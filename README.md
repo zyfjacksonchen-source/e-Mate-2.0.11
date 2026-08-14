@@ -1,6 +1,6 @@
-# e-Mate Harness
+# e-Mate
 
-e-Mate Harness 2.0.7 is a browser-first, local-running e-Mate distribution built on the exact DeepSeek Harness source revision recorded in [`docs/target-contract.md`](docs/target-contract.md).
+e-Mate 2.0.7 is a browser-first, local-running product built on the exact DeepSeek Harness source revision recorded in [`docs/target-contract.md`](docs/target-contract.md). Harness is the technical runtime foundation, not the product name.
 
 The repository is under active implementation. It does not yet publish an accepted npm artifact. Progress and blockers are recorded in [`docs/development-log.md`](docs/development-log.md); an unchecked slice must not be described as complete.
 
@@ -14,4 +14,3 @@ The repository is under active implementation. It does not yet publish an accept
 ## Status
 
 Run `pnpm check:target` to verify that source pins and release identity have not drifted.
-

@@ -29,3 +29,18 @@ Keep the new repository as an overlay with the exact Harness source pinned as a 
 
 Pin the upstream submodule, add a target-drift check, and implement the smallest `@e-mate/dsh` CLI/profile path that can boot the exact source from a development checkout.
 
+## 2026-08-14 — Product naming correction
+
+### Goal correction
+
+The product remains **e-Mate 2.0.7**. “Harness” describes only the pinned DeepSeek runtime foundation and is not part of the product name.
+
+### Applied change
+
+- Renamed the public repository from `zyfjacksonchen-source/e-Mate-Harness` to `zyfjacksonchen-source/e-Mate`.
+- Updated the local Git remote to the canonical renamed repository.
+- Kept the technical npm contract `@e-mate/dsh@2.0.7` and executable `e-mate` unchanged.
+
+### Drift rule
+
+Repository titles, UI labels, documentation headings, package descriptions, health responses, and release pages must use `e-Mate`; references to DeepSeek Harness are allowed only when explaining the underlying technical architecture or source pin.

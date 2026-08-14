@@ -7,6 +7,8 @@ const target = readFileSync(resolve(root, 'docs/target-contract.md'), 'utf8')
 const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
 
 if (manifest.version !== '2.0.7') throw new Error(`workspace version drifted: ${manifest.version}`)
+if (!target.includes('Product name: `e-Mate`')) throw new Error('product name drifted')
+if (!target.includes('Repository: `zyfjacksonchen-source/e-Mate`')) throw new Error('repository identity drifted')
 if (!target.includes('47f943859bef60e4160492346772ded9b24f765a')) throw new Error('Harness source pin is missing')
 if (!target.includes('564a6b6c1d43fb6831dd4a5cd8026e472f063311')) throw new Error('e-Mate shell source pin is missing')
 
@@ -19,5 +21,4 @@ try {
   throw new Error('Harness submodule is missing; run git submodule update --init --recursive')
 }
 
-console.log('target contract: e-Mate Harness 2.0.7 pins verified')
-
+console.log('target contract: e-Mate 2.0.7 pins verified')

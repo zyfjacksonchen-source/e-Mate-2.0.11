@@ -1,16 +1,18 @@
-# e-Mate Harness 2.0.7 target contract
+# e-Mate 2.0.7 target contract
 
 This file is the implementation source of truth. Development records may add evidence but may not weaken these obligations.
 
 ## Identity and source pins
 
-- Repository: `zyfjacksonchen-source/e-Mate-Harness`
+- Product name: `e-Mate`
+- Repository: `zyfjacksonchen-source/e-Mate`
 - Release: `@e-mate/dsh@2.0.7`
 - Executable: `e-mate`
 - Harness source: `deepseek-ai/deepseek-harness@47f943859bef60e4160492346772ded9b24f765a`
 - Harness source version: `0.1.0-rc.5`
 - Browser shell source: e-Mate 2.0.5 at `564a6b6c1d43fb6831dd4a5cd8026e472f063311`
 - Chat interaction source: Codex prototype `019ff665-d721-79a0-869d-338f086cf529`
+- “Harness” identifies the pinned technical foundation only and must not be used as the product or UI name.
 
 ## Product boundaries
 
@@ -43,4 +45,3 @@ The user-visible capability center contains image generation/editing, Office, OC
 - Supported release platforms are macOS 13+ arm64/x64 and Windows 10/11 x64.
 - Keep the existing download, admin, and audit URLs unchanged.
 - Release activation requires clean npm installation, automated checks, performance evidence, and Computer Use acceptance.
-

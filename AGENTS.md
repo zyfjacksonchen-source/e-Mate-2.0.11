@@ -1,4 +1,4 @@
-# e-Mate Harness development rules
+# e-Mate development rules
 
 Read `docs/target-contract.md` and the latest entry in `docs/development-log.md` before changing code. A change that contradicts the target contract is invalid even when it makes a local test pass.
 
@@ -21,4 +21,3 @@ Read `docs/target-contract.md` and the latest entry in `docs/development-log.md`
 5. Record commands, outcomes, remaining gaps, and the next slice.
 
 The main agent owns acceptance. A child agent may repair one documented failure, but the main agent must rerun the failed scenario before closing it.
-
