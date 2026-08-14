@@ -1,0 +1,21 @@
+{
+  "name": "@e-mate/dsh-workspace",
+  "version": "2.0.7",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "check:target": "node scripts/check-target.mjs",
+    "test": "pnpm -r --if-present test",
+    "build": "pnpm -r --if-present build",
+    "pack:check": "pnpm --filter @e-mate/dsh pack --pack-destination dist/npm"
+  }
+}
+
