@@ -182,7 +182,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(source).toMatch(/ctx\.theme\.getTheme\(\)\.active\.colorScheme/u)
     expect(source).toMatch(/ctx\.theme\.setTheme\(/u)
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource)\s*\(/u)
-    expect(styles).toMatch(/:global\(\[data-phase\]\)\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;/u)
+    expect(styles).toMatch(/:global\(\[data-slot='conversation'\] > div\[data-phase\]\)\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;/u)
     expect(styles).toContain('--dsw-alias-button-info-fill: var(--emate-color-brand);')
     expect(home).not.toMatch(/Runtime Scheduler|由 Runtime|从 Runtime/u)
   })

@@ -813,3 +813,11 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 判定合同：三个 cohort 各至少 30 个同 pair ID 且无重复事件的样本；TTFT、吞吐和 Tool 两段 p95 精确执行文档阈值，并强制企业端不可用 cohort 声明有效缓存租约/策略和异步 outbox。聚焦单测覆盖 29 样本、重复事件、超 TTFT、低吞吐、Tool 超 10% 和过期租约的失败关闭。
 - 防伪边界：默认命令固定输出 `fixture-passed-production-blocked`。仅把 JSON 改名为 `production-real-provider` 仍不能通过；生产输入还必须提供 pinned commit、精确 provider/model/Tool/dataset、同环境、起止时间、raw sample ID/样本哈希和实际 raw/Provider receipt 或 Trace 文件，CLI 逐文件回读 SHA-256 后才允许进入生产判定。当前缺已批准生产账号和真实 Provider 配对运行，因此生产性能仍明确阻塞。
 - 本地证据：`node --test scripts/performance-parity.test.mjs` 2/2；固定目标检查通过；真实 Agent Loop 自测三个 cohort 均 30 样本、无判定失败，输出 `fixture-passed-production-blocked` 和 `REAL_PROVIDER_AND_APPROVED_ENTERPRISE_ACCEPTANCE_ACCOUNT_REQUIRED`，未访问生产、未读取模型 Key、未写入产品数据。
+
+## 2026-08-16 · S03/S12 主代理 Computer Use：聊天框裁切与 320px 控件闭环
+
+- 流程按 S12 固定合同执行：主代理运行隔离 Browser 验收并保存证据；独立视觉失败交子代理仅改 `home.module.css` 与直接回归；主代理重新装载构建并逐屏复测，子代理不关闭验收项。
+- 第一轮发现 placeholder 被裁切，且 `320px` 下真实模型、连接器和 Send 互相覆盖。子代理首修把 `44/66px` 高度下限移到目标 mirror 并恢复移动双行 toolbar；主代理没有直接接受，因为 `768/1440px` 的真实 textarea 仍为 `28px`、`scrollHeight=38px`。
+- 第二轮以 Browser computed style 定位到 e-Mate 裸 `:global([data-phase])` 误命中 Harness `<textarea data-phase='plain'>`，给输入控件施加页面根的 `margin:8px`、缩减高度和 `overflow:clip`。修复只将两个页面规则收窄到稳定目标根 `[data-slot='conversation'] > div[data-phase]`，保留目标 InputBar、draft、模型、连接器、submit、Store 和 transport。
+- 子代理聚焦 7 文件 28/28、`@e-mate/dsh` build 与 diff check 通过。主代理 final Browser 在 `1440x900/1280x800/768x800/390x844/320x800`、暗色和明色下均测得零横向溢出，textarea `clientHeight=scrollHeight=44px`、margin `0`；桌面 Send `76x32px`，移动 Send `44x44px` 且完整落在视口内。
+- 主代理还实点真实模型菜单并以 Escape 关闭；实点“外部连接”到 `/settings?section=connections&connectors=feishu,tencent-docs`，只渲染飞书和腾讯文档注册项，未提交授权或凭据。证据位于 `artifacts/design-qa/S12-current-067873f/`。本项关闭不代表完整 S03/S12：六种实时状态、生产多模型/弱网、真实性能和其他切片仍保持开放。

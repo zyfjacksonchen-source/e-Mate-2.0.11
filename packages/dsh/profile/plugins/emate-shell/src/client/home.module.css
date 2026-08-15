@@ -22,7 +22,7 @@
   --emate-color-rule: oklch(0.344584 0 0);
 }
 
-:global([data-phase]) {
+:global([data-slot='conversation'] > div[data-phase]) {
   --dsw-alias-button-info-fill: var(--emate-color-brand);
   --dsw-alias-button-info-hover: color-mix(in srgb, var(--emate-color-brand) 82%, white);
   position: relative;
@@ -96,11 +96,11 @@
   border-radius: 24px 24px 0 0 !important;
 }
 
-:global([data-slot='conversation.composer.bar'] [data-input-scroll]) {
+:global([data-slot='conversation.composer.bar'] [data-input-mirror]) {
   min-height: 44px;
 }
 
-:global([data-phase='hero'] [data-slot='conversation.composer.bar'] [data-input-scroll]) {
+:global([data-phase='hero'] [data-slot='conversation.composer.bar'] [data-input-mirror]) {
   min-height: 66px;
 }
 
@@ -201,6 +201,21 @@
 }
 
 @media (max-width: 767px) {
+  :global([data-slot='conversation.composer.bar'] [data-composer-card] > div:last-child) {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  :global([data-slot='conversation.composer.bar'] [data-composer-card] > div:last-child > div:last-child) {
+    width: 100%;
+  }
+
+  :global([data-slot='conversation.composer.bar'] [data-slot='conversation.input.model']) {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
   :global([data-emate-composer-connectors]) {
     width: 32px;
     min-width: 32px;
@@ -684,7 +699,7 @@
 }
 
 @media (max-width: 767px) {
-  :global([data-phase]) {
+  :global([data-slot='conversation'] > div[data-phase]) {
     height: 100% !important;
     margin: 0;
     border: 0;
