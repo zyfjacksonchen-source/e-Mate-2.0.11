@@ -29,6 +29,7 @@ export default [
       connections: 'src/profile/connections.ts',
       'credentials-os': 'src/profile/credentials-os.ts',
       'general-workspace': 'src/profile/general-workspace.ts',
+      'settings-document-boundary': 'src/profile/settings-document-boundary.ts',
       share: 'src/profile/share.ts',
     },
     outDir: 'profile/plugins',

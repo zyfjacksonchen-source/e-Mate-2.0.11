@@ -10,6 +10,7 @@ import { strToU8, zipSync } from 'fflate'
 import { parse as parseYaml } from 'yaml'
 import { Context } from '../../../upstream/deepseek-harness/vendor/cordis/lib/index.js'
 import { LocalAttachmentStore } from '../../../upstream/deepseek-harness/packages/attachment/attachment-local/lib/index.js'
+import { FileSettingsProvider } from '../../../upstream/deepseek-harness/packages/settings/settings-file/lib/index.js'
 
 import {
   HARNESS_COMMIT,
@@ -26,6 +27,7 @@ import { installTestProfile as installProfile } from './runtime-binding.fixture.
 import { apply as applyHealth } from '../profile/plugins/health.js'
 import { apply as applyShare, SHARE_CHANNEL } from '../profile/plugins/share.js'
 import { apply as applyGeneralWorkspace } from '../profile/plugins/general-workspace.js'
+import * as settingsDocumentBoundary from '../profile/plugins/settings-document-boundary.js'
 import { apply as applyAgentOperations } from '../profile/plugins/agent-operations.js'
 import { apply as applyCapabilities, CAPABILITIES_CHANNEL } from '../profile/plugins/capabilities.js'
 import { apply as applyConnections, CONNECTIONS_CHANNEL } from '../profile/plugins/connections.js'
@@ -120,6 +122,27 @@ test('settings URL is a lifecycle projection over the target SettingsRoot state'
   assert.match(source, /history\.replaceState\(history\.state, '', '\/'\)/)
   assert.doesNotMatch(source, /\buseState\b|\b(?:fetch|WebSocket|EventSource)\s*\(/)
   assert.doesNotMatch(sidebar, /\b(?:fetch|WebSocket|EventSource)\s*\(/)
+})
+
+test('browser profile keeps settings storage but exposes no native document action', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'e-mate-settings-boundary-'))
+  const path = join(root, 'settings.yaml')
+  const context = new Context()
+  const settings = context.plugin(FileSettingsProvider, { path, watch: false })
+  await settings
+  const boundary = context.plugin(settingsDocumentBoundary)
+  await boundary
+  try {
+    assert.equal(context.settings.writable, true)
+    assert.equal(context.settings.documentPath, undefined)
+    assert.equal(await context.settings.prepareDocument(), undefined)
+    assert.equal(existsSync(path), false)
+  } finally {
+    await boundary.dispose()
+    assert.equal(context.settings.documentPath, path)
+    await settings.dispose()
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('external connections refresh control keeps a 44px touch target', () => {
@@ -483,6 +506,11 @@ test('managed profile installation is idempotent', () => {
       'doubao-seed-2-0-pro-260215',
     ])
     assert.equal(patchById.get('emate-general-workspace').name, './plugins/general-workspace.js')
+    assert.deepEqual(patchById.get('emate-settings-document-boundary'), {
+      id: 'emate-settings-document-boundary',
+      name: './plugins/settings-document-boundary.js',
+      inject: ['settings'],
+    })
     assert.equal(patchById.get('schedule').name, '@deepseek-ai/dsh-schedule')
     assert.equal(patchById.get('emate-schedule-import').name, './plugins/schedule-import.js')
     assert.equal(patchById.get('emate-legacy-migration').name, './plugins/legacy-migration.js')
@@ -510,6 +538,7 @@ test('managed profile installation is idempotent', () => {
     assert.ok(readFileSync(join(first.profile, 'plugins', 'agent-operations.js')).byteLength > 0)
     assert.ok(readFileSync(join(first.profile, 'plugins', 'capabilities.js')).byteLength > 0)
     assert.ok(readFileSync(join(first.profile, 'plugins', 'general-workspace.js')).byteLength > 0)
+    assert.ok(readFileSync(join(first.profile, 'plugins', 'settings-document-boundary.js')).byteLength > 0)
     const connections = readFileSync(join(first.profile, 'plugins', 'connections.js'), 'utf8')
     assert.match(connections, /\/emate\.connections/)
     assert.match(connections, /credentials\.describe/)

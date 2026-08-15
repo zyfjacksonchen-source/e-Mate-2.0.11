@@ -12,6 +12,8 @@
   "share_action": "passed-fail-closed",
   "share_provider": "blocked-unconfigured",
   "rename_dialog_role": "passed-after-fix",
+  "settings_native_document_action": "absent-after-profile-boundary-fix",
+  "settings_storage_preserved": true,
   "frontend_fake_transport_added": false,
   "result": "passed-with-external-share-blocker"
 }

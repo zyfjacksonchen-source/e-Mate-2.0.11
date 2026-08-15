@@ -355,6 +355,7 @@ function profileCheck(paths) {
     join(paths.profile, 'plugins', 'capabilities.js'),
     join(paths.profile, 'plugins', 'connections.js'),
     join(paths.profile, 'plugins', 'credentials-os.js'),
+    join(paths.profile, 'plugins', 'settings-document-boundary.js'),
     join(paths.profile, 'plugins', 'skill-hub-agent.js'),
     join(paths.profile, 'plugins', 'image-generation.js'),
     join(paths.profile, 'plugins', 'model-policy.js'),
@@ -382,6 +383,7 @@ function profileCheck(paths) {
     patchValid = byId.get('schedule')?.name === '@deepseek-ai/dsh-schedule'
       && byId.get('credentials')?.name === '@deepseek-ai/dsh-credentials-local'
       && byId.get('credentials')?.disabled === true
+      && byId.get('emate-settings-document-boundary')?.name === './plugins/settings-document-boundary.js'
       && byId.get('emate-credentials-os')?.name === './plugins/credentials-os.js'
       && byId.get('emate-connections')?.name === './plugins/connections.js'
       && byId.get('emate-model-policy')?.name === './plugins/model-policy.js'

@@ -77,6 +77,9 @@
     defaultPreset: danger-full-access
 
 - insert:
+    - id: emate-settings-document-boundary
+      name: ./plugins/settings-document-boundary.js
+      inject: [settings]
     - id: emate-credentials-os
       name: ./plugins/credentials-os.js
     - id: emate-health
