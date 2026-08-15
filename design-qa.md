@@ -320,3 +320,12 @@ final result: blocked (production authentication and ledger reconciliation)
 - CAPTCHA solving, final registration submission, administrator approval, agreement signing and authenticated ledger reconciliation were intentionally not performed.
 
 final result: passed (challenge/login/register entry and responsive boundary); blocked (identity creation and authenticated enterprise acceptance)
+
+## S02/S03 message action and copy feedback — 2026-08-16
+
+- Reference and implementation were captured in the same `1280×720` dark-state Browser run. The reference is the user-specified interactive prototype, SHA-256 `fd734f0026f51e334874cca54adb60f37d7b09cb4e89e98da1841c922996a33e`; the implementation is the current e-Mate shell over the real target Session renderer.
+- Clicking the target-owned copy action changed the same message action to a check icon and exposed the accessible label/tooltip `复制成功`. After about one second it returned to `复制`. No message, global notification, Store entry or synthetic event was added.
+- The focused comparison is `artifacts/design-qa/S02-message-copy-current-f225cc2/focused-source-vs-current-copy-feedback.jpg`; full current and reference captures are stored beside it. The message bubble, timestamp and inline feedback are visibly present in both accepted states.
+- The reference edit action is not marked visually accepted. Pinned rc.5 exposes no completed-message atomic edit-and-branch action; its public `forkAt(seq)` retains the completed/failed turn and `setDraft + submit` cannot safely replay durable attachments. Adding an inert or duplicate-message button would violate the real-action requirement, so this interaction remains blocked on the target seam.
+
+final result: passed (inline copy feedback and recovery); blocked (completed-message edit branch)

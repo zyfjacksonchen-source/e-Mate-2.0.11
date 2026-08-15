@@ -944,3 +944,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 重试首轮暴露真实 P1：同一 `retryId` 的两次 `llm/retry` 已由目标 Conversation Node 投影到 `attempts`，但目标默认 Retry View 只渲染 `current`，导致第 1 次失败不可见。子代只用目标 `conversation.chat.node` keyed-slot shadow seam替换 `model-retry` 的展示层，直接渲染 target-owned attempts；未改 pinned upstream、事件、Store、Router 或 transport。
 - 主代理重跑 shell 30/30、完整 `@e-mate/dsh` build、diff check，再把最终 client bundle SHA-256 `3ae8125072a0f5c0cab5d8c6bd647d2e0893387fd3608c5fc74d4562cba009d8` 同步到同一隔离 profile。Browser 复验显示“上次尝试失败 / 第 1 次”和“重试已取消 / 第 2 次”，两行分别展开后保留 `450ms/连接被重置` 与 `900ms/服务暂时不可用`；另一个保持 open step 的真实 Session 显示当前态“正在重试”，与源稿字面一致。源/修后合并图为 `source-vs-current-retry-after-1280.png`，实时态为 `current-retry-active-after-1280x720.png`。
 - 长文本折叠/展开、下载与同一 Markdown DOM 在本轮再次通过。失败卡本身保留真实 Tool/turn error，但原型中的“重试”动作继续失败关闭：rc.5 没有失败轮原子重试动作，`setDraft + submit` 会重复提示且无法重放附件，`forkAt` 又保留失败轮；因此没有增加无效按钮。完成态的图片/文件产物因本轮真实 Session 没有对应 attachment/renderer 数据也不伪造，S02 的全部 17 状态最终逐屏验收仍保持 open。
+
+## 2026-08-16 · S02/S03 消息动作与复制反馈同状态验收
+
+- 主代理在同一 `1280×720` 暗色 Browser 会话打开用户指定聊天原型和当前提交 `f225cc2651fd08c0cda7ec5c46d0925301c88a82` 的真实 Harness Session。原型 HTML SHA-256 仍为 `fd734f0026f51e334874cca54adb60f37d7b09cb4e89e98da1841c922996a33e`；当前页面从固定 50-event Session（SHA-256 `e88c05a486d196cfd14f2ae8d0be003de191b826b1c226d803bbfb658ff15096`）投影，没有替换 Message renderer、Store 或 transport。
+- 当前用户消息继续使用目标 `MessageIconActions`。主代理点击真实复制动作后，同一消息下方原位出现 check 图标和“复制成功”提示；约 1 秒后按钮与提示恢复为“复制”，页面没有新增消息、全局 toast 或伪事件。证据位于 `artifacts/design-qa/S02-message-copy-current-f225cc2/`，其中 `focused-source-vs-current-copy-feedback.jpg` 是源稿与当前同状态的聚焦并排图。
+- 源稿同一位置还有“编辑”动作，但 rc.5 完成态用户消息只公开 `forkAt(seq)`；该动作会保留本轮结束事件，不能原子地在失败/完成轮之前分支，也没有可安全重放原消息与 durable attachment 的接口。`setDraft + submit` 会追加重复消息并可能丢附件，因此本轮不增加无效编辑按钮。编辑分支保持上游接口阻塞，需目标提供 pre-turn fork 加精确消息/附件重放或原子 edit-and-branch action 后再验收。
+- 本轮关闭“消息动作可见、复制成功反馈、反馈恢复且不造假状态”这一同状态；S02/S03 仍未关闭全部 17 个原型状态、产物同状态和编辑分支。
