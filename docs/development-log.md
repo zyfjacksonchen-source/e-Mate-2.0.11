@@ -791,3 +791,25 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 模型验收新增：切换模型后下一次真实请求必须命中新路由，切换前后同一会话上下文连续；上游不稳或弱网恢复不得重复消息、Tool、用量事实或审计回执。聊天视觉只以任务 `019ff665-d721-79a0-869d-338f086cf529` 的交互原型和逐屏标注为真源，逐状态逐交互核对，不以首页或静态截图代替。
 - 生/改图并发改为逐级加压并记录稳定上限、首个有界拒绝/退化点及附件/会话归属。四类外部连接的 2.0.7 终验边界改为可发现、正确路由并到达 provider 真实授权 handoff；不提交 OAuth consent、二维码确认、凭据或外部写入。在线更新必须可由用户自然语言触发 Agent 复用既有受管 npm 事务，成功恢复后核对版本、会话、凭据、outbox 和完整性收据。
 - 性能新增固定 Harness 配对门禁：同机器/浏览器/网络/模型/提示/Tool 下至少 30 对成功样本；e-Mate 有效缓存租约、模型策略和异步审计开启时，TTFT p50/p95 额外开销不超过 5%/10%（小样本绝对容差 50 ms），持续生成吞吐 p50/p95 下降不超过 5%/10%，Tool event→start 与 Tool result→下一请求的 p95 额外延迟均不超过 50 ms 且相对不超过 10%。企业端断连但租约/策略仍有效时重复同一门禁，证明管理层只作旁路观察/鉴权而不拖慢本地运行。
+
+## 2026-08-15 · S06 Agent 自执行在线更新端到端审计
+
+- 真实路径复核：自然语言意图只由固定 Harness Agent Loop 结合 `emate-agent-operations` 系统提示选择目标已注册的 typed Bash/macOS 或 PowerShell/Windows Tool；Tool 只在前台调用 `e-mate update [--version] --json`。CLI 生成 UUID request ID、持久化请求并把唯一 `update.ts` 事务交给 detached helper；目标 Jobs 服务只提供非更新 Job 的空闲门禁。没有浏览器关键词匹配、第二 Router/transport、第二更新器、`e_mate_update` 平行 Tool 或 Agent 拼装 npm/setup/stop/launch 命令。
+- 信任边界修复：精确 `--version` 过去只验证 tarball 内版本是 SemVer，没有再次要求其等于请求版本；错误 registry 元数据可能把“请求 2.0.8、实际 2.0.7”继续执行。现在 staging 在任何 setup、快照或全局替换前精确比对 requested/staged version，`latest` 仍以解出的真实版本为准；helper/lock 同时只接受 `randomUUID()` 形状的 RFC 4122 v4 request ID。
+- 隔离事务证据：使用现有 `dist/npm/e-mate-dsh-2.0.7.tgz`、临时 Node/npm、临时 npm registry proxy、临时 global prefix、临时 `DSH_HOME` 和 `EMATE_NO_OPEN=1` 执行同版在线更新。权威收据 `online-update-832f617d-41be-4fdb-8509-a76684cecd66.json` 为 `completed`，requested/previous/installed 均为 `2.0.7`，前后 SHA-512 integrity 相同；记忆哨兵保留、收据唯一、update lock 已释放，重启后 `/api/e-mate/health` 为同版本健康实例，随后只停止该临时实例。未修改系统全局安装、用户正式 `$DSH_HOME` 或生产服务器。
+- 聚焦门禁：`@e-mate/dsh build` 通过；更新 target/request/lock/status 与 Agent guidance 窄回归 4/4 通过。当前 npm registry 对 `@e-mate/dsh@2.0.7` 返回 404，真实自然语言模型选 Tool、正式跨版本 npm 更新与故障后 rollback 仍必须在发布候选、已批准身份/模型和两平台环境中验收；本地同版 fixture 不能冒充这些终证。
+
+## 2026-08-15 · S03/S07 模型切换、重连与幂等合同补强
+
+- 运行边界：模型菜单继续只调用固定 Harness 的 `ModelDirectory → session.selectModel`；Host 在下一次 `agent/request` 组装边界读取同一 Session 的新选择，既有消息历史不重写。浏览器弱网只重连目标的两个下行事件流，既有 unary prompt 不由 e-Mate 自动重发，因此没有新增 transport、Store、前端模型写入或泛化重试。
+- e-Mate 回归补强：现有 `model-policy` 测试现在以同一 `sessionId` 连续选择两个允许模型，证明包装层原样委托目标 `selectModel`、选择后目录返回新模型、历史消息保持不变；企业策略端不可达时只允许账号绑定且未过期的缓存策略继续工作，账号变化仍失败关闭。现有 `audit` 测试同时重放相同 Harness usage 事件并并发 `flush`，证明 outbox 仍只有一个 `fact_id/payload_sha256`，失败后重送使用同一载荷，交付后再次重放不会新增上传。
+- 可执行证据：`@e-mate/dsh` 聚焦 2/2、完整 `e-mate.test.mjs` 34/34；固定 Harness `api-proxy-models`、`ConnectionController` 和客户端 Session 回放/缺口修复 74/74；固定 Harness checkpoint crash-recovery 2/2；企业 Model Gateway 71/71，通过项覆盖 pending/recorded replay、provider 明确未接收时复用原幂等键、结果已入账后拒绝重放、未知结果进入 reconciliation 而不二次 POST。真实 PostgreSQL 4 项和 Windows-only 2 项按环境合同 skip。
+- 未关闭的生产门禁：以上证明本地组合合同，不能替代真实 Provider。仍需已批准且下发多模型策略的生产账号，在受控弱网/上游故障注入下完成至少 30 对真实请求，并用 Session 事件序列、Tool call ID、Provider invocation ID、Usage fact、audit receipt 和 Usage 面板逐项对账；当前没有该账号与真实 PostgreSQL 测试 URL，故生产项保持阻塞且未部署。
+
+## 2026-08-15 · S04 固定 Harness 首响/流速/Tool 成对门禁
+
+- 缺口核实：既有 `scripts/create-performance-fixture.mjs` 只生成目标持久化层的 5,000 事件滚动数据集，仓库中没有 TTFT、持续生成吞吐、Tool call→真实执行和 Tool result→下一模型请求的成对采集/判定入口；性能文档此前只有阈值，没有可执行门禁。
+- 最小实现：新增 `scripts/performance-parity.mjs`，直接组合固定提交的 `LlmRuntime/SessionStore/SystemPrompt/ToolRuntime/AgentRegistry/AgentLoop`。Keyless Provider 只产生目标 StreamChunk，所有计时样本均从 Agent Loop 实际追加的 `user/message`、`assistant/chunk/message`、`tool/call/result` 与真实 Tool body/下一次 adapter request 边界派生；没有手写 Session event、e-Mate 延迟拦截器、第二事件协议或新依赖。
+- 判定合同：三个 cohort 各至少 30 个同 pair ID 且无重复事件的样本；TTFT、吞吐和 Tool 两段 p95 精确执行文档阈值，并强制企业端不可用 cohort 声明有效缓存租约/策略和异步 outbox。聚焦单测覆盖 29 样本、重复事件、超 TTFT、低吞吐、Tool 超 10% 和过期租约的失败关闭。
+- 防伪边界：默认命令固定输出 `fixture-passed-production-blocked`。仅把 JSON 改名为 `production-real-provider` 仍不能通过；生产输入还必须提供 pinned commit、精确 provider/model/Tool/dataset、同环境、起止时间、raw sample ID/样本哈希和实际 raw/Provider receipt 或 Trace 文件，CLI 逐文件回读 SHA-256 后才允许进入生产判定。当前缺已批准生产账号和真实 Provider 配对运行，因此生产性能仍明确阻塞。
+- 本地证据：`node --test scripts/performance-parity.test.mjs` 2/2；固定目标检查通过；真实 Agent Loop 自测三个 cohort 均 30 样本、无判定失败，输出 `fixture-passed-production-blocked` 和 `REAL_PROVIDER_AND_APPROVED_ENTERPRISE_ACCEPTANCE_ACCOUNT_REQUIRED`，未访问生产、未读取模型 Key、未写入产品数据。

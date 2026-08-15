@@ -23,6 +23,10 @@ Run paired samples on the same machine, browser, network, provider model, prompt
 
 If provider or network variance makes a paired sample incomparable, discard both members with the same documented reason and rerun; do not average unrelated providers, models or time windows into a passing result.
 
+`pnpm performance:parity --output <receipt.json>` is the executable collector/evaluator self-check. Its keyless default runs the pinned Agent Loop and derives timings only from its real `user/message`, `assistant/chunk`, `assistant/message`, `tool/call`, and `tool/result` events plus the real Tool body/request boundaries. It creates 30 paired samples for baseline, online, and enterprise-unavailable-with-valid-cache cohorts, but deliberately reports `fixture-passed-production-blocked`: the deterministic provider does not prove e-Mate or a production Provider's latency.
+
+A production `--input` can report `passed` only when every cohort supplies an immutable run receipt bound to the pinned commit, exact provider/model/Tool/dataset, identical machine/OS/architecture/Node/browser/network environment, start/finish times, raw sample-ID/sample digests, and two existing artifact files: the raw samples and a Provider invocation/usage receipt or trace. The evaluator reads and SHA-256 verifies both files relative to the input receipt; relabeling a handwritten fixture as `production-real-provider`, setting a JSON verification flag, omitting the approved identity, or supplying arrays without these artifacts stays `fixture-passed-production-blocked`.
+
 ## Project memory isolation and binding
 
 Use two real Harness workspaces A and B with distinct canonical directories and one ungrouped session.

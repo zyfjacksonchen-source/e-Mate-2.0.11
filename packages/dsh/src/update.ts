@@ -13,6 +13,7 @@ import { spawn, spawnSync } from 'node:child_process'
 
 const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
 const SHA512_INTEGRITY_RE = /^sha512-[A-Za-z0-9+/]{86}==$/
+const UPDATE_REQUEST_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
 
 function atomicJson(path, value) {
   mkdirSync(dirname(path), { recursive: true })
@@ -33,6 +34,15 @@ export function normalizeUpdateTarget(value) {
   if (value === undefined || value === 'latest') return 'latest'
   if (!VERSION_RE.test(value)) throw new Error(`invalid update version ${JSON.stringify(value)}`)
   return value
+}
+
+export function validateStagedVersion(target, version) {
+  const normalized = normalizeUpdateTarget(target)
+  if (!VERSION_RE.test(version)) throw new Error('staged e-Mate package version is invalid')
+  if (normalized !== 'latest' && version !== normalized) {
+    throw new Error(`staged e-Mate package version ${version} does not match requested version ${normalized}`)
+  }
+  return version
 }
 
 export function validateUpdateRequest(request, requestId) {
@@ -131,7 +141,7 @@ function processAlive(pid) {
 }
 
 export function claimUpdateLock(path, requestId, ownerPid = process.pid) {
-  if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/iu.test(requestId) || !Number.isSafeInteger(ownerPid) || ownerPid <= 0) {
+  if (!UPDATE_REQUEST_ID_RE.test(requestId) || !Number.isSafeInteger(ownerPid) || ownerPid <= 0) {
     throw new Error('invalid online update lock identity')
   }
   mkdirSync(dirname(path), { recursive: true })
@@ -252,9 +262,10 @@ function stageTarget(paths, target, environment) {
   const packageRoot = join(paths.stage, 'node_modules', '@e-mate', 'dsh')
   const manifest = readJson(join(packageRoot, 'package.json'))
   const stagedBin = join(packageRoot, 'lib', 'bin.js')
-  if (manifest.name !== '@e-mate/dsh' || !VERSION_RE.test(manifest.version) || !existsSync(stagedBin)) {
+  if (manifest.name !== '@e-mate/dsh' || !existsSync(stagedBin)) {
     throw new Error('staged e-Mate package identity is invalid')
   }
+  validateStagedVersion(target, manifest.version)
   const checkHome = join(paths.stage, 'check-home')
   const output = runNode([stagedBin, 'setup', '--check', '--json'], {
     env: { ...environment, DSH_HOME: checkHome, EMATE_STAGING_CHECK: '1' },
@@ -317,7 +328,7 @@ function writeReceipt(paths, request, fields) {
 }
 
 export async function runOnlineUpdateHelper({ requestId, dshHome, binPath }) {
-  if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(requestId)) throw new Error('invalid update request id')
+  if (!UPDATE_REQUEST_ID_RE.test(requestId)) throw new Error('invalid update request id')
   const paths = updaterPaths(dshHome, requestId)
   await requireHelperUpdateLock(paths.lock, requestId)
   const request = validateUpdateRequest(readJson(paths.request), requestId)

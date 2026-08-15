@@ -57,6 +57,7 @@ import {
   normalizeUpdateTarget,
   parsePackageIntegrity,
   releaseUpdateLock,
+  validateStagedVersion,
   validateUpdateRequest,
 } from '../lib/update.js'
 import { createSkillHubClient, inspectSkillArchive, installSkillArchive } from '../lib/skill-hub.js'
@@ -162,6 +163,10 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   assert.equal(normalizeUpdateTarget('2.0.8-rc.1'), '2.0.8-rc.1')
   assert.throws(() => normalizeUpdateTarget('next'), /invalid update version/)
   assert.throws(() => normalizeUpdateTarget('2.0'), /invalid update version/)
+  assert.equal(validateStagedVersion('latest', '2.0.8'), '2.0.8')
+  assert.equal(validateStagedVersion('2.0.8', '2.0.8'), '2.0.8')
+  assert.throws(() => validateStagedVersion('2.0.8', '2.0.7'), /does not match requested version/)
+  assert.throws(() => validateStagedVersion('latest', 'not-semver'), /version is invalid/)
   assert.equal(validateUpdateRequest(request, requestId), request)
   assert.throws(
     () => validateUpdateRequest({ ...request, target: 'file:/tmp/package.tgz' }, requestId),
@@ -243,6 +248,10 @@ test('online updates admit only one live detached helper', () => {
   const first = '11111111-1111-4111-8111-111111111111'
   const second = '22222222-2222-4222-8222-222222222222'
   try {
+    assert.throws(
+      () => claimUpdateLock(lock, '11111111-1111-1111-1111-111111111111'),
+      /invalid online update lock identity/u,
+    )
     claimUpdateLock(lock, first)
     assert.throws(() => claimUpdateLock(lock, second), /already running/u)
     releaseUpdateLock(lock, second)
@@ -1496,7 +1505,7 @@ test('enterprise identity provider maps target credentials and the production HT
   assert.equal(values.size, 0)
 })
 
-test('enterprise model policy filters the target ApiProxy and enforces cached account-bound policy', async () => {
+test('enterprise model switch delegates to the target session, keeps its history and survives a cached-policy outage', async () => {
   const temporary = mkdtempSync(join(tmpdir(), 'e-mate-model-policy-'))
   const cleanups = []
   const records = new Map()
@@ -1506,6 +1515,13 @@ test('enterprise model policy filters the target ApiProxy and enforces cached ac
   }
   const domain = { table: name => name === 'active' ? table : undefined, close: async () => {} }
   const calls = { selected: [], policy: 0 }
+  const session = {
+    current: { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', reasoningEffort: 'max' },
+    messages: [
+      { id: 'user-1', role: 'user', content: 'first turn' },
+      { id: 'assistant-1', role: 'assistant', content: 'first answer' },
+    ],
+  }
   let accountSubject = 'account:test-207'
   let providerAvailable = true
   let rpc
@@ -1517,7 +1533,7 @@ test('enterprise model policy filters the target ApiProxy and enforces cached ac
     schema_version: 1,
     account_subject: accountSubject,
     revision: 7,
-    allowed_model_ids: ['gpt-5.6-luna', 'gpt-image-2-pro', 'gpt-image-2'],
+    allowed_model_ids: ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-image-2-pro', 'gpt-image-2'],
     default_chat_model_id: 'gpt-5.6-luna',
     default_chat_reasoning_effort: 'max',
     image_primary_model_id: 'gpt-image-2-pro',
@@ -1541,11 +1557,16 @@ test('enterprise model policy filters the target ApiProxy and enforces cached ac
     sessions: {
       models: async request => ({
         rpcId: request.rpcId,
-        result: { ok: true, value: { current: { provider: 'enterprise', model: 'gpt-5.6-luna' }, routable: true, ...catalog } },
+        result: { ok: true, value: { current: structuredClone(session.current), routable: true, ...catalog } },
       }),
       selectModel: async request => {
-        calls.selected.push(request.payload.model)
-        return { rpcId: request.rpcId, result: { ok: true, value: { selected: request.payload } } }
+        calls.selected.push(structuredClone(request.payload))
+        session.current = {
+          provider: request.payload.provider,
+          model: request.payload.model,
+          ...request.payload.reasoningEffort === undefined ? {} : { reasoningEffort: request.payload.reasoningEffort },
+        }
+        return { rpcId: request.rpcId, result: { ok: true, value: { selected: structuredClone(session.current) } } }
       },
     },
     llm: {
@@ -1597,25 +1618,33 @@ test('enterprise model policy filters the target ApiProxy and enforces cached ac
     assert.equal((await rpc.handler('unknown', {})).error.code, 'bad-request')
 
     const models = await apiProxy.sessions.models({ rpcId: 'models-1', payload: { sessionId: 'session-1' } })
-    assert.deepEqual(models.result.value.groups[0].models.map(model => model.id), ['gpt-5.6-luna'])
+    assert.deepEqual(models.result.value.groups[0].models.map(model => model.id), ['gpt-5.6-luna', 'gpt-5.6-sol'])
     assert.equal(models.result.value.routable, true)
     const settingsModels = await apiProxy.llm.models({ rpcId: 'models-2', payload: {} })
-    assert.deepEqual(settingsModels.result.value.groups[0].models.map(model => model.id), ['gpt-5.6-luna'])
+    assert.deepEqual(settingsModels.result.value.groups[0].models.map(model => model.id), ['gpt-5.6-luna', 'gpt-5.6-sol'])
     const allowed = await apiProxy.sessions.selectModel({
-      rpcId: 'select-1', payload: { sessionId: 'session-1', provider: 'enterprise', model: 'gpt-5.6-luna' },
+      rpcId: 'select-1', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', reasoningEffort: 'max' },
     })
     assert.equal(allowed.result.ok, true)
+    const historyBeforeSwitch = structuredClone(session.messages)
+    const switched = await apiProxy.sessions.selectModel({
+      rpcId: 'select-2', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-sol', reasoningEffort: 'medium' },
+    })
+    assert.deepEqual(switched.result.value.selected, session.current)
+    assert.deepEqual(session.messages, historyBeforeSwitch)
+    assert.equal((await apiProxy.sessions.models({ rpcId: 'models-3', payload: { sessionId: 'session-1' } })).result.value.current.model, 'gpt-5.6-sol')
     const blocked = await apiProxy.sessions.selectModel({
-      rpcId: 'select-2', payload: { sessionId: 'session-1', provider: 'enterprise', model: 'gpt-5.6-sol' },
+      rpcId: 'select-3', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'unknown' },
     })
     assert.equal(blocked.result.error.code, 'model-unavailable')
-    assert.deepEqual(calls.selected, ['gpt-5.6-luna'])
+    assert.deepEqual(calls.selected.map(call => call.model), ['gpt-5.6-luna', 'gpt-5.6-sol'])
+    assert.ok(calls.selected.every(call => call.sessionId === 'session-1'))
     assert.deepEqual(
-      await requestPolicy({}, async () => ({ provider: 'enterprise', model: 'gpt-5.6-luna' })),
-      { provider: 'enterprise', model: 'gpt-5.6-luna' },
+      await requestPolicy({}, async () => structuredClone(session.current)),
+      session.current,
     )
     await assert.rejects(
-      requestPolicy({}, async () => ({ provider: 'enterprise', model: 'gpt-5.6-sol' })),
+      requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'deepseek' })),
       /not allowed/,
     )
     const streamed = []
@@ -1626,13 +1655,18 @@ test('enterprise model policy filters the target ApiProxy and enforces cached ac
     assert.deepEqual(streamed, ['ok'])
     await assert.rejects(async () => {
       for await (const _chunk of streamPolicy(
-        { provider: 'enterprise', model: 'gpt-5.6-sol' },
+        { provider: 'e-mate-enterprise', model: 'deepseek' },
         () => (async function* () { yield 'blocked' })(),
       )) {}
     }, /not allowed/)
 
     providerAvailable = false
     assert.equal((await modelPolicy.refresh({ force: true })).revision, 7)
+    const cachedSwitch = await apiProxy.sessions.selectModel({
+      rpcId: 'select-4', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', reasoningEffort: 'max' },
+    })
+    assert.equal(cachedSwitch.result.ok, true)
+    assert.deepEqual(session.messages, historyBeforeSwitch)
     accountSubject = 'account:other-207'
     await assert.rejects(modelPolicy.refresh({ force: true }), /enterprise unavailable/)
     assert.throws(
@@ -1645,7 +1679,7 @@ test('enterprise model policy filters the target ApiProxy and enforces cached ac
   }
 })
 
-test('audit records only real Harness usage and uploads an idempotent durable outbox', async () => {
+test('audit records only real Harness usage and deduplicates reconnect replay and concurrent flush', async () => {
   const temporary = mkdtempSync(join(tmpdir(), 'e-mate-audit-'))
   const tables = { bindings: new Map(), outbox: new Map() }
   const handlers = new Map()
@@ -1688,7 +1722,7 @@ test('audit records only real Harness usage and uploads an idempotent durable ou
       storageDomain: { open: async () => domain },
       emateModelPolicy: {
         auditContext: async model => {
-          assert.equal(model, 'ecorex-chat')
+          assert.equal(model, 'gpt-5.6-luna')
           return {
             account_subject_sha256: 'a'.repeat(64),
             policy_revision: 3,
@@ -1726,8 +1760,8 @@ test('audit records only real Harness usage and uploads an idempotent durable ou
     assert.equal(interval.milliseconds, 30_000)
     const request = await handlers.get('agent/request')({
       agent: { id: 'audit-session-1' }, turn: 1, step: 1,
-    }, async () => ({ provider: 'enterprise', model: 'ecorex-chat' }))
-    assert.deepEqual(request, { provider: 'enterprise', model: 'ecorex-chat' })
+    }, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' }))
+    assert.deepEqual(request, { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })
     const event = {
       type: 'assistant/message',
       seq: 8,
@@ -1739,7 +1773,7 @@ test('audit records only real Harness usage and uploads an idempotent durable ou
           id: 'assistant-message-1',
           role: 'assistant',
           content: [{ type: 'text', text: 'must never enter audit payload' }],
-          source: { kind: 'model', provider: 'enterprise', model: 'ecorex-chat' },
+          source: { kind: 'model', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
         },
         usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 2, reasoningTokens: 1 },
       },
@@ -1763,12 +1797,21 @@ test('audit records only real Harness usage and uploads an idempotent durable ou
     assert.match(deferred.error_code, /^[0-9a-f]{16}$/)
     assert.equal(audit.status().pending, 1)
     uploadAvailable = true
-    const delivered = await audit.flush({ force: true })
+    const [delivered, sameFlight] = await Promise.all([
+      audit.flush({ force: true }),
+      audit.flush({ force: true }),
+    ])
+    assert.deepEqual(sameFlight, delivered)
     assert.equal(delivered.delivered_now, 1)
     assert.equal(delivered.delivered, 1)
     assert.equal(tables.outbox.values().next().value.status, 'delivered')
     assert.equal(uploads.length, 2)
     assert.equal('content' in uploads[1][0].payload, false)
+    assert.deepEqual(uploads[1][0], uploads[0][0])
+    handlers.get('session/event')({ id: 'audit-session-1' }, structuredClone(event))
+    await handlers.get('session/flush')()
+    assert.equal((await audit.flush({ force: true })).delivered_now, 0)
+    assert.equal(uploads.length, 2)
     const status = await rpc.handler('audit.status', {})
     assert.equal(status.value.delivered_tokens, 17)
     assert.equal((await rpc.handler('unknown', {})).error.code, 'bad-request')
