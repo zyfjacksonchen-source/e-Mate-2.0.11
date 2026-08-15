@@ -231,3 +231,13 @@ test('Windows Runtime tar calls keep drive-qualified paths out of archive operan
   assert.match(source, /run\('tar', \['-tzf', basename\(archive\)\], \{\s*cwd: dirname\(archive\)/u)
   assert.match(source, /run\('tar', \['-xzf', basename\(archive\), '-C', relative\(dirname\(archive\), temporary\)\], \{ cwd: dirname\(archive\) \}\)/u)
 })
+
+test('platform builders use cross-platform Node entrypoints and bounded verified downloads', () => {
+  const browser = readFileSync('scripts/build-browser-package.mjs', 'utf8')
+  const runtime = readFileSync('scripts/build-runtime-package.mjs', 'utf8')
+  assert.match(browser, /spawnSync\(process\.execPath, \[cli, 'install', 'chromium'\]/u)
+  assert.doesNotMatch(browser, /pnpm\.cmd/u)
+  assert.match(runtime, /for \(let attempt = 1; attempt <= 6; attempt \+= 1\)/u)
+  assert.match(runtime, /catch \(error\) \{\s*if \(attempt === 6\) throw error\s*await sleep\(attempt \* 1_000\)/u)
+  assert.match(runtime, /statSync\(partial\)\.size === asset\.size && sha256\(partial\) === asset\.sha256/u)
+})

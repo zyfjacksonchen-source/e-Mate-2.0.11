@@ -17,6 +17,7 @@ import {
 import { cp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 
 const PRODUCT_VERSION = '2.0.7'
@@ -95,11 +96,18 @@ async function downloadArchive(destination) {
   const partial = `${destination}.partial`
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     const offset = existsSync(partial) ? statSync(partial).size : 0
-    const response = await fetch(url, {
-      headers: offset > 0 ? { Range: `bytes=${offset}-` } : {},
-      redirect: 'follow',
-      signal: AbortSignal.timeout(120000),
-    })
+    let response
+    try {
+      response = await fetch(url, {
+        headers: offset > 0 ? { Range: `bytes=${offset}-` } : {},
+        redirect: 'follow',
+        signal: AbortSignal.timeout(120000),
+      })
+    } catch (error) {
+      if (attempt === 6) throw error
+      await sleep(attempt * 1_000)
+      continue
+    }
     if (response.status === 416 && offset === asset.size) break
     if (!response.ok || response.body === null) throw new Error(`Python archive download returned HTTP ${response.status}`)
     const append = offset > 0 && response.status === 206

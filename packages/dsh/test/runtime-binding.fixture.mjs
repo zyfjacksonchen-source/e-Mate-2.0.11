@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 import { HARNESS_COMMIT, installProfile, resolveHarness } from '../lib/e-mate.js'
 
@@ -13,15 +13,24 @@ export function installTestProfile(dshHome) {
   if (existsSync(bindingPath)) return paths
 
   const harness = resolveHarness()
-  const harnessRequire = createRequire(join(dirname(dirname(harness.bin)), 'package.json'))
+  const harnessRoot = resolve(dirname(dirname(harness.bin)), '..', '..')
+  const packagedRequire = createRequire(join(harnessRoot, 'package.json'))
+  const sourceModule = (packagePath, packageName) => {
+    const entry = join(harnessRoot, packagePath, 'lib', 'index.js')
+    return existsSync(entry) ? entry : packagedRequire.resolve(packageName)
+  }
+  const storagePackage = join(harnessRoot, 'packages', 'storage', 'storage-domain')
+  const storageRequire = createRequire(existsSync(storagePackage)
+    ? join(storagePackage, 'package.json')
+    : join(harnessRoot, 'package.json'))
   const packageRequire = createRequire(new URL('../package.json', import.meta.url))
   const modules = {
-    tools_module: harnessRequire.resolve('@deepseek-ai/dsh-tools'),
-    storage_domain_module: harnessRequire.resolve('@deepseek-ai/dsh-storage-domain'),
-    llm_module: harnessRequire.resolve('@deepseek-ai/dsh-llm'),
-    credentials_module: harnessRequire.resolve('@deepseek-ai/dsh-credentials'),
-    launch_environment_module: harnessRequire.resolve('@deepseek-ai/dsh-launch-environment'),
-    zod_module: harnessRequire.resolve('zod'),
+    tools_module: sourceModule('packages/core/tools', '@deepseek-ai/dsh-tools'),
+    storage_domain_module: sourceModule('packages/storage/storage-domain', '@deepseek-ai/dsh-storage-domain'),
+    llm_module: sourceModule('packages/llm/llm', '@deepseek-ai/dsh-llm'),
+    credentials_module: sourceModule('packages/credentials/credentials', '@deepseek-ai/dsh-credentials'),
+    launch_environment_module: sourceModule('packages/util/launch-environment', '@deepseek-ai/dsh-launch-environment'),
+    zod_module: storageRequire.resolve('zod'),
     playwright_module: packageRequire.resolve('playwright-core'),
   }
   const binding = {

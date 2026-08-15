@@ -44,12 +44,12 @@ function loadTargetPlaywright() {
   if (String(chromium?.revision) !== BROWSER_REVISION || chromium?.browserVersion !== BROWSER_VERSION) {
     throw new Error('pinned Harness Chromium revision drifted')
   }
-  return require('playwright').chromium
+  return { chromium: require('playwright').chromium, cli: join(playwrightRoot, 'cli.js') }
 }
 
-function installTargetChromium() {
-  const executable = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
-  const result = spawnSync(executable, ['--dir', join(harnessRoot, 'apps', 'web'), 'exec', 'playwright', 'install', 'chromium'], {
+function installTargetChromium(cli) {
+  const result = spawnSync(process.execPath, [cli, 'install', 'chromium'], {
+    cwd: join(harnessRoot, 'apps', 'web'),
     stdio: 'inherit',
     env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH },
   })
@@ -100,11 +100,11 @@ function executableFiles(directory, base = directory) {
 
 async function main() {
   assertPackage()
-  const chromium = loadTargetPlaywright()
+  const { chromium, cli } = loadTargetPlaywright()
   let executable = chromium.executablePath()
   let selected = existsSync(executable) ? browserSource(executable) : undefined
   if (selected === undefined) {
-    installTargetChromium()
+    installTargetChromium(cli)
     executable = chromium.executablePath()
     selected = existsSync(executable) ? browserSource(executable) : undefined
   }
