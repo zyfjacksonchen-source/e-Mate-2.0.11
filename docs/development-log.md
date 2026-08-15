@@ -880,3 +880,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 主代理用用户明确授权测试的同一生产 GPT Key/HTTP base URL，按最终 Codex-like 合同固定提交 `gpt-image-2-pro`：单次 `/images/generations`、带前一输出的 multipart `/images/edits` 均返回 HTTP 200；两份输出均为可解码 PNG，生成图带 alpha。没有向请求传模型选择、尺寸、质量、本地输出路径或并发策略。
 - 随后并行发起两次独立 generation 请求；两次均返回 200，wall time 为 113,569ms，单项耗时约 64,974ms 与 113,566ms。输出逐份打开检查且 SHA-256 不同。该结果关闭计划要求的“至少两个并发”原始 Provider 下限，但长尾已明显，不能据此宣称稳定上限或系统端性能达标。
 - 脱敏收据为 `artifacts/acceptance/S10-image-upstream-smoke.json`，只包含请求 ID、时长、大小和哈希，不含 Key、base URL、prompt、响应正文或图像字节。完整发布仍需通过企业 Gateway、e-Mate `imagegen` Tool、Harness Job/附件、审计与 Usage 对账；在这些链路完成前不继续盲目提高 4/8 路并发。
+
+## 2026-08-16 · S07 主代理管理端与 Usage 本地 Browser 验收
+
+- 主代理直接打开当前 Admin/Usage production build 的既定子路径。管理端登录页真实显示企业标识、管理员账号、密码与登录动作；Usage 入口真实显示只读令牌输入和明暗切换。没有提交生产账号、密码或令牌。
+- Usage 明暗按钮由 Browser 实点后，页面从暗色切换到明色，按钮可访问名称同步由“浅色模式”变为“深色模式”；保存并重新打开的两张截图均使用 e-Mate logo、橙色主动作与现行明暗 Token。
+- 使用本地只读 fixture 进入真实看板壳后，概览/用量/用户/审计导航均出现；本地未连接企业 Analytics API，因此页面按合同显示“用量数据暂时不可用”和“重试”，未生成虚假用户、事件或 Token 数据。生产登录、用户事件次数与审计账本对账继续阻塞于真实 Auth/PG/Redis/反代环境。
+- 证据位于 `artifacts/design-qa/S07-admin-usage-local/`。本轮只关闭本地入口、主题与失败关闭状态，不等同于生产部署或账本验收。

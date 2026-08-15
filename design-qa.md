@@ -263,6 +263,16 @@ final result: passed (scoped composer layout and connector route)
 
 final result: passed (persisted terminal states, target approval, refresh recovery)
 
+## S07 admin and usage local Browser acceptance — 2026-08-16
+
+- Main-agent Browser acceptance opened the actual local production builds at the deployed subpaths. The admin surface exposes one e-Mate-branded account/password form with labelled tenant, account and password fields plus one primary login action; no production credential was submitted.
+- The Usage entry surface exposes one labelled read-only token field and a visible theme action. Clicking that action changed the real document from dark to light and changed the action label from `浅色模式` to `深色模式`; both accepted captures keep the e-Mate logo, orange primary action and canonical neutral surfaces.
+- Entering the local read-only fixture reached the real dashboard shell and its Overview/Usage/Users/Audit navigation. Because the local preview has no enterprise Analytics API, the data surface correctly stopped at `用量数据暂时不可用` with a `重试` action instead of rendering invented metrics.
+- Evidence: `artifacts/design-qa/S07-admin-usage-local/01-admin-login-dark.png`, `02-usage-login-dark.png`, `03-usage-login-light.png`, and `04-usage-dashboard-api-unavailable.png`. The captures were reopened after saving and contain the intended complete page states.
+- Accessibility visible from this pass: each entry form has a named region, labelled textboxes, named buttons and a visible alert/retry state. Keyboard focus order, contrast ratios and authenticated table semantics still require the production flow and cannot be closed from these screenshots alone.
+
+final result: passed (local entry/theme/error-state); blocked (production login and ledger reconciliation)
+
 ## S10 managed general session and plugin capability projection — 2026-08-16
 
 - The main-agent Browser run uses the same managed profile, target Workspace/Session services and e-Mate shell bundle as the product. Navigating directly to `/` now opens the registered `emate-general-workspace`: the real InputBar is enabled, the workspace target reads `通用会话`, and its real menu still offers `通用会话` and `添加工作区…`. Evidence: `artifacts/design-qa/S10-plugin-replacement/home-general-default-dark-1280x720.jpg`.
