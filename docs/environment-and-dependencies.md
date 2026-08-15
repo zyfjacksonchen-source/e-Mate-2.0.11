@@ -50,7 +50,7 @@ A source audit at the pinned Harness commit establishes the dependency boundary 
 | HTTP fetch | Reuse the native `@deepseek-ai/dsh-web-fetch-http` provider only after the e-Mate profile explicitly enables it and its security limits are accepted | No legacy fetch duplicate; it is not Computer Use and does not read PDF/binary bodies |
 | Browser Computer Use | Reuse Harness Tools, Jobs, events, permissions and Cordis registration | Windows Playwright MCP + system Edge and macOS Ego remain setup-required until real acceptance; Browser Panel is not ready independently |
 | OCR/Vision | Reuse target Tool/model-policy composition through `vision-toolkit` | `blocked`: rc.5 lacks the required enterprise model-policy seam; no local Worker/model fallback |
-| Office/PDF | Register the four clean-room `office-skills` through the target Skill registry | No packaged execution runtime; host-toolchain closure and real format acceptance remain required |
+| Office/PDF | Register the four clean-room `office-skills` through the target Skill registry | `blocked`: no legally distributable packaged execution layer; no host-toolchain probing or fake artifact fallback |
 | Memory | Use `memory-evolve` with WorkspaceRegistry/session binding | No standalone dream/learning store or global scope |
 | Subagents | Reuse rc.5 native Subagent services | Receipt only; no copied AGPL implementation |
 | Generated UI/sidebar | Use `genui` and `better-sidebar` target slots | No second router, Store or client transport |
@@ -85,7 +85,7 @@ Profile bundles use the exact target registries and services instead of bundling
 
 `memory-evolve` opens its storage through the target Storage Domain and binds each project record to the stable Harness workspace ID plus canonical-path SHA-256. The current session must be a member of that binding; a general conversation receives a session-only scope. It does not create SQLite, a second event log, model client, Job registry, dream store, learning store or profile-local database.
 
-The four Office bundles are Skills, not a bundled document runtime. They describe the target workflow for documents, PDF, spreadsheets and presentations and must fail closed when the required host capability is unavailable. They do not promise an Office artifact until a real Tool result and accepted target artifact/download path exist.
+The four Office identities are disabled Skills, not a bundled document runtime. They report `EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE`, are neither model- nor user-invocable, register no execution Tool, and never probe an accidental host Office/Python/LibreOffice installation. They may become active only when a separately licensed macOS/Windows plugin supplies the complete prebuilt execution layer through target Tool/Job/filesystem seams and passes real DOCX/PDF/XLSX/PPTX create/read/edit/export/reopen acceptance.
 
 Browser state, screenshots and downloads may be exposed only through the selected adapter's real target Session/Tool/attachment path. Until Windows Playwright MCP + Edge or macOS Ego has platform acceptance, setup keeps the browser and Browser Panel at `setup-required`; no unverified profile-isolation or download behavior is claimed.
 

@@ -896,3 +896,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 目标 Harness 的完整 vendor closure 自身含 dormant Linux Landlock optional packages；它们没有进入 e-Mate 的可执行 `bin`，现有 runtime 也会拒绝 Linux。为保持 pinned target 闭包不被私自裁剪，本版本不删除这些不可达依赖字节。
 - 发布主包 manifest 现使用 npm 原生 `os: [darwin, win32]`，因此 Linux 在安装解析阶段即失败，而不是安装 58MiB 后等到 `setup` 才拒绝；Windows arm64 继续由现有 runtime 组合门禁拒绝。未增加 `cpu`，因为 npm 单一 `cpu` 列表无法表达 macOS arm64/x64 与仅 Windows x64 的联合矩阵。
 - release carrier 7/7、根级精确构建和 diff check 通过；CI 仍只有 macOS arm64/x64 与 Windows x64 干净安装，没有 Electron/Tauri/DMG/签名/公证或 Linux 发行作业。
+
+## 2026-08-16 · S10 Office 执行层许可证与运行边界复核
+
+- 主代理复核子代的独立审计：pinned rc.5 standard preset 只有 Skill、filesystem、macOS Bash、Windows PowerShell 与 Job seam，目标锁中没有 DOCX/PDF/XLSX/PPTX 执行 Tool 或完整文档库。Codex primary-runtime 是环境所有的加载器，Documents Skill 的附加许可明确禁止第三方提取、分发和衍生分发；公开 `openai/skills` 的 Apache-2.0 PDF Skill仍要求现场安装 Python/Poppler，也不提供 DOCX/XLSX/PPTX 执行层。
+- 因此四项 Office Skill 保留能力身份但改为非模型/非用户可调用，注册 Tool 数为 0，能力状态固定 `blocked / EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE`；不再扫描偶然存在的系统 Office、Python、LibreOffice 或全局 Node 包，也不生成伪装 Office 文件。
+- 插件窄测 2/2、Node 24 构建与 diff check 通过。强制 Office Computer Use 仍是正式发布阻塞，只有取得可再分发的 macOS/Windows 预构建执行插件并完成四格式真实全场景后才能关闭。

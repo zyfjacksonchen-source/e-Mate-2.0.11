@@ -43,10 +43,20 @@ interface SkillContext {
 
 export const name = 'emate-office-skills'
 export const inject = ['skills', 'emateCapabilities']
+export const OFFICE_RUNTIME_BLOCK_CODE = 'EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE'
 const PROVIDER_NAME = name
 // Pinned Harness rc.5 assigns packaged skills rank 600.
 const BUNDLED_SKILL_RANK = 600
-const INVOCATION = { modelInvocable: true, userInvocable: true } as const
+const INVOCATION = { modelInvocable: false, userInvocable: false } as const
+
+export const OFFICE_ADAPTER_STATUS = Object.freeze({
+  state: 'blocked' as const,
+  code: OFFICE_RUNTIME_BLOCK_CODE,
+  harnessVersion: '0.1.0-rc.5' as const,
+  runtimeInstalled: false as const,
+  toolsRegistered: 0 as const,
+  reason: 'The pinned runtime exposes the native Skill, filesystem, Bash/PowerShell, and Job seams but ships no distributable Office execution layer; the four Codex primary-runtime Skills cannot be redistributed or resolved by e-Mate.',
+})
 
 interface SkillSpec {
   name: string
@@ -60,28 +70,28 @@ const skillRoot = fileURLToPath(new URL('../skills/', import.meta.url))
 const SPECS: readonly SkillSpec[] = [
   {
     name: 'documents',
-    description: 'Read, create, edit, and verify DOCX documents with a fail-closed host-toolchain check.',
+    description: 'Blocked DOCX workflow receipt; no distributable execution layer is installed.',
     whenToUse: 'Use for Word or DOCX reading, authoring, editing, review, and conversion tasks.',
     directory: `${skillRoot}documents`,
     format: 'docx',
   },
   {
     name: 'pdf',
-    description: 'Read, create, fill, edit, and visually verify PDF files with a fail-closed host-toolchain check.',
+    description: 'Blocked PDF workflow receipt; no distributable execution layer is installed.',
     whenToUse: 'Use for PDF reading, generation, form filling, editing, extraction, rendering, or review.',
     directory: `${skillRoot}pdf`,
     format: 'pdf',
   },
   {
     name: 'spreadsheets',
-    description: 'Read, create, edit, calculate, and verify XLSX, CSV, and TSV workbooks with a fail-closed host-toolchain check.',
+    description: 'Blocked spreadsheet workflow receipt; no distributable execution layer is installed.',
     whenToUse: 'Use for spreadsheet authoring, editing, analysis, formulas, charts, or workbook review.',
     directory: `${skillRoot}spreadsheets`,
     format: 'xlsx',
   },
   {
     name: 'presentations',
-    description: 'Read, create, edit, render, and verify PPTX presentations with a fail-closed host-toolchain check.',
+    description: 'Blocked presentation workflow receipt; no distributable execution layer is installed.',
     whenToUse: 'Use for PowerPoint or PPTX authoring, editing, layout, rendering, and review.',
     directory: `${skillRoot}presentations`,
     format: 'pptx',
@@ -100,7 +110,13 @@ function candidate(spec: SkillSpec): SkillCandidate {
     rank: BUNDLED_SKILL_RANK,
     locator: spec.name,
     path: `${spec.directory}/SKILL.md`,
-    metadata: { eMateCapability: 'office', format: spec.format, adapter: 'clean-room' },
+    metadata: {
+      eMateCapability: 'office',
+      format: spec.format,
+      adapter: 'clean-room',
+      state: OFFICE_ADAPTER_STATUS.state,
+      blockerCode: OFFICE_ADAPTER_STATUS.code,
+    },
   }
 }
 
@@ -144,13 +160,13 @@ export function apply(ctx: SkillContext): void {
   ctx.effect(() => ctx.emateCapabilities.register({
     id: 'office-skills',
     title: 'Office 办公',
-    summary: '通过四项内置 Skill 处理 DOCX、PDF、XLSX 与 PPTX，实际执行前检查本机可用工具链。',
+    summary: '四项 Office Skill 已按目标注册；当前固定运行时没有可合法随包交付的真实执行层。',
     icon_key: 'office',
     order: 20,
     actions: [],
     status: async () => ({
-      state: 'setup-required',
-      detail: '四项办公工作流已安装；未随包附带文档运行时，首次任务将按实际本机工具链自检。',
+      state: OFFICE_ADAPTER_STATUS.state,
+      detail: `Office 执行层未交付，四项 Skill 保持禁用（${OFFICE_RUNTIME_BLOCK_CODE}）。`,
       action_ids: [],
     }),
   }), 'emate.office-skills: capability metadata')

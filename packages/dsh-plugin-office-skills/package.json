@@ -42,6 +42,12 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "officeSkills": {
+      "adapterState": "blocked",
+      "blockerCode": "EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE",
+      "runtimeInstalled": false,
+      "toolsRegistered": 0
     }
   },
   "eMate": {
