@@ -1787,10 +1787,13 @@ test('environment check validates the pinned Harness and embedded plugin closure
   const report = await checkEnvironment({ dshHome, includeProfile: false })
   assert.equal(report.checks.find(item => item.id === 'harness')?.status, 'pass')
   assert.equal(report.checks.find(item => item.id === 'plugin_bundles')?.status, 'pass')
+  const credentialStore = await checkOsCredentialBackend()
+  assert.equal(report.checks.find(item => item.id === 'platform')?.status, platformSupported() ? 'pass' : 'fail')
+  assert.equal(report.checks.find(item => item.id === 'credential_store')?.status, credentialStore.ok ? 'pass' : 'fail')
   for (const removedId of [
     'platform_runtime', 'browser_runtime', 'office_worker', 'ocr_worker', 'chromium',
   ]) assert.equal(report.checks.some(item => item.id === removedId), false)
-  assert.equal(report.ok, true)
+  assert.equal(report.ok, platformSupported() && credentialStore.ok)
 })
 
 test('health route reports real projected job activity and rejects writes', () => {
