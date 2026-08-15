@@ -875,6 +875,7 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 随后主代理使用用户明确授权测试的生产 GPT Key 和 HTTP base URL，分别向 Luna 与 Sol 发起一次最小 Responses 调用；两次均返回 HTTP 200，响应报告的模型 ID 与请求一致，并各有 Provider response/request ID 和 token usage。未记录 Key、base URL 或回复正文。脱敏收据为 `artifacts/acceptance/S07-model-upstream-gpt-smoke.json`。该证据只关闭原始 Provider 对两模型的单次连通，不替代企业 Gateway 租约、同会话切换、审计对账或弱网恢复。
 - live smoke 审核同时发现 DeepSeek 上游仍写旧 `deepseek-v4-pro`，与冻结映射 `ecorex-deepseek-v4-pro → deepseek-v4-flash` 漂移；权威 contract 与出站 body 回归已改为 `deepseek-v4-flash`，用户可见路由 ID、策略、鉴权和管理端均未改变。Model Gateway 门禁再次为 75 passed、6 external skips、0 failed；真实目录是否存在该 ID 仍需生产 DeepSeek Provider smoke，未用近似模型代替。
 - 用户提供的生产 DeepSeek Key 在官方目录中真实返回 `deepseek-v4-flash` 与 `deepseek-v4-pro`；主代理随后固定调用 `deepseek-v4-flash`，HTTP 200，返回模型 ID 与冻结映射一致，并有 Provider response ID 和 token usage。用户提供的豆包 Key 在官方方舟目录中真实包含 `doubao-seed-2-0-pro-260215`；同模型最小 Chat Completions 调用也返回 200、匹配模型 ID、request/response ID 与 token usage。脱敏收据分别为 `artifacts/acceptance/S07-model-upstream-deepseek-smoke.json` 与 `S07-model-upstream-doubao-smoke.json`，均不含 Key、base URL、prompt 或回复正文。
+- 正式 Model smoke 原先只允许内部占位域，导致这两个已验证的官方 HTTPS Provider 在任何凭据请求前被错误拒绝。权威 smoke allowlist 现在同时接受既有内部路由、DeepSeek 官方根和方舟北京 `/api/v3` 根；未知 HTTPS 目标继续失败关闭。逐路由 HTTP 许可只保留给用户已认可的 GPT/图像 `/v1` 路径，不能借该开关把 DeepSeek/豆包改到任意明文主机。Model Gateway TypeScript 与 82 项测试通过（76 pass、6 external skips、0 fail）。
 - 这两项与 Luna/Sol 一样只关闭原始 Provider 单次连通；企业 Gateway 登录租约、同会话模型切换、上游故障/弱网恢复、usage/audit 对账和生产 UI 仍必须端到端验收。
 
 ## 2026-08-16 · S10 生产图像 Provider 单次、编辑与最低并发
@@ -889,3 +890,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Usage 明暗按钮由 Browser 实点后，页面从暗色切换到明色，按钮可访问名称同步由“浅色模式”变为“深色模式”；保存并重新打开的两张截图均使用 e-Mate logo、橙色主动作与现行明暗 Token。
 - 使用本地只读 fixture 进入真实看板壳后，概览/用量/用户/审计导航均出现；本地未连接企业 Analytics API，因此页面按合同显示“用量数据暂时不可用”和“重试”，未生成虚假用户、事件或 Token 数据。生产登录、用户事件次数与审计账本对账继续阻塞于真实 Auth/PG/Redis/反代环境。
 - 证据位于 `artifacts/design-qa/S07-admin-usage-local/`。本轮只关闭本地入口、主题与失败关闭状态，不等同于生产部署或账本验收。
+
+## 2026-08-16 · S01/S13 macOS 与 Windows npm 安装边界
+
+- 目标 Harness 的完整 vendor closure 自身含 dormant Linux Landlock optional packages；它们没有进入 e-Mate 的可执行 `bin`，现有 runtime 也会拒绝 Linux。为保持 pinned target 闭包不被私自裁剪，本版本不删除这些不可达依赖字节。
+- 发布主包 manifest 现使用 npm 原生 `os: [darwin, win32]`，因此 Linux 在安装解析阶段即失败，而不是安装 58MiB 后等到 `setup` 才拒绝；Windows arm64 继续由现有 runtime 组合门禁拒绝。未增加 `cpu`，因为 npm 单一 `cpu` 列表无法表达 macOS arm64/x64 与仅 Windows x64 的联合矩阵。
+- release carrier 7/7、根级精确构建和 diff check 通过；CI 仍只有 macOS arm64/x64 与 Windows x64 干净安装，没有 Electron/Tauri/DMG/签名/公证或 Linux 发行作业。

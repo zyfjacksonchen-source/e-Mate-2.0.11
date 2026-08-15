@@ -36,8 +36,8 @@ type SmokeRouteContract = {
   id: string;
   apiMode: NonNullable<ModelGatewayRoute['apiMode']>;
   upstreamModelId: string | RegExp;
-  hostname: string;
-  pathname: string;
+  httpsBaseUrls: readonly string[];
+  httpPathname?: string;
   fallbackUpstreamModelId?: string;
 };
 
@@ -46,37 +46,38 @@ const routeContracts: readonly SmokeRouteContract[] = [
     id: 'gpt-5.6-luna',
     apiMode: 'responses',
     upstreamModelId: 'gpt-5.6-luna',
-    hostname: 'main-provider.ecorex.internal',
-    pathname: '/v1',
+    httpsBaseUrls: ['https://main-provider.ecorex.internal:18443/v1'],
+    httpPathname: '/v1',
   },
   {
     id: 'gpt-5.6-sol',
     apiMode: 'responses',
     upstreamModelId: 'gpt-5.6-sol',
-    hostname: 'main-provider.ecorex.internal',
-    pathname: '/v1',
+    httpsBaseUrls: ['https://main-provider.ecorex.internal:18443/v1'],
+    httpPathname: '/v1',
   },
   {
     id: 'deepseek',
     apiMode: 'chat-completions',
     upstreamModelId: 'deepseek-v4-flash',
-    hostname: 'deepseek-provider.ecorex.internal',
-    pathname: '/v1',
+    httpsBaseUrls: ['https://deepseek-provider.ecorex.internal:18443/v1', 'https://api.deepseek.com'],
   },
   {
     id: 'gpt-image-2-pro',
     apiMode: 'images-generations',
     upstreamModelId: 'gpt-image-2-pro',
     fallbackUpstreamModelId: 'gpt-image-2',
-    hostname: 'image-provider.ecorex.internal',
-    pathname: '/v1',
+    httpsBaseUrls: ['https://image-provider.ecorex.internal:18443/v1'],
+    httpPathname: '/v1',
   },
   {
     id: 'doubao-seed-2-0-pro-260215',
     apiMode: 'chat-completions',
     upstreamModelId: 'doubao-seed-2-0-pro-260215',
-    hostname: 'doubao-provider.ecorex.internal',
-    pathname: '/v1',
+    httpsBaseUrls: [
+      'https://doubao-provider.ecorex.internal:18443/v1',
+      'https://ark.cn-beijing.volces.com/api/v3',
+    ],
   },
 ];
 
@@ -121,19 +122,16 @@ function validateCatalog(routes: readonly ModelSmokeRoute[]): Map<string, ModelS
       typeof contract.upstreamModelId === 'string'
         ? route.upstreamModelId === contract.upstreamModelId
         : contract.upstreamModelId.test(route.upstreamModelId);
-    const transportMatches =
-      route.allowInsecureHttpUpstream === true
-        ? upstream.protocol === 'http:'
-        : upstream.protocol === 'https:' &&
-          upstream.hostname === contract.hostname &&
-          upstream.port === '18443';
+    const normalizedBaseUrl = `${upstream.origin}${upstream.pathname.replace(/\/$/, '')}`;
+    const transportMatches = route.allowInsecureHttpUpstream === true
+      ? upstream.protocol === 'http:' && upstream.pathname === contract.httpPathname
+      : upstream.protocol === 'https:' && contract.httpsBaseUrls.includes(normalizedBaseUrl);
     if (
       route.apiMode !== contract.apiMode ||
       !modelMatches ||
       route.fallbackUpstreamModelId !== contract.fallbackUpstreamModelId ||
       !transportMatches ||
       !upstream.hostname ||
-      upstream.pathname !== contract.pathname ||
       upstream.username ||
       upstream.password ||
       upstream.search ||

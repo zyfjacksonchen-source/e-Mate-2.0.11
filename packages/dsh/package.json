@@ -26,6 +26,10 @@
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
+  "os": [
+    "darwin",
+    "win32"
+  ],
   "scripts": {
     "build": "node ../../scripts/clean-emate-build.mjs && node ../../scripts/sync-emate-ui-assets.mjs && node ../../scripts/sync-emate-plugin-bundles.mjs && ../../upstream/deepseek-harness/node_modules/.bin/tsdown && cd profile/plugins/emate-shell && ../../../../../upstream/deepseek-harness/node_modules/.bin/tsdown",
     "test": "pnpm run build && node --test && pnpm --dir profile/plugins/emate-shell test",

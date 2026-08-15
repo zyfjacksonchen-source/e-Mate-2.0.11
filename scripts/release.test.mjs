@@ -176,8 +176,11 @@ test('GitHub release packs once and validates the same tarball on three platform
   const requireFromDsh = createRequire(resolve('packages/dsh/package.json'))
   const { parse } = requireFromDsh('yaml')
   const workspace = JSON.parse(readFileSync('package.json', 'utf8'))
+  const published = JSON.parse(readFileSync('packages/dsh/package.json', 'utf8'))
   const ci = parse(readFileSync('.github/workflows/ci.yml', 'utf8'))
   const release = parse(readFileSync('.github/workflows/release.yml', 'utf8'))
+  assert.deepEqual(published.os, ['darwin', 'win32'])
+  assert.equal(published.cpu, undefined)
   assert.ok(workspace.scripts.test.indexOf("--filter './packages/dsh-plugin-*'") < workspace.scripts.test.indexOf('--filter @e-mate/dsh test'))
   const ciChecks = ci.jobs.source.steps.find(step => step.name === 'Check target pin and e-Mate behavior').run
   assert.match(ciChecks, /^pnpm test$/mu)

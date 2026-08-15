@@ -206,7 +206,7 @@ test('fails closed without returning approval after any provider rejection', asy
   assert.equal(requests.length, 3);
 });
 
-test('rejects a non-private route catalog before any credential-bearing request', async () => {
+test('rejects an unapproved route catalog before any credential-bearing request', async () => {
   const { fetchImplementation, requests } = mockFetch();
   const invalidRoutes = structuredClone(routes);
   const invalidRoute = invalidRoutes.find(({ id }) => id === 'deepseek');
@@ -257,6 +257,29 @@ test('requires an explicit route-local opt-in before smoking a pinned HTTP upstr
   });
   assert.equal(approval.results.length, 5);
   assert.equal(requests[0]?.url, 'http://127.0.0.1:18080/v1/responses');
+});
+
+test('accepts the pinned official DeepSeek and Doubao HTTPS bases', async () => {
+  const { fetchImplementation, requests } = mockFetch();
+  const officialRoutes = structuredClone(routes);
+  const deepseek = officialRoutes.find(({ id }) => id === 'deepseek');
+  const doubao = officialRoutes.find(({ id }) => id === 'doubao-seed-2-0-pro-260215');
+  assert(deepseek && doubao);
+  deepseek.upstreamBaseUrl = 'https://api.deepseek.com';
+  doubao.upstreamBaseUrl = 'https://ark.cn-beijing.volces.com/api/v3';
+
+  const approval = await runModelSmoke({
+    routes: officialRoutes,
+    catalogSha256: '1'.repeat(64),
+    operator: 'release.operator',
+    timeoutMs: 10_000,
+    fetchImplementation,
+    randomId: randomId(),
+  });
+
+  assert.equal(approval.results.length, 5);
+  assert.equal(requests[2]?.url, 'https://api.deepseek.com/chat/completions');
+  assert.equal(requests[4]?.url, 'https://ark.cn-beijing.volces.com/api/v3/chat/completions');
 });
 
 test('rejects credential-bearing and malformed opted-in HTTP URLs before smoke requests', async () => {
