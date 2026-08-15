@@ -2360,6 +2360,8 @@ test('audit records only real Harness usage and uploads an idempotent durable ou
 })
 
 test('environment check validates real platform closures and otherwise fails closed', async () => {
+  const source = readFileSync(join(import.meta.dirname, '..', 'src', 'e-mate.ts'), 'utf8')
+  assert.match(source, /rmSync\(profile, \{ recursive: true, force: true, maxRetries: 5, retryDelay: 200 \}\)/)
   const dshHome = join(tmpdir(), `e-mate-check-${process.pid}`)
   const report = await checkEnvironment({ dshHome, includeProfile: false })
   assert.equal(report.checks.find(item => item.id === 'harness')?.status, 'pass')

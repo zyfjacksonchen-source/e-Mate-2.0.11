@@ -476,7 +476,7 @@ async function chromiumCheck(browser) {
       })
     })
   } finally {
-    rmSync(profile, { recursive: true, force: true })
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
   }
 }
 
