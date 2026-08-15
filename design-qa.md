@@ -329,3 +329,21 @@ final result: passed (challenge/login/register entry and responsive boundary); b
 - The reference edit action is not marked visually accepted. Pinned rc.5 exposes no completed-message atomic edit-and-branch action; its public `forkAt(seq)` retains the completed/failed turn and `setDraft + submit` cannot safely replay durable attachments. Adding an inert or duplicate-message button would violate the real-action requirement, so this interaction remains blocked on the target seam.
 
 final result: passed (inline copy feedback and recovery); blocked (completed-message edit branch)
+
+## S02/S03 queued-state semantics and target queue actions — 2026-08-16
+
+- The reference state is prototype screen `6 · 排队`: a Tool activity says `等待运行 npm test -- session.test.ts / 排队中`. The current build was exercised with a real open target Agent turn and a second InputBar submission, producing the authoritative target `session/queue` row rather than a client fixture.
+- Current e-Mate correctly places the target QueueDock immediately above the composer. Main-agent interaction verified all three visible actions: edit/save changed the same queued occurrence, remove deleted it and the dock, and steer moved a newly queued occurrence into the real conversation tail without leaving a duplicate row.
+- The focused combined evidence is `artifacts/design-qa/S02-queued-current-7b607c7/focused-source-vs-current-queued.jpg`. It also proves the remaining semantic mismatch: the reference is a not-yet-dispatched Tool activity, while the target surface is a later user-message queue.
+- Pinned rc.5 has no pre-dispatch Tool queue fact. `executeToolCalls()` appends `tool/call` only inside `startCall()`, and the client derives a running Tool only after that event exists. Relabelling `session/queue` as a Tool queue or emitting an early synthetic call would violate the real-event contract, so no visual patch was made.
+
+final result: passed (target next-message queue edit/remove/steer); blocked (prototype pre-dispatch Tool queue)
+
+## S02/S03 running activity collapse — 2026-08-16
+
+- The reference is prototype screen `3 · 折叠`. The main-agent current-state fixture registered one repository-external target Tool only to keep a real `tool/call` open; the product still received and projected the target Session/Agent/Tool events and no client event was fabricated.
+- The first same-state comparison exposed a P1 in the shared activity header: the reference computed `22px / 31.9px`, content width, `500` label/time weight and an `18×18` down chevron, while the current header was `14px`, full-row width and a right-pointing `14×14` chevron. The scoped repair only restored that shared typography, content geometry and existing Chevron presentation.
+- Main-agent rerun against client bundle SHA-256 `63a69d3ec37c0cc6b661d7c88e7c0a79d414e0c7d163af2d834d83960bf2fd30` verified the real group in both directions: expanded had one `acceptance_wait` Tool row; collapsed had `aria-expanded=false` and zero Tool rows; re-expansion restored the same Tool row. The final header computes `22px / 31.9px`, `fit-content`, `8px` gap, `18×18` Chevron and `transform:none`, matching the reference state.
+- Full and focused combined evidence is stored in `artifacts/design-qa/S02-collapse-current-7b607c7/`, especially `focused-source-vs-current-collapsed.jpg`.
+
+final result: passed (real running activity collapse, hidden Tool rows and re-expansion)

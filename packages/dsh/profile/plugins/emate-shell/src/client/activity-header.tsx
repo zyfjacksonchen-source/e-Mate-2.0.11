@@ -196,8 +196,10 @@ export function ActivityHeader({ node }: ChatNodeViewProps<'e-mate-activity-grou
       onClick={() => { setCollapsed(value => !value) }}
       aria-live={status === 'running' ? 'polite' : undefined}
     >
-      <span>{statusLabel(status)}</span>
-      <time>{elapsedLabel}</time>
+      <strong>
+        <span>{statusLabel(status)}</span>{' '}
+        <time>{elapsedLabel}</time>
+      </strong>
       <IconChevronDownOutline14 className={css.chevron} />
     </button>
   )

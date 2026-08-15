@@ -11,6 +11,7 @@ vi.mock('@deepseek-ai/dsh-client-runtime/client', () => ({
 }))
 
 const activity = readFileSync(resolve('src/client/activity-header.tsx'), 'utf8')
+const activityCss = readFileSync(resolve('src/client/activity-header.module.css'), 'utf8')
 const disclosure = readFileSync(resolve('src/client/long-message-disclosure.tsx'), 'utf8')
 
 describe('chat fidelity contract', () => {
@@ -24,6 +25,14 @@ describe('chat fidelity contract', () => {
     expect(activity).toContain("String(minutes).padStart(2, '0')")
     expect(activity).toContain("state === 'ok' || state === 'running'")
     expect(activity).not.toContain("disabled={status === 'running'}")
+  })
+
+  it('keeps the activity header aligned with the collapsed-running prototype', () => {
+    expect(activity).toMatch(/<strong>\s*<span>\{statusLabel\(status\)\}<\/span>\{' '\}\s*<time>\{elapsedLabel\}<\/time>\s*<\/strong>/)
+    expect(activity).toContain('<IconChevronDownOutline14 className={css.chevron} />')
+    expect(activityCss).toMatch(/\.root \{[^}]*width: fit-content;[^}]*font-size: 22px;[^}]*font-weight: 400;[^}]*line-height: 1\.45;[^}]*\}/)
+    expect(activityCss).toMatch(/\.chevron \{[^}]*width: 18px;[^}]*height: 18px;[^}]*\}/)
+    expect(activityCss).not.toContain('transform:')
   })
 
   it('measures one Markdown DOM and exposes functional expand and download controls', () => {

@@ -951,3 +951,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 当前用户消息继续使用目标 `MessageIconActions`。主代理点击真实复制动作后，同一消息下方原位出现 check 图标和“复制成功”提示；约 1 秒后按钮与提示恢复为“复制”，页面没有新增消息、全局 toast 或伪事件。证据位于 `artifacts/design-qa/S02-message-copy-current-f225cc2/`，其中 `focused-source-vs-current-copy-feedback.jpg` 是源稿与当前同状态的聚焦并排图。
 - 源稿同一位置还有“编辑”动作，但 rc.5 完成态用户消息只公开 `forkAt(seq)`；该动作会保留本轮结束事件，不能原子地在失败/完成轮之前分支，也没有可安全重放原消息与 durable attachment 的接口。`setDraft + submit` 会追加重复消息并可能丢附件，因此本轮不增加无效编辑按钮。编辑分支保持上游接口阻塞，需目标提供 pre-turn fork 加精确消息/附件重放或原子 edit-and-branch action 后再验收。
 - 本轮关闭“消息动作可见、复制成功反馈、反馈恢复且不造假状态”这一同状态；S02/S03 仍未关闭全部 17 个原型状态、产物同状态和编辑分支。
+
+## 2026-08-16 · S02/S03 排队状态语义核对与真实消息队列验收
+
+- 主代理选择指定原型第 6 屏“排队”，并在当前 e-Mate Host 中用仓库外临时 LLM adapter 打开一个真实目标 Agent turn；adapter 只让首个模型 stream 保持运行，页面仍使用目标 Session、Agent inbox、Connection、Conversation 和 InputBar。随后从真实 InputBar 提交第二条消息，目标权威 `session/queue` 快照显示一条 `placement='queued'` 的下一轮用户消息，没有客户端注入 queue 数据。
+- 目标 QueueDock 真实显示排队消息及“编辑排队消息 / 删除排队消息 / 插话发送”三个动作。主代理依次完成编辑并保存、删除并确认 dock 消失、重新排队后插话并确认同一消息从 QueueDock 移到真实 conversation tail；没有重复消息、残留 dock 或第二 Store。当前运行随后通过真实“停止生成”动作结束。
+- 同状态视觉对照发现原型与目标事件语义不同：原型行是工具动作 `npm test -- session.test.ts` 在取得执行位之前的“等待运行 / 排队中”；rc.5 `executeToolCalls()` 只在 `startCall()` 内真正开始调用时追加 `tool/call`，客户端也只在 `tool/call` 已存在且 `tool/result` 未出现时投影 `runningCalls`。目标没有可供前端读取的 pre-dispatch Tool queue 事件。
+- 因而不能把真实的用户消息 `session/queue` 改名或搬进活动组冒充工具队列，也不能提前制造 `tool/call`。本轮关闭目标原生消息队列及三个动作闭环；原型第 6 屏的 Tool queued 同状态保持上游事件缺口阻塞。证据位于 `artifacts/design-qa/S02-queued-current-7b607c7/`，聚焦并排图为 `focused-source-vs-current-queued.jpg`。
+
+## 2026-08-16 · S02/S03 运行中活动组折叠同状态终验
+
+- 主代理选择指定原型第 3 屏“折叠”，在仓库外 QA profile 中注册一个目标原生 Tool，让真实 Agent turn 保持 `tool/call` 已开始、`tool/result` 未产生的运行态；产品继续使用固定 rc.5 的 Session、Agent loop、Tools 和持久事件，前端没有注入活动行或伪造终态。
+- 首轮同视口量测发现共享活动头仍是 `14px`、全行 `748px` 点击面和向右 `14px` Chevron，而源稿是内容宽、`22px / 31.9px`、标签/计时 `500` 字重和向下 `18px` Chevron。最小修复只调整现有活动头 DOM/CSS：同一 `strong` 保留真实 `<time>`，按钮使用 `fit-content`，复用现有 Chevron 且不旋转；未改事件匹配、计时、折叠状态或 renderer 分派。
+- 主代理同步最终 client bundle SHA-256 `63a69d3ec37c0cc6b661d7c88e7c0a79d414e0c7d163af2d834d83960bf2fd30` 后重新启动 Host 并提交新会话。展开态有且仅有一条真实 `acceptance_wait` Tool 行；折叠后 `aria-expanded=false` 且 Tool 行数为 0；再次展开恢复同一 Tool 行。最终计算样式为 `22px / 31.9px`、内容宽、`8px` 间距、`18×18` 向下 Chevron，与源稿同状态一致。
+- 子代窄测 7 files / 30 tests、`@e-mate/dsh` build 和 diff check 通过；主代理最终并排证据位于 `artifacts/design-qa/S02-collapse-current-7b607c7/`。本片关闭“真实运行活动组折叠/展开与视觉同状态”，未扩大到目标不存在的 Tool pre-dispatch queue。
