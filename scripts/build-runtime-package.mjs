@@ -136,7 +136,10 @@ async function resolveArchive() {
 }
 
 function assertArchiveShape(archive) {
-  const entries = run('tar', ['-tzf', archive], { maxBuffer: 32 * 1024 * 1024 }).split(/\r?\n/).filter(Boolean)
+  const entries = run('tar', ['-tzf', basename(archive)], {
+    cwd: dirname(archive),
+    maxBuffer: 32 * 1024 * 1024,
+  }).split(/\r?\n/).filter(Boolean)
   if (entries.length === 0) throw new Error('Python archive is empty')
   for (const entry of entries) {
     const parts = entry.replace(/\\/g, '/').split('/')
@@ -252,7 +255,7 @@ async function main() {
   await rm(temporary, { recursive: true, force: true })
   await mkdir(temporary, { recursive: true })
   try {
-    run('tar', ['-xzf', archive, '-C', temporary])
+    run('tar', ['-xzf', basename(archive), '-C', relative(dirname(archive), temporary)], { cwd: dirname(archive) })
     await mkdir(payload, { recursive: true })
     await rename(join(temporary, 'python'), pythonRoot)
     // npm intentionally omits symlinks from package tarballs. The product uses

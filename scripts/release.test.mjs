@@ -225,3 +225,9 @@ test('platform postinstall permits source checkout only and fails closed for an 
     }
   }
 })
+
+test('Windows Runtime tar calls keep drive-qualified paths out of archive operands', () => {
+  const source = readFileSync('scripts/build-runtime-package.mjs', 'utf8')
+  assert.match(source, /run\('tar', \['-tzf', basename\(archive\)\], \{\s*cwd: dirname\(archive\)/u)
+  assert.match(source, /run\('tar', \['-xzf', basename\(archive\), '-C', relative\(dirname\(archive\), temporary\)\], \{ cwd: dirname\(archive\) \}\)/u)
+})

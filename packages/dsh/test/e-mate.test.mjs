@@ -20,13 +20,13 @@ import {
   HARNESS_COMMIT,
   HARNESS_VERSION,
   checkEnvironment,
-  installProfile,
   latestUpdateReceipt,
   managedStatus,
   nodeVersionSupported,
   platformSupported,
   resolveHarness,
 } from '../lib/e-mate.js'
+import { installTestProfile as installProfile } from './runtime-binding.fixture.mjs'
 import { apply as applyHealth } from '../profile/plugins/health.js'
 import { apply as applyShare, SHARE_CHANNEL } from '../profile/plugins/share.js'
 import { apply as applyGeneralWorkspace } from '../profile/plugins/general-workspace.js'

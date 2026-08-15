@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { installProfile } from '../lib/e-mate.js'
+import { installTestProfile as installProfile } from './runtime-binding.fixture.mjs'
 import {
   legacyScheduleConfirmation,
   migrateLegacySchedules,
