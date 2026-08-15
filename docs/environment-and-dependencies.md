@@ -50,7 +50,7 @@ The assembler requires exact `pnpm@11.7.0`, rejects a Harness commit/version mis
 
 ## Release evidence and publication carrier
 
-`.github/workflows/ci.yml` validates the source on Node 24. `.github/workflows/release.yml` builds the two matching platform packages on each of `macos-15` (arm64), `macos-15-intel` (x64), and `windows-2025` (x64), packs the main package once, and clean-installs the main plus the matching platform pair before evidence assembly. It never attempts to emulate a foreign platform package on the wrong host.
+`.github/workflows/ci.yml` validates the source on Node 24. The release workflow follows the pinned Harness CI-first contract: every pull request performs a credential-free pack, the resulting tarballs are installed into a clean consumer outside the checkout, and a protected manual publish consumes those exact artifacts without rebuilding. e-Mate's required delta is the native matrix: `.github/workflows/release.yml` builds the two matching platform packages on each of `macos-15` (arm64), `macos-15-intel` (x64), and `windows-2025` (x64), packs the main package once, and clean-installs the main plus the matching platform pair before evidence assembly. It never attempts to emulate a foreign platform package on the wrong host.
 
 `scripts/release.mjs` accepts exactly the six platform tarballs and the main tarball. It rejects a package identity, version, OS/CPU, target-pin or exact-optional-dependency mismatch, then produces `SHA256SUMS`, `release-manifest.json`, SPDX 2.3 SBOM, aggregated third-party license evidence and an evidence checksum. Runtime distribution records retain their package name, version, license and source metadata so Python contents are not reduced to an opaque binary payload.
 

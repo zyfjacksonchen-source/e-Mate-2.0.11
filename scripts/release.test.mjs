@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -198,4 +198,30 @@ test('GitHub workflows keep the target toolchain and the three supported platfor
   const r2 = release.jobs.r2.steps.find(step => step.name === 'Publish immutable release bytes to Cloudflare R2')
   assert.match(r2.run, /publish-r2\.mjs/u)
   assert.equal(r2.env.EMATE_R2_PUBLIC_ORIGIN, '${{ vars.EMATE_R2_PUBLIC_ORIGIN }}')
+  assert.equal(release.on.workflow_dispatch.inputs.publish.default, false)
+  assert.ok(release.jobs.publish.steps.every(step => !/\b(?:build|pack)\b/u.test(step.run ?? '')))
+  assert.match(readFileSync('.gitattributes', 'utf8'), /^\* text=auto eol=lf$/mu)
+})
+
+test('platform postinstall permits source checkout only and fails closed for an incomplete package', async () => {
+  for (const [kind, source] of [
+    ['runtime', 'packages/dsh-runtime-darwin-arm64/scripts/ensure-executable.mjs'],
+    ['browser', 'packages/dsh-browser-darwin-arm64/scripts/ensure-executable.mjs'],
+  ]) {
+    const root = mkdtempSync(join(tmpdir(), `e-mate-${kind}-postinstall-`))
+    try {
+      const script = join(root, 'packages', kind, 'scripts', 'ensure-executable.mjs')
+      await file(root, `packages/${kind}/scripts/ensure-executable.mjs`, readFileSync(source, 'utf8'))
+      await file(root, 'pnpm-workspace.yaml', 'packages:\n  - packages/*\n')
+      const sourceRun = spawnSync(process.execPath, [script], { encoding: 'utf8' })
+      assert.equal(sourceRun.status, 0, sourceRun.stderr)
+
+      rmSync(join(root, 'pnpm-workspace.yaml'))
+      const packageRun = spawnSync(process.execPath, [script], { encoding: 'utf8' })
+      assert.notEqual(packageRun.status, 0)
+      assert.match(packageRun.stderr, new RegExp(`required e-Mate ${kind === 'runtime' ? 'Runtime' : 'Browser'} manifest is missing`, 'u'))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
 })

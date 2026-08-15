@@ -670,3 +670,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Gemini 上游当前不可用，2.0.7 生产默认目录与本地策略均不包含 Gemini；测试中的 Gemini 字面量只用于证明非默认路由被拒绝，不构成可见或可调用模型。恢复必须单独验证上游后再切片，不在本次发布中预留假入口。
 - 发布工作流现在在 PR 上直接构建 macOS arm64、macOS x64、Windows x64 的 Runtime/Browser 候选并做匹配平台干净安装；npm 与 R2 发布仍只允许手动 `workflow_dispatch` 且 `publish=false` 为默认。主包候选同时安装、检查、测试并构建 enterprise TypeScript 工作区，避免只验本地客户端而漏掉登录、模型、审计和管理端。
 - 修复企业前端构建的两个真实缺口：构建命令复用仓库已声明的 pnpm，不再依赖未声明 Bun；管理端和用量面板直接打包固定 2.0.5 submodule 的同一 e-Mate logo，不复制第二套品牌资源。`enterprise:check` 通过，enterprise tests 全绿（仅缺真实 PostgreSQL/Redis/Windows ACL 的环境测试按合同跳过），五个企业应用构建通过；e-Mate build 与聚焦回归 2/2、release carrier 6/6、工作流 YAML 解析和 `git diff --check` 通过。正式三平台 tarball、R2 admission 和生产生/改图仍待 GitHub 候选与真实账号验收，不提前标记完成。
+## 2026-08-15 · 固定 Harness 的 CI 构建、发布与安装方式对齐
+
+- 目标事实：固定提交 `47f943859bef60e4160492346772ded9b24f765a` 的 `.github/workflows/release.yml` 是 CI-first。Pull Request 与主分支先在无发布凭据的 `pack` job 中执行不可变安装、构建、完整 release-family 打包，并把 tarball 安装到仓库外临时 consumer 后运行已安装 CLI；只有手工从 `dsh-v*` 标签触发的受保护 `publish` job 才下载并发布前一步的同一制品，发布阶段不重新构建。
+- e-Mate 对齐：PR 同样先生成主包和完整平台包 tarball、进行仓库外 npm 安装与 CLI/setup 自检，再汇总为唯一 release-candidate artifact；手工 `e-mate-v2.0.7` 发布只消费该候选字节。npm registry 回读通过后才允许 Cloudflare R2 不可变对象准入。因 Python/Office/OCR/Chromium 必须在目标 OS/CPU 预构建，e-Mate 保留 macOS arm64、macOS x64、Windows x64 三个原生 pack/install lane，这是相对纯 TypeScript Harness 的必要差异，不建立第二套发布协议。
+- CI 根因修复：六个 Runtime/Browser `postinstall` 在源码工作区不得要求 `prepack` 才生成的资源 manifest；现在只在可确认的仓库源码根跳过缺失 manifest，任何仓库外/发布包缺失 manifest 仍立即失败。manifest 存在时 Windows 也先解析验证，macOS 再按清单恢复可执行位，不回退系统 Python/Chrome，也不下载或编译。
+- 跨平台字节合同：根 `.gitattributes` 复用目标仓库的 `* text=auto eol=lf`，避免 Windows checkout 把 Python Worker 锁文件改成 CRLF 后触发 SHA-256 漂移。窄回归覆盖源码安装成功、缺损发布包失败关闭、手工发布默认关闭、publish job 无 build/pack，以及 LF 属性；本地 `node --test scripts/release.test.mjs` 为 7/7 通过。GitHub 三平台候选重跑结果仍以 Actions 为最终证据。

@@ -101,4 +101,4 @@ pnpm test:release
 pnpm release:evidence
 ```
 
-开发使用 Node 24.x 和 `pnpm@11.7.0`。`.github/workflows/release.yml` 只提供手工 dry-run/publish 入口；publish 还必须绑定 S12 验收提交，且按平台包、主包、npm 回读的固定顺序执行。任何 Harness、Python Worker 或 Chromium 升级都必须独立切片重新验收。发布前还必须完成三平台干净安装、SBOM/许可证、性能 Trace、Computer Use 和生产企业对账。
+开发使用 Node 24.x 和 `pnpm@11.7.0`。发布链与固定 DeepSeek Harness 一致采用 CI-first：每个 PR 都无凭据构建、打包并在仓库外安装同一批 tarball；只有从 `e-mate-v2.0.7` 标签手工触发、通过受保护环境和 S12 验收提交绑定后，才发布已经验证的原字节，发布阶段不重新构建。e-Mate 仅因便携 Python/Chromium 平台包保留三平台原生 runner，并在 npm 回读后再准入 Cloudflare R2。任何 Harness、Python Worker 或 Chromium 升级都必须独立切片重新验收。发布前还必须完成三平台干净安装、SBOM/许可证、性能 Trace、Computer Use 和生产企业对账。
