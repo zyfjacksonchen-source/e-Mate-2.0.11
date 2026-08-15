@@ -60,7 +60,8 @@
 }
 
 :global([data-turn-tail][data-emate-activity-tail-status='failed']),
-:global([data-turn-tail][data-emate-activity-tail-status='cancelled']) {
+:global([data-turn-tail][data-emate-activity-tail-status='cancelled']),
+:global([data-turn-tail][data-emate-activity-tail-status='interrupted']) {
   display: none;
 }
 

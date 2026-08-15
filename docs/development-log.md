@@ -931,3 +931,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 主代理在仓库外隔离 `DSH_HOME` 创建权威固定会话 `e-mate-performance-5000-v1`；5,000 个事件、625 个 turn 与事件 SHA-256 `ad12feaa53f9d55c22d0e32a366316c8e29a8031ccca5d27a8e4f97d2a99b0cc` 均由现有 `create-performance-fixture.mjs` 复核。身份只在该临时 profile 内替换为无企业传输的 QA provider，用于越过登录展示锁；没有写入产品 profile、生产账号、模型策略或审计账本。
 - 当前提交 `098f36c8cb769e7e8f8eeb6f6bd18bb98c030eff`、client bundle SHA-256 `3495cdfa492f036d105de02c170891233e208e885f233d44034c8b963cae4457` 通过真实 Harness history paging 从 turn 601 加载到 turn 1。页面最终含 625 条用户消息、625 条助手消息和 39,345 个 DOM nodes；24 个有效 prepend 页的 wall time 中位数 380 ms、最大 589 ms，最后一次空边界请求正确移除“加载更早”。
 - 当前内置 Browser 只开放导航、可访问树、交互和 DOM 只读量测，不开放 CDP Trace、React Profiler 预注入、heap、长任务或 browser metrics。故该轮只更新最终候选分页/DOM事实，不拿旧 Chromium 闭包的 Trace 冒充当前候选，也不把 S04 标记通过；正式支持浏览器上的 Trace、Profiler、heap/FPS/长任务和真实 Provider 配对仍保持发布阻塞。
+
+## 2026-08-16 · S03 当前候选六种真实终态回归
+
+- 主代理复用现有 `create-chat-state-fixture.mjs`，在同一隔离 Harness Host 写入并重放 50 个真实持久事件；fixture SHA-256 为 `e88c05a486d196cfd14f2ae8d0be003de191b826b1c226d803bbfb658ff15096`，六个终态依次为 completed、error、blocked、aborted、interrupted、max-tokens。页面保持目标 Session、History、Conversation renderer 和 Connection，没有前端伪造状态。
+- 首轮 Computer Use 发现唯一独立失败：`reason.kind='interrupted'` 落入 cancelled fallback，显示“已取消”，与真实“任务因进程中断”不一致。子代只在既有活动头映射增加 `interrupted → 已中断`，保持 aborted 为“已取消”、blocked 为“已阻塞”，并复用原重复 turn-tail 隐藏规则；没有改事件、Store、transport、Timer 或 Observer。
+- 主代理串行重跑 shell 29/29、完整主包构建与同一 Browser Session。修复后六态文案和 Tool/失败/输出上限证据均可见，interrupted 独立为“已中断 7s”；所有终态计时冻结。前后证据位于 `artifacts/design-qa/S03-chat-states-current-46d306d/`。该项关闭六终态区分回归，不替代真实 Provider 切换、弱网恢复或全部 17 原型状态的最终逐屏验收。

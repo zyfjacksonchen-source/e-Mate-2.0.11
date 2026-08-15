@@ -263,6 +263,14 @@ final result: passed (scoped composer layout and connector route)
 
 final result: passed (persisted terminal states, target approval, refresh recovery)
 
+## S03 current six-terminal-state replay — 2026-08-16
+
+- Current-run source is the repository's fixed 50-event Harness Session, not a client mock: completed, error, blocked, aborted, interrupted and max-tokens are persisted `turn/end` reasons with fixture SHA-256 `e88c05a486d196cfd14f2ae8d0be003de191b826b1c226d803bbfb658ff15096`.
+- The main Browser pass found a P1 semantic mismatch: interrupted displayed the same “已取消” label as a user abort. The focused correction adds only the missing status mapping and reuses the existing terminal chrome; cancelled and blocked remain distinct.
+- The main Browser rerun shows interrupted as “已中断 7s”, with the same real failed Tool result, while completed/error/blocked/aborted/max-tokens retain their prior terminal labels and disclosures. Screenshots are `artifacts/design-qa/S03-chat-states-current-46d306d/interrupted-shown-as-cancelled-before.jpg` and `interrupted-shown-as-interrupted-after.jpg`.
+
+final result: passed (scoped six-terminal-state distinction)
+
 ## S07 admin and usage local Browser acceptance — 2026-08-16
 
 - Main-agent Browser acceptance opened the actual local production builds at the deployed subpaths. The admin surface exposes one e-Mate-branded account/password form with labelled tenant, account and password fields plus one primary login action; no production credential was submitted.
