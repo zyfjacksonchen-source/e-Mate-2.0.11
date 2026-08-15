@@ -873,3 +873,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 最小适配只给服务端 `ModelGatewayRoute` 增加字面量 `allowInsecureHttpUpstream: true`。默认仍只接受 HTTPS；HTTP 缺少逐路由许可、许可与 HTTPS 混用、含 userinfo/query/hash 或无 hostname 的 URL 均在请求前失败。API Key 仍只从 `upstreamApiKeyFile` 读取，重定向继续拒绝，模型目录显式剥离上游 URL 与许可字段。
 - 主代理复跑 TypeScript 与 Model Gateway 门禁：75 passed、6 项因真实 PostgreSQL/Windows 外部环境跳过、0 failed。该适配门禁阶段只证明路由合同，未写入生产配置或部署；HTTP hop 不提供链路加密，只允许用于用户已认可的受控网络路径。
 - 随后主代理使用用户明确授权测试的生产 GPT Key 和 HTTP base URL，分别向 Luna 与 Sol 发起一次最小 Responses 调用；两次均返回 HTTP 200，响应报告的模型 ID 与请求一致，并各有 Provider response/request ID 和 token usage。未记录 Key、base URL 或回复正文。脱敏收据为 `artifacts/acceptance/S07-model-upstream-gpt-smoke.json`。该证据只关闭原始 Provider 对两模型的单次连通，不替代企业 Gateway 租约、同会话切换、审计对账或弱网恢复。
+- live smoke 审核同时发现 DeepSeek 上游仍写旧 `deepseek-v4-pro`，与冻结映射 `ecorex-deepseek-v4-pro → deepseek-v4-flash` 漂移；权威 contract 与出站 body 回归已改为 `deepseek-v4-flash`，用户可见路由 ID、策略、鉴权和管理端均未改变。Model Gateway 门禁再次为 75 passed、6 external skips、0 failed；真实目录是否存在该 ID 仍需生产 DeepSeek Provider smoke，未用近似模型代替。
+
+## 2026-08-16 · S10 生产图像 Provider 单次、编辑与最低并发
+
+- 主代理用用户明确授权测试的同一生产 GPT Key/HTTP base URL，按最终 Codex-like 合同固定提交 `gpt-image-2-pro`：单次 `/images/generations`、带前一输出的 multipart `/images/edits` 均返回 HTTP 200；两份输出均为可解码 PNG，生成图带 alpha。没有向请求传模型选择、尺寸、质量、本地输出路径或并发策略。
+- 随后并行发起两次独立 generation 请求；两次均返回 200，wall time 为 113,569ms，单项耗时约 64,974ms 与 113,566ms。输出逐份打开检查且 SHA-256 不同。该结果关闭计划要求的“至少两个并发”原始 Provider 下限，但长尾已明显，不能据此宣称稳定上限或系统端性能达标。
+- 脱敏收据为 `artifacts/acceptance/S10-image-upstream-smoke.json`，只包含请求 ID、时长、大小和哈希，不含 Key、base URL、prompt、响应正文或图像字节。完整发布仍需通过企业 Gateway、e-Mate `imagegen` Tool、Harness Job/附件、审计与 Usage 对账；在这些链路完成前不继续盲目提高 4/8 路并发。

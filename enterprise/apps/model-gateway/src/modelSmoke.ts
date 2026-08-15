@@ -59,7 +59,7 @@ const routeContracts: readonly SmokeRouteContract[] = [
   {
     id: 'deepseek',
     apiMode: 'chat-completions',
-    upstreamModelId: 'deepseek-v4-pro',
+    upstreamModelId: 'deepseek-v4-flash',
     hostname: 'deepseek-provider.ecorex.internal',
     pathname: '/v1',
   },

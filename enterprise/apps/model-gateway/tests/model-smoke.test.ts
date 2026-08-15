@@ -24,7 +24,7 @@ function route(
 const routes = [
   route('gpt-5.6-luna', 'responses', 'gpt-5.6-luna', 'https://main-provider.ecorex.internal:18443/v1'),
   route('gpt-5.6-sol', 'responses', 'gpt-5.6-sol', 'https://main-provider.ecorex.internal:18443/v1'),
-  route('deepseek', 'chat-completions', 'deepseek-v4-pro', 'https://deepseek-provider.ecorex.internal:18443/v1'),
+  route('deepseek', 'chat-completions', 'deepseek-v4-flash', 'https://deepseek-provider.ecorex.internal:18443/v1'),
   route(
     'gpt-image-2-pro',
     'images-generations',
@@ -178,6 +178,10 @@ test('uses the fixed protocols and approves a definite image fallback', async ()
   assert.deepEqual(
     requests.filter(({ url }) => url.endsWith('/images/generations')).map(({ body }) => body.model),
     ['gpt-image-2-pro', 'gpt-image-2']
+  );
+  assert.deepEqual(
+    requests.filter(({ url }) => url.endsWith('/chat/completions')).map(({ body }) => body.model),
+    ['deepseek-v4-flash', 'doubao-seed-2-0-pro-260215']
   );
   assert.match(approval.results.find(({ routeId }) => routeId === 'gpt-image-2-pro')?.evidenceId ?? '', /^fallback:provider:/);
 });
