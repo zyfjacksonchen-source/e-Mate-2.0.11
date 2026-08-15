@@ -73,6 +73,16 @@ class FakeTaskEvents implements TaskEventStore {
       },
       scenarioCounts: TASK_SCENARIOS.map((scenario) => ({ scenario, taskCount: scenarioCount(scenario) })),
       eventTypeCounts: TASK_EVENT_TYPES.map((type) => ({ type, eventCount: eventCount(type) })),
+      userEventCounts: [...new Set([...this.events.entries()]
+        .filter(([key]) => key.startsWith(`${principal.tenantId}\0`))
+        .map(([, stored]) => stored.userId))]
+        .sort()
+        .map((userId) => ({
+          userId,
+          eventCount: String([...this.events.entries()].filter(
+            ([key, stored]) => key.startsWith(`${principal.tenantId}\0`) && stored.userId === userId
+          ).length),
+        })),
     };
   }
 }

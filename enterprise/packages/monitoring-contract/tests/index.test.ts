@@ -61,6 +61,10 @@ test('task events accept metadata only and task summaries conserve explicit outc
       { type: 'WAITING_INPUT', eventCount: '1' },
       { type: 'ARTIFACT_UPDATED', eventCount: '1' },
     ],
+    userEventCounts: [
+      { userId: 'user-1', eventCount: '8' },
+      { userId: 'user-2', eventCount: '7' },
+    ],
   } as const;
   assert.deepEqual(parseTenantTaskSummary(summary), summary);
   assert.equal(
@@ -79,6 +83,12 @@ test('task events accept metadata only and task summaries conserve explicit outc
       eventTypeCounts: summary.eventTypeCounts.map((entry) =>
         entry.type === 'COMPLETED' ? { type: entry.type, eventCount: '0' } : entry
       ),
+    })
+  );
+  assert.throws(() =>
+    parseTenantTaskSummary({
+      ...summary,
+      userEventCounts: [{ userId: 'user-1', eventCount: '14' }],
     })
   );
 });

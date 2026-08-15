@@ -51,6 +51,7 @@ type SummaryRow = {
   cancelled_tasks: string;
   scenario_counts: Record<string, string> | null;
   event_type_counts: Record<string, string> | null;
+  user_event_counts: Array<{ userId: string; eventCount: string }> | null;
 };
 
 function identifier(value: string, label: string): string {
@@ -296,6 +297,13 @@ export class PostgresTaskEventStore implements TaskEventStore {
           JOIN cohort USING (tenant_id, task_id)
          WHERE event.occurred_at < $3::timestamptz
          GROUP BY event.type
+      ),
+      user_event_counts AS (
+        SELECT event.user_id, count(*)::text AS event_count
+          FROM e_mate_task_event AS event
+          JOIN cohort USING (tenant_id, task_id)
+         WHERE event.occurred_at < $3::timestamptz
+         GROUP BY event.user_id
       )
       SELECT totals.*,
              COALESCE(
@@ -305,7 +313,17 @@ export class PostgresTaskEventStore implements TaskEventStore {
              COALESCE(
                (SELECT jsonb_object_agg(type, event_count) FROM event_counts),
                '{}'::jsonb
-             ) AS event_type_counts
+             ) AS event_type_counts,
+             COALESCE(
+               (
+                 SELECT jsonb_agg(
+                   jsonb_build_object('userId', user_id, 'eventCount', event_count)
+                   ORDER BY user_id
+                 )
+                   FROM user_event_counts
+               ),
+               '[]'::jsonb
+             ) AS user_event_counts
         FROM totals
     `,
       [tenantId, from, to]
@@ -334,6 +352,7 @@ export class PostgresTaskEventStore implements TaskEventStore {
         type,
         eventCount: row.event_type_counts?.[type] ?? '0',
       })),
+      userEventCounts: row.user_event_counts ?? [],
     });
   }
 }

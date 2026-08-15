@@ -657,6 +657,10 @@ tbody tr:last-child td {
   min-width: 0;
 }
 
+.auth-card > .arco-btn {
+  margin-bottom: var(--space-3);
+}
+
 .event-list {
   display: grid;
   gap: var(--space-2);

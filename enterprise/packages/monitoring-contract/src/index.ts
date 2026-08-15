@@ -58,6 +58,10 @@ export type TenantTaskSummary = {
     type: TaskEventType;
     eventCount: string;
   }>;
+  userEventCounts: Array<{
+    userId: string;
+    eventCount: string;
+  }>;
 };
 
 export type UsageMetrics = {
@@ -234,6 +238,19 @@ function identifier(value: unknown, label: string): string {
   return value;
 }
 
+function principal(value: unknown, label: string): string {
+  if (
+    typeof value !== 'string' ||
+    value.trim() !== value ||
+    value.length < 1 ||
+    value.length > 128 ||
+    /\p{Cc}/u.test(value)
+  ) {
+    throw new Error(`Invalid ${label}`);
+  }
+  return value;
+}
+
 function countString(value: unknown, label: string): string {
   if (typeof value !== 'string' || !countPattern.test(value)) {
     throw new Error(`Invalid ${label}`);
@@ -283,6 +300,7 @@ export function parseTenantTaskSummary(value: unknown): TenantTaskSummary {
       'summary',
       'scenarioCounts',
       'eventTypeCounts',
+      'userEventCounts',
     ],
     'tenant task summary'
   );
@@ -353,6 +371,24 @@ export function parseTenantTaskSummary(value: unknown): TenantTaskSummary {
   if (new Set(eventTypeCounts.map(({ type }) => type)).size !== TASK_EVENT_TYPES.length) {
     throw new Error('Duplicate task event type count');
   }
+  if (!Array.isArray(input.userEventCounts) || input.userEventCounts.length > 10_000) {
+    throw new Error('Invalid task user event counts');
+  }
+  const userEventCounts = input.userEventCounts.map((entry) => {
+    const item = record(entry, 'task user event count');
+    exact(item, ['userId', 'eventCount'], 'task user event count');
+    return {
+      userId: principal(item.userId, 'task user id'),
+      eventCount: countString(item.eventCount, 'task user event count'),
+    };
+  });
+  if (
+    new Set(userEventCounts.map(({ userId }) => userId)).size !== userEventCounts.length ||
+    userEventCounts.reduce((total, item) => total + BigInt(item.eventCount), 0n) !==
+      eventTypeCounts.reduce((total, item) => total + BigInt(item.eventCount), 0n)
+  ) {
+    throw new Error('Inconsistent task user event counts');
+  }
   const eventCounts = Object.fromEntries(eventTypeCounts.map(({ type, eventCount }) => [type, eventCount]));
   if (
     eventCounts.RECEIVED !== summary.receivedTasks ||
@@ -378,6 +414,7 @@ export function parseTenantTaskSummary(value: unknown): TenantTaskSummary {
     summary,
     scenarioCounts,
     eventTypeCounts,
+    userEventCounts,
   };
 }
 

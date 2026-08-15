@@ -151,8 +151,10 @@ test('waiting for structured user input records a fact without closing the task'
 
 test('task summary uses only authoritative task rows and exact decimal strings', async () => {
   let parameters: unknown[] = [];
+  let statement = '';
   const pool = {
-    query: async (_sql: string, values: unknown[]) => {
+    query: async (sql: string, values: unknown[]) => {
+      statement = sql;
       parameters = values;
       return {
         rows: [
@@ -171,6 +173,10 @@ test('task summary uses only authoritative task rows and exact decimal strings',
               WAITING_INPUT: '1',
               TOOL_EXECUTION: '3',
             },
+            user_event_counts: [
+              { userId: 'user-1', eventCount: '7' },
+              { userId: 'user-2', eventCount: '1' },
+            ],
           },
         ],
       };
@@ -190,5 +196,11 @@ test('task summary uses only authoritative task rows and exact decimal strings',
   });
   assert.equal(summary.scenarioCounts[0]?.taskCount, '2');
   assert.equal(summary.eventTypeCounts.find(({ type }) => type === 'WAITING_INPUT')?.eventCount, '1');
+  assert.deepEqual(summary.userEventCounts, [
+    { userId: 'user-1', eventCount: '7' },
+    { userId: 'user-2', eventCount: '1' },
+  ]);
+  assert.match(statement, /user_event_counts AS[\s\S]*GROUP BY event\.user_id/);
+  assert.doesNotMatch(statement, /\bLIMIT\b/);
   assert.deepEqual(parameters, ['tenant-1', '2026-07-25T00:00:00.000Z', '2026-07-27T00:00:00.000Z']);
 });

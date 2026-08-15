@@ -778,3 +778,16 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 主题只跟随 `prefers-color-scheme`；根 `data-theme` 与 Arco `arco-theme` 同步并监听系统变化。统计口径、Bearer 鉴权、API 路径、租户边界、配额语义与事件明细没有改变；Vite 本地代理补齐已存在的 `/v1/admin/users` 同源读路由，仅用于与生产同合同的开发验收。
 - IAB 以真实 schema 形状的只读本地回放验证暗色 `1280×900` 与 `320×800`，两者均为 `scrollWidth === clientWidth`；桌面保留 Workbench 导航/单 workspace surface，手机保留四个导航入口、时间范围、刷新与横向独立滚动的明细表。首轮手机截图发现选择器误隐藏 IconPark wrapper，已收窄为只隐藏文字标签，复测四个图标全部可见。
 - 证据：`artifacts/design-qa/S07-usage-dashboard/implementation-dark-1280x900.jpg`、`implementation-dark-320x800.jpg`、`source-vs-implementation-dark.jpg`。12/12 聚焦测试、TypeScript check 与 production build 通过；浏览器仅出现 Arco/React 19 既有 `element.ref` 开发警告，无页面错误状态。生产 URL、真实只读令牌和账本对账仍未执行，本轮未部署、未使用生产凭据。
+
+## 2026-08-15 · S07 用量面板事件口径、用户事件次数与主题选择
+
+- 旧事件真值来自固定 2.0.5 `usage_panel_service.py` 的 `EVENT_TYPE_ZH`。当前 `e_mate_task_event.type` 不能把 `TOOL_EXECUTION` 无损拆成旧版 `tool.started/tool.finished/tool.failed`，且 `FIRST_RESPONSE/SKILL_SELECTED/PERMISSION_REQUESTED/WAITING_INPUT` 没有旧枚举对应，因此不猜测迁移：只将可确定对应的 `RECEIVED/COMPLETED/FAILED/CANCELLED/ARTIFACT_UPDATED` 恢复为“任务已接收/任务已完成/任务失败/任务已取消/产物已更新”，其余保留当前任务事件合同。旧 `runtime-audit` 的 `actionTypeCounts/actionTypeLabels/userActions` 实现位于部署时动态加载的 `ecorex_admin_api`，未随本仓库源码提供，本片不伪造第二套动作分类。
+- `TenantTaskSummary.userEventCounts` 由既有 `PostgresTaskEventStore.summary()` 在同一 tenant、同一 `from/to` cohort SQL 中直接按 `e_mate_task_event.user_id` 聚合；没有 cursor、limit 或前端分页反算。合同校验每用户唯一、精确十进制字符串，且用户合计必须与完整 `eventTypeCounts` 守恒。Usage 用户表新增“事件次数”，并补入只存在任务事件账本、没有模型 Usage 的用户；调用明细 Drawer 继续只显示分页 `REQUEST/USAGE`，不混作任务事件计数。
+- 明暗切换复用现有 `data-theme`/`arco-theme` 路径和 e-Mate Token；按钮可键盘操作并带 `aria-label`，仅将 `light|dark` 保存到 `localStorage`，非法值或存储不可用时回退系统主题。没有新增 Theme Store、依赖或视觉体系。
+- 聚焦门禁：Monitoring Contract 6/6、Analytics 33/33（另 6 项真实 PostgreSQL/Redis 集成按环境合同 skip）、Usage 12/12 通过；Analytics 与 Usage TypeScript check、Analytics production TypeScript build、Usage Vite production build均通过。主进程随后用同合同本地账本回放实点明暗切换并刷新，`data-theme`/`arco-theme` 均保持 `light`；320×800 下 `scrollWidth === clientWidth === 320`，主题按钮、“事件次数”和仅有 task event 的用户均可见。浏览器只出现既有 Arco/React 19 `element.ref` 开发警告。未连接真实 PostgreSQL、未部署生产，生产账本对账仍待真实环境。
+
+## 2026-08-15 · S04/S12 最终 Computer Use 口径增补
+
+- 模型验收新增：切换模型后下一次真实请求必须命中新路由，切换前后同一会话上下文连续；上游不稳或弱网恢复不得重复消息、Tool、用量事实或审计回执。聊天视觉只以任务 `019ff665-d721-79a0-869d-338f086cf529` 的交互原型和逐屏标注为真源，逐状态逐交互核对，不以首页或静态截图代替。
+- 生/改图并发改为逐级加压并记录稳定上限、首个有界拒绝/退化点及附件/会话归属。四类外部连接的 2.0.7 终验边界改为可发现、正确路由并到达 provider 真实授权 handoff；不提交 OAuth consent、二维码确认、凭据或外部写入。在线更新必须可由用户自然语言触发 Agent 复用既有受管 npm 事务，成功恢复后核对版本、会话、凭据、outbox 和完整性收据。
+- 性能新增固定 Harness 配对门禁：同机器/浏览器/网络/模型/提示/Tool 下至少 30 对成功样本；e-Mate 有效缓存租约、模型策略和异步审计开启时，TTFT p50/p95 额外开销不超过 5%/10%（小样本绝对容差 50 ms），持续生成吞吐 p50/p95 下降不超过 5%/10%，Tool event→start 与 Tool result→下一请求的 p95 额外延迟均不超过 50 ms 且相对不超过 10%。企业端断连但租约/策略仍有效时重复同一门禁，证明管理层只作旁路观察/鉴权而不拖慢本地运行。

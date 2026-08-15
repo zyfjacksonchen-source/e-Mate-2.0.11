@@ -11,12 +11,24 @@ This document is a release gate for e-Mate 2.0.7. A scenario is `passed` only wi
 - Opening and closing 20 sessions grows retained heap by at most 10%.
 - Chrome Performance Trace (gzip is accepted when the uncompressed SHA/size remain in the metrics receipt), React Profiler summary, fixed replay dataset, viewport, build SHA, Node/browser version, and before/after figures are retained per release.
 
+### Harness parity for response and Tool latency
+
+Run paired samples on the same machine, browser, network, provider model, prompt set, Tool fixture and warm/cold state: pinned Harness `0.1.0-rc.5` is the baseline; e-Mate uses a valid cached login lease, the same locally cached model policy and asynchronous audit outbox. Use at least 30 successful samples per path and retain raw timings.
+
+- first response/TTFT adds at most 5% at p50 and 10% at p95, with an absolute allowance of 50 ms when that is larger than the percentage allowance;
+- steady streamed generation throughput (provider output tokens per second, excluding TTFT) is no more than 5% lower at p50 and 10% lower at p95;
+- persisted Tool-call event to real Tool start, and Tool-result persistence to the next model request, each add at most 50 ms at p95 and no more than 10% versus the target baseline;
+- repeat the paired run with the enterprise endpoint unavailable while the login lease and last valid model policy remain valid. Local execution must stay within the same budgets, the audit outbox may remain pending, and no response/Tool event may be duplicated;
+- new login, expired/revoked lease and invalid model policy are correctness failures and are measured separately; they must fail closed and are not included in the steady local-runtime latency sample.
+
+If provider or network variance makes a paired sample incomparable, discard both members with the same documented reason and rerun; do not average unrelated providers, models or time windows into a passing result.
+
 ## Project memory isolation and binding
 
 Use two real Harness workspaces A and B with distinct canonical directories and one ungrouped session.
 
-1. Write a uniquely identifiable memory, dream, and learned fact in A; prove all three are recalled in a new A session.
-2. Open B and the ungrouped session; prove neither can search, recall, distill, mutate, or enumerate A's facts.
+1. Write a uniquely identifiable project memory in A, run the selected `memory-evolve` path, and prove the evolved memory is recalled in a new A session.
+2. Open B and the ungrouped session; prove neither can search, recall, evolve, mutate, or enumerate A's facts.
 3. Write equivalent facts in B and prove A cannot see them.
 4. Rename A through the Harness workspace action; prove the stable workspace binding and recall remain intact.
 5. Move or remove A's directory outside e-Mate, then attempt a project-memory read/write; it must fail closed and must not fall back to B, process cwd, or global memory.
@@ -76,7 +88,7 @@ For every terminal provider fact, reconcile the same immutable identity through 
 2. Local `emate.audit` outbox row and payload SHA-256.
 3. Enterprise ingestion receipt/idempotency result.
 4. Existing immutable provider-usage ledger and account counter delta.
-5. The row and aggregate rendered by `https://dl.ecoremedia.net/ecorex-agent/usage-panel/`.
+5. The row and aggregate rendered by `https://mvdcm.ecoremedia.net/ecorex-agent/usage-panel/`.
 
 Compare source service/ID, account and organization, usage kind, input/output/total tokens or image count, provider timestamp, requested/provider-reported/actual model, provider, fallback source/flag, Job/result status, product generation `emate`, product version `2.0.7`, payload hash, and fact ID. Duplicate delivery must create no second ledger row or counter change. A conflict, missing row, unsettled outbox item, aggregate-only match, or panel mismatch fails acceptance; it cannot be waived because the total happens to match.
 
@@ -84,7 +96,15 @@ Before production access, the local automated gate must prove that one real targ
 
 ## Computer Use evidence set
 
-The release evidence also covers responsive login/refresh/deep links, all real chat states, image generation/editing including concurrency, DOCX/XLSX/PPTX/PDF create-read-edit-export-reopen, OCR/Vision, browser search/interaction/download, Feishu/Tencent Docs/WeChat/DingTalk connection and reversible actions, non-deleted legacy sessions, installation/reinstallation/upgrade/rollback, shortcut single-instance behavior, CLI status/stop/check, Skill Hub cross-user publish/install, and Agent-driven update.
+The release evidence covers the following end-to-end user journeys:
+
+- model selection changes the actual next provider route while preserving the same conversation context; upstream instability and weak-network interruption recover through the existing retry/reconnect path without duplicate user messages, assistant answers, Tool calls, usage facts, or audit receipts;
+- every conversation interaction is compared screen-by-screen and state-by-state with task `019ff665-d721-79a0-869d-338f086cf529`, including its interaction prototype and annotated frames, rather than accepting a Home-only or static screenshot match;
+- image generation and editing cover one generation, one edit, concurrent jobs, attachment/context ownership, and a measured step-up run that records the maximum stable concurrency before the first bounded rejection or degraded budget; the caller still cannot choose the image model;
+- DOCX/XLSX/PPTX/PDF create-read-edit-export-reopen, OCR/Vision, browser search/interaction/download, Browser Panel, GenUI and the selected Sidebar execute through their real target paths;
+- Feishu, Tencent Docs, WeChat and DingTalk must be discoverable by the user and Agent, open the correct connection surface, and reach the provider's real authorization handoff. The 2.0.7 release gate stops before submitting a real OAuth consent, QR confirmation, credential or external write;
+- non-deleted legacy sessions remain visible and can continue, project/general-session memory remains isolated, and Skill Hub cross-user publish/search/download/install uses the target plugin path;
+- installation, same-version repair, cross-version upgrade, rollback protection, shortcut single-instance behavior and CLI status/stop/check are exercised. A user can request an update in natural language; e-Mate must recognize the intent, execute the existing managed npm update transaction, restart/recover, report success, and preserve sessions, credentials, audit outbox and version/integrity receipts.
 
 Office, OCR/Vision and browser rows close only with the selected bundle's real result; installed metadata is not evidence. Vision/OCR remains `blocked` until the rc.5 enterprise model-policy seam exists and passes a governed request. Windows browser acceptance must prove `@playwright/mcp@0.0.78` uses the existing Microsoft Edge, receives the exact Harness workspace/permission scope, performs no browser download, isolates sessions, cleans up, and drives Browser Panel through target events; until then the expected status is `PLAYWRIGHT_MCP_EDGE_UNVERIFIED`/`setup-required`. macOS Ego Browser requires the equivalent real launch, permission, isolation, cleanup and UI evidence and remains setup-required meanwhile.
 

@@ -199,6 +199,7 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
     'copy.requests',
     'copy.totalTokens',
     'copy.configuredQuota',
+    'copy.userEventCount',
     'copy.details',
     'copy.reconciliation',
     'copy.viewEvents',
@@ -207,6 +208,8 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
   }
   assert.doesNotMatch(source, /metrics\.totalTokens[\s\S]{0,120}tokenLimit|<progress/);
   assert.match(source, /copy\.weeklyQuota/);
+  assert.match(source, /taskSummary\?\.userEventCounts/);
+  assert.doesNotMatch(source, /eventState\.events[\s\S]{0,160}eventCount/);
   assert.match(readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8'), /\/v1\/admin\/users/);
 });
 
@@ -223,12 +226,18 @@ test('builds for the production usage-panel path and same-origin enterprise API'
   );
 });
 
-test('labels the waiting-for-input task event for both dashboard locales', () => {
+test('reuses the original labels where task events map without guessing', () => {
+  const zh = messagesFor('zh-CN');
+  assert.equal(zh.eventReceived, '任务已接收');
+  assert.equal(zh.eventCompleted, '任务已完成');
+  assert.equal(zh.eventFailed, '任务失败');
+  assert.equal(zh.eventCancelled, '任务已取消');
+  assert.equal(zh.eventArtifactUpdated, '产物已更新');
   assert.equal(messagesFor('zh-CN').eventWaitingInput, '等待用户输入');
   assert.equal(messagesFor('en-US').eventWaitingInput, 'Waiting for input');
 });
 
-test('reuses the canonical e-Mate tokens and follows the system theme', () => {
+test('reuses canonical tokens and lets a valid saved theme override the system theme', () => {
   const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
   const main = readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8');
   assert.match(styles, /upstream\/e-mate-2\.0\.5\/desktop\/src\/styles\/tokens\.css/);
@@ -237,6 +246,9 @@ test('reuses the canonical e-Mate tokens and follows the system theme', () => {
   assert.doesNotMatch(styles, /\.sidebar nav a span\s*\{/);
   assert.doesNotMatch(styles, /box-shadow: 0 12px 32px|#[0-9a-f]{6}/i);
   assert.match(main, /prefers-color-scheme: dark/);
+  assert.match(main, /value === 'light' \|\| value === 'dark'/);
+  assert.match(main, /savedTheme\(\) \?\?/);
   assert.match(main, /document\.documentElement\.dataset\.theme = theme/);
   assert.match(main, /systemTheme\.addEventListener\('change', applySystemTheme\)/);
+  assert.match(readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8'), /localStorage\.setItem\('e-mate\.usage\.theme'/);
 });

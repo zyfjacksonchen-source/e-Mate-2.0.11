@@ -99,10 +99,20 @@ export function App() {
   const [tokenInput, setTokenInput] = useState('');
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [periodDays, setPeriodDays] = useState<(typeof periodOptions)[number]>(7);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() =>
+    document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
+  );
   const [reloadKey, setReloadKey] = useState(0);
   const [dashboard, setDashboard] = useState<DashboardState>({ kind: 'loading' });
   const [eventsOpen, setEventsOpen] = useState(false);
   const [eventState, setEventState] = useState<EventState>({ kind: 'idle', events: [] });
+
+  useEffect(() => {
+    const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+    const syncThemeLabel = () => setTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+    systemTheme.addEventListener('change', syncThemeLabel);
+    return () => systemTheme.removeEventListener('change', syncThemeLabel);
+  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -145,6 +155,18 @@ export function App() {
     setToken('');
   };
 
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    document.body.setAttribute('arco-theme', next);
+    try {
+      localStorage.setItem('e-mate.usage.theme', next);
+    } catch {
+      // The visible theme still changes when storage is unavailable.
+    }
+    setTheme(next);
+  };
+
   if (!token) {
     return (
       <main className='auth-shell'>
@@ -157,6 +179,9 @@ export function App() {
           </div>
           <h1 id='auth-title'>{copy.tokenTitle}</h1>
           <p>{copy.tokenDescription}</p>
+          <Button onClick={toggleTheme} aria-label={theme === 'dark' ? copy.lightTheme : copy.darkTheme}>
+            {theme === 'dark' ? copy.lightTheme : copy.darkTheme}
+          </Button>
           <form onSubmit={submitToken}>
             <label htmlFor='usage-token'>{copy.tokenLabel}</label>
             <Input.Password
@@ -185,7 +210,11 @@ export function App() {
   const models = projection ? usageModels(projection) : [];
   const userUsage = projection ? usageUsers(projection) : [];
   const userUsageById = new Map(userUsage.map((entry) => [entry.userId, entry]));
+  const userEventCountById = new Map(
+    (taskSummary?.userEventCounts ?? []).map((entry) => [entry.userId, entry.eventCount])
+  );
   const configuredUserIds = new Set(ready?.users?.map(({ userId }) => userId) ?? []);
+  const knownUserIds = new Set([...configuredUserIds, ...userUsageById.keys()]);
   const userRows = ready?.users
     ? [
         ...ready.users.map((user) => ({
@@ -193,6 +222,7 @@ export function App() {
           displayName: user.displayName,
           status: user.status,
           tokenLimit: user.tokenLimit,
+          eventCount: userEventCountById.get(user.userId) ?? '0',
           ...(userUsageById.get(user.userId) ?? { modelIds: [], metrics: emptyMetrics() }),
         })),
         ...userUsage
@@ -202,14 +232,40 @@ export function App() {
             displayName: entry.userId,
             status: null,
             tokenLimit: undefined,
+            eventCount: userEventCountById.get(entry.userId) ?? '0',
+          })),
+        ...(taskSummary?.userEventCounts ?? [])
+          .filter(({ userId }) => !knownUserIds.has(userId))
+          .map(({ userId, eventCount }) => ({
+            userId,
+            displayName: userId,
+            status: null,
+            tokenLimit: undefined,
+            eventCount,
+            modelIds: [],
+            metrics: emptyMetrics(),
           })),
       ]
-    : userUsage.map((entry) => ({
-        ...entry,
-        displayName: entry.userId,
-        status: null,
-        tokenLimit: undefined,
-      }));
+    : [
+        ...userUsage.map((entry) => ({
+          ...entry,
+          displayName: entry.userId,
+          status: null,
+          tokenLimit: undefined,
+          eventCount: userEventCountById.get(entry.userId) ?? '0',
+        })),
+        ...(taskSummary?.userEventCounts ?? [])
+          .filter(({ userId }) => !userUsageById.has(userId))
+          .map(({ userId, eventCount }) => ({
+            userId,
+            displayName: userId,
+            status: null,
+            tokenLimit: undefined,
+            eventCount,
+            modelIds: [],
+            metrics: emptyMetrics(),
+          })),
+      ];
   const maximumRequests = maxCount(trends.map(({ metrics }) => metrics.totalRequests));
   const maximumModelCalls = maxCount(models.map(({ callCount }) => callCount));
   const taskSourceReady = taskSummary?.sourceState === 'AUTHORITATIVE';
@@ -331,6 +387,9 @@ export function App() {
             <p>{copy.subtitle}</p>
           </div>
           <div className='header-actions'>
+            <Button onClick={toggleTheme} aria-label={theme === 'dark' ? copy.lightTheme : copy.darkTheme}>
+              {theme === 'dark' ? copy.lightTheme : copy.darkTheme}
+            </Button>
             <label>
               <span>{copy.period}</span>
               <Select
@@ -585,6 +644,7 @@ export function App() {
                       <th>{copy.user}</th>
                       <th>{copy.model}</th>
                       <th>{copy.userStatus}</th>
+                      <th title={copy.userEventScope}>{copy.userEventCount}</th>
                       <th>{copy.requests}</th>
                       <th>{copy.inputTokens}</th>
                       <th>{copy.outputTokens}</th>
@@ -608,6 +668,7 @@ export function App() {
                           </td>
                           <td>{row.modelIds.join(', ') || '—'}</td>
                           <td>{userStatusLabel(row.status)}</td>
+                          <td title={copy.userEventScope}>{exactCount(row.eventCount, locale)}</td>
                           <td>{exactCount(row.metrics.totalRequests, locale)}</td>
                           <td>{exactCount(row.metrics.inputTokens, locale)}</td>
                           <td>{exactCount(row.metrics.outputTokens, locale)}</td>
