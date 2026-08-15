@@ -128,7 +128,7 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
           useSessions={selector => selector(sessions)}
           getSessions={() => latest.current}
           openSession={openSession}
-          clearSession={vi.fn()}
+          startHomeSession={vi.fn()}
         />
       </>
     }
@@ -141,6 +141,27 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     unlock({ ok: true, value: signedIn })
     await waitFor(() => { expect(openSession).toHaveBeenCalledWith('performance-session') })
     expect(location.pathname).toBe('/chat/performance-session')
+  })
+
+  it('routes Home through the managed general-session action and keeps chat deep links exact', async () => {
+    const startHomeSession = vi.fn()
+    const openSession = vi.fn()
+    const state = { phase: 'ready' as const, current: 'project', byId: { project: {}, other: {} } }
+    const view = render(<SessionRouteProjection
+      useSessions={selector => selector(state)}
+      getSessions={() => state}
+      openSession={openSession}
+      startHomeSession={startHomeSession}
+    />)
+
+    await waitFor(() => { expect(startHomeSession).toHaveBeenCalledOnce() })
+    expect(openSession).not.toHaveBeenCalled()
+
+    history.pushState(null, '', '/chat/other')
+    act(() => { dispatchEvent(new PopStateEvent('popstate')) })
+    expect(openSession).toHaveBeenCalledWith('other')
+    expect(startHomeSession).toHaveBeenCalledOnce()
+    view.unmount()
   })
 
   it('keeps account password and connection credentials on their existing RPC/API seams', async () => {

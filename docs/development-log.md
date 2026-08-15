@@ -828,3 +828,11 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 主代理 Browser 首轮证明 `turn/end reason.kind=blocked` 被活动头错误折叠为“已取消”。定点修复只在真实事件投影函数增加 `blocked → 已阻塞`，复用现有错误状态 Token；计时器和 observer 仍只在 `running` 时存在。主代理用同一持久会话复验后，“执行失败”“已阻塞”“已取消”和 token 上限提示互不混淆，活动组与 Tool 详情仍调用目标组件。
 - 审批交互使用仓库外临时 profile 插件，经目标 `ctx.sessions`、`setApprovalPolicy(session, 'ask')` 和 `ctx.approval.request()` 产生真正的 `approval/requested` Mux frame；插件显式依赖现有 `apiProxy`，没有新增 REST、WebSocket、Store、Router 或产品审批实现。页面显示运行中的“已工作”、真实 Tool call、待审批原因、“拒绝/允许一次”；拒绝收敛为“已阻塞”，允许收敛为“已处理”。默认产品 profile 仍是 `full access + approval never`，本验收没有改变用户默认权限。
 - 在审批未决时刷新页面，Harness 以同一个 pending frame 恢复；刷新后“拒绝”和“允许一次”各恰好 1 个，未重复消息、Tool 或审批卡，随后真实按钮仍能完成决议。证据在 `artifacts/design-qa/S03-chat-states/`。该结果关闭聊天状态投影、审批两种决议和审批刷新恢复；生产模型流式生成中的弱网恢复、真实 Provider 模型切换与端到端审计对账继续保留为发布验收项。
+
+## 2026-08-16 · S10 通用会话默认入口与插件能力投影
+
+- 主代理在干净受管 profile 复现 Home `/` 仍停在 Harness 的未选择工作区状态，输入框显示“选择一个工作区开始”。根因是 URL 投影对 `/` 调用 `sessions.clear()`；修复改为复用 shell 已有 `startSession()`，由目标 `workspaces.startSession(emate-general-workspace)` 打开受管“通用会话”。项目选择器仍由目标组件提供“通用会话/添加工作区…”，真实 `/chat/:id` 深链仍只调用 `sessions.open(id)`；没有新增 Session、Store、Router 或 transport。
+- 九个替换 bundle 均已安装，但能力中心此前只有生图和四类外部连接，因为 Office/Search/Browser Panel/Vision 没有向既有 `emateCapabilities` 服务注册用户可见元数据。四包现在各自注册真实状态：Office、Search、macOS Browser 为 `setup-required`，Vision/OCR 为 `blocked`；没有 action，也没有把未验收能力伪装为可执行。Better Sidebar、GenUI、memory-evolve、native subagent 与 Ego Browser 候选等系统/结构插件不单列卡片。
+- 主代理重载同一 target Host 后验证：首页输入框可直接使用、工作区标签为“通用会话”，选择器仍含“添加工作区…”；能力中心显示 9 项，并逐项呈现生图、Office、网络搜索、浏览器操作、视觉/OCR、飞书、腾讯文档、微信、钉钉及其真实状态。社区 Skill Hub 不可达继续显示错误，不影响内置能力投影。首轮又发现能力中心点“新建任务”只创建会话却不关闭 overlay；同一 `startSession()` 现在先用既有 History/`popstate` 回到 `/`，随后 Home 投影再调用一次目标 `workspaces.startSession`。主代理复验 URL 为 `/`、能力中心消失、通用会话与真实输入框显示。
+- 组合门禁：`@e-mate/dsh` 44/44 Host 测试、shell 7 文件 29/29 测试与构建通过；插件分类测试保证只有四个新增用户能力包含 `emateCapabilities`，系统包保持不可见。证据：`artifacts/design-qa/S10-plugin-replacement/home-general-default-dark-1280x720.jpg`、`capabilities-nine-real-status-dark-1280x720.jpg`。
+- 同一轮主代理交互证据还覆盖：Skill Hub“导入/上传 Skill”真实表单；企业模型目录只含 Luna/Sol、Gemini 不存在，Sol 选择在刷新后保持且同一会话 6 条用户消息未丢；外部连接页面展示飞书、腾讯文档、微信、钉钉的真实配置/阻塞状态而未提交授权；用户中心显示本周 `12,345 / 1,000,000 Token` 进度。对应截图同在 `artifacts/design-qa/S10-plugin-replacement/`。真实 Provider 下一请求、外部 OAuth/扫码完成和生产用量对账仍按发布合同保持开放。

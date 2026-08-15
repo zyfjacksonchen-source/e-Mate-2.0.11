@@ -640,7 +640,8 @@ test('managed profile installation is idempotent', () => {
     assert.match(sessionRoute, /state\.phase !== ['"]ready['"]/) // waits for the target list baseline
     assert.match(sessionRoute, /Object\.prototype\.hasOwnProperty\.call\(state\.byId, id\)/)
     assert.match(sessionRoute, /openSession\(id\)/)
-    assert.match(sessionRoute, /clearSession\(\)/)
+    assert.match(sessionRoute, /startHomeSession\(\)/)
+    assert.doesNotMatch(sessionRoute, /clearSession\(\)/)
     assert.match(sessionRoute, /\/chat\/\$\{encodeURIComponent\(current\)\}/)
     assert.doesNotMatch(sessionRoute, /\b(?:fetch|WebSocket|EventSource|createSnapshotStore|defineStore)\b/)
     const home = readFileSync(new URL('../profile/plugins/emate-shell/src/client/home.tsx', import.meta.url), 'utf8')
@@ -824,6 +825,39 @@ test('OS credential backends use Keychain and CurrentUser DPAPI without plaintex
       ok: true,
       detail: 'Windows CurrentUser DPAPI available',
     })
+  } finally {
+    rmSync(dshHome, { recursive: true, force: true })
+  }
+})
+
+test('managed profile exposes only user-facing plugin capabilities', () => {
+  const dshHome = mkdtempSync(join(tmpdir(), 'e-mate-capability-profile-'))
+  try {
+    const paths = installProfile(dshHome)
+    const visible = new Set([
+      '@e-mate/dsh-plugin-office-skills',
+      '@e-mate/dsh-plugin-search-mcp',
+      '@e-mate/dsh-plugin-browser-panel',
+      '@e-mate/dsh-plugin-vision-toolkit',
+    ])
+    const packages = [
+      '@e-mate/dsh-plugin-better-sidebar',
+      '@e-mate/dsh-plugin-browser-panel',
+      '@e-mate/dsh-plugin-ego-browser',
+      '@e-mate/dsh-plugin-genui',
+      '@e-mate/dsh-plugin-memory-evolve',
+      '@e-mate/dsh-plugin-office-skills',
+      '@e-mate/dsh-plugin-search-mcp',
+      '@e-mate/dsh-plugin-subagent',
+      '@e-mate/dsh-plugin-vision-toolkit',
+    ]
+    for (const name of packages) {
+      const pluginRoot = join(paths.profile, 'node_modules', ...name.split('/'))
+      const pluginManifest = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'))
+      const source = readFileSync(join(pluginRoot, pluginManifest.main), 'utf8')
+      if (visible.has(name)) assert.match(source, /emateCapabilities/)
+      else assert.doesNotMatch(source, /emateCapabilities/)
+    }
   } finally {
     rmSync(dshHome, { recursive: true, force: true })
   }

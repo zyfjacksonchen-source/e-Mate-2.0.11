@@ -10,13 +10,18 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 test('reports a verified-session-bound platform state through loopback Connection RPC', async () => {
   let handler
   let options
+  const capabilities = []
   assert.equal(CHANNEL, '/emate.browserPanel')
-  assert.deepEqual(inject, ['connection', 'sessions'])
+  assert.deepEqual(inject, ['connection', 'sessions', 'emateCapabilities'])
   apply({
     effect(register) { register() },
+    emateCapabilities: { register(definition) { capabilities.push(definition); return () => {} } },
     connection: { rpc: { handle(channel, next, nextOptions) { assert.equal(channel, CHANNEL); handler = next; options = nextOptions; return () => {} } } },
     sessions: { get(id) { return id === 'session-1' ? { id } : undefined } },
   })
+  assert.deepEqual(capabilities.map(capability => capability.id), ['browser'])
+  assert.equal((await capabilities[0].status()).state, statusForPlatform(process.platform).state)
+  assert.deepEqual(capabilities[0].actions, [])
   assert.deepEqual(options, { authority: 'loopback' })
   const response = await handler('status', { session_id: 'session-1' })
   assert.equal(response.ok, true)

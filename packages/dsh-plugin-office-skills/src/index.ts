@@ -35,10 +35,14 @@ interface SkillContext {
   skills: {
     registerProvider(create: () => SkillProvider): () => void
   }
+  emateCapabilities: {
+    register(definition: unknown): () => void
+  }
+  effect(effect: () => () => void, label: string): void
 }
 
 export const name = 'emate-office-skills'
-export const inject = ['skills']
+export const inject = ['skills', 'emateCapabilities']
 const PROVIDER_NAME = name
 // Pinned Harness rc.5 assigns packaged skills rank 600.
 const BUNDLED_SKILL_RANK = 600
@@ -137,4 +141,17 @@ export function apply(ctx: SkillContext): void {
       return spec === undefined ? undefined : await loadDefinition(spec, options)
     },
   }))
+  ctx.effect(() => ctx.emateCapabilities.register({
+    id: 'office-skills',
+    title: 'Office 办公',
+    summary: '通过四项内置 Skill 处理 DOCX、PDF、XLSX 与 PPTX，实际执行前检查本机可用工具链。',
+    icon_key: 'office',
+    order: 20,
+    actions: [],
+    status: async () => ({
+      state: 'setup-required',
+      detail: '四项办公工作流已安装；未随包附带文档运行时，首次任务将按实际本机工具链自检。',
+      action_ids: [],
+    }),
+  }), 'emate.office-skills: capability metadata')
 }

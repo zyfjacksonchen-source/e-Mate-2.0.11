@@ -3,4 +3,4 @@
 - insert:
     - id: emate-browser-panel
       name: '@e-mate/dsh-plugin-browser-panel'
-      inject: [connection, sessions]
+      inject: [connection, sessions, emateCapabilities]

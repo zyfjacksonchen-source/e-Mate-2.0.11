@@ -5,8 +5,13 @@ import { apply, inject } from '../lib/index.js'
 
 test('registers four bundled skills through the Harness skill seam', async () => {
   let provider
-  assert.deepEqual(inject, ['skills'])
-  apply({ skills: { registerProvider(create) { provider = create({ signal: AbortSignal.abort(), invalidate() {} }); return () => {} } } })
+  const capabilities = []
+  assert.deepEqual(inject, ['skills', 'emateCapabilities'])
+  apply({
+    skills: { registerProvider(create) { provider = create({ signal: AbortSignal.abort(), invalidate() {} }); return () => {} } },
+    emateCapabilities: { register(definition) { capabilities.push(definition); return () => {} } },
+    effect(register) { register() },
+  })
   assert.equal(provider.name, 'emate-office-skills')
 
   const skills = await provider.list({})
@@ -19,6 +24,13 @@ test('registers four bundled skills through the Harness skill seam', async () =>
     assert.doesNotMatch(loaded.content, /^---/)
     assert.match(loaded.content, /fail|blocked|unavailable/i)
   }
+  assert.deepEqual(capabilities.map(capability => capability.id), ['office-skills'])
+  assert.deepEqual(await capabilities[0].status(), {
+    state: 'setup-required',
+    detail: '四项办公工作流已安装；未随包附带文档运行时，首次任务将按实际本机工具链自检。',
+    action_ids: [],
+  })
+  assert.deepEqual(capabilities[0].actions, [])
 })
 
 test('package carries no removed runtime or installer dependency', async () => {

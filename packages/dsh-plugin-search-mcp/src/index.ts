@@ -8,9 +8,10 @@ import { WebError, type WebSearchProvider, type WebSearchResult } from '@deepsee
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
+import { searchCapabilityStatus } from './capability.ts'
 
 export const name = '@e-mate/dsh-plugin-search-mcp'
-export const inject = ['web', 'credentials']
+export const inject = ['web', 'credentials', 'emateCapabilities']
 export const SEARCH_MCP_PROVIDER_ID = 'search-mcp'
 export const SEARCH_MCP_SETTINGS_NAMESPACE = settingsNamespace('search-mcp')
 
@@ -323,4 +324,36 @@ export function apply(ctx: Context, config: SearchMcpConfig): void {
       return (await ctx.credentials.resolve(credentialRef(server.credentialRef)))?.value
     },
   })))
+  const capabilities = (ctx as Context & { emateCapabilities: { register(definition: unknown): () => void } }).emateCapabilities
+  ctx.effect(() => capabilities.register({
+    id: 'web-search',
+    title: '网络搜索',
+    summary: '通过 e-Mate 原生 Web 工具调用已配置的 MCP 搜索服务，不建立额外浏览器传输。',
+    icon_key: 'browser',
+    order: 30,
+    actions: [],
+    status: async (signal: AbortSignal) => {
+      signal.throwIfAborted()
+      const settings = current()
+      if (settings.servers.length === 0) return searchCapabilityStatus({
+        server: 'missing', needsCredential: false, credentialRef: '', credentialConfigured: false,
+      })
+      const server = settings.defaultServer.length === 0
+        ? settings.servers[0]
+        : settings.servers.find(item => item.id === settings.defaultServer)
+      if (server === undefined) return searchCapabilityStatus({
+        server: 'invalid', needsCredential: false, credentialRef: '', credentialConfigured: false,
+      })
+      const resolved = resolveServer(server)
+      const credentialConfigured = resolved.needsKey && resolved.credentialRef.length > 0
+        ? (await ctx.credentials.describe(credentialRef(resolved.credentialRef))).configured
+        : false
+      return searchCapabilityStatus({
+        server: 'configured',
+        needsCredential: resolved.needsKey,
+        credentialRef: resolved.credentialRef,
+        credentialConfigured,
+      })
+    },
+  }), 'emate.search-mcp: capability metadata')
 }

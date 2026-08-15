@@ -262,3 +262,14 @@ final result: passed (scoped composer layout and connector route)
 - Remaining release evidence: a real Provider streaming turn interrupted by controlled weak network, model switch on the next real request, and matching usage/audit receipts. These are not replaced by this target-native UI acceptance.
 
 final result: passed (persisted terminal states, target approval, refresh recovery)
+
+## S10 managed general session and plugin capability projection — 2026-08-16
+
+- The main-agent Browser run uses the same managed profile, target Workspace/Session services and e-Mate shell bundle as the product. Navigating directly to `/` now opens the registered `emate-general-workspace`: the real InputBar is enabled, the workspace target reads `通用会话`, and its real menu still offers `通用会话` and `添加工作区…`. Evidence: `artifacts/design-qa/S10-plugin-replacement/home-general-default-dark-1280x720.jpg`.
+- The first `/capabilities` capture proved the nine normalized bundles were installed while only five capabilities were visible. The scoped repair adds metadata through the existing `emateCapabilities` registry from Office, Search, Browser Panel and Vision themselves; no central tool-name branch or alternate page was introduced.
+- The expanded final view reports exactly nine user-facing capabilities. Image generation remains usable; Office, Search and macOS Browser truthfully report setup-required; Vision/OCR and WeChat remain blocked; Feishu, Tencent Docs and DingTalk report configuration required. System/structural bundles are intentionally absent as standalone cards. Evidence: `artifacts/design-qa/S10-plugin-replacement/capabilities-nine-real-status-dark-1280x720.jpg`.
+- The Skill Hub network error remains visible and does not suppress the local list. At `1280x720` the shell has no document-level horizontal overflow; the capability grid retains the existing e-Mate dark surface, brand tokens and two-column card geometry.
+- A follow-up interaction check found that the sidebar New Task action created a general session but left `/capabilities` in front. The same existing action now closes the overlay through the current History/`popstate` projection and then starts the target-managed general session; the main agent rechecked `/capabilities` → New Task and observed URL `/`, no capability overlay, `通用会话`, and the real enabled InputBar.
+- Adjacent real-flow captures in the same directory cover the Skill upload form, the two-model enterprise selector and Sol persistence after reload, all four connection configuration states, and the user-center usage progress. No credential, OAuth consent, QR confirmation or external write was submitted; these captures prove discoverability and local route closure, not production authorization or Provider success.
+
+final result: passed (managed general-session entry and truthful nine-capability projection)

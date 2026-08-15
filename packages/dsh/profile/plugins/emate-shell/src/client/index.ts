@@ -69,10 +69,12 @@ export function apply(ctx: any): void {
       console.warn('e-Mate general workspace is not ready')
       return
     }
+    if (workspaceId === undefined && ['/capabilities', '/settings', '/schedules'].includes(location.pathname)) {
+      history.pushState(null, '', '/')
+      dispatchEvent(new PopStateEvent('popstate'))
+      return
+    }
     ctx.workspaces.startSession(target)
-    if (location.pathname !== '/schedules') return
-    history.pushState(null, '', '/')
-    dispatchEvent(new PopStateEvent('popstate'))
   }
 
   const prepareSchedulePrompt = async (prompt: string) => {
@@ -105,7 +107,7 @@ export function apply(ctx: any): void {
     inject: () => ({
       getSessions: () => ctx.sessions.list.getSnapshot(),
       openSession: (id: string) => { ctx.sessions.open(id) },
-      clearSession: () => { ctx.sessions.clear() },
+      startHomeSession: () => { startSession() },
     }),
   }, SessionRouteProjection))
   ctx.conversationEvents.register(activityHeaderDefinition)

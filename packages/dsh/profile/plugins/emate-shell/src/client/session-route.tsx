@@ -10,10 +10,10 @@ interface Props {
   useSessions: <T>(selector: (state: SessionListState) => T) => T
   getSessions: () => SessionListState
   openSession: (id: string) => void
-  clearSession: () => void
+  startHomeSession: () => void
 }
 
-type PendingRoute = string | false | null
+type PendingRoute = string | null
 
 function chatId(pathname: string): string | null {
   const match = /^\/chat\/([^/]+)$/u.exec(pathname)
@@ -29,7 +29,7 @@ export function SessionRouteProjection({
   useSessions,
   getSessions,
   openSession,
-  clearSession,
+  startHomeSession,
 }: Props) {
   const phase = useSessions(state => state.phase)
   const current = useSessions(state => state.current)
@@ -40,16 +40,16 @@ export function SessionRouteProjection({
     const state = getSessions()
     if (state.phase !== 'ready') return
     if (location.pathname === '/') {
-      pending.current = state.current === undefined ? null : false
-      if (state.current !== undefined) clearSession()
+      pending.current = null
+      startHomeSession()
       return
     }
     if (!location.pathname.startsWith('/chat')) return
     const id = chatId(location.pathname)
     if (id === null || !Object.prototype.hasOwnProperty.call(state.byId, id)) {
       history.replaceState(null, '', '/')
-      pending.current = state.current === undefined ? null : false
-      if (state.current !== undefined) clearSession()
+      pending.current = null
+      startHomeSession()
       return
     }
     pending.current = state.current === id ? null : id
@@ -58,8 +58,8 @@ export function SessionRouteProjection({
         openSession(id)
       } catch {
         history.replaceState(null, '', '/')
-        pending.current = state.current === undefined ? null : false
-        if (state.current !== undefined) clearSession()
+        pending.current = null
+        startHomeSession()
       }
     }
   }
@@ -68,7 +68,7 @@ export function SessionRouteProjection({
     const onPopState = () => { applyLocation() }
     addEventListener('popstate', onPopState)
     return () => { removeEventListener('popstate', onPopState) }
-  }, [clearSession, getSessions, openSession])
+  }, [getSessions, openSession, startHomeSession])
 
   useEffect(() => {
     if (phase !== 'ready') return
@@ -78,7 +78,7 @@ export function SessionRouteProjection({
       return
     }
     if (pending.current !== null) {
-      if ((pending.current === false && current === undefined) || pending.current === current) {
+      if (pending.current === current) {
         pending.current = null
       } else {
         return

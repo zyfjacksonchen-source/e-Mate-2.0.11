@@ -177,7 +177,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(source).toMatch(/ctx\.conversation\.input\.for\(scope\)\.setDraft\(prompt\)/u)
     expect(source).toMatch(/ctx\.sessions\.open\(sessionId\)/u)
     expect(source).toMatch(/ctx\.workspaces\.list\.getSnapshot\(\)\.items\.find\(isGeneralWorkspace\)/u)
-    expect(source).toMatch(/ctx\.workspaces\.startSession\(target\)[\s\S]*?location\.pathname !== '\/schedules'[\s\S]*?history\.pushState\(null, '', '\/'\)/u)
+    expect(source).toMatch(/workspaceId === undefined && \['\/capabilities', '\/settings', '\/schedules'\]\.includes\(location\.pathname\)[\s\S]*?history\.pushState\(null, '', '\/'\)[\s\S]*?dispatchEvent\(new PopStateEvent\('popstate'\)\)[\s\S]*?return[\s\S]*?ctx\.workspaces\.startSession\(target\)/u)
     expect(source).toMatch(/ctx\.layout\.toggleSidebar\(\)/u)
     expect(source).toMatch(/ctx\.theme\.getTheme\(\)\.active\.colorScheme/u)
     expect(source).toMatch(/ctx\.theme\.setTheme\(/u)

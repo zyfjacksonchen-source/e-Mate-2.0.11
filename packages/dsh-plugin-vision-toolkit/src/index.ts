@@ -15,7 +15,7 @@ import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
 
 export const name = '@e-mate/dsh-plugin-vision-toolkit'
-export const inject = ['tools', 'skills']
+export const inject = ['tools', 'skills', 'emateCapabilities']
 
 export const VISION_TOOLKIT_SETTINGS_NAMESPACE = settingsNamespace('vision-toolkit')
 export const VISION_POLICY_BLOCK_CODE = 'EMATE_VISION_POLICY_SEAM_MISSING'
@@ -136,5 +136,19 @@ export function apply(ctx: Context, config: VisionToolkitAdapterConfig): void {
     execute: () => Promise.resolve(statusValue()),
     presentCall: () => ({ card: 'generic', title: 'Vision Toolkit status', kind: 'read' }),
   }))
+  const capabilities = (ctx as Context & { emateCapabilities: { register(definition: unknown): () => void } }).emateCapabilities
+  ctx.effect(() => capabilities.register({
+    id: 'vision-ocr',
+    title: '视觉 / OCR',
+    summary: '通过受企业模型策略约束的 Vision Toolkit 处理 OCR 与图像理解；缺少策略绑定时保持关闭。',
+    icon_key: 'ocr',
+    order: 45,
+    actions: [],
+    status: async () => ({
+      state: ADAPTER_STATUS.state,
+      detail: `固定运行时缺少企业多模态模型策略绑定；Vision/OCR 工具保持禁用（${ADAPTER_STATUS.code}）。`,
+      action_ids: [],
+    }),
+  }), 'emate.vision-toolkit: capability metadata')
   ctx.logger.warn('%s: %s', VISION_POLICY_BLOCK_CODE, ADAPTER_STATUS.reason)
 }

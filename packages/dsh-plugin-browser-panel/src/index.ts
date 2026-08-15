@@ -1,5 +1,5 @@
 export const name = 'emate-browser-panel'
-export const inject = ['connection', 'sessions']
+export const inject = ['connection', 'sessions', 'emateCapabilities']
 export const CHANNEL = '/emate.browserPanel'
 
 const SOURCE_BLOCKER = 'BROWSER_PANEL_SOURCE_UNAVAILABLE'
@@ -69,6 +69,23 @@ export function statusForPlatform(platform: NodeJS.Platform) {
  * this adapter must never claim or synthesize a controllable browser.
  */
 export function apply(ctx: any): void {
+  ctx.effect(() => ctx.emateCapabilities.register({
+    id: 'browser',
+    title: '浏览器操作',
+    summary: '使用会话绑定的浏览器 Skill 与面板执行真实页面交互；未验收的平台保持不可用。',
+    icon_key: 'browser',
+    order: 40,
+    actions: [],
+    status: async () => {
+      const status = statusForPlatform(process.platform)
+      const detail = status.blocker === WINDOWS_BLOCKER
+        ? 'Windows Edge 候选方案尚未完成项目隔离与实机验收。'
+        : status.blocker === MACOS_BLOCKER
+          ? 'macOS Ego Browser 尚未完成启动、权限、隔离与下载验收。'
+          : '当前平台没有已验证的浏览器运行服务。'
+      return { state: status.state, detail, action_ids: [] }
+    },
+  }), 'emate.browserPanel: capability metadata')
   ctx.effect(() => ctx.connection.rpc.handle(
     CHANNEL,
     async (endpoint: string, payload: unknown) => {
