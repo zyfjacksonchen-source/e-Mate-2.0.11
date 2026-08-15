@@ -415,7 +415,7 @@ export function SidebarRoot({
       </aside>
       {renameTarget && createPortal(
         <div className={css.dialogBackdrop} role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && busySession === null) setRenameTarget(null) }}>
-          <form className={css.dialog} aria-labelledby="emate-rename-title" onSubmit={event => { event.preventDefault(); void submitRename() }}>
+          <form className={css.dialog} role="dialog" aria-modal="true" aria-labelledby="emate-rename-title" onSubmit={event => { event.preventDefault(); void submitRename() }}>
             <h2 id="emate-rename-title">重命名任务</h2>
             <input autoFocus aria-label="任务名称" value={renameDraft} disabled={busySession !== null} onChange={event => { setRenameDraft(event.target.value) }} />
             <div><button type="button" disabled={busySession !== null} onClick={() => { setRenameTarget(null) }}>取消</button><button type="submit" disabled={busySession !== null || renameDraft.trim() === ''}>重命名</button></div>

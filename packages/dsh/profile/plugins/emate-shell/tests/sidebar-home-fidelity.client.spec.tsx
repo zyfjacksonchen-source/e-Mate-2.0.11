@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { createPortal } from 'react-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -89,6 +89,10 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(startSession).toHaveBeenCalledWith()
     fireEvent.click(screen.getByRole('button', { name: '打开任务：通用任务' }))
     expect(openSession).toHaveBeenCalledWith('general-session')
+    const taskMenu = screen.getByLabelText('管理任务：通用任务').closest('details')!
+    fireEvent.click(screen.getByLabelText('管理任务：通用任务'))
+    fireEvent.click(within(taskMenu).getByRole('button', { name: '重命名' }))
+    expect(screen.getByRole('dialog', { name: '重命名任务' }).getAttribute('aria-modal')).toBe('true')
     fireEvent.click(screen.getByRole('button', { name: '添加项目文件夹' }))
     await waitFor(() => { expect(startSession).toHaveBeenCalledWith('workspace-1') })
   })

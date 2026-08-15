@@ -851,3 +851,11 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 可执行回归直接组合目标 `JsonlSessionPersistence`、`JsonStorageBackend` 与 `WorkspaceRegistry`，证明通用/项目会话各自只落入对应 Workspace，重复迁移为 `[2 imported, 0 reused] → [0 imported, 2 reused]`，两份源 SQLite 哈希不变。`@e-mate/dsh` 完整门禁为 Host 45/45、Shell 29/29。
 - 主代理在新的真实旧库导入实例复验：Home 初始可见 16 行（15 个导入会话加当前空会话）；选择任一非当前行后进入 `legacy-*` 深链，真实聊天投影为 5 个节点/2 个用户节点；刷新后 URL、5/2 节点和唯一选中行保持，侧栏显示 15 个非空导入会话。只记录数量和布尔结果，不保存旧标题或内容；证据为 `artifacts/design-qa/S08-legacy-migration/acceptance.json`。
 - 导入前后 3 份权威源文件 SHA-256 逐一相同。两个隔离 profile 与其附件副本已停止并移动到 macOS 废纸篓，可恢复；没有修改、删除或上传旧源库。
+
+## 2026-08-16 · S02/S03/S12 主代理可见控件闭环抽查
+
+- 主代理继续在同一真实 Harness Web 实点侧栏与会话动作：新建受管通用会话；重命名后刷新标题保持；复制任务 ID 返回浏览器成功反馈；归档当前临时会话后列表减少 1 行且刷新不复现；会话搜索按输入筛出 4 个真实 fixture 行。所有测试只作用于隔离 profile。
+- 定时任务页 7 个动作均来自现有页面；实点“创建定时任务”后 URL 进入真实 `/chat/:id`，既有 Input Store 获得非空定时任务草稿，页面 overlay 关闭。草稿随后由主代理清空，未发送模型请求或创建计划。
+- 非空会话头的“分享当前任务”真实显示并打开“分享任务”对话框；Host 返回已实现的失败关闭状态“分享服务不可用”，关闭按钮有效。该结果只关闭入口/弹层/RPC 错误态，公开 URL create/revoke 仍因企业分享 provider 未配置保持 blocked。
+- 消息复制动作从“复制”切换为真实“已复制”反馈；完成活动的 disclosure 从 `aria-expanded=false` 切换为 `true`。没有创建消息、Tool 或完成状态。
+- 首轮又发现重命名视觉弹层缺少 dialog 语义：输入和按钮虽然可见，浏览器按 role 查询为 0。定点修复只给现有 form 增加 `role="dialog"`/`aria-modal="true"`，保留原 backdrop、提交和关闭路径；子代 shell 29/29 与 build/target check 通过，主代理重载同一 profile 后按标题命中唯一 dialog，并在其内部命中任务名称输入、取消和重命名按钮。证据为 `artifacts/design-qa/S12-current-067873f/control-closure.json`。
