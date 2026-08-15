@@ -4,13 +4,12 @@ import {
   chmodSync,
   closeSync,
   constants,
+  cpSync,
   existsSync,
-  mkdtempSync,
   mkdirSync,
   openSync,
   readFileSync,
   readdirSync,
-  readlinkSync,
   renameSync,
   rmSync,
   lstatSync,
@@ -18,11 +17,11 @@ import {
 } from 'node:fs'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:net'
-import { homedir, tmpdir } from 'node:os'
-import { basename, dirname, join, resolve, sep } from 'node:path'
+import { homedir } from 'node:os'
+import { basename, dirname, join, resolve } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parse as parseYaml } from 'yaml'
 import { normalizeUpdateTarget, runOnlineUpdateHelper, scheduleOnlineUpdate } from './update.js'
 import { migrateLegacySessions } from './legacy-migration.js'
@@ -35,15 +34,22 @@ export const PROFILE = 'e-mate'
 export const DEFAULT_PORT = 3080
 export const HARNESS_VERSION = '0.1.0-rc.5'
 export const HARNESS_COMMIT = '47f943859bef60e4160492346772ded9b24f765a'
-const WORKER_LOCK_SHA256 = 'cea6914a347a2a9a80f61260bea9d66d7d2fa2ad7e42434e6ecdafc63d8f8fd5'
-const WORKER_SOURCE_COMMIT = '564a6b6c1d43fb6831dd4a5cd8026e472f063311'
+const PLUGIN_PACKAGES = [
+  '@e-mate/dsh-plugin-better-sidebar',
+  '@e-mate/dsh-plugin-browser-panel',
+  '@e-mate/dsh-plugin-ego-browser',
+  '@e-mate/dsh-plugin-genui',
+  '@e-mate/dsh-plugin-memory-evolve',
+  '@e-mate/dsh-plugin-office-skills',
+  '@e-mate/dsh-plugin-search-mcp',
+  '@e-mate/dsh-plugin-subagent',
+  '@e-mate/dsh-plugin-vision-toolkit',
+]
 const UPDATE_RECEIPT_NAME = /^online-update-([0-9a-f]{8}-[0-9a-f-]{27})\.json$/iu
 const UPDATE_RECEIPT_STATUS = new Set(['completed', 'rolled-back', 'rollback-failed', 'failed-before-change'])
 
 const packageRoot = resolve(import.meta.dirname, '..')
 const binPath = fileURLToPath(new URL('./bin.js', import.meta.url))
-const require = createRequire(import.meta.url)
-
 export function resolveDshHome(environment = process.env) {
   return resolve(environment.DSH_HOME || join(homedir(), '.dsh'))
 }
@@ -134,8 +140,8 @@ export function installProfile(dshHome = resolveDshHome()) {
     name: 'dsh-profile-e-mate',
     private: true,
     type: 'module',
-    dependencies: {},
-    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } },
+    dependencies: Object.fromEntries(PLUGIN_PACKAGES.map(name => [name, VERSION])),
+    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...PLUGIN_PACKAGES] } },
   }
   atomicWrite(join(paths.profile, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
   atomicWrite(
@@ -163,56 +169,42 @@ export function installProfile(dshHome = resolveDshHome()) {
   for (const [source, target] of profileFiles) {
     atomicWrite(join(paths.profile, target), readFileSync(join(packageRoot, 'profile', source)))
   }
-  const names = platformPackageNames()
-  const runtime = platformSupported()
-    ? resolvePlatformPackage(names.runtime, 'emate-runtime.json')
-    : { ok: false }
-  const browser = platformSupported()
-    ? resolvePlatformPackage(names.browser, 'emate-browser.json')
-    : { ok: false }
-  const binding = join(paths.profile, 'plugins', 'runtime-binding.json')
-  if (runtime.ok && browser.ok) {
-    const manifestPath = join(runtime.root, 'emate-runtime.json')
-    const browserManifestPath = join(browser.root, 'emate-browser.json')
-    const harness = resolveHarness()
-    const harnessRequire = createRequire(join(dirname(dirname(harness.bin)), 'package.json'))
-    const toolsModule = harnessRequire.resolve('@deepseek-ai/dsh-tools')
-    const storageDomainModule = harnessRequire.resolve('@deepseek-ai/dsh-storage-domain')
-    const llmModule = harnessRequire.resolve('@deepseek-ai/dsh-llm')
-    const credentialsModule = harnessRequire.resolve('@deepseek-ai/dsh-credentials')
-    const launchEnvironmentModule = harnessRequire.resolve('@deepseek-ai/dsh-launch-environment')
-    const zodModule = harnessRequire.resolve('zod')
-    const playwrightModule = require.resolve('playwright-core')
-    atomicWrite(binding, `${JSON.stringify({
-      schema_version: 1,
-      product: PRODUCT,
-      version: VERSION,
-      dsh_home: paths.dshHome,
-      package: names.runtime,
-      runtime_root: runtime.root,
-      manifest_sha256: createHash('sha256').update(readFileSync(manifestPath)).digest('hex'),
-      browser_package: names.browser,
-      browser_root: browser.root,
-      browser_manifest_sha256: createHash('sha256').update(readFileSync(browserManifestPath)).digest('hex'),
-      harness_commit: HARNESS_COMMIT,
-      tools_module: toolsModule,
-      tools_module_sha256: createHash('sha256').update(readFileSync(toolsModule)).digest('hex'),
-      storage_domain_module: storageDomainModule,
-      storage_domain_module_sha256: createHash('sha256').update(readFileSync(storageDomainModule)).digest('hex'),
-      llm_module: llmModule,
-      llm_module_sha256: createHash('sha256').update(readFileSync(llmModule)).digest('hex'),
-      credentials_module: credentialsModule,
-      credentials_module_sha256: createHash('sha256').update(readFileSync(credentialsModule)).digest('hex'),
-      launch_environment_module: launchEnvironmentModule,
-      launch_environment_module_sha256: createHash('sha256').update(readFileSync(launchEnvironmentModule)).digest('hex'),
-      zod_module: zodModule,
-      zod_module_sha256: createHash('sha256').update(readFileSync(zodModule)).digest('hex'),
-      playwright_module: playwrightModule,
-      playwright_module_sha256: createHash('sha256').update(readFileSync(playwrightModule)).digest('hex'),
-    }, null, 2)}\n`, 0o600)
-  } else {
-    rmSync(binding, { force: true })
+  for (const name of PLUGIN_PACKAGES) {
+    const slug = name.slice('@e-mate/dsh-plugin-'.length)
+    const source = join(packageRoot, 'profile', 'bundles', slug)
+    const target = join(paths.profile, 'node_modules', ...name.split('/'))
+    rmSync(target, { recursive: true, force: true })
+    mkdirSync(dirname(target), { recursive: true })
+    cpSync(source, target, { recursive: true, force: true })
   }
+  const binding = join(paths.profile, 'plugins', 'runtime-binding.json')
+  const harness = resolveHarness()
+  const harnessRequire = createRequire(join(dirname(dirname(harness.bin)), 'package.json'))
+  const toolsModule = harnessRequire.resolve('@deepseek-ai/dsh-tools')
+  const storageDomainModule = harnessRequire.resolve('@deepseek-ai/dsh-storage-domain')
+  const llmModule = harnessRequire.resolve('@deepseek-ai/dsh-llm')
+  const credentialsModule = harnessRequire.resolve('@deepseek-ai/dsh-credentials')
+  const launchEnvironmentModule = harnessRequire.resolve('@deepseek-ai/dsh-launch-environment')
+  const zodModule = harnessRequire.resolve('zod')
+  atomicWrite(binding, `${JSON.stringify({
+    schema_version: 1,
+    product: PRODUCT,
+    version: VERSION,
+    dsh_home: paths.dshHome,
+    harness_commit: HARNESS_COMMIT,
+    tools_module: toolsModule,
+    tools_module_sha256: createHash('sha256').update(readFileSync(toolsModule)).digest('hex'),
+    storage_domain_module: storageDomainModule,
+    storage_domain_module_sha256: createHash('sha256').update(readFileSync(storageDomainModule)).digest('hex'),
+    llm_module: llmModule,
+    llm_module_sha256: createHash('sha256').update(readFileSync(llmModule)).digest('hex'),
+    credentials_module: credentialsModule,
+    credentials_module_sha256: createHash('sha256').update(readFileSync(credentialsModule)).digest('hex'),
+    launch_environment_module: launchEnvironmentModule,
+    launch_environment_module_sha256: createHash('sha256').update(readFileSync(launchEnvironmentModule)).digest('hex'),
+    zod_module: zodModule,
+    zod_module_sha256: createHash('sha256').update(readFileSync(zodModule)).digest('hex'),
+  }, null, 2)}\n`, 0o600)
   return paths
 }
 
@@ -258,228 +250,6 @@ export function resolveHarness() {
   return runtime
 }
 
-function platformPackageNames(platform = process.platform, arch = process.arch) {
-  const suffix = `${platform}-${arch}`
-  return {
-    runtime: `@e-mate/dsh-runtime-${suffix}`,
-    browser: `@e-mate/dsh-browser-${suffix}`,
-  }
-}
-
-function packagePath(root, relative, label) {
-  if (typeof relative !== 'string' || relative === '' || relative.includes('\0')) {
-    throw new Error(`${label} path is invalid`)
-  }
-  const path = resolve(root, relative)
-  if (!path.startsWith(`${root}${sep}`)) throw new Error(`${label} path is invalid`)
-  return path
-}
-
-function runtimeTreeIdentity(root, directory = root, files = []) {
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const path = join(directory, entry.name)
-    const metadata = lstatSync(path)
-    const normalized = path.slice(root.length + 1).split(sep).join('/')
-    if (metadata.isDirectory()) runtimeTreeIdentity(root, path, files)
-    else if (metadata.isSymbolicLink()) {
-      const target = readlinkSync(path)
-      const resolvedTarget = resolve(dirname(path), target)
-      if (resolvedTarget !== root && !resolvedTarget.startsWith(`${root}${sep}`)) {
-        throw new Error(`runtime symbolic link escapes payload: ${normalized}`)
-      }
-      files.push({ path, relative: normalized, kind: 'link', target })
-    } else if (metadata.isFile()) {
-      files.push({ path, relative: normalized, kind: 'file', size: metadata.size })
-    } else {
-      throw new Error(`runtime contains an unsupported file type: ${normalized}`)
-    }
-  }
-  if (directory !== root) return files
-  files.sort((left, right) => left.relative.localeCompare(right.relative))
-  const digest = createHash('sha256')
-  for (const file of files) {
-    if (file.kind === 'link') digest.update(`L\0${file.relative}\0${file.target}\0`)
-    else {
-      digest.update(`F\0${file.relative}\0${file.size}\0`)
-      digest.update(readFileSync(file.path))
-    }
-  }
-  return { files: files.length, sha256: digest.digest('hex') }
-}
-
-function verifyWorkerRuntime(root, resourceManifest) {
-  if (resourceManifest?.python_version !== '3.11.15'
-    || resourceManifest?.worker_lock_sha256 !== WORKER_LOCK_SHA256
-    || resourceManifest?.source_commit !== WORKER_SOURCE_COMMIT
-    || resourceManifest?.office !== true
-    || resourceManifest?.ocr !== true) {
-    throw new Error('worker runtime identity is invalid')
-  }
-  for (const [key, label] of [['python', 'Python'], ['worker', 'worker'], ['site_packages', 'site-packages']]) {
-    const path = packagePath(root, resourceManifest[key], label)
-    if (!existsSync(path)) throw new Error(`${label} payload is missing`)
-  }
-  for (const [pathKey, shaKey, label] of [
-    ['python', 'python_sha256', 'Python'],
-    ['worker', 'worker_sha256', 'worker'],
-  ]) {
-    const path = packagePath(root, resourceManifest[pathKey], label)
-    if (!/^[0-9a-f]{64}$/.test(resourceManifest[shaKey])
-      || createHash('sha256').update(readFileSync(path)).digest('hex') !== resourceManifest[shaKey]) {
-      throw new Error(`${label} checksum mismatch`)
-    }
-  }
-  if (!Number.isSafeInteger(resourceManifest.payload_files) || resourceManifest.payload_files < 1
-    || !/^[0-9a-f]{64}$/.test(resourceManifest.payload_sha256)) {
-    throw new Error('worker payload identity is invalid')
-  }
-  const payload = packagePath(root, 'runtime', 'worker payload')
-  const identity = runtimeTreeIdentity(payload)
-  if (identity.files !== resourceManifest.payload_files || identity.sha256 !== resourceManifest.payload_sha256) {
-    throw new Error('worker payload checksum mismatch')
-  }
-  if (!Array.isArray(resourceManifest.models) || resourceManifest.models.length < 3) {
-    throw new Error('OCR model manifest is incomplete')
-  }
-  for (const model of resourceManifest.models) {
-    const path = packagePath(root, model?.path, 'OCR model')
-    if (!existsSync(path) || !Number.isSafeInteger(model?.size) || lstatSync(path).size !== model.size
-      || !/^[0-9a-f]{64}$/.test(model?.sha256)
-      || createHash('sha256').update(readFileSync(path)).digest('hex') !== model.sha256) {
-      throw new Error('OCR model checksum mismatch')
-    }
-  }
-}
-
-function resolvePlatformPackage(name, manifestName) {
-  try {
-    const packageManifestPath = require.resolve(`${name}/package.json`)
-    const root = dirname(packageManifestPath)
-    const packageManifest = readJson(packageManifestPath)
-    const resourceManifest = readJson(require.resolve(`${name}/${manifestName}`))
-    if (packageManifest?.name !== name
-      || packageManifest?.version !== VERSION
-      || resourceManifest?.package !== name
-      || resourceManifest?.version !== VERSION
-      || resourceManifest?.os !== process.platform
-      || resourceManifest?.cpu !== process.arch
-      || !packageManifest?.os?.includes(process.platform)
-      || !packageManifest?.cpu?.includes(process.arch)) {
-      return { ok: false, detail: `${name} version mismatch` }
-    }
-    if (manifestName === 'emate-runtime.json') {
-      verifyWorkerRuntime(root, resourceManifest)
-    } else if (manifestName === 'emate-browser.json') {
-      const executable = packagePath(root, resourceManifest?.executable, 'browser executable')
-      if (!existsSync(executable)) return { ok: false, detail: `${name} browser executable is missing` }
-      const digest = createHash('sha256').update(readFileSync(executable)).digest('hex')
-      if (!/^[0-9a-f]{64}$/.test(resourceManifest.executable_sha256) || digest !== resourceManifest.executable_sha256) {
-        return { ok: false, detail: `${name} browser executable checksum mismatch` }
-      }
-    }
-    return { ok: true, detail: `${name}@${VERSION}`, root, packageManifest, resourceManifest }
-  } catch {
-    return { ok: false, detail: `${name}@${VERSION} is missing` }
-  }
-}
-
-function workerCheck(runtime, packId) {
-  if (!runtime.ok) return { ok: false, detail: `bundled ${packId} worker unavailable` }
-  try {
-    const python = packagePath(runtime.root, runtime.resourceManifest.python, 'Python')
-    const worker = packagePath(runtime.root, runtime.resourceManifest.worker, 'worker')
-    const payload = packId === 'ocr'
-      ? { content_base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }
-      : {}
-    const request = JSON.stringify({
-      schema_version: 1,
-      pack_id: packId,
-      operation: packId === 'ocr' ? 'extract' : 'probe',
-      payload,
-    })
-    const result = spawnSync(python, ['-I', '-B', worker, runtime.root], {
-      input: request,
-      encoding: 'utf8',
-      maxBuffer: 12 * 1024 * 1024,
-      timeout: 120000,
-      env: {
-        LANG: process.env.LANG ?? 'C.UTF-8',
-        LC_ALL: process.env.LC_ALL ?? 'C.UTF-8',
-        PYTHONHASHSEED: '0',
-        PYTHONNOUSERSITE: '1',
-      },
-    })
-    if (result.error !== undefined) throw result.error
-    if (result.status !== 0) throw new Error(`worker exited with ${String(result.status)}`)
-    const response = JSON.parse(result.stdout)
-    const provider = packId === 'ocr' ? 'rapidocr_onnxruntime' : 'python-office-formats-v1'
-    if (response?.schema_version !== 1 || response?.pack_id !== packId
-      || response?.status !== 'success' || response?.result?.provider !== provider) {
-      throw new Error('worker returned an invalid response')
-    }
-    return { ok: true, detail: `${provider} self-test passed` }
-  } catch (error) {
-    return { ok: false, detail: error instanceof Error ? error.message : String(error) }
-  }
-}
-
-async function chromiumCheck(browser) {
-  if (!browser.ok || browser.resourceManifest?.chromium !== true) {
-    return { ok: false, detail: 'bundled Chromium unavailable' }
-  }
-  const executable = resolve(browser.root, browser.resourceManifest.executable)
-  const profile = mkdtempSync(join(tmpdir(), 'e-mate-chromium-check-'))
-  try {
-    return await new Promise(resolveCheck => {
-      let outcome
-      let forceTimer
-      let stderr = ''
-      const child = spawn(executable, [
-        '--headless',
-        '--disable-background-networking',
-        '--no-first-run',
-        '--no-default-browser-check',
-        `--user-data-dir=${profile}`,
-        '--remote-debugging-port=0',
-        'about:blank',
-      ], { stdio: ['ignore', 'ignore', 'pipe'] })
-      const finish = (ok, detail) => {
-        if (outcome !== undefined) return
-        outcome = { ok, detail }
-        clearTimeout(timer)
-        if (child.exitCode === null) {
-          child.kill('SIGTERM')
-          forceTimer = setTimeout(() => child.kill('SIGKILL'), 3000)
-        } else {
-          resolveCheck(outcome)
-        }
-      }
-      const timer = setTimeout(() => finish(false, 'bundled Chromium did not become ready within 15 seconds'), 15000)
-      child.once('error', error => {
-        clearTimeout(timer)
-        outcome = { ok: false, detail: error.message }
-        resolveCheck(outcome)
-      })
-      child.once('exit', () => {
-        clearTimeout(forceTimer)
-        clearTimeout(timer)
-        resolveCheck(outcome ?? {
-          ok: false,
-          detail: `bundled Chromium exited before readiness${stderr === '' ? '' : ': ' + stderr.slice(0, 160)}`,
-        })
-      })
-      child.stderr.on('data', chunk => {
-        stderr = `${stderr}${String(chunk)}`.slice(-1024)
-        if (stderr.includes('DevTools listening on')) {
-          finish(true, `Chromium ${browser.resourceManifest.browser_version} headless launch passed`)
-        }
-      })
-    })
-  } finally {
-    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
-  }
-}
-
 function nearestExisting(path) {
   let candidate = path
   while (!existsSync(candidate)) {
@@ -520,6 +290,38 @@ async function sqliteCheck(paths) {
   }
 }
 
+function pluginBundleCheck(root = join(packageRoot, 'profile', 'bundles')) {
+  try {
+    const registry = readJson(join(root, 'registry.json'))
+    if (registry?.schema_version !== 1
+      || registry.product !== PRODUCT
+      || registry.version !== VERSION
+      || registry.harness_version !== HARNESS_VERSION
+      || registry.harness_commit !== HARNESS_COMMIT
+      || !Array.isArray(registry.packages)
+      || JSON.stringify(registry.packages.map(item => item?.name)) !== JSON.stringify(PLUGIN_PACKAGES)) {
+      throw new Error('plugin bundle registry is invalid')
+    }
+    for (const name of PLUGIN_PACKAGES) {
+      const slug = name.slice('@e-mate/dsh-plugin-'.length)
+      const bundleRoot = join(root, slug)
+      const manifest = readJson(join(bundleRoot, 'package.json'))
+      if (manifest?.name !== name || manifest?.version !== VERSION || manifest?.license !== 'MIT'
+        || typeof manifest?.main !== 'string' || !existsSync(join(bundleRoot, manifest.main))
+        || typeof manifest?.dsh?.bundle?.patch !== 'string'
+        || !existsSync(join(bundleRoot, manifest.dsh.bundle.patch))) {
+        throw new Error(`${name} bundle is incomplete`)
+      }
+      if (manifest?.dsh?.client !== undefined && !existsSync(join(bundleRoot, 'lib', 'client.js'))) {
+        throw new Error(`${name} client bundle is incomplete`)
+      }
+    }
+    return { ok: true, detail: `${PLUGIN_PACKAGES.length} pinned DSH plugin bundle(s)` }
+  } catch (error) {
+    return { ok: false, detail: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 function profileCheck(paths) {
   const manifest = readJson(join(paths.profile, 'package.json'))
   const bundles = manifest?.dsh?.profile?.bundles
@@ -531,11 +333,6 @@ function profileCheck(paths) {
     join(paths.profile, 'plugins', 'connections.js'),
     join(paths.profile, 'plugins', 'credentials-os.js'),
     join(paths.profile, 'plugins', 'skill-hub-agent.js'),
-    join(paths.profile, 'plugins', 'office-ocr.js'),
-    join(paths.profile, 'plugins', 'browser-computer-use.js'),
-    join(paths.profile, 'plugins', 'memory.js'),
-    join(paths.profile, 'plugins', 'dream.js'),
-    join(paths.profile, 'plugins', 'learning.js'),
     join(paths.profile, 'plugins', 'image-generation.js'),
     join(paths.profile, 'plugins', 'model-policy.js'),
     join(paths.profile, 'plugins', 'audit.js'),
@@ -569,11 +366,26 @@ function profileCheck(paths) {
       && byId.get('emate-schedule-import')?.name === './plugins/schedule-import.js'
       && byId.get('emate-legacy-migration')?.name === './plugins/legacy-migration.js'
       && byId.get('emate-agent-operations')?.name === './plugins/agent-operations.js'
+      && !byId.has('emate-office-ocr')
+      && !byId.has('emate-browser-computer-use')
+      && !byId.has('emate-memory')
+      && !byId.has('emate-dream')
+      && !byId.has('emate-learning')
   } catch {
     patchValid = false
   }
-  const ok = JSON.stringify(bundles) === JSON.stringify(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'])
-    && patchValid && plugins.every(existsSync)
+  const managedPlugins = PLUGIN_PACKAGES.every(name => {
+    const root = join(paths.profile, 'node_modules', ...name.split('/'))
+    const packageManifest = readJson(join(root, 'package.json'))
+    return packageManifest?.name === name && packageManifest?.version === VERSION
+      && typeof packageManifest?.main === 'string' && existsSync(join(root, packageManifest.main))
+      && (packageManifest?.dsh?.client === undefined || existsSync(join(root, 'lib', 'client.js')))
+  })
+  const expectedBundles = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...PLUGIN_PACKAGES]
+  const expectedDependencies = Object.fromEntries(PLUGIN_PACKAGES.map(name => [name, VERSION]))
+  const ok = JSON.stringify(bundles) === JSON.stringify(expectedBundles)
+    && JSON.stringify(manifest?.dependencies) === JSON.stringify(expectedDependencies)
+    && patchValid && plugins.every(existsSync) && managedPlugins
   return { ok, detail: ok ? paths.profile : 'managed e-mate profile is missing or drifted; run e-mate setup' }
 }
 
@@ -590,16 +402,6 @@ export async function checkEnvironment({ dshHome = resolveDshHome(), includeProf
   } catch (error) {
     harness = { error: error instanceof Error ? error.message : String(error) }
   }
-  const names = platformPackageNames()
-  const runtime = supported
-    ? resolvePlatformPackage(names.runtime, 'emate-runtime.json')
-    : { ok: false, detail: 'unsupported operating system or CPU' }
-  const browser = supported
-    ? resolvePlatformPackage(names.browser, 'emate-browser.json')
-    : { ok: false, detail: 'unsupported operating system or CPU' }
-  const chromium = await chromiumCheck(browser)
-  const office = workerCheck(runtime, 'office')
-  const ocr = workerCheck(runtime, 'ocr')
   const credentialStore = await checkOsCredentialBackend()
   const checks = [
     check('node', { ok: nodeVersionSupported(), detail: process.versions.node }),
@@ -607,18 +409,12 @@ export async function checkEnvironment({ dshHome = resolveDshHome(), includeProf
     check('harness', harness.error === undefined
       ? { ok: true, detail: `${harness.source} ${HARNESS_VERSION} ${HARNESS_COMMIT}` }
       : { ok: false, detail: harness.error }),
-    check('platform_runtime', runtime),
-    check('browser_runtime', browser),
+    check('plugin_bundles', pluginBundleCheck()),
     check('dsh_home_writable', writableCheck(dshHome)),
     check('sqlite', await sqliteCheck(paths)),
     check('credential_store', credentialStore),
   ]
   if (includeProfile) checks.push(check('profile', profileCheck(paths)))
-  checks.push(
-    check('office_worker', office),
-    check('ocr_worker', ocr),
-    check('chromium', chromium),
-  )
   return {
     product: PRODUCT,
     version: VERSION,
@@ -882,7 +678,7 @@ async function setup() {
   const report = await checkEnvironment({ includeProfile: false })
   if (!report.ok) {
     printCheckReport(report, false)
-    throw new Error('required runtime closure is incomplete; setup made no changes')
+    throw new Error('required e-Mate runtime and plugin closure is incomplete; setup made no changes')
   }
   const current = await managedStatus()
   if (current.healthy && current.health.active_runs > 0) {
@@ -913,9 +709,9 @@ async function migrateWithHarnessPersistence(dshHome) {
   const harness = resolveHarness()
   const harnessRequire = createRequire(join(dirname(dirname(harness.bin)), 'package.json'))
   const [{ Context }, { default: SessionStore }, { default: JsonlSessionPersistence }] = await Promise.all([
-    import(harnessRequire.resolve('@deepseek-ai/cordis')),
-    import(harnessRequire.resolve('@deepseek-ai/dsh-session')),
-    import(harnessRequire.resolve('@deepseek-ai/dsh-session-persistence-jsonl')),
+    import(pathToFileURL(harnessRequire.resolve('@deepseek-ai/cordis')).href),
+    import(pathToFileURL(harnessRequire.resolve('@deepseek-ai/dsh-session')).href),
+    import(pathToFileURL(harnessRequire.resolve('@deepseek-ai/dsh-session-persistence-jsonl')).href),
   ])
   const ctx = new Context()
   let sessionsFiber

@@ -37,22 +37,6 @@ export async function loadTargetTools(bindingPath) {
   return module
 }
 
-export async function loadTargetPlaywright(bindingPath) {
-  const binding = readManagedBinding(bindingPath)
-  if (!isAbsolute(binding.playwright_module) || !SHA256.test(binding.playwright_module_sha256)) {
-    throw new Error('e-Mate Playwright binding is invalid')
-  }
-  const metadata = lstatSync(binding.playwright_module)
-  if (!metadata.isFile()
-    || createHash('sha256').update(readFileSync(binding.playwright_module)).digest('hex') !== binding.playwright_module_sha256) {
-    throw new Error('Playwright module checksum mismatch')
-  }
-  const module = await import(pathToFileURL(binding.playwright_module).href)
-  const chromium = module.chromium ?? module.default?.chromium
-  if (typeof chromium?.connectOverCDP !== 'function') throw new Error('Playwright Chromium CDP adapter is unavailable')
-  return { chromium }
-}
-
 export async function loadTargetStorageDomain(bindingPath) {
   const binding = readManagedBinding(bindingPath)
   for (const [pathKey, shaKey, label] of [

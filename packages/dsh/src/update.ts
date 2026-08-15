@@ -12,6 +12,7 @@ import { dirname, join, posix, resolve, win32 } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 
 const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
+const SHA512_INTEGRITY_RE = /^sha512-[A-Za-z0-9+/]{86}==$/
 
 function atomicJson(path, value) {
   mkdirSync(dirname(path), { recursive: true })
@@ -32,6 +33,31 @@ export function normalizeUpdateTarget(value) {
   if (value === undefined || value === 'latest') return 'latest'
   if (!VERSION_RE.test(value)) throw new Error(`invalid update version ${JSON.stringify(value)}`)
   return value
+}
+
+export function validateUpdateRequest(request, requestId) {
+  if (request?.schema_version !== 1 || request.request_id !== requestId) {
+    throw new Error('update request identity is invalid')
+  }
+  const target = normalizeUpdateTarget(request.target)
+  if (request.target !== target || typeof request.current_version !== 'string'
+    || !VERSION_RE.test(request.current_version)) {
+    throw new Error('update request version is invalid')
+  }
+  return request
+}
+
+export function parsePackageIntegrity(output) {
+  let integrity
+  try {
+    integrity = JSON.parse(output)
+  } catch {
+    throw new Error('npm package integrity response is invalid')
+  }
+  if (typeof integrity !== 'string' || !SHA512_INTEGRITY_RE.test(integrity)) {
+    throw new Error('npm package integrity response is invalid')
+  }
+  return integrity
 }
 
 function parseVersion(value) {
@@ -210,6 +236,12 @@ function runNpm(args, options = {}) {
   return runNode([npmCli(), ...args], options)
 }
 
+function packageIntegrity(version, environment) {
+  return parsePackageIntegrity(runNpm([
+    'view', `@e-mate/dsh@${version}`, 'dist.integrity', '--json',
+  ], { env: environment }))
+}
+
 function stageTarget(paths, target, environment) {
   rmSync(paths.stage, { recursive: true, force: true })
   mkdirSync(paths.stage, { recursive: true })
@@ -231,7 +263,7 @@ function stageTarget(paths, target, environment) {
   if (report.product !== 'e-Mate' || report.version !== manifest.version || report.ok !== true) {
     throw new Error('staged e-Mate dependency closure failed its environment check')
   }
-  return { version: manifest.version, stagedBin }
+  return { version: manifest.version, stagedBin, integrity: packageIntegrity(manifest.version, environment) }
 }
 
 async function health(state) {
@@ -288,11 +320,11 @@ export async function runOnlineUpdateHelper({ requestId, dshHome, binPath }) {
   if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(requestId)) throw new Error('invalid update request id')
   const paths = updaterPaths(dshHome, requestId)
   await requireHelperUpdateLock(paths.lock, requestId)
-  const request = readJson(paths.request)
-  if (request.request_id !== requestId || request.schema_version !== 1) throw new Error('update request identity is invalid')
+  const request = validateUpdateRequest(readJson(paths.request), requestId)
   const environment = { ...process.env, DSH_HOME: dshHome, EMATE_NO_OPEN: '1' }
   const globalPrefix = globalPrefixForBinPath(binPath)
   let staged
+  let previousIntegrity
   let changed = false
   let previousPort
   try {
@@ -300,7 +332,7 @@ export async function runOnlineUpdateHelper({ requestId, dshHome, binPath }) {
     if (compareVersions(staged.version, request.current_version) < 0) {
       throw new Error(`online downgrade refused: ${request.current_version} -> ${staged.version}`)
     }
-    runNpm(['view', `@e-mate/dsh@${request.current_version}`, 'version', '--json'], { env: environment })
+    previousIntegrity = packageIntegrity(request.current_version, environment)
     const running = await requireIdleManagedInstance(dshHome)
     previousPort = running?.port
     if (running !== undefined) runNode([binPath, 'stop'], { env: environment })
@@ -314,7 +346,12 @@ export async function runOnlineUpdateHelper({ requestId, dshHome, binPath }) {
     }
     runNode([binPath, 'setup'], { env: environment })
     runNode([binPath, 'launch', '--port', String(running?.port ?? 3080)], { env: environment })
-    writeReceipt(paths, request, { status: 'completed', installed_version: staged.version })
+    writeReceipt(paths, request, {
+      status: 'completed',
+      installed_version: staged.version,
+      installed_package_integrity: staged.integrity,
+      previous_package_integrity: previousIntegrity,
+    })
     return { status: 'completed', version: staged.version, receipt: paths.receipt }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -329,11 +366,22 @@ export async function runOnlineUpdateHelper({ requestId, dshHome, binPath }) {
         runNode([binPath, 'launch', ...(previousPort === undefined ? [] : ['--port', String(previousPort)])], { env: environment })
       } catch (rollbackError) {
         const rollback = rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-        writeReceipt(paths, request, { status: 'rollback-failed', error: message, rollback_error: rollback })
+        writeReceipt(paths, request, {
+          status: 'rollback-failed',
+          error: message,
+          rollback_error: rollback,
+          staged_package_integrity: staged?.integrity,
+          previous_package_integrity: previousIntegrity,
+        })
         throw new Error(`online update failed (${message}); rollback also failed (${rollback})`)
       }
     }
-    writeReceipt(paths, request, { status: changed ? 'rolled-back' : 'failed-before-change', error: message })
+    writeReceipt(paths, request, {
+      status: changed ? 'rolled-back' : 'failed-before-change',
+      error: message,
+      staged_package_integrity: staged?.integrity,
+      previous_package_integrity: previousIntegrity,
+    })
     throw error
   } finally {
     rmSync(paths.stage, { recursive: true, force: true })

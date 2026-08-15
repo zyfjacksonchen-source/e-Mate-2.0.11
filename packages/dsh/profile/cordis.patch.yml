@@ -113,21 +113,6 @@
     - id: emate-skill-hub-agent
       name: ./plugins/skill-hub-agent.js
       inject: [tools, jobs, emateIdentity, connection, webServer]
-    - id: emate-office-ocr
-      name: ./plugins/office-ocr.js
-      inject: [tools, fs, subprocess, webServer, emateCapabilities]
-    - id: emate-browser-computer-use
-      name: ./plugins/browser-computer-use.js
-      inject: [tools, subprocess, attachments, webServer, emateCapabilities]
-    - id: emate-memory
-      name: ./plugins/memory.js
-      inject: [tools, workspaceRegistry, storageDomain]
-    - id: emate-dream
-      name: ./plugins/dream.js
-      inject: [tools, jobs, llm, emateMemory]
-    - id: emate-learning
-      name: ./plugins/learning.js
-      inject: [tools, jobs, llm, emateMemory]
     - id: emate-image-generation
       name: ./plugins/image-generation.js
       inject: [tools, jobs, attachments, emateIdentity, emateModelPolicy, emateCapabilities]

@@ -1,17 +1,18 @@
 import assert from 'node:assert/strict'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
-import { generateEvidence, RELEASE_PACKAGES, verifyRelease, VERSION } from './release.mjs'
+import { assertEvidenceSource, BUNDLED_PLUGIN_PACKAGES, generateEvidence, RELEASE_PACKAGES, verifyRelease, VERSION } from './release.mjs'
 import { buildR2Inventory, matchesR2Head, normalizeProductionPublicOrigin, R2_BUCKET, R2_PREFIX } from './publish-r2.mjs'
 
 const HARNESS_COMMIT = '47f943859bef60e4160492346772ded9b24f765a'
 const DIGEST = '0'.repeat(64)
 const R2_FIXTURE_PUBLIC_ORIGIN = 'https://downloads.e-mate.example'
+const SOURCE_COMMIT = '70ff2ce2e340682f4aad2be27e4ec8f1d74ee913'
 
 async function file(root, relative, content = '') {
   const path = join(root, ...relative.split('/'))
@@ -24,71 +25,48 @@ function filename(name) {
 }
 
 async function pack(directory, expected, mutate = manifest => manifest) {
-  const stage = join(directory, `${expected.kind}-${expected.os ?? 'all'}-${expected.cpu ?? 'all'}`)
+  const stage = join(directory, 'main-all-all')
   const packageRoot = join(stage, 'package')
   const manifest = mutate({
     name: expected.name,
     version: VERSION,
     license: 'MIT',
     publishConfig: { access: 'public' },
-    ...(expected.kind === 'main' ? {} : { os: [expected.os], cpu: [expected.cpu] }),
   })
   await file(packageRoot, 'package.json', `${JSON.stringify(manifest)}\n`)
   await file(packageRoot, 'LICENSE', 'MIT\n')
   await file(packageRoot, 'README.md', '# fixture\n')
 
-  if (expected.kind === 'main') {
-    manifest.dependencies ??= { yaml: '2.9.0' }
-    manifest.optionalDependencies ??= Object.fromEntries(
-      RELEASE_PACKAGES.filter(item => item.kind !== 'main').map(item => [item.name, VERSION]),
-    )
-    await file(packageRoot, 'package.json', `${JSON.stringify(manifest)}\n`)
-    await file(packageRoot, 'lib/bin.js')
-    await file(packageRoot, 'profile/cordis.patch.yml', '[]\n')
-    await file(packageRoot, 'profile/plugins/emate-shell/index.js')
-    await file(packageRoot, 'THIRD_PARTY_NOTICES.txt')
-    await file(packageRoot, 'runtime/harness/apps/cli/lib/bin.js')
-    await file(packageRoot, 'runtime/harness/node_modules/@deepseek-ai/dsh/package.json', JSON.stringify({
-      name: '@deepseek-ai/dsh', version: '0.1.0-rc.5', license: 'MIT',
+  manifest.dependencies ??= { yaml: '2.9.0' }
+  await file(packageRoot, 'package.json', `${JSON.stringify(manifest)}\n`)
+  await file(packageRoot, 'lib/bin.js')
+  await file(packageRoot, 'profile/cordis.patch.yml', '[]\n')
+  await file(packageRoot, 'profile/plugins/emate-shell/index.js')
+  await file(packageRoot, 'THIRD_PARTY_NOTICES.txt')
+  await file(packageRoot, 'runtime/harness/apps/cli/lib/bin.js')
+  await file(packageRoot, 'runtime/harness/node_modules/@deepseek-ai/dsh/package.json', JSON.stringify({
+    name: '@deepseek-ai/dsh', version: '0.1.0-rc.5', license: 'MIT',
+  }))
+  await file(packageRoot, 'runtime/source-manifest.json', JSON.stringify({
+    product_version: VERSION, version: '0.1.0-rc.5', commit: HARNESS_COMMIT,
+  }))
+  const receipts = []
+  for (const name of BUNDLED_PLUGIN_PACKAGES) {
+    const directory = name.slice('@e-mate/dsh-plugin-'.length)
+    receipts.push({ name, version: VERSION, directory })
+    await file(packageRoot, `profile/bundles/${directory}/package.json`, JSON.stringify({
+      name, version: VERSION, license: 'MIT', main: 'lib/index.js',
     }))
-    await file(packageRoot, 'runtime/source-manifest.json', JSON.stringify({
-      product_version: VERSION, version: '0.1.0-rc.5', commit: HARNESS_COMMIT,
-    }))
-  } else if (expected.kind === 'runtime') {
-    await file(packageRoot, 'THIRD_PARTY_NOTICES.txt')
-    await file(packageRoot, 'runtime/worker.py')
-    for (const model of ['det', 'rec', 'cls']) await file(packageRoot, `runtime/${model}.onnx`, model)
-    await file(packageRoot, 'emate-runtime.json', JSON.stringify({
-      package: expected.name,
-      version: VERSION,
-      os: expected.os,
-      cpu: expected.cpu,
-      office: true,
-      ocr: true,
-      python_version: '3.11.15',
-      source_commit: '564a6b6c1d43fb6831dd4a5cd8026e472f063311',
-      worker: 'runtime/worker.py',
-      payload_sha256: DIGEST,
-      models: ['det', 'rec', 'cls'].map(name => ({ path: `runtime/${name}.onnx`, sha256: DIGEST })),
-      distributions: [{ name: 'rapidocr-onnxruntime', version: '1.4.4', license: 'Apache-2.0' }],
-    }))
-  } else {
-    await file(packageRoot, 'THIRD_PARTY_NOTICES.txt')
-    await file(packageRoot, 'browser/chrome-headless-shell', 'browser')
-    await file(packageRoot, 'emate-browser.json', JSON.stringify({
-      package: expected.name,
-      version: VERSION,
-      os: expected.os,
-      cpu: expected.cpu,
-      chromium: true,
-      engine: 'chromium-headless-shell',
-      playwright_version: '1.61.1',
-      browser_revision: '1228',
-      browser_version: '149.0.7827.55',
-      executable: 'browser/chrome-headless-shell',
-      executable_sha256: DIGEST,
-    }))
+    await file(packageRoot, `profile/bundles/${directory}/lib/index.js`)
   }
+  await file(packageRoot, 'profile/bundles/registry.json', JSON.stringify({
+    schema_version: 1,
+    product: 'e-Mate',
+    version: VERSION,
+    harness_version: '0.1.0-rc.5',
+    harness_commit: HARNESS_COMMIT,
+    packages: receipts,
+  }))
 
   const archive = join(directory, filename(expected.name))
   execFileSync('tar', ['-czf', archive, '-C', stage, 'package'])
@@ -97,34 +75,45 @@ async function pack(directory, expected, mutate = manifest => manifest) {
 
 async function fixture(mutateMain) {
   const root = mkdtempSync(join(tmpdir(), 'e-mate-release-test-'))
-  for (const expected of RELEASE_PACKAGES) {
-    await pack(root, expected, expected.kind === 'main' && mutateMain !== undefined ? mutateMain : value => value)
-  }
+  await pack(root, RELEASE_PACKAGES[0], mutateMain)
   return root
 }
 
-test('release evidence requires the exact seven packages and emits hashes plus SPDX', async () => {
+test('release evidence requires the one bundled package and emits hashes plus SPDX', async () => {
   const root = await fixture()
   const output = join(root, 'evidence')
   try {
-    const result = await generateEvidence(root, output)
-    assert.equal(result.release.length, 7)
+    const result = await generateEvidence(root, output, SOURCE_COMMIT)
+    assert.equal(result.release.length, 1)
     assert.deepEqual(result.manifest.publish_order, RELEASE_PACKAGES.map(item => item.name))
     assert.equal(result.manifest.publish_order.at(-1), '@e-mate/dsh')
-    assert.equal(readFileSync(join(output, 'SHA256SUMS'), 'utf8').trim().split('\n').length, 7)
+    assert.equal(readFileSync(join(output, 'SHA256SUMS'), 'utf8').trim().split('\n').length, 1)
     assert.match(readFileSync(join(output, 'EVIDENCE_SHA256SUMS'), 'utf8'), /e-mate-2\.0\.7\.spdx\.json/u)
     assert.equal(result.spdx.spdxVersion, 'SPDX-2.3')
     assert.ok(result.spdx.packages.some(item => item.name === '@deepseek-ai/dsh'))
-    assert.ok(result.spdx.packages.some(item => item.name === 'rapidocr-onnxruntime'))
+    assert.ok(result.spdx.packages.some(item => item.name === '@e-mate/dsh-plugin-memory-evolve'))
     const r2 = buildR2Inventory(root, output, result.manifest.source_commit, R2_FIXTURE_PUBLIC_ORIGIN)
     assert.equal(r2.bucket, R2_BUCKET)
     assert.equal(r2.public_origin, R2_FIXTURE_PUBLIC_ORIGIN)
     assert.equal(r2.prefix, R2_PREFIX)
-    assert.equal(r2.objects.length, 12)
+    assert.equal(r2.objects.length, 6)
     assert.ok(r2.objects.every(item => item.key === `${R2_PREFIX}/${item.filename}` && item.url === `${R2_FIXTURE_PUBLIC_ORIGIN}/${item.key}`))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test('release evidence refuses dirty or mismatched source attribution', () => {
+  const clean = (command, args) => args[0] === 'rev-parse' ? SOURCE_COMMIT : ''
+  assert.equal(assertEvidenceSource({}, clean), SOURCE_COMMIT)
+  assert.throws(
+    () => assertEvidenceSource({ GITHUB_SHA: 'a'.repeat(40) }, clean),
+    /does not match the checked-out HEAD/u,
+  )
+  assert.throws(
+    () => assertEvidenceSource({}, (command, args) => args[0] === 'rev-parse' ? SOURCE_COMMIT : '?? untracked'),
+    /requires a clean worktree/u,
+  )
 })
 
 test('R2 immutable readback includes download metadata as well as bytes identity', () => {
@@ -158,12 +147,14 @@ test('production R2 download origin requires the bound custom domain', () => {
   )
 })
 
-test('release verification rejects a workspace dependency in packed bytes', async () => {
+test('release verification rejects a legacy platform package dependency', async () => {
   const root = await fixture(manifest => ({ ...manifest }))
   try {
-    const main = RELEASE_PACKAGES.find(item => item.kind === 'main')
-    await pack(root, main, manifest => ({ ...manifest, optionalDependencies: { '@e-mate/dsh-runtime-darwin-arm64': 'workspace:2.0.7' } }))
-    assert.throws(() => verifyRelease(root), /six exact 2\.0\.7 platform packages/u)
+    await pack(root, RELEASE_PACKAGES[0], manifest => ({
+      ...manifest,
+      optionalDependencies: { '@e-mate/dsh-runtime-darwin-arm64': VERSION },
+    }))
+    assert.throws(() => verifyRelease(root), /must not depend on legacy Runtime or Browser platform packages/u)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -181,63 +172,36 @@ test('release verification rejects temporary Harness build bytes', async () => {
   }
 })
 
-test('GitHub workflows keep the target toolchain and the three supported platform lanes', () => {
+test('GitHub release packs once and validates the same tarball on three platforms', () => {
   const requireFromDsh = createRequire(resolve('packages/dsh/package.json'))
   const { parse } = requireFromDsh('yaml')
+  const workspace = JSON.parse(readFileSync('package.json', 'utf8'))
   const ci = parse(readFileSync('.github/workflows/ci.yml', 'utf8'))
   const release = parse(readFileSync('.github/workflows/release.yml', 'utf8'))
+  assert.ok(workspace.scripts.test.indexOf("--filter './packages/dsh-plugin-*'") < workspace.scripts.test.indexOf('--filter @e-mate/dsh test'))
   assert.deepEqual(Object.keys(ci.jobs), ['source'])
   assert.deepEqual(
-    release.jobs.platform.strategy.matrix.include.map(item => [item.platform, item.runner]),
+    release.jobs['clean-install'].strategy.matrix.include.map(item => [item.platform, item.runner]),
     [['darwin-arm64', 'macos-15'], ['darwin-x64', 'macos-15-intel'], ['win32-x64', 'windows-2025']],
   )
-  assert.deepEqual(Object.keys(release.jobs), ['platform', 'main', 'clean-install', 'evidence', 'publish', 'registry-install', 'r2'])
+  assert.deepEqual(Object.keys(release.jobs), ['pack', 'clean-install', 'evidence', 'publish', 'registry-install', 'r2'])
+  assert.equal(release.jobs['clean-install'].needs, 'pack')
+  assert.equal(release.jobs.evidence.needs, 'pack')
   assert.deepEqual(release.jobs.publish.needs, ['clean-install', 'evidence'])
   assert.match(release.jobs.publish.steps.at(-1).run, /release\.mjs publish --from dist\/npm/u)
+  const cleanInstall = release.jobs['clean-install'].steps.find(step => step.name === 'Install tarballs with npm and run setup checks')
+  assert.equal((cleanInstall.run.match(/node "\$cli" setup$/gmu) ?? []).length, 2)
+  const registryInstall = release.jobs['registry-install'].steps.find(step => step.name === 'Read back npm and run a clean registry install')
+  assert.match(registryInstall.run, /update --version 2\.0\.7 --json/u)
+  assert.match(registryInstall.run, /installed_package_integrity/u)
+  assert.match(registryInstall.run, /previous_package_integrity/u)
+  assert.match(registryInstall.run, /node "\$cli" stop/u)
   assert.equal(release.jobs.r2.needs, 'registry-install')
+  assert.deepEqual(release.on.push.branches, ['main'])
   const r2 = release.jobs.r2.steps.find(step => step.name === 'Publish immutable release bytes to Cloudflare R2')
   assert.match(r2.run, /publish-r2\.mjs/u)
   assert.equal(r2.env.EMATE_R2_PUBLIC_ORIGIN, '${{ vars.EMATE_R2_PUBLIC_ORIGIN }}')
   assert.equal(release.on.workflow_dispatch.inputs.publish.default, false)
   assert.ok(release.jobs.publish.steps.every(step => !/\b(?:build|pack)\b/u.test(step.run ?? '')))
   assert.match(readFileSync('.gitattributes', 'utf8'), /^\* text=auto eol=lf$/mu)
-})
-
-test('platform postinstall permits source checkout only and fails closed for an incomplete package', async () => {
-  for (const [kind, source] of [
-    ['runtime', 'packages/dsh-runtime-darwin-arm64/scripts/ensure-executable.mjs'],
-    ['browser', 'packages/dsh-browser-darwin-arm64/scripts/ensure-executable.mjs'],
-  ]) {
-    const root = mkdtempSync(join(tmpdir(), `e-mate-${kind}-postinstall-`))
-    try {
-      const script = join(root, 'packages', kind, 'scripts', 'ensure-executable.mjs')
-      await file(root, `packages/${kind}/scripts/ensure-executable.mjs`, readFileSync(source, 'utf8'))
-      await file(root, 'pnpm-workspace.yaml', 'packages:\n  - packages/*\n')
-      const sourceRun = spawnSync(process.execPath, [script], { encoding: 'utf8' })
-      assert.equal(sourceRun.status, 0, sourceRun.stderr)
-
-      rmSync(join(root, 'pnpm-workspace.yaml'))
-      const packageRun = spawnSync(process.execPath, [script], { encoding: 'utf8' })
-      assert.notEqual(packageRun.status, 0)
-      assert.match(packageRun.stderr, new RegExp(`required e-Mate ${kind === 'runtime' ? 'Runtime' : 'Browser'} manifest is missing`, 'u'))
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  }
-})
-
-test('Windows Runtime tar calls keep drive-qualified paths out of archive operands', () => {
-  const source = readFileSync('scripts/build-runtime-package.mjs', 'utf8')
-  assert.match(source, /run\('tar', \['-tzf', basename\(archive\)\], \{\s*cwd: dirname\(archive\)/u)
-  assert.match(source, /run\('tar', \['-xzf', basename\(archive\), '-C', relative\(dirname\(archive\), temporary\)\], \{ cwd: dirname\(archive\) \}\)/u)
-})
-
-test('platform builders use cross-platform Node entrypoints and bounded verified downloads', () => {
-  const browser = readFileSync('scripts/build-browser-package.mjs', 'utf8')
-  const runtime = readFileSync('scripts/build-runtime-package.mjs', 'utf8')
-  assert.match(browser, /spawnSync\(process\.execPath, \[cli, 'install', 'chromium'\]/u)
-  assert.doesNotMatch(browser, /pnpm\.cmd/u)
-  assert.match(runtime, /for \(let attempt = 1; attempt <= 6; attempt \+= 1\)/u)
-  assert.match(runtime, /catch \(error\) \{\s*if \(attempt === 6\) throw error\s*await sleep\(attempt \* 1_000\)/u)
-  assert.match(runtime, /statSync\(partial\)\.size === asset\.size && sha256\(partial\) === asset\.sha256/u)
 })

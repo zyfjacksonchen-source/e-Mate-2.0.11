@@ -27,22 +27,13 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "build": "node ../../scripts/clean-emate-build.mjs && node ../../scripts/sync-emate-ui-assets.mjs && ../../upstream/deepseek-harness/node_modules/.bin/tsdown && cd profile/plugins/emate-shell && ../../../../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "build": "node ../../scripts/clean-emate-build.mjs && node ../../scripts/sync-emate-ui-assets.mjs && node ../../scripts/sync-emate-plugin-bundles.mjs && ../../upstream/deepseek-harness/node_modules/.bin/tsdown && cd profile/plugins/emate-shell && ../../../../../upstream/deepseek-harness/node_modules/.bin/tsdown",
     "test": "pnpm run build && node --test && pnpm --dir profile/plugins/emate-shell test",
     "prepack": "pnpm run build && node ../../scripts/build-harness-runtime.mjs",
     "pack:check": "pnpm pack --pack-destination ../../dist/npm"
   },
   "dependencies": {
     "fflate": "0.8.3",
-    "playwright-core": "1.61.1",
     "yaml": "2.9.0"
-  },
-  "optionalDependencies": {
-    "@e-mate/dsh-browser-darwin-arm64": "workspace:2.0.7",
-    "@e-mate/dsh-browser-darwin-x64": "workspace:2.0.7",
-    "@e-mate/dsh-browser-win32-x64": "workspace:2.0.7",
-    "@e-mate/dsh-runtime-darwin-arm64": "workspace:2.0.7",
-    "@e-mate/dsh-runtime-darwin-x64": "workspace:2.0.7",
-    "@e-mate/dsh-runtime-win32-x64": "workspace:2.0.7"
   }
 }

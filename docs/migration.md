@@ -65,7 +65,7 @@ New Sessions are then created and appended through the target persistence servic
 
 ## Current release gates
 
-Conversation text, titles, non-deleted filtering, project `cwd`, deterministic identity, source immutability, tool-history evidence, safe CowAgent/Runtime artifact CAS copy, browser artifact projection/download, unavailable-file evidence, corrupted-source refusal, replay idempotency, workspace-bound CowAgent memory/dream/learning copy-on-write import, and disabled-by-default legacy schedule staging/confirmed target activation are implemented and covered against the real Harness backends.
+Conversation text, titles, non-deleted filtering, project `cwd`, deterministic identity, source immutability, tool-history evidence, safe CowAgent/Runtime artifact CAS copy, browser artifact projection/download, unavailable-file evidence, corrupted-source refusal, replay idempotency, workspace-bound CowAgent memory copy-on-write import, and disabled-by-default legacy schedule staging/confirmed target activation are implemented and covered against the real Harness backends.
 
 The following remain release blockers and must not be inferred as complete from the conversation tests:
 

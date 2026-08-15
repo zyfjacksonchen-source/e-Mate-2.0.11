@@ -682,3 +682,63 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Actions `e1a8c46` 已通过源码 CI、主包、三类平台包、证据包及两类 macOS 干净安装；Windows 干净安装在 npm 解包后、首次 staging 环境检查前后静默退出 1。Release workflow 继续失败关闭，但在检查非零时回显原 JSON 报告，使下一轮能按具体 `check.id` 定点修复，不再靠 runner 时序猜测，也不跳过 Windows 门禁。
 - 诊断轮 `4b646f0` 给出唯一失败项 `credential_store: Windows CurrentUser DPAPI unavailable`；同一份已安装 tarball 的 Harness、Runtime、Office、OCR 和 Chromium 检查全部通过。根因路径收敛到 Windows PowerShell 的 DPAPI 类型装载：既有脚本现显式加载系统自带 `System.Security` 程序集并使用完整 `System.Security.Cryptography.*` 类型名，仍采用 `DataProtectionScope.CurrentUser` 与原密文文件合同，不增加依赖或明文回退。
 - DPAPI 修复轮 `6db39f6` 的 Windows staging check 已走到 Chromium 启动后的临时目录回收，但 Windows 文件锁尚未释放时同步删除触发 `EPERM`，因此报告在 DPAPI 检查前中断。Chromium 检查现在使用 Node `rmSync` 原生 `maxRetries/retryDelay` 处理 Windows 短时锁；仍递归删除并在重试耗尽后抛错，没有残留忽略或平台绕过。
+
+## 2026-08-15 · 插件闭包重定基线（替代旧七包架构）
+
+- 用户最终选择“单一 `@e-mate/dsh@2.0.7` tarball + 固定 Harness bundle”作为 2.0.7 当前架构。六个 `@e-mate/dsh-runtime-*`/`@e-mate/dsh-browser-*` 平台包、随包 Python、Office/OCR Worker、RapidOCR/ONNX 模型、Chromium、旧 dream/learning 实现及其预装依赖均从当前产品闭包删除。上文与旧平台包有关的构建、摘要、Actions 和性能记录只说明当时发生过的实验，不再构成当前 S01/S05/S06/S10/S13 的通过证据。
+- 当前内嵌 bundle 清单固定为 `office-skills`、`search-mcp`、`ego-browser`、`browser-panel`、`vision-toolkit`、`memory-evolve`、native-subagent receipt、`genui`、`better-sidebar`。它们必须走 rc.5 Loader、bundle patch、Skills/Tools/Jobs/Storage/Session/Connection/slot 机制；不得增加自有 WebUI–CLI 协议、Router、Store、Agent Loop 或动态插件安装器。Subagent 只复用目标原生实现，不复制 AGPL 项目代码。
+- Office 改为四个 clean-room Skills，不再声称包内可执行 DOCX/XLSX/PPTX/PDF Worker。Vision/OCR 因 rc.5 缺 enterprise model-policy seam 保持 `blocked`，不得回退旧 Python、RapidOCR、模型 Key 或非治理模型路由。`memory-evolve` 必须以 WorkspaceRegistry + canonical-path fingerprint + session membership 绑定项目；通用会话仅能使用 session scope，旧 dream/learning 不作为并行兼容层复活。
+- Windows 浏览器路线按用户选择固定为 Microsoft `@playwright/mcp@0.0.78` + 已安装系统 Edge，安装/setup 不得二次下载浏览器。rc.5 workspace roots/permission 组合及真实 Windows 验收尚未完成，因此公开状态必须是 `PLAYWRIGHT_MCP_EDGE_UNVERIFIED`/`setup-required`，Browser Panel 不得自行显示 ready。macOS Ego Browser 同样需真实启动、权限、隔离、清理、交互和下载证据；当前不得写成已可用。
+- 发布继续对齐目标 CI-first：PR/主分支构建并仓库外安装同一主包 tarball，受保护发布只消费已验收原字节；npm 回读后才进行 Cloudflare R2 不可变对象 admission。旧七包 release carrier 必须重构并重跑，不能因源码适配或历史 Actions 记录标记完成。5,000 事件反向滚动掉帧百分比继续只作诊断，没有发布阈值；FPS、heap、长任务、事件绘制延迟和泄漏预算仍有效。
+- 本条是后续开发与验收的防漂移基线。如与本文件更早的 Runtime/Browser/Worker/Chromium 记录冲突，以本条和当前规范文档为准。当前只完成架构/文档纠偏；单包构建、干净安装、CI、Windows Edge、macOS Ego、Vision/OCR、Office 全场景、Computer Use、npm/R2 和生产 URL 均未因本条自动通过。
+
+## 2026-08-15 · S01/S05 单包 macOS 安装、快捷方式与单实例实跑（前序候选）
+
+- 候选字节：精确 `pnpm@11.7.0` 生成的该轮唯一 `@e-mate/dsh@2.0.7` tarball 大小为 `61,322,499` 字节，SHA-256 为 `b7f0fa15f3c497745f7010268ab4154434ca89c681a0678360273ab7fb5e7342`。它完成了 CLI/快捷方式证据，但随后被 S09 canonical workspace 修复生成的新候选取代，不再作为发布候选。发布 verifier 当时确认九个 bundle、固定 Harness `0.1.0-rc.5`/`47f943859bef60e4160492346772ded9b24f765a`、584 个 SPDX 组件，release carrier 6/6 通过。
+- 仓库外安装：用临时 npm 全局 prefix、独立 `DSH_HOME` 和独立 Desktop 安装该精确 tarball；staging `setup --check --json` 为 7/7，`setup` 后为 8/8，CLI 版本为 `2.0.7`。安装目录没有 Runtime/Browser 平台 optional package，setup 未运行 pip、浏览器下载或本地原生编译。
+- 快捷方式与单实例：macOS `e-Mate.command` 内容仅为登录 shell 执行当前 `e-mate launch`，不含临时 prefix 或旧包绝对路径。服务先在 `55208` 启动后连续执行快捷方式两次，三次观测均保持 PID `70336`、实例 `74e52902-3b9a-4cf1-a087-dab31688f50b`，健康接口返回同一实例且 `active_runs=0`；同版再次 `setup` 原子覆盖快捷方式后重新启动、`stop` 与后续非健康 `status` 一致。
+- 负向边界：独立非 e-Mate HTTP 服务占用 `55209` 时，`launch` 精确失败为 `port 55209 is occupied by a non-managed or unhealthy process; nothing was stopped`，占用进程仍存活。验收全部在临时目录完成并清理，没有修改全局 e-Mate、用户桌面或生产服务。
+- 尚未关闭：本轮设置 `EMATE_NO_OPEN=1` 以避免影响用户默认浏览器，因此证明了浏览器生命周期与 Host 解耦、快捷方式复用同一实例，但未把“真实默认浏览器关闭后再次双击重开页面”记作 Computer Use 通过。macOS 实际浏览器重开、Windows `.lnk`/Edge 实机、macOS x64 同字节安装仍是 S01/S05/S12 门禁。
+- Browser 补证：该前序 tarball 另起隔离实例 `497f8d0e-8b95-4b02-9f3e-83f3ff78a7ca`，in-app Browser 完成插件加载后投影 `/login`、`title=e-Mate` 且真实登录页可见；关闭唯一标签后浏览器会话列表为空，但 loopback health 仍返回同一实例。重新新建标签可再次加载 `/login`，证明关闭网页不终止 Host、页面可从同一实例恢复。随后 Browser 标签、Host 与临时安装目录均已清理。该证据仍不替代快捷方式触发系统默认浏览器窗口的可见 Computer Use。
+
+## 2026-08-15 · S09 canonical workspace 记忆隔离与候选重打
+
+- 根因：产品受管“通用会话”位于 `$DSH_HOME/e-mate/general`，目标 `WorkspaceRegistry` 用 `fs.realpath` 维护唯一 workspace 身份，而 `dshHomePath()` 只做路径拼接。原适配器把 registry 返回的 canonical path 与未 canonicalize 的配置字符串直接比较；当 `$DSH_HOME` 或其父目录含符号链接（macOS `/tmp`/`/private/tmp` 也是同类）时，会把通用会话误判为项目 scope，导致同一受管 workspace 下的会话共享记忆键。
+- 最小修复：不增加第二套 path 工具或缓存；在字符串不相等时直接复用目标 `WorkspaceRegistry.resolveByPath(sessionOnlyWorkspacePath)`，只有解析到与当前 workspace 相同的 authoritative ID 才切为 Session scope。Workspace 状态和 Session membership 的失败关闭条件不变。
+- 可执行证据：`@e-mate/dsh-plugin-memory-evolve` 4/4 通过，其中真实组合使用固定 rc.5 `WorkspaceRegistry`、目标 JSON Storage Domain、真实目录和符号链接，证明两个通用会话 key 不同、两个普通项目会话 key 相同且与通用会话不交叉；主包受管 profile 与九 bundle 闭包定向测试 2/2 通过。源码、同步 bundle、tarball、仓库外安装副本的 `scope.js` SHA-256 均为 `016db058d8a4f647bd8fbe82f4cc3eaed903709e752b2d4522f195054f0f0029`。
+- 该轮候选：精确 `pnpm@11.7.0` 重打唯一 tarball，大小 `61,322,603` 字节，SHA-256 为 `f9fa66a33823c6a04041c3db157465ab586a01bc249f17ea6dcf233a4c02744e`；release evidence 为 1 个 tarball、584 个 SPDX 组件。通过 `npm@11.6.2 install --prefix ... <exact-tarball>` 的仓库外安装、`e-mate --version`、`setup` 和 `setup --check --json` 8/8；全程使用隔离 `DSH_HOME`/Desktop，未写生产状态。该字节随后被下面的 S06 请求校验/完整性收据候选取代，不再作为当前发布候选。
+- 仍未关闭：真实历史 schedule/项目移动样本、macOS x64/Windows 同字节 CI、Windows Edge/macOS Ego、生产 Computer Use、npm registry 回读、R2 admission 和三个生产 URL 激活仍缺证据；本轮未发布、未部署、未修改生产服务器。
+
+## 2026-08-15 · S06 单包重装、Updater 请求边界与完整性收据
+
+- 根因审计：detached Helper 读取 mode-0600 request 后只核对 schema/request ID，没有再次验证 `target/current_version`；同时升级合同要求记录包完整性，但终态收据只有版本。即使 scheduling 入口已限制版本，这个持久化边界仍不应把损坏或被改写的 npm spec 继续传给安装/回滚路径。
+- 最小修复：继续复用唯一 `update.ts` 事务，在 Helper 内用既有 SemVer 解析器重新验证 request，并要求 npm registry 对 staged/previous 精确版本返回合法 `sha512-...==` SRI。成功收据写 `installed_package_integrity`/`previous_package_integrity`；失败和回滚收据写 staged/previous integrity。`e-mate status` 仍只投影 request ID、终态和版本，不暴露 registry 输出、路径或错误。
+- 同版实跑：新候选在隔离 npm prefix、`DSH_HOME` 和 Desktop 中安装后连续执行两次 `setup`，两次命令均成功、最终环境检查 8/8。第一次从用户既存只读源导入 15 条会话，第二次为 `imported=0/reused=15`，source fingerprints 完全一致；schedule 收据同样没有重复导入，证明同版修复 profile/快捷方式不会复活或复制会话。
+- 门禁：主包 Host 42/42、shell 28/28、release carrier 6/6、workflow YAML 解析、target pin 与 diff check 通过。发布工作流的三平台 tarball lane 现在连续运行两次 setup；正式 npm 回读 lane 运行 `e-mate update --version 2.0.7 --json`，必须匹配 request ID、`completed`、两份 SHA-512 integrity，随后 `stop`。该 CI 门禁尚未由真实 npm 发布触发，不作为已通过证据。
+- 当前候选：九 bundle 最终集成并清除公开 npm description/README 首句中的 DeepSeek Harness 产品字样后，用精确 `pnpm@11.7.0` 重打唯一 tarball，大小 `61,323,433` 字节，SHA-256 `ff2eed4b1fba08dd269170c53aaaf311725b9d8c0a1b7745df98eab1fb228c67`；技术文档仍保留必要的上游归因。本地 release evidence 为 1 个 tarball、584 个 SPDX 组件且 evidence checksum 全通过。仓库外 npm 安装、两次 setup 和 8/8 check 通过，第二次迁移为 `imported=0/reused=15`。旧 `dist/npm` 中两个平台包产物已按单包证据合同删除；未发布、未部署。仍缺真实跨版本失败恢复、活动任务竞争、降级、macOS x64/Windows、npm 回读和 R2 admission。
+
+## 2026-08-15 · S08 本机真实旧会话只读迁移证据
+
+- 来源发现：产品的 `defaultLegacySources()` 在本机找到 3 个权威来源，分别为 e-Mate Runtime、ECoreX Runtime 和 CowAgent。证据只记录 family、路径 SHA-256、聚合 SHA-256、文件数和字节数，没有输出会话标题、消息、附件名、明文路径或凭据。
+- 源不变：在隔离的 `DSH_HOME` 与 Desktop 上连续执行两次真实 `e-mate setup`。对源 SQLite、WAL/SHM、Runtime artifact、CowAgent 树及旧 memory 证据做前/中/后清单；第一次和第二次之后的聚合 SHA-256 均与开始时完全一致。两次 setup exit 0、stderr 为空。
+- 幂等结果：第一次 `source_found=true/imported_sessions=15/reused_sessions=0`；第二次 `source_found=true/imported_sessions=0/reused_sessions=15`，3 个 source fingerprint 逐项一致，最终迁移收据含 15 个稳定目标 Session。当前真实 Runtime 源只有 active 行，未提供 deleted 真实样本，因此“删除会话不复活”继续由已存在的可执行 fixture 覆盖，不能写成真实样本已通过。
+- 仍待关闭：需要在真实 Browser 中打开并继续其中一条导入会话；需要 moved/missing project 与并发 WAL 样本，以及企业端提供旧 `memory/users/<id>` 到新账号的权威映射。隔离测试目录没有写生产 `DSH_HOME`、用户桌面或企业服务器。
+
+## 2026-08-15 · S05 正式快捷方式当前环境缺口
+
+- 当前用户真实 Desktop 已有正确的 `e-Mate.command`，内容只经登录 shell 执行 `e-mate launch`，没有绑定旧 npm 路径；但 `/bin/zsh -lic 'command -v e-mate'` 当前返回空，说明机器尚未从正式 npm 全局安装 e-Mate，双击该快捷方式会失败。
+- 本轮没有把未发布的本地候选安装进 Codex 自带 Node 前缀或用户全局环境来制造可见通过；`pnpm dlx npm@11.6.2 prefix -g` 在当前工具环境解析到 Codex runtime 自身目录，也不适合作为产品全局前缀。真实默认浏览器重开应在正式 npm registry 回读后，以用户正常 Node/npm 全局安装路径执行。
+
+## 2026-08-15 · S13 Windows ESM 路径与旧 Actions 候选收敛
+
+- GitHub Release run `31879791989` 的唯一失败为旧候选 `70ff2ce2e340682f4aad2be27e4ec8f1d74ee913` 的 Windows clean-install。npm 解包完成后，setup 报错 `Received protocol 'd:'`；根因是迁移入口把 `createRequire().resolve()` 返回的 `D:\\...` 绝对路径直接交给动态 `import()`，Node ESM 将盘符当成 URL scheme。
+- 现行单 tarball 架构没有恢复已删除的 Runtime/Browser 平台包。共享迁移入口只复用 Node 原生 `pathToFileURL(...).href` 转换三个 Harness 模块路径，与 profile 内既有目标模块加载方式一致；新增窄回归禁止 `import(harnessRequire.resolve(...))` 重新出现。
+- 当前 `@e-mate/dsh` build、Windows ESM 路径聚焦回归 1/1 与 scoped `git diff --check` 通过；现行 `.github/workflows/release.yml` 只上传 `e-mate-dsh-2.0.7.tgz` 并在 macOS arm64/x64、Windows x64 安装同一字节。远端失败 run 属于已淘汰的七包候选，没有重跑或伪造通过；必须提交现行候选后由新的 Windows runner 验收该修复。
+
+## 2026-08-15 · S13 Windows 路径修复后的本地单包候选
+
+- 精确 `pnpm@11.7.0` 重打唯一 `@e-mate/dsh@2.0.7` tarball；大小 `61,323,563` 字节，SHA-256 `d4a9e05b4869a33dfefdd158e81f71e5d634c9424e5ed776e106372b119c375a`。release verifier 只发现 1 个 tarball，SBOM 为 584 个 package/relationship，`EVIDENCE_SHA256SUMS` 和 tarball `SHA256SUMS` 均通过。
+- 仓库外用 `npm@11.6.2` 安装该精确字节，CLI 输出 `2.0.7`；staging check 7/7、setup 后 check 8/8，固定 Harness `0.1.0-rc.5`/`47f943859bef60e4160492346772ded9b24f765a` 与 9 个插件 bundle 均通过。安装、`DSH_HOME` 和 Desktop 使用隔离 `/tmp` 目录并在验证后清理，没有修改全局安装、用户桌面或生产状态。
+- 当前工作树尚未提交，证据 manifest 的 `source_commit` 仍只能记录旧 HEAD `70ff2ce2e340682f4aad2be27e4ec8f1d74ee913`，因此这轮只证明本地字节可安装，不可作为可发布不可变候选。下一份正式候选必须来自包含本修复的干净提交，并由 GitHub Windows runner 关闭 `D:` ESM 回归。
+- 为避免旧 HEAD 被错误绑定到未提交字节，`release:evidence` 现在在生成任何证据前要求 `GITHUB_SHA`（若存在）与 checkout HEAD 一致，并要求 tracked/untracked worktree 均为空；普通 build/pack 不受影响。release carrier 7/7 通过，真实脏工作树 CLI 负向探针按合同拒绝，错误为 `release evidence requires a clean worktree`。
+- 提交前根门禁还捕获到一次工作区调度竞态：根 `pnpm test` 同时运行主包测试与插件自己的 rebuild，`memory-evolve` 清理 `lib/` 时主包的 bundle 同步读到 `ENOENT`。修复只调整既有脚本顺序：9 个插件仍以并发 4 完成测试，全部结束后再运行 `@e-mate/dsh`，没有增加锁、重试或第二构建系统；release 合同锁定插件测试必须先于主包测试。修复后根门禁完整通过：Host 43/43、shell 28/28、各插件测试及 release carrier 7/7 全绿。

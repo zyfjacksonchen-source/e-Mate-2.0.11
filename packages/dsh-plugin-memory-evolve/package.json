@@ -1,0 +1,53 @@
+{
+  "name": "@e-mate/dsh-plugin-memory-evolve",
+  "version": "2.0.7",
+  "description": "Project-isolated memory adapter for the pinned e-Mate 2.0.7 local runtime",
+  "type": "module",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate.git",
+    "directory": "packages/dsh-plugin-memory-evolve"
+  },
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./scope": {
+      "types": "./lib/scope.d.ts",
+      "default": "./lib/scope.js"
+    },
+    "./store": {
+      "types": "./lib/store.d.ts",
+      "default": "./lib/store.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "LICENSE",
+    "NOTICE.md",
+    "README.md"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "build": "../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "test": "pnpm run build && node --test",
+    "prepack": "pnpm run build"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

@@ -10,7 +10,8 @@ e-Mate 2.0.7 是浏览器优先、本地运行的 AI 工作空间。产品运行
 - Windows 10/11：x64。
 - Node.js `^22.19.0` 或 `>=24.0.0`，推荐 Node 24 LTS。
 - npm 使用 Node.js 自带版本。
-- 用户机器不需要 pnpm、Python、Chrome、Xcode、MSVC、Rust、Electron 或签名工具；Python/Office/OCR/Chromium 均由匹配平台包预构建交付。
+- 用户机器不需要 pnpm、Python、Xcode、MSVC、Rust、Electron 或签名工具；2.0.7 不再随包交付旧 Python/Office/OCR Worker 或 Chromium。
+- 浏览器能力不执行二次浏览器下载。Windows 预定使用系统 Microsoft Edge；macOS Ego Browser 与 Windows Edge 路径均须通过各自真实平台验收后才可标记可用。
 - Linux 不属于 2.0.7 正式支持范围。
 
 ## 安装与首次启动
@@ -24,7 +25,7 @@ e-mate setup
 e-mate launch
 ```
 
-`setup --check --json` 是只读检查。任一必需平台包缺失、版本不一致或摘要错误时，`setup` 会失败且不使用系统 Python/Chrome 降级。`setup` 成功后会原子覆盖当前 e-Mate 管理的桌面快捷方式：
+`setup --check --json` 是只读检查。它校验单一主包、固定 Harness、内嵌 bundle、profile、数据目录和平台能力状态；缺失或未验收能力会返回明确的 `blocked/setup-required`，不回装旧 Python/Chromium。`setup` 成功后会原子覆盖当前 e-Mate 管理的桌面快捷方式：
 
 - macOS：桌面 `e-Mate.command`。
 - Windows：桌面 `e-Mate.lnk`。
@@ -95,10 +96,10 @@ corepack enable
 corepack prepare pnpm@11.7.0 --activate
 pnpm install --frozen-lockfile
 pnpm check:target
-pnpm --filter @e-mate/dsh test
+pnpm test
 pnpm test:release
-# 在 dist/npm 已有完整七包后生成发布证据
+# 在 dist/npm 已有单一主包候选后生成发布证据
 pnpm release:evidence
 ```
 
-开发使用 Node 24.x 和 `pnpm@11.7.0`。发布链与固定 DeepSeek Harness 一致采用 CI-first：每个 PR 都无凭据构建、打包并在仓库外安装同一批 tarball；只有从 `e-mate-v2.0.7` 标签手工触发、通过受保护环境和 S12 验收提交绑定后，才发布已经验证的原字节，发布阶段不重新构建。e-Mate 仅因便携 Python/Chromium 平台包保留三平台原生 runner，并在 npm 回读后再准入 Cloudflare R2。任何 Harness、Python Worker 或 Chromium 升级都必须独立切片重新验收。发布前还必须完成三平台干净安装、SBOM/许可证、性能 Trace、Computer Use 和生产企业对账。
+开发使用 Node 24.x 和 `pnpm@11.7.0`。发布链与固定 DeepSeek Harness 一致采用 CI-first：每个 PR 都无凭据构建、打包并在仓库外安装同一个 `@e-mate/dsh` tarball；只有从 `e-mate-v2.0.7` 标签手工触发、通过受保护环境和 S12 验收提交绑定后，才发布已经验证的原字节，发布阶段不重新构建。npm 回读后再把同一 tarball 准入 Cloudflare R2。任何 Harness、内嵌 bundle 或平台浏览器适配升级都必须独立切片重新验收。发布前还必须完成支持平台干净安装、SBOM/许可证、性能 Trace、Computer Use 和生产企业对账。

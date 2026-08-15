@@ -1,0 +1,6 @@
+# Register the package through the pinned Harness skill service. The skills
+# describe workflows only; this bundle installs no Office, Python, OCR, or
+# browser runtime.
+- insert:
+    - id: emate-office-skills
+      name: '@e-mate/dsh-plugin-office-skills'

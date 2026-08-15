@@ -1,0 +1,6 @@
+# The catalog source is unavailable, so this bundle contributes only a
+# fail-closed status surface over Harness Connection RPC and UI slots.
+- insert:
+    - id: emate-browser-panel
+      name: '@e-mate/dsh-plugin-browser-panel'
+      inject: [connection, sessions]

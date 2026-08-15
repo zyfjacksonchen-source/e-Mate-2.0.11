@@ -6,7 +6,7 @@ The normative product and source boundaries live in [target-contract.md](target-
 
 DeepSeek Harness `0.1.0-rc.5` at commit `47f943859bef60e4160492346772ded9b24f765a` is the only local runtime core. It owns the Agent Loop, sessions, durable event logs, model calls, tools, approvals, attachments, Jobs, plugin loading, reconnect semantics, and persistence.
 
-The e-Mate package owns lifecycle commands, the managed profile, product branding, client-module composition, platform resource validation, migrations, and the three enterprise-side services. It does not patch or duplicate the Harness runtime.
+The single `@e-mate/dsh@2.0.7` package owns lifecycle commands, the managed profile, product branding, client-module composition, bundle validation, migrations, and the three enterprise-side services. It does not patch or duplicate the Harness runtime and has no Runtime/Browser platform-package family.
 
 All maintained application source is TypeScript or TSX and is built with the exact Harness `tsdown` installation. Node-executable JavaScript and browser bundles under `lib/` are generated artifacts.
 
@@ -50,13 +50,23 @@ The implemented model-policy adapter wraps the target `apiProxy.sessions.models`
 
 The implemented audit adapter listens to the target `agent/request`, `assistant/message`, `session/event`, and `session/flush` lifecycle. It binds the real provider/model request to the current account-policy receipt, derives usage only from provider-reported terminal event fields, and stores idempotent facts in a target Storage Domain outbox. It does not record prompts, answers, raw account identities, raw session IDs, attachment bytes, paths, or credentials. Upload and retry are asynchronous and errors are reduced to non-sensitive digests; no audit failure changes the local Agent result. Production delivery remains disabled until the enterprise ingestion/receipt contract is verified, so the existing read-only usage-panel endpoint is never guessed to be an ingest API.
 
+## Embedded Harness bundles
+
+The public npm closure contains one tarball. Its managed profile installs these TypeScript/Cordis bundles through the target Loader and bundle/patch mechanism: `office-skills`, `search-mcp`, `ego-browser`, `browser-panel`, `vision-toolkit`, `memory-evolve`, the native-subagent compatibility receipt, `genui`, and `better-sidebar`. They reuse target services, module IDs, slots, Session events and Connection RPC; they do not add a second WebUI-to-CLI protocol, Store, Router, Agent Loop or package installer.
+
+`office-skills` supplies four clean-room Skills for documents, PDF, spreadsheets and presentations. It does not ship the deleted Python Worker or claim local Office-format execution until an accepted host toolchain closes the action. `search-mcp` adapts MCP discovery/calls to the target Web/Tool path. `genui` and `better-sidebar` contribute target UI slots. The subagent bundle is a receipt only: rc.5's native Subagent services remain authoritative, and no AGPL implementation is copied.
+
+Browser control is platform-gated. Windows is specified as Microsoft `@playwright/mcp@0.0.78` driving the already-installed system Microsoft Edge without a browser download. The rc.5 workspace-root/permission composition and a real Windows run are not yet proven, so setup must report `PLAYWRIGHT_MCP_EDGE_UNVERIFIED`/`setup-required`; Browser Panel cannot become ready from package presence alone. macOS Ego Browser has the same fail-closed rule and remains unaccepted until its real local launch, permission, session isolation and cleanup evidence exists. No path may silently install Chromium or select an arbitrary system browser.
+
+`vision-toolkit` does not register a ready OCR/Vision capability because rc.5 lacks the required enterprise model-policy seam. It remains `blocked` rather than importing the deleted RapidOCR/Python closure, a local model Key, or an ungoverned model route.
+
 ## Project-scoped memory
 
-The pinned Harness workspace domain is the binding authority. `WorkspaceRegistry` owns a stable workspace ID and validates membership by comparing each immutable session header `cwd` with the workspace's canonical real path. The e-Mate memory, dream, and learning plugins consume that service; they do not infer a project from the browser label or maintain a second project catalog.
+The pinned Harness workspace domain is the binding authority. `WorkspaceRegistry` owns a stable workspace ID and validates membership by comparing each immutable session header `cwd` with the workspace's canonical real path. The `memory-evolve` adapter consumes that service; it does not infer a project from the browser label or maintain a second project catalog. The deleted standalone dream/learning implementations are not composed as parallel system plugins.
 
 Each stored item carries the workspace ID and canonical-path fingerprint used when it was written. Reads and writes require both the active session membership and the current registry binding to match. Workspace renaming leaves the binding intact; a moved/missing directory, cross-project session, or ambiguous legacy source fails closed. Sessions that are not registered to a workspace may use only a private session scope. Imported CowAgent material is copied into the resolved scope and never linked back to a mutable legacy path.
 
-Legacy file import is part of the same memory plugin and the same Storage Domain. It accepts only an exact canonical source-root match from `WorkspaceRegistry`; it does not create a second project catalog or guess a destination from a session title. Deterministic record identities and `$DSH_HOME/e-mate/migrations/legacy-memory-v1.json` make the copy idempotent. User-scoped legacy files remain blocked until enterprise identity can prove the account mapping, which prevents an old user's private memory from becoming project-shared content.
+Legacy file import is part of the same adapter and Storage Domain. It accepts only an exact canonical source-root match from `WorkspaceRegistry`; it does not create a second project catalog or guess a destination from a session title. Deterministic record identities and `$DSH_HOME/e-mate/migrations/legacy-memory-v1.json` make the copy idempotent. User-scoped legacy files remain blocked until enterprise identity can prove the account mapping, which prevents an old user's private memory from becoming project-shared content.
 
 ## Legacy-session import
 
@@ -72,7 +82,7 @@ The managed profile loads upstream `@deepseek-ai/dsh-schedule`; its versioned `s
 
 Old `tasks.json` rows are a migration catalog only. They enter a local mode-0600 disabled receipt after bounded no-follow validation. Unsupported source semantics remain blocked. After a separate exact user confirmation, the import Tool nests the official `schedule_list`/`schedule_create` Tools in the current Agent scope, so the target's validation, tool policy, persistence checkpoints, event append, and runtime drive remain authoritative.
 
-The pinned shipped baseline was audited before keeping capability adapters: only `web_search` is available by default; the native `web_fetch` package is present but the base composition disables it and supplies no fetch provider; no Office/PDF Tool, OCR Tool, or product Chromium Computer Use Tool exists. Therefore e-Mate retains thin Office/OCR/Chromium adapters, but those adapters register through target Tools/Jobs/attachments/subprocess and do not replace a target capability that already exists.
+The pinned shipped baseline was audited before selecting the embedded bundles. Search, Office Skills, browser control, Vision/OCR, memory and UI extensions remain target-loader plugins with explicit readiness; no deleted local Worker or browser runtime is retained as a fallback. Capability presence in the tarball is not acceptance: Vision/OCR is blocked, and both platform browser paths remain setup-required until their named platform gates pass.
 
 ## Identity and usage continuity
 

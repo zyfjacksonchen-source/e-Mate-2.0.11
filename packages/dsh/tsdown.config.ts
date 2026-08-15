@@ -41,29 +41,6 @@ export default [
   },
   {
     ...node,
-    entry: { 'office-ocr': 'src/profile/office-ocr.ts' },
-    outDir: 'profile/plugins',
-  },
-  {
-    ...node,
-    entry: { 'browser-computer-use': 'src/profile/browser-computer-use.ts' },
-    outDir: 'profile/plugins',
-  },
-  {
-    ...node,
-    entry: { memory: 'src/profile/memory.ts' },
-    outDir: 'profile/plugins',
-  },
-  {
-    ...node,
-    entry: {
-      dream: 'src/profile/dream.ts',
-      learning: 'src/profile/learning.ts',
-    },
-    outDir: 'profile/plugins',
-  },
-  {
-    ...node,
     entry: { 'image-generation': 'src/profile/image-generation.ts' },
     outDir: 'profile/plugins',
   },

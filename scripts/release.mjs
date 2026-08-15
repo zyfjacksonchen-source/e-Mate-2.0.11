@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // e-Mate release carrier. Runtime structure stays owned by DeepSeek Harness;
-// this file only verifies, inventories and publishes the seven e-Mate tarballs.
+// this file only verifies, inventories and publishes the one packed npm artifact.
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
@@ -18,15 +18,21 @@ const HARNESS_COMMIT = '47f943859bef60e4160492346772ded9b24f765a'
 const REPOSITORY = 'zyfjacksonchen-source/e-Mate'
 const TAG = `e-mate-v${VERSION}`
 const SHA256 = /^[0-9a-f]{64}$/u
+const GIT_COMMIT = /^[0-9a-f]{40}$/u
 
 export const RELEASE_PACKAGES = [
-  { name: '@e-mate/dsh-runtime-darwin-arm64', kind: 'runtime', os: 'darwin', cpu: 'arm64' },
-  { name: '@e-mate/dsh-runtime-darwin-x64', kind: 'runtime', os: 'darwin', cpu: 'x64' },
-  { name: '@e-mate/dsh-runtime-win32-x64', kind: 'runtime', os: 'win32', cpu: 'x64' },
-  { name: '@e-mate/dsh-browser-darwin-arm64', kind: 'browser', os: 'darwin', cpu: 'arm64' },
-  { name: '@e-mate/dsh-browser-darwin-x64', kind: 'browser', os: 'darwin', cpu: 'x64' },
-  { name: '@e-mate/dsh-browser-win32-x64', kind: 'browser', os: 'win32', cpu: 'x64' },
   { name: '@e-mate/dsh', kind: 'main' },
+]
+export const BUNDLED_PLUGIN_PACKAGES = [
+  '@e-mate/dsh-plugin-better-sidebar',
+  '@e-mate/dsh-plugin-browser-panel',
+  '@e-mate/dsh-plugin-ego-browser',
+  '@e-mate/dsh-plugin-genui',
+  '@e-mate/dsh-plugin-memory-evolve',
+  '@e-mate/dsh-plugin-office-skills',
+  '@e-mate/dsh-plugin-search-mcp',
+  '@e-mate/dsh-plugin-subagent',
+  '@e-mate/dsh-plugin-vision-toolkit',
 ]
 
 const TRANSIENT_PUBLISH_CODES = ['E409', 'E429', 'E500', 'E502', 'E503', 'E504', 'ETIMEDOUT', 'ECONNRESET', 'EAI_AGAIN']
@@ -40,6 +46,18 @@ function run(command, args, options = {}) {
     throw new Error(`${basename(command)} ${args.join(' ')} exited with ${String(result.status)}:\n${result.stdout}${result.stderr}`)
   }
   return result.stdout.trim()
+}
+
+export function assertEvidenceSource(environment = process.env, execute = run) {
+  const head = execute('git', ['rev-parse', 'HEAD'])
+  const sourceCommit = environment.GITHUB_SHA ?? head
+  if (!GIT_COMMIT.test(sourceCommit) || sourceCommit !== head) {
+    throw new Error('release evidence source commit does not match the checked-out HEAD')
+  }
+  if (execute('git', ['status', '--porcelain=v1', '--untracked-files=normal']) !== '') {
+    throw new Error('release evidence requires a clean worktree')
+  }
+  return sourceCommit
 }
 
 function attempt(command, args, options = {}) {
@@ -93,19 +111,15 @@ function verifyMain(item, manifest, entries) {
   if (entries.some(entry => entry.startsWith('package/runtime/.harness-build-'))) {
     throw new Error('@e-mate/dsh contains a temporary Harness build directory')
   }
-  const expectedOptional = Object.fromEntries(
-    RELEASE_PACKAGES.filter(candidate => candidate.kind !== 'main').map(candidate => [candidate.name, VERSION]),
-  )
-  const actualOptional = manifest.optionalDependencies
-  if (actualOptional === null || typeof actualOptional !== 'object' || Array.isArray(actualOptional)
-    || JSON.stringify(Object.keys(actualOptional).sort()) !== JSON.stringify(Object.keys(expectedOptional).sort())
-    || Object.entries(expectedOptional).some(([name, version]) => actualOptional[name] !== version)) {
-    throw new Error('@e-mate/dsh optionalDependencies must be the six exact 2.0.7 platform packages')
+  const optional = Object.keys(manifest.optionalDependencies ?? {})
+  if (optional.some(name => /^@e-mate\/dsh-(?:runtime|browser)-/u.test(name))) {
+    throw new Error('@e-mate/dsh must not depend on legacy Runtime or Browser platform packages')
   }
   for (const entry of [
     'package/lib/bin.js',
     'package/profile/cordis.patch.yml',
     'package/profile/plugins/emate-shell/index.js',
+    'package/profile/bundles/registry.json',
     'package/runtime/source-manifest.json',
     'package/runtime/harness/apps/cli/lib/bin.js',
     'package/THIRD_PARTY_NOTICES.txt',
@@ -114,41 +128,27 @@ function verifyMain(item, manifest, entries) {
   if (harness.version !== HARNESS_VERSION || harness.commit !== HARNESS_COMMIT || harness.product_version !== VERSION) {
     throw new Error('@e-mate/dsh carries the wrong DeepSeek Harness closure')
   }
-  return { harness }
-}
-
-function verifyRuntime(item, manifest, entries) {
-  for (const entry of ['package/emate-runtime.json', 'package/THIRD_PARTY_NOTICES.txt']) {
-    requireEntry(entries, entry, item.name)
+  const registry = tarJson(item.path, 'package/profile/bundles/registry.json')
+  const actualPlugins = Array.isArray(registry.packages) ? registry.packages.map(plugin => plugin?.name).sort() : []
+  if (registry.schema_version !== 1 || registry.product !== 'e-Mate' || registry.version !== VERSION
+    || registry.harness_version !== HARNESS_VERSION || registry.harness_commit !== HARNESS_COMMIT
+    || JSON.stringify(actualPlugins) !== JSON.stringify([...BUNDLED_PLUGIN_PACKAGES].sort())) {
+    throw new Error('@e-mate/dsh carries the wrong embedded plugin bundle registry')
   }
-  const resource = tarJson(item.path, 'package/emate-runtime.json')
-  if (resource.package !== item.name || resource.version !== VERSION || resource.os !== item.os || resource.cpu !== item.cpu
-    || resource.office !== true || resource.ocr !== true || !SHA256.test(resource.payload_sha256)
-    || !Array.isArray(resource.models) || resource.models.length < 3
-    || !Array.isArray(resource.distributions) || resource.distributions.length < 1) {
-    throw new Error(`${item.name} Runtime manifest is invalid`)
+  for (const plugin of registry.packages) {
+    if (plugin.version !== VERSION || typeof plugin.directory !== 'string' || plugin.directory === '') {
+      throw new Error('@e-mate/dsh embedded plugin receipt is invalid')
+    }
+    const base = `package/profile/bundles/${plugin.directory}`
+    requireEntry(entries, `${base}/package.json`, plugin.name)
+    const pluginManifest = tarJson(item.path, `${base}/package.json`)
+    if (pluginManifest.name !== plugin.name || pluginManifest.version !== VERSION || pluginManifest.license !== 'MIT'
+      || typeof pluginManifest.main !== 'string') {
+      throw new Error(`${plugin.name} embedded bundle identity is invalid`)
+    }
+    requireEntry(entries, `${base}/${pluginManifest.main}`, plugin.name)
   }
-  requireEntry(entries, `package/${resource.worker}`, item.name)
-  for (const model of resource.models) {
-    if (typeof model?.path !== 'string' || !SHA256.test(model.sha256)) throw new Error(`${item.name} OCR model manifest is invalid`)
-    requireEntry(entries, `package/${model.path}`, item.name)
-  }
-  return { resource }
-}
-
-function verifyBrowser(item, manifest, entries) {
-  for (const entry of ['package/emate-browser.json', 'package/THIRD_PARTY_NOTICES.txt']) {
-    requireEntry(entries, entry, item.name)
-  }
-  const resource = tarJson(item.path, 'package/emate-browser.json')
-  if (resource.package !== item.name || resource.version !== VERSION || resource.os !== item.os || resource.cpu !== item.cpu
-    || resource.chromium !== true || resource.engine !== 'chromium-headless-shell'
-    || resource.playwright_version !== '1.61.1' || resource.browser_revision !== '1228'
-    || resource.browser_version !== '149.0.7827.55' || !SHA256.test(resource.executable_sha256)) {
-    throw new Error(`${item.name} Browser manifest is invalid`)
-  }
-  requireEntry(entries, `package/${resource.executable}`, item.name)
-  return { resource }
+  return { harness, registry }
 }
 
 export function verifyRelease(directory) {
@@ -169,18 +169,8 @@ export function verifyRelease(directory) {
     }
     requireEntry(entries, 'package/LICENSE', expected.name)
     requireEntry(entries, 'package/README.md', expected.name)
-    if (expected.kind !== 'main') {
-      if (JSON.stringify(manifest.os) !== JSON.stringify([expected.os])
-        || JSON.stringify(manifest.cpu) !== JSON.stringify([expected.cpu])) {
-        throw new Error(`${expected.name} has the wrong npm os/cpu selector`)
-      }
-    }
     const item = { ...expected, path, filename: basename(path) }
-    const detail = expected.kind === 'main'
-      ? verifyMain(item, manifest, entries)
-      : expected.kind === 'runtime'
-        ? verifyRuntime(item, manifest, entries)
-        : verifyBrowser(item, manifest, entries)
+    const detail = verifyMain(item, manifest, entries)
     return {
       ...item,
       manifest,
@@ -241,12 +231,15 @@ function walkPackageJson(root, directory = root, output = []) {
   return output
 }
 
-async function harnessComponents(main, components) {
+async function packedComponents(main, components) {
   const scratch = await mkdtemp(join(tmpdir(), 'e-mate-release-main-'))
   try {
     run('tar', ['-xzf', main.path, '-C', scratch])
-    const harnessRoot = join(scratch, 'package', 'runtime', 'harness')
-    for (const path of walkPackageJson(harnessRoot)) {
+    const roots = [
+      join(scratch, 'package', 'runtime', 'harness'),
+      join(scratch, 'package', 'profile', 'bundles'),
+    ]
+    for (const path of roots.flatMap(root => walkPackageJson(root))) {
       const manifest = JSON.parse(await readFile(path, 'utf8'))
       if (typeof manifest.name !== 'string' || typeof manifest.version !== 'string') continue
       addComponent(components, {
@@ -291,7 +284,7 @@ function spdxPackage(component, archive) {
   return item
 }
 
-export async function generateEvidence(directory, outputDirectory) {
+export async function generateEvidence(directory, outputDirectory, sourceCommit = assertEvidenceSource()) {
   const release = verifyRelease(directory)
   const output = resolve(outputDirectory)
   await mkdir(output, { recursive: true })
@@ -304,37 +297,10 @@ export async function generateEvidence(directory, outputDirectory) {
     }))
   }
   const main = release.find(item => item.kind === 'main')
-  await harnessComponents(main, components)
+  await packedComponents(main, components)
   for (const [name, version] of Object.entries(main.manifest.dependencies ?? {})) {
     addComponent(components, { ecosystem: 'npm', name, version, license: 'NOASSERTION', owner: main.name })
   }
-  for (const archive of release.filter(item => item.kind === 'runtime')) {
-    addComponent(components, {
-      ecosystem: 'generic', name: 'CPython', version: archive.resource.python_version,
-      license: 'PSF-2.0', owner: archive.name,
-    })
-    addComponent(components, {
-      ecosystem: 'generic', name: 'e-Mate Office/OCR Worker', version: archive.resource.source_commit,
-      license: 'MIT', owner: archive.name,
-    })
-    for (const distribution of archive.resource.distributions) {
-      if (typeof distribution?.name !== 'string' || typeof distribution?.version !== 'string') {
-        throw new Error(`${archive.name} distribution inventory is invalid`)
-      }
-      addComponent(components, {
-        ecosystem: 'pypi', name: distribution.name, version: distribution.version,
-        license: typeof distribution.license === 'string' ? distribution.license : 'NOASSERTION',
-        owner: archive.name,
-      })
-    }
-  }
-  for (const archive of release.filter(item => item.kind === 'browser')) {
-    addComponent(components, {
-      ecosystem: 'generic', name: 'Chromium Headless Shell', version: archive.resource.browser_version,
-      license: 'BSD-3-Clause', owner: archive.name,
-    })
-  }
-
   const releaseDigest = createHash('sha256')
     .update(release.map(item => `${item.filename}\0${item.sha256}\n`).join(''))
     .digest('hex')
@@ -354,14 +320,6 @@ export async function generateEvidence(directory, outputDirectory) {
       }
     }
   }
-  for (const dependency of RELEASE_PACKAGES.filter(item => item.kind !== 'main')) {
-    relationships.push({
-      spdxElementId: owners.get(main.name).id,
-      relationshipType: 'DEPENDS_ON',
-      relatedSpdxElement: owners.get(dependency.name).id,
-    })
-  }
-
   const archivesByName = new Map(release.map(item => [item.name, item]))
   const orderedComponents = [...components.values()].sort((left, right) => left.key.localeCompare(right.key))
   const spdx = {
@@ -379,7 +337,7 @@ export async function generateEvidence(directory, outputDirectory) {
     product: 'e-Mate',
     version: VERSION,
     repository: REPOSITORY,
-    source_commit: process.env.GITHUB_SHA ?? run('git', ['rev-parse', 'HEAD']),
+    source_commit: sourceCommit,
     harness: { version: HARNESS_VERSION, commit: HARNESS_COMMIT },
     release_sha256: releaseDigest,
     publish_order: release.map(item => item.name),

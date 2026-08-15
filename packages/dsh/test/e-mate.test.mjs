@@ -9,12 +9,7 @@ import test from 'node:test'
 import { strToU8, zipSync } from 'fflate'
 import { parse as parseYaml } from 'yaml'
 import { Context } from '../../../upstream/deepseek-harness/vendor/cordis/lib/index.js'
-import { LocalSubprocessRuntime } from '../../../upstream/deepseek-harness/packages/subprocess/subprocess-local/lib/index.js'
 import { LocalAttachmentStore } from '../../../upstream/deepseek-harness/packages/attachment/attachment-local/lib/index.js'
-import Storage from '../../../upstream/deepseek-harness/packages/storage/storage/lib/index.js'
-import { JsonStorageBackend } from '../../../upstream/deepseek-harness/packages/storage/storage-json/lib/index.js'
-import { DomainFacility } from '../../../upstream/deepseek-harness/packages/storage/storage-domain/lib/index.js'
-import WorkspaceRegistry from '../../../upstream/deepseek-harness/packages/workspace/workspace/lib/index.js'
 
 import {
   HARNESS_COMMIT,
@@ -38,11 +33,6 @@ import {
   checkOsCredentialBackend,
   createOsCredentialBackend,
 } from '../profile/plugins/credentials-os.js'
-import { apply as applyOfficeOcr, loadRuntimeBinding, runWorker } from '../profile/plugins/office-ocr.js'
-import { apply as applyBrowser } from '../profile/plugins/browser-computer-use.js'
-import { apply as applyMemory, migrateLegacyMemory } from '../profile/plugins/memory.js'
-import { apply as applyDream } from '../profile/plugins/dream.js'
-import { apply as applyLearning } from '../profile/plugins/learning.js'
 import { apply as applyImageGeneration } from '../profile/plugins/image-generation.js'
 import { apply as applyModelPolicy, MODEL_POLICY_CHANNEL, validateModelPolicy } from '../profile/plugins/model-policy.js'
 import { apply as applyAudit, AUDIT_CHANNEL, createUsageFact } from '../profile/plugins/audit.js'
@@ -64,11 +54,19 @@ import {
   compareVersions,
   globalPrefixForBinPath,
   normalizeUpdateTarget,
+  parsePackageIntegrity,
   releaseUpdateLock,
+  validateUpdateRequest,
 } from '../lib/update.js'
 import { createSkillHubClient, inspectSkillArchive, installSkillArchive } from '../lib/skill-hub.js'
 
 const fileDigest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
+
+test('resolved Harness modules use file URLs for Windows ESM imports', () => {
+  const source = readFileSync(new URL('../src/e-mate.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /import\(harnessRequire\.resolve\(/)
+  assert.equal(source.match(/import\(pathToFileURL\(harnessRequire\.resolve\(/g)?.length, 3)
+})
 
 test('validated identity transitions restore the protected route before reloading one enterprise snapshot', () => {
   const source = readFileSync(new URL('../profile/plugins/emate-shell/src/client/identity.tsx', import.meta.url), 'utf8')
@@ -144,19 +142,33 @@ test('version gates match the release contract', () => {
   for (const stem of ['e-mate', 'legacy-migration', 'legacy-schedule', 'update']) {
     assert.equal(libFiles.filter(name => name.startsWith(`${stem}-`) && name.endsWith('.js')).length, 1)
   }
-  assert.equal(
-    readdirSync(new URL('../profile/plugins/', import.meta.url))
-      .filter(name => name.startsWith('reflection-runtime-') && name.endsWith('.js')).length,
-    1,
-  )
 })
 
 test('online update target parsing rejects tags and downgrade ordering is SemVer-correct', () => {
+  const requestId = '11111111-1111-4111-8111-111111111111'
+  const request = {
+    schema_version: 1,
+    request_id: requestId,
+    target: '2.0.8',
+    current_version: '2.0.7',
+  }
   assert.equal(normalizeUpdateTarget(), 'latest')
   assert.equal(normalizeUpdateTarget('latest'), 'latest')
   assert.equal(normalizeUpdateTarget('2.0.8-rc.1'), '2.0.8-rc.1')
   assert.throws(() => normalizeUpdateTarget('next'), /invalid update version/)
   assert.throws(() => normalizeUpdateTarget('2.0'), /invalid update version/)
+  assert.equal(validateUpdateRequest(request, requestId), request)
+  assert.throws(
+    () => validateUpdateRequest({ ...request, target: 'file:/tmp/package.tgz' }, requestId),
+    /invalid update version/,
+  )
+  assert.throws(
+    () => validateUpdateRequest({ ...request, current_version: '2.0.7 --force' }, requestId),
+    /request version is invalid/,
+  )
+  const integrity = `sha512-${'A'.repeat(86)}==`
+  assert.equal(parsePackageIntegrity(JSON.stringify(integrity)), integrity)
+  assert.throws(() => parsePackageIntegrity(JSON.stringify('sha256-invalid')), /integrity response is invalid/)
   assert.equal(compareVersions('2.0.7', '2.0.7-rc.1'), 1)
   assert.equal(compareVersions('2.0.7-rc.1', '2.0.7-rc.2'), -1)
   assert.equal(compareVersions('2.0.8', '2.0.7'), 1)
@@ -167,7 +179,7 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   )
   assert.throws(() => globalPrefixForBinPath('/repo/packages/dsh/lib/bin.js', 'darwin'), /global npm installation/u)
   const updateSource = readFileSync(new URL('../src/update.ts', import.meta.url), 'utf8')
-  assert.doesNotMatch(updateSource, /--ignore-scripts/u, 'platform package postinstall must restore executable bits')
+  assert.doesNotMatch(updateSource, /--ignore-scripts/u, 'the staged npm package must retain its reviewed lifecycle contract')
   assert.match(
     updateSource,
     /snapshotData\(paths\)\s+changed = true\s+runNpm\(\[\s*'install', '--global'/u,
@@ -393,7 +405,23 @@ test('managed profile installation is idempotent', () => {
   try {
     const first = installProfile(dshHome)
     const manifest = readFileSync(join(first.profile, 'package.json'), 'utf8')
-    assert.equal(JSON.parse(manifest).type, 'module')
+    const profileManifest = JSON.parse(manifest)
+    assert.equal(profileManifest.type, 'module')
+    const pluginPackages = [
+      '@e-mate/dsh-plugin-better-sidebar',
+      '@e-mate/dsh-plugin-browser-panel',
+      '@e-mate/dsh-plugin-ego-browser',
+      '@e-mate/dsh-plugin-genui',
+      '@e-mate/dsh-plugin-memory-evolve',
+      '@e-mate/dsh-plugin-office-skills',
+      '@e-mate/dsh-plugin-search-mcp',
+      '@e-mate/dsh-plugin-subagent',
+      '@e-mate/dsh-plugin-vision-toolkit',
+    ]
+    assert.deepEqual(profileManifest.dsh.profile.bundles, [
+      '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
+    ])
+    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.7'])))
     const patch = readFileSync(join(first.profile, 'cordis.patch.yml'), 'utf8')
     installProfile(dshHome)
     assert.equal(readFileSync(join(first.profile, 'package.json'), 'utf8'), manifest)
@@ -458,11 +486,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(patch, /id: emate-connections[\s\S]*\.\/plugins\/connections\.js[\s\S]*inject: \[credentials, connection, emateCapabilities\]/)
     assert.match(patch, /id: emate-agent-operations[\s\S]*\.\/plugins\/agent-operations\.js/)
     assert.match(patch, /id: emate-skill-hub-agent[\s\S]*\.\/plugins\/skill-hub-agent\.js/)
-    assert.match(patch, /id: emate-office-ocr[\s\S]*\.\/plugins\/office-ocr\.js[\s\S]*inject: \[tools, fs, subprocess, webServer, emateCapabilities\]/)
-    assert.match(patch, /id: emate-browser-computer-use[\s\S]*\.\/plugins\/browser-computer-use\.js[\s\S]*inject: \[tools, subprocess, attachments, webServer, emateCapabilities\]/)
-    assert.match(patch, /id: emate-memory[\s\S]*\.\/plugins\/memory\.js[\s\S]*inject: \[tools, workspaceRegistry, storageDomain\]/)
-    assert.match(patch, /id: emate-dream[\s\S]*\.\/plugins\/dream\.js[\s\S]*inject: \[tools, jobs, llm, emateMemory\]/)
-    assert.match(patch, /id: emate-learning[\s\S]*\.\/plugins\/learning\.js[\s\S]*inject: \[tools, jobs, llm, emateMemory\]/)
+    assert.doesNotMatch(patch, /emate-(?:office-ocr|browser-computer-use|memory|dream|learning)/)
     assert.match(patch, /id: emate-model-policy[\s\S]*\.\/plugins\/model-policy\.js[\s\S]*inject: \[apiProxy, connection, storageDomain, llm, emateIdentity\]/)
     assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, emateModelPolicy\]/)
     assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*inject: \[tools, jobs, attachments, emateIdentity, emateModelPolicy, emateCapabilities\][\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
@@ -481,19 +505,14 @@ test('managed profile installation is idempotent', () => {
     assert.match(credentials, /DataProtectionScope\]::CurrentUser/)
     assert.match(credentials, /find-generic-password/)
     assert.doesNotMatch(credentials, /ctx\.connection|\.credentials\.yaml/)
-    assert.ok(readFileSync(join(first.profile, 'plugins', 'office-ocr.js')).byteLength > 0)
-    const memory = readFileSync(join(first.profile, 'plugins', 'memory.js'), 'utf8')
-    assert.match(memory, /e_mate_memory_remember/)
-    assert.match(memory, /e_mate_memory_search/)
-    assert.match(memory, /workspaceRegistry\.resolveByPath/)
-    assert.match(memory, /storageDomain\.open/)
-    assert.doesNotMatch(memory, /node:sqlite|new WebSocket|from ["']@deepseek-ai\/dsh-storage-domain["']/)
-    const dream = readFileSync(join(first.profile, 'plugins', 'dream.js'), 'utf8')
-    assert.match(dream, /e_mate_dream_distill/)
-    const dreamChunks = [...dream.matchAll(/from ["']\.\/([^"']+\.js)["']/g)].map(match => match[1])
-    assert.ok(dreamChunks.length > 0)
-    for (const chunk of dreamChunks) assert.ok(existsSync(join(first.profile, 'plugins', chunk)))
-    assert.match(readFileSync(join(first.profile, 'plugins', 'learning.js'), 'utf8'), /e_mate_learning_search/)
+    for (const name of pluginPackages) {
+      const pluginRoot = join(first.profile, 'node_modules', ...name.split('/'))
+      const pluginManifest = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'))
+      assert.equal(pluginManifest.name, name)
+      assert.equal(pluginManifest.version, '2.0.7')
+      assert.ok(readFileSync(join(pluginRoot, pluginManifest.main)).byteLength > 0)
+      assert.ok(readFileSync(join(pluginRoot, pluginManifest.dsh.bundle.patch)).byteLength >= 2)
+    }
     const imageGeneration = readFileSync(join(first.profile, 'plugins', 'image-generation.js'), 'utf8')
     assert.match(imageGeneration, /name: "imagegen"/)
     assert.match(imageGeneration, /ctx\.jobs\.start/)
@@ -531,11 +550,6 @@ test('managed profile installation is idempotent', () => {
     assert.doesNotMatch(dumped.stdout, /- id: credentials\n  name: '@deepseek-ai\/dsh-credentials-local'\n(?!  disabled: true)/)
     assert.doesNotMatch(dumped.stdout, /- id: ui-trajectory\n  name: '@deepseek-ai\/dsh-client-ui-trajectory'\n(?!  disabled: true)/)
     assert.match(binding.zod_module_sha256, /^[0-9a-f]{64}$/)
-    const browser = readFileSync(join(first.profile, 'plugins', 'browser-computer-use.js'), 'utf8')
-    assert.match(browser, /e_mate_browser/)
-    assert.match(browser, /connectOverCDP/)
-    assert.match(browser, /ctx\.subprocess\.spawn/)
-    assert.doesNotMatch(browser, /from ["']playwright-core["']/)
     const skillAgent = readFileSync(join(first.profile, 'plugins', 'skill-hub-agent.js'), 'utf8')
     assert.doesNotMatch(skillAgent, /from ["']@deepseek-ai\/dsh-tools["']/)
     assert.match(skillAgent, /loadTargetTools/)
@@ -914,318 +928,6 @@ test('image capability stays visible and inert until its managed endpoint is con
   }
 })
 
-test('Office and OCR use Harness fs/subprocess tools and persist verified immutable artifacts', async () => {
-  const temporary = mkdtempSync(join(tmpdir(), 'e-mate-office-ocr-'))
-  try {
-    const runtimeRoot = join(temporary, 'runtime-package')
-    const payloadRoot = join(runtimeRoot, 'runtime')
-    const python = join(payloadRoot, 'python-bin')
-    const worker = join(payloadRoot, 'worker.py')
-    const models = ['det.onnx', 'rec.onnx', 'cls.onnx'].map(name => join(payloadRoot, name))
-    mkdirSync(payloadRoot, { recursive: true })
-    writeFileSync(python, 'python')
-    writeFileSync(worker, 'worker')
-    models.forEach((path, index) => writeFileSync(path, `model-${index}`))
-    const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
-    const manifest = {
-      schema_version: 1,
-      package: `@e-mate/dsh-runtime-${process.platform}-${process.arch}`,
-      version: '2.0.7',
-      os: process.platform,
-      cpu: process.arch,
-      python_version: '3.11.15',
-      python: 'runtime/python-bin',
-      python_sha256: digest(python),
-      worker: 'runtime/worker.py',
-      worker_sha256: digest(worker),
-      site_packages: 'runtime/python',
-      office: true,
-      ocr: true,
-      worker_lock_sha256: 'cea6914a347a2a9a80f61260bea9d66d7d2fa2ad7e42434e6ecdafc63d8f8fd5',
-      source_commit: '564a6b6c1d43fb6831dd4a5cd8026e472f063311',
-      payload_files: 5,
-      payload_sha256: '0'.repeat(64),
-      models: models.map(path => ({
-        path: `runtime/${path.slice(payloadRoot.length + 1)}`,
-        size: readFileSync(path).byteLength,
-        sha256: digest(path),
-      })),
-    }
-    const manifestPayload = `${JSON.stringify(manifest, null, 2)}\n`
-    writeFileSync(join(runtimeRoot, 'emate-runtime.json'), manifestPayload)
-    const binding = join(temporary, 'runtime-binding.json')
-    writeFileSync(binding, `${JSON.stringify({
-      schema_version: 1,
-      product: 'e-Mate',
-      version: '2.0.7',
-      dsh_home: join(temporary, 'dsh-home'),
-      package: manifest.package,
-      runtime_root: runtimeRoot,
-      manifest_sha256: createHash('sha256').update(manifestPayload).digest('hex'),
-      harness_commit: HARNESS_COMMIT,
-      tools_module: join(import.meta.dirname, '../../../upstream/deepseek-harness/packages/core/tools/lib/index.js'),
-      tools_module_sha256: digest(join(import.meta.dirname, '../../../upstream/deepseek-harness/packages/core/tools/lib/index.js')),
-    })}\n`)
-
-    const tools = new Map()
-    const routes = new Map()
-    const capabilities = []
-    const requests = []
-    const output = text => ({ readFrom: () => ({ text, nextOffset: Buffer.byteLength(text), lossy: false }) })
-    const subprocess = {
-      spawn(spec) {
-        const request = JSON.parse(spec.stdio.stdin.data)
-        requests.push({ request, spec })
-        let result
-        if (request.pack_id === 'ocr') {
-          result = { provider: 'rapidocr_onnxruntime', status: 'success', text: '测试文字', blocks: [{ text: '测试文字', confidence: 0.99 }], latencyMs: 12 }
-        } else if (request.operation === 'probe') {
-          result = { provider: 'python-office-formats-v1', modules: ['docx'] }
-        } else if (request.operation === 'read') {
-          result = { provider: 'python-office-formats-v1', family: request.payload.family, text: '重新打开成功', structure: { paragraph_count: 1 }, warnings: ['visual_layout_not_verified'], truncated: false }
-        } else {
-          const content = Buffer.from('verified-docx')
-          result = {
-            provider: 'python-office-formats-v1', family: request.payload.family,
-            mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            extension: '.docx', size_bytes: content.byteLength, content_base64: content.toString('base64'),
-            validation: { paragraph_count: 1 },
-          }
-        }
-        const response = JSON.stringify({ schema_version: 1, pack_id: request.pack_id, status: 'success', result })
-        return {
-          done: Promise.resolve({ exitCode: 0, signal: null }),
-          collected: { stdout: output(response), stderr: output('') },
-        }
-      },
-    }
-    const ctx = {
-      tools: { register: tool => { tools.set(tool.name, tool) } },
-      subprocess,
-      fs: {
-        resolve: async path => ({ targetKey: path, displayPath: path }),
-        stat: async () => ({ type: 'file', size: 68, version: 'v1' }),
-        readBytes: async () => Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
-      },
-      webServer: { register: route => { routes.set(route.path, route); return () => {} } },
-      get: name => name === 'emateCapabilities' ? { register: definition => { capabilities.push(definition); return () => {} } } : undefined,
-      emit: () => {},
-      effect: effect => effect(),
-    }
-    await applyOfficeOcr(ctx, { bindingPath: binding })
-    assert.deepEqual([...tools.keys()], [
-      'e_mate_ocr_extract',
-      'e_mate_office_read',
-      'e_mate_office_create',
-      'e_mate_office_edit',
-    ])
-    assert.deepEqual(capabilities.map(item => item.id), ['office', 'ocr'])
-    assert.equal((await capabilities[0].status()).state, 'ready')
-
-    const exec = { signal: new AbortController().signal, agent: { session: { header: { cwd: '/workspace' } } } }
-    const ocr = await tools.get('e_mate_ocr_extract').execute({ path: 'scan.png' }, exec)
-    assert.equal(ocr.text, '测试文字')
-    const created = await tools.get('e_mate_office_create').execute({
-      family: 'document', title: '验收文档', content: { sections: [{ paragraphs: ['内容'] }] },
-    }, exec)
-    assert.match(created.artifact_id, /^office_artifact:/)
-    const presentation = tools.get('e_mate_office_create').output.presentationMeta({}, created)
-    assert.deepEqual(presentation.eMateOfficeArtifact, {
-      artifact_id: created.artifact_id,
-      family: created.family,
-      filename: created.filename,
-      mime_type: created.mime_type,
-      size_bytes: created.size_bytes,
-      sha256: created.sha256,
-      download_url: created.download_url,
-    })
-    assert.ok(existsSync(join(temporary, 'dsh-home', 'e-mate', 'attachments', 'office', `${created.sha256}.docx`)))
-    const reopened = await tools.get('e_mate_office_read').execute({ family: 'document', artifact_id: created.artifact_id }, exec)
-    assert.equal(reopened.text, '重新打开成功')
-    assert.equal(requests.every(item => item.spec.argv[0] === python && item.spec.cwd === runtimeRoot), true)
-    assert.equal(requests.every(item => item.spec.env.PATH === undefined), true)
-    assert.equal(requests.some(item => item.request.operation === 'read' && item.spec.argv.includes('--office-read-memory-limit')), true)
-
-    const response = {
-      status: undefined, headers: undefined, body: undefined,
-      writeHead(status, headers) { this.status = status; this.headers = headers },
-      end(body) { this.body = body },
-    }
-    routes.get('/api/e-mate/office.download').handler({ method: 'GET', url: created.download_url }, response)
-    assert.equal(response.status, 200)
-    assert.equal(response.headers['Content-Type'], created.mime_type)
-    assert.equal(response.body.toString(), 'verified-docx')
-  } finally {
-    rmSync(temporary, { recursive: true, force: true })
-  }
-})
-
-test('packaged Office and OCR Workers run through the real Harness subprocess service', async t => {
-  const platformRuntime = join(import.meta.dirname, '..', '..', `dsh-runtime-${process.platform}-${process.arch}`, 'emate-runtime.json')
-  if (!existsSync(platformRuntime)) {
-    t.skip('platform Runtime package is not built on this host')
-    return
-  }
-  const dshHome = mkdtempSync(join(tmpdir(), 'e-mate-subprocess-composition-'))
-  const ctx = new Context()
-  let fiber
-  try {
-    const paths = installProfile(dshHome)
-    const runtime = loadRuntimeBinding(join(paths.profile, 'plugins', 'runtime-binding.json'))
-    fiber = await ctx.plugin(LocalSubprocessRuntime)
-    const office = await runWorker(ctx, runtime, 'office', 'probe', {}, new AbortController().signal)
-    assert.equal(office.provider, 'python-office-formats-v1')
-    for (const sample of [
-      {
-        family: 'document', extension: '.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        initial: { sections: [{ heading: 'DOCX acceptance', paragraphs: ['DOCX initial'] }], tables: [{ rows: [['phase', 'value'], ['initial', '1']] }] },
-        revised: { sections: [{ heading: 'DOCX acceptance', paragraphs: ['DOCX revised'] }] },
-      },
-      {
-        family: 'spreadsheet', extension: '.xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        initial: { sheets: [{ name: 'Acceptance', rows: [['phase', 'value'], ['initial', 1]] }] },
-        revised: { sheets: [{ name: 'Acceptance', rows: [['phase', 'value'], ['revised', 2]] }] },
-      },
-      {
-        family: 'presentation', extension: '.pptx', mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        initial: { slides: [{ title: 'PPTX initial', bullets: ['acceptance'] }] },
-        revised: { slides: [{ title: 'PPTX revised', bullets: ['acceptance'] }] },
-      },
-      {
-        family: 'pdf', extension: '.pdf', mime: 'application/pdf',
-        initial: { sections: [{ heading: 'PDF acceptance', paragraphs: ['PDF initial'] }] },
-        revised: { sections: [{ heading: 'PDF acceptance', paragraphs: ['PDF revised'] }] },
-      },
-    ]) {
-      const created = await runWorker(ctx, runtime, 'office', 'create', {
-        family: sample.family, title: `${sample.family} initial`, ...sample.initial,
-      }, new AbortController().signal)
-      assert.equal(created.extension, sample.extension)
-      assert.equal(created.mime_type, sample.mime)
-      assert.ok(created.size_bytes > 0)
-      const reopened = await runWorker(ctx, runtime, 'office', 'read', {
-        family: sample.family, content_base64: created.content_base64,
-      }, new AbortController().signal)
-      assert.match(reopened.text, /initial/i)
-      const edited = await runWorker(ctx, runtime, 'office', 'edit', {
-        family: sample.family, title: `${sample.family} revised`, content_base64: created.content_base64, ...sample.revised,
-      }, new AbortController().signal)
-      assert.equal(edited.validation.source_opened, true)
-      const reopenedEdit = await runWorker(ctx, runtime, 'office', 'read', {
-        family: sample.family, content_base64: edited.content_base64,
-      }, new AbortController().signal)
-      assert.match(reopenedEdit.text, /revised/i)
-    }
-    const ocr = await runWorker(ctx, runtime, 'ocr', 'extract', {
-      content_base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-    }, new AbortController().signal)
-    assert.equal(ocr.provider, 'rapidocr_onnxruntime')
-  } finally {
-    await fiber?.dispose()
-    await ctx.fiber.dispose()
-    rmSync(dshHome, { recursive: true, force: true })
-  }
-})
-
-test('Browser Computer Use drives packaged Chromium through Harness subprocess and attachments', async t => {
-  const platformBrowser = join(import.meta.dirname, '..', '..', `dsh-browser-${process.platform}-${process.arch}`, 'emate-browser.json')
-  const platformRuntime = join(import.meta.dirname, '..', '..', `dsh-runtime-${process.platform}-${process.arch}`, 'emate-runtime.json')
-  if (!existsSync(platformBrowser) || !existsSync(platformRuntime)) {
-    t.skip('platform Browser or Runtime package is not built on this host')
-    return
-  }
-  const dshHome = mkdtempSync(join(tmpdir(), 'e-mate-browser-composition-'))
-  const server = createServer((req, res) => {
-    if (req.url === '/file.txt') {
-      const content = Buffer.from('e-Mate browser download')
-      res.writeHead(200, {
-        'Content-Type': 'text/plain',
-        'Content-Length': String(content.byteLength),
-        'Content-Disposition': 'attachment; filename="browser-proof.txt"',
-      })
-      res.end(content)
-      return
-    }
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-    res.end('<!doctype html><title>e-Mate CU</title><input id="name"><input id="secret" type="password"><button id="go" onclick="document.querySelector(\'#result\').textContent=document.querySelector(\'#name\').value">提交</button><p id="result">等待</p><a id="download" href="/file.txt" download>下载</a>')
-  })
-  await new Promise((resolveListen, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', resolveListen)
-  })
-  const port = server.address().port
-  const context = new Context()
-  const cleanups = []
-  let subprocessFiber
-  let attachmentFiber
-  try {
-    const paths = installProfile(dshHome)
-    subprocessFiber = await context.plugin(LocalSubprocessRuntime)
-    attachmentFiber = await context.plugin(LocalAttachmentStore, { dshHome })
-    const tools = new Map()
-    const routes = new Map()
-    const capabilities = []
-    const browserContext = {
-      tools: { register: tool => { tools.set(tool.name, tool); return () => { tools.delete(tool.name) } } },
-      subprocess: context.subprocess,
-      attachments: context.attachments,
-      webServer: { register: route => { routes.set(route.path, route); return () => { routes.delete(route.path) } } },
-      get: name => name === 'emateCapabilities'
-        ? { register: definition => { capabilities.push(definition); return () => {} } }
-        : undefined,
-      effect(effect) {
-        const cleanup = effect()
-        if (typeof cleanup === 'function') cleanups.push(cleanup)
-        return cleanup
-      },
-    }
-    await applyBrowser(browserContext, { bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json') })
-    assert.deepEqual([...tools.keys()], ['e_mate_browser'])
-    assert.deepEqual(capabilities.map(item => item.id), ['browser'])
-    assert.equal((await capabilities[0].status()).state, 'ready')
-
-    const exec = { signal: new AbortController().signal, agent: { id: 'browser-test-session' } }
-    const browser = tools.get('e_mate_browser')
-    const navigated = await browser.execute({ action: 'navigate', url: `http://127.0.0.1:${port}/` }, exec)
-    assert.equal(navigated.title, 'e-Mate CU')
-    assert.match(navigated.text, /提交/u)
-    await browser.execute({ action: 'fill', selector: '#name', text: '真实动作' }, exec)
-    await assert.rejects(
-      browser.execute({ action: 'fill', selector: '#secret', text: 'must-not-enter' }, exec),
-      /does not accept passwords/,
-    )
-    await browser.execute({ action: 'click', selector: '#go' }, exec)
-    const snapshot = await browser.execute({ action: 'snapshot' }, exec)
-    assert.match(snapshot.text, /真实动作/u)
-    const screenshot = await browser.execute({ action: 'screenshot' }, exec)
-    assert.equal(screenshot.screenshot.mediaType, 'image/png')
-    assert.ok(screenshot.screenshot.bytes > 0)
-    const downloaded = await browser.execute({ action: 'download', selector: '#download' }, exec)
-    assert.equal(downloaded.download.filename, 'browser-proof.txt')
-    assert.equal(downloaded.download.sha256, createHash('sha256').update('e-Mate browser download').digest('hex'))
-
-    const response = {
-      status: undefined, headers: undefined, body: undefined,
-      writeHead(status, headers) { this.status = status; this.headers = headers },
-      end(body) { this.body = body },
-    }
-    routes.get('/api/e-mate/browser.download').handler({ method: 'GET', url: downloaded.download.download_url }, response)
-    assert.equal(response.status, 200)
-    assert.equal(response.body.toString(), 'e-Mate browser download')
-    await assert.rejects(
-      browser.execute({ action: 'navigate', url: 'http://169.254.169.254/latest/meta-data/' }, exec),
-      /link-local or cloud-metadata/,
-    )
-  } finally {
-    for (const cleanup of cleanups.reverse()) await cleanup()
-    await attachmentFiber?.dispose()
-    await subprocessFiber?.dispose()
-    await context.fiber.dispose()
-    await new Promise(resolveClose => server.close(resolveClose))
-    rmSync(dshHome, { recursive: true, force: true })
-  }
-})
-
 test('image generation reuses the Model Gateway with Harness Jobs and attachments', async () => {
   const temporary = mkdtempSync(join(tmpdir(), 'e-mate-image-generation-'))
   const context = new Context()
@@ -1399,290 +1101,6 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     for (const cleanup of cleanups.reverse()) await cleanup()
     await attachmentFiber?.dispose()
     await context.fiber.dispose()
-    rmSync(temporary, { recursive: true, force: true })
-  }
-})
-
-test('legacy CowAgent memory migration is copy-on-write, idempotent, and bound to one target workspace', async () => {
-  const temporary = mkdtempSync(join(tmpdir(), 'e-mate-legacy-memory-'))
-  const source = join(temporary, 'ECoreX')
-  const dshHome = join(temporary, 'dsh-home')
-  mkdirSync(join(source, 'memory', 'dreams'), { recursive: true })
-  mkdirSync(join(source, 'memory', 'evolution'), { recursive: true })
-  mkdirSync(join(source, 'memory', 'users', 'alice'), { recursive: true })
-  const main = join(source, 'MEMORY.md')
-  writeFileSync(main, 'Keep this project-scoped fact.')
-  writeFileSync(join(source, 'memory', 'dreams', '2026-08-01.md'), 'A historical dream.')
-  writeFileSync(join(source, 'memory', 'evolution', '2026-08-01.md'), 'A historical learning.')
-  writeFileSync(join(source, 'memory', 'users', 'alice', 'MEMORY.md'), 'Do not share this user-scoped memory.')
-  const before = fileDigest(main)
-  const records = new Map()
-  const table = {
-    entries: () => records.entries(),
-    put: async (id, record) => { records.set(id, record) },
-  }
-  const workspace = { id: 'workspace-legacy', path: realpathSync(source), status: async () => 'ok' }
-  const ctx = { workspaceRegistry: { list: () => [workspace] } }
-  try {
-    const first = await migrateLegacyMemory(ctx, table, { dshHome, sources: [source] })
-    assert.deepEqual(
-      { imported: first.imported_records, reused: first.reused_records, pending: first.pending_binding },
-      { imported: 3, reused: 0, pending: false },
-    )
-    assert.equal([...records.values()].some(record => record.content.includes('Do not share')), false)
-    const second = await migrateLegacyMemory(ctx, table, { dshHome, sources: [source] })
-    assert.deepEqual(
-      { imported: second.imported_records, reused: second.reused_records },
-      { imported: 0, reused: 3 },
-    )
-    assert.equal(fileDigest(main), before)
-    writeFileSync(main, 'Changed after completed migration.')
-    await assert.rejects(migrateLegacyMemory(ctx, table, { dshHome, sources: [source] }), /changed after its completed migration/)
-    assert.equal(records.size, 3)
-  } finally {
-    rmSync(temporary, { recursive: true, force: true })
-  }
-})
-
-test('project memory is durably isolated by the real Harness workspace registry and storage domain', async () => {
-  const temporary = mkdtempSync(join(tmpdir(), 'e-mate-memory-isolation-'))
-  const projectA = join(temporary, 'project-a')
-  const projectB = join(temporary, 'project-b')
-  const unowned = join(temporary, 'unowned')
-  mkdirSync(projectA)
-  mkdirSync(projectB)
-  mkdirSync(unowned)
-  mkdirSync(join(projectA, 'memory', 'dreams'), { recursive: true })
-  mkdirSync(join(projectA, 'memory', 'evolution'), { recursive: true })
-  mkdirSync(join(projectA, 'memory', 'users', 'legacy-user'), { recursive: true })
-  const legacyMemoryFiles = [
-    [join(projectA, 'MEMORY.md'), 'Legacy project decision: preserve the verified local Runtime.'],
-    [join(projectA, 'memory', 'dreams', '2026-08-01.md'), 'Legacy dream: consolidated explicit project evidence only.'],
-    [join(projectA, 'memory', 'evolution', '2026-08-01.md'), 'Legacy learning: keep project memory isolated.'],
-    [join(projectA, 'memory', 'users', 'legacy-user', 'MEMORY.md'), 'Private legacy user memory must not become workspace shared.'],
-  ]
-  for (const [path, content] of legacyMemoryFiles) writeFileSync(path, content)
-  const legacyMemoryBefore = new Map(legacyMemoryFiles.map(([path]) => [path, fileDigest(path)]))
-  const canonicalA = realpathSync(projectA)
-  const canonicalB = realpathSync(projectB)
-  const storageRoot = join(temporary, 'storages')
-  const dshHome = join(temporary, 'dsh-home')
-  const ctx = new Context()
-  const memoryCleanups = []
-  let workspaceFiber
-  let backend
-  let facility
-  let unregisterBackend
-  let unmountDomain
-  try {
-    const paths = installProfile(dshHome)
-    await ctx.plugin(Storage)
-    backend = new JsonStorageBackend(storageRoot)
-    unregisterBackend = ctx.storage.backend.register('json', backend)
-    facility = new DomainFacility(ctx, { backend: 'json', routes: {} })
-    unmountDomain = ctx.storage.mount('domain', facility)
-    ctx.provide('storageDomain', facility)
-    ctx.provide('sessionPersistence', {
-      list: async () => [
-        { version: 0, id: 'session-a2', createdAt: 3, cwd: projectA },
-        { version: 0, id: 'session-a', createdAt: 2, cwd: projectA },
-        { version: 0, id: 'session-b', createdAt: 1, cwd: projectB },
-      ],
-      load: async () => { throw new Error('memory isolation must not load session event bodies') },
-      inspect: async () => { throw new Error('memory isolation must not inspect session event bodies') },
-    })
-    workspaceFiber = await ctx.plugin(WorkspaceRegistry)
-    assert.deepEqual(
-      ctx.workspaceRegistry.list().map(workspace => [workspace.path, [...workspace.sessionIds]]).sort(),
-      [[canonicalA, ['session-a2', 'session-a']], [canonicalB, ['session-b']]].sort(),
-    )
-
-    const tools = new Map()
-    let memoryService
-    await applyMemory({
-      tools: { register: tool => { tools.set(tool.name, tool); return () => { tools.delete(tool.name) } } },
-      workspaceRegistry: ctx.workspaceRegistry,
-      storageDomain: facility,
-      provide: (name, value) => {
-        assert.equal(name, 'emateMemory')
-        memoryService = value
-      },
-      effect(effect) {
-        const cleanup = effect()
-        if (typeof cleanup === 'function') memoryCleanups.push(cleanup)
-        return cleanup
-      },
-    }, {
-      bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json'),
-      dshHome,
-      legacyMemorySources: [projectA],
-    })
-    assert.equal(typeof memoryService.remember, 'function')
-    assert.equal(memoryService.legacyMigration.imported_records, 3)
-    assert.equal(memoryService.legacyMigration.pending_binding, false)
-    assert.deepEqual([...tools.keys()].sort(), ['e_mate_memory_remember', 'e_mate_memory_search'])
-
-    const execution = (id, cwd) => ({
-      signal: new AbortController().signal,
-      agent: { id, session: { header: { version: 0, id, createdAt: 0, ...(cwd === undefined ? {} : { cwd }) } } },
-    })
-    const remember = tools.get('e_mate_memory_remember')
-    const search = tools.get('e_mate_memory_search')
-    assert.deepEqual(
-      (await search.execute({ query: 'Legacy project decision' }, execution('session-a', projectA))).items.map(item => item.content),
-      ['Legacy project decision: preserve the verified local Runtime.'],
-    )
-    assert.deepEqual((await search.execute({ query: 'Private legacy user memory' }, execution('session-a', projectA))).items, [])
-    const rememberedA = await remember.execute({ content: 'Alpha project fact', tags: ['alpha'] }, execution('session-a', projectA))
-    assert.equal(rememberedA.scope, 'workspace')
-    assert.deepEqual((await search.execute({ query: 'alpha' }, execution('session-a', projectA))).items.map(item => item.content), ['Alpha project fact'])
-    assert.deepEqual((await search.execute({ query: 'alpha' }, execution('session-a2', projectA))).items.map(item => item.content), ['Alpha project fact'])
-    assert.deepEqual((await search.execute({ query: 'alpha' }, execution('session-b', projectB))).items, [])
-
-    await remember.execute({ content: 'Beta project fact' }, execution('session-b', projectB))
-    assert.deepEqual((await search.execute({ query: 'Alpha project fact' }, execution('session-a', projectA))).items.map(item => item.content), ['Alpha project fact'])
-    await assert.rejects(
-      search.execute({}, execution('session-b', projectA)),
-      /e-Mate session is not bound to its owning project/,
-    )
-
-    await remember.execute({ content: 'Session C fact' }, execution('session-c'))
-    assert.deepEqual((await search.execute({}, execution('session-d'))).items, [])
-    assert.deepEqual((await search.execute({}, execution('session-c'))).items.map(item => item.content), ['Session C fact'])
-    await remember.execute({ content: 'Unowned CWD fact' }, execution('session-e', unowned))
-    assert.deepEqual((await search.execute({}, execution('session-f', unowned))).items, [])
-
-    const llmResponses = []
-    const llmCalls = []
-    const jobs = []
-    const controllers = []
-    let statusListener
-    const pluginCtx = {
-      tools: { register: tool => { tools.set(tool.name, tool); return () => { tools.delete(tool.name) } } },
-      jobs: {
-        attachController: kind => {
-          controllers.push(kind)
-          return () => {}
-        },
-        start(spec) {
-          const id = `job-${jobs.length + 1}`
-          const run = spec.run()
-          jobs.push({ id, spec, ...run })
-          return id
-        },
-      },
-      llm: {
-        async *stream(options) {
-          llmCalls.push(options)
-          const text = llmResponses.shift()
-          if (text === undefined) throw new Error('unexpected reflection model call')
-          yield { type: 'block-start', index: 0, blockType: 'text' }
-          yield { type: 'text-delta', index: 0, text }
-          yield { type: 'block-end', index: 0, block: { type: 'text', text } }
-          yield { type: 'finish', reason: { kind: 'stop' } }
-        },
-      },
-      emateMemory: memoryService,
-      effect(effect) {
-        const cleanup = effect()
-        if (typeof cleanup === 'function') memoryCleanups.push(cleanup)
-        return cleanup
-      },
-      on(event, listener) {
-        assert.equal(event, 'agent/status')
-        statusListener = listener
-        return () => {}
-      },
-      logger: { warn: () => {} },
-    }
-    await applyDream(pluginCtx, { bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json') })
-    await applyLearning(pluginCtx, { bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json') })
-    assert.deepEqual(controllers.sort(), ['emate-dream', 'emate-learning'])
-
-    const messages = Array.from({ length: 6 }, (_, index) => [
-      {
-        id: `user-${index + 1}`,
-        source: { kind: 'user' },
-        content: [{ type: 'text', text: `Explicit project request ${index + 1}` }],
-      },
-      {
-        id: `assistant-${index + 1}`,
-        source: { kind: 'model' },
-        content: [{ type: 'text', text: `Explicit project result ${index + 1}` }],
-      },
-    ]).flat()
-    const agent = (id, cwd, projectedMessages = messages) => ({
-      id,
-      options: { provider: 'fallback-provider', model: 'fallback-model' },
-      session: {
-        header: { version: 0, id, createdAt: 0, ...(cwd === undefined ? {} : { cwd }) },
-        deriveMessages: () => projectedMessages,
-        requestHeader: () => ({ config: { provider: 'routed-provider', model: 'routed-model' } }),
-      },
-    })
-    const agentA = agent('session-a', projectA)
-    const agentB = agent('session-b', projectB)
-    const reflectExec = value => ({ agent: value, signal: new AbortController().signal })
-
-    llmResponses.push(JSON.stringify({
-      distilled_memory: ['The project contains six explicit requests.'],
-      dream: 'Consolidated only the supplied project evidence.',
-    }))
-    const dreamStarted = await tools.get('e_mate_dream_distill').execute({}, reflectExec(agentA))
-    assert.equal(dreamStarted.status, 'running')
-    assert.equal((await jobs.find(job => job.id === dreamStarted.job_id).done).status, 'completed')
-    assert.equal(llmCalls[0].provider, 'routed-provider')
-    assert.equal(llmCalls[0].model, 'routed-model')
-    assert.equal(llmCalls[0].sessionId, 'session-a')
-    assert.equal((await tools.get('e_mate_dream_search').execute({ query: 'Consolidated only' }, reflectExec(agentA))).items.length, 1)
-    assert.deepEqual((await tools.get('e_mate_dream_search').execute({}, reflectExec(agentB))).items, [])
-    const dreamAgain = await tools.get('e_mate_dream_distill').execute({}, reflectExec(agentA))
-    assert.equal((await jobs.find(job => job.id === dreamAgain.job_id).done).status, 'completed')
-    assert.equal(llmCalls.length, 1)
-
-    llmResponses.push(JSON.stringify({
-      decision: 'learn',
-      items: [{ content: 'Keep the six explicit project requests together.', evidence_message_ids: ['user-1', 'user-6'] }],
-    }))
-    statusListener({ agent: agentA, status: 'idle' })
-    assert.equal((await jobs.at(-1).done).status, 'completed')
-    const learningA = await tools.get('e_mate_learning_search').execute({ query: 'six explicit project requests' }, reflectExec(agentA))
-    assert.equal(learningA.items.length, 1)
-    assert.deepEqual(learningA.items[0].evidence_message_ids, ['user-1', 'user-6'])
-    assert.deepEqual((await tools.get('e_mate_learning_search').execute({}, reflectExec(agentB))).items, [])
-
-    llmResponses.push(JSON.stringify({
-      decision: 'learn',
-      items: [{ content: 'Unsupported learning', evidence_message_ids: ['missing-message'] }],
-    }))
-    statusListener({ agent: agentB, status: 'idle' })
-    assert.equal((await jobs.at(-1).done).status, 'failed')
-    assert.deepEqual((await tools.get('e_mate_learning_search').execute({}, reflectExec(agentB))).items, [])
-
-    const agentC = agent('session-c')
-    llmResponses.push(JSON.stringify({ decision: 'silent', items: [] }))
-    statusListener({ agent: agentC, status: 'idle' })
-    assert.equal((await jobs.at(-1).done).status, 'completed')
-    assert.deepEqual((await tools.get('e_mate_learning_search').execute({}, reflectExec(agentC))).items, [])
-
-    const stored = readFileSync(join(storageRoot, 'emate_memory.json'), 'utf8')
-    assert.equal(stored.includes(canonicalA), false)
-    assert.equal(stored.includes(canonicalB), false)
-    const migrationReceipt = JSON.parse(readFileSync(join(dshHome, 'e-mate', 'migrations', 'legacy-memory-v1.json'), 'utf8'))
-    assert.equal(migrationReceipt.records.length, 3)
-    assert.equal(migrationReceipt.blocked_user_scoped_files.length, 1)
-    assert.equal(stored.includes('Private legacy user memory'), false)
-    for (const [path, before] of legacyMemoryBefore) assert.equal(fileDigest(path), before)
-    rmSync(projectA, { recursive: true })
-    await assert.rejects(search.execute({}, execution('session-a', projectA)))
-  } finally {
-    for (const cleanup of memoryCleanups.reverse()) await cleanup()
-    await workspaceFiber?.dispose()
-    await facility?.closeAll()
-    unmountDomain?.()
-    unregisterBackend?.()
-    await backend?.close()
-    await ctx.fiber.dispose()
     rmSync(temporary, { recursive: true, force: true })
   }
 })
@@ -2359,32 +1777,15 @@ test('audit records only real Harness usage and uploads an idempotent durable ou
   }
 })
 
-test('environment check validates real platform closures and otherwise fails closed', async () => {
-  const source = readFileSync(join(import.meta.dirname, '..', 'src', 'e-mate.ts'), 'utf8')
-  assert.match(source, /rmSync\(profile, \{ recursive: true, force: true, maxRetries: 5, retryDelay: 200 \}\)/)
+test('environment check validates the pinned Harness and embedded plugin closure', async () => {
   const dshHome = join(tmpdir(), `e-mate-check-${process.pid}`)
   const report = await checkEnvironment({ dshHome, includeProfile: false })
   assert.equal(report.checks.find(item => item.id === 'harness')?.status, 'pass')
-  const runtimeBuilt = existsSync(join(
-    import.meta.dirname,
-    '..',
-    '..',
-    `dsh-runtime-${process.platform}-${process.arch}`,
-    'emate-runtime.json',
-  ))
-  assert.equal(report.checks.find(item => item.id === 'platform_runtime')?.status, runtimeBuilt ? 'pass' : 'fail')
-  assert.equal(report.checks.find(item => item.id === 'office_worker')?.status, runtimeBuilt ? 'pass' : 'fail')
-  assert.equal(report.checks.find(item => item.id === 'ocr_worker')?.status, runtimeBuilt ? 'pass' : 'fail')
-  const browserBuilt = existsSync(join(
-    import.meta.dirname,
-    '..',
-    '..',
-    `dsh-browser-${process.platform}-${process.arch}`,
-    'emate-browser.json',
-  ))
-  assert.equal(report.ok, runtimeBuilt && browserBuilt)
-  assert.equal(report.checks.find(item => item.id === 'browser_runtime')?.status, browserBuilt ? 'pass' : 'fail')
-  assert.equal(report.checks.find(item => item.id === 'chromium')?.status, browserBuilt ? 'pass' : 'fail')
+  assert.equal(report.checks.find(item => item.id === 'plugin_bundles')?.status, 'pass')
+  for (const removedId of [
+    'platform_runtime', 'browser_runtime', 'office_worker', 'ocr_worker', 'chromium',
+  ]) assert.equal(report.checks.some(item => item.id === removedId), false)
+  assert.equal(report.ok, true)
 })
 
 test('health route reports real projected job activity and rejects writes', () => {

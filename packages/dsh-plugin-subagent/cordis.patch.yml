@@ -1,0 +1,5 @@
+# The pinned Harness standard preset already owns the correct host/agent-plane
+# composition. Adding a duplicate provider, Tool, Job, Store, or router would
+# collide with that authoritative composition, so this compatibility bundle is
+# intentionally an empty patch.
+[]

@@ -4,8 +4,11 @@ package keeps its own LICENSE file under runtime/harness/node_modules.
 
 Dependencies installed by npm keep their license files in their own packages:
 - fflate 0.8.3 — MIT
-- playwright-core 1.61.1 — Apache-2.0
 - yaml 2.9.0 — ISC
+
+The embedded DSH plugin bundles retain their own LICENSE and third-party notice
+files under profile/bundles. They contain no bundled Python, Office runtime,
+OCR model, Chromium browser, or legacy e-Mate Runtime/Browser platform package.
 
 The e-Mate send-button icon uses Lucide Send 0.561.0 under the ISC License:
 
@@ -25,6 +28,5 @@ LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
 OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
 
-Platform Runtime and Browser packages carry their complete generated
-THIRD_PARTY_NOTICES.txt files. The release evidence artifact adds one SPDX 2.3
-SBOM and an aggregate license inventory for the exact seven published tarballs.
+The release evidence artifact adds one SPDX 2.3 SBOM and an aggregate license
+inventory for the single @e-mate/dsh tarball and its embedded plugin bundles.

@@ -1,6 +1,6 @@
 # Performance and acceptance
 
-This document is a release gate for e-Mate 2.0.7. A scenario is `passed` only with commands, screenshots or traces, immutable IDs, and the observed result. Missing enterprise accounts, credentials, platform bundles, or real external targets are `blocked`; mocks cannot close a production acceptance item.
+This document is a release gate for e-Mate 2.0.7. A scenario is `passed` only with commands, screenshots or traces, immutable IDs, and the observed result. Missing enterprise accounts, credentials, platform capabilities, or real external targets are `blocked`; mocks cannot close a production acceptance item.
 
 ## Core browser and performance gates
 
@@ -84,6 +84,10 @@ Before production access, the local automated gate must prove that one real targ
 
 ## Computer Use evidence set
 
-The release bundle also covers responsive login/refresh/deep links, all real chat states, image generation/editing including concurrency, DOCX/XLSX/PPTX/PDF create-read-edit-export-reopen, OCR, browser search/interaction/download, Feishu/Tencent Docs/WeChat/DingTalk connection and reversible actions, non-deleted legacy sessions, installation/reinstallation/upgrade/rollback, shortcut single-instance behavior, CLI status/stop/check, Skill Hub cross-user publish/install, and Agent-driven update.
+The release evidence also covers responsive login/refresh/deep links, all real chat states, image generation/editing including concurrency, DOCX/XLSX/PPTX/PDF create-read-edit-export-reopen, OCR/Vision, browser search/interaction/download, Feishu/Tencent Docs/WeChat/DingTalk connection and reversible actions, non-deleted legacy sessions, installation/reinstallation/upgrade/rollback, shortcut single-instance behavior, CLI status/stop/check, Skill Hub cross-user publish/install, and Agent-driven update.
+
+Office, OCR/Vision and browser rows close only with the selected bundle's real result; installed metadata is not evidence. Vision/OCR remains `blocked` until the rc.5 enterprise model-policy seam exists and passes a governed request. Windows browser acceptance must prove `@playwright/mcp@0.0.78` uses the existing Microsoft Edge, receives the exact Harness workspace/permission scope, performs no browser download, isolates sessions, cleans up, and drives Browser Panel through target events; until then the expected status is `PLAYWRIGHT_MCP_EDGE_UNVERIFIED`/`setup-required`. macOS Ego Browser requires the equivalent real launch, permission, isolation, cleanup and UI evidence and remains setup-required meanwhile.
+
+The 5,000-event reverse-scroll frame-drop percentage is retained in traces only as a diagnostic. It has no pass/fail threshold and cannot by itself block S04 or S12; the FPS, heap, long-task, event-to-paint and leak budgets above remain binding.
 
 Each run stores the starting database/snapshot identity, exact test data, screenshots, trace/artifact paths, relevant audit/fact/receipt IDs, cleanup result, and one of `passed` or `blocked`.

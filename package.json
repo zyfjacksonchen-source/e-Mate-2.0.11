@@ -14,9 +14,9 @@
   "scripts": {
     "check:target": "node scripts/check-target.mjs",
     "performance:fixture": "node scripts/create-performance-fixture.mjs",
-    "test": "pnpm -r --if-present test",
+    "test": "pnpm run build && pnpm -r --filter './packages/dsh-plugin-*' --workspace-concurrency=4 --if-present test && pnpm --filter @e-mate/dsh test",
     "test:release": "node --test scripts/release.test.mjs",
-    "build": "pnpm -r --if-present build",
+    "build": "pnpm -r --filter './packages/dsh-plugin-*' --workspace-concurrency=4 --if-present build && pnpm --filter @e-mate/dsh build",
     "enterprise:check": "pnpm --dir enterprise check",
     "enterprise:test": "pnpm --dir enterprise test",
     "enterprise:build": "pnpm --dir enterprise build",

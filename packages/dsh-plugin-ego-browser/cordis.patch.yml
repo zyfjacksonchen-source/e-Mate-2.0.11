@@ -1,0 +1,6 @@
+# This row contributes one Skill through the pinned Harness registry. Browser
+# state, CDP transport, subprocess execution, and approvals remain owned by
+# ego-browser and the existing Harness Bash/permission services.
+- insert:
+    - id: emate-ego-browser-skill
+      name: '@e-mate/dsh-plugin-ego-browser'

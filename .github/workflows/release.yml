@@ -3,10 +3,12 @@ name: Release e-Mate
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the exact validated tarballs to npm. Must run from e-mate-v2.0.7.
+        description: Publish the exact validated tarball to npm. Must run from e-mate-v2.0.7.
         required: true
         type: boolean
         default: false
@@ -22,64 +24,8 @@ env:
   DSH_TELEMETRY_DISABLED: '1'
 
 jobs:
-  platform:
-    name: Pack ${{ matrix.platform }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: darwin-arm64
-            runner: macos-15
-          - platform: darwin-x64
-            runner: macos-15-intel
-          - platform: win32-x64
-            runner: windows-2025
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          submodules: recursive
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: pnpm
-          cache-dependency-path: |
-            pnpm-lock.yaml
-            upstream/deepseek-harness/pnpm-lock.yaml
-
-      - name: Install exact workspaces
-        shell: bash
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --dir upstream/deepseek-harness install --frozen-lockfile
-
-      - name: Pack Runtime and Browser platform packages
-        shell: bash
-        run: |
-          pnpm --dir packages/dsh-runtime-${{ matrix.platform }} pack --pack-destination ../../dist/npm
-          pnpm --dir packages/dsh-browser-${{ matrix.platform }} pack --pack-destination ../../dist/npm
-
-      - name: Check package metadata
-        shell: bash
-        run: |
-          pnpm --dir upstream/deepseek-harness exec publint ../../dist/npm/e-mate-dsh-runtime-${{ matrix.platform }}-2.0.7.tgz
-          pnpm --dir upstream/deepseek-harness exec publint ../../dist/npm/e-mate-dsh-browser-${{ matrix.platform }}-2.0.7.tgz
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: e-mate-platform-${{ matrix.platform }}
-          path: dist/npm/*.tgz
-          if-no-files-found: error
-          retention-days: 7
-
-  main:
-    name: Pack main npm package
+  pack:
+    name: Build and pack npm tarball
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -109,27 +55,30 @@ jobs:
       - name: Build pinned DeepSeek Harness
         run: pnpm --dir upstream/deepseek-harness run build
 
-      - name: Test and pack the same main bytes
+      - name: Build and test
         run: |
           pnpm check:target
-          pnpm --filter @e-mate/dsh test
+          pnpm test
           pnpm enterprise:check
           pnpm enterprise:test
           pnpm enterprise:build
           node --test scripts/release.test.mjs
+
+      - name: Pack the release tarball
+        run: |
           pnpm --filter @e-mate/dsh pack --pack-destination dist/npm
           pnpm --dir upstream/deepseek-harness exec publint ../../dist/npm/e-mate-dsh-2.0.7.tgz
 
       - uses: actions/upload-artifact@v4
         with:
-          name: e-mate-main
+          name: e-mate-npm-tarball
           path: dist/npm/*.tgz
           if-no-files-found: error
           retention-days: 7
 
   clean-install:
     name: Clean install ${{ matrix.platform }}
-    needs: [platform, main]
+    needs: pack
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -145,12 +94,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: e-mate-main
-          path: dist/npm
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: e-mate-platform-${{ matrix.platform }}
+          name: e-mate-npm-tarball
           path: dist/npm
 
       - uses: actions/setup-node@v6
@@ -166,7 +110,7 @@ jobs:
         run: |
           set -euo pipefail
           prefix="$RUNNER_TEMP/e-mate-prefix"
-          npm install --global --prefix "$prefix" --no-audit --no-fund dist/npm/*.tgz
+          npm install --global --prefix "$prefix" --no-audit --no-fund dist/npm/e-mate-dsh-2.0.7.tgz
           npm_root="$(npm root --global --prefix "$prefix")"
           cli="$npm_root/@e-mate/dsh/lib/bin.js"
           test -f "$cli"
@@ -181,6 +125,7 @@ jobs:
             exit 1
           fi
           node "$cli" setup
+          node "$cli" setup
           if ! node "$cli" setup --check --json > "$RUNNER_TEMP/e-mate-installed-check.json"; then
             cat "$RUNNER_TEMP/e-mate-installed-check.json"
             exit 1
@@ -190,7 +135,7 @@ jobs:
 
   evidence:
     name: Verify release set and generate evidence
-    needs: [platform, main]
+    needs: pack
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -206,9 +151,8 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: e-mate-*
+          name: e-mate-npm-tarball
           path: dist/npm
-          merge-multiple: true
 
       - name: Generate SHA256, manifest, SPDX and license inventory
         run: node scripts/release.mjs evidence --from dist/npm --out dist/release
@@ -228,7 +172,7 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Publish platform packages then main package
+    name: Publish exact npm tarball
     if: inputs.publish
     needs: [clean-install, evidence]
     runs-on: ubuntu-24.04
@@ -302,9 +246,23 @@ jobs:
           npm_root="$(npm root --global --prefix "$prefix")"
           cli="$npm_root/@e-mate/dsh/lib/bin.js"
           test "$(node "$cli" --version)" = '2.0.7'
-          test -f "$npm_root/@e-mate/dsh-runtime-${{ matrix.platform }}/package.json"
-          test -f "$npm_root/@e-mate/dsh-browser-${{ matrix.platform }}/package.json"
+          test -f "$npm_root/@e-mate/dsh/profile/bundles/registry.json"
           EMATE_STAGING_CHECK=1 node "$cli" setup --check --json > "$RUNNER_TEMP/e-mate-registry-check.json"
+          node "$cli" setup
+          update_json="$(node "$cli" update --version 2.0.7 --json)"
+          request_id="$(node -e 'const v=JSON.parse(process.argv[1]); if(typeof v.request_id!=="string") process.exit(1); process.stdout.write(v.request_id)' "$update_json")"
+          status_json='{}'
+          for attempt in {1..180}; do
+            status_json="$(node "$cli" status 2>/dev/null || true)"
+            if node -e 'const v=JSON.parse(process.argv[1]); const u=v.latest_update; process.exit(u?.request_id===process.argv[2] && new Set(["completed","rolled-back","rollback-failed","failed-before-change"]).has(u.status) ? 0 : 1)' "$status_json" "$request_id"; then
+              break
+            fi
+            sleep 1
+          done
+          node -e 'const v=JSON.parse(process.argv[1]); const u=v.latest_update; if(u?.request_id!==process.argv[2] || u.status!=="completed" || u.installed_version!=="2.0.7") throw new Error(JSON.stringify(u))' "$status_json" "$request_id"
+          receipt="$DSH_HOME/e-mate/migrations/online-update-$request_id.json"
+          node -e 'const r=require(process.argv[1]); const sri=/^sha512-[A-Za-z0-9+/]{86}==$/; if(r.status!=="completed" || !sri.test(r.installed_package_integrity) || !sri.test(r.previous_package_integrity)) throw new Error(JSON.stringify(r))' "$receipt"
+          node "$cli" stop
 
   r2:
     name: Publish immutable R2 download objects

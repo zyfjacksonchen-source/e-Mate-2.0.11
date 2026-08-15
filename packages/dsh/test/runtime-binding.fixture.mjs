@@ -23,7 +23,6 @@ export function installTestProfile(dshHome) {
   const storageRequire = createRequire(existsSync(storagePackage)
     ? join(storagePackage, 'package.json')
     : join(harnessRoot, 'package.json'))
-  const packageRequire = createRequire(new URL('../package.json', import.meta.url))
   const modules = {
     tools_module: sourceModule('packages/core/tools', '@deepseek-ai/dsh-tools'),
     storage_domain_module: sourceModule('packages/storage/storage-domain', '@deepseek-ai/dsh-storage-domain'),
@@ -31,7 +30,6 @@ export function installTestProfile(dshHome) {
     credentials_module: sourceModule('packages/credentials/credentials', '@deepseek-ai/dsh-credentials'),
     launch_environment_module: sourceModule('packages/util/launch-environment', '@deepseek-ai/dsh-launch-environment'),
     zod_module: storageRequire.resolve('zod'),
-    playwright_module: packageRequire.resolve('playwright-core'),
   }
   const binding = {
     schema_version: 1,
