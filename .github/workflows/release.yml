@@ -176,9 +176,15 @@ jobs:
             test -x "$prefix/bin/e-mate"
           fi
           test "$(node "$cli" --version)" = '2.0.7'
-          EMATE_STAGING_CHECK=1 node "$cli" setup --check --json > "$RUNNER_TEMP/e-mate-staging-check.json"
+          if ! EMATE_STAGING_CHECK=1 node "$cli" setup --check --json > "$RUNNER_TEMP/e-mate-staging-check.json"; then
+            cat "$RUNNER_TEMP/e-mate-staging-check.json"
+            exit 1
+          fi
           node "$cli" setup
-          node "$cli" setup --check --json > "$RUNNER_TEMP/e-mate-installed-check.json"
+          if ! node "$cli" setup --check --json > "$RUNNER_TEMP/e-mate-installed-check.json"; then
+            cat "$RUNNER_TEMP/e-mate-installed-check.json"
+            exit 1
+          fi
           CHECK_PATH="$RUNNER_TEMP/e-mate-installed-check.json" node -e \
             "const r=require(process.env.CHECK_PATH); if(!r.ok) throw new Error(JSON.stringify(r.checks))"
 
