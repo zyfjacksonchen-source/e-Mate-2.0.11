@@ -742,3 +742,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 当前工作树尚未提交，证据 manifest 的 `source_commit` 仍只能记录旧 HEAD `70ff2ce2e340682f4aad2be27e4ec8f1d74ee913`，因此这轮只证明本地字节可安装，不可作为可发布不可变候选。下一份正式候选必须来自包含本修复的干净提交，并由 GitHub Windows runner 关闭 `D:` ESM 回归。
 - 为避免旧 HEAD 被错误绑定到未提交字节，`release:evidence` 现在在生成任何证据前要求 `GITHUB_SHA`（若存在）与 checkout HEAD 一致，并要求 tracked/untracked worktree 均为空；普通 build/pack 不受影响。release carrier 7/7 通过，真实脏工作树 CLI 负向探针按合同拒绝，错误为 `release evidence requires a clean worktree`。
 - 提交前根门禁还捕获到一次工作区调度竞态：根 `pnpm test` 同时运行主包测试与插件自己的 rebuild，`memory-evolve` 清理 `lib/` 时主包的 bundle 同步读到 `ENOENT`。修复只调整既有脚本顺序：9 个插件仍以并发 4 完成测试，全部结束后再运行 `@e-mate/dsh`，没有增加锁、重试或第二构建系统；release 合同锁定插件测试必须先于主包测试。修复后根门禁完整通过：Host 43/43、shell 28/28、各插件测试及 release carrier 7/7 全绿。
+
+## 2026-08-15 · S13 新提交 CI 的源码解析与 bundle 前置条件
+
+- Draft PR #1 的提交 `b85d57467a6fd5c39930d11ac9908a9008405357` 触发 CI run `31886626728` 与 Release run `31886626760`。两者都在无发布凭据的 PR 门禁阶段失败；npm、R2 和生产页面 job 均未运行。
+- CI 首个真实错误为主包同步九个内嵌 bundle 时缺 `packages/dsh-plugin-better-sidebar/lib/index.js`。工作流此前绕过根测试顺序，直接执行 `pnpm --filter @e-mate/dsh test`；现在复用根唯一 `pnpm test`，先构建/测试插件再测试主包，并由 release carrier 拒绝该工作流退回直跑主包。
+- Release 的六项失败同源于 `installProfile` 只从 Harness CLI 根 `node_modules` 解析 target 服务包。干净 CI 的固定源码树已生成各 package `lib/index.js`，但根目录不保证链接未被 CLI 直接依赖的 workspace package；本地历史 `node_modules` 恰好掩盖了这一点。共享 resolver 现在在固定源码树中按 package manifest 的真实 `main` 读取已构建入口，缺 build 立即失败；正式 npm 包仍从 Harness 自己组装的 portable `node_modules` 解析。会话迁移的 Cordis/Session 三个动态 import 复用同一 resolver 和 `pathToFileURL`，没有第二 binding 或测试专用回退。
+- 删除已失效的 45 行测试 binding 补丁，测试直接调用产品 `installProfile`。本地验证：Host 43/43、shell 28/28、release carrier 7/7 与 `git diff --check` 通过；新增源码模式断言精确解析 `dsh-storage-domain/lib/index.js`，品牌扫描同时保证错误文本不向用户暴露 Harness 产品名。最终跨平台结论继续以修复提交后的 GitHub Actions 为准。

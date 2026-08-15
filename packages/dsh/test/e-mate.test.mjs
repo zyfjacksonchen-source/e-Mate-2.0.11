@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { createServer } from 'node:http'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
@@ -20,6 +20,7 @@ import {
   nodeVersionSupported,
   platformSupported,
   resolveHarness,
+  resolveHarnessModule,
 } from '../lib/e-mate.js'
 import { installTestProfile as installProfile } from './runtime-binding.fixture.mjs'
 import { apply as applyHealth } from '../profile/plugins/health.js'
@@ -62,10 +63,14 @@ import { createSkillHubClient, inspectSkillArchive, installSkillArchive } from '
 
 const fileDigest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
 
-test('resolved Harness modules use file URLs for Windows ESM imports', () => {
+test('resolved Harness modules use source builds and file URLs for Windows ESM imports', () => {
   const source = readFileSync(new URL('../src/e-mate.ts', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /import\(harnessRequire\.resolve\(/)
-  assert.equal(source.match(/import\(pathToFileURL\(harnessRequire\.resolve\(/g)?.length, 3)
+  assert.equal(source.match(/import\(pathToFileURL\(resolveHarnessModule\(/g)?.length, 3)
+  const root = resolve(new URL('../../../upstream/deepseek-harness/', import.meta.url).pathname)
+  assert.equal(resolveHarnessModule({ bin: join(root, 'apps', 'cli', 'lib', 'bin.js') },
+    'packages/storage/storage-domain', '@deepseek-ai/dsh-storage-domain'),
+  join(root, 'packages', 'storage', 'storage-domain', 'lib', 'index.js'))
 })
 
 test('validated identity transitions restore the protected route before reloading one enterprise snapshot', () => {

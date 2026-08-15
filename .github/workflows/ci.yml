@@ -50,7 +50,7 @@ jobs:
       - name: Check target pin and e-Mate behavior
         run: |
           pnpm check:target
-          pnpm --filter @e-mate/dsh test
+          pnpm test
           pnpm enterprise:check
           pnpm enterprise:test
           pnpm enterprise:build

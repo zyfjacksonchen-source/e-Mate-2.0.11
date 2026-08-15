@@ -179,6 +179,9 @@ test('GitHub release packs once and validates the same tarball on three platform
   const ci = parse(readFileSync('.github/workflows/ci.yml', 'utf8'))
   const release = parse(readFileSync('.github/workflows/release.yml', 'utf8'))
   assert.ok(workspace.scripts.test.indexOf("--filter './packages/dsh-plugin-*'") < workspace.scripts.test.indexOf('--filter @e-mate/dsh test'))
+  const ciChecks = ci.jobs.source.steps.find(step => step.name === 'Check target pin and e-Mate behavior').run
+  assert.match(ciChecks, /^pnpm test$/mu)
+  assert.doesNotMatch(ciChecks, /--filter @e-mate\/dsh test/u)
   assert.deepEqual(Object.keys(ci.jobs), ['source'])
   assert.deepEqual(
     release.jobs['clean-install'].strategy.matrix.include.map(item => [item.platform, item.runner]),

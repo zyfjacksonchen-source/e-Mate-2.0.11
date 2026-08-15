@@ -179,13 +179,12 @@ export function installProfile(dshHome = resolveDshHome()) {
   }
   const binding = join(paths.profile, 'plugins', 'runtime-binding.json')
   const harness = resolveHarness()
-  const harnessRequire = createRequire(join(dirname(dirname(harness.bin)), 'package.json'))
-  const toolsModule = harnessRequire.resolve('@deepseek-ai/dsh-tools')
-  const storageDomainModule = harnessRequire.resolve('@deepseek-ai/dsh-storage-domain')
-  const llmModule = harnessRequire.resolve('@deepseek-ai/dsh-llm')
-  const credentialsModule = harnessRequire.resolve('@deepseek-ai/dsh-credentials')
-  const launchEnvironmentModule = harnessRequire.resolve('@deepseek-ai/dsh-launch-environment')
-  const zodModule = harnessRequire.resolve('zod')
+  const toolsModule = resolveHarnessModule(harness, 'packages/core/tools', '@deepseek-ai/dsh-tools')
+  const storageDomainModule = resolveHarnessModule(harness, 'packages/storage/storage-domain', '@deepseek-ai/dsh-storage-domain')
+  const llmModule = resolveHarnessModule(harness, 'packages/llm/llm', '@deepseek-ai/dsh-llm')
+  const credentialsModule = resolveHarnessModule(harness, 'packages/credentials/credentials', '@deepseek-ai/dsh-credentials')
+  const launchEnvironmentModule = resolveHarnessModule(harness, 'packages/util/launch-environment', '@deepseek-ai/dsh-launch-environment')
+  const zodModule = resolveHarnessDependency(harness, 'packages/storage/storage-domain', 'zod')
   atomicWrite(binding, `${JSON.stringify({
     schema_version: 1,
     product: PRODUCT,
@@ -248,6 +247,29 @@ export function resolveHarness() {
     throw new Error(`e-Mate local runtime drifted (version=${String(runtime.version)}, commit=${String(runtime.commit)})`)
   }
   return runtime
+}
+
+function harnessRoot(harness) {
+  return resolve(dirname(dirname(harness.bin)), '..', '..')
+}
+
+export function resolveHarnessModule(harness, packagePath, packageName) {
+  const root = harnessRoot(harness)
+  const manifestPath = join(root, packagePath, 'package.json')
+  if (existsSync(manifestPath)) {
+    const main = readJson(manifestPath)?.main
+    const entry = typeof main === 'string' ? resolve(dirname(manifestPath), main) : undefined
+    if (entry === undefined || !existsSync(entry)) throw new Error(`pinned runtime package ${packageName} is not built`)
+    return entry
+  }
+  return createRequire(join(dirname(dirname(harness.bin)), 'package.json')).resolve(packageName)
+}
+
+function resolveHarnessDependency(harness, packagePath, dependencyName) {
+  const manifestPath = join(harnessRoot(harness), packagePath, 'package.json')
+  return createRequire(existsSync(manifestPath)
+    ? manifestPath
+    : join(dirname(dirname(harness.bin)), 'package.json')).resolve(dependencyName)
 }
 
 function nearestExisting(path) {
@@ -707,11 +729,10 @@ async function setup() {
 
 async function migrateWithHarnessPersistence(dshHome) {
   const harness = resolveHarness()
-  const harnessRequire = createRequire(join(dirname(dirname(harness.bin)), 'package.json'))
   const [{ Context }, { default: SessionStore }, { default: JsonlSessionPersistence }] = await Promise.all([
-    import(pathToFileURL(harnessRequire.resolve('@deepseek-ai/cordis')).href),
-    import(pathToFileURL(harnessRequire.resolve('@deepseek-ai/dsh-session')).href),
-    import(pathToFileURL(harnessRequire.resolve('@deepseek-ai/dsh-session-persistence-jsonl')).href),
+    import(pathToFileURL(resolveHarnessModule(harness, 'vendor/cordis', '@deepseek-ai/cordis')).href),
+    import(pathToFileURL(resolveHarnessModule(harness, 'packages/core/session', '@deepseek-ai/dsh-session')).href),
+    import(pathToFileURL(resolveHarnessModule(harness, 'packages/session/session-persistence-jsonl', '@deepseek-ai/dsh-session-persistence-jsonl')).href),
   ])
   const ctx = new Context()
   let sessionsFiber
