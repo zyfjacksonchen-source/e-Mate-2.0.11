@@ -612,6 +612,17 @@
     grid-template-columns: 0 minmax(0, 1fr) 0 !important;
   }
 
+  /* The target header starts at 20px while this shell's real 44px sidebar
+     trigger occupies x=12..56. Only the collapsed mobile frame needs the
+     8px clearance; the expanded sidebar is an overlay and has no trigger. */
+  :global(div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot='conversation.session.header'] > header) {
+    padding-left: 64px;
+  }
+
+  :global(div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot='conversation.session.header'] > header > div:first-child) {
+    min-height: 44px;
+  }
+
   .root {
     position: fixed;
     z-index: 31;

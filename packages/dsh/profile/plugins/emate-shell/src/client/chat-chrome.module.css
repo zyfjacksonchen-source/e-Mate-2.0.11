@@ -6,6 +6,34 @@
   color: var(--emate-color-ink, var(--dsw-alias-label-primary));
 }
 
+/* The target Markdown renderer stays intact; only ordinary prose paragraphs
+   inherit the interaction reference's reading scale. Structured Markdown,
+   media and the long-text Work container retain their target-owned geometry. */
+:global([data-chat-flow-kind='assistant-step'] [data-slot='conversation.chat.node'] > div > div > div:not([data-emate-long-text]) > p:not(:has(code, img, video, audio))) {
+  max-width: 1180px;
+  margin: 0 0 18px !important;
+  font-size: 26px;
+  line-height: 1.58;
+  letter-spacing: -0.01em;
+}
+
+/* User and admitted-steering rows share the target MessageItem renderer. */
+:global([data-chat-flow-kind='user'] [data-time-hover-root] > div:first-child),
+:global([data-chat-flow-kind='steering'] [data-time-hover-root] > div:first-child) {
+  max-width: min(82%, 820px);
+}
+
+:global([data-chat-flow-kind='user'] [data-time-hover-root] > div:first-child > div:last-child:not([data-align])),
+:global([data-chat-flow-kind='steering'] [data-time-hover-root] > div:first-child > div:last-child:not([data-align])) {
+  max-width: 100%;
+  padding: 12px 16px 13px;
+  border-radius: 25px;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: -0.012em;
+}
+
 /* The reference activity stream is deliberately compact: consecutive real
    Tool nodes read as one activity group without creating a second group model. */
 :global([data-chat-flow-kind='tool-call'] + [data-chat-flow-kind='tool-call']) {
@@ -73,6 +101,10 @@
   display: none;
 }
 
+:global([data-chat-flow-kind='e-mate-image-disclosure']) {
+  display: none;
+}
+
 :global([data-chat-flow-kind='turn-error']) {
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 28%, transparent);
@@ -83,14 +115,110 @@
 /* Harness already groups consecutive real ImageBlocks and owns loading,
    authorization and lightbox state. e-Mate only restores the reference's
    equal, readable response tiles without creating another image renderer. */
-:global([data-chat-flow-kind='assistant-step'] [data-align] > [data-variant='tile']) {
-  width: clamp(112px, 18vw, 156px);
-  height: clamp(112px, 18vw, 156px);
+:global([data-chat-flow-kind='assistant-step'] [data-align='start'] > [data-variant='single']),
+:global([data-chat-flow-kind='assistant-step'] [data-align='start'] > [data-variant='tile']) {
+  width: clamp(112px, 18vw, 160px) !important;
+  height: clamp(112px, 18vw, 160px) !important;
+  border-radius: 18px;
+  background: #111;
+}
+
+/* Target ToolRow remains the renderer and owns disclosure state. The stable
+   flow/disclosure attributes only restore the reference row geometry. */
+:global([data-chat-flow-kind='tool-call'] [data-disclosure-row]) {
+  box-sizing: border-box;
+  min-height: 44px;
+  height: auto;
+  padding: 2px 0;
+  font-size: 22px;
+  line-height: 1.45;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-disclosure-row] > :first-child) {
+  width: 28px;
+  height: 28px;
+  margin-right: 8px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-disclosure-row] > :first-child > svg),
+:global([data-chat-flow-kind='tool-call'] [data-disclosure-row] > :first-child > span > svg) {
+  width: 28px;
+  height: 28px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-disclosure-row][aria-expanded] > :first-child > svg),
+:global([data-chat-flow-kind='tool-call'] [data-disclosure-row][aria-expanded='true'] > :first-child > span > svg) {
+  width: 18px;
+  height: 18px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-disclosure-row] > :not(:first-child)) {
+  font-size: 22px;
+  line-height: 1.45;
+}
+
+/* Bash owns a target-native summary row instead of composing DisclosureRow.
+   Its stable root attribute carries the same closed-row geometry; the terminal
+   card is a sibling, so none of these selectors enter expanded Shell output. */
+:global([data-chat-flow-kind='tool-call'] [data-variant='bash']) {
+  box-sizing: border-box;
+  min-height: 44px;
+  height: auto;
+  padding: 2px 0;
+  font-size: 22px;
+  line-height: 1.45;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-variant='bash'] > span:first-child) {
+  width: 28px;
+  height: 28px;
+  margin-right: 8px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-variant='bash'] > span:first-child > svg),
+:global([data-chat-flow-kind='tool-call'] [data-variant='bash'] > span:first-child > span > svg) {
+  width: 28px;
+  height: 28px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-variant='bash'][aria-expanded] > span:first-child > svg),
+:global([data-chat-flow-kind='tool-call'] [data-variant='bash'][aria-expanded='true'] > span:first-child > span > svg) {
+  width: 18px;
+  height: 18px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-variant='bash'] > span:not(:first-child):not([aria-hidden])) {
+  font-size: 22px;
+  line-height: 1.45;
 }
 
 @media (max-width: 767px) {
   :global([data-chat-flow]) {
     padding-block: 4px 24px;
+  }
+
+  :global([data-chat-flow-kind='assistant-step'] [data-slot='conversation.chat.node'] > div > div > div:not([data-emate-long-text]) > p:not(:has(code, img, video, audio))) {
+    font-size: 18px;
+  }
+
+  :global([data-chat-flow-kind='user'] [data-time-hover-root] > div:first-child),
+  :global([data-chat-flow-kind='steering'] [data-time-hover-root] > div:first-child) {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  :global([data-chat-flow-kind='user'] [data-time-hover-root] > div:first-child > div:last-child:not([data-align])),
+  :global([data-chat-flow-kind='steering'] [data-time-hover-root] > div:first-child > div:last-child:not([data-align])) {
+    width: fit-content;
+    margin-left: auto;
+    font-size: 17px;
+  }
+
+  :global([data-chat-flow-kind='tool-call'] [data-disclosure-row]),
+  :global([data-chat-flow-kind='tool-call'] [data-disclosure-row] > :not(:first-child)),
+  :global([data-chat-flow-kind='tool-call'] [data-variant='bash']),
+  :global([data-chat-flow-kind='tool-call'] [data-variant='bash'] > span:not(:first-child):not([aria-hidden])) {
+    font-size: 16px;
   }
 }
 

@@ -2,6 +2,67 @@
   display: none;
 }
 
+.imageHost {
+  display: contents;
+}
+
+:global([data-emate-image-gallery][hidden]) {
+  display: none !important;
+}
+
+.imageButton {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 22px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+
+.imageButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.imageButton:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 2px;
+}
+
+.imageButton strong {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imageIcon {
+  display: block;
+  width: 28px;
+  height: 28px;
+}
+
+.imageChevron {
+  display: block;
+  width: 18px;
+  height: 18px;
+  transition: transform 120ms ease;
+}
+
+.imageButton[aria-expanded='true'] .imageChevron {
+  transform: rotate(180deg);
+}
+
 .host {
   position: absolute;
   z-index: 1;
@@ -166,6 +227,10 @@
 }
 
 @media (max-width: 767px) {
+  .imageButton {
+    font-size: 16px;
+  }
+
   .button {
     min-height: 44px;
     padding-inline: 8px;
@@ -173,7 +238,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chevron {
+  .chevron,
+  .imageChevron {
     transition: none;
   }
 }

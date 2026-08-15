@@ -190,4 +190,11 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(styles).toContain('--dsw-alias-button-info-fill: var(--emate-color-brand);')
     expect(home).not.toMatch(/Runtime Scheduler|由 Runtime|从 Runtime/u)
   })
+
+  it('keeps the target mobile session title clear of the real sidebar trigger', () => {
+    const styles = readFileSync('src/client/sidebar.module.css', 'utf8')
+    expect(styles).toMatch(/@media \(max-width: 767px\) \{[\s\S]*?div\[data-sidebar-collapsed\]:has\(> \[data-shell-overlay\]\) \[data-slot='conversation\.session\.header'\] > header\) \{[\s\S]*?padding-left: 64px;/u)
+    expect(styles).toMatch(/\[data-slot='conversation\.session\.header'\] > header > div:first-child\) \{[\s\S]*?min-height: 44px;/u)
+    expect(styles).toMatch(/\.mobileOpen \{[\s\S]*?left: 12px;[\s\S]*?width: 44px;[\s\S]*?height: 44px;/u)
+  })
 })

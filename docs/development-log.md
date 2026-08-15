@@ -965,3 +965,11 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 首轮同视口量测发现共享活动头仍是 `14px`、全行 `748px` 点击面和向右 `14px` Chevron，而源稿是内容宽、`22px / 31.9px`、标签/计时 `500` 字重和向下 `18px` Chevron。最小修复只调整现有活动头 DOM/CSS：同一 `strong` 保留真实 `<time>`，按钮使用 `fit-content`，复用现有 Chevron 且不旋转；未改事件匹配、计时、折叠状态或 renderer 分派。
 - 主代理同步最终 client bundle SHA-256 `63a69d3ec37c0cc6b661d7c88e7c0a79d414e0c7d163af2d834d83960bf2fd30` 后重新启动 Host 并提交新会话。展开态有且仅有一条真实 `acceptance_wait` Tool 行；折叠后 `aria-expanded=false` 且 Tool 行数为 0；再次展开恢复同一 Tool 行。最终计算样式为 `22px / 31.9px`、内容宽、`8px` 间距、`18×18` 向下 Chevron，与源稿同状态一致。
 - 子代窄测 7 files / 30 tests、`@e-mate/dsh` build 和 diff check 通过；主代理最终并排证据位于 `artifacts/design-qa/S02-collapse-current-7b607c7/`。本片关闭“真实运行活动组折叠/展开与视觉同状态”，未扩大到目标不存在的 Tool pre-dispatch queue。
+
+## 2026-08-16 · S02/S03 摘要与图片披露同状态终验
+
+- 主代理选择指定原型第 4 屏“摘要”和第 5 屏“图片”，固定源稿 SHA-256 为 `fd734f0026f51e334874cca54adb60f37d7b09cb4e89e98da1841c922996a33e`。仓库外 QA 脚本通过目标 `JsonlSessionPersistence` 写入 13 个持久事件，使用目标小写 `read/glob/bash` Tool 名与真实 CAS 图片附件；事件摘要为 `02a20970ec505cd007cd9da340e179480da02b03c0deb42daf2d4f5db4132a62`。前端继续读取正常 Host Session API，没有夹具 Store 或伪事件。
+- 首轮发现四个具体 P1：目标 gallery 的 display 规则覆盖原生 hidden、Bash 独立摘要行尺寸偏小、普通消息字级未跟随逐屏标注稿、`320/390px` 折叠侧栏触发器与 Session 标题重叠。子代只在对应 target seam 做最小修复，主代理每轮重新构建、同步当前 bundle、重启同一 Host 并复验；没有复制 ImageGallery/Markdown/Terminal renderer，也没有新建 Router、Store 或 transport。
+- 最终桌面实测：普通 assistant 段落 `26px / 41.08px`，用户气泡 `24px / 34.8px`；Read/Bash 摘要均为真实 `44px` 高、`22px / 31.9px`，图片摘要为 `44px`，单图为真实 `160×160px / 18px`。图片按钮从默认收起切到展开后仍是同一 target gallery，原图 lightbox 可打开/关闭，再次收起和刷新均恢复 `aria-expanded=false`、图片不可见。
+- 移动端最终 `390/390`、`320/320`，真实侧栏触发器为 `x=12..56 / 44px`，Session title 从 `x=64` 开始且高度 `44px`；`320px` 只对标题省略，不重叠或横溢出。证据位于 `artifacts/design-qa/S02-summary-current-60b0955/`，最终 client SHA-256 为 `a2d29fe556d92b58919bdf3ced40e7ea2ca092a30b7f3aaefede03b09b765a68`。
+- 本轮关闭原型第 4/5 屏在 e-Mate 真实消息流中的摘要/图片披露与响应式交互；现有 ActivityHeader 继续作为真实活动组合同保留，不为静态截图隐藏。

@@ -311,6 +311,17 @@ final result: passed (managed general-session entry and truthful nine-capability
 
 final result: blocked (production authentication and ledger reconciliation)
 
+## S02/S03 prototype summary and image disclosure — 2026-08-16
+
+- The authoritative visual source is the user-specified interactive prototype `codex-streaming-chat.html`, SHA-256 `fd734f0026f51e334874cca54adb60f37d7b09cb4e89e98da1841c922996a33e`, screens `4 · 摘要` and `5 · 图片`. The implementation side used a 13-event target `JsonlSessionPersistence` Session, event digest `02a20970ec505cd007cd9da340e179480da02b03c0deb42daf2d4f5db4132a62`, with real lower-case target Tool calls and a real CAS image attachment. The fixture stayed outside the repository and did not replace the target Session, Conversation, Tool or ImageGallery renderer.
+- The first same-state pass found four P1 defects: the target gallery CSS overrode the native `hidden` attribute; Bash used its separate compact Terminal summary instead of the shared disclosure row geometry; normal assistant/user text remained much smaller than the annotated prototype; and the mobile sidebar trigger overlapped the session title. Each repair remained a style or auxiliary-node projection over stable target attributes. No second renderer, Store, Router or transport was added.
+- The final desktop measurements at `1280×720` are: assistant prose `26px / 41.08px`, user bubble `24px / 34.8px`, Read and Bash rows exactly `44px` with `22px / 31.9px`, image summary exactly `44px`, and the target single-image frame exactly `160×160px / 18px`. The e-Mate ActivityHeader remains visible because it is the product's existing real activity-group contract; it was not hidden to mimic a static source screen.
+- Interaction closure: refresh starts with `aria-expanded=false` and the real ImageGallery not visible; clicking `已查看 1 张图像` reveals the same target gallery, opens and closes the target `原图预览` dialog, and collapses back without replacing the image DOM. A second refresh again starts collapsed. The image content differs from the reference screenshot intentionally because the accepted side uses an e-Mate attachment fixture, while geometry and interaction use the production renderer.
+- Responsive measurements: at `390×844`, document `clientWidth=scrollWidth=390`; at `320×800`, `clientWidth=scrollWidth=320`. The real mobile trigger occupies `x=12..56`, while the target title starts at `x=64`; both retain a `44px` height. The title truncates at `320px` without overlap, and the summary/image/lightbox controls remain operable.
+- Evidence: `artifacts/design-qa/S02-summary-current-60b0955/implementation-summary-final-1280x720.png`, `implementation-images-final-1280x720.png`, `implementation-summary-final-390x844.png`, `implementation-summary-final-320x800.png`, and the combined `source-vs-implementation-*-final-2560x760.jpg`. Final client bundle SHA-256 is `a2d29fe556d92b58919bdf3ced40e7ea2ca092a30b7f3aaefede03b09b765a68`.
+
+final result: passed (prototype screens 4 summary and 5 image disclosure, desktop/mobile)
+
 ## S07 production registration challenge — 2026-08-16
 
 - The current managed e-Mate profile opened `/register` through the normal Harness Host and existing `emate.identity` Connection RPC. The production Auth Gateway returned a real CAPTCHA image; clicking the existing refresh action replaced it with a different payload. No account, real name, password, CAPTCHA answer or registration request was submitted.

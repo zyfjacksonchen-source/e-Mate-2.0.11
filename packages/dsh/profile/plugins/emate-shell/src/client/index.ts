@@ -39,7 +39,12 @@ import { ComposerConnectors, routeToConnections } from './composer-connectors.ts
 import { HomeProjection } from './home.tsx'
 import { IdentityGate } from './identity.tsx'
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
-import { LongMessageDisclosure, longMessageDefinition } from './long-message-disclosure.tsx'
+import {
+  ImageDisclosure,
+  imageDisclosureDefinition,
+  LongMessageDisclosure,
+  longMessageDefinition,
+} from './long-message-disclosure.tsx'
 import {
   OfficeArtifacts,
   officeArtifactsDefinition,
@@ -126,6 +131,11 @@ export function apply(ctx: any): void {
     name: 'conversation.chat.node',
     key: 'e-mate-message-disclosure',
   }, LongMessageDisclosure))
+  ctx.conversationEvents.register(imageDisclosureDefinition)
+  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
+    name: 'conversation.chat.node',
+    key: 'e-mate-image-disclosure',
+  }, ImageDisclosure))
   ctx.conversationEvents.register(legacyArtifactDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',

@@ -7,7 +7,11 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/client'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { IconChevronDownOutline14, IconDownloadOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  IconBrowseOutline16,
+  IconChevronDownOutline14,
+  IconDownloadOutline16,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './long-message-disclosure.module.css'
 
 type MessageKind = 'user' | 'assistant-step'
@@ -17,6 +21,14 @@ interface LongMessageData {
 }
 
 interface LongMessageState extends LongMessageData {
+  sourceSeq: number
+}
+
+interface ImageDisclosureData {
+  imageCount: number
+}
+
+interface ImageDisclosureState extends ImageDisclosureData {
   sourceSeq: number
 }
 
@@ -32,6 +44,7 @@ function needsHeightProbe(content: readonly unknown[]): boolean {
 declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
   interface ChatNodeDataMap {
     'e-mate-message-disclosure': LongMessageData
+    'e-mate-image-disclosure': ImageDisclosureData
   }
 }
 
@@ -75,6 +88,36 @@ export const longMessageDefinition: ConversationNodeDefinition<LongMessageState>
     location: locationOf(context),
     visibility: 'visible',
     data: { sourceKind: context.state.sourceKind },
+  }),
+}
+
+export const imageDisclosureDefinition: ConversationNodeDefinition<ImageDisclosureState> = {
+  kind: 'e-mate-image-disclosure',
+  target: 'chat',
+  match: event => {
+    if (event.type !== 'assistant/message' || !isAppendSurfaceEvent(event)) return null
+    const imageCount = event.data.message.content.filter(block => block.type === 'image').length
+    return imageCount === 0 ? null : { id: `assistant:${event.data.message.id}`, role: 'start' }
+  },
+  start: (_context, match) => {
+    if (match.event.type !== 'assistant/message') {
+      throw new Error('e-Mate image disclosure requires a durable assistant message')
+    }
+    return {
+      imageCount: match.event.data.message.content.filter(block => block.type === 'image').length,
+      sourceSeq: match.event.seq,
+    }
+  },
+  update: context => context.state,
+  buildViewNode: context => context.state === undefined ? null : ({
+    key: context.key,
+    kind: 'e-mate-image-disclosure',
+    id: context.id,
+    target: 'chat',
+    anchorSeq: context.state.sourceSeq + 0.02,
+    location: locationOf(context),
+    visibility: 'visible',
+    data: { imageCount: context.state.imageCount },
   }),
 }
 
@@ -204,6 +247,78 @@ export function LongMessageDisclosure({ node }: ChatNodeViewProps<'e-mate-messag
       >
         <IconDownloadOutline16 />
       </button>, downloadHost)}
+    </div>
+  )
+}
+
+export function ImageDisclosure({ node }: ChatNodeViewProps<'e-mate-image-disclosure'>) {
+  const { imageCount } = node.data
+  const controlId = `e-mate-images-${node.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+  const rootRef = useRef<HTMLDivElement>(null)
+  const galleriesRef = useRef<HTMLElement[]>([])
+  const [expanded, setExpanded] = useState(false)
+  const [portalHost, setPortalHost] = useState<HTMLElement | null>(null)
+  const [controls, setControls] = useState('')
+
+  useLayoutEffect(() => {
+    const row = rootRef.current?.closest<HTMLElement>('[data-chat-flow-kind]')
+    if (row === undefined || row === null) return undefined
+    const sourceRow = previousMessageRow(row, 'assistant-step')
+    if (sourceRow === null) return undefined
+    const galleries = [...sourceRow.querySelectorAll<HTMLElement>('[data-align="start"]')]
+      .filter(gallery => gallery.closest('[data-chat-flow-kind]') === sourceRow)
+    const first = galleries[0]
+    if (first === undefined || first.parentElement === null) return undefined
+
+    const previous = galleries.map((gallery, index) => ({
+      gallery,
+      hidden: gallery.hidden,
+      id: gallery.id,
+      nextId: gallery.id || `${controlId}-${index + 1}`,
+    }))
+    for (const item of previous) {
+      item.gallery.id = item.nextId
+      item.gallery.hidden = true
+      item.gallery.setAttribute('data-emate-image-gallery', '')
+    }
+    galleriesRef.current = galleries
+
+    const host = document.createElement('span')
+    host.className = css.imageHost
+    host.setAttribute('data-emate-image-disclosure-host', '')
+    first.parentElement.insertBefore(host, first)
+    setControls(previous.map(item => item.nextId).join(' '))
+    setPortalHost(host)
+
+    return () => {
+      for (const item of previous) {
+        item.gallery.hidden = item.hidden
+        item.gallery.removeAttribute('data-emate-image-gallery')
+        if (item.gallery.id === item.nextId) item.gallery.id = item.id
+      }
+      galleriesRef.current = []
+      host.remove()
+    }
+  }, [controlId])
+
+  useLayoutEffect(() => {
+    for (const gallery of galleriesRef.current) gallery.hidden = !expanded
+    portalHost?.toggleAttribute('data-expanded', expanded)
+  }, [expanded, portalHost])
+
+  return (
+    <div ref={rootRef} className={css.root} data-emate-image-disclosure="">
+      {portalHost !== null && controls !== '' && createPortal(<button
+        type="button"
+        className={css.imageButton}
+        aria-expanded={expanded}
+        aria-controls={controls}
+        onClick={() => { setExpanded(value => !value) }}
+      >
+        <IconBrowseOutline16 className={css.imageIcon} />
+        <strong>已查看 {imageCount} 张图像</strong>
+        <IconChevronDownOutline14 className={css.imageChevron} />
+      </button>, portalHost)}
     </div>
   )
 }
