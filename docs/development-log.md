@@ -902,3 +902,4 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 主代理复核子代的独立审计：pinned rc.5 standard preset 只有 Skill、filesystem、macOS Bash、Windows PowerShell 与 Job seam，目标锁中没有 DOCX/PDF/XLSX/PPTX 执行 Tool 或完整文档库。Codex primary-runtime 是环境所有的加载器，Documents Skill 的附加许可明确禁止第三方提取、分发和衍生分发；公开 `openai/skills` 的 Apache-2.0 PDF Skill仍要求现场安装 Python/Poppler，也不提供 DOCX/XLSX/PPTX 执行层。
 - 因此四项 Office Skill 保留能力身份但改为非模型/非用户可调用，注册 Tool 数为 0，能力状态固定 `blocked / EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE`；不再扫描偶然存在的系统 Office、Python、LibreOffice 或全局 Node 包，也不生成伪装 Office 文件。
 - 插件窄测 2/2、Node 24 构建与 diff check 通过。强制 Office Computer Use 仍是正式发布阻塞，只有取得可再分发的 macOS/Windows 预构建执行插件并完成四格式真实全场景后才能关闭。
+- 主代理把新 bundle 同步到同一隔离受管 profile 并重启真实 Harness Host；能力中心展开后仍是 9 项，Office 卡真实显示“暂未启用”和稳定 blocker，Image 继续可用，Search/Browser 为需要配置，Vision/OCR 为暂未启用。页面没有 Office action 或假 ready 状态。Browser 证据为 `artifacts/design-qa/S10-plugin-replacement/capabilities-office-blocked-real-status-dark-1280x720.png`。
