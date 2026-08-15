@@ -129,6 +129,7 @@ export function installProfile(dshHome = resolveDshHome()) {
   for (const directory of [
     paths.profile,
     join(paths.data, 'attachments'),
+    join(paths.data, 'general'),
     join(paths.data, 'memory'),
     join(paths.data, 'cache'),
     join(paths.data, 'migrations'),

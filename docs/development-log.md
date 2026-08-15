@@ -836,3 +836,18 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 主代理重载同一 target Host 后验证：首页输入框可直接使用、工作区标签为“通用会话”，选择器仍含“添加工作区…”；能力中心显示 9 项，并逐项呈现生图、Office、网络搜索、浏览器操作、视觉/OCR、飞书、腾讯文档、微信、钉钉及其真实状态。社区 Skill Hub 不可达继续显示错误，不影响内置能力投影。首轮又发现能力中心点“新建任务”只创建会话却不关闭 overlay；同一 `startSession()` 现在先用既有 History/`popstate` 回到 `/`，随后 Home 投影再调用一次目标 `workspaces.startSession`。主代理复验 URL 为 `/`、能力中心消失、通用会话与真实输入框显示。
 - 组合门禁：`@e-mate/dsh` 44/44 Host 测试、shell 7 文件 29/29 测试与构建通过；插件分类测试保证只有四个新增用户能力包含 `emateCapabilities`，系统包保持不可见。证据：`artifacts/design-qa/S10-plugin-replacement/home-general-default-dark-1280x720.jpg`、`capabilities-nine-real-status-dark-1280x720.jpg`。
 - 同一轮主代理交互证据还覆盖：Skill Hub“导入/上传 Skill”真实表单；企业模型目录只含 Luna/Sol、Gemini 不存在，Sol 选择在刷新后保持且同一会话 6 条用户消息未丢；外部连接页面展示飞书、腾讯文档、微信、钉钉的真实配置/阻塞状态而未提交授权；用户中心显示本周 `12,345 / 1,000,000 Token` 进度。对应截图同在 `artifacts/design-qa/S10-plugin-replacement/`。真实 Provider 下一请求、外部 OAuth/扫码完成和生产用量对账仍按发布合同保持开放。
+
+## 2026-08-16 · S05 主代理 CLI、单实例与快捷方式验收
+
+- 在仓库外临时 `DSH_HOME` 和临时 Desktop 上运行当前构建：首次 `setup`、同版本再次 `setup` 与最终 `setup --check --json` 均成功；后者 8 项全部 pass，包括固定 Harness、九 bundle、SQLite、Keychain 与受管 profile。桌面目录最终只有一个可执行的 `e-Mate.command`，内容继续通过登录 shell 调用当前全局 `e-mate launch`，未绑定 npm 绝对安装路径。
+- `launch --port 55207` 后再次 `launch`、关闭真实浏览器标签、再执行快捷方式的完整 `/bin/zsh -lic 'exec e-mate launch'` 路径，三次均复用同一 PID、instance ID 和健康 URL。`status` 与 loopback health 的 product/version/profile/instance 完全一致；`stop` 只停止该实例并删除状态。
+- 端口 `55208` 由独立 Node HTTP 服务占用时，`launch` 返回“nothing was stopped”，随后原服务仍返回 `not-e-mate`。另以独立进程和错误 instance ID 构造状态，`stop` 返回“instance identity could not be verified”，原进程继续存活；受管进程被外部终止形成 stale PID 时，`stop` 只移除陈旧状态。所有测试进程随后按精确 PID/会话停止。
+- 同一隔离 setup 只读扫描本机三份旧 e-Mate/ECoreX/CowAgent 权威 SQLite，收据包含 3 个源指纹和 15 个唯一 target Session；同版重装后源文件 SHA-256 逐一不变，未从 UI 缓存复活会话，也未写回旧库。隔离数据与临时快捷方式不作为发布产物；Windows `.lnk` 的创建/同版覆盖由同提交的 Windows 2025 干净 npm 安装作业继续提供平台证据。
+
+## 2026-08-16 · S08 主代理真实旧库迁移可见性
+
+- 主代理用本机三份权威旧 SQLite 在全新隔离 `$DSH_HOME` 执行当前 setup；迁移收据包含 15 个唯一 target Session，但修复前 Browser 只显示初始化产生的 1 个空会话。根因不是前端列表遗漏，而是无项目旧 Session 没有 `cwd`，固定 Harness 的 WorkspaceRegistry 因此不会把它们投影到任何 Workspace；缺陷截图为 `artifacts/design-qa/S08-legacy-migration/pre-fix-imported-sessions-invisible.jpg`，不含旧标题或正文。
+- 根因修复只调整迁移边界：无项目旧 Session 的 header 绑定受管 `$DSH_HOME/e-mate/general`，项目 Session 继续保留原项目 `cwd`；setup 在迁移前创建该目录，现有 general-workspace 插件复用目标 `Workspace.setTitle()` 把 Registry 自动标题恢复为“通用会话”。没有新增 Session Store、Workspace Registry、Router 或 transport。
+- 可执行回归直接组合目标 `JsonlSessionPersistence`、`JsonStorageBackend` 与 `WorkspaceRegistry`，证明通用/项目会话各自只落入对应 Workspace，重复迁移为 `[2 imported, 0 reused] → [0 imported, 2 reused]`，两份源 SQLite 哈希不变。`@e-mate/dsh` 完整门禁为 Host 45/45、Shell 29/29。
+- 主代理在新的真实旧库导入实例复验：Home 初始可见 16 行（15 个导入会话加当前空会话）；选择任一非当前行后进入 `legacy-*` 深链，真实聊天投影为 5 个节点/2 个用户节点；刷新后 URL、5/2 节点和唯一选中行保持，侧栏显示 15 个非空导入会话。只记录数量和布尔结果，不保存旧标题或内容；证据为 `artifacts/design-qa/S08-legacy-migration/acceptance.json`。
+- 导入前后 3 份权威源文件 SHA-256 逐一相同。两个隔离 profile 与其附件副本已停止并移动到 macOS 废纸篓，可恢复；没有修改、删除或上传旧源库。

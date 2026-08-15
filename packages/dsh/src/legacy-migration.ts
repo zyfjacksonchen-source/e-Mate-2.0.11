@@ -542,7 +542,7 @@ function runtimeProjectPaths(database: DatabaseSync) {
   return result
 }
 
-function planRuntime(snapshot: SourceSnapshot): PlannedSession[] {
+function planRuntime(snapshot: SourceSnapshot, generalWorkspace: string): PlannedSession[] {
   const database = openSnapshot(snapshot.snapshot)
   try {
     requireTable(database, 'threads', ['thread_id', 'status', 'title', 'metadata_json', 'created_at', 'updated_at'], 'legacy ECoreX Runtime database')
@@ -616,14 +616,14 @@ function planRuntime(snapshot: SourceSnapshot): PlannedSession[] {
           data: { source_family: snapshot.source.family, legacy_id_sha256: sha256(identity.legacyId) }, ignorable: true,
         })
       }
-      const cwd = projects.get(threadId)
+      const cwd = projects.get(threadId) ?? generalWorkspace
       return {
         id,
         canonicalKey: identity.key,
         sourceFamily: snapshot.source.family,
         sourceDatabase: snapshot.source.database,
         legacyId: identity.legacyId,
-        header: { version: SESSION_FORMAT_VERSION, id, createdAt, delegationDepth: 0, ...(cwd === undefined ? {} : { cwd }) },
+        header: { version: SESSION_FORMAT_VERSION, id, createdAt, delegationDepth: 0, cwd },
         events: builder.events,
         evidence: {
           schema_version: 1,
@@ -640,7 +640,7 @@ function planRuntime(snapshot: SourceSnapshot): PlannedSession[] {
   }
 }
 
-function planCowAgent(snapshot: SourceSnapshot): PlannedSession[] {
+function planCowAgent(snapshot: SourceSnapshot, generalWorkspace: string): PlannedSession[] {
   const database = openSnapshot(snapshot.snapshot)
   try {
     const sessionColumns = requireTable(database, 'sessions', ['session_id', 'created_at', 'last_active'], 'legacy CowAgent conversation database')
@@ -750,7 +750,7 @@ function planCowAgent(snapshot: SourceSnapshot): PlannedSession[] {
           id,
           createdAt: epochMilliseconds(session.created_at),
           delegationDepth: 0,
-          ...(projectPath === undefined ? {} : { cwd: projectPath }),
+          cwd: projectPath ?? generalWorkspace,
         },
         events: builder.events,
         evidence: {
@@ -849,9 +849,10 @@ export async function migrateLegacySessions(options: LegacyMigrationOptions): Pr
   const scratch = mkdtempSync(join(tmpdir(), 'e-mate-legacy-sessions-'))
   try {
     const snapshots = sources.map(source => snapshotSource({ ...source, root: resolve(source.root), database: resolve(source.database) }, scratch))
+    const generalWorkspace = join(dshHome, 'e-mate', 'general')
     const plans = mergePlans(snapshots.flatMap(snapshot => snapshot.source.family !== 'cowagent'
-      ? planRuntime(snapshot)
-      : planCowAgent(snapshot)))
+      ? planRuntime(snapshot, generalWorkspace)
+      : planCowAgent(snapshot, generalWorkspace)))
     const listed = await options.sessionPersistence.list()
     const existing = new Map(listed.map(header => [String(header.id), header]))
     const absent: PlannedSession[] = []

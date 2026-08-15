@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, test } from 'node:test'
@@ -9,8 +9,13 @@ import { createServer } from 'node:http'
 import { Context } from '../../../upstream/deepseek-harness/vendor/cordis/lib/index.js'
 import SessionStore from '../../../upstream/deepseek-harness/packages/core/session/lib/index.js'
 import JsonlSessionPersistence from '../../../upstream/deepseek-harness/packages/session/session-persistence-jsonl/lib/index.js'
+import Storage from '../../../upstream/deepseek-harness/packages/storage/storage/lib/index.js'
+import { DomainFacility } from '../../../upstream/deepseek-harness/packages/storage/storage-domain/lib/index.js'
+import { JsonStorageBackend } from '../../../upstream/deepseek-harness/packages/storage/storage-json/lib/index.js'
+import WorkspaceRegistry from '../../../upstream/deepseek-harness/packages/workspace/workspace/lib/index.js'
 import { defaultLegacySources, migrateLegacySessions } from '../lib/legacy-migration.js'
 import { registerLegacyArtifactDownload } from '../profile/plugins/legacy-migration.js'
+import { apply as applyGeneralWorkspace } from '../profile/plugins/general-workspace.js'
 
 const temporary = []
 
@@ -253,6 +258,75 @@ test('imports only non-deleted ECoreX Runtime threads and preserves tool history
     assert.equal(evidence.omitted_items.some(item => item.item_id === 'tool-1'), true)
     assert.equal(digest(source), before)
   } finally {
+    await harness.dispose()
+  }
+})
+
+test('real WorkspaceRegistry groups unprojected legacy sessions under managed general without crossing projects', async () => {
+  const root = scratch()
+  const dshHome = join(root, 'dsh')
+  const general = join(dshHome, 'e-mate', 'general')
+  const project = join(root, 'project')
+  const cowRoot = join(root, 'cow')
+  const runtimeRoot = join(root, 'runtime')
+  mkdirSync(general, { recursive: true })
+  mkdirSync(project)
+  mkdirSync(cowRoot)
+  mkdirSync(runtimeRoot)
+  const cowSource = join(cowRoot, 'conversations.db')
+  const runtimeSource = join(runtimeRoot, 'runtime.sqlite3')
+  cowDatabase(cowSource, null)
+  runtimeDatabase(runtimeSource, project)
+  const before = new Map([[cowSource, digest(cowSource)], [runtimeSource, digest(runtimeSource)]])
+  const harness = await harnessPersistence(join(dshHome, 'sessions'))
+  const { ctx } = harness
+  let registryFiber
+  let storageFiber
+  let backend
+  try {
+    const options = {
+      sessionPersistence: ctx.sessionPersistence,
+      dshHome,
+      sources: [
+        { family: 'cowagent', root: cowRoot, database: cowSource },
+        { family: 'ecorex-runtime', root: runtimeRoot, database: runtimeSource },
+      ],
+    }
+    assert.deepEqual(
+      await migrateLegacySessions(options).then(result => [result.imported_sessions, result.reused_sessions]),
+      [2, 0],
+    )
+    assert.deepEqual(
+      await migrateLegacySessions(options).then(result => [result.imported_sessions, result.reused_sessions]),
+      [0, 2],
+    )
+
+    storageFiber = await ctx.plugin(Storage)
+    backend = new JsonStorageBackend(join(dshHome, 'state'))
+    ctx.storage.backend.register('json', backend)
+    const facility = new DomainFacility(ctx, { backend: 'json', routes: {} })
+    ctx.storage.mount('domain', facility)
+    ctx.provide('storageDomain', facility)
+    registryFiber = await ctx.plugin(WorkspaceRegistry)
+    await applyGeneralWorkspace(ctx, { dshHome })
+
+    const headers = await ctx.sessionPersistence.list()
+    const generalSession = headers.find(header => header.cwd === general)
+    const projectSession = headers.find(header => header.cwd === project)
+    assert.ok(generalSession)
+    assert.ok(projectSession)
+    const generalWorkspace = ctx.workspaceRegistry.list().find(workspace => workspace.path === realpathSync(general))
+    const projectWorkspace = ctx.workspaceRegistry.list().find(workspace => workspace.path === realpathSync(project))
+    assert.equal(generalWorkspace.title, '通用会话')
+    assert.deepEqual(generalWorkspace.sessionIds, [generalSession.id])
+    assert.deepEqual(projectWorkspace.sessionIds, [projectSession.id])
+    assert.equal(generalWorkspace.sessionIds.includes(projectSession.id), false)
+    assert.equal(projectWorkspace.sessionIds.includes(generalSession.id), false)
+    for (const [path, sha256] of before) assert.equal(digest(path), sha256)
+  } finally {
+    await registryFiber?.dispose()
+    await backend?.close()
+    await storageFiber?.dispose()
     await harness.dispose()
   }
 })

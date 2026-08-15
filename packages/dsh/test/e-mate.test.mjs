@@ -418,6 +418,7 @@ test('managed profile installation is idempotent', () => {
   const dshHome = mkdtempSync(join(tmpdir(), 'e-mate-profile-'))
   try {
     const first = installProfile(dshHome)
+    assert.equal(existsSync(join(first.data, 'general')), true)
     const manifest = readFileSync(join(first.profile, 'package.json'), 'utf8')
     const profileManifest = JSON.parse(manifest)
     assert.equal(profileManifest.type, 'module')
@@ -2005,16 +2006,21 @@ test('user-visible runtime copy exposes only the e-Mate product brand', () => {
 test('general conversations reuse a managed Harness workspace outside user projects', async () => {
   const dshHome = mkdtempSync(join(tmpdir(), 'e-mate-general-'))
   let created
+  let renamed
   try {
     await applyGeneralWorkspace({
       workspaceRegistry: {
-        create: async (path, title) => { created = { path: realpathSync(path), title } },
+        create: async (path, title) => {
+          created = { path: realpathSync(path), title }
+          return { title: 'general', setTitle: async value => { renamed = value } }
+        },
       },
     }, { dshHome })
     assert.deepEqual(created, {
       path: realpathSync(join(dshHome, 'e-mate', 'general')),
       title: '通用会话',
     })
+    assert.equal(renamed, '通用会话')
   } finally {
     rmSync(dshHome, { recursive: true, force: true })
   }
