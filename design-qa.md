@@ -283,3 +283,11 @@ final result: passed (local entry/theme/error-state); blocked (production login 
 - Adjacent real-flow captures in the same directory cover the Skill upload form, the two-model enterprise selector and Sol persistence after reload, all four connection configuration states, and the user-center usage progress. No credential, OAuth consent, QR confirmation or external write was submitted; these captures prove discoverability and local route closure, not production authorization or Provider success.
 
 final result: passed (managed general-session entry and truthful nine-capability projection)
+
+## S07 production admin and usage entry — 2026-08-16
+
+- The production admin URL rendered the existing e-Mate account/password surface. Submitting the only credentials explicitly supplied for the server returned `account login failed`; the page remained disconnected and no user, quota, protocol or model operation became available. Evidence: `artifacts/design-qa/S07-admin-usage-production/admin-login-rejected-current-deployment.png`.
+- The supplied production Usage URL was rejected by the browser authentication layer with `ERR_INVALID_AUTH_CREDENTIALS`. Browser security policy then prohibited further navigation or capture, so no alternate browser, URL construction or protocol was used.
+- The local accepted admin/Usage build remains a design and fail-closed proof only. Production authenticated tables, batch approval, unlimited quota, protocol receipt, model connectivity action, per-user event counts and ledger reconciliation remain unverified until the application administrator and Usage read-only credentials are provided.
+
+final result: blocked (production authentication and ledger reconciliation)

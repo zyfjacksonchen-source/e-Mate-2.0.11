@@ -904,3 +904,16 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 因此四项 Office Skill 保留能力身份但改为非模型/非用户可调用，注册 Tool 数为 0，能力状态固定 `blocked / EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE`；不再扫描偶然存在的系统 Office、Python、LibreOffice 或全局 Node 包，也不生成伪装 Office 文件。
 - 插件窄测 2/2、Node 24 构建与 diff check 通过。强制 Office Computer Use 仍是正式发布阻塞，只有取得可再分发的 macOS/Windows 预构建执行插件并完成四格式真实全场景后才能关闭。
 - 主代理把新 bundle 同步到同一隔离受管 profile 并重启真实 Harness Host；能力中心展开后仍是 9 项，Office 卡真实显示“暂未启用”和稳定 blocker，Image 继续可用，Search/Browser 为需要配置，Vision/OCR 为暂未启用。页面没有 Office action 或假 ready 状态。Browser 证据为 `artifacts/design-qa/S10-plugin-replacement/capabilities-office-blocked-real-status-dark-1280x720.png`。
+
+## 2026-08-16 · S07/S13 生产管理与用量入口只读核验
+
+- 主代理只读核验用户指定生产服务器：企业 Web、Auth、Analytics、Model Gateway、PostgreSQL 与 Redis 容器均处于健康运行态，既定管理端与用量子路径在服务器内网返回 HTTP 200。该事实纠正了此前“生产无 PostgreSQL/Redis”的历史假设，但不代表当前分支已经部署。
+- 公网管理端可达并显示 e-Mate 管理员账号/密码入口，但用户提供的服务器面板账号不是 e-Mate 应用管理员账号，真实登录返回 `account login failed`，会话保持未连接；主代理未继续猜测账号、未读取服务端密码材料，也未改用户、配额、协议或模型。证据为 `artifacts/design-qa/S07-admin-usage-production/admin-login-rejected-current-deployment.png`。
+- 用户指定的 Usage 公网入口在浏览器认证层返回 `ERR_INVALID_AUTH_CREDENTIALS`。Browser 安全策略随后阻止继续访问该页面；主代理没有尝试替代浏览器、URL 变形、原始 CDP 或其他绕过。因此生产用户事件次数、Token、模型、审计 outbox 对账继续阻塞于有效的 e-Mate 管理员账号和 Usage 只读认证材料。
+- 生产页面仍是服务器既有部署版本，不能用本地新管理端/Usage 截图冒充生产。当前分支 CI 已通过；正式发布工作流的 npm 候选打包仍在执行。Office、Windows/macOS 浏览器执行层、Vision/OCR、生产登录/租户策略/账本对账等阻塞关闭前，不覆盖生产部署或 R2 下载入口。
+
+## 2026-08-16 · S01/S13 当前三平台发布候选
+
+- 提交 `f7c567a4adde61bac844585b6ff603dd75f96729` 的 GitHub Actions `Release e-Mate` run `31902404007` 从同一源码构建唯一 npm tarball，并在 macOS arm64、macOS x64、Windows x64 三个干净 runner 上完成全局 npm 安装、staging check、两次幂等 setup 与 installed check；三项分别成功，Windows 较慢但在 30 分钟门禁内以 12m57s 正常结束，没有重跑或放宽超时。
+- 同一 run 的 release evidence job 成功生成并回验 SHA256、manifest、SPDX SBOM 与许可证清单。上传的 npm artifact digest 为 `sha256:82132fa7af226e22584f58df3b4e983480ac1093a1ba4b4085b24f2629d4a9be`，release-candidate artifact digest 为 `sha256:2096e966cc969d4d9517ebb6288bd9470139ed9c5a58b332c4f155f9d10aa197`。
+- 该 run 由 Pull Request 触发，npm 发布、registry 三平台回读与 R2 上传按工作流合同全部 skipped；因此本条关闭当前源码的三平台候选构建/干净安装，不关闭 npm/R2 正式发布、生产 URL 激活或 Computer Use 平台能力。
