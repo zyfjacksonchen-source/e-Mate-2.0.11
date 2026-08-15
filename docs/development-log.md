@@ -874,6 +874,8 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 主代理复跑 TypeScript 与 Model Gateway 门禁：75 passed、6 项因真实 PostgreSQL/Windows 外部环境跳过、0 failed。该适配门禁阶段只证明路由合同，未写入生产配置或部署；HTTP hop 不提供链路加密，只允许用于用户已认可的受控网络路径。
 - 随后主代理使用用户明确授权测试的生产 GPT Key 和 HTTP base URL，分别向 Luna 与 Sol 发起一次最小 Responses 调用；两次均返回 HTTP 200，响应报告的模型 ID 与请求一致，并各有 Provider response/request ID 和 token usage。未记录 Key、base URL 或回复正文。脱敏收据为 `artifacts/acceptance/S07-model-upstream-gpt-smoke.json`。该证据只关闭原始 Provider 对两模型的单次连通，不替代企业 Gateway 租约、同会话切换、审计对账或弱网恢复。
 - live smoke 审核同时发现 DeepSeek 上游仍写旧 `deepseek-v4-pro`，与冻结映射 `ecorex-deepseek-v4-pro → deepseek-v4-flash` 漂移；权威 contract 与出站 body 回归已改为 `deepseek-v4-flash`，用户可见路由 ID、策略、鉴权和管理端均未改变。Model Gateway 门禁再次为 75 passed、6 external skips、0 failed；真实目录是否存在该 ID 仍需生产 DeepSeek Provider smoke，未用近似模型代替。
+- 用户提供的生产 DeepSeek Key 在官方目录中真实返回 `deepseek-v4-flash` 与 `deepseek-v4-pro`；主代理随后固定调用 `deepseek-v4-flash`，HTTP 200，返回模型 ID 与冻结映射一致，并有 Provider response ID 和 token usage。用户提供的豆包 Key 在官方方舟目录中真实包含 `doubao-seed-2-0-pro-260215`；同模型最小 Chat Completions 调用也返回 200、匹配模型 ID、request/response ID 与 token usage。脱敏收据分别为 `artifacts/acceptance/S07-model-upstream-deepseek-smoke.json` 与 `S07-model-upstream-doubao-smoke.json`，均不含 Key、base URL、prompt 或回复正文。
+- 这两项与 Luna/Sol 一样只关闭原始 Provider 单次连通；企业 Gateway 登录租约、同会话模型切换、上游故障/弱网恢复、usage/audit 对账和生产 UI 仍必须端到端验收。
 
 ## 2026-08-16 · S10 生产图像 Provider 单次、编辑与最低并发
 
