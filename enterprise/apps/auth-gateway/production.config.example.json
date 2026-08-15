@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 8443
+  },
+  "tls": {
+    "certificateFile": "/run/secrets/e-mate-auth-tls.crt",
+    "privateKeyFile": "/run/secrets/e-mate-auth-tls.key"
+  },
+  "database": {
+    "urlFile": "/run/secrets/e-mate-postgres.url",
+    "transport": {
+      "mode": "internal-plaintext"
+    }
+  },
+  "security": {
+    "maximumRequestsPerMinute": 120
+  },
+  "session": {
+    "issuer": "e-mate-auth",
+    "keyId": "replace-with-rotated-key-id",
+    "privateKeyFile": "/run/secrets/e-mate-session-ed25519-private.pem",
+    "accessAudience": "e-mate-desktop",
+    "accessLifetimeSeconds": 900,
+    "refreshDerivationSecretFile": "/run/secrets/e-mate-refresh-secret.base64url",
+    "refreshLifetimeSeconds": 2592000
+  },
+  "modelGateway": {
+    "baseUrl": "https://mvdcm.ecoremedia.net/e-mate/model-api",
+    "audience": "e-mate-model-gateway",
+    "usageKeyId": "replace-with-usage-key-id",
+    "usagePublicKeyFile": "/run/secrets/e-mate-usage-ed25519-public.pem",
+    "sessionLifetimeSeconds": 600,
+    "routeCatalogFile": "/run/secrets/model-gateway-config.json"
+  },
+  "allowedClientIds": ["e-mate-desktop"],
+  "organizations": [{ "slug": "replace-with-organization", "tenantId": "replace-with-tenant-id" }]
+}

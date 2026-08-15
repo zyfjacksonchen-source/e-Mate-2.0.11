@@ -1,0 +1,30 @@
+e-Mate includes the unmodified DeepSeek Harness 0.1.0-rc.5 runtime assembled
+from commit 47f943859bef60e4160492346772ded9b24f765a. Each redistributed Harness
+package keeps its own LICENSE file under runtime/harness/node_modules.
+
+Dependencies installed by npm keep their license files in their own packages:
+- fflate 0.8.3 — MIT
+- playwright-core 1.61.1 — Apache-2.0
+- yaml 2.9.0 — ISC
+
+The e-Mate send-button icon uses Lucide Send 0.561.0 under the ISC License:
+
+Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2023 as part
+of Feather. All other copyright (c) for Lucide are held by Lucide Contributors
+2025.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+
+Platform Runtime and Browser packages carry their complete generated
+THIRD_PARTY_NOTICES.txt files. The release evidence artifact adds one SPDX 2.3
+SBOM and an aggregate license inventory for the exact seven published tarballs.

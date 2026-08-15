@@ -1,0 +1,721 @@
+.root {
+  --emate-brand: oklch(0.649203 0.180912 42.881);
+  --emate-canvas: oklch(0.966318 0.003973 106.474);
+  --emate-panel: oklch(0.984548 0.002637 106.448);
+  --emate-raised: oklch(0.947728 0.006648 106.526);
+  --emate-hover: oklch(0.951016 0.005316 106.5);
+  --emate-selected: oklch(0.94007 0 0);
+  --emate-ink: oklch(0.296426 0.00355 106.614);
+  --emate-muted: oklch(0.508991 0.006202 106.618);
+  --emate-rule: oklch(0.905018 0.008065 106.56);
+  --emate-danger: oklch(0.514636 0.184396 27.456);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: clip;
+  color: var(--emate-ink);
+  background: var(--emate-canvas);
+  font: 14px/22px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+@media (min-width: 1024px) {
+  :global(div:has(> [data-shell-overlay]):not([data-sidebar-collapsed])[data-details-collapsed]) {
+    grid-template-columns: 248px minmax(0, 1fr) 0 !important;
+  }
+
+  :global(div:has(> [data-shell-overlay]):not([data-sidebar-collapsed]) > [data-side='sidebar']) {
+    display: none;
+  }
+
+  .root {
+    width: 100% !important;
+  }
+}
+
+:global(body[data-ds-dark-theme]) .root {
+  --emate-canvas: oklch(0.296426 0.00355 106.614);
+  --emate-panel: oklch(0.177638 0 0);
+  --emate-raised: oklch(0.268618 0 0);
+  --emate-hover: oklch(0.343524 0.005128 106.666);
+  --emate-selected: oklch(0.268618 0 0);
+  --emate-ink: oklch(0.981562 0.002639 106.448);
+  --emate-muted: oklch(0.780581 0.009753 106.623);
+  --emate-rule: oklch(0.344584 0 0);
+  --emate-danger: oklch(0.72 0.18 28);
+}
+
+.root *,
+.dialogBackdrop * {
+  box-sizing: border-box;
+}
+
+.root button,
+.root input,
+.dialog button,
+.dialog input {
+  font: inherit;
+}
+
+.brandRow {
+  min-height: 64px;
+  padding: 8px 12px 8px 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.brand {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.logo {
+  width: 126px;
+  height: 40px;
+  display: block;
+  object-fit: contain;
+  object-position: left center;
+}
+
+:global(body[data-ds-dark-theme]) .logo {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+.mark {
+  width: 30px;
+  height: 30px;
+  display: none;
+  object-fit: contain;
+  background: transparent;
+}
+
+.iconButton,
+.closeButton,
+.search > button {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  display: inline-grid;
+  place-items: center;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.brandRow > .iconButton {
+  margin-left: auto;
+}
+
+.closeButton {
+  display: none;
+}
+
+.newSession,
+.sectionToggle,
+.projectMain,
+.projectEmpty,
+.taskRow,
+.showMore {
+  min-height: 32px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--emate-ink);
+  background: transparent;
+  font-size: 13px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.newSession {
+  width: calc(100% - 16px);
+  margin: 0 8px 4px;
+  padding: 0 8px;
+  justify-content: flex-start;
+}
+
+.newSession[aria-current='page'] {
+  background: var(--emate-selected);
+}
+
+.primaryActions {
+  display: grid;
+  gap: 0;
+  flex: none;
+  margin-bottom: 8px;
+}
+
+.scheduleAction,
+.primaryActions :global(button[aria-label='能力中心']) {
+  width: calc(100% - 16px);
+  min-height: 32px;
+  margin: 0 8px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--emate-muted);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.scheduleAction:hover,
+.scheduleAction:focus-visible,
+.scheduleAction[aria-current='page'] {
+  color: var(--emate-ink);
+  background: var(--emate-hover);
+}
+
+.search {
+  min-height: 32px;
+  margin: 0 12px 12px;
+  padding-left: 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 8px;
+  color: var(--emate-muted);
+  background: transparent;
+}
+
+.search:focus-within {
+  border-color: var(--emate-rule);
+  background: var(--emate-raised);
+}
+
+.search input {
+  min-width: 0;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--emate-ink);
+  background: transparent;
+}
+
+.taskNav {
+  flex: 1;
+  min-height: 0;
+  padding: 0 8px;
+  border: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: transparent;
+}
+
+.sidebarSection + .sidebarSection {
+  margin-top: 8px;
+}
+
+.navHeading {
+  min-height: 32px;
+  padding-left: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--emate-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.navHeading > strong {
+  font-weight: 600;
+}
+
+.navHeading > small {
+  margin-left: auto;
+}
+
+.sectionToggle {
+  min-width: 0;
+  padding: 0;
+  color: var(--emate-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sectionToggle small {
+  font-weight: 400;
+}
+
+.rotated {
+  transform: rotate(-90deg);
+}
+
+.projectList,
+.projectSessions,
+.taskList {
+  display: grid;
+  gap: 4px;
+}
+
+.projectRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px 32px;
+  align-items: center;
+}
+
+.projectMain,
+.projectEmpty {
+  width: 100%;
+  min-width: 0;
+  padding: 0 8px;
+  justify-content: flex-start;
+  color: var(--emate-muted);
+  text-align: left;
+}
+
+.projectMain span,
+.projectEmpty span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectSessions {
+  margin-left: 16px;
+  padding-left: 8px;
+  border-left: 1px solid var(--emate-rule);
+}
+
+.showMore {
+  width: 100%;
+  padding: 0 8px;
+  justify-content: flex-start;
+  color: var(--emate-muted);
+  font-size: 12px;
+}
+
+.taskEntry {
+  position: relative;
+  min-width: 0;
+}
+
+.taskRow {
+  width: 100%;
+  min-width: 0;
+  padding: 0 44px 0 12px;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.taskRow.current {
+  background: var(--emate-selected);
+}
+
+.taskRow > span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--emate-muted);
+  animation: emate-pulse 1.2s ease-in-out infinite;
+}
+
+.activity.waiting {
+  background: var(--emate-brand);
+  animation: none;
+}
+
+.taskMenu {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  z-index: 2;
+}
+
+.taskMenu > summary {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--emate-muted);
+  opacity: 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.taskMenu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.taskEntry:hover .taskMenu > summary,
+.taskEntry:focus-within .taskMenu > summary,
+.taskMenu[open] > summary {
+  opacity: 1;
+}
+
+.taskMenu > div {
+  position: fixed;
+  z-index: 40;
+  width: 172px;
+  margin: 4px 0 0 -140px;
+  padding: 4px;
+  border: 1px solid var(--emate-rule);
+  border-radius: 10px;
+  display: grid;
+  background: var(--emate-panel);
+  box-shadow: 0 14px 36px rgb(0 0 0 / 18%);
+}
+
+.taskMenu > div button {
+  min-height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--emate-ink);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.taskMenu > div .danger {
+  color: var(--emate-danger);
+}
+
+.empty,
+.notice {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--emate-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.notice {
+  margin-top: 8px;
+  border-radius: 10px;
+  background: var(--emate-raised);
+  overflow-wrap: anywhere;
+}
+
+.footer {
+  flex: none;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.footer :global(button[data-emate-settings-trigger]) {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--emate-ink);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .footer :global(button[data-emate-settings-trigger]:hover) {
+    border-color: var(--emate-rule);
+    background: var(--emate-hover);
+  }
+}
+
+.footer > :global(button),
+.footer > :global(div) {
+  flex: none;
+}
+
+.scrim,
+.mobileOpen {
+  display: none;
+}
+
+.dialogBackdrop {
+  --emate-brand: oklch(0.649203 0.180912 42.881);
+  --emate-panel: oklch(0.984548 0.002637 106.448);
+  --emate-ink: oklch(0.296426 0.00355 106.614);
+  --emate-rule: oklch(0.905018 0.008065 106.56);
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 46%);
+}
+
+:global(body[data-ds-dark-theme]) .dialogBackdrop {
+  --emate-panel: oklch(0.243535 0 0);
+  --emate-ink: oklch(0.981562 0.002639 106.448);
+  --emate-rule: oklch(0.344584 0 0);
+}
+
+.dialog {
+  width: min(400px, 100%);
+  padding: 20px;
+  border: 1px solid var(--emate-rule, #555);
+  border-radius: 18px;
+  display: grid;
+  gap: 16px;
+  color: var(--emate-ink, #fff);
+  background: var(--emate-panel, #222);
+  box-shadow: 0 24px 72px rgb(0 0 0 / 30%);
+}
+
+.dialog h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.dialog input {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--emate-rule, #555);
+  border-radius: 10px;
+  color: inherit;
+  background: transparent;
+}
+
+.dialog > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dialog button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--emate-rule, #555);
+  border-radius: 10px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.dialog button[type='submit'] {
+  border-color: var(--emate-brand);
+  color: white;
+  background: var(--emate-brand);
+}
+
+.root button:disabled,
+.dialog button:disabled,
+.dialog input:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+@media (hover: hover) {
+  .iconButton:hover,
+  .closeButton:hover,
+  .newSession:hover,
+  .projectMain:hover,
+  .projectEmpty:hover,
+  .taskRow:not(.current):hover,
+  .showMore:hover,
+  .taskMenu > summary:hover,
+  .taskMenu > div button:hover {
+    border-color: var(--emate-rule);
+    color: var(--emate-ink);
+    background: var(--emate-raised);
+  }
+}
+
+.root :focus-visible,
+.dialog :focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 1px var(--emate-brand);
+}
+
+.collapsed {
+  width: 56px;
+  padding: 8px 10px;
+}
+
+.collapsed .brandRow {
+  min-height: 48px;
+  padding: 0;
+}
+
+.collapsed .brand {
+  width: 36px;
+  height: 36px;
+  justify-content: center;
+}
+
+.collapsed .logo {
+  display: none;
+}
+
+.collapsed .mark {
+  display: block;
+}
+
+.collapsed .newSession {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  margin: 0;
+  padding: 0;
+  justify-content: center;
+}
+
+.collapsed .primaryActions,
+.collapsed .taskNav {
+  display: none;
+}
+
+.collapsed .footer {
+  margin-top: auto;
+  padding: 0;
+}
+
+@media (max-width: 767px) {
+  :global(div:has(> [data-shell-overlay])) {
+    grid-template-columns: 0 minmax(0, 1fr) 0 !important;
+  }
+
+  .root {
+    position: fixed;
+    z-index: 31;
+    inset: 8px auto 8px 8px;
+    width: min(300px, calc(100vw - 32px)) !important;
+    height: auto;
+    max-height: none;
+    border: 1px solid var(--emate-rule);
+    border-radius: 16px;
+    box-shadow: 0 24px 72px rgb(0 0 0 / 20%);
+  }
+
+  .root.collapsed {
+    display: none;
+  }
+
+  .closeButton {
+    margin-left: auto;
+    display: inline-grid;
+  }
+
+  .brandRow > .iconButton {
+    margin-left: auto;
+  }
+
+  .scrim {
+    position: fixed;
+    z-index: 30;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    display: block;
+    background: rgb(0 0 0 / 34%);
+  }
+
+  .mobileOpen {
+    position: fixed;
+    z-index: 29;
+    top: 12px;
+    left: 12px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--emate-rule);
+    border-radius: 12px;
+    display: inline-grid;
+    place-items: center;
+    color: var(--emate-ink);
+    background: var(--emate-panel);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+    cursor: pointer;
+  }
+
+  .taskRow,
+  .newSession,
+  .projectMain,
+  .projectEmpty,
+  .showMore {
+    min-height: 44px;
+  }
+
+  .iconButton,
+  .closeButton,
+  .taskMenu > summary {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+  }
+
+  .projectRow {
+    grid-template-columns: minmax(0, 1fr) 44px 44px;
+  }
+
+  .taskRow {
+    padding-right: 56px;
+  }
+}
+
+@media (forced-colors: active) {
+  .root,
+  .mobileOpen {
+    --emate-brand: Highlight;
+    --emate-canvas: Canvas;
+    --emate-panel: Canvas;
+    --emate-raised: Canvas;
+    --emate-hover: Highlight;
+    --emate-selected: Highlight;
+    --emate-ink: CanvasText;
+    --emate-muted: CanvasText;
+    --emate-rule: ButtonBorder;
+    --emate-danger: CanvasText;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root *,
+  .dialogBackdrop * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@keyframes emate-pulse {
+  50% { opacity: .35; }
+}

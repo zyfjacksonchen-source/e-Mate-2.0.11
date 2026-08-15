@@ -1,0 +1,132 @@
+export const name = 'emate-capabilities'
+export const inject = ['connection']
+export const CAPABILITIES_CHANNEL = '/emate.capabilities'
+
+const ID = /^[a-z][a-z0-9.-]{1,63}$/u
+const STATES = new Set(['ready', 'setup-required', 'blocked', 'failed'])
+const ACTION_KINDS = new Set(['primary', 'secondary'])
+const ICON_KEYS = new Set(['browser', 'collaboration', 'image', 'office', 'ocr'])
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function badRequest(message) {
+  return { ok: false, error: { code: 'bad-request', message, details: { issues: [] } } }
+}
+
+function boundedText(value, maximum) {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= maximum
+}
+
+function validAction(action) {
+  return isRecord(action)
+    && ID.test(action.id)
+    && boundedText(action.label, 48)
+    && ACTION_KINDS.has(action.kind)
+    && Object.keys(action).sort().join(',') === 'id,kind,label'
+}
+
+function validateDefinition(definition) {
+  if (!isRecord(definition)
+    || !ID.test(definition.id)
+    || !boundedText(definition.title, 80)
+    || !boundedText(definition.summary, 240)
+    || typeof definition.icon_key !== 'string'
+    || !ICON_KEYS.has(definition.icon_key)
+    || !Number.isSafeInteger(definition.order)
+    || typeof definition.status !== 'function'
+    || !Array.isArray(definition.actions)
+    || definition.actions.length > 4
+    || definition.actions.some(action => !validAction(action))
+    || new Set(definition.actions.map(action => action.id)).size !== definition.actions.length
+    || (definition.actions.length > 0 && typeof definition.invoke !== 'function')) {
+    throw new Error('invalid e-Mate capability definition')
+  }
+}
+
+function validateStatus(value, definition) {
+  if (!isRecord(value)
+    || !STATES.has(value.state)
+    || (value.detail !== undefined && (typeof value.detail !== 'string' || value.detail.length > 240))
+    || !Array.isArray(value.action_ids)
+    || value.action_ids.some(id => typeof id !== 'string' || !definition.actions.some(action => action.id === id))
+    || new Set(value.action_ids).size !== value.action_ids.length
+    || Object.keys(value).some(key => key !== 'state' && key !== 'detail' && key !== 'action_ids')) {
+    throw new Error('invalid e-Mate capability status')
+  }
+  return value
+}
+
+export function apply(ctx) {
+  const definitions = new Map()
+  const registry = {
+    register(definition) {
+      validateDefinition(definition)
+      if (definitions.has(definition.id)) throw new Error(`duplicate e-Mate capability ${definition.id}`)
+      definitions.set(definition.id, definition)
+      return () => { definitions.delete(definition.id) }
+    },
+  }
+  ctx.provide('emateCapabilities', registry)
+
+  ctx.effect(() => ctx.connection.rpc.handle(
+    CAPABILITIES_CHANNEL,
+    async (endpoint, payload, signal) => {
+      if (!isRecord(payload)) return badRequest('e-Mate capability payload must be an object')
+      if (endpoint === 'list') {
+        if (Object.keys(payload).length !== 0) return badRequest('capability list payload must be empty')
+        const items = []
+        for (const definition of definitions.values()) {
+          let status
+          try {
+            status = validateStatus(await definition.status(signal), definition)
+          } catch {
+            signal.throwIfAborted()
+            status = { state: 'failed', detail: '能力插件未能返回有效状态。', action_ids: [] }
+          }
+          items.push({
+            id: definition.id,
+            title: definition.title,
+            summary: definition.summary,
+            icon_key: definition.icon_key,
+            order: definition.order,
+            actions: definition.actions.filter(action => status.action_ids.includes(action.id)),
+            state: status.state,
+            ...(status.detail === undefined ? {} : { detail: status.detail }),
+          })
+        }
+        items.sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
+        return { ok: true, value: { schema_version: 1, items } }
+      }
+      if (endpoint === 'action') {
+        if (Object.keys(payload).sort().join(',') !== 'action_id,capability_id,data'
+          || typeof payload.capability_id !== 'string'
+          || !ID.test(payload.capability_id)
+          || typeof payload.action_id !== 'string'
+          || !ID.test(payload.action_id)) {
+          return badRequest('capability action payload is invalid')
+        }
+        const definition = definitions.get(payload.capability_id)
+        if (definition === undefined
+          || typeof definition.invoke !== 'function') {
+          return badRequest('capability action is unavailable')
+        }
+        const status = validateStatus(await definition.status(signal), definition)
+        if (!status.action_ids.includes(payload.action_id)) return badRequest('capability action is unavailable')
+        const result = await definition.invoke(payload.action_id, payload.data, signal)
+        return {
+          ok: true,
+          value: {
+            schema_version: 1,
+            capability_id: payload.capability_id,
+            action_id: payload.action_id,
+            result,
+          },
+        }
+      }
+      return badRequest('unknown e-Mate capability endpoint')
+    },
+    { authority: 'loopback' },
+  ), 'emate.capabilities: target-native RPC channel')
+}

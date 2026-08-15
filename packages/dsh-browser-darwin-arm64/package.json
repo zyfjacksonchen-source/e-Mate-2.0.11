@@ -1,0 +1,19 @@
+{
+  "name": "@e-mate/dsh-browser-darwin-arm64",
+  "version": "2.0.7",
+  "description": "Pinned e-Mate Chromium runtime for macOS arm64",
+  "license": "MIT",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": ["browser", "scripts", "emate-browser.json", "THIRD_PARTY_NOTICES.txt", "LICENSE", "README.md"],
+  "publishConfig": { "access": "public" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate.git",
+    "directory": "packages/dsh-browser-darwin-arm64"
+  },
+  "scripts": {
+    "prepack": "node ../../scripts/build-browser-package.mjs",
+    "postinstall": "node scripts/ensure-executable.mjs"
+  }
+}

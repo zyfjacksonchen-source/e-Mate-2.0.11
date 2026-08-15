@@ -1,0 +1,103 @@
+const node = {
+  format: ['esm'],
+  platform: 'node',
+  target: 'es2024',
+  fixedExtension: false,
+  dts: false,
+  clean: false,
+}
+
+export default [
+  {
+    ...node,
+    entry: {
+      bin: 'src/bin.ts',
+      'e-mate': 'src/e-mate.ts',
+      update: 'src/update.ts',
+      'skill-hub': 'src/skill-hub.ts',
+      'legacy-migration': 'src/legacy-migration.ts',
+      'legacy-schedule': 'src/legacy-schedule.ts',
+    },
+    outDir: 'lib',
+  },
+  {
+    ...node,
+    entry: {
+      health: 'src/profile/health.ts',
+      'agent-operations': 'src/profile/agent-operations.ts',
+      capabilities: 'src/profile/capabilities.ts',
+      connections: 'src/profile/connections.ts',
+      'credentials-os': 'src/profile/credentials-os.ts',
+      'general-workspace': 'src/profile/general-workspace.ts',
+      share: 'src/profile/share.ts',
+    },
+    outDir: 'profile/plugins',
+  },
+  {
+    ...node,
+    noExternal: ['fflate', 'yaml'],
+    entry: { 'skill-hub-agent': 'src/profile/skill-hub-agent.ts' },
+    outDir: 'profile/plugins',
+  },
+  {
+    ...node,
+    entry: { 'office-ocr': 'src/profile/office-ocr.ts' },
+    outDir: 'profile/plugins',
+  },
+  {
+    ...node,
+    entry: { 'browser-computer-use': 'src/profile/browser-computer-use.ts' },
+    outDir: 'profile/plugins',
+  },
+  {
+    ...node,
+    entry: { memory: 'src/profile/memory.ts' },
+    outDir: 'profile/plugins',
+  },
+  {
+    ...node,
+    entry: {
+      dream: 'src/profile/dream.ts',
+      learning: 'src/profile/learning.ts',
+    },
+    outDir: 'profile/plugins',
+  },
+  {
+    ...node,
+    entry: { 'image-generation': 'src/profile/image-generation.ts' },
+    outDir: 'profile/plugins',
+  },
+  {
+    ...node,
+    entry: { 'model-policy': 'src/profile/model-policy.ts' },
+    outDir: 'profile/plugins',
+  },
+  {
+    ...node,
+    entry: { audit: 'src/profile/audit.ts' },
+    outDir: 'profile/plugins',
+  },
+  {
+    ...node,
+    entry: { 'legacy-migration': 'src/profile/legacy-migration.ts' },
+    outDir: 'profile/plugins',
+  },
+  {
+    ...node,
+    entry: { 'schedule-import': 'src/profile/schedule-import.ts' },
+    outDir: 'profile/plugins',
+  },
+  {
+    ...node,
+    entry: {
+      index: 'src/profile/identity/index.ts',
+      agreements: 'src/profile/identity/agreements.ts',
+    },
+    outDir: 'profile/plugins/identity',
+  },
+  {
+    ...node,
+    entry: { index: 'src/profile/emate-shell/index.ts' },
+    outDir: 'profile/plugins/emate-shell',
+  },
+]

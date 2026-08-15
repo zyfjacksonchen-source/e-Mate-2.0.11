@@ -1,0 +1,100 @@
+/* Presentation-only chat coverage. Conversation state, ordering, paging,
+   actions, timers and Tool renderers stay owned by the pinned Harness UI. */
+
+:global([data-chat-flow]) {
+  padding-block: 8px 32px;
+  color: var(--emate-color-ink, var(--dsw-alias-label-primary));
+}
+
+/* The reference activity stream is deliberately compact: consecutive real
+   Tool nodes read as one activity group without creating a second group model. */
+:global([data-chat-flow-kind='tool-call'] + [data-chat-flow-kind='tool-call']) {
+  margin-top: -12px;
+}
+
+:global([data-chat-flow-kind='command'] + [data-chat-flow-kind='tool-call']),
+:global([data-chat-flow-kind='tool-call'] + [data-chat-flow-kind='command']) {
+  margin-top: -12px;
+}
+
+:global([data-chat-flow-kind='tool-call']),
+:global([data-chat-flow-kind='command']),
+:global([data-chat-flow-kind='model-retry']),
+:global([data-chat-flow-kind='turn-error']) {
+  min-height: 24px;
+}
+
+/* Harness exposes one real turn-level running status after the durable node
+   list. Only its product copy changes; its clock still uses the actual turn
+   start and freezes when Harness emits the terminal Turn node. */
+:global([data-chat-flow] > [role='status']) {
+  min-height: 24px;
+  height: 24px;
+  font-size: 0;
+  line-height: 24px;
+}
+
+:global([data-chat-flow] > [role='status'])::before {
+  content: '正在工作';
+  font-size: 14px;
+  line-height: 24px;
+}
+
+:global([data-chat-flow] > [role='status'] > span) {
+  font-size: 13px;
+  line-height: 24px;
+}
+
+:global([data-chat-flow]:has([data-emate-activity-header]) > [role='status']) {
+  display: none;
+}
+
+/* A completed turn keeps the target branch/copy/feedback action row, while
+   matching the quiet history treatment of the interaction reference. */
+:global([data-turn-tail]) {
+  gap: 12px !important;
+}
+
+:global([data-turn-tail][data-emate-activity-tail] > div:last-child > span:last-child) {
+  display: none;
+}
+
+:global([data-turn-tail][data-emate-activity-tail-status='failed']),
+:global([data-turn-tail][data-emate-activity-tail-status='cancelled']) {
+  display: none;
+}
+
+:global([data-chat-flow-kind][data-emate-activity-collapsed]) {
+  display: none;
+}
+
+:global([data-chat-flow-kind='e-mate-message-disclosure']) {
+  display: none;
+}
+
+:global([data-chat-flow-kind='turn-error']) {
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 28%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 6%, transparent);
+}
+
+/* Harness already groups consecutive real ImageBlocks and owns loading,
+   authorization and lightbox state. e-Mate only restores the reference's
+   equal, readable response tiles without creating another image renderer. */
+:global([data-chat-flow-kind='assistant-step'] [data-align] > [data-variant='tile']) {
+  width: clamp(112px, 18vw, 156px);
+  height: clamp(112px, 18vw, 156px);
+}
+
+@media (max-width: 767px) {
+  :global([data-chat-flow]) {
+    padding-block: 4px 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :global([data-chat-flow] *) {
+    scroll-behavior: auto !important;
+  }
+}

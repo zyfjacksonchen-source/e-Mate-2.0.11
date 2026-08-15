@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  source:
+    name: Node 24 / target contracts and unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            enterprise/pnpm-lock.yaml
+            upstream/deepseek-harness/pnpm-lock.yaml
+
+      - name: Install exact workspaces
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir enterprise install --frozen-lockfile
+          pnpm --dir upstream/deepseek-harness install --frozen-lockfile
+
+      - name: Build pinned DeepSeek Harness
+        run: pnpm --dir upstream/deepseek-harness run build
+
+      - name: Check target pin and e-Mate behavior
+        run: |
+          pnpm check:target
+          pnpm --filter @e-mate/dsh test
+          pnpm enterprise:check
+          pnpm enterprise:test
+          pnpm enterprise:build
+
+      - name: Check release carrier
+        run: node --test scripts/release.test.mjs
+
+      - name: Check patch whitespace
+        run: git diff --check

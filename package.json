@@ -13,9 +13,16 @@
   ],
   "scripts": {
     "check:target": "node scripts/check-target.mjs",
+    "performance:fixture": "node scripts/create-performance-fixture.mjs",
     "test": "pnpm -r --if-present test",
+    "test:release": "node --test scripts/release.test.mjs",
     "build": "pnpm -r --if-present build",
-    "pack:check": "pnpm --filter @e-mate/dsh pack --pack-destination dist/npm"
+    "enterprise:check": "pnpm --dir enterprise check",
+    "enterprise:test": "pnpm --dir enterprise test",
+    "enterprise:build": "pnpm --dir enterprise build",
+    "pack:check": "pnpm --filter @e-mate/dsh pack --pack-destination dist/npm",
+    "release:evidence": "node scripts/release.mjs evidence --from dist/npm --out dist/release",
+    "release:publish": "node scripts/release.mjs publish --from dist/npm",
+    "release:r2": "node scripts/publish-r2.mjs --npm dist/npm --evidence dist/release --receipt dist/r2/r2-download-admission.json"
   }
 }
-

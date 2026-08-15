@@ -1,0 +1,495 @@
+:root {
+  color-scheme: dark;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  --admin-bg: #111316;
+  --admin-surface: #191c21;
+  --admin-surface-raised: #20242a;
+  --admin-border: #30353d;
+  --admin-text: #f5f6f7;
+  --admin-muted: #9da5b0;
+  --admin-brand: #ee5b0c;
+  --admin-brand-hover: #d94c00;
+  --admin-brand-soft: #3c281a;
+  --admin-on-brand: #fff;
+  --admin-shadow: rgb(0 0 0 / 28%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  color: var(--admin-text);
+  background: var(--admin-bg);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+
+.auth-card {
+  width: min(100%, 420px);
+  padding: 36px;
+  border: 1px solid var(--admin-border);
+  border-radius: 20px;
+  background: var(--admin-surface);
+  box-shadow: 0 24px 64px var(--admin-shadow);
+}
+
+.brand-logo {
+  width: 128px;
+  height: auto;
+  filter: brightness(0) invert(1);
+  object-fit: contain;
+}
+
+.auth-icon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  margin-top: 28px;
+  border-radius: 14px;
+  color: var(--admin-brand);
+  background: var(--admin-brand-soft);
+}
+
+.auth-card h1 {
+  margin: 20px 0 8px;
+  font-size: 26px;
+}
+
+.auth-card > p {
+  margin: 0 0 24px;
+  color: var(--admin-muted);
+  line-height: 1.65;
+}
+
+.auth-card form {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-card .arco-btn-primary {
+  border-color: var(--admin-brand) !important;
+  color: var(--admin-on-brand) !important;
+  background: var(--admin-brand) !important;
+}
+
+.admin-shell .arco-btn-primary,
+.arco-modal .arco-btn-primary {
+  border-color: var(--admin-brand) !important;
+  color: var(--admin-on-brand) !important;
+  background: var(--admin-brand) !important;
+}
+
+.admin-shell .arco-btn-primary:hover,
+.arco-modal .arco-btn-primary:hover {
+  border-color: var(--admin-brand-hover) !important;
+  background: var(--admin-brand-hover) !important;
+}
+
+.auth-card .arco-btn-primary:hover {
+  border-color: var(--admin-brand-hover) !important;
+  background: var(--admin-brand-hover) !important;
+}
+
+.auth-card .arco-btn-primary:focus-visible,
+.auth-card .arco-input-wrapper:focus-within {
+  outline: 3px solid color-mix(in srgb, var(--admin-brand) 38%, transparent);
+  outline-offset: 2px;
+}
+
+.auth-card label {
+  font-size: 13px;
+  color: var(--admin-muted);
+}
+
+.admin-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+}
+
+.admin-shell aside {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-content: start;
+  gap: 14px;
+  padding: 28px 22px;
+  border-right: 1px solid var(--admin-border);
+  background: var(--admin-surface);
+}
+
+.admin-shell aside > div {
+  display: grid;
+  gap: 3px;
+}
+
+.admin-shell aside span {
+  color: var(--admin-muted);
+  font-size: 12px;
+}
+
+.sign-out {
+  justify-content: flex-start;
+  margin-top: 28px;
+  color: var(--admin-muted) !important;
+}
+
+.admin-content {
+  width: min(100%, 1180px);
+  margin: 0 auto;
+  padding: 48px;
+}
+
+.admin-content > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.admin-content header p,
+.fact-card p,
+.usage-entry p {
+  margin: 0 0 6px;
+  color: var(--admin-brand);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-content h1 {
+  margin: 0 0 8px;
+  font-size: clamp(28px, 4vw, 42px);
+  letter-spacing: -0.03em;
+}
+
+.admin-content header span,
+.scope-note {
+  color: var(--admin-muted);
+  line-height: 1.6;
+}
+
+.admin-tabs .arco-tabs-header {
+  margin-bottom: 22px;
+  border-bottom-color: var(--admin-border);
+}
+
+.admin-tabs .arco-tabs-header-title {
+  color: var(--admin-muted);
+}
+
+.admin-tabs .arco-tabs-header-title-active,
+.admin-tabs .arco-tabs-header-title:hover {
+  color: var(--admin-text);
+}
+
+.admin-tabs .arco-tabs-header-ink {
+  background: var(--admin-brand);
+}
+
+.admin-shell .arco-switch-checked {
+  background: var(--admin-brand);
+}
+
+.scope-note {
+  margin: 18px 0 28px;
+  font-size: 13px;
+}
+
+.loading-state {
+  display: grid;
+  min-height: 240px;
+  place-items: center;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.metric-grid article {
+  display: grid;
+  gap: 14px;
+  min-height: 148px;
+  padding: 20px;
+  border: 1px solid var(--admin-border);
+  border-radius: 16px;
+  background: var(--admin-surface);
+}
+
+.metric-grid article svg {
+  color: var(--admin-brand);
+}
+
+.metric-grid article span {
+  color: var(--admin-muted);
+  font-size: 13px;
+}
+
+.metric-grid article strong {
+  align-self: end;
+  font-size: 30px;
+}
+
+.fact-card,
+.usage-entry {
+  margin-top: 18px;
+  padding: 24px;
+  border: 1px solid var(--admin-border);
+  border-radius: 16px;
+  background: var(--admin-surface);
+}
+
+.fact-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 22px;
+}
+
+.fact-card h2,
+.usage-entry h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 16px;
+}
+
+.section-heading h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.section-heading p,
+.empty-state {
+  margin: 0;
+  color: var(--admin-muted);
+  line-height: 1.6;
+}
+
+.record-list {
+  overflow: hidden;
+  border: 1px solid var(--admin-border);
+  border-radius: 16px;
+  background: var(--admin-surface);
+}
+
+.consent-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(10rem, 1fr)) auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 860px) {
+  .consent-filters {
+    grid-template-columns: 1fr;
+  }
+}
+
+.record-list article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--admin-border);
+}
+
+.record-list article:last-child {
+  border-bottom: 0;
+}
+
+.record-list article > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.record-list article strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.record-list article span {
+  color: var(--admin-muted);
+  font-size: 13px;
+}
+
+.record-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.empty-state {
+  padding: 28px 20px;
+  text-align: center;
+}
+
+.modal-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.modal-fields label {
+  margin-top: 4px;
+  color: var(--admin-muted);
+  font-size: 13px;
+}
+
+.field-hint {
+  color: var(--admin-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.secret-field {
+  margin-top: 16px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.fact-card dl {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.fact-card dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--admin-border);
+}
+
+.fact-card dt,
+.usage-entry span {
+  color: var(--admin-muted);
+}
+
+.fact-card dd {
+  margin: 0;
+  text-align: right;
+}
+
+.usage-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.usage-entry h2 {
+  max-width: 680px;
+  color: var(--admin-muted);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+@media (max-width: 900px) {
+  .admin-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-shell aside {
+    position: static;
+    width: 100%;
+    height: auto;
+    grid-template-columns: auto 1fr auto;
+    padding: 18px 22px;
+    border-right: 0;
+    border-bottom: 1px solid var(--admin-border);
+  }
+
+  .sign-out {
+    grid-column: auto;
+    margin-top: 0;
+  }
+
+  .admin-content {
+    padding: 32px 22px;
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .auth-shell {
+    padding: 16px;
+  }
+
+  .auth-card {
+    padding: 24px;
+  }
+
+  .admin-content > header,
+  .usage-entry,
+  .section-heading,
+  .record-list article {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .record-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fact-card {
+    grid-template-columns: 1fr;
+  }
+
+  .fact-card dl {
+    grid-column: auto;
+  }
+
+  .fact-card dl div {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .fact-card dd {
+    text-align: left;
+  }
+}

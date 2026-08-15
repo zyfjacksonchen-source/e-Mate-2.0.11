@@ -7,3 +7,69 @@ settings:
 importers:
 
   .: {}
+
+  packages/dsh:
+    dependencies:
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
+      playwright-core:
+        specifier: 1.61.1
+        version: 1.61.1
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
+    optionalDependencies:
+      '@e-mate/dsh-browser-darwin-arm64':
+        specifier: workspace:2.0.7
+        version: link:../dsh-browser-darwin-arm64
+      '@e-mate/dsh-browser-darwin-x64':
+        specifier: workspace:2.0.7
+        version: link:../dsh-browser-darwin-x64
+      '@e-mate/dsh-browser-win32-x64':
+        specifier: workspace:2.0.7
+        version: link:../dsh-browser-win32-x64
+      '@e-mate/dsh-runtime-darwin-arm64':
+        specifier: workspace:2.0.7
+        version: link:../dsh-runtime-darwin-arm64
+      '@e-mate/dsh-runtime-darwin-x64':
+        specifier: workspace:2.0.7
+        version: link:../dsh-runtime-darwin-x64
+      '@e-mate/dsh-runtime-win32-x64':
+        specifier: workspace:2.0.7
+        version: link:../dsh-runtime-win32-x64
+
+  packages/dsh-browser-darwin-arm64: {}
+
+  packages/dsh-browser-darwin-x64: {}
+
+  packages/dsh-browser-win32-x64: {}
+
+  packages/dsh-runtime-darwin-arm64: {}
+
+  packages/dsh-runtime-darwin-x64: {}
+
+  packages/dsh-runtime-win32-x64: {}
+
+packages:
+
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
+
+  playwright-core@1.61.1:
+    resolution: {integrity: sha512-h7Qlt6m4REp25qvIdvbDtVmD4LqVXfpRxhORv9L0jzETM05p4fuPJ3dKyuSXQxDSbXnmS79HAgi9589lGSpLkg==}
+    engines: {node: '>=18'}
+    hasBin: true
+
+  yaml@2.9.0:
+    resolution: {integrity: sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
+snapshots:
+
+  fflate@0.8.3: {}
+
+  playwright-core@1.61.1: {}
+
+  yaml@2.9.0: {}

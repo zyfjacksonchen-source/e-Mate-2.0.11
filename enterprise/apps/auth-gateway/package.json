@@ -1,0 +1,26 @@
+{
+  "name": "@e-mate/auth-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "migrate:ecorex-v0292": "node --experimental-strip-types src/migrateEcorexV0292Users.ts",
+    "start": "node --enable-source-maps dist/start.js",
+    "test": "node --test --experimental-strip-types tests/*.test.ts"
+  },
+  "dependencies": {
+    "@e-mate/admin-contract": "workspace:*",
+    "@e-mate/auth-credential": "workspace:*",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pg": "8.20.0",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

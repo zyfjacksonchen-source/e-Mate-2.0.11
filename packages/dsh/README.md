@@ -1,0 +1,3 @@
+# e-Mate CLI
+
+`@e-mate/dsh@2.0.7` provides the `e-mate` command for the browser-first e-Mate product. The package is under implementation and must not be published until the platform runtime packages and packed-consumer checks recorded in the repository development log pass.

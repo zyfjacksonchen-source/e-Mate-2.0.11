@@ -1,0 +1,529 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import test from 'node:test';
+import { Pool } from 'pg';
+import { verifyPassword, type ScryptVerifier } from '@e-mate/auth-credential';
+import { AdminManagementError, openPostgresAdminManagementStore } from '../src/admin-management.ts';
+import { openPostgresObservabilityPolicyStore } from '../src/observability-policy.ts';
+import { openPostgresSessionSummaryStore } from '../src/session-index.ts';
+import { openPostgresTaskEventStore } from '../src/task-events.ts';
+
+const postgresUrl = process.env.E_MATE_TEST_POSTGRES_URL;
+
+type PasswordCredentialRow = {
+  password_salt: Buffer;
+  password_hash: Buffer;
+  scrypt_cost: number;
+  scrypt_block_size: number;
+  scrypt_parallelization: number;
+};
+
+function verifier(row: PasswordCredentialRow): ScryptVerifier {
+  return {
+    salt: row.password_salt,
+    hash: row.password_hash,
+    cost: row.scrypt_cost,
+    blockSize: row.scrypt_block_size,
+    parallelization: row.scrypt_parallelization,
+  };
+}
+
+test(
+  'real PostgreSQL enforces tenant/project access and summary cursors',
+  {
+    skip: postgresUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set',
+  },
+  async () => {
+    const { store, close } = await openPostgresSessionSummaryStore(postgresUrl as string);
+    const run = randomUUID();
+    const tenantId = `tenant-${run}`;
+    const projectId = `project-${run}`;
+    const sessionId = `session-${run}`;
+    const owner = {
+      tenantId,
+      userId: 'owner@example.com',
+      roles: [],
+      projectIds: [projectId],
+    };
+    const member = {
+      tenantId,
+      userId: 'member@example.com',
+      roles: [],
+      projectIds: [projectId],
+    };
+    const write = {
+      schemaVersion: 1 as const,
+      title: '客户季度复盘',
+      summary: '整理销售数据并交付汇报。',
+      projectId,
+      tags: ['销售', '汇报'],
+      state: 'ACTIVE' as const,
+      updatedAt: new Date().toISOString(),
+      expectedSourceCursor: null,
+    };
+    try {
+      const created = await store.write(owner, sessionId, write);
+      assert.equal(created.status, 'OK');
+      assert.equal(await store.write(owner, sessionId, write).then(({ status }) => status), 'CONFLICT');
+      assert.equal(
+        (
+          await store.search(member, {
+            query: '销售',
+            projectId,
+            includeArchived: true,
+            limit: 20,
+          })
+        )[0]?.sessionId,
+        sessionId
+      );
+      assert.equal(
+        (
+          await store.search(
+            {
+              ...member,
+              tenantId: `other-${tenantId}`,
+            },
+            {
+              query: '销售',
+              includeArchived: true,
+              limit: 20,
+            }
+          )
+        ).length,
+        0
+      );
+      assert.equal(
+        await store
+          .write(
+            {
+              ...owner,
+              projectIds: [],
+            },
+            sessionId,
+            {
+              ...write,
+              expectedSourceCursor: 1,
+            }
+          )
+          .then(({ status }) => status),
+        'DENIED'
+      );
+      assert.equal(
+        await store.get(
+          {
+            ...owner,
+            projectIds: [],
+          },
+          sessionId
+        ),
+        null
+      );
+      assert.equal(
+        (
+          await store.search(
+            {
+              ...owner,
+              projectIds: [],
+            },
+            {
+              query: '销售',
+              includeArchived: true,
+              limit: 20,
+            }
+          )
+        ).length,
+        0
+      );
+      assert.equal(
+        await store
+          .write(owner, sessionId, {
+            ...write,
+            updatedAt: '2020-01-01T00:00:00.000Z',
+            expectedSourceCursor: 1,
+          })
+          .then(({ status }) => status),
+        'CONFLICT'
+      );
+      const deleted = await store.write(owner, sessionId, {
+        ...write,
+        title: '',
+        summary: '',
+        tags: [],
+        state: 'DELETED',
+        expectedSourceCursor: 1,
+      });
+      assert.equal(deleted.status, 'OK');
+      assert.equal(await store.get(owner, sessionId), null);
+      assert.equal(
+        await store
+          .write(owner, sessionId, {
+            ...write,
+            title: '',
+            summary: '',
+            tags: [],
+            state: 'DELETED',
+            expectedSourceCursor: null,
+          })
+          .then(({ status }) => status),
+        'OK'
+      );
+    } finally {
+      await close();
+      const cleanup = new Pool({ connectionString: postgresUrl as string });
+      await cleanup.query('DELETE FROM e_mate_session_summary WHERE tenant_id = $1', [tenantId]).catch(() => undefined);
+      await cleanup.end();
+    }
+  }
+);
+
+test(
+  'real PostgreSQL atomically versions and audits observability policy',
+  {
+    skip: postgresUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set',
+  },
+  async () => {
+    const { store, close } = await openPostgresObservabilityPolicyStore(postgresUrl as string);
+    const tenantId = `tenant-policy-${randomUUID()}`;
+    const admin = {
+      tenantId,
+      userId: 'admin@example.com',
+      roles: ['TENANT_ADMIN'],
+    };
+    const cleanup = new Pool({ connectionString: postgresUrl as string });
+    try {
+      assert.equal((await store.get(tenantId)).version, 1);
+      const changed = await store.update(admin, {
+        schemaVersion: 1,
+        requestId: 'request:update-postgres',
+        expectedVersion: 1,
+        traceSampleRatio: 0.25,
+      });
+      assert.equal(changed.status, 'OK');
+      assert.equal(
+        (
+          await store.update(admin, {
+            schemaVersion: 1,
+            requestId: 'request:update-postgres',
+            expectedVersion: 1,
+            traceSampleRatio: 0.25,
+          })
+        ).status,
+        'OK'
+      );
+      const rolledBack = await store.rollback(admin, {
+        schemaVersion: 1,
+        requestId: 'request:rollback-postgres',
+        expectedVersion: 2,
+        targetVersion: 1,
+      });
+      assert.equal(rolledBack.status, 'OK');
+      assert.equal(rolledBack.status === 'OK' && rolledBack.policy.traceSampleRatio, 1);
+      const audit = await cleanup.query<{
+        operation: string;
+        actor_id: string;
+        changed_fields: string[];
+      }>(
+        `
+      SELECT operation, actor_id, changed_fields
+        FROM e_mate_observability_policy_audit
+       WHERE tenant_id = $1
+       ORDER BY result_version
+    `,
+        [tenantId]
+      );
+      assert.deepEqual(audit.rows, [
+        {
+          operation: 'UPDATE',
+          actor_id: 'admin@example.com',
+          changed_fields: ['traceSampleRatio'],
+        },
+        {
+          operation: 'ROLLBACK',
+          actor_id: 'admin@example.com',
+          changed_fields: ['traceSampleRatio'],
+        },
+      ]);
+    } finally {
+      await close();
+      await cleanup
+        .query('DELETE FROM e_mate_observability_policy_audit WHERE tenant_id = $1', [tenantId])
+        .catch(() => undefined);
+      await cleanup
+        .query('DELETE FROM e_mate_observability_policy_history WHERE tenant_id = $1', [tenantId])
+        .catch(() => undefined);
+      await cleanup
+        .query('DELETE FROM e_mate_observability_policy_current WHERE tenant_id = $1', [tenantId])
+        .catch(() => undefined);
+      await cleanup.end();
+    }
+  }
+);
+
+test(
+  'real PostgreSQL keeps task outcomes explicit, idempotent and tenant-isolated',
+  {
+    skip: postgresUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set',
+  },
+  async () => {
+    const { store, close } = await openPostgresTaskEventStore(postgresUrl as string);
+    const run = randomUUID();
+    const tenantId = `tenant-task-${run}`;
+    const otherTenantId = `tenant-task-other-${run}`;
+    const taskId = `task-${run}`;
+    const user = { tenantId, userId: 'user-1', roles: [] };
+    const otherTenantUser = { ...user, tenantId: otherTenantId };
+    const receivedAt = new Date(Date.now() - 120_000).toISOString();
+    const failedAt = new Date(Date.now() - 60_000).toISOString();
+    const event = {
+      schemaVersion: 1 as const,
+      eventId: `received-${run}`,
+      taskId,
+      type: 'RECEIVED' as const,
+      scenario: 'CONTENT_CREATION' as const,
+      occurredAt: receivedAt,
+    };
+    const cleanup = new Pool({ connectionString: postgresUrl as string });
+    try {
+      assert.equal(await store.append(user, event), 'ACCEPTED');
+      assert.equal(await store.append(user, event), 'REPLAY');
+      assert.equal(await store.append(otherTenantUser, event), 'ACCEPTED');
+      assert.equal(
+        await store.append(user, {
+          ...event,
+          eventId: `failed-${run}`,
+          type: 'FAILED',
+          occurredAt: failedAt,
+        }),
+        'ACCEPTED'
+      );
+      assert.equal(
+        await store.append(user, {
+          ...event,
+          eventId: `completed-${run}`,
+          type: 'COMPLETED',
+          occurredAt: new Date().toISOString(),
+        }),
+        'CONFLICT'
+      );
+      const summary = await store.summary(user, {
+        from: new Date(Date.now() - 180_000).toISOString(),
+        to: new Date().toISOString(),
+      });
+      assert.deepEqual(summary.summary, {
+        receivedTasks: '1',
+        successfulTasks: '0',
+        failedTasks: '1',
+        cancelledTasks: '0',
+      });
+      assert.equal(
+        (
+          await store.summary(otherTenantUser, {
+            from: new Date(Date.now() - 180_000).toISOString(),
+            to: new Date().toISOString(),
+          })
+        ).summary.failedTasks,
+        '0'
+      );
+    } finally {
+      await close();
+      await cleanup
+        .query('DELETE FROM e_mate_task_event WHERE tenant_id = ANY($1)', [[tenantId, otherTenantId]])
+        .catch(() => undefined);
+      await cleanup
+        .query('DELETE FROM e_mate_task_fact WHERE tenant_id = ANY($1)', [[tenantId, otherTenantId]])
+        .catch(() => undefined);
+      await cleanup.end();
+    }
+  }
+);
+
+test(
+  'real PostgreSQL provisions login credentials and revokes every session on password reset',
+  {
+    skip: postgresUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set',
+  },
+  async () => {
+    const { store, close } = await openPostgresAdminManagementStore(postgresUrl as string, []);
+    const run = randomUUID();
+    const tenantId = `tenant-password-${run}`;
+    const userId = `user-${run}`;
+    const sessionId = randomUUID();
+    const admin = { tenantId, userId: 'admin-1', roles: ['TENANT_ADMIN'] };
+    const cleanup = new Pool({ connectionString: postgresUrl as string });
+    try {
+      const initialPassword = 'InitialPass-2026!';
+      const replacementPassword = 'Replacement-2026!';
+      const created = await store.createUser(admin, {
+        schemaVersion: 1,
+        userId,
+        displayName: 'User',
+        roles: ['MEMBER'],
+        tokenLimit: 1_000,
+        allowedModelIds: ['gpt-5.6-sol'],
+        initialPassword,
+      });
+      assert.equal(JSON.stringify(created).includes(initialPassword), false);
+      const initialCredential = await cleanup.query<PasswordCredentialRow>(
+        `SELECT password_salt, password_hash, scrypt_cost, scrypt_block_size, scrypt_parallelization
+           FROM e_mate_auth_password_credential
+          WHERE tenant_id = $1 AND user_id = $2`,
+        [tenantId, userId]
+      );
+      assert.equal(
+        await verifyPassword(initialPassword, verifier(initialCredential.rows[0] as PasswordCredentialRow)),
+        true
+      );
+      await cleanup.query(
+        `INSERT INTO e_mate_auth_session
+          (session_id, tenant_id, user_id, client_id, status, expires_at)
+         VALUES ($1, $2, $3, 'e-mate-desktop', 'ACTIVE', clock_timestamp() + interval '1 hour')`,
+        [sessionId, tenantId, userId]
+      );
+      await cleanup.query(
+        `INSERT INTO e_mate_auth_refresh_token
+          (token_hash, session_id, generation, status, expires_at)
+         VALUES ($1, $2, 0, 'ACTIVE', clock_timestamp() + interval '1 hour')`,
+        [Buffer.alloc(32, 7), sessionId]
+      );
+
+      assert.equal(await store.resetPassword(admin, userId, { schemaVersion: 1, password: replacementPassword }), true);
+      const replacementCredential = await cleanup.query<PasswordCredentialRow>(
+        `SELECT password_salt, password_hash, scrypt_cost, scrypt_block_size, scrypt_parallelization
+           FROM e_mate_auth_password_credential
+          WHERE tenant_id = $1 AND user_id = $2`,
+        [tenantId, userId]
+      );
+      const replacementVerifier = verifier(replacementCredential.rows[0] as PasswordCredentialRow);
+      assert.equal(await verifyPassword(initialPassword, replacementVerifier), false);
+      assert.equal(await verifyPassword(replacementPassword, replacementVerifier), true);
+      assert.deepEqual(
+        (
+          await cleanup.query<{ session_status: string; refresh_status: string }>(
+            `SELECT session.status AS session_status, refresh.status AS refresh_status
+               FROM e_mate_auth_session AS session
+               JOIN e_mate_auth_refresh_token AS refresh USING (session_id)
+              WHERE session.session_id = $1`,
+            [sessionId]
+          )
+        ).rows,
+        [{ session_status: 'REVOKED', refresh_status: 'REVOKED' }]
+      );
+      assert.equal(
+        (
+          await cleanup.query<{ count: string }>(
+            `SELECT count(*) AS count
+               FROM e_mate_admin_audit
+              WHERE tenant_id = $1 AND action = 'USER_PASSWORD_RESET' AND target_id = $2`,
+            [tenantId, userId]
+          )
+        ).rows[0]?.count,
+        '1'
+      );
+      const auditDetails = await cleanup.query<{ details: unknown }>(
+        `SELECT details
+           FROM e_mate_admin_audit
+          WHERE tenant_id = $1 AND target_id = $2
+          ORDER BY occurred_at`,
+        [tenantId, userId]
+      );
+      const serializedAudit = JSON.stringify(auditDetails.rows);
+      assert.equal(serializedAudit.includes(initialPassword), false);
+      assert.equal(serializedAudit.includes(replacementPassword), false);
+    } finally {
+      await close();
+      await cleanup
+        .query(
+          'DELETE FROM e_mate_auth_refresh_token WHERE session_id IN (SELECT session_id FROM e_mate_auth_session WHERE tenant_id = $1)',
+          [tenantId]
+        )
+        .catch(() => undefined);
+      await cleanup.query('DELETE FROM e_mate_auth_session WHERE tenant_id = $1', [tenantId]).catch(() => undefined);
+      await cleanup
+        .query('DELETE FROM e_mate_auth_password_credential WHERE tenant_id = $1', [tenantId])
+        .catch(() => undefined);
+      await cleanup.query('DELETE FROM e_mate_admin_audit WHERE tenant_id = $1', [tenantId]).catch(() => undefined);
+      await cleanup.query('DELETE FROM e_mate_tenant_user WHERE tenant_id = $1', [tenantId]).catch(() => undefined);
+      await cleanup.end();
+    }
+  }
+);
+
+test(
+  'real PostgreSQL makes deleted users terminal and revokes their credentials atomically',
+  {
+    skip: postgresUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set',
+  },
+  async () => {
+    const { store, close } = await openPostgresAdminManagementStore(postgresUrl as string, []);
+    const run = randomUUID();
+    const tenantId = `tenant-admin-${run}`;
+    const userId = `user-${run}`;
+    const admin = { tenantId, userId: 'admin-1', roles: ['TENANT_ADMIN'] };
+    const cleanup = new Pool({ connectionString: postgresUrl as string });
+    try {
+      const created = await store.createUser(admin, {
+        schemaVersion: 1,
+        userId,
+        displayName: 'User',
+        roles: ['MEMBER'],
+        tokenLimit: 50_000,
+        allowedModelIds: ['gpt-5.6-sol'],
+        initialPassword: 'InitialPass-2026!',
+      });
+      const issued = await store.issueApiKey(admin, {
+        schemaVersion: 1,
+        label: 'Desktop',
+        principalType: 'USER',
+        principalId: userId,
+        userId,
+        scopes: ['task-events:write', 'models:invoke'],
+      });
+
+      const deletion = { schemaVersion: 1 as const, expectedUpdatedAt: created.updatedAt };
+      assert.equal(await store.deleteUser(admin, userId, deletion), true);
+      assert.equal(await store.deleteUser(admin, userId, deletion), true);
+      assert.equal((await store.listUsers(admin)).users[0]?.status, 'DELETED');
+      assert.equal((await store.listUsers(admin)).users[0]?.tokenLimit, 50_000);
+      assert.equal((await store.listApiKeys(admin)).keys[0]?.revokedAt !== null, true);
+      assert.equal(await store.authenticateTaskEventBearer(issued.secret), null);
+      assert.equal(
+        (
+          await cleanup.query<{ count: string }>(
+            `SELECT count(*) AS count
+               FROM e_mate_admin_audit
+              WHERE tenant_id = $1 AND action = 'USER_DELETED' AND target_id = $2`,
+            [tenantId, userId]
+          )
+        ).rows[0]?.count,
+        '1'
+      );
+      await assert.rejects(
+        store.issueApiKey(admin, {
+          schemaVersion: 1,
+          label: 'Replacement',
+          principalType: 'USER',
+          principalId: userId,
+          userId,
+          scopes: ['models:invoke'],
+        }),
+        (error: unknown) => error instanceof AdminManagementError && error.code === 'USER_UNAVAILABLE'
+      );
+    } finally {
+      await close();
+      await cleanup
+        .query(
+          'DELETE FROM e_mate_auth_refresh_token WHERE session_id IN (SELECT session_id FROM e_mate_auth_session WHERE tenant_id = $1)',
+          [tenantId]
+        )
+        .catch(() => undefined);
+      await cleanup.query('DELETE FROM e_mate_auth_session WHERE tenant_id = $1', [tenantId]).catch(() => undefined);
+      await cleanup
+        .query('DELETE FROM e_mate_auth_password_credential WHERE tenant_id = $1', [tenantId])
+        .catch(() => undefined);
+      await cleanup.query('DELETE FROM e_mate_admin_audit WHERE tenant_id = $1', [tenantId]).catch(() => undefined);
+      await cleanup.query('DELETE FROM e_mate_admin_api_key WHERE tenant_id = $1', [tenantId]).catch(() => undefined);
+      await cleanup.query('DELETE FROM e_mate_tenant_user WHERE tenant_id = $1', [tenantId]).catch(() => undefined);
+      await cleanup.end();
+    }
+  }
+);

@@ -1,0 +1,19 @@
+{
+  "name": "@e-mate/dsh-runtime-darwin-x64",
+  "version": "2.0.7",
+  "description": "e-Mate Office and OCR worker runtime for macOS x64",
+  "license": "MIT",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "files": ["runtime", "scripts", "emate-runtime.json", "THIRD_PARTY_NOTICES.txt", "LICENSE", "README.md"],
+  "publishConfig": { "access": "public" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate.git",
+    "directory": "packages/dsh-runtime-darwin-x64"
+  },
+  "scripts": {
+    "prepack": "node ../../scripts/build-runtime-package.mjs",
+    "postinstall": "node scripts/ensure-executable.mjs"
+  }
+}

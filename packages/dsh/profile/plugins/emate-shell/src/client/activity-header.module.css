@@ -1,0 +1,55 @@
+.root {
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 3px 7px 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 25px;
+}
+
+.root:hover:not(:disabled),
+.root:focus-visible {
+  color: var(--dsw-alias-label-primary);
+}
+
+.root:focus-visible {
+  outline: 1.5px solid var(--dsw-alias-button-info-fill);
+  outline-offset: 2px;
+}
+
+.root time {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+
+.root[data-emate-activity-status='running'] span {
+  color: var(--dsw-alias-label-primary);
+}
+
+.chevron {
+  margin-left: 1px;
+  color: var(--dsw-alias-label-tertiary);
+  transform: rotate(-90deg);
+  transition: transform 120ms ease;
+}
+
+.root[aria-expanded='true'] .chevron {
+  transform: rotate(0deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+}

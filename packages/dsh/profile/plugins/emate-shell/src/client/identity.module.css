@@ -1,0 +1,362 @@
+.gate {
+  --emate-canvas: oklch(0.966318 0.003973 106.474);
+  --emate-workspace: oklch(0.984548 0.002637 106.448);
+  --emate-surface: oklch(0.966318 0.003973 106.474);
+  --emate-raised: oklch(0.947728 0.006648 106.526);
+  --emate-hover: oklch(0.951016 0.005316 106.5);
+  --emate-ink: oklch(0.296426 0.00355 106.614);
+  --emate-muted: oklch(0.508991 0.006202 106.618);
+  --emate-rule: oklch(0.905018 0.008065 106.56);
+  --emate-brand: oklch(0.649203 0.180912 42.881);
+  --emate-brand-ink: oklch(0.205 0.018 55);
+  --emate-danger: oklch(0.514636 0.184396 27.456);
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  min-width: 320px;
+  min-height: 0;
+  padding: max(24px, calc(50dvh - 90px)) 24px 24px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow-x: hidden;
+  overflow-y: auto;
+  color: var(--emate-ink);
+  background: var(--emate-canvas);
+  font: 14px/22px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  pointer-events: auto;
+}
+
+:global(body[data-ds-dark-theme]) .gate {
+  --emate-canvas: oklch(0.296426 0.00355 106.614);
+  --emate-workspace: oklch(0.177638 0 0);
+  --emate-surface: oklch(0.243535 0 0);
+  --emate-raised: oklch(0.268618 0 0);
+  --emate-hover: oklch(0.343524 0.005128 106.666);
+  --emate-ink: oklch(0.981562 0.002639 106.448);
+  --emate-muted: oklch(0.780581 0.009753 106.623);
+  --emate-rule: oklch(0.344584 0 0);
+  --emate-brand-ink: oklch(0.19 0.02 52);
+  --emate-danger: oklch(0.72 0.18 28);
+}
+
+.loginPanel {
+  width: min(386px, 100%);
+  flex: none;
+  display: grid;
+  gap: 24px;
+}
+
+.logo {
+  width: 172px;
+  height: 40px;
+  display: block;
+  object-fit: contain;
+  object-position: left center;
+}
+
+:global(body[data-ds-dark-theme]) .logo,
+:global(body[data-ds-dark-theme]) .agreementHeader img {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+.loginForm,
+.blocked {
+  display: grid;
+  gap: 16px;
+}
+
+.loginForm > label:not(.remember) {
+  display: grid;
+  gap: 8px;
+}
+
+.loginForm > label:not(.remember) > span:first-child {
+  color: var(--emate-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.loginForm input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--emate-rule);
+  border-radius: 10px;
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+  color: var(--emate-ink);
+  background: var(--emate-surface);
+  font: inherit;
+}
+
+.loginForm input:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.remember {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--emate-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.remember input,
+.confirmations input {
+  width: 20px;
+  min-height: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--emate-brand);
+}
+
+.captchaRow {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.captchaImage {
+  width: 112px;
+  height: 44px;
+  flex: none;
+  border: 1px solid var(--emate-rule);
+  border-radius: 10px;
+  object-fit: contain;
+  background: white;
+}
+
+.pending {
+  display: grid;
+  gap: 16px;
+}
+
+.pending h1,
+.pending p,
+.pending small {
+  margin: 0;
+}
+
+.pending h1,
+.blocked h1,
+.agreementHeader h1 {
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+}
+
+.pending p,
+.pending small,
+.blocked p,
+.agreementHeader p,
+.confirmations p {
+  color: var(--emate-muted);
+}
+
+.loginForm input:focus-visible,
+.confirmations input:focus-visible {
+  outline: 0;
+  border-color: var(--emate-brand);
+  box-shadow: 0 0 0 1px var(--emate-brand);
+}
+
+.gate button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--emate-ink);
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.gate button:focus-visible {
+  outline: 0;
+  border-color: var(--emate-rule);
+  background: var(--emate-raised);
+  box-shadow: 0 0 0 1px var(--emate-brand);
+}
+
+.gate .primaryButton {
+  color: var(--emate-brand-ink);
+  background: var(--emate-brand);
+  font-weight: 600;
+}
+
+.gate button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.error {
+  margin: -8px 0 0;
+  color: var(--emate-danger);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.blocked h1,
+.blocked p,
+.agreementHeader h1,
+.agreementHeader p,
+.confirmations p {
+  margin: 0;
+}
+
+.agreementPanel {
+  width: min(920px, 100%);
+  max-height: calc(100dvh - 32px);
+  display: grid;
+  grid-template-rows: auto minmax(160px, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--emate-rule);
+  border-radius: 16px;
+  background: var(--emate-workspace);
+}
+
+.agreementHeader {
+  min-height: 76px;
+  padding: 16px 20px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border-bottom: 1px solid var(--emate-rule);
+}
+
+.agreementHeader img {
+  width: 140px;
+  flex: none;
+}
+
+.documents {
+  padding: 16px 20px;
+  display: grid;
+  gap: 16px;
+  overflow: auto;
+}
+
+.documents article {
+  padding: 16px;
+  border: 1px solid var(--emate-rule);
+  border-radius: 12px;
+  background: var(--emate-surface);
+}
+
+.documents h2,
+.documents pre {
+  margin: 0;
+}
+
+.documents h2 {
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.documents small {
+  display: block;
+  margin: 4px 0 12px;
+  color: var(--emate-muted);
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+
+.documents pre {
+  color: var(--emate-ink);
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.confirmations {
+  padding: 16px 20px 20px;
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--emate-rule);
+}
+
+.confirmations label {
+  min-height: 28px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.confirmations input {
+  margin-top: 1px;
+}
+
+.confirmations button {
+  justify-self: end;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (hover: hover) {
+  .loginForm input:hover:not(:disabled) { background: var(--emate-hover); }
+  .gate button:not(.primaryButton):not(:disabled):hover {
+    border-color: var(--emate-rule);
+    background: var(--emate-raised);
+  }
+}
+
+@media (max-width: 640px) {
+  .gate { padding: max(16px, calc(50dvh - 90px)) 16px 16px; }
+  .gate button { min-height: 44px; }
+  .agreementPanel { max-height: calc(100dvh - 16px); }
+  .agreementHeader { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .agreementHeader img { width: 124px; }
+  .documents,
+  .confirmations { padding: 12px; }
+  .confirmations button { width: 100%; }
+}
+
+@media (forced-colors: active) {
+  .gate {
+    --emate-canvas: Canvas;
+    --emate-workspace: Canvas;
+    --emate-surface: Canvas;
+    --emate-raised: Canvas;
+    --emate-hover: Highlight;
+    --emate-ink: CanvasText;
+    --emate-muted: CanvasText;
+    --emate-rule: ButtonBorder;
+    --emate-brand: Highlight;
+    --emate-brand-ink: HighlightText;
+    --emate-danger: CanvasText;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gate,
+  .gate * {
+    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
+  }
+}
