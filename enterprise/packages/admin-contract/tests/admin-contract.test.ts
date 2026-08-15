@@ -4,6 +4,7 @@ import {
   parseAdminApiKeyCreate,
   parseAdminApiKeyCreationResult,
   parseAdminModelRouteKeyUpdate,
+  parseAdminModelRoutePublication,
   parseAdminModelRouteUpdate,
   parseAdminPasswordReset,
   parseAdminConsentList,
@@ -99,6 +100,18 @@ test('user token limits are explicit and deleted is a read-only terminal status'
       expectedUpdatedAt: user.updatedAt,
     }).tokenLimit,
     1
+  );
+  assert.equal(
+    parseTenantUserUpdate({
+      schemaVersion: 1,
+      displayName: 'Employee',
+      roles: ['MEMBER'],
+      status: 'ACTIVE',
+      tokenLimit: null,
+      allowedModelIds: ['gpt-5.6-sol'],
+      expectedUpdatedAt: user.updatedAt,
+    }).tokenLimit,
+    null
   );
   assert.throws(
     () =>
@@ -246,6 +259,17 @@ test('model route updates accept only a boolean enablement policy', () => {
   });
   assert.throws(
     () => parseAdminModelRouteUpdate({ schemaVersion: 1, enabled: true, upstreamApiKey: 'secret' }),
+    /fields/
+  );
+});
+
+test('model catalog publication accepts only an explicit boolean', () => {
+  assert.deepEqual(parseAdminModelRoutePublication({ schemaVersion: 1, published: false }), {
+    schemaVersion: 1,
+    published: false,
+  });
+  assert.throws(
+    () => parseAdminModelRoutePublication({ schemaVersion: 1, published: false, routeId: 'gpt-5.6-sol' }),
     /fields/
   );
 });

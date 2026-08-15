@@ -4,6 +4,16 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import './styles.css';
 
+const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+const applySystemTheme = ({ matches }: Pick<MediaQueryList, 'matches'>) => {
+  const theme = matches ? 'dark' : 'light';
+  document.documentElement.dataset.theme = theme;
+  document.body.setAttribute('arco-theme', theme);
+};
+
+applySystemTheme(systemTheme);
+systemTheme.addEventListener('change', applySystemTheme);
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

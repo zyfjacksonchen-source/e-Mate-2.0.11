@@ -28,7 +28,7 @@ export class PostgresTenantModelRoutePolicy implements TenantModelRoutePolicy {
     const routeId = identifier(routeIdInput, 'route id');
     const result = await this.#pool.query<{ enabled: boolean }>(
       `
-      SELECT enabled
+      SELECT enabled AND published AS enabled
         FROM e_mate_tenant_model_route
        WHERE tenant_id = $1 AND route_id = $2
        LIMIT 1
@@ -125,7 +125,8 @@ export class PostgresTenantModelRoutePolicy implements TenantModelRoutePolicy {
                  LEFT JOIN e_mate_tenant_model_route AS policy
                    ON policy.tenant_id = authenticated.tenant_id
                   AND policy.route_id = candidate.route_id
-                WHERE COALESCE(policy.enabled, candidate.route_id = ANY($3::text[]))
+                WHERE COALESCE(policy.published, true)
+                  AND COALESCE(policy.enabled, candidate.route_id = ANY($3::text[]))
                 ORDER BY candidate.position
              ) AS model_ids
         FROM authenticated
@@ -224,7 +225,9 @@ export async function openPostgresTenantModelRoutePolicy(
   });
   pool.on('error', () => undefined);
   try {
-    await pool.query('SELECT route_id FROM e_mate_tenant_model_route LIMIT 0');
+    await pool.query(
+      'SELECT route_id, published, enabled, upstream_key_ciphertext, upstream_key_nonce, upstream_key_tag FROM e_mate_tenant_model_route LIMIT 0'
+    );
     await pool.query('SELECT session_id FROM e_mate_auth_session LIMIT 0');
   } catch (error) {
     await pool.end().catch(() => undefined);

@@ -9,6 +9,7 @@ import {
   type TenantUsageReconciliation,
   type UsageBucket,
 } from '@e-mate/monitoring-contract';
+import { parseTenantUserList, type TenantUser } from '@e-mate/admin-contract';
 
 export type UsageQuery = {
   from: string;
@@ -21,6 +22,7 @@ export type UsageDashboardData = {
   projection: TenantUsageProjection;
   reconciliation: TenantUsageReconciliation;
   taskSummary: TenantTaskSummary;
+  users: TenantUser[] | null;
 };
 
 export class UsageApiError extends Error {
@@ -99,7 +101,7 @@ export function validateDashboardPair(
   projection: TenantUsageProjection,
   reconciliation: TenantUsageReconciliation,
   taskSummary: TenantTaskSummary
-): UsageDashboardData {
+): Omit<UsageDashboardData, 'users'> {
   if (
     projection.tenantId !== reconciliation.tenantId ||
     projection.tenantId !== taskSummary.tenantId ||
@@ -113,31 +115,60 @@ export function validateDashboardPair(
   return { projection, reconciliation, taskSummary };
 }
 
+async function loadQuotaUsers(token: string, signal: AbortSignal): Promise<TenantUser[] | null> {
+  try {
+    return parseTenantUserList(await readJson('/v1/admin/users', token, signal)).users;
+  } catch (error) {
+    if (error instanceof UsageApiError && (error.status === 403 || error.status === 503)) return null;
+    throw error;
+  }
+}
+
 export async function loadUsageDashboard(
   token: string,
   query: UsageQuery,
   signal: AbortSignal
 ): Promise<UsageDashboardData> {
   const parameters = usageQueryString(query);
-  const [projectionValue, reconciliationValue, taskSummaryValue] = await Promise.all([
+  const [projectionValue, reconciliationValue, taskSummaryValue, users] = await Promise.all([
     readJson(`/v1/usage/summary?${parameters}`, token, signal),
     readJson(`/v1/usage/reconciliation?${parameters}`, token, signal),
     readJson(`/v1/tasks/summary?${taskQueryString(query)}`, token, signal),
+    loadQuotaUsers(token, signal),
   ]);
-  return validateDashboardPair(
-    parseTenantUsageProjection(projectionValue),
-    parseTenantUsageReconciliation(reconciliationValue),
-    parseTenantTaskSummary(taskSummaryValue)
-  );
+  return {
+    ...validateDashboardPair(
+      parseTenantUsageProjection(projectionValue),
+      parseTenantUsageReconciliation(reconciliationValue),
+      parseTenantTaskSummary(taskSummaryValue)
+    ),
+    users,
+  };
 }
 
 export async function loadUsageEvents(
   token: string,
   query: UsageQuery,
   cursor: string | null,
-  signal: AbortSignal
+  signal: AbortSignal,
+  expectedTenantId: string
 ): Promise<TenantUsageEventPage> {
-  return parseTenantUsageEventPage(
-    await readJson(`/v1/usage/events?${usageQueryString(query, true, cursor)}`, token, signal)
+  return validateUsageEventPage(
+    parseTenantUsageEventPage(
+      await readJson(`/v1/usage/events?${usageQueryString(query, true, cursor)}`, token, signal)
+    ),
+    query,
+    expectedTenantId
   );
+}
+
+export function validateUsageEventPage(
+  page: TenantUsageEventPage,
+  query: UsageQuery,
+  expectedTenantId: string
+): TenantUsageEventPage {
+  if (page.tenantId !== expectedTenantId || page.from !== query.from || page.to !== query.to) {
+    throw new Error('Usage events do not share the dashboard ledger scope');
+  }
+  return page;
 }

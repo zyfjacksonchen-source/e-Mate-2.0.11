@@ -5,6 +5,7 @@ import type {
   TenantTaskSummary,
   TenantUsageProjection,
   TenantUsageReconciliation,
+  TenantUsageEventPage,
   UsageMetrics,
 } from '@e-mate/monitoring-contract';
 import {
@@ -13,6 +14,7 @@ import {
   taskQueryString,
   usageQueryString,
   validateDashboardPair,
+  validateUsageEventPage,
 } from '../src/api.ts';
 import {
   addMetrics,
@@ -23,6 +25,7 @@ import {
   usageDetails,
   usageModels,
   usageTrend,
+  usageUsers,
 } from '../src/usage-data.ts';
 import { messagesFor } from '../src/i18n.ts';
 
@@ -78,6 +81,17 @@ test('groups trends and details only by their declared ledger keys', () => {
   assert.equal(usageTrend(projection)[0]?.metrics.totalRequests, '2');
   assert.equal(usageDetails(projection).length, 2);
   assert.deepEqual(usageModels(projection), [{ modelId: 'model-1', callCount: '2' }]);
+  assert.deepEqual(
+    usageUsers(projection).map(({ userId, modelIds, metrics: value }) => ({
+      userId,
+      modelIds,
+      totalTokens: value.totalTokens,
+    })),
+    [
+      { userId: 'user-1', modelIds: ['model-1'], totalTokens: '10' },
+      { userId: 'user-2', modelIds: ['model-1'], totalTokens: '10' },
+    ]
+  );
 });
 
 test('uses bounded bigint ratios and exact cost display', () => {
@@ -158,15 +172,71 @@ test('adds event pagination only to event queries and preserves configured query
   );
 });
 
-test('keeps the management view focused on tasks, calls, success, and work types', () => {
+test('rejects event pages outside the selected tenant ledger scope', () => {
+  const query = {
+    from: '2026-07-01T00:00:00.000Z',
+    to: '2026-07-02T00:00:00.000Z',
+    timezone: 'Asia/Shanghai',
+    bucket: 'DAY' as const,
+  };
+  const page: TenantUsageEventPage = {
+    schemaVersion: 1,
+    scope: 'TENANT',
+    tenantId: 'tenant-a',
+    from: query.from,
+    to: query.to,
+    events: [],
+    nextCursor: null,
+  };
+  assert.equal(validateUsageEventPage(page, query, 'tenant-a'), page);
+  assert.throws(() => validateUsageEventPage(page, query, 'tenant-b'), /dashboard ledger scope/);
+});
+
+test('projects real token, user, quota, model, and reconciliation facts', () => {
   const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  for (const metric of ['copy.tasks', 'copy.requests', 'copy.callSuccessRate', 'copy.eventDistribution']) {
+  for (const metric of [
+    'copy.tasks',
+    'copy.requests',
+    'copy.totalTokens',
+    'copy.configuredQuota',
+    'copy.details',
+    'copy.reconciliation',
+    'copy.viewEvents',
+  ]) {
     assert.match(source, new RegExp(metric.replace('.', '\\.')));
   }
-  assert.doesNotMatch(source, /copy\.(?:totalTokens|cost|rawEvents|reconciliation|requestStatuses)/);
+  assert.doesNotMatch(source, /metrics\.totalTokens[\s\S]{0,120}tokenLimit|<progress/);
+  assert.match(source, /copy\.weeklyQuota/);
+  assert.match(readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8'), /\/v1\/admin\/users/);
+});
+
+test('builds for the production usage-panel path and same-origin enterprise API', () => {
+  const vite = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8');
+  assert.match(
+    vite,
+    /base: '\/ecorex-agent\/usage-panel\/'/
+  );
+  assert.match(vite, /'\/v1\/admin': apiTarget/);
+  assert.equal(
+    readFileSync(new URL('../.env.production', import.meta.url), 'utf8').trim(),
+    'VITE_USAGE_API_BASE=/e-mate/enterprise-api/'
+  );
 });
 
 test('labels the waiting-for-input task event for both dashboard locales', () => {
   assert.equal(messagesFor('zh-CN').eventWaitingInput, '等待用户输入');
   assert.equal(messagesFor('en-US').eventWaitingInput, 'Waiting for input');
+});
+
+test('reuses the canonical e-Mate tokens and follows the system theme', () => {
+  const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  const main = readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8');
+  assert.match(styles, /upstream\/e-mate-2\.0\.5\/desktop\/src\/styles\/tokens\.css/);
+  assert.match(styles, /grid-template-columns: var\(--layout-sidebar-width\)/);
+  assert.match(styles, /\.sidebar nav a > span:last-child/);
+  assert.doesNotMatch(styles, /\.sidebar nav a span\s*\{/);
+  assert.doesNotMatch(styles, /box-shadow: 0 12px 32px|#[0-9a-f]{6}/i);
+  assert.match(main, /prefers-color-scheme: dark/);
+  assert.match(main, /document\.documentElement\.dataset\.theme = theme/);
+  assert.match(main, /systemTheme\.addEventListener\('change', applySystemTheme\)/);
 });

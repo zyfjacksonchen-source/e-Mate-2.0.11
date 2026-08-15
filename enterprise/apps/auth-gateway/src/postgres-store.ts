@@ -100,6 +100,13 @@ function validRoles(value: unknown): value is string[] {
   );
 }
 
+export function issuedWeeklyTokenLimit(value: string | null): number | null {
+  if (value === null) return Number.MAX_SAFE_INTEGER;
+  if (!/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : null;
+}
+
 function verifier(row: CredentialRow): ScryptVerifier | undefined {
   if (
     !Buffer.isBuffer(row.password_salt) ||
@@ -123,6 +130,7 @@ function identityFromRow(
   row: Pick<CredentialRow, 'tenant_id' | 'user_id' | 'display_name' | 'roles' | 'status' | 'token_limit'>,
   modelIds: string[]
 ): AuthIdentity | null {
+  const weeklyTokenLimit = issuedWeeklyTokenLimit(row.token_limit);
   if (
     row.status !== 'ACTIVE' ||
     !identifierPattern.test(row.tenant_id) ||
@@ -131,10 +139,7 @@ function identityFromRow(
     !row.display_name.trim() ||
     row.display_name.length > 160 ||
     !validRoles(row.roles) ||
-    row.token_limit === null ||
-    !/^\d+$/.test(row.token_limit) ||
-    !Number.isSafeInteger(Number(row.token_limit)) ||
-    Number(row.token_limit) < 1 ||
+    weeklyTokenLimit === null ||
     modelIds.length < 1
   ) {
     return null;
@@ -145,7 +150,7 @@ function identityFromRow(
     displayName: row.display_name,
     roles: [...row.roles],
     modelIds,
-    weeklyTokenLimit: Number(row.token_limit),
+    weeklyTokenLimit,
   };
 }
 
@@ -156,11 +161,7 @@ function loginPolicyError(
   if (row.status === 'PENDING_APPROVAL') return 'APPROVAL_REQUIRED';
   if (
     row.status === 'ACTIVE' &&
-    (row.token_limit === null ||
-      !/^\d+$/.test(row.token_limit) ||
-      !Number.isSafeInteger(Number(row.token_limit)) ||
-      Number(row.token_limit) < 1 ||
-      modelIds.length < 1)
+    (issuedWeeklyTokenLimit(row.token_limit) === null || modelIds.length < 1)
   ) {
     return 'POLICY_REQUIRED';
   }
@@ -212,6 +213,7 @@ export class PostgresAuthStore implements AuthStore {
     if (!existing.rows[0]?.tenant_user || !existing.rows[0]?.model_route) {
       throw new Error('Required enterprise tenant tables are unavailable');
     }
+    await this.#pool.query('SELECT published FROM e_mate_tenant_model_route LIMIT 0');
     await this.#pool.query(AUTH_CREDENTIAL_SCHEMA_SQL);
     await this.#pool.query(AUTH_CREDENTIAL_SOURCE_VERSION_MIGRATION_SQL);
     await this.#pool.query(`
@@ -332,6 +334,7 @@ export class PostgresAuthStore implements AuthStore {
             ON policy.tenant_id = $1
            AND policy.route_id = candidate.route_id
          WHERE candidate.route_id = ANY(app_user.allowed_model_ids)
+           AND COALESCE(policy.published, true)
            AND COALESCE(policy.enabled, candidate.route_id = ANY($4::text[]))
          ORDER BY candidate.position
       ) AS model_ids

@@ -1,6 +1,7 @@
 import {
   Alert,
   Button,
+  Checkbox,
   Input,
   InputNumber,
   Link,
@@ -12,7 +13,7 @@ import {
   Tag,
   Tooltip,
 } from '@arco-design/web-react';
-import { ChartLine, CheckOne, CloseOne, Key, Plus, Refresh, UserBusiness } from '@icon-park/react';
+import { ChartLine, CheckOne, CloseOne, Plus, Refresh, UserBusiness } from '@icon-park/react';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import type {
   AdminApiKeyMetadata,
@@ -29,6 +30,7 @@ import type { RuntimeRegistryModelStatus, RuntimeRegistryStatus } from '@e-mate/
 import eMateLogo from '../../../../upstream/e-mate-2.0.5/desktop/src/v1/assets/emate-logo.png';
 import {
   AdminApiError,
+  ADMIN_MODEL_SESSION_KEY,
   ADMIN_TOKEN_SESSION_KEY,
   abbreviateAuditValue,
   createTenantUser,
@@ -39,12 +41,19 @@ import {
   loadModelRoutes,
   loadRuntimeStatus,
   loadTenantUsers,
+  loginAdmin,
+  publishModelRoute,
+  quotaTokens,
+  readAdminModelSession,
   resolveUsageDashboardPath,
   resetTenantUserPassword,
   revokeApiKey,
+  testModelConnection,
   updateModelRoute,
   updateModelRouteKey,
   updateTenantUser,
+  type QuotaUnit,
+  type AdminModelSession,
 } from './api';
 import { messagesFor } from './i18n';
 
@@ -54,6 +63,7 @@ type ConsoleFacts = {
   keys: AdminApiKeyMetadata[];
   routes: AdminModelRoute[];
   consents: ConsentAcceptance[];
+  consentedUserIds: string[];
 };
 
 type ConsoleState =
@@ -62,7 +72,10 @@ type ConsoleState =
   | { kind: 'error'; status: number | null };
 
 type CredentialPurpose = 'TASKS_ONLY' | 'MODELS_AND_TASKS';
-
+type ModelTestState =
+  | { kind: 'testing' }
+  | { kind: 'passed'; checkedAt: string }
+  | { kind: 'failed'; status: number | null };
 function modelStatusLabel(status: RuntimeRegistryModelStatus, copy: ReturnType<typeof messagesFor>): string {
   if (status === 'HEALTHY') return copy.healthy;
   if (status === 'DEGRADED') return copy.degraded;
@@ -85,7 +98,14 @@ function userStatusLabel(status: AdminUserStatus, copy: ReturnType<typeof messag
 export function App() {
   const copy = messagesFor(navigator.language || 'zh-CN');
   const [token, setToken] = useState(() => sessionStorage.getItem(ADMIN_TOKEN_SESSION_KEY) ?? '');
-  const [tokenInput, setTokenInput] = useState('');
+  const [modelSession, setModelSession] = useState<AdminModelSession | null>(() =>
+    readAdminModelSession(sessionStorage.getItem(ADMIN_MODEL_SESSION_KEY))
+  );
+  const [modelTests, setModelTests] = useState<Record<string, ModelTestState>>({});
+  const [organization, setOrganization] = useState('');
+  const [account, setAccount] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginBusy, setLoginBusy] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [state, setState] = useState<ConsoleState>({ kind: 'loading' });
@@ -98,9 +118,14 @@ export function App() {
   const [initialPassword, setInitialPassword] = useState('');
   const [newTokenLimit, setNewTokenLimit] = useState<number>();
   const [newAllowedModelIds, setNewAllowedModelIds] = useState<string[]>([]);
-  const [tokenLimitUser, setTokenLimitUser] = useState<TenantUser | null>(null);
-  const [tokenLimitValue, setTokenLimitValue] = useState<number>();
-  const [tokenLimitModelIds, setTokenLimitModelIds] = useState<string[]>([]);
+  const [policyUsers, setPolicyUsers] = useState<TenantUser[]>([]);
+  const [policyApprovePending, setPolicyApprovePending] = useState(false);
+  const [quotaAmount, setQuotaAmount] = useState<number>();
+  const [quotaUnit, setQuotaUnit] = useState<QuotaUnit>('K');
+  const [quotaUnlimited, setQuotaUnlimited] = useState(false);
+  const [policyModelIds, setPolicyModelIds] = useState<string[]>([]);
+  const [userSearch, setUserSearch] = useState('');
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [passwordUser, setPasswordUser] = useState<TenantUser | null>(null);
   const [replacementPassword, setReplacementPassword] = useState('');
   const [keyModal, setKeyModal] = useState(false);
@@ -112,11 +137,15 @@ export function App() {
   const [oneTimeSecret, setOneTimeSecret] = useState<string | null>(null);
   const [routeKeyModal, setRouteKeyModal] = useState<AdminModelRoute | null>(null);
   const [routeApiKey, setRouteApiKey] = useState('');
+  const [modelCatalogModal, setModelCatalogModal] = useState(false);
+  const [modelToPublish, setModelToPublish] = useState('');
   const [consentUserFilter, setConsentUserFilter] = useState('');
   const [consentAgreementFilter, setConsentAgreementFilter] = useState('');
   const [consentDisclaimerFilter, setConsentDisclaimerFilter] = useState('');
   const [consentQuery, setConsentQuery] = useState<AdminConsentQuery>({ limit: 100 });
   const apiBase = import.meta.env.VITE_ADMIN_API_BASE as string | undefined;
+  const authBase = import.meta.env.VITE_AUTH_API_BASE as string | undefined;
+  const authClientId = (import.meta.env.VITE_AUTH_CLIENT_ID as string | undefined) ?? 'e-mate-admin';
   const requestOptions = useMemo(() => ({ apiBase, origin: window.location.origin }), [apiBase]);
   const usagePath = useMemo(() => {
     try {
@@ -139,8 +168,9 @@ export function App() {
       loadApiKeys(token, controller.signal, requestOptions),
       loadModelRoutes(token, controller.signal, requestOptions),
       loadConsentAcceptances(token, controller.signal, requestOptions, consentQuery),
+      loadConsentAcceptances(token, controller.signal, requestOptions, { limit: 200 }),
     ])
-      .then(([status, users, keys, routes, consents]) => {
+      .then(([status, users, keys, routes, consents, allConsents]) => {
         setTokenError(null);
         setState({
           kind: 'ready',
@@ -150,6 +180,7 @@ export function App() {
             keys: keys.keys,
             routes: routes.routes,
             consents: consents.acceptances,
+            consentedUserIds: [...new Set(allConsents.acceptances.map((acceptance) => acceptance.userId))],
           },
         });
       })
@@ -158,7 +189,9 @@ export function App() {
         const status = error instanceof AdminApiError ? error.status : null;
         if (status === 401) {
           sessionStorage.removeItem(ADMIN_TOKEN_SESSION_KEY);
+          sessionStorage.removeItem(ADMIN_MODEL_SESSION_KEY);
           setToken('');
+          setModelSession(null);
           setTokenError(copy.authFailed);
         }
         setState({ kind: 'error', status });
@@ -168,21 +201,44 @@ export function App() {
 
   const submitToken = (event: FormEvent) => {
     event.preventDefault();
-    const nextToken = tokenInput.trim();
-    if (!/^[^\s]{1,8192}$/.test(nextToken)) {
+    if (!organization.trim() || !account.trim() || !password) {
       setTokenError(copy.tokenRequired);
       return;
     }
-    sessionStorage.setItem(ADMIN_TOKEN_SESSION_KEY, nextToken);
+    const controller = new AbortController();
+    setLoginBusy(true);
     setTokenError(null);
-    setToken(nextToken);
-    setTokenInput('');
+    void loginAdmin(
+      {
+        authBase,
+        clientId: authClientId,
+        organization: organization.trim(),
+        account: account.trim(),
+        password,
+      },
+      controller.signal,
+      requestOptions
+    )
+      .then((session) => {
+        sessionStorage.setItem(ADMIN_TOKEN_SESSION_KEY, session.accessToken);
+        sessionStorage.setItem(ADMIN_MODEL_SESSION_KEY, JSON.stringify(session.modelGateway));
+        setToken(session.accessToken);
+        setModelSession(session.modelGateway);
+        setPassword('');
+      })
+      .catch((error: unknown) => {
+        setTokenError(error instanceof AdminApiError && error.status === 403 ? copy.accessDenied : copy.authFailed);
+      })
+      .finally(() => setLoginBusy(false));
   };
 
   const signOut = () => {
     sessionStorage.removeItem(ADMIN_TOKEN_SESSION_KEY);
+    sessionStorage.removeItem(ADMIN_MODEL_SESSION_KEY);
     setToken('');
-    setTokenInput('');
+    setModelSession(null);
+    setModelTests({});
+    setPassword('');
     setState({ kind: 'loading' });
   };
 
@@ -201,28 +257,42 @@ export function App() {
     }
   };
 
+  const runModelTest = (routeId: string) => {
+    if (!modelSession) return;
+    const controller = new AbortController();
+    setModelTests((current) => ({ ...current, [routeId]: { kind: 'testing' } }));
+    void testModelConnection(routeId, modelSession, controller.signal, {
+      origin: window.location.origin,
+    })
+      .then(({ checkedAt }) => {
+        setModelTests((current) => ({ ...current, [routeId]: { kind: 'passed', checkedAt } }));
+      })
+      .catch((error: unknown) => {
+        const status = error instanceof AdminApiError ? error.status : null;
+        if (status === 401) {
+          sessionStorage.removeItem(ADMIN_MODEL_SESSION_KEY);
+          setModelSession(null);
+        }
+        setModelTests((current) => ({ ...current, [routeId]: { kind: 'failed', status } }));
+      });
+  };
+
   if (!token) {
     return (
       <main className='auth-shell'>
         <section className='auth-card' aria-labelledby='auth-title'>
           <img className='brand-logo' src={eMateLogo} alt={copy.product} />
-          <span className='auth-icon' aria-hidden='true'>
-            <Key size={28} />
-          </span>
           <h1 id='auth-title'>{copy.tokenTitle}</h1>
           <p>{copy.tokenDescription}</p>
           <form onSubmit={submitToken}>
-            <label htmlFor='admin-token'>{copy.tokenLabel}</label>
-            <Input.Password
-              id='admin-token'
-              value={tokenInput}
-              autoComplete='off'
-              placeholder={copy.tokenPlaceholder}
-              onChange={setTokenInput}
-              visibilityToggle
-            />
+            <label htmlFor='admin-organization'>{copy.organization}</label>
+            <Input id='admin-organization' value={organization} autoComplete='organization' onChange={setOrganization} />
+            <label htmlFor='admin-account'>{copy.account}</label>
+            <Input id='admin-account' value={account} autoComplete='username' onChange={setAccount} />
+            <label htmlFor='admin-password'>{copy.password}</label>
+            <Input.Password id='admin-password' value={password} autoComplete='current-password' onChange={setPassword} />
             {tokenError && <Alert type='error' content={tokenError} showIcon />}
-            <Button type='primary' htmlType='submit' long>
+            <Button type='primary' htmlType='submit' long loading={loginBusy}>
               {copy.connect}
             </Button>
           </form>
@@ -232,6 +302,25 @@ export function App() {
   }
 
   const facts = state.kind === 'ready' ? state.facts : null;
+  const filteredUsers = facts
+    ? facts.users.filter((user) => {
+        const query = userSearch.trim().toLocaleLowerCase();
+        return !query || `${user.displayName}\n${user.userId}`.toLocaleLowerCase().includes(query);
+      })
+    : [];
+  const selectedUsers = facts?.users.filter((user) => selectedUserIds.includes(user.userId) && user.status !== 'DELETED') ?? [];
+  const openPolicy = (users: TenantUser[], approvePending = false) => {
+    if (users.length === 0) return;
+    const current = users.length === 1 ? users[0] : undefined;
+    const currentLimit = current?.tokenLimit;
+    const nextUnit: QuotaUnit = currentLimit && currentLimit >= 1_000_000 && currentLimit % 1_000_000 === 0 ? 'M' : 'K';
+    setQuotaUnit(nextUnit);
+    setQuotaAmount(currentLimit === null || currentLimit === undefined ? undefined : currentLimit / (nextUnit === 'M' ? 1_000_000 : 1_000));
+    setQuotaUnlimited(currentLimit === null);
+    setPolicyModelIds(current?.allowedModelIds ?? []);
+    setPolicyApprovePending(approvePending);
+    setPolicyUsers(users);
+  };
   const createUser = () =>
     void mutate(async (signal) => {
       await createTenantUser(token, signal, requestOptions, {
@@ -400,16 +489,66 @@ export function App() {
                   type='primary'
                   icon={<Plus />}
                   onClick={() => {
-                    setNewAllowedModelIds(facts.routes.filter((route) => route.enabled).map((route) => route.routeId));
+                    setNewAllowedModelIds(
+                      facts.routes.filter((route) => route.published && route.enabled).map((route) => route.routeId)
+                    );
                     setUserModal(true);
                   }}
                 >
                   {copy.addUser}
                 </Button>
               </div>
+              <div className='user-toolbar'>
+                <Input.Search
+                  value={userSearch}
+                  placeholder={copy.searchUsers}
+                  allowClear
+                  onChange={setUserSearch}
+                />
+                <Checkbox
+                  checked={
+                    filteredUsers.some((user) => user.status !== 'DELETED') &&
+                    filteredUsers.filter((user) => user.status !== 'DELETED').every((user) => selectedUserIds.includes(user.userId))
+                  }
+                  indeterminate={
+                    filteredUsers.some((user) => selectedUserIds.includes(user.userId)) &&
+                    !filteredUsers.filter((user) => user.status !== 'DELETED').every((user) => selectedUserIds.includes(user.userId))
+                  }
+                  onChange={(checked) => {
+                    const visible = filteredUsers.filter((user) => user.status !== 'DELETED').map((user) => user.userId);
+                    setSelectedUserIds((current) =>
+                      checked ? [...new Set([...current, ...visible])] : current.filter((id) => !visible.includes(id))
+                    );
+                  }}
+                >
+                  {copy.selectAll}
+                </Checkbox>
+                <span>{copy.selectedUsers.replace('{count}', String(selectedUsers.length))}</span>
+                <Button
+                  type='primary'
+                  disabled={!selectedUsers.some((user) => user.status === 'PENDING_APPROVAL')}
+                  onClick={() => openPolicy(selectedUsers.filter((user) => user.status === 'PENDING_APPROVAL'), true)}
+                >
+                  {copy.batchApprove}
+                </Button>
+                <Button disabled={selectedUsers.length === 0} onClick={() => openPolicy(selectedUsers)}>
+                  {copy.batchPolicy}
+                </Button>
+              </div>
               <div className='record-list'>
-                {facts.users.map((user) => (
+                {filteredUsers.map((user) => (
                   <article key={user.userId}>
+                    {user.status !== 'DELETED' && (
+                      <Checkbox
+                        aria-label={`${copy.selectUser} ${user.displayName}`}
+                        checked={selectedUserIds.includes(user.userId)}
+                        onChange={(checked) =>
+                          setSelectedUserIds((current) =>
+                            checked ? [...new Set([...current, user.userId])] : current.filter((id) => id !== user.userId)
+                          )
+                        }
+                      />
+                    )}
                     <div>
                       <strong>{user.displayName}</strong>
                       <span>{user.userId}</span>
@@ -423,6 +562,9 @@ export function App() {
                         {user.tokenLimit === null ? copy.tokenUnlimited : user.tokenLimit.toLocaleString()}
                       </Tag>
                       <Tag>{copy.allowedModels}：{user.allowedModelIds.length}</Tag>
+                      <Tag color={facts.consentedUserIds.includes(user.userId) ? 'green' : 'gray'}>
+                        {facts.consentedUserIds.includes(user.userId) ? copy.consentSigned : copy.consentUnsigned}
+                      </Tag>
                       <Tag color={user.status === 'ACTIVE' ? 'green' : 'gray'}>
                         {userStatusLabel(user.status, copy)}
                       </Tag>
@@ -432,9 +574,7 @@ export function App() {
                             size='small'
                             loading={mutating}
                             onClick={() => {
-                              setTokenLimitValue(user.tokenLimit ?? undefined);
-                              setTokenLimitModelIds(user.allowedModelIds);
-                              setTokenLimitUser(user);
+                              openPolicy([user]);
                             }}
                           >
                             {copy.updateTokenLimit}
@@ -447,9 +587,7 @@ export function App() {
                             loading={mutating}
                             onClick={() => {
                               if (user.status === 'PENDING_APPROVAL') {
-                                setTokenLimitValue(undefined);
-                                setTokenLimitModelIds([]);
-                                setTokenLimitUser(user);
+                                openPolicy([user], true);
                                 return;
                               }
                               void mutate(async (signal) => {
@@ -495,7 +633,7 @@ export function App() {
                     </div>
                   </article>
                 ))}
-                {facts.users.length === 0 && <p className='empty-state'>{copy.noUsers}</p>}
+                {filteredUsers.length === 0 && <p className='empty-state'>{copy.noUsers}</p>}
               </div>
             </Tabs.TabPane>
 
@@ -553,10 +691,20 @@ export function App() {
                   <h2>{copy.models}</h2>
                   <p>{copy.modelsDescription}</p>
                 </div>
+                <Button
+                  type='primary'
+                  icon={<Plus />}
+                  disabled={!facts.routes.some((route) => !route.published)}
+                  onClick={() => setModelCatalogModal(true)}
+                >
+                  {copy.addModel}
+                </Button>
               </div>
+              <Alert type='info' showIcon content={`${copy.modelsCatalogNotice} ${copy.modelTestUsageNotice}`} />
               <div className='record-list'>
-                {facts.routes.map((route) => (
-                  <article key={route.routeId}>
+                {facts.routes.filter((route) => route.published).map((route) => {
+                  const modelTest = modelTests[route.routeId];
+                  return <article key={route.routeId}>
                     <div>
                       <strong>{route.label}</strong>
                       <span>
@@ -564,9 +712,29 @@ export function App() {
                       </span>
                     </div>
                     <div className='record-actions'>
+                      {modelTest?.kind === 'passed' && (
+                        <Tag color='green'>{copy.modelTestPassed}</Tag>
+                      )}
+                      {modelTest?.kind === 'failed' && (
+                        <Tag color='red'>
+                          {modelTest.status === 401 ? copy.modelTestExpired : copy.modelTestFailed}
+                        </Tag>
+                      )}
                       <Tag color={route.keyConfigured ? 'green' : 'gray'}>
                         {route.keyConfigured ? copy.customKeyConfigured : copy.deploymentKey}
                       </Tag>
+                      <Button
+                        size='small'
+                        loading={modelTest?.kind === 'testing'}
+                        disabled={
+                          !route.enabled ||
+                          !modelSession ||
+                          !modelSession.allowedModelIds.includes(route.routeId)
+                        }
+                        onClick={() => runModelTest(route.routeId)}
+                      >
+                        {copy.testModelConnection}
+                      </Button>
                       <Button
                         size='small'
                         loading={mutating}
@@ -590,10 +758,33 @@ export function App() {
                           })
                         }
                       />
+                      <Button
+                        size='small'
+                        status='danger'
+                        loading={mutating}
+                        onClick={() =>
+                          Modal.confirm({
+                            title: copy.removeModel,
+                            content: copy.removeModelConfirm,
+                            okText: copy.removeModel,
+                            cancelText: copy.cancel,
+                            okButtonProps: { status: 'danger' },
+                            onOk: () =>
+                              mutate(async (signal) => {
+                                await publishModelRoute(token, signal, requestOptions, route.routeId, {
+                                  schemaVersion: 1,
+                                  published: false,
+                                });
+                              }),
+                          })
+                        }
+                      >
+                        {copy.removeModel}
+                      </Button>
                     </div>
-                  </article>
-                ))}
-                {facts.routes.length === 0 && <p className='empty-state'>{copy.noModels}</p>}
+                  </article>;
+                })}
+                {!facts.routes.some((route) => route.published) && <p className='empty-state'>{copy.noModels}</p>}
               </div>
             </Tabs.TabPane>
 
@@ -708,6 +899,7 @@ export function App() {
             !userId.trim() ||
             !displayName.trim() ||
             roles.length === 0 ||
+            newAllowedModelIds.length === 0 ||
             initialPassword.length < 12 ||
             /\p{Cc}/u.test(initialPassword),
         }}
@@ -754,11 +946,12 @@ export function App() {
             mode='multiple'
             value={newAllowedModelIds}
             onChange={(value) => setNewAllowedModelIds(value as string[])}
-            options={(facts?.routes ?? []).filter((route) => route.enabled).map((route) => ({
+            options={(facts?.routes ?? []).filter((route) => route.published && route.enabled).map((route) => ({
               label: route.label,
               value: route.routeId,
             }))}
           />
+          {newAllowedModelIds.length === 0 && <span className='field-hint'>{copy.activeUserModelRequired}</span>}
         </div>
       </Modal>
 
@@ -803,56 +996,123 @@ export function App() {
       </Modal>
 
       <Modal
-        title={copy.updateTokenLimit}
-        visible={tokenLimitUser !== null}
+        title={policyApprovePending ? copy.batchApprove : copy.updateTokenLimit}
+        visible={policyUsers.length > 0}
         onCancel={() => {
-          setTokenLimitUser(null);
-          setTokenLimitValue(undefined);
-          setTokenLimitModelIds([]);
+          setPolicyUsers([]);
+          setQuotaAmount(undefined);
+          setPolicyModelIds([]);
+          setPolicyApprovePending(false);
         }}
         onOk={() =>
           void mutate(async (signal) => {
-            const currentUser = tokenLimitUser;
-            if (!currentUser || currentUser.status === 'DELETED') return;
-            const nextTokenLimit = tokenLimitValue ?? null;
-            setTokenLimitUser(null);
-            setTokenLimitValue(undefined);
-            setTokenLimitModelIds([]);
-            await updateTenantUser(token, signal, requestOptions, currentUser.userId, {
-              schemaVersion: 1,
-              displayName: currentUser.displayName,
-              roles: currentUser.roles,
-              status: currentUser.status === 'PENDING_APPROVAL' ? 'ACTIVE' : currentUser.status,
-              tokenLimit: nextTokenLimit,
-              allowedModelIds: tokenLimitModelIds,
-              expectedUpdatedAt: currentUser.updatedAt,
-            });
+            const users = policyUsers.filter(
+              (user): user is TenantUser & { status: Exclude<AdminUserStatus, 'DELETED'> } =>
+                user.status !== 'DELETED'
+            );
+            const nextTokenLimit = quotaTokens(quotaAmount, quotaUnit, quotaUnlimited);
+            if (nextTokenLimit === undefined) return;
+            await Promise.all(
+              users.map((currentUser) =>
+                updateTenantUser(token, signal, requestOptions, currentUser.userId, {
+                  schemaVersion: 1,
+                  displayName: currentUser.displayName,
+                  roles: currentUser.roles,
+                  status:
+                    policyApprovePending && currentUser.status === 'PENDING_APPROVAL'
+                      ? 'ACTIVE'
+                      : currentUser.status,
+                  tokenLimit: nextTokenLimit,
+                  allowedModelIds: policyModelIds,
+                  expectedUpdatedAt: currentUser.updatedAt,
+                })
+              )
+            );
+            setSelectedUserIds((current) => current.filter((id) => !users.some((user) => user.userId === id)));
+            setPolicyUsers([]);
+            setQuotaAmount(undefined);
+            setPolicyModelIds([]);
+            setPolicyApprovePending(false);
           })
         }
-        okButtonProps={{ loading: mutating, disabled: tokenLimitValue === undefined || tokenLimitModelIds.length === 0 }}
+        okText={policyApprovePending ? copy.confirmApprove : copy.savePolicy}
+        okButtonProps={{
+          loading: mutating,
+          disabled: quotaTokens(quotaAmount, quotaUnit, quotaUnlimited) === undefined || policyModelIds.length === 0,
+        }}
         unmountOnExit
       >
         <div className='modal-fields'>
-          <label htmlFor='user-token-limit'>{copy.tokenLimit}</label>
-          <InputNumber
-            id='user-token-limit'
-            value={tokenLimitValue}
-            min={1}
-            max={Number.MAX_SAFE_INTEGER}
-            precision={0}
-            placeholder={copy.tokenLimitOptional}
-            onChange={setTokenLimitValue}
-            style={{ width: '100%' }}
+          <Alert
+            type='info'
+            showIcon
+            content={copy.policyUsers.replace('{count}', String(policyUsers.length))}
           />
+          <label>{copy.tokenLimit}</label>
+          <div className='quota-row'>
+            <InputNumber
+              value={quotaAmount}
+              min={0.001}
+              max={Number.MAX_SAFE_INTEGER / (quotaUnit === 'M' ? 1_000_000 : 1_000)}
+              precision={3}
+              placeholder={copy.tokenLimitOptional}
+              disabled={quotaUnlimited}
+              onChange={setQuotaAmount}
+              style={{ width: '100%' }}
+            />
+            <Select
+              value={quotaUnit}
+              disabled={quotaUnlimited}
+              onChange={(value) => setQuotaUnit(value as QuotaUnit)}
+              options={[{ label: 'K', value: 'K' }, { label: 'M', value: 'M' }]}
+            />
+            <Checkbox checked={quotaUnlimited} onChange={setQuotaUnlimited}>
+              {copy.tokenUnlimited}
+            </Checkbox>
+          </div>
           <label>{copy.allowedModels}</label>
           <Select
             mode='multiple'
-            value={tokenLimitModelIds}
-            onChange={(value) => setTokenLimitModelIds(value as string[])}
-            options={(facts?.routes ?? []).filter((route) => route.enabled).map((route) => ({
+            value={policyModelIds}
+            onChange={(value) => setPolicyModelIds(value as string[])}
+            options={(facts?.routes ?? []).filter((route) => route.published && route.enabled).map((route) => ({
               label: route.label,
               value: route.routeId,
             }))}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        title={copy.addModel}
+        visible={modelCatalogModal}
+        onCancel={() => {
+          setModelCatalogModal(false);
+          setModelToPublish('');
+        }}
+        onOk={() =>
+          void mutate(async (signal) => {
+            if (!modelToPublish) return;
+            await publishModelRoute(token, signal, requestOptions, modelToPublish, {
+              schemaVersion: 1,
+              published: true,
+            });
+            setModelCatalogModal(false);
+            setModelToPublish('');
+          })
+        }
+        okButtonProps={{ loading: mutating, disabled: !modelToPublish }}
+        unmountOnExit
+      >
+        <div className='modal-fields'>
+          <Alert type='info' showIcon content={copy.modelsCatalogNotice} />
+          <label>{copy.modelCatalog}</label>
+          <Select
+            value={modelToPublish}
+            onChange={setModelToPublish}
+            options={(facts?.routes ?? [])
+              .filter((route) => !route.published)
+              .map((route) => ({ label: `${route.label} · ${route.provider}`, value: route.routeId }))}
           />
         </div>
       </Modal>

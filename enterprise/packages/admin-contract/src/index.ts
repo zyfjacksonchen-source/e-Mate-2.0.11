@@ -92,6 +92,7 @@ export type AdminModelRoute = {
   routeId: string;
   label: string;
   provider: string;
+  published: boolean;
   enabled: boolean;
   updatedAt: string | null;
   keyConfigured: boolean;
@@ -101,6 +102,11 @@ export type AdminModelRoute = {
 export type AdminModelRouteUpdate = {
   schemaVersion: 1;
   enabled: boolean;
+};
+
+export type AdminModelRoutePublication = {
+  schemaVersion: 1;
+  published: boolean;
 };
 
 export type AdminModelRouteKeyUpdate = {
@@ -465,7 +471,6 @@ export function parseTenantUserCreate(value: unknown): TenantUserCreate {
   if (input.schemaVersion !== 1) throw new Error('Invalid tenant user creation schema');
   const limit = tokenLimit(input.tokenLimit);
   const allowedModelIds = modelRouteIds(input.allowedModelIds, false);
-  if (limit === null) throw new Error('Active user requires a weekly token limit');
   return {
     schemaVersion: 1,
     userId: identifier(input.userId, 'user id'),
@@ -488,7 +493,6 @@ export function parseTenantUserUpdate(value: unknown): TenantUserUpdate {
   const status = oneOf(input.status, ADMIN_USER_UPDATE_STATUSES, 'user status');
   const limit = tokenLimit(input.tokenLimit);
   const allowedModelIds = modelRouteIds(input.allowedModelIds, status !== 'ACTIVE');
-  if (status === 'ACTIVE' && limit === null) throw new Error('Active user requires a weekly token limit');
   return {
     schemaVersion: 1,
     displayName: text(input.displayName, 'display name', 120),
@@ -608,6 +612,15 @@ export function parseAdminModelRouteUpdate(value: unknown): AdminModelRouteUpdat
   return { schemaVersion: 1, enabled: input.enabled };
 }
 
+export function parseAdminModelRoutePublication(value: unknown): AdminModelRoutePublication {
+  const input = record(value, 'admin model route publication');
+  exact(input, ['schemaVersion', 'published'], 'admin model route publication');
+  if (input.schemaVersion !== 1 || typeof input.published !== 'boolean') {
+    throw new Error('Invalid admin model route publication');
+  }
+  return { schemaVersion: 1, published: input.published };
+}
+
 export function parseAdminModelRouteKeyUpdate(value: unknown): AdminModelRouteKeyUpdate {
   const input = record(value, 'admin model route key update');
   exact(input, ['schemaVersion', 'apiKey'], 'admin model route key update');
@@ -627,10 +640,25 @@ function parseAdminModelRouteValue(value: unknown): AdminModelRoute {
   const input = record(value, 'admin model route');
   exact(
     input,
-    ['schemaVersion', 'routeId', 'label', 'provider', 'enabled', 'updatedAt', 'keyConfigured', 'keyUpdatedAt'],
+    [
+      'schemaVersion',
+      'routeId',
+      'label',
+      'provider',
+      'published',
+      'enabled',
+      'updatedAt',
+      'keyConfigured',
+      'keyUpdatedAt',
+    ],
     'admin model route'
   );
-  if (input.schemaVersion !== 1 || typeof input.enabled !== 'boolean' || typeof input.keyConfigured !== 'boolean') {
+  if (
+    input.schemaVersion !== 1 ||
+    typeof input.published !== 'boolean' ||
+    typeof input.enabled !== 'boolean' ||
+    typeof input.keyConfigured !== 'boolean'
+  ) {
     throw new Error('Invalid admin model route');
   }
   const keyUpdatedAt = nullableTimestamp(input.keyUpdatedAt, 'route key updated time');
@@ -642,6 +670,7 @@ function parseAdminModelRouteValue(value: unknown): AdminModelRoute {
     routeId: identifier(input.routeId, 'route id'),
     label: text(input.label, 'route label', 120),
     provider: text(input.provider, 'route provider', 120),
+    published: input.published,
     enabled: input.enabled,
     updatedAt: nullableTimestamp(input.updatedAt, 'route updated time'),
     keyConfigured: input.keyConfigured,

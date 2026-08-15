@@ -12,6 +12,10 @@ import { createAnalyticsServer, createManagementAuthenticator, type Authenticate
 import { openPostgresSessionSummaryStore } from './session-index.ts';
 import { openPostgresTaskEventStore } from './task-events.ts';
 import { openPostgresUsageAnalyticsReader } from './usage-analytics.ts';
+import {
+  openPostgresAccessSessionAuthenticator,
+  type AccessSessionVerifierOptions,
+} from './access-session-auth.ts';
 
 const secretPathPattern = /^\/run\/secrets\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -32,6 +36,7 @@ export type AnalyticsProductionConfiguration = {
   modelRoutes: AdminModelRouteDefinition[];
   consentPolicy: ConsentPolicy;
   modelRouteKeyEncryptionKey?: Buffer;
+  sessionAuth?: AccessSessionVerifierOptions;
   authenticate: AuthenticateBearer;
 };
 
@@ -232,6 +237,7 @@ export function parseProductionConfiguration(
       'consentPolicy',
       'modelRoutes',
       ...(root.modelRouteKeys === undefined ? [] : ['modelRouteKeys']),
+      ...(root.sessionAuth === undefined ? [] : ['sessionAuth']),
     ],
     'configuration'
   );
@@ -266,6 +272,35 @@ export function parseProductionConfiguration(
       secretPath(modelRouteKeys.encryptionKeyFile, 'model route key encryption key file')
     );
   }
+  let sessionAuth: AccessSessionVerifierOptions | undefined;
+  if (root.sessionAuth !== undefined) {
+    const value = record(root.sessionAuth, 'session authentication configuration');
+    exact(value, ['issuer', 'audience', 'clientId', 'publicKeys'], 'session authentication configuration');
+    if (!Array.isArray(value.publicKeys) || value.publicKeys.length < 1 || value.publicKeys.length > 8) {
+      throw new Error('Invalid session authentication public keys');
+    }
+    const publicKeys = new Map<string, Buffer>();
+    for (const entryValue of value.publicKeys) {
+      const entry = record(entryValue, 'session authentication public key');
+      exact(entry, ['keyId', 'file'], 'session authentication public key');
+      const keyId = identifier(entry.keyId, 'session authentication key id');
+      if (publicKeys.has(keyId)) throw new Error('Invalid session authentication public keys');
+      publicKeys.set(
+        keyId,
+        readSecret(
+          secretPath(entry.file, 'session authentication public key file'),
+          'session authentication public key',
+          64 * 1_024
+        )
+      );
+    }
+    sessionAuth = {
+      issuer: text(value.issuer, 'session authentication issuer', 256),
+      audience: text(value.audience, 'session authentication audience', 256),
+      clientId: identifier(value.clientId, 'session authentication client id'),
+      publicKeys,
+    };
+  }
 
   return {
     host: listen.host,
@@ -275,6 +310,7 @@ export function parseProductionConfiguration(
     consentPolicy: parseConsentPolicy(root.consentPolicy),
     modelRoutes: parseModelRoutes(root.modelRoutes),
     ...(modelRouteKeyEncryptionKey ? { modelRouteKeyEncryptionKey } : {}),
+    ...(sessionAuth ? { sessionAuth } : {}),
     authenticate: createHashedBearerAuthenticator(principals),
   };
 }
@@ -377,9 +413,17 @@ export async function startProductionAnalyticsApi(configurationFile: string): Pr
     closers.push(admin.close);
     const consent = await openPostgresConsentStore(configuration.databaseUrl, configuration.consentPolicy);
     closers.push(consent.close);
+    let authenticate = configuration.authenticate;
+    if (configuration.sessionAuth) {
+      const accessSessions = openPostgresAccessSessionAuthenticator(configuration.databaseUrl, configuration.sessionAuth);
+      closers.push(accessSessions.close);
+      const bootstrapAuthenticate = authenticate;
+      authenticate = async (bearer) =>
+        (await accessSessions.authenticate(bearer)) ?? (await bootstrapAuthenticate(bearer));
+    }
     server = createAnalyticsServer({
       registry: runtime.registry,
-      authenticate: createManagementAuthenticator(configuration.authenticate, admin.store),
+      authenticate: createManagementAuthenticator(authenticate, admin.store),
       sessionIndex: sessions.store,
       observabilityPolicy: policy.store,
       usageAnalytics: usage.reader,

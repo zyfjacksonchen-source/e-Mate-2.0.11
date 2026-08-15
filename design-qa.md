@@ -214,3 +214,28 @@ The file-and-document source was compared separately with imported history and a
 7. The final desktop and mobile Browser pass verifies the real workspace/model/connection/Send targets, the source-sized continuous input surface and zero horizontal overflow. The only remaining same-state difference is the missing production model adapter described above; it is not replaced by a frontend fixture.
 
 final result: blocked
+
+## S07 enterprise admin model connectivity — 2026-08-15
+
+- Visual source: the current e-Mate user surface and the pinned 2.0.5 logo/OKLCH design tokens already used by this repository. No separate approved admin-screen reference exists, so this pass verifies design-language reuse and responsive closure rather than claiming an invented one-to-one admin layout.
+- The model row keeps the e-Mate dark workspace, orange primary action, existing Arco controls, compact status tags and rounded record surface. “测试联通” remains next to the route it tests and reports the real terminal state as “联通正常” or “联通失败”.
+- Desktop evidence: `artifacts/design-qa/S07-admin/models-connectivity-final-1280x900.jpg`.
+- Mobile evidence: `artifacts/design-qa/S07-admin/models-connectivity-mobile-final-320x800.jpg`. Browser measurement after the grid min-content fix is `clientWidth=320`, `scrollWidth=320`; inactive target tab panes are clipped by the resident Tabs container instead of widening the document.
+- Functional result: passed against a same-contract local Auth/Admin/Model Gateway fixture. Production visual and connectivity acceptance remain blocked on the real administrator account, consent, reverse proxy and Model Gateway environment.
+
+## S07 usage dashboard e-Mate visual language — 2026-08-15
+
+- Source visual truth: `artifacts/design-qa/S02-responsive/home-dark-1440x900.jpg`, `artifacts/design-qa/S02-responsive/home-light-1280x800.jpg`, canonical `upstream/e-mate-2.0.5/desktop/src/styles/tokens.css`, and `upstream/e-mate-2.0.5/design.md`. This is a design-language target rather than a same-content usage-screen mock; no usage facts were changed to resemble the source.
+- Browser implementation: `artifacts/design-qa/S07-usage-dashboard/implementation-dark-1280x900.jpg` and `implementation-dark-320x800.jpg`; combined full-view evidence is `source-vs-implementation-dark.jpg`. CSS viewport and capture pixels are respectively `1280×900`/`1280×900` and `320×800`/`320×800`, device scale factor 1.
+- State: authenticated ready state from a local read-only fixture matching the production contracts. Desktop and mobile both measured `scrollWidth === clientWidth`; the user/model table keeps its own horizontal scroll at mobile width. Theme attributes were `data-theme=dark` and `arco-theme=dark`; the light path consumes the exact canonical light Token block and the runtime synchronizes both attributes on `prefers-color-scheme` changes.
+- Full-view comparison: navigation width, 8px workspace inset, single 16px workspace frame, system CJK type, neutral surface hierarchy, rule density, icon stroke voice, brand logo treatment and restrained orange action use match the user surface. Usage-specific semantic green/red states are retained because they represent real ledger outcomes.
+- Focused-region comparison was not needed after opening the combined full view at `1440×900`: logo, navigation, header, status strip, metric row, panels and chart strokes were legible. Image fidelity is limited to the existing e-Mate logo; the analytics screen has no illustration target and does not substitute CSS art or placeholder imagery.
+- Primary interactions tested: read-token entry, ready-state load, refresh control presence, four navigation anchors, events drawer open, Escape close, and responsive reload. Browser console inspection found only the existing Arco/React 19 `element.ref` development warning; no dashboard error state appeared.
+
+### Comparison history
+
+1. The first `320×800` capture found a P2 mobile regression: `.sidebar nav a span` also hid IconPark's wrapper, leaving the active background without visible navigation icons.
+2. The selector was narrowed to the direct last-child text label. The post-fix capture shows all four icons, no overlap, and zero document-level horizontal overflow.
+3. The final source/implementation comparison found no remaining P0/P1/P2 design-language mismatch. Light-mode visual capture was not forced by changing the user's OS appearance; exact canonical light tokens and live system-theme synchronization are locked by the focused test.
+
+final result: passed

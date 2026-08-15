@@ -16,6 +16,12 @@ export type UsageModelTotal = {
   callCount: string;
 };
 
+export type UsageUserTotal = {
+  userId: string;
+  modelIds: string[];
+  metrics: UsageMetrics;
+};
+
 const countFields = [
   'totalRequests',
   'accountedRequests',
@@ -112,6 +118,24 @@ export function usageModels(projection: TenantUsageProjection): UsageModelTotal[
     return difference === 0n ? left[0].localeCompare(right[0]) : difference > 0n ? 1 : -1;
   });
   return totals.map(([modelId, callCount]) => ({ modelId, callCount: callCount.toString() }));
+}
+
+export function usageUsers(projection: TenantUsageProjection): UsageUserTotal[] {
+  const users = new Map<string, UsageUserTotal>();
+  for (const group of projection.groups) {
+    const current = users.get(group.userId);
+    users.set(group.userId, {
+      userId: group.userId,
+      modelIds: current?.modelIds.includes(group.modelId)
+        ? current.modelIds
+        : [...(current?.modelIds ?? []), group.modelId],
+      metrics: addMetrics(current?.metrics ?? emptyMetrics(), group.metrics),
+    });
+  }
+  return [...users.values()].sort((left, right) => {
+    const difference = BigInt(right.metrics.totalTokens) - BigInt(left.metrics.totalTokens);
+    return difference === 0n ? left.userId.localeCompare(right.userId) : difference > 0n ? 1 : -1;
+  });
 }
 
 export function hasUsageFacts(projection: TenantUsageProjection): boolean {

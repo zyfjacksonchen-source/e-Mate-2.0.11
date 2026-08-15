@@ -18,6 +18,7 @@ import {
   parseAdminApiKeyCreate,
   parseAdminConsentQuery,
   parseAdminModelRouteKeyUpdate,
+  parseAdminModelRoutePublication,
   parseAdminModelRouteUpdate,
   parseAdminPasswordReset,
   parseTenantUserCreate,
@@ -700,6 +701,38 @@ export function createAnalyticsHandler({
       const modelRouteKeyMatch = url.pathname.match(
         /^\/v1\/admin\/model-routes\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\/key$/
       );
+      const modelRoutePublicationMatch = url.pathname.match(
+        /^\/v1\/admin\/model-routes\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\/publication$/
+      );
+      if (modelRoutePublicationMatch) {
+        rejectQuery(url);
+        if (request.method !== 'PUT') {
+          methodNotAllowed(response, 'PUT');
+          return;
+        }
+        const identity = await principal(request, authenticate);
+        requireRole(identity, managementRoles);
+        if (!adminManagement) {
+          throw new HttpError(503, 'ADMIN_MANAGEMENT_UNAVAILABLE', 'Administration temporarily unavailable');
+        }
+        try {
+          const input = parseAdminModelRoutePublication(await readJson(request));
+          const route = await adminManagement.publishModelRoute(
+            identity,
+            modelRoutePublicationMatch[1] as string,
+            input
+          );
+          if (!route) throw new HttpError(404, 'ADMIN_MODEL_ROUTE_NOT_FOUND', 'Model route not found');
+          json(response, 200, route);
+          return;
+        } catch (error) {
+          if (error instanceof HttpError) throw error;
+          if (error instanceof Error && error.message.startsWith('Invalid admin model route publication')) {
+            throw new HttpError(400, 'INVALID_ADMIN_MODEL_ROUTE_PUBLICATION', 'Invalid model route publication');
+          }
+          throwManagementError(error);
+        }
+      }
       if (modelRouteKeyMatch) {
         rejectQuery(url);
         if (request.method !== 'PUT') {

@@ -76,6 +76,35 @@ test('tenant user and model route records remain tenant-isolated', async () => {
   assert.equal((await store.listModelRoutes(tenantAdmin('tenant-b'))).routes[0]?.keyConfigured, false);
 });
 
+test('model catalog removal is tenant-scoped, fail-closed, and reversible only for deployed routes', async () => {
+  const store = new InMemoryAdminManagementStore([
+    { routeId: 'gpt-5.6-sol', label: 'Sol', provider: 'Enterprise gateway' },
+  ]);
+  const removed = await store.publishModelRoute(tenantAdmin('tenant-a'), 'gpt-5.6-sol', {
+    schemaVersion: 1,
+    published: false,
+  });
+  assert.equal(removed?.published, false);
+  assert.equal(removed?.enabled, false);
+  assert.equal((await store.listModelRoutes(tenantAdmin('tenant-b'))).routes[0]?.published, true);
+  assert.equal(
+    await store.publishModelRoute(tenantAdmin('tenant-a'), 'not-in-deployment-catalog', {
+      schemaVersion: 1,
+      published: true,
+    }),
+    null
+  );
+  assert.equal(
+    (
+      await store.publishModelRoute(tenantAdmin('tenant-a'), 'gpt-5.6-sol', {
+        schemaVersion: 1,
+        published: true,
+      })
+    )?.published,
+    true
+  );
+});
+
 test('client credentials are shown once, scope-bound, user-bound, and revocable', async () => {
   let now = Date.parse('2026-07-30T10:00:00.000Z');
   const store = new InMemoryAdminManagementStore([], () => now);

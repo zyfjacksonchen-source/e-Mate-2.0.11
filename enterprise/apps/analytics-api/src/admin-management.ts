@@ -7,6 +7,7 @@ import {
   parseAdminPasswordReset,
   parseAdminModelRouteKeyUpdate,
   parseAdminModelRouteList,
+  parseAdminModelRoutePublication,
   parseAdminModelRouteUpdate,
   parseTenantUser,
   parseTenantUserCreate,
@@ -22,6 +23,7 @@ import {
   type AdminModelRoute,
   type AdminModelRouteKeyUpdate,
   type AdminModelRouteList,
+  type AdminModelRoutePublication,
   type AdminModelRouteUpdate,
   type AdminPasswordReset,
   type TenantUser,
@@ -58,6 +60,11 @@ export type AdminManagementStore = {
     routeId: string,
     input: AdminModelRouteUpdate
   ): Promise<AdminModelRoute | null>;
+  publishModelRoute(
+    principal: RuntimeRegistryPrincipal,
+    routeId: string,
+    input: AdminModelRoutePublication
+  ): Promise<AdminModelRoute | null>;
   updateModelRouteKey(
     principal: RuntimeRegistryPrincipal,
     routeId: string,
@@ -86,6 +93,7 @@ type StoredKey = AdminApiKeyMetadata & {
 };
 
 type ModelRoutePolicy = {
+  published?: boolean;
   enabled: boolean;
   updatedAt: string;
   apiKey?: string;
@@ -317,6 +325,7 @@ export class InMemoryAdminManagementStore implements AdminManagementStore {
           routeId: route.routeId,
           label: route.label,
           provider: route.provider,
+          published: policy?.published ?? true,
           enabled: policy?.enabled ?? isDefaultEnabledModelRoute(route.routeId),
           updatedAt: policy?.updatedAt ?? null,
           keyConfigured: policy?.apiKey !== undefined,
@@ -348,10 +357,48 @@ export class InMemoryAdminManagementStore implements AdminManagementStore {
       routeId,
       label: definition.label,
       provider: definition.provider,
+      published: policies.get(routeId)?.published ?? true,
       enabled: input.enabled,
       updatedAt,
       keyConfigured: policies.get(routeId)?.apiKey !== undefined,
       keyUpdatedAt: policies.get(routeId)?.keyUpdatedAt ?? null,
+    };
+  }
+
+  async publishModelRoute(
+    principal: RuntimeRegistryPrincipal,
+    routeIdInput: string,
+    value: AdminModelRoutePublication
+  ): Promise<AdminModelRoute | null> {
+    const tenantId = identifier(principal.tenantId, 'tenant id');
+    const routeId = identifier(routeIdInput, 'route id');
+    const definition = this.#catalog.find((route) => route.routeId === routeId);
+    if (!definition) return null;
+    const input = parseAdminModelRoutePublication(value);
+    const updatedAt = new Date(this.#now()).toISOString();
+    let policies = this.#routes.get(tenantId);
+    if (!policies) {
+      policies = new Map();
+      this.#routes.set(tenantId, policies);
+    }
+    const current = policies.get(routeId);
+    policies.set(routeId, {
+      ...current,
+      published: input.published,
+      enabled: input.published ? (current?.enabled ?? isDefaultEnabledModelRoute(routeId)) : false,
+      updatedAt,
+    });
+    const policy = policies.get(routeId) as ModelRoutePolicy;
+    return {
+      schemaVersion: 1,
+      routeId,
+      label: definition.label,
+      provider: definition.provider,
+      published: input.published,
+      enabled: policy.enabled,
+      updatedAt,
+      keyConfigured: policy.apiKey !== undefined,
+      keyUpdatedAt: policy.keyUpdatedAt ?? null,
     };
   }
 
@@ -374,6 +421,7 @@ export class InMemoryAdminManagementStore implements AdminManagementStore {
     const current = policies.get(routeId);
     const updatedAt = current?.updatedAt ?? keyUpdatedAt;
     policies.set(routeId, {
+      published: current?.published ?? true,
       enabled: current?.enabled ?? isDefaultEnabledModelRoute(routeId),
       updatedAt,
       apiKey: input.apiKey,
@@ -384,6 +432,7 @@ export class InMemoryAdminManagementStore implements AdminManagementStore {
       routeId,
       label: definition.label,
       provider: definition.provider,
+      published: policies.get(routeId)?.published ?? true,
       enabled: policies.get(routeId)?.enabled ?? isDefaultEnabledModelRoute(routeId),
       updatedAt,
       keyConfigured: true,
@@ -417,6 +466,7 @@ type KeyRow = {
 
 type ModelRouteRow = {
   route_id: string;
+  published: boolean;
   enabled: boolean;
   updated_at: Date;
   key_configured: boolean;
@@ -539,6 +589,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
       CREATE TABLE IF NOT EXISTS e_mate_tenant_model_route (
         tenant_id text NOT NULL,
         route_id text NOT NULL,
+        published boolean NOT NULL DEFAULT true,
         enabled boolean NOT NULL,
         updated_at timestamptz NOT NULL DEFAULT now(),
         updated_by text NOT NULL,
@@ -550,6 +601,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
         PRIMARY KEY (tenant_id, route_id)
       );
       ALTER TABLE e_mate_tenant_model_route
+        ADD COLUMN IF NOT EXISTS published boolean NOT NULL DEFAULT true,
         ADD COLUMN IF NOT EXISTS upstream_key_ciphertext bytea,
         ADD COLUMN IF NOT EXISTS upstream_key_nonce bytea,
         ADD COLUMN IF NOT EXISTS upstream_key_tag bytea,
@@ -1032,7 +1084,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
     const tenantId = identifier(principal.tenantId, 'tenant id');
     const result = await this.#pool.query<ModelRouteRow>(
       `
-      SELECT route_id, enabled, updated_at, key_updated_at,
+      SELECT route_id, published, enabled, updated_at, key_updated_at,
              upstream_key_ciphertext IS NOT NULL
                AND upstream_key_nonce IS NOT NULL
                AND upstream_key_tag IS NOT NULL AS key_configured
@@ -1051,6 +1103,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
           routeId: route.routeId,
           label: route.label,
           provider: route.provider,
+          published: policy?.published ?? true,
           enabled: policy?.enabled ?? isDefaultEnabledModelRoute(route.routeId),
           updatedAt: policy?.updated_at.toISOString() ?? null,
           keyConfigured: policy?.key_configured ?? false,
@@ -1074,6 +1127,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
     try {
       await client.query('BEGIN');
       const result = await client.query<{
+        published: boolean;
         enabled: boolean;
         updated_at: Date;
         key_configured: boolean;
@@ -1088,7 +1142,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
           SET enabled = EXCLUDED.enabled,
               updated_at = now(),
               updated_by = EXCLUDED.updated_by
-        RETURNING enabled, updated_at, key_updated_at,
+        RETURNING published, enabled, updated_at, key_updated_at,
                   upstream_key_ciphertext IS NOT NULL
                     AND upstream_key_nonce IS NOT NULL
                     AND upstream_key_tag IS NOT NULL AS key_configured
@@ -1104,10 +1158,75 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
         routeId,
         label: route.label,
         provider: route.provider,
+        published: result.rows[0]?.published ?? true,
         enabled: result.rows[0]?.enabled ?? input.enabled,
         updatedAt: (result.rows[0]?.updated_at ?? new Date()).toISOString(),
         keyConfigured: result.rows[0]?.key_configured ?? false,
         keyUpdatedAt: result.rows[0]?.key_updated_at?.toISOString() ?? null,
+      };
+    } catch (error) {
+      await rollback(client);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async publishModelRoute(
+    principal: RuntimeRegistryPrincipal,
+    routeIdInput: string,
+    value: AdminModelRoutePublication
+  ): Promise<AdminModelRoute | null> {
+    const tenantId = identifier(principal.tenantId, 'tenant id');
+    const routeId = identifier(routeIdInput, 'route id');
+    const route = this.#catalog.find((candidate) => candidate.routeId === routeId);
+    if (!route) return null;
+    const input = parseAdminModelRoutePublication(value);
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query<{
+        published: boolean;
+        enabled: boolean;
+        updated_at: Date;
+        key_configured: boolean;
+        key_updated_at: Date | null;
+      }>(
+        `INSERT INTO e_mate_tenant_model_route (
+           tenant_id, route_id, published, enabled, updated_by
+         ) VALUES ($1,$2,$3,false,$4)
+         ON CONFLICT (tenant_id, route_id) DO UPDATE
+           SET published = EXCLUDED.published,
+               enabled = CASE WHEN EXCLUDED.published THEN e_mate_tenant_model_route.enabled ELSE false END,
+               updated_at = now(),
+               updated_by = EXCLUDED.updated_by
+         RETURNING published, enabled, updated_at, key_updated_at,
+                   upstream_key_ciphertext IS NOT NULL
+                     AND upstream_key_nonce IS NOT NULL
+                     AND upstream_key_tag IS NOT NULL AS key_configured`,
+        [tenantId, routeId, input.published, principal.userId]
+      );
+      await this.#audit(
+        client,
+        principal,
+        input.published ? 'MODEL_ROUTE_PUBLISHED' : 'MODEL_ROUTE_REMOVED',
+        'MODEL_ROUTE',
+        routeId,
+        { published: input.published }
+      );
+      await client.query('COMMIT');
+      const row = result.rows[0];
+      if (!row) throw new Error('Model route publication was unavailable');
+      return {
+        schemaVersion: 1,
+        routeId,
+        label: route.label,
+        provider: route.provider,
+        published: row.published,
+        enabled: row.enabled,
+        updatedAt: row.updated_at.toISOString(),
+        keyConfigured: row.key_configured,
+        keyUpdatedAt: row.key_updated_at?.toISOString() ?? null,
       };
     } catch (error) {
       await rollback(client);
@@ -1133,6 +1252,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
     try {
       await client.query('BEGIN');
       const result = await client.query<{
+        published: boolean;
         enabled: boolean;
         updated_at: Date;
         key_updated_at: Date;
@@ -1149,7 +1269,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
               upstream_key_tag = EXCLUDED.upstream_key_tag,
               key_updated_at = now(),
               key_updated_by = EXCLUDED.key_updated_by
-        RETURNING enabled, updated_at, key_updated_at
+        RETURNING published, enabled, updated_at, key_updated_at
       `,
         [
           tenantId,
@@ -1172,6 +1292,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
         routeId,
         label: route.label,
         provider: route.provider,
+        published: row.published,
         enabled: row.enabled,
         updatedAt: row.updated_at.toISOString(),
         keyConfigured: true,
@@ -1186,7 +1307,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
   }
 }
 
-function postgresUrl(value: string): string {
+export function validateAdminPostgresUrl(value: string): string {
   const url = new URL(value);
   const loopback = ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(url.hostname);
   const privateService = url.hostname === 'postgres';
@@ -1205,7 +1326,7 @@ export async function openPostgresAdminManagementStore(
   catalog: AdminModelRouteDefinition[],
   routeKeyEncryptionKey?: Buffer
 ): Promise<{ store: PostgresAdminManagementStore; close: () => Promise<void> }> {
-  const connectionString = postgresUrl(url);
+  const connectionString = validateAdminPostgresUrl(url);
   const hostname = new URL(connectionString).hostname;
   const loopback = ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(hostname);
   const privateService = hostname === 'postgres';

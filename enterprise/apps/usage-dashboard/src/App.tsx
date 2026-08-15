@@ -1,11 +1,28 @@
-import { Alert, Button, Empty, Input, Link, Select, Spin, Tag } from '@arco-design/web-react';
-import { ChartHistogram, ChartLine, Home, Key, Refresh } from '@icon-park/react';
+import { Alert, Button, Drawer, Empty, Input, Link, Select, Spin, Tag } from '@arco-design/web-react';
+import { ChartHistogram, ChartLine, CheckOne, Home, Key, Refresh, UserBusiness } from '@icon-park/react';
 import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useState } from 'react';
-import type { TaskEventType, TaskScenario } from '@e-mate/monitoring-contract';
+import type { TaskEventType, TaskScenario, TenantUsageEvent } from '@e-mate/monitoring-contract';
 import eMateLogo from '../../../../upstream/e-mate-2.0.5/desktop/src/v1/assets/emate-logo.png';
-import { loadUsageDashboard, queryForPeriod, UsageApiError, type UsageDashboardData } from './api';
+import {
+  loadUsageDashboard,
+  loadUsageEvents,
+  queryForPeriod,
+  UsageApiError,
+  type UsageDashboardData,
+  type UsageQuery,
+} from './api';
 import { messagesFor } from './i18n';
-import { callSuccessRate, exactCount, hasUsageFacts, percentage, usageModels, usageTrend } from './usage-data';
+import {
+  callSuccessRate,
+  emptyMetrics,
+  exactCost,
+  exactCount,
+  hasUsageFacts,
+  percentage,
+  usageModels,
+  usageTrend,
+  usageUsers,
+} from './usage-data';
 
 const TOKEN_SESSION_KEY = 'e-mate.usage.read-token';
 const periodOptions = [7, 30, 90] as const;
@@ -14,6 +31,12 @@ type DashboardState =
   | { kind: 'loading' }
   | { kind: 'ready'; data: UsageDashboardData }
   | { kind: 'error'; status: number | null };
+
+type EventState =
+  | { kind: 'idle'; events: TenantUsageEvent[] }
+  | { kind: 'loading'; events: TenantUsageEvent[] }
+  | { kind: 'ready'; events: TenantUsageEvent[]; nextCursor: string | null }
+  | { kind: 'error'; events: TenantUsageEvent[] };
 
 function MetricCard({
   label,
@@ -78,6 +101,8 @@ export function App() {
   const [periodDays, setPeriodDays] = useState<(typeof periodOptions)[number]>(7);
   const [reloadKey, setReloadKey] = useState(0);
   const [dashboard, setDashboard] = useState<DashboardState>({ kind: 'loading' });
+  const [eventsOpen, setEventsOpen] = useState(false);
+  const [eventState, setEventState] = useState<EventState>({ kind: 'idle', events: [] });
 
   useEffect(() => {
     if (!token) return;
@@ -158,6 +183,33 @@ export function App() {
   const taskSummary = ready?.taskSummary;
   const trends = projection ? usageTrend(projection) : [];
   const models = projection ? usageModels(projection) : [];
+  const userUsage = projection ? usageUsers(projection) : [];
+  const userUsageById = new Map(userUsage.map((entry) => [entry.userId, entry]));
+  const configuredUserIds = new Set(ready?.users?.map(({ userId }) => userId) ?? []);
+  const userRows = ready?.users
+    ? [
+        ...ready.users.map((user) => ({
+          userId: user.userId,
+          displayName: user.displayName,
+          status: user.status,
+          tokenLimit: user.tokenLimit,
+          ...(userUsageById.get(user.userId) ?? { modelIds: [], metrics: emptyMetrics() }),
+        })),
+        ...userUsage
+          .filter(({ userId }) => !configuredUserIds.has(userId))
+          .map((entry) => ({
+            ...entry,
+            displayName: entry.userId,
+            status: null,
+            tokenLimit: undefined,
+          })),
+      ]
+    : userUsage.map((entry) => ({
+        ...entry,
+        displayName: entry.userId,
+        status: null,
+        tokenLimit: undefined,
+      }));
   const maximumRequests = maxCount(trends.map(({ metrics }) => metrics.totalRequests));
   const maximumModelCalls = maxCount(models.map(({ callCount }) => callCount));
   const taskSourceReady = taskSummary?.sourceState === 'AUTHORITATIVE';
@@ -203,6 +255,45 @@ export function App() {
     ARTIFACT_UPDATED: copy.eventArtifactUpdated,
     WAITING_INPUT: copy.eventWaitingInput,
   };
+  const userStatusLabel = (status: string | null) => {
+    if (status === 'ACTIVE') return copy.active;
+    if (status === 'PENDING_APPROVAL') return copy.pendingApproval;
+    if (status === 'SUSPENDED') return copy.suspended;
+    if (status === 'DELETED') return copy.deleted;
+    return '—';
+  };
+  const eventQuery = projection
+    ? ({
+        from: projection.from,
+        to: projection.to,
+        timezone: projection.timezone,
+        bucket: projection.bucket,
+      } satisfies UsageQuery)
+    : null;
+  const loadEventPage = (cursor: string | null, existing: TenantUsageEvent[]) => {
+    if (!projection || !eventQuery) return;
+    const controller = new AbortController();
+    setEventState({ kind: 'loading', events: existing });
+    void loadUsageEvents(token, eventQuery, cursor, controller.signal, projection.tenantId)
+      .then((page) => setEventState({ kind: 'ready', events: [...existing, ...page.events], nextCursor: page.nextCursor }))
+      .catch((error: unknown) => {
+        if (error instanceof UsageApiError && error.status === 401) {
+          sessionStorage.removeItem(TOKEN_SESSION_KEY);
+          setToken('');
+          setEventsOpen(false);
+        }
+        setEventState({ kind: 'error', events: existing });
+      });
+  };
+  const openEvents = () => {
+    setEventsOpen(true);
+    loadEventPage(null, []);
+  };
+  const mismatchCount = reconciliation
+    ? Object.values(reconciliation.checks)
+        .reduce((total, value) => total + BigInt(value), 0n)
+        .toString()
+    : '0';
 
   return (
     <div className='dashboard-shell'>
@@ -213,11 +304,19 @@ export function App() {
         <nav aria-label={copy.overview}>
           <Link className='is-active' href='#overview' aria-current='page'>
             <Home size={20} />
-            {copy.overview}
+            <span>{copy.overview}</span>
           </Link>
           <Link href='#trend'>
             <ChartHistogram size={20} />
-            {copy.usage}
+            <span>{copy.usage}</span>
+          </Link>
+          <Link href='#users'>
+            <UserBusiness size={20} />
+            <span>{copy.users}</span>
+          </Link>
+          <Link href='#audit'>
+            <CheckOne size={20} />
+            <span>{copy.audit}</span>
           </Link>
         </nav>
         <Button className='sign-out' type='text' onClick={signOut}>
@@ -236,7 +335,11 @@ export function App() {
               <span>{copy.period}</span>
               <Select
                 value={periodDays}
-                onChange={(value) => setPeriodDays(value as (typeof periodOptions)[number])}
+                onChange={(value) => {
+                  setEventsOpen(false);
+                  setEventState({ kind: 'idle', events: [] });
+                  setPeriodDays(value as (typeof periodOptions)[number]);
+                }}
                 aria-label={copy.period}
               >
                 <Select.Option value={7}>{copy.last7Days}</Select.Option>
@@ -305,17 +408,13 @@ export function App() {
                 }
               />
               <MetricCard
-                label={copy.callSuccessRate}
-                value={successRate === null ? '—' : `${successRate}%`}
+                label={copy.totalTokens}
+                value={usageSourceReady ? exactCount(projection.summary.totalTokens, locale) : '—'}
                 detail={
-                  successRate === null
-                    ? copy.noData
-                    : `${exactCount(projection.summary.accountedRequests, locale)} ${copy.accounted} / ${exactCount(
-                        completedCalls,
-                        locale
-                      )} ${copy.completedCalls}`
+                  usageSourceReady
+                    ? copy.tokenComposition
+                    : copy.noData
                 }
-                tone='positive'
               />
               <MetricCard
                 label={copy.activeUsers}
@@ -327,6 +426,13 @@ export function App() {
                 }
               />
             </section>
+
+            {successRate !== null && (
+              <p className='accuracy-note summary-note'>
+                {copy.callSuccessRate}: {successRate}% · {exactCount(projection.summary.accountedRequests, locale)}{' '}
+                {copy.accounted} / {exactCount(completedCalls, locale)} {copy.completedCalls}
+              </p>
+            )}
 
             <section className='analysis-grid'>
               <article className='panel trend-panel' id='trend'>
@@ -463,9 +569,179 @@ export function App() {
                 </div>
               </article>
             </section>
+
+            <section className='panel details-panel' id='users'>
+              <div className='panel-heading'>
+                <div>
+                  <h2>{copy.details}</h2>
+                  <p>{copy.accuracyBoundary}</p>
+                </div>
+                <UserBusiness size={22} />
+              </div>
+              <div className='table-scroll'>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{copy.user}</th>
+                      <th>{copy.model}</th>
+                      <th>{copy.userStatus}</th>
+                      <th>{copy.requests}</th>
+                      <th>{copy.inputTokens}</th>
+                      <th>{copy.outputTokens}</th>
+                      <th>{copy.cacheTokens}</th>
+                      <th>{copy.totalTokens}</th>
+                      <th>{copy.configuredQuota}</th>
+                      <th>{copy.cost}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {userRows.map((row) => {
+                      const cacheTokens = (
+                        BigInt(row.metrics.cacheReadTokens) + BigInt(row.metrics.cacheWriteTokens)
+                      ).toString();
+                      const quota = row.tokenLimit;
+                      return (
+                        <tr key={row.userId}>
+                          <td>
+                            <strong>{row.displayName}</strong>
+                            <small className='table-subline'>{row.userId}</small>
+                          </td>
+                          <td>{row.modelIds.join(', ') || '—'}</td>
+                          <td>{userStatusLabel(row.status)}</td>
+                          <td>{exactCount(row.metrics.totalRequests, locale)}</td>
+                          <td>{exactCount(row.metrics.inputTokens, locale)}</td>
+                          <td>{exactCount(row.metrics.outputTokens, locale)}</td>
+                          <td>{exactCount(cacheTokens, locale)}</td>
+                          <td>{exactCount(row.metrics.totalTokens, locale)}</td>
+                          <td>
+                            {quota === undefined ? (
+                              copy.quotaUnavailable
+                            ) : quota === null ? (
+                              copy.unlimited
+                            ) : (
+                              <span className='quota-cell'>
+                                {exactCount(String(quota), locale)}
+                                <small>{copy.weeklyQuota}</small>
+                              </span>
+                            )}
+                          </td>
+                          <td>{exactCost(row.metrics.costUsd, locale)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {userRows.length === 0 && <Empty description={copy.noData} />}
+              </div>
+            </section>
+
+            <section className='panel audit-panel' id='audit'>
+              <div className='panel-heading'>
+                <div>
+                  <h2>{copy.reconciliation}</h2>
+                  <p>{copy.auditDescription}</p>
+                </div>
+                <Tag color={reconciliation.state === 'MATCHED' ? 'green' : 'orange'}>
+                  {reconciliation.state === 'MATCHED' ? copy.matched : copy.mismatched}
+                </Tag>
+              </div>
+              <dl className='check-list'>
+                {(
+                  [
+                    [copy.requestStatuses, reconciliation.checks.requestStatuses],
+                    [copy.usageTaskTotals, reconciliation.checks.usageTaskTotals],
+                    [copy.completedInvocationUsage, reconciliation.checks.completedInvocationUsage],
+                    [copy.usageInvocationLinks, reconciliation.checks.usageInvocationLinks],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd className={value === '0' ? 'positive-value' : 'negative-value'}>
+                      {exactCount(value, locale)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <div className='validation-actions'>
+                <span>
+                  {copy.mismatchCount}: {exactCount(mismatchCount, locale)} · {copy.checkedAt}{' '}
+                  {dateTime(reconciliation.checkedAt)}
+                </span>
+                <Button onClick={openEvents}>{copy.viewEvents}</Button>
+              </div>
+              {reconciliation.state === 'MISMATCHED' && (
+                <Alert type='warning' content={copy.unmatchedWarning} showIcon />
+              )}
+            </section>
           </>
         )}
       </main>
+
+      <Drawer
+        width={760}
+        title={copy.rawEvents}
+        visible={eventsOpen}
+        onCancel={() => setEventsOpen(false)}
+        footer={null}
+      >
+        <p className='drawer-description'>{copy.rawEventsDescription}</p>
+        {eventState.kind === 'error' && <Alert type='error' content={copy.loadFailed} showIcon />}
+        {eventState.events.length === 0 && eventState.kind === 'loading' ? (
+          <div className='drawer-loading'>
+            <Spin dot />
+          </div>
+        ) : (
+          <div className='event-list'>
+            {eventState.events.map((event) => (
+              <article className='event-row' key={`${event.kind}:${event.eventId}`}>
+                <div className='event-kind'>
+                  <Tag color={event.kind === 'USAGE' ? 'arcoblue' : 'gray'}>
+                    {event.kind === 'USAGE' ? copy.usageEvent : copy.requestEvent}
+                  </Tag>
+                  <time dateTime={event.occurredAt}>{dateTime(event.occurredAt)}</time>
+                </div>
+                <dl>
+                  <div>
+                    <dt>{copy.user}</dt>
+                    <dd>{event.userId}</dd>
+                  </div>
+                  <div>
+                    <dt>{copy.task}</dt>
+                    <dd>{event.taskId}</dd>
+                  </div>
+                  <div>
+                    <dt>{copy.model}</dt>
+                    <dd>{event.modelId}</dd>
+                  </div>
+                  <div>
+                    <dt>{copy.provider}</dt>
+                    <dd>{event.providerId}</dd>
+                  </div>
+                  <div>
+                    <dt>{event.kind === 'USAGE' ? copy.totalTokens : copy.outcome}</dt>
+                    <dd>
+                      {event.kind === 'USAGE' ? exactCount(event.totalTokens, locale) : event.outcome}
+                    </dd>
+                  </div>
+                </dl>
+              </article>
+            ))}
+          </div>
+        )}
+        <div className='drawer-footer'>
+          {eventState.kind === 'loading' && eventState.events.length > 0 ? (
+            <Button loading>{copy.loadMore}</Button>
+          ) : eventState.kind === 'ready' && eventState.nextCursor ? (
+            <Button
+              onClick={() => loadEventPage(eventState.nextCursor, eventState.events)}
+            >
+              {copy.loadMore}
+            </Button>
+          ) : eventState.events.length > 0 ? (
+            copy.noMore
+          ) : null}
+        </div>
+      </Drawer>
     </div>
   );
 }

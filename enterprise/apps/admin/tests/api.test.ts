@@ -1,23 +1,39 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
+  ADMIN_MODEL_SESSION_KEY,
   ADMIN_TOKEN_SESSION_KEY,
   AdminApiError,
   abbreviateAuditValue,
   createTenantUser,
   deleteTenantUser,
   issueApiKey,
+  loginAdmin,
   loadApiKeys,
   loadConsentAcceptances,
   loadRuntimeStatus,
   resetTenantUserPassword,
+  quotaTokens,
+  readAdminModelSession,
   resolveSameOriginPath,
   resolveUsageDashboardPath,
+  testModelConnection,
   updateModelRouteKey,
   updateTenantUser,
 } from '../src/api.ts';
 
 const origin = 'https://admin.example.test';
+
+test('admin login reuses the e-Mate dark component theme and logo treatment', () => {
+  assert.match(readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8'), /setAttribute\('arco-theme'/);
+  const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /width: min\(100%, 360px\)/);
+  assert.match(css, /filter: invert\(1\) hue-rotate\(180deg\)/);
+  assert.match(css, /grid-template-columns: minmax\(0, 1fr\) auto/);
+  assert.match(css, /@media \(max-width: 900px\)[\s\S]*?\.admin-shell\s*{\s*grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(css, /\.admin-tabs,[\s\S]*?overflow: hidden/);
+});
 
 test('admin API paths must stay on the console origin', () => {
   assert.equal(
@@ -34,11 +50,140 @@ test('usage links are emitted only for same-origin deployments', () => {
   assert.equal(resolveUsageDashboardPath('/e-mate/usage/', origin), '/e-mate/usage/');
   assert.equal(resolveUsageDashboardPath(undefined, origin), null);
   assert.throws(() => resolveUsageDashboardPath('https://attacker.example/usage', origin), /must share/);
+  const productionEnvironment = readFileSync(new URL('../.env.production', import.meta.url), 'utf8');
+  assert.match(productionEnvironment, /^VITE_ADMIN_API_BASE=\/e-mate\/enterprise-api\/$/m);
+  assert.match(productionEnvironment, /^VITE_USAGE_DASHBOARD_PATH=\/ecorex-agent\/usage-panel\/$/m);
 });
 
 test('admin credentials use a session key separate from the usage read token', () => {
   assert.equal(ADMIN_TOKEN_SESSION_KEY, 'e-mate.admin.access-token');
+  assert.equal(ADMIN_MODEL_SESSION_KEY, 'e-mate.admin.model-session');
+  assert.notEqual(ADMIN_MODEL_SESSION_KEY, ADMIN_TOKEN_SESSION_KEY);
   assert.notEqual(ADMIN_TOKEN_SESSION_KEY, 'e-mate.usage.read-token');
+});
+
+test('quota units produce exact integer tokens and unlimited remains explicit', () => {
+  assert.equal(quotaTokens(1.001, 'K', false), 1_001);
+  assert.equal(quotaTokens(1.25, 'M', false), 1_250_000);
+  assert.equal(quotaTokens(undefined, 'K', true), null);
+  assert.equal(quotaTokens(0, 'K', false), undefined);
+});
+
+test('administrator password login reuses the same-origin Auth Gateway contract without persisting credentials', async () => {
+  let call: { input: string; init?: RequestInit } | undefined;
+  const accessToken = `header.${'a'.repeat(32)}.signature`;
+  const modelSessionToken = `header.${'m'.repeat(32)}.signature`;
+  const modelExpiry = new Date(Date.now() + 60_000).toISOString();
+  const result = await loginAdmin(
+    {
+      authBase: '/ecorex-agent/auth-api/',
+      clientId: 'e-mate-admin',
+      organization: 'example',
+      account: 'admin@example.test',
+      password: 'not-recorded',
+    },
+    new AbortController().signal,
+    {
+      origin,
+      fetcher: async (input, init) => {
+        call = { input: String(input), init };
+        return new Response(JSON.stringify({
+          schemaVersion: 1,
+          accessToken,
+          modelGateway: {
+            baseUrl: `${origin}/e-mate/model-api/`,
+            sessionToken: modelSessionToken,
+            expiresAt: modelExpiry,
+            allowedModelIds: ['gpt-5.6-sol'],
+          },
+        }), { status: 200 });
+      },
+    }
+  );
+  assert.deepEqual(result, {
+    accessToken,
+    modelGateway: {
+      basePath: '/e-mate/model-api/',
+      sessionToken: modelSessionToken,
+      expiresAt: modelExpiry,
+      allowedModelIds: ['gpt-5.6-sol'],
+    },
+  });
+  assert.equal(call?.input, '/ecorex-agent/auth-api/v1/auth/password');
+  assert.equal(call?.init?.method, 'POST');
+  assert.deepEqual(JSON.parse(String(call?.init?.body)), {
+    clientId: 'e-mate-admin',
+    organization: 'example',
+    user: 'admin@example.test',
+    password: 'not-recorded',
+  });
+  assert.equal(call?.input.includes('admin@example.test'), false);
+  assert.equal(call?.input.includes('not-recorded'), false);
+});
+
+test('model connectivity uses the authenticated same-origin Model Gateway and a real bounded invocation', async () => {
+  const calls: Array<{ input: string; init?: RequestInit }> = [];
+  const session = {
+    basePath: '/e-mate/model-api/',
+    sessionToken: `header.${'m'.repeat(32)}.signature`,
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    allowedModelIds: ['gpt-5.6-sol'],
+  };
+  assert.deepEqual(readAdminModelSession(JSON.stringify(session)), session);
+  const responses = [
+    new Response(JSON.stringify({
+      schemaVersion: 1,
+      models: [{ id: 'gpt-5.6-sol', capabilities: { imageGeneration: false } }],
+    }), { headers: { 'content-type': 'application/json' } }),
+    new Response(
+      'data: {"type":"response.completed","response":{"id":"response-test"}}\n\ndata: [DONE]\n\n',
+      { headers: { 'content-type': 'text/event-stream' } }
+    ),
+  ];
+  const result = await testModelConnection('gpt-5.6-sol', session, new AbortController().signal, {
+    origin,
+    fetcher: async (input, init) => {
+      calls.push({ input: String(input), init });
+      return responses.shift() as Response;
+    },
+  });
+  assert.equal(result.method, 'live-inference');
+  assert.deepEqual(calls.map(({ input }) => input), [
+    '/e-mate/model-api/v1/models',
+    '/e-mate/model-api/v1/responses',
+  ]);
+  assert.equal(new Headers(calls[1]?.init?.headers).get('authorization'), `Bearer ${session.sessionToken}`);
+  assert.equal(calls.some(({ input }) => input.includes(session.sessionToken)), false);
+  assert.equal(String(calls[1]?.init?.body).includes('gpt-5.6-sol'), true);
+});
+
+test('image connectivity follows catalog capabilities instead of route-id branching', async () => {
+  const calls: Array<{ input: string; init?: RequestInit }> = [];
+  const session = {
+    basePath: '/e-mate/model-api/',
+    sessionToken: `header.${'m'.repeat(32)}.signature`,
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    allowedModelIds: ['custom-image-route'],
+  };
+  const responses = [
+    new Response(JSON.stringify({
+      schemaVersion: 1,
+      models: [{ id: 'custom-image-route', capabilities: { imageGeneration: true } }],
+    }), { headers: { 'content-type': 'application/json' } }),
+    new Response(JSON.stringify({ created: 1, data: [{ b64_json: 'fixture' }] }), {
+      headers: { 'content-type': 'application/json' },
+    }),
+  ];
+  const result = await testModelConnection('custom-image-route', session, new AbortController().signal, {
+    origin,
+    fetcher: async (input, init) => {
+      calls.push({ input: String(input), init });
+      return responses.shift() as Response;
+    },
+  });
+  assert.equal(result.method, 'live-image-generation');
+  assert.equal(calls[1]?.input, '/e-mate/model-api/v1/images/generations');
+  assert.match(String(calls[1]?.init?.body), /"model":"custom-image-route"/);
 });
 
 test('audit identifiers stay readable while long values are safely abbreviated', () => {
@@ -309,6 +454,7 @@ test('model route key updates use the write-only key endpoint', async () => {
             routeId: 'gpt-5.6-sol',
             label: 'Sol',
             provider: 'OpenAI',
+            published: true,
             enabled: true,
             updatedAt: null,
             keyConfigured: true,

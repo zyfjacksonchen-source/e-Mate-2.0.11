@@ -750,3 +750,31 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Release 的六项失败同源于 `installProfile` 只从 Harness CLI 根 `node_modules` 解析 target 服务包。干净 CI 的固定源码树已生成各 package `lib/index.js`，但根目录不保证链接未被 CLI 直接依赖的 workspace package；本地历史 `node_modules` 恰好掩盖了这一点。共享 resolver 现在在固定源码树中按 package manifest 的真实 `main` 读取已构建入口，缺 build 立即失败；正式 npm 包仍从 Harness 自己组装的 portable `node_modules` 解析。会话迁移的 Cordis/Session 三个动态 import 复用同一 resolver 和 `pathToFileURL`，没有第二 binding 或测试专用回退。
 - 删除已失效的 45 行测试 binding 补丁，测试直接调用产品 `installProfile`。本地验证：Host 43/43、shell 28/28、release carrier 7/7 与 `git diff --check` 通过；新增源码模式断言精确解析 `dsh-storage-domain/lib/index.js`，品牌扫描同时保证错误文本不向用户暴露 Harness 产品名。最终跨平台结论继续以修复提交后的 GitHub Actions 为准。
 - 修复提交 `e13e0082805bbbf65142c68db2b174af723aa723` 的 CI run `31887177839` 已越过 bundle 同步和全部 target module binding；唯一剩余失败是 Linux runner 的环境测试无条件要求 `report.ok=true`，与 2.0.7 只支持 macOS/Windows 且 Linux 必须拒绝凭据后端的产品合同冲突。测试现在仍强制 Harness 与九 bundle 为 pass，同时按真实 `platformSupported()` 和 `checkOsCredentialBackend()` 断言宿主相关状态；没有把 Linux 加入支持范围、把凭据降为 warning 或放宽 setup 门禁。
+
+## 2026-08-15 · S07 用量审计面板真实账本接入
+
+- 复用现有 `usage-dashboard → Analytics API` 同源 Bearer 链路：概览、时间范围、用户/模型 Token 明细、成本、四项对账差异和分页调用事件均只投影 `/v1/usage/*` 与 `/v1/tasks/summary` 的真实响应；事件页必须与当前 tenant/from/to 完全一致，不一致失败关闭。
+- 用户显示名、状态和配置 Token 额度只读复用已有 `/v1/admin/users` 权威投影；`null` 按合同显示“不限”，审计凭据无管理读权或管理存储不可用时明确显示“配额数据不可用”，不伪造 0 或阻断其他审计事实。面板未增加插件、工具、会话或 Job 控制接口。
+- 部署路径固定为 `/ecorex-agent/usage-panel/`，生产 API 使用同源已存在的 `/e-mate/enterprise-api/`；当前外部 URL `https://mvdcm.ecoremedia.net/ecorex-agent/usage-panel/` 返回 Nginx Basic `401`，缺真实账号，未做生产登录、部署或账本对账；旧同源 API `/e-mate/enterprise-api/healthz` 实测 `200`。
+- 视觉复用现有 e-Mate 管理面深色/品牌橙 Token 与原 Arco 组件，未引入新 UI 依赖。`tsc --noEmit`、11/11 用量合同测试和 Vite production build 通过；以真实 schema 形状的本地拦截回放验证 `1280×900`/`320×800` 的 `scrollWidth === clientWidth`，测试数据没有写入产品或生产服务。
+
+## 2026-08-15 · S07 企业管理端账号、用户、配额与模型策略
+
+- 管理端复用 e-Mate 用户端已有品牌资产、OKLCH Token、圆角、按钮、输入、弹层、卡片、表格与响应式规则，生产 base 固定 `/ecorex-agent/admin/`。登录复用 Auth Gateway `/v1/auth/password`；密码不持久化，短期 access JWT 每次由 Analytics 核验 Ed25519 签名并回查有效 session/用户/当前角色。租户用户只能为 `TENANT_ADMIN`/`AUDIT_ADMIN`/`MEMBER`；`SUPER_ADMIN` 仍是静态引导身份，不能由密码会话签发。
+- 用户面完成搜索、新建/编辑/停用/删除、单个与批量审批、批量模型策略与 K/M/不限 Token；新建的 ACTIVE 用户在 UI 与 contract 都强制至少一个已启用模型。`token_limit=null` 现在是权威不限语义，Auth session 签发为 `Number.MAX_SAFE_INTEGER`，不再被错误拒绝。协议页只读显示版本、时间、状态和内容哈希，未查到时不冒充“已确认未签”。
+- 模型 Key 仍只写入后端 AES-256-GCM 租户/路由绑定存储，页面和日志不回显。模型“添加/移除”是对 Model Gateway 已部署 catalog 的租户发布状态 CRUD；未知 route 返回 404，UI 不提供任意上游 route 创建。移除后 Auth 模型下发和 Model Gateway 新请求都立即失效，重新发布仍保持 disabled，需管理员显式启用。
+- 本地门禁：admin-contract 11/11、Auth 14/14、Analytics 33/33、Model Gateway 71/71、Admin 13/13，合计 142 项通过；Auth 与 Analytics/Model Gateway 因未提供真实 PostgreSQL/Redis 的 20 项集成用例按环境合同 skip。五个 TypeScript check 和 Auth/Analytics/Model/Admin production build 通过；Admin Vite 仅有已知的大 chunk 警告。Auth 与 Model Gateway 启动探针现在同时校验 `published` 及路由 Key 密文列，旧库未先迁移时会在启动阶段失败关闭，不等到首次登录/模型调用才暴露。未获得生产管理员账号、会话公钥/反代配置和真实数据库环境，因此未部署、未对生产账号或模型 Key 做任何变更。
+
+## 2026-08-15 · S07 管理端当前模型真实联通测试
+
+- 沿用 Auth Gateway 登录响应中既有的短期 Model Gateway session，不增加管理 API 到 Provider 的代理，也不把上游 API Key、Endpoint 或错误正文交给浏览器。模型 session 使用独立 `sessionStorage` key；base URL 必须与管理端同源，过期或跨源立即失败关闭。
+- 点击“测试联通”先读取目标 `/v1/models` 权威目录，再依据目录的 `capabilities.imageGeneration` 选择一次最小 Responses 推理或一次真实生图；没有按模型 ID 写分支。两条路径继续经过协议、当前用户允许集合、租户发布/启用、加密 Key、幂等调用和用量账本，因此界面明确提示测试会计入真实用量。
+- Admin API 窄测增至 16/16，覆盖登录 session 校验、同源路径、文本 SSE 终态、生图目录分派、Token 不进入 URL；TypeScript check 与 production build 通过。IAB 本地合同回放实际点击后显示“联通正常”，`1280×900` 与 `320×800` 均无横向溢出；证据为 `artifacts/design-qa/S07-admin/models-connectivity-final-1280x900.jpg` 和 `models-connectivity-mobile-final-320x800.jpg`。
+- 本次只验证本地同合同 fixture，不冒充生产 Provider 通过。生产终证仍需已批准管理员、已签协议、当前允许模型、真实 Model Gateway/数据库/Redis 与用量面板对账；未使用用户提供的生产 Key，也未部署生产。
+
+## 2026-08-15 · S07 用量面板 e-Mate 明暗视觉重构
+
+- 视觉真源固定为当前用户端 `desktop/src/styles/tokens.css` 与 `design.md`：Usage Dashboard 直接消费相同 OKLCH 明暗 Token、系统 CJK 字体、四点间距、248px 导航、8px workspace inset、16px 外框和 e-Mate 品牌资产；未增加第二套主题、图片或 UI 依赖。
+- 主题只跟随 `prefers-color-scheme`；根 `data-theme` 与 Arco `arco-theme` 同步并监听系统变化。统计口径、Bearer 鉴权、API 路径、租户边界、配额语义与事件明细没有改变；Vite 本地代理补齐已存在的 `/v1/admin/users` 同源读路由，仅用于与生产同合同的开发验收。
+- IAB 以真实 schema 形状的只读本地回放验证暗色 `1280×900` 与 `320×800`，两者均为 `scrollWidth === clientWidth`；桌面保留 Workbench 导航/单 workspace surface，手机保留四个导航入口、时间范围、刷新与横向独立滚动的明细表。首轮手机截图发现选择器误隐藏 IconPark wrapper，已收窄为只隐藏文字标签，复测四个图标全部可见。
+- 证据：`artifacts/design-qa/S07-usage-dashboard/implementation-dark-1280x900.jpg`、`implementation-dark-320x800.jpg`、`source-vs-implementation-dark.jpg`。12/12 聚焦测试、TypeScript check 与 production build 通过；浏览器仅出现 Arco/React 19 既有 `element.ref` 开发警告，无页面错误状态。生产 URL、真实只读令牌和账本对账仍未执行，本轮未部署、未使用生产凭据。

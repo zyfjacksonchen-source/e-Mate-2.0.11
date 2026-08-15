@@ -34,6 +34,6 @@
     "sessionLifetimeSeconds": 600,
     "routeCatalogFile": "/run/secrets/model-gateway-config.json"
   },
-  "allowedClientIds": ["e-mate-desktop"],
+  "allowedClientIds": ["e-mate-desktop", "e-mate-admin"],
   "organizations": [{ "slug": "replace-with-organization", "tenantId": "replace-with-tenant-id" }]
 }

@@ -1,5 +1,5 @@
 :root {
-  color-scheme: dark;
+  color-scheme: light dark;
   font-family:
     Inter,
     ui-sans-serif,
@@ -8,17 +8,33 @@
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
-  --admin-bg: #111316;
-  --admin-surface: #191c21;
-  --admin-surface-raised: #20242a;
-  --admin-border: #30353d;
-  --admin-text: #f5f6f7;
-  --admin-muted: #9da5b0;
-  --admin-brand: #ee5b0c;
-  --admin-brand-hover: #d94c00;
-  --admin-brand-soft: #3c281a;
-  --admin-on-brand: #fff;
-  --admin-shadow: rgb(0 0 0 / 28%);
+  --admin-bg: oklch(0.966318 0.003973 106.474);
+  --admin-workspace: oklch(0.984548 0.002637 106.448);
+  --admin-surface: oklch(0.966318 0.003973 106.474);
+  --admin-surface-raised: oklch(0.947728 0.006648 106.526);
+  --admin-border: oklch(0.905018 0.008065 106.56);
+  --admin-text: oklch(0.296426 0.00355 106.614);
+  --admin-muted: oklch(0.508991 0.006202 106.618);
+  --admin-brand: oklch(0.649203 0.180912 42.881);
+  --admin-brand-hover: color-mix(in srgb, var(--admin-brand) 82%, black);
+  --admin-brand-soft: oklch(0.964789 0.019493 50.157);
+  --admin-on-brand: oklch(0.205 0.018 55);
+  --admin-shadow: rgb(0 0 0 / 10%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --admin-bg: oklch(0.296426 0.00355 106.614);
+    --admin-workspace: oklch(0.177638 0 0);
+    --admin-surface: oklch(0.243535 0 0);
+    --admin-surface-raised: oklch(0.268618 0 0);
+    --admin-border: oklch(0.344584 0 0);
+    --admin-text: oklch(0.981562 0.002639 106.448);
+    --admin-muted: oklch(0.780581 0.009753 106.623);
+    --admin-brand-soft: oklch(0.322501 0.052774 42.667);
+    --admin-on-brand: oklch(0.19 0.02 52);
+    --admin-shadow: rgb(0 0 0 / 28%);
+  }
 }
 
 * {
@@ -42,23 +58,24 @@ input {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 32px;
+  padding: 24px;
+  background: var(--admin-workspace);
 }
 
 .auth-card {
-  width: min(100%, 420px);
-  padding: 36px;
-  border: 1px solid var(--admin-border);
-  border-radius: 20px;
-  background: var(--admin-surface);
-  box-shadow: 0 24px 64px var(--admin-shadow);
+  width: min(100%, 360px);
 }
 
 .brand-logo {
-  width: 128px;
+  width: 172px;
   height: auto;
-  filter: brightness(0) invert(1);
   object-fit: contain;
+}
+
+@media (prefers-color-scheme: dark) {
+  .brand-logo {
+    filter: invert(1) hue-rotate(180deg);
+  }
 }
 
 .auth-icon {
@@ -127,6 +144,7 @@ input {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 236px minmax(0, 1fr);
+  background: var(--admin-bg);
 }
 
 .admin-shell aside {
@@ -159,9 +177,12 @@ input {
 }
 
 .admin-content {
-  width: min(100%, 1180px);
-  margin: 0 auto;
-  padding: 48px;
+  width: calc(100% - 16px);
+  min-height: calc(100vh - 16px);
+  margin: 8px 8px 8px 0;
+  padding: 40px 48px;
+  border-radius: 16px;
+  background: var(--admin-workspace);
 }
 
 .admin-content > header {
@@ -197,6 +218,18 @@ input {
 .admin-tabs .arco-tabs-header {
   margin-bottom: 22px;
   border-bottom-color: var(--admin-border);
+}
+
+.admin-tabs,
+.admin-tabs .arco-tabs-content,
+.admin-tabs .arco-tabs-content-item {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.admin-tabs,
+.admin-tabs .arco-tabs-content {
+  overflow: hidden;
 }
 
 .admin-tabs .arco-tabs-header-title {
@@ -328,11 +361,32 @@ input {
   border-bottom: 1px solid var(--admin-border);
 }
 
+.user-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.user-toolbar > span {
+  color: var(--admin-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.quota-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px auto;
+  align-items: center;
+  gap: 10px;
+}
+
 .record-list article:last-child {
   border-bottom: 0;
 }
 
-.record-list article > div:first-child {
+.record-list article > div:first-of-type {
   display: grid;
   min-width: 0;
   gap: 5px;
@@ -423,7 +477,7 @@ input {
 
 @media (max-width: 900px) {
   .admin-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .admin-shell aside {
@@ -442,12 +496,25 @@ input {
   }
 
   .admin-content {
+    width: 100%;
+    min-height: auto;
+    margin: 0;
     padding: 32px 22px;
+    border-radius: 0;
+  }
+
+  .user-toolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .user-toolbar > :first-child {
+    grid-column: 1 / -1;
   }
 
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
 }
 
 @media (max-width: 560px) {
@@ -457,6 +524,21 @@ input {
 
   .auth-card {
     padding: 24px;
+  }
+
+  .admin-shell aside {
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 16px;
+  }
+
+  .admin-shell aside > div {
+    display: none;
+  }
+
+  .admin-shell aside .brand-logo {
+    width: 126px;
   }
 
   .admin-content > header,
@@ -473,6 +555,11 @@ input {
   }
 
   .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .user-toolbar,
+  .quota-row {
     grid-template-columns: 1fr;
   }
 

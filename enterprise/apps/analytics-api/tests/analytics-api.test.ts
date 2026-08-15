@@ -667,6 +667,25 @@ test('admin APIs derive tenant scope and keep administrator and task-event crede
       ).status,
       400
     );
+    const removedRoute = await fetch(`${baseUrl}/v1/admin/model-routes/gpt-5.6-sol/publication`, {
+      method: 'PUT',
+      headers: auth('admin'),
+      body: JSON.stringify({ schemaVersion: 1, published: false }),
+    });
+    assert.equal(removedRoute.status, 200);
+    const removedRouteBody = (await removedRoute.json()) as { published: boolean; enabled: boolean };
+    assert.equal(removedRouteBody.published, false);
+    assert.equal(removedRouteBody.enabled, false);
+    assert.equal(
+      (
+        await fetch(`${baseUrl}/v1/admin/model-routes/not-deployed/publication`, {
+          method: 'PUT',
+          headers: auth('admin'),
+          body: JSON.stringify({ schemaVersion: 1, published: true }),
+        })
+      ).status,
+      404
+    );
     const staleDelete = await fetch(`${baseUrl}/v1/admin/users/user-a`, {
       method: 'DELETE',
       headers: auth('admin'),

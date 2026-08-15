@@ -169,11 +169,14 @@ before(async () => {
     CREATE TABLE IF NOT EXISTS e_mate_tenant_model_route (
       tenant_id text NOT NULL,
       route_id text NOT NULL,
+      published boolean NOT NULL DEFAULT true,
       enabled boolean NOT NULL,
       updated_at timestamptz NOT NULL DEFAULT now(),
       updated_by text NOT NULL,
       PRIMARY KEY (tenant_id, route_id)
     );
+    ALTER TABLE e_mate_tenant_model_route
+      ADD COLUMN IF NOT EXISTS published boolean NOT NULL DEFAULT true;
   `);
 });
 
