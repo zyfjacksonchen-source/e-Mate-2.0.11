@@ -925,3 +925,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 首轮 `320×800` Computer Use 量测为 `scrollWidth=432/clientWidth=320`。根因不是 CAPTCHA 行本身，而是身份 Gate 使用 body portal 时，底层 Harness `#root` 仍按应用最小宽度参与文档布局。子代理只在 Gate 锁定期间把同一根节点设为 `inert + hidden`，cleanup 精确恢复之前的 `hidden/inert`；没有改 Auth、注册语义、Router、Store 或 transport。
 - 主代理重新构建、覆盖同一隔离 profile 并复验：`320×800` 与 `1440×900` 均为 `scrollWidth === clientWidth`，Gate 存在时底层 root 为 hidden，验证码继续来自真实生产 challenge。聚焦身份测试 7/7、shell build 和 diff check 通过。证据位于 `artifacts/design-qa/S07-registration/`。
 - 本项只关闭公开 registration challenge、验证码刷新、登录/注册入口和两视口布局。按 Browser 安全边界，CAPTCHA 求解与注册提交必须取得用户对具体测试身份的确认；管理员批量审批、周额度、协议签署、改密、退出再登录、Gateway 会话和 Usage 对账仍保持生产阻塞。
+
+## 2026-08-16 · S04 当前候选固定 5,000 事件复跑
+
+- 主代理在仓库外隔离 `DSH_HOME` 创建权威固定会话 `e-mate-performance-5000-v1`；5,000 个事件、625 个 turn 与事件 SHA-256 `ad12feaa53f9d55c22d0e32a366316c8e29a8031ccca5d27a8e4f97d2a99b0cc` 均由现有 `create-performance-fixture.mjs` 复核。身份只在该临时 profile 内替换为无企业传输的 QA provider，用于越过登录展示锁；没有写入产品 profile、生产账号、模型策略或审计账本。
+- 当前提交 `098f36c8cb769e7e8f8eeb6f6bd18bb98c030eff`、client bundle SHA-256 `3495cdfa492f036d105de02c170891233e208e885f233d44034c8b963cae4457` 通过真实 Harness history paging 从 turn 601 加载到 turn 1。页面最终含 625 条用户消息、625 条助手消息和 39,345 个 DOM nodes；24 个有效 prepend 页的 wall time 中位数 380 ms、最大 589 ms，最后一次空边界请求正确移除“加载更早”。
+- 当前内置 Browser 只开放导航、可访问树、交互和 DOM 只读量测，不开放 CDP Trace、React Profiler 预注入、heap、长任务或 browser metrics。故该轮只更新最终候选分页/DOM事实，不拿旧 Chromium 闭包的 Trace 冒充当前候选，也不把 S04 标记通过；正式支持浏览器上的 Trace、Profiler、heap/FPS/长任务和真实 Provider 配对仍保持发布阻塞。
