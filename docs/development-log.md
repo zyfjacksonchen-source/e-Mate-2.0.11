@@ -860,3 +860,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 消息复制动作从“复制”切换为真实“已复制”反馈；完成活动的 disclosure 从 `aria-expanded=false` 切换为 `true`。没有创建消息、Tool 或完成状态。
 - 首轮又发现重命名视觉弹层缺少 dialog 语义：输入和按钮虽然可见，浏览器按 role 查询为 0。定点修复只给现有 form 增加 `role="dialog"`/`aria-modal="true"`，保留原 backdrop、提交和关闭路径；子代 shell 29/29 与 build/target check 通过，主代理重载同一 profile 后按标题命中唯一 dialog，并在其内部命中任务名称输入、取消和重命名按钮。证据为 `artifacts/design-qa/S12-current-067873f/control-closure.json`。
 - 设置页首轮还暴露目标桌面式“打开配置文件”动作；浏览器版本不能安全兑现本地原生打开。修复没有改前端或用 CSS 隐藏，而是在 e-Mate profile 上复用 Harness `SettingsProvider → ApiProxy → SettingsDocumentAction` 合同，只令该 profile 的 `documentPath/prepareDocument()` 报告不可用，文件设置存储和热加载继续保留。主代理在真实 Host 重载后打开设置页，确认“打开配置文件”不存在、个人资料/通用设置/能力中心/外部连接仍可见；证据为 `artifacts/design-qa/S12-current-067873f/settings-browser-boundary.png`。Host 46/46、Shell 29/29 和 target contract 检查通过。
+
+## 2026-08-16 · S11 主代理外部连接发现与授权边界
+
+- 主代理从真实聊天框“外部连接”入口进入既有 `/settings?section=connections&connectors=feishu,tencent-docs` 投影，再打开完整“外部连接”设置。页面由同一 `/emate.connections` 注册表动态展示飞书、腾讯文档、微信、钉钉；不存在第二页面、第二 Router 或前端硬编码连接结果。
+- 飞书显示 App ID/App Secret 本机配置步骤，腾讯文档显示 OAuth Token 步骤，微信显示设备扫码前置授权说明，钉钉显示 Client ID/Client Secret 步骤；所有未配置状态均保持真实，凭据只声明进入 Keychain/CurrentUser DPAPI。主代理未输入、保存或提交任何真实凭据，也未触发 OAuth/扫码，因此本项只关闭“可发现并走到授权步骤”，连接成功、读取和可逆写入仍保持生产账号阻塞。
+- 证据为 `artifacts/design-qa/S11-connections/discovery-auth-step-dark-1280x720.png`；截图不含凭据值。
