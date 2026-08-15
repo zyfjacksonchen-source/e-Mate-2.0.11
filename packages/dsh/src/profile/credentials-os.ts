@@ -43,24 +43,25 @@ exit [lindex $result 3]
 }
 const DPAPI_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Security
 $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
 $entropy = [Convert]::FromBase64String('ZS1NYXRlIERQSVBJIGNyZWRlbnRpYWxzIHYx')
 if ($request.op -eq 'protect') {
   $plain = [Convert]::FromBase64String([string]$request.value_base64)
-  $cipher = [Security.Cryptography.ProtectedData]::Protect(
-    $plain, $entropy, [Security.Cryptography.DataProtectionScope]::CurrentUser)
+  $cipher = [System.Security.Cryptography.ProtectedData]::Protect(
+    $plain, $entropy, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
   [Console]::Out.Write([Convert]::ToBase64String($cipher))
 } elseif ($request.op -eq 'unprotect') {
   $cipher = [Convert]::FromBase64String([string]$request.value_base64)
-  $plain = [Security.Cryptography.ProtectedData]::Unprotect(
-    $cipher, $entropy, [Security.Cryptography.DataProtectionScope]::CurrentUser)
+  $plain = [System.Security.Cryptography.ProtectedData]::Unprotect(
+    $cipher, $entropy, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
   [Console]::Out.Write([Convert]::ToBase64String($plain))
 } elseif ($request.op -eq 'probe') {
   $plain = [Text.Encoding]::UTF8.GetBytes('e-Mate DPAPI probe')
-  $cipher = [Security.Cryptography.ProtectedData]::Protect(
-    $plain, $entropy, [Security.Cryptography.DataProtectionScope]::CurrentUser)
-  $roundtrip = [Security.Cryptography.ProtectedData]::Unprotect(
-    $cipher, $entropy, [Security.Cryptography.DataProtectionScope]::CurrentUser)
+  $cipher = [System.Security.Cryptography.ProtectedData]::Protect(
+    $plain, $entropy, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
+  $roundtrip = [System.Security.Cryptography.ProtectedData]::Unprotect(
+    $cipher, $entropy, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
   if ([Convert]::ToBase64String($roundtrip) -ne [Convert]::ToBase64String($plain)) { throw 'DPAPI roundtrip failed' }
   [Console]::Out.Write('ok')
 } else {

@@ -771,7 +771,12 @@ test('OS credential backends use Keychain and CurrentUser DPAPI without plaintex
   assert.equal(macSet.input.trim(), Buffer.from('mac-secret').toString('base64'))
 
   const dshHome = mkdtempSync(join(tmpdir(), 'e-mate-dpapi-'))
-  const powershell = async (_file, _args, input) => {
+  const powershell = async (file, args, input) => {
+    assert.equal(file, 'powershell.exe')
+    assert.deepEqual(args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-Command'])
+    assert.match(args[3], /Add-Type -AssemblyName System\.Security/)
+    assert.match(args[3], /System\.Security\.Cryptography\.ProtectedData/)
+    assert.match(args[3], /System\.Security\.Cryptography\.DataProtectionScope\]::CurrentUser/)
     const request = JSON.parse(input)
     if (request.op === 'probe') return { status: 0, stdout: 'ok' }
     if (request.op === 'protect') {
