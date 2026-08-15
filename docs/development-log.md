@@ -877,6 +877,7 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 用户提供的生产 DeepSeek Key 在官方目录中真实返回 `deepseek-v4-flash` 与 `deepseek-v4-pro`；主代理随后固定调用 `deepseek-v4-flash`，HTTP 200，返回模型 ID 与冻结映射一致，并有 Provider response ID 和 token usage。用户提供的豆包 Key 在官方方舟目录中真实包含 `doubao-seed-2-0-pro-260215`；同模型最小 Chat Completions 调用也返回 200、匹配模型 ID、request/response ID 与 token usage。脱敏收据分别为 `artifacts/acceptance/S07-model-upstream-deepseek-smoke.json` 与 `S07-model-upstream-doubao-smoke.json`，均不含 Key、base URL、prompt 或回复正文。
 - 正式 Model smoke 原先只允许内部占位域，导致这两个已验证的官方 HTTPS Provider 在任何凭据请求前被错误拒绝。权威 smoke allowlist 现在同时接受既有内部路由、DeepSeek 官方根和方舟北京 `/api/v3` 根；未知 HTTPS 目标继续失败关闭。逐路由 HTTP 许可只保留给用户已认可的 GPT/图像 `/v1` 路径，不能借该开关把 DeepSeek/豆包改到任意明文主机。Model Gateway TypeScript 与 82 项测试通过（76 pass、6 external skips、0 fail）。
 - 这两项与 Luna/Sol 一样只关闭原始 Provider 单次连通；企业 Gateway 登录租约、同会话模型切换、上游故障/弱网恢复、usage/audit 对账和生产 UI 仍必须端到端验收。
+- 主代理随后使用同一 production `runModelSmoke` 代码和完整冻结目录顺序，顺序验证 Luna、Sol、DeepSeek Flash、`gpt-image-2-pro` 与 Doubao；五项全部 `PASSED`，目录哈希为 `23f9afa492eb27aa4aeb36577d30bf4ae23aa372d30958386bf2a95d960f78cc`。正式脱敏审批收据为 `artifacts/acceptance/S07-model-upstream-formal-smoke.json`，不含 Key、Provider URL、prompt 或输出正文。该收据关闭生产目录与上游协议 smoke，但仍不替代已认证 Gateway 会话、租户策略、用量账本与旁路审计。
 
 ## 2026-08-16 · S10 生产图像 Provider 单次、编辑与最低并发
 
