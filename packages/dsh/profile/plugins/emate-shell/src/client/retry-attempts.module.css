@@ -1,0 +1,88 @@
+.chain {
+  display: grid;
+  gap: 8px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 2px 0;
+  border-radius: 3px;
+  color: inherit;
+  cursor: pointer;
+  list-style: none;
+}
+
+.summary::-webkit-details-marker {
+  display: none;
+}
+
+.summary:hover {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.summary:focus-visible {
+  outline: 1.5px solid var(--dsw-alias-button-info-fill);
+  outline-offset: 2px;
+}
+
+.copy {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.label {
+  margin-right: 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-weight: 600;
+}
+
+.attempt {
+  white-space: nowrap;
+}
+
+.details {
+  display: grid;
+  gap: 2px;
+  padding: 3px 0 0 14px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.detailLabel {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.active .label {
+  background:
+    linear-gradient(
+      90deg,
+      var(--dsw-alias-label-tertiary) 0%,
+      var(--dsw-alias-label-tertiary) 40%,
+      var(--dsw-alias-label-secondary) 50%,
+      var(--dsw-alias-label-tertiary) 60%,
+      var(--dsw-alias-label-tertiary) 100%
+    );
+  background-position: 100% 50%;
+  background-size: 200% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: retry-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes retry-shimmer {
+  to { background-position: -100% 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .active .label { animation: none; }
+}

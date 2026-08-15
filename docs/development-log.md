@@ -937,3 +937,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 主代理复用现有 `create-chat-state-fixture.mjs`，在同一隔离 Harness Host 写入并重放 50 个真实持久事件；fixture SHA-256 为 `e88c05a486d196cfd14f2ae8d0be003de191b826b1c226d803bbfb658ff15096`，六个终态依次为 completed、error、blocked、aborted、interrupted、max-tokens。页面保持目标 Session、History、Conversation renderer 和 Connection，没有前端伪造状态。
 - 首轮 Computer Use 发现唯一独立失败：`reason.kind='interrupted'` 落入 cancelled fallback，显示“已取消”，与真实“任务因进程中断”不一致。子代只在既有活动头映射增加 `interrupted → 已中断`，保持 aborted 为“已取消”、blocked 为“已阻塞”，并复用原重复 turn-tail 隐藏规则；没有改事件、Store、transport、Timer 或 Observer。
 - 主代理串行重跑 shell 29/29、完整主包构建与同一 Browser Session。修复后六态文案和 Tool/失败/输出上限证据均可见，interrupted 独立为“已中断 7s”；所有终态计时冻结。前后证据位于 `artifacts/design-qa/S03-chat-states-current-46d306d/`。该项关闭六终态区分回归，不替代真实 Provider 切换、弱网恢复或全部 17 原型状态的最终逐屏验收。
+
+## 2026-08-16 · S02/S03 指定聊天原型同状态复跑
+
+- 主代理在当前轮同时打开用户指定 `019ff665-d721-79a0-869d-338f086cf529` 原型（HTML SHA-256 `fd734f0026f51e334874cca54adb60f37d7b09cb4e89e98da1841c922996a33e`）和当前 e-Mate Harness Host；`1280×720` 暗色下逐屏捕获重试、失败、完成与长文本，并把每对源图/实现图合成同一检查输入。当前轮证据位于 `artifacts/design-qa/S02-chat-prototype-current-dee4b39/`，没有拿历史截图冒充本轮结果。
+- 重试首轮暴露真实 P1：同一 `retryId` 的两次 `llm/retry` 已由目标 Conversation Node 投影到 `attempts`，但目标默认 Retry View 只渲染 `current`，导致第 1 次失败不可见。子代只用目标 `conversation.chat.node` keyed-slot shadow seam替换 `model-retry` 的展示层，直接渲染 target-owned attempts；未改 pinned upstream、事件、Store、Router 或 transport。
+- 主代理重跑 shell 30/30、完整 `@e-mate/dsh` build、diff check，再把 client bundle SHA-256 `c6ef8c8f844a7f57128e906f196d46445bbad29a159e33bfdb6bfcec2b01f20a` 同步到同一隔离 profile。Browser 复验显示“上次尝试失败 / 第 1 次”和“重试已取消 / 第 2 次”，两行分别展开后保留 `450ms/连接被重置` 与 `900ms/服务暂时不可用`；源/修后合并图为 `source-vs-current-retry-after-1280.png`。
+- 长文本折叠/展开、下载与同一 Markdown DOM 在本轮再次通过。失败卡本身保留真实 Tool/turn error，但原型中的“重试”动作继续失败关闭：rc.5 没有失败轮原子重试动作，`setDraft + submit` 会重复提示且无法重放附件，`forkAt` 又保留失败轮；因此没有增加无效按钮。完成态的图片/文件产物因本轮真实 Session 没有对应 attachment/renderer 数据也不伪造，S02 的全部 17 状态最终逐屏验收仍保持 open。

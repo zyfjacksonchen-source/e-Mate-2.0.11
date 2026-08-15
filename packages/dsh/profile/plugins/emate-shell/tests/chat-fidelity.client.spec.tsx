@@ -2,7 +2,9 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { render, screen, within } from '@testing-library/react'
 import { longMessageDefinition } from '../src/client/long-message-disclosure.tsx'
+import { RetryAttempts } from '../src/client/retry-attempts.tsx'
 
 vi.mock('@deepseek-ai/dsh-client-runtime/client', () => ({
   isAppendSurfaceEvent: (event: { surfaceOp?: string }) => event.surfaceOp === 'append',
@@ -45,5 +47,34 @@ describe('chat fidelity contract', () => {
 
   it('disconnects terminal activity groups from the shared flow observer', () => {
     expect(activity).toContain("status === 'running' ? new MutationObserver(mark) : null")
+  })
+
+  it('keeps every target-projected retry attempt visible in one correlated row group', () => {
+    render(<RetryAttempts node={{ data: {
+      attempts: [
+        {
+          kind: 'model-retry', seq: 3, time: 3, retryId: 'retry-1', turn: 1, step: 1,
+          provider: 'fake', mode: 'normal', policyKey: 'normal', retry: 1, maxRetries: 2,
+          delayMs: 900, failure: { code: 'TRANSPORT', message: 'first failure' }, retryState: 'started',
+        },
+        {
+          kind: 'model-retry', seq: 5, time: 5, retryId: 'retry-1', turn: 1, step: 1,
+          provider: 'fake', mode: 'normal', policyKey: 'normal', retry: 2, maxRetries: 2,
+          delayMs: 900, failure: { code: 'TRANSPORT', message: 'second failure' }, retryState: 'cancelled',
+        },
+      ],
+      current: {
+        kind: 'model-retry', seq: 5, time: 5, retryId: 'retry-1', turn: 1, step: 1,
+        provider: 'fake', mode: 'normal', policyKey: 'normal', retry: 2, maxRetries: 2,
+        delayMs: 900, failure: { code: 'TRANSPORT', message: 'second failure' }, retryState: 'cancelled',
+      },
+    } } as never} />)
+
+    const chain = screen.getByText('上次尝试失败').closest('[data-emate-retry-attempts]')
+    expect(chain).not.toBeNull()
+    expect(within(chain!).getByText('上次尝试失败')).toBeTruthy()
+    expect(within(chain!).getByText('第 1 次 · 1s')).toBeTruthy()
+    expect(within(chain!).getByText('重试已取消')).toBeTruthy()
+    expect(within(chain!).getByText('第 2 次 · 1s')).toBeTruthy()
   })
 })

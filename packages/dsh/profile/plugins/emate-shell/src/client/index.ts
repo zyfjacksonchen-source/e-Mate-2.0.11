@@ -46,6 +46,7 @@ import {
   selectOfficeArtifacts,
 } from './office-artifacts.tsx'
 import { isGeneralWorkspace, SidebarRoot } from './sidebar.tsx'
+import { RetryAttempts } from './retry-attempts.tsx'
 import { SessionRouteProjection } from './session-route.tsx'
 import { SessionShareAction } from './session-share.tsx'
 import {
@@ -111,6 +112,11 @@ export function apply(ctx: any): void {
     }),
   }, SessionRouteProjection))
   ctx.conversationEvents.register(activityHeaderDefinition)
+  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
+    name: 'conversation.chat.node',
+    key: 'model-retry',
+    priority: -1,
+  }, RetryAttempts))
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',
     key: 'e-mate-activity-group',
