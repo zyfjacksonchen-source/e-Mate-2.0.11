@@ -59,6 +59,10 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
   })
 
   it('keeps registration, verification and pending approval on the target RPC seam', async () => {
+    const shellRoot = document.createElement('div')
+    shellRoot.id = 'root'
+    shellRoot.style.width = '432px'
+    document.body.append(shellRoot)
     const callIdentity = vi.fn(async (endpoint: string): Promise<RpcResult> => {
       if (endpoint === 'identity.bootstrap') return {
         ok: true,
@@ -86,7 +90,8 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
       return { ok: false, error: { message: 'unexpected call' } }
     })
 
-    render(<IdentityGate callIdentity={callIdentity} />)
+    const view = render(<IdentityGate callIdentity={callIdentity} />)
+    await waitFor(() => { expect(shellRoot.hidden).toBe(true) })
     fireEvent.click(await screen.findByRole('button', { name: '注册新账号' }))
     fireEvent.change(await screen.findByLabelText('账号'), { target: { value: 'test@example.com' } })
     fireEvent.change(screen.getByLabelText('真实姓名'), { target: { value: '测试用户' } })
@@ -102,6 +107,9 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
       challenge_id: 'challenge',
       verification_code: 'ABCD',
     })
+    view.unmount()
+    expect(shellRoot.hidden).toBe(false)
+    shellRoot.remove()
   })
 
   it('replays a protected chat deep link after the async identity gate unlocks', async () => {

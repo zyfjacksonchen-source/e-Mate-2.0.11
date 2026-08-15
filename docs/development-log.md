@@ -917,3 +917,11 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 提交 `f7c567a4adde61bac844585b6ff603dd75f96729` 的 GitHub Actions `Release e-Mate` run `31902404007` 从同一源码构建唯一 npm tarball，并在 macOS arm64、macOS x64、Windows x64 三个干净 runner 上完成全局 npm 安装、staging check、两次幂等 setup 与 installed check；三项分别成功，Windows 较慢但在 30 分钟门禁内以 12m57s 正常结束，没有重跑或放宽超时。
 - 同一 run 的 release evidence job 成功生成并回验 SHA256、manifest、SPDX SBOM 与许可证清单。上传的 npm artifact digest 为 `sha256:82132fa7af226e22584f58df3b4e983480ac1093a1ba4b4085b24f2629d4a9be`，release-candidate artifact digest 为 `sha256:2096e966cc969d4d9517ebb6288bd9470139ed9c5a58b332c4f155f9d10aa197`。
 - 该 run 由 Pull Request 触发，npm 发布、registry 三平台回读与 R2 上传按工作流合同全部 skipped；因此本条关闭当前源码的三平台候选构建/干净安装，不关闭 npm/R2 正式发布、生产 URL 激活或 Computer Use 平台能力。
+
+## 2026-08-16 · S07 主代理生产注册 challenge 与移动边界
+
+- 主代理以仓库外隔离 `DSH_HOME` 启动当前 e-Mate profile，直接使用 profile 已签入的生产 Auth Gateway 配置打开 `/register`。页面通过既有 `emate.identity → Connection RPC → enterprise-provider` 链真实取得 CAPTCHA data URL；实点“换一张验证码”后图片载荷变化。全程没有填写或提交账号、真实姓名、密码、验证码，也没有创建生产用户或修改管理员状态。
+- 页面真实展示账号、真实姓名、至少 10 位密码、验证码、提交注册申请和返回登录；登录页真实展示账号/邮箱、密码、保持登录和注册入口。浏览器标签为 `e-Mate`，favicon 为现有透明底小芯头像，当前可见文本没有 `DeepSeek Harness/HARNESS` 品牌残留。
+- 首轮 `320×800` Computer Use 量测为 `scrollWidth=432/clientWidth=320`。根因不是 CAPTCHA 行本身，而是身份 Gate 使用 body portal 时，底层 Harness `#root` 仍按应用最小宽度参与文档布局。子代理只在 Gate 锁定期间把同一根节点设为 `inert + hidden`，cleanup 精确恢复之前的 `hidden/inert`；没有改 Auth、注册语义、Router、Store 或 transport。
+- 主代理重新构建、覆盖同一隔离 profile 并复验：`320×800` 与 `1440×900` 均为 `scrollWidth === clientWidth`，Gate 存在时底层 root 为 hidden，验证码继续来自真实生产 challenge。聚焦身份测试 7/7、shell build 和 diff check 通过。证据位于 `artifacts/design-qa/S07-registration/`。
+- 本项只关闭公开 registration challenge、验证码刷新、登录/注册入口和两视口布局。按 Browser 安全边界，CAPTCHA 求解与注册提交必须取得用户对具体测试身份的确认；管理员批量审批、周额度、协议签署、改密、退出再登录、Gateway 会话和 Usage 对账仍保持生产阻塞。

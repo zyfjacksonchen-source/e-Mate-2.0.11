@@ -291,3 +291,13 @@ final result: passed (managed general-session entry and truthful nine-capability
 - The local accepted admin/Usage build remains a design and fail-closed proof only. Production authenticated tables, batch approval, unlimited quota, protocol receipt, model connectivity action, per-user event counts and ledger reconciliation remain unverified until the application administrator and Usage read-only credentials are provided.
 
 final result: blocked (production authentication and ledger reconciliation)
+
+## S07 production registration challenge — 2026-08-16
+
+- The current managed e-Mate profile opened `/register` through the normal Harness Host and existing `emate.identity` Connection RPC. The production Auth Gateway returned a real CAPTCHA image; clicking the existing refresh action replaced it with a different payload. No account, real name, password, CAPTCHA answer or registration request was submitted.
+- The visible flow contains account, real name, minimum-password guidance, CAPTCHA, submit and return-to-login controls. The login view contains account/password, keep-login and registration actions. The tab title is `e-Mate`, the favicon is the existing transparent Xiaoxin asset, and the visible page contains no `DeepSeek Harness` or `HARNESS` label.
+- First mobile capture found a P1 document overflow: at `320×800`, `clientWidth=320` but `scrollWidth=432`. The identity UI is a body portal, while the inactive Harness application root remained in document layout. The scoped fix hides and inerts that existing root only while the identity gate is locked and restores both previous values on cleanup; no registration or transport behavior changed.
+- Main-agent post-fix measurements are `320/320` and `1440/1440`. Evidence: `artifacts/design-qa/S07-registration/production-challenge-dark-320x800.png` (pre-fix), `production-challenge-fixed-dark-320x800.png`, and `production-challenge-fixed-dark-1440x900.png`.
+- CAPTCHA solving, final registration submission, administrator approval, agreement signing and authenticated ledger reconciliation were intentionally not performed.
+
+final result: passed (challenge/login/register entry and responsive boundary); blocked (identity creation and authenticated enterprise acceptance)

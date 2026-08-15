@@ -160,8 +160,13 @@ export function IdentityGate({ callIdentity }: Props) {
     const root = document.getElementById('root')
     if (root === null) return undefined
     const previous = root.inert
+    const previouslyHidden = root.hidden
     root.inert = true
-    return () => { root.inert = previous }
+    root.hidden = true
+    return () => {
+      root.inert = previous
+      root.hidden = previouslyHidden
+    }
   }, [mode])
 
   const required = state?.agreements.required_acknowledgements ?? []
