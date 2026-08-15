@@ -14,6 +14,8 @@ const disclosure = readFileSync(resolve('src/client/long-message-disclosure.tsx'
 describe('chat fidelity contract', () => {
   it('keeps the real activity clock, terminal clock and collapsible running group', () => {
     expect(activity).toContain("if (status === 'running') return '已工作'")
+    expect(activity).toContain("if (reason.kind === 'blocked') return 'blocked'")
+    expect(activity).toContain("if (status === 'blocked') return '已阻塞'")
     expect(activity).toContain("String(minutes).padStart(2, '0')")
     expect(activity).toContain("state === 'ok' || state === 'running'")
     expect(activity).not.toContain("disabled={status === 'running'}")

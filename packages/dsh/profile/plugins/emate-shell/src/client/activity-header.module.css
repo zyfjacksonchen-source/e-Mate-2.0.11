@@ -37,6 +37,10 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.root[data-emate-activity-status='blocked'] span {
+  color: var(--dsw-alias-state-error-primary);
+}
+
 .chevron {
   margin-left: 1px;
   color: var(--dsw-alias-label-tertiary);

@@ -13,10 +13,11 @@
   ],
   "scripts": {
     "check:target": "node scripts/check-target.mjs",
+    "chat:fixture": "node scripts/create-chat-state-fixture.mjs",
     "performance:fixture": "node scripts/create-performance-fixture.mjs",
     "performance:parity": "pnpm run check:target && node scripts/performance-parity.mjs",
     "test:performance:parity": "node --test scripts/performance-parity.test.mjs",
-    "test": "pnpm run test:performance:parity && pnpm run build && pnpm -r --filter './packages/dsh-plugin-*' --workspace-concurrency=4 --if-present test && pnpm --filter @e-mate/dsh test",
+    "test": "node --test scripts/create-chat-state-fixture.test.mjs && pnpm run test:performance:parity && pnpm run build && pnpm -r --filter './packages/dsh-plugin-*' --workspace-concurrency=4 --if-present test && pnpm --filter @e-mate/dsh test",
     "test:release": "node --test scripts/release.test.mjs",
     "build": "pnpm -r --filter './packages/dsh-plugin-*' --workspace-concurrency=4 --if-present build && pnpm --filter @e-mate/dsh build",
     "enterprise:check": "pnpm --dir enterprise check",

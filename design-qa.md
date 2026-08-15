@@ -251,3 +251,14 @@ final result: passed
 - The specific composer clipping/responsive issue is closed. Full S03/S12 release acceptance remains open for the six live event states, real multi-model Provider switch, weak-network recovery, production performance receipts and remaining S00-S11 gates.
 
 final result: passed (scoped composer layout and connector route)
+
+## S03/S12 real chat states and approval recovery — 2026-08-16
+
+- State source: a deterministic 50-event Session written through the pinned Harness `JsonlSessionPersistence`; the browser reads the normal Host Session API and e-Mate event projection. No fixture Store, client injection or fake completion card exists in the product.
+- Main-agent first pass found one P1: a persisted `turn/end reason.kind='blocked'` displayed as `已取消`. The scoped fix maps that real terminal reason to `已阻塞`; the same Browser session now keeps failure, blocked and cancellation visibly distinct. Evidence: `artifacts/design-qa/S03-chat-states/blocked-vs-cancelled.jpg`.
+- A repository-external acceptance-only Cordis plugin opened a real target Session turn and called the target Approval service after the existing ApiProxy mounted. The product page showed `已工作`, the real Tool call and the target pending-approval panel. This validates the target transport and renderer without changing the shipped default `full access + approval never` policy.
+- Reload while pending replayed one stable approval request: after reload, Browser measured exactly one `拒绝` and one `允许一次` button. Both paths were exercised; reject closed as `已阻塞`, while allow closed as `已处理`, and the pending controls disappeared. Evidence: `approval-pending.jpg`, `approval-after-reload.jpg`, and `approval-allowed-completed.jpg` in the same directory.
+- Activity disclosure and the generic Tool detail row remained keyboard-operable before and after terminal state. Timers froze after completion, failure, blocked and cancellation; only the open pending request continued the `已工作` clock.
+- Remaining release evidence: a real Provider streaming turn interrupted by controlled weak network, model switch on the next real request, and matching usage/audit receipts. These are not replaced by this target-native UI acceptance.
+
+final result: passed (persisted terminal states, target approval, refresh recovery)

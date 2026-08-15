@@ -821,3 +821,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 第二轮以 Browser computed style 定位到 e-Mate 裸 `:global([data-phase])` 误命中 Harness `<textarea data-phase='plain'>`，给输入控件施加页面根的 `margin:8px`、缩减高度和 `overflow:clip`。修复只将两个页面规则收窄到稳定目标根 `[data-slot='conversation'] > div[data-phase]`，保留目标 InputBar、draft、模型、连接器、submit、Store 和 transport。
 - 子代理聚焦 7 文件 28/28、`@e-mate/dsh` build 与 diff check 通过。主代理 final Browser 在 `1440x900/1280x800/768x800/390x844/320x800`、暗色和明色下均测得零横向溢出，textarea `clientHeight=scrollHeight=44px`、margin `0`；桌面 Send `76x32px`，移动 Send `44x44px` 且完整落在视口内。
 - 主代理还实点真实模型菜单并以 Escape 关闭；实点“外部连接”到 `/settings?section=connections&connectors=feishu,tencent-docs`，只渲染飞书和腾讯文档注册项，未提交授权或凭据。证据位于 `artifacts/design-qa/S12-current-067873f/`。本项关闭不代表完整 S03/S12：六种实时状态、生产多模型/弱网、真实性能和其他切片仍保持开放。
+
+## 2026-08-16 · S03/S12 真实聊天状态与审批重连
+
+- 新增 `scripts/create-chat-state-fixture.mjs`，只通过固定 Harness `JsonlSessionPersistence` 写入完成、失败、阻塞、用户取消、进程中断和输出上限六类真实事件；固定 50 个事件的 SHA-256 为 `e88c05a486d196cfd14f2ae8d0be003de191b826b1c226d803bbfb658ff15096`。同一命令重复运行返回 `reused=true` 且摘要不变，测试使用 Node 标准库在临时目录验证创建/复用，不向前端写状态。
+- 主代理 Browser 首轮证明 `turn/end reason.kind=blocked` 被活动头错误折叠为“已取消”。定点修复只在真实事件投影函数增加 `blocked → 已阻塞`，复用现有错误状态 Token；计时器和 observer 仍只在 `running` 时存在。主代理用同一持久会话复验后，“执行失败”“已阻塞”“已取消”和 token 上限提示互不混淆，活动组与 Tool 详情仍调用目标组件。
+- 审批交互使用仓库外临时 profile 插件，经目标 `ctx.sessions`、`setApprovalPolicy(session, 'ask')` 和 `ctx.approval.request()` 产生真正的 `approval/requested` Mux frame；插件显式依赖现有 `apiProxy`，没有新增 REST、WebSocket、Store、Router 或产品审批实现。页面显示运行中的“已工作”、真实 Tool call、待审批原因、“拒绝/允许一次”；拒绝收敛为“已阻塞”，允许收敛为“已处理”。默认产品 profile 仍是 `full access + approval never`，本验收没有改变用户默认权限。
+- 在审批未决时刷新页面，Harness 以同一个 pending frame 恢复；刷新后“拒绝”和“允许一次”各恰好 1 个，未重复消息、Tool 或审批卡，随后真实按钮仍能完成决议。证据在 `artifacts/design-qa/S03-chat-states/`。该结果关闭聊天状态投影、审批两种决议和审批刷新恢复；生产模型流式生成中的弱网恢复、真实 Provider 模型切换与端到端审计对账继续保留为发布验收项。

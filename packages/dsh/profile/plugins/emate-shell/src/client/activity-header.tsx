@@ -8,7 +8,7 @@ import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/
 import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './activity-header.module.css'
 
-type ActivityStatus = 'running' | 'completed' | 'failed' | 'cancelled'
+type ActivityStatus = 'running' | 'completed' | 'failed' | 'blocked' | 'cancelled'
 
 interface ActivityHeaderData {
   turn: number
@@ -34,6 +34,7 @@ function locationOf(context: ConversationNodeContext): ConversationLocation {
 function endStatus(reason: { kind: string }): Exclude<ActivityStatus, 'running'> {
   if (reason.kind === 'completed' || reason.kind === 'max-tokens') return 'completed'
   if (reason.kind === 'error') return 'failed'
+  if (reason.kind === 'blocked') return 'blocked'
   return 'cancelled'
 }
 
@@ -111,6 +112,7 @@ function durationLabel(milliseconds: number, status: ActivityStatus): string {
 function statusLabel(status: ActivityStatus): string {
   if (status === 'running') return '已工作'
   if (status === 'failed') return '执行失败'
+  if (status === 'blocked') return '已阻塞'
   if (status === 'cancelled') return '已取消'
   return '已处理'
 }
