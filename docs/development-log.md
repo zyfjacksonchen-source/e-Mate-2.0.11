@@ -871,4 +871,5 @@ The text highlights AI hallucination and human verification, legal use, real-act
 
 - 用户确认生产 Provider 的 HTTP base URL 已完成其网络安全验证。原 Model Gateway 对所有 `upstreamBaseUrl` 强制 HTTPS，导致该已授权路由在请求前失败；e-Mate 客户端到企业 Gateway 的 HTTPS 边界本身无需改变。
 - 最小适配只给服务端 `ModelGatewayRoute` 增加字面量 `allowInsecureHttpUpstream: true`。默认仍只接受 HTTPS；HTTP 缺少逐路由许可、许可与 HTTPS 混用、含 userinfo/query/hash 或无 hostname 的 URL 均在请求前失败。API Key 仍只从 `upstreamApiKeyFile` 读取，重定向继续拒绝，模型目录显式剥离上游 URL 与许可字段。
-- 主代理复跑 TypeScript 与 Model Gateway 门禁：75 passed、6 项因真实 PostgreSQL/Windows 外部环境跳过、0 failed。该适配只证明路由合同，未写入生产配置、未部署、未调用付费模型；HTTP hop 不提供链路加密，只允许用于用户已认可的受控网络路径。
+- 主代理复跑 TypeScript 与 Model Gateway 门禁：75 passed、6 项因真实 PostgreSQL/Windows 外部环境跳过、0 failed。该适配门禁阶段只证明路由合同，未写入生产配置或部署；HTTP hop 不提供链路加密，只允许用于用户已认可的受控网络路径。
+- 随后主代理使用用户明确授权测试的生产 GPT Key 和 HTTP base URL，分别向 Luna 与 Sol 发起一次最小 Responses 调用；两次均返回 HTTP 200，响应报告的模型 ID 与请求一致，并各有 Provider response/request ID 和 token usage。未记录 Key、base URL 或回复正文。脱敏收据为 `artifacts/acceptance/S07-model-upstream-gpt-smoke.json`。该证据只关闭原始 Provider 对两模型的单次连通，不替代企业 Gateway 租约、同会话切换、审计对账或弱网恢复。
