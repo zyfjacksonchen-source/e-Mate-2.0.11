@@ -46,6 +46,28 @@ function configuration(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function productionRoute(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'gpt-5.6-sol',
+    upstreamModelId: 'gpt-5.6-sol',
+    upstreamBaseUrl: 'http://provider.example:8080/v1',
+    allowInsecureHttpUpstream: true,
+    upstreamApiKeyFile: '/run/secrets/provider-api-key',
+    providerId: 'custom-gpt',
+    label: 'GPT-5.6 Sol',
+    buttonLabel: 'GPT-5.6 Sol · 中等',
+    provider: 'Custom GPT',
+    providerMark: 'G',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
+    contextWindow: 1_050_000,
+    maxTokens: 128_000,
+    remoteCompactionV2: false,
+    ...overrides,
+  };
+}
+
 test('production configuration requires external absolute secret files and rejects inline fields', () => {
   const directory = mkdtempSync(join(tmpdir(), 'e-mate-gateway-'));
   const file = join(directory, 'gateway.json');
@@ -67,6 +89,30 @@ test('production configuration requires external absolute secret files and rejec
     );
     assert.throws(() => loadProductionConfiguration(file), /Invalid Model Gateway production configuration/);
     writeFileSync(file, JSON.stringify(configuration({ inlineSecret: 'forbidden' })));
+    assert.throws(() => loadProductionConfiguration(file), /Invalid Model Gateway production configuration/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('production route schema accepts only the literal HTTP opt-in and a secret-file key', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'e-mate-gateway-http-route-'));
+  const file = join(directory, 'gateway.json');
+  try {
+    writeFileSync(file, JSON.stringify(configuration({ routes: [productionRoute()] })));
+    assert.throws(() => loadProductionConfiguration(file), /TLS certificate path must be absolute/);
+
+    writeFileSync(
+      file,
+      JSON.stringify(configuration({ routes: [productionRoute({ allowInsecureHttpUpstream: false })] }))
+    );
+    assert.throws(() => loadProductionConfiguration(file), /Invalid Model Gateway production configuration/);
+
+    const { upstreamApiKeyFile: _upstreamApiKeyFile, ...inlineKeyRoute } = productionRoute();
+    writeFileSync(
+      file,
+      JSON.stringify(configuration({ routes: [{ ...inlineKeyRoute, upstreamApiKey: 'forbidden-inline-key' }] }))
+    );
     assert.throws(() => loadProductionConfiguration(file), /Invalid Model Gateway production configuration/);
   } finally {
     rmSync(directory, { recursive: true, force: true });

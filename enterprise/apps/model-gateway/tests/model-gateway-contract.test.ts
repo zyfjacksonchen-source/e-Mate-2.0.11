@@ -1571,6 +1571,63 @@ test('requires the default Luna route to support high reasoning', () => {
   );
 });
 
+test('allows a pinned HTTP upstream only with a route-local opt-in and keeps it server-side', async () => {
+  const httpRoute: ModelGatewayRoute = {
+    ...route,
+    upstreamBaseUrl: 'http://provider.example:8080/v1',
+  };
+  assert.throws(
+    () =>
+      createModelGatewayServer({
+        routes: [httpRoute],
+        authenticate: async () => principal('tenant-a', 'user-a'),
+        usageStore: new InMemoryUsageStore(limits),
+        usageKeyId: 'usage-2026',
+        usagePrivateKey: privateKey,
+      }),
+    /Invalid Model Gateway route/
+  );
+
+  const optedInRoute = { ...httpRoute, allowInsecureHttpUpstream: true as const };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const catalogResponse = await fetch(`${baseUrl}/v1/models`, { headers: auth() });
+      assert.equal(catalogResponse.status, 200);
+      const catalog = await catalogResponse.json();
+      assert.equal(JSON.stringify(catalog).includes('allowInsecureHttpUpstream'), false);
+      assert.equal(JSON.stringify(catalog).includes(optedInRoute.upstreamBaseUrl), false);
+
+      const response = await modelRequest(baseUrl);
+      assert.equal(response.status, 200);
+      await response.text();
+      assert.equal(upstreamRequests[0]?.url, `${optedInRoute.upstreamBaseUrl}/responses`);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    optedInRoute
+  );
+
+  for (const upstreamBaseUrl of [
+    'http://user:password@provider.example:8080/v1',
+    'http://provider.example:8080/v1?api_key=forbidden',
+    'http://[::1',
+  ]) {
+    assert.throws(
+      () =>
+        createModelGatewayServer({
+          routes: [{ ...optedInRoute, upstreamBaseUrl }],
+          authenticate: async () => principal('tenant-a', 'user-a'),
+          usageStore: new InMemoryUsageStore(limits),
+          usageKeyId: 'usage-2026',
+          usagePrivateKey: privateKey,
+        }),
+      /Invalid Model Gateway route|Invalid URL/
+    );
+  }
+});
+
 test('accepts Luna with high reasoning through the enterprise route', async () => {
   const lunaRoute: ModelGatewayRoute = {
     ...route,

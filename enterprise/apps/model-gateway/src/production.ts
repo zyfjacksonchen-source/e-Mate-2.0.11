@@ -526,6 +526,7 @@ function route(value: unknown): ProductionConfiguration['routes'][number] {
       'upstreamModelId',
       ...(input.fallbackUpstreamModelId === undefined ? [] : ['fallbackUpstreamModelId']),
       'upstreamBaseUrl',
+      ...(input.allowInsecureHttpUpstream === undefined ? [] : ['allowInsecureHttpUpstream']),
       'upstreamApiKeyFile',
       'providerId',
       'label',
@@ -546,6 +547,9 @@ function route(value: unknown): ProductionConfiguration['routes'][number] {
   if (input.remoteCompactionV2 !== undefined && typeof input.remoteCompactionV2 !== 'boolean') {
     throw new Error('Invalid remote compaction capability');
   }
+  if (input.allowInsecureHttpUpstream !== undefined && input.allowInsecureHttpUpstream !== true) {
+    throw new Error('Invalid insecure HTTP upstream opt-in');
+  }
   if (
     input.apiMode !== undefined &&
     input.apiMode !== 'responses' &&
@@ -564,6 +568,7 @@ function route(value: unknown): ProductionConfiguration['routes'][number] {
       ? {}
       : { fallbackUpstreamModelId: text(input.fallbackUpstreamModelId, 'fallback upstream model id', 128) }),
     upstreamBaseUrl: text(input.upstreamBaseUrl, 'upstream URL', 2_048),
+    ...(input.allowInsecureHttpUpstream === true ? { allowInsecureHttpUpstream: true as const } : {}),
     upstreamApiKeyFile: text(input.upstreamApiKeyFile, 'API key file', 4_096),
     providerId: text(input.providerId, 'provider id', 128),
     label: text(input.label, 'route label', 80),

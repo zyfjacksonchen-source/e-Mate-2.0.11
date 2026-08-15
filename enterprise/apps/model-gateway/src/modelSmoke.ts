@@ -4,7 +4,14 @@ import { inspectSseFrame, parseImageGenerationResponse, type ModelGatewayRoute }
 
 export type ModelSmokeRoute = Pick<
   ModelGatewayRoute,
-  'id' | 'apiMode' | 'upstreamModelId' | 'fallbackUpstreamModelId' | 'upstreamBaseUrl' | 'upstreamApiKey' | 'maxTokens'
+  | 'id'
+  | 'apiMode'
+  | 'upstreamModelId'
+  | 'fallbackUpstreamModelId'
+  | 'upstreamBaseUrl'
+  | 'allowInsecureHttpUpstream'
+  | 'upstreamApiKey'
+  | 'maxTokens'
 >;
 
 type SmokeMethod = 'live-inference' | 'live-image-generation';
@@ -114,13 +121,18 @@ function validateCatalog(routes: readonly ModelSmokeRoute[]): Map<string, ModelS
       typeof contract.upstreamModelId === 'string'
         ? route.upstreamModelId === contract.upstreamModelId
         : contract.upstreamModelId.test(route.upstreamModelId);
+    const transportMatches =
+      route.allowInsecureHttpUpstream === true
+        ? upstream.protocol === 'http:'
+        : upstream.protocol === 'https:' &&
+          upstream.hostname === contract.hostname &&
+          upstream.port === '18443';
     if (
       route.apiMode !== contract.apiMode ||
       !modelMatches ||
       route.fallbackUpstreamModelId !== contract.fallbackUpstreamModelId ||
-      upstream.protocol !== 'https:' ||
-      upstream.hostname !== contract.hostname ||
-      upstream.port !== '18443' ||
+      !transportMatches ||
+      !upstream.hostname ||
       upstream.pathname !== contract.pathname ||
       upstream.username ||
       upstream.password ||

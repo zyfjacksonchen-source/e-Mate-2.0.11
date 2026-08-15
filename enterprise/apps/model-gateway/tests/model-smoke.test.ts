@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ModelSmokeError, runModelSmoke } from '../src/modelSmoke.ts';
+import { ModelSmokeError, runModelSmoke, type ModelSmokeRoute } from '../src/modelSmoke.ts';
 
 const secret = 'test-secret-that-is-never-production';
 function route(
@@ -9,7 +9,7 @@ function route(
   upstreamModelId: string,
   upstreamBaseUrl: string,
   fallbackUpstreamModelId?: string
-) {
+): ModelSmokeRoute {
   return {
     id,
     apiMode,
@@ -220,4 +220,64 @@ test('rejects a non-private route catalog before any credential-bearing request'
       error instanceof ModelSmokeError && error.code === 'INVALID_CATALOG' && error.routeId === 'deepseek'
   );
   assert.equal(requests.length, 0);
+});
+
+test('requires an explicit route-local opt-in before smoking a pinned HTTP upstream', async () => {
+  const { fetchImplementation, requests } = mockFetch();
+  const httpRoutes = structuredClone(routes);
+  const httpRoute = httpRoutes.find(({ id }) => id === 'gpt-5.6-luna');
+  assert(httpRoute);
+  httpRoute.upstreamBaseUrl = 'http://127.0.0.1:18080/v1';
+
+  await assert.rejects(
+    runModelSmoke({
+      routes: httpRoutes,
+      catalogSha256: 'f'.repeat(64),
+      operator: 'release.operator',
+      timeoutMs: 10_000,
+      fetchImplementation,
+    }),
+    (error: unknown) =>
+      error instanceof ModelSmokeError && error.code === 'INVALID_CATALOG' && error.routeId === 'gpt-5.6-luna'
+  );
+  assert.equal(requests.length, 0);
+
+  httpRoute.allowInsecureHttpUpstream = true;
+  const approval = await runModelSmoke({
+    routes: httpRoutes,
+    catalogSha256: 'f'.repeat(64),
+    operator: 'release.operator',
+    timeoutMs: 10_000,
+    fetchImplementation,
+    randomId: randomId(),
+  });
+  assert.equal(approval.results.length, 5);
+  assert.equal(requests[0]?.url, 'http://127.0.0.1:18080/v1/responses');
+});
+
+test('rejects credential-bearing and malformed opted-in HTTP URLs before smoke requests', async () => {
+  for (const upstreamBaseUrl of [
+    'http://user:password@127.0.0.1:18080/v1',
+    'http://127.0.0.1:18080/v1?api_key=forbidden',
+    'http://[::1',
+  ]) {
+    const { fetchImplementation, requests } = mockFetch();
+    const invalidRoutes = structuredClone(routes);
+    const invalidRoute = invalidRoutes.find(({ id }) => id === 'gpt-5.6-luna');
+    assert(invalidRoute);
+    invalidRoute.upstreamBaseUrl = upstreamBaseUrl;
+    invalidRoute.allowInsecureHttpUpstream = true;
+    await assert.rejects(
+      runModelSmoke({
+        routes: invalidRoutes,
+        catalogSha256: '0'.repeat(64),
+        operator: 'release.operator',
+        timeoutMs: 10_000,
+        fetchImplementation,
+      }),
+      (error: unknown) =>
+        error instanceof ModelSmokeError && error.code === 'INVALID_CATALOG' && error.routeId === 'gpt-5.6-luna'
+    );
+    assert.equal(requests.length, 0);
+  }
 });

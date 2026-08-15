@@ -29,6 +29,7 @@ export type ModelGatewayRoute = {
   upstreamModelId: string;
   fallbackUpstreamModelId?: string;
   upstreamBaseUrl: string;
+  allowInsecureHttpUpstream?: true;
   upstreamApiKey: string;
   providerId: string;
   label: string;
@@ -953,7 +954,10 @@ function validateRoute(route: ModelGatewayRoute): void {
   const url = new URL(route.upstreamBaseUrl);
   const rate = (value: number): boolean => Number.isFinite(value) && value >= 0 && value <= 1_000_000;
   if (
-    url.protocol !== 'https:' ||
+    (url.protocol !== 'https:' && !(url.protocol === 'http:' && route.allowInsecureHttpUpstream === true)) ||
+    (route.allowInsecureHttpUpstream !== undefined && route.allowInsecureHttpUpstream !== true) ||
+    (route.allowInsecureHttpUpstream === true && url.protocol !== 'http:') ||
+    !url.hostname ||
     url.username ||
     url.password ||
     url.search ||
@@ -1013,6 +1017,7 @@ function fingerprintRoute(route: ModelGatewayRoute): string {
         upstreamModelId: route.upstreamModelId,
         fallbackUpstreamModelId: route.fallbackUpstreamModelId,
         upstreamBaseUrl: route.upstreamBaseUrl.replace(/\/$/, ''),
+        allowInsecureHttpUpstream: route.allowInsecureHttpUpstream === true,
         providerId: route.providerId,
         cost: route.cost,
         remoteCompactionV2: route.remoteCompactionV2 === true,
@@ -1436,6 +1441,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           ({
             upstreamApiKey: _upstreamApiKey,
             upstreamBaseUrl: _upstreamBaseUrl,
+            allowInsecureHttpUpstream: _allowInsecureHttpUpstream,
             upstreamModelId: _upstreamModelId,
             fallbackUpstreamModelId: _fallbackUpstreamModelId,
             providerId: _providerId,

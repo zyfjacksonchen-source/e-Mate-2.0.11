@@ -866,3 +866,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 主代理从真实聊天框“外部连接”入口进入既有 `/settings?section=connections&connectors=feishu,tencent-docs` 投影，再打开完整“外部连接”设置。页面由同一 `/emate.connections` 注册表动态展示飞书、腾讯文档、微信、钉钉；不存在第二页面、第二 Router 或前端硬编码连接结果。
 - 飞书显示 App ID/App Secret 本机配置步骤，腾讯文档显示 OAuth Token 步骤，微信显示设备扫码前置授权说明，钉钉显示 Client ID/Client Secret 步骤；所有未配置状态均保持真实，凭据只声明进入 Keychain/CurrentUser DPAPI。主代理未输入、保存或提交任何真实凭据，也未触发 OAuth/扫码，因此本项只关闭“可发现并走到授权步骤”，连接成功、读取和可逆写入仍保持生产账号阻塞。
 - 证据为 `artifacts/design-qa/S11-connections/discovery-auth-step-dark-1280x720.png`；截图不含凭据值。
+
+## 2026-08-16 · S07 生产 HTTP Provider 显式路由许可
+
+- 用户确认生产 Provider 的 HTTP base URL 已完成其网络安全验证。原 Model Gateway 对所有 `upstreamBaseUrl` 强制 HTTPS，导致该已授权路由在请求前失败；e-Mate 客户端到企业 Gateway 的 HTTPS 边界本身无需改变。
+- 最小适配只给服务端 `ModelGatewayRoute` 增加字面量 `allowInsecureHttpUpstream: true`。默认仍只接受 HTTPS；HTTP 缺少逐路由许可、许可与 HTTPS 混用、含 userinfo/query/hash 或无 hostname 的 URL 均在请求前失败。API Key 仍只从 `upstreamApiKeyFile` 读取，重定向继续拒绝，模型目录显式剥离上游 URL 与许可字段。
+- 主代理复跑 TypeScript 与 Model Gateway 门禁：75 passed、6 项因真实 PostgreSQL/Windows 外部环境跳过、0 failed。该适配只证明路由合同，未写入生产配置、未部署、未调用付费模型；HTTP hop 不提供链路加密，只允许用于用户已认可的受控网络路径。

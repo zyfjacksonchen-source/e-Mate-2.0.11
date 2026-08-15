@@ -91,6 +91,8 @@ Browser state, screenshots and downloads may be exposed only through the selecte
 
 Image generation has no local provider runtime or packaged model Key. It calls the existing fixed HTTPS e-Mate Model Gateway `/v1` root through `emateIdentity`; generation uses `/v1/images/generations`, editing uses `/v1/images/edits`, and both are fixed to `gpt-image-2-pro`. Results and references use the target attachment store. If that root is absent or malformed, the profile remains loadable but does not register `imagegen`. This is a required failure, not a fallback to production material, a browser credential, system environment, legacy Python image Skill, the older incompatible Image Job JWT, or a guessed download-domain path.
 
+The browser and local runtime always use the HTTPS Model Gateway. A production route may use an operator-approved HTTP provider only by setting the server-only literal `allowInsecureHttpUpstream: true` beside that route's credential-free `upstreamBaseUrl`; omission stays HTTPS-only, keys remain external secret files, redirects are rejected, and neither the URL nor the opt-in is returned by `/v1/models`. This explicit exception does not encrypt the Gateway-to-provider hop, so it is limited to the network path the operator has separately accepted.
+
 ## Credentials and external tools
 
 macOS credentials use Keychain and Windows credentials use DPAPI. Files contain only non-secret credential references. The enterprise model policy and model credentials are never bundled into npm or browser state.
