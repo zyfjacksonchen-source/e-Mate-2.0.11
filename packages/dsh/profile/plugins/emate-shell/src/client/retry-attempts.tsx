@@ -29,9 +29,7 @@ function RetryAttempt({ attempt, current }: { attempt: ModelRetryNode; current: 
   const label = current
     ? attempt.retryState === 'cancelled'
       ? '重试已取消'
-      : attempt.retryState === 'started'
-        ? '已开始重试'
-        : '正在重试'
+      : '正在重试'
     : '上次尝试失败'
 
   return (

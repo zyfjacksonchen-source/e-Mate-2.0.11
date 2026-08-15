@@ -76,5 +76,13 @@ describe('chat fidelity contract', () => {
     expect(within(chain!).getByText('第 1 次 · 1s')).toBeTruthy()
     expect(within(chain!).getByText('重试已取消')).toBeTruthy()
     expect(within(chain!).getByText('第 2 次 · 1s')).toBeTruthy()
+
+    const started = {
+      kind: 'model-retry', seq: 8, time: 8, retryId: 'retry-2', turn: 2, step: 1,
+      provider: 'fake', mode: 'normal', policyKey: 'normal', retry: 1, maxRetries: 2,
+      delayMs: 900, failure: { code: 'TRANSPORT', message: 'retrying' }, retryState: 'started',
+    }
+    render(<RetryAttempts node={{ data: { attempts: [started], current: started } } as never} />)
+    expect(screen.getByText('正在重试')).toBeTruthy()
   })
 })
