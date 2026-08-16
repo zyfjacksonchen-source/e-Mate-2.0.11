@@ -29,7 +29,9 @@ Renderer input is already validated Harness event/result data. Renderers may own
 
 ## Embedded bundle boundary
 
-The single main tarball embeds nine profile bundles: `office-skills`, `search-mcp`, `ego-browser`, `browser-panel`, `vision-toolkit`, `memory-evolve`, a native-subagent receipt, `genui`, and `better-sidebar`. Setup verifies their allowlisted package files and composes their bundle patches through the pinned Loader. A bundle may depend only on the fixed Harness runtime identities; it may not install another Runtime, Router, Store, WebSocket, Agent Loop or package manager.
+The single main tarball embeds ten profile bundles: `office-skills`, `search-mcp`, `ego-browser`, `browser-panel`, `vision-toolkit`, `memory-evolve`, a native-subagent receipt, `genui`, `better-sidebar`, and the fail-closed `dsh-im` adapter receipt. Setup verifies their allowlisted package files and composes their bundle patches through the pinned Loader. A bundle may depend only on the fixed Harness runtime identities; it may not install another Runtime, Router, Store, WebSocket, Agent Loop or package manager.
+
+`dsh-im` is pinned by source receipt to `xmanrui/dsh-im@2eea8a08bcd8ef91e8845de1f300b5715b746938`. Its e-Mate adapter contributes only dynamic `collaboration` capability metadata until rc.5 compatibility, project/session binding, OS credential handling and real authorization are proven. The upstream QQ runtime is excluded because `@tencent-connect/qqbot-connector@1.2.0` declares `UNLICENSED`; a blocked receipt is not permission to ship or load that dependency.
 
 `office-skills` registers four clean-room Skills for documents, PDF, spreadsheets and presentations. It contains no Python interpreter, format library, OCR model or document Worker. A Skill can guide the Agent to a target-owned/approved toolchain, but must report the real missing capability rather than manufacture an artifact or completion.
 

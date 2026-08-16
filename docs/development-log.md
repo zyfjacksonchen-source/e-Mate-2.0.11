@@ -1104,3 +1104,12 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 管理员初始密码已失效；按现有 `PostgresAdminManagementStore.resetPassword` 共享事务设置新的随机强密码并撤销旧管理会话，真实重新登录成功。密码只存用户本机权限文件与服务器 root-only `0600` 文件，不进入命令参数、环境变量、日志、源码或 Git；管理员继续免签协议。
 - root-only 生产回执为 `/root/e-mate-bootstrap/20260816T095133Z-task-audit-46be4ef`，`activation.json` SHA-256 为 `bd32b800b1c77ff61ec1cefc8f5f71d63389611ea59fd817622b11dd28834aaf`。旧 Gateway/Analytics 镜像、compose/env、Usage 静态 tar 与旧 alias 目标均保留用于精确回退。
 - 本次真实 Luna 运行仍同时显示英文 `Deep diving...` 和中文“思考中”；这与先前品牌化结论不一致，已重新列入最终 UI P1，不能用既有单测或历史截图关闭。
+## 2026-08-16 · S11 dsh-im 外部连接插件审计（实现前事实）
+
+- 上游 `xmanrui/dsh-im` 当前 `HEAD` 为 `2eea8a08bcd8ef91e8845de1f300b5715b746938`（package `@xmanrui/dsh-im@0.2.0`），仓库与包本体均声明 MIT；npm 发布物可读取，完整性为 `sha512-piOMq5sHFrg7ScyPrUneOrRycB4KvGIm+gmY8qknObccviBHQn3v6zGF4M1f4xQos16dCbXzELQoOor+T/nc/w==`。上游 281 项源码测试在 Node 24.19.0 下通过。
+- 上游 Host/Client 复用 Harness `Connection.rpc`、`/api/<method>`、Session/Workspace 事件，没有要求修改 Agent Loop；但源码和测试明确以 rc.6 RPC 形状命名，未声明对 e-Mate 固定 rc.5 commit `47f943859bef60e4160492346772ded9b24f765a` 的兼容矩阵，也没有 e-Mate 项目/通用会话绑定合同。
+- 上游 QQ 扫码运行依赖 `@tencent-connect/qqbot-connector@1.2.0`，其 npm 元数据声明 `UNLICENSED`。该依赖以及 QQ 运行通道不得复制或进入 e-Mate 发布闭包；其余通道也不能在完成 rc.5、凭据、会话绑定和真授权验收前显示为 ready。
+- 本切片采用失败关闭适配：增加 MIT 的 e-Mate 插件收据，只登记真实上游 commit、允许审计的通道集合和阻塞码，不复制上游运行码、不注册第二 transport/Router/Session Store/Tool。能力中心以现有 `emateCapabilities` 元数据展示该适配状态；聊天框入口只进入能力中心的“外部连接”分类。
+- 实现增加 `@e-mate/dsh-plugin-im@2.0.7` 并纳入现有 profile bundle 生成、setup 校验和 release registry；该包依赖数为 0、运行码为 0、Tool/transport 数均为 0，能力卡真实显示 `blocked / EMATE_DSH_IM_RUNTIME_UNVERIFIED`。能力中心只按插件的 `icon_key=collaboration` 动态归类，中央 UI 没有通道 ID/工具名分派。
+- 聊天框“外部连接”通过既有 History/`popstate` 跳转 `/capabilities?category=collaboration`；能力中心自动展开“本机内置能力”并选中“外部连接”，没有新增页面 Router。聚焦门禁通过：上游 281/281、适配包 2/2、Shell 路由/分类 9/9、profile setup/可见能力/环境闭包 3/3、target contract 与 diff check；适配包 `pnpm pack` 仅含允许名单文件。
+- 剩余真实阻塞：rc.5 Host 组合、e-Mate 通用/项目会话绑定、macOS/Windows 本机凭据、飞书/微信/钉钉/企业微信/Telegram/Discord/WhatsApp 真授权与可逆收发均未验收；QQ 因 `UNLICENSED` 依赖不进入后续适配范围。

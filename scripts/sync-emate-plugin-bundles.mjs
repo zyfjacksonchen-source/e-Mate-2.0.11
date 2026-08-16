@@ -10,6 +10,7 @@ const expected = [
   '@e-mate/dsh-plugin-browser-panel',
   '@e-mate/dsh-plugin-ego-browser',
   '@e-mate/dsh-plugin-genui',
+  '@e-mate/dsh-plugin-im',
   '@e-mate/dsh-plugin-memory-evolve',
   '@e-mate/dsh-plugin-office-skills',
   '@e-mate/dsh-plugin-search-mcp',

@@ -54,6 +54,8 @@ Image generation adapts the final e-Mate 2.0.5 Codex-like `imagegen` Tool: each 
 
 The product-owned built-in list contains image generation/editing, Office, OCR, Browser, Feishu, Tencent Docs, WeChat, and DingTalk. The capability center also keeps the community Skill Hub and installed custom Skills as a visibly separate catalog. Schedule, memory, dream distillation, and autonomous learning are local system plugins rather than extra built-in cards.
 
+External connections are projected as the capability center's `collaboration` / “外部连接” subtype. The composer entry routes to that subtype through the existing browser History projection; it must not reopen the legacy Settings connector view or add another Router. `xmanrui/dsh-im` is adapted only from an exact audited commit and only channels with a complete licensed runtime, pinned-Harness compatibility, project/session binding and real authorization evidence may become ready. Any channel that lacks one of those proofs remains explicitly blocked; an `UNLICENSED` dependency cannot enter the release closure.
+
 At the pinned Harness commit, only `web_search` is active from the relevant built-in set. `web_fetch` is shipped but disabled without a composed provider, and Office/PDF, OCR, and real Chromium Computer Use Tools are absent. e-Mate keeps thin adapters for those gaps and must still route them through target Tool, Job, attachment, subprocess, event, and client contracts; this finding does not authorize a parallel runtime.
 
 ## Compatibility and delivery

@@ -1,0 +1,3 @@
+xmanrui/dsh-im commit 2eea8a08bcd8ef91e8845de1f300b5715b746938 is an MIT-licensed functional reference. No upstream source or binary is included in this package.
+
+The referenced upstream QQ flow depends on @tencent-connect/qqbot-connector@1.2.0, whose npm metadata declares UNLICENSED. e-Mate excludes that dependency and the QQ runtime from its distribution closure.

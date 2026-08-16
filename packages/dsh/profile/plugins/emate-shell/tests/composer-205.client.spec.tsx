@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { COMPOSER_PLACEHOLDER, ComposerConnectors, CONNECTORS_PATH, routeToConnections } from '../src/client/composer-connectors.tsx'
-import { ConnectionsSettings } from '../src/client/connections.tsx'
-import { SettingsChrome } from '../src/client/settings-chrome.tsx'
 
 const Icon = () => <svg />
 
@@ -15,12 +13,12 @@ afterEach(() => {
 })
 
 describe('final e-Mate 2.0.5 composer projection', () => {
-  it('routes the connector control through the real settings connections section', () => {
+  it('routes the connector control to the capability center external-connection subtype', () => {
     history.replaceState(null, '', '/chat/session-1')
     const popstate = vi.fn()
     addEventListener('popstate', popstate, { once: true })
     render(<ComposerConnectors LinkIcon={Icon} openConnections={routeToConnections} />)
-    fireEvent.click(screen.getByRole('button', { name: '打开飞书和腾讯文档连接器' }))
+    fireEvent.click(screen.getByRole('button', { name: '打开能力中心的外部连接' }))
     expect(`${location.pathname}${location.search}`).toBe(CONNECTORS_PATH)
     expect(history.state.eMateSettingsReturn).toBe('/chat/session-1')
     expect(popstate).toHaveBeenCalledOnce()
@@ -44,42 +42,6 @@ describe('final e-Mate 2.0.5 composer projection', () => {
       </div>,
     )
     expect(screen.getByPlaceholderText('当前模型不可用，请先选择模型')).toBeTruthy()
-  })
-
-  it('selects the existing settings.section row rather than mounting another page', async () => {
-    history.replaceState(null, '', CONNECTORS_PATH)
-    const selectConnections = vi.fn()
-    render(
-      <div role="dialog">
-        <nav>
-          <button type="button" aria-current="true">个人资料</button>
-          <button type="button" onClick={selectConnections}>外部连接</button>
-        </nav>
-        <SettingsChrome />
-      </div>,
-    )
-    await waitFor(() => { expect(selectConnections).toHaveBeenCalledOnce() })
-  })
-
-  it('shows only the real Feishu and Tencent Docs catalog items on the focused route', async () => {
-    history.replaceState(null, '', CONNECTORS_PATH)
-    const items = [
-      ['feishu', '飞书'],
-      ['tencent-docs', '腾讯文档'],
-      ['wechat', '微信'],
-      ['dingtalk', '钉钉'],
-    ].map(([id, title]) => ({ id, title, summary: `${title} summary`, state: 'blocked', detail: `${title} detail`, fields: [] }))
-    render(<ConnectionsSettings
-      callConnections={async () => ({ ok: true, value: { schema_version: 1, items } })}
-      setCredential={async () => {}}
-      unsetCredential={async () => {}}
-      LinkIcon={Icon}
-      RefreshIcon={Icon}
-    />)
-    await waitFor(() => { expect(screen.getByText('飞书')).toBeTruthy() })
-    expect(screen.getByText('腾讯文档')).toBeTruthy()
-    expect(screen.queryByText('微信')).toBeNull()
-    expect(screen.queryByText('钉钉')).toBeNull()
   })
 
   it('keeps the target InputBar transport and source 2.0.5 geometry contract', () => {

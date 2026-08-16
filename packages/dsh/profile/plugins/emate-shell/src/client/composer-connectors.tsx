@@ -5,7 +5,7 @@ interface Props {
   openConnections: () => void
 }
 
-export const CONNECTORS_PATH = '/settings?section=connections&connectors=feishu,tencent-docs'
+export const CONNECTORS_PATH = '/capabilities?category=collaboration'
 export const COMPOSER_PLACEHOLDER = '给小芯发送消息，支持粘贴图片或文件'
 
 export function routeToConnections(): void {
@@ -32,7 +32,7 @@ export function ComposerConnectors({ LinkIcon, openConnections }: Props) {
       ref={control}
       data-emate-composer-connectors=""
       type="button"
-      aria-label="打开飞书和腾讯文档连接器"
+      aria-label="打开能力中心的外部连接"
       onClick={openConnections}
     >
       <LinkIcon size={14} />

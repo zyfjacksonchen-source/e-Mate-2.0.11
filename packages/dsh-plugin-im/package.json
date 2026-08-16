@@ -1,0 +1,57 @@
+{
+  "name": "@e-mate/dsh-plugin-im",
+  "version": "2.0.7",
+  "description": "Fail-closed e-Mate rc.5 adapter boundary for dsh-im external connections",
+  "type": "module",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "cordis.patch.yml",
+    "LICENSE",
+    "README.md",
+    "SOURCE.md",
+    "THIRD_PARTY_NOTICES.txt"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "build": "../../upstream/deepseek-harness/node_modules/.bin/tsc -p tsconfig.json",
+    "test": "pnpm run build && node --test"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "im": {
+      "adapterState": "blocked",
+      "blockerCode": "EMATE_DSH_IM_RUNTIME_UNVERIFIED",
+      "upstreamRepository": "https://github.com/xmanrui/dsh-im",
+      "upstreamCommit": "2eea8a08bcd8ef91e8845de1f300b5715b746938",
+      "upstreamVersion": "0.2.0"
+    }
+  },
+  "eMate": {
+    "harnessVersion": "0.1.0-rc.5",
+    "harnessCommit": "47f943859bef60e4160492346772ded9b24f765a"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate.git",
+    "directory": "packages/dsh-plugin-im"
+  }
+}

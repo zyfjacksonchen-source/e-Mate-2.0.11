@@ -87,8 +87,15 @@ const CAPABILITY_CATEGORY_LABELS: Record<CapabilityIconKey, string> = {
   browser: '系统能力',
   office: '办公能力',
   image: '图像 / 媒体',
-  collaboration: '通道',
+  collaboration: '外部连接',
   ocr: '数据能力',
+}
+
+const CAPABILITY_CATEGORY_KEYS = new Set<CapabilityIconKey>(['browser', 'collaboration', 'image', 'office', 'ocr'])
+
+function requestedCapabilityCategory(): CapabilityIconKey | 'all' {
+  const value = new URLSearchParams(location.search).get('category')
+  return CAPABILITY_CATEGORY_KEYS.has(value as CapabilityIconKey) ? value as CapabilityIconKey : 'all'
 }
 
 const HUB_CATEGORY_LABELS: Record<HubCategory, string> = {
@@ -115,7 +122,7 @@ function CapabilityGlyph({ capability, icons, fallback: Fallback }: {
 }
 
 function route(path: string): void {
-  if (location.pathname === path) return
+  if (`${location.pathname}${location.search}${location.hash}` === path) return
   history.pushState(null, '', path)
   dispatchEvent(new PopStateEvent('popstate'))
 }
@@ -209,14 +216,25 @@ export function CapabilitiesPage({
   const [category, setCategory] = useState<HubCategory>('office_productivity')
   const [hubCategory, setHubCategory] = useState<HubCategory | 'all'>('all')
   const [hubTag, setHubTag] = useState('')
-  const [capabilityCategory, setCapabilityCategory] = useState<CapabilityIconKey | 'all'>('all')
+  const [capabilityCategory, setCapabilityCategory] = useState<CapabilityIconKey | 'all'>(requestedCapabilityCategory)
+  const [builtinsOpen, setBuiltinsOpen] = useState(() => requestedCapabilityCategory() !== 'all')
   const [capabilityNotice, setCapabilityNotice] = useState<string | null>(null)
   const [selectedCard, setSelectedCard] = useState<SkillCard | null>(null)
   const [detail, setDetail] = useState<SkillDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
 
   useEffect(() => {
-    const sync = () => { setOpen(location.pathname === '/capabilities') }
+    const sync = () => {
+      const nextOpen = location.pathname === '/capabilities'
+      setOpen(nextOpen)
+      if (!nextOpen) return
+      const nextCategory = requestedCapabilityCategory()
+      setCapabilityCategory(nextCategory)
+      if (nextCategory !== 'all') {
+        setTab('discover')
+        setBuiltinsOpen(true)
+      }
+    }
     addEventListener('popstate', sync)
     return () => { removeEventListener('popstate', sync) }
   }, [])
@@ -459,7 +477,7 @@ export function CapabilitiesPage({
               </div>
             </section>
 
-            <details className={css.builtins}>
+            <details className={css.builtins} open={builtinsOpen} onToggle={event => { setBuiltinsOpen(event.currentTarget.open) }}>
               <summary><span>本机内置能力</span><small>{builtins.length}</small></summary>
               <div className={css.builtinsBody}>
                 {capabilityCategories.length > 0 && <div className={css.categoryFilter} role="group" aria-label="内置能力分类">

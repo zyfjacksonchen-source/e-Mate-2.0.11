@@ -25,6 +25,8 @@ importers:
 
   packages/dsh-plugin-genui: {}
 
+  packages/dsh-plugin-im: {}
+
   packages/dsh-plugin-memory-evolve: {}
 
   packages/dsh-plugin-office-skills: {}
