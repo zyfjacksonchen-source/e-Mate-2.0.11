@@ -393,3 +393,12 @@ final result: passed (real running activity collapse, hidden Tool rows and re-ex
 - Evidence: `artifacts/design-qa/S03-target-message-stream-main/target-native-message-stream-no-focus-ring.png`. The accepted surface retains the e-Mate logo and orange product tokens while message geometry, typography and actions come from Harness itself.
 
 final result: passed (target-native message presentation and disclosure); blocked (fresh live generation until the direct runtime-model control plane is deployed)
+
+## S10 Agent QR native workflow — 2026-08-16
+
+- The accepted flow starts from a normal-language request in the real e-Mate conversation. Harness selects the typed `e_mate_qr_generate` Tool, creates an owner-scoped `emate-qr` Job, stores the generated PNG through the target Attachment service, and appends the real image output block to the same Session.
+- The client does not have a QR-specific message renderer. The resulting attachment is displayed by the pinned target Image renderer and the one retained e-Mate gallery/Lightbox presentation. No REST endpoint, WebSocket, Store, Router, synthetic Session event or GenUI component was added.
+- Trust-boundary behavior is visible in the registered Tool contract: the only argument is `content`, limited to 1–1,024 UTF-8 bytes; the Tool warns that input persists with the Session and forbids credentials, tokens, recovery codes, private keys and cookies. The Job receipt contains only `image_count`, never the encoded content.
+- Main-agent Computer Use verified the real Tool/Job/Attachment path and opened the resulting image in the target gallery. Evidence: `artifacts/design-qa/S10-agent-qr/agent-qr-real-tool-job-attachment-1280x720.png`. The focused runtime contract test independently reopens the saved bytes and verifies a PNG signature.
+
+final result: passed (natural-language Agent QR generation, durable attachment and target image rendering)
