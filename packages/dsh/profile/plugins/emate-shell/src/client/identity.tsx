@@ -94,6 +94,7 @@ export function IdentityGate({ callIdentity }: Props) {
   const [account, setAccount] = useState('')
   const [realName, setRealName] = useState('')
   const [registrationPassword, setRegistrationPassword] = useState('')
+  const [registrationPasswordConfirmation, setRegistrationPasswordConfirmation] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
   const [challenge, setChallenge] = useState<RegistrationChallenge | null>(null)
   const [challengeBusy, setChallengeBusy] = useState(false)
@@ -248,6 +249,7 @@ export function IdentityGate({ callIdentity }: Props) {
       || !account.trim()
       || !realName.trim()
       || registrationPassword.length < 10
+      || registrationPassword !== registrationPasswordConfirmation
       || !verificationCode.trim()) return
     setBusy(true)
     setError(null)
@@ -260,6 +262,7 @@ export function IdentityGate({ callIdentity }: Props) {
         verification_code: verificationCode.trim(),
       })
       setRegistrationPassword('')
+      setRegistrationPasswordConfirmation('')
       setVerificationCode('')
       if (!result.ok) throw new Error(result.error?.message ?? '注册提交失败。')
       const value = result.value as Partial<RegistrationReceipt> | null
@@ -274,6 +277,7 @@ export function IdentityGate({ callIdentity }: Props) {
       setIdentifier(account.trim())
     } catch (registrationError) {
       setRegistrationPassword('')
+      setRegistrationPasswordConfirmation('')
       setVerificationCode('')
       setChallenge(null)
       setError(errorMessage(registrationError))
@@ -380,10 +384,12 @@ export function IdentityGate({ callIdentity }: Props) {
             <label><span>账号</span><input type="text" autoComplete="username" autoCapitalize="none" spellCheck={false} minLength={3} maxLength={128} value={account} disabled={busy} onChange={event => { setAccount(event.target.value); if (error) setError(null) }} /></label>
             <label><span>真实姓名</span><input type="text" autoComplete="name" minLength={2} maxLength={128} value={realName} disabled={busy} onChange={event => { setRealName(event.target.value); if (error) setError(null) }} /></label>
             <label><span>密码（至少 10 位）</span><input type="password" autoComplete="new-password" minLength={10} maxLength={256} value={registrationPassword} disabled={busy} onChange={event => { setRegistrationPassword(event.target.value); if (error) setError(null) }} /></label>
+            <label><span>确认密码</span><input type="password" autoComplete="new-password" minLength={10} maxLength={256} value={registrationPasswordConfirmation} disabled={busy} onChange={event => { setRegistrationPasswordConfirmation(event.target.value); if (error) setError(null) }} /></label>
             <label><span>验证码</span><span className={css.captchaRow}><input type="text" inputMode="text" autoComplete="off" autoCapitalize="none" spellCheck={false} minLength={4} maxLength={12} value={verificationCode} disabled={busy || challenge === null} onChange={event => { setVerificationCode(event.target.value); if (error) setError(null) }} />{challenge && <img className={css.captchaImage} src={challenge.image_data_url} alt="注册验证码" />}</span></label>
             <button className={css.secondaryButton} type="button" disabled={busy || challengeBusy} onClick={() => { void issueChallenge() }}>{challengeBusy ? '正在获取验证码' : '换一张验证码'}</button>
+            {registrationPasswordConfirmation && registrationPassword !== registrationPasswordConfirmation && <p className={css.error} role="alert">两次输入的密码不一致。</p>}
             {error && <p className={css.error} role="alert">{error}</p>}
-            <button className={css.primaryButton} type="submit" disabled={busy || challenge === null || !account.trim() || !realName.trim() || registrationPassword.length < 10 || !verificationCode.trim()} aria-busy={busy}>{busy ? '正在提交注册' : '提交注册申请'}</button>
+            <button className={css.primaryButton} type="submit" disabled={busy || challenge === null || !account.trim() || !realName.trim() || registrationPassword.length < 10 || registrationPassword !== registrationPasswordConfirmation || !verificationCode.trim()} aria-busy={busy}>{busy ? '正在提交注册' : '提交注册申请'}</button>
             <button className={css.secondaryButton} type="button" disabled={busy} onClick={() => { setAuthView('login'); setError(null) }}>已有账号，返回登录</button>
           </form>
         ) : (

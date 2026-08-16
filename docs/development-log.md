@@ -1175,3 +1175,8 @@ The text highlights AI hallucination and human verification, legal use, real-act
 
 - `320px` 登录页复验发现 pinned Harness 的移动导航按钮由 React Portal 直接挂在 `body`，不属于既有 `#root`；原实现只隐藏并设置根节点 inert，因此底层“打开/关闭任务导航”仍进入辅助树。修复继续沿用同一 Identity Gate，只隔离当前 `body` 的非脚本背景节点，并在 Gate 卸载时逐项恢复原 `hidden/inert`，没有按 Harness 文案或生成类名硬编码，也没有增加 Router、Store 或通信层。
 - Shell 挂载回归覆盖 Portal 隐藏及原状态恢复；聚焦 9/9、主包构建与 diff check 通过。新 bundle 同步到隔离受管 profile 后，主代理在真实 Browser 的 `320×800`、`390×844`、`768×900`、`1280×900`、`1920×1080` 逐档复验均为 `scrollWidth === clientWidth`，登录 Gate 之外的任务导航按钮可见数为 0，标题仍为 `e-Mate`，favicon 仍为透明底小芯机器人。该证据关闭登录态五档响应式与 Portal 隔离，不替代解锁后的五档响应式和全按钮闭环验收。
+
+## 2026-08-16 · S07 注册密码二次确认
+
+- 注册表单新增“确认密码”，两次输入必须完全一致才允许提交；不一致时显示中文错误并禁用提交。注册 RPC 与企业身份合同未改变，匹配后仍只发送一个 `password` 字段。
+- 聚焦身份组件回归 9/9、主包构建和 diff check 通过。主代理在全新隔离 profile 的真实 Browser 中验证：`320×800` 与 `390×844` 均有两个密码输入、无横向溢出；不一致时按钮禁用，改为一致并填完其他必填项后按钮可用，全程未提交注册申请。

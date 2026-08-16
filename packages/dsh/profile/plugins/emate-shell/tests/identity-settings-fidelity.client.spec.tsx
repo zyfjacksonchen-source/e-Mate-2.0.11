@@ -104,7 +104,12 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     fireEvent.change(await screen.findByLabelText('账号'), { target: { value: 'test@example.com' } })
     fireEvent.change(screen.getByLabelText('真实姓名'), { target: { value: '测试用户' } })
     fireEvent.change(screen.getByLabelText('密码（至少 10 位）'), { target: { value: 'safe-password' } })
+    fireEvent.change(screen.getByLabelText('确认密码'), { target: { value: 'different-password' } })
     fireEvent.change(await screen.findByLabelText('验证码'), { target: { value: 'ABCD' } })
+    expect(screen.getByRole('alert').textContent).toBe('两次输入的密码不一致。')
+    expect((screen.getByRole('button', { name: '提交注册申请' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(callIdentity).not.toHaveBeenCalledWith('session.register', expect.anything())
+    fireEvent.change(screen.getByLabelText('确认密码'), { target: { value: 'safe-password' } })
     fireEvent.click(screen.getByRole('button', { name: '提交注册申请' }))
 
     expect(await screen.findByRole('heading', { name: '注册申请已提交' })).toBeTruthy()
