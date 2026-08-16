@@ -1,0 +1,61 @@
+{
+  "name": "@e-mate/dsh-plugin-browser",
+  "version": "2.0.7",
+  "description": "e-Mate rc.5 adapter for the dsh-browser Chrome and Edge extension",
+  "type": "module",
+  "main": "lib/index.mjs",
+  "types": "lib/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.mts",
+      "default": "./lib/index.mjs"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./protocol": {
+      "types": "./lib/protocol.d.mts",
+      "default": "./lib/protocol.mjs"
+    },
+    "./extension/*": "./extension/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "extension/dist",
+    "cordis.patch.yml",
+    "README.md",
+    "SOURCE.md",
+    "THIRD_PARTY_NOTICES.txt",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "publishConfig": { "access": "public" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate.git",
+    "directory": "packages/dsh-plugin-browser"
+  },
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "os": ["darwin", "win32"],
+  "scripts": {
+    "build:host": "../../upstream/deepseek-harness/node_modules/.bin/tsdown --config tsdown.config.ts",
+    "build:extension": "../../upstream/deepseek-harness/node_modules/.bin/tsc -p extension/tsconfig.json --noEmit && ../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/.bin/vite build --config extension/vite.background.config.ts && ../../upstream/deepseek-harness/node_modules/.pnpm/node_modules/.bin/vite build --config extension/vite.content.config.ts && node extension/scripts/finalize.mjs",
+    "build": "pnpm run build:host && pnpm run build:extension",
+    "test": "pnpm run build && node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.0.268",
+    "@types/ws": "8.18.1",
+    "ws": "8.21.0"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "upstream": {
+      "repository": "https://github.com/Lum1104/dsh-browser",
+      "commit": "01f0b216b1bde88b5f9c6575ce9fb922db6fd8fb"
+    }
+  },
+  "eMate": {
+    "harnessVersion": "0.1.0-rc.5",
+    "harnessCommit": "47f943859bef60e4160492346772ded9b24f765a"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-08-15T18:21:56Z",
+  "transport": "operator-approved-http-upstream",
+  "calls": [
+    {
+      "model": "gpt-5.6-luna",
+      "status": 200,
+      "reported_model": "gpt-5.6-luna",
+      "response_id": "resp_03005023fe2fd823016a80ae391280819b986af8523e71ccdc",
+      "request_id": "0d122b6b-596c-4f07-8453-5b6aa1f3c733",
+      "input_tokens": 4391,
+      "output_tokens": 5
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "status": 200,
+      "reported_model": "gpt-5.6-sol",
+      "response_id": "resp_08319b25c5b49675016a80ae3c4cd481998a9e984346ec2dfb",
+      "request_id": "87f8af7d-c3fb-44ff-96f4-b4a4b97d7812",
+      "input_tokens": 4391,
+      "output_tokens": 5
+    }
+  ],
+  "credential_recorded": false,
+  "response_text_recorded": false,
+  "result": "passed-upstream-only"
+}

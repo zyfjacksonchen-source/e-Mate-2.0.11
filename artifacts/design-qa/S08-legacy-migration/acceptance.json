@@ -1,0 +1,16 @@
+{
+  "slice": "S08",
+  "date": "2026-08-16",
+  "source_count": 3,
+  "receipt_target_sessions": 15,
+  "initial_visible_session_rows": 16,
+  "selected_imported_route": true,
+  "selected_imported_chat_nodes": 5,
+  "selected_imported_user_nodes": 2,
+  "reload_same_route": true,
+  "reload_selected_session_rows": 1,
+  "reload_visible_imported_session_rows": 15,
+  "source_hashes_unchanged": true,
+  "source_titles_or_content_recorded": false,
+  "result": "passed"
+}

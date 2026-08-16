@@ -1,0 +1,31 @@
+{
+  "name": "@e-mate/analytics-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "start": "bun dist/production.js",
+    "test": "node --test --experimental-strip-types tests/*.test.ts"
+  },
+  "dependencies": {
+    "@e-mate/admin-contract": "workspace:*",
+    "@e-mate/auth-credential": "workspace:*",
+    "@e-mate/consent-store": "workspace:*",
+    "@e-mate/monitoring-contract": "workspace:*",
+    "@e-mate/observability-policy-contract": "workspace:*",
+    "@e-mate/runtime-registry-contract": "workspace:*",
+    "@e-mate/session-index-contract": "workspace:*",
+    "@redis/client": "6.1.0",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pg": "8.20.0",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

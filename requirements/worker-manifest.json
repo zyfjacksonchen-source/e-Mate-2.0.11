@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "python": "3.11.15",
+  "resolver": {
+    "name": "uv",
+    "version": "0.11.7",
+    "universal": true,
+    "hashes": true
+  },
+  "source": {
+    "commit": "564a6b6c1d43fb6831dd4a5cd8026e472f063311",
+    "manifest_sha256": "68c2ccab5fff58e94980fc8f9b8a872ffff786624cfc2e81b43a0f742b5095ec",
+    "input_sha256": "ac6f5d3b9ba3617fdbf2e2f28aeb7fdd5838ff9bc23a06f0efe2772b811202be",
+    "lock_sha256": "a27d49763e28ef566d4e800e20ba90557eedfd52c83fac6aae93778a3e87ac37",
+    "worker_sha256": "257f21d5bb8ef16151027e006a3c38aaa15bf9f2e2a4fc541c7946ddf339d891"
+  },
+  "worker_input_sha256": "f5531ec6e00649da2b89690ac62d4bf685467b799f5a859b4d28a4b751b39370",
+  "worker_lock_sha256": "cea6914a347a2a9a80f61260bea9d66d7d2fa2ad7e42434e6ecdafc63d8f8fd5",
+  "root_packages": {
+    "numpy": "2.4.6",
+    "onnxruntime": "1.23.2",
+    "openpyxl": "3.1.5",
+    "pypdf": "6.9.1",
+    "python-docx": "1.2.0",
+    "python-pptx": "1.0.2",
+    "rapidocr-onnxruntime": "1.4.4",
+    "reportlab": "4.4.9"
+  }
+}

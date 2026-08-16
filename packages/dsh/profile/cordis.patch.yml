@@ -1,0 +1,111 @@
+- id: credentials
+  name: '@deepseek-ai/dsh-credentials-local'
+  disabled: true
+
+- id: llm-deepseek
+  disabled: true
+
+- id: llm-pi-ai
+  config:
+    providers: {}
+
+- id: agent-default-model
+  config:
+    provider: e-mate-enterprise
+    model: gpt-5.6-luna
+
+- id: ui-settings-models
+  name: '@deepseek-ai/dsh-client-ui-settings-models'
+  disabled: true
+
+- id: ui-agent-preset
+  name: '@deepseek-ai/dsh-client-ui-agent-preset'
+  disabled: true
+
+- id: ui-trajectory
+  name: '@deepseek-ai/dsh-client-ui-trajectory'
+  disabled: true
+
+- id: agent-presets
+  name: '@deepseek-ai/dsh-agent-presets'
+  config:
+    default: standard
+
+- id: sandbox-policy
+  name: '@deepseek-ai/dsh-sandbox-policy'
+  config:
+    mode: danger-full-access
+
+- id: approval
+  name: '@deepseek-ai/dsh-user-approval'
+  config:
+    policy: never
+
+- id: permission
+  name: '@deepseek-ai/dsh-permission-presets'
+  config:
+    defaultPreset: danger-full-access
+
+- insert:
+    - id: emate-settings-document-boundary
+      name: ./plugins/settings-document-boundary.js
+      inject: [settings]
+    - id: emate-credentials-os
+      name: ./plugins/credentials-os.js
+    - id: emate-health
+      name: ./plugins/health.js
+      inject: [webServer, jobs]
+    - id: emate-general-workspace
+      name: ./plugins/general-workspace.js
+      inject: [workspaceRegistry]
+    - id: emate-identity
+      name: ./plugins/identity/index.js
+      inject: [connection, credentials]
+      config:
+        providerLegalName: 亦芯
+        enterprise:
+          authBaseUrl: https://mvdcm.ecoremedia.net/e-mate/auth-api
+          modelBaseUrl: https://mvdcm.ecoremedia.net/e-mate/model-api
+          clientId: e-mate-web
+          organization: emate-v2
+    - id: emate-share
+      name: ./plugins/share.js
+      inject: [connection]
+    - id: emate-model-policy
+      name: ./plugins/model-policy.js
+      inject: [apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity]
+    - id: emate-audit
+      name: ./plugins/audit.js
+      inject: [connection, sessionPersistence, storageDomain, timer, emateModelPolicy, emateIdentity]
+    - id: emate-capabilities
+      name: ./plugins/capabilities.js
+      inject: [connection]
+    - id: emate-connections
+      name: ./plugins/connections.js
+      inject: [credentials, connection, emateCapabilities]
+    - id: emate-qr-generation
+      name: ./plugins/qr-generation.js
+      inject: [tools, jobs, attachments]
+    - id: emate-skill-hub-agent
+      name: ./plugins/skill-hub-agent.js
+      inject: [tools, jobs, emateIdentity, connection, webServer]
+    - id: emate-image-generation
+      name: ./plugins/image-generation.js
+      inject: [tools, jobs, attachments, emateIdentity, emateModelPolicy, emateCapabilities]
+      config:
+        rootUrl: https://mvdcm.ecoremedia.net/e-mate/model-api/v1
+
+    - id: schedule
+      name: '@deepseek-ai/dsh-schedule'
+
+    - id: emate-schedule-import
+      name: ./plugins/schedule-import.js
+      inject: [tools]
+
+    - id: emate-legacy-migration
+      name: ./plugins/legacy-migration.js
+      inject: [sessionPersistence, webServer]
+
+    - id: emate-agent-operations
+      name: ./plugins/agent-operations.js
+      inject: [systemPrompt]

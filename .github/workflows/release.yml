@@ -1,0 +1,315 @@
+name: Release e-Mate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the exact validated tarball to npm. Must run from e-mate-v2.0.7.
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ inputs.publish && 'e-mate-npm-publication' || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: false
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  pack:
+    name: Build and pack npm tarball
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            enterprise/pnpm-lock.yaml
+            upstream/deepseek-harness/pnpm-lock.yaml
+
+      - name: Install exact workspaces
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir enterprise install --frozen-lockfile
+          pnpm --dir upstream/deepseek-harness install --frozen-lockfile
+
+      - name: Build pinned DeepSeek Harness
+        run: pnpm --dir upstream/deepseek-harness run build
+
+      - name: Build and test
+        run: |
+          pnpm check:target
+          pnpm test
+          pnpm enterprise:check
+          pnpm enterprise:test
+          pnpm enterprise:build
+          node --test scripts/release.test.mjs
+
+      - name: Pack the release tarball
+        run: |
+          pnpm --filter @e-mate/dsh pack --pack-destination dist/npm
+          pnpm --dir upstream/deepseek-harness exec publint ../../dist/npm/e-mate-dsh-2.0.7.tgz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-npm-tarball
+          path: dist/npm/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  clean-install:
+    name: Clean install ${{ matrix.platform }}
+    needs: pack
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            runner: macos-15
+          - platform: darwin-x64
+            runner: macos-15-intel
+          - platform: win32-x64
+            runner: windows-2025
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: e-mate-npm-tarball
+          path: dist/npm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install tarballs with npm and run setup checks
+        shell: bash
+        env:
+          DSH_HOME: ${{ runner.temp }}/e-mate-dsh-home
+          EMATE_DESKTOP_DIR: ${{ runner.temp }}/Desktop
+          EMATE_NO_OPEN: '1'
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/e-mate-prefix"
+          npm install --global --prefix "$prefix" --no-audit --no-fund dist/npm/e-mate-dsh-2.0.7.tgz
+          npm_root="$(npm root --global --prefix "$prefix")"
+          cli="$npm_root/@e-mate/dsh/lib/bin.js"
+          test -f "$cli"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            test -f "$prefix/e-mate.cmd"
+          else
+            test -x "$prefix/bin/e-mate"
+          fi
+          test "$(node "$cli" --version)" = '2.0.7'
+          if ! EMATE_STAGING_CHECK=1 node "$cli" setup --check --json > "$RUNNER_TEMP/e-mate-staging-check.json"; then
+            cat "$RUNNER_TEMP/e-mate-staging-check.json"
+            exit 1
+          fi
+          node "$cli" setup
+          node "$cli" setup
+          if ! node "$cli" setup --check --json > "$RUNNER_TEMP/e-mate-installed-check.json"; then
+            cat "$RUNNER_TEMP/e-mate-installed-check.json"
+            exit 1
+          fi
+          CHECK_PATH="$RUNNER_TEMP/e-mate-installed-check.json" node -e \
+            "const r=require(process.env.CHECK_PATH); if(!r.ok) throw new Error(JSON.stringify(r.checks))"
+
+  evidence:
+    name: Verify release set and generate evidence
+    needs: pack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: e-mate-npm-tarball
+          path: dist/npm
+
+      - name: Generate SHA256, manifest, SPDX and license inventory
+        run: node scripts/release.mjs evidence --from dist/npm --out dist/release
+
+      - name: Verify generated evidence checksums
+        run: |
+          cd dist/npm && sha256sum -c ../release/SHA256SUMS
+          cd ../release && sha256sum -c EVIDENCE_SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-release-candidate
+          path: |
+            dist/npm/*
+            dist/release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish exact npm tarball
+    if: inputs.publish
+    needs: [clean-install, evidence]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: npm-publish
+    concurrency:
+      group: e-mate-npm-publish
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: e-mate-release-candidate
+          path: dist
+
+      - name: Recheck candidate bytes
+        run: |
+          cd dist/npm && sha256sum -c ../release/SHA256SUMS
+          cd ../release && sha256sum -c EVIDENCE_SHA256SUMS
+
+      - name: Publish exact candidate bytes
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          EMATE_ACCEPTED_SHA: ${{ vars.EMATE_S12_ACCEPTED_SHA }}
+        run: node scripts/release.mjs publish --from dist/npm
+
+  registry-install:
+    name: Registry install ${{ matrix.platform }}
+    if: inputs.publish
+    needs: publish
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            runner: macos-15
+          - platform: darwin-x64
+            runner: macos-15-intel
+          - platform: win32-x64
+            runner: windows-2025
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+
+      - name: Read back npm and run a clean registry install
+        shell: bash
+        env:
+          DSH_HOME: ${{ runner.temp }}/e-mate-registry-dsh-home
+          EMATE_DESKTOP_DIR: ${{ runner.temp }}/Desktop
+          EMATE_NO_OPEN: '1'
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/e-mate-registry-prefix"
+          npm view '@e-mate/dsh@2.0.7' version --json | grep '2.0.7'
+          npm install --global --prefix "$prefix" --no-audit --no-fund '@e-mate/dsh@2.0.7'
+          npm_root="$(npm root --global --prefix "$prefix")"
+          cli="$npm_root/@e-mate/dsh/lib/bin.js"
+          test "$(node "$cli" --version)" = '2.0.7'
+          test -f "$npm_root/@e-mate/dsh/profile/bundles/registry.json"
+          EMATE_STAGING_CHECK=1 node "$cli" setup --check --json > "$RUNNER_TEMP/e-mate-registry-check.json"
+          node "$cli" setup
+          update_json="$(node "$cli" update --version 2.0.7 --json)"
+          request_id="$(node -e 'const v=JSON.parse(process.argv[1]); if(typeof v.request_id!=="string") process.exit(1); process.stdout.write(v.request_id)' "$update_json")"
+          status_json='{}'
+          for attempt in {1..180}; do
+            status_json="$(node "$cli" status 2>/dev/null || true)"
+            if node -e 'const v=JSON.parse(process.argv[1]); const u=v.latest_update; process.exit(u?.request_id===process.argv[2] && new Set(["completed","rolled-back","rollback-failed","failed-before-change"]).has(u.status) ? 0 : 1)' "$status_json" "$request_id"; then
+              break
+            fi
+            sleep 1
+          done
+          node -e 'const v=JSON.parse(process.argv[1]); const u=v.latest_update; if(u?.request_id!==process.argv[2] || u.status!=="completed" || u.installed_version!=="2.0.7") throw new Error(JSON.stringify(u))' "$status_json" "$request_id"
+          receipt="$DSH_HOME/e-mate/migrations/online-update-$request_id.json"
+          node -e 'const r=require(process.argv[1]); const sri=/^sha512-[A-Za-z0-9+/]{86}==$/; if(r.status!=="completed" || !sri.test(r.installed_package_integrity) || !sri.test(r.previous_package_integrity)) throw new Error(JSON.stringify(r))' "$receipt"
+          node "$cli" stop
+
+  r2:
+    name: Publish immutable R2 download objects
+    if: inputs.publish
+    needs: registry-install
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: r2-publish
+    concurrency:
+      group: e-mate-r2-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: e-mate-release-candidate
+          path: dist
+
+      - name: Recheck candidate bytes
+        run: |
+          cd dist/npm && sha256sum -c ../release/SHA256SUMS
+          cd ../release && sha256sum -c EVIDENCE_SHA256SUMS
+
+      - name: Verify R2 client
+        run: aws --version
+
+      - name: Publish immutable release bytes to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.ECOREX_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.ECOREX_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: 'true'
+          ECOREX_R2_ACCOUNT_ID: ${{ secrets.ECOREX_R2_ACCOUNT_ID }}
+          EMATE_R2_PUBLIC_ORIGIN: ${{ vars.EMATE_R2_PUBLIC_ORIGIN }}
+          EMATE_ACCEPTED_SHA: ${{ vars.EMATE_S12_ACCEPTED_SHA }}
+        run: node scripts/publish-r2.mjs --npm dist/npm --evidence dist/release --receipt dist/r2/r2-download-admission.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-r2-admission
+          path: dist/r2/r2-download-admission.json
+          if-no-files-found: error
+          retention-days: 30

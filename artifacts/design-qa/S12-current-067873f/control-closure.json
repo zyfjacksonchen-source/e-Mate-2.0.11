@@ -1,0 +1,19 @@
+{
+  "slice": "S02-S03-S12",
+  "date": "2026-08-16",
+  "new_general_session": "passed",
+  "rename_and_reload": "passed",
+  "copy_session_id": "passed",
+  "archive_and_reload": "passed",
+  "session_search": "passed",
+  "schedule_action_to_real_draft": "passed",
+  "message_copy_feedback": "passed",
+  "activity_disclosure": "passed",
+  "share_action": "passed-fail-closed",
+  "share_provider": "blocked-unconfigured",
+  "rename_dialog_role": "passed-after-fix",
+  "settings_native_document_action": "absent-after-profile-boundary-fix",
+  "settings_storage_preserved": true,
+  "frontend_fake_transport_added": false,
+  "result": "passed-with-external-share-blocker"
+}

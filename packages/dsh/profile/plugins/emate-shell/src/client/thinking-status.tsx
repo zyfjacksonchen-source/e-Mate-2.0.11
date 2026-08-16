@@ -1,0 +1,88 @@
+import { useEffect } from 'react'
+import css from './thinking-status.module.css'
+
+const TARGET_LABEL = 'Deep diving...'
+const MARKER = 'data-emate-thinking-status'
+
+function targetLabel(node: HTMLElement): Text | undefined {
+  return [...node.childNodes].find((child): child is Text =>
+    child.nodeType === Node.TEXT_NODE && child.textContent?.trimStart().startsWith(TARGET_LABEL),
+  )
+}
+
+function createDomino(): HTMLElement {
+  const host = document.createElement('span')
+  host.className = css.host
+  host.setAttribute('aria-hidden', 'true')
+
+  const loader = document.createElement('span')
+  loader.className = css.loader
+  const domino = document.createElement('span')
+  domino.className = css.domino
+  for (let index = 0; index < 4; index += 1) domino.append(document.createElement('i'))
+  loader.append(domino)
+
+  const label = document.createElement('span')
+  label.textContent = '思考中'
+  host.append(loader, label)
+  return host
+}
+
+/** Brand-only projection over the target Harness running-turn status. */
+export function ThinkingStatusBranding() {
+  useEffect(() => {
+    const documentRoot = document
+    let active = true
+    const decorated = new Map<HTMLElement, { host: HTMLElement; hidden: boolean; label: string | null; text: Text; value: string }>()
+    const restore = (status: HTMLElement, entry: { host: HTMLElement; hidden: boolean; label: string | null; text: Text; value: string }) => {
+      entry.host.remove()
+      entry.text.data = entry.value
+      status.hidden = entry.hidden
+      status.removeAttribute(MARKER)
+      if (entry.label === null) status.removeAttribute('aria-label')
+      else status.setAttribute('aria-label', entry.label)
+    }
+    const sync = () => {
+      if (!active) return
+      for (const [status, entry] of decorated) {
+        if (!status.isConnected) {
+          restore(status, entry)
+          decorated.delete(status)
+        }
+        else if (!entry.host.isConnected) {
+          restore(status, entry)
+          decorated.delete(status)
+        } else {
+          const activityHost = documentRoot.querySelector<HTMLElement>('[data-emate-activity-header][data-state="running"] [data-emate-thinking-host]')
+          const destination = activityHost ?? status
+          if (entry.host.parentElement !== destination) destination.append(entry.host)
+          status.hidden = activityHost === null ? entry.hidden : true
+        }
+      }
+      for (const status of documentRoot.querySelectorAll<HTMLElement>('[role="status"][aria-live="polite"]')) {
+        const text = targetLabel(status)
+        if (text === undefined || decorated.has(status)) continue
+        const host = createDomino()
+        const hidden = status.hidden
+        const label = status.getAttribute('aria-label')
+        const value = text.data
+        text.data = ''
+        status.setAttribute(MARKER, '')
+        status.setAttribute('aria-label', '思考中')
+        const activityHost = documentRoot.querySelector<HTMLElement>('[data-emate-activity-header][data-state="running"] [data-emate-thinking-host]')
+        ;(activityHost ?? status).append(host)
+        status.hidden = activityHost !== null
+        decorated.set(status, { host, hidden, label, text, value })
+      }
+    }
+    sync()
+    const observer = new MutationObserver(sync)
+    observer.observe(documentRoot.body, { childList: true, subtree: true })
+    return () => {
+      active = false
+      observer.disconnect()
+      for (const [status, entry] of decorated) restore(status, entry)
+    }
+  }, [])
+  return null
+}

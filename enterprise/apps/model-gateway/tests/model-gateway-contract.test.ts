@@ -1,0 +1,2801 @@
+import assert from 'node:assert/strict';
+import { createCipheriv, createHash, generateKeyPairSync, verify } from 'node:crypto';
+import { once } from 'node:events';
+import test from 'node:test';
+import { InMemoryConsentStore } from '@e-mate/consent-store';
+import {
+  createModelGatewayServer,
+  InMemoryUsageStore,
+  InvocationAdmissionError,
+  PostgresUsageStore,
+  PostgresTenantModelRoutePolicy,
+  type ModelGatewayPrincipal,
+  type ModelGatewayRoute,
+  type ProviderInvocationReceipt,
+  type ProviderInvocationReceiptRequest,
+  type TenantModelRoutePolicy,
+  type UsageStore,
+} from '../src/index.ts';
+import { createProductionAuthenticator } from '../src/production.ts';
+
+const sessionToken = 's'.repeat(64);
+const otherToken = 'o'.repeat(64);
+const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+const route: ModelGatewayRoute = {
+  id: 'gpt-5.6-sol',
+  upstreamModelId: 'provider-sol',
+  upstreamBaseUrl: 'https://provider.example/v1',
+  upstreamApiKey: 'provider-secret-that-never-leaves-the-gateway',
+  providerId: 'custom-gpt',
+  label: 'GPT-5.6 Sol',
+  buttonLabel: 'GPT-5.6 Sol · 中等',
+  provider: '自定义 GPT Gateway',
+  providerMark: 'G',
+  reasoning: true,
+  input: ['text', 'image'],
+  cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
+  contextWindow: 1_050_000,
+  maxTokens: 128_000,
+};
+const imageRoute: ModelGatewayRoute = {
+  ...route,
+  id: 'gpt-image-2-pro',
+  apiMode: 'images-generations',
+  upstreamModelId: 'provider-image-pro',
+  fallbackUpstreamModelId: 'provider-image-standard',
+  label: '图片 Pro',
+  buttonLabel: '图片 Pro',
+  reasoning: false,
+  input: ['text'],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 32_000,
+  maxTokens: 32_000,
+};
+const chatRoute: ModelGatewayRoute = {
+  ...route,
+  id: 'deepseek',
+  apiMode: 'chat-completions',
+  upstreamModelId: 'deepseek-chat',
+  providerId: 'deepseek',
+  label: 'DeepSeek',
+  buttonLabel: 'DeepSeek',
+  provider: 'DeepSeek',
+  providerMark: 'D',
+  input: ['text'],
+};
+const limits = {
+  tenantRequestsPerMinute: 1_000,
+  tenantBurst: 1_000,
+  tenantMaxConcurrent: 1,
+  invocationLeaseMs: 180_000,
+};
+
+test('decrypts tenant route keys only for their bound tenant and route', async () => {
+  const encryptionKey = Buffer.alloc(32, 7);
+  const nonce = Buffer.alloc(12, 3);
+  const apiKey = 'tenant-provider-key-from-encrypted-store';
+  const cipher = createCipheriv('aes-256-gcm', encryptionKey, nonce);
+  cipher.setAAD(Buffer.from('tenant-a\0gpt-5.6-sol'));
+  const ciphertext = Buffer.concat([cipher.update(apiKey, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  const pool = {
+    query: async () => ({
+      rows: [{ upstream_key_ciphertext: ciphertext, upstream_key_nonce: nonce, upstream_key_tag: tag }],
+    }),
+  };
+  const policy = new PostgresTenantModelRoutePolicy(pool as never, encryptionKey);
+  assert.equal(await policy.upstreamApiKey('tenant-a', 'gpt-5.6-sol'), apiKey);
+  await assert.rejects(policy.upstreamApiKey('tenant-b', 'gpt-5.6-sol'), /unavailable|authenticate/i);
+});
+
+test('uses default route policy only when a tenant has no explicit route row', async () => {
+  const pool = { query: async () => ({ rows: [] }) };
+  const policy = new PostgresTenantModelRoutePolicy(pool as never);
+  assert.equal(await policy.isEnabled('tenant-a', 'gpt-5.6-sol'), true);
+  assert.equal(await policy.isEnabled('tenant-a', 'gemini-3.1-pro-high'), false);
+  assert.equal(await policy.isEnabled('tenant-a', 'deepseek'), true);
+  assert.equal(await policy.isEnabled('tenant-a', 'doubao-seed-2-0-pro-260215'), true);
+  assert.equal(await policy.isEnabled('tenant-a', 'gpt-5.4'), false);
+});
+
+test('checks long-lived client credentials on every request and exposes only currently enabled routes', async () => {
+  const credential = `emate_twe_${'c'.repeat(43)}`;
+  let active = true;
+  let queryCount = 0;
+  const pool = {
+    query: async (statement: string, parameters: unknown[]) => {
+      queryCount += 1;
+      assert.equal(statement.includes("'models:invoke' = ANY(key.scopes)"), true);
+      assert.equal(statement.includes("key.principal_type = 'USER'"), true);
+      assert.equal(statement.includes("app_user.status = 'ACTIVE'"), true);
+      assert.equal(statement.includes('key.revoked_at IS NULL'), true);
+      assert.equal(parameters.includes(credential), false);
+      return {
+        rows: active ? [{ tenant_id: 'tenant-a', user_id: 'user-a', model_ids: ['gpt-5.6-luna'] }] : [],
+      };
+    },
+  };
+  const policy = new PostgresTenantModelRoutePolicy(pool as never);
+  assert.deepEqual(await policy.authenticateClientCredential(credential, ['gpt-5.6-luna', 'gpt-5.6-sol']), {
+    tenantId: 'tenant-a',
+    userId: 'user-a',
+    modelIds: ['gpt-5.6-luna'],
+  });
+  active = false;
+  assert.equal(await policy.authenticateClientCredential(credential, ['gpt-5.6-luna', 'gpt-5.6-sol']), null);
+  assert.equal(await policy.authenticateClientCredential('not-a-client-credential', ['gpt-5.6-luna']), null);
+  assert.equal(queryCount, 2);
+});
+
+test('production authentication rejects a signed session immediately after its session or user is revoked', async () => {
+  const statuses: Array<'ACTIVE' | 'SUSPENDED' | 'DELETED'> = ['ACTIVE', 'SUSPENDED', 'DELETED'];
+  const queries: Array<{ statement: string; parameters: unknown[] }> = [];
+  const pool = {
+    query: async (statement: string, parameters: unknown[]) => {
+      queries.push({ statement, parameters });
+      return { rows: [{ active: statuses.shift() === 'ACTIVE' }] };
+    },
+  };
+  const policy = new PostgresTenantModelRoutePolicy(pool as never);
+  const signedPrincipal = {
+    tenantId: 'tenant-a',
+    userId: 'user-a',
+    modelIds: [route.id],
+    sessionId: 'session-1',
+  };
+  const authenticate = createProductionAuthenticator(
+    async (token) => (token === sessionToken ? signedPrincipal : null),
+    policy,
+    [route.id]
+  );
+
+  assert.deepEqual(await authenticate(sessionToken), signedPrincipal);
+  assert.equal(await authenticate(sessionToken), null);
+  assert.equal(await authenticate(sessionToken), null);
+  assert.equal(queries.length, 3);
+  assert.equal(
+    queries.every(({ statement }) => statement.includes("status = 'ACTIVE'")),
+    true
+  );
+  assert.deepEqual(
+    queries.map(({ parameters }) => parameters),
+    [
+      ['tenant-a', 'user-a', 'session-1'],
+      ['tenant-a', 'user-a', 'session-1'],
+      ['tenant-a', 'user-a', 'session-1'],
+    ]
+  );
+});
+
+type TokenLimitTestState = {
+  replay?: 'PENDING' | 'RECORDED';
+  tokenLimit: string | null;
+  usedTokens: string;
+  statements: string[];
+  quotaUpdates: number;
+  invocationInserts: number;
+};
+
+const postgresInvocationFact = {
+  tenantId: 'tenant-a',
+  userId: 'user-a',
+  taskId: 'task-token-limit',
+  traceId: 'trace-token-limit',
+  modelId: route.id,
+  providerId: route.providerId,
+  requestDigest: 'd'.repeat(43),
+  routeFingerprint: 'f'.repeat(43),
+};
+
+function tokenLimitUsageStore(state: TokenLimitTestState): PostgresUsageStore {
+  const databaseNow = new Date('2026-07-31T00:00:00.000Z');
+  const client = {
+    async query(statementInput: string, parameters: unknown[] = []) {
+      const statement = statementInput.replace(/\s+/g, ' ').trim();
+      state.statements.push(statement);
+      if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(statement)) return { rows: [] };
+      if (statement.startsWith('INSERT INTO e_mate_model_usage_task')) return { rows: [] };
+      if (
+        statement.startsWith('SELECT tenant_id, user_id, task_id') &&
+        statement.includes('FROM e_mate_model_usage_task')
+      ) {
+        return {
+          rows: [
+            {
+              tenant_id: 'tenant-a',
+              user_id: 'user-a',
+              task_id: parameters[2],
+              trace_id: parameters[2] === 'task-token-limit-raised' ? 'trace-token-limit-raised' : 'trace-token-limit',
+              model_id: route.id,
+              provider_id: route.providerId,
+              status: 'ACCUMULATING',
+              input_tokens: '0',
+              output_tokens: '0',
+              cache_read_tokens: '0',
+              cache_write_tokens: '0',
+              cost_usd: '0',
+              usage_id: null,
+              finalized_at: null,
+            },
+          ],
+        };
+      }
+      if (statement.startsWith('SELECT invocation_id') && statement.includes("status = 'PREPARED'")) {
+        return {
+          rows: state.replay === 'PENDING' ? [{ invocation_id: 'pending-invocation' }] : [],
+        };
+      }
+      if (statement.startsWith('SELECT invocation_id') && statement.includes("status = 'COMPLETED'")) {
+        return {
+          rows: state.replay === 'RECORDED' ? [{ invocation_id: 'recorded-invocation' }] : [],
+        };
+      }
+      if (statement.includes('app_user.token_limit::text')) {
+        assert.deepEqual(parameters, ['tenant-a', 'user-a']);
+        assert.match(statement, /FROM e_mate_model_usage_attempt AS attempt/);
+        assert.match(statement, /date_trunc\('week'.*'UTC'/);
+        return {
+          rows: [
+            {
+              token_limit: state.tokenLimit,
+              used_tokens: state.usedTokens,
+              database_now: databaseNow,
+              week_ends_at: new Date('2026-08-03T00:00:00.000Z'),
+            },
+          ],
+        };
+      }
+      if (statement.startsWith('SELECT invocation_id') && statement.includes("status = 'REJECTED'")) {
+        return { rows: [] };
+      }
+      if (statement.startsWith('INSERT INTO e_mate_model_quota_state')) return { rows: [] };
+      if (statement.startsWith('SELECT tokens, last_refill_at')) {
+        return { rows: [{ tokens: '1000', last_refill_at: databaseNow }] };
+      }
+      if (statement === 'SELECT clock_timestamp() AS database_now') {
+        return { rows: [{ database_now: databaseNow }] };
+      }
+      if (statement.startsWith('SELECT count(*) AS active')) {
+        return { rows: [{ active: '0', earliest_expiry: null }] };
+      }
+      if (statement.startsWith('UPDATE e_mate_model_quota_state')) {
+        state.quotaUpdates += 1;
+        return { rows: [] };
+      }
+      if (statement.startsWith('INSERT INTO e_mate_model_invocation')) {
+        state.invocationInserts += 1;
+        return { rows: [] };
+      }
+      throw new Error(`Unexpected test query: ${statement}`);
+    },
+    release() {},
+  };
+  const pool = { connect: async () => client };
+  return new PostgresUsageStore(pool as never, limits);
+}
+
+test('blocks a reached user token limit before tenant admission and recovers after an immediate raise', async () => {
+  const state: TokenLimitTestState = {
+    tokenLimit: '10',
+    usedTokens: '10',
+    statements: [],
+    quotaUpdates: 0,
+    invocationInserts: 0,
+  };
+  const store = tokenLimitUsageStore(state);
+
+  await assert.rejects(store.prepare(postgresInvocationFact), (error: unknown) => {
+    assert(error instanceof InvocationAdmissionError);
+    assert.equal(error.code, 'USER_TOKEN_LIMIT_REACHED');
+    return true;
+  });
+  assert.equal(state.quotaUpdates, 0);
+  assert.equal(state.invocationInserts, 0);
+
+  state.tokenLimit = '11';
+  const prepared = await store.prepare({
+    ...postgresInvocationFact,
+    taskId: 'task-token-limit-raised',
+    traceId: 'trace-token-limit-raised',
+  });
+  assert.equal(prepared.status, 'STARTED');
+  assert.equal(state.quotaUpdates, 1);
+  assert.equal(state.invocationInserts, 1);
+});
+
+test('returns pending and recorded idempotent replays without consulting a reached user limit', async () => {
+  await Promise.all(
+    (['PENDING', 'RECORDED'] as const).map(async (replay) => {
+      const state: TokenLimitTestState = {
+        replay,
+        tokenLimit: '0',
+        usedTokens: '999',
+        statements: [],
+        quotaUpdates: 0,
+        invocationInserts: 0,
+      };
+      const prepared = await tokenLimitUsageStore(state).prepare(postgresInvocationFact);
+
+      assert.equal(prepared.status, replay);
+      assert.equal(
+        state.statements.some((statement) => statement.includes('token_limit')),
+        false
+      );
+      assert.equal(state.quotaUpdates, 0);
+    })
+  );
+});
+
+function principal(tenantId: string, userId: string, modelId = route.id): ModelGatewayPrincipal {
+  return { tenantId, userId, modelIds: [modelId] };
+}
+
+function completedSse(inputTokens: number, outputTokens: number, responseId = 'response-1'): Response {
+  const event = {
+    type: 'response.completed',
+    response: {
+      id: responseId,
+      status: 'completed',
+      output: [],
+      usage: {
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        total_tokens: inputTokens + outputTokens,
+        input_tokens_details: {
+          cached_tokens: 2,
+          cache_write_tokens: 1,
+        },
+      },
+    },
+  };
+  return new Response(`data: ${JSON.stringify(event)}\n\ndata: [DONE]\n\n`, {
+    headers: { 'content-type': 'text/event-stream' },
+  });
+}
+
+function completedChatSse(inputTokens: number, outputTokens: number, responseId = 'chat-response-1'): Response {
+  const frames = [
+    {
+      id: responseId,
+      object: 'chat.completion.chunk',
+      choices: [{ index: 0, delta: { role: 'assistant', content: '你好' }, finish_reason: 'stop' }],
+      usage: null,
+    },
+    {
+      id: responseId,
+      object: 'chat.completion.chunk',
+      choices: [],
+      usage: {
+        prompt_tokens: inputTokens,
+        completion_tokens: outputTokens,
+        total_tokens: inputTokens + outputTokens,
+      },
+    },
+  ];
+  return new Response(`${frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join('')}data: [DONE]\n\n`, {
+    headers: { 'content-type': 'text/event-stream' },
+  });
+}
+
+async function withGateway(
+  run: (baseUrl: string, upstreamRequests: Request[]) => Promise<void>,
+  responseForRequest?: (request: Request, index: number) => Response | Promise<Response>,
+  reconcileProviderInvocation?: (
+    request: ProviderInvocationReceiptRequest
+  ) => Promise<ProviderInvocationReceipt> | ProviderInvocationReceipt,
+  upstreamTimeoutMs?: number,
+  gatewayLimits = limits,
+  gatewayRoute: ModelGatewayRoute = route,
+  tenantModelRoutePolicy?: TenantModelRoutePolicy,
+  usageStore: UsageStore = new InMemoryUsageStore(gatewayLimits)
+): Promise<void> {
+  const upstreamRequests: Request[] = [];
+  const consentStore = new InMemoryConsentStore(consentPolicy);
+  await Promise.all([
+    consentStore.accept(principal('tenant-a', 'user-a', gatewayRoute.id), consentInput),
+    consentStore.accept(principal('tenant-b', 'user-b', gatewayRoute.id), consentInput),
+  ]);
+  const server = createModelGatewayServer({
+    routes: [gatewayRoute],
+    authenticate: async (token) =>
+      token === sessionToken
+        ? principal('tenant-a', 'user-a', gatewayRoute.id)
+        : token === otherToken
+          ? principal('tenant-b', 'user-b', gatewayRoute.id)
+          : null,
+    tenantModelRoutePolicy,
+    consentStore,
+    usageStore,
+    usageKeyId: 'usage-2026',
+    usagePrivateKey: privateKey,
+    reconcileProviderInvocation,
+    upstreamTimeoutMs,
+    fetchImplementation: async (input, init) => {
+      const upstreamRequest = new Request(input, init);
+      upstreamRequests.push(upstreamRequest);
+      return await (responseForRequest?.(upstreamRequest, upstreamRequests.length) ??
+        completedSse(10, 5, `response-${upstreamRequests.length}`));
+    },
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  try {
+    await run(`http://127.0.0.1:${address.port}`, upstreamRequests);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+}
+
+test('ingests strict direct-runtime audit batches idempotently without inference or quota admission', async () => {
+  let routeEnabled = true;
+  const usageStore = new InMemoryUsageStore(limits);
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const upload = (records: unknown[]) =>
+        fetch(`${baseUrl}/v1/audit/usage`, {
+          method: 'POST',
+          headers: { ...auth(), 'content-type': 'application/json' },
+          body: JSON.stringify({ schema_version: 1, records }),
+        });
+      const record = auditUsageRecord();
+      const first = await upload([record]);
+      assert.equal(first.status, 200);
+      assert.equal(first.headers.get('cache-control'), 'no-store');
+      assert.equal(first.headers.has('access-control-allow-origin'), false);
+      const receiptBatch = (await first.json()) as {
+        schema_version: number;
+        receipts: Array<Record<string, unknown>>;
+      };
+      assert.equal(receiptBatch.schema_version, 1);
+      assert.deepEqual(Object.keys(receiptBatch.receipts[0]!).sort(), [
+        'accepted_at',
+        'fact_id',
+        'payload_sha256',
+        'receipt_id',
+      ]);
+      assert.equal(Number.isNaN(Date.parse(String(receiptBatch.receipts[0]!.accepted_at))), false);
+
+      const replay = await upload([record]);
+      assert.equal(replay.status, 200);
+      assert.deepEqual(await replay.json(), receiptBatch);
+      const usage = (await (
+        await fetch(`${baseUrl}/v1/usage/current`, { headers: auth() })
+      ).json()) as { totalTokens: number };
+      assert.equal(usage.totalTokens, 11);
+      const finalized = await usageStore.finalize(
+        principal('tenant-a', 'user-a'),
+        String(record.payload.source_id)
+      );
+      assert.equal(finalized?.costUsd, 0.0001485);
+      assert.equal(finalized?.usageId, `auditusage_${createHash('sha256').update(record.fact_id).digest('hex')}`);
+      assert.equal(finalized?.occurredAt, new Date(String(record.payload.provider_created_at)).toISOString());
+      assert.deepEqual(await (await upload([record])).json(), receiptBatch);
+
+      const conflict = await upload([auditUsageRecord(1, { output_tokens: 5, total_tokens: 12 })]);
+      assert.equal(conflict.status, 409);
+      assert.equal(((await conflict.json()) as { error: { code: string } }).error.code, 'AUDIT_USAGE_CONFLICT');
+      assert.equal(
+        ((await (await fetch(`${baseUrl}/v1/usage/current`, { headers: auth() })).json()) as { totalTokens: number })
+          .totalTokens,
+        11
+      );
+      const orderedRecords = [auditUsageRecord(4), auditUsageRecord(2)];
+      const ordered = (await (await upload(orderedRecords)).json()) as {
+        receipts: Array<{ fact_id: string }>;
+      };
+      assert.deepEqual(
+        ordered.receipts.map(({ fact_id }) => fact_id),
+        orderedRecords.map(({ fact_id }) => fact_id)
+      );
+      const atomicFailure = await upload([
+        auditUsageRecord(5),
+        auditUsageRecord(1, { output_tokens: 5, total_tokens: 12 }),
+      ]);
+      assert.equal(atomicFailure.status, 409);
+      assert.equal(
+        ((await (await fetch(`${baseUrl}/v1/usage/current`, { headers: auth() })).json()) as { totalTokens: number })
+          .totalTokens,
+        33
+      );
+      assert.equal((await upload([auditUsageRecord(5)])).status, 200);
+
+      const wrongAccount = await upload([auditUsageRecord(2, { account_subject_sha256: 'b'.repeat(64) })]);
+      assert.equal(wrongAccount.status, 400);
+      const unknownField = await fetch(`${baseUrl}/v1/audit/usage`, {
+        method: 'POST',
+        headers: { ...auth(), 'content-type': 'application/json' },
+        body: JSON.stringify({ schema_version: 1, records: [auditUsageRecord(2)], extra: true }),
+      });
+      assert.equal(unknownField.status, 400);
+      assert.equal((await upload(Array.from({ length: 65 }, (_, index) => auditUsageRecord(index + 10)))).status, 400);
+      assert.equal((await fetch(`${baseUrl}/v1/audit/usage`, { headers: auth() })).status, 405);
+
+      routeEnabled = false;
+      assert.equal((await upload([auditUsageRecord(3)])).status, 403);
+      assert.equal(upstreamRequests.length, 0);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    route,
+    { isEnabled: async () => routeEnabled },
+    usageStore
+  );
+});
+
+test('ingests only metadata task audit events atomically and idempotently', async () => {
+  await withGateway(async (baseUrl, upstreamRequests) => {
+    const upload = (records: unknown[]) => fetch(`${baseUrl}/v1/audit/tasks`, {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({ schema_version: 1, records }),
+    });
+    const received = auditTaskRecord(1, 0, 'RECEIVED');
+    const tool = auditTaskRecord(1, 1, 'TOOL_EXECUTION');
+    const completed = auditTaskRecord(1, 2, 'COMPLETED');
+    const first = await upload([received, tool, completed]);
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get('cache-control'), 'no-store');
+    assert.equal(first.headers.has('access-control-allow-origin'), false);
+    const receipts = await first.json();
+    assert.deepEqual(
+      (receipts as { receipts: Array<Record<string, unknown>> }).receipts.map((receipt) => Object.keys(receipt).sort()),
+      Array.from({ length: 3 }, () => ['accepted_at', 'event_id', 'payload_sha256', 'receipt_id'])
+    );
+    assert.deepEqual(await (await upload([received, tool, completed])).json(), receipts);
+
+    const changed = auditTaskRecord(1, 0, 'RECEIVED', {
+      occurredAt: new Date(Date.now() - 5_000).toISOString(),
+    });
+    changed.event_id = received.event_id;
+    changed.payload.eventId = received.event_id;
+    changed.payload_sha256 = createHash('sha256').update(testCanonicalJson(changed.payload)).digest('hex');
+    const conflict = await upload([changed]);
+    assert.equal(conflict.status, 409);
+    assert.equal(((await conflict.json()) as { error: { code: string } }).error.code, 'AUDIT_TASK_CONFLICT');
+
+    assert.equal((await upload([auditTaskRecord(2, 1, 'FAILED')])).status, 409);
+    const task2 = auditTaskRecord(2, 0, 'RECEIVED');
+    const atomic = await upload([task2, changed]);
+    assert.equal(atomic.status, 409);
+    assert.equal((await upload([task2])).status, 200);
+
+    const wrongAccount = auditTaskRecord(3, 0, 'RECEIVED');
+    wrongAccount.account_subject_sha256 = 'b'.repeat(64);
+    assert.equal((await upload([wrongAccount])).status, 400);
+    assert.equal((await upload([{ ...auditTaskRecord(4, 0, 'RECEIVED'), prompt: 'forbidden' }])).status, 400);
+    assert.equal((await upload(Array.from({ length: 65 }, (_, index) => auditTaskRecord(index + 10)))).status, 400);
+    assert.equal((await fetch(`${baseUrl}/v1/audit/tasks`, { headers: auth() })).status, 405);
+    assert.equal(upstreamRequests.length, 0);
+  });
+});
+
+test('maps a direct-runtime upstream model id back to its allowed managed route', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const response = await fetch(`${baseUrl}/v1/audit/usage`, {
+        method: 'POST',
+        headers: { ...auth(), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          schema_version: 1,
+          records: [
+            auditUsageRecord(1, {
+              requested_model_id: chatRoute.upstreamModelId,
+              actual_model_id: chatRoute.upstreamModelId,
+            }),
+          ],
+        }),
+      });
+      assert.equal(response.status, 200);
+      assert.equal(upstreamRequests.length, 0);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    chatRoute,
+    { isEnabled: async () => true }
+  );
+});
+
+test('distinguishes a missing credential from an unavailable authenticator', async () => {
+  const server = createModelGatewayServer({
+    routes: [route],
+    authenticate: async () => {
+      throw new Error('authentication backend unavailable');
+    },
+    usageStore: new InMemoryUsageStore(limits),
+    usageKeyId: 'usage-2026',
+    usagePrivateKey: privateKey,
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const missing = await fetch(`${baseUrl}/v1/models`);
+    assert.equal(missing.status, 401);
+    assert.equal((await missing.json()).error.code, 'AUTHENTICATION_REQUIRED');
+
+    const unavailable = await fetch(`${baseUrl}/v1/models`, { headers: auth() });
+    assert.equal(unavailable.status, 503);
+    assert.equal((await unavailable.json()).error.code, 'AUTHENTICATION_UNAVAILABLE');
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
+test('returns HTTP 429 without an upstream request when the user token limit is reached', async () => {
+  const usageStore = new InMemoryUsageStore(limits);
+  usageStore.prepare = async () => {
+    throw new InvocationAdmissionError('USER_TOKEN_LIMIT_REACHED', 3_600_000);
+  };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const response = await modelRequest(baseUrl);
+      assert.equal(response.status, 429);
+      assert.equal(response.headers.get('retry-after'), '3600');
+      assert.equal((await response.json()).error.code, 'USER_TOKEN_LIMIT_REACHED');
+      assert.equal(upstreamRequests.length, 0);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    route,
+    undefined,
+    usageStore
+  );
+});
+
+test('enforces tenant route policy before upstream or usage journal access', async () => {
+  const checked: string[] = [];
+  const policy: TenantModelRoutePolicy = {
+    async isEnabled(tenantId, routeId) {
+      checked.push(`${tenantId}:${routeId}`);
+      return tenantId !== 'tenant-a';
+    },
+  };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const hidden = await fetch(`${baseUrl}/v1/models`, { headers: auth() });
+      assert.equal(hidden.status, 403);
+
+      const rejected = await modelRequest(baseUrl);
+      assert.equal(rejected.status, 403);
+      assert.equal(upstreamRequests.length, 0);
+
+      const available = await fetch(`${baseUrl}/v1/models`, {
+        headers: auth(otherToken),
+      });
+      assert.equal(available.status, 200);
+      assert.equal(((await available.json()) as { models: unknown[] }).models.length, 1);
+      assert.deepEqual(checked, ['tenant-a:gpt-5.6-sol', 'tenant-a:gpt-5.6-sol', 'tenant-b:gpt-5.6-sol']);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    route,
+    policy
+  );
+});
+
+test('applies route enable and disable changes to an existing session on its next request', async () => {
+  let enabled = false;
+  const upstreamRequests: Request[] = [];
+  const consentStore = new InMemoryConsentStore(consentPolicy);
+  await consentStore.accept(principal('tenant-a', 'user-a'), consentInput);
+  const policy: TenantModelRoutePolicy = {
+    async isEnabled(tenantId, routeId) {
+      assert.equal(tenantId, 'tenant-a');
+      assert.equal(routeId, route.id);
+      return enabled;
+    },
+  };
+  const server = createModelGatewayServer({
+    routes: [route],
+    authenticate: async (token) => {
+      if (token === sessionToken) {
+        return { tenantId: 'tenant-a', userId: 'user-a', modelIds: [route.id], sessionId: 'auth-session-1' };
+      }
+      if (token === otherToken) return { tenantId: 'tenant-a', userId: 'user-a', modelIds: [] };
+      return null;
+    },
+    consentStore,
+    tenantModelRoutePolicy: policy,
+    usageStore: new InMemoryUsageStore(limits),
+    usageKeyId: 'usage-2026',
+    usagePrivateKey: privateKey,
+    fetchImplementation: async (input, init) => {
+      upstreamRequests.push(new Request(input, init));
+      return completedSse(10, 5, `response-${upstreamRequests.length}`);
+    },
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const invoke = (token: string, taskId: string) =>
+    fetch(`${baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: {
+        ...responseHeaders(),
+        session_id: taskId,
+        'x-client-request-id': taskId,
+        'x-e-mate-task-id': taskId,
+        'x-e-mate-trace-id': `trace-${taskId}`,
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ model: route.id, input: [], stream: true, store: false }),
+    });
+
+  try {
+    assert.equal((await invoke(sessionToken, 'session-disabled')).status, 403);
+    enabled = true;
+    assert.equal((await fetch(`${baseUrl}/v1/models`, { headers: auth() })).status, 200);
+    const enabledResponse = await invoke(sessionToken, 'session-enabled');
+    assert.equal(enabledResponse.status, 200);
+    await enabledResponse.text();
+    enabled = false;
+    assert.equal((await invoke(sessionToken, 'session-disabled-again')).status, 403);
+    enabled = true;
+    assert.equal((await fetch(`${baseUrl}/v1/models`, { headers: auth(otherToken) })).status, 403);
+    assert.equal((await invoke(otherToken, 'credential-remains-scoped')).status, 403);
+    assert.equal(upstreamRequests.length, 1);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
+test('fails closed when the tenant route policy cannot be read', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const catalog = await fetch(`${baseUrl}/v1/models`, { headers: auth() });
+      assert.equal(catalog.status, 503);
+      assert.equal((await catalog.json()).error.code, 'MODEL_POLICY_UNAVAILABLE');
+
+      const response = await modelRequest(baseUrl);
+      assert.equal(response.status, 503);
+      assert.equal(upstreamRequests.length, 0);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    route,
+    {
+      async isEnabled() {
+        throw new Error('database unavailable');
+      },
+    }
+  );
+});
+
+test('uses a fresh tenant key for new requests without interrupting an in-flight request', async () => {
+  let currentKey = 'tenant-provider-key-before-rotation';
+  let firstStartedResolve!: () => void;
+  const firstStarted = new Promise<void>((resolve) => {
+    firstStartedResolve = resolve;
+  });
+  let releaseFirstResolve!: () => void;
+  const releaseFirst = new Promise<void>((resolve) => {
+    releaseFirstResolve = resolve;
+  });
+  const policy: TenantModelRoutePolicy = {
+    isEnabled: async () => true,
+    upstreamApiKey: async () => currentKey,
+  };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const first = modelRequest(baseUrl, responseHeaders(), 'before rotation');
+      await firstStarted;
+      currentKey = 'tenant-provider-key-after-rotation';
+      const second = await modelRequest(
+        baseUrl,
+        {
+          ...responseHeaders(),
+          session_id: 'session-2',
+          'x-client-request-id': 'session-2',
+          'x-e-mate-task-id': 'task-2',
+          'x-e-mate-trace-id': 'trace-2',
+        },
+        'after rotation'
+      );
+      assert.equal(second.status, 200);
+      releaseFirstResolve();
+      assert.equal((await first).status, 200);
+      assert.equal(upstreamRequests[0]?.headers.get('authorization'), 'Bearer tenant-provider-key-before-rotation');
+      assert.equal(upstreamRequests[1]?.headers.get('authorization'), 'Bearer tenant-provider-key-after-rotation');
+    },
+    async (_request, index) => {
+      if (index === 1) {
+        firstStartedResolve();
+        await releaseFirst;
+      }
+      return completedSse(10, 5, `response-${index}`);
+    },
+    undefined,
+    undefined,
+    { ...limits, tenantMaxConcurrent: 2 },
+    route,
+    policy
+  );
+});
+
+test('keeps non-default routes denied until the tenant explicitly enables them', async () => {
+  const enterpriseRoute: ModelGatewayRoute = {
+    ...route,
+    id: 'gpt-5.6-enterprise',
+    upstreamModelId: 'provider-enterprise',
+    label: 'Enterprise',
+    buttonLabel: 'Enterprise',
+  };
+  const requestEnterprise = (baseUrl: string) =>
+    fetch(`${baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: responseHeaders(),
+      body: JSON.stringify({
+        model: enterpriseRoute.id,
+        input: [{ role: 'user', content: 'hello' }],
+        stream: true,
+        store: false,
+      }),
+    });
+
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      assert.equal((await fetch(`${baseUrl}/v1/models`, { headers: auth() })).status, 403);
+      assert.equal((await requestEnterprise(baseUrl)).status, 403);
+      assert.equal(upstreamRequests.length, 0);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    enterpriseRoute
+  );
+
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      assert.equal((await fetch(`${baseUrl}/v1/models`, { headers: auth() })).status, 200);
+      assert.equal((await requestEnterprise(baseUrl)).status, 200);
+      assert.equal(upstreamRequests.length, 1);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    enterpriseRoute,
+    { isEnabled: async () => true }
+  );
+});
+
+function compactionRequest(baseUrl: string, input: unknown[], headers = responseHeaders()): Promise<Response> {
+  return fetch(`${baseUrl}/v1/responses`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: 'gpt-5.6-sol',
+      input,
+      stream: true,
+      store: false,
+      reasoning: { effort: 'medium', summary: 'auto' },
+    }),
+  });
+}
+
+const auth = (token = sessionToken): Record<string, string> => ({
+  authorization: `Bearer ${token}`,
+});
+
+function testCanonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(testCanonicalJson).join(',')}]`;
+  if (typeof value === 'object' && value !== null) {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${testCanonicalJson(record[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) as string;
+}
+
+function auditUsageRecord(
+  eventSeq = 1,
+  overrides: Record<string, unknown> = {}
+): { fact_id: string; payload_sha256: string; payload: Record<string, unknown> } {
+  const sessionIdSha256 = createHash('sha256').update('session-a').digest('hex');
+  const sourceId = `harness:${sessionIdSha256}:${eventSeq}`;
+  const payload = {
+    schema_version: 1,
+    source_service: 'e-mate-audit',
+    source_id: sourceId,
+    usage_kind: 'chat',
+    session_id_sha256: sessionIdSha256,
+    event_seq: eventSeq,
+    turn: 1,
+    step: eventSeq,
+    provider_created_at: new Date().toISOString(),
+    requested_model_id: route.id,
+    actual_model_id: route.id,
+    actual_provider_id: 'e-mate-enterprise',
+    input_tokens: 3,
+    output_tokens: 4,
+    cache_read_tokens: 2,
+    cache_write_tokens: 2,
+    reasoning_tokens: 1,
+    total_tokens: 11,
+    account_subject_sha256: createHash('sha256').update('tenant-a:user-a').digest('hex'),
+    policy_revision: 1,
+    policy_receipt_id: 'policy-receipt-1',
+    policy_sha256: 'a'.repeat(64),
+    ...overrides,
+  };
+  return {
+    fact_id: `auditfact_${createHash('sha256').update(`e-Mate audit v1\0${sourceId}`).digest('hex')}`,
+    payload_sha256: createHash('sha256').update(testCanonicalJson(payload)).digest('hex'),
+    payload,
+  };
+}
+
+function auditTaskRecord(
+  task = 1,
+  sequence = 0,
+  type = 'RECEIVED',
+  overrides: Record<string, unknown> = {}
+) {
+  const taskId = `task_${createHash('sha256').update(`test-task:${task}`).digest('hex')}`;
+  const eventId = `taskevent_${createHash('sha256').update(`test-task:${task}:${sequence}:${type}`).digest('hex')}`;
+  const payload = {
+    schemaVersion: 1,
+    eventId,
+    taskId,
+    type,
+    scenario: 'GENERAL',
+    occurredAt: new Date(Date.now() - 10_000 + sequence).toISOString(),
+    ...overrides,
+  };
+  return {
+    event_id: eventId,
+    account_subject_sha256: createHash('sha256').update('tenant-a:user-a').digest('hex'),
+    payload_sha256: createHash('sha256').update(testCanonicalJson(payload)).digest('hex'),
+    payload,
+  };
+}
+
+const consentPolicy = {
+  schemaVersion: 1,
+  agreementId: 'e-mate-platform-terms',
+  agreementVersion: '1.0.0',
+  disclaimerVersion: '1.0.0',
+  contentHash: 'a'.repeat(64),
+} as const;
+
+const consentInput = {
+  ...consentPolicy,
+  termsAccepted: true,
+  policyRead: true,
+  lawfulUseConfirmed: true,
+  clientVersion: '2.1.45',
+  locale: 'zh-CN',
+} as const;
+
+test('session-authenticated consent status and acceptance are strict, idempotent and tenant scoped', async () => {
+  const consentStore = new InMemoryConsentStore(consentPolicy, () => Date.parse('2026-08-02T01:02:03.000Z'));
+  const server = createModelGatewayServer({
+    routes: [route],
+    authenticate: async (token) =>
+      token === sessionToken
+        ? principal('tenant-a', 'user-a')
+        : token === otherToken
+          ? principal('tenant-b', 'user-b')
+          : null,
+    consentStore,
+    usageStore: new InMemoryUsageStore(limits),
+    usageKeyId: 'usage-2026',
+    usagePrivateKey: privateKey,
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    assert.equal((await fetch(`${baseUrl}/v1/consents/current`)).status, 401);
+    const current = await fetch(`${baseUrl}/v1/consents/current`, { headers: auth() });
+    assert.equal(current.status, 200);
+    assert.equal(((await current.json()) as { required: boolean }).required, true);
+    assert.equal(
+      (
+        await fetch(`${baseUrl}/v1/consents/accept`, {
+          method: 'POST',
+          headers: { ...auth(), 'content-type': 'application/json' },
+          body: JSON.stringify({ ...consentInput, userId: 'user-b' }),
+        })
+      ).status,
+      400
+    );
+    const stale = await fetch(`${baseUrl}/v1/consents/accept`, {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({ ...consentInput, disclaimerVersion: '0.9.0' }),
+    });
+    assert.equal(stale.status, 409);
+    assert.equal(((await stale.json()) as { error: { code: string } }).error.code, 'CONSENT_POLICY_CHANGED');
+    const accepted = await fetch(`${baseUrl}/v1/consents/accept`, {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify(consentInput),
+    });
+    assert.equal(accepted.status, 200);
+    const first = (await accepted.json()) as { acceptanceId: string; userId: string; acceptedAt: string };
+    assert.equal(first.userId, 'user-a');
+    const replay = await fetch(`${baseUrl}/v1/consents/accept`, {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({ ...consentInput, clientVersion: '2.1.46' }),
+    });
+    assert.deepEqual(await replay.json(), first);
+    assert.equal(
+      (
+        (await (await fetch(`${baseUrl}/v1/consents/current`, { headers: auth(otherToken) })).json()) as {
+          required: boolean;
+        }
+      ).required,
+      true
+    );
+    assert.equal((await fetch(`${baseUrl}/v1/consents/current`, { method: 'POST', headers: auth() })).status, 405);
+    assert.equal((await fetch(`${baseUrl}/v1/consents/accept`, { headers: auth() })).status, 405);
+    assert.equal((await fetch(`${baseUrl}/v1/consents/current?userId=user-b`, { headers: auth() })).status, 400);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
+test('blocks every user model capability until the current consent is accepted', async () => {
+  const consentStore = new InMemoryConsentStore(consentPolicy);
+  let upstreamRequests = 0;
+  const server = createModelGatewayServer({
+    routes: [route, imageRoute],
+    authenticate: async (token) => (token === sessionToken ? principal('tenant-a', 'user-a') : null),
+    consentStore,
+    usageStore: new InMemoryUsageStore(limits),
+    usageKeyId: 'usage-2026',
+    usagePrivateKey: privateKey,
+    fetchImplementation: async () => {
+      upstreamRequests += 1;
+      return completedSse(10, 5);
+    },
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const requests = [
+      fetch(`${baseUrl}/v1/models`, { headers: auth() }),
+      modelRequest(baseUrl),
+      fetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: responseHeaders(),
+        body: JSON.stringify({ model: chatRoute.id, messages: [] }),
+      }),
+      imageRequest(baseUrl),
+      imageEditRequest(baseUrl),
+    ];
+    const responses = await Promise.all(requests);
+    assert.deepEqual(
+      responses.map(({ status }) => status),
+      [403, 403, 403, 403, 403]
+    );
+    assert.deepEqual(
+      await Promise.all(
+        responses.map(async (response) => ((await response.json()) as { error: { code: string } }).error.code)
+      ),
+      ['CONSENT_REQUIRED', 'CONSENT_REQUIRED', 'CONSENT_REQUIRED', 'CONSENT_REQUIRED', 'CONSENT_REQUIRED']
+    );
+    assert.equal(upstreamRequests, 0);
+
+    const accepted = await fetch(`${baseUrl}/v1/consents/accept`, {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify(consentInput),
+    });
+    assert.equal(accepted.status, 200);
+    assert.equal((await fetch(`${baseUrl}/v1/models`, { headers: auth() })).status, 200);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
+test('administrators use the model catalog without signing the user agreement', async () => {
+  const server = createModelGatewayServer({
+    routes: [route],
+    authenticate: async (token) => token === sessionToken
+      ? { ...principal('tenant-a', 'admin-a'), roles: ['TENANT_ADMIN'] }
+      : token === otherToken ? { ...principal('tenant-a', 'auditor-a'), roles: ['AUDIT_ADMIN'] } : null,
+    consentStore: new InMemoryConsentStore(consentPolicy),
+    usageStore: new InMemoryUsageStore(limits),
+    usageKeyId: 'usage-2026',
+    usagePrivateKey: privateKey,
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    assert.equal((await fetch(`${baseUrl}/v1/models`, { headers: auth() })).status, 200);
+    assert.equal((await fetch(`${baseUrl}/v1/models`, { headers: auth(otherToken) })).status, 200);
+    const consent = (await (
+      await fetch(`${baseUrl}/v1/consents/current`, { headers: auth() })
+    ).json()) as { required: boolean };
+    assert.equal(consent.required, true);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
+test('fails closed when the consent store is unavailable', async () => {
+  const server = createModelGatewayServer({
+    routes: [route],
+    authenticate: async (token) =>
+      token === sessionToken ? { ...principal('tenant-a', 'user-a'), sessionId: 'auth-session-1' } : null,
+    usageStore: new InMemoryUsageStore(limits),
+    usageKeyId: 'usage-2026',
+    usagePrivateKey: privateKey,
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const response = await fetch(`${baseUrl}/v1/models`, { headers: auth() });
+    assert.equal(response.status, 503);
+    assert.equal(((await response.json()) as { error: { code: string } }).error.code, 'CONSENT_STORE_UNAVAILABLE');
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
+const responseHeaders = (): Record<string, string> => ({
+  ...auth(),
+  'content-type': 'application/json',
+  session_id: 'session-1',
+  'x-client-request-id': 'session-1',
+  'x-e-mate-task-id': 'task-1',
+  'x-e-mate-trace-id': 'trace-1',
+});
+
+const codexResponseHeaders = (overrides: Record<string, string> = {}): Record<string, string> => ({
+  ...auth(),
+  'content-type': 'application/json',
+  'session-id': 'codex-session-1',
+  'thread-id': 'codex-thread-1',
+  'x-client-request-id': 'codex-thread-1',
+  'x-codex-turn-metadata': JSON.stringify({
+    request_kind: 'turn',
+    session_id: 'codex-session-1',
+    thread_id: 'codex-thread-1',
+    turn_id: 'codex-turn-1',
+  }),
+  ...overrides,
+});
+
+function modelRequest(
+  baseUrl: string,
+  headers = responseHeaders(),
+  content = 'hello',
+  tools?: Array<Record<string, unknown>>
+): Promise<Response> {
+  return fetch(`${baseUrl}/v1/responses`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: 'gpt-5.6-sol',
+      input: [{ role: 'user', content }],
+      stream: true,
+      store: false,
+      reasoning: { effort: 'medium', summary: 'auto' },
+      ...(tools ? { tools } : {}),
+    }),
+  });
+}
+
+function imageRequest(
+  baseUrl: string,
+  body: Record<string, unknown> = {
+    model: imageRoute.id,
+    prompt: 'A blue circle on white.',
+    size: '1024x1024',
+  }
+): Promise<Response> {
+  return fetch(`${baseUrl}/v1/images/generations`, {
+    method: 'POST',
+    headers: responseHeaders(),
+    body: JSON.stringify(body),
+  });
+}
+
+function imageEditRequest(
+  baseUrl: string,
+  form = (() => {
+    const value = new FormData();
+    value.set('model', imageRoute.id);
+    value.set('prompt', 'Keep the subject and change the background.');
+    value.set('image', new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }), 'input.png');
+    return value;
+  })(),
+  scope = 'edit-1'
+): Promise<Response> {
+  const headers = responseHeaders();
+  delete headers['content-type'];
+  headers.session_id = `session-${scope}`;
+  headers['x-client-request-id'] = `session-${scope}`;
+  headers['x-e-mate-task-id'] = `task-${scope}`;
+  headers['x-e-mate-trace-id'] = `trace-${scope}`;
+  return fetch(`${baseUrl}/v1/images/edits`, { method: 'POST', headers, body: form });
+}
+
+function interruptedSse(): Response {
+  return new Response('data: {"type":"response.in_progress"}\n\n', {
+    headers: { 'content-type': 'text/event-stream' },
+  });
+}
+
+test('accepts the pinned Harness pi-ai native session headers without a second transport adapter', async () => {
+  await withGateway(async (baseUrl, upstreamRequests) => {
+    const response = await modelRequest(baseUrl, {
+      ...auth(),
+      'content-type': 'application/json',
+      session_id: 'harness-session-207',
+      'x-client-request-id': 'harness-session-207',
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(upstreamRequests.length, 1);
+    const upstreamBody = JSON.parse(await upstreamRequests[0]!.text()) as {
+      reasoning: { effort: string; summary: string };
+    };
+    assert.equal(upstreamBody.reasoning.effort, 'medium');
+
+    const usageResponse = await fetch(`${baseUrl}/v1/usage/current`, { headers: auth() });
+    assert.equal(usageResponse.status, 200);
+    const usage = (await usageResponse.json()) as {
+      schemaVersion: number;
+      totalTokens: number;
+      weekStartedAt: string;
+      calculatedAt: string;
+    };
+    assert.equal(usage.schemaVersion, 1);
+    assert.equal(usage.totalTokens, 15);
+    assert.equal(Number.isNaN(Date.parse(usage.weekStartedAt)), false);
+    assert.equal(Number.isNaN(Date.parse(usage.calculatedAt)), false);
+  });
+});
+
+test('proxies only an authorized medium request and returns signed aggregate usage', async () => {
+  await withGateway(async (baseUrl, upstreamRequests) => {
+    const catalogResponse = await fetch(`${baseUrl}/v1/models`, {
+      headers: auth(),
+    });
+    assert.equal(catalogResponse.status, 200);
+    const catalog = (await catalogResponse.json()) as {
+      models: Array<Record<string, unknown>>;
+      data: Array<{
+        id: string;
+        capabilities: { input: string[]; reasoning: boolean; toolCalling: boolean; imageGeneration: boolean };
+      }>;
+    };
+    assert.equal(catalog.models[0]?.id, 'gpt-5.6-sol');
+    assert.deepEqual(catalog.data, [
+      {
+        id: 'gpt-5.6-sol',
+        capabilities: {
+          input: ['text', 'image'],
+          reasoning: true,
+          toolCalling: true,
+          imageGeneration: false,
+        },
+      },
+    ]);
+    assert.equal(JSON.stringify(catalog).includes(route.upstreamApiKey), false);
+    assert.equal(JSON.stringify(catalog).includes(route.upstreamBaseUrl), false);
+
+    const cliCatalogResponse = await fetch(`${baseUrl}/v1/models?client_version=0.146.0`, {
+      headers: auth(),
+    });
+    assert.equal(cliCatalogResponse.status, 200);
+    const cliCatalog = (await cliCatalogResponse.json()) as {
+      models: Array<Record<string, unknown>>;
+    };
+    assert.deepEqual(
+      cliCatalog.models.map(({ slug }) => slug),
+      ['gpt-5.6-sol']
+    );
+    assert.equal(cliCatalog.models[0]?.supports_reasoning_summary_parameter, true);
+    assert.equal(typeof cliCatalog.models[0]?.base_instructions, 'string');
+    assert.equal(String(cliCatalog.models[0]?.base_instructions).includes('Never fabricate'), true);
+    assert.equal(String(cliCatalog.models[0]?.base_instructions).includes('Codex'), false);
+    assert.equal(String(cliCatalog.models[0]?.base_instructions).includes('Aion'), false);
+    assert.deepEqual(cliCatalog.models[0]?.truncation_policy, { mode: 'tokens', limit: 10_000 });
+    assert.equal(cliCatalog.models[0]?.auto_compact_token_limit, null);
+    assert.deepEqual(cliCatalog.models[0]?.supported_reasoning_levels, [
+      { effort: 'medium', description: route.buttonLabel },
+    ]);
+
+    const tools = [
+      {
+        type: 'function',
+        name: 'create_document',
+        description: 'Create a document',
+        parameters: { type: 'object', properties: {} },
+      },
+    ];
+    for (let round = 0; round < 2; round += 1) {
+      const modelResponse = await modelRequest(
+        baseUrl,
+        responseHeaders(),
+        `hello-${round}`,
+        round === 0 ? tools : undefined
+      );
+      assert.equal(modelResponse.status, 200);
+      assert.match(await modelResponse.text(), /response\.completed/);
+    }
+
+    assert.equal(upstreamRequests.length, 2);
+    assert.equal(upstreamRequests[0]?.headers.get('authorization'), `Bearer ${route.upstreamApiKey}`);
+    const forwarded = (await upstreamRequests[0]?.json()) as Record<string, unknown>;
+    assert.equal(forwarded.model, route.upstreamModelId);
+    assert.deepEqual(forwarded.tools, tools);
+
+    const receiptResponse = await fetch(`${baseUrl}/v1/usage/task-1`, {
+      headers: auth(),
+    });
+    assert.equal(receiptResponse.status, 200);
+    const envelope = (await receiptResponse.json()) as Record<string, unknown>;
+    const payload = Buffer.from(String(envelope.payload), 'base64url');
+    assert.equal(verify(null, payload, publicKey, Buffer.from(String(envelope.signature), 'base64url')), true);
+    const usage = JSON.parse(payload.toString('utf8')) as Record<string, unknown>;
+    assert.deepEqual(
+      {
+        taskId: usage.taskId,
+        traceId: usage.traceId,
+        modelId: usage.modelId,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheReadTokens: usage.cacheReadTokens,
+        cacheWriteTokens: usage.cacheWriteTokens,
+        totalTokens: usage.totalTokens,
+      },
+      {
+        taskId: 'task-1',
+        traceId: 'trace-1',
+        modelId: 'gpt-5.6-sol',
+        inputTokens: 14,
+        outputTokens: 10,
+        cacheReadTokens: 4,
+        cacheWriteTokens: 2,
+        totalTokens: 30,
+      }
+    );
+  });
+});
+
+test('adapts Chat Completions through the accounted Responses stream', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const headers = {
+        ...responseHeaders(),
+        'x-e-mate-task-id': 'task-chat',
+        'x-e-mate-trace-id': 'trace-chat',
+      };
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: chatRoute.id,
+          instructions: 'You are 小芯.',
+          input: [
+            {
+              type: 'message',
+              role: 'user',
+              content: [{ type: 'input_text', text: '你好' }],
+            },
+          ],
+          stream: true,
+          store: false,
+        }),
+      });
+      assert.equal(response.status, 200);
+      const stream = await response.text();
+      assert.match(stream, /response\.output_text\.delta/);
+      assert.match(stream, /response\.completed/);
+      assert.equal(upstreamRequests.length, 1);
+      assert.equal(new URL(upstreamRequests[0]?.url ?? '').pathname, '/v1/chat/completions');
+      const upstreamBody = (await upstreamRequests[0]?.json()) as {
+        model: string;
+        messages: Array<{ role: string; content: string }>;
+        stream_options: unknown;
+      };
+      assert.equal(upstreamBody.model, 'deepseek-chat');
+      assert.deepEqual(upstreamBody.messages, [
+        { role: 'system', content: 'You are 小芯.' },
+        { role: 'user', content: '你好' },
+      ]);
+      assert.deepEqual(upstreamBody.stream_options, { include_usage: true });
+
+      const usageResponse = await fetch(`${baseUrl}/v1/usage/task-chat`, { headers: auth() });
+      assert.equal(usageResponse.status, 200);
+      const envelope = (await usageResponse.json()) as Record<string, unknown>;
+      const usage = JSON.parse(Buffer.from(String(envelope.payload), 'base64url').toString('utf8')) as Record<
+        string,
+        unknown
+      >;
+      assert.equal(usage.inputTokens, 11);
+      assert.equal(usage.outputTokens, 3);
+      assert.equal(usage.providerId, 'deepseek');
+    },
+    () => completedChatSse(11, 3),
+    undefined,
+    undefined,
+    limits,
+    chatRoute,
+    { isEnabled: async () => true }
+  );
+});
+
+test('keeps an interrupted Chat Completions invocation pending without upstream DONE', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const headers = {
+        ...responseHeaders(),
+        'x-e-mate-task-id': 'task-chat-interrupted',
+        'x-e-mate-trace-id': 'trace-chat-interrupted',
+      };
+      const body = JSON.stringify({
+        model: chatRoute.id,
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '你好' }],
+          },
+        ],
+        stream: true,
+        store: false,
+      });
+      const send = (): Promise<Response> =>
+        fetch(`${baseUrl}/v1/responses`, {
+          method: 'POST',
+          headers,
+          body,
+        });
+      const response = await send();
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /UPSTREAM_STREAM_FAILED/);
+      assert.equal(upstreamRequests.length, 1);
+
+      const retry = await send();
+      assert.equal(retry.status, 409);
+      assert.match(JSON.stringify(await retry.json()), /INVOCATION_RECONCILIATION_REQUIRED/);
+      assert.equal(upstreamRequests.length, 1);
+    },
+    () =>
+      new Response(
+        'data: {"id":"chat-interrupted","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}\n\n',
+        { headers: { 'content-type': 'text/event-stream' } }
+      ),
+    undefined,
+    undefined,
+    limits,
+    chatRoute,
+    { isEnabled: async () => true }
+  );
+});
+
+test('exposes image generation only to the desktop catalog while proxying its dedicated API', async () => {
+  const usageStore = new InMemoryUsageStore(limits);
+  const finalize = usageStore.finalize.bind(usageStore);
+  const finalizedTaskIds: string[] = [];
+  usageStore.finalize = async (principal, taskId) => {
+    finalizedTaskIds.push(taskId);
+    return finalize(principal, taskId);
+  };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const catalogResponse = await fetch(`${baseUrl}/v1/models`, { headers: auth() });
+      assert.equal(catalogResponse.status, 200);
+      const catalog = (await catalogResponse.json()) as {
+        models: Array<{ id: string }>;
+        data: Array<{ id: string }>;
+      };
+      assert.deepEqual(
+        catalog.models.map(({ id }) => id),
+        ['gpt-image-2-pro']
+      );
+      assert.deepEqual(catalog.data, []);
+
+      const cliCatalog = await fetch(`${baseUrl}/v1/models?client_version=0.146.0`, { headers: auth() });
+      assert.equal(cliCatalog.status, 200);
+      assert.deepEqual(((await cliCatalog.json()) as { models: unknown[] }).models, []);
+
+      const generated = await imageRequest(baseUrl);
+      assert.equal(generated.status, 200);
+      const body = (await generated.json()) as {
+        id: string;
+        data: Array<{ b64_json: string }>;
+      };
+      assert.match(body.id, /^image-[A-Za-z0-9._:-]+$/);
+      assert.equal(body.data[0]?.b64_json, 'aGVsbG8=');
+      assert.deepEqual(finalizedTaskIds, ['task-1']);
+
+      const replay = await imageRequest(baseUrl);
+      assert.equal(replay.status, 409);
+      assert.match(JSON.stringify(await replay.json()), /INVOCATION_RESULT_ALREADY_RECORDED/);
+      assert.deepEqual(finalizedTaskIds, ['task-1', 'task-1']);
+
+      assert.equal(upstreamRequests.length, 1);
+      assert.equal(upstreamRequests[0]?.url, `${imageRoute.upstreamBaseUrl}/images/generations`);
+      assert.equal(upstreamRequests[0]?.headers.get('authorization'), `Bearer ${imageRoute.upstreamApiKey}`);
+      assert.match(upstreamRequests[0]?.headers.get('idempotency-key') ?? '', /^[A-Za-z0-9._:-]+$/);
+      assert.deepEqual(await upstreamRequests[0]?.json(), {
+        model: imageRoute.upstreamModelId,
+        prompt: 'A blue circle on white.',
+        size: '1024x1024',
+        n: 1,
+        response_format: 'b64_json',
+      });
+
+      const receiptResponse = await fetch(`${baseUrl}/v1/usage/task-1`, { headers: auth() });
+      assert.equal(receiptResponse.status, 200);
+      const envelope = (await receiptResponse.json()) as Record<string, unknown>;
+      const payload = Buffer.from(String(envelope.payload), 'base64url');
+      assert.equal(verify(null, payload, publicKey, Buffer.from(String(envelope.signature), 'base64url')), true);
+      const usage = JSON.parse(payload.toString('utf8')) as Record<string, unknown>;
+      assert.deepEqual(
+        {
+          modelId: usage.modelId,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          totalTokens: usage.totalTokens,
+        },
+        {
+          modelId: imageRoute.id,
+          inputTokens: 31,
+          outputTokens: 229,
+          totalTokens: 260,
+        }
+      );
+    },
+    () =>
+      Response.json({
+        model: 'gpt-image-2-codex',
+        data: [{ b64_json: 'aGVsbG8=' }],
+        usage: {
+          input_tokens: 31,
+          output_tokens: 229,
+          total_tokens: 260,
+          input_tokens_details: { image_tokens: 0, text_tokens: 31 },
+          output_tokens_details: { image_tokens: 229, text_tokens: 0 },
+        },
+      }),
+    undefined,
+    undefined,
+    limits,
+    imageRoute,
+    { isEnabled: async () => true },
+    usageStore
+  );
+});
+
+test('proxies Codex-like image edits through the same fixed Pro route and usage journal', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const edited = await imageEditRequest(baseUrl);
+      assert.equal(edited.status, 200);
+      assert.equal(((await edited.json()) as { data: unknown[] }).data.length, 1);
+      assert.equal(upstreamRequests.length, 1);
+      const upstream = upstreamRequests[0] as Request;
+      assert.equal(upstream.url, `${imageRoute.upstreamBaseUrl}/images/edits`);
+      assert.match(upstream.headers.get('content-type') ?? '', /^multipart\/form-data; boundary=/i);
+      const form = await upstream.formData();
+      assert.equal(form.get('model'), imageRoute.upstreamModelId);
+      assert.equal(form.get('prompt'), 'Keep the subject and change the background.');
+      assert.equal(form.get('n'), '1');
+      assert.equal(form.get('response_format'), 'b64_json');
+      const image = form.get('image');
+      assert.equal(typeof image === 'string', false);
+      assert.equal((image as File).type, 'image/png');
+      assert.deepEqual([...new Uint8Array(await (image as File).arrayBuffer())], [1, 2, 3]);
+      assert.equal((await fetch(`${baseUrl}/v1/usage/task-edit-1`, { headers: auth() })).status, 200);
+    },
+    () => Response.json({
+      data: [{ b64_json: 'aGVsbG8=' }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    }),
+    undefined,
+    undefined,
+    limits,
+    imageRoute,
+    { isEnabled: async () => true }
+  );
+});
+
+test('falls back from image Pro only after a definite provider rejection', async () => {
+  let primaryBodyCancelled = false;
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const generated = await imageRequest(baseUrl);
+      assert.equal(generated.status, 200);
+      assert.equal(upstreamRequests.length, 2);
+      const primaryRequest = upstreamRequests[0];
+      const fallbackRequest = upstreamRequests[1];
+      assert.ok(primaryRequest);
+      assert.ok(fallbackRequest);
+      assert.equal(((await primaryRequest.json()) as Record<string, unknown>).model, 'provider-image-pro');
+      assert.equal(((await fallbackRequest.json()) as Record<string, unknown>).model, 'provider-image-standard');
+      assert.notEqual(primaryRequest.headers.get('idempotency-key'), fallbackRequest.headers.get('idempotency-key'));
+      assert.equal(primaryBodyCancelled, true);
+    },
+    (_request, index) =>
+      index === 1
+        ? new Response(
+            new ReadableStream({
+              cancel() {
+                primaryBodyCancelled = true;
+              },
+            }),
+            { status: 404 }
+          )
+        : Response.json({
+            data: [{ b64_json: 'aGVsbG8=' }],
+            usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+          }),
+    undefined,
+    undefined,
+    limits,
+    imageRoute,
+    { isEnabled: async () => true }
+  );
+});
+
+test('does not risk duplicate image generation after an uncertain provider failure', async () => {
+  const usageStore = new InMemoryUsageStore(limits);
+  const finalize = usageStore.finalize.bind(usageStore);
+  let finalizeCalls = 0;
+  usageStore.finalize = async (principal, taskId) => {
+    finalizeCalls += 1;
+    return finalize(principal, taskId);
+  };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const generated = await imageRequest(baseUrl);
+      assert.equal(generated.status, 502);
+      const retry = await imageRequest(baseUrl);
+      assert.equal(retry.status, 409);
+      assert.match(JSON.stringify(await retry.json()), /INVOCATION_RECONCILIATION_REQUIRED/);
+      assert.equal(upstreamRequests.length, 1);
+      assert.equal(finalizeCalls, 0);
+    },
+    () => new Response('provider unavailable', { status: 503 }),
+    undefined,
+    undefined,
+    limits,
+    imageRoute,
+    { isEnabled: async () => true },
+    usageStore
+  );
+});
+
+test('keeps image and response APIs isolated and rejects extra image controls before upstream', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      assert.equal((await modelRequest(baseUrl)).status, 403);
+      assert.equal(
+        (
+          await imageRequest(baseUrl, {
+            model: imageRoute.id,
+            prompt: 'A blue circle.',
+            n: 2,
+          })
+        ).status,
+        400
+      );
+      const edit = new FormData();
+      edit.set('model', imageRoute.id);
+      edit.set('prompt', 'Do not accept caller controls.');
+      edit.set('quality', 'high');
+      edit.set('image', new Blob([new Uint8Array([1])], { type: 'image/png' }), 'input.png');
+      assert.equal((await imageEditRequest(baseUrl, edit, 'edit-invalid')).status, 400);
+      assert.equal(upstreamRequests.length, 0);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    imageRoute,
+    { isEnabled: async () => true }
+  );
+});
+
+test('keeps remote compaction closed by default without exposing provider details', async () => {
+  await withGateway(async (baseUrl, upstreamRequests) => {
+    const catalogResponse = await fetch(`${baseUrl}/v1/models`, {
+      headers: auth(),
+    });
+    const catalog = (await catalogResponse.json()) as {
+      models: Array<Record<string, unknown>>;
+    };
+    assert.equal('remoteCompactionV2' in (catalog.models[0] ?? {}), false);
+
+    const rejected = await compactionRequest(baseUrl, [
+      { role: 'user', content: 'private conversation' },
+      { type: 'compaction_trigger' },
+    ]);
+    assert.equal(rejected.status, 403);
+    assert.deepEqual(await rejected.json(), {
+      error: {
+        code: 'REMOTE_COMPACTION_UNAVAILABLE',
+        message: 'Remote compaction is not available',
+      },
+    });
+    assert.equal(upstreamRequests.length, 0);
+  });
+});
+
+test('routes an enabled remote compaction through the accounted invocation chain', async () => {
+  const enabledRoute = { ...route, remoteCompactionV2: true };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const catalogResponse = await fetch(`${baseUrl}/v1/models`, {
+        headers: auth(),
+      });
+      const catalog = (await catalogResponse.json()) as {
+        models: Array<Record<string, unknown>>;
+      };
+      assert.equal(catalog.models[0]?.remoteCompactionV2, true);
+
+      const response = await compactionRequest(baseUrl, [
+        { role: 'user', content: 'conversation' },
+        { type: 'compaction_trigger' },
+      ]);
+      assert.equal(response.status, 200);
+      await response.text();
+      assert.equal(upstreamRequests.length, 1);
+      const upstream = upstreamRequests[0] as Request;
+      assert.equal(upstream.headers.get('x-codex-beta-features'), 'remote_compaction_v2');
+      assert.match(upstream.headers.get('idempotency-key') ?? '', /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/);
+      const body = (await upstream.json()) as Record<string, unknown>;
+      assert.equal(body.stream, true);
+      assert.equal(body.store, false);
+      assert.deepEqual((body.reasoning as Record<string, unknown>).effort, 'medium');
+      assert.deepEqual((body.input as unknown[]).at(-1), {
+        type: 'compaction_trigger',
+      });
+
+      const usage = await fetch(`${baseUrl}/v1/usage/task-1`, {
+        headers: auth(),
+      });
+      assert.equal(usage.status, 200);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    enabledRoute
+  );
+});
+
+test('rejects malformed remote compaction before the provider journal', async () => {
+  const enabledRoute = { ...route, remoteCompactionV2: true };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      for (const input of [
+        [{ type: 'compaction_trigger' }, { role: 'user', content: 'not last' }],
+        [{ type: 'compaction_trigger' }, { type: 'compaction_trigger' }],
+        [
+          { role: 'user', content: 'conversation' },
+          { type: 'compaction_trigger', extra: true },
+        ],
+      ]) {
+        const response = await compactionRequest(baseUrl, input);
+        assert.equal(response.status, 400);
+        assert.deepEqual(await response.json(), {
+          error: {
+            code: 'INVALID_COMPACTION_REQUEST',
+            message: 'Invalid compaction request',
+          },
+        });
+      }
+      assert.equal(upstreamRequests.length, 0);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    enabledRoute
+  );
+});
+
+test('only gpt-5.6-sol may enable remote compaction', () => {
+  assert.throws(
+    () =>
+      createModelGatewayServer({
+        routes: [
+          {
+            ...route,
+            id: 'gpt-5.5',
+            remoteCompactionV2: true,
+          },
+        ],
+        authenticate: async () => principal('tenant-a', 'user-a'),
+        usageStore: new InMemoryUsageStore(limits),
+        usageKeyId: 'usage-2026',
+        usagePrivateKey: privateKey,
+      }),
+    /Invalid Model Gateway route/
+  );
+});
+
+test('requires the default Luna route to support high reasoning', () => {
+  assert.throws(
+    () =>
+      createModelGatewayServer({
+        routes: [
+          {
+            ...route,
+            id: 'gpt-5.6-luna',
+            reasoning: false,
+          },
+        ],
+        authenticate: async () => principal('tenant-a', 'user-a'),
+        usageStore: new InMemoryUsageStore(limits),
+        usageKeyId: 'usage-2026',
+        usagePrivateKey: privateKey,
+      }),
+    /Invalid Model Gateway route/
+  );
+});
+
+test('allows a pinned HTTP upstream only with a route-local opt-in and keeps it server-side', async () => {
+  const httpRoute: ModelGatewayRoute = {
+    ...route,
+    upstreamBaseUrl: 'http://provider.example:8080/v1',
+  };
+  assert.throws(
+    () =>
+      createModelGatewayServer({
+        routes: [httpRoute],
+        authenticate: async () => principal('tenant-a', 'user-a'),
+        usageStore: new InMemoryUsageStore(limits),
+        usageKeyId: 'usage-2026',
+        usagePrivateKey: privateKey,
+      }),
+    /Invalid Model Gateway route/
+  );
+
+  const optedInRoute = { ...httpRoute, allowInsecureHttpUpstream: true as const };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const catalogResponse = await fetch(`${baseUrl}/v1/models`, { headers: auth() });
+      assert.equal(catalogResponse.status, 200);
+      const catalog = await catalogResponse.json();
+      assert.equal(JSON.stringify(catalog).includes('allowInsecureHttpUpstream'), false);
+      assert.equal(JSON.stringify(catalog).includes(optedInRoute.upstreamBaseUrl), false);
+
+      const response = await modelRequest(baseUrl);
+      assert.equal(response.status, 200);
+      await response.text();
+      assert.equal(upstreamRequests[0]?.url, `${optedInRoute.upstreamBaseUrl}/responses`);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    optedInRoute
+  );
+
+  for (const upstreamBaseUrl of [
+    'http://user:password@provider.example:8080/v1',
+    'http://provider.example:8080/v1?api_key=forbidden',
+    'http://[::1',
+  ]) {
+    assert.throws(
+      () =>
+        createModelGatewayServer({
+          routes: [{ ...optedInRoute, upstreamBaseUrl }],
+          authenticate: async () => principal('tenant-a', 'user-a'),
+          usageStore: new InMemoryUsageStore(limits),
+          usageKeyId: 'usage-2026',
+          usagePrivateKey: privateKey,
+        }),
+      /Invalid Model Gateway route|Invalid URL/
+    );
+  }
+});
+
+test('accepts Luna with high reasoning through the enterprise route', async () => {
+  const lunaRoute: ModelGatewayRoute = {
+    ...route,
+    id: 'gpt-5.6-luna',
+    upstreamModelId: 'provider-luna',
+    label: 'GPT-5.6 Luna',
+    buttonLabel: 'GPT-5.6 Luna · 深度',
+  };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: responseHeaders(),
+        body: JSON.stringify({
+          model: 'gpt-5.6-luna',
+          input: [{ role: 'user', content: '验证深度模型' }],
+          stream: true,
+          store: false,
+          reasoning: { effort: 'high', summary: 'auto' },
+        }),
+      });
+      assert.equal(response.status, 200);
+      assert.equal(upstreamRequests.length, 1);
+      assert.equal(
+        (
+          (await upstreamRequests[0].json()) as {
+            reasoning: { effort: string };
+          }
+        ).reasoning.effort,
+        'high'
+      );
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    lunaRoute
+  );
+});
+
+test('forces Luna to high reasoning regardless of the client preference', async () => {
+  const lunaRoute: ModelGatewayRoute = {
+    ...route,
+    id: 'gpt-5.6-luna',
+    upstreamModelId: 'provider-luna',
+    label: 'GPT-5.6 Luna',
+    buttonLabel: 'GPT-5.6 Luna · 深度',
+  };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: responseHeaders(),
+        body: JSON.stringify({
+          model: 'gpt-5.6-luna',
+          input: [],
+          stream: true,
+          store: false,
+          reasoning: { effort: 'medium' },
+        }),
+      });
+      assert.equal(response.status, 200);
+      assert.equal(upstreamRequests.length, 1);
+      const forwarded = (await upstreamRequests[0]?.json()) as { reasoning: { effort: string } };
+      assert.equal(forwarded.reasoning.effort, 'high');
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    lunaRoute
+  );
+});
+
+test('does not repeat an invocation whose usage was recorded before delivery ended', async () => {
+  await withGateway(async (baseUrl, upstreamRequests) => {
+    const completed = await modelRequest(baseUrl);
+    assert.equal(completed.status, 200);
+    assert.match(await completed.text(), /response\.completed/);
+
+    const retry = await modelRequest(baseUrl);
+    assert.equal(retry.status, 409);
+    assert.match(JSON.stringify(await retry.json()), /INVOCATION_RESULT_ALREADY_RECORDED/);
+    assert.equal(upstreamRequests.length, 1);
+  });
+});
+
+test('prepares an invocation before upstream and blocks an unknown retry', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const interrupted = await modelRequest(baseUrl);
+      assert.equal(interrupted.status, 200);
+      assert.match(await interrupted.text(), /UPSTREAM_STREAM_FAILED/);
+      assert.equal(upstreamRequests.length, 1);
+
+      const retry = await modelRequest(baseUrl);
+      assert.equal(retry.status, 409);
+      assert.match(JSON.stringify(await retry.json()), /INVOCATION_RECONCILIATION_REQUIRED/);
+      assert.equal(upstreamRequests.length, 1);
+    },
+    () => interruptedSse()
+  );
+});
+
+test('rejects an unaccepted invocation so the same task can retry with one stable idempotency key', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const rejected = await modelRequest(baseUrl);
+      assert.equal(rejected.status, 502);
+      const retried = await modelRequest(baseUrl);
+      assert.equal(retried.status, 200);
+      assert.match(await retried.text(), /response\.completed/);
+      assert.equal(upstreamRequests.length, 2);
+      const firstKey = upstreamRequests[0]?.headers.get('idempotency-key');
+      assert.match(firstKey ?? '', /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/);
+      assert.equal(upstreamRequests[1]?.headers.get('idempotency-key'), firstKey);
+    },
+    (_request, index) =>
+      index === 1 ? new Response('rate limited', { status: 429 }) : completedSse(10, 5, 'response-retried')
+  );
+});
+
+test('keeps an ambiguous upstream failure pending instead of repeating it', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const unavailable = await modelRequest(baseUrl);
+      assert.equal(unavailable.status, 502);
+      const retry = await modelRequest(baseUrl);
+      assert.equal(retry.status, 409);
+      assert.match(JSON.stringify(await retry.json()), /INVOCATION_RECONCILIATION_REQUIRED/);
+      assert.equal(upstreamRequests.length, 1);
+    },
+    () => new Response('provider unavailable', { status: 503 })
+  );
+});
+
+test('enforces tenant concurrency before a second provider request', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      assert.equal((await modelRequest(baseUrl)).status, 200);
+      const headers = {
+        ...responseHeaders(),
+        'x-e-mate-task-id': 'task-2',
+        'x-e-mate-trace-id': 'trace-2',
+      };
+      const limited = await modelRequest(baseUrl, headers);
+      assert.equal(limited.status, 429);
+      assert.equal(limited.headers.get('retry-after'), '180');
+      assert.match(JSON.stringify(await limited.json()), /TENANT_CONCURRENCY_LIMITED/);
+      assert.equal(upstreamRequests.length, 1);
+    },
+    () => interruptedSse(),
+    undefined,
+    undefined,
+    {
+      tenantRequestsPerMinute: 10,
+      tenantBurst: 10,
+      tenantMaxConcurrent: 1,
+      invocationLeaseMs: 180_000,
+    }
+  );
+});
+
+test('does not refund a provider attempt from the tenant rate bucket', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      assert.equal((await modelRequest(baseUrl)).status, 502);
+      const headers = {
+        ...responseHeaders(),
+        'x-e-mate-task-id': 'task-2',
+        'x-e-mate-trace-id': 'trace-2',
+      };
+      const limited = await modelRequest(baseUrl, headers);
+      assert.equal(limited.status, 429);
+      assert.match(JSON.stringify(await limited.json()), /TENANT_REQUEST_RATE_LIMITED/);
+      assert.equal(upstreamRequests.length, 1);
+    },
+    () => new Response('rate limited', { status: 429 }),
+    undefined,
+    undefined,
+    {
+      tenantRequestsPerMinute: 1,
+      tenantBurst: 1,
+      tenantMaxConcurrent: 10,
+      invocationLeaseMs: 180_000,
+    }
+  );
+});
+
+test('reconciles a pending accounted invocation without a second model POST', async () => {
+  const reconciliationRequests: Array<Record<string, unknown>> = [];
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const interrupted = await modelRequest(baseUrl);
+      assert.equal(interrupted.status, 502);
+
+      const reconciled = await modelRequest(baseUrl);
+      assert.equal(reconciled.status, 409);
+      assert.match(JSON.stringify(await reconciled.json()), /INVOCATION_RESULT_ALREADY_RECORDED/);
+      assert.equal(upstreamRequests.length, 1);
+      assert.equal('input' in (reconciliationRequests[0] ?? {}), false);
+      assert.equal('tenantId' in (reconciliationRequests[0] ?? {}), false);
+      assert.equal('userId' in (reconciliationRequests[0] ?? {}), false);
+      assert.equal('taskId' in (reconciliationRequests[0] ?? {}), false);
+
+      const receipt = await fetch(`${baseUrl}/v1/usage/task-1`, {
+        headers: auth(),
+      });
+      assert.equal(receipt.status, 200);
+
+      const exactRetry = await modelRequest(baseUrl);
+      assert.equal(exactRetry.status, 409);
+      assert.equal(upstreamRequests.length, 1);
+    },
+    () => new Response('provider unavailable', { status: 503 }),
+    (request) => {
+      reconciliationRequests.push(request);
+      return {
+        status: 'ACCOUNTED',
+        invocationId: request.invocationId,
+        requestDigest: request.requestDigest,
+        routeFingerprint: request.routeFingerprint,
+        response: {
+          id: 'response-reconciled',
+          model: route.upstreamModelId,
+          status: 'completed',
+          usage: {
+            input_tokens: 8,
+            output_tokens: 3,
+            total_tokens: 11,
+            input_tokens_details: {
+              cached_tokens: 1,
+              cache_write_tokens: 0,
+            },
+          },
+        },
+      };
+    }
+  );
+});
+
+test('retries a provider-confirmed unaccepted invocation with its original idempotency key', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const rejected = await modelRequest(baseUrl);
+      assert.equal(rejected.status, 502);
+
+      const retried = await modelRequest(baseUrl);
+      assert.equal(retried.status, 200);
+      assert.match(await retried.text(), /response\.completed/);
+      assert.equal(upstreamRequests.length, 2);
+      assert.equal(
+        upstreamRequests[1]?.headers.get('idempotency-key'),
+        upstreamRequests[0]?.headers.get('idempotency-key')
+      );
+    },
+    (_request, index) =>
+      index === 1
+        ? new Response('provider unavailable', { status: 503 })
+        : completedSse(6, 4, 'response-retried-after-reconcile'),
+    (request) => ({
+      status: 'NOT_ACCEPTED',
+      invocationId: request.invocationId,
+      requestDigest: request.requestDigest,
+      routeFingerprint: request.routeFingerprint,
+    })
+  );
+});
+
+test('keeps a contradictory not-accepted receipt pending', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      assert.equal((await modelRequest(baseUrl)).status, 502);
+      const contradictory = await modelRequest(baseUrl);
+      assert.equal(contradictory.status, 409);
+      assert.match(JSON.stringify(await contradictory.json()), /INVOCATION_RECONCILIATION_REQUIRED/);
+      assert.equal(upstreamRequests.length, 1);
+    },
+    () => new Response('provider unavailable', { status: 503 }),
+    (request) =>
+      ({
+        status: 'NOT_ACCEPTED',
+        invocationId: request.invocationId,
+        requestDigest: request.requestDigest,
+        routeFingerprint: request.routeFingerprint,
+        response: {
+          id: 'response-contradictory',
+          model: route.upstreamModelId,
+          status: 'completed',
+        },
+      }) as unknown as ProviderInvocationReceipt
+  );
+});
+
+test('keeps unknown reconciliation receipts pending', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      assert.equal((await modelRequest(baseUrl)).status, 502);
+
+      const unknown = await modelRequest(baseUrl);
+      assert.equal(unknown.status, 409);
+      assert.match(JSON.stringify(await unknown.json()), /INVOCATION_RECONCILIATION_REQUIRED/);
+      assert.equal(upstreamRequests.length, 1);
+    },
+    () => new Response('provider unavailable', { status: 503 }),
+    (request) => ({
+      status: 'UNKNOWN',
+      invocationId: request.invocationId,
+      requestDigest: request.requestDigest,
+      routeFingerprint: request.routeFingerprint,
+    })
+  );
+});
+
+test('renews a trusted pending provider receipt without another model post', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      assert.equal((await modelRequest(baseUrl)).status, 502);
+      const pending = await modelRequest(baseUrl);
+      assert.equal(pending.status, 409);
+      assert.match(JSON.stringify(await pending.json()), /INVOCATION_RECONCILIATION_REQUIRED/);
+      assert.equal(upstreamRequests.length, 1);
+    },
+    () => new Response('provider unavailable', { status: 503 }),
+    (request) => ({
+      status: 'PENDING',
+      invocationId: request.invocationId,
+      requestDigest: request.requestDigest,
+      routeFingerprint: request.routeFingerprint,
+    })
+  );
+});
+
+test('bounds a reconciliation adapter that ignores its abort signal', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      assert.equal((await modelRequest(baseUrl)).status, 502);
+      const startedAt = Date.now();
+      const timedOut = await modelRequest(baseUrl);
+      assert.equal(timedOut.status, 409);
+      assert.match(JSON.stringify(await timedOut.json()), /INVOCATION_RECONCILIATION_REQUIRED/);
+      assert(Date.now() - startedAt < 2_500);
+      assert.equal(upstreamRequests.length, 1);
+    },
+    () => new Response('provider unavailable', { status: 503 }),
+    () => new Promise<ProviderInvocationReceipt>(() => undefined),
+    1_000
+  );
+});
+
+test('keeps mismatched accounted reconciliation receipts pending', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      assert.equal((await modelRequest(baseUrl)).status, 502);
+      const mismatch = await modelRequest(baseUrl);
+      assert.equal(mismatch.status, 409);
+      assert.match(JSON.stringify(await mismatch.json()), /INVOCATION_RECONCILIATION_REQUIRED/);
+      assert.equal(upstreamRequests.length, 1);
+    },
+    () => new Response('provider unavailable', { status: 503 }),
+    (request) => ({
+      status: 'ACCOUNTED',
+      invocationId: `${request.invocationId}-mismatch`,
+      requestDigest: request.requestDigest,
+      routeFingerprint: request.routeFingerprint,
+      response: {
+        id: 'response-mismatch',
+        model: route.upstreamModelId,
+        status: 'completed',
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          total_tokens: 2,
+          input_tokens_details: {
+            cached_tokens: 0,
+            cache_write_tokens: 0,
+          },
+        },
+      },
+    })
+  );
+});
+
+test('overrides client reasoning while rejecting invalid scope and cross-tenant usage', async () => {
+  await withGateway(async (baseUrl, upstreamRequests) => {
+    const wrongReasoning = await fetch(`${baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: responseHeaders(),
+      body: JSON.stringify({
+        model: 'gpt-5.6-sol',
+        input: [],
+        stream: true,
+        store: false,
+        reasoning: { effort: 'high' },
+      }),
+    });
+    assert.equal(wrongReasoning.status, 200);
+    await wrongReasoning.text();
+    const upstreamRequest = upstreamRequests[0];
+    assert.ok(upstreamRequest);
+    assert.equal(((await upstreamRequest.json()) as { reasoning: { effort: string } }).reasoning.effort, 'medium');
+
+    const mismatchedSession = responseHeaders();
+    mismatchedSession['x-client-request-id'] = 'session-2';
+    const wrongScope = await fetch(`${baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: mismatchedSession,
+      body: JSON.stringify({
+        model: 'gpt-5.6-sol',
+        input: [],
+        stream: true,
+        store: false,
+        reasoning: { effort: 'medium' },
+      }),
+    });
+    assert.equal(wrongScope.status, 400);
+    assert.equal(upstreamRequests.length, 1);
+
+    const missing = await fetch(`${baseUrl}/v1/usage/task-1`, {
+      headers: auth(otherToken),
+    });
+    assert.equal(missing.status, 404);
+  });
+});
+
+test('strips client reasoning from routes without a server-pinned effort', async () => {
+  const nonReasoningRoute: ModelGatewayRoute = {
+    ...route,
+    id: 'non-reasoning',
+    upstreamModelId: 'non-reasoning-upstream',
+    providerId: 'compatible-chat',
+    label: 'Standard model',
+    buttonLabel: 'Standard model',
+    provider: 'e-Mate',
+    providerMark: 'M',
+    reasoning: false,
+    input: ['text'],
+  };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: responseHeaders(),
+        body: JSON.stringify({
+          model: nonReasoningRoute.id,
+          input: [],
+          stream: true,
+          store: false,
+          reasoning: { effort: 'high', summary: 'detailed' },
+        }),
+      });
+      assert.equal(response.status, 200);
+      await response.text();
+      assert.equal(upstreamRequests.length, 1);
+      const forwarded = (await upstreamRequests[0]?.json()) as Record<string, unknown>;
+      assert.equal(Object.hasOwn(forwarded, 'reasoning'), false);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    nonReasoningRoute,
+    { isEnabled: async () => true }
+  );
+});
+
+test('accepts the pinned Codex request scope and its models catalog query', async () => {
+  await withGateway(async (baseUrl, upstreamRequests) => {
+    const catalog = await fetch(`${baseUrl}/v1/models?client_version=0.146.0`, {
+      headers: auth(),
+    });
+    assert.equal(catalog.status, 200);
+
+    const modelResponse = await modelRequest(baseUrl, codexResponseHeaders());
+    assert.equal(modelResponse.status, 200);
+    assert.match(await modelResponse.text(), /response\.completed/);
+    assert.equal(upstreamRequests.length, 1);
+
+    const usageResponse = await fetch(`${baseUrl}/v1/usage/codex-turn-1`, {
+      headers: auth(),
+    });
+    assert.equal(usageResponse.status, 200);
+    const envelope = (await usageResponse.json()) as Record<string, unknown>;
+    const usage = JSON.parse(Buffer.from(String(envelope.payload), 'base64url').toString('utf8')) as Record<
+      string,
+      unknown
+    >;
+    assert.match(String(usage.traceId), /^codex-[a-f0-9]{32}$/);
+
+    const wrongMetadata = await modelRequest(
+      baseUrl,
+      codexResponseHeaders({ 'x-client-request-id': 'codex-thread-2' })
+    );
+    assert.equal(wrongMetadata.status, 400);
+    assert.equal(upstreamRequests.length, 1);
+
+    const unknownQuery = await fetch(`${baseUrl}/v1/models?unexpected=true`, { headers: auth() });
+    assert.equal(unknownQuery.status, 400);
+  });
+});
+
+test('lists exactly the four managed chat models for Codex clients', async () => {
+  const managedRoutes: ModelGatewayRoute[] = [
+    { ...route, id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', buttonLabel: 'GPT-5.6 Luna · 深度' },
+    route,
+    chatRoute,
+    {
+      ...chatRoute,
+      id: 'doubao-seed-2-0-pro-260215',
+      upstreamModelId: 'doubao-seed-2-0-pro-260215',
+      providerId: 'doubao',
+      label: 'Doubao Seed 2.0 Pro',
+      buttonLabel: 'Doubao Seed 2.0 Pro · 中等',
+      provider: 'Volcano Ark',
+      providerMark: 'B',
+      input: ['text', 'image'],
+      contextWindow: 256_000,
+      maxTokens: 32_000,
+    },
+    imageRoute,
+    { ...route, id: 'gpt-5.4', label: 'GPT-5.4', buttonLabel: 'GPT-5.4' },
+  ];
+  const managedPrincipal = {
+    tenantId: 'tenant-a',
+    userId: 'user-a',
+    modelIds: managedRoutes.map(({ id }) => id),
+  };
+  const consentStore = new InMemoryConsentStore(consentPolicy);
+  await consentStore.accept(managedPrincipal, consentInput);
+  const server = createModelGatewayServer({
+    routes: managedRoutes,
+    authenticate: async () => managedPrincipal,
+    consentStore,
+    usageStore: new InMemoryUsageStore(limits),
+    usageKeyId: 'usage-2026',
+    usagePrivateKey: privateKey,
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert(address && typeof address === 'object');
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/models?client_version=0.146.0`, {
+      headers: auth(),
+    });
+    const catalog = (await response.json()) as { models: Array<{ slug: string }> };
+    assert.equal(response.status, 200, JSON.stringify(catalog));
+    assert.deepEqual(
+      catalog.models.map(({ slug }) => slug),
+      ['gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek', 'doubao-seed-2-0-pro-260215']
+    );
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
+test('delivers only the authenticated tenant runtime model routes without exposing them through the public catalog', async () => {
+  const luna = {
+    ...route,
+    id: 'gpt-5.6-luna',
+    upstreamModelId: 'gpt-5.6-luna',
+    label: 'GPT-5.6 Luna',
+    buttonLabel: 'GPT-5.6 Luna · 深度',
+  };
+  const tenantKey = 'tenant-specific-provider-key-123456789';
+  const identity = {
+    tenantId: 'tenant-a',
+    userId: 'user-a',
+    modelIds: [luna.id, chatRoute.id],
+  };
+  const consentStore = new InMemoryConsentStore(consentPolicy);
+  await consentStore.accept(identity, consentInput);
+  const server = createModelGatewayServer({
+    routes: [luna, chatRoute, imageRoute],
+    authenticate: async (token) => token === sessionToken ? identity : null,
+    consentStore,
+    tenantModelRoutePolicy: {
+      isEnabled: async (_tenantId, routeId) => routeId !== chatRoute.id,
+      upstreamApiKey: async (_tenantId, routeId) => routeId === luna.id ? tenantKey : null,
+    },
+    usageStore: new InMemoryUsageStore(limits),
+    usageKeyId: 'usage-2026',
+    usagePrivateKey: privateKey,
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    assert.equal((await fetch(`${baseUrl}/v1/runtime-models`)).status, 401);
+    assert.equal((await fetch(`${baseUrl}/v1/runtime-models?all=true`, { headers: auth() })).status, 400);
+    assert.equal((await fetch(`${baseUrl}/v1/runtime-models`, { method: 'POST', headers: auth() })).status, 405);
+    const response = await fetch(`${baseUrl}/v1/runtime-models`, { headers: auth() });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('access-control-allow-origin'), null);
+    assert.deepEqual(await response.json(), {
+      schemaVersion: 1,
+      models: [{
+        id: luna.id,
+        apiMode: 'responses',
+        upstreamModelId: luna.upstreamModelId,
+        upstreamBaseUrl: luna.upstreamBaseUrl,
+        upstreamApiKey: tenantKey,
+        label: luna.label,
+        input: luna.input,
+        reasoning: true,
+        contextWindow: luna.contextWindow,
+        maxTokens: luna.maxTokens,
+      }],
+    });
+    const catalog = JSON.stringify(await (await fetch(`${baseUrl}/v1/models`, { headers: auth() })).json());
+    assert.doesNotMatch(catalog, /provider-key|provider\.example/u);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
+test('freezes usage while preserving exact replay idempotency', async () => {
+  const store = new InMemoryUsageStore(limits);
+  const fact = {
+    tenantId: 'tenant-a',
+    userId: 'user-a',
+    taskId: 'task-1',
+    traceId: 'trace-1',
+    modelId: 'gpt-5.6-sol',
+    providerId: 'custom-gpt',
+    providerResponseId: 'response-1',
+    inputTokens: 1,
+    outputTokens: 1,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    costUsd: 0.01,
+  };
+  await store.add(fact);
+  await store.add(fact);
+  const finalized = await store.finalize(principal('tenant-a', 'user-a'), 'task-1');
+  assert(finalized);
+  assert.equal((await store.finalize(principal('tenant-a', 'user-a'), 'task-1'))?.usageId, finalized.usageId);
+  await store.add(fact);
+  await assert.rejects(store.add({ ...fact, outputTokens: 2 }), /idempotency conflict/);
+  await assert.rejects(store.add({ ...fact, providerResponseId: 'response-2' }), /already finalized/);
+});
+
+test('keeps invocation state idempotent and blocks direct usage around unknown work', async () => {
+  const store = new InMemoryUsageStore(limits);
+  const invocation = {
+    tenantId: 'tenant-a',
+    userId: 'user-a',
+    taskId: 'task-invocation',
+    traceId: 'trace-invocation',
+    modelId: 'gpt-5.6-sol',
+    providerId: 'custom-gpt',
+    requestDigest: 'A'.repeat(43),
+    routeFingerprint: 'R'.repeat(43),
+  };
+  const usage = {
+    ...invocation,
+    providerResponseId: 'response-invocation',
+    inputTokens: 1,
+    outputTokens: 2,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    costUsd: 0.01,
+  };
+  const { requestDigest, ...usageFact } = usage;
+  const prepared = await store.prepare(invocation);
+  assert.equal(prepared.status, 'STARTED');
+  assert.equal((await store.prepare({ ...invocation, requestDigest: 'B'.repeat(43) })).status, 'PENDING');
+  assert.equal(
+    await store.claimReconciliation(
+      principal('tenant-b', 'user-b'),
+      invocation.taskId,
+      prepared.invocationId,
+      invocation.routeFingerprint
+    ),
+    null
+  );
+  const claim = await store.claimReconciliation(
+    principal('tenant-a', 'user-a'),
+    invocation.taskId,
+    prepared.invocationId,
+    invocation.routeFingerprint
+  );
+  assert.equal(claim?.fact.requestDigest, invocation.requestDigest);
+  assert.equal(
+    await store.claimReconciliation(
+      principal('tenant-a', 'user-a'),
+      invocation.taskId,
+      prepared.invocationId,
+      invocation.routeFingerprint
+    ),
+    null
+  );
+  await assert.rejects(
+    store.reject(principal('tenant-b', 'user-b'), invocation.taskId, prepared.invocationId),
+    /not found/
+  );
+  await assert.rejects(store.completeReconciliation(prepared.invocationId, 'stale-lease', usageFact), /lease changed/);
+  await assert.rejects(
+    store.rejectReconciliation(
+      principal('tenant-a', 'user-a'),
+      invocation.taskId,
+      prepared.invocationId,
+      'stale-lease'
+    ),
+    /lease changed/
+  );
+  await assert.rejects(store.finalize(principal('tenant-a', 'user-a'), invocation.taskId), /requires reconciliation/);
+  await assert.rejects(store.add(usageFact), /completion is required/);
+  await store.complete(prepared.invocationId, usageFact);
+  await store.complete(prepared.invocationId, usageFact);
+  await assert.rejects(
+    store.reject(principal('tenant-a', 'user-a'), invocation.taskId, prepared.invocationId),
+    /cannot be rejected/
+  );
+  await assert.rejects(
+    store.complete(prepared.invocationId, {
+      ...usageFact,
+      outputTokens: 3,
+    }),
+    /idempotency conflict/
+  );
+
+  assert.equal((await store.prepare(invocation)).status, 'RECORDED');
+  const nextInvocation = {
+    ...invocation,
+    requestDigest: 'C'.repeat(43),
+  };
+  const next = await store.prepare(nextInvocation);
+  assert.equal(next.status, 'STARTED');
+  assert.notEqual(next.invocationId, prepared.invocationId);
+  await store.reject(principal('tenant-a', 'user-a'), invocation.taskId, next.invocationId);
+  const retry = await store.prepare(nextInvocation);
+  assert.equal(retry.invocationId, next.invocationId);
+  await store.reject(principal('tenant-a', 'user-a'), invocation.taskId, retry.invocationId);
+  assert.equal((await store.finalize(principal('tenant-a', 'user-a'), invocation.taskId))?.outputTokens, 2);
+});
+
+test('refills tenant admission independently without charging pending replays', async () => {
+  let now = 0;
+  const store = new InMemoryUsageStore(
+    {
+      tenantRequestsPerMinute: 2,
+      tenantBurst: 1,
+      tenantMaxConcurrent: 1,
+      invocationLeaseMs: 10_000,
+    },
+    () => now
+  );
+  const invocation = {
+    tenantId: 'tenant-a',
+    userId: 'user-a',
+    taskId: 'task-quota-1',
+    traceId: 'trace-quota-1',
+    modelId: 'gpt-5.6-sol',
+    providerId: 'custom-gpt',
+    requestDigest: 'Q'.repeat(43),
+    routeFingerprint: 'R'.repeat(43),
+  };
+  const started = await store.prepare(invocation);
+  assert.equal(started.status, 'STARTED');
+  assert.equal((await store.prepare(invocation)).status, 'PENDING');
+  now = 5_000;
+  const claim = await store.claimReconciliation(
+    principal('tenant-a', 'user-a'),
+    invocation.taskId,
+    started.invocationId,
+    invocation.routeFingerprint
+  );
+  assert(claim);
+  assert.equal(
+    await store.renewReconciliation(
+      principal('tenant-a', 'user-a'),
+      invocation.taskId,
+      started.invocationId,
+      claim.leaseToken
+    ),
+    true
+  );
+  now = 11_000;
+  await assert.rejects(
+    store.prepare({
+      ...invocation,
+      taskId: 'task-quota-2',
+      traceId: 'trace-quota-2',
+    }),
+    /already running/
+  );
+  await store.reject(principal('tenant-a', 'user-a'), invocation.taskId, started.invocationId);
+  await assert.rejects(
+    store.prepare({
+      ...invocation,
+      taskId: 'task-quota-2',
+      traceId: 'trace-quota-2',
+    }),
+    /rate limit/
+  );
+  assert.equal(
+    (
+      await store.prepare({
+        ...invocation,
+        tenantId: 'tenant-b',
+        taskId: 'task-quota-b',
+        traceId: 'trace-quota-b',
+      })
+    ).status,
+    'STARTED'
+  );
+  now = 30_000;
+  const afterRefill = await store.prepare({
+    ...invocation,
+    taskId: 'task-quota-2',
+    traceId: 'trace-quota-2',
+  });
+  assert.equal(afterRefill.status, 'STARTED');
+  await store.reject(principal('tenant-a', 'user-a'), 'task-quota-2', afterRefill.invocationId);
+  now = 20_000;
+  await assert.rejects(
+    store.prepare({
+      ...invocation,
+      taskId: 'task-quota-3',
+      traceId: 'trace-quota-3',
+    }),
+    /rate limit/
+  );
+});
+
+test('rejects aggregates that cannot be represented by the signed receipt', async () => {
+  const store = new InMemoryUsageStore(limits);
+  const fact = {
+    tenantId: 'tenant-a',
+    userId: 'user-a',
+    taskId: 'task-limit',
+    traceId: 'trace-limit',
+    modelId: 'gpt-5.6-sol',
+    providerId: 'custom-gpt',
+    providerResponseId: 'response-1',
+    inputTokens: Number.MAX_SAFE_INTEGER,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    costUsd: 0,
+  };
+  await store.add(fact);
+  await assert.rejects(
+    store.add({
+      ...fact,
+      providerResponseId: 'response-2',
+      inputTokens: 0,
+      outputTokens: 1,
+    }),
+    /ledger limits/
+  );
+  await assert.rejects(
+    new InMemoryUsageStore(limits).add({
+      ...fact,
+      inputTokens: 0,
+      costUsd: 1_000_001,
+    }),
+    /Invalid usage fact/
+  );
+});

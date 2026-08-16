@@ -1,0 +1,3 @@
+- insert:
+    - id: emate-genui
+      name: '@e-mate/dsh-plugin-genui'

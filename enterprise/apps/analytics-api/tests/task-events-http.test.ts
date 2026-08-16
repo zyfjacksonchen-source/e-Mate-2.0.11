@@ -1,0 +1,202 @@
+import assert from 'node:assert/strict';
+import type { AddressInfo } from 'node:net';
+import test from 'node:test';
+import {
+  TASK_EVENT_TYPES,
+  TASK_SCENARIOS,
+  type TaskEventInput,
+  type TenantTaskSummary,
+} from '@e-mate/monitoring-contract';
+import type { RuntimeRegistryPrincipal, RuntimeRegistryStore } from '../src/runtime-registry.ts';
+import { createAnalyticsServer } from '../src/server.ts';
+import type { TaskEventQuery, TaskEventStore, TaskEventWriteResult } from '../src/task-events.ts';
+
+const users: Record<string, RuntimeRegistryPrincipal> = {
+  employee: { tenantId: 'tenant-1', userId: 'user-1', roles: [], scopes: ['task-events:write'] },
+  unscoped: { tenantId: 'tenant-1', userId: 'user-2', roles: [] },
+  auditor: { tenantId: 'tenant-1', userId: 'auditor-1', roles: ['AUDIT_ADMIN'] },
+  tenant2: { tenantId: 'tenant-2', userId: 'auditor-2', roles: ['AUDIT_ADMIN'] },
+};
+
+class FakeTaskEvents implements TaskEventStore {
+  readonly events = new Map<string, { userId: string; event: TaskEventInput }>();
+  readonly tasks = new Map<string, { userId: string; scenario: TaskEventInput['scenario']; status: string }>();
+
+  async append(principal: RuntimeRegistryPrincipal, event: TaskEventInput): Promise<TaskEventWriteResult> {
+    const eventKey = `${principal.tenantId}\0${event.eventId}`;
+    const existing = this.events.get(eventKey);
+    if (existing) {
+      return existing.userId === principal.userId && JSON.stringify(existing.event) === JSON.stringify(event)
+        ? 'REPLAY'
+        : 'CONFLICT';
+    }
+    const taskKey = `${principal.tenantId}\0${event.taskId}`;
+    const task = this.tasks.get(taskKey);
+    if (event.type === 'RECEIVED') {
+      if (task) return 'CONFLICT';
+      this.tasks.set(taskKey, { userId: principal.userId, scenario: event.scenario, status: 'RECEIVED' });
+    } else if (!task) {
+      return 'NOT_RECEIVED';
+    } else if (task.userId !== principal.userId || task.scenario !== event.scenario) {
+      return 'CONFLICT';
+    } else if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(event.type)) {
+      if (task.status !== 'RECEIVED') return 'CONFLICT';
+      task.status = event.type;
+    }
+    this.events.set(eventKey, { userId: principal.userId, event });
+    return 'ACCEPTED';
+  }
+
+  async summary(principal: RuntimeRegistryPrincipal, query: TaskEventQuery): Promise<TenantTaskSummary> {
+    const tasks = [...this.tasks.entries()].filter(([key]) => key.startsWith(`${principal.tenantId}\0`));
+    const count = (status: string): string => String(tasks.filter(([, task]) => task.status === status).length);
+    const scenarioCount = (scenario: TaskEventInput['scenario']): string =>
+      String(tasks.filter(([, task]) => task.scenario === scenario).length);
+    const eventCount = (type: TaskEventInput['type']): string =>
+      String(
+        [...this.events.entries()].filter(
+          ([key, stored]) => key.startsWith(`${principal.tenantId}\0`) && stored.event.type === type
+        ).length
+      );
+    return {
+      schemaVersion: 1,
+      scope: 'TENANT',
+      tenantId: principal.tenantId,
+      ...query,
+      generatedAt: '2026-07-30T00:00:00.000Z',
+      sourceState: tasks.length ? 'AUTHORITATIVE' : 'NO_DATA',
+      summary: {
+        receivedTasks: String(tasks.length),
+        successfulTasks: count('COMPLETED'),
+        failedTasks: count('FAILED'),
+        cancelledTasks: count('CANCELLED'),
+      },
+      scenarioCounts: TASK_SCENARIOS.map((scenario) => ({ scenario, taskCount: scenarioCount(scenario) })),
+      eventTypeCounts: TASK_EVENT_TYPES.map((type) => ({ type, eventCount: eventCount(type) })),
+      userEventCounts: [...new Set([...this.events.entries()]
+        .filter(([key]) => key.startsWith(`${principal.tenantId}\0`))
+        .map(([, stored]) => stored.userId))]
+        .sort()
+        .map((userId) => ({
+          userId,
+          eventCount: String([...this.events.entries()].filter(
+            ([key, stored]) => key.startsWith(`${principal.tenantId}\0`) && stored.userId === userId
+          ).length),
+        })),
+    };
+  }
+}
+
+const registry: RuntimeRegistryStore = {
+  heartbeat: async () => false,
+  remove: async () => false,
+  status: async () => ({
+    schemaVersion: 1,
+    activeUsers: 0,
+    activeSessions: 0,
+    runningTasks: 0,
+    failedTasks: 0,
+    modelStatus: 'UNAVAILABLE',
+    updatedAt: '2026-07-30T00:00:00.000Z',
+  }),
+};
+
+async function withServer(run: (baseUrl: string) => Promise<void>): Promise<void> {
+  const taskEvents = new FakeTaskEvents();
+  const server = createAnalyticsServer({
+    registry,
+    taskEvents,
+    authenticate: async (token) => users[token] ?? null,
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address() as AddressInfo;
+  try {
+    await run(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+}
+
+const auth = (token: string): Record<string, string> => ({
+  authorization: `Bearer ${token}`,
+  'content-type': 'application/json',
+});
+
+const received = {
+  schemaVersion: 1,
+  eventId: 'event-received',
+  taskId: 'task-1',
+  type: 'RECEIVED',
+  scenario: 'CONTENT_CREATION',
+  occurredAt: '2026-07-25T10:00:00.000Z',
+} as const;
+
+test('task event endpoint is authenticated, metadata-only and idempotent', async () => {
+  await withServer(async (baseUrl) => {
+    const send = (body: unknown) =>
+      fetch(`${baseUrl}/v1/tasks/events`, {
+        method: 'POST',
+        headers: auth('employee'),
+        body: JSON.stringify(body),
+      });
+    assert.equal((await send(received)).status, 202);
+    assert.equal((await send(received)).status, 200);
+    assert.equal((await send({ ...received, prompt: 'must not be collected' })).status, 400);
+    assert.equal((await send({ ...received, tenantId: 'tenant-2' })).status, 400);
+    assert.equal((await send({ ...received, type: 'ACCOUNTED' })).status, 400);
+    assert.equal(
+      (
+        await fetch(`${baseUrl}/v1/tasks/events`, {
+          method: 'POST',
+          headers: auth('unscoped'),
+          body: JSON.stringify({ ...received, eventId: 'event-unscoped' }),
+        })
+      ).status,
+      403
+    );
+  });
+});
+
+test('task outcomes require explicit received and terminal events', async () => {
+  await withServer(async (baseUrl) => {
+    const send = (body: unknown) =>
+      fetch(`${baseUrl}/v1/tasks/events`, {
+        method: 'POST',
+        headers: auth('employee'),
+        body: JSON.stringify(body),
+      });
+    assert.equal(
+      (
+        await send({
+          ...received,
+          eventId: 'event-unreceived-failed',
+          taskId: 'task-unreceived',
+          type: 'FAILED',
+        })
+      ).status,
+      409
+    );
+    await send(received);
+    assert.equal((await send({ ...received, eventId: 'event-failed', type: 'FAILED' })).status, 202);
+    assert.equal((await send({ ...received, eventId: 'event-completed', type: 'COMPLETED' })).status, 409);
+  });
+});
+
+test('task summary is role-gated and tenant-isolated', async () => {
+  await withServer(async (baseUrl) => {
+    await fetch(`${baseUrl}/v1/tasks/events`, {
+      method: 'POST',
+      headers: auth('employee'),
+      body: JSON.stringify(received),
+    });
+    const query = 'from=2026-07-25T00%3A00%3A00.000Z&to=2026-07-26T00%3A00%3A00.000Z';
+    assert.equal((await fetch(`${baseUrl}/v1/tasks/summary?${query}`, { headers: auth('employee') })).status, 403);
+    const tenant1 = await fetch(`${baseUrl}/v1/tasks/summary?${query}`, { headers: auth('auditor') });
+    assert.equal(((await tenant1.json()) as TenantTaskSummary).tenantId, 'tenant-1');
+    const tenant2 = await fetch(`${baseUrl}/v1/tasks/summary?${query}`, { headers: auth('tenant2') });
+    assert.equal(((await tenant2.json()) as TenantTaskSummary).summary.receivedTasks, '0');
+  });
+});

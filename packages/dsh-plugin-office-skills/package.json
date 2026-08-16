@@ -1,0 +1,57 @@
+{
+  "name": "@e-mate/dsh-plugin-office-skills",
+  "version": "2.0.7",
+  "description": "Clean-room DOCX, PDF, XLSX, and PPTX skills for the e-Mate profile",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./skills/*": "./skills/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "skills",
+    "cordis.patch.yml",
+    "README.md",
+    "SOURCE.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate.git",
+    "directory": "packages/dsh-plugin-office-skills"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "build": "../../upstream/deepseek-harness/node_modules/.bin/tsc -p tsconfig.json",
+    "test": "pnpm run build && node --test"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "officeSkills": {
+      "adapterState": "blocked",
+      "blockerCode": "EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE",
+      "runtimeInstalled": false,
+      "toolsRegistered": 0
+    }
+  },
+  "eMate": {
+    "harnessVersion": "0.1.0-rc.5",
+    "harnessCommit": "47f943859bef60e4160492346772ded9b24f765a"
+  }
+}

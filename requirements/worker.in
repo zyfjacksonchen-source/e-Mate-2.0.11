@@ -1,0 +1,12 @@
+# e-Mate Office/OCR worker roots. Versions are inherited from the final 2.0.5
+# platform-stage hash lock; this file intentionally excludes its old Runtime,
+# Browser and application dependencies.
+rapidocr-onnxruntime==1.4.4
+onnxruntime==1.23.2
+numpy==2.4.6
+
+openpyxl==3.1.5
+python-docx==1.2.0
+python-pptx==1.0.2
+pypdf==6.9.1
+reportlab==4.4.9

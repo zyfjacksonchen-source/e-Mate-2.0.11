@@ -1,3 +1,24 @@
 [submodule "upstream/deepseek-harness"]
 	path = upstream/deepseek-harness
 	url = https://github.com/deepseek-ai/deepseek-harness.git
+[submodule "upstream/e-mate-2.0.5"]
+	path = upstream/e-mate-2.0.5
+	url = https://github.com/zyfjacksonchen-source/EcoreX.git
+[submodule "upstream/plugins/dsh-search-mcp"]
+	path = upstream/plugins/dsh-search-mcp
+	url = https://github.com/gxpppp/dsh-search-mcp.git
+[submodule "upstream/plugins/ego-lite"]
+	path = upstream/plugins/ego-lite
+	url = https://github.com/citrolabs/ego-lite.git
+[submodule "upstream/plugins/dsh-vision-toolkit"]
+	path = upstream/plugins/dsh-vision-toolkit
+	url = https://github.com/Anionex/dsh-vision-toolkit.git
+[submodule "upstream/plugins/dsh-memory-evolve"]
+	path = upstream/plugins/dsh-memory-evolve
+	url = https://github.com/csyangwen/dsh-memory-evolve.git
+[submodule "upstream/plugins/dsh-genui"]
+	path = upstream/plugins/dsh-genui
+	url = https://github.com/omdsh-dev/dsh-genui.git
+[submodule "upstream/plugins/dsh-better-sidebar"]
+	path = upstream/plugins/dsh-better-sidebar
+	url = https://github.com/omdsh-dev/DSH-better-sidebar.git
