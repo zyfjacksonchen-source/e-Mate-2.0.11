@@ -258,7 +258,7 @@ async function consumeModelStream(response: Response): Promise<void> {
   } finally {
     reader.releaseLock();
   }
-  if (!body.includes('"type":"response.completed"') || !/data:\s*\[DONE\]/.test(body)) {
+  if (!body.includes('"type":"response.completed"')) {
     throw new AdminApiError(503);
   }
 }

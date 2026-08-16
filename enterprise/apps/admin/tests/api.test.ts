@@ -136,7 +136,7 @@ test('model connectivity uses the authenticated same-origin Model Gateway and a 
       models: [{ id: 'gpt-5.6-sol', capabilities: { imageGeneration: false } }],
     }), { headers: { 'content-type': 'application/json' } }),
     new Response(
-      'data: {"type":"response.completed","response":{"id":"response-test"}}\n\ndata: [DONE]\n\n',
+      'data: {"type":"response.completed","response":{"id":"response-test"}}\n\n',
       { headers: { 'content-type': 'text/event-stream' } }
     ),
   ];
