@@ -115,3 +115,47 @@ Office, OCR/Vision and browser rows close only with the selected bundle's real r
 The 5,000-event reverse-scroll frame-drop percentage is retained in traces only as a diagnostic. It has no pass/fail threshold and cannot by itself block S04 or S12; the FPS, heap, long-task, event-to-paint and leak budgets above remain binding.
 
 Each run stores the starting database/snapshot identity, exact test data, screenshots, trace/artifact paths, relevant audit/fact/receipt IDs, cleanup result, and one of `passed` or `blocked`.
+
+## 2.0.7 上线前真实验收清零表（2026-08-16）
+
+以下只把真账号、真上游、真持久化或真平台结果标记为通过；单测、Mock、CI 构建和元数据安装不能替代对应的真实验收。
+
+### 已真实通过
+
+- macOS arm64 本地安装、受管 profile、登录/注册/审批/协议、管理员免签、改密后旧租约失效与新密码重新登录。
+- Luna 默认模型、Luna/Sol 同一会话切换与上下文连续；生产直连后 Luna 短回复 TTFT 中位数 4.074 秒，Sol 样本 2.807 秒。
+- 生产五路上游 Model Smoke：Luna、Sol、DeepSeek、Doubao、`gpt-image-2-pro`。
+- 本地真实 Usage outbox 到生产账本：一条 15,040 Token 事实成功入账，重复上送返回相同 receipt 且不重复计数；管理员累计 4 次调用、28,225 Token、4 条 Invocation，Usage reconciliation 四项差异均为 0。
+- 管理端与 Usage 面板真实管理员登录、用户审批/额度/模型策略/协议状态、Luna 联通测试、明暗主题和退出登录。
+- 图片上游生成/编辑与并发阶梯：并发 2、4 稳定；并发 8 为 5/8 成功并出现 3 次 429，因此 2.0.7 的已测稳定上限固定为 4，不再重复烧并发 8。
+
+### 发布阻断：尚未真实通过
+
+| 优先级 | 项目 | 当前真实状态 / 关闭条件 |
+|---|---|---|
+| P0 | 验收用户五模型与生/改图全链 | 策略已修为 Luna、Sol、DeepSeek、Doubao、Image Pro，但旧 lease 已撤销；需重新登录后完成 image Tool → Job → Attachment → 画廊、改图、并发 2/4，并与 Audit/Usage 对账。 |
+| P0 | Office 四类文档 | 当前规范化插件因无可合法随包分发的执行层而失败关闭；DOCX/XLSX/PPTX/PDF 创建、读取、编辑、导出、重开均未真实通过。 |
+| P0 | Browser / Computer Use | macOS Ego Browser 与 Windows Playwright MCP + 系统 Edge 均为 `setup-required`；尚无会话隔离、权限、下载、清理和 Browser Panel 的真实证据。 |
+| P0 | Vision / OCR | rc.5 缺少企业多模态策略 seam，插件仅返回阻塞状态；没有真实 OCR 或视觉工具结果。 |
+| P0 | Windows 真实安装 | CI 的 win32-x64 干净安装不能替代真实 Windows 10/11 x64；CLI、快捷方式、Edge、更新、凭据和完整 CU 尚未跑。macOS x64 同样只有 CI，没有真机 CU。 |
+| P0 | 正式发布与在线升级 | npm `2.0.7` 回读、Cloudflare R2 不可变制品/公开入口、跨版本自然语言升级、失败回滚及两平台恢复尚未真实通过；同版本本地更新事务已通过但不能替代正式发布。 |
+| P0 | 每用户任务事件次数 | 模型 Usage 审计已闭环；`e_mate_task_event` 尚无本地任务生命周期上送，`/v1/tasks/summary` 仍为 `NO_DATA`，用户事件次数为 0。 |
+| P1 | 外部连接 | 飞书、腾讯文档、微信、钉钉需从能力中心/Agent 可发现并走到真实授权交接页；按产品边界不提交 OAuth、二维码确认或真实写入。 |
+| P1 | Skill Hub | 上传、搜索、下载、安装和 Agent 自执行已有合同测试；仍需生产服务和两个真实用户验证跨用户可见与安装。 |
+| P1 | 旧会话与项目记忆 | 迁移、幂等和隔离有真实持久化回归；仍需在实际保留的旧 e-Mate/ECoreX 数据上确认非删除会话可见、继续对话、项目/通用会话不串。 |
+| P1 | 弱网与上游恢复 | 原生重试、checkpoint、审计幂等已有自动化；仍需受控断网/重连下验证上下文连续且消息、Tool、Usage、Audit 不重复。 |
+| P1 | 性能成对验收 | 已有真实样本但未完成相同机器、相同提示、相同模型的 30 组目标 rc.5 与 e-Mate p50/p95 对照，包括 TTFT、生成速度与 Tool 调用延迟。 |
+| P1 | 最终响应式与全按钮闭环 | 最新 Harness 原生消息流需在 320/390/768/1280/1920 做一次最终逐屏 CU，并检查全部可见组件不是空动作。 |
+| P1 | Session Share | 当前保持失败关闭；生产 create/list/get/revoke、公开 URL、到期和撤销未有有效租约与真实无敏感 fixture 验证。 |
+| 合同风险 | 严格零超额 | 本地持久预留可阻止有限额度并发超额，但单个请求仍可能超过开始时剩余额度；若上线要求绝对零超额，仍需上游单请求精确上限。 |
+
+Linux、Gemini 和 5,000 条会话反向滚动掉帧率不属于 2.0.7 发布阻断：Linux 不支持，Gemini 已按产品决定移除，反向滚动掉帧只保留诊断数据。
+
+### 后续高效验收顺序
+
+1. 日常变更只跑受影响包的一个聚焦回归、必要的 TypeScript/build 和 `git diff --check`；不重复跑未触及平台的全套测试。
+2. 一个切片稳定后只在该提交 SHA 跑一次组合 CI。CI 通过后复用同一制品，不在部署阶段重新构建。
+3. 候选部署只替换受影响服务，记录前后容器 ID、健康状态和回退收据；只跑该路由的一次真账号/真上游 canonical smoke。
+4. 付费和慢测试集中到发布候选：图片只跑 1、2、4 并发；性能用固定 30 组数据；Windows/macOS 真机、npm、R2、Office、Browser 各跑一次。
+5. 主代理执行 Computer Use。失败项按一个根因一个子代理修复，主代理只重跑失败场景及最近邻回归，不从头重复整套。
+6. 所有结果绑定同一账号、Session、项目、fixture、commit、制品 SHA 和 receipt；缺真实环境就明确 `blocked`，不使用 Mock 关闭真实验收项。

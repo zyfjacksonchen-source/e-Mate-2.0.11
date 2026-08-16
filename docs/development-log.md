@@ -1083,3 +1083,12 @@ The text highlights AI hallucination and human verification, legal use, real-act
 
 - 目标 `TurnStatus` 仍只由 Harness 真实 `running` 状态与真实 turn/start 时间驱动。e-Mate 只在客户端品牌层将可见/accessible 文案投影为“思考中”，并加入 Generative Loaders MIT `Domino` 的原始四节拍结构；色彩复用 Think/Tool 标题 `--dsw-alias-label-secondary`，尺寸收敛到 e-Mate `16px + 14/24`。
 - 该投影不解析 Session 事件，不注册第二 renderer/Store/Router/transport，不影响目标原生计时与终态清理。主进程用真实 Luna 请求看到 `role=status / aria-label=思考中`，轮次结束后节点消失；Shell 32/32 和主包 build 通过。
+
+## 2026-08-16 · S07 旁路审计生产入账与 Usage 对账
+
+- 提交 `9f7aea9bf0875a261f508e4401be8e70df3911cd` 将真实 Harness `assistant/message` Usage 事实经本地持久 outbox 和现有 Host-only identity transport 上送 `/v1/audit/usage`。服务端只写现有 Usage task/attempt/invocation 账本，不参与推理、模型路由或额度 admission；批量大小、载荷、账号、策略、模型、hash 和时间均在入口失败关闭。
+- 本地门禁为主包 Node 49/49、Shell 32/32；Model Gateway 80 pass / 7 环境 skip；精确提交 CI run `31938253833` 成功。Release run `31938253841` 的 tarball、darwin-arm64、darwin-x64 与 release evidence 已成功，记录时 win32-x64 干净安装仍在运行，不能提前标记整条 Release 成功。
+- 生产只替换 Model Gateway 为 `e-mate/model-gateway:e-mate-2.0.7-audit-9f7aea9`，镜像 ID `sha256:439caf252870e1fccb6fa31e96a828be67ee8a862142fd4b3505c72908a989c9`；Auth、Analytics、Web、Postgres、Redis 容器未重启。激活前 Luna、Sol、DeepSeek、Doubao 和 `gpt-image-2-pro` 五路真实 Model Smoke 全通过。root-only 回执目录为 `/root/e-mate-bootstrap/20260816T091230Z-audit-ingest-9f7aea9`，激活回执 SHA-256 为 `81fcb009b2abddc35d37b1dcae3283711c879d9a8adada9970a5769cf9408975`。
+- 真实管理员本地 outbox 从 1 条 pending / 15,040 Token 变为 0 pending / 1 delivered；生产账本从 3 次 / 13,185 Token / 3 Invocations 变为 4 次 / 28,225 Token / 4 Invocations。重复上送相同事实返回同一 receipt，账本计数完全不变。
+- Analytics 回读管理员 requests=4、usage events=4、total tokens=28,225；租户总计 requests=8、usage events=8、total tokens=77,080。Usage reconciliation 为 `MATCHED`，request status、usage task total、completed invocation usage 和 usage-invocation link 四项差异均为 0。
+- 本切片只关闭模型 Usage 审计。`/v1/tasks/summary` 仍为 `NO_DATA`，管理员 `e_mate_task_event` 数为 0；本地任务生命周期事件尚未上送，不能拿模型调用记录伪造每用户事件次数。
