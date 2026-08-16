@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createCipheriv, generateKeyPairSync, verify } from 'node:crypto';
+import { createCipheriv, createHash, generateKeyPairSync, verify } from 'node:crypto';
 import { once } from 'node:events';
 import test from 'node:test';
 import { InMemoryConsentStore } from '@e-mate/consent-store';
@@ -429,6 +429,129 @@ async function withGateway(
   }
 }
 
+test('ingests strict direct-runtime audit batches idempotently without inference or quota admission', async () => {
+  let routeEnabled = true;
+  const usageStore = new InMemoryUsageStore(limits);
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const upload = (records: unknown[]) =>
+        fetch(`${baseUrl}/v1/audit/usage`, {
+          method: 'POST',
+          headers: { ...auth(), 'content-type': 'application/json' },
+          body: JSON.stringify({ schema_version: 1, records }),
+        });
+      const record = auditUsageRecord();
+      const first = await upload([record]);
+      assert.equal(first.status, 200);
+      assert.equal(first.headers.get('cache-control'), 'no-store');
+      assert.equal(first.headers.has('access-control-allow-origin'), false);
+      const receiptBatch = (await first.json()) as {
+        schema_version: number;
+        receipts: Array<Record<string, unknown>>;
+      };
+      assert.equal(receiptBatch.schema_version, 1);
+      assert.deepEqual(Object.keys(receiptBatch.receipts[0]!).sort(), [
+        'accepted_at',
+        'fact_id',
+        'payload_sha256',
+        'receipt_id',
+      ]);
+      assert.equal(Number.isNaN(Date.parse(String(receiptBatch.receipts[0]!.accepted_at))), false);
+
+      const replay = await upload([record]);
+      assert.equal(replay.status, 200);
+      assert.deepEqual(await replay.json(), receiptBatch);
+      const usage = (await (
+        await fetch(`${baseUrl}/v1/usage/current`, { headers: auth() })
+      ).json()) as { totalTokens: number };
+      assert.equal(usage.totalTokens, 11);
+      assert.equal(
+        (await usageStore.finalize(principal('tenant-a', 'user-a'), String(record.payload.source_id)))?.costUsd,
+        0.0001485
+      );
+      assert.deepEqual(await (await upload([record])).json(), receiptBatch);
+
+      const conflict = await upload([auditUsageRecord(1, { output_tokens: 5, total_tokens: 12 })]);
+      assert.equal(conflict.status, 409);
+      assert.equal(((await conflict.json()) as { error: { code: string } }).error.code, 'AUDIT_USAGE_CONFLICT');
+      assert.equal(
+        ((await (await fetch(`${baseUrl}/v1/usage/current`, { headers: auth() })).json()) as { totalTokens: number })
+          .totalTokens,
+        11
+      );
+      const orderedRecords = [auditUsageRecord(4), auditUsageRecord(2)];
+      const ordered = (await (await upload(orderedRecords)).json()) as {
+        receipts: Array<{ fact_id: string }>;
+      };
+      assert.deepEqual(
+        ordered.receipts.map(({ fact_id }) => fact_id),
+        orderedRecords.map(({ fact_id }) => fact_id)
+      );
+      const atomicFailure = await upload([
+        auditUsageRecord(5),
+        auditUsageRecord(1, { output_tokens: 5, total_tokens: 12 }),
+      ]);
+      assert.equal(atomicFailure.status, 409);
+      assert.equal(
+        ((await (await fetch(`${baseUrl}/v1/usage/current`, { headers: auth() })).json()) as { totalTokens: number })
+          .totalTokens,
+        33
+      );
+      assert.equal((await upload([auditUsageRecord(5)])).status, 200);
+
+      const wrongAccount = await upload([auditUsageRecord(2, { account_subject_sha256: 'b'.repeat(64) })]);
+      assert.equal(wrongAccount.status, 400);
+      const unknownField = await fetch(`${baseUrl}/v1/audit/usage`, {
+        method: 'POST',
+        headers: { ...auth(), 'content-type': 'application/json' },
+        body: JSON.stringify({ schema_version: 1, records: [auditUsageRecord(2)], extra: true }),
+      });
+      assert.equal(unknownField.status, 400);
+      assert.equal((await upload(Array.from({ length: 65 }, (_, index) => auditUsageRecord(index + 10)))).status, 400);
+      assert.equal((await fetch(`${baseUrl}/v1/audit/usage`, { headers: auth() })).status, 405);
+
+      routeEnabled = false;
+      assert.equal((await upload([auditUsageRecord(3)])).status, 403);
+      assert.equal(upstreamRequests.length, 0);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    route,
+    { isEnabled: async () => routeEnabled },
+    usageStore
+  );
+});
+
+test('maps a direct-runtime upstream model id back to its allowed managed route', async () => {
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const response = await fetch(`${baseUrl}/v1/audit/usage`, {
+        method: 'POST',
+        headers: { ...auth(), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          schema_version: 1,
+          records: [
+            auditUsageRecord(1, {
+              requested_model_id: chatRoute.upstreamModelId,
+              actual_model_id: chatRoute.upstreamModelId,
+            }),
+          ],
+        }),
+      });
+      assert.equal(response.status, 200);
+      assert.equal(upstreamRequests.length, 0);
+    },
+    undefined,
+    undefined,
+    undefined,
+    limits,
+    chatRoute,
+    { isEnabled: async () => true }
+  );
+});
+
 test('distinguishes a missing credential from an unavailable authenticator', async () => {
   const server = createModelGatewayServer({
     routes: [route],
@@ -724,6 +847,56 @@ function compactionRequest(baseUrl: string, input: unknown[], headers = response
 const auth = (token = sessionToken): Record<string, string> => ({
   authorization: `Bearer ${token}`,
 });
+
+function testCanonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(testCanonicalJson).join(',')}]`;
+  if (typeof value === 'object' && value !== null) {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${testCanonicalJson(record[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) as string;
+}
+
+function auditUsageRecord(
+  eventSeq = 1,
+  overrides: Record<string, unknown> = {}
+): { fact_id: string; payload_sha256: string; payload: Record<string, unknown> } {
+  const sessionIdSha256 = createHash('sha256').update('session-a').digest('hex');
+  const sourceId = `harness:${sessionIdSha256}:${eventSeq}`;
+  const payload = {
+    schema_version: 1,
+    source_service: 'e-mate-audit',
+    source_id: sourceId,
+    usage_kind: 'chat',
+    session_id_sha256: sessionIdSha256,
+    event_seq: eventSeq,
+    turn: 1,
+    step: eventSeq,
+    provider_created_at: new Date().toISOString(),
+    requested_model_id: route.id,
+    actual_model_id: route.id,
+    actual_provider_id: 'e-mate-enterprise',
+    input_tokens: 3,
+    output_tokens: 4,
+    cache_read_tokens: 2,
+    cache_write_tokens: 2,
+    reasoning_tokens: 1,
+    total_tokens: 11,
+    account_subject_sha256: createHash('sha256').update('tenant-a:user-a').digest('hex'),
+    policy_revision: 1,
+    policy_receipt_id: 'policy-receipt-1',
+    policy_sha256: 'a'.repeat(64),
+    ...overrides,
+  };
+  return {
+    fact_id: `auditfact_${createHash('sha256').update(`e-Mate audit v1\0${sourceId}`).digest('hex')}`,
+    payload_sha256: createHash('sha256').update(testCanonicalJson(payload)).digest('hex'),
+    payload,
+  };
+}
 
 const consentPolicy = {
   schemaVersion: 1,

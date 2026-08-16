@@ -1,8 +1,11 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
 import {
   InvocationAdmissionError,
+  AuditUsageConflictError,
   validateInvocationLimits,
+  type AuditUsageRecord,
+  type AuditUsageReceipt,
   type InvocationLimits,
   type FinalizedUsage,
   type InvocationFact,
@@ -58,6 +61,21 @@ type InvocationRow = {
   quota_admitted_at: Date;
   quota_expires_at: Date;
   quota_released_at: Date | null;
+};
+
+type AuditInvocationRow = {
+  invocation_id: string;
+  tenant_id: string;
+  user_id: string;
+  task_id: string;
+  trace_id: string;
+  model_id: string;
+  provider_id: string;
+  request_digest: string;
+  route_fingerprint: string | null;
+  status: 'PREPARED' | 'COMPLETED' | 'REJECTED';
+  provider_response_id: string | null;
+  quota_admitted_at: Date;
 };
 
 type QuotaRow = {
@@ -1045,7 +1063,7 @@ export class PostgresUsageStore implements UsageStore {
     }
   }
 
-  async #add(client: PoolClient, fact: UsageFact, allowPrepared = false): Promise<void> {
+  async #add(client: PoolClient, fact: UsageFact, allowPrepared = false, recordedAt?: Date): Promise<void> {
     await client.query(
       `
         INSERT INTO e_mate_model_usage_task (
@@ -1118,9 +1136,9 @@ export class PostgresUsageStore implements UsageStore {
         INSERT INTO e_mate_model_usage_attempt (
           tenant_id, user_id, task_id, provider_response_id, trace_id,
           model_id, provider_id, input_tokens, output_tokens,
-          cache_read_tokens, cache_write_tokens, cost_usd
+          cache_read_tokens, cache_write_tokens, cost_usd, recorded_at
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,COALESCE($13::timestamptz, now()))
       `,
       [
         fact.tenantId,
@@ -1135,6 +1153,7 @@ export class PostgresUsageStore implements UsageStore {
         fact.cacheReadTokens,
         fact.cacheWriteTokens,
         fact.costUsd,
+        recordedAt ?? null,
       ]
     );
     await client.query(
@@ -1159,6 +1178,151 @@ export class PostgresUsageStore implements UsageStore {
         fact.costUsd,
       ]
     );
+  }
+
+  async ingestAuditUsage(records: AuditUsageRecord[]): Promise<AuditUsageReceipt[]> {
+    const factIds = new Set<string>();
+    const input = records.map((record) => {
+      const fact = validateFact(record.fact);
+      const occurredAt = new Date(record.occurredAt);
+      if (
+        !/^auditfact_[0-9a-f]{64}$/.test(record.factId) ||
+        !/^[0-9a-f]{64}$/.test(record.payloadSha256) ||
+        fact.providerResponseId !== record.factId ||
+        factIds.has(record.factId) ||
+        Number.isNaN(occurredAt.getTime())
+      ) {
+        throw new Error('Invalid audit usage record');
+      }
+      factIds.add(record.factId);
+      return {
+        ...record,
+        fact,
+        occurredAt,
+        receiptId: `auditreceipt_${createHash('sha256').update(record.factId).digest('hex')}`,
+        requestDigest: createHash('sha256').update(record.payloadSha256).digest('base64url'),
+        routeFingerprint: createHash('sha256').update(fact.modelId).digest('base64url'),
+      };
+    });
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      const receipts: AuditUsageReceipt[] = [];
+      for (const record of input) {
+        const existing = await client.query<AuditInvocationRow>(
+          `
+          SELECT invocation_id, tenant_id, user_id, task_id, trace_id,
+                 model_id, provider_id, request_digest, route_fingerprint,
+                 status, provider_response_id, quota_admitted_at
+            FROM e_mate_model_invocation
+           WHERE invocation_id = $1
+           FOR UPDATE
+        `,
+          [record.receiptId]
+        );
+        const current = existing.rows[0];
+        if (
+          current && (
+            current.tenant_id !== record.fact.tenantId ||
+            current.user_id !== record.fact.userId ||
+            current.task_id !== record.fact.taskId ||
+            current.trace_id !== record.fact.traceId ||
+            current.model_id !== record.fact.modelId ||
+            current.provider_id !== record.fact.providerId ||
+            current.request_digest !== record.requestDigest ||
+            current.route_fingerprint !== record.routeFingerprint ||
+            current.status !== 'COMPLETED' ||
+            current.provider_response_id !== record.factId
+          )
+        ) {
+          throw new AuditUsageConflictError('Audit usage fact conflicts with the existing invocation');
+        }
+        try {
+          await this.#add(client, record.fact, true, record.occurredAt);
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            /idempotency conflict|scope changed|already finalized|completion is required/i.test(error.message)
+          ) {
+            throw new AuditUsageConflictError('Audit usage fact conflicts with the existing ledger');
+          }
+          throw error;
+        }
+        if (!current) {
+          const acceptedAt = await this.#databaseNow(client);
+          await client.query(
+            `
+            INSERT INTO e_mate_model_invocation (
+              invocation_id, tenant_id, user_id, task_id, trace_id, model_id,
+              provider_id, request_digest, route_fingerprint, status,
+              provider_response_id, prepared_at, quota_admitted_at,
+              quota_expires_at, quota_released_at, finished_at
+            )
+            VALUES (
+              $1,$2,$3,$4,$5,$6,$7,$8,$9,'COMPLETED',$10,
+              $11,$12,$12,$12,$11
+            )
+            ON CONFLICT (invocation_id) DO NOTHING
+          `,
+            [
+              record.receiptId,
+              record.fact.tenantId,
+              record.fact.userId,
+              record.fact.taskId,
+              record.fact.traceId,
+              record.fact.modelId,
+              record.fact.providerId,
+              record.requestDigest,
+              record.routeFingerprint,
+              record.factId,
+              record.occurredAt,
+              acceptedAt,
+            ]
+          );
+        }
+        const recorded = await client.query<AuditInvocationRow>(
+          `
+          SELECT invocation_id, tenant_id, user_id, task_id, trace_id,
+                 model_id, provider_id, request_digest, route_fingerprint,
+                 status, provider_response_id, quota_admitted_at
+            FROM e_mate_model_invocation
+           WHERE invocation_id = $1
+           FOR UPDATE
+        `,
+          [record.receiptId]
+        );
+        const row = recorded.rows[0];
+        if (
+          !row ||
+          row.tenant_id !== record.fact.tenantId ||
+          row.user_id !== record.fact.userId ||
+          row.task_id !== record.fact.taskId ||
+          row.trace_id !== record.fact.traceId ||
+          row.model_id !== record.fact.modelId ||
+          row.provider_id !== record.fact.providerId ||
+          row.request_digest !== record.requestDigest ||
+          row.route_fingerprint !== record.routeFingerprint ||
+          row.status !== 'COMPLETED' ||
+          row.provider_response_id !== record.factId ||
+          !(row.quota_admitted_at instanceof Date)
+        ) {
+          throw new AuditUsageConflictError('Audit usage fact conflicts with the recorded invocation');
+        }
+        receipts.push({
+          factId: record.factId,
+          payloadSha256: record.payloadSha256,
+          receiptId: record.receiptId,
+          acceptedAt: row.quota_admitted_at.toISOString(),
+        });
+      }
+      await client.query('COMMIT');
+      return receipts;
+    } catch (error) {
+      await rollback(client);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async finalize(principal: ModelGatewayPrincipal, taskIdInput: string): Promise<FinalizedUsage | null> {

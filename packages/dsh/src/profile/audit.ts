@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { loadTargetStorageDomain } from './target-runtime.js'
 
 export const name = 'emate-audit'
-export const inject = ['connection', 'sessionPersistence', 'storageDomain', 'timer', 'emateModelPolicy']
+export const inject = ['connection', 'sessionPersistence', 'storageDomain', 'timer', 'emateModelPolicy', 'emateIdentity']
 export const AUDIT_CHANNEL = '/emate.audit'
 
 const SHA256 = /^[0-9a-f]{64}$/u
@@ -322,7 +322,7 @@ export async function apply(ctx, config = {}) {
     ctx,
     domain.table('bindings'),
     domain.table('outbox'),
-    config.auditProvider,
+    config.auditProvider ?? { upload: records => ctx.emateIdentity.uploadAudit(records) },
   )
   ctx.provide('emateAudit', service)
   ctx.on('agent/request', async (payload, next) => {

@@ -388,6 +388,9 @@ function profileCheck(paths) {
       && byId.get('emate-connections')?.name === './plugins/connections.js'
       && byId.get('emate-model-policy')?.name === './plugins/model-policy.js'
       && byId.get('emate-audit')?.name === './plugins/audit.js'
+      && JSON.stringify(byId.get('emate-audit')?.inject) === JSON.stringify([
+        'connection', 'sessionPersistence', 'storageDomain', 'timer', 'emateModelPolicy', 'emateIdentity',
+      ])
       && byId.get('emate-schedule-import')?.name === './plugins/schedule-import.js'
       && byId.get('emate-legacy-migration')?.name === './plugins/legacy-migration.js'
       && byId.get('emate-agent-operations')?.name === './plugins/agent-operations.js'

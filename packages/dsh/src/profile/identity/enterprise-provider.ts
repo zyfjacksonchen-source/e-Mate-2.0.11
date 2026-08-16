@@ -840,6 +840,13 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
         calculated_at: timestamp(value.calculatedAt, 'usage calculation time'),
       }
     },
+    async auditUpload(records: unknown[]) {
+      return authorized('/v1/audit/usage', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ schema_version: 1, records }),
+      }, 'audit usage')
+    },
     async authenticatedRequest(url: URL | string, init: RequestInit = {}) {
       const target = new URL(url)
       if (target.username || target.password || target.search || target.hash

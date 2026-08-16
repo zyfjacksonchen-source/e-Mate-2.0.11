@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { Pool } from 'pg';
 import { openPostgresAdminManagementStore } from '../../analytics-api/src/admin-management.ts';
@@ -8,6 +8,7 @@ import {
   InvocationAdmissionError,
   PostgresTenantModelRoutePolicy,
   PostgresUsageStore,
+  type AuditUsageRecord,
   type InvocationFact,
   type ModelGatewayPrincipal,
   type UsageFact,
@@ -87,6 +88,82 @@ async function createActiveTestUsers(
     )
   );
 }
+
+test(
+  'real PostgreSQL atomically ingests direct-runtime audit usage into the authoritative ledger',
+  { skip: databaseUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set' },
+  async () => {
+    const suffix = randomUUID();
+    const tenantId = `audit-${suffix}`;
+    const userId = `user-${suffix}`;
+    const sourceId = `harness:${createHash('sha256').update(`session-${suffix}`).digest('hex')}:1`;
+    const factId = `auditfact_${createHash('sha256').update(`e-Mate audit v1\0${sourceId}`).digest('hex')}`;
+    const database = pool();
+    const store = new PostgresUsageStore(database, limits);
+    const record: AuditUsageRecord = {
+      factId,
+      payloadSha256: 'a'.repeat(64),
+      occurredAt: new Date().toISOString(),
+      fact: {
+        tenantId,
+        userId,
+        taskId: sourceId,
+        traceId: createHash('sha256').update(`session-${suffix}`).digest('hex'),
+        modelId: 'gpt-5.6-sol',
+        providerId: 'e-mate-enterprise',
+        providerResponseId: factId,
+        inputTokens: 3,
+        outputTokens: 4,
+        cacheReadTokens: 2,
+        cacheWriteTokens: 2,
+        costUsd: 0,
+      },
+    };
+    try {
+      await store.initialize();
+      await createActiveTestUsers(database, [{ tenantId, userId, tokenLimit: 1 }]);
+      const batches = await Promise.all(Array.from({ length: 10 }, () => store.ingestAuditUsage([record])));
+      const receipts = batches.map(([receipt]) => receipt);
+      assert(receipts[0]);
+      assert.equal(new Set(receipts.map((receipt) => JSON.stringify(receipt))).size, 1);
+      assert.equal((await store.currentAccountUsage({ tenantId, userId, modelIds: ['gpt-5.6-sol'] })).totalTokens, 11);
+      const rows = await database.query<{
+        attempts: string;
+        invocations: string;
+        status: string;
+      }>(
+        `
+        SELECT
+          (SELECT count(*) FROM e_mate_model_usage_attempt
+            WHERE tenant_id = $1 AND user_id = $2 AND task_id = $3)::text AS attempts,
+          (SELECT count(*) FROM e_mate_model_invocation
+            WHERE tenant_id = $1 AND user_id = $2 AND task_id = $3)::text AS invocations,
+          (SELECT status FROM e_mate_model_invocation
+            WHERE tenant_id = $1 AND user_id = $2 AND task_id = $3 LIMIT 1) AS status
+      `,
+        [tenantId, userId, sourceId]
+      );
+      assert.deepEqual(rows.rows[0], { attempts: '1', invocations: '1', status: 'COMPLETED' });
+      await assert.rejects(
+        store.ingestAuditUsage([
+          {
+            ...record,
+            payloadSha256: 'b'.repeat(64),
+            fact: { ...record.fact, outputTokens: 5 },
+          },
+        ]),
+        /conflict/i
+      );
+      assert.equal((await store.currentAccountUsage({ tenantId, userId, modelIds: ['gpt-5.6-sol'] })).totalTokens, 11);
+    } finally {
+      await database.query('DELETE FROM e_mate_model_usage_task WHERE tenant_id = $1', [tenantId]).catch(() => undefined);
+      await database
+        .query('DELETE FROM e_mate_tenant_user WHERE tenant_id = $1 AND user_id = $2', [tenantId, userId])
+        .catch(() => undefined);
+      await database.end().catch(() => undefined);
+    }
+  }
+);
 
 test(
   'real PostgreSQL atomically aggregates and freezes gateway usage attempts',

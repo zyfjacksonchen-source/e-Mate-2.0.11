@@ -10,6 +10,9 @@ import { ConsentStoreError, type ConsentStore } from '@e-mate/consent-store';
 import { chatCompletionsToResponsesStream, responsesToChatCompletionsRequest } from './chat-completions-adapter.ts';
 
 const maxRequestBytes = 4 * 1024 * 1024;
+const maxAuditRequestBytes = 512 * 1024;
+const maxAuditBatchSize = 64;
+const maxAuditTokenCount = 1_000_000_000_000;
 const maxImageEditRequestBytes = 84 * 1024 * 1024;
 const maxImageEditBytes = 5 * 1024 * 1024;
 const maxImageEditInputs = 16;
@@ -203,6 +206,22 @@ export type AccountUsage = {
   calculatedAt: string;
 };
 
+export type AuditUsageRecord = {
+  factId: string;
+  payloadSha256: string;
+  occurredAt: string;
+  fact: UsageFact;
+};
+
+export type AuditUsageReceipt = {
+  factId: string;
+  payloadSha256: string;
+  receiptId: string;
+  acceptedAt: string;
+};
+
+export class AuditUsageConflictError extends Error {}
+
 export type UsageStore = {
   currentAccountUsage(principal: ModelGatewayPrincipal): Promise<AccountUsage>;
   prepare(fact: InvocationFact): Promise<PreparedInvocation>;
@@ -228,6 +247,7 @@ export type UsageStore = {
     leaseToken: string
   ): Promise<void>;
   add(fact: UsageFact): Promise<void>;
+  ingestAuditUsage(records: AuditUsageRecord[]): Promise<AuditUsageReceipt[]>;
   finalize(principal: ModelGatewayPrincipal, taskId: string): Promise<FinalizedUsage | null>;
 };
 
@@ -248,6 +268,7 @@ type InMemoryUsageEntry = {
       reconcileLeaseToken?: string;
       quotaExpiresAt: number;
       quotaReleased: boolean;
+      finishedAt?: string;
     }
   >;
   finalized?: FinalizedUsage;
@@ -349,6 +370,7 @@ export class InMemoryUsageStore implements UsageStore {
   readonly #now: () => number;
   readonly #quota = new Map<string, InMemoryQuotaState>();
   readonly #weeklyUsage = new Map<string, number>();
+  readonly #auditReceipts = new Map<string, AuditUsageReceipt>();
 
   constructor(limits: InvocationLimits, now: () => number = Date.now) {
     this.#limits = validateInvocationLimits(limits);
@@ -623,7 +645,7 @@ export class InMemoryUsageStore implements UsageStore {
     this.#add(entry, fact);
   }
 
-  #add(entry: InMemoryUsageEntry, fact: UsageFact): void {
+  #add(entry: InMemoryUsageEntry, fact: UsageFact, occurredAt = this.#tenantNow(fact.tenantId)): void {
     const replay = entry?.attempts.get(fact.providerResponseId);
     if (replay) {
       if (!sameUsageFact(replay, fact)) {
@@ -654,8 +676,7 @@ export class InMemoryUsageStore implements UsageStore {
     ) {
       throw new Error('Task usage exceeds ledger limits');
     }
-    const now = this.#tenantNow(fact.tenantId);
-    const usageKey = `${fact.tenantId}\0${fact.userId}\0${this.#weekStartedAt(now)}`;
+    const usageKey = `${fact.tenantId}\0${fact.userId}\0${this.#weekStartedAt(occurredAt)}`;
     const nextUsage = (this.#weeklyUsage.get(usageKey) ?? 0) +
       fact.inputTokens + fact.outputTokens + fact.cacheReadTokens + fact.cacheWriteTokens;
     if (!Number.isSafeInteger(nextUsage)) throw new Error('Account usage exceeds its boundary');
@@ -669,6 +690,99 @@ export class InMemoryUsageStore implements UsageStore {
     };
     entry.attempts.set(fact.providerResponseId, fact);
     this.#weeklyUsage.set(usageKey, nextUsage);
+  }
+
+  async ingestAuditUsage(records: AuditUsageRecord[]): Promise<AuditUsageReceipt[]> {
+    if (records.length < 1 || records.length > maxAuditBatchSize) throw new Error('Invalid audit usage batch');
+    const input = records.map((record) => {
+      const fact = normalizeUsageFact(record.fact);
+      const occurredAt = Date.parse(record.occurredAt);
+      if (
+        !auditFactIdPattern.test(record.factId) ||
+        !auditSha256Pattern.test(record.payloadSha256) ||
+        fact.providerResponseId !== record.factId ||
+        !Number.isFinite(occurredAt)
+      ) {
+        throw new Error('Invalid audit usage record');
+      }
+      return { ...record, fact, occurredAtMs: occurredAt };
+    });
+    const weeklyDeltas = new Map<string, number>();
+    for (const record of input) {
+      const receipt = this.#auditReceipts.get(record.factId);
+      if (receipt && receipt.payloadSha256 !== record.payloadSha256) {
+        throw new AuditUsageConflictError('Audit usage fact conflicts with its recorded payload');
+      }
+      const entry = this.#facts.get(`${record.fact.tenantId}\0${record.fact.userId}\0${record.fact.taskId}`);
+      const replay = entry?.attempts.get(record.fact.providerResponseId);
+      if (
+        entry && (
+          !sameInvocationScope(entry.scope, record.fact) ||
+          entry.finalized !== undefined && receipt === undefined ||
+          [...entry.invocations.values()].some(({ state }) => state === 'PREPARED') ||
+          replay !== undefined && !sameUsageFact(replay, record.fact)
+        )
+      ) {
+        throw new AuditUsageConflictError('Audit usage fact conflicts with the existing ledger');
+      }
+      if (receipt && !replay) {
+        throw new AuditUsageConflictError('Audit usage receipt is missing its ledger fact');
+      }
+      if (!receipt) {
+        const usageKey = `${record.fact.tenantId}\0${record.fact.userId}\0${this.#weekStartedAt(record.occurredAtMs)}`;
+        const delta =
+          record.fact.inputTokens +
+          record.fact.outputTokens +
+          record.fact.cacheReadTokens +
+          record.fact.cacheWriteTokens;
+        const nextDelta = (weeklyDeltas.get(usageKey) ?? 0) + delta;
+        if (!Number.isSafeInteger(nextDelta)) throw new Error('Account usage exceeds its boundary');
+        weeklyDeltas.set(usageKey, nextDelta);
+      }
+    }
+    for (const [usageKey, delta] of weeklyDeltas) {
+      if (!Number.isSafeInteger((this.#weeklyUsage.get(usageKey) ?? 0) + delta)) {
+        throw new Error('Account usage exceeds its boundary');
+      }
+    }
+
+    const acceptedAtMs = this.#now();
+    if (!Number.isSafeInteger(acceptedAtMs) || acceptedAtMs < 0) throw new Error('Invalid quota clock');
+    const acceptedAt = new Date(acceptedAtMs).toISOString();
+    return input.map((record) => {
+      const replay = this.#auditReceipts.get(record.factId);
+      if (replay) return replay;
+      const key = `${record.fact.tenantId}\0${record.fact.userId}\0${record.fact.taskId}`;
+      let entry = this.#facts.get(key);
+      if (!entry) {
+        entry = {
+          scope: record.fact,
+          attempts: new Map(),
+          invocations: new Map(),
+        };
+        this.#facts.set(key, entry);
+      }
+      this.#add(entry, record.fact, record.occurredAtMs);
+      const receipt: AuditUsageReceipt = {
+        factId: record.factId,
+        payloadSha256: record.payloadSha256,
+        receiptId: `auditreceipt_${createHash('sha256').update(record.factId).digest('hex')}`,
+        acceptedAt,
+      };
+      entry.invocations.set(receipt.receiptId, {
+        fact: {
+          ...record.fact,
+          requestDigest: createHash('sha256').update(record.payloadSha256).digest('base64url'),
+          routeFingerprint: createHash('sha256').update(record.fact.modelId).digest('base64url'),
+        },
+        state: 'COMPLETED',
+        quotaExpiresAt: Date.parse(acceptedAt),
+        quotaReleased: true,
+        finishedAt: record.occurredAt,
+      });
+      this.#auditReceipts.set(record.factId, receipt);
+      return receipt;
+    });
   }
 
   async finalize(principal: ModelGatewayPrincipal, taskId: string): Promise<FinalizedUsage | null> {
@@ -772,6 +886,188 @@ function principalAllowsRoute(identity: ModelGatewayPrincipal, routeId: string):
   return identity.modelIds.includes(routeId);
 }
 
+const auditSha256Pattern = /^[0-9a-f]{64}$/;
+const auditFactIdPattern = /^auditfact_[0-9a-f]{64}$/;
+const auditPolicyIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
+const auditTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const auditPayloadKeys = [
+  'account_subject_sha256',
+  'actual_model_id',
+  'actual_provider_id',
+  'cache_read_tokens',
+  'cache_write_tokens',
+  'event_seq',
+  'input_tokens',
+  'output_tokens',
+  'policy_receipt_id',
+  'policy_revision',
+  'policy_sha256',
+  'provider_created_at',
+  'reasoning_tokens',
+  'requested_model_id',
+  'schema_version',
+  'session_id_sha256',
+  'source_id',
+  'source_service',
+  'step',
+  'total_tokens',
+  'turn',
+  'usage_kind',
+] as const;
+
+function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).sort().join('\0') === [...keys].sort().join('\0');
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (typeof value === 'object' && value !== null) {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function auditToken(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= maxAuditTokenCount;
+}
+
+function parseAuditUsageBatch(
+  value: Record<string, unknown>,
+  identity: ModelGatewayPrincipal,
+  routes: Map<string, ModelGatewayRoute>
+): Array<{ record: AuditUsageRecord; routeId: string }> {
+  if (
+    !exactKeys(value, ['records', 'schema_version']) ||
+    value.schema_version !== 1 ||
+    !Array.isArray(value.records) ||
+    value.records.length < 1 ||
+    value.records.length > maxAuditBatchSize
+  ) {
+    throw new HttpError(400, 'INVALID_AUDIT_USAGE', 'Invalid audit usage batch');
+  }
+  const expectedAccount = createHash('sha256')
+    .update(`${identity.tenantId}:${identity.userId}`)
+    .digest('hex');
+  const factIds = new Set<string>();
+  return value.records.map((input) => {
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+      throw new HttpError(400, 'INVALID_AUDIT_USAGE', 'Invalid audit usage record');
+    }
+    const envelope = input as Record<string, unknown>;
+    const payload = envelope.payload;
+    if (
+      !exactKeys(envelope, ['fact_id', 'payload', 'payload_sha256']) ||
+      typeof envelope.fact_id !== 'string' ||
+      !auditFactIdPattern.test(envelope.fact_id) ||
+      factIds.has(envelope.fact_id) ||
+      typeof envelope.payload_sha256 !== 'string' ||
+      !auditSha256Pattern.test(envelope.payload_sha256) ||
+      typeof payload !== 'object' ||
+      payload === null ||
+      Array.isArray(payload) ||
+      !exactKeys(payload as Record<string, unknown>, auditPayloadKeys)
+    ) {
+      throw new HttpError(400, 'INVALID_AUDIT_USAGE', 'Invalid audit usage record');
+    }
+    factIds.add(envelope.fact_id);
+    const fact = payload as Record<string, unknown>;
+    const counts = [
+      fact.input_tokens,
+      fact.output_tokens,
+      fact.cache_read_tokens,
+      fact.cache_write_tokens,
+      fact.reasoning_tokens,
+      fact.total_tokens,
+    ];
+    const occurredAt = typeof fact.provider_created_at === 'string' ? fact.provider_created_at : '';
+    const occurredAtMs = Date.parse(occurredAt);
+    const modelId = typeof fact.actual_model_id === 'string' ? fact.actual_model_id : '';
+    const matchingRoutes = [...routes.values()].filter(
+      (route) =>
+        route.apiMode !== 'images-generations' &&
+        (route.id === modelId || route.upstreamModelId === modelId)
+    );
+    const eventSeq = fact.event_seq;
+    const sessionIdSha256 = fact.session_id_sha256;
+    const sourceId = fact.source_id;
+    if (
+      fact.schema_version !== 1 ||
+      fact.source_service !== 'e-mate-audit' ||
+      fact.usage_kind !== 'chat' ||
+      typeof sessionIdSha256 !== 'string' ||
+      !auditSha256Pattern.test(sessionIdSha256) ||
+      !Number.isSafeInteger(eventSeq) ||
+      Number(eventSeq) < 0 ||
+      typeof sourceId !== 'string' ||
+      sourceId !== `harness:${sessionIdSha256}:${eventSeq}` ||
+      !Number.isSafeInteger(fact.turn) ||
+      Number(fact.turn) < 1 ||
+      !Number.isSafeInteger(fact.step) ||
+      Number(fact.step) < 1 ||
+      !auditTimestampPattern.test(occurredAt) ||
+      !Number.isFinite(occurredAtMs) ||
+      occurredAtMs < Date.UTC(2000, 0, 1) ||
+      occurredAtMs > Date.now() + 5 * 60_000 ||
+      fact.requested_model_id !== modelId ||
+      matchingRoutes.length !== 1 ||
+      !principalAllowsRoute(identity, matchingRoutes[0]!.id) ||
+      typeof fact.actual_provider_id !== 'string' ||
+      !identifierPattern.test(fact.actual_provider_id) ||
+      counts.some((count) => !auditToken(count)) ||
+      Number(fact.total_tokens) < 1 ||
+      Number(fact.total_tokens) !==
+        Number(fact.input_tokens) +
+          Number(fact.output_tokens) +
+          Number(fact.cache_read_tokens) +
+          Number(fact.cache_write_tokens) ||
+      fact.account_subject_sha256 !== expectedAccount ||
+      !Number.isSafeInteger(fact.policy_revision) ||
+      Number(fact.policy_revision) < 1 ||
+      typeof fact.policy_receipt_id !== 'string' ||
+      !auditPolicyIdPattern.test(fact.policy_receipt_id) ||
+      typeof fact.policy_sha256 !== 'string' ||
+      !auditSha256Pattern.test(fact.policy_sha256) ||
+      envelope.fact_id !==
+        `auditfact_${createHash('sha256').update(`e-Mate audit v1\0${sourceId}`).digest('hex')}` ||
+      envelope.payload_sha256 !== createHash('sha256').update(canonicalJson(fact)).digest('hex')
+    ) {
+      throw new HttpError(400, 'INVALID_AUDIT_USAGE', 'Invalid audit usage record');
+    }
+    const route = matchingRoutes[0]!;
+    return {
+      routeId: route.id,
+      record: {
+        factId: envelope.fact_id,
+        payloadSha256: envelope.payload_sha256,
+        occurredAt,
+        fact: {
+          tenantId: identity.tenantId,
+          userId: identity.userId,
+          taskId: sourceId,
+          traceId: sessionIdSha256,
+          modelId: route.id,
+          providerId: fact.actual_provider_id,
+          providerResponseId: envelope.fact_id,
+          inputTokens: Number(fact.input_tokens),
+          outputTokens: Number(fact.output_tokens),
+          cacheReadTokens: Number(fact.cache_read_tokens),
+          cacheWriteTokens: Number(fact.cache_write_tokens),
+          costUsd: usageCost(route, {
+            inputTokens: Number(fact.input_tokens),
+            outputTokens: Number(fact.output_tokens),
+            cacheReadTokens: Number(fact.cache_read_tokens),
+            cacheWriteTokens: Number(fact.cache_write_tokens),
+          }),
+        },
+      },
+    };
+  });
+}
+
 async function readBody(request: IncomingMessage, maximum = maxRequestBytes): Promise<Buffer> {
   const declared = request.headers['content-length'];
   if (typeof declared === 'string' && (!/^\d+$/.test(declared) || Number(declared) > maximum)) {
@@ -793,13 +1089,13 @@ async function readBody(request: IncomingMessage, maximum = maxRequestBytes): Pr
   return Buffer.concat(chunks, size);
 }
 
-async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(request: IncomingMessage, maximum = maxRequestBytes): Promise<Record<string, unknown>> {
   if (request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') {
     throw new HttpError(415, 'CONTENT_TYPE_UNSUPPORTED', 'Expected JSON');
   }
   let value: unknown;
   try {
-    value = JSON.parse((await readBody(request)).toString('utf8'));
+    value = JSON.parse((await readBody(request, maximum)).toString('utf8'));
   } catch (error) {
     if (error instanceof HttpError) throw error;
     throw new HttpError(400, 'INVALID_REQUEST', 'Invalid JSON');
@@ -1216,7 +1512,10 @@ function parseProviderInvocationReceipt(
   return { status, usage };
 }
 
-function usageCost(route: ModelGatewayRoute, usage: NonNullable<ReturnType<typeof parseCompletedUsage>>): number {
+function usageCost(
+  route: ModelGatewayRoute,
+  usage: Pick<UsageFact, 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens'>
+): number {
   return (
     (usage.inputTokens * route.cost.input +
       usage.outputTokens * route.cost.output +
@@ -1347,6 +1646,7 @@ const consentProtectedPaths = new Set([
   '/v1/chat/completions',
   '/v1/images/generations',
   '/v1/images/edits',
+  '/v1/audit/usage',
   '/v1/usage/current',
 ]);
 
@@ -1520,6 +1820,34 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
         if (request.method !== 'GET') return method(response, 'GET');
         const usage = await options.usageStore.currentAccountUsage(identity);
         json(response, 200, { schemaVersion: 1, ...usage });
+        return;
+      }
+      if (url.pathname === '/v1/audit/usage') {
+        if (request.method !== 'POST') return method(response, 'POST');
+        const parsed = parseAuditUsageBatch(await readJson(request, maxAuditRequestBytes), identity, routes);
+        for (const routeId of new Set(parsed.map(({ routeId }) => routeId))) {
+          if (!(await modelRouteEnabled(options.tenantModelRoutePolicy, identity.tenantId, routeId))) {
+            throw new HttpError(403, 'MODEL_ACCESS_DENIED', 'Model is not available');
+          }
+        }
+        let receipts: AuditUsageReceipt[];
+        try {
+          receipts = await options.usageStore.ingestAuditUsage(parsed.map(({ record }) => record));
+        } catch (error) {
+          if (error instanceof AuditUsageConflictError) {
+            throw new HttpError(409, 'AUDIT_USAGE_CONFLICT', 'Audit usage conflicts with the existing ledger');
+          }
+          throw error;
+        }
+        json(response, 200, {
+          schema_version: 1,
+          receipts: receipts.map((receipt) => ({
+            fact_id: receipt.factId,
+            payload_sha256: receipt.payloadSha256,
+            receipt_id: receipt.receiptId,
+            accepted_at: receipt.acceptedAt,
+          })),
+        });
         return;
       }
       if (url.pathname === '/v1/responses') {

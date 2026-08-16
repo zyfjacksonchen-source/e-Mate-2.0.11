@@ -203,6 +203,12 @@ export function apply(ctx, config = {}) {
       }
       return accountUsage(await config.identityProvider.usage(timezone), timezone)
     },
+    async uploadAudit(records) {
+      if (typeof config.identityProvider?.auditUpload !== 'function') {
+        throw new Error('e-Mate enterprise audit transport is unavailable')
+      }
+      return config.identityProvider.auditUpload(records)
+    },
   })
   ctx.effect(() => ctx.connection.rpc.handle(
     IDENTITY_CHANNEL,

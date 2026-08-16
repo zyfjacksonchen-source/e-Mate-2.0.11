@@ -520,6 +520,9 @@ test('managed profile installation is idempotent', () => {
     assert.equal(patchById.get('emate-identity').config.enterprise.organization, 'emate-v2')
     assert.equal(patchById.get('emate-share').name, './plugins/share.js')
     assert.equal(patchById.get('emate-audit').name, './plugins/audit.js')
+    assert.deepEqual(patchById.get('emate-audit').inject, [
+      'connection', 'sessionPersistence', 'storageDomain', 'timer', 'emateModelPolicy', 'emateIdentity',
+    ])
     assert.equal(patchById.get('emate-agent-operations').name, './plugins/agent-operations.js')
     assert.equal(patchById.has('ui-sidebar'), false)
     assert.equal(patchById.has('emate-shell'), false)
@@ -532,7 +535,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(patch, /id: emate-skill-hub-agent[\s\S]*\.\/plugins\/skill-hub-agent\.js/)
     assert.doesNotMatch(patch, /emate-(?:office-ocr|browser-computer-use|memory|dream|learning)/)
     assert.match(patch, /id: emate-model-policy[\s\S]*\.\/plugins\/model-policy\.js[\s\S]*inject: \[apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity\]/)
-    assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, emateModelPolicy\]/)
+    assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, emateModelPolicy, emateIdentity\]/)
     assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*inject: \[tools, jobs, attachments, emateIdentity, emateModelPolicy, emateCapabilities\][\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
     assert.match(patch, /id: emate-legacy-migration[\s\S]*\.\/plugins\/legacy-migration\.js[\s\S]*inject: \[sessionPersistence, webServer\]/)
     assert.match(patch, /id: emate-schedule-import[\s\S]*\.\/plugins\/schedule-import\.js[\s\S]*inject: \[tools\]/)
@@ -1350,6 +1353,7 @@ test('identity agreements are immutable, explicit, and use the target Connection
   assert.equal((await registration.handler('agreements.describe', { extra: true })).error.code, 'bad-request')
   assert.equal((await registration.handler('other', {})).error.code, 'bad-request')
   await assert.rejects(identity.request(new URL('https://dl.ecoremedia.net/')), /identity transport is unavailable/)
+  await assert.rejects(identity.uploadAudit([]), /audit transport is unavailable/)
 
   let configuredRegistration
   let authenticated = false
@@ -1541,6 +1545,7 @@ test('enterprise identity provider maps target credentials and the production HT
   }
   let accepted = false
   const requests = []
+  let auditBody
   const json = value => new Response(JSON.stringify(value), {
     status: 200,
     headers: { 'content-type': 'application/json' },
@@ -1621,6 +1626,18 @@ test('enterprise identity provider maps target credentials and the production HT
         totalTokens: 12_345,
         weekStartedAt: '2030-01-07T00:00:00.000Z',
         calculatedAt: new Date(clock).toISOString(),
+      })
+    }
+    if (url.pathname.endsWith('/v1/audit/usage')) {
+      auditBody = JSON.parse(String(init.body))
+      return json({
+        schema_version: 1,
+        receipts: auditBody.records.map(record => ({
+          fact_id: record.fact_id,
+          payload_sha256: record.payload_sha256,
+          receipt_id: `receipt:${record.fact_id}`,
+          accepted_at: new Date(clock).toISOString(),
+        })),
       })
     }
     if (url.pathname.endsWith('/v1/runtime-models')) {
@@ -1718,6 +1735,10 @@ test('enterprise identity provider maps target credentials and the production HT
   const usage = await provider.usage('Asia/Shanghai')
   assert.equal(usage.week.total_tokens, 12_345)
   assert.equal(usage.timezone, 'Asia/Shanghai')
+  const auditRecords = [{ fact_id: 'auditfact_test-207', payload_sha256: 'a'.repeat(64), payload: { total_tokens: 17 } }]
+  const auditReceipt = await provider.auditUpload(auditRecords)
+  assert.deepEqual(auditBody, { schema_version: 1, records: auditRecords })
+  assert.equal(auditReceipt.receipts[0].fact_id, auditRecords[0].fact_id)
   await provider.acceptAgreements()
   const unlocked = await provider.bootstrap()
   assert.equal(unlocked.workspace_unlocked, true)
@@ -1733,6 +1754,9 @@ test('enterprise identity provider maps target credentials and the production HT
   const runtimeRequests = requests.filter(request => request.path.endsWith('/v1/runtime-models'))
   assert.ok(runtimeRequests.length >= 2)
   assert.ok(runtimeRequests.every(request => request.authorization === `Bearer ${modelToken}`))
+  const auditRequests = requests.filter(request => request.path.endsWith('/v1/audit/usage'))
+  assert.equal(auditRequests.length, 1)
+  assert.equal(auditRequests[0].authorization, `Bearer ${modelToken}`)
   values.set('E_MATE_MODEL_KEY_GPT', 'runtime-provider-key-not-persisted-here')
   const logout = await provider.logout({ client_request_id: 'logout-request-207' })
   assert.equal(logout.receipt_id, 'logout-receipt-207')
@@ -2473,6 +2497,101 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
     const blocked = createUsageFact('unbound-session', event, undefined)
     assert.equal(blocked.status, 'blocked')
     assert.equal(blocked.last_error_code, 'identity-policy-binding-missing-or-conflicting')
+  } finally {
+    for (const cleanup of cleanups.reverse()) await cleanup()
+    rmSync(temporary, { recursive: true, force: true })
+  }
+})
+
+test('audit startup flushes a persisted outbox through the Host identity transport', async () => {
+  const temporary = mkdtempSync(join(tmpdir(), 'e-mate-audit-backfill-'))
+  const paths = installProfile(join(temporary, 'dsh-home'))
+  const tables = { bindings: new Map(), outbox: new Map() }
+  const cleanups = []
+  const deliveredFacts = []
+  const uploads = []
+  let audit
+  let uploadAvailable = false
+  let notifyAttempt
+  const attempted = new Promise(resolve => { notifyAttempt = resolve })
+  const event = {
+    type: 'assistant/message',
+    seq: 21,
+    time: Date.now(),
+    data: {
+      turn: 2,
+      step: 1,
+      message: {
+        source: { kind: 'model', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+      },
+      usage: { inputTokens: 9, outputTokens: 4 },
+    },
+  }
+  const pending = createUsageFact('audit-backfill-session', event, {
+    schema_version: 1,
+    account_subject_sha256: 'c'.repeat(64),
+    policy_revision: 4,
+    policy_receipt_id: 'policy-receipt:backfill-207',
+    policy_sha256: 'd'.repeat(64),
+    provider: 'e-mate-enterprise',
+    model: 'gpt-5.6-luna',
+  })
+  tables.outbox.set(pending.fact_id, pending)
+  const domain = {
+    table: name => ({
+      entries: () => tables[name].entries(),
+      put: async (key, value) => { tables[name].set(key, structuredClone(value)) },
+    }),
+    close: async () => {},
+  }
+  try {
+    await applyAudit({
+      connection: { rpc: { handle: () => () => {} } },
+      sessionPersistence: { list: async () => [], readFrom: async () => ({ events: [] }) },
+      storageDomain: { open: async () => domain },
+      emateIdentity: {
+        uploadAudit: async records => {
+          uploads.push(structuredClone(records))
+          notifyAttempt()
+          if (!uploadAvailable) throw new Error('e-Mate login is required')
+          return {
+            schema_version: 1,
+            receipts: records.map(record => ({
+              fact_id: record.fact_id,
+              payload_sha256: record.payload_sha256,
+              receipt_id: `audit-receipt:${record.fact_id.slice(-16)}`,
+              accepted_at: new Date().toISOString(),
+            })),
+          }
+        },
+      },
+      emateModelPolicy: {
+        markAuditDelivered: async (factId, acceptedAt) => { deliveredFacts.push({ factId, acceptedAt }) },
+      },
+      provide: (_name, value) => { audit = value },
+      effect(effect) {
+        const cleanup = effect()
+        if (typeof cleanup === 'function') cleanups.push(cleanup)
+        return cleanup
+      },
+      on: () => () => {},
+      interval: () => () => {},
+      logger: { warn: () => {} },
+    }, {
+      bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json'),
+      flushIntervalMs: 30_000,
+    })
+
+    await attempted
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(audit.status().pending, 1)
+    assert.equal(tables.outbox.get(pending.fact_id).attempt_count, 1)
+    uploadAvailable = true
+    const delivered = await audit.flush({ force: true })
+    assert.equal(delivered.delivered_now, 1)
+    assert.equal(tables.outbox.get(pending.fact_id).status, 'delivered')
+    assert.equal(deliveredFacts.length, 1)
+    assert.equal(uploads.length, 2)
   } finally {
     for (const cleanup of cleanups.reverse()) await cleanup()
     rmSync(temporary, { recursive: true, force: true })

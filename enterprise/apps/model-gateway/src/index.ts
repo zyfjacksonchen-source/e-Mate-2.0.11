@@ -1,6 +1,9 @@
 export {
   createModelGatewayHandler,
   createModelGatewayServer,
+  AuditUsageConflictError,
+  type AuditUsageRecord,
+  type AuditUsageReceipt,
   InMemoryUsageStore,
   type FinalizedUsage,
   InvocationAdmissionError,
