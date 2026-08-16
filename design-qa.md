@@ -320,6 +320,15 @@ final result: passed (local entry/theme/error-state); blocked (production login 
 
 final result: passed (managed general-session entry and truthful nine-capability projection)
 
+## S03 target running status brand projection — 2026-08-16
+
+- Source: Generative Loaders `Domino` at `https://generativeloaders.com/`, MIT licensed. Browser inspection confirmed the original four-item DOM, staggered delays, `1.38s` cubic-bezier animation and `0/32deg` keyframes; the exact source card is `artifacts/design-qa/S03-thinking-domino/source-generative-loaders-domino.png` and its full-page context is saved beside it.
+- Implementation keeps the pinned Harness `TurnStatus` and its real `running`/elapsed-time lifecycle. The e-Mate shell only decorates that target status node, exposes the Chinese accessible label `思考中`, and uses the existing Think/Tool title color `--dsw-alias-label-secondary`. No Session event, renderer dispatch, Store, Router or transport was replaced.
+- The loader is scaled to e-Mate's existing `16px` leading icon and `14px/24px` UI text instead of copying the reference card size. Reduced-motion users receive the same static Domino silhouette without animation.
+- Main Browser acceptance submitted a real Luna request, observed the named live status `思考中`, captured the animated state in `artifacts/design-qa/S03-thinking-domino/implementation-emate-dark.png`, and verified the status node disappears at the real turn terminal boundary. Shell tests are 32/32 and `@e-mate/dsh` build passes.
+
+final result: passed (real running-turn lifecycle and scoped Domino brand projection)
+
 ## S07 production admin and usage entry — 2026-08-16
 
 - The production admin URL rendered the existing e-Mate account/password surface. Submitting the only credentials explicitly supplied for the server returned `account login failed`; the page remained disconnected and no user, quota, protocol or model operation became available. Evidence: `artifacts/design-qa/S07-admin-usage-production/admin-login-rejected-current-deployment.png`.

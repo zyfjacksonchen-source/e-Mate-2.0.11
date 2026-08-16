@@ -53,6 +53,7 @@ import {
   SettingsTitle,
   SettingsTrigger,
 } from './settings-chrome.tsx'
+import { ThinkingStatusBranding } from './thinking-status.tsx'
 
 export const inject = ['slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'conversationEvents', 'theme']
 
@@ -109,6 +110,11 @@ export function apply(ctx: any): void {
       startHomeSession: () => { startSession() },
     }),
   }, SessionRouteProjection))
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay',
+    id: 'e-mate-thinking-status',
+    order: -190,
+  }, ThinkingStatusBranding))
   ctx.conversationEvents.register(imageDisclosureDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',

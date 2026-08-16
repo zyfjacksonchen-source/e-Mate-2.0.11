@@ -1072,3 +1072,14 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 同一真实 Session 的上下文连续通过：Luna 首轮记住 `ORANGE-207`，第二轮准确回忆；切到 Sol 后仍准确回忆，随后恢复 Luna。短回复的三次 Luna TTFT 为 2.522s、4.827s、4.074s，中位数 4.074s；对应总时长为 2.525s、5.162s、4.428s，中位数 4.428s。Sol 切换后的 TTFT/总时长为 2.807s/3.172s。相较修复前同机首轮 18.8s TTFT、21.4s 总时长，当前真实链路已消除企业 Gateway 与 Keychain 热路径等待。
 - 另一个 Luna 长回复产生 183 output tokens、159 个真实 `assistant/chunk`，TTFT 3.357s、总时长 7.505s、首末 chunk 解码 2.434s，即 75.18 tok/s。该样本用于确认流式生成恢复，不把不同提示长度的 75.18 tok/s 与旧 5.4 tok/s 冒充严格同数据集配对，也不从少量样本推算 p95。
 - 空白新 Session 首次读取模型目录时，在 control-plane 背景刷新完成前短暂返回 `routable=false`；绕过 UI 强行提交会按合同以 `model policy cache is unavailable or expired` 失败关闭。随后同一 Session 目录变为可路由并正常完成请求；正常浏览器 Composer 会等待真实目录可路由，不制造自动成功状态。
+
+## 2026-08-16 · S07 验收账号模型与生图策略修复
+
+- 通过现有 Admin API 将 `emate-v2 / emate-accept-0816-1140` 从 Luna/Sol 两项收敛策略更新为 Luna、Sol、DeepSeek、Doubao 和 `gpt-image-2-pro`，Luna 保持首位默认，未加入 Gemini。用户仍为 `ACTIVE / MEMBER / 100000`，真实协议回执数仍为 1。未直接写 SQL、未改 Key、未重启服务。
+- 主进程只读复核回执：五路 route 均 `enabled + published`，登录模型集含四个聊天模型和 `gpt-image-2-pro`，runtime endpoint 仍只下发四个聊天模型；Gateway/Auth/Analytics/Postgres/Redis 均为原实例 healthy。生产回执为 `/root/e-mate-bootstrap/20260816T084700Z-accept-model-policy/`。
+- 策略更新按合同撤销该账号旧租约。当前没有可安全取得的验收账号新密码或有效 Session，因此未伪造真实 image Tool 调用；最终 Computer Use 仍需用户重新登录该账号，核对五项可见目录与真实 imagegen Job/Attachment。
+
+## 2026-08-16 · S03 Harness 原生思考状态品牌化
+
+- 目标 `TurnStatus` 仍只由 Harness 真实 `running` 状态与真实 turn/start 时间驱动。e-Mate 只在客户端品牌层将可见/accessible 文案投影为“思考中”，并加入 Generative Loaders MIT `Domino` 的原始四节拍结构；色彩复用 Think/Tool 标题 `--dsw-alias-label-secondary`，尺寸收敛到 e-Mate `16px + 14/24`。
+- 该投影不解析 Session 事件，不注册第二 renderer/Store/Router/transport，不影响目标原生计时与终态清理。主进程用真实 Luna 请求看到 `role=status / aria-label=思考中`，轮次结束后节点消失；Shell 32/32 和主包 build 通过。

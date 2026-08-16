@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ImageDisclosure, imageDisclosureDefinition } from '../src/client/image-gallery.tsx'
+import { ThinkingStatusBranding } from '../src/client/thinking-status.tsx'
 
 vi.mock('@deepseek-ai/dsh-client-runtime/client', () => ({
   isAppendSurfaceEvent: (event: { surfaceOp?: string }) => event.surfaceOp === 'append',
@@ -13,6 +14,7 @@ const source = readFileSync(resolve('src/client/index.ts'), 'utf8')
 const gallery = readFileSync(resolve('src/client/image-gallery.tsx'), 'utf8')
 const galleryCss = readFileSync(resolve('src/client/image-gallery.module.css'), 'utf8')
 const chatCss = readFileSync(resolve('src/client/chat-chrome.module.css'), 'utf8')
+const thinkingCss = readFileSync(resolve('src/client/thinking-status.module.css'), 'utf8')
 const homeCss = readFileSync(resolve('src/client/home.module.css'), 'utf8')
 const targetRoot = resolve('../../../../../upstream/deepseek-harness/packages/client')
 const targetMessage = readFileSync(resolve(targetRoot, 'ui-conversation/src/client/chat/MessageItem.tsx'), 'utf8')
@@ -109,5 +111,26 @@ describe('target conversation fidelity contract', () => {
     expect(genuiClient).toContain('conversation.input.dock')
     expect(genuiClient).toContain('data-genui-tool')
     expect(genuiClient).toContain('data-genui-panel')
+  })
+
+  it('brands only the target running status with the Domino loader', () => {
+    const view = render(<>
+      <ThinkingStatusBranding />
+      <div role="status" aria-live="polite">Deep diving...<span>15秒</span></div>
+      <div role="status" aria-live="polite">正在上传</div>
+    </>)
+    const target = screen.getByRole('status', { name: '思考中' })
+    const unrelated = [...view.container.querySelectorAll<HTMLElement>('[role="status"]')]
+      .find(node => node.textContent === '正在上传')!
+    expect(target.hasAttribute('data-emate-thinking-status')).toBe(true)
+    expect(target.textContent).toContain('Deep diving...')
+    expect(target.textContent).toContain('思考中')
+    expect(target.querySelectorAll('i')).toHaveLength(4)
+    expect(unrelated.hasAttribute('data-emate-thinking-status')).toBe(false)
+    expect(thinkingCss).toContain('var(--dsw-alias-label-secondary)')
+    expect(thinkingCss).toContain('@keyframes emate-domino')
+    expect(thinkingCss).toContain('width: 16px')
+    view.unmount()
+    expect(target.hasAttribute('data-emate-thinking-status')).toBe(false)
   })
 })
