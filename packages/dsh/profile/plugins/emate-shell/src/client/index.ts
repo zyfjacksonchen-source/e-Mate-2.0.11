@@ -31,6 +31,7 @@ import {
   IconUserOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AccountControl, AccountSettings } from './account.tsx'
+import { ActivityGroup, activityGroupDefinition } from './activity-group.tsx'
 import { CapabilitiesPage, CapabilityControl } from './capabilities.tsx'
 import './chat-chrome.module.css'
 import { ConnectionsSettings } from './connections.tsx'
@@ -115,6 +116,11 @@ export function apply(ctx: any): void {
     id: 'e-mate-thinking-status',
     order: -190,
   }, ThinkingStatusBranding))
+  ctx.conversationEvents.register(activityGroupDefinition)
+  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
+    name: 'conversation.chat.node',
+    key: 'e-mate-activity-group',
+  }, ActivityGroup))
   ctx.conversationEvents.register(imageDisclosureDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',

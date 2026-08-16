@@ -1202,3 +1202,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 同一 MV3 制品面向用户已有的 macOS Chrome 与 Windows Chrome/Edge，不下载浏览器。Browser Panel 只投影真实连接状态。包级 Host/extension build 与 3 个 carrier 合同测试通过；macOS 和 Windows 的真实 Computer Use、扩展商店分发及断连/下载/会话隔离证据仍是发布门禁。
 - macOS 隔离验收随后关闭：真实 Harness Agent Loop 在 `danger-full-access` 下完成 snapshot → 输入 `session-a` → 点击 → 读取 `Applied: session-a`，事件日志保留每项真实 `tool/call`/`tool/result` 和完成 `turn/end`；下载链接生成 `/Users/mac/Downloads/receipt.txt`，SHA-256 `82a958ac398aa7af3ab42afa831567240ecb4a9828a7bb77d194cae83c46bde7`。第二个真实 Session 在未显式选择新标签页时精确失败为“当前标签页已绑定其他 e-Mate 会话”，没有读取首会话页面；关闭扩展后 Tool 失败关闭，重启同一扩展后 snapshot 恢复成功。
 - 验收同时修正目标权限语义：`ask` 模式仍调用 Harness `approval.request` 并记录原生审批事件；默认 `danger-full-access / never` 不制造一个必被 Harness 拒绝的审批请求，浏览器动作按目标 full-access 语义直接执行。包级合同扩为 4/4，并锁定会话标签碰撞失败关闭和扩展无第二套聊天/Session/模型/审批 UI。Windows 实机与 Chrome Web Store / Edge Add-ons 正式分发仍是发布门禁。
+
+## 2026-08-16 · S02/S03 Codex-like 活动组与文字扫光
+
+- 用户确认隔离原型后，当前切片只在受管 `emate-shell` 展示层增加 Codex-like 活动组：Header 直接由真实 `turn/start → step/start → turn/end` 投影，原有 Assistant、Tool、Retry、错误、ProducedFiles、Attachment、Lightbox、Session 与事件链保持不变；没有增加 Store、Router、WebSocket、事件类型或工具名分派。
+- 运行态继续复用现有“思考中” Domino；它进入活动 Header 后隐藏原目标状态行，终态恢复为“已处理 + 真实时长”并默认折叠。折叠只隐藏真实 reasoning 和非错误 Tool DOM，错误/中断、最终 Assistant、操作行和图片画廊保持可见。
+- 按最终评审，运行扫光只裁剪进标题/摘要文字，不再在 reasoning、Tool、Command 或 Bash 行上绘制覆盖层；`prefers-reduced-motion` 下关闭扫光和 Chevron 位移。
+- 最终验证：`emate-shell` 8 个文件 / 36 个测试通过，`@e-mate/dsh` 51/51 通过，目标 pin 检查通过，shell `tsdown` 构建通过。主浏览器使用真实 JSONL Session 与真实 CAS 图片附件复核成功/失败/阻塞/取消/中断/最大 token、折叠/展开、双图画廊和灯箱；`1440×1000` 与 `390×844` 截图无溢出，新鲜页面加载后的浏览器 error/warn 为 0。
