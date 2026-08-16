@@ -2418,6 +2418,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           );
         }
         if (prepared.status === 'RECORDED') {
+          if (!(await options.usageStore.finalize(identity, taskId))) throw new Error('Image usage finalization failed');
           throw new HttpError(409, 'INVOCATION_RESULT_ALREADY_RECORDED', 'This image invocation was already recorded');
         }
         const clientAbort = new AbortController();
@@ -2480,6 +2481,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           ...completed.usage,
           costUsd: usageCost(route, completed.usage),
         });
+        if (!(await options.usageStore.finalize(identity, taskId))) throw new Error('Image usage finalization failed');
         json(response, 200, completed.body);
         return;
       }

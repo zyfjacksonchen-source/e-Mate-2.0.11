@@ -1511,6 +1511,13 @@ test('keeps an interrupted Chat Completions invocation pending without upstream 
 });
 
 test('exposes image generation only to the desktop catalog while proxying its dedicated API', async () => {
+  const usageStore = new InMemoryUsageStore(limits);
+  const finalize = usageStore.finalize.bind(usageStore);
+  const finalizedTaskIds: string[] = [];
+  usageStore.finalize = async (principal, taskId) => {
+    finalizedTaskIds.push(taskId);
+    return finalize(principal, taskId);
+  };
   await withGateway(
     async (baseUrl, upstreamRequests) => {
       const catalogResponse = await fetch(`${baseUrl}/v1/models`, { headers: auth() });
@@ -1537,6 +1544,12 @@ test('exposes image generation only to the desktop catalog while proxying its de
       };
       assert.match(body.id, /^image-[A-Za-z0-9._:-]+$/);
       assert.equal(body.data[0]?.b64_json, 'aGVsbG8=');
+      assert.deepEqual(finalizedTaskIds, ['task-1']);
+
+      const replay = await imageRequest(baseUrl);
+      assert.equal(replay.status, 409);
+      assert.match(JSON.stringify(await replay.json()), /INVOCATION_RESULT_ALREADY_RECORDED/);
+      assert.deepEqual(finalizedTaskIds, ['task-1', 'task-1']);
 
       assert.equal(upstreamRequests.length, 1);
       assert.equal(upstreamRequests[0]?.url, `${imageRoute.upstreamBaseUrl}/images/generations`);
@@ -1587,7 +1600,8 @@ test('exposes image generation only to the desktop catalog while proxying its de
     undefined,
     limits,
     imageRoute,
-    { isEnabled: async () => true }
+    { isEnabled: async () => true },
+    usageStore
   );
 });
 
@@ -1663,18 +1677,30 @@ test('falls back from image Pro only after a definite provider rejection', async
 });
 
 test('does not risk duplicate image generation after an uncertain provider failure', async () => {
+  const usageStore = new InMemoryUsageStore(limits);
+  const finalize = usageStore.finalize.bind(usageStore);
+  let finalizeCalls = 0;
+  usageStore.finalize = async (principal, taskId) => {
+    finalizeCalls += 1;
+    return finalize(principal, taskId);
+  };
   await withGateway(
     async (baseUrl, upstreamRequests) => {
       const generated = await imageRequest(baseUrl);
       assert.equal(generated.status, 502);
+      const retry = await imageRequest(baseUrl);
+      assert.equal(retry.status, 409);
+      assert.match(JSON.stringify(await retry.json()), /INVOCATION_RECONCILIATION_REQUIRED/);
       assert.equal(upstreamRequests.length, 1);
+      assert.equal(finalizeCalls, 0);
     },
     () => new Response('provider unavailable', { status: 503 }),
     undefined,
     undefined,
     limits,
     imageRoute,
-    { isEnabled: async () => true }
+    { isEnabled: async () => true },
+    usageStore
   );
 });
 
