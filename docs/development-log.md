@@ -1195,3 +1195,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 生产实测发现旧 Usage 面板退出只清访问令牌，未保存或提交 Auth Gateway 的 refresh token，因此不能撤销服务端会话。提交 `069068d` 复用现有 `/v1/auth/logout`：登录只在当前标签页保存 access/refresh token；退出先同步清除两者并返回登录页，再用既有 `clientId + refreshToken + clientRequestId` 合同撤销会话；401 同样清除两类令牌。没有新增身份服务、Cookie、Router 或持久登录层。
 - `@e-mate/usage-dashboard` 类型检查、14/14 测试和生产构建通过。制品 SHA-256 为 `9d760c6ee9983ec14635ccc1a906a93a79d53471c6051feb7cfa56584d03e766`，公网 alias 原子切到 `/srv/ecorex-agent-usage-panel/releases/usage-2.0.7-logout-069068d`，实际脚本为 `index-BzUbJnBX.js`；旧 release 保留可回退，root-only 制品位于 `/root/e-mate-bootstrap/20260816T150000Z-usage-logout-069068d/usage-dashboard.tgz`。
 - 主代理用真实管理员完成“登录 → 退出 → 刷新仍为登录页 → 重新登录”闭环；Nginx 访问日志同时记录 `POST /auth-api/v1/auth/logout` 为 HTTP 200。浏览器未读写或输出 refresh token，生产账号密码未进入源码、Git、命令参数或日志。
+
+## 2026-08-16 · S02/S03 Codex-like 活动组与文字扫光
+
+- 用户确认隔离原型后，当前切片只在受管 `emate-shell` 展示层增加 Codex-like 活动组：Header 直接由真实 `turn/start → step/start → turn/end` 投影，原有 Assistant、Tool、Retry、错误、ProducedFiles、Attachment、Lightbox、Session 与事件链保持不变；没有增加 Store、Router、WebSocket、事件类型或工具名分派。
+- 运行态继续复用现有“思考中” Domino；它进入活动 Header 后隐藏原目标状态行，终态恢复为“已处理 + 真实时长”并默认折叠。折叠只隐藏真实 reasoning 和非错误 Tool DOM，错误/中断、最终 Assistant、操作行和图片画廊保持可见。
+- 按最终评审，运行扫光只裁剪进标题/摘要文字，不再在 reasoning、Tool、Command 或 Bash 行上绘制覆盖层；`prefers-reduced-motion` 下关闭扫光和 Chevron 位移。
+- 最终验证：`emate-shell` 8 个文件 / 36 个测试通过，`@e-mate/dsh` 51/51 通过，目标 pin 检查通过，shell `tsdown` 构建通过。主浏览器使用真实 JSONL Session 与真实 CAS 图片附件复核成功/失败/阻塞/取消/中断/最大 token、折叠/展开、双图画廊和灯箱；`1440×1000` 与 `390×844` 截图无溢出，新鲜页面加载后的浏览器 error/warn 为 0。

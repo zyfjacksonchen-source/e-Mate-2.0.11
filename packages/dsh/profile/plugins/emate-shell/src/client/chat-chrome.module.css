@@ -1,6 +1,148 @@
-/* Harness owns the complete conversation presentation. e-Mate keeps only the
-   image-gallery exception and hides inert Inspect actions while ui-trajectory
-   is disabled. */
+/* Harness keeps ownership of every conversation event and keyed node. e-Mate
+   adds only Codex-like presentation over those real rows. */
+
+:global([data-chat-flow-kind='e-mate-activity-group']) {
+  padding-top: 8px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+:global([data-emate-activity-header]) {
+  width: 100%;
+}
+
+:global([data-emate-activity-toggle]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+
+:global([data-emate-activity-toggle]:hover),
+:global([data-emate-activity-toggle]:focus-visible) {
+  outline: none;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+:global([data-emate-activity-toggle] > span:nth-last-child(2)) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+:global([data-emate-thinking-host]) {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+:global([data-emate-activity-toggle] > svg) {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  transform: rotate(-90deg);
+  transition: transform 120ms ease;
+}
+
+:global([data-emate-activity-toggle][aria-expanded='true'] > svg) {
+  transform: rotate(0deg);
+}
+
+:global([data-emate-activity-member][hidden]) {
+  display: none !important;
+}
+
+:global([data-chat-flow-kind='e-mate-activity-group']:has([data-emate-activity-header][hidden])) {
+  display: none;
+}
+
+:global([data-emate-activity-toggle]:disabled) {
+  cursor: default;
+}
+
+:global([data-emate-activity-toggle]:disabled > svg) {
+  display: none;
+}
+
+:global([data-chat-flow]) {
+  padding-block: 8px 32px;
+  color: var(--emate-color-ink, var(--dsw-alias-label-primary));
+}
+
+/* Preserve the current e-Mate 2.0.5 type scale while the target Markdown DOM,
+   links, code, media and stream ownership remain untouched. */
+:global([data-chat-flow-kind='assistant-step'] [data-slot='conversation.chat.node'] > div > div > div > p:not(:has(code, img, video, audio))) {
+  max-width: 1180px;
+  margin: 0 0 8px !important;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+:global([data-chat-flow-kind='user'] [data-time-hover-root] > div:first-child),
+:global([data-chat-flow-kind='steering'] [data-time-hover-root] > div:first-child) {
+  max-width: min(82%, 820px);
+}
+
+:global([data-chat-flow-kind='user'] [data-time-hover-root] > div:first-child > div:last-child:not([data-align])),
+:global([data-chat-flow-kind='steering'] [data-time-hover-root] > div:first-child > div:last-child:not([data-align])) {
+  max-width: 100%;
+  padding: 8px 12px;
+  border-radius: 16px;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+}
+
+/* Consecutive real activity rows share the compact Codex-like rhythm without
+   introducing a second activity model. */
+:global([data-chat-flow-kind='tool-call'] + [data-chat-flow-kind='tool-call']),
+:global([data-chat-flow-kind='command'] + [data-chat-flow-kind='tool-call']),
+:global([data-chat-flow-kind='tool-call'] + [data-chat-flow-kind='command']) {
+  margin-top: -12px;
+}
+
+:global([data-chat-flow-kind='tool-call']),
+:global([data-chat-flow-kind='command']),
+:global([data-chat-flow-kind='model-retry']),
+:global([data-chat-flow-kind='turn-error']) {
+  min-height: 24px;
+}
+
+/* The existing Domino is portalled into the real activity Header, so the
+   target TurnStatus remains the fallback only before an activity exists. */
+:global([data-chat-flow]:has([data-emate-activity-header]) > [role='status']) {
+  display: none;
+}
+
+:global([data-turn-tail]) {
+  gap: 12px !important;
+}
+
+:global([data-turn-tail][data-emate-activity-tail] > div:last-child > span:last-child) {
+  display: none;
+}
+
+:global([data-turn-tail][data-emate-activity-tail-status='failed']),
+:global([data-turn-tail][data-emate-activity-tail-status='cancelled']),
+:global([data-turn-tail][data-emate-activity-tail-status='interrupted']) {
+  display: none;
+}
+
+:global([data-chat-flow-kind='turn-error']) {
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 28%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 6%, transparent);
+}
 
 :global([data-chat-flow-kind='e-mate-image-disclosure']) {
   display: none;
@@ -16,6 +158,72 @@
   background: #111;
 }
 
+/* Keep target Tool/Disclosure renderers and their real state; only restore the
+   accepted 44px hit area, 16px icon seat and 13/20 UI type scale. */
+:global([data-chat-flow-kind='tool-call'] [data-disclosure-row]) {
+  box-sizing: border-box;
+  min-height: 44px;
+  height: auto;
+  padding: 2px 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-disclosure-row] > :first-child) {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-disclosure-row] > :first-child > svg),
+:global([data-chat-flow-kind='tool-call'] [data-disclosure-row] > :first-child > span > svg) {
+  width: 16px;
+  height: 16px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-disclosure-row][aria-expanded] > :first-child > svg),
+:global([data-chat-flow-kind='tool-call'] [data-disclosure-row][aria-expanded='true'] > :first-child > span > svg) {
+  width: 14px;
+  height: 14px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-disclosure-row] > :not(:first-child)) {
+  font-size: 13px;
+  line-height: 20px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-variant='bash']) {
+  box-sizing: border-box;
+  min-height: 44px;
+  height: auto;
+  padding: 2px 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-variant='bash'] > span:first-child) {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-variant='bash'] > span:first-child > svg),
+:global([data-chat-flow-kind='tool-call'] [data-variant='bash'] > span:first-child > span > svg) {
+  width: 16px;
+  height: 16px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-variant='bash'][aria-expanded] > span:first-child > svg),
+:global([data-chat-flow-kind='tool-call'] [data-variant='bash'][aria-expanded='true'] > span:first-child > span > svg) {
+  width: 14px;
+  height: 14px;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-variant='bash'] > span:not(:first-child):not([aria-hidden])) {
+  font-size: 13px;
+  line-height: 20px;
+}
+
 /* Keep target disclosure behavior while replacing its non-brand focus ring
    with the same visible hover surface used across e-Mate. */
 :global([data-slot='conversation'] [aria-expanded]:focus-visible) {
@@ -24,9 +232,87 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+/* The approved shimmer crosses glyphs only. Disable the target row glare and
+   clip the same moving highlight into running title/summary text. */
+:global([data-slot='conversation'] [data-state='running'] [data-disclosure-row]::after),
+:global([data-slot='conversation'] [data-sample='bash'][data-state='running']::after) {
+  content: none !important;
+  background: none !important;
+  animation: none !important;
+}
+
+:global([data-slot='conversation'] [data-state='running'] [data-disclosure-row] > span:nth-child(n + 2):not([aria-hidden])),
+:global([data-slot='conversation'] [data-state='running'] [data-disclosure-row] > button),
+:global([data-slot='conversation'] [data-sample='bash'][data-state='running'] > span:nth-child(n + 2):not([aria-hidden])) {
+  background: linear-gradient(
+    100deg,
+    var(--dsw-alias-label-secondary) 0 38%,
+    var(--dsw-alias-label-primary) 48%,
+    var(--dsw-alias-label-secondary) 58% 100%
+  );
+  background-position: 120% 0;
+  background-size: 240% 100%;
+  background-clip: text;
+  color: transparent !important;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: emate-text-shimmer 1.45s ease-in-out infinite;
+}
+
+@keyframes emate-text-shimmer {
+  to { background-position: -120% 0; }
+}
+
 /* The profile disables ui-trajectory, so target Inspect handoffs have no
    destination. All other target Tool disclosure and action controls remain. */
 :global([data-chat-flow-kind='tool-call'] [data-chat-call-id] [data-variant] > [data-open='true'] > div > button:has(> svg[aria-hidden][width='12'][height='12'])),
 :global([data-chat-flow-kind='tool-call'] [data-chat-call-id] [data-sample='bash'] + div > button:has(> svg[aria-hidden][width='12'][height='12'])) {
   display: none;
+}
+
+@media (max-width: 767px) {
+  :global([data-chat-flow]) {
+    padding-block: 4px 24px;
+  }
+
+  :global([data-chat-flow-kind='user'] [data-time-hover-root] > div:first-child),
+  :global([data-chat-flow-kind='steering'] [data-time-hover-root] > div:first-child) {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  :global([data-chat-flow-kind='user'] [data-time-hover-root] > div:first-child > div:last-child:not([data-align])),
+  :global([data-chat-flow-kind='steering'] [data-time-hover-root] > div:first-child > div:last-child:not([data-align])) {
+    width: fit-content;
+    margin-left: auto;
+  }
+
+  :global([data-chat-flow-kind='turn-error'] [role='status']) {
+    grid-template-columns: 10px minmax(0, 1fr);
+  }
+
+  :global([data-chat-flow-kind='turn-error'] [role='status'] > code) {
+    grid-column: 2;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :global([data-chat-flow] *) {
+    scroll-behavior: auto !important;
+  }
+
+  :global([data-emate-activity-toggle] > svg) {
+    transition: none;
+  }
+
+  :global([data-slot='conversation'] [data-state='running'] [data-disclosure-row] > span:nth-child(n + 2):not([aria-hidden])),
+  :global([data-slot='conversation'] [data-state='running'] [data-disclosure-row] > button),
+  :global([data-slot='conversation'] [data-sample='bash'][data-state='running'] > span:nth-child(n + 2):not([aria-hidden])) {
+    background: none;
+    color: inherit !important;
+    -webkit-text-fill-color: currentColor;
+    animation: none;
+  }
 }
