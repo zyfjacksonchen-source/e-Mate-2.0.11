@@ -1001,3 +1001,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 生产 Auth 配置回退快照收据为 `20260816T011716Z-auth-namespace`。本轮只关闭账号命名空间隔离与注册入口，不创建测试用户、不求解 CAPTCHA、不审批、不设置用户额度；这些动作仍须使用明确的新测试身份完成 Computer Use。
 - 默认 Luna 保持策略级语义：当管理员为新用户允许多个模型时，Auth 按权威目录顺序下发，本地 `CHAT_MODELS` 首选 `gpt-5.6-luna`。新注册用户仍以 PENDING/空模型集合进入，必须由管理端审批并配置额度和允许模型后才能登录执行，未因“默认 Luna”绕过审批边界。
 - 主代理用当前构建重新执行隔离 `setup` 和浏览器验收：安装后的 `--dump-config` 精确回读 `clientId=e-mate-web / organization=emate-v2`；`/register` 标签标题为 `e-Mate`，账号、真实姓名、至少 10 位密码、验证码、提交申请和返回登录均可见，实点“换一张验证码”后 data URL 载荷变化。未填写或提交表单；证据为 `artifacts/design-qa/S07-registration-namespace/registration-emate-v2-dark-1280x720.jpg`。验收 Host 已停止，临时 profile 与指针均移入废纸篓。
+
+## 2026-08-16 · S07 新租户管理员引导边界复核
+
+- 主代理在不读取密码、Token 或私钥内容的前提下只读复核当前生产配置与数据库。Auth 当前允许 `e-mate-desktop`、`e-mate-web`，保留 `emate → emate-production` 与新增 `emate-v2 → emate-v2`；Analytics 当前未配置 `sessionAuth`，Compose 也未向 Analytics 挂载 Auth 公钥。
+- 权威用户表中旧租户 43 ACTIVE、2 DELETED、1 SUSPENDED 全部只有 `MEMBER`；新租户仍为 0。不存在可合法复用的旧管理员，新租户也没有首个 `TENANT_ADMIN`。因此当前管理端的账号密码登录、审批和额度配置不能标记生产可用。
+- 要关闭该项，必须先由用户明确一个新的 2.0.7 管理员身份，再按现有服务合同允许 `e-mate-admin` client、为 Analytics 配置匹配 issuer/audience/clientId 的 `sessionAuth` 并只挂载公钥，最后以该新租户账号完成登录、审批、配额、模型下发和 Usage 对账。不得把旧 MEMBER 提权、猜管理员口令、直接写测试账号或绕过 CAPTCHA 冒充验收。本轮未修改生产用户、角色、Analytics 或 Compose。
+- 命名空间提交 `bbb1d5ea9fdf4338581c15f30d3fb33b6c0fae70` 的 CI run `31919887274` 与 Release e-Mate run `31919887259` 均成功；同一 tarball 在 macOS arm64、macOS x64、Windows x64 完成干净 npm 安装与 setup 检查，SHA/manifest/SBOM/许可证证据生成成功。PR 门禁按合同跳过正式 registry 发布与 R2 上传，因此这里只关闭候选构建和三平台安装，不冒充 npm/R2 已发布。
