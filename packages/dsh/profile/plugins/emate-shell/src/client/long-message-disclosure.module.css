@@ -12,7 +12,7 @@
 
 .imageButton {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 18px;
+  grid-template-columns: 16px minmax(0, 1fr) 14px;
   align-items: center;
   gap: 8px;
   width: 100%;
@@ -23,8 +23,8 @@
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font: inherit;
-  font-size: 22px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 20px;
   text-align: left;
   cursor: pointer;
 }
@@ -35,8 +35,9 @@
 }
 
 .imageButton:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 2px;
+  outline: none;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
 }
 
 .imageButton strong {
@@ -48,14 +49,14 @@
 
 .imageIcon {
   display: block;
-  width: 28px;
-  height: 28px;
+  width: 16px;
+  height: 16px;
 }
 
 .imageChevron {
   display: block;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   transition: transform 120ms ease;
 }
 
@@ -106,6 +107,7 @@
   color: var(--dsw-alias-label-secondary);
   font: inherit;
   font-size: 13px;
+  line-height: 20px;
   cursor: pointer;
 }
 
@@ -138,8 +140,9 @@
 }
 
 .button:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 2px;
+  outline: none;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
 }
 
 .chevron {
@@ -189,6 +192,11 @@
   background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) 72%, transparent);
 }
 
+:global([data-emate-long-text][data-emate-long-text-kind='assistant-step'] > p:not(:has(code, img, video, audio))) {
+  font-size: 14px;
+  line-height: 22px;
+}
+
 :global([data-emate-long-text][data-emate-long-text-kind='assistant-step'])::before {
   position: absolute;
   inset: 0 0 auto;
@@ -199,8 +207,9 @@
   border-bottom: 1px solid var(--dsw-alias-border-l2);
   content: '长文本摘要';
   color: var(--dsw-alias-label-primary);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
+  line-height: 20px;
 }
 
 :global([data-emate-long-text][data-emate-long-text-kind='assistant-step']:not([data-emate-long-text-expanded])) {
@@ -227,10 +236,6 @@
 }
 
 @media (max-width: 767px) {
-  .imageButton {
-    font-size: 16px;
-  }
-
   .button {
     min-height: 44px;
     padding-inline: 8px;

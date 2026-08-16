@@ -973,3 +973,12 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 最终桌面实测：普通 assistant 段落 `26px / 41.08px`，用户气泡 `24px / 34.8px`；Read/Bash 摘要均为真实 `44px` 高、`22px / 31.9px`，图片摘要为 `44px`，单图为真实 `160×160px / 18px`。图片按钮从默认收起切到展开后仍是同一 target gallery，原图 lightbox 可打开/关闭，再次收起和刷新均恢复 `aria-expanded=false`、图片不可见。
 - 移动端最终 `390/390`、`320/320`，真实侧栏触发器为 `x=12..56 / 44px`，Session title 从 `x=64` 开始且高度 `44px`；`320px` 只对标题省略，不重叠或横溢出。证据位于 `artifacts/design-qa/S02-summary-current-60b0955/`，最终 client SHA-256 为 `a2d29fe556d92b58919bdf3ced40e7ea2ca092a30b7f3aaefede03b09b765a68`。
 - 本轮关闭原型第 4/5 屏在 e-Mate 真实消息流中的摘要/图片披露与响应式交互；现有 ActivityHeader 继续作为真实活动组合同保留，不为静态截图隐藏。
+
+## 2026-08-16 · S02/S03 消息流字号、折叠焦点与第一准则复核
+
+- 只读追踪确认当前消息流仍由 pinned rc.5 的 `conversationEvents`、Session persistence、`/api/events.mux`、官方 assembler、InputHub/Session.prompt、Session.cancel 与 PendingWait `/api/respond` 驱动；e-Mate 只用 keyed slots 和真实持久事件做展示投影。没有第二 Store、Router、WebSocket/EventSource、消息 normalizer，也没有按 Tool 名或能力 ID 硬编码事件。
+- 按用户最新纠正，消息流字号不再照搬原型截图的绝对像素，而统一回到 e-Mate 2.0.5 全局层级：正文 `14/22`、摘要与工具 UI `13/20`、详情 `12/16`，交互热区仍为 `44px`，图标/Chevron 为 `16/14px`。移动端保持同层级，避免与侧栏、Composer 和设置页失衡。
+- 用户指出折叠点击出现红/蓝框后，现有 Activity、Tool、Bash、长文本/图片和 retry disclosure 的 `focus-visible` 改用 e-Mate 交互背景与文字色反馈，不再绘制外轮廓；没有移除键盘焦点反馈。禁用的 `ui-trajectory` 所遗留的 inert Inspect seat 只在 pinned target 的两种展开 Tool body seam 隐藏，其他 target action 不受影响。
+- ActivityHeader 现在仅对真实可控制成员输出 `aria-controls/aria-expanded`；失败、阻塞、取消、中断的 Tool/错误证据必须常显，因此相应 header 被禁用并隐藏 Chevron，避免无效折叠按钮。主代理 Browser 实点 completed header 与 Tool row 后均为 `outline:none/border:none`，受控 Tool row 正常展开，Inspect 不可见。
+- 同轮 `320×800` 实测发现 error status 的三列 grid 把中文错误压成单字竖排；窄屏仅把该真实 status 收敛为 `10px + minmax(0,1fr)`，code 放第二列并允许断行。最终 document 为 `320/320`，status 为 `10px 208px`，没有横溢出。
+- 证据位于 `artifacts/design-qa/S02-message-flow-typography-focus-9a84bde/`，最终 bundle SHA-256 为 `20a2d90eb6adaf58df6c8f0001084a13d1c71e91389683e2df4e61f4568a030a`。shell 8 files/39 tests、主包 build 和 diff check 通过；本条只关闭消息流尺寸、焦点与折叠语义，不关闭上游缺少原子用户编辑/失败轮重试动作的既有阻塞。

@@ -2,7 +2,8 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { ActivityHeader } from '../src/client/activity-header.tsx'
 import {
   ImageDisclosure,
   imageDisclosureDefinition,
@@ -19,6 +20,7 @@ const activityCss = readFileSync(resolve('src/client/activity-header.module.css'
 const disclosure = readFileSync(resolve('src/client/long-message-disclosure.tsx'), 'utf8')
 const disclosureCss = readFileSync(resolve('src/client/long-message-disclosure.module.css'), 'utf8')
 const chatCss = readFileSync(resolve('src/client/chat-chrome.module.css'), 'utf8')
+const retryCss = readFileSync(resolve('src/client/retry-attempts.module.css'), 'utf8')
 
 describe('chat fidelity contract', () => {
   it('keeps the real activity clock, terminal clock and collapsible running group', () => {
@@ -36,17 +38,69 @@ describe('chat fidelity contract', () => {
   it('keeps the activity header aligned with the collapsed-running prototype', () => {
     expect(activity).toMatch(/<strong>\s*<span>\{statusLabel\(status\)\}<\/span>\{' '\}\s*<time>\{elapsedLabel\}<\/time>\s*<\/strong>/)
     expect(activity).toContain('<IconChevronDownOutline14 className={css.chevron} />')
-    expect(activityCss).toMatch(/\.root \{[^}]*width: fit-content;[^}]*font-size: 22px;[^}]*font-weight: 400;[^}]*line-height: 1\.45;[^}]*\}/)
-    expect(activityCss).toMatch(/\.chevron \{[^}]*width: 18px;[^}]*height: 18px;[^}]*\}/)
+    expect(activityCss).toMatch(/\.root \{[^}]*width: fit-content;[^}]*min-height: 44px;[^}]*font-size: 13px;[^}]*font-weight: 400;[^}]*line-height: 20px;[^}]*\}/)
+    expect(activityCss).toMatch(/\.chevron \{[^}]*width: 14px;[^}]*height: 14px;[^}]*\}/)
+    expect(activityCss).toMatch(/\.root:focus-visible \{[^}]*outline: none;[^}]*background: var\(--dsw-alias-interactive-bg-hover\);/)
     expect(activityCss).not.toContain('transform:')
   })
 
-  it('restores prototype prose and user-bubble typography without restyling structured Markdown', () => {
+  it('uses canonical body typography without restyling structured Markdown', () => {
     expect(chatCss).toContain("div:not([data-emate-long-text]) > p:not(:has(code, img, video, audio))")
-    expect(chatCss).toMatch(/p:not\(:has\(code, img, video, audio\)\)\) \{[^}]*max-width: 1180px;[^}]*margin: 0 0 18px !important;[^}]*font-size: 26px;[^}]*line-height: 1\.58;[^}]*letter-spacing: -0\.01em;/)
+    expect(chatCss).toMatch(/p:not\(:has\(code, img, video, audio\)\)\) \{[^}]*max-width: 1180px;[^}]*margin: 0 0 8px !important;[^}]*font-size: 14px;[^}]*line-height: 22px;/)
     expect(chatCss).toContain("[data-chat-flow-kind='user'] [data-time-hover-root] > div:first-child")
-    expect(chatCss).toMatch(/div:last-child:not\(\[data-align\]\)\) \{[^}]*padding: 12px 16px 13px;[^}]*border-radius: 25px;[^}]*font-size: 24px;[^}]*font-weight: 500;[^}]*line-height: 1\.45;[^}]*letter-spacing: -0\.012em;/)
-    expect(chatCss).toMatch(/@media \(max-width: 767px\) \{[\s\S]*font-size: 18px;[\s\S]*font-size: 17px;/)
+    expect(chatCss).toMatch(/div:last-child:not\(\[data-align\]\)\) \{[^}]*padding: 8px 12px;[^}]*border-radius: 16px;[^}]*font-size: 14px;[^}]*font-weight: 400;[^}]*line-height: 22px;/)
+    expect(disclosureCss).toMatch(/\[data-emate-long-text\]\[data-emate-long-text-kind='assistant-step'\] > p:not\(:has\(code, img, video, audio\)\)\) \{[^}]*font-size: 14px;[^}]*line-height: 22px;/)
+    expect(chatCss).toMatch(/@media \(max-width: 767px\) \{[\s\S]*\[data-chat-flow-kind='turn-error'\] \[role='status'\][^}]*grid-template-columns: 10px minmax\(0, 1fr\);[\s\S]*\[role='status'\] > code[^}]*grid-column: 2;[^}]*overflow-wrap: anywhere;/)
+  })
+
+  it('connects activity disclosure state to the real controlled Tool rows', async () => {
+    const view = render(<div data-chat-flow="">
+      <div data-chat-flow-kind="e-mate-activity-group">
+        <ActivityHeader node={{
+          key: 'activity:1',
+          data: { turn: 1, startTime: 1_000, endTime: 2_000, status: 'completed' },
+        } as never} />
+      </div>
+      <div data-chat-flow-kind="tool-call" data-chat-flow-key="tool:read">
+        <div data-state="ok" />
+      </div>
+      <div data-chat-flow-kind="turn-tail" data-turn-tail="1" />
+    </div>)
+    const header = screen.getByRole('button', { name: '已处理 1s' })
+    const tool = view.container.querySelector<HTMLElement>('[data-chat-flow-key="tool:read"]')!
+
+    await waitFor(() => { expect(header.getAttribute('aria-controls')).toBe(tool.id) })
+    expect(tool.id).toMatch(/^e-mate-activity-/)
+    expect(tool.hasAttribute('data-emate-activity-collapsed')).toBe(true)
+
+    fireEvent.click(header)
+    await waitFor(() => { expect(tool.hasAttribute('data-emate-activity-collapsed')).toBe(false) })
+    expect(header.getAttribute('aria-controls')).toBe(tool.id)
+
+    view.unmount()
+    expect(tool.id).toBe('')
+  })
+
+  it('does not expose a no-op disclosure when failure evidence must remain visible', async () => {
+    render(<div data-chat-flow="">
+      <div data-chat-flow-kind="e-mate-activity-group">
+        <ActivityHeader node={{
+          key: 'activity:failed',
+          data: { turn: 2, startTime: 1_000, endTime: 2_000, status: 'failed' },
+        } as never} />
+      </div>
+      <div data-chat-flow-kind="tool-call" data-chat-flow-key="tool:failed">
+        <div data-state="error" />
+      </div>
+      <div data-chat-flow-kind="turn-tail" data-turn-tail="2" />
+    </div>)
+
+    const header = screen.getByRole('button', { name: '执行失败 1s' })
+    await waitFor(() => { expect((header as HTMLButtonElement).disabled).toBe(true) })
+    expect(header.getAttribute('aria-expanded')).toBeNull()
+    expect(header.getAttribute('aria-controls')).toBeNull()
+    expect(activityCss).toMatch(/\.root:disabled \{[^}]*cursor: default;/)
+    expect(activityCss).toMatch(/\.root:disabled \.chevron \{[^}]*display: none;/)
   })
 
   it('measures one Markdown DOM and exposes functional expand and download controls', () => {
@@ -121,12 +175,16 @@ describe('chat fidelity contract', () => {
     expect(disclosure).toContain('item.gallery.hidden = true')
     expect(disclosure).toContain('gallery.hidden = !expanded')
     expect(disclosure).toContain('<IconBrowseOutline16 className={css.imageIcon} />')
-    expect(disclosureCss).toMatch(/\.imageButton \{[^}]*min-height: 44px;[^}]*font-size: 22px;/)
+    expect(disclosureCss).toMatch(/\.imageButton \{[^}]*min-height: 44px;[^}]*font-size: 13px;[^}]*line-height: 20px;/)
+    expect(disclosureCss).toMatch(/\.imageButton:focus-visible \{[^}]*outline: none;[^}]*background: var\(--dsw-alias-interactive-bg-hover\);/)
+    expect(disclosureCss).toMatch(/\.button:focus-visible \{[^}]*outline: none;[^}]*background: var\(--dsw-alias-interactive-bg-hover\);/)
     expect(disclosureCss).toMatch(/\[data-emate-image-gallery\]\[hidden\][^}]*display: none !important;/)
     expect(disclosureCss).toContain(".imageButton[aria-expanded='true'] .imageChevron")
     expect(chatCss).toContain("[data-chat-flow-kind='tool-call'] [data-disclosure-row]")
     expect(chatCss).toMatch(/\[data-chat-flow-kind='tool-call'\] \[data-disclosure-row\][^}]*box-sizing: border-box;[^}]*min-height: 44px;/)
-    expect(chatCss).toMatch(/\[data-chat-flow-kind='tool-call'\] \[data-variant='bash'\][^}]*box-sizing: border-box;[^}]*min-height: 44px;[^}]*font-size: 22px;/)
+    expect(chatCss).toMatch(/\[data-chat-flow-kind='tool-call'\] \[data-disclosure-row\]:focus-visible\)[^}]*\{[^}]*outline: none;[^}]*background: var\(--dsw-alias-interactive-bg-hover\);/)
+    expect(chatCss).toMatch(/\[data-chat-flow-kind='tool-call'\] \[data-variant='bash'\][^}]*box-sizing: border-box;[^}]*min-height: 44px;[^}]*font-size: 13px;[^}]*line-height: 20px;/)
+    expect(chatCss).toMatch(/\[data-chat-flow-kind='tool-call'\] \[data-variant='bash'\]:focus-visible\)[^}]*\{[^}]*outline: none;[^}]*background: var\(--dsw-alias-interactive-bg-hover\);/)
     expect(chatCss).toContain("[data-variant='bash'][aria-expanded]")
     expect(chatCss).toContain("[data-variant='bash'][aria-expanded='true']")
     expect(chatCss).toContain("[data-align='start'] > [data-variant='single']")
@@ -138,6 +196,11 @@ describe('chat fidelity contract', () => {
   })
 
   it('keeps every target-projected retry attempt visible in one correlated row group', () => {
+    expect(retryCss).toMatch(/\.chain \{[^}]*font-size: 13px;[^}]*line-height: 20px;/)
+    expect(retryCss).toMatch(/\.summary \{[^}]*box-sizing: border-box;[^}]*min-height: 44px;/)
+    expect(retryCss).toMatch(/\.summary:focus-visible \{[^}]*outline: none;[^}]*background: var\(--dsw-alias-interactive-bg-hover\);/)
+    expect(retryCss).toMatch(/\.details \{[^}]*padding: 4px 0 0 24px;[^}]*font-size: 12px;[^}]*line-height: 16px;/)
+
     render(<RetryAttempts node={{ data: {
       attempts: [
         {

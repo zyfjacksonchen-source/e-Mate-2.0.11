@@ -271,6 +271,23 @@ final result: passed (persisted terminal states, target approval, refresh recove
 
 final result: passed (scoped six-terminal-state distinction)
 
+## S02/S03 message-flow e-Mate scale and disclosure focus — 2026-08-16
+
+- Visual source: the user-provided `codex-clipboard-bd9dbe7d-d2ba-413d-9b48-f175f9508117.png` at `1280×720`, checked together with the current implementation in `artifacts/design-qa/S02-message-flow-typography-focus-9a84bde/source-vs-current-desktop-1280x720.jpg`; the focused no-outline comparison is `focused-source-vs-current-no-outline.jpg`. The two full screens contain different real Session events, so the focused comparison is authoritative for the disclosure control while the pinned e-Mate 2.0.5 tokens are authoritative for scale.
+- The earlier prototype-sized `22–26px` message chrome is superseded by the user's whole-product correction. Current hierarchy uses the e-Mate body token `14px/22px`, UI token `13px/20px`, caption token `12px/16px`, `44px` interaction rows, `16px` leading icons and `14px` chevrons. Desktop and mobile keep the same type hierarchy instead of independently inflating narrow screens.
+- Clicking the real activity header, Read/Glob/Bash disclosure, long-text/image disclosure or retry summary no longer paints orange/red/blue outlines. Keyboard focus remains visible through the existing subtle interactive background and label-color change rather than a boxed stroke.
+- Activity headers expose `aria-controls` only when they own real Tool/command members. Completed/max-token groups remain expandable and point to stable real DOM IDs; failed, blocked, cancelled and interrupted evidence remains visible, so their no-op header is disabled, loses `aria-expanded`, hides the chevron and cannot pretend to collapse anything.
+- The same mobile pass fixed the existing terminal-error grid at `320px`: document width is `320/320`, the error status columns are `10px 208px`, and the message/code stay horizontal instead of collapsing to one Chinese character per line.
+- Final current captures are `implementation-desktop-final-1280x720.jpg` and `implementation-mobile-final-320x800.jpg`. Browser-computed desktop state after click: activity `13px/20px`, `44px` high, `outline:none`, `border:none`, real controlled row expanded; Tool row `outline:none`, `border:none`, and the disabled trajectory Inspect action is absent. Final client bundle SHA-256 is `20a2d90eb6adaf58df6c8f0001084a13d1c71e91389683e2df4e61f4568a030a`.
+
+### Comparison history
+
+1. The source/current comparison found prototype-pixel typography and colored focus rings out of proportion with the current e-Mate shell.
+2. Canonical e-Mate scale, soft focus feedback and target-owned activity `aria-controls` were applied without changing events, the target renderer, Store, Router or transport.
+3. Browser interaction exposed two adjacent issues: terminal error copy squeezed at `320px`, and failure-state activity headers presented a no-op disclosure. Both were corrected at their existing display seams and rechecked in the same real persisted Session.
+
+final result: passed (scoped message-flow scale, focus and disclosure semantics)
+
 ## S02/S03 current prototype same-state replay — 2026-08-16
 
 - Current-run source truth is the user-specified interactive prototype `codex-streaming-chat.html`, SHA-256 `fd734f0026f51e334874cca54adb60f37d7b09cb4e89e98da1841c922996a33e`. The main agent opened that source and the current target Harness Host together at `1280×720`, dark theme, and saved both sides in the same audit run.

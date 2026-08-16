@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type {
   ConversationLocation,
   ConversationNodeContext,
@@ -123,7 +123,9 @@ export function ActivityHeader({ node }: ChatNodeViewProps<'e-mate-activity-grou
   const { turn, startTime, endTime, status } = node.data
   const [now, setNow] = useState(() => Date.now())
   const [collapsed, setCollapsed] = useState(() => status !== 'running')
+  const [controlIds, setControlIds] = useState('')
   const rootRef = useRef<HTMLButtonElement>(null)
+  const controlsPrefix = `e-mate-activity-${node.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 
   useEffect(() => {
     if (status !== 'running') return undefined
@@ -135,12 +137,15 @@ export function ActivityHeader({ node }: ChatNodeViewProps<'e-mate-activity-grou
     if (status !== 'running') setCollapsed(true)
   }, [status])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const row = rootRef.current?.closest<HTMLElement>('[data-chat-flow-kind]')
     const flow = row?.parentElement
     if (row === undefined || flow === undefined || row === null || flow === null) return undefined
     const touched = new Set<HTMLElement>()
+    const assignedIds = new Map<HTMLElement, string>()
     const mark = () => {
+      const memberIds: string[] = []
+      let memberIndex = 0
       const tail = flow.querySelector<HTMLElement>(`[data-turn-tail="${turn}"]`)
       if (tail !== null) {
         tail.setAttribute('data-emate-activity-tail', '')
@@ -158,17 +163,30 @@ export function ActivityHeader({ node }: ChatNodeViewProps<'e-mate-activity-grou
             sibling.setAttribute('data-emate-activity-member', String(turn))
             if (collapsed) sibling.setAttribute('data-emate-activity-collapsed', '')
             else sibling.removeAttribute('data-emate-activity-collapsed')
+            if (sibling.id === '') {
+              const memberKey = sibling.dataset.chatFlowKey ?? String(memberIndex + 1)
+              const id = `${controlsPrefix}-${memberIndex + 1}-${memberKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+              sibling.id = id
+              assignedIds.set(sibling, id)
+            }
+            memberIds.push(sibling.id)
+            memberIndex += 1
             touched.add(sibling)
           }
         }
         sibling = sibling.nextElementSibling as HTMLElement | null
       }
+      const next = memberIds.join(' ')
+      setControlIds(current => current === next ? current : next)
     }
     mark()
     const observer = status === 'running' ? new MutationObserver(mark) : null
     observer?.observe(flow, { childList: true, subtree: true })
     return () => {
       observer?.disconnect()
+      for (const [element, id] of assignedIds) {
+        if (element.id === id) element.removeAttribute('id')
+      }
       for (const element of touched) {
         if (element.dataset.emateActivityMember === String(turn)) {
           element.removeAttribute('data-emate-activity-member')
@@ -180,7 +198,7 @@ export function ActivityHeader({ node }: ChatNodeViewProps<'e-mate-activity-grou
         }
       }
     }
-  }, [collapsed, status, turn])
+  }, [collapsed, controlsPrefix, status, turn])
 
   const elapsed = Math.max(0, (endTime ?? now) - startTime)
   const elapsedLabel = durationLabel(elapsed, status)
@@ -192,7 +210,9 @@ export function ActivityHeader({ node }: ChatNodeViewProps<'e-mate-activity-grou
       data-emate-activity-header=""
       data-emate-activity-status={status}
       aria-label={`${statusLabel(status)} ${elapsedLabel}`}
-      aria-expanded={!collapsed}
+      aria-expanded={controlIds === '' ? undefined : !collapsed}
+      aria-controls={controlIds || undefined}
+      disabled={controlIds === ''}
       onClick={() => { setCollapsed(value => !value) }}
       aria-live={status === 'running' ? 'polite' : undefined}
     >
