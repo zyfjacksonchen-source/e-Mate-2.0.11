@@ -373,6 +373,13 @@ test(
         await verifyPassword(initialPassword, verifier(initialCredential.rows[0] as PasswordCredentialRow)),
         true
       );
+      const loginIdentifier = `member-${run}@example.test`;
+      await cleanup.query(
+        `UPDATE e_mate_auth_password_credential
+            SET login_identifier_normalized = $3
+          WHERE tenant_id = $1 AND user_id = $2`,
+        [tenantId, userId, loginIdentifier]
+      );
       await cleanup.query(
         `INSERT INTO e_mate_auth_session
           (session_id, tenant_id, user_id, client_id, status, expires_at)
@@ -387,13 +394,15 @@ test(
       );
 
       assert.equal(await store.resetPassword(admin, userId, { schemaVersion: 1, password: replacementPassword }), true);
-      const replacementCredential = await cleanup.query<PasswordCredentialRow>(
-        `SELECT password_salt, password_hash, scrypt_cost, scrypt_block_size, scrypt_parallelization
+      const replacementCredential = await cleanup.query<PasswordCredentialRow & { login_identifier_normalized: string }>(
+        `SELECT login_identifier_normalized, password_salt, password_hash,
+                scrypt_cost, scrypt_block_size, scrypt_parallelization
            FROM e_mate_auth_password_credential
           WHERE tenant_id = $1 AND user_id = $2`,
         [tenantId, userId]
       );
       const replacementVerifier = verifier(replacementCredential.rows[0] as PasswordCredentialRow);
+      assert.equal(replacementCredential.rows[0]?.login_identifier_normalized, loginIdentifier);
       assert.equal(await verifyPassword(initialPassword, replacementVerifier), false);
       assert.equal(await verifyPassword(replacementPassword, replacementVerifier), true);
       assert.deepEqual(

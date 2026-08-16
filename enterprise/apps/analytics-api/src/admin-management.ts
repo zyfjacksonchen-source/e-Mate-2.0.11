@@ -748,8 +748,7 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
         )
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
         ON CONFLICT (tenant_id, user_id) DO UPDATE
-          SET login_identifier_normalized = EXCLUDED.login_identifier_normalized,
-              password_salt = EXCLUDED.password_salt,
+          SET password_salt = EXCLUDED.password_salt,
               password_hash = EXCLUDED.password_hash,
               scrypt_cost = EXCLUDED.scrypt_cost,
               scrypt_block_size = EXCLUDED.scrypt_block_size,
