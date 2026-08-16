@@ -36,8 +36,8 @@ export const HARNESS_VERSION = '0.1.0-rc.5'
 export const HARNESS_COMMIT = '47f943859bef60e4160492346772ded9b24f765a'
 const PLUGIN_PACKAGES = [
   '@e-mate/dsh-plugin-better-sidebar',
+  '@e-mate/dsh-plugin-browser',
   '@e-mate/dsh-plugin-browser-panel',
-  '@e-mate/dsh-plugin-ego-browser',
   '@e-mate/dsh-plugin-genui',
   '@e-mate/dsh-plugin-im',
   '@e-mate/dsh-plugin-memory-evolve',

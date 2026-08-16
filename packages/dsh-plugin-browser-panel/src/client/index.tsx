@@ -6,9 +6,9 @@ export const inject = ['slots', 'connection']
 
 type RpcResult = { ok: boolean; value?: unknown; error?: { message?: string } }
 type Status = {
-  state: 'blocked' | 'setup-required'
-  blocker: 'BROWSER_PANEL_SOURCE_UNAVAILABLE' | 'PLAYWRIGHT_MCP_EDGE_UNVERIFIED' | 'EGO_BROWSER_RUNTIME_UNVERIFIED'
-  egoPlatformEligible?: boolean
+  state: 'ready' | 'blocked' | 'setup-required'
+  blocker?: 'DSH_BROWSER_PLATFORM_UNSUPPORTED' | 'DSH_BROWSER_EXTENSION_NOT_CONNECTED' | 'DSH_BROWSER_WINDOWS_ACCEPTANCE_PENDING'
+  connected: boolean
 }
 
 interface Injected {
@@ -26,42 +26,18 @@ const styles: Record<string, CSSProperties> = {
 function parseStatus(value: unknown): Status {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('浏览器面板状态无效。')
   const status = value as Record<string, unknown>
-  if (status.schema_version !== 1 || status.ready !== false || status.provider_verified !== false) {
+  if (status.schema_version !== 1 || status.provider !== 'dsh-browser'
+    || status.session_bound !== true || status.browser_state_session_bound !== true
+    || typeof status.connected !== 'boolean') {
     throw new Error('浏览器面板状态无效。')
   }
-  if (status.state === 'setup-required' && status.blocker === 'PLAYWRIGHT_MCP_EDGE_UNVERIFIED') {
-    const provider = status.playwright_mcp
-    if (provider === null || typeof provider !== 'object' || Array.isArray(provider)
-      || (provider as Record<string, unknown>).package !== '@playwright/mcp'
-      || (provider as Record<string, unknown>).version !== '0.0.78'
-      || (provider as Record<string, unknown>).browser !== 'system-edge'
-      || (provider as Record<string, unknown>).workspace_roots_supported !== false
-      || (provider as Record<string, unknown>).windows_acceptance_verified !== false) {
-      throw new Error('浏览器面板状态无效。')
-    }
-    return { state: 'setup-required', blocker: 'PLAYWRIGHT_MCP_EDGE_UNVERIFIED' }
+  if (status.state === 'ready' && status.ready === true && status.provider_verified === true && status.connected === true) {
+    return { state: 'ready', connected: true }
   }
-  const ego = status.ego_browser
-  if (status.state === 'setup-required' && status.blocker === 'EGO_BROWSER_RUNTIME_UNVERIFIED'
-    && ego !== null && typeof ego === 'object' && !Array.isArray(ego)
-    && (ego as Record<string, unknown>).platform_eligible === true
-    && (ego as Record<string, unknown>).code === 'EGO_BROWSER_RUNTIME_UNVERIFIED') {
-    return {
-      state: 'setup-required',
-      blocker: 'EGO_BROWSER_RUNTIME_UNVERIFIED',
-      egoPlatformEligible: true,
-    }
-  }
-  if (status.state !== 'blocked' || status.blocker !== 'BROWSER_PANEL_SOURCE_UNAVAILABLE'
-    || ego === null || typeof ego !== 'object' || Array.isArray(ego)
-    || typeof (ego as Record<string, unknown>).platform_eligible !== 'boolean') {
-    throw new Error('浏览器面板状态无效。')
-  }
-  return {
-    state: 'blocked',
-    blocker: 'BROWSER_PANEL_SOURCE_UNAVAILABLE',
-    egoPlatformEligible: (ego as Record<string, unknown>).platform_eligible as boolean,
-  }
+  const blockers = new Set(['DSH_BROWSER_PLATFORM_UNSUPPORTED', 'DSH_BROWSER_EXTENSION_NOT_CONNECTED', 'DSH_BROWSER_WINDOWS_ACCEPTANCE_PENDING'])
+  if ((status.state !== 'blocked' && status.state !== 'setup-required') || status.ready !== false
+    || status.provider_verified !== false || !blockers.has(String(status.blocker))) throw new Error('浏览器面板状态无效。')
+  return { state: status.state, blocker: status.blocker as Status['blocker'], connected: status.connected }
 }
 
 function BrowserPanel({ sessionId, callStatus }: ConvViewProps & Injected) {
@@ -86,22 +62,17 @@ function BrowserPanel({ sessionId, callStatus }: ConvViewProps & Injected) {
   return (
     <section style={styles.root} aria-label="浏览器面板">
       <div style={styles.card}>
-        <span style={styles.badge}>{status?.state === 'setup-required' ? '需要设置' : '不可用'}</span>
+        <span style={styles.badge}>{status?.state === 'ready' ? '已连接' : status?.state === 'setup-required' ? '需要设置' : '不可用'}</span>
         <h2>浏览器面板</h2>
         {message !== '' ? <p role="status" style={styles.detail}>{message}</p> : (
           <>
-            {status?.state === 'setup-required' ? (
-              <p role="status" style={styles.detail}>{status.blocker === 'PLAYWRIGHT_MCP_EDGE_UNVERIFIED'
-                ? 'Windows 已选择 @playwright/mcp@0.0.78 与系统 Edge 作为候选方案；固定的 Harness rc.5 没有 Session/项目绑定的 MCP workspace-root 路径，且真实 Windows 验收尚未完成。'
-                : 'macOS 已选择 ego-browser 候选方案；真实启动、权限、任务空间隔离、清理、交互与下载验收尚未完成。'}</p>
-            ) : (
-              <>
-                <p role="status" style={styles.detail}>目录中声明的 dsh-browser-panel 源码仓库与 npm 包均无法验证，当前也没有已验证的浏览器运行服务。e-Mate 不会伪造可用状态或浏览器事件。</p>
-                <p style={styles.detail}>{status?.egoPlatformEligible === true
-                  ? '当前平台可使用 macOS 专属的 ego-browser 适配，但其运行服务尚未验证，因此本面板仍保持不可用。'
-                  : '当前平台没有已选定且完成验收的浏览器运行服务。'}</p>
-              </>
-            )}
+            <p role="status" style={styles.detail}>{status?.state === 'ready'
+              ? 'dsh-browser 已连接。浏览器动作由 Harness 真实 Tool 事件驱动，并绑定当前会话的标签页。点击扩展图标可让下一次浏览器操作改绑到当前标签页。'
+              : status?.blocker === 'DSH_BROWSER_WINDOWS_ACCEPTANCE_PENDING'
+                ? 'Windows 扩展已连接；真实 Windows Chrome/Edge Computer Use 尚未完成，因此保持失败关闭。'
+                : status?.blocker === 'DSH_BROWSER_EXTENSION_NOT_CONNECTED'
+                  ? '请安装并启用 e-Mate 浏览器扩展。扩展不包含独立聊天、模型、会话或审批界面。'
+                  : '当前平台不在 e-Mate 2.0.7 浏览器能力支持范围。'}</p>
           </>
         )}
         <button style={styles.button} type="button" onClick={() => { void refresh() }}>重新核验</button>

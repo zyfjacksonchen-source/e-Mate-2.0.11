@@ -110,7 +110,7 @@ The release evidence covers the following end-to-end user journeys:
 - non-deleted legacy sessions remain visible and can continue, project/general-session memory remains isolated, and Skill Hub cross-user publish/search/download/install uses the target plugin path;
 - installation, same-version repair, cross-version upgrade, rollback protection, shortcut single-instance behavior and CLI status/stop/check are exercised. A user can request an update in natural language; e-Mate must recognize the intent, execute the existing managed npm update transaction, restart/recover, report success, and preserve sessions, credentials, audit outbox and version/integrity receipts.
 
-Office, OCR/Vision and browser rows close only with the selected bundle's real result; installed metadata is not evidence. Vision/OCR remains `blocked` until the rc.5 enterprise model-policy seam exists and passes a governed request. Windows browser acceptance must prove `@playwright/mcp@0.0.78` uses the existing Microsoft Edge, receives the exact Harness workspace/permission scope, performs no browser download, isolates sessions, cleans up, and drives Browser Panel through target events; until then the expected status is `PLAYWRIGHT_MCP_EDGE_UNVERIFIED`/`setup-required`. macOS Ego Browser requires the equivalent real launch, permission, isolation, cleanup and UI evidence and remains setup-required meanwhile.
+Office, OCR/Vision and browser rows close only with the selected bundle's real result; installed metadata is not evidence. Vision/OCR remains `blocked` until the rc.5 enterprise model-policy seam exists and passes a governed request. Browser acceptance must prove the packaged `dsh-browser` MV3 extension connects in the existing macOS Chrome and Windows Chrome/Edge, binds distinct Sessions without state crossover, routes mutations through target approval, performs no browser download, recovers after disconnect, cleans up, and drives Browser Panel from real bridge state. Each platform remains `setup-required` until its own run passes.
 
 The 5,000-event reverse-scroll frame-drop percentage is retained in traces only as a diagnostic. It has no pass/fail threshold and cannot by itself block S04 or S12; the FPS, heap, long-task, event-to-paint and leak budgets above remain binding.
 
@@ -137,7 +137,7 @@ Each run stores the starting database/snapshot identity, exact test data, screen
 | 优先级 | 项目 | 当前真实状态 / 关闭条件 |
 |---|---|---|
 | P0 | Office 四类文档 | 当前规范化插件因无可合法随包分发的执行层而失败关闭；DOCX/XLSX/PPTX/PDF 创建、读取、编辑、导出、重开均未真实通过。 |
-| P0 | Browser / Computer Use | macOS Ego Browser 与 Windows Playwright MCP + 系统 Edge 均为 `setup-required`；尚无会话隔离、权限、下载、清理和 Browser Panel 的真实证据。 |
+| P0 | Browser / Computer Use | 最终方案已统一为 `dsh-browser` MV3 扩展；macOS Chrome 与 Windows Chrome/Edge 的会话隔离、目标审批、交互、下载、断连恢复和 Browser Panel 仍须分别完成真实证据。 |
 | P0 | Vision / OCR | rc.5 缺少企业多模态策略 seam，插件仅返回阻塞状态；没有真实 OCR 或视觉工具结果。 |
 | P0 | Windows 真实安装 | CI 的 win32-x64 干净安装不能替代真实 Windows 10/11 x64；CLI、快捷方式、Edge、更新、凭据和完整 CU 尚未跑。macOS x64 同样只有 CI，没有真机 CU。 |
 | P0 | 正式发布与在线升级 | npm `2.0.7` 回读、Cloudflare R2 不可变制品/公开入口、跨版本自然语言升级、失败回滚及两平台恢复尚未真实通过；同版本本地更新事务已通过但不能替代正式发布。 |

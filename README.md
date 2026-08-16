@@ -11,7 +11,7 @@ e-Mate 2.0.7 是浏览器优先、本地运行的 AI 工作空间。产品运行
 - Node.js `^22.19.0` 或 `>=24.0.0`，推荐 Node 24 LTS。
 - npm 使用 Node.js 自带版本。
 - 用户机器不需要 pnpm、Python、Xcode、MSVC、Rust、Electron 或签名工具；2.0.7 不再随包交付旧 Python/Office/OCR Worker 或 Chromium。
-- 浏览器能力不执行二次浏览器下载。Windows 预定使用系统 Microsoft Edge；macOS Ego Browser 与 Windows Edge 路径均须通过各自真实平台验收后才可标记可用。
+- 浏览器能力使用同一 `dsh-browser` MV3 扩展连接用户已有的 macOS Chrome 或 Windows Chrome/Edge，不执行浏览器二次下载；各平台通过真实 Computer Use 前保持 `setup-required`。
 - Linux 不属于 2.0.7 正式支持范围。
 
 ## 安装与首次启动

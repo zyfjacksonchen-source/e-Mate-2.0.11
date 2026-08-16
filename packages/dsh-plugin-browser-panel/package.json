@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh-plugin-browser-panel",
   "version": "2.0.7",
-  "description": "Fail-closed browser panel adapter for the pinned e-Mate 2.0.7 local runtime.",
+  "description": "Target-native Browser Panel projection for the e-Mate dsh-browser adapter.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -39,19 +39,12 @@
     "harnessVersion": "0.1.0-rc.5",
     "harnessCommit": "47f943859bef60e4160492346772ded9b24f765a",
     "upstream": {
-      "catalogRepository": "https://github.com/dsh-external/dsh-browser-panel",
-      "sourceStatus": "blocked",
-      "npmStatus": "not-published",
-      "verifiedAt": "2026-08-15"
+      "repository": "https://github.com/Lum1104/dsh-browser",
+      "commit": "01f0b216b1bde88b5f9c6575ce9fb922db6fd8fb",
+      "verifiedAt": "2026-08-16"
     },
-    "providerStatus": "platform-dependent-unverified",
-    "windowsCandidate": {
-      "package": "@playwright/mcp",
-      "version": "0.0.78",
-      "browser": "system-edge",
-      "status": "setup-required",
-      "blocker": "PLAYWRIGHT_MCP_EDGE_UNVERIFIED"
-    },
+    "providerStatus": "dsh-browser-extension-connection",
+    "windowsBlocker": "DSH_BROWSER_WINDOWS_ACCEPTANCE_PENDING",
     "excludedFeatures": [
       "browser-control",
       "standalone-http-api",

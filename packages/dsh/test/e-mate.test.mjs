@@ -457,8 +457,8 @@ test('managed profile installation is idempotent', () => {
     assert.equal(profileManifest.type, 'module')
     const pluginPackages = [
       '@e-mate/dsh-plugin-better-sidebar',
+      '@e-mate/dsh-plugin-browser',
       '@e-mate/dsh-plugin-browser-panel',
-      '@e-mate/dsh-plugin-ego-browser',
       '@e-mate/dsh-plugin-genui',
       '@e-mate/dsh-plugin-im',
       '@e-mate/dsh-plugin-memory-evolve',
@@ -995,8 +995,8 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
     ])
     const packages = [
       '@e-mate/dsh-plugin-better-sidebar',
+      '@e-mate/dsh-plugin-browser',
       '@e-mate/dsh-plugin-browser-panel',
-      '@e-mate/dsh-plugin-ego-browser',
       '@e-mate/dsh-plugin-genui',
       '@e-mate/dsh-plugin-im',
       '@e-mate/dsh-plugin-memory-evolve',

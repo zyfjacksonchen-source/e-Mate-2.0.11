@@ -1,0 +1,7 @@
+dsh-browser
+Copyright (c) Yuxiang Lin and contributors
+Source: https://github.com/Lum1104/dsh-browser
+Commit: 01f0b216b1bde88b5f9c6575ce9fb922db6fd8fb
+License: MIT
+
+Only the MIT browser bridge, page extraction, snapshot and action code is adapted. The upstream side-panel chat/session UI is not distributed by e-Mate.

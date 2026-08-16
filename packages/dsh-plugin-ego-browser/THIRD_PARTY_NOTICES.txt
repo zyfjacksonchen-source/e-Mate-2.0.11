@@ -1,7 +1,0 @@
-ego lite / ego-browser skill
-Repository: https://github.com/citrolabs/ego-lite
-Commit: c46a439e7fbad90ad33dbea6c6af329b6009809f
-License: MIT
-Copyright (c) 2026 CitroLabs
-
-The full upstream license text is included in LICENSE.ego-lite.
