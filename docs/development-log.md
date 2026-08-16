@@ -982,3 +982,13 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - ActivityHeader 现在仅对真实可控制成员输出 `aria-controls/aria-expanded`；失败、阻塞、取消、中断的 Tool/错误证据必须常显，因此相应 header 被禁用并隐藏 Chevron，避免无效折叠按钮。主代理 Browser 实点 completed header 与 Tool row 后均为 `outline:none/border:none`，受控 Tool row 正常展开，Inspect 不可见。
 - 同轮 `320×800` 实测发现 error status 的三列 grid 把中文错误压成单字竖排；窄屏仅把该真实 status 收敛为 `10px + minmax(0,1fr)`，code 放第二列并允许断行。最终 document 为 `320/320`，status 为 `10px 208px`，没有横溢出。
 - 证据位于 `artifacts/design-qa/S02-message-flow-typography-focus-9a84bde/`，最终 bundle SHA-256 为 `20a2d90eb6adaf58df6c8f0001084a13d1c71e91389683e2df4e61f4568a030a`。shell 8 files/39 tests、主包 build 和 diff check 通过；本条只关闭消息流尺寸、焦点与折叠语义，不关闭上游缺少原子用户编辑/失败轮重试动作的既有阻塞。
+
+## 2026-08-16 · S07/S10 生产模型 Key 激活与生图并发上限
+
+- 主代理按用户明确授权从仓库外生产配置文件加载 GPT、DeepSeek 与豆包 Key；Key 只进入权限受限临时文件、SSH/SCP 传输和服务器 Secret，不进入命令参数、日志、源码、前端状态、Git 或验收回执。Gemini 未配置。
+- 新 Key 的精确模型推理在写入前通过：`gpt-5.6-luna` Responses 流 2.34s、`gpt-5.6-sol` 1.66s、`deepseek-v4-flash` 0.56s、`doubao-seed-2-0-pro-260215` 2.89s，四路均 HTTP 200 且有真实流终态。客户端默认模型无需新增逻辑：企业目录与本地 `CHAT_MODELS` 都以 Luna 为首个允许聊天模型，故默认仍是 `gpt-5.6-luna`。
+- `gpt-image-2-pro` 单次真实生成 HTTP 200，37.16s，得到 1,898,205-byte PNG；上游响应披露底层解析名 `gpt-image-2-codex`，客户端和 Gateway 路由 ID 仍固定为 `gpt-image-2-pro`。并发 2 路为 2/2、4 路为 4/4；8 路仅 5/8，另外 3 路为 HTTP 429。因此本次已验证稳定并发上限为 4，不把 8 路标记可用，也不继续扩大付费压测。
+- 生产服务器复用既有 HTTPS Model Gateway 与内网 TLS provider bridge；main/image bridge 的最终上游正是用户给定 HTTP Base URL，DeepSeek/豆包分别走官方 HTTPS API。没有把 HTTP Base URL 暴露给浏览器或本地 Harness，也没有新增第二传输层。
+- 服务器先在 root-only 目录快照旧四类 Secret 与模型配置，再原子替换 Luna/Sol 共用 GPT Key、DeepSeek Key 和豆包 Key；按现有 `activate-release.sh` 的 Compose 环境加载方式只重建 gateway 容器。重建后健康状态为 `healthy`，5 条原生生产 Model Smoke 全通过，配置 SHA-256 为 `3c985cde632ef7db81da431db4552c73df3c93926ad875f1233f5a3d0f4e5769`，回退快照收据为 `20260816T010958Z-production-model-keys`。
+- 当前线上 gateway 镜像的 DeepSeek Smoke 合同仍锁 `deepseek-v4-pro`，而当前仓库与新 Key 已验证 `deepseek-v4-flash`。本轮只激活授权 Key，不在服务器手改镜像或伪造 Flash 验收；Flash 切换必须随下一份由 CI 构建的 Model Gateway 镜像和对应生产配置一起发布、重跑 5 路 Smoke 后关闭。
+- 可复核回执与单次真实图片位于 `artifacts/acceptance/S10-image-production-20260816/`；回执不含 Key、Key hash、上游签名 URL或回复正文。
