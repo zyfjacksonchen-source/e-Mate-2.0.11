@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createPublicKey, randomUUID } from 'node:crypto'
 import {
   agreementBundleSha256,
   agreementDocuments,
@@ -18,6 +18,28 @@ const CHAT_MODELS = [
   'deepseek',
   'doubao-seed-2-0-pro-260215',
 ]
+const ADMIN_ROLES = new Set(['TENANT_ADMIN', 'AUDIT_ADMIN'])
+const REGISTRATION_REJECTION_MESSAGES = {
+  INVALID_CHALLENGE: '验证码无效或已过期',
+  ACCOUNT_EXISTS: '该账号已存在',
+} as const
+const LOGIN_REJECTION_MESSAGE = '账号或密码错误'
+
+class RegistrationRejection extends Error {
+  constructor(readonly code: keyof typeof REGISTRATION_REJECTION_MESSAGES) {
+    super(REGISTRATION_REJECTION_MESSAGES[code])
+  }
+}
+
+export function registrationRejectionMessage(error: unknown): string | undefined {
+  return error instanceof RegistrationRejection ? REGISTRATION_REJECTION_MESSAGES[error.code] : undefined
+}
+
+class LoginRejection extends Error {}
+
+export function loginRejectionMessage(error: unknown): string | undefined {
+  return error instanceof LoginRejection ? LOGIN_REJECTION_MESSAGE : undefined
+}
 
 type Credentials = {
   resolve(ref: string): Promise<{ value: string; source: string } | undefined>
@@ -95,6 +117,10 @@ type ProviderOptions = {
   now?: () => number
 }
 
+function agreementExempt(value: StoredSession): boolean {
+  return value.session.identity.roles.some(role => ADMIN_ROLES.has(role))
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -139,6 +165,25 @@ function text(value: unknown, label: string, maximum = 512): string {
     throw new Error(`e-Mate enterprise ${label} is invalid`)
   }
   return value
+}
+
+function usagePublicKey(value: unknown): string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 8_192 || value.includes('\u0000')) {
+    throw new Error('e-Mate enterprise usage public key is invalid')
+  }
+  const pem = value.trim()
+  if (!pem.startsWith('-----BEGIN PUBLIC KEY-----') || !pem.endsWith('-----END PUBLIC KEY-----')) {
+    throw new Error('e-Mate enterprise usage public key is invalid')
+  }
+  try {
+    const key = createPublicKey(pem)
+    if (key.type !== 'public' || key.asymmetricKeyType !== 'ed25519') {
+      throw new Error('not Ed25519')
+    }
+    return key.export({ type: 'spki', format: 'pem' }).toString()
+  } catch {
+    throw new Error('e-Mate enterprise usage public key is invalid')
+  }
 }
 
 function modelIds(value: unknown): string[] {
@@ -199,7 +244,7 @@ function session(value: unknown, expectedModelRoot: string): Session {
       sessionToken: modelToken,
       expiresAt: modelExpiry,
       usageKeyId: identifier(value.modelGateway.usageKeyId, 'usage key id'),
-      usagePublicKey: text(value.modelGateway.usagePublicKey, 'usage public key', 8_192),
+      usagePublicKey: usagePublicKey(value.modelGateway.usagePublicKey),
       allowedModelIds: modelIds(value.modelGateway.allowedModelIds),
     },
   }
@@ -301,14 +346,20 @@ async function responseJson(response: Response, label: string): Promise<unknown>
     const code = isRecord(value) && isRecord(value.error) && typeof value.error.code === 'string'
       ? value.error.code
       : `HTTP_${response.status}`
+    if (label === 'registration'
+      && (response.status === 400 && code === 'INVALID_CHALLENGE'
+        || response.status === 409 && code === 'ACCOUNT_EXISTS')) {
+      throw new RegistrationRejection(code)
+    }
+    if (label === 'login' && response.status === 401 && code === 'INVALID_GRANT') {
+      throw new LoginRejection(LOGIN_REJECTION_MESSAGE)
+    }
     const messages: Record<string, string> = {
       INVALID_GRANT: '账号或密码错误',
       APPROVAL_REQUIRED: '账号正在等待管理员审核',
       POLICY_REQUIRED: '管理员尚未配置周用量和可用模型',
       SESSION_REVOKED: '登录已失效，请重新登录',
       TOKEN_REUSED: '登录刷新凭据已失效，请重新登录',
-      INVALID_CHALLENGE: '验证码无效或已过期',
-      ACCOUNT_EXISTS: '该账号已存在',
     }
     throw new Error(messages[code] ?? `e-Mate enterprise ${label} failed (${code})`)
   }
@@ -507,6 +558,17 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     async bootstrap() {
       const value = await active(false)
       if (value === undefined) return { authenticated: false, workspace_unlocked: false }
+      if (agreementExempt(value)) {
+        return {
+          authenticated: true,
+          workspace_unlocked: true,
+          agreement_exempt: true,
+          display_name: value.session.identity.displayName,
+          account_status: 'active',
+          weekly_token_limit: value.session.identity.weeklyTokenLimit,
+          account_subject: `${value.session.identity.tenantId}:${value.session.identity.userId}`,
+        }
+      }
       const consent = await liveConsent(value)
       return {
         authenticated: true,

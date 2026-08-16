@@ -34,6 +34,7 @@ export interface IdentityBootstrap {
   display_name?: string
   account_status?: 'active'
   weekly_token_limit?: number
+  agreement_exempt?: true
   agreement_receipt_id?: string
   agreements: AgreementBundle
 }

@@ -3,7 +3,11 @@ import {
   describeAgreements,
   requiredAcknowledgements,
 } from './agreements.js'
-import { createEnterpriseIdentityProvider } from './enterprise-provider.js'
+import {
+  createEnterpriseIdentityProvider,
+  loginRejectionMessage,
+  registrationRejectionMessage,
+} from './enterprise-provider.js'
 export { createEnterpriseIdentityProvider, MODEL_SESSION_REF } from './enterprise-provider.js'
 
 export const inject = ['connection', 'credentials']
@@ -87,6 +91,7 @@ async function bootstrap(config, includeAccountSubject = false) {
     display_name: typeof value.display_name === 'string' ? value.display_name : undefined,
     account_status: value.authenticated ? value.account_status : undefined,
     weekly_token_limit: value.authenticated ? value.weekly_token_limit : undefined,
+    agreement_exempt: value.agreement_exempt === true ? true : undefined,
     agreement_receipt_id: typeof value.agreement_receipt_id === 'string'
       ? value.agreement_receipt_id
       : undefined,
@@ -241,13 +246,20 @@ export function apply(ctx, config = {}) {
         if (typeof config.identityProvider?.register !== 'function') {
           throw new Error('e-Mate enterprise registration is unavailable')
         }
-        const registration = await config.identityProvider.register({
-          account: payload.account.trim(),
-          real_name: payload.real_name.trim(),
-          password: payload.password,
-          challenge_id: payload.challenge_id,
-          verification_code: payload.verification_code.trim(),
-        })
+        let registration
+        try {
+          registration = await config.identityProvider.register({
+            account: payload.account.trim(),
+            real_name: payload.real_name.trim(),
+            password: payload.password,
+            challenge_id: payload.challenge_id,
+            verification_code: payload.verification_code.trim(),
+          })
+        } catch (error) {
+          const message = registrationRejectionMessage(error)
+          if (message !== undefined) return badRequest(message)
+          throw error
+        }
         if (!validRegistration(registration)) {
           throw new Error('e-Mate enterprise registration receipt is invalid')
         }
@@ -267,11 +279,17 @@ export function apply(ctx, config = {}) {
         if (typeof config.identityProvider?.login !== 'function') {
           throw new Error('e-Mate enterprise identity login is unavailable')
         }
-        await config.identityProvider.login({
-          identifier: payload.identifier.trim(),
-          password: payload.password,
-          remember_login: payload.remember_login,
-        })
+        try {
+          await config.identityProvider.login({
+            identifier: payload.identifier.trim(),
+            password: payload.password,
+            remember_login: payload.remember_login,
+          })
+        } catch (error) {
+          const message = loginRejectionMessage(error)
+          if (message !== undefined) return badRequest(message)
+          throw error
+        }
         const state = await bootstrap(config)
         if (!state.authenticated) {
           throw new Error('e-Mate login requires administrator approval and a weekly Token allowance')

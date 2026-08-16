@@ -1025,3 +1025,16 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 聚焦验证为 Usage 13/13、TypeScript check、Vite production build 与 diff check。最终生产静态 release 为 `/srv/ecorex-agent-usage-panel/releases/usage-2.0.7-auth-final-20260816T033831Z`，tar SHA-256 `32bdbf566f12b5a184a747ee7e36ced3630018d323ca0be3b3397a4dce1df252`，root-only 回执同名。旧 `v2.0.5-77786087753e-8f116d9b4bca` 目录未删除；前两次真实探针分别暴露回环地址与 Nginx graceful reload 竞态，均由部署钩子恢复旧软链和配置，失败候选保留在服务器 `failed/` 后才重新切换。
 - Nginx 仅移除静态 `/ecorex-agent/usage-panel/` 的 Basic Auth；旧 `/ecorex-agent/usage-panel/api/` 继续 401，新前端数据走同源 `/e-mate/auth-api/` 与 `/e-mate/enterprise-api/`。`mvdcm` 与 `dl` 两个 Usage URL 均回读 HTTP 200，Auth/Analytics `/healthz` 均为 200。
 - 主代理 Browser 用真实 `emate-admin` 登录。7 日账本显示 3 次成功调用、13,185 Token、1 个活跃用户、Luna 3 次调用、管理员周额度“不限”；请求状态、任务汇总、Usage/Invocation 关联四项差异均为 0。调用明细逐条显示三组 Luna request/usage 对，明暗主题切换和退出后密码清空均通过。任务事件账本仍显示“未接入/0”，这是当前生产没有 e-Mate 本地任务审计上送事实，不用模型调用记录伪造任务事件次数。
+
+## 2026-08-16 · S07 管理员协议免签一致性
+
+- 管理员协议豁免统一收敛到现有角色边界：`TENANT_ADMIN` 与 `AUDIT_ADMIN` 登录本地 e-Mate 时直接解锁工作区，Model Gateway 同样跳过普通用户同意门；不请求 `/v1/consents/current`、不写接受记录、不生成伪回执。普通 `MEMBER` 流程保持首次签署和企业留档不变。
+- 管理端用户列表对管理员显示“管理员免签”，不再把无签署记录误标为普通用户“未签署”。身份、模型网关、管理端聚焦回归及两项 TypeScript check 通过；生产部署仍须随下一份已通过 CI 的服务制品激活后再做真实账号复验。
+
+## 2026-08-16 · S07 2.0.7 新用户首次使用与真实模型闭环
+
+- 主代理通过生产注册 challenge 创建 `emate-v2 / emate-accept-0816-1140`，真实姓名为“验收用户”。管理员从现有管理端将其审批为 ACTIVE，周额度设为 100,000 Token，只允许 Luna 与 Sol；旧 `emate-production` 用户和服务未停止、未导入、未修改。生产数据库只读回读为普通用户 `ACTIVE / 100000 / 1` 条当前协议回执，管理员 `ACTIVE / unlimited / 0` 条回执。
+- 首次登录发现服务器当前同意政策 hash 仍指向旧 2.0.5 文本，客户端按合同失败关闭。主代理在 root-only 目录快照配置后，只把生产 consent policy 的 `contentHash` 对齐当前安装包 `3e3f7919a9007b9f852ca74f363f257fb0bbf3b09c366d63d2b121abee682920`，使用既有生产镜像和 `validate-secrets.sh` 校验，再仅重建 Gateway；Auth、Postgres、Redis 与旧服务未停止。回退收据为 `/root/e-mate-bootstrap/20260816T043000Z-consent-policy-3e3f7919`，新配置 SHA-256 为 `32182edf2280b35e2b9eb32fd35225314dd845c08222fb3be2f192a260d4e891`。
+- 普通用户在 Browser 中逐项勾选三项确认并签署协议，企业数据库回读 agreement/disclaimer version 均为 `2026-08-14.1`，随后进入工作区。默认模型真实显示 Luna；同一 Session 的 Luna 首轮回复编号 `207`，第二轮准确回忆 `207`；切换 Sol 后第三轮仍回复 `207`，模型选择器同时回读 Sol，证明模型切换生效且上下文连续。三轮实测分别为 Luna 21.4s/首 Token 18.8s/5.4 tok/s、Luna 15s/首 Token 14s/7.2 tok/s、Sol 20s/首 Token 20s/32 tok/s；用户中心回读 48,855 / 100,000 Token。
+- 首次真实登录同时暴露 macOS `security -w` 交互输入对长凭据截断的根因。OS credential provider 保持 Keychain-only：不把值放 argv、环境变量或文件；超过 96B 的值改为带 generation、SHA-256 manifest 和写后校验的分片，且同一 credential ref 的 set/unset 串行化。4 KiB 真实 Keychain round-trip 与 256B 并发覆盖探针均通过，Model Token 和 Session 不再出现 generation incomplete。
+- 用户在现有账户设置中完成改密，服务撤销旧租约并返回登录页；旧密码经 Auth 401/`INVALID_GRANT` 映射为 Harness `bad-request`，页面显示“账号或密码错误”，新密码重新登录成功且原本地会话保留。HTTP 500、未知 4xx 和网络失败继续抛出，不被误报为凭据错误。管理员真实登录直接进入工作区、未进入协议页，生产数据库回执数保持 0；未生成管理员假签署记录。

@@ -218,6 +218,13 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     })) })
     unmount()
 
+    const administrator = render(<AccountSettings callIdentity={vi.fn(async (): Promise<RpcResult> => ({
+      ok: true,
+      value: { ...signedIn, agreement_exempt: true, agreement_receipt_id: undefined },
+    }))} />)
+    expect(await screen.findByText(/管理员无需签署用户协议/u)).toBeTruthy()
+    administrator.unmount()
+
     const callConnections = vi.fn(async () => ({
       ok: true,
       value: {

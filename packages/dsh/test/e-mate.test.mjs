@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { createHash } from 'node:crypto'
+import { createHash, generateKeyPairSync } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createServer } from 'node:http'
@@ -799,6 +799,13 @@ test('OS credential provider preserves target layering without exposing values t
 test('OS credential backends use Keychain and CurrentUser DPAPI without plaintext files', async () => {
   const keychain = new Map()
   const macCommands = []
+  let rejectedChunkSuffix
+  const rejectedDeletes = new Set()
+  let blockConcurrentChunk = false
+  let concurrentChunkEntered
+  let releaseConcurrentChunk
+  let armManifestReadFailure
+  let rejectRestoreWrite
   const mac = createOsCredentialBackend('darwin', '/unused', async (file, args, input = '') => {
     macCommands.push({ file, args, input })
     if (file === '/usr/bin/expect') {
@@ -807,24 +814,101 @@ test('OS credential backends use Keychain and CurrentUser DPAPI without plaintex
       assert.match(args[1], /retype password for new item:/)
       assert.match(args[1], /set timeout 30/)
       assert.match(args[1], /spawn -noecho \/usr\/bin\/security/)
-      assert.match(args[1], /set account \{CONNECTOR_TOKEN\}/)
       assert.match(args[1], /set service \{net\.ecoremedia\.e-mate\.credentials\.v1\}/)
       assert.doesNotMatch(args[1], /mac-secret|bWFjLXNlY3JldA==/)
-      keychain.set('CONNECTOR_TOKEN', input.trim())
+      const account = /set account \{([A-Za-z0-9_]+)\}/u.exec(args[1])?.[1]
+      assert.ok(account)
+      if (rejectRestoreWrite === account) {
+        rejectRestoreWrite = undefined
+        return { status: 1, stdout: '' }
+      }
+      if (rejectedChunkSuffix !== undefined && account.endsWith(rejectedChunkSuffix)) {
+        return { status: 1, stdout: '' }
+      }
+      if (blockConcurrentChunk && account.startsWith('CONCURRENT_TOKEN_EMATE1_') && account.endsWith('_0')) {
+        blockConcurrentChunk = false
+        await new Promise(resolve => {
+          releaseConcurrentChunk = resolve
+          concurrentChunkEntered()
+        })
+      }
+      keychain.set(account, input.trim())
+      if (armManifestReadFailure === account) armManifestReadFailure = `armed:${account}`
       return { status: 0, stdout: '' }
     }
     const ref = args[args.indexOf('-a') + 1]
     if (args[0] === 'find-generic-password') {
+      if (armManifestReadFailure === `armed:${ref}` && args.includes('-w')) {
+        armManifestReadFailure = undefined
+        rejectRestoreWrite = ref
+        return { status: 1, stdout: '' }
+      }
       if (!keychain.has(ref)) return { status: 44, stdout: '' }
       return { status: 0, stdout: args.includes('-w') ? `${keychain.get(ref)}\n` : '' }
     }
-    if (args[0] === 'delete-generic-password') return { status: keychain.delete(ref) ? 0 : 44, stdout: '' }
+    if (args[0] === 'delete-generic-password') {
+      if (rejectedDeletes.has(ref)) return { status: 1, stdout: '' }
+      return { status: keychain.delete(ref) ? 0 : 44, stdout: '' }
+    }
     return { status: 1, stdout: '' }
   })
   await mac.set('CONNECTOR_TOKEN', 'mac-secret')
   assert.equal(await mac.get('CONNECTOR_TOKEN'), 'mac-secret')
   assert.equal(await mac.has('CONNECTOR_TOKEN'), true)
   assert.equal(await mac.unset('CONNECTOR_TOKEN'), true)
+
+  const firstLongValue = 's'.repeat(4_096)
+  const secondLongValue = 't'.repeat(8_192)
+  await mac.set('SESSION_TOKEN', firstLongValue)
+  assert.equal(await mac.get('SESSION_TOKEN'), firstLongValue)
+  const firstGeneration = [...keychain.keys()].filter(ref => ref.startsWith('SESSION_TOKEN_EMATE1_'))
+  assert.ok(firstGeneration.length > 1)
+  await mac.set('SESSION_TOKEN', secondLongValue)
+  assert.equal(await mac.get('SESSION_TOKEN'), secondLongValue)
+  assert.ok(firstGeneration.every(ref => !keychain.has(ref)))
+
+  const committedEntries = new Set(keychain.keys())
+  rejectedChunkSuffix = '_2'
+  await assert.rejects(mac.set('SESSION_TOKEN', 'u'.repeat(12_288)), /macOS Keychain operation failed/)
+  rejectedChunkSuffix = undefined
+  assert.deepEqual(new Set(keychain.keys()), committedEntries)
+  assert.equal(await mac.get('SESSION_TOKEN'), secondLongValue)
+
+  let enteredConcurrentChunk
+  const concurrentChunk = new Promise(resolve => { enteredConcurrentChunk = resolve })
+  concurrentChunkEntered = enteredConcurrentChunk
+  blockConcurrentChunk = true
+  const firstConcurrentSet = mac.set('CONCURRENT_TOKEN', 'a'.repeat(1_024))
+  await concurrentChunk
+  const commandsBeforeSecondSet = macCommands.length
+  const secondConcurrentSet = mac.set('CONCURRENT_TOKEN', 'b'.repeat(1_024))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(macCommands.length, commandsBeforeSecondSet)
+  releaseConcurrentChunk()
+  await Promise.all([firstConcurrentSet, secondConcurrentSet])
+  assert.equal(await mac.get('CONCURRENT_TOKEN'), 'b'.repeat(1_024))
+
+  await mac.set('CLEANUP_TOKEN', 'c'.repeat(1_024))
+  const staleChunk = [...keychain.keys()].find(ref => ref.startsWith('CLEANUP_TOKEN_EMATE1_'))
+  assert.ok(staleChunk)
+  rejectedDeletes.add(staleChunk)
+  await mac.set('CLEANUP_TOKEN', 'd'.repeat(1_024))
+  assert.equal(await mac.get('CLEANUP_TOKEN'), 'd'.repeat(1_024))
+  assert.equal(keychain.has(staleChunk), true)
+  rejectedDeletes.clear()
+
+  await mac.set('ROLLBACK_TOKEN', 'e'.repeat(1_024))
+  armManifestReadFailure = 'ROLLBACK_TOKEN'
+  await assert.rejects(mac.set('ROLLBACK_TOKEN', 'f'.repeat(1_024)), /rollback failed/)
+  assert.equal(await mac.get('ROLLBACK_TOKEN'), 'f'.repeat(1_024))
+
+  const activeChunk = [...keychain.keys()].find(ref => ref.startsWith('SESSION_TOKEN_EMATE1_'))
+  assert.ok(activeChunk)
+  keychain.set(activeChunk, Buffer.from('tampered').toString('base64'))
+  await assert.rejects(mac.get('SESSION_TOKEN'), /integrity check failed/)
+  assert.equal(await mac.unset('SESSION_TOKEN'), true)
+  assert.equal([...keychain.keys()].some(ref => ref.startsWith('SESSION_TOKEN')), false)
+
   const macSet = macCommands.find(command => command.file === '/usr/bin/expect')
   assert.equal(macSet.args[0], '-c')
   assert.equal(macSet.args.includes('mac-secret'), false)
@@ -1418,15 +1502,21 @@ test('identity agreements are immutable, explicit, and use the target Connection
 
 test('enterprise identity provider maps target credentials and the production HTTP contracts without exposing tokens', async () => {
   const values = new Map()
+  let rejectModelCredential = false
   const credentials = {
     resolve: async ref => values.has(ref) ? { value: values.get(ref), source: 'test' } : undefined,
-    set: async (ref, value) => { values.set(ref, value) },
+    set: async (ref, value) => {
+      if (rejectModelCredential && ref === MODEL_SESSION_REF) throw new Error('simulated model credential failure')
+      values.set(ref, value)
+    },
     unset: async ref => { values.delete(ref) },
   }
   const clock = Date.parse('2030-01-08T12:00:00.000Z')
   const accessToken = 'access.payload.signature'
   const modelToken = 'model.payload.signature'
   const refreshToken = `emate_rt_${'r'.repeat(43)}`
+  const usageKeys = generateKeyPairSync('ed25519')
+  const usagePublicKey = usageKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString()
   const userAgreement = agreementDocuments.find(document => document.id === 'e-mate-user-agreement')
   const disclaimer = agreementDocuments.find(document => document.id === 'yixin-enterprise-disclaimer')
   const policy = {
@@ -1460,7 +1550,7 @@ test('enterprise identity provider maps target credentials and the production HT
       sessionToken: modelToken,
       expiresAt: new Date(clock + 10 * 60_000).toISOString(),
       usageKeyId: 'usage-key-207',
-      usagePublicKey: 'test-usage-public-key',
+      usagePublicKey,
       allowedModelIds: ['gpt-5.6-luna', 'gpt-image-2-pro'],
     },
   }
@@ -1544,9 +1634,35 @@ test('enterprise identity provider maps target credentials and the production HT
     verification_code: '123456',
   })
   assert.equal(registration.status, 'pending_approval')
+  const nonEd25519PublicKey = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+    .publicKey.export({ type: 'spki', format: 'pem' }).toString()
+  const privateKey = usageKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
+  for (const invalid of [privateKey, nonEd25519PublicKey, `${usagePublicKey}\u0000`, 'x'.repeat(8_193)]) {
+    session.modelGateway.usagePublicKey = invalid
+    await assert.rejects(
+      provider.login({ identifier: 'test.user', password: 'secret-value', remember_login: true }),
+      /usage public key is invalid/,
+    )
+    assert.equal(values.size, 0)
+  }
+  session.modelGateway.usagePublicKey = usagePublicKey.replaceAll('\n', '\r\n')
+  values.set(MODEL_SESSION_REF, 'previous-model-token')
+  rejectModelCredential = true
+  await assert.rejects(
+    provider.login({ identifier: 'test.user', password: 'secret-value', remember_login: true }),
+    /simulated model credential failure/,
+  )
+  assert.equal(values.has('E_MATE_ENTERPRISE_SESSION'), false)
+  assert.equal(values.get(MODEL_SESSION_REF), 'previous-model-token')
+  rejectModelCredential = false
+  values.delete(MODEL_SESSION_REF)
   await provider.login({ identifier: 'test.user', password: 'secret-value', remember_login: true })
   assert.equal(values.get(MODEL_SESSION_REF), modelToken)
   assert.doesNotMatch(values.get('E_MATE_ENTERPRISE_SESSION'), /secret-value|registration-secret/)
+  assert.equal(
+    JSON.parse(values.get('E_MATE_ENTERPRISE_SESSION')).session.modelGateway.usagePublicKey,
+    usagePublicKey,
+  )
   const locked = await provider.bootstrap()
   assert.equal(locked.authenticated, true)
   assert.equal(locked.workspace_unlocked, false)
@@ -1569,6 +1685,83 @@ test('enterprise identity provider maps target credentials and the production HT
   const logout = await provider.logout({ client_request_id: 'logout-request-207' })
   assert.equal(logout.receipt_id, 'logout-receipt-207')
   assert.equal(values.size, 0)
+
+  accepted = false
+  session.identity.roles = ['AUDIT_ADMIN']
+  await provider.login({ identifier: 'audit.admin', password: 'secret-value', remember_login: false })
+  const consentRequestsBeforeAdminBootstrap = requests.filter(request => request.path.includes('/v1/consents/')).length
+  const administrator = await provider.bootstrap()
+  assert.equal(administrator.workspace_unlocked, true)
+  assert.equal(administrator.agreement_exempt, true)
+  assert.equal(administrator.agreement_receipt_id, undefined)
+  assert.equal(
+    requests.filter(request => request.path.includes('/v1/consents/')).length,
+    consentRequestsBeforeAdminBootstrap,
+  )
+  await provider.logout({ client_request_id: 'admin-logout-request-207' })
+})
+
+test('enterprise identity rejects expected gateway responses through the target RPC result', async () => {
+  let identityHandler
+  let response = { status: 400, body: { error: { code: 'INVALID_CHALLENGE' } } }
+  const credentials = {
+    resolve: async () => undefined,
+    set: async () => {},
+    unset: async () => {},
+  }
+  applyIdentity({
+    get: name => name === 'credentials' ? credentials : undefined,
+    connection: { rpc: { handle: (_channel, handler) => {
+      identityHandler = handler
+      return async () => {}
+    } } },
+    provide: () => {},
+    effect: effect => effect(),
+  }, {
+    providerLegalName: '亦芯测试主体',
+    enterprise: {
+      authBaseUrl: 'https://mvdcm.ecoremedia.net/e-mate/auth-api',
+      modelBaseUrl: 'https://mvdcm.ecoremedia.net/e-mate/model-api',
+      clientId: 'e-mate-web',
+      organization: 'emate-v2',
+    },
+    fetchImplementation: async () => new Response(JSON.stringify(response.body), {
+      status: response.status,
+      headers: { 'content-type': 'application/json' },
+    }),
+  })
+  const payload = {
+    account: 'test.user',
+    real_name: '测试用户',
+    password: 'registration-secret',
+    challenge_id: 'registration-challenge-207',
+    verification_code: '123456',
+  }
+
+  assert.deepEqual(await identityHandler('session.register', payload), {
+    ok: false,
+    error: { code: 'bad-request', message: '验证码无效或已过期', details: { issues: [] } },
+  })
+  response = { status: 409, body: { error: { code: 'ACCOUNT_EXISTS' } } }
+  assert.deepEqual(await identityHandler('session.register', payload), {
+    ok: false,
+    error: { code: 'bad-request', message: '该账号已存在', details: { issues: [] } },
+  })
+
+  response = { status: 500, body: { error: { code: 'ACCOUNT_EXISTS', message: 'sensitive upstream detail' } } }
+  await assert.rejects(identityHandler('session.register', payload), error => {
+    assert.doesNotMatch(String(error), /sensitive upstream detail/u)
+    return true
+  })
+
+  const login = { identifier: 'test.user', password: 'old-password', remember_login: true }
+  response = { status: 401, body: { error: { code: 'INVALID_GRANT' } } }
+  assert.deepEqual(await identityHandler('session.login', login), {
+    ok: false,
+    error: { code: 'bad-request', message: '账号或密码错误', details: { issues: [] } },
+  })
+  response = { status: 500, body: { error: { code: 'INVALID_GRANT' } } }
+  await assert.rejects(identityHandler('session.login', login), /账号或密码错误/)
 })
 
 test('enterprise model switch delegates to the target session, keeps its history and survives a cached-policy outage', async () => {

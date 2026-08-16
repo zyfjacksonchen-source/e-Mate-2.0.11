@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
 import { access, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -8,6 +8,10 @@ import { loadTargetCredentials } from './target-runtime.js'
 export const name = 'emate-credentials-os'
 
 const KEYCHAIN_SERVICE = 'net.ecoremedia.e-mate.credentials.v1'
+const KEYCHAIN_CHUNK_BYTES = 96
+const KEYCHAIN_MAX_BYTES = 64 * 1024
+const KEYCHAIN_MANIFEST_PREFIX = 'EMATE1:'
+const KEYCHAIN_MANIFEST = /^EMATE1:([0-9a-f]{16}):([1-9][0-9]{0,3}):([1-9][0-9]{0,4}):([A-Za-z0-9_-]{43})$/u
 const MAX_COMMAND_OUTPUT = 4 * 1024 * 1024
 const CREDENTIAL_REF = /^[A-Za-z_][A-Za-z0-9_]*$/u
 
@@ -138,8 +142,20 @@ function canonicalBase64(value: string, label: string): Buffer {
 
 class MacOsKeychainBackend implements CredentialBackend {
   readonly source = 'keychain' as const
+  private readonly mutations = new Map<string, Promise<unknown>>()
 
   constructor(private readonly run: CommandRunner = runCommand) {}
+
+  private async mutate<T>(ref: string, action: () => Promise<T>): Promise<T> {
+    const previous = this.mutations.get(ref) ?? Promise.resolve()
+    const current = previous.catch(() => undefined).then(action)
+    this.mutations.set(ref, current)
+    try {
+      return await current
+    } finally {
+      if (this.mutations.get(ref) === current) this.mutations.delete(ref)
+    }
+  }
 
   private async find(ref: string, reveal: boolean): Promise<CommandResult | undefined> {
     const result = await this.run('/usr/bin/security', [
@@ -150,10 +166,88 @@ class MacOsKeychainBackend implements CredentialBackend {
     return result
   }
 
-  async get(ref: string): Promise<string | undefined> {
+  private async read(ref: string): Promise<Buffer | undefined> {
     const result = await this.find(ref, true)
-    if (result === undefined) return undefined
-    return new TextDecoder('utf-8', { fatal: true }).decode(canonicalBase64(result.stdout, 'macOS Keychain'))
+    return result === undefined ? undefined : canonicalBase64(result.stdout, 'macOS Keychain')
+  }
+
+  private async write(ref: string, value: Buffer): Promise<void> {
+    const result = await this.run('/usr/bin/expect', [
+      '-c', keychainExpectScript(ref),
+    ], `${value.toString('base64')}\n`)
+    if (result.status !== 0) throw new Error('macOS Keychain operation failed')
+  }
+
+  private manifest(value: Buffer, generation = randomUUID().replaceAll('-', '').slice(0, 16)) {
+    const chunks = Math.ceil(value.byteLength / KEYCHAIN_CHUNK_BYTES)
+    const digest = createHash('sha256').update(value).digest('base64url')
+    return { generation, chunks, bytes: value.byteLength, digest }
+  }
+
+  private parseManifest(value: Buffer) {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(value)
+    if (!text.startsWith(KEYCHAIN_MANIFEST_PREFIX)) return undefined
+    const match = KEYCHAIN_MANIFEST.exec(text)
+    if (match === null) throw new Error('macOS Keychain credential manifest is invalid')
+    const chunks = Number(match[2])
+    const bytes = Number(match[3])
+    if (bytes > KEYCHAIN_MAX_BYTES || chunks !== Math.ceil(bytes / KEYCHAIN_CHUNK_BYTES)) {
+      throw new Error('macOS Keychain credential manifest is invalid')
+    }
+    return { generation: match[1], chunks, bytes, digest: match[4] }
+  }
+
+  private manifestValue(value: ReturnType<MacOsKeychainBackend['manifest']>): Buffer {
+    return Buffer.from(`${KEYCHAIN_MANIFEST_PREFIX}${value.generation}:${value.chunks}:${value.bytes}:${value.digest}`)
+  }
+
+  private chunkRef(ref: string, generation: string, index: number): string {
+    return `${ref}_EMATE1_${generation}_${index}`
+  }
+
+  private async readChunks(ref: string, manifest: NonNullable<ReturnType<MacOsKeychainBackend['parseManifest']>>) {
+    const chunks: Buffer[] = []
+    for (let index = 0; index < manifest.chunks; index += 1) {
+      const chunk = await this.read(this.chunkRef(ref, manifest.generation, index))
+      if (chunk === undefined) throw new Error('macOS Keychain credential generation is incomplete')
+      chunks.push(chunk)
+    }
+    const value = Buffer.concat(chunks)
+    if (value.byteLength !== manifest.bytes
+      || createHash('sha256').update(value).digest('base64url') !== manifest.digest) {
+      throw new Error('macOS Keychain credential integrity check failed')
+    }
+    return value
+  }
+
+  private async deleteGeneration(ref: string, manifest: NonNullable<ReturnType<MacOsKeychainBackend['parseManifest']>>) {
+    const failures: unknown[] = []
+    for (let index = 0; index < manifest.chunks; index += 1) {
+      try { await this.delete(this.chunkRef(ref, manifest.generation, index)) } catch (error) { failures.push(error) }
+    }
+    if (failures.length > 0) throw new AggregateError(failures, 'macOS Keychain credential generation cleanup failed')
+  }
+
+  private async delete(ref: string): Promise<boolean> {
+    const result = await this.run('/usr/bin/security', [
+      'delete-generic-password', '-a', ref, '-s', KEYCHAIN_SERVICE,
+    ])
+    if (result.status === 44) return false
+    if (result.status !== 0) throw new Error('macOS Keychain operation failed')
+    return true
+  }
+
+  private async restore(ref: string, previous: Buffer | undefined): Promise<void> {
+    if (previous === undefined) await this.delete(ref)
+    else await this.write(ref, previous)
+  }
+
+  async get(ref: string): Promise<string | undefined> {
+    const stored = await this.read(ref)
+    if (stored === undefined) return undefined
+    const manifest = this.parseManifest(stored)
+    const value = manifest === undefined ? stored : await this.readChunks(ref, manifest)
+    return new TextDecoder('utf-8', { fatal: true }).decode(value)
   }
 
   async has(ref: string): Promise<boolean> {
@@ -161,19 +255,75 @@ class MacOsKeychainBackend implements CredentialBackend {
   }
 
   async set(ref: string, value: string): Promise<void> {
-    const encoded = Buffer.from(value, 'utf8').toString('base64')
-    const result = await this.run('/usr/bin/expect', [
-      '-c', keychainExpectScript(ref),
-    ], `${encoded}\n`)
-    if (result.status !== 0) throw new Error('macOS Keychain operation failed')
+    await this.mutate(ref, () => this.setUnlocked(ref, value))
+  }
+
+  private async setUnlocked(ref: string, value: string): Promise<void> {
+    const bytes = Buffer.from(value, 'utf8')
+    if (bytes.byteLength > KEYCHAIN_MAX_BYTES) throw new Error('macOS Keychain credential exceeds its boundary')
+    const previous = await this.read(ref)
+    const previousManifest = previous === undefined ? undefined : this.parseManifest(previous)
+    if (bytes.byteLength <= KEYCHAIN_CHUNK_BYTES
+      && !bytes.toString('utf8').startsWith(KEYCHAIN_MANIFEST_PREFIX)) {
+      try {
+        await this.write(ref, bytes)
+        if (!(await this.read(ref))?.equals(bytes)) throw new Error('macOS Keychain credential verification failed')
+      } catch (error) {
+        await this.restore(ref, previous)
+        throw error
+      }
+      // ponytail: committed value wins; add an orphan index only if Keychain cleanup failures need retry.
+      if (previousManifest !== undefined) await this.deleteGeneration(ref, previousManifest).catch(() => undefined)
+      return
+    }
+
+    const next = this.manifest(bytes)
+    const manifestValue = this.manifestValue(next)
+    let manifestAttempted = false
+    try {
+      for (let index = 0; index < next.chunks; index += 1) {
+        await this.write(
+          this.chunkRef(ref, next.generation, index),
+          bytes.subarray(index * KEYCHAIN_CHUNK_BYTES, (index + 1) * KEYCHAIN_CHUNK_BYTES),
+        )
+      }
+      await this.readChunks(ref, next)
+      manifestAttempted = true
+      await this.write(ref, manifestValue)
+      if (!(await this.read(ref))?.equals(manifestValue)) {
+        throw new Error('macOS Keychain credential manifest verification failed')
+      }
+    } catch (error) {
+      const failures: unknown[] = [error]
+      let restored = !manifestAttempted
+      if (manifestAttempted) {
+        try {
+          await this.restore(ref, previous)
+          restored = true
+        } catch (rollbackError) {
+          failures.push(rollbackError)
+        }
+      }
+      if (restored) {
+        try { await this.deleteGeneration(ref, next) } catch (cleanupError) { failures.push(cleanupError) }
+      }
+      if (failures.length > 1) throw new AggregateError(failures, 'macOS Keychain credential rollback failed')
+      throw error
+    }
+    // ponytail: committed value wins; add an orphan index only if Keychain cleanup failures need retry.
+    if (previousManifest !== undefined) await this.deleteGeneration(ref, previousManifest).catch(() => undefined)
   }
 
   async unset(ref: string): Promise<boolean> {
-    const result = await this.run('/usr/bin/security', [
-      'delete-generic-password', '-a', ref, '-s', KEYCHAIN_SERVICE,
-    ])
-    if (result.status === 44) return false
-    if (result.status !== 0) throw new Error('macOS Keychain operation failed')
+    return this.mutate(ref, () => this.unsetUnlocked(ref))
+  }
+
+  private async unsetUnlocked(ref: string): Promise<boolean> {
+    const stored = await this.read(ref)
+    if (stored === undefined) return false
+    const manifest = this.parseManifest(stored)
+    if (!await this.delete(ref)) return false
+    if (manifest !== undefined) await this.deleteGeneration(ref, manifest)
     return true
   }
 }

@@ -22,6 +22,7 @@ import {
   updateModelRouteKey,
   updateTenantUser,
 } from '../src/api.ts';
+import { messagesFor } from '../src/i18n.ts';
 
 const origin = 'https://admin.example.test';
 
@@ -36,6 +37,8 @@ test('admin login reuses the e-Mate dark component theme and logo treatment', ()
   assert.match(css, /grid-template-columns: minmax\(0, 1fr\) auto/);
   assert.match(css, /@media \(max-width: 900px\)[\s\S]*?\.admin-shell\s*{\s*grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(css, /\.admin-tabs,[\s\S]*?overflow: hidden/);
+  assert.match(app, /agreementExempt\(user\.roles\)[\s\S]*?copy\.consentExempt/);
+  assert.equal(messagesFor('zh-CN').consentExempt, '管理员免签');
 });
 
 test('admin API paths must stay on the console origin', () => {

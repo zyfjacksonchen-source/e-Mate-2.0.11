@@ -303,7 +303,7 @@ export function AccountSettings({ callIdentity }: Props) {
       </div>
       <p className={css.note}>
         {state?.authenticated
-          ? `每周 Token 额度 ${state.weekly_token_limit?.toLocaleString('zh-CN') ?? '—'}；${state.agreement_receipt_id ? '首次使用协议已归档。' : '尚无有效协议归档凭证。'}`
+          ? `每周 Token 额度 ${state.weekly_token_limit?.toLocaleString('zh-CN') ?? '—'}；${state.agreement_exempt ? '管理员无需签署用户协议。' : state.agreement_receipt_id ? '首次使用协议已归档。' : '尚无有效协议归档凭证。'}`
           : status ?? '请完成企业登录后再修改密码。'}
       </p>
       {state?.authenticated ? (

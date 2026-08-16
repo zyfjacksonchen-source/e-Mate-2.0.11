@@ -1347,7 +1347,7 @@ const consentProtectedPaths = new Set([
 ]);
 
 async function requireAcceptedConsent(store: ConsentStore | undefined, identity: ModelGatewayPrincipal): Promise<void> {
-  if (identity.roles?.includes('TENANT_ADMIN')) return;
+  if (identity.roles?.some((role) => role === 'TENANT_ADMIN' || role === 'AUDIT_ADMIN')) return;
   if (!store) {
     throw new HttpError(503, 'CONSENT_STORE_UNAVAILABLE', 'Consent status temporarily unavailable');
   }

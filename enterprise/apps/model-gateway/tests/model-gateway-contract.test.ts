@@ -873,11 +873,12 @@ test('blocks every user model capability until the current consent is accepted',
   }
 });
 
-test('tenant administrators use the model catalog without signing the user agreement', async () => {
+test('administrators use the model catalog without signing the user agreement', async () => {
   const server = createModelGatewayServer({
     routes: [route],
-    authenticate: async (token) =>
-      token === sessionToken ? { ...principal('tenant-a', 'admin-a'), roles: ['TENANT_ADMIN'] } : null,
+    authenticate: async (token) => token === sessionToken
+      ? { ...principal('tenant-a', 'admin-a'), roles: ['TENANT_ADMIN'] }
+      : token === otherToken ? { ...principal('tenant-a', 'auditor-a'), roles: ['AUDIT_ADMIN'] } : null,
     consentStore: new InMemoryConsentStore(consentPolicy),
     usageStore: new InMemoryUsageStore(limits),
     usageKeyId: 'usage-2026',
@@ -890,6 +891,7 @@ test('tenant administrators use the model catalog without signing the user agree
   const baseUrl = `http://127.0.0.1:${address.port}`;
   try {
     assert.equal((await fetch(`${baseUrl}/v1/models`, { headers: auth() })).status, 200);
+    assert.equal((await fetch(`${baseUrl}/v1/models`, { headers: auth(otherToken) })).status, 200);
     const consent = (await (
       await fetch(`${baseUrl}/v1/consents/current`, { headers: auth() })
     ).json()) as { required: boolean };

@@ -95,6 +95,10 @@ function userStatusLabel(status: AdminUserStatus, copy: ReturnType<typeof messag
   return copy.deleted;
 }
 
+function agreementExempt(roles: AdminUserRole[]): boolean {
+  return roles.some((role) => role === 'TENANT_ADMIN' || role === 'AUDIT_ADMIN');
+}
+
 export function App() {
   const copy = messagesFor(navigator.language || 'zh-CN');
   const [token, setToken] = useState(() => sessionStorage.getItem(ADMIN_TOKEN_SESSION_KEY) ?? '');
@@ -560,8 +564,10 @@ export function App() {
                         {user.tokenLimit === null ? copy.tokenUnlimited : user.tokenLimit.toLocaleString()}
                       </Tag>
                       <Tag>{copy.allowedModels}：{user.allowedModelIds.length}</Tag>
-                      <Tag color={facts.consentedUserIds.includes(user.userId) ? 'green' : 'gray'}>
-                        {facts.consentedUserIds.includes(user.userId) ? copy.consentSigned : copy.consentUnsigned}
+                      <Tag color={agreementExempt(user.roles) || facts.consentedUserIds.includes(user.userId) ? 'green' : 'gray'}>
+                        {agreementExempt(user.roles)
+                          ? copy.consentExempt
+                          : facts.consentedUserIds.includes(user.userId) ? copy.consentSigned : copy.consentUnsigned}
                       </Tag>
                       <Tag color={user.status === 'ACTIVE' ? 'green' : 'gray'}>
                         {userStatusLabel(user.status, copy)}
