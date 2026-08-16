@@ -1180,3 +1180,18 @@ The text highlights AI hallucination and human verification, legal use, real-act
 
 - 注册表单新增“确认密码”，两次输入必须完全一致才允许提交；不一致时显示中文错误并禁用提交。注册 RPC 与企业身份合同未改变，匹配后仍只发送一个 `password` 字段。
 - 聚焦身份组件回归 9/9、主包构建和 diff check 通过。主代理在全新隔离 profile 的真实 Browser 中验证：`320×800` 与 `390×844` 均有两个密码输入、无横向溢出；不一致时按钮禁用，改为一致并填完其他必填项后按钮可用，全程未提交注册申请。
+
+## 2026-08-16 · S07/S10 验收账号、生改图与图片用量终态闭环
+
+- 验收账号 `emate-v2 / emate-accept-0816-1140` 已使用新密码真实登录；模型选择器回读 Luna、Sol、DeepSeek、Doubao 四个聊天模型，Luna 为默认，Image Pro 继续只由图片能力使用。一次 Luna 短回复的 TTFT 为 2.2 秒、总时长约 2.4 秒、28 tok/s；本地审计 outbox 归零，生产对应 Luna task 为 `FINALIZED`。
+- 首次登录 HTTP 500 的根因不是账号、密码或 Auth，而是 Gateway 重建后 Nginx 仍缓存旧 Docker IP；`/consents/current` 因此返回 502。只重启 Web 容器后上游解析恢复，Gateway/Auth/Analytics/Postgres/Redis 未重启。前后容器收据保存在 `/root/e-mate-bootstrap/20260816T141500Z-web-upstream-dns`。
+- 提交 `7e893d6` 只在现有 `imagegen` Tool/Job 结果中暴露当前 Session 的 `sha256:` attachment ID。主代理随后完成真实生图和自然语言改图：Luna 从上一张 Tool/Job 结果自动取 ID，第二次 Tool 明确携带该 ID，`emate-image-2` 完成并生成新 CAS attachment 与 Harness ImageGallery；没有把 Job ID、provider request ID 或纯生图冒充改图。
+- Host 重启后的第一次图片 Tool 曾在同账号 session refresh 写 Keychain 的窗口误报 policy cache unavailable。提交 `fe6b27f` 仅让同 tenant/user 刷新在两份凭据写完前保留旧内存主体；跨账号和写入失败仍清空。重启后立即自然语言改图已越过原失败点并完成，证明未把企业请求重新塞进模型调用热链。
+- 提交 `e4fbb54` 让图片成功 `complete` 后复用既有 `UsageStore.finalize`；精确 `RECORDED` 重放只补终态且不重发上游，503/未知结果仍保持 reconciliation。生产候选 `e-mate/model-gateway:e-mate-2.0.7-image-finalize-e4fbb54`（镜像 `sha256:a479c679256ba2488e24a678a23f596f22be8302fd5eafe213f61f1fe79baf1f`）激活前 Luna、Sol、DeepSeek、Doubao、Image Pro 五路真实 Smoke 全通过；只重建 Gateway，随后只重启 Web 刷新 Docker DNS，其他服务保持原实例 healthy。
+- 激活后的真实改图 task `image-ed01d1668c46fc120e0dd170fd544521` 在图片返回时即为 `FINALIZED`，Usage 面板同时显示该图片 `ACCOUNTED`；本轮修复前产生且满足“Image Pro、0 PREPARED、1 attempt”的两条 task `image-a70c...`、`image-5eb1...` 经所属用户鉴权的现有 `/v1/usage/:taskId` 精确终结。更早的正常聚合、Provider pending 与图片历史任务全部保持未修改。Usage 四项对账差异均为 0；root-only 收据为 `/root/e-mate-bootstrap/20260816T144149Z-image-finalize-e4fbb54`。
+
+## 2026-08-16 · S07 Usage 面板退出与会话撤销闭环
+
+- 生产实测发现旧 Usage 面板退出只清访问令牌，未保存或提交 Auth Gateway 的 refresh token，因此不能撤销服务端会话。提交 `069068d` 复用现有 `/v1/auth/logout`：登录只在当前标签页保存 access/refresh token；退出先同步清除两者并返回登录页，再用既有 `clientId + refreshToken + clientRequestId` 合同撤销会话；401 同样清除两类令牌。没有新增身份服务、Cookie、Router 或持久登录层。
+- `@e-mate/usage-dashboard` 类型检查、14/14 测试和生产构建通过。制品 SHA-256 为 `9d760c6ee9983ec14635ccc1a906a93a79d53471c6051feb7cfa56584d03e766`，公网 alias 原子切到 `/srv/ecorex-agent-usage-panel/releases/usage-2.0.7-logout-069068d`，实际脚本为 `index-BzUbJnBX.js`；旧 release 保留可回退，root-only 制品位于 `/root/e-mate-bootstrap/20260816T150000Z-usage-logout-069068d/usage-dashboard.tgz`。
+- 主代理用真实管理员完成“登录 → 退出 → 刷新仍为登录页 → 重新登录”闭环；Nginx 访问日志同时记录 `POST /auth-api/v1/auth/logout` 为 HTTP 200。浏览器未读写或输出 refresh token，生产账号密码未进入源码、Git、命令参数或日志。

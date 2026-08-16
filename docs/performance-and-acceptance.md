@@ -125,7 +125,9 @@ Each run stores the starting database/snapshot identity, exact test data, screen
 - macOS arm64 本地安装、受管 profile、登录/注册/审批/协议、管理员免签、改密后旧租约失效与新密码重新登录。
 - Luna 默认模型、Luna/Sol 同一会话切换与上下文连续；生产直连后 Luna 短回复 TTFT 中位数 4.074 秒，Sol 样本 2.807 秒。
 - 生产五路上游 Model Smoke：Luna、Sol、DeepSeek、Doubao、`gpt-image-2-pro`。
+- 验收账号重新登录后真实回读 Luna、Sol、DeepSeek、Doubao 四个聊天模型和 Image Pro 图片能力，Luna 保持默认；单次生图、基于上一张 Session attachment 的自然语言改图、Harness Job、CAS Attachment 与 ImageGallery 均通过。重启后立即改图也通过，不再出现同账号刷新窗口的策略缓存误报。
 - 本地真实 Usage outbox 到生产账本：一条 15,040 Token 事实成功入账，重复上送返回相同 receipt 且不重复计数；服务端现只对 `auditreceipt_` task 强制终态。历史 21 条旁路 task 已原子补齐 deterministic usage ID 并全部转为 `FINALIZED`，0 条 audit task 留在 `ACCUMULATING`；18 条正常聚合/Provider pending task 未被误改。
+- 新 Luna 审计 task 首次写入即为 `FINALIZED`；图片成功调用也已在响应前终结，生产新图片 task `image-ed01...` 同时在 Usage 明细显示 `ACCOUNTED`。只精确补齐本轮修复前的两条已知图片 task，其他旧任务未批量修改；四项对账差异继续为 0。
 - Harness 真实任务事件到生产任务账本：一个无工具 Luna turn 精确产生 `RECEIVED / FIRST_RESPONSE / COMPLETED` 各 1 条，本地 outbox 为 3 delivered / 0 pending，生产管理员事件次数为 3、`GENERAL` 任务为 1；Host 重启回放后生产计数不变，Usage 面板逐项显示且四项对账差异仍为 0。
 - 管理端与 Usage 面板真实管理员登录、用户审批/额度/模型策略/协议状态、Luna 联通测试、明暗主题和退出登录。
 - 图片上游生成/编辑与并发阶梯：并发 2、4 稳定；并发 8 为 5/8 成功并出现 3 次 429，因此 2.0.7 的已测稳定上限固定为 4，不再重复烧并发 8。
@@ -134,8 +136,6 @@ Each run stores the starting database/snapshot identity, exact test data, screen
 
 | 优先级 | 项目 | 当前真实状态 / 关闭条件 |
 |---|---|---|
-| P0 | 验收用户五模型与生/改图全链 | 策略已修为 Luna、Sol、DeepSeek、Doubao、Image Pro，但旧 lease 已撤销；需重新登录后完成 image Tool → Job → Attachment → 画廊、改图、并发 2/4，并与 Audit/Usage 对账。 |
-| P0 | 部署后旁路审计终态 | 历史 21 条 audit task 已修复，Gateway/Analytics 已激活提交 `f9c50fe`；仍需验收用户重新登录，执行一条新 Luna turn，证明新 task 首次写入即为 `FINALIZED`、deterministic usage ID/attempt/invocation 对齐且 Usage 四项差异继续为 0。旧口径的 MATCHED 不能替代本项。 |
 | P0 | Office 四类文档 | 当前规范化插件因无可合法随包分发的执行层而失败关闭；DOCX/XLSX/PPTX/PDF 创建、读取、编辑、导出、重开均未真实通过。 |
 | P0 | Browser / Computer Use | macOS Ego Browser 与 Windows Playwright MCP + 系统 Edge 均为 `setup-required`；尚无会话隔离、权限、下载、清理和 Browser Panel 的真实证据。 |
 | P0 | Vision / OCR | rc.5 缺少企业多模态策略 seam，插件仅返回阻塞状态；没有真实 OCR 或视觉工具结果。 |
