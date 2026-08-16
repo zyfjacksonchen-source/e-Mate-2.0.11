@@ -244,6 +244,8 @@ function createAuditService(ctx, bindingsTable, outboxTable, auditProvider) {
         }
         outbox.set(record.fact_id, delivered)
         await outboxTable.put(record.fact_id, delivered)
+        await Promise.resolve(ctx.emateModelPolicy.markAuditDelivered?.(record.fact_id, receipt.accepted_at))
+          .catch(error => ctx.logger?.warn?.(`e-Mate local quota audit reconciliation failed: ${errorCode(error)}`))
       }
       return { ...status(), delivered_now: pending.length, provider_ready: true }
     } catch (error) {

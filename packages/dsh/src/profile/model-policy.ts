@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { loadTargetStorageDomain } from './target-runtime.js'
 
@@ -18,6 +18,8 @@ const SUBJECT = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/u
 const RECEIPT = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,255}$/u
 const MAX_VALIDITY_MS = 32 * 24 * 60 * 60 * 1_000
 const REFRESH_MS = 30_000
+const WEEK_MS = 7 * 24 * 60 * 60 * 1_000
+const UNLIMITED = Number.MAX_SAFE_INTEGER
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -29,6 +31,262 @@ function canonicalJson(value) {
     return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
   }
   return JSON.stringify(value)
+}
+
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function usageBuckets(value) {
+  if (!isRecord(value)) return undefined
+  const buckets = {
+    input_tokens: value.inputTokens,
+    output_tokens: value.outputTokens,
+    cache_read_tokens: value.cacheReadTokens ?? 0,
+    cache_write_tokens: value.cacheWriteTokens ?? 0,
+  }
+  if (Object.values(buckets).some(token => !Number.isSafeInteger(token) || token < 0)) return undefined
+  const total_tokens = Object.values(buckets).reduce((total, token) => total + token, 0)
+  return Number.isSafeInteger(total_tokens) && total_tokens > 0 ? { ...buckets, total_tokens } : undefined
+}
+
+function quotaFactId(sessionId, seq) {
+  const sessionIdSha256 = sha256(String(sessionId))
+  return `auditfact_${sha256(`e-Mate audit v1\0harness:${sessionIdSha256}:${seq}`)}`
+}
+
+export function createQuotaService(ctx, snapshotsTable, reservationsTable, usageTable, now = Date.now) {
+  const snapshots = new Map(snapshotsTable.entries())
+  const reservations = new Map(reservationsTable.entries())
+  const usage = new Map(usageTable.entries())
+  const armed = new Map()
+  const warnedWeeks = new Set()
+  let queued = Promise.resolve()
+
+  const enqueue = operation => {
+    const result = queued.then(operation, operation)
+    queued = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  const activeSnapshot = (subject, at = now()) => {
+    const snapshot = snapshots.get(subject)
+    if (snapshot === undefined
+      || snapshot.account_subject !== subject
+      || Date.parse(snapshot.week_started_at) > at
+      || at >= Date.parse(snapshot.week_started_at) + WEEK_MS
+      || at >= Date.parse(snapshot.lease_expires_at)) {
+      throw new Error('e-Mate local weekly quota snapshot is unavailable or expired')
+    }
+    return snapshot
+  }
+
+  const localTokens = snapshot => [...usage.values()]
+    .filter(record => record.account_subject === snapshot.account_subject
+      && record.week_started_at === snapshot.week_started_at
+      && !(record.audit_delivered_at !== undefined
+        && Date.parse(record.audit_delivered_at) <= Date.parse(snapshot.calculated_at)))
+    .reduce((total, record) => total + record.total_tokens, 0)
+
+  const activeReservation = snapshot => [...reservations.values()].find(record =>
+    record.account_subject === snapshot.account_subject
+      && record.week_started_at === snapshot.week_started_at
+      && ![...usage.values()].some(entry => entry.reservation_id === record.reservation_id))
+
+  const refresh = async policy => {
+    const state = await ctx.emateIdentity.state()
+    if (!isRecord(state)
+      || state.authenticated !== true
+      || state.workspace_unlocked !== true
+      || state.account_subject !== policy.account_subject
+      || !Number.isSafeInteger(state.weekly_token_limit)
+      || state.weekly_token_limit < 1) {
+      throw new Error('e-Mate local weekly quota account binding is invalid')
+    }
+    const projection = await ctx.emateIdentity.usage('UTC')
+    const weekStartedAt = Date.parse(projection?.week_started_at)
+    const calculatedAt = Date.parse(projection?.calculated_at)
+    const leaseExpiresAt = Date.parse(policy.expires_at)
+    if (!isRecord(projection)
+      || projection.schema_version !== 1
+      || projection.scope !== 'account'
+      || projection.timezone !== 'UTC'
+      || !isRecord(projection.week)
+      || !Number.isSafeInteger(projection.week.total_tokens)
+      || projection.week.total_tokens < 0
+      || !Number.isFinite(weekStartedAt)
+      || !Number.isFinite(calculatedAt)
+      || !Number.isFinite(leaseExpiresAt)
+      || calculatedAt < weekStartedAt
+      || calculatedAt >= weekStartedAt + WEEK_MS
+      || leaseExpiresAt <= now()) {
+      throw new Error('e-Mate local weekly quota projection is invalid')
+    }
+    const snapshot = {
+      schema_version: 1,
+      account_subject: policy.account_subject,
+      week_started_at: new Date(weekStartedAt).toISOString(),
+      calculated_at: new Date(calculatedAt).toISOString(),
+      lease_expires_at: new Date(leaseExpiresAt).toISOString(),
+      weekly_token_limit: state.weekly_token_limit,
+      enterprise_total_tokens: projection.week.total_tokens,
+    }
+    return enqueue(async () => {
+      const current = snapshots.get(snapshot.account_subject)
+      if (current !== undefined && Date.parse(current.calculated_at) > calculatedAt) return current
+      await snapshotsTable.put(snapshot.account_subject, snapshot)
+      snapshots.set(snapshot.account_subject, snapshot)
+      return snapshot
+    })
+  }
+
+  const armRequest = (payload, request) => {
+    const sessionId = payload?.agent?.id
+    if (typeof sessionId !== 'string' || sessionId.length < 1
+      || !Number.isSafeInteger(payload?.turn) || payload.turn < 1
+      || !Number.isSafeInteger(payload?.step) || payload.step < 1) return
+    armed.set(sessionId, {
+      session_id_sha256: sha256(sessionId),
+      turn: payload.turn,
+      step: payload.step,
+      provider: request.provider,
+      model: request.model,
+    })
+  }
+
+  const admit = options => enqueue(async () => {
+    const scope = typeof options?.sessionId === 'string' ? armed.get(options.sessionId) : undefined
+    if (scope === undefined || scope.provider !== options.provider || scope.model !== options.model) return undefined
+    armed.delete(options.sessionId)
+    const subject = ctx.emateIdentity.localAccountSubject?.()
+    if (typeof subject !== 'string') throw new Error('e-Mate local weekly quota requires an authenticated account')
+    const snapshot = activeSnapshot(subject)
+    if (snapshot.weekly_token_limit === UNLIMITED) return { unlimited: true }
+    if (activeReservation(snapshot) !== undefined) {
+      throw new Error('e-Mate local weekly quota has an unsettled request; wait for it to finish')
+    }
+    const used = snapshot.enterprise_total_tokens + localTokens(snapshot)
+    if (!Number.isSafeInteger(used) || used >= snapshot.weekly_token_limit) {
+      throw new Error('e-Mate weekly Token allowance is exhausted')
+    }
+    const warningKey = `${snapshot.account_subject}\0${snapshot.week_started_at}`
+    if (!warnedWeeks.has(warningKey)) {
+      warnedWeeks.add(warningKey)
+      ctx.logger?.warn?.('e-Mate finite weekly quota permits one in-flight request; one real request may exceed its remaining allowance')
+    }
+    const reservation = {
+      schema_version: 1,
+      reservation_id: `quota_${randomUUID()}`,
+      account_subject: subject,
+      week_started_at: snapshot.week_started_at,
+      session_id_sha256: scope.session_id_sha256,
+      turn: scope.turn,
+      step: scope.step,
+      provider: scope.provider,
+      model: scope.model,
+      reserved_tokens: snapshot.weekly_token_limit - used,
+      created_at: new Date(now()).toISOString(),
+    }
+    await reservationsTable.put(reservation.reservation_id, reservation)
+    reservations.set(reservation.reservation_id, reservation)
+    return { reservation_id: reservation.reservation_id }
+  })
+
+  const finish = (handle, chunkUsage, reason) => {
+    if (handle === undefined || handle.unlimited === true) return Promise.resolve()
+    return enqueue(async () => {
+      const reservation = reservations.get(handle.reservation_id)
+      if (reservation === undefined) return
+      if (reason === 'error' || reason === 'aborted') {
+        await reservationsTable.delete(reservation.reservation_id)
+        reservations.delete(reservation.reservation_id)
+        return
+      }
+      const buckets = usageBuckets(chunkUsage)
+      if (buckets === undefined || !['stop', 'tool-calls', 'max-tokens'].includes(reason)) return
+      const terminal = {
+        ...reservation,
+        terminal_usage: buckets,
+        terminal_at: new Date(now()).toISOString(),
+      }
+      await reservationsTable.put(reservation.reservation_id, terminal)
+      reservations.set(reservation.reservation_id, terminal)
+    })
+  }
+
+  const captureEvent = (sessionId, event) => {
+    if (event?.type !== 'assistant/message' || !isRecord(event.data?.usage)) return Promise.resolve()
+    return enqueue(async () => {
+      const buckets = usageBuckets(event.data.usage)
+      const provider = event.data?.message?.source?.provider
+      const model = event.data?.message?.source?.model
+      if (buckets === undefined || typeof provider !== 'string' || typeof model !== 'string') return
+      const factId = quotaFactId(sessionId, event.seq)
+      const existing = usage.get(factId)
+      if (existing !== undefined) return
+      const sessionIdSha256 = sha256(String(sessionId))
+      const reservation = [...reservations.values()].find(record =>
+        record.session_id_sha256 === sessionIdSha256
+          && record.turn === event.data.turn
+          && record.step === event.data.step
+          && record.provider === provider
+          && record.model === model
+          && canonicalJson(record.terminal_usage) === canonicalJson(buckets))
+      if (reservation === undefined) {
+        ctx.logger?.warn?.(`e-Mate local weekly quota could not reconcile usage: ${factId.slice(-16)}`)
+        return
+      }
+      const record = {
+        schema_version: 1,
+        fact_id: factId,
+        reservation_id: reservation.reservation_id,
+        account_subject: reservation.account_subject,
+        week_started_at: reservation.week_started_at,
+        total_tokens: buckets.total_tokens,
+        occurred_at: new Date(event.time).toISOString(),
+      }
+      // Usage lands first. A crash before reservation deletion is conservative:
+      // the reservation is ignored once its linked real usage record exists.
+      await usageTable.put(factId, record)
+      usage.set(factId, record)
+      await reservationsTable.delete(reservation.reservation_id)
+      reservations.delete(reservation.reservation_id)
+    })
+  }
+
+  const markAuditDelivered = (factId, acceptedAt) => enqueue(async () => {
+    const record = usage.get(factId)
+    if (record === undefined || !Number.isFinite(Date.parse(acceptedAt))) return
+    const delivered = { ...record, audit_delivered_at: new Date(Date.parse(acceptedAt)).toISOString() }
+    await usageTable.put(factId, delivered)
+    usage.set(factId, delivered)
+  })
+
+  return {
+    refresh,
+    armRequest,
+    admit,
+    finish,
+    captureEvent,
+    markAuditDelivered,
+    drain: () => queued,
+    status() {
+      const subject = ctx.emateIdentity.localAccountSubject?.()
+      if (typeof subject !== 'string') return { ready: false }
+      try {
+        const snapshot = activeSnapshot(subject)
+        return {
+          ready: true,
+          unlimited: snapshot.weekly_token_limit === UNLIMITED,
+          enterprise_tokens: snapshot.enterprise_total_tokens,
+          local_tokens: localTokens(snapshot),
+          reservations: activeReservation(snapshot) === undefined ? 0 : 1,
+        }
+      } catch {
+        return { ready: false }
+      }
+    },
+  }
 }
 
 function publicPolicy(policy) {
@@ -214,7 +472,7 @@ async function projectRuntimeModels(ctx, models) {
     .map(ref => ctx.credentials.unset(ref)))
 }
 
-function createService(ctx, table) {
+function createService(ctx, table, quota) {
   let cached = [...table.entries()].find(([key]) => key === 'active')?.[1]
   let runtimeReady = typeof ctx.emateIdentity.modelRuntimePolicy !== 'function' || hasNativeRuntimeProjection(ctx)
   let lastRefresh = 0
@@ -258,6 +516,7 @@ function createService(ctx, table) {
           ? await ctx.emateIdentity.modelRuntimePolicy()
           : { policy: await ctx.emateIdentity.modelPolicy() }
         const policy = validateModelPolicy(runtime.policy, state.account_subject, now)
+        await quota.refresh(policy)
         if (runtime.models !== undefined) {
           await projectRuntimeModels(ctx, runtime.models)
           runtimeReady = true
@@ -314,6 +573,7 @@ function createService(ctx, table) {
       if (!allowed(policy, model)) throw new Error(`Model "${model}" is not allowed by the current e-Mate policy.`)
       return publicPolicy(policy)
     },
+    markAuditDelivered: quota.markAuditDelivered,
   }
 }
 
@@ -421,18 +681,88 @@ export async function apply(ctx, config = {}) {
     tables: { active: domainTable(policyRecord) },
   }))
   ctx.effect(() => () => domain.close(), 'emate.modelPolicy: close target storage domain')
-  const service = createService(ctx, domain.table('active'))
+  const quotaSnapshot = z.object({
+    schema_version: z.literal(1),
+    account_subject: z.string().regex(SUBJECT),
+    week_started_at: z.iso.datetime(),
+    calculated_at: z.iso.datetime(),
+    lease_expires_at: z.iso.datetime(),
+    weekly_token_limit: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    enterprise_total_tokens: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  })
+  const quotaReservation = z.object({
+    schema_version: z.literal(1),
+    reservation_id: z.string().regex(/^quota_[0-9a-f-]{36}$/u),
+    account_subject: z.string().regex(SUBJECT),
+    week_started_at: z.iso.datetime(),
+    session_id_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    turn: z.number().int().min(1),
+    step: z.number().int().min(1),
+    provider: z.string().min(1).max(256),
+    model: z.string().min(1).max(256),
+    reserved_tokens: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    created_at: z.iso.datetime(),
+    terminal_usage: z.json().optional(),
+    terminal_at: z.iso.datetime().optional(),
+  })
+  const quotaUsage = z.object({
+    schema_version: z.literal(1),
+    fact_id: z.string().regex(/^auditfact_[0-9a-f]{64}$/u),
+    reservation_id: z.string().regex(/^quota_[0-9a-f-]{36}$/u),
+    account_subject: z.string().regex(SUBJECT),
+    week_started_at: z.iso.datetime(),
+    total_tokens: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    occurred_at: z.iso.datetime(),
+    audit_delivered_at: z.iso.datetime().optional(),
+  })
+  const quotaDomain = await ctx.storageDomain.open(defineDomain({
+    name: 'emate_weekly_quota',
+    version: 1,
+    tables: {
+      snapshots: domainTable(quotaSnapshot),
+      reservations: domainTable(quotaReservation),
+      usage: domainTable(quotaUsage),
+    },
+  }))
+  ctx.effect(() => () => quotaDomain.close(), 'emate.modelPolicy: close weekly quota storage domain')
+  const quota = createQuotaService(
+    ctx,
+    quotaDomain.table('snapshots'),
+    quotaDomain.table('reservations'),
+    quotaDomain.table('usage'),
+  )
+  const service = createService(ctx, domain.table('active'), quota)
   ctx.provide('emateModelPolicy', service)
   ctx.effect(() => installApiPolicy(ctx, service), 'emate.modelPolicy: target ApiProxy policy projection')
-  ctx.on('agent/request', async (_payload, next) => {
+  ctx.on('agent/request', async (payload, next) => {
     const request = await next()
     await service.assertModel(request.model)
+    quota.armRequest(payload, request)
     return request
   })
   ctx.on('llm/stream', (options, next) => (async function* () {
     await service.assertModel(options.model)
-    yield* next()
+    const reservation = await quota.admit(options)
+    let terminal
+    let realUsage
+    try {
+      for await (const chunk of next()) {
+        if (chunk?.type === 'usage') realUsage = chunk.usage
+        if (chunk?.type === 'finish') terminal = chunk.reason?.kind
+        yield chunk
+      }
+    } catch (error) {
+      try {
+        await quota.finish(reservation, undefined, options.signal?.aborted ? 'aborted' : 'error')
+      } catch {
+        ctx.logger?.warn?.('e-Mate local weekly quota failed to release an errored request')
+      }
+      throw error
+    }
+    await quota.finish(reservation, realUsage, terminal)
   })())
+  ctx.on('session/event', (session, event) => { void quota.captureEvent(session.id, event) })
+  ctx.on('session/flush', () => quota.drain())
   ctx.effect(() => ctx.connection.rpc.handle(
     MODEL_POLICY_CHANNEL,
     async (endpoint, payload) => {

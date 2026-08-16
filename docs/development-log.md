@@ -1054,3 +1054,11 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 唯一保留的消息视觉例外是图片画廊：辅助节点只匹配真实 append `assistant/message` 图片块，只切换同一 target ImageGallery DOM 的 hidden 状态；图片加载、鉴权、重试和 Lightbox 仍由目标 renderer 负责。`dsh-genui` 的 bundle、patch、`render_ui`/`validate_dsh_ui` Tool 和 client renderer 无代码差异，并有静态注册回归。
 - 主代理在既有真实账号和持久 Session 上复验：自定义 Activity/Retry/LongText 节点计数为 0，目标 Think disclosure 原位展开，消息复制/反馈/分支动作保持目标实现，禁用 trajectory 后无可见 Inspect；点击折叠后的 computed outline style 为 `none`、box-shadow 为 `none`，没有红/蓝框。品牌相关目标色 Token 继续投影为 e-Mate 橙色。
 - 主包完整测试为 Node 47/47、shell 31/31，`@e-mate/dsh` build、target pin 和 diff check 均通过。主代理截图为 `artifacts/design-qa/S03-target-message-stream-main/target-native-message-stream-no-focus-ring.png`。旧日志中的原型活动组、重试链和长文本视觉验收仅是历史证据，已被本次最终产品决策取代。
+
+## 2026-08-16 · S07 原生直连后的本地周额度候选
+
+- 企业端继续只下发账号、周额度、模型策略和运行配置，不进入 Harness 原生 `llm-pi-ai` 推理热链。现有模型策略后台刷新同时取得权威 UTC 周用量快照，并按账号、策略租约和周起点写入本地 `StorageDomain`；有效快照可离线继续使用，过期、跨周或账号切换均失败关闭。
+- 有限额度账号在真实 `agent/request` 与 `llm/stream` 之间持久预留当前剩余额度；同一账号同一周最多一个未结算聊天请求，因此消除本地并发超额。终态只读取真实 Harness usage chunk，并在对应持久 `assistant/message` 事件出现后以与审计 outbox 相同的 `fact_id` 结算；重复事件不重复计数，审计回执与更新后的企业快照用于排除已纳入服务端账本的本地事实。
+- 弱网、Abort 或下游流抛错会释放当前预留并原样透传错误，让目标原生重试继续工作；若本地持久清理自身失败则保留预留并失败关闭。进程崩溃或正常结束但缺少真实 finish chunk 时也保留预留，避免猜测用量。不限额度账号不建预留并保持并发。
+- 当前合同只能消除并发超额，不能阻止单个真实请求超过请求开始时的剩余额度；这是明确的 best-effort 单请求上限，不冒充严格硬配额。若发布要求零超额，仍需上游支持单请求精确 Token 上限或每用户 Provider 额度，保持发布阻塞。
+- 主包验证为 Node 48/48、shell 31/31，构建与 diff check 通过；覆盖并发预留、真实终态结算、重复事件、重启、周切换、账号隔离、离线租约、不限额、弱网异常释放和审计回执对账。前一候选提交的 CI 与 Release run 均成功，三平台干净 npm 安装已通过；本切片合入后必须重新运行同一门禁。

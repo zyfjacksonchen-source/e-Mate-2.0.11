@@ -197,6 +197,12 @@ export function apply(ctx, config = {}) {
       }
       return config.identityProvider.modelRuntimePolicy()
     },
+    async usage(timezone = 'UTC') {
+      if (typeof config.identityProvider?.usage !== 'function') {
+        throw new Error('e-Mate enterprise usage projection is unavailable')
+      }
+      return accountUsage(await config.identityProvider.usage(timezone), timezone)
+    },
   })
   ctx.effect(() => ctx.connection.rpc.handle(
     IDENTITY_CHANNEL,

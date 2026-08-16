@@ -37,7 +37,12 @@ import {
   createOsCredentialBackend,
 } from '../profile/plugins/credentials-os.js'
 import { apply as applyImageGeneration } from '../profile/plugins/image-generation.js'
-import { apply as applyModelPolicy, MODEL_POLICY_CHANNEL, validateModelPolicy } from '../profile/plugins/model-policy.js'
+import {
+  apply as applyModelPolicy,
+  createQuotaService,
+  MODEL_POLICY_CHANNEL,
+  validateModelPolicy,
+} from '../profile/plugins/model-policy.js'
 import { apply as applyAudit, AUDIT_CHANNEL, createUsageFact } from '../profile/plugins/audit.js'
 import { apply as applyShell } from '../profile/plugins/emate-shell/index.js'
 import {
@@ -1819,7 +1824,17 @@ test('enterprise model switch delegates to the target session, keeps its history
     entries: () => records.entries(),
     put: async (key, value) => { records.set(key, structuredClone(value)) },
   }
+  const quotaRecords = { snapshots: new Map(), reservations: new Map(), usage: new Map() }
   const domain = { table: name => name === 'active' ? table : undefined, close: async () => {} }
+  const quotaDomain = {
+    table: name => ({
+      entries: () => quotaRecords[name].entries(),
+      put: async (key, value) => { quotaRecords[name].set(key, structuredClone(value)) },
+      delete: async key => quotaRecords[name].delete(key),
+    }),
+    close: async () => {},
+  }
+  let openedDomains = 0
   const calls = { selected: [], policy: 0 }
   const credentialValues = new Map()
   let llmSettings = {
@@ -1844,6 +1859,7 @@ test('enterprise model switch delegates to the target session, keeps its history
   let rpc
   let requestPolicy
   let streamPolicy
+  const modelPolicyHandlers = new Map()
   let modelPolicy
   const now = Date.now()
   const policy = () => ({
@@ -1913,10 +1929,28 @@ test('enterprise model switch delegates to the target session, keeps its history
           llmSettings = structuredClone(value)
         },
       },
-      storageDomain: { open: async () => domain },
+      storageDomain: { open: async () => openedDomains++ === 0 ? domain : quotaDomain },
       emateIdentity: {
         localAccountSubject: () => accountSubject,
-        state: async () => ({ authenticated: true, workspace_unlocked: true, account_subject: accountSubject }),
+        state: async () => ({
+          authenticated: true,
+          workspace_unlocked: true,
+          account_subject: accountSubject,
+          weekly_token_limit: 100_000,
+        }),
+        usage: async timezone => {
+          const date = new Date(now)
+          date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7))
+          date.setUTCHours(0, 0, 0, 0)
+          return {
+            schema_version: 1,
+            scope: 'account',
+            timezone,
+            week: { total_tokens: 48_855 },
+            week_started_at: date.toISOString(),
+            calculated_at: new Date(now).toISOString(),
+          }
+        },
         modelRuntimePolicy: async () => {
           calls.policy += 1
           if (!providerAvailable) throw new Error('enterprise unavailable')
@@ -1978,6 +2012,7 @@ test('enterprise model switch delegates to the target session, keeps its history
       on: (event, handler) => {
         if (event === 'agent/request') requestPolicy = handler
         else if (event === 'llm/stream') streamPolicy = handler
+        else if (event === 'session/event' || event === 'session/flush') modelPolicyHandlers.set(event, handler)
         else assert.fail(`unexpected model policy event ${event}`)
         return () => {}
       },
@@ -2039,7 +2074,7 @@ test('enterprise model switch delegates to the target session, keeps its history
     assert.ok(calls.selected.every(call => call.sessionId === 'session-1'))
     const policyCallsBeforeHotPath = calls.policy
     assert.deepEqual(
-      await requestPolicy({}, async () => structuredClone(session.current)),
+      await requestPolicy({ agent: { id: 'session-1' }, turn: 1, step: 1 }, async () => structuredClone(session.current)),
       session.current,
     )
     await assert.rejects(
@@ -2050,13 +2085,60 @@ test('enterprise model switch delegates to the target session, keeps its history
       await requestPolicy({}, async () => ({ provider: 'e-mate-enterprise-deepseek', model: 'deepseek-v4-flash' })),
       { provider: 'e-mate-enterprise-deepseek', model: 'deepseek-v4-flash' },
     )
+    await requestPolicy(
+      { agent: { id: 'session-1' }, turn: 1, step: 1 },
+      async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' }),
+    )
     const streamed = []
     for await (const chunk of streamPolicy(
-      { provider: 'enterprise', model: 'gpt-5.6-luna' },
-      () => (async function* () { yield 'ok' })(),
+      { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', sessionId: 'session-1' },
+      () => (async function* () {
+        yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 2 } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      })(),
     )) streamed.push(chunk)
-    assert.deepEqual(streamed, ['ok'])
+    assert.deepEqual(streamed.map(chunk => chunk.type), ['usage', 'finish'])
     assert.equal(calls.policy, policyCallsBeforeHotPath)
+    modelPolicyHandlers.get('session/event')({ id: 'session-1' }, {
+      type: 'assistant/message',
+      seq: 9,
+      time: now,
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          source: { kind: 'model', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+        },
+        usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 2 },
+      },
+    })
+    await modelPolicyHandlers.get('session/flush')()
+    assert.equal(quotaRecords.usage.size, 1)
+    assert.equal(quotaRecords.reservations.size, 0)
+
+    await requestPolicy(
+      { agent: { id: 'session-throw' }, turn: 1, step: 1 },
+      async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' }),
+    )
+    const streamFailure = new Error('real downstream stream failure')
+    await assert.rejects(async () => {
+      for await (const _chunk of streamPolicy(
+        { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', sessionId: 'session-throw' },
+        () => (async function* () { throw streamFailure })(),
+      )) {}
+    }, error => error === streamFailure)
+    assert.equal(quotaRecords.reservations.size, 0)
+
+    await requestPolicy(
+      { agent: { id: 'session-no-finish' }, turn: 1, step: 1 },
+      async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' }),
+    )
+    for await (const _chunk of streamPolicy(
+      { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', sessionId: 'session-no-finish' },
+      () => (async function* () { yield { type: 'text-delta', index: 0, text: 'partial' } })(),
+    )) {}
+    assert.equal(quotaRecords.reservations.size, 1)
+
     await assert.rejects(async () => {
       for await (const _chunk of streamPolicy(
         { provider: 'e-mate-enterprise', model: 'unknown-native-model' },
@@ -2087,12 +2169,170 @@ test('enterprise model switch delegates to the target session, keeps its history
   }
 })
 
+test('local weekly quota serializes finite accounts and settles only real terminal Harness usage', async () => {
+  const monday = new Date()
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7))
+  monday.setUTCHours(0, 0, 0, 0)
+  let clock = monday.getTime() + 24 * 60 * 60_000
+  let subject = 'account:quota-207'
+  let limit = 100
+  let enterpriseTokens = 90
+  let calculatedAt = clock
+  let usageAvailable = true
+  const records = { snapshots: new Map(), reservations: new Map(), usage: new Map() }
+  const table = name => ({
+    entries: () => records[name].entries(),
+    put: async (key, value) => { records[name].set(key, structuredClone(value)) },
+    delete: async key => records[name].delete(key),
+  })
+  const warnings = []
+  const identity = {
+    localAccountSubject: () => subject,
+    state: async () => ({
+      authenticated: true,
+      workspace_unlocked: true,
+      account_subject: subject,
+      weekly_token_limit: limit,
+    }),
+    usage: async timezone => {
+      if (!usageAvailable) throw new Error('enterprise unavailable')
+      return {
+        schema_version: 1,
+        scope: 'account',
+        timezone,
+        week: { total_tokens: enterpriseTokens },
+        week_started_at: monday.toISOString(),
+        calculated_at: new Date(calculatedAt).toISOString(),
+      }
+    },
+  }
+  const service = () => createQuotaService(
+    { emateIdentity: identity, logger: { warn: message => warnings.push(message) } },
+    table('snapshots'),
+    table('reservations'),
+    table('usage'),
+    () => clock,
+  )
+  const quota = service()
+  const policy = () => ({
+    account_subject: subject,
+    expires_at: new Date(monday.getTime() + 7 * 24 * 60 * 60_000).toISOString(),
+  })
+  const arm = (target, turn = 1, step = 1) => quota.armRequest(
+    { agent: { id: target }, turn, step },
+    { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+  )
+  const options = target => ({
+    sessionId: target,
+    provider: 'e-mate-enterprise',
+    model: 'gpt-5.6-luna',
+  })
+
+  await quota.refresh(policy())
+  arm('quota-session-1')
+  const failed = await quota.admit(options('quota-session-1'))
+  assert.equal(records.reservations.values().next().value.reserved_tokens, 10)
+  arm('quota-session-2')
+  await assert.rejects(quota.admit(options('quota-session-2')), /unsettled request/)
+  await quota.finish(failed, undefined, 'error')
+  assert.equal(records.reservations.size, 0)
+
+  arm('quota-session-3')
+  const completed = await quota.admit(options('quota-session-3'))
+  const realUsage = { inputTokens: 2, outputTokens: 3 }
+  await quota.finish(completed, realUsage, 'stop')
+  const event = {
+    type: 'assistant/message',
+    seq: 7,
+    time: clock,
+    data: {
+      turn: 1,
+      step: 1,
+      message: { source: { kind: 'model', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' } },
+      usage: realUsage,
+    },
+  }
+  await quota.captureEvent('quota-session-3', event)
+  await quota.captureEvent('quota-session-3', structuredClone(event))
+  assert.equal(records.usage.size, 1)
+  assert.equal(records.reservations.size, 0)
+  assert.deepEqual(quota.status(), {
+    ready: true,
+    unlimited: false,
+    enterprise_tokens: 90,
+    local_tokens: 5,
+    reservations: 0,
+  })
+
+  const factId = records.usage.keys().next().value
+  await quota.markAuditDelivered(factId, new Date(clock).toISOString())
+  clock += 1
+  calculatedAt = clock
+  enterpriseTokens = 95
+  await quota.refresh(policy())
+  assert.equal(quota.status().local_tokens, 0)
+
+  usageAvailable = false
+  arm('quota-session-offline')
+  const orphan = await quota.admit(options('quota-session-offline'))
+  const restarted = service()
+  restarted.armRequest(
+    { agent: { id: 'quota-session-restart' }, turn: 1, step: 1 },
+    { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+  )
+  await assert.rejects(
+    restarted.admit(options('quota-session-restart')),
+    /unsettled request/,
+  )
+  await restarted.finish(orphan, undefined, 'aborted')
+  assert.equal(records.reservations.size, 0)
+
+  usageAvailable = true
+  enterpriseTokens = 100
+  calculatedAt = ++clock
+  await restarted.refresh(policy())
+  restarted.armRequest(
+    { agent: { id: 'quota-session-exhausted' }, turn: 1, step: 1 },
+    { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+  )
+  await assert.rejects(
+    restarted.admit(options('quota-session-exhausted')),
+    /allowance is exhausted/,
+  )
+
+  subject = 'account:other-207'
+  assert.deepEqual(restarted.status(), { ready: false })
+  subject = 'account:unlimited-207'
+  limit = Number.MAX_SAFE_INTEGER
+  enterpriseTokens = 123_456
+  usageAvailable = true
+  calculatedAt = clock
+  await restarted.refresh(policy())
+  restarted.armRequest(
+    { agent: { id: 'quota-unlimited-1' }, turn: 1, step: 1 },
+    { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+  )
+  restarted.armRequest(
+    { agent: { id: 'quota-unlimited-2' }, turn: 1, step: 1 },
+    { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+  )
+  assert.equal((await restarted.admit(options('quota-unlimited-1'))).unlimited, true)
+  assert.equal((await restarted.admit(options('quota-unlimited-2'))).unlimited, true)
+  assert.equal(records.reservations.size, 0)
+  clock = monday.getTime() + 7 * 24 * 60 * 60_000
+  assert.deepEqual(restarted.status(), { ready: false })
+  assert.deepEqual(warnings, [
+    'e-Mate finite weekly quota permits one in-flight request; one real request may exceed its remaining allowance',
+  ])
+})
+
 test('audit records only real Harness usage and deduplicates reconnect replay and concurrent flush', async () => {
   const temporary = mkdtempSync(join(tmpdir(), 'e-mate-audit-'))
   const tables = { bindings: new Map(), outbox: new Map() }
   const handlers = new Map()
   const cleanups = []
   const uploads = []
+  const deliveredFacts = []
   let audit
   let rpc
   let interval
@@ -2137,6 +2377,9 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
             policy_receipt_id: 'policy-receipt:audit-207',
             policy_sha256: 'b'.repeat(64),
           }
+        },
+        markAuditDelivered: async (factId, acceptedAt) => {
+          deliveredFacts.push({ factId, acceptedAt })
         },
       },
       provide: (name, value) => {
@@ -2212,6 +2455,9 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
     assert.deepEqual(sameFlight, delivered)
     assert.equal(delivered.delivered_now, 1)
     assert.equal(delivered.delivered, 1)
+    assert.equal(deliveredFacts.length, 1)
+    assert.equal(deliveredFacts[0].factId, stored.fact_id)
+    assert.equal(Number.isFinite(Date.parse(deliveredFacts[0].acceptedAt)), true)
     assert.equal(tables.outbox.values().next().value.status, 'delivered')
     assert.equal(uploads.length, 2)
     assert.equal('content' in uploads[1][0].payload, false)
