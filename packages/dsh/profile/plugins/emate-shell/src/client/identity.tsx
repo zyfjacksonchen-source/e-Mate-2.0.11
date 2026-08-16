@@ -160,13 +160,22 @@ export function IdentityGate({ callIdentity }: Props) {
     if (mode === 'unlocked') return undefined
     const root = document.getElementById('root')
     if (root === null) return undefined
-    const previous = root.inert
-    const previouslyHidden = root.hidden
-    root.inert = true
-    root.hidden = true
+    const gate = document.querySelector('[data-emate-identity-gate]')
+    const background = [root, ...Array.from(document.body.children).filter(
+      (element): element is HTMLElement => element instanceof HTMLElement
+        && element !== root
+        && element !== gate
+        && element.tagName !== 'SCRIPT',
+    )].map(element => ({ element, inert: element.inert, hidden: element.hidden }))
+    for (const { element } of background) {
+      element.inert = true
+      element.hidden = true
+    }
     return () => {
-      root.inert = previous
-      root.hidden = previouslyHidden
+      for (const previous of background) {
+        previous.element.inert = previous.inert
+        previous.element.hidden = previous.hidden
+      }
     }
   }, [mode])
 

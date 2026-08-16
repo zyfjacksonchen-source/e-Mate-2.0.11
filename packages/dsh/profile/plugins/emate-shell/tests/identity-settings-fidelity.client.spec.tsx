@@ -63,6 +63,10 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     shellRoot.id = 'root'
     shellRoot.style.width = '432px'
     document.body.append(shellRoot)
+    const targetPortal = document.createElement('button')
+    targetPortal.setAttribute('aria-label', '关闭任务导航')
+    const initialPortalInert = targetPortal.inert
+    document.body.append(targetPortal)
     const callIdentity = vi.fn(async (endpoint: string): Promise<RpcResult> => {
       if (endpoint === 'identity.bootstrap') return {
         ok: true,
@@ -91,7 +95,11 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     })
 
     const view = render(<IdentityGate callIdentity={callIdentity} />)
-    await waitFor(() => { expect(shellRoot.hidden).toBe(true) })
+    await waitFor(() => {
+      expect(shellRoot.hidden).toBe(true)
+      expect(targetPortal.hidden).toBe(true)
+      expect(targetPortal.inert).toBe(true)
+    })
     fireEvent.click(await screen.findByRole('button', { name: '注册新账号' }))
     fireEvent.change(await screen.findByLabelText('账号'), { target: { value: 'test@example.com' } })
     fireEvent.change(screen.getByLabelText('真实姓名'), { target: { value: '测试用户' } })
@@ -109,6 +117,9 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     })
     view.unmount()
     expect(shellRoot.hidden).toBe(false)
+    expect(targetPortal.hidden).toBe(false)
+    expect(targetPortal.inert).toBe(initialPortalInert)
+    targetPortal.remove()
     shellRoot.remove()
   })
 

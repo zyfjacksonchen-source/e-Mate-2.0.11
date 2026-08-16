@@ -1170,3 +1170,8 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 公开仓库和产品名称继续为 `zyfjacksonchen-source/e-Mate` / `e-Mate`；npm 身份为 `@e-mate/dsh@2.0.7`、命令为 `e-mate`。技术文档可注明固定 DeepSeek Harness，但发布页、健康响应和 UI 不使用“e-Mate Harness”作为产品名。
 - 当前产品提交 `f9c50fe` 的 CI/Release 均成功，Release 已用同一 tarball 完成 darwin-arm64、darwin-x64、win32-x64 仓库外干净 npm 安装和 SBOM/许可证证据；`publish=false` 使 npm、registry 回读和 R2 job 正确跳过。文档提交 `7971334` 的 CI 也成功，不把纯文档运行冒充新产品候选。
 - 实时 HTTP 回读确认管理端和 Usage 的 `dl`/`mvdcm` 地址均为 200，当前生产脚本分别是 `index-_20_trxr.js` 与 `index-BIO1utWs.js`。下载入口 `https://dl.ecoremedia.net/e-mate/update/` 仍经两次 302 到旧“e-Mate 下载与安装”页面，并展示桌面安装包及 macOS 未签名图解；这与 2.0.7 的 npm-only 交付合同不一致。正式 npm/R2 同字节准入和新下载页切换前，S13 继续 open，禁止提前宣称已发布。
+
+## 2026-08-16 · S02 登录 Gate 的目标 Portal 隔离
+
+- `320px` 登录页复验发现 pinned Harness 的移动导航按钮由 React Portal 直接挂在 `body`，不属于既有 `#root`；原实现只隐藏并设置根节点 inert，因此底层“打开/关闭任务导航”仍进入辅助树。修复继续沿用同一 Identity Gate，只隔离当前 `body` 的非脚本背景节点，并在 Gate 卸载时逐项恢复原 `hidden/inert`，没有按 Harness 文案或生成类名硬编码，也没有增加 Router、Store 或通信层。
+- Shell 挂载回归覆盖 Portal 隐藏及原状态恢复；聚焦 9/9、主包构建与 diff check 通过。新 bundle 同步到隔离受管 profile 后，主代理在真实 Browser 的 `320×800`、`390×844` 复验均为 `scrollWidth === clientWidth`，登录 Gate 之外的任务导航按钮可见数为 0，标题仍为 `e-Mate`，favicon 仍为透明底小芯机器人。该证据只关闭登录态 Portal 隔离，不替代解锁后的五档响应式和全按钮闭环验收。
