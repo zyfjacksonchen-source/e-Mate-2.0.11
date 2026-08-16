@@ -1163,3 +1163,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 生产仅重建 Gateway 和 Analytics：当前镜像分别为 `sha256:0df335d158e5d07dd42667c550c1be38f89ef28c89253fcf443d8de3d97f3443` 与 `sha256:3271373646e5230a869df432adfd504be88a86776184883cfe7c4cc6cf4ab4da`，Auth、Web、Postgres、Redis 未重启。激活前 Luna、Sol、DeepSeek、Doubao 与 `gpt-image-2-pro` 五路 Model Smoke 全通过；配置摘要为 `6d47c4bc9350026492e1a6932510325b54b97ed2b671e1398a77d0657ba187ce`。
 - 历史修复在一个事务内精确命中 21 条 audit task：`eligible=21 / updated=21 / unique_usage_ids=21 / remaining_audit_accumulating=0`；16 条正常 Gateway 聚合 task 与 2 条真实 Provider pending 合计 `non_audit_accumulating=18`，保持未修改。验收用户当前只读回查为 19 条 audit `FINALIZED`、0 条 audit `ACCUMULATING`；root-only 回执目录为 `/root/e-mate-bootstrap/20260816T130715Z-audit-finalize-f9c50fe`。
 - 受管 Host 与 `/api/e-mate/health` 当前健康，但验收账号策略变更已撤销旧租约，真实浏览器停在登录页。尚未输入密码或绕过登录；因此“部署后新 Luna 会话产生新的 deterministic audit usage、Usage 四项继续为 0 差异”仍是明确待验收项，不能用历史 21 条修复或单元测试代替。
+
+## 2026-08-16 · S13 当前发布载体与公开入口复核
+
+- 公开仓库和产品名称继续为 `zyfjacksonchen-source/e-Mate` / `e-Mate`；npm 身份为 `@e-mate/dsh@2.0.7`、命令为 `e-mate`。技术文档可注明固定 DeepSeek Harness，但发布页、健康响应和 UI 不使用“e-Mate Harness”作为产品名。
+- 当前产品提交 `f9c50fe` 的 CI/Release 均成功，Release 已用同一 tarball 完成 darwin-arm64、darwin-x64、win32-x64 仓库外干净 npm 安装和 SBOM/许可证证据；`publish=false` 使 npm、registry 回读和 R2 job 正确跳过。文档提交 `7971334` 的 CI 也成功，不把纯文档运行冒充新产品候选。
+- 实时 HTTP 回读确认管理端和 Usage 的 `dl`/`mvdcm` 地址均为 200，当前生产脚本分别是 `index-_20_trxr.js` 与 `index-BIO1utWs.js`。下载入口 `https://dl.ecoremedia.net/e-mate/update/` 仍经两次 302 到旧“e-Mate 下载与安装”页面，并展示桌面安装包及 macOS 未签名图解；这与 2.0.7 的 npm-only 交付合同不一致。正式 npm/R2 同字节准入和新下载页切换前，S13 继续 open，禁止提前宣称已发布。

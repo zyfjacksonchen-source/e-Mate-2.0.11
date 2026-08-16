@@ -22,7 +22,7 @@ The public release closure is one npm package:
 
 | Package | Contents | Current status |
 | --- | --- | --- |
-| `@e-mate/dsh@2.0.7` | TypeScript CLI, pinned Harness closure, browser overlay, profile, and embedded bundle registry | Source adaptation is in progress; the new single-tarball release candidate and supported-platform clean installs are not yet accepted |
+| `@e-mate/dsh@2.0.7` | TypeScript CLI, pinned Harness closure, browser overlay, profile, and embedded bundle registry | Commit `f9c50fe` single-tarball candidate passed CI pack/evidence and clean npm install on darwin-arm64, darwin-x64 and win32-x64; registry/R2 publication and real Windows/macOS-x64 Computer Use remain open |
 
 There are no `@e-mate/dsh-runtime-*` or `@e-mate/dsh-browser-*` packages and no platform `optionalDependencies`. The deleted Python/Office/OCR Worker, RapidOCR models, Playwright Chromium payload, and their postinstall/build scripts are not part of 2.0.7. Setup validates the main package, Harness receipt, embedded bundle manifests, profile composition and platform capability state; it never restores the deleted closure or downloads a browser.
 

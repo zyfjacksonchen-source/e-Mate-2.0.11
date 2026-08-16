@@ -103,7 +103,7 @@ Before production access, the local automated gate must prove that one real targ
 The release evidence covers the following end-to-end user journeys:
 
 - model selection changes the actual next provider route while preserving the same conversation context; upstream instability and weak-network interruption recover through the existing retry/reconnect path without duplicate user messages, assistant answers, Tool calls, usage facts, or audit receipts;
-- every conversation interaction is compared screen-by-screen and state-by-state with task `019ff665-d721-79a0-869d-338f086cf529`, including its interaction prototype and annotated frames, rather than accepting a Home-only or static screenshot match;
+- the composer, navigation and non-message product chrome keep their accepted e-Mate references, while the conversation stream itself is exercised against the pinned Harness Message, Retry, TurnStatus, Tool, Disclosure and Actions renderers. The earlier `019ff665-d721-79a0-869d-338f086cf529` and 2.0.4/2.0.5 custom message-flow projections were explicitly withdrawn; only the real attachment image gallery remains as an e-Mate message visual exception;
 - image generation and editing cover one generation, one edit, concurrent jobs, attachment/context ownership, and a measured step-up run that records the maximum stable concurrency before the first bounded rejection or degraded budget; the caller still cannot choose the image model;
 - DOCX/XLSX/PPTX/PDF create-read-edit-export-reopen, OCR/Vision, browser search/interaction/download, Browser Panel, GenUI and the selected Sidebar execute through their real target paths;
 - Feishu, Tencent Docs, WeChat and DingTalk must be discoverable by the user and Agent, open the correct connection surface, and reach the provider's real authorization handoff. The 2.0.7 release gate stops before submitting a real OAuth consent, QR confirmation, credential or external write;
@@ -125,7 +125,7 @@ Each run stores the starting database/snapshot identity, exact test data, screen
 - macOS arm64 本地安装、受管 profile、登录/注册/审批/协议、管理员免签、改密后旧租约失效与新密码重新登录。
 - Luna 默认模型、Luna/Sol 同一会话切换与上下文连续；生产直连后 Luna 短回复 TTFT 中位数 4.074 秒，Sol 样本 2.807 秒。
 - 生产五路上游 Model Smoke：Luna、Sol、DeepSeek、Doubao、`gpt-image-2-pro`。
-- 本地真实 Usage outbox 到生产账本：一条 15,040 Token 事实成功入账，重复上送返回相同 receipt 且不重复计数；管理员累计 4 次调用、28,225 Token、4 条 Invocation，Usage reconciliation 四项差异均为 0。
+- 本地真实 Usage outbox 到生产账本：一条 15,040 Token 事实成功入账，重复上送返回相同 receipt 且不重复计数；服务端现只对 `auditreceipt_` task 强制终态。历史 21 条旁路 task 已原子补齐 deterministic usage ID 并全部转为 `FINALIZED`，0 条 audit task 留在 `ACCUMULATING`；18 条正常聚合/Provider pending task 未被误改。
 - Harness 真实任务事件到生产任务账本：一个无工具 Luna turn 精确产生 `RECEIVED / FIRST_RESPONSE / COMPLETED` 各 1 条，本地 outbox 为 3 delivered / 0 pending，生产管理员事件次数为 3、`GENERAL` 任务为 1；Host 重启回放后生产计数不变，Usage 面板逐项显示且四项对账差异仍为 0。
 - 管理端与 Usage 面板真实管理员登录、用户审批/额度/模型策略/协议状态、Luna 联通测试、明暗主题和退出登录。
 - 图片上游生成/编辑与并发阶梯：并发 2、4 稳定；并发 8 为 5/8 成功并出现 3 次 429，因此 2.0.7 的已测稳定上限固定为 4，不再重复烧并发 8。
@@ -135,6 +135,7 @@ Each run stores the starting database/snapshot identity, exact test data, screen
 | 优先级 | 项目 | 当前真实状态 / 关闭条件 |
 |---|---|---|
 | P0 | 验收用户五模型与生/改图全链 | 策略已修为 Luna、Sol、DeepSeek、Doubao、Image Pro，但旧 lease 已撤销；需重新登录后完成 image Tool → Job → Attachment → 画廊、改图、并发 2/4，并与 Audit/Usage 对账。 |
+| P0 | 部署后旁路审计终态 | 历史 21 条 audit task 已修复，Gateway/Analytics 已激活提交 `f9c50fe`；仍需验收用户重新登录，执行一条新 Luna turn，证明新 task 首次写入即为 `FINALIZED`、deterministic usage ID/attempt/invocation 对齐且 Usage 四项差异继续为 0。旧口径的 MATCHED 不能替代本项。 |
 | P0 | Office 四类文档 | 当前规范化插件因无可合法随包分发的执行层而失败关闭；DOCX/XLSX/PPTX/PDF 创建、读取、编辑、导出、重开均未真实通过。 |
 | P0 | Browser / Computer Use | macOS Ego Browser 与 Windows Playwright MCP + 系统 Edge 均为 `setup-required`；尚无会话隔离、权限、下载、清理和 Browser Panel 的真实证据。 |
 | P0 | Vision / OCR | rc.5 缺少企业多模态策略 seam，插件仅返回阻塞状态；没有真实 OCR 或视觉工具结果。 |
@@ -145,7 +146,7 @@ Each run stores the starting database/snapshot identity, exact test data, screen
 | P1 | 旧会话与项目记忆 | 迁移、幂等和隔离有真实持久化回归；仍需在实际保留的旧 e-Mate/ECoreX 数据上确认非删除会话可见、继续对话、项目/通用会话不串。 |
 | P1 | 弱网与上游恢复 | 原生重试、checkpoint、审计幂等已有自动化；仍需受控断网/重连下验证上下文连续且消息、Tool、Usage、Audit 不重复。 |
 | P1 | 性能成对验收 | 已有真实样本但未完成相同机器、相同提示、相同模型的 30 组目标 rc.5 与 e-Mate p50/p95 对照，包括 TTFT、生成速度与 Tool 调用延迟。 |
-| P1 | 最终响应式与全按钮闭环 | 最新 Harness 原生消息流需在 320/390/768/1280/1920 做一次最终逐屏 CU，并检查全部可见组件不是空动作；本次真实 Luna 运行仍同时看见英文 `Deep diving...` 与中文“思考中”，品牌文案切换尚未真实关闭。 |
+| P1 | 最终响应式与全按钮闭环 | 最新 Harness 原生消息流需在 320/390/768/1280/1920 做一次最终逐屏 CU，并检查全部可见组件不是空动作。真实 Luna 运行态已经只显示中文“思考中”，`Deep diving...` 计数为 0；该品牌项已关闭，不再作为本行阻塞理由。 |
 | P1 | Session Share | 当前保持失败关闭；生产 create/list/get/revoke、公开 URL、到期和撤销未有有效租约与真实无敏感 fixture 验证。 |
 | 合同风险 | 严格零超额 | 本地持久预留可阻止有限额度并发超额，但单个请求仍可能超过开始时剩余额度；若上线要求绝对零超额，仍需上游单请求精确上限。 |
 
