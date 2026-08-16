@@ -1127,3 +1127,16 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - e-Mate 图片例外现增加一个通用 `tool/result` 投影：只匹配真实 append Tool result 中的 image block，不判断工具名或能力 ID；复用 pinned Harness `ImageGallery`、授权附件加载和 Lightbox，只折叠/展开同一持久附件。没有新增 Store、Router、REST、WebSocket 或 Session 事件。Host 重启后旧图片真实恢复为“已查看 1 张图像”，原图预览可打开。
 - 单次真实生图通过；基于上一张附件 SHA-256 的单次改图通过，耗时约 2 分 11 秒，真实产物把橙色星星改为橙色爱心并保持透明背景。两个不同 Session 的并发 2 验收中，一项约 60 秒完成并展示真实图片，另一项约 2 分 20 秒收到上游 HTTP 503；因此当前只能确认稳定并发下限为 1，并发 2 保持发布阻断，不能用 1/2 成功冒充通过。
 - 主包验证为 Node 49/49、Shell 34/34，target pin 与客户端构建通过；Loader 合同显式加入目标 attachment renderer，确保受管 profile 重装后仍使用同一 Harness 实现。
+
+## 2026-08-16 · S03 原生思考状态中文替换最终闭环
+
+- 前一品牌投影只用 `font-size: 0` 隐藏目标 Text node，语义树仍同时包含 `Deep diving...` 和“思考中”。最终实现继续只覆盖 pinned Harness 的真实 running status，但在运行期间暂存并清空该英文 Text node，卸载时按原值恢复；Domino、真实 turn 时钟、终态清理和事件来源不变。
+- Shell 34/34 与主包客户端构建通过。同步受管 profile、重启 Host 并重新登录后，真实 Luna 请求的运行态 DOM 为 `status / 思考中`，`Deep diving...` 计数为 0；截图中只显示橙色品牌 Domino 和“思考中”，终态后节点消失并显示真实回复。
+
+## 2026-08-16 · S10 Codex imagegen 运行与并发对照
+
+- 本机可分发的 imagegen 合同确认：每个资产或变体是一个独立 built-in 调用；编辑只使用当前会话中可见的图片。Codex 内置服务端实现不在分发目录中，不能检查、复制或宣称完全复刻。Apache-2.0 fallback CLI 的 `asyncio Task + Semaphore` 默认 5、上限 25 只是批处理工具参数，不是内置服务稳定并发上限，也没有搬入 e-Mate。
+- e-Mate 已匹配可验证结构：每个 Tool 调用一张图、编辑仅接受当前权威 Session 的 CAS attachment、`isConcurrencySafe` 交给 Harness 并行调度、每次有独立 Job/调用 ID、取消信号、图片校验、CAS 产物和真实 `tool/result` attachment。模型固定 `gpt-image-2-pro`，不允许用户或前端改 provider/model/timeout/并发策略。
+- 曾用同一调用 ID 试验 503 自动重试，但现有安全门禁正确失败：当前 Images 上游没有正式承诺 idempotency key 去重或 invocation 状态查询，重复 POST 可能重复出图和计费；试验已完整撤回，最终 0 代码改动。两条历史 504/503 的 Harness Job 都是真实 failed，企业调用账本的 PENDING 只表示无法证明上游未接收还是响应丢失，不能伪造为 rejected。
+- 安全解除 PENDING 需要上游提供按 invocation/idempotency key 查询的鉴权状态合同，并绑定 request digest、route fingerprint、provider/model；只有明确 `NOT_ACCEPTED` 才可重试，`ACCOUNTED` 必须带可信 response ID、终态和 usage，`UNKNOWN` 保持待核对。在该合同缺失时停止更高阶生产压测；当前可确认稳定并发下限为 1，并发 2 仍不稳定。
+- 对照切片验证为 Model Gateway TypeScript check、图片生成/改图/Pro fallback/503 不重复提交/API 隔离 5/5、e-Mate Harness Job 与 attachment 1/1；Model Gateway 81 pass / 7 环境 skip / 0 fail，且无残留代码改动。

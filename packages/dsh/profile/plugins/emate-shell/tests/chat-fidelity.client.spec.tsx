@@ -148,7 +148,7 @@ describe('target conversation fidelity contract', () => {
     const unrelated = [...view.container.querySelectorAll<HTMLElement>('[role="status"]')]
       .find(node => node.textContent === '正在上传')!
     expect(target.hasAttribute('data-emate-thinking-status')).toBe(true)
-    expect(target.textContent).toContain('Deep diving...')
+    expect(target.textContent).not.toContain('Deep diving...')
     expect(target.textContent).toContain('思考中')
     expect(target.querySelectorAll('i')).toHaveLength(4)
     expect(unrelated.hasAttribute('data-emate-thinking-status')).toBe(false)
@@ -157,5 +157,6 @@ describe('target conversation fidelity contract', () => {
     expect(thinkingCss).toContain('width: 16px')
     view.unmount()
     expect(target.hasAttribute('data-emate-thinking-status')).toBe(false)
+    expect(target.textContent).toContain('Deep diving...')
   })
 })

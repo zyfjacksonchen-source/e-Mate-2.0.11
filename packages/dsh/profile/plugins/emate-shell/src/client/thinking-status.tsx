@@ -4,8 +4,8 @@ import css from './thinking-status.module.css'
 const TARGET_LABEL = 'Deep diving...'
 const MARKER = 'data-emate-thinking-status'
 
-function isTargetStatus(node: HTMLElement): boolean {
-  return [...node.childNodes].some(child =>
+function targetLabel(node: HTMLElement): Text | undefined {
+  return [...node.childNodes].find((child): child is Text =>
     child.nodeType === Node.TEXT_NODE && child.textContent?.trimStart().startsWith(TARGET_LABEL),
   )
 }
@@ -33,9 +33,10 @@ export function ThinkingStatusBranding() {
   useEffect(() => {
     const documentRoot = document
     let active = true
-    const decorated = new Map<HTMLElement, { host: HTMLElement; label: string | null }>()
-    const restore = (status: HTMLElement, entry: { host: HTMLElement; label: string | null }) => {
+    const decorated = new Map<HTMLElement, { host: HTMLElement; label: string | null; text: Text; value: string }>()
+    const restore = (status: HTMLElement, entry: { host: HTMLElement; label: string | null; text: Text; value: string }) => {
       entry.host.remove()
+      entry.text.data = entry.value
       status.removeAttribute(MARKER)
       if (entry.label === null) status.removeAttribute('aria-label')
       else status.setAttribute('aria-label', entry.label)
@@ -50,13 +51,16 @@ export function ThinkingStatusBranding() {
         }
       }
       for (const status of documentRoot.querySelectorAll<HTMLElement>('[role="status"][aria-live="polite"]')) {
-        if (!isTargetStatus(status) || decorated.has(status)) continue
+        const text = targetLabel(status)
+        if (text === undefined || decorated.has(status)) continue
         const host = createDomino()
         const label = status.getAttribute('aria-label')
+        const value = text.data
+        text.data = ''
         status.setAttribute(MARKER, '')
         status.setAttribute('aria-label', '思考中')
         status.append(host)
-        decorated.set(status, { host, label })
+        decorated.set(status, { host, label, text, value })
       }
     }
     sync()
