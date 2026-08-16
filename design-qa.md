@@ -375,3 +375,12 @@ final result: passed (target next-message queue edit/remove/steer); blocked (pro
 - Full and focused combined evidence is stored in `artifacts/design-qa/S02-collapse-current-7b607c7/`, especially `focused-source-vs-current-collapsed.jpg`.
 
 final result: passed (real running activity collapse, hidden Tool rows and re-expansion)
+
+## S02/S03 final target-native message stream — 2026-08-16
+
+- This final product decision supersedes the earlier prototype/2.0.4/2.0.5 message-stream sections above. ActivityHeader, RetryAttempts and LongMessageDisclosure were deleted; the pinned rc.5 Message, Retry, TurnStatus, Tool, Disclosure and Actions renderers again own the complete conversation surface and behavior.
+- The only retained custom message visual is the image gallery. It matches only real appended assistant image messages and hides/reveals the same target ImageGallery; image loading, authorization, retry and Lightbox remain target-owned. dsh-genui is unchanged and its server/client registration contract remains covered.
+- Main-agent Browser acceptance used the existing authenticated account and durable three-turn context Session. The target Think disclosure opened in place; custom activity/retry/long-text node count was zero; Inspect was absent because ui-trajectory remains disabled. After the final focus pass the expanded control computed `outline-style:none` and `box-shadow:none`, so click did not leave a red or blue frame.
+- Evidence: `artifacts/design-qa/S03-target-message-stream-main/target-native-message-stream-no-focus-ring.png`. The accepted surface retains the e-Mate logo and orange product tokens while message geometry, typography and actions come from Harness itself.
+
+final result: passed (target-native message presentation and disclosure); blocked (fresh live generation until the direct runtime-model control plane is deployed)

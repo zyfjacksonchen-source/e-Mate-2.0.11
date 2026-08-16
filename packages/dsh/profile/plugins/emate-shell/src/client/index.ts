@@ -31,27 +31,20 @@ import {
   IconUserOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AccountControl, AccountSettings } from './account.tsx'
-import { ActivityHeader, activityHeaderDefinition } from './activity-header.tsx'
 import { CapabilitiesPage, CapabilityControl } from './capabilities.tsx'
 import './chat-chrome.module.css'
 import { ConnectionsSettings } from './connections.tsx'
 import { ComposerConnectors, routeToConnections } from './composer-connectors.tsx'
 import { HomeProjection } from './home.tsx'
 import { IdentityGate } from './identity.tsx'
+import { ImageDisclosure, imageDisclosureDefinition } from './image-gallery.tsx'
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
-import {
-  ImageDisclosure,
-  imageDisclosureDefinition,
-  LongMessageDisclosure,
-  longMessageDefinition,
-} from './long-message-disclosure.tsx'
 import {
   OfficeArtifacts,
   officeArtifactsDefinition,
   selectOfficeArtifacts,
 } from './office-artifacts.tsx'
 import { isGeneralWorkspace, SidebarRoot } from './sidebar.tsx'
-import { RetryAttempts } from './retry-attempts.tsx'
 import { SessionRouteProjection } from './session-route.tsx'
 import { SessionShareAction } from './session-share.tsx'
 import {
@@ -116,21 +109,6 @@ export function apply(ctx: any): void {
       startHomeSession: () => { startSession() },
     }),
   }, SessionRouteProjection))
-  ctx.conversationEvents.register(activityHeaderDefinition)
-  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
-    name: 'conversation.chat.node',
-    key: 'model-retry',
-    priority: -1,
-  }, RetryAttempts))
-  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
-    name: 'conversation.chat.node',
-    key: 'e-mate-activity-group',
-  }, ActivityHeader))
-  ctx.conversationEvents.register(longMessageDefinition)
-  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
-    name: 'conversation.chat.node',
-    key: 'e-mate-message-disclosure',
-  }, LongMessageDisclosure))
   ctx.conversationEvents.register(imageDisclosureDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',

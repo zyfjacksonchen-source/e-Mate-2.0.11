@@ -23,8 +23,13 @@
 }
 
 :global([data-slot='conversation'] > div[data-phase]) {
+  --dsw-static-deepseek-50: color-mix(in srgb, var(--emate-color-brand) 8%, var(--emate-color-workspace));
+  --dsw-static-deepseek-200: color-mix(in srgb, var(--emate-color-brand) 24%, var(--emate-color-workspace));
+  --dsw-static-deepseek-400: color-mix(in srgb, var(--emate-color-brand) 82%, white);
+  --dsw-static-deepseek-500: var(--emate-color-brand);
   --dsw-alias-button-info-fill: var(--emate-color-brand);
   --dsw-alias-button-info-hover: color-mix(in srgb, var(--emate-color-brand) 82%, white);
+  --dsw-alias-state-business-primary: var(--emate-color-brand);
   position: relative;
   box-sizing: border-box;
   height: calc(100% - 16px) !important;

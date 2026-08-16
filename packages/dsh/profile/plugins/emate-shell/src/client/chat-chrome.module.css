@@ -1,118 +1,13 @@
-/* Presentation-only chat coverage. Conversation state, ordering, paging,
-   actions, timers and Tool renderers stay owned by the pinned Harness UI. */
-
-:global([data-chat-flow]) {
-  padding-block: 8px 32px;
-  color: var(--emate-color-ink, var(--dsw-alias-label-primary));
-}
-
-/* The target Markdown renderer stays intact; only ordinary prose paragraphs
-   use the canonical e-Mate body token. Structured Markdown, media and the
-   long-text Work container retain their target-owned geometry. */
-:global([data-chat-flow-kind='assistant-step'] [data-slot='conversation.chat.node'] > div > div > div:not([data-emate-long-text]) > p:not(:has(code, img, video, audio))) {
-  max-width: 1180px;
-  margin: 0 0 8px !important;
-  font-size: 14px;
-  line-height: 22px;
-}
-
-/* User and admitted-steering rows share the target MessageItem renderer. */
-:global([data-chat-flow-kind='user'] [data-time-hover-root] > div:first-child),
-:global([data-chat-flow-kind='steering'] [data-time-hover-root] > div:first-child) {
-  max-width: min(82%, 820px);
-}
-
-:global([data-chat-flow-kind='user'] [data-time-hover-root] > div:first-child > div:last-child:not([data-align])),
-:global([data-chat-flow-kind='steering'] [data-time-hover-root] > div:first-child > div:last-child:not([data-align])) {
-  max-width: 100%;
-  padding: 8px 12px;
-  border-radius: 16px;
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 22px;
-}
-
-/* The reference activity stream is deliberately compact: consecutive real
-   Tool nodes read as one activity group without creating a second group model. */
-:global([data-chat-flow-kind='tool-call'] + [data-chat-flow-kind='tool-call']) {
-  margin-top: -12px;
-}
-
-:global([data-chat-flow-kind='command'] + [data-chat-flow-kind='tool-call']),
-:global([data-chat-flow-kind='tool-call'] + [data-chat-flow-kind='command']) {
-  margin-top: -12px;
-}
-
-:global([data-chat-flow-kind='tool-call']),
-:global([data-chat-flow-kind='command']),
-:global([data-chat-flow-kind='model-retry']),
-:global([data-chat-flow-kind='turn-error']) {
-  min-height: 24px;
-}
-
-/* Harness exposes one real turn-level running status after the durable node
-   list. Only its product copy changes; its clock still uses the actual turn
-   start and freezes when Harness emits the terminal Turn node. */
-:global([data-chat-flow] > [role='status']) {
-  min-height: 24px;
-  height: 24px;
-  font-size: 0;
-  line-height: 24px;
-}
-
-:global([data-chat-flow] > [role='status'])::before {
-  content: '正在工作';
-  font-size: 14px;
-  line-height: 24px;
-}
-
-:global([data-chat-flow] > [role='status'] > span) {
-  font-size: 13px;
-  line-height: 24px;
-}
-
-:global([data-chat-flow]:has([data-emate-activity-header]) > [role='status']) {
-  display: none;
-}
-
-/* A completed turn keeps the target branch/copy/feedback action row, while
-   matching the quiet history treatment of the interaction reference. */
-:global([data-turn-tail]) {
-  gap: 12px !important;
-}
-
-:global([data-turn-tail][data-emate-activity-tail] > div:last-child > span:last-child) {
-  display: none;
-}
-
-:global([data-turn-tail][data-emate-activity-tail-status='failed']),
-:global([data-turn-tail][data-emate-activity-tail-status='cancelled']),
-:global([data-turn-tail][data-emate-activity-tail-status='interrupted']) {
-  display: none;
-}
-
-:global([data-chat-flow-kind][data-emate-activity-collapsed]) {
-  display: none;
-}
-
-:global([data-chat-flow-kind='e-mate-message-disclosure']) {
-  display: none;
-}
+/* Harness owns the complete conversation presentation. e-Mate keeps only the
+   image-gallery exception and hides inert Inspect actions while ui-trajectory
+   is disabled. */
 
 :global([data-chat-flow-kind='e-mate-image-disclosure']) {
   display: none;
 }
 
-:global([data-chat-flow-kind='turn-error']) {
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 28%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 6%, transparent);
-}
-
-/* Harness already groups consecutive real ImageBlocks and owns loading,
-   authorization and lightbox state. e-Mate only restores the reference's
-   equal, readable response tiles without creating another image renderer. */
+/* Preserve the e-Mate equal-tile gallery while the target ImageGallery keeps
+   ownership of image loading, authorization, retry and lightbox behavior. */
 :global([data-chat-flow-kind='assistant-step'] [data-align='start'] > [data-variant='single']),
 :global([data-chat-flow-kind='assistant-step'] [data-align='start'] > [data-variant='tile']) {
   width: clamp(112px, 18vw, 160px) !important;
@@ -121,125 +16,17 @@
   background: #111;
 }
 
-/* Target ToolRow remains the renderer and owns disclosure state. The stable
-   flow/disclosure attributes only restore the reference row geometry. */
-:global([data-chat-flow-kind='tool-call'] [data-disclosure-row]) {
-  box-sizing: border-box;
-  min-height: 44px;
-  height: auto;
-  padding: 2px 0;
-  font-size: 13px;
-  line-height: 20px;
-}
-
-:global([data-chat-flow-kind='tool-call'] [data-disclosure-row] > :first-child) {
-  width: 16px;
-  height: 16px;
-  margin-right: 8px;
-}
-
-:global([data-chat-flow-kind='tool-call'] [data-disclosure-row] > :first-child > svg),
-:global([data-chat-flow-kind='tool-call'] [data-disclosure-row] > :first-child > span > svg) {
-  width: 16px;
-  height: 16px;
-}
-
-:global([data-chat-flow-kind='tool-call'] [data-disclosure-row][aria-expanded] > :first-child > svg),
-:global([data-chat-flow-kind='tool-call'] [data-disclosure-row][aria-expanded='true'] > :first-child > span > svg) {
-  width: 14px;
-  height: 14px;
-}
-
-:global([data-chat-flow-kind='tool-call'] [data-disclosure-row] > :not(:first-child)) {
-  font-size: 13px;
-  line-height: 20px;
-}
-
-:global([data-chat-flow-kind='tool-call'] [data-disclosure-row]:focus-visible) {
+/* Keep target disclosure behavior while replacing its non-brand focus ring
+   with the same visible hover surface used across e-Mate. */
+:global([data-slot='conversation'] [aria-expanded]:focus-visible) {
   outline: none;
+  box-shadow: none;
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-/* Bash owns a target-native summary row instead of composing DisclosureRow.
-   Its stable root attribute carries the same closed-row geometry; the terminal
-   card is a sibling, so none of these selectors enter expanded Shell output. */
-:global([data-chat-flow-kind='tool-call'] [data-variant='bash']) {
-  box-sizing: border-box;
-  min-height: 44px;
-  height: auto;
-  padding: 2px 0;
-  font-size: 13px;
-  line-height: 20px;
-}
-
-:global([data-chat-flow-kind='tool-call'] [data-variant='bash'] > span:first-child) {
-  width: 16px;
-  height: 16px;
-  margin-right: 8px;
-}
-
-:global([data-chat-flow-kind='tool-call'] [data-variant='bash'] > span:first-child > svg),
-:global([data-chat-flow-kind='tool-call'] [data-variant='bash'] > span:first-child > span > svg) {
-  width: 16px;
-  height: 16px;
-}
-
-:global([data-chat-flow-kind='tool-call'] [data-variant='bash'][aria-expanded] > span:first-child > svg),
-:global([data-chat-flow-kind='tool-call'] [data-variant='bash'][aria-expanded='true'] > span:first-child > span > svg) {
-  width: 14px;
-  height: 14px;
-}
-
-:global([data-chat-flow-kind='tool-call'] [data-variant='bash'] > span:not(:first-child):not([aria-hidden])) {
-  font-size: 13px;
-  line-height: 20px;
-}
-
-:global([data-chat-flow-kind='tool-call'] [data-variant='bash']:focus-visible) {
-  outline: none;
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-/* ui-trajectory is intentionally disabled in the e-Mate profile, while the
-   pinned Tool renderers still mount their otherwise inert Inspect handoff.
-   Match only IconInspectOutline12's direct action seat in the target's two
-   expanded-body shapes; disclosure, file, copy and card buttons are nested
-   elsewhere and remain target-owned. */
+/* The profile disables ui-trajectory, so target Inspect handoffs have no
+   destination. All other target Tool disclosure and action controls remain. */
 :global([data-chat-flow-kind='tool-call'] [data-chat-call-id] [data-variant] > [data-open='true'] > div > button:has(> svg[aria-hidden][width='12'][height='12'])),
 :global([data-chat-flow-kind='tool-call'] [data-chat-call-id] [data-sample='bash'] + div > button:has(> svg[aria-hidden][width='12'][height='12'])) {
   display: none;
-}
-
-@media (max-width: 767px) {
-  :global([data-chat-flow]) {
-    padding-block: 4px 24px;
-  }
-
-  :global([data-chat-flow-kind='user'] [data-time-hover-root] > div:first-child),
-  :global([data-chat-flow-kind='steering'] [data-time-hover-root] > div:first-child) {
-    width: 100%;
-    max-width: 100%;
-  }
-
-  :global([data-chat-flow-kind='user'] [data-time-hover-root] > div:first-child > div:last-child:not([data-align])),
-  :global([data-chat-flow-kind='steering'] [data-time-hover-root] > div:first-child > div:last-child:not([data-align])) {
-    width: fit-content;
-    margin-left: auto;
-  }
-
-  :global([data-chat-flow-kind='turn-error'] [role='status']) {
-    grid-template-columns: 10px minmax(0, 1fr);
-  }
-
-  :global([data-chat-flow-kind='turn-error'] [role='status'] > code) {
-    grid-column: 2;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  :global([data-chat-flow] *) {
-    scroll-behavior: auto !important;
-  }
 }

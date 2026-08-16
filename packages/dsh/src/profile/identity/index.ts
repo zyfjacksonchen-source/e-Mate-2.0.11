@@ -171,6 +171,11 @@ export function apply(ctx, config = {}) {
     }
   }
   ctx.provide('emateIdentity', {
+    localAccountSubject() {
+      return typeof config.identityProvider?.localAccountSubject === 'function'
+        ? config.identityProvider.localAccountSubject()
+        : undefined
+    },
     async request(url, init) {
       if (typeof config.authenticatedRequest !== 'function') {
         throw new Error('e-Mate enterprise identity transport is unavailable; sign in after the verified provider policy is installed')
@@ -185,6 +190,12 @@ export function apply(ctx, config = {}) {
         throw new Error('e-Mate enterprise model policy provider is unavailable')
       }
       return config.identityProvider.modelPolicy()
+    },
+    async modelRuntimePolicy() {
+      if (typeof config.identityProvider?.modelRuntimePolicy !== 'function') {
+        throw new Error('e-Mate enterprise runtime model policy provider is unavailable')
+      }
+      return config.identityProvider.modelRuntimePolicy()
     },
   })
   ctx.effect(() => ctx.connection.rpc.handle(

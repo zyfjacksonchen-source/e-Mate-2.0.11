@@ -18,6 +18,20 @@ const CHAT_MODELS = [
   'deepseek',
   'doubao-seed-2-0-pro-260215',
 ]
+const RUNTIME_MODEL_CONTRACT = new Map([
+  ['gpt-5.6-luna', { upstreamModelId: 'gpt-5.6-luna', apiMode: 'responses', provider: 'e-mate-enterprise', credentialRef: 'E_MATE_MODEL_KEY_GPT' }],
+  ['gpt-5.6-sol', { upstreamModelId: 'gpt-5.6-sol', apiMode: 'responses', provider: 'e-mate-enterprise', credentialRef: 'E_MATE_MODEL_KEY_GPT' }],
+  ['deepseek', { upstreamModelId: 'deepseek-v4-flash', apiMode: 'chat-completions', provider: 'e-mate-enterprise-deepseek', credentialRef: 'E_MATE_MODEL_KEY_DEEPSEEK' }],
+  ['doubao-seed-2-0-pro-260215', {
+    upstreamModelId: 'doubao-seed-2-0-pro-260215',
+    apiMode: 'chat-completions',
+    provider: 'e-mate-enterprise-doubao',
+    credentialRef: 'E_MATE_MODEL_KEY_DOUBAO',
+  }],
+])
+export const RUNTIME_MODEL_CREDENTIAL_REFS = Object.freeze(
+  [...new Set([...RUNTIME_MODEL_CONTRACT.values()].map(({ credentialRef }) => credentialRef))],
+)
 const ADMIN_ROLES = new Set(['TENANT_ADMIN', 'AUDIT_ADMIN'])
 const REGISTRATION_REJECTION_MESSAGES = {
   INVALID_CHALLENGE: '验证码无效或已过期',
@@ -110,6 +124,21 @@ type StoredSession = {
   consent?: ConsentStatus
 }
 
+export type RuntimeModel = {
+  id: string
+  provider: string
+  credentialRef: string
+  api: 'openai-responses' | 'openai-completions'
+  upstreamModelId: string
+  upstreamBaseUrl: string
+  upstreamApiKey: string
+  label: string
+  input: Array<'text' | 'image'>
+  reasoning: boolean
+  contextWindow: number
+  maxTokens: number
+}
+
 type ProviderOptions = {
   credentials: Credentials
   enterprise: EnterpriseConfig
@@ -195,6 +224,87 @@ function modelIds(value: unknown): string[] {
     throw new Error('e-Mate enterprise allowed model ids are invalid')
   }
   return [...value]
+}
+
+function runtimeUpstreamBaseUrl(value: unknown, allowInsecureHttp: boolean): string {
+  if (typeof value !== 'string' || value.length > 2_048) {
+    throw new Error('e-Mate enterprise runtime model URL is invalid')
+  }
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error('e-Mate enterprise runtime model URL is invalid')
+  }
+  if (!url.hostname || url.username || url.password || url.search || url.hash
+    || (url.protocol !== 'https:' && !(url.protocol === 'http:' && allowInsecureHttp))) {
+    throw new Error('e-Mate enterprise runtime model URL is invalid')
+  }
+  return url.toString().replace(/\/+$/u, '')
+}
+
+function runtimeModels(value: unknown, allowed: readonly string[]): RuntimeModel[] {
+  if (!isRecord(value)
+    || !exact(value, ['schemaVersion', 'models'])
+    || value.schemaVersion !== 1
+    || !Array.isArray(value.models)
+    || value.models.length < 1
+    || value.models.length > RUNTIME_MODEL_CONTRACT.size) {
+    throw new Error('e-Mate enterprise runtime models are invalid')
+  }
+  const seen = new Set<string>()
+  return value.models.map(model => {
+    if (!isRecord(model)
+      || !exact(model, [
+        'id', 'apiMode', 'upstreamModelId', 'upstreamBaseUrl', 'upstreamApiKey', 'label', 'input',
+        'reasoning', 'contextWindow', 'maxTokens',
+        ...(model.allowInsecureHttpUpstream === undefined ? [] : ['allowInsecureHttpUpstream']),
+      ])) {
+      throw new Error('e-Mate enterprise runtime model is invalid')
+    }
+    const id = identifier(model.id, 'runtime model id')
+    const contract = RUNTIME_MODEL_CONTRACT.get(id)
+    const allowInsecureHttp = model.allowInsecureHttpUpstream === true
+    if (contract === undefined
+      || !allowed.includes(id)
+      || seen.has(id)
+      || model.upstreamModelId !== contract.upstreamModelId
+      || model.apiMode !== contract.apiMode
+      || typeof model.upstreamApiKey !== 'string'
+      || model.upstreamApiKey.length < 20
+      || model.upstreamApiKey.length > 8_192
+      || /\s/u.test(model.upstreamApiKey)
+      || typeof model.reasoning !== 'boolean'
+      || !Array.isArray(model.input)
+      || model.input.length < 1
+      || model.input.length > 2
+      || new Set(model.input).size !== model.input.length
+      || model.input.some(input => input !== 'text' && input !== 'image')
+      || !Number.isSafeInteger(model.contextWindow)
+      || Number(model.contextWindow) < 1
+      || Number(model.contextWindow) > 10_000_000
+      || !Number.isSafeInteger(model.maxTokens)
+      || Number(model.maxTokens) < 1
+      || Number(model.maxTokens) > 10_000_000
+      || (model.allowInsecureHttpUpstream !== undefined && !allowInsecureHttp)) {
+      throw new Error('e-Mate enterprise runtime model is invalid')
+    }
+    seen.add(id)
+    return {
+      id,
+      provider: contract.provider,
+      credentialRef: contract.credentialRef,
+      api: model.apiMode === 'responses' ? 'openai-responses' : 'openai-completions',
+      upstreamModelId: contract.upstreamModelId,
+      upstreamBaseUrl: runtimeUpstreamBaseUrl(model.upstreamBaseUrl, allowInsecureHttp),
+      upstreamApiKey: model.upstreamApiKey,
+      label: text(model.label, 'runtime model label', 80),
+      input: [...model.input] as Array<'text' | 'image'>,
+      reasoning: model.reasoning,
+      contextWindow: Number(model.contextWindow),
+      maxTokens: Number(model.maxTokens),
+    }
+  })
 }
 
 function session(value: unknown, expectedModelRoot: string): Session {
@@ -391,11 +501,11 @@ function mutationReceipt(value: unknown, password: boolean) {
   }
 }
 
-function policyFor(value: StoredSession) {
-  const managed = value.session.modelGateway.allowedModelIds.filter(id => [
-    ...CHAT_MODELS,
-    'gpt-image-2-pro',
-  ].includes(id))
+function policyFor(value: StoredSession, runtime: readonly RuntimeModel[]) {
+  const managed = [
+    ...runtime.map(({ id }) => id),
+    ...value.session.modelGateway.allowedModelIds.filter(id => id === 'gpt-image-2-pro'),
+  ]
   const chat = CHAT_MODELS.find(id => managed.includes(id))
   if (chat === undefined) throw new Error('e-Mate enterprise policy contains no chat model')
   const allowed = new Set(managed)
@@ -438,16 +548,22 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     await Promise.all([
       options.credentials.unset(SESSION_REF),
       options.credentials.unset(MODEL_SESSION_REF),
+      ...RUNTIME_MODEL_CREDENTIAL_REFS.map(ref => options.credentials.unset(ref)),
     ])
   }
 
   const save = async (value: StoredSession) => {
-    await options.credentials.set(SESSION_REF, JSON.stringify(value))
+    current = undefined
     try {
+      await options.credentials.set(SESSION_REF, JSON.stringify(value))
       await options.credentials.set(MODEL_SESSION_REF, value.session.modelGateway.sessionToken)
       current = value
     } catch (error) {
-      await options.credentials.unset(SESSION_REF).catch(() => undefined)
+      await Promise.allSettled([
+        options.credentials.unset(SESSION_REF),
+        options.credentials.unset(MODEL_SESSION_REF),
+        ...RUNTIME_MODEL_CREDENTIAL_REFS.map(ref => options.credentials.unset(ref)),
+      ])
       throw error
     }
   }
@@ -545,8 +661,9 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
       if (status.policy.contentHash !== agreementBundleSha256) {
         throw new Error('e-Mate enterprise agreement policy does not match this installed version')
       }
-      const next = { ...value, consent: status }
-      await save(next)
+      if (JSON.stringify(value.consent) !== JSON.stringify(status)) {
+        await save({ ...value, consent: status })
+      }
       return status
     } catch (error) {
       if (value.consent?.policy.contentHash === agreementBundleSha256) return value.consent
@@ -554,7 +671,22 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     }
   }
 
+  const modelRuntimePolicy = async () => {
+    const value = await active(true)
+    if (value === undefined) throw new Error('e-Mate login is required')
+    const models = runtimeModels(
+      await modelCall(value, '/v1/runtime-models', { method: 'GET' }, 'runtime models'),
+      value.session.modelGateway.allowedModelIds,
+    )
+    return { policy: policyFor(value, models), models }
+  }
+
   const provider = {
+    localAccountSubject() {
+      return current === undefined
+        ? undefined
+        : `${current.session.identity.tenantId}:${current.session.identity.userId}`
+    },
     async bootstrap() {
       const value = await active(false)
       if (value === undefined) return { authenticated: false, workspace_unlocked: false }
@@ -684,10 +816,11 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
       }, 'consent acceptance'), status.policy)
       await save({ ...value, consent: { schemaVersion: 1, policy: status.policy, required: false, acceptance } })
     },
+    async modelRuntimePolicy() {
+      return modelRuntimePolicy()
+    },
     async modelPolicy() {
-      const value = await active(true)
-      if (value === undefined) throw new Error('e-Mate login is required')
-      return policyFor(value)
+      return (await modelRuntimePolicy()).policy
     },
     async usage(timezone: string) {
       const value = await authorized('/v1/usage/current', { method: 'GET' }, 'account usage')

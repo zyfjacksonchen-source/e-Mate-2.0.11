@@ -7,37 +7,7 @@
 
 - id: llm-pi-ai
   config:
-    providers:
-      e-mate-enterprise:
-        displayName: e-Mate
-        apiKeyEnv: E_MATE_MODEL_SESSION_TOKEN
-        api: openai-responses
-        baseURL: https://mvdcm.ecoremedia.net/e-mate/model-api/v1
-        models:
-          - id: gpt-5.6-luna
-            name: GPT-5.6 Luna · 最大推理
-            contextWindow: 1050000
-            maxTokens: 128000
-            input: [text, image]
-            reasoningEfforts: { max: high }
-          - id: gpt-5.6-sol
-            name: GPT-5.6 Sol · 中等推理
-            contextWindow: 1050000
-            maxTokens: 128000
-            input: [text, image]
-            reasoningEfforts: { medium: medium }
-          - id: deepseek
-            name: DeepSeek V4 Pro · 最大推理
-            contextWindow: 131072
-            maxTokens: 65536
-            input: [text]
-            reasoningEfforts: { max: max }
-          - id: doubao-seed-2-0-pro-260215
-            name: Doubao Seed 2.0 Pro · 中等推理
-            contextWindow: 256000
-            maxTokens: 32000
-            input: [text, image]
-            reasoningEfforts: { medium: medium }
+    providers: {}
 
 - id: agent-default-model
   config:
@@ -103,7 +73,7 @@
       inject: [connection]
     - id: emate-model-policy
       name: ./plugins/model-policy.js
-      inject: [apiProxy, connection, storageDomain, llm, emateIdentity]
+      inject: [apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity]
     - id: emate-audit
       name: ./plugins/audit.js
       inject: [connection, sessionPersistence, storageDomain, timer, emateModelPolicy]

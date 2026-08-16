@@ -497,14 +497,7 @@ test('managed profile installation is idempotent', () => {
       provider: 'e-mate-enterprise',
       model: 'gpt-5.6-luna',
     })
-    const enterpriseLlm = patchById.get('llm-pi-ai').config.providers['e-mate-enterprise']
-    assert.equal(enterpriseLlm.apiKeyEnv, 'E_MATE_MODEL_SESSION_TOKEN')
-    assert.equal(enterpriseLlm.api, 'openai-responses')
-    assert.equal(enterpriseLlm.baseURL, 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1')
-    assert.deepEqual(enterpriseLlm.models.map(model => model.id), [
-      'gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek',
-      'doubao-seed-2-0-pro-260215',
-    ])
+    assert.deepEqual(patchById.get('llm-pi-ai').config.providers, {})
     assert.equal(patchById.get('emate-general-workspace').name, './plugins/general-workspace.js')
     assert.deepEqual(patchById.get('emate-settings-document-boundary'), {
       id: 'emate-settings-document-boundary',
@@ -515,6 +508,9 @@ test('managed profile installation is idempotent', () => {
     assert.equal(patchById.get('emate-schedule-import').name, './plugins/schedule-import.js')
     assert.equal(patchById.get('emate-legacy-migration').name, './plugins/legacy-migration.js')
     assert.equal(patchById.get('emate-model-policy').name, './plugins/model-policy.js')
+    assert.deepEqual(patchById.get('emate-model-policy').inject, [
+      'apiProxy', 'connection', 'credentials', 'settings', 'storageDomain', 'llm', 'emateIdentity',
+    ])
     assert.equal(patchById.get('emate-identity').config.enterprise.clientId, 'e-mate-web')
     assert.equal(patchById.get('emate-identity').config.enterprise.organization, 'emate-v2')
     assert.equal(patchById.get('emate-share').name, './plugins/share.js')
@@ -530,7 +526,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(patch, /id: emate-agent-operations[\s\S]*\.\/plugins\/agent-operations\.js/)
     assert.match(patch, /id: emate-skill-hub-agent[\s\S]*\.\/plugins\/skill-hub-agent\.js/)
     assert.doesNotMatch(patch, /emate-(?:office-ocr|browser-computer-use|memory|dream|learning)/)
-    assert.match(patch, /id: emate-model-policy[\s\S]*\.\/plugins\/model-policy\.js[\s\S]*inject: \[apiProxy, connection, storageDomain, llm, emateIdentity\]/)
+    assert.match(patch, /id: emate-model-policy[\s\S]*\.\/plugins\/model-policy\.js[\s\S]*inject: \[apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity\]/)
     assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, emateModelPolicy\]/)
     assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*inject: \[tools, jobs, attachments, emateIdentity, emateModelPolicy, emateCapabilities\][\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
     assert.match(patch, /id: emate-legacy-migration[\s\S]*\.\/plugins\/legacy-migration\.js[\s\S]*inject: \[sessionPersistence, webServer\]/)
@@ -655,8 +651,8 @@ test('managed profile installation is idempotent', () => {
     assert.match(client, /legacy-artifact\.download/)
     assert.match(client, /conversation\.chat\.turnTail/)
     assert.match(client, /e-mate-office-artifacts/)
-    assert.match(client, /e-mate-activity-group/)
-    assert.match(client, /data-emate-activity-header/)
+    assert.match(client, /e-mate-image-disclosure/)
+    assert.doesNotMatch(client, /e-mate-activity-group|data-emate-activity-header|e-mate-message-disclosure/)
     const capabilities = readFileSync(new URL('../profile/plugins/emate-shell/src/client/capabilities.tsx', import.meta.url), 'utf8')
     assert.match(capabilities, /icons\[capability\.icon_key\]/)
     assert.match(capabilities, /社区 Skill 暂时不可用；内置能力仍可正常使用。/)
@@ -681,8 +677,8 @@ test('managed profile installation is idempotent', () => {
     assert.match(homeCss, /min-height:\s*44px/)
     assert.doesNotMatch(homeCss, /> div > div:first-of-type/)
     const chatCss = readFileSync(new URL('../profile/plugins/emate-shell/src/client/chat-chrome.module.css', import.meta.url), 'utf8')
-    assert.match(chatCss, /\[data-chat-flow-kind='tool-call'\] \+ \[data-chat-flow-kind='tool-call'\]/)
-    assert.match(chatCss, /\[data-chat-flow\] > \[role='status'\]/)
+    assert.doesNotMatch(chatCss, /data-turn-tail|data-emate-activity|data-disclosure-row/)
+    assert.doesNotMatch(chatCss, /data-chat-flow-kind='(?:user|steering|model-retry|turn-error|command)'/)
     assert.match(chatCss, /\[data-chat-flow-kind='assistant-step'\] \[data-align='start'\] > \[data-variant='single'\]/)
     assert.match(chatCss, /\[data-chat-flow-kind='assistant-step'\] \[data-align='start'\] > \[data-variant='tile'\]/)
     assert.match(chatCss, /width:\s*clamp\(112px, 18vw, 160px\) !important/)
@@ -693,29 +689,13 @@ test('managed profile installation is idempotent', () => {
     assert.match(catalogLoader, /callSkillHub\('catalog\.search'/)
     assert.ok(catalogLoader.indexOf('setBuiltins(') < catalogLoader.indexOf("callSkillHub('catalog.search'"))
     assert.match(catalogLoader, /catch \(skillHubError\) \{\s*setItems\(\[\]\)\s*setError\(message\(skillHubError\)\)/)
-    const activityHeader = readFileSync(new URL('../profile/plugins/emate-shell/src/client/activity-header.tsx', import.meta.url), 'utf8')
-    assert.match(activityHeader, /ConversationNodeDefinition<ActivityHeaderState>/)
-    assert.match(activityHeader, /event\.type === 'turn\/start'/)
-    assert.match(activityHeader, /event\.type === 'tool\/call'/)
-    assert.match(activityHeader, /event\.type === 'turn\/end'/)
-    assert.match(activityHeader, /data-emate-activity-collapsed/)
-    assert.match(activityHeader, /data-emate-activity-tail-status/)
-    assert.match(chatCss, /data-emate-activity-tail-status='failed'/)
-    assert.match(chatCss, /data-emate-activity-tail-status='cancelled'/)
-    assert.doesNotMatch(activityHeader, /\b(?:fetch|WebSocket|EventSource|setTimeout)\s*\(/)
-    const longMessage = readFileSync(new URL('../profile/plugins/emate-shell/src/client/long-message-disclosure.tsx', import.meta.url), 'utf8')
-    const longMessageCss = readFileSync(new URL('../profile/plugins/emate-shell/src/client/long-message-disclosure.module.css', import.meta.url), 'utf8')
-    assert.match(longMessage, /kind: 'e-mate-message-disclosure'/)
-    assert.match(longMessage, /event\.type === 'user\/message'/)
-    assert.match(longMessage, /event\.type === 'assistant\/message'/)
-    assert.match(longMessage, /text\.scrollHeight > 160/)
-    assert.match(longMessage, /data-emate-long-text-expanded/)
-    assert.match(longMessage, /createPortal\(/)
-    assert.match(longMessage, /data-emate-long-disclosure-host/)
-    assert.match(longMessage, /aria-controls=\{controlId\}/)
-    assert.match(longMessageCss, /\[data-emate-long-text\]\[data-emate-long-text-kind='assistant-step'\]/)
-    assert.match(longMessageCss, /\[data-emate-long-text\]\[data-emate-long-text-kind='user'\]/)
-    assert.doesNotMatch(longMessage, /\b(?:fetch|WebSocket|EventSource|setTimeout)\s*\(/)
+    const imageGallery = readFileSync(new URL('../profile/plugins/emate-shell/src/client/image-gallery.tsx', import.meta.url), 'utf8')
+    assert.match(imageGallery, /kind: 'e-mate-image-disclosure'/)
+    assert.match(imageGallery, /event\.type !== 'assistant\/message'/)
+    assert.match(imageGallery, /isAppendSurfaceEvent\(event\)/)
+    assert.match(imageGallery, /querySelectorAll<HTMLElement>\('\[data-align="start"\]'\)/)
+    assert.match(imageGallery, /gallery\.hidden = !expanded/)
+    assert.doesNotMatch(imageGallery, /\b(?:fetch|WebSocket|EventSource|setTimeout)\s*\(/)
     const legacyArtifactCss = readFileSync(new URL('../profile/plugins/emate-shell/src/client/legacy-artifacts.module.css', import.meta.url), 'utf8')
     assert.match(legacyArtifactCss, /flex-direction:\s*column/)
     assert.match(legacyArtifactCss, /\.item \+ \.item/)
@@ -758,12 +738,23 @@ test('public share capability stays on the target RPC seam and fails closed with
 
 test('OS credential provider preserves target layering without exposing values through describe', async () => {
   const stored = new Map()
+  let reads = 0
+  let writes = 0
+  let rejectWrite = false
+  let rejectUnset = false
   const backend = {
     source: 'keychain',
-    get: async ref => stored.get(ref),
+    get: async ref => { reads += 1; return stored.get(ref) },
     has: async ref => stored.has(ref),
-    set: async (ref, value) => { stored.set(ref, value) },
-    unset: async ref => stored.delete(ref),
+    set: async (ref, value) => {
+      if (rejectWrite) throw new Error('simulated credential write failure')
+      writes += 1
+      stored.set(ref, value)
+    },
+    unset: async ref => {
+      if (rejectUnset) throw new Error('simulated credential unset failure')
+      return stored.delete(ref)
+    },
   }
   const layers = {
     process: new Map(),
@@ -781,9 +772,26 @@ test('OS credential provider preserves target layering without exposing values t
   const credentials = new CredentialStore(environment, backend)
   await credentials.set('CONNECTOR_TOKEN', 'stored-secret')
   assert.deepEqual(await credentials.resolve('CONNECTOR_TOKEN'), { value: 'stored-secret', source: 'keychain' })
+  assert.deepEqual(await credentials.resolve('CONNECTOR_TOKEN'), { value: 'stored-secret', source: 'keychain' })
+  await credentials.set('CONNECTOR_TOKEN', 'stored-secret')
+  assert.deepEqual({ reads, writes }, { reads: 0, writes: 1 })
+  const restored = new CredentialStore(environment, backend)
+  assert.deepEqual(await restored.resolve('CONNECTOR_TOKEN'), { value: 'stored-secret', source: 'keychain' })
+  assert.deepEqual(await restored.resolve('CONNECTOR_TOKEN'), { value: 'stored-secret', source: 'keychain' })
+  assert.equal(reads, 1)
+  await credentials.set('CONNECTOR_TOKEN', 'next-account-secret')
+  assert.deepEqual(await credentials.resolve('CONNECTOR_TOKEN'), { value: 'next-account-secret', source: 'keychain' })
+  rejectWrite = true
+  await assert.rejects(credentials.set('CONNECTOR_TOKEN', 'failed-account-secret'), /simulated credential write failure/u)
+  rejectWrite = false
+  assert.deepEqual(await credentials.resolve('CONNECTOR_TOKEN'), { value: 'next-account-secret', source: 'keychain' })
+  rejectUnset = true
+  await assert.rejects(credentials.unset('CONNECTOR_TOKEN'), /simulated credential unset failure/u)
+  rejectUnset = false
+  assert.deepEqual(await credentials.resolve('CONNECTOR_TOKEN'), { value: 'next-account-secret', source: 'keychain' })
   const described = await credentials.describe('CONNECTOR_TOKEN')
   assert.deepEqual(described, { configured: true, source: 'keychain', writable: true })
-  assert.equal(JSON.stringify(described).includes('stored-secret'), false)
+  assert.equal(JSON.stringify(described).includes('next-account-secret'), false)
   assert.deepEqual(await credentials.resolve('PROJECT_ONLY'), { value: 'project-secret', source: 'project-env' })
   layers.process.set('CONNECTOR_TOKEN', 'process-secret')
   assert.deepEqual(await credentials.resolve('CONNECTOR_TOKEN'), { value: 'process-secret', source: 'env' })
@@ -1610,6 +1618,24 @@ test('enterprise identity provider maps target credentials and the production HT
         calculatedAt: new Date(clock).toISOString(),
       })
     }
+    if (url.pathname.endsWith('/v1/runtime-models')) {
+      return json({
+        schemaVersion: 1,
+        models: [{
+          id: 'gpt-5.6-luna',
+          apiMode: 'responses',
+          upstreamModelId: 'gpt-5.6-luna',
+          upstreamBaseUrl: 'http://provider.example:8080/v1',
+          allowInsecureHttpUpstream: true,
+          upstreamApiKey: 'runtime-provider-key-not-persisted-here',
+          label: 'GPT-5.6 Luna · 最大推理',
+          input: ['text', 'image'],
+          reasoning: true,
+          contextWindow: 1_050_000,
+          maxTokens: 128_000,
+        }],
+      })
+    }
     throw new Error(`unexpected test endpoint ${url.pathname}`)
   }
   const provider = createEnterpriseIdentityProvider({
@@ -1653,7 +1679,7 @@ test('enterprise identity provider maps target credentials and the production HT
     /simulated model credential failure/,
   )
   assert.equal(values.has('E_MATE_ENTERPRISE_SESSION'), false)
-  assert.equal(values.get(MODEL_SESSION_REF), 'previous-model-token')
+  assert.equal(values.has(MODEL_SESSION_REF), false)
   rejectModelCredential = false
   values.delete(MODEL_SESSION_REF)
   await provider.login({ identifier: 'test.user', password: 'secret-value', remember_login: true })
@@ -1668,11 +1694,22 @@ test('enterprise identity provider maps target credentials and the production HT
   assert.equal(locked.workspace_unlocked, false)
   assert.equal('accessToken' in locked, false)
   assert.equal('sessionToken' in locked, false)
+  const consentRequestsAfterFirstBootstrap = requests.filter(request => request.path.endsWith('/v1/consents/current')).length
+  await provider.bootstrap()
+  assert.equal(
+    requests.filter(request => request.path.endsWith('/v1/consents/current')).length,
+    consentRequestsAfterFirstBootstrap + 1,
+  )
   const modelPolicy = await provider.modelPolicy()
   assert.equal(modelPolicy.default_chat_model_id, 'gpt-5.6-luna')
   assert.deepEqual(modelPolicy.allowed_model_ids, [
     'gpt-5.6-luna', 'gpt-image-2-pro', 'gpt-image-2',
   ])
+  const runtimePolicy = await provider.modelRuntimePolicy()
+  assert.equal(runtimePolicy.models[0].provider, 'e-mate-enterprise')
+  assert.equal(runtimePolicy.models[0].credentialRef, 'E_MATE_MODEL_KEY_GPT')
+  assert.equal(runtimePolicy.models[0].upstreamBaseUrl, 'http://provider.example:8080/v1')
+  assert.equal(values.has('E_MATE_MODEL_KEY_GPT'), false)
   const usage = await provider.usage('Asia/Shanghai')
   assert.equal(usage.week.total_tokens, 12_345)
   assert.equal(usage.timezone, 'Asia/Shanghai')
@@ -1680,8 +1717,18 @@ test('enterprise identity provider maps target credentials and the production HT
   const unlocked = await provider.bootstrap()
   assert.equal(unlocked.workspace_unlocked, true)
   assert.equal(unlocked.agreement_receipt_id, 'acceptance-receipt-207')
+  const consentRequestsAfterAcceptance = requests.filter(request => request.path.endsWith('/v1/consents/current')).length
+  await provider.bootstrap()
+  assert.equal(
+    requests.filter(request => request.path.endsWith('/v1/consents/current')).length,
+    consentRequestsAfterAcceptance + 1,
+  )
   const protectedRequests = requests.filter(request => request.path.includes('/v1/consents/'))
   assert.ok(protectedRequests.every(request => request.authorization === `Bearer ${modelToken}`))
+  const runtimeRequests = requests.filter(request => request.path.endsWith('/v1/runtime-models'))
+  assert.ok(runtimeRequests.length >= 2)
+  assert.ok(runtimeRequests.every(request => request.authorization === `Bearer ${modelToken}`))
+  values.set('E_MATE_MODEL_KEY_GPT', 'runtime-provider-key-not-persisted-here')
   const logout = await provider.logout({ client_request_id: 'logout-request-207' })
   assert.equal(logout.receipt_id, 'logout-receipt-207')
   assert.equal(values.size, 0)
@@ -1774,6 +1821,17 @@ test('enterprise model switch delegates to the target session, keeps its history
   }
   const domain = { table: name => name === 'active' ? table : undefined, close: async () => {} }
   const calls = { selected: [], policy: 0 }
+  const credentialValues = new Map()
+  let llmSettings = {
+    providers: {
+      'e-mate-enterprise': {
+        apiKeyEnv: 'E_MATE_MODEL_SESSION_TOKEN',
+        api: 'openai-responses',
+        baseURL: 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1',
+        models: [{ id: 'gpt-5.6-luna' }],
+      },
+    },
+  }
   const session = {
     current: { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', reasoningEffort: 'max' },
     messages: [
@@ -1792,7 +1850,7 @@ test('enterprise model switch delegates to the target session, keeps its history
     schema_version: 1,
     account_subject: accountSubject,
     revision: 7,
-    allowed_model_ids: ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-image-2-pro', 'gpt-image-2'],
+    allowed_model_ids: ['gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek', 'gpt-image-2-pro', 'gpt-image-2'],
     default_chat_model_id: 'gpt-5.6-luna',
     default_chat_reasoning_effort: 'max',
     image_primary_model_id: 'gpt-image-2-pro',
@@ -1801,6 +1859,7 @@ test('enterprise model switch delegates to the target session, keeps its history
     expires_at: new Date(now + 60 * 60_000).toISOString(),
     receipt_id: 'policy-receipt:test-207',
   })
+  records.set('active', validateModelPolicy(policy(), accountSubject, now))
   const catalog = {
     groups: [{
       id: 'enterprise',
@@ -1808,6 +1867,7 @@ test('enterprise model switch delegates to the target session, keeps its history
       models: [
         { id: 'gpt-5.6-luna', name: 'e-Mate Chat' },
         { id: 'gpt-5.6-sol', name: 'e-Mate Sol' },
+        { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Pro' },
       ],
     }],
     failures: [],
@@ -1841,13 +1901,69 @@ test('enterprise model switch delegates to the target session, keeps its history
         return () => {}
       } } },
       llm: {},
+      credentials: {
+        resolve: async ref => credentialValues.has(ref) ? { value: credentialValues.get(ref), source: 'test' } : undefined,
+        set: async (ref, value) => { credentialValues.set(ref, value) },
+        unset: async ref => { credentialValues.delete(ref) },
+      },
+      settings: {
+        get: ns => ns === 'llm-pi-ai' ? structuredClone(llmSettings) : undefined,
+        replace: async (ns, value) => {
+          assert.equal(ns, 'llm-pi-ai')
+          llmSettings = structuredClone(value)
+        },
+      },
       storageDomain: { open: async () => domain },
       emateIdentity: {
+        localAccountSubject: () => accountSubject,
         state: async () => ({ authenticated: true, workspace_unlocked: true, account_subject: accountSubject }),
-        modelPolicy: async () => {
+        modelRuntimePolicy: async () => {
           calls.policy += 1
           if (!providerAvailable) throw new Error('enterprise unavailable')
-          return policy()
+          return {
+            policy: policy(),
+            models: [
+              {
+                id: 'gpt-5.6-luna',
+                provider: 'e-mate-enterprise',
+                credentialRef: 'E_MATE_MODEL_KEY_GPT',
+                api: 'openai-responses',
+                upstreamModelId: 'gpt-5.6-luna',
+                upstreamBaseUrl: 'http://provider.example:8080/v1',
+                upstreamApiKey: 'production-key-redacted-for-test-123',
+                label: 'GPT-5.6 Luna · 最大推理',
+                input: ['text', 'image'],
+                contextWindow: 1_050_000,
+                maxTokens: 128_000,
+              },
+              {
+                id: 'gpt-5.6-sol',
+                provider: 'e-mate-enterprise',
+                credentialRef: 'E_MATE_MODEL_KEY_GPT',
+                api: 'openai-responses',
+                upstreamModelId: 'gpt-5.6-sol',
+                upstreamBaseUrl: 'http://provider.example:8080/v1',
+                upstreamApiKey: 'production-key-redacted-for-test-123',
+                label: 'GPT-5.6 Sol · 中等推理',
+                input: ['text', 'image'],
+                contextWindow: 1_050_000,
+                maxTokens: 128_000,
+              },
+              {
+                id: 'deepseek',
+                provider: 'e-mate-enterprise-deepseek',
+                credentialRef: 'E_MATE_MODEL_KEY_DEEPSEEK',
+                api: 'openai-completions',
+                upstreamModelId: 'deepseek-v4-flash',
+                upstreamBaseUrl: 'https://api.deepseek.com/v1',
+                upstreamApiKey: 'deepseek-key-redacted-for-test-123',
+                label: 'DeepSeek V4 Pro · 最大推理',
+                input: ['text'],
+                contextWindow: 131_072,
+                maxTokens: 65_536,
+              },
+            ],
+          }
         },
       },
       provide: (name, value) => {
@@ -1869,18 +1985,41 @@ test('enterprise model switch delegates to the target session, keeps its history
 
     assert.equal(rpc.channel, MODEL_POLICY_CHANNEL)
     assert.deepEqual(rpc.options, { authority: 'loopback' })
+    await assert.rejects(
+      requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })),
+      /native runtime model projection is not ready/,
+    )
+    assert.equal(calls.policy, 0)
     const current = await rpc.handler('policy.current', {})
     assert.equal(current.ok, true)
     assert.equal(current.value.revision, 7)
     assert.equal('account_subject' in current.value, false)
     assert.match(records.get('active').policy_sha256, /^[0-9a-f]{64}$/)
+    assert.equal(credentialValues.get('E_MATE_MODEL_KEY_GPT'), 'production-key-redacted-for-test-123')
+    assert.equal(credentialValues.get('E_MATE_MODEL_KEY_DEEPSEEK'), 'deepseek-key-redacted-for-test-123')
+    assert.equal(llmSettings.providers['e-mate-enterprise'].baseURL, 'http://provider.example:8080/v1')
+    assert.equal(llmSettings.providers['e-mate-enterprise'].apiKeyEnv, 'E_MATE_MODEL_KEY_GPT')
+    assert.deepEqual(
+      llmSettings.providers['e-mate-enterprise'].models.map(model => model.id),
+      ['gpt-5.6-luna', 'gpt-5.6-sol'],
+    )
+    assert.deepEqual(
+      llmSettings.providers['e-mate-enterprise-deepseek'].models.map(model => model.id),
+      ['deepseek-v4-flash'],
+    )
+    assert.doesNotMatch(JSON.stringify(llmSettings), /redacted-for-test/u)
+    assert.doesNotMatch(JSON.stringify(llmSettings), /model-api/u)
     assert.equal((await rpc.handler('unknown', {})).error.code, 'bad-request')
 
     const models = await apiProxy.sessions.models({ rpcId: 'models-1', payload: { sessionId: 'session-1' } })
-    assert.deepEqual(models.result.value.groups[0].models.map(model => model.id), ['gpt-5.6-luna', 'gpt-5.6-sol'])
+    assert.deepEqual(models.result.value.groups[0].models.map(model => model.id), [
+      'gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek-v4-flash',
+    ])
     assert.equal(models.result.value.routable, true)
     const settingsModels = await apiProxy.llm.models({ rpcId: 'models-2', payload: {} })
-    assert.deepEqual(settingsModels.result.value.groups[0].models.map(model => model.id), ['gpt-5.6-luna', 'gpt-5.6-sol'])
+    assert.deepEqual(settingsModels.result.value.groups[0].models.map(model => model.id), [
+      'gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek-v4-flash',
+    ])
     const allowed = await apiProxy.sessions.selectModel({
       rpcId: 'select-1', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', reasoningEffort: 'max' },
     })
@@ -1898,13 +2037,18 @@ test('enterprise model switch delegates to the target session, keeps its history
     assert.equal(blocked.result.error.code, 'model-unavailable')
     assert.deepEqual(calls.selected.map(call => call.model), ['gpt-5.6-luna', 'gpt-5.6-sol'])
     assert.ok(calls.selected.every(call => call.sessionId === 'session-1'))
+    const policyCallsBeforeHotPath = calls.policy
     assert.deepEqual(
       await requestPolicy({}, async () => structuredClone(session.current)),
       session.current,
     )
     await assert.rejects(
-      requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'deepseek' })),
+      requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'unknown-native-model' })),
       /not allowed/,
+    )
+    assert.deepEqual(
+      await requestPolicy({}, async () => ({ provider: 'e-mate-enterprise-deepseek', model: 'deepseek-v4-flash' })),
+      { provider: 'e-mate-enterprise-deepseek', model: 'deepseek-v4-flash' },
     )
     const streamed = []
     for await (const chunk of streamPolicy(
@@ -1912,9 +2056,10 @@ test('enterprise model switch delegates to the target session, keeps its history
       () => (async function* () { yield 'ok' })(),
     )) streamed.push(chunk)
     assert.deepEqual(streamed, ['ok'])
+    assert.equal(calls.policy, policyCallsBeforeHotPath)
     await assert.rejects(async () => {
       for await (const _chunk of streamPolicy(
-        { provider: 'e-mate-enterprise', model: 'deepseek' },
+        { provider: 'e-mate-enterprise', model: 'unknown-native-model' },
         () => (async function* () { yield 'blocked' })(),
       )) {}
     }, /not allowed/)
@@ -1927,6 +2072,10 @@ test('enterprise model switch delegates to the target session, keeps its history
     assert.equal(cachedSwitch.result.ok, true)
     assert.deepEqual(session.messages, historyBeforeSwitch)
     accountSubject = 'account:other-207'
+    await assert.rejects(
+      requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })),
+      /cache is unavailable or expired/,
+    )
     await assert.rejects(modelPolicy.refresh({ force: true }), /enterprise unavailable/)
     assert.throws(
       () => validateModelPolicy({ ...policy(), allowed_model_ids: ['gpt-5.6-luna', 'unknown'] }, accountSubject, now),

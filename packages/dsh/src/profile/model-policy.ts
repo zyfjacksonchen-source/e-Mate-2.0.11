@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { loadTargetStorageDomain } from './target-runtime.js'
 
 export const name = 'emate-model-policy'
-export const inject = ['apiProxy', 'connection', 'storageDomain', 'llm', 'emateIdentity']
+export const inject = ['apiProxy', 'connection', 'credentials', 'settings', 'storageDomain', 'llm', 'emateIdentity']
 export const MODEL_POLICY_CHANNEL = '/emate.modelPolicy'
 
 const CHAT_MODELS = new Map([
@@ -91,8 +91,12 @@ export function validateModelPolicy(value, accountSubject, now = Date.now()) {
   }
 }
 
+function policyModelId(model) {
+  return model === 'deepseek-v4-flash' ? 'deepseek' : model
+}
+
 function allowed(policy, model) {
-  return policy.allowed_model_ids.includes(model)
+  return policy.allowed_model_ids.includes(policyModelId(model))
 }
 
 function filterGroups(groups, policy) {
@@ -116,8 +120,103 @@ function modelUnavailable(request, provider, model, message = `Model "${model}" 
   }
 }
 
+const RUNTIME_REASONING = new Map([
+  ['gpt-5.6-luna', { max: 'high' }],
+  ['gpt-5.6-sol', { medium: 'medium' }],
+  ['deepseek-v4-flash', { max: 'max' }],
+  ['doubao-seed-2-0-pro-260215', { medium: 'medium' }],
+])
+const RUNTIME_CREDENTIAL_REFS = new Set([
+  'E_MATE_MODEL_KEY_GPT',
+  'E_MATE_MODEL_KEY_DEEPSEEK',
+  'E_MATE_MODEL_KEY_DOUBAO',
+])
+
+function hasNativeRuntimeProjection(ctx) {
+  const value = ctx.settings?.get?.('llm-pi-ai')
+  if (!isRecord(value) || !isRecord(value.providers)) return false
+  const providers = Object.values(value.providers)
+  return providers.length > 0 && providers.every(provider => isRecord(provider)
+    && typeof provider.apiKeyEnv === 'string'
+    && RUNTIME_CREDENTIAL_REFS.has(provider.apiKeyEnv))
+}
+
+async function projectRuntimeModels(ctx, models) {
+  if (!Array.isArray(models) || models.length < 1 || models.length > CHAT_MODELS.size) {
+    throw new Error('e-Mate runtime model projection is invalid')
+  }
+  const credentials = new Map()
+  const providers = {}
+  for (const model of models) {
+    if (!isRecord(model)
+      || typeof model.id !== 'string'
+      || typeof model.provider !== 'string'
+      || typeof model.credentialRef !== 'string'
+      || typeof model.api !== 'string'
+      || typeof model.upstreamModelId !== 'string'
+      || typeof model.upstreamBaseUrl !== 'string'
+      || typeof model.upstreamApiKey !== 'string'
+      || typeof model.label !== 'string'
+      || !Array.isArray(model.input)
+      || !Number.isSafeInteger(model.contextWindow)
+      || !Number.isSafeInteger(model.maxTokens)
+      || model.id === 'deepseek' && model.upstreamModelId !== 'deepseek-v4-flash'
+      || !RUNTIME_CREDENTIAL_REFS.has(model.credentialRef)
+      || !RUNTIME_REASONING.has(model.upstreamModelId)
+      || !['openai-responses', 'openai-completions'].includes(model.api)) {
+      throw new Error('e-Mate runtime model projection is invalid')
+    }
+    const credential = credentials.get(model.credentialRef)
+    if (credential !== undefined && credential !== model.upstreamApiKey) {
+      throw new Error('e-Mate runtime model routes sharing a credential reference disagree')
+    }
+    credentials.set(model.credentialRef, model.upstreamApiKey)
+    const existing = providers[model.provider]
+    if (existing !== undefined
+      && (existing.api !== model.api
+        || existing.baseURL !== model.upstreamBaseUrl
+        || existing.apiKeyEnv !== model.credentialRef)) {
+      throw new Error('e-Mate runtime model routes sharing a provider disagree')
+    }
+    const provider = existing ?? {
+      displayName: 'e-Mate',
+      apiKeyEnv: model.credentialRef,
+      api: model.api,
+      baseURL: model.upstreamBaseUrl,
+      models: [],
+    }
+    provider.models.push({
+      id: model.upstreamModelId,
+      name: model.label,
+      contextWindow: model.contextWindow,
+      maxTokens: model.maxTokens,
+      input: [...model.input],
+      reasoningEfforts: RUNTIME_REASONING.get(model.upstreamModelId),
+    })
+    providers[model.provider] = provider
+  }
+
+  const previous = new Map(await Promise.all([...credentials.keys()].map(async ref => [ref, await ctx.credentials.resolve(ref)])))
+  try {
+    await Promise.all([...credentials].map(([ref, value]) => ctx.credentials.set(ref, value)))
+    const next = { providers }
+    if (canonicalJson(ctx.settings.get('llm-pi-ai')) !== canonicalJson(next)) {
+      await ctx.settings.replace('llm-pi-ai', next)
+    }
+  } catch (error) {
+    await Promise.allSettled([...previous].map(([ref, hit]) => hit === undefined
+      ? ctx.credentials.unset(ref)
+      : ctx.credentials.set(ref, hit.value)))
+    throw error
+  }
+  await Promise.allSettled([...RUNTIME_CREDENTIAL_REFS]
+    .filter(ref => !credentials.has(ref))
+    .map(ref => ctx.credentials.unset(ref)))
+}
+
 function createService(ctx, table) {
   let cached = [...table.entries()].find(([key]) => key === 'active')?.[1]
+  let runtimeReady = typeof ctx.emateIdentity.modelRuntimePolicy !== 'function' || hasNativeRuntimeProjection(ctx)
   let lastRefresh = 0
   let refreshing
 
@@ -155,7 +254,14 @@ function createService(ctx, table) {
     }
     const promise = (async () => {
       try {
-        const policy = validateModelPolicy(await ctx.emateIdentity.modelPolicy(), state.account_subject, now)
+        const runtime = typeof ctx.emateIdentity.modelRuntimePolicy === 'function'
+          ? await ctx.emateIdentity.modelRuntimePolicy()
+          : { policy: await ctx.emateIdentity.modelPolicy() }
+        const policy = validateModelPolicy(runtime.policy, state.account_subject, now)
+        if (runtime.models !== undefined) {
+          await projectRuntimeModels(ctx, runtime.models)
+          runtimeReady = true
+        }
         await table.put('active', policy)
         cached = policy
         lastRefresh = now
@@ -177,11 +283,24 @@ function createService(ctx, table) {
     }
   }
 
+  const activeCached = () => {
+    if (!runtimeReady) throw new Error('e-Mate native runtime model projection is not ready')
+    const subject = typeof ctx.emateIdentity.localAccountSubject === 'function'
+      ? ctx.emateIdentity.localAccountSubject()
+      : cached?.account_subject
+    const policy = typeof subject === 'string' ? validCached(subject, Date.now()) : undefined
+    if (policy === undefined) throw new Error('e-Mate model policy cache is unavailable or expired')
+    if (Date.now() - lastRefresh >= REFRESH_MS && refreshing === undefined) {
+      void refresh().catch(error => ctx.logger?.warn?.('e-Mate model policy background refresh failed', error))
+    }
+    return policy
+  }
+
   return {
     refresh,
     async current() { return publicPolicy(await refresh()) },
-    async auditContext(model) {
-      const policy = await refresh()
+    auditContext(model) {
+      const policy = activeCached()
       if (!allowed(policy, model)) throw new Error(`Model "${model}" is not allowed by the current e-Mate policy.`)
       return {
         account_subject_sha256: createHash('sha256').update(policy.account_subject).digest('hex'),
@@ -190,8 +309,8 @@ function createService(ctx, table) {
         policy_sha256: policy.policy_sha256,
       }
     },
-    async assertModel(model) {
-      const policy = await refresh()
+    assertModel(model) {
+      const policy = activeCached()
       if (!allowed(policy, model)) throw new Error(`Model "${model}" is not allowed by the current e-Mate policy.`)
       return publicPolicy(policy)
     },

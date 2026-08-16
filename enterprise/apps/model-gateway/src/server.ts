@@ -59,6 +59,9 @@ const managedCodexModelIds = new Set([
   'doubao-seed-2-0-pro-260215',
 ]);
 
+const runtimeApiMode = (route: ModelGatewayRoute): 'responses' | 'chat-completions' =>
+  route.apiMode === 'chat-completions' ? 'chat-completions' : 'responses';
+
 const eMateAgentBaseInstructions = `You are 小芯, the all-purpose office and creative agent developed by 亦芯 for e-Mate. Work with the user until the requested outcome is genuinely handled. Follow all session, developer, Skill, and tool instructions injected by e-Mate. Use only capabilities actually available in the current session, respect workspace and permission boundaries, and request authorization before side effects. Never fabricate tool results, tests, files, sources, or completion; verify deliverables and report partial failures accurately. Protect user data and hidden reasoning, exposing only safe progress summaries. Never expose internal runtime or provider brands. Respond in Chinese unless the user requests another language.`;
 
 type CodexCatalogRoute = Pick<
@@ -1339,6 +1342,7 @@ const definitelyRejectedStatuses = new Set([400, 401, 403, 404, 413, 415, 422, 4
 const imageFallbackStatuses = new Set([400, 404, 415, 422]);
 const consentProtectedPaths = new Set([
   '/v1/models',
+  '/v1/runtime-models',
   '/v1/responses',
   '/v1/chat/completions',
   '/v1/images/generations',
@@ -1474,6 +1478,42 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           models: cliCatalog,
           data: chatCatalog.map(({ id, capabilities }) => ({ id, capabilities })),
         });
+        return;
+      }
+      if (url.pathname === '/v1/runtime-models') {
+        if (request.method !== 'GET') return method(response, 'GET');
+        const availableRoutes = (
+          await Promise.all(
+            options.routes.map(async (route) =>
+              managedCodexModelIds.has(route.id) &&
+              route.apiMode !== 'images-generations' &&
+              principalAllowsRoute(identity, route.id) &&
+              (await modelRouteEnabled(options.tenantModelRoutePolicy, identity.tenantId, route.id))
+                ? {
+                    id: route.id,
+                    apiMode: runtimeApiMode(route),
+                    upstreamModelId: route.upstreamModelId,
+                    upstreamBaseUrl: route.upstreamBaseUrl,
+                    ...(route.allowInsecureHttpUpstream === true ? { allowInsecureHttpUpstream: true } : {}),
+                    upstreamApiKey: await modelRouteUpstreamApiKey(
+                      options.tenantModelRoutePolicy,
+                      identity.tenantId,
+                      route
+                    ),
+                    label: route.label,
+                    input: route.input,
+                    reasoning: route.reasoning,
+                    contextWindow: route.contextWindow,
+                    maxTokens: route.maxTokens,
+                  }
+                : null
+            )
+          )
+        ).filter((route): route is NonNullable<typeof route> => route !== null);
+        if (availableRoutes.length === 0) {
+          throw new HttpError(403, 'MODEL_ACCESS_DENIED', 'No model is available');
+        }
+        json(response, 200, { schemaVersion: 1, models: availableRoutes });
         return;
       }
       if (url.pathname === '/v1/usage/current') {

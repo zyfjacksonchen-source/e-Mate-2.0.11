@@ -2215,6 +2215,71 @@ test('lists exactly the four managed chat models for Codex clients', async () =>
   }
 });
 
+test('delivers only the authenticated tenant runtime model routes without exposing them through the public catalog', async () => {
+  const luna = {
+    ...route,
+    id: 'gpt-5.6-luna',
+    upstreamModelId: 'gpt-5.6-luna',
+    label: 'GPT-5.6 Luna',
+    buttonLabel: 'GPT-5.6 Luna · 深度',
+  };
+  const tenantKey = 'tenant-specific-provider-key-123456789';
+  const identity = {
+    tenantId: 'tenant-a',
+    userId: 'user-a',
+    modelIds: [luna.id, chatRoute.id],
+  };
+  const consentStore = new InMemoryConsentStore(consentPolicy);
+  await consentStore.accept(identity, consentInput);
+  const server = createModelGatewayServer({
+    routes: [luna, chatRoute, imageRoute],
+    authenticate: async (token) => token === sessionToken ? identity : null,
+    consentStore,
+    tenantModelRoutePolicy: {
+      isEnabled: async (_tenantId, routeId) => routeId !== chatRoute.id,
+      upstreamApiKey: async (_tenantId, routeId) => routeId === luna.id ? tenantKey : null,
+    },
+    usageStore: new InMemoryUsageStore(limits),
+    usageKeyId: 'usage-2026',
+    usagePrivateKey: privateKey,
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    assert.equal((await fetch(`${baseUrl}/v1/runtime-models`)).status, 401);
+    assert.equal((await fetch(`${baseUrl}/v1/runtime-models?all=true`, { headers: auth() })).status, 400);
+    assert.equal((await fetch(`${baseUrl}/v1/runtime-models`, { method: 'POST', headers: auth() })).status, 405);
+    const response = await fetch(`${baseUrl}/v1/runtime-models`, { headers: auth() });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('access-control-allow-origin'), null);
+    assert.deepEqual(await response.json(), {
+      schemaVersion: 1,
+      models: [{
+        id: luna.id,
+        apiMode: 'responses',
+        upstreamModelId: luna.upstreamModelId,
+        upstreamBaseUrl: luna.upstreamBaseUrl,
+        upstreamApiKey: tenantKey,
+        label: luna.label,
+        input: luna.input,
+        reasoning: true,
+        contextWindow: luna.contextWindow,
+        maxTokens: luna.maxTokens,
+      }],
+    });
+    const catalog = JSON.stringify(await (await fetch(`${baseUrl}/v1/models`, { headers: auth() })).json());
+    assert.doesNotMatch(catalog, /provider-key|provider\.example/u);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
 test('freezes usage while preserving exact replay idempotency', async () => {
   const store = new InMemoryUsageStore(limits);
   const fact = {

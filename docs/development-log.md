@@ -1038,3 +1038,19 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 普通用户在 Browser 中逐项勾选三项确认并签署协议，企业数据库回读 agreement/disclaimer version 均为 `2026-08-14.1`，随后进入工作区。默认模型真实显示 Luna；同一 Session 的 Luna 首轮回复编号 `207`，第二轮准确回忆 `207`；切换 Sol 后第三轮仍回复 `207`，模型选择器同时回读 Sol，证明模型切换生效且上下文连续。三轮实测分别为 Luna 21.4s/首 Token 18.8s/5.4 tok/s、Luna 15s/首 Token 14s/7.2 tok/s、Sol 20s/首 Token 20s/32 tok/s；用户中心回读 48,855 / 100,000 Token。
 - 首次真实登录同时暴露 macOS `security -w` 交互输入对长凭据截断的根因。OS credential provider 保持 Keychain-only：不把值放 argv、环境变量或文件；超过 96B 的值改为带 generation、SHA-256 manifest 和写后校验的分片，且同一 credential ref 的 set/unset 串行化。4 KiB 真实 Keychain round-trip 与 256B 并发覆盖探针均通过，Model Token 和 Session 不再出现 generation incomplete。
 - 用户在现有账户设置中完成改密，服务撤销旧租约并返回登录页；旧密码经 Auth 401/`INVALID_GRANT` 映射为 Harness `bad-request`，页面显示“账号或密码错误”，新密码重新登录成功且原本地会话保留。HTTP 500、未知 4xx 和网络失败继续抛出，不被误报为凭据错误。管理员真实登录直接进入工作区、未进入协议页，生产数据库回执数保持 0；未生成管理员假签署记录。
+
+## 2026-08-16 · S04/S07 Luna 首响分段与原生直连修复候选
+
+- 真实 Session 事件分段确认首轮 Luna 的 `turn/start → request/header` 为 7.950s、`request/header → first assistant/chunk` 为 10.882s、首 chunk 到终态为 2.602s，总计 21.434s；输入 14,729、输出 14，生成段 5.38 tok/s。第二轮缓存上下文后 TTFT 仍为 14.457s，说明问题不只在首轮 Skill/System catalog。请求头约 51.7 KiB、40 个真实 Tool；没有删除必要系统提示、安全边界或 Tool 能力。
+- 本机 Keychain 分段发现模型短令牌首读 837.945ms、企业 Session 首读 2,912.145ms，随后同进程重复读取分别降为 0.020/0.007ms 与 0.019/0.007ms。OS credential provider 只增加与 `set/unset` 同步失效的正值缓存；环境变量优先级不变，相同 durable value 的 `set` 为 no-op，写入/删除失败不会公布新值或回退到旧账号值。协议状态仍每次请求企业当前政策，没有做进程生命周期缓存。
+- 更根本的架构违背是 e-Mate profile 把 rc.5 原生 `llm-pi-ai` 指向企业 Model Gateway，使聊天 SSE 进入了本应只负责鉴权、策略下发和旁路审计的企业层。修复候选保留唯一的 target adapter：Gateway 新增同一 JWT、协议、租户启用和允许模型过滤下的 Host-only `GET /v1/runtime-models`，只下发聊天路由 direct Base URL、真实 upstream model id、协议、能力和 Key；无 CORS、`Cache-Control: no-store`，公开 `/v1/models` 继续剥离这些字段。
+- 本地 enterprise provider 对 runtime bundle exact validate，HTTP 只有路由显式 opt-in 才接受；Key 只写 Keychain/DPAPI，非秘密 provider profile 通过 target `settings` 的 `llm-pi-ai` namespace 热投影。静态 profile 已删除聊天 Gateway URL/Token，Luna/Sol 保持 provider `e-mate-enterprise`；durable/public policy v1 继续使用兼容 ID `deepseek`，只有 target native projection 使用真实 `deepseek-v4-flash` 并独立 route，未在 pinned adapter 中伪造 alias。模型调用前只读取本地有效、账号绑定的 policy cache；过期、账号切换或旧 Gateway settings 尚未被 native projection 替换时立即 fail closed，企业刷新在后台触发，真实 audit usage 仍写本地 durable outbox 后异步上送。
+- Model Gateway TypeScript check 与 84 项测试为 78 pass / 6 环境 skip；`@e-mate/dsh` build 及 OS credential、identity、runtime projection、模型切换聚焦 4/4 通过。未部署、未修改生产；一次受控 direct upstream 探针返回 HTTP 503 后停止，没有盲重试或冒充 before/after。正式关闭仍需生产把权威聊天 route 从内网 bridge 改为客户端可达的批准 upstream，完成同数据集至少 3 次配对并报告 p50/p95、TTFT、总时长、tok/s 和输入 token。
+- 直连后服务器不再逐请求同步执行周额度 admission；本地 durable quota enforcement 尚无现成完整 seam，保持独立发布阻塞。图片插件仍按既有专用 Gateway 路径运行，也必须作为后续切片处理，不能用本次聊天 LLM 修复宣称全部模型调用链已完成。
+
+## 2026-08-16 · S02/S03 消息流回归 Harness 原生展示
+
+- 用户最终明确撤销 `019ff665-d721-79a0-869d-338f086cf529` 与 e-Mate 2.0.4/2.0.5 的消息流展示升级。当前候选删除 ActivityHeader、RetryAttempts、LongMessageDisclosure 及对应 keyed slot/CSS，重新由 pinned rc.5 的 Message、Retry、TurnStatus、Tool、Disclosure 和 Actions 完整负责消息展现与交互；Session、Conversation events、Store、Router、Connection 与 transport 均未修改。
+- 唯一保留的消息视觉例外是图片画廊：辅助节点只匹配真实 append `assistant/message` 图片块，只切换同一 target ImageGallery DOM 的 hidden 状态；图片加载、鉴权、重试和 Lightbox 仍由目标 renderer 负责。`dsh-genui` 的 bundle、patch、`render_ui`/`validate_dsh_ui` Tool 和 client renderer 无代码差异，并有静态注册回归。
+- 主代理在既有真实账号和持久 Session 上复验：自定义 Activity/Retry/LongText 节点计数为 0，目标 Think disclosure 原位展开，消息复制/反馈/分支动作保持目标实现，禁用 trajectory 后无可见 Inspect；点击折叠后的 computed outline style 为 `none`、box-shadow 为 `none`，没有红/蓝框。品牌相关目标色 Token 继续投影为 e-Mate 橙色。
+- 主包完整测试为 Node 47/47、shell 31/31，`@e-mate/dsh` build、target pin 和 diff check 均通过。主代理截图为 `artifacts/design-qa/S03-target-message-stream-main/target-native-message-stream-no-focus-ring.png`。旧日志中的原型活动组、重试链和长文本视觉验收仅是历史证据，已被本次最终产品决策取代。

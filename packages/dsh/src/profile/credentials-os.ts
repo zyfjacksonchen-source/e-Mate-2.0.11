@@ -402,6 +402,8 @@ export function createOsCredentialBackend(
 }
 
 export class CredentialStore {
+  private readonly resolved = new Map<string, string>()
+
   constructor(
     private readonly environment: EnvironmentSnapshot,
     private readonly backend: CredentialBackend,
@@ -420,14 +422,20 @@ export class CredentialStore {
   async resolve(ref: string): Promise<{ value: string; source: string } | undefined> {
     const inherited = this.inherited(ref)
     if (inherited !== undefined) return { value: inherited.value, source: 'env' }
+    const cached = this.resolved.get(ref)
+    if (cached !== undefined) return { value: cached, source: this.backend.source }
     const stored = await this.backend.get(ref)
-    if (stored !== undefined && stored.length > 0) return { value: stored, source: this.backend.source }
+    if (stored !== undefined && stored.length > 0) {
+      this.resolved.set(ref, stored)
+      return { value: stored, source: this.backend.source }
+    }
     const fallback = this.fallback(ref)
     return fallback === undefined ? undefined : { value: fallback.value, source: fallback.source }
   }
 
   async describe(ref: string): Promise<{ configured: boolean; source?: string; writable: boolean }> {
     if (this.inherited(ref) !== undefined) return { configured: true, source: 'env', writable: false }
+    if (this.resolved.has(ref)) return { configured: true, source: this.backend.source, writable: true }
     if (await this.backend.has(ref)) return { configured: true, source: this.backend.source, writable: true }
     const fallback = this.fallback(ref)
     return fallback === undefined
@@ -438,12 +446,16 @@ export class CredentialStore {
   async set(ref: string, value: string): Promise<void> {
     if (value.length === 0) throw new Error(`e-Mate credentials: an empty value cannot be stored for "${ref}"; use unset`)
     this.assertUnshadowed(ref, 'set')
+    if (this.resolved.get(ref) === value) return
     await this.backend.set(ref, value)
+    this.resolved.set(ref, value)
   }
 
   async unset(ref: string): Promise<boolean> {
     this.assertUnshadowed(ref, 'unset')
-    return this.backend.unset(ref)
+    const removed = await this.backend.unset(ref)
+    this.resolved.delete(ref)
+    return removed
   }
 
   private assertUnshadowed(ref: string, verb: 'set' | 'unset'): void {
