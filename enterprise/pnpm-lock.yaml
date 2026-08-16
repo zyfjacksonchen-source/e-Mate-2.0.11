@@ -118,6 +118,9 @@ importers:
       '@e-mate/consent-store':
         specifier: workspace:*
         version: link:../../packages/consent-store
+      '@e-mate/monitoring-contract':
+        specifier: workspace:*
+        version: link:../../packages/monitoring-contract
       pg:
         specifier: 8.22.0
         version: 8.22.0

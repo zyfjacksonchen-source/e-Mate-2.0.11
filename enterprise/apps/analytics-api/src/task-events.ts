@@ -99,6 +99,7 @@ export class PostgresTaskEventStore implements TaskEventStore {
         user_id text NOT NULL,
         scenario text NOT NULL CHECK (
           scenario IN (
+            'GENERAL',
             'CONTENT_CREATION', 'DOCUMENT_EDITING', 'SYSTEM_MAINTENANCE',
             'ASSET_PRODUCTION', 'DATA_PROCESSING', 'SEARCH_QUERY'
           )
@@ -132,6 +133,7 @@ export class PostgresTaskEventStore implements TaskEventStore {
         ),
         scenario text NOT NULL CHECK (
           scenario IN (
+            'GENERAL',
             'CONTENT_CREATION', 'DOCUMENT_EDITING', 'SYSTEM_MAINTENANCE',
             'ASSET_PRODUCTION', 'DATA_PROCESSING', 'SEARCH_QUERY'
           )
@@ -155,6 +157,26 @@ export class PostgresTaskEventStore implements TaskEventStore {
             'CANCELLED', 'SKILL_SELECTED', 'TOOL_SELECTED',
             'TOOL_EXECUTION', 'PERMISSION_REQUESTED', 'WAITING_INPUT',
             'ARTIFACT_UPDATED'
+          )
+        );
+      ALTER TABLE e_mate_task_fact
+        DROP CONSTRAINT IF EXISTS e_mate_task_fact_scenario_check;
+      ALTER TABLE e_mate_task_fact
+        ADD CONSTRAINT e_mate_task_fact_scenario_check CHECK (
+          scenario IN (
+            'GENERAL', 'CONTENT_CREATION', 'DOCUMENT_EDITING',
+            'SYSTEM_MAINTENANCE', 'ASSET_PRODUCTION',
+            'DATA_PROCESSING', 'SEARCH_QUERY'
+          )
+        );
+      ALTER TABLE e_mate_task_event
+        DROP CONSTRAINT IF EXISTS e_mate_task_event_scenario_check;
+      ALTER TABLE e_mate_task_event
+        ADD CONSTRAINT e_mate_task_event_scenario_check CHECK (
+          scenario IN (
+            'GENERAL', 'CONTENT_CREATION', 'DOCUMENT_EDITING',
+            'SYSTEM_MAINTENANCE', 'ASSET_PRODUCTION',
+            'DATA_PROCESSING', 'SEARCH_QUERY'
           )
         );
     `);

@@ -43,7 +43,7 @@ import {
   MODEL_POLICY_CHANNEL,
   validateModelPolicy,
 } from '../profile/plugins/model-policy.js'
-import { apply as applyAudit, AUDIT_CHANNEL, createUsageFact } from '../profile/plugins/audit.js'
+import { apply as applyAudit, AUDIT_CHANNEL, createTaskAuditFact, createUsageFact } from '../profile/plugins/audit.js'
 import { apply as applyShell } from '../profile/plugins/emate-shell/index.js'
 import {
   apply as applyIdentity,
@@ -1546,6 +1546,7 @@ test('enterprise identity provider maps target credentials and the production HT
   let accepted = false
   const requests = []
   let auditBody
+  let taskAuditBody
   const json = value => new Response(JSON.stringify(value), {
     status: 200,
     headers: { 'content-type': 'application/json' },
@@ -1636,6 +1637,18 @@ test('enterprise identity provider maps target credentials and the production HT
           fact_id: record.fact_id,
           payload_sha256: record.payload_sha256,
           receipt_id: `receipt:${record.fact_id}`,
+          accepted_at: new Date(clock).toISOString(),
+        })),
+      })
+    }
+    if (url.pathname.endsWith('/v1/audit/tasks')) {
+      taskAuditBody = JSON.parse(String(init.body))
+      return json({
+        schema_version: 1,
+        receipts: taskAuditBody.records.map(record => ({
+          event_id: record.event_id,
+          payload_sha256: record.payload_sha256,
+          receipt_id: `receipt:${record.event_id}`,
           accepted_at: new Date(clock).toISOString(),
         })),
       })
@@ -1739,6 +1752,15 @@ test('enterprise identity provider maps target credentials and the production HT
   const auditReceipt = await provider.auditUpload(auditRecords)
   assert.deepEqual(auditBody, { schema_version: 1, records: auditRecords })
   assert.equal(auditReceipt.receipts[0].fact_id, auditRecords[0].fact_id)
+  const taskAuditRecords = [{
+    event_id: `taskevent_${'b'.repeat(64)}`,
+    account_subject_sha256: 'c'.repeat(64),
+    payload_sha256: 'd'.repeat(64),
+    payload: { schemaVersion: 1 },
+  }]
+  const taskAuditReceipt = await provider.taskAuditUpload(taskAuditRecords)
+  assert.deepEqual(taskAuditBody, { schema_version: 1, records: taskAuditRecords })
+  assert.equal(taskAuditReceipt.receipts[0].event_id, taskAuditRecords[0].event_id)
   await provider.acceptAgreements()
   const unlocked = await provider.bootstrap()
   assert.equal(unlocked.workspace_unlocked, true)
@@ -1757,6 +1779,9 @@ test('enterprise identity provider maps target credentials and the production HT
   const auditRequests = requests.filter(request => request.path.endsWith('/v1/audit/usage'))
   assert.equal(auditRequests.length, 1)
   assert.equal(auditRequests[0].authorization, `Bearer ${modelToken}`)
+  const taskAuditRequests = requests.filter(request => request.path.endsWith('/v1/audit/tasks'))
+  assert.equal(taskAuditRequests.length, 1)
+  assert.equal(taskAuditRequests[0].authorization, `Bearer ${modelToken}`)
   values.set('E_MATE_MODEL_KEY_GPT', 'runtime-provider-key-not-persisted-here')
   const logout = await provider.logout({ client_request_id: 'logout-request-207' })
   assert.equal(logout.receipt_id, 'logout-receipt-207')
@@ -2353,9 +2378,11 @@ test('local weekly quota serializes finite accounts and settles only real termin
 test('audit records only real Harness usage and deduplicates reconnect replay and concurrent flush', async () => {
   const temporary = mkdtempSync(join(tmpdir(), 'e-mate-audit-'))
   const tables = { bindings: new Map(), outbox: new Map() }
+  const taskTables = { bindings: new Map(), outbox: new Map() }
   const handlers = new Map()
   const cleanups = []
   const uploads = []
+  const taskUploads = []
   const deliveredFacts = []
   let audit
   let rpc
@@ -2376,13 +2403,29 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
       }
     },
   }
-  const domain = {
+  const taskProvider = {
+    async upload(facts) {
+      taskUploads.push(structuredClone(facts))
+      if (!uploadAvailable) throw new Error('task audit endpoint unavailable')
+      return {
+        schema_version: 1,
+        receipts: facts.map(fact => ({
+          event_id: fact.event_id,
+          payload_sha256: fact.payload_sha256,
+          receipt_id: `task-receipt:${fact.event_id.slice(-16)}`,
+          accepted_at: new Date().toISOString(),
+        })),
+      }
+    },
+  }
+  const domain = source => ({
     table: name => ({
-      entries: () => tables[name].entries(),
-      put: async (key, value) => { tables[name].set(key, structuredClone(value)) },
+      entries: () => source[name].entries(),
+      put: async (key, value) => { source[name].set(key, structuredClone(value)) },
     }),
     close: async () => {},
-  }
+  })
+  let openedDomains = 0
   try {
     const paths = installProfile(join(temporary, 'dsh-home'))
     await applyAudit({
@@ -2391,7 +2434,8 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
         return () => {}
       } } },
       sessionPersistence: { list: async () => [], readFrom: async () => ({ events: [] }) },
-      storageDomain: { open: async () => domain },
+      storageDomain: { open: async () => domain(openedDomains++ === 0 ? tables : taskTables) },
+      emateIdentity: { localAccountSubject: () => 'tenant-207:user-207' },
       emateModelPolicy: {
         auditContext: async model => {
           assert.equal(model, 'gpt-5.6-luna')
@@ -2427,12 +2471,17 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
     }, {
       bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json'),
       auditProvider: provider,
+      taskAuditProvider: taskProvider,
       flushIntervalMs: 30_000,
     })
 
     assert.equal(rpc.channel, AUDIT_CHANNEL)
     assert.deepEqual(rpc.options, { authority: 'loopback' })
     assert.equal(interval.milliseconds, 30_000)
+    const startedAt = Date.now()
+    handlers.get('session/event')({ id: 'audit-session-1' }, {
+      type: 'turn/start', seq: 0, time: startedAt, data: { turn: 1 },
+    })
     const request = await handlers.get('agent/request')({
       agent: { id: 'audit-session-1' }, turn: 1, step: 1,
     }, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' }))
@@ -2440,7 +2489,7 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
     const event = {
       type: 'assistant/message',
       seq: 8,
-      time: Date.now(),
+      time: startedAt + 1,
       data: {
         turn: 1,
         step: 1,
@@ -2454,9 +2503,30 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
       },
     }
     handlers.get('session/event')({ id: 'audit-session-1' }, event)
+    handlers.get('session/event')({ id: 'audit-session-1' }, {
+      type: 'tool/call', seq: 9, time: startedAt + 2,
+      data: { turn: 1, step: 1, callId: 'private-call-id', name: 'private-tool-name', arguments: '{"secret":true}' },
+    })
+    handlers.get('session/event')({ id: 'audit-session-1' }, {
+      type: 'approval/asked', seq: 10, time: startedAt + 3,
+      data: { id: 'private-approval-id', toolName: 'private-tool-name' },
+    })
+    handlers.get('session/event')({ id: 'audit-session-1' }, {
+      type: 'turn/end', seq: 11, time: startedAt + 4,
+      data: { turn: 1, reason: { kind: 'completed' } },
+    })
     await handlers.get('session/flush')()
     assert.equal(tables.bindings.size, 1)
     assert.equal(tables.outbox.size, 1)
+    assert.equal(taskTables.bindings.size, 1)
+    assert.equal(taskTables.outbox.size, 5)
+    assert.deepEqual(
+      [...taskTables.outbox.values()].map(record => record.payload.type),
+      ['RECEIVED', 'FIRST_RESPONSE', 'TOOL_EXECUTION', 'PERMISSION_REQUESTED', 'COMPLETED'],
+    )
+    assert.ok([...taskTables.outbox.values()].every(record => record.payload.scenario === 'GENERAL'))
+    assert.equal(JSON.stringify([...taskTables.outbox.values()]).includes('private-tool-name'), false)
+    assert.equal(JSON.stringify([...taskTables.outbox.values()]).includes('private-call-id'), false)
     const stored = [...tables.outbox.values()][0]
     assert.equal(stored.status, 'pending')
     assert.equal(stored.payload.total_tokens, 17)
@@ -2471,6 +2541,7 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
     assert.equal(deferred.delivered_now, 0)
     assert.match(deferred.error_code, /^[0-9a-f]{16}$/)
     assert.equal(audit.status().pending, 1)
+    assert.equal(audit.status().task_events_pending, 5)
     uploadAvailable = true
     const [delivered, sameFlight] = await Promise.all([
       audit.flush({ force: true }),
@@ -2479,11 +2550,13 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
     assert.deepEqual(sameFlight, delivered)
     assert.equal(delivered.delivered_now, 1)
     assert.equal(delivered.delivered, 1)
+    assert.equal(delivered.task_delivered_now, 5)
     assert.equal(deliveredFacts.length, 1)
     assert.equal(deliveredFacts[0].factId, stored.fact_id)
     assert.equal(Number.isFinite(Date.parse(deliveredFacts[0].acceptedAt)), true)
     assert.equal(tables.outbox.values().next().value.status, 'delivered')
     assert.equal(uploads.length, 2)
+    assert.equal(taskUploads.length, 2)
     assert.equal('content' in uploads[1][0].payload, false)
     assert.deepEqual(uploads[1][0], uploads[0][0])
     handlers.get('session/event')({ id: 'audit-session-1' }, structuredClone(event))
@@ -2492,11 +2565,17 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
     assert.equal(uploads.length, 2)
     const status = await rpc.handler('audit.status', {})
     assert.equal(status.value.delivered_tokens, 17)
+    assert.equal(status.value.task_events_delivered, 5)
     assert.equal((await rpc.handler('unknown', {})).error.code, 'bad-request')
 
     const blocked = createUsageFact('unbound-session', event, undefined)
     assert.equal(blocked.status, 'blocked')
     assert.equal(blocked.last_error_code, 'identity-policy-binding-missing-or-conflicting')
+    const taskFact = createTaskAuditFact('audit-session-1', {
+      type: 'turn/end', seq: 12, time: startedAt + 5, data: { turn: 2, reason: { kind: 'aborted' } },
+    }, 'CANCELLED', { schema_version: 1, account_subject_sha256: 'e'.repeat(64) })
+    assert.equal(taskFact.payload.type, 'CANCELLED')
+    assert.equal(JSON.stringify(taskFact).includes('audit-session-1'), false)
   } finally {
     for (const cleanup of cleanups.reverse()) await cleanup()
     rmSync(temporary, { recursive: true, force: true })
@@ -2507,6 +2586,7 @@ test('audit startup flushes a persisted outbox through the Host identity transpo
   const temporary = mkdtempSync(join(tmpdir(), 'e-mate-audit-backfill-'))
   const paths = installProfile(join(temporary, 'dsh-home'))
   const tables = { bindings: new Map(), outbox: new Map() }
+  const taskTables = { bindings: new Map(), outbox: new Map() }
   const cleanups = []
   const deliveredFacts = []
   const uploads = []
@@ -2537,18 +2617,19 @@ test('audit startup flushes a persisted outbox through the Host identity transpo
     model: 'gpt-5.6-luna',
   })
   tables.outbox.set(pending.fact_id, pending)
-  const domain = {
+  const domain = source => ({
     table: name => ({
-      entries: () => tables[name].entries(),
-      put: async (key, value) => { tables[name].set(key, structuredClone(value)) },
+      entries: () => source[name].entries(),
+      put: async (key, value) => { source[name].set(key, structuredClone(value)) },
     }),
     close: async () => {},
-  }
+  })
+  let openedDomains = 0
   try {
     await applyAudit({
       connection: { rpc: { handle: () => () => {} } },
       sessionPersistence: { list: async () => [], readFrom: async () => ({ events: [] }) },
-      storageDomain: { open: async () => domain },
+      storageDomain: { open: async () => domain(openedDomains++ === 0 ? tables : taskTables) },
       emateIdentity: {
         uploadAudit: async records => {
           uploads.push(structuredClone(records))

@@ -41,6 +41,7 @@ test('task events accept metadata only and task summaries conserve explicit outc
       cancelledTasks: '1',
     },
     scenarioCounts: [
+      { scenario: 'GENERAL', taskCount: '0' },
       { scenario: 'CONTENT_CREATION', taskCount: '1' },
       { scenario: 'DOCUMENT_EDITING', taskCount: '1' },
       { scenario: 'SYSTEM_MAINTENANCE', taskCount: '0' },

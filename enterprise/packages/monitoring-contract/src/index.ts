@@ -18,6 +18,7 @@ export const TASK_EVENT_TYPES = [
 export type TaskEventType = (typeof TASK_EVENT_TYPES)[number];
 
 export const TASK_SCENARIOS = [
+  'GENERAL',
   'CONTENT_CREATION',
   'DOCUMENT_EDITING',
   'SYSTEM_MAINTENANCE',

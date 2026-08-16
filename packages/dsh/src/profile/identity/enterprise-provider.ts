@@ -847,6 +847,13 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
         body: JSON.stringify({ schema_version: 1, records }),
       }, 'audit usage')
     },
+    async taskAuditUpload(records: unknown[]) {
+      return authorized('/v1/audit/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ schema_version: 1, records }),
+      }, 'task audit')
+    },
     async authenticatedRequest(url: URL | string, init: RequestInit = {}) {
       const target = new URL(url)
       if (target.username || target.password || target.search || target.hash

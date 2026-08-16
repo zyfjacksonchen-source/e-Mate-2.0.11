@@ -209,6 +209,12 @@ export function apply(ctx, config = {}) {
       }
       return config.identityProvider.auditUpload(records)
     },
+    async uploadTaskAudit(records) {
+      if (typeof config.identityProvider?.taskAuditUpload !== 'function') {
+        throw new Error('e-Mate enterprise task audit transport is unavailable')
+      }
+      return config.identityProvider.taskAuditUpload(records)
+    },
   })
   ctx.effect(() => ctx.connection.rpc.handle(
     IDENTITY_CHANNEL,

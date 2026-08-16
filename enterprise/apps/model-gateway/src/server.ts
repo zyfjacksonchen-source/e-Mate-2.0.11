@@ -7,6 +7,7 @@ import {
   type ConsentAcceptanceInput,
 } from '@e-mate/admin-contract';
 import { ConsentStoreError, type ConsentStore } from '@e-mate/consent-store';
+import { parseTaskEventInput, type TaskEventInput } from '@e-mate/monitoring-contract';
 import { chatCompletionsToResponsesStream, responsesToChatCompletionsRequest } from './chat-completions-adapter.ts';
 
 const maxRequestBytes = 4 * 1024 * 1024;
@@ -222,6 +223,22 @@ export type AuditUsageReceipt = {
 
 export class AuditUsageConflictError extends Error {}
 
+export type AuditTaskRecord = {
+  tenantId: string;
+  userId: string;
+  payloadSha256: string;
+  event: TaskEventInput;
+};
+
+export type AuditTaskReceipt = {
+  eventId: string;
+  payloadSha256: string;
+  receiptId: string;
+  acceptedAt: string;
+};
+
+export class AuditTaskConflictError extends Error {}
+
 export type UsageStore = {
   currentAccountUsage(principal: ModelGatewayPrincipal): Promise<AccountUsage>;
   prepare(fact: InvocationFact): Promise<PreparedInvocation>;
@@ -248,6 +265,7 @@ export type UsageStore = {
   ): Promise<void>;
   add(fact: UsageFact): Promise<void>;
   ingestAuditUsage(records: AuditUsageRecord[]): Promise<AuditUsageReceipt[]>;
+  ingestAuditTasks(records: AuditTaskRecord[]): Promise<AuditTaskReceipt[]>;
   finalize(principal: ModelGatewayPrincipal, taskId: string): Promise<FinalizedUsage | null>;
 };
 
@@ -371,6 +389,8 @@ export class InMemoryUsageStore implements UsageStore {
   readonly #quota = new Map<string, InMemoryQuotaState>();
   readonly #weeklyUsage = new Map<string, number>();
   readonly #auditReceipts = new Map<string, AuditUsageReceipt>();
+  readonly #taskAuditEvents = new Map<string, AuditTaskRecord & { acceptedAt: string }>();
+  readonly #taskAuditStates = new Map<string, { userId: string; scenario: string; terminal: boolean }>();
 
   constructor(limits: InvocationLimits, now: () => number = Date.now) {
     this.#limits = validateInvocationLimits(limits);
@@ -785,6 +805,61 @@ export class InMemoryUsageStore implements UsageStore {
     });
   }
 
+  async ingestAuditTasks(records: AuditTaskRecord[]): Promise<AuditTaskReceipt[]> {
+    const events = new Map(this.#taskAuditEvents);
+    const tasks = new Map(this.#taskAuditStates);
+    const acceptedAtMs = this.#now();
+    if (!Number.isSafeInteger(acceptedAtMs) || acceptedAtMs < 0) throw new Error('Invalid quota clock');
+    const acceptedAt = new Date(acceptedAtMs).toISOString();
+    const receipts: AuditTaskReceipt[] = [];
+    for (const record of records) {
+      const eventKey = `${record.tenantId}\0${record.event.eventId}`;
+      const taskKey = `${record.tenantId}\0${record.event.taskId}`;
+      const existing = events.get(eventKey);
+      if (existing) {
+        if (canonicalJson(existing.event) !== canonicalJson(record.event)
+          || existing.userId !== record.userId
+          || existing.payloadSha256 !== record.payloadSha256) {
+          throw new AuditTaskConflictError('Task audit event conflicts with the existing ledger');
+        }
+        receipts.push({
+          eventId: record.event.eventId,
+          payloadSha256: record.payloadSha256,
+          receiptId: `taskreceipt_${createHash('sha256').update(record.event.eventId).digest('hex')}`,
+          acceptedAt: existing.acceptedAt,
+        });
+        continue;
+      }
+      const task = tasks.get(taskKey);
+      if (record.event.type === 'RECEIVED') {
+        if (task) throw new AuditTaskConflictError('Task audit receive conflicts with the existing task');
+        tasks.set(taskKey, { userId: record.userId, scenario: record.event.scenario, terminal: false });
+      } else if (
+        !task ||
+        task.userId !== record.userId ||
+        task.scenario !== record.event.scenario ||
+        task.terminal ||
+        (['COMPLETED', 'FAILED', 'CANCELLED'].includes(record.event.type) && task.terminal)
+      ) {
+        throw new AuditTaskConflictError('Task audit event has no compatible received task');
+      } else if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(record.event.type)) {
+        tasks.set(taskKey, { ...task, terminal: true });
+      }
+      events.set(eventKey, { ...structuredClone(record), acceptedAt });
+      receipts.push({
+        eventId: record.event.eventId,
+        payloadSha256: record.payloadSha256,
+        receiptId: `taskreceipt_${createHash('sha256').update(record.event.eventId).digest('hex')}`,
+        acceptedAt,
+      });
+    }
+    this.#taskAuditEvents.clear();
+    events.forEach((value, key) => this.#taskAuditEvents.set(key, value));
+    this.#taskAuditStates.clear();
+    tasks.forEach((value, key) => this.#taskAuditStates.set(key, value));
+    return receipts;
+  }
+
   async finalize(principal: ModelGatewayPrincipal, taskId: string): Promise<FinalizedUsage | null> {
     const key = `${principal.tenantId}\0${principal.userId}\0${taskId}`;
     const entry = this.#facts.get(key);
@@ -888,6 +963,7 @@ function principalAllowsRoute(identity: ModelGatewayPrincipal, routeId: string):
 
 const auditSha256Pattern = /^[0-9a-f]{64}$/;
 const auditFactIdPattern = /^auditfact_[0-9a-f]{64}$/;
+const taskEventIdPattern = /^taskevent_[0-9a-f]{64}$/;
 const auditPolicyIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
 const auditTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const auditPayloadKeys = [
@@ -1064,6 +1140,66 @@ function parseAuditUsageBatch(
           }),
         },
       },
+    };
+  });
+}
+
+function parseAuditTaskBatch(
+  value: Record<string, unknown>,
+  identity: ModelGatewayPrincipal
+): AuditTaskRecord[] {
+  if (
+    !exactKeys(value, ['records', 'schema_version']) ||
+    value.schema_version !== 1 ||
+    !Array.isArray(value.records) ||
+    value.records.length < 1 ||
+    value.records.length > maxAuditBatchSize
+  ) {
+    throw new HttpError(400, 'INVALID_AUDIT_TASK', 'Invalid task audit batch');
+  }
+  const expectedAccount = createHash('sha256')
+    .update(`${identity.tenantId}:${identity.userId}`)
+    .digest('hex');
+  const eventIds = new Set<string>();
+  return value.records.map((input) => {
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+      throw new HttpError(400, 'INVALID_AUDIT_TASK', 'Invalid task audit record');
+    }
+    const envelope = input as Record<string, unknown>;
+    if (
+      !exactKeys(envelope, ['account_subject_sha256', 'event_id', 'payload', 'payload_sha256']) ||
+      typeof envelope.event_id !== 'string' ||
+      !taskEventIdPattern.test(envelope.event_id) ||
+      eventIds.has(envelope.event_id) ||
+      envelope.account_subject_sha256 !== expectedAccount ||
+      typeof envelope.payload_sha256 !== 'string' ||
+      !auditSha256Pattern.test(envelope.payload_sha256)
+    ) {
+      throw new HttpError(400, 'INVALID_AUDIT_TASK', 'Invalid task audit record');
+    }
+    let event: TaskEventInput;
+    try {
+      event = parseTaskEventInput(envelope.payload);
+    } catch {
+      throw new HttpError(400, 'INVALID_AUDIT_TASK', 'Invalid task audit event');
+    }
+    const occurredAtMs = Date.parse(event.occurredAt);
+    if (
+      event.eventId !== envelope.event_id ||
+      !taskEventIdPattern.test(event.eventId) ||
+      event.scenario !== 'GENERAL' ||
+      occurredAtMs < Date.UTC(2000, 0, 1) ||
+      occurredAtMs > Date.now() + 5 * 60_000 ||
+      envelope.payload_sha256 !== createHash('sha256').update(canonicalJson(event)).digest('hex')
+    ) {
+      throw new HttpError(400, 'INVALID_AUDIT_TASK', 'Invalid task audit event');
+    }
+    eventIds.add(event.eventId);
+    return {
+      tenantId: identity.tenantId,
+      userId: identity.userId,
+      payloadSha256: envelope.payload_sha256,
+      event,
     };
   });
 }
@@ -1647,6 +1783,7 @@ const consentProtectedPaths = new Set([
   '/v1/images/generations',
   '/v1/images/edits',
   '/v1/audit/usage',
+  '/v1/audit/tasks',
   '/v1/usage/current',
 ]);
 
@@ -1843,6 +1980,29 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           schema_version: 1,
           receipts: receipts.map((receipt) => ({
             fact_id: receipt.factId,
+            payload_sha256: receipt.payloadSha256,
+            receipt_id: receipt.receiptId,
+            accepted_at: receipt.acceptedAt,
+          })),
+        });
+        return;
+      }
+      if (url.pathname === '/v1/audit/tasks') {
+        if (request.method !== 'POST') return method(response, 'POST');
+        const records = parseAuditTaskBatch(await readJson(request, maxAuditRequestBytes), identity);
+        let receipts: AuditTaskReceipt[];
+        try {
+          receipts = await options.usageStore.ingestAuditTasks(records);
+        } catch (error) {
+          if (error instanceof AuditTaskConflictError) {
+            throw new HttpError(409, 'AUDIT_TASK_CONFLICT', 'Task audit conflicts with the existing ledger');
+          }
+          throw error;
+        }
+        json(response, 200, {
+          schema_version: 1,
+          receipts: receipts.map((receipt) => ({
+            event_id: receipt.eventId,
             payload_sha256: receipt.payloadSha256,
             receipt_id: receipt.receiptId,
             accepted_at: receipt.acceptedAt,

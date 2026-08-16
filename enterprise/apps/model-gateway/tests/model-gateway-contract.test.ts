@@ -524,6 +524,53 @@ test('ingests strict direct-runtime audit batches idempotently without inference
   );
 });
 
+test('ingests only metadata task audit events atomically and idempotently', async () => {
+  await withGateway(async (baseUrl, upstreamRequests) => {
+    const upload = (records: unknown[]) => fetch(`${baseUrl}/v1/audit/tasks`, {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({ schema_version: 1, records }),
+    });
+    const received = auditTaskRecord(1, 0, 'RECEIVED');
+    const tool = auditTaskRecord(1, 1, 'TOOL_EXECUTION');
+    const completed = auditTaskRecord(1, 2, 'COMPLETED');
+    const first = await upload([received, tool, completed]);
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get('cache-control'), 'no-store');
+    assert.equal(first.headers.has('access-control-allow-origin'), false);
+    const receipts = await first.json();
+    assert.deepEqual(
+      (receipts as { receipts: Array<Record<string, unknown>> }).receipts.map((receipt) => Object.keys(receipt).sort()),
+      Array.from({ length: 3 }, () => ['accepted_at', 'event_id', 'payload_sha256', 'receipt_id'])
+    );
+    assert.deepEqual(await (await upload([received, tool, completed])).json(), receipts);
+
+    const changed = auditTaskRecord(1, 0, 'RECEIVED', {
+      occurredAt: new Date(Date.now() - 5_000).toISOString(),
+    });
+    changed.event_id = received.event_id;
+    changed.payload.eventId = received.event_id;
+    changed.payload_sha256 = createHash('sha256').update(testCanonicalJson(changed.payload)).digest('hex');
+    const conflict = await upload([changed]);
+    assert.equal(conflict.status, 409);
+    assert.equal(((await conflict.json()) as { error: { code: string } }).error.code, 'AUDIT_TASK_CONFLICT');
+
+    assert.equal((await upload([auditTaskRecord(2, 1, 'FAILED')])).status, 409);
+    const task2 = auditTaskRecord(2, 0, 'RECEIVED');
+    const atomic = await upload([task2, changed]);
+    assert.equal(atomic.status, 409);
+    assert.equal((await upload([task2])).status, 200);
+
+    const wrongAccount = auditTaskRecord(3, 0, 'RECEIVED');
+    wrongAccount.account_subject_sha256 = 'b'.repeat(64);
+    assert.equal((await upload([wrongAccount])).status, 400);
+    assert.equal((await upload([{ ...auditTaskRecord(4, 0, 'RECEIVED'), prompt: 'forbidden' }])).status, 400);
+    assert.equal((await upload(Array.from({ length: 65 }, (_, index) => auditTaskRecord(index + 10)))).status, 400);
+    assert.equal((await fetch(`${baseUrl}/v1/audit/tasks`, { headers: auth() })).status, 405);
+    assert.equal(upstreamRequests.length, 0);
+  });
+});
+
 test('maps a direct-runtime upstream model id back to its allowed managed route', async () => {
   await withGateway(
     async (baseUrl, upstreamRequests) => {
@@ -893,6 +940,31 @@ function auditUsageRecord(
   };
   return {
     fact_id: `auditfact_${createHash('sha256').update(`e-Mate audit v1\0${sourceId}`).digest('hex')}`,
+    payload_sha256: createHash('sha256').update(testCanonicalJson(payload)).digest('hex'),
+    payload,
+  };
+}
+
+function auditTaskRecord(
+  task = 1,
+  sequence = 0,
+  type = 'RECEIVED',
+  overrides: Record<string, unknown> = {}
+) {
+  const taskId = `task_${createHash('sha256').update(`test-task:${task}`).digest('hex')}`;
+  const eventId = `taskevent_${createHash('sha256').update(`test-task:${task}:${sequence}:${type}`).digest('hex')}`;
+  const payload = {
+    schemaVersion: 1,
+    eventId,
+    taskId,
+    type,
+    scenario: 'GENERAL',
+    occurredAt: new Date(Date.now() - 10_000 + sequence).toISOString(),
+    ...overrides,
+  };
+  return {
+    event_id: eventId,
+    account_subject_sha256: createHash('sha256').update('tenant-a:user-a').digest('hex'),
     payload_sha256: createHash('sha256').update(testCanonicalJson(payload)).digest('hex'),
     payload,
   };

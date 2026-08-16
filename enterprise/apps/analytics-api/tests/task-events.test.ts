@@ -34,6 +34,7 @@ test('task event schema migration admits the metadata milestone event types', as
     assert.match(schema, new RegExp(`'${type}'`));
   }
   assert.match(schema, /DROP CONSTRAINT IF EXISTS e_mate_task_event_type_check/);
+  assert.match(schema, /e_mate_task_fact_scenario_check[\s\S]*'GENERAL'/);
 });
 
 test('task event writes are tenant-bound, idempotent and require an explicit receive', async () => {
@@ -194,7 +195,7 @@ test('task summary uses only authoritative task rows and exact decimal strings',
     failedTasks: '1',
     cancelledTasks: '0',
   });
-  assert.equal(summary.scenarioCounts[0]?.taskCount, '2');
+  assert.equal(summary.scenarioCounts.find(({ scenario }) => scenario === 'CONTENT_CREATION')?.taskCount, '2');
   assert.equal(summary.eventTypeCounts.find(({ type }) => type === 'WAITING_INPUT')?.eventCount, '1');
   assert.deepEqual(summary.userEventCounts, [
     { userId: 'user-1', eventCount: '7' },

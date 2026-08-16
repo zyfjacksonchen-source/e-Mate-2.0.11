@@ -2,8 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
 import {
   InvocationAdmissionError,
+  AuditTaskConflictError,
   AuditUsageConflictError,
   validateInvocationLimits,
+  type AuditTaskRecord,
+  type AuditTaskReceipt,
   type AuditUsageRecord,
   type AuditUsageReceipt,
   type InvocationLimits,
@@ -76,6 +79,23 @@ type AuditInvocationRow = {
   status: 'PREPARED' | 'COMPLETED' | 'REJECTED';
   provider_response_id: string | null;
   quota_admitted_at: Date;
+};
+
+type TaskAuditEventRow = {
+  user_id: string;
+  task_id: string;
+  type: string;
+  scenario: string;
+  occurred_at: Date;
+  recorded_at: Date;
+};
+
+type TaskAuditFactRow = {
+  user_id: string;
+  scenario: string;
+  status: 'RECEIVED' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  received_at: Date;
+  terminal_at: Date | null;
 };
 
 type QuotaRow = {
@@ -465,6 +485,79 @@ export class PostgresUsageStore implements UsageStore {
           REFERENCES e_mate_model_usage_task (tenant_id, user_id, task_id)
           ON DELETE CASCADE
       );
+
+      CREATE TABLE IF NOT EXISTS e_mate_task_fact (
+        tenant_id text NOT NULL,
+        task_id text NOT NULL,
+        user_id text NOT NULL,
+        scenario text NOT NULL CHECK (
+          scenario IN (
+            'GENERAL', 'CONTENT_CREATION', 'DOCUMENT_EDITING',
+            'SYSTEM_MAINTENANCE', 'ASSET_PRODUCTION',
+            'DATA_PROCESSING', 'SEARCH_QUERY'
+          )
+        ),
+        received_event_id text NOT NULL,
+        received_at timestamptz NOT NULL,
+        status text NOT NULL CHECK (status IN ('RECEIVED', 'COMPLETED', 'FAILED', 'CANCELLED')),
+        terminal_event_id text,
+        terminal_at timestamptz,
+        PRIMARY KEY (tenant_id, task_id),
+        UNIQUE (tenant_id, received_event_id),
+        CHECK (
+          (status = 'RECEIVED' AND terminal_event_id IS NULL AND terminal_at IS NULL) OR
+          (status <> 'RECEIVED' AND terminal_event_id IS NOT NULL AND terminal_at IS NOT NULL)
+        )
+      );
+      CREATE TABLE IF NOT EXISTS e_mate_task_event (
+        tenant_id text NOT NULL,
+        event_id text NOT NULL,
+        task_id text NOT NULL,
+        user_id text NOT NULL,
+        type text NOT NULL CHECK (
+          type IN (
+            'RECEIVED', 'FIRST_RESPONSE', 'COMPLETED', 'FAILED',
+            'CANCELLED', 'SKILL_SELECTED', 'TOOL_SELECTED',
+            'TOOL_EXECUTION', 'PERMISSION_REQUESTED', 'WAITING_INPUT',
+            'ARTIFACT_UPDATED'
+          )
+        ),
+        scenario text NOT NULL CHECK (
+          scenario IN (
+            'GENERAL', 'CONTENT_CREATION', 'DOCUMENT_EDITING',
+            'SYSTEM_MAINTENANCE', 'ASSET_PRODUCTION',
+            'DATA_PROCESSING', 'SEARCH_QUERY'
+          )
+        ),
+        occurred_at timestamptz NOT NULL,
+        recorded_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (tenant_id, event_id),
+        FOREIGN KEY (tenant_id, task_id) REFERENCES e_mate_task_fact (tenant_id, task_id)
+      );
+      CREATE INDEX IF NOT EXISTS e_mate_task_fact_received
+        ON e_mate_task_fact (tenant_id, received_at, task_id);
+      CREATE INDEX IF NOT EXISTS e_mate_task_event_occurred
+        ON e_mate_task_event (tenant_id, occurred_at, event_id);
+      ALTER TABLE e_mate_task_fact
+        DROP CONSTRAINT IF EXISTS e_mate_task_fact_scenario_check;
+      ALTER TABLE e_mate_task_fact
+        ADD CONSTRAINT e_mate_task_fact_scenario_check CHECK (
+          scenario IN (
+            'GENERAL', 'CONTENT_CREATION', 'DOCUMENT_EDITING',
+            'SYSTEM_MAINTENANCE', 'ASSET_PRODUCTION',
+            'DATA_PROCESSING', 'SEARCH_QUERY'
+          )
+        );
+      ALTER TABLE e_mate_task_event
+        DROP CONSTRAINT IF EXISTS e_mate_task_event_scenario_check;
+      ALTER TABLE e_mate_task_event
+        ADD CONSTRAINT e_mate_task_event_scenario_check CHECK (
+          scenario IN (
+            'GENERAL', 'CONTENT_CREATION', 'DOCUMENT_EDITING',
+            'SYSTEM_MAINTENANCE', 'ASSET_PRODUCTION',
+            'DATA_PROCESSING', 'SEARCH_QUERY'
+          )
+        );
       `);
       await client.query('COMMIT');
     } catch (error) {
@@ -1319,6 +1412,150 @@ export class PostgresUsageStore implements UsageStore {
       return receipts;
     } catch (error) {
       await rollback(client);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async ingestAuditTasks(records: AuditTaskRecord[]): Promise<AuditTaskReceipt[]> {
+    const eventIds = new Set<string>();
+    const input = records.map((record) => {
+      const occurredAt = new Date(record.event.occurredAt);
+      if (
+        !identifierPattern.test(record.tenantId) ||
+        !identifierPattern.test(record.userId) ||
+        !/^taskevent_[0-9a-f]{64}$/.test(record.event.eventId) ||
+        !identifierPattern.test(record.event.taskId) ||
+        record.event.scenario !== 'GENERAL' ||
+        !/^[0-9a-f]{64}$/.test(record.payloadSha256) ||
+        eventIds.has(record.event.eventId) ||
+        Number.isNaN(occurredAt.getTime())
+      ) {
+        throw new Error('Invalid task audit record');
+      }
+      eventIds.add(record.event.eventId);
+      return {
+        ...record,
+        occurredAt,
+        receiptId: `taskreceipt_${createHash('sha256').update(record.event.eventId).digest('hex')}`,
+      };
+    });
+    const terminal = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      const receipts: AuditTaskReceipt[] = [];
+      for (const record of input) {
+        const existing = await client.query<TaskAuditEventRow>(
+          `SELECT user_id, task_id, type, scenario, occurred_at, recorded_at
+             FROM e_mate_task_event
+            WHERE tenant_id = $1 AND event_id = $2
+            FOR UPDATE`,
+          [record.tenantId, record.event.eventId]
+        );
+        const current = existing.rows[0];
+        if (current) {
+          if (
+            current.user_id !== record.userId ||
+            current.task_id !== record.event.taskId ||
+            current.type !== record.event.type ||
+            current.scenario !== record.event.scenario ||
+            current.occurred_at.toISOString() !== record.event.occurredAt
+          ) {
+            throw new AuditTaskConflictError('Task audit event conflicts with the existing ledger');
+          }
+          receipts.push({
+            eventId: record.event.eventId,
+            payloadSha256: record.payloadSha256,
+            receiptId: record.receiptId,
+            acceptedAt: current.recorded_at.toISOString(),
+          });
+          continue;
+        }
+        if (record.event.type === 'RECEIVED') {
+          const inserted = await client.query(
+            `INSERT INTO e_mate_task_fact (
+               tenant_id, task_id, user_id, scenario, received_event_id, received_at, status
+             ) VALUES ($1,$2,$3,$4,$5,$6,'RECEIVED')
+             ON CONFLICT DO NOTHING`,
+            [
+              record.tenantId,
+              record.event.taskId,
+              record.userId,
+              record.event.scenario,
+              record.event.eventId,
+              record.event.occurredAt,
+            ]
+          );
+          if (inserted.rowCount !== 1) {
+            throw new AuditTaskConflictError('Task audit receive conflicts with the existing task');
+          }
+        } else {
+          const taskResult = await client.query<TaskAuditFactRow>(
+            `SELECT user_id, scenario, status, received_at, terminal_at
+               FROM e_mate_task_fact
+              WHERE tenant_id = $1 AND task_id = $2
+              FOR UPDATE`,
+            [record.tenantId, record.event.taskId]
+          );
+          const task = taskResult.rows[0];
+          if (
+            !task ||
+            task.user_id !== record.userId ||
+            task.scenario !== record.event.scenario ||
+            task.status !== 'RECEIVED' ||
+            record.occurredAt.getTime() < task.received_at.getTime() ||
+            task.terminal_at !== null
+          ) {
+            throw new AuditTaskConflictError('Task audit event has no compatible received task');
+          }
+        }
+        const inserted = await client.query<{ recorded_at: Date }>(
+          `INSERT INTO e_mate_task_event (
+             tenant_id, event_id, task_id, user_id, type, scenario, occurred_at
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+           RETURNING recorded_at`,
+          [
+            record.tenantId,
+            record.event.eventId,
+            record.event.taskId,
+            record.userId,
+            record.event.type,
+            record.event.scenario,
+            record.event.occurredAt,
+          ]
+        );
+        const recordedAt = inserted.rows[0]?.recorded_at;
+        if (!(recordedAt instanceof Date)) throw new Error('Task audit receipt time was unavailable');
+        if (terminal.has(record.event.type)) {
+          await client.query(
+            `UPDATE e_mate_task_fact
+                SET status = $3, terminal_event_id = $4, terminal_at = $5
+              WHERE tenant_id = $1 AND task_id = $2`,
+            [
+              record.tenantId,
+              record.event.taskId,
+              record.event.type,
+              record.event.eventId,
+              record.event.occurredAt,
+            ]
+          );
+        }
+        receipts.push({
+          eventId: record.event.eventId,
+          payloadSha256: record.payloadSha256,
+          receiptId: record.receiptId,
+          acceptedAt: recordedAt.toISOString(),
+        });
+      }
+      await client.query('COMMIT');
+      return receipts;
+    } catch (error) {
+      await rollback(client);
+      if ((error as { code?: unknown }).code === '23505') {
+        throw new AuditTaskConflictError('Task audit event conflicts with the existing ledger');
+      }
       throw error;
     } finally {
       client.release();

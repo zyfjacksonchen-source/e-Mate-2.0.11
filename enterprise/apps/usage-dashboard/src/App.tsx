@@ -317,6 +317,7 @@ export function App() {
   const successRate = projection ? callSuccessRate(projection.summary) : null;
   const activeUsers = projection ? new Set(projection.groups.map(({ userId }) => userId)).size.toString() : '0';
   const scenarioLabels: Record<TaskScenario, string> = {
+    GENERAL: copy.taxonomyGeneral,
     CONTENT_CREATION: copy.taxonomyCreative,
     DOCUMENT_EDITING: copy.taxonomyDocument,
     SYSTEM_MAINTENANCE: copy.taxonomySystem,

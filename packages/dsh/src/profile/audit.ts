@@ -46,6 +46,58 @@ function bindingKey(sessionId, turn, step) {
   return `${sha256(String(sessionId))}:${turn}:${step}`
 }
 
+function taskBindingKey(sessionId, turn) {
+  return `${sha256(String(sessionId))}:${turn}`
+}
+
+function taskType(event) {
+  if (event.type === 'turn/start') return 'RECEIVED'
+  if (event.type === 'tool/call') return 'TOOL_EXECUTION'
+  if (event.type === 'approval/asked') return 'PERMISSION_REQUESTED'
+  if (event.type === 'assistant/message'
+    && isRecord(event.data?.message?.source)
+    && event.data.message.source.kind === 'model') return 'FIRST_RESPONSE'
+  if (event.type !== 'turn/end' || !isRecord(event.data?.reason)) return undefined
+  if (event.data.reason.kind === 'completed') return 'COMPLETED'
+  if (['aborted', 'disposed', 'interrupted'].includes(event.data.reason.kind)) return 'CANCELLED'
+  return 'FAILED'
+}
+
+export function createTaskAuditFact(sessionId, event, type, binding, turn = event?.data?.turn) {
+  if (!isRecord(event)
+    || !['RECEIVED', 'FIRST_RESPONSE', 'COMPLETED', 'FAILED', 'CANCELLED', 'TOOL_EXECUTION', 'PERMISSION_REQUESTED'].includes(type)
+    || !Number.isSafeInteger(event.seq) || event.seq < 0
+    || !Number.isSafeInteger(event.time) || event.time < 0
+    || !Number.isSafeInteger(turn) || turn < 1
+    || !isRecord(binding)
+    || binding.schema_version !== 1
+    || !SHA256.test(binding.account_subject_sha256)) return undefined
+  const occurredAt = new Date(event.time)
+  if (!Number.isFinite(occurredAt.getTime())) return undefined
+  const sessionIdSha256 = sha256(String(sessionId))
+  const taskId = `task_${sha256(`e-Mate task v1\0${sessionIdSha256}:${turn}`)}`
+  const eventId = `taskevent_${sha256(`e-Mate task event v1\0${sessionIdSha256}:${event.seq}:${type}`)}`
+  const payload = {
+    schemaVersion: 1,
+    eventId,
+    taskId,
+    type,
+    scenario: 'GENERAL',
+    occurredAt: occurredAt.toISOString(),
+  }
+  return {
+    schema_version: 1,
+    event_id: eventId,
+    account_subject_sha256: binding.account_subject_sha256,
+    payload,
+    payload_sha256: sha256(canonicalJson(payload)),
+    source_seq: event.seq,
+    status: 'pending',
+    attempt_count: 0,
+    next_attempt_at: payload.occurredAt,
+  }
+}
+
 export function createUsageFact(sessionId, event, binding) {
   if (!isRecord(event)
     || event.type !== 'assistant/message'
@@ -148,9 +200,48 @@ function validateUploadReceipts(value, records) {
   return receipts
 }
 
-function createAuditService(ctx, bindingsTable, outboxTable, auditProvider) {
+function validateTaskUploadReceipts(value, records) {
+  if (!isRecord(value)
+    || value.schema_version !== 1
+    || !Array.isArray(value.receipts)
+    || value.receipts.length !== records.length) {
+    throw new Error('e-Mate enterprise task audit receipt batch is invalid')
+  }
+  const expected = new Map(records.map(record => [record.event_id, record.payload_sha256]))
+  const receipts = new Map()
+  for (const receipt of value.receipts) {
+    if (!isRecord(receipt)
+      || Object.keys(receipt).sort().join(',') !== 'accepted_at,event_id,payload_sha256,receipt_id'
+      || typeof receipt.event_id !== 'string'
+      || expected.get(receipt.event_id) !== receipt.payload_sha256
+      || typeof receipt.receipt_id !== 'string' || !SAFE_ID.test(receipt.receipt_id)
+      || typeof receipt.accepted_at !== 'string' || !Number.isFinite(Date.parse(receipt.accepted_at))
+      || receipts.has(receipt.event_id)) {
+      throw new Error('e-Mate enterprise task audit receipt is invalid')
+    }
+    receipts.set(receipt.event_id, receipt)
+  }
+  if (receipts.size !== expected.size) throw new Error('e-Mate enterprise task audit receipt set is incomplete')
+  return receipts
+}
+
+function createAuditService(
+  ctx,
+  bindingsTable,
+  outboxTable,
+  auditProvider,
+  taskBindingsTable,
+  taskOutboxTable,
+  taskAuditProvider,
+) {
   const bindings = new Map(bindingsTable.entries())
   const outbox = new Map(outboxTable.entries())
+  const taskBindings = new Map(taskBindingsTable.entries())
+  const taskOutbox = new Map(taskOutboxTable.entries())
+  const firstResponseTasks = new Set(
+    [...taskOutbox.values()].filter(record => record.payload.type === 'FIRST_RESPONSE').map(record => record.payload.taskId),
+  )
+  const openTurns = new Map()
   let queued = Promise.resolve()
   let flushPromise
 
@@ -205,6 +296,51 @@ function createAuditService(ctx, bindingsTable, outboxTable, auditProvider) {
     enqueue(() => outboxTable.put(fact.fact_id, fact))
   }
 
+  const captureTaskEvent = (sessionId, event, live) => {
+    if (!isRecord(event) || !isRecord(event.data)) return
+    let turn = Number.isSafeInteger(event.data.turn) ? event.data.turn : openTurns.get(String(sessionId))
+    if (event.type === 'turn/start') {
+      if (!Number.isSafeInteger(turn) || turn < 1) return
+      openTurns.set(String(sessionId), turn)
+      const key = taskBindingKey(sessionId, turn)
+      if (live && !taskBindings.has(key)) {
+        const subject = ctx.emateIdentity.localAccountSubject?.()
+        if (typeof subject === 'string' && subject.length > 0) {
+          const binding = {
+            schema_version: 1,
+            account_subject_sha256: sha256(subject),
+            created_at: new Date(event.time).toISOString(),
+          }
+          taskBindings.set(key, binding)
+          enqueue(() => taskBindingsTable.put(key, binding))
+        }
+      }
+    }
+    if (!Number.isSafeInteger(turn) || turn < 1) return
+    const type = taskType(event)
+    if (type === undefined) return
+    const key = taskBindingKey(sessionId, turn)
+    const binding = taskBindings.get(key)
+    const fact = createTaskAuditFact(sessionId, event, type, binding, turn)
+    if (fact === undefined) {
+      if (live) ctx.logger?.warn?.(`e-Mate task audit binding unavailable: ${sha256(key).slice(0, 16)}`)
+      if (event.type === 'turn/end') openTurns.delete(String(sessionId))
+      return
+    }
+    if (type === 'FIRST_RESPONSE') {
+      if (firstResponseTasks.has(fact.payload.taskId)) return
+      firstResponseTasks.add(fact.payload.taskId)
+    }
+    const existing = taskOutbox.get(fact.event_id)
+    if (existing === undefined) {
+      taskOutbox.set(fact.event_id, fact)
+      enqueue(() => taskOutboxTable.put(fact.event_id, fact))
+    } else if (existing.payload_sha256 !== fact.payload_sha256) {
+      ctx.logger?.warn?.(`e-Mate task audit fact conflict: ${fact.event_id.slice(-16)}`)
+    }
+    if (event.type === 'turn/end') openTurns.delete(String(sessionId))
+  }
+
   const status = () => {
     const counts = { pending: 0, delivered: 0, blocked: 0 }
     let pendingTokens = 0
@@ -214,10 +350,23 @@ function createAuditService(ctx, bindingsTable, outboxTable, auditProvider) {
       if (record.status === 'pending') pendingTokens += record.payload.total_tokens
       if (record.status === 'delivered') deliveredTokens += record.payload.total_tokens
     }
-    return { schema_version: 1, ...counts, pending_tokens: pendingTokens, delivered_tokens: deliveredTokens }
+    let taskPending = 0
+    let taskDelivered = 0
+    for (const record of taskOutbox.values()) {
+      if (record.status === 'pending') taskPending += 1
+      if (record.status === 'delivered') taskDelivered += 1
+    }
+    return {
+      schema_version: 1,
+      ...counts,
+      pending_tokens: pendingTokens,
+      delivered_tokens: deliveredTokens,
+      task_events_pending: taskPending,
+      task_events_delivered: taskDelivered,
+    }
   }
 
-  const flushCore = async (force) => {
+  const flushUsageCore = async (force) => {
     await queued
     if (typeof auditProvider?.upload !== 'function') return { ...status(), delivered_now: 0, provider_ready: false }
     const now = Date.now()
@@ -265,19 +414,75 @@ function createAuditService(ctx, bindingsTable, outboxTable, auditProvider) {
     }
   }
 
+
+  const flushTaskCore = async (force) => {
+    await queued
+    if (typeof taskAuditProvider?.upload !== 'function') {
+      return { delivered_now: 0, provider_ready: false }
+    }
+    const now = Date.now()
+    const pending = [...taskOutbox.values()]
+      .filter(record => record.status === 'pending' && (force || Date.parse(record.next_attempt_at) <= now))
+      .sort((left, right) => left.payload.occurredAt.localeCompare(right.payload.occurredAt) || left.source_seq - right.source_seq)
+      .slice(0, BATCH_SIZE)
+    if (pending.length === 0) return { delivered_now: 0, provider_ready: true }
+    try {
+      const receipts = validateTaskUploadReceipts(await taskAuditProvider.upload(pending.map(record => ({
+        event_id: record.event_id,
+        account_subject_sha256: record.account_subject_sha256,
+        payload_sha256: record.payload_sha256,
+        payload: structuredClone(record.payload),
+      }))), pending)
+      for (const record of pending) {
+        const receipt = receipts.get(record.event_id)
+        const { last_error_code: _lastError, ...withoutError } = record
+        const delivered = {
+          ...withoutError,
+          status: 'delivered',
+          receipt_id: receipt.receipt_id,
+          delivered_at: new Date(Date.parse(receipt.accepted_at)).toISOString(),
+        }
+        taskOutbox.set(record.event_id, delivered)
+        await taskOutboxTable.put(record.event_id, delivered)
+      }
+      return { delivered_now: pending.length, provider_ready: true }
+    } catch (error) {
+      const code = errorCode(error)
+      for (const record of pending) {
+        const attempts = record.attempt_count + 1
+        const deferred = {
+          ...record,
+          attempt_count: attempts,
+          next_attempt_at: new Date(now + Math.min(300_000, 1_000 * 2 ** Math.min(attempts, 8))).toISOString(),
+          last_error_code: code,
+        }
+        taskOutbox.set(record.event_id, deferred)
+        await taskOutboxTable.put(record.event_id, deferred)
+      }
+      return { delivered_now: 0, provider_ready: true, error_code: code }
+    }
+  }
+
   const flush = ({ force = false } = {}) => {
     if (flushPromise !== undefined) return flushPromise
-    flushPromise = flushCore(force).finally(() => { flushPromise = undefined })
+    flushPromise = (async () => {
+      const usage = await flushUsageCore(force)
+      const tasks = await flushTaskCore(force)
+      return { ...usage, task_delivered_now: tasks.delivered_now, task_provider_ready: tasks.provider_ready }
+    })().finally(() => { flushPromise = undefined })
     return flushPromise
   }
 
-  return { captureBinding, captureEvent, drain: () => queued, flush, status }
+  return { captureBinding, captureEvent, captureTaskEvent, drain: () => queued, flush, status }
 }
 
 async function backfill(ctx, service) {
   for (const header of await ctx.sessionPersistence.list()) {
     const { events } = await ctx.sessionPersistence.readFrom(header.id, 0)
-    for (const event of events) service.captureEvent(header.id, event)
+    for (const event of events) {
+      service.captureEvent(header.id, event)
+      service.captureTaskEvent(header.id, event, false)
+    }
   }
   await service.drain()
 }
@@ -312,17 +517,45 @@ export async function apply(ctx, config = {}) {
     receipt_id: z.string().regex(SAFE_ID).optional(),
     delivered_at: z.iso.datetime().optional(),
   })
+  const taskBinding = z.object({
+    schema_version: z.literal(1),
+    account_subject_sha256: z.string().regex(SHA256),
+    created_at: z.iso.datetime(),
+  })
+  const taskOutbox = z.object({
+    schema_version: z.literal(1),
+    event_id: z.string().regex(/^taskevent_[0-9a-f]{64}$/u),
+    account_subject_sha256: z.string().regex(SHA256),
+    payload: z.json(),
+    payload_sha256: z.string().regex(SHA256),
+    source_seq: z.number().int().min(0),
+    status: z.enum(['pending', 'delivered']),
+    attempt_count: z.number().int().min(0),
+    next_attempt_at: z.iso.datetime(),
+    last_error_code: z.string().max(128).optional(),
+    receipt_id: z.string().regex(SAFE_ID).optional(),
+    delivered_at: z.iso.datetime().optional(),
+  })
   const domain = await ctx.storageDomain.open(defineDomain({
     name: 'emate_audit',
     version: 1,
     tables: { bindings: domainTable(binding), outbox: domainTable(outbox) },
   }))
   ctx.effect(() => () => domain.close(), 'emate.audit: close target storage domain')
+  const taskDomain = await ctx.storageDomain.open(defineDomain({
+    name: 'emate_task_audit',
+    version: 1,
+    tables: { bindings: domainTable(taskBinding), outbox: domainTable(taskOutbox) },
+  }))
+  ctx.effect(() => () => taskDomain.close(), 'emate.audit: close task audit storage domain')
   const service = createAuditService(
     ctx,
     domain.table('bindings'),
     domain.table('outbox'),
     config.auditProvider ?? { upload: records => ctx.emateIdentity.uploadAudit(records) },
+    taskDomain.table('bindings'),
+    taskDomain.table('outbox'),
+    config.taskAuditProvider ?? { upload: records => ctx.emateIdentity.uploadTaskAudit(records) },
   )
   ctx.provide('emateAudit', service)
   ctx.on('agent/request', async (payload, next) => {
@@ -335,7 +568,10 @@ export async function apply(ctx, config = {}) {
     }
     return request
   })
-  ctx.on('session/event', (session, event) => { service.captureEvent(session.id, event) })
+  ctx.on('session/event', (session, event) => {
+    service.captureEvent(session.id, event)
+    service.captureTaskEvent(session.id, event, true)
+  })
   ctx.on('session/flush', () => service.drain())
   const flushSafely = () => {
     void service.flush().catch((error) => {

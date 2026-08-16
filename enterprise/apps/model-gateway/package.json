@@ -13,6 +13,7 @@
   "dependencies": {
     "@e-mate/admin-contract": "workspace:*",
     "@e-mate/consent-store": "workspace:*",
+    "@e-mate/monitoring-contract": "workspace:*",
     "pg": "8.22.0"
   },
   "devDependencies": {
