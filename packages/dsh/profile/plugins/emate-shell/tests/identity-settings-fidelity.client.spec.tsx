@@ -252,7 +252,17 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     expect(await screen.findByText(/管理员无需签署用户协议/u)).toBeTruthy()
     administrator.unmount()
 
-    const callConnections = vi.fn(async () => ({
+    const callConnections = vi.fn(async (endpoint: string) => endpoint === 'qr.begin' ? {
+      ok: true,
+      value: {
+        connection_id: 'wechat',
+        attempt_id: '123e4567-e89b-12d3-a456-426614174000',
+        state: 'pending',
+        expires_at: Date.now() + 300_000,
+        qr_code_data_url: 'data:image/png;base64,AA==',
+        detail: '请使用微信扫描二维码。',
+      },
+    } : {
       ok: true,
       value: {
         schema_version: 1,
@@ -262,6 +272,7 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
           summary: '飞书连接',
           state: 'setup-required',
           detail: '需要配置应用凭据。',
+          qr_supported: false,
           fields: [{
             ref: 'FEISHU_SECRET',
             label: 'App Secret',
@@ -269,9 +280,17 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
             configured: false,
             writable: true,
           }],
+        }, {
+          id: 'wechat',
+          title: '微信',
+          summary: '微信扫码连接',
+          state: 'blocked',
+          detail: '扫码授权可用，运行适配尚未启用。',
+          qr_supported: true,
+          fields: [],
         }],
       },
-    }))
+    })
     const setCredential = vi.fn(async () => {})
     render(<ConnectionsSettings
       callConnections={callConnections}
@@ -284,6 +303,10 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     fireEvent.change(await screen.findByLabelText(/^App Secret/u), { target: { value: 'secret-value' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => { expect(setCredential).toHaveBeenCalledWith('FEISHU_SECRET', 'secret-value') })
+
+    fireEvent.click(screen.getByRole('button', { name: '生成授权二维码' }))
+    expect(await screen.findByRole('img', { name: '用于授权 微信 的一次性二维码' })).toBeTruthy()
+    expect(callConnections).toHaveBeenCalledWith('qr.begin', { connection_id: 'wechat' })
   })
 
   it('renders an unlimited weekly quota without exposing its numeric sentinel', async () => {

@@ -22,6 +22,7 @@ export default [
   },
   {
     ...node,
+    noExternal: ['qrcode'],
     entry: {
       health: 'src/profile/health.ts',
       'agent-operations': 'src/profile/agent-operations.ts',
@@ -32,6 +33,12 @@ export default [
       'settings-document-boundary': 'src/profile/settings-document-boundary.ts',
       share: 'src/profile/share.ts',
     },
+    outDir: 'profile/plugins',
+  },
+  {
+    ...node,
+    noExternal: ['qrcode'],
+    entry: { 'qr-generation': 'src/profile/qr-generation.ts' },
     outDir: 'profile/plugins',
   },
   {

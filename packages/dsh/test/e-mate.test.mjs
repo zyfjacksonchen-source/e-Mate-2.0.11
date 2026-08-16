@@ -30,7 +30,12 @@ import { apply as applyGeneralWorkspace } from '../profile/plugins/general-works
 import * as settingsDocumentBoundary from '../profile/plugins/settings-document-boundary.js'
 import { apply as applyAgentOperations } from '../profile/plugins/agent-operations.js'
 import { apply as applyCapabilities, CAPABILITIES_CHANNEL } from '../profile/plugins/capabilities.js'
-import { apply as applyConnections, CONNECTIONS_CHANNEL } from '../profile/plugins/connections.js'
+import {
+  apply as applyConnections,
+  CONNECTIONS_CHANNEL,
+  createWeixinQrProvider,
+} from '../profile/plugins/connections.js'
+import { apply as applyQrGeneration } from '../profile/plugins/qr-generation.js'
 import {
   CredentialStore,
   checkOsCredentialBackend,
@@ -479,6 +484,11 @@ test('managed profile installation is idempotent', () => {
     })
     assert.equal(patchById.get('emate-credentials-os').name, './plugins/credentials-os.js')
     assert.equal(patchById.get('emate-connections').name, './plugins/connections.js')
+    assert.deepEqual(patchById.get('emate-qr-generation'), {
+      id: 'emate-qr-generation',
+      name: './plugins/qr-generation.js',
+      inject: ['tools', 'jobs', 'attachments'],
+    })
     assert.deepEqual(patchById.get('ui-settings-models'), {
       id: 'ui-settings-models',
       name: '@deepseek-ai/dsh-client-ui-settings-models',
@@ -532,6 +542,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(patch, /id: emate-identity[\s\S]*\.\/plugins\/identity\/index\.js/)
     assert.match(patch, /id: emate-capabilities[\s\S]*\.\/plugins\/capabilities\.js/)
     assert.match(patch, /id: emate-connections[\s\S]*\.\/plugins\/connections\.js[\s\S]*inject: \[credentials, connection, emateCapabilities\]/)
+    assert.match(patch, /id: emate-qr-generation[\s\S]*\.\/plugins\/qr-generation\.js[\s\S]*inject: \[tools, jobs, attachments\]/)
     assert.match(patch, /id: emate-agent-operations[\s\S]*\.\/plugins\/agent-operations\.js/)
     assert.match(patch, /id: emate-skill-hub-agent[\s\S]*\.\/plugins\/skill-hub-agent\.js/)
     assert.doesNotMatch(patch, /emate-(?:office-ocr|browser-computer-use|memory|dream|learning)/)
@@ -548,7 +559,14 @@ test('managed profile installation is idempotent', () => {
     assert.match(connections, /\/emate\.connections/)
     assert.match(connections, /credentials\.describe/)
     assert.match(connections, /emateCapabilities/)
-    assert.doesNotMatch(connections, /\b(?:fetch|WebSocket|EventSource)\b/)
+    assert.match(connections, /redirect:\s*["']error["']/)
+    assert.doesNotMatch(connections, /from ["']qrcode["']/)
+    assert.doesNotMatch(connections, /\b(?:WebSocket|EventSource)\b/)
+    const qrGeneration = readFileSync(join(first.profile, 'plugins', 'qr-generation.js'), 'utf8')
+    assert.match(qrGeneration, /e_mate_qr_generate/)
+    assert.match(qrGeneration, /ctx\.jobs\.start/)
+    assert.match(qrGeneration, /attachments\.saveImage/)
+    assert.doesNotMatch(qrGeneration, /from ["']qrcode["']/)
     const credentials = readFileSync(join(first.profile, 'plugins', 'credentials-os.js'), 'utf8')
     assert.match(credentials, /loadTargetCredentials/)
     assert.match(credentials, /DataProtectionScope\]::CurrentUser/)
@@ -1057,6 +1075,9 @@ test('external connection catalog uses target credentials and keeps unavailable 
       describe: async ref => configured.has(ref)
         ? { configured: true, source: 'keychain', writable: true }
         : { configured: false, writable: true },
+      resolve: async () => undefined,
+      set: async () => {},
+      unset: async () => {},
     },
     connection: { rpc: { handle: (channel, callback, options) => {
       assert.equal(channel, CONNECTIONS_CHANNEL)
@@ -1076,6 +1097,7 @@ test('external connection catalog uses target credentials and keeps unavailable 
   assert.equal(byId.get('feishu').state, 'setup-required')
   assert.equal(byId.get('dingtalk').state, 'blocked')
   assert.equal(byId.get('wechat').fields.length, 0)
+  assert.equal(byId.get('wechat').qr_supported, true)
   assert.equal(byId.get('tencent-docs').fields[0].configured, false)
   assert.equal(JSON.stringify(response).includes('secret-value'), false)
   assert.deepEqual(await capabilities.at(-1).status(), {
@@ -1084,6 +1106,133 @@ test('external connection catalog uses target credentials and keeps unavailable 
     action_ids: [],
   })
   assert.equal((await handler('save-config', {})).error.code, 'bad-request')
+})
+
+test('Weixin QR authorization keeps the raw token Host-only and stores confirmed credentials', async () => {
+  const stored = new Map()
+  const credentials = {
+    resolve: async ref => stored.has(ref) ? { value: stored.get(ref), source: 'keychain' } : undefined,
+    set: async (ref, value) => { stored.set(ref, value) },
+    unset: async ref => stored.delete(ref),
+  }
+  const requests = []
+  const responses = [
+    { qrcode: 'host-only-qr-token', qrcode_img_content: 'https://liteapp.weixin.qq.com/q/e-mate-207' },
+    {
+      status: 'confirmed',
+      bot_token: 'host-only-bot-token',
+      ilink_bot_id: 'host-only-account',
+      ilink_user_id: 'host-only-owner',
+      baseurl: 'https://ilinkai.weixin.qq.com/api',
+    },
+  ]
+  const provider = createWeixinQrProvider(credentials, {
+    fetchImpl: async (url, init) => {
+      requests.push({ url: String(url), init })
+      return new Response(JSON.stringify(responses.shift()), { status: 200 })
+    },
+    encodeQr: async value => {
+      assert.equal(value, 'https://liteapp.weixin.qq.com/q/e-mate-207')
+      return 'data:image/png;base64,AA=='
+    },
+    now: () => 1_700_000_000_000,
+  })
+
+  const begun = await provider.begin()
+  assert.equal(begun.state, 'pending')
+  assert.equal(begun.qr_code_data_url, 'data:image/png;base64,AA==')
+  assert.doesNotMatch(JSON.stringify(begun), /host-only-qr-token/u)
+  const completed = await provider.poll(begun.attempt_id)
+  assert.equal(completed.state, 'authorized')
+  assert.doesNotMatch(JSON.stringify(completed), /host-only-(?:qr|bot|account|owner)/u)
+  assert.equal(stored.get('EMATE_WECHAT_BOT_TOKEN'), 'host-only-bot-token')
+  assert.equal(stored.get('EMATE_WECHAT_BASE_URL'), 'https://ilinkai.weixin.qq.com/api/')
+  assert.equal(requests[0].init.redirect, 'error')
+  assert.match(requests[1].url, /get_qrcode_status\?qrcode=host-only-qr-token$/u)
+
+  const rejected = createWeixinQrProvider(credentials, {
+    fetchImpl: async () => new Response(JSON.stringify({
+      qrcode: 'must-not-be-used',
+      qrcode_img_content: 'https://attacker.example/qr',
+    }), { status: 200 }),
+    encodeQr: async () => { throw new Error('untrusted URL reached encoder') },
+  })
+  await assert.rejects(rejected.begin(), /untrusted Weixin URL/u)
+
+  const redirectedRequests = []
+  const redirectedResponses = [
+    { qrcode: 'redirect-token', qrcode_img_content: 'https://liteapp.weixin.qq.com/q/redirect' },
+    { status: 'scaned_but_redirect', redirect_host: 'https://region.weixin.qq.com/ilink/' },
+    { status: 'wait' },
+  ]
+  const redirected = createWeixinQrProvider(credentials, {
+    fetchImpl: async url => {
+      redirectedRequests.push(String(url))
+      return new Response(JSON.stringify(redirectedResponses.shift()), { status: 200 })
+    },
+    encodeQr: async () => 'data:image/png;base64,AA==',
+  })
+  const redirectedAttempt = await redirected.begin()
+  await redirected.poll(redirectedAttempt.attempt_id)
+  await redirected.poll(redirectedAttempt.attempt_id)
+  assert.match(redirectedRequests[2], /^https:\/\/region\.weixin\.qq\.com\/ilink\/ilink\/bot\/get_qrcode_status/u)
+})
+
+test('Agent QR generation uses the target Tool, Job, Attachment, and image renderer path', async () => {
+  const temporary = mkdtempSync(join(tmpdir(), 'e-mate-qr-generation-'))
+  const context = new Context()
+  let attachmentFiber
+  try {
+    const paths = installProfile(join(temporary, 'dsh-home'))
+    attachmentFiber = await context.plugin(LocalAttachmentStore, { dshHome: join(temporary, 'dsh-home') })
+    const tools = new Map()
+    const jobs = []
+    const controllers = []
+    await applyQrGeneration({
+      tools: { register: tool => { tools.set(tool.name, tool); return () => tools.delete(tool.name) } },
+      jobs: {
+        attachController: kind => { controllers.push(kind); return () => {} },
+        start(spec) {
+          assert.equal(spec.kind, 'emate-qr')
+          assert.equal(spec.owner.id, 'qr-session')
+          const id = `emate-qr-${jobs.length + 1}`
+          const run = spec.run()
+          jobs.push({ id, spec, ...run })
+          return id
+        },
+      },
+      attachments: context.attachments,
+      effect: effect => effect(),
+    }, { bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json') })
+
+    assert.deepEqual([...tools.keys()], ['e_mate_qr_generate'])
+    assert.deepEqual(controllers, ['emate-qr'])
+    const tool = tools.get('e_mate_qr_generate')
+    assert.match(tool.description, /never encode passwords, API keys/iu)
+    const result = await tool.execute({ content: 'https://example.com/e-mate' }, {
+      agent: { id: 'qr-session' },
+      signal: new AbortController().signal,
+    })
+    assert.match(result.image.attachmentId, /^sha256:[0-9a-f]{64}$/u)
+    assert.equal(result.image.mediaType, 'image/png')
+    assert.equal(tool.output.render({}, result).some(block => block.type === 'image'), true)
+    assert.equal((await jobs[0].done).output, '{"image_count":1}')
+    assert.doesNotMatch(JSON.stringify(await jobs[0].done), /example\.com/u)
+    const stored = await context.attachments.readImage(result.image, new AbortController().signal)
+    assert.equal(Buffer.from(stored.data).subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])), true)
+    await assert.rejects(
+      tool.execute({ content: 'x'.repeat(1025) }, { agent: { id: 'qr-session' }, signal: new AbortController().signal }),
+      /1 to 1024 UTF-8 bytes/u,
+    )
+    await assert.rejects(
+      tool.execute({ content: 'safe', model: 'external' }, { agent: { id: 'qr-session' }, signal: new AbortController().signal }),
+      /accepts only content/u,
+    )
+  } finally {
+    await attachmentFiber?.dispose()
+    await context.fiber.dispose()
+    rmSync(temporary, { recursive: true, force: true })
+  }
 })
 
 test('image capability stays visible and inert until its managed endpoint is configured', async () => {

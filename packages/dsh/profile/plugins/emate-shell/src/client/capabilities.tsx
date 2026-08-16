@@ -486,6 +486,7 @@ export function CapabilitiesPage({
                     const Icon = capabilityIcons[item] ?? SkillIcon
                     return <button type="button" key={item} aria-pressed={capabilityCategory === item} onClick={() => { setCapabilityCategory(item) }}><Icon size={14} /><span>{CAPABILITY_CATEGORY_LABELS[item]}</span></button>
                   })}
+                  {capabilityCategory === 'collaboration' && <button className={`${css.primary} ${css.uploadAction}`} type="button" onClick={() => { route('/settings?section=connections') }}>配置外部连接</button>}
                 </div>}
                 {loading && builtins.length === 0 ? <p className={css.empty}>正在读取能力目录…</p> : null}
                 {!loading && builtins.length > 0 && visibleBuiltins.length === 0 ? <p className={css.empty}>该分类暂无能力。</p> : null}

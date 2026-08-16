@@ -355,6 +355,7 @@ function profileCheck(paths) {
     join(paths.profile, 'plugins', 'agent-operations.js'),
     join(paths.profile, 'plugins', 'capabilities.js'),
     join(paths.profile, 'plugins', 'connections.js'),
+    join(paths.profile, 'plugins', 'qr-generation.js'),
     join(paths.profile, 'plugins', 'credentials-os.js'),
     join(paths.profile, 'plugins', 'settings-document-boundary.js'),
     join(paths.profile, 'plugins', 'skill-hub-agent.js'),
@@ -387,6 +388,7 @@ function profileCheck(paths) {
       && byId.get('emate-settings-document-boundary')?.name === './plugins/settings-document-boundary.js'
       && byId.get('emate-credentials-os')?.name === './plugins/credentials-os.js'
       && byId.get('emate-connections')?.name === './plugins/connections.js'
+      && byId.get('emate-qr-generation')?.name === './plugins/qr-generation.js'
       && byId.get('emate-model-policy')?.name === './plugins/model-policy.js'
       && byId.get('emate-audit')?.name === './plugins/audit.js'
       && JSON.stringify(byId.get('emate-audit')?.inject) === JSON.stringify([

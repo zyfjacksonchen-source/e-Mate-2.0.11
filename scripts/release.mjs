@@ -35,6 +35,11 @@ export const BUNDLED_PLUGIN_PACKAGES = [
   '@e-mate/dsh-plugin-subagent',
   '@e-mate/dsh-plugin-vision-toolkit',
 ]
+const BUNDLED_MAIN_COMPONENTS = [
+  { name: 'qrcode', version: '1.5.4', license: 'MIT' },
+  { name: 'dijkstrajs', version: '1.0.3', license: 'MIT' },
+  { name: 'pngjs', version: '5.0.0', license: 'MIT' },
+]
 
 const TRANSIENT_PUBLISH_CODES = ['E409', 'E429', 'E500', 'E502', 'E503', 'E504', 'ETIMEDOUT', 'ECONNRESET', 'EAI_AGAIN']
 const PUBLISH_ATTEMPTS = 4
@@ -301,6 +306,9 @@ export async function generateEvidence(directory, outputDirectory, sourceCommit 
   await packedComponents(main, components)
   for (const [name, version] of Object.entries(main.manifest.dependencies ?? {})) {
     addComponent(components, { ecosystem: 'npm', name, version, license: 'NOASSERTION', owner: main.name })
+  }
+  for (const component of BUNDLED_MAIN_COMPONENTS) {
+    addComponent(components, { ecosystem: 'npm', ...component, owner: main.name })
   }
   const releaseDigest = createHash('sha256')
     .update(release.map(item => `${item.filename}\0${item.sha256}\n`).join(''))

@@ -83,6 +83,9 @@
     - id: emate-connections
       name: ./plugins/connections.js
       inject: [credentials, connection, emateCapabilities]
+    - id: emate-qr-generation
+      name: ./plugins/qr-generation.js
+      inject: [tools, jobs, attachments]
     - id: emate-skill-hub-agent
       name: ./plugins/skill-hub-agent.js
       inject: [tools, jobs, emateIdentity, connection, webServer]

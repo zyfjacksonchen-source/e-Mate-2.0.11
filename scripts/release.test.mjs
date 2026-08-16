@@ -92,6 +92,9 @@ test('release evidence requires the one bundled package and emits hashes plus SP
     assert.equal(result.spdx.spdxVersion, 'SPDX-2.3')
     assert.ok(result.spdx.packages.some(item => item.name === '@deepseek-ai/dsh'))
     assert.ok(result.spdx.packages.some(item => item.name === '@e-mate/dsh-plugin-memory-evolve'))
+    for (const name of ['qrcode', 'dijkstrajs', 'pngjs']) {
+      assert.equal(result.spdx.packages.find(item => item.name === name)?.licenseDeclared, 'MIT')
+    }
     const r2 = buildR2Inventory(root, output, result.manifest.source_commit, R2_FIXTURE_PUBLIC_ORIGIN)
     assert.equal(r2.bucket, R2_BUCKET)
     assert.equal(r2.public_origin, R2_FIXTURE_PUBLIC_ORIGIN)
@@ -177,6 +180,7 @@ test('GitHub release packs once and validates the same tarball on three platform
   const { parse } = requireFromDsh('yaml')
   const workspace = JSON.parse(readFileSync('package.json', 'utf8'))
   const published = JSON.parse(readFileSync('packages/dsh/package.json', 'utf8'))
+  assert.equal(published.dependencies.qrcode, '1.5.4')
   const ci = parse(readFileSync('.github/workflows/ci.yml', 'utf8'))
   const release = parse(readFileSync('.github/workflows/release.yml', 'utf8'))
   assert.deepEqual(published.os, ['darwin', 'win32'])

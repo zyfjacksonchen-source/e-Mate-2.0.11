@@ -1140,3 +1140,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 曾用同一调用 ID 试验 503 自动重试，但现有安全门禁正确失败：当前 Images 上游没有正式承诺 idempotency key 去重或 invocation 状态查询，重复 POST 可能重复出图和计费；试验已完整撤回，最终 0 代码改动。两条历史 504/503 的 Harness Job 都是真实 failed，企业调用账本的 PENDING 只表示无法证明上游未接收还是响应丢失，不能伪造为 rejected。
 - 安全解除 PENDING 需要上游提供按 invocation/idempotency key 查询的鉴权状态合同，并绑定 request digest、route fingerprint、provider/model；只有明确 `NOT_ACCEPTED` 才可重试，`ACCOUNTED` 必须带可信 response ID、终态和 usage，`UNKNOWN` 保持待核对。在该合同缺失时停止更高阶生产压测；当前可确认稳定并发下限为 1，并发 2 仍不稳定。
 - 对照切片验证为 Model Gateway TypeScript check、图片生成/改图/Pro fallback/503 不重复提交/API 隔离 5/5、e-Mate Harness Job 与 attachment 1/1；Model Gateway 81 pass / 7 环境 skip / 0 fail，且无残留代码改动。
+
+## 2026-08-16 · S11 外部连接授权前闭环
+
+- 主代理 Computer Use 复现真实缺口：聊天框已经进入能力中心“外部连接”分类，但插件卡只有动态状态，没有可达设置/授权步骤，违反“可发现且按钮闭环”。根因不在连接 transport，而是分类页缺少到目标现有 Connections Settings 的入口。
+- 最小修复只在 `collaboration` 分类显示“配置外部连接”，通过既有 History/`popstate` 进入 `/settings?section=connections`；没有为飞书、腾讯文档、微信、钉钉或 dsh-im 在中央 UI 写 ID/工具名分派，没有新增 Router、Store、RPC 或第二连接页。聊天框入口仍先进入能力中心，符合外部连接子类型要求。
+- 重建受管 profile 后，主代理从聊天框逐步进入能力中心和真实设置页。飞书显示 App ID/App Secret、腾讯文档显示 OAuth Token、钉钉显示 Client ID/Client Secret；凭据继续只写 Keychain/CurrentUser DPAPI且页面不回读。微信准确显示设备扫码尚未启用，dsh-im 继续为 `EMATE_DSH_IM_RUNTIME_UNVERIFIED`，没有假二维码或近似授权页。
+- 按 2.0.7 验收边界，本轮未填写、保存、提交 OAuth、扫码或发消息。Shell 34/34 与主包构建通过；真实授权前截图为 `artifacts/design-qa/S11-external-connections/settings-authorization-step-1280.png`。
+
+## 2026-08-16 · S10/S11 二维码真实闭环
+
+- `xmanrui/dsh-im@2eea8a08bcd8ef91e8845de1f300b5715b746938` 的只读审计确认微信 iLink 二维码流程为 MIT 可适配部分；QQ 仍依赖 `UNLICENSED` 的 connector，不进入 e-Mate。微信授权复用现有 `/emate.connections` loopback RPC：二维码 token 和区域重定向只留在 Host 内存，浏览器只取得一次性 PNG 与状态；确认后的 bot/account/owner/base URL 只写现有 Keychain/CurrentUser DPAPI provider。没有复制 rc.6 Runtime、增加 REST/WebSocket/Store/Router 或把消息通道假标为 ready。
+- 主代理直接调用同一发布 bundle 的真实微信 begin 流程，取得 pending 状态和 3,168-byte PNG 后立即取消；没有输出 token、保存二维码、扫码、提交配对码或取得真实账号授权。Browser 验收因此前策略变更已吊销验收账号租约且当前没有可安全取得的新密码，未绕过登录或创建临时生产用户；UI 的生成、轮询、配对码和取消闭环由挂载测试覆盖，最终 Computer Use 登录后仍需逐屏复验。
+- Agent 普通二维码使用独立 `e_mate_qr_generate` typed Tool：输入上限 1,024 UTF-8 bytes，固定生成 512px/M 级 PNG，通过 owner-scoped Harness Job 与 `attachments.saveImage` 写入当前会话，返回真实 image block 继续由目标 Image renderer/Lightbox 展示。Job receipt 不含原文，Tool 明确禁止密码、Key、令牌、恢复码、私钥和 Cookie；未改 dsh-genui、消息事件、通信层或 renderer 分派。
+- `qrcode@1.5.4`、`dijkstrajs@1.0.3` 与 `pngjs@5.0.0` 已内联进 Host 插件并补齐 MIT notice，干净安装不依赖 `$DSH_HOME` 外的模块解析。主包完整门禁为 Node 51/51、Shell 34/34；真实 Host 重装后健康，固定 Harness runtime-binding 的 Tool/Job/Attachment 执行回归通过。

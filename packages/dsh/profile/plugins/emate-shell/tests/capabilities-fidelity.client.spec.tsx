@@ -101,6 +101,9 @@ describe('capability center fidelity surface', () => {
     expect(screen.queryByText('生图与改图')).toBeNull()
     expect(screen.getByRole('button', { name: '外部连接' }).getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByText('本机内置能力').closest('details')?.open).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: '配置外部连接' }))
+    expect(`${location.pathname}${location.search}`).toBe('/settings?section=connections')
   })
 
   it('opens the real Hub detail and starts its download job', async () => {

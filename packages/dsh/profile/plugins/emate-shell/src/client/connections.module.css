@@ -132,6 +132,52 @@
 }
 .body > small { display: block; margin-top: 2px; font-size: 12px; line-height: 16px; }
 
+.qrActions { margin-top: 12px; }
+.qrActions button,
+.qrVerification button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--emate-brand-ink);
+  background: var(--emate-brand);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  cursor: pointer;
+}
+.qrActions button:disabled,
+.qrVerification button:disabled { opacity: .5; cursor: not-allowed; }
+
+.qrPanel {
+  width: min(360px, 100%);
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--emate-rule);
+  border-radius: 12px;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  background: var(--emate-raised);
+  box-sizing: border-box;
+}
+.qrImage {
+  width: min(240px, 100%);
+  height: auto;
+  border-radius: 10px;
+  display: block;
+  background: white;
+}
+.qrPanel > p { margin: 0; color: var(--emate-muted); font-size: 12px; line-height: 16px; text-align: center; }
+.qrVerification { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.qrVerification input {
+  width: 100%; min-width: 0; min-height: 32px; padding: 6px 10px; box-sizing: border-box;
+  border: 1px solid var(--emate-rule); border-radius: 10px; outline: 0;
+  color: var(--emate-ink); background: var(--emate-surface); font: inherit;
+}
+.qrVerification input:focus-visible { border-color: var(--emate-brand); box-shadow: 0 0 0 1px var(--emate-brand); }
+
 .fields {
   margin-top: 12px;
   padding-top: 8px;
@@ -196,7 +242,10 @@
 @media (pointer: coarse) {
   .iconButton,
   .actions button,
-  .field input { min-height: 44px; }
+  .field input,
+  .qrActions button,
+  .qrVerification input,
+  .qrVerification button { min-height: 44px; }
   .iconButton { width: 44px; min-width: 44px; }
 }
 

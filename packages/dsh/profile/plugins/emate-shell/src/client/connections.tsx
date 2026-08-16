@@ -23,6 +23,19 @@ interface ConnectionItem {
   state: 'setup-required' | 'blocked'
   detail: string
   fields: Field[]
+  qr_supported: boolean
+}
+
+type QrState = 'pending' | 'scanned' | 'needs-verification' | 'authorized' | 'expired' | 'failed' | 'cancelled'
+
+interface QrAttempt {
+  connectionId: string
+  attemptId: string
+  state: QrState
+  expiresAt: number
+  qrCodeDataUrl?: string
+  verificationRequired: boolean
+  detail: string
 }
 
 interface Props {
@@ -34,6 +47,9 @@ interface Props {
 }
 
 const REF = /^[A-Za-z_][A-Za-z0-9_]*$/u
+const QR_ATTEMPT = /^[0-9a-f-]{36}$/iu
+const QR_DATA_URL = /^data:image\/png;base64,[A-Za-z0-9+/=]+$/u
+const ACTIVE_QR_STATES = new Set<QrState>(['pending', 'scanned'])
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : '外部连接暂不可用。'
@@ -51,6 +67,7 @@ function catalog(value: unknown): ConnectionItem[] {
       || typeof entry.summary !== 'string'
       || !['setup-required', 'blocked'].includes(String(entry.state))
       || typeof entry.detail !== 'string'
+      || typeof entry.qr_supported !== 'boolean'
       || !Array.isArray(entry.fields)) throw new Error('外部连接目录无效。')
     for (const field of entry.fields) {
       if (field === null || typeof field !== 'object' || Array.isArray(field)) throw new Error('外部连接凭据目录无效。')
@@ -68,6 +85,30 @@ function catalog(value: unknown): ConnectionItem[] {
   return root.items as ConnectionItem[]
 }
 
+function qrAttempt(value: unknown): QrAttempt {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('二维码状态无效。')
+  const source = value as Record<string, unknown>
+  if (source.connection_id !== 'wechat'
+    || typeof source.attempt_id !== 'string' || !QR_ATTEMPT.test(source.attempt_id)
+    || !['pending', 'scanned', 'needs-verification', 'authorized', 'expired', 'failed', 'cancelled'].includes(String(source.state))
+    || typeof source.expires_at !== 'number' || !Number.isSafeInteger(source.expires_at)
+    || typeof source.detail !== 'string'
+    || (source.qr_code_data_url !== undefined
+      && (typeof source.qr_code_data_url !== 'string' || source.qr_code_data_url.length > 1_000_000 || !QR_DATA_URL.test(source.qr_code_data_url)))
+    || (source.verification_required !== undefined && source.verification_required !== true)) {
+    throw new Error('二维码状态无效。')
+  }
+  return {
+    connectionId: source.connection_id,
+    attemptId: source.attempt_id,
+    state: source.state as QrState,
+    expiresAt: source.expires_at,
+    ...(source.qr_code_data_url === undefined ? {} : { qrCodeDataUrl: source.qr_code_data_url }),
+    verificationRequired: source.verification_required === true,
+    detail: source.detail,
+  }
+}
+
 export function ConnectionsSettings({
   callConnections,
   setCredential,
@@ -81,6 +122,9 @@ export function ConnectionsSettings({
   const [busyRef, setBusyRef] = useState<string | null>(null)
   const [confirmRef, setConfirmRef] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
+  const [qr, setQr] = useState<QrAttempt | null>(null)
+  const [qrBusy, setQrBusy] = useState(false)
+  const [verifyCode, setVerifyCode] = useState('')
 
   const load = async () => {
     setStatus(null)
@@ -94,6 +138,86 @@ export function ConnectionsSettings({
     void load().catch(error => { if (active) setStatus(message(error)) })
     return () => { active = false }
   }, [callConnections])
+
+  useEffect(() => {
+    if (qr === null || !ACTIVE_QR_STATES.has(qr.state)) return undefined
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async () => {
+      try {
+        const result = await callConnections('qr.poll', {
+          connection_id: qr.connectionId,
+          attempt_id: qr.attemptId,
+        })
+        if (!active) return
+        if (!result.ok) throw new Error(result.error?.message ?? '二维码状态读取失败。')
+        const next = qrAttempt(result.value)
+        setQr(next)
+        if (ACTIVE_QR_STATES.has(next.state)) timer = setTimeout(() => { void poll() }, 1_000)
+        else if (next.state === 'authorized') await load()
+      } catch (error) {
+        if (active) setStatus(message(error))
+      }
+    }
+    timer = setTimeout(() => { void poll() }, 1_000)
+    return () => {
+      active = false
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [callConnections, qr?.attemptId, qr?.connectionId, qr?.state])
+
+  const beginQr = async (item: ConnectionItem) => {
+    if (qrBusy) return
+    setQrBusy(true)
+    setVerifyCode('')
+    setStatus(null)
+    try {
+      const result = await callConnections('qr.begin', { connection_id: item.id })
+      if (!result.ok) throw new Error(result.error?.message ?? '二维码生成失败。')
+      setQr(qrAttempt(result.value))
+    } catch (error) {
+      setStatus(message(error))
+    } finally {
+      setQrBusy(false)
+    }
+  }
+
+  const cancelQr = async () => {
+    if (qr === null || qrBusy) return
+    setQrBusy(true)
+    try {
+      const result = await callConnections('qr.cancel', {
+        connection_id: qr.connectionId,
+        attempt_id: qr.attemptId,
+      })
+      if (!result.ok) throw new Error(result.error?.message ?? '二维码取消失败。')
+      setQr(qrAttempt(result.value))
+    } catch (error) {
+      setStatus(message(error))
+    } finally {
+      setQrBusy(false)
+    }
+  }
+
+  const submitVerifyCode = async () => {
+    if (qr === null || qrBusy || !/^\d{4,8}$/u.test(verifyCode)) return
+    setQrBusy(true)
+    setStatus(null)
+    try {
+      const result = await callConnections('qr.poll', {
+        connection_id: qr.connectionId,
+        attempt_id: qr.attemptId,
+        verify_code: verifyCode,
+      })
+      if (!result.ok) throw new Error(result.error?.message ?? '配对码提交失败。')
+      setVerifyCode('')
+      setQr(qrAttempt(result.value))
+    } catch (error) {
+      setStatus(message(error))
+    } finally {
+      setQrBusy(false)
+    }
+  }
 
   const save = async (field: Field) => {
     const value = drafts[field.ref]?.trim() ?? ''
@@ -158,6 +282,16 @@ export function ConnectionsSettings({
               </div>
               <p>{item.summary}</p>
               <small>{item.detail}</small>
+              {item.qr_supported && <div className={css.qrActions}><button type="button" disabled={busyRef !== null || qrBusy} onClick={() => { void beginQr(item) }}>{qrBusy ? '正在生成' : '生成授权二维码'}</button></div>}
+              {qr?.connectionId === item.id && <section className={css.qrPanel} aria-label={`${item.title}扫码授权`}>
+                {qr.qrCodeDataUrl && <img className={css.qrImage} src={qr.qrCodeDataUrl} alt={`用于授权 ${item.title} 的一次性二维码`} />}
+                <p role="status">{qr.detail}</p>
+                {qr.verificationRequired && <label className={css.qrVerification}><span>配对码</span><input inputMode="numeric" autoComplete="one-time-code" minLength={4} maxLength={8} pattern="[0-9]{4,8}" value={verifyCode} onChange={event => { setVerifyCode(event.target.value.replace(/\D/gu, '').slice(0, 8)) }} /><button type="button" disabled={qrBusy || !/^\d{4,8}$/u.test(verifyCode)} onClick={() => { void submitVerifyCode() }}>提交配对码</button></label>}
+                <div className={css.actions}>
+                  {['pending', 'scanned', 'needs-verification'].includes(qr.state) && <button type="button" disabled={qrBusy} onClick={() => { void cancelQr() }}>取消扫码</button>}
+                  {['expired', 'failed', 'cancelled'].includes(qr.state) && <button type="button" disabled={qrBusy} onClick={() => { void beginQr(item) }}>重新生成</button>}
+                </div>
+              </section>}
               {item.fields.length > 0 && (
                 <div className={css.fields}>
                   {item.fields.map(field => (
