@@ -23,6 +23,7 @@ function token(claims: Record<string, unknown> = {}, header: Record<string, unkn
       sub: 'user-1',
       sid: 'session-1',
       tenantId: 'tenant-1',
+      roles: ['MEMBER'],
       modelIds: ['gpt-5.6-sol'],
       scopes: ['models:read', 'responses:create', 'usage:read'],
       iat: Math.floor(now / 1_000),
@@ -47,10 +48,18 @@ test('verifies short-lived Ed25519 session tokens with their signed user model p
   assert.deepEqual(await authenticate(token()), {
     tenantId: 'tenant-1',
     userId: 'user-1',
+    roles: ['MEMBER'],
     modelIds: ['gpt-5.6-sol'],
     sessionId: 'session-1',
   });
   assert.equal(await authenticate(token({ modelIds: undefined })), null);
+  assert.deepEqual(await authenticate(token({ roles: undefined })), {
+    tenantId: 'tenant-1',
+    userId: 'user-1',
+    modelIds: ['gpt-5.6-sol'],
+    sessionId: 'session-1',
+  });
+  assert.equal(await authenticate(token({ roles: ['SUPER_ADMIN'] })), null);
 });
 
 test('rejects tampering, algorithm confusion, wrong scope and invalid lifetime', async () => {

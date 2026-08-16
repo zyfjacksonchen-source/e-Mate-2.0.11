@@ -1,4 +1,5 @@
 import { createPublicKey, verify, type KeyObject } from 'node:crypto';
+import { ADMIN_USER_ROLES, type AdminUserRole } from '@e-mate/admin-contract';
 import type { ModelGatewayPrincipal } from './server.ts';
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -11,6 +12,7 @@ type SessionClaims = {
   sub: string;
   sid: string;
   tenantId: string;
+  roles?: AdminUserRole[];
   modelIds: string[];
   scopes: ['models:read', 'responses:create', 'usage:read'];
   iat: number;
@@ -75,7 +77,7 @@ function validClaimText(value: unknown): value is string {
 function parseClaims(value: Record<string, unknown>, policy: SessionTokenPolicy): SessionClaims | undefined {
   const claimKeys = ['schemaVersion', 'iss', 'aud', 'sub', 'sid', 'tenantId', 'scopes', 'iat', 'nbf', 'exp', 'jti'];
   if (
-    !exactKeys(value, [...claimKeys, 'modelIds']) ||
+    (!exactKeys(value, [...claimKeys, 'modelIds']) && !exactKeys(value, [...claimKeys, 'modelIds', 'roles'])) ||
     value.schemaVersion !== 1 ||
     value.iss !== policy.issuer ||
     value.aud !== policy.audience ||
@@ -83,6 +85,12 @@ function parseClaims(value: Record<string, unknown>, policy: SessionTokenPolicy)
     !validIdentifier(value.sid) ||
     !validIdentifier(value.tenantId) ||
     !validNonce(value.jti) ||
+    (value.roles !== undefined &&
+      (!Array.isArray(value.roles) ||
+        value.roles.length < 1 ||
+        value.roles.length > ADMIN_USER_ROLES.length ||
+        value.roles.some((role) => !ADMIN_USER_ROLES.includes(role as AdminUserRole)) ||
+        new Set(value.roles).size !== value.roles.length)) ||
     (!Array.isArray(value.modelIds) ||
         value.modelIds.length < 1 ||
         value.modelIds.length > 20 ||
@@ -202,6 +210,7 @@ export function createSessionTokenVerifier(
     return {
       tenantId: claims.tenantId,
       userId: claims.sub,
+      ...(claims.roles ? { roles: [...claims.roles] } : {}),
       modelIds: [...claims.modelIds],
       sessionId: claims.sid,
     };

@@ -170,6 +170,7 @@ export function createSessionTokenIssuer(options: SessionTokenIssuerOptions) {
         sub: identity.userId,
         sid: sessionId,
         tenantId: identity.tenantId,
+        roles: identity.roles,
         modelIds: identity.modelIds,
         scopes: ['models:read', 'responses:create', 'usage:read'],
         iat: issuedAt,

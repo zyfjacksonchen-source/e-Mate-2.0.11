@@ -19,6 +19,7 @@ const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 export type ModelGatewayPrincipal = {
   tenantId: string;
   userId: string;
+  roles?: Array<'TENANT_ADMIN' | 'AUDIT_ADMIN' | 'MEMBER'>;
   modelIds: string[];
   sessionId?: string;
 };
@@ -1346,6 +1347,7 @@ const consentProtectedPaths = new Set([
 ]);
 
 async function requireAcceptedConsent(store: ConsentStore | undefined, identity: ModelGatewayPrincipal): Promise<void> {
+  if (identity.roles?.includes('TENANT_ADMIN')) return;
   if (!store) {
     throw new HttpError(503, 'CONSENT_STORE_UNAVAILABLE', 'Consent status temporarily unavailable');
   }

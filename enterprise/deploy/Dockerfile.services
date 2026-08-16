@@ -1,0 +1,43 @@
+ARG NODE_IMAGE=node@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+ARG BUN_IMAGE=oven/bun@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f
+
+FROM ${NODE_IMAGE} AS build
+WORKDIR /app
+RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps ./apps
+COPY packages ./packages
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @e-mate/analytics-api build \
+ && pnpm --filter @e-mate/model-gateway build \
+ && pnpm --filter @e-mate/auth-gateway build
+
+FROM ${BUN_IMAGE} AS analytics
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/apps/analytics-api ./apps/analytics-api
+COPY --from=build /app/packages ./packages
+USER 10001:0
+EXPOSE 4190
+CMD ["bun", "apps/analytics-api/dist/production.js"]
+
+FROM ${BUN_IMAGE} AS gateway
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/apps/model-gateway ./apps/model-gateway
+COPY --from=build /app/packages ./packages
+USER 10001:0
+EXPOSE 4191
+CMD ["bun", "apps/model-gateway/dist/start.js"]
+
+FROM ${BUN_IMAGE} AS auth
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/apps/auth-gateway ./apps/auth-gateway
+COPY --from=build /app/packages ./packages
+USER 10001:0
+EXPOSE 4192
+CMD ["bun", "apps/auth-gateway/dist/start.js"]

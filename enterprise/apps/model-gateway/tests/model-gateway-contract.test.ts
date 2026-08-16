@@ -873,6 +873,33 @@ test('blocks every user model capability until the current consent is accepted',
   }
 });
 
+test('tenant administrators use the model catalog without signing the user agreement', async () => {
+  const server = createModelGatewayServer({
+    routes: [route],
+    authenticate: async (token) =>
+      token === sessionToken ? { ...principal('tenant-a', 'admin-a'), roles: ['TENANT_ADMIN'] } : null,
+    consentStore: new InMemoryConsentStore(consentPolicy),
+    usageStore: new InMemoryUsageStore(limits),
+    usageKeyId: 'usage-2026',
+    usagePrivateKey: privateKey,
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    assert.equal((await fetch(`${baseUrl}/v1/models`, { headers: auth() })).status, 200);
+    const consent = (await (
+      await fetch(`${baseUrl}/v1/consents/current`, { headers: auth() })
+    ).json()) as { required: boolean };
+    assert.equal(consent.required, true);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
 test('fails closed when the consent store is unavailable', async () => {
   const server = createModelGatewayServer({
     routes: [route],

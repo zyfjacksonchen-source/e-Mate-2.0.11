@@ -93,6 +93,7 @@ test('issued response matches desktop contract and model token authorizes consen
   assert.deepEqual(modelJwt.header, { alg: 'EdDSA', typ: 'e-mate-model-session+jwt', kid: 'auth-2026-08' });
   assert.equal(modelJwt.claims.aud, 'e-mate-model-gateway');
   assert.deepEqual(modelJwt.claims.scopes, ['models:read', 'responses:create', 'usage:read']);
+  assert.deepEqual(modelJwt.claims.roles, ['MEMBER']);
   assert.deepEqual(modelJwt.claims.modelIds, ['gpt-5.6-luna', 'gpt-image-2-pro']);
   assert.equal(modelJwt.claims.sid, 'session-1');
   const authenticateModelGateway = createSessionTokenVerifier({
@@ -104,6 +105,7 @@ test('issued response matches desktop contract and model token authorizes consen
   assert.deepEqual(await authenticateModelGateway(session.modelGateway.sessionToken), {
     tenantId: 'tenant-a',
     userId: 'user-a',
+    roles: ['MEMBER'],
     modelIds: ['gpt-5.6-luna', 'gpt-image-2-pro'],
     sessionId: 'session-1',
   });
