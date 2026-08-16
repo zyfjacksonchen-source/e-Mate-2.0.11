@@ -259,6 +259,35 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     await waitFor(() => { expect(setCredential).toHaveBeenCalledWith('FEISHU_SECRET', 'secret-value') })
   })
 
+  it('renders an unlimited weekly quota without exposing its numeric sentinel', async () => {
+    const unlimitedState = { ...signedIn, weekly_token_limit: Number.MAX_SAFE_INTEGER }
+    const callIdentity = vi.fn(async (endpoint: string): Promise<RpcResult> => endpoint === 'identity.usage'
+      ? {
+          ok: true,
+          value: {
+            schema_version: 1,
+            scope: 'account',
+            timezone: 'Asia/Shanghai',
+            week: { total_tokens: 2_500 },
+            week_started_at: '2026-08-10T16:00:00.000Z',
+            calculated_at: '2026-08-15T00:00:00.000Z',
+          },
+        }
+      : { ok: true, value: unlimitedState })
+    const Icon = () => <svg />
+
+    const account = render(<AccountControl callIdentity={callIdentity} wide UserIcon={Icon} expandSidebar={() => {}} />)
+    fireEvent.click(await screen.findByLabelText('用户中心，测试用户'))
+    expect(await screen.findByText('2,500 Token · 不限额度')).toBeTruthy()
+    expect(screen.getByRole('progressbar', { name: '本周 Token 用量' }).getAttribute('aria-valuetext')).toBe('无限额度，已使用 2,500 Token')
+    expect(document.body.textContent).not.toContain(Number.MAX_SAFE_INTEGER.toLocaleString('zh-CN'))
+    account.unmount()
+
+    render(<AccountSettings callIdentity={callIdentity} />)
+    expect(await screen.findByText(/每周 Token 额度 不限；/u)).toBeTruthy()
+    expect(document.body.textContent).not.toContain(Number.MAX_SAFE_INTEGER.toLocaleString('zh-CN'))
+  })
+
   it('previews a validated avatar locally without adding an identity RPC', async () => {
     const callIdentity = vi.fn(async (): Promise<RpcResult> => ({ ok: true, value: signedIn }))
     render(<AccountSettings callIdentity={callIdentity} />)

@@ -1113,3 +1113,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 实现增加 `@e-mate/dsh-plugin-im@2.0.7` 并纳入现有 profile bundle 生成、setup 校验和 release registry；该包依赖数为 0、运行码为 0、Tool/transport 数均为 0，能力卡真实显示 `blocked / EMATE_DSH_IM_RUNTIME_UNVERIFIED`。能力中心只按插件的 `icon_key=collaboration` 动态归类，中央 UI 没有通道 ID/工具名分派。
 - 聊天框“外部连接”通过既有 History/`popstate` 跳转 `/capabilities?category=collaboration`；能力中心自动展开“本机内置能力”并选中“外部连接”，没有新增页面 Router。聚焦门禁通过：上游 281/281、适配包 2/2、Shell 路由/分类 9/9、profile setup/可见能力/环境闭包 3/3、target contract 与 diff check；适配包 `pnpm pack` 仅含允许名单文件。
 - 剩余真实阻塞：rc.5 Host 组合、e-Mate 通用/项目会话绑定、macOS/Windows 本机凭据、飞书/微信/钉钉/企业微信/Telegram/Discord/WhatsApp 真授权与可逆收发均未验收；QQ 因 `UNLICENSED` 依赖不进入后续适配范围。
+
+## 2026-08-16 · S07 生产验收账号无限额度与显示闭环
+
+- 通过现有生产管理 API 将唯一验收用户 `cae2a9ef-2110-41ab-990d-151658c549e7` 的 `tokenLimit` 从有限值更新为 `null`；状态保持 `ACTIVE`，五项已允许模型保持不变，旧服务未停止或重启。管理 API 回读为 `null`，随后使用该用户真实密码重新登录，Auth Gateway 新租约的 `weeklyTokenLimit` 为 `Number.MAX_SAFE_INTEGER`，证明现有无限额度合同生效。
+- Computer Use 发现用户中心把内部无限额度哨兵直接显示为 `9,007,199,254,740,991`。显示层已复用同一真实身份/用量状态，改为“已使用 Token · 不限额度”，进度条用 `aria-valuetext` 描述无限额度；设置页同步显示“每周 Token 额度 不限”。没有改变 Auth、配额 admission、审计或模型调用链。
+- 聚焦组件测试覆盖有限额度原行为、无限额度用户中心、无哨兵泄露和设置页文案；Shell 客户端构建通过。真实浏览器在同步新 bundle 后仍需回读最终文案截图，不能用源码测试替代该项 Computer Use。
