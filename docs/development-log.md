@@ -1092,3 +1092,15 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 真实管理员本地 outbox 从 1 条 pending / 15,040 Token 变为 0 pending / 1 delivered；生产账本从 3 次 / 13,185 Token / 3 Invocations 变为 4 次 / 28,225 Token / 4 Invocations。重复上送相同事实返回同一 receipt，账本计数完全不变。
 - Analytics 回读管理员 requests=4、usage events=4、total tokens=28,225；租户总计 requests=8、usage events=8、total tokens=77,080。Usage reconciliation 为 `MATCHED`，request status、usage task total、completed invocation usage 和 usage-invocation link 四项差异均为 0。
 - 本切片只关闭模型 Usage 审计。`/v1/tasks/summary` 仍为 `NO_DATA`，管理员 `e_mate_task_event` 数为 0；本地任务生命周期事件尚未上送，不能拿模型调用记录伪造每用户事件次数。
+
+## 2026-08-16 · S07 Harness 任务事件旁路审计与每用户事件次数
+
+- 提交 `46be4ef74e54421bf358286ebb1f425a89fdbb1f` 只映射 pinned rc.5 的真实持久事件：`turn/start → RECEIVED`、首个模型 `assistant/message → FIRST_RESPONSE`、`tool/call → TOOL_EXECUTION`、`approval/asked → PERMISSION_REQUESTED`，以及 `turn/end` 的完成/失败/取消终态。Task ID 与 Event ID 由 Session/turn/seq 的 SHA-256 稳定生成；载荷只有类型、匿名 ID、`GENERAL` 场景和时间，不含提示词、回复、工具名、参数、附件或原 Session ID。
+- 本地复用现有 `emate-audit` 插件与独立 `emate_task_audit` StorageDomain；登录主体只在 live `turn/start` 绑定，旧的无绑定 Session 不会被当前账号冒领。任务 outbox 继续经 Host-only identity transport 上送新增的 `/v1/audit/tasks`；没有浏览器 RPC、第二 Store、Router 或通信层。Model Gateway 使用既有 model-session 验证当前用户和协议，再原子写入共享 `e_mate_task_fact/e_mate_task_event`，同 Event 重放返回同 receipt，冲突整批回滚。
+- 新增 `GENERAL` 是 Harness 通用 turn 的真实场景，不从提示词、工具或能力名猜业务分类；`SKILL_SELECTED / TOOL_SELECTED / WAITING_INPUT / ARTIFACT_UPDATED` 在无权威事件源时保持 0。共享 monitoring contract、Analytics、Usage、Gateway 和 Host 聚焦门禁全通过；精确提交 CI run `31939933973` 成功。
+- 生产候选激活前 Luna、Sol、DeepSeek、Doubao、`gpt-image-2-pro` 五路 Model Smoke 全通过。仅替换 Gateway 为 `sha256:491212557d98df0c0c01d98f4704503f353739f27655dfbb2dada0fd44929732`、Analytics 为 `sha256:b74fc659fc60a5d9bd0d826071d0d66f84de05959019c505bc53d87d3016a39c`；Auth、Web、Postgres、Redis 容器未重启且继续 healthy。公网 Usage 静态 release 原子切到 `/srv/ecorex-agent-usage-panel/releases/usage-2.0.7-task-audit-46be4ef`，实际脚本为 `index-BIO1utWs.js`。
+- 主代理用真实管理员在受管 e-Mate 中执行一个 Luna 无工具 turn；页面终态回复“任务审计验收通过”。本地 outbox 精确为 3 delivered / 0 pending / 0 retry；生产账本精确为 `RECEIVED / FIRST_RESPONSE / COMPLETED` 各 1，管理员事件次数 3、`GENERAL` 任务 1。重启 Host 回放同一 Session 后本地和生产计数完全不变。生产 Usage 面板显示事件次数 3、通用任务 1，四项对账差异为 0。
+- 公网 Usage 首轮仍加载旧 `index-JdWJrmzA.js` 并把四个 HTTP 200 的新合同误报为不可用；根因是公网 Nginx alias `/srv/ecorex-agent-usage-panel/current`，不是容器内 `/srv/www/usage`。切换真实 alias 后 Browser 回读新 bundle 与完整数据。后续静态验收固定先核对浏览器实际脚本 hash，避免只看容器目录。
+- 管理员初始密码已失效；按现有 `PostgresAdminManagementStore.resetPassword` 共享事务设置新的随机强密码并撤销旧管理会话，真实重新登录成功。密码只存用户本机权限文件与服务器 root-only `0600` 文件，不进入命令参数、环境变量、日志、源码或 Git；管理员继续免签协议。
+- root-only 生产回执为 `/root/e-mate-bootstrap/20260816T095133Z-task-audit-46be4ef`，`activation.json` SHA-256 为 `bd32b800b1c77ff61ec1cefc8f5f71d63389611ea59fd817622b11dd28834aaf`。旧 Gateway/Analytics 镜像、compose/env、Usage 静态 tar 与旧 alias 目标均保留用于精确回退。
+- 本次真实 Luna 运行仍同时显示英文 `Deep diving...` 和中文“思考中”；这与先前品牌化结论不一致，已重新列入最终 UI P1，不能用既有单测或历史截图关闭。
