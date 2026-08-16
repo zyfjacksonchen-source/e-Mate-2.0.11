@@ -616,6 +616,7 @@ test('managed profile installation is idempotent', () => {
       '@deepseek-ai/dsh-client-connection',
       '@deepseek-ai/dsh-client-ui-layout',
       '@deepseek-ai/dsh-client-ui-conversation',
+      '@deepseek-ai/dsh-client-ui-attachment',
       '@deepseek-ai/dsh-client-locale',
     ])
     const client = readFileSync(join(shell, 'lib', 'client.js'), 'utf8')

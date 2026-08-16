@@ -172,6 +172,33 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     view.unmount()
   })
 
+  it('closes an overlay route when the target session selection really changes', async () => {
+    history.replaceState(null, '', '/capabilities?category=collaboration')
+    let selectSession!: (id: string) => void
+    const popstate = vi.fn()
+    addEventListener('popstate', popstate)
+
+    function Runtime() {
+      const [current, setCurrent] = React.useState('session-1')
+      selectSession = setCurrent
+      const state = { phase: 'ready' as const, current, byId: { 'session-1': {}, 'session-2': {} } }
+      return <SessionRouteProjection
+        useSessions={selector => selector(state)}
+        getSessions={() => state}
+        openSession={() => {}}
+        startHomeSession={() => {}}
+      />
+    }
+
+    const view = render(<Runtime />)
+    expect(location.pathname).toBe('/capabilities')
+    act(() => { selectSession('session-2') })
+    expect(location.pathname).toBe('/chat/session-2')
+    expect(popstate).toHaveBeenCalledOnce()
+    removeEventListener('popstate', popstate)
+    view.unmount()
+  })
+
   it('keeps account password and connection credentials on their existing RPC/API seams', async () => {
     const callIdentity = vi.fn(async (endpoint: string): Promise<RpcResult> => {
       if (endpoint === 'identity.bootstrap') return { ok: true, value: signedIn }

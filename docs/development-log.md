@@ -1118,4 +1118,12 @@ The text highlights AI hallucination and human verification, legal use, real-act
 
 - 通过现有生产管理 API 将唯一验收用户 `cae2a9ef-2110-41ab-990d-151658c549e7` 的 `tokenLimit` 从有限值更新为 `null`；状态保持 `ACTIVE`，五项已允许模型保持不变，旧服务未停止或重启。管理 API 回读为 `null`，随后使用该用户真实密码重新登录，Auth Gateway 新租约的 `weeklyTokenLimit` 为 `Number.MAX_SAFE_INTEGER`，证明现有无限额度合同生效。
 - Computer Use 发现用户中心把内部无限额度哨兵直接显示为 `9,007,199,254,740,991`。显示层已复用同一真实身份/用量状态，改为“已使用 Token · 不限额度”，进度条用 `aria-valuetext` 描述无限额度；设置页同步显示“每周 Token 额度 不限”。没有改变 Auth、配额 admission、审计或模型调用链。
-- 聚焦组件测试覆盖有限额度原行为、无限额度用户中心、无哨兵泄露和设置页文案；Shell 客户端构建通过。真实浏览器在同步新 bundle 后仍需回读最终文案截图，不能用源码测试替代该项 Computer Use。
+- 聚焦组件测试覆盖有限额度原行为、无限额度用户中心、无哨兵泄露和设置页文案；Shell 客户端构建通过。同步新 bundle 并重新登录后，真实浏览器回读用户中心为 `110,314 Token · 不限额度`，设置页为“每周 Token 额度 不限”，不再暴露内部哨兵。
+
+## 2026-08-16 · S02/S10 覆盖层会话闭环与真实图片持久画廊
+
+- Computer Use 发现从 `/capabilities` 点击真实会话会切换 Harness 当前 Session，但 URL 和能力中心覆盖层没有关闭。修复只监听目标 `sessions.current` 的真实变化：能力中心、设置或定时任务覆盖层中的会话变化投影到真实 `/chat/:sessionId` 并复用既有 `popstate`；初始深链和同一会话不制造导航。真实浏览器已验证能力中心点击另一会话后进入对应 chat URL，覆盖层消失。
+- 首次真实生图完成后，图片只存在于持久 `tool/result` 的真实 image block；Host 重启后目标通用 Tool 仅显示 JSON，Agent 随后对已丢失的进程内 Job ID 查询失败，却错误声称图片已展示。历史错误回复原样保留为验收证据，没有删除或改写事件。
+- e-Mate 图片例外现增加一个通用 `tool/result` 投影：只匹配真实 append Tool result 中的 image block，不判断工具名或能力 ID；复用 pinned Harness `ImageGallery`、授权附件加载和 Lightbox，只折叠/展开同一持久附件。没有新增 Store、Router、REST、WebSocket 或 Session 事件。Host 重启后旧图片真实恢复为“已查看 1 张图像”，原图预览可打开。
+- 单次真实生图通过；基于上一张附件 SHA-256 的单次改图通过，耗时约 2 分 11 秒，真实产物把橙色星星改为橙色爱心并保持透明背景。两个不同 Session 的并发 2 验收中，一项约 60 秒完成并展示真实图片，另一项约 2 分 20 秒收到上游 HTTP 503；因此当前只能确认稳定并发下限为 1，并发 2 保持发布阻断，不能用 1/2 成功冒充通过。
+- 主包验证为 Node 49/49、Shell 34/34，target pin 与客户端构建通过；Loader 合同显式加入目标 attachment renderer，确保受管 profile 重装后仍使用同一 Harness 实现。

@@ -7,6 +7,8 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/client'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { ImageGallery } from '@deepseek-ai/dsh-client-ui-attachment'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { IconBrowseOutline16, IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './image-gallery.module.css'
 
@@ -18,9 +20,18 @@ interface ImageDisclosureState extends ImageDisclosureData {
   sourceSeq: number
 }
 
+interface ToolImagesData {
+  images: readonly { attachment: ImageAttachmentRef }[]
+}
+
+interface ToolImagesState extends ToolImagesData {
+  sourceSeq: number
+}
+
 declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
   interface ChatNodeDataMap {
     'e-mate-image-disclosure': ImageDisclosureData
+    'e-mate-tool-images': ToolImagesData
   }
 }
 
@@ -55,6 +66,35 @@ export const imageDisclosureDefinition: ConversationNodeDefinition<ImageDisclosu
     location: locationOf(context),
     visibility: 'visible',
     data: { imageCount: context.state.imageCount },
+  }),
+}
+
+function toolImages(event: Parameters<ConversationNodeDefinition<ToolImagesState>['match']>[0]): ToolImagesData['images'] {
+  if (event.type !== 'tool/result') return []
+  return event.data.message.content.flatMap(block => block.type === 'tool-result'
+    ? block.content.filter(image => image.type === 'image').map(image => ({ attachment: image.attachment }))
+    : [])
+}
+
+export const toolImagesDefinition: ConversationNodeDefinition<ToolImagesState> = {
+  kind: 'e-mate-tool-images',
+  target: 'chat',
+  match: event => {
+    if (event.type !== 'tool/result' || !isAppendSurfaceEvent(event)) return null
+    const images = toolImages(event)
+    return images.length === 0 ? null : { id: `tool-images:${event.data.message.id}`, role: 'start' }
+  },
+  start: (_context, match) => ({ images: toolImages(match.event), sourceSeq: match.event.seq }),
+  update: context => context.state,
+  buildViewNode: context => context.state === undefined ? null : ({
+    key: context.key,
+    kind: 'e-mate-tool-images',
+    id: context.id,
+    target: 'chat',
+    anchorSeq: context.state.sourceSeq + 0.02,
+    location: locationOf(context),
+    visibility: 'visible',
+    data: { images: context.state.images },
   }),
 }
 
@@ -136,4 +176,34 @@ export function ImageDisclosure({ node }: ChatNodeViewProps<'e-mate-image-disclo
       </button>, portalHost)}
     </div>
   )
+}
+
+const imageLabels = {
+  image: '图像',
+  open: '查看原图',
+  openNamed: (label: string) => `查看原图：${label}`,
+  loading: '正在加载图像…',
+  loadFailed: '图像加载失败，点击重试',
+  lightbox: { dialog: '原图预览', close: '关闭原图预览' },
+}
+
+export function ToolImageGallery({ node, loadImage }: ChatNodeViewProps<'e-mate-tool-images'>) {
+  const [expanded, setExpanded] = useState(false)
+  const controlId = `e-mate-tool-images-${node.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+  return <section className={css.toolImages} data-emate-tool-images="">
+    <button
+      type="button"
+      className={css.button}
+      aria-expanded={expanded}
+      aria-controls={controlId}
+      onClick={() => { setExpanded(value => !value) }}
+    >
+      <IconBrowseOutline16 className={css.icon} />
+      <strong>已查看 {node.data.images.length} 张图像</strong>
+      <IconChevronDownOutline14 className={css.chevron} />
+    </button>
+    <div id={controlId} hidden={!expanded}>
+      <ImageGallery images={node.data.images} load={loadImage} align="start" labels={imageLabels} />
+    </div>
+  </section>
 }

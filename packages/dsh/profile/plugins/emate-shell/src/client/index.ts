@@ -37,7 +37,7 @@ import { ConnectionsSettings } from './connections.tsx'
 import { ComposerConnectors, routeToConnections } from './composer-connectors.tsx'
 import { HomeProjection } from './home.tsx'
 import { IdentityGate } from './identity.tsx'
-import { ImageDisclosure, imageDisclosureDefinition } from './image-gallery.tsx'
+import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImagesDefinition } from './image-gallery.tsx'
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
 import {
   OfficeArtifacts,
@@ -120,6 +120,11 @@ export function apply(ctx: any): void {
     name: 'conversation.chat.node',
     key: 'e-mate-image-disclosure',
   }, ImageDisclosure))
+  ctx.conversationEvents.register(toolImagesDefinition)
+  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
+    name: 'conversation.chat.node',
+    key: 'e-mate-tool-images',
+  }, ToolImageGallery))
   ctx.conversationEvents.register(legacyArtifactDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',

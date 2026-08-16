@@ -6,6 +6,14 @@
   display: contents;
 }
 
+.toolImages {
+  width: 100%;
+}
+
+.toolImages > div[hidden] {
+  display: none;
+}
+
 :global([data-emate-image-gallery][hidden]) {
   display: none !important;
 }

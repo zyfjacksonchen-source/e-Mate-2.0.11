@@ -3,11 +3,15 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { ImageDisclosure, imageDisclosureDefinition } from '../src/client/image-gallery.tsx'
+import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImagesDefinition } from '../src/client/image-gallery.tsx'
 import { ThinkingStatusBranding } from '../src/client/thinking-status.tsx'
 
 vi.mock('@deepseek-ai/dsh-client-runtime/client', () => ({
   isAppendSurfaceEvent: (event: { surfaceOp?: string }) => event.surfaceOp === 'append',
+}))
+
+vi.mock('@deepseek-ai/dsh-client-ui-attachment', () => ({
+  ImageGallery: ({ images }: { images: unknown[] }) => <div data-target-image-gallery="">{images.length} images</div>,
 }))
 
 const source = readFileSync(resolve('src/client/index.ts'), 'utf8')
@@ -95,6 +99,27 @@ describe('target conversation fidelity contract', () => {
     expect(targetLightbox).toContain('role="dialog"')
     expect(gallery).toContain("querySelectorAll<HTMLElement>('[data-align=\"start\"]')")
     expect(galleryCss).toContain('[data-emate-image-gallery][hidden]')
+  })
+
+  it('projects durable tool-result images through the target ImageGallery after reload', () => {
+    const attachment = { attachmentId: 'sha256:one', mediaType: 'image/png', bytes: 10, width: 1, height: 1 }
+    const event = {
+      type: 'tool/result', seq: 8, time: 8, surfaceOp: 'append',
+      data: { message: { id: 'tool-result-1', content: [{
+        type: 'tool-result', toolCallId: 'call-1', isError: false,
+        content: [{ type: 'text', text: 'Generated 1 image.' }, { type: 'image', attachment }],
+      }] } },
+    }
+    expect(toolImagesDefinition.match(event as never)).toEqual({ id: 'tool-images:tool-result-1', role: 'start' })
+
+    render(<ToolImageGallery node={{ key: 'tool-images:test', data: { images: [{ attachment }] } } as never} loadImage={vi.fn()} />)
+    const button = screen.getByRole('button', { name: '已查看 1 张图像' })
+    const gallery = screen.getByText('1 images')
+    expect(gallery.parentElement?.hidden).toBe(true)
+    fireEvent.click(button)
+    expect(gallery.hasAttribute('data-target-image-gallery')).toBe(true)
+    expect(gallery.parentElement?.hidden).toBe(false)
+    expect(button.getAttribute('aria-expanded')).toBe('true')
   })
 
   it('keeps dsh-genui registered on target slots and real plugin metadata', () => {

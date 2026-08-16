@@ -35,6 +35,7 @@ export function SessionRouteProjection({
   const current = useSessions(state => state.current)
   const initialized = useRef(false)
   const pending = useRef<PendingRoute>(null)
+  const previousCurrent = useRef(current)
 
   const applyLocation = () => {
     const state = getSessions()
@@ -72,6 +73,8 @@ export function SessionRouteProjection({
 
   useEffect(() => {
     if (phase !== 'ready') return
+    const changed = previousCurrent.current !== current
+    previousCurrent.current = current
     if (!initialized.current) {
       initialized.current = true
       applyLocation()
@@ -84,8 +87,13 @@ export function SessionRouteProjection({
         return
       }
     }
-    if (!['/', '/chat'].some(prefix => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`))) return
     const path = current === undefined ? '/' : `/chat/${encodeURIComponent(current)}`
+    if (changed && ['/capabilities', '/settings', '/schedules'].includes(location.pathname)) {
+      history.pushState(null, '', path)
+      dispatchEvent(new PopStateEvent('popstate'))
+      return
+    }
+    if (!['/', '/chat'].some(prefix => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`))) return
     if (location.pathname !== path) history.pushState(null, '', path)
   }, [current, phase])
 

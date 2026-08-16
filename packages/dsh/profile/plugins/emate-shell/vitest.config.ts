@@ -12,6 +12,10 @@ const upstreamRuntime = fileURLToPath(new URL(
   '../../../../../upstream/deepseek-harness/packages/client/runtime/lib/client.js',
   import.meta.url,
 ))
+const upstreamAttachment = fileURLToPath(new URL(
+  '../../../../../upstream/deepseek-harness/packages/client/ui-attachment/lib/index.js',
+  import.meta.url,
+))
 
 export default {
   resolve: {
@@ -20,6 +24,7 @@ export default {
       react: `${upstreamModules}.pnpm/node_modules/react`,
       '@testing-library/react': `${upstreamModules}@testing-library/react`,
       '@deepseek-ai/dsh-client-ui-primitives': upstreamPrimitives,
+      '@deepseek-ai/dsh-client-ui-attachment': upstreamAttachment,
       '@deepseek-ai/dsh-client-runtime/client': upstreamRuntime,
     },
   },
