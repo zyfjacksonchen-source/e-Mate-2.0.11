@@ -96,8 +96,8 @@
         enterprise:
           authBaseUrl: https://mvdcm.ecoremedia.net/e-mate/auth-api
           modelBaseUrl: https://mvdcm.ecoremedia.net/e-mate/model-api
-          clientId: e-mate-desktop
-          organization: emate
+          clientId: e-mate-web
+          organization: emate-v2
     - id: emate-share
       name: ./plugins/share.js
       inject: [connection]

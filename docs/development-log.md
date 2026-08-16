@@ -992,3 +992,12 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 服务器先在 root-only 目录快照旧四类 Secret 与模型配置，再原子替换 Luna/Sol 共用 GPT Key、DeepSeek Key 和豆包 Key；按现有 `activate-release.sh` 的 Compose 环境加载方式只重建 gateway 容器。重建后健康状态为 `healthy`，5 条原生生产 Model Smoke 全通过，配置 SHA-256 为 `3c985cde632ef7db81da431db4552c73df3c93926ad875f1233f5a3d0f4e5769`，回退快照收据为 `20260816T010958Z-production-model-keys`。
 - 当前线上 gateway 镜像的 DeepSeek Smoke 合同仍锁 `deepseek-v4-pro`，而当前仓库与新 Key 已验证 `deepseek-v4-flash`。本轮只激活授权 Key，不在服务器手改镜像或伪造 Flash 验收；Flash 切换必须随下一份由 CI 构建的 Model Gateway 镜像和对应生产配置一起发布、重跑 5 路 Smoke 后关闭。
 - 可复核回执与单次真实图片位于 `artifacts/acceptance/S10-image-production-20260816/`；回执不含 Key、Key hash、上游签名 URL或回复正文。
+
+## 2026-08-16 · S07 2.0.7 新用户命名空间
+
+- 用户明确要求旧服务继续运行，但 e-Mate 2.0.7 不沿用旧用户、必须重新注册。只读核对确认线上旧 Auth 映射为 `e-mate-desktop / emate → emate-production`，旧租户当前有 43 个 ACTIVE、2 个 DELETED、1 个 SUSPENDED 用户；本轮未修改这些记录，也未给旧用户补模型策略。
+- 2.0.7 受管 profile 改用长期 Web 产品命名空间 `clientId=e-mate-web / organization=emate-v2`；租户 ID 同为 `emate-v2`。命名空间不携带补丁版本，后续 2.0.8+ 可延续 2.0.7 新注册账号，同时不会回落到旧桌面用户。
+- 生产 Auth Gateway 只新增上述 client 与 organization 映射，保留旧 client/tenant；只重建 auth 容器。新旧 client 的真实 registration challenge 均返回 HTTP 200，Auth 健康，新租户用户数仍为 0，证明未导入或复用旧用户。
+- 生产 Auth 配置回退快照收据为 `20260816T011716Z-auth-namespace`。本轮只关闭账号命名空间隔离与注册入口，不创建测试用户、不求解 CAPTCHA、不审批、不设置用户额度；这些动作仍须使用明确的新测试身份完成 Computer Use。
+- 默认 Luna 保持策略级语义：当管理员为新用户允许多个模型时，Auth 按权威目录顺序下发，本地 `CHAT_MODELS` 首选 `gpt-5.6-luna`。新注册用户仍以 PENDING/空模型集合进入，必须由管理端审批并配置额度和允许模型后才能登录执行，未因“默认 Luna”绕过审批边界。
+- 主代理用当前构建重新执行隔离 `setup` 和浏览器验收：安装后的 `--dump-config` 精确回读 `clientId=e-mate-web / organization=emate-v2`；`/register` 标签标题为 `e-Mate`，账号、真实姓名、至少 10 位密码、验证码、提交申请和返回登录均可见，实点“换一张验证码”后 data URL 载荷变化。未填写或提交表单；证据为 `artifacts/design-qa/S07-registration-namespace/registration-emate-v2-dark-1280x720.jpg`。验收 Host 已停止，临时 profile 与指针均移入废纸篓。
