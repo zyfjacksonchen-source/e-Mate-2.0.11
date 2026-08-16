@@ -1062,3 +1062,13 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 弱网、Abort 或下游流抛错会释放当前预留并原样透传错误，让目标原生重试继续工作；若本地持久清理自身失败则保留预留并失败关闭。进程崩溃或正常结束但缺少真实 finish chunk 时也保留预留，避免猜测用量。不限额度账号不建预留并保持并发。
 - 当前合同只能消除并发超额，不能阻止单个真实请求超过请求开始时的剩余额度；这是明确的 best-effort 单请求上限，不冒充严格硬配额。若发布要求零超额，仍需上游支持单请求精确 Token 上限或每用户 Provider 额度，保持发布阻塞。
 - 主包验证为 Node 48/48、shell 31/31，构建与 diff check 通过；覆盖并发预留、真实终态结算、重复事件、重启、周切换、账号隔离、离线租约、不限额、弱网异常释放和审计回执对账。前一候选提交的 CI 与 Release run 均成功，三平台干净 npm 安装已通过；本切片合入后必须重新运行同一门禁。
+
+## 2026-08-16 · S04/S07 原生直连生产激活与真实首响复验
+
+- 生产只激活提交 `2bd51196dac25c6c8a42cfb9e9e704dcf8f50b81` 对应的 Model Gateway 控制面镜像 `e-mate/model-gateway:e-mate-2.0.7-direct-2bd5119`；运行镜像 ID 为 `sha256:13719f52d7bd0bba6827759b0cd158790357f8a4c55b2c0ed2132620293fb614`。Gateway 健康，Auth、Analytics、Web、PostgreSQL 与 Redis 未重启且继续健康；旧镜像、旧 Secret root、旧 Compose/环境/模型配置均保留用于精确回退。
+- 权威聊天 route 现由 `GET /v1/runtime-models` 按当前账号和策略下发给本地 Host：Luna/Sol 走用户批准的 HTTP direct upstream，DeepSeek 与 Doubao 走各自 HTTPS upstream；图片继续使用专用 Gateway 路径。接口为 `Cache-Control: no-store`、无 CORS，只返回当前 principal 允许的 4 个聊天模型；Key 未进入浏览器、settings、日志或回执。
+- 候选激活前真实 Model Smoke 为 Luna、Sol、DeepSeek Flash、Doubao、`gpt-image-2-pro` 五路全通过；Smoke SHA-256 为 `bd28059a253fbf055c1890b22f8aad66cde39cb906adc9b63f794fec2ba89095`。生产回执为 `/root/e-mate-bootstrap/20260816T071402Z-runtime-models-direct-2bd5119`，激活回执 SHA-256 为 `a8cdf027d6d6b208964b61f5a025741419b79921306597f8eaa3edb89de48f0f`。
+- 本地主机用真实管理员登录后，目标 `session.models` 回读 Luna、Sol、DeepSeek、Doubao 四个聊天模型且 `routable=true`；`settings.describe` 的 `llm-pi-ai` namespace 为 live revision 1，只有三个原生 provider profile、Key 仅以 credential ref 出现且无 inline value。新 Session 默认回读 `gpt-5.6-luna / max`；验收中临时切到 Sol 后已切回 Luna，并由另一个新 Session 再次确认默认值。
+- 同一真实 Session 的上下文连续通过：Luna 首轮记住 `ORANGE-207`，第二轮准确回忆；切到 Sol 后仍准确回忆，随后恢复 Luna。短回复的三次 Luna TTFT 为 2.522s、4.827s、4.074s，中位数 4.074s；对应总时长为 2.525s、5.162s、4.428s，中位数 4.428s。Sol 切换后的 TTFT/总时长为 2.807s/3.172s。相较修复前同机首轮 18.8s TTFT、21.4s 总时长，当前真实链路已消除企业 Gateway 与 Keychain 热路径等待。
+- 另一个 Luna 长回复产生 183 output tokens、159 个真实 `assistant/chunk`，TTFT 3.357s、总时长 7.505s、首末 chunk 解码 2.434s，即 75.18 tok/s。该样本用于确认流式生成恢复，不把不同提示长度的 75.18 tok/s 与旧 5.4 tok/s 冒充严格同数据集配对，也不从少量样本推算 p95。
+- 空白新 Session 首次读取模型目录时，在 control-plane 背景刷新完成前短暂返回 `routable=false`；绕过 UI 强行提交会按合同以 `model policy cache is unavailable or expired` 失败关闭。随后同一 Session 目录变为可路由并正常完成请求；正常浏览器 Composer 会等待真实目录可路由，不制造自动成功状态。
