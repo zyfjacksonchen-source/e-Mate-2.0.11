@@ -722,6 +722,7 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 来源发现：产品的 `defaultLegacySources()` 在本机找到 3 个权威来源，分别为 e-Mate Runtime、ECoreX Runtime 和 CowAgent。证据只记录 family、路径 SHA-256、聚合 SHA-256、文件数和字节数，没有输出会话标题、消息、附件名、明文路径或凭据。
 - 源不变：在隔离的 `DSH_HOME` 与 Desktop 上连续执行两次真实 `e-mate setup`。对源 SQLite、WAL/SHM、Runtime artifact、CowAgent 树及旧 memory 证据做前/中/后清单；第一次和第二次之后的聚合 SHA-256 均与开始时完全一致。两次 setup exit 0、stderr 为空。
 - 幂等结果：第一次 `source_found=true/imported_sessions=15/reused_sessions=0`；第二次 `source_found=true/imported_sessions=0/reused_sessions=15`，3 个 source fingerprint 逐项一致，最终迁移收据含 15 个稳定目标 Session。当前真实 Runtime 源只有 active 行，未提供 deleted 真实样本，因此“删除会话不复活”继续由已存在的可执行 fixture 覆盖，不能写成真实样本已通过。
+- 2026-08-16 复核继续使用固定 rc.5 的真实 `Context + SessionStore + JsonlSessionPersistence`：15 条目标会话均归入受管通用工作区，33 轮 start/end 平衡、33 条用户消息、26 条助手消息，`tool/call`/`tool/result` 为 0，证明旧活动没有伪造成新 Harness 执行。脱敏计数收据为 `artifacts/acceptance/S08-legacy-real-source-migration.json`；隔离副本在源哈希复核后按精确路径删除。
 - 仍待关闭：需要在真实 Browser 中打开并继续其中一条导入会话；需要 moved/missing project 与并发 WAL 样本，以及企业端提供旧 `memory/users/<id>` 到新账号的权威映射。隔离测试目录没有写生产 `DSH_HOME`、用户桌面或企业服务器。
 
 ## 2026-08-15 · S05 正式快捷方式当前环境缺口
