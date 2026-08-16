@@ -7,6 +7,7 @@ import {
   loadUsageDashboard,
   loadUsageEvents,
   loginUsageAccount,
+  logoutUsageAccount,
   queryForPeriod,
   UsageApiError,
   type UsageDashboardData,
@@ -26,7 +27,13 @@ import {
 } from './usage-data';
 
 const TOKEN_SESSION_KEY = 'e-mate.usage.access-token';
+const REFRESH_TOKEN_SESSION_KEY = 'e-mate.usage.refresh-token';
 const periodOptions = [7, 30, 90] as const;
+
+function clearUsageSession() {
+  sessionStorage.removeItem(TOKEN_SESSION_KEY);
+  sessionStorage.removeItem(REFRESH_TOKEN_SESSION_KEY);
+}
 
 type DashboardState =
   | { kind: 'loading' }
@@ -131,7 +138,7 @@ export function App() {
         if (controller.signal.aborted) return;
         const status = error instanceof UsageApiError ? error.status : null;
         if (status === 401) {
-          sessionStorage.removeItem(TOKEN_SESSION_KEY);
+          clearUsageSession();
           setToken('');
           setTokenError(copy.authFailed);
         }
@@ -160,9 +167,10 @@ export function App() {
       controller.signal,
       { origin: window.location.origin }
     )
-      .then((accessToken) => {
-        sessionStorage.setItem(TOKEN_SESSION_KEY, accessToken);
-        setToken(accessToken);
+      .then((session) => {
+        sessionStorage.setItem(TOKEN_SESSION_KEY, session.accessToken);
+        sessionStorage.setItem(REFRESH_TOKEN_SESSION_KEY, session.refreshToken);
+        setToken(session.accessToken);
         setPassword('');
       })
       .catch((error: unknown) => {
@@ -172,8 +180,20 @@ export function App() {
   };
 
   const signOut = () => {
-    sessionStorage.removeItem(TOKEN_SESSION_KEY);
+    const refreshToken = sessionStorage.getItem(REFRESH_TOKEN_SESSION_KEY);
+    clearUsageSession();
     setToken('');
+    if (!refreshToken) return;
+    void logoutUsageAccount(
+      {
+        authBase: import.meta.env.VITE_AUTH_API_BASE as string | undefined,
+        clientId: (import.meta.env.VITE_AUTH_CLIENT_ID as string | undefined) ?? 'e-mate-admin',
+        refreshToken,
+        clientRequestId: crypto.randomUUID(),
+      },
+      new AbortController().signal,
+      { origin: window.location.origin }
+    ).catch(() => undefined);
   };
 
   const toggleTheme = () => {
@@ -361,7 +381,7 @@ export function App() {
       .then((page) => setEventState({ kind: 'ready', events: [...existing, ...page.events], nextCursor: page.nextCursor }))
       .catch((error: unknown) => {
         if (error instanceof UsageApiError && error.status === 401) {
-          sessionStorage.removeItem(TOKEN_SESSION_KEY);
+          clearUsageSession();
           setToken('');
           setEventsOpen(false);
         }

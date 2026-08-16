@@ -33,6 +33,18 @@ export type UsagePasswordLogin = {
   password: string;
 };
 
+export type UsageAuthSession = {
+  accessToken: string;
+  refreshToken: string;
+};
+
+export type UsageLogout = {
+  authBase?: string;
+  clientId: string;
+  refreshToken: string;
+  clientRequestId: string;
+};
+
 export class UsageApiError extends Error {
   readonly status: number;
 
@@ -87,7 +99,7 @@ export async function loginUsageAccount(
   input: UsagePasswordLogin,
   signal: AbortSignal,
   options: { origin: string; fetcher?: typeof fetch }
-): Promise<string> {
+): Promise<UsageAuthSession> {
   const response = await (options.fetcher ?? fetch)(
     resolveSameOriginApiPath(input.authBase, '/v1/auth/password', options.origin),
     {
@@ -118,6 +130,8 @@ export async function loginUsageAccount(
     value.schemaVersion !== 1 ||
     typeof value.accessToken !== 'string' ||
     !/^[^\s]{32,4096}$/.test(value.accessToken) ||
+    typeof value.refreshToken !== 'string' ||
+    !/^emate_rt_[A-Za-z0-9_-]{43}$/.test(value.refreshToken) ||
     typeof value.expiresAt !== 'string' ||
     !Number.isFinite(Date.parse(value.expiresAt)) ||
     Date.parse(value.expiresAt) <= Date.now() ||
@@ -126,7 +140,38 @@ export async function loginUsageAccount(
     throw new UsageApiError(503);
   }
   if (!roles.some((role) => role === 'TENANT_ADMIN' || role === 'AUDIT_ADMIN')) throw new UsageApiError(403);
-  return value.accessToken;
+  return { accessToken: value.accessToken, refreshToken: value.refreshToken };
+}
+
+export async function logoutUsageAccount(
+  input: UsageLogout,
+  signal: AbortSignal,
+  options: { origin: string; fetcher?: typeof fetch }
+): Promise<void> {
+  const response = await (options.fetcher ?? fetch)(
+    resolveSameOriginApiPath(input.authBase, '/v1/auth/logout', options.origin),
+    {
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        clientId: input.clientId,
+        refreshToken: input.refreshToken,
+        clientRequestId: input.clientRequestId,
+      }),
+      cache: 'no-store',
+      credentials: 'same-origin',
+      signal,
+    }
+  );
+  if (!response.ok) throw new UsageApiError(response.status);
+  const value = (await response.json()) as Record<string, unknown>;
+  if (
+    value.schemaVersion !== 1 ||
+    value.receiptId !== input.clientRequestId ||
+    value.reauthenticationRequired !== false
+  ) {
+    throw new UsageApiError(503);
+  }
 }
 
 function apiUrl(path: string): string {

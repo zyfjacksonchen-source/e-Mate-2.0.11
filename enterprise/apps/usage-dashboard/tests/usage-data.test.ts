@@ -11,6 +11,7 @@ import type {
 import {
   queryForPeriod,
   loginUsageAccount,
+  logoutUsageAccount,
   UsageApiError,
   resolveSameOriginApiPath,
   taskQueryString,
@@ -239,17 +240,21 @@ test('password login reuses the same-origin Auth Gateway and accepts only usage 
     return new Response(JSON.stringify({
       schemaVersion: 1,
       accessToken: token,
+      refreshToken: `emate_rt_${'r'.repeat(43)}`,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       identity: { roles: ['AUDIT_ADMIN'] },
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
-  assert.equal(await loginUsageAccount({
+  assert.deepEqual(await loginUsageAccount({
     authBase: '/e-mate/auth-api/',
     clientId: 'e-mate-admin',
     organization: 'emate-v2',
     account: 'auditor',
     password: 'secret',
-  }, new AbortController().signal, { origin: 'https://example.test', fetcher }), token);
+  }, new AbortController().signal, { origin: 'https://example.test', fetcher }), {
+    accessToken: token,
+    refreshToken: `emate_rt_${'r'.repeat(43)}`,
+  });
   assert.equal(request?.input, '/e-mate/auth-api/v1/auth/password');
   assert.deepEqual(JSON.parse(String(request?.init?.body)), {
     clientId: 'e-mate-admin',
@@ -269,10 +274,40 @@ test('password login reuses the same-origin Auth Gateway and accepts only usage 
     fetcher: async () => new Response(JSON.stringify({
       schemaVersion: 1,
       accessToken: token,
+      refreshToken: `emate_rt_${'r'.repeat(43)}`,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       identity: { roles: ['MEMBER'] },
     }), { status: 200 }),
   }), (error: unknown) => error instanceof UsageApiError && error.status === 403);
+});
+
+test('logout revokes the existing Auth session through the same-origin contract', async () => {
+  let request: { input: RequestInfo | URL; init?: RequestInit } | undefined;
+  const refreshToken = `emate_rt_${'r'.repeat(43)}`;
+  const clientRequestId = 'logout-request-1';
+  await logoutUsageAccount({
+    authBase: '/e-mate/auth-api/',
+    clientId: 'e-mate-admin',
+    refreshToken,
+    clientRequestId,
+  }, new AbortController().signal, {
+    origin: 'https://example.test',
+    fetcher: async (input, init) => {
+      request = { input, init };
+      return new Response(JSON.stringify({
+        schemaVersion: 1,
+        receiptId: clientRequestId,
+        reauthenticationRequired: false,
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  assert.equal(request?.input, '/e-mate/auth-api/v1/auth/logout');
+  assert.deepEqual(JSON.parse(String(request?.init?.body)), {
+    clientId: 'e-mate-admin',
+    refreshToken,
+    clientRequestId,
+  });
+  assert.equal(new Headers(request?.init?.headers).get('authorization'), null);
 });
 
 test('reuses the original labels where task events map without guessing', () => {
