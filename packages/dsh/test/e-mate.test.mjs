@@ -1270,7 +1270,6 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const paths = installProfile(join(temporary, 'dsh-home'))
     attachmentFiber = await context.plugin(LocalAttachmentStore, { dshHome: join(temporary, 'dsh-home') })
     const inputBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
-    const input = await context.attachments.saveImage({ data: inputBytes, mediaType: 'image/png', name: 'input.png' })
     const requests = []
     const requestScopes = []
     let remoteCounter = 0
@@ -1364,15 +1363,12 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       detail: 'gpt-image-2-pro',
       action_ids: [],
     })
+    const sessionMessages = []
     const agent = {
       id: 'image-session',
       session: {
         header: { id: 'image-session' },
-        deriveMessages: () => [{
-          id: 'message-image',
-          source: { kind: 'user' },
-          content: [{ type: 'image', attachment: input }],
-        }],
+        deriveMessages: () => sessionMessages,
       },
     }
     let callIndex = 0
@@ -1393,12 +1389,34 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       path: '/e-mate/model-api/v1/images/generations',
       body: { model: 'gpt-image-2-pro', prompt: 'Generate one verified image.' },
     })
-    assert.equal((await jobs.at(-1).done).status, 'completed')
-    assert.equal(imagegen.output.render({}, generated).some(block => block.type === 'image'), true)
+    const generatedContent = imagegen.output.render({}, generated)
+    const attachmentId = String(generated.images[0].image.attachmentId)
+    assert.deepEqual(await jobs.at(-1).done, {
+      status: 'completed',
+      detail: '1 image, 0 failures',
+      output: JSON.stringify({
+        image_count: 1,
+        failure_count: 0,
+        request_ids: [generated.images[0].request_id],
+        attachment_ids: [attachmentId],
+      }),
+    })
+    assert.equal(generatedContent.some(block => block.type === 'image'), true)
+    assert.equal(generatedContent.some(block => block.type === 'text' && block.text.includes(attachmentId)), true)
+    sessionMessages.push({
+      id: 'generated-tool-result',
+      source: { kind: 'tool', callId: 'image-call-1' },
+      content: [{
+        type: 'tool-result',
+        toolCallId: 'image-call-1',
+        isError: false,
+        content: generatedContent,
+      }],
+    })
 
     const edited = await imagegen.execute({
       prompt: 'Retouch only the supplied image.',
-      image_url: [String(input.attachmentId)],
+      image_url: [attachmentId],
     }, execution())
     assert.equal(edited.images[0].model, 'gpt-image-2-pro')
     assert.deepEqual(requests.at(-1), {

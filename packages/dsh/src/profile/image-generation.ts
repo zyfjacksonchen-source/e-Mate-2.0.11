@@ -238,7 +238,12 @@ function startImageJob(ctx, owner, execSignal, operation) {
           value => ({
             status: 'completed',
             detail: '1 image, 0 failures',
-            output: JSON.stringify({ image_count: 1, failure_count: 0, request_ids: [value.request_id] }),
+            output: JSON.stringify({
+              image_count: 1,
+              failure_count: 0,
+              request_ids: [value.request_id],
+              attachment_ids: [value.image.attachmentId],
+            }),
           }),
           error => ({
             status: controller.signal.aborted ? 'killed' : 'failed',
@@ -261,7 +266,10 @@ const imageOutput = {
     },
   },
   render: (_args, value) => [
-    { type: 'text', text: 'Generated 1 image.' },
+    {
+      type: 'text',
+      text: `Generated 1 image. Current-session image attachment ID for future image_url: ${value.images[0].image.attachmentId}`,
+    },
     ...value.images.map(item => ({ type: 'image', attachment: imageRef(item.image) })),
   ],
 }
@@ -305,12 +313,12 @@ export async function apply(ctx, config = {}) {
   ctx.effect(() => ctx.jobs.attachController('emate-image'), 'emate.image: target Job controller')
   ctx.tools.register(defineTool({
     name: 'imagegen',
-    description: 'Generate or edit one independent image through the fixed e-Mate gpt-image-2-pro route. Pass prompt and optional current-session image_url attachment IDs. For multiple outputs, make separate concurrent imagegen calls. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.',
+    description: 'Generate or edit one independent image through the fixed e-Mate gpt-image-2-pro route. For an edit, copy the exact sha256: value labeled as the current-session image attachment ID by a prior imagegen or job_output result into image_url; never pass its Job ID, request ID, or a URL. For multiple outputs, make separate concurrent imagegen calls. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.',
     parameters: {
       prompt: { type: 'string', required: true, description: 'One image generation or edit instruction.' },
       image_url: {
         oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
-        description: 'Optional current-session image attachment ID or ordered IDs for editing/reference fusion.',
+        description: 'Optional exact sha256: current-session image attachment ID or ordered IDs from prior imagegen results for editing/reference fusion. Job IDs, request IDs, and URLs are invalid.',
       },
     },
     output: imageOutput,
