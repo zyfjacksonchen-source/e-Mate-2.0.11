@@ -800,6 +800,12 @@ export class InMemoryUsageStore implements UsageStore {
         quotaReleased: true,
         finishedAt: record.occurredAt,
       });
+      const { providerResponseId: _providerResponseId, ...fact } = entry.fact as UsageFact;
+      entry.finalized = {
+        ...fact,
+        usageId: `auditusage_${createHash('sha256').update(record.factId).digest('hex')}`,
+        occurredAt: new Date(record.occurredAtMs).toISOString(),
+      };
       this.#auditReceipts.set(record.factId, receipt);
       return receipt;
     });

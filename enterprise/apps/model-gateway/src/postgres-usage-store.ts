@@ -1401,6 +1401,39 @@ export class PostgresUsageStore implements UsageStore {
         ) {
           throw new AuditUsageConflictError('Audit usage fact conflicts with the recorded invocation');
         }
+        const usageId = `auditusage_${createHash('sha256').update(record.factId).digest('hex')}`;
+        const finalized = await client.query<Pick<TaskRow, 'status' | 'usage_id' | 'finalized_at'>>(
+          `
+          UPDATE e_mate_model_usage_task
+             SET status = 'FINALIZED',
+                 usage_id = $4,
+                 finalized_at = $5,
+                 updated_at = now()
+           WHERE tenant_id = $1 AND user_id = $2 AND task_id = $3
+             AND status = 'ACCUMULATING'
+       RETURNING status, usage_id, finalized_at
+        `,
+          [record.fact.tenantId, record.fact.userId, record.fact.taskId, usageId, record.occurredAt]
+        );
+        const usageTask = finalized.rows[0] ?? (
+          await client.query<Pick<TaskRow, 'status' | 'usage_id' | 'finalized_at'>>(
+            `
+            SELECT status, usage_id, finalized_at
+              FROM e_mate_model_usage_task
+             WHERE tenant_id = $1 AND user_id = $2 AND task_id = $3
+             FOR UPDATE
+          `,
+            [record.fact.tenantId, record.fact.userId, record.fact.taskId]
+          )
+        ).rows[0];
+        if (
+          !usageTask ||
+          usageTask.status !== 'FINALIZED' ||
+          usageTask.usage_id !== usageId ||
+          usageTask.finalized_at?.getTime() !== record.occurredAt.getTime()
+        ) {
+          throw new AuditUsageConflictError('Audit usage fact conflicts with the finalized ledger');
+        }
         receipts.push({
           factId: record.factId,
           payloadSha256: record.payloadSha256,

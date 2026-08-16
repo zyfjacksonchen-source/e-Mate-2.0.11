@@ -130,7 +130,10 @@ test(
       const rows = await database.query<{
         attempts: string;
         invocations: string;
-        status: string;
+        invocation_status: string;
+        task_status: string;
+        usage_id: string;
+        finalized_at_matches: boolean;
       }>(
         `
         SELECT
@@ -139,11 +142,26 @@ test(
           (SELECT count(*) FROM e_mate_model_invocation
             WHERE tenant_id = $1 AND user_id = $2 AND task_id = $3)::text AS invocations,
           (SELECT status FROM e_mate_model_invocation
-            WHERE tenant_id = $1 AND user_id = $2 AND task_id = $3 LIMIT 1) AS status
+            WHERE tenant_id = $1 AND user_id = $2 AND task_id = $3 LIMIT 1) AS invocation_status,
+          (SELECT status FROM e_mate_model_usage_task
+            WHERE tenant_id = $1 AND user_id = $2 AND task_id = $3 LIMIT 1) AS task_status,
+          (SELECT usage_id FROM e_mate_model_usage_task
+            WHERE tenant_id = $1 AND user_id = $2 AND task_id = $3 LIMIT 1) AS usage_id,
+          (SELECT finalized_at = $4::timestamptz FROM e_mate_model_usage_task
+            WHERE tenant_id = $1 AND user_id = $2 AND task_id = $3 LIMIT 1) AS finalized_at_matches
       `,
-        [tenantId, userId, sourceId]
+        [tenantId, userId, sourceId, record.occurredAt]
       );
-      assert.deepEqual(rows.rows[0], { attempts: '1', invocations: '1', status: 'COMPLETED' });
+      const usageId = `auditusage_${createHash('sha256').update(factId).digest('hex')}`;
+      assert.deepEqual(rows.rows[0], {
+        attempts: '1',
+        invocations: '1',
+        invocation_status: 'COMPLETED',
+        task_status: 'FINALIZED',
+        usage_id: usageId,
+        finalized_at_matches: true,
+      });
+      assert.equal((await store.finalize({ tenantId, userId, modelIds: ['gpt-5.6-sol'] }, sourceId))?.usageId, usageId);
       await assert.rejects(
         store.ingestAuditUsage([
           {

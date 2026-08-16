@@ -465,10 +465,13 @@ test('ingests strict direct-runtime audit batches idempotently without inference
         await fetch(`${baseUrl}/v1/usage/current`, { headers: auth() })
       ).json()) as { totalTokens: number };
       assert.equal(usage.totalTokens, 11);
-      assert.equal(
-        (await usageStore.finalize(principal('tenant-a', 'user-a'), String(record.payload.source_id)))?.costUsd,
-        0.0001485
+      const finalized = await usageStore.finalize(
+        principal('tenant-a', 'user-a'),
+        String(record.payload.source_id)
       );
+      assert.equal(finalized?.costUsd, 0.0001485);
+      assert.equal(finalized?.usageId, `auditusage_${createHash('sha256').update(record.fact_id).digest('hex')}`);
+      assert.equal(finalized?.occurredAt, new Date(String(record.payload.provider_created_at)).toISOString());
       assert.deepEqual(await (await upload([record])).json(), receiptBatch);
 
       const conflict = await upload([auditUsageRecord(1, { output_tokens: 5, total_tokens: 12 })]);

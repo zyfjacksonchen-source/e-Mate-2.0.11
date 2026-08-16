@@ -377,6 +377,21 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
             OR task.cache_read_tokens <> COALESCE(totals.cache_read_tokens, 0)
             OR task.cache_write_tokens <> COALESCE(totals.cache_write_tokens, 0)
             OR task.cost_usd <> COALESCE(totals.cost_usd, 0)
+            OR (
+              EXISTS (
+                SELECT 1
+                  FROM e_mate_model_invocation AS audit_invocation
+                 WHERE audit_invocation.tenant_id = task.tenant_id
+                   AND audit_invocation.user_id = task.user_id
+                   AND audit_invocation.task_id = task.task_id
+                   AND left(audit_invocation.invocation_id, 13) = 'auditreceipt_'
+              )
+              AND (
+                task.status <> 'FINALIZED'
+                OR task.usage_id IS NULL
+                OR task.finalized_at IS NULL
+              )
+            )
       ),
       completed_without_usage AS (
         SELECT count(*) AS mismatches
