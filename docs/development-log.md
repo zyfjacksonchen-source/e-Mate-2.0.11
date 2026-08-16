@@ -1008,3 +1008,13 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 权威用户表中旧租户 43 ACTIVE、2 DELETED、1 SUSPENDED 全部只有 `MEMBER`；新租户仍为 0。不存在可合法复用的旧管理员，新租户也没有首个 `TENANT_ADMIN`。因此当前管理端的账号密码登录、审批和额度配置不能标记生产可用。
 - 要关闭该项，必须先由用户明确一个新的 2.0.7 管理员身份，再按现有服务合同允许 `e-mate-admin` client、为 Analytics 配置匹配 issuer/audience/clientId 的 `sessionAuth` 并只挂载公钥，最后以该新租户账号完成登录、审批、配额、模型下发和 Usage 对账。不得把旧 MEMBER 提权、猜管理员口令、直接写测试账号或绕过 CAPTCHA 冒充验收。本轮未修改生产用户、角色、Analytics 或 Compose。
 - 命名空间提交 `bbb1d5ea9fdf4338581c15f30d3fb33b6c0fae70` 的 CI run `31919887274` 与 Release e-Mate run `31919887259` 均成功；同一 tarball 在 macOS arm64、macOS x64、Windows x64 完成干净 npm 安装与 setup 检查，SHA/manifest/SBOM/许可证证据生成成功。PR 门禁按合同跳过正式 registry 发布与 R2 上传，因此这里只关闭候选构建和三平台安装，不冒充 npm/R2 已发布。
+
+## 2026-08-16 · S07 2.0.7 生产管理员与公网管理端
+
+- 用户明确授权由主代理创建新的 2.0.7 管理员。主代理通过现有 `PostgresAdminManagementStore` 创建 `emate-v2 / emate-admin`，角色严格为 `TENANT_ADMIN + AUDIT_ADMIN`，允许模型为 Luna、Sol、DeepSeek、Doubao 与图片 Pro；没有提升或复用旧 `emate-production` 用户。初始密码只保存在服务器 root-only `0600` 回执与用户本机剪贴板中，未写入命令参数、日志、源码、Git 或本文。
+- Analytics 接入现有 Auth Gateway 的 Ed25519 access session 验签，并逐请求回查 ACTIVE Session 和当前角色。生产只重建 Gateway、Auth、Analytics 与静态 Web 容器，Postgres、Redis 和旧控制面进程未停止；旧 `e-mate-desktop`、新 `e-mate-web` 与管理端 client 的 registration challenge 均为 HTTP 200。
+- 用户纠正“管理员不用签署用户协议”后，模型短会话增加 Auth 签名角色；Model Gateway 只对真实 `TENANT_ADMIN` 跳过用户同意门。普通用户仍须签署，旧短会话在角色字段缺失时继续按普通用户处理。管理员的同意状态保持 `required=true / accepted=false`，没有生成伪签署记录；模型目录仍返回全部 5 个允许模型。
+- 生产服务镜像由提交 `9b26eead4625c2813f91dc78b62bf9997e7febaa` 的 `enterprise/deploy/Dockerfile.services` 和锁文件构建，三项服务健康。回退收据位于服务器 root-only `20260816T022330Z-admin-session`，包含旧/新配置、Compose、镜像、Nginx 路由与管理端静态目录。
+- 管理端生产构建固定同源 `/e-mate/auth-api/`、`/e-mate/enterprise-api/`、`/e-mate/model-api/`，登录页只显示账号和密码，组织固定为 `emate-v2`。公网固定地址 `https://mvdcm.ecoremedia.net/ecorex-agent/admin/` 和 `https://dl.ecoremedia.net/ecorex-agent/admin/` 均为 HTTP 200；`/health/ready` 为 200。
+- 主代理用 Browser 实点账号密码登录，用户页回读管理员为“不限”周额度、5 个模型、未查询到签署记录；模型页实点 Luna 的真实最小 Responses 调用后显示“联通正常”。公网 API 同步验证登录、用户列表、用量汇总、模型目录均为 200，Luna 收到真实 `response.completed`。验收后已退出管理会话并清空密码框。
+- Usage 面板仍由既有 Nginx Basic Auth 独立保护，未把管理员密码复制为 Basic Auth 口令；该地址的未认证响应保持 401。管理员页面已接入同源用量链接，但 Usage 面板统一账号登录属于后续独立鉴权切片，不能在本条冒充关闭。
