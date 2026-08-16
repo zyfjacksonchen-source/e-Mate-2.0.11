@@ -25,6 +25,14 @@ export type UsageDashboardData = {
   users: TenantUser[] | null;
 };
 
+export type UsagePasswordLogin = {
+  authBase?: string;
+  clientId: string;
+  organization: string;
+  account: string;
+  password: string;
+};
+
 export class UsageApiError extends Error {
   readonly status: number;
 
@@ -68,11 +76,57 @@ export function taskQueryString(query: UsageQuery): string {
 export function resolveSameOriginApiPath(configured: string | undefined, path: string, origin: string): string {
   if (!configured) return path;
   const base = new URL(configured, origin);
-  if (base.origin !== origin) {
+  if (base.origin !== origin || base.username || base.password) {
     throw new Error('Usage API must share the dashboard origin');
   }
   const endpoint = new URL(path.replace(/^\//, ''), `${base.href.replace(/\/?$/, '/')}`);
   return `${endpoint.pathname}${endpoint.search}`;
+}
+
+export async function loginUsageAccount(
+  input: UsagePasswordLogin,
+  signal: AbortSignal,
+  options: { origin: string; fetcher?: typeof fetch }
+): Promise<string> {
+  const response = await (options.fetcher ?? fetch)(
+    resolveSameOriginApiPath(input.authBase, '/v1/auth/password', options.origin),
+    {
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        clientId: input.clientId,
+        organization: input.organization,
+        user: input.account,
+        password: input.password,
+      }),
+      cache: 'no-store',
+      credentials: 'same-origin',
+      signal,
+    }
+  );
+  if (!response.ok) throw new UsageApiError(response.status);
+  const value = (await response.json()) as Record<string, unknown>;
+  const identity = value.identity as Record<string, unknown> | undefined;
+  const roles = identity?.roles;
+  const rolesValid =
+    Array.isArray(roles) &&
+    roles.length >= 1 &&
+    roles.length <= 3 &&
+    roles.every((role) => role === 'TENANT_ADMIN' || role === 'AUDIT_ADMIN' || role === 'MEMBER') &&
+    new Set(roles).size === roles.length;
+  if (
+    value.schemaVersion !== 1 ||
+    typeof value.accessToken !== 'string' ||
+    !/^[^\s]{32,4096}$/.test(value.accessToken) ||
+    typeof value.expiresAt !== 'string' ||
+    !Number.isFinite(Date.parse(value.expiresAt)) ||
+    Date.parse(value.expiresAt) <= Date.now() ||
+    !rolesValid
+  ) {
+    throw new UsageApiError(503);
+  }
+  if (!roles.some((role) => role === 'TENANT_ADMIN' || role === 'AUDIT_ADMIN')) throw new UsageApiError(403);
+  return value.accessToken;
 }
 
 function apiUrl(path: string): string {

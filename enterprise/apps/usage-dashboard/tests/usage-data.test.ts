@@ -10,6 +10,8 @@ import type {
 } from '@e-mate/monitoring-contract';
 import {
   queryForPeriod,
+  loginUsageAccount,
+  UsageApiError,
   resolveSameOriginApiPath,
   taskQueryString,
   usageQueryString,
@@ -220,10 +222,57 @@ test('builds for the production usage-panel path and same-origin enterprise API'
     /base: '\/ecorex-agent\/usage-panel\/'/
   );
   assert.match(vite, /'\/v1\/admin': apiTarget/);
-  assert.equal(
-    readFileSync(new URL('../.env.production', import.meta.url), 'utf8').trim(),
-    'VITE_USAGE_API_BASE=/e-mate/enterprise-api/'
-  );
+  assert.equal(readFileSync(new URL('../.env.production', import.meta.url), 'utf8').trim(), [
+    'VITE_USAGE_API_BASE=/e-mate/enterprise-api/',
+    'VITE_AUTH_API_BASE=/e-mate/auth-api/',
+    'VITE_AUTH_CLIENT_ID=e-mate-admin',
+    'VITE_AUTH_ORGANIZATION=emate-v2',
+  ].join('\n'));
+  assert.match(vite, /'\/v1\/auth': authTarget/);
+});
+
+test('password login reuses the same-origin Auth Gateway and accepts only usage administrators', async () => {
+  let request: { input: RequestInfo | URL; init?: RequestInit } | undefined;
+  const token = `header.${'a'.repeat(32)}.signature`;
+  const fetcher: typeof fetch = async (input, init) => {
+    request = { input, init };
+    return new Response(JSON.stringify({
+      schemaVersion: 1,
+      accessToken: token,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      identity: { roles: ['AUDIT_ADMIN'] },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  assert.equal(await loginUsageAccount({
+    authBase: '/e-mate/auth-api/',
+    clientId: 'e-mate-admin',
+    organization: 'emate-v2',
+    account: 'auditor',
+    password: 'secret',
+  }, new AbortController().signal, { origin: 'https://example.test', fetcher }), token);
+  assert.equal(request?.input, '/e-mate/auth-api/v1/auth/password');
+  assert.deepEqual(JSON.parse(String(request?.init?.body)), {
+    clientId: 'e-mate-admin',
+    organization: 'emate-v2',
+    user: 'auditor',
+    password: 'secret',
+  });
+  assert.equal(new Headers(request?.init?.headers).get('authorization'), null);
+
+  await assert.rejects(() => loginUsageAccount({
+    clientId: 'e-mate-admin',
+    organization: 'emate-v2',
+    account: 'member',
+    password: 'secret',
+  }, new AbortController().signal, {
+    origin: 'https://example.test',
+    fetcher: async () => new Response(JSON.stringify({
+      schemaVersion: 1,
+      accessToken: token,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      identity: { roles: ['MEMBER'] },
+    }), { status: 200 }),
+  }), (error: unknown) => error instanceof UsageApiError && error.status === 403);
 });
 
 test('reuses the original labels where task events map without guessing', () => {

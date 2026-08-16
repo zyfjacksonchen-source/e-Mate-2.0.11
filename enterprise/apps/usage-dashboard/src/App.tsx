@@ -1,11 +1,12 @@
 import { Alert, Button, Drawer, Empty, Input, Link, Select, Spin, Tag } from '@arco-design/web-react';
-import { ChartHistogram, ChartLine, CheckOne, Home, Key, Refresh, UserBusiness } from '@icon-park/react';
+import { ChartHistogram, ChartLine, CheckOne, Home, Refresh, UserBusiness } from '@icon-park/react';
 import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import type { TaskEventType, TaskScenario, TenantUsageEvent } from '@e-mate/monitoring-contract';
 import eMateLogo from '../../../../upstream/e-mate-2.0.5/desktop/src/v1/assets/emate-logo.png';
 import {
   loadUsageDashboard,
   loadUsageEvents,
+  loginUsageAccount,
   queryForPeriod,
   UsageApiError,
   type UsageDashboardData,
@@ -24,7 +25,7 @@ import {
   usageUsers,
 } from './usage-data';
 
-const TOKEN_SESSION_KEY = 'e-mate.usage.read-token';
+const TOKEN_SESSION_KEY = 'e-mate.usage.access-token';
 const periodOptions = [7, 30, 90] as const;
 
 type DashboardState =
@@ -96,8 +97,10 @@ export function App() {
   const locale = navigator.language || 'zh-CN';
   const copy = messagesFor(locale);
   const [token, setToken] = useState(() => sessionStorage.getItem(TOKEN_SESSION_KEY) ?? '');
-  const [tokenInput, setTokenInput] = useState('');
+  const [account, setAccount] = useState('');
+  const [password, setPassword] = useState('');
   const [tokenError, setTokenError] = useState<string | null>(null);
+  const [loginBusy, setLoginBusy] = useState(false);
   const [periodDays, setPeriodDays] = useState<(typeof periodOptions)[number]>(7);
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
@@ -139,15 +142,33 @@ export function App() {
 
   const submitToken = (event: FormEvent) => {
     event.preventDefault();
-    const nextToken = tokenInput.trim();
-    if (!nextToken) {
+    if (!account.trim() || !password) {
       setTokenError(copy.tokenRequired);
       return;
     }
-    sessionStorage.setItem(TOKEN_SESSION_KEY, nextToken);
+    const controller = new AbortController();
+    setLoginBusy(true);
     setTokenError(null);
-    setToken(nextToken);
-    setTokenInput('');
+    void loginUsageAccount(
+      {
+        authBase: import.meta.env.VITE_AUTH_API_BASE as string | undefined,
+        clientId: (import.meta.env.VITE_AUTH_CLIENT_ID as string | undefined) ?? 'e-mate-admin',
+        organization: (import.meta.env.VITE_AUTH_ORGANIZATION as string | undefined) ?? 'emate-v2',
+        account: account.trim(),
+        password,
+      },
+      controller.signal,
+      { origin: window.location.origin }
+    )
+      .then((accessToken) => {
+        sessionStorage.setItem(TOKEN_SESSION_KEY, accessToken);
+        setToken(accessToken);
+        setPassword('');
+      })
+      .catch((error: unknown) => {
+        setTokenError(error instanceof UsageApiError && error.status === 403 ? copy.accessDenied : copy.authFailed);
+      })
+      .finally(() => setLoginBusy(false));
   };
 
   const signOut = () => {
@@ -174,26 +195,31 @@ export function App() {
           <div className='auth-brand'>
             <img src={eMateLogo} alt={copy.product} />
           </div>
-          <div className='auth-icon' aria-hidden='true'>
-            <Key size={28} />
-          </div>
           <h1 id='auth-title'>{copy.tokenTitle}</h1>
           <p>{copy.tokenDescription}</p>
           <Button onClick={toggleTheme} aria-label={theme === 'dark' ? copy.lightTheme : copy.darkTheme}>
             {theme === 'dark' ? copy.lightTheme : copy.darkTheme}
           </Button>
           <form onSubmit={submitToken}>
-            <label htmlFor='usage-token'>{copy.tokenLabel}</label>
+            <label htmlFor='usage-account'>{copy.account}</label>
+            <Input
+              id='usage-account'
+              value={account}
+              autoComplete='username'
+              placeholder={copy.accountPlaceholder}
+              onChange={setAccount}
+            />
+            <label htmlFor='usage-password'>{copy.password}</label>
             <Input.Password
-              id='usage-token'
-              value={tokenInput}
-              autoComplete='off'
-              placeholder={copy.tokenPlaceholder}
-              onChange={setTokenInput}
+              id='usage-password'
+              value={password}
+              autoComplete='current-password'
+              placeholder={copy.passwordPlaceholder}
+              onChange={setPassword}
               visibilityToggle
             />
             {tokenError && <Alert type='error' content={tokenError} showIcon />}
-            <Button type='primary' htmlType='submit' long>
+            <Button type='primary' htmlType='submit' loading={loginBusy} long>
               {copy.connect}
             </Button>
           </form>

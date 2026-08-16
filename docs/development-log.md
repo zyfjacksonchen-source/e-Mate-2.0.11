@@ -1018,3 +1018,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 管理端生产构建固定同源 `/e-mate/auth-api/`、`/e-mate/enterprise-api/`、`/e-mate/model-api/`，登录页只显示账号和密码，组织固定为 `emate-v2`。公网固定地址 `https://mvdcm.ecoremedia.net/ecorex-agent/admin/` 和 `https://dl.ecoremedia.net/ecorex-agent/admin/` 均为 HTTP 200；`/health/ready` 为 200。
 - 主代理用 Browser 实点账号密码登录，用户页回读管理员为“不限”周额度、5 个模型、未查询到签署记录；模型页实点 Luna 的真实最小 Responses 调用后显示“联通正常”。公网 API 同步验证登录、用户列表、用量汇总、模型目录均为 200，Luna 收到真实 `response.completed`。验收后已退出管理会话并清空密码框。
 - Usage 面板仍由既有 Nginx Basic Auth 独立保护，未把管理员密码复制为 Basic Auth 口令；该地址的未认证响应保持 401。管理员页面已接入同源用量链接，但 Usage 面板统一账号登录属于后续独立鉴权切片，不能在本条冒充关闭。
+
+## 2026-08-16 · S07 生产 Usage 面板统一管理员登录与真实对账
+
+- 删除重复的“粘贴只读 Token”登录入口，复用现有同源 Auth Gateway `/v1/auth/password`；生产配置固定 `clientId=e-mate-admin / organization=emate-v2`。密码只进入该请求，access token 只保留在当前标签页；后续 `/v1/usage/*`、`/v1/tasks/summary` 与 `/v1/admin/users` 继续使用原 Analytics Bearer 链路，没有第二认证服务、Store、Router 或传输层。客户端只允许真实 `TENANT_ADMIN/AUDIT_ADMIN` 进入，服务端仍逐请求验签、回查会话并执行角色授权。
+- 聚焦验证为 Usage 13/13、TypeScript check、Vite production build 与 diff check。最终生产静态 release 为 `/srv/ecorex-agent-usage-panel/releases/usage-2.0.7-auth-final-20260816T033831Z`，tar SHA-256 `32bdbf566f12b5a184a747ee7e36ced3630018d323ca0be3b3397a4dce1df252`，root-only 回执同名。旧 `v2.0.5-77786087753e-8f116d9b4bca` 目录未删除；前两次真实探针分别暴露回环地址与 Nginx graceful reload 竞态，均由部署钩子恢复旧软链和配置，失败候选保留在服务器 `failed/` 后才重新切换。
+- Nginx 仅移除静态 `/ecorex-agent/usage-panel/` 的 Basic Auth；旧 `/ecorex-agent/usage-panel/api/` 继续 401，新前端数据走同源 `/e-mate/auth-api/` 与 `/e-mate/enterprise-api/`。`mvdcm` 与 `dl` 两个 Usage URL 均回读 HTTP 200，Auth/Analytics `/healthz` 均为 200。
+- 主代理 Browser 用真实 `emate-admin` 登录。7 日账本显示 3 次成功调用、13,185 Token、1 个活跃用户、Luna 3 次调用、管理员周额度“不限”；请求状态、任务汇总、Usage/Invocation 关联四项差异均为 0。调用明细逐条显示三组 Luna request/usage 对，明暗主题切换和退出后密码清空均通过。任务事件账本仍显示“未接入/0”，这是当前生产没有 e-Mate 本地任务审计上送事实，不用模型调用记录伪造任务事件次数。
