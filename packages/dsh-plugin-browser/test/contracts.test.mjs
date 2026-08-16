@@ -28,6 +28,12 @@ test('profile inserts the Host bridge without targeting a nonexistent wrapper en
   assert.doesNotMatch(patch, /id:\s*dsh-web/)
 })
 
+test('extension branding comes from the pinned source asset, not generated build output', async () => {
+  const finalize = await readFile(resolve(root, 'extension/scripts/finalize.mjs'), 'utf8')
+  assert.match(finalize, /upstream\/e-mate-2\.0\.5\/desktop\/src\/v1\/assets\/emate-mark\.png/u)
+  assert.doesNotMatch(finalize, /packages\/dsh\/profile\/plugins\/emate-shell\/assets/u)
+})
+
 test('loopback extension carrier binds every Tool request to its real Session id', async () => {
   const token = 't'.repeat(43)
   const bridge = new BrowserBridgeServer(token, caps)
