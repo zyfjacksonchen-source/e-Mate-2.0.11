@@ -553,12 +553,14 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
   }
 
   const save = async (value: StoredSession) => {
-    current = undefined
+    if (current?.session.identity.tenantId !== value.session.identity.tenantId
+      || current.session.identity.userId !== value.session.identity.userId) current = undefined
     try {
       await options.credentials.set(SESSION_REF, JSON.stringify(value))
       await options.credentials.set(MODEL_SESSION_REF, value.session.modelGateway.sessionToken)
       current = value
     } catch (error) {
+      current = undefined
       await Promise.allSettled([
         options.credentials.unset(SESSION_REF),
         options.credentials.unset(MODEL_SESSION_REF),

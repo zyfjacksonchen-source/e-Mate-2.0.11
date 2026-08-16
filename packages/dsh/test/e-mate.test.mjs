@@ -1691,15 +1691,22 @@ test('identity agreements are immutable, explicit, and use the target Connection
 test('enterprise identity provider maps target credentials and the production HTTP contracts without exposing tokens', async () => {
   const values = new Map()
   let rejectModelCredential = false
+  let holdModelCredential
+  let modelCredentialStarted
   const credentials = {
     resolve: async ref => values.has(ref) ? { value: values.get(ref), source: 'test' } : undefined,
     set: async (ref, value) => {
       if (rejectModelCredential && ref === MODEL_SESSION_REF) throw new Error('simulated model credential failure')
+      if (holdModelCredential !== undefined && ref === MODEL_SESSION_REF) {
+        modelCredentialStarted()
+        await holdModelCredential
+        holdModelCredential = undefined
+      }
       values.set(ref, value)
     },
     unset: async ref => { values.delete(ref) },
   }
-  const clock = Date.parse('2030-01-08T12:00:00.000Z')
+  let clock = Date.parse('2030-01-08T12:00:00.000Z')
   const accessToken = 'access.payload.signature'
   const modelToken = 'model.payload.signature'
   const refreshToken = `emate_rt_${'r'.repeat(43)}`
@@ -1763,6 +1770,7 @@ test('enterprise identity provider maps target credentials and the production HT
       }), { status: 201, headers: { 'content-type': 'application/json' } })
     }
     if (url.pathname.endsWith('/v1/auth/password')) return json(session)
+    if (url.pathname.endsWith('/v1/auth/refresh')) return json(session)
     if (url.pathname.endsWith('/v1/auth/logout')) {
       return json({ schemaVersion: 1, receiptId: 'logout-receipt-207', reauthenticationRequired: false })
     }
@@ -1916,6 +1924,16 @@ test('enterprise identity provider maps target credentials and the production HT
   assert.equal(runtimePolicy.models[0].credentialRef, 'E_MATE_MODEL_KEY_GPT')
   assert.equal(runtimePolicy.models[0].upstreamBaseUrl, 'http://provider.example:8080/v1')
   assert.equal(values.has('E_MATE_MODEL_KEY_GPT'), false)
+  const accountSubject = provider.localAccountSubject()
+  clock += 9 * 60_000
+  let releaseModelCredential
+  holdModelCredential = new Promise(resolve => { releaseModelCredential = resolve })
+  const modelCredentialWriteStarted = new Promise(resolve => { modelCredentialStarted = resolve })
+  const refreshingPolicy = provider.modelRuntimePolicy()
+  await modelCredentialWriteStarted
+  assert.equal(provider.localAccountSubject(), accountSubject)
+  releaseModelCredential()
+  await refreshingPolicy
   const usage = await provider.usage('Asia/Shanghai')
   assert.equal(usage.week.total_tokens, 12_345)
   assert.equal(usage.timezone, 'Asia/Shanghai')
