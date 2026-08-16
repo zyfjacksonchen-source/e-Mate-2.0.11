@@ -102,7 +102,6 @@ export function App() {
     readAdminModelSession(sessionStorage.getItem(ADMIN_MODEL_SESSION_KEY))
   );
   const [modelTests, setModelTests] = useState<Record<string, ModelTestState>>({});
-  const [organization, setOrganization] = useState('');
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
   const [loginBusy, setLoginBusy] = useState(false);
@@ -146,6 +145,7 @@ export function App() {
   const apiBase = import.meta.env.VITE_ADMIN_API_BASE as string | undefined;
   const authBase = import.meta.env.VITE_AUTH_API_BASE as string | undefined;
   const authClientId = (import.meta.env.VITE_AUTH_CLIENT_ID as string | undefined) ?? 'e-mate-admin';
+  const authOrganization = (import.meta.env.VITE_AUTH_ORGANIZATION as string | undefined) ?? 'emate-v2';
   const requestOptions = useMemo(() => ({ apiBase, origin: window.location.origin }), [apiBase]);
   const usagePath = useMemo(() => {
     try {
@@ -201,7 +201,7 @@ export function App() {
 
   const submitToken = (event: FormEvent) => {
     event.preventDefault();
-    if (!organization.trim() || !account.trim() || !password) {
+    if (!account.trim() || !password) {
       setTokenError(copy.tokenRequired);
       return;
     }
@@ -212,7 +212,7 @@ export function App() {
       {
         authBase,
         clientId: authClientId,
-        organization: organization.trim(),
+        organization: authOrganization,
         account: account.trim(),
         password,
       },
@@ -285,8 +285,6 @@ export function App() {
           <h1 id='auth-title'>{copy.tokenTitle}</h1>
           <p>{copy.tokenDescription}</p>
           <form onSubmit={submitToken}>
-            <label htmlFor='admin-organization'>{copy.organization}</label>
-            <Input id='admin-organization' value={organization} autoComplete='organization' onChange={setOrganization} />
             <label htmlFor='admin-account'>{copy.account}</label>
             <Input id='admin-account' value={account} autoComplete='username' onChange={setAccount} />
             <label htmlFor='admin-password'>{copy.password}</label>

@@ -26,6 +26,9 @@ import {
 const origin = 'https://admin.example.test';
 
 test('admin login reuses the e-Mate dark component theme and logo treatment', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  assert.match(app, /VITE_AUTH_ORGANIZATION/);
+  assert.doesNotMatch(app, /admin-organization/);
   assert.match(readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8'), /setAttribute\('arco-theme'/);
   const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
   assert.match(css, /width: min\(100%, 360px\)/);
@@ -52,6 +55,9 @@ test('usage links are emitted only for same-origin deployments', () => {
   assert.throws(() => resolveUsageDashboardPath('https://attacker.example/usage', origin), /must share/);
   const productionEnvironment = readFileSync(new URL('../.env.production', import.meta.url), 'utf8');
   assert.match(productionEnvironment, /^VITE_ADMIN_API_BASE=\/e-mate\/enterprise-api\/$/m);
+  assert.match(productionEnvironment, /^VITE_AUTH_API_BASE=\/e-mate\/auth-api\/$/m);
+  assert.match(productionEnvironment, /^VITE_AUTH_CLIENT_ID=e-mate-admin$/m);
+  assert.match(productionEnvironment, /^VITE_AUTH_ORGANIZATION=emate-v2$/m);
   assert.match(productionEnvironment, /^VITE_USAGE_DASHBOARD_PATH=\/ecorex-agent\/usage-panel\/$/m);
 });
 
