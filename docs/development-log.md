@@ -1275,3 +1275,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 同一已发布桌面制品使用原生本地图片选择器上传 `e-mate-ocr-acceptance.png`，草稿区立即显示真实缩略图；Luna 从图片精确还原其中唯一可见中文行。该项只证明当前企业 Luna 路由的原生图片理解/OCR 可用；桌面 profile 仍未安装会默认调用第三方 Anionex 服务并在首次运行下载 Python 的 `dsh-vision-toolkit`，不得把本次证据写成该插件已经通过或恢复旧 RapidOCR 闭包。
 - 自然语言外部连接逐项通过现有 `e_mate_connection_setup` Tool：飞书进入 App ID/App Secret 配置页，腾讯文档进入 OAuth Token 配置页，微信进入二维码授权页并生成一次性二维码。主代理未输入任何凭据、未扫码或确认授权，并在取证后取消临时二维码会话；因此该项只关闭三类连接的 Agent 可发现性和“走到授权步骤”，不替代真实授权、读取或可逆写入验收。
 - 同一制品真实调用 `gpt-image-2-pro` 生成一张图片，`emate-image` Job 为 `1 image / 0 failures / 28.9s`，整轮 54 秒，终态使用目标 ImageGallery/CAS。实测同时暴露图片默认折叠为“已查看 1 张图像”；源码最小修复仅把既有助手图片和工具图片披露层的初始状态改为展开，保留用户手动折叠、目标 Gallery/Lightbox、事件和 Tool/Job 链。Shell 8 文件 40 项回归与 bundle 构建通过；该展示修复仍需重新打包发布后做安装态复验。
+
+## 2026-08-18 · S07/S13 当前发布与生产账本回读
+
+- 当前仓库 HEAD 为 `fc1828941b9d49d12dd32fadbab6b67e52599ca4`，开放 PR 为 0。Desktop Release run `32070025595` 为成功，原生 macOS universal 与 Windows x64 两个构建 job、清单绑定和 R2 激活均通过；公开 `desktop/latest.json` 与下载页已指向 e-Mate 2.0.7。macOS `/Applications/e-Mate.app` 已按该发布制品完成登录、Luna、单次生图、终态图片画廊和同版本自然语言更新回读。
+- 使用生产管理员只在内存中登录并在查询后撤销验收会话，回读 `2026-08-15T22:49:10Z` 至 `2026-08-17T22:48:10Z` 的权威 Usage/Task 账本。全租户 `216` 个模型任务中 `214` 个已入账、`2` 个 pending；四项 reconciliation 均为 `0`。当前验收账号对应用户的 Luna 与 `gpt-image-2-pro` 分组均为 `pendingRequests=0`，其中当前日期 Image Pro 为 `2/2 accounted`。
+- 同一用户的任务账本为 `49 RECEIVED / 47 FIRST_RESPONSE / 40 COMPLETED / 2 FAILED / 4 CANCELLED / 128 TOOL_EXECUTION`，合计 `270` 个真实事件，来源状态为 `AUTHORITATIVE`。查询未读取 prompt、回答、附件或凭据值；管理员 refresh session 已在查询结束时通过现有 logout 合同撤销。
+- 当前剩余 P0 不是账本或 macOS 发布：已发布 App 面向用户正在使用的 Chrome 真实调用 `dsh-browser` 仍返回“浏览器扩展桥接未连接”，而本机 Chrome 进程未加载 `$DSH_HOME/browser-extension`；Windows `win-codex` 当前主机名不可解析，故 Windows 安装、Edge、DPAPI、Office、更新和完整 CU 都不能标记通过。上述两项继续失败关闭，不用隔离开发者模式或 CI 构建代替。

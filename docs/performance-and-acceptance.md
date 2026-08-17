@@ -131,22 +131,26 @@ Each run stores the starting database/snapshot identity, exact test data, screen
 - Harness 真实任务事件到生产任务账本：一个无工具 Luna turn 精确产生 `RECEIVED / FIRST_RESPONSE / COMPLETED` 各 1 条，本地 outbox 为 3 delivered / 0 pending，生产管理员事件次数为 3、`GENERAL` 任务为 1；Host 重启回放后生产计数不变，Usage 面板逐项显示且四项对账差异仍为 0。
 - 管理端与 Usage 面板真实管理员登录、用户审批/额度/模型策略/协议状态、Luna 联通测试、明暗主题和退出登录。
 - 图片上游生成/编辑与并发阶梯：并发 2、4 稳定；并发 8 为 5/8 成功并出现 3 次 429，因此 2.0.7 的已测稳定上限固定为 4，不再重复烧并发 8。
+- 已发布 macOS 2.0.7 桌面制品完成 DOCX/XLSX/PPTX/PDF 创建与重新读取，四个产物通过格式完整性检查并在终态显示可点击产物；这关闭 macOS 当前规范化 Office 闭包，不替代复杂第三方版式或 Windows 实机。
+- 已发布桌面制品完成 Luna 图片理解/OCR、飞书/腾讯文档/微信自然语言路由至真实授权前步骤，以及单次 `gpt-image-2-pro` 生图。外部连接按验收边界停在输入凭据或扫码确认之前。
+- 桌面发布 run `32070025595` 从提交 `fc1828941b9d49d12dd32fadbab6b67e52599ca4` 生成 macOS universal DMG 与 Windows x64 Setup.exe，同一不可变清单已激活到 R2；macOS 安装态下载、登录、Luna、图片画廊和同版本自然语言更新回读通过。
+- 2026-08-18 生产账本复核：最近 48 小时 `216` 个模型任务中 `214` 个已入账、`2` 个为另一旧验收用户的历史 pending；当前验收账号对应用户的 Luna 与 `gpt-image-2-pro` 分组均为 `pendingRequests=0`。四项 reconciliation 差异继续为 `0`，该用户任务账本为 `49 RECEIVED / 40 COMPLETED / 2 FAILED / 4 CANCELLED / 128 TOOL_EXECUTION`，总事件 `270`。
 
 ### 发布阻断：尚未真实通过
 
 | 优先级 | 项目 | 当前真实状态 / 关闭条件 |
 |---|---|---|
-| P0 | Office 四类文档 | 当前规范化插件因无可合法随包分发的执行层而失败关闭；DOCX/XLSX/PPTX/PDF 创建、读取、编辑、导出、重开均未真实通过。 |
-| P0 | Browser / Computer Use | 最终方案已统一为 `dsh-browser` MV3 扩展；macOS Chrome 与 Windows Chrome/Edge 的会话隔离、目标审批、交互、下载、断连恢复和 Browser Panel 仍须分别完成真实证据。 |
-| P0 | Vision / OCR | rc.5 缺少企业多模态策略 seam，插件仅返回阻塞状态；没有真实 OCR 或视觉工具结果。 |
-| P0 | Windows 真实安装 | CI 的 win32-x64 干净安装不能替代真实 Windows 10/11 x64；CLI、快捷方式、Edge、更新、凭据和完整 CU 尚未跑。macOS x64 同样只有 CI，没有真机 CU。 |
-| P0 | 正式发布与在线升级 | npm `2.0.7` 回读、Cloudflare R2 不可变制品/公开入口、跨版本自然语言升级、失败回滚及两平台恢复尚未真实通过；同版本本地更新事务已通过但不能替代正式发布。 |
-| P1 | 外部连接 | 飞书、腾讯文档、微信、钉钉需从能力中心/Agent 可发现并走到真实授权交接页；按产品边界不提交 OAuth、二维码确认或真实写入。 |
+| P0 | Browser / Computer Use | `dsh-browser` 的隔离 macOS 开发者模式验收已完成会话隔离、点击、下载和断连恢复，但当前已发布 App 面向用户正在使用的 Chrome 实测仍报告“浏览器扩展桥接未连接”；Windows Chrome/Edge 也没有真机证据。关闭条件是当前 Chrome 实际加载 `$DSH_HOME/browser-extension` 并重复同一 CU，以及 Windows 真机复验。 |
+| P0 | Windows 真实安装 | Windows x64 Setup.exe 已由原生 GitHub runner 构建和校验，但不能替代 Windows 10/11 真机；安装、Edge 扩展、DPAPI、自然语言更新、Office/图片和卸载保留数据仍待跑。 |
+| P0 | 跨版本在线升级与恢复 | R2 桌面发布、macOS 安装态同版本自然语言检查与真实 `up-to-date` 回执已通过；仍缺一个更高版本候选上的真实安装、失败回滚、活动任务拒绝和 Windows 恢复证据。 |
+| P1 | Vision / OCR | 当前企业 Luna 图片理解已在发布桌面通过一张真实中文图片；独立 `dsh-vision-toolkit` 仍不进入闭包，复杂 OCR、批量图片和 Windows 侧没有单独验收，不能把一次模型视觉结果扩大为本地 OCR 工具闭包。 |
+| P1 | Office 复杂版式与 Windows | macOS 已发布制品的四格式规范化创建/读取已通过；复杂第三方文档无损编辑、Office 全场景和 Windows 打开/预览仍待真实样本。 |
+| P1 | 外部连接 | 飞书、腾讯文档和微信已由 Agent 走到真实授权前步骤；按产品边界不提交 OAuth、二维码确认或真实写入。钉钉仍需在当前发布制品中重复同一授权前 handoff。 |
 | P1 | Skill Hub | 上传、搜索、下载、安装和 Agent 自执行已有合同测试；仍需生产服务和两个真实用户验证跨用户可见与安装。 |
 | P1 | 旧会话与项目记忆 | 本机真实三类来源已完成 copy-on-write：15 条 e-Mate 权威非删除会话首次导入、复跑 15 条全复用、源哈希不变且旧 Tool 未伪造成新事件。仍需登录后在浏览器确认 15 条可见并任选一条继续真实模型对话；实际来源没有项目会话，项目/通用记忆隔离仍需另一个真实项目 fixture。 |
 | P1 | 弱网与上游恢复 | 原生重试、checkpoint、审计幂等已有自动化；仍需受控断网/重连下验证上下文连续且消息、Tool、Usage、Audit 不重复。 |
-| P1 | 性能成对验收 | 已有真实样本但未完成相同机器、相同提示、相同模型的 30 组目标 rc.5 与 e-Mate p50/p95 对照，包括 TTFT、生成速度与 Tool 调用延迟。 |
-| P1 | 最终响应式与全按钮闭环 | 最新 Harness 原生消息流需在 320/390/768/1280/1920 做一次最终逐屏 CU，并检查全部可见组件不是空动作。真实 Luna 运行态已经只显示中文“思考中”，`Deep diving...` 计数为 0；该品牌项已关闭，不再作为本行阻塞理由。 |
+| P1 | 性能成对验收 | 已有真实样本但未完成相同机器、相同提示、相同模型的 30 组目标 rc.6 Desktop 与 e-Mate p50/p95 对照，包括 TTFT、生成速度与 Tool 调用延迟。 |
+| P1 | 最终响应式与全按钮闭环 | 当前交付形态已改为 rc.6 Desktop；需在 macOS 与 Windows 安装态分别复验主窗口缩放、明暗模式、二级弹层空白关闭和全部可见按钮闭环，不再把旧 rc.5 浏览器五断点当作桌面发布门槛。 |
 | P1 | Session Share | 当前保持失败关闭；生产 create/list/get/revoke、公开 URL、到期和撤销未有有效租约与真实无敏感 fixture 验证。 |
 | 合同风险 | 严格零超额 | 本地持久预留可阻止有限额度并发超额，但单个请求仍可能超过开始时剩余额度；若上线要求绝对零超额，仍需上游单请求精确上限。 |
 
