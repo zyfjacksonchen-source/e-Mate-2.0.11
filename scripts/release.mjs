@@ -20,6 +20,11 @@ const TAG = `e-mate-v${VERSION}`
 const SHA256 = /^[0-9a-f]{64}$/u
 const GIT_COMMIT = /^[0-9a-f]{40}$/u
 
+export function isAcceptedReleaseCommit(environment = process.env) {
+  const sourceCommit = environment.GITHUB_SHA ?? ''
+  return GIT_COMMIT.test(sourceCommit) && environment.EMATE_ACCEPTED_SHA === sourceCommit
+}
+
 export const RELEASE_PACKAGES = [
   { name: '@e-mate/dsh', kind: 'main' },
 ]
@@ -394,7 +399,7 @@ function authorizePublication() {
     || process.env.GITHUB_REF_TYPE !== 'tag' || process.env.GITHUB_REF_NAME !== TAG) {
     throw new Error(`publication is allowed only by GitHub Actions in ${REPOSITORY} from tag ${TAG}`)
   }
-  if (!SHA256.test(process.env.GITHUB_SHA ?? '') || process.env.EMATE_ACCEPTED_SHA !== process.env.GITHUB_SHA) {
+  if (!isAcceptedReleaseCommit()) {
     throw new Error('EMATE_S12_ACCEPTED_SHA must equal the release commit before publication')
   }
   if (!process.env.NODE_AUTH_TOKEN) throw new Error('NODE_AUTH_TOKEN is required for publication')
