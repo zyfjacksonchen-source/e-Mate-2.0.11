@@ -6,7 +6,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
-import { assertEvidenceSource, BUNDLED_PLUGIN_PACKAGES, generateEvidence, RELEASE_PACKAGES, verifyRelease, VERSION } from './release.mjs'
+import { assertEvidenceSource, BUNDLED_PLUGIN_PACKAGES, generateEvidence, isAcceptedReleaseCommit, RELEASE_PACKAGES, verifyRelease, VERSION } from './release.mjs'
 import { buildR2Inventory, matchesR2Head, normalizeProductionPublicOrigin, R2_BUCKET, R2_PREFIX } from './publish-r2.mjs'
 
 const HARNESS_COMMIT = '47f943859bef60e4160492346772ded9b24f765a'
@@ -117,6 +117,12 @@ test('release evidence refuses dirty or mismatched source attribution', () => {
     () => assertEvidenceSource({}, (command, args) => args[0] === 'rev-parse' ? SOURCE_COMMIT : '?? untracked'),
     /requires a clean worktree/u,
   )
+})
+
+test('publication accepts only the exact 40-character release commit', () => {
+  assert.equal(isAcceptedReleaseCommit({ GITHUB_SHA: SOURCE_COMMIT, EMATE_ACCEPTED_SHA: SOURCE_COMMIT }), true)
+  assert.equal(isAcceptedReleaseCommit({ GITHUB_SHA: DIGEST, EMATE_ACCEPTED_SHA: DIGEST }), false)
+  assert.equal(isAcceptedReleaseCommit({ GITHUB_SHA: SOURCE_COMMIT, EMATE_ACCEPTED_SHA: 'a'.repeat(40) }), false)
 })
 
 test('R2 immutable readback includes download metadata as well as bytes identity', () => {

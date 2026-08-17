@@ -10,7 +10,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { VERSION, verifyRelease } from './release.mjs'
+import { isAcceptedReleaseCommit, VERSION, verifyRelease } from './release.mjs'
 
 export const R2_BUCKET = 'emate-desktop-downloads'
 export const R2_PREFIX = `npm/v${VERSION}`
@@ -246,7 +246,7 @@ function receiptObject(item) {
 function authorize() {
   if (process.env.GITHUB_ACTIONS !== 'true' || process.env.GITHUB_REPOSITORY !== REPOSITORY
     || process.env.GITHUB_REF_TYPE !== 'tag' || process.env.GITHUB_REF_NAME !== TAG
-    || !SHA256.test(process.env.GITHUB_SHA ?? '') || process.env.EMATE_ACCEPTED_SHA !== process.env.GITHUB_SHA) {
+    || !isAcceptedReleaseCommit()) {
     throw new Error(`R2 publication is allowed only for the accepted ${TAG} commit in ${REPOSITORY}`)
   }
   if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
