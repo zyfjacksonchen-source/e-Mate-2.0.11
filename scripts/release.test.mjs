@@ -7,7 +7,14 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { assertEvidenceSource, BUNDLED_PLUGIN_PACKAGES, generateEvidence, isAcceptedReleaseCommit, RELEASE_PACKAGES, verifyRelease, VERSION } from './release.mjs'
-import { buildR2Inventory, matchesR2Head, normalizeProductionPublicOrigin, R2_BUCKET, R2_PREFIX } from './publish-r2.mjs'
+import {
+  buildR2Inventory,
+  matchesR2Head,
+  normalizeProductionPublicOrigin,
+  R2_BUCKET,
+  R2_PREFIX,
+  R2_PUBLIC_ORIGIN,
+} from './publish-r2.mjs'
 
 const HARNESS_COMMIT = '47f943859bef60e4160492346772ded9b24f765a'
 const DIGEST = '0'.repeat(64)
@@ -144,15 +151,19 @@ test('R2 immutable readback includes download metadata as well as bytes identity
   assert.equal(matchesR2Head({ ...head, Metadata: { sha256: 'f'.repeat(64) } }, item), false)
 })
 
-test('production R2 download origin requires the bound custom domain', () => {
-  assert.equal(normalizeProductionPublicOrigin('https://downloads.e-mate.example'), 'https://downloads.e-mate.example')
+test('production R2 download origin is the owned public bucket', () => {
+  assert.equal(normalizeProductionPublicOrigin(R2_PUBLIC_ORIGIN), R2_PUBLIC_ORIGIN)
+  assert.throws(
+    () => normalizeProductionPublicOrigin('https://dl.ecoremedia.net'),
+    /e-Mate Cloudflare R2 public bucket origin/u,
+  )
   assert.throws(
     () => normalizeProductionPublicOrigin('https://pub-0123456789abcdef0123456789abcdef.r2.dev'),
-    /production Cloudflare R2 custom domain/u,
+    /e-Mate Cloudflare R2 public bucket origin/u,
   )
   assert.throws(
     () => normalizeProductionPublicOrigin('https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com'),
-    /production Cloudflare R2 custom domain/u,
+    /e-Mate Cloudflare R2 public bucket origin/u,
   )
 })
 

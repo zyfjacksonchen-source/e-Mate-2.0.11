@@ -350,23 +350,31 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
 }
 
 function taskEventQuery(url: URL): TaskEventQuery {
-  const allowed = new Set(['from', 'to']);
+  const allowed = new Set(['from', 'to', 'userId']);
   if (
     [...url.searchParams.keys()].some((key) => !allowed.has(key)) ||
-    [...allowed].some((key) => url.searchParams.getAll(key).length !== 1)
+    ['from', 'to'].some((key) => url.searchParams.getAll(key).length !== 1) ||
+    url.searchParams.getAll('userId').length > 1
   ) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
   }
   const from = url.searchParams.get('from');
   const to = url.searchParams.get('to');
-  if (!from || !to || !isIsoTimestamp(from) || !isIsoTimestamp(to)) {
+  const userId = url.searchParams.get('userId');
+  if (
+    !from ||
+    !to ||
+    !isIsoTimestamp(from) ||
+    !isIsoTimestamp(to) ||
+    (userId !== null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId))
+  ) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
   }
   const duration = Date.parse(to) - Date.parse(from);
   if (duration <= 0 || duration > 366 * 86_400_000 || Date.parse(to) > Date.now()) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
   }
-  return { from, to };
+  return { from, to, ...(userId ? { userId } : {}) };
 }
 
 function usageEventPage(url: URL): { cursor: string | null; limit: number } {
