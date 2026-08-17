@@ -1220,3 +1220,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Usage 面板复用现有 `/v1/usage/*`、`/v1/tasks/summary` 与管理员用户列表，新增最长 366 天、不得晚于当前时间的自定义起止时间和用户筛选；没有新增统计 Store、分页推算或伪事件。预设范围、刷新、调用明细与选中用户继续共享同一 `from/to/userId` 账本范围。
 - Usage SQL 已有的 `tenant/time/user/model` 聚合保持不变；任务账本的 `summary` 增加可选 `userId`，在权威 `e_mate_task_fact` cohort 入口过滤后再按事件类型、场景、状态和用户汇总。页面为选中用户显示原合同 `RECEIVED/COMPLETED/...`、请求 `ACCOUNTED/REJECTED/PENDING/USAGE` 代码与次数，并列出全部真实模型调用次数；`gpt-image-2-pro` 因而直接显示为该用户的生图模型调用次数，不依赖工具名判断。
 - 明暗主题继续复用 e-Mate Token；筛选条在小屏改为单列、输入和选择器限制为容器宽度。Usage 14/14、Analytics 33 pass / 6 环境 skip、两项 TypeScript check、Usage Vite 生产构建、Analytics build 与 diff check 通过。真实生产部署、管理员登录后的自定义范围/逐用户/图片调用和任务事件账本核对仍须主代理完成，且当前生产任务事件源若仍为 `NO_DATA` 必须原样显示“未接入”，不能用模型调用代替。
+
+## 2026-08-17 · S07 管理端双域名登录修复
+
+- 生产实测确认管理员凭据有效：`mvdcm` 管理端可正常登录，而 `dl` 管理端在 Auth Gateway 已返回 HTTP 200 后仍显示“账号或密码错误”。根因是登录回执中的 Model Gateway 规范地址固定为 `mvdcm`，管理端随后用通用同源校验拒绝了 `dl` 页面收到的同一回执，错误被登录页统一映射为凭据失败。
+- 管理端继续只向当前页面同源的 `/e-mate/model-api/` 发请求；登录回执中的地址必须是 HTTPS、无用户信息/查询/片段且路径精确为 `/e-mate/model-api`，才允许把这个固定路径投影到当前 `mvdcm` 或 `dl` 域名。任意其他路径、HTTP 或带凭据 URL 仍失败关闭；没有放宽 Auth/Admin/Usage 的既有同源合同。
+- `@e-mate/enterprise-admin` 17/17 测试、TypeScript check、生产构建和 diff check 通过。生产部署后须用同一桌面凭据分别在 `mvdcm`、`dl` 登录，进入模型状态页后退出，并确认 Auth 会话已撤销。
