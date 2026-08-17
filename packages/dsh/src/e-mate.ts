@@ -89,6 +89,10 @@ function readJson(path) {
   }
 }
 
+function emptyBundlePatch(patch) {
+  return patch.split('\n').map(line => line.trim()).filter(line => line !== '' && !line.startsWith('#')).join('\n') === '[]'
+}
+
 export function latestUpdateReceipt(dshHome = resolveDshHome()) {
   const directory = join(dshHome, 'e-mate', 'migrations')
   let latest
@@ -178,6 +182,14 @@ export function installProfile(dshHome = resolveDshHome()) {
     rmSync(target, { recursive: true, force: true })
     mkdirSync(dirname(target), { recursive: true })
     cpSync(source, target, { recursive: true, force: true })
+    const packageManifest = readJson(join(target, 'package.json'))
+    const patchPath = join(target, packageManifest.dsh.bundle.patch)
+    const patch = readFileSync(patchPath, 'utf8')
+    if (!emptyBundlePatch(patch)) {
+      const packageEntry = `name: '${name}'`
+      if (patch.split(packageEntry).length !== 2) throw new Error(`${name} bundle entry is not uniquely localizable`)
+      atomicWrite(patchPath, patch.replace(packageEntry, `name: './node_modules/${name}/${packageManifest.main}'`))
+    }
   }
   const binding = join(paths.profile, 'plugins', 'runtime-binding.json')
   const harness = resolveHarness()
@@ -408,8 +420,16 @@ function profileCheck(paths) {
   const managedPlugins = PLUGIN_PACKAGES.every(name => {
     const root = join(paths.profile, 'node_modules', ...name.split('/'))
     const packageManifest = readJson(join(root, 'package.json'))
-    return packageManifest?.name === name && packageManifest?.version === VERSION
-      && typeof packageManifest?.main === 'string' && existsSync(join(root, packageManifest.main))
+    if (packageManifest?.name !== name || packageManifest?.version !== VERSION
+      || typeof packageManifest?.main !== 'string' || !existsSync(join(root, packageManifest.main))
+      || typeof packageManifest?.dsh?.bundle?.patch !== 'string') return false
+    let patch
+    try {
+      patch = readFileSync(join(root, packageManifest.dsh.bundle.patch), 'utf8')
+    } catch {
+      return false
+    }
+    return (emptyBundlePatch(patch) || patch.includes(`name: './node_modules/${name}/${packageManifest.main}'`))
       && (packageManifest?.dsh?.client === undefined || existsSync(join(root, 'lib', 'client.js')))
   })
   const expectedBundles = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...PLUGIN_PACKAGES]
@@ -591,7 +611,13 @@ async function waitForManagedHealth(state, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const health = await fetchHealth(state.port)
-    if (health?.instance_id === state.instance_id) return health
+    if (health?.instance_id === state.instance_id) {
+      await new Promise(resolveWait => setTimeout(resolveWait, 250))
+      if (pidAlive(state.pid)) {
+        const stable = await fetchHealth(state.port)
+        if (stable?.instance_id === state.instance_id) return stable
+      }
+    }
     if (!pidAlive(state.pid)) break
     await new Promise(resolveWait => setTimeout(resolveWait, 100))
   }

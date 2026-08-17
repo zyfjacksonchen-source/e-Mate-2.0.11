@@ -578,7 +578,13 @@ test('managed profile installation is idempotent', () => {
       assert.equal(pluginManifest.name, name)
       assert.equal(pluginManifest.version, '2.0.7')
       assert.ok(readFileSync(join(pluginRoot, pluginManifest.main)).byteLength > 0)
-      assert.ok(readFileSync(join(pluginRoot, pluginManifest.dsh.bundle.patch)).byteLength >= 2)
+      const pluginPatch = readFileSync(join(pluginRoot, pluginManifest.dsh.bundle.patch), 'utf8')
+      assert.ok(pluginPatch.length >= 2)
+      const patchBody = pluginPatch.split('\n').map(line => line.trim()).filter(line => line !== '' && !line.startsWith('#')).join('\n')
+      if (patchBody !== '[]') {
+        assert.ok(pluginPatch.includes(`name: './node_modules/${name}/${pluginManifest.main}'`))
+        assert.doesNotMatch(pluginPatch, new RegExp(`name: '${name}'`, 'u'))
+      }
     }
     const imageGeneration = readFileSync(join(first.profile, 'plugins', 'image-generation.js'), 'utf8')
     assert.match(imageGeneration, /name: "imagegen"/)
