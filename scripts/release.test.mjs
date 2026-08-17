@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -243,28 +243,28 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.match(readFileSync('.gitattributes', 'utf8'), /^\* text=auto eol=lf$/mu)
 })
 
-test('download page exposes npm-only platform install and immutable R2 evidence', () => {
-  const page = renderDownloadPage(readFileSync('deploy/download-page/index.html', 'utf8'), SOURCE_COMMIT)
-  const install = `npm install -g ${releaseSource(SOURCE_COMMIT).tarball_url}`
-  assert.equal((page.match(new RegExp(install.replaceAll('.', '\\.'), 'gu')) ?? []).length, 4)
-  assert.doesNotMatch(page, /npm install -g @e-mate\/dsh@2\.0\.7/u)
-  for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64']) {
+test('download page resolves unsigned desktop installers from the fail-closed R2 manifest', () => {
+  const page = renderDownloadPage(readFileSync('deploy/download-page/index.html', 'utf8'))
+  const manifestUrl = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json'
+  assert.ok((page.match(new RegExp(manifestUrl.replaceAll('.', '\\.'), 'gu')) ?? []).length >= 3)
+  for (const platform of ['macos', 'windows-x64']) {
     assert.match(page, new RegExp(`data-platform="${platform}"`, 'u'))
     assert.match(page, new RegExp(`data-panel="${platform}"`, 'u'))
   }
-  for (const command of ['e-mate setup', 'e-mate launch', 'e-mate stop']) assert.match(page, new RegExp(command, 'u'))
-  for (const evidence of [
-    'e-mate-dsh-2.0.7.tgz',
-    'SHA256SUMS',
-    'release-manifest.json',
-    'e-mate-2.0.7.spdx.json',
-    'THIRD_PARTY_LICENSES.txt',
-    'EVIDENCE_SHA256SUMS',
-    'r2-download-admission.json',
-  ]) {
-    assert.match(page, new RegExp(`https://pub-ada3f610c0234a76838f4e19fe2bb25e\\.r2\\.dev/${releasePrefix(SOURCE_COMMIT).replaceAll('.', '\\.').replaceAll('/', '\\/')}/${evidence.replaceAll('.', '\\.')}`, 'u'))
+  for (const artifact of ['darwin', 'win32']) assert.match(page, new RegExp(`data-desktop-artifact="${artifact}"`, 'u'))
+  for (const filename of ['e-Mate-2.0.7-mac-universal.dmg', 'e-Mate-2.0.7-win-x64-Setup.exe']) {
+    assert.match(page, new RegExp(filename.replaceAll('.', '\\.'), 'u'))
   }
-  assert.match(page, /支持 Node \^22\.19 或 ≥24/u)
+  assert.match(page, /manifest\.source_commit/u)
+  assert.match(page, /Number\.isSafeInteger\(artifact\?\.bytes\)/u)
+  assert.match(page, /\^\[0-9a-f\]\{64\}\$/u)
+  assert.match(page, /未签名版本/u)
+  assert.match(page, /自然语言更新/u)
   assert.match(page, /data-theme-toggle/u)
-  assert.doesNotMatch(page, /Electron|\.dmg\b|\.exe\b|下载安装包|未签名/u)
+  assert.match(page, /\/ecorex-agent\/admin\//u)
+  for (const asset of ['emate-logo.e0bf52b1480f.png', 'emate-mark.1a6dbbe3b5fe.png']) {
+    assert.ok(existsSync(`deploy/download-page/assets/${asset}`))
+    assert.match(page, new RegExp(`\\./assets/${asset.replaceAll('.', '\\.')}\\b`, 'u'))
+  }
+  assert.doesNotMatch(page, /__EMATE_RELEASE_SOURCE_COMMIT__|npm install|nodejs\.org|e-mate setup|e-mate launch|\/desktop\/releases\/v2\.0\.7\/[0-9a-f]{40}/u)
 })
