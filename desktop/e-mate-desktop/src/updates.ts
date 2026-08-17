@@ -21,7 +21,7 @@ export const inject = ['desktopRuntime']
 
 /** The only Agent-callable entry into the native desktop updater. */
 export interface DesktopUpdates {
-  runInteractiveUpdate(): Promise<void>
+  runInteractiveUpdate(): Promise<UpdateCheckResult | null>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -67,7 +67,7 @@ const EMPTY_STATE: UpdateStateV2 = { version: 2 }
  */
 export function apply(ctx: Context, config: Config): void {
   const adapter = ctx.desktopRuntime.updates
-  let interactiveUpdate: (() => Promise<void>) | undefined
+  let interactiveUpdate: (() => Promise<UpdateCheckResult | null>) | undefined
   ctx.provide('desktopUpdates', {
     runInteractiveUpdate() {
       if (interactiveUpdate === undefined) {
@@ -87,7 +87,7 @@ export function apply(ctx: Context, config: Config): void {
     let requestController: AbortController | undefined
     let downloadController: AbortController | undefined
     let inFlight: Promise<UpdateCheckResult | null> | undefined
-    let manualTask: Promise<void> | undefined
+    let manualTask: Promise<UpdateCheckResult | null> | undefined
     let downloadTask: Promise<void> | undefined
     let refreshTray = (): void => {}
 
@@ -202,21 +202,22 @@ export function apply(ctx: Context, config: Config): void {
       if (!disposed) await startDownload(update)
     }
 
-    const runManualCheck = (): Promise<void> => {
+    const runManualCheck = (): Promise<UpdateCheckResult | null> => {
       manualTask ??= (async () => {
         if (availableUpdate !== undefined) {
           await offerDownload(availableUpdate, false)
-          return
+          return availableUpdate
         }
         const result = await startCheck()
-        if (disposed) return
+        if (disposed) return null
         const update = observeResult(result)
         if (update !== undefined) {
           await offerDownload(update, false)
-          return
+          return update
         }
         await adapter.showManualCheckResult(result)
-      })().catch(() => undefined).finally(() => { manualTask = undefined })
+        return result
+      })().catch(() => null).finally(() => { manualTask = undefined })
       return manualTask
     }
     interactiveUpdate = runManualCheck
@@ -248,7 +249,7 @@ export function apply(ctx: Context, config: Config): void {
           ? checking ? 'Checking for Updates…' : 'Check for Updates…'
           : `e-Mate ${availableUpdate.latestVersion} Available`
         : `Downloading e-Mate ${downloadingVersion}…`,
-      invoke: runManualCheck,
+      invoke: async () => { await runManualCheck() },
     })
     refreshTray = registration.refresh
 

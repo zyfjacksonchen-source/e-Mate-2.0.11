@@ -42,6 +42,7 @@ interface Harness {
   readonly downloadAndOpen: ReturnType<typeof vi.fn>
   readonly refresh: ReturnType<typeof vi.fn>
   readonly registrationDispose: ReturnType<typeof vi.fn>
+  runInteractiveUpdate(): Promise<UpdateCheckResult | null>
   dispose(): Promise<void>
 }
 
@@ -111,6 +112,7 @@ async function createHarness(options: {
     downloadAndOpen,
     refresh,
     registrationDispose,
+    runInteractiveUpdate: () => ctx.desktopUpdates.runInteractiveUpdate(),
     dispose: async () => { await disposer?.() },
   }
 }
@@ -147,7 +149,11 @@ describe('desktop update Host plugin', () => {
     await vi.advanceTimersByTimeAsync(testConfig.intervalMs)
     expect(request).not.toHaveBeenCalled()
     expect(harness.tray.label()).toBe('Check for Updates…')
-    await harness.tray.invoke()
+    await expect(harness.runInteractiveUpdate()).resolves.toEqual({
+      status: 'up-to-date',
+      currentVersion: '2.0.0',
+      latestVersion: '2.0.0',
+    })
     expect(request).toHaveBeenCalledOnce()
     expect(harness.showManualCheckResult).toHaveBeenCalledWith({
       status: 'up-to-date',

@@ -4,7 +4,11 @@ import { apply } from '../src/agent-update.ts'
 
 describe('e-Mate Agent desktop update Tool', () => {
   it('delegates only to the native updater service', async () => {
-    const runInteractiveUpdate = vi.fn(async () => {})
+    const runInteractiveUpdate = vi.fn(async () => ({
+      status: 'up-to-date' as const,
+      currentVersion: '2.0.7',
+      latestVersion: '2.0.7',
+    }))
     const section = vi.fn()
     const register = vi.fn()
     const ctx = {
@@ -27,7 +31,11 @@ describe('e-Mate Agent desktop update Tool', () => {
       execute(args: object, exec: object): Promise<unknown>
     }
     expect(tool.name).toBe('e_mate_desktop_update')
-    await expect(tool.execute({}, {})).resolves.toEqual({ state: 'native_update_flow_finished' })
+    await expect(tool.execute({}, {})).resolves.toEqual({
+      status: 'up-to-date',
+      installedVersion: '2.0.7',
+      latestVersion: '2.0.7',
+    })
     expect(runInteractiveUpdate).toHaveBeenCalledOnce()
   })
 })
