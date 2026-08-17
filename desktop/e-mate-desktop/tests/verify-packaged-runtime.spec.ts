@@ -53,10 +53,11 @@ describe('packaged desktop runtime verification', () => {
     expect(run).toHaveBeenCalledOnce()
     const [executable, args, options] = run.mock.calls[0]!
     expect(executable).toBe(expectedExecutable)
-    expect(args).toEqual(expect.arrayContaining([
+    const comparableArgs = platform === 'win32' ? args.map(argument => argument.toLowerCase()) : args
+    expect(comparableArgs).toEqual(expect.arrayContaining([
       join(resolvePackagedUnpackedRoot(context('/build', platform)), 'node_modules', 'node-pty'),
       expectedCommand,
-    ]))
+    ].map(argument => platform === 'win32' ? argument.toLowerCase() : argument)))
     expect(options).toMatchObject({ timeout: 60_000, env: { ELECTRON_RUN_AS_NODE: '1' } })
   })
 
