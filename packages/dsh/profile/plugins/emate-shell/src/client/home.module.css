@@ -128,7 +128,7 @@
 /* The standard preset and full-access policy stay Host-owned defaults; their
    mode controls are intentionally absent from the user-facing 2.0.5 bar. */
 :global([data-slot='conversation.hero.agentPreset']),
-:global([data-slot='conversation.composer.bar'] [data-composer-card] > div:last-child > div:first-child > div) {
+:global([data-slot='conversation.composer.bar'] [data-composer-card] > div:last-child > div:first-child > div:first-of-type) {
   display: none !important;
 }
 
@@ -136,6 +136,15 @@
   width: 42px !important;
   height: 32px !important;
   background: transparent !important;
+}
+
+:global([data-slot='conversation.composer.bar'] [data-composer-card] > div:last-child > div:first-child > button:first-child > svg) {
+  display: none;
+}
+
+:global([data-slot='conversation.composer.bar'] [data-composer-card] > div:last-child > div:first-child > button:first-child::before) {
+  content: '/';
+  font: 500 18px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 :global([data-emate-composer-connectors]) {
@@ -163,6 +172,7 @@
 
 :global([data-slot='conversation.composer.bar'] [data-slot='conversation.input.model'] button) {
   min-height: 32px;
+  max-width: none;
 }
 
 :global([data-slot='conversation.composer.bar'] [data-composer-card] > div:last-child > div:last-child > button[aria-label='发送消息']) {

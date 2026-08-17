@@ -1,0 +1,95 @@
+diff --git a/lib/client.js b/lib/client.js
+index 99b0907d9a5b78b90073b156c499cc60951518fb..17e759ccb215232ae32539e6069ffe96e92ab9f2 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -35463,7 +35463,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
+ 		* 任何文件路径都路由；属于某会话工作区的按工作区模式打开（带文件树），
+ 		* 不属于任何工作区的绝对路径以单文件模式打开（无文件树、跳过 containment）。
+ 		*/
+-		function installFileOpenRouter(workspaces, sessions, openViewer) {
++		const SYSTEM_OPEN_EXTENSIONS = /\.(?:docx|xlsx|pptx|pdf)$/iu;
++		function installFileOpenRouter(workspaces, sessions, openViewer, openSystem) {
+ 			const serviceTarget = workspaces[Symbol.for("cordis.original")] ?? workspaces;
+ 			const ownDescriptor = Object.getOwnPropertyDescriptor(serviceTarget, "openPath");
+ 			const nativeOpenPath = workspaces.openPath;
+@@ -35472,6 +35473,10 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
+ 				if (!enabled) return nativeOpenPath.call(workspaces, path);
+ 				const target = fileViewerTarget(path, sessions.list.getSnapshot());
+ 				if (target === void 0) return nativeOpenPath.call(workspaces, path);
++				if (SYSTEM_OPEN_EXTENSIONS.test(target.path)) {
++					await openSystem(target.sessionId, target.path, target.singleFile);
++					return;
++				}
+ 				const activeElement = document.activeElement;
+ 				const trigger = activeElement instanceof HTMLElement && activeElement !== document.body && activeElement.isConnected ? activeElement : void 0;
+ 				await openViewer(target.sessionId, target.path, trigger, target.singleFile);
+@@ -35616,7 +35621,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
+ 				zh,
+ 				en
+ 			}), "file-viewer: dictionaries");
+-			ctx.effect(() => installFileOpenRouter(ctx.workspaces, ctx.sessions, (sessionId, path, trigger, singleFile) => coordinator.openPath(sessionId, path, singleFile, trigger)), "file-viewer: file open router");
++			ctx.effect(() => installFileOpenRouter(
++				ctx.workspaces,
++				ctx.sessions,
++				(sessionId, path, trigger, singleFile) => coordinator.openPath(sessionId, path, singleFile, trigger),
++				(sessionId, path, singleFile) => coordinator.openInSystem(sessionId, path, singleFile)
++			), "file-viewer: file open router");
+ 			ctx.on("connection/reset", () => {
+ 				coordinator.resetConnection();
+ 			});
+diff --git a/lib/index.js b/lib/index.js
+index 7438ac600ca3a553f1c77348e8274b6c0c4fea92..c90ee96c8a1de183f52750cb7abb9e4f3d1c8df0 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -572,8 +572,9 @@ function rejected$1(code) {
+ //#region src/host/open-file.ts
+ /** macOS 用 `open`，Linux 用 `xdg-open`；其他平台不支持。 */
+ function openCommandFor(platform) {
+-	if (platform === "darwin") return "open";
++	if (platform === "darwin") return "/usr/bin/open";
+ 	if (platform === "linux") return "xdg-open";
++	if (platform === "win32") return `${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+ }
+ /**
+ * 用系统默认应用打开目标文件（类似 Codex 的 open-in-editor）。
+@@ -600,11 +601,23 @@ async function openFileWithSystem(request, environment) {
+ 		const info = await fs.stat(target, signal);
+ 		if (info === void 0) return rejected("not-found");
+ 		if (info.type !== "file") return rejected("not-file");
+-		const command = openCommandFor(environment.platform ?? process.platform);
++		const platform = environment.platform ?? process.platform;
++		const command = openCommandFor(platform);
+ 		if (command === void 0) return rejected("unsupported-platform");
+ 		const processPath = fs.processPath(target);
+ 		try {
+-			await spawnDetached(command, [processPath]);
++			await platform === "win32" ? spawnDetached(command, [
++				"-NoLogo",
++				"-NoProfile",
++				"-NonInteractive",
++				"-Command",
++				"Invoke-Item -LiteralPath $env:E_MATE_OPEN_PATH"
++			], {
++				SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
++				TEMP: process.env.TEMP ?? "",
++				TMP: process.env.TMP ?? "",
++				E_MATE_OPEN_PATH: processPath
++			}) : spawnDetached(command, [processPath]);
+ 		} catch {
+ 			return rejected("open-failed");
+ 		}
+@@ -619,11 +632,12 @@ async function openFileWithSystem(request, environment) {
+ 	}
+ }
+ /** 分离启动系统命令；成功 spawn 即返回（不等待子进程退出）。 */
+-function spawnDetached(command, args) {
++function spawnDetached(command, args, env) {
+ 	return new Promise((resolve, reject) => {
+ 		const child = spawn(command, args, {
+ 			detached: true,
+-			stdio: "ignore"
++			stdio: "ignore",
++			...env === void 0 ? {} : { env }
+ 		});
+ 		child.once("error", reject);
+ 		child.once("spawn", () => {

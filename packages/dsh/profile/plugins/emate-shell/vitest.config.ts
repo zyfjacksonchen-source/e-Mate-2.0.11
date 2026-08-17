@@ -9,11 +9,15 @@ const upstreamPrimitives = fileURLToPath(new URL(
   import.meta.url,
 ))
 const upstreamRuntime = fileURLToPath(new URL(
-  '../../../../../upstream/deepseek-harness/packages/client/runtime/lib/client.js',
+  '../../../../../upstream/deepseek-harness/packages/client/runtime/src/client/index.ts',
   import.meta.url,
 ))
 const upstreamAttachment = fileURLToPath(new URL(
   '../../../../../upstream/deepseek-harness/packages/client/ui-attachment/lib/index.js',
+  import.meta.url,
+))
+const upstreamCordis = fileURLToPath(new URL(
+  '../../../../../upstream/deepseek-harness/vendor/cordis/lib/index.js',
   import.meta.url,
 ))
 
@@ -26,6 +30,7 @@ export default {
       '@deepseek-ai/dsh-client-ui-primitives': upstreamPrimitives,
       '@deepseek-ai/dsh-client-ui-attachment': upstreamAttachment,
       '@deepseek-ai/dsh-client-runtime/client': upstreamRuntime,
+      '@deepseek-ai/cordis': upstreamCordis,
     },
   },
 }

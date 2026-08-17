@@ -1,0 +1,128 @@
+diff --git a/lib/client.js b/lib/client.js
+index dc95f6cd0442d343086711c159d19d44771b9665..e75eb82d817ffa593439b11d184d1aad15f921d1 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({
+ 		let react_jsx_runtime = require("react/jsx-runtime");
+ 		/** Fallback prefs used whenever the settings document is unreachable or malformed. */
+ 		const SIDEBAR_PREFS_DEFAULTS = {
+-			openByDefault: true,
++			openByDefault: false,
+ 			defaultWidthPercent: 30,
+ 			autoOpenSubagent: true,
+ 			autoOpenJobs: true,
+@@ -741,7 +741,7 @@ window.__ModuleLoader__.load({
+ 			};
+ 			const maxWidth = typeof window !== "undefined" ? window.innerWidth : Infinity;
+ 			return {
+-				panelOpen: record.panelOpen,
++				panelOpen: false,
+ 				width: Math.max(280, Math.min(record.width, maxWidth)),
+ 				activePane: typeof record.activePane === "string" ? reid.get(record.activePane) ?? record.activePane : null,
+ 				nextTerminal: record.nextTerminal,
+@@ -6818,6 +6818,7 @@ window.__ModuleLoader__.load({
+ 			const state = snapshot.state;
+ 			const sessionId = snapshot.sessionId;
+ 			const summaryCwd = sessionId === void 0 ? void 0 : sessionList.byId[sessionId]?.cwd;
++			const showToggles = window.location.pathname.startsWith("/chat/");
+ 			const collapsed = state === void 0 || !state.panelOpen;
+ 			(0, react.useEffect)(() => {
+ 				if (collapsed) document.body.setAttribute("data-dsh-sidebar-collapsed", "");
+@@ -7254,7 +7255,7 @@ window.__ModuleLoader__.load({
+ 				sessionId,
+ 				cwd
+ 			]);
+-			if (state === void 0 || sessionId === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
++			if (state === void 0 || sessionId === void 0) return !showToggles ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+ 				className: sidebar_module_css_default.toggleCluster,
+ 				children: [!narrow && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+ 					label: t("noSession"),
+@@ -7357,7 +7358,7 @@ window.__ModuleLoader__.load({
+ 				}
+ 			});
+ 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+-				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
++				showToggles && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+ 					className: sidebar_module_css_default.toggleCluster,
+ 					children: [!narrow && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+ 						label: state.bottomOpen ? t("collapseBottomPanel") : t("expandBottomPanel"),
+diff --git a/src/client/Sidebar.tsx b/src/client/Sidebar.tsx
+index c450a36bc5f952c0c9fb1e9e602d4c356c5032c8..190ca1ef4b00c16a012f49c1dccf99662db76f91 100644
+--- a/src/client/Sidebar.tsx
++++ b/src/client/Sidebar.tsx
+@@ -154,6 +154,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
+   const state = snapshot.state
+   const sessionId = snapshot.sessionId
+   const summaryCwd = sessionId === undefined ? undefined : sessionList.byId[sessionId]?.cwd
++  const showToggles = window.location.pathname.startsWith('/chat/')
+
+   // The collapsed toggle cluster reclaims the top-right corner, so the DSH
+   // session header's right-aligned utilities (the "Session log" download
+@@ -640,7 +641,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
+   }, [ctx, sessionId, cwd])
+
+   if (state === undefined || sessionId === undefined) {
+-    return (
++    return !showToggles ? null : (
+       <div className={css.toggleCluster}>
+         {!narrow && (
+           <Tooltip label={t('noSession')} side="bottom" delayMs={500}>
+@@ -734,7 +735,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
+         right end it really squeezes (the strip reserves its width via CSS),
+         so the tabs genuinely yield space to it.
+       */}
+-      <div className={css.toggleCluster}>
++      {showToggles && <div className={css.toggleCluster}>
+         {/*
+           Narrow viewports merge the two workbenches into the one drawer —
+           there is no bottom panel, so its toggle button is not offered.
+@@ -761,7 +762,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
+             <IconPanelRightOutline16 />
+           </button>
+         </Tooltip>
+-      </div>
++      </div>}
+       {/*
+         The right panel stays mounted while collapsed (hidden off-screen) so
+         the slide in/out can animate; visibility hides it after the slide
+diff --git a/src/client/state.ts b/src/client/state.ts
+index 8656ddcd9be1250dc4b04276fbc600689c66e292..f0eb5dd9d9775e55c3c44565c8c5349fb2edb434 100644
+--- a/src/client/state.ts
++++ b/src/client/state.ts
+@@ -828,7 +828,9 @@ export function sanitizeState(parsed: unknown): SidebarState | undefined {
+     ?? { kind: 'leaf' as const, id: uid('pane'), tabs: [], active: null }
+   const maxWidth = typeof window !== 'undefined' ? window.innerWidth : Infinity
+   return {
+-    panelOpen: record.panelOpen,
++    // e-Mate always enters a restored conversation with the secondary panel
++    // closed; opening it remains a per-session user action for this run.
++    panelOpen: false,
+     width: Math.max(PANEL_MIN, Math.min(record.width, maxWidth)),
+     // A stale duplicate pane id may have been re-ided; follow the rename so
+     // new tabs still land in the pane the user was using.
+diff --git a/src/config.ts b/src/config.ts
+index a5bc8c273f03f289a2375d84c3a7fd2474550b6d..3534b702e1e4c8c88f55cb2598cf292fa2d6974f 100644
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -88,7 +88,7 @@ export function resolveSidebarConfig(config: SidebarConfig | undefined): Resolve
+
+ /** Schemastery schema for the user-facing preferences (validated by the settings service). */
+ export const PrefsSchema: z<SidebarPrefs> = z.object({
+-  openByDefault: z.boolean().default(true),
++  openByDefault: z.boolean().default(false),
+   defaultWidthPercent: z.number().step(1).min(WIDTH_PERCENT_MIN).max(WIDTH_PERCENT_MAX).default(WIDTH_PERCENT_DEFAULT),
+   autoOpenSubagent: z.boolean().default(true),
+   autoOpenJobs: z.boolean().default(true),
+diff --git a/src/prefs-shared.ts b/src/prefs-shared.ts
+index 42986a443cba8cb6b75f49533cae1ae85023dafb..94320f3f8de4b6e94ebdbfc7697a3aa66125ef7c 100644
+--- a/src/prefs-shared.ts
++++ b/src/prefs-shared.ts
+@@ -170,7 +170,7 @@ export const TITLE_BAR_STRIP_DEFAULT = 40
+
+ /** Fallback prefs used whenever the settings document is unreachable or malformed. */
+ export const SIDEBAR_PREFS_DEFAULTS: SidebarPrefs = {
+-  openByDefault: true,
++  openByDefault: false,
+   defaultWidthPercent: WIDTH_PERCENT_DEFAULT,
+   autoOpenSubagent: true,
+   autoOpenJobs: true,

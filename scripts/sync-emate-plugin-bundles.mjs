@@ -9,6 +9,7 @@ const expected = [
   '@e-mate/dsh-plugin-better-sidebar',
   '@e-mate/dsh-plugin-browser',
   '@e-mate/dsh-plugin-browser-panel',
+  '@e-mate/dsh-plugin-file-import',
   '@e-mate/dsh-plugin-genui',
   '@e-mate/dsh-plugin-im',
   '@e-mate/dsh-plugin-memory-evolve',

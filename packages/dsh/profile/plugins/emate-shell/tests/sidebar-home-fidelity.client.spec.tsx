@@ -15,6 +15,7 @@ afterEach(() => {
 
 const Icon = () => <svg />
 const homeToolbarProps = {
+  closeDetails: vi.fn(),
   toggleSidebar: vi.fn(),
   openSettings: vi.fn(),
   getThemeScheme: () => 'light' as const,
@@ -78,6 +79,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       toggleSidebar={() => {}}
     />)
 
+    expect(screen.getByText('2.0.7')).not.toBeNull()
     expect(screen.getByRole('button', { name: '新建任务' }).textContent).toContain('新任务')
     expect(screen.getByRole('button', { name: '新建任务' }).getAttribute('aria-current')).toBe('page')
     fireEvent.click(screen.getByRole('button', { name: '定时任务' }))
@@ -90,6 +92,10 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开任务：通用任务' }))
     expect(openSession).toHaveBeenCalledWith('general-session')
     const taskMenu = screen.getByLabelText('管理任务：通用任务').closest('details')!
+    fireEvent.click(screen.getByLabelText('管理任务：通用任务'))
+    expect(taskMenu.open).toBe(true)
+    fireEvent.pointerDown(document.body)
+    expect(taskMenu.open).toBe(false)
     fireEvent.click(screen.getByLabelText('管理任务：通用任务'))
     fireEvent.click(within(taskMenu).getByRole('button', { name: '重命名' }))
     expect(screen.getByRole('dialog', { name: '重命名任务' }).getAttribute('aria-modal')).toBe('true')
@@ -133,6 +139,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       scheduleIcons={{ create: Icon, list: Icon, edit: Icon, run: Icon, pause: Icon, resume: Icon, delete: Icon }}
     />)
     await waitFor(() => { expect(screen.getByRole('heading', { name: '今日使用概览' })).not.toBeNull() })
+    expect(homeToolbarProps.closeDetails).toHaveBeenCalled()
     expect(screen.getByRole('heading', { name: '和小芯一起开始工作吧' })).not.toBeNull()
     expect(screen.getByText('Token 消耗量').parentElement?.textContent).toContain('100')
     expect(screen.getByRole('heading', { name: '任务趋势（近 7 天）' })).not.toBeNull()
@@ -144,6 +151,57 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(homeToolbarProps.openSettings).toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: /真实任务/u }))
     expect(openSession).toHaveBeenCalledWith('session-1')
+  })
+
+  it('localizes a blank session without pinning a title that blocks target auto naming', async () => {
+    const renameSession = vi.fn(async () => {})
+    const sessions = {
+      ids: ['blank-session'],
+      byId: {
+        'blank-session': { id: 'blank-session', displayTitle: 'general', running: false, blank: true, updatedAt: 1 },
+      },
+      current: 'blank-session',
+      phase: 'ready' as const,
+    }
+    const workspaces = {
+      items: [{
+        workspaceId: 'workspace-general', path: '/home/test/.dsh/e-mate/general',
+        title: '通用会话', sessionIds: ['blank-session'],
+      }],
+      archivedSessionIds: [],
+      phase: 'ready' as const,
+    }
+
+    render(<SidebarRoot
+      collapsed={false}
+      width={248}
+      renderSlot={() => null}
+      createPortal={createPortal}
+      useSessions={selector => selector(sessions)}
+      useWorkspaces={selector => selector(workspaces)}
+      NewChatIcon={Icon}
+      PanelIcon={Icon}
+      SearchIcon={Icon}
+      ScheduleIcon={Icon}
+      ChevronIcon={Icon}
+      FolderIcon={Icon}
+      PlusIcon={Icon}
+      EllipsisIcon={Icon}
+      CopyIcon={Icon}
+      EditIcon={Icon}
+      ArchiveIcon={Icon}
+      CloseIcon={Icon}
+      startSession={() => {}}
+      openSchedules={() => {}}
+      openSession={() => {}}
+      pickWorkspace={async () => null}
+      renameSession={renameSession}
+      archiveSession={async () => {}}
+      toggleSidebar={() => {}}
+    />)
+
+    expect(screen.getByRole('button', { name: '打开任务：新会话' })).not.toBeNull()
+    await waitFor(() => { expect(renameSession).not.toHaveBeenCalled() })
   })
 
   it('mounts the pinned schedule actions and writes the selected prompt through the target composer action', async () => {
@@ -183,11 +241,14 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(source).toMatch(/ctx\.workspaces\.list\.getSnapshot\(\)\.items\.find\(isGeneralWorkspace\)/u)
     expect(source).toMatch(/workspaceId === undefined && \['\/capabilities', '\/settings', '\/schedules'\]\.includes\(location\.pathname\)[\s\S]*?history\.pushState\(null, '', '\/'\)[\s\S]*?dispatchEvent\(new PopStateEvent\('popstate'\)\)[\s\S]*?return[\s\S]*?ctx\.workspaces\.startSession\(target\)/u)
     expect(source).toMatch(/ctx\.layout\.toggleSidebar\(\)/u)
+    expect(source).toMatch(/ctx\.layout\.closeDetails\(\)/u)
     expect(source).toMatch(/ctx\.theme\.getTheme\(\)\.active\.colorScheme/u)
     expect(source).toMatch(/ctx\.theme\.setTheme\(/u)
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource)\s*\(/u)
     expect(styles).toMatch(/:global\(\[data-slot='conversation'\] > div\[data-phase\]\)\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;/u)
     expect(styles).toContain('--dsw-alias-button-info-fill: var(--emate-color-brand);')
+    expect(styles).toMatch(/button:first-child > svg\) \{\s*display: none;/u)
+    expect(styles).toMatch(/button:first-child::before\) \{\s*content: '\/';/u)
     expect(home).not.toMatch(/Runtime Scheduler|由 Runtime|从 Runtime/u)
   })
 

@@ -1,0 +1,207 @@
+name: Release e-Mate Desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the accepted unsigned 2.0.7 installers and latest.json to R2.
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ inputs.publish && 'e-mate-desktop-r2-publication' || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: false
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  profile:
+    name: Build and verify the e-Mate profile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            upstream/deepseek-harness/pnpm-lock.yaml
+      - run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir upstream/deepseek-harness install --frozen-lockfile
+          pnpm --dir upstream/deepseek-harness run build
+          pnpm check:target
+          pnpm test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-desktop-profile-${{ github.sha }}
+          path: packages/dsh/profile
+          if-no-files-found: error
+          retention-days: 1
+
+  windows:
+    name: Build unsigned Windows x64 installer
+    needs: profile
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.2'
+      - run: corepack enable
+      - uses: actions/download-artifact@v4
+        with:
+          name: e-mate-desktop-profile-${{ github.sha }}
+          path: packages/dsh/profile
+      - name: Resolve Yarn cache folder
+        id: yarn-cache
+        shell: bash
+        run: echo "dir=$(cd desktop && yarn config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: desktop-yarn-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/yarn.lock', 'desktop/.yarnrc.yml') }}
+      - working-directory: desktop
+        run: yarn install --immutable
+      - working-directory: desktop
+        run: yarn dist:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-desktop-windows-${{ github.sha }}
+          path: desktop/e-mate-desktop/dist/e-Mate-2.0.7-win-x64-Setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    name: Build unsigned macOS universal disk image
+    needs: profile
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.2'
+      - run: corepack enable
+      - uses: actions/download-artifact@v4
+        with:
+          name: e-mate-desktop-profile-${{ github.sha }}
+          path: packages/dsh/profile
+      - name: Resolve Yarn cache folder
+        id: yarn-cache
+        run: echo "dir=$(cd desktop && yarn config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: desktop-yarn-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/yarn.lock', 'desktop/.yarnrc.yml') }}
+      - working-directory: desktop
+        run: yarn install --immutable
+      - working-directory: desktop
+        run: yarn dist:mac-smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-desktop-macos-${{ github.sha }}
+          path: desktop/e-mate-desktop/dist/mac-smoke/e-Mate-2.0.7-mac-universal.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+  manifest:
+    name: Bind native artifacts to the release manifest
+    needs: [windows, macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.2'
+      - uses: actions/download-artifact@v4
+        with:
+          name: e-mate-desktop-windows-${{ github.sha }}
+          path: dist/desktop
+      - uses: actions/download-artifact@v4
+        with:
+          name: e-mate-desktop-macos-${{ github.sha }}
+          path: dist/desktop
+      - name: Generate exact R2 release manifest
+        run: >-
+          node desktop/e-mate-desktop/scripts/desktop-release-manifest.ts
+          --mac dist/desktop/e-Mate-2.0.7-mac-universal.dmg
+          --win dist/desktop/e-Mate-2.0.7-win-x64-Setup.exe
+          --commit "$GITHUB_SHA"
+          --out dist/desktop/latest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-desktop-release-${{ github.sha }}
+          path: dist/desktop/*
+          if-no-files-found: error
+          retention-days: 30
+
+  r2:
+    name: Publish immutable installers and activate latest.json
+    if: inputs.publish
+    needs: manifest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: r2-publish
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: e-mate-desktop-release-${{ github.sha }}
+          path: dist/desktop
+      - name: Publish accepted desktop bytes to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.ECOREX_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.ECOREX_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: 'true'
+          ECOREX_R2_ACCOUNT_ID: ${{ secrets.ECOREX_R2_ACCOUNT_ID }}
+          EMATE_ACCEPTED_SHA: ${{ vars.EMATE_S12_ACCEPTED_SHA }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_SHA" = "$EMATE_ACCEPTED_SHA"
+          endpoint="https://${ECOREX_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          bucket="emate-desktop-downloads"
+          prefix="desktop/releases/v2.0.7/${GITHUB_SHA}"
+          origin="https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev"
+          for file in e-Mate-2.0.7-mac-universal.dmg e-Mate-2.0.7-win-x64-Setup.exe; do
+            path="dist/desktop/$file"
+            bytes="$(stat -c %s "$path")"
+            sha="$(sha256sum "$path" | cut -d' ' -f1)"
+            key="$prefix/$file"
+            if aws --endpoint-url "$endpoint" s3api head-object --bucket "$bucket" --key "$key" > existing.json 2>/dev/null; then
+              test "$(jq -r .ContentLength existing.json)" = "$bytes"
+              test "$(jq -r .Metadata.sha256 existing.json)" = "$sha"
+            else
+              aws --endpoint-url "$endpoint" s3api put-object --bucket "$bucket" --key "$key" --body "$path" \
+                --cache-control 'public,max-age=31536000,immutable' --metadata "sha256=$sha" >/dev/null
+            fi
+            curl --fail --silent --show-error --retry 6 --retry-all-errors "$origin/$key" -o public-artifact
+            test "$(stat -c %s public-artifact)" = "$bytes"
+            test "$(sha256sum public-artifact | cut -d' ' -f1)" = "$sha"
+          done
+          aws --endpoint-url "$endpoint" s3api put-object --bucket "$bucket" --key desktop/latest.json \
+            --body dist/desktop/latest.json --content-type application/json --cache-control 'no-store' >/dev/null
+          curl --fail --silent --show-error --retry 6 --retry-all-errors "$origin/desktop/latest.json" -o public-latest.json
+          cmp dist/desktop/latest.json public-latest.json

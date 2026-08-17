@@ -15,6 +15,7 @@ import {
   loadRuntimeStatus,
   resetTenantUserPassword,
   quotaTokens,
+  formatTokenCount,
   readAdminModelSession,
   resolveModelGatewayPath,
   resolveSameOriginPath,
@@ -92,6 +93,14 @@ test('quota units produce exact integer tokens and unlimited remains explicit', 
   assert.equal(quotaTokens(1.25, 'M', false), 1_250_000);
   assert.equal(quotaTokens(undefined, 'K', true), null);
   assert.equal(quotaTokens(0, 'K', false), undefined);
+});
+
+test('token displays use K and M above three digits', () => {
+  assert.equal(formatTokenCount(999), '999');
+  assert.equal(formatTokenCount(1_000), '1K');
+  assert.equal(formatTokenCount(1_250), '1.3K');
+  assert.equal(formatTokenCount(1_000_000), '1M');
+  assert.equal(formatTokenCount(1_250_000), '1.3M');
 });
 
 test('administrator password login reuses the same-origin Auth Gateway contract without persisting credentials', async () => {

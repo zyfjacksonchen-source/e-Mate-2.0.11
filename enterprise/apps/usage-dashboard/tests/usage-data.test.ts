@@ -26,6 +26,7 @@ import {
   exactCost,
   hasUsageFacts,
   percentage,
+  tokenCount,
   usageDetails,
   usageModels,
   usageTrend,
@@ -63,6 +64,14 @@ test('aggregates exact counts and decimals without Number coercion', () => {
   assert.equal(value.totalRequests, '9007199254740994');
   assert.equal(value.totalTokens, '9007199254741012');
   assert.equal(value.costUsd, '0.200000000002');
+});
+
+test('formats displayed token values with K and M above three digits', () => {
+  assert.equal(tokenCount('999'), '999');
+  assert.equal(tokenCount('1000'), '1K');
+  assert.equal(tokenCount('1250'), '1.3K');
+  assert.equal(tokenCount('1000000'), '1M');
+  assert.equal(tokenCount('1250000'), '1.3M');
 });
 
 test('groups trends and details only by their declared ledger keys', () => {

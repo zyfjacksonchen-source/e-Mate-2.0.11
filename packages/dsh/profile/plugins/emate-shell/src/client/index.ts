@@ -34,16 +34,15 @@ import { AccountControl, AccountSettings } from './account.tsx'
 import { CapabilitiesPage, CapabilityControl } from './capabilities.tsx'
 import './chat-chrome.module.css'
 import { ConnectionsSettings } from './connections.tsx'
-import { ComposerConnectors, routeToConnections } from './composer-connectors.tsx'
+import {
+  ComposerConnectors,
+  ConnectionIntentRouter,
+  routeToConnections,
+} from './composer-connectors.tsx'
 import { HomeProjection } from './home.tsx'
 import { IdentityGate } from './identity.tsx'
 import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImagesDefinition } from './image-gallery.tsx'
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
-import {
-  OfficeArtifacts,
-  officeArtifactsDefinition,
-  selectOfficeArtifacts,
-} from './office-artifacts.tsx'
 import { isGeneralWorkspace, SidebarRoot } from './sidebar.tsx'
 import { SessionRouteProjection } from './session-route.tsx'
 import { SessionShareAction } from './session-share.tsx'
@@ -55,7 +54,26 @@ import {
 } from './settings-chrome.tsx'
 import { ThinkingStatusBranding } from './thinking-status.tsx'
 
-export const inject = ['slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'conversationEvents', 'theme']
+export const inject = [
+  'slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'conversationEvents', 'theme',
+  'sessionLogDownload',
+]
+
+export function registerSessionShare(ctx: any): void {
+  ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+    name: 'conversation.session.header.utilities',
+    id: 'session-log-download',
+    order: -20,
+    priority: -1,
+    inject: () => ({
+      callShare: (endpoint: string, payload: Record<string, unknown>) =>
+        ctx.connection.rpc.call('/emate.share', endpoint, payload),
+      hooks: { sessionLogDownload: ctx.sessionLogDownload.store },
+      requestDownload: (sessionId: string) => ctx.sessionLogDownload.download(sessionId),
+      dismissDownload: (sessionId: string) => { ctx.sessionLogDownload.dismiss(sessionId) },
+    }),
+  }, SessionShareAction))
+}
 
 function SkipTargetOnboarding({ complete }: { complete: () => void }) {
   useEffect(complete, [complete])
@@ -131,21 +149,12 @@ export function apply(ctx: any): void {
     key: 'legacy-artifacts',
     inject: () => ({ canDownload: ctx.connection.isLoopback }),
   }, LegacyArtifacts))
-  ctx.conversationEvents.register(officeArtifactsDefinition)
-  ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
-    name: 'conversation.chat.turnTail',
-    select: selectOfficeArtifacts,
-    inject: () => ({ canDownload: ctx.connection.isLoopback }),
-  }, OfficeArtifacts))
+  registerSessionShare(ctx)
   ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
     name: 'conversation.session.header.utilities',
-    id: 'e-mate-session-share',
-    order: -20,
-    inject: () => ({
-      callShare: (endpoint: string, payload: Record<string, unknown>) =>
-        ctx.connection.rpc.call('/emate.share', endpoint, payload),
-    }),
-  }, SessionShareAction))
+    id: 'e-mate-connection-intent-router',
+    order: -30,
+  }, ConnectionIntentRouter))
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
     name: 'conversation.input.right',
     id: 'e-mate-connectors',
@@ -206,6 +215,7 @@ export function apply(ctx: any): void {
     inject: () => ({
       openSession: (id: string) => { ctx.sessions.open(id) },
       prepareSchedulePrompt,
+      closeDetails: () => { ctx.layout.closeDetails() },
       toggleSidebar: () => { ctx.layout.toggleSidebar() },
       openSettings: () => {
         if (location.pathname === '/settings') return

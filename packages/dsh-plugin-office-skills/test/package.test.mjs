@@ -1,64 +1,151 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 import {
   apply,
   inject,
   OFFICE_ADAPTER_STATUS,
-  OFFICE_RUNTIME_BLOCK_CODE,
+  readOfficeBuffer,
+  writeOfficeBuffer,
 } from '../lib/index.js'
 
-test('registers four bundled skills through the Harness skill seam', async () => {
+test('registers four ready Skills and two target Tool/Job paths', async () => {
   let provider
   const capabilities = []
-  assert.deepEqual(inject, ['skills', 'emateCapabilities'])
+  const tools = []
+  assert.deepEqual(inject, ['skills', 'tools', 'jobs', 'emateCapabilities'])
   apply({
-    skills: { registerProvider(create) { provider = create({ signal: AbortSignal.abort(), invalidate() {} }); return () => {} } },
+    skills: { registerProvider(create) { provider = create(); return () => {} } },
+    tools: { register(definition) { tools.push(definition); return () => {} } },
+    jobs: { attachController() { return () => {} } },
     emateCapabilities: { register(definition) { capabilities.push(definition); return () => {} } },
     effect(register) { register() },
   })
   assert.equal(provider.name, 'emate-office-skills')
-
   const skills = await provider.list({})
   assert.deepEqual(skills.map(skill => skill.name), ['documents', 'pdf', 'spreadsheets', 'presentations'])
   for (const skill of skills) {
     assert.equal(skill.rank, 600)
-    assert.equal(skill.source, 'bundled')
-    assert.deepEqual(skill.invocation, { modelInvocable: false, userInvocable: false })
-    assert.equal(skill.metadata.state, 'blocked')
-    assert.equal(skill.metadata.blockerCode, OFFICE_RUNTIME_BLOCK_CODE)
+    assert.deepEqual(skill.invocation, { modelInvocable: true, userInvocable: true })
+    assert.equal(skill.metadata.state, 'ready')
     const loaded = await provider.get(skill, {})
-    assert.ok(loaded.content.length > 400)
-    assert.doesNotMatch(loaded.content, /^---/)
-    assert.match(loaded.content, /fail|blocked|unavailable/i)
+    assert.ok(loaded.content.length > 300)
+    assert.doesNotMatch(loaded.content, /^---/u)
+    assert.doesNotMatch(loaded.content, /EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE/u)
   }
+  assert.deepEqual(tools.map(tool => tool.name), ['office_write', 'office_read'])
+  assert.equal(tools.every(tool => tool.timeoutMs === 120_000), true)
+  assert.deepEqual(tools[0].presentCall({ format: 'docx', filename: '交付.docx' }), {
+    card: 'generic',
+    title: '生成 Office 文件',
+    kind: 'edit',
+    rawInput: '交付.docx',
+    locations: [{ path: '.e-mate/office/交付.docx' }],
+  })
+  assert.equal(tools[0].parameters.properties.document.type, 'object')
+  assert.equal(tools[1].output.schema.properties.document.type, 'object')
   assert.deepEqual(capabilities.map(capability => capability.id), ['office-skills'])
   assert.deepEqual(await capabilities[0].status(), {
-    state: 'blocked',
-    detail: `Office 执行层未交付，四项 Skill 保持禁用（${OFFICE_RUNTIME_BLOCK_CODE}）。`,
+    state: 'ready',
+    detail: 'DOCX / XLSX / PPTX / PDF · local rc.6 Tools',
     action_ids: [],
   })
-  assert.deepEqual(capabilities[0].actions, [])
   assert.deepEqual(OFFICE_ADAPTER_STATUS, {
-    state: 'blocked',
-    code: OFFICE_RUNTIME_BLOCK_CODE,
-    harnessVersion: '0.1.0-rc.5',
-    runtimeInstalled: false,
-    toolsRegistered: 0,
-    reason: 'The pinned runtime exposes the native Skill, filesystem, Bash/PowerShell, and Job seams but ships no distributable Office execution layer; the four Codex primary-runtime Skills cannot be redistributed or resolved by e-Mate.',
+    state: 'ready',
+    harnessVersion: '0.1.0-rc.6',
+    runtimeInstalled: true,
+    toolsRegistered: 2,
+    reason: 'Pure JavaScript DOCX, XLSX, PPTX, and PDF execution is installed locally; unsupported lossless binary edits fail closed.',
   })
 })
 
-test('package carries no removed runtime or installer dependency', async () => {
+test('round-trips real DOCX, XLSX, PPTX, and Chinese PDF bytes', async () => {
+  const fixtures = [
+    ['docx', { title: 'e-Mate 文档', paragraphs: [{ text: '第一节', heading: 1 }, '正文内容'] }, value => {
+      assert.deepEqual(value.paragraphs, ['e-Mate 文档', '第一节', '正文内容'])
+    }],
+    ['xlsx', { sheets: [{ name: '数据', rows: [['项目', '数量'], ['e-Mate', 207]] }] }, value => {
+      assert.equal(value.sheets[0].name, '数据')
+      assert.deepEqual(value.sheets[0].rows.slice(0, 2), [['项目', '数量'], ['e-Mate', 207]])
+    }],
+    ['pptx', { slides: [{ title: 'e-Mate 演示', bullets: ['第一点', '第二点'] }] }, value => {
+      assert.equal(value.slides.length, 1)
+      assert.match(value.slides[0].bullets.join(' '), /e-Mate 演示/u)
+      assert.match(value.slides[0].bullets.join(' '), /第一点/u)
+    }],
+    ['pdf', { title: 'e-Mate PDF', pages: [{ lines: ['中文 PDF 内容', '第二行'] }] }, value => {
+      assert.equal(value.pages.length, 1)
+      assert.deepEqual(value.pages[0].lines, ['中文 PDF 内容', '第二行'])
+    }],
+  ]
+  for (const [format, input, verify] of fixtures) {
+    const buffer = await writeOfficeBuffer(format, input)
+    assert.ok(Buffer.isBuffer(buffer) && buffer.byteLength > 500, format)
+    verify(await readOfficeBuffer(format, buffer))
+  }
+})
+
+test('package pins a distributable JS-only closure and bundled OFL font', async () => {
   const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
-  assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
-  assert.deepEqual(manifest.dsh.officeSkills, {
-    adapterState: 'blocked',
-    blockerCode: OFFICE_RUNTIME_BLOCK_CODE,
-    runtimeInstalled: false,
-    toolsRegistered: 0,
+  assert.equal(manifest.dsh.officeSkills.adapterState, 'ready')
+  assert.equal(manifest.dsh.officeSkills.toolsRegistered, 2)
+  assert.equal(manifest.eMate.harnessVersion, '0.1.0-rc.6')
+  assert.deepEqual(manifest.dependencies, {
+    '@pdf-lib/fontkit': '1.1.1',
+    '@xmldom/xmldom': '0.9.11',
+    docx: '9.7.1',
+    jszip: '3.10.1',
+    'pdf-lib': '1.17.1',
+    pdf2json: '4.0.3',
+    pptxgenjs: '4.0.1',
   })
-  assert.deepEqual(manifest.dependencies, undefined)
-  const text = JSON.stringify(manifest)
-  assert.doesNotMatch(text, /python|playwright|chromium|rapidocr|libreoffice|office-ocr/i)
+  assert.equal(manifest.devDependencies['@fontsource-variable/noto-sans-sc'], '5.3.0')
+  const fontLicense = await readFile(new URL('../assets/noto-sans-sc/LICENSE', import.meta.url), 'utf8')
+  assert.match(fontLicense, /SIL OPEN FONT LICENSE Version 1\.1/u)
+  const pdfParser = await readFile(new URL('../assets/pdf2json/pdfparser.js', import.meta.url), 'utf8')
+  assert.ok(pdfParser.length > 500_000)
+  assert.match(await readFile(new URL('../assets/pdf2json/LICENSE', import.meta.url), 'utf8'), /Apache License/u)
+  const bundle = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
+  assert.doesNotMatch(bundle, /^import .* from ["'](?:@pdf-lib\/fontkit|@xmldom\/xmldom|docx|jszip|pdf-lib|pdf2json|pptxgenjs)["'];?$/mu)
+  assert.doesNotMatch(bundle, /\bexceljs\b|\bbuffers@0\.1\.1\b/iu)
+  assert.doesNotMatch(JSON.stringify(manifest), /libreoffice|microsoft office|python|chromium|rapidocr/i)
+})
+
+test('Tools stay inside the current workspace and never overwrite output', async t => {
+  const sandbox = await mkdtemp(join(tmpdir(), 'emate-office-'))
+  t.after(async () => await rm(sandbox, { recursive: true, force: true }))
+  const root = join(sandbox, 'workspace')
+  await mkdir(root)
+  const tools = []
+  let jobIndex = 0
+  apply({
+    skills: { registerProvider() { return () => {} } },
+    tools: { register(definition) { tools.push(definition); return () => {} } },
+    jobs: {
+      attachController() { return () => {} },
+      start(specification) { jobIndex += 1; specification.run(); return `office-job-${jobIndex}` },
+      async wait() {},
+    },
+    emateCapabilities: { register() { return () => {} } },
+    effect(register) { register() },
+  })
+  const owner = { session: { header: { cwd: root } } }
+  const execution = { agent: owner, signal: new AbortController().signal }
+  const write = tools.find(tool => tool.name === 'office_write')
+  const read = tools.find(tool => tool.name === 'office_read')
+  const document = { title: '轻量 Office', paragraphs: ['第一版'] }
+  const first = await write.execute({ format: 'docx', filename: '交付.docx', document }, execution)
+  const second = await write.execute({ format: 'docx', filename: '交付.docx', document }, execution)
+  assert.equal(first.relative_path, '.e-mate/office/交付.docx')
+  assert.equal(second.relative_path, '.e-mate/office/交付-2.docx')
+  assert.ok((await readFile(join(root, first.relative_path))).byteLength > 500)
+  assert.match(JSON.stringify((await read.execute({ path: first.relative_path }, execution)).document), /轻量 Office/u)
+
+  const outside = join(sandbox, 'outside.docx')
+  await writeFile(outside, 'not an office file')
+  await assert.rejects(read.execute({ path: '../outside.docx' }, execution), /escapes the workspace/u)
+  await symlink(join(root, first.relative_path), join(root, 'linked.docx'))
+  await assert.rejects(read.execute({ path: 'linked.docx' }, execution), /unavailable or too large/u)
 })

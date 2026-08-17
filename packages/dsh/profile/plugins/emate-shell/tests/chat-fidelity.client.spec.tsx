@@ -27,6 +27,7 @@ const targetChat = readFileSync(resolve(targetRoot, 'ui-conversation/src/client/
 const targetTool = readFileSync(resolve(targetRoot, 'ui-tool/src/client/tool/components/ToolRow.tsx'), 'utf8')
 const targetImages = readFileSync(resolve(targetRoot, 'ui-attachment/src/MessageImage.tsx'), 'utf8')
 const targetLightbox = readFileSync(resolve(targetRoot, 'ui-attachment/src/ImageLightbox.tsx'), 'utf8')
+const targetBundlePatch = readFileSync(resolve(targetRoot, '../bundle/web-app/cordis.patch.yml'), 'utf8')
 const genuiRoot = resolve('../../bundles/genui')
 const genuiPackage = readFileSync(resolve(genuiRoot, 'package.json'), 'utf8')
 const genuiPatch = readFileSync(resolve(genuiRoot, 'cordis.patch.yml'), 'utf8')
@@ -44,12 +45,21 @@ describe('target conversation fidelity contract', () => {
     expect(targetChat).toContain('<ChatNodeSeat')
     expect(targetChat).toContain('<TurnStatus startTime={runningTurnStart}')
     expect(targetTool).toContain('<DisclosureRow')
+    expect(targetBundlePatch).toContain('id: ui-deliverables')
   })
 
-  it('keeps chat CSS limited to the gallery and disabled-trajectory boundary', () => {
-    expect(chatCss).not.toMatch(/data-chat-flow-kind='(?:user|steering|model-retry|turn-error|command)'/u)
-    expect(chatCss).not.toMatch(/data-turn-tail|data-emate-activity|data-disclosure-row/u)
+  it('keeps target renderers while applying only the e-Mate type scale, gallery and disabled-trajectory boundary', () => {
+    expect(chatCss).not.toMatch(/data-chat-flow-kind='(?:steering|model-retry|turn-error|command)'/u)
+    expect(chatCss).not.toMatch(/data-turn-tail|data-emate-activity/u)
+    expect(chatCss).toContain('--dsw-font-markdown-base: 14px/22px')
+    expect(chatCss).toContain("[data-chat-flow-kind='user'] [data-time-hover-root]")
+    expect(chatCss).toContain('"PingFang SC"')
+    expect(chatCss).toContain('font-size: 14px !important;')
+    expect(chatCss).toContain("[data-chat-flow-kind='tool-call'] [data-disclosure-row]")
+    expect(chatCss).toContain('font-size: 13px;')
+    expect(chatCss).toContain('width: 14px;')
     expect(chatCss).toContain("[data-chat-flow-kind='assistant-step'] [data-align='start']")
+    expect(chatCss).toContain("div:has(> [data-disclosure-row] [data-context-source])")
     expect(chatCss).toContain("[data-chat-flow-kind='e-mate-image-disclosure']")
     expect(chatCss).toContain("[data-sample='bash'] + div > button")
     expect(chatCss).toMatch(/\[data-slot='conversation'\] \[aria-expanded\]:focus-visible[^}]*outline: none;[^}]*box-shadow: none;/u)
@@ -102,7 +112,9 @@ describe('target conversation fidelity contract', () => {
   })
 
   it('projects durable tool-result images through the target ImageGallery after reload', () => {
-    const attachment = { attachmentId: 'sha256:one', mediaType: 'image/png', bytes: 10, width: 1, height: 1 }
+    const attachment = {
+      attachmentId: 'sha256:one', mediaType: 'image/png', bytes: 10, width: 1, height: 1, name: 'e-Mate-image.png',
+    }
     const event = {
       type: 'tool/result', seq: 8, time: 8, surfaceOp: 'append',
       data: { message: { id: 'tool-result-1', content: [{
@@ -120,6 +132,7 @@ describe('target conversation fidelity contract', () => {
     expect(gallery.hasAttribute('data-target-image-gallery')).toBe(true)
     expect(gallery.parentElement?.hidden).toBe(false)
     expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('e-Mate-image.png')).toBeTruthy()
   })
 
   it('keeps dsh-genui registered on target slots and real plugin metadata', () => {

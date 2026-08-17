@@ -1,0 +1,12 @@
+{
+  "name": "dsh-browser-extension",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": "https://github.com/Lum1104/dsh-browser",
+  "commit": "b20ecd51eca800e00fc40bd7973271bf62a1b1d2",
+  "built_with": "pnpm@11.19.0",
+  "changes": [
+    "Replaced user-visible dsh branding with e-Mate branding.",
+    "Replaced extension icons with the e-Mate rounded application icon."
+  ]
+}

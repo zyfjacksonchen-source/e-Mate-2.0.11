@@ -56,12 +56,15 @@ test('panel stays a target-native projection of the dsh-browser Host service', a
   assert.match(host, /connection\.rpc\.handle\(/)
   assert.match(client, /connection\.rpc\.call\(/)
   assert.match(client, /name:\s*'conversation\.view'/)
-  assert.equal(manifest.eMate.harnessVersion, '0.1.0-rc.5')
-  assert.equal(manifest.eMate.harnessCommit, '47f943859bef60e4160492346772ded9b24f765a')
+  assert.equal(manifest.eMate.harnessVersion, '0.1.0-rc.6')
+  assert.equal(manifest.eMate.harnessCommit, undefined)
+  assert.equal(manifest.eMate.upstream.commit, 'b20ecd51eca800e00fc40bd7973271bf62a1b1d2')
   assert.equal(manifest.dependencies, undefined)
   assert.doesNotMatch(`${host}\n${client}`, /child_process|spawn\(|exec\(|new WebSocket|fetch\(|ctx\.router|ctx\.webServer|createStore|modelPolicy|allowed_model_ids/)
   assert.match(host, /emateBrowser\.status\(\)/)
   assert.match(client, /DSH_BROWSER_EXTENSION_NOT_CONNECTED/)
+  assert.match(client, /加载已解压的扩展程序/)
+  assert.match(client, /~\/\.dsh\/browser-extension/)
 })
 
 test('publishes only the declared files', async () => {

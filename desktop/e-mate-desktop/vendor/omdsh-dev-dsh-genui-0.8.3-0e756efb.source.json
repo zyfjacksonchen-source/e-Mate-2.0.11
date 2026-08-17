@@ -1,0 +1,8 @@
+{
+  "name": "@omdsh-dev/dsh-genui",
+  "version": "0.8.3",
+  "license": "MIT",
+  "repository": "https://github.com/omdsh-dev/dsh-genui",
+  "commit": "0e756efb7671e6b8413dde3d8e199c68fa89cbeb",
+  "sha256": "573f3e59d227282fc5a7e3d113b05597ac61f214247307a954bd0ebc21ed95ac"
+}

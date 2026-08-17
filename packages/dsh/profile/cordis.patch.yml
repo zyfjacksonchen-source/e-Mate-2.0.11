@@ -82,7 +82,7 @@
       inject: [connection]
     - id: emate-connections
       name: ./plugins/connections.js
-      inject: [credentials, connection, emateCapabilities]
+      inject: [credentials, connection, emateCapabilities, tools, systemPrompt]
     - id: emate-qr-generation
       name: ./plugins/qr-generation.js
       inject: [tools, jobs, attachments]

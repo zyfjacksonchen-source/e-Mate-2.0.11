@@ -1,0 +1,50 @@
+{
+  "name": "@e-mate/dsh-plugin-file-import",
+  "version": "2.0.7",
+  "description": "Session-bound local file import for the e-Mate DSH composer.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./contract": "./lib/contract.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rm -rf lib && ../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "test": "node --test test/*.test.mjs",
+    "check": "pnpm build && pnpm test"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ],
+      "platform": "web"
+    }
+  },
+  "eMate": {
+    "harnessVersion": "0.1.0-rc.6",
+    "excludedFeatures": [
+      "independent-store",
+      "independent-router",
+      "independent-chat-transport",
+      "arbitrary-host-path"
+    ]
+  },
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "os": ["darwin", "win32"],
+  "license": "MIT",
+  "private": true
+}

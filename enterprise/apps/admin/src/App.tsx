@@ -35,6 +35,7 @@ import {
   abbreviateAuditValue,
   createTenantUser,
   deleteTenantUser,
+  formatTokenCount,
   issueApiKey,
   loadApiKeys,
   loadConsentAcceptances,
@@ -561,7 +562,7 @@ export function App() {
                       ))}
                       <Tag>
                         {copy.tokenLimit}：
-                        {user.tokenLimit === null ? copy.tokenUnlimited : user.tokenLimit.toLocaleString()}
+                        {user.tokenLimit === null ? copy.tokenUnlimited : formatTokenCount(user.tokenLimit)}
                       </Tag>
                       <Tag>{copy.allowedModels}：{user.allowedModelIds.length}</Tag>
                       <Tag color={agreementExempt(user.roles) || facts.consentedUserIds.includes(user.userId) ? 'green' : 'gray'}>

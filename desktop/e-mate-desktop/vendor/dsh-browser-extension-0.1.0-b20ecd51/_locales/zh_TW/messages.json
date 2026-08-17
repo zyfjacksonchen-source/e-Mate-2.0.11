@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "e-Mate 瀏覽器助手"
+  },
+  "extensionDescription": {
+    "message": "讓 e-Mate 無需視覺能力即可直接讀取並操作瀏覽器的 Chrome 側邊欄擴充功能。"
+  },
+  "actionTitle": {
+    "message": "開啟 e-Mate 瀏覽器助手"
+  }
+}

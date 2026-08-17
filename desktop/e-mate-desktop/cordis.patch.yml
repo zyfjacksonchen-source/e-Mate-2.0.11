@@ -1,0 +1,29 @@
+# Desktop Host operations compose around the existing Web bundle. Compatibility
+# mode keeps upstream ownership of the browser carrier and rendered UI.
+- insert:
+    - id: desktop-shell
+      name: '@e-mate/desktop'
+      config:
+        mode: compatibility
+    - id: desktop-terminal
+      name: '@e-mate/desktop/terminal'
+      disabled: !!js process.platform === 'linux'
+    - id: desktop-pnpm
+      name: '@e-mate/desktop/pnpm'
+    - id: desktop-updates
+      name: '@e-mate/desktop/updates'
+    - id: desktop-agent-update
+      name: '@e-mate/desktop/agent-update'
+    - id: desktop-vision-toolkit
+      name: '@e-mate/desktop/vision-toolkit'
+
+# Desktop releases use the native updater Tool, never the legacy npm updater guidance.
+- id: emate-agent-operations
+  disabled: true
+
+# A desktop launch has no terminal operator waiting for the Web readiness line.
+- id: web-runtime
+  config:
+    printUrl: false
+    surfaceContext: true
+    trustedHosts: []

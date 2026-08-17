@@ -1,9 +1,10 @@
 # @e-mate/dsh-plugin-office-skills
 
-This e-Mate 2.0.7 bundle records four disabled Skill adapters: `documents`, `pdf`, `spreadsheets`, and `presentations`.
+Lightweight local Office support for e-Mate 2.0.7 on the target Harness rc.6 profile.
 
-It uses the public `ctx.skills.registerProvider` seam and adds no Tool, transport, store, Python environment, Office worker, OCR model, browser, or package installer. The adapters are not model- or user-invocable and the capability reports `blocked / EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE`; e-Mate never probes or depends on an accidental host installation.
+- `office_read` reads a workspace-relative DOCX, XLSX, PPTX, or PDF into bounded normalized JSON.
+- `office_write` creates a new real DOCX, XLSX, PPTX, or PDF under `.e-mate/office/`.
+- Every operation uses the target Tool and Job registries. Outputs never overwrite a source file.
+- The package is pure JavaScript and bundles its exact execution closure and an OFL Chinese font. It does not require Python, LibreOffice, Microsoft Office, native compilation, or a second download.
 
-This is an intentional release blocker for the mandatory Office Computer Use scenarios. It may be lifted only by a separately licensed, macOS/Windows prebuilt execution plugin that uses the pinned Harness Tool/Job/filesystem seams and passes real create/read/edit/export/reopen acceptance for all four formats.
-
-The package becomes a profile layer through its `dsh.bundle.patch` manifest and `cordis.patch.yml`.
+This intentionally is not a lossless arbitrary Office editor. Tables, macros, charts, tracked changes, forms, signatures, masters, and exact third-party layout are read only where the normalized contract supports them. Requests that require unsupported preservation must fail closed. Preview remains the responsibility of the installed `dsh-file-viewer`; scanned content remains the responsibility of `dsh-vision-toolkit`.

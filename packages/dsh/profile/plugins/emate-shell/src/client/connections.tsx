@@ -117,6 +117,8 @@ export function ConnectionsSettings({
   RefreshIcon,
 }: Props) {
   const focused = new URLSearchParams(location.search).get('connectors') === 'feishu,tencent-docs'
+  const requested = new URLSearchParams(location.search).get('connection')
+  const requestedConnection = ['feishu', 'tencent-docs', 'wechat'].includes(requested ?? '') ? requested : null
   const [items, setItems] = useState<ConnectionItem[]>([])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [busyRef, setBusyRef] = useState<string | null>(null)
@@ -272,7 +274,9 @@ export function ConnectionsSettings({
       {status && <p className={css.notice} role="status">{status}</p>}
 
       <div className={css.list}>
-        {items.filter(item => !focused || item.id === 'feishu' || item.id === 'tencent-docs').map(item => (
+        {items.filter(item => requestedConnection !== null
+          ? item.id === requestedConnection
+          : !focused || item.id === 'feishu' || item.id === 'tencent-docs').map(item => (
           <article className={css.row} key={item.id} data-state={item.state}>
             <span className={css.icon} aria-hidden="true"><LinkIcon size={16} /></span>
             <div className={css.body}>

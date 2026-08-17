@@ -1236,3 +1236,34 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 更新事务在变更前把当前 release manifest 指向的精确旧 tarball 校验并缓存到本次 update snapshot；回滚只安装该缓存字节并恢复数据快照，不查询或回落已知损坏的 registry 2.0.7。完成/失败收据保留新旧 source URL 与 SRI，R2 只在 accepted commit 的手动发布流程中写新 key。
 - 前一候选 head `c63c77c8ac0dc5a61409c11148d0dff449bc6813` 的 Release run `31993617705` 已完成 darwin-arm64、darwin-x64、win32-x64 的 `setup → launch → health → status → stop`；本次 R2 updater 变更必须重新通过相同门禁后才可上传、合并或切生产页。
 - PR 首轮 Release run `31992565126` 的 darwin-arm64 job `95279702774` 在新增启动门禁失败；候选 tarball 回读确认三项 `.mjs` bundle main 已存在并由 setup 正确落盘，但 runtime 只包含 Linux x64 的 `sharp`、`libvips` 与 `koffi`。Harness 原生 `pnpm deploy` 现显式声明目标 `darwin/win32 × arm64/x64`，继续由同一 deploy/pack 结构组装，不引入下载器或兼容层；release 校验同时要求三端 `sharp/libvips`、`koffi`、ripgrep、node-addon-require-builtin 与 node-pty 的固定原生文件，缺任一项即禁止候选进入 clean-install。
+
+## 2026-08-17 · S02 分享弹层承接会话归档
+
+- 聊天页不再并列显示独立 `Session log` 下载按钮。e-Mate 的静态 profile 插件不是 cordis-client-runner 的动态 facade，必须用目标 list slot 的同 `id` 和显式 `priority: -1` shadowing 原生 `priority: 0` 条目；同时直接注入 pinned `@deepseek-ai/dsh-session-log-export` 的既有 Controller，没有新增 fetch、Store、Router、WebSocket 或第二下载协议。
+- “分享任务”弹层现提供真实“下载 ZIP”操作，继续走目标 Controller 的同源 `HEAD /api/session.export` 预检、浏览器原生下载、同 Session 并发折叠和 `/export` 命令状态；准备中、成功和失败均在同一弹层投影。关闭弹层继续调用目标 dismiss，且不会取消正在进行的预检。
+- `emate.share` 的唯一可验证合同仍是 loopback `status` 返回 `public-share-provider-not-configured`。弹层明确展示“分享服务不可用”，不创建、复制或撤销不存在的公开 URL；本地归档与公开分享边界保持分离。
+- Shell 聚焦回归 3/3、完整 Shell 回归 35/35、目标 Session Export Controller/Client apply 10/10 和 Shell bundle 均通过。受管 profile 聚焦检查被同工作树另一切片的用户消息 CSS 正则失配提前阻断，与本切片无关；待该并发切片收敛后由主代理重跑。
+- 最终 rc.6 桌面复验进一步发现仅有 package `dsh.client.inject` 依赖不够：它只保证 Session Export bundle 进入 client graph；e-Mate bundle 导出的 Cordis 服务级 `inject` 未声明 `sessionLogDownload`，因此 `priority: -1` 条目先胜出后在渲染 inject face 读取 `undefined.store`，被目标 ErrorBoundary abdicate，原生 `Session log` 随即接管。现已在同一静态 shell 插件声明该服务依赖；组合回归通过真实插件 Context 启动目标 Session Export 和分享注册、执行最终 winner inject face，并核对其直接绑定目标 Controller store/download。
+- 修复后 Shell 41/41、目标 Session Export 10/10、Shell bundle 与桌面 rc.6 `verify-profile-boot.mjs` 全部通过；最终桌面 AX 仍由主代理在重装新 bundle 后复验。
+
+## 2026-08-17 · S02/S07 Token 紧凑显示与桌面插件启动图闭环
+
+- 用户端、管理端和 Usage 面板的 Token 数量统一按同一显示规则缩写：`0–999` 保留整数，`1000` 起用 `K`，`1,000,000` 起用 `M`，非整单位保留一位小数；任务数、事件数、金额和精确账本字段不改写。三端窄测覆盖 `999 / 1K / 1.3K / 1M`，管理端 18/18、Usage 15/15、Shell 36/36、TypeScript 与两项 Vite 构建通过。
+- 桌面实测发现四个 e-Mate 双端插件的 Host 已启动，但 profile 安装器把 Loader 行改成相对文件路径，目标 `ClientModuleRegistry` 因而无法按 package manifest 发现其 `dsh.client`；文件导入、Better Sidebar、Browser Panel 与 GenUI 均未进入 Web boot graph。修复只让声明 `dsh.client.platform=web` 的插件保留 package name，server-only bundle 继续使用现有相对入口；未改 Harness Loader、ClientModuleRegistry 或通信层。
+- `verify-profile-boot.mjs` 过去没有先安装完整 e-Mate profile，只验证了基础 Web 层。门禁现先执行受管 profile 安装，再硬性要求上述四包及 `dsh-at-file / dsh-file-viewer / dsh-turn-fold / dsh-visualize` 全部出现在真实 `window.__DSH_BOOT__`。Profile/Package 15/15、Loader boot 和完整 profile boot 通过。
+- 新打包的未签名 macOS arm64 2.0.7 使用全新 `DSH_HOME` 启动并以验收账号真实登录；健康响应为 `e-Mate/2.0.7/e-mate`，默认模型为 `gpt-5.6-luna · Max`。原生选择 README 后界面显示“已就绪”，草稿只保存 `.e-mate/imports/README.md`，工作区文件权限为 `0600`；Finder 复制粘贴同一文件生成 `README-2.md`，没有覆盖。无工作区的旧迁移会话按合同显示导入失败，不把主机绝对路径写入会话。
+- 分享入口的真实桌面复验只显示“分享当前任务”，弹层复用目标 Session Export 提供“下载 ZIP”；公开分享服务未配置时明确失败关闭。点击弹层外空白区域可关闭二级窗口。当前本机只运行该 2.0.7 测试包，未发现其他 e-Mate `.app`。
+
+## 2026-08-17 · S10 轻量 Office 执行闭包
+
+- Office 能力从 rc.5 的失败关闭收据升级为 rc.6 原生 `Tool + Job + Skill` 插件：`office_write` 与 `office_read` 在当前工作区创建、读取并以规范化内容重新生成 DOCX、XLSX、PPTX、PDF；输出固定进入 `.e-mate/office/`，不覆盖源文件，路径越界、符号链接、超限文件和不支持的无损版式编辑继续失败关闭。
+- 运行闭包为纯 JavaScript，不要求 Python、LibreOffice、Microsoft Office、本地编译或安装后下载。XLSX 直接使用 JSZip/XML 写入最小 OOXML，删除 ExcelJS 及其缺少许可证文本的旧传递依赖；PDF 使用随包 OFL 中文字体，精确版本和许可证记录随插件交付。最终 bundle 为 3.89 MB，npm tarball 约 5.7 MB。
+- 四格式写入后均由同一插件重新读取成功；`file`、ZIP 完整性和 `pdfinfo` 通过，macOS Quick Look 为四个产物均生成真实缩略图。插件 4/4、桌面 profile/package 16/16、rc.6 完整 profile boot 与 583 个生产包许可证门禁通过；该证据关闭执行闭包和本机格式可打开性，不替代 Windows 实机及复杂第三方版式验收。
+
+## 2026-08-17 · S13 rc.6 桌面封装、原生 CI 与更新完整性
+
+- 桌面封装继续复用 `anywhere-labs/deepseek-harness-desktop` 的 Electron/Cordis 结构、Node 22.23.2、Corepack/Yarn 和原生 macOS/Windows 构建方式；CI 新增 Windows x64 未签名 NSIS 与 macOS universal 未签名 DMG 两条真实 runner，并只消费 source job 构建的同一 e-Mate profile。用户安装包不依赖系统 Node、pnpm 或另装 DSH。
+- macOS universal 首轮真实打包依次暴露并关闭三个产品门禁：完整 profile loader smoke 缺 `workspaceRegistry` mock；双架构闭包的 Python runtime 未列入 `x64ArchFiles`；首次 universal 冷启动的真实 node-pty 探针超过 10 秒。最终所有单架构切片仍做完整静态闭包校验，live PTY 只在最终 universal app 运行且保留 60 秒上限。未签名 DMG `e-Mate-2.0.7-mac-universal.dmg` 已通过挂载、Info.plist、双架构和运行时探针；首份校验制品为 350,924,326 字节、SHA-256 `934d0604ac00217f867176ce126b331002d24818e993ac32d2ac313762ede30c`，后续更新完整性修改必须重打，不复用该摘要发布。
+- Windows `package.json` 已生成 `e-Mate-2.0.7-win-x64-Setup.exe`，旧验证器仍查找 `DSH-Desktop-*`。验证器和回归现统一为品牌文件名；最终 Windows 关闭只能由新增原生 runner 的实际 NSIS/PE 校验给出，macOS 本机不冒充通过。
+- 更新检查改用 R2 `desktop/latest.json`，较新版本必须同时提供平台制品的 commit-scoped HTTPS URL、精确字节数与小写 SHA-256；下载过程不跟随重定向并流式核对大小和摘要，再执行 DMG/PE 格式检查和原子落盘。R2 artifact 放在 `desktop/releases/v2.0.7/<40-char-source-commit>/`，`latest.json` 只能在两端原生门禁和公共回读完成后最后切换；不存在版本/平台制品、摘要漂移或 URL 越界均失败关闭。
+- 安装态 Computer Use 使用 `/Applications/e-Mate.app` 唯一 2.0.7：默认暗色，Luna/Max、新会话中文与右侧栏默认折叠均符合合同。验收账号真实登录后发送固定短回复，首 token 2.5 秒、总 LLM 约 2.8 秒、50 tok/s；这是当前 macOS/Luna 单样本，不替代 30 组性能配对或 Windows 验收。完整桌面门禁为 39 个文件、320 pass / 2 skip；更新、发布清单、运行时和 Windows 品牌聚焦门禁为 151/151。
