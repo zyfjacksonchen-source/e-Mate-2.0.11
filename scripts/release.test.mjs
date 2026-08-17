@@ -243,28 +243,47 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.match(readFileSync('.gitattributes', 'utf8'), /^\* text=auto eol=lf$/mu)
 })
 
-test('download page resolves unsigned desktop installers from the fail-closed R2 manifest', () => {
+test('download page resolves unsigned desktop installers from the fail-closed R2 manifest', async () => {
   const page = renderDownloadPage(readFileSync('deploy/download-page/index.html', 'utf8'))
+  const script = readFileSync('deploy/download-page/site.527be2232a46.js', 'utf8')
   const manifestUrl = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json'
-  assert.ok((page.match(new RegExp(manifestUrl.replaceAll('.', '\\.'), 'gu')) ?? []).length >= 3)
-  for (const platform of ['macos', 'windows-x64']) {
-    assert.match(page, new RegExp(`data-platform="${platform}"`, 'u'))
-    assert.match(page, new RegExp(`data-panel="${platform}"`, 'u'))
-  }
-  for (const artifact of ['darwin', 'win32']) assert.match(page, new RegExp(`data-desktop-artifact="${artifact}"`, 'u'))
+  assert.match(script, new RegExp(manifestUrl.replaceAll('.', '\\.')))
+  for (const platform of ['macos', 'windows']) assert.match(page, new RegExp(`data-platform="${platform}"`, 'u'))
+  for (const artifact of ['darwin', 'win32']) assert.match(script, new RegExp(`artifacts\\.${artifact}`, 'u'))
   for (const filename of ['e-Mate-2.0.7-mac-universal.dmg', 'e-Mate-2.0.7-win-x64-Setup.exe']) {
-    assert.match(page, new RegExp(filename.replaceAll('.', '\\.'), 'u'))
+    assert.match(script, new RegExp(filename.replaceAll('.', '\\.'), 'u'))
   }
-  assert.match(page, /manifest\.source_commit/u)
-  assert.match(page, /Number\.isSafeInteger\(artifact\?\.bytes\)/u)
-  assert.match(page, /\^\[0-9a-f\]\{64\}\$/u)
-  assert.match(page, /未签名版本/u)
-  assert.match(page, /自然语言更新/u)
-  assert.match(page, /data-theme-toggle/u)
+  assert.match(script, /manifest\.source_commit/u)
+  assert.match(script, /Number\.isSafeInteger\(artifact\.bytes\)/u)
+  assert.match(script, /\^\[0-9a-f\]\{64\}\$/u)
+  assert.match(page, /未签名/u)
+  assert.match(page, /告诉小芯更新 e-Mate/u)
   assert.match(page, /\/ecorex-agent\/admin\//u)
-  for (const asset of ['emate-logo.e0bf52b1480f.png', 'emate-mark.1a6dbbe3b5fe.png']) {
+  for (const asset of [
+    'emate-logo.e0bf52b1480f.png',
+    'emate-mark.1a6dbbe3b5fe.png',
+    'emate-desktop-workspace.622f3434f88c.jpg',
+    'e-mate-hero-decor.d7f99a88447b.png',
+  ]) {
     assert.ok(existsSync(`deploy/download-page/assets/${asset}`))
     assert.match(page, new RegExp(`\\./assets/${asset.replaceAll('.', '\\.')}\\b`, 'u'))
   }
-  assert.doesNotMatch(page, /__EMATE_RELEASE_SOURCE_COMMIT__|npm install|nodejs\.org|e-mate setup|e-mate launch|\/desktop\/releases\/v2\.0\.7\/[0-9a-f]{40}/u)
+  assert.doesNotMatch(page, /__EMATE_RELEASE_SOURCE_COMMIT__|npm install|nodejs\.org|e-mate setup|e-mate launch/u)
+  const { normalizeDownloadIndex } = await import('../deploy/download-page/site.527be2232a46.js')
+  const commit = 'a'.repeat(40)
+  const releasePrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.7/${commit}`
+  const fixture = {
+    schema_version: 1,
+    version: '2.0.7',
+    source_commit: commit,
+    artifacts: {
+      darwin: { url: `${releasePrefix}/e-Mate-2.0.7-mac-universal.dmg`, bytes: 123, sha256: 'b'.repeat(64) },
+      win32: { url: `${releasePrefix}/e-Mate-2.0.7-win-x64-Setup.exe`, bytes: 456, sha256: 'c'.repeat(64) },
+    },
+  }
+  assert.deepEqual(normalizeDownloadIndex(fixture).downloads.map(item => item.target), ['macos-universal', 'windows-x64'])
+  assert.throws(() => normalizeDownloadIndex({
+    ...fixture,
+    artifacts: { ...fixture.artifacts, darwin: { ...fixture.artifacts.darwin, url: 'https://example.com/e-Mate.dmg' } },
+  }), /桌面制品身份无效/u)
 })
