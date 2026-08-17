@@ -67,7 +67,7 @@ describe('target conversation fidelity contract', () => {
     expect(homeCss).toContain('--dsw-alias-state-business-primary: var(--emate-color-brand);')
   })
 
-  it('collapses the target ImageGallery without replacing its DOM or lightbox', () => {
+  it('shows the target ImageGallery by default without replacing its DOM or lightbox', () => {
     const event = {
       type: 'assistant/message', seq: 5, time: 5, surfaceOp: 'append',
       data: { message: { id: 'assistant-1', content: [
@@ -89,16 +89,14 @@ describe('target conversation fidelity contract', () => {
     const targetGallery = view.container.querySelector<HTMLElement>('[data-align="start"]')!
     const original = targetGallery
     const button = screen.getByRole('button', { name: '已查看 2 张图像' })
-    expect(targetGallery.hidden).toBe(true)
+    expect(targetGallery.hidden).toBe(false)
     expect(button.getAttribute('aria-controls')).toBe(targetGallery.id)
-    expect(button.getAttribute('aria-expanded')).toBe('false')
+    expect(button.getAttribute('aria-expanded')).toBe('true')
 
     fireEvent.click(button)
     expect(targetGallery).toBe(original)
-    expect(targetGallery.hidden).toBe(false)
-    expect(button.getAttribute('aria-expanded')).toBe('true')
-    fireEvent.click(button)
     expect(targetGallery.hidden).toBe(true)
+    expect(button.getAttribute('aria-expanded')).toBe('false')
 
     cleanup()
     expect(targetGallery.hidden).toBe(false)
@@ -127,11 +125,12 @@ describe('target conversation fidelity contract', () => {
     render(<ToolImageGallery node={{ key: 'tool-images:test', data: { images: [{ attachment }] } } as never} loadImage={vi.fn()} />)
     const button = screen.getByRole('button', { name: '已查看 1 张图像' })
     const gallery = screen.getByText('1 images')
-    expect(gallery.parentElement?.hidden).toBe(true)
-    fireEvent.click(button)
-    expect(gallery.hasAttribute('data-target-image-gallery')).toBe(true)
     expect(gallery.parentElement?.hidden).toBe(false)
+    expect(gallery.hasAttribute('data-target-image-gallery')).toBe(true)
     expect(button.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(button)
+    expect(gallery.parentElement?.hidden).toBe(true)
+    expect(button.getAttribute('aria-expanded')).toBe('false')
     expect(screen.getByText('e-Mate-image.png')).toBeTruthy()
   })
 

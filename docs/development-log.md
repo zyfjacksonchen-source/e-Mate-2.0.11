@@ -1267,3 +1267,11 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Windows `package.json` 已生成 `e-Mate-2.0.7-win-x64-Setup.exe`，旧验证器仍查找 `DSH-Desktop-*`。验证器和回归现统一为品牌文件名；最终 Windows 关闭只能由新增原生 runner 的实际 NSIS/PE 校验给出，macOS 本机不冒充通过。
 - 更新检查改用 R2 `desktop/latest.json`，较新版本必须同时提供平台制品的 commit-scoped HTTPS URL、精确字节数与小写 SHA-256；下载过程不跟随重定向并流式核对大小和摘要，再执行 DMG/PE 格式检查和原子落盘。R2 artifact 放在 `desktop/releases/v2.0.7/<40-char-source-commit>/`，`latest.json` 只能在两端原生门禁和公共回读完成后最后切换；不存在版本/平台制品、摘要漂移或 URL 越界均失败关闭。
 - 安装态 Computer Use 使用 `/Applications/e-Mate.app` 唯一 2.0.7：默认暗色，Luna/Max、新会话中文与右侧栏默认折叠均符合合同。验收账号真实登录后发送固定短回复，首 token 2.5 秒、总 LLM 约 2.8 秒、50 tok/s；这是当前 macOS/Luna 单样本，不替代 30 组性能配对或 Windows 验收。完整桌面门禁为 39 个文件、320 pass / 2 skip；更新、发布清单、运行时和 Windows 品牌聚焦门禁为 151/151。
+
+## 2026-08-18 · S10 已发布桌面 Office 四格式真实回归
+
+- 使用 `/Applications/e-Mate.app` 的已发布 2.0.7、生产验收账号、默认 `gpt-5.6-luna · Max` 和通用工作区发起一次自然语言 Office 请求。Agent 经同一 rc.6 Tool/Job/Skill 链写入并重新读取 DOCX、XLSX、PPTX、PDF，八个 `emate-office` 后台 Job 均为真实完成态；最终消息只投影四个真实相对路径、字节数和可点击产物按钮。
+- 落盘文件为 `.e-mate/office/office-acceptance.{docx,xlsx,pptx,pdf}`，字节数依次为 `8660 / 2110 / 45930 / 13904`。主机复核确认 DOCX/XLSX/PPTX ZIP 完整性无错误，Spotlight 类型分别为 Word、Excel、PowerPoint 与 PDF；该证据关闭当前 macOS 已发布制品的四格式创建、读取和终态产物展示，不替代 Windows 实机或复杂第三方版式保真。
+- 同一已发布桌面制品使用原生本地图片选择器上传 `e-mate-ocr-acceptance.png`，草稿区立即显示真实缩略图；Luna 从图片精确还原其中唯一可见中文行。该项只证明当前企业 Luna 路由的原生图片理解/OCR 可用；桌面 profile 仍未安装会默认调用第三方 Anionex 服务并在首次运行下载 Python 的 `dsh-vision-toolkit`，不得把本次证据写成该插件已经通过或恢复旧 RapidOCR 闭包。
+- 自然语言外部连接逐项通过现有 `e_mate_connection_setup` Tool：飞书进入 App ID/App Secret 配置页，腾讯文档进入 OAuth Token 配置页，微信进入二维码授权页并生成一次性二维码。主代理未输入任何凭据、未扫码或确认授权，并在取证后取消临时二维码会话；因此该项只关闭三类连接的 Agent 可发现性和“走到授权步骤”，不替代真实授权、读取或可逆写入验收。
+- 同一制品真实调用 `gpt-image-2-pro` 生成一张图片，`emate-image` Job 为 `1 image / 0 failures / 28.9s`，整轮 54 秒，终态使用目标 ImageGallery/CAS。实测同时暴露图片默认折叠为“已查看 1 张图像”；源码最小修复仅把既有助手图片和工具图片披露层的初始状态改为展开，保留用户手动折叠、目标 Gallery/Lightbox、事件和 Tool/Job 链。Shell 8 文件 40 项回归与 bundle 构建通过；该展示修复仍需重新打包发布后做安装态复验。

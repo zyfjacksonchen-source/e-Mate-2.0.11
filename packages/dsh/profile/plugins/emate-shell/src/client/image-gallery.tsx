@@ -112,7 +112,7 @@ export function ImageDisclosure({ node }: ChatNodeViewProps<'e-mate-image-disclo
   const controlId = `e-mate-images-${node.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
   const rootRef = useRef<HTMLDivElement>(null)
   const galleriesRef = useRef<HTMLElement[]>([])
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true)
   const [portalHost, setPortalHost] = useState<HTMLElement | null>(null)
   const [controls, setControls] = useState('')
 
@@ -188,7 +188,7 @@ const imageLabels = {
 }
 
 export function ToolImageGallery({ node, loadImage }: ChatNodeViewProps<'e-mate-tool-images'>) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true)
   const controlId = `e-mate-tool-images-${node.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
   return <section className={css.toolImages} data-emate-tool-images="">
     <button
