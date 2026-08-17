@@ -1209,3 +1209,14 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 运行态继续复用现有“思考中” Domino；它进入活动 Header 后隐藏原目标状态行，终态恢复为“已处理 + 真实时长”并默认折叠。折叠只隐藏真实 reasoning 和非错误 Tool DOM，错误/中断、最终 Assistant、操作行和图片画廊保持可见。
 - 按最终评审，运行扫光只裁剪进标题/摘要文字，不再在 reasoning、Tool、Command 或 Bash 行上绘制覆盖层；`prefers-reduced-motion` 下关闭扫光和 Chevron 位移。
 - 最终验证：`emate-shell` 8 个文件 / 36 个测试通过，`@e-mate/dsh` 51/51 通过，目标 pin 检查通过，shell `tsdown` 构建通过。主浏览器使用真实 JSONL Session 与真实 CAS 图片附件复核成功/失败/阻塞/取消/中断/最大 token、折叠/展开、双图画廊和灯箱；`1440×1000` 与 `390×844` 截图无溢出，新鲜页面加载后的浏览器 error/warn 为 0。
+
+## 2026-08-17 · S13 npm 与 Cloudflare R2 不可变发布
+
+- `@e-mate/dsh@2.0.7` 已从同一 GitHub candidate 发布到 npm，npm 回读 integrity 与三条注册表干净安装（darwin-arm64、darwin-x64、win32-x64）通过。随后复核确认 `emate-desktop-downloads` 账户没有可绑定的 Cloudflare Zone 或自定义域，`dl.ecoremedia.net` 实际仍由旧 Tengine/CDN 返回且不是该 R2 bucket 的公共域；继续把它作为 `EMATE_R2_PUBLIC_ORIGIN` 会让真实 R2 对象公共探针必然失败。
+- 发布门禁改为固定该 bucket 已启用且经 Cloudflare API 核验的 `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev`，仍拒绝任意其他 `r2.dev`、旧 `dl` 域和 S3 API 域。已验收的 2.0.7 npm tarball、五份证据及 admission receipt 均发布到 `npm/v2.0.7/`，逐对象通过认证 size/content metadata/SHA-256、公共 HEAD 与首尾 Range 字节对比；旧下载 URL 只作为入口页，不承载包字节。
+
+## 2026-08-17 · S07 Usage 用户事件下钻与自定义时间范围
+
+- Usage 面板复用现有 `/v1/usage/*`、`/v1/tasks/summary` 与管理员用户列表，新增最长 366 天、不得晚于当前时间的自定义起止时间和用户筛选；没有新增统计 Store、分页推算或伪事件。预设范围、刷新、调用明细与选中用户继续共享同一 `from/to/userId` 账本范围。
+- Usage SQL 已有的 `tenant/time/user/model` 聚合保持不变；任务账本的 `summary` 增加可选 `userId`，在权威 `e_mate_task_fact` cohort 入口过滤后再按事件类型、场景、状态和用户汇总。页面为选中用户显示原合同 `RECEIVED/COMPLETED/...`、请求 `ACCOUNTED/REJECTED/PENDING/USAGE` 代码与次数，并列出全部真实模型调用次数；`gpt-image-2-pro` 因而直接显示为该用户的生图模型调用次数，不依赖工具名判断。
+- 明暗主题继续复用 e-Mate Token；筛选条在小屏改为单列、输入和选择器限制为容器宽度。Usage 14/14、Analytics 33 pass / 6 环境 skip、两项 TypeScript check、Usage Vite 生产构建、Analytics build 与 diff check 通过。真实生产部署、管理员登录后的自定义范围/逐用户/图片调用和任务事件账本核对仍须主代理完成，且当前生产任务事件源若仍为 `NO_DATA` 必须原样显示“未接入”，不能用模型调用代替。

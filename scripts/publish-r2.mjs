@@ -14,6 +14,7 @@ import { isAcceptedReleaseCommit, VERSION, verifyRelease } from './release.mjs'
 
 export const R2_BUCKET = 'emate-desktop-downloads'
 export const R2_PREFIX = `npm/v${VERSION}`
+export const R2_PUBLIC_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
 const REPOSITORY = 'zyfjacksonchen-source/e-Mate'
 const TAG = `e-mate-v${VERSION}`
 const EVIDENCE_FILES = [
@@ -65,10 +66,7 @@ function normalizePublicOrigin(value) {
 
 export function normalizeProductionPublicOrigin(value) {
   const origin = normalizePublicOrigin(value)
-  const hostname = new URL(origin).hostname.toLowerCase()
-  if (hostname.endsWith('.r2.dev') || hostname.endsWith('.r2.cloudflarestorage.com')) {
-    throw new Error('EMATE_R2_PUBLIC_ORIGIN must be the production Cloudflare R2 custom domain')
-  }
+  if (origin !== R2_PUBLIC_ORIGIN) throw new Error('EMATE_R2_PUBLIC_ORIGIN must be the e-Mate Cloudflare R2 public bucket origin')
   return origin
 }
 

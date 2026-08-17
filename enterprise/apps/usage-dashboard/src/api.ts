@@ -16,6 +16,7 @@ export type UsageQuery = {
   to: string;
   timezone: string;
   bucket: UsageBucket;
+  userId?: string;
 };
 
 export type UsageDashboardData = {
@@ -58,10 +59,26 @@ export function queryForPeriod(days: number, now = new Date()): UsageQuery {
   if (!Number.isInteger(days) || days < 1 || days > 366) {
     throw new Error('Invalid usage period');
   }
+  return queryForRange(new Date(now.getTime() - days * 86_400_000), now, now);
+}
+
+export function queryForRange(from: Date, to: Date, now = new Date()): UsageQuery {
+  const fromMs = from.getTime();
+  const toMs = to.getTime();
+  const duration = toMs - fromMs;
+  if (
+    !Number.isFinite(fromMs) ||
+    !Number.isFinite(toMs) ||
+    duration <= 0 ||
+    duration > 366 * 86_400_000 ||
+    toMs > now.getTime()
+  ) {
+    throw new Error('Invalid usage range');
+  }
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   return {
-    from: new Date(now.getTime() - days * 86_400_000).toISOString(),
-    to: now.toISOString(),
+    from: from.toISOString(),
+    to: to.toISOString(),
     timezone,
     bucket: 'DAY',
   };
@@ -74,6 +91,7 @@ export function usageQueryString(query: UsageQuery, events = false, cursor: stri
     timezone: query.timezone,
     bucket: query.bucket,
   });
+  if (query.userId) parameters.set('userId', query.userId);
   if (events) {
     if (cursor) parameters.set('cursor', cursor);
     parameters.set('limit', '100');
@@ -82,7 +100,9 @@ export function usageQueryString(query: UsageQuery, events = false, cursor: stri
 }
 
 export function taskQueryString(query: UsageQuery): string {
-  return new URLSearchParams({ from: query.from, to: query.to }).toString();
+  const parameters = new URLSearchParams({ from: query.from, to: query.to });
+  if (query.userId) parameters.set('userId', query.userId);
+  return parameters.toString();
 }
 
 export function resolveSameOriginApiPath(configured: string | undefined, path: string, origin: string): string {

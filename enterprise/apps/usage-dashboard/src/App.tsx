@@ -9,6 +9,7 @@ import {
   loginUsageAccount,
   logoutUsageAccount,
   queryForPeriod,
+  queryForRange,
   UsageApiError,
   type UsageDashboardData,
   type UsageQuery,
@@ -29,6 +30,11 @@ import {
 const TOKEN_SESSION_KEY = 'e-mate.usage.access-token';
 const REFRESH_TOKEN_SESSION_KEY = 'e-mate.usage.refresh-token';
 const periodOptions = [7, 30, 90] as const;
+const ALL_USERS = '__all__';
+
+function localDateTime(value: Date): string {
+  return new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
 
 function clearUsageSession() {
   sessionStorage.removeItem(TOKEN_SESSION_KEY);
@@ -108,7 +114,13 @@ export function App() {
   const [password, setPassword] = useState('');
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [loginBusy, setLoginBusy] = useState(false);
-  const [periodDays, setPeriodDays] = useState<(typeof periodOptions)[number]>(7);
+  const [period, setPeriod] = useState<(typeof periodOptions)[number] | 'custom'>(7);
+  const [range, setRange] = useState<UsageQuery>(() => queryForPeriod(7));
+  const [customFrom, setCustomFrom] = useState(() => localDateTime(new Date(Date.now() - 7 * 86_400_000)));
+  const [customTo, setCustomTo] = useState(() => localDateTime(new Date()));
+  const [rangeError, setRangeError] = useState<string | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState('');
+  const [knownUsers, setKnownUsers] = useState<Array<{ userId: string; displayName: string }>>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
   );
@@ -127,11 +139,22 @@ export function App() {
   useEffect(() => {
     if (!token) return;
     const controller = new AbortController();
-    const query = queryForPeriod(periodDays);
+    const query = { ...range, ...(selectedUserId ? { userId: selectedUserId } : {}) };
     setDashboard({ kind: 'loading' });
     void loadUsageDashboard(token, query, controller.signal)
       .then((data) => {
         setTokenError(null);
+        setKnownUsers((current) => {
+          const users = new Map(current.map((user) => [user.userId, user]));
+          for (const user of data.users ?? []) users.set(user.userId, { userId: user.userId, displayName: user.displayName });
+          for (const { userId } of data.projection.groups) {
+            if (!users.has(userId)) users.set(userId, { userId, displayName: userId });
+          }
+          for (const { userId } of data.taskSummary.userEventCounts) {
+            if (!users.has(userId)) users.set(userId, { userId, displayName: userId });
+          }
+          return [...users.values()].sort((left, right) => left.displayName.localeCompare(right.displayName));
+        });
         setDashboard({ kind: 'ready', data });
       })
       .catch((error: unknown) => {
@@ -140,12 +163,36 @@ export function App() {
         if (status === 401) {
           clearUsageSession();
           setToken('');
+          setKnownUsers([]);
+          setSelectedUserId('');
           setTokenError(copy.authFailed);
         }
         setDashboard({ kind: 'error', status });
       });
     return () => controller.abort();
-  }, [copy.authFailed, periodDays, reloadKey, token]);
+  }, [copy.authFailed, range.bucket, range.from, range.timezone, range.to, reloadKey, selectedUserId, token]);
+
+  const resetEvents = () => {
+    setEventsOpen(false);
+    setEventState({ kind: 'idle', events: [] });
+  };
+
+  const selectPeriod = (value: (typeof periodOptions)[number] | 'custom') => {
+    setPeriod(value);
+    setRangeError(null);
+    resetEvents();
+    if (value !== 'custom') setRange(queryForPeriod(value));
+  };
+
+  const applyCustomRange = () => {
+    try {
+      setRange(queryForRange(new Date(customFrom), new Date(customTo)));
+      setRangeError(null);
+      resetEvents();
+    } catch {
+      setRangeError(copy.invalidRange);
+    }
+  };
 
   const submitToken = (event: FormEvent) => {
     event.preventDefault();
@@ -170,6 +217,8 @@ export function App() {
       .then((session) => {
         sessionStorage.setItem(TOKEN_SESSION_KEY, session.accessToken);
         sessionStorage.setItem(REFRESH_TOKEN_SESSION_KEY, session.refreshToken);
+        setKnownUsers([]);
+        setSelectedUserId('');
         setToken(session.accessToken);
         setPassword('');
       })
@@ -183,6 +232,8 @@ export function App() {
     const refreshToken = sessionStorage.getItem(REFRESH_TOKEN_SESSION_KEY);
     clearUsageSession();
     setToken('');
+    setKnownUsers([]);
+    setSelectedUserId('');
     if (!refreshToken) return;
     void logoutUsageAccount(
       {
@@ -261,7 +312,7 @@ export function App() {
   );
   const configuredUserIds = new Set(ready?.users?.map(({ userId }) => userId) ?? []);
   const knownUserIds = new Set([...configuredUserIds, ...userUsageById.keys()]);
-  const userRows = ready?.users
+  const userRows = (ready?.users
     ? [
         ...ready.users.map((user) => ({
           userId: user.userId,
@@ -311,7 +362,7 @@ export function App() {
             modelIds: [],
             metrics: emptyMetrics(),
           })),
-      ];
+      ]).filter(({ userId }) => !selectedUserId || userId === selectedUserId);
   const maximumRequests = maxCount(trends.map(({ metrics }) => metrics.totalRequests));
   const maximumModelCalls = maxCount(models.map(({ callCount }) => callCount));
   const taskSourceReady = taskSummary?.sourceState === 'AUTHORITATIVE';
@@ -371,6 +422,7 @@ export function App() {
         to: projection.to,
         timezone: projection.timezone,
         bucket: projection.bucket,
+        ...(selectedUserId ? { userId: selectedUserId } : {}),
       } satisfies UsageQuery)
     : null;
   const loadEventPage = (cursor: string | null, existing: TenantUsageEvent[]) => {
@@ -437,31 +489,68 @@ export function App() {
             <Button onClick={toggleTheme} aria-label={theme === 'dark' ? copy.lightTheme : copy.darkTheme}>
               {theme === 'dark' ? copy.lightTheme : copy.darkTheme}
             </Button>
-            <label>
-              <span>{copy.period}</span>
-              <Select
-                value={periodDays}
-                onChange={(value) => {
-                  setEventsOpen(false);
-                  setEventState({ kind: 'idle', events: [] });
-                  setPeriodDays(value as (typeof periodOptions)[number]);
-                }}
-                aria-label={copy.period}
-              >
-                <Select.Option value={7}>{copy.last7Days}</Select.Option>
-                <Select.Option value={30}>{copy.last30Days}</Select.Option>
-                <Select.Option value={90}>{copy.last90Days}</Select.Option>
-              </Select>
-            </label>
             <Button
               icon={<Refresh />}
-              onClick={() => setReloadKey((value) => value + 1)}
+              onClick={() => {
+                if (period !== 'custom') setRange(queryForPeriod(period));
+                else setReloadKey((value) => value + 1);
+              }}
               loading={dashboard.kind === 'loading'}
             >
               {copy.refresh}
             </Button>
           </div>
         </header>
+
+        <section className='filter-bar' aria-label={copy.filters}>
+          <label>
+            <span>{copy.period}</span>
+            <Select
+              value={period}
+              onChange={(value) => selectPeriod(value as (typeof periodOptions)[number] | 'custom')}
+              aria-label={copy.period}
+            >
+              <Select.Option value={7}>{copy.last7Days}</Select.Option>
+              <Select.Option value={30}>{copy.last30Days}</Select.Option>
+              <Select.Option value={90}>{copy.last90Days}</Select.Option>
+              <Select.Option value='custom'>{copy.customRange}</Select.Option>
+            </Select>
+          </label>
+          {period === 'custom' && (
+            <>
+              <label>
+                <span>{copy.from}</span>
+                <input type='datetime-local' value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} />
+              </label>
+              <label>
+                <span>{copy.to}</span>
+                <input type='datetime-local' value={customTo} onChange={(event) => setCustomTo(event.target.value)} />
+              </label>
+              <Button onClick={applyCustomRange}>{copy.apply}</Button>
+            </>
+          )}
+          <label className='user-filter'>
+            <span>{copy.userFilter}</span>
+            <Select
+              value={selectedUserId || ALL_USERS}
+              showSearch
+              onChange={(value) => {
+                resetEvents();
+                setSelectedUserId(value === ALL_USERS ? '' : String(value));
+              }}
+              aria-label={copy.userFilter}
+            >
+              <Select.Option value={ALL_USERS}>{copy.allUsers}</Select.Option>
+              {knownUsers.map((user) => (
+                <Select.Option value={user.userId} key={user.userId}>
+                  {user.displayName === user.userId ? user.userId : `${user.displayName} · ${user.userId}`}
+                </Select.Option>
+              ))}
+            </Select>
+          </label>
+          {selectedUserId && <Tag>{copy.filteredUser}: {selectedUserId}</Tag>}
+        </section>
+        {rangeError && <Alert className='dashboard-alert' type='error' content={rangeError} showIcon />}
 
         {dashboard.kind === 'error' && (
           <Alert
@@ -613,6 +702,27 @@ export function App() {
                   <ChartHistogram size={22} />
                 </div>
 
+                {selectedUserId && <p className='scope-note'>{copy.userEventDetail}: {selectedUserId}</p>}
+
+                <div className='distribution-section'>
+                  <h3>{copy.modelCallStatus}</h3>
+                  <div className='taxonomy-grid'>
+                    {(
+                      [
+                        [copy.accounted, projection.summary.accountedRequests, 'ACCOUNTED'],
+                        [copy.rejected, projection.summary.rejectedRequests, 'REJECTED'],
+                        [copy.pending, projection.summary.pendingRequests, 'PENDING'],
+                        [copy.usageEvents, projection.summary.usageEvents, 'USAGE'],
+                      ] as const
+                    ).map(([label, value, contractType]) => (
+                      <span key={contractType}>
+                        {label}<small className='contract-type'>{contractType}</small>
+                        <small>{usageSourceReady ? exactCount(value, locale) : '—'}</small>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
                 <div className='distribution-section'>
                   <h3>{copy.taskStatus}</h3>
                   <div className='taxonomy-grid'>
@@ -638,7 +748,7 @@ export function App() {
                     taskSummary.eventTypeCounts.map(({ type, eventCount }) => (
                       <DistributionRow
                         key={type}
-                        label={eventTypeLabels[type]}
+                        label={`${eventTypeLabels[type]} · ${type}`}
                         value={eventCount}
                         maximum={maximumTaskEvents}
                         locale={locale}
@@ -663,7 +773,7 @@ export function App() {
 
                 <div className='distribution-section'>
                   <h3>{copy.modelDistribution}</h3>
-                  {models.slice(0, 3).map(({ modelId, callCount }) => (
+                  {models.map(({ modelId, callCount }) => (
                     <DistributionRow
                       key={modelId}
                       label={modelId}

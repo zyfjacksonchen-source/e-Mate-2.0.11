@@ -48,21 +48,27 @@ class FakeTaskEvents implements TaskEventStore {
   }
 
   async summary(principal: RuntimeRegistryPrincipal, query: TaskEventQuery): Promise<TenantTaskSummary> {
-    const tasks = [...this.tasks.entries()].filter(([key]) => key.startsWith(`${principal.tenantId}\0`));
+    const tasks = [...this.tasks.entries()].filter(
+      ([key, task]) => key.startsWith(`${principal.tenantId}\0`) && (!query.userId || task.userId === query.userId)
+    );
     const count = (status: string): string => String(tasks.filter(([, task]) => task.status === status).length);
     const scenarioCount = (scenario: TaskEventInput['scenario']): string =>
       String(tasks.filter(([, task]) => task.scenario === scenario).length);
     const eventCount = (type: TaskEventInput['type']): string =>
       String(
         [...this.events.entries()].filter(
-          ([key, stored]) => key.startsWith(`${principal.tenantId}\0`) && stored.event.type === type
+          ([key, stored]) =>
+            key.startsWith(`${principal.tenantId}\0`) &&
+            (!query.userId || stored.userId === query.userId) &&
+            stored.event.type === type
         ).length
       );
     return {
       schemaVersion: 1,
       scope: 'TENANT',
       tenantId: principal.tenantId,
-      ...query,
+      from: query.from,
+      to: query.to,
       generatedAt: '2026-07-30T00:00:00.000Z',
       sourceState: tasks.length ? 'AUTHORITATIVE' : 'NO_DATA',
       summary: {
@@ -74,13 +80,18 @@ class FakeTaskEvents implements TaskEventStore {
       scenarioCounts: TASK_SCENARIOS.map((scenario) => ({ scenario, taskCount: scenarioCount(scenario) })),
       eventTypeCounts: TASK_EVENT_TYPES.map((type) => ({ type, eventCount: eventCount(type) })),
       userEventCounts: [...new Set([...this.events.entries()]
-        .filter(([key]) => key.startsWith(`${principal.tenantId}\0`))
+        .filter(
+          ([key, stored]) => key.startsWith(`${principal.tenantId}\0`) && (!query.userId || stored.userId === query.userId)
+        )
         .map(([, stored]) => stored.userId))]
         .sort()
         .map((userId) => ({
           userId,
           eventCount: String([...this.events.entries()].filter(
-            ([key, stored]) => key.startsWith(`${principal.tenantId}\0`) && stored.userId === userId
+            ([key, stored]) =>
+              key.startsWith(`${principal.tenantId}\0`) &&
+              (!query.userId || stored.userId === query.userId) &&
+              stored.userId === userId
           ).length),
         })),
     };
@@ -196,6 +207,17 @@ test('task summary is role-gated and tenant-isolated', async () => {
     assert.equal((await fetch(`${baseUrl}/v1/tasks/summary?${query}`, { headers: auth('employee') })).status, 403);
     const tenant1 = await fetch(`${baseUrl}/v1/tasks/summary?${query}`, { headers: auth('auditor') });
     assert.equal(((await tenant1.json()) as TenantTaskSummary).tenantId, 'tenant-1');
+    const filtered = await fetch(`${baseUrl}/v1/tasks/summary?${query}&userId=user-1`, {
+      headers: auth('auditor'),
+    });
+    assert.deepEqual(((await filtered.json()) as TenantTaskSummary).userEventCounts, [
+      { userId: 'user-1', eventCount: '1' },
+    ]);
+    assert.equal(
+      (await fetch(`${baseUrl}/v1/tasks/summary?${query}&userId=invalid%20user`, { headers: auth('auditor') }))
+        .status,
+      400
+    );
     const tenant2 = await fetch(`${baseUrl}/v1/tasks/summary?${query}`, { headers: auth('tenant2') });
     assert.equal(((await tenant2.json()) as TenantTaskSummary).summary.receivedTasks, '0');
   });

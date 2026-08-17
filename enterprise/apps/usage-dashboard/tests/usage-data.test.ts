@@ -10,6 +10,7 @@ import type {
 } from '@e-mate/monitoring-contract';
 import {
   queryForPeriod,
+  queryForRange,
   loginUsageAccount,
   logoutUsageAccount,
   UsageApiError,
@@ -131,6 +132,21 @@ test('keeps an empty ledger distinct from real zero-valued usage', () => {
 
 test('rejects invalid periods and cross-scope dashboard pairs', () => {
   assert.throws(() => queryForPeriod(0), /Invalid usage period/);
+  const now = new Date('2026-07-03T00:00:00.000Z');
+  assert.deepEqual(queryForRange(new Date('2026-07-01T00:00:00.000Z'), new Date('2026-07-02T00:00:00.000Z'), now), {
+    from: '2026-07-01T00:00:00.000Z',
+    to: '2026-07-02T00:00:00.000Z',
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    bucket: 'DAY',
+  });
+  assert.throws(
+    () => queryForRange(new Date('2026-07-02T00:00:00.000Z'), new Date('2026-07-01T00:00:00.000Z'), now),
+    /Invalid usage range/
+  );
+  assert.throws(
+    () => queryForRange(new Date('2026-07-01T00:00:00.000Z'), new Date('2026-07-04T00:00:00.000Z'), now),
+    /Invalid usage range/
+  );
   const projection = {
     tenantId: 'tenant-a',
     from: '2026-07-01T00:00:00.000Z',
@@ -161,9 +177,12 @@ test('adds event pagination only to event queries and preserves configured query
     to: '2026-07-02T00:00:00.000Z',
     timezone: 'Asia/Shanghai',
     bucket: 'DAY' as const,
+    userId: 'user-1',
   };
   assert.equal(new URLSearchParams(usageQueryString(query)).has('limit'), false);
-  assert.deepEqual([...new URLSearchParams(taskQueryString(query)).keys()], ['from', 'to']);
+  assert.equal(new URLSearchParams(usageQueryString(query)).get('userId'), 'user-1');
+  assert.deepEqual([...new URLSearchParams(taskQueryString(query)).keys()], ['from', 'to', 'userId']);
+  assert.equal(new URLSearchParams(taskQueryString(query)).get('userId'), 'user-1');
   assert.equal(new URLSearchParams(usageQueryString(query, true, 'cursor-1')).get('cursor'), 'cursor-1');
   assert.equal(
     resolveSameOriginApiPath('/e-mate/enterprise-api/', '/v1/usage/summary?from=one', 'https://example.test'),
@@ -206,12 +225,19 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
     'copy.details',
     'copy.reconciliation',
     'copy.viewEvents',
+    'copy.customRange',
+    'copy.userFilter',
+    'copy.modelCallStatus',
   ]) {
     assert.match(source, new RegExp(metric.replace('.', '\\.')));
   }
   assert.doesNotMatch(source, /metrics\.totalTokens[\s\S]{0,120}tokenLimit|<progress/);
   assert.match(source, /copy\.weeklyQuota/);
   assert.match(source, /taskSummary\?\.userEventCounts/);
+  assert.match(source, /queryForRange/);
+  assert.match(source, /selectedUserId \? \{ userId: selectedUserId \}/);
+  assert.match(source, /eventTypeLabels\[type\].*type/);
+  assert.doesNotMatch(source, /models\.slice/);
   assert.doesNotMatch(source, /eventState\.events[\s\S]{0,160}eventCount/);
   assert.match(readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8'), /\/v1\/admin\/users/);
 });
