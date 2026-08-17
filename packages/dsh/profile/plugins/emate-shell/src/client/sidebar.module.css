@@ -88,6 +88,15 @@
   object-position: left center;
 }
 
+.version {
+  margin-left: 4px;
+  color: var(--emate-muted);
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 :global(body[data-ds-dark-theme]) .logo {
   filter: invert(1) hue-rotate(180deg);
 }

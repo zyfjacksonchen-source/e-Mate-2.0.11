@@ -239,7 +239,7 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
       expandSidebar={() => {}}
     />)
     fireEvent.click(await screen.findByLabelText('用户中心，测试用户'))
-    expect(await screen.findByText('2,500 / 10,000 Token')).toBeTruthy()
+    expect(await screen.findByText('2.5K / 10K Token')).toBeTruthy()
     expect((screen.getByRole('progressbar', { name: '本周 Token 用量' }) as HTMLProgressElement).value).toBe(2_500)
     fireEvent.click(await screen.findByRole('button', { name: '退出登录' }))
     expect(await screen.findByRole('dialog', { name: '退出 e-Mate？' })).toBeTruthy()
@@ -250,7 +250,7 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     const { unmount } = render(<AccountSettings callIdentity={callIdentity} />)
 
     expect(await screen.findByText('测试用户')).toBeTruthy()
-    expect(screen.getByText(/每周 Token 额度 10,000/)).toBeTruthy()
+    expect(screen.getByText(/每周 Token 额度 10K/)).toBeTruthy()
     fireEvent.change(screen.getByLabelText('当前密码'), { target: { value: 'old-password' } })
     fireEvent.change(screen.getByLabelText('新密码'), { target: { value: 'new-password' } })
     fireEvent.change(screen.getByLabelText('确认新密码'), { target: { value: 'new-password' } })
@@ -325,6 +325,27 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     expect(callConnections).toHaveBeenCalledWith('qr.begin', { connection_id: 'wechat' })
   })
 
+  it('focuses the exact authorization surface requested by the Agent connection Tool', async () => {
+    history.replaceState(null, '', '/settings?section=connections&connection=tencent-docs')
+    const item = (id: string, title: string) => ({
+      id, title, summary: `${title}连接`, state: 'setup-required', detail: '需要配置。', qr_supported: false, fields: [],
+    })
+    render(<ConnectionsSettings
+      callConnections={vi.fn(async () => ({
+        ok: true,
+        value: { schema_version: 1, items: [item('feishu', '飞书'), item('tencent-docs', '腾讯文档'), item('wechat', '微信')] },
+      }))}
+      setCredential={vi.fn(async () => {})}
+      unsetCredential={vi.fn(async () => {})}
+      LinkIcon={() => <svg />}
+      RefreshIcon={() => <svg />}
+    />)
+
+    expect(await screen.findByText('腾讯文档')).toBeTruthy()
+    expect(screen.queryByText('飞书')).toBeNull()
+    expect(screen.queryByText('微信')).toBeNull()
+  })
+
   it('renders an unlimited weekly quota without exposing its numeric sentinel', async () => {
     const unlimitedState = { ...signedIn, weekly_token_limit: Number.MAX_SAFE_INTEGER }
     const callIdentity = vi.fn(async (endpoint: string): Promise<RpcResult> => endpoint === 'identity.usage'
@@ -344,8 +365,8 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
 
     const account = render(<AccountControl callIdentity={callIdentity} wide UserIcon={Icon} expandSidebar={() => {}} />)
     fireEvent.click(await screen.findByLabelText('用户中心，测试用户'))
-    expect(await screen.findByText('2,500 Token · 不限额度')).toBeTruthy()
-    expect(screen.getByRole('progressbar', { name: '本周 Token 用量' }).getAttribute('aria-valuetext')).toBe('无限额度，已使用 2,500 Token')
+    expect(await screen.findByText('2.5K Token · 不限额度')).toBeTruthy()
+    expect(screen.getByRole('progressbar', { name: '本周 Token 用量' }).getAttribute('aria-valuetext')).toBe('无限额度，已使用 2.5K Token')
     expect(document.body.textContent).not.toContain(Number.MAX_SAFE_INTEGER.toLocaleString('zh-CN'))
     account.unmount()
 

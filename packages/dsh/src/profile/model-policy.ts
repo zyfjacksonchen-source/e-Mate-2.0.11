@@ -399,7 +399,7 @@ function hasNativeRuntimeProjection(ctx) {
     && RUNTIME_CREDENTIAL_REFS.has(provider.apiKeyEnv))
 }
 
-async function projectRuntimeModels(ctx, models) {
+async function projectRuntimeModels(ctx, models, policy) {
   if (!Array.isArray(models) || models.length < 1 || models.length > CHAT_MODELS.size) {
     throw new Error('e-Mate runtime model projection is invalid')
   }
@@ -445,7 +445,7 @@ async function projectRuntimeModels(ctx, models) {
     }
     provider.models.push({
       id: model.upstreamModelId,
-      name: model.label,
+      name: model.upstreamModelId,
       contextWindow: model.contextWindow,
       maxTokens: model.maxTokens,
       input: [...model.input],
@@ -460,6 +460,16 @@ async function projectRuntimeModels(ctx, models) {
     const next = { providers }
     if (canonicalJson(ctx.settings.get('llm-pi-ai')) !== canonicalJson(next)) {
       await ctx.settings.replace('llm-pi-ai', next)
+    }
+    const defaultModel = models.find(model => model.id === policy.default_chat_model_id)
+    if (defaultModel === undefined) throw new Error('e-Mate default runtime model is unavailable')
+    const defaultSelection = {
+      provider: defaultModel.provider,
+      model: defaultModel.upstreamModelId,
+      reasoningEffort: policy.default_chat_reasoning_effort,
+    }
+    if (canonicalJson(ctx.settings.get('agent-default-model')) !== canonicalJson(defaultSelection)) {
+      await ctx.settings.replace('agent-default-model', defaultSelection)
     }
   } catch (error) {
     await Promise.allSettled([...previous].map(([ref, hit]) => hit === undefined
@@ -518,7 +528,7 @@ function createService(ctx, table, quota) {
         const policy = validateModelPolicy(runtime.policy, state.account_subject, now)
         await quota.refresh(policy)
         if (runtime.models !== undefined) {
-          await projectRuntimeModels(ctx, runtime.models)
+          await projectRuntimeModels(ctx, runtime.models, policy)
           runtimeReady = true
         }
         await table.put('active', policy)
@@ -624,7 +634,14 @@ function installApiPolicy(ctx, service) {
         error instanceof Error ? error.message : String(error),
       )
     }
-    return originalSelectModel(request)
+    return originalSelectModel({
+      ...request,
+      payload: {
+        ...request.payload,
+        reasoningEffort: request.payload.reasoningEffort
+          ?? CHAT_MODELS.get(policyModelId(request.payload.model))?.reasoning_effort,
+      },
+    })
   }
 
   const llmModels = async (request) => {

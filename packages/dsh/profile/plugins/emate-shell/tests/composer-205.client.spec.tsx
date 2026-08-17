@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { COMPOSER_PLACEHOLDER, ComposerConnectors, CONNECTORS_PATH, routeToConnections } from '../src/client/composer-connectors.tsx'
+import {
+  COMPOSER_PLACEHOLDER,
+  ComposerConnectors,
+  ConnectionIntentRouter,
+  CONNECTORS_PATH,
+  routeToConnections,
+} from '../src/client/composer-connectors.tsx'
 
 const Icon = () => <svg />
 
@@ -32,6 +38,52 @@ describe('final e-Mate 2.0.5 composer projection', () => {
       </div>,
     )
     expect(screen.getByPlaceholderText(COMPOSER_PLACEHOLDER)).toBeTruthy()
+  })
+
+  it('routes only a newly completed native connection Tool event to the local authorization UI', async () => {
+    history.replaceState(null, '', '/chat/session-1')
+    let state: { nodes: any[] } = { nodes: [] }
+    const useSession = <T,>(selector: (value: typeof state) => T) => selector(state)
+    const view = render(<ConnectionIntentRouter useSession={useSession} />)
+
+    state = { nodes: [{
+      kind: 'tool-result',
+      seq: 11,
+      isError: false,
+      call: { name: 'run_code', argsRaw: '{}' },
+      subCalls: [{
+        kind: 'tool-result',
+        seq: 12,
+        isError: false,
+        call: { name: 'e_mate_connection_setup', argsRaw: '{"connection_id":"wechat"}' },
+        subCalls: [],
+      }],
+    }] }
+    view.rerender(<ConnectionIntentRouter useSession={useSession} />)
+
+    await waitFor(() => {
+      expect(`${location.pathname}${location.search}`).toBe('/settings?section=connections&connection=wechat')
+    })
+    expect(history.state.eMateSettingsReturn).toBe('/chat/session-1')
+  })
+
+  it('does not navigate from replayed or failed connection Tool evidence', () => {
+    history.replaceState(null, '', '/chat/session-1')
+    const state = { nodes: [{
+      kind: 'tool-result',
+      seq: 12,
+      isError: false,
+      call: { name: 'e_mate_connection_setup', argsRaw: '{"connection_id":"feishu"}' },
+      subCalls: [],
+    }, {
+      kind: 'tool-result',
+      seq: 13,
+      isError: true,
+      call: { name: 'e_mate_connection_setup', argsRaw: '{"connection_id":"wechat"}' },
+      subCalls: [],
+    }] }
+    render(<ConnectionIntentRouter useSession={selector => selector(state)} />)
+    expect(location.pathname).toBe('/chat/session-1')
   })
 
   it('keeps the target blocker reason on a disabled textarea', () => {

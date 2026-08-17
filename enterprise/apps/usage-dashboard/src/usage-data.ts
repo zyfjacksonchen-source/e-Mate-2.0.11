@@ -157,6 +157,18 @@ export function exactCount(value: string, locale: string): string {
   return new Intl.NumberFormat(locale).format(BigInt(value));
 }
 
+export function tokenCount(value: string): string {
+  const amount = BigInt(value);
+  const [divisor, suffix] = amount >= 1_000_000n
+    ? [1_000_000n, 'M'] as const
+    : amount >= 1_000n
+      ? [1_000n, 'K'] as const
+      : [1n, ''] as const;
+  if (!suffix) return amount.toString();
+  const tenths = (amount * 10n + divisor / 2n) / divisor;
+  return `${tenths / 10n}${tenths % 10n ? `.${tenths % 10n}` : ''}${suffix}`;
+}
+
 export function exactCost(value: string, locale: string): string {
   const [integer, fraction = ''] = value.split('.');
   const trimmedFraction = fraction.replace(/0+$/, '');

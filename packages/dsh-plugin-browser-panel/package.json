@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh-plugin-browser-panel",
   "version": "2.0.7",
-  "description": "Target-native Browser Panel projection for the e-Mate dsh-browser adapter.",
+  "description": "Status projection for the native rc.6 dsh-browser bridge in e-Mate.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -36,11 +36,10 @@
     }
   },
   "eMate": {
-    "harnessVersion": "0.1.0-rc.5",
-    "harnessCommit": "47f943859bef60e4160492346772ded9b24f765a",
+    "harnessVersion": "0.1.0-rc.6",
     "upstream": {
       "repository": "https://github.com/Lum1104/dsh-browser",
-      "commit": "01f0b216b1bde88b5f9c6575ce9fb922db6fd8fb",
+      "commit": "b20ecd51eca800e00fc40bd7973271bf62a1b1d2",
       "verifiedAt": "2026-08-16"
     },
     "providerStatus": "dsh-browser-extension-connection",

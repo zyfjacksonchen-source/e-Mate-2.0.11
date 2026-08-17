@@ -20,6 +20,7 @@ import {
   emptyMetrics,
   exactCost,
   exactCount,
+  tokenCount,
   hasUsageFacts,
   percentage,
   usageModels,
@@ -604,7 +605,7 @@ export function App() {
               />
               <MetricCard
                 label={copy.totalTokens}
-                value={usageSourceReady ? exactCount(projection.summary.totalTokens, locale) : '—'}
+                value={usageSourceReady ? tokenCount(projection.summary.totalTokens) : '—'}
                 detail={
                   usageSourceReady
                     ? copy.tokenComposition
@@ -827,10 +828,10 @@ export function App() {
                           <td>{userStatusLabel(row.status)}</td>
                           <td title={copy.userEventScope}>{exactCount(row.eventCount, locale)}</td>
                           <td>{exactCount(row.metrics.totalRequests, locale)}</td>
-                          <td>{exactCount(row.metrics.inputTokens, locale)}</td>
-                          <td>{exactCount(row.metrics.outputTokens, locale)}</td>
-                          <td>{exactCount(cacheTokens, locale)}</td>
-                          <td>{exactCount(row.metrics.totalTokens, locale)}</td>
+                          <td>{tokenCount(row.metrics.inputTokens)}</td>
+                          <td>{tokenCount(row.metrics.outputTokens)}</td>
+                          <td>{tokenCount(cacheTokens)}</td>
+                          <td>{tokenCount(row.metrics.totalTokens)}</td>
                           <td>
                             {quota === undefined ? (
                               copy.quotaUnavailable
@@ -838,7 +839,7 @@ export function App() {
                               copy.unlimited
                             ) : (
                               <span className='quota-cell'>
-                                {exactCount(String(quota), locale)}
+                                {tokenCount(String(quota))}
                                 <small>{copy.weeklyQuota}</small>
                               </span>
                             )}
@@ -938,7 +939,7 @@ export function App() {
                   <div>
                     <dt>{event.kind === 'USAGE' ? copy.totalTokens : copy.outcome}</dt>
                     <dd>
-                      {event.kind === 'USAGE' ? exactCount(event.totalTokens, locale) : event.outcome}
+                      {event.kind === 'USAGE' ? tokenCount(event.totalTokens) : event.outcome}
                     </dd>
                   </div>
                 </dl>

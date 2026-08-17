@@ -9,6 +9,7 @@ const IMAGE_MODEL = 'gpt-image-2-pro'
 const MAX_PROMPT_CHARS = 20_000
 const MAX_EDIT_IMAGES = 16
 const MAX_EDIT_IMAGE_BYTES = 5 * 1024 * 1024
+const IMAGE_TIMEOUT_MS = 610_000
 const ATTACHMENT_ID = /^sha256:[0-9a-f]{64}$/u
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
@@ -323,7 +324,7 @@ export async function apply(ctx, config = {}) {
     },
     output: imageOutput,
     isConcurrencySafe: () => true,
-    timeoutMs: 610_000,
+    timeoutMs: IMAGE_TIMEOUT_MS,
     async execute(args, exec) {
       exec.signal.throwIfAborted()
       const task = normalizeTask(args)
@@ -331,7 +332,11 @@ export async function apply(ctx, config = {}) {
       const refs = task.attachmentIds.map(id => sessionImage(exec.agent, id))
       const scope = requestScope(exec)
       const started = startImageJob(ctx, exec.agent, exec.signal, signal => client.execute(task, refs, signal, scope))
-      return { job_id: started.id, images: [await started.result], failures: [] }
+      const [image] = await Promise.all([
+        started.result,
+        ctx.jobs.wait(started.id, IMAGE_TIMEOUT_MS, exec.agent, exec.signal),
+      ])
+      return { job_id: started.id, images: [image], failures: [] }
     },
     presentCall: args => ({
       card: 'generic',

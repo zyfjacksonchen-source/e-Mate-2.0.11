@@ -204,6 +204,13 @@ export function ToolImageGallery({ node, loadImage }: ChatNodeViewProps<'e-mate-
     </button>
     <div id={controlId} hidden={!expanded}>
       <ImageGallery images={node.data.images} load={loadImage} align="start" labels={imageLabels} />
+      <div className={css.names} aria-label="图片文件名">
+        {node.data.images.map(({ attachment }, index) => (
+          <span key={`${attachment.attachmentId}:${index}`} title={attachment.name ?? imageLabels.image}>
+            {attachment.name ?? `图片 ${index + 1}`}
+          </span>
+        ))}
+      </div>
     </div>
   </section>
 }

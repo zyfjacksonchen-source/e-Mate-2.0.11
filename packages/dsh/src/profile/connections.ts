@@ -1,9 +1,18 @@
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 import QRCode from 'qrcode'
+import { loadTargetTools } from './target-runtime.js'
 
 export const name = 'emate-connections'
-export const inject = ['credentials', 'connection', 'emateCapabilities']
+export const inject = ['credentials', 'connection', 'emateCapabilities', 'tools', 'systemPrompt']
 export const CONNECTIONS_CHANNEL = '/emate.connections'
+
+const CONNECTION_SETUP_TOOL = 'e_mate_connection_setup'
+const AGENT_CONNECTIONS = new Map([
+  ['feishu', '飞书'],
+  ['tencent-docs', '腾讯文档'],
+  ['wechat', '微信'],
+])
 
 const WEIXIN_QR_BASE_URL = 'https://ilinkai.weixin.qq.com/'
 const WEIXIN_QR_TTL_MS = 5 * 60_000
@@ -75,6 +84,15 @@ function isRecord(value) {
 
 function exactKeys(value, allowed) {
   return isRecord(value) && Object.keys(value).every(key => allowed.includes(key))
+}
+
+function connectionSetupId(value) {
+  if (!exactKeys(value, ['connection_id'])
+    || typeof value.connection_id !== 'string'
+    || !AGENT_CONNECTIONS.has(value.connection_id)) {
+    throw new Error('connection setup requires one supported connection_id')
+  }
+  return value.connection_id
 }
 
 function text(value) {
@@ -341,10 +359,52 @@ async function project(ctx, definition) {
   }
 }
 
-export function apply(ctx) {
+export async function apply(ctx, config = {}) {
   const capabilities = ctx.get('emateCapabilities')
   if (capabilities === undefined) throw new Error('e-Mate connections requires emateCapabilities')
   const weixinQr = createWeixinQrProvider(ctx.credentials)
+  const { defineTool } = await loadTargetTools(config.bindingPath ?? join(import.meta.dirname, 'runtime-binding.json'))
+
+  ctx.systemPrompt.section({
+    name: 'emate:connections',
+    order: 181,
+    text: `When the user asks to connect or configure 飞书、腾讯文档 or 微信, call the registered \`${CONNECTION_SETUP_TOOL}\` Tool with the exact connection_id. This Tool only requests the existing local e-Mate authorization UI. Never ask the user to send App IDs, secrets, tokens, pairing codes, or QR credentials in chat; never use a browser Tool for this setup; and never claim the connector is active until its real local status says so.`,
+  })
+  ctx.tools.register(defineTool({
+    name: CONNECTION_SETUP_TOOL,
+    description: 'Open the existing local e-Mate authorization UI for exactly one supported external connection. Use this for natural-language requests to connect or configure 飞书, 腾讯文档, or 微信. This Tool never accepts credentials and does not activate a connector by itself.',
+    parameters: {
+      connection_id: {
+        type: 'string',
+        required: true,
+        enum: [...AGENT_CONNECTIONS.keys()],
+        description: 'Exact local connection to configure.',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          connection_id: { type: 'string', required: true },
+          state: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `已请求打开本机“外部连接”中的${AGENT_CONNECTIONS.get(value.connection_id)}授权界面；凭据只在该界面提交。`,
+      }],
+    },
+    isConcurrencySafe: () => true,
+    execute(args) {
+      return { connection_id: connectionSetupId(args), state: 'authorization-ui-requested' }
+    },
+    presentCall: args => ({
+      card: 'generic',
+      title: `打开${AGENT_CONNECTIONS.get(connectionSetupId(args))}连接`,
+      kind: 'read',
+    }),
+  }))
 
   for (const definition of definitions) {
     ctx.effect(() => capabilities.register({

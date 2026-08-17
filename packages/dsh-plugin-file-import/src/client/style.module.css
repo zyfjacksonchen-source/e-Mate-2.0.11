@@ -1,0 +1,113 @@
+.root {
+  display: contents;
+}
+
+.button {
+  display: inline-grid;
+  width: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.button:hover,
+.button:focus-visible {
+  border-color: var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
+.rows {
+  position: absolute;
+  right: 12px;
+  bottom: calc(100% + 8px);
+  left: 12px;
+  z-index: 3;
+  display: flex;
+  max-height: 132px;
+  flex-wrap: wrap;
+  gap: 6px;
+  overflow: auto;
+  pointer-events: none;
+}
+
+.row {
+  display: grid;
+  min-width: 180px;
+  max-width: min(320px, 100%);
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  gap: 0 8px;
+  align-items: center;
+  padding: 7px 9px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 10%);
+  color: var(--dsw-alias-label-primary);
+  pointer-events: auto;
+}
+
+.badge {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  grid-row: 1 / 3;
+  place-items: center;
+  border-radius: 8px;
+  background: color-mix(in srgb, #eb5e1a 12%, var(--dsw-alias-bg-layer-2));
+  color: #eb5e1a;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.name {
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phase {
+  grid-column: 2 / 4;
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row[data-phase='ready'] .phase {
+  color: var(--dsw-alias-label-success, #3f8c5b);
+}
+
+.row[data-phase='error'] .phase {
+  color: var(--dsw-alias-label-danger, #c13b32);
+}
+
+.dismiss {
+  grid-row: 1;
+  grid-column: 3;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  font-size: 16px;
+}

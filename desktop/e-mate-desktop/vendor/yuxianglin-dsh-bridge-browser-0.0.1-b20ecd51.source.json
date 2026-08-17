@@ -1,0 +1,11 @@
+{
+  "name": "@yuxianglin/dsh-bridge-browser",
+  "version": "0.0.1",
+  "license": "MIT",
+  "repository": "https://github.com/Lum1104/dsh-browser",
+  "commit": "b20ecd51eca800e00fc40bd7973271bf62a1b1d2",
+  "sha256": "66a97e999941b0da33096d027007d26029d82abc14d9f755b8370603a847c8ae",
+  "changes": [
+    "Expose the native BridgeServer connection fact through the existing e-Mate capability status service."
+  ]
+}

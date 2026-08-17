@@ -492,6 +492,7 @@ test('managed profile installation is idempotent', () => {
       '@e-mate/dsh-plugin-better-sidebar',
       '@e-mate/dsh-plugin-browser',
       '@e-mate/dsh-plugin-browser-panel',
+      '@e-mate/dsh-plugin-file-import',
       '@e-mate/dsh-plugin-genui',
       '@e-mate/dsh-plugin-im',
       '@e-mate/dsh-plugin-memory-evolve',
@@ -516,7 +517,11 @@ test('managed profile installation is idempotent', () => {
       disabled: true,
     })
     assert.equal(patchById.get('emate-credentials-os').name, './plugins/credentials-os.js')
-    assert.equal(patchById.get('emate-connections').name, './plugins/connections.js')
+    assert.deepEqual(patchById.get('emate-connections'), {
+      id: 'emate-connections',
+      name: './plugins/connections.js',
+      inject: ['credentials', 'connection', 'emateCapabilities', 'tools', 'systemPrompt'],
+    })
     assert.deepEqual(patchById.get('emate-qr-generation'), {
       id: 'emate-qr-generation',
       name: './plugins/qr-generation.js',
@@ -574,7 +579,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(patch, /id: emate-general-workspace[\s\S]*\.\/plugins\/general-workspace\.js[\s\S]*inject: \[workspaceRegistry\]/)
     assert.match(patch, /id: emate-identity[\s\S]*\.\/plugins\/identity\/index\.js/)
     assert.match(patch, /id: emate-capabilities[\s\S]*\.\/plugins\/capabilities\.js/)
-    assert.match(patch, /id: emate-connections[\s\S]*\.\/plugins\/connections\.js[\s\S]*inject: \[credentials, connection, emateCapabilities\]/)
+    assert.match(patch, /id: emate-connections[\s\S]*\.\/plugins\/connections\.js[\s\S]*inject: \[credentials, connection, emateCapabilities, tools, systemPrompt\]/)
     assert.match(patch, /id: emate-qr-generation[\s\S]*\.\/plugins\/qr-generation\.js[\s\S]*inject: \[tools, jobs, attachments\]/)
     assert.match(patch, /id: emate-agent-operations[\s\S]*\.\/plugins\/agent-operations\.js/)
     assert.match(patch, /id: emate-skill-hub-agent[\s\S]*\.\/plugins\/skill-hub-agent\.js/)
@@ -675,6 +680,7 @@ test('managed profile installation is idempotent', () => {
       '@deepseek-ai/dsh-client-ui-conversation',
       '@deepseek-ai/dsh-client-ui-attachment',
       '@deepseek-ai/dsh-client-locale',
+      '@deepseek-ai/dsh-session-log-export',
     ])
     const client = readFileSync(join(shell, 'lib', 'client.js'), 'utf8')
     assert.match(client, /window\.__ModuleLoader__\.load\(\s*\{/)
@@ -716,12 +722,8 @@ test('managed profile installation is idempotent', () => {
     assert.match(client, /emate\/legacy-artifacts/)
     assert.match(client, /conversationEvents\.register/)
     assert.match(client, /legacy-artifact\.download/)
-    assert.match(client, /conversation\.chat\.turnTail/)
-    assert.match(client, /e-mate-office-artifacts/)
     assert.match(client, /e-mate-image-disclosure/)
-    assert.match(client, /e-mate-activity-group/)
-    assert.match(client, /data-emate-activity-header/)
-    assert.doesNotMatch(client, /e-mate-message-disclosure/)
+    assert.doesNotMatch(client, /e-mate-activity-group|data-emate-activity-header|e-mate-message-disclosure/)
     const capabilities = readFileSync(new URL('../profile/plugins/emate-shell/src/client/capabilities.tsx', import.meta.url), 'utf8')
     assert.match(capabilities, /icons\[capability\.icon_key\]/)
     assert.match(capabilities, /社区 Skill 暂时不可用；内置能力仍可正常使用。/)
@@ -746,11 +748,11 @@ test('managed profile installation is idempotent', () => {
     assert.match(homeCss, /min-height:\s*44px/)
     assert.doesNotMatch(homeCss, /> div > div:first-of-type/)
     const chatCss = readFileSync(new URL('../profile/plugins/emate-shell/src/client/chat-chrome.module.css', import.meta.url), 'utf8')
-    assert.doesNotMatch(chatCss, /data-tool=["'](?:Read|Search|Web|Edit|Terminal|Bash)/)
-    assert.match(chatCss, /data-emate-activity-toggle/)
-    assert.match(chatCss, /\[data-turn-tail\]\[data-emate-activity-tail\]/)
-    assert.match(chatCss, /\[data-state='running'\] \[data-disclosure-row\]::after/)
-    assert.match(chatCss, /@keyframes emate-text-shimmer/)
+    assert.doesNotMatch(chatCss, /data-turn-tail|data-emate-activity/)
+    assert.doesNotMatch(chatCss, /data-chat-flow-kind='(?:steering|model-retry|turn-error|command)'/)
+    assert.match(chatCss, /--dsw-font-markdown-base:\s*14px\/22px/)
+    assert.match(chatCss, /\[data-chat-flow-kind='user'\] \[data-time-hover-root\]/)
+    assert.match(chatCss, /\[data-chat-flow-kind='tool-call'\] \[data-disclosure-row\]/)
     assert.match(chatCss, /\[data-chat-flow-kind='assistant-step'\] \[data-align='start'\] > \[data-variant='single'\]/)
     assert.match(chatCss, /\[data-chat-flow-kind='assistant-step'\] \[data-align='start'\] > \[data-variant='tile'\]/)
     assert.match(chatCss, /width:\s*clamp\(112px, 18vw, 160px\) !important/)
@@ -772,11 +774,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(legacyArtifactCss, /flex-direction:\s*column/)
     assert.match(legacyArtifactCss, /\.item \+ \.item/)
     assert.match(legacyArtifactCss, /background:\s*var\(--dsw-alias-bg-layer-1\)/)
-    const officeArtifacts = readFileSync(new URL('../profile/plugins/emate-shell/src/client/office-artifacts.tsx', import.meta.url), 'utf8')
-    assert.match(officeArtifacts, /ConversationTurnDataMap/)
-    assert.match(officeArtifacts, /isAppendSurfaceEvent\(event\)/)
-    assert.match(officeArtifacts, /owner\.turn\.data\.get\('e-mate-office-artifacts'\)/)
-    assert.doesNotMatch(officeArtifacts, /\b(?:fetch|WebSocket|EventSource|setTimeout)\s*\(/)
+    assert.doesNotMatch(client, /e-mate-office-artifacts|officeArtifactsDefinition|OfficeArtifacts/)
     assert.doesNotMatch(client, /\b(?:WebSocket|EventSource)\b|\bfetch\s*\(/)
     assert.ok(readFileSync(join(shell, 'assets', 'emate-logo.png')).byteLength > 0)
     assert.ok(readFileSync(join(shell, 'assets', 'lucide-send.svg')).byteLength > 0)
@@ -1041,6 +1039,7 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
       '@e-mate/dsh-plugin-better-sidebar',
       '@e-mate/dsh-plugin-browser',
       '@e-mate/dsh-plugin-browser-panel',
+      '@e-mate/dsh-plugin-file-import',
       '@e-mate/dsh-plugin-genui',
       '@e-mate/dsh-plugin-im',
       '@e-mate/dsh-plugin-memory-evolve',
@@ -1104,14 +1103,19 @@ test('capability registry projects only registered plugin metadata and actions',
 })
 
 test('external connection catalog uses target credentials and keeps unavailable adapters inert', async () => {
+  const temporary = mkdtempSync(join(tmpdir(), 'e-mate-connections-'))
+  const paths = installProfile(join(temporary, 'dsh-home'))
   let handler
+  let promptSection
   const capabilities = []
+  const tools = new Map()
+  const credentialWrites = []
   const configured = new Set([
     'EMATE_FEISHU_APP_ID',
     'EMATE_DINGTALK_CLIENT_ID',
     'EMATE_DINGTALK_CLIENT_SECRET',
   ])
-  applyConnections({
+  await applyConnections({
     get: service => service === 'emateCapabilities'
       ? { register: definition => { capabilities.push(definition); return () => {} } }
       : undefined,
@@ -1120,9 +1124,11 @@ test('external connection catalog uses target credentials and keeps unavailable 
         ? { configured: true, source: 'keychain', writable: true }
         : { configured: false, writable: true },
       resolve: async () => undefined,
-      set: async () => {},
-      unset: async () => {},
+      set: async (...args) => { credentialWrites.push(['set', ...args]) },
+      unset: async (...args) => { credentialWrites.push(['unset', ...args]) },
     },
+    tools: { register: tool => { tools.set(tool.name, tool); return () => tools.delete(tool.name) } },
+    systemPrompt: { section: value => { promptSection = value } },
     connection: { rpc: { handle: (channel, callback, options) => {
       assert.equal(channel, CONNECTIONS_CHANNEL)
       assert.deepEqual(options, { authority: 'loopback' })
@@ -1130,10 +1136,22 @@ test('external connection catalog uses target credentials and keeps unavailable 
       return () => {}
     } } },
     effect: effect => effect(),
-  })
+  }, { bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json') })
 
   assert.deepEqual(capabilities.map(item => item.id), ['feishu', 'tencent-docs', 'wechat', 'dingtalk'])
   assert.ok(capabilities.every(item => item.actions.length === 0))
+  assert.equal(promptSection.name, 'emate:connections')
+  assert.match(promptSection.text, /e_mate_connection_setup/u)
+  assert.match(promptSection.text, /Never ask the user to send App IDs, secrets, tokens/u)
+  assert.match(promptSection.text, /never use a browser Tool/u)
+  assert.deepEqual([...tools.keys()], ['e_mate_connection_setup'])
+  const setup = tools.get('e_mate_connection_setup')
+  const setupResult = await setup.execute({ connection_id: 'wechat' }, {})
+  assert.deepEqual(setupResult, { connection_id: 'wechat', state: 'authorization-ui-requested' })
+  assert.match(setup.output.render({}, setupResult)[0].text, /凭据只在该界面提交/u)
+  await assert.rejects(setup.execute({ connection_id: 'unknown' }, {}), /must be one of/iu)
+  await assert.rejects(setup.execute({ connection_id: 'wechat', token: 'never-accept' }, {}), /requires one supported connection_id/iu)
+  assert.deepEqual(credentialWrites, [])
   const response = await handler('catalog', {})
   assert.equal(response.ok, true)
   assert.equal(response.value.schema_version, 1)
@@ -1150,6 +1168,7 @@ test('external connection catalog uses target credentials and keeps unavailable 
     action_ids: [],
   })
   assert.equal((await handler('save-config', {})).error.code, 'bad-request')
+  rmSync(temporary, { recursive: true, force: true })
 })
 
 test('Weixin QR authorization keeps the raw token Host-only and stores confirmed credentials', async () => {
@@ -1317,6 +1336,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const requests = []
     const requestScopes = []
     let remoteCounter = 0
+    let nextFailureStatus
     let activeSubmissions = 0
     let maximumSubmissions = 0
     const json = (value, status = 200) => new Response(JSON.stringify(value), {
@@ -1355,6 +1375,11 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         } else {
           throw new Error(`unexpected managed image request ${init.method ?? 'GET'} ${url.pathname}`)
         }
+        if (nextFailureStatus !== undefined) {
+          const status = nextFailureStatus
+          nextFailureStatus = undefined
+          return json({ error: 'upstream unavailable' }, status)
+        }
         return json({
           id: `image-response-${++remoteCounter}`,
           data: [{ b64_json: inputBytes.toString('base64') }],
@@ -1364,6 +1389,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     }
     const tools = new Map()
     const jobs = []
+    const waitedJobs = []
     const controllers = []
     const capabilities = []
     const policyModels = []
@@ -1379,6 +1405,14 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
           const run = spec.run()
           jobs.push({ id, spec, ...run })
           return id
+        },
+        async wait(id, _timeoutMs, owner) {
+          const job = jobs.find(value => value.id === id)
+          assert.ok(job)
+          assert.equal(owner.id, 'image-session')
+          waitedJobs.push(id)
+          const outcome = await job.done
+          return { id, kind: job.spec.kind, label: job.spec.label, status: outcome.status, reported: true }
         },
       },
       attachments: context.attachments,
@@ -1480,6 +1514,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.deepEqual(concurrent.map(result => result.images.length), [1, 1])
     assert.equal(maximumSubmissions >= 2, true)
     assert.deepEqual(policyModels, ['gpt-image-2-pro', 'gpt-image-2-pro', 'gpt-image-2-pro', 'gpt-image-2-pro'])
+    assert.deepEqual(waitedJobs, jobs.map(job => job.id))
     assert.equal(requests.every(request => !('provider' in request.body) && !('api_key' in request.body)), true)
     const firstScope = `image-${createHash('sha256').update('image-session\0image-call-1').digest('hex').slice(0, 32)}`
     assert.deepEqual(requestScopes[0], { task: firstScope, trace: firstScope, session: firstScope, client: firstScope })
@@ -1492,6 +1527,14 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       imagegen.execute({ prompt: 'Do not accept caller-selected model.', model: 'gpt-image-2' }, execution()),
       /additional property|only prompt and optional image_url/iu,
     )
+    const requestsBeforeFailure = requests.length
+    nextFailureStatus = 503
+    await assert.rejects(
+      imagegen.execute({ prompt: 'Do not retry an unknown upstream failure.' }, execution()),
+      /HTTP 503/u,
+    )
+    assert.equal(requests.length, requestsBeforeFailure + 1)
+    assert.deepEqual(waitedJobs, jobs.map(job => job.id))
   } finally {
     for (const cleanup of cleanups.reverse()) await cleanup()
     await attachmentFiber?.dispose()
@@ -1500,13 +1543,15 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
   }
 })
 
-test('Agent operation guidance reuses Harness shell and Job semantics', () => {
+test('Agent operation guidance owns the e-Mate persona and reuses Harness shell and Job semantics', async () => {
   let section
   applyAgentOperations({
     systemPrompt: { section: value => { section = value } },
   })
   assert.equal(section.name, 'emate:agent-operations')
   assert.equal(section.order, 180)
+  assert.match(section.text, /我是小芯，你的 AI 办公助手/u)
+  assert.match(section.text, /运行在 e-Mate 内，是亦芯开发的全场景办公 AI Agent/u)
   assert.match(section.text, /existing Bash tool/)
   assert.match(section.text, /PowerShell tool/)
   assert.match(section.text, /do not wrap it in another background Job/)
@@ -1516,6 +1561,9 @@ test('Agent operation guidance reuses Harness shell and Job semantics', () => {
     assert.match(section.text, new RegExp(`e_mate_skill_hub_${operation}`))
   }
   assert.match(section.text, /Do not compose or run npm install/)
+  assert.match(section.text, /能力中心 > 外部连接/u)
+  assert.match(section.text, /Do not call any `browser_\*` Tool/u)
+  assert.match(section.text, /do not ask the user to paste App IDs, secrets, tokens, or QR credentials into chat/u)
 })
 
 test('identity agreements are immutable, explicit, and use the target Connection RPC', async () => {
@@ -2129,6 +2177,7 @@ test('enterprise model switch delegates to the target session, keeps its history
       },
     },
   }
+  let defaultModelSettings
   const session = {
     current: { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', reasoningEffort: 'max' },
     messages: [
@@ -2205,10 +2254,13 @@ test('enterprise model switch delegates to the target session, keeps its history
         unset: async ref => { credentialValues.delete(ref) },
       },
       settings: {
-        get: ns => ns === 'llm-pi-ai' ? structuredClone(llmSettings) : undefined,
+        get: ns => ns === 'llm-pi-ai'
+          ? structuredClone(llmSettings)
+          : ns === 'agent-default-model' ? structuredClone(defaultModelSettings) : undefined,
         replace: async (ns, value) => {
-          assert.equal(ns, 'llm-pi-ai')
-          llmSettings = structuredClone(value)
+          if (ns === 'llm-pi-ai') llmSettings = structuredClone(value)
+          else if (ns === 'agent-default-model') defaultModelSettings = structuredClone(value)
+          else assert.fail(`unexpected settings namespace ${ns}`)
         },
       },
       storageDomain: { open: async () => openedDomains++ === 0 ? domain : quotaDomain },
@@ -2324,6 +2376,15 @@ test('enterprise model switch delegates to the target session, keeps its history
       llmSettings.providers['e-mate-enterprise-deepseek'].models.map(model => model.id),
       ['deepseek-v4-flash'],
     )
+    assert.deepEqual(
+      llmSettings.providers['e-mate-enterprise'].models.map(model => model.name),
+      ['gpt-5.6-luna', 'gpt-5.6-sol'],
+    )
+    assert.deepEqual(defaultModelSettings, {
+      provider: 'e-mate-enterprise',
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'max',
+    })
     assert.doesNotMatch(JSON.stringify(llmSettings), /redacted-for-test/u)
     assert.doesNotMatch(JSON.stringify(llmSettings), /model-api/u)
     assert.equal((await rpc.handler('unknown', {})).error.code, 'bad-request')
@@ -2338,14 +2399,16 @@ test('enterprise model switch delegates to the target session, keeps its history
       'gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek-v4-flash',
     ])
     const allowed = await apiProxy.sessions.selectModel({
-      rpcId: 'select-1', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', reasoningEffort: 'max' },
+      rpcId: 'select-1', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
     })
     assert.equal(allowed.result.ok, true)
+    assert.equal(allowed.result.value.selected.reasoningEffort, 'max')
     const historyBeforeSwitch = structuredClone(session.messages)
     const switched = await apiProxy.sessions.selectModel({
-      rpcId: 'select-2', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-sol', reasoningEffort: 'medium' },
+      rpcId: 'select-2', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-sol' },
     })
     assert.deepEqual(switched.result.value.selected, session.current)
+    assert.equal(switched.result.value.selected.reasoningEffort, 'medium')
     assert.deepEqual(session.messages, historyBeforeSwitch)
     assert.equal((await apiProxy.sessions.models({ rpcId: 'models-3', payload: { sessionId: 'session-1' } })).result.value.current.model, 'gpt-5.6-sol')
     const blocked = await apiProxy.sessions.selectModel({

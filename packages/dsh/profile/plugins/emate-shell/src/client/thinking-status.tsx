@@ -33,11 +33,10 @@ export function ThinkingStatusBranding() {
   useEffect(() => {
     const documentRoot = document
     let active = true
-    const decorated = new Map<HTMLElement, { host: HTMLElement; hidden: boolean; label: string | null; text: Text; value: string }>()
-    const restore = (status: HTMLElement, entry: { host: HTMLElement; hidden: boolean; label: string | null; text: Text; value: string }) => {
+    const decorated = new Map<HTMLElement, { host: HTMLElement; label: string | null; text: Text; value: string }>()
+    const restore = (status: HTMLElement, entry: { host: HTMLElement; label: string | null; text: Text; value: string }) => {
       entry.host.remove()
       entry.text.data = entry.value
-      status.hidden = entry.hidden
       status.removeAttribute(MARKER)
       if (entry.label === null) status.removeAttribute('aria-label')
       else status.setAttribute('aria-label', entry.label)
@@ -45,34 +44,23 @@ export function ThinkingStatusBranding() {
     const sync = () => {
       if (!active) return
       for (const [status, entry] of decorated) {
-        if (!status.isConnected) {
-          restore(status, entry)
-          decorated.delete(status)
-        }
+        if (!status.isConnected) decorated.delete(status)
         else if (!entry.host.isConnected) {
           restore(status, entry)
           decorated.delete(status)
-        } else {
-          const activityHost = documentRoot.querySelector<HTMLElement>('[data-emate-activity-header][data-state="running"] [data-emate-thinking-host]')
-          const destination = activityHost ?? status
-          if (entry.host.parentElement !== destination) destination.append(entry.host)
-          status.hidden = activityHost === null ? entry.hidden : true
         }
       }
       for (const status of documentRoot.querySelectorAll<HTMLElement>('[role="status"][aria-live="polite"]')) {
         const text = targetLabel(status)
         if (text === undefined || decorated.has(status)) continue
         const host = createDomino()
-        const hidden = status.hidden
         const label = status.getAttribute('aria-label')
         const value = text.data
         text.data = ''
         status.setAttribute(MARKER, '')
         status.setAttribute('aria-label', '思考中')
-        const activityHost = documentRoot.querySelector<HTMLElement>('[data-emate-activity-header][data-state="running"] [data-emate-thinking-host]')
-        ;(activityHost ?? status).append(host)
-        status.hidden = activityHost !== null
-        decorated.set(status, { host, hidden, label, text, value })
+        status.append(host)
+        decorated.set(status, { host, label, text, value })
       }
     }
     sync()

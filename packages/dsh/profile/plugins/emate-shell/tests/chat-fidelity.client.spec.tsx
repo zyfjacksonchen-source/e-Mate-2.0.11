@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { ActivityGroup, activityGroupDefinition } from '../src/client/activity-group.tsx'
 import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImagesDefinition } from '../src/client/image-gallery.tsx'
 import { ThinkingStatusBranding } from '../src/client/thinking-status.tsx'
 
@@ -28,6 +27,7 @@ const targetChat = readFileSync(resolve(targetRoot, 'ui-conversation/src/client/
 const targetTool = readFileSync(resolve(targetRoot, 'ui-tool/src/client/tool/components/ToolRow.tsx'), 'utf8')
 const targetImages = readFileSync(resolve(targetRoot, 'ui-attachment/src/MessageImage.tsx'), 'utf8')
 const targetLightbox = readFileSync(resolve(targetRoot, 'ui-attachment/src/ImageLightbox.tsx'), 'utf8')
+const targetBundlePatch = readFileSync(resolve(targetRoot, '../bundle/web-app/cordis.patch.yml'), 'utf8')
 const genuiRoot = resolve('../../bundles/genui')
 const genuiPackage = readFileSync(resolve(genuiRoot, 'package.json'), 'utf8')
 const genuiPatch = readFileSync(resolve(genuiRoot, 'cordis.patch.yml'), 'utf8')
@@ -36,9 +36,8 @@ const genuiClient = readFileSync(resolve(genuiRoot, 'lib/client.js'), 'utf8')
 
 describe('target conversation fidelity contract', () => {
   it('leaves Message, Retry, Turn status and Tool disclosure to the pinned target', () => {
-    expect(source).not.toMatch(/retry-attempts|long-message-disclosure|e-mate-message-disclosure/u)
+    expect(source).not.toMatch(/activity-header|retry-attempts|long-message-disclosure|e-mate-message-disclosure/u)
     expect(source).not.toContain("key: 'model-retry'")
-    expect(source).toContain("key: 'e-mate-activity-group'")
     expect(targetMessage).toContain('export const RetryNodeView')
     expect(targetMessage).toContain('<ModelRetryItem node={data.current}')
     expect(targetMessage).toContain('function UserStyleBubble')
@@ -46,99 +45,26 @@ describe('target conversation fidelity contract', () => {
     expect(targetChat).toContain('<ChatNodeSeat')
     expect(targetChat).toContain('<TurnStatus startTime={runningTurnStart}')
     expect(targetTool).toContain('<DisclosureRow')
+    expect(targetBundlePatch).toContain('id: ui-deliverables')
   })
 
-  it('keeps chat CSS on presentation metadata without tool-name dispatch', () => {
-    expect(chatCss).not.toMatch(/data-tool=["'](?:Read|Search|Web|Edit|Terminal|Bash)/u)
-    expect(chatCss).toContain('[data-emate-activity-toggle]')
-    expect(chatCss).toContain('[data-turn-tail][data-emate-activity-tail]')
-    expect(chatCss).toContain("[data-state='running'] [data-disclosure-row]::after")
-    expect(chatCss).toContain('@keyframes emate-text-shimmer')
+  it('keeps target renderers while applying only the e-Mate type scale, gallery and disabled-trajectory boundary', () => {
+    expect(chatCss).not.toMatch(/data-chat-flow-kind='(?:steering|model-retry|turn-error|command)'/u)
+    expect(chatCss).not.toMatch(/data-turn-tail|data-emate-activity/u)
+    expect(chatCss).toContain('--dsw-font-markdown-base: 14px/22px')
+    expect(chatCss).toContain("[data-chat-flow-kind='user'] [data-time-hover-root]")
+    expect(chatCss).toContain('"PingFang SC"')
+    expect(chatCss).toContain('font-size: 14px !important;')
+    expect(chatCss).toContain("[data-chat-flow-kind='tool-call'] [data-disclosure-row]")
+    expect(chatCss).toContain('font-size: 13px;')
+    expect(chatCss).toContain('width: 14px;')
     expect(chatCss).toContain("[data-chat-flow-kind='assistant-step'] [data-align='start']")
+    expect(chatCss).toContain("div:has(> [data-disclosure-row] [data-context-source])")
     expect(chatCss).toContain("[data-chat-flow-kind='e-mate-image-disclosure']")
     expect(chatCss).toContain("[data-sample='bash'] + div > button")
     expect(chatCss).toMatch(/\[data-slot='conversation'\] \[aria-expanded\]:focus-visible[^}]*outline: none;[^}]*box-shadow: none;/u)
     expect(homeCss).toContain('--dsw-static-deepseek-500: var(--emate-color-brand);')
     expect(homeCss).toContain('--dsw-alias-state-business-primary: var(--emate-color-brand);')
-  })
-
-  it('derives one collapsible activity group from real turn boundaries', () => {
-    const start = { type: 'turn/start', seq: 1, time: 1_000, data: { turn: 7 } }
-    const step = { type: 'step/start', seq: 3, time: 1_100, data: { turn: 7, step: 1 } }
-    const end = { type: 'turn/end', seq: 8, time: 5_000, data: { turn: 7, reason: { kind: 'completed' } } }
-    expect(activityGroupDefinition.match(start as never)).toEqual({ id: '7', role: 'start' })
-    expect(activityGroupDefinition.match(step as never)).toEqual({ id: '7', role: 'update' })
-    expect(activityGroupDefinition.match(end as never)).toEqual({ id: '7', role: 'update' })
-    const initial = activityGroupDefinition.start({} as never, { event: start } as never, {} as never)
-    const active = activityGroupDefinition.update({ state: initial } as never, { event: step } as never)
-    const settled = activityGroupDefinition.update({ state: active } as never, { event: end } as never)
-    expect(settled).toMatchObject({
-      turn: 7,
-      startTime: 1_000,
-      firstActivitySeq: 3,
-      endTime: 5_000,
-      status: 'completed',
-    })
-
-    const view = render(<div data-chat-flow="">
-      <div data-chat-flow-kind="e-mate-activity-group">
-        <ActivityGroup node={{
-          key: 'activity:7',
-          data: { turn: 7, startTime: 1_000, endTime: 5_000, status: 'completed' },
-        } as never} />
-      </div>
-      <div data-chat-flow-kind="assistant-step" data-testid="think-row"><div><div data-variant="think">Reasoning</div></div></div>
-      <div data-chat-flow-kind="tool-call" data-testid="tool-row"><div data-state="ok">Read</div></div>
-      <div data-chat-flow-kind="tool-call" data-testid="error-row"><div data-state="error">Failed</div></div>
-      <div data-chat-flow-kind="assistant-step" data-testid="answer-row"><p>Final answer</p></div>
-    </div>)
-    const button = screen.getByRole('button', { name: '已处理 00:04' })
-    expect(button.getAttribute('aria-expanded')).toBe('false')
-    expect(screen.getByTestId('think-row').hidden).toBe(true)
-    expect(screen.getByTestId('tool-row').hidden).toBe(true)
-    expect(screen.getByTestId('error-row').hidden).toBe(false)
-    expect(screen.getByTestId('answer-row').hidden).toBe(false)
-    expect(button.getAttribute('aria-controls')?.split(' ')).toHaveLength(2)
-    fireEvent.click(button)
-    expect(screen.getByTestId('think-row').hidden).toBe(false)
-    expect(screen.getByTestId('tool-row').hidden).toBe(false)
-    view.unmount()
-  })
-
-  it('keeps the real running activity expanded for the existing Domino host', () => {
-    const view = render(<div data-chat-flow="">
-      <div data-chat-flow-kind="e-mate-activity-group">
-        <ActivityGroup node={{
-          key: 'activity:8',
-          data: { turn: 8, startTime: Date.now() - 68_000, status: 'running' },
-        } as never} />
-      </div>
-      <div data-chat-flow-kind="assistant-step" data-testid="running-think"><div><div data-variant="think">Reasoning</div></div></div>
-      <div data-chat-flow-kind="tool-call" data-testid="running-tool"><div data-state="running">Terminal</div></div>
-    </div>)
-    const button = screen.getByRole('button', { name: /思考中 已工作 01:08/u })
-    expect(button.getAttribute('aria-expanded')).toBe('true')
-    expect(view.container.querySelector('[data-emate-thinking-host]')).not.toBeNull()
-    expect(screen.getByTestId('running-think').hidden).toBe(false)
-    expect(screen.getByTestId('running-tool').hidden).toBe(false)
-    view.unmount()
-  })
-
-  it('keeps exceptional terminal activity visible without a false disclosure control', () => {
-    render(<div data-chat-flow="">
-      <div data-chat-flow-kind="e-mate-activity-group">
-        <ActivityGroup node={{
-          key: 'activity:9',
-          data: { turn: 9, startTime: 1_000, endTime: 5_000, status: 'blocked' },
-        } as never} />
-      </div>
-      <div data-chat-flow-kind="assistant-step" data-testid="blocked-think"><div><div data-variant="think">Reasoning</div></div></div>
-      <div data-chat-flow-kind="tool-call" data-testid="blocked-tool"><div data-state="ok">Read</div></div>
-    </div>)
-    expect(screen.queryByRole('button', { name: /已阻塞/u })).toBeNull()
-    expect(screen.getByRole('status').textContent).toContain('已阻塞 00:04')
-    expect(screen.getByTestId('blocked-think').hidden).toBe(false)
-    expect(screen.getByTestId('blocked-tool').hidden).toBe(false)
   })
 
   it('collapses the target ImageGallery without replacing its DOM or lightbox', () => {
@@ -186,7 +112,9 @@ describe('target conversation fidelity contract', () => {
   })
 
   it('projects durable tool-result images through the target ImageGallery after reload', () => {
-    const attachment = { attachmentId: 'sha256:one', mediaType: 'image/png', bytes: 10, width: 1, height: 1 }
+    const attachment = {
+      attachmentId: 'sha256:one', mediaType: 'image/png', bytes: 10, width: 1, height: 1, name: 'e-Mate-image.png',
+    }
     const event = {
       type: 'tool/result', seq: 8, time: 8, surfaceOp: 'append',
       data: { message: { id: 'tool-result-1', content: [{
@@ -204,6 +132,7 @@ describe('target conversation fidelity contract', () => {
     expect(gallery.hasAttribute('data-target-image-gallery')).toBe(true)
     expect(gallery.parentElement?.hidden).toBe(false)
     expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('e-Mate-image.png')).toBeTruthy()
   })
 
   it('keeps dsh-genui registered on target slots and real plugin metadata', () => {
@@ -225,21 +154,16 @@ describe('target conversation fidelity contract', () => {
   it('brands only the target running status with the Domino loader', () => {
     const view = render(<>
       <ThinkingStatusBranding />
-      <div data-emate-activity-header="" data-state="running">
-        <span data-emate-thinking-host="" />
-      </div>
       <div role="status" aria-live="polite">Deep diving...<span>15秒</span></div>
       <div role="status" aria-live="polite">正在上传</div>
     </>)
-    const target = view.container.querySelector<HTMLElement>('[role="status"][data-emate-thinking-status]')!
-    const activityHost = view.container.querySelector<HTMLElement>('[data-emate-thinking-host]')!
+    const target = screen.getByRole('status', { name: '思考中' })
     const unrelated = [...view.container.querySelectorAll<HTMLElement>('[role="status"]')]
       .find(node => node.textContent === '正在上传')!
-    expect(target.hidden).toBe(true)
     expect(target.hasAttribute('data-emate-thinking-status')).toBe(true)
     expect(target.textContent).not.toContain('Deep diving...')
-    expect(activityHost.textContent).toContain('思考中')
-    expect(activityHost.querySelectorAll('i')).toHaveLength(4)
+    expect(target.textContent).toContain('思考中')
+    expect(target.querySelectorAll('i')).toHaveLength(4)
     expect(unrelated.hasAttribute('data-emate-thinking-status')).toBe(false)
     expect(thinkingCss).toContain('var(--dsw-alias-label-secondary)')
     expect(thinkingCss).toContain('@keyframes emate-domino')

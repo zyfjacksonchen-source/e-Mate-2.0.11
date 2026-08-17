@@ -25,7 +25,7 @@ export function statusForPlatform(platform: NodeJS.Platform, runtime: { connecte
     ready,
     ...(ready ? {} : { blocker: windowsPending && connected ? WINDOWS_BLOCKER : CONNECTION_BLOCKER }),
     provider: 'dsh-browser',
-    upstream_commit: '01f0b216b1bde88b5f9c6575ce9fb922db6fd8fb',
+    upstream_commit: 'b20ecd51eca800e00fc40bd7973271bf62a1b1d2',
     supported_platforms: ['darwin', 'win32'],
     session_bound: true,
     browser_state_session_bound: true,

@@ -219,7 +219,9 @@ test('GitHub release packs once and validates the same tarball on three platform
   const ciChecks = ci.jobs.source.steps.find(step => step.name === 'Check target pin and e-Mate behavior').run
   assert.match(ciChecks, /^pnpm test$/mu)
   assert.doesNotMatch(ciChecks, /--filter @e-mate\/dsh test/u)
-  assert.deepEqual(Object.keys(ci.jobs), ['source'])
+  assert.deepEqual(Object.keys(ci.jobs), ['source', 'desktop-windows', 'desktop-macos'])
+  assert.equal(ci.jobs['desktop-windows'].needs, 'source')
+  assert.equal(ci.jobs['desktop-macos'].needs, 'source')
   assert.deepEqual(
     release.jobs['clean-install'].strategy.matrix.include.map(item => [item.platform, item.runner]),
     [['darwin-arm64', 'macos-15'], ['darwin-x64', 'macos-15-intel'], ['win32-x64', 'windows-2025']],

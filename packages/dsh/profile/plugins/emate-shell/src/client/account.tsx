@@ -7,6 +7,7 @@ import {
   validBootstrap,
 } from './identity.tsx'
 import css from './account.module.css'
+import { formatTokenCount } from './token-format.ts'
 
 interface Props {
   callIdentity: (endpoint: string, payload: Record<string, unknown>) => Promise<RpcResult>
@@ -167,15 +168,15 @@ export function AccountControl({ callIdentity, wide, UserIcon, expandSidebar }: 
             <div className={css.usage}>
               <span>本周用量</span>
               {unlimited
-                ? <progress aria-label="本周 Token 用量" aria-valuetext={usage === null ? '无限额度' : `无限额度，已使用 ${usage.week.total_tokens.toLocaleString('zh-CN')} Token`} />
+                ? <progress aria-label="本周 Token 用量" aria-valuetext={usage === null ? '无限额度' : `无限额度，已使用 ${formatTokenCount(usage.week.total_tokens)} Token`} />
                 : usage === null
                 ? <progress aria-label="本周 Token 用量" max={state.weekly_token_limit} />
                 : <progress aria-label="本周 Token 用量" max={state.weekly_token_limit} value={Math.min(usage.week.total_tokens, state.weekly_token_limit)} />}
               <small>{usage === null
                 ? usageError ?? '正在同步企业审计用量…'
                 : unlimited
-                  ? `${usage.week.total_tokens.toLocaleString('zh-CN')} Token · 不限额度`
-                  : `${usage.week.total_tokens.toLocaleString('zh-CN')} / ${state.weekly_token_limit.toLocaleString('zh-CN')} Token`}</small>
+                  ? `${formatTokenCount(usage.week.total_tokens)} Token · 不限额度`
+                  : `${formatTokenCount(usage.week.total_tokens)} / ${formatTokenCount(state.weekly_token_limit)} Token`}</small>
             </div>
           ) : null}
           {state?.authenticated ? (
@@ -308,7 +309,7 @@ export function AccountSettings({ callIdentity }: Props) {
       </div>
       <p className={css.note}>
         {state?.authenticated
-          ? `每周 Token 额度 ${state.weekly_token_limit === Number.MAX_SAFE_INTEGER ? '不限' : state.weekly_token_limit?.toLocaleString('zh-CN') ?? '—'}；${state.agreement_exempt ? '管理员无需签署用户协议。' : state.agreement_receipt_id ? '首次使用协议已归档。' : '尚无有效协议归档凭证。'}`
+          ? `每周 Token 额度 ${state.weekly_token_limit === Number.MAX_SAFE_INTEGER ? '不限' : state.weekly_token_limit === undefined ? '—' : formatTokenCount(state.weekly_token_limit)}；${state.agreement_exempt ? '管理员无需签署用户协议。' : state.agreement_receipt_id ? '首次使用协议已归档。' : '尚无有效协议归档凭证。'}`
           : status ?? '请完成企业登录后再修改密码。'}
       </p>
       {state?.authenticated ? (

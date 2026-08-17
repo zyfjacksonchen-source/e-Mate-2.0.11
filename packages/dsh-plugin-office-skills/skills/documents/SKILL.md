@@ -1,23 +1,22 @@
 ---
 name: documents
-description: Blocked DOCX workflow receipt; no distributable execution layer is installed.
-whenToUse: Use for Word or DOCX reading, authoring, editing, review, and conversion tasks.
+description: Create, read, and safely regenerate DOCX documents with the local e-Mate Office tools.
+whenToUse: Use for text-first DOCX reading, authoring, review, and supported edits.
 metadata:
   eMateCapability: office
   format: docx
   adapter: clean-room
-  state: blocked
-  blockerCode: EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE
+  state: ready
 ---
 
 # Documents
 
-This disabled adapter preserves the requested Codex category name but supplies no document runtime. It is not model- or user-invocable in e-Mate 2.0.7.
+Use `office_read` to normalize an existing DOCX and `office_write` to create a new real DOCX. Never overwrite the source.
 
 1. Keep source files unchanged unless the user explicitly requests an in-place edit. Write deliverables inside the active workspace and use a descriptive `.docx` name.
-2. Stop with `EMATE_OFFICE_EXECUTION_LAYER_UNAVAILABLE`. Do not probe the host, install packages, download a runtime, invoke the removed e-Mate Office worker, or assume Python, LibreOffice, Microsoft Office, or a particular library exists.
+2. `office_write` accepts `{title?, paragraphs:[string|{text,heading?}]}` where heading is 1, 2, or 3.
 3. Do not create a renamed text or HTML file pretending to be DOCX.
-4. For reads, inspect paragraphs, headings, lists, tables, headers, footers, comments, tracked changes, links, media, and document properties relevant to the request.
-5. For creation or editing, preserve semantic Word structures: real heading styles, real numbering, explicit table geometry, accessible labels, stable page dimensions, and consistent typography. Make the smallest requested edit when a source document exists.
-6. Validate the resulting OOXML package by reopening it with the same implementation. When a compatible renderer is already available, render every page and inspect for clipping, overlap, missing glyphs, broken tables, and header/footer drift. If no renderer exists, report that visual QA is blocked instead of claiming it passed.
+4. Reading extracts text into the normalized structure; it is not a lossless representation of tables, comments, tracked changes, media, headers, or arbitrary third-party layout.
+5. To edit, read, change the normalized JSON, and write a new filename. If the requested edit depends on unsupported layout, stop instead of claiming a lossless edit.
+6. Reopen the result with `office_read`; use the installed file viewer for user preview when available.
 7. Return only the requested final document. Keep diagnostic renders and temporary conversions out of the deliverables.

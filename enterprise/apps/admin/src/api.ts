@@ -49,6 +49,18 @@ export type AdminPasswordLogin = {
 
 export type QuotaUnit = 'K' | 'M';
 
+export function formatTokenCount(value: number): string {
+  const amount = BigInt(value);
+  const [divisor, suffix] = amount >= 1_000_000n
+    ? [1_000_000n, 'M'] as const
+    : amount >= 1_000n
+      ? [1_000n, 'K'] as const
+      : [1n, ''] as const;
+  if (!suffix) return amount.toString();
+  const tenths = (amount * 10n + divisor / 2n) / divisor;
+  return `${tenths / 10n}${tenths % 10n ? `.${tenths % 10n}` : ''}${suffix}`;
+}
+
 export function quotaTokens(amount: number | undefined, unit: QuotaUnit, unlimited: boolean): number | null | undefined {
   if (unlimited) return null;
   if (amount === undefined || !Number.isFinite(amount) || amount <= 0) return undefined;

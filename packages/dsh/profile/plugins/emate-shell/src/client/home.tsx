@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useSyncExternalStore, type ComponentType } from 'react'
 import { createPortal } from 'react-dom'
 import css from './home.module.css'
+import { formatTokenCount } from './token-format.ts'
 
 interface SessionRow {
   id: string
@@ -33,6 +34,7 @@ interface Props {
   scheduleIcons: Record<ScheduleIcon, ComponentType<{ size?: number }>>
   toggleSidebar: () => void
   openSettings: () => void
+  closeDetails: () => void
   getThemeScheme: () => 'light' | 'dark'
   subscribeTheme: (listener: () => void) => () => void
   toggleTheme: () => void
@@ -96,6 +98,7 @@ export function HomeProjection({
   scheduleIcons,
   toggleSidebar,
   openSettings,
+  closeDetails,
   getThemeScheme,
   subscribeTheme,
   toggleTheme,
@@ -113,6 +116,10 @@ export function HomeProjection({
   const [scheduleError, setScheduleError] = useState<string | null>(null)
   const schedules = pathname === '/schedules'
   const show = schedules || current === undefined || byId[current]?.blank === true
+
+  useEffect(() => {
+    if (show && !schedules) closeDetails()
+  }, [closeDetails, schedules, show])
 
   useEffect(() => {
     const sync = () => { setPathname(location.pathname) }
@@ -235,7 +242,7 @@ export function HomeProjection({
         <div className={css.metrics}>
           <article><small>完成任务数</small><strong>{completed}</strong><span>本机完成提醒</span></article>
           <article><small>等待任务</small><strong>{waiting}</strong><span>{waiting ? '等待小芯处理' : '当前无等待'}</span></article>
-          <article><small>Token 消耗量</small><strong>{tokenUsage.toLocaleString('zh-CN')}</strong><span>本机可核对用量</span></article>
+          <article><small>Token 消耗量</small><strong>{formatTokenCount(tokenUsage)}</strong><span>本机可核对用量</span></article>
           <article><small>任务成功率</small><strong>暂无</strong><span>等待审计结果对账</span></article>
         </div>
         <div className={css.report}>

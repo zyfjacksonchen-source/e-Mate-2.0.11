@@ -95,6 +95,7 @@ export function SidebarRoot({
   toggleSidebar,
 }: Props) {
   const wide = !collapsed
+  const root = useRef<HTMLElement>(null)
   const mobileOpen = useRef<HTMLButtonElement>(null)
   const ids = useSessions(state => state.ids)
   const byId = useSessions(state => state.byId)
@@ -133,6 +134,18 @@ export function SidebarRoot({
     const sync = () => { setPathname(location.pathname) }
     addEventListener('popstate', sync)
     return () => { removeEventListener('popstate', sync) }
+  }, [])
+
+  useEffect(() => {
+    const closeOutsideMenus = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      root.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(details => {
+        if (!details.contains(target)) details.removeAttribute('open')
+      })
+    }
+    document.addEventListener('pointerdown', closeOutsideMenus)
+    return () => { document.removeEventListener('pointerdown', closeOutsideMenus) }
   }, [])
 
   useEffect(() => {
@@ -269,19 +282,19 @@ export function SidebarRoot({
       <button
         className={`${css.taskRow} ${row.id === current ? css.current : ''}`}
         type="button"
-        title={row.displayTitle}
-        aria-label={`打开任务：${row.displayTitle}`}
+        title={row.blank ? '新会话' : row.displayTitle}
+        aria-label={`打开任务：${row.blank ? '新会话' : row.displayTitle}`}
         aria-current={row.id === current ? 'page' : undefined}
         disabled={busySession === row.id}
         onClick={() => { openSession(row.id) }}
       >
-        <span>{row.displayTitle}</span>
+        <span>{row.blank ? '新会话' : row.displayTitle}</span>
         {row.running || row.pendingInteraction !== undefined
           ? <i className={`${css.activity} ${row.pendingInteraction !== undefined ? css.waiting : ''}`} aria-label={row.pendingInteraction !== undefined ? '等待你确认' : '任务正在进行'} />
           : null}
       </button>
       <details className={css.taskMenu}>
-        <summary aria-label={`管理任务：${row.displayTitle}`}><EllipsisIcon size={16} /></summary>
+        <summary aria-label={`管理任务：${row.blank ? '新会话' : row.displayTitle}`}><EllipsisIcon size={16} /></summary>
         <div>
           <button type="button" onClick={() => { void copyId(row.id) }}><CopyIcon size={16} />复制任务 ID</button>
           <button type="button" onClick={() => { setRenameTarget(row); setRenameDraft(row.displayTitle) }}><EditIcon size={16} />重命名</button>
@@ -312,10 +325,10 @@ export function SidebarRoot({
 
   return (
     <>
-      <aside className={`${css.root} ${collapsed ? css.collapsed : ''}`} style={wide ? { width } : undefined} aria-label="任务导航">
+      <aside ref={root} className={`${css.root} ${collapsed ? css.collapsed : ''}`} style={wide ? { width } : undefined} aria-label="任务导航">
         <div className={css.brandRow}>
           {wide
-            ? <span className={css.brand}><img className={css.logo} src="/assets/e-mate/logo.png" alt="e-Mate" /></span>
+            ? <span className={css.brand}><img className={css.logo} src="/assets/e-mate/logo.png" alt="e-Mate" /><small className={css.version}>2.0.7</small></span>
             : <button className={css.brand} type="button" aria-label="展开任务导航" onClick={toggleSidebar}><img className={css.mark} src="/assets/e-mate/xiaoxin-avatar.png" alt="" aria-hidden="true" /></button>}
           {wide && (
             <button className={css.iconButton} type="button" aria-label="搜索会话" aria-expanded={searchOpen} onClick={() => { setSearchOpen(value => !value) }}>
