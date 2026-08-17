@@ -11,6 +11,7 @@ import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
+import { PACKAGE_NAME, releaseSource } from './release-source.mjs'
 
 export const VERSION = '2.0.7'
 const HARNESS_VERSION = '0.1.0-rc.5'
@@ -147,6 +148,7 @@ function verifyMain(item, manifest, entries) {
   }
   for (const entry of [
     'package/lib/bin.js',
+    'package/lib/release-source.json',
     'package/profile/cordis.patch.yml',
     'package/profile/plugins/emate-shell/index.js',
     'package/profile/bundles/registry.json',
@@ -160,6 +162,11 @@ function verifyMain(item, manifest, entries) {
   const harness = tarJson(item.path, 'package/runtime/source-manifest.json')
   if (harness.version !== HARNESS_VERSION || harness.commit !== HARNESS_COMMIT || harness.product_version !== VERSION) {
     throw new Error('@e-mate/dsh carries the wrong DeepSeek Harness closure')
+  }
+  const source = tarJson(item.path, 'package/lib/release-source.json')
+  const expectedSource = releaseSource(source.source_commit)
+  if (JSON.stringify(source) !== JSON.stringify(expectedSource)) {
+    throw new Error('@e-mate/dsh carries an invalid immutable release source')
   }
   const registry = tarJson(item.path, 'package/profile/bundles/registry.json')
   const actualPlugins = Array.isArray(registry.packages) ? registry.packages.map(plugin => plugin?.name).sort() : []
@@ -181,7 +188,7 @@ function verifyMain(item, manifest, entries) {
     }
     requireEntry(entries, `${base}/${pluginManifest.main}`, plugin.name)
   }
-  return { harness, registry }
+  return { harness, registry, releaseSource: source }
 }
 
 export function verifyRelease(directory) {
@@ -330,6 +337,9 @@ export async function generateEvidence(directory, outputDirectory, sourceCommit 
     }))
   }
   const main = release.find(item => item.kind === 'main')
+  if (main.releaseSource.source_commit !== sourceCommit || main.releaseSource.package_name !== PACKAGE_NAME) {
+    throw new Error('packed release source does not match the evidence commit')
+  }
   await packedComponents(main, components)
   for (const [name, version] of Object.entries(main.manifest.dependencies ?? {})) {
     addComponent(components, { ecosystem: 'npm', name, version, license: 'NOASSERTION', owner: main.name })
@@ -376,6 +386,13 @@ export async function generateEvidence(directory, outputDirectory, sourceCommit 
     source_commit: sourceCommit,
     harness: { version: HARNESS_VERSION, commit: HARNESS_COMMIT },
     release_sha256: releaseDigest,
+    download: {
+      ...main.releaseSource,
+      sha256: main.sha256,
+      sha512: main.sha512,
+      integrity: main.integrity,
+      size: main.size,
+    },
     publish_order: release.map(item => item.name),
     packages: release.map(({ name, kind, os, cpu, filename, size, sha256, sha512, integrity }) => ({
       name, version: VERSION, kind, ...(os === undefined ? {} : { os, cpu }), filename, size, sha256, sha512, integrity,

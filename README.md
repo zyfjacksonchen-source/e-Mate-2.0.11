@@ -16,10 +16,9 @@ e-Mate 2.0.7 是浏览器优先、本地运行的 AI 工作空间。产品运行
 
 ## 安装与首次启动
 
-正式发布后使用：
+正式发布后，从 [下载入口](https://dl.ecoremedia.net/e-mate/update/) 复制按发布提交固定的 R2 tarball 安装命令，然后运行：
 
 ```bash
-npm install -g @e-mate/dsh@2.0.7
 e-mate setup --check --json
 e-mate setup
 e-mate launch
@@ -53,14 +52,14 @@ Agent 识别“在线更新”意图后调用的也是同一个受管更新事�
 
 ```bash
 e-mate update
-e-mate update --version 2.0.8 --json
+e-mate update --version 2.0.7 --json
 ```
 
-人工覆盖安装仍支持：
+人工覆盖安装仍使用下载入口展示的同一不可变 tarball URL：
 
 ```bash
 e-mate stop
-npm install -g @e-mate/dsh@新版本
+# 在此运行下载入口展示的 npm install -g HTTPS 命令
 e-mate setup
 e-mate launch
 ```

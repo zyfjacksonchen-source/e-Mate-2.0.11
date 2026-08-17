@@ -12,9 +12,10 @@ import {
   matchesR2Head,
   normalizeProductionPublicOrigin,
   R2_BUCKET,
-  R2_PREFIX,
   R2_PUBLIC_ORIGIN,
 } from './publish-r2.mjs'
+import { releasePrefix, releaseSource } from './release-source.mjs'
+import { renderDownloadPage } from './render-download-page.mjs'
 
 const HARNESS_COMMIT = '47f943859bef60e4160492346772ded9b24f765a'
 const DIGEST = '0'.repeat(64)
@@ -47,6 +48,7 @@ async function pack(directory, expected, mutate = manifest => manifest) {
   manifest.dependencies ??= { yaml: '2.9.0' }
   await file(packageRoot, 'package.json', `${JSON.stringify(manifest)}\n`)
   await file(packageRoot, 'lib/bin.js')
+  await file(packageRoot, 'lib/release-source.json', JSON.stringify(releaseSource(SOURCE_COMMIT)))
   await file(packageRoot, 'profile/cordis.patch.yml', '[]\n')
   await file(packageRoot, 'profile/plugins/emate-shell/index.js')
   await file(packageRoot, 'THIRD_PARTY_NOTICES.txt')
@@ -97,6 +99,14 @@ test('release evidence requires the one bundled package and emits hashes plus SP
     assert.equal(result.release.length, 1)
     assert.deepEqual(result.manifest.publish_order, RELEASE_PACKAGES.map(item => item.name))
     assert.equal(result.manifest.publish_order.at(-1), '@e-mate/dsh')
+    assert.equal(result.manifest.download.package_name, '@e-mate/dsh')
+    assert.equal(result.manifest.download.version, VERSION)
+    assert.equal(result.manifest.download.source_commit, SOURCE_COMMIT)
+    assert.equal(result.manifest.download.manifest_url, releaseSource(SOURCE_COMMIT).manifest_url)
+    assert.equal(result.manifest.download.tarball_url, releaseSource(SOURCE_COMMIT).tarball_url)
+    assert.equal(result.manifest.download.sha256, result.release[0].sha256)
+    assert.equal(result.manifest.download.sha512, result.release[0].sha512)
+    assert.equal(result.manifest.download.integrity, result.release[0].integrity)
     assert.equal(readFileSync(join(output, 'SHA256SUMS'), 'utf8').trim().split('\n').length, 1)
     assert.match(readFileSync(join(output, 'EVIDENCE_SHA256SUMS'), 'utf8'), /e-mate-2\.0\.7\.spdx\.json/u)
     assert.equal(result.spdx.spdxVersion, 'SPDX-2.3')
@@ -108,9 +118,9 @@ test('release evidence requires the one bundled package and emits hashes plus SP
     const r2 = buildR2Inventory(root, output, result.manifest.source_commit, R2_FIXTURE_PUBLIC_ORIGIN)
     assert.equal(r2.bucket, R2_BUCKET)
     assert.equal(r2.public_origin, R2_FIXTURE_PUBLIC_ORIGIN)
-    assert.equal(r2.prefix, R2_PREFIX)
+    assert.equal(r2.prefix, releasePrefix(SOURCE_COMMIT))
     assert.equal(r2.objects.length, 6)
-    assert.ok(r2.objects.every(item => item.key === `${R2_PREFIX}/${item.filename}` && item.url === `${R2_FIXTURE_PUBLIC_ORIGIN}/${item.key}`))
+    assert.ok(r2.objects.every(item => item.key === `${releasePrefix(SOURCE_COMMIT)}/${item.filename}` && item.url === `${R2_FIXTURE_PUBLIC_ORIGIN}/${item.key}`))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -214,33 +224,28 @@ test('GitHub release packs once and validates the same tarball on three platform
     release.jobs['clean-install'].strategy.matrix.include.map(item => [item.platform, item.runner]),
     [['darwin-arm64', 'macos-15'], ['darwin-x64', 'macos-15-intel'], ['win32-x64', 'windows-2025']],
   )
-  assert.deepEqual(Object.keys(release.jobs), ['pack', 'clean-install', 'evidence', 'publish', 'registry-install', 'r2'])
+  assert.deepEqual(Object.keys(release.jobs), ['pack', 'clean-install', 'evidence', 'r2'])
   assert.equal(release.jobs['clean-install'].needs, 'pack')
   assert.equal(release.jobs.evidence.needs, 'pack')
-  assert.deepEqual(release.jobs.publish.needs, ['clean-install', 'evidence'])
-  assert.match(release.jobs.publish.steps.at(-1).run, /release\.mjs publish --from dist\/npm/u)
+  assert.match(release.jobs.evidence.steps.find(step => step.name === 'Render the immutable candidate download page').run, /render-download-page\.mjs/u)
   const cleanInstall = release.jobs['clean-install'].steps.find(step => step.name === 'Install tarballs with npm and run setup checks')
   assert.equal((cleanInstall.run.match(/node "\$cli" setup$/gmu) ?? []).length, 2)
   assert.match(readFileSync('scripts/build-harness-runtime.mjs', 'utf8'), /'--os=darwin', '--os=win32', '--cpu=arm64', '--cpu=x64'/u)
-  const registryInstall = release.jobs['registry-install'].steps.find(step => step.name === 'Read back npm and run a clean registry install')
-  assert.match(registryInstall.run, /update --version 2\.0\.7 --json/u)
-  assert.match(registryInstall.run, /installed_package_integrity/u)
-  assert.match(registryInstall.run, /previous_package_integrity/u)
-  assert.match(registryInstall.run, /node "\$cli" stop/u)
-  assert.equal(release.jobs.r2.needs, 'registry-install')
+  assert.deepEqual(release.jobs.r2.needs, ['clean-install', 'evidence'])
   assert.deepEqual(release.on.push.branches, ['main'])
   const r2 = release.jobs.r2.steps.find(step => step.name === 'Publish immutable release bytes to Cloudflare R2')
   assert.match(r2.run, /publish-r2\.mjs/u)
   assert.equal(r2.env.EMATE_R2_PUBLIC_ORIGIN, '${{ vars.EMATE_R2_PUBLIC_ORIGIN }}')
   assert.equal(release.on.workflow_dispatch.inputs.publish.default, false)
-  assert.ok(release.jobs.publish.steps.every(step => !/\b(?:build|pack)\b/u.test(step.run ?? '')))
+  assert.doesNotMatch(readFileSync('.github/workflows/release.yml', 'utf8'), /npm view '@e-mate\/dsh@2\.0\.7'|release\.mjs publish/u)
   assert.match(readFileSync('.gitattributes', 'utf8'), /^\* text=auto eol=lf$/mu)
 })
 
 test('download page exposes npm-only platform install and immutable R2 evidence', () => {
-  const page = readFileSync('deploy/download-page/index.html', 'utf8')
-  const install = 'npm install -g @e-mate/dsh@2.0.7'
+  const page = renderDownloadPage(readFileSync('deploy/download-page/index.html', 'utf8'), SOURCE_COMMIT)
+  const install = `npm install -g ${releaseSource(SOURCE_COMMIT).tarball_url}`
   assert.equal((page.match(new RegExp(install.replaceAll('.', '\\.'), 'gu')) ?? []).length, 4)
+  assert.doesNotMatch(page, /npm install -g @e-mate\/dsh@2\.0\.7/u)
   for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64']) {
     assert.match(page, new RegExp(`data-platform="${platform}"`, 'u'))
     assert.match(page, new RegExp(`data-panel="${platform}"`, 'u'))
@@ -255,7 +260,7 @@ test('download page exposes npm-only platform install and immutable R2 evidence'
     'EVIDENCE_SHA256SUMS',
     'r2-download-admission.json',
   ]) {
-    assert.match(page, new RegExp(`https://pub-ada3f610c0234a76838f4e19fe2bb25e\\.r2\\.dev/npm/v2\\.0\\.7/${evidence.replaceAll('.', '\\.')}`, 'u'))
+    assert.match(page, new RegExp(`https://pub-ada3f610c0234a76838f4e19fe2bb25e\\.r2\\.dev/${releasePrefix(SOURCE_COMMIT).replaceAll('.', '\\.').replaceAll('/', '\\/')}/${evidence.replaceAll('.', '\\.')}`, 'u'))
   }
   assert.match(page, /支持 Node \^22\.19 或 ≥24/u)
   assert.match(page, /data-theme-toggle/u)

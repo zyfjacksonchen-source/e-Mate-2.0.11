@@ -11,12 +11,11 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { isAcceptedReleaseCommit, VERSION, verifyRelease } from './release.mjs'
+import { releasePrefix } from './release-source.mjs'
 
 export const R2_BUCKET = 'emate-desktop-downloads'
-export const R2_PREFIX = `npm/v${VERSION}`
 export const R2_PUBLIC_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
 const REPOSITORY = 'zyfjacksonchen-source/e-Mate'
-const TAG = `e-mate-v${VERSION}`
 const EVIDENCE_FILES = [
   'SHA256SUMS',
   'release-manifest.json',
@@ -70,13 +69,13 @@ export function normalizeProductionPublicOrigin(value) {
   return origin
 }
 
-function record(path, role, publicOrigin) {
+function record(path, role, publicOrigin, prefix) {
   const metadata = lstatSync(path)
   if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size < 1) {
     throw new Error(`R2 release input is not a non-empty regular file: ${path}`)
   }
   const filename = basename(path)
-  const key = `${R2_PREFIX}/${filename}`
+  const key = `${prefix}/${filename}`
   return {
     role,
     filename,
@@ -100,23 +99,33 @@ export function buildR2Inventory(
   const manifestPath = join(evidenceDirectory, 'release-manifest.json')
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
   if (manifest.product !== 'e-Mate' || manifest.version !== VERSION || manifest.source_commit !== sourceCommit
-    || !SHA256.test(manifest.release_sha256 ?? '') || !Array.isArray(manifest.packages)) {
+    || !SHA256.test(manifest.release_sha256 ?? '') || !Array.isArray(manifest.packages)
+    || manifest.download?.source_commit !== sourceCommit) {
     throw new Error('R2 release manifest identity is invalid')
   }
-  const packageRecords = release.map(item => record(item.path, 'npm-package', publicOrigin))
+  const prefix = releasePrefix(sourceCommit)
+  if (manifest.download.manifest_url !== `${R2_PUBLIC_ORIGIN}/${prefix}/release-manifest.json`
+    || manifest.download.tarball_url !== `${R2_PUBLIC_ORIGIN}/${prefix}/e-mate-dsh-2.0.7.tgz`) {
+    throw new Error('R2 release manifest download source is invalid')
+  }
+  const packageRecords = release.map(item => record(item.path, 'npm-package', publicOrigin, prefix))
   if (manifest.packages.length !== packageRecords.length
     || new Set(manifest.packages.map(item => item.filename)).size !== packageRecords.length) {
     throw new Error('R2 release manifest package set is invalid')
   }
   for (const item of packageRecords) {
     const expected = manifest.packages.find(candidate => candidate.filename === item.filename)
-    if (expected?.sha256 !== item.sha256 || expected?.size !== item.size) {
+    const actual = release.find(candidate => candidate.filename === item.filename)
+    if (expected?.sha256 !== item.sha256 || expected?.sha512 !== actual?.sha512
+      || expected?.integrity !== actual?.integrity
+      || expected?.size !== item.size || manifest.download.sha256 !== item.sha256
+      || manifest.download.integrity !== expected.integrity || manifest.download.size !== item.size) {
       throw new Error(`R2 package differs from release manifest: ${item.filename}`)
     }
   }
   const objects = [
     ...packageRecords,
-    ...EVIDENCE_FILES.map(name => record(join(evidenceDirectory, name), 'release-evidence', publicOrigin)),
+    ...EVIDENCE_FILES.map(name => record(join(evidenceDirectory, name), 'release-evidence', publicOrigin, prefix)),
   ]
   if (new Set(objects.map(item => item.key)).size !== objects.length) throw new Error('R2 release contains duplicate object keys')
   return {
@@ -128,7 +137,7 @@ export function buildR2Inventory(
     release_sha256: manifest.release_sha256,
     bucket: R2_BUCKET,
     public_origin: publicOrigin,
-    prefix: R2_PREFIX,
+    prefix,
     objects,
   }
 }
@@ -243,9 +252,8 @@ function receiptObject(item) {
 
 function authorize() {
   if (process.env.GITHUB_ACTIONS !== 'true' || process.env.GITHUB_REPOSITORY !== REPOSITORY
-    || process.env.GITHUB_REF_TYPE !== 'tag' || process.env.GITHUB_REF_NAME !== TAG
-    || !isAcceptedReleaseCommit()) {
-    throw new Error(`R2 publication is allowed only for the accepted ${TAG} commit in ${REPOSITORY}`)
+    || process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || !isAcceptedReleaseCommit()) {
+    throw new Error(`R2 publication is allowed only by workflow dispatch for the accepted commit in ${REPOSITORY}`)
   }
   if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
     throw new Error('R2 S3 credentials are missing')
@@ -275,8 +283,8 @@ export async function publishR2(npmDirectory, evidenceDirectory, receiptPath) {
   const temporary = `${receiptPath}.tmp`
   await writeFile(temporary, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 })
   await rename(temporary, receiptPath)
-  await publishObject(record(receiptPath, 'r2-admission', inventory.public_origin))
-  console.log(`e-Mate R2 admission: ${receipt.objects.length} release objects verified under ${R2_PREFIX}`)
+  await publishObject(record(receiptPath, 'r2-admission', inventory.public_origin, inventory.prefix))
+  console.log(`e-Mate R2 admission: ${receipt.objects.length} release objects verified under ${inventory.prefix}`)
   return receipt
 }
 

@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the exact validated tarball to npm. Must run from e-mate-v2.0.7.
+        description: Publish the accepted 2.0.7 carrier and evidence to a new immutable R2 prefix.
         required: true
         type: boolean
         default: false
@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ inputs.publish && 'e-mate-npm-publication' || format('{0}-{1}', github.workflow, github.ref) }}
+  group: ${{ inputs.publish && 'e-mate-r2-publication' || format('{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: false
 
 env:
@@ -167,6 +167,9 @@ jobs:
       - name: Generate SHA256, manifest, SPDX and license inventory
         run: node scripts/release.mjs evidence --from dist/npm --out dist/release
 
+      - name: Render the immutable candidate download page
+        run: node scripts/render-download-page.mjs --commit "$GITHUB_SHA" --out dist/download-page/index.html
+
       - name: Verify generated evidence checksums
         run: |
           cd dist/npm && sha256sum -c ../release/SHA256SUMS
@@ -178,106 +181,14 @@ jobs:
           path: |
             dist/npm/*
             dist/release/*
+            dist/download-page/index.html
           if-no-files-found: error
           retention-days: 7
-
-  publish:
-    name: Publish exact npm tarball
-    if: inputs.publish
-    needs: [clean-install, evidence]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    environment: npm-publish
-    concurrency:
-      group: e-mate-npm-publish
-      cancel-in-progress: false
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          registry-url: https://registry.npmjs.org
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: e-mate-release-candidate
-          path: dist
-
-      - name: Recheck candidate bytes
-        run: |
-          cd dist/npm && sha256sum -c ../release/SHA256SUMS
-          cd ../release && sha256sum -c EVIDENCE_SHA256SUMS
-
-      - name: Publish exact candidate bytes
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          EMATE_ACCEPTED_SHA: ${{ vars.EMATE_S12_ACCEPTED_SHA }}
-        run: node scripts/release.mjs publish --from dist/npm
-
-  registry-install:
-    name: Registry install ${{ matrix.platform }}
-    if: inputs.publish
-    needs: publish
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: darwin-arm64
-            runner: macos-15
-          - platform: darwin-x64
-            runner: macos-15-intel
-          - platform: win32-x64
-            runner: windows-2025
-    steps:
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          registry-url: https://registry.npmjs.org
-
-      - name: Read back npm and run a clean registry install
-        shell: bash
-        env:
-          DSH_HOME: ${{ runner.temp }}/e-mate-registry-dsh-home
-          EMATE_DESKTOP_DIR: ${{ runner.temp }}/Desktop
-          EMATE_NO_OPEN: '1'
-        run: |
-          set -euo pipefail
-          prefix="$RUNNER_TEMP/e-mate-registry-prefix"
-          npm view '@e-mate/dsh@2.0.7' version --json | grep '2.0.7'
-          npm install --global --prefix "$prefix" --no-audit --no-fund '@e-mate/dsh@2.0.7'
-          npm_root="$(npm root --global --prefix "$prefix")"
-          cli="$npm_root/@e-mate/dsh/lib/bin.js"
-          test "$(node "$cli" --version)" = '2.0.7'
-          test -f "$npm_root/@e-mate/dsh/profile/bundles/registry.json"
-          EMATE_STAGING_CHECK=1 node "$cli" setup --check --json > "$RUNNER_TEMP/e-mate-registry-check.json"
-          node "$cli" setup
-          update_json="$(node "$cli" update --version 2.0.7 --json)"
-          request_id="$(node -e 'const v=JSON.parse(process.argv[1]); if(typeof v.request_id!=="string") process.exit(1); process.stdout.write(v.request_id)' "$update_json")"
-          status_json='{}'
-          for attempt in {1..180}; do
-            status_json="$(node "$cli" status 2>/dev/null || true)"
-            if node -e 'const v=JSON.parse(process.argv[1]); const u=v.latest_update; process.exit(u?.request_id===process.argv[2] && new Set(["completed","rolled-back","rollback-failed","failed-before-change"]).has(u.status) ? 0 : 1)' "$status_json" "$request_id"; then
-              break
-            fi
-            sleep 1
-          done
-          node -e 'const v=JSON.parse(process.argv[1]); const u=v.latest_update; if(u?.request_id!==process.argv[2] || u.status!=="completed" || u.installed_version!=="2.0.7") throw new Error(JSON.stringify(u))' "$status_json" "$request_id"
-          receipt="$DSH_HOME/e-mate/migrations/online-update-$request_id.json"
-          node -e 'const r=require(process.argv[1]); const sri=/^sha512-[A-Za-z0-9+/]{86}==$/; if(r.status!=="completed" || !sri.test(r.installed_package_integrity) || !sri.test(r.previous_package_integrity)) throw new Error(JSON.stringify(r))' "$receipt"
-          node "$cli" stop
 
   r2:
     name: Publish immutable R2 download objects
     if: inputs.publish
-    needs: registry-install
+    needs: [clean-install, evidence]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: r2-publish

@@ -1235,4 +1235,12 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 随后从 npm registry 在独立 `DSH_HOME` 和全局前缀执行真实 macOS arm64 安装。npm 安装、重复 `setup` 与 `setup --check` 均成功，但 `launch` 后 Host 退出：其一，内置 e-Mate bundle patch 仍用 Loader 无法从安装目录解析的裸包名；其二，Ubuntu 生成的统一 tarball 未携带 pinned Harness 的 macOS `sharp` 与 `koffi` 原生闭包。第一项已最小改为 setup 落盘 profile 内的相对入口，并把 `launch → health → status → stop` 加入三平台 release clean-install 门禁；第二项必须以目标 Harness 原生三平台制品闭包修复，不能禁用 attachment/sandbox、使用系统依赖或伪造健康。因此当前下载页生产切换保持阻塞，已发布 2.0.7 npm/R2 字节不覆盖、不重发。
 - 修复后的源码在 macOS arm64 独立目录真实执行 `setup → launch → 1 秒稳定 health → status → stop` 已通过；Loader 路径按各 bundle 自己的 `package.json#main` 生成，兼容 `.js` 与 `.mjs`，空 patch 仍保持为空。`launch` 同时要求间隔后的第二次健康回读，避免 Host 在插件树加载失败前短暂暴露 health 造成假成功。
 - 已发布 npm `@e-mate/dsh@2.0.7` 的 `setup` 没有补丁下载器，也不认识外置平台补充包；新建 R2 对象无法改变已安装 CLI 的代码或依赖闭包。保持单命令 npm 安装合同的最小合法载体因此是新的 npm semver，并由同一不可变候选在 macOS arm64、macOS x64、Windows x64 全部通过新增启动门禁后再切下载页。此切片不重发 2.0.7、不覆盖 `npm/v2.0.7/`，也不把源码通过表述成 npm 2.0.7 已修复。
+
+## 2026-08-17 · S13 2.0.7 R2 安装载体裁决
+
+- 发布载体最终保持包 identity `@e-mate/dsh@2.0.7` 与产品版本 2.0.7，不重发或覆盖 npm registry 已存在字节，也不伪升产品版本。新的已验收 tarball 与证据只允许写入按 release source commit 隔离的 `npm/candidates/v2.0.7/<40-char-sha>/` R2 不可变前缀；旧 `npm/v2.0.7/` 对象保持原样。
+- 下载页是 release artifact 模板，CI 用同一 evidence source commit 渲染三端 `npm install -g <immutable-r2-tarball-url>` 命令与全部证据链接；模板占位符不得直接部署。日常仍由 npm CLI 安装，但 registry 2.0.7 不再作为安装、更新或回滚字节源。
+- 原在线更新 helper 保持单一路径、活动任务拒绝、数据快照、锁、收据和失败回滚；来源从 `npm view/install @version` 改为精确 R2 release manifest。Host 只接受固定 R2 HTTPS origin、无凭据/重定向/查询的 commit-scoped URL，校验 manifest 与 tarball 内的 name/version、size、SHA-256、SHA-512/SRI 后才进入 npm stage/install。
+- 更新事务在变更前把当前 release manifest 指向的精确旧 tarball 校验并缓存到本次 update snapshot；回滚只安装该缓存字节并恢复数据快照，不查询或回落已知损坏的 registry 2.0.7。完成/失败收据保留新旧 source URL 与 SRI，R2 只在 accepted commit 的手动发布流程中写新 key。
+- 前一候选 head `c63c77c8ac0dc5a61409c11148d0dff449bc6813` 的 Release run `31993617705` 已完成 darwin-arm64、darwin-x64、win32-x64 的 `setup → launch → health → status → stop`；本次 R2 updater 变更必须重新通过相同门禁后才可上传、合并或切生产页。
 - PR 首轮 Release run `31992565126` 的 darwin-arm64 job `95279702774` 在新增启动门禁失败；候选 tarball 回读确认三项 `.mjs` bundle main 已存在并由 setup 正确落盘，但 runtime 只包含 Linux x64 的 `sharp`、`libvips` 与 `koffi`。Harness 原生 `pnpm deploy` 现显式声明目标 `darwin/win32 × arm64/x64`，继续由同一 deploy/pack 结构组装，不引入下载器或兼容层；release 校验同时要求三端 `sharp/libvips`、`koffi`、ripgrep、node-addon-require-builtin 与 node-pty 的固定原生文件，缺任一项即禁止候选进入 clean-install。

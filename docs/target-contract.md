@@ -63,5 +63,5 @@ At the pinned Harness commit, only `web_search` is active from the relevant buil
 - Import only authoritative, non-deleted old e-Mate/ECoreX sessions; preserve sources unchanged and make import idempotent.
 - User data stays under the resolved `$DSH_HOME`; npm installation directories are read-only code/resources.
 - Supported release platforms are macOS 13+ arm64/x64 and Windows 10/11 x64.
-- Keep the existing download, admin, and audit URLs unchanged. The download URL remains the stable entry/integrity page, while every final 2.0.7 tarball and release-evidence download resolves to its immutable Cloudflare R2 object admitted under `npm/v2.0.7/`; the application server must not become the binary origin.
+- Keep the existing download, admin, and audit URLs unchanged. The download URL remains the stable entry/integrity page, while the accepted replacement 2.0.7 tarball and release evidence resolve to commit-scoped immutable Cloudflare R2 objects under `npm/candidates/v2.0.7/<source-commit>/`; the old `npm/v2.0.7/` objects are never overwritten and the application server must not become the binary origin.
 - Release activation requires clean npm installation, automated checks, performance evidence, and Computer Use acceptance.
