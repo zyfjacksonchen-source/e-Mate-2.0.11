@@ -1226,3 +1226,21 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 生产实测确认管理员凭据有效：`mvdcm` 管理端可正常登录，而 `dl` 管理端在 Auth Gateway 已返回 HTTP 200 后仍显示“账号或密码错误”。根因是登录回执中的 Model Gateway 规范地址固定为 `mvdcm`，管理端随后用通用同源校验拒绝了 `dl` 页面收到的同一回执，错误被登录页统一映射为凭据失败。
 - 管理端继续只向当前页面同源的 `/e-mate/model-api/` 发请求；登录回执中的地址必须是 HTTPS、无用户信息/查询/片段且路径精确为 `/e-mate/model-api`，才允许把这个固定路径投影到当前 `mvdcm` 或 `dl` 域名。任意其他路径、HTTP 或带凭据 URL 仍失败关闭；没有放宽 Auth/Admin/Usage 的既有同源合同。
 - `@e-mate/enterprise-admin` 17/17 测试、TypeScript check、生产构建和 diff check 通过。生产部署后须用同一桌面凭据分别在 `mvdcm`、`dl` 登录，进入模型状态页后退出，并确认 Auth 会话已撤销。
+
+## 2026-08-17 · S13 2.0.7 npm 下载入口
+
+- 实时只读追踪确认 `https://dl.ecoremedia.net/e-mate/update/` 依次跳转到 `https://mvdcm.ecoremedia.net/e-mate/` 与 `/ecorex-agent/`；生产页面由 `/srv/ecorex-agent-download/current` 的原子相对软链提供。当前槽位仍是 `site-emate-2.0.4-r2-9d7351b3`，包含旧桌面安装包和未签名安装说明，必须覆盖为 npm-only 页面；既有槽位保留作为回退，不删除旧程序或数据。
+- 新下载页复用现有 e-Mate Logo、橙色 Token、明暗模式、圆角卡片和响应式断点，不增加前端依赖。macOS Apple Silicon、macOS Intel、Windows 10/11 x64 分端展示同一真实发布包 `@e-mate/dsh@2.0.7` 的首次安装与覆盖更新命令；Node 合同固定为 `^22.19.0 || >=24.0.0`，推荐 Node 24 LTS。`setup` 创建覆盖式桌面快捷方式，页面明确它只是本地 Web 的启动入口。
+- 日常安装只走 npm；R2 区域只链接已准入的 `npm/v2.0.7/` tarball、SHA256、manifest、SBOM、许可证、证据校验和 admission receipt。页面不提供旧 Feed、应用安装包、签名或第二下载源；三端验证只引用 Release run `31989572790` 的真实 clean-install job，Windows 不伪造成当前 macOS 本机验证。
+- 随后从 npm registry 在独立 `DSH_HOME` 和全局前缀执行真实 macOS arm64 安装。npm 安装、重复 `setup` 与 `setup --check` 均成功，但 `launch` 后 Host 退出：其一，内置 e-Mate bundle patch 仍用 Loader 无法从安装目录解析的裸包名；其二，Ubuntu 生成的统一 tarball 未携带 pinned Harness 的 macOS `sharp` 与 `koffi` 原生闭包。第一项已最小改为 setup 落盘 profile 内的相对入口，并把 `launch → health → status → stop` 加入三平台 release clean-install 门禁；第二项必须以目标 Harness 原生三平台制品闭包修复，不能禁用 attachment/sandbox、使用系统依赖或伪造健康。因此当前下载页生产切换保持阻塞，已发布 2.0.7 npm/R2 字节不覆盖、不重发。
+- 修复后的源码在 macOS arm64 独立目录真实执行 `setup → launch → 1 秒稳定 health → status → stop` 已通过；Loader 路径按各 bundle 自己的 `package.json#main` 生成，兼容 `.js` 与 `.mjs`，空 patch 仍保持为空。`launch` 同时要求间隔后的第二次健康回读，避免 Host 在插件树加载失败前短暂暴露 health 造成假成功。
+- 已发布 npm `@e-mate/dsh@2.0.7` 的 `setup` 没有补丁下载器，也不认识外置平台补充包；新建 R2 对象无法改变已安装 CLI 的代码或依赖闭包。保持单命令 npm 安装合同的最小合法载体因此是新的 npm semver，并由同一不可变候选在 macOS arm64、macOS x64、Windows x64 全部通过新增启动门禁后再切下载页。此切片不重发 2.0.7、不覆盖 `npm/v2.0.7/`，也不把源码通过表述成 npm 2.0.7 已修复。
+
+## 2026-08-17 · S13 2.0.7 R2 安装载体裁决
+
+- 发布载体最终保持包 identity `@e-mate/dsh@2.0.7` 与产品版本 2.0.7，不重发或覆盖 npm registry 已存在字节，也不伪升产品版本。新的已验收 tarball 与证据只允许写入按 release source commit 隔离的 `npm/candidates/v2.0.7/<40-char-sha>/` R2 不可变前缀；旧 `npm/v2.0.7/` 对象保持原样。
+- 下载页是 release artifact 模板，CI 用同一 evidence source commit 渲染三端 `npm install -g <immutable-r2-tarball-url>` 命令与全部证据链接；模板占位符不得直接部署。日常仍由 npm CLI 安装，但 registry 2.0.7 不再作为安装、更新或回滚字节源。
+- 原在线更新 helper 保持单一路径、活动任务拒绝、数据快照、锁、收据和失败回滚；来源从 `npm view/install @version` 改为精确 R2 release manifest。Host 只接受固定 R2 HTTPS origin、无凭据/重定向/查询的 commit-scoped URL，校验 manifest 与 tarball 内的 name/version、size、SHA-256、SHA-512/SRI 后才进入 npm stage/install。
+- 更新事务在变更前把当前 release manifest 指向的精确旧 tarball 校验并缓存到本次 update snapshot；回滚只安装该缓存字节并恢复数据快照，不查询或回落已知损坏的 registry 2.0.7。完成/失败收据保留新旧 source URL 与 SRI，R2 只在 accepted commit 的手动发布流程中写新 key。
+- 前一候选 head `c63c77c8ac0dc5a61409c11148d0dff449bc6813` 的 Release run `31993617705` 已完成 darwin-arm64、darwin-x64、win32-x64 的 `setup → launch → health → status → stop`；本次 R2 updater 变更必须重新通过相同门禁后才可上传、合并或切生产页。
+- PR 首轮 Release run `31992565126` 的 darwin-arm64 job `95279702774` 在新增启动门禁失败；候选 tarball 回读确认三项 `.mjs` bundle main 已存在并由 setup 正确落盘，但 runtime 只包含 Linux x64 的 `sharp`、`libvips` 与 `koffi`。Harness 原生 `pnpm deploy` 现显式声明目标 `darwin/win32 × arm64/x64`，继续由同一 deploy/pack 结构组装，不引入下载器或兼容层；release 校验同时要求三端 `sharp/libvips`、`koffi`、ripgrep、node-addon-require-builtin 与 node-pty 的固定原生文件，缺任一项即禁止候选进入 clean-install。

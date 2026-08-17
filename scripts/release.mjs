@@ -11,6 +11,7 @@ import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
+import { PACKAGE_NAME, releaseSource } from './release-source.mjs'
 
 export const VERSION = '2.0.7'
 const HARNESS_VERSION = '0.1.0-rc.5'
@@ -44,6 +45,25 @@ const BUNDLED_MAIN_COMPONENTS = [
   { name: 'qrcode', version: '1.5.4', license: 'MIT' },
   { name: 'dijkstrajs', version: '1.0.3', license: 'MIT' },
   { name: 'pngjs', version: '5.0.0', license: 'MIT' },
+]
+export const TARGET_NATIVE_RUNTIME_FILES = [
+  '@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.35.3.node',
+  '@img/sharp-darwin-x64/lib/sharp-darwin-x64-0.35.3.node',
+  '@img/sharp-win32-x64/lib/sharp-win32-x64-0.35.3.node',
+  '@img/sharp-libvips-darwin-arm64/lib/libvips-cpp.8.18.3.dylib',
+  '@img/sharp-libvips-darwin-x64/lib/libvips-cpp.8.18.3.dylib',
+  '@koromix/koffi-darwin-arm64/darwin_arm64/koffi.node',
+  '@koromix/koffi-darwin-x64/darwin_x64/koffi.node',
+  '@koromix/koffi-win32-x64/win32_x64/koffi.node',
+  '@vscode/ripgrep-darwin-arm64/bin/rg',
+  '@vscode/ripgrep-darwin-x64/bin/rg',
+  '@vscode/ripgrep-win32-x64/bin/rg.exe',
+  'node-addon-require-builtin-darwin-arm64/prebuilt/darwin-arm64-napi-v9.node',
+  'node-addon-require-builtin-darwin-x64/prebuilt/darwin-x64-napi-v9.node',
+  'node-addon-require-builtin-win32-x64-msvc/prebuilt/win32-x64-msvc-napi-v9.node',
+  'node-pty/prebuilds/darwin-arm64/pty.node',
+  'node-pty/prebuilds/darwin-x64/pty.node',
+  'node-pty/prebuilds/win32-x64/pty.node',
 ]
 
 const TRANSIENT_PUBLISH_CODES = ['E409', 'E429', 'E500', 'E502', 'E503', 'E504', 'ETIMEDOUT', 'ECONNRESET', 'EAI_AGAIN']
@@ -128,6 +148,7 @@ function verifyMain(item, manifest, entries) {
   }
   for (const entry of [
     'package/lib/bin.js',
+    'package/lib/release-source.json',
     'package/profile/cordis.patch.yml',
     'package/profile/plugins/emate-shell/index.js',
     'package/profile/bundles/registry.json',
@@ -135,9 +156,17 @@ function verifyMain(item, manifest, entries) {
     'package/runtime/harness/apps/cli/lib/bin.js',
     'package/THIRD_PARTY_NOTICES.txt',
   ]) requireEntry(entries, entry, item.name)
+  for (const entry of TARGET_NATIVE_RUNTIME_FILES) {
+    requireEntry(entries, `package/runtime/harness/node_modules/${entry}`, item.name)
+  }
   const harness = tarJson(item.path, 'package/runtime/source-manifest.json')
   if (harness.version !== HARNESS_VERSION || harness.commit !== HARNESS_COMMIT || harness.product_version !== VERSION) {
     throw new Error('@e-mate/dsh carries the wrong DeepSeek Harness closure')
+  }
+  const source = tarJson(item.path, 'package/lib/release-source.json')
+  const expectedSource = releaseSource(source.source_commit)
+  if (JSON.stringify(source) !== JSON.stringify(expectedSource)) {
+    throw new Error('@e-mate/dsh carries an invalid immutable release source')
   }
   const registry = tarJson(item.path, 'package/profile/bundles/registry.json')
   const actualPlugins = Array.isArray(registry.packages) ? registry.packages.map(plugin => plugin?.name).sort() : []
@@ -159,7 +188,7 @@ function verifyMain(item, manifest, entries) {
     }
     requireEntry(entries, `${base}/${pluginManifest.main}`, plugin.name)
   }
-  return { harness, registry }
+  return { harness, registry, releaseSource: source }
 }
 
 export function verifyRelease(directory) {
@@ -308,6 +337,9 @@ export async function generateEvidence(directory, outputDirectory, sourceCommit 
     }))
   }
   const main = release.find(item => item.kind === 'main')
+  if (main.releaseSource.source_commit !== sourceCommit || main.releaseSource.package_name !== PACKAGE_NAME) {
+    throw new Error('packed release source does not match the evidence commit')
+  }
   await packedComponents(main, components)
   for (const [name, version] of Object.entries(main.manifest.dependencies ?? {})) {
     addComponent(components, { ecosystem: 'npm', name, version, license: 'NOASSERTION', owner: main.name })
@@ -354,6 +386,13 @@ export async function generateEvidence(directory, outputDirectory, sourceCommit 
     source_commit: sourceCommit,
     harness: { version: HARNESS_VERSION, commit: HARNESS_COMMIT },
     release_sha256: releaseDigest,
+    download: {
+      ...main.releaseSource,
+      sha256: main.sha256,
+      sha512: main.sha512,
+      integrity: main.integrity,
+      size: main.size,
+    },
     publish_order: release.map(item => item.name),
     packages: release.map(({ name, kind, os, cpu, filename, size, sha256, sha512, integrity }) => ({
       name, version: VERSION, kind, ...(os === undefined ? {} : { os, cpu }), filename, size, sha256, sha512, integrity,

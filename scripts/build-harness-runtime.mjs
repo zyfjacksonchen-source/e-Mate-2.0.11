@@ -139,6 +139,7 @@ async function main() {
   try {
     run('pnpm', [
       '--filter', '@deepseek-ai/dsh', 'deploy', '--prod',
+      '--os=darwin', '--os=win32', '--cpu=arm64', '--cpu=x64',
       '--config.node-linker=hoisted',
       '--config.link-workspace-packages=true',
       '--config.inject-workspace-packages=true',

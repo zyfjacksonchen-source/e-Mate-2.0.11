@@ -92,7 +92,7 @@ JavaScript Cordis packages are a different artifact family. If supported, they u
 
 ## Agent-driven online update
 
-`e-mate update` is a product CLI transaction reached through the target's existing Bash/PowerShell Tool, not a replacement Agent Loop, Tool registry, or updater protocol. It resolves an exact npm version/channel, validates the single main package and its embedded bundle registry, and detaches activation from the running Host. The scheduling command runs in the foreground and returns immediately; e-Mate never shells out through browser code or edits the currently running npm tree in-process.
+`e-mate update` is a product CLI transaction reached through the target's existing Bash/PowerShell Tool, not a replacement Agent Loop, Tool registry, or updater protocol. It resolves the embedded commit-scoped R2 release source, verifies the HTTPS manifest plus tarball name/version/SHA-256/SHA-512/SRI before npm stages the local bytes, and detaches activation from the running Host. The scheduling command runs in the foreground and returns immediately; e-Mate never shells out through browser code or edits the currently running npm tree in-process.
 
 Activation is fail-closed: the updater waits for non-update Jobs to be idle, flushes local state, records the requested/installed versions and package integrity, stops the identity-verified managed instance so the target launcher's normal signal path performs bounded disposal, then performs npm install, `e-mate setup`, health check and `e-mate launch` from a detached helper. Failed setup or health returns to the recorded prior package/data snapshot. The target Tool's real events remain the only chat progress source.
 

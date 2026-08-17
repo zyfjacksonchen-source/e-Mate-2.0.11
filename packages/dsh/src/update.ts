@@ -1,19 +1,33 @@
 import {
   cpSync,
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
   rmSync,
+  writeSync,
   writeFileSync,
 } from 'node:fs'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { dirname, join, posix, resolve, win32 } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 
 const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
 const SHA512_INTEGRITY_RE = /^sha512-[A-Za-z0-9+/]{86}==$/
+const SHA256_RE = /^[0-9a-f]{64}$/u
+const SHA512_RE = /^[0-9a-f]{128}$/u
+const RELEASE_SOURCE_COMMIT_RE = /^[0-9a-f]{40}$/u
 const UPDATE_REQUEST_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+const PRODUCT = 'e-Mate'
+const VERSION = '2.0.7'
+const PACKAGE_NAME = '@e-mate/dsh'
+const TARBALL_FILENAME = 'e-mate-dsh-2.0.7.tgz'
+const R2_PUBLIC_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
+const RELEASE_MANIFEST_PATH_RE = /^\/npm\/candidates\/v2\.0\.7\/([0-9a-f]{40})\/release-manifest\.json$/u
+const MANIFEST_MAX_BYTES = 1024 * 1024
+const TARBALL_MAX_BYTES = 512 * 1024 * 1024
 
 function atomicJson(path, value) {
   mkdirSync(dirname(path), { recursive: true })
@@ -28,6 +42,47 @@ function atomicJson(path, value) {
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
+}
+
+function safeReleaseUrl(value, kind, sourceCommit) {
+  let url
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error(`R2 release ${kind} URL is invalid`)
+  }
+  if (url.protocol !== 'https:' || url.origin !== R2_PUBLIC_ORIGIN || url.username !== '' || url.password !== ''
+    || url.search !== '' || url.hash !== '') throw new Error(`R2 release ${kind} URL is invalid`)
+  const directory = posix.dirname(url.pathname)
+  const match = RELEASE_MANIFEST_PATH_RE.exec(kind === 'manifest' ? url.pathname : `${directory}/release-manifest.json`)
+  if (match?.[1] !== sourceCommit || (kind === 'tarball' && url.pathname !== `${directory}/${TARBALL_FILENAME}`)) {
+    throw new Error(`R2 release ${kind} URL is invalid`)
+  }
+  return url.href
+}
+
+export function validateReleaseSource(value) {
+  if (value?.schema_version !== 1 || value.product !== PRODUCT || value.version !== VERSION
+    || value.package_name !== PACKAGE_NAME || !RELEASE_SOURCE_COMMIT_RE.test(value.source_commit ?? '')) {
+    throw new Error('embedded R2 release source is invalid')
+  }
+  const source = {
+    schema_version: 1,
+    product: PRODUCT,
+    version: VERSION,
+    package_name: PACKAGE_NAME,
+    source_commit: value.source_commit,
+    manifest_url: safeReleaseUrl(value.manifest_url, 'manifest', value.source_commit),
+    tarball_url: safeReleaseUrl(value.tarball_url, 'tarball', value.source_commit),
+  }
+  if (source.tarball_url !== new URL(TARBALL_FILENAME, source.manifest_url).href) {
+    throw new Error('embedded R2 release source is invalid')
+  }
+  return source
+}
+
+function currentReleaseSource() {
+  return validateReleaseSource(readJson(new URL('./release-source.json', import.meta.url)))
 }
 
 export function normalizeUpdateTarget(value) {
@@ -54,18 +109,24 @@ export function validateUpdateRequest(request, requestId) {
     || !VERSION_RE.test(request.current_version)) {
     throw new Error('update request version is invalid')
   }
+  const source = validateReleaseSource(request.release_source)
+  const previousSource = validateReleaseSource(request.previous_release_source)
+  if (target !== 'latest' && target !== source.version) throw new Error('requested R2 release is unavailable')
+  if (request.current_version !== previousSource.version) throw new Error('previous R2 release identity is invalid')
+  request.release_source = source
+  request.previous_release_source = previousSource
   return request
 }
 
 export function parsePackageIntegrity(output) {
   let integrity
   try {
-    integrity = JSON.parse(output)
+    integrity = SHA512_INTEGRITY_RE.test(output) ? output : JSON.parse(output)
   } catch {
-    throw new Error('npm package integrity response is invalid')
+    throw new Error('release package integrity is invalid')
   }
   if (typeof integrity !== 'string' || !SHA512_INTEGRITY_RE.test(integrity)) {
-    throw new Error('npm package integrity response is invalid')
+    throw new Error('release package integrity is invalid')
   }
   return integrity
 }
@@ -119,14 +180,17 @@ export function globalPrefixForBinPath(binPath, platform = process.platform) {
 
 function updaterPaths(dshHome, requestId) {
   const root = join(dshHome, 'e-mate')
+  const snapshotRoot = join(dshHome, 'update-snapshots', requestId)
   return {
     root,
     request: join(root, 'run', 'updates', `${requestId}.json`),
     lock: join(root, 'run', 'update.lock'),
     receipt: join(root, 'migrations', `online-update-${requestId}.json`),
     stage: join(dshHome, 'update-staging', requestId),
-    snapshot: join(dshHome, 'update-snapshots', requestId, 'e-mate'),
-    failedData: join(dshHome, 'update-snapshots', requestId, 'failed-e-mate'),
+    snapshot: join(snapshotRoot, 'e-mate'),
+    failedData: join(snapshotRoot, 'failed-e-mate'),
+    targetPackage: join(snapshotRoot, 'target.tgz'),
+    previousPackage: join(snapshotRoot, 'previous.tgz'),
   }
 }
 
@@ -193,6 +257,10 @@ export function releaseUpdateLock(path, requestId) {
 
 export function scheduleOnlineUpdate({ target, dshHome, binPath, currentVersion }) {
   const normalized = normalizeUpdateTarget(target)
+  const releaseSource = currentReleaseSource()
+  if (normalized !== 'latest' && normalized !== releaseSource.version) {
+    throw new Error('requested R2 release is unavailable')
+  }
   const requestId = randomUUID()
   const paths = updaterPaths(dshHome, requestId)
   claimUpdateLock(paths.lock, requestId)
@@ -202,6 +270,8 @@ export function scheduleOnlineUpdate({ target, dshHome, binPath, currentVersion 
       request_id: requestId,
       target: normalized,
       current_version: currentVersion,
+      release_source: releaseSource,
+      previous_release_source: releaseSource,
       requested_at: new Date().toISOString(),
     })
     const child = spawn(process.execPath, [binPath, '__update-helper', requestId], {
@@ -246,26 +316,95 @@ function runNpm(args, options = {}) {
   return runNode([npmCli(), ...args], options)
 }
 
-function packageIntegrity(version, environment) {
-  return parsePackageIntegrity(runNpm([
-    'view', `@e-mate/dsh@${version}`, 'dist.integrity', '--json',
-  ], { env: environment }))
+async function fetchJson(url) {
+  const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(30_000) })
+  if (!response.ok) throw new Error(`R2 release manifest returned HTTP ${String(response.status)}`)
+  const declared = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > MANIFEST_MAX_BYTES) throw new Error('R2 release manifest is too large')
+  const bytes = Buffer.from(await response.arrayBuffer())
+  if (bytes.length === 0 || bytes.length > MANIFEST_MAX_BYTES) throw new Error('R2 release manifest is too large')
+  return JSON.parse(bytes.toString('utf8'))
 }
 
-function stageTarget(paths, target, environment) {
+export function validateReleaseManifest(value, source, target = 'latest') {
+  source = validateReleaseSource(source)
+  const item = Array.isArray(value?.packages) && value.packages.length === 1 ? value.packages[0] : undefined
+  if (value?.schema_version !== 1 || value.product !== PRODUCT || value.version !== source.version
+    || value.source_commit !== source.source_commit || value.download?.manifest_url !== source.manifest_url
+    || value.download?.tarball_url !== source.tarball_url || item?.name !== PACKAGE_NAME
+    || item.version !== source.version || item.filename !== TARBALL_FILENAME || item.kind !== 'main'
+    || !Number.isSafeInteger(item.size) || item.size < 1 || item.size > TARBALL_MAX_BYTES
+    || !SHA256_RE.test(item.sha256 ?? '') || !SHA512_RE.test(item.sha512 ?? '')) {
+    throw new Error('R2 release manifest identity is invalid')
+  }
+  const integrity = parsePackageIntegrity(item.integrity)
+  if (integrity !== `sha512-${Buffer.from(item.sha512, 'hex').toString('base64')}`
+    || value.download.sha256 !== item.sha256 || value.download.sha512 !== item.sha512
+    || value.download.integrity !== integrity || value.download.size !== item.size) {
+    throw new Error('R2 release manifest integrity is invalid')
+  }
+  validateStagedVersion(target, item.version)
+  return { ...source, filename: item.filename, size: item.size, sha256: item.sha256, sha512: item.sha512, integrity }
+}
+
+async function resolveRelease(source, target) {
+  return validateReleaseManifest(await fetchJson(source.manifest_url), source, target)
+}
+
+async function downloadRelease(release, path) {
+  mkdirSync(dirname(path), { recursive: true })
+  rmSync(path, { force: true })
+  const response = await fetch(release.tarball_url, { redirect: 'error', signal: AbortSignal.timeout(600_000) })
+  if (!response.ok || response.body === null) throw new Error(`R2 release tarball returned HTTP ${String(response.status)}`)
+  const declared = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared !== release.size) throw new Error('R2 release tarball size is invalid')
+  const sha256 = createHash('sha256')
+  const sha512 = createHash('sha512')
+  let size = 0
+  let failure
+  const descriptor = openSync(path, 'wx', 0o600)
+  try {
+    for await (const value of response.body) {
+      const chunk = Buffer.from(value)
+      size += chunk.length
+      if (size > release.size || size > TARBALL_MAX_BYTES) throw new Error('R2 release tarball is too large')
+      sha256.update(chunk)
+      sha512.update(chunk)
+      writeSync(descriptor, chunk)
+    }
+  } catch (error) {
+    failure = error
+  } finally {
+    closeSync(descriptor)
+  }
+  if (failure !== undefined) {
+    rmSync(path, { force: true })
+    throw failure
+  }
+  const sha512Hex = sha512.digest('hex')
+  if (size !== release.size || sha256.digest('hex') !== release.sha256 || sha512Hex !== release.sha512
+    || `sha512-${Buffer.from(sha512Hex, 'hex').toString('base64')}` !== release.integrity) {
+    rmSync(path, { force: true })
+    throw new Error('R2 release tarball integrity is invalid')
+  }
+}
+
+async function stageTarget(paths, request, environment) {
   rmSync(paths.stage, { recursive: true, force: true })
   mkdirSync(paths.stage, { recursive: true })
+  const release = await resolveRelease(request.release_source, request.target)
+  await downloadRelease(release, paths.targetPackage)
   runNpm([
     'install', '--prefix', paths.stage, '--no-audit', '--no-fund', '--package-lock=false',
-    `@e-mate/dsh@${target}`,
+    paths.targetPackage,
   ], { env: environment })
   const packageRoot = join(paths.stage, 'node_modules', '@e-mate', 'dsh')
   const manifest = readJson(join(packageRoot, 'package.json'))
   const stagedBin = join(packageRoot, 'lib', 'bin.js')
-  if (manifest.name !== '@e-mate/dsh' || !existsSync(stagedBin)) {
+  if (manifest.name !== PACKAGE_NAME || !existsSync(stagedBin)) {
     throw new Error('staged e-Mate package identity is invalid')
   }
-  validateStagedVersion(target, manifest.version)
+  validateStagedVersion(request.target, manifest.version)
   const checkHome = join(paths.stage, 'check-home')
   const output = runNode([stagedBin, 'setup', '--check', '--json'], {
     env: { ...environment, DSH_HOME: checkHome, EMATE_STAGING_CHECK: '1' },
@@ -274,7 +413,7 @@ function stageTarget(paths, target, environment) {
   if (report.product !== 'e-Mate' || report.version !== manifest.version || report.ok !== true) {
     throw new Error('staged e-Mate dependency closure failed its environment check')
   }
-  return { version: manifest.version, stagedBin, integrity: packageIntegrity(manifest.version, environment) }
+  return { ...release, version: manifest.version, stagedBin }
 }
 
 async function health(state) {
@@ -303,7 +442,8 @@ async function requireIdleManagedInstance(dshHome) {
 }
 
 function snapshotData(paths) {
-  rmSync(dirname(paths.snapshot), { recursive: true, force: true })
+  rmSync(paths.snapshot, { recursive: true, force: true })
+  rmSync(paths.failedData, { recursive: true, force: true })
   mkdirSync(dirname(paths.snapshot), { recursive: true })
   if (existsSync(paths.root)) cpSync(paths.root, paths.snapshot, { recursive: true, preserveTimestamps: true })
 }
@@ -335,22 +475,29 @@ export async function runOnlineUpdateHelper({ requestId, dshHome, binPath }) {
   const environment = { ...process.env, DSH_HOME: dshHome, EMATE_NO_OPEN: '1' }
   const globalPrefix = globalPrefixForBinPath(binPath)
   let staged
+  let previous
   let previousIntegrity
   let changed = false
   let previousPort
   try {
-    staged = stageTarget(paths, request.target, environment)
+    staged = await stageTarget(paths, request, environment)
     if (compareVersions(staged.version, request.current_version) < 0) {
       throw new Error(`online downgrade refused: ${request.current_version} -> ${staged.version}`)
     }
-    previousIntegrity = packageIntegrity(request.current_version, environment)
+    previous = await resolveRelease(request.previous_release_source, request.current_version)
+    if (previous.tarball_url === staged.tarball_url && previous.integrity === staged.integrity) {
+      cpSync(paths.targetPackage, paths.previousPackage)
+    } else {
+      await downloadRelease(previous, paths.previousPackage)
+    }
+    previousIntegrity = previous.integrity
     const running = await requireIdleManagedInstance(dshHome)
     previousPort = running?.port
     if (running !== undefined) runNode([binPath, 'stop'], { env: environment })
     snapshotData(paths)
     changed = true
     runNpm([
-      'install', '--global', '--prefix', globalPrefix, '--no-audit', '--no-fund', `@e-mate/dsh@${staged.version}`,
+      'install', '--global', '--prefix', globalPrefix, '--no-audit', '--no-fund', paths.targetPackage,
     ], { env: environment })
     if (runNode([binPath, '--version'], { env: environment }).trim() !== staged.version) {
       throw new Error('activated e-Mate package version does not match the staged release')
@@ -361,7 +508,11 @@ export async function runOnlineUpdateHelper({ requestId, dshHome, binPath }) {
       status: 'completed',
       installed_version: staged.version,
       installed_package_integrity: staged.integrity,
+      installed_manifest_url: staged.manifest_url,
+      installed_source_url: staged.tarball_url,
       previous_package_integrity: previousIntegrity,
+      previous_manifest_url: previous.manifest_url,
+      previous_source_url: previous.tarball_url,
     })
     return { status: 'completed', version: staged.version, receipt: paths.receipt }
   } catch (error) {
@@ -370,8 +521,11 @@ export async function runOnlineUpdateHelper({ requestId, dshHome, binPath }) {
       try {
         runNpm([
           'install', '--global', '--prefix', globalPrefix, '--no-audit', '--no-fund',
-          `@e-mate/dsh@${request.current_version}`,
+          paths.previousPackage,
         ], { env: environment })
+        if (runNode([binPath, '--version'], { env: environment }).trim() !== request.current_version) {
+          throw new Error('rolled-back e-Mate package version does not match the cached release')
+        }
         restoreData(paths)
         runNode([binPath, 'setup'], { env: environment })
         runNode([binPath, 'launch', ...(previousPort === undefined ? [] : ['--port', String(previousPort)])], { env: environment })
@@ -382,7 +536,9 @@ export async function runOnlineUpdateHelper({ requestId, dshHome, binPath }) {
           error: message,
           rollback_error: rollback,
           staged_package_integrity: staged?.integrity,
+          staged_source_url: staged?.tarball_url,
           previous_package_integrity: previousIntegrity,
+          previous_source_url: previous?.tarball_url,
         })
         throw new Error(`online update failed (${message}); rollback also failed (${rollback})`)
       }
@@ -391,7 +547,9 @@ export async function runOnlineUpdateHelper({ requestId, dshHome, binPath }) {
       status: changed ? 'rolled-back' : 'failed-before-change',
       error: message,
       staged_package_integrity: staged?.integrity,
+      staged_source_url: staged?.tarball_url,
       previous_package_integrity: previousIntegrity,
+      previous_source_url: previous?.tarball_url,
     })
     throw error
   } finally {
