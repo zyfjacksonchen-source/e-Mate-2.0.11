@@ -80,6 +80,21 @@ export function resolveSameOriginPath(configured: string | undefined, path: stri
   return `${endpoint.pathname}${endpoint.search}`;
 }
 
+export function resolveModelGatewayPath(configured: string, origin: string): string {
+  const target = new URL(configured, origin);
+  if (
+    target.protocol !== 'https:' ||
+    target.username ||
+    target.password ||
+    target.search ||
+    target.hash ||
+    !/^\/e-mate\/model-api\/?$/.test(target.pathname)
+  ) {
+    throw new Error('Invalid Model Gateway URL');
+  }
+  return '/e-mate/model-api/';
+}
+
 export function resolveUsageDashboardPath(configured: string | undefined, origin: string): string | null {
   if (!configured) return null;
   const target = new URL(configured, origin);
@@ -143,7 +158,7 @@ export async function loginAdmin(
   return {
     accessToken: value.accessToken,
     modelGateway: {
-      basePath: resolveSameOriginPath(modelGateway.baseUrl, '/', options.origin),
+      basePath: resolveModelGatewayPath(modelGateway.baseUrl, options.origin),
       sessionToken: modelGateway.sessionToken,
       expiresAt,
       allowedModelIds: [...allowedModelIds],

@@ -16,6 +16,7 @@ import {
   resetTenantUserPassword,
   quotaTokens,
   readAdminModelSession,
+  resolveModelGatewayPath,
   resolveSameOriginPath,
   resolveUsageDashboardPath,
   testModelConnection,
@@ -49,6 +50,21 @@ test('admin API paths must stay on the console origin', () => {
   assert.throws(
     () => resolveSameOriginPath('https://attacker.example/runtime', '/runtime/status', origin),
     /must share/
+  );
+});
+
+test('canonical Model Gateway receipts are rebased to the current public console origin', () => {
+  assert.equal(
+    resolveModelGatewayPath('https://mvdcm.ecoremedia.net/e-mate/model-api', 'https://dl.ecoremedia.net'),
+    '/e-mate/model-api/'
+  );
+  assert.throws(
+    () => resolveModelGatewayPath('https://attacker.example/model-api', origin),
+    /Invalid Model Gateway URL/
+  );
+  assert.throws(
+    () => resolveModelGatewayPath('http://mvdcm.ecoremedia.net/e-mate/model-api', origin),
+    /Invalid Model Gateway URL/
   );
 });
 
@@ -100,7 +116,7 @@ test('administrator password login reuses the same-origin Auth Gateway contract 
           schemaVersion: 1,
           accessToken,
           modelGateway: {
-            baseUrl: `${origin}/e-mate/model-api/`,
+            baseUrl: 'https://mvdcm.ecoremedia.net/e-mate/model-api/',
             sessionToken: modelSessionToken,
             expiresAt: modelExpiry,
             allowedModelIds: ['gpt-5.6-sol'],
