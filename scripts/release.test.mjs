@@ -6,7 +6,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
-import { assertEvidenceSource, BUNDLED_PLUGIN_PACKAGES, generateEvidence, isAcceptedReleaseCommit, RELEASE_PACKAGES, verifyRelease, VERSION } from './release.mjs'
+import { assertEvidenceSource, BUNDLED_PLUGIN_PACKAGES, generateEvidence, isAcceptedReleaseCommit, RELEASE_PACKAGES, TARGET_NATIVE_RUNTIME_FILES, verifyRelease, VERSION } from './release.mjs'
 import {
   buildR2Inventory,
   matchesR2Head,
@@ -54,6 +54,9 @@ async function pack(directory, expected, mutate = manifest => manifest) {
   await file(packageRoot, 'runtime/harness/node_modules/@deepseek-ai/dsh/package.json', JSON.stringify({
     name: '@deepseek-ai/dsh', version: '0.1.0-rc.5', license: 'MIT',
   }))
+  for (const runtimeFile of TARGET_NATIVE_RUNTIME_FILES) {
+    await file(packageRoot, `runtime/harness/node_modules/${runtimeFile}`)
+  }
   await file(packageRoot, 'runtime/source-manifest.json', JSON.stringify({
     product_version: VERSION, version: '0.1.0-rc.5', commit: HARNESS_COMMIT,
   }))
@@ -218,6 +221,7 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.match(release.jobs.publish.steps.at(-1).run, /release\.mjs publish --from dist\/npm/u)
   const cleanInstall = release.jobs['clean-install'].steps.find(step => step.name === 'Install tarballs with npm and run setup checks')
   assert.equal((cleanInstall.run.match(/node "\$cli" setup$/gmu) ?? []).length, 2)
+  assert.match(readFileSync('scripts/build-harness-runtime.mjs', 'utf8'), /'--os=darwin', '--os=win32', '--cpu=arm64', '--cpu=x64'/u)
   const registryInstall = release.jobs['registry-install'].steps.find(step => step.name === 'Read back npm and run a clean registry install')
   assert.match(registryInstall.run, /update --version 2\.0\.7 --json/u)
   assert.match(registryInstall.run, /installed_package_integrity/u)

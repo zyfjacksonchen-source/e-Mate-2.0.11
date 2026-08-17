@@ -45,6 +45,25 @@ const BUNDLED_MAIN_COMPONENTS = [
   { name: 'dijkstrajs', version: '1.0.3', license: 'MIT' },
   { name: 'pngjs', version: '5.0.0', license: 'MIT' },
 ]
+export const TARGET_NATIVE_RUNTIME_FILES = [
+  '@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.35.3.node',
+  '@img/sharp-darwin-x64/lib/sharp-darwin-x64-0.35.3.node',
+  '@img/sharp-win32-x64/lib/sharp-win32-x64-0.35.3.node',
+  '@img/sharp-libvips-darwin-arm64/lib/libvips-cpp.8.18.3.dylib',
+  '@img/sharp-libvips-darwin-x64/lib/libvips-cpp.8.18.3.dylib',
+  '@koromix/koffi-darwin-arm64/darwin_arm64/koffi.node',
+  '@koromix/koffi-darwin-x64/darwin_x64/koffi.node',
+  '@koromix/koffi-win32-x64/win32_x64/koffi.node',
+  '@vscode/ripgrep-darwin-arm64/bin/rg',
+  '@vscode/ripgrep-darwin-x64/bin/rg',
+  '@vscode/ripgrep-win32-x64/bin/rg.exe',
+  'node-addon-require-builtin-darwin-arm64/prebuilt/darwin-arm64-napi-v9.node',
+  'node-addon-require-builtin-darwin-x64/prebuilt/darwin-x64-napi-v9.node',
+  'node-addon-require-builtin-win32-x64-msvc/prebuilt/win32-x64-msvc-napi-v9.node',
+  'node-pty/prebuilds/darwin-arm64/pty.node',
+  'node-pty/prebuilds/darwin-x64/pty.node',
+  'node-pty/prebuilds/win32-x64/pty.node',
+]
 
 const TRANSIENT_PUBLISH_CODES = ['E409', 'E429', 'E500', 'E502', 'E503', 'E504', 'ETIMEDOUT', 'ECONNRESET', 'EAI_AGAIN']
 const PUBLISH_ATTEMPTS = 4
@@ -135,6 +154,9 @@ function verifyMain(item, manifest, entries) {
     'package/runtime/harness/apps/cli/lib/bin.js',
     'package/THIRD_PARTY_NOTICES.txt',
   ]) requireEntry(entries, entry, item.name)
+  for (const entry of TARGET_NATIVE_RUNTIME_FILES) {
+    requireEntry(entries, `package/runtime/harness/node_modules/${entry}`, item.name)
+  }
   const harness = tarJson(item.path, 'package/runtime/source-manifest.json')
   if (harness.version !== HARNESS_VERSION || harness.commit !== HARNESS_COMMIT || harness.product_version !== VERSION) {
     throw new Error('@e-mate/dsh carries the wrong DeepSeek Harness closure')
