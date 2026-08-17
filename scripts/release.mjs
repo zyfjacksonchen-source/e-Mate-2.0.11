@@ -413,7 +413,7 @@ function isTransient(output) {
 
 async function publishTarball(item) {
   for (let attemptNumber = 1; attemptNumber <= PUBLISH_ATTEMPTS; attemptNumber += 1) {
-    const result = attempt('npm', ['publish', item.path, '--provenance'])
+    const result = attempt('npm', ['publish', item.path, '--provenance', '--loglevel=error'])
     const output = `${result.stdout}${result.stderr}`
     if (result.status === 0) return
     const settled = registryState(item.name, VERSION)
