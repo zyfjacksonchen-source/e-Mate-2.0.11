@@ -1320,3 +1320,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 企业管理端复用现有用户列表、`updateTenantUser`、批量审批与模型策略弹层，新增“全部状态 / 有效 / 待审批”筛选；没有新增管理 API、身份、Store 或第二套审批协议。
 - “全选待审批并配置模型”只取当前筛选结果中的待审批用户并打开原策略弹层，预选全部已发布且启用的模型；弹层另提供“全选可用模型”，最终仍须管理员确认额度和模型后提交。
 - 管理端 19/19 测试、TypeScript 与 Vite 生产构建通过。生产主备域名均回读同一 `index-QtMqsyCQ.js`；真实管理员会话验证了状态选项、有效用户筛选和五个可用模型的清空/全选交互，未提交任何生产用户变更，验收后已退出。
+
+## 2026-08-18 · 2.0.8 S13 下载页静态缓存身份
+
+- 用户在正式下载页复现“正在读取最新版本 / 下载信息暂不可用”。实时回读确认 R2 `desktop/latest.json` 为已发布 2.0.8，且对 `https://dl.ecoremedia.net` 返回正确 CORS；生产 `/srv/ecorex-agent-download/current` 仍指向 `site-emate-2.0.7-92c3fd3`，线上脚本因此按 2.0.7 身份拒绝 2.0.8 清单。
+- 同一脚本 URL 使用一年 `immutable` 缓存，但仓库中的 2.0.8 脚本内容 SHA-256 已从文件名声明的 `527be2232a46` 变为 `a8c4f1979f7c`。直接覆盖旧 URL 会让已访问用户继续命中 2.0.7 字节；最小修复只为现有 2.0.8 脚本换用真实内容哈希文件名，并在发布测试锁定“文件名摘要前缀等于文件内容”，不放宽 manifest、R2 origin、版本、来源提交、大小或 SHA-256 校验。
+- 下载页聚焦回归 `1/1`、完整 release contract `9/9` 与 `git diff --check` 通过；生产切槽继续要求新旧槽位并存、原子替换 `current`，并在公开页面真实渲染 2.0.8 下载按钮后才关闭。

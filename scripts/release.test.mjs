@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -245,7 +246,9 @@ test('GitHub release packs once and validates the same tarball on three platform
 
 test('download page resolves unsigned desktop installers from the fail-closed R2 manifest', async () => {
   const page = renderDownloadPage(readFileSync('deploy/download-page/index.html', 'utf8'))
-  const script = readFileSync('deploy/download-page/site.527be2232a46.js', 'utf8')
+  const scriptName = 'site.a8c4f1979f7c.js'
+  const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
+  assert.equal(scriptName.split('.')[1], createHash('sha256').update(script).digest('hex').slice(0, 12))
   const manifestUrl = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json'
   assert.match(script, new RegExp(manifestUrl.replaceAll('.', '\\.')))
   for (const platform of ['macos', 'windows']) assert.match(page, new RegExp(`data-platform="${platform}"`, 'u'))
@@ -269,7 +272,7 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
     assert.match(page, new RegExp(`\\./assets/${asset.replaceAll('.', '\\.')}\\b`, 'u'))
   }
   assert.doesNotMatch(page, /__EMATE_RELEASE_SOURCE_COMMIT__|npm install|nodejs\.org|e-mate setup|e-mate launch/u)
-  const { normalizeDownloadIndex } = await import('../deploy/download-page/site.527be2232a46.js')
+  const { normalizeDownloadIndex } = await import(`../deploy/download-page/${scriptName}`)
   const commit = 'a'.repeat(40)
   const releasePrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.8/${commit}`
   const fixture = {
