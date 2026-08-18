@@ -11,6 +11,11 @@
   --dsw-font-markdown-base-strong-italic: italic 600 14px/22px var(--dsw-font-family);
 }
 
+/* The audit store keeps turn timing/token facts; the user-facing tail does not. */
+:global([data-turn-tail] > div:last-child > span:last-child) {
+  display: none;
+}
+
 :global([data-chat-flow-kind='user'] [data-time-hover-root] > div:first-child > div:last-child) {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif !important;
   font-size: 14px !important;
