@@ -4299,6 +4299,7 @@ __metadata:
     "@deepseek-ai/dsh-workflow": "npm:0.1.0-rc.6"
     "@deepseek-ai/schemastery": "npm:^3.18.1"
     "@electron/asar": "npm:3.4.1"
+    "@kelearns/dsh-navigation-bar": "npm:0.2.1"
     "@omdsh-dev/dsh-genui": "file:vendor/omdsh-dev-dsh-genui-0.8.3-0e756efb.tgz"
     "@types/js-yaml": "npm:^4.0.9"
     "@types/node": "npm:^22.20.0"
@@ -4837,6 +4838,17 @@ __metadata:
     "@jridgewell/resolve-uri": "npm:^3.1.0"
     "@jridgewell/sourcemap-codec": "npm:^1.4.14"
   checksum: 10c0/4b30ec8cd56c5fd9a661f088230af01e0c1a3888d11ffb6b47639700f71225be21d1f7e168048d6d4f9449207b978a235c07c8f15c07705685d16dc06280e9d9
+  languageName: node
+  linkType: hard
+
+"@kelearns/dsh-navigation-bar@npm:0.2.1":
+  version: 0.2.1
+  resolution: "@kelearns/dsh-navigation-bar@npm:0.2.1"
+  peerDependencies:
+    "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.6
+    react: ^18.2.0
+    react-dom: ^18.2.0
+  checksum: 10c0/90a5c908db034f6ad8f34d644766ed8ba5866d4bcf61f6d8720fffa10cedb92343a897ae6d5eb9403eec299f3e4468e733d56eb93b195b29331088183122352a
   languageName: node
   linkType: hard
 
@@ -7593,8 +7605,8 @@ __metadata:
 
 "dsh-turn-fold@patch:dsh-turn-fold@https%3A//github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz#~/.yarn/patches/dsh-turn-fold-https-e835a4814f.patch":
   version: 0.2.2
-  resolution: "dsh-turn-fold@patch:dsh-turn-fold@https%3A//github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz#~/.yarn/patches/dsh-turn-fold-https-e835a4814f.patch::version=0.2.2&hash=11736b"
-  checksum: 10c0/8b181c491b07c31ea9a5f660aeb1fd928e61c64e2e73367e185f9cb73583a2a8e96efdecf02942300c0cdd1690f525473c88ab5686573a39582de9e8ffcc932c
+  resolution: "dsh-turn-fold@patch:dsh-turn-fold@https%3A//github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz#~/.yarn/patches/dsh-turn-fold-https-e835a4814f.patch::version=0.2.2&hash=370051"
+  checksum: 10c0/05a06d0afd283e247bfc76bf5f8ced583cd2fe26f9611b6ab5426843ec84f04fde4cbc79fcfb0a8ca0c9d2772fd90f357a3479961c8b8a1f9d0503112e9304f5
   languageName: node
   linkType: hard
 

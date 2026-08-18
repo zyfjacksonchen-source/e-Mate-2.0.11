@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
-import { loadTargetTools } from './target-runtime.js'
+import { loadTargetLlm, loadTargetTools } from './target-runtime.js'
 
 export const name = 'emate-image-generation'
 export const inject = ['tools', 'jobs', 'attachments', 'emateIdentity', 'emateModelPolicy', 'emateCapabilities']
@@ -119,6 +119,24 @@ function sessionImage(agent, attachmentId) {
     if (found !== undefined) return found
   }
   throw new Error(`image attachment ${attachmentId} is not present in this e-Mate session`)
+}
+
+function selectedImageContext(messages) {
+  const attachmentIds = []
+  const seen = new Set()
+  for (const message of messages) {
+    if (message?.source?.kind !== 'user' || !Array.isArray(message.content)) continue
+    for (const block of message.content) {
+      if (block?.type !== 'image' || !validImageRef(block.attachment)) continue
+      const id = block.attachment.attachmentId
+      if (!seen.has(id)) {
+        seen.add(id)
+        attachmentIds.push(id)
+      }
+    }
+  }
+  if (attachmentIds.length === 0) return undefined
+  return `The user-selected images in this request are already stored as e-Mate attachments. Their image_url values, in attachment order, are: ${attachmentIds.map(id => `\`${id}\``).join(', ')}. When the user asks to edit or use an attached image as reference, call imagegen with the matching exact image_url value; do not ask the user to upload it again.`
 }
 
 function normalizeTask(args) {
@@ -310,7 +328,23 @@ export async function apply(ctx, config = {}) {
     root,
     attachments: ctx.attachments,
   })
-  const { defineTool } = await loadTargetTools(config.bindingPath ?? join(import.meta.dirname, 'runtime-binding.json'))
+  const bindingPath = config.bindingPath ?? join(import.meta.dirname, 'runtime-binding.json')
+  const [{ defineTool }, { createUserMessage }] = await Promise.all([
+    loadTargetTools(bindingPath),
+    loadTargetLlm(bindingPath),
+  ])
+  ctx.on('agent/pre-step', async (_proposal, next) => {
+    const decision = await next()
+    if (decision.kind === 'reject') return decision
+    const context = selectedImageContext(decision.messages)
+    return context === undefined ? decision : {
+      ...decision,
+      messages: [...decision.messages, createUserMessage({
+        content: [{ type: 'text', text: context }],
+        source: { kind: 'plugin', plugin: '@e-mate/dsh-image-generation', form: 'catalog' },
+      })],
+    }
+  })
   ctx.effect(() => ctx.jobs.attachController('emate-image'), 'emate.image: target Job controller')
   ctx.tools.register(defineTool({
     name: 'imagegen',

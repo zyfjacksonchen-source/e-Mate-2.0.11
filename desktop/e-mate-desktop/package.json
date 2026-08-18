@@ -222,6 +222,7 @@
     "@deepseek-ai/dsh-web-app": "0.1.0-rc.6",
     "@deepseek-ai/dsh-workflow": "0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1",
+    "@kelearns/dsh-navigation-bar": "0.2.1",
     "@omdsh-dev/dsh-genui": "file:vendor/omdsh-dev-dsh-genui-0.8.3-0e756efb.tgz",
     "@yuxianglin/dsh-bridge-browser": "file:vendor/yuxianglin-dsh-bridge-browser-0.0.1-b20ecd51.tgz",
     "dsh-at-file": "https://github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz",

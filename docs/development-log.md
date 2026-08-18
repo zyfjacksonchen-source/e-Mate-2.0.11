@@ -1326,3 +1326,22 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 用户在正式下载页复现“正在读取最新版本 / 下载信息暂不可用”。实时回读确认 R2 `desktop/latest.json` 为已发布 2.0.8，且对 `https://dl.ecoremedia.net` 返回正确 CORS；生产 `/srv/ecorex-agent-download/current` 仍指向 `site-emate-2.0.7-92c3fd3`，线上脚本因此按 2.0.7 身份拒绝 2.0.8 清单。
 - 同一脚本 URL 使用一年 `immutable` 缓存，但仓库中的 2.0.8 脚本内容 SHA-256 已从文件名声明的 `527be2232a46` 变为 `a8c4f1979f7c`。直接覆盖旧 URL 会让已访问用户继续命中 2.0.7 字节；最小修复只为现有 2.0.8 脚本换用真实内容哈希文件名，并在发布测试锁定“文件名摘要前缀等于文件内容”，不放宽 manifest、R2 origin、版本、来源提交、大小或 SHA-256 校验。
 - 下载页聚焦回归 `1/1`、完整 release contract `9/9` 与 `git diff --check` 通过；生产切槽继续要求新旧槽位并存、原子替换 `current`，并在公开页面真实渲染 2.0.8 下载按钮后才关闭。
+
+## 2026-08-18 · 2.0.8 S10 本地图片附件身份透传
+
+- 原生本地文件选择器已正确把 PNG/JPG 交给 pinned Harness 的 InputBar，Host 也已把图片保存为带 `sha256:` identity 的真实 `ImageAttachmentRef`；问题不在上传。目标 LLM adapter 只把图片字节和 MIME 暴露给模型，不暴露附件 identity，而既有 `imagegen` Tool 为避免读取会话外图片又只接受精确 `image_url`，因此 Agent 能看见图片却无法调用改图 Tool，错误要求用户重新上传。
+- 修复只在既有 `emate-image-generation` 插件复用目标 `agent/pre-step` waterfall 和 `createUserMessage`：当本步存在真实 `source.kind=user` 图片时，追加一条 durably logged 的 plugin catalog 消息，把附件顺序和精确 `image_url` 提供给模型；文本请求保持原样，重复 identity 去重，Tool 的 session ownership 校验不变。未改文件选择器、Harness core、LLM adapter、附件 schema、会话或传输协议。
+- 图片生成窄回归 `1/1`、完整 e-Mate profile `42/42`、文件导入合同 `5/5`、target pin 检查、profile build 与 `git diff --check` 通过。此切片未提交、发布、改版本或覆盖任何 2.0.8 制品；剩余门禁是主代理重建 Desktop profile 后通过真实本地文件选择器上传 PNG/JPG，确认自然语言改图调用 `imagegen` 的同一 `sha256:` identity 并完成 Job/Gallery，而不再出现重新上传提示。
+
+## 2026-08-18 · 2.0.8 S13 下载页静态缓存身份
+
+- 用户在正式下载页复现“正在读取最新版本 / 下载信息暂不可用”。实时回读确认 R2 `desktop/latest.json` 为已发布 2.0.8，且对 `https://dl.ecoremedia.net` 返回正确 CORS；生产 `/srv/ecorex-agent-download/current` 仍指向 `site-emate-2.0.7-92c3fd3`，线上脚本因此按 2.0.7 身份拒绝 2.0.8 清单。
+- 同一脚本 URL 使用一年 `immutable` 缓存，但仓库中的 2.0.8 脚本内容 SHA-256 已从文件名声明的 `527be2232a46` 变为 `a8c4f1979f7c`。直接覆盖旧 URL 会让已访问用户继续命中 2.0.7 字节；最小修复只为现有 2.0.8 脚本换用真实内容哈希文件名，并在发布测试锁定“文件名摘要前缀等于文件内容”，不放宽 manifest、R2 origin、版本、来源提交、大小或 SHA-256 校验。
+- 下载页聚焦回归 `1/1`、完整 release contract `9/9` 与 `git diff --check` 通过；生产切槽继续要求新旧槽位并存、原子替换 `current`，并在公开页面真实渲染 2.0.8 下载按钮后才关闭。
+
+## 2026-08-18 · 2.0.8 S14 Bash 权限、导航栏与回合 Token 紧凑显示
+
+- 固定 Harness 基线中 `terminal-bash` 的 `CONTROLLED_PROMPT` 是 5 字节 `dsh> `，而 `tool-bash-persistent` 的 `SHELL_PROMPT` 是 31 字节 `__DSH_PERSISTENT_BASH_PROMPT__ `；末尾都含空格但逐字节不一致，生产默认等待因此每条命令误走 3.5 秒超时。下游 Harness 提交 `12d68b6ca05fa538d98f70ed47786c44ca3a7225` 只把前者及锁死旧值的测试改为后者，改后两者均为 31 字节、十六进制 `5f5f4453485f50455253495354454e545f424153485f50524f4d50545f5f20`。
+- 同一窄补丁在 Bash/PowerShell Tool 的共享权限入口把“请求与当前 sandbox 相等”及“当前已是 `danger-full-access`”判定为冗余请求，继续使用当前策略且不触发审批；只有严格扩大权限才进入既有审批，缺少 sandbox 组合及非法模式仍失败关闭。该修改直接覆盖截图中的 `danger-full-access → workspace-write/danger-full-access` 反向升级错误，没有新权限模型或第二套执行路径。
+- 生产默认持久 Bash 三命令实测：macOS 从 `7244/3573/3547 ms` 降至 `239/78/79 ms`；Linux ARM64 从 `7183/3553/3537 ms` 降至 `229/67/67 ms`。相关 13 个测试文件在 macOS 改前/改后为 `7.85/7.90 s`，均为 248 passed、7 skipped；Linux 为 `9.649/8.356 s`，同样 248 passed、7 skipped。Linux 初次安装的 `node-pty` LTO 环境错误通过仅对该既有原生依赖关闭 LTO 重建后消除，不计入功能结果。
+- Desktop 通过现有 ecosystem profile 机制预装固定 `@kelearns/dsh-navigation-bar@0.2.1`，没有修改 Harness 导航架构；既有 `dsh-turn-fold@0.2.2` Yarn patch 仅把折叠回合标题的总 Token 显示改为与 DSH StatsLine 相同的 K/M 阈值和精度，例如 `267382 → 267K token`、`1250000 → 1.3M token`，`tok/s` 与缓存命中率不变。

@@ -5,7 +5,7 @@ import { nativeSubagentCompatibility } from '../lib/index.js'
 
 test('compatibility bundle pins only native rc.5 subagent composition', async () => {
   assert.equal(nativeSubagentCompatibility.harnessVersion, '0.1.0-rc.5')
-  assert.equal(nativeSubagentCompatibility.harnessCommit, '47f943859bef60e4160492346772ded9b24f765a')
+  assert.equal(nativeSubagentCompatibility.harnessCommit, '12d68b6ca05fa538d98f70ed47786c44ca3a7225')
   assert.equal(nativeSubagentCompatibility.preset, 'standard')
   assert.ok(nativeSubagentCompatibility.packages.every(name => name.startsWith('@deepseek-ai/')))
   assert.deepEqual(nativeSubagentCompatibility.tools, [

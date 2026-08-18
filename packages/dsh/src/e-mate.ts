@@ -33,7 +33,7 @@ export const VERSION = '2.0.8'
 export const PROFILE = 'e-mate'
 export const DEFAULT_PORT = 3080
 export const HARNESS_VERSION = '0.1.0-rc.5'
-export const HARNESS_COMMIT = '47f943859bef60e4160492346772ded9b24f765a'
+export const HARNESS_COMMIT = '12d68b6ca05fa538d98f70ed47786c44ca3a7225'
 const PLUGIN_PACKAGES = [
   '@e-mate/dsh-plugin-better-sidebar',
   '@e-mate/dsh-plugin-browser',

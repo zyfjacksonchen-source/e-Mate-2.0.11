@@ -18,7 +18,7 @@ import { unpackedAsarPath } from './packaged-runtime-path.ts'
 export const EMATE_PROFILE_NAME = 'e-mate'
 
 const VERSION = '2.0.8'
-const HARNESS_COMMIT = '47f943859bef60e4160492346772ded9b24f765a'
+const HARNESS_COMMIT = '12d68b6ca05fa538d98f70ed47786c44ca3a7225'
 const PLUGIN_PACKAGES = [
   '@e-mate/dsh-plugin-browser-panel',
   '@e-mate/dsh-plugin-file-import',
@@ -28,6 +28,7 @@ const PLUGIN_PACKAGES = [
 ] as const
 
 const ECOSYSTEM_PLUGIN_PACKAGES = [
+  { name: '@kelearns/dsh-navigation-bar', version: '0.2.1', entry: 'index.js', client: true, patchName: "'@kelearns/dsh-navigation-bar'" },
   { name: '@omdsh-dev/dsh-genui', version: '0.8.3', entry: 'lib/index.js', client: true, patchName: "'@omdsh-dev/dsh-genui'" },
   { name: '@yuxianglin/dsh-bridge-browser', version: '0.0.1', entry: 'lib/index.js', client: false, patchName: "'@yuxianglin/dsh-bridge-browser'" },
   { name: 'dsh-at-file', version: '0.6.2', entry: 'lib/index.js', client: true, patchName: 'dsh-at-file' },

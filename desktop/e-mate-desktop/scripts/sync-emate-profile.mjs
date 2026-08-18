@@ -13,6 +13,7 @@ const mark = join(source, 'plugins', 'emate-shell', 'assets', 'emate-mark.png')
 const browserExtension = join(desktopRoot, 'vendor', 'dsh-browser-extension-0.1.0-b20ecd51')
 const require = createRequire(import.meta.url)
 const ecosystemPlugins = [
+  '@kelearns/dsh-navigation-bar',
   '@omdsh-dev/dsh-genui',
   '@yuxianglin/dsh-bridge-browser',
   'dsh-at-file',
@@ -62,7 +63,7 @@ for (const name of ecosystemPlugins) {
 
 const registry = JSON.parse(await readFile(join(destination, 'bundles', 'registry.json'), 'utf8'))
 if (registry.product !== 'e-Mate' || registry.version !== '2.0.8'
-  || registry.harness_commit !== '47f943859bef60e4160492346772ded9b24f765a') {
+  || registry.harness_commit !== '12d68b6ca05fa538d98f70ed47786c44ca3a7225') {
   throw new Error('sync-emate-profile: bundled e-Mate profile identity drifted')
 }
 

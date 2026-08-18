@@ -21,8 +21,9 @@ describe('e-Mate desktop profile', () => {
     const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8')) as {
       dsh: { profile: { bundles: string[] } }
     }
-    expect(manifest.dsh.profile.bundles).toHaveLength(15)
+    expect(manifest.dsh.profile.bundles).toHaveLength(16)
     expect(manifest.dsh.profile.bundles).toEqual(expect.arrayContaining([
+      '@kelearns/dsh-navigation-bar',
       '@omdsh-dev/dsh-genui',
       '@yuxianglin/dsh-bridge-browser',
       '@e-mate/dsh-plugin-file-import',
@@ -40,6 +41,7 @@ describe('e-Mate desktop profile', () => {
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-genui')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-search-mcp')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-subagent')
+    expect(existsSync(join(profile, 'node_modules', '@kelearns', 'dsh-navigation-bar', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@omdsh-dev', 'dsh-genui', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@yuxianglin', 'dsh-bridge-browser', 'lib', 'index.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-file-import', 'lib', 'client.js'))).toBe(true)
@@ -61,7 +63,13 @@ describe('e-Mate desktop profile', () => {
     expect(fileViewerClient).toContain('SYSTEM_OPEN_EXTENSIONS = /\\.(?:docx|xlsx|pptx|pdf)$/iu')
     expect(fileViewerClient).toContain('coordinator.openInSystem(sessionId, path, singleFile)')
     expect(existsSync(join(profile, 'node_modules', 'dsh-search-mcp', 'lib', 'client.browser.js'))).toBe(true)
-    expect(existsSync(join(profile, 'node_modules', 'dsh-turn-fold', 'client.js'))).toBe(true)
+    const turnFoldClient = readFileSync(join(profile, 'node_modules', 'dsh-turn-fold', 'client.js'), 'utf8')
+    const formatterBody = /function formatTokenCount\(tokens\) \{([\s\S]*?)\n\t\t\}/u.exec(turnFoldClient)?.[1]
+    expect(formatterBody).toBeDefined()
+    const formatTokenCount = new Function('tokens', formatterBody ?? '') as (tokens: number) => string
+    expect(formatTokenCount(267_382)).toBe('267K')
+    expect(formatTokenCount(1_250_000)).toBe('1.3M')
+    expect(turnFoldClient).toContain('"消耗" + formatTokenCount(metrics.tokens) + " token"')
     expect(existsSync(join(profile, 'node_modules', 'dsh-visualize', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(home, 'browser-extension', 'manifest.json'))).toBe(true)
     expect(existsSync(join(home, 'browser-extension', 'SOURCE.json'))).toBe(true)
@@ -83,6 +91,9 @@ describe('e-Mate desktop profile', () => {
     }))
     expect(rows.find(row => row.id === 'genui')).toEqual(expect.objectContaining({
       name: '@omdsh-dev/dsh-genui',
+    }))
+    expect(rows.find(row => row.id === 'dsh-navigation-bar')).toEqual(expect.objectContaining({
+      name: '@kelearns/dsh-navigation-bar',
     }))
     expect(rows.find(row => row.id === 'better-sidebar')).toEqual(expect.objectContaining({
       name: 'dsh-better-sidebar',

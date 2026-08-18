@@ -11,7 +11,7 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
 
 const PRODUCT_VERSION = '2.0.8'
 const HARNESS_VERSION = '0.1.0-rc.5'
-const HARNESS_COMMIT = '47f943859bef60e4160492346772ded9b24f765a'
+const HARNESS_COMMIT = '12d68b6ca05fa538d98f70ed47786c44ca3a7225'
 const PNPM_VERSION = '11.7.0'
 
 const root = resolve(import.meta.dirname, '..')
@@ -164,7 +164,7 @@ async function main() {
       schema_version: 1,
       product: 'e-Mate',
       product_version: PRODUCT_VERSION,
-      source: 'deepseek-ai/deepseek-harness',
+      source: 'zyfjacksonchen-source/deepseek-harness',
       version: HARNESS_VERSION,
       commit: HARNESS_COMMIT,
       lockfile_sha256: sha256(join(harnessRoot, 'pnpm-lock.yaml')),

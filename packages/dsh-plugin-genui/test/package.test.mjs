@@ -10,7 +10,7 @@ test('uses the e-Mate module identity and pinned rc.5 compatibility receipt', as
   const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
   assert.equal(manifest.name, '@e-mate/dsh-plugin-genui')
   assert.equal(manifest.eMate.harnessVersion, '0.1.0-rc.5')
-  assert.equal(manifest.eMate.harnessCommit, '47f943859bef60e4160492346772ded9b24f765a')
+  assert.equal(manifest.eMate.harnessCommit, '12d68b6ca05fa538d98f70ed47786c44ca3a7225')
   assert.equal(manifest.peerDependencies, undefined)
 
   const host = await readFile(resolve(root, 'lib/index.js'), 'utf8')

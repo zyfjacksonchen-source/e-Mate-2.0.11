@@ -157,6 +157,7 @@ try {
     '@e-mate/desktop',
     '@e-mate/dsh-plugin-browser-panel',
     '@e-mate/dsh-plugin-file-import',
+    '@kelearns/dsh-navigation-bar',
     '@omdsh-dev/dsh-genui',
     '@deepseek-ai/dsh-client-ui-conversation',
     '@deepseek-ai/dsh-client-ui-layout',

@@ -10,7 +10,7 @@ import ToolRuntime, { defineContentToolFixture } from '../upstream/deepseek-harn
 import AgentRegistry from '../upstream/deepseek-harness/packages/core/agent/lib/index.js'
 import AgentLoop from '../upstream/deepseek-harness/packages/core/agent-loop/lib/index.js'
 
-const HARNESS_COMMIT = '47f943859bef60e4160492346772ded9b24f765a'
+const HARNESS_COMMIT = '12d68b6ca05fa538d98f70ed47786c44ca3a7225'
 const MIN_SAMPLES = 30
 const wait = milliseconds => new Promise(resolveWait => setTimeout(resolveWait, milliseconds))
 const sha256 = value => createHash('sha256').update(value).digest('hex')

@@ -8,7 +8,7 @@ This file is the implementation source of truth. Development records may add evi
 - Repository: `zyfjacksonchen-source/e-Mate`
 - Release: `@e-mate/dsh@2.0.8`
 - Executable: `e-mate`
-- Harness source: `deepseek-ai/deepseek-harness@47f943859bef60e4160492346772ded9b24f765a`
+- Harness source: `zyfjacksonchen-source/deepseek-harness@12d68b6ca05fa538d98f70ed47786c44ca3a7225` (upstream `deepseek-ai/deepseek-harness@47f943859bef60e4160492346772ded9b24f765a` plus the 2.0.8 prompt and redundant-permission fix only)
 - Harness source version: `0.1.0-rc.5`
 - Browser shell and component source: task `019ff91c-47ca-7c11-93bd-863475181a18`, represented by the final e-Mate 2.0.4/2.0.5 UI state at exact 2.0.5 commit `564a6b6c1d43fb6831dd4a5cd8026e472f063311`
 - Chat interaction source: Codex prototype `019ff665-d721-79a0-869d-338f086cf529`

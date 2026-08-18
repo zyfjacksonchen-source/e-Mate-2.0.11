@@ -1600,6 +1600,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const controllers = []
     const capabilities = []
     const policyModels = []
+    let preStep
     const modelPolicy = { assertModel: async model => { policyModels.push(model) } }
     const pluginCtx = {
       tools: { register: tool => { tools.set(tool.name, tool); return () => { tools.delete(tool.name) } } },
@@ -1635,6 +1636,11 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         if (typeof cleanup === 'function') cleanups.push(cleanup)
         return cleanup
       },
+      on(name, listener) {
+        assert.equal(name, 'agent/pre-step')
+        preStep = listener
+        return () => {}
+      },
     }
     await applyImageGeneration(pluginCtx, {
       bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json'),
@@ -1642,6 +1648,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     })
     assert.deepEqual([...tools.keys()], ['imagegen'])
     assert.deepEqual(controllers, ['emate-image'])
+    assert.equal(typeof preStep, 'function')
     assert.equal(capabilities.length, 1)
     assert.deepEqual(await capabilities[0].status(), {
       state: 'ready',
@@ -1666,6 +1673,30 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.deepEqual(Object.keys(imagegen.parameters.properties), ['prompt', 'image_url'])
     assert.deepEqual(imagegen.parameters.required, ['prompt'])
     assert.match(imagegen.description, /Never pass a provider, model, output path, size, quality, timeout, or concurrency policy/u)
+
+    const selected = await context.attachments.saveImage({
+      data: inputBytes,
+      mediaType: 'image/png',
+      name: 'selected-locally.png',
+    })
+    const userUpload = {
+      id: 'local-upload-message',
+      role: 'user',
+      source: { kind: 'user' },
+      content: [{ type: 'image', attachment: selected }, { type: 'text', text: '请修改这张图。' }],
+    }
+    const admitted = await preStep({ messages: [userUpload] }, async () => ({ kind: 'enter', messages: [userUpload] }))
+    assert.equal(admitted.messages.length, 2)
+    assert.deepEqual(admitted.messages[0], userUpload)
+    assert.deepEqual(admitted.messages[1].source, {
+      kind: 'plugin', plugin: '@e-mate/dsh-image-generation', form: 'catalog',
+    })
+    assert.match(admitted.messages[1].content[0].text, new RegExp(selected.attachmentId))
+    assert.match(admitted.messages[1].content[0].text, /do not ask the user to upload it again/u)
+
+    const textOnly = { ...userUpload, id: 'text-only-message', content: [{ type: 'text', text: '只生成一张新图。' }] }
+    const unchanged = await preStep({ messages: [textOnly] }, async () => ({ kind: 'enter', messages: [textOnly] }))
+    assert.deepEqual(unchanged.messages, [textOnly])
 
     const generated = await imagegen.execute({ prompt: 'Generate one verified image.' }, execution())
     assert.equal(generated.images.length, 1)

@@ -1,3 +1,30 @@
+diff --git a/client.js b/client.js
+index 5746741fa0f36cc9cadf7dd69603c7c35e89cceb..aed1263dffd7d692926d47f80f5e048cc469a9aa 100644
+--- a/client.js
++++ b/client.js
+@@ -346,6 +346,13 @@ window.__ModuleLoader__.load({
+ 			}
+ 			return total + "秒";
+ 		}
++		/** Token 紧凑显示：与 DSH StatsLine 保持相同的 K/M 阈值和精度。 */
++		function formatTokenCount(tokens) {
++			var scaled = function (value) { return String(value >= 100 ? Math.round(value) : Math.round(value * 10) / 10); };
++			if (tokens < 1000) return String(tokens);
++			if (tokens < 1000000) return scaled(tokens / 1000) + "K";
++			return scaled(tokens / 1000000) + "M";
++		}
+ 		/** tok/s：>=10 取整，<10 保留一位小数（与官方一致）。 */
+ 		function formatTokPerSec(tps) {
+ 			var v = Math.max(0, tps);
+@@ -356,7 +363,7 @@ window.__ModuleLoader__.load({
+ 			if (!metrics) return "";
+ 			var parts = [];
+ 			if (metrics.durationMs !== undefined) parts.push("耗时" + formatTurnDuration(metrics.durationMs));
+-			if (metrics.tokens !== undefined) parts.push("消耗" + metrics.tokens + "token");
++			if (metrics.tokens !== undefined) parts.push("消耗" + formatTokenCount(metrics.tokens) + " token");
+ 			if (metrics.tokensPerSecond !== undefined) parts.push(formatTokPerSec(metrics.tokensPerSecond) + "tok/s");
+ 			if (metrics.cacheHitPercent !== undefined) parts.push("缓存命中" + metrics.cacheHitPercent + "%");
+ 			return parts.join("，");
 diff --git a/cordis.patch.yml b/cordis.patch.yml
 new file mode 100644
 index 0000000000000000000000000000000000000000..6158346a28ab55aae4ec1615bb4f4103792ebd58
