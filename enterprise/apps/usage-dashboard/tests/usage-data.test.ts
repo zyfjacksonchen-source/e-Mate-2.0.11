@@ -23,6 +23,7 @@ import {
 import {
   addMetrics,
   callSuccessRate,
+  exactCount,
   exactCost,
   hasUsageFacts,
   percentage,
@@ -72,6 +73,9 @@ test('formats displayed token values with K and M above three digits', () => {
   assert.equal(tokenCount('1250'), '1.3K');
   assert.equal(tokenCount('1000000'), '1M');
   assert.equal(tokenCount('1250000'), '1.3M');
+  assert.equal(exactCount('999', 'zh-CN'), '999');
+  assert.equal(exactCount('1000', 'zh-CN'), '1K');
+  assert.equal(exactCount('1250000', 'zh-CN'), '1.3M');
 });
 
 test('groups trends and details only by their declared ledger keys', () => {

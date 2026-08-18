@@ -154,7 +154,7 @@ export function callSuccessRate(metrics: UsageMetrics): number | null {
 }
 
 export function exactCount(value: string, locale: string): string {
-  return new Intl.NumberFormat(locale).format(BigInt(value));
+  return BigInt(value) >= 1_000n ? tokenCount(value) : new Intl.NumberFormat(locale).format(BigInt(value));
 }
 
 export function tokenCount(value: string): string {
