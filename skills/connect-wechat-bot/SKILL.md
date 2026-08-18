@@ -15,8 +15,7 @@ Use the existing DSH plugin/profile and Session path. Do not request a bot token
    ```json
    {
      "action": "install",
-     "packageName": "@xmanrui/dsh-im",
-     "source": "github:zyfjacksonchen-source/dsh-im#f984f73dcd67692141d4e475c8fbe887e2ce7062"
+     "packageName": "@xmanrui/dsh-im"
    }
    ```
 
