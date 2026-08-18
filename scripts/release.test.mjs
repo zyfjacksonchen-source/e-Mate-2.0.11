@@ -214,6 +214,7 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.equal(published.dependencies.qrcode, '1.5.4')
   const ci = parse(readFileSync('.github/workflows/ci.yml', 'utf8'))
   const release = parse(readFileSync('.github/workflows/release.yml', 'utf8'))
+  const desktopRelease = parse(readFileSync('.github/workflows/desktop-release.yml', 'utf8'))
   assert.deepEqual(published.os, ['darwin', 'win32'])
   assert.equal(published.cpu, undefined)
   assert.ok(workspace.scripts.test.indexOf("--filter './packages/dsh-plugin-*'") < workspace.scripts.test.indexOf('--filter @e-mate/dsh test'))
@@ -223,6 +224,14 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.deepEqual(Object.keys(ci.jobs), ['source', 'desktop-windows', 'desktop-macos'])
   assert.equal(ci.jobs['desktop-windows'].needs, 'source')
   assert.equal(ci.jobs['desktop-macos'].needs, 'source')
+  for (const [workflow, producer] of [[ci, 'source'], [desktopRelease, 'profile']]) {
+    const artifact = workflow.jobs[producer].steps.find(step => step.uses === 'actions/upload-artifact@v4')
+    assert.match(artifact.with.path, /packages\/dsh-plugin-\*\/lib/u)
+    assert.match(artifact.with.path, /packages\/dsh-plugin-browser\/extension\/dist/u)
+    for (const job of Object.values(workflow.jobs).filter(item => item.needs === producer)) {
+      assert.equal(job.steps.find(step => step.uses === 'actions/download-artifact@v4').with.path, 'packages')
+    }
+  }
   assert.deepEqual(
     release.jobs['clean-install'].strategy.matrix.include.map(item => [item.platform, item.runner]),
     [['darwin-arm64', 'macos-15'], ['darwin-x64', 'macos-15-intel'], ['win32-x64', 'windows-2025']],

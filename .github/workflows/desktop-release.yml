@@ -47,7 +47,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: e-mate-desktop-profile-${{ github.sha }}
-          path: packages/dsh/profile
+          path: |
+            packages/dsh/profile
+            packages/dsh-plugin-*/lib
+            packages/dsh-plugin-browser/extension/dist
           if-no-files-found: error
           retention-days: 1
 
@@ -68,7 +71,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: e-mate-desktop-profile-${{ github.sha }}
-          path: packages/dsh/profile
+          path: packages
       - name: Resolve Yarn cache folder
         id: yarn-cache
         shell: bash
@@ -105,7 +108,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: e-mate-desktop-profile-${{ github.sha }}
-          path: packages/dsh/profile
+          path: packages
       - name: Resolve Yarn cache folder
         id: yarn-cache
         run: echo "dir=$(cd desktop && yarn config get cacheFolder)" >> "$GITHUB_OUTPUT"
