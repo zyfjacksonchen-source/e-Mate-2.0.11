@@ -43,7 +43,7 @@ describe('dsh-turn-fold activity projection', () => {
       closed: false, toolCount: 1, messageCount: 1, activityCount: 2,
       finalAssistantKey: null, headerKey: 'think', foldable: true, isTurnHeader: true,
     })
-    expect(activityHeaderLabel(fold)).toBe('1 tool calls, 1 messages')
+    expect(activityHeaderLabel(fold)).toBe('1 次工具调用，1 条消息')
     expect(source).toContain('v === undefined ? false : v')
   })
 

@@ -1374,7 +1374,7 @@ The text highlights AI hallucination and human verification, legal use, real-act
 ## 2026-08-18 · S17 紧凑活动与产物展示（实现结果）
 
 - e-Mate Shell 以同 id、较高优先级 shadow rc.7 的 `stats` dock cell，普通用户不再看到回合、步骤、耗时、首 Token、吞吐、缓存与输入输出 Token；原始 usage/session 事实仍留在 Harness 与企业审计链路。
-- 现有 `dsh-turn-fold` Yarn patch 继续只读取 rc.7 `chat.nodes / locations / turnEnds`，把运行中和已结束的 Think、工具调用与上下文统一投影为默认折叠的 `X tool calls, Y messages`；展开恢复原生节点。最终回复、失败工具结果、中断/带图 assistant 节点以及未被插件覆盖的审批、附件、turn-error、retry 仍保持可见，组头不再订阅或展示任何性能指标。
+- 现有 `dsh-turn-fold` Yarn patch 继续只读取 rc.7 `chat.nodes / locations / turnEnds`，把运行中和已结束的 Think、工具调用与上下文统一投影为默认折叠的“X 次工具调用，Y 条消息”；展开恢复原生节点。最终回复、失败工具结果、中断/带图 assistant 节点以及未被插件覆盖的审批、附件、turn-error、retry 仍保持可见，组头不再订阅或展示任何性能指标。
 - rc.7 `ProducedFiles` 的真实按钮与 `openFile(path)` 没有替换；Shell 只把按钮投影成文件类型胶囊，保留文件名和外链箭头，并从 title/aria-label 清除本地完整路径。会话菜单使用原 summary 作为 CSS anchor，固定浮层随锚点滚动；不支持 anchor 的 Chromium 走原位 absolute fallback。
 - Tool/Think 图标只复用 Beautiful UI MIT 许可的少量 SVG path，未引入依赖；完整版权与 MIT 文本已加入 Desktop `THIRD_PARTY_NOTICES.md`。
 - 聚焦验证：Shell `8 files / 38 tests` 通过；独立活动投影 `1 file / 2 tests` 通过；Yarn patch `install --immutable` 通过，安装后的 `dsh-turn-fold/client.js` 通过 `node --check`，聚焦 `git diff --check` 通过。未提交、推送、发布。

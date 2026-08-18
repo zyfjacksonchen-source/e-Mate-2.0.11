@@ -12,7 +12,7 @@ index 5746741fa0f36cc9cadf7dd69603c7c35e89cceb..407df4de0723f77287d99856e80f1e06
 -//      大组头显示本轮耗时/token/tok/s/缓存命中率；最终总结消息只显示正文。
 -//   4. 点击组头可手动展开/折叠。
 +//   1. Think / 工具调用 / 上下文注入统一收成一个活动组，默认折叠。
-+//   2. 组头只显示「X tool calls, Y messages」，点击后才显示明细。
++//   2. 组头只显示「X 次工具调用，Y 条消息」，点击后才显示明细。
 +//   3. 最终总结、错误、中断、审批、附件仍沿用 DSH 原生节点，不被活动组吞掉。
  //
  // 实现方式：
@@ -134,7 +134,7 @@ index 5746741fa0f36cc9cadf7dd69603c7c35e89cceb..407df4de0723f77287d99856e80f1e06
 -			var v = Math.max(0, tps);
 -			return v >= 10 ? String(Math.round(v)) : String(Math.round(v * 10) / 10);
 +		function activityHeaderLabel(fold) {
-+			return fold.toolCount + " tool calls, " + fold.messageCount + " messages";
++			return fold.toolCount + " 次工具调用，" + fold.messageCount + " 条消息";
  		}
 -		/** 大组头文案："耗时…，消耗…token，…tok/s，缓存命中…%"；无数据返回空串。 */
 -		function turnHeaderLabel(metrics) {

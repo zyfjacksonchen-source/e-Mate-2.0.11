@@ -7644,8 +7644,8 @@ __metadata:
 
 "dsh-turn-fold@patch:dsh-turn-fold@https%3A//github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz#~/.yarn/patches/dsh-turn-fold-https-e835a4814f.patch":
   version: 0.2.2
-  resolution: "dsh-turn-fold@patch:dsh-turn-fold@https%3A//github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz#~/.yarn/patches/dsh-turn-fold-https-e835a4814f.patch::version=0.2.2&hash=587234"
-  checksum: 10c0/6f430d2736c03bdf8ecb370262f2ae18269793c61e3ac1dab917ef6f41ed8b17e4cf423402c5a89f7adb115c62a1ca72b06d9b99968a9c7c9d5f518cc51d3ebb
+  resolution: "dsh-turn-fold@patch:dsh-turn-fold@https%3A//github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz#~/.yarn/patches/dsh-turn-fold-https-e835a4814f.patch::version=0.2.2&hash=03b271"
+  checksum: 10c0/0663afa71bf25684e10962d58741000d17d2ca609d1f792596f39162ab57ba10990217863fee3c43a4ca0cb5103661a358f2ec1a5499ea06b3a15aba711bfc78
   languageName: node
   linkType: hard
 
