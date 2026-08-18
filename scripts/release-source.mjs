@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
 export const PRODUCT = 'e-Mate'
-export const VERSION = '2.0.7'
+export const VERSION = '2.0.8'
 export const PACKAGE_NAME = '@e-mate/dsh'
-export const TARBALL_FILENAME = 'e-mate-dsh-2.0.7.tgz'
+export const TARBALL_FILENAME = 'e-mate-dsh-2.0.8.tgz'
 export const R2_PUBLIC_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
 const COMMIT = /^[0-9a-f]{40}$/u
 

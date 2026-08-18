@@ -6,7 +6,7 @@ import type { DesktopShellSpec } from '../src/runtime.ts'
 
 const updateAvailable = {
   status: 'update-available',
-  currentVersion: '2.0.7',
+  currentVersion: '2.0.8',
   latestVersion: '2.1.0',
   artifact: {
     url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.1.0/${'a'.repeat(40)}/e-Mate-2.1.0-mac-universal.dmg`,
@@ -559,7 +559,7 @@ describe('Electron compatibility runtime', () => {
         appExecutable: process.execPath,
         electronVersion: '43.4.0',
         profileName: 'desktop',
-        productVersion: '2.0.7',
+        productVersion: '2.0.8',
         profileDir: '/tmp/dsh-home/profiles/desktop',
         homeDir: '/tmp/dsh-home',
         spawn: expect.any(Function),
@@ -742,7 +742,7 @@ describe('Electron compatibility runtime', () => {
     expect(runtime.updates).toMatchObject({
       isPackaged: false,
       canDownload: false,
-      currentVersion: '2.0.7',
+      currentVersion: '2.0.8',
       statePath: join('/tmp/dsh-desktop-user-data', 'updates', 'state.json'),
     })
     electron.app.isPackaged = true

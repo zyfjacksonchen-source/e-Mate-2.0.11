@@ -179,7 +179,7 @@ async function callMcpSearch(
           signal,
         },
       })
-  const client = new Client({ name: '@e-mate/dsh-plugin-search-mcp', version: '2.0.7' }, { capabilities: {} })
+  const client = new Client({ name: '@e-mate/dsh-plugin-search-mcp', version: '2.0.8' }, { capabilities: {} })
   try {
     await abortable(client.connect(transport), signal, `connect to ${server.id}`)
     const args: Record<string, unknown> = { query }

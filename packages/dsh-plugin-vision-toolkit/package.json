@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-vision-toolkit",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "description": "Fail-closed e-Mate rc.5 adapter boundary for dsh-vision-toolkit",
   "type": "module",
   "license": "MIT",

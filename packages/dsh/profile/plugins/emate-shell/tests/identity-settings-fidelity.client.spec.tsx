@@ -289,6 +289,7 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
           state: 'setup-required',
           detail: '需要配置应用凭据。',
           qr_supported: false,
+          oauth_supported: true,
           fields: [{
             ref: 'FEISHU_SECRET',
             label: 'App Secret',
@@ -303,6 +304,7 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
           state: 'blocked',
           detail: '扫码授权可用，运行适配尚未启用。',
           qr_supported: true,
+          oauth_supported: false,
           fields: [],
         }],
       },
@@ -328,7 +330,7 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
   it('focuses the exact authorization surface requested by the Agent connection Tool', async () => {
     history.replaceState(null, '', '/settings?section=connections&connection=tencent-docs')
     const item = (id: string, title: string) => ({
-      id, title, summary: `${title}连接`, state: 'setup-required', detail: '需要配置。', qr_supported: false, fields: [],
+      id, title, summary: `${title}连接`, state: 'setup-required', detail: '需要配置。', qr_supported: false, oauth_supported: id !== 'wechat', fields: [],
     })
     render(<ConnectionsSettings
       callConnections={vi.fn(async () => ({
@@ -344,6 +346,56 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     expect(await screen.findByText('腾讯文档')).toBeTruthy()
     expect(screen.queryByText('飞书')).toBeNull()
     expect(screen.queryByText('微信')).toBeNull()
+  })
+
+  it('opens only the Host-provided official OAuth URL without a browser Tool', async () => {
+    history.replaceState(null, '', '/settings?section=connections&connection=tencent-docs')
+    const callConnections = vi.fn(async (endpoint: string): Promise<RpcResult> => endpoint === 'oauth.begin'
+      ? {
+          ok: true,
+          value: {
+            connection_id: 'tencent-docs',
+            attempt_id: '123e4567-e89b-12d3-a456-426614174001',
+            state: 'pending',
+            expires_at: Date.now() + 300_000,
+            authorization_url: 'https://docs.qq.com/scenario/open-claw.html?authType=2&user_code=ABCD-EFGH',
+            user_code: 'ABCD-EFGH',
+            qr_code_data_url: 'data:image/png;base64,AA==',
+            detail: '请在腾讯文档官方页面完成授权。',
+          },
+        }
+      : {
+          ok: true,
+          value: {
+            schema_version: 1,
+            items: [{
+              id: 'tencent-docs',
+              title: '腾讯文档',
+              summary: '通过官方远程 MCP 连接腾讯文档。',
+              state: 'setup-required',
+              detail: '请生成并打开官方授权链接。',
+              qr_supported: false,
+              oauth_supported: true,
+              fields: [],
+            }],
+          },
+        })
+    render(<ConnectionsSettings
+      callConnections={callConnections}
+      setCredential={vi.fn(async () => {})}
+      unsetCredential={vi.fn(async () => {})}
+      LinkIcon={() => <svg />}
+      RefreshIcon={() => <svg />}
+    />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '生成官方授权链接' }))
+    const link = await screen.findByRole('link', { name: '打开腾讯文档官方授权页' })
+    expect(link.getAttribute('href')).toBe('https://docs.qq.com/scenario/open-claw.html?authType=2&user_code=ABCD-EFGH')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+    expect(screen.getByText('ABCD-EFGH')).toBeTruthy()
+    expect(screen.getByRole('img', { name: '用于授权 腾讯文档 的一次性二维码' })).toBeTruthy()
+    expect(callConnections).toHaveBeenCalledWith('oauth.begin', { connection_id: 'tencent-docs' })
   })
 
   it('renders an unlimited weekly quota without exposing its numeric sentinel', async () => {

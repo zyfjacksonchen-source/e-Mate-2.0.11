@@ -11,7 +11,7 @@ test('rc.5 adapter is observable and does not expose provider or model configura
     readFile(new URL('src/index.ts', root), 'utf8'),
   ])
   const pkg = JSON.parse(manifest)
-  assert.equal(pkg.version, '2.0.7')
+  assert.equal(pkg.version, '2.0.8')
   assert.equal(pkg.dsh.visionToolkit.adapterState, 'blocked')
   assert.equal(pkg.dependencies, undefined)
   assert.equal(pkg.peerDependencies, undefined)

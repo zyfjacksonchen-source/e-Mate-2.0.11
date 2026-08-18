@@ -24,6 +24,7 @@ interface ConnectionItem {
   detail: string
   fields: Field[]
   qr_supported: boolean
+  oauth_supported: boolean
 }
 
 type QrState = 'pending' | 'scanned' | 'needs-verification' | 'authorized' | 'expired' | 'failed' | 'cancelled'
@@ -35,6 +36,19 @@ interface QrAttempt {
   expiresAt: number
   qrCodeDataUrl?: string
   verificationRequired: boolean
+  detail: string
+}
+
+type OAuthState = 'pending' | 'authorized' | 'denied' | 'expired' | 'failed' | 'cancelled'
+
+interface OAuthAttempt {
+  connectionId: 'feishu' | 'tencent-docs'
+  attemptId: string
+  state: OAuthState
+  expiresAt: number
+  authorizationUrl?: string
+  userCode?: string
+  qrCodeDataUrl?: string
   detail: string
 }
 
@@ -50,6 +64,11 @@ const REF = /^[A-Za-z_][A-Za-z0-9_]*$/u
 const QR_ATTEMPT = /^[0-9a-f-]{36}$/iu
 const QR_DATA_URL = /^data:image\/png;base64,[A-Za-z0-9+/=]+$/u
 const ACTIVE_QR_STATES = new Set<QrState>(['pending', 'scanned'])
+const ACTIVE_OAUTH_STATES = new Set<OAuthState>(['pending'])
+const OAUTH_ORIGINS = new Map([
+  ['feishu', ['https://accounts.feishu.cn', '/oauth/v1/device/verify']],
+  ['tencent-docs', ['https://docs.qq.com', '/scenario/open-claw.html']],
+])
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : '外部连接暂不可用。'
@@ -68,6 +87,7 @@ function catalog(value: unknown): ConnectionItem[] {
       || !['setup-required', 'blocked'].includes(String(entry.state))
       || typeof entry.detail !== 'string'
       || typeof entry.qr_supported !== 'boolean'
+      || typeof entry.oauth_supported !== 'boolean'
       || !Array.isArray(entry.fields)) throw new Error('外部连接目录无效。')
     for (const field of entry.fields) {
       if (field === null || typeof field !== 'object' || Array.isArray(field)) throw new Error('外部连接凭据目录无效。')
@@ -83,6 +103,39 @@ function catalog(value: unknown): ConnectionItem[] {
     }
   }
   return root.items as ConnectionItem[]
+}
+
+function oauthAttempt(value: unknown): OAuthAttempt {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('官方授权状态无效。')
+  const source = value as Record<string, unknown>
+  if (!['feishu', 'tencent-docs'].includes(String(source.connection_id))
+    || typeof source.attempt_id !== 'string' || !QR_ATTEMPT.test(source.attempt_id)
+    || !['pending', 'authorized', 'denied', 'expired', 'failed', 'cancelled'].includes(String(source.state))
+    || typeof source.expires_at !== 'number' || !Number.isSafeInteger(source.expires_at)
+    || typeof source.detail !== 'string'
+    || (source.user_code !== undefined && (typeof source.user_code !== 'string' || !/^[\x21-\x7E]{1,64}$/u.test(source.user_code)))
+    || (source.qr_code_data_url !== undefined
+      && (typeof source.qr_code_data_url !== 'string' || source.qr_code_data_url.length > 1_000_000 || !QR_DATA_URL.test(source.qr_code_data_url)))) {
+    throw new Error('官方授权状态无效。')
+  }
+  if (source.authorization_url !== undefined) {
+    if (typeof source.authorization_url !== 'string') throw new Error('官方授权链接无效。')
+    const url = new URL(source.authorization_url)
+    const [origin, pathname] = OAUTH_ORIGINS.get(String(source.connection_id)) ?? []
+    if (url.origin !== origin || url.pathname !== pathname || url.username || url.password || url.hash) {
+      throw new Error('官方授权链接无效。')
+    }
+  }
+  return {
+    connectionId: source.connection_id as OAuthAttempt['connectionId'],
+    attemptId: source.attempt_id,
+    state: source.state as OAuthState,
+    expiresAt: source.expires_at,
+    ...(source.authorization_url === undefined ? {} : { authorizationUrl: source.authorization_url }),
+    ...(source.user_code === undefined ? {} : { userCode: source.user_code }),
+    ...(source.qr_code_data_url === undefined ? {} : { qrCodeDataUrl: source.qr_code_data_url }),
+    detail: source.detail,
+  }
 }
 
 function qrAttempt(value: unknown): QrAttempt {
@@ -127,6 +180,8 @@ export function ConnectionsSettings({
   const [qr, setQr] = useState<QrAttempt | null>(null)
   const [qrBusy, setQrBusy] = useState(false)
   const [verifyCode, setVerifyCode] = useState('')
+  const [oauth, setOauth] = useState<OAuthAttempt | null>(null)
+  const [oauthBusy, setOauthBusy] = useState(false)
 
   const load = async () => {
     setStatus(null)
@@ -167,6 +222,65 @@ export function ConnectionsSettings({
       if (timer !== undefined) clearTimeout(timer)
     }
   }, [callConnections, qr?.attemptId, qr?.connectionId, qr?.state])
+
+  useEffect(() => {
+    if (oauth === null || !ACTIVE_OAUTH_STATES.has(oauth.state)) return undefined
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async () => {
+      try {
+        const result = await callConnections('oauth.poll', {
+          connection_id: oauth.connectionId,
+          attempt_id: oauth.attemptId,
+        })
+        if (!active) return
+        if (!result.ok) throw new Error(result.error?.message ?? '官方授权状态读取失败。')
+        const next = oauthAttempt(result.value)
+        setOauth(next)
+        if (ACTIVE_OAUTH_STATES.has(next.state)) timer = setTimeout(() => { void poll() }, 1_000)
+        else if (next.state === 'authorized') await load()
+      } catch (error) {
+        if (active) setStatus(message(error))
+      }
+    }
+    timer = setTimeout(() => { void poll() }, 1_000)
+    return () => {
+      active = false
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [callConnections, oauth?.attemptId, oauth?.connectionId, oauth?.state])
+
+  const beginOauth = async (item: ConnectionItem) => {
+    if (oauthBusy) return
+    setOauthBusy(true)
+    setStatus(null)
+    try {
+      const result = await callConnections('oauth.begin', { connection_id: item.id })
+      if (!result.ok) throw new Error(result.error?.message ?? '官方授权链接生成失败。')
+      setOauth(oauthAttempt(result.value))
+    } catch (error) {
+      setStatus(message(error))
+    } finally {
+      setOauthBusy(false)
+    }
+  }
+
+  const cancelOauth = async () => {
+    if (oauth === null || oauthBusy) return
+    setOauthBusy(true)
+    try {
+      const result = await callConnections('oauth.cancel', {
+        connection_id: oauth.connectionId,
+        attempt_id: oauth.attemptId,
+      })
+      if (!result.ok) throw new Error(result.error?.message ?? '官方授权取消失败。')
+      setOauth(oauthAttempt(result.value))
+    } catch (error) {
+      setStatus(message(error))
+    } finally {
+      setOauthBusy(false)
+    }
+  }
 
   const beginQr = async (item: ConnectionItem) => {
     if (qrBusy) return
@@ -264,7 +378,7 @@ export function ConnectionsSettings({
     <section className={css.settings} aria-labelledby="emate-connections-settings-title">
       <header className={css.heading}>
         <h2 id="emate-connections-settings-title">外部连接</h2>
-        <button className={css.iconButton} type="button" aria-label="刷新外部连接" disabled={busyRef !== null} onClick={() => { void load().catch(error => { setStatus(message(error)) }) }}>
+        <button className={css.iconButton} type="button" aria-label="刷新外部连接" disabled={busyRef !== null || qrBusy || oauthBusy} onClick={() => { void load().catch(error => { setStatus(message(error)) }) }}>
           <RefreshIcon size={16} />
         </button>
       </header>
@@ -286,6 +400,17 @@ export function ConnectionsSettings({
               </div>
               <p>{item.summary}</p>
               <small>{item.detail}</small>
+              {item.oauth_supported && <div className={css.qrActions}><button type="button" disabled={busyRef !== null || qrBusy || oauthBusy} onClick={() => { void beginOauth(item) }}>{oauthBusy ? '正在生成' : '生成官方授权链接'}</button></div>}
+              {oauth?.connectionId === item.id && <section className={css.qrPanel} aria-label={`${item.title}官方授权`}>
+                {oauth.qrCodeDataUrl && <img className={css.qrImage} src={oauth.qrCodeDataUrl} alt={`用于授权 ${item.title} 的一次性二维码`} />}
+                {oauth.userCode && <p>授权码 <code>{oauth.userCode}</code></p>}
+                {oauth.authorizationUrl && <a className={css.oauthLink} href={oauth.authorizationUrl} target="_blank" rel="noopener noreferrer">打开{item.title}官方授权页</a>}
+                <p role="status">{oauth.detail}</p>
+                <div className={css.actions}>
+                  {oauth.state === 'pending' && <button type="button" disabled={oauthBusy} onClick={() => { void cancelOauth() }}>取消授权</button>}
+                  {['denied', 'expired', 'failed', 'cancelled'].includes(oauth.state) && <button type="button" disabled={oauthBusy} onClick={() => { void beginOauth(item) }}>重新生成</button>}
+                </div>
+              </section>}
               {item.qr_supported && <div className={css.qrActions}><button type="button" disabled={busyRef !== null || qrBusy} onClick={() => { void beginQr(item) }}>{qrBusy ? '正在生成' : '生成授权二维码'}</button></div>}
               {qr?.connectionId === item.id && <section className={css.qrPanel} aria-label={`${item.title}扫码授权`}>
                 {qr.qrCodeDataUrl && <img className={css.qrImage} src={qr.qrCodeDataUrl} alt={`用于授权 ${item.title} 的一次性二维码`} />}

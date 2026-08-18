@@ -8,6 +8,7 @@ const SESSION_REF = 'E_MATE_ENTERPRISE_SESSION'
 export const MODEL_SESSION_REF = 'E_MATE_MODEL_SESSION_TOKEN'
 const MAX_JSON_BYTES = 2 * 1024 * 1024
 const REFRESH_EARLY_MS = 60_000
+const SKILL_HUB_ROOT = new URL('https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1')
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u
 const JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u
@@ -536,6 +537,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
   const now = options.now ?? Date.now
   let current: StoredSession | undefined
   let initialized = false
+  let loading: Promise<StoredSession | undefined> | undefined
   let refreshing: Promise<StoredSession> | undefined
 
   const call = async (root: string, path: string, init: RequestInit, label: string) => responseJson(await request(
@@ -572,24 +574,32 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
 
   const load = async () => {
     if (current !== undefined) return current
+    if (loading !== undefined) return loading
     if (initialized) return undefined
-    initialized = true
-    const hit = await options.credentials.resolve(SESSION_REF)
-    if (hit === undefined) return undefined
-    let value: StoredSession
+    loading = (async () => {
+      const hit = await options.credentials.resolve(SESSION_REF)
+      if (hit === undefined) return undefined
+      let value: StoredSession
+      try {
+        value = storedSession(JSON.parse(hit.value), modelRoot)
+      } catch {
+        await clear().catch(() => undefined)
+        throw new Error('e-Mate stored enterprise session is invalid; sign in again')
+      }
+      if (!value.remember_login) {
+        await clear()
+        return undefined
+      }
+      await options.credentials.set(MODEL_SESSION_REF, value.session.modelGateway.sessionToken)
+      current = value
+      return value
+    })()
     try {
-      value = storedSession(JSON.parse(hit.value), modelRoot)
-    } catch {
-      await clear().catch(() => undefined)
-      throw new Error('e-Mate stored enterprise session is invalid; sign in again')
+      return await loading
+    } finally {
+      initialized = true
+      loading = undefined
     }
-    if (!value.remember_login || Date.parse(value.session.expiresAt) <= now()) {
-      await clear()
-      return undefined
-    }
-    await options.credentials.set(MODEL_SESSION_REF, value.session.modelGateway.sessionToken)
-    current = value
-    return value
   }
 
   const refresh = async (value: StoredSession) => {
@@ -627,15 +637,12 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
   const active = async (requireFreshModel: boolean) => {
     const value = await load()
     if (value === undefined) return undefined
-    if (Date.parse(value.session.expiresAt) <= now()) {
-      await clear()
-      return undefined
-    }
-    if (Date.parse(value.session.modelGateway.expiresAt) <= now() + REFRESH_EARLY_MS) {
+    const accessExpired = Date.parse(value.session.expiresAt) <= now()
+    if (accessExpired || Date.parse(value.session.modelGateway.expiresAt) <= now() + REFRESH_EARLY_MS) {
       try {
         return await refresh(value)
       } catch (error) {
-        if (requireFreshModel) throw error
+        if (accessExpired || requireFreshModel) throw error
       }
     }
     return value
@@ -812,7 +819,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
           termsAccepted: true,
           policyRead: true,
           lawfulUseConfirmed: true,
-          clientVersion: '2.0.7',
+          clientVersion: '2.0.8',
           locale: 'zh-CN',
         }),
       }, 'consent acceptance'), status.policy)
@@ -858,15 +865,20 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     },
     async authenticatedRequest(url: URL | string, init: RequestInit = {}) {
       const target = new URL(url)
-      if (target.username || target.password || target.search || target.hash
-        || !target.toString().startsWith(`${modelRoot}/`)) {
+      const modelTarget = target.search === '' && target.toString().startsWith(`${modelRoot}/`)
+      const skillHubTarget = target.origin === SKILL_HUB_ROOT.origin
+        && (target.pathname === SKILL_HUB_ROOT.pathname
+          || target.pathname.startsWith(`${SKILL_HUB_ROOT.pathname}/`))
+      if (target.username || target.password || target.hash || (!modelTarget && !skillHubTarget)) {
         throw new Error('e-Mate authenticated request target is outside the managed enterprise root')
       }
       const value = await active(true)
       if (value === undefined) throw new Error('e-Mate login is required')
       const headers = new Headers(init.headers)
       if (headers.has('authorization')) throw new Error('e-Mate authenticated request cannot override authorization')
-      headers.set('authorization', `Bearer ${value.session.modelGateway.sessionToken}`)
+      headers.set('authorization', `Bearer ${skillHubTarget
+        ? value.session.accessToken
+        : value.session.modelGateway.sessionToken}`)
       return request(target, { ...init, redirect: 'error', headers })
     },
     async dispose() {

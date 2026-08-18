@@ -18,7 +18,7 @@ let currentDiscovery: Discovery | undefined
 function exactDiscovery(value: unknown): Discovery | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const row = value as Record<string, unknown>
-  if (row.schema_version !== 1 || row.product !== 'e-Mate' || row.version !== '2.0.7'
+  if (row.schema_version !== 1 || row.product !== 'e-Mate' || row.version !== '2.0.8'
     || typeof row.ws_url !== 'string' || typeof row.token !== 'string') return undefined
   try {
     const url = new URL(row.ws_url)

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the accepted unsigned 2.0.7 installers and latest.json to R2.
+        description: Publish the accepted unsigned 2.0.8 installers and latest.json to R2.
         required: true
         type: boolean
         default: false
@@ -84,7 +84,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: e-mate-desktop-windows-${{ github.sha }}
-          path: desktop/e-mate-desktop/dist/e-Mate-2.0.7-win-x64-Setup.exe
+          path: desktop/e-mate-desktop/dist/e-Mate-2.0.8-win-x64-Setup.exe
           if-no-files-found: error
           retention-days: 7
 
@@ -120,7 +120,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: e-mate-desktop-macos-${{ github.sha }}
-          path: desktop/e-mate-desktop/dist/mac-smoke/e-Mate-2.0.7-mac-universal.dmg
+          path: desktop/e-mate-desktop/dist/mac-smoke/e-Mate-2.0.8-mac-universal.dmg
           if-no-files-found: error
           retention-days: 7
 
@@ -147,8 +147,8 @@ jobs:
       - name: Generate exact R2 release manifest
         run: >-
           node desktop/e-mate-desktop/scripts/desktop-release-manifest.ts
-          --mac dist/desktop/e-Mate-2.0.7-mac-universal.dmg
-          --win dist/desktop/e-Mate-2.0.7-win-x64-Setup.exe
+          --mac dist/desktop/e-Mate-2.0.8-mac-universal.dmg
+          --win dist/desktop/e-Mate-2.0.8-win-x64-Setup.exe
           --commit "$GITHUB_SHA"
           --out dist/desktop/latest.json
       - uses: actions/upload-artifact@v4
@@ -205,9 +205,9 @@ jobs:
           unset ECOREX_R2_ACCESS_KEY_ID ECOREX_R2_SECRET_ACCESS_KEY
           endpoint="https://${ECOREX_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           bucket="emate-desktop-downloads"
-          prefix="desktop/releases/v2.0.7/${GITHUB_SHA}"
+          prefix="desktop/releases/v2.0.8/${GITHUB_SHA}"
           origin="https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev"
-          for file in e-Mate-2.0.7-mac-universal.dmg e-Mate-2.0.7-win-x64-Setup.exe; do
+          for file in e-Mate-2.0.8-mac-universal.dmg e-Mate-2.0.8-win-x64-Setup.exe; do
             path="dist/desktop/$file"
             bytes="$(stat -c %s "$path")"
             sha="$(sha256sum "$path" | cut -d' ' -f1)"

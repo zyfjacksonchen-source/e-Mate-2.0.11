@@ -29,7 +29,7 @@ import { migrateLegacySchedules } from './legacy-schedule.js'
 import { checkOsCredentialBackend } from './profile/credentials-os.js'
 
 export const PRODUCT = 'e-Mate'
-export const VERSION = '2.0.7'
+export const VERSION = '2.0.8'
 export const PROFILE = 'e-mate'
 export const DEFAULT_PORT = 3080
 export const HARNESS_VERSION = '0.1.0-rc.5'
@@ -66,7 +66,7 @@ export function managedPaths(dshHome = resolveDshHome()) {
     run,
     state: join(run, 'instance.json'),
     log: join(data, 'logs', 'web.log'),
-    receipt: join(data, 'migrations', 'setup-2.0.7.json'),
+    receipt: join(data, 'migrations', 'setup-2.0.8.json'),
   }
 }
 

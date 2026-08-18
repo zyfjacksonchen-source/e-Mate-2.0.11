@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the accepted 2.0.7 carrier and evidence to a new immutable R2 prefix.
+        description: Publish the accepted 2.0.8 carrier and evidence to a new immutable R2 prefix.
         required: true
         type: boolean
         default: false
@@ -67,7 +67,7 @@ jobs:
       - name: Pack the release tarball
         run: |
           pnpm --filter @e-mate/dsh pack --pack-destination dist/npm
-          pnpm --dir upstream/deepseek-harness exec publint ../../dist/npm/e-mate-dsh-2.0.7.tgz
+          pnpm --dir upstream/deepseek-harness exec publint ../../dist/npm/e-mate-dsh-2.0.8.tgz
 
       - uses: actions/upload-artifact@v4
         with:
@@ -110,7 +110,7 @@ jobs:
         run: |
           set -euo pipefail
           prefix="$RUNNER_TEMP/e-mate-prefix"
-          npm install --global --prefix "$prefix" --no-audit --no-fund dist/npm/e-mate-dsh-2.0.7.tgz
+          npm install --global --prefix "$prefix" --no-audit --no-fund dist/npm/e-mate-dsh-2.0.8.tgz
           npm_root="$(npm root --global --prefix "$prefix")"
           cli="$npm_root/@e-mate/dsh/lib/bin.js"
           test -f "$cli"
@@ -119,7 +119,7 @@ jobs:
           else
             test -x "$prefix/bin/e-mate"
           fi
-          test "$(node "$cli" --version)" = '2.0.7'
+          test "$(node "$cli" --version)" = '2.0.8'
           if ! EMATE_STAGING_CHECK=1 node "$cli" setup --check --json > "$RUNNER_TEMP/e-mate-staging-check.json"; then
             cat "$RUNNER_TEMP/e-mate-staging-check.json"
             exit 1
@@ -138,8 +138,8 @@ jobs:
             exit 1
           fi
           status_json="$(node "$cli" status)"
-          health_url="$(node -e 'const v=JSON.parse(process.argv[1]); if(!v.running || !v.healthy || v.product!=="e-Mate" || v.version!=="2.0.7") throw new Error(JSON.stringify(v)); process.stdout.write(new URL("/api/e-mate/health", v.url).href)' "$status_json")"
-          node -e 'fetch(process.argv[1]).then(async response => { const v=await response.json(); if(!response.ok || v.product!=="e-Mate" || v.version!=="2.0.7" || v.profile!=="e-mate") throw new Error(JSON.stringify(v)) })' "$health_url"
+          health_url="$(node -e 'const v=JSON.parse(process.argv[1]); if(!v.running || !v.healthy || v.product!=="e-Mate" || v.version!=="2.0.8") throw new Error(JSON.stringify(v)); process.stdout.write(new URL("/api/e-mate/health", v.url).href)' "$status_json")"
+          node -e 'fetch(process.argv[1]).then(async response => { const v=await response.json(); if(!response.ok || v.product!=="e-Mate" || v.version!=="2.0.8" || v.profile!=="e-mate") throw new Error(JSON.stringify(v)) })' "$health_url"
           node "$cli" stop
           trap - EXIT
 

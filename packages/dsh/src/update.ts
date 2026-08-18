@@ -21,11 +21,11 @@ const SHA512_RE = /^[0-9a-f]{128}$/u
 const RELEASE_SOURCE_COMMIT_RE = /^[0-9a-f]{40}$/u
 const UPDATE_REQUEST_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
 const PRODUCT = 'e-Mate'
-const VERSION = '2.0.7'
+const VERSION = '2.0.8'
 const PACKAGE_NAME = '@e-mate/dsh'
-const TARBALL_FILENAME = 'e-mate-dsh-2.0.7.tgz'
+const TARBALL_FILENAME = 'e-mate-dsh-2.0.8.tgz'
 const R2_PUBLIC_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
-const RELEASE_MANIFEST_PATH_RE = /^\/npm\/candidates\/v2\.0\.7\/([0-9a-f]{40})\/release-manifest\.json$/u
+const RELEASE_MANIFEST_PATH_RE = /^\/npm\/candidates\/v2\.0\.8\/([0-9a-f]{40})\/release-manifest\.json$/u
 const MANIFEST_MAX_BYTES = 1024 * 1024
 const TARBALL_MAX_BYTES = 512 * 1024 * 1024
 

@@ -137,7 +137,7 @@ describe('target conversation fidelity contract', () => {
   it('keeps dsh-genui registered on target slots and real plugin metadata', () => {
     expect(JSON.parse(genuiPackage)).toMatchObject({
       name: '@e-mate/dsh-plugin-genui',
-      version: '2.0.7',
+      version: '2.0.8',
       dsh: { bundle: { patch: './cordis.patch.yml' }, client: { platform: 'web' } },
     })
     expect(genuiPatch).toContain('id: emate-genui')

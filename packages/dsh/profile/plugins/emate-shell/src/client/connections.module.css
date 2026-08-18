@@ -170,6 +170,18 @@
   background: white;
 }
 .qrPanel > p { margin: 0; color: var(--emate-muted); font-size: 12px; line-height: 16px; text-align: center; }
+.oauthLink {
+  min-height: 32px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  box-sizing: border-box;
+  color: var(--emate-brand-ink);
+  background: var(--emate-brand);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  text-decoration: none;
+}
 .qrVerification { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .qrVerification input {
   width: 100%; min-width: 0; min-height: 32px; padding: 6px 10px; box-sizing: border-box;
@@ -244,6 +256,7 @@
   .actions button,
   .field input,
   .qrActions button,
+  .oauthLink,
   .qrVerification input,
   .qrVerification button { min-height: 44px; }
   .iconButton { width: 44px; min-width: 44px; }

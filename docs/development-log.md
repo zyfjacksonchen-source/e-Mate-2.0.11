@@ -1282,3 +1282,35 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 使用生产管理员只在内存中登录并在查询后撤销验收会话，回读 `2026-08-15T22:49:10Z` 至 `2026-08-17T22:48:10Z` 的权威 Usage/Task 账本。全租户 `216` 个模型任务中 `214` 个已入账、`2` 个 pending；四项 reconciliation 均为 `0`。当前验收账号对应用户的 Luna 与 `gpt-image-2-pro` 分组均为 `pendingRequests=0`，其中当前日期 Image Pro 为 `2/2 accounted`。
 - 同一用户的任务账本为 `49 RECEIVED / 47 FIRST_RESPONSE / 40 COMPLETED / 2 FAILED / 4 CANCELLED / 128 TOOL_EXECUTION`，合计 `270` 个真实事件，来源状态为 `AUTHORITATIVE`。查询未读取 prompt、回答、附件或凭据值；管理员 refresh session 已在查询结束时通过现有 logout 合同撤销。
 - 当前剩余 P0 不是账本或 macOS 发布：已发布 App 面向用户正在使用的 Chrome 真实调用 `dsh-browser` 仍返回“浏览器扩展桥接未连接”，而本机 Chrome 进程未加载 `$DSH_HOME/browser-extension`；Windows `win-codex` 当前主机名不可解析，故 Windows 安装、Edge、DPAPI、Office、更新和完整 CU 都不能标记通过。上述两项继续失败关闭，不用隔离开发者模式或 CI 构建代替。
+
+## 2026-08-18 · 2.0.8 S09 Skill Hub 认证请求边界
+
+- 活动切片：保持 2.0.7 已发布制品冻结，仅在最新 `main` 的 2.0.8 分支修复 Skill Hub 固定产品端点的认证请求。
+- 已验证根因：`createSkillHubClient()` 复用现有 `emateIdentity.request` 和固定 `https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1` 端点；`authenticatedRequest()` 只允许 Model Gateway root 且全局禁止 query，因而真实 `/skills?query=...&limit=24` 在发出前失败关闭。
+- 边界：只扩展 identity provider 的精确 HTTPS origin/pathname subtree 允许集；不改 Skill Hub client、Agent Tool、Harness 核心、会话或传输模型。
+- 真实 Agent Tool 首轮已经越过本机目标门禁并发出请求，但生产端返回 `Control Plane authentication failed`；保留的 Control Plane/设备传输合同确认 Skill Hub 使用企业 access token，Model Gateway 才使用 model session token。共享 provider 因此按已验证的目标类型选择现有 Bearer，不新增身份、请求客户端或回退链。
+
+## 2026-08-18 · 2.0.8 S07 企业模型策略闲置恢复
+
+- 活动切片：修复 e-Mate 闲置超过短期 JWT 后模型策略掉线、已登录用户无法从现有模型请求恢复的根因；保持 identity → model policy → target session/catalog 单链路。
+- 已验证事实：生产合同的 access JWT 为 15 分钟、model JWT 为 10 分钟，refresh lease 为 30 天；当前 identity provider 却在 access JWT 到期时直接清除持久 refresh token，同时 model policy 的同步热路径在 cache 失效后只拒绝而不触发已有 `refresh()`。
+- 边界：只复用 Auth Gateway 已有 refresh token 轮换和 model-policy 已有强制刷新；不改 Harness core，不新增定时器、会话、策略存储或传输协议。
+- 实现只调整现有共享路径：持久会话加载后由 `active()` 在 access JWT 过期时强制轮换 refresh token，轮换被企业端拒绝则继续清除本地会话；`assertModel()` 与 `auditContext()` 仅在账户绑定的 cache 缺失或过期时等待同一 `refresh({ force: true })`，刷新失败仍拒绝模型请求。
+- 窄回归先在旧实现稳定复现 `e-Mate login is required` 和 `model policy cache is unavailable or expired`；重建 profile 后两项通过。组合命令 `/Users/mac/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --test test/e-mate.test.mjs` 为 `41/41` 通过，`git diff --check` 通过；已发布 2.0.7 制品和生产未修改。
+- 剩余门禁：主代理须重建 2.0.8 Desktop profile，用现有验收账号完成跨过短期 JWT 的真实 Agent 模型请求与 Computer Use 复验；本切片不替代安装态验收或发布。
+
+## 2026-08-18 · 2.0.8 S11 飞书 / 腾讯文档官方授权
+
+- 根因不是第三方平台没有官方授权，而是原外部连接目录只提供 App ID/Secret 或手填 OAuth Token，Host 没有官方 OAuth 生命周期；同时 Agent 被正确禁止使用 `browser_*`，所以用户只能落到手填或浏览器桥。修复继续复用既有 `emate-connections` 插件、`/emate.connections` loopback RPC、DSH `webServer` 与 OS 凭据库，没有新增 Router、Store、会话、传输或 Harness core 改动。
+- 飞书按官方 CLI 合同使用 Device Authorization Grant：Host 用已保存的 `cli_*` App ID/Secret 请求一次性链接、用户码和二维码，按 `authorization_pending / slow_down` 轮询；access/refresh token 只进入 Keychain/CurrentUser DPAPI，浏览器端从不读取 Bearer。当前没有可用飞书应用凭据，因此只关闭代码与模拟官方响应门禁，不伪称真实飞书租户授权通过。
+- 腾讯文档的生产 discovery 虽声明 Device Grant，但真实 DCR public client 调用 device endpoint 返回 `invalid client for device auth`；继续硬套设备流会给用户生成不可用链接。最终改用同一生产 metadata 声明的 Authorization Code + S256 PKCE，动态注册 native public client，回调精确绑定 DSH 原生 `http://127.0.0.1:<port>/emate.oauth.tencent-docs/callback`；不新建回调服务器，也不使用 Agent 浏览器 Tool/桥。
+- Host 严格固定腾讯 `docs.qq.com` issuer、authorization/token/registration/resource endpoint 和 scope，校验 loopback Host、GET、state、单值 callback 参数与 PKCE；一次性 state/verifier、授权码、链接、二维码在终态清除，access/refresh token 只进 OS 凭据库。UI 只展示 Host 白名单后的官方 HTTPS 链接和二维码。
+- DSH build 通过；外部连接与 OAuth 聚焦回归 `2/2`、完整 e-Mate profile `42/42`、Shell `8 files / 41 tests`、`git diff --check` 通过。主代理重建 2.0.8 Desktop 后用 Computer Use 从“外部连接”生成真实腾讯官方二维码和 `https://docs.qq.com/scenario/open-claw.html` 链接，链接携带 `authorization_code + S256 + 127.0.0.1` 回调；随后取消 attempt，未替用户登录、同意授权或保存腾讯 access token。
+- 同一重建桌面还完成闲置恢复终验：15 分钟 access JWT 过期后的持久 Session 重启直接回到工作区，Luna Agent 请求成功且刷新后的 access/model 到期时间均前移；不再要求用户重新登录或手动恢复模型策略。该证据关闭前一 S07 的真实 Desktop 门禁，不替代发布安装态和跨平台验收。
+
+## 2026-08-18 · 2.0.8 S09 Skill Hub 生产认证闭环
+
+- Control Plane 的 Skill Hub 认证补丁基于当前生产精确父提交 `35dfba71431cae43fd7cd169d048e89b9d045ba1` 构建为 `bb60c20fec6b97ed0a497a5d688cdaaee9c90866`，只为 Skill Hub router 增加现有 e-Mate access-session JWT 验证；Admin、设备、发布和 Model Gateway 身份边界不变。生产候选 `e-mate-cloud-2.0.5-skillhub-bb60c20` 的 artifact manifest SHA-256 为 `024c654b2fe1f0234ec36b1a4b4a5678ccd3e847ffed18bc52be25eb36445640`，继续使用当前云包的 operator-waived unsigned 合同，不改写任何 2.0.7 桌面制品。
+- 首次 apply 在切槽前以 `nginx_admin_route_wiring_invalid` 失败关闭；活动 release、green 槽和四个服务均未切换。只读定位到两份受管 route 模板与当前/候选制品字节完全一致，但 `active-admin-route.conf` 被历史操作写成普通文件。将其原子恢复为只指向现有 `admin-route-control-plane.conf` 的符号链接后，`nginx -t`、reload 和部署 dry-run 均通过；新的独立部署单元成功切到 blue，四个 blue readiness endpoint 为 200，green 四服务已停，活动 manifest 与候选精确一致。
+- 切槽后的首轮真实 Agent Tool 仍返回 Control Plane 身份验证失败。根因是代码中的 Skill Hub authenticator 已部署，但生产 Control Plane 环境尚未注入 issuer、audience 和 session 公钥 keyring，因此运行时按合同保持禁用。修复只复用当前 Auth Gateway 正在签名且 Model Gateway 正在验证的同一 `session-2026` Ed25519 公钥；私钥、access token、refresh token 和验收账号密码均未复制到 Control Plane。配置原子写入，重启健康失败会恢复原文件；实际重启后 blue readiness 为 200。
+- 主代理随后在同一重建 2.0.8 Desktop、同一已登录验收用户和 Luna/Max 下再次发起自然语言请求。展开的真实 Harness 步骤显示 `Tool call e_mate_skill_hub_search · pdf`，详情为 `IN {"query":"pdf"} OUT []`；空数组是当前生产目录的真实搜索结果，不再出现本机目标越界或 Control Plane 鉴权错误。该证据关闭 Skill Hub 搜索的真实 Agent CU 门禁；跨用户发布、下载、安装和最终安装态回归仍由 2.0.8 发布流水线单独关闭。

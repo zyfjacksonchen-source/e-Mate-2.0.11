@@ -50,7 +50,7 @@ export async function apply(ctx: Context): Promise<void> {
       res.end(JSON.stringify({
         schema_version: 1,
         product: 'e-Mate',
-        version: '2.0.7',
+        version: '2.0.8',
         ws_url: `ws://127.0.0.1:${ctx.webServer.port}${BRIDGE_PATH}`,
         token,
       }))

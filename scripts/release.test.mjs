@@ -108,7 +108,7 @@ test('release evidence requires the one bundled package and emits hashes plus SP
     assert.equal(result.manifest.download.sha512, result.release[0].sha512)
     assert.equal(result.manifest.download.integrity, result.release[0].integrity)
     assert.equal(readFileSync(join(output, 'SHA256SUMS'), 'utf8').trim().split('\n').length, 1)
-    assert.match(readFileSync(join(output, 'EVIDENCE_SHA256SUMS'), 'utf8'), /e-mate-2\.0\.7\.spdx\.json/u)
+    assert.match(readFileSync(join(output, 'EVIDENCE_SHA256SUMS'), 'utf8'), /e-mate-2\.0\.8\.spdx\.json/u)
     assert.equal(result.spdx.spdxVersion, 'SPDX-2.3')
     assert.ok(result.spdx.packages.some(item => item.name === '@deepseek-ai/dsh'))
     assert.ok(result.spdx.packages.some(item => item.name === '@e-mate/dsh-plugin-memory-evolve'))
@@ -147,7 +147,7 @@ test('publication accepts only the exact 40-character release commit', () => {
 
 test('R2 immutable readback includes download metadata as well as bytes identity', () => {
   const item = {
-    filename: 'e-mate-dsh-2.0.7.tgz',
+    filename: 'e-mate-dsh-2.0.8.tgz',
     size: 207,
     sha256: DIGEST,
     contentType: 'application/gzip',
@@ -239,7 +239,7 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.match(r2.run, /publish-r2\.mjs/u)
   assert.equal(r2.env.EMATE_R2_PUBLIC_ORIGIN, '${{ vars.EMATE_R2_PUBLIC_ORIGIN }}')
   assert.equal(release.on.workflow_dispatch.inputs.publish.default, false)
-  assert.doesNotMatch(readFileSync('.github/workflows/release.yml', 'utf8'), /npm view '@e-mate\/dsh@2\.0\.7'|release\.mjs publish/u)
+  assert.doesNotMatch(readFileSync('.github/workflows/release.yml', 'utf8'), /npm view '@e-mate\/dsh@2\.0\.8'|release\.mjs publish/u)
   assert.match(readFileSync('.gitattributes', 'utf8'), /^\* text=auto eol=lf$/mu)
 })
 
@@ -250,7 +250,7 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
   assert.match(script, new RegExp(manifestUrl.replaceAll('.', '\\.')))
   for (const platform of ['macos', 'windows']) assert.match(page, new RegExp(`data-platform="${platform}"`, 'u'))
   for (const artifact of ['darwin', 'win32']) assert.match(script, new RegExp(`artifacts\\.${artifact}`, 'u'))
-  for (const filename of ['e-Mate-2.0.7-mac-universal.dmg', 'e-Mate-2.0.7-win-x64-Setup.exe']) {
+  for (const filename of ['e-Mate-2.0.8-mac-universal.dmg', 'e-Mate-2.0.8-win-x64-Setup.exe']) {
     assert.match(script, new RegExp(filename.replaceAll('.', '\\.'), 'u'))
   }
   assert.match(script, /manifest\.source_commit/u)
@@ -271,14 +271,14 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
   assert.doesNotMatch(page, /__EMATE_RELEASE_SOURCE_COMMIT__|npm install|nodejs\.org|e-mate setup|e-mate launch/u)
   const { normalizeDownloadIndex } = await import('../deploy/download-page/site.527be2232a46.js')
   const commit = 'a'.repeat(40)
-  const releasePrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.7/${commit}`
+  const releasePrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.8/${commit}`
   const fixture = {
     schema_version: 1,
-    version: '2.0.7',
+    version: '2.0.8',
     source_commit: commit,
     artifacts: {
-      darwin: { url: `${releasePrefix}/e-Mate-2.0.7-mac-universal.dmg`, bytes: 123, sha256: 'b'.repeat(64) },
-      win32: { url: `${releasePrefix}/e-Mate-2.0.7-win-x64-Setup.exe`, bytes: 456, sha256: 'c'.repeat(64) },
+      darwin: { url: `${releasePrefix}/e-Mate-2.0.8-mac-universal.dmg`, bytes: 123, sha256: 'b'.repeat(64) },
+      win32: { url: `${releasePrefix}/e-Mate-2.0.8-win-x64-Setup.exe`, bytes: 456, sha256: 'c'.repeat(64) },
     },
   }
   assert.deepEqual(normalizeDownloadIndex(fixture).downloads.map(item => item.target), ['macos-universal', 'windows-x64'])

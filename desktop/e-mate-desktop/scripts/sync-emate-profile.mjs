@@ -61,7 +61,7 @@ for (const name of ecosystemPlugins) {
 }
 
 const registry = JSON.parse(await readFile(join(destination, 'bundles', 'registry.json'), 'utf8'))
-if (registry.product !== 'e-Mate' || registry.version !== '2.0.7'
+if (registry.product !== 'e-Mate' || registry.version !== '2.0.8'
   || registry.harness_commit !== '47f943859bef60e4160492346772ded9b24f765a') {
   throw new Error('sync-emate-profile: bundled e-Mate profile identity drifted')
 }
@@ -85,7 +85,7 @@ await sharp(roundedSurface, { failOn: 'warning' })
 await writeFile(join(destination, 'desktop-source.json'), `${JSON.stringify({
   schema_version: 1,
   product: 'e-Mate',
-  version: '2.0.7',
+  version: '2.0.8',
   harness_commit: registry.harness_commit,
   registry_sha256: createHash('sha256')
     .update(await readFile(join(destination, 'bundles', 'registry.json')))

@@ -13,7 +13,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import { PACKAGE_NAME, releaseSource } from './release-source.mjs'
 
-export const VERSION = '2.0.7'
+export const VERSION = '2.0.8'
 const HARNESS_VERSION = '0.1.0-rc.5'
 const HARNESS_COMMIT = '47f943859bef60e4160492346772ded9b24f765a'
 const REPOSITORY = 'zyfjacksonchen-source/e-Mate'
@@ -398,7 +398,7 @@ export async function generateEvidence(directory, outputDirectory, sourceCommit 
     packages: release.map(({ name, kind, os, cpu, filename, size, sha256, sha512, integrity }) => ({
       name, version: VERSION, kind, ...(os === undefined ? {} : { os, cpu }), filename, size, sha256, sha512, integrity,
     })),
-    evidence: ['SHA256SUMS', 'e-mate-2.0.7.spdx.json', 'THIRD_PARTY_LICENSES.txt', 'EVIDENCE_SHA256SUMS'],
+    evidence: ['SHA256SUMS', 'e-mate-2.0.8.spdx.json', 'THIRD_PARTY_LICENSES.txt', 'EVIDENCE_SHA256SUMS'],
   }
   const sums = `${release.map(item => `${item.sha256}  ${item.filename}`).sort().join('\n')}\n`
   const licenses = [
@@ -411,7 +411,7 @@ export async function generateEvidence(directory, outputDirectory, sourceCommit 
   const files = {
     SHA256SUMS: sums,
     'release-manifest.json': `${JSON.stringify(manifest, null, 2)}\n`,
-    'e-mate-2.0.7.spdx.json': `${JSON.stringify(spdx, null, 2)}\n`,
+    'e-mate-2.0.8.spdx.json': `${JSON.stringify(spdx, null, 2)}\n`,
     'THIRD_PARTY_LICENSES.txt': licenses,
   }
   for (const [name, content] of Object.entries(files)) await writeFile(join(output, name), content)

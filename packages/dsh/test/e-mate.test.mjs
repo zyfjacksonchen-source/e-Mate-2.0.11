@@ -33,6 +33,7 @@ import { apply as applyCapabilities, CAPABILITIES_CHANNEL } from '../profile/plu
 import {
   apply as applyConnections,
   CONNECTIONS_CHANNEL,
+  createOfficialOAuthProvider,
   createWeixinQrProvider,
 } from '../profile/plugins/connections.js'
 import { apply as applyQrGeneration } from '../profile/plugins/qr-generation.js'
@@ -188,21 +189,21 @@ test('version gates match the release contract', () => {
 test('online update target parsing rejects tags and downgrade ordering is SemVer-correct', () => {
   const requestId = '11111111-1111-4111-8111-111111111111'
   const sourceCommit = 'a'.repeat(40)
-  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.7/${sourceCommit}`
+  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.8/${sourceCommit}`
   const releaseSource = {
     schema_version: 1,
     product: 'e-Mate',
-    version: '2.0.7',
+    version: '2.0.8',
     package_name: '@e-mate/dsh',
     source_commit: sourceCommit,
     manifest_url: `${base}/release-manifest.json`,
-    tarball_url: `${base}/e-mate-dsh-2.0.7.tgz`,
+    tarball_url: `${base}/e-mate-dsh-2.0.8.tgz`,
   }
   const request = {
     schema_version: 1,
     request_id: requestId,
-    target: '2.0.7',
-    current_version: '2.0.7',
+    target: '2.0.8',
+    current_version: '2.0.8',
     release_source: releaseSource,
     previous_release_source: releaseSource,
   }
@@ -241,11 +242,11 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   const sha512 = 'ab'.repeat(64)
   const artifactIntegrity = `sha512-${Buffer.from(sha512, 'hex').toString('base64')}`
   const artifact = {
-    name: '@e-mate/dsh', version: '2.0.7', kind: 'main', filename: 'e-mate-dsh-2.0.7.tgz',
+    name: '@e-mate/dsh', version: '2.0.8', kind: 'main', filename: 'e-mate-dsh-2.0.8.tgz',
     size: 207, sha256: 'cd'.repeat(32), sha512, integrity: artifactIntegrity,
   }
   const manifest = {
-    schema_version: 1, product: 'e-Mate', version: '2.0.7', source_commit: sourceCommit,
+    schema_version: 1, product: 'e-Mate', version: '2.0.8', source_commit: sourceCommit,
     packages: [artifact], download: { ...releaseSource, size: artifact.size, sha256: artifact.sha256, sha512, integrity: artifactIntegrity },
   }
   assert.equal(validateReleaseManifest(manifest, releaseSource).integrity, artifactIntegrity)
@@ -504,7 +505,7 @@ test('managed profile installation is idempotent', () => {
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
     ])
-    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.7'])))
+    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.8'])))
     const patch = readFileSync(join(first.profile, 'cordis.patch.yml'), 'utf8')
     installProfile(dshHome)
     assert.equal(readFileSync(join(first.profile, 'package.json'), 'utf8'), manifest)
@@ -614,7 +615,7 @@ test('managed profile installation is idempotent', () => {
       const pluginRoot = join(first.profile, 'node_modules', ...name.split('/'))
       const pluginManifest = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'))
       assert.equal(pluginManifest.name, name)
-      assert.equal(pluginManifest.version, '2.0.7')
+      assert.equal(pluginManifest.version, '2.0.8')
       assert.ok(readFileSync(join(pluginRoot, pluginManifest.main)).byteLength > 0)
       const pluginPatch = readFileSync(join(pluginRoot, pluginManifest.dsh.bundle.patch), 'utf8')
       assert.ok(pluginPatch.length >= 2)
@@ -1107,6 +1108,7 @@ test('external connection catalog uses target credentials and keeps unavailable 
   const paths = installProfile(join(temporary, 'dsh-home'))
   let handler
   let promptSection
+  let oauthRoute
   const capabilities = []
   const tools = new Map()
   const credentialWrites = []
@@ -1129,6 +1131,11 @@ test('external connection catalog uses target credentials and keeps unavailable 
     },
     tools: { register: tool => { tools.set(tool.name, tool); return () => tools.delete(tool.name) } },
     systemPrompt: { section: value => { promptSection = value } },
+    webServer: {
+      host: '127.0.0.1',
+      port: 3080,
+      register: route => { oauthRoute = route; return () => {} },
+    },
     connection: { rpc: { handle: (channel, callback, options) => {
       assert.equal(channel, CONNECTIONS_CHANNEL)
       assert.deepEqual(options, { authority: 'loopback' })
@@ -1144,6 +1151,25 @@ test('external connection catalog uses target credentials and keeps unavailable 
   assert.match(promptSection.text, /e_mate_connection_setup/u)
   assert.match(promptSection.text, /Never ask the user to send App IDs, secrets, tokens/u)
   assert.match(promptSection.text, /never use a browser Tool/u)
+  assert.equal(oauthRoute.kind, 'exact')
+  assert.equal(oauthRoute.path, '/emate.oauth.tencent-docs/callback')
+  const routeResponse = () => {
+    const output = { status: null, headers: null, body: null }
+    return {
+      output,
+      response: {
+        writeHead: (status, headers) => { output.status = status; output.headers = headers },
+        end: body => { output.body = body },
+      },
+    }
+  }
+  const wrongHost = routeResponse()
+  await oauthRoute.handler({ method: 'GET', headers: { host: 'attacker.example' }, url: oauthRoute.path }, wrongHost.response)
+  assert.equal(wrongHost.output.status, 403)
+  const wrongMethod = routeResponse()
+  await oauthRoute.handler({ method: 'POST', headers: { host: '127.0.0.1:3080' }, url: oauthRoute.path }, wrongMethod.response)
+  assert.equal(wrongMethod.output.status, 405)
+  assert.equal(wrongMethod.output.headers.allow, 'GET')
   assert.deepEqual([...tools.keys()], ['e_mate_connection_setup'])
   const setup = tools.get('e_mate_connection_setup')
   const setupResult = await setup.execute({ connection_id: 'wechat' }, {})
@@ -1160,15 +1186,196 @@ test('external connection catalog uses target credentials and keeps unavailable 
   assert.equal(byId.get('dingtalk').state, 'blocked')
   assert.equal(byId.get('wechat').fields.length, 0)
   assert.equal(byId.get('wechat').qr_supported, true)
-  assert.equal(byId.get('tencent-docs').fields[0].configured, false)
+  assert.equal(byId.get('feishu').oauth_supported, true)
+  assert.equal(byId.get('tencent-docs').oauth_supported, true)
+  assert.equal(byId.get('tencent-docs').fields.length, 0)
   assert.equal(JSON.stringify(response).includes('secret-value'), false)
   assert.deepEqual(await capabilities.at(-1).status(), {
     state: 'blocked',
     detail: '凭据已保存在本机；官方 Stream 适配完成真实连接验收前不会启用。',
     action_ids: [],
   })
+  assert.equal((await handler('oauth.begin', { connection_id: 'feishu' })).error.code, 'bad-request')
   assert.equal((await handler('save-config', {})).error.code, 'bad-request')
   rmSync(temporary, { recursive: true, force: true })
+})
+
+test('official connection OAuth uses Feishu device grant and Tencent PKCE with all bearer material Host-only', async () => {
+  let clock = 1_700_000_000_000
+  const stored = new Map([
+    ['EMATE_FEISHU_APP_ID', 'cli_a12345678'],
+    ['EMATE_FEISHU_APP_SECRET', 'host-only-feishu-secret'],
+  ])
+  const requests = []
+  const tokenPolls = new Map()
+  let tencentChallenge
+  const credentials = {
+    resolve: async ref => stored.has(ref) ? { value: stored.get(ref), source: 'keychain' } : undefined,
+    set: async (ref, value) => { stored.set(ref, value) },
+    unset: async ref => stored.delete(ref),
+  }
+  const response = (value, status = 200) => new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
+  const provider = createOfficialOAuthProvider(credentials, {
+    now: () => clock,
+    tencentRedirectUri: 'http://127.0.0.1:3080/emate.oauth.tencent-docs/callback',
+    encodeQr: async value => {
+      assert.match(value, /^https:\/\/(?:accounts\.feishu\.cn|docs\.qq\.com)\//u)
+      return 'data:image/png;base64,AA=='
+    },
+    fetchImpl: async (url, init = {}) => {
+      const target = String(url)
+      const headers = new Headers(init.headers)
+      const body = typeof init.body === 'string' ? init.body : init.body?.toString()
+      requests.push({ target, method: init.method, headers, body, redirect: init.redirect })
+      if (target === 'https://accounts.feishu.cn/oauth/v1/device_authorization') {
+        assert.equal(headers.get('authorization'), `Basic ${Buffer.from('cli_a12345678:host-only-feishu-secret').toString('base64')}`)
+        assert.equal(new URLSearchParams(body).get('scope'), 'offline_access')
+        return response({
+          device_code: 'host-only-feishu-device-code',
+          user_code: 'FEI-SHU1',
+          verification_uri_complete: 'https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=f1&user_code=FEI-SHU1',
+          expires_in: 300,
+          interval: 5,
+        })
+      }
+      if (target === 'https://open.feishu.cn/open-apis/authen/v2/oauth/token') {
+        const count = tokenPolls.get(target) ?? 0
+        tokenPolls.set(target, count + 1)
+        if (count === 0) return response({ error: 'authorization_pending' }, 400)
+        return response({
+          access_token: 'host-only-feishu-access',
+          refresh_token: 'host-only-feishu-refresh',
+          token_type: 'Bearer',
+          expires_in: 7_200,
+          refresh_token_expires_in: 604_800,
+          scope: 'offline_access',
+        })
+      }
+      if (target === 'https://docs.qq.com/openapi/mcp/.well-known/oauth-protected-resource') return response({
+        resource: 'https://docs.qq.com/openapi/mcp',
+        authorization_servers: ['https://docs.qq.com'],
+        scopes_supported: ['docs:read', 'docs:write', 'docs:manage'],
+        bearer_methods_supported: ['header'],
+      })
+      if (target === 'https://docs.qq.com/.well-known/oauth-authorization-server') return response({
+        issuer: 'https://docs.qq.com',
+        authorization_endpoint: 'https://docs.qq.com/scenario/open-claw.html?authType=2',
+        token_endpoint: 'https://docs.qq.com/openapi/mcp/oauth/token',
+        registration_endpoint: 'https://docs.qq.com/openapi/mcp/oauth/register',
+        device_authorization_endpoint: 'https://docs.qq.com/openapi/mcp/oauth/device/code',
+        scopes_supported: ['docs:read', 'docs:write', 'docs:manage'],
+        response_types_supported: ['code'],
+        grant_types_supported: ['authorization_code', 'refresh_token', 'urn:ietf:params:oauth:grant-type:device_code'],
+        token_endpoint_auth_methods_supported: ['none'],
+        code_challenge_methods_supported: ['S256'],
+      })
+      if (target === 'https://docs.qq.com/openapi/mcp/oauth/register') {
+        const registration = JSON.parse(body)
+        assert.equal(registration.application_type, 'native')
+        assert.deepEqual(registration.redirect_uris, ['http://127.0.0.1:3080/emate.oauth.tencent-docs/callback'])
+        assert.deepEqual(registration.grant_types, ['authorization_code', 'refresh_token'])
+        assert.deepEqual(registration.response_types, ['code'])
+        assert.equal(registration.token_endpoint_auth_method, 'none')
+        assert.equal(registration.scope, 'docs:read docs:write')
+        return response({ client_id: 'tencent-public-client', token_endpoint_auth_method: 'none' })
+      }
+      if (target === 'https://docs.qq.com/openapi/mcp/oauth/token') {
+        const form = new URLSearchParams(body)
+        assert.equal(form.get('grant_type'), 'authorization_code')
+        assert.equal(form.get('code'), 'host-only-tencent-code')
+        assert.equal(form.get('client_id'), 'tencent-public-client')
+        assert.equal(form.get('redirect_uri'), 'http://127.0.0.1:3080/emate.oauth.tencent-docs/callback')
+        assert.equal(form.get('resource'), 'https://docs.qq.com/openapi/mcp')
+        const verifier = form.get('code_verifier')
+        assert.match(verifier, /^[A-Za-z0-9_-]{43}$/u)
+        assert.equal(createHash('sha256').update(verifier).digest('base64url'), tencentChallenge)
+        return response({
+          access_token: 'host-only-tencent-access',
+          refresh_token: 'host-only-tencent-refresh',
+          token_type: 'Bearer',
+          expires_in: 3_600,
+          scope: 'docs:read docs:write',
+        })
+      }
+      throw new Error(`unexpected OAuth endpoint ${target}`)
+    },
+  })
+
+  const feishu = await provider.begin('feishu')
+  assert.equal(feishu.state, 'pending')
+  assert.match(feishu.authorization_url, /^https:\/\/accounts\.feishu\.cn\/oauth\/v1\/device\/verify\?/u)
+  assert.doesNotMatch(JSON.stringify(feishu), /host-only-(?:feishu|tencent)/u)
+  clock += 5_000
+  assert.equal((await provider.poll('feishu', feishu.attempt_id)).state, 'pending')
+  clock += 5_000
+  const authorizedFeishu = await provider.poll('feishu', feishu.attempt_id)
+  assert.equal(authorizedFeishu.state, 'authorized')
+  assert.equal(stored.get('EMATE_FEISHU_USER_ACCESS_TOKEN'), 'host-only-feishu-access')
+  assert.equal(stored.get('EMATE_FEISHU_REFRESH_TOKEN'), 'host-only-feishu-refresh')
+  assert.equal(authorizedFeishu.user_code, undefined)
+  assert.equal(authorizedFeishu.qr_code_data_url, undefined)
+  assert.doesNotMatch(JSON.stringify(authorizedFeishu), /host-only|authorization_url/u)
+
+  const tencent = await provider.begin('tencent-docs')
+  assert.equal(tencent.state, 'pending')
+  assert.equal(stored.get('EMATE_TENCENT_DOCS_OAUTH_CLIENT_ID'), 'tencent-public-client')
+  assert.equal(stored.get('EMATE_TENCENT_DOCS_OAUTH_REDIRECT_URI'), 'http://127.0.0.1:3080/emate.oauth.tencent-docs/callback')
+  const tencentAuthorization = new URL(tencent.authorization_url)
+  assert.equal(tencentAuthorization.origin, 'https://docs.qq.com')
+  assert.equal(tencentAuthorization.pathname, '/scenario/open-claw.html')
+  assert.equal(tencentAuthorization.searchParams.get('response_type'), 'code')
+  assert.equal(tencentAuthorization.searchParams.get('code_challenge_method'), 'S256')
+  assert.equal(tencentAuthorization.searchParams.get('redirect_uri'), 'http://127.0.0.1:3080/emate.oauth.tencent-docs/callback')
+  assert.match(tencentAuthorization.searchParams.get('state'), /^[A-Za-z0-9_-]{43}$/u)
+  tencentChallenge = tencentAuthorization.searchParams.get('code_challenge')
+  await assert.rejects(provider.poll('feishu', tencent.attempt_id), /connection mismatch/u)
+  assert.equal((await provider.poll('tencent-docs', tencent.attempt_id)).state, 'pending')
+  const authorizedTencent = await provider.completeTencentCallback(new URL(
+    `http://127.0.0.1:3080/emate.oauth.tencent-docs/callback?code=host-only-tencent-code&state=${tencentAuthorization.searchParams.get('state')}`,
+  ))
+  assert.equal(authorizedTencent.state, 'authorized')
+  assert.equal(stored.get('EMATE_TENCENT_DOCS_TOKEN'), 'host-only-tencent-access')
+  assert.equal(stored.get('EMATE_TENCENT_DOCS_REFRESH_TOKEN'), 'host-only-tencent-refresh')
+  assert.equal(authorizedTencent.authorization_url, undefined)
+  assert.equal(authorizedTencent.user_code, undefined)
+  assert.ok(requests.every(request => request.redirect === 'error'))
+  assert.equal(requests.some(request => /state=/u.test(request.body ?? '')), false)
+
+  const rejected = createOfficialOAuthProvider(credentials, {
+    fetchImpl: async () => response({
+      device_code: 'must-not-leak',
+      user_code: 'BAD-CODE',
+      verification_uri_complete: 'https://attacker.example/oauth/v1/device/verify?code=BAD-CODE',
+      expires_in: 300,
+      interval: 5,
+    }),
+    encodeQr: async () => { throw new Error('untrusted URL reached encoder') },
+  })
+  await assert.rejects(rejected.begin('feishu'), /untrusted OAuth verification URL/u)
+
+  let failedClock = 1_700_000_000_000
+  const failed = createOfficialOAuthProvider(credentials, {
+    now: () => failedClock,
+    encodeQr: async () => 'data:image/png;base64,AA==',
+    fetchImpl: async url => String(url) === 'https://accounts.feishu.cn/oauth/v1/device_authorization'
+      ? response({
+          device_code: 'host-only-failed-device-code',
+          user_code: 'FAIL-CODE',
+          verification_uri: 'https://accounts.feishu.cn/oauth/v1/device/verify',
+          expires_in: 300,
+          interval: 5,
+        })
+      : response({ error: 'invalid_client' }, 400),
+  })
+  const failedAttempt = await failed.begin('feishu')
+  failedClock += 5_000
+  const terminalFailure = await failed.poll('feishu', failedAttempt.attempt_id)
+  assert.equal(terminalFailure.state, 'failed')
+  assert.equal(terminalFailure.authorization_url, undefined)
+  assert.equal(terminalFailure.user_code, undefined)
 })
 
 test('Weixin QR authorization keeps the raw token Host-only and stores confirmed credentials', async () => {
@@ -1785,8 +1992,17 @@ test('enterprise identity provider maps target credentials and the production HT
   let rejectModelCredential = false
   let holdModelCredential
   let modelCredentialStarted
+  let holdSessionCredential
+  let sessionCredentialStarted
   const credentials = {
-    resolve: async ref => values.has(ref) ? { value: values.get(ref), source: 'test' } : undefined,
+    resolve: async ref => {
+      if (holdSessionCredential !== undefined && ref === 'E_MATE_ENTERPRISE_SESSION') {
+        sessionCredentialStarted()
+        await holdSessionCredential
+        holdSessionCredential = undefined
+      }
+      return values.has(ref) ? { value: values.get(ref), source: 'test' } : undefined
+    },
     set: async (ref, value) => {
       if (rejectModelCredential && ref === MODEL_SESSION_REF) throw new Error('simulated model credential failure')
       if (holdModelCredential !== undefined && ref === MODEL_SESSION_REF) {
@@ -1826,7 +2042,7 @@ test('enterprise identity provider maps target credentials and the production HT
     sessionId: 'session-enterprise-207',
     accessToken,
     refreshToken,
-    expiresAt: new Date(clock + 60 * 60_000).toISOString(),
+    expiresAt: new Date(clock + 15 * 60_000).toISOString(),
     identity: {
       tenantId: 'tenant-207',
       userId: 'user-207',
@@ -1845,7 +2061,7 @@ test('enterprise identity provider maps target credentials and the production HT
   }
   const fetchImplementation = async (input, init = {}) => {
     const url = new URL(input)
-    requests.push({ path: url.pathname, authorization: new Headers(init.headers).get('authorization') })
+    requests.push({ url: url.href, path: url.pathname, authorization: new Headers(init.headers).get('authorization') })
     if (url.pathname.endsWith('/v1/auth/registration/challenge')) {
       return json({
         schemaVersion: 1,
@@ -1862,7 +2078,16 @@ test('enterprise identity provider maps target credentials and the production HT
       }), { status: 201, headers: { 'content-type': 'application/json' } })
     }
     if (url.pathname.endsWith('/v1/auth/password')) return json(session)
-    if (url.pathname.endsWith('/v1/auth/refresh')) return json(session)
+    if (url.pathname.endsWith('/v1/auth/refresh')) {
+      return json({
+        ...session,
+        expiresAt: new Date(clock + 15 * 60_000).toISOString(),
+        modelGateway: {
+          ...session.modelGateway,
+          expiresAt: new Date(clock + 10 * 60_000).toISOString(),
+        },
+      })
+    }
     if (url.pathname.endsWith('/v1/auth/logout')) {
       return json({ schemaVersion: 1, receiptId: 'logout-receipt-207', reauthenticationRequired: false })
     }
@@ -1876,7 +2101,7 @@ test('enterprise identity provider maps target credentials and the production HT
           acceptanceId: 'acceptance-receipt-207',
           userId: 'user-207',
           acceptedAt: new Date(clock).toISOString(),
-          clientVersion: '2.0.7',
+          clientVersion: '2.0.8',
           locale: 'zh-CN',
         } : null,
       })
@@ -1888,7 +2113,7 @@ test('enterprise identity provider maps target credentials and the production HT
         acceptanceId: 'acceptance-receipt-207',
         userId: 'user-207',
         acceptedAt: new Date(clock).toISOString(),
-        clientVersion: '2.0.7',
+        clientVersion: '2.0.8',
         locale: 'zh-CN',
       })
     }
@@ -1942,9 +2167,13 @@ test('enterprise identity provider maps target credentials and the production HT
         }],
       })
     }
+    if (url.pathname.endsWith('/v1/authenticated-probe')
+      || url.pathname.startsWith('/ecorex-agent/client/skill-hub/v1/')) {
+      return json({ ok: true })
+    }
     throw new Error(`unexpected test endpoint ${url.pathname}`)
   }
-  const provider = createEnterpriseIdentityProvider({
+  const providerOptions = {
     credentials,
     enterprise: {
       authBaseUrl: 'https://mvdcm.ecoremedia.net/e-mate/auth-api',
@@ -1954,7 +2183,8 @@ test('enterprise identity provider maps target credentials and the production HT
     },
     fetchImplementation,
     now: () => clock,
-  })
+  }
+  let provider = createEnterpriseIdentityProvider(providerOptions)
 
   const challenge = await provider.issueRegistrationChallenge()
   assert.equal(challenge.challenge_id, 'registration-challenge-207')
@@ -2026,6 +2256,23 @@ test('enterprise identity provider maps target credentials and the production HT
   assert.equal(provider.localAccountSubject(), accountSubject)
   releaseModelCredential()
   await refreshingPolicy
+  const refreshRequestsBeforeIdle = requests.filter(request => request.path.endsWith('/v1/auth/refresh')).length
+  clock += 16 * 60_000
+  let releaseSessionCredential
+  holdSessionCredential = new Promise(resolve => { releaseSessionCredential = resolve })
+  const sessionCredentialReadStarted = new Promise(resolve => { sessionCredentialStarted = resolve })
+  provider = createEnterpriseIdentityProvider(providerOptions)
+  const idlePolicy = provider.modelPolicy()
+  await sessionCredentialReadStarted
+  const idleBootstrap = provider.bootstrap()
+  releaseSessionCredential()
+  assert.equal((await idlePolicy).default_chat_model_id, 'gpt-5.6-luna')
+  assert.equal((await idleBootstrap).authenticated, true)
+  assert.equal(
+    requests.filter(request => request.path.endsWith('/v1/auth/refresh')).length,
+    refreshRequestsBeforeIdle + 1,
+  )
+  assert.ok(Date.parse(JSON.parse(values.get('E_MATE_ENTERPRISE_SESSION')).session.expiresAt) > clock)
   const usage = await provider.usage('Asia/Shanghai')
   assert.equal(usage.week.total_tokens, 12_345)
   assert.equal(usage.timezone, 'Asia/Shanghai')
@@ -2042,6 +2289,34 @@ test('enterprise identity provider maps target credentials and the production HT
   const taskAuditReceipt = await provider.taskAuditUpload(taskAuditRecords)
   assert.deepEqual(taskAuditBody, { schema_version: 1, records: taskAuditRecords })
   assert.equal(taskAuditReceipt.receipts[0].event_id, taskAuditRecords[0].event_id)
+  const modelProbe = await provider.authenticatedRequest(
+    'https://mvdcm.ecoremedia.net/e-mate/model-api/v1/authenticated-probe',
+  )
+  assert.equal(modelProbe.ok, true)
+  await assert.rejects(
+    provider.authenticatedRequest('https://mvdcm.ecoremedia.net/e-mate/model-api/v1/authenticated-probe?query=blocked'),
+    /outside the managed enterprise root/,
+  )
+  const skillHubUrl = 'https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1/skills?query=office&limit=24'
+  const skillHubResponse = await provider.authenticatedRequest(skillHubUrl)
+  assert.equal(skillHubResponse.ok, true)
+  assert.deepEqual(requests.at(-1), {
+    url: skillHubUrl,
+    path: '/ecorex-agent/client/skill-hub/v1/skills',
+    authorization: `Bearer ${accessToken}`,
+  })
+  for (const target of [
+    'https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v10/skills?query=office&limit=24',
+    'https://example.com/ecorex-agent/client/skill-hub/v1/skills?query=office&limit=24',
+    'https://user:password@dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1/skills?query=office&limit=24',
+    'https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1/skills?query=office&limit=24#fragment',
+  ]) {
+    await assert.rejects(provider.authenticatedRequest(target), /outside the managed enterprise root/)
+  }
+  await assert.rejects(
+    provider.authenticatedRequest(skillHubUrl, { headers: { authorization: 'Bearer caller-token' } }),
+    /cannot override authorization/,
+  )
   await provider.acceptAgreements()
   const unlocked = await provider.bootstrap()
   assert.equal(unlocked.workspace_unlocked, true)
@@ -2498,10 +2773,18 @@ test('enterprise model switch delegates to the target session, keeps its history
     })
     assert.equal(cachedSwitch.result.ok, true)
     assert.deepEqual(session.messages, historyBeforeSwitch)
+    providerAvailable = true
     accountSubject = 'account:other-207'
+    assert.deepEqual(
+      await requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })),
+      { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+    )
+    assert.equal(records.get('active').account_subject, accountSubject)
+    providerAvailable = false
+    accountSubject = 'account:unavailable-207'
     await assert.rejects(
       requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })),
-      /cache is unavailable or expired/,
+      /enterprise unavailable/,
     )
     await assert.rejects(modelPolicy.refresh({ force: true }), /enterprise unavailable/)
     assert.throws(
@@ -2770,6 +3053,7 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
       taskAuditProvider: taskProvider,
       flushIntervalMs: 30_000,
     })
+    await new Promise(resolve => setImmediate(resolve))
 
     assert.equal(rpc.channel, AUDIT_CHANNEL)
     assert.deepEqual(rpc.options, { authority: 'loopback' })

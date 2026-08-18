@@ -552,24 +552,28 @@ function createService(ctx, table, quota) {
     }
   }
 
-  const activeCached = () => {
+  const activeCached = (recover = false) => {
     if (!runtimeReady) throw new Error('e-Mate native runtime model projection is not ready')
     const subject = typeof ctx.emateIdentity.localAccountSubject === 'function'
       ? ctx.emateIdentity.localAccountSubject()
       : cached?.account_subject
     const policy = typeof subject === 'string' ? validCached(subject, Date.now()) : undefined
-    if (policy === undefined) throw new Error('e-Mate model policy cache is unavailable or expired')
+    if (policy === undefined) {
+      if (recover) return undefined
+      throw new Error('e-Mate model policy cache is unavailable or expired')
+    }
     if (Date.now() - lastRefresh >= REFRESH_MS && refreshing === undefined) {
       void refresh().catch(error => ctx.logger?.warn?.('e-Mate model policy background refresh failed', error))
     }
     return policy
   }
+  const activePolicy = async () => activeCached(true) ?? refresh({ force: true })
 
   return {
     refresh,
     async current() { return publicPolicy(await refresh()) },
-    auditContext(model) {
-      const policy = activeCached()
+    async auditContext(model) {
+      const policy = await activePolicy()
       if (!allowed(policy, model)) throw new Error(`Model "${model}" is not allowed by the current e-Mate policy.`)
       return {
         account_subject_sha256: createHash('sha256').update(policy.account_subject).digest('hex'),
@@ -578,8 +582,8 @@ function createService(ctx, table, quota) {
         policy_sha256: policy.policy_sha256,
       }
     },
-    assertModel(model) {
-      const policy = activeCached()
+    async assertModel(model) {
+      const policy = await activePolicy()
       if (!allowed(policy, model)) throw new Error(`Model "${model}" is not allowed by the current e-Mate policy.`)
       return publicPolicy(policy)
     },

@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-browser",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "description": "e-Mate rc.5 adapter for the dsh-browser Chrome and Edge extension",
   "type": "module",
   "main": "lib/index.mjs",

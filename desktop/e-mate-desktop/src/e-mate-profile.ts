@@ -17,7 +17,7 @@ import { unpackedAsarPath } from './packaged-runtime-path.ts'
 
 export const EMATE_PROFILE_NAME = 'e-mate'
 
-const VERSION = '2.0.7'
+const VERSION = '2.0.8'
 const HARNESS_COMMIT = '47f943859bef60e4160492346772ded9b24f765a'
 const PLUGIN_PACKAGES = [
   '@e-mate/dsh-plugin-browser-panel',

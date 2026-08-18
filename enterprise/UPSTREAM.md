@@ -1,6 +1,6 @@
 # Enterprise control-plane baseline
 
-This directory contains the smallest server-side subset needed by e-Mate 2.0.7:
+This directory contains the smallest server-side subset needed by e-Mate 2.0.8:
 authentication, managed model routing, usage/audit analytics, the existing admin and
 usage applications, and their direct contracts. It deliberately excludes the old
 Electron desktop, local Agent runtime, and unrelated product packages.
@@ -20,4 +20,4 @@ imported baseline files; its SHA-256 is:
 ```
 
 The manifest is provenance evidence, not a current-tree checksum: subsequent e-Mate
-2.0.7 changes are expected to differ and remain reviewable in this repository.
+2.0.8 changes are expected to differ and remain reviewable in this repository.
