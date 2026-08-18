@@ -87,7 +87,7 @@ describe('e-Mate desktop profile', () => {
     const labelBody = /function activityHeaderLabel\(fold\) \{([\s\S]*?)\n\t\t\}/u.exec(turnFoldClient)?.[1]
     expect(labelBody).toBeDefined()
     const activityHeaderLabel = new Function('fold', labelBody ?? '') as (fold: { toolCount: number, messageCount: number }) => string
-    expect(activityHeaderLabel({ toolCount: 4, messageCount: 2 })).toBe('4 tool calls, 2 messages')
+    expect(activityHeaderLabel({ toolCount: 4, messageCount: 2 })).toBe('4 次工具调用，2 条消息')
     expect(turnFoldClient).toContain('v === undefined ? false : v')
     expect(turnFoldClient).toContain('fold.activityCount > 0')
     expect(turnFoldClient).toContain('assistantMustStayVisible(node)')

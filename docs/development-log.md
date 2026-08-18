@@ -1385,3 +1385,8 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 芯助手插件已复用 Desktop 现有的应用内 Python 和 DSH `subprocess`，但生产 CLI 的 MPI 路径直接导入 `requests` 与 `cryptography`；两套依赖都未随插件或应用内 Python交付，真实查询因此在授权检查前以 `No module named` 失败。
 - 插件现随包携带固定版本的纯 Python HTTP 依赖，以及分别面向 `darwin-arm64`、`darwin-x64`、`win32-x64` 的 RSA 原生 wheel；运行时只通过 `PYTHONPATH` 接入，保持现有结构化只读 Tool、超时、输出上限和应用内 Python 路径，不运行 pip、不访问包仓库、不开放 shell。
 - 应用内 arm64/x64 Python 均成功导入 `requests 2.32.5` 与 `cryptography 46.0.7`；真实 MPI 只读命令已越过依赖加载并按合同返回“需要现有 token/refresh token”，证明失败边界回到用户授权而不是缺包。插件 build 与合同回归 `2/2` 通过；Windows wheel 已校验为 PE x86-64，仍须最终 Windows 安装态执行同一导入和授权门禁。
+
+## 2026-08-19 · S17 活动标题中文化与消息尾指标
+
+- 活动折叠标题固定为“X 次工具调用，Y 条消息”，不再向中文用户显示 `tool calls / messages`。
+- 只隐藏编辑器底部的回合/步骤/缓存/输入输出统计条；原生消息尾的用时、首 token 和 `tok/s` 继续显示，未删除 Harness usage 事实。
