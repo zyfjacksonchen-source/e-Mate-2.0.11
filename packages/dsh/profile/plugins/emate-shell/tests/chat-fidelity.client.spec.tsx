@@ -51,8 +51,7 @@ describe('target conversation fidelity contract', () => {
 
   it('keeps target renderers while applying only the e-Mate type scale, gallery and disabled-trajectory boundary', () => {
     expect(chatCss).not.toMatch(/data-chat-flow-kind='(?:steering|model-retry|turn-error|command)'/u)
-    expect(chatCss).not.toContain('data-emate-activity')
-    expect(chatCss).toContain("[data-turn-tail] > div:last-child > span:last-child")
+    expect(chatCss).not.toMatch(/data-turn-tail|data-emate-activity/u)
     expect(chatCss).toContain('--dsw-font-markdown-base: 14px/22px')
     expect(chatCss).toContain("[data-chat-flow-kind='user'] [data-time-hover-root]")
     expect(chatCss).toContain('"PingFang SC"')
