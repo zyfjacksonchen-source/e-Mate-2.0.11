@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util'
 
 export const RELEASE_SOURCE_PLACEHOLDER = '__EMATE_RELEASE_SOURCE_COMMIT__'
 export const DESKTOP_MANIFEST_URL = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json'
-export const DESKTOP_SCRIPT = './site.a8c4f1979f7c.js'
+export const DESKTOP_SCRIPT = './site.d39dbfb48ee5.js'
 
 export function renderDownloadPage(template) {
   if (template.includes(RELEASE_SOURCE_PLACEHOLDER)

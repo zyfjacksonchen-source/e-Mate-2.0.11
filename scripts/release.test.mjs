@@ -109,7 +109,7 @@ test('release evidence requires the one bundled package and emits hashes plus SP
     assert.equal(result.manifest.download.sha512, result.release[0].sha512)
     assert.equal(result.manifest.download.integrity, result.release[0].integrity)
     assert.equal(readFileSync(join(output, 'SHA256SUMS'), 'utf8').trim().split('\n').length, 1)
-    assert.match(readFileSync(join(output, 'EVIDENCE_SHA256SUMS'), 'utf8'), /e-mate-2\.0\.8\.spdx\.json/u)
+    assert.ok(readFileSync(join(output, 'EVIDENCE_SHA256SUMS'), 'utf8').includes(`e-mate-${VERSION}.spdx.json`))
     assert.equal(result.spdx.spdxVersion, 'SPDX-2.3')
     assert.ok(result.spdx.packages.some(item => item.name === '@deepseek-ai/dsh'))
     assert.ok(result.spdx.packages.some(item => item.name === '@e-mate/dsh-plugin-memory-evolve'))
@@ -246,7 +246,7 @@ test('GitHub release packs once and validates the same tarball on three platform
 
 test('download page resolves unsigned desktop installers from the fail-closed R2 manifest', async () => {
   const page = renderDownloadPage(readFileSync('deploy/download-page/index.html', 'utf8'))
-  const scriptName = 'site.a8c4f1979f7c.js'
+  const scriptName = 'site.d39dbfb48ee5.js'
   const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
   assert.equal(scriptName.split('.')[1], createHash('sha256').update(script).digest('hex').slice(0, 12))
   const manifestUrl = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json'
