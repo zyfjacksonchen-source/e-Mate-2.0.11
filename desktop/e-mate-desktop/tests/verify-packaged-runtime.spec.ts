@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -42,6 +43,12 @@ function completePackageResolver(unpackedRoot: string): PackageResolver {
 }
 
 describe('packaged desktop runtime verification', () => {
+  it('tracks the Windows prebuilds shipped by the installed node-pty', () => {
+    for (const entry of REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES) {
+      expect(existsSync(join(import.meta.dirname, '..', entry))).toBe(true)
+    }
+  })
+
   it.each([
     ['darwin', join('/build', 'e-Mate.app', 'Contents', 'MacOS', 'e-Mate'), '/bin/sh'],
     ['win32', join('/build', 'e-Mate.exe'), 'C:\\Windows\\System32\\cmd.exe'],

@@ -67,7 +67,10 @@ export const TARGET_NATIVE_RUNTIME_FILES = [
   'node-addon-require-builtin-win32-x64-msvc/prebuilt/win32-x64-msvc-napi-v9.node',
   'node-pty/prebuilds/darwin-arm64/pty.node',
   'node-pty/prebuilds/darwin-x64/pty.node',
-  'node-pty/prebuilds/win32-x64/pty.node',
+  'node-pty/prebuilds/win32-x64/conpty.node',
+  'node-pty/prebuilds/win32-x64/conpty_console_list.node',
+  'node-pty/prebuilds/win32-x64/conpty/conpty.dll',
+  'node-pty/prebuilds/win32-x64/conpty/OpenConsole.exe',
 ]
 
 const TRANSIENT_PUBLISH_CODES = ['E409', 'E429', 'E500', 'E502', 'E503', 'E504', 'ETIMEDOUT', 'ECONNRESET', 'EAI_AGAIN']
