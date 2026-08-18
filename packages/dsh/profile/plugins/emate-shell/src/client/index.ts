@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import {
   IconArchiveOutline20,
   IconBrowseOutline16,
@@ -31,14 +32,10 @@ import {
   IconUserOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AccountControl, AccountSettings } from './account.tsx'
+import { ArtifactCapsules } from './artifact-capsules.tsx'
 import { CapabilitiesPage, CapabilityControl } from './capabilities.tsx'
 import './chat-chrome.module.css'
-import { ConnectionsSettings } from './connections.tsx'
-import {
-  ComposerConnectors,
-  ConnectionIntentRouter,
-  routeToConnections,
-} from './composer-connectors.tsx'
+import { ComposerConnectors } from './composer-connectors.tsx'
 import { HomeProjection } from './home.tsx'
 import { IdentityGate } from './identity.tsx'
 import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImagesDefinition } from './image-gallery.tsx'
@@ -56,7 +53,7 @@ import { ThinkingStatusBranding } from './thinking-status.tsx'
 
 export const inject = [
   'slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'conversationEvents', 'theme',
-  'sessionLogDownload',
+  'sessionLogDownload', 'inputTriggers',
 ]
 
 export function registerSessionShare(ctx: any): void {
@@ -75,12 +72,46 @@ export function registerSessionShare(ctx: any): void {
   }, SessionShareAction))
 }
 
+export function registerComputerUseTrigger(ctx: any): void {
+  const source: InputTriggerSource = {
+    trigger: '@',
+    name: '功能',
+    order: -20,
+    candidates(_session, { query }) {
+      const isMac = /Mac/u.test(navigator.userAgent) || /Mac/u.test(navigator.platform)
+      return Promise.resolve(isMac && '电脑操控'.includes(query)
+        ? [{ name: '电脑操控', description: '显式指定使用 dsh-computer-use 操作当前电脑' }]
+        : [])
+    },
+    lexicon() { return ['电脑操控'] },
+    onPick() {
+      return { insert: { source: '功能', ref: 'computer-use', label: '电脑操控', clipboardText: '@电脑操控' } }
+    },
+    codec: {
+      clipboardText: () => '@电脑操控',
+      serialize: (_ref, signal) => {
+        signal.throwIfAborted()
+        return Promise.resolve('<computer-use explicit="true">用户已显式指定使用电脑操控完成本次请求。</computer-use>')
+      },
+    },
+  }
+  ctx.effect(() => ctx.inputTriggers.registerSource(source), 'e-mate-shell: @电脑操控 source')
+}
+
 function SkipTargetOnboarding({ complete }: { complete: () => void }) {
   useEffect(complete, [complete])
   return null
 }
 
+function HiddenSessionStats() { return null }
+
 export function apply(ctx: any): void {
+  registerComputerUseTrigger(ctx)
+  ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
+    name: 'conversation.composer.dock',
+    id: 'stats',
+    priority: -1,
+  }, HiddenSessionStats))
   const startSession = (workspaceId?: string) => {
     const target = workspaceId ?? ctx.workspaces.list.getSnapshot().items.find(isGeneralWorkspace)?.workspaceId
     if (target === undefined) {
@@ -133,6 +164,11 @@ export function apply(ctx: any): void {
     id: 'e-mate-thinking-status',
     order: -190,
   }, ThinkingStatusBranding))
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay',
+    id: 'e-mate-artifact-capsules',
+    order: -185,
+  }, ArtifactCapsules))
   ctx.conversationEvents.register(imageDisclosureDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',
@@ -150,16 +186,14 @@ export function apply(ctx: any): void {
     inject: () => ({ canDownload: ctx.connection.isLoopback }),
   }, LegacyArtifacts))
   registerSessionShare(ctx)
-  ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
-    name: 'conversation.session.header.utilities',
-    id: 'e-mate-connection-intent-router',
-    order: -30,
-  }, ConnectionIntentRouter))
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
     name: 'conversation.input.right',
     id: 'e-mate-connectors',
     order: 20,
-    inject: () => ({ LinkIcon: IconLinkOutline16, openConnections: routeToConnections }),
+    inject: () => ({
+      LinkIcon: IconLinkOutline16,
+      callConnections: () => ctx.connection.rpc.call('/emate.mcpManage', 'active', {}),
+    }),
   }, ComposerConnectors))
   ctx.effect(
     () => ctx.slots.register({
@@ -308,26 +342,6 @@ export function apply(ctx: any): void {
         ctx.connection.rpc.call('/emate.identity', endpoint, payload),
     }),
   }, AccountSettings))
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'connections',
-    order: 40,
-    label: '外部连接',
-    inject: () => ({
-      callConnections: (endpoint: string, payload: Record<string, unknown>) =>
-        ctx.connection.rpc.call('/emate.connections', endpoint, payload),
-      setCredential: async (ref: string, value: string) => {
-        const response = await ctx.connection.api.credentials.set({ ref, value })
-        if (!response.result.ok) throw new Error(response.result.error.message)
-      },
-      unsetCredential: async (ref: string) => {
-        const response = await ctx.connection.api.credentials.unset({ ref })
-        if (!response.result.ok) throw new Error(response.result.error.message)
-      },
-      LinkIcon: IconLinkOutline16,
-      RefreshIcon: IconRefreshOutline16,
-    }),
-  }, ConnectionsSettings))
   ctx.slots.inject('settings.action', () => ctx.slots.register({
     name: 'settings.action',
     id: 'e-mate-settings-header',

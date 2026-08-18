@@ -11,11 +11,11 @@ test('rc.5 adapter is observable and does not expose provider or model configura
     readFile(new URL('src/index.ts', root), 'utf8'),
   ])
   const pkg = JSON.parse(manifest)
-  assert.equal(pkg.version, '2.0.8')
+  assert.equal(pkg.version, '2.0.9')
   assert.equal(pkg.dsh.visionToolkit.adapterState, 'blocked')
   assert.equal(pkg.dependencies, undefined)
   assert.equal(pkg.peerDependencies, undefined)
-  assert.equal(pkg.eMate.harnessVersion, '0.1.0-rc.5')
+  assert.equal(pkg.eMate.harnessVersion, '0.1.0-rc.7')
   assert.match(patch, /mode: managed/u)
   assert.match(source, /EMATE_VISION_POLICY_SEAM_MISSING/u)
   assert.match(source, /runtimeInstalled: false/u)

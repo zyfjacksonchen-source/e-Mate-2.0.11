@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-client-shell",
-  "version": "2.0.8",
+  "version": "2.0.9",
   "type": "module",
   "main": "./index.js",
   "exports": {
@@ -15,6 +15,7 @@
         "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-client-ui-layout",
         "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-input-trigger",
         "@deepseek-ai/dsh-client-ui-attachment",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-session-log-export"

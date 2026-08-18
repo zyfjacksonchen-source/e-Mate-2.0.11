@@ -2,7 +2,7 @@
 
 ## 1. 不重建市场
 
-e-Mate 2.0.8 保留 e-Mate 2.0.5 已实现的 Skill Hub 行为和线上数据模型。公开目录继续支持用户上传、其他用户发现、查看版本、下载和本机安装。2.0.8 不创建第二套市场、第二种 Skill ZIP 或第二个 Skill Store。
+e-Mate 2.0.9 保留 e-Mate 2.0.5 已实现的 Skill Hub 行为和线上数据模型。公开目录继续支持用户上传、其他用户发现、查看版本、下载和本机安装。2.0.9 不创建第二套市场、第二种 Skill ZIP 或第二个 Skill Store。
 
 旧实现的权威来源：
 
@@ -49,7 +49,7 @@ SkillsWorkspace or Harness Agent Skill Hub Tool
 - 同一 slug + version 不可覆盖；包内容、版本、上传者、来源和审计记录不可在原地改写。
 - Agent 发布只能引用当前会话已授权的 Harness attachment/artifact ID，不接受模型生成的任意本机路径；下载也返回 Harness artifact/HTTP 下载对象，而不是向浏览器暴露宿主绝对路径。
 
-2.0.8 Host adapter 只处理本机身份代理、摘要校验、安装 receipt 和本地目录切换。中央注册表仍由已有 Skill Hub 服务负责，不归企业管理端插件控制面。
+2.0.9 Host adapter 只处理本机身份代理、摘要校验、安装 receipt 和本地目录切换。中央注册表仍由已有 Skill Hub 服务负责，不归企业管理端插件控制面。
 
 ## 5. 安装事务
 

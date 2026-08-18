@@ -1,0 +1,7 @@
+- insert:
+    - id: emate-xin-assistant
+      name: '@e-mate/dsh-plugin-xin-assistant'
+      inject: [subprocess, tools, systemPrompt]
+      config:
+        pythonPath: ''
+        databasePath: ''

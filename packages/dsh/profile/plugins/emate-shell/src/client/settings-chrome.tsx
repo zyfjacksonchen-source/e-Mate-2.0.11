@@ -102,10 +102,6 @@ export function SettingsChrome() {
     if (dialog === null || dialog === undefined) return undefined
     const sync = () => {
       applySettingsBrandCopy(dialog)
-      if (new URLSearchParams(location.search).get('section') !== 'connections') return
-      const target = [...dialog.querySelectorAll<HTMLButtonElement>('nav button')]
-        .find(button => button.textContent?.trim() === '外部连接')
-      if (target !== undefined && target.getAttribute('aria-current') !== 'true') target.click()
     }
     const observer = new MutationObserver(sync)
     observer.observe(dialog, { childList: true, characterData: true, subtree: true })

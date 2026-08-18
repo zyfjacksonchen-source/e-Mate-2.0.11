@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh-plugin-memory-evolve",
-  "version": "2.0.8",
-  "description": "Project-isolated memory adapter for the pinned e-Mate 2.0.8 local runtime",
+  "version": "2.0.9",
+  "description": "Project-isolated memory adapter for the pinned e-Mate 2.0.9 local runtime",
   "type": "module",
   "license": "MIT",
   "publishConfig": {

@@ -13,6 +13,7 @@ import {
   queryForRange,
   loginUsageAccount,
   logoutUsageAccount,
+  refreshUsageAccount,
   UsageApiError,
   resolveSameOriginApiPath,
   taskQueryString,
@@ -250,6 +251,7 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
   assert.match(source, /queryForRange/);
   assert.match(source, /selectedUserId \? \{ userId: selectedUserId \}/);
   assert.match(source, /eventTypeLabels\[type\].*type/);
+  assert.match(source, /status === 401[\s\S]*refreshUsageSession/);
   assert.doesNotMatch(source, /models\.slice/);
   assert.doesNotMatch(source, /eventState\.events[\s\S]{0,160}eventCount/);
   assert.match(readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8'), /\/v1\/admin\/users/);
@@ -318,6 +320,39 @@ test('password login reuses the same-origin Auth Gateway and accepts only usage 
       identity: { roles: ['MEMBER'] },
     }), { status: 200 }),
   }), (error: unknown) => error instanceof UsageApiError && error.status === 403);
+});
+
+test('refresh rotates an expired usage session through the existing Auth Gateway contract', async () => {
+  let request: { input: RequestInfo | URL; init?: RequestInit } | undefined;
+  const accessToken = `header.${'a'.repeat(32)}.signature`;
+  const refreshToken = `emate_rt_${'r'.repeat(43)}`;
+  const rotatedRefreshToken = `emate_rt_${'s'.repeat(43)}`;
+  const refreshRequestId = 'refresh-request-1';
+  assert.deepEqual(await refreshUsageAccount({
+    authBase: '/e-mate/auth-api/',
+    clientId: 'e-mate-admin',
+    refreshToken,
+    refreshRequestId,
+  }, new AbortController().signal, {
+    origin: 'https://example.test',
+    fetcher: async (input, init) => {
+      request = { input, init };
+      return new Response(JSON.stringify({
+        schemaVersion: 1,
+        accessToken,
+        refreshToken: rotatedRefreshToken,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        identity: { roles: ['AUDIT_ADMIN'] },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  }), { accessToken, refreshToken: rotatedRefreshToken });
+  assert.equal(request?.input, '/e-mate/auth-api/v1/auth/refresh');
+  assert.deepEqual(JSON.parse(String(request?.init?.body)), {
+    clientId: 'e-mate-admin',
+    refreshToken,
+    refreshRequestId,
+  });
+  assert.equal(new Headers(request?.init?.headers).get('authorization'), null);
 });
 
 test('logout revokes the existing Auth session through the same-origin contract', async () => {

@@ -26,8 +26,8 @@ export default [
     entry: {
       health: 'src/profile/health.ts',
       'agent-operations': 'src/profile/agent-operations.ts',
+      'artifact-open-boundary': 'src/profile/artifact-open-boundary.ts',
       capabilities: 'src/profile/capabilities.ts',
-      connections: 'src/profile/connections.ts',
       'credentials-os': 'src/profile/credentials-os.ts',
       'general-workspace': 'src/profile/general-workspace.ts',
       'settings-document-boundary': 'src/profile/settings-document-boundary.ts',

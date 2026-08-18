@@ -1,0 +1,12 @@
+- insert:
+    - id: emate-computer-use
+      name: '@e-mate/dsh-plugin-computer-use'
+      disabled: !!js process.platform !== 'darwin'
+      config:
+        observationTtlMs: 0
+        interaction:
+          focusPolicy: preserve
+          keyboardPolicy: activate
+          pointerInputPolicy: targeted
+          cursorVisualization: visible
+          cursorAutoHideMs: 0

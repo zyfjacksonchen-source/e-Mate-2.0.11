@@ -21,13 +21,16 @@ const SHA512_RE = /^[0-9a-f]{128}$/u
 const RELEASE_SOURCE_COMMIT_RE = /^[0-9a-f]{40}$/u
 const UPDATE_REQUEST_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
 const PRODUCT = 'e-Mate'
-const VERSION = '2.0.8'
+const VERSION = '2.0.9'
 const PACKAGE_NAME = '@e-mate/dsh'
-const TARBALL_FILENAME = 'e-mate-dsh-2.0.8.tgz'
 const R2_PUBLIC_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
-const RELEASE_MANIFEST_PATH_RE = /^\/npm\/candidates\/v2\.0\.8\/([0-9a-f]{40})\/release-manifest\.json$/u
+const LATEST_STABLE_URL = `${R2_PUBLIC_ORIGIN}/desktop/latest.json`
 const MANIFEST_MAX_BYTES = 1024 * 1024
 const TARBALL_MAX_BYTES = 512 * 1024 * 1024
+
+function tarballFilename(version) {
+  return `e-mate-dsh-${version}.tgz`
+}
 
 function atomicJson(path, value) {
   mkdirSync(dirname(path), { recursive: true })
@@ -44,7 +47,7 @@ function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
 }
 
-function safeReleaseUrl(value, kind, sourceCommit) {
+function safeReleaseUrl(value, kind, version, sourceCommit) {
   let url
   try {
     url = new URL(value)
@@ -53,32 +56,64 @@ function safeReleaseUrl(value, kind, sourceCommit) {
   }
   if (url.protocol !== 'https:' || url.origin !== R2_PUBLIC_ORIGIN || url.username !== '' || url.password !== ''
     || url.search !== '' || url.hash !== '') throw new Error(`R2 release ${kind} URL is invalid`)
-  const directory = posix.dirname(url.pathname)
-  const match = RELEASE_MANIFEST_PATH_RE.exec(kind === 'manifest' ? url.pathname : `${directory}/release-manifest.json`)
-  if (match?.[1] !== sourceCommit || (kind === 'tarball' && url.pathname !== `${directory}/${TARBALL_FILENAME}`)) {
+  const directory = `/npm/candidates/v${version}/${sourceCommit}`
+  const expected = kind === 'manifest'
+    ? `${directory}/release-manifest.json`
+    : `${directory}/${tarballFilename(version)}`
+  if (url.pathname !== expected) {
     throw new Error(`R2 release ${kind} URL is invalid`)
   }
   return url.href
 }
 
 export function validateReleaseSource(value) {
-  if (value?.schema_version !== 1 || value.product !== PRODUCT || value.version !== VERSION
+  if (value?.schema_version !== 1 || value.product !== PRODUCT || !VERSION_RE.test(value.version ?? '')
     || value.package_name !== PACKAGE_NAME || !RELEASE_SOURCE_COMMIT_RE.test(value.source_commit ?? '')) {
     throw new Error('embedded R2 release source is invalid')
   }
   const source = {
     schema_version: 1,
     product: PRODUCT,
-    version: VERSION,
+    version: value.version,
     package_name: PACKAGE_NAME,
     source_commit: value.source_commit,
-    manifest_url: safeReleaseUrl(value.manifest_url, 'manifest', value.source_commit),
-    tarball_url: safeReleaseUrl(value.tarball_url, 'tarball', value.source_commit),
+    manifest_url: safeReleaseUrl(value.manifest_url, 'manifest', value.version, value.source_commit),
+    tarball_url: safeReleaseUrl(value.tarball_url, 'tarball', value.version, value.source_commit),
   }
-  if (source.tarball_url !== new URL(TARBALL_FILENAME, source.manifest_url).href) {
+  if (source.tarball_url !== new URL(tarballFilename(source.version), source.manifest_url).href) {
     throw new Error('embedded R2 release source is invalid')
   }
   return source
+}
+
+export function validateLatestReleasePointer(value) {
+  if (value?.schema_version !== 1 || !VERSION_RE.test(value.version ?? '')
+    || !RELEASE_SOURCE_COMMIT_RE.test(value.source_commit ?? '') || value.artifacts === null
+    || typeof value.artifacts !== 'object' || Array.isArray(value.artifacts)) {
+    throw new Error('latest stable e-Mate release pointer is invalid')
+  }
+  const prefix = `${R2_PUBLIC_ORIGIN}/desktop/releases/v${value.version}/${value.source_commit}`
+  for (const [platform, filename] of [
+    ['darwin', `e-Mate-${value.version}-mac-universal.dmg`],
+    ['win32', `e-Mate-${value.version}-win-x64-Setup.exe`],
+  ]) {
+    const artifact = value.artifacts[platform]
+    if (artifact === null || typeof artifact !== 'object' || Array.isArray(artifact)
+      || artifact.url !== `${prefix}/${filename}` || !Number.isSafeInteger(artifact.bytes) || artifact.bytes < 1
+      || !SHA256_RE.test(artifact.sha256 ?? '')) {
+      throw new Error('latest stable e-Mate release pointer is invalid')
+    }
+  }
+  const releasePrefix = `${R2_PUBLIC_ORIGIN}/npm/candidates/v${value.version}/${value.source_commit}`
+  return validateReleaseSource({
+    schema_version: 1,
+    product: PRODUCT,
+    version: value.version,
+    package_name: PACKAGE_NAME,
+    source_commit: value.source_commit,
+    manifest_url: `${releasePrefix}/release-manifest.json`,
+    tarball_url: `${releasePrefix}/${tarballFilename(value.version)}`,
+  })
 }
 
 function currentReleaseSource() {
@@ -328,11 +363,12 @@ async function fetchJson(url) {
 
 export function validateReleaseManifest(value, source, target = 'latest') {
   source = validateReleaseSource(source)
+  const filename = tarballFilename(source.version)
   const item = Array.isArray(value?.packages) && value.packages.length === 1 ? value.packages[0] : undefined
   if (value?.schema_version !== 1 || value.product !== PRODUCT || value.version !== source.version
     || value.source_commit !== source.source_commit || value.download?.manifest_url !== source.manifest_url
     || value.download?.tarball_url !== source.tarball_url || item?.name !== PACKAGE_NAME
-    || item.version !== source.version || item.filename !== TARBALL_FILENAME || item.kind !== 'main'
+    || item.version !== source.version || item.filename !== filename || item.kind !== 'main'
     || !Number.isSafeInteger(item.size) || item.size < 1 || item.size > TARBALL_MAX_BYTES
     || !SHA256_RE.test(item.sha256 ?? '') || !SHA512_RE.test(item.sha512 ?? '')) {
     throw new Error('R2 release manifest identity is invalid')
@@ -349,6 +385,10 @@ export function validateReleaseManifest(value, source, target = 'latest') {
 
 async function resolveRelease(source, target) {
   return validateReleaseManifest(await fetchJson(source.manifest_url), source, target)
+}
+
+async function resolveLatestReleaseSource() {
+  return validateLatestReleasePointer(await fetchJson(LATEST_STABLE_URL))
 }
 
 async function downloadRelease(release, path) {
@@ -472,6 +512,7 @@ export async function runOnlineUpdateHelper({ requestId, dshHome, binPath }) {
   const paths = updaterPaths(dshHome, requestId)
   await requireHelperUpdateLock(paths.lock, requestId)
   const request = validateUpdateRequest(readJson(paths.request), requestId)
+  if (request.target === 'latest') request.release_source = await resolveLatestReleaseSource()
   const environment = { ...process.env, DSH_HOME: dshHome, EMATE_NO_OPEN: '1' }
   const globalPrefix = globalPrefixForBinPath(binPath)
   let staged

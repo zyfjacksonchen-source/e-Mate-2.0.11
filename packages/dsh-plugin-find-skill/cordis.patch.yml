@@ -1,0 +1,37 @@
+- insert:
+    - id: emate-find-skill
+      name: '@e-mate/dsh-plugin-find-skill'
+      config:
+        cliCommand: 'pnpm dlx skills@1.5.22'
+        installDefaultScope: temp
+        compactDisposePolicy: keep
+        prioritySources:
+          - zyfjacksonchen-source
+          - riba2534
+          - vercel-labs
+          - vercel
+          - anthropics
+          - microsoft
+          - google
+          - github
+        catalogSkills:
+          - id: connect-feishu-cli
+            name: 连接飞书 CLI
+            source: https://github.com/zyfjacksonchen-source/e-Mate/tree/skills-v2.0.9-r5/skills/connect-feishu-cli
+            url: https://github.com/zyfjacksonchen-source/e-Mate/tree/skills-v2.0.9-r5/skills/connect-feishu-cli
+            keywords: [飞书, 飞书cli, feishu, feishu cli, lark]
+          - id: connect-tencent-docs
+            name: 连接腾讯文档
+            source: https://github.com/zyfjacksonchen-source/e-Mate/tree/skills-v2.0.9-r5/skills/connect-tencent-docs
+            url: https://github.com/zyfjacksonchen-source/e-Mate/tree/skills-v2.0.9-r5/skills/connect-tencent-docs
+            keywords: [腾讯文档, 腾讯 docs, tencent docs, docs.qq.com]
+          - id: connect-dingtalk
+            name: 连接钉钉
+            source: https://github.com/zyfjacksonchen-source/e-Mate/tree/skills-v2.0.9-r5/skills/connect-dingtalk
+            url: https://github.com/zyfjacksonchen-source/e-Mate/tree/skills-v2.0.9-r5/skills/connect-dingtalk
+            keywords: [钉钉, dingtalk, ding talk]
+          - id: connect-wechat-bot
+            name: 连接微信 Bot
+            source: https://github.com/zyfjacksonchen-source/e-Mate/tree/skills-v2.0.9-r5/skills/connect-wechat-bot
+            url: https://github.com/zyfjacksonchen-source/e-Mate/tree/skills-v2.0.9-r5/skills/connect-wechat-bot
+            keywords: [微信, 微信bot, 微信 bot, wechat, wechat bot]

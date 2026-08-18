@@ -185,6 +185,7 @@ describe('packaged desktop runtime verification', () => {
     'package.json',
     'build/app-icon-mac.png',
     'build/tray-iconTemplate.png',
+    'build/e-mate-profile/browser-extension/assets/icon.png',
     'lib/terminal.js',
     'lib/update-download.js',
     'node_modules/@deepseek-ai/dsh/lib/bin.js',

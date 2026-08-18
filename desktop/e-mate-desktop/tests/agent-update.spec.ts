@@ -6,8 +6,8 @@ describe('e-Mate Agent desktop update Tool', () => {
   it('delegates only to the native updater service', async () => {
     const runInteractiveUpdate = vi.fn(async () => ({
       status: 'up-to-date' as const,
-      currentVersion: '2.0.8',
-      latestVersion: '2.0.8',
+      currentVersion: '2.0.9',
+      latestVersion: '2.0.9',
     }))
     const section = vi.fn()
     const register = vi.fn()
@@ -33,8 +33,8 @@ describe('e-Mate Agent desktop update Tool', () => {
     expect(tool.name).toBe('e_mate_desktop_update')
     await expect(tool.execute({}, {})).resolves.toEqual({
       status: 'up-to-date',
-      installedVersion: '2.0.8',
-      latestVersion: '2.0.8',
+      installedVersion: '2.0.9',
+      latestVersion: '2.0.9',
     })
     expect(runInteractiveUpdate).toHaveBeenCalledOnce()
   })

@@ -72,7 +72,7 @@ function BrowserPanel({ sessionId, callStatus }: ConvViewProps & Injected) {
                 ? 'Windows 扩展已连接；真实 Windows Chrome/Edge Computer Use 尚未完成，因此保持失败关闭。'
                 : status?.blocker === 'DSH_BROWSER_EXTENSION_NOT_CONNECTED'
                   ? '请在 Chrome 或 Edge 的扩展管理页启用开发者模式，选择“加载已解压的扩展程序”，再选取 e-Mate 数据目录下的 browser-extension 文件夹。默认路径为 ~/.dsh/browser-extension。扩展加载后会自动连接，无需填写地址或 token。'
-                  : '当前平台不在 e-Mate 2.0.8 浏览器能力支持范围。'}</p>
+                  : '当前平台不在 e-Mate 2.0.9 浏览器能力支持范围。'}</p>
           </>
         )}
         <button style={styles.button} type="button" onClick={() => { void refresh() }}>重新核验</button>

@@ -39,6 +39,13 @@ export type UsageAuthSession = {
   refreshToken: string;
 };
 
+export type UsageRefresh = {
+  authBase?: string;
+  clientId: string;
+  refreshToken: string;
+  refreshRequestId: string;
+};
+
 export type UsageLogout = {
   authBase?: string;
   clientId: string;
@@ -115,29 +122,7 @@ export function resolveSameOriginApiPath(configured: string | undefined, path: s
   return `${endpoint.pathname}${endpoint.search}`;
 }
 
-export async function loginUsageAccount(
-  input: UsagePasswordLogin,
-  signal: AbortSignal,
-  options: { origin: string; fetcher?: typeof fetch }
-): Promise<UsageAuthSession> {
-  const response = await (options.fetcher ?? fetch)(
-    resolveSameOriginApiPath(input.authBase, '/v1/auth/password', options.origin),
-    {
-      method: 'POST',
-      headers: { accept: 'application/json', 'content-type': 'application/json' },
-      body: JSON.stringify({
-        clientId: input.clientId,
-        organization: input.organization,
-        user: input.account,
-        password: input.password,
-      }),
-      cache: 'no-store',
-      credentials: 'same-origin',
-      signal,
-    }
-  );
-  if (!response.ok) throw new UsageApiError(response.status);
-  const value = (await response.json()) as Record<string, unknown>;
+function parseUsageAuthSession(value: Record<string, unknown>): UsageAuthSession {
   const identity = value.identity as Record<string, unknown> | undefined;
   const roles = identity?.roles;
   const rolesValid =
@@ -161,6 +146,55 @@ export async function loginUsageAccount(
   }
   if (!roles.some((role) => role === 'TENANT_ADMIN' || role === 'AUDIT_ADMIN')) throw new UsageApiError(403);
   return { accessToken: value.accessToken, refreshToken: value.refreshToken };
+}
+
+export async function loginUsageAccount(
+  input: UsagePasswordLogin,
+  signal: AbortSignal,
+  options: { origin: string; fetcher?: typeof fetch }
+): Promise<UsageAuthSession> {
+  const response = await (options.fetcher ?? fetch)(
+    resolveSameOriginApiPath(input.authBase, '/v1/auth/password', options.origin),
+    {
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        clientId: input.clientId,
+        organization: input.organization,
+        user: input.account,
+        password: input.password,
+      }),
+      cache: 'no-store',
+      credentials: 'same-origin',
+      signal,
+    }
+  );
+  if (!response.ok) throw new UsageApiError(response.status);
+  return parseUsageAuthSession((await response.json()) as Record<string, unknown>);
+}
+
+export async function refreshUsageAccount(
+  input: UsageRefresh,
+  signal: AbortSignal,
+  options: { origin: string; fetcher?: typeof fetch }
+): Promise<UsageAuthSession> {
+  const response = await (options.fetcher ?? fetch)(
+    resolveSameOriginApiPath(input.authBase, '/v1/auth/refresh', options.origin),
+    {
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        clientId: input.clientId,
+        refreshToken: input.refreshToken,
+        refreshRequestId: input.refreshRequestId,
+      }),
+      cache: 'no-store',
+      credentials: 'same-origin',
+      signal,
+    }
+  );
+  if (!response.ok) throw new UsageApiError(response.status);
+  return parseUsageAuthSession((await response.json()) as Record<string, unknown>);
 }
 
 export async function logoutUsageAccount(

@@ -4,7 +4,7 @@ import { isAbsolute, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const SHA256 = /^[0-9a-f]{64}$/u
-const HARNESS_COMMIT = '12d68b6ca05fa538d98f70ed47786c44ca3a7225'
+const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -15,7 +15,7 @@ export function readManagedBinding(bindingPath = join(import.meta.dirname, 'runt
   if (!isRecord(binding)
     || binding.schema_version !== 1
     || binding.product !== 'e-Mate'
-    || binding.version !== '2.0.8'
+    || binding.version !== '2.0.9'
     || binding.harness_commit !== HARNESS_COMMIT
     || !isAbsolute(binding.dsh_home)
     || !isAbsolute(binding.tools_module)

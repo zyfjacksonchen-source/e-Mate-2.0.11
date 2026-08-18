@@ -1,6 +1,6 @@
 # e-Mate
 
-e-Mate 2.0.7 是浏览器优先、本地运行的 AI 工作空间。产品运行在锁定的 DeepSeek Harness `0.1.0-rc.5` 上；Harness 是技术底座，不是产品名称。版本固定关系和不可越界项见 [`docs/target-contract.md`](docs/target-contract.md)。
+e-Mate 2.0.7 是浏览器优先、本地运行的 AI 工作空间。产品运行在锁定的 DeepSeek Harness `0.1.0-rc.7` 上；Harness 是技术底座，不是产品名称。版本固定关系和不可越界项见 [`docs/target-contract.md`](docs/target-contract.md)。
 
 > 当前仓库仍在发布前实现与验收阶段。npm 正式包尚未激活；未通过的切片不得描述为已交付。实时状态见 [`docs/development-log.md`](docs/development-log.md) 和 [`docs/slices/S00-S13.md`](docs/slices/S00-S13.md)。
 

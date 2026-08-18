@@ -328,7 +328,7 @@ export function SidebarRoot({
       <aside ref={root} className={`${css.root} ${collapsed ? css.collapsed : ''}`} style={wide ? { width } : undefined} aria-label="任务导航">
         <div className={css.brandRow}>
           {wide
-            ? <span className={css.brand}><img className={css.logo} src="/assets/e-mate/logo.png" alt="e-Mate" /><small className={css.version}>2.0.8</small></span>
+            ? <span className={css.brand}><img className={css.logo} src="/assets/e-mate/logo.png" alt="e-Mate" /><small className={css.version}>2.0.9</small></span>
             : <button className={css.brand} type="button" aria-label="展开任务导航" onClick={toggleSidebar}><img className={css.mark} src="/assets/e-mate/xiaoxin-avatar.png" alt="" aria-hidden="true" /></button>}
           {wide && (
             <button className={css.iconButton} type="button" aria-label="搜索会话" aria-expanded={searchOpen} onClick={() => { setSearchOpen(value => !value) }}>
@@ -362,7 +362,7 @@ export function SidebarRoot({
         {wide && searchOpen && (
           <label className={css.search}>
             <SearchIcon size={16} />
-            <input autoFocus type="search" aria-label="搜索会话" placeholder="搜索会话" value={query} onChange={event => { setQuery(event.target.value) }} />
+            <input autoFocus type="text" aria-label="搜索会话" placeholder="搜索会话" value={query} onChange={event => { setQuery(event.target.value) }} />
             <button type="button" aria-label="关闭搜索" onClick={() => { setQuery(''); setSearchOpen(false) }}><CloseIcon size={16} /></button>
           </label>
         )}

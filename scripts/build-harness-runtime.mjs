@@ -9,9 +9,9 @@ import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 
-const PRODUCT_VERSION = '2.0.8'
-const HARNESS_VERSION = '0.1.0-rc.5'
-const HARNESS_COMMIT = '12d68b6ca05fa538d98f70ed47786c44ca3a7225'
+const PRODUCT_VERSION = '2.0.9'
+const HARNESS_VERSION = '0.1.0-rc.7'
+const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
 const PNPM_VERSION = '11.7.0'
 
 const root = resolve(import.meta.dirname, '..')

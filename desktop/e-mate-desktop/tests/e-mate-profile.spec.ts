@@ -5,6 +5,7 @@ import { composeEntries } from '@deepseek-ai/dsh-app-boot'
 import { afterEach, describe, expect, it } from 'vitest'
 import { installEmateDesktopProfile } from '../src/e-mate-profile.ts'
 import { prepareDesktopProfile } from '../src/profile.ts'
+import { bundledPythonPath } from '../src/vision-toolkit.ts'
 
 const roots: string[] = []
 
@@ -21,13 +22,17 @@ describe('e-Mate desktop profile', () => {
     const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8')) as {
       dsh: { profile: { bundles: string[] } }
     }
-    expect(manifest.dsh.profile.bundles).toHaveLength(16)
+    expect(manifest.dsh.profile.bundles).toHaveLength(19)
     expect(manifest.dsh.profile.bundles).toEqual(expect.arrayContaining([
       '@kelearns/dsh-navigation-bar',
       '@omdsh-dev/dsh-genui',
-      '@yuxianglin/dsh-bridge-browser',
+      '@e-mate/dsh-plugin-browser',
       '@e-mate/dsh-plugin-file-import',
+      '@e-mate/dsh-plugin-computer-use',
+      '@e-mate/dsh-plugin-find-skill',
+      '@e-mate/dsh-plugin-mcp-manage',
       '@e-mate/dsh-plugin-office-skills',
+      '@e-mate/dsh-plugin-xin-assistant',
       'dsh-at-file',
       'dsh-better-sidebar',
       'dsh-file-viewer',
@@ -35,44 +40,72 @@ describe('e-Mate desktop profile', () => {
       'dsh-turn-fold',
       'dsh-visualize',
     ]))
+    expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-im')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-vision-toolkit')
-    expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-browser')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-better-sidebar')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-genui')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-search-mcp')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-subagent')
     expect(existsSync(join(profile, 'node_modules', '@kelearns', 'dsh-navigation-bar', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@omdsh-dev', 'dsh-genui', 'lib', 'client.js'))).toBe(true)
-    expect(existsSync(join(profile, 'node_modules', '@yuxianglin', 'dsh-bridge-browser', 'lib', 'index.js'))).toBe(true)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-browser', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-file-import', 'lib', 'client.js'))).toBe(true)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-computer-use', 'lib', 'client.js'))).toBe(true)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-find-skill', 'lib', 'index.js'))).toBe(true)
+    const findSkillPatch = readFileSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-find-skill', 'cordis.patch.yml'), 'utf8')
+    expect(findSkillPatch).toContain("cliCommand: 'pnpm dlx skills@1.5.22'")
+    expect(findSkillPatch).toContain('/tree/skills-v2.0.9-r5/skills/connect-feishu-cli')
+    expect(findSkillPatch).not.toContain('/tree/main/skills/connect-feishu-cli')
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-mcp-manage', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'lib', 'index.js'))).toBe(true)
+    const xinPatch = readFileSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant', 'cordis.patch.yml'), 'utf8')
+    expect(xinPatch).toContain(`pythonPath: ${JSON.stringify(bundledPythonPath())}`)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets', 'pdf2json', 'pdfparser.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets', 'noto-sans-sc', 'files', 'noto-sans-sc-4-wght-normal.woff2'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', 'dsh-at-file', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', 'dsh-better-sidebar', 'lib', 'client.js'))).toBe(true)
-    expect(readFileSync(join(profile, 'node_modules', 'dsh-better-sidebar', 'src', 'prefs-shared.ts'), 'utf8'))
-      .toContain('openByDefault: false')
+    const betterSidebarPrefs = readFileSync(join(profile, 'node_modules', 'dsh-better-sidebar', 'src', 'prefs-shared.ts'), 'utf8')
+    expect(betterSidebarPrefs).toContain('openByDefault: false')
+    expect(betterSidebarPrefs).toContain('interceptOpenPath: false')
     const betterSidebarClient = readFileSync(join(profile, 'node_modules', 'dsh-better-sidebar', 'lib', 'client.js'), 'utf8')
     expect(betterSidebarClient).toContain('window.location.pathname.startsWith("/chat/")')
     expect(betterSidebarClient).toContain('panelOpen: false')
+    expect(betterSidebarClient).toContain('store.getPrefs().interceptOpenPath === false ||')
+    expect(readFileSync(join(profile, 'node_modules', 'dsh-better-sidebar', 'lib', 'index.js'), 'utf8'))
+      .toContain('interceptOpenPath: z.boolean().default(false)')
     expect(existsSync(join(profile, 'node_modules', 'dsh-file-viewer', 'lib', 'client.js'))).toBe(true)
     const fileViewerHost = readFileSync(join(profile, 'node_modules', 'dsh-file-viewer', 'lib', 'index.js'), 'utf8')
     const fileViewerClient = readFileSync(join(profile, 'node_modules', 'dsh-file-viewer', 'lib', 'client.js'), 'utf8')
     expect(fileViewerHost).toContain('/usr/bin/open')
     expect(fileViewerHost).toContain('Invoke-Item -LiteralPath $env:E_MATE_OPEN_PATH')
-    expect(fileViewerClient).toContain('SYSTEM_OPEN_EXTENSIONS = /\\.(?:docx|xlsx|pptx|pdf)$/iu')
-    expect(fileViewerClient).toContain('coordinator.openInSystem(sessionId, path, singleFile)')
-    expect(existsSync(join(profile, 'node_modules', 'dsh-search-mcp', 'lib', 'client.browser.js'))).toBe(true)
+    expect(fileViewerClient).not.toContain('"file-viewer: file open router"')
+    expect(fileViewerClient).toContain('name: "conversation.session.header.actions"')
+    expect(fileViewerClient).toContain('coordinator.openInSystem(sessionId, path)')
+    const searchMcpClient = readFileSync(join(profile, 'node_modules', 'dsh-search-mcp', 'lib', 'client.browser.js'), 'utf8')
+    expect(searchMcpClient).toContain('key: "search-mcp"')
     const turnFoldClient = readFileSync(join(profile, 'node_modules', 'dsh-turn-fold', 'client.js'), 'utf8')
-    const formatterBody = /function formatTokenCount\(tokens\) \{([\s\S]*?)\n\t\t\}/u.exec(turnFoldClient)?.[1]
-    expect(formatterBody).toBeDefined()
-    const formatTokenCount = new Function('tokens', formatterBody ?? '') as (tokens: number) => string
-    expect(formatTokenCount(267_382)).toBe('267K')
-    expect(formatTokenCount(1_250_000)).toBe('1.3M')
-    expect(turnFoldClient).toContain('"消耗" + formatTokenCount(metrics.tokens) + " token"')
+    const labelBody = /function activityHeaderLabel\(fold\) \{([\s\S]*?)\n\t\t\}/u.exec(turnFoldClient)?.[1]
+    expect(labelBody).toBeDefined()
+    const activityHeaderLabel = new Function('fold', labelBody ?? '') as (fold: { toolCount: number, messageCount: number }) => string
+    expect(activityHeaderLabel({ toolCount: 4, messageCount: 2 })).toBe('4 tool calls, 2 messages')
+    expect(turnFoldClient).toContain('v === undefined ? false : v')
+    expect(turnFoldClient).toContain('fold.activityCount > 0')
+    expect(turnFoldClient).toContain('assistantMustStayVisible(node)')
+    expect(turnFoldClient).toContain('toolFailed(node)')
+    expect(turnFoldClient).not.toContain('turnTimings')
+    expect(turnFoldClient).not.toMatch(/首 token|缓存命中|tok\/s|消耗.*token/u)
     expect(existsSync(join(profile, 'node_modules', 'dsh-visualize', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(home, 'browser-extension', 'manifest.json'))).toBe(true)
-    expect(existsSync(join(home, 'browser-extension', 'SOURCE.json'))).toBe(true)
+    expect(existsSync(join(home, 'browser-extension', 'README.txt'))).toBe(true)
+    const browserManifest = JSON.parse(readFileSync(join(home, 'browser-extension', 'manifest.json'), 'utf8')) as {
+      name?: string
+      permissions?: string[]
+      side_panel?: unknown
+    }
+    expect(browserManifest.name).toBe('e-Mate 浏览器')
+    expect(browserManifest.permissions).not.toContain('sidePanel')
+    expect(browserManifest.side_panel).toBeUndefined()
+    expect(readFileSync(join(home, 'browser-extension', 'background.js'), 'utf8')).not.toContain('session.prompt')
     expect(existsSync(join(profile, 'plugins', 'runtime-binding.json'))).toBe(true)
     expect(readFileSync(join(home, 'settings.yaml'), 'utf8')).toBe(
       'ui-theme:\n  preference: dark\nagent-default-model:\n  provider: e-mate-enterprise\n  model: gpt-5.6-luna\n  reasoningEffort: max\n',
@@ -86,9 +119,10 @@ describe('e-Mate desktop profile', () => {
       name: '@e-mate/desktop/agent-update',
     }))
     expect(rows.find(row => row.id === 'desktop-agent-update')?.disabled).not.toBe(true)
-    expect(rows.find(row => row.id === 'bridge-browser')).toEqual(expect.objectContaining({
-      name: '@yuxianglin/dsh-bridge-browser',
+    expect(rows.find(row => row.id === 'emate-browser')).toEqual(expect.objectContaining({
+      name: './node_modules/@e-mate/dsh-plugin-browser/lib/index.mjs',
     }))
+    expect(rows.map(row => row.id)).not.toContain('bridge-browser')
     expect(rows.find(row => row.id === 'genui')).toEqual(expect.objectContaining({
       name: '@omdsh-dev/dsh-genui',
     }))
@@ -103,6 +137,19 @@ describe('e-Mate desktop profile', () => {
     }))
     expect(rows.find(row => row.id === 'emate-file-import')).toEqual(expect.objectContaining({
       name: '@e-mate/dsh-plugin-file-import',
+    }))
+    expect(rows.find(row => row.id === 'emate-computer-use')).toEqual(expect.objectContaining({
+      name: '@e-mate/dsh-plugin-computer-use',
+    }))
+    expect(rows.find(row => row.id === 'emate-find-skill')).toEqual(expect.objectContaining({
+      name: '@e-mate/dsh-plugin-find-skill',
+    }))
+    expect(rows.find(row => row.id === 'emate-mcp-manage')).toEqual(expect.objectContaining({
+      name: './node_modules/@e-mate/dsh-plugin-mcp-manage/lib/index.mjs',
+    }))
+    expect(rows.find(row => row.id === 'emate-xin-assistant')).toEqual(expect.objectContaining({
+      name: './node_modules/@e-mate/dsh-plugin-xin-assistant/lib/index.mjs',
+      config: expect.objectContaining({ pythonPath: bundledPythonPath() }),
     }))
     expect(rows.find(row => row.id === 'emate-office-skills')).toEqual(expect.objectContaining({
       name: './node_modules/@e-mate/dsh-plugin-office-skills/lib/index.js',
@@ -136,5 +183,37 @@ describe('e-Mate desktop profile', () => {
     expect(readFileSync(settings, 'utf8')).toBe(
       'ui-theme:\n  preference: light\nagent-default-model:\n  provider: e-mate-enterprise\n  model: gpt-5.6-luna\n  reasoningEffort: max\n',
     )
+  })
+
+  it('preserves a native DSH plugin dependency and bundle across managed profile repair', () => {
+    const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
+    roots.push(home)
+    const profile = installEmateDesktopProfile(home)
+    const manifestPath = join(profile, 'package.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      dependencies: Record<string, string>
+      dsh: { profile: { bundles: string[] } }
+    }
+    manifest.dependencies['@xmanrui/dsh-im'] = 'github:zyfjacksonchen-source/dsh-im#f984f73dcd67692141d4e475c8fbe887e2ce7062'
+    manifest.dependencies['@e-mate/dsh-plugin-im'] = '2.0.8'
+    manifest.dependencies['@yuxianglin/dsh-bridge-browser'] = '0.0.1'
+    manifest.dsh.profile.bundles.push(
+      '@xmanrui/dsh-im',
+      '@e-mate/dsh-plugin-im',
+      '@yuxianglin/dsh-bridge-browser',
+    )
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+
+    installEmateDesktopProfile(home)
+
+    const repaired = JSON.parse(readFileSync(manifestPath, 'utf8')) as typeof manifest
+    expect(repaired.dependencies['@xmanrui/dsh-im']).toBe(
+      'github:zyfjacksonchen-source/dsh-im#f984f73dcd67692141d4e475c8fbe887e2ce7062',
+    )
+    expect(repaired.dsh.profile.bundles.at(-1)).toBe('@xmanrui/dsh-im')
+    expect(repaired.dependencies['@e-mate/dsh-plugin-im']).toBeUndefined()
+    expect(repaired.dependencies['@yuxianglin/dsh-bridge-browser']).toBeUndefined()
+    expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-im')
+    expect(repaired.dsh.profile.bundles).not.toContain('@yuxianglin/dsh-bridge-browser')
   })
 })

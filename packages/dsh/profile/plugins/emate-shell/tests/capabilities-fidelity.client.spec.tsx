@@ -10,7 +10,6 @@ const Icon = () => <svg aria-hidden="true" />
 const capabilityItems = [
   { id: 'office-live', title: 'Office', summary: '创建与编辑办公文档', icon_key: 'office', order: 2, state: 'ready', actions: [{ id: 'check', label: '自检', kind: 'secondary' }] },
   { id: 'image-live', title: '生图与改图', summary: '使用当前图像模型', icon_key: 'image', order: 1, state: 'setup-required', actions: [] },
-  { id: 'dsh-im', title: 'IM 外部连接', summary: '真实插件元数据', icon_key: 'collaboration', order: 3, state: 'blocked', actions: [] },
 ] as const
 
 const hubCard = {
@@ -91,19 +90,6 @@ describe('capability center fidelity surface', () => {
       data: {},
     }))
     expect(await screen.findByText('Office 已提交操作。')).toBeTruthy()
-  })
-
-  it('opens and filters the external-connection subtype from the composer route', async () => {
-    history.replaceState(null, '', '/capabilities?category=collaboration')
-    renderPage()
-    expect(await screen.findByText('IM 外部连接')).toBeTruthy()
-    expect(screen.queryByText('Office')).toBeNull()
-    expect(screen.queryByText('生图与改图')).toBeNull()
-    expect(screen.getByRole('button', { name: '外部连接' }).getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByText('本机内置能力').closest('details')?.open).toBe(true)
-
-    fireEvent.click(screen.getByRole('button', { name: '配置外部连接' }))
-    expect(`${location.pathname}${location.search}`).toBe('/settings?section=connections')
   })
 
   it('opens the real Hub detail and starts its download job', async () => {

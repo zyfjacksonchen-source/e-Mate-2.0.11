@@ -6,7 +6,7 @@ import { mkdir, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const VERSION = '2.0.8'
+const VERSION = '2.0.9'
 const R2_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/u
 

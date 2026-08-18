@@ -721,6 +721,9 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
         agreement_receipt_id: consent.acceptance?.acceptanceId,
       }
     },
+    async keepAlive() {
+      await active(true)
+    },
     async issueRegistrationChallenge() {
       const value = await call(authRoot, '/v1/auth/registration/challenge', {
         method: 'POST',
@@ -819,7 +822,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
           termsAccepted: true,
           policyRead: true,
           lawfulUseConfirmed: true,
-          clientVersion: '2.0.8',
+          clientVersion: '2.0.9',
           locale: 'zh-CN',
         }),
       }, 'consent acceptance'), status.policy)

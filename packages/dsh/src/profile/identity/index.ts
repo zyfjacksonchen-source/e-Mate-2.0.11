@@ -10,8 +10,9 @@ import {
 } from './enterprise-provider.js'
 export { createEnterpriseIdentityProvider, MODEL_SESSION_REF } from './enterprise-provider.js'
 
-export const inject = ['connection', 'credentials']
+export const inject = ['connection', 'credentials', 'timer']
 export const IDENTITY_CHANNEL = '/emate.identity'
+export const ENTERPRISE_KEEP_ALIVE_MS = 30_000
 
 const badRequest = message => ({
   ok: false,
@@ -164,6 +165,11 @@ export function apply(ctx, config = {}) {
       ...(config.now === undefined ? {} : { now: config.now }),
     })
     ctx.effect(() => () => provider.dispose(), 'emate.identity: dispose enterprise lease')
+    ctx.interval(() => {
+      void provider.keepAlive().catch(error => {
+        ctx.logger?.warn?.('e-Mate enterprise lease refresh failed; retrying on the next host tick', error)
+      })
+    }, ENTERPRISE_KEEP_ALIVE_MS)
     config = {
       ...config,
       identityProvider: provider,

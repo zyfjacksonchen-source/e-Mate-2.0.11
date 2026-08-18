@@ -4,9 +4,9 @@ The normative product and source boundaries live in [target-contract.md](target-
 
 ## Runtime ownership
 
-DeepSeek Harness `0.1.0-rc.5` at downstream commit `12d68b6ca05fa538d98f70ed47786c44ca3a7225` (upstream base `47f943859bef60e4160492346772ded9b24f765a`) is the only local runtime core. It owns the Agent Loop, sessions, durable event logs, model calls, tools, approvals, attachments, Jobs, plugin loading, reconnect semantics, and persistence.
+DeepSeek Harness `0.1.0-rc.7` at downstream commit `df78045a127e32cb5b942defba52c539590d1596` (upstream base `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`) is the only local runtime core. It owns the Agent Loop, sessions, durable event logs, model calls, tools, approvals, attachments, Jobs, plugin loading, reconnect semantics, and persistence.
 
-The single `@e-mate/dsh@2.0.7` package owns lifecycle commands, the managed profile, product branding, client-module composition, bundle validation, migrations, and the three enterprise-side services. It does not patch or duplicate the Harness runtime and has no Runtime/Browser platform-package family.
+The single `@e-mate/dsh@2.0.7` package owns lifecycle commands, the managed profile, product branding, client-module composition, bundle validation, migrations, and the three enterprise-side services. It does not replace or duplicate the Harness runtime and has no Runtime/Browser platform-package family. Its desktop dependency closure applies only the two source-pinned shell permission boundary patches carried by the downstream Harness commit.
 
 All maintained application source is TypeScript or TSX and is built with the exact Harness `tsdown` installation. Node-executable JavaScript and browser bundles under `lib/` are generated artifacts.
 

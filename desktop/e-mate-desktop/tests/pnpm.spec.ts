@@ -117,6 +117,7 @@ describe('desktop pnpm Host service', () => {
     const signal = new AbortController().signal
 
     const operation = harness.service.run(['list', '--depth=0'], signal)
+    expect(harness.service.profileDir).toBe(bootstrap().activeProfileDir)
 
     expect(harness.spawn).toHaveBeenCalledOnce()
     const spec = harness.spawn.mock.calls[0]?.[0]

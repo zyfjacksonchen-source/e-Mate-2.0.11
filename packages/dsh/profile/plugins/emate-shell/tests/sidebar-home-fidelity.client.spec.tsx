@@ -14,6 +14,7 @@ afterEach(() => {
 })
 
 const Icon = () => <svg />
+const sidebarCss = readFileSync('src/client/sidebar.module.css', 'utf8')
 const homeToolbarProps = {
   closeDetails: vi.fn(),
   toggleSidebar: vi.fn(),
@@ -79,9 +80,12 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       toggleSidebar={() => {}}
     />)
 
-    expect(screen.getByText('2.0.8')).not.toBeNull()
+    expect(screen.getByText('2.0.9')).not.toBeNull()
     expect(screen.getByRole('button', { name: '新建任务' }).textContent).toContain('新任务')
     expect(screen.getByRole('button', { name: '新建任务' }).getAttribute('aria-current')).toBe('page')
+    fireEvent.click(screen.getByRole('button', { name: '搜索会话' }))
+    expect(screen.getByRole('textbox', { name: '搜索会话' }).getAttribute('type')).toBe('text')
+    expect(screen.getAllByRole('button', { name: '关闭搜索' })).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: '定时任务' }))
     expect(openSchedules).toHaveBeenCalledOnce()
     expect(screen.getByRole('region', { name: '项目' }).textContent).toContain('季度报告')
@@ -99,6 +103,10 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     fireEvent.click(screen.getByLabelText('管理任务：通用任务'))
     fireEvent.click(within(taskMenu).getByRole('button', { name: '重命名' }))
     expect(screen.getByRole('dialog', { name: '重命名任务' }).getAttribute('aria-modal')).toBe('true')
+    expect(sidebarCss).toContain('anchor-name: --emate-task-menu')
+    expect(sidebarCss).toContain('position-anchor: --emate-task-menu')
+    expect(sidebarCss).toContain('top: calc(anchor(bottom) + 4px)')
+    expect(sidebarCss).toContain('right: anchor(right)')
     fireEvent.click(screen.getByRole('button', { name: '添加项目文件夹' }))
     await waitFor(() => { expect(startSession).toHaveBeenCalledWith('workspace-1') })
   })
@@ -254,6 +262,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
 
   it('keeps the target mobile session title clear of the real sidebar trigger', () => {
     const styles = readFileSync('src/client/sidebar.module.css', 'utf8')
+    expect(styles).toMatch(/\.search input:focus-visible \{\s*box-shadow: none;/u)
     expect(styles).toMatch(/@media \(max-width: 767px\) \{[\s\S]*?div\[data-sidebar-collapsed\]:has\(> \[data-shell-overlay\]\) \[data-slot='conversation\.session\.header'\] > header\) \{[\s\S]*?padding-left: 64px;/u)
     expect(styles).toMatch(/\[data-slot='conversation\.session\.header'\] > header > div:first-child\) \{[\s\S]*?min-height: 44px;/u)
     expect(styles).toMatch(/\.mobileOpen \{[\s\S]*?left: 12px;[\s\S]*?width: 44px;[\s\S]*?height: 44px;/u)

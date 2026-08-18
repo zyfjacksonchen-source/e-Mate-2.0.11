@@ -1,89 +1,48 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, type ComponentType } from 'react'
+import {
+  useEffect, useId, useLayoutEffect, useRef, useState,
+  type ComponentType,
+} from 'react'
+import css from './composer-connectors.module.css'
+
+interface ActiveConnection {
+  name: string
+  transport: 'streamable-http' | 'stdio'
+  active: true
+  authorized: boolean
+}
 
 interface Props {
   LinkIcon: ComponentType<{ size?: number }>
-  openConnections: () => void
+  callConnections: () => Promise<unknown>
 }
 
-export const CONNECTORS_PATH = '/capabilities?category=collaboration'
 export const COMPOSER_PLACEHOLDER = '给小芯发送消息，支持粘贴图片或文件'
-const CONNECTION_SETUP_TOOL = 'e_mate_connection_setup'
-const CONNECTION_IDS = new Set(['feishu', 'tencent-docs', 'wechat'])
 
-interface ConversationNode {
-  kind?: string
-  seq?: number
-  call?: { name?: string; argsRaw?: string } | null
-  isError?: boolean
-  subCalls?: readonly ConversationNode[]
-}
-
-interface SessionState {
-  nodes: readonly ConversationNode[]
-}
-
-export function routeToConnections(): void {
-  const returnPath = `${location.pathname}${location.search}${location.hash}`
-  history.pushState({ eMateSettingsReturn: returnPath }, '', CONNECTORS_PATH)
-  dispatchEvent(new PopStateEvent('popstate'))
-}
-
-export function routeToConnectionSetup(connectionId: string): void {
-  if (!CONNECTION_IDS.has(connectionId)) return
-  const target = `/settings?section=connections&connection=${encodeURIComponent(connectionId)}`
-  if (`${location.pathname}${location.search}` === target) return
-  const returnPath = `${location.pathname}${location.search}${location.hash}`
-  history.pushState({ eMateSettingsReturn: returnPath }, '', target)
-  dispatchEvent(new PopStateEvent('popstate'))
-}
-
-function latestConnectionSetup(nodes: readonly ConversationNode[]): { connectionId: string; seq: number } | null {
-  let latest: { connectionId: string; seq: number } | null = null
-  const visit = (node: ConversationNode) => {
-    if (node.kind === 'tool-result'
-      && node.isError === false
-      && node.call?.name === CONNECTION_SETUP_TOOL
-      && typeof node.call.argsRaw === 'string'
-      && typeof node.seq === 'number') {
-      try {
-        const args = JSON.parse(node.call.argsRaw) as unknown
-        if (args !== null && typeof args === 'object' && !Array.isArray(args)
-          && Object.keys(args).length === 1
-          && typeof (args as Record<string, unknown>).connection_id === 'string'
-          && CONNECTION_IDS.has((args as Record<string, string>).connection_id)
-          && (latest === null || node.seq > latest.seq)) {
-          latest = { connectionId: (args as Record<string, string>).connection_id, seq: node.seq }
-        }
-      } catch {
-        // A malformed persisted call is evidence, not a navigation instruction.
-      }
-    }
-    node.subCalls?.forEach(visit)
+function activeConnections(value: unknown): ActiveConnection[] {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('外部连接响应无效。')
+  const response = value as Record<string, unknown>
+  if (response.ok !== true || response.value === null || typeof response.value !== 'object' || Array.isArray(response.value)) {
+    throw new Error('外部连接读取失败。')
   }
-  nodes.forEach(visit)
-  return latest
+  const body = response.value as Record<string, unknown>
+  if (body.schema_version !== 1 || !Array.isArray(body.items)) throw new Error('外部连接响应无效。')
+  return body.items.map((entry): ActiveConnection => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('外部连接响应无效。')
+    const item = entry as Record<string, unknown>
+    if (typeof item.name !== 'string' || !['streamable-http', 'stdio'].includes(String(item.transport))
+      || item.active !== true || typeof item.authorized !== 'boolean') throw new Error('外部连接响应无效。')
+    return item as unknown as ActiveConnection
+  })
 }
 
-export function ConnectionIntentRouter({
-  useSession,
-}: {
-  useSession: <T>(selector: (state: SessionState) => T) => T
-}) {
-  const nodes = useSession(state => state.nodes)
-  const latest = useMemo(() => latestConnectionSetup(nodes), [nodes])
-  const handledSeq = useRef(latest?.seq ?? -1)
-
-  useEffect(() => {
-    if (latest === null || latest.seq <= handledSeq.current) return
-    handledSeq.current = latest.seq
-    routeToConnectionSetup(latest.connectionId)
-  }, [latest])
-
-  return null
-}
-
-export function ComposerConnectors({ LinkIcon, openConnections }: Props) {
+export function ComposerConnectors({ LinkIcon, callConnections }: Props) {
+  const root = useRef<HTMLDivElement>(null)
   const control = useRef<HTMLButtonElement>(null)
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [items, setItems] = useState<ActiveConnection[]>([])
+  const [error, setError] = useState('')
+  const id = useId()
 
   useLayoutEffect(() => {
     const textarea = control.current?.closest('[data-composer-card]')?.querySelector('textarea')
@@ -95,16 +54,52 @@ export function ComposerConnectors({ LinkIcon, openConnections }: Props) {
     }
   })
 
-  return (
+  useEffect(() => {
+    if (!open) return
+    const close = (event: MouseEvent): void => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => { document.removeEventListener('mousedown', close) }
+  }, [open])
+
+  const load = (): void => {
+    setLoading(true)
+    setError('')
+    void callConnections().then(
+      value => { setItems(activeConnections(value)) },
+      () => { setError('暂时无法读取外部连接。') },
+    ).finally(() => { setLoading(false) })
+  }
+
+  return <div ref={root} className={css.root}>
     <button
       ref={control}
       data-emate-composer-connectors=""
       type="button"
-      aria-label="打开能力中心的外部连接"
-      onClick={openConnections}
+      aria-label="查看已生效的外部连接"
+      aria-haspopup="menu"
+      aria-expanded={open}
+      aria-controls={open ? `${id}-menu` : undefined}
+      onClick={() => {
+        if (open) setOpen(false)
+        else { setOpen(true); load() }
+      }}
     >
       <LinkIcon size={14} />
       <span>外部连接</span>
     </button>
-  )
+    {open && <div id={`${id}-menu`} className={css.menu} role="menu" aria-label="已生效的外部连接">
+      <strong>已生效的外部连接</strong>
+      {loading && <span className={css.note}>读取中…</span>}
+      {!loading && error !== '' && <span className={css.error}>{error}</span>}
+      {!loading && error === '' && items.length === 0 && <span className={css.note}>
+        暂无连接。直接告诉小芯你要连接的服务，它会查找并安装对应 Skill。
+      </span>}
+      {!loading && error === '' && items.map(item => <span key={item.name} className={css.item} role="menuitem">
+        <span className={css.dot} aria-hidden="true" />
+        <span><b>{item.name}</b><small>{item.transport === 'stdio' ? '本地 MCP' : '远程 MCP'}</small></span>
+      </span>)}
+    </div>}
+  </div>
 }

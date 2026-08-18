@@ -223,6 +223,10 @@
   background: transparent;
 }
 
+.search input:focus-visible {
+  box-shadow: none;
+}
+
 .taskNav {
   flex: 1;
   min-height: 0;
@@ -359,6 +363,7 @@
 }
 
 .taskMenu {
+  anchor-scope: --emate-task-menu;
   position: absolute;
   top: 0;
   right: 4px;
@@ -366,6 +371,7 @@
 }
 
 .taskMenu > summary {
+  anchor-name: --emate-task-menu;
   width: 32px;
   height: 32px;
   border-radius: 10px;
@@ -388,16 +394,27 @@
 }
 
 .taskMenu > div {
-  position: fixed;
+  position: absolute;
+  top: 36px;
+  right: 0;
   z-index: 40;
   width: 172px;
-  margin: 4px 0 0 -140px;
+  margin: 0;
   padding: 4px;
   border: 1px solid var(--emate-rule);
   border-radius: 10px;
   display: grid;
   background: var(--emate-panel);
   box-shadow: 0 14px 36px rgb(0 0 0 / 18%);
+}
+
+@supports (position-anchor: --emate-task-menu) {
+  .taskMenu > div {
+    position: fixed;
+    position-anchor: --emate-task-menu;
+    top: calc(anchor(bottom) + 4px);
+    right: anchor(right);
+  }
 }
 
 .taskMenu > div button {

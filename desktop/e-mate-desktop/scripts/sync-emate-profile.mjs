@@ -10,12 +10,11 @@ const repositoryRoot = resolve(desktopRoot, '..', '..')
 const source = join(repositoryRoot, 'packages', 'dsh', 'profile')
 const destination = join(desktopRoot, 'build', 'e-mate-profile')
 const mark = join(source, 'plugins', 'emate-shell', 'assets', 'emate-mark.png')
-const browserExtension = join(desktopRoot, 'vendor', 'dsh-browser-extension-0.1.0-b20ecd51')
+const browserExtension = join(repositoryRoot, 'packages', 'dsh-plugin-browser', 'extension', 'dist')
 const require = createRequire(import.meta.url)
 const ecosystemPlugins = [
   '@kelearns/dsh-navigation-bar',
   '@omdsh-dev/dsh-genui',
-  '@yuxianglin/dsh-bridge-browser',
   'dsh-at-file',
   'dsh-better-sidebar',
   'dsh-file-viewer',
@@ -29,6 +28,7 @@ for (const path of [
   join(source, 'bundles', 'registry.json'),
   join(source, 'plugins', 'health.js'),
   join(source, 'plugins', 'emate-shell', 'lib', 'client.js'),
+  join(browserExtension, 'manifest.json'),
   mark,
 ]) {
   const metadata = await lstat(path)
@@ -62,8 +62,8 @@ for (const name of ecosystemPlugins) {
 }
 
 const registry = JSON.parse(await readFile(join(destination, 'bundles', 'registry.json'), 'utf8'))
-if (registry.product !== 'e-Mate' || registry.version !== '2.0.8'
-  || registry.harness_commit !== '12d68b6ca05fa538d98f70ed47786c44ca3a7225') {
+if (registry.product !== 'e-Mate' || registry.version !== '2.0.9'
+  || registry.harness_commit !== 'df78045a127e32cb5b942defba52c539590d1596') {
   throw new Error('sync-emate-profile: bundled e-Mate profile identity drifted')
 }
 
@@ -86,7 +86,7 @@ await sharp(roundedSurface, { failOn: 'warning' })
 await writeFile(join(destination, 'desktop-source.json'), `${JSON.stringify({
   schema_version: 1,
   product: 'e-Mate',
-  version: '2.0.8',
+  version: '2.0.9',
   harness_commit: registry.harness_commit,
   registry_sha256: createHash('sha256')
     .update(await readFile(join(destination, 'bundles', 'registry.json')))

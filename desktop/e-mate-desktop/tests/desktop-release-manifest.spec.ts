@@ -19,8 +19,8 @@ describe('desktop release manifest', () => {
     await mkdir(artifacts)
     const macBytes = Buffer.from('mac-dmg')
     const windowsBytes = Buffer.from('windows-exe')
-    const macArtifact = join(artifacts, 'e-Mate-2.0.8-mac-universal.dmg')
-    const windowsArtifact = join(artifacts, 'e-Mate-2.0.8-win-x64-Setup.exe')
+    const macArtifact = join(artifacts, 'e-Mate-2.0.9-mac-universal.dmg')
+    const windowsArtifact = join(artifacts, 'e-Mate-2.0.9-win-x64-Setup.exe')
     await writeFile(macArtifact, macBytes)
     await writeFile(windowsArtifact, windowsBytes)
     const output = join(root, 'release', 'latest.json')
@@ -31,16 +31,16 @@ describe('desktop release manifest', () => {
     const manifest = JSON.parse(await readFile(output, 'utf8'))
     expect(manifest).toEqual({
       schema_version: 1,
-      version: '2.0.8',
+      version: '2.0.9',
       source_commit: commit,
       artifacts: {
         darwin: {
-          url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.8/${commit}/e-Mate-2.0.8-mac-universal.dmg`,
+          url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.9/${commit}/e-Mate-2.0.9-mac-universal.dmg`,
           bytes: macBytes.byteLength,
           sha256: createHash('sha256').update(macBytes).digest('hex'),
         },
         win32: {
-          url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.8/${commit}/e-Mate-2.0.8-win-x64-Setup.exe`,
+          url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.9/${commit}/e-Mate-2.0.9-win-x64-Setup.exe`,
           bytes: windowsBytes.byteLength,
           sha256: createHash('sha256').update(windowsBytes).digest('hex'),
         },
@@ -52,7 +52,7 @@ describe('desktop release manifest', () => {
     const root = await mkdtemp(join(tmpdir(), 'e-mate-desktop-release-'))
     roots.push(root)
     const macArtifact = join(root, 'latest.dmg')
-    const windowsArtifact = join(root, 'e-Mate-2.0.8-win-x64-Setup.exe')
+    const windowsArtifact = join(root, 'e-Mate-2.0.9-win-x64-Setup.exe')
     await writeFile(macArtifact, 'mac')
     await writeFile(windowsArtifact, 'win')
 

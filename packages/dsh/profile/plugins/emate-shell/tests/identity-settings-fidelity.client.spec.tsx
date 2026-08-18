@@ -5,7 +5,6 @@ import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AccountControl, AccountSettings } from '../src/client/account.tsx'
-import { ConnectionsSettings } from '../src/client/connections.tsx'
 import { IdentityGate, type IdentityBootstrap, type RpcResult } from '../src/client/identity.tsx'
 import { SessionRouteProjection } from '../src/client/session-route.tsx'
 import { SettingsChrome } from '../src/client/settings-chrome.tsx'
@@ -215,7 +214,7 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     view.unmount()
   })
 
-  it('keeps account password and connection credentials on their existing RPC/API seams', async () => {
+  it('keeps account password on the existing identity RPC seam', async () => {
     const callIdentity = vi.fn(async (endpoint: string): Promise<RpcResult> => {
       if (endpoint === 'identity.bootstrap') return { ok: true, value: signedIn }
       if (endpoint === 'identity.usage') return {
@@ -268,134 +267,6 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     expect(await screen.findByText(/管理员无需签署用户协议/u)).toBeTruthy()
     administrator.unmount()
 
-    const callConnections = vi.fn(async (endpoint: string) => endpoint === 'qr.begin' ? {
-      ok: true,
-      value: {
-        connection_id: 'wechat',
-        attempt_id: '123e4567-e89b-12d3-a456-426614174000',
-        state: 'pending',
-        expires_at: Date.now() + 300_000,
-        qr_code_data_url: 'data:image/png;base64,AA==',
-        detail: '请使用微信扫描二维码。',
-      },
-    } : {
-      ok: true,
-      value: {
-        schema_version: 1,
-        items: [{
-          id: 'feishu',
-          title: '飞书',
-          summary: '飞书连接',
-          state: 'setup-required',
-          detail: '需要配置应用凭据。',
-          qr_supported: false,
-          oauth_supported: true,
-          fields: [{
-            ref: 'FEISHU_SECRET',
-            label: 'App Secret',
-            secret: true,
-            configured: false,
-            writable: true,
-          }],
-        }, {
-          id: 'wechat',
-          title: '微信',
-          summary: '微信扫码连接',
-          state: 'blocked',
-          detail: '扫码授权可用，运行适配尚未启用。',
-          qr_supported: true,
-          oauth_supported: false,
-          fields: [],
-        }],
-      },
-    })
-    const setCredential = vi.fn(async () => {})
-    render(<ConnectionsSettings
-      callConnections={callConnections}
-      setCredential={setCredential}
-      unsetCredential={vi.fn(async () => {})}
-      LinkIcon={Icon}
-      RefreshIcon={Icon}
-    />)
-
-    fireEvent.change(await screen.findByLabelText(/^App Secret/u), { target: { value: 'secret-value' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => { expect(setCredential).toHaveBeenCalledWith('FEISHU_SECRET', 'secret-value') })
-
-    fireEvent.click(screen.getByRole('button', { name: '生成授权二维码' }))
-    expect(await screen.findByRole('img', { name: '用于授权 微信 的一次性二维码' })).toBeTruthy()
-    expect(callConnections).toHaveBeenCalledWith('qr.begin', { connection_id: 'wechat' })
-  })
-
-  it('focuses the exact authorization surface requested by the Agent connection Tool', async () => {
-    history.replaceState(null, '', '/settings?section=connections&connection=tencent-docs')
-    const item = (id: string, title: string) => ({
-      id, title, summary: `${title}连接`, state: 'setup-required', detail: '需要配置。', qr_supported: false, oauth_supported: id !== 'wechat', fields: [],
-    })
-    render(<ConnectionsSettings
-      callConnections={vi.fn(async () => ({
-        ok: true,
-        value: { schema_version: 1, items: [item('feishu', '飞书'), item('tencent-docs', '腾讯文档'), item('wechat', '微信')] },
-      }))}
-      setCredential={vi.fn(async () => {})}
-      unsetCredential={vi.fn(async () => {})}
-      LinkIcon={() => <svg />}
-      RefreshIcon={() => <svg />}
-    />)
-
-    expect(await screen.findByText('腾讯文档')).toBeTruthy()
-    expect(screen.queryByText('飞书')).toBeNull()
-    expect(screen.queryByText('微信')).toBeNull()
-  })
-
-  it('opens only the Host-provided official OAuth URL without a browser Tool', async () => {
-    history.replaceState(null, '', '/settings?section=connections&connection=tencent-docs')
-    const callConnections = vi.fn(async (endpoint: string): Promise<RpcResult> => endpoint === 'oauth.begin'
-      ? {
-          ok: true,
-          value: {
-            connection_id: 'tencent-docs',
-            attempt_id: '123e4567-e89b-12d3-a456-426614174001',
-            state: 'pending',
-            expires_at: Date.now() + 300_000,
-            authorization_url: 'https://docs.qq.com/scenario/open-claw.html?authType=2&user_code=ABCD-EFGH',
-            user_code: 'ABCD-EFGH',
-            qr_code_data_url: 'data:image/png;base64,AA==',
-            detail: '请在腾讯文档官方页面完成授权。',
-          },
-        }
-      : {
-          ok: true,
-          value: {
-            schema_version: 1,
-            items: [{
-              id: 'tencent-docs',
-              title: '腾讯文档',
-              summary: '通过官方远程 MCP 连接腾讯文档。',
-              state: 'setup-required',
-              detail: '请生成并打开官方授权链接。',
-              qr_supported: false,
-              oauth_supported: true,
-              fields: [],
-            }],
-          },
-        })
-    render(<ConnectionsSettings
-      callConnections={callConnections}
-      setCredential={vi.fn(async () => {})}
-      unsetCredential={vi.fn(async () => {})}
-      LinkIcon={() => <svg />}
-      RefreshIcon={() => <svg />}
-    />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '生成官方授权链接' }))
-    const link = await screen.findByRole('link', { name: '打开腾讯文档官方授权页' })
-    expect(link.getAttribute('href')).toBe('https://docs.qq.com/scenario/open-claw.html?authType=2&user_code=ABCD-EFGH')
-    expect(link.getAttribute('target')).toBe('_blank')
-    expect(link.getAttribute('rel')).toBe('noopener noreferrer')
-    expect(screen.getByText('ABCD-EFGH')).toBeTruthy()
-    expect(screen.getByRole('img', { name: '用于授权 腾讯文档 的一次性二维码' })).toBeTruthy()
-    expect(callConnections).toHaveBeenCalledWith('oauth.begin', { connection_id: 'tencent-docs' })
   })
 
   it('renders an unlimited weekly quota without exposing its numeric sentinel', async () => {

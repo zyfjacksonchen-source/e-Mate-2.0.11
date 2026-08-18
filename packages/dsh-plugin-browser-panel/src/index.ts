@@ -25,7 +25,7 @@ export function statusForPlatform(platform: NodeJS.Platform, runtime: { connecte
     ready,
     ...(ready ? {} : { blocker: windowsPending && connected ? WINDOWS_BLOCKER : CONNECTION_BLOCKER }),
     provider: 'dsh-browser',
-    upstream_commit: 'b20ecd51eca800e00fc40bd7973271bf62a1b1d2',
+    upstream_commit: '01f0b216b1bde88b5f9c6575ce9fb922db6fd8fb',
     supported_platforms: ['darwin', 'win32'],
     session_bound: true,
     browser_state_session_bound: true,
@@ -56,7 +56,7 @@ export function apply(ctx: any): void {
           ? 'Windows 扩展已连接，仍需完成真实 Windows Computer Use 验收。'
           : status.blocker === CONNECTION_BLOCKER
             ? '请安装并启用 e-Mate 浏览器扩展。'
-            : '当前平台不在 e-Mate 2.0.8 支持范围。'
+            : '当前平台不在 e-Mate 2.0.9 支持范围。'
       return { state: status.state, detail, action_ids: [] }
     },
   }), 'emate.browserPanel: capability metadata')

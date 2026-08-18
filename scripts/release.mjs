@@ -13,9 +13,9 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import { PACKAGE_NAME, releaseSource } from './release-source.mjs'
 
-export const VERSION = '2.0.8'
-const HARNESS_VERSION = '0.1.0-rc.5'
-const HARNESS_COMMIT = '12d68b6ca05fa538d98f70ed47786c44ca3a7225'
+export const VERSION = '2.0.9'
+const HARNESS_VERSION = '0.1.0-rc.7'
+const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
 const REPOSITORY = 'zyfjacksonchen-source/e-Mate'
 const TAG = `e-mate-v${VERSION}`
 const SHA256 = /^[0-9a-f]{64}$/u
@@ -33,14 +33,17 @@ export const BUNDLED_PLUGIN_PACKAGES = [
   '@e-mate/dsh-plugin-better-sidebar',
   '@e-mate/dsh-plugin-browser',
   '@e-mate/dsh-plugin-browser-panel',
+  '@e-mate/dsh-plugin-computer-use',
   '@e-mate/dsh-plugin-file-import',
+  '@e-mate/dsh-plugin-find-skill',
   '@e-mate/dsh-plugin-genui',
-  '@e-mate/dsh-plugin-im',
+  '@e-mate/dsh-plugin-mcp-manage',
   '@e-mate/dsh-plugin-memory-evolve',
   '@e-mate/dsh-plugin-office-skills',
   '@e-mate/dsh-plugin-search-mcp',
   '@e-mate/dsh-plugin-subagent',
   '@e-mate/dsh-plugin-vision-toolkit',
+  '@e-mate/dsh-plugin-xin-assistant',
 ]
 const BUNDLED_MAIN_COMPONENTS = [
   { name: 'qrcode', version: '1.5.4', license: 'MIT' },
@@ -398,7 +401,7 @@ export async function generateEvidence(directory, outputDirectory, sourceCommit 
     packages: release.map(({ name, kind, os, cpu, filename, size, sha256, sha512, integrity }) => ({
       name, version: VERSION, kind, ...(os === undefined ? {} : { os, cpu }), filename, size, sha256, sha512, integrity,
     })),
-    evidence: ['SHA256SUMS', 'e-mate-2.0.8.spdx.json', 'THIRD_PARTY_LICENSES.txt', 'EVIDENCE_SHA256SUMS'],
+    evidence: ['SHA256SUMS', 'e-mate-2.0.9.spdx.json', 'THIRD_PARTY_LICENSES.txt', 'EVIDENCE_SHA256SUMS'],
   }
   const sums = `${release.map(item => `${item.sha256}  ${item.filename}`).sort().join('\n')}\n`
   const licenses = [
@@ -411,7 +414,7 @@ export async function generateEvidence(directory, outputDirectory, sourceCommit 
   const files = {
     SHA256SUMS: sums,
     'release-manifest.json': `${JSON.stringify(manifest, null, 2)}\n`,
-    'e-mate-2.0.8.spdx.json': `${JSON.stringify(spdx, null, 2)}\n`,
+    'e-mate-2.0.9.spdx.json': `${JSON.stringify(spdx, null, 2)}\n`,
     'THIRD_PARTY_LICENSES.txt': licenses,
   }
   for (const [name, content] of Object.entries(files)) await writeFile(join(output, name), content)

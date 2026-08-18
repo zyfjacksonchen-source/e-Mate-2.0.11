@@ -18,7 +18,7 @@ import {
 import { releasePrefix, releaseSource } from './release-source.mjs'
 import { renderDownloadPage } from './render-download-page.mjs'
 
-const HARNESS_COMMIT = '12d68b6ca05fa538d98f70ed47786c44ca3a7225'
+const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
 const DIGEST = '0'.repeat(64)
 const R2_FIXTURE_PUBLIC_ORIGIN = 'https://downloads.e-mate.example'
 const SOURCE_COMMIT = '70ff2ce2e340682f4aad2be27e4ec8f1d74ee913'
@@ -55,13 +55,13 @@ async function pack(directory, expected, mutate = manifest => manifest) {
   await file(packageRoot, 'THIRD_PARTY_NOTICES.txt')
   await file(packageRoot, 'runtime/harness/apps/cli/lib/bin.js')
   await file(packageRoot, 'runtime/harness/node_modules/@deepseek-ai/dsh/package.json', JSON.stringify({
-    name: '@deepseek-ai/dsh', version: '0.1.0-rc.5', license: 'MIT',
+    name: '@deepseek-ai/dsh', version: '0.1.0-rc.7', license: 'MIT',
   }))
   for (const runtimeFile of TARGET_NATIVE_RUNTIME_FILES) {
     await file(packageRoot, `runtime/harness/node_modules/${runtimeFile}`)
   }
   await file(packageRoot, 'runtime/source-manifest.json', JSON.stringify({
-    product_version: VERSION, version: '0.1.0-rc.5', commit: HARNESS_COMMIT,
+    product_version: VERSION, version: '0.1.0-rc.7', commit: HARNESS_COMMIT,
   }))
   const receipts = []
   for (const name of BUNDLED_PLUGIN_PACKAGES) {
@@ -76,7 +76,7 @@ async function pack(directory, expected, mutate = manifest => manifest) {
     schema_version: 1,
     product: 'e-Mate',
     version: VERSION,
-    harness_version: '0.1.0-rc.5',
+    harness_version: '0.1.0-rc.7',
     harness_commit: HARNESS_COMMIT,
     packages: receipts,
   }))
@@ -148,7 +148,7 @@ test('publication accepts only the exact 40-character release commit', () => {
 
 test('R2 immutable readback includes download metadata as well as bytes identity', () => {
   const item = {
-    filename: 'e-mate-dsh-2.0.8.tgz',
+    filename: 'e-mate-dsh-2.0.9.tgz',
     size: 207,
     sha256: DIGEST,
     contentType: 'application/gzip',
@@ -253,7 +253,7 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
   assert.match(script, new RegExp(manifestUrl.replaceAll('.', '\\.')))
   for (const platform of ['macos', 'windows']) assert.match(page, new RegExp(`data-platform="${platform}"`, 'u'))
   for (const artifact of ['darwin', 'win32']) assert.match(script, new RegExp(`artifacts\\.${artifact}`, 'u'))
-  for (const filename of ['e-Mate-2.0.8-mac-universal.dmg', 'e-Mate-2.0.8-win-x64-Setup.exe']) {
+  for (const filename of ['e-Mate-2.0.9-mac-universal.dmg', 'e-Mate-2.0.9-win-x64-Setup.exe']) {
     assert.match(script, new RegExp(filename.replaceAll('.', '\\.'), 'u'))
   }
   assert.match(script, /manifest\.source_commit/u)
@@ -274,14 +274,14 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
   assert.doesNotMatch(page, /__EMATE_RELEASE_SOURCE_COMMIT__|npm install|nodejs\.org|e-mate setup|e-mate launch/u)
   const { normalizeDownloadIndex } = await import(`../deploy/download-page/${scriptName}`)
   const commit = 'a'.repeat(40)
-  const releasePrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.8/${commit}`
+  const releasePrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.9/${commit}`
   const fixture = {
     schema_version: 1,
-    version: '2.0.8',
+    version: '2.0.9',
     source_commit: commit,
     artifacts: {
-      darwin: { url: `${releasePrefix}/e-Mate-2.0.8-mac-universal.dmg`, bytes: 123, sha256: 'b'.repeat(64) },
-      win32: { url: `${releasePrefix}/e-Mate-2.0.8-win-x64-Setup.exe`, bytes: 456, sha256: 'c'.repeat(64) },
+      darwin: { url: `${releasePrefix}/e-Mate-2.0.9-mac-universal.dmg`, bytes: 123, sha256: 'b'.repeat(64) },
+      win32: { url: `${releasePrefix}/e-Mate-2.0.9-win-x64-Setup.exe`, bytes: 456, sha256: 'c'.repeat(64) },
     },
   }
   assert.deepEqual(normalizeDownloadIndex(fixture).downloads.map(item => item.target), ['macos-universal', 'windows-x64'])

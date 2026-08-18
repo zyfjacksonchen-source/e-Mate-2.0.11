@@ -49,7 +49,7 @@ const UPSTREAM_TOOL_NAMES = [
 export interface VisionAdapterStatus {
   state: 'blocked'
   code: typeof VISION_POLICY_BLOCK_CODE
-  harnessVersion: '0.1.0-rc.5'
+  harnessVersion: '0.1.0-rc.7'
   upstreamCommit: typeof UPSTREAM_COMMIT
   managedRuntime: 'deferred'
   runtimeInstalled: false
@@ -62,13 +62,13 @@ export interface VisionAdapterStatus {
 export const ADAPTER_STATUS: VisionAdapterStatus = Object.freeze({
   state: 'blocked',
   code: VISION_POLICY_BLOCK_CODE,
-  harnessVersion: '0.1.0-rc.5',
+  harnessVersion: '0.1.0-rc.7',
   upstreamCommit: UPSTREAM_COMMIT,
   managedRuntime: 'deferred',
   runtimeInstalled: false,
   toolsRegistered: 0,
   blockedTools: Object.freeze([...UPSTREAM_TOOL_NAMES]),
-  reason: 'Harness 0.1.0-rc.5 has no enterprise-owned multimodal provider policy seam; exposing the upstream provider/model Settings would bypass e-Mate model policy.',
+  reason: 'Harness 0.1.0-rc.7 has no enterprise-owned multimodal provider policy seam; exposing the upstream provider/model Settings would bypass e-Mate model policy.',
 })
 
 const STATUS_SKILL: SkillRegistration = {
@@ -78,7 +78,7 @@ const STATUS_SKILL: SkillRegistration = {
   source: 'bundled',
   content: `# Vision Toolkit status
 
-The pinned e-Mate 2.0.8 adapter is fail-closed with code ${VISION_POLICY_BLOCK_CODE}.
+The pinned e-Mate 2.0.9 adapter is fail-closed with code ${VISION_POLICY_BLOCK_CODE}.
 Call vision_toolkit_status for the exact release and blocked-tool list. Do not
 infer image contents, claim OCR ran, install Python packages, or substitute a
 different vision provider. The managed runtime remains uninstalled until an

@@ -1,5 +1,7 @@
-import { createHash } from 'node:crypto'
-import { join } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
+import { link, lstat, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
+import { isAbsolute, join, relative, sep } from 'node:path'
+import { zipSync } from 'fflate'
 import { loadTargetLlm, loadTargetTools } from './target-runtime.js'
 
 export const name = 'emate-image-generation'
@@ -9,6 +11,8 @@ const IMAGE_MODEL = 'gpt-image-2-pro'
 const MAX_PROMPT_CHARS = 20_000
 const MAX_EDIT_IMAGES = 16
 const MAX_EDIT_IMAGE_BYTES = 5 * 1024 * 1024
+const MAX_PACK_IMAGES = 100
+const MAX_PACK_BYTES = 100 * 1024 * 1024
 const IMAGE_TIMEOUT_MS = 610_000
 const ATTACHMENT_ID = /^sha256:[0-9a-f]{64}$/u
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
@@ -97,46 +101,82 @@ function validImageRef(value) {
     && (value.name === undefined || typeof value.name === 'string')
 }
 
-function sessionImage(agent, attachmentId) {
-  const messages = agent?.session?.deriveMessages?.()
-  if (!Array.isArray(messages)) throw new Error('image editing requires the authoritative e-Mate conversation')
+function messageImages(messages, generatedOnly = false) {
+  const images = []
   let visited = 0
-  const find = blocks => {
-    if (!Array.isArray(blocks)) return undefined
+  const collect = (blocks, generated = false) => {
+    if (!Array.isArray(blocks)) return
     for (const block of blocks) {
       if (++visited > 20_000) throw new Error('e-Mate image history exceeds the edit lookup boundary')
-      if (block?.type === 'image' && validImageRef(block.attachment)
-        && block.attachment.attachmentId === attachmentId) return block.attachment
-      if (block?.type === 'tool-result') {
-        const nested = find(block.content)
-        if (nested !== undefined) return nested
+      if (block?.type === 'image' && validImageRef(block.attachment) && (!generatedOnly || generated)) {
+        images.push(block.attachment)
       }
+      if (block?.type === 'tool-result') collect(block.content, true)
     }
-    return undefined
   }
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const found = find(messages[index]?.content)
-    if (found !== undefined) return found
-  }
+  for (const message of messages) collect(message?.content)
+  return images
+}
+
+function uniqueImages(images, newestFirst = false) {
+  const ordered = newestFirst ? [...images].reverse() : images
+  const seen = new Set()
+  return ordered.filter(image => {
+    if (seen.has(image.attachmentId)) return false
+    seen.add(image.attachmentId)
+    return true
+  })
+}
+
+function sessionMessages(agent) {
+  const messages = agent?.session?.deriveMessages?.()
+  if (!Array.isArray(messages)) throw new Error('image tools require the authoritative e-Mate conversation')
+  return messages
+}
+
+function sessionImage(agent, attachmentId) {
+  const image = uniqueImages(messageImages(sessionMessages(agent)), true)
+    .find(candidate => candidate.attachmentId === attachmentId)
+  if (image !== undefined) return image
   throw new Error(`image attachment ${attachmentId} is not present in this e-Mate session`)
 }
 
-function selectedImageContext(messages) {
-  const attachmentIds = []
-  const seen = new Set()
-  for (const message of messages) {
-    if (message?.source?.kind !== 'user' || !Array.isArray(message.content)) continue
-    for (const block of message.content) {
-      if (block?.type !== 'image' || !validImageRef(block.attachment)) continue
-      const id = block.attachment.attachmentId
-      if (!seen.has(id)) {
-        seen.add(id)
-        attachmentIds.push(id)
-      }
-    }
+function latestUserMessage(messages) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.source?.kind === 'user') return messages[index]
   }
-  if (attachmentIds.length === 0) return undefined
-  return `The user-selected images in this request are already stored as e-Mate attachments. Their image_url values, in attachment order, are: ${attachmentIds.map(id => `\`${id}\``).join(', ')}. When the user asks to edit or use an attached image as reference, call imagegen with the matching exact image_url value; do not ask the user to upload it again.`
+  return undefined
+}
+
+function imageCatalogContext(messages) {
+  const current = uniqueImages(messageImages(latestUserMessage(messages) === undefined ? [] : [latestUserMessage(messages)]))
+  const recent = uniqueImages(messageImages(messages), true)
+    .filter(image => !current.some(selected => selected.attachmentId === image.attachmentId))
+    .slice(0, 32)
+  if (current.length === 0 && recent.length === 0) return undefined
+  const selected = current.length === 0 ? ''
+    : `Images selected in the current user request, in attachment order: ${current.map(image => `\`${image.attachmentId}\``).join(', ')}. `
+  const history = recent.length === 0 ? ''
+    : `Recent images already stored in this conversation, newest first: ${recent.map(image => `\`${image.attachmentId}\``).join(', ')}. `
+  return `${selected}${history}For an edit or reference request such as \"修改上图\", call imagegen with the matching exact image_url attachment ID (normally the newest image when the user says \"上图\"); never ask the user to upload an image already listed here. A request for a wholly new image must omit image_url. To deliver several images together, call image_pack once with their exact attachment IDs.`
+}
+
+const SESSION_IMAGE_REFERENCE = /(?:上图|这张图|该图|原图|刚才(?:生成|上传)?的?(?:那张)?图|所附图片|附件(?:中|里)的图|(?:把|将)它(?:修改|改成|修成)|\b(?:this|that|above|previous|original|uploaded|attached)\s+(?:image|picture|photo)\b)/iu
+
+function implicitEditImages(agent, task) {
+  if (task.attachmentIds.length > 0) return task.attachmentIds
+  const messages = sessionMessages(agent)
+  const current = uniqueImages(messageImages(latestUserMessage(messages) === undefined ? [] : [latestUserMessage(messages)]))
+  if (current.length > 0) return current.map(image => image.attachmentId)
+  const text = latestUserMessage(messages)?.content
+    ?.filter(block => block?.type === 'text' && typeof block.text === 'string')
+    .map(block => block.text).join('\n') ?? ''
+  if (!SESSION_IMAGE_REFERENCE.test(`${text}\n${task.prompt}`)) return []
+  const newest = uniqueImages(messageImages(messages), true)[0]
+  if (newest === undefined) {
+    throw new Error('image editing needs a source image in the current conversation; upload one image once and retry')
+  }
+  return [newest.attachmentId]
 }
 
 function normalizeTask(args) {
@@ -155,6 +195,109 @@ function normalizeTask(args) {
     throw new Error('image_url must contain current-session image attachment IDs')
   }
   return { prompt, attachmentIds: [...new Set(attachmentIds)] }
+}
+
+function normalizePack(args) {
+  if (!exactKeys(args, ['image_url']) || !Array.isArray(args.image_url)) {
+    throw new Error('image_pack accepts only an image_url array')
+  }
+  const attachmentIds = [...new Set(args.image_url)]
+  if (attachmentIds.length === 0 || attachmentIds.length > MAX_PACK_IMAGES
+    || attachmentIds.some(id => typeof id !== 'string' || !ATTACHMENT_ID.test(id))) {
+    throw new Error(`image_pack requires 1 to ${MAX_PACK_IMAGES} current-session image attachment IDs`)
+  }
+  return { attachmentIds }
+}
+
+function packRelativePath(attachmentIds) {
+  const digest = createHash('sha256').update(attachmentIds.join('\0')).digest('hex').slice(0, 12)
+  return `.e-mate/images/e-Mate-images-${digest}.zip`
+}
+
+function inside(root, candidate) {
+  const path = relative(root, candidate)
+  return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path))
+}
+
+async function imageWorkspace(agent) {
+  const cwd = agent?.session?.header?.cwd
+  if (typeof cwd !== 'string' || !isAbsolute(cwd)) throw new Error('image packaging requires a current local workspace')
+  const root = await realpath(cwd)
+  const info = await lstat(root)
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('current image workspace is unavailable')
+  return root
+}
+
+async function imagePackDirectory(root) {
+  let current = root
+  for (const segment of ['.e-mate', 'images']) {
+    const path = join(current, segment)
+    await mkdir(path, { recursive: false, mode: 0o700 }).catch(error => {
+      if (error?.code !== 'EEXIST') throw error
+    })
+    const info = await lstat(path)
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('image package output directory is unsafe')
+    current = await realpath(path)
+    if (!inside(root, current)) throw new Error('image package output directory escapes the workspace')
+  }
+  return current
+}
+
+function imageExtension(mediaType) {
+  if (mediaType === 'image/png') return 'png'
+  if (mediaType === 'image/jpeg') return 'jpg'
+  if (mediaType === 'image/webp') return 'webp'
+  throw new Error(`${mediaType} is unsupported by image packaging`)
+}
+
+async function publishImagePack(root, relativePath, data, signal) {
+  if (data.byteLength < 1 || data.byteLength > MAX_PACK_BYTES + 1024 * 1024) {
+    throw new Error('image package output exceeds the 101 MiB limit')
+  }
+  const directory = await imagePackDirectory(root)
+  const target = join(directory, relativePath.slice(relativePath.lastIndexOf('/') + 1))
+  const existing = await lstat(target).catch(error => {
+    if (error?.code === 'ENOENT') return undefined
+    throw error
+  })
+  if (existing !== undefined) {
+    if (!existing.isFile() || existing.isSymbolicLink() || existing.size !== data.byteLength
+      || !Buffer.from(await readFile(target, { signal })).equals(Buffer.from(data))) {
+      throw new Error('an existing image package conflicts with the current attachment set')
+    }
+    return
+  }
+  const temporary = join(directory, `.image-pack-${randomUUID()}.tmp`)
+  await writeFile(temporary, data, { flag: 'wx', flush: true, mode: 0o600, signal })
+  try {
+    await link(temporary, target)
+    const info = await lstat(target)
+    if (!info.isFile() || info.isSymbolicLink()) {
+      await unlink(target).catch(() => {})
+      throw new Error('image package output is not a regular file')
+    }
+  } finally {
+    await unlink(temporary).catch(() => {})
+  }
+}
+
+async function createImagePack(ctx, agent, args, signal) {
+  const pack = normalizePack(args)
+  const refs = pack.attachmentIds.map(id => sessionImage(agent, id))
+  const entries = {}
+  let total = 0
+  for (const [index, ref] of refs.entries()) {
+    signal.throwIfAborted()
+    const stored = await ctx.attachments.readImage(ref, signal)
+    total += stored.data.byteLength
+    if (total > MAX_PACK_BYTES) throw new Error('image package inputs exceed the 100 MiB limit')
+    const name = `image-${String(index + 1).padStart(3, '0')}.${imageExtension(ref.mediaType)}`
+    entries[name] = new Uint8Array(stored.data)
+  }
+  const relativePath = packRelativePath(pack.attachmentIds)
+  const data = zipSync(entries, { level: 0 })
+  await publishImagePack(await imageWorkspace(agent), relativePath, data, signal)
+  return { bytes: data.byteLength, image_count: refs.length, relative_path: relativePath }
 }
 
 function detectedImage(data) {
@@ -293,6 +436,21 @@ const imageOutput = {
   ],
 }
 
+const imagePackOutput = {
+  schema: {
+    type: 'object', additionalProperties: false,
+    properties: {
+      bytes: { type: 'integer', required: true },
+      image_count: { type: 'integer', required: true },
+      relative_path: { type: 'string', required: true },
+    },
+  },
+  render: (_args, value) => [{
+    type: 'text',
+    text: `已将 ${value.image_count} 张图片打包到本地产物：${value.relative_path}（${value.bytes} bytes）。`,
+  }],
+}
+
 export async function apply(ctx, config = {}) {
   const capabilities = ctx.get('emateCapabilities')
   if (capabilities === undefined) throw new Error('e-Mate image generation requires emateCapabilities')
@@ -336,7 +494,7 @@ export async function apply(ctx, config = {}) {
   ctx.on('agent/pre-step', async (_proposal, next) => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
-    const context = selectedImageContext(decision.messages)
+    const context = imageCatalogContext(decision.messages)
     return context === undefined ? decision : {
       ...decision,
       messages: [...decision.messages, createUserMessage({
@@ -362,6 +520,7 @@ export async function apply(ctx, config = {}) {
     async execute(args, exec) {
       exec.signal.throwIfAborted()
       const task = normalizeTask(args)
+      task.attachmentIds = implicitEditImages(exec.agent, task)
       await modelPolicy.assertModel(IMAGE_MODEL)
       const refs = task.attachmentIds.map(id => sessionImage(exec.agent, id))
       const scope = requestScope(exec)
@@ -378,5 +537,34 @@ export async function apply(ctx, config = {}) {
       kind: 'write',
       rawInput: args.prompt,
     }),
+  }))
+  ctx.tools.register(defineTool({
+    name: 'image_pack',
+    description: 'Package already-generated current-session images into one local ZIP deliverable. Copy the exact sha256: attachment IDs from the image catalog into image_url in the desired order. Do not regenerate, transform, download by URL, or ask for an output path.',
+    parameters: {
+      image_url: {
+        type: 'array', required: true, items: { type: 'string' },
+        description: 'Exact current-session sha256: image attachment IDs to include, in archive order.',
+      },
+    },
+    output: imagePackOutput,
+    isConcurrencySafe: () => false,
+    timeoutMs: 120_000,
+    async execute(args, exec) {
+      exec.signal.throwIfAborted()
+      return await createImagePack(ctx, exec.agent, args, exec.signal)
+    },
+    presentCall: args => {
+      try {
+        const pack = normalizePack(args)
+        const path = packRelativePath(pack.attachmentIds)
+        return {
+          card: 'generic', title: '打包图片', kind: 'edit', rawInput: `${pack.attachmentIds.length} images`,
+          locations: [{ path }],
+        }
+      } catch {
+        return undefined
+      }
+    },
   }))
 }

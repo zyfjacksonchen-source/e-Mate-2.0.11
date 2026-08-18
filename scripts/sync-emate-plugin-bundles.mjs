@@ -9,14 +9,17 @@ const expected = [
   '@e-mate/dsh-plugin-better-sidebar',
   '@e-mate/dsh-plugin-browser',
   '@e-mate/dsh-plugin-browser-panel',
+  '@e-mate/dsh-plugin-computer-use',
   '@e-mate/dsh-plugin-file-import',
+  '@e-mate/dsh-plugin-find-skill',
   '@e-mate/dsh-plugin-genui',
-  '@e-mate/dsh-plugin-im',
+  '@e-mate/dsh-plugin-mcp-manage',
   '@e-mate/dsh-plugin-memory-evolve',
   '@e-mate/dsh-plugin-office-skills',
   '@e-mate/dsh-plugin-search-mcp',
   '@e-mate/dsh-plugin-subagent',
   '@e-mate/dsh-plugin-vision-toolkit',
+  '@e-mate/dsh-plugin-xin-assistant',
 ]
 
 async function copyEntry(source, target) {
@@ -33,7 +36,7 @@ for (const name of expected) {
   const slug = name.slice('@e-mate/dsh-plugin-'.length)
   const source = join(root, 'packages', `dsh-plugin-${slug}`)
   const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
-  if (manifest.name !== name || manifest.version !== '2.0.8' || manifest.license !== 'MIT') {
+  if (manifest.name !== name || manifest.version !== '2.0.9' || manifest.license !== 'MIT') {
     throw new Error(`${source} package identity is invalid`)
   }
   if (typeof manifest.main !== 'string') throw new Error(`${name} has no main entry`)
@@ -55,8 +58,8 @@ for (const name of expected) {
 await writeFile(join(destination, 'registry.json'), `${JSON.stringify({
   schema_version: 1,
   product: 'e-Mate',
-  version: '2.0.8',
-  harness_version: '0.1.0-rc.5',
-  harness_commit: '12d68b6ca05fa538d98f70ed47786c44ca3a7225',
+  version: '2.0.9',
+  harness_version: '0.1.0-rc.7',
+  harness_commit: 'df78045a127e32cb5b942defba52c539590d1596',
   packages: receipts,
 }, null, 2)}\n`)

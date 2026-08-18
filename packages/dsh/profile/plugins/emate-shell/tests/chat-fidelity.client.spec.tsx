@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { ArtifactCapsules } from '../src/client/artifact-capsules.tsx'
 import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImagesDefinition } from '../src/client/image-gallery.tsx'
 import { ThinkingStatusBranding } from '../src/client/thinking-status.tsx'
 
@@ -59,12 +60,35 @@ describe('target conversation fidelity contract', () => {
     expect(chatCss).toContain('font-size: 13px;')
     expect(chatCss).toContain('width: 14px;')
     expect(chatCss).toContain("[data-chat-flow-kind='assistant-step'] [data-align='start']")
+    expect(chatCss).toContain("[data-produced-files-row] > [data-emate-produced-file]")
+    expect(chatCss).toContain('Beautiful UI Tool Chips icon geometry (MIT)')
     expect(chatCss).toContain("div:has(> [data-disclosure-row] [data-context-source])")
     expect(chatCss).toContain("[data-chat-flow-kind='e-mate-image-disclosure']")
     expect(chatCss).toContain("[data-sample='bash'] + div > button")
     expect(chatCss).toMatch(/\[data-slot='conversation'\] \[aria-expanded\]:focus-visible[^}]*outline: none;[^}]*box-shadow: none;/u)
     expect(homeCss).toContain('--dsw-static-deepseek-500: var(--emate-color-brand);')
     expect(homeCss).toContain('--dsw-alias-state-business-primary: var(--emate-color-brand);')
+    expect(source).toContain("ctx.slots.inject('conversation.composer.dock'")
+    expect(source).toMatch(/id: 'stats',[\s\S]*?priority: -1/u)
+  })
+
+  it('keeps the target produced-file opener while removing its local path from the UI', async () => {
+    const openFile = vi.fn()
+    const view = render(<>
+      <ArtifactCapsules />
+      <div data-produced-files-row="">
+        <button type="button" title="/private/workspace/deliverables/Dairy Onboarding SOP.pdf" onClick={openFile}>
+          Dairy Onboarding SOP.pdf
+        </button>
+      </div>
+    </>)
+    const file = screen.getByRole('button', { name: '打开 Dairy Onboarding SOP.pdf' })
+    await waitFor(() => { expect(file.hasAttribute('data-emate-produced-file')).toBe(true) })
+    expect(file.getAttribute('title')).toBe('Dairy Onboarding SOP.pdf')
+    expect(file.getAttribute('aria-label')).toBe('打开 Dairy Onboarding SOP.pdf')
+    expect(view.container.innerHTML).not.toContain('/private/workspace')
+    fireEvent.click(file)
+    expect(openFile).toHaveBeenCalledOnce()
   })
 
   it('shows the target ImageGallery by default without replacing its DOM or lightbox', () => {
@@ -137,7 +161,7 @@ describe('target conversation fidelity contract', () => {
   it('keeps dsh-genui registered on target slots and real plugin metadata', () => {
     expect(JSON.parse(genuiPackage)).toMatchObject({
       name: '@e-mate/dsh-plugin-genui',
-      version: '2.0.8',
+      version: '2.0.9',
       dsh: { bundle: { patch: './cordis.patch.yml' }, client: { platform: 'web' } },
     })
     expect(genuiPatch).toContain('id: emate-genui')

@@ -12,10 +12,10 @@ test('profile replaces built-in search and uses only credential references', asy
     readFile(new URL('src/index.ts', root), 'utf8'),
   ])
   const pkg = JSON.parse(manifest)
-  assert.equal(pkg.version, '2.0.8')
+  assert.equal(pkg.version, '2.0.9')
   assert.deepEqual(pkg.dependencies, { '@modelcontextprotocol/sdk': '1.29.0' })
   assert.equal(pkg.peerDependencies, undefined)
-  assert.equal(pkg.eMate.harnessVersion, '0.1.0-rc.5')
+  assert.equal(pkg.eMate.harnessVersion, '0.1.0-rc.7')
   assert.equal(pkg.eMate.mcpSdkVersion, '1.29.0')
   assert.match(patch, /searchProvider: search-mcp/u)
   assert.match(patch, /web-search-deepseek[\s\S]*disabled: true/u)

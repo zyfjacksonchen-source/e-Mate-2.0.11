@@ -58,9 +58,12 @@
     - id: emate-general-workspace
       name: ./plugins/general-workspace.js
       inject: [workspaceRegistry]
+    - id: emate-artifact-open-boundary
+      name: ./plugins/artifact-open-boundary.js
+      inject: [apiProxy, workspaceRegistry]
     - id: emate-identity
       name: ./plugins/identity/index.js
-      inject: [connection, credentials]
+      inject: [connection, credentials, timer]
       config:
         providerLegalName: 亦芯
         enterprise:
@@ -80,9 +83,6 @@
     - id: emate-capabilities
       name: ./plugins/capabilities.js
       inject: [connection]
-    - id: emate-connections
-      name: ./plugins/connections.js
-      inject: [credentials, connection, emateCapabilities, tools, systemPrompt]
     - id: emate-qr-generation
       name: ./plugins/qr-generation.js
       inject: [tools, jobs, attachments]

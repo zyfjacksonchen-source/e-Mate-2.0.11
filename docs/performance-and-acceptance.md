@@ -13,7 +13,7 @@ This document is a release gate for e-Mate 2.0.7. A scenario is `passed` only wi
 
 ### Harness parity for response and Tool latency
 
-Run paired samples on the same machine, browser, network, provider model, prompt set, Tool fixture and warm/cold state: pinned Harness `0.1.0-rc.5` is the baseline; e-Mate uses a valid cached login lease, the same locally cached model policy and asynchronous audit outbox. Use at least 30 successful samples per path and retain raw timings.
+Run paired samples on the same machine, browser, network, provider model, prompt set, Tool fixture and warm/cold state: pinned Harness `0.1.0-rc.7` is the baseline; e-Mate uses a valid cached login lease, the same locally cached model policy and asynchronous audit outbox. Use at least 30 successful samples per path and retain raw timings.
 
 - first response/TTFT adds at most 5% at p50 and 10% at p95, with an absolute allowance of 50 ms when that is larger than the percentage allowance;
 - steady streamed generation throughput (provider output tokens per second, excluding TTFT) is no more than 5% lower at p50 and 10% lower at p95;

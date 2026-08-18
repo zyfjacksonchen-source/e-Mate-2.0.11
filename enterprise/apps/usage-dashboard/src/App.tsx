@@ -1,6 +1,6 @@
 import { Alert, Button, Drawer, Empty, Input, Link, Select, Spin, Tag } from '@arco-design/web-react';
 import { ChartHistogram, ChartLine, CheckOne, Home, Refresh, UserBusiness } from '@icon-park/react';
-import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useState } from 'react';
+import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { TaskEventType, TaskScenario, TenantUsageEvent } from '@e-mate/monitoring-contract';
 import eMateLogo from '../../../../upstream/e-mate-2.0.5/desktop/src/v1/assets/emate-logo.png';
 import {
@@ -10,7 +10,9 @@ import {
   logoutUsageAccount,
   queryForPeriod,
   queryForRange,
+  refreshUsageAccount,
   UsageApiError,
+  type UsageAuthSession,
   type UsageDashboardData,
   type UsageQuery,
 } from './api';
@@ -129,6 +131,32 @@ export function App() {
   const [dashboard, setDashboard] = useState<DashboardState>({ kind: 'loading' });
   const [eventsOpen, setEventsOpen] = useState(false);
   const [eventState, setEventState] = useState<EventState>({ kind: 'idle', events: [] });
+  const pendingRefresh = useRef<Promise<UsageAuthSession> | null>(null);
+  const authBase = import.meta.env.VITE_AUTH_API_BASE as string | undefined;
+  const authClientId = (import.meta.env.VITE_AUTH_CLIENT_ID as string | undefined) ?? 'e-mate-admin';
+
+  const refreshUsageSession = (signal: AbortSignal): Promise<UsageAuthSession> => {
+    const refreshToken = sessionStorage.getItem(REFRESH_TOKEN_SESSION_KEY);
+    if (!refreshToken) return Promise.reject(new UsageApiError(401));
+    pendingRefresh.current ??= refreshUsageAccount(
+      {
+        authBase,
+        clientId: authClientId,
+        refreshToken,
+        refreshRequestId: crypto.randomUUID(),
+      },
+      signal,
+      { origin: window.location.origin }
+    ).then((session) => {
+      if (sessionStorage.getItem(REFRESH_TOKEN_SESSION_KEY) !== refreshToken) throw new UsageApiError(401);
+      sessionStorage.setItem(TOKEN_SESSION_KEY, session.accessToken);
+      sessionStorage.setItem(REFRESH_TOKEN_SESSION_KEY, session.refreshToken);
+      return session;
+    }).finally(() => {
+      pendingRefresh.current = null;
+    });
+    return pendingRefresh.current;
+  };
 
   useEffect(() => {
     const systemTheme = matchMedia('(prefers-color-scheme: dark)');
@@ -158,15 +186,21 @@ export function App() {
         });
         setDashboard({ kind: 'ready', data });
       })
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         if (controller.signal.aborted) return;
         const status = error instanceof UsageApiError ? error.status : null;
         if (status === 401) {
-          clearUsageSession();
-          setToken('');
-          setKnownUsers([]);
-          setSelectedUserId('');
-          setTokenError(copy.authFailed);
+          try {
+            const session = await refreshUsageSession(controller.signal);
+            if (!controller.signal.aborted) setToken(session.accessToken);
+            return;
+          } catch {
+            clearUsageSession();
+            setToken('');
+            setKnownUsers([]);
+            setSelectedUserId('');
+            setTokenError(copy.authFailed);
+          }
         }
         setDashboard({ kind: 'error', status });
       });
@@ -206,8 +240,8 @@ export function App() {
     setTokenError(null);
     void loginUsageAccount(
       {
-        authBase: import.meta.env.VITE_AUTH_API_BASE as string | undefined,
-        clientId: (import.meta.env.VITE_AUTH_CLIENT_ID as string | undefined) ?? 'e-mate-admin',
+        authBase,
+        clientId: authClientId,
         organization: (import.meta.env.VITE_AUTH_ORGANIZATION as string | undefined) ?? 'emate-v2',
         account: account.trim(),
         password,
@@ -238,8 +272,8 @@ export function App() {
     if (!refreshToken) return;
     void logoutUsageAccount(
       {
-        authBase: import.meta.env.VITE_AUTH_API_BASE as string | undefined,
-        clientId: (import.meta.env.VITE_AUTH_CLIENT_ID as string | undefined) ?? 'e-mate-admin',
+        authBase,
+        clientId: authClientId,
         refreshToken,
         clientRequestId: crypto.randomUUID(),
       },
@@ -432,11 +466,25 @@ export function App() {
     setEventState({ kind: 'loading', events: existing });
     void loadUsageEvents(token, eventQuery, cursor, controller.signal, projection.tenantId)
       .then((page) => setEventState({ kind: 'ready', events: [...existing, ...page.events], nextCursor: page.nextCursor }))
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         if (error instanceof UsageApiError && error.status === 401) {
-          clearUsageSession();
-          setToken('');
-          setEventsOpen(false);
+          try {
+            const session = await refreshUsageSession(controller.signal);
+            const page = await loadUsageEvents(
+              session.accessToken,
+              eventQuery,
+              cursor,
+              controller.signal,
+              projection.tenantId
+            );
+            setToken(session.accessToken);
+            setEventState({ kind: 'ready', events: [...existing, ...page.events], nextCursor: page.nextCursor });
+            return;
+          } catch {
+            clearUsageSession();
+            setToken('');
+            setEventsOpen(false);
+          }
         }
         setEventState({ kind: 'error', events: existing });
       });

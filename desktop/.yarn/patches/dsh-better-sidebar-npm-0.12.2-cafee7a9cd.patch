@@ -1,5 +1,5 @@
 diff --git a/lib/client.js b/lib/client.js
-index dc95f6cd0442d343086711c159d19d44771b9665..e75eb82d817ffa593439b11d184d1aad15f921d1 100644
+index dc95f6cd0442d343086711c159d19d44771b9665..2688cb0 100644
 --- a/lib/client.js
 +++ b/lib/client.js
 @@ -10,7 +10,7 @@ window.__ModuleLoader__.load({
@@ -11,6 +11,15 @@ index dc95f6cd0442d343086711c159d19d44771b9665..e75eb82d817ffa593439b11d184d1aad
  			defaultWidthPercent: 30,
  			autoOpenSubagent: true,
  			autoOpenJobs: true,
+@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
+ 			bottomPanelAutoTerminal: true,
+ 			terminalFontFamily: "",
+ 			terminalFontSize: 13,
+-			interceptOpenPath: true,
++			interceptOpenPath: false,
+ 			titleBarCompat: false,
+ 			titleBarStripPx: 40,
+ 			htmlViewerNoSandbox: false,
 @@ -741,7 +741,7 @@ window.__ModuleLoader__.load({
  			};
  			const maxWidth = typeof window !== "undefined" ? window.innerWidth : Infinity;
@@ -20,6 +29,15 @@ index dc95f6cd0442d343086711c159d19d44771b9665..e75eb82d817ffa593439b11d184d1aad
  				width: Math.max(280, Math.min(record.width, maxWidth)),
  				activePane: typeof record.activePane === "string" ? reid.get(record.activePane) ?? record.activePane : null,
  				nextTerminal: record.nextTerminal,
+@@ -2238,7 +2238,7 @@ window.__ModuleLoader__.load({
+ 			return ctx.slots.inject("conversation.chat.turnTail", () => ctx.slots.register({
+ 				name: "conversation.chat.turnTail",
+ 				select: (owner) => {
+-					if (store.getPrefs().tabsEnabled["editor"] === false) return null;
++					if (store.getPrefs().interceptOpenPath === false || store.getPrefs().tabsEnabled["editor"] === false) return null;
+ 					return selectProducedFiles(owner);
+ 				},
+ 				priority: -1,
 @@ -6818,6 +6818,7 @@ window.__ModuleLoader__.load({
  			const state = snapshot.state;
  			const sessionId = snapshot.sessionId;
@@ -46,6 +64,19 @@ index dc95f6cd0442d343086711c159d19d44771b9665..e75eb82d817ffa593439b11d184d1aad
  					className: sidebar_module_css_default.toggleCluster,
  					children: [!narrow && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
  						label: state.bottomOpen ? t("collapseBottomPanel") : t("expandBottomPanel"),
+diff --git a/lib/index.js b/lib/index.js
+index b6ae4a6832ce5f01b419f4fc7f3432fa54afd91e..e11fe0ab791a233f097bc9149323abaa3a8b8db3 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -62,7 +62,7 @@ const PrefsSchema = z.object({
+ 	bottomPanelAutoTerminal: z.boolean().default(true),
+ 	terminalFontFamily: z.string().default(""),
+ 	terminalFontSize: z.number().step(1).min(9).max(32).default(13),
+-	interceptOpenPath: z.boolean().default(true),
++	interceptOpenPath: z.boolean().default(false),
+ 	titleBarCompat: z.boolean().default(false),
+ 	titleBarStripPx: z.number().step(1).min(0).max(120).default(40),
+ 	htmlViewerNoSandbox: z.boolean().default(false),
 diff --git a/src/client/Sidebar.tsx b/src/client/Sidebar.tsx
 index c450a36bc5f952c0c9fb1e9e602d4c356c5032c8..190ca1ef4b00c16a012f49c1dccf99662db76f91 100644
 --- a/src/client/Sidebar.tsx
@@ -55,12 +86,12 @@ index c450a36bc5f952c0c9fb1e9e602d4c356c5032c8..190ca1ef4b00c16a012f49c1dccf9966
    const sessionId = snapshot.sessionId
    const summaryCwd = sessionId === undefined ? undefined : sessionList.byId[sessionId]?.cwd
 +  const showToggles = window.location.pathname.startsWith('/chat/')
-
+ 
    // The collapsed toggle cluster reclaims the top-right corner, so the DSH
    // session header's right-aligned utilities (the "Session log" download
 @@ -640,7 +641,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
    }, [ctx, sessionId, cwd])
-
+ 
    if (state === undefined || sessionId === undefined) {
 -    return (
 +    return !showToggles ? null : (
@@ -85,6 +116,27 @@ index c450a36bc5f952c0c9fb1e9e602d4c356c5032c8..190ca1ef4b00c16a012f49c1dccf9966
        {/*
          The right panel stays mounted while collapsed (hidden off-screen) so
          the slide in/out can animate; visibility hides it after the slide
+diff --git a/src/client/intercept.tsx b/src/client/intercept.tsx
+index e8f3b707041c1f15f3a98c445f8a2bfa325b74ee..d51592cb413295f6e1b120512986b4b9dfe42843 100644
+--- a/src/client/intercept.tsx
++++ b/src/client/intercept.tsx
+@@ -74,11 +74,12 @@ export function SidebarProducedFiles(props: {
+ export function registerTurnTailInterception(ctx: Context, store: SidebarStore): () => void {
+   return ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
+     name: 'conversation.chat.turnTail',
+-    // Decline the takeover while the editor tab type is disabled in the side
+-    // card settings: the produced-files row falls back to the default
+-    // deliverables behavior instead of offering chips that cannot open.
++    // Decline the takeover unless the user explicitly enabled sidebar file
++    // opening: the native deliverables row then resolves the Workspace path
++    // and hands it to the Host OS opener.
+     select: (owner) => {
+-      if (store.getPrefs().tabsEnabled['editor'] === false) return null
++      if (store.getPrefs().interceptOpenPath === false
++        || store.getPrefs().tabsEnabled['editor'] === false) return null
+       return selectProducedFiles(owner)
+     },
+     priority: -1,
 diff --git a/src/client/state.ts b/src/client/state.ts
 index 8656ddcd9be1250dc4b04276fbc600689c66e292..f0eb5dd9d9775e55c3c44565c8c5349fb2edb434 100644
 --- a/src/client/state.ts
@@ -101,11 +153,11 @@ index 8656ddcd9be1250dc4b04276fbc600689c66e292..f0eb5dd9d9775e55c3c44565c8c5349f
      // A stale duplicate pane id may have been re-ided; follow the rename so
      // new tabs still land in the pane the user was using.
 diff --git a/src/config.ts b/src/config.ts
-index a5bc8c273f03f289a2375d84c3a7fd2474550b6d..3534b702e1e4c8c88f55cb2598cf292fa2d6974f 100644
+index a5bc8c273f03f289a2375d84c3a7fd2474550b6d..56789a57cccdd14bf7ad333591b2815d74d997b2 100644
 --- a/src/config.ts
 +++ b/src/config.ts
 @@ -88,7 +88,7 @@ export function resolveSidebarConfig(config: SidebarConfig | undefined): Resolve
-
+ 
  /** Schemastery schema for the user-facing preferences (validated by the settings service). */
  export const PrefsSchema: z<SidebarPrefs> = z.object({
 -  openByDefault: z.boolean().default(true),
@@ -113,12 +165,30 @@ index a5bc8c273f03f289a2375d84c3a7fd2474550b6d..3534b702e1e4c8c88f55cb2598cf292f
    defaultWidthPercent: z.number().step(1).min(WIDTH_PERCENT_MIN).max(WIDTH_PERCENT_MAX).default(WIDTH_PERCENT_DEFAULT),
    autoOpenSubagent: z.boolean().default(true),
    autoOpenJobs: z.boolean().default(true),
+@@ -96,7 +96,7 @@ export const PrefsSchema: z<SidebarPrefs> = z.object({
+   bottomPanelAutoTerminal: z.boolean().default(true),
+   terminalFontFamily: z.string().default(''),
+   terminalFontSize: z.number().step(1).min(TERMINAL_FONT_SIZE_MIN).max(TERMINAL_FONT_SIZE_MAX).default(TERMINAL_FONT_SIZE_DEFAULT),
+-  interceptOpenPath: z.boolean().default(true),
++  interceptOpenPath: z.boolean().default(false),
+   titleBarCompat: z.boolean().default(false),
+   titleBarStripPx: z.number().step(1).min(TITLE_BAR_STRIP_MIN).max(TITLE_BAR_STRIP_MAX).default(TITLE_BAR_STRIP_DEFAULT),
+   htmlViewerNoSandbox: z.boolean().default(false),
 diff --git a/src/prefs-shared.ts b/src/prefs-shared.ts
-index 42986a443cba8cb6b75f49533cae1ae85023dafb..94320f3f8de4b6e94ebdbfc7697a3aa66125ef7c 100644
+index 42986a443cba8cb6b75f49533cae1ae85023dafb..6b9d945319ed5ee8843a13e7e4f7168fcd08f446 100644
 --- a/src/prefs-shared.ts
 +++ b/src/prefs-shared.ts
+@@ -56,7 +56,7 @@ export interface SidebarPrefs {
+    * Whether chat-side file opens (tool-row path links, the produced-files
+    * row, prose file mentions — every path that funnels through the client
+    * runtime's `ctx.workspaces.openPath`) open in the sidebar editor instead
+-   * of the Host OS's default application. On by default; the editor tab's
++   * of the Host OS's default application. Off by default; the editor tab's
+    * own enable switch gates it too (both must be on for the takeover).
+    */
+   interceptOpenPath: boolean
 @@ -170,7 +170,7 @@ export const TITLE_BAR_STRIP_DEFAULT = 40
-
+ 
  /** Fallback prefs used whenever the settings document is unreachable or malformed. */
  export const SIDEBAR_PREFS_DEFAULTS: SidebarPrefs = {
 -  openByDefault: true,
@@ -126,3 +196,12 @@ index 42986a443cba8cb6b75f49533cae1ae85023dafb..94320f3f8de4b6e94ebdbfc7697a3aa6
    defaultWidthPercent: WIDTH_PERCENT_DEFAULT,
    autoOpenSubagent: true,
    autoOpenJobs: true,
+@@ -178,7 +178,7 @@ export const SIDEBAR_PREFS_DEFAULTS: SidebarPrefs = {
+   bottomPanelAutoTerminal: true,
+   terminalFontFamily: '',
+   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
+-  interceptOpenPath: true,
++  interceptOpenPath: false,
+   titleBarCompat: false,
+   titleBarStripPx: TITLE_BAR_STRIP_DEFAULT,
+   htmlViewerNoSandbox: false,

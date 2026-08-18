@@ -29,24 +29,30 @@ import { migrateLegacySchedules } from './legacy-schedule.js'
 import { checkOsCredentialBackend } from './profile/credentials-os.js'
 
 export const PRODUCT = 'e-Mate'
-export const VERSION = '2.0.8'
+export const VERSION = '2.0.9'
 export const PROFILE = 'e-mate'
 export const DEFAULT_PORT = 3080
-export const HARNESS_VERSION = '0.1.0-rc.5'
-export const HARNESS_COMMIT = '12d68b6ca05fa538d98f70ed47786c44ca3a7225'
+export const HARNESS_VERSION = '0.1.0-rc.7'
+export const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
 const PLUGIN_PACKAGES = [
   '@e-mate/dsh-plugin-better-sidebar',
   '@e-mate/dsh-plugin-browser',
   '@e-mate/dsh-plugin-browser-panel',
+  '@e-mate/dsh-plugin-computer-use',
   '@e-mate/dsh-plugin-file-import',
+  '@e-mate/dsh-plugin-find-skill',
   '@e-mate/dsh-plugin-genui',
-  '@e-mate/dsh-plugin-im',
+  '@e-mate/dsh-plugin-mcp-manage',
   '@e-mate/dsh-plugin-memory-evolve',
   '@e-mate/dsh-plugin-office-skills',
   '@e-mate/dsh-plugin-search-mcp',
   '@e-mate/dsh-plugin-subagent',
   '@e-mate/dsh-plugin-vision-toolkit',
+  '@e-mate/dsh-plugin-xin-assistant',
 ]
+const MANAGED_PROFILE_PACKAGES = new Set(PLUGIN_PACKAGES)
+const RETIRED_PROFILE_PACKAGES = new Set(['@e-mate/dsh-plugin-im', '@yuxianglin/dsh-bridge-browser'])
+const OWNED_PROFILE_PACKAGES = new Set([...MANAGED_PROFILE_PACKAGES, ...RETIRED_PROFILE_PACKAGES])
 const UPDATE_RECEIPT_NAME = /^online-update-([0-9a-f]{8}-[0-9a-f-]{27})\.json$/iu
 const UPDATE_RECEIPT_STATUS = new Set(['completed', 'rolled-back', 'rollback-failed', 'failed-before-change'])
 
@@ -66,7 +72,7 @@ export function managedPaths(dshHome = resolveDshHome()) {
     run,
     state: join(run, 'instance.json'),
     log: join(data, 'logs', 'web.log'),
-    receipt: join(data, 'migrations', 'setup-2.0.8.json'),
+    receipt: join(data, 'migrations', 'setup-2.0.9.json'),
   }
 }
 
@@ -143,12 +149,21 @@ export function installProfile(dshHome = resolveDshHome()) {
     join(paths.data, 'logs'),
   ]) mkdirSync(directory, { recursive: true })
 
+  const previous = readJson(join(paths.profile, 'package.json')) ?? {}
+  const externalDependencies = Object.entries(previous.dependencies ?? {})
+    .filter(([name, version]) => !OWNED_PROFILE_PACKAGES.has(name) && typeof version === 'string')
+  const externalBundles = (Array.isArray(previous.dsh?.profile?.bundles) ? previous.dsh.profile.bundles : [])
+    .filter(name => typeof name === 'string' && !OWNED_PROFILE_PACKAGES.has(name)
+      && name !== '@deepseek-ai/dsh-base' && name !== '@deepseek-ai/dsh-web-app')
   const manifest = {
     name: 'dsh-profile-e-mate',
     private: true,
     type: 'module',
-    dependencies: Object.fromEntries(PLUGIN_PACKAGES.map(name => [name, VERSION])),
-    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...PLUGIN_PACKAGES] } },
+    dependencies: Object.fromEntries([
+      ...PLUGIN_PACKAGES.map(name => [name, VERSION]),
+      ...externalDependencies,
+    ]),
+    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...PLUGIN_PACKAGES, ...externalBundles] } },
   }
   atomicWrite(join(paths.profile, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
   atomicWrite(
@@ -366,8 +381,8 @@ function profileCheck(paths) {
   const plugins = [
     join(paths.profile, 'plugins', 'health.js'),
     join(paths.profile, 'plugins', 'agent-operations.js'),
+    join(paths.profile, 'plugins', 'artifact-open-boundary.js'),
     join(paths.profile, 'plugins', 'capabilities.js'),
-    join(paths.profile, 'plugins', 'connections.js'),
     join(paths.profile, 'plugins', 'qr-generation.js'),
     join(paths.profile, 'plugins', 'credentials-os.js'),
     join(paths.profile, 'plugins', 'settings-document-boundary.js'),
@@ -400,7 +415,7 @@ function profileCheck(paths) {
       && byId.get('credentials')?.disabled === true
       && byId.get('emate-settings-document-boundary')?.name === './plugins/settings-document-boundary.js'
       && byId.get('emate-credentials-os')?.name === './plugins/credentials-os.js'
-      && byId.get('emate-connections')?.name === './plugins/connections.js'
+      && byId.get('emate-artifact-open-boundary')?.name === './plugins/artifact-open-boundary.js'
       && byId.get('emate-qr-generation')?.name === './plugins/qr-generation.js'
       && byId.get('emate-model-policy')?.name === './plugins/model-policy.js'
       && byId.get('emate-audit')?.name === './plugins/audit.js'
@@ -435,8 +450,16 @@ function profileCheck(paths) {
   })
   const expectedBundles = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...PLUGIN_PACKAGES]
   const expectedDependencies = Object.fromEntries(PLUGIN_PACKAGES.map(name => [name, VERSION]))
-  const ok = JSON.stringify(bundles) === JSON.stringify(expectedBundles)
-    && JSON.stringify(manifest?.dependencies) === JSON.stringify(expectedDependencies)
+  const dependencyEntries = manifest?.dependencies !== null && typeof manifest?.dependencies === 'object'
+    ? Object.entries(manifest.dependencies)
+    : []
+  const ok = Array.isArray(bundles)
+    && JSON.stringify(bundles.slice(0, expectedBundles.length)) === JSON.stringify(expectedBundles)
+    && bundles.slice(expectedBundles.length).every(name => typeof name === 'string'
+      && !expectedBundles.includes(name) && !RETIRED_PROFILE_PACKAGES.has(name))
+    && Object.entries(expectedDependencies).every(([name, version]) => manifest.dependencies?.[name] === version)
+    && dependencyEntries.every(([name, version]) => typeof version === 'string'
+      && !RETIRED_PROFILE_PACKAGES.has(name) && (!MANAGED_PROFILE_PACKAGES.has(name) || version === VERSION))
     && patchValid && plugins.every(existsSync) && managedPlugins
   return { ok, detail: ok ? paths.profile : 'managed e-mate profile is missing or drifted; run e-mate setup' }
 }

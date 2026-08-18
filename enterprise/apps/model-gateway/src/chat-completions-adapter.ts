@@ -21,6 +21,7 @@ const requestKeys = new Set([
   'include',
   'input',
   'instructions',
+  'max_output_tokens',
   'model',
   'parallel_tool_calls',
   'prompt_cache_key',
@@ -377,6 +378,12 @@ export function responsesToChatCompletionsRequest(
   flushCalls();
   if (callKinds.size > 0) throw new Error('Missing tool output');
   if (messages.length === 0) throw new Error('Responses input is empty');
+  if (
+    value.max_output_tokens !== undefined &&
+    (!Number.isSafeInteger(value.max_output_tokens) || Number(value.max_output_tokens) < 1)
+  ) {
+    throw new Error('Invalid maximum output tokens');
+  }
   if (value.parallel_tool_calls !== undefined && typeof value.parallel_tool_calls !== 'boolean') {
     throw new Error('Invalid parallel tool calls');
   }
@@ -389,7 +396,8 @@ export function responsesToChatCompletionsRequest(
       ...(choice === undefined ? {} : { tool_choice: choice }),
       ...(value.parallel_tool_calls === undefined ? {} : { parallel_tool_calls: value.parallel_tool_calls }),
       ...(responseFormat === undefined ? {} : { response_format: responseFormat }),
-      max_tokens: maxTokens,
+      max_tokens:
+        value.max_output_tokens === undefined ? maxTokens : Math.min(Number(value.max_output_tokens), maxTokens),
       stream: true,
       stream_options: { include_usage: true },
     }),

@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-file-import",
-  "version": "2.0.8",
+  "version": "2.0.9",
   "description": "Session-bound local file import for the e-Mate DSH composer.",
   "type": "module",
   "main": "lib/index.js",
@@ -29,6 +29,7 @@
         "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-input-trigger",
         "@deepseek-ai/dsh-client-ui-primitives"
       ],
       "platform": "web"

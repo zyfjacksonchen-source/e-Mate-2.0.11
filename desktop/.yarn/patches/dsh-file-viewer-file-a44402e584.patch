@@ -1,39 +1,12 @@
 diff --git a/lib/client.js b/lib/client.js
-index 99b0907d9a5b78b90073b156c499cc60951518fb..17e759ccb215232ae32539e6069ffe96e92ab9f2 100644
+index 99b0907d9a5b78b90073b156c499cc60951518fb..4acef62 100644
 --- a/lib/client.js
 +++ b/lib/client.js
-@@ -35463,7 +35463,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
- 		* 任何文件路径都路由；属于某会话工作区的按工作区模式打开（带文件树），
- 		* 不属于任何工作区的绝对路径以单文件模式打开（无文件树、跳过 containment）。
- 		*/
--		function installFileOpenRouter(workspaces, sessions, openViewer) {
-+		const SYSTEM_OPEN_EXTENSIONS = /\.(?:docx|xlsx|pptx|pdf)$/iu;
-+		function installFileOpenRouter(workspaces, sessions, openViewer, openSystem) {
- 			const serviceTarget = workspaces[Symbol.for("cordis.original")] ?? workspaces;
- 			const ownDescriptor = Object.getOwnPropertyDescriptor(serviceTarget, "openPath");
- 			const nativeOpenPath = workspaces.openPath;
-@@ -35472,6 +35473,10 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
- 				if (!enabled) return nativeOpenPath.call(workspaces, path);
- 				const target = fileViewerTarget(path, sessions.list.getSnapshot());
- 				if (target === void 0) return nativeOpenPath.call(workspaces, path);
-+				if (SYSTEM_OPEN_EXTENSIONS.test(target.path)) {
-+					await openSystem(target.sessionId, target.path, target.singleFile);
-+					return;
-+				}
- 				const activeElement = document.activeElement;
- 				const trigger = activeElement instanceof HTMLElement && activeElement !== document.body && activeElement.isConnected ? activeElement : void 0;
- 				await openViewer(target.sessionId, target.path, trigger, target.singleFile);
-@@ -35616,7 +35621,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
+@@ -35616,7 +35616,6 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
  				zh,
  				en
  			}), "file-viewer: dictionaries");
 -			ctx.effect(() => installFileOpenRouter(ctx.workspaces, ctx.sessions, (sessionId, path, trigger, singleFile) => coordinator.openPath(sessionId, path, singleFile, trigger)), "file-viewer: file open router");
-+			ctx.effect(() => installFileOpenRouter(
-+				ctx.workspaces,
-+				ctx.sessions,
-+				(sessionId, path, trigger, singleFile) => coordinator.openPath(sessionId, path, singleFile, trigger),
-+				(sessionId, path, singleFile) => coordinator.openInSystem(sessionId, path, singleFile)
-+			), "file-viewer: file open router");
  			ctx.on("connection/reset", () => {
  				coordinator.resetConnection();
  			});

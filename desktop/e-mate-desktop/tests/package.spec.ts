@@ -111,6 +111,15 @@ describe('published package surface', () => {
     expect(manifest.optionalDependencies ?? {}).not.toHaveProperty('dshmarket')
   })
 
+  it('runs only the pinned rc.7 Harness packages', () => {
+    const runtime = Object.entries(manifest.dependencies ?? {})
+      .filter(([name]) => name.startsWith('@deepseek-ai/dsh'))
+    expect(runtime.length).toBeGreaterThan(0)
+    expect(runtime.every(([, version]) => version === '0.1.0-rc.7')).toBe(true)
+    const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
+    expect(lockfile).not.toMatch(/^\s*version: 0\.1\.0-rc\.6$/mu)
+  })
+
   it('builds public Host plugins and their private native bootstraps', () => {
     const config = readFileSync(new URL('tsdown.config.ts', packageRoot), 'utf8')
 
@@ -212,6 +221,7 @@ describe('published package surface', () => {
   it('separates unsigned smoke packaging from the signed macOS release', () => {
     const packageDir = readFileSync(new URL('scripts/package-dir.mjs', packageRoot), 'utf8')
 
+    expect(manifest.scripts?.build).toContain('node ../../scripts/sync-emate-plugin-bundles.mjs')
     expect(manifest.scripts?.build).toContain('node scripts/generate-mac-app-icon.mjs')
     expect(manifest.scripts?.['package:dir']).toBe('yarn run build && node scripts/package-dir.mjs')
     expect(packageDir).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")
@@ -312,22 +322,29 @@ describe('published package surface', () => {
   })
 
   it('keeps node-pty from duplicating an already-unpacked ASAR helper path', () => {
-    const patchResolution = 'patch:node-pty@npm%3A1.1.0#./.yarn/patches/node-pty-npm-1.1.0-asar-unpacked-path.patch'
+    const stablePatch = 'patch:node-pty@npm%3A1.1.0#./.yarn/patches/node-pty-npm-1.1.0-asar-unpacked-path.patch'
+    const runtimePatch = 'patch:node-pty@npm%3A1.2.0-beta.15#./.yarn/patches/node-pty-npm-1.2.0-beta.15-asar-unpacked-path.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
     const patch = readFileSync(
       new URL('.yarn/patches/node-pty-npm-1.1.0-asar-unpacked-path.patch', workspaceRoot),
       'utf8',
     )
     const workspaceRequire = createRequire(new URL('package.json', packageRoot))
-    const installed = readFileSync(workspaceRequire.resolve('node-pty/lib/unixTerminal.js'), 'utf8')
+    const sidebarRequire = createRequire(workspaceRequire.resolve('dsh-better-sidebar/package.json'))
+    const installed = [workspaceRequire, sidebarRequire]
+      .map(require => readFileSync(require.resolve('node-pty/lib/unixTerminal.js'), 'utf8'))
 
     expect(workspaceManifest.resolutions).toMatchObject({
-      'node-pty@npm:^1.1.0': patchResolution,
+      'node-pty@npm:^1.1.0': stablePatch,
+      'node-pty@npm:1.2.0-beta.15': runtimePatch,
     })
     expect(lockfile).toContain('node-pty@patch:node-pty@npm%3A1.1.0#./.yarn/patches/node-pty-npm-1.1.0-asar-unpacked-path.patch')
+    expect(lockfile).toContain('node-pty@patch:node-pty@npm%3A1.2.0-beta.15#./.yarn/patches/node-pty-npm-1.2.0-beta.15-asar-unpacked-path.patch')
     expect(patch).toContain("path.sep + 'app.asar' + path.sep")
-    expect(installed).toContain("path.sep + 'app.asar' + path.sep")
-    expect(installed).not.toContain("replace('app.asar', 'app.asar.unpacked')")
+    for (const source of installed) {
+      expect(source).toContain("path.sep + 'app.asar' + path.sep")
+      expect(source).not.toContain("replace('app.asar', 'app.asar.unpacked')")
+    }
   })
 
   it('resolves electron-builder through the pinned app-builder-lib keychain patch', () => {
@@ -351,9 +368,9 @@ describe('published package surface', () => {
   })
 
   it('starts restricted Windows shells with a hidden console show state', () => {
-    const patchResolution = 'patch:@deepseek-ai/dsh-sandbox-windows-acl@npm%3A0.1.0-rc.6#./patches/dsh-sandbox-windows-acl@0.1.0-rc.6.patch'
+    const patchResolution = 'patch:@deepseek-ai/dsh-sandbox-windows-acl@npm%3A0.1.0-rc.7#./patches/dsh-sandbox-windows-acl@0.1.0-rc.7.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
-    const patch = readFileSync(new URL('patches/dsh-sandbox-windows-acl@0.1.0-rc.6.patch', workspaceRoot), 'utf8')
+    const patch = readFileSync(new URL('patches/dsh-sandbox-windows-acl@0.1.0-rc.7.patch', workspaceRoot), 'utf8')
     const workspaceRequire = createRequire(new URL('package.json', packageRoot))
     const sandboxManifest = workspaceRequire.resolve('@deepseek-ai/dsh-sandbox-windows-acl/package.json')
     const sandboxLocalManifest = workspaceRequire.resolve('@deepseek-ai/dsh-sandbox-local/package.json')
@@ -362,12 +379,12 @@ describe('published package surface', () => {
     const runtimeChunks = readdirSync(sandboxLib).filter(name => /^types-.*\.js$/u.test(name))
 
     expect(workspaceManifest.resolutions).toMatchObject({
-      '@deepseek-ai/dsh-sandbox-windows-acl@npm:0.1.0-rc.6': patchResolution,
-      '@deepseek-ai/dsh-sandbox-windows-acl@npm:^0.1.0-rc.6': patchResolution,
+      '@deepseek-ai/dsh-sandbox-windows-acl@npm:0.1.0-rc.7': patchResolution,
+      '@deepseek-ai/dsh-sandbox-windows-acl@npm:^0.1.0-rc.7': patchResolution,
     })
     expect(sandboxLocalRequire.resolve('@deepseek-ai/dsh-sandbox-windows-acl/package.json'))
       .toBe(sandboxManifest)
-    expect(lockfile).toContain('@deepseek-ai/dsh-sandbox-windows-acl@patch:@deepseek-ai/dsh-sandbox-windows-acl@npm%3A0.1.0-rc.6#./patches/dsh-sandbox-windows-acl@0.1.0-rc.6.patch')
+    expect(lockfile).toContain('@deepseek-ai/dsh-sandbox-windows-acl@patch:@deepseek-ai/dsh-sandbox-windows-acl@npm%3A0.1.0-rc.7#./patches/dsh-sandbox-windows-acl@0.1.0-rc.7.patch')
     expect(patch.match(/^\+\s*dwFlags: 257,\r?$/gmu)).toHaveLength(2)
     expect(patch.match(/^\+\s*wShowWindow: 0,\r?$/gmu)).toHaveLength(2)
     expect(runtimeChunks).toHaveLength(1)
@@ -377,5 +394,25 @@ describe('published package surface', () => {
     expect(installedRuntime).toContain('api.createProcessAsUserW(token, null, commandLine, null, null, 1, 0, null')
     expect(installedRuntime).toContain('api.createProcessAsUserW(token, null, commandLine, null, null, 1, 4, null')
     expect(installedRuntime).not.toContain('134217728')
+  })
+
+  it('ignores redundant shell escalation metadata under the current policy', () => {
+    const bashPatch = 'patch:@deepseek-ai/dsh-tool-bash@npm%3A0.1.0-rc.7#~/.yarn/patches/@deepseek-ai-dsh-tool-bash-npm-0.1.0-rc.7-b4db1f9f9e.patch'
+    const pwshPatch = 'patch:@deepseek-ai/dsh-tool-pwsh@npm%3A0.1.0-rc.7#~/.yarn/patches/@deepseek-ai-dsh-tool-pwsh-npm-0.1.0-rc.7-5c1a523622.patch'
+    const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
+    const workspaceRequire = createRequire(new URL('package.json', packageRoot))
+
+    expect(workspaceManifest.resolutions).toMatchObject({
+      '@deepseek-ai/dsh-tool-bash@npm:^0.1.0-rc.7': bashPatch,
+      '@deepseek-ai/dsh-tool-pwsh@npm:^0.1.0-rc.7': pwshPatch,
+    })
+    expect(lockfile).toContain('@deepseek-ai/dsh-tool-bash@patch:@deepseek-ai/dsh-tool-bash@npm%3A0.1.0-rc.7#~/.yarn/patches/')
+    expect(lockfile).toContain('@deepseek-ai/dsh-tool-pwsh@patch:@deepseek-ai/dsh-tool-pwsh@npm%3A0.1.0-rc.7#~/.yarn/patches/')
+    for (const packageName of ['@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tool-pwsh']) {
+      const packageManifest = workspaceRequire.resolve(`${packageName}/package.json`)
+      const installed = readFileSync(join(dirname(packageManifest), 'lib/index.js'), 'utf8')
+      expect(installed).toContain('const redundantEscalation =')
+      expect(installed).toContain('if (!redundantEscalation) validateEscalationArgs(')
+    }
   })
 })

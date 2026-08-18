@@ -1345,3 +1345,43 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 同一窄补丁在 Bash/PowerShell Tool 的共享权限入口把“请求与当前 sandbox 相等”及“当前已是 `danger-full-access`”判定为冗余请求，继续使用当前策略且不触发审批；只有严格扩大权限才进入既有审批，缺少 sandbox 组合及非法模式仍失败关闭。该修改直接覆盖截图中的 `danger-full-access → workspace-write/danger-full-access` 反向升级错误，没有新权限模型或第二套执行路径。
 - 生产默认持久 Bash 三命令实测：macOS 从 `7244/3573/3547 ms` 降至 `239/78/79 ms`；Linux ARM64 从 `7183/3553/3537 ms` 降至 `229/67/67 ms`。相关 13 个测试文件在 macOS 改前/改后为 `7.85/7.90 s`，均为 248 passed、7 skipped；Linux 为 `9.649/8.356 s`，同样 248 passed、7 skipped。Linux 初次安装的 `node-pty` LTO 环境错误通过仅对该既有原生依赖关闭 LTO 重建后消除，不计入功能结果。
 - Desktop 通过现有 ecosystem profile 机制预装固定 `@kelearns/dsh-navigation-bar@0.2.1`，没有修改 Harness 导航架构；既有 `dsh-turn-fold@0.2.2` Yarn patch 仅把折叠回合标题的总 Token 显示改为与 DSH StatsLine 相同的 K/M 阈值和精度，例如 `267382 → 267K token`、`1250000 → 1.3M token`，`tok/s` 与缓存命中率不变。
+
+## 2026-08-18 · 2.0.9 产物本地打开边界
+
+- rc.7 已由原生 `ui-deliverables → conversation openFile → host.openPath → OS 默认应用` 提供产物点击链路；e-Mate 不新增下载、文件服务或第二套打开协议。
+- 原生 `host.openPath` 只受 loopback RPC 边界保护，仍会把任意绝对主机路径交给系统。e-Mate profile 增加一个窄包装插件：打开前 `realpath`，仅放行已注册本地 Workspace 自身及其子路径，并把规范化后的本地路径交回原生 opener；相对路径、缺失路径、Workspace 外路径和符号链接越界均失败关闭。
+- e-Mate profile `tsdown` 构建通过；新增边界回归 `1/1`、rc.7 原生产物与会话打开回归 `23/23`、聚焦 `git diff --check` 通过。最终安装态点击并由系统默认应用打开真实产物，仍并入 2.0.9 的统一 Computer Use 发布门禁。
+- 首轮 Computer Use 点击 ZIP 证明产物没有进入上述 `host.openPath` 边界。`dsh-better-sidebar@0.12.2` 的高优先级 turn-tail entry 是第一处接管：现有 ecosystem Yarn patch 将其侧栏文件接管默认关闭，并让 turn-tail 与共享包装统一遵守同一个用户偏好；用户仍可显式启用侧栏打开。
+- 新 DMG 的 QA4 已确认设置中没有 `interceptOpenPath`，且已安装 better-sidebar 客户端默认、selector 与 Host schema 均为 `false`，因此继续迁移设置不会改变行为。第二处实际接管来自 `dsh-file-viewer@0.1.0`：它明确包装所有 `workspaces.openPath`，ZIP 不在其 Office 扩展特例中便进入“工作区文件浏览器”。最小修复只从现有 Yarn patch 移除该共享 router 的注册；插件的会话头手动入口、预览和“在系统应用中打开”保留，聊天产物与文件引用统一退回 rc.7 原生 opener 和 e-Mate Workspace 边界。
+- 聚焦 Desktop profile 回归锁定 better-sidebar 默认/退让条件，并锁定发布包不再注册 file-viewer 的共享 file-open router；修复后的安装态验证必须重建 profile/桌面包，旧运行中 bundle 不会热更新，不能复用 QA4 结果。
+
+## 2026-08-18 · 2.0.9 Codex-like 插件发现、MCP 授权与浏览器闭环
+
+- DSH rc.7 已有 `@deepseek-ai/dsh-mcp-client` 的标准 MCP transport、Tool 同步和重连能力，因此不新增 MCP Server、Tool 协议或第二套客户端。e-Mate 只补 profile 插件 `@e-mate/dsh-plugin-mcp-manage`：非密配置进入 DSH Settings，OAuth 凭据进入 DSH Credentials，连接最终仍挂载到原生 MCP client；授权使用受保护资源 discovery、动态客户端注册、Authorization Code + PKCE、固定 loopback callback 和 refresh token 轮换，只有真实 `mcp__<name>__*` Tool 注册后才报告生效。
+- 同一管理插件提供一个窄 `dsh_plugin_manage` Agent Tool，委托桌面已经打包的原生 `dsh plugin`/pnpm 服务安装可选插件，不新增 loader。远端来源只接受 `github:owner/repo#<40 位 commit>`，安装前走目标确认，安装后验证依赖和 bundle，失败回滚；受管 profile 修复保留用户安装的第三方依赖和 bundle。四个平台均改为可发现而非内置的 Skill：腾讯文档安装官方远程 MCP 并由用户扫码/OAuth 授权；飞书通过公开 `riba2534/feishu-cli` 的一键扫码创建应用、Device Flow 和按业务域 Skills；钉钉与微信使用精简 fork `zyfjacksonchen-source/dsh-im@f984f73dcd67692141d4e475c8fbe887e2ce7062`，要求真实首条消息/回复后才宣称闭环。
+- `find-skill` 的远端 skills.sh 在新 Skill 尚未收录或临时不可用时原本会返回空结果。e-Mate fork `zyfjacksonchen-source/dsh-find-skill@37bba4f7c9115a476d8135f751b4cc6d1454aa23` 只增加 Codex-like 推荐目录：按关键词把四个外部 Skill 的来源元数据置于远端结果之前，安装仍由既有 `skill_install`、用户确认和官方 `skills@1.5.22` CLI 完成，平台实现代码没有回到预装包。fork 回归 `55/55`、类型检查和包装合同通过。
+- `dsh-browser` 的断链根因是桌面仍安装旧 `@yuxianglin/dsh-bridge-browser` 及带 side panel 第二套聊天/Session 的扩展，而仓库现成的 `@e-mate/dsh-plugin-browser` 原生 Harness Tool/Session/approval 实现没有接入。Profile 现移除旧 bridge，安装原生插件，并从其精简 MV3 构建复制扩展；Browser Panel 只投影同一连接状态。包级 Browser `5/5`、Panel `5/5`、Desktop profile/electron `25/25`、MCP 管理 `3/3`、DSH profile `49/49` 与 Shell `37/37` 通过；当前 Chrome 未加载 e-Mate 扩展，最终新安装包仍需用户完成一次 Chrome “加载已解压的扩展”授权，再由 Agent 完成 `navigate/snapshot/click/type` 和右侧栏投影的安装态 Computer Use 验收。
+- QA7 从真实 2.0.8/QA6 用户 Profile 升级时暴露旧 bridge 被“保留第三方插件”逻辑误留，和新浏览器插件争用 `emateBrowser` 导致启动失败。Desktop 与 CLI Profile 安装器现在只额外识别两个历史 e-Mate-owned 包（旧 `@yuxianglin/dsh-bridge-browser`、旧内置 `@e-mate/dsh-plugin-im`）并清理；真正第三方 bundle 仍保留。聚焦回归 Desktop `3/3`、DSH `49/49`、Shell `37/37` 通过，QA7 Universal DMG 的 140 个发布测试、197 节点运行时闭包和 DMG smoke 通过；安装升级后旧包消失、2.0.9 界面与登录态正常恢复。
+- 四个连接 Skill 已单独提交为 `e361b1b8055af2c07ca0f84d65396479eb3a1fe8` 并发布不可变 Git 标签 `skills-v2.0.9`。真实官方 `skills@1.5.22` CLI 从标签 URL 克隆 `connect-feishu-cli` 并完成安装；同时发现 Desktop 只提供现有 `pnpm`，适配器配置却调用未打包的 `npx`。最小修复改为复用 Desktop PATH 中的 `pnpm dlx skills@1.5.22`，受信目录四个来源固定到该标签，不依赖 `main` 漂移；包装合同 `1/1` 通过，仍需重打安装包后由真实 Agent 完成安装确认与扫码前链路。
+- QA7 安装态 Computer Use 已验证：搜索框仅一个关闭按钮且无选中描边；外部连接显示为小卡片；`@` 菜单同时提供文件与“电脑操控”，显式电脑操控返回当前前台应用 `e-Mate`；一次性定时任务 1 分钟后在原会话真实返回 `SCHEDULE_OK`；同一图片会话无需重新上传即把 A 改为 B，ZIP 包含两张对应图片，点击产物由 macOS 归档工具按本地路径打开并解压。上述证据不替代四平台扫码、浏览器扩展、Windows 与企业生产门禁。
+## 2026-08-18 · S17 紧凑活动与产物展示（实现前事实）
+
+- 图 1 的轮数、步骤、LLM/Tool 耗时、首 token、吞吐、缓存和输入输出 Token 来自 pinned rc.7 的 `conversation.composer.dock` `stats` 插槽，不是 Agent 输出；e-Mate Shell 已有同名插件插槽覆盖能力，可只隐藏普通用户展示而不删除持久用量事实或改变企业审计。
+- 图 5 的逐行 Think/Tool 噪音已经由预装 `dsh-turn-fold` 插件接管，但插件只在回合结束后整组折叠，且组头改为性能指标，恰好与本轮需求相反；修复应留在该插件的真实 `turn/step/tool/assistant` 投影，不增加会话、事件或 transport。
+- 图 2 的会话菜单漂移根因是 `.taskMenu > div` 使用 `position: fixed` 却没有任何 `top/right/bottom/left` 或锚点，位置依赖静态位置算法而不会可靠跟随滚动锚点。现代 Desktop Chromium 已具备 CSS Anchor Positioning，可让固定层继续逃逸滚动裁剪并绑定现有 summary，较 Portal 坐标状态更小。
+- rc.7 原生 `ui-deliverables` 已从真实工具 mutation locations 聚合产物，并通过同一个 `openFile` 打开；本轮只收紧原生行的文件胶囊展示与标题隐私，不能复制 opener、产物 Store 或工具分派。Beautiful UI 的 Thinking/Tool Chips 组件和 SVG 图标按其页面声明的 MIT License（Copyright 2026 Shane Levine）可复用，采用内联小图标与现有依赖，不增加图标包。
+
+## 2026-08-18 · S17 紧凑活动与产物展示（实现结果）
+
+- e-Mate Shell 以同 id、较高优先级 shadow rc.7 的 `stats` dock cell，普通用户不再看到回合、步骤、耗时、首 Token、吞吐、缓存与输入输出 Token；原始 usage/session 事实仍留在 Harness 与企业审计链路。
+- 现有 `dsh-turn-fold` Yarn patch 继续只读取 rc.7 `chat.nodes / locations / turnEnds`，把运行中和已结束的 Think、工具调用与上下文统一投影为默认折叠的 `X tool calls, Y messages`；展开恢复原生节点。最终回复、失败工具结果、中断/带图 assistant 节点以及未被插件覆盖的审批、附件、turn-error、retry 仍保持可见，组头不再订阅或展示任何性能指标。
+- rc.7 `ProducedFiles` 的真实按钮与 `openFile(path)` 没有替换；Shell 只把按钮投影成文件类型胶囊，保留文件名和外链箭头，并从 title/aria-label 清除本地完整路径。会话菜单使用原 summary 作为 CSS anchor，固定浮层随锚点滚动；不支持 anchor 的 Chromium 走原位 absolute fallback。
+- Tool/Think 图标只复用 Beautiful UI MIT 许可的少量 SVG path，未引入依赖；完整版权与 MIT 文本已加入 Desktop `THIRD_PARTY_NOTICES.md`。
+- 聚焦验证：Shell `8 files / 38 tests` 通过；独立活动投影 `1 file / 2 tests` 通过；Yarn patch `install --immutable` 通过，安装后的 `dsh-turn-fold/client.js` 通过 `node --check`，聚焦 `git diff --check` 通过。未提交、推送、发布。
+- 剩余统一门禁：主流程重建 DMG 后用 Computer Use 验证滚动/缩放时菜单锚定、活动组默认折叠和展开、失败/审批/附件不丢、产物胶囊点击由系统默认应用打开且界面不泄漏本地路径，以及浅/深色下图标可读性。
+
+## 2026-08-18 · 2.0.9 芯助手 CLI 离线运行时闭环
+
+- 芯助手插件已复用 Desktop 现有的应用内 Python 和 DSH `subprocess`，但生产 CLI 的 MPI 路径直接导入 `requests` 与 `cryptography`；两套依赖都未随插件或应用内 Python交付，真实查询因此在授权检查前以 `No module named` 失败。
+- 插件现随包携带固定版本的纯 Python HTTP 依赖，以及分别面向 `darwin-arm64`、`darwin-x64`、`win32-x64` 的 RSA 原生 wheel；运行时只通过 `PYTHONPATH` 接入，保持现有结构化只读 Tool、超时、输出上限和应用内 Python 路径，不运行 pip、不访问包仓库、不开放 shell。
+- 应用内 arm64/x64 Python 均成功导入 `requests 2.32.5` 与 `cryptography 46.0.7`；真实 MPI 只读命令已越过依赖加载并按合同返回“需要现有 token/refresh token”，证明失败边界回到用户授权而不是缺包。插件 build 与合同回归 `2/2` 通过；Windows wheel 已校验为 PE x86-64，仍须最终 Windows 安装态执行同一导入和授权门禁。

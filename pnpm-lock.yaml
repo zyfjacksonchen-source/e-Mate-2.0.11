@@ -36,11 +36,33 @@ importers:
 
   packages/dsh-plugin-browser-panel: {}
 
+  packages/dsh-plugin-computer-use:
+    dependencies:
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
   packages/dsh-plugin-file-import: {}
+
+  packages/dsh-plugin-find-skill:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: 3.18.1
+        version: 3.18.1
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
 
   packages/dsh-plugin-genui: {}
 
-  packages/dsh-plugin-im: {}
+  packages/dsh-plugin-mcp-manage:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: 3.18.1
+        version: 3.18.1
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(zod@4.4.3)
 
   packages/dsh-plugin-memory-evolve: {}
 
@@ -82,7 +104,19 @@ importers:
 
   packages/dsh-plugin-vision-toolkit: {}
 
+  packages/dsh-plugin-xin-assistant:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: 3.18.1
+        version: 3.18.1
+
 packages:
+
+  '@deepseek-ai/cosmokit@1.8.2':
+    resolution: {integrity: sha512-muBOKtSrUKU5m/xpq8ZXWL6hQ/jgd4PhU2PqH97bcxIiLEJfNwZOGQEx4t/aS/GgxRAR+ra9pMHPMtTHU4sqqA==}
+
+  '@deepseek-ai/schemastery@3.18.1':
+    resolution: {integrity: sha512-Qn0FCSwCQnpnj6SB31I6i2sIKgKWnkbJM8O0EU91Gv2UsYVvtZTl6IA0sCwk2e2MZf5S8w5hpq9QkeVvK9qwxg==}
 
   '@fontsource-variable/noto-sans-sc@5.3.0':
     resolution: {integrity: sha512-lNar1dF7Ik/lHNPo/7JWG0TolXY29LtsqYgMvEysooZ5bsO9uH4shJmRrwyJ3PjyTPljhpMJEK0jDuLSU4vJ1w==}
@@ -111,6 +145,9 @@ packages:
 
   '@pdf-lib/upng@1.0.1':
     resolution: {integrity: sha512-dQK2FUMQtowVP00mtIksrlZhdFXQZPC+taih1q4CvPZ5vqdxR/LKBaFg0oAfzd1GlHZXXSPdQfzQnt+ViGvEIQ==}
+
+  '@standard-schema/spec@1.1.0':
+    resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
   '@types/chrome@0.0.268':
     resolution: {integrity: sha512-7N1QH9buudSJ7sI8Pe4mBHJr5oZ48s0hcanI9w3wgijAlv1OZNUZve9JR4x42dn5lJ5Sm87V1JNfnoh10EnQlA==}
@@ -721,6 +758,13 @@ packages:
 
 snapshots:
 
+  '@deepseek-ai/cosmokit@1.8.2': {}
+
+  '@deepseek-ai/schemastery@3.18.1':
+    dependencies:
+      '@deepseek-ai/cosmokit': 1.8.2
+      '@standard-schema/spec': 1.1.0
+
   '@fontsource-variable/noto-sans-sc@5.3.0': {}
 
   '@hono/node-server@1.19.17(hono@4.13.2)':
@@ -760,6 +804,8 @@ snapshots:
   '@pdf-lib/upng@1.0.1':
     dependencies:
       pako: 1.0.11
+
+  '@standard-schema/spec@1.1.0': {}
 
   '@types/chrome@0.0.268':
     dependencies:

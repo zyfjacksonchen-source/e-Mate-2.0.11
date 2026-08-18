@@ -26,7 +26,7 @@ function evidence(candidateOverrides = {}, count = 30) {
   return {
     schema_version: 1,
     evidence_kind: 'keyless-target-loop-collector-fixture',
-    harness_commit: '12d68b6ca05fa538d98f70ed47786c44ca3a7225',
+    harness_commit: 'df78045a127e32cb5b942defba52c539590d1596',
     paths: {
       baseline: { samples: baseline },
       emate_online: { samples: candidate },

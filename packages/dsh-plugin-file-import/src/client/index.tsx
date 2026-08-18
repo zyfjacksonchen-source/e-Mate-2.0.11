@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import { IconPaperclipOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { InputTriggerServiceContract, InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import {
   ALLOWED_MEDIA_BY_EXTENSION,
   allowedMediaType,
@@ -14,7 +15,8 @@ import {
 } from '../contract.ts'
 import css from './style.module.css'
 
-export const inject = ['slots', 'connection']
+export const inject = ['slots', 'connection', 'inputTriggers']
+export const FILE_PICK_EVENT = 'e-mate:file-picker-requested'
 
 const IMAGE_MEDIA = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 const IMAGE_MEDIA_BY_EXTENSION: Readonly<Record<string, string>> = {
@@ -194,6 +196,15 @@ export function FileImportControl({ sessionId, input, inputActions, isLoopback, 
     }
   }, [intake])
 
+  useEffect(() => {
+    const open = (event: Event): void => {
+      if (!(event instanceof CustomEvent) || event.detail?.sessionId !== sessionId || disabled) return
+      picker.current?.click()
+    }
+    document.addEventListener(FILE_PICK_EVENT, open)
+    return () => { document.removeEventListener(FILE_PICK_EVENT, open) }
+  }, [disabled, sessionId])
+
   const choose = (event: ChangeEvent<HTMLInputElement>): void => {
     const files = Array.from(event.currentTarget.files ?? [])
     event.currentTarget.value = ''
@@ -236,6 +247,20 @@ export function FileImportControl({ sessionId, input, inputActions, isLoopback, 
 }
 
 export function apply(ctx: Context): void {
+  const source: InputTriggerSource = {
+    trigger: '@',
+    name: '文件',
+    order: -30,
+    candidates(_session, { query }) {
+      return Promise.resolve('文件'.includes(query) ? [{ name: '文件', description: '选择本地图片或文件' }] : [])
+    },
+    onPick({ session }) {
+      document.dispatchEvent(new CustomEvent(FILE_PICK_EVENT, { detail: { sessionId: session.sessionId } }))
+      return 'handled'
+    },
+  }
+  const inputTriggers = ctx.get('inputTriggers') as InputTriggerServiceContract
+  ctx.effect(() => inputTriggers.registerSource(source), 'file-import: @文件 source')
   ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
     name: 'conversation.input.left',
     id: 'e-mate-file-import',

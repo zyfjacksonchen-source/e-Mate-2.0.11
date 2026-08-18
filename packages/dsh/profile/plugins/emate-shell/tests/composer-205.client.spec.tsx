@@ -3,119 +3,62 @@ import React from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  COMPOSER_PLACEHOLDER,
-  ComposerConnectors,
-  ConnectionIntentRouter,
-  CONNECTORS_PATH,
-  routeToConnections,
-} from '../src/client/composer-connectors.tsx'
+import { COMPOSER_PLACEHOLDER, ComposerConnectors } from '../src/client/composer-connectors.tsx'
 
 const Icon = () => <svg />
 
-afterEach(() => {
-  cleanup()
-  history.replaceState(null, '', '/')
-})
+afterEach(cleanup)
 
-describe('final e-Mate 2.0.5 composer projection', () => {
-  it('routes the connector control to the capability center external-connection subtype', () => {
-    history.replaceState(null, '', '/chat/session-1')
-    const popstate = vi.fn()
-    addEventListener('popstate', popstate, { once: true })
-    render(<ComposerConnectors LinkIcon={Icon} openConnections={routeToConnections} />)
-    fireEvent.click(screen.getByRole('button', { name: '打开能力中心的外部连接' }))
-    expect(`${location.pathname}${location.search}`).toBe(CONNECTORS_PATH)
-    expect(history.state.eMateSettingsReturn).toBe('/chat/session-1')
-    expect(popstate).toHaveBeenCalledOnce()
+describe('e-Mate 2.0.9 composer projection', () => {
+  it('opens a selector card that lists only effective native MCP connections', async () => {
+    const callConnections = vi.fn(async () => ({
+      ok: true,
+      value: {
+        schema_version: 1,
+        items: [{ name: 'docs', transport: 'streamable-http', active: true, authorized: true }],
+      },
+    }))
+    render(<ComposerConnectors LinkIcon={Icon} callConnections={callConnections} />)
+    fireEvent.click(screen.getByRole('button', { name: '查看已生效的外部连接' }))
+    expect(await screen.findByRole('menu', { name: '已生效的外部连接' })).toBeTruthy()
+    expect(await screen.findByText('docs')).toBeTruthy()
+    expect(screen.getByText('远程 MCP')).toBeTruthy()
+    expect(callConnections).toHaveBeenCalledOnce()
   })
 
-  it('restores the 2.0.5 guide on the resident live Harness textarea', () => {
-    render(
-      <div data-composer-card="">
-        <textarea defaultValue="" placeholder="描述你想要构建的内容" />
-        <ComposerConnectors LinkIcon={Icon} openConnections={() => {}} />
-      </div>,
-    )
+  it('guides natural-language skill discovery when no connection is active', async () => {
+    render(<ComposerConnectors LinkIcon={Icon} callConnections={async () => ({
+      ok: true, value: { schema_version: 1, items: [] },
+    })} />)
+    fireEvent.click(screen.getByRole('button', { name: '查看已生效的外部连接' }))
+    expect(await screen.findByText(/直接告诉小芯/u)).toBeTruthy()
+  })
+
+  it('keeps the resident live Harness textarea placeholder', () => {
+    render(<div data-composer-card="">
+      <textarea defaultValue="" placeholder="描述你想要构建的内容" />
+      <ComposerConnectors LinkIcon={Icon} callConnections={async () => ({})} />
+    </div>)
     expect(screen.getByPlaceholderText(COMPOSER_PLACEHOLDER)).toBeTruthy()
   })
 
-  it('routes only a newly completed native connection Tool event to the local authorization UI', async () => {
-    history.replaceState(null, '', '/chat/session-1')
-    let state: { nodes: any[] } = { nodes: [] }
-    const useSession = <T,>(selector: (value: typeof state) => T) => selector(state)
-    const view = render(<ConnectionIntentRouter useSession={useSession} />)
-
-    state = { nodes: [{
-      kind: 'tool-result',
-      seq: 11,
-      isError: false,
-      call: { name: 'run_code', argsRaw: '{}' },
-      subCalls: [{
-        kind: 'tool-result',
-        seq: 12,
-        isError: false,
-        call: { name: 'e_mate_connection_setup', argsRaw: '{"connection_id":"wechat"}' },
-        subCalls: [],
-      }],
-    }] }
-    view.rerender(<ConnectionIntentRouter useSession={useSession} />)
-
-    await waitFor(() => {
-      expect(`${location.pathname}${location.search}`).toBe('/settings?section=connections&connection=wechat')
-    })
-    expect(history.state.eMateSettingsReturn).toBe('/chat/session-1')
-  })
-
-  it('does not navigate from replayed or failed connection Tool evidence', () => {
-    history.replaceState(null, '', '/chat/session-1')
-    const state = { nodes: [{
-      kind: 'tool-result',
-      seq: 12,
-      isError: false,
-      call: { name: 'e_mate_connection_setup', argsRaw: '{"connection_id":"feishu"}' },
-      subCalls: [],
-    }, {
-      kind: 'tool-result',
-      seq: 13,
-      isError: true,
-      call: { name: 'e_mate_connection_setup', argsRaw: '{"connection_id":"wechat"}' },
-      subCalls: [],
-    }] }
-    render(<ConnectionIntentRouter useSession={selector => selector(state)} />)
-    expect(location.pathname).toBe('/chat/session-1')
-  })
-
   it('keeps the target blocker reason on a disabled textarea', () => {
-    render(
-      <div data-composer-card="">
-        <textarea disabled placeholder="当前模型不可用，请先选择模型" />
-        <ComposerConnectors LinkIcon={Icon} openConnections={() => {}} />
-      </div>,
-    )
+    render(<div data-composer-card="">
+      <textarea disabled placeholder="当前模型不可用，请先选择模型" />
+      <ComposerConnectors LinkIcon={Icon} callConnections={async () => ({})} />
+    </div>)
     expect(screen.getByPlaceholderText('当前模型不可用，请先选择模型')).toBeTruthy()
   })
 
-  it('keeps the target InputBar transport and source 2.0.5 geometry contract', () => {
+  it('uses the target input trigger and input-bar contracts without a parallel transport', async () => {
     const source = readFileSync('src/client/index.ts', 'utf8')
     const styles = readFileSync('src/client/home.module.css', 'utf8')
     expect(source).toContain("ctx.slots.inject('conversation.input.right'")
-    expect(source).toContain('routeToConnections')
+    expect(source).toContain("ctx.connection.rpc.call('/emate.mcpManage', 'active', {})")
+    expect(source).toContain("name: '功能'")
+    expect(source).toContain("label: '电脑操控'")
+    expect(source).toContain('<computer-use explicit="true">')
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource)\s*\(/u)
-    expect(styles).toContain("[data-composer-card]")
-    expect(styles).toContain('min-height: 112px')
-    expect(styles).toContain(":global([data-slot='conversation'] > div[data-phase])")
-    expect(styles).not.toMatch(/:global\(\[data-phase\]\)\s*\{/u)
-    expect(styles).toMatch(/\[data-input-mirror\]\) \{\s*min-height: 44px;/u)
-    expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*flex-direction: column;/u)
-    expect(styles).toContain("[data-slot='conversation.input.model'])")
-    expect(styles).toContain('flex: 1 1 auto')
-    expect(styles).toContain('background: transparent !important')
-    expect(styles).toContain('border-radius: 24px 24px 0 0 !important')
-    expect(styles).toContain('border-radius: 0 0 24px 24px')
-    expect(styles).toContain("background: url('/assets/e-mate/send.svg') center / contain no-repeat")
-    expect(styles).toContain('display: inline-flex !important')
-    expect(styles).toContain('border-radius: 10px !important')
-    expect(styles).toContain("button[aria-label='发送消息']::after")
+    await waitFor(() => expect(styles).toContain('[data-composer-card]'))
   })
 })

@@ -92,5 +92,8 @@ test('keeps the client contract on target draft mentions and an explicit safe al
   assert.match(client, /IconPaperclipOutline16/u)
   assert.doesNotMatch(client, />＋</u)
   assert.match(client, /name:\s*'conversation\.input\.left'/u)
+  assert.match(client, /name:\s*'文件'/u)
+  assert.match(client, /inputTriggers\.registerSource\(source\)/u)
+  assert.match(client, /e-mate:file-picker-requested/u)
   assert.doesNotMatch(client, /new WebSocket|createStore|ctx\.router|fetch\(/u)
 })

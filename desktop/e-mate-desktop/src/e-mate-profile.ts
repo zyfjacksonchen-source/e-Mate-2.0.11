@@ -14,23 +14,27 @@ import { createRequire } from 'node:module'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { unpackedAsarPath } from './packaged-runtime-path.ts'
+import { bundledPythonPath } from './vision-toolkit.ts'
 
 export const EMATE_PROFILE_NAME = 'e-mate'
 
-const VERSION = '2.0.8'
-const HARNESS_COMMIT = '12d68b6ca05fa538d98f70ed47786c44ca3a7225'
+const VERSION = '2.0.9'
+const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
 const PLUGIN_PACKAGES = [
+  '@e-mate/dsh-plugin-browser',
   '@e-mate/dsh-plugin-browser-panel',
+  '@e-mate/dsh-plugin-computer-use',
   '@e-mate/dsh-plugin-file-import',
-  '@e-mate/dsh-plugin-im',
+  '@e-mate/dsh-plugin-find-skill',
+  '@e-mate/dsh-plugin-mcp-manage',
   '@e-mate/dsh-plugin-memory-evolve',
   '@e-mate/dsh-plugin-office-skills',
+  '@e-mate/dsh-plugin-xin-assistant',
 ] as const
 
 const ECOSYSTEM_PLUGIN_PACKAGES = [
   { name: '@kelearns/dsh-navigation-bar', version: '0.2.1', entry: 'index.js', client: true, patchName: "'@kelearns/dsh-navigation-bar'" },
   { name: '@omdsh-dev/dsh-genui', version: '0.8.3', entry: 'lib/index.js', client: true, patchName: "'@omdsh-dev/dsh-genui'" },
-  { name: '@yuxianglin/dsh-bridge-browser', version: '0.0.1', entry: 'lib/index.js', client: false, patchName: "'@yuxianglin/dsh-bridge-browser'" },
   { name: 'dsh-at-file', version: '0.6.2', entry: 'lib/index.js', client: true, patchName: 'dsh-at-file' },
   { name: 'dsh-better-sidebar', version: '0.12.2', entry: 'lib/index.js', client: true, patchName: "'dsh-better-sidebar'" },
   { name: 'dsh-file-viewer', version: '0.1.0', entry: 'lib/index.js', client: true, patchName: "'dsh-file-viewer'" },
@@ -43,6 +47,9 @@ const PROFILE_PLUGIN_PACKAGES = [
   ...PLUGIN_PACKAGES,
   ...ECOSYSTEM_PLUGIN_PACKAGES.map(plugin => plugin.name),
 ]
+const MANAGED_PROFILE_PACKAGES = new Set<string>(PROFILE_PLUGIN_PACKAGES)
+const RETIRED_PROFILE_PACKAGES = new Set(['@e-mate/dsh-plugin-im', '@yuxianglin/dsh-bridge-browser'])
+const OWNED_PROFILE_PACKAGES = new Set([...MANAGED_PROFILE_PACKAGES, ...RETIRED_PROFILE_PACKAGES])
 
 const sourceRoot = unpackedAsarPath(
   fileURLToPath(new URL('../build/e-mate-profile/', import.meta.url)),
@@ -127,7 +134,6 @@ export function installEmateDesktopProfile(dshHome: string): string {
       atomicWrite(settings, `${current}${current.endsWith('\n') ? '' : '\n'}${DEFAULT_MODEL_SETTINGS}`, 0o600)
     }
   }
-
   cpSync(join(sourceRoot, 'plugins'), join(profile, 'plugins'), { recursive: true, force: true })
   atomicWrite(
     join(profile, 'cordis.patch.yml'),
@@ -135,6 +141,16 @@ export function installEmateDesktopProfile(dshHome: string): string {
   )
   atomicWrite(join(profile, 'cordis.yml'), '[]\n')
   installBrowserExtension(dshHome)
+  let previous: {
+    dependencies?: Record<string, unknown>
+    dsh?: { profile?: { bundles?: unknown[] } }
+  } = {}
+  try { previous = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8')) } catch {}
+  const externalDependencies = Object.entries(previous.dependencies ?? {})
+    .filter(([name, version]) => !OWNED_PROFILE_PACKAGES.has(name) && typeof version === 'string')
+  const externalBundles = (Array.isArray(previous.dsh?.profile?.bundles) ? previous.dsh.profile.bundles : [])
+    .filter((name): name is string => typeof name === 'string' && !OWNED_PROFILE_PACKAGES.has(name)
+      && name !== '@deepseek-ai/dsh-base' && name !== '@deepseek-ai/dsh-web-app')
   atomicWrite(join(profile, 'package.json'), `${JSON.stringify({
     name: 'dsh-profile-e-mate',
     private: true,
@@ -142,10 +158,11 @@ export function installEmateDesktopProfile(dshHome: string): string {
     dependencies: Object.fromEntries([
       ...PLUGIN_PACKAGES.map(name => [name, VERSION]),
       ...ECOSYSTEM_PLUGIN_PACKAGES.map(plugin => [plugin.name, plugin.version]),
+      ...externalDependencies,
     ]),
     dsh: {
       profile: {
-        bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...PROFILE_PLUGIN_PACKAGES],
+        bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...PROFILE_PLUGIN_PACKAGES, ...externalBundles],
       },
     },
   }, null, 2)}\n`)
@@ -169,13 +186,20 @@ export function installEmateDesktopProfile(dshHome: string): string {
     }
     if (manifest.dsh.client?.platform === 'web') continue
     const patchPath = join(target, manifest.dsh.bundle.patch)
-    const patch = readFileSync(patchPath, 'utf8')
+    let patch = readFileSync(patchPath, 'utf8')
     if (emptyPatch(patch)) continue
     const marker = `name: '${name}'`
     if (patch.split(marker).length !== 2) {
       throw new Error(`${name} bundle entry is not uniquely localizable`)
     }
-    atomicWrite(patchPath, patch.replace(marker, `name: './node_modules/${name}/${manifest.main}'`))
+    patch = patch.replace(marker, `name: './node_modules/${name}/${manifest.main}'`)
+    if (name === '@e-mate/dsh-plugin-xin-assistant') {
+      if (patch.split("pythonPath: ''").length !== 2) {
+        throw new Error(`${name} Python runtime config is not uniquely localizable`)
+      }
+      patch = patch.replace("pythonPath: ''", `pythonPath: ${JSON.stringify(bundledPythonPath())}`)
+    }
+    atomicWrite(patchPath, patch)
   }
 
   for (const expected of ECOSYSTEM_PLUGIN_PACKAGES) {

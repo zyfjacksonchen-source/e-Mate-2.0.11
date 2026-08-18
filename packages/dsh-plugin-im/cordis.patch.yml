@@ -1,6 +1,0 @@
-# Keep the exact upstream audit visible through the existing capability
-# registry. No upstream Host/client runtime is activated until the pinned
-# rc.5, license and project-binding gates are proven.
-- insert:
-    - id: emate-dsh-im
-      name: '@e-mate/dsh-plugin-im'

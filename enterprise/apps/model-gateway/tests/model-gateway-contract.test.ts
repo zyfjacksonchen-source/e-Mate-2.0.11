@@ -1419,6 +1419,7 @@ test('adapts Chat Completions through the accounted Responses stream', async () 
               content: [{ type: 'input_text', text: '你好' }],
             },
           ],
+          max_output_tokens: 32,
           stream: true,
           store: false,
         }),
@@ -1431,10 +1432,12 @@ test('adapts Chat Completions through the accounted Responses stream', async () 
       assert.equal(new URL(upstreamRequests[0]?.url ?? '').pathname, '/v1/chat/completions');
       const upstreamBody = (await upstreamRequests[0]?.json()) as {
         model: string;
+        max_tokens: number;
         messages: Array<{ role: string; content: string }>;
         stream_options: unknown;
       };
       assert.equal(upstreamBody.model, 'deepseek-chat');
+      assert.equal(upstreamBody.max_tokens, 32);
       assert.deepEqual(upstreamBody.messages, [
         { role: 'system', content: 'You are 小芯.' },
         { role: 'user', content: '你好' },

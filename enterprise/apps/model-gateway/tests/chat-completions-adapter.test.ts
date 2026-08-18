@@ -140,6 +140,7 @@ test('validates current Codex request controls instead of silently forwarding th
           'x-codex-turn-metadata': '{"request_kind":"turn"}',
         },
         prompt_cache_key: 'session-1',
+        max_output_tokens: 32,
         service_tier: 'fast',
         store: false,
         stream: true,
@@ -148,6 +149,35 @@ test('validates current Codex request controls instead of silently forwarding th
       4096,
       false
     )
+  );
+  const bounded = responsesToChatCompletionsRequest(
+    {
+      model: 'deepseek',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hi' }] }],
+      max_output_tokens: 32,
+      store: false,
+      stream: true,
+    },
+    'provider-model',
+    4096,
+    false
+  );
+  assert.equal((JSON.parse(bounded.body) as { max_tokens: number }).max_tokens, 32);
+  assert.throws(
+    () =>
+      responsesToChatCompletionsRequest(
+        {
+          model: 'deepseek',
+          input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hi' }] }],
+          max_output_tokens: 0,
+          store: false,
+          stream: true,
+        },
+        'provider-model',
+        4096,
+        false
+      ),
+    /maximum output tokens/
   );
   assert.throws(
     () =>

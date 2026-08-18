@@ -30,15 +30,15 @@ const typescriptSources = [
 ]
 for (const path of typescriptSources) readFileSync(resolve(root, path), 'utf8')
 
-if (manifest.version !== '2.0.8') throw new Error(`workspace version drifted: ${manifest.version}`)
-if (release.name !== '@e-mate/dsh' || release.version !== '2.0.8') {
+if (manifest.version !== '2.0.9') throw new Error(`workspace version drifted: ${manifest.version}`)
+if (release.name !== '@e-mate/dsh' || release.version !== '2.0.9') {
   throw new Error(`release identity drifted: ${release.name}@${release.version}`)
 }
-if (!release.description.startsWith('e-Mate 2.0.8')) throw new Error('release product name drifted')
+if (!release.description.startsWith('e-Mate 2.0.9')) throw new Error('release product name drifted')
 if (release.bin?.['e-mate'] !== 'lib/bin.js') throw new Error('TypeScript-built CLI entry drifted')
 if (!target.includes('Product name: `e-Mate`')) throw new Error('product name drifted')
 if (!target.includes('Repository: `zyfjacksonchen-source/e-Mate`')) throw new Error('repository identity drifted')
-if (!target.includes('12d68b6ca05fa538d98f70ed47786c44ca3a7225')) throw new Error('Harness source pin is missing')
+if (!target.includes('df78045a127e32cb5b942defba52c539590d1596')) throw new Error('Harness source pin is missing')
 if (!target.includes('564a6b6c1d43fb6831dd4a5cd8026e472f063311')) throw new Error('e-Mate shell source pin is missing')
 if (!target.includes('TypeScript/TSX')) throw new Error('TypeScript source contract is missing')
 if (!target.includes('019ff91c-47ca-7c11-93bd-863475181a18')) throw new Error('full e-Mate UI reference is missing')
@@ -49,7 +49,7 @@ if (/\b(?:WebSocket|EventSource)\b|\bfetch\s*\(|\/api\//.test(shellSource)) {
 }
 
 for (const [name, path, expected] of [
-  ['Harness', 'upstream/deepseek-harness', '12d68b6ca05fa538d98f70ed47786c44ca3a7225'],
+  ['Harness', 'upstream/deepseek-harness', 'df78045a127e32cb5b942defba52c539590d1596'],
   ['e-Mate shell', 'upstream/e-mate-2.0.5', '564a6b6c1d43fb6831dd4a5cd8026e472f063311'],
 ]) {
   try {
@@ -61,4 +61,4 @@ for (const [name, path, expected] of [
   }
 }
 
-console.log('target contract: e-Mate 2.0.8 pins verified')
+console.log('target contract: e-Mate 2.0.9 pins verified')

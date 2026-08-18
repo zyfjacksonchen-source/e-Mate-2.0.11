@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import { createServer } from 'node:http'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
-import { strToU8, zipSync } from 'fflate'
+import { strToU8, unzipSync, zipSync } from 'fflate'
 import { parse as parseYaml } from 'yaml'
 import { Context } from '../../../upstream/deepseek-harness/vendor/cordis/lib/index.js'
 import { LocalAttachmentStore } from '../../../upstream/deepseek-harness/packages/attachment/attachment-local/lib/index.js'
@@ -30,12 +30,6 @@ import { apply as applyGeneralWorkspace } from '../profile/plugins/general-works
 import * as settingsDocumentBoundary from '../profile/plugins/settings-document-boundary.js'
 import { apply as applyAgentOperations } from '../profile/plugins/agent-operations.js'
 import { apply as applyCapabilities, CAPABILITIES_CHANNEL } from '../profile/plugins/capabilities.js'
-import {
-  apply as applyConnections,
-  CONNECTIONS_CHANNEL,
-  createOfficialOAuthProvider,
-  createWeixinQrProvider,
-} from '../profile/plugins/connections.js'
 import { apply as applyQrGeneration } from '../profile/plugins/qr-generation.js'
 import {
   CredentialStore,
@@ -54,6 +48,7 @@ import { apply as applyShell } from '../profile/plugins/emate-shell/index.js'
 import {
   apply as applyIdentity,
   createEnterpriseIdentityProvider,
+  ENTERPRISE_KEEP_ALIVE_MS,
   IDENTITY_CHANNEL,
   MODEL_SESSION_REF,
 } from '../profile/plugins/identity/index.js'
@@ -72,6 +67,7 @@ import {
   releaseUpdateLock,
   validateReleaseManifest,
   validateReleaseSource,
+  validateLatestReleasePointer,
   validateStagedVersion,
   validateUpdateRequest,
 } from '../lib/update.js'
@@ -158,18 +154,6 @@ test('browser profile keeps settings storage but exposes no native document acti
   }
 })
 
-test('external connections refresh control keeps a 44px touch target', () => {
-  const source = readFileSync(new URL('../profile/plugins/emate-shell/src/client/connections.module.css', import.meta.url), 'utf8')
-  const iconButton = source.match(/\.iconButton\s*\{[^}]+\}/)?.[0] ?? ''
-  const coarse = source.match(/@media \(pointer: coarse\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
-  const coarseIconButton = coarse.match(/\.iconButton\s*\{[^}]+\}/)?.[0] ?? ''
-  assert.match(iconButton, /width:\s*32px/)
-  assert.match(iconButton, /min-width:\s*32px/)
-  assert.match(iconButton, /display:\s*grid/)
-  assert.match(coarse, /\.iconButton,[\s\S]*?min-height:\s*44px/)
-  assert.match(coarseIconButton, /width:\s*44px/)
-  assert.match(coarseIconButton, /min-width:\s*44px/)
-})
 
 test('version gates match the release contract', () => {
   assert.equal(nodeVersionSupported('22.18.0'), false)
@@ -189,32 +173,32 @@ test('version gates match the release contract', () => {
 test('online update target parsing rejects tags and downgrade ordering is SemVer-correct', () => {
   const requestId = '11111111-1111-4111-8111-111111111111'
   const sourceCommit = 'a'.repeat(40)
-  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.8/${sourceCommit}`
+  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.9/${sourceCommit}`
   const releaseSource = {
     schema_version: 1,
     product: 'e-Mate',
-    version: '2.0.8',
+    version: '2.0.9',
     package_name: '@e-mate/dsh',
     source_commit: sourceCommit,
     manifest_url: `${base}/release-manifest.json`,
-    tarball_url: `${base}/e-mate-dsh-2.0.8.tgz`,
+    tarball_url: `${base}/e-mate-dsh-2.0.9.tgz`,
   }
   const request = {
     schema_version: 1,
     request_id: requestId,
-    target: '2.0.8',
-    current_version: '2.0.8',
+    target: '2.0.9',
+    current_version: '2.0.9',
     release_source: releaseSource,
     previous_release_source: releaseSource,
   }
   assert.equal(normalizeUpdateTarget(), 'latest')
   assert.equal(normalizeUpdateTarget('latest'), 'latest')
-  assert.equal(normalizeUpdateTarget('2.0.8-rc.1'), '2.0.8-rc.1')
+  assert.equal(normalizeUpdateTarget('2.0.9-rc.1'), '2.0.9-rc.1')
   assert.throws(() => normalizeUpdateTarget('next'), /invalid update version/)
   assert.throws(() => normalizeUpdateTarget('2.0'), /invalid update version/)
-  assert.equal(validateStagedVersion('latest', '2.0.8'), '2.0.8')
-  assert.equal(validateStagedVersion('2.0.8', '2.0.8'), '2.0.8')
-  assert.throws(() => validateStagedVersion('2.0.8', '2.0.7'), /does not match requested version/)
+  assert.equal(validateStagedVersion('latest', '2.0.9'), '2.0.9')
+  assert.equal(validateStagedVersion('2.0.9', '2.0.9'), '2.0.9')
+  assert.throws(() => validateStagedVersion('2.0.9', '2.0.7'), /does not match requested version/)
   assert.throws(() => validateStagedVersion('latest', 'not-semver'), /version is invalid/)
   assert.equal(validateUpdateRequest(request, requestId), request)
   assert.throws(
@@ -230,7 +214,7 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   assert.throws(() => parsePackageIntegrity(JSON.stringify('sha256-invalid')), /integrity is invalid/)
   assert.equal(compareVersions('2.0.7', '2.0.7-rc.1'), 1)
   assert.equal(compareVersions('2.0.7-rc.1', '2.0.7-rc.2'), -1)
-  assert.equal(compareVersions('2.0.8', '2.0.7'), 1)
+  assert.equal(compareVersions('2.0.9', '2.0.7'), 1)
   assert.equal(globalPrefixForBinPath('/opt/e-mate/lib/node_modules/@e-mate/dsh/lib/bin.js', 'darwin'), '/opt/e-mate')
   assert.equal(
     globalPrefixForBinPath('C:\\Users\\e-mate\\AppData\\Roaming\\npm\\node_modules\\@e-mate\\dsh\\lib\\bin.js', 'win32'),
@@ -238,15 +222,34 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   )
   assert.throws(() => globalPrefixForBinPath('/repo/packages/dsh/lib/bin.js', 'darwin'), /global npm installation/u)
   assert.deepEqual(validateReleaseSource(releaseSource), releaseSource)
+  const desktopPrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.9/${sourceCommit}`
+  assert.deepEqual(validateLatestReleasePointer({
+    schema_version: 1,
+    version: '2.0.9',
+    source_commit: sourceCommit,
+    artifacts: {
+      darwin: {
+        url: `${desktopPrefix}/e-Mate-2.0.9-mac-universal.dmg`,
+        bytes: 1,
+        sha256: 'ab'.repeat(32),
+      },
+      win32: {
+        url: `${desktopPrefix}/e-Mate-2.0.9-win-x64-Setup.exe`,
+        bytes: 1,
+        sha256: 'cd'.repeat(32),
+      },
+    },
+  }), releaseSource)
+  assert.equal(compareVersions('2.0.9', '2.0.5'), 1)
   assert.throws(() => validateReleaseSource({ ...releaseSource, manifest_url: 'http://example.com/release-manifest.json' }), /URL is invalid/u)
   const sha512 = 'ab'.repeat(64)
   const artifactIntegrity = `sha512-${Buffer.from(sha512, 'hex').toString('base64')}`
   const artifact = {
-    name: '@e-mate/dsh', version: '2.0.8', kind: 'main', filename: 'e-mate-dsh-2.0.8.tgz',
+    name: '@e-mate/dsh', version: '2.0.9', kind: 'main', filename: 'e-mate-dsh-2.0.9.tgz',
     size: 207, sha256: 'cd'.repeat(32), sha512, integrity: artifactIntegrity,
   }
   const manifest = {
-    schema_version: 1, product: 'e-Mate', version: '2.0.8', source_commit: sourceCommit,
+    schema_version: 1, product: 'e-Mate', version: '2.0.9', source_commit: sourceCommit,
     packages: [artifact], download: { ...releaseSource, size: artifact.size, sha256: artifact.sha256, sha512, integrity: artifactIntegrity },
   }
   assert.equal(validateReleaseManifest(manifest, releaseSource).integrity, artifactIntegrity)
@@ -278,7 +281,7 @@ test('status projects only the latest bounded online-update receipt', async () =
       product: 'e-Mate',
       request_id: first,
       status: 'failed-before-change',
-      requested_version: '2.0.8',
+      requested_version: '2.0.9',
       previous_version: '2.0.7',
       error: 'must not reach status output',
       finished_at: '2026-08-15T01:00:00.000Z',
@@ -493,23 +496,39 @@ test('managed profile installation is idempotent', () => {
       '@e-mate/dsh-plugin-better-sidebar',
       '@e-mate/dsh-plugin-browser',
       '@e-mate/dsh-plugin-browser-panel',
+      '@e-mate/dsh-plugin-computer-use',
       '@e-mate/dsh-plugin-file-import',
+      '@e-mate/dsh-plugin-find-skill',
       '@e-mate/dsh-plugin-genui',
-      '@e-mate/dsh-plugin-im',
+      '@e-mate/dsh-plugin-mcp-manage',
       '@e-mate/dsh-plugin-memory-evolve',
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-search-mcp',
       '@e-mate/dsh-plugin-subagent',
       '@e-mate/dsh-plugin-vision-toolkit',
+      '@e-mate/dsh-plugin-xin-assistant',
     ]
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
     ])
-    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.8'])))
+    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.9'])))
     const patch = readFileSync(join(first.profile, 'cordis.patch.yml'), 'utf8')
     installProfile(dshHome)
     assert.equal(readFileSync(join(first.profile, 'package.json'), 'utf8'), manifest)
     assert.equal(readFileSync(join(first.profile, 'cordis.patch.yml'), 'utf8'), patch)
+    profileManifest.dependencies['@e-mate/dsh-plugin-im'] = '2.0.8'
+    profileManifest.dependencies['@yuxianglin/dsh-bridge-browser'] = '0.0.1'
+    profileManifest.dsh.profile.bundles.push(
+      '@e-mate/dsh-plugin-im',
+      '@yuxianglin/dsh-bridge-browser',
+    )
+    writeFileSync(join(first.profile, 'package.json'), `${JSON.stringify(profileManifest, null, 2)}\n`)
+    installProfile(dshHome)
+    const repairedManifest = JSON.parse(readFileSync(join(first.profile, 'package.json'), 'utf8'))
+    assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-im'], undefined)
+    assert.equal(repairedManifest.dependencies['@yuxianglin/dsh-bridge-browser'], undefined)
+    assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-im'), false)
+    assert.equal(repairedManifest.dsh.profile.bundles.includes('@yuxianglin/dsh-bridge-browser'), false)
     const patchRows = parseYaml(patch).flatMap(operation => operation.insert ?? (operation.id ? [operation] : []))
     const patchById = new Map(patchRows.map(row => [row.id, row]))
     assert.deepEqual(patchById.get('credentials'), {
@@ -518,11 +537,7 @@ test('managed profile installation is idempotent', () => {
       disabled: true,
     })
     assert.equal(patchById.get('emate-credentials-os').name, './plugins/credentials-os.js')
-    assert.deepEqual(patchById.get('emate-connections'), {
-      id: 'emate-connections',
-      name: './plugins/connections.js',
-      inject: ['credentials', 'connection', 'emateCapabilities', 'tools', 'systemPrompt'],
-    })
+    assert.equal(patchById.has('emate-connections'), false)
     assert.deepEqual(patchById.get('emate-qr-generation'), {
       id: 'emate-qr-generation',
       name: './plugins/qr-generation.js',
@@ -580,7 +595,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(patch, /id: emate-general-workspace[\s\S]*\.\/plugins\/general-workspace\.js[\s\S]*inject: \[workspaceRegistry\]/)
     assert.match(patch, /id: emate-identity[\s\S]*\.\/plugins\/identity\/index\.js/)
     assert.match(patch, /id: emate-capabilities[\s\S]*\.\/plugins\/capabilities\.js/)
-    assert.match(patch, /id: emate-connections[\s\S]*\.\/plugins\/connections\.js[\s\S]*inject: \[credentials, connection, emateCapabilities, tools, systemPrompt\]/)
+    assert.doesNotMatch(patch, /emate-connections|plugins\/connections\.js/)
     assert.match(patch, /id: emate-qr-generation[\s\S]*\.\/plugins\/qr-generation\.js[\s\S]*inject: \[tools, jobs, attachments\]/)
     assert.match(patch, /id: emate-agent-operations[\s\S]*\.\/plugins\/agent-operations\.js/)
     assert.match(patch, /id: emate-skill-hub-agent[\s\S]*\.\/plugins\/skill-hub-agent\.js/)
@@ -594,13 +609,6 @@ test('managed profile installation is idempotent', () => {
     assert.ok(readFileSync(join(first.profile, 'plugins', 'capabilities.js')).byteLength > 0)
     assert.ok(readFileSync(join(first.profile, 'plugins', 'general-workspace.js')).byteLength > 0)
     assert.ok(readFileSync(join(first.profile, 'plugins', 'settings-document-boundary.js')).byteLength > 0)
-    const connections = readFileSync(join(first.profile, 'plugins', 'connections.js'), 'utf8')
-    assert.match(connections, /\/emate\.connections/)
-    assert.match(connections, /credentials\.describe/)
-    assert.match(connections, /emateCapabilities/)
-    assert.match(connections, /redirect:\s*["']error["']/)
-    assert.doesNotMatch(connections, /from ["']qrcode["']/)
-    assert.doesNotMatch(connections, /\b(?:WebSocket|EventSource)\b/)
     const qrGeneration = readFileSync(join(first.profile, 'plugins', 'qr-generation.js'), 'utf8')
     assert.match(qrGeneration, /e_mate_qr_generate/)
     assert.match(qrGeneration, /ctx\.jobs\.start/)
@@ -615,7 +623,7 @@ test('managed profile installation is idempotent', () => {
       const pluginRoot = join(first.profile, 'node_modules', ...name.split('/'))
       const pluginManifest = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'))
       assert.equal(pluginManifest.name, name)
-      assert.equal(pluginManifest.version, '2.0.8')
+      assert.equal(pluginManifest.version, '2.0.9')
       assert.ok(readFileSync(join(pluginRoot, pluginManifest.main)).byteLength > 0)
       const pluginPatch = readFileSync(join(pluginRoot, pluginManifest.dsh.bundle.patch), 'utf8')
       assert.ok(pluginPatch.length >= 2)
@@ -679,6 +687,7 @@ test('managed profile installation is idempotent', () => {
       '@deepseek-ai/dsh-client-connection',
       '@deepseek-ai/dsh-client-ui-layout',
       '@deepseek-ai/dsh-client-ui-conversation',
+      '@deepseek-ai/dsh-client-ui-input-trigger',
       '@deepseek-ai/dsh-client-ui-attachment',
       '@deepseek-ai/dsh-client-locale',
       '@deepseek-ai/dsh-session-log-export',
@@ -711,10 +720,9 @@ test('managed profile installation is idempotent', () => {
     assert.match(client, /data-emate-capabilities/)
     assert.match(client, /\/emate\.skillHub/)
     assert.match(client, /\/emate\.capabilities/)
-    assert.match(client, /\/emate\.connections/)
-    assert.match(client, /ctx\.connection\.api\.credentials\.set/)
-    assert.match(client, /ctx\.connection\.api\.credentials\.unset/)
+    assert.match(client, /\/emate\.mcpManage/)
     assert.match(client, /外部连接/)
+    assert.match(client, /电脑操控/)
     assert.match(client, /catalog\.search/)
     assert.match(client, /skills\.publish/)
     assert.match(client, /ctx\.connection\.api\.skills\.list/)
@@ -730,9 +738,9 @@ test('managed profile installation is idempotent', () => {
     assert.match(capabilities, /社区 Skill 暂时不可用；内置能力仍可正常使用。/)
     assert.doesNotMatch(capabilities, /capability\.(?:id|title)\s*===|switch\s*\(\s*capability\.(?:id|title)/)
     assert.doesNotMatch(capabilities, /\b(?:fetch|WebSocket|EventSource)\s*\(/)
-    const connectionsUi = readFileSync(new URL('../profile/plugins/emate-shell/src/client/connections.tsx', import.meta.url), 'utf8')
-    assert.match(connectionsUi, /本机 Keychain 或 CurrentUser DPAPI/)
-    assert.match(connectionsUi, /再次点击“确认清除”/)
+    const connectionsUi = readFileSync(new URL('../profile/plugins/emate-shell/src/client/composer-connectors.tsx', import.meta.url), 'utf8')
+    assert.match(connectionsUi, /已生效的外部连接/)
+    assert.match(connectionsUi, /查找并安装对应 Skill/)
     assert.doesNotMatch(connectionsUi, /\b(?:fetch|WebSocket|EventSource)\s*\(/)
     const sessionRoute = readFileSync(new URL('../profile/plugins/emate-shell/src/client/session-route.tsx', import.meta.url), 'utf8')
     assert.match(sessionRoute, /state\.phase !== ['"]ready['"]/) // waits for the target list baseline
@@ -1033,16 +1041,18 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-search-mcp',
       '@e-mate/dsh-plugin-browser-panel',
-      '@e-mate/dsh-plugin-im',
       '@e-mate/dsh-plugin-vision-toolkit',
+      '@e-mate/dsh-plugin-xin-assistant',
     ])
     const packages = [
       '@e-mate/dsh-plugin-better-sidebar',
       '@e-mate/dsh-plugin-browser',
       '@e-mate/dsh-plugin-browser-panel',
+      '@e-mate/dsh-plugin-computer-use',
       '@e-mate/dsh-plugin-file-import',
+      '@e-mate/dsh-plugin-find-skill',
       '@e-mate/dsh-plugin-genui',
-      '@e-mate/dsh-plugin-im',
+      '@e-mate/dsh-plugin-mcp-manage',
       '@e-mate/dsh-plugin-memory-evolve',
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-search-mcp',
@@ -1103,350 +1113,6 @@ test('capability registry projects only registered plugin metadata and actions',
   assert.deepEqual((await handler('list', {})).value.items, [])
 })
 
-test('external connection catalog uses target credentials and keeps unavailable adapters inert', async () => {
-  const temporary = mkdtempSync(join(tmpdir(), 'e-mate-connections-'))
-  const paths = installProfile(join(temporary, 'dsh-home'))
-  let handler
-  let promptSection
-  let oauthRoute
-  const capabilities = []
-  const tools = new Map()
-  const credentialWrites = []
-  const configured = new Set([
-    'EMATE_FEISHU_APP_ID',
-    'EMATE_DINGTALK_CLIENT_ID',
-    'EMATE_DINGTALK_CLIENT_SECRET',
-  ])
-  await applyConnections({
-    get: service => service === 'emateCapabilities'
-      ? { register: definition => { capabilities.push(definition); return () => {} } }
-      : undefined,
-    credentials: {
-      describe: async ref => configured.has(ref)
-        ? { configured: true, source: 'keychain', writable: true }
-        : { configured: false, writable: true },
-      resolve: async () => undefined,
-      set: async (...args) => { credentialWrites.push(['set', ...args]) },
-      unset: async (...args) => { credentialWrites.push(['unset', ...args]) },
-    },
-    tools: { register: tool => { tools.set(tool.name, tool); return () => tools.delete(tool.name) } },
-    systemPrompt: { section: value => { promptSection = value } },
-    webServer: {
-      host: '127.0.0.1',
-      port: 3080,
-      register: route => { oauthRoute = route; return () => {} },
-    },
-    connection: { rpc: { handle: (channel, callback, options) => {
-      assert.equal(channel, CONNECTIONS_CHANNEL)
-      assert.deepEqual(options, { authority: 'loopback' })
-      handler = callback
-      return () => {}
-    } } },
-    effect: effect => effect(),
-  }, { bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json') })
-
-  assert.deepEqual(capabilities.map(item => item.id), ['feishu', 'tencent-docs', 'wechat', 'dingtalk'])
-  assert.ok(capabilities.every(item => item.actions.length === 0))
-  assert.equal(promptSection.name, 'emate:connections')
-  assert.match(promptSection.text, /e_mate_connection_setup/u)
-  assert.match(promptSection.text, /Never ask the user to send App IDs, secrets, tokens/u)
-  assert.match(promptSection.text, /never use a browser Tool/u)
-  assert.equal(oauthRoute.kind, 'exact')
-  assert.equal(oauthRoute.path, '/emate.oauth.tencent-docs/callback')
-  const routeResponse = () => {
-    const output = { status: null, headers: null, body: null }
-    return {
-      output,
-      response: {
-        writeHead: (status, headers) => { output.status = status; output.headers = headers },
-        end: body => { output.body = body },
-      },
-    }
-  }
-  const wrongHost = routeResponse()
-  await oauthRoute.handler({ method: 'GET', headers: { host: 'attacker.example' }, url: oauthRoute.path }, wrongHost.response)
-  assert.equal(wrongHost.output.status, 403)
-  const wrongMethod = routeResponse()
-  await oauthRoute.handler({ method: 'POST', headers: { host: '127.0.0.1:3080' }, url: oauthRoute.path }, wrongMethod.response)
-  assert.equal(wrongMethod.output.status, 405)
-  assert.equal(wrongMethod.output.headers.allow, 'GET')
-  assert.deepEqual([...tools.keys()], ['e_mate_connection_setup'])
-  const setup = tools.get('e_mate_connection_setup')
-  const setupResult = await setup.execute({ connection_id: 'wechat' }, {})
-  assert.deepEqual(setupResult, { connection_id: 'wechat', state: 'authorization-ui-requested' })
-  assert.match(setup.output.render({}, setupResult)[0].text, /凭据只在该界面提交/u)
-  await assert.rejects(setup.execute({ connection_id: 'unknown' }, {}), /must be one of/iu)
-  await assert.rejects(setup.execute({ connection_id: 'wechat', token: 'never-accept' }, {}), /requires one supported connection_id/iu)
-  assert.deepEqual(credentialWrites, [])
-  const response = await handler('catalog', {})
-  assert.equal(response.ok, true)
-  assert.equal(response.value.schema_version, 1)
-  const byId = new Map(response.value.items.map(item => [item.id, item]))
-  assert.equal(byId.get('feishu').state, 'setup-required')
-  assert.equal(byId.get('dingtalk').state, 'blocked')
-  assert.equal(byId.get('wechat').fields.length, 0)
-  assert.equal(byId.get('wechat').qr_supported, true)
-  assert.equal(byId.get('feishu').oauth_supported, true)
-  assert.equal(byId.get('tencent-docs').oauth_supported, true)
-  assert.equal(byId.get('tencent-docs').fields.length, 0)
-  assert.equal(JSON.stringify(response).includes('secret-value'), false)
-  assert.deepEqual(await capabilities.at(-1).status(), {
-    state: 'blocked',
-    detail: '凭据已保存在本机；官方 Stream 适配完成真实连接验收前不会启用。',
-    action_ids: [],
-  })
-  assert.equal((await handler('oauth.begin', { connection_id: 'feishu' })).error.code, 'bad-request')
-  assert.equal((await handler('save-config', {})).error.code, 'bad-request')
-  rmSync(temporary, { recursive: true, force: true })
-})
-
-test('official connection OAuth uses Feishu device grant and Tencent PKCE with all bearer material Host-only', async () => {
-  let clock = 1_700_000_000_000
-  const stored = new Map([
-    ['EMATE_FEISHU_APP_ID', 'cli_a12345678'],
-    ['EMATE_FEISHU_APP_SECRET', 'host-only-feishu-secret'],
-  ])
-  const requests = []
-  const tokenPolls = new Map()
-  let tencentChallenge
-  const credentials = {
-    resolve: async ref => stored.has(ref) ? { value: stored.get(ref), source: 'keychain' } : undefined,
-    set: async (ref, value) => { stored.set(ref, value) },
-    unset: async ref => stored.delete(ref),
-  }
-  const response = (value, status = 200) => new Response(JSON.stringify(value), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })
-  const provider = createOfficialOAuthProvider(credentials, {
-    now: () => clock,
-    tencentRedirectUri: 'http://127.0.0.1:3080/emate.oauth.tencent-docs/callback',
-    encodeQr: async value => {
-      assert.match(value, /^https:\/\/(?:accounts\.feishu\.cn|docs\.qq\.com)\//u)
-      return 'data:image/png;base64,AA=='
-    },
-    fetchImpl: async (url, init = {}) => {
-      const target = String(url)
-      const headers = new Headers(init.headers)
-      const body = typeof init.body === 'string' ? init.body : init.body?.toString()
-      requests.push({ target, method: init.method, headers, body, redirect: init.redirect })
-      if (target === 'https://accounts.feishu.cn/oauth/v1/device_authorization') {
-        assert.equal(headers.get('authorization'), `Basic ${Buffer.from('cli_a12345678:host-only-feishu-secret').toString('base64')}`)
-        assert.equal(new URLSearchParams(body).get('scope'), 'offline_access')
-        return response({
-          device_code: 'host-only-feishu-device-code',
-          user_code: 'FEI-SHU1',
-          verification_uri_complete: 'https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=f1&user_code=FEI-SHU1',
-          expires_in: 300,
-          interval: 5,
-        })
-      }
-      if (target === 'https://open.feishu.cn/open-apis/authen/v2/oauth/token') {
-        const count = tokenPolls.get(target) ?? 0
-        tokenPolls.set(target, count + 1)
-        if (count === 0) return response({ error: 'authorization_pending' }, 400)
-        return response({
-          access_token: 'host-only-feishu-access',
-          refresh_token: 'host-only-feishu-refresh',
-          token_type: 'Bearer',
-          expires_in: 7_200,
-          refresh_token_expires_in: 604_800,
-          scope: 'offline_access',
-        })
-      }
-      if (target === 'https://docs.qq.com/openapi/mcp/.well-known/oauth-protected-resource') return response({
-        resource: 'https://docs.qq.com/openapi/mcp',
-        authorization_servers: ['https://docs.qq.com'],
-        scopes_supported: ['docs:read', 'docs:write', 'docs:manage'],
-        bearer_methods_supported: ['header'],
-      })
-      if (target === 'https://docs.qq.com/.well-known/oauth-authorization-server') return response({
-        issuer: 'https://docs.qq.com',
-        authorization_endpoint: 'https://docs.qq.com/scenario/open-claw.html?authType=2',
-        token_endpoint: 'https://docs.qq.com/openapi/mcp/oauth/token',
-        registration_endpoint: 'https://docs.qq.com/openapi/mcp/oauth/register',
-        device_authorization_endpoint: 'https://docs.qq.com/openapi/mcp/oauth/device/code',
-        scopes_supported: ['docs:read', 'docs:write', 'docs:manage'],
-        response_types_supported: ['code'],
-        grant_types_supported: ['authorization_code', 'refresh_token', 'urn:ietf:params:oauth:grant-type:device_code'],
-        token_endpoint_auth_methods_supported: ['none'],
-        code_challenge_methods_supported: ['S256'],
-      })
-      if (target === 'https://docs.qq.com/openapi/mcp/oauth/register') {
-        const registration = JSON.parse(body)
-        assert.equal(registration.application_type, 'native')
-        assert.deepEqual(registration.redirect_uris, ['http://127.0.0.1:3080/emate.oauth.tencent-docs/callback'])
-        assert.deepEqual(registration.grant_types, ['authorization_code', 'refresh_token'])
-        assert.deepEqual(registration.response_types, ['code'])
-        assert.equal(registration.token_endpoint_auth_method, 'none')
-        assert.equal(registration.scope, 'docs:read docs:write')
-        return response({ client_id: 'tencent-public-client', token_endpoint_auth_method: 'none' })
-      }
-      if (target === 'https://docs.qq.com/openapi/mcp/oauth/token') {
-        const form = new URLSearchParams(body)
-        assert.equal(form.get('grant_type'), 'authorization_code')
-        assert.equal(form.get('code'), 'host-only-tencent-code')
-        assert.equal(form.get('client_id'), 'tencent-public-client')
-        assert.equal(form.get('redirect_uri'), 'http://127.0.0.1:3080/emate.oauth.tencent-docs/callback')
-        assert.equal(form.get('resource'), 'https://docs.qq.com/openapi/mcp')
-        const verifier = form.get('code_verifier')
-        assert.match(verifier, /^[A-Za-z0-9_-]{43}$/u)
-        assert.equal(createHash('sha256').update(verifier).digest('base64url'), tencentChallenge)
-        return response({
-          access_token: 'host-only-tencent-access',
-          refresh_token: 'host-only-tencent-refresh',
-          token_type: 'Bearer',
-          expires_in: 3_600,
-          scope: 'docs:read docs:write',
-        })
-      }
-      throw new Error(`unexpected OAuth endpoint ${target}`)
-    },
-  })
-
-  const feishu = await provider.begin('feishu')
-  assert.equal(feishu.state, 'pending')
-  assert.match(feishu.authorization_url, /^https:\/\/accounts\.feishu\.cn\/oauth\/v1\/device\/verify\?/u)
-  assert.doesNotMatch(JSON.stringify(feishu), /host-only-(?:feishu|tencent)/u)
-  clock += 5_000
-  assert.equal((await provider.poll('feishu', feishu.attempt_id)).state, 'pending')
-  clock += 5_000
-  const authorizedFeishu = await provider.poll('feishu', feishu.attempt_id)
-  assert.equal(authorizedFeishu.state, 'authorized')
-  assert.equal(stored.get('EMATE_FEISHU_USER_ACCESS_TOKEN'), 'host-only-feishu-access')
-  assert.equal(stored.get('EMATE_FEISHU_REFRESH_TOKEN'), 'host-only-feishu-refresh')
-  assert.equal(authorizedFeishu.user_code, undefined)
-  assert.equal(authorizedFeishu.qr_code_data_url, undefined)
-  assert.doesNotMatch(JSON.stringify(authorizedFeishu), /host-only|authorization_url/u)
-
-  const tencent = await provider.begin('tencent-docs')
-  assert.equal(tencent.state, 'pending')
-  assert.equal(stored.get('EMATE_TENCENT_DOCS_OAUTH_CLIENT_ID'), 'tencent-public-client')
-  assert.equal(stored.get('EMATE_TENCENT_DOCS_OAUTH_REDIRECT_URI'), 'http://127.0.0.1:3080/emate.oauth.tencent-docs/callback')
-  const tencentAuthorization = new URL(tencent.authorization_url)
-  assert.equal(tencentAuthorization.origin, 'https://docs.qq.com')
-  assert.equal(tencentAuthorization.pathname, '/scenario/open-claw.html')
-  assert.equal(tencentAuthorization.searchParams.get('response_type'), 'code')
-  assert.equal(tencentAuthorization.searchParams.get('code_challenge_method'), 'S256')
-  assert.equal(tencentAuthorization.searchParams.get('redirect_uri'), 'http://127.0.0.1:3080/emate.oauth.tencent-docs/callback')
-  assert.match(tencentAuthorization.searchParams.get('state'), /^[A-Za-z0-9_-]{43}$/u)
-  tencentChallenge = tencentAuthorization.searchParams.get('code_challenge')
-  await assert.rejects(provider.poll('feishu', tencent.attempt_id), /connection mismatch/u)
-  assert.equal((await provider.poll('tencent-docs', tencent.attempt_id)).state, 'pending')
-  const authorizedTencent = await provider.completeTencentCallback(new URL(
-    `http://127.0.0.1:3080/emate.oauth.tencent-docs/callback?code=host-only-tencent-code&state=${tencentAuthorization.searchParams.get('state')}`,
-  ))
-  assert.equal(authorizedTencent.state, 'authorized')
-  assert.equal(stored.get('EMATE_TENCENT_DOCS_TOKEN'), 'host-only-tencent-access')
-  assert.equal(stored.get('EMATE_TENCENT_DOCS_REFRESH_TOKEN'), 'host-only-tencent-refresh')
-  assert.equal(authorizedTencent.authorization_url, undefined)
-  assert.equal(authorizedTencent.user_code, undefined)
-  assert.ok(requests.every(request => request.redirect === 'error'))
-  assert.equal(requests.some(request => /state=/u.test(request.body ?? '')), false)
-
-  const rejected = createOfficialOAuthProvider(credentials, {
-    fetchImpl: async () => response({
-      device_code: 'must-not-leak',
-      user_code: 'BAD-CODE',
-      verification_uri_complete: 'https://attacker.example/oauth/v1/device/verify?code=BAD-CODE',
-      expires_in: 300,
-      interval: 5,
-    }),
-    encodeQr: async () => { throw new Error('untrusted URL reached encoder') },
-  })
-  await assert.rejects(rejected.begin('feishu'), /untrusted OAuth verification URL/u)
-
-  let failedClock = 1_700_000_000_000
-  const failed = createOfficialOAuthProvider(credentials, {
-    now: () => failedClock,
-    encodeQr: async () => 'data:image/png;base64,AA==',
-    fetchImpl: async url => String(url) === 'https://accounts.feishu.cn/oauth/v1/device_authorization'
-      ? response({
-          device_code: 'host-only-failed-device-code',
-          user_code: 'FAIL-CODE',
-          verification_uri: 'https://accounts.feishu.cn/oauth/v1/device/verify',
-          expires_in: 300,
-          interval: 5,
-        })
-      : response({ error: 'invalid_client' }, 400),
-  })
-  const failedAttempt = await failed.begin('feishu')
-  failedClock += 5_000
-  const terminalFailure = await failed.poll('feishu', failedAttempt.attempt_id)
-  assert.equal(terminalFailure.state, 'failed')
-  assert.equal(terminalFailure.authorization_url, undefined)
-  assert.equal(terminalFailure.user_code, undefined)
-})
-
-test('Weixin QR authorization keeps the raw token Host-only and stores confirmed credentials', async () => {
-  const stored = new Map()
-  const credentials = {
-    resolve: async ref => stored.has(ref) ? { value: stored.get(ref), source: 'keychain' } : undefined,
-    set: async (ref, value) => { stored.set(ref, value) },
-    unset: async ref => stored.delete(ref),
-  }
-  const requests = []
-  const responses = [
-    { qrcode: 'host-only-qr-token', qrcode_img_content: 'https://liteapp.weixin.qq.com/q/e-mate-207' },
-    {
-      status: 'confirmed',
-      bot_token: 'host-only-bot-token',
-      ilink_bot_id: 'host-only-account',
-      ilink_user_id: 'host-only-owner',
-      baseurl: 'https://ilinkai.weixin.qq.com/api',
-    },
-  ]
-  const provider = createWeixinQrProvider(credentials, {
-    fetchImpl: async (url, init) => {
-      requests.push({ url: String(url), init })
-      return new Response(JSON.stringify(responses.shift()), { status: 200 })
-    },
-    encodeQr: async value => {
-      assert.equal(value, 'https://liteapp.weixin.qq.com/q/e-mate-207')
-      return 'data:image/png;base64,AA=='
-    },
-    now: () => 1_700_000_000_000,
-  })
-
-  const begun = await provider.begin()
-  assert.equal(begun.state, 'pending')
-  assert.equal(begun.qr_code_data_url, 'data:image/png;base64,AA==')
-  assert.doesNotMatch(JSON.stringify(begun), /host-only-qr-token/u)
-  const completed = await provider.poll(begun.attempt_id)
-  assert.equal(completed.state, 'authorized')
-  assert.doesNotMatch(JSON.stringify(completed), /host-only-(?:qr|bot|account|owner)/u)
-  assert.equal(stored.get('EMATE_WECHAT_BOT_TOKEN'), 'host-only-bot-token')
-  assert.equal(stored.get('EMATE_WECHAT_BASE_URL'), 'https://ilinkai.weixin.qq.com/api/')
-  assert.equal(requests[0].init.redirect, 'error')
-  assert.match(requests[1].url, /get_qrcode_status\?qrcode=host-only-qr-token$/u)
-
-  const rejected = createWeixinQrProvider(credentials, {
-    fetchImpl: async () => new Response(JSON.stringify({
-      qrcode: 'must-not-be-used',
-      qrcode_img_content: 'https://attacker.example/qr',
-    }), { status: 200 }),
-    encodeQr: async () => { throw new Error('untrusted URL reached encoder') },
-  })
-  await assert.rejects(rejected.begin(), /untrusted Weixin URL/u)
-
-  const redirectedRequests = []
-  const redirectedResponses = [
-    { qrcode: 'redirect-token', qrcode_img_content: 'https://liteapp.weixin.qq.com/q/redirect' },
-    { status: 'scaned_but_redirect', redirect_host: 'https://region.weixin.qq.com/ilink/' },
-    { status: 'wait' },
-  ]
-  const redirected = createWeixinQrProvider(credentials, {
-    fetchImpl: async url => {
-      redirectedRequests.push(String(url))
-      return new Response(JSON.stringify(redirectedResponses.shift()), { status: 200 })
-    },
-    encodeQr: async () => 'data:image/png;base64,AA==',
-  })
-  const redirectedAttempt = await redirected.begin()
-  await redirected.poll(redirectedAttempt.attempt_id)
-  await redirected.poll(redirectedAttempt.attempt_id)
-  assert.match(redirectedRequests[2], /^https:\/\/region\.weixin\.qq\.com\/ilink\/ilink\/bot\/get_qrcode_status/u)
-})
 
 test('Agent QR generation uses the target Tool, Job, Attachment, and image renderer path', async () => {
   const temporary = mkdtempSync(join(tmpdir(), 'e-mate-qr-generation-'))
@@ -1646,7 +1312,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json'),
       rootUrl: 'https://model.example/e-mate/model-api/v1',
     })
-    assert.deepEqual([...tools.keys()], ['imagegen'])
+    assert.deepEqual([...tools.keys()], ['imagegen', 'image_pack'])
     assert.deepEqual(controllers, ['emate-image'])
     assert.equal(typeof preStep, 'function')
     assert.equal(capabilities.length, 1)
@@ -1659,7 +1325,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const agent = {
       id: 'image-session',
       session: {
-        header: { id: 'image-session' },
+        header: { id: 'image-session', cwd: temporary },
         deriveMessages: () => sessionMessages,
       },
     }
@@ -1692,11 +1358,12 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       kind: 'plugin', plugin: '@e-mate/dsh-image-generation', form: 'catalog',
     })
     assert.match(admitted.messages[1].content[0].text, new RegExp(selected.attachmentId))
-    assert.match(admitted.messages[1].content[0].text, /do not ask the user to upload it again/u)
+    assert.match(admitted.messages[1].content[0].text, /never ask the user to upload an image already listed here/u)
 
     const textOnly = { ...userUpload, id: 'text-only-message', content: [{ type: 'text', text: '只生成一张新图。' }] }
     const unchanged = await preStep({ messages: [textOnly] }, async () => ({ kind: 'enter', messages: [textOnly] }))
     assert.deepEqual(unchanged.messages, [textOnly])
+    sessionMessages.push(textOnly)
 
     const generated = await imagegen.execute({ prompt: 'Generate one verified image.' }, execution())
     assert.equal(generated.images.length, 1)
@@ -1730,6 +1397,29 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       }],
     })
 
+    const modifyAbove = {
+      id: 'modify-above-message', role: 'user', source: { kind: 'user' },
+      content: [{ type: 'text', text: '就直接修改上图，不要让我重新上传。' }],
+    }
+    const resumed = await preStep({ messages: [...sessionMessages, modifyAbove] }, async () => ({
+      kind: 'enter', messages: [...sessionMessages, modifyAbove],
+    }))
+    assert.match(resumed.messages.at(-1).content[0].text, new RegExp(attachmentId))
+    assert.match(resumed.messages.at(-1).content[0].text, /normally the newest image/u)
+    sessionMessages.push(modifyAbove)
+
+    const implicitEdit = await imagegen.execute({ prompt: 'Retouch the referenced image only.' }, execution())
+    assert.equal(implicitEdit.images.length, 1)
+    assert.deepEqual(requests.at(-1), {
+      path: '/e-mate/model-api/v1/images/edits',
+      body: {
+        model: 'gpt-image-2-pro',
+        prompt: 'Retouch the referenced image only.',
+        imageFields: ['image'],
+        imageBytes: [inputBytes.byteLength],
+      },
+    })
+
     const edited = await imagegen.execute({
       prompt: 'Retouch only the supplied image.',
       image_url: [attachmentId],
@@ -1745,18 +1435,48 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       },
     })
 
+    const second = await context.attachments.saveImage({
+      data: readFileSync(new URL('../../../upstream/deepseek-harness/examples/acp-agent/tests/snapshots/read-image/workspace/red.png', import.meta.url)),
+      mediaType: 'image/png',
+      name: 'red.png',
+    })
+    sessionMessages.push({
+      id: 'second-tool-result', source: { kind: 'tool', callId: 'image-call-pack' },
+      content: [{
+        type: 'tool-result', toolCallId: 'image-call-pack', isError: false,
+        content: [{ type: 'image', attachment: second }],
+      }],
+    })
+    const imagePack = tools.get('image_pack')
+    const packed = await imagePack.execute({ image_url: [attachmentId, second.attachmentId] }, execution())
+    assert.equal(packed.image_count, 2)
+    assert.match(packed.relative_path, /^\.e-mate\/images\/e-Mate-images-[0-9a-f]{12}\.zip$/u)
+    const archive = unzipSync(readFileSync(join(temporary, packed.relative_path)))
+    assert.deepEqual(Object.keys(archive), ['image-001.png', 'image-002.png'])
+    assert.equal(Buffer.from(archive['image-001.png']).equals(inputBytes), true)
+    assert.equal(Buffer.from(archive['image-002.png']).equals(readFileSync(new URL('../../../upstream/deepseek-harness/examples/acp-agent/tests/snapshots/read-image/workspace/red.png', import.meta.url))), true)
+    assert.deepEqual(imagePack.presentCall({ image_url: [attachmentId, second.attachmentId] }), {
+      card: 'generic', title: '打包图片', kind: 'edit', rawInput: '2 images',
+      locations: [{ path: packed.relative_path }],
+    })
+    assert.match(imagePack.output.render({}, packed)[0].text, /2 张图片打包到本地产物/u)
+
+    sessionMessages.push({
+      id: 'new-variants-message', role: 'user', source: { kind: 'user' },
+      content: [{ type: 'text', text: '生成两个全新的独立方案。' }],
+    })
     const concurrent = await Promise.all([
       imagegen.execute({ prompt: 'Generate independent variant A.' }, execution()),
       imagegen.execute({ prompt: 'Generate independent variant B.' }, execution()),
     ])
     assert.deepEqual(concurrent.map(result => result.images.length), [1, 1])
     assert.equal(maximumSubmissions >= 2, true)
-    assert.deepEqual(policyModels, ['gpt-image-2-pro', 'gpt-image-2-pro', 'gpt-image-2-pro', 'gpt-image-2-pro'])
+    assert.deepEqual(policyModels, ['gpt-image-2-pro', 'gpt-image-2-pro', 'gpt-image-2-pro', 'gpt-image-2-pro', 'gpt-image-2-pro'])
     assert.deepEqual(waitedJobs, jobs.map(job => job.id))
     assert.equal(requests.every(request => !('provider' in request.body) && !('api_key' in request.body)), true)
     const firstScope = `image-${createHash('sha256').update('image-session\0image-call-1').digest('hex').slice(0, 32)}`
     assert.deepEqual(requestScopes[0], { task: firstScope, trace: firstScope, session: firstScope, client: firstScope })
-    assert.equal(new Set(requestScopes.map(scope => scope.task)).size, 4)
+    assert.equal(new Set(requestScopes.map(scope => scope.task)).size, 5)
     await assert.rejects(
       imagegen.execute({ prompt: 'Edit missing image.', image_url: `sha256:${'f'.repeat(64)}` }, execution()),
       /not present in this e-Mate session/,
@@ -1764,6 +1484,22 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     await assert.rejects(
       imagegen.execute({ prompt: 'Do not accept caller-selected model.', model: 'gpt-image-2' }, execution()),
       /additional property|only prompt and optional image_url/iu,
+    )
+    await assert.rejects(
+      imagegen.execute({ prompt: 'Modify the above image only.' }, {
+        agent: {
+          id: 'empty-image-session',
+          session: {
+            header: { id: 'empty-image-session', cwd: temporary },
+            deriveMessages: () => [{
+              id: 'empty-edit', role: 'user', source: { kind: 'user' },
+              content: [{ type: 'text', text: '修改上图。' }],
+            }],
+          },
+        },
+        callId: 'empty-edit-call', signal: new AbortController().signal,
+      }),
+      /needs a source image.*upload one image once/u,
     )
     const requestsBeforeFailure = requests.length
     nextFailureStatus = 503
@@ -1799,9 +1535,10 @@ test('Agent operation guidance owns the e-Mate persona and reuses Harness shell 
     assert.match(section.text, new RegExp(`e_mate_skill_hub_${operation}`))
   }
   assert.match(section.text, /Do not compose or run npm install/)
-  assert.match(section.text, /能力中心 > 外部连接/u)
-  assert.match(section.text, /Do not call any `browser_\*` Tool/u)
-  assert.match(section.text, /do not ask the user to paste App IDs, secrets, tokens, or QR credentials into chat/u)
+  assert.match(section.text, /installed find-skill provider/u)
+  assert.match(section.text, /use `mcp_manage`/u)
+  assert.match(section.text, /Browser Tools are only for operating a user-visible page/u)
+  assert.match(section.text, /do not ask the user to paste secrets into chat/u)
 })
 
 test('identity agreements are immutable, explicit, and use the target Connection RPC', async () => {
@@ -2132,7 +1869,7 @@ test('enterprise identity provider maps target credentials and the production HT
           acceptanceId: 'acceptance-receipt-207',
           userId: 'user-207',
           acceptedAt: new Date(clock).toISOString(),
-          clientVersion: '2.0.8',
+          clientVersion: '2.0.9',
           locale: 'zh-CN',
         } : null,
       })
@@ -2144,7 +1881,7 @@ test('enterprise identity provider maps target credentials and the production HT
         acceptanceId: 'acceptance-receipt-207',
         userId: 'user-207',
         acceptedAt: new Date(clock).toISOString(),
-        clientVersion: '2.0.8',
+        clientVersion: '2.0.9',
         locale: 'zh-CN',
       })
     }
@@ -2293,10 +2030,12 @@ test('enterprise identity provider maps target credentials and the production HT
   holdSessionCredential = new Promise(resolve => { releaseSessionCredential = resolve })
   const sessionCredentialReadStarted = new Promise(resolve => { sessionCredentialStarted = resolve })
   provider = createEnterpriseIdentityProvider(providerOptions)
-  const idlePolicy = provider.modelPolicy()
+  const idleLease = provider.keepAlive()
   await sessionCredentialReadStarted
+  const idlePolicy = provider.modelPolicy()
   const idleBootstrap = provider.bootstrap()
   releaseSessionCredential()
+  await idleLease
   assert.equal((await idlePolicy).default_chat_model_id, 'gpt-5.6-luna')
   assert.equal((await idleBootstrap).authenticated, true)
   assert.equal(
@@ -2391,6 +2130,8 @@ test('enterprise identity provider maps target credentials and the production HT
 
 test('enterprise identity rejects expected gateway responses through the target RPC result', async () => {
   let identityHandler
+  let keepAliveTick
+  let keepAliveInterval
   let response = { status: 400, body: { error: { code: 'INVALID_CHALLENGE' } } }
   const credentials = {
     resolve: async () => undefined,
@@ -2405,6 +2146,11 @@ test('enterprise identity rejects expected gateway responses through the target 
     } } },
     provide: () => {},
     effect: effect => effect(),
+    interval: (callback, delay) => {
+      keepAliveTick = callback
+      keepAliveInterval = delay
+      return () => {}
+    },
   }, {
     providerLegalName: '亦芯测试主体',
     enterprise: {
@@ -2418,6 +2164,8 @@ test('enterprise identity rejects expected gateway responses through the target 
       headers: { 'content-type': 'application/json' },
     }),
   })
+  assert.equal(keepAliveInterval, ENTERPRISE_KEEP_ALIVE_MS)
+  keepAliveTick()
   const payload = {
     account: 'test.user',
     real_name: '测试用户',

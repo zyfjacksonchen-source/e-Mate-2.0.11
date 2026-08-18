@@ -142,6 +142,11 @@ export class DesktopPnpm extends Service {
     )
   }
 
+  /** Absolute active profile directory whose manifest the native CLI manages. */
+  get profileDir(): string {
+    return this.bootstrap.activeProfileDir
+  }
+
   /**
    * Run packaged pnpm directly in the active profile.
    * @param args - pnpm arguments following the executable name.

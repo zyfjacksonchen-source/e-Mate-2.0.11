@@ -1,4 +1,4 @@
-# e-Mate 2.0.8 target contract
+# e-Mate 2.0.9 target contract
 
 This file is the implementation source of truth. Development records may add evidence but may not weaken these obligations.
 
@@ -6,10 +6,10 @@ This file is the implementation source of truth. Development records may add evi
 
 - Product name: `e-Mate`
 - Repository: `zyfjacksonchen-source/e-Mate`
-- Release: `@e-mate/dsh@2.0.8`
+- Release: `@e-mate/dsh@2.0.9`
 - Executable: `e-mate`
-- Harness source: `zyfjacksonchen-source/deepseek-harness@12d68b6ca05fa538d98f70ed47786c44ca3a7225` (upstream `deepseek-ai/deepseek-harness@47f943859bef60e4160492346772ded9b24f765a` plus the 2.0.8 prompt and redundant-permission fix only)
-- Harness source version: `0.1.0-rc.5`
+- Harness source: `zyfjacksonchen-source/deepseek-harness@df78045a127e32cb5b942defba52c539590d1596` (upstream `deepseek-ai/deepseek-harness@99f6f02fecdb7dff40c3fbc9470f5907c29f74ca` plus the bounded 2.0.9 prompt and redundant-permission boundary fixes only)
+- Harness source version: `0.1.0-rc.7`
 - Browser shell and component source: task `019ff91c-47ca-7c11-93bd-863475181a18`, represented by the final e-Mate 2.0.4/2.0.5 UI state at exact 2.0.5 commit `564a6b6c1d43fb6831dd4a5cd8026e472f063311`
 - Chat interaction source: Codex prototype `019ff665-d721-79a0-869d-338f086cf529`
 - “Harness” identifies the pinned technical foundation only and must not be used as the product or UI name.
@@ -46,7 +46,7 @@ This file is the implementation source of truth. Development records may add evi
 | `ecorex-deepseek-v4-pro` | `deepseek-v4-flash` | `max` |
 | `ecorex-doubao-seed-2.0-pro` | `doubao-seed-2-0-pro-260215` | `medium` |
 
-Gemini is not part of the 2.0.8 production catalog while its upstream route is unavailable. It must not be emitted by identity policy, shown in the client catalog, or enabled by default; restoring it requires a separately verified upstream route and release slice.
+Gemini is not part of the 2.0.9 production catalog while its upstream route is unavailable. It must not be emitted by identity policy, shown in the client catalog, or enabled by default; restoring it requires a separately verified upstream route and release slice.
 
 Image generation adapts the final e-Mate 2.0.5 Codex-like `imagegen` Tool: each call accepts only required `prompt` and optional current-session `image_url` attachment IDs, produces one independent output, and uses separate target Tool calls for concurrency. Generation and image editing are both fixed to `gpt-image-2-pro`; neither the user nor the Agent can select or pass an image model or provider. Only the enterprise image service may apply the verified 2.0.5-compatible `gpt-image-2-pro → gpt-image-2` fallback for eligible upstream-unavailable errors. The tenant policy may allow several chat models, while one session selects one active model.
 
@@ -63,5 +63,5 @@ At the pinned Harness commit, only `web_search` is active from the relevant buil
 - Import only authoritative, non-deleted old e-Mate/ECoreX sessions; preserve sources unchanged and make import idempotent.
 - User data stays under the resolved `$DSH_HOME`; npm installation directories are read-only code/resources.
 - Supported release platforms are macOS 13+ arm64/x64 and Windows 10/11 x64.
-- Keep the existing download, admin, and audit URLs unchanged. The download URL remains the stable entry/integrity page, while the accepted 2.0.8 tarball and release evidence resolve to commit-scoped immutable Cloudflare R2 objects under `npm/candidates/v2.0.8/<source-commit>/`; all 2.0.7 objects remain frozen and are never overwritten, and the application server must not become the binary origin.
+- Keep the existing download, admin, and audit URLs unchanged. The download URL remains the stable entry/integrity page, while the accepted 2.0.9 tarball and release evidence resolve to commit-scoped immutable Cloudflare R2 objects under `npm/candidates/v2.0.9/<source-commit>/`; all 2.0.7 objects remain frozen and are never overwritten, and the application server must not become the binary origin.
 - Release activation requires clean npm installation, automated checks, performance evidence, and Computer Use acceptance.

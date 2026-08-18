@@ -30,6 +30,119 @@
   height: 14px;
 }
 
+/* Beautiful UI Tool Chips icon geometry (MIT) over the target's existing
+   presentation variants. No tool name or execution path is dispatched here. */
+:global([data-chat-flow-kind='tool-call'] [data-variant]) {
+  --emate-tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 17l6-5-6-5M12 19h8'/%3E%3C/svg%3E");
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-variant='write']),
+:global([data-chat-flow-kind='tool-call'] [data-variant='edit']) {
+  --emate-tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z'/%3E%3C/svg%3E");
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-variant='read']),
+:global([data-chat-flow-kind='tool-call'] [data-variant='search']) {
+  --emate-tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6'/%3E%3C/svg%3E");
+}
+
+:global([data-chat-flow-kind='assistant-step'] [data-variant='think']) {
+  --emate-tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z'/%3E%3C/svg%3E");
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-variant] [data-disclosure-row] > :first-child > span:has(> svg) > svg),
+:global([data-chat-flow-kind='assistant-step'] [data-variant='think'] [data-disclosure-row] > :first-child > span:has(> svg) > svg) {
+  display: none;
+}
+
+:global([data-chat-flow-kind='tool-call'] [data-variant] [data-disclosure-row] > :first-child > span:has(> svg)::before),
+:global([data-chat-flow-kind='assistant-step'] [data-variant='think'] [data-disclosure-row] > :first-child > span:has(> svg)::before) {
+  content: '';
+  display: block;
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  mask: var(--emate-tool-icon) center / contain no-repeat;
+}
+
+/* Keep rc.7's real ProducedFiles/openFile chain and make only its client
+   projection the compact file capsule used by the target reference. */
+:global([data-slot='conversation'] div:has(> [data-produced-files-row])) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+:global([data-slot='conversation'] div:has(> [data-produced-files-row]) > span:first-child) {
+  display: none;
+}
+
+:global([data-produced-files-row]) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  overflow: visible;
+}
+
+:global([data-produced-files-row] > [data-emate-produced-file]) {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: 32px;
+  max-width: min(100%, 360px);
+  padding: 0 10px 0 7px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-secondary);
+  line-height: 30px;
+  text-decoration: none;
+}
+
+:global([data-produced-files-row] > [data-emate-produced-file]::before) {
+  content: 'FILE';
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 3px;
+  border-radius: 5px;
+  background: #64748b;
+  color: white;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+:global([data-produced-files-row] > [data-emate-produced-file][title$='.pdf' i]::before) { content: 'PDF'; background: #e8495f; }
+:global([data-produced-files-row] > [data-emate-produced-file][title$='.doc' i]::before),
+:global([data-produced-files-row] > [data-emate-produced-file][title$='.docx' i]::before) { content: 'DOC'; background: #3978d5; }
+:global([data-produced-files-row] > [data-emate-produced-file][title$='.xls' i]::before),
+:global([data-produced-files-row] > [data-emate-produced-file][title$='.xlsx' i]::before),
+:global([data-produced-files-row] > [data-emate-produced-file][title$='.csv' i]::before) { content: 'XLS'; background: #23956b; }
+:global([data-produced-files-row] > [data-emate-produced-file][title$='.ppt' i]::before),
+:global([data-produced-files-row] > [data-emate-produced-file][title$='.pptx' i]::before) { content: 'PPT'; background: #d4663a; }
+:global([data-produced-files-row] > [data-emate-produced-file][title$='.zip' i]::before) { content: 'ZIP'; background: #8b5bb5; }
+
+:global([data-produced-files-row] > [data-emate-produced-file]::after) {
+  content: '';
+  flex: none;
+  width: 10px;
+  height: 10px;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 17L17 7M7 7h10v10'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+:global([data-produced-files-row] > [data-emate-produced-file]:hover) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+  text-decoration: none;
+}
+
 :global([data-chat-flow-kind='e-mate-image-disclosure']) {
   display: none;
 }
