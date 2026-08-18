@@ -22,3 +22,12 @@
 [submodule "upstream/plugins/dsh-better-sidebar"]
 	path = upstream/plugins/dsh-better-sidebar
 	url = https://github.com/omdsh-dev/DSH-better-sidebar.git
+[submodule "upstream/plugins/dsh-computer-use"]
+	path = upstream/plugins/dsh-computer-use
+	url = https://github.com/Anionex/dsh-computer-use.git
+[submodule "upstream/plugins/dsh-find-skill"]
+	path = upstream/plugins/dsh-find-skill
+	url = https://github.com/zyfjacksonchen-source/dsh-find-skill.git
+[submodule "upstream/plugins/dsh-im"]
+	path = upstream/plugins/dsh-im
+	url = https://github.com/zyfjacksonchen-source/dsh-im.git

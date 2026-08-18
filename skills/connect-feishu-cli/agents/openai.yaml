@@ -1,0 +1,4 @@
+interface:
+  display_name: "连接飞书"
+  short_description: "由Agent安装飞书CLI技能，用户扫码授权后完成真实飞书业务操作"
+  default_prompt: "Use $connect-feishu-cli to install and authorize Feishu CLI, then complete the requested Feishu task."

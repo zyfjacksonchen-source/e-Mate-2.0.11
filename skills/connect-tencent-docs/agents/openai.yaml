@@ -1,0 +1,4 @@
+interface:
+  display_name: "连接腾讯文档"
+  short_description: "通过官方MCP扫码授权腾讯文档并完成真实文档读写闭环验证"
+  default_prompt: "Use $connect-tencent-docs to connect Tencent Docs and complete the requested document task."

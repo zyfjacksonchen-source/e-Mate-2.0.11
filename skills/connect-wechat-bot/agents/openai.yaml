@@ -1,0 +1,4 @@
+interface:
+  display_name: "连接微信 Bot"
+  short_description: "扫码安装微信Bot连接器并完成权限授权与端到端消息收发验证"
+  default_prompt: "Use $connect-wechat-bot to connect WeChat Bot and complete the requested messaging task."

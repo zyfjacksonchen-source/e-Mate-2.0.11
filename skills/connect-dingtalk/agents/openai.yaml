@@ -1,0 +1,4 @@
+interface:
+  display_name: "连接钉钉"
+  short_description: "扫码安装钉钉消息连接器并完成权限授权与端到端消息收发验证"
+  default_prompt: "Use $connect-dingtalk to connect DingTalk and complete the requested messaging task."
