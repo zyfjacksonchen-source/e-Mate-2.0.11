@@ -252,6 +252,8 @@ describe('published package surface', () => {
     }))
     expect(String(manifest.build?.mac?.x64ArchFiles))
       .toContain('python-runtime/darwin-*/**')
+    expect(String(manifest.build?.mac?.x64ArchFiles))
+      .toContain('build/e-mate-profile/bundles/xin-assistant/runtime/vendor-native/darwin-*/**')
     expect(manifest.build?.files).toContain('!node_modules/node-pty/build/**')
     expect(manifest.devDependencies?.['@electron/asar']).toBe('3.4.1')
   })
