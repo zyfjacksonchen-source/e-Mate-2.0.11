@@ -130,12 +130,10 @@ async function clickAction(args: Record<string, unknown>, ctx: ActionContext): P
   const el = elementOrThrow(ctx.ids, index)
   el.scrollIntoView({ block: 'center', behavior: 'instant' })
   if (el instanceof HTMLAnchorElement) {
-    const urlBefore = location.href
-    el.click()
-    await settle()
-    return location.href !== urlBefore
-      ? { text: `Clicked link [${index}]; the page is navigating. Call browser_snapshot again after it loads.` }
-      : { text: `Clicked link [${index}]; the page did not navigate.` }
+    // Cross-document clicks destroy this content script and its response port.
+    // Return first, then click in a fresh task so the Harness Tool can finish.
+    setTimeout(() => { el.click() }, 0)
+    return { text: `Clicked link [${index}]; call browser_snapshot again after the page settles.` }
   }
   if (el instanceof HTMLButtonElement && el.disabled) {
     throw new ActionError('action-failed', `Button [${index}] is disabled.`)

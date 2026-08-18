@@ -98,3 +98,10 @@ test('extension contains no second chat, Session gateway, model, or approval UI'
   assert.doesNotMatch(background, /session\.prompt|session\.create|model\.catalog|credentials\.|approval\.request/)
   assert.equal(await readFile(resolve(root, 'extension/dist/content.js'), 'utf8').then(text => text.includes('EMATE_BROWSER_ACTION')), true)
 })
+
+test('link clicks answer before navigation can destroy the Tool response port', async () => {
+  const actions = await readFile(resolve(root, 'extension/src/content/actions.ts'), 'utf8')
+  const anchor = actions.slice(actions.indexOf('if (el instanceof HTMLAnchorElement)'), actions.indexOf('if (el instanceof HTMLButtonElement'))
+  assert.match(anchor, /setTimeout\(\(\) => \{ el\.click\(\) \}, 0\)/u)
+  assert.doesNotMatch(anchor, /await settle\(\)/u)
+})

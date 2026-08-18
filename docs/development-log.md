@@ -1390,3 +1390,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 
 - 活动折叠标题固定为“X 次工具调用，Y 条消息”，不再向中文用户显示 `tool calls / messages`。
 - 只隐藏编辑器底部的回合/步骤/缓存/输入输出统计条；原生消息尾的用时、首 token 和 `tok/s` 继续显示，未删除 Harness usage 事实。
+
+## 2026-08-19 · 2.0.9 dsh-browser 链接点击闭环
+
+- 安装态 Computer Use 已确认精简 MV3 扩展连接到 e-Mate，Agent 的原生 `browser_snapshot` 与 `browser_click` 能读取 Example Domain 并把真实 Chrome 标签跳转到 IANA；但点击 Tool 一直停在运行中。
+- 根因在同一扩展的链接点击实现：`el.click()` 触发跨文档导航后仍等待旧页面稳定，旧 content script 与 `tabs.sendMessage` 回包端口先被销毁，导致 Harness 一直等到工具超时。修复复用 `browser_navigate` 的既有模式，先返回 Tool 结果，再于下一事件轮执行真实链接点击；不增加桥接协议、会话或浏览器状态。
+- 新增最小回归锁定链接分支必须延后点击且不得在旧文档等待；最终门禁是重建扩展后重复同一自然语言任务，确认点击后能继续快照并生成最终回复。
