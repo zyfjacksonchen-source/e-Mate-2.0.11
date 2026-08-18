@@ -363,7 +363,7 @@ input {
 
 .user-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto auto auto auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(140px, auto) auto auto auto auto auto;
   align-items: center;
   gap: 10px;
   margin-bottom: 14px;

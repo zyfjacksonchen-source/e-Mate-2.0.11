@@ -73,6 +73,7 @@ type ConsoleState =
   | { kind: 'error'; status: number | null };
 
 type CredentialPurpose = 'TASKS_ONLY' | 'MODELS_AND_TASKS';
+type UserStatusFilter = 'ALL' | Extract<AdminUserStatus, 'ACTIVE' | 'PENDING_APPROVAL'>;
 type ModelTestState =
   | { kind: 'testing' }
   | { kind: 'passed'; checkedAt: string }
@@ -129,6 +130,7 @@ export function App() {
   const [quotaUnlimited, setQuotaUnlimited] = useState(false);
   const [policyModelIds, setPolicyModelIds] = useState<string[]>([]);
   const [userSearch, setUserSearch] = useState('');
+  const [userStatusFilter, setUserStatusFilter] = useState<UserStatusFilter>('ALL');
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [passwordUser, setPasswordUser] = useState<TenantUser | null>(null);
   const [replacementPassword, setReplacementPassword] = useState('');
@@ -308,9 +310,16 @@ export function App() {
   const filteredUsers = facts
     ? facts.users.filter((user) => {
         const query = userSearch.trim().toLocaleLowerCase();
-        return !query || `${user.displayName}\n${user.userId}`.toLocaleLowerCase().includes(query);
+        return (
+          (userStatusFilter === 'ALL' || user.status === userStatusFilter) &&
+          (!query || `${user.displayName}\n${user.userId}`.toLocaleLowerCase().includes(query))
+        );
       })
     : [];
+  const pendingFilteredUsers = filteredUsers.filter((user) => user.status === 'PENDING_APPROVAL');
+  const availableModelIds = facts?.routes
+    .filter((route) => route.published && route.enabled)
+    .map((route) => route.routeId) ?? [];
   const selectedUsers = facts?.users.filter((user) => selectedUserIds.includes(user.userId) && user.status !== 'DELETED') ?? [];
   const openPolicy = (users: TenantUser[], approvePending = false) => {
     if (users.length === 0) return;
@@ -508,6 +517,16 @@ export function App() {
                   allowClear
                   onChange={setUserSearch}
                 />
+                <Select
+                  value={userStatusFilter}
+                  aria-label={copy.userStatusFilter}
+                  onChange={(value) => setUserStatusFilter(value as UserStatusFilter)}
+                  options={[
+                    { label: copy.allStatuses, value: 'ALL' },
+                    { label: copy.active, value: 'ACTIVE' },
+                    { label: copy.pendingApproval, value: 'PENDING_APPROVAL' },
+                  ]}
+                />
                 <Checkbox
                   checked={
                     filteredUsers.some((user) => user.status !== 'DELETED') &&
@@ -527,6 +546,19 @@ export function App() {
                   {copy.selectAll}
                 </Checkbox>
                 <span>{copy.selectedUsers.replace('{count}', String(selectedUsers.length))}</span>
+                <Button
+                  type='primary'
+                  disabled={pendingFilteredUsers.length === 0}
+                  onClick={() => {
+                    setSelectedUserIds((current) => [
+                      ...new Set([...current, ...pendingFilteredUsers.map((user) => user.userId)]),
+                    ]);
+                    openPolicy(pendingFilteredUsers, true);
+                    setPolicyModelIds(availableModelIds);
+                  }}
+                >
+                  {copy.approveAllPending}
+                </Button>
                 <Button
                   type='primary'
                   disabled={!selectedUsers.some((user) => user.status === 'PENDING_APPROVAL')}
@@ -1076,6 +1108,13 @@ export function App() {
             </Checkbox>
           </div>
           <label>{copy.allowedModels}</label>
+          <Checkbox
+            checked={availableModelIds.length > 0 && availableModelIds.every((id) => policyModelIds.includes(id))}
+            indeterminate={policyModelIds.length > 0 && !availableModelIds.every((id) => policyModelIds.includes(id))}
+            onChange={(checked) => setPolicyModelIds(checked ? availableModelIds : [])}
+          >
+            {copy.selectAllModels}
+          </Checkbox>
           <Select
             mode='multiple'
             value={policyModelIds}

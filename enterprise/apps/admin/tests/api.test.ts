@@ -43,6 +43,22 @@ test('admin login reuses the e-Mate dark component theme and logo treatment', ()
   assert.equal(messagesFor('zh-CN').consentExempt, '管理员免签');
 });
 
+test('user administration filters approval state and reuses the existing batch policy flow', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const copy = messagesFor('zh-CN');
+  assert.equal(copy.active, '有效');
+  assert.equal(copy.pendingApproval, '待审批');
+  assert.equal(copy.approveAllPending, '全选待审批并配置模型');
+  assert.equal(copy.selectAllModels, '全选可用模型');
+  assert.match(app, /userStatusFilter === 'ALL' \|\| user\.status === userStatusFilter/);
+  assert.match(app, /openPolicy\(pendingFilteredUsers, true\);\s*setPolicyModelIds\(availableModelIds\)/);
+  assert.match(
+    app,
+    /title=\{policyApprovePending \? copy\.batchApprove : copy\.updateTokenLimit\}[\s\S]*?copy\.selectAllModels/
+  );
+  assert.doesNotMatch(app, /fetch\([^\n]*approveAllPending/);
+});
+
 test('admin API paths must stay on the console origin', () => {
   assert.equal(
     resolveSameOriginPath('/e-mate/enterprise-api/', '/runtime/status', origin),

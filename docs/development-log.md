@@ -1314,3 +1314,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 首次 apply 在切槽前以 `nginx_admin_route_wiring_invalid` 失败关闭；活动 release、green 槽和四个服务均未切换。只读定位到两份受管 route 模板与当前/候选制品字节完全一致，但 `active-admin-route.conf` 被历史操作写成普通文件。将其原子恢复为只指向现有 `admin-route-control-plane.conf` 的符号链接后，`nginx -t`、reload 和部署 dry-run 均通过；新的独立部署单元成功切到 blue，四个 blue readiness endpoint 为 200，green 四服务已停，活动 manifest 与候选精确一致。
 - 切槽后的首轮真实 Agent Tool 仍返回 Control Plane 身份验证失败。根因是代码中的 Skill Hub authenticator 已部署，但生产 Control Plane 环境尚未注入 issuer、audience 和 session 公钥 keyring，因此运行时按合同保持禁用。修复只复用当前 Auth Gateway 正在签名且 Model Gateway 正在验证的同一 `session-2026` Ed25519 公钥；私钥、access token、refresh token 和验收账号密码均未复制到 Control Plane。配置原子写入，重启健康失败会恢复原文件；实际重启后 blue readiness 为 200。
 - 主代理随后在同一重建 2.0.8 Desktop、同一已登录验收用户和 Luna/Max 下再次发起自然语言请求。展开的真实 Harness 步骤显示 `Tool call e_mate_skill_hub_search · pdf`，详情为 `IN {"query":"pdf"} OUT []`；空数组是当前生产目录的真实搜索结果，不再出现本机目标越界或 Control Plane 鉴权错误。该证据关闭 Skill Hub 搜索的真实 Agent CU 门禁；跨用户发布、下载、安装和最终安装态回归仍由 2.0.8 发布流水线单独关闭。
+
+## 2026-08-18 · S07 管理端用户审批筛选
+
+- 企业管理端复用现有用户列表、`updateTenantUser`、批量审批与模型策略弹层，新增“全部状态 / 有效 / 待审批”筛选；没有新增管理 API、身份、Store 或第二套审批协议。
+- “全选待审批并配置模型”只取当前筛选结果中的待审批用户并打开原策略弹层，预选全部已发布且启用的模型；弹层另提供“全选可用模型”，最终仍须管理员确认额度和模型后提交。
+- 管理端 19/19 测试、TypeScript 与 Vite 生产构建通过。生产主备域名均回读同一 `index-QtMqsyCQ.js`；真实管理员会话验证了状态选项、有效用户筛选和五个可用模型的清空/全选交互，未提交任何生产用户变更，验收后已退出。
