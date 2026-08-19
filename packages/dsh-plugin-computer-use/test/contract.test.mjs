@@ -23,6 +23,7 @@ test('computer-use adapter preserves the immutable universal helper and macOS-on
   assert.match(nativeBuilder, /--options', 'runtime'/u)
   assert.match(nativeBuilder, /--entitlements', HELPER_ENTITLEMENTS/u)
   assert.match(adapterBuilder, /nativeManifest\.binary\.sha256/u)
+  assert.match(adapterBuilder, /process\.platform === 'darwin'/u)
   assert.match(helperEntitlements, /com\.apple\.security\.cs\.disable-library-validation/u)
   assert.match(client, /@e-mate\/dsh-plugin-computer-use/u)
   assert.doesNotMatch(client, /@anionex\/dsh-computer-use/u)

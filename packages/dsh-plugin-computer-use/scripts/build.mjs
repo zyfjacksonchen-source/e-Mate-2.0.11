@@ -6,9 +6,13 @@ import { join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const upstream = resolve(root, '../../upstream/plugins/dsh-computer-use')
 
-for (const name of ['lib', 'native', 'assets', 'docs']) {
+for (const name of ['lib', 'assets', 'docs']) {
   await rm(join(root, name), { recursive: true, force: true })
   await cp(join(upstream, name), join(root, name), { recursive: true })
+}
+if (process.platform === 'darwin') {
+  await rm(join(root, 'native'), { recursive: true, force: true })
+  await cp(join(upstream, 'native'), join(root, 'native'), { recursive: true })
 }
 await mkdir(join(root, 'scripts'), { recursive: true })
 await cp(join(upstream, 'scripts/build-native.mjs'), join(root, 'scripts/build-native.mjs'))
@@ -28,9 +32,11 @@ nativeBuilder = nativeBuilder
   )
 await writeFile(nativeBuilderPath, nativeBuilder)
 const helper = join(root, 'native/macos/bin/dsh-computer-use-helper')
-execFileSync('/usr/bin/codesign', [
-  '--force', '--sign', '-', '--timestamp=none', '--options', 'runtime', '--entitlements', entitlements, helper,
-], { stdio: 'inherit' })
+if (process.platform === 'darwin') {
+  execFileSync('/usr/bin/codesign', [
+    '--force', '--sign', '-', '--timestamp=none', '--options', 'runtime', '--entitlements', entitlements, helper,
+  ], { stdio: 'inherit' })
+}
 const nativeManifestPath = join(root, 'native/macos/manifest.json')
 const nativeManifest = JSON.parse(await readFile(nativeManifestPath, 'utf8'))
 nativeManifest.binary.sha256 = createHash('sha256').update(await readFile(helper)).digest('hex')
