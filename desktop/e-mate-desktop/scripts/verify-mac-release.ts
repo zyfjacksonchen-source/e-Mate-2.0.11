@@ -9,7 +9,6 @@ import { fileURLToPath } from 'node:url'
 import { MACOS_UNIVERSAL_NATIVE_ENTRIES } from './mac-universal.ts'
 
 const RELEASE_HEALTH_TIMEOUT_MS = 180_000
-const ROSETTA_RELEASE_HEALTH_TIMEOUT_MS = 360_000
 
 /** Injectable filesystem and command boundaries for release verification. */
 export interface MacReleaseVerificationOptions {
@@ -25,7 +24,7 @@ export interface MacReleaseVerificationOptions {
   readonly makeMountPoint: () => string
   /** Execute one macOS verification command. */
   readonly run: (command: string, args: readonly string[]) => void
-  /** Prove both architectures reach renderer health from isolated fresh profiles. */
+  /** Prove both architectures reach the native interactive shell from isolated fresh profiles. */
   readonly launch: (executable: string, architectures: readonly ('arm64' | 'x86_64')[]) => void
   /** Keep the packaged native helper bound to its immutable plugin manifest. */
   readonly verifyComputerUseHelper: (unpackedRoot: string) => void
@@ -49,8 +48,7 @@ function launchArchitecture(executable: string, arch: 'arm64' | 'x86_64', root: 
     if (child.pid === undefined) throw new Error(`${arch} packaged application did not start`)
     processGroup = child.pid
     const sleeper = new Int32Array(new SharedArrayBuffer(4))
-    const timeout = arch === 'x86_64' ? ROSETTA_RELEASE_HEALTH_TIMEOUT_MS : RELEASE_HEALTH_TIMEOUT_MS
-    const deadline = Date.now() + timeout
+    const deadline = Date.now() + RELEASE_HEALTH_TIMEOUT_MS
     while (!existsSync(healthAck)) {
       try {
         process.kill(child.pid, 0)
@@ -58,11 +56,11 @@ function launchArchitecture(executable: string, arch: 'arm64' | 'x86_64', root: 
         throw new Error(`${arch} packaged application exited before renderer health acknowledgement`)
       }
       if (Date.now() >= deadline) {
-        throw new Error(`${arch} packaged application did not acknowledge renderer health within ${String(timeout / 1000)} seconds`)
+        throw new Error(`${arch} packaged application did not acknowledge an interactive shell within ${String(RELEASE_HEALTH_TIMEOUT_MS / 1000)} seconds`)
       }
       Atomics.wait(sleeper, 0, 0, 200)
     }
-    console.log(`${arch} renderer health acknowledged in ${String(Date.now() - startedAt)} ms`)
+    console.log(`${arch} interactive shell acknowledged in ${String(Date.now() - startedAt)} ms`)
   } finally {
     if (processGroup !== undefined) {
       try { process.kill(-processGroup, 'SIGKILL') } catch {}
@@ -170,7 +168,7 @@ export function verifyMacRelease(
       options.run('spctl', ['--assess', '--type', 'execute', '--verbose=4', appPath])
       options.run('xcrun', ['stapler', 'validate', appPath])
     } else {
-      options.launch(executablePath, ['x86_64', 'arm64'])
+      options.launch(executablePath, ['arm64', 'x86_64'])
     }
   } catch (cause) {
     failure = cause

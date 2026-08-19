@@ -38,7 +38,6 @@ describe('macOS release artifact verification', () => {
     expect(source).not.toContain("DSH_HOME: join(root, 'dsh')")
     expect(source).toContain("run('/usr/bin/ditto', [sourceApp, installedApp])")
     expect(source).toContain('launchArchitecture(installedExecutable, architecture, root)')
-    expect(source).toContain("arch === 'x86_64' ? ROSETTA_RELEASE_HEALTH_TIMEOUT_MS : RELEASE_HEALTH_TIMEOUT_MS")
   })
 
   it('mounts one DMG and verifies signature, Gatekeeper, and the stapled ticket', () => {
@@ -114,8 +113,8 @@ describe('macOS release artifact verification', () => {
     expect(harness.calls.some(call => call.command === 'spctl')).toBe(false)
     expect(harness.calls.some(call => call.command === 'xcrun')).toBe(false)
     expect(harness.launches).toEqual([
-      { executable, arch: 'x86_64' },
       { executable, arch: 'arm64' },
+      { executable, arch: 'x86_64' },
     ])
   })
 

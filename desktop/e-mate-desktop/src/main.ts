@@ -147,13 +147,6 @@ async function start(): Promise<void> {
     }
     if (report.status === 'healthy') {
       markDesktopProfileHealthy(profileStatePath, profileStartup.profileName)
-      if (process.env.EMATE_RELEASE_HEALTH_PROBE === '1') {
-        writeFileSync(join(app.getPath('userData'), '.release-health-ack'), app.getVersion(), {
-          encoding: 'utf8',
-          flag: 'wx',
-          mode: 0o600,
-        })
-      }
       try {
         const installed = writeMacUpdateStartupAck(app.getPath('userData'), app.getVersion())
         if (installed !== undefined) {
@@ -332,7 +325,14 @@ async function start(): Promise<void> {
       profileDir: prepared.profile.dir,
       homeDir: prepared.homeDir,
     })
-    await runtime.mountScheduled()
+    await runtime.mountScheduled(() => {
+      if (process.env.EMATE_RELEASE_HEALTH_PROBE !== '1') return
+      writeFileSync(join(app.getPath('userData'), '.release-health-ack'), app.getVersion(), {
+        encoding: 'utf8',
+        flag: 'wx',
+        mode: 0o600,
+      })
+    })
     await Promise.all(deferredProfileCleanup.map(async (path) => {
       await rm(path, { recursive: true, force: true })
     })).catch((cause: unknown) => {
