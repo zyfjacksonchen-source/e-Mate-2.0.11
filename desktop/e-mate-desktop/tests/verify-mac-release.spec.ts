@@ -38,6 +38,10 @@ describe('macOS release artifact verification', () => {
     expect(source).not.toContain("DSH_HOME: join(root, 'dsh')")
     expect(source).toContain("run('/usr/bin/ditto', [sourceApp, installedApp])")
     expect(source).toContain('launchArchitecture(installedExecutable, architecture, root)')
+    expect(source).toContain("arch === 'x86_64' ? '.release-native-ready-ack' : '.release-health-ack'")
+    expect(source).toContain('const RELEASE_HEALTH_TIMEOUT_MS = 180_000')
+    expect(source).not.toContain('360_000')
+    expect(source).not.toContain('ROSETTA_RELEASE_HEALTH_TIMEOUT_MS')
   })
 
   it('mounts one DMG and verifies signature, Gatekeeper, and the stapled ticket', () => {

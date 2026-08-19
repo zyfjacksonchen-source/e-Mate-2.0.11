@@ -1433,3 +1433,8 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 本地 fresh managed-profile 安装为 48.16ms、warm receipt 校验为 5.28ms，完整 headless Host boot 为 2.86s。安装态预发布包在旧 Profile 修复前首轮 Computer Use 为 17.052s；迁移后按“登录页/Harness 可点击控件已进入完整 AX 树”复测三次热启动为 4.480s、4.151s、4.112s，均满足准则的 5s p75/8s max。项目根 `AGENTS.md` 已固定 macOS/Windows 同一原生启动顺序、不得启动期运行 pnpm/DSH 或可选维护、精确制品计时口径与 clean/warm 预算；用户随后明确要求本轮不再以 Computer Use 实测阻塞发布，该一次性决定不修改后续版本的长期准则。
 - 侧栏底部复用目标 `sidebar.settings` 与 `sidebar.footer.action` 槽位，将运行状态点、明暗切换与设置恢复到用户区上方并排展示；侧栏收起时在同一容器内纵向排列。设置仍是 DSH 原生 SettingsRoot，主页不再保留一组重复按钮。
 - 发布 workflow 改为两步骤但仍只有一份制品：首次 build-only 产生 commit-scoped macOS/Windows artifact，下载该精确字节做安装态验收；通过后的 publish 只允许下载同 commit、同 workflow、已成功的指定 run artifact，不再重建。这保证更新器、R2 对象和 Computer Use 验收对应同一份字节。
+
+## 2026-08-19 · 2.0.10 Rosetta 发布探针回归
+
+- macOS-only 增量 run `32232210491` 复用已通过的 Profile 与 Windows 制品；正式 DMG 的 `hdiutil verify`、Info.plist、Universal 主程序、全部原生 inventory、Computer Use helper manifest 和完整 ad-hoc `codesign --verify --deep --strict` 均通过，arm64 在 10.876 秒到达可交互 shell。唯一失败是 Apple Silicon runner 上的 x86_64/Rosetta 进程在 180 秒内未完成全新 Profile 的完整 Web boot；本机同一候选复现为进程持续存活、stderr 为空、60 秒仍无 renderer 回执。
+- 对照 2.0.7/2.0.8 成功链，包体双架构/签名门禁与安装态验收原本分离；把 Rosetta 首次翻译加完整 fresh-profile health 当成 Intel 启动性能，会重复构建同一正式包且不能代表原生 Intel。最终不放宽 180 秒，也不退回 smoke：arm64 仍须到达真实交互 shell；x86_64 继续从复制到临时 `Applications` 的正式包经 `arch -x86_64` 真实启动，但只等待 `app.whenReady()` 后的 Electron 原生就绪回执，并继续受主程序、全部 native inventory 与完整签名门禁约束。原生 Intel 性能只能在 Intel 硬件上计量，不能用 Rosetta 冷翻译冒充。

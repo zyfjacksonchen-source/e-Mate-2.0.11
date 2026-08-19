@@ -24,7 +24,7 @@ export interface MacReleaseVerificationOptions {
   readonly makeMountPoint: () => string
   /** Execute one macOS verification command. */
   readonly run: (command: string, args: readonly string[]) => void
-  /** Prove both architectures reach the native interactive shell from isolated fresh profiles. */
+  /** Prove native arm64 interaction and x86_64 Electron readiness from isolated fresh profiles. */
   readonly launch: (executable: string, architectures: readonly ('arm64' | 'x86_64')[]) => void
   /** Keep the packaged native helper bound to its immutable plugin manifest. */
   readonly verifyComputerUseHelper: (unpackedRoot: string) => void
@@ -38,7 +38,11 @@ function launchArchitecture(executable: string, arch: 'arm64' | 'x86_64', root: 
   let processGroup: number | undefined
   try {
     const userData = join(root, `user-data-${arch}`)
-    const healthAck = join(userData, '.release-health-ack')
+    // ponytail: Rosetta proves the x86_64 package can enter Electron; native Intel performance
+    // belongs on Intel hardware, not a fresh translation cache on an Apple Silicon runner.
+    const acknowledgement = arch === 'x86_64' ? '.release-native-ready-ack' : '.release-health-ack'
+    const healthAck = join(userData, acknowledgement)
+    const outcome = arch === 'x86_64' ? 'Electron native readiness' : 'an interactive shell'
     const startedAt = Date.now()
     const child = spawn('/usr/bin/arch', [`-${arch}`, executable, `--user-data-dir=${userData}`], {
       env: { ...process.env, DSH_HOME: join(root, `dsh-${arch}`), EMATE_RELEASE_HEALTH_PROBE: '1' },
@@ -53,14 +57,14 @@ function launchArchitecture(executable: string, arch: 'arm64' | 'x86_64', root: 
       try {
         process.kill(child.pid, 0)
       } catch {
-        throw new Error(`${arch} packaged application exited before renderer health acknowledgement`)
+        throw new Error(`${arch} packaged application exited before ${outcome}`)
       }
       if (Date.now() >= deadline) {
-        throw new Error(`${arch} packaged application did not acknowledge an interactive shell within ${String(RELEASE_HEALTH_TIMEOUT_MS / 1000)} seconds`)
+        throw new Error(`${arch} packaged application did not acknowledge ${outcome} within ${String(RELEASE_HEALTH_TIMEOUT_MS / 1000)} seconds`)
       }
       Atomics.wait(sleeper, 0, 0, 200)
     }
-    console.log(`${arch} interactive shell acknowledged in ${String(Date.now() - startedAt)} ms`)
+    console.log(`${arch} ${outcome} acknowledged in ${String(Date.now() - startedAt)} ms`)
   } finally {
     if (processGroup !== undefined) {
       try { process.kill(-processGroup, 'SIGKILL') } catch {}

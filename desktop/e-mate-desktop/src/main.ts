@@ -198,6 +198,13 @@ async function start(): Promise<void> {
 
   app.on('second-instance', () => { runtime.show() })
   await app.whenReady()
+  if (process.env.EMATE_RELEASE_HEALTH_PROBE === '1') {
+    writeFileSync(join(app.getPath('userData'), '.release-native-ready-ack'), app.getVersion(), {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    })
+  }
   if (process.platform === 'win32') app.setAppUserModelId('net.ecoremedia.e-mate')
   if (app.isPackaged && process.cwd() === '/') process.chdir(app.getPath('home'))
   const homeDir = resolveDshHome()
