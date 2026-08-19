@@ -1514,3 +1514,11 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 静态热路径追踪发现 e-Mate Shell 的思考状态、设置路由与折叠移动侧栏都在 `document.body` 上监听全部 `childList/subtree`；此前每个流式 token DOM 变化都会再次查询整页。三处现只检查 MutationRecord 中新增/移除的目标 marker 子树；思考状态首次扫描后只处理新增 status，设置与侧栏对无关 token mutation 完全不查询 document。没有修改 DSH Message、Agent Loop、LLM stream、Session event 或 Desktop IPC。
 - Shell `8 files / 39 tests` 与组件 build 通过；新增反例连续插入 50 个无关 token 节点，锁定 document-wide query 为 0，同时验证晚到思考状态、设置弹层和移动路由仍生效。change-impact 对本切片精确返回 `plugin-only`、唯一组件 `@e-mate/dsh-client-shell`、`portable` job，证明以后该优化不构建 Harness、Desktop 或安装器。
 - 这些结果证明已移除一个确定的 renderer 放大器，不等于声称 TTFT/tok/s 已对齐。最终性能门仍需绑定已安装 Base/Profile/组件摘要，用真实 provider 完成原始 Desktop 与候选的 30 组成对运行；缺该证据继续标记 blocked。
+
+## 2026-08-20 · 2.0.11 S12 首个 Base 候选本地总验收
+
+- 首个实现提交为 `dbf14555d0bf2806e325cd390987739a5d40586e`。相对唯一 2.0.10 基线 `65a995fa795d7007dd90818c939c5185b3fc1a1d` 的 change-impact 结果为 `base` 且 release contract valid；这是本版修改 Desktop、权限、更新事务、inventory 与发布权威后的正确一次性 Base lane，不是后续插件更新流程。
+- 根工作区总门禁通过：release/component/composition/publisher `23/23`，性能 evaluator `4/4`，所有一方组件 build/test，DSH Profile `43/43`，Shell `39/39`。Xin Python 真依赖测试改为 `PYTHONDONTWRITEBYTECODE=1`，复跑 `4/4` 且 runtime 中没有 `__pycache__`，避免测试机器缓存进入候选工作树；component emitter 仍独立拒绝任何 `__pycache__`/`.pyc`。
+- Desktop 首轮总测的唯一失败来自测试把 `node:child_process` 整体 mock 成只有 `spawn`，使组件平台验签 import 的标准库 `execFile` 不存在，26 条用例均在加载前失败。mock 改为保留真实标准库、只覆盖 `spawn` 后，聚焦 `26/26`，完整 Desktop `52/52 files`、`425 passed / 3 environment skips`；四套 TypeScript、197 节点 runtime closure、CLI、Loader、Profile 和 582 个生产依赖许可证检查全部通过。
+- 用该真实提交重新 emit 当前 11 个 Desktop 接受组件并组合 macOS arm64 初代，真实 Cordis Host/Web Loader boot 通过。generation 为 `8719ccfca1de5a36111e25c068aa0ac9c57359adffaf00dc1e769771ca79a39f`；本地 admission 为 `7,179` bytes，SHA-256 `988a042de497ca9f6d2e253e466629f3d0778dfbc84e8647170de216a90374a3`。该收据使用 CI 临时 Ed25519 key，仅是本地组合证据，不能发布。
+- 尚未关闭且不得降级的门：main 上同 SHA 的三平台 CI/Base installer、受保护环境生产签名 bootstrap、不可变 R2 上传与三目标 desired-state 公共回读、macOS/Windows 安装态确认/重启/健康/回滚、CDP 与 Full Access 真机、以及原始 DSH Desktop rc.7 对当前已安装 generation 的 30 组成对 TTFT/tok/s。缺任一外部证据都不能把 2.0.11 标为上线完成。
