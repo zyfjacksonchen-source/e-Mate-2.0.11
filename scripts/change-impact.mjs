@@ -1,0 +1,525 @@
+#!/usr/bin/env node
+
+import { execFileSync } from 'node:child_process'
+import { appendFileSync, readFileSync } from 'node:fs'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+export const BASE_CONTRACT_PATH = 'desktop/e-mate-desktop/base-contract.json'
+const SHELL_COMPONENT_ROOT = 'packages/dsh/profile/plugins/emate-shell'
+const COMPONENT_INVENTORY_PATH = 'packages/dsh/profile/component-inventory.json'
+const STABLE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u
+const SHA40 = /^[0-9a-f]{40}$/u
+const PLATFORM_TARGETS = ['darwin-arm64', 'darwin-x64', 'win32-x64']
+const TARGET_RUNNERS = new Map([
+  ['darwin-arm64', 'macos-15'],
+  ['darwin-x64', 'macos-15-intel'],
+  ['win32-x64', 'windows-2025'],
+])
+
+const BASE_PATHS = [
+  '.github/workflows/desktop-release.yml',
+  '.github/workflows/ci.yml',
+  '.github/workflows/profile-release.yml',
+  '.github/workflows/release.yml',
+  '.gitmodules',
+  'package.json',
+  'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
+  'desktop/package.json',
+  'desktop/yarn.lock',
+  'desktop/.yarnrc.yml',
+  BASE_CONTRACT_PATH,
+]
+
+const BASE_PREFIXES = [
+  'desktop/e-mate-desktop/',
+  'packages/dsh/',
+  'scripts/',
+  'upstream/',
+]
+
+const VERIFICATION_PATHS = new Set([
+  '.gitignore',
+  'AGENTS.md',
+  'docs/target-contract.md',
+  'scripts/change-impact.test.mjs',
+  'scripts/component-release.test.mjs',
+  'scripts/profile-release.test.mjs',
+  'scripts/publish-profile-r2.test.mjs',
+])
+
+function record(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function parsePlatformTargets(value) {
+  if (!Array.isArray(value) || value.length !== PLATFORM_TARGETS.length) {
+    throw new Error('platform component targets are incomplete')
+  }
+  const targets = value.map(target => {
+    if (!record(target) || !exactKeys(target, [
+      'platform', 'arch', 'runtime_abi', 'minimum_os', 'signing', 'native_paths',
+    ]) || !['darwin', 'win32'].includes(target.platform)
+      || !['arm64', 'x64'].includes(target.arch)
+      || typeof target.runtime_abi !== 'string' || !/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u.test(target.runtime_abi)
+      || typeof target.minimum_os !== 'string' || !/^[0-9]+\.[0-9]+$/u.test(target.minimum_os)
+      || !record(target.signing) || !exactKeys(target.signing, ['scheme', 'identity'])
+      || !['adhoc', 'unsigned'].includes(target.signing.scheme)
+      || typeof target.signing.identity !== 'string' || target.signing.identity === ''
+      || !Array.isArray(target.native_paths)
+      || target.native_paths.some(path => !safeFilesEntry(path))
+      || target.native_paths.some((path, index) => index > 0 && target.native_paths[index - 1] >= path)) {
+      throw new Error('platform component target is invalid')
+    }
+    if (target.platform === 'darwin' && target.signing.scheme !== 'adhoc'
+      || target.platform === 'win32' && target.signing.scheme !== 'unsigned'
+      || target.signing.scheme === 'adhoc' && target.signing.identity !== 'adhoc'
+      || target.signing.scheme === 'unsigned' && target.signing.identity !== 'none'
+      || target.runtime_abi === 'none' && target.native_paths.length !== 0
+      || target.runtime_abi !== 'none' && target.native_paths.length === 0) {
+      throw new Error('platform component signing contract is invalid')
+    }
+    return {
+      platform: target.platform,
+      arch: target.arch,
+      runtime_abi: target.runtime_abi,
+      minimum_os: target.minimum_os,
+      signing: { scheme: target.signing.scheme, identity: target.signing.identity },
+      native_paths: [...target.native_paths],
+    }
+  })
+  const keys = targets.map(target => `${target.platform}-${target.arch}`)
+  if (keys.some((key, index) => key !== PLATFORM_TARGETS[index])) {
+    throw new Error('platform component targets must cover the supported Desktop matrix in stable order')
+  }
+  return targets
+}
+
+function exactKeys(value, expected) {
+  const actual = Object.keys(value).sort()
+  const wanted = [...expected].sort()
+  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index])
+}
+
+function safeFilesEntry(value) {
+  return typeof value === 'string'
+    && value !== ''
+    && !value.includes('\0')
+    && !isAbsolute(value)
+    && !value.split(/[\\/]/u).includes('..')
+}
+
+function safePackageEntry(value) {
+  return safeFilesEntry(value)
+    && !value.includes('\\')
+    && value.split('/').every(segment => segment !== '' && segment !== '.')
+}
+
+function readJson(path) {
+  return JSON.parse(readFileSync(path, 'utf8'))
+}
+
+function normalizePath(path) {
+  if (typeof path !== 'string') throw new Error('changed path must be a string')
+  const normalized = path.replaceAll('\\', '/').replace(/^\.\//u, '')
+  if (normalized === '' || normalized.includes('\0') || normalized.startsWith('/')
+    || normalized.split('/').includes('..')) {
+    throw new Error(`invalid changed path: ${JSON.stringify(path)}`)
+  }
+  return normalized
+}
+
+function componentInventory(root) {
+  const value = readJson(join(root, COMPONENT_INVENTORY_PATH))
+  if (!record(value) || value.schema_version !== 1 || !Array.isArray(value.components)
+    || value.components.length === 0 || Object.keys(value).some(key => !['schema_version', 'components'].includes(key))) {
+    throw new Error('component inventory is invalid')
+  }
+  const components = value.components.map(entry => {
+    if (!record(entry)
+      || typeof entry.id !== 'string'
+      || typeof entry.root !== 'string' || !safeFilesEntry(entry.root)
+      || !['profile', 'platform-profile'].includes(entry.kind)
+      || !['hot-profile', 'platform-profile', 'blocked'].includes(entry.desktop)
+      || typeof entry.cli !== 'boolean'
+      || entry.desktop === 'hot-profile' && entry.kind !== 'profile'
+      || entry.desktop === 'platform-profile' && entry.kind !== 'platform-profile') {
+      throw new Error('component inventory entry is invalid')
+    }
+    const expectedKeys = ['id', 'root', 'kind', 'desktop', 'cli', ...(entry.kind === 'platform-profile' ? ['targets'] : [])]
+    if (!exactKeys(entry, expectedKeys)) throw new Error('component inventory entry is invalid')
+    const targets = entry.kind === 'platform-profile' ? parsePlatformTargets(entry.targets) : []
+    const expectedRoot = entry.id === '@e-mate/dsh-client-shell'
+      ? SHELL_COMPONENT_ROOT
+      : `packages/${entry.id.replace(/^@e-mate\//u, '')}`
+    if (entry.root !== expectedRoot) throw new Error(`component inventory root mismatch: ${entry.id}`)
+    return { ...entry, targets }
+  }).sort((left, right) => left.id.localeCompare(right.id))
+  if (new Set(components.map(component => component.id)).size !== components.length
+    || new Set(components.map(component => component.root)).size !== components.length) {
+    throw new Error('component inventory identities must be unique')
+  }
+  return components
+}
+
+function validateBaseContract(value) {
+  const errors = []
+  if (!record(value)) return ['base contract must be an object']
+  if (value.schema_version !== 1) errors.push('base contract schema_version must be 1')
+  if (typeof value.id !== 'string' || !/^e-mate-desktop-profile-v[1-9][0-9]*-dsh-[0-9a-f]{12}$/u.test(value.id)) {
+    errors.push('base contract id is invalid')
+  }
+  if (value.desktop_api !== 1) errors.push('base contract desktop_api must be 1')
+  if (value.profile_format !== 1) errors.push('base contract profile_format must be 1')
+  const reference = record(value.desktop_reference) ? value.desktop_reference : {}
+  if (reference.repository !== 'anywhere-labs/deepseek-harness-desktop'
+    || reference.commit !== '6074088f5b660206e404b3591fab51fb99c69add'
+    || reference.harness_repository !== 'deepseek-ai/deepseek-harness'
+    || reference.harness_commit !== '99f6f02fecdb7dff40c3fbc9470f5907c29f74ca'
+    || reference.harness_version !== '0.1.0-rc.7') {
+    errors.push('base contract Desktop rc.7 reference drifted')
+  }
+  if (value.harness_version !== '0.1.0-rc.7') errors.push('base contract Harness version drifted')
+  if (value.harness_commit !== 'df78045a127e32cb5b942defba52c539590d1596') {
+    errors.push('base contract Harness commit drifted')
+  }
+  if (!Array.isArray(value.profile_signing_keys) || value.profile_signing_keys.length === 0
+    || value.profile_signing_keys.some(key => !record(key)
+      || typeof key.id !== 'string' || !/^[0-9a-f]{16}$/u.test(key.id)
+      || key.algorithm !== 'ed25519'
+      || typeof key.public_key_spki_der_base64 !== 'string'
+      || !/^MCowBQYDK2VwAyEA[A-Za-z0-9+/]{43}=$/u.test(key.public_key_spki_der_base64))
+    || new Set(value.profile_signing_keys.map(key => key.id)).size !== value.profile_signing_keys.length) {
+    errors.push('base contract profile signing keys are invalid')
+  }
+  return errors
+}
+
+function validateComponent(root, inventory, baseContract, desktopDependencies) {
+  const errors = []
+  const componentRoot = inventory.root
+  let manifest
+  try {
+    manifest = readJson(join(root, componentRoot, 'package.json'))
+  } catch (cause) {
+    return { root: componentRoot, errors: [`package.json cannot be read: ${cause instanceof Error ? cause.message : String(cause)}`] }
+  }
+  const slug = componentRoot === SHELL_COMPONENT_ROOT
+    ? 'shell'
+    : componentRoot.slice('packages/dsh-plugin-'.length)
+  const expectedName = inventory.id
+  if (manifest.name !== expectedName) errors.push(`package name must be ${expectedName}`)
+  if (typeof manifest.version !== 'string' || !STABLE_VERSION.test(manifest.version)) {
+    errors.push('package version must be stable SemVer')
+  }
+  if (manifest.license !== 'MIT') errors.push('package license must be MIT')
+  if (!record(manifest.eMate) || manifest.eMate.harnessVersion !== baseContract.harness_version) {
+    errors.push(`component Harness ABI must equal ${String(baseContract.harness_version)}`)
+  }
+  if (!record(manifest.eMate) || manifest.eMate.harnessCommit !== baseContract.harness_commit) {
+    errors.push(`component Harness commit must equal ${String(baseContract.harness_commit)}`)
+  }
+  if (!Array.isArray(manifest.files) || manifest.files.length === 0 || manifest.files.some(value => !safeFilesEntry(value))) {
+    errors.push('package files must be a non-empty safe allowlist')
+  }
+  if (!safePackageEntry(manifest.main)) errors.push('package main must be a canonical safe component path')
+  if (!record(manifest.dsh)
+    || (!record(manifest.dsh.bundle) || typeof manifest.dsh.bundle.patch !== 'string')
+      && (!record(manifest.dsh.client) || manifest.dsh.client.platform !== 'web')) {
+    errors.push('package must declare a DSH bundle patch or Web client contract')
+  }
+  const component = record(manifest.eMate) && record(manifest.eMate.component)
+    ? manifest.eMate.component
+    : undefined
+  if (component === undefined) {
+    errors.push('eMate.component metadata is missing')
+  } else {
+    if (component.schema_version !== 1) errors.push('component schema_version must be 1')
+    if (component.id !== manifest.name) errors.push('component id must equal package name')
+    if (!['profile', 'platform-profile'].includes(component.kind)) errors.push('component kind is invalid')
+    if (component.kind !== inventory.kind) errors.push(`component kind must equal inventory kind ${inventory.kind}`)
+    if (!Array.isArray(component.base_contracts)
+      || component.base_contracts.length !== 1
+      || component.base_contracts[0] !== baseContract.id) {
+      errors.push(`component compatibility must equal the one tested base contract ${String(baseContract.id)}`)
+    }
+  }
+  if (desktopDependencies.has(manifest.name)) {
+    errors.push('component must not be a direct Desktop dependency')
+  }
+  return {
+    root: componentRoot,
+    id: typeof manifest.name === 'string' ? manifest.name : expectedName,
+    version: typeof manifest.version === 'string' ? manifest.version : undefined,
+    kind: component?.kind,
+    desktop: inventory.desktop,
+    cli: inventory.cli,
+    targets: inventory.targets,
+    errors,
+  }
+}
+
+/** Load and validate the executable base/component compatibility inventory. */
+export function loadReleaseBoundary(root = resolve(fileURLToPath(new URL('..', import.meta.url)))) {
+  const errors = []
+  let baseContract = {}
+  try {
+    baseContract = readJson(join(root, BASE_CONTRACT_PATH))
+    errors.push(...validateBaseContract(baseContract).map(error => `${BASE_CONTRACT_PATH}: ${error}`))
+  } catch (cause) {
+    errors.push(`${BASE_CONTRACT_PATH}: ${cause instanceof Error ? cause.message : String(cause)}`)
+  }
+  let desktopDependencies = new Map()
+  try {
+    const desktop = readJson(join(root, 'desktop/e-mate-desktop/package.json'))
+    desktopDependencies = new Map(Object.entries(record(desktop.dependencies) ? desktop.dependencies : {}))
+    for (const [name, version] of desktopDependencies) {
+      if (name.startsWith('@deepseek-ai/dsh') && version !== baseContract.harness_version) {
+        errors.push(`desktop/e-mate-desktop/package.json: ${name} must equal ${String(baseContract.harness_version)}`)
+      }
+    }
+    const harnessSource = readJson(join(root, 'upstream/deepseek-harness/package.json'))
+    if (harnessSource.version !== baseContract.harness_version) {
+      errors.push('upstream/deepseek-harness/package.json: Harness source version does not match the Base contract')
+    }
+  } catch (cause) {
+    errors.push(`Desktop/Harness package contract: ${cause instanceof Error ? cause.message : String(cause)}`)
+  }
+  let inventory = []
+  try {
+    inventory = componentInventory(root)
+  } catch (cause) {
+    errors.push(`${COMPONENT_INVENTORY_PATH}: ${cause instanceof Error ? cause.message : String(cause)}`)
+  }
+  const components = inventory.map(component => (
+    validateComponent(root, component, baseContract, desktopDependencies)
+  ))
+  for (const component of components) {
+    errors.push(...component.errors.map(error => `${component.root}: ${error}`))
+  }
+  return {
+    baseContract,
+    components,
+    valid: errors.length === 0,
+    errors,
+  }
+}
+
+function componentForPath(path, components) {
+  return components.find(component => path === component.root || path.startsWith(`${component.root}/`))
+}
+
+function localComponentPath(path, component) {
+  return path === component.root ? '' : path.slice(component.root.length + 1)
+}
+
+function componentTestPath(path) {
+  return /(^|\/)tests?\//u.test(path) || /\.(?:spec|test)\.[cm]?[jt]sx?$/u.test(path)
+}
+
+function docsPath(path) {
+  return path.startsWith('docs/') || /(^|\/)(?:README|CHANGELOG)(?:\.[^/]*)?$/iu.test(path)
+}
+
+/** Resolve component build jobs from the validated inventory shared by CI and release workflows. */
+export function componentJobsFor(boundary, componentIds, publishIds = []) {
+  const published = new Set(publishIds)
+  return [...new Set(componentIds)].sort().flatMap(id => {
+    const component = boundary.components.find(candidate => candidate.id === id)
+    if (component === undefined) throw new Error(`unknown component job: ${id}`)
+    const targets = component.kind === 'platform-profile'
+      ? component.targets.map(target => `${target.platform}-${target.arch}`)
+      : ['portable']
+    return targets.map(target => ({
+      component: id,
+      target,
+      runner: target === 'portable' ? 'ubuntu-24.04' : TARGET_RUNNERS.get(target),
+      publish: published.has(id),
+    }))
+  })
+}
+
+function classifyPath(path, boundary) {
+  const component = componentForPath(path, boundary.components)
+  if (component !== undefined) {
+    if (component.errors.length > 0) {
+      return { kind: 'base', path, reason: 'component contract is invalid' }
+    }
+    const local = localComponentPath(path, component)
+    if (componentTestPath(local)) {
+      return { kind: 'component-test', path, component: component.id, reason: 'component verification input' }
+    }
+    if (component.desktop === 'blocked') {
+      return { kind: 'base', path, reason: 'component is not yet in the accepted Desktop runtime composition' }
+    }
+    return {
+      kind: 'component',
+      path,
+      component: component.id,
+      reason: component.kind === 'platform-profile'
+        ? 'independent target-bound platform Profile component input'
+        : 'independent Profile component input',
+    }
+  }
+  if (path.startsWith('enterprise/')) return { kind: 'enterprise', path, reason: 'enterprise-only input' }
+  if (VERIFICATION_PATHS.has(path) || path.startsWith('artifacts/')) {
+    return { kind: 'verification', path, reason: 'repository gate or evidence only' }
+  }
+  if (docsPath(path) || /^[^/]+\.md$/iu.test(path)) return { kind: 'docs', path, reason: 'documentation only' }
+  if (BASE_PATHS.includes(path) || BASE_PREFIXES.some(prefix => path.startsWith(prefix))) {
+    return { kind: 'base', path, reason: 'shared, Harness, Desktop, packaging, or release input' }
+  }
+  return { kind: 'base', path, reason: 'unknown path fails closed' }
+}
+
+/** Classify normalized repository paths using one fail-closed release boundary. */
+export function classifyChangedPaths(paths, options = {}) {
+  const root = resolve(options.root ?? fileURLToPath(new URL('..', import.meta.url)))
+  let normalized
+  try {
+    normalized = [...new Set(paths.map(normalizePath))].sort()
+  } catch (cause) {
+    return failureResult(paths, cause instanceof Error ? cause.message : String(cause))
+  }
+  let boundary
+  try {
+    boundary = loadReleaseBoundary(root)
+  } catch (cause) {
+    return failureResult(normalized, cause instanceof Error ? cause.message : String(cause))
+  }
+  const classifications = normalized.map(path => classifyPath(path, boundary))
+  const kinds = new Set(classifications.map(item => item.kind))
+  const components = [...new Set(classifications.flatMap(item => item.component === undefined ? [] : [item.component]))].sort()
+  const publishComponents = [...new Set(classifications.flatMap(item => (
+    item.kind === 'component' && item.component !== undefined ? [item.component] : []
+  )))].sort()
+  const componentJobs = componentJobsFor(boundary, components, publishComponents)
+  const hasComponentWork = kinds.has('component') || kinds.has('component-test')
+  let lane
+  if (!boundary.valid || kinds.has('base') || hasComponentWork && kinds.has('enterprise')) lane = 'base'
+  else if (hasComponentWork) lane = 'plugin-only'
+  else if (kinds.has('enterprise')) lane = 'enterprise-only'
+  else if (kinds.has('verification')) lane = 'verification-only'
+  else if (kinds.has('docs')) lane = 'docs-only'
+  else lane = 'none'
+  return result({ lane, normalized, classifications, components, componentJobs, publishComponents, boundary })
+}
+
+function result({ lane, normalized, classifications, components, componentJobs = [], publishComponents = [], boundary, error }) {
+  return {
+    schema_version: 1,
+    lane,
+    run_base: lane === 'base',
+    run_plugins: lane === 'plugin-only',
+    run_enterprise: lane === 'enterprise-only',
+    run_verification: lane !== 'none',
+    components,
+    component_jobs: componentJobs,
+    publish_components: publishComponents,
+    changed_paths: normalized,
+    classifications,
+    contract: {
+      valid: boundary?.valid ?? false,
+      base_contract_id: typeof boundary?.baseContract?.id === 'string' ? boundary.baseContract.id : null,
+      errors: boundary?.errors ?? (error === undefined ? [] : [error]),
+    },
+  }
+}
+
+function failureResult(paths, error) {
+  const normalized = Array.isArray(paths) ? paths.filter(path => typeof path === 'string') : []
+  return result({
+    lane: 'base',
+    normalized,
+    classifications: [{ kind: 'base', path: '<classifier>', reason: error }],
+    components: [],
+    componentJobs: [],
+    publishComponents: [],
+    error,
+  })
+}
+
+function changedPathsFromGit(root, base, head) {
+  if (!SHA40.test(base) || !SHA40.test(head)) throw new Error('base and head must be full lowercase commit ids')
+  const mergeBase = execFileSync('git', ['merge-base', base, head], { cwd: root, encoding: 'utf8' }).trim()
+  if (!SHA40.test(mergeBase)) throw new Error('git merge-base did not return a commit id')
+  const output = execFileSync(
+    'git',
+    ['diff', '--no-renames', '--name-only', '-z', '--diff-filter=ACDMRTUXB', mergeBase, head, '--'],
+    { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+  )
+  return output.split('\0').filter(Boolean)
+}
+
+function parseArguments(argv) {
+  const options = { paths: [] }
+  for (let index = 0; index < argv.length; index += 1) {
+    const name = argv[index]
+    if (name === '--check-contract') options.checkContract = true
+    else if (['--base', '--head', '--paths-from', '--github-output', '--root'].includes(name)) {
+      const value = argv[index + 1]
+      if (value === undefined) throw new Error(`${name} requires a value`)
+      options[name.slice(2).replace('-', '')] = value
+      index += 1
+    } else if (name === '--path') {
+      const value = argv[index + 1]
+      if (value === undefined) throw new Error('--path requires a value')
+      options.paths.push(value)
+      index += 1
+    } else throw new Error(`unknown argument: ${String(name)}`)
+  }
+  return options
+}
+
+function writeGithubOutput(path, value) {
+  appendFileSync(path, [
+    `lane=${value.lane}`,
+    `run_base=${String(value.run_base)}`,
+    `run_plugins=${String(value.run_plugins)}`,
+    `run_enterprise=${String(value.run_enterprise)}`,
+    `run_verification=${String(value.run_verification)}`,
+    `components_json=${JSON.stringify(value.components)}`,
+    `component_jobs_json=${JSON.stringify(value.component_jobs)}`,
+    `publish_components_json=${JSON.stringify(value.publish_components)}`,
+    `result_json=${JSON.stringify(value)}`,
+    '',
+  ].join('\n'))
+}
+
+function main() {
+  let options
+  try {
+    options = parseArguments(process.argv.slice(2))
+  } catch (cause) {
+    const value = failureResult([], cause instanceof Error ? cause.message : String(cause))
+    process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
+    process.exitCode = 2
+    return
+  }
+  const root = resolve(options.root ?? fileURLToPath(new URL('..', import.meta.url)))
+  let paths = options.paths
+  let inputError
+  try {
+    if (options.checkContract) paths = []
+    else if (options.pathsfrom !== undefined) {
+      const source = resolve(options.pathsfrom)
+      const relativeSource = relative(root, source)
+      if (relativeSource === '..' || relativeSource.startsWith(`..${sep}`)) throw new Error('--paths-from must stay inside the repository')
+      paths = readFileSync(source, 'utf8').split(/\r?\n/u).filter(Boolean)
+    } else if (options.base !== undefined || options.head !== undefined) {
+      if (options.base === undefined || options.head === undefined) throw new Error('--base and --head must be provided together')
+      paths = changedPathsFromGit(root, options.base, options.head)
+    } else if (paths.length === 0) throw new Error('provide --base/--head, --paths-from, --path, or --check-contract')
+  } catch (cause) {
+    inputError = cause instanceof Error ? cause.message : String(cause)
+  }
+  const value = inputError === undefined
+    ? classifyChangedPaths(paths, { root })
+    : failureResult(paths, inputError)
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
+  if (options.githuboutput !== undefined) writeGithubOutput(options.githuboutput, value)
+  if (options.checkContract && !value.contract.valid) process.exitCode = 1
+}
+
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()

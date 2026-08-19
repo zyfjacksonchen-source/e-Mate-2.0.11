@@ -1,6 +1,5 @@
-import { useEffect } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 
-const FILE_SELECTOR = '[data-produced-files-row] > button[title]'
 const MARKER = 'data-emate-produced-file'
 
 function basename(path: string): string {
@@ -8,18 +7,21 @@ function basename(path: string): string {
   return at === -1 ? path : path.slice(at + 1)
 }
 
-/** Hide workspace paths while preserving rc.7's native produced-file opener. */
+/** Hide workspace paths once per native turn-tail row, outside the token stream. */
 export function ArtifactCapsules() {
-  useEffect(() => {
+  const marker = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    const row = marker.current?.parentElement?.querySelector<HTMLElement>('[data-produced-files-row]')
+    if (row === null || row === undefined) return undefined
     const originals = new Map<HTMLButtonElement, { label: string | null; title: string }>()
     const sync = () => {
-      for (const button of document.querySelectorAll<HTMLButtonElement>(FILE_SELECTOR)) {
+      for (const button of row.querySelectorAll<HTMLButtonElement>(':scope > button[title]')) {
         const original = originals.get(button) ?? {
           label: button.getAttribute('aria-label'),
           title: button.title,
         }
         if (!originals.has(button)) originals.set(button, original)
-        const name = basename(original.title)
+        const name = button.textContent?.trim() || basename(original.title)
         if (button.title !== name) button.title = name
         if (button.getAttribute('aria-label') !== `打开 ${name}`) button.setAttribute('aria-label', `打开 ${name}`)
         if (!button.hasAttribute(MARKER)) button.setAttribute(MARKER, '')
@@ -27,7 +29,7 @@ export function ArtifactCapsules() {
     }
     sync()
     const observer = new MutationObserver(sync)
-    observer.observe(document.body, { attributes: true, attributeFilter: ['title'], childList: true, subtree: true })
+    observer.observe(row, { childList: true })
     return () => {
       observer.disconnect()
       for (const [button, original] of originals) {
@@ -39,5 +41,5 @@ export function ArtifactCapsules() {
       }
     }
   }, [])
-  return null
+  return <span ref={marker} hidden data-emate-produced-files-adapter="" />
 }

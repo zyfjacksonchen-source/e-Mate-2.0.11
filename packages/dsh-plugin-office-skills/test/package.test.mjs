@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import JSZip from 'jszip'
 import {
   apply,
   inject,
@@ -49,12 +50,12 @@ test('registers four ready Skills and two target Tool/Job paths', async () => {
   assert.deepEqual(capabilities.map(capability => capability.id), ['office-skills'])
   assert.deepEqual(await capabilities[0].status(), {
     state: 'ready',
-    detail: 'DOCX / XLSX / PPTX / PDF · local rc.6 Tools',
+    detail: 'DOCX / XLSX / PPTX / PDF · local rc.7 Tools',
     action_ids: [],
   })
   assert.deepEqual(OFFICE_ADAPTER_STATUS, {
     state: 'ready',
-    harnessVersion: '0.1.0-rc.6',
+    harnessVersion: '0.1.0-rc.7',
     runtimeInstalled: true,
     toolsRegistered: 2,
     reason: 'Pure JavaScript DOCX, XLSX, PPTX, and PDF execution is installed locally; unsupported lossless binary edits fail closed.',
@@ -87,11 +88,35 @@ test('round-trips real DOCX, XLSX, PPTX, and Chinese PDF bytes', async () => {
   }
 })
 
+test('OOXML readers reject archive bombs before unbounded XML parsing', async () => {
+  const oversizedXml = new JSZip()
+  oversizedXml.file('word/document.xml', Buffer.alloc(9 * 1024 * 1024, 0x61))
+  await assert.rejects(
+    readOfficeBuffer('docx', await oversizedXml.generateAsync({ type: 'nodebuffer', compression: 'STORE' })),
+    /XML exceeds the parsing limit/u,
+  )
+
+  const highRatio = new JSZip()
+  highRatio.file('word/document.xml', 'x'.repeat(2 * 1024 * 1024))
+  await assert.rejects(
+    readOfficeBuffer('docx', await highRatio.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })),
+    /compression-ratio limit/u,
+  )
+
+  const manyEntries = new JSZip()
+  manyEntries.file('word/document.xml', '<document/>')
+  for (let index = 0; index < 2_048; index += 1) manyEntries.file(`extra/${index}.xml`, '')
+  await assert.rejects(
+    readOfficeBuffer('docx', await manyEntries.generateAsync({ type: 'nodebuffer', compression: 'STORE' })),
+    /too many entries/u,
+  )
+})
+
 test('package pins a distributable JS-only closure and bundled OFL font', async () => {
   const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   assert.equal(manifest.dsh.officeSkills.adapterState, 'ready')
   assert.equal(manifest.dsh.officeSkills.toolsRegistered, 2)
-  assert.equal(manifest.eMate.harnessVersion, '0.1.0-rc.6')
+  assert.equal(manifest.eMate.harnessVersion, '0.1.0-rc.7')
   assert.deepEqual(manifest.dependencies, {
     '@pdf-lib/fontkit': '1.1.1',
     '@xmldom/xmldom': '0.9.11',

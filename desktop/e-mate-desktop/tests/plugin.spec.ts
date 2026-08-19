@@ -37,8 +37,6 @@ interface PluginHarness {
   setThemeSource: ReturnType<typeof vi.fn<(source: ThemePreference) => void>>
   rendererBoot: ReturnType<typeof vi.fn<(report: RendererBootReport) => void>>
   rendererRoute(): WebRoute | undefined
-  browserExtensionTrayInvoke(): (() => void | Promise<void>) | undefined
-  openBrowserExtensionSetup: ReturnType<typeof vi.fn<() => Promise<void>>>
   notify(next: DesktopSettings, prev: DesktopSettings): Promise<void>
   notifyTheme(preference: ThemePreference): void
 }
@@ -50,8 +48,6 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
   const restart = vi.fn(async () => {})
   const setThemeSource = vi.fn<(source: ThemePreference) => void>()
   const rendererBoot = vi.fn<(report: RendererBootReport) => void>()
-  const openBrowserExtensionSetup = vi.fn(async () => {})
-  let browserExtensionTrayInvoke: (() => void | Promise<void>) | undefined
   let rendererRoute: WebRoute | undefined
   let settingsUpdated: ((namespace: unknown, next: unknown) => void) | undefined
   let themePreference: ThemePreference = 'system'
@@ -75,12 +71,8 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
     },
     mountScheduled: async () => {},
     show: () => {},
-    registerTrayItem: (item) => {
-      if (item.label() === '加载浏览器扩展…') browserExtensionTrayInvoke = item.invoke
-      return { refresh: () => {}, dispose: () => {} }
-    },
+    registerTrayItem: () => ({ refresh: () => {}, dispose: () => {} }),
     openTerminal: () => {},
-    openBrowserExtensionSetup,
     openComputerUseAccessibilitySetup: async () => true,
     reportRendererBoot: rendererBoot,
     setThemeSource,
@@ -129,8 +121,6 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
     setThemeSource,
     rendererBoot,
     rendererRoute: () => rendererRoute,
-    browserExtensionTrayInvoke: () => browserExtensionTrayInvoke,
-    openBrowserExtensionSetup,
     notify: async (next, prev) => { await watcher?.(next, prev) },
     notifyTheme: (preference) => {
       themePreference = preference
@@ -210,8 +200,6 @@ describe('desktop Host plugin', () => {
 
     await expect(harness.shell()?.requestModeChange('advanced')).rejects.toThrow('fixed to compatibility')
     expect(harness.update).not.toHaveBeenCalled()
-    await harness.browserExtensionTrayInvoke()?.()
-    expect(harness.openBrowserExtensionSetup).toHaveBeenCalledOnce()
   })
 
   it('forwards same-origin renderer boot reports through the Host route', async () => {

@@ -1,98 +1,90 @@
-# e-Mate Skill Hub → Harness Skill Provider 兼容合同
+# e-Mate 2.0.11 Skill Hub 与 DSH Skill 合同
 
-## 1. 不重建市场
+## 1. 一个市场、一个运行时、一个组件
 
-e-Mate 2.0.9 保留 e-Mate 2.0.5 已实现的 Skill Hub 行为和线上数据模型。公开目录继续支持用户上传、其他用户发现、查看版本、下载和本机安装。2.0.9 不创建第二套市场、第二种 Skill ZIP 或第二个 Skill Store。
+e-Mate 沿用 2.0.5 Skill Hub 的公开目录与不可变版本模型，不创建第二套市场、ZIP 格式或 Skill Store。2.0.11 的适配面只有一个可热更新 Profile 组件 `@e-mate/dsh-plugin-skill-hub`；Host 事务、Agent Tools、Harness Connection RPC 和界面必须以同一版本发布。
 
-旧实现的权威来源：
+权威参考仍是：
 
-- 服务端注册表：`upstream/e-mate-2.0.5/ecorex/control_plane/skill_hub.py`
-- 客户端投影校验：`upstream/e-mate-2.0.5/desktop/src/v1/api/skillHubRuntimeContract.ts`
-- 能力中心交互：`upstream/e-mate-2.0.5/desktop/src/v1/components/SkillsWorkspace.tsx`
-- 运行接口：`/api/v1/skill-hub/skills...`
-- 注册表、Runtime、传输和种子包测试：`test_skill_hub_registry.py`、`test_skill_hub_runtime_api.py`、`test_skill_hub_transport.py`、`test_skill_hub_seed_gate.py`
+- 服务端注册表：`upstream/e-mate-2.0.5/ecorex/control_plane/skill_hub.py`；
+- 服务端投影：`upstream/e-mate-2.0.5/desktop/src/v1/api/skillHubRuntimeContract.ts`；
+- 用户流程：`upstream/e-mate-2.0.5/desktop/src/v1/components/SkillsWorkspace.tsx`；
+- 本地解析与调用：固定 rc.7 的 `@deepseek-ai/dsh-skill-filesystem`、`ctx.skills` 与 `@deepseek-ai/dsh-tool-skill`。
 
-## 2. 两种对象不可混淆
-
-| 对象 | 运行方式 | 安装位置 | 权限 |
+| 对象 | 运行方式 | 安装位置 | 发布边界 |
 |---|---|---|---|
-| Skill Hub ZIP | Harness `skill-filesystem` + `tool-skill` | `$DSH_HOME/skills/<slug>/` | Markdown 指令和相对资源；调用能力仍受 Harness Tool/Approval 约束 |
-| Cordis JS 插件 | Harness dynamic Cordis runner/guard | 目标项目定义的动态包存储 | 必须单独审批、隔离和登记服务/slot/tool 权限 |
-| e-Mate 内置能力插件 | profile 固定组合 | npm 只读资源 + `$DSH_HOME` 插件状态 | 产品版本哈希和发布验收 |
+| Skill Hub ZIP | DSH Skill provider 与 `skill` Tool | `$DSH_HOME/skills/<slug>/` | Markdown 指令及相对资源；不能携带 Cordis JS 或原生可执行文件 |
+| Cordis 插件 | DSH Profile/Cordis guard | 签名 Profile generation | 独立组件 ABI、权限与发布门禁 |
+| Desktop Base | deepseek-harness-desktop rc.7 封装 | 应用安装目录 | 只提供稳定系统、窗口、更新和 Profile seam |
 
-Skill Hub 的 `.zip` 不能携带并激活任意 Cordis Host/Client JavaScript。把两者混成一个“万能插件包”会绕过目标项目已有的 Guard 和用户审批，明确禁止。
-
-## 3. 浏览器与 Host 通路
+## 2. 同一条用户链路
 
 ```text
-SkillsWorkspace or Harness Agent Skill Hub Tool
-  → e-Mate Skill Hub Host service
-  → browser calls use Harness Connection RPC: /emate.skillHub/<endpoint>
-  → Agent calls target ctx.tools registrations; mutations use ctx.jobs
-  → e-Mate Host adapter
-  → 已有 Skill Hub HTTPS API
-  → 哈希/投影/身份校验
-  → 原子安装到 $DSH_HOME/skills
-  → Harness skill-filesystem watcher 自动刷新目录
+用户自然语言 / Skill Hub 页面
+  -> 固定 DSH Agent Tool 或 Harness Connection /emate.skillHub
+  -> @e-mate/dsh-plugin-skill-hub
+  -> emateIdentity 认证的 Skill Hub HTTPS API
+  -> ZIP 摘要与供应链校验
+  -> 每 slug 锁 + 持久 WAL + 原子目录切换
+  -> 固定 rc.7 DSH provider readback
+  -> DSH Job 终态与 receipt/inventory 投影
 ```
 
-浏览器代码不得直接 `fetch()` Hub、保存企业 bearer 或建立自己的重连/下载状态总线。目录、详情、发布意图、安装进度和错误通过 Harness 既有 Connection/Job/Slot 数据投影展示。
+浏览器不得直连 Hub、持有 bearer、读取宿主绝对路径或另建任务总线。聊天端不得按关键词执行分支；Agent 只能从以下类型化 Tool schema 选择动作：
 
-聊天端也不做“在线更新”“安装某 Skill”等关键词匹配。Agent Loop 依据 `e_mate_skill_hub_search|download|install|publish` 的目标 Tool schema 选择操作；目标对象必须作为结构化参数传入。Tool 调用、审批、后台 Job、失败和终态继续写入 Harness 真实会话事件，聊天 renderer 不按这些工具名写分支。
+- 只读：`e_mate_skill_hub_search`、`e_mate_skill_hub_detail`、`e_mate_skill_hub_inventory`；
+- 共享 Skill：`e_mate_skill_hub_download`、`install`、`update`、`enable`、`disable`、`uninstall`；
+- 当前用户发布：`e_mate_skill_hub_publish`、`e_mate_skill_hub_delete_publication`。
 
-## 4. 保留的线上合同
+所有 mutation 都由当前 Agent 所有的原生 DSH Job 执行。Tool 会先解析精确 slug、版本和 SHA-256，再通过 `ctx.userQuestions` 展示目标；发布确认还绑定确认时实际生成的 ZIP 字节，确认后目录若变化即拒绝上传。删除发布必须携带精确 slug/version/hash，由服务端重新校验当前身份的所有权；它不等于本地卸载。
 
-- `GET /api/v1/skill-hub/skills`：搜索、分类、标签、原始来源。
-- `GET /api/v1/skill-hub/skills/{slug}`：详情和版本历史。
-- `GET /api/v1/skill-hub/skills/{slug}/versions/{version}/package`：不可变 ZIP，响应摘要必须等于目录 `package_sha256`。
-- `POST /api/v1/skill-hub/skills`：认证用户发布 ZIP；服务端解析真实 slug/version，不信任浏览器声明。
-- 同一 slug + version 不可覆盖；包内容、版本、上传者、来源和审计记录不可在原地改写。
-- Agent 发布只能引用当前会话已授权的 Harness attachment/artifact ID，不接受模型生成的任意本机路径；下载也返回 Harness artifact/HTTP 下载对象，而不是向浏览器暴露宿主绝对路径。
+## 3. 线上 API 合同
 
-2.0.9 Host adapter 只处理本机身份代理、摘要校验、安装 receipt 和本地目录切换。中央注册表仍由已有 Skill Hub 服务负责，不归企业管理端插件控制面。
+- `GET /skills`：服务端处理 query/category/tag/source、1–100 条分页和 opaque cursor；客户端不得只取首页后本地假过滤。
+- `GET /skills/{slug}`：同一 slug 的详情和不可变版本历史。
+- `GET /skills/{slug}/versions/{version}/package`：响应头、本地字节和目录对象三方 SHA-256 必须相等。
+- `POST /skills`：发布当前用户本机已安装的声明式 Skill；服务端解析真实 slug/version，不信任客户端声明。
+- `DELETE /skills/{slug}/versions/{version}`：只为当前身份拥有且 SHA-256 完全相等的版本写删除终态，不覆盖或改写已发布字节。
+- 安装意图的 consume/complete 必须绑定身份、设备、slug、version 和 digest。相同 completion receipt 的相同终态必须幂等；`POST /install-intents/reconcile` 必须可区分 `claimed|installed|failed`，供客户端在响应丢失或重启后对账。
 
-## 5. 安装事务
+当前仓库只拥有客户端组件，不拥有线上 Skill Hub 服务的权威部署。现存 2.0.5 服务尚未证明具备幂等 complete、reconcile 和所有权 DELETE；在对应服务端版本发布并通过跨用户验收前，生产 Skill Hub 全链路保持未关闭，客户端不得用本地 fixture 冒充上线证据。
 
-1. 取得目录中选定的 `slug/version/package_sha256`。
-2. 创建一次性安装意图，绑定账号、租约、设备实例、slug、version 和摘要。
-3. 下载到 `$DSH_HOME/e-mate/cache/skill-hub/<intent>.zip.part`。
-4. 校验传输长度、响应摘要和本地 SHA-256。
-5. 在隔离临时目录中检查 ZIP，再解析 `SKILL.md` frontmatter。
-6. 确认 frontmatter name/version 与目录对象匹配，且 Harness 能解析该 Skill。
-7. 写完整安装 receipt 后，原子切换 `$DSH_HOME/skills/<slug>`。
-8. 由 `skill-filesystem` watcher 刷新；Host 读取真实目录确认已可发现。
-9. 任一步失败都删除临时文件并保持旧版本原样。
+## 4. 本地生命周期事务
 
-Agent 调用时，步骤 2–9 由一个所有者绑定到当前 Agent 的 Harness Job 执行。Tool 先完成参数、身份租约和目标版本预检，再调用 `ctx.jobs.start`；取消通过 Job hooks 传播到网络请求和临时目录清理。前端关闭或刷新不会制造新的事务，重连后按同一 Job/Event ID 恢复展示。
+每个 slug 的 `install/update/enable/disable/uninstall` 共享一个进程内串行器和 `$DSH_HOME/e-mate/skill-hub/transactions/<slug>` 持久 WAL；同一 `DSH_HOME` 的并发进程通过事务目录争用同一个所有者。步骤如下：
 
-同版重装只重新校验；升级先保留旧目录快照，验证新目录被目标 Skill provider 识别后再清理。降级需要用户明确选择旧版本。
+1. 从严格目录投影选择 exact slug/version/digest；不支持当前运行时的候选在下载后、安装前失败。
+2. 下载到 mode-0600 缓存，校验长度、响应摘要、本地摘要和 ZIP 边界。
+3. 解压到候选目录，由固定 rc.7 `FileSystemSkillProvider` 解析并回读唯一 `SKILL.md`；第二套 frontmatter parser 不能作为提交依据。
+4. 安装/更新先取得远端 completion receipt，再原子切换候选；固定 `ctx.skills` 必须从目标路径读到相同 Skill，才可提交本地 receipt。
+5. 远端 completion 明确接受后清理上代；明确拒绝则恢复上代。响应未知时立即恢复上代、保留 WAL，并返回 `recovery-pending`，绝不报告 completed/killed。
+6. 重启扫描 WAL，向服务端 reconcile；只有远端确认为 installed 才重新激活候选，否则保持上代或继续 pending。
+7. disable/uninstall 先原子移入受管隔离目录，确认原生 provider 已不可见后提交；enable 反向切换并要求原生 provider 可见。
 
-## 6. 上传和供应链门
+`install` 只允许首次安装或同版本同摘要幂等复核；已有不同版本必须明确调用 `update`。降级只有 `allow_downgrade=true` 且确认框显示目标旧版本时允许。一个失败事务不能回滚另一个已返回成功的较新事务。
 
-沿用旧项目门禁并补充目标适配检查：
+“已安装”页以 Skill Hub receipt inventory 为所有权真相，再叠加原生 provider readiness；当前会话 `skill.list` 不能替代它。页面重载通过原生 Jobs registry 重绑 active/recent UI Job，终态后重新读取 inventory。下载返回随机凭证，最多 32 个、五分钟有效；HEAD 不消费，首次成功 GET 后删除，响应前再次校验 SHA-256，组件启动/卸载时清除残留缓存。
 
-- ZIP ≤ 10 MB；限制条目数、单文件和总解压大小。
-- 拒绝路径穿越、绝对路径、重复规范化路径、符号/硬链接、设备文件、加密条目和嵌套归档。
-- 根目录必须有唯一 `SKILL.md`；名称为 Harness 接受的 kebab-case，版本为不可变语义版本。
-- 摘要、slug、version、来源、许可证、上传者和服务端时间进入不可变记录。
-- 拒绝 native binary、安装脚本、package lifecycle script 和伪装 Cordis JS 包。
-- 工具/平台依赖不满足时标记 `unsupported`，不得声称已启用。
-- 发布成功只代表目录可见；安装和执行仍由每台设备上的用户与 Harness 权限边界决定。
+## 5. ZIP 与发布安全边界
 
-## 7. 企业边界
+- 压缩包、条目数、单文件和总解压字节均有上限；拒绝路径穿越、绝对路径、重复规范路径、链接、设备文件、加密条目和嵌套归档。
+- 根目录必须有唯一 `SKILL.md`，name 为 DSH 接受的 kebab-case，version 为不可变 SemVer；原生 DSH parser 的 invocation/readiness 结论优先。
+- 拒绝可执行位、native binary、安装脚本、package lifecycle 与伪装 Cordis 包。
+- 发布只接受已安装 Skill 的受管 slug 或界面已读取的 ZIP 字节；Agent Tool 不接受模型提供的任意本机路径。
+- 摘要、slug、version、分类、来源、许可证、上传者和服务端时间进入不可变记录。同 slug/version 不同摘要必须拒绝。
+- Hub 内容不是产品插件，安装它不会扩大 DSH Tool、Approval、sandbox 或 Computer Use 权限。
 
-Skill Hub 是用户主动使用的产品目录，不属于 `emate.identity`、`emate.modelPolicy` 或 `emate.audit`。企业管理端可以通过旁路审计看到经过脱敏的发布/安装结果，但不能：
+## 6. 企业边界
 
-- 静默安装、启用、停用、升级或删除 Skill；
-- 把上传内容推送到设备；
-- 跳过本地摘要、安全、依赖或审批检查；
-- 把 Skill Hub receipt 当成工具执行授权。
+Skill Hub 是用户主动使用的产品能力，不属于管理端的 `emate.identity`、`emate.modelPolicy` 或 `emate.audit` 控制面。管理端只提供鉴权并可接收脱敏结果审计；不得静默安装、启停、升级、卸载、删除发布或把 ZIP 推送到设备。控制面或审计不可用不能删除已接受的本地 Skill，也不能把 receipt 当成工具授权。
 
-## 8. 验收
+## 7. 发布与验收门禁
 
-- 用户 A 发布一个合规 Skill；用户 B 能搜索、查看同一摘要和版本历史并下载。
-- B 安装后，Harness `skill-filesystem` 的真实目录出现 Skill；重启后仍存在。
-- 重复安装幂等；同 slug/version 不同摘要被拒；失败升级保持旧版。
-- 路径穿越、链接、压缩炸弹、JS 插件伪装、摘要不符和缺失许可证均失败关闭。
-- 发布不自动安装；企业端无插件启停接口；审计失败不阻断已授权的本地安装事务落盘。
-- 用户在聊天中明确提出搜索、下载、安装或发布意图时，Agent 能调用真实 Tool 并完成同一事务；未知 Skill、模糊目标或没有附件时失败关闭，不由前端猜测。
+Skill Hub Host、Agent、RPC 和 UI 任一源文件变化，都必须由 change-impact 归类为同一个 portable plugin-only 组件。其发布不重建安装器，但必须：
+
+1. 用已接受 Base SDK 构建组件并验证 exact rc.7 peer ABI；
+2. 运行原生 parser/provider、Agent Tool/Job、并发、取消、崩溃/重启恢复、界面 remount 和一次性下载行为测试；
+3. 将新组件与签名 accepted-component-set 组装完整 Profile，执行 Host boot、Client Loader settle、Desktop restart/health/rollback；
+4. 只上传不可变的新组件字节，最后原子激活签名 desired state，并从公共端回读同一 generation/hash。
+
+生产关闭条件还包括：用户 A 发布，用户 B 分页搜索、查看同一摘要、下载、安装并经真实 `/skill`/Agent 调用；B 完成更新、禁用、重启、启用和卸载；A 删除自己发布的精确版本，而 B 无权删除；安装完成响应丢失后重启能幂等对账。缺少线上 API、真实账号、签名 generation、平台安装态或实际 Skill 调用任一证据，都只能记录为局部门禁通过，不能宣称 Skill Hub 已上线闭环。

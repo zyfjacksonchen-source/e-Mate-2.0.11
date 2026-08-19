@@ -18,23 +18,25 @@ const typescriptSources = [
   'packages/dsh/src/profile/health.ts',
   'packages/dsh/src/profile/agent-operations.ts',
   'packages/dsh/src/profile/schedule-import.ts',
-  'packages/dsh/src/profile/skill-hub-agent.ts',
+  'packages/dsh-plugin-skill-hub/src/index.ts',
+  'packages/dsh-plugin-skill-hub/src/skill-hub.ts',
+  'packages/dsh-plugin-skill-hub/src/client/index.tsx',
   'packages/dsh/src/profile/identity/index.ts',
   'packages/dsh/src/profile/identity/agreements.ts',
   'packages/dsh/src/profile/model-policy.ts',
   'packages/dsh/src/profile/audit.ts',
-  'packages/dsh/src/profile/emate-shell/index.ts',
+  'packages/dsh/profile/plugins/emate-shell/src/index.ts',
   'packages/dsh/profile/plugins/emate-shell/src/client/index.ts',
   'packages/dsh/profile/plugins/emate-shell/src/client/home.tsx',
   'packages/dsh/profile/plugins/emate-shell/src/client/sidebar.tsx',
 ]
 for (const path of typescriptSources) readFileSync(resolve(root, path), 'utf8')
 
-if (manifest.version !== '2.0.10') throw new Error(`workspace version drifted: ${manifest.version}`)
-if (release.name !== '@e-mate/dsh' || release.version !== '2.0.10') {
+if (manifest.version !== '2.0.11') throw new Error(`workspace version drifted: ${manifest.version}`)
+if (release.name !== '@e-mate/dsh' || release.version !== '2.0.11') {
   throw new Error(`release identity drifted: ${release.name}@${release.version}`)
 }
-if (!release.description.startsWith('e-Mate 2.0.10')) throw new Error('release product name drifted')
+if (!release.description.startsWith('e-Mate 2.0.11')) throw new Error('release product name drifted')
 if (release.bin?.['e-mate'] !== 'lib/bin.js') throw new Error('TypeScript-built CLI entry drifted')
 if (!target.includes('Product name: `e-Mate`')) throw new Error('product name drifted')
 if (!target.includes('Repository: `zyfjacksonchen-source/e-Mate`')) throw new Error('repository identity drifted')
@@ -61,4 +63,4 @@ for (const [name, path, expected] of [
   }
 }
 
-console.log('target contract: e-Mate 2.0.10 pins verified')
+console.log('target contract: e-Mate 2.0.11 pins verified')

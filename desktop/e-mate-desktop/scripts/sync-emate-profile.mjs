@@ -10,7 +10,6 @@ const repositoryRoot = resolve(desktopRoot, '..', '..')
 const source = join(repositoryRoot, 'packages', 'dsh', 'profile')
 const destination = join(desktopRoot, 'build', 'e-mate-profile')
 const mark = join(source, 'plugins', 'emate-shell', 'assets', 'emate-mark.png')
-const browserExtension = join(repositoryRoot, 'packages', 'dsh-plugin-browser', 'extension', 'dist')
 const require = createRequire(import.meta.url)
 const desktopManifest = JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8'))
 const version = desktopManifest.version
@@ -23,7 +22,6 @@ const ecosystemPlugins = [
   'dsh-at-file',
   'dsh-better-sidebar',
   'dsh-file-viewer',
-  'dsh-search-mcp',
   'dsh-turn-fold',
   'dsh-visualize',
 ]
@@ -33,7 +31,6 @@ for (const path of [
   join(source, 'bundles', 'registry.json'),
   join(source, 'plugins', 'health.js'),
   join(source, 'plugins', 'emate-shell', 'lib', 'client.js'),
-  join(browserExtension, 'manifest.json'),
   mark,
 ]) {
   const metadata = await lstat(path)
@@ -50,13 +47,6 @@ await cp(source, destination, {
   dereference: false,
   filter: async path => !(await lstat(path)).isSymbolicLink(),
 })
-await cp(browserExtension, join(destination, 'browser-extension'), {
-  recursive: true,
-  force: true,
-  dereference: false,
-  filter: async path => !(await lstat(path)).isSymbolicLink(),
-})
-
 for (const name of ecosystemPlugins) {
   const packageRoot = dirname(require.resolve(`${name}/package.json`))
   await cp(packageRoot, join(destination, 'ecosystem', name), {

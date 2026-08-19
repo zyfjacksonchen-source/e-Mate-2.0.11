@@ -17,11 +17,18 @@ import {
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { copyFile, lstat, mkdir, realpath, writeFile } from 'node:fs/promises'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { basename, isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
+import {
+  checkProfileUpdate,
+  installProfileUpdate,
+  type DesktopProfileUpdateAdapter,
+  type ProfileUpdateAvailable,
+  type ProfileUpdateContext,
+} from './profile-update.ts'
 import { scheduleMacUpdateInstallation } from './mac-update-installer.ts'
 import type {
   DesktopNotification,
@@ -66,6 +73,11 @@ export function desktopProductVersion(moduleUrl: string = import.meta.url): stri
   return (value as { version: string }).version
 }
 
+/** Resolve the CommonJS preload emitted beside the Electron runtime bundle. */
+export function desktopPreloadPath(moduleUrl: string = import.meta.url): string {
+  return fileURLToPath(new URL('./preload.cjs', moduleUrl))
+}
+
 const PRODUCT_VERSION = desktopProductVersion()
 const RESOURCE_CONTEXT_SCRIPT = `Reflect.get(globalThis, '__EMATE_DESKTOP_RESOURCE__') ?? null`
 const MAX_CONTEXT_IMAGE_BYTES = 32 * 1024 * 1024
@@ -98,16 +110,29 @@ function safeResourceName(name: string, fallback: string): string {
   return value === '' || value === '.' || value === '..' ? fallback : value.slice(0, 180)
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+}
+
+/** Main-process deadline for one Renderer generation to settle its client Loader. */
+export const RENDERER_BOOT_TIMEOUT_MS = 30_000
+
+/** Failure class used by startup recovery to distinguish a hung Renderer. */
+export type RendererBootFailureReason = 'renderer-failed' | 'renderer-timeout'
+
 /** Native adapter used by the e-Mate launcher and owned by its Cordis shell plugin. */
 export class ElectronDesktopRuntime implements DesktopRuntime {
   readonly platform: DesktopPlatform
-  readonly updates: DesktopUpdateAdapter = {
+  readonly updates: DesktopUpdateAdapter & { profile: DesktopProfileUpdateAdapter | undefined } = {
     get isPackaged() { return app.isPackaged },
     get canDownload() { return app.isPackaged && (process.platform === 'darwin' || process.platform === 'win32') },
     get platform() { return process.platform === 'darwin' || process.platform === 'win32' ? process.platform : undefined },
     get currentVersion() { return PRODUCT_VERSION },
     get statePath() { return join(app.getPath('userData'), 'updates', 'state.json') },
     request: (url, init) => net.fetch(url, init),
+    profile: undefined,
     confirmDownload: version => this.confirmUpdateDownload(version),
     showManualCheckResult: result => this.showManualUpdateCheckResult(result),
     downloadAndOpen: (update, signal) => this.downloadAndOpenUpdate(update, signal),
@@ -123,6 +148,9 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private readonly trayItems = new Map<symbol, DesktopTrayItem>()
   private terminalSpec: DesktopTerminalSpec | undefined
   private rendererBootReported = false
+  private rendererBootMonitoring = false
+  private rendererBootTimer: NodeJS.Timeout | undefined
+  private bootFailureReason: RendererBootFailureReason | undefined
   private markMacUpdateShutdownReady: (() => void) | undefined
 
   constructor(
@@ -133,6 +161,59 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       throw new Error(`@e-mate/desktop: unsupported Electron platform ${process.platform}`)
     }
     this.platform = process.platform
+  }
+
+  /** Bind the signed component updater to the generation selected for this process. */
+  configureProfileUpdates(context: Omit<ProfileUpdateContext, 'request'>): void {
+    if (this.updates.profile !== undefined) throw new Error('@e-mate/desktop: Profile updater is already configured')
+    const configured: ProfileUpdateContext = {
+      ...context,
+      request: (url, init) => net.fetch(url, init),
+    }
+    this.updates.profile = {
+      check: signal => checkProfileUpdate(configured, signal),
+      confirm: update => this.confirmProfileUpdate(update),
+      install: async (update, signal) => {
+        await installProfileUpdate(configured, update, signal)
+        this.showNotification({
+          title: 'Installing e-Mate Components',
+          body: `e-Mate ${update.releaseVersion} will reopen with the verified component generation.`,
+        })
+        void this.requestRestart().catch((cause: unknown) => {
+          process.stderr.write(`@e-mate/desktop: failed to restart after component update: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+        })
+      },
+    }
+  }
+
+  /** Terminal failure class for the first Renderer boot report, when it failed. */
+  get rendererBootFailureReason(): RendererBootFailureReason | undefined {
+    return this.bootFailureReason
+  }
+
+  /** Arm one main-process deadline immediately before the native shell starts loading. */
+  beginRendererBootMonitoring(timeoutMs: number = RENDERER_BOOT_TIMEOUT_MS): void {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+      throw new Error('@e-mate/desktop: renderer boot timeout must be a positive integer')
+    }
+    if (this.rendererBootReported || this.rendererBootMonitoring) {
+      throw new Error('@e-mate/desktop: renderer boot monitoring already started')
+    }
+    this.rendererBootMonitoring = true
+    this.rendererBootTimer = setTimeout(() => {
+      this.failRendererBoot(
+        'renderer-timeout',
+        `The Renderer did not report boot health within ${String(timeoutMs)}ms.`,
+      )
+    }, timeoutMs)
+    this.rendererBootTimer.unref()
+  }
+
+  /** Stop a pending deadline while startup is being torn down for another failure. */
+  stopRendererBootMonitoring(): void {
+    this.rendererBootMonitoring = false
+    if (this.rendererBootTimer !== undefined) clearTimeout(this.rendererBootTimer)
+    this.rendererBootTimer = undefined
   }
 
   /** @inheritdoc */
@@ -243,40 +324,6 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   }
 
   /** @inheritdoc */
-  async openBrowserExtensionSetup(): Promise<void> {
-    try {
-      const spec = this.terminalSpec
-      if (spec === undefined) throw new Error('@e-mate/desktop: browser extension profile is not configured')
-      const manifest = join(spec.homeDir, 'browser-extension', 'manifest.json')
-      if (!existsSync(manifest)) throw new Error(`browser extension is missing: ${manifest}`)
-
-      shell.showItemInFolder(manifest)
-      if (this.platform === 'darwin') {
-        await this.spawnNative('/usr/bin/open', ['-a', 'Google Chrome', 'chrome://extensions'])
-      } else if (this.platform === 'win32') {
-        const chrome = [
-          process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-          process.env.ProgramFiles && join(process.env.ProgramFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-          process.env['ProgramFiles(x86)'] && join(process.env['ProgramFiles(x86)'], 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        ].find((candidate): candidate is string => candidate !== undefined && existsSync(candidate))
-        if (chrome === undefined) throw new Error('Google Chrome is not installed in a standard location')
-        await this.spawnNative(chrome, ['--new-tab', 'chrome://extensions'])
-      } else {
-        throw new Error('browser extension setup is unavailable on this platform')
-      }
-      this.showNotification({
-        title: 'e-Mate 浏览器扩展安装已准备',
-        body: 'Chrome 扩展页和内置扩展目录已打开，e-Mate Agent 将继续完成可自动执行的步骤。',
-      })
-    } catch (cause) {
-      const error = cause instanceof Error ? cause : new Error(String(cause))
-      process.stderr.write(`@e-mate/desktop: failed to open browser extension setup: ${error.message}\n`)
-      dialog.showErrorBox('无法加载 e-Mate 浏览器扩展', error.message)
-      throw error
-    }
-  }
-
-  /** @inheritdoc */
   async openComputerUseAccessibilitySetup(): Promise<boolean> {
     if (this.platform !== 'darwin') {
       throw new Error('computer-use Accessibility setup is available only on macOS')
@@ -296,6 +343,8 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   reportRendererBoot(report: RendererBootReport): void {
     if (this.rendererBootReported) return
     this.rendererBootReported = true
+    this.stopRendererBootMonitoring()
+    if (report.status === 'failed') this.bootFailureReason ??= 'renderer-failed'
     try {
       this.onRendererBoot(report)
     } catch (cause) {
@@ -323,6 +372,13 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   /** @inheritdoc */
   prepareToQuit(): void {
     this.quitting = true
+    this.stopRendererBootMonitoring()
+  }
+
+  private failRendererBoot(reason: RendererBootFailureReason, error: string): void {
+    if (!this.rendererBootMonitoring || this.rendererBootReported) return
+    this.bootFailureReason = reason
+    this.reportRendererBoot({ status: 'failed', plugins: [], error })
   }
 
   /** Allow the detached updater to replace the app only after Cordis disposed cleanly. */
@@ -405,6 +461,24 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       title: 'e-Mate Update Available',
       message: `e-Mate ${version} is available.`,
       detail: 'e-Mate will download, verify, install, and reopen automatically.',
+      buttons: ['Update and Restart', 'Later'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    })
+    return result.response === 0
+  }
+
+  /** Show the exact signed component delta before any component payload is downloaded. */
+  private async confirmProfileUpdate(update: ProfileUpdateAvailable): Promise<boolean> {
+    const components = update.changedComponents.length === 0
+      ? 'No component payload changed; only the signed generation receipt will update.'
+      : update.changedComponents.map(component => `• ${component.id} ${component.version}`).join('\n')
+    const result = await dialog.showMessageBox({
+      type: 'info',
+      title: 'e-Mate Component Update Available',
+      message: `e-Mate ${update.releaseVersion} component generation ${update.sequence} is available.`,
+      detail: `${components}\n\nDownload: ${formatBytes(update.downloadBytes)}\nThe update will be verified, activated atomically, and committed only after restart health checks pass.`,
       buttons: ['Update and Restart', 'Later'],
       defaultId: 1,
       cancelId: 1,
@@ -697,7 +771,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (this.platform === 'darwin') app.dock?.setIcon(icon)
     const origin = new URL(spec.url).origin
     nativeTheme.themeSource = spec.readThemeSource()
-    const window = new BrowserWindow(desktopWindowOptions(spec, icon, this.platform))
+    const window = new BrowserWindow(desktopWindowOptions(spec, icon, this.platform, desktopPreloadPath()))
     window.accessibleTitle = spec.windowTitle
     if (this.platform === 'win32') window.removeMenu()
     this.window = window

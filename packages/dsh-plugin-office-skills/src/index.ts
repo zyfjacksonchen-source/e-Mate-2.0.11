@@ -1,4 +1,4 @@
-/** Lightweight, local Office execution for the e-Mate rc.6 Harness profile. */
+/** Lightweight, local Office execution for the e-Mate rc.7 Harness profile. */
 
 import { randomUUID } from 'node:crypto'
 import { link, lstat, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
@@ -56,7 +56,7 @@ export const name = 'emate-office-skills'
 export const inject = ['skills', 'tools', 'jobs', 'emateCapabilities']
 export const OFFICE_ADAPTER_STATUS = Object.freeze({
   state: 'ready' as const,
-  harnessVersion: '0.1.0-rc.6' as const,
+  harnessVersion: '0.1.0-rc.7' as const,
   runtimeInstalled: true as const,
   toolsRegistered: 2 as const,
   reason: 'Pure JavaScript DOCX, XLSX, PPTX, and PDF execution is installed locally; unsupported lossless binary edits fail closed.',
@@ -341,7 +341,7 @@ export function apply(ctx: OfficeContext): void {
     id: 'office-skills', title: 'Office 办公',
     summary: '本地创建、读取并以规范化内容安全生成 DOCX、XLSX、PPTX 和 PDF；复杂第三方版式不做伪无损覆盖。',
     icon_key: 'office', order: 20, actions: [],
-    status: async () => ({ state: 'ready', detail: 'DOCX / XLSX / PPTX / PDF · local rc.6 Tools', action_ids: [] }),
+    status: async () => ({ state: 'ready', detail: 'DOCX / XLSX / PPTX / PDF · local rc.7 Tools', action_ids: [] }),
   }), 'emate.office-skills: capability metadata')
 }
 

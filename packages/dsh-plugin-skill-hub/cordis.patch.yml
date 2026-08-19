@@ -1,0 +1,4 @@
+- insert:
+    - id: emate-skill-hub
+      name: '@e-mate/dsh-plugin-skill-hub'
+      inject: [tools, jobs, skills, userQuestions, systemPrompt, emateIdentity, connection, webServer]

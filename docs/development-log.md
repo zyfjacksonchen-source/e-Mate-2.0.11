@@ -1438,3 +1438,79 @@ The text highlights AI hallucination and human verification, legal use, real-act
 
 - macOS-only 增量 run `32232210491` 复用已通过的 Profile 与 Windows 制品；正式 DMG 的 `hdiutil verify`、Info.plist、Universal 主程序、全部原生 inventory、Computer Use helper manifest 和完整 ad-hoc `codesign --verify --deep --strict` 均通过，arm64 在 10.876 秒到达可交互 shell。唯一失败是 Apple Silicon runner 上的 x86_64/Rosetta 进程在 180 秒内未完成全新 Profile 的完整 Web boot；本机同一候选复现为进程持续存活、stderr 为空、60 秒仍无 renderer 回执。
 - 对照 2.0.7/2.0.8 成功链，包体双架构/签名门禁与安装态验收原本分离；把 Rosetta 首次翻译加完整 fresh-profile health 当成 Intel 启动性能，会重复构建同一正式包且不能代表原生 Intel。最终不放宽 180 秒，也不退回 smoke：arm64 仍须到达真实交互 shell；x86_64 继续从复制到临时 `Applications` 的正式包经 `arch -x86_64` 真实启动，但只等待 `app.whenReady()` 后的 Electron 原生就绪回执，并继续受主程序、全部 native inventory 与完整签名门禁约束。原生 Intel 性能只能在 Intel 硬件上计量，不能用 Rosetta 冷翻译冒充。
+
+## 2026-08-19 · 2.0.11 S00 增量发布基线与禁止漂移合同
+
+- 2.0.11 唯一基线锁定为已公开激活的 2.0.10 提交 `65a995fa795d7007dd90818c939c5185b3fc1a1d`。build-only run `32235790388` 成功；publish-only 首次 run `32238137486` 只在 R2 阶段失败，重跑 `32238252808` 未重建任何制品并成功激活。公开 `desktop/latest.json` 回读仍绑定该提交：macOS `384418794` bytes / `c40840ef41017939ef583b36bd804d7c9a30cfc9f9f132b67896c2c9a8bf0ac1`，Windows `294003755` bytes / `44ed621f65c093c5323ff77d31a24211dd51d112dc83e24d260de340376bddea`。
+- 新分支 `agent/e-mate-2.0.11` 和独立工作树从上述精确提交创建。固定 Harness 仍为 fork `df78045a127e32cb5b942defba52c539590d1596` / upstream `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca` / `0.1.0-rc.7`；没有修改 submodule。对照 `anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add` 后，继续采用单 Electron/Cordis 进程、Profile 层、原生 `dsh plugin --profile` 对账及既有启动/重启健康边界，不新增 Loader、Host、Session、Transport 或更新协议。
+- 当前仓库尚不能声称 plugin-only：根 `test/build`、CI 和 Desktop build 会构建全部一方插件与固定 Harness；`sync-emate-plugin-bundles.mjs` 把 14 个包复制进一份 Profile，`sync-emate-profile.mjs` 再把完整 Profile、浏览器扩展、生态插件与运行时嵌入 Desktop。该耦合在可执行边界门禁通过前必须保守进入 Base lane，不能用路径过滤制造假增量。
+- 本切片先把 Desktop 基座、Profile 组件、第三方 overlay、精确兼容、双确认、原子切换和 fail-closed 分类写入仓库合同。下一片实现一份 Node 标准库 change-impact 分类器及表驱动测试；CI 与 Release 只能消费同一结果，未知或共享输入一律升级到 Base。
+
+## 2026-08-19 · 2.0.11 S00 原生创造模式第一准则与封装门禁
+
+- 对照固定 DSH rc.7 源码确认「创造模式」就是 shipped `cordis` Agent preset：它在标准 coding preset 之上增加 `cordis_inspect_*`、动态插件 define/run/stop/undefine 生命周期，以及 `cordis-plugin-development`、`editing-cordis-compositions` 两份官方 skill。动态包只存在当前 DSH 进程内存，重启即消失，且隔离不是恶意代码安全边界；因此它适合作为插件开发内环，不是发布格式或上线旁路。
+- 对照 `anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add` 发现原生 Desktop 明确把完整 shipped preset 根作为 `system` root。e-Mate 2.0.10 封装此前只把改写 persona 的一个 `standard` 复制到受管根并替换全部 roots，同时禁用 `ui-agent-preset`；虽然包内已有 rc.7 Host/Client runner 依赖，`standard/code/minimal/cordis` 名单和创造模式入口实际被切断。
+- `AGENTS.md` 和本目标合同现把“插件平面先走原生创造模式检查和可逆试装”固定为第一开发准则：成功实验必须重新实现为普通仓库 Profile 组件，并继续经过精确 Base/Harness 兼容、组件/组合测试、签名、原子 generation、renderer health 和回滚。创造模式为显式 opt-in、信任级别等同 shell，不能成为普通会话默认值，也不接触签名密钥、发布凭据或 Feed 激活权限；Base-only 变更必须记录原因并回到固定 Desktop 生命周期。
+- Desktop Profile 现在按 first-root-wins 同时组合两个只读 `system` root：受管 e-Mate `standard` 在前，只 shadow 产品 persona；原生 DSH shipped root 在后，继续提供 `code/minimal/cordis`。`standard` 仍是默认 preset，UI 只恢复原生 preset 选择/创作入口。`shippedPresetRoot()` 同步采用原生 Desktop 的 `app.asar → app.asar.unpacked` 物理路径规则，没有复制、修改或另造 shipped preset。
+- 仓库门禁同时锁定第一准则文本、两个 preset root、显式启用的原生 UI 行，以及正式包内四个 preset 的 composition/metadata 与两份创作 skill。验证结果：`node --test scripts/change-impact.test.mjs` 为 `10/10`；Desktop `vitest run tests/profile.spec.ts tests/verify-packaged-runtime.spec.ts` 为 `44/44`；首次 DSH Profile 测试因生成态 `lib/e-mate.js` 尚未构建而在加载前失败，按既有根构建链生成全部 Profile 输入后，同一 `node --test packages/dsh/test/e-mate.test.mjs` 为 `38/38`。本切片没有发布、签名或激活任何组件，不能据此声称热更新事务已经闭环。
+
+## 2026-08-19 · 2.0.11 S03 Full Access 原生环境与 Computer Use 最小权限
+
+- 截图中的 `npx ... exit code 127` 不是 DSH sandbox 拒绝，而是 e-Mate 封装遗漏了原生 Desktop 在 Host boot 前执行的 login-shell 环境恢复：Finder 启动的 macOS App 只继承精简 PATH，即使当前 Agent 已是 `danger-full-access`，Bash/Tool 仍找不到用户终端中的命令。Desktop 现直接保留原生 `shell-environment` 路径，只接受绝对路径的 zsh/bash/fish、2 秒/1 MiB 截止，并在官方敏感变量 scrub 后仅合并 PATH 与固定开发环境 allowlist；恢复发生在 `loadLayeredEnv()` 快照、pnpm shim、Profile 和 Host boot 之前。
+- Computer Use 的 Full Access 映射继续按当前 Session 的 `sandboxPolicy.resolve()` 动态判断：只有 `danger-full-access` 绕过应用 lease，Default/Read-only/Workspace-write 仍走原生 exact grant/approval，未使用进程级 `allowAllApps`。同时删除了封装曾给高权限 Swift helper 追加的 Electron JIT、unsigned executable memory 与 disable-library-validation entitlement；build 现在复制上游 universal helper 并只重算 manifest SHA，不再二次扩权重签。
+- 聚焦验证：Desktop `shell-environment.spec.ts + package.spec.ts` 为 `44 pass / 1 skip`，Desktop TypeScript 无输出通过；Computer Use 重建后合同为 `2/2`，helper SHA-256 `6dbb7d4b171d9f480e046a4c69df6e3b41c8c5bf0decfabc6e5331c1dc79af91` 与 manifest 一致，`codesign -d --entitlements` 未返回 entitlement。该证据关闭源码和构建产物边界，不替代正式 App 从 Finder 冷启动后的用户 PATH/真实 TCC 装机验收。
+
+## 2026-08-19 · 2.0.11 S04 签名组件代启动、健康回滚与 Agent 自然语言更新
+
+- Desktop 现在从随 Base 打包的严格 `base-contract.json` 读取唯一 Ed25519 信任根，不接受多余字段、错误密钥类型或 Harness 身份漂移。启动先消费 pending generation，复验签名 desired-state、完整官方热更组件集合、每个 manifest、精确文件集合/权限/SHA-256 与 package 合同；缺失或损坏代沿 `last_known_good → previous_known_good → bundled` 有界回落，不再由旧 profile 安装逻辑静默覆盖成 Base 字节。
+- `installEmateDesktopProfile` 已接入通过复验的 content-addressed component roots，并把 generation id 写入安装回执。Renderer Loader 健康后才同时确认 Desktop Profile 与组件代；超时或失败会把非 bundled 代标记失败并请求重启上一个健康代。已健康代若以后发生磁盘损坏，也会在下一次启动回落。组件缓存仅在用户确认后的 staging 中修复损坏对象，active generation 不就地改写。
+- 自然语言“检查更新 / 更新插件 / 更新 e-Mate”继续走原生 Harness Agent Tool `e_mate_desktop_update` 和既有 `desktopUpdates` 服务，没有 Bash、npm/pnpm、关键字路由或第二更新器。手动/Agent 检查优先验证签名组件 desired-state；后台轮询也按 generation id 每代只推送一次同一个原生确认框。确认框展示发布版本、变化组件及剩余字节；确认后再次取得并比对同一 generation，只下载缺失 component closure、原子 stage 并重启。真实 rc.6 Base 收到 rc.7-only envelope 会先得到 `base-required`，再检查既有 Base installer；没有兼容 Base 时不下载或安装插件。
+- 聚焦验证命令为 Desktop 主/测试 TypeScript 两套 `--noEmit`，以及 `vitest run tests/profile-update.spec.ts tests/updates.spec.ts tests/agent-update.spec.ts tests/profile-release.spec.ts tests/profile-generation.spec.ts tests/profile-component.spec.ts tests/e-mate-profile.spec.ts tests/electron-runtime.spec.ts`，结果 `8 files / 69 tests` 全过。当前闭环证明客户端选择、下载、组装、重启选择和健康回滚合同；公开 desired-state 签名/上传/激活、完整 accepted-component-set 组合门禁和平台目标组件仍是后续发布切片，未据此声称已上线。
+
+## 2026-08-19 · 2.0.11 S05 插件闭包第一批与 Desktop 原生能力回归
+
+- Search 不再同时维护“第一方可发布但 Desktop 不使用”和生态包真实运行两条实现。Desktop 已移除旧 `dsh-search-mcp` patch/source/tarball，改装同一 `@e-mate/dsh-plugin-search-mcp` 热组件；搜索仍只注册到 DSH `ctx.web`。组件删除任意 URL、任意认证 header/query、任意 stdio 命令及运行时 `npx -y latest`，只接受固定 HTTPS provider catalog、精确 credential ref、有限结果树和有界来源；修复 request `maxResults` 被默认值遮蔽及 capability 永久 setup-required。Search `5/5`、MCP Manage `4/4`、重建后的完整 Profile boot 均通过。当前仍缺一张使用 DSH settings/credentials 原生服务的固定 provider 配置卡，不能把安全运行路径写成完整 UI 闭环。
+- Office 对所有 DOCX/PPTX/XLSX 输入先做 ZIP metadata 预检：最多 2048 entries、单 entry 16 MiB、声明总量 64 MiB、超过 1 MiB 后最高 200 倍压缩率；XML 再经过单文件 8 MiB、累计 64 MiB、fatal UTF-8 的流式读取边界。PPTX 改为最多 200 页顺序解析，XLSX 最多 100 个 sheet metadata，不再 `Promise.all` 解压整包。真实 roundtrip、9 MiB STORE XML、高压缩率和 2049-entry 反例合计 `5/5` 通过。
+- “Full Access 仍不能拖入项目文件夹”的根因不是权限预设，而是 e-Mate 封装删除了 DSH Desktop 的 context-isolated preload/Workspace drop bridge，同时 file-import 在 document capture 阶段抢走 directory drop。Desktop 已按固定参考回植只暴露 `webUtils.getPathForFile` 的最小 preload，并继续调用原生 `workspaces.create/startSession`；兼容模式的 DSH Workspace browser 与高级模式的项目区共享同一 drop marker。file-import 对目录和 Workspace target 明确放行，普通文件只在 `data-composer-card` 接管，页面级空 MIME 图片规范化继续交回原生 attachment 流。验证为 file-import `6/6`、Shell `6/6`、Desktop 相关 `5 files / 61 tests`、TypeScript 与完整 Profile boot 通过。
+- Xin Assistant 不再由 Profile 安装器搜索/替换 `pythonPath`，因此未来 component generation 不会绕过改写后退回系统 Python。Desktop 在 `loadLayeredEnv()` 冻结快照前校验并覆盖 `EMATE_MANAGED_PYTHON_PATH` 为当前平台随 App 交付的解释器；插件只从 DSH `launchEnvironmentOf(ctx).getFrom(..., ['process'])` 读取该稳定基座合同，显式 `pythonPath` 仍优先，非 Desktop 才保留系统解释器回退。Xin `3/3`、Desktop Profile/Package/Vision `3 files / 28 tests`、TypeScript 与完整 Profile boot 通过。
+- 本切片含 Desktop Base 与 Profile 组件同时变更，必须进入 Base lane；上述验证不是 plugin-only 发布证据，也没有上传、签名或激活任何线上 generation。下一步仍须关闭 Skill Hub 事务、Vision 平行实现、平台组件 target tuple、完整 accepted-component-set 组合、真实 TTFT/tok/s 对照和双平台安装态门禁。
+
+## 2026-08-19 · 2.0.11 S06 平台 Profile 组件目标矩阵
+
+- Computer Use 与 Xin Assistant 不再因为包含原生闭包而永久升级成 Base。唯一组件 inventory 为两者声明完整 `darwin-arm64 / darwin-x64 / win32-x64` 矩阵，并把 platform、arch、runtime ABI、最低系统、签名声明与 native path closure 同时绑定进组件 manifest 和签名 desired-state。portable 组件保持 `target: null`；平台组件缺 target、target 不全或元数据不一致一律失败关闭。
+- change-impact 只为变更组件展开目标 job：macOS arm64 使用 `macos-15`、Intel 使用 `macos-15-intel`、Windows x64 使用 `windows-2025`。每个 job 仅 build/test 当前组件并从已接受 Base SDK 恢复 Harness ABI；Base SDK cache 缺失就失败，不允许插件 lane 偷跑 Harness 构建。emit 仅纳入所选目标的 native closure；Desktop 只读取 `<platform>-<arch>` desired state，并在下载/物化时复验目标、闭包、Mach-O/PE 与 ad-hoc/unsigned 声明。
+- Computer Use 的 universal helper 实际 Mach-O minimum OS 为 14.0；Xin 原生 Python 闭包按目标固定为 CPython 3.12。最低系统字段表示该原生能力的 readiness floor，不阻断同一 generation 的无关 portable 组件。macOS Xin 的四个 Mach-O 扩展已逐一 ad-hoc 签名并由组件测试锁定；Windows target 必须在 Windows runner 产生并验收，不能在 Linux/macOS 伪造。
+- 验证结果：分类器/组件产物合同 `16/16`，Desktop Profile release/component/generation/update/Profile 组合 `5 files / 21 tests`，Desktop TypeScript、完整构建和 headless Profile boot 均通过；CI YAML 由系统解析器回读成功，GitHub 当前官方 runner 表确认三个 runner label 可用。这里仍只关闭平台 component-only 的构建与客户端拒绝边界，没有签名公开 desired state、组合 accepted set、上传或 Feed 激活，因此尚未上线。
+
+## 2026-08-19 · 2.0.11 S07 管理端与本地 DSH 边界回归
+
+- 管理端生产装配现只保留身份、模型发布/策略与脱敏审计。Analytics production 不再打开 Runtime Registry、Session Index、observability policy 或 platform monitoring 的本地运行面；对应旧路由在生产装配返回 404，Redis 也不再是管理 API 启动依赖。Admin 去掉 `/runtime/status` 和本地 session/task/model-health 投影，只展示权威账户与已发布模型事实。
+- Finder/网络故障之外另一个“本地不能用”根因是短 JWT 到期时 Auth 临时 5xx/断网会清除 OS 中已接受会话，IdentityGate 随即锁住整个本地 Harness。Identity provider 现在只对明确失效/撤销清会话；瞬时服务不可用时保留已接受主体和本地 workspace unlock，新的企业模型请求仍按既有模型策略失败关闭。模型目录投影同时把 Settings 与全部 runtime credential 纳入一个回滚边界，第二步失败不再留下半套模型配置。
+- 聚焦验证为 DSH Profile `38/38`、Admin `17/17` 加 TypeScript/Vite build、Analytics TypeScript 与 `34/34`；另 6 项真实 PostgreSQL/Redis 测试因本机未提供外部测试端点而明确 skip。源码/测试证明生产路由与本地故障语义，不冒充真实控制面断网装机演练或线上部署完成。
+
+## 2026-08-19 · 2.0.11 S08 Skill Hub 全链路审计与自然语言操作合同
+
+- 只读行为重放证明旧实现会把原生 DSH 无法解析的 Skill 写成 installed；同 slug 并发安装时，较早失败事务还能删除较晚已返回成功的新版本；server complete 响应未知会留下永久 `pending-server-receipt`，且没有启动恢复。当前也缺 update/enable/disable/uninstall，Shell“已安装”页读取的是 session `skill.list` 而非 Hub receipt，搜索只取前 24 条再本地过滤。以上均为发布阻断，不按现状冒充闭环。
+- 仓库合同现要求把 Host 事务与 UI 投影收敛成同版本 Skill Hub Profile 组件，复用原生 `dsh-skill-filesystem` parser/readback、`dsh-tool-skill` load、Jobs、UserQuestions 与 Agent Loop。每 slug 使用一个锁和持久 WAL；所有本地 mutation 只有在原生 provider 可见性/不可见性符合动作后提交，网络未知进入 recovery-pending 并在重启后幂等对账。
+- 用户可自然语言搜索/查看、安装、更新、启用、禁用、卸载其他用户分享的 Skill，也可上传、发布或删除自己有权限的发布。明确原话已给出 exact action/slug/version 时可作为该次 consent；含糊请求必须在任何网络或磁盘副作用前询问 exact source/version/digest/scope。远端删除只为经服务端所有权验证的 immutable publication 写 tombstone；本地 uninstall 与远端 delete 是两种明确动作，不能互相替代。下一切片实现并用真实 DSH provider/invoke、并发/crash/restart 矩阵及 UI remount 验收；本条仅固定根因与不可退化合同。
+
+## 2026-08-20 · 2.0.11 S09 Skill Hub 单组件与 Agent 全生命周期
+
+- Skill Hub 的 Host 事务、Connection RPC、Agent prompt/Tools 与 UI 已从共享 `packages/dsh`/Shell 拆成唯一 portable 组件 `@e-mate/dsh-plugin-skill-hub`，同一组件提供搜索、详情、receipt inventory、短期下载、安装、更新、启用、禁用、卸载、上传发布和 owned-publication 删除。自然语言操作只注册类型化 `e_mate_skill_hub_*` Tools；不做浏览器关键词判断，也不把 ZIP 生命周期交给 `dsh-find-skill` 的另一套目录或 receipt。
+- 本地 mutation 以每 slug 串行所有者、持久 WAL、候选/上代目录和原生 rc.7 provider readback 为提交边界。非法 frontmatter 不会产生 installed receipt；已安装 Skill 必须能由真实 model-facing `skill` Tool 加载。同 slug 交错、同版幂等、install/update 分离、completion 响应丢失、重启 reconcile、disable/enable/uninstall 都有行为测试。发布确认绑定实际 ZIP 摘要，Agent 不能把任意本机路径或变化后的文件上传；删除远端发布与本地卸载保持两个明确动作。
+- 组件完整测试为 Host/事务 `8/8`、Client `5/5`，合计 `13/13`；真实 emit 还验证 Host、Agent、Client 和 bundled ZIP/YAML closure 全在同一 payload。当前仓库仍不拥有线上 2.0.5 Skill Hub 服务的部署权威；服务端幂等 complete/reconcile/所有权 DELETE 和 A/B 真实账号全流程尚无生产证据，因此这里只关闭客户端组件和原生 DSH 本地链，未宣称 Skill Hub 已在线闭环。
+
+## 2026-08-20 · 2.0.11 S10 完整组件组合与增量发布事务
+
+- Base lane 现一次产生 content-addressed Base SDK：固定 Harness 全部编译 `lib`、Desktop `lib`、非一方热组件的 Profile 核心/生态输入和图标，由 schema-2 manifest 绑定 Base contract、Desktop reference、Harness commit、每文件 mode/bytes/SHA-256。真实 emit/verify 为 `6,929` 个文件、`135,404,057` bytes。plugin-only lane 只 restore/install 该 SDK；cache miss 明确失败，不能在插件 job 里偷偷重建 Harness/Desktop。
+- CI 只为 change-impact 返回的组件/目标执行 build/test/emit，再用当前签名 accepted set 形成 `darwin-arm64`、`darwin-x64`、`win32-x64` 三个完整候选。组合器要求 changed artifact 精确相等、官方 11 组件齐全、每个 manifest/文件/目标可物化，并实际启动 Cordis Host、Web graph 与全部 Client bundle。候选 artifact 只保留 admission/payload/临时签名证据，不上传验证期完整 store。一次真实 darwin-arm64 全量重放已通过，generation 为 `f8ab75ee8a30d6db29e4f42392ce545bcf0c8b4bd7150606b5716e6318e5466c`、组件数 `11`、changed `11`。
+- 真实重放先后暴露并关闭四个会让单包测试假绿的问题：manifest 的 locale 排序与 Desktop codepoint 排序不一致；content-addressed 目录失去偶然的父级依赖解析；Search/MCP/Find/Computer Use 的非 Base 依赖未进入 payload；Computer Use bundling 后 `import.meta.url` 深度变化。现统一 codepoint 顺序，只从 generation roots 重定向固定 DSH/React Base ABI，其余依赖打入所属组件；Computer Use 只修正两个生成态本地路径。
+- 新的手动 `profile-release.yml` 只接受 exact main commit 的成功 CI run 和 `CI admission`。正常发布不运行 build/test，不构建 DMG/EXE：生产私钥必须匹配 Base 内置信任根，publisher 先验证三目标候选和父代，再上传/回读变化组件与不可变 release envelope，最后分别替换 `no-store` target desired state 并产出 R2 receipt。首次 2.0.11 bootstrap 由同一 inventory 展开 9 个 portable job 加两组各三平台 job，从已接受 Base SDK 形成三份完整 generation；它只执行一次，仍不构建安装器。
+- 仓库门禁当前为 release boundary/component/composition/publisher `23/23`，两份 workflow 均通过 YAML parser；完整真实 generation boot 也已通过。尚未执行受保护环境的 production bootstrap/R2 激活，也未取得三平台安装态、真实 TTFT/tok/s 或公开 desired-state receipt，故本切片只证明发布代码与本地组合闭环，不能写成已经上线。
+
+## 2026-08-20 · 2.0.11 S11 流式 Renderer 热路径收敛
+
+- 首 token 与 provider `tok/s` 的仓库 evaluator 已按真实慢尾定义固定为 TTFT p50/p95、吞吐 p50/p5，并要求原始 DSH Desktop rc.7 与同一 e-Mate generation 在同机器、模型、数据集和网络上至少 30 组成对样本。内置确定性 AgentLoop 只验证采集/比较器且强制非零退出，不能冒充 Desktop/Profile 或生产速度证据。
+- 静态热路径追踪发现 e-Mate Shell 的思考状态、设置路由与折叠移动侧栏都在 `document.body` 上监听全部 `childList/subtree`；此前每个流式 token DOM 变化都会再次查询整页。三处现只检查 MutationRecord 中新增/移除的目标 marker 子树；思考状态首次扫描后只处理新增 status，设置与侧栏对无关 token mutation 完全不查询 document。没有修改 DSH Message、Agent Loop、LLM stream、Session event 或 Desktop IPC。
+- Shell `8 files / 39 tests` 与组件 build 通过；新增反例连续插入 50 个无关 token 节点，锁定 document-wide query 为 0，同时验证晚到思考状态、设置弹层和移动路由仍生效。change-impact 对本切片精确返回 `plugin-only`、唯一组件 `@e-mate/dsh-client-shell`、`portable` job，证明以后该优化不构建 Harness、Desktop 或安装器。
+- 这些结果证明已移除一个确定的 renderer 放大器，不等于声称 TTFT/tok/s 已对齐。最终性能门仍需绑定已安装 Base/Profile/组件摘要，用真实 provider 完成原始 Desktop 与候选的 30 组成对运行；缺该证据继续标记 blocked。

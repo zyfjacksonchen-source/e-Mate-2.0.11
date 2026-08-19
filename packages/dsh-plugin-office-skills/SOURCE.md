@@ -13,4 +13,4 @@ Exact distributable dependencies:
 - @xmldom/xmldom 0.9.11 — MIT
 - Noto Sans SC Variable 5.3.0 font assets — SIL Open Font License 1.1
 
-The runtime targets DeepSeek Harness 0.1.0-rc.6 Tool, Job, Skill, and capability seams. Unsupported layout-preserving edits are an explicit product boundary, not a hidden system dependency.
+The runtime targets DeepSeek Harness 0.1.0-rc.7 Tool, Job, Skill, and capability seams. Unsupported layout-preserving edits are an explicit product boundary, not a hidden system dependency.

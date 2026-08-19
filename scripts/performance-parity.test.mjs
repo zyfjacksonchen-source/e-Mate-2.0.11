@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
-import { evaluateEvidence } from './performance-parity.mjs'
+import { evaluateEvidence, exitCodeForGateStatus } from './performance-parity.mjs'
 
 const canonical = value => Array.isArray(value)
   ? `[${value.map(canonical).join(',')}]`
@@ -47,10 +47,12 @@ test('accepts 30 paired samples and keeps keyless evidence production-blocked', 
   assert.equal(evaluateEvidence(relabelled).gate_status, 'fixture-passed-production-blocked')
   assert.deepEqual(evaluateEvidence(relabelled).production_receipt_failures, ['PRODUCTION_RUN_RECEIPT_INCOMPLETE'])
 
-  for (const path of Object.values(relabelled.paths)) {
+  for (const [pathName, path] of Object.entries(relabelled.paths)) {
+    const candidate = pathName !== 'baseline'
     const body = {
       harness_commit: relabelled.harness_commit,
       provider: 'provider', model: 'model', tool: 'tool', dataset_sha256: 'a'.repeat(64),
+      acceptance_identity_sha256: '9'.repeat(64),
       sample_ids_sha256: sha256(canonical(path.samples.map(item => item.pair_id))),
       raw_samples_sha256: sha256(canonical(path.samples)),
       raw_samples_artifact: { kind: 'raw-samples', path: 'raw.json', sha256: 'b'.repeat(64) },
@@ -58,14 +60,57 @@ test('accepts 30 paired samples and keeps keyless evidence production-blocked', 
       environment: {
         machine_id_sha256: 'd'.repeat(64), os: 'macOS', arch: 'arm64', node: '24.19.0', browser: '149', network_profile: 'fixed',
       },
+      runtime: {
+        product: candidate ? 'e-mate-desktop' : 'deepseek-harness-desktop',
+        source_commit: candidate ? 'e'.repeat(40) : '6074088f5b660206e404b3591fab51fb99c69add',
+        desktop_reference_commit: '6074088f5b660206e404b3591fab51fb99c69add',
+        base_contract_id: candidate ? 'e-mate-desktop-profile-v1-dsh-df78045a127e' : 'dsh-desktop-rc7',
+        profile_generation: candidate ? 'candidate-generation' : 'baseline-generation',
+        composition_sha256: candidate ? 'f'.repeat(64) : '1'.repeat(64),
+        client_bundle_sha256: candidate ? '2'.repeat(64) : '3'.repeat(64),
+      },
       started_at: '2026-08-15T00:00:00.000Z',
       finished_at: '2026-08-15T00:01:00.000Z',
+    }
+    if (candidate) {
+      body.enterprise_receipt = {
+        lease_sha256: '4'.repeat(64),
+        model_policy_sha256: '5'.repeat(64),
+        audit_outbox_sha256: pathName === 'emate_online' ? '6'.repeat(64) : '7'.repeat(64),
+      }
+      body.enterprise_receipt_artifact = {
+        kind: 'enterprise-runtime-receipt', path: `${pathName}-enterprise.json`, sha256: '8'.repeat(64),
+      }
     }
     path.run_receipt = { ...body, receipt_sha256: sha256(canonical(body)) }
   }
   relabelled.production_artifacts_verified = true
   assert.equal(evaluateEvidence(relabelled).gate_status, 'fixture-passed-production-blocked')
   assert.equal(evaluateEvidence(relabelled).production_blocker, 'PRODUCTION_ARTIFACTS_NOT_VERIFIED')
+
+  const sameRuntime = structuredClone(relabelled)
+  const forged = sameRuntime.paths.emate_online.run_receipt
+  forged.runtime = sameRuntime.paths.baseline.run_receipt.runtime
+  const forgedBody = { ...forged }
+  delete forgedBody.receipt_sha256
+  forged.receipt_sha256 = sha256(canonical(forgedBody))
+  assert.ok(evaluateEvidence(sameRuntime).production_receipt_failures.includes('PRODUCTION_CANDIDATE_RUNTIME_MISMATCH'))
+})
+
+test('uses the slow throughput tail rather than the fastest tail', () => {
+  const observed = evidence()
+  for (const path of [observed.paths.emate_online, observed.paths.emate_enterprise_unavailable_valid_cache]) {
+    path.samples.slice(0, 14).forEach(item => { item.output_tokens_per_second = 1 })
+  }
+  const result = evaluateEvidence(observed)
+  assert.equal(result.gate_status, 'failed')
+  assert.ok(result.failures.some(failure => failure.includes('p5 throughput')))
+})
+
+test('only verified production evidence may return a successful process status', () => {
+  assert.equal(exitCodeForGateStatus('passed'), 0)
+  assert.equal(exitCodeForGateStatus('fixture-passed-production-blocked'), 1)
+  assert.equal(exitCodeForGateStatus('failed'), 1)
 })
 
 test('fails closed on missing samples, duplicate events, latency, throughput, or offline lease metadata', () => {

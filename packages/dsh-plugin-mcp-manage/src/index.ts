@@ -12,6 +12,7 @@ import { auth as authorizeMcp, type OAuthClientProvider, type OAuthDiscoveryStat
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js'
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
+import { readCollectedOutput } from './collected-output.ts'
 import { parseOAuthCallback } from './oauth-callback.ts'
 import { validatePluginInstall, validatePluginPackageName } from './plugin-source.ts'
 
@@ -48,7 +49,6 @@ const PROTECTED_PLUGIN_NAMES = new Set<string>([
   'dsh-at-file',
   'dsh-better-sidebar',
   'dsh-file-viewer',
-  'dsh-search-mcp',
   'dsh-turn-fold',
   'dsh-visualize',
 ])
@@ -131,6 +131,18 @@ interface DesktopPnpmLike {
     done: Promise<{ exitCode: number | null }>
     cancel(): void
   }
+  runPluginInstall(
+    args: readonly string[],
+    invokingDir: string,
+    recovery: { packageName: string; packageVersion: string; receiptId: string },
+    signal?: AbortSignal,
+  ): Promise<{
+    stdout: AsyncIterable<Uint8Array | string>
+    stderr: AsyncIterable<Uint8Array | string>
+    done: Promise<{ exitCode: number | null }>
+    cancel(): void
+  }>
+  rollbackPluginInstall(receiptId: string): Promise<boolean>
 }
 
 interface DesktopRuntimeLike { requestRestart(): Promise<void> }
@@ -176,8 +188,11 @@ async function runProfilePlugin(
   service: DesktopPnpmLike,
   args: readonly string[],
   signal?: AbortSignal,
+  recovery?: { packageName: string; packageVersion: string; receiptId: string },
 ): Promise<void> {
-  const operation = service.runPlugin(args, process.cwd(), signal)
+  const operation = recovery === undefined
+    ? service.runPlugin(args, process.cwd(), signal)
+    : await service.runPluginInstall(args, process.cwd(), recovery, signal)
   try {
     const [, , outcome] = await Promise.all([
       readBounded(operation.stdout),
@@ -415,15 +430,13 @@ async function clipboardText(ctx: Context, signal?: AbortSignal): Promise<string
     },
   })
   try {
-    const [value, , outcome] = await Promise.all([
-      readBounded(handle.stdout),
-      readBounded(handle.stderr),
-      handle.done,
-    ])
+    const outcome = await handle.done
+    const value = readCollectedOutput(handle.collected.stdout, '剪贴板标准输出')
+    readCollectedOutput(handle.collected.stderr, '剪贴板错误输出')
     if (outcome.exitCode !== 0) throw new Error('无法读取系统剪贴板。')
     return value.trim()
   } catch (error) {
-    handle.cancel()
+    handle.terminate()
     throw error
   }
 }
@@ -439,7 +452,7 @@ async function oauthProvider(
   let codeVerifier = ''
   const persist = () => writeOAuthState(ctx, spec.name, saved)
   const clientMetadata: OAuthClientMetadata = {
-    client_name: 'e-Mate 2.0.10',
+    client_name: 'e-Mate 2.0.11',
     redirect_uris: [redirectUrl],
     grant_types: ['authorization_code', 'refresh_token'],
     response_types: ['code'],
@@ -720,21 +733,19 @@ export function apply(ctx: Context, config: ConfigShape): void {
       if (!await confirmed(ctx, `安装按需 DSH 插件“${packageName}”并重启 e-Mate？`, packageName, exec.signal, exec.agent)) {
         return { status: 'cancelled', packageName }
       }
-      const before = await profileManifest(pnpm)
-      const previous = before.dependencies[packageName]
+      const receiptId = `mcp-manage:${randomBytes(16).toString('hex')}`
       try {
-        await runProfilePlugin(pnpm, ['add', '--save-exact', source], exec.signal)
+        await runProfilePlugin(pnpm, ['add', '--save-exact', source], exec.signal, {
+          packageName,
+          packageVersion: source,
+          receiptId,
+        })
         const after = await profileManifest(pnpm)
         if (after.dependencies[packageName] !== source || !after.bundles.includes(packageName)) {
           throw new Error('DSH 插件没有作为 profile bundle 激活。')
         }
       } catch (error) {
-        try {
-          if (previous === undefined) await runProfilePlugin(pnpm, ['remove', packageName])
-          else await runProfilePlugin(pnpm, ['add', '--save-exact', `${packageName}@${previous}`])
-        } catch (rollbackError) {
-          throw new AggregateError([error, rollbackError], 'DSH 插件安装失败且回滚未完成。')
-        }
+        await pnpm.rollbackPluginInstall(receiptId)
         throw error
       }
       ctx.timeout(() => { void runtime.requestRestart().catch(() => {}) }, 2_000)

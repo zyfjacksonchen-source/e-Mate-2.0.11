@@ -1,1 +1,2 @@
 .yarn/patches/*.patch -whitespace
+patches/*.patch -whitespace

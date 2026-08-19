@@ -3,6 +3,7 @@ import css from './thinking-status.module.css'
 
 const TARGET_LABEL = 'Deep diving...'
 const MARKER = 'data-emate-thinking-status'
+const STATUS_SELECTOR = '[role="status"][aria-live="polite"]'
 
 function targetLabel(node: HTMLElement): Text | undefined {
   return [...node.childNodes].find((child): child is Text =>
@@ -31,7 +32,6 @@ function createDomino(): HTMLElement {
 /** Brand-only projection over the target Harness running-turn status. */
 export function ThinkingStatusBranding() {
   useEffect(() => {
-    const documentRoot = document
     let active = true
     const decorated = new Map<HTMLElement, { host: HTMLElement; label: string | null; text: Text; value: string }>()
     const restore = (status: HTMLElement, entry: { host: HTMLElement; label: string | null; text: Text; value: string }) => {
@@ -41,7 +41,7 @@ export function ThinkingStatusBranding() {
       if (entry.label === null) status.removeAttribute('aria-label')
       else status.setAttribute('aria-label', entry.label)
     }
-    const sync = () => {
+    const sync = (candidates: Iterable<HTMLElement>) => {
       if (!active) return
       for (const [status, entry] of decorated) {
         if (!status.isConnected) decorated.delete(status)
@@ -50,7 +50,7 @@ export function ThinkingStatusBranding() {
           decorated.delete(status)
         }
       }
-      for (const status of documentRoot.querySelectorAll<HTMLElement>('[role="status"][aria-live="polite"]')) {
+      for (const status of candidates) {
         const text = targetLabel(status)
         if (text === undefined || decorated.has(status)) continue
         const host = createDomino()
@@ -63,9 +63,27 @@ export function ThinkingStatusBranding() {
         decorated.set(status, { host, label, text, value })
       }
     }
-    sync()
-    const observer = new MutationObserver(sync)
-    observer.observe(documentRoot.body, { childList: true, subtree: true })
+    const addClosestStatus = (node: Node, candidates: Set<HTMLElement>) => {
+      const element = node instanceof Element ? node : node.parentElement
+      const status = element?.matches(STATUS_SELECTOR) === true ? element : element?.closest(STATUS_SELECTOR)
+      if (status instanceof HTMLElement) candidates.add(status)
+    }
+    const scanAdded = (node: Node, candidates: Set<HTMLElement>) => {
+      addClosestStatus(node, candidates)
+      if (!(node instanceof Element) || node.childElementCount === 0) return
+      for (const status of node.querySelectorAll<HTMLElement>(STATUS_SELECTOR)) candidates.add(status)
+    }
+
+    sync(document.querySelectorAll<HTMLElement>(STATUS_SELECTOR))
+    const observer = new MutationObserver(records => {
+      const candidates = new Set<HTMLElement>()
+      for (const record of records) {
+        addClosestStatus(record.target, candidates)
+        for (const node of record.addedNodes) scanAdded(node, candidates)
+      }
+      sync(candidates)
+    })
+    observer.observe(document.body, { childList: true, subtree: true })
     return () => {
       active = false
       observer.disconnect()

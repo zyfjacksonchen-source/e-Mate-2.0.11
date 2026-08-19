@@ -1,6 +1,6 @@
 # Performance and acceptance
 
-This document is a release gate for e-Mate 2.0.7. A scenario is `passed` only with commands, screenshots or traces, immutable IDs, and the observed result. Missing enterprise accounts, credentials, platform capabilities, or real external targets are `blocked`; mocks cannot close a production acceptance item.
+This document is a release gate for e-Mate 2.0.11. A scenario is `passed` only with commands, screenshots or traces, immutable IDs, and the observed result. Missing enterprise accounts, credentials, platform capabilities, or real external targets are `blocked`; mocks cannot close a production acceptance item.
 
 ## Core browser and performance gates
 
@@ -9,6 +9,7 @@ This document is a release gate for e-Mate 2.0.7. A scenario is `passed` only wi
 - At 30 real events per second for 60 seconds, event-to-paint is p95 at most 50 ms and p99 at most 100 ms.
 - A 5,000-event session scrolls at an average of at least 55 fps, uses at most 300 MB JS heap, and has no steady-state main-thread task above 100 ms. Frame-drop percentage is diagnostic evidence only and is not a release gate.
 - Opening and closing 20 sessions grows retained heap by at most 10%.
+- A Shell adapter that observes the conversation DOM must process only the changed marker subtree. Unrelated streamed-token `childList` mutations must not cause a document-wide selector scan; the component behavior test is the repository gate for this hot path.
 - Chrome Performance Trace (gzip is accepted when the uncompressed SHA/size remain in the metrics receipt), React Profiler summary, fixed replay dataset, viewport, build SHA, Node/browser version, and before/after figures are retained per release.
 
 ### Harness parity for response and Tool latency
@@ -16,16 +17,16 @@ This document is a release gate for e-Mate 2.0.7. A scenario is `passed` only wi
 Run paired samples on the same machine, browser, network, provider model, prompt set, Tool fixture and warm/cold state: pinned Harness `0.1.0-rc.7` is the baseline; e-Mate uses a valid cached login lease, the same locally cached model policy and asynchronous audit outbox. Use at least 30 successful samples per path and retain raw timings.
 
 - first response/TTFT adds at most 5% at p50 and 10% at p95, with an absolute allowance of 50 ms when that is larger than the percentage allowance;
-- steady streamed generation throughput (provider output tokens per second, excluding TTFT) is no more than 5% lower at p50 and 10% lower at p95;
+- steady streamed generation throughput (provider output tokens per second, excluding TTFT) is no more than 5% lower at p50 and 10% lower at p5; the low tail is the slow side of a throughput distribution;
 - persisted Tool-call event to real Tool start, and Tool-result persistence to the next model request, each add at most 50 ms at p95 and no more than 10% versus the target baseline;
 - repeat the paired run with the enterprise endpoint unavailable while the login lease and last valid model policy remain valid. Local execution must stay within the same budgets, the audit outbox may remain pending, and no response/Tool event may be duplicated;
 - new login, expired/revoked lease and invalid model policy are correctness failures and are measured separately; they must fail closed and are not included in the steady local-runtime latency sample.
 
 If provider or network variance makes a paired sample incomparable, discard both members with the same documented reason and rerun; do not average unrelated providers, models or time windows into a passing result.
 
-`pnpm performance:parity --output <receipt.json>` is the executable collector/evaluator self-check. Its keyless default runs the pinned Agent Loop and derives timings only from its real `user/message`, `assistant/chunk`, `assistant/message`, `tool/call`, and `tool/result` events plus the real Tool body/request boundaries. It creates 30 paired samples for baseline, online, and enterprise-unavailable-with-valid-cache cohorts, but deliberately reports `fixture-passed-production-blocked`: the deterministic provider does not prove e-Mate or a production Provider's latency.
+`pnpm performance:parity --fixture --output <receipt.json>` is an explicit collector/evaluator self-check. It runs the pinned Agent Loop and derives timings only from its real `user/message`, `assistant/chunk`, `assistant/message`, `tool/call`, and `tool/result` events plus the real Tool body/request boundaries. It creates 30 paired samples for baseline, online, and enterprise-unavailable-with-valid-cache cohorts, deliberately reports `fixture-passed-production-blocked`, and exits non-zero: the deterministic provider does not load the e-Mate Desktop/Profile and cannot prove production latency. Omitting both `--fixture` and `--input` is an error.
 
-A production `--input` can report `passed` only when every cohort supplies an immutable run receipt bound to the pinned commit, exact provider/model/Tool/dataset, identical machine/OS/architecture/Node/browser/network environment, start/finish times, raw sample-ID/sample digests, and two existing artifact files: the raw samples and a Provider invocation/usage receipt or trace. The evaluator reads and SHA-256 verifies both files relative to the input receipt; relabeling a handwritten fixture as `production-real-provider`, setting a JSON verification flag, omitting the approved identity, or supplying arrays without these artifacts stays `fixture-passed-production-blocked`.
+A production `--input` can report `passed` only when every cohort supplies an immutable run receipt bound to the pinned Harness commit, approved identity digest, exact provider/model/Tool/dataset, identical machine/OS/architecture/Node/browser/network environment, start/finish times, raw sample-ID/sample digests, and two existing artifact files: the raw samples and a Provider invocation/usage receipt or trace. The baseline must identify the pinned original `deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add`; both e-Mate cohorts must identify the same candidate source commit, Base contract, Profile generation, component-composition digest, and client-bundle digest. Each e-Mate path additionally supplies a verified enterprise-runtime receipt that binds the cached lease, model policy, and audit outbox, with online/offline using the same lease and policy. The evaluator reads and SHA-256 verifies every artifact relative to the input receipt. Relabeling a handwritten fixture, setting a JSON verification flag, using the same runtime for baseline and candidate, or omitting any artifact stays blocked and exits non-zero.
 
 ## Project memory isolation and binding
 
@@ -105,12 +106,12 @@ The release evidence covers the following end-to-end user journeys:
 - model selection changes the actual next provider route while preserving the same conversation context; upstream instability and weak-network interruption recover through the existing retry/reconnect path without duplicate user messages, assistant answers, Tool calls, usage facts, or audit receipts;
 - the composer, navigation and non-message product chrome keep their accepted e-Mate references, while the conversation stream itself is exercised against the pinned Harness Message, Retry, TurnStatus, Tool, Disclosure and Actions renderers. The earlier `019ff665-d721-79a0-869d-338f086cf529` and 2.0.4/2.0.5 custom message-flow projections were explicitly withdrawn; only the real attachment image gallery remains as an e-Mate message visual exception;
 - image generation and editing cover one generation, one edit, concurrent jobs, attachment/context ownership, and a measured step-up run that records the maximum stable concurrency before the first bounded rejection or degraded budget; the caller still cannot choose the image model;
-- DOCX/XLSX/PPTX/PDF create-read-edit-export-reopen, OCR/Vision, browser search/interaction/download, Browser Panel, GenUI and the selected Sidebar execute through their real target paths;
+- DOCX/XLSX/PPTX/PDF create-read-edit-export-reopen, OCR/Vision, CDP browser search/interaction/download, GenUI and the selected Sidebar execute through their real target paths;
 - Feishu, Tencent Docs, WeChat and DingTalk must be discoverable by the user and Agent, open the correct connection surface, and reach the provider's real authorization handoff. The 2.0.7 release gate stops before submitting a real OAuth consent, QR confirmation, credential or external write;
 - non-deleted legacy sessions remain visible and can continue, project/general-session memory remains isolated, and Skill Hub cross-user publish/search/download/install uses the target plugin path;
 - installation, same-version repair, cross-version upgrade, rollback protection, shortcut single-instance behavior and CLI status/stop/check are exercised. A user can request an update in natural language; e-Mate must recognize the intent, execute the existing managed npm update transaction, restart/recover, report success, and preserve sessions, credentials, audit outbox and version/integrity receipts.
 
-Office, OCR/Vision and browser rows close only with the selected bundle's real result; installed metadata is not evidence. Vision/OCR remains `blocked` until the rc.5 enterprise model-policy seam exists and passes a governed request. Browser acceptance must prove the packaged `dsh-browser` MV3 extension connects in the existing macOS Chrome and Windows Chrome/Edge, binds distinct Sessions without state crossover, routes mutations through target approval, performs no browser download, recovers after disconnect, cleans up, and drives Browser Panel from real bridge state. Each platform remains `setup-required` until its own run passes.
+Office, OCR/Vision and browser rows close only with the selected bundle's real result; installed metadata is not evidence. Vision/OCR remains `blocked` until the enterprise model-policy seam passes a governed request. CDP acceptance must prove the DSH-native adapter binds explicitly configured loopback Chrome/Edge endpoints to distinct Sessions without state crossover, routes mutations through target approval, performs no browser download, and recovers and cleans up after disconnect. Each platform remains `setup-required` until its own run passes.
 
 The 5,000-event reverse-scroll frame-drop percentage is retained in traces only as a diagnostic. It has no pass/fail threshold and cannot by itself block S04 or S12; the FPS, heap, long-task, event-to-paint and leak budgets above remain binding.
 
@@ -140,8 +141,8 @@ Each run stores the starting database/snapshot identity, exact test data, screen
 
 | 优先级 | 项目 | 当前真实状态 / 关闭条件 |
 |---|---|---|
-| P0 | Browser / Computer Use | `dsh-browser` 的隔离 macOS 开发者模式验收已完成会话隔离、点击、下载和断连恢复，但当前已发布 App 面向用户正在使用的 Chrome 实测仍报告“浏览器扩展桥接未连接”；Windows Chrome/Edge 也没有真机证据。关闭条件是当前 Chrome 实际加载 `$DSH_HOME/browser-extension` 并重复同一 CU，以及 Windows 真机复验。 |
-| P0 | Windows 真实安装 | Windows x64 Setup.exe 已由原生 GitHub runner 构建和校验，但不能替代 Windows 10/11 真机；安装、Edge 扩展、DPAPI、自然语言更新、Office/图片和卸载保留数据仍待跑。 |
+| P0 | CDP / Computer Use | 旧浏览器扩展与 Browser Panel 已删除，CDP 已实现为 DSH 原生 Tool/approval/session 插件；仍缺 macOS 与 Windows 已安装浏览器上的 loopback endpoint、会话隔离、交互、断连恢复真机证据。Computer Use 还必须分别验证 macOS TCC 与 Full Access 原生策略。 |
+| P0 | Windows 真实安装 | Windows x64 Setup.exe 已由原生 GitHub runner 构建和校验，但不能替代 Windows 10/11 真机；安装、CDP endpoint、DPAPI、自然语言更新、Office/图片和卸载保留数据仍待跑。 |
 | P0 | 跨版本在线升级与恢复 | R2 桌面发布、macOS 安装态同版本自然语言检查与真实 `up-to-date` 回执已通过；仍缺一个更高版本候选上的真实安装、失败回滚、活动任务拒绝和 Windows 恢复证据。 |
 | P1 | Vision / OCR | 当前企业 Luna 图片理解已在发布桌面通过一张真实中文图片；独立 `dsh-vision-toolkit` 仍不进入闭包，复杂 OCR、批量图片和 Windows 侧没有单独验收，不能把一次模型视觉结果扩大为本地 OCR 工具闭包。 |
 | P1 | Office 复杂版式与 Windows | macOS 已发布制品的四格式规范化创建/读取已通过；复杂第三方文档无损编辑、Office 全场景和 Windows 打开/预览仍待真实样本。 |
@@ -149,7 +150,7 @@ Each run stores the starting database/snapshot identity, exact test data, screen
 | P1 | Skill Hub | 上传、搜索、下载、安装和 Agent 自执行已有合同测试；仍需生产服务和两个真实用户验证跨用户可见与安装。 |
 | P1 | 旧会话与项目记忆 | 本机真实三类来源已完成 copy-on-write：15 条 e-Mate 权威非删除会话首次导入、复跑 15 条全复用、源哈希不变且旧 Tool 未伪造成新事件。仍需登录后在浏览器确认 15 条可见并任选一条继续真实模型对话；实际来源没有项目会话，项目/通用记忆隔离仍需另一个真实项目 fixture。 |
 | P1 | 弱网与上游恢复 | 原生重试、checkpoint、审计幂等已有自动化；仍需受控断网/重连下验证上下文连续且消息、Tool、Usage、Audit 不重复。 |
-| P1 | 性能成对验收 | 已有真实样本但未完成相同机器、相同提示、相同模型的 30 组目标 rc.6 Desktop 与 e-Mate p50/p95 对照，包括 TTFT、生成速度与 Tool 调用延迟。 |
+| P1 | 性能成对验收 | 已有真实样本但未完成相同机器、相同提示、相同模型的 30 组原始 DSH Desktop rc.7 与 e-Mate 对照：TTFT 看 p50/p95，生成速度看 p50/p5，Tool 调用延迟看 p95；证据还必须绑定实际安装的 Base/Profile/组件组合。 |
 | P1 | 最终响应式与全按钮闭环 | 当前交付形态已改为 rc.6 Desktop；需在 macOS 与 Windows 安装态分别复验主窗口缩放、明暗模式、二级弹层空白关闭和全部可见按钮闭环，不再把旧 rc.5 浏览器五断点当作桌面发布门槛。 |
 | P1 | Session Share | 当前保持失败关闭；生产 create/list/get/revoke、公开 URL、到期和撤销未有有效租约与真实无敏感 fixture 验证。 |
 | 合同风险 | 严格零超额 | 本地持久预留可阻止有限额度并发超额，但单个请求仍可能超过开始时剩余额度；若上线要求绝对零超额，仍需上游单请求精确上限。 |

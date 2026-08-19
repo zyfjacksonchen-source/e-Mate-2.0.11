@@ -2,6 +2,23 @@ export const CHANNEL = '/emate.fileImport'
 export const MAX_FILES = 8
 export const MAX_FILE_BYTES = 16 * 1024 * 1024
 export const MAX_TOTAL_BYTES = 32 * 1024 * 1024
+export const COMPOSER_DROP_TARGET = '[data-composer-card]'
+export const WORKSPACE_DROP_TARGET = '[data-dsh-workspace-drop-target]'
+
+export type FileDropRoute = 'pass' | 'normalize-images' | 'intake-all'
+
+/** Route a native drop without stealing workspace folders or page-wide ordinary files. */
+export function fileDropRoute(input: {
+  readonly composerTarget: boolean
+  readonly directory: boolean
+  readonly normalizeImage: boolean
+  readonly ordinary: boolean
+  readonly workspaceTarget: boolean
+}): FileDropRoute {
+  if (input.directory || input.workspaceTarget) return 'pass'
+  if (input.composerTarget && (input.ordinary || input.normalizeImage)) return 'intake-all'
+  return input.normalizeImage ? 'normalize-images' : 'pass'
+}
 
 export const ALLOWED_MEDIA_BY_EXTENSION: Readonly<Record<string, string>> = {
   '7z': 'application/x-7z-compressed',

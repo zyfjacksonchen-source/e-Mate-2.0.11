@@ -14,7 +14,6 @@ export default [
       bin: 'src/bin.ts',
       'e-mate': 'src/e-mate.ts',
       update: 'src/update.ts',
-      'skill-hub': 'src/skill-hub.ts',
       'legacy-migration': 'src/legacy-migration.ts',
       'legacy-schedule': 'src/legacy-schedule.ts',
     },
@@ -39,12 +38,6 @@ export default [
     ...node,
     noExternal: ['qrcode'],
     entry: { 'qr-generation': 'src/profile/qr-generation.ts' },
-    outDir: 'profile/plugins',
-  },
-  {
-    ...node,
-    noExternal: ['fflate', 'yaml'],
-    entry: { 'skill-hub-agent': 'src/profile/skill-hub-agent.ts' },
     outDir: 'profile/plugins',
   },
   {
@@ -79,10 +72,5 @@ export default [
       agreements: 'src/profile/identity/agreements.ts',
     },
     outDir: 'profile/plugins/identity',
-  },
-  {
-    ...node,
-    entry: { index: 'src/profile/emate-shell/index.ts' },
-    outDir: 'profile/plugins/emate-shell',
   },
 ]

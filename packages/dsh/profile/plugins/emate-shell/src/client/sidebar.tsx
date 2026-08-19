@@ -128,6 +128,7 @@ export function SidebarRoot({
   const [pathname, setPathname] = useState(() => location.pathname)
   const themeScheme = useSyncExternalStore(subscribeTheme, getThemeScheme, getThemeScheme)
   const ThemeIcon = themeScheme === 'dark' ? DarkIcon : LightIcon
+  const desktop = document.body.dataset.dshDesktopMode === 'advanced'
 
   const archived = useMemo(() => new Set(archivedSessionIds), [archivedSessionIds])
   const projectWorkspaces = useMemo(() => workspaces.filter(workspace => !isGeneralWorkspace(workspace)), [workspaces])
@@ -149,19 +150,7 @@ export function SidebarRoot({
   }, [])
 
   useEffect(() => {
-    const closeOutsideMenus = (event: PointerEvent) => {
-      const target = event.target
-      if (!(target instanceof Node)) return
-      root.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(details => {
-        if (!details.contains(target)) details.removeAttribute('open')
-      })
-    }
-    document.addEventListener('pointerdown', closeOutsideMenus)
-    return () => { document.removeEventListener('pointerdown', closeOutsideMenus) }
-  }, [])
-
-  useEffect(() => {
-    if (!collapsed) return undefined
+    if (!collapsed || desktop) return undefined
     let awaitingTarget = false
     let identityBlocked = document.querySelector('[data-emate-identity-gate]') !== null
     let retryFrame: number | undefined
@@ -224,7 +213,13 @@ export function SidebarRoot({
       retryFrames = 0
       syncSettingsRoute()
     }
-    const observer = new MutationObserver(() => { syncSettingsRoute() })
+    const routeMarkers = '[data-emate-identity-gate], [data-emate-settings-content], [data-emate-settings-trigger]'
+    const observer = new MutationObserver(records => {
+      const changed = records.some(record => [...record.addedNodes, ...record.removedNodes].some(node =>
+        node instanceof Element && (node.matches(routeMarkers) || node.querySelector(routeMarkers) !== null),
+      ))
+      if (changed) syncSettingsRoute()
+    })
 
     observer.observe(document.body, { childList: true, subtree: true })
     addEventListener('popstate', restartForLayout)
@@ -236,7 +231,19 @@ export function SidebarRoot({
       removeEventListener('popstate', restartForLayout)
       removeEventListener('resize', restartForLayout)
     }
-  }, [collapsed, toggleSidebar])
+  }, [collapsed, desktop, toggleSidebar])
+
+  useEffect(() => {
+    const closeOutsideMenus = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      root.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(details => {
+        if (!details.contains(target)) details.removeAttribute('open')
+      })
+    }
+    document.addEventListener('pointerdown', closeOutsideMenus)
+    return () => { document.removeEventListener('pointerdown', closeOutsideMenus) }
+  }, [])
 
   const addWorkspace = async () => {
     if (picking) return
@@ -340,7 +347,7 @@ export function SidebarRoot({
       <aside ref={root} className={`${css.root} ${collapsed ? css.collapsed : ''}`} style={wide ? { width } : undefined} aria-label="任务导航">
         <div className={css.brandRow}>
           {wide
-            ? <span className={css.brand}><img className={css.logo} src="/assets/e-mate/logo.png" alt="e-Mate" /><small className={css.version}>2.0.10</small></span>
+            ? <span className={css.brand}><img className={css.logo} src="/assets/e-mate/logo.png" alt="e-Mate" /><small className={css.version}>2.0.11</small></span>
             : <button className={css.brand} type="button" aria-label="展开任务导航" onClick={toggleSidebar}><img className={css.mark} src="/assets/e-mate/xiaoxin-avatar.png" alt="" aria-hidden="true" /></button>}
           {wide && (
             <button className={css.iconButton} type="button" aria-label="搜索会话" aria-expanded={searchOpen} onClick={() => { setSearchOpen(value => !value) }}>
@@ -387,7 +394,7 @@ export function SidebarRoot({
             </section>
           ) : (
             <>
-              <section className={css.sidebarSection} aria-label="项目">
+              <section className={css.sidebarSection} aria-label="项目" data-dsh-workspace-drop-target="">
                 <div className={css.navHeading}>
                   <button className={css.sectionToggle} type="button" aria-expanded={!projectsCollapsed} onClick={() => { setProjectsCollapsed(value => !value) }}>
                     <ChevronIcon className={projectsCollapsed ? css.rotated : undefined} size={14} /><span>项目</span>
@@ -433,14 +440,15 @@ export function SidebarRoot({
           {notice && <p className={css.notice} role="status">{notice}</p>}
         </nav>
 
-        <div className={css.footer}>
+        {!desktop && <div className={css.footer}>
           <div className={css.utilities} aria-label="应用工具">
             <span className={css.runtimeStatus} role="status" aria-label="运行时已连接" />
             <button type="button" aria-label={themeScheme === 'dark' ? '切换到明亮模式' : '切换到暗色模式'} onClick={toggleTheme}><ThemeIcon size={18} /></button>
             {renderSlot('sidebar.settings', { wide: false })}
           </div>
           {renderSlot('sidebar.footer.action', { wide })}
-        </div>
+        </div>}
+
       </aside>
       {renameTarget && createPortal(
         <div className={css.dialogBackdrop} role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && busySession === null) setRenameTarget(null) }}>

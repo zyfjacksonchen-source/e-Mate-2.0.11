@@ -82,6 +82,14 @@ describe('mobile settings route', () => {
     vi.spyOn(mobileOpen!, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList)
     const domClick = vi.spyOn(mobileOpen!, 'click')
 
+    const documentQuery = vi.spyOn(document, 'querySelector')
+    const token = document.createElement('span')
+    document.body.append(token)
+    await act(async () => { await Promise.resolve() })
+    expect(documentQuery).not.toHaveBeenCalled()
+    documentQuery.mockRestore()
+    token.remove()
+
     act(() => { dispatchEvent(new Event('resize')) })
     expect(toggleSidebar).not.toHaveBeenCalled()
     identityGate.remove()

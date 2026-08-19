@@ -82,9 +82,9 @@ describe('published package surface', () => {
       types: './lib/types/agent-update.d.ts',
       default: './lib/agent-update.js',
     })
-    expect(manifest.exports).toHaveProperty('./browser-extension-setup', {
-      types: './lib/types/browser-extension-setup.d.ts',
-      default: './lib/browser-extension-setup.js',
+    expect(manifest.exports).toHaveProperty('./computer-use-setup', {
+      types: './lib/types/computer-use-setup.d.ts',
+      default: './lib/computer-use-setup.js',
     })
     expect(manifest.exports).not.toHaveProperty('./windows-acl-runner')
     expect(manifest.exports).not.toHaveProperty('./desktop-cli')
@@ -107,7 +107,7 @@ describe('published package surface', () => {
     expect(patch).toContain("name: '@e-mate/desktop/pnpm'")
     expect(patch).toContain("name: '@e-mate/desktop/updates'")
     expect(patch).toContain("name: '@e-mate/desktop/agent-update'")
-    expect(patch).toContain("name: '@e-mate/desktop/browser-extension-setup'")
+    expect(patch).toContain("name: '@e-mate/desktop/computer-use-setup'")
     expect(patch).not.toContain('desktop-profiles')
   })
 
@@ -123,6 +123,21 @@ describe('published package surface', () => {
     expect(runtime.every(([, version]) => version === '0.1.0-rc.7')).toBe(true)
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
     expect(lockfile).not.toMatch(/^\s*version: 0\.1\.0-rc\.6$/mu)
+  })
+
+  it('marks the DSH Workspace browser as the desktop folder-drop target', () => {
+    const patchPath = './patches/dsh-client-ui-workspace@0.1.0-rc.7.patch'
+    expect(workspaceManifest.resolutions).toMatchObject({
+      '@deepseek-ai/dsh-client-ui-workspace@npm:0.1.0-rc.7': expect.stringContaining(patchPath),
+      '@deepseek-ai/dsh-client-ui-workspace@npm:^0.1.0-rc.7': expect.stringContaining(patchPath),
+    })
+    const patch = readFileSync(new URL(patchPath, workspaceRoot), 'utf8')
+    const installedClient = readFileSync(new URL(
+      'node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js',
+      packageRoot,
+    ), 'utf8')
+    expect(patch).toContain('data-dsh-workspace-drop-target')
+    expect(installedClient).toContain('data-dsh-workspace-drop-target')
   })
 
   it('builds public Host plugins and their private native bootstraps', () => {
@@ -143,23 +158,33 @@ describe('published package surface', () => {
     expect(config).toContain("'mac-update-installer': 'src/mac-update-installer.ts'")
     expect(config).toContain("updates: 'src/updates.ts'")
     expect(config).toContain("'agent-update': 'src/agent-update.ts'")
+    expect(config).toContain("entry: { preload: 'src/preload.ts' }")
+    expect(config).toContain("entryFileNames: 'preload.cjs'")
   })
 
   it('installs Host command PATHs after the launch snapshot and before profile boot', () => {
     const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
+    const recover = main.indexOf('await resolveDesktopShellEnvironment')
+    const applyRecovered = main.indexOf('Object.entries(shellEnvironmentResolution.updates)')
+    const managedPython = main.indexOf('process.env.EMATE_MANAGED_PYTHON_PATH = managedPythonPath')
     const snapshot = main.indexOf('const environment = loadLayeredEnv')
     const install = main.indexOf('const pnpmRuntime = installDesktopPnpmRuntime')
     const prepare = main.indexOf('const prepared = prepareDesktopProfile')
     const installDsh = main.indexOf('const dshRuntime = process.platform === \'win32\'')
     const boot = main.indexOf('const ctx = await boot')
+    const beginRendererHealth = main.indexOf('runtime.beginRendererBootMonitoring()')
     const mount = main.indexOf('await runtime.mountScheduled(')
+    const rendererHealth = main.indexOf('const rendererReport = await rendererBoot')
     const electronReady = main.indexOf('await app.whenReady()')
     const nativeReadyAck = main.indexOf("'.release-native-ready-ack'")
     const releaseAck = main.indexOf("'.release-health-ack'")
     const profileCleanup = main.indexOf('deferredProfileCleanup.map')
     const cleanup = main.indexOf('const cleanup = app.isPackaged')
 
-    expect(snapshot).toBeGreaterThanOrEqual(0)
+    expect(recover).toBeGreaterThanOrEqual(0)
+    expect(applyRecovered).toBeGreaterThan(recover)
+    expect(managedPython).toBeGreaterThan(applyRecovered)
+    expect(snapshot).toBeGreaterThan(managedPython)
     expect(install).toBeGreaterThan(snapshot)
     expect(nativeReadyAck).toBeGreaterThan(electronReady)
     expect(nativeReadyAck).toBeLessThan(snapshot)
@@ -167,19 +192,49 @@ describe('published package surface', () => {
     expect(installDsh).toBeGreaterThan(prepare)
     expect(boot).toBeGreaterThan(prepare)
     expect(boot).toBeGreaterThan(installDsh)
+    expect(beginRendererHealth).toBeGreaterThan(boot)
     expect(mount).toBeGreaterThan(boot)
-    expect(releaseAck).toBeGreaterThan(mount)
+    expect(mount).toBeGreaterThan(beginRendererHealth)
+    expect(rendererHealth).toBeGreaterThan(mount)
+    expect(releaseAck).toBeGreaterThan(rendererHealth)
     expect(releaseAck).toBeLessThan(profileCleanup)
     expect(profileCleanup).toBeGreaterThan(mount)
     expect(cleanup).toBeGreaterThan(profileCleanup)
     expect(cleanup).toBeGreaterThan(mount)
     expect(main).toContain("'@e-mate/desktop: packaged pnpm runtime PATH'")
     expect(main).toContain("'@e-mate/desktop: packaged dsh runtime PATH'")
-    expect(main).toContain("process.env.EMATE_RELEASE_HEALTH_PROBE !== '1'")
+    expect(main).toContain("process.env.EMATE_RELEASE_HEALTH_PROBE === '1'")
     expect(main).toContain("'.release-native-ready-ack'")
     expect(main).toContain("'.release-health-ack'")
     expect(main).toContain('disposePnpmRuntime?.()')
     expect(main).toContain('disposeDshRuntime?.()')
+  })
+
+  it('uses the upstream child-environment scrub around login-shell recovery', () => {
+    const shellEnvironment = readFileSync(new URL('src/shell-environment.ts', packageRoot), 'utf8')
+
+    expect(shellEnvironment).toContain('scrubbedParentEnv')
+    expect(shellEnvironment).toContain('SENSITIVE_ENV_PATTERN')
+    expect(shellEnvironment).toContain('DSH_ENV_PREFIX')
+    expect(shellEnvironment).toContain('DESKTOP_SHELL_ENVIRONMENT_KEYS')
+  })
+
+  it('commits recoverable plugin installs only after Renderer health', () => {
+    const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
+    const pnpm = readFileSync(new URL('src/pnpm.ts', packageRoot), 'utf8')
+    const claim = main.indexOf('const recoveryClaim = await installRecovery.claim()')
+    const prepare = main.indexOf('const prepared = prepareDesktopProfile')
+    const rendererHealth = main.indexOf('const rendererReport = await rendererBoot')
+    const installHealth = main.indexOf('await installRecovery.markHealthy(verifyingInstall.transactionId)')
+
+    expect(claim).toBeGreaterThanOrEqual(0)
+    expect(claim).toBeLessThan(prepare)
+    expect(installHealth).toBeGreaterThan(rendererHealth)
+    expect(main).toContain("runtime.rendererBootFailureReason ?? 'startup-failed'")
+    expect(main).toContain('await installRecovery.recordFailure(')
+    expect(pnpm).toContain('plugin add must use the recoverable install boundary')
+    expect(pnpm).toContain('async runPluginInstall(')
+    expect(pnpm).toContain('await this.installRecovery.seal(active.recoveryTransactionId)')
   })
 
   it('fixes the installed application identity', () => {
@@ -195,13 +250,16 @@ describe('published package surface', () => {
     ])
     expect(manifest.build?.electronFuses).toEqual({ runAsNode: true })
     expect(manifest.files).toEqual(expect.arrayContaining([
+      'base-contract.json',
       'build/app-icon.png',
       'build/app-icon-mac.png',
       'build/tray-icon.svg',
       'build/tray-icon*.png',
       'docs/**',
+      'lib/**/*.cjs',
     ]))
     expect(manifest.build?.files).toEqual([
+      'base-contract.json',
       'build/e-mate-profile/**',
       'build/app-icon.png',
       'build/app-icon-mac.png',
@@ -457,5 +515,21 @@ describe('published package surface', () => {
       expect(installed).toContain('const redundantEscalation =')
       expect(installed).toContain('if (!redundantEscalation) validateEscalationArgs(')
     }
+  })
+
+  it('ignores redundant filesystem escalation metadata under the current policy', () => {
+    const fsPatch = 'patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.0-rc.7#~/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.0-rc.7-redundant-escalation.patch'
+    const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
+    const workspaceRequire = createRequire(new URL('package.json', packageRoot))
+
+    expect(workspaceManifest.resolutions).toMatchObject({
+      '@deepseek-ai/dsh-tool-fs@npm:^0.1.0-rc.7': fsPatch,
+    })
+    expect(lockfile).toContain('@deepseek-ai/dsh-tool-fs@patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.0-rc.7#~/.yarn/patches/')
+    const packageManifest = workspaceRequire.resolve('@deepseek-ai/dsh-tool-fs/package.json')
+    const installed = readFileSync(join(dirname(packageManifest), 'lib/index.js'), 'utf8')
+    expect(installed).toContain('const redundantEscalation =')
+    expect(installed).toContain('if (!redundantEscalation) validateEscalationArgs(')
+    expect(installed).toContain('args.justification === void 0 || redundantEscalation')
   })
 })

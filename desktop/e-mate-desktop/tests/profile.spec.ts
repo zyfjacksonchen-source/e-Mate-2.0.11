@@ -11,6 +11,7 @@ import {
   ensureDesktopProfile,
   prepareDesktopProfile,
   readDesktopShellMode,
+  shippedPresetRoot,
 } from '../src/profile.ts'
 
 const homes: string[] = []
@@ -115,18 +116,30 @@ describe('desktop profile composition', () => {
     }))
     expect(patches).toContainEqual(expect.objectContaining({
       id: 'agent-presets',
-      config: expect.objectContaining({ roots: [expect.objectContaining({ trust: 'system' })] }),
+      config: expect.objectContaining({
+        roots: [
+          expect.objectContaining({ trust: 'system' }),
+          expect.objectContaining({ trust: 'system' }),
+        ],
+      }),
     }))
     const presetPatch = patches.find(patch => patch.id === 'agent-presets') as {
       config: { roots: Array<{ path: string; trust: string }> }
     }
-    const presetRoot = presetPatch.config.roots[0]?.path
-    expect(presetRoot).toBe(join(home, 'profiles', 'e-mate', 'agent-presets'))
-    const managedPreset = readFileSync(join(presetRoot!, 'standard', 'agent.cordis.yml'), 'utf8')
+    const managedRoot = presetPatch.config.roots[0]?.path
+    const nativeRoot = presetPatch.config.roots[1]?.path
+    expect(managedRoot).toBe(join(home, 'profiles', 'e-mate', 'agent-presets'))
+    expect(nativeRoot).toBe(shippedPresetRoot())
+    const managedPreset = readFileSync(join(managedRoot!, 'standard', 'agent.cordis.yml'), 'utf8')
     expect(managedPreset).toContain('你是小芯，用户的 AI 办公助手。')
     expect(managedPreset).toContain('普通 Bash 或 PowerShell 调用不要设置 sandbox_permissions 或 justification')
     expect(managedPreset).toContain('当前工作目录是 {{cwd}}。')
     expect(managedPreset).not.toContain('You are a coding agent powered by the {{model}} model.')
+    expect(readFileSync(join(nativeRoot!, 'cordis', 'preset.yml'), 'utf8')).toContain('name: 创造模式')
+    expect(readFileSync(join(nativeRoot!, 'cordis', 'skills', 'cordis-plugin-development', 'SKILL.md'), 'utf8'))
+      .toContain('Cordis')
+    expect(readFileSync(join(nativeRoot!, 'cordis', 'skills', 'editing-cordis-compositions', 'SKILL.md'), 'utf8'))
+      .toContain('preset')
     expect(readFileSync(prepared.rootConfig, 'utf8')).toBe('[]\n')
     expect(prepared.homeDir).toBe(home)
     expect(fileURLToPath(prepared.bareModuleBaseUrl)).toBe(join(prepared.profile.dir, 'package.json'))
@@ -174,8 +187,8 @@ describe('desktop profile composition', () => {
     expect(rows.find(row => row.id === 'desktop-agent-update')).toEqual(expect.objectContaining({
       name: '@e-mate/desktop/agent-update',
     }))
-    expect(rows.find(row => row.id === 'desktop-browser-extension-setup')).toEqual(expect.objectContaining({
-      name: '@e-mate/desktop/browser-extension-setup',
+    expect(rows.find(row => row.id === 'desktop-computer-use-setup')).toEqual(expect.objectContaining({
+      name: '@e-mate/desktop/computer-use-setup',
     }))
     expect(rows.map(row => row.id)).not.toContain('desktop-profiles')
   })

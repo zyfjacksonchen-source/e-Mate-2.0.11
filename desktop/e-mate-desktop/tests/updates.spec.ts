@@ -9,6 +9,7 @@ import type {
   DesktopTrayItem,
 } from '../src/runtime.ts'
 import type { UpdateCheckResult } from '../src/update-checker.ts'
+import type { DesktopProfileUpdateAdapter, ProfileUpdateAvailable } from '../src/profile-update.ts'
 import { apply, Config, inject, type Config as UpdateConfig, type InteractiveUpdateResult } from '../src/updates.ts'
 
 const testConfig: UpdateConfig = {
@@ -55,6 +56,7 @@ async function createHarness(options: {
   readonly showManualCheckResult?: (result: UpdateCheckResult | null) => Promise<void>
   readonly downloadAndOpen?: DesktopRuntime['updates']['downloadAndOpen']
   readonly notify?: (notification: DesktopNotification) => void
+  readonly profile?: DesktopProfileUpdateAdapter
   readonly state?: string
 } = {}): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-updates-'))
@@ -80,6 +82,7 @@ async function createHarness(options: {
       statePath,
       canDownload: options.canDownload ?? true,
       request: options.request ?? (async () => versionResponse('2.0.0')),
+      ...(options.profile === undefined ? {} : { profile: options.profile }),
       confirmDownload,
       showManualCheckResult,
       downloadAndOpen,
@@ -122,6 +125,99 @@ afterEach(() => {
 })
 
 describe('desktop update Host plugin', () => {
+  it('uses the signed component updater first for a natural-language/manual request', async () => {
+    const release = {
+      status: 'update-available',
+      currentGeneration: 'bundled',
+      currentSequence: 0,
+      generationId: 'a'.repeat(64),
+      releaseVersion: '2.0.11',
+      sequence: 2,
+      changedComponents: [{ id: '@e-mate/dsh-plugin-memory-evolve', version: '2.0.11', bytes: 321 }],
+      downloadBytes: 321,
+      release: {} as ProfileUpdateAvailable['release'],
+    } satisfies ProfileUpdateAvailable
+    const profile = {
+      check: vi.fn(async () => release),
+      confirm: vi.fn(async () => true),
+      install: vi.fn(async () => {}),
+    } satisfies DesktopProfileUpdateAdapter
+    const baseRequest = vi.fn(async () => versionResponse('2.1.0'))
+    const harness = await createHarness({ profile, request: baseRequest })
+
+    await expect(harness.runInteractiveUpdate()).resolves.toEqual({
+      status: 'scheduled',
+      installedVersion: '2.0.0',
+      latestVersion: '2.0.11',
+      updateKind: 'components',
+      componentGeneration: release.generationId,
+      components: ['@e-mate/dsh-plugin-memory-evolve'],
+      downloadBytes: 321,
+    })
+    expect(profile.check).toHaveBeenCalledTimes(2)
+    expect(profile.confirm).toHaveBeenCalledWith(release)
+    expect(profile.install).toHaveBeenCalledOnce()
+    expect(baseRequest).not.toHaveBeenCalled()
+  })
+
+  it('pushes one native prompt per signed component generation', async () => {
+    vi.useFakeTimers()
+    const release = {
+      status: 'update-available',
+      currentGeneration: 'bundled',
+      currentSequence: 0,
+      generationId: 'b'.repeat(64),
+      releaseVersion: '2.0.11',
+      sequence: 4,
+      changedComponents: [{ id: '@e-mate/dsh-client-shell', version: '2.0.11', bytes: 99 }],
+      downloadBytes: 99,
+      release: {} as ProfileUpdateAvailable['release'],
+    } satisfies ProfileUpdateAvailable
+    const profile = {
+      check: vi.fn(async () => release),
+      confirm: vi.fn(async () => false),
+      install: vi.fn(async () => {}),
+    } satisfies DesktopProfileUpdateAdapter
+    const harness = await createHarness({ profile })
+
+    await vi.advanceTimersByTimeAsync(testConfig.initialDelayMs)
+    await vi.waitFor(() => { expect(profile.confirm).toHaveBeenCalledOnce() })
+    expect(JSON.parse(await readFile(harness.statePath, 'utf8'))).toEqual({
+      version: 2,
+      lastPromptedGeneration: release.generationId,
+    })
+
+    await vi.advanceTimersByTimeAsync(testConfig.intervalMs)
+    await vi.waitFor(() => { expect(profile.check).toHaveBeenCalledTimes(2) })
+    expect(profile.confirm).toHaveBeenCalledOnce()
+    expect(profile.install).not.toHaveBeenCalled()
+  })
+
+  it('reports Base-required when no compatible Desktop Base is published', async () => {
+    const profile = {
+      check: vi.fn(async () => ({
+        status: 'base-required' as const,
+        currentGeneration: 'bundled',
+        currentSequence: 0,
+        releaseVersion: '2.0.11',
+        sequence: 3,
+        requiredBaseContracts: ['e-mate-desktop-profile-v1-dsh-rc7'],
+      })),
+      confirm: vi.fn(),
+      install: vi.fn(),
+    } satisfies DesktopProfileUpdateAdapter
+    const harness = await createHarness({ profile, request: async () => versionResponse('2.0.0') })
+
+    await expect(harness.runInteractiveUpdate()).resolves.toEqual({
+      status: 'base-required',
+      installedVersion: '2.0.0',
+      latestVersion: '2.0.11',
+      requiredBaseContracts: ['e-mate-desktop-profile-v1-dsh-rc7'],
+    })
+    expect(profile.confirm).not.toHaveBeenCalled()
+    expect(harness.notifications).toEqual([expect.objectContaining({ title: 'Desktop Base Update Required' })])
+  })
+
   it('exposes the packaged 60-second and six-hour background policy', () => {
     expect(inject).toEqual(['desktopRuntime'])
     expect(Config({} as UpdateConfig)).toEqual({

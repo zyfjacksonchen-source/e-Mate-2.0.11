@@ -8,8 +8,9 @@ import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
+import { applyHarnessRuntimeAdapters } from './harness-runtime-adapters.mjs'
 
-const PRODUCT_VERSION = '2.0.10'
+const PRODUCT_VERSION = '2.0.11'
 const HARNESS_VERSION = '0.1.0-rc.7'
 const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
 const PNPM_VERSION = '11.7.0'
@@ -158,6 +159,7 @@ async function main() {
       env: environment,
     })
     await arrangeRuntime(stage, assembled)
+    await applyHarnessRuntimeAdapters(assembled)
     const reported = capture(process.execPath, [join(assembled, 'apps', 'cli', 'lib', 'bin.js'), '--version'])
     if (reported !== HARNESS_VERSION) throw new Error(`assembled Harness reported ${reported}`)
     await publishAtomically(assembled, {

@@ -105,7 +105,7 @@ export function buildR2Inventory(
   }
   const prefix = releasePrefix(sourceCommit)
   if (manifest.download.manifest_url !== `${R2_PUBLIC_ORIGIN}/${prefix}/release-manifest.json`
-    || manifest.download.tarball_url !== `${R2_PUBLIC_ORIGIN}/${prefix}/e-mate-dsh-2.0.10.tgz`) {
+    || manifest.download.tarball_url !== `${R2_PUBLIC_ORIGIN}/${prefix}/e-mate-dsh-2.0.11.tgz`) {
     throw new Error('R2 release manifest download source is invalid')
   }
   const packageRecords = release.map(item => record(item.path, 'npm-package', publicOrigin, prefix))

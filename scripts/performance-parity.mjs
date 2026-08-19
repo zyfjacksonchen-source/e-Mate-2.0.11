@@ -11,6 +11,7 @@ import AgentRegistry from '../upstream/deepseek-harness/packages/core/agent/lib/
 import AgentLoop from '../upstream/deepseek-harness/packages/core/agent-loop/lib/index.js'
 
 const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
+const DESKTOP_REFERENCE_COMMIT = '6074088f5b660206e404b3591fab51fb99c69add'
 const MIN_SAMPLES = 30
 const wait = milliseconds => new Promise(resolveWait => setTimeout(resolveWait, milliseconds))
 const sha256 = value => createHash('sha256').update(value).digest('hex')
@@ -97,14 +98,23 @@ function comparePath(baseline, candidate) {
     const candidateTtft = metric(candidate.samples, 'ttft_ms', percentileValue)
     const ttftRate = percentileValue === 0.5 ? 0.05 : 0.10
     const ttftLimit = baseTtft + Math.max(50, baseTtft * ttftRate)
-    const baseThroughput = metric(baseline.samples, 'output_tokens_per_second', percentileValue)
-    const candidateThroughput = metric(candidate.samples, 'output_tokens_per_second', percentileValue)
-    const throughputLimit = baseThroughput * (1 - ttftRate)
     summaries[label] = {
       ttft_ms: { baseline: baseTtft, candidate: candidateTtft, limit: ttftLimit },
-      output_tokens_per_second: { baseline: baseThroughput, candidate: candidateThroughput, limit: throughputLimit },
     }
     if (candidateTtft > ttftLimit) failures.push(`${label} TTFT ${candidateTtft}ms > ${ttftLimit}ms`)
+  }
+
+  for (const [percentileValue, throughputRate] of [[0.5, 0.05], [0.05, 0.10]]) {
+    const label = `p${String(percentileValue * 100)}`
+    const baseThroughput = metric(baseline.samples, 'output_tokens_per_second', percentileValue)
+    const candidateThroughput = metric(candidate.samples, 'output_tokens_per_second', percentileValue)
+    const throughputLimit = baseThroughput * (1 - throughputRate)
+    summaries[label] ??= {}
+    summaries[label].output_tokens_per_second = {
+      baseline: baseThroughput,
+      candidate: candidateThroughput,
+      limit: throughputLimit,
+    }
     if (candidateThroughput < throughputLimit) {
       failures.push(`${label} throughput ${candidateThroughput} < ${throughputLimit}`)
     }
@@ -119,6 +129,24 @@ function comparePath(baseline, candidate) {
     }
   }
   return { passed: failures.length === 0, failures, summaries }
+}
+
+function validRuntimeIdentity(runtime) {
+  return runtime !== null && typeof runtime === 'object'
+    && typeof runtime.product === 'string' && runtime.product.length > 0
+    && /^[a-f0-9]{40}$/.test(runtime.source_commit)
+    && runtime.desktop_reference_commit === DESKTOP_REFERENCE_COMMIT
+    && typeof runtime.base_contract_id === 'string' && runtime.base_contract_id.length > 0
+    && typeof runtime.profile_generation === 'string' && runtime.profile_generation.length > 0
+    && isSha256(runtime.composition_sha256)
+    && isSha256(runtime.client_bundle_sha256)
+}
+
+function validEnterpriseReceipt(receipt) {
+  return receipt !== null && typeof receipt === 'object'
+    && isSha256(receipt.lease_sha256)
+    && isSha256(receipt.model_policy_sha256)
+    && isSha256(receipt.audit_outbox_sha256)
 }
 
 export function evaluateEvidence(evidence) {
@@ -179,12 +207,14 @@ function validateProductionReceipts(evidence) {
     evidence.paths?.emate_enterprise_unavailable_valid_cache,
   ]
   const receipts = paths.map(path => path?.run_receipt)
+  let receiptsComplete = true
   for (const receipt of receipts) {
     if (receipt === undefined
       || receipt.harness_commit !== HARNESS_COMMIT
       || typeof receipt.provider !== 'string' || receipt.provider.length === 0 || receipt.provider.includes('fixture')
       || typeof receipt.model !== 'string' || receipt.model.length === 0 || receipt.model.includes('fixture')
       || typeof receipt.tool !== 'string' || receipt.tool.length === 0
+      || !isSha256(receipt.acceptance_identity_sha256)
       || !isSha256(receipt.dataset_sha256)
       || !isSha256(receipt.sample_ids_sha256)
       || !isSha256(receipt.raw_samples_sha256)
@@ -196,8 +226,10 @@ function validateProductionReceipts(evidence) {
       || !Number.isFinite(Date.parse(receipt.started_at))
       || !Number.isFinite(Date.parse(receipt.finished_at))
       || Date.parse(receipt.finished_at) <= Date.parse(receipt.started_at)
+      || !validRuntimeIdentity(receipt.runtime)
       || !['machine_id_sha256', 'os', 'arch', 'node', 'browser', 'network_profile'].every(key => typeof receipt.environment?.[key] === 'string' && receipt.environment[key].length > 0)) {
       failures.push('PRODUCTION_RUN_RECEIPT_INCOMPLETE')
+      receiptsComplete = false
       continue
     }
     const receiptBody = { ...receipt }
@@ -206,6 +238,7 @@ function validateProductionReceipts(evidence) {
       failures.push('PRODUCTION_RUN_RECEIPT_DIGEST_MISMATCH')
     }
   }
+  if (!receiptsComplete) return [...new Set(failures)]
   if (receipts.every(Boolean) && paths.some((path, index) => {
     const samples = path?.samples ?? []
     return receipts[index].sample_ids_sha256 !== sha256(canonical(samples.map(sample => sample.pair_id)))
@@ -213,11 +246,30 @@ function validateProductionReceipts(evidence) {
   })) {
     failures.push('PRODUCTION_SAMPLE_RECEIPT_MISMATCH')
   }
-  const pairingKeys = ['provider', 'model', 'tool', 'dataset_sha256']
+  const pairingKeys = ['provider', 'model', 'tool', 'acceptance_identity_sha256', 'dataset_sha256']
   const baseline = receipts[0]
   if (baseline !== undefined && receipts.some(receipt => pairingKeys.some(key => receipt?.[key] !== baseline[key])
     || canonical(receipt?.environment) !== canonical(baseline.environment))) {
     failures.push('PRODUCTION_PATHS_ARE_NOT_EXACTLY_PAIRED')
+  }
+  if (baseline?.runtime?.product !== 'deepseek-harness-desktop'
+    || baseline?.runtime?.source_commit !== DESKTOP_REFERENCE_COMMIT) {
+    failures.push('PRODUCTION_BASELINE_RUNTIME_MISMATCH')
+  }
+  const online = receipts[1]
+  const offline = receipts[2]
+  if (online?.runtime?.product !== 'e-mate-desktop'
+    || canonical(online?.runtime) !== canonical(offline?.runtime)
+    || canonical(baseline?.runtime) === canonical(online?.runtime)) {
+    failures.push('PRODUCTION_CANDIDATE_RUNTIME_MISMATCH')
+  }
+  if (![online, offline].every(receipt => validEnterpriseReceipt(receipt?.enterprise_receipt)
+    && receipt?.enterprise_receipt_artifact?.kind === 'enterprise-runtime-receipt'
+    && isSha256(receipt?.enterprise_receipt_artifact?.sha256))) {
+    failures.push('PRODUCTION_ENTERPRISE_RUNTIME_RECEIPT_INCOMPLETE')
+  } else if (online.enterprise_receipt.lease_sha256 !== offline.enterprise_receipt.lease_sha256
+    || online.enterprise_receipt.model_policy_sha256 !== offline.enterprise_receipt.model_policy_sha256) {
+    failures.push('PRODUCTION_ENTERPRISE_STATE_NOT_PAIRED')
   }
   return [...new Set(failures)]
 }
@@ -227,9 +279,11 @@ async function verifyProductionArtifacts(evidence, input) {
   const checked = { ...evidence }
   delete checked.production_artifacts_verified
   const root = dirname(resolve(input))
-  for (const path of Object.values(checked.paths ?? {})) {
+  for (const [pathName, path] of Object.entries(checked.paths ?? {})) {
     const receipt = path.run_receipt
-    for (const key of ['raw_samples_artifact', 'provider_receipt_artifact']) {
+    const artifactKeys = ['raw_samples_artifact', 'provider_receipt_artifact']
+    if (pathName !== 'baseline') artifactKeys.push('enterprise_receipt_artifact')
+    for (const key of artifactKeys) {
       const artifact = receipt?.[key]
       if (typeof artifact?.path !== 'string' || !isSha256(artifact.sha256)) return checked
       let bytes
@@ -242,6 +296,12 @@ async function verifyProductionArtifacts(evidence, input) {
       if (key === 'raw_samples_artifact') {
         try {
           if (canonical(JSON.parse(bytes)) !== canonical(path.samples)) return checked
+        } catch {
+          return checked
+        }
+      } else if (key === 'enterprise_receipt_artifact') {
+        try {
+          if (canonical(JSON.parse(bytes)) !== canonical(receipt.enterprise_receipt)) return checked
         } catch {
           return checked
         }
@@ -368,22 +428,27 @@ async function main() {
   const { values } = parseArgs({
     options: {
       input: { type: 'string' },
+      fixture: { type: 'boolean', default: false },
       output: { type: 'string' },
       samples: { type: 'string', default: String(MIN_SAMPLES) },
     },
     strict: true,
   })
+  const modeCount = Number(values.input !== undefined) + Number(values.fixture)
+  if (modeCount !== 1) throw new Error('choose exactly one of --input <production-evidence.json> or --fixture')
   const samples = Number(values.samples)
   if (!Number.isSafeInteger(samples) || samples < MIN_SAMPLES) throw new Error(`--samples must be an integer >= ${MIN_SAMPLES}`)
-  const loaded = values.input === undefined
+  const loaded = values.fixture
     ? await createFixture(samples)
     : JSON.parse(await readFile(resolve(values.input), 'utf8'))
-  const evidence = values.input === undefined ? loaded : await verifyProductionArtifacts(loaded, values.input)
+  const evidence = values.fixture ? loaded : await verifyProductionArtifacts(loaded, values.input)
   const result = { ...evidence, decision: evaluateEvidence(evidence) }
   const serialized = `${JSON.stringify(result, null, 2)}\n`
   if (values.output === undefined) process.stdout.write(serialized)
   else await writeFile(resolve(values.output), serialized)
-  if (result.decision.gate_status === 'failed') process.exitCode = 1
+  process.exitCode = exitCodeForGateStatus(result.decision.gate_status)
 }
+
+export const exitCodeForGateStatus = gateStatus => gateStatus === 'passed' ? 0 : 1
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === import.meta.filename) await main()

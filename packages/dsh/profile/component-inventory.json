@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "components": [
+    {
+      "id": "@e-mate/dsh-client-shell",
+      "root": "packages/dsh/profile/plugins/emate-shell",
+      "kind": "profile",
+      "desktop": "hot-profile",
+      "cli": false
+    },
+    {
+      "id": "@e-mate/dsh-plugin-skill-hub",
+      "root": "packages/dsh-plugin-skill-hub",
+      "kind": "profile",
+      "desktop": "hot-profile",
+      "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-better-sidebar",
+      "root": "packages/dsh-plugin-better-sidebar",
+      "kind": "profile",
+      "desktop": "blocked",
+      "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-cdp",
+      "root": "packages/dsh-plugin-cdp",
+      "kind": "profile",
+      "desktop": "hot-profile",
+      "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-computer-use",
+      "root": "packages/dsh-plugin-computer-use",
+      "kind": "platform-profile",
+      "desktop": "platform-profile",
+      "cli": true,
+      "targets": [
+        {
+          "platform": "darwin",
+          "arch": "arm64",
+          "runtime_abi": "macos-computer-use-helper-v1",
+          "minimum_os": "14.0",
+          "signing": { "scheme": "adhoc", "identity": "adhoc" },
+          "native_paths": ["native/macos"]
+        },
+        {
+          "platform": "darwin",
+          "arch": "x64",
+          "runtime_abi": "macos-computer-use-helper-v1",
+          "minimum_os": "14.0",
+          "signing": { "scheme": "adhoc", "identity": "adhoc" },
+          "native_paths": ["native/macos"]
+        },
+        {
+          "platform": "win32",
+          "arch": "x64",
+          "runtime_abi": "none",
+          "minimum_os": "10.0",
+          "signing": { "scheme": "unsigned", "identity": "none" },
+          "native_paths": []
+        }
+      ]
+    },
+    {
+      "id": "@e-mate/dsh-plugin-file-import",
+      "root": "packages/dsh-plugin-file-import",
+      "kind": "profile",
+      "desktop": "hot-profile",
+      "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-find-skill",
+      "root": "packages/dsh-plugin-find-skill",
+      "kind": "profile",
+      "desktop": "hot-profile",
+      "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-genui",
+      "root": "packages/dsh-plugin-genui",
+      "kind": "profile",
+      "desktop": "blocked",
+      "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-mcp-manage",
+      "root": "packages/dsh-plugin-mcp-manage",
+      "kind": "profile",
+      "desktop": "hot-profile",
+      "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-memory-evolve",
+      "root": "packages/dsh-plugin-memory-evolve",
+      "kind": "profile",
+      "desktop": "hot-profile",
+      "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-office-skills",
+      "root": "packages/dsh-plugin-office-skills",
+      "kind": "profile",
+      "desktop": "hot-profile",
+      "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-search-mcp",
+      "root": "packages/dsh-plugin-search-mcp",
+      "kind": "profile",
+      "desktop": "hot-profile",
+      "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-vision-toolkit",
+      "root": "packages/dsh-plugin-vision-toolkit",
+      "kind": "profile",
+      "desktop": "blocked",
+      "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-xin-assistant",
+      "root": "packages/dsh-plugin-xin-assistant",
+      "kind": "platform-profile",
+      "desktop": "platform-profile",
+      "cli": true,
+      "targets": [
+        {
+          "platform": "darwin",
+          "arch": "arm64",
+          "runtime_abi": "cpython-3.12",
+          "minimum_os": "13.0",
+          "signing": { "scheme": "adhoc", "identity": "adhoc" },
+          "native_paths": ["runtime/vendor-native/darwin-arm64"]
+        },
+        {
+          "platform": "darwin",
+          "arch": "x64",
+          "runtime_abi": "cpython-3.12",
+          "minimum_os": "13.0",
+          "signing": { "scheme": "adhoc", "identity": "adhoc" },
+          "native_paths": ["runtime/vendor-native/darwin-x64"]
+        },
+        {
+          "platform": "win32",
+          "arch": "x64",
+          "runtime_abi": "cpython-3.12",
+          "minimum_os": "10.0",
+          "signing": { "scheme": "unsigned", "identity": "none" },
+          "native_paths": ["runtime/vendor-native/win32-x64"]
+        }
+      ]
+    }
+  ]
+}

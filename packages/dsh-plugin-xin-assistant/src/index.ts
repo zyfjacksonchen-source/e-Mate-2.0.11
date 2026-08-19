@@ -3,13 +3,14 @@ import { readFileSync } from 'node:fs'
 import { delimiter } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
+import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
-import { buildCliArgs } from './args.ts'
+import { buildCliArgs, resolvePythonCommand } from './args.ts'
 
-export { buildCliArgs } from './args.ts'
+export { buildCliArgs, resolvePythonCommand } from './args.ts'
 
 export const name = '@e-mate/dsh-plugin-xin-assistant'
 export const inject = ['subprocess', 'tools', 'systemPrompt']
@@ -33,6 +34,7 @@ export function verifyBundledCli(): void {
 
 export function apply(ctx: Context, config: ConfigShape): void {
   verifyBundledCli()
+  const python = resolvePythonCommand(config.pythonPath, launchEnvironmentOf(ctx))
   ctx.systemPrompt.section({
     name: 'emate:xin-assistant',
     order: 182,
@@ -51,7 +53,7 @@ export function apply(ctx: Context, config: ConfigShape): void {
     },
     output: { schema: { type: 'object', additionalProperties: true }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
     async execute(args, exec) {
-      const argv = [config.pythonPath.trim() || (process.platform === 'win32' ? 'python' : 'python3'), cliPath, ...buildCliArgs(args)]
+      const argv = [python, cliPath, ...buildCliArgs(args)]
       const signal = AbortSignal.any([exec.signal, AbortSignal.timeout(60_000)])
       const handle = ctx.subprocess.spawn({
         argv, cwd: runtimeRoot, signal, graceMs: 3_000,

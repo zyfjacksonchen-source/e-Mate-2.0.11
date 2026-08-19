@@ -14,7 +14,6 @@ export default defineConfig(({ mode }) => {
       port: 4179,
       strictPort: true,
       proxy: {
-        '/runtime/status': apiTarget,
         '/v1/admin': apiTarget,
         '/v1/auth': authTarget,
         '/e-mate/model-api': {

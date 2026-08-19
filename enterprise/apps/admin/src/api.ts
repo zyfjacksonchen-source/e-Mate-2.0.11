@@ -1,4 +1,3 @@
-import { parseRuntimeRegistryStatus, type RuntimeRegistryStatus } from '@e-mate/runtime-registry-contract';
 import {
   parseAdminApiKeyCreationResult,
   parseAdminConsentList,
@@ -355,14 +354,6 @@ async function request(
   });
   if (!response.ok) throw new AdminApiError(response.status);
   return response.status === 204 ? null : response.json();
-}
-
-export async function loadRuntimeStatus(
-  token: string,
-  signal: AbortSignal,
-  options: StatusRequestOptions
-): Promise<RuntimeRegistryStatus> {
-  return parseRuntimeRegistryStatus(await request(token, signal, options, '/runtime/status'));
 }
 
 export async function loadConsentAcceptances(

@@ -52,6 +52,7 @@ export function applyAdvancedShell(ctx: ClientContext, environment: DesktopClien
       'conversation': { kind: 'single', scope: 'session-maybe' },
       'details': { kind: 'single', scope: 'session' },
       'shell.overlay': { kind: 'list', scope: 'root' },
+      'desktop.titlebar.utilities': { kind: 'list', scope: 'session-maybe' },
     },
     inject: () => ({ layout: desktopLayout, platform: environment.platform }),
   }, AdvancedFrame), 'desktop: advanced root slot')

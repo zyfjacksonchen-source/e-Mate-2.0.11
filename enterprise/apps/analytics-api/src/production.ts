@@ -6,10 +6,8 @@ import { pathToFileURL } from 'node:url';
 import { parseConsentPolicy, type ConsentPolicy } from '@e-mate/admin-contract';
 import { openPostgresConsentStore } from '@e-mate/consent-store';
 import { openPostgresAdminManagementStore, type AdminModelRouteDefinition } from './admin-management.ts';
-import { openPostgresObservabilityPolicyStore } from './observability-policy.ts';
-import { openRedisRuntimeRegistry, type RuntimeRegistryPrincipal } from './runtime-registry.ts';
+import type { RuntimeRegistryPrincipal } from './runtime-registry.ts';
 import { createAnalyticsServer, createManagementAuthenticator, type AuthenticateBearer } from './server.ts';
-import { openPostgresSessionSummaryStore } from './session-index.ts';
 import { openPostgresTaskEventStore } from './task-events.ts';
 import { openPostgresUsageAnalyticsReader } from './usage-analytics.ts';
 import {
@@ -32,7 +30,6 @@ export type AnalyticsProductionConfiguration = {
   host: string;
   port: number;
   databaseUrl: string;
-  redisUrl: string;
   modelRoutes: AdminModelRouteDefinition[];
   consentPolicy: ConsentPolicy;
   modelRouteKeyEncryptionKey?: Buffer;
@@ -232,10 +229,10 @@ export function parseProductionConfiguration(
       'schemaVersion',
       'listen',
       'database',
-      'redis',
       'managementAuth',
       'consentPolicy',
       'modelRoutes',
+      ...(root.redis === undefined ? [] : ['redis']),
       ...(root.modelRouteKeys === undefined ? [] : ['modelRouteKeys']),
       ...(root.sessionAuth === undefined ? [] : ['sessionAuth']),
     ],
@@ -253,9 +250,11 @@ export function parseProductionConfiguration(
   exact(database, ['urlFile'], 'database configuration');
   const databaseFile = secretPath(database.urlFile, 'database URL file');
 
-  const redis = record(root.redis, 'Redis configuration');
-  exact(redis, ['urlFile'], 'Redis configuration');
-  const redisFile = secretPath(redis.urlFile, 'Redis URL file');
+  if (root.redis !== undefined) {
+    const redis = record(root.redis, 'Redis configuration');
+    exact(redis, ['urlFile'], 'Redis configuration');
+    secretPath(redis.urlFile, 'Redis URL file');
+  }
 
   const managementAuth = record(root.managementAuth, 'management authentication configuration');
   exact(managementAuth, ['principalsFile'], 'management authentication configuration');
@@ -306,7 +305,6 @@ export function parseProductionConfiguration(
     host: listen.host,
     port: integer(listen.port, 'listen port', 1, 65_535),
     databaseUrl: secretText(readSecret, databaseFile, 'database URL'),
-    redisUrl: secretText(readSecret, redisFile, 'Redis URL'),
     consentPolicy: parseConsentPolicy(root.consentPolicy),
     modelRoutes: parseModelRoutes(root.modelRoutes),
     ...(modelRouteKeyEncryptionKey ? { modelRouteKeyEncryptionKey } : {}),
@@ -395,12 +393,6 @@ export async function startProductionAnalyticsApi(configurationFile: string): Pr
   const closers: Array<() => Promise<void>> = [];
   let server: Server | undefined;
   try {
-    const runtime = await openRedisRuntimeRegistry(configuration.redisUrl);
-    closers.push(runtime.close);
-    const sessions = await openPostgresSessionSummaryStore(configuration.databaseUrl);
-    closers.push(sessions.close);
-    const policy = await openPostgresObservabilityPolicyStore(configuration.databaseUrl);
-    closers.push(policy.close);
     const usage = await openPostgresUsageAnalyticsReader(configuration.databaseUrl);
     closers.push(usage.close);
     const tasks = await openPostgresTaskEventStore(configuration.databaseUrl);
@@ -422,10 +414,7 @@ export async function startProductionAnalyticsApi(configurationFile: string): Pr
         (await accessSessions.authenticate(bearer)) ?? (await bootstrapAuthenticate(bearer));
     }
     server = createAnalyticsServer({
-      registry: runtime.registry,
       authenticate: createManagementAuthenticator(authenticate, admin.store),
-      sessionIndex: sessions.store,
-      observabilityPolicy: policy.store,
       usageAnalytics: usage.reader,
       taskEvents: tasks.store,
       adminManagement: admin.store,

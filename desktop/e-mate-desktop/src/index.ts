@@ -156,13 +156,4 @@ export function apply(ctx: Context, config: Config): void {
     }),
     '@e-mate/desktop: native shell generation',
   )
-  ctx.effect(() => {
-    const registration = runtime.registerTrayItem({
-      group: 'tools',
-      order: 20,
-      label: () => '加载浏览器扩展…',
-      invoke: () => runtime.openBrowserExtensionSetup(),
-    })
-    return () => { registration.dispose() }
-  }, '@e-mate/desktop: browser extension setup tray command')
 }

@@ -11,7 +11,7 @@ const Icon = () => <svg />
 
 afterEach(cleanup)
 
-describe('e-Mate 2.0.10 composer projection', () => {
+describe('e-Mate 2.0.11 composer projection', () => {
   it('opens a selector card that lists only effective native MCP connections', async () => {
     const callConnections = vi.fn(async () => ({
       ok: true,

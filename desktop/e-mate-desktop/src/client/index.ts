@@ -9,6 +9,7 @@ import { applyAdvancedShell } from './advanced-shell.ts'
 import { startRendererBootReporter } from './boot-health.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
 import { installResourceContext } from './resource-context.ts'
+import { installWorkspaceFolderDrop } from './workspace-folder-drop.ts'
 
 export { applyAdvancedShell } from './advanced-shell.ts'
 export {
@@ -26,6 +27,7 @@ export const inject = [
   'slots',
   'sessions',
   'theme',
+  'workspaces',
 ]
 
 /** Register desktop-owned client surfaces for the current BrowserWindow mode. @param ctx - browser Cordis context. */
@@ -36,5 +38,12 @@ export function apply(ctx: ClientContext): void {
     '@e-mate/desktop: renderer boot health report',
   )
   ctx.effect(() => installResourceContext(ctx.sessions), '@e-mate/desktop: resource context')
+  ctx.effect(
+    () => installWorkspaceFolderDrop({
+      create: input => ctx.workspaces.create(input),
+      startSession: workspaceId => { ctx.workspaces.startSession(workspaceId) },
+    }),
+    '@e-mate/desktop: workspace folder drop',
+  )
   if (environment.mode === 'advanced') applyAdvancedShell(ctx, environment)
 }

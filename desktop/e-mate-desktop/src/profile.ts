@@ -195,10 +195,12 @@ export function ensureDesktopProfile(home: string = resolveDshHome()): string {
   return dir
 }
 
-/** Resolve the agent presets shipped by the matching dsh CLI dependency. */
-function shippedPresetRoot(): string {
-  const require = createRequire(import.meta.url)
-  return join(dirname(require.resolve('@deepseek-ai/dsh/package.json')), 'config', 'agent-presets')
+/** Resolve the complete agent-preset set shipped by the matching dsh CLI dependency. */
+export function shippedPresetRoot(moduleUrl: string = import.meta.url): string {
+  const require = createRequire(moduleUrl)
+  return unpackedAsarPath(
+    join(dirname(require.resolve('@deepseek-ai/dsh/package.json')), 'config', 'agent-presets'),
+  )
 }
 
 /** Materialize the target standard preset with only its product persona replaced. */
@@ -383,7 +385,10 @@ export function prepareDesktopProfile(
       id: 'agent-presets',
       config: {
         ...rowConfig(presets),
-        roots: [{ path: managedPresetRoot(profileDir), trust: 'system' }],
+        roots: [
+          { path: managedPresetRoot(profileDir), trust: 'system' },
+          { path: shippedPresetRoot(), trust: 'system' },
+        ],
       },
     })
   }

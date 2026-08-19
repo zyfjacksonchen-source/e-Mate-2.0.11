@@ -1,5 +1,0 @@
-# Project the dsh-browser Host service through target Connection RPC and slots.
-- insert:
-    - id: emate-browser-panel
-      name: '@e-mate/dsh-plugin-browser-panel'
-      inject: [connection, sessions, emateCapabilities, emateBrowser]

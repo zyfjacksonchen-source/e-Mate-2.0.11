@@ -3,6 +3,7 @@ import css from './settings-chrome.module.css'
 
 const SETTINGS_PATH = '/settings'
 const SETTINGS_RETURN_KEY = 'eMateSettingsReturn'
+const SETTINGS_CONTENT_SELECTOR = '[data-emate-settings-content]'
 const SETTINGS_BRAND_COPY = new Map([
   ['插件', '能力中心'],
   ['Plugins', 'Capabilities'],
@@ -40,17 +41,22 @@ export function SettingsTrigger({ wide, SettingsIcon }: TriggerProps) {
     if (!(trigger instanceof HTMLButtonElement)) return undefined
     trigger.dataset.emateSettingsTrigger = ''
 
-    let open = document.querySelector('[data-emate-settings-content]') !== null
+    let open = document.querySelector(SETTINGS_CONTENT_SELECTOR) !== null
     const syncPanel = () => {
       const shouldOpen = location.pathname === SETTINGS_PATH
-      const isOpen = document.querySelector('[data-emate-settings-content]') !== null
+      const isOpen = document.querySelector(SETTINGS_CONTENT_SELECTOR) !== null
       if (shouldOpen && !isOpen) trigger.click()
       if (!shouldOpen && isOpen) {
         document.querySelector<HTMLElement>('[data-emate-settings-close]')?.closest('button')?.click()
       }
     }
-    const observer = new MutationObserver(() => {
-      const isOpen = document.querySelector('[data-emate-settings-content]') !== null
+    const observer = new MutationObserver(records => {
+      const changed = records.some(record => [...record.addedNodes, ...record.removedNodes].some(node =>
+        node instanceof Element
+        && (node.matches(SETTINGS_CONTENT_SELECTOR) || node.querySelector(SETTINGS_CONTENT_SELECTOR) !== null),
+      ))
+      if (!changed) return
+      const isOpen = document.querySelector(SETTINGS_CONTENT_SELECTOR) !== null
       if (isOpen === open) {
         syncPanel()
         return

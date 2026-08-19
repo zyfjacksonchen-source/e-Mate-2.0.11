@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { posix } from 'node:path'
+import type { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import fontkit from '@pdf-lib/fontkit'
 import { DOMParser, type Document as XmlDocument, type Element as XmlElement } from '@xmldom/xmldom'
@@ -42,7 +43,82 @@ const MAX_ROWS = 10_000
 const MAX_COLUMNS = 256
 const MAX_SLIDES = 200
 const MAX_PAGES = 500
+const MAX_ZIP_ENTRIES = 2_048
+const MAX_ZIP_ENTRY_BYTES = 16 * 1024 * 1024
+const MAX_ZIP_TOTAL_BYTES = 64 * 1024 * 1024
+const MAX_XML_ENTRY_BYTES = 8 * 1024 * 1024
+const MAX_ZIP_COMPRESSION_RATIO = 200
 const fontRoot = fileURLToPath(new URL('../assets/noto-sans-sc/', import.meta.url))
+
+interface OfficeZip {
+  zip: JSZip
+  remainingXmlBytes: number
+}
+
+interface ZipMetadata {
+  compressedSize?: unknown
+  uncompressedSize?: unknown
+}
+
+async function loadOfficeZip(buffer: Buffer): Promise<OfficeZip> {
+  const zip = await JSZip.loadAsync(buffer)
+  const entries = Object.values(zip.files)
+  if (entries.length > MAX_ZIP_ENTRIES) throw new Error('Office archive contains too many entries')
+  let total = 0
+  for (const entry of entries) {
+    if (entry.dir) continue
+    const metadata = (entry as unknown as { _data?: ZipMetadata })._data
+    const compressed = metadata?.compressedSize
+    const uncompressed = metadata?.uncompressedSize
+    if (!Number.isSafeInteger(compressed) || !Number.isSafeInteger(uncompressed)
+      || (compressed as number) < 0 || (uncompressed as number) < 0) {
+      throw new Error('Office archive entry metadata is invalid')
+    }
+    if ((uncompressed as number) > MAX_ZIP_ENTRY_BYTES) throw new Error('Office archive entry exceeds the size limit')
+    total += uncompressed as number
+    if (total > MAX_ZIP_TOTAL_BYTES) throw new Error('Office archive exceeds the total size limit')
+    if ((uncompressed as number) > 1024 * 1024
+      && (uncompressed as number) > Math.max(1, compressed as number) * MAX_ZIP_COMPRESSION_RATIO) {
+      throw new Error('Office archive entry exceeds the compression-ratio limit')
+    }
+  }
+  return { zip, remainingXmlBytes: MAX_ZIP_TOTAL_BYTES }
+}
+
+async function readZipXml(archive: OfficeZip, entry: JSZip.JSZipObject): Promise<string> {
+  const chunks: Buffer[] = []
+  let bytes = 0
+  const stream = entry.nodeStream('nodebuffer') as Readable
+  await new Promise<void>((resolve, reject) => {
+    let settled = false
+    const fail = (error: Error): void => {
+      if (settled) return
+      settled = true
+      stream.destroy()
+      reject(error)
+    }
+    stream.on('data', (chunk: Buffer) => {
+      bytes += chunk.byteLength
+      if (bytes > MAX_XML_ENTRY_BYTES || bytes > archive.remainingXmlBytes) {
+        fail(new Error('Office XML exceeds the parsing limit'))
+        return
+      }
+      chunks.push(chunk)
+    })
+    stream.once('error', error => { fail(error instanceof Error ? error : new Error('Office XML decompression failed')) })
+    stream.once('end', () => {
+      if (settled) return
+      settled = true
+      archive.remainingXmlBytes -= bytes
+      resolve()
+    })
+  })
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, bytes))
+  } catch (cause) {
+    throw new Error('Office XML is not valid UTF-8', { cause })
+  }
+}
 
 function record(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -277,7 +353,7 @@ async function writePdf(value: PdfDocumentInput): Promise<Buffer> {
   const pdf = await PDFDocument.create()
   pdf.registerFontkit(fontkit)
   if (value.title !== undefined) pdf.setTitle(value.title)
-  pdf.setProducer('e-Mate 2.0.10')
+  pdf.setProducer('e-Mate 2.0.11')
   const segments = await fontSegments()
   const used = new Map<string, Awaited<ReturnType<PDFDocument['embedFont']>>>()
   const allText = [value.title ?? '', ...value.pages.flatMap(page => page.lines)]
@@ -328,10 +404,10 @@ function xmlText(xml: string, containerName: string): string[] {
 }
 
 async function readDocx(buffer: Buffer): Promise<TextDocument> {
-  const zip = await JSZip.loadAsync(buffer)
-  const entry = zip.file('word/document.xml')
+  const archive = await loadOfficeZip(buffer)
+  const entry = archive.zip.file('word/document.xml')
   if (entry === null) throw new Error('DOCX document.xml is missing')
-  return { paragraphs: xmlText(await entry.async('string'), 'p') }
+  return { paragraphs: xmlText(await readZipXml(archive, entry), 'p') }
 }
 
 function numericPath(a: string, b: string): number {
@@ -339,12 +415,16 @@ function numericPath(a: string, b: string): number {
 }
 
 async function readPptx(buffer: Buffer): Promise<SlidesDocument> {
-  const zip = await JSZip.loadAsync(buffer)
-  const paths = Object.keys(zip.files).filter(path => /^ppt\/slides\/slide\d+\.xml$/u.test(path)).sort(numericPath)
-  if (paths.length === 0) throw new Error('PPTX contains no slides')
-  return {
-    slides: await Promise.all(paths.map(async path => ({ bullets: xmlText(await (zip.file(path) as JSZip.JSZipObject).async('string'), 'p') }))),
+  const archive = await loadOfficeZip(buffer)
+  const paths = Object.keys(archive.zip.files).filter(path => /^ppt\/slides\/slide\d+\.xml$/u.test(path)).sort(numericPath)
+  if (paths.length === 0 || paths.length > MAX_SLIDES) throw new Error('PPTX slide count is invalid')
+  const slides: SlidesDocument['slides'] = []
+  for (const path of paths) {
+    const entry = archive.zip.file(path)
+    if (entry === null) throw new Error('PPTX slide is missing')
+    slides.push({ bullets: xmlText(await readZipXml(archive, entry), 'p') })
   }
+  return { slides }
 }
 
 function parsedXml(xml: string): XmlDocument {
@@ -378,25 +458,27 @@ function xlsxCellValue(cell: XmlElement, sharedStrings: readonly string[]): Scal
 }
 
 async function readXlsx(buffer: Buffer): Promise<WorkbookDocument> {
-  const zip = await JSZip.loadAsync(buffer)
-  const workbookFile = zip.file('xl/workbook.xml')
-  const relationshipsFile = zip.file('xl/_rels/workbook.xml.rels')
+  const archive = await loadOfficeZip(buffer)
+  const workbookFile = archive.zip.file('xl/workbook.xml')
+  const relationshipsFile = archive.zip.file('xl/_rels/workbook.xml.rels')
   if (workbookFile === null || relationshipsFile === null) throw new Error('XLSX workbook metadata is missing')
-  const workbook = parsedXml(await workbookFile.async('string'))
-  const relationships = parsedXml(await relationshipsFile.async('string'))
+  const workbook = parsedXml(await readZipXml(archive, workbookFile))
+  const relationships = parsedXml(await readZipXml(archive, relationshipsFile))
   const targets = new Map(namedElements(relationships, 'Relationship').map(node => [node.getAttribute('Id'), node.getAttribute('Target')]))
-  const sharedFile = zip.file('xl/sharedStrings.xml')
-  const sharedStrings = sharedFile === null ? [] : xmlText(await sharedFile.async('string'), 'si')
+  const sharedFile = archive.zip.file('xl/sharedStrings.xml')
+  const sharedStrings = sharedFile === null ? [] : xmlText(await readZipXml(archive, sharedFile), 'si')
   const sheets: WorkbookDocument['sheets'] = []
-  for (const sheet of namedElements(workbook, 'sheet')) {
+  const sheetElements = namedElements(workbook, 'sheet')
+  if (sheetElements.length === 0 || sheetElements.length > 100) throw new Error('XLSX sheet count is invalid')
+  for (const sheet of sheetElements) {
     const name = sheet.getAttribute('name')
     const target = targets.get(sheet.getAttribute('r:id') || sheet.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id'))
     if (name === null || target === null || target === undefined) throw new Error('XLSX sheet metadata is invalid')
     const path = posix.normalize(target.startsWith('/') ? target.slice(1) : posix.join('xl', target))
     if (!path.startsWith('xl/') || path.includes('../')) throw new Error('XLSX worksheet path is unsafe')
-    const entry = zip.file(path)
+    const entry = archive.zip.file(path)
     if (entry === null) throw new Error('XLSX worksheet is missing')
-    const document = parsedXml(await entry.async('string'))
+    const document = parsedXml(await readZipXml(archive, entry))
     const rows: Scalar[][] = []
     for (const row of namedElements(document, 'row')) {
       const rowIndex = Number(row.getAttribute('r'))
@@ -414,7 +496,6 @@ async function readXlsx(buffer: Buffer): Promise<WorkbookDocument> {
     }
     sheets.push({ name, rows })
   }
-  if (sheets.length === 0) throw new Error('XLSX contains no sheets')
   return { sheets }
 }
 

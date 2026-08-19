@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh-plugin-genui",
-  "version": "2.0.10",
-  "description": "e-Mate 2.0.10 compatibility build of dsh-genui for the pinned local runtime.",
+  "version": "2.0.11",
+  "description": "e-Mate 2.0.11 compatibility build of dsh-genui for the pinned local runtime.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -32,6 +32,12 @@
     }
   },
   "eMate": {
+    "component": {
+      "schema_version": 1,
+      "id": "@e-mate/dsh-plugin-genui",
+      "kind": "profile",
+      "base_contracts": ["e-mate-desktop-profile-v1-dsh-df78045a127e"]
+    },
     "harnessVersion": "0.1.0-rc.7",
     "harnessCommit": "df78045a127e32cb5b942defba52c539590d1596"
   },

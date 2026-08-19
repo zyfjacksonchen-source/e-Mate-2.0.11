@@ -13,7 +13,6 @@
   "dependencies": {
     "@arco-design/web-react": "^2.66.1",
     "@e-mate/admin-contract": "workspace:*",
-    "@e-mate/runtime-registry-contract": "workspace:*",
     "@icon-park/react": "^1.4.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

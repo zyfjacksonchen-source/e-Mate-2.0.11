@@ -2,6 +2,24 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/u
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2})?$/u
 type Args = Record<string, unknown>
 
+export const EMATE_MANAGED_PYTHON_PATH = 'EMATE_MANAGED_PYTHON_PATH'
+
+export interface PythonEnvironmentLookup {
+  getFrom(name: string, sources: readonly 'process'[]): { readonly value: string } | undefined
+}
+
+/** Resolve Desktop's managed interpreter through the frozen DSH launch environment. */
+export function resolvePythonCommand(
+  configured: string,
+  environment: PythonEnvironmentLookup,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const explicit = configured.trim()
+  if (explicit !== '') return explicit
+  const managed = environment.getFrom(EMATE_MANAGED_PYTHON_PATH, ['process'])?.value.trim()
+  return managed === undefined || managed === '' ? (platform === 'win32' ? 'python' : 'python3') : managed
+}
+
 function text(value: unknown, name: string, max = 1024): string | undefined {
   if (value === undefined) return undefined
   if (typeof value !== 'string' || value.length === 0 || value.length > max || /[\0\r\n]/u.test(value)) throw new Error(`${name} 参数无效。`)

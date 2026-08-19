@@ -444,13 +444,6 @@
   line-height: 16px;
 }
 
-.notice {
-  margin-top: 8px;
-  border-radius: 10px;
-  background: var(--emate-raised);
-  overflow-wrap: anywhere;
-}
-
 .footer {
   flex: none;
   padding: 8px;
@@ -526,6 +519,13 @@
 .footer > :global(button),
 .footer > :global(div) {
   flex: none;
+}
+
+.notice {
+  margin-top: 8px;
+  border-radius: 10px;
+  background: var(--emate-raised);
+  overflow-wrap: anywhere;
 }
 
 .scrim,

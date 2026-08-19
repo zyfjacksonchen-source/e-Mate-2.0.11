@@ -98,7 +98,6 @@ try {
     registerTrayItem() {
       return { refresh() {}, dispose() {} }
     },
-    async openBrowserExtensionSetup() {},
     async requestRestart() {},
     prepareToQuit() {},
   }

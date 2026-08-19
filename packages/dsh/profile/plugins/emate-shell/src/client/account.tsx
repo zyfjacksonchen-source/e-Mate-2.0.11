@@ -15,6 +15,7 @@ interface Props {
 
 interface AccountControlProps extends Props {
   wide: boolean
+  placement?: 'sidebar' | 'header'
   UserIcon: ComponentType<{ size?: number }>
   expandSidebar: () => void
 }
@@ -76,7 +77,7 @@ function validUsage(value: unknown): value is AccountUsage {
     && Number.isFinite(Date.parse(usage.calculated_at))
 }
 
-export function AccountControl({ callIdentity, wide, UserIcon, expandSidebar }: AccountControlProps) {
+export function AccountControl({ callIdentity, wide, placement = 'sidebar', UserIcon, expandSidebar }: AccountControlProps) {
   const [state, setState] = useState<IdentityBootstrap | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -142,7 +143,7 @@ export function AccountControl({ callIdentity, wide, UserIcon, expandSidebar }: 
   }
 
   return <>
-    <details ref={details} className={css.account} onToggle={event => {
+    <details ref={details} className={`${css.account} ${placement === 'header' ? css.headerAccount : ''}`} onToggle={event => {
       if ((event.currentTarget as HTMLDetailsElement).open) {
         void loadUsage()
       } else {
@@ -152,7 +153,7 @@ export function AccountControl({ callIdentity, wide, UserIcon, expandSidebar }: 
       <summary
         aria-label={`用户中心，${state?.display_name ?? (state?.authenticated ? '已登录账号' : '未登录')}`}
         onClick={event => {
-          if (!wide) {
+          if (!wide && placement === 'sidebar') {
             event.preventDefault()
             expandSidebar()
           }
@@ -161,7 +162,7 @@ export function AccountControl({ callIdentity, wide, UserIcon, expandSidebar }: 
         <UserIcon size={18} />
         <span className={wide ? undefined : css.visuallyHidden}>用户中心</span>
       </summary>
-      {wide && (
+      {(wide || placement === 'header') && (
         <div className={css.accountPanel}>
           <strong>{state?.display_name ?? (state?.authenticated ? '已登录账号' : '未登录')}</strong>
           {state?.authenticated && state.weekly_token_limit !== undefined ? (

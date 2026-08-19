@@ -5,10 +5,10 @@ import { composeEntries } from '@deepseek-ai/dsh-app-boot'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   EMATE_DESKTOP_PROFILE_VERSION,
+  EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
   installEmateDesktopProfile,
 } from '../src/e-mate-profile.ts'
 import { prepareDesktopProfile } from '../src/profile.ts'
-import { bundledPythonPath } from '../src/vision-toolkit.ts'
 
 const roots: string[] = []
 
@@ -25,33 +25,28 @@ describe('e-Mate desktop profile', () => {
     const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8')) as {
       dsh: { profile: { bundles: string[] } }
     }
-    expect(manifest.dsh.profile.bundles).toHaveLength(19)
-    expect(manifest.dsh.profile.bundles).toEqual(expect.arrayContaining([
+    expect(manifest.dsh.profile.bundles).toEqual([
+      '@deepseek-ai/dsh-base',
+      '@deepseek-ai/dsh-web-app',
+      ...EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS.filter(id => id.startsWith('@e-mate/dsh-plugin-')),
       '@kelearns/dsh-navigation-bar',
       '@omdsh-dev/dsh-genui',
-      '@e-mate/dsh-plugin-browser',
-      '@e-mate/dsh-plugin-file-import',
-      '@e-mate/dsh-plugin-computer-use',
-      '@e-mate/dsh-plugin-find-skill',
-      '@e-mate/dsh-plugin-mcp-manage',
-      '@e-mate/dsh-plugin-office-skills',
-      '@e-mate/dsh-plugin-xin-assistant',
       'dsh-at-file',
       'dsh-better-sidebar',
       'dsh-file-viewer',
-      'dsh-search-mcp',
       'dsh-turn-fold',
       'dsh-visualize',
-    ]))
+    ])
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-im')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-vision-toolkit')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-better-sidebar')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-genui')
-    expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-search-mcp')
+    expect(manifest.dsh.profile.bundles).not.toContain('dsh-search-mcp')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-subagent')
     expect(existsSync(join(profile, 'node_modules', '@kelearns', 'dsh-navigation-bar', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@omdsh-dev', 'dsh-genui', 'lib', 'client.js'))).toBe(true)
-    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-browser', 'lib', 'index.mjs'))).toBe(true)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-cdp', 'lib', 'index.mjs'))).toBe(true)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-skill-hub', 'lib', 'index.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-file-import', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-computer-use', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-find-skill', 'lib', 'index.js'))).toBe(true)
@@ -63,7 +58,7 @@ describe('e-Mate desktop profile', () => {
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'lib', 'index.js'))).toBe(true)
     expect(lstatSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets')).isSymbolicLink()).toBe(true)
     const xinPatch = readFileSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant', 'cordis.patch.yml'), 'utf8')
-    expect(xinPatch).toContain(`pythonPath: ${JSON.stringify(bundledPythonPath())}`)
+    expect(xinPatch).toContain("pythonPath: ''")
     expect(lstatSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant', 'runtime')).isSymbolicLink()).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets', 'pdf2json', 'pdfparser.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets', 'noto-sans-sc', 'files', 'noto-sans-sc-4-wght-normal.woff2'))).toBe(true)
@@ -86,8 +81,10 @@ describe('e-Mate desktop profile', () => {
     expect(fileViewerClient).not.toContain('"file-viewer: file open router"')
     expect(fileViewerClient).toContain('name: "conversation.session.header.actions"')
     expect(fileViewerClient).toContain('coordinator.openInSystem(sessionId, path)')
-    const searchMcpClient = readFileSync(join(profile, 'node_modules', 'dsh-search-mcp', 'lib', 'client.browser.js'), 'utf8')
-    expect(searchMcpClient).toContain('key: "search-mcp"')
+    const searchMcpHost = readFileSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-search-mcp', 'lib', 'index.mjs'), 'utf8')
+    expect(searchMcpHost).toContain('https://mcp.tavily.com/mcp/')
+    expect(searchMcpHost).not.toMatch(/StdioClientTransport|duckduckgo|\bnpx\b/u)
+    expect(existsSync(join(profile, 'node_modules', 'dsh-search-mcp'))).toBe(false)
     const turnFoldClient = readFileSync(join(profile, 'node_modules', 'dsh-turn-fold', 'client.js'), 'utf8')
     const labelBody = /function activityHeaderLabel\(fold\) \{([\s\S]*?)\n\t\t\}/u.exec(turnFoldClient)?.[1]
     expect(labelBody).toBeDefined()
@@ -100,17 +97,9 @@ describe('e-Mate desktop profile', () => {
     expect(turnFoldClient).not.toContain('turnTimings')
     expect(turnFoldClient).not.toMatch(/首 token|缓存命中|tok\/s|消耗.*token/u)
     expect(existsSync(join(profile, 'node_modules', 'dsh-visualize', 'lib', 'client.js'))).toBe(true)
-    expect(existsSync(join(home, 'browser-extension', 'manifest.json'))).toBe(true)
-    expect(existsSync(join(home, 'browser-extension', 'README.txt'))).toBe(true)
-    const browserManifest = JSON.parse(readFileSync(join(home, 'browser-extension', 'manifest.json'), 'utf8')) as {
-      name?: string
-      permissions?: string[]
-      side_panel?: unknown
-    }
-    expect(browserManifest.name).toBe('e-Mate 浏览器')
-    expect(browserManifest.permissions).not.toContain('sidePanel')
-    expect(browserManifest.side_panel).toBeUndefined()
-    expect(readFileSync(join(home, 'browser-extension', 'background.js'), 'utf8')).not.toContain('session.prompt')
+    expect(existsSync(join(home, 'browser-extension'))).toBe(false)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-browser'))).toBe(false)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-browser-panel'))).toBe(false)
     expect(existsSync(join(profile, 'plugins', 'runtime-binding.json'))).toBe(true)
     const runtimeBinding = JSON.parse(readFileSync(join(profile, 'plugins', 'runtime-binding.json'), 'utf8')) as {
       version?: string
@@ -132,11 +121,11 @@ describe('e-Mate desktop profile', () => {
       name: '@e-mate/desktop/agent-update',
     }))
     expect(rows.find(row => row.id === 'desktop-agent-update')?.disabled).not.toBe(true)
-    expect(rows.find(row => row.id === 'desktop-browser-extension-setup')).toEqual(expect.objectContaining({
-      name: '@e-mate/desktop/browser-extension-setup',
+    expect(rows.find(row => row.id === 'desktop-computer-use-setup')).toEqual(expect.objectContaining({
+      name: '@e-mate/desktop/computer-use-setup',
     }))
-    expect(rows.find(row => row.id === 'emate-browser')).toEqual(expect.objectContaining({
-      name: './node_modules/@e-mate/dsh-plugin-browser/lib/index.mjs',
+    expect(rows.find(row => row.id === 'emate-cdp')).toEqual(expect.objectContaining({
+      name: './node_modules/@e-mate/dsh-plugin-cdp/lib/index.mjs',
     }))
     expect(rows.map(row => row.id)).not.toContain('bridge-browser')
     expect(rows.find(row => row.id === 'genui')).toEqual(expect.objectContaining({
@@ -149,7 +138,7 @@ describe('e-Mate desktop profile', () => {
       name: 'dsh-better-sidebar',
     }))
     expect(rows.find(row => row.id === 'search-mcp')).toEqual(expect.objectContaining({
-      name: 'dsh-search-mcp',
+      name: './node_modules/@e-mate/dsh-plugin-search-mcp/lib/index.mjs',
     }))
     expect(rows.find(row => row.id === 'emate-file-import')).toEqual(expect.objectContaining({
       name: '@e-mate/dsh-plugin-file-import',
@@ -165,7 +154,7 @@ describe('e-Mate desktop profile', () => {
     }))
     expect(rows.find(row => row.id === 'emate-xin-assistant')).toEqual(expect.objectContaining({
       name: './node_modules/@e-mate/dsh-plugin-xin-assistant/lib/index.mjs',
-      config: expect.objectContaining({ pythonPath: bundledPythonPath() }),
+      config: expect.objectContaining({ pythonPath: '' }),
     }))
     expect(rows.find(row => row.id === 'emate-office-skills')).toEqual(expect.objectContaining({
       name: './node_modules/@e-mate/dsh-plugin-office-skills/lib/index.js',
@@ -205,8 +194,8 @@ describe('e-Mate desktop profile', () => {
     const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
     roots.push(home)
     const profile = installEmateDesktopProfile(home)
-    const browserClient = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-browser', 'package.json')
-    const sentinel = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-browser', '.warm-start-sentinel')
+    const cdpManifest = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-cdp', 'package.json')
+    const sentinel = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-cdp', '.warm-start-sentinel')
     const firstModified = readFileSync(join(profile, '.e-mate-install.json'), 'utf8')
 
     writeFileSync(sentinel, 'preserved only when the immutable install is reused')
@@ -214,9 +203,9 @@ describe('e-Mate desktop profile', () => {
     expect(readFileSync(join(profile, '.e-mate-install.json'), 'utf8')).toBe(firstModified)
     expect(existsSync(sentinel)).toBe(true)
 
-    rmSync(browserClient)
+    rmSync(cdpManifest)
     installEmateDesktopProfile(home)
-    expect(existsSync(browserClient)).toBe(true)
+    expect(existsSync(cdpManifest)).toBe(true)
     expect(existsSync(sentinel)).toBe(false)
   })
 
@@ -224,15 +213,15 @@ describe('e-Mate desktop profile', () => {
     const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
     roots.push(home)
     const profile = installEmateDesktopProfile(home)
-    const browserPackage = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-browser')
-    const sentinel = join(browserPackage, '.old-package-sentinel')
+    const cdpPackage = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-cdp')
+    const sentinel = join(cdpPackage, '.old-package-sentinel')
     const deferred: string[] = []
     writeFileSync(sentinel, 'old package tree')
-    rmSync(join(browserPackage, 'package.json'))
+    rmSync(join(cdpPackage, 'package.json'))
 
     installEmateDesktopProfile(home, path => { deferred.push(path) })
 
-    expect(existsSync(join(browserPackage, 'package.json'))).toBe(true)
+    expect(existsSync(join(cdpPackage, 'package.json'))).toBe(true)
     expect(deferred.some(path => existsSync(join(path, '.old-package-sentinel')))).toBe(true)
     for (const path of deferred) rmSync(path, { recursive: true, force: true })
   })

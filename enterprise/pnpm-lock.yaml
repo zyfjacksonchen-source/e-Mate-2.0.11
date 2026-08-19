@@ -16,9 +16,6 @@ importers:
       '@e-mate/admin-contract':
         specifier: workspace:*
         version: link:../../packages/admin-contract
-      '@e-mate/runtime-registry-contract':
-        specifier: workspace:*
-        version: link:../../packages/runtime-registry-contract
       '@icon-park/react':
         specifier: ^1.4.2
         version: 1.4.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)

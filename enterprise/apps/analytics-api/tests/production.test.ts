@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
 import { parseProductionConfiguration } from '../src/production.ts';
@@ -60,12 +61,16 @@ function principals(overrides: Record<string, unknown> = {}): Record<string, unk
 }
 
 test('production configuration maps a hashed bearer to fixed identity and denies other tokens', async () => {
+  const readSecret = secretReader(principals());
   const parsed = parseProductionConfiguration(
     {
       ...configuration(),
       modelRouteKeys: { encryptionKeyFile: '/run/secrets/model-route-key-encryption' },
     },
-    secretReader(principals())
+    (path) => {
+      assert.notEqual(path, '/run/secrets/redis-url');
+      return readSecret(path);
+    }
   );
   assert.equal(parsed.host, '0.0.0.0');
   assert.equal(parsed.port, 4190);
@@ -79,6 +84,40 @@ test('production configuration maps a hashed bearer to fixed identity and denies
     projectIds: ['project-1'],
   });
   assert.equal(await parsed.authenticate('wrong-admin-bearer'), null);
+  const withoutRedis = configuration();
+  delete withoutRedis.redis;
+  assert.equal(parseProductionConfiguration(withoutRedis, readSecret).port, 4190);
+});
+
+test('production registers only identity, model-policy management and redacted audit surfaces', async () => {
+  const source = readFileSync(new URL('../src/production.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /openRedisRuntimeRegistry|openPostgresSessionSummaryStore|openPostgresObservabilityPolicyStore/);
+  assert.doesNotMatch(source, /\bregistry:|\bsessionIndex:|\bobservabilityPolicy:/);
+
+  const server = createAnalyticsServer({ authenticate: async () => null });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address() as AddressInfo;
+  try {
+    for (const path of [
+      '/runtime/status',
+      '/v1/runtime-registry/heartbeats',
+      '/v1/runtime-registry/instances/runtime-1',
+      '/v1/session-index/search',
+      '/v1/session-index/session-1',
+      '/v1/operations/observability',
+      '/v1/observability-policy',
+      '/v1/observability-policy/rollback',
+    ]) {
+      const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
+      assert.equal(response.status, 404, path);
+      assert.equal(((await response.json()) as { error: { code: string } }).error.code, 'NOT_FOUND');
+    }
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
 });
 
 test('production configuration rejects non-secret paths, unknown fields, invalid roles, and duplicate hashes', () => {

@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/desktop",
-  "version": "2.0.10",
+  "version": "2.0.11",
   "description": "e-Mate desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin",
   "license": "MIT",
   "publishConfig": {
@@ -58,9 +58,9 @@
       "types": "./lib/types/agent-update.d.ts",
       "default": "./lib/agent-update.js"
     },
-    "./browser-extension-setup": {
-      "types": "./lib/types/browser-extension-setup.d.ts",
-      "default": "./lib/browser-extension-setup.js"
+    "./computer-use-setup": {
+      "types": "./lib/types/computer-use-setup.d.ts",
+      "default": "./lib/computer-use-setup.js"
     },
     "./vision-toolkit": {
       "types": "./lib/types/vision-toolkit.d.ts",
@@ -69,6 +69,7 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "base-contract.json",
     "build/e-mate-profile/**",
     "build/app-icon.png",
     "build/app-icon-mac.png",
@@ -76,6 +77,7 @@
     "build/tray-icon*.png",
     "cordis.patch.yml",
     "docs/**",
+    "lib/**/*.cjs",
     "lib/**/*.js",
     "lib/**/*.map",
     "lib/types/**/*.d.ts",
@@ -208,6 +210,7 @@
     "@deepseek-ai/dsh-shell": "0.1.0-rc.7",
     "@deepseek-ai/dsh-shell-env": "0.1.0-rc.7",
     "@deepseek-ai/dsh-skill": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-skill-filesystem": "0.1.0-rc.7",
     "@deepseek-ai/dsh-spill": "0.1.0-rc.7",
     "@deepseek-ai/dsh-storage": "0.1.0-rc.7",
     "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.7",
@@ -233,7 +236,6 @@
     "dsh-at-file": "https://github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz",
     "dsh-better-sidebar": "patch:dsh-better-sidebar@npm%3A0.12.2#~/.yarn/patches/dsh-better-sidebar-npm-0.12.2-cafee7a9cd.patch",
     "dsh-file-viewer": "patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch",
-    "dsh-search-mcp": "patch:dsh-search-mcp@file%3Avendor/dsh-search-mcp-0.1.0-9562b966.tgz%23vendor/dsh-search-mcp-0.1.0-9562b966.tgz%3A%3Ahash=bd339a&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-search-mcp-file-024047d146.patch",
     "dsh-turn-fold": "patch:dsh-turn-fold@https%3A//github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz#~/.yarn/patches/dsh-turn-fold-https-e835a4814f.patch",
     "dsh-visualize": "file:vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz",
     "koffi": "3.1.5",
@@ -278,6 +280,7 @@
       "buildResources": "build"
     },
     "files": [
+      "base-contract.json",
       "build/e-mate-profile/**",
       "build/app-icon.png",
       "build/app-icon-mac.png",

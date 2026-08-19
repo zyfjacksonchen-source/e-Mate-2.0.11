@@ -14,5 +14,5 @@ export function searchCapabilityStatus(input: SearchCapabilityInput) {
   if (input.needsCredential && !input.credentialConfigured) {
     return { state: 'setup-required', detail: 'MCP 搜索凭据尚未在本机配置。', action_ids: [] }
   }
-  return { state: 'setup-required', detail: 'MCP 搜索配置已就绪；真实服务联通验收尚未完成。', action_ids: [] }
+  return { state: 'ready', detail: 'MCP 搜索配置与本机凭据已就绪。', action_ids: [] }
 }

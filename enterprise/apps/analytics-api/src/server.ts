@@ -45,7 +45,7 @@ const taskEventWriteScope = 'task-events:write';
 export type AuthenticateBearer = (bearer: string) => Promise<RuntimeRegistryPrincipal | null>;
 
 export type AnalyticsApiOptions = {
-  registry: RuntimeRegistryStore;
+  registry?: RuntimeRegistryStore;
   authenticate: AuthenticateBearer;
   sessionIndex?: SessionSummaryStore;
   observabilityPolicy?: ObservabilityPolicyStore;
@@ -452,7 +452,7 @@ export function createAnalyticsHandler({
         json(response, 200, { status: 'ok' });
         return;
       }
-      if (url.pathname === '/v1/runtime-registry/heartbeats') {
+      if (registry && url.pathname === '/v1/runtime-registry/heartbeats') {
         rejectQuery(url);
         if (request.method !== 'POST') {
           methodNotAllowed(response, 'POST');
@@ -476,7 +476,7 @@ export function createAnalyticsHandler({
       const deleteMatch = url.pathname.match(
         /^\/v1\/runtime-registry\/instances\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/
       );
-      if (deleteMatch) {
+      if (registry && deleteMatch) {
         rejectQuery(url);
         if (request.method !== 'DELETE') {
           methodNotAllowed(response, 'DELETE');
@@ -490,7 +490,7 @@ export function createAnalyticsHandler({
         empty(response);
         return;
       }
-      if (url.pathname === '/runtime/status') {
+      if (registry && url.pathname === '/runtime/status') {
         rejectQuery(url);
         if (request.method !== 'GET') {
           methodNotAllowed(response, 'GET');
@@ -766,7 +766,7 @@ export function createAnalyticsHandler({
           throwManagementError(error);
         }
       }
-      if (url.pathname === '/v1/operations/observability') {
+      if (platformMonitoring && url.pathname === '/v1/operations/observability') {
         if (request.method !== 'GET') {
           methodNotAllowed(response, 'GET');
           return;
@@ -774,9 +774,6 @@ export function createAnalyticsHandler({
         const identity = await principal(request, authenticate);
         requireRole(identity, platformMonitoringRoles);
         const period = monitoringPeriod(url);
-        if (!platformMonitoring) {
-          throw new HttpError(503, 'MONITORING_UNAVAILABLE', 'Platform monitoring temporarily unavailable');
-        }
         try {
           json(response, 200, await platformMonitoring.read(period));
         } catch {
@@ -868,7 +865,8 @@ export function createAnalyticsHandler({
         }
         return;
       }
-      if (url.pathname === '/v1/observability-policy' || url.pathname === '/v1/observability-policy/rollback') {
+      if (observabilityPolicy
+        && (url.pathname === '/v1/observability-policy' || url.pathname === '/v1/observability-policy/rollback')) {
         rejectQuery(url);
         const rollback = url.pathname.endsWith('/rollback');
         const allow = rollback ? 'POST' : 'GET, PUT';
@@ -881,9 +879,6 @@ export function createAnalyticsHandler({
         }
         const identity = await principal(request, authenticate);
         requireRole(identity, rollback || request.method === 'PUT' ? policyWriteRoles : statusRoles);
-        if (!observabilityPolicy) {
-          throw new HttpError(503, 'POLICY_UNAVAILABLE', 'Observability policy temporarily unavailable');
-        }
         if (request.method === 'GET') {
           try {
             json(response, 200, await observabilityPolicy.get(identity.tenantId));
@@ -920,13 +915,10 @@ export function createAnalyticsHandler({
         json(response, 200, policyMutation(result));
         return;
       }
-      if (url.pathname === '/v1/session-index/search') {
+      if (sessionIndex && url.pathname === '/v1/session-index/search') {
         if (request.method !== 'GET') {
           methodNotAllowed(response, 'GET');
           return;
-        }
-        if (!sessionIndex) {
-          throw new HttpError(503, 'SESSION_INDEX_UNAVAILABLE', 'Session Index temporarily unavailable');
         }
         const identity = await principal(request, authenticate);
         requireEnterprisePrincipal(identity);
@@ -939,11 +931,8 @@ export function createAnalyticsHandler({
         return;
       }
       const sessionMatch = url.pathname.match(/^\/v1\/session-index\/([A-Za-z0-9][A-Za-z0-9._:-]{0,199})$/);
-      if (sessionMatch) {
+      if (sessionIndex && sessionMatch) {
         rejectQuery(url);
-        if (!sessionIndex) {
-          throw new HttpError(503, 'SESSION_INDEX_UNAVAILABLE', 'Session Index temporarily unavailable');
-        }
         const identity = await principal(request, authenticate);
         requireEnterprisePrincipal(identity);
         const sessionId = sessionMatch[1] as string;

@@ -12,7 +12,6 @@ import {
   loginAdmin,
   loadApiKeys,
   loadConsentAcceptances,
-  loadRuntimeStatus,
   resetTenantUserPassword,
   quotaTokens,
   formatTokenCount,
@@ -45,7 +44,10 @@ test('admin login reuses the e-Mate dark component theme and logo treatment', ()
 
 test('user administration filters approval state and reuses the existing batch policy flow', () => {
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const vite = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8');
   const copy = messagesFor('zh-CN');
+  assert.equal(copy.activeUsers, '有效账户');
+  assert.doesNotMatch(copy.source, /Runtime Registry/);
   assert.equal(copy.active, '有效');
   assert.equal(copy.pendingApproval, '待审批');
   assert.equal(copy.approveAllPending, '全选待审批并配置模型');
@@ -57,15 +59,17 @@ test('user administration filters approval state and reuses the existing batch p
     /title=\{policyApprovePending \? copy\.batchApprove : copy\.updateTokenLimit\}[\s\S]*?copy\.selectAllModels/
   );
   assert.doesNotMatch(app, /fetch\([^\n]*approveAllPending/);
+  assert.doesNotMatch(app, /runtime\/status|RuntimeRegistry/);
+  assert.doesNotMatch(vite, /runtime\/status/);
 });
 
 test('admin API paths must stay on the console origin', () => {
   assert.equal(
-    resolveSameOriginPath('/e-mate/enterprise-api/', '/runtime/status', origin),
-    '/e-mate/enterprise-api/runtime/status'
+    resolveSameOriginPath('/e-mate/enterprise-api/', '/v1/admin/users', origin),
+    '/e-mate/enterprise-api/v1/admin/users'
   );
   assert.throws(
-    () => resolveSameOriginPath('https://attacker.example/runtime', '/runtime/status', origin),
+    () => resolveSameOriginPath('https://attacker.example/runtime', '/v1/admin/users', origin),
     /must share/
   );
 });
@@ -239,60 +243,6 @@ test('image connectivity follows catalog capabilities instead of route-id branch
 test('audit identifiers stay readable while long values are safely abbreviated', () => {
   assert.equal(abbreviateAuditValue('acceptance-1'), 'acceptance-1');
   assert.equal(abbreviateAuditValue('a'.repeat(64)), `${'a'.repeat(12)}…${'a'.repeat(8)}`);
-});
-
-test('runtime status uses bearer authentication without putting the token in the URL', async () => {
-  const calls: Array<{ input: string; init?: RequestInit }> = [];
-  const status = await loadRuntimeStatus('secret-token', new AbortController().signal, {
-    origin,
-    fetcher: async (input, init) => {
-      calls.push({ input: String(input), init });
-      return new Response(
-        JSON.stringify({
-          schemaVersion: 1,
-          activeUsers: 3,
-          activeSessions: 4,
-          runningTasks: 2,
-          failedTasks: 1,
-          modelStatus: 'HEALTHY',
-          updatedAt: '2026-07-30T10:00:00.000Z',
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } }
-      );
-    },
-  });
-
-  assert.equal(status.activeUsers, 3);
-  assert.equal(calls[0]?.input, '/runtime/status');
-  assert.equal(new Headers(calls[0]?.init?.headers).get('authorization'), 'Bearer secret-token');
-  assert.equal(calls[0]?.input.includes('secret-token'), false);
-  assert.equal(calls[0]?.init?.credentials, 'same-origin');
-});
-
-test('runtime status rejects forbidden roles and malformed server facts', async () => {
-  await assert.rejects(
-    loadRuntimeStatus('invalid token', new AbortController().signal, {
-      origin,
-      fetcher: async () => new Response('{}', { status: 200 }),
-    }),
-    (error: unknown) => error instanceof AdminApiError && error.status === 401
-  );
-
-  await assert.rejects(
-    loadRuntimeStatus('token', new AbortController().signal, {
-      origin,
-      fetcher: async () => new Response('{}', { status: 403 }),
-    }),
-    (error: unknown) => error instanceof AdminApiError && error.status === 403
-  );
-
-  await assert.rejects(
-    loadRuntimeStatus('token', new AbortController().signal, {
-      origin,
-      fetcher: async () => new Response(JSON.stringify({ schemaVersion: 1 }), { status: 200 }),
-    }),
-    /Invalid runtime registry status/
-  );
 });
 
 test('consent audit requests retain audit evidence without sending tenant or policy bodies', async () => {

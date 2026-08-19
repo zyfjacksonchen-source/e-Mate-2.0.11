@@ -87,7 +87,6 @@ jobs:
           path: |
             packages/dsh/profile
             packages/dsh-plugin-*/lib
-            packages/dsh-plugin-browser/extension/dist
           if-no-files-found: error
           retention-days: 1
 

@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import { createServer } from 'node:http'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
-import { strToU8, unzipSync, zipSync } from 'fflate'
+import { unzipSync } from 'fflate'
 import { parse as parseYaml } from 'yaml'
 import { Context } from '../../../upstream/deepseek-harness/vendor/cordis/lib/index.js'
 import { LocalAttachmentStore } from '../../../upstream/deepseek-harness/packages/attachment/attachment-local/lib/index.js'
@@ -71,7 +71,6 @@ import {
   validateStagedVersion,
   validateUpdateRequest,
 } from '../lib/update.js'
-import { createSkillHubClient, inspectSkillArchive, installSkillArchive } from '../lib/skill-hub.js'
 
 const fileDigest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
 
@@ -173,32 +172,32 @@ test('version gates match the release contract', () => {
 test('online update target parsing rejects tags and downgrade ordering is SemVer-correct', () => {
   const requestId = '11111111-1111-4111-8111-111111111111'
   const sourceCommit = 'a'.repeat(40)
-  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.10/${sourceCommit}`
+  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.11/${sourceCommit}`
   const releaseSource = {
     schema_version: 1,
     product: 'e-Mate',
-    version: '2.0.10',
+    version: '2.0.11',
     package_name: '@e-mate/dsh',
     source_commit: sourceCommit,
     manifest_url: `${base}/release-manifest.json`,
-    tarball_url: `${base}/e-mate-dsh-2.0.10.tgz`,
+    tarball_url: `${base}/e-mate-dsh-2.0.11.tgz`,
   }
   const request = {
     schema_version: 1,
     request_id: requestId,
-    target: '2.0.10',
-    current_version: '2.0.10',
+    target: '2.0.11',
+    current_version: '2.0.11',
     release_source: releaseSource,
     previous_release_source: releaseSource,
   }
   assert.equal(normalizeUpdateTarget(), 'latest')
   assert.equal(normalizeUpdateTarget('latest'), 'latest')
-  assert.equal(normalizeUpdateTarget('2.0.10-rc.1'), '2.0.10-rc.1')
+  assert.equal(normalizeUpdateTarget('2.0.11-rc.1'), '2.0.11-rc.1')
   assert.throws(() => normalizeUpdateTarget('next'), /invalid update version/)
   assert.throws(() => normalizeUpdateTarget('2.0'), /invalid update version/)
-  assert.equal(validateStagedVersion('latest', '2.0.10'), '2.0.10')
-  assert.equal(validateStagedVersion('2.0.10', '2.0.10'), '2.0.10')
-  assert.throws(() => validateStagedVersion('2.0.10', '2.0.7'), /does not match requested version/)
+  assert.equal(validateStagedVersion('latest', '2.0.11'), '2.0.11')
+  assert.equal(validateStagedVersion('2.0.11', '2.0.11'), '2.0.11')
+  assert.throws(() => validateStagedVersion('2.0.11', '2.0.7'), /does not match requested version/)
   assert.throws(() => validateStagedVersion('latest', 'not-semver'), /version is invalid/)
   assert.equal(validateUpdateRequest(request, requestId), request)
   assert.throws(
@@ -214,7 +213,7 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   assert.throws(() => parsePackageIntegrity(JSON.stringify('sha256-invalid')), /integrity is invalid/)
   assert.equal(compareVersions('2.0.7', '2.0.7-rc.1'), 1)
   assert.equal(compareVersions('2.0.7-rc.1', '2.0.7-rc.2'), -1)
-  assert.equal(compareVersions('2.0.10', '2.0.7'), 1)
+  assert.equal(compareVersions('2.0.11', '2.0.7'), 1)
   assert.equal(globalPrefixForBinPath('/opt/e-mate/lib/node_modules/@e-mate/dsh/lib/bin.js', 'darwin'), '/opt/e-mate')
   assert.equal(
     globalPrefixForBinPath('C:\\Users\\e-mate\\AppData\\Roaming\\npm\\node_modules\\@e-mate\\dsh\\lib\\bin.js', 'win32'),
@@ -222,34 +221,34 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   )
   assert.throws(() => globalPrefixForBinPath('/repo/packages/dsh/lib/bin.js', 'darwin'), /global npm installation/u)
   assert.deepEqual(validateReleaseSource(releaseSource), releaseSource)
-  const desktopPrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.10/${sourceCommit}`
+  const desktopPrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.11/${sourceCommit}`
   assert.deepEqual(validateLatestReleasePointer({
     schema_version: 1,
-    version: '2.0.10',
+    version: '2.0.11',
     source_commit: sourceCommit,
     artifacts: {
       darwin: {
-        url: `${desktopPrefix}/e-Mate-2.0.10-mac-universal.dmg`,
+        url: `${desktopPrefix}/e-Mate-2.0.11-mac-universal.dmg`,
         bytes: 1,
         sha256: 'ab'.repeat(32),
       },
       win32: {
-        url: `${desktopPrefix}/e-Mate-2.0.10-win-x64-Setup.exe`,
+        url: `${desktopPrefix}/e-Mate-2.0.11-win-x64-Setup.exe`,
         bytes: 1,
         sha256: 'cd'.repeat(32),
       },
     },
   }), releaseSource)
-  assert.equal(compareVersions('2.0.10', '2.0.5'), 1)
+  assert.equal(compareVersions('2.0.11', '2.0.5'), 1)
   assert.throws(() => validateReleaseSource({ ...releaseSource, manifest_url: 'http://example.com/release-manifest.json' }), /URL is invalid/u)
   const sha512 = 'ab'.repeat(64)
   const artifactIntegrity = `sha512-${Buffer.from(sha512, 'hex').toString('base64')}`
   const artifact = {
-    name: '@e-mate/dsh', version: '2.0.10', kind: 'main', filename: 'e-mate-dsh-2.0.10.tgz',
+    name: '@e-mate/dsh', version: '2.0.11', kind: 'main', filename: 'e-mate-dsh-2.0.11.tgz',
     size: 207, sha256: 'cd'.repeat(32), sha512, integrity: artifactIntegrity,
   }
   const manifest = {
-    schema_version: 1, product: 'e-Mate', version: '2.0.10', source_commit: sourceCommit,
+    schema_version: 1, product: 'e-Mate', version: '2.0.11', source_commit: sourceCommit,
     packages: [artifact], download: { ...releaseSource, size: artifact.size, sha256: artifact.sha256, sha512, integrity: artifactIntegrity },
   }
   assert.equal(validateReleaseManifest(manifest, releaseSource).integrity, artifactIntegrity)
@@ -281,7 +280,7 @@ test('status projects only the latest bounded online-update receipt', async () =
       product: 'e-Mate',
       request_id: first,
       status: 'failed-before-change',
-      requested_version: '2.0.10',
+      requested_version: '2.0.11',
       previous_version: '2.0.7',
       error: 'must not reach status output',
       finished_at: '2026-08-15T01:00:00.000Z',
@@ -291,18 +290,18 @@ test('status projects only the latest bounded online-update receipt', async () =
       product: 'e-Mate',
       request_id: second,
       status: 'completed',
-      requested_version: '2.0.10',
+      requested_version: '2.0.11',
       previous_version: '2.0.7',
-      installed_version: '2.0.10',
+      installed_version: '2.0.11',
       error: 'must not reach status output',
       finished_at: '2026-08-15T02:00:00.000Z',
     }))
     const expected = {
       request_id: second,
       status: 'completed',
-      requested_version: '2.0.10',
+      requested_version: '2.0.11',
       previous_version: '2.0.7',
-      installed_version: '2.0.10',
+      installed_version: '2.0.11',
       finished_at: '2026-08-15T02:00:00.000Z',
     }
     assert.deepEqual(latestUpdateReceipt(dshHome), expected)
@@ -339,144 +338,6 @@ test('online updates admit only one live detached helper', () => {
   }
 })
 
-test('Skill Hub archives validate and install atomically into the Harness user root', () => {
-  const markdown = `---\nname: meeting-notes\ndescription: Summarize meeting notes\nversion: 1.2.3\n---\n\nUse the available document tools.\n`
-  const archive = Buffer.from(zipSync({
-    'SKILL.md': strToU8(markdown),
-    'references/example.md': strToU8('Example'),
-  }))
-  const sha256 = createHash('sha256').update(archive).digest('hex')
-  const inspected = inspectSkillArchive(archive, { slug: 'meeting-notes', version: '1.2.3', sha256 })
-  assert.equal(inspected.name, 'meeting-notes')
-  assert.deepEqual([...inspected.files.keys()], ['SKILL.md', 'references/example.md'])
-
-  const dshHome = mkdtempSync(join(tmpdir(), 'e-mate-skill-'))
-  try {
-    const receipt = installSkillArchive(archive, { dshHome, slug: 'meeting-notes', version: '1.2.3', sha256 })
-    assert.equal(receipt.package_sha256, sha256)
-    const installed = join(dshHome, 'skills', 'meeting-notes', 'SKILL.md')
-    assert.equal(readFileSync(installed, 'utf8'), markdown)
-    assert.ok(existsSync(receipt.receipt))
-    assert.throws(
-      () => installSkillArchive(archive, { dshHome, slug: 'meeting-notes', version: '1.2.3', sha256: '0'.repeat(64) }),
-      /SHA-256 does not match/,
-    )
-    assert.equal(readFileSync(installed, 'utf8'), markdown)
-  } finally {
-    rmSync(dshHome, { recursive: true, force: true })
-  }
-})
-
-test('Skill Hub archives reject traversal before extraction', () => {
-  const archive = Buffer.from(zipSync({
-    '../outside.txt': strToU8('no'),
-    'SKILL.md': strToU8('---\nname: safe\ndescription: Safe\nversion: 1.0.0\n---\n'),
-  }))
-  assert.throws(() => inspectSkillArchive(archive), /traversal/)
-})
-
-test('Skill Hub archives reject mismatched local and central file identities', () => {
-  const archive = Buffer.from(zipSync({
-    'SKILL.md': strToU8('---\nname: safe\ndescription: Safe\nversion: 1.0.0\n---\n'),
-  }))
-  archive[30] = 'X'.charCodeAt(0)
-  assert.throws(() => inspectSkillArchive(archive), /local and central ZIP records do not match/)
-})
-
-test('Skill Hub client preserves the old intent/download/claim/install/complete transaction', async () => {
-  const archive = Buffer.from(zipSync({
-    'SKILL.md': strToU8('---\nname: safe\ndescription: Safe skill\nversion: 1.0.0\n---\nUse verified tools.\n'),
-  }))
-  const sha256 = createHash('sha256').update(archive).digest('hex')
-  const card = {
-    slug: 'safe',
-    title: 'Safe',
-    summary: 'Safe skill',
-    version: '1.0.0',
-    package_sha256: sha256,
-    category: 'office_productivity',
-    tags: [],
-  }
-  const requests = []
-  const request = async (url, init = {}) => {
-    requests.push({ url: url.href, method: init.method ?? 'GET' })
-    if (url.pathname.endsWith('/skills/safe')) return Response.json({ skill: card, versions: [card] })
-    if (url.pathname.endsWith('/install-intent')) return Response.json({ install_intent: 'intent-token' })
-    if (url.pathname.endsWith('/package')) {
-      return new Response(archive, { headers: { 'x-skill-content-sha256': sha256 } })
-    }
-    if (url.pathname.endsWith('/install-intents/consume')) return Response.json({ completion_receipt: 'completion-token' })
-    if (url.pathname.endsWith('/install-intents/complete')) return Response.json({ schema_version: 1, status: 'installed' })
-    return Response.json({ detail: 'unexpected request' }, { status: 404 })
-  }
-  const dshHome = mkdtempSync(join(tmpdir(), 'e-mate-hub-client-'))
-  try {
-    const client = createSkillHubClient({ request, dshHome })
-    const installed = await client.install('safe', '1.0.0')
-    assert.equal(installed.package_sha256, sha256)
-    assert.ok(existsSync(join(dshHome, 'skills', 'safe', 'SKILL.md')))
-    assert.deepEqual(requests.map(item => item.method), ['GET', 'POST', 'GET', 'GET', 'POST', 'POST'])
-    assert.equal(requests.every(item => item.url.startsWith('https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1/')), true)
-  } finally {
-    rmSync(dshHome, { recursive: true, force: true })
-  }
-})
-
-test('Skill Hub install restores the previous local Skill when server completion rejects it', async () => {
-  const archive = version => Buffer.from(zipSync({
-    'SKILL.md': strToU8(`---\nname: safe\ndescription: Safe skill\nversion: ${version}\n---\nVersion ${version}.\n`),
-  }))
-  const oldArchive = archive('1.0.0')
-  const oldSha256 = createHash('sha256').update(oldArchive).digest('hex')
-  const nextArchive = archive('2.0.0')
-  const nextSha256 = createHash('sha256').update(nextArchive).digest('hex')
-  const card = {
-    slug: 'safe', title: 'Safe', summary: 'Safe skill', version: '2.0.0',
-    package_sha256: nextSha256, category: 'office_productivity', tags: [],
-  }
-  const completionStatuses = []
-  const request = async (url, init = {}) => {
-    if (url.pathname.endsWith('/skills/safe')) return Response.json({ skill: card, versions: [card] })
-    if (url.pathname.endsWith('/install-intent')) return Response.json({ install_intent: 'intent-token' })
-    if (url.pathname.endsWith('/package')) return new Response(nextArchive, { headers: { 'x-skill-content-sha256': nextSha256 } })
-    if (url.pathname.endsWith('/install-intents/consume')) return Response.json({ completion_receipt: 'completion-token' })
-    if (url.pathname.endsWith('/install-intents/complete')) {
-      const status = JSON.parse(init.body).status
-      completionStatuses.push(status)
-      return status === 'installed'
-        ? Response.json({ detail: 'completion rejected' }, { status: 409 })
-        : Response.json({ schema_version: 1, status: 'failed' })
-    }
-    return Response.json({ detail: 'unexpected request' }, { status: 404 })
-  }
-  const dshHome = mkdtempSync(join(tmpdir(), 'e-mate-hub-rollback-'))
-  try {
-    installSkillArchive(oldArchive, { dshHome, slug: 'safe', version: '1.0.0', sha256: oldSha256 })
-    await assert.rejects(createSkillHubClient({ request, dshHome }).install('safe', '2.0.0'), /completion rejected/)
-    assert.match(readFileSync(join(dshHome, 'skills', 'safe', 'SKILL.md'), 'utf8'), /version: 1\.0\.0/)
-    const receipt = JSON.parse(readFileSync(join(dshHome, 'e-mate', 'migrations', 'skill-safe.json'), 'utf8'))
-    assert.equal(receipt.version, '1.0.0')
-    assert.equal(receipt.status, 'installed')
-    assert.deepEqual(completionStatuses, ['installed', 'failed'])
-  } finally {
-    rmSync(dshHome, { recursive: true, force: true })
-  }
-})
-
-test('Skill Hub rejects oversized chunked responses without trusting content-length', async () => {
-  const request = async () => new Response(new ReadableStream({
-    start(controller) {
-      controller.enqueue(new Uint8Array(1024 * 1024 + 1))
-      controller.enqueue(new Uint8Array(1024 * 1024 + 1))
-      controller.close()
-    },
-  }))
-  await assert.rejects(
-    createSkillHubClient({ request, dshHome: '/unused' }).search(),
-    /response is too large/,
-  )
-})
-
 test('runtime resolves only the exact Harness source', () => {
   const runtime = resolveHarness()
   assert.equal(runtime.version, HARNESS_VERSION)
@@ -493,9 +354,9 @@ test('managed profile installation is idempotent', () => {
     const profileManifest = JSON.parse(manifest)
     assert.equal(profileManifest.type, 'module')
     const pluginPackages = [
+      '@e-mate/dsh-plugin-skill-hub',
       '@e-mate/dsh-plugin-better-sidebar',
-      '@e-mate/dsh-plugin-browser',
-      '@e-mate/dsh-plugin-browser-panel',
+      '@e-mate/dsh-plugin-cdp',
       '@e-mate/dsh-plugin-computer-use',
       '@e-mate/dsh-plugin-file-import',
       '@e-mate/dsh-plugin-find-skill',
@@ -504,14 +365,13 @@ test('managed profile installation is idempotent', () => {
       '@e-mate/dsh-plugin-memory-evolve',
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-search-mcp',
-      '@e-mate/dsh-plugin-subagent',
       '@e-mate/dsh-plugin-vision-toolkit',
       '@e-mate/dsh-plugin-xin-assistant',
     ]
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
     ])
-    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.10'])))
+    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.11'])))
     const patch = readFileSync(join(first.profile, 'cordis.patch.yml'), 'utf8')
     installProfile(dshHome)
     assert.equal(readFileSync(join(first.profile, 'package.json'), 'utf8'), manifest)
@@ -551,7 +411,7 @@ test('managed profile installation is idempotent', () => {
     assert.deepEqual(patchById.get('ui-agent-preset'), {
       id: 'ui-agent-preset',
       name: '@deepseek-ai/dsh-client-ui-agent-preset',
-      disabled: true,
+      disabled: false,
     })
     assert.deepEqual(patchById.get('ui-trajectory'), {
       id: 'ui-trajectory',
@@ -602,7 +462,7 @@ test('managed profile installation is idempotent', () => {
     assert.doesNotMatch(patch, /emate-connections|plugins\/connections\.js/)
     assert.match(patch, /id: emate-qr-generation[\s\S]*\.\/plugins\/qr-generation\.js[\s\S]*inject: \[tools, jobs, attachments\]/)
     assert.match(patch, /id: emate-agent-operations[\s\S]*\.\/plugins\/agent-operations\.js/)
-    assert.match(patch, /id: emate-skill-hub-agent[\s\S]*\.\/plugins\/skill-hub-agent\.js/)
+    assert.doesNotMatch(patch, /emate-skill-hub-agent|plugins\/skill-hub-agent\.js/)
     assert.doesNotMatch(patch, /emate-(?:office-ocr|browser-computer-use|memory|dream|learning)/)
     assert.match(patch, /id: emate-model-policy[\s\S]*\.\/plugins\/model-policy\.js[\s\S]*inject: \[apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity\]/)
     assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, emateModelPolicy, emateIdentity\]/)
@@ -627,7 +487,7 @@ test('managed profile installation is idempotent', () => {
       const pluginRoot = join(first.profile, 'node_modules', ...name.split('/'))
       const pluginManifest = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'))
       assert.equal(pluginManifest.name, name)
-      assert.equal(pluginManifest.version, '2.0.10')
+      assert.equal(pluginManifest.version, '2.0.11')
       assert.ok(readFileSync(join(pluginRoot, pluginManifest.main)).byteLength > 0)
       const pluginPatch = readFileSync(join(pluginRoot, pluginManifest.dsh.bundle.patch), 'utf8')
       assert.ok(pluginPatch.length >= 2)
@@ -675,16 +535,6 @@ test('managed profile installation is idempotent', () => {
     assert.doesNotMatch(dumped.stdout, /- id: credentials\n  name: '@deepseek-ai\/dsh-credentials-local'\n(?!  disabled: true)/)
     assert.doesNotMatch(dumped.stdout, /- id: ui-trajectory\n  name: '@deepseek-ai\/dsh-client-ui-trajectory'\n(?!  disabled: true)/)
     assert.match(binding.zod_module_sha256, /^[0-9a-f]{64}$/)
-    const skillAgent = readFileSync(join(first.profile, 'plugins', 'skill-hub-agent.js'), 'utf8')
-    assert.doesNotMatch(skillAgent, /from ["']@deepseek-ai\/dsh-tools["']/)
-    assert.match(skillAgent, /loadTargetTools/)
-    assert.match(skillAgent, /e_mate_skill_hub_search/)
-    assert.match(skillAgent, /e_mate_skill_hub_install/)
-    assert.match(skillAgent, /e_mate_skill_hub_publish/)
-    assert.match(skillAgent, /jobs\.attachController\(["']emate-skill-hub-ui["']\)/)
-    assert.match(skillAgent, /\/api\/e-mate\/skill-hub\.download/)
-    assert.match(skillAgent, /Content-Disposition/)
-    assert.doesNotMatch(skillAgent, /^import\b[^\n]*\bfrom ["'](?:fflate|yaml)["'];?\s*$/m)
     const shell = join(first.profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar')
     const shellManifest = JSON.parse(readFileSync(join(shell, 'package.json'), 'utf8'))
     assert.deepEqual(shellManifest.dsh.client.inject, [
@@ -721,24 +571,25 @@ test('managed profile installation is idempotent', () => {
     assert.match(client, /session\.logout/)
     assert.match(client, /session\.password/)
     assert.match(client, /\.inert\s*=\s*true/)
-    assert.match(client, /e-mate-capabilities-entry/)
-    assert.match(client, /data-emate-capabilities/)
-    assert.match(client, /\/emate\.skillHub/)
-    assert.match(client, /\/emate\.capabilities/)
     assert.match(client, /\/emate\.mcpManage/)
     assert.match(client, /外部连接/)
     assert.match(client, /电脑操控/)
-    assert.match(client, /catalog\.search/)
-    assert.match(client, /skills\.publish/)
-    assert.match(client, /ctx\.connection\.api\.skills\.list/)
-    assert.match(client, /\/capabilities/)
-    assert.match(client, /保存 ZIP/)
+    const skillHubRoot = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-skill-hub')
+    const skillHubClient = readFileSync(join(skillHubRoot, 'lib', 'client.js'), 'utf8')
+    assert.match(skillHubClient, /e-mate-capabilities-entry/)
+    assert.match(skillHubClient, /data-emate-capabilities/)
+    assert.match(skillHubClient, /\/emate\.capabilities/)
+    assert.match(skillHubClient, /\/emate\.skillHub/)
+    assert.match(skillHubClient, /catalog\.search/)
+    assert.match(skillHubClient, /skills\.publish/)
+    assert.match(skillHubClient, /\/capabilities/)
+    assert.match(skillHubClient, /保存 ZIP/)
     assert.match(client, /emate\/legacy-artifacts/)
     assert.match(client, /conversationEvents\.register/)
     assert.match(client, /legacy-artifact\.download/)
     assert.match(client, /e-mate-image-disclosure/)
     assert.doesNotMatch(client, /e-mate-activity-group|data-emate-activity-header|e-mate-message-disclosure/)
-    const capabilities = readFileSync(new URL('../profile/plugins/emate-shell/src/client/capabilities.tsx', import.meta.url), 'utf8')
+    const capabilities = readFileSync(new URL('../../dsh-plugin-skill-hub/src/client/capabilities.tsx', import.meta.url), 'utf8')
     assert.match(capabilities, /icons\[capability\.icon_key\]/)
     assert.match(capabilities, /社区 Skill 暂时不可用；内置能力仍可正常使用。/)
     assert.doesNotMatch(capabilities, /capability\.(?:id|title)\s*===|switch\s*\(\s*capability\.(?:id|title)/)
@@ -776,7 +627,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(catalogLoader, /setBuiltins\(/)
     assert.match(catalogLoader, /callSkillHub\('catalog\.search'/)
     assert.ok(catalogLoader.indexOf('setBuiltins(') < catalogLoader.indexOf("callSkillHub('catalog.search'"))
-    assert.match(catalogLoader, /catch \(skillHubError\) \{\s*setItems\(\[\]\)\s*setError\(message\(skillHubError\)\)/)
+    assert.match(catalogLoader, /catch \(skillHubError\) \{\s*if \(cursor === undefined\) setItems\(\[\]\)\s*setError\(message\(skillHubError\)\)/)
     const imageGallery = readFileSync(new URL('../profile/plugins/emate-shell/src/client/image-gallery.tsx', import.meta.url), 'utf8')
     assert.match(imageGallery, /kind: 'e-mate-image-disclosure'/)
     assert.match(imageGallery, /event\.type !== 'assistant\/message'/)
@@ -1045,14 +896,12 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
     const visible = new Set([
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-search-mcp',
-      '@e-mate/dsh-plugin-browser-panel',
       '@e-mate/dsh-plugin-vision-toolkit',
       '@e-mate/dsh-plugin-xin-assistant',
     ])
     const packages = [
       '@e-mate/dsh-plugin-better-sidebar',
-      '@e-mate/dsh-plugin-browser',
-      '@e-mate/dsh-plugin-browser-panel',
+      '@e-mate/dsh-plugin-cdp',
       '@e-mate/dsh-plugin-computer-use',
       '@e-mate/dsh-plugin-file-import',
       '@e-mate/dsh-plugin-find-skill',
@@ -1061,7 +910,6 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
       '@e-mate/dsh-plugin-memory-evolve',
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-search-mcp',
-      '@e-mate/dsh-plugin-subagent',
       '@e-mate/dsh-plugin-vision-toolkit',
     ]
     for (const name of packages) {
@@ -1595,18 +1443,12 @@ test('Agent operation guidance owns the e-Mate persona and reuses Harness shell 
   assert.equal(section.order, 180)
   assert.match(section.text, /我是小芯，你的 AI 办公助手/u)
   assert.match(section.text, /运行在 e-Mate 内，是亦芯开发的全场景办公 AI Agent/u)
-  assert.match(section.text, /existing Bash tool/)
-  assert.match(section.text, /PowerShell tool/)
-  assert.match(section.text, /do not wrap it in another background Job/)
-  assert.match(section.text, /Download, install, and publish create their own registered Jobs/)
-  assert.match(section.text, /e-mate update --json/)
-  for (const operation of ['search', 'download', 'install', 'publish']) {
-    assert.match(section.text, new RegExp(`e_mate_skill_hub_${operation}`))
-  }
-  assert.match(section.text, /Do not compose or run npm install/)
+  assert.match(section.text, /Never use Bash, PowerShell, npm, pnpm/)
+  assert.match(section.text, /e_mate_desktop_update/)
+  assert.doesNotMatch(section.text, /e-mate update --json|e_mate_skill_hub_/)
   assert.match(section.text, /installed find-skill provider/u)
   assert.match(section.text, /use `mcp_manage`/u)
-  assert.match(section.text, /Browser Tools are only for operating a user-visible page/u)
+  assert.match(section.text, /user-visible Chrome page exposed through the DSH CDP adapter/u)
   assert.match(section.text, /do not ask the user to paste secrets into chat/u)
   assert.equal(channel, SCHEDULES_CHANNEL)
   assert.deepEqual(options, { authority: 'loopback' })
@@ -1881,6 +1723,8 @@ test('enterprise identity provider maps target credentials and the production HT
   const requests = []
   let auditBody
   let taskAuditBody
+  let transportAvailable = true
+  let refreshRejected = false
   const json = value => new Response(JSON.stringify(value), {
     status: 200,
     headers: { 'content-type': 'application/json' },
@@ -1908,6 +1752,7 @@ test('enterprise identity provider maps target credentials and the production HT
     },
   }
   const fetchImplementation = async (input, init = {}) => {
+    if (!transportAvailable) throw new Error('simulated enterprise transport outage')
     const url = new URL(input)
     requests.push({ url: url.href, path: url.pathname, authorization: new Headers(init.headers).get('authorization') })
     if (url.pathname.endsWith('/v1/auth/registration/challenge')) {
@@ -1927,6 +1772,12 @@ test('enterprise identity provider maps target credentials and the production HT
     }
     if (url.pathname.endsWith('/v1/auth/password')) return json(session)
     if (url.pathname.endsWith('/v1/auth/refresh')) {
+      if (refreshRejected) {
+        return new Response(JSON.stringify({ error: { code: 'TOKEN_REUSED' } }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
       return json({
         ...session,
         expiresAt: new Date(clock + 15 * 60_000).toISOString(),
@@ -1949,7 +1800,7 @@ test('enterprise identity provider maps target credentials and the production HT
           acceptanceId: 'acceptance-receipt-207',
           userId: 'user-207',
           acceptedAt: new Date(clock).toISOString(),
-          clientVersion: '2.0.10',
+          clientVersion: '2.0.11',
           locale: 'zh-CN',
         } : null,
       })
@@ -1961,7 +1812,7 @@ test('enterprise identity provider maps target credentials and the production HT
         acceptanceId: 'acceptance-receipt-207',
         userId: 'user-207',
         acceptedAt: new Date(clock).toISOString(),
-        clientVersion: '2.0.10',
+        clientVersion: '2.0.11',
         locale: 'zh-CN',
       })
     }
@@ -2188,6 +2039,20 @@ test('enterprise identity provider maps target credentials and the production HT
   const taskAuditRequests = requests.filter(request => request.path.endsWith('/v1/audit/tasks'))
   assert.equal(taskAuditRequests.length, 1)
   assert.equal(taskAuditRequests[0].authorization, `Bearer ${modelToken}`)
+  clock += 16 * 60_000
+  transportAvailable = false
+  provider = createEnterpriseIdentityProvider(providerOptions)
+  const offlineWorkspace = await provider.bootstrap()
+  assert.equal(offlineWorkspace.authenticated, true)
+  assert.equal(offlineWorkspace.workspace_unlocked, true)
+  await assert.rejects(provider.modelPolicy(), /企业身份服务暂时不可用/)
+  assert.equal(values.has('E_MATE_ENTERPRISE_SESSION'), true)
+  transportAvailable = true
+  refreshRejected = true
+  await assert.rejects(provider.bootstrap(), /登录刷新凭据已失效/)
+  assert.equal(values.has('E_MATE_ENTERPRISE_SESSION'), false)
+  refreshRejected = false
+  await provider.login({ identifier: 'test.user', password: 'secret-value', remember_login: true })
   values.set('E_MATE_MODEL_KEY_GPT', 'runtime-provider-key-not-persisted-here')
   const logout = await provider.logout({ client_request_id: 'logout-request-207' })
   assert.equal(logout.receipt_id, 'logout-receipt-207')
@@ -2334,6 +2199,10 @@ test('enterprise model switch delegates to the target session, keeps its history
     },
   }
   let defaultModelSettings
+  let failDefaultModelWrite = false
+  let projectedGptKey = 'production-key-redacted-for-test-123'
+  let projectedGptBaseUrl = 'http://provider.example:8080/v1'
+  let policyDefaultModel = 'gpt-5.6-luna'
   const session = {
     current: { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', reasoningEffort: 'max' },
     messages: [
@@ -2354,8 +2223,8 @@ test('enterprise model switch delegates to the target session, keeps its history
     account_subject: accountSubject,
     revision: 7,
     allowed_model_ids: ['gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek', 'gpt-image-2-pro', 'gpt-image-2'],
-    default_chat_model_id: 'gpt-5.6-luna',
-    default_chat_reasoning_effort: 'max',
+    default_chat_model_id: policyDefaultModel,
+    default_chat_reasoning_effort: policyDefaultModel === 'gpt-5.6-luna' ? 'max' : 'medium',
     image_primary_model_id: 'gpt-image-2-pro',
     image_fallback_upstream_model_id: 'gpt-image-2',
     issued_at: new Date(now - 1_000).toISOString(),
@@ -2415,7 +2284,13 @@ test('enterprise model switch delegates to the target session, keeps its history
           : ns === 'agent-default-model' ? structuredClone(defaultModelSettings) : undefined,
         replace: async (ns, value) => {
           if (ns === 'llm-pi-ai') llmSettings = structuredClone(value)
-          else if (ns === 'agent-default-model') defaultModelSettings = structuredClone(value)
+          else if (ns === 'agent-default-model') {
+            if (failDefaultModelWrite) {
+              failDefaultModelWrite = false
+              throw new Error('simulated default model settings failure')
+            }
+            defaultModelSettings = structuredClone(value)
+          }
           else assert.fail(`unexpected settings namespace ${ns}`)
         },
       },
@@ -2453,8 +2328,8 @@ test('enterprise model switch delegates to the target session, keeps its history
                 credentialRef: 'E_MATE_MODEL_KEY_GPT',
                 api: 'openai-responses',
                 upstreamModelId: 'gpt-5.6-luna',
-                upstreamBaseUrl: 'http://provider.example:8080/v1',
-                upstreamApiKey: 'production-key-redacted-for-test-123',
+                upstreamBaseUrl: projectedGptBaseUrl,
+                upstreamApiKey: projectedGptKey,
                 label: 'GPT-5.6 Luna · 最大推理',
                 input: ['text', 'image'],
                 contextWindow: 1_050_000,
@@ -2466,8 +2341,8 @@ test('enterprise model switch delegates to the target session, keeps its history
                 credentialRef: 'E_MATE_MODEL_KEY_GPT',
                 api: 'openai-responses',
                 upstreamModelId: 'gpt-5.6-sol',
-                upstreamBaseUrl: 'http://provider.example:8080/v1',
-                upstreamApiKey: 'production-key-redacted-for-test-123',
+                upstreamBaseUrl: projectedGptBaseUrl,
+                upstreamApiKey: projectedGptKey,
                 label: 'GPT-5.6 Sol · 中等推理',
                 input: ['text', 'image'],
                 contextWindow: 1_050_000,
@@ -2544,6 +2419,21 @@ test('enterprise model switch delegates to the target session, keeps its history
     assert.doesNotMatch(JSON.stringify(llmSettings), /redacted-for-test/u)
     assert.doesNotMatch(JSON.stringify(llmSettings), /model-api/u)
     assert.equal((await rpc.handler('unknown', {})).error.code, 'bad-request')
+
+    const projectedSettings = structuredClone(llmSettings)
+    const projectedDefault = structuredClone(defaultModelSettings)
+    const projectedCredentials = new Map(credentialValues)
+    projectedGptKey = 'rotated-key-redacted-for-test-456'
+    projectedGptBaseUrl = 'http://provider.example:8081/v1'
+    policyDefaultModel = 'gpt-5.6-sol'
+    failDefaultModelWrite = true
+    assert.equal((await modelPolicy.refresh({ force: true })).revision, 7)
+    assert.deepEqual(llmSettings, projectedSettings)
+    assert.deepEqual(defaultModelSettings, projectedDefault)
+    assert.deepEqual(credentialValues, projectedCredentials)
+    projectedGptKey = 'production-key-redacted-for-test-123'
+    projectedGptBaseUrl = 'http://provider.example:8080/v1'
+    policyDefaultModel = 'gpt-5.6-luna'
 
     const models = await apiProxy.sessions.models({ rpcId: 'models-1', payload: { sessionId: 'session-1' } })
     assert.deepEqual(models.result.value.groups[0].models.map(model => model.id), [

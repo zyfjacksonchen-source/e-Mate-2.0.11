@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { apply, importIntoWorkspace } from '../lib/index.js'
-import { allowedMediaType, appendImportedMentions, CHANNEL, MAX_FILES } from '../lib/contract.js'
+import { allowedMediaType, appendImportedMentions, CHANNEL, fileDropRoute, MAX_FILES } from '../lib/contract.js'
 
 async function mounted(workspace) {
   let handler
@@ -96,4 +96,12 @@ test('keeps the client contract on target draft mentions and an explicit safe al
   assert.match(client, /inputTriggers\.registerSource\(source\)/u)
   assert.match(client, /e-mate:file-picker-requested/u)
   assert.doesNotMatch(client, /new WebSocket|createStore|ctx\.router|fetch\(/u)
+})
+
+test('routes folders to the native Workspace bridge and ordinary files only to the composer', () => {
+  assert.equal(fileDropRoute({ composerTarget: true, directory: true, normalizeImage: false, ordinary: true, workspaceTarget: false }), 'pass')
+  assert.equal(fileDropRoute({ composerTarget: false, directory: true, normalizeImage: false, ordinary: true, workspaceTarget: true }), 'pass')
+  assert.equal(fileDropRoute({ composerTarget: false, directory: false, normalizeImage: false, ordinary: true, workspaceTarget: false }), 'pass')
+  assert.equal(fileDropRoute({ composerTarget: true, directory: false, normalizeImage: false, ordinary: true, workspaceTarget: false }), 'intake-all')
+  assert.equal(fileDropRoute({ composerTarget: false, directory: false, normalizeImage: true, ordinary: true, workspaceTarget: false }), 'normalize-images')
 })

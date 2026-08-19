@@ -3,13 +3,10 @@ import { createPortal } from 'react-dom'
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import {
   IconArchiveOutline20,
-  IconBrowseOutline16,
   IconChevronDownOutline14,
   IconChecklistOutline14,
   IconCloseOutline16,
   IconCopyOutline16,
-  IconDataOutline16,
-  IconDownloadOutline16,
   IconEditOutline16,
   IconEllipsisOutline16,
   IconFolderOpenOutline16,
@@ -17,23 +14,21 @@ import {
   IconDarkOutline16,
   IconLightOutline16,
   IconLinkOutline16,
-  IconListPenOutline16,
   IconNewChatOutline16,
   IconPanelLeftOutline16,
   IconPlusOutline16,
   IconRefreshOutline16,
   IconSearchOutline16,
   IconSettingsOutline16,
-  IconSkillOutline16,
   IconTrashOutline16,
   IconUserOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AccountControl, AccountSettings } from './account.tsx'
 import { ArtifactCapsules } from './artifact-capsules.tsx'
-import { CapabilitiesPage, CapabilityControl } from './capabilities.tsx'
 import './chat-chrome.module.css'
 import { ComposerConnectors } from './composer-connectors.tsx'
 import { HomeProjection } from './home.tsx'
+import { HeaderControls } from './header-controls.tsx'
 import { IdentityGate } from './identity.tsx'
 import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImagesDefinition } from './image-gallery.tsx'
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
@@ -67,6 +62,31 @@ export function registerSessionShare(ctx: any): void {
       dismissDownload: (sessionId: string) => { ctx.sessionLogDownload.dismiss(sessionId) },
     }),
   }, SessionShareAction))
+}
+
+/** Mount the advanced-Desktop utilities through its declared titlebar slot. */
+export function registerHeaderControls(ctx: any): void {
+  ctx.slots.inject('desktop.titlebar.utilities', () => ctx.slots.register({
+    name: 'desktop.titlebar.utilities',
+    id: 'e-mate-header-controls',
+    order: -30,
+    children: {
+      'sidebar.settings': { kind: 'single', scope: 'root' },
+    },
+    inject: () => ({
+      getThemeScheme: () => ctx.theme.getTheme().active.colorScheme,
+      subscribeTheme: (listener: () => void) => ctx.on('theme/change', listener),
+      toggleTheme: () => {
+        const scheme = ctx.theme.getTheme().active.colorScheme
+        ctx.theme.setTheme(scheme === 'dark' ? 'light' : 'dark')
+      },
+      LightIcon: IconLightOutline16,
+      DarkIcon: IconDarkOutline16,
+      UserIcon: IconUserOutline16,
+      callIdentity: (endpoint: string, payload: Record<string, unknown>) =>
+        ctx.connection.rpc.call('/emate.identity', endpoint, payload),
+    }),
+  }, HeaderControls))
 }
 
 export function registerComputerUseTrigger(ctx: any): void {
@@ -171,10 +191,10 @@ export function apply(ctx: any): void {
     id: 'e-mate-thinking-status',
     order: -190,
   }, ThinkingStatusBranding))
-  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
-    name: 'shell.overlay',
+  ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
+    name: 'conversation.chat.turnTail',
     id: 'e-mate-artifact-capsules',
-    order: -185,
+    order: 100,
   }, ArtifactCapsules))
   ctx.conversationEvents.register(imageDisclosureDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
@@ -193,6 +213,7 @@ export function apply(ctx: any): void {
     inject: () => ({ canDownload: ctx.connection.isLoopback }),
   }, LegacyArtifacts))
   registerSessionShare(ctx)
+  registerHeaderControls(ctx)
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
     name: 'conversation.input.right',
     id: 'e-mate-connectors',
@@ -285,41 +306,6 @@ export function apply(ctx: any): void {
         ctx.connection.rpc.call('/emate.identity', endpoint, payload),
     }),
   }, IdentityGate))
-  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
-    name: 'shell.overlay',
-    id: 'e-mate-capabilities',
-    order: -10,
-    inject: () => ({
-      callCapabilities: (endpoint: string, payload: Record<string, unknown>) =>
-        ctx.connection.rpc.call('/emate.capabilities', endpoint, payload),
-      callSkillHub: (endpoint: string, payload: Record<string, unknown>) =>
-        ctx.connection.rpc.call('/emate.skillHub', endpoint, payload),
-      listInstalled: async (sessionId: string) => {
-        const { result } = await ctx.connection.api.skills.list({ sessionId })
-        if (!result.ok) throw new Error(`skill.list failed: ${result.error.code}: ${result.error.message}`)
-        return result.value.skills
-      },
-      startSession: () => { startSession() },
-      SearchIcon: IconSearchOutline16,
-      DownloadIcon: IconDownloadOutline16,
-      CloseIcon: IconCloseOutline16,
-      RefreshIcon: IconRefreshOutline16,
-      SkillIcon: IconSkillOutline16,
-      capabilityIcons: {
-        browser: IconBrowseOutline16,
-        collaboration: IconLinkOutline16,
-        image: IconEnhanceOutline16,
-        office: IconListPenOutline16,
-        ocr: IconDataOutline16,
-      },
-    }),
-  }, CapabilitiesPage))
-  ctx.slots.inject('sidebar.primary.action', () => ctx.slots.register({
-    name: 'sidebar.primary.action',
-    id: 'e-mate-capabilities-entry',
-    order: 20,
-    inject: () => ({ SkillIcon: IconSkillOutline16 }),
-  }, CapabilityControl))
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
     id: 'e-mate-user-center',

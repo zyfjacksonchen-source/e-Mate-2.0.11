@@ -460,7 +460,11 @@ async function projectRuntimeModels(ctx, models, policy) {
     providers[model.provider] = provider
   }
 
-  const previous = new Map(await Promise.all([...credentials.keys()].map(async ref => [ref, await ctx.credentials.resolve(ref)])))
+  const previousCredentials = new Map(await Promise.all(
+    [...RUNTIME_CREDENTIAL_REFS].map(async ref => [ref, await ctx.credentials.resolve(ref)]),
+  ))
+  const previousLlmSettings = structuredClone(ctx.settings.get('llm-pi-ai') ?? {})
+  const previousDefaultModel = structuredClone(ctx.settings.get('agent-default-model') ?? {})
   try {
     await Promise.all([...credentials].map(([ref, value]) => ctx.credentials.set(ref, value)))
     const next = { providers }
@@ -477,15 +481,23 @@ async function projectRuntimeModels(ctx, models, policy) {
     if (canonicalJson(ctx.settings.get('agent-default-model')) !== canonicalJson(defaultSelection)) {
       await ctx.settings.replace('agent-default-model', defaultSelection)
     }
+    await Promise.all([...RUNTIME_CREDENTIAL_REFS]
+      .filter(ref => !credentials.has(ref))
+      .map(ref => ctx.credentials.unset(ref)))
   } catch (error) {
-    await Promise.allSettled([...previous].map(([ref, hit]) => hit === undefined
-      ? ctx.credentials.unset(ref)
-      : ctx.credentials.set(ref, hit.value)))
+    const rollback = await Promise.allSettled([
+      ctx.settings.replace('agent-default-model', previousDefaultModel),
+      ctx.settings.replace('llm-pi-ai', previousLlmSettings),
+      ...[...previousCredentials].map(([ref, hit]) => hit === undefined
+        ? ctx.credentials.unset(ref)
+        : ctx.credentials.set(ref, hit.value)),
+    ])
+    const rollbackFailures = rollback.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+    if (rollbackFailures.length > 0) {
+      throw new AggregateError([error, ...rollbackFailures], 'e-Mate runtime model projection rollback failed')
+    }
     throw error
   }
-  await Promise.allSettled([...RUNTIME_CREDENTIAL_REFS]
-    .filter(ref => !credentials.has(ref))
-    .map(ref => ctx.credentials.unset(ref)))
 }
 
 function createService(ctx, table, quota) {

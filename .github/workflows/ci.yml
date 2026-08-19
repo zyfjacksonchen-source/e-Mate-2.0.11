@@ -16,8 +16,55 @@ env:
   DSH_TELEMETRY_DISABLED: '1'
 
 jobs:
+  impact:
+    name: Release impact contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      lane: ${{ steps.classify.outputs.lane }}
+      run_base: ${{ steps.classify.outputs.run_base }}
+      run_plugins: ${{ steps.classify.outputs.run_plugins }}
+      run_enterprise: ${{ steps.classify.outputs.run_enterprise }}
+      components_json: ${{ steps.classify.outputs.components_json }}
+      component_jobs_json: ${{ steps.classify.outputs.component_jobs_json }}
+      publish_components_json: ${{ steps.classify.outputs.publish_components_json }}
+      head_sha: ${{ steps.classify.outputs.head_sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Test the fail-closed classifier and payload boundary
+        run: node --test scripts/change-impact.test.mjs scripts/component-release.test.mjs scripts/profile-release.test.mjs scripts/publish-profile-r2.test.mjs
+
+      - name: Classify the exact diff once
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          node scripts/change-impact.mjs \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --github-output "$GITHUB_OUTPUT" > change-impact.json
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-change-impact-${{ github.sha }}
+          path: change-impact.json
+          if-no-files-found: error
+          retention-days: 7
+
   source:
     name: Node 24 / target contracts and unit tests
+    needs: impact
+    if: needs.impact.outputs.run_base == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -58,6 +105,42 @@ jobs:
       - name: Check release carrier
         run: node --test scripts/release.test.mjs
 
+      - name: Resolve the immutable Base SDK cache key
+        id: base-sdk-key
+        run: echo "key=e-mate-base-sdk-$(node scripts/base-sdk.mjs fingerprint)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the immutable Base SDK cache
+        id: base-sdk
+        uses: actions/cache/restore@v4
+        with:
+          path: .release-cache/base-sdk
+          key: ${{ steps.base-sdk-key.outputs.key }}
+          enableCrossOsArchive: true
+
+      - name: Build the accepted Desktop SDK carrier once
+        if: steps.base-sdk.outputs.cache-hit != 'true'
+        working-directory: desktop
+        run: |
+          corepack enable
+          yarn install --immutable
+          yarn build
+
+      - name: Emit the immutable Base SDK
+        if: steps.base-sdk.outputs.cache-hit != 'true'
+        run: node scripts/base-sdk.mjs emit --directory .release-cache/base-sdk
+
+      - name: Verify the restored immutable Base SDK
+        if: steps.base-sdk.outputs.cache-hit == 'true'
+        run: node scripts/base-sdk.mjs verify --directory .release-cache/base-sdk
+
+      - name: Seed the immutable Base SDK cache
+        if: steps.base-sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .release-cache/base-sdk
+          key: ${{ steps.base-sdk-key.outputs.key }}
+          enableCrossOsArchive: true
+
       - name: Export the exact built e-Mate profile for desktop jobs
         uses: actions/upload-artifact@v4
         with:
@@ -65,12 +148,250 @@ jobs:
           path: |
             packages/dsh/profile
             packages/dsh-plugin-*/lib
-            packages/dsh-plugin-browser/extension/dist
           if-no-files-found: error
           retention-days: 1
 
       - name: Check patch whitespace
         run: git diff --check
+
+  plugins:
+    name: Changed Profile component / ${{ matrix.component }} / ${{ matrix.target }}
+    needs: impact
+    if: needs.impact.outputs.run_plugins == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.impact.outputs.component_jobs_json) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.impact.outputs.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            upstream/deepseek-harness/pnpm-lock.yaml
+
+      - name: Install exact component toolchains without building Harness
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir upstream/deepseek-harness install --frozen-lockfile
+
+      - name: Resolve the accepted Base SDK cache key
+        id: base-sdk-key
+        shell: bash
+        run: echo "key=e-mate-base-sdk-$(node scripts/base-sdk.mjs fingerprint)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the accepted Base SDK
+        id: base-sdk
+        uses: actions/cache/restore@v4
+        with:
+          path: .release-cache/base-sdk
+          key: ${{ steps.base-sdk-key.outputs.key }}
+          enableCrossOsArchive: true
+
+      - name: Refuse to rebuild a missing Base SDK in the plugin lane
+        if: steps.base-sdk.outputs.cache-hit != 'true'
+        run: |
+          echo 'The accepted Base SDK cache is unavailable; seed it through a Base lane. Plugin CI will not rebuild Harness.' >&2
+          exit 1
+
+      - name: Restore and verify the accepted Base SDK
+        run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
+
+      - name: Build and test only the changed component
+        env:
+          COMPONENT: ${{ matrix.component }}
+          EMATE_COMPONENT_TARGET: ${{ matrix.target }}
+        run: |
+          pnpm --filter "$COMPONENT" run build
+          pnpm --filter "$COMPONENT" run test
+
+      - name: Emit the immutable component payload
+        if: matrix.publish == true
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.component }}
+          SOURCE_COMMIT: ${{ needs.impact.outputs.head_sha }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          slug="${COMPONENT#@e-mate/}"
+          target_args=()
+          output="dist/components/$slug"
+          if [[ "$TARGET" != portable ]]; then
+            target_args=(--target "$TARGET")
+            output="$output/$TARGET"
+          fi
+          node scripts/component-release.mjs emit \
+            --component "$COMPONENT" \
+            --source-commit "$SOURCE_COMMIT" \
+            "${target_args[@]}" \
+            --out "$output"
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.publish == true
+        with:
+          name: e-mate-component-${{ strategy.job-index }}-${{ matrix.target }}-${{ needs.impact.outputs.head_sha }}
+          path: dist/components
+          if-no-files-found: error
+          retention-days: 7
+
+  profile-composition:
+    name: Complete Profile generation / ${{ matrix.target }}
+    needs: [impact, plugins]
+    if: needs.impact.outputs.run_plugins == 'true' && needs.impact.outputs.publish_components_json != '[]'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-15
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: win32-x64
+            runner: windows-2025
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.impact.outputs.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - run: corepack enable
+
+      - name: Resolve the accepted Base SDK cache key
+        id: base-sdk-key
+        shell: bash
+        run: echo "key=e-mate-base-sdk-$(node scripts/base-sdk.mjs fingerprint)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the accepted Base SDK
+        id: base-sdk
+        uses: actions/cache/restore@v4
+        with:
+          path: .release-cache/base-sdk
+          key: ${{ steps.base-sdk-key.outputs.key }}
+          enableCrossOsArchive: true
+
+      - name: Refuse to rebuild a missing Base SDK in the component lane
+        if: steps.base-sdk.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          echo 'The accepted Base SDK cache is unavailable; seed it through a Base lane. Profile composition will not rebuild Desktop or Harness.' >&2
+          exit 1
+
+      - name: Restore and verify the accepted Base SDK
+        run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
+
+      - name: Download exactly the changed component payloads
+        uses: actions/download-artifact@v4
+        with:
+          pattern: e-mate-component-*-${{ needs.impact.outputs.head_sha }}
+          path: dist/components
+          merge-multiple: true
+
+      - name: Resolve Yarn cache folder
+        id: yarn-cache
+        shell: bash
+        run: echo "dir=$(cd desktop && yarn config get cacheFolder)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: profile-yarn-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/yarn.lock', 'desktop/.yarnrc.yml') }}
+
+      - name: Install the exact Desktop runtime closure without building Base
+        working-directory: desktop
+        run: yarn install --immutable
+
+      - name: Fetch the currently accepted signed desired state
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/profile-current
+          curl --fail --silent --show-error --max-redirs 0 --proto '=https' --tlsv1.2 --max-filesize 1048576 \
+            --output "dist/profile-current/$TARGET.json" \
+            "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/desired-state/$TARGET.json"
+
+      - name: Compose and boot the complete candidate generation
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          SOURCE_COMMIT: ${{ needs.impact.outputs.head_sha }}
+          PUBLISH_COMPONENTS_JSON: ${{ needs.impact.outputs.publish_components_json }}
+        run: |
+          set -euo pipefail
+          changed_args=()
+          while IFS= read -r component; do
+            changed_args+=(--changed "$component")
+          done < <(node --input-type=module -e 'for (const id of JSON.parse(process.env.PUBLISH_COMPONENTS_JSON)) console.log(id)')
+          output="dist/profile-candidate/$TARGET"
+          node scripts/profile-release.mjs \
+            --target "$TARGET" \
+            --artifact-root dist/components \
+            "${changed_args[@]}" \
+            --source-commit "$SOURCE_COMMIT" \
+            --current "dist/profile-current/$TARGET.json" \
+            --out "$output"
+          generation=$(node --input-type=module -e 'import { readFileSync } from "node:fs"; console.log(JSON.parse(readFileSync(process.argv[1], "utf8")).candidate_generation)' "$output/admission.json")
+          node desktop/e-mate-desktop/scripts/verify-profile-boot.mjs \
+            --store "$output/store" \
+            --generation "$generation" \
+            --base "$output/verification-base.json" \
+            --target "$TARGET"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-profile-candidate-${{ matrix.target }}-${{ needs.impact.outputs.head_sha }}
+          path: |
+            dist/profile-candidate/${{ matrix.target }}/admission.json
+            dist/profile-candidate/${{ matrix.target }}/payload.json
+            dist/profile-candidate/${{ matrix.target }}/envelope.json
+            dist/profile-candidate/${{ matrix.target }}/verification-base.json
+          if-no-files-found: error
+          retention-days: 7
+
+  enterprise:
+    name: Enterprise-only contracts
+    needs: impact
+    if: needs.impact.outputs.run_enterprise == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.impact.outputs.head_sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: enterprise/pnpm-lock.yaml
+      - run: pnpm --dir enterprise install --frozen-lockfile
+      - run: |
+          pnpm enterprise:check
+          pnpm enterprise:test
+          pnpm enterprise:build
 
   desktop-windows:
     name: Windows x64 / unsigned desktop installer
@@ -170,3 +491,64 @@ jobs:
           path: desktop/e-mate-desktop/dist/mac-smoke/*
           if-no-files-found: error
           retention-days: 7
+
+  admission:
+    name: CI admission
+    if: always()
+    needs: [impact, source, plugins, profile-composition, enterprise, desktop-windows, desktop-macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Admit exactly the classified lane
+        env:
+          LANE: ${{ needs.impact.outputs.lane }}
+          IMPACT: ${{ needs.impact.result }}
+          SOURCE: ${{ needs.source.result }}
+          PLUGINS: ${{ needs.plugins.result }}
+          PROFILE: ${{ needs.profile-composition.result }}
+          PUBLISH_COMPONENTS: ${{ needs.impact.outputs.publish_components_json }}
+          ENTERPRISE: ${{ needs.enterprise.result }}
+          WINDOWS: ${{ needs.desktop-windows.result }}
+          MACOS: ${{ needs.desktop-macos.result }}
+        run: |
+          set -euo pipefail
+          test "$IMPACT" = success
+          case "$LANE" in
+            base)
+              test "$SOURCE" = success
+              test "$WINDOWS" = success
+              test "$MACOS" = success
+              test "$PLUGINS" = skipped
+              test "$PROFILE" = skipped
+              test "$ENTERPRISE" = skipped
+              ;;
+            plugin-only)
+              test "$PLUGINS" = success
+              if test "$PUBLISH_COMPONENTS" = '[]'; then
+                test "$PROFILE" = skipped
+              else
+                test "$PROFILE" = success
+              fi
+              test "$SOURCE" = skipped
+              test "$ENTERPRISE" = skipped
+              test "$WINDOWS" = skipped
+              test "$MACOS" = skipped
+              ;;
+            enterprise-only)
+              test "$ENTERPRISE" = success
+              test "$SOURCE" = skipped
+              test "$PLUGINS" = skipped
+              test "$PROFILE" = skipped
+              test "$WINDOWS" = skipped
+              test "$MACOS" = skipped
+              ;;
+            docs-only|verification-only|none)
+              test "$SOURCE" = skipped
+              test "$PLUGINS" = skipped
+              test "$PROFILE" = skipped
+              test "$ENTERPRISE" = skipped
+              test "$WINDOWS" = skipped
+              test "$MACOS" = skipped
+              ;;
+            *) exit 1 ;;
+          esac

@@ -645,7 +645,9 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     try {
       return await refreshing
     } catch (error) {
-      if (Date.parse(value.session.expiresAt) <= now()) await clear().catch(() => undefined)
+      if (Date.parse(value.session.expiresAt) <= now() && !(error instanceof IdentityServiceUnavailable)) {
+        await clear().catch(() => undefined)
+      }
       throw error
     } finally {
       refreshing = undefined
@@ -715,7 +717,13 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
         : `${current.session.identity.tenantId}:${current.session.identity.userId}`
     },
     async bootstrap() {
-      const value = await active(false)
+      let value: StoredSession | undefined
+      try {
+        value = await active(false)
+      } catch (error) {
+        if (!(error instanceof IdentityServiceUnavailable)) throw error
+        value = await load()
+      }
       if (value === undefined) return { authenticated: false, workspace_unlocked: false }
       if (agreementExempt(value)) {
         return {
@@ -840,7 +848,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
           termsAccepted: true,
           policyRead: true,
           lawfulUseConfirmed: true,
-          clientVersion: '2.0.10',
+          clientVersion: '2.0.11',
           locale: 'zh-CN',
         }),
       }, 'consent acceptance'), status.policy)

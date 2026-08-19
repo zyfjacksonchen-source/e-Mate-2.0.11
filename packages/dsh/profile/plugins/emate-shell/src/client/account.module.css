@@ -49,6 +49,31 @@
 
 .account summary::-webkit-details-marker { display: none; }
 
+.headerAccount {
+  width: 32px;
+  flex: none;
+}
+
+.headerAccount summary {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  justify-content: center;
+}
+
+.headerAccount .accountPanel {
+  top: calc(100% + 6px);
+  right: 0;
+  bottom: auto;
+  left: auto;
+}
+
+.headerAccount summary:hover,
+.headerAccount summary:focus-visible {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
 .accountPanel {
   position: absolute;
   z-index: 20;

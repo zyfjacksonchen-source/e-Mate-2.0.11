@@ -1,4 +1,0 @@
-- insert:
-    - id: emate-browser
-      name: '@e-mate/dsh-plugin-browser'
-      inject: [webServer, tools, approval, systemPrompt]

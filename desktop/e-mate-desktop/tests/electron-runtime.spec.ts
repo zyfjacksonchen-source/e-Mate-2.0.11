@@ -1,6 +1,4 @@
 import { basename, dirname, join } from 'node:path'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopShellSpec } from '../src/runtime.ts'
 
@@ -65,7 +63,10 @@ vi.mock('../src/mac-update-installer.ts', () => ({
   scheduleMacUpdateInstallation: macUpdater.schedule,
 }))
 
-vi.mock('node:child_process', () => ({ spawn: childProcess.spawn }))
+vi.mock('node:child_process', async importOriginal => ({
+  ...await importOriginal<typeof import('node:child_process')>(),
+  spawn: childProcess.spawn,
+}))
 
 const electron = vi.hoisted(() => {
   const browserWindowOptions: unknown[] = []
@@ -269,6 +270,7 @@ describe('Electron compatibility runtime', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
@@ -289,6 +291,7 @@ describe('Electron compatibility runtime', () => {
       height: 840,
       show: false,
       webPreferences: {
+        preload: expect.stringMatching(/preload\.cjs$/),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -572,7 +575,7 @@ describe('Electron compatibility runtime', () => {
         appExecutable: process.execPath,
         electronVersion: '43.4.0',
         profileName: 'desktop',
-        productVersion: '2.0.10',
+        productVersion: '2.0.11',
         profileDir: '/tmp/dsh-home/profiles/desktop',
         homeDir: '/tmp/dsh-home',
         spawn: expect.any(Function),
@@ -590,37 +593,6 @@ describe('Electron compatibility runtime', () => {
       })).toThrow('already configured')
     } finally {
       delete (process.versions as { electron?: string }).electron
-    }
-  })
-
-  it('opens Chrome setup and reveals the installed browser extension', async () => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
-    const home = mkdtempSync(join(tmpdir(), 'e-mate-browser-extension-'))
-    const extension = join(home, 'browser-extension')
-    const manifest = join(extension, 'manifest.json')
-    mkdirSync(extension)
-    writeFileSync(manifest, '{"manifest_version":3}\n')
-    try {
-      const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-      const runtime = new ElectronDesktopRuntime(async () => {})
-      runtime.configureTerminal({ profileName: 'e-mate', profileDir: join(home, 'profiles', 'e-mate'), homeDir: home })
-
-      const opened = runtime.openBrowserExtensionSetup()
-      await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenCalledOnce() })
-      childProcess.emit('spawn')
-      await opened
-
-      expect(childProcess.spawn).toHaveBeenCalledWith(
-        '/usr/bin/open',
-        ['-a', 'Google Chrome', 'chrome://extensions'],
-        expect.objectContaining({ detached: true, stdio: 'ignore' }),
-      )
-      expect(electron.shell.showItemInFolder).toHaveBeenCalledWith(manifest)
-      expect(electron.notifications.at(-1)?.options).toEqual(expect.objectContaining({
-        title: 'e-Mate 浏览器扩展安装已准备',
-      }))
-    } finally {
-      rmSync(home, { recursive: true, force: true })
     }
   })
 
@@ -732,6 +704,41 @@ describe('Electron compatibility runtime', () => {
     expect(electron.dialog.showMessageBox).not.toHaveBeenCalled()
   })
 
+  it('fails a renderer generation that never reports boot health', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const onRendererBoot = vi.fn()
+    const runtime = new ElectronDesktopRuntime(async () => {}, onRendererBoot)
+
+    runtime.beginRendererBootMonitoring(25)
+    await vi.advanceTimersByTimeAsync(25)
+
+    expect(runtime.rendererBootFailureReason).toBe('renderer-timeout')
+    expect(onRendererBoot).toHaveBeenCalledOnce()
+    expect(onRendererBoot).toHaveBeenCalledWith({
+      status: 'failed',
+      plugins: [],
+      error: 'The Renderer did not report boot health within 25ms.',
+    })
+  })
+
+  it('cancels the renderer deadline after the first healthy report', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const onRendererBoot = vi.fn()
+    const runtime = new ElectronDesktopRuntime(async () => {}, onRendererBoot)
+
+    runtime.beginRendererBootMonitoring(25)
+    runtime.reportRendererBoot({ status: 'healthy' })
+    await vi.advanceTimersByTimeAsync(25)
+
+    expect(runtime.rendererBootFailureReason).toBeUndefined()
+    expect(onRendererBoot).toHaveBeenCalledOnce()
+    expect(onRendererBoot).toHaveBeenCalledWith({ status: 'healthy' })
+  })
+
   it('opens the active profile terminal from plugin recovery', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     Object.defineProperty(process.versions, 'electron', {
@@ -785,7 +792,7 @@ describe('Electron compatibility runtime', () => {
     expect(runtime.updates).toMatchObject({
       isPackaged: false,
       canDownload: false,
-      currentVersion: '2.0.10',
+      currentVersion: '2.0.11',
       statePath: join('/tmp/dsh-desktop-user-data', 'updates', 'state.json'),
     })
     electron.app.isPackaged = true

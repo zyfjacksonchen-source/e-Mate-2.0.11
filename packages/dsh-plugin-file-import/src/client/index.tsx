@@ -7,10 +7,13 @@ import {
   allowedMediaType,
   appendImportedMentions,
   CHANNEL,
+  COMPOSER_DROP_TARGET,
   fileBadge,
+  fileDropRoute,
   MAX_FILE_BYTES,
   MAX_FILES,
   MAX_TOTAL_BYTES,
+  WORKSPACE_DROP_TARGET,
   type ImportedFile,
 } from '../contract.ts'
 import css from './style.module.css'
@@ -168,11 +171,19 @@ export function FileImportControl({ sessionId, input, inputActions, isLoopback, 
       const files = Array.from(event.dataTransfer?.files ?? [])
       const normalizeImage = files.some(file => imageType(file) !== undefined && file.type === '')
       const ordinary = files.some(file => imageType(file) === undefined)
-      if (!directory && !ordinary && !normalizeImage) return
+      const target = event.target instanceof Element ? event.target : undefined
+      const route = fileDropRoute({
+        composerTarget: target !== undefined && target.closest(COMPOSER_DROP_TARGET) !== null,
+        directory,
+        normalizeImage,
+        ordinary,
+        workspaceTarget: target !== undefined && target.closest(WORKSPACE_DROP_TARGET) !== null,
+      })
+      if (route === 'pass') return
       event.preventDefault()
       event.stopImmediatePropagation()
-      if (directory) setRows(current => [...current, { id: crypto.randomUUID(), displayName: '文件夹', mediaType: '', phase: 'error', message: '不支持导入文件夹。' }])
-      if (files.length > 0) queueMicrotask(() => { intake(files) })
+      const routedFiles = route === 'intake-all' ? files : files.filter(file => imageType(file) !== undefined)
+      if (routedFiles.length > 0) queueMicrotask(() => { intake(routedFiles) })
     }
     const onPaste = (event: ClipboardEvent): void => {
       if (!(event.target instanceof HTMLTextAreaElement) || event.clipboardData === null) return

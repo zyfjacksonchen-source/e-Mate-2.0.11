@@ -1937,7 +1937,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@deepseek-ai/dsh-client-ui-workspace@npm:0.1.0-rc.7, @deepseek-ai/dsh-client-ui-workspace@npm:^0.1.0-rc.7":
+"@deepseek-ai/dsh-client-ui-workspace@npm:0.1.0-rc.7":
   version: 0.1.0-rc.7
   resolution: "@deepseek-ai/dsh-client-ui-workspace@npm:0.1.0-rc.7"
   dependencies:
@@ -1951,6 +1951,23 @@ __metadata:
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.7
     react: ^18.2.0
   checksum: 10c0/ac9930cc8fcfa4ca43d1a5659f1d2677c86c66a4891a341280333cdf932be96df07e497c3d66dc7a5ee94393227fb5e5fa9dcc412be4fa97a462565d518b6e83
+  languageName: node
+  linkType: hard
+
+"@deepseek-ai/dsh-client-ui-workspace@patch:@deepseek-ai/dsh-client-ui-workspace@npm%3A0.1.0-rc.7#./patches/dsh-client-ui-workspace@0.1.0-rc.7.patch::locator=%40e-mate%2Fdesktop-workspace%40workspace%3A.":
+  version: 0.1.0-rc.7
+  resolution: "@deepseek-ai/dsh-client-ui-workspace@patch:@deepseek-ai/dsh-client-ui-workspace@npm%3A0.1.0-rc.7#./patches/dsh-client-ui-workspace@0.1.0-rc.7.patch::version=0.1.0-rc.7&hash=1d300d&locator=%40e-mate%2Fdesktop-workspace%40workspace%3A."
+  dependencies:
+    clsx: "npm:^2.0.0"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-client-locale": ^0.1.0-rc.7
+    "@deepseek-ai/dsh-client-runtime": ^0.1.0-rc.7
+    "@deepseek-ai/dsh-client-ui-primitives": ^0.1.0-rc.7
+    "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.7
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.7
+    react: ^18.2.0
+  checksum: 10c0/a46cdf78a018eaced40da72dae10ecf9044177272e8f27bc81300c22d530bd20b98e71fb56a8e39c0dca10e1183abcfcf9b84b1274f44e0a902e21c7f335ca11
   languageName: node
   linkType: hard
 
@@ -3150,7 +3167,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@deepseek-ai/dsh-skill-filesystem@npm:^0.1.0-rc.7":
+"@deepseek-ai/dsh-skill-filesystem@npm:0.1.0-rc.7, @deepseek-ai/dsh-skill-filesystem@npm:^0.1.0-rc.7":
   version: 0.1.0-rc.7
   resolution: "@deepseek-ai/dsh-skill-filesystem@npm:0.1.0-rc.7"
   dependencies:
@@ -3598,7 +3615,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@deepseek-ai/dsh-tool-fs@npm:^0.1.0-rc.7":
+"@deepseek-ai/dsh-tool-fs@npm:0.1.0-rc.7":
   version: 0.1.0-rc.7
   resolution: "@deepseek-ai/dsh-tool-fs@npm:0.1.0-rc.7"
   dependencies:
@@ -3617,6 +3634,28 @@ __metadata:
     "@deepseek-ai/dsh-tools": ^0.1.0-rc.7
     "@deepseek-ai/dsh-user-approval": ^0.1.0-rc.7
   checksum: 10c0/0eb8915ebc037196ce2013e562407ea36e811db9c5e77c268e02accdf5855482f8b7ed88de1cfeb4be30d6154e5711911313365304f516309667d49d5efc854f
+  languageName: node
+  linkType: hard
+
+"@deepseek-ai/dsh-tool-fs@patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.0-rc.7#~/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.0-rc.7-redundant-escalation.patch":
+  version: 0.1.0-rc.7
+  resolution: "@deepseek-ai/dsh-tool-fs@patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.0-rc.7#~/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.0-rc.7-redundant-escalation.patch::version=0.1.0-rc.7&hash=14d5e6"
+  dependencies:
+    "@deepseek-ai/schemastery": "npm:^3.18.1"
+    diff: "npm:^9.0.0"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-attachment": ^0.1.0-rc.7
+    "@deepseek-ai/dsh-fs": ^0.1.0-rc.7
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.7
+    "@deepseek-ai/dsh-llm": ^0.1.0-rc.7
+    "@deepseek-ai/dsh-sandbox": ^0.1.0-rc.7
+    "@deepseek-ai/dsh-sandbox-policy": ^0.1.0-rc.7
+    "@deepseek-ai/dsh-session": ^0.1.0-rc.7
+    "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.7
+    "@deepseek-ai/dsh-tools": ^0.1.0-rc.7
+    "@deepseek-ai/dsh-user-approval": ^0.1.0-rc.7
+  checksum: 10c0/e4be2ef083293ac0ae0100ff78379ee3875305d217a7ea9c9a10ee891511e4dc2231586dadaa57bc8aa3235b4da2db16aa00668dbd7cb301e0f4f47b5b52a36b
   languageName: node
   linkType: hard
 
@@ -4324,6 +4363,7 @@ __metadata:
     "@deepseek-ai/dsh-shell": "npm:0.1.0-rc.7"
     "@deepseek-ai/dsh-shell-env": "npm:0.1.0-rc.7"
     "@deepseek-ai/dsh-skill": "npm:0.1.0-rc.7"
+    "@deepseek-ai/dsh-skill-filesystem": "npm:0.1.0-rc.7"
     "@deepseek-ai/dsh-spill": "npm:0.1.0-rc.7"
     "@deepseek-ai/dsh-storage": "npm:0.1.0-rc.7"
     "@deepseek-ai/dsh-storage-domain": "npm:0.1.0-rc.7"
@@ -4353,7 +4393,6 @@ __metadata:
     dsh-at-file: "https://github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz"
     dsh-better-sidebar: "patch:dsh-better-sidebar@npm%3A0.12.2#~/.yarn/patches/dsh-better-sidebar-npm-0.12.2-cafee7a9cd.patch"
     dsh-file-viewer: "patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch"
-    dsh-search-mcp: "patch:dsh-search-mcp@file%3Avendor/dsh-search-mcp-0.1.0-9562b966.tgz%23vendor/dsh-search-mcp-0.1.0-9562b966.tgz%3A%3Ahash=bd339a&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-search-mcp-file-024047d146.patch"
     dsh-turn-fold: "patch:dsh-turn-fold@https%3A//github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz#~/.yarn/patches/dsh-turn-fold-https-e835a4814f.patch"
     dsh-visualize: "file:vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz"
     electron: "npm:43.4.0"
@@ -5238,7 +5277,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@modelcontextprotocol/sdk@npm:^1.12.0, @modelcontextprotocol/sdk@npm:^1.30.0":
+"@modelcontextprotocol/sdk@npm:^1.12.0":
   version: 1.30.0
   resolution: "@modelcontextprotocol/sdk@npm:1.30.0"
   dependencies:
@@ -7622,34 +7661,6 @@ __metadata:
     "@deepseek-ai/dsh-typert-protocol": ^0.1.0-rc.6
     react: ^18.2.0
   checksum: 10c0/33822310c6441bc373600241c3ac0cb5472c5db8b80404fa0b91a4ea3fc3cf5bac0ee7aeea106c8826b2c14b8d47c33bf1ef56950b475d0e4171e491de85cd32
-  languageName: node
-  linkType: hard
-
-"dsh-search-mcp@file:vendor/dsh-search-mcp-0.1.0-9562b966.tgz#vendor/dsh-search-mcp-0.1.0-9562b966.tgz::hash=bd339a&locator=%40e-mate%2Fdesktop%40workspace%3Ae-mate-desktop":
-  version: 0.1.0
-  resolution: "dsh-search-mcp@file:vendor/dsh-search-mcp-0.1.0-9562b966.tgz#vendor/dsh-search-mcp-0.1.0-9562b966.tgz::hash=bd339a&locator=%40e-mate%2Fdesktop%40workspace%3Ae-mate-desktop"
-  dependencies:
-    "@deepseek-ai/dsh-credentials": "npm:0.1.0-rc.6"
-    "@deepseek-ai/dsh-launch-environment": "npm:0.1.0-rc.6"
-    "@deepseek-ai/dsh-settings": "npm:0.1.0-rc.6"
-    "@deepseek-ai/dsh-web": "npm:0.1.0-rc.6"
-    "@deepseek-ai/schemastery": "npm:^3.18.1"
-    "@modelcontextprotocol/sdk": "npm:^1.30.0"
-  checksum: 10c0/255a4b73b3c5878f72b80965fc76f00464951928f3dd3e3ad151ef47f98623c41eb112b2fab42a9c1925372e83bd76141b85d194f6bc2f0172401868c9e43a5e
-  languageName: node
-  linkType: hard
-
-"dsh-search-mcp@patch:dsh-search-mcp@file%3Avendor/dsh-search-mcp-0.1.0-9562b966.tgz%23vendor/dsh-search-mcp-0.1.0-9562b966.tgz%3A%3Ahash=bd339a&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-search-mcp-file-024047d146.patch":
-  version: 0.1.0
-  resolution: "dsh-search-mcp@patch:dsh-search-mcp@file%3Avendor/dsh-search-mcp-0.1.0-9562b966.tgz%23vendor/dsh-search-mcp-0.1.0-9562b966.tgz%3A%3Ahash=bd339a&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-search-mcp-file-024047d146.patch::version=0.1.0&hash=aa2f7b"
-  dependencies:
-    "@deepseek-ai/dsh-credentials": "npm:0.1.0-rc.6"
-    "@deepseek-ai/dsh-launch-environment": "npm:0.1.0-rc.6"
-    "@deepseek-ai/dsh-settings": "npm:0.1.0-rc.6"
-    "@deepseek-ai/dsh-web": "npm:0.1.0-rc.6"
-    "@deepseek-ai/schemastery": "npm:^3.18.1"
-    "@modelcontextprotocol/sdk": "npm:^1.30.0"
-  checksum: 10c0/cb4b41a36a6db738af181424739266f1930855162c53f2ee61ab6bbd5dbd0cf922209546b292f27987c9033fc2f1e0b64009de45c13df17ac277565872b25afe
   languageName: node
   linkType: hard
 

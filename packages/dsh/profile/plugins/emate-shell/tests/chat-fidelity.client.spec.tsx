@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ArtifactCapsules } from '../src/client/artifact-capsules.tsx'
 import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImagesDefinition } from '../src/client/image-gallery.tsx'
@@ -72,16 +72,16 @@ describe('target conversation fidelity contract', () => {
     expect(source).toMatch(/id: 'stats',[\s\S]*?priority: -1/u)
   })
 
-  it('keeps the target produced-file opener while removing its local path from the UI', async () => {
+  it('keeps the target produced-file opener while removing its local path outside the token stream', async () => {
     const openFile = vi.fn()
-    const view = render(<>
-      <ArtifactCapsules />
+    const view = render(<div>
       <div data-produced-files-row="">
         <button type="button" title="/private/workspace/deliverables/Dairy Onboarding SOP.pdf" onClick={openFile}>
           Dairy Onboarding SOP.pdf
         </button>
       </div>
-    </>)
+      <ArtifactCapsules />
+    </div>)
     const file = screen.getByRole('button', { name: '打开 Dairy Onboarding SOP.pdf' })
     await waitFor(() => { expect(file.hasAttribute('data-emate-produced-file')).toBe(true) })
     expect(file.getAttribute('title')).toBe('Dairy Onboarding SOP.pdf')
@@ -89,6 +89,10 @@ describe('target conversation fidelity contract', () => {
     expect(view.container.innerHTML).not.toContain('/private/workspace')
     fireEvent.click(file)
     expect(openFile).toHaveBeenCalledOnce()
+    const adapter = readFileSync(resolve('src/client/artifact-capsules.tsx'), 'utf8')
+    expect(adapter).not.toContain('document.body')
+    expect(adapter).not.toContain('document.querySelectorAll')
+    expect(adapter).toContain("observer.observe(row, { childList: true })")
   })
 
   it('shows the target ImageGallery by default without replacing its DOM or lightbox', () => {
@@ -158,7 +162,7 @@ describe('target conversation fidelity contract', () => {
   it('keeps dsh-genui registered on target slots and real plugin metadata', () => {
     expect(JSON.parse(genuiPackage)).toMatchObject({
       name: '@e-mate/dsh-plugin-genui',
-      version: '2.0.10',
+      version: '2.0.11',
       dsh: { bundle: { patch: './cordis.patch.yml' }, client: { platform: 'web' } },
     })
     expect(genuiPatch).toContain('id: emate-genui')
@@ -171,7 +175,7 @@ describe('target conversation fidelity contract', () => {
     expect(genuiClient).toContain('data-genui-panel')
   })
 
-  it('brands only the target running status with the Domino loader', () => {
+  it('brands only target running statuses without rescanning the document during token streaming', async () => {
     const view = render(<>
       <ThinkingStatusBranding />
       <div role="status" aria-live="polite">Deep diving...<span>15秒</span></div>
@@ -188,6 +192,28 @@ describe('target conversation fidelity contract', () => {
     expect(thinkingCss).toContain('var(--dsw-alias-label-secondary)')
     expect(thinkingCss).toContain('@keyframes emate-domino')
     expect(thinkingCss).toContain('width: 16px')
+
+    const documentQuery = vi.spyOn(document, 'querySelectorAll')
+    const stream = document.createElement('div')
+    view.container.append(stream)
+    await act(async () => {
+      for (let index = 0; index < 50; index += 1) stream.append(document.createElement('span'))
+      await Promise.resolve()
+    })
+    expect(documentQuery).not.toHaveBeenCalled()
+
+    const lateTarget = document.createElement('div')
+    lateTarget.setAttribute('role', 'status')
+    lateTarget.setAttribute('aria-live', 'polite')
+    lateTarget.append('Deep diving...')
+    await act(async () => {
+      view.container.append(lateTarget)
+      await Promise.resolve()
+    })
+    expect(lateTarget.hasAttribute('data-emate-thinking-status')).toBe(true)
+    expect(documentQuery).not.toHaveBeenCalled()
+    documentQuery.mockRestore()
+
     view.unmount()
     expect(target.hasAttribute('data-emate-thinking-status')).toBe(false)
     expect(target.textContent).toContain('Deep diving...')

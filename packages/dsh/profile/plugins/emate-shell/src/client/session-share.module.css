@@ -17,14 +17,14 @@
 :global(body[data-dsh-desktop-mode='advanced'] .dshDesktopFrame[data-desktop-platform='darwin']) .trigger {
   position: fixed;
   z-index: 1001;
-  top: 0;
+  top: 1px;
   right: 72px;
 }
 
 :global(body[data-dsh-desktop-mode='advanced'] .dshDesktopFrame[data-desktop-platform='win32']) .trigger {
   position: fixed;
   z-index: 1001;
-  top: 0;
+  top: 1px;
   right: 210px;
 }
 

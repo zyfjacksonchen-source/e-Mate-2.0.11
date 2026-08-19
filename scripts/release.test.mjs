@@ -148,7 +148,7 @@ test('publication accepts only the exact 40-character release commit', () => {
 
 test('R2 immutable readback includes download metadata as well as bytes identity', () => {
   const item = {
-    filename: 'e-mate-dsh-2.0.10.tgz',
+    filename: 'e-mate-dsh-2.0.11.tgz',
     size: 207,
     sha256: DIGEST,
     contentType: 'application/gzip',
@@ -221,13 +221,22 @@ test('GitHub release packs once and validates the same tarball on three platform
   const ciChecks = ci.jobs.source.steps.find(step => step.name === 'Check target pin and e-Mate behavior').run
   assert.match(ciChecks, /^pnpm test$/mu)
   assert.doesNotMatch(ciChecks, /--filter @e-mate\/dsh test/u)
-  assert.deepEqual(Object.keys(ci.jobs), ['source', 'desktop-windows', 'desktop-macos'])
+  assert.deepEqual(Object.keys(ci.jobs), [
+    'impact',
+    'source',
+    'plugins',
+    'enterprise',
+    'desktop-windows',
+    'desktop-macos',
+    'admission',
+  ])
+  assert.equal(ci.jobs.source.needs, 'impact')
   assert.equal(ci.jobs['desktop-windows'].needs, 'source')
   assert.equal(ci.jobs['desktop-macos'].needs, 'source')
   for (const [workflow, producer] of [[ci, 'source'], [desktopRelease, 'profile']]) {
     const artifact = workflow.jobs[producer].steps.find(step => step.uses === 'actions/upload-artifact@v4')
     assert.match(artifact.with.path, /packages\/dsh-plugin-\*\/lib/u)
-    assert.match(artifact.with.path, /packages\/dsh-plugin-browser\/extension\/dist/u)
+    assert.doesNotMatch(artifact.with.path, /browser-extension/u)
     for (const job of Object.values(workflow.jobs).filter(item => item.needs === producer)) {
       assert.equal(job.steps.find(step => step.uses === 'actions/download-artifact@v4').with.path, 'packages')
     }
@@ -294,7 +303,9 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
   assert.match(script, new RegExp(manifestUrl.replaceAll('.', '\\.')))
   for (const platform of ['macos', 'windows']) assert.match(page, new RegExp(`data-platform="${platform}"`, 'u'))
   for (const artifact of ['darwin', 'win32']) assert.match(script, new RegExp(`artifacts\\.${artifact}`, 'u'))
-  for (const filename of ['e-Mate-2.0.10-mac-universal.dmg', 'e-Mate-2.0.10-win-x64-Setup.exe']) {
+  const publishedVersion = /const VERSION = "(\d+\.\d+\.\d+)";/u.exec(script)?.[1]
+  assert.equal(typeof publishedVersion, 'string')
+  for (const filename of [`e-Mate-${publishedVersion}-mac-universal.dmg`, `e-Mate-${publishedVersion}-win-x64-Setup.exe`]) {
     assert.match(script, new RegExp(filename.replaceAll('.', '\\.'), 'u'))
   }
   assert.match(script, /manifest\.source_commit/u)
@@ -321,14 +332,14 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
   assert.doesNotMatch(page, /__EMATE_RELEASE_SOURCE_COMMIT__|npm install|nodejs\.org|e-mate setup|e-mate launch/u)
   const { normalizeDownloadIndex } = await import(`../deploy/download-page/${scriptName}`)
   const commit = 'a'.repeat(40)
-  const releasePrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.10/${commit}`
+  const releasePrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v${publishedVersion}/${commit}`
   const fixture = {
     schema_version: 1,
-    version: '2.0.10',
+    version: publishedVersion,
     source_commit: commit,
     artifacts: {
-      darwin: { url: `${releasePrefix}/e-Mate-2.0.10-mac-universal.dmg`, bytes: 123, sha256: 'b'.repeat(64) },
-      win32: { url: `${releasePrefix}/e-Mate-2.0.10-win-x64-Setup.exe`, bytes: 456, sha256: 'c'.repeat(64) },
+      darwin: { url: `${releasePrefix}/e-Mate-${publishedVersion}-mac-universal.dmg`, bytes: 123, sha256: 'b'.repeat(64) },
+      win32: { url: `${releasePrefix}/e-Mate-${publishedVersion}-win-x64-Setup.exe`, bytes: 456, sha256: 'c'.repeat(64) },
     },
   }
   assert.deepEqual(normalizeDownloadIndex(fixture).downloads.map(item => item.target), ['macos-universal', 'windows-x64'])

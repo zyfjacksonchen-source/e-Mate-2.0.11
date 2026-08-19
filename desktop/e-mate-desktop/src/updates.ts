@@ -6,6 +6,11 @@ import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import z from '@deepseek-ai/schemastery'
 import type {} from './runtime.ts'
 import {
+  sameProfileUpdate,
+  type ProfileUpdateAvailable,
+  type ProfileUpdateCheckResult,
+} from './profile-update.ts'
+import {
   checkForStableUpdate,
   parseSemVer,
   type UpdateCheckResult,
@@ -25,9 +30,14 @@ export interface DesktopUpdates {
 }
 
 export type InteractiveUpdateResult = {
-  readonly status: 'up-to-date' | 'declined' | 'superseded' | 'scheduled' | 'failed'
+  readonly status: 'up-to-date' | 'base-required' | 'declined' | 'superseded' | 'scheduled' | 'failed'
   readonly installedVersion: string
   readonly latestVersion?: string
+  readonly updateKind?: 'components'
+  readonly componentGeneration?: string
+  readonly components?: string[]
+  readonly downloadBytes?: number
+  readonly requiredBaseContracts?: string[]
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -62,6 +72,7 @@ export const Config: z<Config> = z.object({
 interface UpdateStateV2 {
   readonly version: 2
   readonly lastPromptedVersion?: string
+  readonly lastPromptedGeneration?: string
 }
 
 const EMPTY_STATE: UpdateStateV2 = { version: 2 }
@@ -73,6 +84,7 @@ const EMPTY_STATE: UpdateStateV2 = { version: 2 }
  */
 export function apply(ctx: Context, config: Config): void {
   const adapter = ctx.desktopRuntime.updates
+  const profileAdapter = adapter.profile
   let interactiveUpdate: (() => Promise<InteractiveUpdateResult>) | undefined
   ctx.provide('desktopUpdates', {
     runInteractiveUpdate() {
@@ -86,15 +98,22 @@ export function apply(ctx: Context, config: Config): void {
     let disposed = false
     let checking = false
     let availableUpdate: AvailableUpdate | undefined
+    let availableProfileUpdate: ProfileUpdateAvailable | undefined
     let downloadingVersion: string | undefined
+    let downloadingProfile: ProfileUpdateAvailable | undefined
     let state: UpdateStateV2 = EMPTY_STATE
     let pollTimer: ReturnType<typeof setTimeout> | undefined
     let requestTimer: ReturnType<typeof setTimeout> | undefined
+    let profileRequestTimer: ReturnType<typeof setTimeout> | undefined
     let requestController: AbortController | undefined
+    let profileRequestController: AbortController | undefined
     let downloadController: AbortController | undefined
+    let profileDownloadController: AbortController | undefined
     let inFlight: Promise<UpdateCheckResult | null> | undefined
+    let profileInFlight: Promise<ProfileUpdateCheckResult | null> | undefined
     let manualTask: Promise<InteractiveUpdateResult> | undefined
     let downloadTask: Promise<InteractiveUpdateResult> | undefined
+    let profileDownloadTask: Promise<InteractiveUpdateResult> | undefined
     let refreshTray = (): void => {}
 
     const persistState = async (): Promise<void> => {
@@ -121,7 +140,14 @@ export function apply(ctx: Context, config: Config): void {
     const rememberPrompt = async (version: string): Promise<void> => {
       await stateReady
       if (state.lastPromptedVersion === version) return
-      state = { version: 2, lastPromptedVersion: version }
+      state = { ...state, lastPromptedVersion: version }
+      await persistState()
+    }
+
+    const rememberProfilePrompt = async (generationId: string): Promise<void> => {
+      await stateReady
+      if (state.lastPromptedGeneration === generationId) return
+      state = { ...state, lastPromptedGeneration: generationId }
       await persistState()
     }
 
@@ -157,6 +183,32 @@ export function apply(ctx: Context, config: Config): void {
       return task
     }
 
+    const startProfileCheck = (): Promise<ProfileUpdateCheckResult | null> => {
+      if (profileAdapter === undefined) return Promise.resolve(null)
+      if (profileInFlight !== undefined) return profileInFlight
+      checking = true
+      refreshTray()
+      const controller = new AbortController()
+      profileRequestController = controller
+      const task = (async () => {
+        profileRequestTimer = setTimeout(() => { controller.abort() }, config.requestTimeoutMs)
+        try {
+          return await profileAdapter.check(controller.signal)
+        } catch {
+          return null
+        }
+      })().finally(() => {
+        if (profileRequestTimer !== undefined) clearTimeout(profileRequestTimer)
+        profileRequestTimer = undefined
+        if (profileRequestController === controller) profileRequestController = undefined
+        profileInFlight = undefined
+        checking = false
+        refreshTray()
+      })
+      profileInFlight = task
+      return task
+    }
+
     const observeResult = (result: UpdateCheckResult | null): AvailableUpdate | undefined => {
       if (disposed || result === null) return undefined
       availableUpdate = result.status === 'update-available' && adapter.canDownload && adapter.platform !== undefined
@@ -166,10 +218,37 @@ export function apply(ctx: Context, config: Config): void {
       return availableUpdate
     }
 
+    const observeProfileResult = (result: ProfileUpdateCheckResult | null): ProfileUpdateAvailable | undefined => {
+      if (disposed || result === null) return undefined
+      availableProfileUpdate = result.status === 'update-available' ? result : undefined
+      refreshTray()
+      return availableProfileUpdate
+    }
+
     const failed = (latestVersion?: string): InteractiveUpdateResult => ({
       status: 'failed',
       installedVersion: adapter.currentVersion,
       ...(latestVersion === undefined ? {} : { latestVersion }),
+    })
+
+    const profileResult = (
+      status: 'declined' | 'superseded' | 'scheduled' | 'failed',
+      update: ProfileUpdateAvailable,
+    ): InteractiveUpdateResult => ({
+      status,
+      installedVersion: adapter.currentVersion,
+      latestVersion: update.releaseVersion,
+      updateKind: 'components',
+      componentGeneration: update.generationId,
+      components: update.changedComponents.map(component => component.id),
+      downloadBytes: update.downloadBytes,
+    })
+
+    const baseRequired = (result: Extract<ProfileUpdateCheckResult, { status: 'base-required' }>): InteractiveUpdateResult => ({
+      status: 'base-required',
+      installedVersion: adapter.currentVersion,
+      latestVersion: result.releaseVersion,
+      requiredBaseContracts: [...result.requiredBaseContracts],
     })
 
     const startDownload = (update: AvailableUpdate): Promise<InteractiveUpdateResult> => {
@@ -225,6 +304,60 @@ export function apply(ctx: Context, config: Config): void {
       return task
     }
 
+    const startProfileDownload = (update: ProfileUpdateAvailable): Promise<InteractiveUpdateResult> => {
+      if (profileAdapter === undefined) return Promise.resolve(profileResult('failed', update))
+      if (profileDownloadTask !== undefined) return profileDownloadTask
+      const task = (async (): Promise<InteractiveUpdateResult> => {
+        let confirmed: boolean
+        try {
+          confirmed = await profileAdapter.confirm(update)
+        } catch {
+          return profileResult('failed', update)
+        }
+        if (!confirmed) return profileResult('declined', update)
+        if (disposed) return profileResult('failed', update)
+
+        const rechecked = await startProfileCheck()
+        const confirmedUpdate = observeProfileResult(rechecked)
+        if (confirmedUpdate === undefined || !sameProfileUpdate(confirmedUpdate, update) || disposed) {
+          if (!disposed) {
+            adapter.notify(confirmedUpdate === undefined
+              ? { title: 'e-Mate Component Update Changed', body: 'The signed component release changed or now requires a different Desktop Base.' }
+              : { title: 'e-Mate Component Update Changed', body: `Component generation ${confirmedUpdate.sequence} is now available. Please confirm the new release.` })
+          }
+          if (rechecked?.status === 'base-required') return baseRequired(rechecked)
+          return confirmedUpdate === undefined
+            ? profileResult('failed', update)
+            : profileResult('superseded', confirmedUpdate)
+        }
+
+        const controller = new AbortController()
+        profileDownloadController = controller
+        downloadingProfile = update
+        refreshTray()
+        try {
+          await profileAdapter.install(confirmedUpdate, controller.signal)
+          return profileResult('scheduled', confirmedUpdate)
+        } catch {
+          if (!disposed) {
+            adapter.notify({
+              title: 'e-Mate Component Update Failed',
+              body: 'The component generation could not be downloaded, verified, or activated. The current generation was not changed.',
+            })
+          }
+          return profileResult('failed', confirmedUpdate)
+        } finally {
+          if (profileDownloadController === controller) profileDownloadController = undefined
+          downloadingProfile = undefined
+          refreshTray()
+        }
+      })().finally(() => {
+        if (profileDownloadTask === task) profileDownloadTask = undefined
+      })
+      profileDownloadTask = task
+      return task
+    }
+
     const offerDownload = async (update: AvailableUpdate, automatic: boolean): Promise<InteractiveUpdateResult | undefined> => {
       if (disposed || !adapter.canDownload) return failed(update.latestVersion)
       await stateReady
@@ -233,9 +366,41 @@ export function apply(ctx: Context, config: Config): void {
       if (!disposed) return startDownload(update)
     }
 
+    const offerProfileDownload = async (
+      update: ProfileUpdateAvailable,
+      automatic: boolean,
+    ): Promise<InteractiveUpdateResult | undefined> => {
+      if (disposed || profileAdapter === undefined) return profileResult('failed', update)
+      await stateReady
+      if (disposed || (automatic && state.lastPromptedGeneration === update.generationId)) return
+      await rememberProfilePrompt(update.generationId)
+      if (!disposed) return startProfileDownload(update)
+    }
+
     const runManualCheck = (): Promise<InteractiveUpdateResult> => {
       if (manualTask !== undefined) return manualTask
       const task = (async (): Promise<InteractiveUpdateResult> => {
+        const checkedProfile = profileAdapter === undefined ? undefined : await startProfileCheck()
+        if (disposed) return failed()
+        const profileUpdate = observeProfileResult(checkedProfile ?? null)
+        if (profileUpdate !== undefined) {
+          return (await offerProfileDownload(profileUpdate, false)) ?? profileResult('failed', profileUpdate)
+        }
+
+        if (checkedProfile?.status === 'base-required') {
+          const result = await startCheck()
+          if (disposed) return failed()
+          const update = observeResult(result)
+          if (update !== undefined) {
+            return (await offerDownload(update, false)) ?? failed(update.latestVersion)
+          }
+          adapter.notify({
+            title: 'Desktop Base Update Required',
+            body: `Component release ${checkedProfile.releaseVersion} requires a newer compatible Desktop Base.`,
+          })
+          return baseRequired(checkedProfile)
+        }
+
         if (availableUpdate !== undefined) {
           return (await offerDownload(availableUpdate, false)) ?? failed(availableUpdate.latestVersion)
         }
@@ -245,7 +410,8 @@ export function apply(ctx: Context, config: Config): void {
         if (update !== undefined) {
           return (await offerDownload(update, false)) ?? failed(update.latestVersion)
         }
-        await adapter.showManualCheckResult(result)
+        await adapter.showManualCheckResult(checkedProfile === null && result?.status === 'up-to-date' ? null : result)
+        if (checkedProfile === null && result?.status === 'up-to-date') return failed(result.latestVersion)
         return result?.status === 'up-to-date'
           ? { status: 'up-to-date', installedVersion: result.currentVersion, latestVersion: result.latestVersion }
           : failed(result?.status === 'update-available' ? result.latestVersion : undefined)
@@ -258,8 +424,16 @@ export function apply(ctx: Context, config: Config): void {
     interactiveUpdate = runManualCheck
 
     const runBackgroundCheck = async (): Promise<void> => {
-      if (inFlight !== undefined || disposed) return
+      if (inFlight !== undefined || profileInFlight !== undefined || disposed) return
       try {
+        if (profileAdapter !== undefined) {
+          const profile = await startProfileCheck()
+          const profileUpdate = observeProfileResult(profile)
+          if (profileUpdate !== undefined) {
+            await offerProfileDownload(profileUpdate, true)
+            return
+          }
+        }
         const update = observeResult(await startCheck())
         if (update !== undefined) await offerDownload(update, true)
       } catch {
@@ -279,11 +453,15 @@ export function apply(ctx: Context, config: Config): void {
     const registration = ctx.desktopRuntime.registerTrayItem({
       group: 'status',
       order: 10,
-      label: () => downloadingVersion === undefined
-        ? availableUpdate === undefined
-          ? checking ? 'Checking for Updates…' : 'Check for Updates…'
-          : `e-Mate ${availableUpdate.latestVersion} Available`
-        : `Downloading e-Mate ${downloadingVersion}…`,
+      label: () => downloadingProfile !== undefined
+        ? `Installing e-Mate ${downloadingProfile.releaseVersion} Components…`
+        : downloadingVersion !== undefined
+          ? `Downloading e-Mate ${downloadingVersion}…`
+          : availableProfileUpdate !== undefined
+            ? `e-Mate ${availableProfileUpdate.releaseVersion} Components Available`
+            : availableUpdate === undefined
+              ? checking ? 'Checking for Updates…' : 'Check for Updates…'
+              : `e-Mate ${availableUpdate.latestVersion} Available`,
       invoke: async () => { await runManualCheck() },
     })
     refreshTray = registration.refresh
@@ -295,12 +473,16 @@ export function apply(ctx: Context, config: Config): void {
       if (interactiveUpdate === runManualCheck) interactiveUpdate = undefined
       if (pollTimer !== undefined) clearTimeout(pollTimer)
       if (requestTimer !== undefined) clearTimeout(requestTimer)
+      if (profileRequestTimer !== undefined) clearTimeout(profileRequestTimer)
       requestController?.abort()
+      profileRequestController?.abort()
       downloadController?.abort()
+      profileDownloadController?.abort()
       registration.dispose()
       // Native dialogs are not cancellable. Await only file state and the abortable version request.
       const pending: Promise<unknown>[] = [stateReady]
       if (inFlight !== undefined) pending.push(inFlight)
+      if (profileInFlight !== undefined) pending.push(profileInFlight)
       await Promise.allSettled(pending)
     }
   }, '@e-mate/desktop: update polling, confirmation, and installer handoff')
@@ -318,12 +500,16 @@ function parseState(text: string): UpdateStateV2 {
   if (!isRecord(value)
     || value.version !== 2
     || (value.lastPromptedVersion !== undefined && !isStableVersion(value.lastPromptedVersion))
-    || Object.keys(value).some(key => !['version', 'lastPromptedVersion'].includes(key))) {
+    || (value.lastPromptedGeneration !== undefined
+      && (typeof value.lastPromptedGeneration !== 'string' || !/^[0-9a-f]{64}$/u.test(value.lastPromptedGeneration)))
+    || Object.keys(value).some(key => !['version', 'lastPromptedVersion', 'lastPromptedGeneration'].includes(key))) {
     throw new Error('invalid v2 update state')
   }
-  return value.lastPromptedVersion === undefined
-    ? EMPTY_STATE
-    : { version: 2, lastPromptedVersion: value.lastPromptedVersion as string }
+  return {
+    version: 2,
+    ...(value.lastPromptedVersion === undefined ? {} : { lastPromptedVersion: value.lastPromptedVersion as string }),
+    ...(value.lastPromptedGeneration === undefined ? {} : { lastPromptedGeneration: value.lastPromptedGeneration as string }),
+  }
 }
 
 async function readState(filename: string): Promise<string> {

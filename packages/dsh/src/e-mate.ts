@@ -29,34 +29,33 @@ import { migrateLegacySchedules } from './legacy-schedule.js'
 import { checkOsCredentialBackend } from './profile/credentials-os.js'
 
 export const PRODUCT = 'e-Mate'
-export const VERSION = '2.0.10'
+export const VERSION = '2.0.11'
 export const PROFILE = 'e-mate'
 export const DEFAULT_PORT = 3080
 export const HARNESS_VERSION = '0.1.0-rc.7'
 export const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
-const PLUGIN_PACKAGES = [
-  '@e-mate/dsh-plugin-better-sidebar',
+const packageRoot = resolve(import.meta.dirname, '..')
+const componentInventory = JSON.parse(
+  readFileSync(join(packageRoot, 'profile', 'component-inventory.json'), 'utf8'),
+)
+if (componentInventory.schema_version !== 1 || !Array.isArray(componentInventory.components)) {
+  throw new Error('e-Mate component inventory is invalid')
+}
+const PLUGIN_PACKAGES = componentInventory.components
+  .filter(component => component.cli === true && /^@e-mate\/dsh-plugin-[a-z0-9-]+$/u.test(component.id))
+  .map(component => component.id)
+const MANAGED_PROFILE_PACKAGES = new Set(PLUGIN_PACKAGES)
+const RETIRED_PROFILE_PACKAGES = new Set([
   '@e-mate/dsh-plugin-browser',
   '@e-mate/dsh-plugin-browser-panel',
-  '@e-mate/dsh-plugin-computer-use',
-  '@e-mate/dsh-plugin-file-import',
-  '@e-mate/dsh-plugin-find-skill',
-  '@e-mate/dsh-plugin-genui',
-  '@e-mate/dsh-plugin-mcp-manage',
-  '@e-mate/dsh-plugin-memory-evolve',
-  '@e-mate/dsh-plugin-office-skills',
-  '@e-mate/dsh-plugin-search-mcp',
+  '@e-mate/dsh-plugin-im',
   '@e-mate/dsh-plugin-subagent',
-  '@e-mate/dsh-plugin-vision-toolkit',
-  '@e-mate/dsh-plugin-xin-assistant',
-]
-const MANAGED_PROFILE_PACKAGES = new Set(PLUGIN_PACKAGES)
-const RETIRED_PROFILE_PACKAGES = new Set(['@e-mate/dsh-plugin-im', '@yuxianglin/dsh-bridge-browser'])
+  '@yuxianglin/dsh-bridge-browser',
+])
 const OWNED_PROFILE_PACKAGES = new Set([...MANAGED_PROFILE_PACKAGES, ...RETIRED_PROFILE_PACKAGES])
 const UPDATE_RECEIPT_NAME = /^online-update-([0-9a-f]{8}-[0-9a-f-]{27})\.json$/iu
 const UPDATE_RECEIPT_STATUS = new Set(['completed', 'rolled-back', 'rollback-failed', 'failed-before-change'])
 
-const packageRoot = resolve(import.meta.dirname, '..')
 const binPath = fileURLToPath(new URL('./bin.js', import.meta.url))
 export function resolveDshHome(environment = process.env) {
   return resolve(environment.DSH_HOME || join(homedir(), '.dsh'))
@@ -72,7 +71,7 @@ export function managedPaths(dshHome = resolveDshHome()) {
     run,
     state: join(run, 'instance.json'),
     log: join(data, 'logs', 'web.log'),
-    receipt: join(data, 'migrations', 'setup-2.0.10.json'),
+    receipt: join(data, 'migrations', 'setup-2.0.11.json'),
   }
 }
 
@@ -389,7 +388,6 @@ function profileCheck(paths) {
     join(paths.profile, 'plugins', 'qr-generation.js'),
     join(paths.profile, 'plugins', 'credentials-os.js'),
     join(paths.profile, 'plugins', 'settings-document-boundary.js'),
-    join(paths.profile, 'plugins', 'skill-hub-agent.js'),
     join(paths.profile, 'plugins', 'image-generation.js'),
     join(paths.profile, 'plugins', 'model-policy.js'),
     join(paths.profile, 'plugins', 'audit.js'),

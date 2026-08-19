@@ -24,6 +24,9 @@ describe('e-Mate Agent desktop update Tool', () => {
       text: expect.stringContaining('e_mate_desktop_update'),
     }))
     const guidance = section.mock.calls[0]?.[0]?.text as string
+    expect(guidance).toContain('更新插件')
+    expect(guidance).toContain('变化组件和下载量')
+    expect(guidance).toContain('base-required')
     expect(guidance).not.toContain('e-mate update --json')
     expect(guidance).not.toContain('npm install')
     const tool = register.mock.calls[0]?.[0] as {

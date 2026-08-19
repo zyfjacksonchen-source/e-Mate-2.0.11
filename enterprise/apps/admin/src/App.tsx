@@ -13,7 +13,7 @@ import {
   Tag,
   Tooltip,
 } from '@arco-design/web-react';
-import { ChartLine, CheckOne, CloseOne, Plus, Refresh, UserBusiness } from '@icon-park/react';
+import { ChartLine, Plus, Refresh, UserBusiness } from '@icon-park/react';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import type {
   AdminApiKeyMetadata,
@@ -26,7 +26,6 @@ import type {
   AdminConsentQuery,
   TenantUser,
 } from '@e-mate/admin-contract';
-import type { RuntimeRegistryModelStatus, RuntimeRegistryStatus } from '@e-mate/runtime-registry-contract';
 import eMateLogo from '../../../../upstream/e-mate-2.0.5/desktop/src/v1/assets/emate-logo.png';
 import {
   AdminApiError,
@@ -40,7 +39,6 @@ import {
   loadApiKeys,
   loadConsentAcceptances,
   loadModelRoutes,
-  loadRuntimeStatus,
   loadTenantUsers,
   loginAdmin,
   publishModelRoute,
@@ -59,7 +57,6 @@ import {
 import { messagesFor } from './i18n';
 
 type ConsoleFacts = {
-  status: RuntimeRegistryStatus;
   users: TenantUser[];
   keys: AdminApiKeyMetadata[];
   routes: AdminModelRoute[];
@@ -78,11 +75,6 @@ type ModelTestState =
   | { kind: 'testing' }
   | { kind: 'passed'; checkedAt: string }
   | { kind: 'failed'; status: number | null };
-function modelStatusLabel(status: RuntimeRegistryModelStatus, copy: ReturnType<typeof messagesFor>): string {
-  if (status === 'HEALTHY') return copy.healthy;
-  if (status === 'DEGRADED') return copy.degraded;
-  return copy.unavailable;
-}
 
 function errorMessage(status: number | null, copy: ReturnType<typeof messagesFor>): string {
   if (status === 401) return copy.authFailed;
@@ -170,19 +162,17 @@ export function App() {
     const controller = new AbortController();
     setState({ kind: 'loading' });
     void Promise.all([
-      loadRuntimeStatus(token, controller.signal, requestOptions),
       loadTenantUsers(token, controller.signal, requestOptions),
       loadApiKeys(token, controller.signal, requestOptions),
       loadModelRoutes(token, controller.signal, requestOptions),
       loadConsentAcceptances(token, controller.signal, requestOptions, consentQuery),
       loadConsentAcceptances(token, controller.signal, requestOptions, { limit: 200 }),
     ])
-      .then(([status, users, keys, routes, consents, allConsents]) => {
+      .then(([users, keys, routes, consents, allConsents]) => {
         setTokenError(null);
         setState({
           kind: 'ready',
           facts: {
-            status,
             users: users.users,
             keys: keys.keys,
             routes: routes.routes,
@@ -430,51 +420,13 @@ export function App() {
                 <article>
                   <UserBusiness size={22} />
                   <span>{copy.activeUsers}</span>
-                  <strong>{facts.status.activeUsers.toLocaleString()}</strong>
+                  <strong>{facts.users.filter((user) => user.status === 'ACTIVE').length.toLocaleString()}</strong>
                 </article>
                 <article>
                   <ChartLine size={22} />
-                  <span>{copy.activeSessions}</span>
-                  <strong>{facts.status.activeSessions.toLocaleString()}</strong>
+                  <span>{copy.allowedModels}</span>
+                  <strong>{facts.routes.filter((route) => route.published && route.enabled).length.toLocaleString()}</strong>
                 </article>
-                <article>
-                  <CheckOne size={22} />
-                  <span>{copy.runningTasks}</span>
-                  <strong>{facts.status.runningTasks.toLocaleString()}</strong>
-                </article>
-                <article>
-                  <CloseOne size={22} />
-                  <span>{copy.failedTasks}</span>
-                  <strong>{facts.status.failedTasks.toLocaleString()}</strong>
-                </article>
-              </section>
-              <section className='fact-card' aria-labelledby='model-service-title'>
-                <div>
-                  <p>{copy.modelService}</p>
-                  <h2 id='model-service-title'>{modelStatusLabel(facts.status.modelStatus, copy)}</h2>
-                </div>
-                <Tag
-                  color={
-                    facts.status.modelStatus === 'HEALTHY'
-                      ? 'green'
-                      : facts.status.modelStatus === 'DEGRADED'
-                        ? 'orange'
-                        : 'red'
-                  }
-                >
-                  {facts.status.modelStatus}
-                </Tag>
-                <dl>
-                  <div>
-                    <dt>{copy.updatedAt}</dt>
-                    <dd>
-                      {new Intl.DateTimeFormat(navigator.language, {
-                        dateStyle: 'medium',
-                        timeStyle: 'medium',
-                      }).format(new Date(facts.status.updatedAt))}
-                    </dd>
-                  </div>
-                </dl>
               </section>
               <section className='usage-entry' aria-labelledby='usage-title'>
                 <div>

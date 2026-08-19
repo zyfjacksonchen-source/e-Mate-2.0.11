@@ -1,0 +1,247 @@
+import { createHash } from 'node:crypto'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+  materializeProfileComponent,
+  parseProfileComponentManifest,
+  verifyMaterializedProfileComponent,
+} from '../src/profile-component.ts'
+import type { ProfileBaseContract, ProfileReleaseComponent } from '../src/profile-release.ts'
+
+const base: ProfileBaseContract = {
+  schema_version: 1,
+  id: 'e-mate-desktop-profile-v1-dsh-df78045a127e',
+  desktop_api: 1,
+  profile_format: 1,
+  harness_version: '0.1.0-rc.7',
+  harness_commit: 'df78045a127e32cb5b942defba52c539590d1596',
+  profile_signing_keys: [],
+}
+const sourceCommit = 'a'.repeat(40)
+const packageValue = {
+  name: '@e-mate/dsh-plugin-memory-evolve',
+  version: '2.0.11',
+  license: 'MIT',
+  main: 'index.js',
+  files: ['index.js'],
+  dsh: { bundle: { patch: './cordis.patch.yml' } },
+  eMate: {
+    component: {
+      schema_version: 1,
+      id: '@e-mate/dsh-plugin-memory-evolve',
+      kind: 'profile',
+      base_contracts: [base.id],
+    },
+  },
+}
+const payloadFiles = new Map<string, Buffer>([
+  ['index.js', Buffer.from('export default class Memory {}\n')],
+  ['package.json', Buffer.from(`${JSON.stringify(packageValue, null, 2)}\n`)],
+])
+
+function sha256(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex')
+}
+
+function fixture(): { reference: ProfileReleaseComponent, objects: Map<string, Buffer> } {
+  const files = [...payloadFiles].map(([path, bytes]) => ({
+    path,
+    bytes: bytes.byteLength,
+    sha256: sha256(bytes),
+    mode: '0644' as const,
+  })).sort((left, right) => left.path.localeCompare(right.path))
+  const manifest = Buffer.from(`${JSON.stringify({
+    schema_version: 1,
+    id: packageValue.name,
+    slug: 'dsh-plugin-memory-evolve',
+    version: packageValue.version,
+    kind: 'profile',
+    target: null,
+    source_commit: sourceCommit,
+    base_contracts: [base.id],
+    harness_contract: { version: base.harness_version, commit: base.harness_commit },
+    package_entry: packageValue.main,
+    dsh: packageValue.dsh,
+    total_bytes: files.reduce((sum, file) => sum + file.bytes, 0),
+    files,
+  }, null, 2)}\n`)
+  const manifestUrl = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-memory-evolve/v2.0.11/${sourceCommit}/manifest.json`
+  return {
+    reference: {
+      id: packageValue.name,
+      version: packageValue.version,
+      kind: 'profile',
+      target: null,
+      profile_path: 'node_modules/@e-mate/dsh-plugin-memory-evolve',
+      manifest_url: manifestUrl,
+      manifest_bytes: manifest.byteLength,
+      manifest_sha256: sha256(manifest),
+      manifest_source_commit: sourceCommit,
+    },
+    objects: new Map([
+      [manifestUrl, manifest],
+      ...[...payloadFiles].map(([path, bytes]) => [`${new URL('.', manifestUrl).href}files/${path}`, bytes] as const),
+    ]),
+  }
+}
+
+const temporary: string[] = []
+afterEach(async () => {
+  await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true })))
+})
+
+describe('Profile component materialization', () => {
+  it('rejects a platform manifest selected for another runtime target', () => {
+    const { reference, objects } = fixture()
+    const manifest = JSON.parse(objects.get(reference.manifest_url)!.toString())
+    const target = {
+      platform: 'win32' as const,
+      arch: 'x64' as const,
+      runtime_abi: 'none',
+      minimum_os: '10.0',
+      signing: { scheme: 'unsigned' as const, identity: 'none' },
+      native_paths: [],
+    }
+    const bytes = Buffer.from(`${JSON.stringify({ ...manifest, kind: 'platform-profile', target })}\n`)
+    const platformReference: ProfileReleaseComponent = {
+      ...reference,
+      kind: 'platform-profile',
+      target,
+    }
+    expect(parseProfileComponentManifest(bytes, platformReference, base)?.target).toEqual(target)
+    expect(parseProfileComponentManifest(bytes, {
+      ...platformReference,
+      target: { ...target, platform: 'darwin', arch: 'arm64', minimum_os: '13.0', signing: { scheme: 'adhoc', identity: 'adhoc' } },
+    }, base)).toBeUndefined()
+  })
+
+  it.runIf(process.platform === 'darwin' && ['arm64', 'x64'].includes(process.arch))(
+    'verifies the target native closure and ad-hoc signature before committing it',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'e-mate-platform-component-'))
+      temporary.push(root)
+      const id = '@e-mate/dsh-plugin-xin-assistant'
+      const targetName = `darwin-${process.arch}`
+      const nativePath = `runtime/vendor-native/${targetName}/_cffi_backend.cpython-312-darwin.so`
+      const nativeBytes = await readFile(new URL(`../../../packages/dsh-plugin-xin-assistant/${nativePath}`, import.meta.url))
+      const indexBytes = Buffer.from('export default class Xin {}\n')
+      const dsh = { bundle: { patch: './cordis.patch.yml' } }
+      const target = {
+        platform: 'darwin' as const,
+        arch: process.arch as 'arm64' | 'x64',
+        runtime_abi: 'cpython-3.12',
+        minimum_os: '13.0',
+        signing: { scheme: 'adhoc' as const, identity: 'adhoc' },
+        native_paths: [`runtime/vendor-native/${targetName}`],
+      }
+      const packageBytes = Buffer.from(`${JSON.stringify({
+        name: id,
+        version: '2.0.11',
+        license: 'MIT',
+        main: 'index.mjs',
+        dsh,
+        eMate: { component: { schema_version: 1, id, kind: 'platform-profile', base_contracts: [base.id] } },
+      }, null, 2)}\n`)
+      const payload = new Map<string, { bytes: Buffer, mode: '0644' | '0755' }>([
+        ['index.mjs', { bytes: indexBytes, mode: '0644' }],
+        [nativePath, { bytes: nativeBytes, mode: '0755' }],
+        ['package.json', { bytes: packageBytes, mode: '0644' }],
+      ])
+      const files = [...payload].map(([path, file]) => ({
+        path,
+        bytes: file.bytes.byteLength,
+        sha256: sha256(file.bytes),
+        mode: file.mode,
+      })).sort((left, right) => left.path.localeCompare(right.path))
+      const manifestBytes = Buffer.from(`${JSON.stringify({
+        schema_version: 1,
+        id,
+        slug: 'dsh-plugin-xin-assistant',
+        version: '2.0.11',
+        kind: 'platform-profile',
+        target,
+        source_commit: sourceCommit,
+        base_contracts: [base.id],
+        harness_contract: { version: base.harness_version, commit: base.harness_commit },
+        package_entry: 'index.mjs',
+        dsh,
+        total_bytes: files.reduce((sum, file) => sum + file.bytes, 0),
+        files,
+      }, null, 2)}\n`)
+      const manifestUrl = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-xin-assistant/v2.0.11/${sourceCommit}/${targetName}/manifest.json`
+      const reference: ProfileReleaseComponent = {
+        id,
+        version: '2.0.11',
+        kind: 'platform-profile',
+        target,
+        profile_path: `node_modules/${id}`,
+        manifest_url: manifestUrl,
+        manifest_bytes: manifestBytes.byteLength,
+        manifest_sha256: sha256(manifestBytes),
+        manifest_source_commit: sourceCommit,
+      }
+      const objects = new Map<string, Buffer>([
+        [manifestUrl, manifestBytes],
+        ...[...payload].map(([path, file]) => [`${new URL('.', manifestUrl).href}files/${path}`, file.bytes] as const),
+      ])
+      const installed = await materializeProfileComponent({
+        destination: join(root, 'component'),
+        reference,
+        base,
+        platform: 'darwin',
+        arch: process.arch,
+        request: async url => {
+          const bytes = objects.get(url)
+          return bytes === undefined ? new Response(null, { status: 404 }) : new Response(Uint8Array.from(bytes).buffer)
+        },
+      })
+      expect(installed.target).toEqual(target)
+    },
+  )
+
+  it('persists the exact manifest and re-verifies the complete cached file set', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'e-mate-component-'))
+    temporary.push(root)
+    const destination = join(root, 'component')
+    const { reference, objects } = fixture()
+    const request = async (url: string): Promise<Response> => {
+      const bytes = objects.get(url)
+      return bytes === undefined
+        ? new Response(null, { status: 404 })
+        : new Response(Uint8Array.from(bytes).buffer, { status: 200, headers: { 'content-length': String(bytes.byteLength) } })
+    }
+
+    const installed = await materializeProfileComponent({ destination, reference, base, request })
+    await expect(verifyMaterializedProfileComponent({ directory: destination, reference, base }))
+      .resolves.toEqual(installed)
+    expect(await readFile(join(destination, '.e-mate-component-manifest.json'))).toHaveLength(reference.manifest_bytes)
+
+    await writeFile(join(destination, 'index.js'), 'tampered\n')
+    await expect(verifyMaterializedProfileComponent({ directory: destination, reference, base }))
+      .rejects.toThrow('file identity mismatch: index.js')
+  })
+
+  it('rejects files that were not signed into the component manifest', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'e-mate-component-'))
+    temporary.push(root)
+    const destination = join(root, 'component')
+    const { reference, objects } = fixture()
+    await materializeProfileComponent({
+      destination,
+      reference,
+      base,
+      request: async (url) => {
+        const bytes = objects.get(url)
+        return bytes === undefined
+          ? new Response(null, { status: 404 })
+          : new Response(Uint8Array.from(bytes).buffer, { status: 200 })
+      },
+    })
+    await writeFile(join(destination, 'injected.js'), 'export default 1\n')
+
+    await expect(verifyMaterializedProfileComponent({ directory: destination, reference, base }))
+      .rejects.toThrow('file set is not exact')
+  })
+})

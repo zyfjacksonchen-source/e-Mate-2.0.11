@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { RendererBootReport } from './renderer-boot-contract.ts'
+import type { DesktopProfileUpdateAdapter } from './profile-update.ts'
 import type {
   DesktopReleasePlatform,
   UpdateCheckResult,
@@ -100,6 +101,8 @@ export interface DesktopUpdateAdapter {
   readonly statePath: string
   /** Request adapter backed by Electron's native network session. */
   readonly request: UpdateRequest
+  /** Signed component-generation updater configured by the native launcher. */
+  readonly profile?: DesktopProfileUpdateAdapter | undefined
   /** Ask whether one strictly newer version may be downloaded. */
   confirmDownload(version: string): Promise<boolean>
   /** Present the outcome of a user-triggered version check. */
@@ -177,9 +180,6 @@ export interface DesktopRuntime {
 
   /** Open a native terminal containing packaged DSH command shims. */
   openTerminal(): void
-
-  /** Open the Chromium extension page and reveal the packaged bridge directory. */
-  openBrowserExtensionSetup(): Promise<void>
 
   /** Register e-Mate for macOS Accessibility and open its privacy pane when permission is missing. */
   openComputerUseAccessibilitySetup(): Promise<boolean>

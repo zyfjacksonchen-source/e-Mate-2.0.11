@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AccountControl, AccountSettings } from '../src/client/account.tsx'
 import { IdentityGate, type IdentityBootstrap, type RpcResult } from '../src/client/identity.tsx'
 import { SessionRouteProjection } from '../src/client/session-route.tsx'
-import { SettingsChrome } from '../src/client/settings-chrome.tsx'
+import { SettingsChrome, SettingsTrigger } from '../src/client/settings-chrome.tsx'
 
 const agreements = {
   ready: true,
@@ -55,6 +55,29 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     render(<div role="dialog"><button type="button">插件</button><p>DeepSeek 搜索提供方。</p><SettingsChrome /></div>)
     expect(await screen.findByText('能力中心')).toBeTruthy()
     expect(screen.getByText('e-Mate 搜索服务。')).toBeTruthy()
+  })
+
+  it('ignores unrelated token mutations while retaining settings route synchronization', async () => {
+    const Icon = () => <svg />
+    const view = render(<button type="button"><SettingsTrigger wide SettingsIcon={Icon} /></button>)
+    const documentQuery = vi.spyOn(document, 'querySelector')
+    const stream = document.createElement('div')
+    view.container.append(stream)
+    await act(async () => {
+      for (let index = 0; index < 50; index += 1) stream.append(document.createElement('span'))
+      await Promise.resolve()
+    })
+    expect(documentQuery).not.toHaveBeenCalled()
+
+    const settings = document.createElement('div')
+    settings.dataset.emateSettingsContent = ''
+    await act(async () => {
+      view.container.append(settings)
+      await Promise.resolve()
+    })
+    expect(location.pathname).toBe('/settings')
+    expect(documentQuery).toHaveBeenCalled()
+    documentQuery.mockRestore()
   })
 
   it('keeps registration, verification and pending approval on the target RPC seam', async () => {

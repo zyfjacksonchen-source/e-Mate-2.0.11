@@ -18,7 +18,6 @@ import { createRequire } from 'node:module'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { unpackedAsarPath } from './packaged-runtime-path.ts'
-import { bundledPythonPath } from './vision-toolkit.ts'
 
 export const EMATE_PROFILE_NAME = 'e-mate'
 
@@ -31,17 +30,42 @@ if (typeof EMATE_DESKTOP_PROFILE_VERSION !== 'string'
   throw new Error('e-Mate desktop package version must be a stable semantic version')
 }
 const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
-const PLUGIN_PACKAGES = [
-  '@e-mate/dsh-plugin-browser',
-  '@e-mate/dsh-plugin-browser-panel',
-  '@e-mate/dsh-plugin-computer-use',
-  '@e-mate/dsh-plugin-file-import',
-  '@e-mate/dsh-plugin-find-skill',
-  '@e-mate/dsh-plugin-mcp-manage',
-  '@e-mate/dsh-plugin-memory-evolve',
-  '@e-mate/dsh-plugin-office-skills',
-  '@e-mate/dsh-plugin-xin-assistant',
-] as const
+const sourceRoot = unpackedAsarPath(
+  fileURLToPath(new URL('../build/e-mate-profile/', import.meta.url)),
+)
+interface ComponentInventoryEntry {
+  readonly id: string
+  readonly root: string
+  readonly kind: 'profile' | 'platform-profile'
+  readonly desktop: 'hot-profile' | 'platform-profile' | 'blocked'
+  readonly cli: boolean
+}
+const componentInventory = JSON.parse(
+  readFileSync(join(sourceRoot, 'component-inventory.json'), 'utf8'),
+) as { schema_version?: unknown; components?: unknown }
+if (componentInventory.schema_version !== 1 || !Array.isArray(componentInventory.components)
+  || componentInventory.components.some(entry => entry === null || typeof entry !== 'object'
+    || typeof (entry as ComponentInventoryEntry).id !== 'string'
+    || !['hot-profile', 'platform-profile', 'blocked'].includes((entry as ComponentInventoryEntry).desktop))) {
+  throw new Error('e-Mate component inventory is invalid')
+}
+const desktopComponents = componentInventory.components as ComponentInventoryEntry[]
+const PLUGIN_PACKAGES = desktopComponents
+  .filter(component => component.desktop !== 'blocked' && component.id.startsWith('@e-mate/dsh-plugin-'))
+  .map(component => component.id)
+
+/** Components whose complete closure can currently move independently of the Base. */
+export const EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS = [
+  ...desktopComponents
+    .filter(component => component.desktop !== 'blocked')
+    .map(component => component.id),
+] as readonly string[]
+
+/** Verified content-addressed component roots selected for one Desktop boot. */
+export interface EmateProfileGeneration {
+  readonly id: string
+  readonly componentDirectories: ReadonlyMap<string, string>
+}
 
 const ECOSYSTEM_PLUGIN_PACKAGES = [
   { name: '@kelearns/dsh-navigation-bar', version: '0.2.1', entry: 'index.js', client: true, patchName: "'@kelearns/dsh-navigation-bar'" },
@@ -49,7 +73,6 @@ const ECOSYSTEM_PLUGIN_PACKAGES = [
   { name: 'dsh-at-file', version: '0.6.2', entry: 'lib/index.js', client: true, patchName: 'dsh-at-file' },
   { name: 'dsh-better-sidebar', version: '0.12.2', entry: 'lib/index.js', client: true, patchName: "'dsh-better-sidebar'" },
   { name: 'dsh-file-viewer', version: '0.1.0', entry: 'lib/index.js', client: true, patchName: "'dsh-file-viewer'" },
-  { name: 'dsh-search-mcp', version: '0.1.0', entry: 'lib/index.js', client: true, patchName: "'dsh-search-mcp'" },
   { name: 'dsh-turn-fold', version: '0.2.2', entry: 'index.js', client: true, patchName: 'dsh-turn-fold' },
   { name: 'dsh-visualize', version: '0.1.0', entry: 'lib/index.mjs', client: true, patchName: "'dsh-visualize'" },
 ] as const
@@ -59,13 +82,17 @@ const PROFILE_PLUGIN_PACKAGES = [
   ...ECOSYSTEM_PLUGIN_PACKAGES.map(plugin => plugin.name),
 ]
 const MANAGED_PROFILE_PACKAGES = new Set<string>(PROFILE_PLUGIN_PACKAGES)
-const RETIRED_PROFILE_PACKAGES = new Set(['@e-mate/dsh-plugin-im', '@yuxianglin/dsh-bridge-browser'])
+const RETIRED_PROFILE_PACKAGES = new Set([
+  '@e-mate/dsh-plugin-browser',
+  '@e-mate/dsh-plugin-browser-panel',
+  '@e-mate/dsh-plugin-im',
+  '@e-mate/dsh-plugin-subagent',
+  '@yuxianglin/dsh-bridge-browser',
+  'dsh-search-mcp',
+])
 const OWNED_PROFILE_PACKAGES = new Set([...MANAGED_PROFILE_PACKAGES, ...RETIRED_PROFILE_PACKAGES])
 const PROFILE_INSTALL_RECEIPT = '.e-mate-install.json'
-
-const sourceRoot = unpackedAsarPath(
-  fileURLToPath(new URL('../build/e-mate-profile/', import.meta.url)),
-)
+const COMPONENT_STORE_METADATA = new Set(['.e-mate-component.json', '.e-mate-component-manifest.json'])
 
 const DEFAULT_SETTINGS = 'ui-theme:\n  preference: dark\nagent-default-model:\n  provider: e-mate-enterprise\n  model: gpt-5.6-luna\n  reasoningEffort: max\n'
 const DEFAULT_MODEL_SETTINGS = 'agent-default-model:\n  provider: e-mate-enterprise\n  model: gpt-5.6-luna\n  reasoningEffort: max\n'
@@ -84,6 +111,41 @@ function atomicWrite(path: string, content: string | NodeJS.ArrayBufferView, mod
 
 function sha256(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+function sha256Bytes(bytes: string | NodeJS.ArrayBufferView): string {
+  return createHash('sha256').update(bytes).digest('hex')
+}
+
+function bundledComponentSource(id: string): string {
+  return id === '@e-mate/dsh-client-shell'
+    ? join(sourceRoot, 'plugins', 'emate-shell')
+    : join(sourceRoot, 'bundles', id.slice('@e-mate/dsh-plugin-'.length))
+}
+
+function componentSource(id: string, generation?: EmateProfileGeneration): string {
+  return generation?.componentDirectories.get(id) ?? bundledComponentSource(id)
+}
+
+function packageVersion(source: string, expectedName: string): string {
+  const manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')) as {
+    name?: unknown
+    version?: unknown
+  }
+  if (manifest.name !== expectedName || typeof manifest.version !== 'string'
+    || !/^\d+\.\d+\.\d+$/u.test(manifest.version)) {
+    throw new Error(`${expectedName} component package identity is invalid`)
+  }
+  return manifest.version
+}
+
+function validateGeneration(generation?: EmateProfileGeneration): void {
+  if (generation === undefined) return
+  if (!/^[0-9a-f]{64}$/u.test(generation.id)
+    || generation.componentDirectories.size !== EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS.length
+    || EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS.some(id => !generation.componentDirectories.has(id))) {
+    throw new Error('e-Mate Profile generation component set is invalid')
+  }
 }
 
 function packageEntry(name: string): string {
@@ -121,6 +183,7 @@ function installManagedPackage(
     }
     mkdirSync(target, { recursive: true })
     for (const entry of readdirSync(source, { withFileTypes: true })) {
+      if (COMPONENT_STORE_METADATA.has(entry.name)) continue
       const from = join(source, entry.name)
       const to = join(target, entry.name)
       if (statSync(from).isDirectory()) {
@@ -140,28 +203,82 @@ function installManagedPackage(
   }
 }
 
-function managedPackageCurrent(source: string, target: string): boolean {
+function managedPackageCurrent(
+  source: string,
+  target: string,
+  overrides: ReadonlyMap<string, string> = new Map(),
+): boolean {
   try {
-    return readdirSync(source, { withFileTypes: true }).every(entry => {
+    return readdirSync(source, { withFileTypes: true })
+      .filter(entry => !COMPONENT_STORE_METADATA.has(entry.name))
+      .every(entry => {
       const from = join(source, entry.name)
       const to = join(target, entry.name)
-      return statSync(from).isDirectory()
-        ? lstatSync(to).isSymbolicLink() && samePath(from, to)
-        : existsSync(to)
-    })
+      const sourceMetadata = statSync(from)
+      const targetMetadata = lstatSync(to)
+      return sourceMetadata.isDirectory()
+        ? targetMetadata.isSymbolicLink() && samePath(from, to)
+        : targetMetadata.isFile() && !targetMetadata.isSymbolicLink()
+          && (overrides.has(entry.name)
+            ? sha256Bytes(overrides.get(entry.name)!) === sha256(to)
+            : sourceMetadata.size === targetMetadata.size && sha256(from) === sha256(to))
+      })
   } catch {
     return false
   }
 }
 
-function installedProfileCurrent(profile: string, dshHome: string): boolean {
+interface ManagedBundleManifest {
+  readonly main: string
+  readonly dsh: { readonly bundle: { readonly patch: string }; readonly client?: { readonly platform?: string } }
+}
+
+function adaptedPluginPatch(source: string, name: string): ReadonlyMap<string, string> {
+  const manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')) as ManagedBundleManifest
+  if (manifest.dsh.client?.platform === 'web') return new Map()
+  const patchName = manifest.dsh.bundle.patch.replace(/^\.\//u, '')
+  let patch = readFileSync(join(source, patchName), 'utf8')
+  if (emptyPatch(patch)) return new Map()
+  const marker = `name: '${name}'`
+  if (patch.split(marker).length !== 2) throw new Error(`${name} bundle entry is not uniquely localizable`)
+  patch = patch.replace(marker, `name: './node_modules/${name}/${manifest.main}'`)
+  return new Map([[patchName, patch]])
+}
+
+function adaptedEcosystemPatch(
+  source: string,
+  expected: (typeof ECOSYSTEM_PLUGIN_PACKAGES)[number],
+): ReadonlyMap<string, string> {
+  const manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')) as {
+    dsh?: { bundle?: { patch?: string } }
+  }
+  const declaredPatch = manifest.dsh?.bundle?.patch
+  if (typeof declaredPatch !== 'string') throw new Error(`${expected.name} has no bundle patch`)
+  const patchName = declaredPatch.replace(/^\.\//u, '')
+  const marker = `name: ${expected.patchName}`
+  const patch = readFileSync(join(source, patchName), 'utf8')
+  if (patch.split(marker).length !== 2) {
+    throw new Error(`${expected.name} bundle entry is not uniquely localizable`)
+  }
+  return new Map([[
+    patchName,
+    patch.replace(marker, `name: './node_modules/${expected.name}/${expected.entry}'`),
+  ]])
+}
+
+function installedProfileCurrent(
+  profile: string,
+  dshHome: string,
+  generation?: EmateProfileGeneration,
+): boolean {
   try {
     const receipt = JSON.parse(readFileSync(join(profile, PROFILE_INSTALL_RECEIPT), 'utf8')) as Record<string, unknown>
     if (receipt.schema_version !== 1
       || receipt.version !== EMATE_DESKTOP_PROFILE_VERSION
       || receipt.harness_commit !== HARNESS_COMMIT
       || receipt.dsh_home !== resolve(dshHome)
-      || receipt.source_root !== resolve(sourceRoot)) return false
+      || receipt.source_root !== resolve(sourceRoot)
+      || receipt.profile_generation !== (generation?.id ?? 'bundled')) return false
 
     const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, unknown>
@@ -169,7 +286,7 @@ function installedProfileCurrent(profile: string, dshHome: string): boolean {
     }
     const dependencies = manifest.dependencies ?? {}
     for (const name of PLUGIN_PACKAGES) {
-      if (dependencies[name] !== EMATE_DESKTOP_PROFILE_VERSION) return false
+      if (dependencies[name] !== packageVersion(componentSource(name, generation), name)) return false
     }
     for (const plugin of ECOSYSTEM_PLUGIN_PACKAGES) {
       if (dependencies[plugin.name] !== plugin.version) return false
@@ -184,19 +301,23 @@ function installedProfileCurrent(profile: string, dshHome: string): boolean {
       || [...RETIRED_PROFILE_PACKAGES].some(name => bundles.includes(name))) return false
 
     if (!managedPackageCurrent(
-      join(sourceRoot, 'plugins', 'emate-shell'),
+      componentSource('@e-mate/dsh-client-shell', generation),
       join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar'),
     )) return false
     for (const name of PLUGIN_PACKAGES) {
+      const source = componentSource(name, generation)
       if (!managedPackageCurrent(
-        join(sourceRoot, 'bundles', name.slice('@e-mate/dsh-plugin-'.length)),
+        source,
         join(profile, 'node_modules', ...name.split('/')),
+        adaptedPluginPatch(source, name),
       )) return false
     }
     for (const plugin of ECOSYSTEM_PLUGIN_PACKAGES) {
+      const source = join(sourceRoot, 'ecosystem', plugin.name)
       if (!managedPackageCurrent(
-        join(sourceRoot, 'ecosystem', plugin.name),
+        source,
         join(profile, 'node_modules', plugin.name),
+        adaptedEcosystemPatch(source, plugin),
       )) return false
     }
 
@@ -207,7 +328,6 @@ function installedProfileCurrent(profile: string, dshHome: string): boolean {
       join(profile, 'plugins', 'health.js'),
       join(profile, 'plugins', 'model-policy.js'),
       join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar', 'package.json'),
-      join(dshHome, 'browser-extension', 'manifest.json'),
       ...PLUGIN_PACKAGES.map(name => join(profile, 'node_modules', ...name.split('/'), 'package.json')),
       ...ECOSYSTEM_PLUGIN_PACKAGES.map(plugin => join(profile, 'node_modules', plugin.name, 'package.json')),
     ].every(existsSync)
@@ -216,32 +336,13 @@ function installedProfileCurrent(profile: string, dshHome: string): boolean {
   }
 }
 
-function installBrowserExtension(dshHome: string): void {
-  const source = join(sourceRoot, 'browser-extension')
-  const target = join(dshHome, 'browser-extension')
-  const staged = join(dshHome, `.browser-extension.${randomUUID()}.tmp`)
-  const previous = join(dshHome, `.browser-extension.${randomUUID()}.previous`)
-  let movedPrevious = false
-  try {
-    cpSync(source, staged, { recursive: true, force: true })
-    if (existsSync(target)) {
-      renameSync(target, previous)
-      movedPrevious = true
-    }
-    renameSync(staged, target)
-    if (movedPrevious) rmSync(previous, { recursive: true, force: true })
-  } catch (cause) {
-    rmSync(staged, { recursive: true, force: true })
-    if (movedPrevious && !existsSync(target)) renameSync(previous, target)
-    throw cause
-  }
-}
-
 /** Install or repair only the e-Mate-owned profile files before Desktop boot. */
 export function installEmateDesktopProfile(
   dshHome: string,
   deferCleanup?: (path: string) => void,
+  generation?: EmateProfileGeneration,
 ): string {
+  validateGeneration(generation)
   const profile = join(dshHome, 'profiles', EMATE_PROFILE_NAME)
   const data = join(dshHome, 'e-mate')
   for (const directory of [
@@ -264,7 +365,7 @@ export function installEmateDesktopProfile(
       atomicWrite(settings, `${current}${current.endsWith('\n') ? '' : '\n'}${DEFAULT_MODEL_SETTINGS}`, 0o600)
     }
   }
-  if (installedProfileCurrent(profile, dshHome)) return profile
+  if (installedProfileCurrent(profile, dshHome, generation)) return profile
 
   rmSync(join(profile, PROFILE_INSTALL_RECEIPT), { force: true })
   cpSync(join(sourceRoot, 'plugins'), join(profile, 'plugins'), { recursive: true, force: true })
@@ -273,7 +374,7 @@ export function installEmateDesktopProfile(
     `${readFileSync(join(sourceRoot, 'cordis.patch.yml'), 'utf8').trimEnd()}\n\n- id: dsh-file-viewer\n  config:\n    allowAbsolutePaths: false\n`,
   )
   atomicWrite(join(profile, 'cordis.yml'), '[]\n')
-  installBrowserExtension(dshHome)
+  rmSync(join(dshHome, 'browser-extension'), { recursive: true, force: true })
   let previous: {
     dependencies?: Record<string, unknown>
     dsh?: { profile?: { bundles?: unknown[] } }
@@ -289,7 +390,7 @@ export function installEmateDesktopProfile(
     private: true,
     type: 'module',
     dependencies: Object.fromEntries([
-      ...PLUGIN_PACKAGES.map(name => [name, EMATE_DESKTOP_PROFILE_VERSION]),
+      ...PLUGIN_PACKAGES.map(name => [name, packageVersion(componentSource(name, generation), name)]),
       ...ECOSYSTEM_PLUGIN_PACKAGES.map(plugin => [plugin.name, plugin.version]),
       ...externalDependencies,
     ]),
@@ -300,37 +401,19 @@ export function installEmateDesktopProfile(
     },
   }, null, 2)}\n`)
 
-  const shellSource = join(sourceRoot, 'plugins', 'emate-shell')
+  const shellSource = componentSource('@e-mate/dsh-client-shell', generation)
   const shellTarget = join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar')
   mkdirSync(dirname(shellTarget), { recursive: true })
   installManagedPackage(shellSource, shellTarget, deferCleanup)
 
   for (const name of PLUGIN_PACKAGES) {
-    const slug = name.slice('@e-mate/dsh-plugin-'.length)
-    const source = join(sourceRoot, 'bundles', slug)
+    const source = componentSource(name, generation)
     const target = join(profile, 'node_modules', ...name.split('/'))
     mkdirSync(dirname(target), { recursive: true })
     installManagedPackage(source, target, deferCleanup)
-    const manifest = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8')) as {
-      main: string
-      dsh: { bundle: { patch: string }; client?: { platform?: string } }
+    for (const [patchName, patch] of adaptedPluginPatch(source, name)) {
+      atomicWrite(join(target, patchName), patch)
     }
-    if (manifest.dsh.client?.platform === 'web') continue
-    const patchPath = join(target, manifest.dsh.bundle.patch)
-    let patch = readFileSync(patchPath, 'utf8')
-    if (emptyPatch(patch)) continue
-    const marker = `name: '${name}'`
-    if (patch.split(marker).length !== 2) {
-      throw new Error(`${name} bundle entry is not uniquely localizable`)
-    }
-    patch = patch.replace(marker, `name: './node_modules/${name}/${manifest.main}'`)
-    if (name === '@e-mate/dsh-plugin-xin-assistant') {
-      if (patch.split("pythonPath: ''").length !== 2) {
-        throw new Error(`${name} Python runtime config is not uniquely localizable`)
-      }
-      patch = patch.replace("pythonPath: ''", `pythonPath: ${JSON.stringify(bundledPythonPath())}`)
-    }
-    atomicWrite(patchPath, patch)
   }
 
   for (const expected of ECOSYSTEM_PLUGIN_PACKAGES) {
@@ -362,16 +445,9 @@ export function installEmateDesktopProfile(
       throw new Error(`${expected.name} package contract does not match the pinned e-Mate desktop profile`)
     }
     installManagedPackage(source, target, deferCleanup)
-    const patchPath = join(target, manifest.dsh!.bundle!.patch!)
-    let patch = readFileSync(patchPath, 'utf8')
-    const marker = `name: ${expected.patchName}`
-    if (patch.split(marker).length !== 2) {
-      throw new Error(`${expected.name} bundle entry is not uniquely localizable`)
+    for (const [patchName, patch] of adaptedEcosystemPatch(source, expected)) {
+      atomicWrite(join(target, patchName), patch)
     }
-    atomicWrite(patchPath, patch.replace(
-      marker,
-      `name: './node_modules/${expected.name}/${expected.entry}'`,
-    ))
   }
 
   const tools = packageEntry('@deepseek-ai/dsh-tools')
@@ -429,6 +505,7 @@ export function installEmateDesktopProfile(
     harness_commit: HARNESS_COMMIT,
     dsh_home: resolve(dshHome),
     source_root: resolve(sourceRoot),
+    profile_generation: generation?.id ?? 'bundled',
   }, null, 2)}\n`, 0o600)
   return profile
 }

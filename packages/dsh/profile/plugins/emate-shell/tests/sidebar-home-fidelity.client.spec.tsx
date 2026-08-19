@@ -83,7 +83,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       {...sidebarUtilityProps}
     />)
 
-    expect(screen.getByText('2.0.10')).not.toBeNull()
+    expect(screen.getByText('2.0.11')).not.toBeNull()
     expect(screen.getByRole('button', { name: '新建任务' }).textContent).toContain('新任务')
     expect(screen.getByRole('button', { name: '新建任务' }).getAttribute('aria-current')).toBe('page')
     fireEvent.click(screen.getByRole('button', { name: '搜索会话' }))
@@ -97,6 +97,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(screen.getByRole('button', { name: '打开设置' })).not.toBeNull()
     expect(screen.getByRole('region', { name: '项目' }).textContent).toContain('季度报告')
     expect(screen.getByRole('region', { name: '项目' }).textContent).not.toContain('通用会话')
+    expect(screen.getByRole('region', { name: '项目' }).getAttribute('data-dsh-workspace-drop-target')).toBe('')
     expect(screen.getByRole('region', { name: '会话' }).textContent).toContain('通用任务')
     fireEvent.click(screen.getByRole('button', { name: '新建任务' }))
     expect(startSession).toHaveBeenCalledWith()

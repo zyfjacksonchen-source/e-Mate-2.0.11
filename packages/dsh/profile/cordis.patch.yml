@@ -24,7 +24,7 @@
 
 - id: ui-agent-preset
   name: '@deepseek-ai/dsh-client-ui-agent-preset'
-  disabled: true
+  disabled: false
 
 - id: ui-trajectory
   name: '@deepseek-ai/dsh-client-ui-trajectory'
@@ -90,9 +90,6 @@
     - id: emate-qr-generation
       name: ./plugins/qr-generation.js
       inject: [tools, jobs, attachments]
-    - id: emate-skill-hub-agent
-      name: ./plugins/skill-hub-agent.js
-      inject: [tools, jobs, emateIdentity, connection, webServer]
     - id: emate-image-generation
       name: ./plugins/image-generation.js
       inject: [tools, jobs, attachments, emateIdentity, emateModelPolicy, emateCapabilities]

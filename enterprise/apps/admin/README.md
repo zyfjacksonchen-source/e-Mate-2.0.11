@@ -63,8 +63,21 @@ requires a new login.
 Task-event credentials are random opaque Bearer secrets. The API returns a new
 secret once, persists only its SHA-256 digest, exposes redacted metadata on
 later reads, verifies the exact `task-events:write` scope, and supports
-revocation. Desktop main receives such a credential through its protected
-deployment path; Renderer must never receive it.
+revocation. They belong to the generic Analytics audit-ingest surface; the
+current Desktop does not receive them. Local e-Mate uploads metadata-only audit
+facts with its short-lived Model Gateway session, and Renderer receives neither
+credential.
+
+## Local-runtime boundary
+
+The administrator control plane owns identity, model publication and redacted
+audit only. Production does not register runtime-registry, Session Index,
+observability-policy or local-runtime status routes, and the console must not
+add a dependency on them. It cannot execute local commands, manipulate local
+sessions, tools, plugins, permissions or sandbox policy, or read prompts,
+answers, attachments, local paths or credential values. A control-plane outage
+may fail closed for a new enterprise model request, but it must not lock a
+previously accepted local Harness workspace.
 
 All user, credential, and model-route writes are tenant-scoped from the
 authenticated principal and append redacted audit records. New routes are

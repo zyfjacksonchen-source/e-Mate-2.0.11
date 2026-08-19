@@ -1,8 +1,9 @@
 /** e-Mate executable: minimal Electron bootstrap around the Host Cordis root. */
 
-import { app, shell } from 'electron'
+import { app, dialog, shell } from 'electron'
 import type { Context } from '@deepseek-ai/cordis'
-import { writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { existsSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,6 +11,7 @@ import {
   boot,
   installFailLoud,
   loadLayeredEnv,
+  resolveProfileDir,
   type FailLoudProcess,
 } from '@deepseek-ai/dsh-app-boot'
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
@@ -21,6 +23,11 @@ import {
 } from './desktop-runtime-environment.ts'
 import { ElectronDesktopRuntime } from './electron-runtime.ts'
 import { installProfilePackageResolver } from './module-resolution.ts'
+import {
+  desktopInstallRecoveryStatePath,
+  DesktopInstallRecoveryStore,
+  type DesktopInstallRecoveryTransaction,
+} from './install-recovery.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
 import {
   beginDesktopProfileStartup,
@@ -30,13 +37,25 @@ import {
 } from './profile-manager.ts'
 import {
   EMATE_DESKTOP_PROFILE_VERSION,
+  EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
   EMATE_PROFILE_NAME,
   installEmateDesktopProfile,
 } from './e-mate-profile.ts'
 import { cleanupObsoleteMacApplications } from './installation-cleanup.ts'
 import { readMacUpdateStartupResult, writeMacUpdateStartupAck } from './mac-update-installer.ts'
 import { prepareDesktopProfile, type SkippedOptionalEntry } from './profile.ts'
+import {
+  BUNDLED_PROFILE_GENERATION,
+  markProfileGenerationFailed,
+  markProfileGenerationHealthy,
+  resolveProfileGenerationStartup,
+  type ResolvedProfileGenerationStartup,
+} from './profile-generation.ts'
+import { loadProfileBaseContract, profileReleaseTarget } from './profile-release.ts'
+import type { RendererBootReport } from './renderer-boot-contract.ts'
+import { resolveDesktopShellEnvironment } from './shell-environment.ts'
 import type { DesktopPnpmBootstrap } from './pnpm.ts'
+import { bundledPythonPath } from './vision-toolkit.ts'
 import {
   createDesktopExitCoordinator,
   createDesktopShutdown,
@@ -119,11 +138,23 @@ async function start(): Promise<void> {
   let current: Context | undefined
   let profileStartup: DesktopProfileStartup | undefined
   let profileStatePath: string | undefined
+  let profileGenerationStartup: ResolvedProfileGenerationStartup | undefined
+  let profileGenerationStatePath: string | undefined
+  let profileGenerationCommitted = false
+  const processGenerationId = randomUUID()
+  let installRecovery: DesktopInstallRecoveryStore | undefined
+  let verifyingInstall: DesktopInstallRecoveryTransaction | undefined
+  let rolledBackInstall: DesktopInstallRecoveryTransaction | undefined
   let shutdown: DesktopShutdown | undefined
   let removeShutdownRequests: (() => void) | undefined
   let disposeDshRuntime: (() => void) | undefined
   let disposePnpmRuntime: (() => void) | undefined
   let runtime!: ElectronDesktopRuntime
+  let rendererBootSettled = false
+  let resolveRendererBoot!: (report: RendererBootReport) => void
+  const rendererBoot = new Promise<RendererBootReport>((resolve) => {
+    resolveRendererBoot = resolve
+  })
   const nativeExit = createDesktopExitCoordinator(
     {
       prepareToQuit: () => { runtime.prepareToQuit() },
@@ -142,43 +173,9 @@ async function start(): Promise<void> {
     nativeExit.requestRelaunch()
     await shutdown.request(0)
   }, (report) => {
-    if (profileStartup === undefined || profileStatePath === undefined) {
-      throw new Error('@e-mate/desktop: renderer boot health arrived before profile startup')
-    }
-    if (report.status === 'healthy') {
-      markDesktopProfileHealthy(profileStatePath, profileStartup.profileName)
-      try {
-        const installed = writeMacUpdateStartupAck(app.getPath('userData'), app.getVersion())
-        if (installed !== undefined) {
-          runtime.updates.notify({
-            title: 'e-Mate Update Complete',
-            body: `e-Mate ${installed.targetVersion} was installed and reopened successfully.`,
-          })
-        } else {
-          void readMacUpdateStartupResult(app.getPath('userData'), app.getVersion()).then((result) => {
-            if (result?.status === 'rolled-back') {
-              runtime.updates.notify({
-                title: 'e-Mate Update Rolled Back',
-                body: `The update to ${result.targetVersion} failed; e-Mate ${result.currentVersion} was restored.`,
-              })
-            } else if (result?.status === 'failed') {
-              runtime.updates.notify({
-                title: 'e-Mate Update Failed',
-                body: `e-Mate could not finish the update to ${result.targetVersion}.`,
-              })
-            }
-          }).catch((cause: unknown) => {
-            process.stderr.write(`${BIN_NAME}: failed to read macOS update result: ${cause instanceof Error ? cause.message : String(cause)}\n`)
-          })
-        }
-      } catch (cause) {
-        process.stderr.write(
-          `${BIN_NAME}: failed to acknowledge macOS update startup: ${cause instanceof Error ? cause.message : String(cause)}\n`,
-        )
-      }
-    } else {
-      markDesktopProfileFailed(profileStatePath, profileStartup.profileName)
-    }
+    if (rendererBootSettled) return
+    rendererBootSettled = true
+    resolveRendererBoot(report)
   })
   const finalExit = (code: number): void => { nativeExit.finish(code) }
   shutdown = createDesktopShutdown(
@@ -207,6 +204,13 @@ async function start(): Promise<void> {
   }
   if (process.platform === 'win32') app.setAppUserModelId('net.ecoremedia.e-mate')
   if (app.isPackaged && process.cwd() === '/') process.chdir(app.getPath('home'))
+  const shellEnvironmentResolution = await resolveDesktopShellEnvironment({
+    environment: process.env,
+    home: app.getPath('home'),
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+  })
+  for (const [name, value] of Object.entries(shellEnvironmentResolution.updates)) process.env[name] = value
   const homeDir = resolveDshHome()
   const windowsVolumeConcerns = diagnoseWindowsVolumes(process.platform, [
     { label: 'application install', path: process.execPath },
@@ -235,6 +239,11 @@ async function start(): Promise<void> {
     if (app.isPackaged && currentVersion !== EMATE_DESKTOP_PROFILE_VERSION) {
       throw new Error(`${BIN_NAME}: packaged application version ${currentVersion} does not match profile version ${EMATE_DESKTOP_PROFILE_VERSION}`)
     }
+    const managedPythonPath = bundledPythonPath()
+    if (!existsSync(managedPythonPath)) {
+      throw new Error(`${BIN_NAME}: managed Python runtime is missing: ${managedPythonPath}`)
+    }
+    process.env.EMATE_MANAGED_PYTHON_PATH = managedPythonPath
     const environment = loadLayeredEnv(BIN_NAME, process.cwd())
     const electronVersion = process.versions.electron
     if (electronVersion === undefined) {
@@ -252,13 +261,95 @@ async function start(): Promise<void> {
     const releasePnpmRuntime = (): void => { pnpmRuntime.dispose() }
     disposePnpmRuntime = releasePnpmRuntime
     const selectionStatePath = join(app.getPath('userData'), 'profile-selection', 'state.json')
+    const generationStatePath = join(app.getPath('userData'), 'profile-generations', 'state.json')
+    const generationRoot = join(app.getPath('userData'), 'profile-generations', 'store')
+    const baseContract = loadProfileBaseContract(fileURLToPath(new URL('../base-contract.json', import.meta.url)))
+    const componentTarget = profileReleaseTarget()
+    profileGenerationStatePath = generationStatePath
+    profileGenerationStartup = await resolveProfileGenerationStartup({
+      state_path: generationStatePath,
+      root: generationRoot,
+      base: baseContract,
+      expected_component_ids: EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
+      target: componentTarget,
+    })
+    runtime.configureProfileUpdates({
+      base: baseContract,
+      target: componentTarget,
+      expectedComponentIds: EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
+      generationRoot,
+      generationStatePath,
+      activeGenerationId: profileGenerationStartup.generation_id,
+      ...(profileGenerationStartup.generation === undefined
+        ? {}
+        : { activeRelease: profileGenerationStartup.generation.release }),
+    })
     const deferredProfileCleanup: string[] = []
-    installEmateDesktopProfile(homeDir, path => { deferredProfileCleanup.push(path) })
+    installEmateDesktopProfile(
+      homeDir,
+      path => { deferredProfileCleanup.push(path) },
+      profileGenerationStartup.generation === undefined ? undefined : {
+        id: profileGenerationStartup.generation.id,
+        componentDirectories: profileGenerationStartup.generation.component_directories,
+      },
+    )
     profileStatePath = selectionStatePath
     profileStartup = beginDesktopProfileStartup(selectionStatePath, homeDir)
     const activeProfileName = profileStartup.profileName
     if (activeProfileName !== EMATE_PROFILE_NAME) {
       throw new Error(`${BIN_NAME}: desktop profile must be ${EMATE_PROFILE_NAME}`)
+    }
+    const activeProfileDir = resolveProfileDir(activeProfileName, homeDir)
+    const installRecoveryStatePath = desktopInstallRecoveryStatePath(app.getPath('userData'))
+    installRecovery = new DesktopInstallRecoveryStore({
+      statePath: installRecoveryStatePath,
+      profileName: activeProfileName,
+      profileDir: activeProfileDir,
+      generationId: processGenerationId,
+    })
+    const recoveryClaim = await installRecovery.claim()
+    if (recoveryClaim.action === 'verify') {
+      verifyingInstall = recoveryClaim.transaction
+    } else if (recoveryClaim.action === 'prompt') {
+      const choice = await dialog.showMessageBox({
+        type: 'warning',
+        title: '插件安装恢复',
+        message: `插件 ${recoveryClaim.transaction.packageName} 的上次安装没有完成。`,
+        detail: '可恢复到安装前状态，或只重试一次当前插件。未知文件变化不会被覆盖。',
+        buttons: ['恢复安装前状态', '重试一次', '退出 e-Mate'],
+        defaultId: 0,
+        cancelId: 2,
+        noLink: true,
+      })
+      if (choice.response === 1) {
+        await installRecovery.requestRetry(recoveryClaim.transaction.transactionId)
+        nativeExit.requestRelaunch()
+        await shutdown.request(0)
+        return
+      }
+      if (choice.response !== 0) {
+        await shutdown.request(1)
+        return
+      }
+      const restored = await installRecovery.restore(
+        recoveryClaim.transaction.transactionId,
+        recoveryClaim.reason,
+      )
+      if (restored.status === 'manual-recovery-required') {
+        throw new Error(`${BIN_NAME}: plugin install recovery requires manual repair for ${restored.mismatchedFiles.join(', ')}`)
+      }
+      rolledBackInstall = restored.transaction
+    } else if (recoveryClaim.action === 'terminal') {
+      if (recoveryClaim.transaction.phase === 'manual-recovery-required') {
+        throw new Error(`${BIN_NAME}: plugin install recovery requires manual repair`)
+      }
+      if (recoveryClaim.transaction.phase === 'verified') {
+        await installRecovery.clear(recoveryClaim.transaction.transactionId)
+      } else if (recoveryClaim.transaction.phase === 'rolled-back') {
+        rolledBackInstall = recoveryClaim.transaction
+      }
+    } else if (recoveryClaim.action === 'deferred') {
+      throw new Error(`${BIN_NAME}: plugin install recovery is deferred by ${recoveryClaim.reason}`)
     }
     const prepared = prepareDesktopProfile(
       process.env.DSH_TELEMETRY_DISABLED,
@@ -291,8 +382,13 @@ async function start(): Promise<void> {
       nodeShimPath: pnpmRuntime.nodeShimPath,
       clearEnvironmentPath: pnpmRuntime.clearEnvironmentPath,
       dshBootstrapPath,
+      installRecoveryStatePath,
+      generationId: processGenerationId,
     }
-    const releasePackageResolver = installProfilePackageResolver(prepared.bareModuleBaseUrl)
+    const releasePackageResolver = installProfilePackageResolver(
+      prepared.bareModuleBaseUrl,
+      profileGenerationStartup.generation?.component_directories.values(),
+    )
     const ctx = await boot(
       BIN_NAME,
       prepared.rootConfig,
@@ -332,14 +428,73 @@ async function start(): Promise<void> {
       profileDir: prepared.profile.dir,
       homeDir: prepared.homeDir,
     })
-    await runtime.mountScheduled(() => {
-      if (process.env.EMATE_RELEASE_HEALTH_PROBE !== '1') return
+    runtime.beginRendererBootMonitoring()
+    await runtime.mountScheduled()
+    const rendererReport = await rendererBoot
+    if (rendererReport.status === 'failed') {
+      throw new Error(rendererReport.error ?? `Renderer boot failed for ${String(rendererReport.plugins.length)} plugin(s)`)
+    }
+    if (verifyingInstall !== undefined && installRecovery !== undefined) {
+      await installRecovery.markHealthy(verifyingInstall.transactionId)
+      await installRecovery.clear(verifyingInstall.transactionId)
+      verifyingInstall = undefined
+    }
+    if (rolledBackInstall !== undefined && installRecovery !== undefined) {
+      if (rolledBackInstall.rollbackNotifiedAt === undefined) {
+        try {
+          runtime.updates.notify({
+            title: '插件安装已回滚',
+            body: `${rolledBackInstall.packageName} 未能安全启动，e-Mate 已恢复安装前状态。`,
+          })
+          rolledBackInstall = await installRecovery.markRollbackNotified(rolledBackInstall.transactionId)
+        } catch (noticeCause) {
+          process.stderr.write(`${BIN_NAME}: failed to report plugin install rollback: ${noticeCause instanceof Error ? noticeCause.message : String(noticeCause)}\n`)
+        }
+      }
+      if (rolledBackInstall.rollbackNotifiedAt !== undefined) {
+        await installRecovery.clear(rolledBackInstall.transactionId)
+        rolledBackInstall = undefined
+      }
+    }
+    markDesktopProfileHealthy(selectionStatePath, activeProfileName)
+    markProfileGenerationHealthy(generationStatePath, profileGenerationStartup.generation_id)
+    profileGenerationCommitted = true
+    try {
+      const installed = writeMacUpdateStartupAck(app.getPath('userData'), app.getVersion())
+      if (installed !== undefined) {
+        runtime.updates.notify({
+          title: 'e-Mate Update Complete',
+          body: `e-Mate ${installed.targetVersion} was installed and reopened successfully.`,
+        })
+      } else {
+        void readMacUpdateStartupResult(app.getPath('userData'), app.getVersion()).then((result) => {
+          if (result?.status === 'rolled-back') {
+            runtime.updates.notify({
+              title: 'e-Mate Update Rolled Back',
+              body: `The update to ${result.targetVersion} failed; e-Mate ${result.currentVersion} was restored.`,
+            })
+          } else if (result?.status === 'failed') {
+            runtime.updates.notify({
+              title: 'e-Mate Update Failed',
+              body: `e-Mate could not finish the update to ${result.targetVersion}.`,
+            })
+          }
+        }).catch((cause: unknown) => {
+          process.stderr.write(`${BIN_NAME}: failed to read macOS update result: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+        })
+      }
+    } catch (cause) {
+      process.stderr.write(
+        `${BIN_NAME}: failed to acknowledge macOS update startup: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+      )
+    }
+    if (process.env.EMATE_RELEASE_HEALTH_PROBE === '1') {
       writeFileSync(join(app.getPath('userData'), '.release-health-ack'), app.getVersion(), {
         encoding: 'utf8',
         flag: 'wx',
         mode: 0o600,
       })
-    })
+    }
     await Promise.all(deferredProfileCleanup.map(async (path) => {
       await rm(path, { recursive: true, force: true })
     })).catch((cause: unknown) => {
@@ -368,9 +523,35 @@ async function start(): Promise<void> {
         `Reopened last-known-good profile ${activeProfileName}.`,
       )
     }
+    if (profileGenerationStartup.rolled_back_from.length > 0) {
+      notifyProfileRecovery(runtime, 'Reopened the last-known-good component generation.')
+    }
   } catch (cause) {
+    runtime.stopRendererBootMonitoring()
+    if (verifyingInstall !== undefined && installRecovery !== undefined) {
+      try {
+        await installRecovery.recordFailure(
+          verifyingInstall.transactionId,
+          runtime.rendererBootFailureReason ?? 'startup-failed',
+        )
+      } catch (recoveryCause) {
+        process.stderr.write(`${BIN_NAME}: failed to persist plugin install recovery: ${recoveryCause instanceof Error ? recoveryCause.message : String(recoveryCause)}\n`)
+      }
+    }
     process.stderr.write(`${BIN_NAME}: ${cause instanceof Error ? cause.stack ?? cause.message : String(cause)}\n`)
     let exitCode = 1
+    if (!profileGenerationCommitted && profileGenerationStartup !== undefined
+      && profileGenerationStatePath !== undefined
+      && profileGenerationStartup.generation_id !== BUNDLED_PROFILE_GENERATION) {
+      try {
+        markProfileGenerationFailed(profileGenerationStatePath, profileGenerationStartup.generation_id)
+        nativeExit.requestRelaunch()
+        exitCode = 0
+        notifyProfileRecovery(runtime, 'Reopening the last-known-good component generation.')
+      } catch (stateCause) {
+        process.stderr.write(`${BIN_NAME}: failed to roll back Profile generation state: ${stateCause instanceof Error ? stateCause.message : String(stateCause)}\n`)
+      }
+    }
     if (profileStartup !== undefined && profileStatePath !== undefined) {
       const retryLastKnownGood = profileStartup.profileName !== profileStartup.state.lastKnownGood
       try {

@@ -5,22 +5,11 @@ import { basename, join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
 const destination = join(root, 'packages', 'dsh', 'profile', 'bundles')
-const expected = [
-  '@e-mate/dsh-plugin-better-sidebar',
-  '@e-mate/dsh-plugin-browser',
-  '@e-mate/dsh-plugin-browser-panel',
-  '@e-mate/dsh-plugin-computer-use',
-  '@e-mate/dsh-plugin-file-import',
-  '@e-mate/dsh-plugin-find-skill',
-  '@e-mate/dsh-plugin-genui',
-  '@e-mate/dsh-plugin-mcp-manage',
-  '@e-mate/dsh-plugin-memory-evolve',
-  '@e-mate/dsh-plugin-office-skills',
-  '@e-mate/dsh-plugin-search-mcp',
-  '@e-mate/dsh-plugin-subagent',
-  '@e-mate/dsh-plugin-vision-toolkit',
-  '@e-mate/dsh-plugin-xin-assistant',
-]
+const inventory = JSON.parse(await readFile(join(root, 'packages', 'dsh', 'profile', 'component-inventory.json'), 'utf8'))
+if (inventory.schema_version !== 1 || !Array.isArray(inventory.components)) {
+  throw new Error('component inventory is invalid')
+}
+const expected = inventory.components.filter(component => component.cli === true)
 
 async function copyEntry(source, target) {
   const metadata = await stat(source)
@@ -32,11 +21,12 @@ await rm(destination, { recursive: true, force: true })
 await mkdir(destination, { recursive: true })
 
 const receipts = []
-for (const name of expected) {
+for (const component of expected) {
+  const { id: name } = component
   const slug = name.slice('@e-mate/dsh-plugin-'.length)
-  const source = join(root, 'packages', `dsh-plugin-${slug}`)
+  const source = join(root, component.root)
   const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
-  if (manifest.name !== name || manifest.version !== '2.0.10' || manifest.license !== 'MIT') {
+  if (manifest.name !== name || manifest.version !== '2.0.11' || manifest.license !== 'MIT') {
     throw new Error(`${source} package identity is invalid`)
   }
   if (typeof manifest.main !== 'string') throw new Error(`${name} has no main entry`)
@@ -58,7 +48,7 @@ for (const name of expected) {
 await writeFile(join(destination, 'registry.json'), `${JSON.stringify({
   schema_version: 1,
   product: 'e-Mate',
-  version: '2.0.10',
+  version: '2.0.11',
   harness_version: '0.1.0-rc.7',
   harness_commit: 'df78045a127e32cb5b942defba52c539590d1596',
   packages: receipts,
