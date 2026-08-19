@@ -36,6 +36,8 @@ describe('macOS release artifact verification', () => {
     const source = readFileSync(new URL('../scripts/verify-mac-release.ts', import.meta.url), 'utf8')
     expect(source).toContain('DSH_HOME: join(root, `dsh-${arch}`)')
     expect(source).not.toContain("DSH_HOME: join(root, 'dsh')")
+    expect(source).toContain("run('/usr/bin/ditto', [sourceApp, installedApp])")
+    expect(source).toContain('launchArchitecture(installedExecutable, architecture, root)')
   })
 
   it('mounts one DMG and verifies signature, Gatekeeper, and the stapled ticket', () => {

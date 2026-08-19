@@ -71,7 +71,12 @@ function launchArchitecture(executable: string, arch: 'arm64' | 'x86_64', root: 
 function launch(executable: string, architectures: readonly ('arm64' | 'x86_64')[]): void {
   const root = mkdtempSync(join(tmpdir(), 'e-mate-release-'))
   try {
-    for (const architecture of architectures) launchArchitecture(executable, architecture, root)
+    const sourceApp = dirname(dirname(dirname(executable)))
+    const installedApp = join(root, 'Applications', basename(sourceApp))
+    run('/usr/bin/ditto', [sourceApp, installedApp])
+    run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', installedApp])
+    const installedExecutable = join(installedApp, 'Contents', 'MacOS', basename(executable))
+    for (const architecture of architectures) launchArchitecture(installedExecutable, architecture, root)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

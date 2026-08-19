@@ -34,7 +34,16 @@ describe('desktop release manifest', () => {
     const output = join(root, 'release', 'latest.json')
     const commit = 'a'.repeat(40)
 
-    await createDesktopReleaseManifest({ macArtifact, windowsArtifact, sourceCommit: commit, output })
+    await createDesktopReleaseManifest({
+      macArtifact,
+      windowsArtifact,
+      sourceCommit: commit,
+      macSourceCommit: 'b'.repeat(40),
+      windowsSourceCommit: 'c'.repeat(40),
+      macBuildRunId: '123',
+      windowsBuildRunId: '456',
+      output,
+    })
 
     const manifest = JSON.parse(await readFile(output, 'utf8'))
     expect(manifest).toEqual({
@@ -46,11 +55,15 @@ describe('desktop release manifest', () => {
           url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.10/${commit}/e-Mate-2.0.10-mac-universal.dmg`,
           bytes: macBytes.byteLength,
           sha256: createHash('sha256').update(macBytes).digest('hex'),
+          build_source_commit: 'b'.repeat(40),
+          build_run_id: '123',
         },
         win32: {
           url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.10/${commit}/e-Mate-2.0.10-win-x64-Setup.exe`,
           bytes: windowsBytes.byteLength,
           sha256: createHash('sha256').update(windowsBytes).digest('hex'),
+          build_source_commit: 'c'.repeat(40),
+          build_run_id: '456',
         },
       },
     })
@@ -68,12 +81,20 @@ describe('desktop release manifest', () => {
       macArtifact,
       windowsArtifact,
       sourceCommit: 'not-a-commit',
+      macSourceCommit: 'a'.repeat(40),
+      windowsSourceCommit: 'a'.repeat(40),
+      macBuildRunId: '1',
+      windowsBuildRunId: '1',
       output: join(root, 'latest.json'),
     })).rejects.toThrow('source commit')
     await expect(createDesktopReleaseManifest({
       macArtifact,
       windowsArtifact,
       sourceCommit: 'a'.repeat(40),
+      macSourceCommit: 'a'.repeat(40),
+      windowsSourceCommit: 'a'.repeat(40),
+      macBuildRunId: '1',
+      windowsBuildRunId: '1',
       output: join(root, 'latest.json'),
     })).rejects.toThrow('unexpected desktop artifact name')
   })

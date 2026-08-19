@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: ''
+      reuse_run_id:
+        description: Prior build run whose successful profile and Windows artifacts may be reused by a macOS-only retry.
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -26,8 +31,33 @@ env:
   DSH_TELEMETRY_DISABLED: '1'
 
 jobs:
+  reuse:
+    if: ${{ !inputs.publish && inputs.reuse_run_id != '' }}
+    name: Validate reusable profile and Windows artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      source_sha: ${{ steps.accepted.outputs.source_sha }}
+    steps:
+      - name: Accept only the prior run's successful unaffected jobs
+        id: accepted
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$REUSE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REUSE_RUN_ID")"
+          source_sha="$(jq -er '.head_sha | select(test("^[0-9a-f]{40}$"))' <<<"$run_json")"
+          test "$(jq -er .event <<<"$run_json")" = workflow_dispatch
+          test "$(jq -er .path <<<"$run_json")" = .github/workflows/desktop-release.yml
+          jobs_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REUSE_RUN_ID/jobs?per_page=100")"
+          jq -e '.jobs | any(.name == "Build and verify the e-Mate profile" and .conclusion == "success")' <<<"$jobs_json" >/dev/null
+          jq -e '.jobs | any(.name == "Build unsigned Windows x64 installer" and .conclusion == "success")' <<<"$jobs_json" >/dev/null
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+
   profile:
-    if: ${{ !inputs.publish }}
+    if: ${{ !inputs.publish && inputs.reuse_run_id == '' }}
     name: Build and verify the e-Mate profile
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -62,7 +92,7 @@ jobs:
           retention-days: 1
 
   windows:
-    if: ${{ !inputs.publish }}
+    if: ${{ !inputs.publish && inputs.reuse_run_id == '' }}
     name: Build unsigned Windows x64 installer
     needs: profile
     runs-on: windows-2025
@@ -107,9 +137,9 @@ jobs:
           retention-days: 7
 
   macos:
-    if: ${{ !inputs.publish }}
+    if: ${{ always() && !inputs.publish && ((inputs.reuse_run_id == '' && needs.profile.result == 'success') || (inputs.reuse_run_id != '' && needs.reuse.result == 'success')) }}
     name: Build unsigned macOS universal disk image
-    needs: profile
+    needs: [profile, reuse]
     runs-on: macos-15
     timeout-minutes: 90
     steps:
@@ -123,8 +153,10 @@ jobs:
       - run: corepack enable
       - uses: actions/download-artifact@v4
         with:
-          name: e-mate-desktop-profile-${{ github.sha }}
+          name: ${{ inputs.reuse_run_id != '' && format('e-mate-desktop-profile-{0}', needs.reuse.outputs.source_sha) || format('e-mate-desktop-profile-{0}', github.sha) }}
           path: packages
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}
       - name: Resolve Yarn cache folder
         id: yarn-cache
         run: echo "dir=$(cd desktop && yarn config get cacheFolder)" >> "$GITHUB_OUTPUT"
@@ -150,9 +182,9 @@ jobs:
           retention-days: 7
 
   manifest:
-    if: ${{ !inputs.publish }}
+    if: ${{ always() && !inputs.publish && needs.macos.result == 'success' && ((inputs.reuse_run_id == '' && needs.windows.result == 'success') || (inputs.reuse_run_id != '' && needs.reuse.result == 'success')) }}
     name: Bind native artifacts to the release manifest
-    needs: [windows, macos]
+    needs: [reuse, windows, macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -164,8 +196,10 @@ jobs:
           node-version: '22.23.2'
       - uses: actions/download-artifact@v4
         with:
-          name: e-mate-desktop-windows-${{ github.sha }}
+          name: ${{ inputs.reuse_run_id != '' && format('e-mate-desktop-windows-{0}', needs.reuse.outputs.source_sha) || format('e-mate-desktop-windows-{0}', github.sha) }}
           path: dist/desktop
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}
       - uses: actions/download-artifact@v4
         with:
           name: e-mate-desktop-macos-${{ github.sha }}
@@ -181,6 +215,10 @@ jobs:
           --mac dist/desktop/e-Mate-${{ steps.version.outputs.value }}-mac-universal.dmg
           --win dist/desktop/e-Mate-${{ steps.version.outputs.value }}-win-x64-Setup.exe
           --commit "$GITHUB_SHA"
+          --mac-commit "$GITHUB_SHA"
+          --win-commit "${{ inputs.reuse_run_id != '' && needs.reuse.outputs.source_sha || github.sha }}"
+          --mac-run "$GITHUB_RUN_ID"
+          --win-run "${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}"
           --out dist/desktop/latest.json
       - uses: actions/upload-artifact@v4
         with:
@@ -222,6 +260,7 @@ jobs:
           AWS_EC2_METADATA_DISABLED: 'true'
           ECOREX_R2_ACCOUNT_ID: ${{ secrets.ECOREX_R2_ACCOUNT_ID }}
           EMATE_ACCEPTED_SHA: ${{ vars.EMATE_S12_ACCEPTED_SHA }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
         run: |
           set -euo pipefail
           test "$GITHUB_SHA" = "$EMATE_ACCEPTED_SHA"
@@ -263,6 +302,12 @@ jobs:
             sha="$(sha256sum "$path" | cut -d' ' -f1)"
             test "$(jq -er --arg platform "$platform" '.artifacts[$platform].bytes' dist/desktop/latest.json)" = "$bytes"
             test "$(jq -er --arg platform "$platform" '.artifacts[$platform].sha256' dist/desktop/latest.json)" = "$sha"
+            [[ "$(jq -er --arg platform "$platform" '.artifacts[$platform].build_source_commit' dist/desktop/latest.json)" =~ ^[0-9a-f]{40}$ ]]
+            [[ "$(jq -er --arg platform "$platform" '.artifacts[$platform].build_run_id' dist/desktop/latest.json)" =~ ^[1-9][0-9]*$ ]]
+            if [[ "$platform" = darwin ]]; then
+              test "$(jq -er '.artifacts.darwin.build_source_commit' dist/desktop/latest.json)" = "$GITHUB_SHA"
+              test "$(jq -er '.artifacts.darwin.build_run_id' dist/desktop/latest.json)" = "$RELEASE_RUN_ID"
+            fi
             key="$prefix/$file"
             if aws --endpoint-url "$endpoint" s3api head-object --bucket "$bucket" --key "$key" > existing.json 2>/dev/null; then
               test "$(jq -r .ContentLength existing.json)" = "$bytes"

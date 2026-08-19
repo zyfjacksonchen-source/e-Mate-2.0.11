@@ -21,6 +21,12 @@ Read `docs/target-contract.md` and the latest entry in `docs/development-log.md`
 - Every release candidate must use the exact immutable macOS and Windows artifacts intended for publication. On release hardware, run one clean installed launch and three sequential warm launches per platform. Clean launch must be at most 10 seconds; warm-launch p75 must be at most 5 seconds and no warm launch may exceed 8 seconds. Record raw timings in `docs/development-log.md`; any regression or missing platform evidence blocks release.
 - The release gate must also prove macOS arm64 and x86_64/Rosetta renderer health and Windows x64 renderer health. Architecture health may complete after the interactive window, but it cannot substitute for the startup budgets above.
 
+## Incremental release contract
+
+- Determine the affected release stages from the actual diff before dispatching CI. Reuse an already accepted immutable artifact when its product inputs are unchanged; a test, documentation, release-verifier, or single-platform change must not trigger unrelated platform or carrier rebuilds.
+- Rerun only the failed or affected stage. A full cross-platform rebuild is allowed only when shared runtime code, the managed profile, bundled dependencies, lockfiles, packaging inputs, or artifact provenance changed, or when existing evidence cannot prove the artifact is unchanged and accepted.
+- Reused artifacts must keep their original commit, workflow run, byte count, and SHA-256 provenance. Release workflows must verify that provenance before composition and must never relabel old bytes as a newer commit. Feed or `latest.json` activation remains the final atomic step after every selected artifact passes its own gate.
+
 ## Work loop
 
 1. Name the active slice in the development log.

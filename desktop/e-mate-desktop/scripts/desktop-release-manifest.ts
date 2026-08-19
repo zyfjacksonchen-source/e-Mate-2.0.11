@@ -21,6 +21,10 @@ export interface DesktopReleaseManifestOptions {
   readonly macArtifact: string
   readonly windowsArtifact: string
   readonly sourceCommit: string
+  readonly macSourceCommit: string
+  readonly windowsSourceCommit: string
+  readonly macBuildRunId: string
+  readonly windowsBuildRunId: string
   readonly output: string
 }
 
@@ -28,15 +32,23 @@ interface ArtifactRecord {
   readonly url: string
   readonly bytes: number
   readonly sha256: string
+  readonly build_source_commit: string
+  readonly build_run_id: string
 }
 
 /** Create one deterministic latest.json after both native packages have passed their platform gates. */
 export async function createDesktopReleaseManifest(options: DesktopReleaseManifestOptions): Promise<void> {
   if (!SOURCE_COMMIT.test(options.sourceCommit)) throw new Error('desktop release source commit is invalid')
+  for (const commit of [options.macSourceCommit, options.windowsSourceCommit]) {
+    if (!SOURCE_COMMIT.test(commit)) throw new Error('desktop artifact source commit is invalid')
+  }
+  for (const runId of [options.macBuildRunId, options.windowsBuildRunId]) {
+    if (!/^[1-9][0-9]*$/u.test(runId)) throw new Error('desktop artifact build run ID is invalid')
+  }
   const prefix = `${R2_ORIGIN}/desktop/releases/v${DESKTOP_RELEASE_VERSION}/${options.sourceCommit}`
   const [darwin, win32] = await Promise.all([
-    artifact(options.macArtifact, `e-Mate-${DESKTOP_RELEASE_VERSION}-mac-universal.dmg`, prefix),
-    artifact(options.windowsArtifact, `e-Mate-${DESKTOP_RELEASE_VERSION}-win-x64-Setup.exe`, prefix),
+    artifact(options.macArtifact, `e-Mate-${DESKTOP_RELEASE_VERSION}-mac-universal.dmg`, prefix, options.macSourceCommit, options.macBuildRunId),
+    artifact(options.windowsArtifact, `e-Mate-${DESKTOP_RELEASE_VERSION}-win-x64-Setup.exe`, prefix, options.windowsSourceCommit, options.windowsBuildRunId),
   ])
   const output = resolve(options.output)
   await mkdir(dirname(output), { recursive: true })
@@ -50,7 +62,13 @@ export async function createDesktopReleaseManifest(options: DesktopReleaseManife
   await rename(temporary, output)
 }
 
-async function artifact(path: string, expectedName: string, prefix: string): Promise<ArtifactRecord> {
+async function artifact(
+  path: string,
+  expectedName: string,
+  prefix: string,
+  sourceCommit: string,
+  buildRunId: string,
+): Promise<ArtifactRecord> {
   const resolved = resolve(path)
   if (basename(resolved) !== expectedName) throw new Error(`unexpected desktop artifact name: ${basename(resolved)}`)
   const file = await stat(resolved)
@@ -59,7 +77,13 @@ async function artifact(path: string, expectedName: string, prefix: string): Pro
   }
   const digest = createHash('sha256')
   for await (const chunk of createReadStream(resolved)) digest.update(chunk)
-  return { url: `${prefix}/${expectedName}`, bytes: file.size, sha256: digest.digest('hex') }
+  return {
+    url: `${prefix}/${expectedName}`,
+    bytes: file.size,
+    sha256: digest.digest('hex'),
+    build_source_commit: sourceCommit,
+    build_run_id: buildRunId,
+  }
 }
 
 function argument(name: string): string {
@@ -74,6 +98,10 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
     macArtifact: argument('--mac'),
     windowsArtifact: argument('--win'),
     sourceCommit: argument('--commit'),
+    macSourceCommit: argument('--mac-commit'),
+    windowsSourceCommit: argument('--win-commit'),
+    macBuildRunId: argument('--mac-run'),
+    windowsBuildRunId: argument('--win-run'),
     output: argument('--out'),
   })
 }
