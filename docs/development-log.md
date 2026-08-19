@@ -1536,3 +1536,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 逐项重跑 Base CI 的独立 `Check release carrier` 时真实复现 `scripts/release.test.mjs` 失败：CI 已增加 `profile-composition`，旧测试仍断言没有该 Job，因此即使此前组件门禁全绿，Base lane 也会在发布载体合同处失败。最小修复只把完整 Profile generation Job 纳入既有权威拓扑断言；发布/分类/组件/组合/R2 合同合并重跑为 `32/32`。
 - CI 中的 `dist:mac-smoke` 仍只属于隔离 Base 验证，正式 `desktop-release.yml` 唯一执行并上传 `dist:mac-unsigned-release`；本轮没有把 smoke 字节改名或提升为可发布 Desktop。当前本地正式 DMG 的真实健康证据仍由 S13 记录。
 - 外部状态保持失败关闭：实时公开回读 `darwin-arm64`、`darwin-x64`、`win32-x64` 三个 `desktop/profile/desired-state/*.json` 均为 HTTP 404；远端 `main` 仍为 `af124d75ccf2c46f423a69380dcbd1450692686f`，最近成功 CI 为 `32099808664`，尚不包含本地 2.0.11 提交；`win-codex` 目标 `laptop-adq973jn.local` 当前 DNS 无法解析。故仓库实现、本地组合和 macOS 候选已经可验证，但生产 bootstrap、Windows 及用户热更新入口仍未上线，Goal 不能标为完成。
+
+## 2026-08-20 · 2.0.11 S15 干净 CI impact 启动闭环
+
+- 用当前提交创建未初始化 submodule、没有任何生成 `lib` 的临时 worktree，按 GitHub impact Job 原命令重放。修复前 `--check-contract` 因读取不存在的 `upstream/deepseek-harness/package.json` 失败；这是本机已展开 submodule 掩盖的真实首步阻断。分类器现直接读取 Git index 的唯一 `160000` gitlink，并要求其对象精确等于 Base contract 的 `df78045a127e32cb5b942defba52c539590d1596`；错误 mode、重复路径、缺失或 commit 漂移均失败关闭，不再为一个版本字段下载整个 Harness。
+- 同一干净重放还证明 impact 的 component payload 测试依赖未跟踪构建产物：Shell `index.js`、Skill Hub `lib/` 和 Computer Use `lib/index.js` 在 CI 尚未 build 时均不存在。边界测试现只检查已提交 package allowlist/exports、平台 target 过滤函数和自包含 emitter fixture；真实生成字节仍由对应 changed-component Job 在 build 后 emit，并由三目标完整 generation 物化与 Host/Web Loader boot 验收，没有把生成物检查删除或移到浏览器伪测试。
+- 修复后的无 submodule/无生成物 worktree按 impact 原命令为 `24/24`，随后 `--check-contract` 返回 `valid: true`；本地合并发布载体门禁为 `33/33`，`git diff --check` 通过。本切片修改 classifier 及共享发布测试，正确属于本版一次性 Base lane；后续普通组件源码变化仍复用同一 Base SDK，不初始化或重建 Harness/Desktop。

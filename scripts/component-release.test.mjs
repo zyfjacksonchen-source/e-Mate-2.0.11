@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { emitComponent, componentFiles } from './component-release.mjs'
+import { emitComponent, componentFiles, targetEntries } from './component-release.mjs'
 
 const root = await mkdtemp(join(tmpdir(), 'e-mate-component-release-'))
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url))
@@ -60,34 +60,21 @@ describe('component payload closure', () => {
     assert.throws(() => componentFiles(packageRoot, { files: ['linked.json'] }), /symlinks/u)
   })
 
-  it('emits the real Shell with a materializable canonical package entry', () => {
-    const output = join(releaseRoot, 'shell')
-    const emitted = emitComponent({
-      root: repositoryRoot,
-      id: '@e-mate/dsh-client-shell',
-      out: output,
-      sourceCommit: 'a'.repeat(40),
-    })
-    assert.equal(emitted.package_entry, 'index.js')
-    assert.equal(emitted.target, null)
-    assert.equal(emitted.files.some(file => file.path === emitted.package_entry), true)
-    assert.equal(JSON.parse(readFileSync(join(output, 'files', 'package.json'), 'utf8')).main, 'index.js')
+  it('declares the real Shell package entry in its component allowlist', () => {
+    const manifest = JSON.parse(readFileSync(
+      join(repositoryRoot, 'packages/dsh/profile/plugins/emate-shell/package.json'),
+      'utf8',
+    ))
+    assert.equal(manifest.main, 'index.js')
+    assert.equal(manifest.files.includes(manifest.main), true)
   })
 
-  it('emits the Skill Hub Host, Agent, UI, and bundled library closure as one portable component', () => {
-    const output = join(releaseRoot, 'skill-hub')
-    const emitted = emitComponent({
-      root: repositoryRoot,
-      id: '@e-mate/dsh-plugin-skill-hub',
-      out: output,
-      sourceCommit: 'd'.repeat(40),
-    })
-    const manifest = JSON.parse(readFileSync(join(output, 'files', 'package.json'), 'utf8'))
-    assert.equal(emitted.package_entry, 'lib/index.js')
-    assert.equal(emitted.target, null)
-    assert.equal(emitted.files.some(file => file.path === 'lib/client.js'), true)
-    assert.equal(emitted.files.some(file => file.path === 'lib/skill-hub.js'), true)
-    assert.equal(emitted.files.some(file => /^lib\/skill-hub-[A-Za-z0-9_-]+\.js$/u.test(file.path)), true)
+  it('declares the Skill Hub Host, Agent, UI, and library as one portable component', () => {
+    const manifest = JSON.parse(readFileSync(join(repositoryRoot, 'packages/dsh-plugin-skill-hub/package.json'), 'utf8'))
+    assert.equal(manifest.main, 'lib/index.js')
+    assert.equal(manifest.files.includes('lib'), true)
+    assert.equal(manifest.exports['./client'], './lib/client.js')
+    assert.equal(manifest.exports['./skill-hub'], './lib/skill-hub.js')
     assert.equal(manifest.dependencies, undefined)
     assert.deepEqual(manifest.peerDependencies, {
       '@deepseek-ai/dsh-skill-filesystem': '0.1.0-rc.7',
@@ -97,16 +84,14 @@ describe('component payload closure', () => {
   })
 
 
-  it('emits only the native closure selected for a platform target', () => {
-    const output = join(releaseRoot, 'computer-use-win32-x64')
-    const emitted = emitComponent({
-      root: repositoryRoot,
-      id: '@e-mate/dsh-plugin-computer-use',
-      out: output,
-      sourceCommit: 'b'.repeat(40),
-      target: 'win32-x64',
-    })
-    assert.deepEqual(emitted.target, {
+  it('selects only the native closure declared for one platform target', () => {
+    const inventory = JSON.parse(readFileSync(
+      join(repositoryRoot, 'packages/dsh/profile/component-inventory.json'),
+      'utf8',
+    ))
+    const component = inventory.components.find(candidate => candidate.id === '@e-mate/dsh-plugin-computer-use')
+    const target = component.targets.find(candidate => candidate.platform === 'win32')
+    assert.deepEqual(target, {
       platform: 'win32',
       arch: 'x64',
       runtime_abi: 'none',
@@ -114,8 +99,10 @@ describe('component payload closure', () => {
       signing: { scheme: 'unsigned', identity: 'none' },
       native_paths: [],
     })
-    assert.equal(emitted.files.some(file => file.path.startsWith('native/macos/')), false)
-    assert.equal(emitted.files.some(file => file.path === emitted.package_entry), true)
+    assert.deepEqual(targetEntries([
+      { path: 'lib/index.js' },
+      { path: 'native/macos/bin/dsh-computer-use-helper' },
+    ], component, target).map(entry => entry.path), ['lib/index.js'])
   })
 
   it('requires an explicit supported target for platform components', () => {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { generateKeyPairSync } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -24,7 +25,11 @@ function fixture() {
   const baseId = 'e-mate-desktop-profile-v1-dsh-df78045a127e'
   mkdirSync(join(root, 'desktop/e-mate-desktop'), { recursive: true })
   mkdirSync(join(root, 'packages/dsh/profile'), { recursive: true })
-  mkdirSync(join(root, 'upstream/deepseek-harness'), { recursive: true })
+  execFileSync('git', ['init', '--quiet'], { cwd: root })
+  execFileSync('git', [
+    'update-index', '--add', '--cacheinfo',
+    '160000,df78045a127e32cb5b942defba52c539590d1596,upstream/deepseek-harness',
+  ], { cwd: root })
   writeJson(join(root, 'desktop/e-mate-desktop/base-contract.json'), {
     schema_version: 1,
     id: baseId,
@@ -46,7 +51,6 @@ function fixture() {
     }],
   })
   writeJson(join(root, 'desktop/e-mate-desktop/package.json'), { version: '2.0.11', dependencies: {} })
-  writeJson(join(root, 'upstream/deepseek-harness/package.json'), { version: '0.1.0-rc.7' })
   const components = ['fixture-a', 'fixture-b'].map(slug => {
     const id = `@e-mate/dsh-plugin-${slug}`
     const componentRoot = join(root, 'packages', `dsh-plugin-${slug}`)

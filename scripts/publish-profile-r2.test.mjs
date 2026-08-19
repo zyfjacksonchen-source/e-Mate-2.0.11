@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { generateKeyPairSync } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -24,7 +25,11 @@ test('publication admits bootstrap and its direct successor before exposing acti
   const sourceCommit = 'a'.repeat(40)
   mkdirSync(join(root, 'desktop/e-mate-desktop'), { recursive: true })
   mkdirSync(join(root, 'packages/dsh/profile'), { recursive: true })
-  mkdirSync(join(root, 'upstream/deepseek-harness'), { recursive: true })
+  execFileSync('git', ['init', '--quiet'], { cwd: root })
+  execFileSync('git', [
+    'update-index', '--add', '--cacheinfo',
+    '160000,df78045a127e32cb5b942defba52c539590d1596,upstream/deepseek-harness',
+  ], { cwd: root })
   const componentRoot = join(root, 'packages/dsh-plugin-fixture')
   mkdirSync(join(componentRoot, 'lib'), { recursive: true })
   writeJson(join(root, 'desktop/e-mate-desktop/base-contract.json'), {
@@ -48,7 +53,6 @@ test('publication admits bootstrap and its direct successor before exposing acti
     }],
   })
   writeJson(join(root, 'desktop/e-mate-desktop/package.json'), { version: '2.0.11', dependencies: {} })
-  writeJson(join(root, 'upstream/deepseek-harness/package.json'), { version: '0.1.0-rc.7' })
   writeJson(join(root, 'packages/dsh/profile/component-inventory.json'), { schema_version: 1, components: [{
     id: componentId,
     root: 'packages/dsh-plugin-fixture',

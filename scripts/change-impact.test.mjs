@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { classifyChangedPaths, loadReleaseBoundary } from './change-impact.mjs'
@@ -51,6 +54,44 @@ describe('repository release boundary', () => {
     assert.equal(boundary.components.length, 14)
     assert.equal(boundary.components.every(component => component.errors.length === 0), true)
     assert.deepEqual(boundary.components.flatMap(component => component.errors), [])
+  })
+
+  it('validates the Harness gitlink without requiring an initialized submodule', () => {
+    const checkout = mkdtempSync(join(tmpdir(), 'e-mate-impact-checkout-'))
+    try {
+      const inventoryPath = 'packages/dsh/profile/component-inventory.json'
+      const inventory = JSON.parse(readFileSync(join(root, inventoryPath), 'utf8'))
+      const files = [
+        'desktop/e-mate-desktop/base-contract.json',
+        'desktop/e-mate-desktop/package.json',
+        inventoryPath,
+        ...inventory.components.map(component => `${component.root}/package.json`),
+      ]
+      for (const file of files) {
+        const destination = join(checkout, file)
+        mkdirSync(dirname(destination), { recursive: true })
+        copyFileSync(join(root, file), destination)
+      }
+      execFileSync('git', ['init', '--quiet'], { cwd: checkout })
+      execFileSync('git', [
+        'update-index', '--add', '--cacheinfo',
+        '160000,df78045a127e32cb5b942defba52c539590d1596,upstream/deepseek-harness',
+      ], { cwd: checkout })
+
+      assert.equal(existsSync(join(checkout, 'upstream/deepseek-harness/package.json')), false)
+      assert.equal(loadReleaseBoundary(checkout).valid, true)
+
+      execFileSync('git', [
+        'update-index', '--add', '--cacheinfo',
+        `160000,${'a'.repeat(40)},upstream/deepseek-harness`,
+      ], { cwd: checkout })
+      assert.match(
+        loadReleaseBoundary(checkout).errors.join('\n'),
+        /Git submodule commit does not match the Base contract/u,
+      )
+    } finally {
+      rmSync(checkout, { recursive: true, force: true })
+    }
   })
 
   it('admits one or several ordinary Profile component changes without a base build', () => {

@@ -120,6 +120,17 @@ function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
 }
 
+function harnessGitlinkCommit(root) {
+  const row = execFileSync('git', ['ls-files', '-s', '--', 'upstream/deepseek-harness'], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 1024,
+  }).trim()
+  const match = /^160000 ([0-9a-f]{40}) 0\tupstream\/deepseek-harness$/u.exec(row)
+  if (match === null) throw new Error('Harness source must be one tracked Git submodule')
+  return match[1]
+}
+
 function normalizePath(path) {
   if (typeof path !== 'string') throw new Error('changed path must be a string')
   const normalized = path.replaceAll('\\', '/').replace(/^\.\//u, '')
@@ -279,9 +290,8 @@ export function loadReleaseBoundary(root = resolve(fileURLToPath(new URL('..', i
         errors.push(`desktop/e-mate-desktop/package.json: ${name} must equal ${String(baseContract.harness_version)}`)
       }
     }
-    const harnessSource = readJson(join(root, 'upstream/deepseek-harness/package.json'))
-    if (harnessSource.version !== baseContract.harness_version) {
-      errors.push('upstream/deepseek-harness/package.json: Harness source version does not match the Base contract')
+    if (harnessGitlinkCommit(root) !== baseContract.harness_commit) {
+      errors.push('upstream/deepseek-harness: Git submodule commit does not match the Base contract')
     }
   } catch (cause) {
     errors.push(`Desktop/Harness package contract: ${cause instanceof Error ? cause.message : String(cause)}`)

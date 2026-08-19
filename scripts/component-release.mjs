@@ -93,7 +93,7 @@ function selectTarget(component, requested) {
   return target
 }
 
-function targetEntries(entries, component, target) {
+export function targetEntries(entries, component, target) {
   if (target === null) return entries
   const allNativePaths = [...new Set(component.targets.flatMap(candidate => candidate.native_paths))]
   return entries.filter(entry => {
