@@ -225,6 +225,7 @@ test('GitHub release packs once and validates the same tarball on three platform
     'impact',
     'source',
     'plugins',
+    'profile-composition',
     'enterprise',
     'desktop-windows',
     'desktop-macos',

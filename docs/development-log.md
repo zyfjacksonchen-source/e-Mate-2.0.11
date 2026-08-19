@@ -1530,3 +1530,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Universal 合并连续拒绝两处错误架构的宿主编译残留：随 Profile 复制的 `build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty/build`，以及 Desktop 物理依赖树中的 `node_modules/dsh-better-sidebar/node_modules/node-pty/build`。同步器和 electron-builder 现统一排除任意嵌套 `node-pty/build`；每个 darwin 单架构 afterPack 已先失败关闭，最终 universal inventory 只接受并逐项验证 arm64/x86_64 prebuild 的 `pty.node` 与 `spawn-helper`，不再把污染二进制加入合并白名单。
 - 本地 unsigned/ad-hoc Universal DMG 已通过 `hdiutil verify/attach`、Info.plist、全部原生条目双架构、深度 codesign 和从挂载镜像复制后的真实启动。arm64 交互 Renderer health ACK 为 `24,190 ms`，x86_64/Rosetta native-ready ACK 为 `44,097 ms`；产物为 `desktop/e-mate-desktop/dist/mac-unsigned-release/e-Mate-2.0.11-mac-universal.dmg`，`383,503,141` bytes，SHA-256 `25c2063c4d25fe8d5e08860a73ba68e33bcf11dd9878ed2b383f02d112e2732a`。
 - 该文件仅是本机未公证候选，未上传、未激活 Feed，也不能替代 Intel 真机 Renderer、Windows 安装态、真实 Full Access/CDP、生产签名组件 generation 和 30 组成对性能证据；这些外部门禁继续保持未完成。
+
+## 2026-08-20 · 2.0.11 S14 发布合同完成性复核
+
+- 逐项重跑 Base CI 的独立 `Check release carrier` 时真实复现 `scripts/release.test.mjs` 失败：CI 已增加 `profile-composition`，旧测试仍断言没有该 Job，因此即使此前组件门禁全绿，Base lane 也会在发布载体合同处失败。最小修复只把完整 Profile generation Job 纳入既有权威拓扑断言；发布/分类/组件/组合/R2 合同合并重跑为 `32/32`。
+- CI 中的 `dist:mac-smoke` 仍只属于隔离 Base 验证，正式 `desktop-release.yml` 唯一执行并上传 `dist:mac-unsigned-release`；本轮没有把 smoke 字节改名或提升为可发布 Desktop。当前本地正式 DMG 的真实健康证据仍由 S13 记录。
+- 外部状态保持失败关闭：实时公开回读 `darwin-arm64`、`darwin-x64`、`win32-x64` 三个 `desktop/profile/desired-state/*.json` 均为 HTTP 404；远端 `main` 仍为 `af124d75ccf2c46f423a69380dcbd1450692686f`，最近成功 CI 为 `32099808664`，尚不包含本地 2.0.11 提交；`win-codex` 目标 `laptop-adq973jn.local` 当前 DNS 无法解析。故仓库实现、本地组合和 macOS 候选已经可验证，但生产 bootstrap、Windows 及用户热更新入口仍未上线，Goal 不能标为完成。
