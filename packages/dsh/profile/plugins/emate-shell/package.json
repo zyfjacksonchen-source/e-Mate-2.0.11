@@ -39,7 +39,7 @@
     "harnessCommit": "df78045a127e32cb5b942defba52c539590d1596"
   },
   "scripts": {
-    "build": "node ../../../../../scripts/sync-emate-ui-assets.mjs && ../../../../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "build": "../../../../../upstream/deepseek-harness/node_modules/.bin/tsdown",
     "test": "../../../../../upstream/deepseek-harness/node_modules/.bin/vitest run tests/*.spec.tsx"
   },
   "license": "MIT"

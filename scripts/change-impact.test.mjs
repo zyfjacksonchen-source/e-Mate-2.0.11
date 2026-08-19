@@ -78,6 +78,15 @@ describe('repository release boundary', () => {
         'update-index', '--add', '--cacheinfo',
         '160000,df78045a127e32cb5b942defba52c539590d1596,upstream/deepseek-harness',
       ], { cwd: checkout })
+      for (const component of inventory.components) {
+        const manifest = JSON.parse(readFileSync(join(checkout, component.root, 'package.json'), 'utf8'))
+        for (const sourceRoot of component.source_roots ?? []) {
+          execFileSync('git', [
+            'update-index', '--add', '--cacheinfo',
+            `160000,${manifest.dsh.upstream.commit},${sourceRoot}`,
+          ], { cwd: checkout })
+        }
+      }
       execFileSync('git', ['add', '--', ...files], { cwd: checkout })
 
       assert.equal(existsSync(join(checkout, 'upstream/deepseek-harness/package.json')), false)
@@ -89,6 +98,31 @@ describe('repository release boundary', () => {
       writeFileSync(join(checkout, componentProbe), 'export const probe = true\n')
       execFileSync('git', ['add', '--', componentProbe], { cwd: checkout })
       assert.equal(baseSdkFingerprint(checkout), acceptedBase)
+
+      const computerUseManifestPath = 'packages/dsh-plugin-computer-use/package.json'
+      const computerUseManifest = JSON.parse(readFileSync(join(checkout, computerUseManifestPath), 'utf8'))
+      computerUseManifest.dsh.upstream.commit = 'b'.repeat(40)
+      writeFileSync(join(checkout, computerUseManifestPath), `${JSON.stringify(computerUseManifest, null, 2)}\n`)
+      execFileSync('git', ['add', '--', computerUseManifestPath], { cwd: checkout })
+      execFileSync('git', [
+        'update-index', '--add', '--cacheinfo',
+        `160000,${'b'.repeat(40)},upstream/plugins/dsh-computer-use`,
+      ], { cwd: checkout })
+      assert.equal(loadReleaseBoundary(checkout).valid, true)
+      assert.equal(baseSdkFingerprint(checkout), acceptedBase)
+
+      execFileSync('git', [
+        'update-index', '--add', '--cacheinfo',
+        `160000,${'c'.repeat(40)},upstream/plugins/dsh-computer-use`,
+      ], { cwd: checkout })
+      assert.match(
+        loadReleaseBoundary(checkout).errors.join('\n'),
+        /component upstream commit must equal the upstream\/plugins\/dsh-computer-use Git submodule commit/u,
+      )
+      execFileSync('git', [
+        'update-index', '--add', '--cacheinfo',
+        `160000,${'b'.repeat(40)},upstream/plugins/dsh-computer-use`,
+      ], { cwd: checkout })
 
       const desktopProbe = 'desktop/e-mate-desktop/src/fingerprint-probe.ts'
       mkdirSync(dirname(join(checkout, desktopProbe)), { recursive: true })
@@ -179,6 +213,7 @@ describe('repository release boundary', () => {
 
   it('admits platform components only through the complete native target matrix', () => {
     for (const path of [
+      'upstream/plugins/dsh-computer-use',
       'packages/dsh-plugin-computer-use/native/macos/bin/helper',
       'packages/dsh-plugin-computer-use/scripts/build-native.mjs',
       'packages/dsh-plugin-computer-use/scripts/build.mjs',
@@ -193,6 +228,25 @@ describe('repository release boundary', () => {
       { component: '@e-mate/dsh-plugin-computer-use', target: 'darwin-x64', runner: 'macos-15-intel', publish: true },
       { component: '@e-mate/dsh-plugin-computer-use', target: 'win32-x64', runner: 'windows-2025', publish: true },
     ])
+  })
+
+  it('assigns only declared external source gitlinks to their component owner', () => {
+    const computerUse = classify('upstream/plugins/dsh-computer-use')
+    assert.equal(computerUse.lane, 'plugin-only')
+    assert.deepEqual(computerUse.components, ['@e-mate/dsh-plugin-computer-use'])
+    assert.equal(computerUse.component_jobs.length, 3)
+
+    const findSkill = classify('upstream/plugins/dsh-find-skill')
+    assert.equal(findSkill.lane, 'plugin-only')
+    assert.deepEqual(findSkill.components, ['@e-mate/dsh-plugin-find-skill'])
+    assert.deepEqual(findSkill.component_jobs, [{
+      component: '@e-mate/dsh-plugin-find-skill',
+      target: 'portable',
+      runner: 'ubuntu-24.04',
+      publish: true,
+    }])
+
+    assert.equal(classify('upstream/plugins/dsh-genui').lane, 'base')
   })
 
   it('keeps the DSH-native CDP adapter in the component lane', () => {

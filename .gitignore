@@ -16,6 +16,5 @@ packages/dsh/profile/plugins/*.js
 packages/dsh/profile/plugins/identity/*.js
 packages/dsh/profile/plugins/emate-shell/index.js
 packages/dsh/profile/plugins/emate-shell/lib/
-packages/dsh/profile/plugins/emate-shell/assets/
 packages/dsh/profile/bundles/
 packages/dsh-plugin-*/lib/

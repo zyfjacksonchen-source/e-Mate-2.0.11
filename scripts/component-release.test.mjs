@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -35,6 +35,22 @@ describe('component payload closure', () => {
       accepted.map(component => component.id).sort(),
     )
     assert.equal(inventory.component_jobs.every(job => job.publish === true && typeof job.runner === 'string'), true)
+    assert.deepEqual(
+      inventory.components.filter(component => component.source_roots.length > 0).map(component => ({
+        id: component.id,
+        source_roots: component.source_roots,
+      })),
+      [
+        {
+          id: '@e-mate/dsh-plugin-computer-use',
+          source_roots: ['upstream/plugins/dsh-computer-use'],
+        },
+        {
+          id: '@e-mate/dsh-plugin-find-skill',
+          source_roots: ['upstream/plugins/dsh-find-skill'],
+        },
+      ],
+    )
   })
 
   it('enumerates only allowlisted regular files in stable order', () => {
@@ -61,12 +77,23 @@ describe('component payload closure', () => {
   })
 
   it('declares the real Shell package entry in its component allowlist', () => {
-    const manifest = JSON.parse(readFileSync(
-      join(repositoryRoot, 'packages/dsh/profile/plugins/emate-shell/package.json'),
-      'utf8',
-    ))
+    const shellRoot = join(repositoryRoot, 'packages/dsh/profile/plugins/emate-shell')
+    const manifest = JSON.parse(readFileSync(join(shellRoot, 'package.json'), 'utf8'))
     assert.equal(manifest.main, 'index.js')
     assert.equal(manifest.files.includes(manifest.main), true)
+    assert.equal(manifest.files.includes('assets'), true)
+    assert.doesNotMatch(manifest.scripts.build, /sync-emate-ui-assets/u)
+    for (const name of [
+      'e-mate-team-hero-transparent.png',
+      'emate-logo.png',
+      'emate-mark.png',
+      'lucide-send.svg',
+      'xiaoxin-avatar.png',
+    ]) {
+      const path = `packages/dsh/profile/plugins/emate-shell/assets/${name}`
+      assert.ok(statSync(join(repositoryRoot, path)).size > 0, path)
+      execFileSync('git', ['ls-files', '--error-unmatch', '--', path], { cwd: repositoryRoot })
+    }
   })
 
   it('declares the Skill Hub Host, Agent, UI, and library as one portable component', () => {

@@ -32,6 +32,7 @@
     {
       "id": "@e-mate/dsh-plugin-computer-use",
       "root": "packages/dsh-plugin-computer-use",
+      "source_roots": ["upstream/plugins/dsh-computer-use"],
       "kind": "platform-profile",
       "desktop": "platform-profile",
       "cli": true,
@@ -72,6 +73,7 @@
     {
       "id": "@e-mate/dsh-plugin-find-skill",
       "root": "packages/dsh-plugin-find-skill",
+      "source_roots": ["upstream/plugins/dsh-find-skill"],
       "kind": "profile",
       "desktop": "hot-profile",
       "cli": true

@@ -120,14 +120,14 @@ function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
 }
 
-function harnessGitlinkCommit(root) {
-  const row = execFileSync('git', ['ls-files', '-s', '--', 'upstream/deepseek-harness'], {
+function trackedGitlinkCommit(root, path) {
+  const row = execFileSync('git', ['ls-files', '-s', '--', path], {
     cwd: root,
     encoding: 'utf8',
-    maxBuffer: 1024,
+    maxBuffer: 4096,
   }).trim()
-  const match = /^160000 ([0-9a-f]{40}) 0\tupstream\/deepseek-harness$/u.exec(row)
-  if (match === null) throw new Error('Harness source must be one tracked Git submodule')
+  const match = /^160000 ([0-9a-f]{40}) 0\t(.+)$/u.exec(row)
+  if (match === null || match[2] !== path) throw new Error(`${path} must be one tracked Git submodule`)
   return match[1]
 }
 
@@ -148,9 +148,12 @@ function componentInventory(root) {
     throw new Error('component inventory is invalid')
   }
   const components = value.components.map(entry => {
+    const sourceRoots = entry.source_roots ?? []
     if (!record(entry)
       || typeof entry.id !== 'string'
       || typeof entry.root !== 'string' || !safeFilesEntry(entry.root)
+      || !Array.isArray(sourceRoots) || sourceRoots.length > 1
+      || sourceRoots.some(path => !safeFilesEntry(path) || !path.startsWith('upstream/plugins/'))
       || !['profile', 'platform-profile'].includes(entry.kind)
       || !['hot-profile', 'platform-profile', 'blocked'].includes(entry.desktop)
       || typeof entry.cli !== 'boolean'
@@ -158,17 +161,22 @@ function componentInventory(root) {
       || entry.desktop === 'platform-profile' && entry.kind !== 'platform-profile') {
       throw new Error('component inventory entry is invalid')
     }
-    const expectedKeys = ['id', 'root', 'kind', 'desktop', 'cli', ...(entry.kind === 'platform-profile' ? ['targets'] : [])]
+    const expectedKeys = [
+      'id', 'root', 'kind', 'desktop', 'cli',
+      ...(entry.source_roots === undefined ? [] : ['source_roots']),
+      ...(entry.kind === 'platform-profile' ? ['targets'] : []),
+    ]
     if (!exactKeys(entry, expectedKeys)) throw new Error('component inventory entry is invalid')
     const targets = entry.kind === 'platform-profile' ? parsePlatformTargets(entry.targets) : []
     const expectedRoot = entry.id === '@e-mate/dsh-client-shell'
       ? SHELL_COMPONENT_ROOT
       : `packages/${entry.id.replace(/^@e-mate\//u, '')}`
     if (entry.root !== expectedRoot) throw new Error(`component inventory root mismatch: ${entry.id}`)
-    return { ...entry, targets }
+    return { ...entry, source_roots: [...sourceRoots], targets }
   }).sort((left, right) => left.id.localeCompare(right.id))
+  const ownedRoots = components.flatMap(component => [component.root, ...component.source_roots])
   if (new Set(components.map(component => component.id)).size !== components.length
-    || new Set(components.map(component => component.root)).size !== components.length) {
+    || new Set(ownedRoots).size !== ownedRoots.length) {
     throw new Error('component inventory identities must be unique')
   }
   return components
@@ -259,6 +267,16 @@ function validateComponent(root, inventory, baseContract, desktopDependencies) {
   if (desktopDependencies.has(manifest.name)) {
     errors.push('component must not be a direct Desktop dependency')
   }
+  for (const sourceRoot of inventory.source_roots) {
+    try {
+      const commit = trackedGitlinkCommit(root, sourceRoot)
+      if (!record(manifest.dsh?.upstream) || manifest.dsh.upstream.commit !== commit) {
+        errors.push(`component upstream commit must equal the ${sourceRoot} Git submodule commit`)
+      }
+    } catch (cause) {
+      errors.push(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
   return {
     root: componentRoot,
     id: typeof manifest.name === 'string' ? manifest.name : expectedName,
@@ -266,6 +284,7 @@ function validateComponent(root, inventory, baseContract, desktopDependencies) {
     kind: component?.kind,
     desktop: inventory.desktop,
     cli: inventory.cli,
+    source_roots: inventory.source_roots,
     targets: inventory.targets,
     errors,
   }
@@ -290,7 +309,7 @@ export function loadReleaseBoundary(root = resolve(fileURLToPath(new URL('..', i
         errors.push(`desktop/e-mate-desktop/package.json: ${name} must equal ${String(baseContract.harness_version)}`)
       }
     }
-    if (harnessGitlinkCommit(root) !== baseContract.harness_commit) {
+    if (trackedGitlinkCommit(root, 'upstream/deepseek-harness') !== baseContract.harness_commit) {
       errors.push('upstream/deepseek-harness: Git submodule commit does not match the Base contract')
     }
   } catch (cause) {
@@ -317,11 +336,14 @@ export function loadReleaseBoundary(root = resolve(fileURLToPath(new URL('..', i
 }
 
 function componentForPath(path, components) {
-  return components.find(component => path === component.root || path.startsWith(`${component.root}/`))
+  return components.find(component => [component.root, ...component.source_roots]
+    .some(root => path === root || path.startsWith(`${root}/`)))
 }
 
 function localComponentPath(path, component) {
-  return path === component.root ? '' : path.slice(component.root.length + 1)
+  const owner = [component.root, ...component.source_roots]
+    .find(root => path === root || path.startsWith(`${root}/`))
+  return owner === undefined || path === owner ? '' : path.slice(owner.length + 1)
 }
 
 function componentTestPath(path) {

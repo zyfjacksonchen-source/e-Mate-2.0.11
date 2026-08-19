@@ -1548,3 +1548,11 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 新增真实 Git index 行为测试：先把完整 Base contract、Desktop package、组件 inventory、14 个组件 package manifest 和固定 Harness gitlink 写入一个无 submodule fixture，取得已接受 Base SDK fingerprint；随后只新增并 stage `memory-evolve` 组件源码，fingerprint 必须逐字节不变；再新增并 stage Desktop 共享源码，fingerprint 必须变化。错误 Harness gitlink继续使合同失败。
 - 该反例证明 plugin-only Job 不只是“分类结果写着不跑 Base”：它会解析出与上一 Base lane 相同的 Actions cache key，命中并复验已有 SDK；Desktop/Harness/共享输入则产生新 key，只能回到 Base lane。干净 checkout 无生成物门禁继续为 `24/24`，且可直接输出 Base SDK fingerprint `f45d9f7fbf99ac2983ce3c727bde3b0fc511e9f35dca47e8d204f5108ded1aab`。
 - 本切片只改变分类器反例测试和开发记录，不改变产品或发布输入；它必须保持 verification-only，不能因补门禁再次触发 Desktop 安装器构建。
+
+## 2026-08-20 · 2.0.11 S17 组件外部源码所有权闭环
+
+- 全量枚举 14 个一方组件的真实 build command 后确认两处可发布组件仍从组件目录外生成代码：Computer Use 读取固定 `upstream/plugins/dsh-computer-use` gitlink，Find Skill 读取固定 `upstream/plugins/dsh-find-skill` gitlink。旧分类器把所有 `upstream/**` 一律判为 Base，因此只升级这两个插件的权威上游源码仍会错误触发 Harness/Desktop 全量构建。
+- 唯一 component inventory 现为这两个组件显式声明 `source_roots`。分类器只把该精确 gitlink 及其子路径交给对应组件，并要求 Git index 中必须是唯一 `160000` submodule、对象 SHA 必须与组件 `package.json` 的 `dsh.upstream.commit` 相等；缺失、普通目录、SHA 漂移或未声明的 upstream 均失败关闭。GenUI 仍是 Desktop blocked，继续走 Base；共享 Harness/tsdown ABI 仍由既有 Base SDK 提供，没有伪装成组件输入。
+- 同一审计发现 Shell 的 plugin-only build 每次从旧 2.0.5 子模块和 `packages/dsh/src` 回拷 Logo、头像与发送图标。五个已生成文件先逐项 SHA-256 对照原来源完全一致，随后直接成为 Shell 组件的受跟踪 `assets` 闭包；同步脚本及 Base 中的重复 SVG 被删除。以后改 Shell 资源精确得到一个 portable Shell job，旧 2.0.5 参考资源仍属于 Base，不再暗中决定组件产物。
+- Git-index 反例覆盖了“同时更新 Computer Use gitlink 与 manifest provenance 时 Base SDK fingerprint 不变”，以及“只改一侧时合同失败”；分类器实跑分别得到 Computer Use 三平台 plugin-only、Find Skill portable plugin-only、未声明 GenUI Base。真实构建/测试为 Computer Use `2/2`、Find Skill `6/6`、Shell `8 files / 39 tests`，DSH package build 通过；三个组件真实 emit 分别包含 Shell 五个资源、Find Skill 固定 upstream SHA 与 Computer Use darwin-arm64 固定 upstream SHA。
+- 发布/分类/组合/R2 合并门禁为 `34/34`；无 submodule、无生成 `lib` 的物理路径临时 checkout 为 `22/22`，独立 `--check-contract` 返回 `valid: true`。本切片修改 inventory、分类器和一次性 Base 构建输入，因此当前提交正确进入 Base lane；它的目的正是让后续这三个组件的源码或资源更新不再重建 Desktop 安装器。本轮没有上传组件、签名 generation 或激活线上 desired state。

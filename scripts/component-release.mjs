@@ -205,6 +205,7 @@ function main() {
         version: component.version,
         kind: component.kind,
         root: component.root,
+        source_roots: component.source_roots,
         desktop: component.desktop,
         targets: component.targets,
       })),
