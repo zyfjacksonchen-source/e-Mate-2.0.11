@@ -1542,3 +1542,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 用当前提交创建未初始化 submodule、没有任何生成 `lib` 的临时 worktree，按 GitHub impact Job 原命令重放。修复前 `--check-contract` 因读取不存在的 `upstream/deepseek-harness/package.json` 失败；这是本机已展开 submodule 掩盖的真实首步阻断。分类器现直接读取 Git index 的唯一 `160000` gitlink，并要求其对象精确等于 Base contract 的 `df78045a127e32cb5b942defba52c539590d1596`；错误 mode、重复路径、缺失或 commit 漂移均失败关闭，不再为一个版本字段下载整个 Harness。
 - 同一干净重放还证明 impact 的 component payload 测试依赖未跟踪构建产物：Shell `index.js`、Skill Hub `lib/` 和 Computer Use `lib/index.js` 在 CI 尚未 build 时均不存在。边界测试现只检查已提交 package allowlist/exports、平台 target 过滤函数和自包含 emitter fixture；真实生成字节仍由对应 changed-component Job 在 build 后 emit，并由三目标完整 generation 物化与 Host/Web Loader boot 验收，没有把生成物检查删除或移到浏览器伪测试。
 - 修复后的无 submodule/无生成物 worktree按 impact 原命令为 `24/24`，随后 `--check-contract` 返回 `valid: true`；本地合并发布载体门禁为 `33/33`，`git diff --check` 通过。本切片修改 classifier 及共享发布测试，正确属于本版一次性 Base lane；后续普通组件源码变化仍复用同一 Base SDK，不初始化或重建 Harness/Desktop。
+
+## 2026-08-20 · 2.0.11 S16 Plugin-only Base SDK cache-key 反例
+
+- 新增真实 Git index 行为测试：先把完整 Base contract、Desktop package、组件 inventory、14 个组件 package manifest 和固定 Harness gitlink 写入一个无 submodule fixture，取得已接受 Base SDK fingerprint；随后只新增并 stage `memory-evolve` 组件源码，fingerprint 必须逐字节不变；再新增并 stage Desktop 共享源码，fingerprint 必须变化。错误 Harness gitlink继续使合同失败。
+- 该反例证明 plugin-only Job 不只是“分类结果写着不跑 Base”：它会解析出与上一 Base lane 相同的 Actions cache key，命中并复验已有 SDK；Desktop/Harness/共享输入则产生新 key，只能回到 Base lane。干净 checkout 无生成物门禁继续为 `24/24`，且可直接输出 Base SDK fingerprint `f45d9f7fbf99ac2983ce3c727bde3b0fc511e9f35dca47e8d204f5108ded1aab`。
+- 本切片只改变分类器反例测试和开发记录，不改变产品或发布输入；它必须保持 verification-only，不能因补门禁再次触发 Desktop 安装器构建。

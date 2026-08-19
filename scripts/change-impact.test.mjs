@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { baseSdkFingerprint } from './base-sdk.mjs'
 import { classifyChangedPaths, loadReleaseBoundary } from './change-impact.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
@@ -56,7 +57,7 @@ describe('repository release boundary', () => {
     assert.deepEqual(boundary.components.flatMap(component => component.errors), [])
   })
 
-  it('validates the Harness gitlink without requiring an initialized submodule', () => {
+  it('pins the Harness gitlink while keeping component changes on the accepted Base SDK key', () => {
     const checkout = mkdtempSync(join(tmpdir(), 'e-mate-impact-checkout-'))
     try {
       const inventoryPath = 'packages/dsh/profile/component-inventory.json'
@@ -77,9 +78,23 @@ describe('repository release boundary', () => {
         'update-index', '--add', '--cacheinfo',
         '160000,df78045a127e32cb5b942defba52c539590d1596,upstream/deepseek-harness',
       ], { cwd: checkout })
+      execFileSync('git', ['add', '--', ...files], { cwd: checkout })
 
       assert.equal(existsSync(join(checkout, 'upstream/deepseek-harness/package.json')), false)
       assert.equal(loadReleaseBoundary(checkout).valid, true)
+      const acceptedBase = baseSdkFingerprint(checkout)
+
+      const componentProbe = 'packages/dsh-plugin-memory-evolve/src/fingerprint-probe.ts'
+      mkdirSync(dirname(join(checkout, componentProbe)), { recursive: true })
+      writeFileSync(join(checkout, componentProbe), 'export const probe = true\n')
+      execFileSync('git', ['add', '--', componentProbe], { cwd: checkout })
+      assert.equal(baseSdkFingerprint(checkout), acceptedBase)
+
+      const desktopProbe = 'desktop/e-mate-desktop/src/fingerprint-probe.ts'
+      mkdirSync(dirname(join(checkout, desktopProbe)), { recursive: true })
+      writeFileSync(join(checkout, desktopProbe), 'export const probe = true\n')
+      execFileSync('git', ['add', '--', desktopProbe], { cwd: checkout })
+      assert.notEqual(baseSdkFingerprint(checkout), acceptedBase)
 
       execFileSync('git', [
         'update-index', '--add', '--cacheinfo',
