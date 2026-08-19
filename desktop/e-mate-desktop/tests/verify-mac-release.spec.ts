@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -31,6 +32,12 @@ function options(overrides: Partial<MacReleaseVerificationOptions> = {}) {
 }
 
 describe('macOS release artifact verification', () => {
+  it('isolates forced-stop architecture probes from each other', () => {
+    const source = readFileSync(new URL('../scripts/verify-mac-release.ts', import.meta.url), 'utf8')
+    expect(source).toContain('DSH_HOME: join(root, `dsh-${arch}`)')
+    expect(source).not.toContain("DSH_HOME: join(root, 'dsh')")
+  })
+
   it('mounts one DMG and verifies signature, Gatekeeper, and the stapled ticket', () => {
     const harness = options()
     const appPath = join('/private/tmp/dsh-desktop-dmg-test', 'e-Mate.app')

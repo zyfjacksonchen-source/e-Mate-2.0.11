@@ -24,7 +24,7 @@ export interface MacReleaseVerificationOptions {
   readonly makeMountPoint: () => string
   /** Execute one macOS verification command. */
   readonly run: (command: string, args: readonly string[]) => void
-  /** Prove both architectures reach renderer health in one installed profile. */
+  /** Prove both architectures reach renderer health from isolated fresh profiles. */
   readonly launch: (executable: string, architectures: readonly ('arm64' | 'x86_64')[]) => void
   /** Keep the packaged native helper bound to its immutable plugin manifest. */
   readonly verifyComputerUseHelper: (unpackedRoot: string) => void
@@ -41,7 +41,7 @@ function launchArchitecture(executable: string, arch: 'arm64' | 'x86_64', root: 
     const healthAck = join(userData, '.release-health-ack')
     const startedAt = Date.now()
     const child = spawn('/usr/bin/arch', [`-${arch}`, executable, `--user-data-dir=${userData}`], {
-      env: { ...process.env, DSH_HOME: join(root, 'dsh'), EMATE_RELEASE_HEALTH_PROBE: '1' },
+      env: { ...process.env, DSH_HOME: join(root, `dsh-${arch}`), EMATE_RELEASE_HEALTH_PROBE: '1' },
       stdio: 'ignore',
       detached: true,
     })
