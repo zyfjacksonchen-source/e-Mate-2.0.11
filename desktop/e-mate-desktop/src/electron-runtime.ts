@@ -350,7 +350,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     } catch (cause) {
       process.stderr.write(`@e-mate/desktop: failed to persist renderer boot health: ${cause instanceof Error ? cause.message : String(cause)}\n`)
     }
-    if (report.status === 'failed') {
+    if (report.status === 'failed' && process.env.EMATE_RELEASE_HEALTH_PROBE !== '1') {
       void this.showRendererBootRecovery(report).catch((cause: unknown) => {
         process.stderr.write(`@e-mate/desktop: failed to show plugin recovery: ${cause instanceof Error ? cause.message : String(cause)}\n`)
       })

@@ -346,7 +346,7 @@ export function verifyPackagedRuntime(
       `@e-mate/desktop: packaged runtime at ${resourcesRoot} is missing Python runtime entries: ${missingPython.join(', ')}`,
     )
   }
-  if (context.electronPlatformName === 'darwin' && context.arch === 4) {
+  if (context.electronPlatformName === 'darwin') {
     const forbidden = FORBIDDEN_MACOS_UNIVERSAL_ENTRIES
       .filter(entry => exists(join(unpackedRoot, entry)))
     if (forbidden.length > 0) {

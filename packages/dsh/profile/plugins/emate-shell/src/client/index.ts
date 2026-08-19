@@ -24,7 +24,6 @@ import {
   IconUserOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AccountControl, AccountSettings } from './account.tsx'
-import { ArtifactCapsules } from './artifact-capsules.tsx'
 import './chat-chrome.module.css'
 import { ComposerConnectors } from './composer-connectors.tsx'
 import { HomeProjection } from './home.tsx'
@@ -191,11 +190,6 @@ export function apply(ctx: any): void {
     id: 'e-mate-thinking-status',
     order: -190,
   }, ThinkingStatusBranding))
-  ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
-    name: 'conversation.chat.turnTail',
-    id: 'e-mate-artifact-capsules',
-    order: 100,
-  }, ArtifactCapsules))
   ctx.conversationEvents.register(imageDisclosureDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',

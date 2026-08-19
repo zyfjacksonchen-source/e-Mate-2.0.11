@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import sharp from 'sharp'
@@ -269,6 +269,7 @@ describe('published package surface', () => {
       'lib/**',
       'package.json',
       '!node_modules/node-pty/build/**',
+      '!node_modules/**/node-pty/build/**',
     ])
     expect(manifest.build?.extraResources).toEqual([
       { from: 'build/python-runtime', to: 'python-runtime' },
@@ -340,6 +341,11 @@ describe('published package surface', () => {
     expect(String(manifest.build?.mac?.x64ArchFiles))
       .toContain('build/e-mate-profile/bundles/xin-assistant/runtime/vendor-native/darwin-*/**')
     expect(manifest.build?.files).toContain('!node_modules/node-pty/build/**')
+    expect(manifest.build?.files).toContain('!node_modules/**/node-pty/build/**')
+    expect(existsSync(new URL(
+      'build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty/build/Release/pty.node',
+      packageRoot,
+    ))).toBe(false)
     expect(manifest.devDependencies?.['@electron/asar']).toBe('3.4.1')
   })
 

@@ -11,10 +11,9 @@ describe('universal macOS native runtime preparation', () => {
 
     prepareMacUniversalRuntime({ desktopRoot: '/desktop', exists: () => true, chmod })
 
-    expect(chmod.mock.calls).toEqual([
-      [join('/desktop', 'node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper'), 0o755],
-      [join('/desktop', 'node_modules/node-pty/prebuilds/darwin-x64/spawn-helper'), 0o755],
-    ])
+    expect(chmod.mock.calls).toEqual(MACOS_UNIVERSAL_NATIVE_ENTRIES
+      .filter(entry => entry.path.endsWith('/spawn-helper'))
+      .map(entry => [join('/desktop', entry.path), 0o755]))
   })
 
   it('fails before changing permissions when one architecture is incomplete', () => {

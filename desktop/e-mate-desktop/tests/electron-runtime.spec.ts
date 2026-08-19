@@ -704,6 +704,26 @@ describe('Electron compatibility runtime', () => {
     expect(electron.dialog.showMessageBox).not.toHaveBeenCalled()
   })
 
+  it('does not block a release probe on the interactive recovery dialog', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const previous = process.env.EMATE_RELEASE_HEALTH_PROBE
+    process.env.EMATE_RELEASE_HEALTH_PROBE = '1'
+    try {
+      const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+      const onRendererBoot = vi.fn()
+      const runtime = new ElectronDesktopRuntime(async () => {}, onRendererBoot)
+      const report = { status: 'failed' as const, plugins: ['broken-client'] }
+
+      runtime.reportRendererBoot(report)
+
+      expect(onRendererBoot).toHaveBeenCalledWith(report)
+      expect(electron.dialog.showMessageBox).not.toHaveBeenCalled()
+    } finally {
+      if (previous === undefined) delete process.env.EMATE_RELEASE_HEALTH_PROBE
+      else process.env.EMATE_RELEASE_HEALTH_PROBE = previous
+    }
+  })
+
   it('fails a renderer generation that never reports boot health', async () => {
     vi.useFakeTimers()
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')

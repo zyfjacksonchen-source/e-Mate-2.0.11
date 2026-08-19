@@ -85,7 +85,7 @@
   overflow: visible;
 }
 
-:global([data-produced-files-row] > [data-emate-produced-file]) {
+:global([data-produced-files-row] > button[title]) {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -101,7 +101,7 @@
   text-decoration: none;
 }
 
-:global([data-produced-files-row] > [data-emate-produced-file]::before) {
+:global([data-produced-files-row] > button[title]::before) {
   content: 'FILE';
   display: inline-flex;
   flex: none;
@@ -118,17 +118,17 @@
   line-height: 18px;
 }
 
-:global([data-produced-files-row] > [data-emate-produced-file][title$='.pdf' i]::before) { content: 'PDF'; background: #e8495f; }
-:global([data-produced-files-row] > [data-emate-produced-file][title$='.doc' i]::before),
-:global([data-produced-files-row] > [data-emate-produced-file][title$='.docx' i]::before) { content: 'DOC'; background: #3978d5; }
-:global([data-produced-files-row] > [data-emate-produced-file][title$='.xls' i]::before),
-:global([data-produced-files-row] > [data-emate-produced-file][title$='.xlsx' i]::before),
-:global([data-produced-files-row] > [data-emate-produced-file][title$='.csv' i]::before) { content: 'XLS'; background: #23956b; }
-:global([data-produced-files-row] > [data-emate-produced-file][title$='.ppt' i]::before),
-:global([data-produced-files-row] > [data-emate-produced-file][title$='.pptx' i]::before) { content: 'PPT'; background: #d4663a; }
-:global([data-produced-files-row] > [data-emate-produced-file][title$='.zip' i]::before) { content: 'ZIP'; background: #8b5bb5; }
+:global([data-produced-files-row] > button[title$='.pdf' i]::before) { content: 'PDF'; background: #e8495f; }
+:global([data-produced-files-row] > button[title$='.doc' i]::before),
+:global([data-produced-files-row] > button[title$='.docx' i]::before) { content: 'DOC'; background: #3978d5; }
+:global([data-produced-files-row] > button[title$='.xls' i]::before),
+:global([data-produced-files-row] > button[title$='.xlsx' i]::before),
+:global([data-produced-files-row] > button[title$='.csv' i]::before) { content: 'XLS'; background: #23956b; }
+:global([data-produced-files-row] > button[title$='.ppt' i]::before),
+:global([data-produced-files-row] > button[title$='.pptx' i]::before) { content: 'PPT'; background: #d4663a; }
+:global([data-produced-files-row] > button[title$='.zip' i]::before) { content: 'ZIP'; background: #8b5bb5; }
 
-:global([data-produced-files-row] > [data-emate-produced-file]::after) {
+:global([data-produced-files-row] > button[title]::after) {
   content: '';
   flex: none;
   width: 10px;
@@ -137,7 +137,7 @@
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 17L17 7M7 7h10v10'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
-:global([data-produced-files-row] > [data-emate-produced-file]:hover) {
+:global([data-produced-files-row] > button[title]:hover) {
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
   text-decoration: none;

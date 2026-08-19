@@ -432,7 +432,8 @@ async function start(): Promise<void> {
     await runtime.mountScheduled()
     const rendererReport = await rendererBoot
     if (rendererReport.status === 'failed') {
-      throw new Error(rendererReport.error ?? `Renderer boot failed for ${String(rendererReport.plugins.length)} plugin(s)`)
+      const plugins = rendererReport.plugins.length === 0 ? 'unknown client plugin' : rendererReport.plugins.join(', ')
+      throw new Error(`Renderer boot failed for ${plugins}: ${rendererReport.error ?? 'client Loader did not provide an error'}`)
     }
     if (verifyingInstall !== undefined && installRecovery !== undefined) {
       await installRecovery.markHealthy(verifyingInstall.transactionId)
@@ -528,6 +529,14 @@ async function start(): Promise<void> {
     }
   } catch (cause) {
     runtime.stopRendererBootMonitoring()
+    const failure = cause instanceof Error ? cause.stack ?? cause.message : String(cause)
+    if (process.env.EMATE_RELEASE_HEALTH_PROBE === '1') {
+      writeFileSync(join(app.getPath('userData'), '.release-health-failure'), failure.slice(0, 16 * 1024), {
+        encoding: 'utf8',
+        flag: 'wx',
+        mode: 0o600,
+      })
+    }
     if (verifyingInstall !== undefined && installRecovery !== undefined) {
       try {
         await installRecovery.recordFailure(
@@ -538,7 +547,7 @@ async function start(): Promise<void> {
         process.stderr.write(`${BIN_NAME}: failed to persist plugin install recovery: ${recoveryCause instanceof Error ? recoveryCause.message : String(recoveryCause)}\n`)
       }
     }
-    process.stderr.write(`${BIN_NAME}: ${cause instanceof Error ? cause.stack ?? cause.message : String(cause)}\n`)
+    process.stderr.write(`${BIN_NAME}: ${failure}\n`)
     let exitCode = 1
     if (!profileGenerationCommitted && profileGenerationStartup !== undefined
       && profileGenerationStatePath !== undefined

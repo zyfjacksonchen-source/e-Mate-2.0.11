@@ -1,7 +1,7 @@
 import { cp, lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
 
@@ -53,6 +53,10 @@ for (const name of ecosystemPlugins) {
     recursive: true,
     force: true,
     dereference: true,
+    filter: path => {
+      const parts = relative(packageRoot, path).split(sep)
+      return !(parts[0] === 'node_modules' && parts[1] === 'node-pty' && parts[2] === 'build')
+    },
   })
 }
 

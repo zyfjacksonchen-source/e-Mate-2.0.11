@@ -95,8 +95,9 @@ describe('packaged desktop runtime verification', () => {
   ])('inspects the %s app.asar path', (platform, expectedPath) => {
     const list = vi.fn<ArchiveLister>(() => completeArchiveEntries(platform === 'win32' ? '\\' : '/'))
 
-    const exists = vi.fn<FileProbe>(() => true)
     const unpackedRoot = `${expectedPath}.unpacked`
+    const exists = vi.fn<FileProbe>(filename => platform !== 'darwin'
+      || !FORBIDDEN_MACOS_UNIVERSAL_ENTRIES.some(entry => filename === join(unpackedRoot, entry)))
     const resolvePackage = vi.fn<PackageResolver>(completePackageResolver(unpackedRoot))
 
     verifyPackagedRuntime(context('/build', platform), list, exists, resolvePackage)
@@ -108,6 +109,7 @@ describe('packaged desktop runtime verification', () => {
     expect(exists).toHaveBeenCalledTimes(
       REQUIRED_UNPACKED_RUNTIME_ENTRIES.length
         + (platform === 'win32' ? REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES.length : 0)
+        + (platform === 'darwin' ? FORBIDDEN_MACOS_UNIVERSAL_ENTRIES.length : 0)
         + 1,
     )
     expect(resolvePackage.mock.calls.map(([specifier]) => specifier))
@@ -171,6 +173,20 @@ describe('packaged desktop runtime verification', () => {
       filename => filename === join(unpackedRoot, forbidden)
         || !FORBIDDEN_MACOS_UNIVERSAL_ENTRIES
           .some(entry => filename === join(unpackedRoot, entry)),
+      completePackageResolver(unpackedRoot),
+    )).toThrow(`contains host-architecture build output: ${forbidden}`)
+  })
+
+  it('rejects a nested host-architecture node-pty build before universal merge', () => {
+    const runtimeContext = context('/build', 'darwin', 3)
+    const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)
+    const forbidden = FORBIDDEN_MACOS_UNIVERSAL_ENTRIES.find(entry => entry.startsWith('node_modules/dsh-better-sidebar/'))!
+
+    expect(() => verifyPackagedRuntime(
+      runtimeContext,
+      () => completeArchiveEntries(),
+      filename => filename === join(unpackedRoot, forbidden)
+        || !FORBIDDEN_MACOS_UNIVERSAL_ENTRIES.some(entry => filename === join(unpackedRoot, entry)),
       completePackageResolver(unpackedRoot),
     )).toThrow(`contains host-architecture build output: ${forbidden}`)
   })

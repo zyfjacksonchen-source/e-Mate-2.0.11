@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { ArtifactCapsules } from '../src/client/artifact-capsules.tsx'
 import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImagesDefinition } from '../src/client/image-gallery.tsx'
 import { ThinkingStatusBranding } from '../src/client/thinking-status.tsx'
 
@@ -60,7 +59,7 @@ describe('target conversation fidelity contract', () => {
     expect(chatCss).toContain('font-size: 13px;')
     expect(chatCss).toContain('width: 14px;')
     expect(chatCss).toContain("[data-chat-flow-kind='assistant-step'] [data-align='start']")
-    expect(chatCss).toContain("[data-produced-files-row] > [data-emate-produced-file]")
+    expect(chatCss).toContain('[data-produced-files-row] > button[title]')
     expect(chatCss).toContain('Beautiful UI Tool Chips icon geometry (MIT)')
     expect(chatCss).toContain("div:has(> [data-disclosure-row] [data-context-source])")
     expect(chatCss).toContain("[data-chat-flow-kind='e-mate-image-disclosure']")
@@ -72,27 +71,10 @@ describe('target conversation fidelity contract', () => {
     expect(source).toMatch(/id: 'stats',[\s\S]*?priority: -1/u)
   })
 
-  it('keeps the target produced-file opener while removing its local path outside the token stream', async () => {
-    const openFile = vi.fn()
-    const view = render(<div>
-      <div data-produced-files-row="">
-        <button type="button" title="/private/workspace/deliverables/Dairy Onboarding SOP.pdf" onClick={openFile}>
-          Dairy Onboarding SOP.pdf
-        </button>
-      </div>
-      <ArtifactCapsules />
-    </div>)
-    const file = screen.getByRole('button', { name: '打开 Dairy Onboarding SOP.pdf' })
-    await waitFor(() => { expect(file.hasAttribute('data-emate-produced-file')).toBe(true) })
-    expect(file.getAttribute('title')).toBe('Dairy Onboarding SOP.pdf')
-    expect(file.getAttribute('aria-label')).toBe('打开 Dairy Onboarding SOP.pdf')
-    expect(view.container.innerHTML).not.toContain('/private/workspace')
-    fireEvent.click(file)
-    expect(openFile).toHaveBeenCalledOnce()
-    const adapter = readFileSync(resolve('src/client/artifact-capsules.tsx'), 'utf8')
-    expect(adapter).not.toContain('document.body')
-    expect(adapter).not.toContain('document.querySelectorAll')
-    expect(adapter).toContain("observer.observe(row, { childList: true })")
+  it('styles the target produced-file buttons without registering a competing turn-tail chain entry', () => {
+    expect(source).not.toContain("ctx.slots.inject('conversation.chat.turnTail'")
+    expect(source).not.toContain('e-mate-artifact-capsules')
+    expect(chatCss).toContain('[data-produced-files-row] > button[title]')
   })
 
   it('shows the target ImageGallery by default without replacing its DOM or lightbox', () => {

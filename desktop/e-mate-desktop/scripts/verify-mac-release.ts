@@ -42,6 +42,7 @@ function launchArchitecture(executable: string, arch: 'arm64' | 'x86_64', root: 
     // belongs on Intel hardware, not a fresh translation cache on an Apple Silicon runner.
     const acknowledgement = arch === 'x86_64' ? '.release-native-ready-ack' : '.release-health-ack'
     const healthAck = join(userData, acknowledgement)
+    const healthFailure = join(userData, '.release-health-failure')
     const outcome = arch === 'x86_64' ? 'Electron native readiness' : 'an interactive shell'
     const startedAt = Date.now()
     const child = spawn('/usr/bin/arch', [`-${arch}`, executable, `--user-data-dir=${userData}`], {
@@ -54,6 +55,9 @@ function launchArchitecture(executable: string, arch: 'arm64' | 'x86_64', root: 
     const sleeper = new Int32Array(new SharedArrayBuffer(4))
     const deadline = Date.now() + RELEASE_HEALTH_TIMEOUT_MS
     while (!existsSync(healthAck)) {
+      if (existsSync(healthFailure)) {
+        throw new Error(`${arch} packaged application failed before ${outcome}: ${readFileSync(healthFailure, 'utf8')}`)
+      }
       try {
         process.kill(child.pid, 0)
       } catch {
