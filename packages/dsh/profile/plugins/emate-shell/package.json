@@ -33,6 +33,13 @@
       "schema_version": 1,
       "id": "@e-mate/dsh-client-shell",
       "kind": "profile",
+      "base_imports": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-attachment",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "react",
+        "react-dom"
+      ],
       "base_contracts": ["e-mate-desktop-profile-v1-dsh-df78045a127e"]
     },
     "harnessVersion": "0.1.0-rc.7",

@@ -28,6 +28,7 @@ const base: ProfileBaseContract = {
   profile_format: 1,
   harness_version: '0.1.0-rc.7',
   harness_commit: 'df78045a127e32cb5b942defba52c539590d1596',
+  runtime_imports: {},
   profile_signing_keys: [{
     id: 'test-key',
     algorithm: 'ed25519',

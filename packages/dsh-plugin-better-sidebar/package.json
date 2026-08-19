@@ -38,6 +38,7 @@
       "schema_version": 1,
       "id": "@e-mate/dsh-plugin-better-sidebar",
       "kind": "profile",
+      "base_imports": ["react"],
       "base_contracts": ["e-mate-desktop-profile-v1-dsh-df78045a127e"]
     },
     "harnessVersion": "0.1.0-rc.7",

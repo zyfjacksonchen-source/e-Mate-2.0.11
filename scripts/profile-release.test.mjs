@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
-import { emitComponent } from './component-release.mjs'
+import { componentRuntimeParserAvailable, emitComponent } from './component-release.mjs'
 import { composeProfileReleaseCandidate } from './profile-release.mjs'
 
 const roots = []
@@ -44,6 +44,7 @@ function fixture() {
     },
     harness_version: '0.1.0-rc.7',
     harness_commit: 'df78045a127e32cb5b942defba52c539590d1596',
+    runtime_imports: {},
     profile_signing_keys: [{
       id: keyId,
       algorithm: 'ed25519',
@@ -55,17 +56,17 @@ function fixture() {
     const id = `@e-mate/dsh-plugin-${slug}`
     const componentRoot = join(root, 'packages', `dsh-plugin-${slug}`)
     mkdirSync(join(componentRoot, 'lib'), { recursive: true })
-    writeFileSync(join(componentRoot, 'lib/index.js'), `export const value = ${JSON.stringify(slug)}\n`)
+    writeJson(join(componentRoot, 'lib/index.json'), { value: slug })
     writeFileSync(join(componentRoot, 'cordis.patch.yml'), '[]\n')
     writeJson(join(componentRoot, 'package.json'), {
       name: id,
       version: '2.0.11',
       type: 'module',
-      main: 'lib/index.js',
+      main: 'lib/index.json',
       files: ['lib', 'cordis.patch.yml'],
       dsh: { bundle: { patch: './cordis.patch.yml' } },
       eMate: {
-        component: { schema_version: 1, id, kind: 'profile', base_contracts: [baseId] },
+        component: { schema_version: 1, id, kind: 'profile', base_imports: [], base_contracts: [baseId] },
         harnessVersion: '0.1.0-rc.7',
         harnessCommit: 'df78045a127e32cb5b942defba52c539590d1596',
       },
@@ -101,6 +102,21 @@ function artifactRequest(reference, artifact) {
   }
 }
 
+test('component emission rejects a runtime import missing from the signed Base ABI declaration', {
+  skip: !componentRuntimeParserAvailable() && 'Harness toolchain is intentionally absent in the impact lane',
+}, () => {
+  const { root, components } = fixture()
+  const component = components[0]
+  writeFileSync(
+    join(root, component.root, 'lib/index.js'),
+    'import { defineTool } from "@deepseek-ai/dsh-tools"\nexport { defineTool }\n',
+  )
+  assert.throws(
+    () => emit(root, component.id, join(root, 'dist/undeclared'), 'f'.repeat(40)),
+    /runtime imports do not match its fixed Base ABI declaration/u,
+  )
+})
+
 test('a changed component is merged with the complete signed accepted set before admission', async () => {
   const { root, components, keyId, privateKeyPem } = fixture()
   const firstArtifacts = join(root, 'dist/first-components')
@@ -125,7 +141,7 @@ test('a changed component is merged with the complete signed accepted set before
   assert.deepEqual(first.release.payload.components.map(component => component.id), components.map(component => component.id))
 
   const changed = components[0]
-  writeFileSync(join(root, changed.root, 'lib/index.js'), 'export const value = "changed"\n')
+  writeJson(join(root, changed.root, 'lib/index.json'), { value: 'changed' })
   const secondArtifact = join(root, 'dist/second-components', changed.id.split('/').at(-1))
   const secondCommit = 'b'.repeat(40)
   emit(root, changed.id, secondArtifact, secondCommit)

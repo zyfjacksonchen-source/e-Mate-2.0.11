@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto'
+import { builtinModules, createRequire } from 'node:module'
 import {
   chmodSync,
   copyFileSync,
@@ -16,6 +17,24 @@ import { fileURLToPath } from 'node:url'
 import { componentJobsFor, loadReleaseBoundary } from './change-impact.mjs'
 
 const SHA40 = /^[0-9a-f]{40}$/u
+const BUILTIN_MODULES = new Set(builtinModules.flatMap(name => [name, `node:${name}`]))
+const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)(?:\/|$)/u
+let typescript
+
+function runtimeImportParser() {
+  typescript ??= createRequire(new URL('../upstream/deepseek-harness/package.json', import.meta.url))('typescript')
+  return typescript
+}
+
+/** The impact lane intentionally runs before the Harness toolchain is installed. */
+export function componentRuntimeParserAvailable() {
+  try {
+    runtimeImportParser()
+    return true
+  } catch {
+    return false
+  }
+}
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
@@ -102,6 +121,50 @@ export function targetEntries(entries, component, target) {
   })
 }
 
+function packageName(specifier) {
+  if (specifier.startsWith('.') || specifier.startsWith('/') || BUILTIN_MODULES.has(specifier)) return
+  const match = PACKAGE_NAME.exec(specifier)
+  if (match === null) throw new Error(`unsupported component runtime import: ${specifier}`)
+  return match[0].replace(/\/$/u, '')
+}
+
+/** Extract the exact bare package imports left external in the emitted runtime closure. */
+export function componentRuntimeImports(entries) {
+  const runtimeEntries = entries.filter(entry => /\.[cm]?js$/u.test(entry.path))
+  if (runtimeEntries.length === 0) return []
+  const ts = runtimeImportParser()
+  const imports = new Set()
+  for (const entry of runtimeEntries) {
+    const source = ts.createSourceFile(
+      entry.source,
+      readFileSync(entry.source, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.JS,
+    )
+    if (source.parseDiagnostics.length > 0) throw new Error(`component runtime JavaScript is invalid: ${entry.path}`)
+    const visit = node => {
+      let specifier
+      if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+        && node.moduleSpecifier !== undefined && ts.isStringLiteral(node.moduleSpecifier)) {
+        specifier = node.moduleSpecifier.text
+      } else if (ts.isCallExpression(node) && node.arguments.length === 1
+        && ts.isStringLiteral(node.arguments[0])
+        && (node.expression.kind === ts.SyntaxKind.ImportKeyword
+          || ts.isIdentifier(node.expression) && node.expression.text === 'require')) {
+        specifier = node.arguments[0].text
+      }
+      if (specifier !== undefined) {
+        const name = packageName(specifier)
+        if (name !== undefined) imports.add(name)
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(source)
+  }
+  return [...imports].sort(comparePath)
+}
+
 /** Emit one deterministic, unpacked component payload and integrity manifest. */
 export function emitComponent(options) {
   const root = resolve(options.root)
@@ -117,6 +180,10 @@ export function emitComponent(options) {
   }
   const target = selectTarget(component, options.target)
   const entries = targetEntries(componentFiles(packageRoot, manifest), component, target)
+  const baseImports = componentRuntimeImports(entries)
+  if (JSON.stringify(baseImports) !== JSON.stringify(component.base_imports)) {
+    throw new Error(`component runtime imports do not match its fixed Base ABI declaration: ${component.id}`)
+  }
   rmSync(output, { recursive: true, force: true })
   const payloadRoot = join(output, 'files')
   mkdirSync(payloadRoot, { recursive: true })
@@ -145,6 +212,7 @@ export function emitComponent(options) {
     target,
     source_commit: sourceCommit,
     base_contracts: [...manifest.eMate.component.base_contracts].sort(),
+    base_imports: baseImports,
     harness_contract: {
       version: boundary.baseContract.harness_version,
       commit: boundary.baseContract.harness_commit,
@@ -206,6 +274,7 @@ function main() {
         kind: component.kind,
         root: component.root,
         source_roots: component.source_roots,
+        base_imports: component.base_imports,
         desktop: component.desktop,
         targets: component.targets,
       })),

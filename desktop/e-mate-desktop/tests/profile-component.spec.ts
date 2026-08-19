@@ -17,6 +17,7 @@ const base: ProfileBaseContract = {
   profile_format: 1,
   harness_version: '0.1.0-rc.7',
   harness_commit: 'df78045a127e32cb5b942defba52c539590d1596',
+  runtime_imports: {},
   profile_signing_keys: [],
 }
 const sourceCommit = 'a'.repeat(40)
@@ -32,6 +33,7 @@ const packageValue = {
       schema_version: 1,
       id: '@e-mate/dsh-plugin-memory-evolve',
       kind: 'profile',
+      base_imports: [],
       base_contracts: [base.id],
     },
   },
@@ -61,6 +63,7 @@ function fixture(): { reference: ProfileReleaseComponent, objects: Map<string, B
     target: null,
     source_commit: sourceCommit,
     base_contracts: [base.id],
+    base_imports: [],
     harness_contract: { version: base.harness_version, commit: base.harness_commit },
     package_entry: packageValue.main,
     dsh: packageValue.dsh,
@@ -142,7 +145,7 @@ describe('Profile component materialization', () => {
         license: 'MIT',
         main: 'index.mjs',
         dsh,
-        eMate: { component: { schema_version: 1, id, kind: 'platform-profile', base_contracts: [base.id] } },
+        eMate: { component: { schema_version: 1, id, kind: 'platform-profile', base_imports: [], base_contracts: [base.id] } },
       }, null, 2)}\n`)
       const payload = new Map<string, { bytes: Buffer, mode: '0644' | '0755' }>([
         ['index.mjs', { bytes: indexBytes, mode: '0644' }],
@@ -164,6 +167,7 @@ describe('Profile component materialization', () => {
         target,
         source_commit: sourceCommit,
         base_contracts: [base.id],
+        base_imports: [],
         harness_contract: { version: base.harness_version, commit: base.harness_commit },
         package_entry: 'index.mjs',
         dsh,

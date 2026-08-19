@@ -2,14 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { isBaseProfileRuntimeSpecifier } from '../src/module-resolution.ts'
 
 describe('hot Profile component runtime boundary', () => {
-  it('exposes only the pinned DSH and React Base ABI', () => {
-    expect(isBaseProfileRuntimeSpecifier('@deepseek-ai/dsh-tools')).toBe(true)
-    expect(isBaseProfileRuntimeSpecifier('@deepseek-ai/dsh-skill-filesystem/internal')).toBe(true)
-    expect(isBaseProfileRuntimeSpecifier('react/jsx-runtime')).toBe(true)
-    expect(isBaseProfileRuntimeSpecifier('react-dom/client')).toBe(true)
-    expect(isBaseProfileRuntimeSpecifier('@modelcontextprotocol/sdk/client/index.js')).toBe(false)
-    expect(isBaseProfileRuntimeSpecifier('yaml')).toBe(false)
-    expect(isBaseProfileRuntimeSpecifier('zod')).toBe(false)
-    expect(isBaseProfileRuntimeSpecifier('@e-mate/dsh-plugin-sibling')).toBe(false)
+  it('exposes only the exact Base ABI imports declared by that component', () => {
+    const imports = new Set(['@deepseek-ai/dsh-tools', 'react'])
+    expect(isBaseProfileRuntimeSpecifier('@deepseek-ai/dsh-tools', imports)).toBe(true)
+    expect(isBaseProfileRuntimeSpecifier('@deepseek-ai/dsh-tools/internal', imports)).toBe(true)
+    expect(isBaseProfileRuntimeSpecifier('react/jsx-runtime', imports)).toBe(true)
+    expect(isBaseProfileRuntimeSpecifier('@deepseek-ai/dsh-skill-filesystem', imports)).toBe(false)
+    expect(isBaseProfileRuntimeSpecifier('react-dom/client', imports)).toBe(false)
+    expect(isBaseProfileRuntimeSpecifier('@modelcontextprotocol/sdk/client/index.js', imports)).toBe(false)
+    expect(isBaseProfileRuntimeSpecifier('yaml', imports)).toBe(false)
+    expect(isBaseProfileRuntimeSpecifier('zod', imports)).toBe(false)
+    expect(isBaseProfileRuntimeSpecifier('@e-mate/dsh-plugin-sibling', imports)).toBe(false)
   })
 })

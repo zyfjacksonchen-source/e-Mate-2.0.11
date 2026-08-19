@@ -13,6 +13,7 @@ const COMPONENT_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 const BASE_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u
 const KEY_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u
 const HARNESS_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
+const BASE_RUNTIME_PACKAGE = /^(?:@deepseek-ai\/[a-z0-9][a-z0-9._-]*|react(?:-dom)?)$/u
 const MAX_BASE_CONTRACT_BYTES = 64 * 1024
 
 export interface ProfileSigningKey {
@@ -28,6 +29,7 @@ export interface ProfileBaseContract {
   readonly profile_format: number
   readonly harness_version: string
   readonly harness_commit: string
+  readonly runtime_imports: Readonly<Record<string, string>>
   readonly profile_signing_keys: readonly ProfileSigningKey[]
 }
 
@@ -124,7 +126,7 @@ function strictBase64(value: unknown): Buffer | undefined {
 export function parseProfileBaseContract(value: unknown): ProfileBaseContract | undefined {
   if (!record(value) || !exactKeys(value, [
     'schema_version', 'id', 'desktop_api', 'profile_format', 'desktop_reference',
-    'harness_version', 'harness_commit', 'profile_signing_keys',
+    'harness_version', 'harness_commit', 'runtime_imports', 'profile_signing_keys',
   ]) || value.schema_version !== 1 || typeof value.id !== 'string' || !BASE_ID.test(value.id)
     || !Number.isSafeInteger(value.desktop_api) || (value.desktop_api as number) <= 0
     || !Number.isSafeInteger(value.profile_format) || (value.profile_format as number) <= 0
@@ -140,7 +142,13 @@ export function parseProfileBaseContract(value: unknown): ProfileBaseContract | 
     || typeof value.desktop_reference.harness_commit !== 'string' || !SHA40.test(value.desktop_reference.harness_commit)
     || typeof value.desktop_reference.harness_version !== 'string'
     || !HARNESS_VERSION.test(value.desktop_reference.harness_version)
+    || !record(value.runtime_imports)
     || !Array.isArray(value.profile_signing_keys) || value.profile_signing_keys.length === 0) return
+
+  const runtimeImports = Object.entries(value.runtime_imports)
+  if (runtimeImports.some(([name, version]) => !BASE_RUNTIME_PACKAGE.test(name)
+    || typeof version !== 'string' || !HARNESS_VERSION.test(version))
+    || runtimeImports.some(([name], index) => index > 0 && runtimeImports[index - 1]![0] >= name)) return
 
   const keys: ProfileSigningKey[] = []
   for (const item of value.profile_signing_keys) {
@@ -167,6 +175,7 @@ export function parseProfileBaseContract(value: unknown): ProfileBaseContract | 
     profile_format: value.profile_format as number,
     harness_version: value.harness_version,
     harness_commit: value.harness_commit,
+    runtime_imports: Object.fromEntries(runtimeImports) as Record<string, string>,
     profile_signing_keys: keys,
   }
 }

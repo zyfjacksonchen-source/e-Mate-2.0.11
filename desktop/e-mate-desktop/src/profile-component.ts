@@ -38,6 +38,7 @@ export interface ProfileComponentManifest {
   readonly target: ProfileComponentTarget | null
   readonly source_commit: string
   readonly base_contracts: readonly string[]
+  readonly base_imports: readonly string[]
   readonly harness_contract: {
     readonly version: string
     readonly commit: string
@@ -61,9 +62,9 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]):
   return actual.length === wanted.length && actual.every((key, index) => key === wanted[index])
 }
 
-function sortedUniqueStrings(value: unknown): value is string[] {
+function sortedUniqueStrings(value: unknown, allowEmpty = false): value is string[] {
   return Array.isArray(value)
-    && value.length > 0
+    && (allowEmpty || value.length > 0)
     && value.every(item => typeof item === 'string' && item !== '')
     && value.every((item, index) => index === 0 || value[index - 1]! < item)
 }
@@ -110,13 +111,15 @@ export function parseProfileComponentManifest(
   } catch { return }
   if (!record(value) || !exactKeys(value, [
     'schema_version', 'id', 'slug', 'version', 'kind', 'target', 'source_commit', 'base_contracts',
-    'harness_contract', 'package_entry', 'dsh', 'total_bytes', 'files',
+    'base_imports', 'harness_contract', 'package_entry', 'dsh', 'total_bytes', 'files',
   ]) || value.schema_version !== 1
     || value.id !== reference.id || value.slug !== componentSlug(reference.id)
     || value.version !== reference.version || !STABLE_VERSION.test(value.version as string)
     || value.kind !== reference.kind || value.source_commit !== reference.manifest_source_commit
     || typeof value.source_commit !== 'string' || !SHA40.test(value.source_commit)
     || !sortedUniqueStrings(value.base_contracts) || !value.base_contracts.includes(base.id)
+    || !sortedUniqueStrings(value.base_imports, true)
+    || value.base_imports.some(name => !Object.hasOwn(base.runtime_imports, name))
     || !record(value.harness_contract)
     || !exactKeys(value.harness_contract, ['version', 'commit'])
     || value.harness_contract.version !== base.harness_version
@@ -143,6 +146,7 @@ export function parseProfileComponentManifest(
     target,
     source_commit: reference.manifest_source_commit,
     base_contracts: [...value.base_contracts],
+    base_imports: [...value.base_imports],
     harness_contract: { version: base.harness_version, commit: base.harness_commit },
     package_entry: value.package_entry,
     dsh: value.dsh,
@@ -291,11 +295,13 @@ async function verifyPackageContract(
     || value.license !== 'MIT' || value.main !== manifest.package_entry
     || !record(value.dsh) || canonical(value.dsh) !== canonical(manifest.dsh)
     || !record(value.eMate) || !record(value.eMate.component)
+    || !exactKeys(value.eMate.component, ['schema_version', 'id', 'kind', 'base_imports', 'base_contracts'])
     || value.eMate.component.schema_version !== 1
     || value.eMate.component.id !== manifest.id
     || value.eMate.component.kind !== manifest.kind
-    || !Array.isArray(value.eMate.component.base_contracts)
-    || !value.eMate.component.base_contracts.includes(base.id)) {
+    || canonical(value.eMate.component.base_contracts) !== canonical(manifest.base_contracts)
+    || canonical(value.eMate.component.base_imports) !== canonical(manifest.base_imports)
+    || !manifest.base_contracts.includes(base.id)) {
     throw new Error('component package contract does not match its verified manifest')
   }
 }

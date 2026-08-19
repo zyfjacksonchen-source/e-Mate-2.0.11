@@ -39,6 +39,13 @@
       "schema_version": 1,
       "id": "@e-mate/dsh-plugin-find-skill",
       "kind": "profile",
+      "base_imports": [
+        "@deepseek-ai/dsh-home-paths",
+        "@deepseek-ai/dsh-skill",
+        "@deepseek-ai/dsh-tools",
+        "@deepseek-ai/schemastery",
+        "react"
+      ],
       "base_contracts": ["e-mate-desktop-profile-v1-dsh-df78045a127e"]
     },
     "harnessVersion": "0.1.0-rc.7",

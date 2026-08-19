@@ -6,7 +6,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { emitComponent, componentFiles, targetEntries } from './component-release.mjs'
+import {
+  componentFiles,
+  componentRuntimeImports,
+  componentRuntimeParserAvailable,
+  emitComponent,
+  targetEntries,
+} from './component-release.mjs'
 
 const root = await mkdtemp(join(tmpdir(), 'e-mate-component-release-'))
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url))
@@ -74,6 +80,25 @@ describe('component payload closure', () => {
     symlinkSync(join(packageRoot, 'package.json'), join(packageRoot, 'linked.json'))
     assert.throws(() => componentFiles(packageRoot, { files: ['../outside'] }), /unsafe/u)
     assert.throws(() => componentFiles(packageRoot, { files: ['linked.json'] }), /symlinks/u)
+  })
+
+  it('extracts only real external runtime imports from emitted JavaScript', {
+    skip: !componentRuntimeParserAvailable() && 'Harness toolchain is intentionally absent in the impact lane',
+  }, () => {
+    const source = join(root, 'runtime-imports.js')
+    writeFileSync(source, [
+      'import { readFile } from "node:fs/promises"',
+      'import { defineTool } from "@deepseek-ai/dsh-tools"',
+      'import "./local.js"',
+      'const react = require("react/jsx-runtime")',
+      '// import ignored from "yaml"',
+      'export { react, defineTool, readFile }',
+      '',
+    ].join('\n'))
+    assert.deepEqual(componentRuntimeImports([{ path: 'lib/index.js', source }]), [
+      '@deepseek-ai/dsh-tools',
+      'react',
+    ])
   })
 
   it('declares the real Shell package entry in its component allowlist', () => {

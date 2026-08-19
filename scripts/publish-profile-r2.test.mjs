@@ -46,6 +46,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
     },
     harness_version: '0.1.0-rc.7',
     harness_commit: 'df78045a127e32cb5b942defba52c539590d1596',
+    runtime_imports: {},
     profile_signing_keys: [{
       id: keyId,
       algorithm: 'ed25519',
@@ -60,17 +61,17 @@ test('publication admits bootstrap and its direct successor before exposing acti
     desktop: 'hot-profile',
     cli: true,
   }] })
-  writeFileSync(join(componentRoot, 'lib/index.js'), 'export const value = true\n')
+  writeJson(join(componentRoot, 'lib/index.json'), { value: true })
   writeFileSync(join(componentRoot, 'cordis.patch.yml'), '[]\n')
   writeJson(join(componentRoot, 'package.json'), {
     name: componentId,
     version: '2.0.11',
     type: 'module',
-    main: 'lib/index.js',
+    main: 'lib/index.json',
     files: ['lib', 'cordis.patch.yml'],
     dsh: { bundle: { patch: './cordis.patch.yml' } },
     eMate: {
-      component: { schema_version: 1, id: componentId, kind: 'profile', base_contracts: [baseId] },
+      component: { schema_version: 1, id: componentId, kind: 'profile', base_imports: [], base_contracts: [baseId] },
       harnessVersion: '0.1.0-rc.7',
       harnessCommit: 'df78045a127e32cb5b942defba52c539590d1596',
     },
@@ -117,7 +118,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
     const target = JSON.parse(readFileSync(join(candidate, 'admission.json'), 'utf8')).target
     return [`${target.platform}-${target.arch}`, envelope]
   }))
-  writeFileSync(join(componentRoot, 'lib/index.js'), 'export const value = false\n')
+  writeJson(join(componentRoot, 'lib/index.json'), { value: false })
   const nextSourceCommit = 'b'.repeat(40)
   const nextArtifact = join(root, 'dist/components-next/fixture')
   emitComponent({ root, id: componentId, out: nextArtifact, sourceCommit: nextSourceCommit })

@@ -35,6 +35,7 @@ describe('signed Profile update path', () => {
       profile_format: 1,
       harness_version: '0.1.0-rc.7',
       harness_commit: 'd'.repeat(40),
+      runtime_imports: {},
       profile_signing_keys: [{
         id: 'test-key',
         algorithm: 'ed25519',
@@ -51,7 +52,7 @@ describe('signed Profile update path', () => {
       license: 'MIT',
       main: 'index.js',
       dsh,
-      eMate: { component: { schema_version: 1, id, kind: 'profile', base_contracts: [base.id] } },
+      eMate: { component: { schema_version: 1, id, kind: 'profile', base_imports: [], base_contracts: [base.id] } },
     }, null, 2)}\n`)
     const indexBytes = Buffer.from('export const name = "memory-evolve"\n')
     const files = [
@@ -67,6 +68,7 @@ describe('signed Profile update path', () => {
       target: null,
       source_commit: commit,
       base_contracts: [base.id],
+      base_imports: [],
       harness_contract: { version: base.harness_version, commit: base.harness_commit },
       package_entry: 'index.js',
       dsh,

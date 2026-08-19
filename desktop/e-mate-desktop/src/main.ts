@@ -388,6 +388,7 @@ async function start(): Promise<void> {
     const releasePackageResolver = installProfilePackageResolver(
       prepared.bareModuleBaseUrl,
       profileGenerationStartup.generation?.component_directories.values(),
+      baseContract.runtime_imports,
     )
     const ctx = await boot(
       BIN_NAME,

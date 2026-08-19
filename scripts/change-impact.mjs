@@ -9,6 +9,8 @@ export const BASE_CONTRACT_PATH = 'desktop/e-mate-desktop/base-contract.json'
 const SHELL_COMPONENT_ROOT = 'packages/dsh/profile/plugins/emate-shell'
 const COMPONENT_INVENTORY_PATH = 'packages/dsh/profile/component-inventory.json'
 const STABLE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u
+const PACKAGE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
+const BASE_RUNTIME_PACKAGE = /^(?:@deepseek-ai\/[a-z0-9][a-z0-9._-]*|react(?:-dom)?)$/u
 const SHA40 = /^[0-9a-f]{40}$/u
 const PLATFORM_TARGETS = ['darwin-arm64', 'darwin-x64', 'win32-x64']
 const TARGET_RUNNERS = new Map([
@@ -116,6 +118,12 @@ function safePackageEntry(value) {
     && value.split('/').every(segment => segment !== '' && segment !== '.')
 }
 
+function sortedUniqueStrings(value) {
+  return Array.isArray(value)
+    && value.every(item => typeof item === 'string' && item !== '')
+    && value.every((item, index) => index === 0 || value[index - 1] < item)
+}
+
 function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
 }
@@ -185,6 +193,10 @@ function componentInventory(root) {
 function validateBaseContract(value) {
   const errors = []
   if (!record(value)) return ['base contract must be an object']
+  if (!exactKeys(value, [
+    'schema_version', 'id', 'desktop_api', 'profile_format', 'desktop_reference',
+    'harness_version', 'harness_commit', 'runtime_imports', 'profile_signing_keys',
+  ])) errors.push('base contract fields are invalid')
   if (value.schema_version !== 1) errors.push('base contract schema_version must be 1')
   if (typeof value.id !== 'string' || !/^e-mate-desktop-profile-v[1-9][0-9]*-dsh-[0-9a-f]{12}$/u.test(value.id)) {
     errors.push('base contract id is invalid')
@@ -202,6 +214,13 @@ function validateBaseContract(value) {
   if (value.harness_version !== '0.1.0-rc.7') errors.push('base contract Harness version drifted')
   if (value.harness_commit !== 'df78045a127e32cb5b942defba52c539590d1596') {
     errors.push('base contract Harness commit drifted')
+  }
+  const runtimeImports = record(value.runtime_imports) ? Object.entries(value.runtime_imports) : []
+  if (!record(value.runtime_imports)
+    || runtimeImports.some(([name, version]) => !BASE_RUNTIME_PACKAGE.test(name)
+      || typeof version !== 'string' || !PACKAGE_VERSION.test(version))
+    || runtimeImports.some(([name], index) => index > 0 && runtimeImports[index - 1][0] >= name)) {
+    errors.push('base contract runtime imports are invalid')
   }
   if (!Array.isArray(value.profile_signing_keys) || value.profile_signing_keys.length === 0
     || value.profile_signing_keys.some(key => !record(key)
@@ -254,6 +273,9 @@ function validateComponent(root, inventory, baseContract, desktopDependencies) {
   if (component === undefined) {
     errors.push('eMate.component metadata is missing')
   } else {
+    if (!exactKeys(component, ['schema_version', 'id', 'kind', 'base_imports', 'base_contracts'])) {
+      errors.push('component metadata fields are invalid')
+    }
     if (component.schema_version !== 1) errors.push('component schema_version must be 1')
     if (component.id !== manifest.name) errors.push('component id must equal package name')
     if (!['profile', 'platform-profile'].includes(component.kind)) errors.push('component kind is invalid')
@@ -262,6 +284,12 @@ function validateComponent(root, inventory, baseContract, desktopDependencies) {
       || component.base_contracts.length !== 1
       || component.base_contracts[0] !== baseContract.id) {
       errors.push(`component compatibility must equal the one tested base contract ${String(baseContract.id)}`)
+    }
+    if (!sortedUniqueStrings(component.base_imports)) {
+      errors.push('component Base runtime imports must be a sorted unique string array')
+    } else if (component.base_imports.some(name => !record(baseContract.runtime_imports)
+      || !Object.hasOwn(baseContract.runtime_imports, name))) {
+      errors.push('component imports a package outside the fixed Base runtime ABI')
     }
   }
   if (desktopDependencies.has(manifest.name)) {
@@ -286,6 +314,7 @@ function validateComponent(root, inventory, baseContract, desktopDependencies) {
     cli: inventory.cli,
     source_roots: inventory.source_roots,
     targets: inventory.targets,
+    base_imports: sortedUniqueStrings(component?.base_imports) ? [...component.base_imports] : [],
     errors,
   }
 }
@@ -309,6 +338,13 @@ export function loadReleaseBoundary(root = resolve(fileURLToPath(new URL('..', i
         errors.push(`desktop/e-mate-desktop/package.json: ${name} must equal ${String(baseContract.harness_version)}`)
       }
     }
+    if (record(baseContract.runtime_imports)) {
+      for (const [name, version] of Object.entries(baseContract.runtime_imports)) {
+        if (desktopDependencies.get(name) !== version) {
+          errors.push(`desktop/e-mate-desktop/package.json: Base runtime import ${name} must equal ${String(version)}`)
+        }
+      }
+    }
     if (trackedGitlinkCommit(root, 'upstream/deepseek-harness') !== baseContract.harness_commit) {
       errors.push('upstream/deepseek-harness: Git submodule commit does not match the Base contract')
     }
@@ -326,6 +362,11 @@ export function loadReleaseBoundary(root = resolve(fileURLToPath(new URL('..', i
   ))
   for (const component of components) {
     errors.push(...component.errors.map(error => `${component.root}: ${error}`))
+  }
+  const baseRuntimeImports = record(baseContract.runtime_imports) ? Object.keys(baseContract.runtime_imports).sort() : []
+  const declaredRuntimeImports = [...new Set(components.flatMap(component => component.base_imports))].sort()
+  if (JSON.stringify(baseRuntimeImports) !== JSON.stringify(declaredRuntimeImports)) {
+    errors.push(`${BASE_CONTRACT_PATH}: runtime imports must equal the component-declared Base ABI union`)
   }
   return {
     baseContract,

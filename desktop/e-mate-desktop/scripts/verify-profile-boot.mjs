@@ -60,12 +60,15 @@ try {
   // Deliberately inject stale target state: the e-Mate desktop must still boot
   // its fixed compatibility profile without exposing a mode selector.
   writeFileSync(join(home, 'settings.yaml'), 'dsh-desktop:\n  mode: advanced\n')
+  const selectedBase = generationOptions.base === undefined
+    ? undefined
+    : loadProfileBaseContract(generationOptions.base)
   const selectedGeneration = generationOptions.store === undefined
     ? undefined
     : await loadProfileGeneration({
         root: generationOptions.store,
         id: generationOptions.generation,
-        base: loadProfileBaseContract(generationOptions.base),
+        base: selectedBase,
         expected_component_ids: EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
         target: selectedTarget,
       })
@@ -90,6 +93,7 @@ try {
   releasePackageResolver = installProfilePackageResolver(
     prepared.bareModuleBaseUrl,
     selectedGeneration?.component_directories.values(),
+    selectedBase?.runtime_imports,
   )
   const runtime = {
     platform: selectedTarget.platform,

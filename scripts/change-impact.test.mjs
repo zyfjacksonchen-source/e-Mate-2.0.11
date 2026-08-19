@@ -91,6 +91,21 @@ describe('repository release boundary', () => {
 
       assert.equal(existsSync(join(checkout, 'upstream/deepseek-harness/package.json')), false)
       assert.equal(loadReleaseBoundary(checkout).valid, true)
+
+      const basePath = join(checkout, 'desktop/e-mate-desktop/base-contract.json')
+      const baseContract = JSON.parse(readFileSync(basePath, 'utf8'))
+      baseContract.runtime_imports.react = '18.3.2'
+      writeFileSync(basePath, `${JSON.stringify(baseContract, null, 2)}\n`)
+      assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /Base runtime import react must equal 18\.3\.2/u)
+      copyFileSync(join(root, 'desktop/e-mate-desktop/base-contract.json'), basePath)
+
+      const memoryPath = join(checkout, 'packages/dsh-plugin-memory-evolve/package.json')
+      const memoryManifest = JSON.parse(readFileSync(memoryPath, 'utf8'))
+      memoryManifest.eMate.component.base_imports = ['yaml']
+      writeFileSync(memoryPath, `${JSON.stringify(memoryManifest, null, 2)}\n`)
+      assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /outside the fixed Base runtime ABI/u)
+      copyFileSync(join(root, 'packages/dsh-plugin-memory-evolve/package.json'), memoryPath)
+
       const acceptedBase = baseSdkFingerprint(checkout)
 
       const componentProbe = 'packages/dsh-plugin-memory-evolve/src/fingerprint-probe.ts'
