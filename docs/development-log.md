@@ -1396,3 +1396,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 安装态 Computer Use 已确认精简 MV3 扩展连接到 e-Mate，Agent 的原生 `browser_snapshot` 与 `browser_click` 能读取 Example Domain 并把真实 Chrome 标签跳转到 IANA；但点击 Tool 一直停在运行中。
 - 根因在同一扩展的链接点击实现：`el.click()` 触发跨文档导航后仍等待旧页面稳定，旧 content script 与 `tabs.sendMessage` 回包端口先被销毁，导致 Harness 一直等到工具超时。修复复用 `browser_navigate` 的既有模式，先返回 Tool 结果，再于下一事件轮执行真实链接点击；不增加桥接协议、会话或浏览器状态。
 - 新增最小回归锁定链接分支必须延后点击且不得在旧文档等待；最终门禁是重建扩展后重复同一自然语言任务，确认点击后能继续快照并生成最终回复。
+
+## 2026-08-19 · 2.0.9 安装态浏览器与企业生产验收
+
+- 重建扩展并重新加载后，安装态 Computer Use 通过同一 Agent 回合完成 `browser_snapshot → browser_click → browser_snapshot`：Chrome 从 Example Domain 跳转到 IANA Example Domains，点击 Tool 正常结束并生成最终回复；消息尾继续显示用时、首 token 与 `tok/s`。浏览器包回归为 `6/6`。
+- Usage Dashboard 已把生产静态目录原子切换到新不可变 release；公开脚本 SHA-256 为 `b636db0337d5f22b637242d49b734adf217032f0242e0b708758d61b11562ee6`。修复复用 Auth Gateway 已有 refresh token 轮换：access token 过期时单飞刷新并重试原查询，刷新失败才清除会话；没有新增身份或会话协议。
+- Model Gateway 仅重建并替换自身容器，生产镜像 ID 为 `sha256:483a3933f2184c02cd1c967f632f731013b5a63359bfdaa8eedd65500aed24da`，Auth、Analytics、Postgres 与 Redis 未重建。DeepSeek/豆包的 Chat Completions 适配器现在接受管理端既有 `max_output_tokens`，并映射为受路由上限约束的 `max_tokens`，不再在上游请求前被精确字段校验拒绝。
+- 用户已确认生产审计面板、DeepSeek 与豆包验收正常，并要求停止重复登录/实测；飞书与腾讯文档沿用此前用户验收，钉钉/微信和 Windows 实机测试按用户要求不进入本次真实测试。Windows 仍保留最终 CI、安装包和清单门禁。
