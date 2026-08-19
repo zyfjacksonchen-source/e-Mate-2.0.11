@@ -267,6 +267,11 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.match(desktopPublisher.run, /version="\$\(jq -er '\.version/u)
   assert.match(desktopPublisher.run, /\.artifacts\[\$platform\]\.url/u)
   assert.ok(desktopPublisher.run.lastIndexOf('public-artifact') < desktopPublisher.run.indexOf('--key desktop/latest.json'))
+  for (const job of ['windows', 'macos', 'manifest']) {
+    const step = desktopRelease.jobs[job].steps.find(item => item.id === 'version')
+    assert.match(step.run, /node -p "require\(process\.argv\[1\]\)\.version"/u)
+    assert.doesNotMatch(step.run, /node -p \\"require/u)
+  }
   assert.doesNotMatch(desktopReleaseSource, /e-Mate-\d+\.\d+\.\d+-(?:mac|win)|releases\/v\d+\.\d+\.\d+/u)
   assert.match(readFileSync('.gitattributes', 'utf8'), /^\* text=auto eol=lf$/mu)
 })

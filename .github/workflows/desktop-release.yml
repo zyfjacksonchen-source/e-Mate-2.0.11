@@ -96,7 +96,9 @@ jobs:
         id: version
         working-directory: desktop
         shell: bash
-        run: echo "value=$(node -p \"require('./e-mate-desktop/package.json').version\")" >> "$GITHUB_OUTPUT"
+        run: |
+          version="$(node -p "require(process.argv[1]).version" "./e-mate-desktop/package.json")"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: e-mate-desktop-windows-${{ github.sha }}
@@ -137,7 +139,9 @@ jobs:
       - name: Resolve packaged desktop version
         id: version
         working-directory: desktop
-        run: echo "value=$(node -p \"require('./e-mate-desktop/package.json').version\")" >> "$GITHUB_OUTPUT"
+        run: |
+          version="$(node -p "require(process.argv[1]).version" "./e-mate-desktop/package.json")"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: e-mate-desktop-macos-${{ github.sha }}
@@ -168,7 +172,9 @@ jobs:
           path: dist/desktop
       - name: Resolve manifest version
         id: version
-        run: echo "value=$(node -p \"require('./desktop/e-mate-desktop/package.json').version\")" >> "$GITHUB_OUTPUT"
+        run: |
+          version="$(node -p "require(process.argv[1]).version" "./desktop/e-mate-desktop/package.json")"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
       - name: Generate exact R2 release manifest
         run: >-
           node desktop/e-mate-desktop/scripts/desktop-release-manifest.ts
