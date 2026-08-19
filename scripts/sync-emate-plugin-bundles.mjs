@@ -36,7 +36,7 @@ for (const name of expected) {
   const slug = name.slice('@e-mate/dsh-plugin-'.length)
   const source = join(root, 'packages', `dsh-plugin-${slug}`)
   const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
-  if (manifest.name !== name || manifest.version !== '2.0.9' || manifest.license !== 'MIT') {
+  if (manifest.name !== name || manifest.version !== '2.0.10' || manifest.license !== 'MIT') {
     throw new Error(`${source} package identity is invalid`)
   }
   if (typeof manifest.main !== 'string') throw new Error(`${name} has no main entry`)
@@ -58,7 +58,7 @@ for (const name of expected) {
 await writeFile(join(destination, 'registry.json'), `${JSON.stringify({
   schema_version: 1,
   product: 'e-Mate',
-  version: '2.0.9',
+  version: '2.0.10',
   harness_version: '0.1.0-rc.7',
   harness_commit: 'df78045a127e32cb5b942defba52c539590d1596',
   packages: receipts,

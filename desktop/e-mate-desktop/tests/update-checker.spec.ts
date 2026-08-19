@@ -56,7 +56,7 @@ describe('strict SemVer parsing', () => {
   })
 
   it('compares strict versions without numeric overflow', () => {
-    expect(compareSemVerVersions('2.1.0', '2.0.9')).toBeGreaterThan(0)
+    expect(compareSemVerVersions('2.1.0', '2.0.10')).toBeGreaterThan(0)
     expect(compareSemVerVersions('2.0.0-rc.1', '2.0.0')).toBeLessThan(0)
     expect(compareSemVerVersions('2.0', '2.0.0')).toBeNull()
     expect(compareSemVerVersions(

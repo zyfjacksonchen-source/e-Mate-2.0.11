@@ -1,7 +1,9 @@
 /** e-Mate executable: minimal Electron bootstrap around the Host Cordis root. */
 
-import { app } from 'electron'
+import { app, shell } from 'electron'
 import type { Context } from '@deepseek-ai/cordis'
+import { writeFileSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -26,7 +28,13 @@ import {
   markDesktopProfileHealthy,
   type DesktopProfileStartup,
 } from './profile-manager.ts'
-import { EMATE_PROFILE_NAME, installEmateDesktopProfile } from './e-mate-profile.ts'
+import {
+  EMATE_DESKTOP_PROFILE_VERSION,
+  EMATE_PROFILE_NAME,
+  installEmateDesktopProfile,
+} from './e-mate-profile.ts'
+import { cleanupObsoleteMacApplications } from './installation-cleanup.ts'
+import { readMacUpdateStartupResult, writeMacUpdateStartupAck } from './mac-update-installer.ts'
 import { prepareDesktopProfile, type SkippedOptionalEntry } from './profile.ts'
 import type { DesktopPnpmBootstrap } from './pnpm.ts'
 import {
@@ -139,6 +147,42 @@ async function start(): Promise<void> {
     }
     if (report.status === 'healthy') {
       markDesktopProfileHealthy(profileStatePath, profileStartup.profileName)
+      if (process.env.EMATE_RELEASE_HEALTH_PROBE === '1') {
+        writeFileSync(join(app.getPath('userData'), '.release-health-ack'), app.getVersion(), {
+          encoding: 'utf8',
+          flag: 'wx',
+          mode: 0o600,
+        })
+      }
+      try {
+        const installed = writeMacUpdateStartupAck(app.getPath('userData'), app.getVersion())
+        if (installed !== undefined) {
+          runtime.updates.notify({
+            title: 'e-Mate Update Complete',
+            body: `e-Mate ${installed.targetVersion} was installed and reopened successfully.`,
+          })
+        } else {
+          void readMacUpdateStartupResult(app.getPath('userData'), app.getVersion()).then((result) => {
+            if (result?.status === 'rolled-back') {
+              runtime.updates.notify({
+                title: 'e-Mate Update Rolled Back',
+                body: `The update to ${result.targetVersion} failed; e-Mate ${result.currentVersion} was restored.`,
+              })
+            } else if (result?.status === 'failed') {
+              runtime.updates.notify({
+                title: 'e-Mate Update Failed',
+                body: `e-Mate could not finish the update to ${result.targetVersion}.`,
+              })
+            }
+          }).catch((cause: unknown) => {
+            process.stderr.write(`${BIN_NAME}: failed to read macOS update result: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+          })
+        }
+      } catch (cause) {
+        process.stderr.write(
+          `${BIN_NAME}: failed to acknowledge macOS update startup: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+        )
+      }
     } else {
       markDesktopProfileFailed(profileStatePath, profileStartup.profileName)
     }
@@ -152,6 +196,7 @@ async function start(): Promise<void> {
         disposeDshRuntime?.()
         disposePnpmRuntime?.()
       }
+      runtime.commitPreparedUpdateShutdown()
     },
     finalExit,
   )
@@ -186,6 +231,10 @@ async function start(): Promise<void> {
   })
 
   try {
+    const currentVersion = app.getVersion()
+    if (app.isPackaged && currentVersion !== EMATE_DESKTOP_PROFILE_VERSION) {
+      throw new Error(`${BIN_NAME}: packaged application version ${currentVersion} does not match profile version ${EMATE_DESKTOP_PROFILE_VERSION}`)
+    }
     const environment = loadLayeredEnv(BIN_NAME, process.cwd())
     const electronVersion = process.versions.electron
     if (electronVersion === undefined) {
@@ -203,7 +252,8 @@ async function start(): Promise<void> {
     const releasePnpmRuntime = (): void => { pnpmRuntime.dispose() }
     disposePnpmRuntime = releasePnpmRuntime
     const selectionStatePath = join(app.getPath('userData'), 'profile-selection', 'state.json')
-    installEmateDesktopProfile(homeDir)
+    const deferredProfileCleanup: string[] = []
+    installEmateDesktopProfile(homeDir, path => { deferredProfileCleanup.push(path) })
     profileStatePath = selectionStatePath
     profileStartup = beginDesktopProfileStartup(selectionStatePath, homeDir)
     const activeProfileName = profileStartup.profileName
@@ -283,6 +333,26 @@ async function start(): Promise<void> {
       homeDir: prepared.homeDir,
     })
     await runtime.mountScheduled()
+    await Promise.all(deferredProfileCleanup.map(async (path) => {
+      await rm(path, { recursive: true, force: true })
+    })).catch((cause: unknown) => {
+      process.stderr.write(`${BIN_NAME}: stale managed profile cleanup failed: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+    })
+    const cleanup = app.isPackaged
+      ? await cleanupObsoleteMacApplications({
+          platform: process.platform,
+          currentExecutable: process.execPath,
+          currentVersion,
+          homeDirectory: app.getPath('home'),
+          trash: path => shell.trashItem(path),
+        }).catch((cause: unknown) => {
+          process.stderr.write(`${BIN_NAME}: obsolete application cleanup failed: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+          return { removed: [], failed: [] }
+        })
+      : { removed: [], failed: [] }
+    for (const path of cleanup.failed) {
+      process.stderr.write(`${BIN_NAME}: failed to move obsolete application to Trash: ${path}\n`)
+    }
     notifySkippedOptionalEntries(runtime, prepared.skippedOptionalEntries)
     notifyWindowsVolumeConcerns(runtime, windowsVolumeConcerns)
     if (profileStartup.rolledBackFrom !== undefined) {

@@ -28,7 +28,7 @@ import { apply as applyHealth } from '../profile/plugins/health.js'
 import { apply as applyShare, SHARE_CHANNEL } from '../profile/plugins/share.js'
 import { apply as applyGeneralWorkspace } from '../profile/plugins/general-workspace.js'
 import * as settingsDocumentBoundary from '../profile/plugins/settings-document-boundary.js'
-import { apply as applyAgentOperations } from '../profile/plugins/agent-operations.js'
+import { apply as applyAgentOperations, SCHEDULES_CHANNEL } from '../profile/plugins/agent-operations.js'
 import { apply as applyCapabilities, CAPABILITIES_CHANNEL } from '../profile/plugins/capabilities.js'
 import { apply as applyQrGeneration } from '../profile/plugins/qr-generation.js'
 import {
@@ -173,32 +173,32 @@ test('version gates match the release contract', () => {
 test('online update target parsing rejects tags and downgrade ordering is SemVer-correct', () => {
   const requestId = '11111111-1111-4111-8111-111111111111'
   const sourceCommit = 'a'.repeat(40)
-  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.9/${sourceCommit}`
+  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.10/${sourceCommit}`
   const releaseSource = {
     schema_version: 1,
     product: 'e-Mate',
-    version: '2.0.9',
+    version: '2.0.10',
     package_name: '@e-mate/dsh',
     source_commit: sourceCommit,
     manifest_url: `${base}/release-manifest.json`,
-    tarball_url: `${base}/e-mate-dsh-2.0.9.tgz`,
+    tarball_url: `${base}/e-mate-dsh-2.0.10.tgz`,
   }
   const request = {
     schema_version: 1,
     request_id: requestId,
-    target: '2.0.9',
-    current_version: '2.0.9',
+    target: '2.0.10',
+    current_version: '2.0.10',
     release_source: releaseSource,
     previous_release_source: releaseSource,
   }
   assert.equal(normalizeUpdateTarget(), 'latest')
   assert.equal(normalizeUpdateTarget('latest'), 'latest')
-  assert.equal(normalizeUpdateTarget('2.0.9-rc.1'), '2.0.9-rc.1')
+  assert.equal(normalizeUpdateTarget('2.0.10-rc.1'), '2.0.10-rc.1')
   assert.throws(() => normalizeUpdateTarget('next'), /invalid update version/)
   assert.throws(() => normalizeUpdateTarget('2.0'), /invalid update version/)
-  assert.equal(validateStagedVersion('latest', '2.0.9'), '2.0.9')
-  assert.equal(validateStagedVersion('2.0.9', '2.0.9'), '2.0.9')
-  assert.throws(() => validateStagedVersion('2.0.9', '2.0.7'), /does not match requested version/)
+  assert.equal(validateStagedVersion('latest', '2.0.10'), '2.0.10')
+  assert.equal(validateStagedVersion('2.0.10', '2.0.10'), '2.0.10')
+  assert.throws(() => validateStagedVersion('2.0.10', '2.0.7'), /does not match requested version/)
   assert.throws(() => validateStagedVersion('latest', 'not-semver'), /version is invalid/)
   assert.equal(validateUpdateRequest(request, requestId), request)
   assert.throws(
@@ -214,7 +214,7 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   assert.throws(() => parsePackageIntegrity(JSON.stringify('sha256-invalid')), /integrity is invalid/)
   assert.equal(compareVersions('2.0.7', '2.0.7-rc.1'), 1)
   assert.equal(compareVersions('2.0.7-rc.1', '2.0.7-rc.2'), -1)
-  assert.equal(compareVersions('2.0.9', '2.0.7'), 1)
+  assert.equal(compareVersions('2.0.10', '2.0.7'), 1)
   assert.equal(globalPrefixForBinPath('/opt/e-mate/lib/node_modules/@e-mate/dsh/lib/bin.js', 'darwin'), '/opt/e-mate')
   assert.equal(
     globalPrefixForBinPath('C:\\Users\\e-mate\\AppData\\Roaming\\npm\\node_modules\\@e-mate\\dsh\\lib\\bin.js', 'win32'),
@@ -222,34 +222,34 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   )
   assert.throws(() => globalPrefixForBinPath('/repo/packages/dsh/lib/bin.js', 'darwin'), /global npm installation/u)
   assert.deepEqual(validateReleaseSource(releaseSource), releaseSource)
-  const desktopPrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.9/${sourceCommit}`
+  const desktopPrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.10/${sourceCommit}`
   assert.deepEqual(validateLatestReleasePointer({
     schema_version: 1,
-    version: '2.0.9',
+    version: '2.0.10',
     source_commit: sourceCommit,
     artifacts: {
       darwin: {
-        url: `${desktopPrefix}/e-Mate-2.0.9-mac-universal.dmg`,
+        url: `${desktopPrefix}/e-Mate-2.0.10-mac-universal.dmg`,
         bytes: 1,
         sha256: 'ab'.repeat(32),
       },
       win32: {
-        url: `${desktopPrefix}/e-Mate-2.0.9-win-x64-Setup.exe`,
+        url: `${desktopPrefix}/e-Mate-2.0.10-win-x64-Setup.exe`,
         bytes: 1,
         sha256: 'cd'.repeat(32),
       },
     },
   }), releaseSource)
-  assert.equal(compareVersions('2.0.9', '2.0.5'), 1)
+  assert.equal(compareVersions('2.0.10', '2.0.5'), 1)
   assert.throws(() => validateReleaseSource({ ...releaseSource, manifest_url: 'http://example.com/release-manifest.json' }), /URL is invalid/u)
   const sha512 = 'ab'.repeat(64)
   const artifactIntegrity = `sha512-${Buffer.from(sha512, 'hex').toString('base64')}`
   const artifact = {
-    name: '@e-mate/dsh', version: '2.0.9', kind: 'main', filename: 'e-mate-dsh-2.0.9.tgz',
+    name: '@e-mate/dsh', version: '2.0.10', kind: 'main', filename: 'e-mate-dsh-2.0.10.tgz',
     size: 207, sha256: 'cd'.repeat(32), sha512, integrity: artifactIntegrity,
   }
   const manifest = {
-    schema_version: 1, product: 'e-Mate', version: '2.0.9', source_commit: sourceCommit,
+    schema_version: 1, product: 'e-Mate', version: '2.0.10', source_commit: sourceCommit,
     packages: [artifact], download: { ...releaseSource, size: artifact.size, sha256: artifact.sha256, sha512, integrity: artifactIntegrity },
   }
   assert.equal(validateReleaseManifest(manifest, releaseSource).integrity, artifactIntegrity)
@@ -281,7 +281,7 @@ test('status projects only the latest bounded online-update receipt', async () =
       product: 'e-Mate',
       request_id: first,
       status: 'failed-before-change',
-      requested_version: '2.0.9',
+      requested_version: '2.0.10',
       previous_version: '2.0.7',
       error: 'must not reach status output',
       finished_at: '2026-08-15T01:00:00.000Z',
@@ -291,18 +291,18 @@ test('status projects only the latest bounded online-update receipt', async () =
       product: 'e-Mate',
       request_id: second,
       status: 'completed',
-      requested_version: '2.0.9',
+      requested_version: '2.0.10',
       previous_version: '2.0.7',
-      installed_version: '2.0.9',
+      installed_version: '2.0.10',
       error: 'must not reach status output',
       finished_at: '2026-08-15T02:00:00.000Z',
     }))
     const expected = {
       request_id: second,
       status: 'completed',
-      requested_version: '2.0.9',
+      requested_version: '2.0.10',
       previous_version: '2.0.7',
-      installed_version: '2.0.9',
+      installed_version: '2.0.10',
       finished_at: '2026-08-15T02:00:00.000Z',
     }
     assert.deepEqual(latestUpdateReceipt(dshHome), expected)
@@ -511,7 +511,7 @@ test('managed profile installation is idempotent', () => {
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
     ])
-    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.9'])))
+    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.10'])))
     const patch = readFileSync(join(first.profile, 'cordis.patch.yml'), 'utf8')
     installProfile(dshHome)
     assert.equal(readFileSync(join(first.profile, 'package.json'), 'utf8'), manifest)
@@ -567,6 +567,7 @@ test('managed profile installation is idempotent', () => {
       provider: 'e-mate-enterprise',
       model: 'gpt-5.6-luna',
     })
+    assert.equal(patchById.get('agent-loop').config.maxParallelToolCalls, 4)
     assert.deepEqual(patchById.get('llm-pi-ai').config.providers, {})
     assert.equal(patchById.get('emate-general-workspace').name, './plugins/general-workspace.js')
     assert.deepEqual(patchById.get('emate-settings-document-boundary'), {
@@ -589,6 +590,9 @@ test('managed profile installation is idempotent', () => {
       'connection', 'sessionPersistence', 'storageDomain', 'timer', 'emateModelPolicy', 'emateIdentity',
     ])
     assert.equal(patchById.get('emate-agent-operations').name, './plugins/agent-operations.js')
+    assert.deepEqual(patchById.get('emate-agent-operations').inject, [
+      'systemPrompt', 'connection', 'sessionPersistence',
+    ])
     assert.equal(patchById.has('ui-sidebar'), false)
     assert.equal(patchById.has('emate-shell'), false)
     assert.match(patch, /\.\/plugins\/health\.js/)
@@ -623,7 +627,7 @@ test('managed profile installation is idempotent', () => {
       const pluginRoot = join(first.profile, 'node_modules', ...name.split('/'))
       const pluginManifest = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'))
       assert.equal(pluginManifest.name, name)
-      assert.equal(pluginManifest.version, '2.0.9')
+      assert.equal(pluginManifest.version, '2.0.10')
       assert.ok(readFileSync(join(pluginRoot, pluginManifest.main)).byteLength > 0)
       const pluginPatch = readFileSync(join(pluginRoot, pluginManifest.dsh.bundle.patch), 'utf8')
       assert.ok(pluginPatch.length >= 2)
@@ -652,6 +656,7 @@ test('managed profile installation is idempotent', () => {
     const binding = JSON.parse(readFileSync(join(first.profile, 'plugins', 'runtime-binding.json'), 'utf8'))
     assert.match(binding.storage_domain_module_sha256, /^[0-9a-f]{64}$/)
     assert.match(binding.llm_module_sha256, /^[0-9a-f]{64}$/)
+    assert.match(binding.schedule_module_sha256, /^[0-9a-f]{64}$/)
     assert.match(binding.credentials_module_sha256, /^[0-9a-f]{64}$/)
     assert.match(binding.launch_environment_module_sha256, /^[0-9a-f]{64}$/)
     const dumped = spawnSync(process.execPath, [
@@ -1322,10 +1327,15 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       action_ids: [],
     })
     const sessionMessages = []
+    const sessionEvents = []
     const agent = {
       id: 'image-session',
       session: {
         header: { id: 'image-session', cwd: temporary },
+        events: sessionEvents,
+        append(type, data) {
+          sessionEvents.push({ type, data, seq: sessionEvents.length, time: Date.now() })
+        },
         deriveMessages: () => sessionMessages,
       },
     }
@@ -1351,7 +1361,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       source: { kind: 'user' },
       content: [{ type: 'image', attachment: selected }, { type: 'text', text: '请修改这张图。' }],
     }
-    const admitted = await preStep({ messages: [userUpload] }, async () => ({ kind: 'enter', messages: [userUpload] }))
+    const admitted = await preStep({ agent, messages: [userUpload] }, async () => ({ kind: 'enter', messages: [userUpload] }))
     assert.equal(admitted.messages.length, 2)
     assert.deepEqual(admitted.messages[0], userUpload)
     assert.deepEqual(admitted.messages[1].source, {
@@ -1361,7 +1371,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.match(admitted.messages[1].content[0].text, /never ask the user to upload an image already listed here/u)
 
     const textOnly = { ...userUpload, id: 'text-only-message', content: [{ type: 'text', text: '只生成一张新图。' }] }
-    const unchanged = await preStep({ messages: [textOnly] }, async () => ({ kind: 'enter', messages: [textOnly] }))
+    const unchanged = await preStep({ agent, messages: [textOnly] }, async () => ({ kind: 'enter', messages: [textOnly] }))
     assert.deepEqual(unchanged.messages, [textOnly])
     sessionMessages.push(textOnly)
 
@@ -1384,8 +1394,17 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         attachment_ids: [attachmentId],
       }),
     })
-    assert.equal(generatedContent.some(block => block.type === 'image'), true)
+    assert.equal(generatedContent.some(block => block.type === 'image'), false)
     assert.equal(generatedContent.some(block => block.type === 'text' && block.text.includes(attachmentId)), true)
+    assert.deepEqual(sessionEvents.at(-1), {
+      type: 'emate/image-output',
+      data: {
+        call_id: 'image-call-1',
+        content: [{ type: 'image', attachment: generated.images[0].image }],
+      },
+      seq: 0,
+      time: sessionEvents[0].time,
+    })
     sessionMessages.push({
       id: 'generated-tool-result',
       source: { kind: 'tool', callId: 'image-call-1' },
@@ -1401,7 +1420,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       id: 'modify-above-message', role: 'user', source: { kind: 'user' },
       content: [{ type: 'text', text: '就直接修改上图，不要让我重新上传。' }],
     }
-    const resumed = await preStep({ messages: [...sessionMessages, modifyAbove] }, async () => ({
+    const resumed = await preStep({ agent, messages: [...sessionMessages, modifyAbove] }, async () => ({
       kind: 'enter', messages: [...sessionMessages, modifyAbove],
     }))
     assert.match(resumed.messages.at(-1).content[0].text, new RegExp(attachmentId))
@@ -1440,6 +1459,27 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       mediaType: 'image/png',
       name: 'red.png',
     })
+    await assert.rejects(
+      imagegen.execute({ prompt: 'Edit both current images independently.' }, {
+        agent: {
+          id: 'multi-image-session',
+          session: {
+            header: { id: 'multi-image-session', cwd: temporary },
+            events: [],
+            deriveMessages: () => [{
+              id: 'multi-image-message', role: 'user', source: { kind: 'user' },
+              content: [
+                { type: 'image', attachment: selected },
+                { type: 'image', attachment: second },
+                { type: 'text', text: '分别修改这两张图。' },
+              ],
+            }],
+          },
+        },
+        callId: 'multi-image-call', signal: new AbortController().signal,
+      }),
+      /multiple source images.*exact attachment ID/iu,
+    )
     sessionMessages.push({
       id: 'second-tool-result', source: { kind: 'tool', callId: 'image-call-pack' },
       content: [{
@@ -1519,9 +1559,38 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
 
 test('Agent operation guidance owns the e-Mate persona and reuses Harness shell and Job semantics', async () => {
   let section
+  let channel
+  let handler
+  let options
+  const temporary = mkdtempSync(join(tmpdir(), 'emate-agent-operations-'))
+  const paths = installProfile(join(temporary, 'dsh'))
   applyAgentOperations({
     systemPrompt: { section: value => { section = value } },
-  })
+    connection: { rpc: { handle: (value, callback, config) => {
+      channel = value
+      handler = callback
+      options = config
+      return () => {}
+    } } },
+    sessionPersistence: {
+      listSnapshots: async () => [{ header: { id: 'session-1' }, revision: 'revision-1' }],
+      inspect: async () => ({
+        meta: { cwd: '/tmp/project', seedLength: 0 },
+        events: [
+          { type: 'session/title', seq: 0, time: 1, data: { title: '日报会话' } },
+          { type: 'schedule/change', seq: 1, time: 1, data: {
+            version: 1,
+            operation: 'create',
+            schedule: {
+              id: 'schedule-1', kind: 'every', prompt: '生成日报', everySeconds: 300,
+              scheduledAt: '2099-08-19T12:00:00.000Z',
+            },
+          } },
+        ],
+      }),
+    },
+    effect: callback => callback(),
+  }, { bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json') })
   assert.equal(section.name, 'emate:agent-operations')
   assert.equal(section.order, 180)
   assert.match(section.text, /我是小芯，你的 AI 办公助手/u)
@@ -1539,6 +1608,17 @@ test('Agent operation guidance owns the e-Mate persona and reuses Harness shell 
   assert.match(section.text, /use `mcp_manage`/u)
   assert.match(section.text, /Browser Tools are only for operating a user-visible page/u)
   assert.match(section.text, /do not ask the user to paste secrets into chat/u)
+  assert.equal(channel, SCHEDULES_CHANNEL)
+  assert.deepEqual(options, { authority: 'loopback' })
+  const schedules = await handler('list', {})
+  assert.equal(schedules.ok, true)
+  assert.deepEqual(schedules.value.errors, [])
+  assert.deepEqual(schedules.value.items[0], {
+    session_id: 'session-1', session_title: '日报会话', id: 'schedule-1', kind: 'every',
+    prompt: '生成日报', everySeconds: 300, scheduledAt: '2099-08-19T12:00:00.000Z',
+    state: 'scheduled', deliveryMode: 'session-local',
+  })
+  rmSync(temporary, { recursive: true, force: true })
 })
 
 test('identity agreements are immutable, explicit, and use the target Connection RPC', async () => {
@@ -1869,7 +1949,7 @@ test('enterprise identity provider maps target credentials and the production HT
           acceptanceId: 'acceptance-receipt-207',
           userId: 'user-207',
           acceptedAt: new Date(clock).toISOString(),
-          clientVersion: '2.0.9',
+          clientVersion: '2.0.10',
           locale: 'zh-CN',
         } : null,
       })
@@ -1881,7 +1961,7 @@ test('enterprise identity provider maps target credentials and the production HT
         acceptanceId: 'acceptance-receipt-207',
         userId: 'user-207',
         acceptedAt: new Date(clock).toISOString(),
-        clientVersion: '2.0.9',
+        clientVersion: '2.0.10',
         locale: 'zh-CN',
       })
     }
@@ -2133,6 +2213,9 @@ test('enterprise identity rejects expected gateway responses through the target 
   let keepAliveTick
   let keepAliveInterval
   let response = { status: 400, body: { error: { code: 'INVALID_CHALLENGE' } } }
+  let transportFailure = false
+  let requestSignal
+  const warnings = []
   const credentials = {
     resolve: async () => undefined,
     set: async () => {},
@@ -2146,6 +2229,7 @@ test('enterprise identity rejects expected gateway responses through the target 
     } } },
     provide: () => {},
     effect: effect => effect(),
+    logger: { warn: warning => { warnings.push(warning) } },
     interval: (callback, delay) => {
       keepAliveTick = callback
       keepAliveInterval = delay
@@ -2159,10 +2243,14 @@ test('enterprise identity rejects expected gateway responses through the target 
       clientId: 'e-mate-web',
       organization: 'emate-v2',
     },
-    fetchImplementation: async () => new Response(JSON.stringify(response.body), {
-      status: response.status,
-      headers: { 'content-type': 'application/json' },
-    }),
+    fetchImplementation: async (_input, init) => {
+      requestSignal = init.signal
+      if (transportFailure) throw new Error('simulated transport failure')
+      return new Response(JSON.stringify(response.body), {
+        status: response.status,
+        headers: { 'content-type': 'application/json' },
+      })
+    },
   })
   assert.equal(keepAliveInterval, ENTERPRISE_KEEP_ALIVE_MS)
   keepAliveTick()
@@ -2185,9 +2273,9 @@ test('enterprise identity rejects expected gateway responses through the target 
   })
 
   response = { status: 500, body: { error: { code: 'ACCOUNT_EXISTS', message: 'sensitive upstream detail' } } }
-  await assert.rejects(identityHandler('session.register', payload), error => {
-    assert.doesNotMatch(String(error), /sensitive upstream detail/u)
-    return true
+  assert.deepEqual(await identityHandler('session.register', payload), {
+    ok: false,
+    error: { code: 'unavailable', message: '企业身份服务暂时不可用，请稍后重试。', details: { issues: [] } },
   })
 
   const login = { identifier: 'test.user', password: 'old-password', remember_login: true }
@@ -2197,7 +2285,21 @@ test('enterprise identity rejects expected gateway responses through the target 
     error: { code: 'bad-request', message: '账号或密码错误', details: { issues: [] } },
   })
   response = { status: 500, body: { error: { code: 'INVALID_GRANT' } } }
-  await assert.rejects(identityHandler('session.login', login), /账号或密码错误/)
+  assert.deepEqual(await identityHandler('session.login', login), {
+    ok: false,
+    error: { code: 'unavailable', message: '企业身份服务暂时不可用，请稍后重试。', details: { issues: [] } },
+  })
+  assert.match(warnings.at(-1), /session\.login unavailable \(upstream-http 500\)/u)
+  transportFailure = true
+  assert.deepEqual(await identityHandler('session.login', login), {
+    ok: false,
+    error: { code: 'unavailable', message: '企业身份服务暂时不可用，请稍后重试。', details: { issues: [] } },
+  })
+  assert.equal(requestSignal instanceof AbortSignal, true)
+  assert.match(warnings.at(-1), /session\.login unavailable \(transport\)/u)
+  transportFailure = false
+  response = { status: 400, body: { error: { code: 'UNKNOWN_CONTRACT_FAILURE' } } }
+  await assert.rejects(identityHandler('session.login', login), /UNKNOWN_CONTRACT_FAILURE/u)
 })
 
 test('enterprise model switch delegates to the target session, keeps its history and survives a cached-policy outage', async () => {

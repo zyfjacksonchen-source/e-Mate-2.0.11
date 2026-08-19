@@ -1,11 +1,14 @@
 /** Verify the signed application sealed inside one macOS release DMG. */
 
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readdirSync, rmdirSync, statSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MACOS_UNIVERSAL_NATIVE_ENTRIES } from './mac-universal.ts'
+
+const RELEASE_HEALTH_TIMEOUT_MS = 180_000
 
 /** Injectable filesystem and command boundaries for release verification. */
 export interface MacReleaseVerificationOptions {
@@ -13,14 +16,65 @@ export interface MacReleaseVerificationOptions {
   readonly distDir: string
   /** Installed application name inside the mounted image. */
   readonly productName: string
+  /** Signed/notarized Developer ID release or formal ad-hoc-signed unsigned release. */
+  readonly mode: 'signed-notarized' | 'unsigned-adhoc'
   /** Return regular DMG files in the distribution directory. */
   readonly listDmgs: (distDir: string) => readonly string[]
   /** Create a private empty mount point. */
   readonly makeMountPoint: () => string
   /** Execute one macOS verification command. */
   readonly run: (command: string, args: readonly string[]) => void
+  /** Prove both architectures reach renderer health in one installed profile. */
+  readonly launch: (executable: string, architectures: readonly ('arm64' | 'x86_64')[]) => void
+  /** Keep the packaged native helper bound to its immutable plugin manifest. */
+  readonly verifyComputerUseHelper: (unpackedRoot: string) => void
+  /** Briefly allow terminated Electron helpers to release the mounted image before a retry. */
+  readonly waitBeforeDetachRetry: () => void
   /** Remove the detached empty mount point. */
   readonly removeMountPoint: (mountPoint: string) => void
+}
+
+function launchArchitecture(executable: string, arch: 'arm64' | 'x86_64', root: string): void {
+  let processGroup: number | undefined
+  try {
+    const userData = join(root, `user-data-${arch}`)
+    const healthAck = join(userData, '.release-health-ack')
+    const startedAt = Date.now()
+    const child = spawn('/usr/bin/arch', [`-${arch}`, executable, `--user-data-dir=${userData}`], {
+      env: { ...process.env, DSH_HOME: join(root, 'dsh'), EMATE_RELEASE_HEALTH_PROBE: '1' },
+      stdio: 'ignore',
+      detached: true,
+    })
+    if (child.pid === undefined) throw new Error(`${arch} packaged application did not start`)
+    processGroup = child.pid
+    const sleeper = new Int32Array(new SharedArrayBuffer(4))
+    const deadline = Date.now() + RELEASE_HEALTH_TIMEOUT_MS
+    while (!existsSync(healthAck)) {
+      try {
+        process.kill(child.pid, 0)
+      } catch {
+        throw new Error(`${arch} packaged application exited before renderer health acknowledgement`)
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`${arch} packaged application did not acknowledge renderer health within ${String(RELEASE_HEALTH_TIMEOUT_MS / 1000)} seconds`)
+      }
+      Atomics.wait(sleeper, 0, 0, 200)
+    }
+    console.log(`${arch} renderer health acknowledged in ${String(Date.now() - startedAt)} ms`)
+  } finally {
+    if (processGroup !== undefined) {
+      try { process.kill(-processGroup, 'SIGKILL') } catch {}
+    }
+  }
+}
+
+function launch(executable: string, architectures: readonly ('arm64' | 'x86_64')[]): void {
+  const root = mkdtempSync(join(tmpdir(), 'e-mate-release-'))
+  try {
+    for (const architecture of architectures) launchArchitecture(executable, architecture, root)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 }
 
 function listDmgs(distDir: string): readonly string[] {
@@ -28,6 +82,20 @@ function listDmgs(distDir: string): readonly string[] {
     .filter(name => name.endsWith('.dmg'))
     .map(name => join(distDir, name))
     .filter(path => statSync(path).isFile())
+}
+
+function verifyComputerUseHelper(unpackedRoot: string): void {
+  const nativeRoot = join(unpackedRoot, 'build', 'e-mate-profile', 'bundles', 'computer-use', 'native', 'macos')
+  const manifest = JSON.parse(readFileSync(join(nativeRoot, 'manifest.json'), 'utf8')) as {
+    readonly binary?: { readonly path?: unknown; readonly sha256?: unknown }
+  }
+  const relativePath = manifest.binary?.path
+  const expected = manifest.binary?.sha256
+  if (relativePath !== 'bin/dsh-computer-use-helper' || typeof expected !== 'string' || !/^[a-f0-9]{64}$/u.test(expected)) {
+    throw new Error('packaged Computer Use helper manifest is invalid')
+  }
+  const actual = createHash('sha256').update(readFileSync(join(nativeRoot, relativePath))).digest('hex')
+  if (actual !== expected) throw new Error('packaged Computer Use helper does not match its manifest')
 }
 
 function run(command: string, args: readonly string[]): void {
@@ -45,9 +113,13 @@ function defaultOptions(): MacReleaseVerificationOptions {
       ? join(packageRoot, 'dist', 'mac-release')
       : resolve(process.argv[2]),
     productName: 'e-Mate',
+    mode: process.argv.includes('--unsigned-adhoc') ? 'unsigned-adhoc' : 'signed-notarized',
     listDmgs,
     makeMountPoint: () => mkdtempSync(join(tmpdir(), 'dsh-desktop-dmg-')),
     run,
+    launch,
+    verifyComputerUseHelper,
+    waitBeforeDetachRetry: () => { run('/bin/sleep', ['1']) },
     removeMountPoint: mountPoint => rmdirSync(mountPoint),
   }
 }
@@ -74,8 +146,10 @@ export function verifyMacRelease(
   let failure: unknown
 
   try {
+    options.run('hdiutil', ['verify', dmgPath])
     options.run('hdiutil', ['attach', dmgPath, '-mountpoint', mountPoint, '-nobrowse', '-readonly'])
     mounted = true
+    options.run('plutil', ['-lint', join(appPath, 'Contents', 'Info.plist')])
     const executablePath = join(appPath, 'Contents', 'MacOS', options.productName)
     options.run('lipo', [executablePath, '-verify_arch', 'x86_64'])
     options.run('lipo', [executablePath, '-verify_arch', 'arm64'])
@@ -83,20 +157,40 @@ export function verifyMacRelease(
     for (const entry of MACOS_UNIVERSAL_NATIVE_ENTRIES) {
       options.run('lipo', [join(unpackedRoot, entry.path), '-verify_arch', entry.arch])
     }
+    options.verifyComputerUseHelper(unpackedRoot)
     options.run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath])
-    options.run('spctl', ['--assess', '--type', 'execute', '--verbose=4', appPath])
-    options.run('xcrun', ['stapler', 'validate', appPath])
+    if (options.mode === 'signed-notarized') {
+      options.run('spctl', ['--assess', '--type', 'execute', '--verbose=4', appPath])
+      options.run('xcrun', ['stapler', 'validate', appPath])
+    } else {
+      options.launch(executablePath, ['arm64', 'x86_64'])
+    }
   } catch (cause) {
     failure = cause
   }
 
   const cleanupFailures: unknown[] = []
   if (mounted) {
-    try {
-      options.run('hdiutil', ['detach', mountPoint])
-    } catch (cause) {
-      cleanupFailures.push(cause)
+    let detachFailure: unknown
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        options.run('hdiutil', ['detach', mountPoint])
+        detachFailure = undefined
+        break
+      } catch (cause) {
+        detachFailure = cause
+        if (attempt < 4) options.waitBeforeDetachRetry()
+      }
     }
+    if (detachFailure !== undefined) {
+      try {
+        options.run('hdiutil', ['detach', mountPoint, '-force'])
+        detachFailure = undefined
+      } catch (cause) {
+        detachFailure = cause
+      }
+    }
+    if (detachFailure !== undefined) cleanupFailures.push(detachFailure)
   }
   try {
     options.removeMountPoint(mountPoint)
@@ -118,6 +212,9 @@ if (invokedPath !== undefined && resolve(invokedPath) === fileURLToPath(import.m
     console.log(`macOS release verification passed: ${verified.dmgPath}`)
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error))
+    if (error instanceof AggregateError) {
+      for (const cause of error.errors) console.error(cause instanceof Error ? cause.message : String(cause))
+    }
     process.exitCode = 1
   }
 }

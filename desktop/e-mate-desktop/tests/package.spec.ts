@@ -82,6 +82,10 @@ describe('published package surface', () => {
       types: './lib/types/agent-update.d.ts',
       default: './lib/agent-update.js',
     })
+    expect(manifest.exports).toHaveProperty('./browser-extension-setup', {
+      types: './lib/types/browser-extension-setup.d.ts',
+      default: './lib/browser-extension-setup.js',
+    })
     expect(manifest.exports).not.toHaveProperty('./windows-acl-runner')
     expect(manifest.exports).not.toHaveProperty('./desktop-cli')
     expect(manifest.exports).not.toHaveProperty('./desktop-runtime-environment')
@@ -103,6 +107,7 @@ describe('published package surface', () => {
     expect(patch).toContain("name: '@e-mate/desktop/pnpm'")
     expect(patch).toContain("name: '@e-mate/desktop/updates'")
     expect(patch).toContain("name: '@e-mate/desktop/agent-update'")
+    expect(patch).toContain("name: '@e-mate/desktop/browser-extension-setup'")
     expect(patch).not.toContain('desktop-profiles')
   })
 
@@ -134,6 +139,8 @@ describe('published package surface', () => {
     expect(config).toContain("profiles: 'src/profiles.ts'")
     expect(config).toContain("terminal: 'src/terminal.ts'")
     expect(config).toContain("'update-download': 'src/update-download.ts'")
+    expect(config).toContain("'mac-update-helper': 'src/mac-update-helper.ts'")
+    expect(config).toContain("'mac-update-installer': 'src/mac-update-installer.ts'")
     expect(config).toContain("updates: 'src/updates.ts'")
     expect(config).toContain("'agent-update': 'src/agent-update.ts'")
   })
@@ -145,6 +152,9 @@ describe('published package surface', () => {
     const prepare = main.indexOf('const prepared = prepareDesktopProfile')
     const installDsh = main.indexOf('const dshRuntime = process.platform === \'win32\'')
     const boot = main.indexOf('const ctx = await boot')
+    const mount = main.indexOf('await runtime.mountScheduled()')
+    const profileCleanup = main.indexOf('deferredProfileCleanup.map')
+    const cleanup = main.indexOf('const cleanup = app.isPackaged')
 
     expect(snapshot).toBeGreaterThanOrEqual(0)
     expect(install).toBeGreaterThan(snapshot)
@@ -152,8 +162,14 @@ describe('published package surface', () => {
     expect(installDsh).toBeGreaterThan(prepare)
     expect(boot).toBeGreaterThan(prepare)
     expect(boot).toBeGreaterThan(installDsh)
+    expect(mount).toBeGreaterThan(boot)
+    expect(profileCleanup).toBeGreaterThan(mount)
+    expect(cleanup).toBeGreaterThan(profileCleanup)
+    expect(cleanup).toBeGreaterThan(mount)
     expect(main).toContain("'@e-mate/desktop: packaged pnpm runtime PATH'")
     expect(main).toContain("'@e-mate/desktop: packaged dsh runtime PATH'")
+    expect(main).toContain("process.env.EMATE_RELEASE_HEALTH_PROBE === '1'")
+    expect(main).toContain("'.release-health-ack'")
     expect(main).toContain('disposePnpmRuntime?.()')
     expect(main).toContain('disposeDshRuntime?.()')
   })
@@ -226,6 +242,7 @@ describe('published package surface', () => {
     expect(manifest.scripts?.['package:dir']).toBe('yarn run build && node scripts/package-dir.mjs')
     expect(packageDir).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")
     expect(manifest.scripts?.['dist:mac']).toBe('node scripts/release-mac.ts')
+    expect(manifest.scripts?.['dist:mac-unsigned-release']).toBe('node scripts/package-mac-unsigned-release.ts')
     expect(manifest.scripts?.['dist:mac-smoke']).toBe('node scripts/package-mac.ts')
     expect(manifest.scripts?.['dist:win']).toBe('node scripts/package-win.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run build')
@@ -238,6 +255,8 @@ describe('published package surface', () => {
     expect(manifest.scripts?.['verify:cli']).toBe('node scripts/verify-cli-runtime.mjs')
     expect(manifest.scripts?.check).toContain('yarn run verify:cli')
     expect(workspaceManifest.scripts?.['dist:mac']).toBe('yarn workspace @e-mate/desktop dist:mac')
+    expect(workspaceManifest.scripts?.['dist:mac-unsigned-release'])
+      .toBe('yarn workspace @e-mate/desktop dist:mac-unsigned-release')
     expect(workspaceManifest.scripts?.['dist:mac-smoke'])
       .toBe('yarn workspace @e-mate/desktop dist:mac-smoke')
     expect(workspaceManifest.scripts?.['dist:win'])
@@ -256,6 +275,20 @@ describe('published package surface', () => {
       .toContain('build/e-mate-profile/bundles/xin-assistant/runtime/vendor-native/darwin-*/**')
     expect(manifest.build?.files).toContain('!node_modules/node-pty/build/**')
     expect(manifest.devDependencies?.['@electron/asar']).toBe('3.4.1')
+  })
+
+  it('keeps publishable macOS bytes isolated from the CI-only smoke output', () => {
+    const workflow = readFileSync(new URL('../../.github/workflows/desktop-release.yml', packageRoot), 'utf8')
+    const signerPatch = readFileSync(new URL('../.yarn/patches/@electron-osx-sign-npm-1.3.3-sequential-walk.patch', packageRoot), 'utf8')
+
+    expect(workflow).toContain('yarn dist:mac-unsigned-release')
+    expect(workflow).toContain('dist/mac-unsigned-release/e-Mate-')
+    expect(workflow).not.toContain('dist:mac-smoke')
+    expect(workflow).not.toContain('/mac-smoke/')
+    expect(workspaceManifest.resolutions?.['@electron/osx-sign@npm:1.3.3'])
+      .toContain('@electron-osx-sign-npm-1.3.3-sequential-walk.patch')
+    expect(signerPatch).toContain('for (const child of children)')
+    expect(signerPatch).toContain('-        return await Promise.all(children.map(async (child) => {')
   })
 
   it('keeps one fixed e-Mate orange tray source for generated native assets', () => {

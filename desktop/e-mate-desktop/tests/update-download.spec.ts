@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, readdir, rm, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -84,7 +84,13 @@ async function expectFailure(
 }
 
 async function expectNoPartialFiles(userDataPath: string, version: string): Promise<void> {
-  const entries = await readdir(join(userDataPath, 'updates', version))
+  let entries: string[]
+  try {
+    entries = await readdir(join(userDataPath, 'updates', version))
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw cause
+  }
   expect(entries.filter(entry => entry.endsWith('.partial'))).toEqual([])
 }
 
@@ -115,6 +121,22 @@ describe('desktop update installer download', () => {
     expect(calls[0]?.url).toBe(releaseArtifact('darwin', '2.1.0').url)
     expect(calls[0]?.init).toMatchObject({ method: 'GET', cache: 'no-store', redirect: 'error' })
     await expectNoPartialFiles(userDataPath, '2.1.0')
+  })
+
+  it('keeps only the newest requested installer cache while preserving update state', async () => {
+    const userDataPath = await temporaryUserData()
+    const updates = join(userDataPath, 'updates')
+    await mkdir(join(updates, '2.0.7'), { recursive: true })
+    await writeFile(join(updates, '2.0.7', 'old.dmg'), 'old')
+    await writeFile(join(updates, 'state.json'), '{"version":2}')
+    await downloadDesktopUpdate({
+      platform: 'darwin',
+      version: '2.0.10',
+      userDataPath,
+      request: async () => chunkedResponse([dmgArtifact()]),
+    })
+    expect(await readdir(updates)).toEqual(['2.0.10', 'state.json'])
+    expect(await readFile(join(updates, 'state.json'), 'utf8')).toBe('{"version":2}')
   })
 
   it('accepts a Windows executable only when it has both MZ and PE signatures', async () => {

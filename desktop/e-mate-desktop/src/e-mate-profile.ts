@@ -3,11 +3,15 @@ import {
   chmodSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -18,7 +22,14 @@ import { bundledPythonPath } from './vision-toolkit.ts'
 
 export const EMATE_PROFILE_NAME = 'e-mate'
 
-const VERSION = '2.0.9'
+const desktopManifest = JSON.parse(
+  readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
+) as { version?: unknown }
+export const EMATE_DESKTOP_PROFILE_VERSION = desktopManifest.version
+if (typeof EMATE_DESKTOP_PROFILE_VERSION !== 'string'
+  || !/^\d+\.\d+\.\d+$/u.test(EMATE_DESKTOP_PROFILE_VERSION)) {
+  throw new Error('e-Mate desktop package version must be a stable semantic version')
+}
 const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
 const PLUGIN_PACKAGES = [
   '@e-mate/dsh-plugin-browser',
@@ -50,6 +61,7 @@ const PROFILE_PLUGIN_PACKAGES = [
 const MANAGED_PROFILE_PACKAGES = new Set<string>(PROFILE_PLUGIN_PACKAGES)
 const RETIRED_PROFILE_PACKAGES = new Set(['@e-mate/dsh-plugin-im', '@yuxianglin/dsh-bridge-browser'])
 const OWNED_PROFILE_PACKAGES = new Set([...MANAGED_PROFILE_PACKAGES, ...RETIRED_PROFILE_PACKAGES])
+const PROFILE_INSTALL_RECEIPT = '.e-mate-install.json'
 
 const sourceRoot = unpackedAsarPath(
   fileURLToPath(new URL('../build/e-mate-profile/', import.meta.url)),
@@ -89,6 +101,121 @@ function emptyPatch(patch: string): boolean {
     .join('\n') === '[]'
 }
 
+function samePath(left: string, right: string): boolean {
+  const normalized = (path: string) => process.platform === 'win32' ? path.toLowerCase() : path
+  return normalized(realpathSync(left)) === normalized(realpathSync(right))
+}
+
+/** Keep package metadata patchable while loading large immutable directories from the app bundle. */
+function installManagedPackage(
+  source: string,
+  target: string,
+  deferCleanup?: (path: string) => void,
+): void {
+  const previous = `${target}.e-mate-stale-${process.pid}-${randomUUID()}`
+  let movedPrevious = false
+  try {
+    if (existsSync(target)) {
+      renameSync(target, previous)
+      movedPrevious = true
+    }
+    mkdirSync(target, { recursive: true })
+    for (const entry of readdirSync(source, { withFileTypes: true })) {
+      const from = join(source, entry.name)
+      const to = join(target, entry.name)
+      if (statSync(from).isDirectory()) {
+        symlinkSync(resolve(from), to, process.platform === 'win32' ? 'junction' : 'dir')
+      } else {
+        cpSync(from, to, { force: true })
+      }
+    }
+    if (movedPrevious) {
+      if (deferCleanup === undefined) rmSync(previous, { recursive: true, force: true })
+      else deferCleanup(previous)
+    }
+  } catch (cause) {
+    rmSync(target, { recursive: true, force: true })
+    if (movedPrevious && !existsSync(target)) renameSync(previous, target)
+    throw cause
+  }
+}
+
+function managedPackageCurrent(source: string, target: string): boolean {
+  try {
+    return readdirSync(source, { withFileTypes: true }).every(entry => {
+      const from = join(source, entry.name)
+      const to = join(target, entry.name)
+      return statSync(from).isDirectory()
+        ? lstatSync(to).isSymbolicLink() && samePath(from, to)
+        : existsSync(to)
+    })
+  } catch {
+    return false
+  }
+}
+
+function installedProfileCurrent(profile: string, dshHome: string): boolean {
+  try {
+    const receipt = JSON.parse(readFileSync(join(profile, PROFILE_INSTALL_RECEIPT), 'utf8')) as Record<string, unknown>
+    if (receipt.schema_version !== 1
+      || receipt.version !== EMATE_DESKTOP_PROFILE_VERSION
+      || receipt.harness_commit !== HARNESS_COMMIT
+      || receipt.dsh_home !== resolve(dshHome)
+      || receipt.source_root !== resolve(sourceRoot)) return false
+
+    const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, unknown>
+      dsh?: { profile?: { bundles?: unknown[] } }
+    }
+    const dependencies = manifest.dependencies ?? {}
+    for (const name of PLUGIN_PACKAGES) {
+      if (dependencies[name] !== EMATE_DESKTOP_PROFILE_VERSION) return false
+    }
+    for (const plugin of ECOSYSTEM_PLUGIN_PACKAGES) {
+      if (dependencies[plugin.name] !== plugin.version) return false
+    }
+    for (const name of RETIRED_PROFILE_PACKAGES) {
+      if (dependencies[name] !== undefined) return false
+    }
+    const bundles = manifest.dsh?.profile?.bundles
+    const managedBundles = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...PROFILE_PLUGIN_PACKAGES]
+    if (!Array.isArray(bundles)
+      || managedBundles.some((name, index) => bundles[index] !== name)
+      || [...RETIRED_PROFILE_PACKAGES].some(name => bundles.includes(name))) return false
+
+    if (!managedPackageCurrent(
+      join(sourceRoot, 'plugins', 'emate-shell'),
+      join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar'),
+    )) return false
+    for (const name of PLUGIN_PACKAGES) {
+      if (!managedPackageCurrent(
+        join(sourceRoot, 'bundles', name.slice('@e-mate/dsh-plugin-'.length)),
+        join(profile, 'node_modules', ...name.split('/')),
+      )) return false
+    }
+    for (const plugin of ECOSYSTEM_PLUGIN_PACKAGES) {
+      if (!managedPackageCurrent(
+        join(sourceRoot, 'ecosystem', plugin.name),
+        join(profile, 'node_modules', plugin.name),
+      )) return false
+    }
+
+    return [
+      join(profile, 'cordis.patch.yml'),
+      join(profile, 'cordis.yml'),
+      join(profile, 'plugins', 'runtime-binding.json'),
+      join(profile, 'plugins', 'health.js'),
+      join(profile, 'plugins', 'model-policy.js'),
+      join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar', 'package.json'),
+      join(dshHome, 'browser-extension', 'manifest.json'),
+      ...PLUGIN_PACKAGES.map(name => join(profile, 'node_modules', ...name.split('/'), 'package.json')),
+      ...ECOSYSTEM_PLUGIN_PACKAGES.map(plugin => join(profile, 'node_modules', plugin.name, 'package.json')),
+    ].every(existsSync)
+  } catch {
+    return false
+  }
+}
+
 function installBrowserExtension(dshHome: string): void {
   const source = join(sourceRoot, 'browser-extension')
   const target = join(dshHome, 'browser-extension')
@@ -111,7 +238,10 @@ function installBrowserExtension(dshHome: string): void {
 }
 
 /** Install or repair only the e-Mate-owned profile files before Desktop boot. */
-export function installEmateDesktopProfile(dshHome: string): string {
+export function installEmateDesktopProfile(
+  dshHome: string,
+  deferCleanup?: (path: string) => void,
+): string {
   const profile = join(dshHome, 'profiles', EMATE_PROFILE_NAME)
   const data = join(dshHome, 'e-mate')
   for (const directory of [
@@ -134,6 +264,9 @@ export function installEmateDesktopProfile(dshHome: string): string {
       atomicWrite(settings, `${current}${current.endsWith('\n') ? '' : '\n'}${DEFAULT_MODEL_SETTINGS}`, 0o600)
     }
   }
+  if (installedProfileCurrent(profile, dshHome)) return profile
+
+  rmSync(join(profile, PROFILE_INSTALL_RECEIPT), { force: true })
   cpSync(join(sourceRoot, 'plugins'), join(profile, 'plugins'), { recursive: true, force: true })
   atomicWrite(
     join(profile, 'cordis.patch.yml'),
@@ -156,7 +289,7 @@ export function installEmateDesktopProfile(dshHome: string): string {
     private: true,
     type: 'module',
     dependencies: Object.fromEntries([
-      ...PLUGIN_PACKAGES.map(name => [name, VERSION]),
+      ...PLUGIN_PACKAGES.map(name => [name, EMATE_DESKTOP_PROFILE_VERSION]),
       ...ECOSYSTEM_PLUGIN_PACKAGES.map(plugin => [plugin.name, plugin.version]),
       ...externalDependencies,
     ]),
@@ -169,17 +302,15 @@ export function installEmateDesktopProfile(dshHome: string): string {
 
   const shellSource = join(sourceRoot, 'plugins', 'emate-shell')
   const shellTarget = join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar')
-  rmSync(shellTarget, { recursive: true, force: true })
   mkdirSync(dirname(shellTarget), { recursive: true })
-  cpSync(shellSource, shellTarget, { recursive: true, force: true })
+  installManagedPackage(shellSource, shellTarget, deferCleanup)
 
   for (const name of PLUGIN_PACKAGES) {
     const slug = name.slice('@e-mate/dsh-plugin-'.length)
     const source = join(sourceRoot, 'bundles', slug)
     const target = join(profile, 'node_modules', ...name.split('/'))
-    rmSync(target, { recursive: true, force: true })
     mkdirSync(dirname(target), { recursive: true })
-    cpSync(source, target, { recursive: true, force: true })
+    installManagedPackage(source, target, deferCleanup)
     const manifest = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8')) as {
       main: string
       dsh: { bundle: { patch: string }; client?: { platform?: string } }
@@ -230,8 +361,7 @@ export function installEmateDesktopProfile(dshHome: string): string {
       || typeof manifest.dsh?.bundle?.patch !== 'string') {
       throw new Error(`${expected.name} package contract does not match the pinned e-Mate desktop profile`)
     }
-    rmSync(target, { recursive: true, force: true })
-    cpSync(source, target, { recursive: true, force: true })
+    installManagedPackage(source, target, deferCleanup)
     const patchPath = join(target, manifest.dsh!.bundle!.patch!)
     let patch = readFileSync(patchPath, 'utf8')
     const marker = `name: ${expected.patchName}`
@@ -247,6 +377,7 @@ export function installEmateDesktopProfile(dshHome: string): string {
   const tools = packageEntry('@deepseek-ai/dsh-tools')
   const storage = packageEntry('@deepseek-ai/dsh-storage-domain')
   const llm = packageEntry('@deepseek-ai/dsh-llm')
+  const schedule = packageEntry('@deepseek-ai/dsh-schedule')
   const credentials = packageEntry('@deepseek-ai/dsh-credentials')
   const environment = packageEntry('@deepseek-ai/dsh-launch-environment')
   const storageManifest = createRequire(import.meta.url).resolve('@deepseek-ai/dsh-storage-domain/package.json')
@@ -254,7 +385,7 @@ export function installEmateDesktopProfile(dshHome: string): string {
   atomicWrite(join(profile, 'plugins', 'runtime-binding.json'), `${JSON.stringify({
     schema_version: 1,
     product: 'e-Mate',
-    version: VERSION,
+    version: EMATE_DESKTOP_PROFILE_VERSION,
     dsh_home: resolve(dshHome),
     harness_commit: HARNESS_COMMIT,
     tools_module: tools,
@@ -263,6 +394,8 @@ export function installEmateDesktopProfile(dshHome: string): string {
     storage_domain_module_sha256: sha256(storage),
     llm_module: llm,
     llm_module_sha256: sha256(llm),
+    schedule_module: schedule,
+    schedule_module_sha256: sha256(schedule),
     credentials_module: credentials,
     credentials_module_sha256: sha256(credentials),
     launch_environment_module: environment,
@@ -277,7 +410,7 @@ export function installEmateDesktopProfile(dshHome: string): string {
     harness_commit?: string
     packages?: unknown[]
   }
-  if (registry.product !== 'e-Mate' || registry.version !== VERSION
+  if (registry.product !== 'e-Mate' || registry.version !== EMATE_DESKTOP_PROFILE_VERSION
     || registry.harness_commit !== HARNESS_COMMIT
     || !Array.isArray(registry.packages)
     || PLUGIN_PACKAGES.some(name => !registry.packages!.some(candidate => (
@@ -290,5 +423,12 @@ export function installEmateDesktopProfile(dshHome: string): string {
   if (!generatedPlugins.includes('health.js') || !generatedPlugins.includes('model-policy.js')) {
     throw new Error('e-Mate desktop profile plugins are incomplete')
   }
+  atomicWrite(join(profile, PROFILE_INSTALL_RECEIPT), `${JSON.stringify({
+    schema_version: 1,
+    version: EMATE_DESKTOP_PROFILE_VERSION,
+    harness_commit: HARNESS_COMMIT,
+    dsh_home: resolve(dshHome),
+    source_root: resolve(sourceRoot),
+  }, null, 2)}\n`, 0o600)
   return profile
 }

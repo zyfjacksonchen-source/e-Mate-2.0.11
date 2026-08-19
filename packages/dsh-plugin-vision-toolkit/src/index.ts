@@ -78,7 +78,7 @@ const STATUS_SKILL: SkillRegistration = {
   source: 'bundled',
   content: `# Vision Toolkit status
 
-The pinned e-Mate 2.0.9 adapter is fail-closed with code ${VISION_POLICY_BLOCK_CODE}.
+The pinned e-Mate 2.0.10 adapter is fail-closed with code ${VISION_POLICY_BLOCK_CODE}.
 Call vision_toolkit_status for the exact release and blocked-tool list. Do not
 infer image contents, claim OCR ran, install Python packages, or substitute a
 different vision provider. The managed runtime remains uninstalled until an

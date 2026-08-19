@@ -154,6 +154,11 @@ export function createQuotaService(ctx, snapshotsTable, reservationsTable, usage
     })
   }
 
+  const isArmed = options => {
+    const scope = typeof options?.sessionId === 'string' ? armed.get(options.sessionId) : undefined
+    return scope !== undefined && scope.provider === options.provider && scope.model === options.model
+  }
+
   const admit = options => enqueue(async () => {
     const scope = typeof options?.sessionId === 'string' ? armed.get(options.sessionId) : undefined
     if (scope === undefined || scope.provider !== options.provider || scope.model !== options.model) return undefined
@@ -265,6 +270,7 @@ export function createQuotaService(ctx, snapshotsTable, reservationsTable, usage
   return {
     refresh,
     armRequest,
+    isArmed,
     admit,
     finish,
     captureEvent,
@@ -484,6 +490,7 @@ async function projectRuntimeModels(ctx, models, policy) {
 
 function createService(ctx, table, quota) {
   let cached = [...table.entries()].find(([key]) => key === 'active')?.[1]
+  let validatedCache
   let runtimeReady = typeof ctx.emateIdentity.modelRuntimePolicy !== 'function' || hasNativeRuntimeProjection(ctx)
   let lastRefresh = 0
   let refreshing
@@ -503,9 +510,14 @@ function createService(ctx, table, quota) {
   const validCached = (subject, now) => {
     try {
       if (!isRecord(cached) || typeof cached.policy_sha256 !== 'string') return undefined
+      if (validatedCache?.source === cached
+        && validatedCache.subject === subject
+        && now < validatedCache.expiresAt) return validatedCache.policy
       const { policy_sha256: expected, ...raw } = cached
       const policy = validateModelPolicy(raw, subject, now)
-      return policy.policy_sha256 === expected ? policy : undefined
+      if (policy.policy_sha256 !== expected) return undefined
+      validatedCache = { source: cached, subject, expiresAt: Date.parse(policy.expires_at), policy }
+      return policy
     } catch {
       return undefined
     }
@@ -762,7 +774,7 @@ export async function apply(ctx, config = {}) {
     return request
   })
   ctx.on('llm/stream', (options, next) => (async function* () {
-    await service.assertModel(options.model)
+    if (!quota.isArmed(options)) await service.assertModel(options.model)
     const reservation = await quota.admit(options)
     let terminal
     let realUsage

@@ -81,6 +81,7 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
     },
     openTerminal: () => {},
     openBrowserExtensionSetup,
+    openComputerUseAccessibilitySetup: async () => true,
     reportRendererBoot: rendererBoot,
     setThemeSource,
     requestRestart: restart,

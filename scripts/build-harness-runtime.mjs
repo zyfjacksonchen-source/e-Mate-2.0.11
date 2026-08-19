@@ -9,7 +9,7 @@ import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 
-const PRODUCT_VERSION = '2.0.9'
+const PRODUCT_VERSION = '2.0.10'
 const HARNESS_VERSION = '0.1.0-rc.7'
 const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
 const PNPM_VERSION = '11.7.0'

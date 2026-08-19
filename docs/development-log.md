@@ -1403,3 +1403,31 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Usage Dashboard 已把生产静态目录原子切换到新不可变 release；公开脚本 SHA-256 为 `b636db0337d5f22b637242d49b734adf217032f0242e0b708758d61b11562ee6`。修复复用 Auth Gateway 已有 refresh token 轮换：access token 过期时单飞刷新并重试原查询，刷新失败才清除会话；没有新增身份或会话协议。
 - Model Gateway 仅重建并替换自身容器，生产镜像 ID 为 `sha256:483a3933f2184c02cd1c967f632f731013b5a63359bfdaa8eedd65500aed24da`，Auth、Analytics、Postgres 与 Redis 未重建。DeepSeek/豆包的 Chat Completions 适配器现在接受管理端既有 `max_output_tokens`，并映射为受路由上限约束的 `max_tokens`，不再在上游请求前被精确字段校验拒绝。
 - 用户已确认生产审计面板、DeepSeek 与豆包验收正常，并要求停止重复登录/实测；飞书与腾讯文档沿用此前用户验收，钉钉/微信和 Windows 实机测试按用户要求不进入本次真实测试。Windows 仍保留最终 CI、安装包和清单门禁。
+
+## 2026-08-19 · 2.0.10 飞书反馈、首 token 与 Agent 性能切片
+
+- 本片只处理反馈中的六项闭环：多图改图失败/误生成、并发生图触发限流并中止、生成图片污染后续模型历史导致文本模型无法切换、原图引用丢失、定时任务管理页展示伪动作、分享及首页工具按钮布局；同时优化首 token 与后续 Agent 请求热路径。发布前每项都必须由安装态 Computer Use 复测，任何一项未通过都不发布。
+- 架构边界不变：所有修复继续落在 managed profile 插件或浏览器投影；不修改 pinned DeepSeek Harness 核心，不新增聊天、会话、传输、调度器、图片队列或模型路由。定时任务继续以官方 `@deepseek-ai/dsh-schedule` 的 Session 事件为唯一真值，UI 只做只读卡片和原生 Tool 提示词交接。
+- 最小根因方案：生成图片改由非模型历史的 `emate/image-output` Session 事件承载，Tool 结果只保留 attachment ID 文本；用户上传图片仍进入模型历史。多张当前附件不再被隐式合并成一次编辑，独立编辑要求每次明确传入一个 ID；引用融合仍允许显式 ID 数组。并发复用 Agent Loop 原生 `maxParallelToolCalls=4`，不重试未知上游失败。
+- 性能方案：消除生成图片字节在后续每次 LLM 请求中的重复编码/传输；同一请求在 `agent/request` 已校验并武装额度后，`llm/stream` 只复用完全匹配的武装记录，外部直调仍执行策略校验；策略缓存对象在有效期内复用已验证结果。验收保留原生首 token、总耗时与 `tok/s` 事实，不伪造指标。
+- 定时任务选择“独立管理页”方案：列出真实任务卡片的状态、内容、规则、下次时间与所属会话；新增、修改、删除只把精确操作交给对应会话中的原生 `schedule_create/list/delete`，其中修改为先创建替代任务、成功后再删除旧任务。不会声称支持不存在的立即运行、暂停或恢复。
+- 在线更新回退的现场核对发现标准 `/Applications` 内同时存在 7 个同 bundle id 的 2.0.9 应用副本，Spotlight 还索引到工作区内两个 2.0.7 构建；当前进程来自规范 `/Applications/e-Mate.app`。2.0.10 因此只在“当前运行的是标准目录中的最新稳定版本、且没有更高版本副本”时，把 `/Applications` 与用户 `Applications` 中同 bundle id 的旧版或同版重复包移入废纸篓；工作区构建、非标准目录、符号链接、身份/版本异常包一律不碰。下载缓存同样只保留本次目标版本，更新状态与用户会话数据不删除。
+- 版本真值统一读取 Desktop `package.json`：profile、打包清单、更新清单和 R2 发布工作流不再分别硬编码。发布激活前必须回读线上 `latest.json` 及实际对象，逐项核对版本、文件名、来源提交、字节数与 SHA-256；只有全部一致才最后切换线上清单，避免“更新器显示版本”和实际发布字节不一致。
+- `@电脑操控` 继续使用 DSH 原生 composer reference/codec/插入路径；e-Mate Shell 只恢复被全局字体覆盖误伤的 `DshChipCell` 字体，并补齐可见标签中的 `@`。用户选择后现在能在输入框内看到完整 chip，不增加第二套 mention 模型。
+- 飞书 CLI 的 `spawn pnpm ENOENT` 来自 Skill 安装器依赖环境 PATH 查找，而 Desktop 已生成了可用的应用内 pnpm shim。Desktop 现把该 shim 的绝对路径显式交给 find-skill 适配器，只有 `pnpm` 安装命令使用它；其他 DSH 子进程路径不变，且拒绝非绝对覆盖值。
+- 浏览器扩展仍复用现有 dsh-browser 内置 MV3 制品和 Desktop 安装入口。Agent Tool 只打开 Chrome 扩展页与内置目录，macOS 随后复用原生 Computer Use 完成可自动执行的“开发者模式/加载已解压目录”，并以原生 browser Tool 重试成功作为唯一完成标准；浏览器或系统强制的安全确认不能绕过，Windows 在没有 Computer Use provider 时必须如实提示一次浏览器侧确认。
+- macOS Computer Use 首次使用若没有辅助功能权限，Agent 调用 Desktop 安装 Tool：复用 Electron 原生 `isTrustedAccessibilityClient(true)` 登记 e-Mate，并打开 `Privacy_Accessibility` 系统页。系统强制的“添加/开启 e-Mate”仍由用户完成；Agent 随后必须重试原生 Computer Use 并看到权限生效，不能只凭打开设置页报告成功。
+- 登录页 `transport failure ... HTTP 500` 的请求字段和 Host RPC 合同均正确；公网解析与用户提供的生产连接资料交叉确认真实源站 `47.103.108.213`，但 22 无 SSH banner、80/443 无应用/TLS 响应、面板专用端口同样连接超时，`dl` CDN 回源为 504，属于实例网络/宿主层失联而非账号错误。仓库没有生产 restart/deploy workflow，本机也没有云厂商 API 凭据，因此未盲目重启。客户端共享身份 provider 现以 15 秒原生 signal 限制请求，把 transport 与上游 5xx 类型化为 service-unavailable；唯一 `/emate.identity` RPC 边界只返回中文可重试提示和脱敏 endpoint/reason/status，401 仍是账号密码错误，未知 4xx 继续失败关闭。生产登录恢复仍要求云控制台先恢复实例并读取 OOM/磁盘/负载、Nginx/Docker 日志；不能把客户端提示修复写成服务已恢复。
+
+## 2026-08-19 · 2.0.10 macOS 正式发布与自动替换事故修复
+
+- 事故根因不是用户打开方式：正式 Desktop workflow 错把明确定义为 CI-only、无完整签名且“never publishes”的 `dist:mac-smoke` 和 `dist/mac-smoke/` 当成正式 DMG 上传。2.0.9 线上 bundle 因此在 `codesign --verify --deep --strict` 下失败；本轮不覆盖任何 2.0.9 历史对象，修复直接并入 SemVer 可发现的 2.0.10。
+- 正式无 Developer ID 路径现独立为 `dist:mac-unsigned-release` 与 `dist/mac-unsigned-release/`，强制完整 ad-hoc 封装且明确不是 Developer ID 签名/公证。正式 workflow 与聚焦合同禁止出现 `dist:mac-smoke` 或 `/mac-smoke/`；smoke 只保留在隔离 CI。正式门禁包含 `hdiutil verify`、只读挂载、Info.plist、Universal 主程序及全部原生 inventory、`codesign --verify --deep --strict` 和 `arch -arm64/-x86_64` 真实启动。
+- 2.0.10 起 macOS updater 继续复用唯一清单、下载、字节数、SHA-256 与 DMG 校验，再由 staged 新包启动 detached helper。helper 只接受规范 `/Applications/e-Mate.app` 或用户 `Applications` 路径、同卷可写 Trash、严格递增稳定版本及完整 bundle 校验；helper-ready 持久握手成功后应用才退出，Cordis 完整释放写入 shutdown-ready 后才交换。旧包一直保留到新 renderer 健康回执，超时/启动失败会恢复、重启旧包并显示回滚结果；renderer 健康是提交边界，之后的回执或清理失败不得撤掉健康新包。没有静默 `sudo`、全局 Gatekeeper 关闭或第二更新协议。
+- 已安装 2.0.9 的首次 2.0.10 升级仍受旧二进制限制，需要其原 DMG 手工交接；从 2.0.10 起后续更新才自动替换。最新图解对此作明确区分，并整合 Apple/Intel 两条仅针对 `/Applications/e-Mate.app` 的 quarantine 命令和密码不回显说明。
+- 发布保持 commit-scoped immutable：Windows/macOS 制品与清单先上传并公共回读字节数/SHA-256，只有正式安装态门禁全部通过才最后原子激活 `desktop/latest.json`。未完成真实 Apple/Intel 安装态 Computer Use 前，本节不是发布完成声明。
+- 首个正式候选包在安装态暴露 `dsh-computer-use-helper` 被 Electron Builder 二次签名后与原生 manifest SHA-256 不一致。修复位于既有 Computer Use 包适配层：以固定 entitlement 对 helper 做完整 ad-hoc 签名并更新 manifest，正式打包对该已管理文件禁止再签名；验证器直接复算包内 helper 与 manifest，不再允许只靠深度签名掩盖不一致。
+- 与 `anywhere-labs/deepseek-harness-desktop` 的同机对照确认其秒级启动来自单一 Electron/Cordis 进程和就地 package 解析；e-Mate 变慢不是 Harness 架构，而是 Desktop 每次启动重复复制约 158MB 的受管 profile，且旧 Profile 第一次迁移还会在主线程递归删除整棵副本。现在仍走同一 DSH Loader：package 根只复制可补丁元数据，`assets/lib/runtime/node_modules` 等不可变目录在 macOS/Linux 使用符号链接、Windows 使用目录 junction 指向应用内固定来源；版本化回执与窄关键文件检查命中时不安装、不全树哈希、不改 Profile。旧副本迁移改为同卷原子改名，窗口可交互后再异步清理，失败不会覆盖原包。
+- 本地 fresh managed-profile 安装为 48.16ms、warm receipt 校验为 5.28ms，完整 headless Host boot 为 2.86s。安装态预发布包在旧 Profile 修复前首轮 Computer Use 为 17.052s；迁移后按“登录页/Harness 可点击控件已进入完整 AX 树”复测三次热启动为 4.480s、4.151s、4.112s，均满足准则的 5s p75/8s max。项目根 `AGENTS.md` 已固定 macOS/Windows 同一原生启动顺序、不得启动期运行 pnpm/DSH 或可选维护、精确制品计时口径与 clean/warm 预算；用户随后明确要求本轮不再以 Computer Use 实测阻塞发布，该一次性决定不修改后续版本的长期准则。
+- 侧栏底部复用目标 `sidebar.settings` 与 `sidebar.footer.action` 槽位，将运行状态点、明暗切换与设置恢复到用户区上方并排展示；侧栏收起时在同一容器内纵向排列。设置仍是 DSH 原生 SettingsRoot，主页不再保留一组重复按钮。
+- 发布 workflow 改为两步骤但仍只有一份制品：首次 build-only 产生 commit-scoped macOS/Windows artifact，下载该精确字节做安装态验收；通过后的 publish 只允许下载同 commit、同 workflow、已成功的指定 run artifact，不再重建。这保证更新器、R2 对象和 Computer Use 验收对应同一份字节。

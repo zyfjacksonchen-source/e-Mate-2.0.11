@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-subagent",
-  "version": "2.0.9",
+  "version": "2.0.10",
   "description": "Clean-room compatibility receipt for the e-Mate native subagent runtime",
   "type": "module",
   "license": "MIT",

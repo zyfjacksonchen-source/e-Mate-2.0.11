@@ -29,7 +29,7 @@ import { migrateLegacySchedules } from './legacy-schedule.js'
 import { checkOsCredentialBackend } from './profile/credentials-os.js'
 
 export const PRODUCT = 'e-Mate'
-export const VERSION = '2.0.9'
+export const VERSION = '2.0.10'
 export const PROFILE = 'e-mate'
 export const DEFAULT_PORT = 3080
 export const HARNESS_VERSION = '0.1.0-rc.7'
@@ -72,7 +72,7 @@ export function managedPaths(dshHome = resolveDshHome()) {
     run,
     state: join(run, 'instance.json'),
     log: join(data, 'logs', 'web.log'),
-    receipt: join(data, 'migrations', 'setup-2.0.9.json'),
+    receipt: join(data, 'migrations', 'setup-2.0.10.json'),
   }
 }
 
@@ -212,6 +212,7 @@ export function installProfile(dshHome = resolveDshHome()) {
   const toolsModule = resolveHarnessModule(harness, 'packages/core/tools', '@deepseek-ai/dsh-tools')
   const storageDomainModule = resolveHarnessModule(harness, 'packages/storage/storage-domain', '@deepseek-ai/dsh-storage-domain')
   const llmModule = resolveHarnessModule(harness, 'packages/llm/llm', '@deepseek-ai/dsh-llm')
+  const scheduleModule = resolveHarnessModule(harness, 'packages/schedule/schedule', '@deepseek-ai/dsh-schedule')
   const credentialsModule = resolveHarnessModule(harness, 'packages/credentials/credentials', '@deepseek-ai/dsh-credentials')
   const launchEnvironmentModule = resolveHarnessModule(harness, 'packages/util/launch-environment', '@deepseek-ai/dsh-launch-environment')
   const zodModule = resolveHarnessDependency(harness, 'packages/storage/storage-domain', 'zod')
@@ -227,6 +228,8 @@ export function installProfile(dshHome = resolveDshHome()) {
     storage_domain_module_sha256: createHash('sha256').update(readFileSync(storageDomainModule)).digest('hex'),
     llm_module: llmModule,
     llm_module_sha256: createHash('sha256').update(readFileSync(llmModule)).digest('hex'),
+    schedule_module: scheduleModule,
+    schedule_module_sha256: createHash('sha256').update(readFileSync(scheduleModule)).digest('hex'),
     credentials_module: credentialsModule,
     credentials_module_sha256: createHash('sha256').update(readFileSync(credentialsModule)).digest('hex'),
     launch_environment_module: launchEnvironmentModule,
@@ -411,6 +414,7 @@ function profileCheck(paths) {
       : []
     const byId = new Map(rows.map(row => [row?.id, row]))
     patchValid = byId.get('schedule')?.name === '@deepseek-ai/dsh-schedule'
+      && byId.get('agent-loop')?.config?.maxParallelToolCalls === 4
       && byId.get('credentials')?.name === '@deepseek-ai/dsh-credentials-local'
       && byId.get('credentials')?.disabled === true
       && byId.get('emate-settings-document-boundary')?.name === './plugins/settings-document-boundary.js'
@@ -425,6 +429,9 @@ function profileCheck(paths) {
       && byId.get('emate-schedule-import')?.name === './plugins/schedule-import.js'
       && byId.get('emate-legacy-migration')?.name === './plugins/legacy-migration.js'
       && byId.get('emate-agent-operations')?.name === './plugins/agent-operations.js'
+      && JSON.stringify(byId.get('emate-agent-operations')?.inject) === JSON.stringify([
+        'systemPrompt', 'connection', 'sessionPersistence',
+      ])
       && !byId.has('emate-office-ocr')
       && !byId.has('emate-browser-computer-use')
       && !byId.has('emate-memory')

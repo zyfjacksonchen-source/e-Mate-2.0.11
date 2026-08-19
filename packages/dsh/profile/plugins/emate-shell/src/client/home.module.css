@@ -114,7 +114,7 @@
 :global([data-slot='conversation.composer.bar'] [data-input-mirror]) {
   padding: 12px 12px 4px !important;
   background: transparent !important;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif !important;
+  font-family: 'DshChipCell', -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif !important;
   font-size: 14px !important;
   line-height: 22px !important;
 }
@@ -604,10 +604,71 @@
   color: var(--emate-color-muted);
 }
 
-.schedules > div {
+.scheduleCards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.scheduleHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.schedules .scheduleHeaderActions button {
+  width: auto;
+  min-height: 32px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scheduleCards article {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--emate-color-rule);
+  border-radius: 12px;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  background: color-mix(in srgb, var(--emate-color-surface) 92%, transparent);
+}
+
+.scheduleCards article > header,
+.scheduleCards article > footer,
+.scheduleCards dl > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scheduleCards article > header { justify-content: space-between; }
+.scheduleCards article > header span { color: var(--emate-color-brand); font-size: 12px; }
+.scheduleCards article > header .overdue { color: oklch(0.514636 0.184396 27.456); }
+.scheduleCards article > header small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scheduleCards article > strong { overflow-wrap: anywhere; }
+.scheduleCards dl { margin: 0; display: grid; gap: 4px; font-size: 12px; }
+.scheduleCards dt { width: 64px; color: var(--emate-color-muted); }
+.scheduleCards dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.scheduleCards article > footer { margin-top: auto; }
+
+.schedules .scheduleCards article > footer button {
+  min-height: 32px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scheduleEmpty {
+  grid-column: 1 / -1;
+  padding: 24px;
+  border: 1px dashed var(--emate-color-rule);
+  border-radius: 12px;
+  color: var(--emate-color-muted);
+  text-align: center;
 }
 
 .schedules button {
@@ -674,7 +735,7 @@
 @media (max-width: 860px) {
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .report { grid-template-columns: 1fr; }
-  .schedules > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scheduleCards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-height: 820px) and (min-width: 769px) {

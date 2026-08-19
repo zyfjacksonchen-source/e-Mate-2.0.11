@@ -26,6 +26,7 @@
           <p>macOS 未签名安装说明</p>
           <h1 id="guide-title" data-mac-guide-title>四步安全打开 e-Mate</h1>
           <span data-mac-guide-package>请只使用官方下载页提供的安装包。</span>
+          <p>本页适用于全新安装 2.0.10，以及旧 2.0.9 第一次升级到 2.0.10。安装 2.0.10 后，后续在线更新会由 e-Mate 校验、替换并自动重开，不再要求手工拖动。</p>
         </div>
         <div class="help-grid mac-guide-grid">
           <article>
@@ -60,17 +61,27 @@
           <p>找不到“仍要打开”时</p>
           <h2 id="terminal-title">使用终端允许这一个 App</h2>
         </div>
-        <article class="download-card">
-          <h3>先核对下载页标注的 SHA-256</h3>
-          <p id="mac-command-note">确认安装包摘要一致，并已将 e-Mate 拖入“应用程序”后，打开“终端”，运行这一条命令：</p>
-          <p class="mac-command"><code data-macos-command-line>xattr -dr com.apple.quarantine "/Applications/e-Mate.app" &amp;&amp; open -a "e-Mate"</code></p>
-          <button class="download-link" type="button" data-copy-macos-command aria-label="复制允许打开命令" aria-describedby="mac-command-note">复制一条命令</button>
-          <p data-copy-status role="status" aria-live="polite"></p>
-        </article>
+        <p>先核对下载页标注的 SHA-256，并将 e-Mate 拖入“应用程序”，再按芯片选择命令。看到 <code>Password:</code> 后输入 Mac 登录密码并按回车；输入时不会显示任何字符。</p>
+        <div class="download-grid">
+          <article class="download-card">
+            <h3>Apple 芯片（M1 / M2 / M3 / M4）</h3>
+            <p id="mac-command-apple-note">打开“终端”，复制并运行：</p>
+            <p class="mac-command"><code data-macos-command-line>sudo /usr/bin/arch -arm64 /usr/bin/xattr -rd com.apple.quarantine "/Applications/e-Mate.app" &amp;&amp; /usr/bin/open "/Applications/e-Mate.app"</code></p>
+            <button class="download-link" type="button" data-copy-macos-command aria-label="复制 Apple 芯片允许打开命令" aria-describedby="mac-command-apple-note">复制 Apple 芯片命令</button>
+            <p data-copy-status role="status" aria-live="polite"></p>
+          </article>
+          <article class="download-card">
+            <h3>Intel 芯片</h3>
+            <p id="mac-command-intel-note">打开“终端”，复制并运行：</p>
+            <p class="mac-command"><code data-macos-command-line>sudo /usr/bin/arch -x86_64 /usr/bin/xattr -rd com.apple.quarantine "/Applications/e-Mate.app" &amp;&amp; /usr/bin/open "/Applications/e-Mate.app"</code></p>
+            <button class="download-link" type="button" data-copy-macos-command aria-label="复制 Intel 芯片允许打开命令" aria-describedby="mac-command-intel-note">复制 Intel 芯片命令</button>
+            <p data-copy-status role="status" aria-live="polite"></p>
+          </article>
+        </div>
       </section>
     </main>
 
     <footer class="footer"><span>e-Mate</span><a href="./#download-options">返回官方下载</a></footer>
-    <script type="module" src="./site.d39dbfb48ee5.js"></script>
+    <script type="module" src="./site.8cdedc87d365.js"></script>
   </body>
 </html>

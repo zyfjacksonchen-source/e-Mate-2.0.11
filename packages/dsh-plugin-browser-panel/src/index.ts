@@ -56,7 +56,7 @@ export function apply(ctx: any): void {
           ? 'Windows 扩展已连接，仍需完成真实 Windows Computer Use 验收。'
           : status.blocker === CONNECTION_BLOCKER
             ? '请安装并启用 e-Mate 浏览器扩展。'
-            : '当前平台不在 e-Mate 2.0.9 支持范围。'
+            : '当前平台不在 e-Mate 2.0.10 支持范围。'
       return { state: status.state, detail, action_ids: [] }
     },
   }), 'emate.browserPanel: capability metadata')

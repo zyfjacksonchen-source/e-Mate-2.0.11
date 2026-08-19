@@ -15,7 +15,7 @@ export function readManagedBinding(bindingPath = join(import.meta.dirname, 'runt
   if (!isRecord(binding)
     || binding.schema_version !== 1
     || binding.product !== 'e-Mate'
-    || binding.version !== '2.0.9'
+    || binding.version !== '2.0.10'
     || binding.harness_commit !== HARNESS_COMMIT
     || !isAbsolute(binding.dsh_home)
     || !isAbsolute(binding.tools_module)
@@ -77,6 +77,23 @@ export async function loadTargetLlm(bindingPath) {
   const module = await import(pathToFileURL(binding.llm_module).href)
   if (typeof module.BlockAssembler !== 'function' || typeof module.createUserMessage !== 'function') {
     throw new Error('e-Mate local model assembly API is unavailable')
+  }
+  return module
+}
+
+export async function loadTargetSchedule(bindingPath) {
+  const binding = readManagedBinding(bindingPath)
+  if (!isAbsolute(binding.schedule_module) || !SHA256.test(binding.schedule_module_sha256)) {
+    throw new Error('e-Mate local schedule binding is invalid')
+  }
+  const metadata = lstatSync(binding.schedule_module)
+  if (!metadata.isFile()
+    || createHash('sha256').update(readFileSync(binding.schedule_module)).digest('hex') !== binding.schedule_module_sha256) {
+    throw new Error('e-Mate local schedule module checksum mismatch')
+  }
+  const module = await import(pathToFileURL(binding.schedule_module).href)
+  if (typeof module.foldScheduleEvents !== 'function' || typeof module.scheduleView !== 'function') {
+    throw new Error('e-Mate local schedule API is unavailable')
   }
   return module
 }

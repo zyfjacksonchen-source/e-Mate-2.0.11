@@ -12,7 +12,7 @@ test('profile replaces built-in search and uses only credential references', asy
     readFile(new URL('src/index.ts', root), 'utf8'),
   ])
   const pkg = JSON.parse(manifest)
-  assert.equal(pkg.version, '2.0.9')
+  assert.equal(pkg.version, '2.0.10')
   assert.deepEqual(pkg.dependencies, { '@modelcontextprotocol/sdk': '1.29.0' })
   assert.equal(pkg.peerDependencies, undefined)
   assert.equal(pkg.eMate.harnessVersion, '0.1.0-rc.7')

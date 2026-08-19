@@ -6,7 +6,7 @@ import type { DesktopShellSpec } from '../src/runtime.ts'
 
 const updateAvailable = {
   status: 'update-available',
-  currentVersion: '2.0.9',
+  currentVersion: '2.0.10',
   latestVersion: '2.1.0',
   artifact: {
     url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.1.0/${'a'.repeat(40)}/e-Mate-2.1.0-mac-universal.dmg`,
@@ -25,6 +25,7 @@ const windowsUpdateAvailable = {
 
 const terminal = vi.hoisted(() => ({ open: vi.fn() }))
 const updater = vi.hoisted(() => ({ download: vi.fn() }))
+const macUpdater = vi.hoisted(() => ({ schedule: vi.fn(), markShutdownReady: vi.fn() }))
 const childProcess = vi.hoisted(() => {
   type Listener = (...args: unknown[]) => void
   const listeners = new Map<string, Listener[]>()
@@ -58,6 +59,10 @@ vi.mock('../src/desktop-terminal.ts', async (importOriginal) => ({
 
 vi.mock('../src/update-download.ts', () => ({
   downloadDesktopUpdate: updater.download,
+}))
+
+vi.mock('../src/mac-update-installer.ts', () => ({
+  scheduleMacUpdateInstallation: macUpdater.schedule,
 }))
 
 vi.mock('node:child_process', () => ({ spawn: childProcess.spawn }))
@@ -98,6 +103,9 @@ const electron = vi.hoisted(() => {
     copyImageAt: vi.fn(),
   }
   const nativeTheme = { themeSource: 'system' }
+  const systemPreferences = {
+    isTrustedAccessibilityClient: vi.fn(() => false),
+  }
 
   class BrowserWindow {
     readonly webContents = webContents
@@ -157,7 +165,7 @@ const electron = vi.hoisted(() => {
   return {
     app: {
       dock: { setIcon: vi.fn() },
-      getPath: vi.fn(() => '/tmp/dsh-desktop-user-data'),
+      getPath: vi.fn((name: string) => name === 'home' ? '/tmp/dsh-home' : '/tmp/dsh-desktop-user-data'),
       getVersion: vi.fn(() => '43.4.0'),
       isPackaged: false,
       on: vi.fn(),
@@ -195,6 +203,7 @@ const electron = vi.hoisted(() => {
       openPath: vi.fn(async () => ''),
       showItemInFolder: vi.fn(),
     },
+    systemPreferences,
     templateIcon,
     Tray,
     trays,
@@ -212,6 +221,7 @@ vi.mock('electron', () => ({
   net: electron.net,
   Notification: electron.Notification,
   shell: electron.shell,
+  systemPreferences: electron.systemPreferences,
   Tray: electron.Tray,
 }))
 
@@ -248,10 +258,13 @@ describe('Electron compatibility runtime', () => {
     childProcess.reset()
     vi.clearAllMocks()
     updater.download.mockReset()
+    macUpdater.schedule.mockReset()
+    macUpdater.schedule.mockResolvedValue({ markShutdownReady: macUpdater.markShutdownReady })
     electron.loadURL.mockReset()
     electron.loadURL.mockResolvedValue(undefined)
     electron.dialog.showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: false })
     electron.shell.openPath.mockResolvedValue('')
+    electron.systemPreferences.isTrustedAccessibilityClient.mockReturnValue(false)
     electron.nativeTheme.themeSource = 'system'
   })
 
@@ -559,7 +572,7 @@ describe('Electron compatibility runtime', () => {
         appExecutable: process.execPath,
         electronVersion: '43.4.0',
         profileName: 'desktop',
-        productVersion: '2.0.9',
+        productVersion: '2.0.10',
         profileDir: '/tmp/dsh-home/profiles/desktop',
         homeDir: '/tmp/dsh-home',
         spawn: expect.any(Function),
@@ -603,13 +616,41 @@ describe('Electron compatibility runtime', () => {
         expect.objectContaining({ detached: true, stdio: 'ignore' }),
       )
       expect(electron.shell.showItemInFolder).toHaveBeenCalledWith(manifest)
-      expect(electron.dialog.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
-        title: '加载 e-Mate 浏览器扩展',
-        detail: expect.stringContaining('加载已解压的扩展程序'),
+      expect(electron.notifications.at(-1)?.options).toEqual(expect.objectContaining({
+        title: 'e-Mate 浏览器扩展安装已准备',
       }))
     } finally {
       rmSync(home, { recursive: true, force: true })
     }
+  })
+
+  it('registers e-Mate and opens the macOS Accessibility pane when Computer Use needs permission', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+
+    await expect(runtime.openComputerUseAccessibilitySetup()).resolves.toBe(false)
+
+    expect(electron.systemPreferences.isTrustedAccessibilityClient.mock.calls).toEqual([[false], [true], [false]])
+    expect(electron.shell.openExternal).toHaveBeenCalledWith(
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+    )
+    expect(electron.notifications.at(-1)?.options).toEqual(expect.objectContaining({
+      title: '请允许 e-Mate 操控电脑',
+    }))
+  })
+
+  it('does not open macOS Settings when Computer Use already has Accessibility permission', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    electron.systemPreferences.isTrustedAccessibilityClient.mockReturnValue(true)
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+
+    await expect(runtime.openComputerUseAccessibilitySetup()).resolves.toBe(true)
+
+    expect(electron.systemPreferences.isTrustedAccessibilityClient).toHaveBeenCalledOnce()
+    expect(electron.systemPreferences.isTrustedAccessibilityClient).toHaveBeenCalledWith(false)
+    expect(electron.shell.openExternal).not.toHaveBeenCalled()
   })
 
   it('shows native errors for synchronous and asynchronous terminal launch failures', async () => {
@@ -729,20 +770,22 @@ describe('Electron compatibility runtime', () => {
     await vi.waitFor(() => { expect(restart).toHaveBeenCalledOnce() })
   })
 
-  it('uses Electron networking and confirmation-gated macOS update handoff', async () => {
+  it('uses Electron networking and confirmation-gated macOS replacement', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const response = Response.json({ version: '2.1.0' })
     electron.net.fetch.mockResolvedValueOnce(response)
     updater.download.mockResolvedValueOnce('/tmp/e-Mate-2.1.0-mac.dmg')
+    const requestQuit = vi.fn()
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
+    runtime.schedule({ ...spec, requestQuit })
 
     await expect(runtime.updates.request('https://dl.ecoremedia.net/ecorex-agent/e-mate/desktop/latest.json', { method: 'GET' }))
       .resolves.toBe(response)
     expect(runtime.updates).toMatchObject({
       isPackaged: false,
       canDownload: false,
-      currentVersion: '2.0.9',
+      currentVersion: '2.0.10',
       statePath: join('/tmp/dsh-desktop-user-data', 'updates', 'state.json'),
     })
     electron.app.isPackaged = true
@@ -771,6 +814,10 @@ describe('Electron compatibility runtime', () => {
 
     electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 0, checkboxChecked: false })
     await expect(runtime.updates.confirmDownload('2.1.0')).resolves.toBe(true)
+    expect(electron.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
+      detail: 'e-Mate will download, verify, install, and reopen automatically.',
+      buttons: ['Update and Restart', 'Later'],
+    }))
     const controller = new AbortController()
     await runtime.updates.downloadAndOpen(updateAvailable, controller.signal)
     expect(updater.download).toHaveBeenCalledWith({
@@ -781,17 +828,30 @@ describe('Electron compatibility runtime', () => {
       request: expect.any(Function),
       signal: controller.signal,
     })
-    expect(electron.shell.openPath).toHaveBeenCalledWith('/tmp/e-Mate-2.1.0-mac.dmg')
-    expect(electron.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
-      title: 'e-Mate Update Downloaded',
-      buttons: ['OK'],
+    expect(macUpdater.schedule).toHaveBeenCalledWith(expect.objectContaining({
+      dmgPath: '/tmp/e-Mate-2.1.0-mac.dmg',
+      targetVersion: '2.1.0',
+      currentExecutable: process.execPath,
+      userDataPath: '/tmp/dsh-desktop-user-data',
+      homeDirectory: '/tmp/dsh-home',
+      helperModulePath: expect.stringMatching(/mac-update-helper\.js$/u),
+      parentPid: process.pid,
+      signal: controller.signal,
     }))
+    expect(requestQuit).toHaveBeenCalledWith(0)
+    expect(macUpdater.markShutdownReady).not.toHaveBeenCalled()
+    runtime.commitPreparedUpdateShutdown()
+    expect(macUpdater.markShutdownReady).toHaveBeenCalledOnce()
+    expect(electron.notifications[0]?.options).toEqual({
+      title: 'Installing e-Mate Update',
+      body: 'e-Mate 2.1.0 will reopen automatically.',
+    })
 
     runtime.updates.notify({
       title: 'Profile Recovered',
       body: 'Reopened the last-known-good profile.',
     })
-    const notification = electron.notifications[0]
+    const notification = electron.notifications.at(-1)
     expect(notification?.options).toEqual({
       title: 'Profile Recovered',
       body: 'Reopened the last-known-good profile.',
@@ -845,48 +905,56 @@ describe('Electron compatibility runtime', () => {
     expect(requestQuit).not.toHaveBeenCalled()
   })
 
-  it('keeps a downloaded Windows installer idle when installation is deferred', async () => {
+  it('does not ask for a second confirmation after a Windows update was approved', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     updater.download.mockResolvedValueOnce('C:\\Updates\\e-Mate-2.1.0-windows.exe')
-    electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 1, checkboxChecked: false })
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
+    runtime.schedule(spec)
+    const dialogCalls = electron.dialog.showMessageBox.mock.calls.length
 
-    await runtime.updates.downloadAndOpen(windowsUpdateAvailable, new AbortController().signal)
+    const pending = runtime.updates.downloadAndOpen(windowsUpdateAvailable, new AbortController().signal)
+    await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenCalledOnce() })
+    childProcess.emit('spawn')
+    await pending
 
-    expect(childProcess.spawn).not.toHaveBeenCalled()
+    expect(electron.dialog.showMessageBox).toHaveBeenCalledTimes(dialogCalls)
   })
 
-  it('rejects a macOS handoff when the operating system cannot open the DMG', async () => {
+  it('does not exit when macOS update staging fails', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     updater.download.mockResolvedValueOnce('/tmp/e-Mate-2.1.0-mac.dmg')
-    electron.shell.openPath.mockResolvedValueOnce('Launch Services rejected the image')
+    macUpdater.schedule.mockRejectedValueOnce(new Error('invalid staged bundle'))
+    const requestQuit = vi.fn()
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
+    runtime.schedule({ ...spec, requestQuit })
 
     await expect(runtime.updates.downloadAndOpen(updateAvailable, new AbortController().signal))
-      .rejects.toThrow('Launch Services rejected the image')
-    expect(electron.dialog.showMessageBox).not.toHaveBeenCalled()
+      .rejects.toThrow('invalid staged bundle')
+    expect(requestQuit).not.toHaveBeenCalled()
   })
 
-  it('does not show macOS completion after the update generation is cancelled', async () => {
+  it('commits a ready macOS helper even if the original request signal aborts afterward', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     updater.download.mockResolvedValueOnce('/tmp/e-Mate-2.1.0-mac.dmg')
-    let finishOpen!: (result: string) => void
-    electron.shell.openPath.mockImplementationOnce(async () => new Promise<string>(resolve => {
-      finishOpen = resolve
+    let finishStage!: () => void
+    macUpdater.schedule.mockImplementationOnce(async () => new Promise(resolve => {
+      finishStage = () => { resolve({ markShutdownReady: macUpdater.markShutdownReady }) }
     }))
+    const requestQuit = vi.fn()
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
+    runtime.schedule({ ...spec, requestQuit })
     const controller = new AbortController()
 
     const pending = runtime.updates.downloadAndOpen(updateAvailable, controller.signal)
-    await vi.waitFor(() => { expect(electron.shell.openPath).toHaveBeenCalledOnce() })
+    await vi.waitFor(() => { expect(macUpdater.schedule).toHaveBeenCalledOnce() })
     controller.abort()
-    finishOpen('')
+    finishStage()
 
-    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
-    expect(electron.dialog.showMessageBox).not.toHaveBeenCalled()
+    await expect(pending).resolves.toBeUndefined()
+    expect(requestQuit).toHaveBeenCalledWith(0)
   })
 
   it('keeps advanced material internals free of a user-visible mode switch', async () => {

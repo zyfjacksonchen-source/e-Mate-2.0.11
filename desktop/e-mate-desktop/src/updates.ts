@@ -21,7 +21,13 @@ export const inject = ['desktopRuntime']
 
 /** The only Agent-callable entry into the native desktop updater. */
 export interface DesktopUpdates {
-  runInteractiveUpdate(): Promise<UpdateCheckResult | null>
+  runInteractiveUpdate(): Promise<InteractiveUpdateResult>
+}
+
+export type InteractiveUpdateResult = {
+  readonly status: 'up-to-date' | 'declined' | 'superseded' | 'scheduled' | 'failed'
+  readonly installedVersion: string
+  readonly latestVersion?: string
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -67,7 +73,7 @@ const EMPTY_STATE: UpdateStateV2 = { version: 2 }
  */
 export function apply(ctx: Context, config: Config): void {
   const adapter = ctx.desktopRuntime.updates
-  let interactiveUpdate: (() => Promise<UpdateCheckResult | null>) | undefined
+  let interactiveUpdate: (() => Promise<InteractiveUpdateResult>) | undefined
   ctx.provide('desktopUpdates', {
     runInteractiveUpdate() {
       if (interactiveUpdate === undefined) {
@@ -87,8 +93,8 @@ export function apply(ctx: Context, config: Config): void {
     let requestController: AbortController | undefined
     let downloadController: AbortController | undefined
     let inFlight: Promise<UpdateCheckResult | null> | undefined
-    let manualTask: Promise<UpdateCheckResult | null> | undefined
-    let downloadTask: Promise<void> | undefined
+    let manualTask: Promise<InteractiveUpdateResult> | undefined
+    let downloadTask: Promise<InteractiveUpdateResult> | undefined
     let refreshTray = (): void => {}
 
     const persistState = async (): Promise<void> => {
@@ -160,19 +166,37 @@ export function apply(ctx: Context, config: Config): void {
       return availableUpdate
     }
 
-    const startDownload = (update: AvailableUpdate): Promise<void> => {
+    const failed = (latestVersion?: string): InteractiveUpdateResult => ({
+      status: 'failed',
+      installedVersion: adapter.currentVersion,
+      ...(latestVersion === undefined ? {} : { latestVersion }),
+    })
+
+    const startDownload = (update: AvailableUpdate): Promise<InteractiveUpdateResult> => {
       if (downloadTask !== undefined) return downloadTask
-      const task = (async () => {
+      const task = (async (): Promise<InteractiveUpdateResult> => {
         let confirmed: boolean
         try {
           confirmed = await adapter.confirmDownload(update.latestVersion)
         } catch {
-          return
+          return failed(update.latestVersion)
         }
-        if (!confirmed || disposed) return
+        if (!confirmed) {
+          return { status: 'declined', installedVersion: adapter.currentVersion, latestVersion: update.latestVersion }
+        }
+        if (disposed) return failed(update.latestVersion)
 
         const confirmedUpdate = observeResult(await startCheck())
-        if (!sameUpdate(confirmedUpdate, update) || disposed) return
+        if (!sameUpdate(confirmedUpdate, update) || disposed) {
+          if (!disposed) {
+            adapter.notify(confirmedUpdate === undefined
+              ? { title: 'e-Mate Update Failed', body: 'The update release could not be verified. Please try again.' }
+              : { title: 'e-Mate Update Changed', body: `e-Mate ${confirmedUpdate.latestVersion} is now available. Please confirm the new release.` })
+          }
+          return confirmedUpdate === undefined
+            ? failed(update.latestVersion)
+            : { status: 'superseded', installedVersion: adapter.currentVersion, latestVersion: confirmedUpdate.latestVersion }
+        }
 
         const controller = new AbortController()
         downloadController = controller
@@ -180,8 +204,15 @@ export function apply(ctx: Context, config: Config): void {
         refreshTray()
         try {
           await adapter.downloadAndOpen(update, controller.signal)
+          return { status: 'scheduled', installedVersion: adapter.currentVersion, latestVersion: update.latestVersion }
         } catch {
-          // Network, filesystem, and installer-opening failures are deliberately silent.
+          if (!disposed) {
+            adapter.notify({
+              title: 'e-Mate Update Failed',
+              body: `e-Mate ${update.latestVersion} could not be downloaded, verified, or installed. Please try again.`,
+            })
+          }
+          return failed(update.latestVersion)
         } finally {
           if (downloadController === controller) downloadController = undefined
           downloadingVersion = undefined
@@ -194,31 +225,35 @@ export function apply(ctx: Context, config: Config): void {
       return task
     }
 
-    const offerDownload = async (update: AvailableUpdate, automatic: boolean): Promise<void> => {
-      if (disposed || !adapter.canDownload) return
+    const offerDownload = async (update: AvailableUpdate, automatic: boolean): Promise<InteractiveUpdateResult | undefined> => {
+      if (disposed || !adapter.canDownload) return failed(update.latestVersion)
       await stateReady
       if (disposed || (automatic && state.lastPromptedVersion === update.latestVersion)) return
       await rememberPrompt(update.latestVersion)
-      if (!disposed) await startDownload(update)
+      if (!disposed) return startDownload(update)
     }
 
-    const runManualCheck = (): Promise<UpdateCheckResult | null> => {
-      manualTask ??= (async () => {
+    const runManualCheck = (): Promise<InteractiveUpdateResult> => {
+      if (manualTask !== undefined) return manualTask
+      const task = (async (): Promise<InteractiveUpdateResult> => {
         if (availableUpdate !== undefined) {
-          await offerDownload(availableUpdate, false)
-          return availableUpdate
+          return (await offerDownload(availableUpdate, false)) ?? failed(availableUpdate.latestVersion)
         }
         const result = await startCheck()
-        if (disposed) return null
+        if (disposed) return failed()
         const update = observeResult(result)
         if (update !== undefined) {
-          await offerDownload(update, false)
-          return update
+          return (await offerDownload(update, false)) ?? failed(update.latestVersion)
         }
         await adapter.showManualCheckResult(result)
-        return result
-      })().catch(() => null).finally(() => { manualTask = undefined })
-      return manualTask
+        return result?.status === 'up-to-date'
+          ? { status: 'up-to-date', installedVersion: result.currentVersion, latestVersion: result.latestVersion }
+          : failed(result?.status === 'update-available' ? result.latestVersion : undefined)
+      })().catch(() => failed()).finally(() => {
+        if (manualTask === task) manualTask = undefined
+      })
+      manualTask = task
+      return task
     }
     interactiveUpdate = runManualCheck
 

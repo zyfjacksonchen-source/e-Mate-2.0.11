@@ -4,12 +4,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { COMPOSER_PLACEHOLDER, ComposerConnectors } from '../src/client/composer-connectors.tsx'
+import { registerComputerUseTrigger } from '../src/client/index.ts'
+import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 
 const Icon = () => <svg />
 
 afterEach(cleanup)
 
-describe('e-Mate 2.0.9 composer projection', () => {
+describe('e-Mate 2.0.10 composer projection', () => {
   it('opens a selector card that lists only effective native MCP connections', async () => {
     const callConnections = vi.fn(async () => ({
       ok: true,
@@ -50,13 +52,36 @@ describe('e-Mate 2.0.9 composer projection', () => {
     expect(screen.getByPlaceholderText('当前模型不可用，请先选择模型')).toBeTruthy()
   })
 
+  it('keeps a picked @电脑操控 reference visible in the native composer', () => {
+    let registered: InputTriggerSource | undefined
+    registerComputerUseTrigger({
+      effect(run: () => () => void) { return run() },
+      inputTriggers: {
+        registerSource(source: InputTriggerSource) {
+          registered = source
+          return () => {}
+        },
+      },
+    })
+    expect(registered?.onPick({
+      candidate: { name: '电脑操控' },
+      session: { sessionId: 'session-1' as never },
+      position: 'inline',
+      via: 'menu',
+      span: { start: 0, end: 5, draftRev: 1 },
+    })).toEqual({
+      insert: { source: '功能', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' },
+    })
+    expect(readFileSync('src/client/home.module.css', 'utf8')).toContain("font-family: 'DshChipCell', -apple-system")
+  })
+
   it('uses the target input trigger and input-bar contracts without a parallel transport', async () => {
     const source = readFileSync('src/client/index.ts', 'utf8')
     const styles = readFileSync('src/client/home.module.css', 'utf8')
     expect(source).toContain("ctx.slots.inject('conversation.input.right'")
     expect(source).toContain("ctx.connection.rpc.call('/emate.mcpManage', 'active', {})")
     expect(source).toContain("name: '功能'")
-    expect(source).toContain("label: '电脑操控'")
+    expect(source).toContain("label: '@电脑操控'")
     expect(source).toContain('<computer-use explicit="true">')
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource)\s*\(/u)
     await waitFor(() => expect(styles).toContain('[data-composer-card]'))

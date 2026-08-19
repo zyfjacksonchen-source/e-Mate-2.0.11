@@ -28,6 +28,18 @@ interface ToolImagesState extends ToolImagesData {
   sourceSeq: number
 }
 
+interface ImageOutputEventData {
+  readonly call_id: string
+  readonly content: readonly [{ readonly type: 'image'; readonly attachment: ImageAttachmentRef }]
+}
+
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    /** Human-visible generated image kept outside model-visible message history. */
+    'emate/image-output': ImageOutputEventData
+  }
+}
+
 declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
   interface ChatNodeDataMap {
     'e-mate-image-disclosure': ImageDisclosureData
@@ -70,6 +82,13 @@ export const imageDisclosureDefinition: ConversationNodeDefinition<ImageDisclosu
 }
 
 function toolImages(event: Parameters<ConversationNodeDefinition<ToolImagesState>['match']>[0]): ToolImagesData['images'] {
+  if (event.type === 'emate/image-output') {
+    const data = event.data
+    return typeof data.call_id === 'string' && Array.isArray(data.content) && data.content.length === 1
+      && data.content[0]?.type === 'image' && typeof data.content[0].attachment?.attachmentId === 'string'
+      ? [{ attachment: data.content[0].attachment }]
+      : []
+  }
   if (event.type !== 'tool/result') return []
   return event.data.message.content.flatMap(block => block.type === 'tool-result'
     ? block.content.filter(image => image.type === 'image').map(image => ({ attachment: image.attachment }))
@@ -80,9 +99,11 @@ export const toolImagesDefinition: ConversationNodeDefinition<ToolImagesState> =
   kind: 'e-mate-tool-images',
   target: 'chat',
   match: event => {
-    if (event.type !== 'tool/result' || !isAppendSurfaceEvent(event)) return null
+    if (event.type !== 'emate/image-output' && (event.type !== 'tool/result' || !isAppendSurfaceEvent(event))) return null
     const images = toolImages(event)
-    return images.length === 0 ? null : { id: `tool-images:${event.data.message.id}`, role: 'start' }
+    if (images.length === 0) return null
+    const id = event.type === 'emate/image-output' ? event.data.call_id : event.data.message.id
+    return { id: `tool-images:${id}`, role: 'start' }
   },
   start: (_context, match) => ({ images: toolImages(match.event), sourceSeq: match.event.seq }),
   update: context => context.state,

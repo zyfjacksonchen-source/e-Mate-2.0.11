@@ -14,6 +14,7 @@ const HELPER_SOURCE = join(NATIVE, 'Sources', 'Helper')
 const FIXTURE_SOURCE = join(NATIVE, 'Sources', 'Fixture', 'main.swift')
 const MONITOR_SOURCE = join(NATIVE, 'Sources', 'Monitor', 'main.swift')
 const HELPER_OUTPUT = join(NATIVE, 'bin', 'dsh-computer-use-helper')
+const HELPER_ENTITLEMENTS = join(NATIVE, 'helper-entitlements.plist')
 const FIXTURE_APP = join(NATIVE, 'fixture', 'DSHComputerUseFixture.app')
 const MONITOR_OUTPUT = join(NATIVE, 'fixture', 'dsh-computer-use-input-monitor')
 const args = new Set(process.argv.slice(2))
@@ -83,7 +84,7 @@ async function buildHelper() {
   }
   await run('xcrun', ['lipo', '-create', ...outputs, '-output', HELPER_OUTPUT])
   await chmod(HELPER_OUTPUT, 0o755)
-  await run('codesign', ['--force', '--sign', '-', '--timestamp=none', HELPER_OUTPUT])
+  await run('codesign', ['--force', '--sign', '-', '--timestamp=none', '--options', 'runtime', '--entitlements', HELPER_ENTITLEMENTS, HELPER_OUTPUT])
   const architectures = (await run('xcrun', ['lipo', '-archs', HELPER_OUTPUT])).split(/\s+/u).filter(Boolean).sort()
   if (architectures.join(',') !== 'arm64,x86_64') throw new Error(`helper is not universal: ${architectures.join(', ')}`)
   const manifest = {

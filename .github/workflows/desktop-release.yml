@@ -4,13 +4,19 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the accepted unsigned 2.0.9 installers and latest.json to R2.
+        description: Publish an already built and Computer Use-accepted artifact run to R2.
         required: true
         type: boolean
         default: false
+      release_run_id:
+        description: Successful build-only run ID containing the exact accepted installers; required only when publishing.
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ${{ inputs.publish && 'e-mate-desktop-r2-publication' || format('{0}-{1}', github.workflow, github.ref) }}
@@ -21,6 +27,7 @@ env:
 
 jobs:
   profile:
+    if: ${{ !inputs.publish }}
     name: Build and verify the e-Mate profile
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -55,6 +62,7 @@ jobs:
           retention-days: 1
 
   windows:
+    if: ${{ !inputs.publish }}
     name: Build unsigned Windows x64 installer
     needs: profile
     runs-on: windows-2025
@@ -84,14 +92,20 @@ jobs:
         run: yarn install --immutable
       - working-directory: desktop
         run: yarn dist:win
+      - name: Resolve packaged desktop version
+        id: version
+        working-directory: desktop
+        shell: bash
+        run: echo "value=$(node -p \"require('./e-mate-desktop/package.json').version\")" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: e-mate-desktop-windows-${{ github.sha }}
-          path: desktop/e-mate-desktop/dist/e-Mate-2.0.9-win-x64-Setup.exe
+          path: desktop/e-mate-desktop/dist/e-Mate-${{ steps.version.outputs.value }}-win-x64-Setup.exe
           if-no-files-found: error
           retention-days: 7
 
   macos:
+    if: ${{ !inputs.publish }}
     name: Build unsigned macOS universal disk image
     needs: profile
     runs-on: macos-15
@@ -119,15 +133,20 @@ jobs:
       - working-directory: desktop
         run: yarn install --immutable
       - working-directory: desktop
-        run: yarn dist:mac-smoke
+        run: yarn dist:mac-unsigned-release
+      - name: Resolve packaged desktop version
+        id: version
+        working-directory: desktop
+        run: echo "value=$(node -p \"require('./e-mate-desktop/package.json').version\")" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: e-mate-desktop-macos-${{ github.sha }}
-          path: desktop/e-mate-desktop/dist/mac-smoke/e-Mate-2.0.9-mac-universal.dmg
+          path: desktop/e-mate-desktop/dist/mac-unsigned-release/e-Mate-${{ steps.version.outputs.value }}-mac-universal.dmg
           if-no-files-found: error
           retention-days: 7
 
   manifest:
+    if: ${{ !inputs.publish }}
     name: Bind native artifacts to the release manifest
     needs: [windows, macos]
     runs-on: ubuntu-24.04
@@ -147,11 +166,14 @@ jobs:
         with:
           name: e-mate-desktop-macos-${{ github.sha }}
           path: dist/desktop
+      - name: Resolve manifest version
+        id: version
+        run: echo "value=$(node -p \"require('./desktop/e-mate-desktop/package.json').version\")" >> "$GITHUB_OUTPUT"
       - name: Generate exact R2 release manifest
         run: >-
           node desktop/e-mate-desktop/scripts/desktop-release-manifest.ts
-          --mac dist/desktop/e-Mate-2.0.9-mac-universal.dmg
-          --win dist/desktop/e-Mate-2.0.9-win-x64-Setup.exe
+          --mac dist/desktop/e-Mate-${{ steps.version.outputs.value }}-mac-universal.dmg
+          --win dist/desktop/e-Mate-${{ steps.version.outputs.value }}-win-x64-Setup.exe
           --commit "$GITHUB_SHA"
           --out dist/desktop/latest.json
       - uses: actions/upload-artifact@v4
@@ -164,15 +186,28 @@ jobs:
   r2:
     name: Publish immutable installers and activate latest.json
     if: inputs.publish
-    needs: manifest
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: r2-publish
     steps:
+      - name: Validate the accepted build-only run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID")"
+          test "$(jq -er .head_sha <<<"$run_json")" = "$GITHUB_SHA"
+          test "$(jq -er .conclusion <<<"$run_json")" = success
+          test "$(jq -er .event <<<"$run_json")" = workflow_dispatch
+          test "$(jq -er .path <<<"$run_json")" = .github/workflows/desktop-release.yml
       - uses: actions/download-artifact@v4
         with:
           name: e-mate-desktop-release-${{ github.sha }}
           path: dist/desktop
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.release_run_id }}
       - name: Publish accepted desktop bytes to Cloudflare R2
         env:
           ECOREX_R2_ACCESS_KEY_ID: ${{ secrets.ECOREX_R2_ACCESS_KEY_ID }}
@@ -208,12 +243,20 @@ jobs:
           unset ECOREX_R2_ACCESS_KEY_ID ECOREX_R2_SECRET_ACCESS_KEY
           endpoint="https://${ECOREX_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           bucket="emate-desktop-downloads"
-          prefix="desktop/releases/v2.0.9/${GITHUB_SHA}"
           origin="https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev"
-          for file in e-Mate-2.0.9-mac-universal.dmg e-Mate-2.0.9-win-x64-Setup.exe; do
+          version="$(jq -er '.version | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' dist/desktop/latest.json)"
+          test "$(jq -er .source_commit dist/desktop/latest.json)" = "$GITHUB_SHA"
+          prefix="desktop/releases/v${version}/${GITHUB_SHA}"
+          for platform in darwin win32; do
+            file="$(jq -er --arg platform "$platform" '.artifacts[$platform].url | split("/")[-1]' dist/desktop/latest.json)"
+            if [[ "$platform" = darwin ]]; then suffix='mac-universal.dmg'; else suffix='win-x64-Setup.exe'; fi
+            test "$file" = "e-Mate-${version}-${suffix}"
+            test "$(jq -er --arg platform "$platform" '.artifacts[$platform].url' dist/desktop/latest.json)" = "$origin/$prefix/$file"
             path="dist/desktop/$file"
             bytes="$(stat -c %s "$path")"
             sha="$(sha256sum "$path" | cut -d' ' -f1)"
+            test "$(jq -er --arg platform "$platform" '.artifacts[$platform].bytes' dist/desktop/latest.json)" = "$bytes"
+            test "$(jq -er --arg platform "$platform" '.artifacts[$platform].sha256' dist/desktop/latest.json)" = "$sha"
             key="$prefix/$file"
             if aws --endpoint-url "$endpoint" s3api head-object --bucket "$bucket" --key "$key" > existing.json 2>/dev/null; then
               test "$(jq -r .ContentLength existing.json)" = "$bytes"

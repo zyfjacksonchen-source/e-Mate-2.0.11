@@ -439,7 +439,7 @@ async function oauthProvider(
   let codeVerifier = ''
   const persist = () => writeOAuthState(ctx, spec.name, saved)
   const clientMetadata: OAuthClientMetadata = {
-    client_name: 'e-Mate 2.0.9',
+    client_name: 'e-Mate 2.0.10',
     redirect_uris: [redirectUrl],
     grant_types: ['authorization_code', 'refresh_token'],
     response_types: ['code'],

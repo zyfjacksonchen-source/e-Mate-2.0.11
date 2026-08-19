@@ -20,4 +20,14 @@ await cp(join(upstream, 'client/lib/types/index.d.ts'), join(root, 'lib/types/cl
 let client = await readFile(join(root, 'lib/client.js'), 'utf8')
 client = client.replaceAll('dsh-find-skill-client', '@e-mate/dsh-plugin-find-skill')
 await writeFile(join(root, 'lib/client.js'), client)
+const cliPath = join(root, 'lib/cli.js')
+let cli = await readFile(cliPath, 'utf8')
+const imports = `import { join } from 'node:path';`
+const command = `    const [command, ...fixed] = tokens;\n    const handle = subprocess.spawn({\n        argv: [command, ...fixed, ...args],`
+if (cli.split(imports).length !== 2 || cli.split(command).length !== 2) {
+  throw new Error('generated find-skill CLI is not uniquely patchable')
+}
+cli = cli.replace(imports, `import { isAbsolute, join } from 'node:path';`)
+cli = cli.replace(command, `    const [command, ...fixed] = tokens;\n    const managedPnpm = command === 'pnpm' ? process.env.EMATE_DESKTOP_PNPM : undefined;\n    if (managedPnpm !== undefined && !isAbsolute(managedPnpm))\n        throw new Error('EMATE_DESKTOP_PNPM must be an absolute path');\n    const executable = managedPnpm ?? command;\n    const handle = subprocess.spawn({\n        argv: [executable, ...fixed, ...args],`)
+await writeFile(cliPath, cli)
 await cp(join(upstream, 'LICENSE'), join(root, 'LICENSE'))

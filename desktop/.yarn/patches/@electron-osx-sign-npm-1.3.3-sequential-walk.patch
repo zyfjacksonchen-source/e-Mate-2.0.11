@@ -1,0 +1,95 @@
+diff -ruN a/dist/cjs/util.js b/dist/cjs/util.js
+--- a/dist/cjs/util.js
++++ b/dist/cjs/util.js
+@@ -150,33 +150,38 @@
+ async function walkAsync(dirPath) {
+     (0, exports.debugLog)('Walking... ' + dirPath);
+     async function _walkAsync(dirPath) {
+         const children = await fs.readdir(dirPath);
+-        return await Promise.all(children.map(async (child) => {
++        const results = [];
++        for (const child of children) {
+             const filePath = path.resolve(dirPath, child);
+             const stat = await fs.stat(filePath);
+             if (stat.isFile()) {
+                 switch (path.extname(filePath)) {
+                     case '.cstemp': // Temporary file generated from past codesign
+                         (0, exports.debugLog)('Removing... ' + filePath);
+                         await fs.remove(filePath);
+-                        return null;
++                        results.push(null);
++                        continue;
+                     default:
+-                        return await getFilePathIfBinary(filePath);
++                        results.push(await getFilePathIfBinary(filePath));
++                        continue;
+                 }
+             }
+             else if (stat.isDirectory() && !stat.isSymbolicLink()) {
+                 const walkResult = await _walkAsync(filePath);
+                 switch (path.extname(filePath)) {
+                     case '.app': // Application
+                     case '.framework': // Framework
+                         walkResult.push(filePath);
+                 }
+-                return walkResult;
++                results.push(walkResult);
++                continue;
+             }
+-            return null;
+-        }));
++            results.push(null);
++        }
++        return results;
+     }
+     const allPaths = await _walkAsync(dirPath);
+     return compactFlattenedList(allPaths);
+ }
+ exports.walkAsync = walkAsync;
+diff -ruN a/dist/esm/util.js b/dist/esm/util.js
+--- a/dist/esm/util.js
++++ b/dist/esm/util.js
+@@ -114,32 +114,37 @@
+ export async function walkAsync(dirPath) {
+     debugLog('Walking... ' + dirPath);
+     async function _walkAsync(dirPath) {
+         const children = await fs.readdir(dirPath);
+-        return await Promise.all(children.map(async (child) => {
++        const results = [];
++        for (const child of children) {
+             const filePath = path.resolve(dirPath, child);
+             const stat = await fs.stat(filePath);
+             if (stat.isFile()) {
+                 switch (path.extname(filePath)) {
+                     case '.cstemp': // Temporary file generated from past codesign
+                         debugLog('Removing... ' + filePath);
+                         await fs.remove(filePath);
+-                        return null;
++                        results.push(null);
++                        continue;
+                     default:
+-                        return await getFilePathIfBinary(filePath);
++                        results.push(await getFilePathIfBinary(filePath));
++                        continue;
+                 }
+             }
+             else if (stat.isDirectory() && !stat.isSymbolicLink()) {
+                 const walkResult = await _walkAsync(filePath);
+                 switch (path.extname(filePath)) {
+                     case '.app': // Application
+                     case '.framework': // Framework
+                         walkResult.push(filePath);
+                 }
+-                return walkResult;
++                results.push(walkResult);
++                continue;
+             }
+-            return null;
+-        }));
++            results.push(null);
++        }
++        return results;
+     }
+     const allPaths = await _walkAsync(dirPath);
+     return compactFlattenedList(allPaths);
+ }

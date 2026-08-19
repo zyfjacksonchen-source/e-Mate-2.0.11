@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-xin-assistant",
-  "version": "2.0.9",
+  "version": "2.0.10",
   "description": "DSH-native read-only Xin Assistant CLI integration for e-Mate",
   "type": "module",
   "license": "MIT",

@@ -1,9 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { composeEntries } from '@deepseek-ai/dsh-app-boot'
 import { afterEach, describe, expect, it } from 'vitest'
-import { installEmateDesktopProfile } from '../src/e-mate-profile.ts'
+import {
+  EMATE_DESKTOP_PROFILE_VERSION,
+  installEmateDesktopProfile,
+} from '../src/e-mate-profile.ts'
 import { prepareDesktopProfile } from '../src/profile.ts'
 import { bundledPythonPath } from '../src/vision-toolkit.ts'
 
@@ -58,8 +61,10 @@ describe('e-Mate desktop profile', () => {
     expect(findSkillPatch).not.toContain('/tree/main/skills/connect-feishu-cli')
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-mcp-manage', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'lib', 'index.js'))).toBe(true)
+    expect(lstatSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets')).isSymbolicLink()).toBe(true)
     const xinPatch = readFileSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant', 'cordis.patch.yml'), 'utf8')
     expect(xinPatch).toContain(`pythonPath: ${JSON.stringify(bundledPythonPath())}`)
+    expect(lstatSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant', 'runtime')).isSymbolicLink()).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets', 'pdf2json', 'pdfparser.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets', 'noto-sans-sc', 'files', 'noto-sans-sc-4-wght-normal.woff2'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', 'dsh-at-file', 'lib', 'client.js'))).toBe(true)
@@ -107,6 +112,14 @@ describe('e-Mate desktop profile', () => {
     expect(browserManifest.side_panel).toBeUndefined()
     expect(readFileSync(join(home, 'browser-extension', 'background.js'), 'utf8')).not.toContain('session.prompt')
     expect(existsSync(join(profile, 'plugins', 'runtime-binding.json'))).toBe(true)
+    const runtimeBinding = JSON.parse(readFileSync(join(profile, 'plugins', 'runtime-binding.json'), 'utf8')) as {
+      version?: string
+      schedule_module?: string
+      schedule_module_sha256?: string
+    }
+    expect(runtimeBinding.version).toBe(EMATE_DESKTOP_PROFILE_VERSION)
+    expect(runtimeBinding.schedule_module).toContain('@deepseek-ai/dsh-schedule')
+    expect(runtimeBinding.schedule_module_sha256).toMatch(/^[0-9a-f]{64}$/u)
     expect(readFileSync(join(home, 'settings.yaml'), 'utf8')).toBe(
       'ui-theme:\n  preference: dark\nagent-default-model:\n  provider: e-mate-enterprise\n  model: gpt-5.6-luna\n  reasoningEffort: max\n',
     )
@@ -119,6 +132,9 @@ describe('e-Mate desktop profile', () => {
       name: '@e-mate/desktop/agent-update',
     }))
     expect(rows.find(row => row.id === 'desktop-agent-update')?.disabled).not.toBe(true)
+    expect(rows.find(row => row.id === 'desktop-browser-extension-setup')).toEqual(expect.objectContaining({
+      name: '@e-mate/desktop/browser-extension-setup',
+    }))
     expect(rows.find(row => row.id === 'emate-browser')).toEqual(expect.objectContaining({
       name: './node_modules/@e-mate/dsh-plugin-browser/lib/index.mjs',
     }))
@@ -183,6 +199,42 @@ describe('e-Mate desktop profile', () => {
     expect(readFileSync(settings, 'utf8')).toBe(
       'ui-theme:\n  preference: light\nagent-default-model:\n  provider: e-mate-enterprise\n  model: gpt-5.6-luna\n  reasoningEffort: max\n',
     )
+  })
+
+  it('reuses a complete immutable profile and repairs it when a required file disappears', () => {
+    const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
+    roots.push(home)
+    const profile = installEmateDesktopProfile(home)
+    const browserClient = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-browser', 'package.json')
+    const sentinel = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-browser', '.warm-start-sentinel')
+    const firstModified = readFileSync(join(profile, '.e-mate-install.json'), 'utf8')
+
+    writeFileSync(sentinel, 'preserved only when the immutable install is reused')
+    installEmateDesktopProfile(home)
+    expect(readFileSync(join(profile, '.e-mate-install.json'), 'utf8')).toBe(firstModified)
+    expect(existsSync(sentinel)).toBe(true)
+
+    rmSync(browserClient)
+    installEmateDesktopProfile(home)
+    expect(existsSync(browserClient)).toBe(true)
+    expect(existsSync(sentinel)).toBe(false)
+  })
+
+  it('defers removal of replaced managed packages until the desktop is interactive', () => {
+    const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
+    roots.push(home)
+    const profile = installEmateDesktopProfile(home)
+    const browserPackage = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-browser')
+    const sentinel = join(browserPackage, '.old-package-sentinel')
+    const deferred: string[] = []
+    writeFileSync(sentinel, 'old package tree')
+    rmSync(join(browserPackage, 'package.json'))
+
+    installEmateDesktopProfile(home, path => { deferred.push(path) })
+
+    expect(existsSync(join(browserPackage, 'package.json'))).toBe(true)
+    expect(deferred.some(path => existsSync(join(path, '.old-package-sentinel')))).toBe(true)
+    for (const path of deferred) rmSync(path, { recursive: true, force: true })
   })
 
   it('preserves a native DSH plugin dependency and bundle across managed profile repair', () => {

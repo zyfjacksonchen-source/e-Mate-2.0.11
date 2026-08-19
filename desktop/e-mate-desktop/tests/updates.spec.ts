@@ -9,7 +9,7 @@ import type {
   DesktopTrayItem,
 } from '../src/runtime.ts'
 import type { UpdateCheckResult } from '../src/update-checker.ts'
-import { apply, Config, inject, type Config as UpdateConfig } from '../src/updates.ts'
+import { apply, Config, inject, type Config as UpdateConfig, type InteractiveUpdateResult } from '../src/updates.ts'
 
 const testConfig: UpdateConfig = {
   enabled: true,
@@ -42,7 +42,7 @@ interface Harness {
   readonly downloadAndOpen: ReturnType<typeof vi.fn>
   readonly refresh: ReturnType<typeof vi.fn>
   readonly registrationDispose: ReturnType<typeof vi.fn>
-  runInteractiveUpdate(): Promise<UpdateCheckResult | null>
+  runInteractiveUpdate(): Promise<InteractiveUpdateResult>
   dispose(): Promise<void>
 }
 
@@ -151,7 +151,7 @@ describe('desktop update Host plugin', () => {
     expect(harness.tray.label()).toBe('Check for Updates…')
     await expect(harness.runInteractiveUpdate()).resolves.toEqual({
       status: 'up-to-date',
-      currentVersion: '2.0.0',
+      installedVersion: '2.0.0',
       latestVersion: '2.0.0',
     })
     expect(request).toHaveBeenCalledOnce()
@@ -230,12 +230,20 @@ describe('desktop update Host plugin', () => {
       confirmDownload,
     })
 
-    await harness.tray.invoke()
+    await expect(harness.runInteractiveUpdate()).resolves.toEqual({
+      status: 'declined',
+      installedVersion: '2.0.0',
+      latestVersion: '2.1.0',
+    })
     expect(confirmDownload).toHaveBeenCalledOnce()
     expect(harness.downloadAndOpen).not.toHaveBeenCalled()
     expect(harness.tray.label()).toBe('e-Mate 2.1.0 Available')
 
-    await harness.tray.invoke()
+    await expect(harness.runInteractiveUpdate()).resolves.toEqual({
+      status: 'scheduled',
+      installedVersion: '2.0.0',
+      latestVersion: '2.1.0',
+    })
     expect(confirmDownload).toHaveBeenCalledTimes(2)
     expect(harness.downloadAndOpen).toHaveBeenCalledOnce()
     expect(harness.showManualCheckResult).not.toHaveBeenCalled()
@@ -251,7 +259,11 @@ describe('desktop update Host plugin', () => {
       confirmDownload: async () => true,
     })
 
-    await harness.tray.invoke()
+    await expect(harness.runInteractiveUpdate()).resolves.toEqual({
+      status: 'superseded',
+      installedVersion: '2.0.0',
+      latestVersion: '2.2.0',
+    })
 
     expect(request).toHaveBeenCalledTimes(2)
     expect(harness.confirmDownload).toHaveBeenCalledWith('2.1.0')
@@ -348,7 +360,7 @@ describe('desktop update Host plugin', () => {
     expect(harness.tray.label()).toBe('Check for Updates…')
   })
 
-  it('shares one pending download and silently restores availability after failure', async () => {
+  it('shares one pending download and reports a visible failure result', async () => {
     let rejectDownload!: (cause: Error) => void
     const download = new Promise<void>((_resolve, reject) => { rejectDownload = reject })
     const harness = await createHarness({
@@ -358,15 +370,18 @@ describe('desktop update Host plugin', () => {
       downloadAndOpen: async () => download,
     })
 
-    const first = harness.tray.invoke()
+    const first = harness.runInteractiveUpdate()
     await vi.waitFor(() => { expect(harness.downloadAndOpen).toHaveBeenCalledOnce() })
-    const second = harness.tray.invoke()
+    const second = harness.runInteractiveUpdate()
     expect(harness.downloadAndOpen).toHaveBeenCalledOnce()
     rejectDownload(new Error('offline'))
-    await Promise.all([first, second])
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { status: 'failed', installedVersion: '2.0.0', latestVersion: '2.1.0' },
+      { status: 'failed', installedVersion: '2.0.0', latestVersion: '2.1.0' },
+    ])
 
     expect(harness.downloadAndOpen).toHaveBeenCalledOnce()
-    expect(harness.notifications).toEqual([])
+    expect(harness.notifications).toEqual([expect.objectContaining({ title: 'e-Mate Update Failed' })])
     expect(harness.warnings).toEqual([])
     expect(harness.tray.label()).toBe('e-Mate 2.1.0 Available')
   })

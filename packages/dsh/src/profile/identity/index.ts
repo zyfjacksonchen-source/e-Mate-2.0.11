@@ -5,6 +5,7 @@ import {
 } from './agreements.js'
 import {
   createEnterpriseIdentityProvider,
+  IdentityServiceUnavailable,
   loginRejectionMessage,
   registrationRejectionMessage,
 } from './enterprise-provider.js'
@@ -17,6 +18,11 @@ export const ENTERPRISE_KEEP_ALIVE_MS = 30_000
 const badRequest = message => ({
   ok: false,
   error: { code: 'bad-request', message, details: { issues: [] } },
+})
+
+const unavailable = message => ({
+  ok: false,
+  error: { code: 'unavailable', message, details: { issues: [] } },
 })
 
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -225,6 +231,7 @@ export function apply(ctx, config = {}) {
   ctx.effect(() => ctx.connection.rpc.handle(
     IDENTITY_CHANNEL,
     async (endpoint, payload) => {
+      try {
       if (!isRecord(payload)) return badRequest('e-Mate identity payload must be an object')
       if (endpoint === 'agreements.describe') {
         if (Object.keys(payload).length !== 0) {
@@ -405,6 +412,15 @@ export function apply(ctx, config = {}) {
         return { ok: true, value: state }
       }
       return badRequest('unknown e-Mate identity endpoint')
+      } catch (error) {
+        if (error instanceof IdentityServiceUnavailable) {
+          ctx.logger?.warn?.(
+            `e-Mate enterprise identity ${endpoint} unavailable (${error.reason}${error.status === undefined ? '' : ` ${error.status}`})`,
+          )
+          return unavailable(error.message)
+        }
+        throw error
+      }
     },
     { authority: 'loopback' },
   ), 'emate.identity: target-native RPC channel')

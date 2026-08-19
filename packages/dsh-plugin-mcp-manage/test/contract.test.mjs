@@ -8,7 +8,7 @@ const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.
 const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
 
 test('MCP management keeps native DSH ownership and secrets out of settings', () => {
-  assert.equal(manifest.version, '2.0.9')
+  assert.equal(manifest.version, '2.0.10')
   assert.equal(manifest.eMate.runtime, '@deepseek-ai/dsh-mcp-client')
   assert.equal(manifest.eMate.mcpSdkVersion, '1.29.0')
   assert.match(source, /ctx\.loader\.(?:create|update)/u)

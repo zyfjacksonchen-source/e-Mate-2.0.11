@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-mcp-manage",
-  "version": "2.0.9",
+  "version": "2.0.10",
   "description": "DSH-native MCP connection management for e-Mate",
   "type": "module",
   "license": "MIT",

@@ -12,7 +12,6 @@ import {
   IconDownloadOutline16,
   IconEditOutline16,
   IconEllipsisOutline16,
-  IconEnhanceOutline16,
   IconFolderOpenOutline16,
   IconGoalOutline16,
   IconDarkOutline16,
@@ -21,8 +20,6 @@ import {
   IconListPenOutline16,
   IconNewChatOutline16,
   IconPanelLeftOutline16,
-  IconPauseOutline16,
-  IconPlayOutline16,
   IconPlusOutline16,
   IconRefreshOutline16,
   IconSearchOutline16,
@@ -85,7 +82,7 @@ export function registerComputerUseTrigger(ctx: any): void {
     },
     lexicon() { return ['电脑操控'] },
     onPick() {
-      return { insert: { source: '功能', ref: 'computer-use', label: '电脑操控', clipboardText: '@电脑操控' } }
+      return { insert: { source: '功能', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' } }
     },
     codec: {
       clipboardText: () => '@电脑操控',
@@ -126,7 +123,17 @@ export function apply(ctx: any): void {
     ctx.workspaces.startSession(target)
   }
 
-  const prepareSchedulePrompt = async (prompt: string) => {
+  const prepareSchedulePrompt = async (prompt: string, requestedSessionId?: string) => {
+    if (requestedSessionId !== undefined) {
+      const requestedScope = ctx.sessions.scope(requestedSessionId)
+      if (requestedScope === undefined) throw new Error(`session "${requestedSessionId}" is not addressable`)
+      ctx.conversation.input.for(requestedScope).setDraft(prompt)
+      ctx.sessions.open(requestedSessionId)
+      const route = `/chat/${encodeURIComponent(requestedSessionId)}`
+      if (location.pathname !== route) history.pushState(null, '', route)
+      dispatchEvent(new PopStateEvent('popstate'))
+      return
+    }
     const workspaceState = ctx.workspaces.list.getSnapshot()
     const current = ctx.sessions.list.getSnapshot().current
     let workspace = current === undefined
@@ -238,6 +245,14 @@ export function apply(ctx: any): void {
         },
         archiveSession: async (id: string) => { await ctx.workspaces.archiveSession(id) },
         toggleSidebar: () => { ctx.layout.toggleSidebar() },
+        getThemeScheme: () => ctx.theme.getTheme().active.colorScheme,
+        subscribeTheme: (listener: () => void) => ctx.on('theme/change', listener),
+        toggleTheme: () => {
+          const scheme = ctx.theme.getTheme().active.colorScheme
+          ctx.theme.setTheme(scheme === 'dark' ? 'light' : 'dark')
+        },
+        LightIcon: IconLightOutline16,
+        DarkIcon: IconDarkOutline16,
       }),
     }, SidebarRoot),
     'emate-shell: sidebar slot',
@@ -249,30 +264,14 @@ export function apply(ctx: any): void {
     inject: () => ({
       openSession: (id: string) => { ctx.sessions.open(id) },
       prepareSchedulePrompt,
+      callSchedules: () => ctx.connection.rpc.call('/emate.schedules', 'list', {}),
       closeDetails: () => { ctx.layout.closeDetails() },
       toggleSidebar: () => { ctx.layout.toggleSidebar() },
-      openSettings: () => {
-        if (location.pathname === '/settings') return
-        history.pushState(null, '', '/settings')
-        dispatchEvent(new PopStateEvent('popstate'))
-      },
-      getThemeScheme: () => ctx.theme.getTheme().active.colorScheme,
-      subscribeTheme: (listener: () => void) => ctx.on('theme/change', listener),
-      toggleTheme: () => {
-        const scheme = ctx.theme.getTheme().active.colorScheme
-        ctx.theme.setTheme(scheme === 'dark' ? 'light' : 'dark')
-      },
       PanelIcon: IconPanelLeftOutline16,
-      LightIcon: IconLightOutline16,
-      DarkIcon: IconDarkOutline16,
-      SettingsIcon: IconSettingsOutline16,
       scheduleIcons: {
         create: IconGoalOutline16,
-        list: IconChecklistOutline14,
+        refresh: IconRefreshOutline16,
         edit: IconEditOutline16,
-        run: IconEnhanceOutline16,
-        pause: IconPauseOutline16,
-        resume: IconPlayOutline16,
         delete: IconTrashOutline16,
       },
     }),

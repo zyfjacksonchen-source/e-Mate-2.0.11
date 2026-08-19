@@ -18,14 +18,14 @@ const sidebarCss = readFileSync('src/client/sidebar.module.css', 'utf8')
 const homeToolbarProps = {
   closeDetails: vi.fn(),
   toggleSidebar: vi.fn(),
-  openSettings: vi.fn(),
+  PanelIcon: Icon,
+}
+const sidebarUtilityProps = {
   getThemeScheme: () => 'light' as const,
   subscribeTheme: () => () => {},
   toggleTheme: vi.fn(),
-  PanelIcon: Icon,
   LightIcon: Icon,
   DarkIcon: Icon,
-  SettingsIcon: Icon,
 }
 
 describe('pinned e-Mate Sidebar and Home projection', () => {
@@ -55,7 +55,9 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     render(<SidebarRoot
       collapsed={false}
       width={248}
-      renderSlot={(name) => name === 'sidebar.primary.action' ? <button type="button">能力中心</button> : null}
+      renderSlot={(name) => name === 'sidebar.primary.action'
+        ? <button type="button">能力中心</button>
+        : name === 'sidebar.settings' ? <button type="button" data-emate-settings-trigger="">打开设置</button> : null}
       createPortal={createPortal}
       useSessions={selector => selector(sessions)}
       useWorkspaces={selector => selector(workspaces)}
@@ -78,9 +80,10 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       renameSession={async () => {}}
       archiveSession={async () => {}}
       toggleSidebar={() => {}}
+      {...sidebarUtilityProps}
     />)
 
-    expect(screen.getByText('2.0.9')).not.toBeNull()
+    expect(screen.getByText('2.0.10')).not.toBeNull()
     expect(screen.getByRole('button', { name: '新建任务' }).textContent).toContain('新任务')
     expect(screen.getByRole('button', { name: '新建任务' }).getAttribute('aria-current')).toBe('page')
     fireEvent.click(screen.getByRole('button', { name: '搜索会话' }))
@@ -88,6 +91,10 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(screen.getAllByRole('button', { name: '关闭搜索' })).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: '定时任务' }))
     expect(openSchedules).toHaveBeenCalledOnce()
+    expect(screen.getByRole('status', { name: '运行时已连接' })).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '切换到暗色模式' }))
+    expect(sidebarUtilityProps.toggleTheme).toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '打开设置' })).not.toBeNull()
     expect(screen.getByRole('region', { name: '项目' }).textContent).toContain('季度报告')
     expect(screen.getByRole('region', { name: '项目' }).textContent).not.toContain('通用会话')
     expect(screen.getByRole('region', { name: '会话' }).textContent).toContain('通用任务')
@@ -144,7 +151,8 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       useSessions={selector => selector(state)}
       openSession={openSession}
       prepareSchedulePrompt={async () => {}}
-      scheduleIcons={{ create: Icon, list: Icon, edit: Icon, run: Icon, pause: Icon, resume: Icon, delete: Icon }}
+      callSchedules={async () => ({ ok: true, value: { schema_version: 1, items: [], errors: [] } })}
+      scheduleIcons={{ create: Icon, refresh: Icon, edit: Icon, delete: Icon }}
     />)
     await waitFor(() => { expect(screen.getByRole('heading', { name: '今日使用概览' })).not.toBeNull() })
     expect(homeToolbarProps.closeDetails).toHaveBeenCalled()
@@ -152,11 +160,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(screen.getByText('Token 消耗量').parentElement?.textContent).toContain('100')
     expect(screen.getByRole('heading', { name: '任务趋势（近 7 天）' })).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '切换任务导航' }))
-    fireEvent.click(screen.getByRole('button', { name: '切换到暗色模式' }))
-    fireEvent.click(screen.getByRole('button', { name: '打开设置' }))
     expect(homeToolbarProps.toggleSidebar).toHaveBeenCalled()
-    expect(homeToolbarProps.toggleTheme).toHaveBeenCalled()
-    expect(homeToolbarProps.openSettings).toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: /真实任务/u }))
     expect(openSession).toHaveBeenCalledWith('session-1')
   })
@@ -206,18 +210,27 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       renameSession={renameSession}
       archiveSession={async () => {}}
       toggleSidebar={() => {}}
+      {...sidebarUtilityProps}
     />)
 
     expect(screen.getByRole('button', { name: '打开任务：新会话' })).not.toBeNull()
     await waitFor(() => { expect(renameSession).not.toHaveBeenCalled() })
   })
 
-  it('mounts the pinned schedule actions and writes the selected prompt through the target composer action', async () => {
+  it('projects native schedules and writes create, edit, and delete prompts into their owning target sessions', async () => {
     history.replaceState(null, '', '/schedules')
     const phase = document.createElement('main')
     phase.dataset.phase = 'active'
     document.body.append(phase)
     const prepareSchedulePrompt = vi.fn(async () => {})
+    const callSchedules = vi.fn(async () => ({ ok: true, value: {
+      schema_version: 1,
+      items: [{
+        id: 'schedule-1', session_id: 'session-1', session_title: '日报会话', kind: 'every',
+        prompt: '生成日报', everySeconds: 300, scheduledAt: '2099-08-19T12:00:00.000Z', state: 'scheduled',
+      }],
+      errors: [],
+    } }))
     const state = { ids: [], byId: {}, current: undefined }
 
     render(<HomeProjection
@@ -225,15 +238,22 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       useSessions={selector => selector(state)}
       openSession={() => {}}
       prepareSchedulePrompt={prepareSchedulePrompt}
-      scheduleIcons={{ create: Icon, list: Icon, edit: Icon, run: Icon, pause: Icon, resume: Icon, delete: Icon }}
+      callSchedules={callSchedules}
+      scheduleIcons={{ create: Icon, refresh: Icon, edit: Icon, delete: Icon }}
     />)
 
     await waitFor(() => { expect(screen.getByRole('heading', { name: '定时任务' })).not.toBeNull() })
-    expect(screen.getAllByRole('button').filter(button => button.querySelector('strong'))).toHaveLength(7)
-    fireEvent.click(screen.getByRole('button', { name: /创建定时任务/u }))
+    await waitFor(() => { expect(screen.getByText('生成日报')).not.toBeNull() })
+    expect(callSchedules).toHaveBeenCalledOnce()
+    expect(screen.getByText('日报会话')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '新任务' }))
     await waitFor(() => {
-      expect(prepareSchedulePrompt).toHaveBeenCalledWith('请帮我创建一个定时任务。先向我确认执行时间、任务内容和发送通道，再调用定时任务能力保存：')
+      expect(prepareSchedulePrompt).toHaveBeenCalledWith('请帮我创建一个定时任务。先向我确认执行时间和任务内容，再调用 schedule_create 保存。')
     })
+    fireEvent.click(screen.getByRole('button', { name: '修改' }))
+    await waitFor(() => { expect(prepareSchedulePrompt).toHaveBeenCalledWith(expect.stringContaining('schedule_create 创建替代任务'), 'session-1') })
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    await waitFor(() => { expect(prepareSchedulePrompt).toHaveBeenCalledWith(expect.stringContaining('schedule_delete'), 'session-1') })
   })
 
   it('keeps schedule prompt handoff on the target workspace/session/input path', () => {
@@ -244,14 +264,15 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(source).toMatch(/ctx\.workspaces\.create\(\{ path \}\)/u)
     expect(source).toMatch(/ctx\.workspaces\.connectWorkspace\(workspace\.workspaceId\)/u)
     expect(source).toMatch(/ctx\.sessions\.scope\(sessionId\)/u)
+    expect(source).toMatch(/ctx\.sessions\.scope\(requestedSessionId\)/u)
     expect(source).toMatch(/ctx\.conversation\.input\.for\(scope\)\.setDraft\(prompt\)/u)
     expect(source).toMatch(/ctx\.sessions\.open\(sessionId\)/u)
     expect(source).toMatch(/ctx\.workspaces\.list\.getSnapshot\(\)\.items\.find\(isGeneralWorkspace\)/u)
     expect(source).toMatch(/workspaceId === undefined && \['\/capabilities', '\/settings', '\/schedules'\]\.includes\(location\.pathname\)[\s\S]*?history\.pushState\(null, '', '\/'\)[\s\S]*?dispatchEvent\(new PopStateEvent\('popstate'\)\)[\s\S]*?return[\s\S]*?ctx\.workspaces\.startSession\(target\)/u)
     expect(source).toMatch(/ctx\.layout\.toggleSidebar\(\)/u)
     expect(source).toMatch(/ctx\.layout\.closeDetails\(\)/u)
+    expect(source).toMatch(/ctx\.connection\.rpc\.call\('\/emate\.schedules', 'list', \{\}\)/u)
     expect(source).toMatch(/ctx\.theme\.getTheme\(\)\.active\.colorScheme/u)
-    expect(source).toMatch(/ctx\.theme\.setTheme\(/u)
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource)\s*\(/u)
     expect(styles).toMatch(/:global\(\[data-slot='conversation'\] > div\[data-phase\]\)\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;/u)
     expect(styles).toContain('--dsw-alias-button-info-fill: var(--emate-color-brand);')

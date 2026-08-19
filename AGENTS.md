@@ -4,13 +4,22 @@ Read `docs/target-contract.md` and the latest entry in `docs/development-log.md`
 
 ## Non-negotiable boundaries
 
-- Keep the DeepSeek Harness core at commit `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`; add e-Mate behavior through profiles, plugins, client slots, or generated distribution assets.
+- Keep the DeepSeek Harness core at the bounded target fork commit recorded in `docs/target-contract.md` (currently `df78045a127e32cb5b942defba52c539590d1596`); add e-Mate behavior through profiles, plugins, client slots, or generated distribution assets.
 - Keep the enterprise surface limited to identity, model policy, and asynchronous audit. It must not control local tools, plugins, jobs, sessions, or capability availability.
 - Render only real Harness events and plugin presentation metadata. Do not create fake activity events or hardcode tool names in the central chat UI.
 - Preserve the model mapping and image-model fallback recorded in the target contract.
 - Treat old e-Mate/ECoreX databases as read-only sources. Never resurrect cache-only deleted conversations.
 - Missing credentials, test accounts, platform artifacts, or upstream packages are blockers. Do not replace them with approximate behavior or weaken acceptance.
-- Do not add Electron, Tauri, signing, notarization, or desktop auto-update code.
+- Reuse the `anywhere-labs/deepseek-harness-desktop` Electron/Cordis packaging and lifecycle. Desktop-only adapters such as formal packaging and auto-update belong in `desktop/e-mate-desktop`; do not add another desktop shell, Host, session transport, Agent loop, or updater protocol.
+
+## Desktop startup contract
+
+- macOS and Windows must keep the same upstream startup order: packaged Electron becomes ready, resolves the fixed local profile, boots the in-process Cordis Host, loads its loopback Web surface, and shows the native window. Do not replace this with a launcher service, CLI subprocess, external browser carrier, or parallel local server.
+- A warm launch must never copy, install, hash the full tree of, or mutate the managed profile. The managed profile may be repaired only when its versioned installation receipt or a narrow critical-file check fails. Windows command shims may be atomically refreshed, but must not execute pnpm or DSH during application startup.
+- Keep network requests, update checks/downloads, obsolete-install cleanup, browser-extension setup, Accessibility setup, Skill installation, and other optional maintenance outside the first-interactive-window critical path. Failures in those tasks must not delay or blank the local shell.
+- Measure startup from launching the installed application to a visible, AX-readable, clickable Harness surface. Measure renderer health separately; do not use a process-alive check, a loading screen, or direct execution from a compressed DMG as an interactive-start proxy.
+- Every release candidate must use the exact immutable macOS and Windows artifacts intended for publication. On release hardware, run one clean installed launch and three sequential warm launches per platform. Clean launch must be at most 10 seconds; warm-launch p75 must be at most 5 seconds and no warm launch may exceed 8 seconds. Record raw timings in `docs/development-log.md`; any regression or missing platform evidence blocks release.
+- The release gate must also prove macOS arm64 and x86_64/Rosetta renderer health and Windows x64 renderer health. Architecture health may complete after the interactive window, but it cannot substitute for the startup budgets above.
 
 ## Work loop
 

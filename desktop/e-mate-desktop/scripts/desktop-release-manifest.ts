@@ -1,12 +1,19 @@
 /** Build the immutable desktop artifact manifest consumed by e-Mate updates. */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { createReadStream, readFileSync } from 'node:fs'
 import { mkdir, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const VERSION = '2.0.9'
+const desktopManifest = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as { version?: unknown }
+export const DESKTOP_RELEASE_VERSION = desktopManifest.version
+if (typeof DESKTOP_RELEASE_VERSION !== 'string'
+  || !/^\d+\.\d+\.\d+$/u.test(DESKTOP_RELEASE_VERSION)) {
+  throw new Error('desktop release package version must be a stable semantic version')
+}
 const R2_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/u
 
@@ -26,17 +33,17 @@ interface ArtifactRecord {
 /** Create one deterministic latest.json after both native packages have passed their platform gates. */
 export async function createDesktopReleaseManifest(options: DesktopReleaseManifestOptions): Promise<void> {
   if (!SOURCE_COMMIT.test(options.sourceCommit)) throw new Error('desktop release source commit is invalid')
-  const prefix = `${R2_ORIGIN}/desktop/releases/v${VERSION}/${options.sourceCommit}`
+  const prefix = `${R2_ORIGIN}/desktop/releases/v${DESKTOP_RELEASE_VERSION}/${options.sourceCommit}`
   const [darwin, win32] = await Promise.all([
-    artifact(options.macArtifact, `e-Mate-${VERSION}-mac-universal.dmg`, prefix),
-    artifact(options.windowsArtifact, `e-Mate-${VERSION}-win-x64-Setup.exe`, prefix),
+    artifact(options.macArtifact, `e-Mate-${DESKTOP_RELEASE_VERSION}-mac-universal.dmg`, prefix),
+    artifact(options.windowsArtifact, `e-Mate-${DESKTOP_RELEASE_VERSION}-win-x64-Setup.exe`, prefix),
   ])
   const output = resolve(options.output)
   await mkdir(dirname(output), { recursive: true })
   const temporary = `${output}.${process.pid}.${randomUUID()}.tmp`
   await writeFile(temporary, `${JSON.stringify({
     schema_version: 1,
-    version: VERSION,
+    version: DESKTOP_RELEASE_VERSION,
     source_commit: options.sourceCommit,
     artifacts: { darwin, win32 },
   }, null, 2)}\n`, { flag: 'wx', mode: 0o600 })

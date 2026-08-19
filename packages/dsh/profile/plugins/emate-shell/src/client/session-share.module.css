@@ -14,6 +14,20 @@
 .trigger:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .trigger:focus-visible { outline: 2px solid var(--emate-color-brand, #ff6a1a); outline-offset: 2px; }
 
+:global(body[data-dsh-desktop-mode='advanced'] .dshDesktopFrame[data-desktop-platform='darwin']) .trigger {
+  position: fixed;
+  z-index: 1001;
+  top: 0;
+  right: 72px;
+}
+
+:global(body[data-dsh-desktop-mode='advanced'] .dshDesktopFrame[data-desktop-platform='win32']) .trigger {
+  position: fixed;
+  z-index: 1001;
+  top: 0;
+  right: 210px;
+}
+
 .dialog { width: min(680px, 100%); }
 
 .unavailable {

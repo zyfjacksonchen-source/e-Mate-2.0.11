@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useSyncExternalStore, type ComponentType } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useState, type ComponentType } from 'react'
 import { createPortal } from 'react-dom'
 import css from './home.module.css'
 import { formatTokenCount } from './token-format.ts'
@@ -30,60 +30,57 @@ interface SessionState {
 interface Props {
   useSessions: <T>(selector: (state: SessionState) => T) => T
   openSession: (id: string) => void
-  prepareSchedulePrompt: (prompt: string) => Promise<void>
+  prepareSchedulePrompt: (prompt: string, sessionId?: string) => Promise<void>
+  callSchedules: () => Promise<unknown>
   scheduleIcons: Record<ScheduleIcon, ComponentType<{ size?: number }>>
   toggleSidebar: () => void
-  openSettings: () => void
   closeDetails: () => void
-  getThemeScheme: () => 'light' | 'dark'
-  subscribeTheme: (listener: () => void) => () => void
-  toggleTheme: () => void
   PanelIcon: ComponentType<{ size?: number }>
-  LightIcon: ComponentType<{ size?: number }>
-  DarkIcon: ComponentType<{ size?: number }>
-  SettingsIcon: ComponentType<{ size?: number }>
 }
 
-type ScheduleIcon = 'create' | 'list' | 'edit' | 'run' | 'pause' | 'resume' | 'delete'
+type ScheduleIcon = 'create' | 'refresh' | 'edit' | 'delete'
 
-const SCHEDULE_ACTIONS = [
-  ['create', '创建定时任务', '告诉小芯执行时间、内容和发送通道', '请帮我创建一个定时任务。先向我确认执行时间、任务内容和发送通道，再调用定时任务能力保存：'],
-  ['list', '查看定时任务', '从 e-Mate 读取当前任务，不在页面伪造状态', '请调用定时任务能力，列出我当前的全部定时任务和下次执行时间。'],
-  ['edit', '修改定时任务', '修改名称、内容或执行时间并保留原投递目标', '请调用定时任务能力，先列出当前任务，再让我选择一个任务并说明要修改的字段。'],
-  ['run', '立即运行一次', '不改变原计划的下次执行时间', '请调用定时任务能力，先列出当前任务，再让我选择一个任务立即运行一次。'],
-  ['pause', '暂停定时任务', '选择任务后由 e-Mate 立即停用', '请调用定时任务能力，先列出当前启用的定时任务，再让我选择要暂停的任务。'],
-  ['resume', '恢复定时任务', '选择任务后由 e-Mate 重新启用', '请调用定时任务能力，先列出当前暂停的定时任务，再让我选择要恢复的任务。'],
-  ['delete', '删除定时任务', '删除前由小芯再次向你确认', '请调用定时任务能力，先列出当前定时任务，再让我选择要删除的任务；删除前必须再次确认。'],
-] as const satisfies ReadonlyArray<readonly [ScheduleIcon, string, string, string]>
+interface ScheduleItem {
+  id: string
+  session_id: string
+  session_title: string
+  kind: 'after' | 'at' | 'every'
+  prompt: string
+  scheduledAt: string
+  state: 'scheduled' | 'overdue'
+  afterSeconds?: number
+  everySeconds?: number
+}
 
-interface ToolbarProps extends Pick<Props,
-  'toggleSidebar' | 'openSettings' | 'getThemeScheme' | 'subscribeTheme' | 'toggleTheme'
-  | 'PanelIcon' | 'LightIcon' | 'DarkIcon' | 'SettingsIcon'> {}
+interface ToolbarProps extends Pick<Props, 'toggleSidebar' | 'PanelIcon'> {}
 
-function HomeToolbar({
-  toggleSidebar,
-  openSettings,
-  getThemeScheme,
-  subscribeTheme,
-  toggleTheme,
-  PanelIcon,
-  LightIcon,
-  DarkIcon,
-  SettingsIcon,
-}: ToolbarProps) {
-  const themeScheme = useSyncExternalStore(subscribeTheme, getThemeScheme, getThemeScheme)
-  const ThemeIcon = themeScheme === 'dark' ? DarkIcon : LightIcon
-
+function HomeToolbar({ toggleSidebar, PanelIcon }: ToolbarProps) {
   return (
     <header className={css.toolbar} data-emate-home-toolbar="">
       <button type="button" aria-label="切换任务导航" onClick={toggleSidebar}><PanelIcon size={18} /></button>
-      <div>
-        <span className={css.runtimeStatus} role="status" aria-label="运行时已连接" />
-        <button type="button" aria-label={themeScheme === 'dark' ? '切换到明亮模式' : '切换到暗色模式'} onClick={toggleTheme}><ThemeIcon size={18} /></button>
-        <button type="button" aria-label="打开设置" onClick={openSettings}><SettingsIcon size={18} /></button>
-      </div>
     </header>
   )
+}
+
+function scheduleRule(item: ScheduleItem): string {
+  if (item.kind === 'every') return `每 ${Math.round((item.everySeconds ?? 0) / 60)} 分钟`
+  if (item.kind === 'after') return `创建后 ${Math.round((item.afterSeconds ?? 0) / 60)} 分钟`
+  return '指定时间'
+}
+
+function parseSchedules(response: unknown): { items: ScheduleItem[]; errors: number } {
+  const value = response as { ok?: boolean; value?: { schema_version?: number; items?: unknown[]; errors?: unknown[] }; error?: { message?: string } }
+  if (value?.ok !== true || value.value?.schema_version !== 1 || !Array.isArray(value.value.items)) {
+    throw new Error(value?.error?.message ?? '定时任务暂时无法读取。')
+  }
+  const items = value.value.items.filter((item): item is ScheduleItem => {
+    const row = item as Partial<ScheduleItem>
+    return typeof row.id === 'string' && typeof row.session_id === 'string' && typeof row.session_title === 'string'
+      && ['after', 'at', 'every'].includes(String(row.kind)) && typeof row.prompt === 'string'
+      && typeof row.scheduledAt === 'string' && ['scheduled', 'overdue'].includes(String(row.state))
+  })
+  if (items.length !== value.value.items.length) throw new Error('定时任务数据格式无效。')
+  return { items, errors: Array.isArray(value.value.errors) ? value.value.errors.length : 0 }
 }
 
 function dayKey(timestamp: number): string {
@@ -95,17 +92,11 @@ export function HomeProjection({
   useSessions,
   openSession,
   prepareSchedulePrompt,
+  callSchedules,
   scheduleIcons,
   toggleSidebar,
-  openSettings,
   closeDetails,
-  getThemeScheme,
-  subscribeTheme,
-  toggleTheme,
   PanelIcon,
-  LightIcon,
-  DarkIcon,
-  SettingsIcon,
 }: Props) {
   const current = useSessions(state => state.current)
   const ids = useSessions(state => state.ids)
@@ -114,8 +105,31 @@ export function HomeProjection({
   const [target, setTarget] = useState<Element | null>(null)
   const [scheduleBusy, setScheduleBusy] = useState<string | null>(null)
   const [scheduleError, setScheduleError] = useState<string | null>(null)
+  const [scheduleItems, setScheduleItems] = useState<ScheduleItem[]>([])
+  const [scheduleLoading, setScheduleLoading] = useState(false)
+  const [scheduleReadErrors, setScheduleReadErrors] = useState(0)
+  const ScheduleCreateIcon = scheduleIcons.create
+  const ScheduleRefreshIcon = scheduleIcons.refresh
   const schedules = pathname === '/schedules'
   const show = schedules || current === undefined || byId[current]?.blank === true
+  const refreshSchedules = useCallback(async () => {
+    setScheduleLoading(true)
+    setScheduleError(null)
+    try {
+      const result = parseSchedules(await callSchedules())
+      setScheduleItems(result.items)
+      setScheduleReadErrors(result.errors)
+    } catch (error) {
+      setScheduleItems([])
+      setScheduleError(error instanceof Error ? error.message : '定时任务暂时无法读取。')
+    } finally {
+      setScheduleLoading(false)
+    }
+  }, [callSchedules])
+
+  useEffect(() => {
+    if (schedules) void refreshSchedules()
+  }, [refreshSchedules, schedules])
 
   useEffect(() => {
     if (show && !schedules) closeDetails()
@@ -153,40 +167,44 @@ export function HomeProjection({
   if (schedules) {
     return createPortal(
       <>
-        <HomeToolbar {...{
-          toggleSidebar, openSettings, getThemeScheme, subscribeTheme, toggleTheme,
-          PanelIcon, LightIcon, DarkIcon, SettingsIcon,
-        }} />
+        <HomeToolbar toggleSidebar={toggleSidebar} PanelIcon={PanelIcon} />
         <main className={css.schedulesPage} data-emate-schedules-page="" aria-labelledby="emate-schedules-title">
           <section className={css.schedules}>
             <header>
               <div><small>e-Mate Scheduler</small><h1 id="emate-schedules-title">定时任务</h1></div>
-              <p>操作将在当前会话中执行，由 e-Mate 返回真实结果。</p>
+              <div className={css.scheduleHeaderActions}>
+                <button type="button" disabled={scheduleLoading} onClick={() => { void refreshSchedules() }}><ScheduleRefreshIcon size={16} />刷新</button>
+                <button type="button" disabled={scheduleBusy !== null} onClick={() => {
+                  setScheduleBusy('create')
+                  void prepareSchedulePrompt('请帮我创建一个定时任务。先向我确认执行时间和任务内容，再调用 schedule_create 保存。')
+                    .catch(error => { setScheduleError(error instanceof Error ? error.message : '定时任务会话暂时不可用。') })
+                    .finally(() => { setScheduleBusy(null) })
+                }}><ScheduleCreateIcon size={16} />新任务</button>
+              </div>
             </header>
-            <div>
-              {SCHEDULE_ACTIONS.map(([icon, title, description, prompt]) => {
-                const Icon = scheduleIcons[icon]
-                return (
-                  <button
-                    key={title}
-                    type="button"
-                    disabled={scheduleBusy !== null}
-                    onClick={() => {
-                      setScheduleBusy(title)
-                      setScheduleError(null)
-                      void prepareSchedulePrompt(prompt)
-                        .catch(error => { setScheduleError(error instanceof Error ? error.message : '定时任务会话暂时不可用。') })
-                        .finally(() => { setScheduleBusy(null) })
-                    }}
-                  >
-                    <Icon size={20} />
-                    <span><strong>{title}</strong><small>{description}</small></span>
-                  </button>
-                )
-              })}
+            <div className={css.scheduleCards}>
+              {scheduleItems.map(item => <article key={`${item.session_id}:${item.id}`}>
+                <header><span className={item.state === 'overdue' ? css.overdue : undefined}>{item.state === 'overdue' ? '已逾期' : '已计划'}</span><small>{item.session_title}</small></header>
+                <strong>{item.prompt}</strong>
+                <dl><div><dt>规则</dt><dd>{scheduleRule(item)}</dd></div><div><dt>下次执行</dt><dd>{new Date(item.scheduledAt).toLocaleString()}</dd></div></dl>
+                <footer>
+                  <button type="button" disabled={scheduleBusy !== null} onClick={() => {
+                    setScheduleBusy(item.id)
+                    const prompt = `请修改定时任务 ${item.id}（当前内容：${JSON.stringify(item.prompt)}，下次执行：${item.scheduledAt}）。先向我确认新内容或时间；确认后先调用 schedule_create 创建替代任务，成功后再调用 schedule_delete 删除旧任务。`
+                    void prepareSchedulePrompt(prompt, item.session_id).catch(error => { setScheduleError(error instanceof Error ? error.message : '定时任务会话暂时不可用。') }).finally(() => { setScheduleBusy(null) })
+                  }}><scheduleIcons.edit size={16} />修改</button>
+                  <button type="button" disabled={scheduleBusy !== null} onClick={() => {
+                    setScheduleBusy(item.id)
+                    const prompt = `请删除定时任务 ${item.id}（内容：${JSON.stringify(item.prompt)}）。先调用 schedule_list 核对它仍存在并向我确认；只有收到确认后才调用 schedule_delete。`
+                    void prepareSchedulePrompt(prompt, item.session_id).catch(error => { setScheduleError(error instanceof Error ? error.message : '定时任务会话暂时不可用。') }).finally(() => { setScheduleBusy(null) })
+                  }}><scheduleIcons.delete size={16} />删除</button>
+                </footer>
+              </article>)}
+              {!scheduleLoading && scheduleItems.length === 0 && <p className={css.scheduleEmpty}>还没有定时任务。点击“新任务”后由小芯确认时间和内容。</p>}
             </div>
-            <p className={css.scheduleNote}>此页面不缓存任务清单；查看、修改和执行状态始终以 e-Mate 返回的事实为准。</p>
-            {scheduleBusy !== null && <p className={css.scheduleStatus} role="status">正在准备“{scheduleBusy}”会话…</p>}
+            <p className={css.scheduleNote}>任务来自 DSH 原生 Schedule 事件；修改会先创建替代任务，成功后再删除旧任务。</p>
+            {scheduleReadErrors > 0 && <p className={css.scheduleError} role="alert">有 {scheduleReadErrors} 个会话的定时任务日志无法读取。</p>}
+            {(scheduleLoading || scheduleBusy !== null) && <p className={css.scheduleStatus} role="status">{scheduleLoading ? '正在读取定时任务…' : '正在打开所属会话…'}</p>}
             {scheduleError !== null && <p className={css.scheduleError} role="alert">{scheduleError}</p>}
           </section>
         </main>
@@ -221,10 +239,7 @@ export function HomeProjection({
 
   return (
     <>
-      {createPortal(<HomeToolbar {...{
-        toggleSidebar, openSettings, getThemeScheme, subscribeTheme, toggleTheme,
-        PanelIcon, LightIcon, DarkIcon, SettingsIcon,
-      }} />, target.closest('[data-phase]') ?? target)}
+      {createPortal(<HomeToolbar toggleSidebar={toggleSidebar} PanelIcon={PanelIcon} />, target.closest('[data-phase]') ?? target)}
       {createPortal(<>
       <section className={css.hero} aria-labelledby="emate-home-title" data-emate-home-hero="">
         <div className={css.heroStage}>

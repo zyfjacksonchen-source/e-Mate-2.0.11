@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react'
 import css from './sidebar.module.css'
 
 interface SessionRow {
@@ -63,6 +63,11 @@ interface Props {
   renameSession: (id: string, title: string) => Promise<void>
   archiveSession: (id: string) => Promise<void>
   toggleSidebar: () => void
+  getThemeScheme: () => 'light' | 'dark'
+  subscribeTheme: (listener: () => void) => () => void
+  toggleTheme: () => void
+  LightIcon: Icon
+  DarkIcon: Icon
 }
 
 const COLLAPSED_SESSION_LIMIT = 10
@@ -93,6 +98,11 @@ export function SidebarRoot({
   renameSession,
   archiveSession,
   toggleSidebar,
+  getThemeScheme,
+  subscribeTheme,
+  toggleTheme,
+  LightIcon,
+  DarkIcon,
 }: Props) {
   const wide = !collapsed
   const root = useRef<HTMLElement>(null)
@@ -116,6 +126,8 @@ export function SidebarRoot({
   const [busySession, setBusySession] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [pathname, setPathname] = useState(() => location.pathname)
+  const themeScheme = useSyncExternalStore(subscribeTheme, getThemeScheme, getThemeScheme)
+  const ThemeIcon = themeScheme === 'dark' ? DarkIcon : LightIcon
 
   const archived = useMemo(() => new Set(archivedSessionIds), [archivedSessionIds])
   const projectWorkspaces = useMemo(() => workspaces.filter(workspace => !isGeneralWorkspace(workspace)), [workspaces])
@@ -328,7 +340,7 @@ export function SidebarRoot({
       <aside ref={root} className={`${css.root} ${collapsed ? css.collapsed : ''}`} style={wide ? { width } : undefined} aria-label="任务导航">
         <div className={css.brandRow}>
           {wide
-            ? <span className={css.brand}><img className={css.logo} src="/assets/e-mate/logo.png" alt="e-Mate" /><small className={css.version}>2.0.9</small></span>
+            ? <span className={css.brand}><img className={css.logo} src="/assets/e-mate/logo.png" alt="e-Mate" /><small className={css.version}>2.0.10</small></span>
             : <button className={css.brand} type="button" aria-label="展开任务导航" onClick={toggleSidebar}><img className={css.mark} src="/assets/e-mate/xiaoxin-avatar.png" alt="" aria-hidden="true" /></button>}
           {wide && (
             <button className={css.iconButton} type="button" aria-label="搜索会话" aria-expanded={searchOpen} onClick={() => { setSearchOpen(value => !value) }}>
@@ -422,7 +434,11 @@ export function SidebarRoot({
         </nav>
 
         <div className={css.footer}>
-          {renderSlot('sidebar.settings', { wide })}
+          <div className={css.utilities} aria-label="应用工具">
+            <span className={css.runtimeStatus} role="status" aria-label="运行时已连接" />
+            <button type="button" aria-label={themeScheme === 'dark' ? '切换到明亮模式' : '切换到暗色模式'} onClick={toggleTheme}><ThemeIcon size={18} /></button>
+            {renderSlot('sidebar.settings', { wide: false })}
+          </div>
           {renderSlot('sidebar.footer.action', { wide })}
         </div>
       </aside>

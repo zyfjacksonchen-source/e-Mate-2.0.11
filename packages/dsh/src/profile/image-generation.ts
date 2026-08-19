@@ -7,6 +7,22 @@ import { loadTargetLlm, loadTargetTools } from './target-runtime.js'
 export const name = 'emate-image-generation'
 export const inject = ['tools', 'jobs', 'attachments', 'emateIdentity', 'emateModelPolicy', 'emateCapabilities']
 
+interface ImageOutputEventData {
+  readonly call_id: string
+  readonly content: readonly [{ readonly type: 'image'; readonly attachment: ReturnType<typeof imageRef> }]
+}
+
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    /**
+     * Keeps one generated image durable and human-visible without adding its bytes to later model requests.
+     * @mode emit
+     * @param data - originating Tool call and saved image attachment.
+     */
+    'emate/image-output': ImageOutputEventData
+  }
+}
+
 const IMAGE_MODEL = 'gpt-image-2-pro'
 const MAX_PROMPT_CHARS = 20_000
 const MAX_EDIT_IMAGES = 16
@@ -118,6 +134,27 @@ function messageImages(messages, generatedOnly = false) {
   return images
 }
 
+function eventImages(events) {
+  if (!Array.isArray(events)) return []
+  const images = []
+  for (const event of events) {
+    if (event?.type === 'emate/image-output') {
+      const content = event.data?.content
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block?.type === 'image' && validImageRef(block.attachment)) images.push(block.attachment)
+        }
+      }
+      continue
+    }
+    if (event?.type === 'user/message') images.push(...messageImages([{ content: event.data?.content }]))
+    else if (event?.type === 'assistant/message' || event?.type === 'tool/result') {
+      images.push(...messageImages([event.data?.message]))
+    }
+  }
+  return images
+}
+
 function uniqueImages(images, newestFirst = false) {
   const ordered = newestFirst ? [...images].reverse() : images
   const seen = new Set()
@@ -135,7 +172,10 @@ function sessionMessages(agent) {
 }
 
 function sessionImage(agent, attachmentId) {
-  const image = uniqueImages(messageImages(sessionMessages(agent)), true)
+  const image = uniqueImages([
+    ...messageImages(sessionMessages(agent)),
+    ...eventImages(agent?.session?.events),
+  ], true)
     .find(candidate => candidate.attachmentId === attachmentId)
   if (image !== undefined) return image
   throw new Error(`image attachment ${attachmentId} is not present in this e-Mate session`)
@@ -148,9 +188,10 @@ function latestUserMessage(messages) {
   return undefined
 }
 
-function imageCatalogContext(messages) {
+function imageCatalogContext(agent, messages) {
   const current = uniqueImages(messageImages(latestUserMessage(messages) === undefined ? [] : [latestUserMessage(messages)]))
-  const recent = uniqueImages(messageImages(messages), true)
+  const eventHistory = eventImages(agent?.session?.events)
+  const recent = uniqueImages(eventHistory.length === 0 ? messageImages(messages) : eventHistory, true)
     .filter(image => !current.some(selected => selected.attachmentId === image.attachmentId))
     .slice(0, 32)
   if (current.length === 0 && recent.length === 0) return undefined
@@ -158,7 +199,7 @@ function imageCatalogContext(messages) {
     : `Images selected in the current user request, in attachment order: ${current.map(image => `\`${image.attachmentId}\``).join(', ')}. `
   const history = recent.length === 0 ? ''
     : `Recent images already stored in this conversation, newest first: ${recent.map(image => `\`${image.attachmentId}\``).join(', ')}. `
-  return `${selected}${history}For an edit or reference request such as \"修改上图\", call imagegen with the matching exact image_url attachment ID (normally the newest image when the user says \"上图\"); never ask the user to upload an image already listed here. A request for a wholly new image must omit image_url. To deliver several images together, call image_pack once with their exact attachment IDs.`
+  return `${selected}${history}For an edit or reference request such as \"修改上图\", call imagegen with the matching exact image_url attachment ID (normally the newest image when the user says \"上图\"); never ask the user to upload an image already listed here. For several independent edits, make one concurrent imagegen call per source and pass exactly one image_url to each call; never send the whole selected group to every edit. Explicitly pass multiple IDs only when the user asks to fuse those references into one output. A request for a wholly new image must omit image_url. To deliver several images together, call image_pack once with their exact attachment IDs.`
 }
 
 const SESSION_IMAGE_REFERENCE = /(?:上图|这张图|该图|原图|刚才(?:生成|上传)?的?(?:那张)?图|所附图片|附件(?:中|里)的图|(?:把|将)它(?:修改|改成|修成)|\b(?:this|that|above|previous|original|uploaded|attached)\s+(?:image|picture|photo)\b)/iu
@@ -167,12 +208,16 @@ function implicitEditImages(agent, task) {
   if (task.attachmentIds.length > 0) return task.attachmentIds
   const messages = sessionMessages(agent)
   const current = uniqueImages(messageImages(latestUserMessage(messages) === undefined ? [] : [latestUserMessage(messages)]))
-  if (current.length > 0) return current.map(image => image.attachmentId)
+  if (current.length === 1) return [current[0].attachmentId]
+  if (current.length > 1) {
+    throw new Error('multiple source images require an explicit image_url: use one exact attachment ID per independent edit, or pass the intended IDs together only for reference fusion')
+  }
   const text = latestUserMessage(messages)?.content
     ?.filter(block => block?.type === 'text' && typeof block.text === 'string')
     .map(block => block.text).join('\n') ?? ''
   if (!SESSION_IMAGE_REFERENCE.test(`${text}\n${task.prompt}`)) return []
-  const newest = uniqueImages(messageImages(messages), true)[0]
+  const history = eventImages(agent?.session?.events)
+  const newest = uniqueImages(history.length === 0 ? messageImages(messages) : history, true)[0]
   if (newest === undefined) {
     throw new Error('image editing needs a source image in the current conversation; upload one image once and retry')
   }
@@ -432,7 +477,6 @@ const imageOutput = {
       type: 'text',
       text: `Generated 1 image. Current-session image attachment ID for future image_url: ${value.images[0].image.attachmentId}`,
     },
-    ...value.images.map(item => ({ type: 'image', attachment: imageRef(item.image) })),
   ],
 }
 
@@ -491,10 +535,10 @@ export async function apply(ctx, config = {}) {
     loadTargetTools(bindingPath),
     loadTargetLlm(bindingPath),
   ])
-  ctx.on('agent/pre-step', async (_proposal, next) => {
+  ctx.on('agent/pre-step', async ({ agent }, next) => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
-    const context = imageCatalogContext(decision.messages)
+    const context = imageCatalogContext(agent, decision.messages)
     return context === undefined ? decision : {
       ...decision,
       messages: [...decision.messages, createUserMessage({
@@ -506,7 +550,7 @@ export async function apply(ctx, config = {}) {
   ctx.effect(() => ctx.jobs.attachController('emate-image'), 'emate.image: target Job controller')
   ctx.tools.register(defineTool({
     name: 'imagegen',
-    description: 'Generate or edit one independent image through the fixed e-Mate gpt-image-2-pro route. For an edit, copy the exact sha256: value labeled as the current-session image attachment ID by a prior imagegen or job_output result into image_url; never pass its Job ID, request ID, or a URL. For multiple outputs, make separate concurrent imagegen calls. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.',
+    description: 'Generate or edit one independent image through the fixed e-Mate gpt-image-2-pro route. For an edit, copy the exact sha256: value labeled as the current-session image attachment ID by a prior imagegen or job_output result into image_url; never pass its Job ID, request ID, or a URL. For multiple independent edits, make separate concurrent imagegen calls and pass exactly one source ID to each call. Pass multiple explicit IDs only for reference fusion into one output. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.',
     parameters: {
       prompt: { type: 'string', required: true, description: 'One image generation or edit instruction.' },
       image_url: {
@@ -529,6 +573,10 @@ export async function apply(ctx, config = {}) {
         started.result,
         ctx.jobs.wait(started.id, IMAGE_TIMEOUT_MS, exec.agent, exec.signal),
       ])
+      exec.agent.session.append('emate/image-output', {
+        call_id: String(exec.callId),
+        content: [{ type: 'image', attachment: imageRef(image.image) }],
+      })
       return { job_id: started.id, images: [image], failures: [] }
     },
     presentCall: args => ({

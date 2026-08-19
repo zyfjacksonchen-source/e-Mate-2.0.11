@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-find-skill",
-  "version": "2.0.9",
+  "version": "2.0.10",
   "description": "e-Mate adapter for dsh-find-skill with user-confirmed native subprocess installs",
   "type": "module",
   "main": "lib/index.js",

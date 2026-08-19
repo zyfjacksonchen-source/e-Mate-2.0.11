@@ -7,6 +7,7 @@ import {
 const SESSION_REF = 'E_MATE_ENTERPRISE_SESSION'
 export const MODEL_SESSION_REF = 'E_MATE_MODEL_SESSION_TOKEN'
 const MAX_JSON_BYTES = 2 * 1024 * 1024
+const REQUEST_TIMEOUT_MS = 15_000
 const REFRESH_EARLY_MS = 60_000
 const SKILL_HUB_ROOT = new URL('https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1')
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
@@ -54,6 +55,12 @@ class LoginRejection extends Error {}
 
 export function loginRejectionMessage(error: unknown): string | undefined {
   return error instanceof LoginRejection ? LOGIN_REJECTION_MESSAGE : undefined
+}
+
+export class IdentityServiceUnavailable extends Error {
+  constructor(readonly reason: 'transport' | 'upstream-http', readonly status?: number) {
+    super('企业身份服务暂时不可用，请稍后重试。')
+  }
 }
 
 type Credentials = {
@@ -437,6 +444,7 @@ function storedSession(value: unknown, modelRoot: string): StoredSession {
 }
 
 async function responseJson(response: Response, label: string): Promise<unknown> {
+  if (response.status >= 500) throw new IdentityServiceUnavailable('upstream-http', response.status)
   const declared = response.headers.get('content-length')
   if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > MAX_JSON_BYTES)) {
     throw new Error(`e-Mate enterprise ${label} response exceeds its boundary`)
@@ -540,10 +548,20 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
   let loading: Promise<StoredSession | undefined> | undefined
   let refreshing: Promise<StoredSession> | undefined
 
-  const call = async (root: string, path: string, init: RequestInit, label: string) => responseJson(await request(
-    endpoint(root, path),
-    { ...init, redirect: 'error', headers: { accept: 'application/json', ...init.headers } },
-  ), label)
+  const call = async (root: string, path: string, init: RequestInit, label: string) => {
+    let response: Response
+    try {
+      response = await request(endpoint(root, path), {
+        ...init,
+        redirect: 'error',
+        signal: init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        headers: { accept: 'application/json', ...init.headers },
+      })
+    } catch {
+      throw new IdentityServiceUnavailable('transport')
+    }
+    return responseJson(response, label)
+  }
 
   const clear = async () => {
     current = undefined
@@ -822,7 +840,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
           termsAccepted: true,
           policyRead: true,
           lawfulUseConfirmed: true,
-          clientVersion: '2.0.9',
+          clientVersion: '2.0.10',
           locale: 'zh-CN',
         }),
       }, 'consent acceptance'), status.policy)

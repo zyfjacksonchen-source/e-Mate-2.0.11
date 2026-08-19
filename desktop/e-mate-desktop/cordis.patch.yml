@@ -14,6 +14,8 @@
       name: '@e-mate/desktop/updates'
     - id: desktop-agent-update
       name: '@e-mate/desktop/agent-update'
+    - id: desktop-browser-extension-setup
+      name: '@e-mate/desktop/browser-extension-setup'
     - id: desktop-vision-toolkit
       name: '@e-mate/desktop/vision-toolkit'
 

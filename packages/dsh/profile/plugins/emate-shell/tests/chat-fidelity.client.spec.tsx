@@ -133,18 +133,15 @@ describe('target conversation fidelity contract', () => {
     expect(galleryCss).toContain('[data-emate-image-gallery][hidden]')
   })
 
-  it('projects durable tool-result images through the target ImageGallery after reload', () => {
+  it('projects durable custom image events through the target ImageGallery without model-visible image input', () => {
     const attachment = {
       attachmentId: 'sha256:one', mediaType: 'image/png', bytes: 10, width: 1, height: 1, name: 'e-Mate-image.png',
     }
     const event = {
-      type: 'tool/result', seq: 8, time: 8, surfaceOp: 'append',
-      data: { message: { id: 'tool-result-1', content: [{
-        type: 'tool-result', toolCallId: 'call-1', isError: false,
-        content: [{ type: 'text', text: 'Generated 1 image.' }, { type: 'image', attachment }],
-      }] } },
+      type: 'emate/image-output', seq: 8, time: 8,
+      data: { call_id: 'call-1', content: [{ type: 'image', attachment }] },
     }
-    expect(toolImagesDefinition.match(event as never)).toEqual({ id: 'tool-images:tool-result-1', role: 'start' })
+    expect(toolImagesDefinition.match(event as never)).toEqual({ id: 'tool-images:call-1', role: 'start' })
 
     render(<ToolImageGallery node={{ key: 'tool-images:test', data: { images: [{ attachment }] } } as never} loadImage={vi.fn()} />)
     const button = screen.getByRole('button', { name: '已查看 1 张图像' })
@@ -161,7 +158,7 @@ describe('target conversation fidelity contract', () => {
   it('keeps dsh-genui registered on target slots and real plugin metadata', () => {
     expect(JSON.parse(genuiPackage)).toMatchObject({
       name: '@e-mate/dsh-plugin-genui',
-      version: '2.0.9',
+      version: '2.0.10',
       dsh: { bundle: { patch: './cordis.patch.yml' }, client: { platform: 'web' } },
     })
     expect(genuiPatch).toContain('id: emate-genui')

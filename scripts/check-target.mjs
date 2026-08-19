@@ -30,11 +30,11 @@ const typescriptSources = [
 ]
 for (const path of typescriptSources) readFileSync(resolve(root, path), 'utf8')
 
-if (manifest.version !== '2.0.9') throw new Error(`workspace version drifted: ${manifest.version}`)
-if (release.name !== '@e-mate/dsh' || release.version !== '2.0.9') {
+if (manifest.version !== '2.0.10') throw new Error(`workspace version drifted: ${manifest.version}`)
+if (release.name !== '@e-mate/dsh' || release.version !== '2.0.10') {
   throw new Error(`release identity drifted: ${release.name}@${release.version}`)
 }
-if (!release.description.startsWith('e-Mate 2.0.9')) throw new Error('release product name drifted')
+if (!release.description.startsWith('e-Mate 2.0.10')) throw new Error('release product name drifted')
 if (release.bin?.['e-mate'] !== 'lib/bin.js') throw new Error('TypeScript-built CLI entry drifted')
 if (!target.includes('Product name: `e-Mate`')) throw new Error('product name drifted')
 if (!target.includes('Repository: `zyfjacksonchen-source/e-Mate`')) throw new Error('repository identity drifted')
@@ -61,4 +61,4 @@ for (const [name, path, expected] of [
   }
 }
 
-console.log('target contract: e-Mate 2.0.9 pins verified')
+console.log('target contract: e-Mate 2.0.10 pins verified')

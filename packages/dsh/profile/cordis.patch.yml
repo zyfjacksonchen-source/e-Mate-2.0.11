@@ -14,6 +14,10 @@
     provider: e-mate-enterprise
     model: gpt-5.6-luna
 
+- id: agent-loop
+  config:
+    maxParallelToolCalls: 4
+
 - id: ui-settings-models
   name: '@deepseek-ai/dsh-client-ui-settings-models'
   disabled: true
@@ -108,4 +112,4 @@
 
     - id: emate-agent-operations
       name: ./plugins/agent-operations.js
-      inject: [systemPrompt]
+      inject: [systemPrompt, connection, sessionPersistence]

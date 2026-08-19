@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-browser-panel",
-  "version": "2.0.9",
+  "version": "2.0.10",
   "description": "Status projection for the native rc.7 dsh-browser bridge in e-Mate.",
   "type": "module",
   "main": "lib/index.js",

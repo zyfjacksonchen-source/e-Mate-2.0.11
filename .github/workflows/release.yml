@@ -8,13 +8,19 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the accepted 2.0.9 carrier and evidence to a new immutable R2 prefix.
+        description: Publish an already built and accepted carrier run to a new immutable R2 prefix.
         required: true
         type: boolean
         default: false
+      release_run_id:
+        description: Successful build-only run ID containing the exact accepted carrier; required only when publishing.
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ${{ inputs.publish && 'e-mate-r2-publication' || format('{0}-{1}', github.workflow, github.ref) }}
@@ -25,6 +31,7 @@ env:
 
 jobs:
   pack:
+    if: ${{ !inputs.publish }}
     name: Build and pack npm tarball
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -67,7 +74,8 @@ jobs:
       - name: Pack the release tarball
         run: |
           pnpm --filter @e-mate/dsh pack --pack-destination dist/npm
-          pnpm --dir upstream/deepseek-harness exec publint ../../dist/npm/e-mate-dsh-2.0.9.tgz
+          version="$(node -p "require('./packages/dsh/package.json').version")"
+          pnpm --dir upstream/deepseek-harness exec publint "../../dist/npm/e-mate-dsh-${version}.tgz"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -77,6 +85,7 @@ jobs:
           retention-days: 7
 
   clean-install:
+    if: ${{ !inputs.publish }}
     name: Clean install ${{ matrix.platform }}
     needs: pack
     runs-on: ${{ matrix.runner }}
@@ -110,16 +119,19 @@ jobs:
         run: |
           set -euo pipefail
           prefix="$RUNNER_TEMP/e-mate-prefix"
-          npm install --global --prefix "$prefix" --no-audit --no-fund dist/npm/e-mate-dsh-2.0.9.tgz
+          tarballs=(dist/npm/e-mate-dsh-*.tgz)
+          test "${#tarballs[@]}" = 1
+          npm install --global --prefix "$prefix" --no-audit --no-fund "${tarballs[0]}"
           npm_root="$(npm root --global --prefix "$prefix")"
           cli="$npm_root/@e-mate/dsh/lib/bin.js"
+          version="$(node -p "require('$npm_root/@e-mate/dsh/package.json').version")"
           test -f "$cli"
           if [[ "$RUNNER_OS" == Windows ]]; then
             test -f "$prefix/e-mate.cmd"
           else
             test -x "$prefix/bin/e-mate"
           fi
-          test "$(node "$cli" --version)" = '2.0.9'
+          test "$(node "$cli" --version)" = "$version"
           if ! EMATE_STAGING_CHECK=1 node "$cli" setup --check --json > "$RUNNER_TEMP/e-mate-staging-check.json"; then
             cat "$RUNNER_TEMP/e-mate-staging-check.json"
             exit 1
@@ -138,12 +150,13 @@ jobs:
             exit 1
           fi
           status_json="$(node "$cli" status)"
-          health_url="$(node -e 'const v=JSON.parse(process.argv[1]); if(!v.running || !v.healthy || v.product!=="e-Mate" || v.version!=="2.0.9") throw new Error(JSON.stringify(v)); process.stdout.write(new URL("/api/e-mate/health", v.url).href)' "$status_json")"
-          node -e 'fetch(process.argv[1]).then(async response => { const v=await response.json(); if(!response.ok || v.product!=="e-Mate" || v.version!=="2.0.9" || v.profile!=="e-mate") throw new Error(JSON.stringify(v)) })' "$health_url"
+          health_url="$(EMATE_EXPECTED_VERSION="$version" node -e 'const v=JSON.parse(process.argv[1]); if(!v.running || !v.healthy || v.product!=="e-Mate" || v.version!==process.env.EMATE_EXPECTED_VERSION) throw new Error(JSON.stringify(v)); process.stdout.write(new URL("/api/e-mate/health", v.url).href)' "$status_json")"
+          EMATE_EXPECTED_VERSION="$version" node -e 'fetch(process.argv[1]).then(async response => { const v=await response.json(); if(!response.ok || v.product!=="e-Mate" || v.version!==process.env.EMATE_EXPECTED_VERSION || v.profile!=="e-mate") throw new Error(JSON.stringify(v)) })' "$health_url"
           node "$cli" stop
           trap - EXIT
 
   evidence:
+    if: ${{ !inputs.publish }}
     name: Verify release set and generate evidence
     needs: pack
     runs-on: ubuntu-24.04
@@ -188,7 +201,6 @@ jobs:
   r2:
     name: Publish immutable R2 download objects
     if: inputs.publish
-    needs: [clean-install, evidence]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: r2-publish
@@ -204,10 +216,25 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Validate the accepted build-only run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID")"
+          test "$(jq -er .head_sha <<<"$run_json")" = "$GITHUB_SHA"
+          test "$(jq -er .conclusion <<<"$run_json")" = success
+          test "$(jq -er .event <<<"$run_json")" = workflow_dispatch
+          test "$(jq -er .path <<<"$run_json")" = .github/workflows/release.yml
+
       - uses: actions/download-artifact@v4
         with:
           name: e-mate-release-candidate
           path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.release_run_id }}
 
       - name: Recheck candidate bytes
         run: |

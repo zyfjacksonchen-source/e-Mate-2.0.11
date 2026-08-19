@@ -1,6 +1,6 @@
 # @e-mate/dsh-plugin-vision-toolkit
 
-This package is the e-Mate `2.0.9` adapter boundary for `Anionex/dsh-vision-toolkit` commit `29850a83871d4b7a7cc13e251420c5a440e2f69e`.
+This package is the e-Mate `2.0.10` adapter boundary for `Anionex/dsh-vision-toolkit` commit `29850a83871d4b7a7cc13e251420c5a440e2f69e`.
 
 The upstream `0.1.7` plugin targets DeepSeek Harness `0.1.0-rc.6` and exposes user-editable multimodal provider, endpoint, protocol, model, and credential settings. e-Mate is pinned to Harness `0.1.0-rc.7`, whose model seam does not provide an enterprise-owned multimodal policy binding. Activating the upstream plugin would therefore let local Settings bypass the enterprise model policy.
 

@@ -95,6 +95,7 @@ describe('desktop Host pnpm runtime', () => {
 
     expect(environment).toEqual({
       ...original,
+      EMATE_DESKTOP_PNPM: installation.pnpmShimPath,
       PATH: `${installation.pathDir}:/usr/local/bin:/usr/bin:/bin`,
     })
     if (process.platform !== 'win32') {
@@ -212,6 +213,7 @@ describe('desktop Host pnpm runtime', () => {
 
     expect(environment).toEqual({
       Path: `${installation.pathDir};C:\\Windows\\System32;C:\\Windows`,
+      EMATE_DESKTOP_PNPM: installation.pnpmShimPath,
       KEEP: 'value',
     })
     expect(environment).not.toHaveProperty('ELECTRON_RUN_AS_NODE')

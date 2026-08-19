@@ -1,6 +1,6 @@
 # @e-mate/dsh-plugin-browser
 
-e-Mate 2.0.9 对 `Lum1104/dsh-browser` 的 DeepSeek Harness rc.7 适配。
+e-Mate 2.0.10 对 `Lum1104/dsh-browser` 的 DeepSeek Harness rc.7 适配。
 
 本包只保留真实页面快照、点击、输入、导航、滚动、等待与文本读取能力。浏览器扩展不包含自己的聊天、会话、模型、设置或审批页面；所有 Tool、Session、项目绑定、审批和持久事件继续由 e-Mate 内的固定 Harness rc.7 负责。
 

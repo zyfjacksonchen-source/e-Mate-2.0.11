@@ -10,7 +10,7 @@ test('find-skill adapter is pinned, user-confirmed, and uses the native subproce
   const cli = await readFile(new URL('../../upstream/plugins/dsh-find-skill/src/cli.ts', root), 'utf8')
   const tools = await readFile(new URL('../../upstream/plugins/dsh-find-skill/src/tools.ts', root), 'utf8')
   const client = await readFile(new URL('../../upstream/plugins/dsh-find-skill/client/src/client/index.ts', root), 'utf8')
-  assert.equal(pkg.version, '2.0.9')
+  assert.equal(pkg.version, '2.0.10')
   assert.equal(pkg.dsh.upstream.commit, '5a7f18b4535835a81de47c0cc2ca8ceb6e97a4e6')
   assert.match(patch, /cliCommand: 'pnpm dlx skills@1\.5\.22'/u)
   assert.match(tools, /agent: exec\.agent/u)
@@ -24,4 +24,11 @@ test('find-skill adapter is pinned, user-confirmed, and uses the native subproce
   assert.match(tools, /title: args\.skill \?\? '安装技能'/u)
   assert.match(client, /String\(args\.skill \?\? '安装技能'\)/u)
   assert.doesNotMatch(client, /String\(args\.source/u)
+})
+
+test('find-skill uses the desktop-owned pnpm shim without relying on ambient PATH lookup', async () => {
+  const builtCli = await readFile(new URL('../lib/cli.js', import.meta.url), 'utf8')
+  assert.match(builtCli, /command === 'pnpm' \? process\.env\.EMATE_DESKTOP_PNPM/u)
+  assert.match(builtCli, /!isAbsolute\(managedPnpm\)/u)
+  assert.match(builtCli, /argv: \[executable, \.\.\.fixed, \.\.\.args\]/u)
 })

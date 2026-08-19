@@ -181,6 +181,9 @@ export interface DesktopRuntime {
   /** Open the Chromium extension page and reveal the packaged bridge directory. */
   openBrowserExtensionSetup(): Promise<void>
 
+  /** Register e-Mate for macOS Accessibility and open its privacy pane when permission is missing. */
+  openComputerUseAccessibilitySetup(): Promise<boolean>
+
   /** Accept the terminal client Loader outcome for the mounted generation. */
   reportRendererBoot(report: RendererBootReport): void
 

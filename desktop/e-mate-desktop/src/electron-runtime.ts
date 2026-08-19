@@ -11,6 +11,7 @@ import {
   net,
   Notification,
   shell,
+  systemPreferences,
   Tray,
 } from 'electron'
 import { spawn } from 'node:child_process'
@@ -21,6 +22,7 @@ import { basename, isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
+import { scheduleMacUpdateInstallation } from './mac-update-installer.ts'
 import type {
   DesktopNotification,
   DesktopPlatform,
@@ -121,6 +123,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private readonly trayItems = new Map<symbol, DesktopTrayItem>()
   private terminalSpec: DesktopTerminalSpec | undefined
   private rendererBootReported = false
+  private markMacUpdateShutdownReady: (() => void) | undefined
 
   constructor(
     private readonly restart: () => Promise<void>,
@@ -261,17 +264,32 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       } else {
         throw new Error('browser extension setup is unavailable on this platform')
       }
-      await dialog.showMessageBox({
-        type: 'info',
-        title: '加载 e-Mate 浏览器扩展',
-        message: 'Chrome 扩展页和 e-Mate 扩展目录已打开',
-        detail: '开启“开发者模式”，点击“加载已解压的扩展程序”，选择已打开的 browser-extension 文件夹。首次加载不需要填写地址或 Token。',
+      this.showNotification({
+        title: 'e-Mate 浏览器扩展安装已准备',
+        body: 'Chrome 扩展页和内置扩展目录已打开，e-Mate Agent 将继续完成可自动执行的步骤。',
       })
     } catch (cause) {
       const error = cause instanceof Error ? cause : new Error(String(cause))
       process.stderr.write(`@e-mate/desktop: failed to open browser extension setup: ${error.message}\n`)
       dialog.showErrorBox('无法加载 e-Mate 浏览器扩展', error.message)
+      throw error
     }
+  }
+
+  /** @inheritdoc */
+  async openComputerUseAccessibilitySetup(): Promise<boolean> {
+    if (this.platform !== 'darwin') {
+      throw new Error('computer-use Accessibility setup is available only on macOS')
+    }
+    if (systemPreferences.isTrustedAccessibilityClient(false)) return true
+
+    systemPreferences.isTrustedAccessibilityClient(true)
+    await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility')
+    this.showNotification({
+      title: '请允许 e-Mate 操控电脑',
+      body: '已打开“隐私与安全性 → 辅助功能”，请添加或开启 e-Mate；完成后 Agent 会重试。',
+    })
+    return systemPreferences.isTrustedAccessibilityClient(false)
   }
 
   /** @inheritdoc */
@@ -305,6 +323,14 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   /** @inheritdoc */
   prepareToQuit(): void {
     this.quitting = true
+  }
+
+  /** Allow the detached updater to replace the app only after Cordis disposed cleanly. */
+  commitPreparedUpdateShutdown(): void {
+    const markReady = this.markMacUpdateShutdownReady
+    if (markReady === undefined) return
+    this.markMacUpdateShutdownReady = undefined
+    markReady()
   }
 
   private async showRendererBootRecovery(report: Extract<RendererBootReport, { status: 'failed' }>): Promise<void> {
@@ -378,8 +404,8 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       type: 'info',
       title: 'e-Mate Update Available',
       message: `e-Mate ${version} is available.`,
-      detail: 'Download this update now?',
-      buttons: ['Download', 'Later'],
+      detail: 'e-Mate will download, verify, install, and reopen automatically.',
+      buttons: ['Update and Restart', 'Later'],
       defaultId: 1,
       cancelId: 1,
       noLink: true,
@@ -445,32 +471,27 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     signal.throwIfAborted()
 
     if (this.platform === 'darwin') {
-      const openError = await shell.openPath(artifactPath)
-      if (openError !== '') throw new Error(`@e-mate/desktop: failed to open update disk image: ${openError}`)
-      signal.throwIfAborted()
-      await dialog.showMessageBox({
-        type: 'info',
-        title: 'e-Mate Update Downloaded',
-        message: `e-Mate ${update.latestVersion} is ready to install.`,
-        detail: 'The disk image has opened. Replace e-Mate in Applications, then reopen it.',
-        buttons: ['OK'],
-        defaultId: 0,
-        noLink: true,
+      const spec = this.scheduled
+      if (spec === undefined) throw new Error('@e-mate/desktop: no active shell can exit for update installation')
+      const prepared = await scheduleMacUpdateInstallation({
+        dmgPath: artifactPath,
+        targetVersion: update.latestVersion,
+        currentExecutable: process.execPath,
+        userDataPath: app.getPath('userData'),
+        homeDirectory: app.getPath('home'),
+        helperModulePath: fileURLToPath(new URL('./mac-update-helper.js', import.meta.url)),
+        parentPid: process.pid,
+        signal,
       })
+      this.markMacUpdateShutdownReady = prepared.markShutdownReady
+      this.showNotification({
+        title: 'Installing e-Mate Update',
+        body: `e-Mate ${update.latestVersion} will reopen automatically.`,
+      })
+      this.quitting = true
+      spec.requestQuit(0)
       return
     }
-
-    const result = await dialog.showMessageBox({
-      type: 'info',
-      title: 'e-Mate Update Downloaded',
-      message: `e-Mate ${update.latestVersion} is ready to install.`,
-      detail: 'Restart e-Mate and run the installer now?',
-      buttons: ['Restart and Install', 'Later'],
-      defaultId: 1,
-      cancelId: 1,
-      noLink: true,
-    })
-    if (result.response !== 0) return
 
     const spec = this.scheduled
     if (spec === undefined) throw new Error('@e-mate/desktop: no active shell can exit for update installation')

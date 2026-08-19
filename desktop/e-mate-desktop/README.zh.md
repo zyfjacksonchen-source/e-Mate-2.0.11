@@ -146,11 +146,11 @@ npx @e-mate/desktop
 
 ## 桌面操作
 
-打包后的 macOS 与 Windows 应用会在启动 60 秒后查询 `https://www.dshdesktop.cn/api/desktop/version`，并在每次检查完成六小时后再次查询。每次 no-cache 请求的期限为 15 秒，并与托盘中的 **Check for Updates…** 命令共用一个 in-flight operation。响应只有在包含规范的 stable Semantic Versioning 时才会被接受。后台检查遇到网络、HTTP、超时、无效响应、相同版本或服务端旧版本时保持静默。手工检查一定会显示原生结果对话框：相同或旧版本会显示当前安装版本，失败会提示用户重试，严格更新的版本则显示 **Download** 或 **Later**。自动更新提示会按版本记录，用户仍可从托盘显式重试。开发运行、未打包启动与 Linux 不会下载安装包。
+打包后的 macOS 与 Windows 应用会在启动 60 秒后查询稳定 R2 清单 `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json`，并在每次检查完成六小时后再次查询。每次 no-cache 请求的期限为 15 秒，并与托盘中的 **Check for Updates…** 命令共用一个 in-flight operation。只有规范 stable SemVer、来源提交、平台 URL、字节数与 SHA-256 共同构成一个有效不可变发布身份时才接受响应。后台检查遇到网络、HTTP、超时、无效响应、相同版本或服务端旧版本时保持静默。手工检查一定会显示原生结果对话框：相同或旧版本会显示当前安装版本，失败会提示用户重试，严格更新的版本则显示 **Update and Restart** 或 **Later**。自动更新提示会按版本记录，用户仍可从托盘显式重试。开发运行、未打包启动与 Linux 不会下载安装包。
 
-选择 **Download** 后，应用会先重新确认服务端版本没有变化，然后才首次请求对应平台用于计数的固定下载入口。e-Mate 使用 Electron 网络跟随 service redirect，把不超过 1 GiB 的文件流式写入私有、按版本划分的 user-data 目录，并在交付前拒绝不完整的 DMG 或 Windows PE。macOS 会打开下载好的 DMG，并提示用户替换 `Applications` 中的应用后重新打开。Windows 会在 NSIS 安装器准备完成后再次确认；选择 **Restart and Install** 会启动安装器，并在当前进程退出前请求 Cordis 有序 teardown。下载、文件系统与安装器打开失败都会保持静默，同时保留托盘中的可重试版本操作。
+选择 **Update and Restart** 后，应用会先重新确认服务端版本没有变化，然后才首次请求对应平台用于计数的固定下载入口。e-Mate 使用 Electron 网络跟随 service redirect，把不超过 1 GiB 的文件流式写入私有、按版本划分的 user-data 目录，并在安装前核对清单字节数、SHA-256 和 DMG 或 Windows PE 容器。对于已经安装 2.0.10 的 macOS，应用还会校验挂载包的身份、版本、Universal 主程序与原生文件清单，以及完整 ad-hoc 签名；detached helper 必须先持久化就绪，且只允许规范的 `Applications/e-Mate.app`。Cordis 完整释放并写入 shutdown-ready 后才交换，旧版会保留到新 renderer 报告健康；失败则恢复、重启旧版并显示回滚结果，健康提交后的回执或旧包清理失败绝不会撤掉新版本。2.0.9 第一次升级 2.0.10 仍使用 2.0.9 自带的旧 DMG 手工交接，因为已安装的旧二进制无法远程获得新 updater 逻辑。Windows 会在同一次确认后启动准备好的 NSIS 安装器并请求有序退出，不再弹出第二个应用确认框。任何路径都不会静默提权、全局关闭 Gatekeeper 或冒充 publisher 身份。
 
-Release operator 必须先发布两个平台产物，再让版本可被发现。产物与 download redirect 准备完成后，在 Upstash Redis console 中把 `deepseek-harness-desktop:release:version` 设置为规范的 stable 版本，例如 `SET deepseek-harness-desktop:release:version 2.0.1`。版本 API 会立即生效；key 缺失、服务不可用或值无效时，Desktop 不会显示任何提示。
+Release operator 先把两个平台产物上传到按提交隔离的不可变前缀，并从公网回读核对字节数与 SHA-256。只有原生验收完成后，workflow 才最后原子替换 `desktop/latest.json`，并从公网逐字节回读。该清单同时是 updater 和下载页的唯一版本真值，不再存在独立 Redis 版本开关。
 
 在 macOS 与 Windows 上，**Open DSH Terminal** 会打开以当前激活 profile 为工作目录的系统终端。欢迎信息会显示应用版本、当前 profile、profile 目录与 DSH home，并列出配置与插件管理命令。在该终端内，裸 `dsh`、`dsh --dump-config`，以及没有选择 profile 的 plugin 子命令都会默认使用当前激活 profile；显式 `--profile` 与上游 `web` alias 会保留原有含义。e-Mate 会在自身 user-data 目录下按 profile 生成私有 `dsh`、`pnpm` 与 `node` shim，设置 `DSH_HOME`，使用当前 profile 作为工作目录，并且只在该终端的 `PATH` 前置 shim 目录；之后切换 profile 不会改变已经打开的终端命令。它不会修改全局环境或 shell 启动文件。macOS launcher 会先保留用户的交互式 zsh 或 bash 设置，再恢复 desktop 自有变量。Windows 会依次选择 PowerShell 7、Windows PowerShell 或命令提示符，并在新的 Windows Terminal 窗口中打开；如果 `wt.exe` 不可用，则由私有 `cmd start` broker 创建可见控制台。同步启动失败与 broker 非正常退出会显示在原生错误对话框中。Linux 不组合该终端命令。
 
@@ -174,13 +174,15 @@ corepack.cmd yarn dist:win
 
 该流程不要求 Python 或 Visual Studio C++ Build Tools。Windows 命令会直接使用 `node-pty` 内置的 x64 Node-API 二进制，而不会让 Electron Builder 从源码重新编译；如果安装包 staging tree 缺少这些二进制，packaged-runtime gate 会直接拒绝产物。
 
-`dist:win` 会拒绝非 Windows 或非 x64 宿主，先执行一组 Windows 可运行的 gate，其中包括 build、全部 TypeScript compiler face、打包与原生 shell 聚焦测试，以及 runtime-closure verifier；随后再构建 NSIS 安装向导，并校验生成的两个 PE 文件。完整跨平台 suite 仍由 CI 持有，因为其中部分 POSIX 执行测试不是 Windows 程序。安装向导支持当前用户安装或提升权限后的所有用户安装，可更改安装目录，会创建开始菜单与桌面快捷方式，并且卸载应用时保留 DSH 用户数据。版本 `2.0.9` 会输出到 `@e-mate/desktop\dist\e-Mate-2.0.9-win-x64-Setup.exe`；用于 smoke 测试的未封装程序仍位于 `@e-mate/desktop\dist\win-unpacked\e-Mate.exe`。
+`dist:win` 会拒绝非 Windows 或非 x64 宿主，先执行一组 Windows 可运行的 gate，其中包括 build、全部 TypeScript compiler face、打包与原生 shell 聚焦测试，以及 runtime-closure verifier；随后再构建 NSIS 安装向导，并校验生成的两个 PE 文件。完整跨平台 suite 仍由 CI 持有，因为其中部分 POSIX 执行测试不是 Windows 程序。安装向导支持当前用户安装或提升权限后的所有用户安装，可更改安装目录，会创建开始菜单与桌面快捷方式，并且卸载应用时保留 DSH 用户数据。版本 `2.0.10` 会输出到 `@e-mate/desktop\dist\e-Mate-2.0.10-win-x64-Setup.exe`；用于 smoke 测试的未封装程序仍位于 `@e-mate/desktop\dist\win-unpacked\e-Mate.exe`。
 
 该本地命令会主动移除 Windows 证书变量，并设置 `signExecutable=false`。产物可以安装测试，但没有 Authenticode publisher，因此 Windows 可能显示 Unknown publisher 或 SmartScreen 警告。签名后的 Windows release、证书校验、安装器升级与卸载测试，以及原生 UI 和 sandbox smoke 仍是独立的发布 gate。
 
 ### macOS DMG 冒烟构建
 
-`yarn dist:mac-smoke` 会在原生 macOS 宿主机上构建一个未签名的 universal DMG，同一个安装包可以在 Intel 和 Apple Silicon Mac 上原生运行。该命令拒绝非 macOS 宿主，先执行一组 macOS 可运行的 gate（build、全部 TypeScript compiler face、打包与 macOS 聚焦测试、runtime-closure verifier），再在不接触任何签名材料的情况下打包。它会挂载 DMG，检查属性列表、主程序执行权限、`x86_64` 与 `arm64` 两个架构切片，以及 `app.asar`。该命令与 `dist:win` 的密钥纪律一致：剥离 Electron Builder 能识别的全部 macOS 签名与公证变量、设置 `CSC_IDENTITY_AUTO_DISCOVERY=false`、关闭 notarization，且从不发布。产物没有 Developer ID 签名，因此 Gatekeeper 会在其他机器上拦截它；它的存在是为了让打包回归在人工发布之前就在 CI 中失败。签名并公证的 universal 正式发布仍是在持有凭证的 macOS 机器上执行 `yarn dist:mac`，产物写入 `@e-mate/desktop/dist/mac-release/`。
+`yarn dist:mac-smoke` 只构建 CI 使用的 Universal 冒烟 DMG。它永远不能上传到 release manifest 或 R2，正式发布 job 也明确禁止 `dist/mac-smoke/`；该产物只用于尽早发现打包回归。
+
+没有 Developer ID 与公证凭据时，正式链必须使用独立的 `yarn dist:mac-unsigned-release`。它移除发布 secret、强制完整 ad-hoc 签名，只写入 `dist/mac-unsigned-release/`，不会冒充 Developer ID 签名或已公证。门禁会验证 DMG、只读挂载、校验 `Info.plist`、检查主程序及全部必需原生二进制的 `arm64`/`x86_64` 切片、核对 Computer Use helper 与 manifest 哈希、执行 `codesign --verify --deep --strict`，并通过 renderer 健康回执真实运行 `arch -arm64` 与 `arch -x86_64`。持有凭据时的正式签名/公证路径仍是 `yarn dist:mac`，输出到 `dist/mac-release/`。
 
 ## 模型体验
 
@@ -198,7 +200,7 @@ corepack.cmd yarn dist:win
 - macOS 与 Windows 托盘终端会提供私有 `dsh`、`pnpm` 与 `node` shim。除此之外，Host runtime 会在当前 Electron 进程的 `PATH` 中公开内置 `pnpm` 命令作为 ambient compatibility，并提供受管 `desktopPnpm` service；这些命令都不会加入系统 `PATH`，Linux 目前也没有 desktop 终端命令。
 - 在 Windows 上，ambient `pnpm` 命令与 lifecycle Node helper 是 `.cmd` shim。`desktopPnpm.run()` 与 `runPlugin()` 会启动准确的已打包 entry，从而避免 manager process 的 shell lookup；上游 `dsh plugin`、PowerShell 与命令提示符则可通过 command interpreter 解析 ambient shim。第三方插件直接调用 Node `spawn('pnpm', { shell: false })`，或 lifecycle script 直接以 `shell: false` 执行其 `.cmd` `npm_node_execpath`，仍属于不可移植行为，应改用受管 service 或 shell-aware 启动路径。
 - `dshmarket@1.2.3` 仍是用户可选安装的第三方 package，而不是内置 marketplace。只有重新审计的版本同时消费可选 Desktop service、保留普通 DSH fallback，并包含再分发所需的完整 license notice 后，才会重新评估预装。
-- 更新交接只验证下载容器，不验证 publisher 身份。macOS 仍要求用户从已打开的 DMG 替换应用；Windows 会运行已下载的 NSIS 安装器，但本地 `dist:win` 产物没有签名。签名产物、Authenticode/publisher 校验、SmartScreen 信誉与原生升级测试仍是发布 gate。
+- 2.0.10 正式 macOS 包是 ad-hoc 签名，不是 Developer ID 签名，也没有公证。全新安装以及 2.0.9 到 2.0.10 的一次性交接因此可能需要按图解仅移除该 App 的 quarantine；已安装 2.0.10 后的后续更新会在精确制品与 bundle 校验后自动替换。Windows 本地 `dist:win` 仍未签名；publisher 身份、SmartScreen 信誉和原生升级测试仍是发布 gate。
 - 共享 carrier 使用 loopback HTTP 与 WebSocket，而不是 Electron IPC。替换它需要上游 DSH 提供 transport 扩展点，不属于该独立包的范围。
 - 该项目目前固定使用已发布的 DSH `0.1.0-rc.6` family，而相邻的 `deepseek-harness/` 源码 checkout 早于该版本。因此，测试验证的是已发布包接口，而非上游未发布源码。
 - `package:dir` 是用于 smoke 的未封装产物。`dist:win` 会额外生成未签名的 NSIS 测试安装包，但不会建立 Authenticode 身份或 SmartScreen 信誉。安装与升级行为、原生通知与终端、Windows ACL sandbox，以及每台目标机器上的原生材质外观仍属于目标平台验证边界。

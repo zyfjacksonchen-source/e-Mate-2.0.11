@@ -1,5 +1,5 @@
 const MAX_INDEX_BYTES = 64 * 1024;
-const VERSION = "2.0.9";
+const VERSION = "2.0.10";
 const R2_ORIGIN = "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev";
 const DESKTOP_MANIFEST_URL = "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json";
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -36,13 +36,13 @@ export function normalizeDownloadIndex(raw) {
   const artifacts = object(manifest.artifacts, "桌面制品");
   exactKeys(artifacts, ["darwin", "win32"], "桌面制品");
   const downloads = [
-    releaseArtifact(artifacts.darwin, manifest.source_commit, "macos-universal", "e-Mate-2.0.9-mac-universal.dmg"),
-    releaseArtifact(artifacts.win32, manifest.source_commit, "windows-x64", "e-Mate-2.0.9-win-x64-Setup.exe"),
+    releaseArtifact(artifacts.darwin, manifest.source_commit, "macos-universal", "e-Mate-2.0.10-mac-universal.dmg"),
+    releaseArtifact(artifacts.win32, manifest.source_commit, "windows-x64", "e-Mate-2.0.10-win-x64-Setup.exe"),
   ];
   return Object.freeze({
     version: manifest.version,
     source_commit: manifest.source_commit,
-    distribution_mode: "unsigned-manual",
+    distribution_mode: "adhoc-unsigned-release",
     downloads: Object.freeze(downloads),
   });
 }
@@ -68,11 +68,11 @@ function releaseArtifact(raw, sourceCommit, targetId, fileName) {
 }
 
 export function installationTrustCopy(index) {
-  if (index.distribution_mode !== "unsigned-manual") return null;
+  if (index.distribution_mode !== "adhoc-unsigned-release") return null;
   const windowsSigned = index.downloads.some((item) => item.target === "windows-x64" && item.authenticode?.status === "verified");
   return windowsSigned
-    ? Object.freeze({ release: "Windows 已签名 · macOS 手动安装（未签名）", help: "Windows 安装包已验证数字签名；macOS 暂未签名，请按系统提示允许打开。" })
-    : Object.freeze({ release: "手动安装（未签名）", help: "当前候选暂未签名，请按系统提示允许打开。" });
+    ? Object.freeze({ release: "Windows 已签名 · macOS 正式未签名（ad-hoc）", help: "Windows 安装包已验证数字签名；macOS 没有 Developer ID 签名或公证，请按图解只允许这一个 App。" })
+    : Object.freeze({ release: "正式未签名（ad-hoc）", help: "当前正式版没有 Developer ID 签名或公证，请按图解只允许这一个 App。" });
 }
 
 export function downloadSources(index, target) {
@@ -268,16 +268,18 @@ if (typeof document !== "undefined") {
     if (title) title.textContent = guideCopy.title;
     if (packageNote) packageNote.textContent = guideCopy.package;
   }
-  const copy = document.querySelector("[data-copy-macos-command]");
-  copy?.addEventListener("click", async () => {
-    const status = document.querySelector("[data-copy-status]");
-    const command = [...document.querySelectorAll("[data-macos-command-line]")].map((line) => line.textContent).join("\n");
-    try {
-      await navigator.clipboard.writeText(command);
-      if (status) status.textContent = "已复制，请粘贴到终端运行。";
-    } catch {
-      if (status) status.textContent = "复制失败，请手动选择上方这一条命令。";
-    }
+  document.querySelectorAll("[data-copy-macos-command]").forEach((copy) => {
+    copy.addEventListener("click", async () => {
+      const card = copy.closest(".download-card");
+      const status = card?.querySelector("[data-copy-status]");
+      const command = card?.querySelector("[data-macos-command-line]")?.textContent || "";
+      try {
+        await navigator.clipboard.writeText(command);
+        if (status) status.textContent = "已复制，请粘贴到终端运行。";
+      } catch {
+        if (status) status.textContent = "复制失败，请手动选择上方命令。";
+      }
+    });
   });
   if (document.querySelector("[data-downloads]")) {
     Promise.all([loadIndex(), detectTarget()]).then(([index, target]) => renderIndex(index, target)).catch(renderFailure);

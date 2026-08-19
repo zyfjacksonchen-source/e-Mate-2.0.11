@@ -1,7 +1,7 @@
 /** Headless, confirmation-gated downloads for e-Mate installers. */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { chmod, lstat, mkdir, open, rename, unlink } from 'node:fs/promises'
+import { chmod, lstat, mkdir, open, readdir, rename, rm, unlink } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
 import {
   parseSemVer,
@@ -189,6 +189,7 @@ async function prepareDownloadPaths(
     throw new UpdateDownloadError('invalid-options', 'The update destination escaped the user-data directory.')
   }
   await preparePrivateDirectory(updatesDirectory)
+  await pruneOldDownloads(updatesDirectory, version)
   await preparePrivateDirectory(directory)
 
   const extension = platform === 'darwin' ? 'dmg' : 'exe'
@@ -207,6 +208,18 @@ async function prepareDownloadPaths(
     directory,
     completed,
     temporary: join(directory, `.${filename}.${process.pid}.${randomUUID()}.partial`),
+  }
+}
+
+async function pruneOldDownloads(updatesDirectory: string, keepVersion: string): Promise<void> {
+  for (const entry of await readdir(updatesDirectory, { withFileTypes: true })) {
+    if (entry.name === keepVersion || parseSemVer(entry.name)?.prerelease.length !== 0) continue
+    const path = join(updatesDirectory, entry.name)
+    const metadata = await lstat(path)
+    if (!entry.isDirectory() || entry.isSymbolicLink() || !metadata.isDirectory() || metadata.isSymbolicLink()) {
+      throw new UpdateDownloadError('invalid-options', 'An old update path is not a real directory.')
+    }
+    await rm(path, { recursive: true })
   }
 }
 

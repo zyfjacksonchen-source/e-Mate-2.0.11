@@ -8,17 +8,26 @@ import { MACOS_UNIVERSAL_NATIVE_ENTRIES } from '../scripts/mac-universal.ts'
 
 function options(overrides: Partial<MacReleaseVerificationOptions> = {}) {
   const calls: Array<{ command: string; args: readonly string[] }> = []
+  const launches: Array<{ executable: string; arch: 'arm64' | 'x86_64' }> = []
   const removeMountPoint = vi.fn()
+  const waitBeforeDetachRetry = vi.fn()
+  const verifyComputerUseHelper = vi.fn()
   const value: MacReleaseVerificationOptions = {
     distDir: '/release/dist',
     productName: 'e-Mate',
+    mode: 'signed-notarized',
     listDmgs: () => ['/release/dist/e-Mate-2.0.0-universal.dmg'],
     makeMountPoint: () => '/private/tmp/dsh-desktop-dmg-test',
     run: (command, args) => { calls.push({ command, args: [...args] }) },
+    launch: (executable, architectures) => {
+      for (const arch of architectures) launches.push({ executable, arch })
+    },
+    verifyComputerUseHelper,
+    waitBeforeDetachRetry,
     removeMountPoint,
     ...overrides,
   }
-  return { calls, removeMountPoint, value }
+  return { calls, launches, removeMountPoint, verifyComputerUseHelper, waitBeforeDetachRetry, value }
 }
 
 describe('macOS release artifact verification', () => {
@@ -34,10 +43,18 @@ describe('macOS release artifact verification', () => {
     expect(harness.calls).toEqual([
       {
         command: 'hdiutil',
+        args: ['verify', '/release/dist/e-Mate-2.0.0-universal.dmg'],
+      },
+      {
+        command: 'hdiutil',
         args: [
           'attach', '/release/dist/e-Mate-2.0.0-universal.dmg',
           '-mountpoint', '/private/tmp/dsh-desktop-dmg-test', '-nobrowse', '-readonly',
         ],
+      },
+      {
+        command: 'plutil',
+        args: ['-lint', join(appPath, 'Contents', 'Info.plist')],
       },
       {
         command: 'lipo',
@@ -72,6 +89,24 @@ describe('macOS release artifact verification', () => {
       },
     ])
     expect(harness.removeMountPoint).toHaveBeenCalledWith('/private/tmp/dsh-desktop-dmg-test')
+    expect(harness.verifyComputerUseHelper).toHaveBeenCalledWith(join(appPath, 'Contents', 'Resources', 'app.asar.unpacked'))
+    expect(harness.launches).toEqual([])
+  })
+
+  it('accepts only a complete ad-hoc signature and proves both packaged architectures launch', () => {
+    const harness = options({ mode: 'unsigned-adhoc' })
+    const appPath = join('/private/tmp/dsh-desktop-dmg-test', 'e-Mate.app')
+    const executable = join(appPath, 'Contents', 'MacOS', 'e-Mate')
+
+    verifyMacRelease(harness.value)
+
+    expect(harness.calls.some(call => call.command === 'codesign')).toBe(true)
+    expect(harness.calls.some(call => call.command === 'spctl')).toBe(false)
+    expect(harness.calls.some(call => call.command === 'xcrun')).toBe(false)
+    expect(harness.launches).toEqual([
+      { executable, arch: 'arm64' },
+      { executable, arch: 'x86_64' },
+    ])
   })
 
   it('rejects absent or ambiguous release images before mounting', () => {
@@ -102,6 +137,12 @@ describe('macOS release artifact verification', () => {
 
     expect(caught).toBeInstanceOf(AggregateError)
     expect((caught as AggregateError).errors).toEqual([verifyFailure, detachFailure])
+    expect(harness.calls.filter(call => call.command === 'hdiutil' && call.args[0] === 'detach')).toHaveLength(6)
+    expect(harness.calls).toContainEqual({
+      command: 'hdiutil',
+      args: ['detach', '/private/tmp/dsh-desktop-dmg-test', '-force'],
+    })
+    expect(harness.waitBeforeDetachRetry).toHaveBeenCalledTimes(4)
     expect(harness.removeMountPoint).toHaveBeenCalledOnce()
   })
 })

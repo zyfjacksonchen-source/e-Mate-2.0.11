@@ -18,6 +18,7 @@ const RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
 const DEFAULT_PROFILE = 'DSH_DESKTOP_DEFAULT_PROFILE'
 const DSH_HOME = 'DSH_HOME'
 const PATH = 'PATH'
+const DESKTOP_PNPM = 'EMATE_DESKTOP_PNPM'
 const ELECTRON_HEADERS_URL = 'https://electronjs.org/headers'
 const DIRECTORY_MODE = 0o700
 const EXECUTABLE_FILE_MODE = 0o700
@@ -409,6 +410,10 @@ export function installDesktopPnpmRuntime(options: DesktopPnpmRuntimeOptions): D
       : posixPnpmShim(options, nodeBinDir, nodeShimPath, clearEnvironmentUrl),
     windows ? PRIVATE_FILE_MODE : EXECUTABLE_FILE_MODE,
   )
+  const environment = options.environment ?? process.env
+  const previousDesktopPnpm = environment[DESKTOP_PNPM]
+  environment[DESKTOP_PNPM] = pnpmShimPath
+  const disposePath = installPathDirectory(environment, pathDir, options.platform)
 
   return {
     pathDir,
@@ -416,6 +421,11 @@ export function installDesktopPnpmRuntime(options: DesktopPnpmRuntimeOptions): D
     nodeBinDir,
     nodeShimPath,
     clearEnvironmentPath,
-    dispose: installPathDirectory(options.environment ?? process.env, pathDir, options.platform),
+    dispose: () => {
+      disposePath()
+      if (environment[DESKTOP_PNPM] !== pnpmShimPath) return
+      if (previousDesktopPnpm === undefined) delete environment[DESKTOP_PNPM]
+      else environment[DESKTOP_PNPM] = previousDesktopPnpm
+    },
   }
 }

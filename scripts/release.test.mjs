@@ -148,7 +148,7 @@ test('publication accepts only the exact 40-character release commit', () => {
 
 test('R2 immutable readback includes download metadata as well as bytes identity', () => {
   const item = {
-    filename: 'e-mate-dsh-2.0.9.tgz',
+    filename: 'e-mate-dsh-2.0.10.tgz',
     size: 207,
     sha256: DIGEST,
     contentType: 'application/gzip',
@@ -243,34 +243,57 @@ test('GitHub release packs once and validates the same tarball on three platform
   const cleanInstall = release.jobs['clean-install'].steps.find(step => step.name === 'Install tarballs with npm and run setup checks')
   assert.equal((cleanInstall.run.match(/node "\$cli" setup$/gmu) ?? []).length, 2)
   assert.match(readFileSync('scripts/build-harness-runtime.mjs', 'utf8'), /'--os=darwin', '--os=win32', '--cpu=arm64', '--cpu=x64'/u)
-  assert.deepEqual(release.jobs.r2.needs, ['clean-install', 'evidence'])
+  assert.equal(release.jobs.r2.needs, undefined)
   assert.deepEqual(release.on.push.branches, ['main'])
   const r2 = release.jobs.r2.steps.find(step => step.name === 'Publish immutable release bytes to Cloudflare R2')
   assert.match(r2.run, /publish-r2\.mjs/u)
   assert.equal(r2.env.EMATE_R2_PUBLIC_ORIGIN, '${{ vars.EMATE_R2_PUBLIC_ORIGIN }}')
   assert.equal(release.on.workflow_dispatch.inputs.publish.default, false)
+  assert.equal(release.on.workflow_dispatch.inputs.release_run_id.default, '')
+  assert.match(release.jobs.r2.steps.find(step => step.name === 'Validate the accepted build-only run').run, /head_sha/u)
+  assert.equal(release.jobs.r2.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], '${{ inputs.release_run_id }}')
   assert.doesNotMatch(readFileSync('.github/workflows/release.yml', 'utf8'), /npm view '@e-mate\/dsh@2\.0\.8'|release\.mjs publish/u)
+  const desktopReleaseSource = readFileSync('.github/workflows/desktop-release.yml', 'utf8')
+  const desktopManifestSource = readFileSync('desktop/e-mate-desktop/scripts/desktop-release-manifest.ts', 'utf8')
+  const desktopPublisher = desktopRelease.jobs.r2.steps.find(step => step.name === 'Publish accepted desktop bytes to Cloudflare R2')
+  assert.equal(desktopRelease.jobs.r2.needs, undefined)
+  assert.equal(desktopRelease.on.workflow_dispatch.inputs.release_run_id.default, '')
+  assert.match(desktopRelease.jobs.r2.steps.find(step => step.name === 'Validate the accepted build-only run').run, /head_sha/u)
+  assert.equal(desktopRelease.jobs.r2.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], '${{ inputs.release_run_id }}')
+  assert.match(desktopManifestSource, /readFileSync\(new URL\('\.\.\/package\.json'/u)
+  assert.doesNotMatch(desktopManifestSource, /const VERSION = '\d+\.\d+\.\d+'/u)
+  assert.match(desktopPublisher.run, /version="\$\(jq -er '\.version/u)
+  assert.match(desktopPublisher.run, /\.artifacts\[\$platform\]\.url/u)
+  assert.ok(desktopPublisher.run.lastIndexOf('public-artifact') < desktopPublisher.run.indexOf('--key desktop/latest.json'))
+  assert.doesNotMatch(desktopReleaseSource, /e-Mate-\d+\.\d+\.\d+-(?:mac|win)|releases\/v\d+\.\d+\.\d+/u)
   assert.match(readFileSync('.gitattributes', 'utf8'), /^\* text=auto eol=lf$/mu)
 })
 
 test('download page resolves unsigned desktop installers from the fail-closed R2 manifest', async () => {
   const page = renderDownloadPage(readFileSync('deploy/download-page/index.html', 'utf8'))
-  const scriptName = 'site.d39dbfb48ee5.js'
+  const macGuide = readFileSync('deploy/download-page/install-macos.html', 'utf8')
+  const scriptName = 'site.8cdedc87d365.js'
   const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
   assert.equal(scriptName.split('.')[1], createHash('sha256').update(script).digest('hex').slice(0, 12))
   const manifestUrl = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json'
   assert.match(script, new RegExp(manifestUrl.replaceAll('.', '\\.')))
   for (const platform of ['macos', 'windows']) assert.match(page, new RegExp(`data-platform="${platform}"`, 'u'))
   for (const artifact of ['darwin', 'win32']) assert.match(script, new RegExp(`artifacts\\.${artifact}`, 'u'))
-  for (const filename of ['e-Mate-2.0.9-mac-universal.dmg', 'e-Mate-2.0.9-win-x64-Setup.exe']) {
+  for (const filename of ['e-Mate-2.0.10-mac-universal.dmg', 'e-Mate-2.0.10-win-x64-Setup.exe']) {
     assert.match(script, new RegExp(filename.replaceAll('.', '\\.'), 'u'))
   }
   assert.match(script, /manifest\.source_commit/u)
   assert.match(script, /Number\.isSafeInteger\(artifact\.bytes\)/u)
   assert.match(script, /\^\[0-9a-f\]\{64\}\$/u)
   assert.match(page, /未签名/u)
-  assert.match(page, /告诉小芯更新 e-Mate/u)
+  assert.match(page, /e-Mate 会校验、替换并自动重开/u)
   assert.match(page, /\/ecorex-agent\/admin\//u)
+  assert.match(macGuide, /2\.0\.9 第一次升级到 2\.0\.10/u)
+  assert.match(macGuide, /2\.0\.10 后，后续在线更新/u)
+  assert.match(macGuide, /\/usr\/bin\/arch -arm64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)
+  assert.match(macGuide, /\/usr\/bin\/arch -x86_64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)
+  assert.match(macGuide, /Password:.*输入时不会显示任何字符/u)
+  assert.equal((macGuide.match(/data-copy-macos-command/gmu) ?? []).length, 2)
   for (const asset of [
     'emate-logo.e0bf52b1480f.png',
     'emate-mark.1a6dbbe3b5fe.png',
@@ -283,14 +306,14 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
   assert.doesNotMatch(page, /__EMATE_RELEASE_SOURCE_COMMIT__|npm install|nodejs\.org|e-mate setup|e-mate launch/u)
   const { normalizeDownloadIndex } = await import(`../deploy/download-page/${scriptName}`)
   const commit = 'a'.repeat(40)
-  const releasePrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.9/${commit}`
+  const releasePrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.10/${commit}`
   const fixture = {
     schema_version: 1,
-    version: '2.0.9',
+    version: '2.0.10',
     source_commit: commit,
     artifacts: {
-      darwin: { url: `${releasePrefix}/e-Mate-2.0.9-mac-universal.dmg`, bytes: 123, sha256: 'b'.repeat(64) },
-      win32: { url: `${releasePrefix}/e-Mate-2.0.9-win-x64-Setup.exe`, bytes: 456, sha256: 'c'.repeat(64) },
+      darwin: { url: `${releasePrefix}/e-Mate-2.0.10-mac-universal.dmg`, bytes: 123, sha256: 'b'.repeat(64) },
+      win32: { url: `${releasePrefix}/e-Mate-2.0.10-win-x64-Setup.exe`, bytes: 456, sha256: 'c'.repeat(64) },
     },
   }
   assert.deepEqual(normalizeDownloadIndex(fixture).downloads.map(item => item.target), ['macos-universal', 'windows-x64'])
