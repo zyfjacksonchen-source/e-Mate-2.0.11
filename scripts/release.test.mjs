@@ -242,6 +242,8 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.match(release.jobs.evidence.steps.find(step => step.name === 'Render the immutable candidate download page').run, /render-download-page\.mjs/u)
   const cleanInstall = release.jobs['clean-install'].steps.find(step => step.name === 'Install tarballs with npm and run setup checks')
   assert.equal((cleanInstall.run.match(/node "\$cli" setup$/gmu) ?? []).length, 2)
+  assert.ok(cleanInstall.run.includes('version="$(node -p "require(process.argv[1]).version" "$npm_root/@e-mate/dsh/package.json")"'))
+  assert.doesNotMatch(cleanInstall.run, /require\('\$npm_root/u)
   assert.match(readFileSync('scripts/build-harness-runtime.mjs', 'utf8'), /'--os=darwin', '--os=win32', '--cpu=arm64', '--cpu=x64'/u)
   assert.equal(release.jobs.r2.needs, undefined)
   assert.deepEqual(release.on.push.branches, ['main'])

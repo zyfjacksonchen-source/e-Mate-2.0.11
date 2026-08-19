@@ -124,7 +124,7 @@ jobs:
           npm install --global --prefix "$prefix" --no-audit --no-fund "${tarballs[0]}"
           npm_root="$(npm root --global --prefix "$prefix")"
           cli="$npm_root/@e-mate/dsh/lib/bin.js"
-          version="$(node -p "require('$npm_root/@e-mate/dsh/package.json').version")"
+          version="$(node -p "require(process.argv[1]).version" "$npm_root/@e-mate/dsh/package.json")"
           test -f "$cli"
           if [[ "$RUNNER_OS" == Windows ]]; then
             test -f "$prefix/e-mate.cmd"
