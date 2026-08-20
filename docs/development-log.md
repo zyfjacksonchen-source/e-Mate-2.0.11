@@ -1615,3 +1615,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 完成性审计确认 release envelope 的签名解析与 `selectProfileRelease` 已把兼容性和当前 Base 分层，但既有 rc.6→rc.7 测试只直接调用选择函数；它不能证明 Desktop 的真实网络入口会在组件 manifest/文件下载之前得到同一结果。
 - 新行为测试用 rc.6 Base 内嵌的同一稳定 release 公钥验证一个仅声明 rc.7 Base/Harness 的已签 2.0.11 desired-state，再从 `checkProfileUpdate` 完整入口执行。结果精确为 `base-required`，包含所需 Base contract，网络请求严格只有一次 desired-state GET；任何组件 manifest 或文件都没有被请求。产品实现无需增加旁路或 SemVer 推断。
 - Profile release/update 聚焦回归为 `2 files / 8 tests`，Desktop 测试 TypeScript 与 diff check 通过。该证据锁定“旧 Base 不混装新插件、兼容 Base 缺失时保持原代”的仓库合同；它没有把尚不存在的生产 desired-state 或 Base installer 冒充上线。
+
+## 2026-08-20 · 2.0.11 S27 发布候选绑定 accepted impact 组件集合
+
+- Profile release 的 validate Job 已从同 SHA 成功 CI impact artifact 读取 `publish_components` 并验证对应 component/composition Jobs，但 production publisher 旧接口没有接收这份列表，只验证三个候选各自声明的 `changed_components` 与实际 artifact 集合自洽。正常 CI 会生成一致数据，发布信任边界却没有证明“CI 判定变化哪些组件”和“最终签名哪些组件”是同一真相。
+- publish Job 现在把非 bootstrap 的 accepted `publish_components`、bootstrap 的完整 accepted inventory 转成同一个重复 `--changed` 参数；publisher 要求列表非空、排序、唯一、全部属于当前 Base inventory，并要求三个目标候选的 admission 逐字节语义一致。候选多报、漏报或换成另一组件均在生产签名、不可变上传和 desired-state 激活前失败。
+- 行为反例将一个已组合目标的 admission 从真实变化组件偷换为另一合法组件 ID；旧自洽链会直到后续 artifact 检查才间接失败，新边界直接报“candidate changed components do not match accepted CI impact”。影响/组件/组合/R2 publisher `29/29`、安装器发布合同 `9/9`、release boundary 与 diff check 通过。本切片修改发布权威，正确进入 Base lane；后续普通插件发布仍只传 classifier 已确认的变化集合。

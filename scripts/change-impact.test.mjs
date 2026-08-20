@@ -367,6 +367,8 @@ describe('repository release boundary', () => {
     assert.match(workflow, /Bootstrap complete Profile generation \/ \$\{\{ matrix\.target \}\}/u)
     assert.match(workflow, /node desktop\/e-mate-desktop\/scripts\/verify-profile-boot\.mjs/u)
     assert.match(workflow, /node scripts\/publish-profile-r2\.mjs/u)
+    assert.match(workflow, /EXPECTED_CHANGED_COMPONENTS_JSON:/u)
+    assert.match(workflow, /changed_args\+=\(--changed "\$component"\)/u)
     assert.match(workflow, /EMATE_PROFILE_SIGNING_PRIVATE_KEY: \$\{\{ secrets\.EMATE_PROFILE_SIGNING_PRIVATE_KEY \}\}/u)
     assert.match(workflow, /environment: r2-publish/u)
     assert.doesNotMatch(workflow, /pnpm --dir upstream\/deepseek-harness run build/u)

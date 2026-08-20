@@ -97,10 +97,30 @@ test('publication admits bootstrap and its direct successor before exposing acti
     })
     candidates.push(output)
   }
+  const driftedAdmission = JSON.parse(readFileSync(join(candidates[0], 'admission.json'), 'utf8'))
+  writeJson(join(candidates[0], 'admission.json'), {
+    ...driftedAdmission,
+    changed_components: ['@e-mate/dsh-client-shell'],
+  })
+  assert.throws(() => prepareProfilePublication({
+    root,
+    candidateDirectories: candidates,
+    artifactRoots: [join(root, 'dist/components')],
+    expectedChangedIds: [componentId],
+    sourceCommit,
+    privateKeyPem,
+    keyId,
+    currentByTarget: new Map([
+      ['darwin-arm64', undefined], ['darwin-x64', undefined], ['win32-x64', undefined],
+    ]),
+    bootstrap: true,
+  }), /candidate changed components do not match accepted CI impact/u)
+  writeJson(join(candidates[0], 'admission.json'), driftedAdmission)
   const publication = prepareProfilePublication({
     root,
     candidateDirectories: candidates,
     artifactRoots: [join(root, 'dist/components')],
+    expectedChangedIds: [componentId],
     sourceCommit,
     privateKeyPem,
     keyId,
@@ -117,6 +137,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
     root,
     candidateDirectories: candidates,
     artifactRoots: [join(root, 'dist/components')],
+    expectedChangedIds: [componentId],
     sourceCommit,
     privateKeyPem,
     keyId,
@@ -160,6 +181,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
     root,
     candidateDirectories: nextCandidates,
     artifactRoots: [join(root, 'dist/components-next')],
+    expectedChangedIds: [componentId],
     sourceCommit: nextSourceCommit,
     privateKeyPem,
     currentByTarget,
@@ -174,6 +196,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
     root,
     candidateDirectories: nextCandidates,
     artifactRoots: [join(root, 'dist/components-next')],
+    expectedChangedIds: [componentId],
     sourceCommit: nextSourceCommit,
     privateKeyPem,
     keyId,

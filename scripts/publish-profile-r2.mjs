@@ -180,6 +180,17 @@ export function prepareProfilePublication(options) {
   if (canonicalProfileJson(candidates.map(candidate => candidate.name)) !== canonicalProfileJson([...TARGET_NAMES].sort())) {
     throw new Error('Profile publication must contain exactly one candidate for every Desktop target')
   }
+  const expectedChangedIds = options.expectedChangedIds
+  if (!Array.isArray(expectedChangedIds) || expectedChangedIds.length === 0
+    || expectedChangedIds.some((id, index) => typeof id !== 'string'
+      || !expectedIds.includes(id) || index > 0 && expectedChangedIds[index - 1] >= id)) {
+    throw new Error('accepted CI changed component set is invalid')
+  }
+  for (const candidate of candidates) {
+    if (canonicalProfileJson(candidate.admission.changed_components) !== canonicalProfileJson(expectedChangedIds)) {
+      throw new Error(`candidate changed components do not match accepted CI impact: ${candidate.name}`)
+    }
+  }
   for (const candidate of candidates) {
     validateCurrent(candidate, options.currentByTarget.get(candidate.name), base, expectedIds, options.bootstrap)
   }
@@ -443,17 +454,20 @@ async function main() {
   const { values } = parseArgs({ options: {
     candidate: { type: 'string', multiple: true },
     'artifact-root': { type: 'string', multiple: true },
+    changed: { type: 'string', multiple: true },
     receipt: { type: 'string' },
     bootstrap: { type: 'boolean', default: false },
   } })
-  if (values.candidate?.length !== 3 || values['artifact-root']?.length === 0 || values.receipt === undefined) {
-    throw new Error('usage: publish-profile-r2.mjs --candidate <dir> (three targets) --artifact-root <dir> --receipt <path> [--bootstrap]')
+  if (values.candidate?.length !== 3 || values['artifact-root']?.length === 0
+    || values.changed?.length === 0 || values.receipt === undefined) {
+    throw new Error('usage: publish-profile-r2.mjs --candidate <dir> (three targets) --artifact-root <dir> --changed <component> --receipt <path> [--bootstrap]')
   }
   const root = fileURLToPath(new URL('..', import.meta.url))
   const receipt = await publishProfileR2({
     root,
     candidateDirectories: values.candidate,
     artifactRoots: values['artifact-root'],
+    expectedChangedIds: values.changed,
     receipt: resolve(values.receipt),
     bootstrap: values.bootstrap,
   })

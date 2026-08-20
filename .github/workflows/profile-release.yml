@@ -399,6 +399,7 @@ jobs:
           EMATE_PROFILE_SIGNING_PRIVATE_KEY: ${{ secrets.EMATE_PROFILE_SIGNING_PRIVATE_KEY }}
           EMATE_PROFILE_SIGNING_KEY_ID: ${{ secrets.EMATE_PROFILE_SIGNING_KEY_ID }}
           EMATE_PROFILE_BOOTSTRAP: ${{ inputs.bootstrap }}
+          EXPECTED_CHANGED_COMPONENTS_JSON: ${{ inputs.bootstrap && needs.bootstrap-plan.outputs.components_json || needs.validate.outputs.publish_components_json }}
           AWS_DEFAULT_REGION: auto
           AWS_EC2_METADATA_DISABLED: 'true'
         run: |
@@ -428,11 +429,16 @@ jobs:
           unset ECOREX_R2_ACCESS_KEY_ID ECOREX_R2_SECRET_ACCESS_KEY
           bootstrap_args=()
           if test "$EMATE_PROFILE_BOOTSTRAP" = true; then bootstrap_args=(--bootstrap); fi
+          changed_args=()
+          while IFS= read -r component; do changed_args+=(--changed "$component"); done < <(
+            node --input-type=module -e 'for (const id of JSON.parse(process.env.EXPECTED_CHANGED_COMPONENTS_JSON)) console.log(id)'
+          )
           node scripts/publish-profile-r2.mjs \
             --candidate dist/profile-candidates/darwin-arm64 \
             --candidate dist/profile-candidates/darwin-x64 \
             --candidate dist/profile-candidates/win32-x64 \
             --artifact-root dist/components \
+            "${changed_args[@]}" \
             --receipt dist/profile-publication/r2-admission.json \
             "${bootstrap_args[@]}"
       - uses: actions/upload-artifact@v4
