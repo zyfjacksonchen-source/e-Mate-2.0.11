@@ -1585,3 +1585,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 完成性审计区分了 `git diff --name-only` 中的历史删除项与当前磁盘真值：旧 `packages/dsh-plugin-browser`、`packages/dsh-plugin-browser-panel`、Desktop extension setup 和整份 extension vendor 已经不存在；`e-mate-profile.ts`/CLI 中保留的旧包名只负责升级时删除用户旧 Profile 残留，不是运行或发布依赖。
 - 继续检查 Desktop vendor 后发现仍有失活的 `@yuxianglin/dsh-bridge-browser@0.0.1` tgz 与 source receipt。它们没有 package/lock/runtime 引用，仍是扩展浏览器实现字节，现已精确删除；删除前 tgz SHA-256 为 `66a97e999941b0da33096d027007d26029d82abc14d9f755b8370603a847c8ae`。CDP 仍是 inventory 中唯一浏览器组件，没有增加替代桥、扩展、浏览器二进制或第二套 Tool/approval/session 路径。
 - `check-target` 现在拒绝旧 browser/browser-panel/extension setup 路径以及 vendor 中任何 `dsh-browser`/`bridge-browser` 文件重新出现；仓库边界新增同一可运行断言。验证结果为影响/组件/完整组合/R2 publisher `28/28`、安装器发布合同 `9/9`、Desktop Profile/package `26/26`，目标 pin 与 diff check 通过。本切片触及 Base 发布输入，必须诚实进入一次 Base lane；后续只改 CDP 组件仍保持 plugin-only。
+
+## 2026-08-20 · 2.0.11 S22 唯一 2.0.10 前序改为可执行门禁
+
+- 完成性审计发现目标合同虽声明 `65a995fa795d7007dd90818c939c5185b3fc1a1d` 是唯一验收的 2.0.10 前序，旧门禁只检查文档文本包含该 SHA，没有证明候选 Git 历史来自这些字节。另一条历史可以复制合同文本后进入分类，属于来源身份缺口。
+- change-impact 现在导出唯一 `ACCEPTED_PREDECESSOR`，`--base/--head` 在计算 diff 与任何构建前调用 Git ancestry 验证；非后代、缺失对象或非法 HEAD 统一产生无效合同并非零退出，不再降级为昂贵的 Base 构建。`check-target` 复用同一常量和验证函数，Profile 发布仍只接受这个 exact HEAD 的成功 CI run，因此没有第二份前序判断。
+- 正向证据证明当前 `HEAD` 的 merge-base 是精确 `65a995f…`；反例使用仓库根提交，函数与 CLI 均明确拒绝并返回状态 1。影响/组件/完整组合/R2 publisher 回归为 `29/29`，release boundary、target pin 与 diff check 通过。该分类器改动正确进入 Base lane；Goal 仍等待当前 SHA 的远端 CI/签名 bootstrap/三平台安装态收据。

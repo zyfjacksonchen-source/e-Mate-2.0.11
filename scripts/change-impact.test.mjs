@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { baseSdkFingerprint } from './base-sdk.mjs'
-import { classifyChangedPaths, loadReleaseBoundary, PRODUCT_UI_REFERENCE } from './change-impact.mjs'
+import {
+  ACCEPTED_PREDECESSOR,
+  assertAcceptedPredecessor,
+  classifyChangedPaths,
+  loadReleaseBoundary,
+  PRODUCT_UI_REFERENCE,
+} from './change-impact.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 
@@ -15,6 +21,27 @@ function classify(...paths) {
 }
 
 describe('repository release boundary', () => {
+  it('requires every candidate to descend from the accepted 2.0.10 commit', () => {
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+    const repositoryRoot = execFileSync('git', ['rev-list', '--max-parents=0', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim()
+    assert.doesNotThrow(() => assertAcceptedPredecessor(root, head))
+    assert.throws(
+      () => assertAcceptedPredecessor(root, repositoryRoot),
+      new RegExp(`accepted 2\\.0\\.10 ${ACCEPTED_PREDECESSOR}`, 'u'),
+    )
+    const rejected = spawnSync(process.execPath, [
+      'scripts/change-impact.mjs', '--base', repositoryRoot, '--head', repositoryRoot,
+    ], { cwd: root, encoding: 'utf8' })
+    assert.equal(rejected.status, 1)
+    assert.match(
+      JSON.parse(rejected.stdout).contract.errors.join('\n'),
+      new RegExp(`accepted 2\\.0\\.10 ${ACCEPTED_PREDECESSOR}`, 'u'),
+    )
+  })
+
   it('keeps the deleted extension browser out of source and release vendor bytes', () => {
     for (const path of [
       'packages/dsh-plugin-browser',

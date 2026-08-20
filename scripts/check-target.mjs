@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
-import { PRODUCT_UI_REFERENCE } from './change-impact.mjs'
+import { ACCEPTED_PREDECESSOR, assertAcceptedPredecessor, PRODUCT_UI_REFERENCE } from './change-impact.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const target = readFileSync(resolve(root, 'docs/target-contract.md'), 'utf8')
@@ -41,6 +41,7 @@ if (!release.description.startsWith('e-Mate 2.0.11')) throw new Error('release p
 if (release.bin?.['e-mate'] !== 'lib/bin.js') throw new Error('TypeScript-built CLI entry drifted')
 if (!target.includes('Product name: `e-Mate`')) throw new Error('product name drifted')
 if (!target.includes('Repository: `zyfjacksonchen-source/e-Mate`')) throw new Error('repository identity drifted')
+if (!target.includes(ACCEPTED_PREDECESSOR)) throw new Error('accepted 2.0.10 predecessor is missing')
 if (!target.includes('df78045a127e32cb5b942defba52c539590d1596')) throw new Error('Harness source pin is missing')
 if (!target.includes(PRODUCT_UI_REFERENCE.commit)) throw new Error('e-Mate shell source pin is missing')
 if (!target.includes('TypeScript/TSX')) throw new Error('TypeScript source contract is missing')
@@ -75,5 +76,7 @@ for (const [name, path, expected] of [
     throw new Error(`${name} submodule is missing; run git submodule update --init --recursive`)
   }
 }
+
+assertAcceptedPredecessor(root, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim())
 
 console.log('target contract: e-Mate 2.0.11 pins verified')

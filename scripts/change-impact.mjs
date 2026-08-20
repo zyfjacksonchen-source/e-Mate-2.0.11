@@ -6,6 +6,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const BASE_CONTRACT_PATH = 'desktop/e-mate-desktop/base-contract.json'
+export const ACCEPTED_PREDECESSOR = '65a995fa795d7007dd90818c939c5185b3fc1a1d'
 export const PRODUCT_UI_REFERENCE = Object.freeze({
   repository: 'zyfjacksonchen-source/ECoreX',
   path: 'upstream/e-mate-2.0.5',
@@ -521,8 +522,22 @@ function failureResult(paths, error) {
   })
 }
 
+/** Require every release candidate to descend from the one accepted 2.0.10 commit. */
+export function assertAcceptedPredecessor(root, head) {
+  if (!SHA40.test(head)) throw new Error('head must be a full lowercase commit id')
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', ACCEPTED_PREDECESSOR, head], {
+      cwd: root,
+      stdio: 'ignore',
+    })
+  } catch {
+    throw new Error(`release head does not descend from accepted 2.0.10 ${ACCEPTED_PREDECESSOR}`)
+  }
+}
+
 function changedPathsFromGit(root, base, head) {
   if (!SHA40.test(base) || !SHA40.test(head)) throw new Error('base and head must be full lowercase commit ids')
+  assertAcceptedPredecessor(root, head)
   const mergeBase = execFileSync('git', ['merge-base', base, head], { cwd: root, encoding: 'utf8' }).trim()
   if (!SHA40.test(mergeBase)) throw new Error('git merge-base did not return a commit id')
   const output = execFileSync(
@@ -600,7 +615,7 @@ function main() {
     : failureResult(paths, inputError)
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
   if (options.githuboutput !== undefined) writeGithubOutput(options.githuboutput, value)
-  if (options.checkContract && !value.contract.valid) process.exitCode = 1
+  if (!value.contract.valid) process.exitCode = 1
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()
