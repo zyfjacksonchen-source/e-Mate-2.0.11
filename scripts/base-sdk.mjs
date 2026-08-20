@@ -62,6 +62,7 @@ function compiledFiles(repositoryRoot) {
     return local === 'component-inventory.json'
       || local === 'cordis.patch.yml'
       || local === 'desktop-source.json'
+      || local === 'bundles/registry.json'
       || local.startsWith('plugins/')
       || local.startsWith('ecosystem/')
   }, files)
@@ -80,6 +81,7 @@ function compiledFiles(repositoryRoot) {
   const unique = new Map(files.map(file => [file.path, file]))
   if (unique.size !== files.length || !files.some(file => file.path.startsWith('upstream/deepseek-harness/'))
     || !files.some(file => file.path.startsWith('desktop/e-mate-desktop/lib/'))
+    || !files.some(file => file.path.endsWith('/build/e-mate-profile/bundles/registry.json'))
     || !files.some(file => file.path.includes('/build/e-mate-profile/plugins/'))) {
     throw new Error('accepted Base SDK build closure is incomplete')
   }
