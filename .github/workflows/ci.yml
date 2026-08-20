@@ -48,6 +48,9 @@ jobs:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
+          if test "$BASE_SHA" = 0000000000000000000000000000000000000000; then
+            BASE_SHA="$(node --input-type=module -e "import { ACCEPTED_PREDECESSOR } from './scripts/change-impact.mjs'; process.stdout.write(ACCEPTED_PREDECESSOR)")"
+          fi
           node scripts/change-impact.mjs \
             --base "$BASE_SHA" \
             --head "$HEAD_SHA" \

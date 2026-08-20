@@ -1634,3 +1634,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 目标合同、三个生产发布器和一方 npm package metadata 已统一迁到新仓库身份。`check-target` 同时校验合同文本、发布授权常量和五个发布包 URL，任何一处退回旧仓库都会失败关闭；历史开发记录及带旧 tag 的 Skill 来源 URL 继续指向原不可变出处，不被批量改写成不存在的 provenance。
 - 公开前只扫描当前分支新增历史：高置信凭据模式只命中密码学依赖中的私钥格式常量及代码模板，没有真实私钥/API token；最大新增 blob 约 21 MiB；11 个 submodule URL 均可匿名读取。窄验证为 target contract 通过、release/Profile publisher `10/10`、impact classifier `17/17`、JSON 与 diff check 通过。
 - 新仓库没有继承旧仓库的 Actions secrets、受保护 environment、平台验收收据或公开 desired state；因此“代码公开”不等于“2.0.11 已发布”。这些权限和证据只能在新仓库 fail-closed 门禁下重新建立，不能复制旧 SHA 的成功状态。
+
+## 2026-08-20 · 2.0.11 S30 新仓库首次 push 的零前序闭环
+
+- 新公开仓库第一次 push 的真实 CI run `32320534760` 在 impact 首步失败：GitHub 将 `github.event.before` 设为 40 个零，旧流程直接把它传给 Git，得到 `Not a valid commit name`。这不是产品测试失败，而是新仓库 bootstrap 事件此前没有可执行合同。
+- impact Job 现在只在 `BASE_SHA` 精确等于 40 个零时，从 `change-impact.mjs` 的唯一 `ACCEPTED_PREDECESSOR` 读取 `65a995fa795d7007dd90818c939c5185b3fc1a1d`；普通 push 和 PR 仍使用 GitHub 提供的 exact base。分类器随后照常验证候选是该前序后代，缺对象或另一条历史仍失败关闭，不能用首次 push 绕过来源门禁。
+- 反例被写入现有 CI 权威测试；impact `17/17`、target contract、系统 YAML 解析与 diff check 通过。以 accepted predecessor 到当前提交的真实分类结果为 `lane=base`、`run_base=true`、contract valid；本修改自身属于 workflow authority，因此下一次 main push 必须运行完整 Base/Windows/macOS lane，而不是借 docs-only 跳过。
+- `Release e-Mate` 在普通 push 下仅执行 `inputs.publish == false` 的 build/clean-install/evidence 路径；R2 job 只接受显式 `workflow_dispatch publish=true`，本次没有发布 npm 或 R2 对象。
