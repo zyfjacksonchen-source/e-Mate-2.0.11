@@ -1731,3 +1731,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Draft PR `#10` 的 exact-SHA CI run `32395061470` 在第一道 impact Job 安全失败，其余 Base、平台组件和安装器任务全部跳过。分类器本身 `18/18`、组件静态闭包门禁通过；失败来自 Profile 组合测试加载 `profile-component.ts` 时找不到 `fflate`。该依赖已由 Desktop 和 DSH 精确声明，但 impact Job 为保持轻量此前完全不安装依赖，新的 wheel 内 Mach-O/PE 校验让这一旧假设不再成立。
 - 最小修复不复制 ZIP parser，也不安装 Desktop/Harness 全依赖：根开发合同精确声明同一 `fflate@0.8.3`，impact Job 通过根 `pnpm-lock.yaml` 执行 `pnpm install --frozen-lockfile --ignore-scripts` 后再运行边界测试。仓库测试锁定这一步必须位于 fail-closed classifier 测试之前，防止以后删除安装步骤后在冷 CI 再次假绿或失败。
 - 本地按远端冷路径重新安装后，impact/emitter/Profile publication 为 `32/32`，release topology 为 `10/10`，diff check 通过。该修复修改 CI authority，因此继续属于同一 Base PR；只有更新后的 exact SHA 完整门禁通过才可合并。
+
+## 2026-08-21 · 2.0.11 S44 平台组件复用 Base 的精确 CPython
+
+- PR `#10` 更新后的 CI run `32395386973` 已通过 impact 与完整 Node 24/source Job，随后 macOS arm64、Intel、Windows 的 Vision compatibility 和两套 Desktop installer 都在 `actions/setup-python` 阶段失败：该 action 的公开 manifest 尚无 CPython `3.12.14`，所以没有任何组件测试或安装器构建被误报成功。Computer Use 的非 Python 路径继续独立运行。
+- 产品的唯一 Python 权威本来就是 Desktop `prepare-python-runtime.mjs`：它固定 python-build-standalone release、三目标 archive SHA 和 CPython `3.12.14`，正式 App 也从这里取得运行时。组件矩阵与 Profile bootstrap 现复用同一脚本的目标选择入口，只下载当前 target 并把已校验解释器绝对路径交给 Vision；不再把 GitHub action 的可用版本清单当第二个 Base runtime。
+- `actions/setup-python` 仍以可用的 `3.12` 运行 `prepare-wheels.py`，该脚本只下载、重签和确定性重打固定 wheel 字节，不进入最终产品运行时。目标脚本本机 arm64 成功、跨 host target 在下载前拒绝；CI classifier `18/18`、release topology `10/10`、三份 workflow YAML 和 diff check 通过。新 exact SHA 必须重跑六个原生组件 Job与两套安装器后才可合并。

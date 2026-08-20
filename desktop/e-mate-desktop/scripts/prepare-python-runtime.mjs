@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream/promises'
 import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseArgs } from 'node:util'
 
 const RELEASE = '20260814'
 const PYTHON_VERSION = '3.12.14'
@@ -91,4 +92,13 @@ async function prepare(target) {
   }
 }
 
-for (const target of targetsForHost()) await prepare(target)
+const { values } = parseArgs({
+  options: { target: { type: 'string', multiple: true } },
+})
+const hostTargets = targetsForHost()
+const targets = values.target ?? hostTargets
+if (targets.length === 0 || new Set(targets).size !== targets.length
+  || targets.some(target => !hostTargets.includes(target))) {
+  throw new Error(`e-Mate Python runtime target is unsupported on ${process.platform}-${process.arch}`)
+}
+for (const target of targets) await prepare(target)

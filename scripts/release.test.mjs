@@ -241,6 +241,7 @@ test('GitHub release packs once and validates the same tarball on three platform
   const ci = parse(readFileSync('.github/workflows/ci.yml', 'utf8'))
   const release = parse(readFileSync('.github/workflows/release.yml', 'utf8'))
   const desktopRelease = parse(readFileSync('.github/workflows/desktop-release.yml', 'utf8'))
+  assert.doesNotMatch(readFileSync('.github/workflows/desktop-release.yml', 'utf8'), /python-version: '3\.12\.14'/u)
   assert.deepEqual(published.os, ['darwin', 'win32'])
   assert.equal(published.cpu, undefined)
   assert.ok(workspace.scripts.test.indexOf('component-run.mjs check') < workspace.scripts.test.indexOf('--filter @e-mate/dsh test'))
