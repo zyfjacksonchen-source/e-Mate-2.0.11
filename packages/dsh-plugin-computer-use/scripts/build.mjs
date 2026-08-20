@@ -14,22 +14,23 @@ const bundleRuntime = () => {
   if (result.status !== 0) throw new Error(`runtime bundle failed:\n${result.stdout}${result.stderr}`)
 }
 
-for (const name of ['lib', 'assets', 'docs']) {
+for (const name of ['lib', 'assets', 'docs', 'native']) {
   await rm(join(root, name), { recursive: true, force: true })
-  await cp(join(upstream, name), join(root, name), { recursive: true })
+  if (name !== 'native') await cp(join(upstream, name), join(root, name), { recursive: true })
 }
 if (process.platform === 'darwin') {
-  await rm(join(root, 'native'), { recursive: true, force: true })
   await cp(join(upstream, 'native'), join(root, 'native'), { recursive: true })
 }
 await mkdir(join(root, 'scripts'), { recursive: true })
 await cp(join(upstream, 'scripts/build-native.mjs'), join(root, 'scripts/build-native.mjs'))
 await cp(join(upstream, 'LICENSE'), join(root, 'LICENSE'))
-const helper = join(root, 'native/macos/bin/dsh-computer-use-helper')
-const nativeManifestPath = join(root, 'native/macos/manifest.json')
-const nativeManifest = JSON.parse(await readFile(nativeManifestPath, 'utf8'))
-nativeManifest.binary.sha256 = createHash('sha256').update(await readFile(helper)).digest('hex')
-await writeFile(nativeManifestPath, `${JSON.stringify(nativeManifest, null, 2)}\n`)
+if (process.platform === 'darwin') {
+  const helper = join(root, 'native/macos/bin/dsh-computer-use-helper')
+  const nativeManifestPath = join(root, 'native/macos/manifest.json')
+  const nativeManifest = JSON.parse(await readFile(nativeManifestPath, 'utf8'))
+  nativeManifest.binary.sha256 = createHash('sha256').update(await readFile(helper)).digest('hex')
+  await writeFile(nativeManifestPath, `${JSON.stringify(nativeManifest, null, 2)}\n`)
+}
 let client = await readFile(join(root, 'lib/client.js'), 'utf8')
 client = client.replaceAll('@anionex/dsh-computer-use', '@e-mate/dsh-plugin-computer-use')
 await writeFile(join(root, 'lib/client.js'), client)

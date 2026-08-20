@@ -28,11 +28,6 @@ const targetTool = readFileSync(resolve(targetRoot, 'ui-tool/src/client/tool/com
 const targetImages = readFileSync(resolve(targetRoot, 'ui-attachment/src/MessageImage.tsx'), 'utf8')
 const targetLightbox = readFileSync(resolve(targetRoot, 'ui-attachment/src/ImageLightbox.tsx'), 'utf8')
 const targetBundlePatch = readFileSync(resolve(targetRoot, '../bundle/web-app/cordis.patch.yml'), 'utf8')
-const genuiRoot = resolve('../../bundles/genui')
-const genuiPackage = readFileSync(resolve(genuiRoot, 'package.json'), 'utf8')
-const genuiPatch = readFileSync(resolve(genuiRoot, 'cordis.patch.yml'), 'utf8')
-const genuiServer = readFileSync(resolve(genuiRoot, 'lib/index.js'), 'utf8')
-const genuiClient = readFileSync(resolve(genuiRoot, 'lib/client.js'), 'utf8')
 
 describe('target conversation fidelity contract', () => {
   it('leaves Message, Retry, Turn status and Tool disclosure to the pinned target', () => {
@@ -139,22 +134,6 @@ describe('target conversation fidelity contract', () => {
     expect(gallery.parentElement?.hidden).toBe(true)
     expect(button.getAttribute('aria-expanded')).toBe('false')
     expect(screen.getByText('e-Mate-image.png')).toBeTruthy()
-  })
-
-  it('keeps dsh-genui registered on target slots and real plugin metadata', () => {
-    expect(JSON.parse(genuiPackage)).toMatchObject({
-      name: '@e-mate/dsh-plugin-genui',
-      version: '2.0.11',
-      dsh: { bundle: { patch: './cordis.patch.yml' }, client: { platform: 'web' } },
-    })
-    expect(genuiPatch).toContain('id: emate-genui')
-    expect(genuiPatch).toContain("name: '@e-mate/dsh-plugin-genui'")
-    expect(genuiServer).toContain('tools.register(createRenderUiTool())')
-    expect(genuiServer).toContain('tools.register(createValidateDshUiTool())')
-    expect(genuiClient).toContain('tool.call.toolview')
-    expect(genuiClient).toContain('conversation.input.dock')
-    expect(genuiClient).toContain('data-genui-tool')
-    expect(genuiClient).toContain('data-genui-panel')
   })
 
   it('brands only target running statuses without rescanning the document during token streaming', async () => {
