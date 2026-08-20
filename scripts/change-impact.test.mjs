@@ -10,6 +10,7 @@ import {
   ACCEPTED_PREDECESSOR,
   assertAcceptedPredecessor,
   classifyChangedPaths,
+  harnessVersionsFromComponentLock,
   loadReleaseBoundary,
   PRODUCT_UI_REFERENCE,
 } from './change-impact.mjs'
@@ -83,7 +84,8 @@ describe('repository release boundary', () => {
   it('accepts the checked-in base contract and every first-party component', () => {
     const boundary = loadReleaseBoundary(root)
     assert.equal(boundary.valid, true, boundary.errors.join('\n'))
-    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v1-dsh-df78045a127e')
+    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v2-dsh-df78045a127e')
+    assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.11')
     assert.deepEqual(PRODUCT_UI_REFERENCE, {
       repository: 'zyfjacksonchen-source/ECoreX',
       path: 'upstream/e-mate-2.0.5',
@@ -101,6 +103,15 @@ describe('repository release boundary', () => {
     assert.deepEqual(boundary.components.flatMap(component => component.errors), [])
   })
 
+  it('detects a transitive Harness version hidden in a component lock peer context', () => {
+    assert.deepEqual(
+      [...harnessVersionsFromComponentLock(
+        "'@deepseek-ai/dsh-skill-filesystem@0.1.0-rc.7(@deepseek-ai/dsh-home-paths@0.1.0-rc.8)'",
+      )].sort(),
+      ['0.1.0-rc.7', '0.1.0-rc.8'],
+    )
+  })
+
   it('pins the Harness and product UI gitlinks while keeping component changes on the accepted Base SDK key', () => {
     const checkout = mkdtempSync(join(tmpdir(), 'e-mate-impact-checkout-'))
     try {
@@ -110,7 +121,10 @@ describe('repository release boundary', () => {
         'desktop/e-mate-desktop/base-contract.json',
         'desktop/e-mate-desktop/package.json',
         inventoryPath,
-        ...inventory.components.map(component => `${component.root}/package.json`),
+        ...inventory.components.flatMap(component => [
+          `${component.root}/package.json`,
+          ...(component.desktop === 'blocked' ? [] : [`${component.root}/pnpm-lock.yaml`]),
+        ]),
       ]
       for (const file of files) {
         const destination = join(checkout, file)
@@ -153,6 +167,29 @@ describe('repository release boundary', () => {
       writeFileSync(memoryPath, `${JSON.stringify(memoryManifest, null, 2)}\n`)
       assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /outside the fixed Base runtime ABI/u)
       copyFileSync(join(root, 'packages/dsh-plugin-memory-evolve/package.json'), memoryPath)
+
+      const authorityManifest = JSON.parse(readFileSync(memoryPath, 'utf8'))
+      authorityManifest.eMate.component.authority_contract.effects = ['filesystem-root']
+      writeFileSync(memoryPath, `${JSON.stringify(authorityManifest, null, 2)}\n`)
+      assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /authority contract is invalid/u)
+      copyFileSync(join(root, 'packages/dsh-plugin-memory-evolve/package.json'), memoryPath)
+
+      const memoryLockPath = join(checkout, 'packages/dsh-plugin-memory-evolve/pnpm-lock.yaml')
+      writeFileSync(memoryLockPath, [
+        "lockfileVersion: '9.0'",
+        'importers:',
+        '  .:',
+        '    dependencies:',
+        '      shared:',
+        '        specifier: workspace:*',
+        '        version: link:../shared',
+        '',
+      ].join('\n'))
+      assert.match(
+        loadReleaseBoundary(checkout).errors.join('\n'),
+        /must not reference a local or workspace dependency/u,
+      )
+      copyFileSync(join(root, 'packages/dsh-plugin-memory-evolve/pnpm-lock.yaml'), memoryLockPath)
 
       const acceptedBase = baseSdkFingerprint(checkout)
 
@@ -285,6 +322,17 @@ describe('repository release boundary', () => {
       ['packages/dsh-plugin-memory-evolve/src/index.ts', 'desktop/e-mate-desktop/src/main.ts'],
       ['packages/dsh-plugin-memory-evolve/src/index.ts', 'enterprise/apps/auth-gateway/src/index.ts'],
     ]) assert.equal(classify(...paths).lane, 'base', paths.join(', '))
+    assert.equal(classify('packages/dsh-plugin-memory-evolve/pnpm-lock.yaml').lane, 'plugin-only')
+
+    const base = classify('desktop/e-mate-desktop/src/main.ts')
+    assert.deepEqual(base.base_platform_component_jobs, [
+      { component: '@e-mate/dsh-plugin-computer-use', target: 'darwin-arm64', runner: 'macos-15', publish: false },
+      { component: '@e-mate/dsh-plugin-computer-use', target: 'darwin-x64', runner: 'macos-15-intel', publish: false },
+      { component: '@e-mate/dsh-plugin-computer-use', target: 'win32-x64', runner: 'windows-2025', publish: false },
+      { component: '@e-mate/dsh-plugin-vision-toolkit', target: 'darwin-arm64', runner: 'macos-15', publish: false },
+      { component: '@e-mate/dsh-plugin-vision-toolkit', target: 'darwin-x64', runner: 'macos-15-intel', publish: false },
+      { component: '@e-mate/dsh-plugin-vision-toolkit', target: 'win32-x64', runner: 'windows-2025', publish: false },
+    ])
   })
 
   it('admits platform components only through the complete native target matrix', () => {
@@ -323,7 +371,24 @@ describe('repository release boundary', () => {
       publish: true,
     }])
 
-    assert.equal(classify('upstream/plugins/dsh-genui').lane, 'base')
+    const genui = classify('upstream/plugins/dsh-genui')
+    assert.equal(genui.lane, 'plugin-only')
+    assert.deepEqual(genui.components, ['@e-mate/dsh-plugin-genui'])
+    assert.deepEqual(genui.component_jobs, [{
+      component: '@e-mate/dsh-plugin-genui',
+      target: 'portable',
+      runner: 'ubuntu-24.04',
+      publish: true,
+    }])
+
+    const vision = classify('upstream/plugins/dsh-vision-toolkit')
+    assert.equal(vision.lane, 'plugin-only')
+    assert.deepEqual(vision.components, ['@e-mate/dsh-plugin-vision-toolkit'])
+    assert.deepEqual(vision.component_jobs, [
+      { component: '@e-mate/dsh-plugin-vision-toolkit', target: 'darwin-arm64', runner: 'macos-15', publish: true },
+      { component: '@e-mate/dsh-plugin-vision-toolkit', target: 'darwin-x64', runner: 'macos-15-intel', publish: true },
+      { component: '@e-mate/dsh-plugin-vision-toolkit', target: 'win32-x64', runner: 'windows-2025', publish: true },
+    ])
   })
 
   it('keeps the DSH-native CDP adapter in the component lane', () => {
@@ -346,11 +411,16 @@ describe('repository release boundary', () => {
 
   it('makes the required CI admission consume only classifier outputs', () => {
     const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
+    assert.match(workflow, /impact:\n(?:.|\n)*?pnpm\/action-setup@v4(?:.|\n)*?pnpm install --frozen-lockfile --ignore-scripts(?:.|\n)*?Test the fail-closed classifier/u)
     assert.match(workflow, /source:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_base == 'true'/u)
     assert.match(workflow, /plugins:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_plugins == 'true'/u)
     assert.match(workflow, /include: \$\{\{ fromJSON\(needs\.impact\.outputs\.component_jobs_json\) \}\}/u)
+    assert.match(workflow, /base-platform-components:\n(?:.|\n)*?needs: \[impact, source\](?:.|\n)*?include: \$\{\{ fromJSON\(needs\.impact\.outputs\.base_platform_component_jobs_json\) \}\}/u)
+    assert.match(workflow, /name: Prepare the exact component Python runtime(?:.|\n)*?prepare-python-runtime\.mjs --target "\$TARGET"(?:.|\n)*?EMATE_BUILD_PYTHON: \$\{\{ steps\.component-python\.outputs\.python \}\}/u)
+    assert.doesNotMatch(workflow, /python-version: '3\.12\.14'/u)
+    assert.match(workflow, /name: Test the accepted platform component against the new Base\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
     assert.match(workflow, /runs-on: \$\{\{ matrix\.runner \}\}/u)
-    assert.match(workflow, /name: Build and test only the changed component\n\s+shell: bash[^]*?set -euo pipefail[^]*?pnpm --filter "\$COMPONENT" run build/u)
+    assert.match(workflow, /name: Build and test only the changed component\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
     assert.match(workflow, /if: matrix\.publish == true/u)
     assert.match(workflow, /profile-composition:\n(?:.|\n)*?needs: \[impact, plugins\](?:.|\n)*?publish_components_json != '\[\]'(?:.|\n)*?Compose and boot the complete candidate generation/u)
     assert.match(workflow, /node scripts\/base-sdk\.mjs fingerprint/u)
@@ -358,6 +428,7 @@ describe('repository release boundary', () => {
     assert.match(workflow, /if test "\$BASE_SHA" = 0000000000000000000000000000000000000000;(?:.|\n)*?ACCEPTED_PREDECESSOR/u)
     assert.match(workflow, /enterprise:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_enterprise == 'true'/u)
     assert.match(workflow, /admission:\n(?:.|\n)*?case "\$LANE" in(?:.|\n)*?plugin-only\)(?:.|\n)*?test "\$PROFILE" = success(?:.|\n)*?test "\$SOURCE" = skipped(?:.|\n)*?test "\$WINDOWS" = skipped(?:.|\n)*?test "\$MACOS" = skipped/u)
+    assert.match(workflow, /base\)(?:.|\n)*?test "\$BASE_PLATFORM_COMPONENTS" = success/u)
     assert.doesNotMatch(workflow, /^\s+paths(?:-ignore)?:/mu)
   })
 
@@ -370,6 +441,8 @@ describe('repository release boundary', () => {
     assert.match(workflow, /node scripts\/component-release\.mjs inventory > component-inventory\.json/u)
     assert.match(workflow, /Bootstrap complete Profile generation \/ \$\{\{ matrix\.target \}\}/u)
     assert.match(workflow, /node desktop\/e-mate-desktop\/scripts\/verify-profile-boot\.mjs/u)
+    assert.match(workflow, /prepare-python-runtime\.mjs --target "\$TARGET"/u)
+    assert.doesNotMatch(workflow, /python-version: '3\.12\.14'/u)
     assert.match(workflow, /node scripts\/publish-profile-r2\.mjs/u)
     assert.match(workflow, /--bundle dist\/profile-publication/u)
     assert.match(workflow, /e-mate-profile-native-cloudflare-publication-/u)
@@ -379,7 +452,7 @@ describe('repository release boundary', () => {
     assert.match(workflow, /EMATE_ACCEPTED_CI_RUN_ID: \$\{\{ inputs\.ci_run_id \}\}/u)
     assert.match(workflow, /environment: r2-publish/u)
     assert.doesNotMatch(workflow, /ECOREX_R2_ACCESS_KEY_ID|ECOREX_R2_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID/u)
-    assert.match(workflow, /name: Build and test the target component\n\s+shell: bash[^]*?set -euo pipefail[^]*?pnpm --filter "\$COMPONENT" run build/u)
+    assert.match(workflow, /name: Build and test the target component\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
     assert.doesNotMatch(workflow, /pnpm --dir upstream\/deepseek-harness run build/u)
     assert.doesNotMatch(workflow, /yarn (?:build|dist:)/u)
 

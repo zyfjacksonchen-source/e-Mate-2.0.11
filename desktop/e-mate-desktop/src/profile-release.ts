@@ -13,7 +13,7 @@ const COMPONENT_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 const BASE_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u
 const KEY_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u
 const HARNESS_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
-const BASE_RUNTIME_PACKAGE = /^(?:@deepseek-ai\/[a-z0-9][a-z0-9._-]*|react(?:-dom)?)$/u
+const BASE_RUNTIME_PACKAGE = /^(?:@deepseek-ai\/[a-z0-9][a-z0-9._-]*|@e-mate\/desktop\/vision-toolkit|react(?:-dom)?)$/u
 const MAX_BASE_CONTRACT_BYTES = 64 * 1024
 
 export interface ProfileSigningKey {
@@ -87,6 +87,11 @@ export interface SignedProfileRelease {
 
 export type ProfileReleaseSelection = 'update' | 'current' | 'base-required'
 
+/** Return whether a package name is part of the explicitly versioned Base ABI. */
+export function isProfileBaseRuntimePackage(name: string): boolean {
+  return BASE_RUNTIME_PACKAGE.test(name)
+}
+
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -146,7 +151,7 @@ export function parseProfileBaseContract(value: unknown): ProfileBaseContract | 
     || !Array.isArray(value.profile_signing_keys) || value.profile_signing_keys.length === 0) return
 
   const runtimeImports = Object.entries(value.runtime_imports)
-  if (runtimeImports.some(([name, version]) => !BASE_RUNTIME_PACKAGE.test(name)
+  if (runtimeImports.some(([name, version]) => !isProfileBaseRuntimePackage(name)
     || typeof version !== 'string' || !HARNESS_VERSION.test(version))
     || runtimeImports.some(([name], index) => index > 0 && runtimeImports[index - 1]![0] >= name)) return
 

@@ -24,7 +24,6 @@ export default defineConfig([
       'update-download': 'src/update-download.ts',
       updates: 'src/updates.ts',
       'agent-update': 'src/agent-update.ts',
-      'computer-use-setup': 'src/computer-use-setup.ts',
       'mac-update-installer': 'src/mac-update-installer.ts',
       'mac-update-helper': 'src/mac-update-helper.ts',
       'vision-toolkit': 'src/vision-toolkit.ts',

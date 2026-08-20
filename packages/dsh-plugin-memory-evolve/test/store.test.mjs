@@ -38,10 +38,18 @@ test('Cordis adapter registers only Harness prompt and Tool seams', async () => 
   const tools = []
   const sections = []
   const services = new Map()
+  const questions = []
+  let approve = true
   const ctx = {
     workspaceRegistry: { resolveByPath: async () => undefined },
     storageDomain: {
       open: async () => ({ table: () => table, close: async () => {} }),
+    },
+    userQuestions: {
+      ask: async request => {
+        questions.push(request)
+        return { answers: [{ id: request.questions[0].id, selected: [approve ? '保存' : '取消'] }] }
+      },
     },
     tools: { register: definition => { tools.push(definition); return () => {} } },
     systemPrompt: { section: section => { sections.push(section); return () => {} } },
@@ -57,8 +65,15 @@ test('Cordis adapter registers only Harness prompt and Tool seams', async () => 
   assert.deepEqual(tools[0].parameters.required, ['content'])
   assert.deepEqual(tools[1].output.schema.required, ['items'])
 
-  const exec = execution('general')
+  const exec = { ...execution('general'), signal: new AbortController().signal }
   await tools[0].execute({ content: 'tool memory' }, exec)
+  assert.equal(questions.length, 1)
+  assert.equal(questions[0].agent, exec.agent)
+  assert.equal(questions[0].signal, exec.signal)
+  assert.equal(questions[0].questions[0].detail, 'tool memory')
+  assert.deepEqual((await tools[1].execute({}, exec)).items.map(item => item.content), ['tool memory'])
+  approve = false
+  await assert.rejects(tools[0].execute({ content: 'not saved' }, exec), /cancelled by the user/u)
   assert.deepEqual((await tools[1].execute({}, exec)).items.map(item => item.content), ['tool memory'])
   await assert.rejects(tools[0].execute({ content: 'x', extra: true }, exec), /arguments are invalid/)
 })

@@ -12,7 +12,7 @@ import type { ProfileBaseContract, ProfileReleaseComponent } from '../src/profil
 
 const base: ProfileBaseContract = {
   schema_version: 1,
-  id: 'e-mate-desktop-profile-v1-dsh-df78045a127e',
+  id: 'e-mate-desktop-profile-v2-dsh-df78045a127e',
   desktop_api: 1,
   profile_format: 1,
   harness_version: '0.1.0-rc.7',
@@ -34,6 +34,7 @@ const packageValue = {
       id: '@e-mate/dsh-plugin-memory-evolve',
       kind: 'profile',
       base_imports: [],
+      authority_contract: { effects: ['persistent-state'], guards: ['native-user-question'] },
       base_contracts: [base.id],
     },
   },
@@ -76,6 +77,7 @@ function fixture(options: {
     source_commit: sourceCommit,
     base_contracts: [base.id],
     base_imports: [],
+    authority_contract: packageValue.eMate.component.authority_contract,
     harness_contract: { version: base.harness_version, commit: base.harness_commit },
     package_entry: packageValue.main,
     dsh: packageValue.dsh,
@@ -109,7 +111,19 @@ afterEach(async () => {
 })
 
 describe('Profile component materialization', () => {
-  it('rejects native binaries in portable components and outside a platform closure', async () => {
+  it('accepts only the signed component authority vocabulary', () => {
+    const { reference, objects } = fixture()
+    const manifestBytes = objects.get(reference.manifest_url)!
+    expect(parseProfileComponentManifest(manifestBytes, reference, base)?.authority_contract).toEqual({
+      effects: ['persistent-state'],
+      guards: ['native-user-question'],
+    })
+    const manifest = JSON.parse(manifestBytes.toString())
+    manifest.authority_contract.effects = ['filesystem-root']
+    expect(parseProfileComponentManifest(Buffer.from(JSON.stringify(manifest)), reference, base)).toBeUndefined()
+  })
+
+  it('rejects native binaries and wheels in portable components and outside a platform closure', async () => {
     const elf = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00])
     const portableRoot = await mkdtemp(join(tmpdir(), 'e-mate-portable-native-'))
     temporary.push(portableRoot)
@@ -123,6 +137,19 @@ describe('Profile component materialization', () => {
         return bytes === undefined ? new Response(null, { status: 404 }) : new Response(Uint8Array.from(bytes).buffer)
       },
     })).rejects.toThrow('portable component contains a native binary')
+
+    const portableWheelRoot = await mkdtemp(join(tmpdir(), 'e-mate-portable-wheel-'))
+    temporary.push(portableWheelRoot)
+    const portableWheel = fixture({ extraFiles: new Map([['runtime/wheels/native.whl', Buffer.from('PK\u0003\u0004')]]) })
+    await expect(materializeProfileComponent({
+      destination: join(portableWheelRoot, 'component'),
+      reference: portableWheel.reference,
+      base,
+      request: async url => {
+        const bytes = portableWheel.objects.get(url)
+        return bytes === undefined ? new Response(null, { status: 404 }) : new Response(Uint8Array.from(bytes).buffer)
+      },
+    })).rejects.toThrow('portable component contains a platform wheel')
 
     const pe = Buffer.alloc(68)
     pe.write('MZ', 0, 'ascii')
@@ -207,7 +234,7 @@ describe('Profile component materialization', () => {
         license: 'MIT',
         main: 'index.mjs',
         dsh,
-        eMate: { component: { schema_version: 1, id, kind: 'platform-profile', base_imports: [], base_contracts: [base.id] } },
+        eMate: { component: { schema_version: 1, id, kind: 'platform-profile', base_imports: [], authority_contract: { effects: [], guards: [] }, base_contracts: [base.id] } },
       }, null, 2)}\n`)
       const payload = new Map<string, { bytes: Buffer, mode: '0644' | '0755' }>([
         ['index.mjs', { bytes: indexBytes, mode: '0644' }],
@@ -230,6 +257,7 @@ describe('Profile component materialization', () => {
         source_commit: sourceCommit,
         base_contracts: [base.id],
         base_imports: [],
+        authority_contract: { effects: [], guards: [] },
         harness_contract: { version: base.harness_version, commit: base.harness_commit },
         package_entry: 'index.mjs',
         dsh,

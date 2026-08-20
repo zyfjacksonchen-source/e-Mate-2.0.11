@@ -365,7 +365,6 @@ test('managed profile installation is idempotent', () => {
       '@e-mate/dsh-plugin-memory-evolve',
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-search-mcp',
-      '@e-mate/dsh-plugin-vision-toolkit',
     ]
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
@@ -473,7 +472,7 @@ test('managed profile installation is idempotent', () => {
     assert.doesNotMatch(patch, /emate-(?:office-ocr|browser-computer-use|memory|dream|learning)/)
     assert.match(patch, /id: emate-model-policy[\s\S]*\.\/plugins\/model-policy\.js[\s\S]*inject: \[apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity\]/)
     assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, emateModelPolicy, emateIdentity\]/)
-    assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*inject: \[tools, jobs, attachments, emateIdentity, emateModelPolicy, emateCapabilities\][\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
+    assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*inject: \[tools, jobs, attachments, sandboxPolicy, emateIdentity, emateModelPolicy, emateCapabilities\][\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
     assert.match(patch, /id: emate-legacy-migration[\s\S]*\.\/plugins\/legacy-migration\.js[\s\S]*inject: \[sessionPersistence, webServer\]/)
     assert.match(patch, /id: emate-schedule-import[\s\S]*\.\/plugins\/schedule-import\.js[\s\S]*inject: \[tools\]/)
     assert.ok(readFileSync(join(first.profile, 'plugins', 'agent-operations.js')).byteLength > 0)
@@ -903,7 +902,7 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
     const visible = new Set([
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-search-mcp',
-      '@e-mate/dsh-plugin-vision-toolkit',
+      '@e-mate/dsh-plugin-cdp',
     ])
     const packages = [
       '@e-mate/dsh-plugin-better-sidebar',
@@ -916,7 +915,6 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
       '@e-mate/dsh-plugin-memory-evolve',
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-search-mcp',
-      '@e-mate/dsh-plugin-vision-toolkit',
     ]
     for (const name of packages) {
       const pluginRoot = join(paths.profile, 'node_modules', ...name.split('/'))
@@ -952,16 +950,26 @@ test('capability registry projects only registered plugin metadata and actions',
     summary: 'Create and edit documents.',
     icon_key: 'office',
     order: 20,
-    actions: [{ id: 'setup', label: '设置', kind: 'primary' }],
-    status: async () => ({ state: 'setup-required', detail: '首次使用需要配置。', action_ids: ['setup'] }),
+    actions: [
+      { id: 'setup', label: '设置', kind: 'primary' },
+      { id: 'credential', label: '配置凭据', kind: 'primary', input: 'credential' },
+    ],
+    status: async () => ({
+      state: 'setup-required', detail: '首次使用需要配置。',
+      action_ids: ['setup', 'credential'], credential_refs: { credential: 'OFFICE_API_KEY' },
+    }),
     invoke: async (action, data) => ({ action, data, accepted: true }),
   })
   const listed = await handler('list', {})
   assert.equal(listed.value.schema_version, 1)
   assert.deepEqual(listed.value.items.map(item => [item.id, item.state]), [['office', 'setup-required']])
   assert.equal(listed.value.items[0].icon_key, 'office')
+  assert.deepEqual(listed.value.items[0].actions[1], {
+    id: 'credential', label: '配置凭据', kind: 'primary', input: 'credential', credential_ref: 'OFFICE_API_KEY',
+  })
   const acted = await handler('action', { capability_id: 'office', action_id: 'setup', data: { source: 'user' } })
   assert.deepEqual(acted.value.result, { action: 'setup', data: { source: 'user' }, accepted: true })
+  assert.equal((await handler('action', { capability_id: 'office', action_id: 'credential', data: { secret: 'must-not-pass' } })).error.code, 'bad-request')
   assert.equal((await handler('action', { capability_id: 'office', action_id: 'missing', data: {} })).error.code, 'bad-request')
   assert.throws(() => registry.register({
     id: 'bad-icon', title: 'Bad', summary: 'Bad icon.', icon_key: 'emoji', order: 99,
@@ -1125,6 +1133,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const controllers = []
     const capabilities = []
     const policyModels = []
+    let sandboxMode = 'read-only'
     let preStep
     const modelPolicy = { assertModel: async model => { policyModels.push(model) } }
     const pluginCtx = {
@@ -1149,6 +1158,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         },
       },
       attachments: context.attachments,
+      sandboxPolicy: { resolve: () => ({ mode: sandboxMode, workspaceRoot: temporary }) },
       get: name => name === 'emateIdentity'
         ? identity
         : name === 'emateModelPolicy'
@@ -1342,6 +1352,12 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       }],
     })
     const imagePack = tools.get('image_pack')
+    await assert.rejects(
+      imagePack.execute({ image_url: [attachmentId, second.attachmentId] }, execution()),
+      /read-only sandbox policy/u,
+    )
+    assert.equal(existsSync(join(temporary, '.e-mate', 'images')), false)
+    sandboxMode = 'workspace-write'
     const packed = await imagePack.execute({ image_url: [attachmentId, second.attachmentId] }, execution())
     assert.equal(packed.image_count, 2)
     assert.match(packed.relative_path, /^\.e-mate\/images\/e-Mate-images-[0-9a-f]{12}\.zip$/u)
@@ -1354,6 +1370,11 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       locations: [{ path: packed.relative_path }],
     })
     assert.match(imagePack.output.render({}, packed)[0].text, /2 张图片打包到本地产物/u)
+    sandboxMode = 'danger-full-access'
+    assert.deepEqual(
+      await imagePack.execute({ image_url: [attachmentId, second.attachmentId] }, execution()),
+      packed,
+    )
 
     sessionMessages.push({
       id: 'new-variants-message', role: 'user', source: { kind: 'user' },

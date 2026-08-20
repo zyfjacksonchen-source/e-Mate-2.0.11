@@ -19,6 +19,7 @@
   },
   "files": [
     "lib",
+    "pnpm-lock.yaml",
     "cordis.patch.yml",
     "README.md",
     "SOURCE.md",
@@ -32,9 +33,20 @@
     "directory": "packages/dsh-plugin-cdp"
   },
   "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-settings": "0.1.0-rc.7",
+    "@deepseek-ai/schemastery": "3.18.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-brand": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-invariants": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-settings": "0.1.0-rc.7",
+    "@deepseek-ai/schemastery": "3.18.1"
+  },
   "scripts": {
     "build": "../../upstream/deepseek-harness/node_modules/.bin/tsdown",
-    "test": "pnpm run build && node --test test/*.test.mjs",
+    "test": "node --test test/*.test.mjs",
     "prepack": "pnpm run build"
   },
   "dsh": {
@@ -45,8 +57,12 @@
       "schema_version": 1,
       "id": "@e-mate/dsh-plugin-cdp",
       "kind": "profile",
-      "base_imports": [],
-      "base_contracts": ["e-mate-desktop-profile-v1-dsh-df78045a127e"]
+      "base_imports": ["@deepseek-ai/dsh-settings", "@deepseek-ai/schemastery"],
+      "authority_contract": {
+        "effects": ["browser-control", "browser-read", "network-loopback"],
+        "guards": ["explicit-user-action", "fixed-endpoint", "native-approval", "native-user-question", "plugin-settings-grant", "session-scope"]
+      },
+      "base_contracts": ["e-mate-desktop-profile-v2-dsh-df78045a127e"]
     },
     "harnessVersion": "0.1.0-rc.7",
     "harnessCommit": "df78045a127e32cb5b942defba52c539590d1596"

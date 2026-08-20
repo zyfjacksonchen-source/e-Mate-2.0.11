@@ -12,7 +12,7 @@ await rm(output, { recursive: true, force: true })
 await mkdir(output, { recursive: true })
 await cp(resolve(source, 'lib'), output, { recursive: true })
 
-for (const relative of ['index.js', 'client.js']) {
+for (const relative of ['index.js', 'client.js', 'invariant.js']) {
   const path = resolve(output, relative)
   const built = await readFile(path, 'utf8')
   await writeFile(path, built.replaceAll(upstreamId, packageId))

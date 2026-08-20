@@ -187,9 +187,7 @@ describe('desktop profile composition', () => {
     expect(rows.find(row => row.id === 'desktop-agent-update')).toEqual(expect.objectContaining({
       name: '@e-mate/desktop/agent-update',
     }))
-    expect(rows.find(row => row.id === 'desktop-computer-use-setup')).toEqual(expect.objectContaining({
-      name: '@e-mate/desktop/computer-use-setup',
-    }))
+    expect(rows.map(row => row.id)).not.toContain('desktop-computer-use-setup')
     expect(rows.map(row => row.id)).not.toContain('desktop-profiles')
   })
 

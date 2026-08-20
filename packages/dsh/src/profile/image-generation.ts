@@ -5,7 +5,7 @@ import { zipSync } from 'fflate'
 import { loadTargetLlm, loadTargetTools } from './target-runtime.js'
 
 export const name = 'emate-image-generation'
-export const inject = ['tools', 'jobs', 'attachments', 'emateIdentity', 'emateModelPolicy', 'emateCapabilities']
+export const inject = ['tools', 'jobs', 'attachments', 'sandboxPolicy', 'emateIdentity', 'emateModelPolicy', 'emateCapabilities']
 
 interface ImageOutputEventData {
   readonly call_id: string
@@ -345,6 +345,14 @@ async function createImagePack(ctx, agent, args, signal) {
   return { bytes: data.byteLength, image_count: refs.length, relative_path: relativePath }
 }
 
+function assertImagePackWrite(ctx, agent) {
+  const session = agent?.session
+  if (session === undefined) throw new Error('image packaging requires an owning Agent session')
+  if (ctx.sandboxPolicy.resolve({ session }).mode === 'read-only') {
+    throw new Error('image packaging is blocked by the current read-only sandbox policy')
+  }
+}
+
 function detectedImage(data) {
   if (data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
     return { mediaType: 'image/png', extension: 'png' }
@@ -600,6 +608,7 @@ export async function apply(ctx, config = {}) {
     timeoutMs: 120_000,
     async execute(args, exec) {
       exec.signal.throwIfAborted()
+      assertImagePackWrite(ctx, exec.agent)
       return await createImagePack(ctx, exec.agent, args, exec.signal)
     },
     presentCall: args => {

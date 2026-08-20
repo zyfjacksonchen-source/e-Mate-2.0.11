@@ -15,15 +15,18 @@ import { CapabilitiesPage, CapabilityControl } from './capabilities.tsx'
 export const inject = ['slots', 'connection']
 
 export function apply(ctx: any): void {
+  const connection = ctx.get('connection')
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay',
     id: 'e-mate-capabilities',
     order: -10,
     inject: () => ({
       callCapabilities: (endpoint: string, payload: Record<string, unknown>) =>
-        ctx.connection.rpc.call('/emate.capabilities', endpoint, payload),
+        connection.rpc.call('/emate.capabilities', endpoint, payload),
       callSkillHub: (endpoint: string, payload: Record<string, unknown>) =>
-        ctx.connection.rpc.call('/emate.skillHub', endpoint, payload),
+        connection.rpc.call('/emate.skillHub', endpoint, payload),
+      setCredential: async (ref: string, value: string) =>
+        (await connection.api.credentials.set({ ref, value })).result,
       SearchIcon: IconSearchOutline16,
       DownloadIcon: IconDownloadOutline16,
       CloseIcon: IconCloseOutline16,

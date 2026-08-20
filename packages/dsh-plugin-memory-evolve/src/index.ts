@@ -1,9 +1,16 @@
 import { isAbsolute } from 'node:path'
+import type { UserQuestionService } from '@deepseek-ai/dsh-user-questions'
 import { resolveMemoryScope, type MemoryExecution, type MemoryWorkspaceRegistry } from './scope.ts'
-import { MemoryStore, type MemoryRecord, type MemoryTable } from './store.ts'
+import {
+  MemoryStore,
+  normalizeMemoryRememberInput,
+  type MemoryRecord,
+  type MemoryRememberInput,
+  type MemoryTable,
+} from './store.ts'
 
 export const name = 'emate-memory-evolve'
-export const inject = ['tools', 'systemPrompt', 'workspaceRegistry', 'storageDomain']
+export const inject = ['tools', 'systemPrompt', 'workspaceRegistry', 'storageDomain', 'userQuestions']
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
 const SHA256 = /^[0-9a-f]{64}$/u
@@ -71,6 +78,7 @@ interface MemoryDomain {
 interface MemoryPluginContext {
   readonly workspaceRegistry: MemoryWorkspaceRegistry
   readonly storageDomain: { open(spec: typeof memoryDomain): Promise<MemoryDomain> }
+  readonly userQuestions: UserQuestionService
   readonly tools: { register(definition: unknown): () => void }
   readonly systemPrompt: {
     section(section: { name: string; order: number; text: string }): () => void
@@ -99,16 +107,16 @@ const publicRecordSchema = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-function rememberInput(value: unknown): { content: unknown; tags?: readonly string[] } {
+function rememberInput(value: unknown): MemoryRememberInput {
   if (!isRecord(value)
     || !Object.keys(value).every(key => key === 'content' || key === 'tags')
     || !Object.hasOwn(value, 'content')) {
     throw new Error('e_mate_memory_remember arguments are invalid')
   }
-  return {
+  return normalizeMemoryRememberInput({
     content: value.content,
     ...(value.tags === undefined ? {} : { tags: value.tags as readonly string[] }),
-  }
+  })
 }
 
 function searchInput(value: unknown): { query?: unknown; limit?: unknown } {
@@ -118,6 +126,33 @@ function searchInput(value: unknown): { query?: unknown; limit?: unknown } {
   return {
     ...(value.query === undefined ? {} : { query: value.query }),
     ...(value.limit === undefined ? {} : { limit: value.limit }),
+  }
+}
+
+async function confirmRemember(
+  ctx: MemoryPluginContext,
+  input: MemoryRememberInput,
+  execution: MemoryExecution,
+): Promise<void> {
+  if (execution.agent === undefined) throw new Error('e-Mate memory requires an owning Agent session')
+  const answer = await ctx.userQuestions.ask({
+    agent: execution.agent as never,
+    signal: execution.signal,
+    questions: [{
+      id: 'e-mate-memory-remember',
+      header: '保存记忆',
+      question: '是否将以下内容保存到当前项目或会话记忆？',
+      detail: input.tags.length === 0
+        ? input.content
+        : `${input.content}\n\n标签：${input.tags.join('、')}`,
+      options: [
+        { label: '保存', description: '写入当前项目；未分组会话只写入当前会话。' },
+        { label: '取消', description: '不保存这条记忆。' },
+      ],
+    }],
+  })
+  if (answer.answers[0]?.selected.includes('保存') !== true) {
+    throw new Error('e-Mate memory write was cancelled by the user')
   }
 }
 
@@ -158,7 +193,11 @@ export async function apply(ctx: MemoryPluginContext, config: MemoryConfig = {})
       schema: publicRecordSchema,
       render: (_args: unknown, value: { scope: string; content: string }) => [{ type: 'text', text: `Remembered for this ${value.scope}: ${value.content}` }],
     },
-    execute: async (args: unknown, execution: MemoryExecution) => memory.remember(rememberInput(args), execution),
+    execute: async (args: unknown, execution: MemoryExecution) => {
+      const input = rememberInput(args)
+      await confirmRemember(ctx, input, execution)
+      return memory.remember(input, execution)
+    },
     presentCall: (args: unknown) => isRecord(args) && typeof args.content === 'string'
       ? { card: 'generic', title: 'Remember for this project', kind: 'write', rawInput: args.content }
       : undefined,

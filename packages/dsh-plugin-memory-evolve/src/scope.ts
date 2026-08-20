@@ -19,6 +19,7 @@ export interface MemoryExecution {
     readonly id: string
     readonly session?: { readonly header?: { readonly cwd?: unknown } }
   }
+  readonly signal?: AbortSignal
 }
 
 /** Product-owned workspace that must isolate each attached conversation. */

@@ -74,6 +74,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: |
             pnpm-lock.yaml
+            packages/dsh-plugin-*/pnpm-lock.yaml
+            packages/dsh/profile/plugins/emate-shell/pnpm-lock.yaml
             upstream/deepseek-harness/pnpm-lock.yaml
       - run: |
           pnpm install --frozen-lockfile
@@ -104,11 +106,16 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22.23.2'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
       - run: corepack enable
       - uses: actions/download-artifact@v4
         with:
           name: e-mate-desktop-profile-${{ github.sha }}
           path: packages
+      - name: Prepare the exact offline Windows Vision runtime
+        run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets win32-x64
       - name: Resolve Yarn cache folder
         id: yarn-cache
         shell: bash
@@ -149,6 +156,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22.23.2'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
       - run: corepack enable
       - uses: actions/download-artifact@v4
         with:
@@ -156,6 +166,8 @@ jobs:
           path: packages
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}
+      - name: Prepare the exact offline universal macOS Vision runtime
+        run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets darwin-arm64,darwin-x64
       - name: Resolve Yarn cache folder
         id: yarn-cache
         run: echo "dir=$(cd desktop && yarn config get cacheFolder)" >> "$GITHUB_OUTPUT"

@@ -1,6 +1,6 @@
 /** Headless smoke for the complete published DSH Web profile and renderer manifest. */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,6 +14,7 @@ import {
 } from '@deepseek-ai/dsh-launch-environment'
 import { installDesktopPnpmRuntime } from '../lib/desktop-runtime-environment.js'
 import {
+  emateProfileComponentSources,
   EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
   installEmateDesktopProfile,
 } from '../lib/e-mate-profile.js'
@@ -60,9 +61,9 @@ try {
   // Deliberately inject stale target state: the e-Mate desktop must still boot
   // its fixed compatibility profile without exposing a mode selector.
   writeFileSync(join(home, 'settings.yaml'), 'dsh-desktop:\n  mode: advanced\n')
-  const selectedBase = generationOptions.base === undefined
-    ? undefined
-    : loadProfileBaseContract(generationOptions.base)
+  const selectedBase = loadProfileBaseContract(
+    generationOptions.base ?? fileURLToPath(new URL('../base-contract.json', import.meta.url)),
+  )
   const selectedGeneration = generationOptions.store === undefined
     ? undefined
     : await loadProfileGeneration({
@@ -72,10 +73,21 @@ try {
         expected_component_ids: EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
         target: selectedTarget,
       })
-  installEmateDesktopProfile(home, undefined, selectedGeneration === undefined ? undefined : {
+  const activeProfileGeneration = selectedGeneration === undefined ? undefined : {
     id: selectedGeneration.id,
     componentDirectories: selectedGeneration.component_directories,
-  })
+  }
+  const installedProfile = installEmateDesktopProfile(home, undefined, activeProfileGeneration)
+  const retiredBrowser = /e-Mate 浏览器扩展未连接|chrome:\/\/extensions|load[- ]unpacked|加载已解压|ext-bridge-token|browser-extension|@e-mate\/dsh-plugin-browser(?:-panel)?|@yuxianglin\/dsh-bridge-browser/u
+  for (const relative of readdirSync(installedProfile, { recursive: true })) {
+    if (retiredBrowser.test(relative)) {
+      throw new Error(`assembled Profile contains a retired browser bridge path: ${relative}`)
+    }
+    if (!/\.(?:[cm]?js|html|json|ya?ml)$/u.test(relative)) continue
+    if (retiredBrowser.test(readFileSync(join(installedProfile, relative), 'utf8'))) {
+      throw new Error(`assembled Profile contains retired browser bridge code: ${relative}`)
+    }
+  }
   const prepared = prepareDesktopProfile('1', home, selectedTarget.platform)
   const packageRoot = new URL('../', import.meta.url)
   const pnpmBinPath = fileURLToPath(new URL('node_modules/pnpm/bin/pnpm.mjs', packageRoot))
@@ -92,8 +104,8 @@ try {
   })
   releasePackageResolver = installProfilePackageResolver(
     prepared.bareModuleBaseUrl,
-    selectedGeneration?.component_directories.values(),
-    selectedBase?.runtime_imports,
+    emateProfileComponentSources(activeProfileGeneration),
+    selectedBase.runtime_imports,
   )
   const runtime = {
     platform: selectedTarget.platform,
@@ -212,8 +224,9 @@ try {
     '@e-mate/desktop',
     '@e-mate/dsh-plugin-file-import',
     '@e-mate/dsh-plugin-skill-hub',
+    '@e-mate/dsh-plugin-genui',
+    '@e-mate/dsh-plugin-vision-toolkit',
     '@kelearns/dsh-navigation-bar',
-    '@omdsh-dev/dsh-genui',
     '@deepseek-ai/dsh-client-ui-conversation',
     '@deepseek-ai/dsh-client-ui-layout',
     '@deepseek-ai/dsh-client-ui-sidebar',

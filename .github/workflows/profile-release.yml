@@ -155,7 +155,20 @@ jobs:
           cache: pnpm
           cache-dependency-path: |
             pnpm-lock.yaml
+            packages/dsh-plugin-*/pnpm-lock.yaml
+            packages/dsh/profile/plugins/emate-shell/pnpm-lock.yaml
             upstream/deepseek-harness/pnpm-lock.yaml
+      - name: Prepare the exact component Python runtime
+        id: component-python
+        if: matrix.component == '@e-mate/dsh-plugin-vision-toolkit'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          node desktop/e-mate-desktop/scripts/prepare-python-runtime.mjs --target "$TARGET"
+          relative="desktop/e-mate-desktop/build/python-runtime/$TARGET/python/bin/python3"
+          if [[ "$TARGET" == win32-x64 ]]; then relative="desktop/e-mate-desktop/build/python-runtime/$TARGET/python/python.exe"; fi
+          node -e 'const fs=require("node:fs"),p=require("node:path").resolve(process.argv[1]);if(!fs.existsSync(p))throw new Error(`missing ${p}`);process.stdout.write(`python=${p}\n`)' "$relative" >> "$GITHUB_OUTPUT"
       - name: Install exact component toolchains without building Base
         run: |
           pnpm install --frozen-lockfile
@@ -184,10 +197,10 @@ jobs:
         env:
           COMPONENT: ${{ matrix.component }}
           EMATE_COMPONENT_TARGET: ${{ matrix.target }}
+          EMATE_BUILD_PYTHON: ${{ steps.component-python.outputs.python }}
         run: |
           set -euo pipefail
-          pnpm --filter "$COMPONENT" run build
-          pnpm --filter "$COMPONENT" run test
+          node scripts/component-run.mjs check --component "$COMPONENT"
       - name: Emit the immutable target payload
         shell: bash
         env:

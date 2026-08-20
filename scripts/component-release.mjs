@@ -19,6 +19,7 @@ import { componentJobsFor, loadReleaseBoundary } from './change-impact.mjs'
 const SHA40 = /^[0-9a-f]{40}$/u
 const BUILTIN_MODULES = new Set(builtinModules.flatMap(name => [name, `node:${name}`]))
 const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)(?:\/|$)/u
+const DESKTOP_COMPONENT_IMPORT = '@e-mate/desktop/vision-toolkit'
 let typescript
 
 function runtimeImportParser() {
@@ -123,6 +124,12 @@ export function targetEntries(entries, component, target) {
 
 function packageName(specifier) {
   if (specifier.startsWith('.') || specifier.startsWith('/') || BUILTIN_MODULES.has(specifier)) return
+  if (specifier === '@e-mate/desktop' || specifier.startsWith('@e-mate/desktop/')) {
+    if (specifier !== DESKTOP_COMPONENT_IMPORT) {
+      throw new Error(`unsupported Desktop Base runtime import: ${specifier}`)
+    }
+    return specifier
+  }
   const match = PACKAGE_NAME.exec(specifier)
   if (match === null) throw new Error(`unsupported component runtime import: ${specifier}`)
   return match[0].replace(/\/$/u, '')
@@ -145,6 +152,36 @@ export function componentRuntimeImports(entries) {
     if (source.parseDiagnostics.length > 0) throw new Error(`component runtime JavaScript is invalid: ${entry.path}`)
     const visit = node => {
       let specifier
+      if (ts.isCallExpression(node) && node.arguments.length === 1
+        && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'load'
+        && ts.isPropertyAccessExpression(node.expression.expression)
+        && node.expression.expression.name.text === '__ModuleLoader__'
+        && ts.isIdentifier(node.expression.expression.expression)
+        && node.expression.expression.expression.text === 'window'
+        && ts.isObjectLiteralExpression(node.arguments[0])) {
+        const property = node.arguments[0].properties.find(candidate =>
+          ts.isPropertyAssignment(candidate)
+            && (ts.isIdentifier(candidate.name) || ts.isStringLiteral(candidate.name))
+            && candidate.name.text === 'factory')
+        const factory = property?.initializer
+        const parameter = factory !== undefined
+          && (ts.isArrowFunction(factory) || ts.isFunctionExpression(factory))
+          && factory.parameters.length > 0 && ts.isIdentifier(factory.parameters[0].name)
+          ? factory.parameters[0].name.text
+          : undefined
+        if (parameter !== undefined) {
+          const visitFactory = candidate => {
+            if (ts.isCallExpression(candidate) && ts.isIdentifier(candidate.expression)
+              && candidate.expression.text === parameter && candidate.arguments.length === 1
+              && ts.isStringLiteral(candidate.arguments[0])) {
+              const name = packageName(candidate.arguments[0].text)
+              if (name !== undefined) imports.add(name)
+            }
+            ts.forEachChild(candidate, visitFactory)
+          }
+          visitFactory(factory.body)
+        }
+      }
       if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
         && node.moduleSpecifier !== undefined && ts.isStringLiteral(node.moduleSpecifier)) {
         specifier = node.moduleSpecifier.text
@@ -213,6 +250,10 @@ export function emitComponent(options) {
     source_commit: sourceCommit,
     base_contracts: [...manifest.eMate.component.base_contracts].sort(),
     base_imports: baseImports,
+    authority_contract: {
+      effects: [...component.authority_contract.effects],
+      guards: [...component.authority_contract.guards],
+    },
     harness_contract: {
       version: boundary.baseContract.harness_version,
       commit: boundary.baseContract.harness_commit,
@@ -275,6 +316,7 @@ function main() {
         root: component.root,
         source_roots: component.source_roots,
         base_imports: component.base_imports,
+        authority_contract: component.authority_contract,
         desktop: component.desktop,
         targets: component.targets,
       })),

@@ -596,35 +596,6 @@ describe('Electron compatibility runtime', () => {
     }
   })
 
-  it('registers e-Mate and opens the macOS Accessibility pane when Computer Use needs permission', async () => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
-    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-    const runtime = new ElectronDesktopRuntime(async () => {})
-
-    await expect(runtime.openComputerUseAccessibilitySetup()).resolves.toBe(false)
-
-    expect(electron.systemPreferences.isTrustedAccessibilityClient.mock.calls).toEqual([[false], [true], [false]])
-    expect(electron.shell.openExternal).toHaveBeenCalledWith(
-      'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
-    )
-    expect(electron.notifications.at(-1)?.options).toEqual(expect.objectContaining({
-      title: '请允许 e-Mate 操控电脑',
-    }))
-  })
-
-  it('does not open macOS Settings when Computer Use already has Accessibility permission', async () => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
-    electron.systemPreferences.isTrustedAccessibilityClient.mockReturnValue(true)
-    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-    const runtime = new ElectronDesktopRuntime(async () => {})
-
-    await expect(runtime.openComputerUseAccessibilitySetup()).resolves.toBe(true)
-
-    expect(electron.systemPreferences.isTrustedAccessibilityClient).toHaveBeenCalledOnce()
-    expect(electron.systemPreferences.isTrustedAccessibilityClient).toHaveBeenCalledWith(false)
-    expect(electron.shell.openExternal).not.toHaveBeenCalled()
-  })
-
   it('shows native errors for synchronous and asynchronous terminal launch failures', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)

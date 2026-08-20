@@ -16,7 +16,7 @@ const SHELL_COMPONENT_ROOT = 'packages/dsh/profile/plugins/emate-shell'
 const COMPONENT_INVENTORY_PATH = 'packages/dsh/profile/component-inventory.json'
 const STABLE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u
 const PACKAGE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
-const BASE_RUNTIME_PACKAGE = /^(?:@deepseek-ai\/[a-z0-9][a-z0-9._-]*|react(?:-dom)?)$/u
+const BASE_RUNTIME_PACKAGE = /^(?:@deepseek-ai\/[a-z0-9][a-z0-9._-]*|@e-mate\/desktop\/vision-toolkit|react(?:-dom)?)$/u
 const SHA40 = /^[0-9a-f]{40}$/u
 const PLATFORM_TARGETS = ['darwin-arm64', 'darwin-x64', 'win32-x64']
 const TARGET_RUNNERS = new Map([
@@ -24,6 +24,46 @@ const TARGET_RUNNERS = new Map([
   ['darwin-x64', 'macos-15-intel'],
   ['win32-x64', 'windows-2025'],
 ])
+const COMPONENT_AUTHORITY_EFFECTS = new Set([
+  'browser-control',
+  'browser-read',
+  'credentials-read',
+  'credentials-write',
+  'desktop-restart',
+  'filesystem-read',
+  'filesystem-write',
+  'host-plugin-install',
+  'network-loopback',
+  'network-remote',
+  'os-accessibility',
+  'os-input-control',
+  'os-screen-recording',
+  'persistent-state',
+  'skill-lifecycle',
+  'subprocess',
+])
+const COMPONENT_AUTHORITY_GUARDS = new Set([
+  'atomic-receipt',
+  'authenticated-identity',
+  'enterprise-policy',
+  'explicit-user-action',
+  'fixed-catalog',
+  'fixed-endpoint',
+  'native-approval',
+  'native-user-question',
+  'os-tcc',
+  'plugin-settings-grant',
+  'read-only',
+  'sandbox-policy',
+  'session-scope',
+  'workspace-scope',
+])
+
+export function harnessVersionsFromComponentLock(lock) {
+  return new Set([...lock.matchAll(
+    /@deepseek-ai\/dsh(?:-[a-z0-9._-]+)?@(?:npm:)?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/gu,
+  )].map(match => match[1]))
+}
 
 const BASE_PATHS = [
   '.github/workflows/desktop-release.yml',
@@ -128,6 +168,14 @@ function sortedUniqueStrings(value) {
   return Array.isArray(value)
     && value.every(item => typeof item === 'string' && item !== '')
     && value.every((item, index) => index === 0 || value[index - 1] < item)
+}
+
+function parseAuthorityContract(value) {
+  if (!record(value) || !exactKeys(value, ['effects', 'guards'])
+    || !sortedUniqueStrings(value.effects) || !sortedUniqueStrings(value.guards)
+    || value.effects.some(effect => !COMPONENT_AUTHORITY_EFFECTS.has(effect))
+    || value.guards.some(guard => !COMPONENT_AUTHORITY_GUARDS.has(guard))) return
+  return { effects: [...value.effects], guards: [...value.guards] }
 }
 
 function readJson(path) {
@@ -267,6 +315,22 @@ function validateComponent(root, inventory, baseContract, desktopDependencies) {
   if (!Array.isArray(manifest.files) || manifest.files.length === 0 || manifest.files.some(value => !safeFilesEntry(value))) {
     errors.push('package files must be a non-empty safe allowlist')
   }
+  if (inventory.desktop !== 'blocked' && !manifest.files?.includes('pnpm-lock.yaml')) {
+    errors.push('component package files must bind its independent pnpm-lock.yaml')
+  } else if (inventory.desktop !== 'blocked') {
+    try {
+      const lock = readFileSync(join(root, componentRoot, 'pnpm-lock.yaml'), 'utf8')
+      if (!/^lockfileVersion: '9\.0'$/mu.test(lock)) {
+        errors.push('component pnpm lock is invalid')
+      } else if (/^\s+(?:specifier|version):\s*(?:file:|link:|workspace:)/mu.test(lock)) {
+        errors.push('component pnpm lock must not reference a local or workspace dependency')
+      } else if ([...harnessVersionsFromComponentLock(lock)].some(version => version !== baseContract.harness_version)) {
+        errors.push(`component pnpm lock DSH packages must equal ${String(baseContract.harness_version)}`)
+      }
+    } catch (cause) {
+      errors.push(`component pnpm lock cannot be read: ${cause instanceof Error ? cause.message : String(cause)}`)
+    }
+  }
   if (!safePackageEntry(manifest.main)) errors.push('package main must be a canonical safe component path')
   if (!record(manifest.dsh)
     || (!record(manifest.dsh.bundle) || typeof manifest.dsh.bundle.patch !== 'string')
@@ -279,7 +343,9 @@ function validateComponent(root, inventory, baseContract, desktopDependencies) {
   if (component === undefined) {
     errors.push('eMate.component metadata is missing')
   } else {
-    if (!exactKeys(component, ['schema_version', 'id', 'kind', 'base_imports', 'base_contracts'])) {
+    if (!exactKeys(component, [
+      'schema_version', 'id', 'kind', 'base_imports', 'authority_contract', 'base_contracts',
+    ])) {
       errors.push('component metadata fields are invalid')
     }
     if (component.schema_version !== 1) errors.push('component schema_version must be 1')
@@ -296,6 +362,9 @@ function validateComponent(root, inventory, baseContract, desktopDependencies) {
     } else if (component.base_imports.some(name => !record(baseContract.runtime_imports)
       || !Object.hasOwn(baseContract.runtime_imports, name))) {
       errors.push('component imports a package outside the fixed Base runtime ABI')
+    }
+    if (parseAuthorityContract(component.authority_contract) === undefined) {
+      errors.push('component authority contract is invalid')
     }
   }
   if (desktopDependencies.has(manifest.name)) {
@@ -321,6 +390,7 @@ function validateComponent(root, inventory, baseContract, desktopDependencies) {
     source_roots: inventory.source_roots,
     targets: inventory.targets,
     base_imports: sortedUniqueStrings(component?.base_imports) ? [...component.base_imports] : [],
+    authority_contract: parseAuthorityContract(component?.authority_contract) ?? { effects: [], guards: [] },
     errors,
   }
 }
@@ -346,7 +416,8 @@ export function loadReleaseBoundary(root = resolve(fileURLToPath(new URL('..', i
     }
     if (record(baseContract.runtime_imports)) {
       for (const [name, version] of Object.entries(baseContract.runtime_imports)) {
-        if (desktopDependencies.get(name) !== version) {
+        const installed = name.startsWith(`${desktop.name}/`) ? desktop.version : desktopDependencies.get(name)
+        if (installed !== version) {
           errors.push(`desktop/e-mate-desktop/package.json: Base runtime import ${name} must equal ${String(version)}`)
         }
       }
@@ -422,6 +493,16 @@ export function componentJobsFor(boundary, componentIds, publishIds = []) {
   })
 }
 
+/** Validate every accepted platform component against a newly built Base. */
+export function basePlatformComponentJobsFor(boundary) {
+  return componentJobsFor(
+    boundary,
+    boundary.components
+      .filter(component => component.desktop === 'platform-profile')
+      .map(component => component.id),
+  )
+}
+
 function classifyPath(path, boundary) {
   const component = componentForPath(path, boundary.components)
   if (component !== undefined) {
@@ -477,6 +558,7 @@ export function classifyChangedPaths(paths, options = {}) {
     item.kind === 'component' && item.component !== undefined ? [item.component] : []
   )))].sort()
   const componentJobs = componentJobsFor(boundary, components, publishComponents)
+  const basePlatformComponentJobs = basePlatformComponentJobsFor(boundary)
   const hasComponentWork = kinds.has('component') || kinds.has('component-test')
   let lane
   if (!boundary.valid || kinds.has('base') || hasComponentWork && kinds.has('enterprise')) lane = 'base'
@@ -485,10 +567,29 @@ export function classifyChangedPaths(paths, options = {}) {
   else if (kinds.has('verification')) lane = 'verification-only'
   else if (kinds.has('docs')) lane = 'docs-only'
   else lane = 'none'
-  return result({ lane, normalized, classifications, components, componentJobs, publishComponents, boundary })
+  return result({
+    lane,
+    normalized,
+    classifications,
+    components,
+    componentJobs,
+    basePlatformComponentJobs,
+    publishComponents,
+    boundary,
+  })
 }
 
-function result({ lane, normalized, classifications, components, componentJobs = [], publishComponents = [], boundary, error }) {
+function result({
+  lane,
+  normalized,
+  classifications,
+  components,
+  componentJobs = [],
+  basePlatformComponentJobs = [],
+  publishComponents = [],
+  boundary,
+  error,
+}) {
   return {
     schema_version: 1,
     lane,
@@ -498,6 +599,7 @@ function result({ lane, normalized, classifications, components, componentJobs =
     run_verification: lane !== 'none',
     components,
     component_jobs: componentJobs,
+    base_platform_component_jobs: basePlatformComponentJobs,
     publish_components: publishComponents,
     changed_paths: normalized,
     classifications,
@@ -517,6 +619,7 @@ function failureResult(paths, error) {
     classifications: [{ kind: 'base', path: '<classifier>', reason: error }],
     components: [],
     componentJobs: [],
+    basePlatformComponentJobs: [],
     publishComponents: [],
     error,
   })
@@ -577,6 +680,7 @@ function writeGithubOutput(path, value) {
     `run_verification=${String(value.run_verification)}`,
     `components_json=${JSON.stringify(value.components)}`,
     `component_jobs_json=${JSON.stringify(value.component_jobs)}`,
+    `base_platform_component_jobs_json=${JSON.stringify(value.base_platform_component_jobs)}`,
     `publish_components_json=${JSON.stringify(value.publish_components)}`,
     `result_json=${JSON.stringify(value)}`,
     '',

@@ -34,8 +34,8 @@ describe('component payload closure', () => {
       encoding: 'utf8',
     }))
     const accepted = inventory.components.filter(component => component.desktop !== 'blocked')
-    assert.equal(accepted.length, 11)
-    assert.equal(inventory.component_jobs.length, 13)
+    assert.equal(accepted.length, 13)
+    assert.equal(inventory.component_jobs.length, 17)
     assert.deepEqual(
       [...new Set(inventory.component_jobs.map(job => job.component))].sort(),
       accepted.map(component => component.id).sort(),
@@ -54,6 +54,14 @@ describe('component payload closure', () => {
         {
           id: '@e-mate/dsh-plugin-find-skill',
           source_roots: ['upstream/plugins/dsh-find-skill'],
+        },
+        {
+          id: '@e-mate/dsh-plugin-genui',
+          source_roots: ['upstream/plugins/dsh-genui'],
+        },
+        {
+          id: '@e-mate/dsh-plugin-vision-toolkit',
+          source_roots: ['upstream/plugins/dsh-vision-toolkit'],
         },
       ],
     )
@@ -99,6 +107,37 @@ describe('component payload closure', () => {
       '@deepseek-ai/dsh-tools',
       'react',
     ])
+  })
+
+  it('extracts imports from the exact DSH client ModuleLoader factory boundary', {
+    skip: !componentRuntimeParserAvailable() && 'Harness toolchain is intentionally absent in the impact lane',
+  }, () => {
+    assert.deepEqual(componentRuntimeImports([{
+      path: 'lib/client.js',
+      source: join(repositoryRoot, 'upstream/plugins/dsh-genui/lib/client.js'),
+    }]), [
+      '@deepseek-ai/dsh-client-ui-primitives',
+      'react',
+      'react-dom',
+    ])
+  })
+
+  it('allows only the declared Desktop component seam', {
+    skip: !componentRuntimeParserAvailable() && 'Harness toolchain is intentionally absent in the impact lane',
+  }, () => {
+    const allowed = join(root, 'desktop-allowed.js')
+    writeFileSync(allowed, 'import { bundledPythonPath } from "@e-mate/desktop/vision-toolkit"\n')
+    assert.deepEqual(componentRuntimeImports([{ path: 'lib/index.js', source: allowed }]), [
+      '@e-mate/desktop/vision-toolkit',
+    ])
+    for (const specifier of ['@e-mate/desktop', '@e-mate/desktop/updates', '@e-mate/desktop/terminal']) {
+      const rejected = join(root, `desktop-rejected-${specifier.split('/').at(-1)}.js`)
+      writeFileSync(rejected, `import ${JSON.stringify(specifier)}\n`)
+      assert.throws(
+        () => componentRuntimeImports([{ path: 'lib/index.js', source: rejected }]),
+        /unsupported Desktop Base runtime import/u,
+      )
+    }
   })
 
   it('declares the real Shell package entry in its component allowlist', () => {

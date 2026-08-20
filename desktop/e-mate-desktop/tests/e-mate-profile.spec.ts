@@ -30,21 +30,21 @@ describe('e-Mate desktop profile', () => {
       '@deepseek-ai/dsh-web-app',
       ...EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS.filter(id => id.startsWith('@e-mate/dsh-plugin-')),
       '@kelearns/dsh-navigation-bar',
-      '@omdsh-dev/dsh-genui',
       'dsh-at-file',
       'dsh-file-viewer',
       'dsh-turn-fold',
       'dsh-visualize',
     ])
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-im')
-    expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-vision-toolkit')
+    expect(manifest.dsh.profile.bundles).toContain('@e-mate/dsh-plugin-vision-toolkit')
     expect(manifest.dsh.profile.bundles).toContain('@e-mate/dsh-plugin-better-sidebar')
-    expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-genui')
+    expect(manifest.dsh.profile.bundles).toContain('@e-mate/dsh-plugin-genui')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-xin-assistant')
     expect(manifest.dsh.profile.bundles).not.toContain('dsh-search-mcp')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-subagent')
     expect(existsSync(join(profile, 'node_modules', '@kelearns', 'dsh-navigation-bar', 'lib', 'client.js'))).toBe(true)
-    expect(existsSync(join(profile, 'node_modules', '@omdsh-dev', 'dsh-genui', 'lib', 'client.js'))).toBe(true)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-genui', 'lib', 'client.js'))).toBe(true)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-vision-toolkit', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-cdp', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-skill-hub', 'lib', 'index.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-file-import', 'lib', 'client.js'))).toBe(true)
@@ -88,6 +88,11 @@ describe('e-Mate desktop profile', () => {
     expect(turnFoldClient).not.toMatch(/首 token|缓存命中|tok\/s|消耗.*token/u)
     expect(existsSync(join(profile, 'node_modules', 'dsh-visualize', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(home, 'browser-extension'))).toBe(false)
+    mkdirSync(join(home, 'browser-extension'))
+    writeFileSync(join(home, 'ext-bridge-token'), 'retired-token')
+    installEmateDesktopProfile(home)
+    expect(existsSync(join(home, 'browser-extension'))).toBe(false)
+    expect(existsSync(join(home, 'ext-bridge-token'))).toBe(false)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-browser'))).toBe(false)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-browser-panel'))).toBe(false)
     expect(existsSync(join(profile, 'plugins', 'runtime-binding.json'))).toBe(true)
@@ -111,16 +116,19 @@ describe('e-Mate desktop profile', () => {
       name: '@e-mate/desktop/agent-update',
     }))
     expect(rows.find(row => row.id === 'desktop-agent-update')?.disabled).not.toBe(true)
-    expect(rows.find(row => row.id === 'desktop-computer-use-setup')).toEqual(expect.objectContaining({
-      name: '@e-mate/desktop/computer-use-setup',
-    }))
+    expect(rows.map(row => row.id)).not.toContain('desktop-computer-use-setup')
     expect(rows.find(row => row.id === 'emate-cdp')).toEqual(expect.objectContaining({
       name: './node_modules/@e-mate/dsh-plugin-cdp/lib/index.mjs',
     }))
     expect(rows.map(row => row.id)).not.toContain('bridge-browser')
-    expect(rows.find(row => row.id === 'genui')).toEqual(expect.objectContaining({
-      name: '@omdsh-dev/dsh-genui',
+    expect(rows.find(row => row.id === 'emate-genui')).toEqual(expect.objectContaining({
+      name: '@e-mate/dsh-plugin-genui',
     }))
+    expect(rows.map(row => row.id)).not.toContain('genui')
+    expect(rows.find(row => row.id === 'vision-toolkit')).toEqual(expect.objectContaining({
+      name: '@e-mate/dsh-plugin-vision-toolkit',
+    }))
+    expect(rows.map(row => row.id)).not.toContain('desktop-vision-toolkit')
     expect(rows.find(row => row.id === 'dsh-navigation-bar')).toEqual(expect.objectContaining({
       name: '@kelearns/dsh-navigation-bar',
     }))

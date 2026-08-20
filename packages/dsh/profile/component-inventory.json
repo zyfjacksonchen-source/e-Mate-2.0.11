@@ -81,8 +81,9 @@
     {
       "id": "@e-mate/dsh-plugin-genui",
       "root": "packages/dsh-plugin-genui",
+      "source_roots": ["upstream/plugins/dsh-genui"],
       "kind": "profile",
-      "desktop": "blocked",
+      "desktop": "hot-profile",
       "cli": true
     },
     {
@@ -116,9 +117,36 @@
     {
       "id": "@e-mate/dsh-plugin-vision-toolkit",
       "root": "packages/dsh-plugin-vision-toolkit",
-      "kind": "profile",
-      "desktop": "blocked",
-      "cli": true
+      "source_roots": ["upstream/plugins/dsh-vision-toolkit"],
+      "kind": "platform-profile",
+      "desktop": "platform-profile",
+      "cli": false,
+      "targets": [
+        {
+          "platform": "darwin",
+          "arch": "arm64",
+          "runtime_abi": "cpython-3.12",
+          "minimum_os": "13.0",
+          "signing": { "scheme": "adhoc", "identity": "adhoc" },
+          "native_paths": ["runtime/wheels/darwin-arm64"]
+        },
+        {
+          "platform": "darwin",
+          "arch": "x64",
+          "runtime_abi": "cpython-3.12",
+          "minimum_os": "13.0",
+          "signing": { "scheme": "adhoc", "identity": "adhoc" },
+          "native_paths": ["runtime/wheels/darwin-x64"]
+        },
+        {
+          "platform": "win32",
+          "arch": "x64",
+          "runtime_abi": "cpython-3.12",
+          "minimum_os": "10.0",
+          "signing": { "scheme": "unsigned", "identity": "none" },
+          "native_paths": ["runtime/wheels/win32-x64"]
+        }
+      ]
     },
     {
       "id": "@e-mate/dsh-plugin-xin-assistant",

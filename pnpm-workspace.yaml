@@ -1,5 +1,4 @@
 packages:
-  - packages/*
-  - packages/dsh/profile/plugins/*
+  - packages/dsh
 
 onlyBuiltDependencies: []

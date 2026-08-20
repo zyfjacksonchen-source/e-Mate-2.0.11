@@ -18,3 +18,6 @@ packages/dsh/profile/plugins/emate-shell/index.js
 packages/dsh/profile/plugins/emate-shell/lib/
 packages/dsh/profile/bundles/
 packages/dsh-plugin-*/lib/
+packages/dsh-plugin-vision-toolkit/.build/
+packages/dsh-plugin-vision-toolkit/.test-lib/
+packages/dsh-plugin-vision-toolkit/runtime/wheels/

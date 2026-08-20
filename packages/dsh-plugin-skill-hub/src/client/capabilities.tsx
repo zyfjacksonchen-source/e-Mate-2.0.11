@@ -46,7 +46,15 @@ interface BuiltinCapability {
   order: number
   state: 'ready' | 'setup-required' | 'blocked' | 'failed'
   detail?: string
-  actions: Array<{ id: string; label: string; kind: 'primary' | 'secondary' }>
+  actions: CapabilityAction[]
+}
+
+interface CapabilityAction {
+  id: string
+  label: string
+  kind: 'primary' | 'secondary'
+  input?: 'credential'
+  credential_ref?: string
 }
 
 interface RpcResult {
@@ -58,6 +66,7 @@ interface RpcResult {
 interface Props {
   callCapabilities: (endpoint: string, payload: Record<string, unknown>) => Promise<RpcResult>
   callSkillHub: (endpoint: string, payload: Record<string, unknown>) => Promise<RpcResult>
+  setCredential: (ref: string, value: string) => Promise<RpcResult>
   SearchIcon: ComponentType<{ size?: number }>
   DownloadIcon: ComponentType<{ size?: number }>
   CloseIcon: ComponentType<{ size?: number }>
@@ -192,6 +201,7 @@ export function CapabilityControl({ wide, SkillIcon }: ControlProps) {
 export function CapabilitiesPage({
   callCapabilities,
   callSkillHub,
+  setCredential,
   SearchIcon,
   DownloadIcon,
   CloseIcon,
@@ -224,6 +234,8 @@ export function CapabilitiesPage({
   const [selectedCard, setSelectedCard] = useState<SkillCard | null>(null)
   const [detail, setDetail] = useState<SkillDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [credentialAction, setCredentialAction] = useState<{ capability: BuiltinCapability; action: CapabilityAction } | null>(null)
+  const [credentialValue, setCredentialValue] = useState('')
 
   useEffect(() => {
     const sync = () => {
@@ -416,6 +428,42 @@ export function CapabilitiesPage({
     if (succeeded) await loadCatalog(query)
   }
 
+  const beginCapabilityAction = (capability: BuiltinCapability, action: CapabilityAction) => {
+    if (action.input !== 'credential') {
+      void runCapabilityAction(capability, action.id)
+      return
+    }
+    if (typeof action.credential_ref !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(action.credential_ref)) {
+      setError('能力返回了无效的凭据引用。')
+      return
+    }
+    setCredentialValue('')
+    setCredentialAction({ capability, action })
+  }
+
+  const storeCredential = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (credentialAction === null || loading) return
+    const value = credentialValue.trim()
+    if (value.length === 0 || value.length > 16 * 1024 || /[\r\n]/u.test(value)) {
+      setError('凭据必须是 1–16384 个不含换行的字符。')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      rpcValue(await setCredential(credentialAction.action.credential_ref!, value), '凭据写入失败。')
+      setCredentialValue('')
+      setCapabilityNotice(`${credentialAction.capability.title} 凭据已安全保存。`)
+      setCredentialAction(null)
+      await loadCatalog(query)
+    } catch (credentialError) {
+      setError(message(credentialError))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const openDetail = async (card: SkillCard) => {
     detailSlug.current = card.slug
     setSelectedCard(card)
@@ -519,7 +567,7 @@ export function CapabilitiesPage({
                 <div className={css.capabilityGrid}>
                   {visibleBuiltins.map(capability => <article className={css.capabilityCard} key={capability.id} data-state={capability.state}>
                     <div className={css.capabilityMain}><CapabilityGlyph capability={capability} icons={capabilityIcons} fallback={SkillIcon} /><span className={css.capabilityCopy}><strong>{capability.title}</strong><small>{capability.summary}</small><em>{CAPABILITY_CATEGORY_LABELS[capability.icon_key]} · {CAPABILITY_STATE_LABELS[capability.state]}</em></span></div>
-                    {capability.actions.length > 0 && <div className={css.capabilityActions}>{capability.actions.map(action => <button className={action.kind === 'primary' ? css.primary : undefined} type="button" key={action.id} disabled={loading} onClick={() => { void runCapabilityAction(capability, action.id) }}>{action.label}</button>)}</div>}
+                    {capability.actions.length > 0 && <div className={css.capabilityActions}>{capability.actions.map(action => <button className={action.kind === 'primary' ? css.primary : undefined} type="button" key={action.id} disabled={loading} onClick={() => { beginCapabilityAction(capability, action) }}>{action.label}</button>)}</div>}
                     {capability.detail && <p className={css.capabilityDetail}>{capability.detail}</p>}
                   </article>)}
                 </div>
@@ -579,6 +627,19 @@ export function CapabilitiesPage({
           </div>
           <button className={css.dialogClose} type="button" aria-label="关闭 Skill 详情" onClick={closeDetail}><CloseIcon size={16} /></button>
         </section>
+      </div>}
+
+      {credentialAction && <div className={css.dialogOverlay} role="presentation" onMouseDown={event => { if (!loading && event.target === event.currentTarget) setCredentialAction(null) }}>
+        <form className={css.dialog} role="dialog" aria-modal="true" aria-labelledby="emate-credential-title" onSubmit={storeCredential}>
+          <h2 id="emate-credential-title">配置 {credentialAction.capability.title}</h2>
+          <p>密钥只通过 DSH Credentials 单向写入本机凭据库，不会进入 Agent、能力 RPC 或设置文档。</p>
+          <label className={css.credentialField}><span>API Key</span><input autoFocus type="password" autoComplete="new-password" spellCheck={false} value={credentialValue} disabled={loading} onChange={event => { setCredentialValue(event.target.value) }} /></label>
+          <div className={css.dialogActions}>
+            <button type="button" disabled={loading} onClick={() => { setCredentialValue(''); setCredentialAction(null) }}>取消</button>
+            <button className={css.primary} type="submit" disabled={loading || credentialValue.trim() === ''}>{loading ? '正在保存' : '安全保存'}</button>
+          </div>
+          <button className={css.dialogClose} type="button" aria-label="关闭凭据配置" disabled={loading} onClick={() => { setCredentialValue(''); setCredentialAction(null) }}><CloseIcon size={16} /></button>
+        </form>
       </div>}
     </main>
   )

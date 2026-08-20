@@ -1,6 +1,6 @@
 - insert:
     - id: emate-cdp
       name: '@e-mate/dsh-plugin-cdp'
-      inject: [tools, approval, systemPrompt]
+      inject: [tools, approval, settings, systemPrompt, userQuestions, emateCapabilities]
       config:
         endpoint: 'http://127.0.0.1:9222'

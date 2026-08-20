@@ -3,6 +3,7 @@ export const inject = ['connection']
 export const CAPABILITIES_CHANNEL = '/emate.capabilities'
 
 const ID = /^[a-z][a-z0-9.-]{1,63}$/u
+const CREDENTIAL_REF = /^[A-Za-z_][A-Za-z0-9_]*$/u
 const STATES = new Set(['ready', 'setup-required', 'blocked', 'failed'])
 const ACTION_KINDS = new Set(['primary', 'secondary'])
 const ICON_KEYS = new Set(['browser', 'collaboration', 'image', 'office', 'ocr'])
@@ -20,11 +21,13 @@ function boundedText(value, maximum) {
 }
 
 function validAction(action) {
+  const keys = isRecord(action) ? Object.keys(action).sort().join(',') : ''
   return isRecord(action)
     && ID.test(action.id)
     && boundedText(action.label, 48)
     && ACTION_KINDS.has(action.kind)
-    && Object.keys(action).sort().join(',') === 'id,kind,label'
+    && (keys === 'id,kind,label'
+      || (keys === 'id,input,kind,label' && action.input === 'credential'))
 }
 
 function validateDefinition(definition) {
@@ -40,19 +43,27 @@ function validateDefinition(definition) {
     || definition.actions.length > 4
     || definition.actions.some(action => !validAction(action))
     || new Set(definition.actions.map(action => action.id)).size !== definition.actions.length
-    || (definition.actions.length > 0 && typeof definition.invoke !== 'function')) {
+    || (definition.actions.some(action => action.input !== 'credential') && typeof definition.invoke !== 'function')) {
     throw new Error('invalid e-Mate capability definition')
   }
 }
 
 function validateStatus(value, definition) {
+  const credentialRefs = value?.credential_refs ?? {}
   if (!isRecord(value)
     || !STATES.has(value.state)
     || (value.detail !== undefined && (typeof value.detail !== 'string' || value.detail.length > 240))
     || !Array.isArray(value.action_ids)
     || value.action_ids.some(id => typeof id !== 'string' || !definition.actions.some(action => action.id === id))
     || new Set(value.action_ids).size !== value.action_ids.length
-    || Object.keys(value).some(key => key !== 'state' && key !== 'detail' && key !== 'action_ids')) {
+    || !isRecord(credentialRefs)
+    || Object.entries(credentialRefs).some(([id, ref]) => !value.action_ids.includes(id)
+      || definition.actions.find(action => action.id === id)?.input !== 'credential'
+      || typeof ref !== 'string' || !CREDENTIAL_REF.test(ref))
+    || value.action_ids.some(id => definition.actions.find(action => action.id === id)?.input === 'credential'
+      && !Object.hasOwn(credentialRefs, id))
+    || Object.keys(value).some(key => key !== 'state' && key !== 'detail'
+      && key !== 'action_ids' && key !== 'credential_refs')) {
     throw new Error('invalid e-Mate capability status')
   }
   return value
@@ -91,7 +102,12 @@ export function apply(ctx) {
             summary: definition.summary,
             icon_key: definition.icon_key,
             order: definition.order,
-            actions: definition.actions.filter(action => status.action_ids.includes(action.id)),
+            actions: definition.actions.filter(action => status.action_ids.includes(action.id)).map(action => ({
+              ...action,
+              ...(action.input === 'credential'
+                ? { credential_ref: status.credential_refs[action.id] }
+                : {}),
+            })),
             state: status.state,
             ...(status.detail === undefined ? {} : { detail: status.detail }),
           })
@@ -108,7 +124,9 @@ export function apply(ctx) {
           return badRequest('capability action payload is invalid')
         }
         const definition = definitions.get(payload.capability_id)
+        const action = definition?.actions.find(candidate => candidate.id === payload.action_id)
         if (definition === undefined
+          || action?.input === 'credential'
           || typeof definition.invoke !== 'function') {
           return badRequest('capability action is unavailable')
         }

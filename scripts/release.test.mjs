@@ -206,6 +206,32 @@ test('release verification rejects temporary Harness build bytes', async () => {
   }
 })
 
+test('component builds reject a pnpm version different from the repository contract', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'emate-pnpm-version-'))
+  try {
+    const fakePnpm = join(root, 'pnpm.mjs')
+    await writeFile(fakePnpm, "console.log('11.19.0')\n")
+    let failure
+    try {
+      execFileSync(process.execPath, [
+        'scripts/component-run.mjs',
+        'build',
+        '--component',
+        '@e-mate/dsh-plugin-cdp',
+      ], {
+        env: { ...process.env, npm_execpath: fakePnpm },
+        stdio: 'pipe',
+      })
+    } catch (error) {
+      failure = error
+    }
+    assert.ok(failure)
+    assert.match(String(failure.stderr), /component builds require pnpm 11\.7\.0, found 11\.19\.0/u)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('GitHub release packs once and validates the same tarball on three platforms', () => {
   const requireFromDsh = createRequire(resolve('packages/dsh/package.json'))
   const { parse } = requireFromDsh('yaml')
@@ -215,9 +241,10 @@ test('GitHub release packs once and validates the same tarball on three platform
   const ci = parse(readFileSync('.github/workflows/ci.yml', 'utf8'))
   const release = parse(readFileSync('.github/workflows/release.yml', 'utf8'))
   const desktopRelease = parse(readFileSync('.github/workflows/desktop-release.yml', 'utf8'))
+  assert.doesNotMatch(readFileSync('.github/workflows/desktop-release.yml', 'utf8'), /python-version: '3\.12\.14'/u)
   assert.deepEqual(published.os, ['darwin', 'win32'])
   assert.equal(published.cpu, undefined)
-  assert.ok(workspace.scripts.test.indexOf("--filter './packages/dsh-plugin-*'") < workspace.scripts.test.indexOf('--filter @e-mate/dsh test'))
+  assert.ok(workspace.scripts.test.indexOf('component-run.mjs check') < workspace.scripts.test.indexOf('--filter @e-mate/dsh test'))
   const ciChecks = ci.jobs.source.steps.find(step => step.name === 'Check target pin and e-Mate behavior').run
   assert.match(ciChecks, /^pnpm test$/mu)
   assert.doesNotMatch(ciChecks, /--filter @e-mate\/dsh test/u)
@@ -225,6 +252,7 @@ test('GitHub release packs once and validates the same tarball on three platform
     'impact',
     'source',
     'plugins',
+    'base-platform-components',
     'profile-composition',
     'enterprise',
     'desktop-windows',
@@ -232,6 +260,7 @@ test('GitHub release packs once and validates the same tarball on three platform
     'admission',
   ])
   assert.equal(ci.jobs.source.needs, 'impact')
+  assert.deepEqual(ci.jobs['base-platform-components'].needs, ['impact', 'source'])
   assert.equal(ci.jobs['desktop-windows'].needs, 'source')
   assert.equal(ci.jobs['desktop-macos'].needs, 'source')
   for (const [workflow, producer] of [[ci, 'source'], [desktopRelease, 'profile']]) {

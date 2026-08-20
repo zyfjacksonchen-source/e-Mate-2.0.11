@@ -41,41 +41,7 @@ function replaceExactlyOnce(source, before, after, label) {
   if (count !== 1) throw new Error(`computer-use adapter expected one ${label} seam, found ${count}`)
   return source.replace(before, after)
 }
-
-// e-Mate's Full access control is the DSH session's standing sandbox policy,
-// not a process-global Computer Use setting. Map only that one session mode to
-// configured app access; narrower modes retain upstream grants and approvals.
-const leasesPath = join(root, 'lib/leases.js')
-let leases = await readFile(leasesPath, 'utf8')
-leases = replaceExactlyOnce(
-  leases,
-  'import { approvalPolicy } from "./approval-policy.js";',
-  'import { approvalPolicy } from "./approval-policy.js";\nimport { standingFullAccess } from "./emate-permission.js";',
-  'lease import',
-)
-leases = leases.replaceAll(
-  'if (configuredAccess(this.config(), app.bundleId, scope))',
-  'if (standingFullAccess(this.ctx, agent) || configuredAccess(this.config(), app.bundleId, scope))',
-)
-if ((leases.match(/standingFullAccess\(this\.ctx, agent\)/gu) ?? []).length !== 2) {
-  throw new Error('computer-use adapter expected two application lease checks')
-}
-await writeFile(leasesPath, leases)
-await writeFile(join(root, 'lib/emate-permission.js'), `/** e-Mate mapping from the current DSH session policy to Computer Use app access. */
-export function standingFullAccess(ctx, agent) {
-    return ctx.sandboxPolicy.resolve({ session: agent.session }).mode === 'danger-full-access';
-}
-`)
-
 const indexPath = join(root, 'lib/index.js')
-let index = await readFile(indexPath, 'utf8')
-index = replaceExactlyOnce(
-  index,
-  "static inject = ['subprocess', 'approval', 'settings', 'sessions', 'agents', 'tools', 'skills'];",
-  "static inject = ['subprocess', 'approval', 'settings', 'sessions', 'agents', 'tools', 'skills', 'sandboxPolicy'];",
-  'bundle injection declaration',
-)
-await writeFile(indexPath, index)
 bundleRuntime()
 let runtime = await readFile(join(root, '.runtime-bundle/index.js'), 'utf8')
 runtime = replaceExactlyOnce(runtime, 'new URL("../../native/macos/", import.meta.url)', 'new URL("../native/macos/", import.meta.url)', 'bundled native path')

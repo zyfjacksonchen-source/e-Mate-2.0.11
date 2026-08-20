@@ -32,6 +32,7 @@
   },
   "files": [
     "lib",
+    "pnpm-lock.yaml",
     "cordis.patch.yml",
     "LICENSE",
     "NOTICE.md",
@@ -43,7 +44,11 @@
       "id": "@e-mate/dsh-plugin-memory-evolve",
       "kind": "profile",
       "base_imports": [],
-      "base_contracts": ["e-mate-desktop-profile-v1-dsh-df78045a127e"]
+      "authority_contract": {
+        "effects": ["persistent-state"],
+        "guards": ["native-user-question", "session-scope", "workspace-scope"]
+      },
+      "base_contracts": ["e-mate-desktop-profile-v2-dsh-df78045a127e"]
     },
     "harnessVersion": "0.1.0-rc.7",
     "harnessCommit": "df78045a127e32cb5b942defba52c539590d1596"
@@ -53,7 +58,7 @@
   },
   "scripts": {
     "build": "../../upstream/deepseek-harness/node_modules/.bin/tsdown",
-    "test": "pnpm run build && node --test",
+    "test": "node --test",
     "prepack": "pnpm run build"
   },
   "dsh": {

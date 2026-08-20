@@ -1,6 +1,6 @@
 # @e-mate/dsh-plugin-office-skills
 
-Lightweight local Office support for e-Mate 2.0.10 on the target Harness rc.6 profile.
+Lightweight local Office support for e-Mate 2.0.11 on the pinned Harness rc.7 Profile.
 
 - `office_read` reads a workspace-relative DOCX, XLSX, PPTX, or PDF into bounded normalized JSON.
 - `office_write` creates a new real DOCX, XLSX, PPTX, or PDF under `.e-mate/office/`.

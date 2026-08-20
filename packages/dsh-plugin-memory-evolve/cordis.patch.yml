@@ -1,6 +1,6 @@
 - insert:
     - id: emate-memory-evolve
       name: '@e-mate/dsh-plugin-memory-evolve'
-      inject: [tools, systemPrompt, workspaceRegistry, storageDomain]
+      inject: [tools, systemPrompt, workspaceRegistry, storageDomain, userQuestions]
       config:
         sessionOnlyWorkspacePath: !!js dshHomePath('e-mate/general')

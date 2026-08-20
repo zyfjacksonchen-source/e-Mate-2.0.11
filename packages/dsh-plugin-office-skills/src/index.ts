@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { link, lstat, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
 import { extname, isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import {
   type OfficeFormat,
   readOfficeBuffer,
@@ -41,6 +42,7 @@ interface OfficeContext {
     start(specification: unknown): string
     wait(id: string, timeoutMs: number, owner: AgentOwner, signal: AbortSignal): Promise<unknown>
   }
+  sandboxPolicy: SandboxPolicyService
   emateCapabilities: { register(definition: unknown): () => void }
   effect(effect: () => () => void, label: string): void
 }
@@ -53,7 +55,7 @@ interface PublishedFile {
 }
 
 export const name = 'emate-office-skills'
-export const inject = ['skills', 'tools', 'jobs', 'emateCapabilities']
+export const inject = ['skills', 'tools', 'jobs', 'sandboxPolicy', 'emateCapabilities']
 export const OFFICE_ADAPTER_STATUS = Object.freeze({
   state: 'ready' as const,
   harnessVersion: '0.1.0-rc.7' as const,
@@ -140,6 +142,14 @@ async function workspace(owner: AgentOwner | undefined): Promise<string> {
   const info = await lstat(root)
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Current workspace is unavailable')
   return root
+}
+
+function assertWorkspaceWrite(ctx: OfficeContext, owner: AgentOwner | undefined): void {
+  const session = owner?.session
+  if (session === undefined) throw new Error('Office execution requires an owning Agent session')
+  if (ctx.sandboxPolicy.resolve({ session: session as never }).mode === 'read-only') {
+    throw new Error('Office write is blocked by the current read-only sandbox policy')
+  }
 }
 
 async function officeDirectory(root: string): Promise<string> {
@@ -279,6 +289,7 @@ export function apply(ctx: OfficeContext): void {
     isConcurrencySafe: () => true,
     timeoutMs: OFFICE_TIMEOUT_MS,
     async execute(args: unknown, exec: ToolExecution) {
+      assertWorkspaceWrite(ctx, exec.agent)
       const input = args as Record<string, unknown>
       const targetFormat = format(input.format)
       const targetName = filename(input.filename, targetFormat)

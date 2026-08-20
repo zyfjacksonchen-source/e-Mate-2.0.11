@@ -27,6 +27,7 @@ jobs:
       run_enterprise: ${{ steps.classify.outputs.run_enterprise }}
       components_json: ${{ steps.classify.outputs.components_json }}
       component_jobs_json: ${{ steps.classify.outputs.component_jobs_json }}
+      base_platform_component_jobs_json: ${{ steps.classify.outputs.base_platform_component_jobs_json }}
       publish_components_json: ${{ steps.classify.outputs.publish_components_json }}
       head_sha: ${{ steps.classify.outputs.head_sha }}
     steps:
@@ -35,9 +36,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
+
+      - name: Install impact test dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Test the fail-closed classifier and payload boundary
         run: node --test scripts/change-impact.test.mjs scripts/component-release.test.mjs scripts/profile-release.test.mjs scripts/publish-profile-r2.test.mjs
@@ -85,6 +91,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: |
             pnpm-lock.yaml
+            packages/dsh-plugin-*/pnpm-lock.yaml
+            packages/dsh/profile/plugins/emate-shell/pnpm-lock.yaml
             enterprise/pnpm-lock.yaml
             upstream/deepseek-harness/pnpm-lock.yaml
 
@@ -183,7 +191,21 @@ jobs:
           cache: pnpm
           cache-dependency-path: |
             pnpm-lock.yaml
+            packages/dsh-plugin-*/pnpm-lock.yaml
+            packages/dsh/profile/plugins/emate-shell/pnpm-lock.yaml
             upstream/deepseek-harness/pnpm-lock.yaml
+
+      - name: Prepare the exact component Python runtime
+        id: component-python
+        if: matrix.component == '@e-mate/dsh-plugin-vision-toolkit'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          node desktop/e-mate-desktop/scripts/prepare-python-runtime.mjs --target "$TARGET"
+          relative="desktop/e-mate-desktop/build/python-runtime/$TARGET/python/bin/python3"
+          if [[ "$TARGET" == win32-x64 ]]; then relative="desktop/e-mate-desktop/build/python-runtime/$TARGET/python/python.exe"; fi
+          node -e 'const fs=require("node:fs"),p=require("node:path").resolve(process.argv[1]);if(!fs.existsSync(p))throw new Error(`missing ${p}`);process.stdout.write(`python=${p}\n`)' "$relative" >> "$GITHUB_OUTPUT"
 
       - name: Install exact component toolchains without building Harness
         run: |
@@ -217,10 +239,10 @@ jobs:
         env:
           COMPONENT: ${{ matrix.component }}
           EMATE_COMPONENT_TARGET: ${{ matrix.target }}
+          EMATE_BUILD_PYTHON: ${{ steps.component-python.outputs.python }}
         run: |
           set -euo pipefail
-          pnpm --filter "$COMPONENT" run build
-          pnpm --filter "$COMPONENT" run test
+          node scripts/component-run.mjs check --component "$COMPONENT"
 
       - name: Emit the immutable component payload
         if: matrix.publish == true
@@ -251,6 +273,84 @@ jobs:
           path: dist/components
           if-no-files-found: error
           retention-days: 7
+
+  base-platform-components:
+    name: Base compatibility / ${{ matrix.component }} / ${{ matrix.target }}
+    needs: [impact, source]
+    if: needs.impact.outputs.run_base == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.impact.outputs.base_platform_component_jobs_json) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.impact.outputs.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            packages/dsh-plugin-*/pnpm-lock.yaml
+            upstream/deepseek-harness/pnpm-lock.yaml
+
+      - name: Prepare the exact component Python runtime
+        id: component-python
+        if: matrix.component == '@e-mate/dsh-plugin-vision-toolkit'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          node desktop/e-mate-desktop/scripts/prepare-python-runtime.mjs --target "$TARGET"
+          relative="desktop/e-mate-desktop/build/python-runtime/$TARGET/python/bin/python3"
+          if [[ "$TARGET" == win32-x64 ]]; then relative="desktop/e-mate-desktop/build/python-runtime/$TARGET/python/python.exe"; fi
+          node -e 'const fs=require("node:fs"),p=require("node:path").resolve(process.argv[1]);if(!fs.existsSync(p))throw new Error(`missing ${p}`);process.stdout.write(`python=${p}\n`)' "$relative" >> "$GITHUB_OUTPUT"
+
+      - name: Install exact platform component toolchains
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir upstream/deepseek-harness install --frozen-lockfile
+
+      - name: Resolve the newly built Base SDK cache key
+        id: base-sdk-key
+        shell: bash
+        run: echo "key=e-mate-base-sdk-$(node scripts/base-sdk.mjs fingerprint)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the newly built Base SDK
+        id: base-sdk
+        uses: actions/cache/restore@v4
+        with:
+          path: .release-cache/base-sdk
+          key: ${{ steps.base-sdk-key.outputs.key }}
+          enableCrossOsArchive: true
+
+      - name: Require the Base SDK produced by the source job
+        if: steps.base-sdk.outputs.cache-hit != 'true'
+        run: |
+          echo 'The new Base SDK cache is unavailable; platform compatibility cannot use another Base.' >&2
+          exit 1
+
+      - name: Restore and verify the new Base SDK
+        run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
+
+      - name: Test the accepted platform component against the new Base
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.component }}
+          EMATE_COMPONENT_TARGET: ${{ matrix.target }}
+          EMATE_BUILD_PYTHON: ${{ steps.component-python.outputs.python }}
+        run: |
+          set -euo pipefail
+          node scripts/component-run.mjs check --component "$COMPONENT"
 
   profile-composition:
     name: Complete Profile generation / ${{ matrix.target }}
@@ -414,6 +514,10 @@ jobs:
         with:
           node-version: '22.23.2'
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
       - run: corepack enable
 
       - name: Restore the profile built by the source gate
@@ -421,6 +525,9 @@ jobs:
         with:
           name: e-mate-desktop-profile-${{ github.sha }}
           path: packages
+
+      - name: Prepare the exact offline Windows Vision runtime
+        run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets win32-x64
 
       - name: Resolve Yarn cache folder
         id: yarn-cache
@@ -465,6 +572,10 @@ jobs:
         with:
           node-version: '22.23.2'
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
       - run: corepack enable
 
       - name: Restore the profile built by the source gate
@@ -472,6 +583,9 @@ jobs:
         with:
           name: e-mate-desktop-profile-${{ github.sha }}
           path: packages
+
+      - name: Prepare the exact offline universal macOS Vision runtime
+        run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets darwin-arm64,darwin-x64
 
       - name: Resolve Yarn cache folder
         id: yarn-cache
@@ -500,7 +614,7 @@ jobs:
   admission:
     name: CI admission
     if: always()
-    needs: [impact, source, plugins, profile-composition, enterprise, desktop-windows, desktop-macos]
+    needs: [impact, source, plugins, base-platform-components, profile-composition, enterprise, desktop-windows, desktop-macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -510,6 +624,7 @@ jobs:
           IMPACT: ${{ needs.impact.result }}
           SOURCE: ${{ needs.source.result }}
           PLUGINS: ${{ needs.plugins.result }}
+          BASE_PLATFORM_COMPONENTS: ${{ needs.base-platform-components.result }}
           PROFILE: ${{ needs.profile-composition.result }}
           PUBLISH_COMPONENTS: ${{ needs.impact.outputs.publish_components_json }}
           ENTERPRISE: ${{ needs.enterprise.result }}
@@ -523,6 +638,7 @@ jobs:
               test "$SOURCE" = success
               test "$WINDOWS" = success
               test "$MACOS" = success
+              test "$BASE_PLATFORM_COMPONENTS" = success
               test "$PLUGINS" = skipped
               test "$PROFILE" = skipped
               test "$ENTERPRISE" = skipped
@@ -538,6 +654,7 @@ jobs:
               test "$ENTERPRISE" = skipped
               test "$WINDOWS" = skipped
               test "$MACOS" = skipped
+              test "$BASE_PLATFORM_COMPONENTS" = skipped
               ;;
             enterprise-only)
               test "$ENTERPRISE" = success
@@ -546,6 +663,7 @@ jobs:
               test "$PROFILE" = skipped
               test "$WINDOWS" = skipped
               test "$MACOS" = skipped
+              test "$BASE_PLATFORM_COMPONENTS" = skipped
               ;;
             docs-only|verification-only|none)
               test "$SOURCE" = skipped
@@ -554,6 +672,7 @@ jobs:
               test "$ENTERPRISE" = skipped
               test "$WINDOWS" = skipped
               test "$MACOS" = skipped
+              test "$BASE_PLATFORM_COMPONENTS" = skipped
               ;;
             *) exit 1 ;;
           esac

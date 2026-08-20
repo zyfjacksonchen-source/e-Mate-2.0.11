@@ -8,9 +8,11 @@
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
+  "devDependencies": {
+    "fflate": "0.8.3"
+  },
   "workspaces": [
-    "packages/*",
-    "packages/dsh/profile/plugins/*"
+    "packages/dsh"
   ],
   "scripts": {
     "check:target": "node scripts/check-target.mjs",
@@ -20,10 +22,10 @@
     "performance:fixture": "node scripts/create-performance-fixture.mjs",
     "performance:parity": "pnpm run check:target && node scripts/performance-parity.mjs",
     "test:performance:parity": "node --test scripts/performance-parity.test.mjs",
-    "test": "pnpm run test:impact && node --test scripts/create-chat-state-fixture.test.mjs && pnpm run test:performance:parity && pnpm run build && pnpm -r --filter './packages/dsh-plugin-*' --workspace-concurrency=4 --if-present test && pnpm --filter @e-mate/dsh test",
+    "test": "pnpm run test:impact && node --test scripts/create-chat-state-fixture.test.mjs && pnpm run test:performance:parity && node scripts/component-run.mjs check && pnpm --filter @e-mate/dsh build && pnpm --filter @e-mate/dsh test",
     "test:impact": "node --test scripts/change-impact.test.mjs scripts/component-release.test.mjs scripts/profile-release.test.mjs scripts/publish-profile-r2.test.mjs",
     "test:release": "node --test scripts/release.test.mjs",
-    "build": "pnpm -r --filter './packages/dsh-plugin-*' --workspace-concurrency=4 --if-present build && pnpm --filter @e-mate/dsh build",
+    "build": "node scripts/component-run.mjs build && pnpm --filter @e-mate/dsh build",
     "enterprise:check": "pnpm --dir enterprise check",
     "enterprise:test": "pnpm --dir enterprise test",
     "enterprise:build": "pnpm --dir enterprise build",

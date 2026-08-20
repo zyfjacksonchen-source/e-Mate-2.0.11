@@ -1,14 +1,14 @@
 /** Profile-relative package resolution for Electron's restricted Node runtime. */
 
-import { readFileSync } from 'node:fs'
-import { registerHooks } from 'node:module'
+import { readFileSync, realpathSync } from 'node:fs'
+import { builtinModules, registerHooks } from 'node:module'
 import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { isProfileBaseRuntimePackage } from './profile-release.ts'
 
-const LOADER_ENTRY_URL = import.meta.resolve('@deepseek-ai/cordis-plugin-loader')
 const DESKTOP_ENTRY_URL = new URL('../lib/index.js', import.meta.url).href
 const DESKTOP_PACKAGE_NAME = '@e-mate/desktop'
-const BASE_RUNTIME_PACKAGE = /^(?:@deepseek-ai\/[a-z0-9][a-z0-9._-]*|react(?:-dom)?)(?:\/|$)/u
+const BUILTIN_PACKAGES = new Set(builtinModules.map(name => name.replace(/^node:/u, '')))
 
 /** Return whether a Loader request needs Node package resolution. */
 function isBareSpecifier(specifier: string): boolean {
@@ -16,8 +16,12 @@ function isBareSpecifier(specifier: string): boolean {
 }
 
 function baseRuntimePackage(specifier: string): string | undefined {
-  const match = BASE_RUNTIME_PACKAGE.exec(specifier)
-  return match?.[0].replace(/\/$/u, '')
+  if (specifier.startsWith(`${DESKTOP_PACKAGE_NAME}/`)) {
+    return isProfileBaseRuntimePackage(specifier) ? specifier : undefined
+  }
+  const segments = specifier.split('/')
+  const name = specifier.startsWith('@') ? segments.slice(0, 2).join('/') : segments[0]
+  return name !== undefined && isProfileBaseRuntimePackage(name) ? name : undefined
 }
 
 /** Stable runtime packages supplied by the pinned Base only when the component declares them. */
@@ -58,21 +62,38 @@ export function installProfilePackageResolver(
   profileBaseUrl: string,
   componentRoots: Iterable<string> = [],
   baseRuntimeImports: Readonly<Record<string, string>> = {},
+  loaderEntryUrl: string = import.meta.resolve('@deepseek-ai/cordis-plugin-loader'),
+  baseRuntimeEntryUrl: string = DESKTOP_ENTRY_URL,
 ): () => void {
   const components = [...componentRoots].map(root => ({
-    prefix: pathToFileURL(`${resolve(root)}${sep}`).href,
+    prefix: pathToFileURL(`${realpathSync(resolve(root))}${sep}`).href,
     imports: componentBaseImports(root, baseRuntimeImports),
   }))
   const hooks = registerHooks({
     resolve(specifier, context, nextResolve) {
-      const fromLoader = context.parentURL === LOADER_ENTRY_URL
+      const fromLoader = context.parentURL === loaderEntryUrl
       if (fromLoader && specifier === DESKTOP_PACKAGE_NAME) {
         return { shortCircuit: true, url: DESKTOP_ENTRY_URL }
       }
-      if (context.parentURL !== undefined && isBareSpecifier(specifier)) {
+      if (context.parentURL !== undefined) {
         const component = components.find(candidate => context.parentURL!.startsWith(candidate.prefix))
-        if (component !== undefined && isBaseProfileRuntimeSpecifier(specifier, component.imports)) {
-          return nextResolve(specifier, { ...context, parentURL: DESKTOP_ENTRY_URL })
+        if (component !== undefined) {
+          if (isBareSpecifier(specifier)) {
+            if (isBaseProfileRuntimeSpecifier(specifier, component.imports)) {
+              const parentURL = specifier.startsWith(`${DESKTOP_PACKAGE_NAME}/`)
+                ? DESKTOP_ENTRY_URL
+                : baseRuntimeEntryUrl
+              return nextResolve(specifier, { ...context, parentURL })
+            }
+            if (BUILTIN_PACKAGES.has(specifier)) return nextResolve(specifier, context)
+            throw new Error(`hot Profile component undeclared runtime import is blocked: ${specifier}`)
+          }
+          if (specifier.startsWith('node:') && BUILTIN_PACKAGES.has(specifier.slice(5))) {
+            return nextResolve(specifier, context)
+          }
+          const resolved = nextResolve(specifier, context)
+          if (resolved.url.startsWith(component.prefix)) return resolved
+          throw new Error(`hot Profile component path escape is blocked: ${specifier}`)
         }
       }
       if (fromLoader && isBareSpecifier(specifier)) {

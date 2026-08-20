@@ -5,74 +5,6 @@ __metadata:
   version: 10
   cacheKey: 10c0
 
-"@anionex/dsh-vision-toolkit@npm:0.1.7":
-  version: 0.1.7
-  resolution: "@anionex/dsh-vision-toolkit@npm:0.1.7"
-  dependencies:
-    saxes: "npm:6.0.0"
-  peerDependencies:
-    "@deepseek-ai/cordis": ^4.0.1
-    "@deepseek-ai/dsh-agent": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-api-remotes": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-locale": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-runtime": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-conversation": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-input-trigger": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-primitives": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-settings": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-tool": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-credentials": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-host-webserver": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-llm": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-session": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-settings": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-skill": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-subprocess": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-tools": ^0.1.0-rc.6
-    "@deepseek-ai/schemastery": ^3.18.1
-    react: ^18.2.0
-  peerDependenciesMeta:
-    "@deepseek-ai/dsh-host-webserver":
-      optional: true
-  checksum: 10c0/53bafa73a02fed9cd3abbdf921577b4b2664f9c6efbe621319907c6f8a5b6a9f912cfb7d4ae2e50589d84f0c289c3179f7aae8c256131b1635a5ae2b7fca8cf1
-  languageName: node
-  linkType: hard
-
-"@anionex/dsh-vision-toolkit@patch:@anionex/dsh-vision-toolkit@npm%3A0.1.7#~/.yarn/patches/@anionex-dsh-vision-toolkit-npm-0.1.7-c7bdbc494e.patch":
-  version: 0.1.7
-  resolution: "@anionex/dsh-vision-toolkit@patch:@anionex/dsh-vision-toolkit@npm%3A0.1.7#~/.yarn/patches/@anionex-dsh-vision-toolkit-npm-0.1.7-c7bdbc494e.patch::version=0.1.7&hash=43cf93"
-  dependencies:
-    saxes: "npm:6.0.0"
-  peerDependencies:
-    "@deepseek-ai/cordis": ^4.0.1
-    "@deepseek-ai/dsh-agent": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-api-remotes": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-locale": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-runtime": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-conversation": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-input-trigger": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-primitives": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-settings": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-tool": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-credentials": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-host-webserver": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-llm": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-session": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-settings": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-skill": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-subprocess": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-tools": ^0.1.0-rc.6
-    "@deepseek-ai/schemastery": ^3.18.1
-    react: ^18.2.0
-  peerDependenciesMeta:
-    "@deepseek-ai/dsh-host-webserver":
-      optional: true
-  checksum: 10c0/f11db65f6e1f1b9e367b763fd0cb5e8b3fd5185aa7a8a85501857d7f6a05e99aba8884c046dd3f4706611d641b13dbefe30c4a06ce6cee548a41416bc859bf9a
-  languageName: node
-  linkType: hard
-
 "@anthropic-ai/sdk@npm:0.91.1":
   version: 0.91.1
   resolution: "@anthropic-ai/sdk@npm:0.91.1"
@@ -4006,7 +3938,6 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@e-mate/desktop@workspace:e-mate-desktop"
   dependencies:
-    "@anionex/dsh-vision-toolkit": "patch:@anionex/dsh-vision-toolkit@npm%3A0.1.7#~/.yarn/patches/@anionex-dsh-vision-toolkit-npm-0.1.7-c7bdbc494e.patch"
     "@deepseek-ai/cordis": "npm:4.0.1"
     "@deepseek-ai/cordis-plugin-group": "npm:1.0.1"
     "@deepseek-ai/cordis-plugin-include": "npm:1.0.6"
@@ -4114,7 +4045,6 @@ __metadata:
     "@deepseek-ai/schemastery": "npm:3.18.1"
     "@electron/asar": "npm:3.4.1"
     "@kelearns/dsh-navigation-bar": "npm:0.2.1"
-    "@omdsh-dev/dsh-genui": "file:vendor/omdsh-dev-dsh-genui-0.8.3-0e756efb.tgz"
     "@types/js-yaml": "npm:^4.0.9"
     "@types/node": "npm:^22.20.0"
     "@types/react": "npm:^18"
@@ -4124,6 +4054,7 @@ __metadata:
     dsh-visualize: "file:vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz"
     electron: "npm:43.4.0"
     electron-builder: "npm:26.15.3"
+    fflate: "npm:0.8.3"
     koffi: "npm:3.1.5"
     node-addon-require-builtin: "npm:^0.1.4"
     pnpm: "npm:11.7.0"
@@ -4886,26 +4817,6 @@ __metadata:
   version: 2.3.0
   resolution: "@noble/hashes@npm:2.3.0"
   checksum: 10c0/85651da4c1ea1db15fcacac7f38e4c4e6d60154cd116200b1002c198893bfad2733b31108352fde307126bab789f82f47b5bee8a12462b12f25fd0703aed7dce
-  languageName: node
-  linkType: hard
-
-"@omdsh-dev/dsh-genui@file:vendor/omdsh-dev-dsh-genui-0.8.3-0e756efb.tgz::locator=%40e-mate%2Fdesktop%40workspace%3Ae-mate-desktop":
-  version: 0.8.3
-  resolution: "@omdsh-dev/dsh-genui@file:vendor/omdsh-dev-dsh-genui-0.8.3-0e756efb.tgz#vendor/omdsh-dev-dsh-genui-0.8.3-0e756efb.tgz::hash=4806e5&locator=%40e-mate%2Fdesktop%40workspace%3Ae-mate-desktop"
-  dependencies:
-    react: "npm:^18.3.1"
-  peerDependencies:
-    "@deepseek-ai/cordis": ^4.0.1
-    "@deepseek-ai/dsh-client-runtime": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-primitives": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-tool": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-llm": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-tools": ^0.1.0-rc.6
-    react: ^18.0.0 || ^19.0.0
-  checksum: 10c0/8f9fb584162132630d740a6a83f3b43c91f9a4162bae80f5a9bcce79fb079a63bfbd1f84e30d4febaa9509972b96942566415e791c5d7a0080b85f272b347aa4
   languageName: node
   linkType: hard
 
@@ -7502,7 +7413,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"fflate@npm:^0.8.2":
+"fflate@npm:0.8.3, fflate@npm:^0.8.2":
   version: 0.8.3
   resolution: "fflate@npm:0.8.3"
   checksum: 10c0/eab181ca37f5348ae76d4b6f840e0026e30220e33153289ac942222d8b9638237d486507dbcc09878d724095bd354993a2ee48bbee99c8f2c6440d4448719aa7
@@ -9866,7 +9777,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react@npm:18.3.1, react@npm:^18.2.0, react@npm:^18.3.1":
+"react@npm:18.3.1, react@npm:^18.2.0":
   version: 18.3.1
   resolution: "react@npm:18.3.1"
   dependencies:
@@ -10205,15 +10116,6 @@ __metadata:
   version: 1.6.1
   resolution: "sax@npm:1.6.1"
   checksum: 10c0/c91a71043d60da50fdf1e2cee936fc7ad4c9376afb8d1022aef5655f279433640859ec06b3b49abfcbe578fc7da2828cc1661e45aaedf835f5393496193437fa
-  languageName: node
-  linkType: hard
-
-"saxes@npm:6.0.0":
-  version: 6.0.0
-  resolution: "saxes@npm:6.0.0"
-  dependencies:
-    xmlchars: "npm:^2.2.0"
-  checksum: 10c0/3847b839f060ef3476eb8623d099aa502ad658f5c40fd60c105ebce86d244389b0d76fcae30f4d0c728d7705ceb2f7e9b34bb54717b6a7dbedaf5dad2d9a4b74
   languageName: node
   linkType: hard
 
@@ -11297,13 +11199,6 @@ __metadata:
   version: 15.1.1
   resolution: "xmlbuilder@npm:15.1.1"
   checksum: 10c0/665266a8916498ff8d82b3d46d3993913477a254b98149ff7cff060d9b7cc0db7cf5a3dae99aed92355254a808c0e2e3ec74ad1b04aa1061bdb8dfbea26c18b8
-  languageName: node
-  linkType: hard
-
-"xmlchars@npm:^2.2.0":
-  version: 2.2.0
-  resolution: "xmlchars@npm:2.2.0"
-  checksum: 10c0/b64b535861a6f310c5d9bfa10834cf49127c71922c297da9d4d1b45eeaae40bf9b4363275876088fbe2667e5db028d2cd4f8ee72eed9bede840a67d57dab7593
   languageName: node
   linkType: hard
 

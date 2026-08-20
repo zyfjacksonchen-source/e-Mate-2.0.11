@@ -1,3 +1,3 @@
 # e-Mate CLI
 
-`@e-mate/dsh@2.0.10` provides the `e-mate` command for the browser-first e-Mate product. The package is under implementation and must not be published until the single-tarball three-platform clean-install checks recorded in the repository development log pass.
+`@e-mate/dsh@2.0.11` provides the optional `e-mate` CLI for the same pinned Harness rc.7 Profile used by the desktop product. The supported end-user delivery is the Electron Desktop Base plus signed Profile components; this package must not be published until the repository release gates and development-log acceptance evidence pass.

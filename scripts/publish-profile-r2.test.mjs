@@ -21,7 +21,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   const privateKeyPem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
   const keyId = '0123456789abcdef'
-  const baseId = 'e-mate-desktop-profile-v1-dsh-df78045a127e'
+  const baseId = 'e-mate-desktop-profile-v2-dsh-df78045a127e'
   const componentId = '@e-mate/dsh-plugin-fixture'
   const sourceCommit = 'a'.repeat(40)
   mkdirSync(join(root, 'desktop/e-mate-desktop'), { recursive: true })
@@ -68,15 +68,16 @@ test('publication admits bootstrap and its direct successor before exposing acti
   }] })
   writeJson(join(componentRoot, 'lib/index.json'), { value: true })
   writeFileSync(join(componentRoot, 'cordis.patch.yml'), '[]\n')
+  writeFileSync(join(componentRoot, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n")
   writeJson(join(componentRoot, 'package.json'), {
     name: componentId,
     version: '2.0.11',
     type: 'module',
     main: 'lib/index.json',
-    files: ['lib', 'cordis.patch.yml'],
+    files: ['lib', 'cordis.patch.yml', 'pnpm-lock.yaml'],
     dsh: { bundle: { patch: './cordis.patch.yml' } },
     eMate: {
-      component: { schema_version: 1, id: componentId, kind: 'profile', base_imports: [], base_contracts: [baseId] },
+      component: { schema_version: 1, id: componentId, kind: 'profile', base_imports: [], authority_contract: { effects: [], guards: [] }, base_contracts: [baseId] },
       harnessVersion: '0.1.0-rc.7',
       harnessCommit: 'df78045a127e32cb5b942defba52c539590d1596',
     },

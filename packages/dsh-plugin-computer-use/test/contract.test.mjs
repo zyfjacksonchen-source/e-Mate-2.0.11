@@ -13,6 +13,7 @@ test('computer-use adapter preserves the immutable universal helper only on macO
   const adapterBuilder = await readFile(new URL('scripts/build.mjs', root), 'utf8')
   const client = await readFile(new URL('lib/client.js', root), 'utf8')
   const leases = await readFile(new URL('lib/leases.js', root), 'utf8')
+  const upstreamLeases = await readFile(new URL('../../upstream/plugins/dsh-computer-use/lib/leases.js', root), 'utf8')
   const bundle = await readFile(new URL('lib/index.js', root), 'utf8')
   assert.equal(pkg.version, '2.0.11')
   assert.equal(pkg.dsh.upstream.commit, '76bfe8607f61945c1cbb84e73976e601100c13a2')
@@ -38,25 +39,14 @@ test('computer-use adapter preserves the immutable universal helper only on macO
   assert.doesNotMatch(adapterBuilder, /--entitlements|allow-jit|allow-unsigned-executable-memory|disable-library-validation/u)
   assert.match(client, /@e-mate\/dsh-plugin-computer-use/u)
   assert.doesNotMatch(client, /@anionex\/dsh-computer-use/u)
-  assert.match(leases, /import \{ standingFullAccess \} from "\.\/emate-permission\.js"/u)
-  assert.equal((leases.match(/standingFullAccess\(this\.ctx, agent\)/gu) ?? []).length, 2)
-  assert.match(bundle, /static inject = \[[\s\S]*?"skills",\s*"sandboxPolicy"/u)
+  assert.doesNotMatch(adapterBuilder, /standingFullAccess|emate-permission|sandboxPolicy/u)
+  assert.equal(leases, upstreamLeases)
+  assert.doesNotMatch(leases, /standingFullAccess|emate-permission|sandboxPolicy/u)
+  assert.equal((leases.match(/configuredAccess\(this\.config\(\), app\.bundleId, scope\)/gu) ?? []).length, 2)
+  assert.match(leases, /approvalPolicy\(this\.ctx, agent\) === 'never'/u)
+  assert.match(leases, /approval prompts are disabled/u)
+  assert.doesNotMatch(bundle, /standingFullAccess|emate-permission/u)
   assert.doesNotMatch(bundle, /^import .* from ["']zod["'];?$/mu)
   assert.match(bundle, /new URL\("\.\.\/native\/macos\/", import\.meta\.url\)/u)
   assert.match(bundle, /new URL\("\.\.\/scripts\/build-native\.mjs", import\.meta\.url\)/u)
-})
-
-test('application access follows the current DSH session policy without widening narrower presets', async () => {
-  const { standingFullAccess } = await import('../lib/emate-permission.js')
-  let mode = 'danger-full-access'
-  const ctx = {
-    sandboxPolicy: { resolve: () => ({ mode, workspaceRoot: '/tmp' }) },
-  }
-  const agent = { session: { id: 'session-1', header: { createdAt: 1 }, events: [{ type: 'turn/start', data: { turn: 1 } }] } }
-
-  assert.equal(standingFullAccess(ctx, agent), true)
-  mode = 'workspace-write'
-  assert.equal(standingFullAccess(ctx, agent), false)
-  mode = 'read-only'
-  assert.equal(standingFullAccess(ctx, agent), false)
 })

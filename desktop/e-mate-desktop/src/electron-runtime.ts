@@ -11,7 +11,6 @@ import {
   net,
   Notification,
   shell,
-  systemPreferences,
   Tray,
 } from 'electron'
 import { spawn } from 'node:child_process'
@@ -321,22 +320,6 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     } catch (cause) {
       this.reportTerminalLaunchError(cause)
     }
-  }
-
-  /** @inheritdoc */
-  async openComputerUseAccessibilitySetup(): Promise<boolean> {
-    if (this.platform !== 'darwin') {
-      throw new Error('computer-use Accessibility setup is available only on macOS')
-    }
-    if (systemPreferences.isTrustedAccessibilityClient(false)) return true
-
-    systemPreferences.isTrustedAccessibilityClient(true)
-    await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility')
-    this.showNotification({
-      title: '请允许 e-Mate 操控电脑',
-      body: '已打开“隐私与安全性 → 辅助功能”，请添加或开启 e-Mate；完成后 Agent 会重试。',
-    })
-    return systemPreferences.isTrustedAccessibilityClient(false)
   }
 
   /** @inheritdoc */

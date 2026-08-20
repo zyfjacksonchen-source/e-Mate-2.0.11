@@ -118,7 +118,7 @@ describe('signed Profile update path', () => {
       license: 'MIT',
       main: 'index.js',
       dsh,
-      eMate: { component: { schema_version: 1, id, kind: 'profile', base_imports: [], base_contracts: [base.id] } },
+      eMate: { component: { schema_version: 1, id, kind: 'profile', base_imports: [], authority_contract: { effects: [], guards: [] }, base_contracts: [base.id] } },
     }, null, 2)}\n`)
     const indexBytes = Buffer.from('export const name = "memory-evolve"\n')
     const files = [
@@ -135,6 +135,7 @@ describe('signed Profile update path', () => {
       source_commit: commit,
       base_contracts: [base.id],
       base_imports: [],
+      authority_contract: { effects: [], guards: [] },
       harness_contract: { version: base.harness_version, commit: base.harness_commit },
       package_entry: 'index.js',
       dsh,

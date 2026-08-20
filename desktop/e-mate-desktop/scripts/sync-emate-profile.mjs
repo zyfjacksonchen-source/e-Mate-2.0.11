@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
+import { syncEmatePluginBundles } from '../../../scripts/sync-emate-plugin-bundles.mjs'
 
 const desktopRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const repositoryRoot = resolve(desktopRoot, '..', '..')
@@ -18,7 +19,6 @@ if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/u.test(version)) {
 }
 const ecosystemPlugins = [
   '@kelearns/dsh-navigation-bar',
-  '@omdsh-dev/dsh-genui',
   'dsh-at-file',
   'dsh-file-viewer',
   'dsh-turn-fold',
@@ -27,7 +27,6 @@ const ecosystemPlugins = [
 
 for (const path of [
   join(source, 'cordis.patch.yml'),
-  join(source, 'bundles', 'registry.json'),
   join(source, 'plugins', 'health.js'),
   join(source, 'plugins', 'emate-shell', 'lib', 'client.js'),
   mark,
@@ -44,8 +43,10 @@ await cp(source, destination, {
   recursive: true,
   force: true,
   dereference: false,
-  filter: async path => !(await lstat(path)).isSymbolicLink(),
+  filter: async path => relative(source, path).split(sep)[0] !== 'bundles'
+    && !(await lstat(path)).isSymbolicLink(),
 })
+await syncEmatePluginBundles({ target: 'desktop', destination: join(destination, 'bundles') })
 for (const name of ecosystemPlugins) {
   const packageRoot = dirname(require.resolve(`${name}/package.json`))
   await cp(packageRoot, join(destination, 'ecosystem', name), {

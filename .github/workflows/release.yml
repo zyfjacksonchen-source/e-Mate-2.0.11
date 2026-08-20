@@ -50,6 +50,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: |
             pnpm-lock.yaml
+            packages/dsh-plugin-*/pnpm-lock.yaml
+            packages/dsh/profile/plugins/emate-shell/pnpm-lock.yaml
             enterprise/pnpm-lock.yaml
             upstream/deepseek-harness/pnpm-lock.yaml
 

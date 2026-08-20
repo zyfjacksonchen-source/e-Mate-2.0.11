@@ -69,7 +69,6 @@ export interface EmateProfileGeneration {
 
 const ECOSYSTEM_PLUGIN_PACKAGES = [
   { name: '@kelearns/dsh-navigation-bar', version: '0.2.1', entry: 'index.js', client: true, patchName: "'@kelearns/dsh-navigation-bar'" },
-  { name: '@omdsh-dev/dsh-genui', version: '0.8.3', entry: 'lib/index.js', client: true, patchName: "'@omdsh-dev/dsh-genui'" },
   { name: 'dsh-at-file', version: '0.6.2', entry: 'lib/index.js', client: true, patchName: 'dsh-at-file' },
   { name: 'dsh-file-viewer', version: '0.1.0', entry: 'lib/index.js', client: true, patchName: "'dsh-file-viewer'" },
   { name: 'dsh-turn-fold', version: '0.2.2', entry: 'index.js', client: true, patchName: 'dsh-turn-fold' },
@@ -87,6 +86,7 @@ const RETIRED_PROFILE_PACKAGES = new Set([
   '@e-mate/dsh-plugin-im',
   '@e-mate/dsh-plugin-subagent',
   '@e-mate/dsh-plugin-xin-assistant',
+  '@omdsh-dev/dsh-genui',
   '@yuxianglin/dsh-bridge-browser',
   'dsh-better-sidebar',
   'dsh-search-mcp',
@@ -126,6 +126,12 @@ function bundledComponentSource(id: string): string {
 
 function componentSource(id: string, generation?: EmateProfileGeneration): string {
   return generation?.componentDirectories.get(id) ?? bundledComponentSource(id)
+}
+
+/** Exact component roots whose declared imports may resolve through the Base ABI. */
+export function emateProfileComponentSources(generation?: EmateProfileGeneration): readonly string[] {
+  validateGeneration(generation)
+  return EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS.map(id => componentSource(id, generation))
 }
 
 function packageVersion(source: string, expectedName: string): string {
@@ -366,6 +372,8 @@ export function installEmateDesktopProfile(
       atomicWrite(settings, `${current}${current.endsWith('\n') ? '' : '\n'}${DEFAULT_MODEL_SETTINGS}`, 0o600)
     }
   }
+  rmSync(join(dshHome, 'browser-extension'), { recursive: true, force: true })
+  rmSync(join(dshHome, 'ext-bridge-token'), { force: true })
   if (installedProfileCurrent(profile, dshHome, generation)) return profile
 
   rmSync(join(profile, PROFILE_INSTALL_RECEIPT), { force: true })
@@ -375,7 +383,6 @@ export function installEmateDesktopProfile(
     `${readFileSync(join(sourceRoot, 'cordis.patch.yml'), 'utf8').trimEnd()}\n\n- id: dsh-file-viewer\n  config:\n    allowAbsolutePaths: false\n`,
   )
   atomicWrite(join(profile, 'cordis.yml'), '[]\n')
-  rmSync(join(dshHome, 'browser-extension'), { recursive: true, force: true })
   let previous: {
     dependencies?: Record<string, unknown>
     dsh?: { profile?: { bundles?: unknown[] } }

@@ -8,7 +8,7 @@ import { removeManagedSkill, throwawayEnvironment } from '../lib/emate-safety.js
 
 const root = new URL('../', import.meta.url)
 
-test('find-skill adapter is pinned, user-confirmed, and uses the native subprocess seam', async () => {
+test('find-skill is pinned, discovery-only, and uses the native subprocess seam', async () => {
   const pkg = JSON.parse(await readFile(new URL('package.json', root), 'utf8'))
   const patch = await readFile(new URL('cordis.patch.yml', root), 'utf8')
   const cli = await readFile(new URL('../lib/cli.js', import.meta.url), 'utf8')
@@ -18,6 +18,10 @@ test('find-skill adapter is pinned, user-confirmed, and uses the native subproce
   assert.equal(pkg.version, '2.0.11')
   assert.equal(pkg.dsh.upstream.commit, '5a7f18b4535835a81de47c0cc2ca8ceb6e97a4e6')
   assert.match(patch, /cliCommand: 'pnpm dlx skills@1\.5\.22'/u)
+  assert.match(patch, /registerFindTool: true/u)
+  assert.match(patch, /registerInstallTool: false/u)
+  assert.match(patch, /registerRemoveTool: false/u)
+  assert.match(patch, /registerCommand: false/u)
   assert.match(tools, /agent: exec\.agent/u)
   assert.doesNotMatch(patch, /\bnpx\b/u)
   assert.match(patch, /tree\/skills-v2\.0\.9-r5\/skills\/connect-feishu-cli/u)

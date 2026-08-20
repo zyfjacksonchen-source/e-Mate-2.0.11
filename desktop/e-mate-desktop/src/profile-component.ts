@@ -2,9 +2,11 @@
 
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { chmod, lstat, mkdir, open, readFile, readdir, rm, writeFile } from 'node:fs/promises'
-import { dirname, join, relative, sep } from 'node:path'
+import { chmod, lstat, mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join, relative, sep } from 'node:path'
 import { promisify } from 'node:util'
+import { Unzip, UnzipInflate } from 'fflate'
 import type {
   ProfileBaseContract,
   ProfileComponentTarget,
@@ -21,12 +23,31 @@ const STABLE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u
 const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu
 const LOCAL_RECEIPT = '.e-mate-component.json'
 const LOCAL_MANIFEST = '.e-mate-component-manifest.json'
+const MAX_WHEEL_BYTES = 64 * 1024 * 1024
+const MAX_WHEEL_FILES = 5_000
+const MAX_WHEEL_EXPANDED_BYTES = 256 * 1024 * 1024
+const COMPONENT_AUTHORITY_EFFECTS = new Set([
+  'browser-control', 'browser-read', 'credentials-read', 'credentials-write', 'desktop-restart',
+  'filesystem-read', 'filesystem-write', 'host-plugin-install', 'network-loopback', 'network-remote',
+  'os-accessibility', 'os-input-control', 'os-screen-recording', 'persistent-state', 'skill-lifecycle',
+  'subprocess',
+])
+const COMPONENT_AUTHORITY_GUARDS = new Set([
+  'atomic-receipt', 'authenticated-identity', 'enterprise-policy', 'explicit-user-action',
+  'fixed-catalog', 'fixed-endpoint', 'native-approval', 'native-user-question', 'os-tcc',
+  'plugin-settings-grant', 'read-only', 'sandbox-policy', 'session-scope', 'workspace-scope',
+])
 
 export interface ProfileComponentFile {
   readonly path: string
   readonly bytes: number
   readonly sha256: string
   readonly mode: '0644' | '0755'
+}
+
+export interface ProfileComponentAuthorityContract {
+  readonly effects: readonly string[]
+  readonly guards: readonly string[]
 }
 
 export interface ProfileComponentManifest {
@@ -39,6 +60,7 @@ export interface ProfileComponentManifest {
   readonly source_commit: string
   readonly base_contracts: readonly string[]
   readonly base_imports: readonly string[]
+  readonly authority_contract: ProfileComponentAuthorityContract
   readonly harness_contract: {
     readonly version: string
     readonly commit: string
@@ -67,6 +89,14 @@ function sortedUniqueStrings(value: unknown, allowEmpty = false): value is strin
     && (allowEmpty || value.length > 0)
     && value.every(item => typeof item === 'string' && item !== '')
     && value.every((item, index) => index === 0 || value[index - 1]! < item)
+}
+
+function parseAuthorityContract(value: unknown): ProfileComponentAuthorityContract | undefined {
+  if (!record(value) || !exactKeys(value, ['effects', 'guards'])
+    || !sortedUniqueStrings(value.effects, true) || !sortedUniqueStrings(value.guards, true)
+    || value.effects.some(effect => !COMPONENT_AUTHORITY_EFFECTS.has(effect))
+    || value.guards.some(guard => !COMPONENT_AUTHORITY_GUARDS.has(guard))) return
+  return { effects: [...value.effects], guards: [...value.guards] }
 }
 
 /** Reject traversal plus names that cannot be materialized consistently on macOS and Windows. */
@@ -111,7 +141,7 @@ export function parseProfileComponentManifest(
   } catch { return }
   if (!record(value) || !exactKeys(value, [
     'schema_version', 'id', 'slug', 'version', 'kind', 'target', 'source_commit', 'base_contracts',
-    'base_imports', 'harness_contract', 'package_entry', 'dsh', 'total_bytes', 'files',
+    'base_imports', 'authority_contract', 'harness_contract', 'package_entry', 'dsh', 'total_bytes', 'files',
   ]) || value.schema_version !== 1
     || value.id !== reference.id || value.slug !== componentSlug(reference.id)
     || value.version !== reference.version || !STABLE_VERSION.test(value.version as string)
@@ -120,6 +150,7 @@ export function parseProfileComponentManifest(
     || !sortedUniqueStrings(value.base_contracts) || !value.base_contracts.includes(base.id)
     || !sortedUniqueStrings(value.base_imports, true)
     || value.base_imports.some(name => !Object.hasOwn(base.runtime_imports, name))
+    || parseAuthorityContract(value.authority_contract) === undefined
     || !record(value.harness_contract)
     || !exactKeys(value.harness_contract, ['version', 'commit'])
     || value.harness_contract.version !== base.harness_version
@@ -147,6 +178,7 @@ export function parseProfileComponentManifest(
     source_commit: reference.manifest_source_commit,
     base_contracts: [...value.base_contracts],
     base_imports: [...value.base_imports],
+    authority_contract: parseAuthorityContract(value.authority_contract)!,
     harness_contract: { version: base.harness_version, commit: base.harness_commit },
     package_entry: value.package_entry,
     dsh: value.dsh,
@@ -177,13 +209,137 @@ async function binaryKind(path: string): Promise<'mach-o' | 'pe' | 'elf' | undef
   }
 }
 
+interface WheelBinary {
+  readonly path: string
+  readonly kind: 'mach-o' | 'pe' | 'elf'
+  readonly bytes: Buffer
+}
+
+function bufferBinaryKind(bytes: Buffer): 'mach-o' | 'pe' | 'elf' | undefined {
+  const magic = bytes.subarray(0, 4).toString('hex')
+  if (MACH_O_MAGICS.has(magic)) return 'mach-o'
+  if (bytes.length >= 4 && bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) return 'elf'
+  if (bytes.length < 64 || bytes[0] !== 0x4d || bytes[1] !== 0x5a) return
+  const offset = bytes.readUInt32LE(0x3c)
+  return offset <= bytes.length - 6 && bytes.subarray(offset, offset + 4).equals(Buffer.from([0x50, 0x45, 0x00, 0x00]))
+    ? 'pe'
+    : undefined
+}
+
+function wheelTargetMatches(filename: string, target: ProfileComponentTarget): boolean {
+  if (target.runtime_abi !== 'cpython-3.12') return false
+  const suffix = target.platform === 'win32'
+    ? '-cp312-cp312-win_amd64.whl'
+    : target.arch === 'arm64'
+      ? /-cp312-cp312-macosx_[0-9]+_[0-9]+_arm64\.whl$/u
+      : /-cp312-cp312-macosx_[0-9]+_[0-9]+_x86_64\.whl$/u
+  return typeof suffix === 'string' ? filename.endsWith(suffix) : suffix.test(filename)
+}
+
+function wheelBinaryMatchesTarget(bytes: Buffer, target: ProfileComponentTarget): boolean {
+  if (target.platform === 'win32') {
+    if (bufferBinaryKind(bytes) !== 'pe') return false
+    const offset = bytes.readUInt32LE(0x3c)
+    return bytes.readUInt16LE(offset + 4) === 0x8664
+  }
+  const magic = bytes.subarray(0, 4).toString('hex')
+  const expected = target.arch === 'arm64' ? 0x0100000c : 0x01000007
+  if (magic === 'cafebabe' || magic === 'bebafeca' || magic === 'cafebabf' || magic === 'bfbafeca') {
+    const littleEndian = magic === 'bebafeca' || magic === 'bfbafeca'
+    const count = littleEndian ? bytes.readUInt32LE(4) : bytes.readUInt32BE(4)
+    const entrySize = magic === 'cafebabf' || magic === 'bfbafeca' ? 32 : 20
+    if (count < 1 || count > 16 || 8 + count * entrySize > bytes.length) return false
+    const cpus = new Set(Array.from({ length: count }, (_, index) => (
+      littleEndian ? bytes.readUInt32LE(8 + index * entrySize) : bytes.readUInt32BE(8 + index * entrySize)
+    )))
+    return cpus.size === 1 && cpus.has(expected)
+  }
+  if (magic !== 'cffaedfe' && magic !== 'cefaedfe' && magic !== 'feedfacf' && magic !== 'feedface') return false
+  const littleEndian = magic === 'cffaedfe' || magic === 'cefaedfe'
+  return (littleEndian ? bytes.readUInt32LE(4) : bytes.readUInt32BE(4)) === expected
+}
+
+async function wheelBinaries(path: string, target: ProfileComponentTarget): Promise<WheelBinary[]> {
+  const archive = await readFile(path)
+  if (archive.byteLength === 0 || archive.byteLength > MAX_WHEEL_BYTES
+    || !wheelTargetMatches(basename(path), target)) {
+    throw new Error('component wheel target contract is invalid')
+  }
+  const binaries: WheelBinary[] = []
+  const names = new Set<string>()
+  let entries = 0
+  let expanded = 0
+  let started = 0
+  let completed = 0
+  let failure: Error | undefined
+  const unzip = new Unzip(file => {
+    if (failure !== undefined) return
+    const name = file.name.endsWith('/') ? file.name.slice(0, -1) : file.name
+    entries += 1
+    if (name === '' || !safeComponentPath(name) || names.has(name)
+      || entries > MAX_WHEEL_FILES || file.originalSize === undefined
+      || !Number.isSafeInteger(file.originalSize) || file.originalSize < 0) {
+      failure = new Error('component wheel archive contract is invalid')
+      return
+    }
+    names.add(name)
+    expanded += file.originalSize
+    if (expanded > MAX_WHEEL_EXPANDED_BYTES) {
+      failure = new Error('component wheel expanded size is invalid')
+      return
+    }
+    if (file.name.endsWith('/')) return
+    started += 1
+    const chunks: Uint8Array[] = []
+    let length = 0
+    file.ondata = (error, chunk, final) => {
+      if (failure !== undefined) return
+      if (error !== null) {
+        failure = error
+        return
+      }
+      length += chunk.byteLength
+      if (length > file.originalSize!) {
+        failure = new Error('component wheel entry length is invalid')
+        return
+      }
+      chunks.push(chunk)
+      if (!final) return
+      completed += 1
+      if (length !== file.originalSize) {
+        failure = new Error('component wheel entry length is invalid')
+        return
+      }
+      const bytes = Buffer.concat(chunks, length)
+      const kind = bufferBinaryKind(bytes)
+      if (kind !== undefined) binaries.push({ path: file.name, kind, bytes })
+    }
+    try { file.start() } catch (cause) {
+      failure = cause instanceof Error ? cause : new Error(String(cause))
+    }
+  })
+  unzip.register(UnzipInflate)
+  try { unzip.push(archive, true) } catch (cause) {
+    failure ??= cause instanceof Error ? cause : new Error(String(cause))
+  }
+  if (failure !== undefined) throw failure
+  if (entries === 0 || completed !== started || binaries.length === 0
+    || binaries.some(binary => !wheelBinaryMatchesTarget(binary.bytes, target))) {
+    throw new Error('component wheel native closure is invalid')
+  }
+  return binaries
+}
+
 async function verifyPlatformTarget(
   directory: string,
   manifest: ProfileComponentManifest,
   platform: NodeJS.Platform,
   arch: string,
 ): Promise<void> {
-  const binaries: Array<{ path: string, kind: 'mach-o' | 'pe' | 'elf' }> = []
+  const binaries: Array<{ path: string, kind: 'mach-o' | 'pe' | 'elf', bytes?: Buffer }> = []
+  if (manifest.target === null && manifest.files.some(file => file.path.endsWith('.whl'))) {
+    throw new Error('portable component contains a platform wheel')
+  }
   for (const file of manifest.files) {
     const path = join(directory, ...file.path.split('/'))
     const kind = await binaryKind(path)
@@ -207,18 +363,40 @@ async function verifyPlatformTarget(
     return
   }
   if (nativeFiles.length === 0) throw new Error('platform component native closure is empty')
+  if (manifest.target.runtime_abi === 'cpython-3.12') {
+    if (nativeFiles.some(file => !file.path.endsWith('.whl'))) {
+      throw new Error('CPython component native closure must contain only wheels')
+    }
+    for (const file of nativeFiles) {
+      const archivePath = join(directory, ...file.path.split('/'))
+      for (const binary of await wheelBinaries(archivePath, manifest.target)) {
+        binaries.push({ path: `${file.path}!/${binary.path}`, kind: binary.kind, bytes: binary.bytes })
+      }
+    }
+  }
   if (platform === 'darwin') {
     const machO = binaries.filter(binary => binary.kind === 'mach-o')
     if (manifest.target.signing.scheme !== 'adhoc' || machO.length === 0 || machO.length !== binaries.length) {
       throw new Error('macOS component native signing contract is invalid')
     }
-    for (const binary of machO) {
-      const path = join(directory, ...binary.path.split('/'))
-      await execFileAsync('/usr/bin/codesign', ['--verify', '--strict', path])
-      const displayed = await execFileAsync('/usr/bin/codesign', ['-dvv', path])
-      if (!/Signature=adhoc/u.test(`${displayed.stdout}\n${displayed.stderr}`)) {
-        throw new Error('macOS component native binary is not ad-hoc signed')
+    const extracted = machO.some(binary => binary.bytes !== undefined)
+      ? await mkdtemp(join(tmpdir(), 'e-mate-component-native-'))
+      : undefined
+    try {
+      for (let index = 0; index < machO.length; index += 1) {
+        const binary = machO[index]!
+        const path = binary.bytes === undefined
+          ? join(directory, ...binary.path.split('/'))
+          : join(extracted!, `${String(index)}.bin`)
+        if (binary.bytes !== undefined) await writeFile(path, binary.bytes, { mode: 0o644, flag: 'wx' })
+        await execFileAsync('/usr/bin/codesign', ['--verify', '--strict', path])
+        const displayed = await execFileAsync('/usr/bin/codesign', ['-dvv', path])
+        if (!/Signature=adhoc/u.test(`${displayed.stdout}\n${displayed.stderr}`)) {
+          throw new Error('macOS component native binary is not ad-hoc signed')
+        }
       }
+    } finally {
+      if (extracted !== undefined) await rm(extracted, { recursive: true, force: true })
     }
   } else if (manifest.target.signing.scheme !== 'unsigned' || binaries.length === 0
     || binaries.some(binary => binary.kind !== 'pe')) {
@@ -308,12 +486,15 @@ async function verifyPackageContract(
     || value.license !== 'MIT' || value.main !== manifest.package_entry
     || !record(value.dsh) || canonical(value.dsh) !== canonical(manifest.dsh)
     || !record(value.eMate) || !record(value.eMate.component)
-    || !exactKeys(value.eMate.component, ['schema_version', 'id', 'kind', 'base_imports', 'base_contracts'])
+    || !exactKeys(value.eMate.component, [
+      'schema_version', 'id', 'kind', 'base_imports', 'authority_contract', 'base_contracts',
+    ])
     || value.eMate.component.schema_version !== 1
     || value.eMate.component.id !== manifest.id
     || value.eMate.component.kind !== manifest.kind
     || canonical(value.eMate.component.base_contracts) !== canonical(manifest.base_contracts)
     || canonical(value.eMate.component.base_imports) !== canonical(manifest.base_imports)
+    || canonical(value.eMate.component.authority_contract) !== canonical(manifest.authority_contract)
     || !manifest.base_contracts.includes(base.id)) {
     throw new Error('component package contract does not match its verified manifest')
   }

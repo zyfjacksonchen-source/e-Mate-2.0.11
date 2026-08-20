@@ -7,7 +7,10 @@ import {
   resolveServer,
   validateSearchConfig,
 } from '../src/contract.ts'
-import { searchCapabilityStatus } from '../src/capability.ts'
+import {
+  SEARCH_CREDENTIAL_ACTION,
+  searchCapabilityStatus,
+} from '../src/capability.ts'
 
 const root = new URL('../', import.meta.url)
 const baseConfig = {
@@ -96,20 +99,22 @@ test('untrusted MCP output is bounded, cycle-safe, and strips credential URLs', 
   })
 })
 
-test('capability reports ready only after a configured credential exists', () => {
-  assert.deepEqual(searchCapabilityStatus({ server: 'missing', needsCredential: false, credentialRef: '', credentialConfigured: false }), {
-    state: 'setup-required', detail: '尚未配置 MCP 搜索服务。', action_ids: [],
+test('capability securely configures and reports the native credential', () => {
+  assert.deepEqual(searchCapabilityStatus({ server: 'missing', needsCredential: false, credentialRef: '', credentialConfigured: false, credentialWritable: false }), {
+    state: 'setup-required', detail: '尚未配置 MCP 搜索服务。', action_ids: [], credential_refs: {},
   })
-  assert.deepEqual(searchCapabilityStatus({ server: 'invalid', needsCredential: false, credentialRef: '', credentialConfigured: false }), {
-    state: 'blocked', detail: '默认 MCP 搜索服务不在当前配置中。', action_ids: [],
+  assert.deepEqual(searchCapabilityStatus({ server: 'invalid', needsCredential: false, credentialRef: '', credentialConfigured: false, credentialWritable: false }), {
+    state: 'blocked', detail: '默认 MCP 搜索服务不在当前配置中。', action_ids: [], credential_refs: {},
   })
-  assert.deepEqual(searchCapabilityStatus({ server: 'configured', needsCredential: true, credentialRef: '', credentialConfigured: false }), {
-    state: 'setup-required', detail: 'MCP 搜索服务尚未绑定凭据引用。', action_ids: [],
+  assert.deepEqual(searchCapabilityStatus({ server: 'configured', needsCredential: true, credentialRef: '', credentialConfigured: false, credentialWritable: true }), {
+    state: 'setup-required', detail: 'MCP 搜索服务尚未绑定凭据引用。', action_ids: [], credential_refs: {},
   })
-  assert.deepEqual(searchCapabilityStatus({ server: 'configured', needsCredential: true, credentialRef: 'TAVILY_API_KEY', credentialConfigured: false }), {
-    state: 'setup-required', detail: 'MCP 搜索凭据尚未在本机配置。', action_ids: [],
+  assert.deepEqual(searchCapabilityStatus({ server: 'configured', needsCredential: true, credentialRef: 'TAVILY_API_KEY', credentialConfigured: false, credentialWritable: true }), {
+    state: 'setup-required', detail: 'MCP 搜索凭据尚未在本机配置。', action_ids: [SEARCH_CREDENTIAL_ACTION],
+    credential_refs: { [SEARCH_CREDENTIAL_ACTION]: 'TAVILY_API_KEY' },
   })
-  assert.deepEqual(searchCapabilityStatus({ server: 'configured', needsCredential: true, credentialRef: 'TAVILY_API_KEY', credentialConfigured: true }), {
-    state: 'ready', detail: 'MCP 搜索配置与本机凭据已就绪。', action_ids: [],
+  assert.deepEqual(searchCapabilityStatus({ server: 'configured', needsCredential: true, credentialRef: 'TAVILY_API_KEY', credentialConfigured: true, credentialWritable: true }), {
+    state: 'ready', detail: 'MCP 搜索配置与本机凭据已就绪。', action_ids: [SEARCH_CREDENTIAL_ACTION],
+    credential_refs: { [SEARCH_CREDENTIAL_ACTION]: 'TAVILY_API_KEY' },
   })
 })

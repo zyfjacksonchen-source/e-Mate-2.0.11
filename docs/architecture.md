@@ -1,4 +1,4 @@
-# e-Mate 2.0.7 architecture
+# e-Mate 2.0.11 architecture
 
 The normative product and source boundaries live in [target-contract.md](target-contract.md). This document records how the implementation satisfies them without forking the pinned DeepSeek Harness architecture.
 
@@ -6,7 +6,7 @@ The normative product and source boundaries live in [target-contract.md](target-
 
 DeepSeek Harness `0.1.0-rc.7` at downstream commit `df78045a127e32cb5b942defba52c539590d1596` (upstream base `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`) is the only local runtime core. It owns the Agent Loop, sessions, durable event logs, model calls, tools, approvals, attachments, Jobs, plugin loading, reconnect semantics, and persistence.
 
-The single `@e-mate/dsh@2.0.7` package owns lifecycle commands, the managed profile, product branding, client-module composition, bundle validation, migrations, and the three enterprise-side services. It does not replace or duplicate the Harness runtime and has no Runtime/Browser platform-package family. Its desktop dependency closure applies only the two source-pinned shell permission boundary patches carried by the downstream Harness commit.
+`@e-mate/desktop@2.0.11` is the native carrier for Electron, the pinned Harness closure, startup/shutdown, updater trust, packaged platform runtimes and renderer-health recovery. Product branding and behavior live in independently versioned Profile components selected by one signed generation. Neither layer replaces the Harness runtime, and there is no Runtime/Browser platform-package family or second plugin loader.
 
 All maintained application source is TypeScript or TSX and is built with the exact Harness `tsdown` installation. Node-executable JavaScript and browser bundles under `lib/` are generated artifacts.
 
@@ -52,13 +52,13 @@ The implemented audit adapter listens to the target `agent/request`, `assistant/
 
 ## Embedded Harness bundles
 
-The public npm closure installs only the TypeScript/Cordis components declared by `packages/dsh/profile/component-inventory.json` through the target Loader and bundle/patch mechanism. The inventory is shared by CLI setup, Desktop composition, change classification and release. Components reuse target services, module IDs, slots, Session events and Connection RPC; they do not add a second WebUI-to-CLI protocol, Store, Router, Agent Loop or package installer.
+The bundled baseline and every hot Profile generation contain only the TypeScript/Cordis components declared by `packages/dsh/profile/component-inventory.json` through the target Loader and bundle/patch mechanism. The inventory is shared by CLI compatibility, Desktop composition, change classification and release. Components reuse target services, module IDs, slots, Session events and Connection RPC; they do not add a second WebUI-to-Host protocol, Store, Router, Agent Loop or package installer.
 
 `office-skills` supplies four clean-room Skills for documents, PDF, spreadsheets and presentations. It does not ship the deleted Python Worker or claim local Office-format execution until an accepted host toolchain closes the action. `search-mcp` adapts MCP discovery/calls to the target Web/Tool path. `genui` and `better-sidebar` contribute target UI slots. The pinned Harness remains the sole owner of native Subagent services.
 
 Browser control is `@e-mate/dsh-plugin-cdp`: a dependency-free loopback CDP client registered as ordinary DSH Tools. It binds target selection and accessibility snapshots to the current Agent session, uses target approval for mutations, and never downloads or launches a browser. There is no extension, Browser Panel, extra UI transport or Base browser bridge. macOS and Windows remain platform-gated until real installed-browser session isolation, action and recovery runs pass.
 
-`vision-toolkit` does not register a ready OCR/Vision capability because rc.5 lacks the required enterprise model-policy seam. It remains `blocked` rather than importing the deleted RapidOCR/Python closure, a local model Key, or an ungoverned model route.
+`vision-toolkit` is a Desktop-only rc.7 hot Profile component. It retains the pinned native Skill, visual Tools, pasted-image codec, Tool views, Artifact preview/download and health surface, while consuming only the Desktop's stable packaged-Python seam. Its model route and credential remain read-only enterprise-policy projections; the Web surface cannot mutate either.
 
 ## Project-scoped memory
 
@@ -82,7 +82,7 @@ The managed profile loads upstream `@deepseek-ai/dsh-schedule`; its versioned `s
 
 Old `tasks.json` rows are a migration catalog only. They enter a local mode-0600 disabled receipt after bounded no-follow validation. Unsupported source semantics remain blocked. After a separate exact user confirmation, the import Tool nests the official `schedule_list`/`schedule_create` Tools in the current Agent scope, so the target's validation, tool policy, persistence checkpoints, event append, and runtime drive remain authoritative.
 
-The pinned shipped baseline was audited before selecting the embedded bundles. Search, Office Skills, browser control, Vision/OCR, memory and UI extensions remain target-loader plugins with explicit readiness; no deleted local Worker or browser runtime is retained as a fallback. Capability presence in the tarball is not acceptance: Vision/OCR is blocked, and both platform browser paths remain setup-required until their named platform gates pass.
+The pinned shipped baseline was audited before selecting the embedded bundles. Search, Office Skills, browser control, Vision/OCR, memory and UI extensions remain target-loader plugins with explicit readiness; no deleted local Worker or browser runtime is retained as a fallback. Capability presence in the tarball is not acceptance: Vision/OCR becomes ready only after its managed runtime and enterprise model route pass health, and browser control remains setup-required until its named platform gates pass.
 
 ## Identity and usage continuity
 

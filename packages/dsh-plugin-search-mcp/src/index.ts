@@ -7,7 +7,10 @@ import { WebError, type WebSearchProvider, type WebSearchResult } from '@deepsee
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
-import { searchCapabilityStatus } from './capability.ts'
+import {
+  SEARCH_CREDENTIAL_ACTION,
+  searchCapabilityStatus,
+} from './capability.ts'
 import {
   extractSearchResult,
   resolveSearchLimit,
@@ -41,6 +44,8 @@ export const Config: Schema<SearchMcpConfig> = z.object({
 })
 
 type Server = SearchMcpServerConfig
+
+type SearchContext = Context & { emateCapabilities: { register(definition: unknown): () => void } }
 
 interface ProviderOptions {
   servers: Server[]
@@ -154,7 +159,7 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal, stage: string): 
   })
 }
 
-/** Register one live Settings-backed search provider with rc.5 Web. */
+/** Register one live Settings-backed search provider with the pinned rc.7 Web client. */
 export function apply(ctx: Context, config: SearchMcpConfig): void {
   validateSearchConfig(config)
   let current = (): SearchMcpConfig => config
@@ -173,33 +178,35 @@ export function apply(ctx: Context, config: SearchMcpConfig): void {
       return (await ctx.credentials.resolve(credentialRef(server.credentialRef)))?.value
     },
   })))
-  const capabilities = (ctx as Context & { emateCapabilities: { register(definition: unknown): () => void } }).emateCapabilities
+  const searchContext = ctx as SearchContext
+  const capabilities = searchContext.emateCapabilities
   ctx.effect(() => capabilities.register({
     id: 'web-search',
     title: '网络搜索',
     summary: '通过 e-Mate 原生 Web 工具调用已配置的 MCP 搜索服务，不建立额外浏览器传输。',
     icon_key: 'browser',
     order: 30,
-    actions: [],
+    actions: [{ id: SEARCH_CREDENTIAL_ACTION, label: '配置/更新凭据', kind: 'primary', input: 'credential' }],
     status: async (signal: AbortSignal) => {
       signal.throwIfAborted()
       const settings = current()
       if (settings.servers.length === 0) return searchCapabilityStatus({
-        server: 'missing', needsCredential: false, credentialRef: '', credentialConfigured: false,
+        server: 'missing', needsCredential: false, credentialRef: '', credentialConfigured: false, credentialWritable: false,
       })
       const server = settings.defaultServer.length === 0
         ? settings.servers[0]
         : settings.servers.find(item => item.id === settings.defaultServer)
       if (server === undefined) return searchCapabilityStatus({
-        server: 'invalid', needsCredential: false, credentialRef: '', credentialConfigured: false,
+        server: 'invalid', needsCredential: false, credentialRef: '', credentialConfigured: false, credentialWritable: false,
       })
       const resolved = resolveServer(server)
-      const credentialConfigured = (await ctx.credentials.describe(credentialRef(resolved.credentialRef))).configured
+      const credential = await ctx.credentials.describe(credentialRef(resolved.credentialRef))
       return searchCapabilityStatus({
         server: 'configured',
         needsCredential: true,
         credentialRef: resolved.credentialRef,
-        credentialConfigured,
+        credentialConfigured: credential.configured,
+        credentialWritable: credential.writable,
       })
     },
   }), 'emate.search-mcp: capability metadata')
