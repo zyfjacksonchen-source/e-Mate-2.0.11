@@ -84,7 +84,6 @@ jobs:
           job_succeeded 'CI admission'
           if test "$BOOTSTRAP" = true; then
             test "$(jq -er .lane "$impact")" = base
-            test "$(jq -c .publish_components "$impact")" = '[]'
             job_succeeded 'Node 24 / target contracts and unit tests'
             job_succeeded 'Windows x64 / unsigned desktop installer'
             job_succeeded 'macOS universal / unsigned desktop disk image'

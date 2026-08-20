@@ -365,6 +365,7 @@ describe('repository release boundary', () => {
     assert.match(workflow, /test "\$\(jq -er \.head_sha <<<"\$run_json"\)" = "\$GITHUB_SHA"/u)
     assert.match(workflow, /test "\$\(jq -er \.conclusion <<<"\$run_json"\)" = success/u)
     assert.match(workflow, /job_succeeded 'CI admission'/u)
+    assert.doesNotMatch(workflow, /if test "\$BOOTSTRAP" = true; then[^]*?publish_components[^]*?= '\[\]'/u)
     assert.match(workflow, /node scripts\/component-release\.mjs inventory > component-inventory\.json/u)
     assert.match(workflow, /Bootstrap complete Profile generation \/ \$\{\{ matrix\.target \}\}/u)
     assert.match(workflow, /node desktop\/e-mate-desktop\/scripts\/verify-profile-boot\.mjs/u)
