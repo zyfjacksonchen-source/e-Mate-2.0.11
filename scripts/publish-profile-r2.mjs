@@ -23,7 +23,7 @@ import {
   verifyProfileRelease,
 } from '../desktop/e-mate-desktop/src/profile-release.ts'
 
-const REPOSITORY = 'zyfjacksonchen-source/e-Mate'
+const REPOSITORY = 'zyfjacksonchen-source/e-Mate-2.0.11'
 const BUCKET = 'emate-desktop-downloads'
 const ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
 const TARGET_NAMES = ['darwin-arm64', 'darwin-x64', 'win32-x64']

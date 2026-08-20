@@ -4,6 +4,8 @@ import { resolve } from 'node:path'
 import { ACCEPTED_PREDECESSOR, assertAcceptedPredecessor, PRODUCT_UI_REFERENCE } from './change-impact.mjs'
 
 const root = resolve(import.meta.dirname, '..')
+const repository = 'zyfjacksonchen-source/e-Mate-2.0.11'
+const repositoryUrl = `git+https://github.com/${repository}.git`
 const target = readFileSync(resolve(root, 'docs/target-contract.md'), 'utf8')
 const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
 const release = JSON.parse(readFileSync(resolve(root, 'packages/dsh/package.json'), 'utf8'))
@@ -40,7 +42,22 @@ if (release.name !== '@e-mate/dsh' || release.version !== '2.0.11') {
 if (!release.description.startsWith('e-Mate 2.0.11')) throw new Error('release product name drifted')
 if (release.bin?.['e-mate'] !== 'lib/bin.js') throw new Error('TypeScript-built CLI entry drifted')
 if (!target.includes('Product name: `e-Mate`')) throw new Error('product name drifted')
-if (!target.includes('Repository: `zyfjacksonchen-source/e-Mate`')) throw new Error('repository identity drifted')
+if (!target.includes(`Repository: \`${repository}\``)) throw new Error('repository identity drifted')
+for (const path of [
+  'packages/dsh/package.json',
+  'desktop/e-mate-desktop/package.json',
+  'packages/dsh-plugin-cdp/package.json',
+  'packages/dsh-plugin-memory-evolve/package.json',
+  'packages/dsh-plugin-office-skills/package.json',
+]) {
+  const value = JSON.parse(readFileSync(resolve(root, path), 'utf8'))
+  if (value.repository?.url !== repositoryUrl) throw new Error(`repository package metadata drifted: ${path}`)
+}
+for (const path of ['scripts/release.mjs', 'scripts/publish-r2.mjs', 'scripts/publish-profile-r2.mjs']) {
+  if (!readFileSync(resolve(root, path), 'utf8').includes(`const REPOSITORY = '${repository}'`)) {
+    throw new Error(`repository release authority drifted: ${path}`)
+  }
+}
 if (!target.includes(ACCEPTED_PREDECESSOR)) throw new Error('accepted 2.0.10 predecessor is missing')
 if (!target.includes('df78045a127e32cb5b942defba52c539590d1596')) throw new Error('Harness source pin is missing')
 if (!target.includes(PRODUCT_UI_REFERENCE.commit)) throw new Error('e-Mate shell source pin is missing')

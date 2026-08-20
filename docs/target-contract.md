@@ -5,7 +5,7 @@ This file is the implementation source of truth. Development records may add evi
 ## Identity and source pins
 
 - Product name: `e-Mate`
-- Repository: `zyfjacksonchen-source/e-Mate`
+- Repository: `zyfjacksonchen-source/e-Mate-2.0.11`
 - Desktop base candidate: `@e-mate/desktop@2.0.11`
 - Product Profile release: `2.0.11`
 - Accepted predecessor: Desktop `2.0.10` at `65a995fa795d7007dd90818c939c5185b3fc1a1d`; every 2.0.11 change starts from those exact accepted bytes and contracts.
