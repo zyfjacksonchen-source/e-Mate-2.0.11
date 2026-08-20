@@ -162,6 +162,11 @@ describe('published package surface', () => {
     expect(config).toContain("entryFileNames: 'preload.cjs'")
   })
 
+  it('keeps target Python preparation out of the portable Base SDK build', () => {
+    expect(manifest.scripts?.build).toBe('yarn run prepare:python && yarn run build:sdk')
+    expect(manifest.scripts?.['build:sdk']).not.toContain('prepare:python')
+  })
+
   it('installs Host command PATHs after the launch snapshot and before profile boot', () => {
     const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
     const recover = main.indexOf('await resolveDesktopShellEnvironment')
@@ -304,8 +309,8 @@ describe('published package surface', () => {
   it('separates unsigned smoke packaging from the signed macOS release', () => {
     const packageDir = readFileSync(new URL('scripts/package-dir.mjs', packageRoot), 'utf8')
 
-    expect(manifest.scripts?.build).toContain('node ../../scripts/sync-emate-plugin-bundles.mjs')
-    expect(manifest.scripts?.build).toContain('node scripts/generate-mac-app-icon.mjs')
+    expect(manifest.scripts?.['build:sdk']).toContain('node ../../scripts/sync-emate-plugin-bundles.mjs')
+    expect(manifest.scripts?.['build:sdk']).toContain('node scripts/generate-mac-app-icon.mjs')
     expect(manifest.scripts?.['package:dir']).toBe('yarn run build && node scripts/package-dir.mjs')
     expect(packageDir).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")
     expect(manifest.scripts?.['dist:mac']).toBe('node scripts/release-mac.ts')

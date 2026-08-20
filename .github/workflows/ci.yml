@@ -126,7 +126,7 @@ jobs:
         run: |
           corepack enable
           yarn install --immutable
-          yarn build
+          yarn build:sdk
 
       - name: Emit the immutable Base SDK
         if: steps.base-sdk.outputs.cache-hit != 'true'

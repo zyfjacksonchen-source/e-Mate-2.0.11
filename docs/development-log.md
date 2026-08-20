@@ -1641,3 +1641,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - impact Job 现在只在 `BASE_SHA` 精确等于 40 个零时，从 `change-impact.mjs` 的唯一 `ACCEPTED_PREDECESSOR` 读取 `65a995fa795d7007dd90818c939c5185b3fc1a1d`；普通 push 和 PR 仍使用 GitHub 提供的 exact base。分类器随后照常验证候选是该前序后代，缺对象或另一条历史仍失败关闭，不能用首次 push 绕过来源门禁。
 - 反例被写入现有 CI 权威测试；impact `17/17`、target contract、系统 YAML 解析与 diff check 通过。以 accepted predecessor 到当前提交的真实分类结果为 `lane=base`、`run_base=true`、contract valid；本修改自身属于 workflow authority，因此下一次 main push 必须运行完整 Base/Windows/macOS lane，而不是借 docs-only 跳过。
 - `Release e-Mate` 在普通 push 下仅执行 `inputs.publish == false` 的 build/clean-install/evidence 路径；R2 job 只接受显式 `workflow_dispatch publish=true`，本次没有发布 npm 或 R2 对象。
+
+## 2026-08-20 · 2.0.11 S31 Linux Base SDK 与平台 runtime 解耦
+
+- 新仓库 exact-SHA Base CI run `32320697231` 的 Harness build、目标合同和 release carrier 全部通过，随后在 Ubuntu 的 Base SDK cache miss 路径失败：`yarn build` 调用 `prepare-python-runtime.mjs`，该脚本正确拒绝 `linux-x64`。Windows/macOS Job 因 source 失败尚未启动；这证明旧仓库已有 cache 曾遮蔽首个 clean Base SDK seed。
+- Desktop 只拆出一个复用原构建命令的 `build:sdk` script；完整 `build` 仍严格执行 `prepare:python && build:sdk`，安装器和平台发布没有获得跳过 runtime 的入口。Ubuntu Base SDK Job 只编译其 manifest 实际收录的 Harness/Desktop lib、Profile 与图标，不下载也不收录 macOS/Windows Python；对应平台 Job 仍在原生 runner 准备并验证自己的 runtime closure。
+- Package 行为测试同时锁定完整 build 必须保留 Python preparation、SDK build 不得包含它，既有打包测试改为检查共享 `build:sdk` 中仍包含 Profile 同步与图标生成。聚焦结果为 package `22/22`、impact `17/17`、target contract、YAML、diff check，以及不执行 Python 下载的完整 SDK 编译成功。
+- `main` 已启用强制 PR、线性历史、禁止强推/删除及 required `CI admission`；本修复从独立分支提交并经 PR 验收，不再直接写受保护主线。
