@@ -22,7 +22,12 @@ async function loadBuiltModule(relative = 'lib/index.mjs') {
   const desktopEntry = pathToFileURL(resolve(
     fileURLToPath(new URL('../../../desktop/e-mate-desktop/lib/index.js', import.meta.url)),
   )).href
-  const dispose = installProfilePackageResolver(desktopEntry, [fileURLToPath(root)], base.runtime_imports)
+  const dispose = installProfilePackageResolver(
+    desktopEntry,
+    [fileURLToPath(root)],
+    base.runtime_imports,
+    new URL('.test-loader.mjs', root).href,
+  )
   try {
     const module = await import(new URL(relative, root))
     builtModules.set(relative, module)

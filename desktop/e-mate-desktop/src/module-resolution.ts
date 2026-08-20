@@ -6,7 +6,6 @@ import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { isProfileBaseRuntimePackage } from './profile-release.ts'
 
-const LOADER_ENTRY_URL = import.meta.resolve('@deepseek-ai/cordis-plugin-loader')
 const DESKTOP_ENTRY_URL = new URL('../lib/index.js', import.meta.url).href
 const DESKTOP_PACKAGE_NAME = '@e-mate/desktop'
 const BUILTIN_PACKAGES = new Set(builtinModules.map(name => name.replace(/^node:/u, '')))
@@ -63,6 +62,7 @@ export function installProfilePackageResolver(
   profileBaseUrl: string,
   componentRoots: Iterable<string> = [],
   baseRuntimeImports: Readonly<Record<string, string>> = {},
+  loaderEntryUrl: string = import.meta.resolve('@deepseek-ai/cordis-plugin-loader'),
 ): () => void {
   const components = [...componentRoots].map(root => ({
     prefix: pathToFileURL(`${realpathSync(resolve(root))}${sep}`).href,
@@ -70,7 +70,7 @@ export function installProfilePackageResolver(
   }))
   const hooks = registerHooks({
     resolve(specifier, context, nextResolve) {
-      const fromLoader = context.parentURL === LOADER_ENTRY_URL
+      const fromLoader = context.parentURL === loaderEntryUrl
       if (fromLoader && specifier === DESKTOP_PACKAGE_NAME) {
         return { shortCircuit: true, url: DESKTOP_ENTRY_URL }
       }

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 import { spawnSync } from 'node:child_process'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
@@ -77,7 +77,10 @@ async function prepare(target) {
     const actual = sha256(archive)
     if (actual !== asset.sha256) throw new Error(`Python runtime SHA-256 mismatch for ${target}`)
     mkdirSync(staging, { recursive: true })
-    const unpack = spawnSync('tar', ['-xzf', archive, '-C', staging], { stdio: 'inherit' })
+    const unpack = spawnSync('tar', ['-xzf', basename(archive), '-C', basename(staging)], {
+      cwd: outputRoot,
+      stdio: 'inherit',
+    })
     if (unpack.error !== undefined) throw unpack.error
     if (unpack.status !== 0) throw new Error(`tar exited with ${String(unpack.status)} for ${target}`)
     if (!existsSync(pythonExecutable(staging, platform))) {

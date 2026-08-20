@@ -27,10 +27,10 @@ const expectedPnpm = /^pnpm@([^+]+)$/u.exec(packageManager)?.[1]
 if (expectedPnpm === undefined) throw new Error(`unsupported packageManager: ${String(packageManager)}`)
 const inheritedPnpm = process.env.npm_execpath
 const pnpm = inheritedPnpm === undefined
-  ? { command: process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', prefix: [] }
-  : { command: process.execPath, prefix: [inheritedPnpm] }
+  ? { command: process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', prefix: [], shell: process.platform === 'win32' }
+  : { command: process.execPath, prefix: [inheritedPnpm], shell: false }
 
-const detectedPnpm = spawnSync(pnpm.command, [...pnpm.prefix, '--version'], { encoding: 'utf8' })
+const detectedPnpm = spawnSync(pnpm.command, [...pnpm.prefix, '--version'], { encoding: 'utf8', shell: pnpm.shell })
 if (detectedPnpm.error !== undefined) throw detectedPnpm.error
 if (detectedPnpm.status !== 0) throw new Error(detectedPnpm.stderr.trim() || 'unable to determine pnpm version')
 if (detectedPnpm.stdout.trim() !== expectedPnpm) {
@@ -38,7 +38,7 @@ if (detectedPnpm.stdout.trim() !== expectedPnpm) {
 }
 
 function run(args, env = process.env) {
-  const result = spawnSync(pnpm.command, [...pnpm.prefix, ...args], { stdio: 'inherit', env })
+  const result = spawnSync(pnpm.command, [...pnpm.prefix, ...args], { stdio: 'inherit', env, shell: pnpm.shell })
   if (result.error !== undefined) throw result.error
   if (result.status !== 0) process.exit(result.status ?? 1)
 }

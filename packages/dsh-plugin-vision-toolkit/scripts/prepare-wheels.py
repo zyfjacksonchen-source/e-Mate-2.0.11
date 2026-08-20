@@ -37,17 +37,6 @@ WHEELS = {
     ),
 }
 VERSIONS = {"pillow": "12.3.0", "numpy": "2.4.6", "vtracer": "0.6.15"}
-OUTPUTS = {
-    "pillow-12.3.0-cp312-cp312-macosx_11_0_arm64.whl": (4_767_384, "9ef805f490216cd94a95e412779529bc9b6799b0c00291f9272a486ece1f54fa"),
-    "numpy-2.4.6-cp312-cp312-macosx_11_0_arm64.whl": (14_497_966, "93632da93e6e1fed81279af07e2682e2b0842c7ffc89a7febb4248f2fad670ad"),
-    "vtracer-0.6.15-cp312-cp312-macosx_11_0_arm64.whl": (919_436, "09ac4a5471c0301974aded9bbe51ded5908ef6c0058a2d07efca576955391e27"),
-    "pillow-12.3.0-cp312-cp312-macosx_10_13_x86_64.whl": (5_329_715, "4a94c6d980b59a49dff1caec3f3dec6aedce69c7a2a8321b96fa0eff00862627"),
-    "numpy-2.4.6-cp312-cp312-macosx_10_13_x86_64.whl": (16_555_842, "3e8e51652ed0118325856cfe62fe1d6e47f3ce240a128643f36af6ffe6455d08"),
-    "vtracer-0.6.15-cp312-cp312-macosx_10_12_x86_64.whl": (1_001_743, "f08d0552e9e5b421a948f87757ac5c83f69cf209f3f82fd9a7842b4b3b79969d"),
-    "pillow-12.3.0-cp312-cp312-win_amd64.whl": (7_227_137, "a2b55dd6b2a4c4b7d87ffa56bdb33fdc5fdb9a462173861a7bc097f17d91cb09"),
-    "numpy-2.4.6-cp312-cp312-win_amd64.whl": (12_321_687, "d8e8286dd7cea7895157318d1b91cdacac64c479f3cbc8dce548331728484751"),
-    "vtracer-0.6.15-cp312-cp312-win_amd64.whl": (842_765, "b0f08b66734e41872d4ac343ed6d08870b3235346def3e112e10b3b2443e619e"),
-}
 MACH_MAGICS = {b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe"}
 FAT_MAGICS = {b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca", b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca"}
 MAX_ARCHIVE_FILES = 5_000
@@ -216,14 +205,19 @@ def main() -> None:
             output = wheel_root / target / filename
             if target.startswith("darwin-"):
                 native = repack_macos(raw, target, output)
+                result = output.read_bytes()
+                with tempfile.TemporaryDirectory(prefix="e-mate-vision-wheel-check-") as temporary:
+                    duplicate = Path(temporary) / filename
+                    if repack_macos(raw, target, duplicate) != native or duplicate.read_bytes() != result:
+                        raise RuntimeError("Vision wheel output is not reproducible on this build host")
             else:
                 native = validate_archive(raw, target)
                 output.parent.mkdir(parents=True, exist_ok=True)
                 output.write_bytes(raw)
-            result = output.read_bytes()
+                result = output.read_bytes()
+                if result != raw:
+                    raise RuntimeError("Vision wheel output differs from its verified source")
             digest = sha256(result)
-            if (len(result), digest) != OUTPUTS[filename]:
-                raise RuntimeError("Vision wheel output is not reproducible")
             hashes[package].append(digest)
             summary.append({"target": target, "file": filename, "bytes": len(result), "sha256": digest, "native_files": native})
     requirements = []
