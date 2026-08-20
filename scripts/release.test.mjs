@@ -299,7 +299,7 @@ test('GitHub release packs once and validates the same tarball on three platform
 test('download page resolves unsigned desktop installers from the fail-closed R2 manifest', async () => {
   const page = renderDownloadPage(readFileSync('deploy/download-page/index.html', 'utf8'))
   const macGuide = readFileSync('deploy/download-page/install-macos.html', 'utf8')
-  const scriptName = 'site.dd13c04a1f6f.js'
+  const scriptName = 'site.fc9d1cdb2ddd.js'
   const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
   assert.equal(scriptName.split('.')[1], createHash('sha256').update(script).digest('hex').slice(0, 12))
   const manifestUrl = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json'
@@ -313,6 +313,8 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
   }
   assert.match(script, /manifest\.source_commit/u)
   assert.match(script, /Number\.isSafeInteger\(artifact\.bytes\)/u)
+  assert.match(script, /artifact\.build_source_commit/u)
+  assert.match(script, /artifact\.build_run_id/u)
   assert.match(script, /\^\[0-9a-f\]\{64\}\$/u)
   assert.match(page, /未签名/u)
   assert.match(page, /e-Mate 会校验、替换并自动重开/u)
@@ -341,8 +343,8 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
     version: publishedVersion,
     source_commit: commit,
     artifacts: {
-      darwin: { url: `${releasePrefix}/e-Mate-${publishedVersion}-mac-universal.dmg`, bytes: 123, sha256: 'b'.repeat(64) },
-      win32: { url: `${releasePrefix}/e-Mate-${publishedVersion}-win-x64-Setup.exe`, bytes: 456, sha256: 'c'.repeat(64) },
+      darwin: { url: `${releasePrefix}/e-Mate-${publishedVersion}-mac-universal.dmg`, bytes: 123, sha256: 'b'.repeat(64), build_source_commit: commit, build_run_id: '123' },
+      win32: { url: `${releasePrefix}/e-Mate-${publishedVersion}-win-x64-Setup.exe`, bytes: 456, sha256: 'c'.repeat(64), build_source_commit: 'd'.repeat(40), build_run_id: '456' },
     },
   }
   assert.deepEqual(normalizeDownloadIndex(fixture).downloads.map(item => item.target), ['macos-universal', 'windows-x64'])

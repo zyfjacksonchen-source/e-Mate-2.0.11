@@ -1665,6 +1665,6 @@ The text highlights AI hallucination and human verification, legal use, real-act
 ## 2026-08-20 · 2.0.11 S34 下载页版本绑定与 Linux Base 构建反例
 
 - PR `#3` 的首次远端门禁证明跨平台修复还有一个共享调用方：Computer Use 为 Windows payload 删除 macOS helper 时也在 Linux Base SDK 构建中删除了同一目录，随后 CLI bundle 同步因 `native` 不存在而失败。构建脚本现在只在 Windows 删除 native closure、macOS 从固定上游重建并校验、Linux 保留仓库内已固定的 Base SDK 输入；平台 payload 的目标隔离合同没有放宽。
-- 正式下载页脚本此前仍把 manifest 版本与两个安装包文件名固定为 `2.0.10`。即使 2.0.11 `desktop/latest.json` 正确激活，页面也会按设计 fail closed 成“暂时无法下载”。页面现精确绑定 2.0.11，内容哈希文件更新为 `site.dd13c04a1f6f.js`；首页和 macOS 未签名图解同时说明全新安装 2.0.11、已安装 2.0.10 可在应用内确认更新。
+- 正式下载页脚本此前仍把 manifest 版本与两个安装包文件名固定为 `2.0.10`，且只接受三项 artifact 字段，遗漏真实发布器已固定的 `build_source_commit/build_run_id`。即使 2.0.11 `desktop/latest.json` 正确激活，页面也会按设计 fail closed 成“暂时无法下载”。页面现精确绑定 2.0.11，并严格接受、校验五项 provenance 字段；内容哈希文件更新为 `site.fc9d1cdb2ddd.js`。首页和 macOS 未签名图解同时说明全新安装 2.0.11、已安装 2.0.10 可在应用内确认更新。
 - Codex 原生 Cloudflare OAuth 已确认可直接列举、读取和上传 R2 对象，单对象 API 上限 300 MB；后续发布无需创建或复制长期 R2 密钥。当前只完成能力只读确认，尚未上传安装器、覆盖 `desktop/latest.json` 或修改官网下载线上对象。
 - Computer Use、release 与 impact 聚焦回归合计 `28/28`，diff check 通过。下载页和发布脚本属于 Base 发布输入，本切片继续由同一 PR 的 Base lane 验证；R2 仍须先上传 immutable 2.0.11 制品并公开回读，最后才能激活 latest 和上线页面。

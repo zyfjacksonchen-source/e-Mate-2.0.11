@@ -49,9 +49,10 @@ export function normalizeDownloadIndex(raw) {
 
 function releaseArtifact(raw, sourceCommit, targetId, fileName) {
   const artifact = object(raw, "桌面制品");
-  exactKeys(artifact, ["url", "bytes", "sha256"], "桌面制品");
+  exactKeys(artifact, ["url", "bytes", "sha256", "build_source_commit", "build_run_id"], "桌面制品");
   if (artifact.url !== `${R2_ORIGIN}/desktop/releases/v${VERSION}/${sourceCommit}/${fileName}`
-    || !Number.isSafeInteger(artifact.bytes) || artifact.bytes < 1 || !SHA256.test(artifact.sha256)) {
+    || !Number.isSafeInteger(artifact.bytes) || artifact.bytes < 1 || !SHA256.test(artifact.sha256)
+    || !SOURCE_COMMIT.test(artifact.build_source_commit) || !/^[1-9][0-9]*$/.test(artifact.build_run_id)) {
     throw new Error("桌面制品身份无效");
   }
   const target = TARGETS[targetId];
@@ -63,6 +64,8 @@ function releaseArtifact(raw, sourceCommit, targetId, fileName) {
     url: artifact.url,
     size_bytes: artifact.bytes,
     sha256: artifact.sha256,
+    build_source_commit: artifact.build_source_commit,
+    build_run_id: artifact.build_run_id,
     label: target.label,
   });
 }
