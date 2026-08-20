@@ -113,6 +113,21 @@ test('publication admits bootstrap and its direct successor before exposing acti
   assert.deepEqual(publication.releases.map(release => release.target), ['darwin-arm64', 'darwin-x64', 'win32-x64'])
   assert.equal(publication.releases.every(release => release.stable.cacheControl === 'no-store'), true)
   assert.equal(publication.objects.filter(item => item.role === 'desired-state-immutable').length, 3)
+  const partialBootstrap = prepareProfilePublication({
+    root,
+    candidateDirectories: candidates,
+    artifactRoots: [join(root, 'dist/components')],
+    sourceCommit,
+    privateKeyPem,
+    keyId,
+    currentByTarget: new Map([
+      ['darwin-arm64', readFileSync(join(candidates[0], 'production-envelope.json'))],
+      ['darwin-x64', undefined],
+      ['win32-x64', undefined],
+    ]),
+    bootstrap: true,
+  })
+  assert.equal(partialBootstrap.releases.length, 3)
   const base = parseProfileBaseContract(JSON.parse(readFileSync(join(root, 'desktop/e-mate-desktop/base-contract.json'), 'utf8')))
   for (const candidate of candidates) {
     assert.notEqual(parseProfileReleaseEnvelope(readFileSync(join(candidate, 'production-envelope.json')), base), undefined)
@@ -155,4 +170,19 @@ test('publication admits bootstrap and its direct successor before exposing acti
     [componentId], [componentId], [componentId],
   ])
   assert.equal(successor.releases.every(release => typeof release.parent_generation === 'string'), true)
+  const partialSuccessor = prepareProfilePublication({
+    root,
+    candidateDirectories: nextCandidates,
+    artifactRoots: [join(root, 'dist/components-next')],
+    sourceCommit: nextSourceCommit,
+    privateKeyPem,
+    keyId,
+    currentByTarget: new Map([
+      ['darwin-arm64', readFileSync(join(nextCandidates[0], 'production-envelope.json'))],
+      ['darwin-x64', currentByTarget.get('darwin-x64')],
+      ['win32-x64', currentByTarget.get('win32-x64')],
+    ]),
+    bootstrap: false,
+  })
+  assert.equal(partialSuccessor.releases.length, 3)
 })

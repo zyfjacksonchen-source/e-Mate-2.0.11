@@ -1597,3 +1597,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 完成性审计发现 `verifyPlatformTarget` 旧实现只扫描声明 `native_paths` 内的 Mach-O/PE，且 `target:null` 的 portable 组件直接返回。这样 portable 插件可夹带原生二进制，平台组件也可把另一 OS 的 PE/ELF 放在声明闭包外，并用闭包内一个合法二进制满足最低检查，违背 target tuple 与“portable 不含 native”的合同。
 - 现有 Desktop 物化边界现在扫描签名 manifest 的完整文件集，精确识别 Mach-O、带真实 PE signature 的 DOS/PE 与 ELF。portable 发现任一原生格式即拒绝；platform-profile 的每个原生二进制必须位于声明的 sorted native closure，darwin 只接受严格 ad-hoc Mach-O，win32 只接受 PE，ELF 和跨 OS 混入均失败。校验仍在同一 `materialize/verifyMaterializedProfileComponent` 路径，没有为 CI 或更新器复制第二套规则。
 - 行为反例分别把 ELF 放入 portable payload、把第二个 PE 放到 Windows target 的声明闭包外，二者都在写 generation receipt 前失败；真实 macOS Xin native closure/codesign 正向路径继续通过。Profile release/component/generation/update `4 files / 17 tests`、Desktop 主进程与测试 TypeScript、仓库影响/组合 `29/29`、target pin 和 diff check 均通过。该信任边界属于 Desktop Base，正确触发 Base lane；普通 portable/平台插件源码仍由 inventory 的对应 plugin-only target jobs 构建。
+
+## 2026-08-20 · 2.0.11 S24 多目标 Profile 激活可幂等续跑
+
+- R2 publisher 会按目标依次激活三个 stable desired-state；如果首个目标写入成功、后续目标失败，旧重试会把已经写入的首目标视为“已有 bootstrap”或“不是当前状态的直接后继”，导致同一已签发布永久卡住。R2 不提供跨对象原子事务，因此不能用本地成功假装三目标同时提交。
+- 发布前 CAS 校验现只增加一个严格幂等分支：公开对象经过原签名、target 和完整组件集合验证后，只有其 canonical envelope 与本次候选逐字节语义相等才视为该目标已经完成；任何其他已有对象仍拒绝 bootstrap，普通更新仍要求 exact parent generation、sequence 和 changed-component 声明。不可变组件上传、公开回读和最终 receipt 规则没有放宽。
+- 回归分别模拟 bootstrap 与直接后继在 `darwin-arm64` 已激活、其余两目标尚未激活的中断状态，两次重试均可继续生成完整三目标发布计划；错误父代和非同一候选继续由原 CAS 测试失败关闭。影响/组件/完整组合/R2 publisher 为 `29/29`，安装器发布合同 `9/9`，release boundary 与 diff check 通过。该修改触及共享发布器，正确属于 Base lane；尚未发生线上写入或激活。

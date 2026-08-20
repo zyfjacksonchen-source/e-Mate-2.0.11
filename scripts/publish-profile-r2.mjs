@@ -122,8 +122,17 @@ function loadCandidate(directory, base, expectedIds, sourceCommit, privateKeyPem
 }
 
 function validateCurrent(candidate, bytes, base, expectedIds, bootstrap) {
+  let current
+  if (bytes !== undefined) {
+    current = parseProfileReleaseEnvelope(bytes, base, MAX_CURRENT_BYTES)
+    if (current === undefined || !sameProfileReleaseTarget(current.payload.target, candidate.payload.target)) {
+      throw new Error(`current desired state is invalid: ${candidate.name}`)
+    }
+    assertCompleteProfileRelease(current.payload, expectedIds)
+    if (canonicalProfileJson(current) === canonicalProfileJson(candidate.envelope)) return
+  }
   if (bootstrap) {
-    if (bytes !== undefined || candidate.admission.parent_generation !== null || candidate.payload.sequence !== 1) {
+    if (current !== undefined || candidate.admission.parent_generation !== null || candidate.payload.sequence !== 1) {
       throw new Error(`bootstrap candidate would replace an existing desired state: ${candidate.name}`)
     }
     if (candidate.admission.changed_components.length !== expectedIds.length) {
@@ -131,12 +140,7 @@ function validateCurrent(candidate, bytes, base, expectedIds, bootstrap) {
     }
     return
   }
-  if (bytes === undefined) throw new Error(`current desired state is missing: ${candidate.name}`)
-  const current = parseProfileReleaseEnvelope(bytes, base, MAX_CURRENT_BYTES)
-  if (current === undefined || !sameProfileReleaseTarget(current.payload.target, candidate.payload.target)) {
-    throw new Error(`current desired state is invalid: ${candidate.name}`)
-  }
-  assertCompleteProfileRelease(current.payload, expectedIds)
+  if (current === undefined) throw new Error(`current desired state is missing: ${candidate.name}`)
   if (candidate.admission.parent_generation !== profileGenerationId(current.payload)
     || candidate.payload.sequence !== current.payload.sequence + 1) {
     throw new Error(`candidate is not the direct successor of the public desired state: ${candidate.name}`)
