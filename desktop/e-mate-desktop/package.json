@@ -103,7 +103,8 @@
   },
   "scripts": {
     "prepare:python": "node scripts/prepare-python-runtime.mjs",
-    "build": "yarn run prepare:python && node ../../scripts/sync-emate-plugin-bundles.mjs && node scripts/sync-emate-profile.mjs && node scripts/generate-mac-app-icon.mjs && node scripts/generate-tray-icons.mjs && node scripts/clean.mjs && tsdown && tsc -p tsconfig.json --emitDeclarationOnly && tsc -p tsconfig.client.json --emitDeclarationOnly",
+    "build": "yarn run prepare:python && yarn run build:sdk",
+    "build:sdk": "node ../../scripts/sync-emate-plugin-bundles.mjs && node scripts/sync-emate-profile.mjs && node scripts/generate-mac-app-icon.mjs && node scripts/generate-tray-icons.mjs && node scripts/clean.mjs && tsdown && tsc -p tsconfig.json --emitDeclarationOnly && tsc -p tsconfig.client.json --emitDeclarationOnly",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.tests.client.json --noEmit",
     "test": "vitest run",
     "verify:closure": "node --test scripts/runtime-closure.spec.mjs && node scripts/verify-runtime-closure.mjs",
