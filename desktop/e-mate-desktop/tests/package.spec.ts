@@ -171,7 +171,6 @@ describe('published package surface', () => {
     const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
     const recover = main.indexOf('await resolveDesktopShellEnvironment')
     const applyRecovered = main.indexOf('Object.entries(shellEnvironmentResolution.updates)')
-    const managedPython = main.indexOf('process.env.EMATE_MANAGED_PYTHON_PATH = managedPythonPath')
     const snapshot = main.indexOf('const environment = loadLayeredEnv')
     const install = main.indexOf('const pnpmRuntime = installDesktopPnpmRuntime')
     const prepare = main.indexOf('const prepared = prepareDesktopProfile')
@@ -188,8 +187,7 @@ describe('published package surface', () => {
 
     expect(recover).toBeGreaterThanOrEqual(0)
     expect(applyRecovered).toBeGreaterThan(recover)
-    expect(managedPython).toBeGreaterThan(applyRecovered)
-    expect(snapshot).toBeGreaterThan(managedPython)
+    expect(snapshot).toBeGreaterThan(applyRecovered)
     expect(install).toBeGreaterThan(snapshot)
     expect(nativeReadyAck).toBeGreaterThan(electronReady)
     expect(nativeReadyAck).toBeLessThan(snapshot)
@@ -344,7 +342,7 @@ describe('published package surface', () => {
     expect(String(manifest.build?.mac?.x64ArchFiles))
       .toContain('python-runtime/darwin-*/**')
     expect(String(manifest.build?.mac?.x64ArchFiles))
-      .toContain('build/e-mate-profile/bundles/xin-assistant/runtime/vendor-native/darwin-*/**')
+      .not.toContain('xin-assistant')
     expect(manifest.build?.files).toContain('!node_modules/node-pty/build/**')
     expect(manifest.build?.files).toContain('!node_modules/**/node-pty/build/**')
     expect(existsSync(new URL(

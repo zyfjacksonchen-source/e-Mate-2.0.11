@@ -187,19 +187,19 @@ describe('Profile component materialization', () => {
     async () => {
       const root = await mkdtemp(join(tmpdir(), 'e-mate-platform-component-'))
       temporary.push(root)
-      const id = '@e-mate/dsh-plugin-xin-assistant'
+      const id = '@e-mate/dsh-plugin-computer-use'
       const targetName = `darwin-${process.arch}`
-      const nativePath = `runtime/vendor-native/${targetName}/_cffi_backend.cpython-312-darwin.so`
-      const nativeBytes = await readFile(new URL(`../../../packages/dsh-plugin-xin-assistant/${nativePath}`, import.meta.url))
-      const indexBytes = Buffer.from('export default class Xin {}\n')
+      const nativePath = 'native/macos/bin/dsh-computer-use-helper'
+      const nativeBytes = await readFile(new URL(`../../../packages/dsh-plugin-computer-use/${nativePath}`, import.meta.url))
+      const indexBytes = Buffer.from('export default class ComputerUse {}\n')
       const dsh = { bundle: { patch: './cordis.patch.yml' } }
       const target = {
         platform: 'darwin' as const,
         arch: process.arch as 'arm64' | 'x64',
-        runtime_abi: 'cpython-3.12',
-        minimum_os: '13.0',
+        runtime_abi: 'macos-computer-use-helper-v1',
+        minimum_os: '14.0',
         signing: { scheme: 'adhoc' as const, identity: 'adhoc' },
-        native_paths: [`runtime/vendor-native/${targetName}`],
+        native_paths: ['native/macos'],
       }
       const packageBytes = Buffer.from(`${JSON.stringify({
         name: id,
@@ -223,7 +223,7 @@ describe('Profile component materialization', () => {
       const manifestBytes = Buffer.from(`${JSON.stringify({
         schema_version: 1,
         id,
-        slug: 'dsh-plugin-xin-assistant',
+        slug: 'dsh-plugin-computer-use',
         version: '2.0.11',
         kind: 'platform-profile',
         target,
@@ -236,7 +236,7 @@ describe('Profile component materialization', () => {
         total_bytes: files.reduce((sum, file) => sum + file.bytes, 0),
         files,
       }, null, 2)}\n`)
-      const manifestUrl = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-xin-assistant/v2.0.11/${sourceCommit}/${targetName}/manifest.json`
+      const manifestUrl = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-computer-use/v2.0.11/${sourceCommit}/${targetName}/manifest.json`
       const reference: ProfileReleaseComponent = {
         id,
         version: '2.0.11',

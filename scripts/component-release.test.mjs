@@ -34,8 +34,8 @@ describe('component payload closure', () => {
       encoding: 'utf8',
     }))
     const accepted = inventory.components.filter(component => component.desktop !== 'blocked')
-    assert.equal(accepted.length, 11)
-    assert.equal(inventory.component_jobs.length, 15)
+    assert.equal(accepted.length, 10)
+    assert.equal(inventory.component_jobs.length, 12)
     assert.deepEqual(
       [...new Set(inventory.component_jobs.map(job => job.component))].sort(),
       accepted.map(component => component.id).sort(),

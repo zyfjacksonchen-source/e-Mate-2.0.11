@@ -366,7 +366,6 @@ test('managed profile installation is idempotent', () => {
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-search-mcp',
       '@e-mate/dsh-plugin-vision-toolkit',
-      '@e-mate/dsh-plugin-xin-assistant',
     ]
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
@@ -377,18 +376,26 @@ test('managed profile installation is idempotent', () => {
     assert.equal(readFileSync(join(first.profile, 'package.json'), 'utf8'), manifest)
     assert.equal(readFileSync(join(first.profile, 'cordis.patch.yml'), 'utf8'), patch)
     profileManifest.dependencies['@e-mate/dsh-plugin-im'] = '2.0.8'
+    profileManifest.dependencies['@e-mate/dsh-plugin-xin-assistant'] = '2.0.10'
     profileManifest.dependencies['@yuxianglin/dsh-bridge-browser'] = '0.0.1'
+    const retiredXin = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant')
+    mkdirSync(retiredXin, { recursive: true })
+    writeFileSync(join(retiredXin, 'stale.txt'), 'retired')
     profileManifest.dsh.profile.bundles.push(
       '@e-mate/dsh-plugin-im',
+      '@e-mate/dsh-plugin-xin-assistant',
       '@yuxianglin/dsh-bridge-browser',
     )
     writeFileSync(join(first.profile, 'package.json'), `${JSON.stringify(profileManifest, null, 2)}\n`)
     installProfile(dshHome)
     const repairedManifest = JSON.parse(readFileSync(join(first.profile, 'package.json'), 'utf8'))
     assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-im'], undefined)
+    assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-xin-assistant'], undefined)
     assert.equal(repairedManifest.dependencies['@yuxianglin/dsh-bridge-browser'], undefined)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-im'), false)
+    assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-xin-assistant'), false)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@yuxianglin/dsh-bridge-browser'), false)
+    assert.equal(existsSync(retiredXin), false)
     const patchRows = parseYaml(patch).flatMap(operation => operation.insert ?? (operation.id ? [operation] : []))
     const patchById = new Map(patchRows.map(row => [row.id, row]))
     assert.deepEqual(patchById.get('credentials'), {
@@ -897,7 +904,6 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-search-mcp',
       '@e-mate/dsh-plugin-vision-toolkit',
-      '@e-mate/dsh-plugin-xin-assistant',
     ])
     const packages = [
       '@e-mate/dsh-plugin-better-sidebar',

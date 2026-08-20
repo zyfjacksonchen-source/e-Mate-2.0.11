@@ -294,9 +294,10 @@ describe('repository release boundary', () => {
       'packages/dsh-plugin-computer-use/scripts/build-native.mjs',
       'packages/dsh-plugin-computer-use/scripts/build.mjs',
       'packages/dsh-plugin-computer-use/overrides/helper-entitlements.plist',
-      'packages/dsh-plugin-xin-assistant/src/index.ts',
-      'packages/dsh-plugin-xin-assistant/runtime/vendor-native/darwin-arm64/library.dylib',
     ]) assert.equal(classify(path).lane, 'plugin-only', path)
+
+    assert.equal(classify('packages/dsh-plugin-xin-assistant/src/index.ts').lane, 'base')
+    assert.equal(classify('packages/dsh-plugin-xin-assistant/runtime/vendor-native/darwin-arm64/library.dylib').lane, 'base')
 
     const impact = classify('packages/dsh-plugin-computer-use/scripts/build.mjs')
     assert.deepEqual(impact.component_jobs, [

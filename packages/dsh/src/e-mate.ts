@@ -50,6 +50,7 @@ const RETIRED_PROFILE_PACKAGES = new Set([
   '@e-mate/dsh-plugin-browser-panel',
   '@e-mate/dsh-plugin-im',
   '@e-mate/dsh-plugin-subagent',
+  '@e-mate/dsh-plugin-xin-assistant',
   '@yuxianglin/dsh-bridge-browser',
 ])
 const OWNED_PROFILE_PACKAGES = new Set([...MANAGED_PROFILE_PACKAGES, ...RETIRED_PROFILE_PACKAGES])
@@ -189,6 +190,9 @@ export function installProfile(dshHome = resolveDshHome()) {
   ]
   for (const [source, target] of profileFiles) {
     atomicWrite(join(paths.profile, target), readFileSync(join(packageRoot, 'profile', source)))
+  }
+  for (const name of RETIRED_PROFILE_PACKAGES) {
+    rmSync(join(paths.profile, 'node_modules', ...name.split('/')), { recursive: true, force: true })
   }
   for (const name of PLUGIN_PACKAGES) {
     const slug = name.slice('@e-mate/dsh-plugin-'.length)
