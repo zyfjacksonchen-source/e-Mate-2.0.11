@@ -271,6 +271,7 @@ describe('published package surface', () => {
       'cordis.patch.yml',
       'lib/**',
       'package.json',
+      'node_modules/@earendil-works/pi-ai/dist/providers/data/.manifest.json',
       '!node_modules/node-pty/build/**',
       '!node_modules/**/node-pty/build/**',
     ])

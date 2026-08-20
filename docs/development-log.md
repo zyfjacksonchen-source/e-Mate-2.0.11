@@ -1701,3 +1701,11 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 根因不是插件代码或目标不兼容，而是 accepted Base SDK 的 allowlist 排除了 `build/e-mate-profile/bundles/registry.json`。Desktop 的既有 `installEmateDesktopProfile` 即使从 content-addressed generation 读取组件，仍需这份 1,627-byte 注册表验证受管 package roster；缺失时在 Host boot 前得到 `ENOENT`，因此不能把坏 generation 签名或激活。
 - 最小修复只把 `bundles/registry.json` 作为 Base 组合元数据加入 SDK，并把它纳入 SDK 完整性断言；同目录下任何其他 bundle 文件继续排除，组件代码和 payload 仍只能来自签名 generation。该文件由唯一 component inventory 生成，所以芯助手保持 blocked 后不会借注册表回到 2.0.11。
 - 本地边界验证实际 emit 6,926 个 Base SDK 文件、135,218,474 bytes；断言证明 registry 存在且没有第二个 `bundles/**` payload，仓库 release boundary `17/17` 与 diff check 通过。该修改触及 Base SDK authority，必须经新 PR、exact-main CI/Release 和 Profile bootstrap 重跑；在三目标完整 generation、签名 publication bundle、性能/Computer Use 收据与公开回读全部闭合前仍不写 R2。
+
+## 2026-08-20 · 2.0.11 S40 真实启动发现 pi-ai 隐藏 manifest 漏包
+
+- 对公开主线 `f8d5aa6febe5983fb7999dfcd4ace84cb5c41faf` 的正式候选做用户授权的未签名启动时，Electron 主进程在 UI 健康前退出。直接执行候选二进制得到唯一根因：`@deepseek-ai/dsh-llm-pi-ai` 无法加载 `@earendil-works/pi-ai/dist/providers/data/.manifest.json`。源依赖树存在该 3,353-byte 文件，但 electron-builder 的普通 glob 忽略点文件；此前 exact-main CI、DMG/EXE 哈希和静态 inventory 因未把它列为运行时必需文件而全部假绿。该 SHA 的 macOS/Windows 安装器和离线 latest manifest 已明确作废，未上传 R2、未激活 Feed。
+- 最小修复只在 Desktop `build.files` 精确加入这一文件，并把同一路径加入 afterPack 的物理运行时必需清单；package 配置测试和缺文件反例同步锁定它。聚焦回归为 `2 files / 55 tests`，change-impact 对四个修改文件实跑为 `lane=base`、`run_base=true`、合同有效，避免把 Base 打包闭包变化伪装成 plugin-only。
+- 新的本机 arm64 目录封装已由 afterPack 通过，物理 `.manifest.json` 存在；候选随后完成 Host、Profile、Client Loader 和交互 UI 启动，显示 `2.0.11`，并使用测试账号完成真实企业登录。Full Access 会话中的 Bash 无 `sandbox escalation`，`command -v gh` 返回登录 Shell 的 `/Users/mac/.local/bin/gh`，证明 Finder 启动环境已恢复用户 PATH；`npx` 无输出经 `/bin/zsh -lic` 交叉验证为本机登录 Shell 本身未安装 npm/npx，不再误判为权限拒绝。
+- 同一安装态的两轮 Bash Agent 指令分别显示首 token `8.2 s` / `8.7 s`、流式 `103 tok/s` / `71 tok/s`。原生 Computer Use Tool 随后通过 `computer_list_apps` 与 `computer_observe` 只读取得 Chrome 当前标签页及窗口标题，没有 `COMPUTER_PERMISSION_REQUIRED`、应用授权或 sandbox 错误；该轮显示首 token `8.1 s`、`73 tok/s`。这些是当前真实候选的单机样本，不冒充原始 DSH/2.0.8 的 30 组成对性能收据。
+- 当前只证明本机 arm64 unpacked candidate 的根因修复和交互链。因为修复属于 Base lane，必须先进入受保护的新公开仓库主线，再重新取得同一 exact SHA 的 CI、Windows/macOS 正式未签名安装器、Profile bootstrap、性能与平台收据；旧 `f8d5aa6…` 产物不得复用。所有新证据通过前继续禁止 R2 写入和官网下载页激活。

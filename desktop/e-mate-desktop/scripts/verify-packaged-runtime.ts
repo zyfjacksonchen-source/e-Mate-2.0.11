@@ -92,6 +92,7 @@ export const REQUIRED_UNPACKED_RUNTIME_ENTRIES = [
   'node_modules/@deepseek-ai/dsh/config/agent-presets/cordis/skills/editing-cordis-compositions/SKILL.md',
   'node_modules/@deepseek-ai/dsh-app-boot/lib/index.js',
   'node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html',
+  'node_modules/@earendil-works/pi-ai/dist/providers/data/.manifest.json',
   'node_modules/pnpm/bin/pnpm.mjs',
 ] as const
 

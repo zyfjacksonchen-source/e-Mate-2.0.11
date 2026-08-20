@@ -212,6 +212,7 @@ describe('packaged desktop runtime verification', () => {
     'build/e-mate-profile/bundles/cdp/lib/index.mjs',
     'lib/terminal.js',
     'lib/update-download.js',
+    'node_modules/@earendil-works/pi-ai/dist/providers/data/.manifest.json',
     'node_modules/@deepseek-ai/dsh/lib/bin.js',
     'node_modules/@deepseek-ai/dsh/config/agent-presets/cordis/agent.cordis.yml',
     'node_modules/@deepseek-ai/dsh/config/agent-presets/cordis/skills/cordis-plugin-development/SKILL.md',
