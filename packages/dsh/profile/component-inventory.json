@@ -19,7 +19,7 @@
       "id": "@e-mate/dsh-plugin-better-sidebar",
       "root": "packages/dsh-plugin-better-sidebar",
       "kind": "profile",
-      "desktop": "blocked",
+      "desktop": "hot-profile",
       "cli": true
     },
     {

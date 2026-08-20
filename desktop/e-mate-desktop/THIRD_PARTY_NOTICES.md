@@ -377,7 +377,6 @@ the package names, versions, and licenses for transparency.
 | devlop | 1.1.0 | MIT |
 | diff | 9.0.0 | BSD-3-Clause |
 | dsh-at-file | 0.6.2 | MIT |
-| dsh-better-sidebar | 0.12.2 | MIT |
 | dsh-file-viewer | 0.1.0 | MIT |
 | dsh-search-mcp | 0.1.0 | MIT |
 | dsh-turn-fold | 0.2.2 | MIT |

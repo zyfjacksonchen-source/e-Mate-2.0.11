@@ -32,14 +32,13 @@ describe('e-Mate desktop profile', () => {
       '@kelearns/dsh-navigation-bar',
       '@omdsh-dev/dsh-genui',
       'dsh-at-file',
-      'dsh-better-sidebar',
       'dsh-file-viewer',
       'dsh-turn-fold',
       'dsh-visualize',
     ])
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-im')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-vision-toolkit')
-    expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-better-sidebar')
+    expect(manifest.dsh.profile.bundles).toContain('@e-mate/dsh-plugin-better-sidebar')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-genui')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-xin-assistant')
     expect(manifest.dsh.profile.bundles).not.toContain('dsh-search-mcp')
@@ -62,16 +61,8 @@ describe('e-Mate desktop profile', () => {
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets', 'pdf2json', 'pdfparser.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets', 'noto-sans-sc', 'files', 'noto-sans-sc-4-wght-normal.woff2'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', 'dsh-at-file', 'lib', 'client.js'))).toBe(true)
-    expect(existsSync(join(profile, 'node_modules', 'dsh-better-sidebar', 'lib', 'client.js'))).toBe(true)
-    const betterSidebarPrefs = readFileSync(join(profile, 'node_modules', 'dsh-better-sidebar', 'src', 'prefs-shared.ts'), 'utf8')
-    expect(betterSidebarPrefs).toContain('openByDefault: false')
-    expect(betterSidebarPrefs).toContain('interceptOpenPath: false')
-    const betterSidebarClient = readFileSync(join(profile, 'node_modules', 'dsh-better-sidebar', 'lib', 'client.js'), 'utf8')
-    expect(betterSidebarClient).toContain('window.location.pathname.startsWith("/chat/")')
-    expect(betterSidebarClient).toContain('panelOpen: false')
-    expect(betterSidebarClient).toContain('store.getPrefs().interceptOpenPath === false ||')
-    expect(readFileSync(join(profile, 'node_modules', 'dsh-better-sidebar', 'lib', 'index.js'), 'utf8'))
-      .toContain('interceptOpenPath: z.boolean().default(false)')
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-better-sidebar', 'lib', 'client.js'))).toBe(true)
+    expect(existsSync(join(profile, 'node_modules', 'dsh-better-sidebar'))).toBe(false)
     expect(existsSync(join(profile, 'node_modules', 'dsh-file-viewer', 'lib', 'client.js'))).toBe(true)
     const fileViewerHost = readFileSync(join(profile, 'node_modules', 'dsh-file-viewer', 'lib', 'index.js'), 'utf8')
     const fileViewerClient = readFileSync(join(profile, 'node_modules', 'dsh-file-viewer', 'lib', 'client.js'), 'utf8')
@@ -133,9 +124,10 @@ describe('e-Mate desktop profile', () => {
     expect(rows.find(row => row.id === 'dsh-navigation-bar')).toEqual(expect.objectContaining({
       name: '@kelearns/dsh-navigation-bar',
     }))
-    expect(rows.find(row => row.id === 'better-sidebar')).toEqual(expect.objectContaining({
-      name: 'dsh-better-sidebar',
+    expect(rows.find(row => row.id === 'emate-better-sidebar')).toEqual(expect.objectContaining({
+      name: '@e-mate/dsh-plugin-better-sidebar',
     }))
+    expect(rows.map(row => row.id)).not.toContain('better-sidebar')
     expect(rows.find(row => row.id === 'search-mcp')).toEqual(expect.objectContaining({
       name: './node_modules/@e-mate/dsh-plugin-search-mcp/lib/index.mjs',
     }))
@@ -235,14 +227,19 @@ describe('e-Mate desktop profile', () => {
     manifest.dependencies['@e-mate/dsh-plugin-im'] = '2.0.8'
     manifest.dependencies['@e-mate/dsh-plugin-xin-assistant'] = '2.0.10'
     manifest.dependencies['@yuxianglin/dsh-bridge-browser'] = '0.0.1'
+    manifest.dependencies['dsh-better-sidebar'] = '0.12.2'
     const retiredXin = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant')
+    const retiredSidebar = join(profile, 'node_modules', 'dsh-better-sidebar')
     mkdirSync(retiredXin, { recursive: true })
+    mkdirSync(retiredSidebar, { recursive: true })
     writeFileSync(join(retiredXin, 'stale.txt'), 'retired', { flag: 'w' })
+    writeFileSync(join(retiredSidebar, 'stale.txt'), 'retired', { flag: 'w' })
     manifest.dsh.profile.bundles.push(
       '@xmanrui/dsh-im',
       '@e-mate/dsh-plugin-im',
       '@e-mate/dsh-plugin-xin-assistant',
       '@yuxianglin/dsh-bridge-browser',
+      'dsh-better-sidebar',
     )
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
 
@@ -256,9 +253,12 @@ describe('e-Mate desktop profile', () => {
     expect(repaired.dependencies['@e-mate/dsh-plugin-im']).toBeUndefined()
     expect(repaired.dependencies['@e-mate/dsh-plugin-xin-assistant']).toBeUndefined()
     expect(repaired.dependencies['@yuxianglin/dsh-bridge-browser']).toBeUndefined()
+    expect(repaired.dependencies['dsh-better-sidebar']).toBeUndefined()
     expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-im')
     expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-xin-assistant')
     expect(repaired.dsh.profile.bundles).not.toContain('@yuxianglin/dsh-bridge-browser')
+    expect(repaired.dsh.profile.bundles).not.toContain('dsh-better-sidebar')
     expect(existsSync(retiredXin)).toBe(false)
+    expect(existsSync(retiredSidebar)).toBe(false)
   })
 })

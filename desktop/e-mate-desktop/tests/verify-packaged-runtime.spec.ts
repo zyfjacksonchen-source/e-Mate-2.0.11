@@ -177,20 +177,6 @@ describe('packaged desktop runtime verification', () => {
     )).toThrow(`contains host-architecture build output: ${forbidden}`)
   })
 
-  it('rejects a nested host-architecture node-pty build before universal merge', () => {
-    const runtimeContext = context('/build', 'darwin', 3)
-    const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)
-    const forbidden = FORBIDDEN_MACOS_UNIVERSAL_ENTRIES.find(entry => entry.startsWith('node_modules/dsh-better-sidebar/'))!
-
-    expect(() => verifyPackagedRuntime(
-      runtimeContext,
-      () => completeArchiveEntries(),
-      filename => filename === join(unpackedRoot, forbidden)
-        || !FORBIDDEN_MACOS_UNIVERSAL_ENTRIES.some(entry => filename === join(unpackedRoot, entry)),
-      completePackageResolver(unpackedRoot),
-    )).toThrow(`contains host-architecture build output: ${forbidden}`)
-  })
-
   it.each([
     'lib/client.js',
     'lib/desktop-runtime-environment.js',
@@ -212,6 +198,7 @@ describe('packaged desktop runtime verification', () => {
     'build/e-mate-profile/bundles/cdp/lib/index.mjs',
     'lib/terminal.js',
     'lib/update-download.js',
+    'node_modules/@earendil-works/pi-ai/dist/providers/data/.manifest.json',
     'node_modules/@deepseek-ai/dsh/lib/bin.js',
     'node_modules/@deepseek-ai/dsh/config/agent-presets/cordis/agent.cordis.yml',
     'node_modules/@deepseek-ai/dsh/config/agent-presets/cordis/skills/cordis-plugin-development/SKILL.md',
