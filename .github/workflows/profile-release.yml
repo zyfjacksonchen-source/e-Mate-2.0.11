@@ -340,9 +340,12 @@ jobs:
           ref: ${{ needs.validate.outputs.source_sha }}
           persist-credentials: false
           submodules: recursive
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
+      - name: Install the exact publication tool dependency
+        run: pnpm install --frozen-lockfile --ignore-scripts --filter @e-mate/dsh-workspace
 
       - name: Download accepted changed component payloads
         if: ${{ !inputs.bootstrap }}
