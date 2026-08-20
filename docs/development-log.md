@@ -1627,3 +1627,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 本节写入前的最新生产/门禁实现提交为 `60ee8205693dd3a4ebf6db2bf164b59d67f4ca46`，远端 `main` 仍为 `af124d75ccf2c46f423a69380dcbd1450692686f`；最近成功 main CI 仍是 run `32099808664`，绑定旧远端 SHA。没有可供 Profile publisher 接受的同 SHA CI run，本轮没有推送或伪造 CI artifact。
 - 公开 `darwin-arm64`、`darwin-x64`、`win32-x64` desired-state 继续全部返回 HTTP 404；因此首个 2.0.11 production bootstrap 尚未发生。`win-codex` 仍解析到 `laptop-adq973jn.local`，但系统 DNS 返回 `Could not resolve hostname`，不能取得 Windows 安装、重启、健康、回滚或 Full Access/CDP 真机收据。
 - 同一外部阻塞已跨 S14、S20、S25 与本节重复：需要维护者先把当前候选合入远端 main、取得 exact-SHA 三平台 CI/性能/Computer Use 验收，并恢复 Windows runner 或 `win-codex` 可达性；随后才能由受保护环境执行签名 bootstrap 与公共回读。仓库侧不得绕过这些门或把本地测试改名为生产证据。
+
+## 2026-08-20 · 2.0.11 S29 新公开仓库成为发布权威
+
+- 按用户明确指令创建公开仓库 `zyfjacksonchen-source/e-Mate-2.0.11`，默认分支为 `main`；首个主线提交为 `b76ad7055ad614e8dea65da6adb509bf752bbf7a`。旧 `zyfjacksonchen-source/e-Mate` 只保留为历史来源，当前开发分支跟踪新仓库 `main`，没有覆盖或删除旧远端。
+- 目标合同、三个生产发布器和一方 npm package metadata 已统一迁到新仓库身份。`check-target` 同时校验合同文本、发布授权常量和五个发布包 URL，任何一处退回旧仓库都会失败关闭；历史开发记录及带旧 tag 的 Skill 来源 URL 继续指向原不可变出处，不被批量改写成不存在的 provenance。
+- 公开前只扫描当前分支新增历史：高置信凭据模式只命中密码学依赖中的私钥格式常量及代码模板，没有真实私钥/API token；最大新增 blob 约 21 MiB；11 个 submodule URL 均可匿名读取。窄验证为 target contract 通过、release/Profile publisher `10/10`、impact classifier `17/17`、JSON 与 diff check 通过。
+- 新仓库没有继承旧仓库的 Actions secrets、受保护 environment、平台验收收据或公开 desired state；因此“代码公开”不等于“2.0.11 已发布”。这些权限和证据只能在新仓库 fail-closed 门禁下重新建立，不能复制旧 SHA 的成功状态。
