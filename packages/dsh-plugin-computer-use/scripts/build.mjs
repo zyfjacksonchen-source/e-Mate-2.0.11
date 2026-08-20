@@ -21,8 +21,6 @@ for (const name of ['lib', 'assets', 'docs']) {
 if (process.platform === 'darwin') {
   await rm(join(root, 'native'), { recursive: true, force: true })
   await cp(join(upstream, 'native'), join(root, 'native'), { recursive: true })
-} else if (process.platform === 'win32') {
-  await rm(join(root, 'native'), { recursive: true, force: true })
 }
 await mkdir(join(root, 'scripts'), { recursive: true })
 await cp(join(upstream, 'scripts/build-native.mjs'), join(root, 'scripts/build-native.mjs'))

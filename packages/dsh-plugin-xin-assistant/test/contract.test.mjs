@@ -9,6 +9,8 @@ import { buildCliArgs, EMATE_MANAGED_PYTHON_PATH, resolvePythonCommand } from '.
 const pythonEnv = { ...process.env, PYTHONDONTWRITEBYTECODE: '1' }
 
 test('bundled production CLI is exact, runnable, and only structured read operations are exposed', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.match(pkg.scripts.build, /^node .*tsdown\/dist\/run\.mjs /u)
   const cli = new URL('../runtime/xin_agent_cli.py', import.meta.url)
   assert.equal(createHash('sha256').update(readFileSync(cli)).digest('hex'), '936c5a16ada2d59144b39848535f4ab36d0fb87b07665955513d20abc0606767')
   const schema = spawnSync('python3', [cli.pathname, 'schema'], { encoding: 'utf8', env: pythonEnv })
