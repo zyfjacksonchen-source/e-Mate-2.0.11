@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { PRODUCT_UI_REFERENCE } from './change-impact.mjs'
@@ -50,6 +50,18 @@ if (!target.includes('Historical e-Mate `v0.x`/`v1.x` screenshots')) throw new E
 if (/\b(?:WebSocket|EventSource)\b|\bfetch\s*\(|\/api\//.test(shellSource)) {
   throw new Error('e-Mate shell introduced a parallel WebUI/CLI transport')
 }
+
+for (const path of [
+  'packages/dsh-plugin-browser',
+  'packages/dsh-plugin-browser-panel',
+  'desktop/e-mate-desktop/src/browser-extension-setup.ts',
+  'desktop/e-mate-desktop/vendor/dsh-browser-extension',
+]) {
+  if (existsSync(resolve(root, path))) throw new Error(`legacy extension browser source returned: ${path}`)
+}
+const legacyBrowserVendor = readdirSync(resolve(root, 'desktop/e-mate-desktop/vendor'))
+  .find(name => /(?:dsh-browser|bridge-browser)/u.test(name))
+if (legacyBrowserVendor !== undefined) throw new Error(`legacy extension browser vendor returned: ${legacyBrowserVendor}`)
 
 for (const [name, path, expected] of [
   ['Harness', 'upstream/deepseek-harness', 'df78045a127e32cb5b942defba52c539590d1596'],

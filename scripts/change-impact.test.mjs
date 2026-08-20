@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -15,6 +15,18 @@ function classify(...paths) {
 }
 
 describe('repository release boundary', () => {
+  it('keeps the deleted extension browser out of source and release vendor bytes', () => {
+    for (const path of [
+      'packages/dsh-plugin-browser',
+      'packages/dsh-plugin-browser-panel',
+      'desktop/e-mate-desktop/src/browser-extension-setup.ts',
+    ]) assert.equal(existsSync(join(root, path)), false, path)
+    assert.deepEqual(
+      readdirSync(join(root, 'desktop/e-mate-desktop/vendor')).filter(name => /(?:dsh-browser|bridge-browser)/u.test(name)),
+      [],
+    )
+  })
+
   it('makes native rc.7 Creation Mode the guarded development first rule', () => {
     const agents = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8')
     const target = readFileSync(new URL('../docs/target-contract.md', import.meta.url), 'utf8')

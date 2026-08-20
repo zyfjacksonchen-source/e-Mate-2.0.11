@@ -1579,3 +1579,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - change-impact 现在导出唯一 `PRODUCT_UI_REFERENCE`，release boundary 直接从 Git index 验证该 gitlink；`check-target` 复用同一常量，不再维护第二份路径/SHA。新增反例把 UI gitlink换成任意本机提交时，合同在构建前失败关闭；正确 pin 下单组件仍复用相同 Base SDK key。本切片只修发布分类器和 Base 来源身份，Creation Mode 无法表示 Git provenance/CI admission，因此按合同保留在 Base/release plane，没有制造动态插件实验。
 - 聚焦验收：影响分类/组件 payload/完整 Profile 组合/R2 publisher `27/27`、安装器发布合同 `9/9`，`check:release-boundary` 与 `check:target` 均通过；临时组合仓库也使用同一 UI reference 常量，不再因缺失 gitlink 假失败。当前修复修改分类器和受管 Base gitlink，正确进入一次 Base lane；它不改变 Skill Hub 组件的 portable plugin-only 归属。生产服务来源、三平台 CI/安装态、公开 desired state 与 A/B 账号验收仍未关闭。
 - 提交后只读刷新外部门禁：远端 `main` 仍为 `af124d75ccf2c46f423a69380dcbd1450692686f`；最近成功的 Desktop Release run `32238252808` 绑定旧 SHA `65a995fa795d7007dd90818c939c5185b3fc1a1d`。`darwin-arm64`、`darwin-x64`、`win32-x64` 三个公开 Profile desired-state 继续全部返回 HTTP 404，`win-codex` 仍因 `laptop-adq973jn.local` 无法解析而不可达。没有推送、发布或生产变更；在同一当前 SHA 的 CI、签名 bootstrap、公共回读和平台安装态收据到齐前，Goal 保持 active。
+
+## 2026-08-20 · 2.0.11 S21 删除最后的扩展浏览器发布字节
+
+- 完成性审计区分了 `git diff --name-only` 中的历史删除项与当前磁盘真值：旧 `packages/dsh-plugin-browser`、`packages/dsh-plugin-browser-panel`、Desktop extension setup 和整份 extension vendor 已经不存在；`e-mate-profile.ts`/CLI 中保留的旧包名只负责升级时删除用户旧 Profile 残留，不是运行或发布依赖。
+- 继续检查 Desktop vendor 后发现仍有失活的 `@yuxianglin/dsh-bridge-browser@0.0.1` tgz 与 source receipt。它们没有 package/lock/runtime 引用，仍是扩展浏览器实现字节，现已精确删除；删除前 tgz SHA-256 为 `66a97e999941b0da33096d027007d26029d82abc14d9f755b8370603a847c8ae`。CDP 仍是 inventory 中唯一浏览器组件，没有增加替代桥、扩展、浏览器二进制或第二套 Tool/approval/session 路径。
+- `check-target` 现在拒绝旧 browser/browser-panel/extension setup 路径以及 vendor 中任何 `dsh-browser`/`bridge-browser` 文件重新出现；仓库边界新增同一可运行断言。验证结果为影响/组件/完整组合/R2 publisher `28/28`、安装器发布合同 `9/9`、Desktop Profile/package `26/26`，目标 pin 与 diff check 通过。本切片触及 Base 发布输入，必须诚实进入一次 Base lane；后续只改 CDP 组件仍保持 plugin-only。
