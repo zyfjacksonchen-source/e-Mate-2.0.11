@@ -1679,5 +1679,5 @@ The text highlights AI hallucination and human verification, legal use, real-act
 ## 2026-08-20 · 2.0.11 S36 Profile bootstrap 的 Windows 组件产物闭包
 
 - exact main Profile bootstrap run `32333362899` 在 R2 写入前失败关闭：Windows Computer Use 已完成 build/test，但 emitter 因构建脚本提前删除 `native` allowlist 根目录而拒绝产物；Windows Xin Assistant 则因 npm script 直接执行 POSIX `.bin/tsdown`，在 `windows-2025` 上得到 command-not-found。其余组件目标成功，完整 generation 与签名 publication bundle 均未生成，线上 desired-state 没有部分激活。
-- Computer Use 的 Windows 运行能力本就按 inventory 声明为 `runtime_abi: none`、`native_paths: []`；构建现保留仓库固定的 macOS native 来源供统一 allowlist 枚举，再由既有 target filter 从 Windows payload 排除，不新增 Windows 自动化旁路。Xin 仅把同一固定 Harness `tsdown` 入口改为跨平台 `node …/dist/run.mjs`，没有改变编译参数或依赖闭包。
+- Computer Use 的 Windows 运行能力本就按 inventory 声明为 `runtime_abi: none`、`native_paths: []`；非 Darwin 构建现保留仓库固定的 macOS native 来源供统一 allowlist 枚举，再由既有 target filter 从 Windows payload 排除，也保持 Linux npm/Base SDK 输入可构建，不新增 Windows 自动化旁路。Xin 仅把同一固定 Harness `tsdown` 入口改为跨平台 `node …/dist/run.mjs`，没有改变编译参数或依赖闭包。CI changed-component 步骤与 bootstrap 共用显式 Bash 环境，避免 PowerShell 把 `$COMPONENT` 当空值后由 pnpm 假成功。
 - 两条窄合同分别锁定 Windows 构建不得删除 allowlist 根和 Xin 必须使用 Node 入口。该修复触及两个 platform-profile 的构建来源，按仓库合同诚实进入一次 Base lane；只有新的 exact-main CI、正式安装器和 Profile bootstrap 全部通过后，才允许原生 Cloudflare 发布。

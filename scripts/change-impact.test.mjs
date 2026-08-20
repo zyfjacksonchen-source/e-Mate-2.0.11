@@ -349,6 +349,7 @@ describe('repository release boundary', () => {
     assert.match(workflow, /plugins:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_plugins == 'true'/u)
     assert.match(workflow, /include: \$\{\{ fromJSON\(needs\.impact\.outputs\.component_jobs_json\) \}\}/u)
     assert.match(workflow, /runs-on: \$\{\{ matrix\.runner \}\}/u)
+    assert.match(workflow, /name: Build and test only the changed component\n\s+shell: bash[^]*?set -euo pipefail[^]*?pnpm --filter "\$COMPONENT" run build/u)
     assert.match(workflow, /if: matrix\.publish == true/u)
     assert.match(workflow, /profile-composition:\n(?:.|\n)*?needs: \[impact, plugins\](?:.|\n)*?publish_components_json != '\[\]'(?:.|\n)*?Compose and boot the complete candidate generation/u)
     assert.match(workflow, /node scripts\/base-sdk\.mjs fingerprint/u)
