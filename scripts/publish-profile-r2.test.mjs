@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { generateKeyPairSync } from 'node:crypto'
+import { createHash, generateKeyPairSync } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,7 +9,7 @@ import { parseProfileBaseContract, parseProfileReleaseEnvelope } from '../deskto
 import { PRODUCT_UI_REFERENCE } from './change-impact.mjs'
 import { emitComponent } from './component-release.mjs'
 import { composeProfileReleaseCandidate } from './profile-release.mjs'
-import { prepareProfilePublication } from './publish-profile-r2.mjs'
+import { prepareProfilePublication, writeProfilePublicationBundle } from './publish-profile-r2.mjs'
 
 function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
@@ -133,6 +133,22 @@ test('publication admits bootstrap and its direct successor before exposing acti
   assert.deepEqual(publication.releases.map(release => release.target), ['darwin-arm64', 'darwin-x64', 'win32-x64'])
   assert.equal(publication.releases.every(release => release.stable.cacheControl === 'no-store'), true)
   assert.equal(publication.objects.filter(item => item.role === 'desired-state-immutable').length, 3)
+  const bundle = join(root, 'dist/native-publication')
+  const plan = writeProfilePublicationBundle(publication, bundle, new Map([
+    ['darwin-arm64', undefined], ['darwin-x64', undefined], ['win32-x64', undefined],
+  ]), { acceptedCiRunId: '123', preparationRunId: '456' })
+  assert.equal(plan.document_type, 'emate.profile-native-cloudflare-publication-plan')
+  assert.equal(plan.source_commit, sourceCommit)
+  assert.equal(plan.accepted_ci_run_id, '123')
+  assert.equal(plan.preparation_run_id, '456')
+  assert.equal(plan.activations.every(item => item.expected_current === null), true)
+  assert.equal(plan.immutable_objects.every(item => item.path.startsWith('immutable/')), true)
+  assert.equal(plan.activations.every(item => item.object.path.startsWith('activation/')), true)
+  for (const item of [...plan.immutable_objects, ...plan.activations.map(entry => entry.object)]) {
+    const bytes = readFileSync(join(bundle, ...item.path.split('/')))
+    assert.equal(bytes.byteLength, item.bytes)
+    assert.equal(createHash('sha256').update(bytes).digest('hex'), item.sha256)
+  }
   const partialBootstrap = prepareProfilePublication({
     root,
     candidateDirectories: candidates,
@@ -192,6 +208,9 @@ test('publication admits bootstrap and its direct successor before exposing acti
     [componentId], [componentId], [componentId],
   ])
   assert.equal(successor.releases.every(release => typeof release.parent_generation === 'string'), true)
+  const successorBundle = join(root, 'dist/native-publication-successor')
+  const successorPlan = writeProfilePublicationBundle(successor, successorBundle, currentByTarget)
+  assert.equal(successorPlan.activations.every(item => item.expected_current?.sha256?.length === 64), true)
   const partialSuccessor = prepareProfilePublication({
     root,
     candidateDirectories: nextCandidates,
