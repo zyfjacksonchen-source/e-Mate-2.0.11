@@ -23,7 +23,7 @@ afterEach(async () => {
 const { privateKey, publicKey } = generateKeyPairSync('ed25519')
 const base: ProfileBaseContract = {
   schema_version: 1,
-  id: 'e-mate-desktop-profile-v1-dsh-df78045a127e',
+  id: 'e-mate-desktop-profile-v2-dsh-df78045a127e',
   desktop_api: 1,
   profile_format: 1,
   harness_version: '0.1.0-rc.7',

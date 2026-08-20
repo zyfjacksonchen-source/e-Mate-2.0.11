@@ -155,7 +155,14 @@ jobs:
           cache: pnpm
           cache-dependency-path: |
             pnpm-lock.yaml
+            packages/dsh-plugin-*/pnpm-lock.yaml
+            packages/dsh/profile/plugins/emate-shell/pnpm-lock.yaml
             upstream/deepseek-harness/pnpm-lock.yaml
+      - uses: actions/setup-python@v6
+        id: component-python
+        if: matrix.component == '@e-mate/dsh-plugin-vision-toolkit'
+        with:
+          python-version: '3.12.14'
       - name: Install exact component toolchains without building Base
         run: |
           pnpm install --frozen-lockfile
@@ -184,10 +191,10 @@ jobs:
         env:
           COMPONENT: ${{ matrix.component }}
           EMATE_COMPONENT_TARGET: ${{ matrix.target }}
+          EMATE_BUILD_PYTHON: ${{ steps.component-python.outputs.python-path }}
         run: |
           set -euo pipefail
-          pnpm --filter "$COMPONENT" run build
-          pnpm --filter "$COMPONENT" run test
+          node scripts/component-run.mjs check --component "$COMPONENT"
       - name: Emit the immutable target payload
         shell: bash
         env:

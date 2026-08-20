@@ -182,6 +182,9 @@ export function FileImportControl({ sessionId, input, inputActions, isLoopback, 
       if (route === 'pass') return
       event.preventDefault()
       event.stopImmediatePropagation()
+      // This capture listener owns the drop, so finish the native image drag
+      // state that would otherwise be cleared by its blocked bubble listener.
+      window.dispatchEvent(new Event('dragend'))
       const routedFiles = route === 'intake-all' ? files : files.filter(file => imageType(file) !== undefined)
       if (routedFiles.length > 0) queueMicrotask(() => { intake(routedFiles) })
     }

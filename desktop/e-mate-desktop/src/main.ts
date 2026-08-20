@@ -39,6 +39,7 @@ import {
   EMATE_DESKTOP_PROFILE_VERSION,
   EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
   EMATE_PROFILE_NAME,
+  emateProfileComponentSources,
   installEmateDesktopProfile,
 } from './e-mate-profile.ts'
 import { cleanupObsoleteMacApplications } from './installation-cleanup.ts'
@@ -284,13 +285,14 @@ async function start(): Promise<void> {
         : { activeRelease: profileGenerationStartup.generation.release }),
     })
     const deferredProfileCleanup: string[] = []
+    const activeProfileGeneration = profileGenerationStartup.generation === undefined ? undefined : {
+      id: profileGenerationStartup.generation.id,
+      componentDirectories: profileGenerationStartup.generation.component_directories,
+    }
     installEmateDesktopProfile(
       homeDir,
       path => { deferredProfileCleanup.push(path) },
-      profileGenerationStartup.generation === undefined ? undefined : {
-        id: profileGenerationStartup.generation.id,
-        componentDirectories: profileGenerationStartup.generation.component_directories,
-      },
+      activeProfileGeneration,
     )
     profileStatePath = selectionStatePath
     profileStartup = beginDesktopProfileStartup(selectionStatePath, homeDir)
@@ -386,7 +388,7 @@ async function start(): Promise<void> {
     }
     const releasePackageResolver = installProfilePackageResolver(
       prepared.bareModuleBaseUrl,
-      profileGenerationStartup.generation?.component_directories.values(),
+      emateProfileComponentSources(activeProfileGeneration),
       baseContract.runtime_imports,
     )
     const ctx = await boot(

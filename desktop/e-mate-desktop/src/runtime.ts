@@ -181,9 +181,6 @@ export interface DesktopRuntime {
   /** Open a native terminal containing packaged DSH command shims. */
   openTerminal(): void
 
-  /** Register e-Mate for macOS Accessibility and open its privacy pane when permission is missing. */
-  openComputerUseAccessibilitySetup(): Promise<boolean>
-
   /** Accept the terminal client Loader outcome for the mounted generation. */
   reportRendererBoot(report: RendererBootReport): void
 

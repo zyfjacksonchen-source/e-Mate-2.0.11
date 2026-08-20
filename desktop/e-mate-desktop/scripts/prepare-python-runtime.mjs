@@ -1,4 +1,4 @@
-/** Download the fixed Python bootstrap used by the rc.6 native Vision Toolkit. */
+/** Download the fixed Python bootstrap exposed to the rc.7 Vision component. */
 
 import { createHash } from 'node:crypto'
 import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'

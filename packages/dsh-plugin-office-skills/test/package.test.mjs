@@ -16,11 +16,12 @@ test('registers four ready Skills and two target Tool/Job paths', async () => {
   let provider
   const capabilities = []
   const tools = []
-  assert.deepEqual(inject, ['skills', 'tools', 'jobs', 'emateCapabilities'])
+  assert.deepEqual(inject, ['skills', 'tools', 'jobs', 'sandboxPolicy', 'emateCapabilities'])
   apply({
     skills: { registerProvider(create) { provider = create(); return () => {} } },
     tools: { register(definition) { tools.push(definition); return () => {} } },
     jobs: { attachController() { return () => {} } },
+    sandboxPolicy: { resolve() { return { mode: 'read-only', workspaceRoot: process.cwd() } } },
     emateCapabilities: { register(definition) { capabilities.push(definition); return () => {} } },
     effect(register) { register() },
   })
@@ -145,6 +146,7 @@ test('Tools stay inside the current workspace and never overwrite output', async
   await mkdir(root)
   const tools = []
   let jobIndex = 0
+  let sandboxMode = 'read-only'
   apply({
     skills: { registerProvider() { return () => {} } },
     tools: { register(definition) { tools.push(definition); return () => {} } },
@@ -153,6 +155,7 @@ test('Tools stay inside the current workspace and never overwrite output', async
       start(specification) { jobIndex += 1; specification.run(); return `office-job-${jobIndex}` },
       async wait() {},
     },
+    sandboxPolicy: { resolve() { return { mode: sandboxMode, workspaceRoot: root } } },
     emateCapabilities: { register() { return () => {} } },
     effect(register) { register() },
   })
@@ -161,7 +164,14 @@ test('Tools stay inside the current workspace and never overwrite output', async
   const write = tools.find(tool => tool.name === 'office_write')
   const read = tools.find(tool => tool.name === 'office_read')
   const document = { title: '轻量 Office', paragraphs: ['第一版'] }
+  await assert.rejects(
+    write.execute({ format: 'docx', filename: '交付.docx', document }, execution),
+    /read-only sandbox policy/u,
+  )
+  assert.equal(jobIndex, 0)
+  sandboxMode = 'workspace-write'
   const first = await write.execute({ format: 'docx', filename: '交付.docx', document }, execution)
+  sandboxMode = 'danger-full-access'
   const second = await write.execute({ format: 'docx', filename: '交付.docx', document }, execution)
   assert.equal(first.relative_path, '.e-mate/office/交付.docx')
   assert.equal(second.relative_path, '.e-mate/office/交付-2.docx')

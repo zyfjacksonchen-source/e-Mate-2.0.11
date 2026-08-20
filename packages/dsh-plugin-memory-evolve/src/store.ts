@@ -46,6 +46,11 @@ export interface MemoryPublicRecord {
   readonly scope: MemoryScope['kind']
 }
 
+export interface MemoryRememberInput {
+  readonly content: string
+  readonly tags: readonly string[]
+}
+
 type ScopeResolver = (execution: MemoryExecution) => Promise<MemoryScope>
 
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex')
@@ -80,6 +85,14 @@ function tags(value: readonly string[] | undefined): readonly string[] {
     }
     return normalized
   }))]
+}
+
+/** Validate and normalize one durable-memory mutation at its public boundary. */
+export function normalizeMemoryRememberInput(input: {
+  readonly content: unknown
+  readonly tags?: readonly string[]
+}): MemoryRememberInput {
+  return { content: content(input.content), tags: tags(input.tags) }
 }
 
 function query(value: unknown): string {
@@ -159,12 +172,13 @@ export class MemoryStore {
 
   /** Store one explicitly requested memory in the current scope. */
   async remember(input: { readonly content: unknown; readonly tags?: readonly string[] }, execution: MemoryExecution): Promise<MemoryPublicRecord> {
+    const normalized = normalizeMemoryRememberInput(input)
     const scope = await this.resolveScope(execution)
     const record = scopedRecord(scope, {
       schemaVersion: 1,
       id: randomUUID(),
-      content: content(input.content),
-      tags: tags(input.tags),
+      content: normalized.content,
+      tags: normalized.tags,
       writtenBySessionId: scope.sessionId,
       createdAt: new Date().toISOString(),
     })

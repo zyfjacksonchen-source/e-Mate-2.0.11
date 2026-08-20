@@ -109,7 +109,7 @@ export const REQUIRED_MACOS_UNIVERSAL_ENTRIES = [
   ...MACOS_UNIVERSAL_NATIVE_ENTRIES.map(entry => entry.path),
 ] as const
 
-/** Fixed Python bootstrap executables used by the rc.6 native Vision Toolkit. */
+/** Fixed Python bootstrap executables exposed to the rc.7 Vision component. */
 export const REQUIRED_PYTHON_RUNTIME_ENTRIES = {
   'darwin-arm64': 'python-runtime/darwin-arm64/python/bin/python3',
   'darwin-x64': 'python-runtime/darwin-x64/python/bin/python3',
@@ -126,7 +126,6 @@ export const REQUIRED_UNPACKED_PACKAGE_SPECIFIERS = [
   '@e-mate/desktop/profile-service',
   '@e-mate/desktop/profiles',
   '@e-mate/desktop/updates',
-  '@e-mate/desktop/computer-use-setup',
   '@e-mate/desktop/windows-pwsh-sandbox',
   '@e-mate/desktop/package.json',
   '@deepseek-ai/dsh-base/package.json',

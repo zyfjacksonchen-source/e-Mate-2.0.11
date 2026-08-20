@@ -14,12 +14,6 @@
       name: '@e-mate/desktop/updates'
     - id: desktop-agent-update
       name: '@e-mate/desktop/agent-update'
-    - id: desktop-computer-use-setup
-      name: '@e-mate/desktop/computer-use-setup'
-      disabled: !!js process.platform !== 'darwin'
-    - id: desktop-vision-toolkit
-      name: '@e-mate/desktop/vision-toolkit'
-
 # Desktop releases use the native updater Tool, never the legacy npm updater guidance.
 - id: emate-agent-operations
   disabled: true

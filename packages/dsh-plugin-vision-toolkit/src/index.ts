@@ -1,154 +1,227 @@
-/**
- * Fail-closed rc.5 adapter boundary for dsh-vision-toolkit.
- *
- * The pinned Harness has no enterprise-owned multimodal-provider policy seam.
- * Registering the upstream remote tools would therefore expose user-editable
- * provider and model fields outside e-Mate model policy. The adapter keeps the
- * upstream atomic exposure rule: while that seam is absent it installs no
- * Python environment and registers none of the ten execution tools.
- */
 import type { Context } from '@deepseek-ai/cordis'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
-import type { SkillRegistration } from '@deepseek-ai/dsh-skill'
-import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
-import z from '@deepseek-ai/schemastery'
-import type Schema from '@deepseek-ai/schemastery'
+import type {} from '@deepseek-ai/dsh-credentials'
+import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import { bundledPythonPath } from '@e-mate/desktop/vision-toolkit'
+import { apply as applyVisionToolkit } from '../.build/upstream-lib/index.js'
 
 export const name = '@e-mate/dsh-plugin-vision-toolkit'
-export const inject = ['tools', 'skills', 'emateCapabilities']
+export const inject = [
+  'tools',
+  'credentials',
+  'skills',
+  'subprocess',
+  'sandboxPolicy',
+  'settings',
+  'agents',
+  'sessions',
+  'webServer',
+  'emateCapabilities',
+]
 
-export const VISION_TOOLKIT_SETTINGS_NAMESPACE = settingsNamespace('vision-toolkit')
-export const VISION_POLICY_BLOCK_CODE = 'EMATE_VISION_POLICY_SEAM_MISSING'
-export const UPSTREAM_COMMIT = '29850a83871d4b7a7cc13e251420c5a440e2f69e'
+const SETTINGS_NAMESPACE = settingsNamespace('vision-toolkit')
+const MODEL_SETTINGS_NAMESPACE = settingsNamespace('llm-pi-ai')
+const MODEL_ID = 'gpt-5.6-luna'
+const CREDENTIAL_REF = 'E_MATE_MODEL_KEY_GPT'
+const UNCONFIGURED_BASE_URL = 'https://127.0.0.1.invalid/v1'
+const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 
-export interface VisionToolkitAdapterConfig {
-  runtime: {
-    mode: 'managed'
+type CapabilityRegistry = {
+  register(definition: unknown): () => void
+}
+
+type VisionContext = Context & {
+  emateCapabilities: CapabilityRegistry
+}
+
+type VisionToolExecution = { agent?: { session?: unknown } }
+
+export type VisionConfig = {
+  provider: {
+    baseUrl: string
+    credential: string
+    model: string
+    protocol: 'responses'
+    anthropicThinking: 'omit'
+    userAgent: string
   }
+  language: 'zh'
+  timeoutMs: number
+  maxImageBytes: number
+  maxImagePixels: number
+  concurrency: number
+  runtime: { mode: 'managed'; python: string }
+  allowedDirs: string[]
 }
 
-export const Config: Schema<VisionToolkitAdapterConfig> = z.object({
-  runtime: z.object({
-    mode: z.union(['managed'] as const).default('managed'),
-  }),
-})
-
-const UPSTREAM_TOOL_NAMES = [
-  'vision_glance',
-  'vision_ground',
-  'vision_detect',
-  'vision_trace',
-  'vision_crop',
-  'vision_pixel_diff',
-  'vision_long_screenshot_ocr',
-  'vision_extract_foreground',
-  'vision_dominant_colors',
-  'vision_html_screenshot',
-] as const
-
-export interface VisionAdapterStatus {
-  state: 'blocked'
-  code: typeof VISION_POLICY_BLOCK_CODE
-  harnessVersion: '0.1.0-rc.7'
-  upstreamCommit: typeof UPSTREAM_COMMIT
-  managedRuntime: 'deferred'
-  runtimeInstalled: false
-  toolsRegistered: 0
-  blockedTools: readonly string[]
-  reason: string
-}
-
-/** Stable, credential-free status projected to both humans and the Agent. */
-export const ADAPTER_STATUS: VisionAdapterStatus = Object.freeze({
-  state: 'blocked',
-  code: VISION_POLICY_BLOCK_CODE,
-  harnessVersion: '0.1.0-rc.7',
-  upstreamCommit: UPSTREAM_COMMIT,
-  managedRuntime: 'deferred',
-  runtimeInstalled: false,
-  toolsRegistered: 0,
-  blockedTools: Object.freeze([...UPSTREAM_TOOL_NAMES]),
-  reason: 'Harness 0.1.0-rc.7 has no enterprise-owned multimodal provider policy seam; exposing the upstream provider/model Settings would bypass e-Mate model policy.',
-})
-
-const STATUS_SKILL: SkillRegistration = {
-  name: 'vision-tools',
-  description: 'Reports the fail-closed status of the pinned Vision Toolkit adapter.',
-  whenToUse: 'Load when a task requests OCR, image understanding, grounding, or visual comparison and Vision Toolkit tools are absent.',
-  source: 'bundled',
-  content: `# Vision Toolkit status
-
-The pinned e-Mate 2.0.11 adapter is fail-closed with code ${VISION_POLICY_BLOCK_CODE}.
-Call vision_toolkit_status for the exact release and blocked-tool list. Do not
-infer image contents, claim OCR ran, install Python packages, or substitute a
-different vision provider. The managed runtime remains uninstalled until an
-enterprise-owned multimodal provider policy seam is available.`,
-}
-
-function statusValue(): JsonValue {
+function unconfigured(): VisionConfig {
   return {
-    state: ADAPTER_STATUS.state,
-    code: ADAPTER_STATUS.code,
-    harnessVersion: ADAPTER_STATUS.harnessVersion,
-    upstreamCommit: ADAPTER_STATUS.upstreamCommit,
-    managedRuntime: ADAPTER_STATUS.managedRuntime,
-    runtimeInstalled: ADAPTER_STATUS.runtimeInstalled,
-    toolsRegistered: ADAPTER_STATUS.toolsRegistered,
-    blockedTools: [...ADAPTER_STATUS.blockedTools],
-    reason: ADAPTER_STATUS.reason,
+    provider: {
+      baseUrl: UNCONFIGURED_BASE_URL,
+      credential: CREDENTIAL_REF,
+      model: MODEL_ID,
+      protocol: 'responses',
+      anthropicThinking: 'omit',
+      userAgent: DEFAULT_USER_AGENT,
+    },
+    language: 'zh',
+    timeoutMs: 120_000,
+    maxImageBytes: 16 * 1024 * 1024,
+    maxImagePixels: 40_000_000,
+    concurrency: 4,
+    runtime: { mode: 'managed', python: bundledPythonPath() },
+    allowedDirs: [],
   }
 }
 
-/** Register only truthful status surfaces; no runtime or vision Tool is mounted. */
-export function apply(ctx: Context, config: VisionToolkitAdapterConfig): void {
-  let current = (): VisionToolkitAdapterConfig => config
-  installSettingsSection(ctx, VISION_TOOLKIT_SETTINGS_NAMESPACE, Config, config, {
-    setSource(source) { current = source },
-    onChange() {
-      if (current().runtime.mode !== 'managed') {
-        throw new Error('vision-toolkit runtime.mode must remain managed')
-      }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+/** Derive the vision route only from the enterprise-projected native catalog. */
+export function visionConfigFromModelSettings(value: unknown): VisionConfig | undefined {
+  if (!isRecord(value) || !isRecord(value.providers)) return undefined
+  const provider = value.providers['e-mate-enterprise']
+  if (!isRecord(provider)
+    || provider.apiKeyEnv !== CREDENTIAL_REF
+    || provider.api !== 'openai-responses'
+    || typeof provider.baseURL !== 'string'
+    || !Array.isArray(provider.models)) return undefined
+  const model = provider.models.find(candidate => isRecord(candidate)
+    && candidate.id === MODEL_ID
+    && Array.isArray(candidate.input)
+    && candidate.input.includes('image'))
+  if (model === undefined) return undefined
+  let baseUrl: URL
+  try {
+    baseUrl = new URL(provider.baseURL)
+  } catch {
+    return undefined
+  }
+  if ((baseUrl.protocol !== 'https:' && baseUrl.protocol !== 'http:')
+    || baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash) return undefined
+  const config = unconfigured()
+  return {
+    ...config,
+    provider: {
+      ...config.provider,
+      baseUrl: baseUrl.toString().replace(/\/+$/u, ''),
+    },
+  }
+}
+
+function same(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function assertArtifactWrite(ctx: VisionContext, exec: VisionToolExecution): void {
+  const session = exec.agent?.session
+  if (session === undefined) throw new Error('Vision artifact output requires an owning Agent session')
+  if (ctx.sandboxPolicy.resolve({ session: session as never }).mode === 'read-only') {
+    throw new Error('Vision artifact output is blocked by the current read-only sandbox policy')
+  }
+}
+
+async function runtimeStatus(ctx: Context, signal: AbortSignal): Promise<{ state: string; detail: string; action_ids: never[] }> {
+  const endpoint = `http://127.0.0.1:${String(ctx.webServer.port)}/_dsh/vision-toolkit/settings`
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(3_000)])
+  try {
+    const snapshotResponse = await fetch(endpoint, {
+      headers: { accept: 'application/json' }, cache: 'no-store', signal: bounded,
+    })
+    const snapshot = await snapshotResponse.json() as unknown
+    if (!snapshotResponse.ok || !isRecord(snapshot) || snapshot.ok !== true || !isRecord(snapshot.value)
+      || !isRecord(snapshot.value.runtime) || snapshot.value.runtime.ready !== true
+      || !isRecord(snapshot.value.credential) || snapshot.value.credential.configured !== true
+      || !isRecord(snapshot.value.settings) || !isRecord(snapshot.value.settings.value)
+      || !isRecord(snapshot.value.settings.value.provider)
+      || snapshot.value.settings.value.provider.baseUrl === UNCONFIGURED_BASE_URL) {
+      return { state: 'setup-required', detail: 'OCR 运行时或企业视觉模型配置尚未就绪。', action_ids: [] }
+    }
+    const healthResponse = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        origin: `http://127.0.0.1:${String(ctx.webServer.port)}`,
+      },
+      body: JSON.stringify({ action: 'health', testConnection: true }),
+      signal: bounded,
+    })
+    const health = await healthResponse.json() as unknown
+    if (!healthResponse.ok || !isRecord(health) || health.ok !== true || !isRecord(health.value)
+      || health.value.healthy !== true || health.value.connectionTested !== true) {
+      return { state: 'setup-required', detail: 'OCR 本地运行时已加载，但视觉模型连接检查未通过。', action_ids: [] }
+    }
+    return { state: 'ready', detail: 'OCR 本地运行时、企业凭据与模型服务可达性检查通过。', action_ids: [] }
+  } catch {
+    return { state: 'setup-required', detail: 'OCR 运行时尚未完成启动或连接检查。', action_ids: [] }
+  }
+}
+
+/** Mount the pinned DSH-native toolkit while enforcing the enterprise-owned model route. */
+export async function apply(ctx: VisionContext): Promise<() => void> {
+  const initial = visionConfigFromModelSettings(ctx.settings.get(MODEL_SETTINGS_NAMESPACE)) ?? unconfigured()
+  const disposeToolkit = await applyVisionToolkit(ctx, initial, {
+    managed: true,
+    validateConfig(value) {
+      const current = visionConfigFromModelSettings(ctx.settings.get(MODEL_SETTINGS_NAMESPACE)) ?? unconfigured()
+      if (!same(value, current)) throw new Error('vision-toolkit settings must match the enterprise model policy')
+    },
+    assertWriteAllowed(exec) {
+      assertArtifactWrite(ctx, exec)
     },
   })
-  ctx.skills.register(STATUS_SKILL)
-  ctx.tools.register(defineTool({
-    name: 'vision_toolkit_status',
-    description: 'Report why the pinned e-Mate Vision Toolkit adapter is unavailable without installing or executing a runtime.',
-    parameters: {},
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          state: { type: 'string', enum: ['blocked'], required: true },
-          code: { type: 'string', enum: [VISION_POLICY_BLOCK_CODE], required: true },
-          harnessVersion: { type: 'string', required: true },
-          upstreamCommit: { type: 'string', required: true },
-          managedRuntime: { type: 'string', enum: ['deferred'], required: true },
-          runtimeInstalled: { type: 'boolean', required: true },
-          toolsRegistered: { type: 'integer', required: true },
-          blockedTools: { type: 'array', items: { type: 'string' }, required: true },
-          reason: { type: 'string', required: true },
-        },
-      },
-      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
-    },
-    execute: () => Promise.resolve(statusValue()),
-    presentCall: () => ({ card: 'generic', title: 'Vision Toolkit status', kind: 'read' }),
-  }))
-  const capabilities = (ctx as Context & { emateCapabilities: { register(definition: unknown): () => void } }).emateCapabilities
-  ctx.effect(() => capabilities.register({
+  type Status = Awaited<ReturnType<typeof runtimeStatus>>
+  let cachedStatus: { readonly value: Status; readonly expiresAt: number } | undefined
+  let statusEpoch = 0
+  const invalidateStatus = (): void => {
+    cachedStatus = undefined
+    statusEpoch += 1
+  }
+  const status = async (signal: AbortSignal): Promise<Status> => {
+    if (cachedStatus !== undefined && cachedStatus.expiresAt > Date.now()) return cachedStatus.value
+    const epoch = statusEpoch
+    const value = await runtimeStatus(ctx, signal)
+    if (epoch === statusEpoch) {
+      cachedStatus = { value, expiresAt: Date.now() + (value.state === 'ready' ? 30_000 : 2_000) }
+    }
+    return value
+  }
+  let projection = Promise.resolve()
+  const refresh = (): void => {
+    invalidateStatus()
+    projection = projection.then(async () => {
+      const next = visionConfigFromModelSettings(ctx.settings.get(MODEL_SETTINGS_NAMESPACE)) ?? unconfigured()
+      if (same(ctx.settings.get(SETTINGS_NAMESPACE), next)) return
+      await ctx.settings.replace(SETTINGS_NAMESPACE, next)
+      invalidateStatus()
+    }).catch(error => ctx.logger.warn(
+      'e-Mate Vision Toolkit projection failed: %s',
+      error instanceof Error ? error.message : String(error),
+    ))
+  }
+  refresh()
+  const disposeSettings = ctx.on('settings/updated', namespace => {
+    if (namespace === String(MODEL_SETTINGS_NAMESPACE)) refresh()
+  })
+  const disposeCredentials = ctx.on('credentials/updated', ref => {
+    if (String(ref) === CREDENTIAL_REF) invalidateStatus()
+  })
+  const disposeCapability = ctx.emateCapabilities.register({
     id: 'vision-ocr',
     title: '视觉 / OCR',
-    summary: '通过受企业模型策略约束的 Vision Toolkit 处理 OCR 与图像理解；缺少策略绑定时保持关闭。',
+    summary: '使用目标 dsh-vision-toolkit 执行 OCR、图像理解、定位、裁剪与视觉产物交付。',
     icon_key: 'ocr',
     order: 45,
     actions: [],
-    status: async () => ({
-      state: ADAPTER_STATUS.state,
-      detail: `固定运行时缺少企业多模态模型策略绑定；Vision/OCR 工具保持禁用（${ADAPTER_STATUS.code}）。`,
-      action_ids: [],
-    }),
-  }), 'emate.vision-toolkit: capability metadata')
-  ctx.logger.warn('%s: %s', VISION_POLICY_BLOCK_CODE, ADAPTER_STATUS.reason)
+    status,
+  })
+  return () => {
+    disposeCapability()
+    disposeCredentials()
+    disposeSettings()
+    disposeToolkit()
+  }
 }

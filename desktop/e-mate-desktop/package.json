@@ -58,10 +58,6 @@
       "types": "./lib/types/agent-update.d.ts",
       "default": "./lib/agent-update.js"
     },
-    "./computer-use-setup": {
-      "types": "./lib/types/computer-use-setup.d.ts",
-      "default": "./lib/computer-use-setup.js"
-    },
     "./vision-toolkit": {
       "types": "./lib/types/vision-toolkit.d.ts",
       "default": "./lib/vision-toolkit.js"
@@ -104,7 +100,7 @@
   "scripts": {
     "prepare:python": "node scripts/prepare-python-runtime.mjs",
     "build": "yarn run prepare:python && yarn run build:sdk",
-    "build:sdk": "node ../../scripts/sync-emate-plugin-bundles.mjs && node scripts/sync-emate-profile.mjs && node scripts/generate-mac-app-icon.mjs && node scripts/generate-tray-icons.mjs && node scripts/clean.mjs && tsdown && tsc -p tsconfig.json --emitDeclarationOnly && tsc -p tsconfig.client.json --emitDeclarationOnly",
+    "build:sdk": "node scripts/sync-emate-profile.mjs && node scripts/generate-mac-app-icon.mjs && node scripts/generate-tray-icons.mjs && node scripts/clean.mjs && tsdown && tsc -p tsconfig.json --emitDeclarationOnly && tsc -p tsconfig.client.json --emitDeclarationOnly",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.tests.client.json --noEmit",
     "test": "vitest run",
     "verify:closure": "node --test scripts/runtime-closure.spec.mjs && node scripts/verify-runtime-closure.mjs",
@@ -126,7 +122,6 @@
     "prepack": "yarn run check"
   },
   "dependencies": {
-    "@anionex/dsh-vision-toolkit": "patch:@anionex/dsh-vision-toolkit@npm%3A0.1.7#~/.yarn/patches/@anionex-dsh-vision-toolkit-npm-0.1.7-c7bdbc494e.patch",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/cordis-plugin-group": "1.0.1",
     "@deepseek-ai/cordis-plugin-include": "1.0.6",
@@ -233,11 +228,11 @@
     "@deepseek-ai/dsh-workflow": "0.1.0-rc.7",
     "@deepseek-ai/schemastery": "3.18.1",
     "@kelearns/dsh-navigation-bar": "0.2.1",
-    "@omdsh-dev/dsh-genui": "file:vendor/omdsh-dev-dsh-genui-0.8.3-0e756efb.tgz",
     "dsh-at-file": "https://github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz",
     "dsh-file-viewer": "patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch",
     "dsh-turn-fold": "patch:dsh-turn-fold@https%3A//github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz#~/.yarn/patches/dsh-turn-fold-https-e835a4814f.patch",
     "dsh-visualize": "file:vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz",
+    "fflate": "0.8.3",
     "koffi": "3.1.5",
     "node-addon-require-builtin": "^0.1.4",
     "pnpm": "11.7.0",
@@ -297,10 +292,6 @@
       {
         "from": "build/python-runtime",
         "to": "python-runtime"
-      },
-      {
-        "from": "node_modules/@anionex/dsh-vision-toolkit/vendor/agent-vision-toolkit/CHANGELOG.md",
-        "to": "app.asar.unpacked/node_modules/@anionex/dsh-vision-toolkit/vendor/agent-vision-toolkit/CHANGELOG.md"
       }
     ],
     "mac": {

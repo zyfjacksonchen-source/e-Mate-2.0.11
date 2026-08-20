@@ -82,10 +82,7 @@ describe('published package surface', () => {
       types: './lib/types/agent-update.d.ts',
       default: './lib/agent-update.js',
     })
-    expect(manifest.exports).toHaveProperty('./computer-use-setup', {
-      types: './lib/types/computer-use-setup.d.ts',
-      default: './lib/computer-use-setup.js',
-    })
+    expect(manifest.exports).not.toHaveProperty('./computer-use-setup')
     expect(manifest.exports).not.toHaveProperty('./windows-acl-runner')
     expect(manifest.exports).not.toHaveProperty('./desktop-cli')
     expect(manifest.exports).not.toHaveProperty('./desktop-runtime-environment')
@@ -107,7 +104,7 @@ describe('published package surface', () => {
     expect(patch).toContain("name: '@e-mate/desktop/pnpm'")
     expect(patch).toContain("name: '@e-mate/desktop/updates'")
     expect(patch).toContain("name: '@e-mate/desktop/agent-update'")
-    expect(patch).toContain("name: '@e-mate/desktop/computer-use-setup'")
+    expect(patch).not.toContain('desktop-computer-use-setup')
     expect(patch).not.toContain('desktop-profiles')
   })
 
@@ -277,10 +274,6 @@ describe('published package surface', () => {
     ])
     expect(manifest.build?.extraResources).toEqual([
       { from: 'build/python-runtime', to: 'python-runtime' },
-      {
-        from: 'node_modules/@anionex/dsh-vision-toolkit/vendor/agent-vision-toolkit/CHANGELOG.md',
-        to: 'app.asar.unpacked/node_modules/@anionex/dsh-vision-toolkit/vendor/agent-vision-toolkit/CHANGELOG.md',
-      },
     ])
     expect(manifest.build?.mac?.icon).toBe('build/app-icon-mac.png')
     expect(manifest.build?.mac?.mergeASARs).toBe(false)
@@ -308,7 +301,8 @@ describe('published package surface', () => {
   it('separates unsigned smoke packaging from the signed macOS release', () => {
     const packageDir = readFileSync(new URL('scripts/package-dir.mjs', packageRoot), 'utf8')
 
-    expect(manifest.scripts?.['build:sdk']).toContain('node ../../scripts/sync-emate-plugin-bundles.mjs')
+    expect(manifest.scripts?.['build:sdk']).toContain('node scripts/sync-emate-profile.mjs')
+    expect(manifest.scripts?.['build:sdk']).not.toContain('sync-emate-plugin-bundles.mjs')
     expect(manifest.scripts?.['build:sdk']).toContain('node scripts/generate-mac-app-icon.mjs')
     expect(manifest.scripts?.['package:dir']).toBe('yarn run build && node scripts/package-dir.mjs')
     expect(packageDir).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")

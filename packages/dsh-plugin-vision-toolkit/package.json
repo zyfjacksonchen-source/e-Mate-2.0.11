@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh-plugin-vision-toolkit",
   "version": "2.0.11",
-  "description": "Fail-closed e-Mate rc.5 adapter boundary for dsh-vision-toolkit",
+  "description": "Enterprise-policy adapter for the pinned DSH-native Vision Toolkit",
   "type": "module",
   "license": "MIT",
   "main": "lib/index.mjs",
@@ -11,11 +11,15 @@
       "types": "./lib/index.d.mts",
       "default": "./lib/index.mjs"
     },
+    "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
+    "pnpm-lock.yaml",
+    "runtime",
+    "vendor",
     "cordis.patch.yml",
     "LICENSE",
     "NOTICE.md",
@@ -28,27 +32,55 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-tool",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-input-trigger",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    },
     "visionToolkit": {
-      "adapterState": "blocked",
-      "upstreamRepository": "https://github.com/Anionex/dsh-vision-toolkit",
-      "upstreamCommit": "29850a83871d4b7a7cc13e251420c5a440e2f69e"
+      "adapterState": "managed",
+      "upstreamRepository": "https://github.com/Anionex/agent-vision-toolkit",
+      "upstreamVersion": "v0.1.0+snapshot.bc9803d",
+      "upstreamCommit": "bc9803d7d6300c864d17460ecbb33540b26638e0"
+    },
+    "upstream": {
+      "repository": "Anionex/dsh-vision-toolkit",
+      "commit": "29850a83871d4b7a7cc13e251420c5a440e2f69e"
     }
   },
   "scripts": {
-    "build": "../../upstream/deepseek-harness/node_modules/.bin/tsdown src/index.ts --format esm --dts --clean --out-dir lib --deps.never-bundle '@deepseek-ai/**'",
-    "test": "pnpm run build && node --test"
+    "build": "node scripts/build.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "saxes": "6.0.0"
   },
   "eMate": {
     "component": {
       "schema_version": 1,
       "id": "@e-mate/dsh-plugin-vision-toolkit",
-      "kind": "profile",
+      "kind": "platform-profile",
       "base_imports": [
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-credentials",
         "@deepseek-ai/dsh-settings",
         "@deepseek-ai/dsh-tools",
-        "@deepseek-ai/schemastery"
+        "@deepseek-ai/schemastery",
+        "@e-mate/desktop/vision-toolkit",
+        "react"
       ],
-      "base_contracts": ["e-mate-desktop-profile-v1-dsh-df78045a127e"]
+      "authority_contract": {
+        "effects": ["credentials-read", "filesystem-read", "filesystem-write", "network-remote", "persistent-state", "subprocess"],
+        "guards": ["enterprise-policy", "sandbox-policy", "session-scope", "workspace-scope"]
+      },
+      "base_contracts": ["e-mate-desktop-profile-v2-dsh-df78045a127e"]
     },
     "harnessVersion": "0.1.0-rc.7",
     "harnessCommit": "df78045a127e32cb5b942defba52c539590d1596"

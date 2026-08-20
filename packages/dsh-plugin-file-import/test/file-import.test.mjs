@@ -95,6 +95,7 @@ test('keeps the client contract on target draft mentions and an explicit safe al
   assert.match(client, /name:\s*'文件'/u)
   assert.match(client, /inputTriggers\.registerSource\(source\)/u)
   assert.match(client, /e-mate:file-picker-requested/u)
+  assert.match(client, /window\.dispatchEvent\(new Event\('dragend'\)\)/u)
   assert.doesNotMatch(client, /new WebSocket|createStore|ctx\.router|fetch\(/u)
 })
 

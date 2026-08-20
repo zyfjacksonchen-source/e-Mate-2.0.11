@@ -33,6 +33,7 @@ const OAUTH_REFRESH_SKEW_MS = 5 * 60_000
 const OAUTH_RESPONSE_MAX = 1024 * 1024
 const PLUGIN_OUTPUT_MAX = 128 * 1024
 const PROTECTED_PLUGIN_PREFIXES = ['@deepseek-ai/', '@e-mate/']
+const UNSUPPORTED_MCP = '2.0.11 仅允许受审计 HTTPS MCP；旧本地或自定义连接已停用，可安全删除。'
 const AUDITED_PLUGIN_SOURCES = new Map([
   ['@xmanrui/dsh-im', 'github:zyfjacksonchen-source/dsh-im#f984f73dcd67692141d4e475c8fbe887e2ce7062'],
 ])
@@ -113,6 +114,18 @@ function validateConfig(value: ConfigShape): void {
     if (names.has(spec.name)) throw new Error(`MCP 名称重复：${spec.name}`)
     names.add(spec.name)
   }
+}
+
+function supportedServer(spec: McpServerSpec): boolean {
+  const accepted = MCP_CATALOG.get(spec.name)
+  return accepted !== undefined
+    && spec.transport === accepted.transport
+    && spec.url === accepted.url
+    && spec.command === accepted.command
+    && spec.args.length === accepted.args.length
+    && spec.args.every((arg, index) => arg === accepted.args[index])
+    && spec.auth === accepted.auth
+    && spec.oauthScope === accepted.oauthScope
 }
 
 function exactObject(value: unknown): value is Record<string, unknown> {
@@ -570,6 +583,9 @@ export function apply(ctx: Context, config: ConfigShape): void {
   }
 
   const status = async () => Promise.all(current().servers.map(async spec => {
+    if (!supportedServer(spec)) {
+      return { name: spec.name, transport: spec.transport, active: false, authorized: false, error: UNSUPPORTED_MCP }
+    }
     const authorized = spec.auth === 'none'
       || (spec.auth === 'bearer'
         ? (await ctx.credentials.describe(tokenRef(spec.name))).configured
@@ -588,7 +604,7 @@ export function apply(ctx: Context, config: ConfigShape): void {
   }))
 
   const reconcile = async (): Promise<void> => {
-    const wanted = new Map(current().servers.map(spec => [spec.name, spec]))
+    const wanted = new Map(current().servers.filter(supportedServer).map(spec => [spec.name, spec]))
     for (const [serverName, entryId] of [...entryIds]) {
       if (wanted.has(serverName)) continue
       await ctx.loader.remove(entryId)
@@ -612,18 +628,12 @@ export function apply(ctx: Context, config: ConfigShape): void {
         fingerprints.delete(spec.name)
         continue
       }
-      const nativeConfig = spec.transport === 'streamable-http'
-        ? {
-            transport: 'streamable-http', serverName: spec.name, url: spec.url,
-            headers: token === '' ? {} : { Authorization: spec.name === 'tencent_docs' ? token : `Bearer ${token}` },
-            toolCallTimeoutMs: 60_000, failOnStartupError: true,
-            reconnect: { enabled: true, initialDelayMs: 1_000, maxDelayMs: 30_000, maxAttempts: 1000 },
-          }
-        : {
-            transport: 'stdio', serverName: spec.name, command: spec.command, args: spec.args,
-            env: {}, cwd: '', toolCallTimeoutMs: 60_000, failOnStartupError: true,
-            reconnect: { enabled: true, initialDelayMs: 1_000, maxDelayMs: 30_000, maxAttempts: 1000 },
-          }
+      const nativeConfig = {
+        transport: 'streamable-http', serverName: spec.name, url: spec.url,
+        headers: token === '' ? {} : { Authorization: spec.name === 'tencent_docs' ? token : `Bearer ${token}` },
+        toolCallTimeoutMs: 60_000, failOnStartupError: true,
+        reconnect: { enabled: true, initialDelayMs: 1_000, maxDelayMs: 30_000, maxAttempts: 1000 },
+      }
       const fingerprint = JSON.stringify(nativeConfig)
       if (fingerprints.get(spec.name) === fingerprint) continue
       const entryId = entryIds.get(spec.name) ?? `emate-mcp-${spec.name}`
@@ -680,7 +690,7 @@ export function apply(ctx: Context, config: ConfigShape): void {
   ctx.systemPrompt.section({
     name: 'emate:mcp-manage',
     order: 181,
-    text: 'When a user asks for a capability that is not installed, use the find-skill tools first. A selected Skill may call dsh_plugin_manage to install an audited DSH bundle pinned to one exact GitHub commit; that tool uses the Desktop native plugin CLI, preserves the managed profile, and restarts e-Mate. If the Skill requires an MCP server, call mcp_manage to install or connect it. Prefer OAuth: mcp_manage opens the provider authorization page and stores credentials without exposing authorization URLs, codes, or tokens to the Agent. Never ask for tokens in chat. Only report an MCP connection effective when mcp_manage list returns active=true.',
+    text: 'When a user asks for a capability that is not installed, use skill_find for discovery and Skill Hub for Skill lifecycle. A selected Skill may call dsh_plugin_manage to install an audited DSH bundle pinned to one exact GitHub commit; that tool uses the Desktop native plugin CLI, preserves the managed profile, and restarts e-Mate. If the Skill requires an MCP server, call mcp_manage only for an audited HTTPS catalog entry. Prefer OAuth: mcp_manage opens the provider authorization page and stores credentials without exposing authorization URLs, codes, or tokens to the Agent. Never ask for tokens in chat. Only report an MCP connection effective when mcp_manage list returns active=true.',
   })
 
   ctx.tools.register(defineTool({
@@ -798,16 +808,10 @@ export function apply(ctx: Context, config: ConfigShape): void {
 
   ctx.tools.register(defineTool({
     name: 'mcp_manage',
-    description: 'List, install, connect, or remove external MCP connections through DSH Settings, Credentials, Loader, and the native dsh-mcp-client runtime. OAuth opens the provider page and keeps URLs, codes, and tokens outside model arguments and results.',
+    description: 'List, install, connect, or remove audited HTTPS MCP catalog entries through DSH Settings, Credentials, Loader, and the native dsh-mcp-client runtime. OAuth opens the provider page and keeps URLs, codes, and tokens outside model arguments and results.',
     parameters: {
       action: { type: 'string', required: true, enum: ['list', 'install', 'connect', 'remove'] },
       name: { type: 'string' },
-      transport: { type: 'string', enum: ['streamable-http', 'stdio'] },
-      url: { type: 'string' },
-      command: { type: 'string' },
-      args: { type: 'array', items: { type: 'string' } },
-      auth: { type: 'string', enum: ['none', 'bearer', 'oauth'] },
-      oauthScope: { type: 'string' },
     },
     output: {
       schema: { type: 'object', additionalProperties: true },
@@ -830,6 +834,7 @@ export function apply(ctx: Context, config: ConfigShape): void {
       if (args.action === 'connect') {
         const existing = current().servers.find(item => item.name === args.name)
         if (existing === undefined) throw new Error(`MCP 连接不存在：${args.name}`)
+        if (!supportedServer(existing)) throw new Error(UNSUPPORTED_MCP)
         if (existing.auth === 'none') {
           await reconcileSerial()
           const item = (await status()).find(candidate => candidate.name === existing.name)
@@ -856,15 +861,8 @@ export function apply(ctx: Context, config: ConfigShape): void {
           throw error
         }
       }
-      const spec: McpServerSpec = MCP_CATALOG.get(args.name) ?? {
-        name: args.name,
-        transport: args.transport ?? 'streamable-http',
-        url: args.url ?? '',
-        command: args.command ?? '',
-        args: args.args ?? [],
-        auth: args.auth ?? 'none',
-        oauthScope: args.oauthScope ?? '',
-      }
+      const spec = MCP_CATALOG.get(args.name)
+      if (spec === undefined) throw new Error('该 MCP 不在 2.0.11 受审计 HTTPS catalog 中。')
       validateServer(spec)
       if (current().servers.some(item => item.name === spec.name)) throw new Error(`MCP 连接已存在：${spec.name}`)
       if (!await confirmed(ctx, `安装 MCP 连接“${spec.name}”？`, JSON.stringify(spec, null, 2), exec.signal, exec.agent)) {

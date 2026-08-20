@@ -3,6 +3,10 @@
       name: '@e-mate/dsh-plugin-find-skill'
       config:
         cliCommand: 'pnpm dlx skills@1.5.22'
+        registerFindTool: true
+        registerInstallTool: false
+        registerRemoveTool: false
+        registerCommand: false
         installDefaultScope: temp
         compactDisposePolicy: keep
         prioritySources:

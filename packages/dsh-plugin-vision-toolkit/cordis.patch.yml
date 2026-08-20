@@ -1,6 +1,3 @@
 - insert:
     - id: vision-toolkit
       name: '@e-mate/dsh-plugin-vision-toolkit'
-      config:
-        runtime:
-          mode: managed

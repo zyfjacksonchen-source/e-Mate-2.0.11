@@ -23,7 +23,7 @@ function fixture() {
   roots.push(root)
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   const keyId = '0123456789abcdef'
-  const baseId = 'e-mate-desktop-profile-v1-dsh-df78045a127e'
+  const baseId = 'e-mate-desktop-profile-v2-dsh-df78045a127e'
   mkdirSync(join(root, 'desktop/e-mate-desktop'), { recursive: true })
   mkdirSync(join(root, 'packages/dsh/profile'), { recursive: true })
   execFileSync('git', ['init', '--quiet'], { cwd: root })
@@ -63,15 +63,16 @@ function fixture() {
     mkdirSync(join(componentRoot, 'lib'), { recursive: true })
     writeJson(join(componentRoot, 'lib/index.json'), { value: slug })
     writeFileSync(join(componentRoot, 'cordis.patch.yml'), '[]\n')
+    writeFileSync(join(componentRoot, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n")
     writeJson(join(componentRoot, 'package.json'), {
       name: id,
       version: '2.0.11',
       type: 'module',
       main: 'lib/index.json',
-      files: ['lib', 'cordis.patch.yml'],
+      files: ['lib', 'cordis.patch.yml', 'pnpm-lock.yaml'],
       dsh: { bundle: { patch: './cordis.patch.yml' } },
       eMate: {
-        component: { schema_version: 1, id, kind: 'profile', base_imports: [], base_contracts: [baseId] },
+        component: { schema_version: 1, id, kind: 'profile', base_imports: [], authority_contract: { effects: [], guards: [] }, base_contracts: [baseId] },
         harnessVersion: '0.1.0-rc.7',
         harnessCommit: 'df78045a127e32cb5b942defba52c539590d1596',
       },

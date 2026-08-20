@@ -9,7 +9,7 @@ const Icon = () => <svg aria-hidden="true" />
 
 const capabilityItems = [
   { id: 'office-live', title: 'Office', summary: '创建与编辑办公文档', icon_key: 'office', order: 2, state: 'ready', actions: [{ id: 'check', label: '自检', kind: 'secondary' }] },
-  { id: 'image-live', title: '生图与改图', summary: '使用当前图像模型', icon_key: 'image', order: 1, state: 'setup-required', actions: [] },
+  { id: 'image-live', title: '生图与改图', summary: '使用当前图像模型', icon_key: 'image', order: 1, state: 'setup-required', actions: [{ id: 'key', label: '配置凭据', kind: 'primary', input: 'credential', credential_ref: 'IMAGE_API_KEY' }] },
 ] as const
 
 const hubCard = {
@@ -57,9 +57,11 @@ function renderPage(callSkillHub = vi.fn(async (endpoint: string) => {
   const callCapabilities = vi.fn(async (endpoint: string) => endpoint === 'list'
     ? { ok: true, value: { schema_version: 1, items: capabilityItems } }
     : { ok: true, value: { accepted: true } })
+  const setCredential = vi.fn(async () => ({ ok: true, value: {} }))
   render(<CapabilitiesPage
     callCapabilities={callCapabilities}
     callSkillHub={callSkillHub}
+    setCredential={setCredential}
     SearchIcon={Icon}
     DownloadIcon={Icon}
     CloseIcon={Icon}
@@ -67,7 +69,7 @@ function renderPage(callSkillHub = vi.fn(async (endpoint: string) => {
     SkillIcon={Icon}
     capabilityIcons={{ browser: Icon, collaboration: Icon, image: Icon, office: Icon, ocr: Icon }}
   />)
-  return { callCapabilities, callSkillHub }
+  return { callCapabilities, callSkillHub, setCredential }
 }
 
 describe('capability center fidelity surface', () => {
@@ -100,6 +102,18 @@ describe('capability center fidelity surface', () => {
       data: {},
     }))
     expect(await screen.findByText('Office 已提交操作。')).toBeTruthy()
+  })
+
+  it('writes secrets only through the native credential channel', async () => {
+    const { callCapabilities, setCredential } = renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '配置凭据' }))
+    const input = screen.getByLabelText('API Key')
+    expect(input.getAttribute('type')).toBe('password')
+    fireEvent.change(input, { target: { value: 'secret-for-native-credential-channel' } })
+    fireEvent.click(screen.getByRole('button', { name: '安全保存' }))
+    await waitFor(() => expect(setCredential).toHaveBeenCalledWith('IMAGE_API_KEY', 'secret-for-native-credential-channel'))
+    expect(callCapabilities.mock.calls.some(([, payload]) => JSON.stringify(payload).includes('secret-for-native-credential-channel'))).toBe(false)
+    expect(await screen.findByText('生图与改图 凭据已安全保存。')).toBeTruthy()
   })
 
   it('opens the real Hub detail and starts its download job', async () => {
