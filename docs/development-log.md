@@ -1609,3 +1609,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 性能 evaluator 已绑定原始 `deepseek-harness-desktop` rc.7 reference 与候选 Base/Profile/Client 摘要，使用 TTFT p50/p95、吞吐慢尾 p50/p5，并且夹具或未回读原始 artifact 的输入统一非零退出；但正式 Desktop R2 publisher 旧流程只检查综合 `EMATE_S12_ACCEPTED_SHA`，仓库没有独立证明当前发布 SHA 已完成真实 30 组成对性能验收。
 - 最小门禁不增加第二套采集器，也不让 CI 夹具冒充真机：受保护 `r2-publish` 环境必须另外提供 `EMATE_PERFORMANCE_ACCEPTED_SHA`，且在下载候选后的任何 R2 写入之前逐字节等于 `GITHUB_SHA`。只有原始 DSH Desktop 与同一候选在相同机器、provider/model、数据集和网络上生成并通过生产 evaluator 后，维护者才能设置该受保护变量；plugin-only Profile 发布不走 Desktop installer publisher，因此不会因无关小插件更新重跑 Base 性能。
 - release/performance 聚焦合同 `13/13`、影响/组件/组合/R2 publisher `29/29`、release boundary 与 diff check 通过。当前变量尚未配置、真实 30 组成对收据尚未取得，故该门会按预期阻止 Base 上线；本片没有把缺失证据写成通过。
+
+## 2026-08-20 · 2.0.11 S26 旧 Base 与新插件代不兼容的完整入口反例
+
+- 完成性审计确认 release envelope 的签名解析与 `selectProfileRelease` 已把兼容性和当前 Base 分层，但既有 rc.6→rc.7 测试只直接调用选择函数；它不能证明 Desktop 的真实网络入口会在组件 manifest/文件下载之前得到同一结果。
+- 新行为测试用 rc.6 Base 内嵌的同一稳定 release 公钥验证一个仅声明 rc.7 Base/Harness 的已签 2.0.11 desired-state，再从 `checkProfileUpdate` 完整入口执行。结果精确为 `base-required`，包含所需 Base contract，网络请求严格只有一次 desired-state GET；任何组件 manifest 或文件都没有被请求。产品实现无需增加旁路或 SemVer 推断。
+- Profile release/update 聚焦回归为 `2 files / 8 tests`，Desktop 测试 TypeScript 与 diff check 通过。该证据锁定“旧 Base 不混装新插件、兼容 Base 缺失时保持原代”的仓库合同；它没有把尚不存在的生产 desired-state 或 Base installer 冒充上线。

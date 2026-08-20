@@ -24,6 +24,72 @@ function response(bytes: Uint8Array): Response {
 }
 
 describe('signed Profile update path', () => {
+  it('returns base-required for a signed rc.7-only release before fetching component bytes', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+    const oldBase: ProfileBaseContract = {
+      schema_version: 1,
+      id: 'e-mate-desktop-profile-v1-dsh-rc6',
+      desktop_api: 1,
+      profile_format: 1,
+      harness_version: '0.1.0-rc.6',
+      harness_commit: '6'.repeat(40),
+      runtime_imports: {},
+      profile_signing_keys: [{
+        id: 'release-key',
+        algorithm: 'ed25519',
+        public_key_spki_der_base64: publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
+      }],
+    }
+    const target = { platform: 'darwin' as const, arch: 'arm64' as const }
+    const commit = '7'.repeat(40)
+    const payload: ProfileReleasePayload = {
+      schema_version: 1,
+      product: 'e-Mate',
+      release_version: '2.0.11',
+      sequence: 1,
+      source_commit: commit,
+      target,
+      base_contracts: ['e-mate-desktop-profile-v1-dsh-rc7'],
+      harness_contract: { version: '0.1.0-rc.7', commit: '7'.repeat(40) },
+      components: [{
+        id: '@e-mate/dsh-plugin-memory-evolve',
+        version: '2.0.11',
+        kind: 'profile',
+        target: null,
+        profile_path: 'node_modules/@e-mate/dsh-plugin-memory-evolve',
+        manifest_url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-memory-evolve/v2.0.11/${commit}/manifest.json`,
+        manifest_bytes: 123,
+        manifest_sha256: '8'.repeat(64),
+        manifest_source_commit: commit,
+      }],
+    }
+    const release = signProfileRelease(
+      payload,
+      privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),
+      'release-key',
+    )
+    const request = vi.fn(async () => response(Buffer.from(`${JSON.stringify(release)}\n`)))
+
+    await expect(checkProfileUpdate({
+      base: oldBase,
+      target,
+      expectedComponentIds: ['@e-mate/dsh-plugin-memory-evolve'],
+      generationRoot: '/unused',
+      generationStatePath: '/unused/state.json',
+      activeGenerationId: 'bundled',
+      request,
+    }, new AbortController().signal)).resolves.toEqual({
+      status: 'base-required',
+      currentGeneration: 'bundled',
+      currentSequence: 0,
+      releaseVersion: '2.0.11',
+      sequence: 1,
+      requiredBaseContracts: ['e-mate-desktop-profile-v1-dsh-rc7'],
+    })
+    expect(request).toHaveBeenCalledOnce()
+    expect(request).toHaveBeenCalledWith(profileReleaseUrl(target), expect.objectContaining({ method: 'GET' }))
+  })
+
   it('checks the exact delta, materializes it, and stages one generation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'e-mate-profile-update-'))
     temporary.push(root)
