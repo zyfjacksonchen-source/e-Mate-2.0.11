@@ -1681,3 +1681,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - exact main Profile bootstrap run `32333362899` 在 R2 写入前失败关闭：Windows Computer Use 已完成 build/test，但 emitter 因构建脚本提前删除 `native` allowlist 根目录而拒绝产物；Windows Xin Assistant 则因 npm script 直接执行 POSIX `.bin/tsdown`，在 `windows-2025` 上得到 command-not-found。其余组件目标成功，完整 generation 与签名 publication bundle 均未生成，线上 desired-state 没有部分激活。
 - Computer Use 的 Windows 运行能力本就按 inventory 声明为 `runtime_abi: none`、`native_paths: []`；非 Darwin 构建现保留仓库固定的 macOS native 来源供统一 allowlist 枚举，再由既有 target filter 从 Windows payload 排除，也保持 Linux npm/Base SDK 输入可构建，不新增 Windows 自动化旁路。Xin 仅把同一固定 Harness `tsdown` 入口改为跨平台 `node …/dist/run.mjs`，没有改变编译参数或依赖闭包。CI changed-component 步骤与 bootstrap 共用显式 Bash 环境，避免 PowerShell 把 `$COMPONENT` 当空值后由 pnpm 假成功。
 - 两条窄合同分别锁定 Windows 构建不得删除 allowlist 根和 Xin 必须使用 Node 入口。该修复触及两个 platform-profile 的构建来源，按仓库合同诚实进入一次 Base lane；只有新的 exact-main CI、正式安装器和 Profile bootstrap 全部通过后，才允许原生 Cloudflare 发布。
+
+## 2026-08-20 · 2.0.11 S37 Base bootstrap 与平台组件变化可同时成立
+
+- 公开主线 `211597338906ea3507e57451f01b1f73ce18397b` 的 exact-SHA CI、Windows/macOS unsigned installer 和 npm 三目标 clean-install 全部成功；首次 Profile bootstrap run `32337936610` 随后在任何签名或 R2 写入前失败。accepted impact 正确判为 Base lane，同时列出本批确实变化的 Computer Use 与 Xin 两个平台组件；发布 workflow 却额外要求 Base lane 的 `publish_components` 必须为空，和 bootstrap 后续“构建完整 accepted component matrix”的职责矛盾。
+- 最小修复只删除这条互斥断言。bootstrap 仍必须绑定当前 `main` 的 exact successful CI、有效 Base contract、`CI admission`、Node/目标合同及 Windows/macOS installer 成功，并继续重建、组合、启动验证所有目标组件；普通 plugin-only 发布仍逐项要求 classifier 给出的变化组件 Job 和三平台完整 generation 成功，没有放宽 lane 或签名/R2 权限。
+- 仓库合同新增反例，防止以后重新把“Base 发生变化”误写成“本批不能包含组件变化”。聚焦 release-boundary 测试 `17/17` 与 diff check 通过；该修复本身修改发布权威，按规则再次进入 Base lane。旧 SHA 的 Desktop 候选全部作废，只有新主线 exact-SHA 的 CI、签名 bundle、性能/Computer Use 收据及公开回读闭合后才允许激活线上入口。
