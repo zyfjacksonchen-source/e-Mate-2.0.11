@@ -63,12 +63,13 @@ export function registerSessionShare(ctx: any): void {
   }, SessionShareAction))
 }
 
-/** Mount the advanced-Desktop utilities through its declared titlebar slot. */
+/** Mount e-Mate utilities in DSH's native Session header utility seat. */
 export function registerHeaderControls(ctx: any): void {
-  ctx.slots.inject('desktop.titlebar.utilities', () => ctx.slots.register({
-    name: 'desktop.titlebar.utilities',
+  ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+    name: 'conversation.session.header.utilities',
     id: 'e-mate-header-controls',
     order: -30,
+    priority: -1,
     children: {
       'sidebar.settings': { kind: 'single', scope: 'root' },
     },
@@ -81,9 +82,6 @@ export function registerHeaderControls(ctx: any): void {
       },
       LightIcon: IconLightOutline16,
       DarkIcon: IconDarkOutline16,
-      UserIcon: IconUserOutline16,
-      callIdentity: (endpoint: string, payload: Record<string, unknown>) =>
-        ctx.connection.rpc.call('/emate.identity', endpoint, payload),
     }),
   }, HeaderControls))
 }

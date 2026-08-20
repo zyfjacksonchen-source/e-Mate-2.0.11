@@ -57,7 +57,8 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       width={248}
       renderSlot={(name) => name === 'sidebar.primary.action'
         ? <button type="button">能力中心</button>
-        : name === 'sidebar.settings' ? <button type="button" data-emate-settings-trigger="">打开设置</button> : null}
+        : name === 'sidebar.settings' ? <button type="button" data-emate-settings-trigger="">打开设置</button>
+          : name === 'sidebar.footer.action' ? <button type="button">用户中心</button> : null}
       createPortal={createPortal}
       useSessions={selector => selector(sessions)}
       useWorkspaces={selector => selector(workspaces)}
@@ -117,6 +118,10 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(sidebarCss).toContain('right: anchor(right)')
     fireEvent.click(screen.getByRole('button', { name: '添加项目文件夹' }))
     await waitFor(() => { expect(startSession).toHaveBeenCalledWith('workspace-1') })
+    history.pushState(null, '', '/chat/general-session')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    await waitFor(() => { expect(screen.queryByRole('status', { name: '运行时已连接' })).toBeNull() })
+    expect(screen.getByRole('button', { name: '用户中心' })).not.toBeNull()
   })
 
   it('uses current e-Mate Home copy and projects durable token/session facts', async () => {
