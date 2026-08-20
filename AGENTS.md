@@ -12,7 +12,7 @@ Read `docs/target-contract.md` and the latest entry in `docs/development-log.md`
 
 ## Non-negotiable boundaries
 
-- Keep the DeepSeek Harness core at the bounded target fork commit recorded in `docs/target-contract.md` (currently `df78045a127e32cb5b942defba52c539590d1596`); add e-Mate behavior through profiles, plugins, client slots, or generated distribution assets.
+- Keep the DeepSeek Harness core at the bounded target fork commit recorded in `docs/target-contract.md` (currently `2bc16230975f6cf02aa1b283b1f86de44007b059`); add e-Mate behavior through profiles, plugins, client slots, or generated distribution assets.
 - Keep the enterprise surface limited to identity, model policy, and asynchronous audit. It must not control local tools, plugins, jobs, sessions, or capability availability.
 - Render only real Harness events and plugin presentation metadata. Do not create fake activity events or hardcode tool names in the central chat UI.
 - Preserve the model mapping and image-model fallback recorded in the target contract.

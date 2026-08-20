@@ -18,7 +18,7 @@ import {
 import { releasePrefix, releaseSource } from './release-source.mjs'
 import { renderDownloadPage } from './render-download-page.mjs'
 
-const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
+const HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
 const DIGEST = '0'.repeat(64)
 const R2_FIXTURE_PUBLIC_ORIGIN = 'https://downloads.e-mate.example'
 const SOURCE_COMMIT = '70ff2ce2e340682f4aad2be27e4ec8f1d74ee913'

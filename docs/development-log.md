@@ -1743,3 +1743,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - PR `#10` 的 exact-SHA CI run `32398433767` 已证明两套安装器能越过 Python、wheel 与 PTY 准备，但 Vision 的 Base compatibility 仍失败关闭。Windows 在构建阶段报告 pinned apply contract changed，根因是子模块自己的 checkout 换行策略把已固定 JavaScript 变成 CRLF；macOS 则在行为测试加载 Base import 时从 Desktop 包根解析，而该 Job 按合同只恢复 Base SDK 编译字节、不安装 Desktop 依赖树。
 - Vision 构建现在只在读取 pinned upstream JavaScript 的单一边界把 CRLF 规范成 LF，并继续拒绝任何孤立 CR；所有 exact-once 补丁哨兵和 upstream commit 约束保持不变。生产 Profile resolver 只新增可注入的 Base runtime 解析锚点，默认仍是 Desktop；Vision 的 Base SDK 行为测试将非 Desktop 的声明导入指向 pinned Harness 已安装的原生 package graph，而 `@e-mate/desktop/vision-toolkit` 仍只从唯一 Desktop ABI seam 解析。没有复制 resolver、安装第二套 Desktop closure或放宽未声明 import。
 - 本地以 Base CPython `3.12.14` 复跑 Vision `9/9`，覆盖签名 wheel 的断网安装/复用、managed Web 只读、工具 sandbox、Responses 与策略失败关闭；Desktop resolver `2/2`、release boundary/emitter `28/28`、diff check 通过。旧 SHA 的失败安装器和组件证据继续作废；只有新 exact SHA 在 Windows、arm64、Intel 与两套安装器门禁全部通过后才能合并，当前仍未写 R2 或激活官网下载入口。
+
+## 2026-08-21 · 2.0.11 S46 DSH 原生附件拖拽遮罩恢复路径
+
+- 真实安装态复现表明，文件拖入对话框后若 Chromium/macOS 没有送达预期的末端 `dragleave` 或 `drop`，pinned DSH 的全窗口附件遮罩会一直保持挂载；该遮罩没有显式关闭动作，用户只能退出应用。根因位于 DSH 原生 `DropOverlay` 与 `InputBar` 的共享拖拽状态，不在 e-Mate Shell、文件导入插件或 Desktop 登录状态，因此没有新增 e-Mate 覆盖层或平行文件处理器。
+- 修复以公开 DSH PR `zyfjacksonchen-source/deepseek-harness#1` 合入提交 `2bc16230975f6cf02aa1b283b1f86de44007b059`：遮罩增加可访问的本地化关闭按钮与 `Escape`，所有拖拽完成、离开、投放、按钮关闭和键盘关闭都复用同一个 `InputBar` reset 路径。新提交相对旧 e-Mate pin `df78045a127e32cb5b942defba52c539590d1596` 的文件树只改变 16 个附件 UI、测试和配对文档文件，并保留既有 prompt 与冗余沙箱参数修复。
+- DSH 聚焦测试 `73/73`，Client GUI `3788 passed / 1 skipped`，Web replay `253 passed / 15 skipped`；Host/Client TypeScript 与生产构建、Vite build、lint、翻译配对、文档同步/类型检查及 pre-push typecheck 均通过。e-Mate Base contract、组件 manifests、生成/发布测试和仓库级准则随后统一改钉新 commit；这是 Base 变更，必须重新取得 exact-SHA Base CI、Computer Use/Vision 六个原生目标兼容收据、两套未签名安装器及安装态遮罩回归，旧 `df78045…` 2.0.11 候选不得上线。

@@ -10,7 +10,7 @@ This file is the implementation source of truth. Development records may add evi
 - Product Profile release: `2.0.11`
 - Accepted predecessor: Desktop `2.0.10` at `65a995fa795d7007dd90818c939c5185b3fc1a1d`; every 2.0.11 change starts from those exact accepted bytes and contracts.
 - Executable: `e-mate`
-- Harness source: `zyfjacksonchen-source/deepseek-harness@df78045a127e32cb5b942defba52c539590d1596` (upstream `deepseek-ai/deepseek-harness@99f6f02fecdb7dff40c3fbc9470f5907c29f74ca` plus the already accepted bounded prompt and redundant-permission boundary fixes only)
+- Harness source: `zyfjacksonchen-source/deepseek-harness@2bc16230975f6cf02aa1b283b1f86de44007b059` (upstream `deepseek-ai/deepseek-harness@99f6f02fecdb7dff40c3fbc9470f5907c29f74ca` plus the accepted bounded prompt, redundant-permission, and attachment-overlay dismissal fixes only)
 - Harness source version: `0.1.0-rc.7`
 - Desktop reference: `anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add`; its `upstream.json`, root resolutions, Desktop dependencies and lock all establish the same DSH `0.1.0-rc.7` ABI. e-Mate derives platform lifecycle behavior from that reference while keeping the accepted Harness fork above.
 - Browser shell and component source: task `019ff91c-47ca-7c11-93bd-863475181a18`, represented by the final e-Mate 2.0.4/2.0.5 UI state at exact 2.0.5 commit `564a6b6c1d43fb6831dd4a5cd8026e472f063311`

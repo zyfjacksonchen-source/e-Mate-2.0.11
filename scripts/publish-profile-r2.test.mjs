@@ -21,7 +21,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   const privateKeyPem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
   const keyId = '0123456789abcdef'
-  const baseId = 'e-mate-desktop-profile-v2-dsh-df78045a127e'
+  const baseId = 'e-mate-desktop-profile-v2-dsh-2bc16230975f'
   const componentId = '@e-mate/dsh-plugin-fixture'
   const sourceCommit = 'a'.repeat(40)
   mkdirSync(join(root, 'desktop/e-mate-desktop'), { recursive: true })
@@ -29,7 +29,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
   execFileSync('git', ['init', '--quiet'], { cwd: root })
   execFileSync('git', [
     'update-index', '--add', '--cacheinfo',
-    '160000,df78045a127e32cb5b942defba52c539590d1596,upstream/deepseek-harness',
+    '160000,2bc16230975f6cf02aa1b283b1f86de44007b059,upstream/deepseek-harness',
   ], { cwd: root })
   execFileSync('git', [
     'update-index', '--add', '--cacheinfo',
@@ -50,7 +50,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
       harness_version: '0.1.0-rc.7',
     },
     harness_version: '0.1.0-rc.7',
-    harness_commit: 'df78045a127e32cb5b942defba52c539590d1596',
+    harness_commit: '2bc16230975f6cf02aa1b283b1f86de44007b059',
     runtime_imports: {},
     profile_signing_keys: [{
       id: keyId,
@@ -79,7 +79,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
     eMate: {
       component: { schema_version: 1, id: componentId, kind: 'profile', base_imports: [], authority_contract: { effects: [], guards: [] }, base_contracts: [baseId] },
       harnessVersion: '0.1.0-rc.7',
-      harnessCommit: 'df78045a127e32cb5b942defba52c539590d1596',
+      harnessCommit: '2bc16230975f6cf02aa1b283b1f86de44007b059',
     },
     license: 'MIT',
   })

@@ -50,9 +50,9 @@
         "effects": ["network-remote", "subprocess"],
         "guards": ["fixed-catalog", "read-only"]
       },
-      "base_contracts": ["e-mate-desktop-profile-v2-dsh-df78045a127e"]
+      "base_contracts": ["e-mate-desktop-profile-v2-dsh-2bc16230975f"]
     },
     "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "df78045a127e32cb5b942defba52c539590d1596"
+    "harnessCommit": "2bc16230975f6cf02aa1b283b1f86de44007b059"
   }
 }

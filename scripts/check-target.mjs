@@ -59,7 +59,7 @@ for (const path of ['scripts/release.mjs', 'scripts/publish-r2.mjs', 'scripts/pu
   }
 }
 if (!target.includes(ACCEPTED_PREDECESSOR)) throw new Error('accepted 2.0.10 predecessor is missing')
-if (!target.includes('df78045a127e32cb5b942defba52c539590d1596')) throw new Error('Harness source pin is missing')
+if (!target.includes('2bc16230975f6cf02aa1b283b1f86de44007b059')) throw new Error('Harness source pin is missing')
 if (!target.includes(PRODUCT_UI_REFERENCE.commit)) throw new Error('e-Mate shell source pin is missing')
 if (!target.includes('TypeScript/TSX')) throw new Error('TypeScript source contract is missing')
 if (!target.includes('019ff91c-47ca-7c11-93bd-863475181a18')) throw new Error('full e-Mate UI reference is missing')
@@ -82,7 +82,7 @@ const legacyBrowserVendor = readdirSync(resolve(root, 'desktop/e-mate-desktop/ve
 if (legacyBrowserVendor !== undefined) throw new Error(`legacy extension browser vendor returned: ${legacyBrowserVendor}`)
 
 for (const [name, path, expected] of [
-  ['Harness', 'upstream/deepseek-harness', 'df78045a127e32cb5b942defba52c539590d1596'],
+  ['Harness', 'upstream/deepseek-harness', '2bc16230975f6cf02aa1b283b1f86de44007b059'],
   ['e-Mate shell', PRODUCT_UI_REFERENCE.path, PRODUCT_UI_REFERENCE.commit],
 ]) {
   try {

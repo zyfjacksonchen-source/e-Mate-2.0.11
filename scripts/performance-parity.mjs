@@ -10,7 +10,7 @@ import ToolRuntime, { defineContentToolFixture } from '../upstream/deepseek-harn
 import AgentRegistry from '../upstream/deepseek-harness/packages/core/agent/lib/index.js'
 import AgentLoop from '../upstream/deepseek-harness/packages/core/agent-loop/lib/index.js'
 
-const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
+const HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
 const DESKTOP_REFERENCE_COMMIT = '6074088f5b660206e404b3591fab51fb99c69add'
 const MIN_SAMPLES = 30
 const wait = milliseconds => new Promise(resolveWait => setTimeout(resolveWait, milliseconds))
