@@ -124,8 +124,8 @@
       "id": "@e-mate/dsh-plugin-xin-assistant",
       "root": "packages/dsh-plugin-xin-assistant",
       "kind": "platform-profile",
-      "desktop": "platform-profile",
-      "cli": true,
+      "desktop": "blocked",
+      "cli": false,
       "targets": [
         {
           "platform": "darwin",

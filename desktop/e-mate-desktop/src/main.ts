@@ -239,11 +239,10 @@ async function start(): Promise<void> {
     if (app.isPackaged && currentVersion !== EMATE_DESKTOP_PROFILE_VERSION) {
       throw new Error(`${BIN_NAME}: packaged application version ${currentVersion} does not match profile version ${EMATE_DESKTOP_PROFILE_VERSION}`)
     }
-    const managedPythonPath = bundledPythonPath()
-    if (!existsSync(managedPythonPath)) {
-      throw new Error(`${BIN_NAME}: managed Python runtime is missing: ${managedPythonPath}`)
+    const visionPythonPath = bundledPythonPath()
+    if (!existsSync(visionPythonPath)) {
+      throw new Error(`${BIN_NAME}: managed Python runtime is missing: ${visionPythonPath}`)
     }
-    process.env.EMATE_MANAGED_PYTHON_PATH = managedPythonPath
     const environment = loadLayeredEnv(BIN_NAME, process.cwd())
     const electronVersion = process.versions.electron
     if (electronVersion === undefined) {

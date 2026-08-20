@@ -87,6 +87,7 @@ const RETIRED_PROFILE_PACKAGES = new Set([
   '@e-mate/dsh-plugin-browser-panel',
   '@e-mate/dsh-plugin-im',
   '@e-mate/dsh-plugin-subagent',
+  '@e-mate/dsh-plugin-xin-assistant',
   '@yuxianglin/dsh-bridge-browser',
   'dsh-search-mcp',
 ])
@@ -400,6 +401,9 @@ export function installEmateDesktopProfile(
       },
     },
   }, null, 2)}\n`)
+  for (const name of RETIRED_PROFILE_PACKAGES) {
+    rmSync(join(profile, 'node_modules', ...name.split('/')), { recursive: true, force: true })
+  }
 
   const shellSource = componentSource('@e-mate/dsh-client-shell', generation)
   const shellTarget = join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar')

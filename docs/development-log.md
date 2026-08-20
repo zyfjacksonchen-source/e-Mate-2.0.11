@@ -1687,3 +1687,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 公开主线 `211597338906ea3507e57451f01b1f73ce18397b` 的 exact-SHA CI、Windows/macOS unsigned installer 和 npm 三目标 clean-install 全部成功；首次 Profile bootstrap run `32337936610` 随后在任何签名或 R2 写入前失败。accepted impact 正确判为 Base lane，同时列出本批确实变化的 Computer Use 与 Xin 两个平台组件；发布 workflow 却额外要求 Base lane 的 `publish_components` 必须为空，和 bootstrap 后续“构建完整 accepted component matrix”的职责矛盾。
 - 最小修复只删除这条互斥断言。bootstrap 仍必须绑定当前 `main` 的 exact successful CI、有效 Base contract、`CI admission`、Node/目标合同及 Windows/macOS installer 成功，并继续重建、组合、启动验证所有目标组件；普通 plugin-only 发布仍逐项要求 classifier 给出的变化组件 Job 和三平台完整 generation 成功，没有放宽 lane 或签名/R2 权限。
 - 仓库合同新增反例，防止以后重新把“Base 发生变化”误写成“本批不能包含组件变化”。聚焦 release-boundary 测试 `17/17` 与 diff check 通过；该修复本身修改发布权威，按规则再次进入 Base lane。旧 SHA 的 Desktop 候选全部作废，只有新主线 exact-SHA 的 CI、签名 bundle、性能/Computer Use 收据及公开回读闭合后才允许激活线上入口。
+
+## 2026-08-20 · 2.0.11 S38 芯助手退出 2.0.11 运行时组合
+
+- exact-main Profile bootstrap run `32341826773` 在签名和 R2 写入前失败关闭：16 个目标通过，只有 Xin Assistant `win32-x64` 的组件测试把 `file://` pathname 错交给 Windows Python，随后完整 generation 与 publication bundle 全部跳过。用户明确决定芯助手不进入 2.0.11、留待后续版本继续开发，因此本轮不修补或绕过该组件门禁。
+- 唯一 component inventory 现把 `@e-mate/dsh-plugin-xin-assistant` 标成 `desktop: blocked`、`cli: false`。同一真相源会让 CLI bundle 同步、Desktop fallback、Profile bootstrap、普通组件发布和完整 generation 全部排除它；组件源码仍保留，任何后续源码变化在重新准入前按 Base lane 失败关闭，不能以 plugin-only 偷渡回 2.0.11。
+- Desktop 与 CLI 将芯助手加入 retired owner：升级/修复 Profile 时同时移除旧 manifest dependency、bundle 声明及残留 package 目录。Desktop 不再投影专供芯助手的 `EMATE_MANAGED_PYTHON_PATH`，但 Vision Toolkit 仍使用自己既有的受管 Python runtime；macOS universal merge allowlist 也删除芯助手原生目录。原生 platform component 验证改由仍在 2.0.11 的 Computer Use helper 承担。
+- run `32339945078` 的 unsigned Desktop 字节虽已通过哈希、DMG、Universal、ad-hoc codesign、arm64 交互健康和 x86_64/Rosetta 启动验收，但它仍包含本次退出前的组合，现作废且不会上传 R2。只有本切片经受保护主线 Base/Windows/macOS 门禁重新构建后的 exact-SHA 产物才可继续性能、Computer Use、Cloudflare 与官网下载页发布。

@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { composeEntries } from '@deepseek-ai/dsh-app-boot'
@@ -41,6 +41,7 @@ describe('e-Mate desktop profile', () => {
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-vision-toolkit')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-better-sidebar')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-genui')
+    expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-xin-assistant')
     expect(manifest.dsh.profile.bundles).not.toContain('dsh-search-mcp')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-subagent')
     expect(existsSync(join(profile, 'node_modules', '@kelearns', 'dsh-navigation-bar', 'lib', 'client.js'))).toBe(true)
@@ -57,9 +58,7 @@ describe('e-Mate desktop profile', () => {
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-mcp-manage', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'lib', 'index.js'))).toBe(true)
     expect(lstatSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets')).isSymbolicLink()).toBe(true)
-    const xinPatch = readFileSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant', 'cordis.patch.yml'), 'utf8')
-    expect(xinPatch).toContain("pythonPath: ''")
-    expect(lstatSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant', 'runtime')).isSymbolicLink()).toBe(true)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant'))).toBe(false)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets', 'pdf2json', 'pdfparser.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'assets', 'noto-sans-sc', 'files', 'noto-sans-sc-4-wght-normal.woff2'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', 'dsh-at-file', 'lib', 'client.js'))).toBe(true)
@@ -152,10 +151,7 @@ describe('e-Mate desktop profile', () => {
     expect(rows.find(row => row.id === 'emate-mcp-manage')).toEqual(expect.objectContaining({
       name: './node_modules/@e-mate/dsh-plugin-mcp-manage/lib/index.mjs',
     }))
-    expect(rows.find(row => row.id === 'emate-xin-assistant')).toEqual(expect.objectContaining({
-      name: './node_modules/@e-mate/dsh-plugin-xin-assistant/lib/index.mjs',
-      config: expect.objectContaining({ pythonPath: '' }),
-    }))
+    expect(rows.map(row => row.id)).not.toContain('emate-xin-assistant')
     expect(rows.find(row => row.id === 'emate-office-skills')).toEqual(expect.objectContaining({
       name: './node_modules/@e-mate/dsh-plugin-office-skills/lib/index.js',
     }))
@@ -237,10 +233,15 @@ describe('e-Mate desktop profile', () => {
     }
     manifest.dependencies['@xmanrui/dsh-im'] = 'github:zyfjacksonchen-source/dsh-im#f984f73dcd67692141d4e475c8fbe887e2ce7062'
     manifest.dependencies['@e-mate/dsh-plugin-im'] = '2.0.8'
+    manifest.dependencies['@e-mate/dsh-plugin-xin-assistant'] = '2.0.10'
     manifest.dependencies['@yuxianglin/dsh-bridge-browser'] = '0.0.1'
+    const retiredXin = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant')
+    mkdirSync(retiredXin, { recursive: true })
+    writeFileSync(join(retiredXin, 'stale.txt'), 'retired', { flag: 'w' })
     manifest.dsh.profile.bundles.push(
       '@xmanrui/dsh-im',
       '@e-mate/dsh-plugin-im',
+      '@e-mate/dsh-plugin-xin-assistant',
       '@yuxianglin/dsh-bridge-browser',
     )
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
@@ -253,8 +254,11 @@ describe('e-Mate desktop profile', () => {
     )
     expect(repaired.dsh.profile.bundles.at(-1)).toBe('@xmanrui/dsh-im')
     expect(repaired.dependencies['@e-mate/dsh-plugin-im']).toBeUndefined()
+    expect(repaired.dependencies['@e-mate/dsh-plugin-xin-assistant']).toBeUndefined()
     expect(repaired.dependencies['@yuxianglin/dsh-bridge-browser']).toBeUndefined()
     expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-im')
+    expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-xin-assistant')
     expect(repaired.dsh.profile.bundles).not.toContain('@yuxianglin/dsh-bridge-browser')
+    expect(existsSync(retiredXin)).toBe(false)
   })
 })
