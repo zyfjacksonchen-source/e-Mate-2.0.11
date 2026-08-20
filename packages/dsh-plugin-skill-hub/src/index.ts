@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { createHash } from 'node:crypto'
-import { readFileSync, rmSync } from 'node:fs'
+import { lstatSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createSkillHubClient, createSkillHubStore, SkillHubRecoveryPendingError } from './skill-hub.js'
@@ -9,9 +9,8 @@ import { createSkillHubClient, createSkillHubStore, SkillHubRecoveryPendingError
 export const name = 'emate-skill-hub'
 export const inject = ['tools', 'jobs', 'skills', 'userQuestions', 'systemPrompt', 'emateIdentity', 'connection', 'webServer']
 export const SKILL_HUB_CHANNEL = '/emate.skillHub'
-const SKILL_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
-const SKILL_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u
-const SHA256 = /^[0-9a-f]{64}$/u
+const SKILL_SLUG = /^(?=.{2,96}$)[a-z0-9]+(?:-[a-z0-9]+)*$/u
+const SKILL_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u
 const DOWNLOAD_TTL_MS = 5 * 60 * 1_000
 const MAX_BROWSER_DOWNLOADS = 32
 
@@ -70,6 +69,50 @@ function skillTarget(payload) {
 
 function localSkillTarget(payload) {
   return exactKeys(payload, ['slug']) && typeof payload.slug === 'string' && SKILL_SLUG.test(payload.slug)
+}
+
+function inside(root, candidate) {
+  const path = relative(root, candidate)
+  return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path))
+}
+
+function workspaceSkillArchive(agent, identity) {
+  const parts = typeof identity === 'string' ? identity.split('/') : []
+  const name = parts[2]
+  if (parts.length !== 3 || parts[0] !== '.e-mate' || parts[1] !== 'imports'
+    || name === '' || name !== name.normalize('NFC') || !name.toLowerCase().endsWith('.zip')
+    || Buffer.byteLength(name) > 200 || /[\x00-\x1f\x7f\\]/u.test(name)) {
+    throw new Error('Skill publication artifact identity is invalid')
+  }
+  const cwd = agent?.session?.header?.cwd
+  if (typeof cwd !== 'string') throw new Error('Skill publication artifact requires a session workspace')
+  const root = realpathSync(cwd)
+  const state = join(root, '.e-mate')
+  const importPath = join(state, 'imports')
+  for (const directory of [state, importPath]) {
+    const info = lstatSync(directory)
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Skill publication import boundary is invalid')
+  }
+  const imports = realpathSync(importPath)
+  const selected = join(root, ...parts)
+  const selectedInfo = lstatSync(selected)
+  if (!selectedInfo.isFile() || selectedInfo.isSymbolicLink() || selectedInfo.nlink !== 1) {
+    throw new Error('Skill publication artifact must be one bounded regular ZIP')
+  }
+  const target = realpathSync(selected)
+  if (!inside(root, imports) || !inside(imports, target)) throw new Error('Skill publication artifact is outside the session import boundary')
+  const before = lstatSync(target)
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > 10 * 1024 * 1024) {
+    throw new Error('Skill publication artifact must be one bounded regular ZIP')
+  }
+  const payload = readFileSync(target)
+  const after = lstatSync(target)
+  if (!after.isFile() || after.isSymbolicLink() || after.nlink !== 1
+    || after.dev !== before.dev || after.ino !== before.ino
+    || after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
+    throw new Error('Skill publication artifact changed while it was being read')
+  }
+  return payload
 }
 
 async function confirmMutation(ctx, exec, { id, header, question, detail, approve }) {
@@ -151,7 +194,10 @@ export async function apply(ctx, config = {}) {
   const activeDefinition = async (path, slug, signal) => {
     invalidateActive()
     const definition = await ctx.skills.get(slug, { signal })
-    if (definition === undefined || definition.path === undefined || resolve(definition.path) !== resolve(path)) {
+    if (definition === undefined || definition.path === undefined
+      || resolve(definition.path) !== resolve(path, 'SKILL.md')
+      || definition.resourceBase?.kind !== 'directory'
+      || resolve(definition.resourceBase.path) !== resolve(path)) {
       throw new Error(`Skill ${slug} is not active through the native DSH registry`)
     }
     return definition
@@ -201,7 +247,7 @@ export async function apply(ctx, config = {}) {
     browserDownloads.set(result.download_id, {
       path: join(browserDownloadRoot, `${result.download_id}.zip`),
       filename: `e-mate-skill-${result.slug}-${result.version}.zip`,
-      sha256: result.package_sha256,
+      sha256: result.archive_sha256,
       expires_at: Date.now() + DOWNLOAD_TTL_MS,
     })
     pruneDownloads()
@@ -328,13 +374,15 @@ export async function apply(ctx, config = {}) {
         return { ok: true, value: started }
       }
       if (endpoint === 'skills.delete-publication') {
-        if (!exactKeys(payload, ['slug', 'version', 'package_sha256'])
+        if (!exactKeys(payload, ['slug', 'version'])
           || typeof payload.slug !== 'string' || !SKILL_SLUG.test(payload.slug)
-          || typeof payload.version !== 'string' || !SKILL_VERSION.test(payload.version)
-          || typeof payload.package_sha256 !== 'string' || !SHA256.test(payload.package_sha256)) {
+          || typeof payload.version !== 'string' || !SKILL_VERSION.test(payload.version)) {
           return badRequest('skills.delete-publication payload is invalid')
         }
-        return { ok: true, value: startJob(ctx, undefined, signal, `Delete published Skill: ${payload.slug}@${payload.version}`, jobSignal => hub.deletePublication(payload.slug, payload.version, payload.package_sha256, jobSignal)) }
+        return { ok: true, value: startJob(ctx, undefined, signal, `Delete published Skill: ${payload.slug}@${payload.version}`, async jobSignal => {
+          const publication = await hub.ownedPublication(payload.slug, payload.version, jobSignal)
+          return hub.deletePublication(publication, jobSignal)
+        }) }
       }
       if (endpoint === 'jobs.list') {
         if (!exactKeys(payload, [])) return badRequest('jobs.list payload is invalid')
@@ -488,28 +536,38 @@ export async function apply(ctx, config = {}) {
 
   ctx.tools.register(defineTool({
     name: 'e_mate_skill_hub_publish',
-    description: 'Upload and publish one locally installed declarative Skill under the authenticated user. Never accepts an arbitrary host path or a JavaScript plugin.',
+    description: 'Upload and publish one installed declarative Skill or one exact ZIP imported into this Harness session workspace. Never accepts an arbitrary host path or a JavaScript plugin.',
     parameters: {
-      slug: { type: 'string', required: true, description: 'Exact local Skill name under the native DSH user Skill root.' },
+      source: { type: 'string', required: true, enum: ['installed', 'workspace-artifact'], description: 'Use installed for a native user Skill, or workspace-artifact for an attached/imported ZIP.' },
+      identity: { type: 'string', required: true, description: 'Exact installed Skill slug, or exact .e-mate/imports/*.zip identity shown in this session.' },
       category: { type: 'string', required: true, enum: ['third_party', 'content_creation', 'office_productivity'] },
     },
     output: jobOutput,
     async execute(args, exec) {
-      if (typeof args.slug !== 'string' || !SKILL_SLUG.test(args.slug)
+      if (!['installed', 'workspace-artifact'].includes(args.source) || typeof args.identity !== 'string'
         || !['third_party', 'content_creation', 'office_productivity'].includes(args.category)) {
         throw new Error('Skill publication target is invalid')
       }
-      const publication = hub.previewPublication(args.slug)
+      let publication
+      if (args.source === 'installed') {
+        if (!SKILL_SLUG.test(args.identity)) throw new Error('Installed Skill publication identity is invalid')
+        await activeDefinition(join(dshHome, 'skills', args.identity), args.identity, exec.signal)
+        publication = hub.previewPublication(args.identity)
+      } else {
+        const payload = workspaceSkillArchive(exec.agent, args.identity)
+        await hub.validatePublication(payload, exec.signal)
+        publication = hub.previewArchive(payload)
+      }
       await confirmMutation(ctx, exec, {
         id: 'skill-hub-publish',
         header: '发布 Skill',
-        question: `是否上传并发布本机 Skill ${publication.slug}@${publication.version}？`,
-        detail: `SHA-256: ${publication.package_sha256}\n分类: ${args.category}\n服务端会按当前登录账号校验发布身份和不可覆盖版本。`,
+        question: `是否上传并发布 ${publication.slug}@${publication.version}？`,
+        detail: `来源: ${args.source === 'installed' ? `本机原生 Skill ${args.identity}` : `当前会话产物 ${args.identity}`}\n内容 SHA-256: ${publication.package_sha256}\nZIP SHA-256: ${publication.archive_sha256}\n分类: ${args.category}\n服务端会按当前登录账号校验发布身份和不可覆盖版本。`,
         approve: '上传并发布',
       })
       return startJob(ctx, exec.agent, exec.signal, `Publish e-Mate Skill: ${publication.slug}@${publication.version}`, signal => hub.publishPrepared(publication, args.category, signal))
     },
-    presentCall: args => ({ card: 'generic', title: 'Publish e-Mate Skill', kind: 'execute', rawInput: args.slug }),
+    presentCall: args => ({ card: 'generic', title: 'Publish e-Mate Skill', kind: 'execute', rawInput: args.identity }),
   }))
   ctx.tools.register(defineTool({
     name: 'e_mate_skill_hub_delete_publication',
@@ -517,23 +575,22 @@ export async function apply(ctx, config = {}) {
     parameters: {
       slug: { type: 'string', required: true },
       version: { type: 'string', required: true },
-      package_sha256: { type: 'string', required: true },
     },
     output: jobOutput,
     async execute(args, exec) {
       if (typeof args.slug !== 'string' || !SKILL_SLUG.test(args.slug)
-        || typeof args.version !== 'string' || !SKILL_VERSION.test(args.version)
-        || typeof args.package_sha256 !== 'string' || !SHA256.test(args.package_sha256)) {
+        || typeof args.version !== 'string' || !SKILL_VERSION.test(args.version)) {
         throw new Error('Skill publication deletion target is invalid')
       }
+      const publication = await hub.ownedPublication(args.slug, args.version, exec.signal)
       await confirmMutation(ctx, exec, {
         id: 'skill-hub-delete-publication',
         header: '删除已发布 Skill',
         question: `是否删除你发布的 ${args.slug}@${args.version}？`,
-        detail: `SHA-256: ${args.package_sha256}\n只删除服务端精确版本，不卸载本机 Skill。`,
+        detail: `SHA-256: ${publication.package_sha256}\n该所有权和摘要来自当前登录账号的服务端回读；只删除服务端精确版本，不卸载本机 Skill。`,
         approve: '删除发布',
       })
-      return startJob(ctx, exec.agent, exec.signal, `Delete published Skill: ${args.slug}@${args.version}`, signal => hub.deletePublication(args.slug, args.version, args.package_sha256, signal))
+      return startJob(ctx, exec.agent, exec.signal, `Delete published Skill: ${args.slug}@${args.version}`, signal => hub.deletePublication(publication, signal))
     },
     presentCall: args => ({ card: 'generic', title: 'Delete published Skill', kind: 'delete', rawInput: `${args.slug}@${args.version}` }),
   }))
@@ -541,6 +598,6 @@ export async function apply(ctx, config = {}) {
   ctx.effect(() => ctx.systemPrompt.section({
     name: 'emate:skill-hub',
     order: 181,
-    text: 'When the user asks in natural language to find or use another user\'s shared Skill, use e_mate_skill_hub_search/detail and then the exact install/update/enable/disable/uninstall Tool. When the user asks to upload or share a local Skill, use e_mate_skill_hub_publish; when they ask to remove their own published immutable version, use e_mate_skill_hub_delete_publication. Read local ownership/readiness with e_mate_skill_hub_inventory. Every mutation shows a native confirmation and returns a DSH Job: do not bypass it with shell commands, do not guess slugs, versions, digests, or ownership, and do not claim success until the Job completes.',
+    text: 'When the user asks in natural language to find or use another user\'s shared Skill, use e_mate_skill_hub_search/detail and then the exact install/update/enable/disable/uninstall Tool. When the user asks to upload or share a local Skill, use e_mate_skill_hub_publish with either its native installed slug or the exact .e-mate/imports/*.zip identity produced by this session; when they ask to remove their own published immutable version, use e_mate_skill_hub_delete_publication. Read local ownership/readiness with e_mate_skill_hub_inventory. Every mutation shows a native confirmation and returns a DSH Job: do not bypass it with shell commands, do not invent host paths, slugs, versions, digests, or ownership, and do not claim success until the Job completes.',
   }), 'emate.skillHub: natural-language operations')
 }

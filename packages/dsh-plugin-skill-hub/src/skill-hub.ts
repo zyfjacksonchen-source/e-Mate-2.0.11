@@ -11,7 +11,6 @@ import {
 import { createHash, randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { unzipSync, zipSync } from 'fflate'
-import { parse } from 'yaml'
 
 const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024
 const MAX_FILE_BYTES = 2 * 1024 * 1024
@@ -19,9 +18,15 @@ const MAX_FILES = 256
 const MAX_PATH_BYTES = 512
 const MAX_PATH_DEPTH = 8
 const MAX_EXPANSION_RATIO = 100
-const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
-const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+const SKILL_NAME = /^(?=.{2,96}$)[a-z0-9]+(?:-[a-z0-9]+)*$/
+const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
 const SHA256 = /^[0-9a-f]{64}$/
+const FRONTMATTER_KEY = /^[a-z][a-z0-9_-]{0,63}$/
+const FRONTMATTER_KEYS = new Set(['name', 'description', 'version', 'license', 'compatibility', 'tags'])
+const TAG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/u
+const RANGE_PART = /^(?:>=|<=|>|<|=)?(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+const CAS_PREFIX = Buffer.from('ecorex-local-skill-bundle-v1\0')
 const BLOCKED_SUFFIXES = new Set([
   '.7z', '.bat', '.class', '.cmd', '.com', '.dll', '.dylib', '.exe', '.hta', '.jar', '.msi', '.rar', '.so', '.wasm', '.zip',
 ])
@@ -163,18 +168,131 @@ function centralDirectory(payload) {
   return records
 }
 
+function scalar(raw, label) {
+  if (raw === '' || '|>&*!{}[]@`'.includes(raw[0]) || raw.includes('\t')) {
+    throw archiveError(`SKILL.md ${label} must be a bounded scalar`)
+  }
+  if (raw.startsWith('"')) {
+    let value
+    try { value = JSON.parse(raw) } catch { throw archiveError(`SKILL.md ${label} quoted scalar is invalid`) }
+    if (typeof value !== 'string') throw archiveError(`SKILL.md ${label} must be a string`)
+    return value
+  }
+  if (raw.startsWith("'")) {
+    if (raw.length < 2 || !raw.endsWith("'")) throw archiveError(`SKILL.md ${label} quoted scalar is invalid`)
+    return raw.slice(1, -1).replaceAll("''", "'")
+  }
+  return raw.includes(' #') ? raw.slice(0, raw.indexOf(' #')).trimEnd() : raw
+}
+
+function bounded(value, label, maximum) {
+  if (typeof value !== 'string' || value.trim() === '' || value !== value.trim()
+    || Buffer.byteLength(value) > maximum || CONTROL.test(value)) {
+    throw archiveError(`SKILL.md ${label} is invalid`)
+  }
+  return value
+}
+
+function validVersion(value) {
+  const match = VERSION.exec(value)
+  return match !== null && (match[4] === undefined || match[4].split('.').every(part => !/^\d+$/u.test(part) || part === '0' || !part.startsWith('0')))
+}
+
+function validVersionRange(value) {
+  return value === '*' || (typeof value === 'string' && value.length <= 256
+    && !CONTROL.test(value) && value.split(',').every(part => part !== '' && part === part.trim() && RANGE_PART.test(part)))
+}
+
 function frontmatter(markdown) {
   const text = new TextDecoder('utf-8', { fatal: true }).decode(markdown)
-  if (!text.startsWith('---\n') && !text.startsWith('---\r\n')) throw archiveError('SKILL.md is missing YAML frontmatter')
-  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text)
-  if (match === null || Buffer.byteLength(match[1]) > 16 * 1024) throw archiveError('SKILL.md frontmatter is invalid')
-  const data = parse(match[1], { maxAliasCount: 0 })
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) throw archiveError('SKILL.md frontmatter must be an object')
-  if (typeof data.name !== 'string' || !SKILL_NAME.test(data.name)) throw archiveError('SKILL.md name is invalid')
-  if (typeof data.description !== 'string' || data.description.trim() === '') throw archiveError('SKILL.md description is required')
-  const version = data.version ?? '0.0.0'
-  if (typeof version !== 'string' || !VERSION.test(version)) throw archiveError('SKILL.md version is invalid')
-  return { name: data.name, version }
+  if (text.startsWith('\ufeff') || CONTROL.test(text)) throw archiveError('SKILL.md contains a BOM or control character')
+  const lines = text.split(/\r\n|[\n\r\x0b\x0c\x1c-\x1e\x85\u2028\u2029]/u)
+  if (lines[0] !== '---') throw archiveError('SKILL.md must begin with YAML frontmatter')
+  const closing = lines.indexOf('---', 1)
+  if (closing < 0 || Buffer.byteLength(lines.slice(0, closing + 1).join('\n')) > 16 * 1024) {
+    throw archiveError('SKILL.md frontmatter is invalid')
+  }
+  const values = {}
+  for (let index = 1; index < closing;) {
+    const line = lines[index]
+    if (line === '' || /^[ \t-]/u.test(line) || !line.includes(':')) {
+      throw archiveError('SKILL.md frontmatter must use flat product fields')
+    }
+    const separator = line.indexOf(':')
+    const key = line.slice(0, separator)
+    const raw = line.slice(separator + 1).trim()
+    if (!FRONTMATTER_KEY.test(key) || !FRONTMATTER_KEYS.has(key)) throw archiveError('SKILL.md frontmatter contains an unknown field')
+    if (Object.hasOwn(values, key)) throw archiveError('SKILL.md frontmatter contains a duplicate field')
+    index += 1
+    if (key === 'tags' && raw === '') {
+      const tags = []
+      while (index < closing && lines[index].startsWith('  - ')) {
+        tags.push(scalar(lines[index].slice(4).trim(), 'tag'))
+        index += 1
+      }
+      values.tags = tags
+      continue
+    }
+    if (key === 'tags') {
+      let tags
+      try { tags = JSON.parse(raw) } catch { throw archiveError('SKILL.md tags must be a JSON string array') }
+      if (!Array.isArray(tags) || tags.some(tag => typeof tag !== 'string')) throw archiveError('SKILL.md tags must be a string array')
+      values.tags = tags
+      continue
+    }
+    values[key] = scalar(raw, key)
+  }
+  if (!Object.hasOwn(values, 'name') || !Object.hasOwn(values, 'description')) {
+    throw archiveError('SKILL.md frontmatter is missing name or description')
+  }
+  const name = bounded(values.name, 'name', 128)
+  const description = bounded(values.description, 'description', 2048)
+  const version = bounded(values.version ?? '0.0.0', 'version', 128)
+  if (!SKILL_NAME.test(name) || !validVersion(version)) throw archiveError('SKILL.md name or version is invalid')
+  const license = values.license === undefined ? null : bounded(values.license, 'license', 128)
+  const compatibility = bounded(values.compatibility ?? '*', 'compatibility', 256)
+  if (!validVersionRange(compatibility)) throw archiveError('SKILL.md compatibility is invalid')
+  const rawTags = values.tags ?? []
+  if (rawTags.length > 32 || rawTags.some(tag => !TAG.test(tag)) || new Set(rawTags).size !== rawTags.length) {
+    throw archiveError('SKILL.md tags must be unique bounded identifiers')
+  }
+  return { name, description, version, license, compatibility, tags: [...rawTags].sort(compareCodePoints) }
+}
+
+function compareCodePoints(left, right) {
+  const one = [...left]
+  const two = [...right]
+  for (let index = 0; index < Math.min(one.length, two.length); index += 1) {
+    const difference = one[index].codePointAt(0) - two[index].codePointAt(0)
+    if (difference !== 0) return difference
+  }
+  return one.length - two.length
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value).sort(compareCodePoints).map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
+  }
+  const encoded = JSON.stringify(value)
+  if (encoded === undefined) throw archiveError('canonical Skill content is invalid')
+  return encoded
+}
+
+function contentDigest(metadata, files) {
+  const records = [...files].sort(([left], [right]) => compareCodePoints(left, right)).map(([path, content]) => ({
+    path,
+    size_bytes: content.byteLength,
+    sha256: digest(content),
+  }))
+  const manifest = {
+    schema_version: 1,
+    kind: 'declarative_skill',
+    metadata,
+    files: records,
+    total_size_bytes: records.reduce((total, record) => total + record.size_bytes, 0),
+  }
+  return digest(Buffer.concat([CAS_PREFIX, Buffer.from(canonicalJson(manifest))]))
 }
 
 export function inspectSkillArchive(payload, expected = {}) {
@@ -192,11 +310,15 @@ export function inspectSkillArchive(payload, expected = {}) {
   const metadata = frontmatter(files.get('SKILL.md'))
   if (expected.slug !== undefined && metadata.name !== expected.slug) throw archiveError('SKILL.md name does not match the selected slug')
   if (expected.version !== undefined && metadata.version !== expected.version) throw archiveError('SKILL.md version does not match the selected version')
-  const sha256 = digest(payload)
-  if (expected.sha256 !== undefined && (!SHA256.test(expected.sha256) || sha256 !== expected.sha256)) {
-    throw archiveError('package SHA-256 does not match the catalog')
+  const packageSha256 = contentDigest(metadata, files)
+  const archiveSha256 = digest(payload)
+  if (expected.packageSha256 !== undefined && (!SHA256.test(expected.packageSha256) || packageSha256 !== expected.packageSha256)) {
+    throw archiveError('package content SHA-256 does not match the catalog')
   }
-  return { ...metadata, sha256, files }
+  if (expected.archiveSha256 !== undefined && (!SHA256.test(expected.archiveSha256) || archiveSha256 !== expected.archiveSha256)) {
+    throw archiveError('package archive SHA-256 changed after confirmation')
+  }
+  return { ...metadata, packageSha256, archiveSha256, files }
 }
 
 function realDirectory(path, label) {
@@ -440,7 +562,7 @@ export function createSkillHubStore({ dshHome, validateCandidate, validateActive
       throw new Error(`Skill ${card.slug}@${card.version} is a downgrade; an explicit downgrade choice is required`)
     }
     const bundle = inspectSkillArchive(payload, {
-      slug: card.slug, version: card.version, sha256: card.package_sha256,
+      slug: card.slug, version: card.version, packageSha256: card.package_sha256,
     })
     const action = previousReceipt?.status === 'installed' ? 'update' : 'install'
     let wal = openTransaction(paths, {
@@ -643,6 +765,20 @@ export function createSkillHubStore({ dshHome, validateCandidate, validateActive
     return items.sort((left, right) => left.slug.localeCompare(right.slug))
   }
 
+  const validatePublication = async (payload, signal) => {
+    signal?.throwIfAborted()
+    const bundle = inspectSkillArchive(payload)
+    const candidateRoot = join(dshHome, 'e-mate', 'skill-hub', 'publication-validation', randomUUID())
+    const paths = { candidateRoot, candidate: join(candidateRoot, bundle.name) }
+    try {
+      extractCandidate(bundle, paths)
+      await validateCandidate(candidateRoot, bundle.name, signal)
+      return bundle
+    } finally {
+      rmSync(candidateRoot, { recursive: true, force: true })
+    }
+  }
+
   const recover = async ({ reconcile, complete, signal } = {}) => {
     const root = join(dshHome, 'e-mate', 'skill-hub', 'transactions')
     if (!existsSync(root)) return []
@@ -747,6 +883,7 @@ export function createSkillHubStore({ dshHome, validateCandidate, validateActive
     uninstall,
     inventory,
     recover,
+    validatePublication,
   }
 }
 
@@ -850,15 +987,110 @@ async function packageBytes(response, expectedSha256) {
   if (!response.ok) throw new Error(`Skill package download failed with HTTP ${response.status}`)
   const declared = response.headers.get('x-skill-content-sha256')
   if (declared !== expectedSha256) throw new Error('Skill package response digest is invalid')
-  const payload = await readBounded(response, MAX_ARCHIVE_BYTES, 'Skill package')
-  if (digest(payload) !== expectedSha256) {
-    throw new Error('Skill package bytes do not match the catalog')
-  }
-  return payload
+  return readBounded(response, MAX_ARCHIVE_BYTES, 'Skill package')
 }
 
 function requestId(prefix) {
   return `${prefix}:${randomUUID()}`
+}
+
+function mutationRequestId(action, ...identity) {
+  return `${action}:${digest(Buffer.from(identity.join('\0'), 'utf8'))}`
+}
+
+function remoteMutationPaths(dshHome, requestId) {
+  const root = join(dshHome, 'e-mate', 'skill-hub', 'remote-mutations')
+  const transaction = join(root, digest(Buffer.from(requestId, 'utf8')))
+  return {
+    root,
+    transaction,
+    wal: join(transaction, 'wal.json'),
+    payload: join(transaction, 'payload.zip'),
+  }
+}
+
+function remoteMutationWal(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)
+    || value.schema_version !== 1
+    || !['publish', 'delete'].includes(value.action)
+    || !SKILL_NAME.test(value.slug) || !VERSION.test(value.version)
+    || !SHA256.test(value.package_sha256)
+    || typeof value.request_id !== 'string'
+    || value.request_id !== mutationRequestId(
+      value.action, value.slug, value.version, value.package_sha256,
+      ...(value.action === 'publish' ? [value.category] : []),
+    )
+    || (value.action === 'publish' && (
+      !['third_party', 'content_creation', 'office_productivity'].includes(value.category)
+      || !SHA256.test(value.archive_sha256)
+    ))) {
+    throw new Error('Skill Hub remote mutation receipt is invalid')
+  }
+  return value
+}
+
+function readRemotePayload(paths, expectedSha256) {
+  const before = lstatSync(paths.payload)
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
+    || before.size < 22 || before.size > MAX_ARCHIVE_BYTES) {
+    throw new Error('Skill Hub pending publication payload is invalid')
+  }
+  const payload = readFileSync(paths.payload)
+  const after = lstatSync(paths.payload)
+  if (!after.isFile() || after.isSymbolicLink() || after.nlink !== 1
+    || after.dev !== before.dev || after.ino !== before.ino
+    || after.size !== before.size || after.mtimeMs !== before.mtimeMs
+    || digest(payload) !== expectedSha256) {
+    throw new Error('Skill Hub pending publication payload changed')
+  }
+  return payload
+}
+
+function readRemoteMutation(paths) {
+  realDirectory(paths.transaction, 'Skill Hub remote mutation')
+  let value
+  try {
+    value = JSON.parse(readFileSync(paths.wal, 'utf8'))
+  } catch (error) {
+    throw new Error('Skill Hub remote mutation receipt is unreadable', { cause: error })
+  }
+  const wal = remoteMutationWal(value)
+  return {
+    wal,
+    payload: wal.action === 'publish' ? readRemotePayload(paths, wal.archive_sha256) : undefined,
+  }
+}
+
+function prepareRemoteMutation(dshHome, wal, payload) {
+  const accepted = remoteMutationWal(wal)
+  const paths = remoteMutationPaths(dshHome, accepted.request_id)
+  ensureRealDirectory(paths.root, 'Skill Hub remote mutation root')
+  if (existsSync(paths.transaction)) {
+    const pending = readRemoteMutation(paths)
+    for (const key of Object.keys(accepted)) {
+      if (pending.wal[key] !== accepted[key]) throw new Error('Skill Hub remote mutation identity conflicts with pending recovery')
+    }
+    return { paths, ...pending }
+  }
+  const temporary = `${paths.transaction}.${process.pid}.${randomUUID()}.tmp`
+  try {
+    mkdirSync(temporary, { mode: 0o700 })
+    if (accepted.action === 'publish') {
+      if (!Buffer.isBuffer(payload) || digest(payload) !== accepted.archive_sha256) {
+        throw new Error('Skill Hub publication payload does not match its recovery receipt')
+      }
+      writeFileSync(join(temporary, 'payload.zip'), payload, { mode: 0o600, flag: 'wx' })
+    }
+    atomicJson(join(temporary, 'wal.json'), accepted)
+    renameSync(temporary, paths.transaction)
+  } finally {
+    rmSync(temporary, { recursive: true, force: true })
+  }
+  return { paths, wal: accepted, payload }
+}
+
+function cleanupRemoteMutation(paths) {
+  rmSync(paths.transaction, { recursive: true, force: true })
 }
 
 function decodeArchiveBase64(value) {
@@ -881,7 +1113,9 @@ function installedSkillArchive(dshHome, slug) {
   let count = 0
   let total = 0
   const walk = (directory, relative = '') => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entries = readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => compareCodePoints(left.name, right.name))
+    for (const entry of entries) {
       const path = relative === '' ? entry.name : `${relative}/${entry.name}`
       const target = join(directory, entry.name)
       if (entry.isSymbolicLink()) throw new Error('installed Skill contains a symbolic link')
@@ -907,7 +1141,7 @@ function installedSkillArchive(dshHome, slug) {
     }
   }
   walk(root)
-  const payload = Buffer.from(zipSync(files, { level: 6 }))
+  const payload = Buffer.from(zipSync(files, { level: 6, mtime: new Date(1980, 0, 1) }))
   inspectSkillArchive(payload, { slug })
   return payload
 }
@@ -921,6 +1155,124 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
     headers: { accept: 'application/json', ...init.headers },
     redirect: 'error',
   })
+  const remoteTails = new Map()
+  const serialRemote = async (requestId, operation) => {
+    const previous = remoteTails.get(requestId) ?? Promise.resolve()
+    const current = previous.catch(() => undefined).then(operation)
+    remoteTails.set(requestId, current)
+    try {
+      return await current
+    } finally {
+      if (remoteTails.get(requestId) === current) remoteTails.delete(requestId)
+    }
+  }
+
+  const pendingRemote = (wal, error) => new SkillHubRecoveryPendingError(
+    `Skill ${wal.slug}@${wal.version} ${wal.action} is pending authenticated server reconciliation`,
+    { cause: error },
+  )
+
+  const executeRemoteMutation = async ({ paths, wal, payload }, signal) => {
+    try {
+      signal?.throwIfAborted()
+    } catch (error) {
+      cleanupRemoteMutation(paths)
+      throw error
+    }
+    let response
+    try {
+      response = wal.action === 'publish'
+        ? await call('/skills', {
+          method: 'POST',
+          signal,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            slug: wal.slug,
+            category: wal.category,
+            bundle_base64: payload.toString('base64'),
+            client_request_id: wal.request_id,
+          }),
+        })
+        : await call(`/skills/${encodeSegment(wal.slug, SKILL_NAME, 'Skill slug')}/versions/${encodeSegment(wal.version, VERSION, 'Skill version')}`, {
+          method: 'DELETE',
+          signal,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            package_sha256: wal.package_sha256,
+            client_request_id: wal.request_id,
+          }),
+        })
+    } catch (error) {
+      throw pendingRemote(wal, error)
+    }
+    const label = wal.action === 'publish' ? 'Skill publication' : 'Skill publication deletion'
+    if (!response.ok) {
+      let failure
+      try { await responseJson(response, label) } catch (error) { failure = error }
+      if (response.status >= 500 || [408, 425, 429].includes(response.status)) {
+        throw pendingRemote(wal, failure ?? new Error(`${label} status is uncertain`))
+      }
+      cleanupRemoteMutation(paths)
+      throw failure ?? new Error(`${label} failed with HTTP ${response.status}`)
+    }
+    try {
+      const value = await responseJson(response, label)
+      if (wal.action === 'publish') {
+        const card = skillCard(value)
+        if (card.slug !== wal.slug || card.version !== wal.version
+          || card.package_sha256 !== wal.package_sha256) {
+          throw new Error('Skill publication receipt does not match the uploaded archive')
+        }
+        cleanupRemoteMutation(paths)
+        return card
+      }
+      if (value.schema_version !== 1 || value.status !== 'deleted'
+        || value.slug !== wal.slug || value.version !== wal.version
+        || value.package_sha256 !== wal.package_sha256) {
+        throw new Error('Skill publication deletion receipt is invalid')
+      }
+      cleanupRemoteMutation(paths)
+      return value
+    } catch (error) {
+      throw pendingRemote(wal, error)
+    }
+  }
+
+  const runRemoteMutation = (wal, payload, signal) => serialRemote(wal.request_id, async () => {
+    const prepared = prepareRemoteMutation(dshHome, wal, payload)
+    return executeRemoteMutation(prepared, signal)
+  })
+
+  const recoverRemoteMutations = async signal => {
+    const root = join(dshHome, 'e-mate', 'skill-hub', 'remote-mutations')
+    if (!existsSync(root)) return []
+    realDirectory(root, 'Skill Hub remote mutation root')
+    const results = []
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.isSymbolicLink() || !SHA256.test(entry.name)) continue
+      const paths = {
+        root,
+        transaction: join(root, entry.name),
+        wal: join(root, entry.name, 'wal.json'),
+        payload: join(root, entry.name, 'payload.zip'),
+      }
+      try {
+        const pending = readRemoteMutation(paths)
+        if (remoteMutationPaths(dshHome, pending.wal.request_id).transaction !== paths.transaction) {
+          throw new Error('Skill Hub remote mutation path is invalid')
+        }
+        await serialRemote(pending.wal.request_id, () => executeRemoteMutation({ paths, ...pending }, signal))
+        results.push({ slug: pending.wal.slug, action: pending.wal.action, status: 'recovered' })
+      } catch (error) {
+        results.push({
+          slug: 'remote-publication',
+          status: error instanceof SkillHubRecoveryPendingError ? 'recovery-pending' : 'failed',
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+    return results
+  }
 
   const detail = async (slug, signal) => {
     const response = await call(`/skills/${encodeSegment(slug, SKILL_NAME, 'Skill slug')}`, { signal })
@@ -945,8 +1297,12 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
     signal?.throwIfAborted()
     const response = await call(`/skills/${encodeSegment(card.slug, SKILL_NAME, 'Skill slug')}/versions/${encodeSegment(card.version, VERSION, 'Skill version')}/package`, { signal })
     const payload = await packageBytes(response, card.package_sha256)
-    inspectSkillArchive(payload, { slug: card.slug, version: card.version, sha256: card.package_sha256 })
-    return { card, payload }
+    const inspected = inspectSkillArchive(payload, {
+      slug: card.slug,
+      version: card.version,
+      packageSha256: card.package_sha256,
+    })
+    return { card, payload, archiveSha256: inspected.archiveSha256 }
   }
 
   const complete = async (completionReceipt, status, signal) => {
@@ -1029,7 +1385,8 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
     return {
       slug: inspected.name,
       version: inspected.version,
-      package_sha256: inspected.sha256,
+      package_sha256: inspected.packageSha256,
+      archive_sha256: inspected.archiveSha256,
       payload,
     }
   }
@@ -1038,26 +1395,43 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
     if (!['third_party', 'content_creation', 'office_productivity'].includes(category)) throw new Error('Skill category is invalid')
     const inspected = inspectSkillArchive(payload)
     if (expected !== undefined && (inspected.name !== expected.slug
-      || inspected.version !== expected.version || inspected.sha256 !== expected.package_sha256)) {
+      || inspected.version !== expected.version
+      || inspected.packageSha256 !== expected.package_sha256
+      || inspected.archiveSha256 !== expected.archive_sha256)) {
       throw new Error('Skill publication changed after user confirmation')
     }
-    const value = await responseJson(await call('/skills', {
-      method: 'POST',
-      signal,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        slug: inspected.name,
-        category,
-        bundle_base64: payload.toString('base64'),
-        client_request_id: requestId('publish'),
-      }),
-    }), 'Skill publication')
-    const card = skillCard(value)
-    if (card.slug !== inspected.name
-      || card.version !== inspected.version
-      || card.package_sha256 !== inspected.sha256) {
-      throw new Error('Skill publication receipt does not match the uploaded archive')
+    await store.validatePublication(payload, signal)
+    const requestId = mutationRequestId(
+      'publish', inspected.name, inspected.version, inspected.packageSha256, category,
+    )
+    return runRemoteMutation({
+      schema_version: 1,
+      action: 'publish',
+      request_id: requestId,
+      slug: inspected.name,
+      version: inspected.version,
+      package_sha256: inspected.packageSha256,
+      archive_sha256: inspected.archiveSha256,
+      category,
+    }, payload, signal)
+  }
+
+  const ownedPublication = async (slug, version, signal) => {
+    if (!SKILL_NAME.test(slug)) throw new Error('Skill slug is invalid')
+    if (!VERSION.test(version)) throw new Error('Skill version is invalid')
+    const parameters = new URLSearchParams({
+      slug,
+      version,
+    })
+    const value = await responseJson(
+      await call(`/publications/mine?${parameters}`, { signal }),
+      'Owned Skill publication',
+    )
+    if (value.schema_version !== 1 || !Array.isArray(value.items) || value.items.length !== 1) {
+      throw new Error(`Skill ${slug}@${version} is not an active publication owned by this account`)
     }
+    const card = skillCard(value.items[0])
+    if (card.slug !== slug || card.version !== version) throw new Error('Owned Skill publication identity is invalid')
     return card
   }
 
@@ -1087,12 +1461,12 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
     },
     detail,
     async download(slug, version, signal) {
-      const { card, payload } = await download(slug, version, signal)
+      const { card, payload, archiveSha256 } = await download(slug, version, signal)
       const id = randomUUID()
       const path = join(dshHome, 'e-mate', 'cache', 'skill-hub', 'downloads', `${id}.zip`)
       mkdirSync(dirname(path), { recursive: true })
       writeFileSync(path, payload, { flag: 'wx', mode: 0o600 })
-      return { ...card, download_id: id, bytes: payload.byteLength }
+      return { ...card, archive_sha256: archiveSha256, download_id: id, bytes: payload.byteLength }
     },
     install: (slug, version, signal, options) => installOperation('install', slug, version, signal, options),
     update: (slug, version, signal, options) => installOperation('update', slug, version, signal, options),
@@ -1100,10 +1474,25 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
     disable: (slug, signal) => store.disable(slug, signal),
     uninstall: (slug, signal) => store.uninstall(slug, signal),
     inventory: signal => store.inventory(signal),
-    recover: signal => store.recover({ reconcile, complete, signal }),
+    async recover(signal) {
+      const local = await store.recover({ reconcile, complete, signal })
+      const remote = await recoverRemoteMutations(signal)
+      return [...local, ...remote]
+    },
     previewPublication(slug) {
       return preparePublication(slug)
     },
+    previewArchive(payload) {
+      const inspected = inspectSkillArchive(payload)
+      return {
+        slug: inspected.name,
+        version: inspected.version,
+        package_sha256: inspected.packageSha256,
+        archive_sha256: inspected.archiveSha256,
+        payload,
+      }
+    },
+    validatePublication: (payload, signal) => store.validatePublication(payload, signal),
     async publish(slug, category, signal) {
       const publication = preparePublication(slug)
       return publishPayload(publication.payload, category, signal, publication)
@@ -1111,26 +1500,25 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
     async publishPrepared(publication, category, signal) {
       if (typeof publication !== 'object' || publication === null || !Buffer.isBuffer(publication.payload)
         || !SKILL_NAME.test(publication.slug) || !VERSION.test(publication.version)
-        || !SHA256.test(publication.package_sha256)) throw new Error('Skill publication preview is invalid')
+        || !SHA256.test(publication.package_sha256)
+        || !SHA256.test(publication.archive_sha256)) throw new Error('Skill publication preview is invalid')
       return publishPayload(publication.payload, category, signal, publication)
     },
     async publishArchive(bundleBase64, category, signal) {
       return publishPayload(decodeArchiveBase64(bundleBase64), category, signal)
     },
-    async deletePublication(slug, version, packageSha256, signal) {
-      const path = `/skills/${encodeSegment(slug, SKILL_NAME, 'Skill slug')}/versions/${encodeSegment(version, VERSION, 'Skill version')}`
-      if (!SHA256.test(packageSha256)) throw new Error('Skill publication digest is invalid')
-      const value = await responseJson(await call(path, {
-        method: 'DELETE',
-        signal,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ package_sha256: packageSha256, client_request_id: requestId('delete') }),
-      }), 'Skill publication deletion')
-      if (value.schema_version !== 1 || value.status !== 'deleted'
-        || value.slug !== slug || value.version !== version || value.package_sha256 !== packageSha256) {
-        throw new Error('Skill publication deletion receipt is invalid')
-      }
-      return value
+    ownedPublication,
+    async deletePublication(publication, signal) {
+      const card = skillCard(publication)
+      const requestId = mutationRequestId('delete', card.slug, card.version, card.package_sha256)
+      return runRemoteMutation({
+        schema_version: 1,
+        action: 'delete',
+        request_id: requestId,
+        slug: card.slug,
+        version: card.version,
+        package_sha256: card.package_sha256,
+      }, undefined, signal)
     },
   }
 }

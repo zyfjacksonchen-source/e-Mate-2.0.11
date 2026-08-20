@@ -36,18 +36,20 @@ e-Mate 沿用 2.0.5 Skill Hub 的公开目录与不可变版本模型，不创�
 - 共享 Skill：`e_mate_skill_hub_download`、`install`、`update`、`enable`、`disable`、`uninstall`；
 - 当前用户发布：`e_mate_skill_hub_publish`、`e_mate_skill_hub_delete_publication`。
 
-所有 mutation 都由当前 Agent 所有的原生 DSH Job 执行。Tool 会先解析精确 slug、版本和 SHA-256，再通过 `ctx.userQuestions` 展示目标；发布确认还绑定确认时实际生成的 ZIP 字节，确认后目录若变化即拒绝上传。删除发布必须携带精确 slug/version/hash，由服务端重新校验当前身份的所有权；它不等于本地卸载。
+所有 mutation 都由当前 Agent 所有的原生 DSH Job 执行。Tool 会先解析精确 slug、版本和 SHA-256，再通过 `ctx.userQuestions` 展示目标；发布只接受原生 provider 当前可见的已安装 slug，或当前会话文件导入链产生的精确 `.e-mate/imports/*.zip` identity，不接受任意主机路径。候选 ZIP 必须先由固定 rc.7 `FileSystemSkillProvider` 成功解析；确认同时绑定规范内容摘要和实际 ZIP 字节摘要，确认后字节变化即拒绝上传。删除 Tool 只接收用户/模型选择的 slug/version，必须先从 `GET /publications/mine` 按当前身份回读精确 owned publication，再展示服务端摘要并执行删除；模型不能提供或猜测所有权摘要。删除发布不等于本地卸载。
 
 ## 3. 线上 API 合同
 
 - `GET /skills`：服务端处理 query/category/tag/source、1–100 条分页和 opaque cursor；客户端不得只取首页后本地假过滤。
 - `GET /skills/{slug}`：同一 slug 的详情和不可变版本历史。
-- `GET /skills/{slug}/versions/{version}/package`：响应头、本地字节和目录对象三方 SHA-256 必须相等。
-- `POST /skills`：发布当前用户本机已安装的声明式 Skill；服务端解析真实 slug/version，不信任客户端声明。
+- `GET /skills/{slug}/versions/{version}/package`：目录卡片与 `X-Skill-Content-SHA256` 使用规范内容/CAS 摘要；客户端必须重新解析下载 ZIP 并计算同一内容摘要。ZIP 原始字节另算 `archive_sha256`，只用于本地下载凭证和发布确认，不能与内容摘要混用。
+- `GET /publications/mine`：无参数只列当前身份的活动发布；精确 slug/version 查询也可回读本人已 tombstone 的不可变版本，用于删除响应丢失后的同请求幂等重放，不向其他账号泄露记录。
+- `POST /skills`：发布当前用户选择且已通过原生 DSH parser 的声明式 Skill；服务端再次解析真实 slug/version，不信任客户端声明。一个 slug 的首版原子绑定发布者，后续版本必须属于同一账号，其他账号不能劫持 latest。
 - `DELETE /skills/{slug}/versions/{version}`：只为当前身份拥有且 SHA-256 完全相等的版本写删除终态，不覆盖或改写已发布字节。
 - 安装意图的 consume/complete 必须绑定身份、设备、slug、version 和 digest。相同 completion receipt 的相同终态必须幂等；`POST /install-intents/reconcile` 必须可区分 `claimed|installed|failed`，供客户端在响应丢失或重启后对账。
+- publish/delete 的 `client_request_id` 由动作和精确不可变目标确定性生成；ZIP 文件顺序/时间固定，原始 ZIP 摘要只参与用户确认，不进入远端幂等身份。响应丢失后重试必须复用同一 ID，服务端对相同请求返回同一终态，对 ID 复用于其他目标则拒绝。
 
-当前仓库只拥有客户端组件，不拥有线上 Skill Hub 服务的权威部署。现存 2.0.5 服务尚未证明具备幂等 complete、reconcile 和所有权 DELETE；在对应服务端版本发布并通过跨用户验收前，生产 Skill Hub 全链路保持未关闭，客户端不得用本地 fixture 冒充上线证据。
+仓库内固定的 2.0.5 服务源已实现内容/CAS 摘要、幂等 complete/reconcile、owned-publication 回读、按当前身份写不可变 tombstone 的 DELETE，以及幂等 publish/delete receipt；服务行为回归覆盖跨账号拒绝和 CAS 字节保留。该源代码尚未部署到权威线上环境，也没有真实账号/公网回读收据；在对应服务端版本发布并通过跨用户验收前，生产 Skill Hub 全链路仍保持未关闭，客户端不得用本地 fixture 冒充上线证据。
 
 ## 4. 本地生命周期事务
 
@@ -61,6 +63,8 @@ e-Mate 沿用 2.0.5 Skill Hub 的公开目录与不可变版本模型，不创�
 6. 重启扫描 WAL，向服务端 reconcile；只有远端确认为 installed 才重新激活候选，否则保持上代或继续 pending。
 7. disable/uninstall 先原子移入受管隔离目录，确认原生 provider 已不可见后提交；enable 反向切换并要求原生 provider 可见。
 
+远端 `publish/delete` 在发出请求前把稳定 request ID、精确 slug/version/content digest/category 及发布 ZIP 写入 `$DSH_HOME/e-mate/skill-hub/remote-mutations`。明确 4xx 会清理 WAL 并失败；断网、取消时响应未知、限流或 5xx 保留 `recovery-pending`。重启或同一自然语言动作重试时只重放该 WAL 中的原始字节和请求 ID，收到匹配终态收据后才清理；不会重新解释模型参数或把未知完成报告为成功。
+
 `install` 只允许首次安装或同版本同摘要幂等复核；已有不同版本必须明确调用 `update`。降级只有 `allow_downgrade=true` 且确认框显示目标旧版本时允许。一个失败事务不能回滚另一个已返回成功的较新事务。
 
 “已安装”页以 Skill Hub receipt inventory 为所有权真相，再叠加原生 provider readiness；当前会话 `skill.list` 不能替代它。页面重载通过原生 Jobs registry 重绑 active/recent UI Job，终态后重新读取 inventory。下载返回随机凭证，最多 32 个、五分钟有效；HEAD 不消费，首次成功 GET 后删除，响应前再次校验 SHA-256，组件启动/卸载时清除残留缓存。
@@ -70,7 +74,7 @@ e-Mate 沿用 2.0.5 Skill Hub 的公开目录与不可变版本模型，不创�
 - 压缩包、条目数、单文件和总解压字节均有上限；拒绝路径穿越、绝对路径、重复规范路径、链接、设备文件、加密条目和嵌套归档。
 - 根目录必须有唯一 `SKILL.md`，name 为 DSH 接受的 kebab-case，version 为不可变 SemVer；原生 DSH parser 的 invocation/readiness 结论优先。
 - 拒绝可执行位、native binary、安装脚本、package lifecycle 与伪装 Cordis 包。
-- 发布只接受已安装 Skill 的受管 slug 或界面已读取的 ZIP 字节；Agent Tool 不接受模型提供的任意本机路径。
+- 发布只接受已安装 Skill 的受管 slug，或当前会话 `.e-mate/imports` 下经 realpath/普通文件/硬链接/大小/TOCTOU 复验的 ZIP identity；Agent Tool 不接受模型提供的任意本机路径。
 - 摘要、slug、version、分类、来源、许可证、上传者和服务端时间进入不可变记录。同 slug/version 不同摘要必须拒绝。
 - Hub 内容不是产品插件，安装它不会扩大 DSH Tool、Approval、sandbox 或 Computer Use 权限。
 
@@ -87,4 +91,4 @@ Skill Hub Host、Agent、RPC 和 UI 任一源文件变化，都必须由 change-
 3. 将新组件与签名 accepted-component-set 组装完整 Profile，执行 Host boot、Client Loader settle、Desktop restart/health/rollback；
 4. 只上传不可变的新组件字节，最后原子激活签名 desired state，并从公共端回读同一 generation/hash。
 
-生产关闭条件还包括：用户 A 发布，用户 B 分页搜索、查看同一摘要、下载、安装并经真实 `/skill`/Agent 调用；B 完成更新、禁用、重启、启用和卸载；A 删除自己发布的精确版本，而 B 无权删除；安装完成响应丢失后重启能幂等对账。缺少线上 API、真实账号、签名 generation、平台安装态或实际 Skill 调用任一证据，都只能记录为局部门禁通过，不能宣称 Skill Hub 已上线闭环。
+生产关闭条件还包括：用户 A 发布，用户 B 不能发布同 slug 的新版本，且能分页搜索、查看同一摘要、下载、安装并经真实 `/skill`/Agent 调用；B 完成更新、禁用、重启、启用和卸载；A 删除自己发布的精确版本，而 B 无权删除；安装完成以及 publish/delete 响应丢失后重启均能幂等对账。缺少线上 API、真实账号、签名 generation、平台安装态或实际 Skill 调用任一证据，都只能记录为局部门禁通过，不能宣称 Skill Hub 已上线闭环。
