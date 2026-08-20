@@ -33,9 +33,9 @@
   },
   "profile_signing_keys": [
     {
-      "id": "e41eaa8769570d58",
+      "id": "e0a81164526dcbcd",
       "algorithm": "ed25519",
-      "public_key_spki_der_base64": "MCowBQYDK2VwAyEAOPKm8377q4unGuiPRClVd5r0rIp7B3N3LYuKcKGJgjk="
+      "public_key_spki_der_base64": "MCowBQYDK2VwAyEA0+3XBSNHP2aAp7jg++srGAjEpIICRypfzX5WWykO4oM="
     }
   ]
 }

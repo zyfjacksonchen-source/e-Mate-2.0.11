@@ -1648,3 +1648,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Desktop 只拆出一个复用原构建命令的 `build:sdk` script；完整 `build` 仍严格执行 `prepare:python && build:sdk`，安装器和平台发布没有获得跳过 runtime 的入口。Ubuntu Base SDK Job 只编译其 manifest 实际收录的 Harness/Desktop lib、Profile 与图标，不下载也不收录 macOS/Windows Python；对应平台 Job 仍在原生 runner 准备并验证自己的 runtime closure。
 - Package 行为测试同时锁定完整 build 必须保留 Python preparation、SDK build 不得包含它，既有打包测试改为检查共享 `build:sdk` 中仍包含 Profile 同步与图标生成。聚焦结果为 package `22/22`、impact `17/17`、target contract、YAML、diff check，以及不执行 Python 下载的完整 SDK 编译成功。
 - `main` 已启用强制 PR、线性历史、禁止强推/删除及 required `CI admission`；本修复从独立分支提交并经 PR 验收，不再直接写受保护主线。
+
+## 2026-08-20 · 2.0.11 S32 新公开仓库专用 Profile 签名根
+
+- 新公开仓库不能读取或迁移旧仓库 environment secret 的值，而 Base 中原 `e41eaa8769570d58` 信任根对应的私钥在当前发布环境不可用。继续保留它会让所有 production Profile bootstrap 在签名前永久失败；因此没有改名复用未知旧 secret，也没有绕过签名。
+- 为 `zyfjacksonchen-source/e-Mate-2.0.11` 独立生成 Ed25519 发布根。Base 只提交 SPKI 公钥及其 SHA-256 前 16 位 key id `e0a81164526dcbcd`；PKCS#8 私钥和同一 key id 分别进入受保护 `r2-publish` environment 的 `EMATE_PROFILE_SIGNING_PRIVATE_KEY`、`EMATE_PROFILE_SIGNING_KEY_ID`，本机临时私钥在公私钥匹配验证和 Secret 写入后立即删除。
+- 真实公私钥匹配检查通过；影响分类/Profile 组合/Profile publisher 聚焦回归 `21/21`、target pin 与 diff check 通过。信任根是 Base 发布输入，本切片必须经过新的 Base lane；R2 access secrets、当前 SHA 的性能/平台收据和三个公开 desired-state 仍未就绪，因此没有触发 bootstrap 或线上写入。
