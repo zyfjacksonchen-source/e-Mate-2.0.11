@@ -71,7 +71,6 @@ const ECOSYSTEM_PLUGIN_PACKAGES = [
   { name: '@kelearns/dsh-navigation-bar', version: '0.2.1', entry: 'index.js', client: true, patchName: "'@kelearns/dsh-navigation-bar'" },
   { name: '@omdsh-dev/dsh-genui', version: '0.8.3', entry: 'lib/index.js', client: true, patchName: "'@omdsh-dev/dsh-genui'" },
   { name: 'dsh-at-file', version: '0.6.2', entry: 'lib/index.js', client: true, patchName: 'dsh-at-file' },
-  { name: 'dsh-better-sidebar', version: '0.12.2', entry: 'lib/index.js', client: true, patchName: "'dsh-better-sidebar'" },
   { name: 'dsh-file-viewer', version: '0.1.0', entry: 'lib/index.js', client: true, patchName: "'dsh-file-viewer'" },
   { name: 'dsh-turn-fold', version: '0.2.2', entry: 'index.js', client: true, patchName: 'dsh-turn-fold' },
   { name: 'dsh-visualize', version: '0.1.0', entry: 'lib/index.mjs', client: true, patchName: "'dsh-visualize'" },
@@ -89,6 +88,7 @@ const RETIRED_PROFILE_PACKAGES = new Set([
   '@e-mate/dsh-plugin-subagent',
   '@e-mate/dsh-plugin-xin-assistant',
   '@yuxianglin/dsh-bridge-browser',
+  'dsh-better-sidebar',
   'dsh-search-mcp',
 ])
 const OWNED_PROFILE_PACKAGES = new Set([...MANAGED_PROFILE_PACKAGES, ...RETIRED_PROFILE_PACKAGES])

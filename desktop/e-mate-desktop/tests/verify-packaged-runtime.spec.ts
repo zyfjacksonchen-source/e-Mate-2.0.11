@@ -57,7 +57,7 @@ describe('packaged desktop runtime verification', () => {
 
     verifyPackagedNodePty(context('/build', platform), run)
 
-    expect(run).toHaveBeenCalledTimes(2)
+    expect(run).toHaveBeenCalledOnce()
     const [executable, args, options] = run.mock.calls[0]!
     expect(executable).toBe(expectedExecutable)
     const comparableArgs = platform === 'win32' ? args.map(argument => argument.toLowerCase()) : args
@@ -66,10 +66,6 @@ describe('packaged desktop runtime verification', () => {
       expectedCommand,
     ].map(argument => platform === 'win32' ? argument.toLowerCase() : argument)))
     expect(options).toMatchObject({ timeout: 60_000, env: { ELECTRON_RUN_AS_NODE: '1' } })
-    expect(run.mock.calls[1]![1]).toContain(join(
-      resolvePackagedUnpackedRoot(context('/build', platform)),
-      'build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty',
-    ))
   })
 
   it('fails packaging when the native PTY cannot start', () => {
@@ -181,20 +177,6 @@ describe('packaged desktop runtime verification', () => {
     )).toThrow(`contains host-architecture build output: ${forbidden}`)
   })
 
-  it('rejects a nested host-architecture node-pty build before universal merge', () => {
-    const runtimeContext = context('/build', 'darwin', 3)
-    const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)
-    const forbidden = FORBIDDEN_MACOS_UNIVERSAL_ENTRIES.find(entry => entry.startsWith('node_modules/dsh-better-sidebar/'))!
-
-    expect(() => verifyPackagedRuntime(
-      runtimeContext,
-      () => completeArchiveEntries(),
-      filename => filename === join(unpackedRoot, forbidden)
-        || !FORBIDDEN_MACOS_UNIVERSAL_ENTRIES.some(entry => filename === join(unpackedRoot, entry)),
-      completePackageResolver(unpackedRoot),
-    )).toThrow(`contains host-architecture build output: ${forbidden}`)
-  })
-
   it.each([
     'lib/client.js',
     'lib/desktop-runtime-environment.js',
@@ -222,8 +204,6 @@ describe('packaged desktop runtime verification', () => {
     'node_modules/@deepseek-ai/dsh/config/agent-presets/cordis/skills/cordis-plugin-development/SKILL.md',
     'node_modules/pnpm/bin/pnpm.mjs',
     'node_modules/node-pty/prebuilds/win32-x64/conpty.node',
-    'build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty/package.json',
-    'build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty/prebuilds/win32-x64/conpty.node',
   ])('fails loud when physical runtime entry %s is absent from app.asar.unpacked', (missing) => {
     const runtimeContext = context('/build', 'win32')
     const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)

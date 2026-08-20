@@ -4,10 +4,12 @@ import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { prepareInstalledMacUniversalRuntime } from './mac-universal.ts'
 
 const require = createRequire(import.meta.url)
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const builderCli = require.resolve('electron-builder/cli.js')
+if (process.platform === 'darwin') prepareInstalledMacUniversalRuntime(packageRoot)
 const result = spawnSync(process.execPath, [builderCli, '--dir'], {
   cwd: packageRoot,
   env: {

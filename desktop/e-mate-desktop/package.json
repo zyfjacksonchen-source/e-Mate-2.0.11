@@ -235,7 +235,6 @@
     "@kelearns/dsh-navigation-bar": "0.2.1",
     "@omdsh-dev/dsh-genui": "file:vendor/omdsh-dev-dsh-genui-0.8.3-0e756efb.tgz",
     "dsh-at-file": "https://github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz",
-    "dsh-better-sidebar": "patch:dsh-better-sidebar@npm%3A0.12.2#~/.yarn/patches/dsh-better-sidebar-npm-0.12.2-cafee7a9cd.patch",
     "dsh-file-viewer": "patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch",
     "dsh-turn-fold": "patch:dsh-turn-fold@https%3A//github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz#~/.yarn/patches/dsh-turn-fold-https-e835a4814f.patch",
     "dsh-visualize": "file:vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz",
@@ -302,23 +301,6 @@
       {
         "from": "node_modules/@anionex/dsh-vision-toolkit/vendor/agent-vision-toolkit/CHANGELOG.md",
         "to": "app.asar.unpacked/node_modules/@anionex/dsh-vision-toolkit/vendor/agent-vision-toolkit/CHANGELOG.md"
-      },
-      {
-        "from": "build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty",
-        "to": "app.asar.unpacked/build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty",
-        "filter": [
-          "package.json",
-          "lib/**",
-          "prebuilds/darwin-arm64/pty.node",
-          "prebuilds/darwin-arm64/spawn-helper",
-          "prebuilds/darwin-x64/pty.node",
-          "prebuilds/darwin-x64/spawn-helper",
-          "prebuilds/win32-x64/conpty.node",
-          "prebuilds/win32-x64/conpty_console_list.node",
-          "prebuilds/win32-x64/pty.node",
-          "prebuilds/win32-x64/winpty-agent.exe",
-          "prebuilds/win32-x64/winpty.dll"
-        ]
       }
     ],
     "mac": {

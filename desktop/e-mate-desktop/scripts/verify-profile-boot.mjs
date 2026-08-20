@@ -221,7 +221,7 @@ try {
       ? '@deepseek-ai/dsh-client-ui-directory-picker-native'
       : '@deepseek-ai/dsh-client-ui-directory-picker-browse',
     'dsh-at-file',
-    'dsh-better-sidebar',
+    '@e-mate/dsh-plugin-better-sidebar',
     'dsh-file-viewer',
     'dsh-turn-fold',
     'dsh-visualize',

@@ -20,7 +20,6 @@ const ecosystemPlugins = [
   '@kelearns/dsh-navigation-bar',
   '@omdsh-dev/dsh-genui',
   'dsh-at-file',
-  'dsh-better-sidebar',
   'dsh-file-viewer',
   'dsh-turn-fold',
   'dsh-visualize',

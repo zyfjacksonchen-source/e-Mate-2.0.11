@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import sharp from 'sharp'
@@ -281,23 +281,6 @@ describe('published package surface', () => {
         from: 'node_modules/@anionex/dsh-vision-toolkit/vendor/agent-vision-toolkit/CHANGELOG.md',
         to: 'app.asar.unpacked/node_modules/@anionex/dsh-vision-toolkit/vendor/agent-vision-toolkit/CHANGELOG.md',
       },
-      {
-        from: 'build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty',
-        to: 'app.asar.unpacked/build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty',
-        filter: [
-          'package.json',
-          'lib/**',
-          'prebuilds/darwin-arm64/pty.node',
-          'prebuilds/darwin-arm64/spawn-helper',
-          'prebuilds/darwin-x64/pty.node',
-          'prebuilds/darwin-x64/spawn-helper',
-          'prebuilds/win32-x64/conpty.node',
-          'prebuilds/win32-x64/conpty_console_list.node',
-          'prebuilds/win32-x64/pty.node',
-          'prebuilds/win32-x64/winpty-agent.exe',
-          'prebuilds/win32-x64/winpty.dll',
-        ],
-      },
     ])
     expect(manifest.build?.mac?.icon).toBe('build/app-icon-mac.png')
     expect(manifest.build?.mac?.mergeASARs).toBe(false)
@@ -329,6 +312,8 @@ describe('published package surface', () => {
     expect(manifest.scripts?.['build:sdk']).toContain('node scripts/generate-mac-app-icon.mjs')
     expect(manifest.scripts?.['package:dir']).toBe('yarn run build && node scripts/package-dir.mjs')
     expect(packageDir).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")
+    expect(packageDir).toContain("import { prepareInstalledMacUniversalRuntime } from './mac-universal.ts'")
+    expect(packageDir).toContain("if (process.platform === 'darwin') prepareInstalledMacUniversalRuntime(packageRoot)")
     expect(manifest.scripts?.['dist:mac']).toBe('node scripts/release-mac.ts')
     expect(manifest.scripts?.['dist:mac-unsigned-release']).toBe('node scripts/package-mac-unsigned-release.ts')
     expect(manifest.scripts?.['dist:mac-smoke']).toBe('node scripts/package-mac.ts')
@@ -363,10 +348,6 @@ describe('published package surface', () => {
       .not.toContain('xin-assistant')
     expect(manifest.build?.files).toContain('!node_modules/node-pty/build/**')
     expect(manifest.build?.files).toContain('!node_modules/**/node-pty/build/**')
-    expect(existsSync(new URL(
-      'build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty/build/Release/pty.node',
-      packageRoot,
-    ))).toBe(false)
     expect(manifest.devDependencies?.['@electron/asar']).toBe('3.4.1')
   })
 
@@ -449,30 +430,26 @@ describe('published package surface', () => {
     expect(lockfile).not.toContain('@koromix/koffi-win32-x64@npm:3.1.4')
   })
 
-  it('keeps node-pty from duplicating an already-unpacked ASAR helper path', () => {
-    const stablePatch = 'patch:node-pty@npm%3A1.1.0#./.yarn/patches/node-pty-npm-1.1.0-asar-unpacked-path.patch'
+  it('keeps the DSH node-pty runtime from duplicating an already-unpacked ASAR helper path', () => {
     const runtimePatch = 'patch:node-pty@npm%3A1.2.0-beta.15#./.yarn/patches/node-pty-npm-1.2.0-beta.15-asar-unpacked-path.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
     const patch = readFileSync(
-      new URL('.yarn/patches/node-pty-npm-1.1.0-asar-unpacked-path.patch', workspaceRoot),
+      new URL('.yarn/patches/node-pty-npm-1.2.0-beta.15-asar-unpacked-path.patch', workspaceRoot),
       'utf8',
     )
     const workspaceRequire = createRequire(new URL('package.json', packageRoot))
-    const sidebarRequire = createRequire(workspaceRequire.resolve('dsh-better-sidebar/package.json'))
-    const installed = [workspaceRequire, sidebarRequire]
-      .map(require => readFileSync(require.resolve('node-pty/lib/unixTerminal.js'), 'utf8'))
+    const installed = readFileSync(workspaceRequire.resolve('node-pty/lib/unixTerminal.js'), 'utf8')
 
     expect(workspaceManifest.resolutions).toMatchObject({
-      'node-pty@npm:^1.1.0': stablePatch,
       'node-pty@npm:1.2.0-beta.15': runtimePatch,
     })
-    expect(lockfile).toContain('node-pty@patch:node-pty@npm%3A1.1.0#./.yarn/patches/node-pty-npm-1.1.0-asar-unpacked-path.patch')
     expect(lockfile).toContain('node-pty@patch:node-pty@npm%3A1.2.0-beta.15#./.yarn/patches/node-pty-npm-1.2.0-beta.15-asar-unpacked-path.patch')
     expect(patch).toContain("path.sep + 'app.asar' + path.sep")
-    for (const source of installed) {
-      expect(source).toContain("path.sep + 'app.asar' + path.sep")
-      expect(source).not.toContain("replace('app.asar', 'app.asar.unpacked')")
-    }
+    expect(installed).toContain("path.sep + 'app.asar' + path.sep")
+    expect(installed).not.toContain("replace('app.asar', 'app.asar.unpacked')")
+    expect(manifest.dependencies).not.toHaveProperty('dsh-better-sidebar')
+    expect(workspaceManifest.resolutions).not.toHaveProperty('node-pty@npm:^1.1.0')
+    expect(lockfile).not.toContain('dsh-better-sidebar@')
   })
 
   it('resolves electron-builder through the pinned app-builder-lib keychain patch', () => {
