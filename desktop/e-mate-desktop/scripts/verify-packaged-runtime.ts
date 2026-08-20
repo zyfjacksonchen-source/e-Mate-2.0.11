@@ -10,6 +10,8 @@ import {
   MACOS_UNIVERSAL_NATIVE_ENTRIES,
 } from './mac-universal.ts'
 
+const BETTER_SIDEBAR_NODE_PTY = 'build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty'
+
 /** AfterPack fields consumed without importing Electron Builder's incomplete declaration graph. */
 export interface PackagedRuntimeContext {
   /** Completed platform application directory. */
@@ -94,6 +96,8 @@ export const REQUIRED_UNPACKED_RUNTIME_ENTRIES = [
   'node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html',
   'node_modules/@earendil-works/pi-ai/dist/providers/data/.manifest.json',
   'node_modules/pnpm/bin/pnpm.mjs',
+  `${BETTER_SIDEBAR_NODE_PTY}/package.json`,
+  `${BETTER_SIDEBAR_NODE_PTY}/lib/index.js`,
 ] as const
 
 /** Prebuilt Node-API modules required when the Windows package skips native source rebuilds. */
@@ -102,6 +106,11 @@ export const REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES = [
   'node_modules/node-pty/prebuilds/win32-x64/conpty_console_list.node',
   'node_modules/node-pty/prebuilds/win32-x64/conpty/conpty.dll',
   'node_modules/node-pty/prebuilds/win32-x64/conpty/OpenConsole.exe',
+  `${BETTER_SIDEBAR_NODE_PTY}/prebuilds/win32-x64/conpty.node`,
+  `${BETTER_SIDEBAR_NODE_PTY}/prebuilds/win32-x64/conpty_console_list.node`,
+  `${BETTER_SIDEBAR_NODE_PTY}/prebuilds/win32-x64/pty.node`,
+  `${BETTER_SIDEBAR_NODE_PTY}/prebuilds/win32-x64/winpty-agent.exe`,
+  `${BETTER_SIDEBAR_NODE_PTY}/prebuilds/win32-x64/winpty.dll`,
 ] as const
 
 /** CPU-specific runtime assets that must coexist in a universal macOS application. */
@@ -200,7 +209,11 @@ export function verifyPackagedNodePty(
   const executable = context.electronPlatformName === 'darwin'
     ? join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'MacOS', context.packager.appInfo.productFilename)
     : join(context.appOutDir, `${context.packager.appInfo.productFilename}.exe`)
-  const nodePtyRoot = join(resolvePackagedUnpackedRoot(context), 'node_modules', 'node-pty')
+  const unpackedRoot = resolvePackagedUnpackedRoot(context)
+  const nodePtyRoots = [
+    join(unpackedRoot, 'node_modules', 'node-pty'),
+    join(unpackedRoot, BETTER_SIDEBAR_NODE_PTY),
+  ]
   const command = context.electronPlatformName === 'win32'
     ? (process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe')
     : '/bin/sh'
@@ -214,19 +227,21 @@ export function verifyPackagedNodePty(
     't.onData(d=>{out+=d});',
     't.onExit(e=>{if(e.exitCode!==0||!out.includes("e-mate-pty-ready"))process.exit(1);process.exit(0)});',
   ].join('')
-  const result = run(executable, ['-e', probe, nodePtyRoot, command, JSON.stringify(commandArgs)], {
-    encoding: 'utf8',
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-    timeout: 60_000,
-  })
-  if (result.error !== undefined || result.status !== 0) {
-    const detail = [result.error?.message, String(result.stderr ?? '').trim()]
-      .filter(value => value !== undefined && value !== '')
-      .join(': ')
-    throw new Error(
-      `@e-mate/desktop: packaged node-pty smoke failed${detail === '' ? '' : `: ${detail}`}`,
-      result.error === undefined ? undefined : { cause: result.error },
-    )
+  for (const nodePtyRoot of nodePtyRoots) {
+    const result = run(executable, ['-e', probe, nodePtyRoot, command, JSON.stringify(commandArgs)], {
+      encoding: 'utf8',
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      timeout: 60_000,
+    })
+    if (result.error !== undefined || result.status !== 0) {
+      const detail = [result.error?.message, String(result.stderr ?? '').trim()]
+        .filter(value => value !== undefined && value !== '')
+        .join(': ')
+      throw new Error(
+        `@e-mate/desktop: packaged node-pty smoke failed${detail === '' ? '' : `: ${detail}`}`,
+        result.error === undefined ? undefined : { cause: result.error },
+      )
+    }
   }
 }
 

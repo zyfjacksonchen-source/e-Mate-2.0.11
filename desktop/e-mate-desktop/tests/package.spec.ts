@@ -281,6 +281,23 @@ describe('published package surface', () => {
         from: 'node_modules/@anionex/dsh-vision-toolkit/vendor/agent-vision-toolkit/CHANGELOG.md',
         to: 'app.asar.unpacked/node_modules/@anionex/dsh-vision-toolkit/vendor/agent-vision-toolkit/CHANGELOG.md',
       },
+      {
+        from: 'build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty',
+        to: 'app.asar.unpacked/build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty',
+        filter: [
+          'package.json',
+          'lib/**',
+          'prebuilds/darwin-arm64/pty.node',
+          'prebuilds/darwin-arm64/spawn-helper',
+          'prebuilds/darwin-x64/pty.node',
+          'prebuilds/darwin-x64/spawn-helper',
+          'prebuilds/win32-x64/conpty.node',
+          'prebuilds/win32-x64/conpty_console_list.node',
+          'prebuilds/win32-x64/pty.node',
+          'prebuilds/win32-x64/winpty-agent.exe',
+          'prebuilds/win32-x64/winpty.dll',
+        ],
+      },
     ])
     expect(manifest.build?.mac?.icon).toBe('build/app-icon-mac.png')
     expect(manifest.build?.mac?.mergeASARs).toBe(false)

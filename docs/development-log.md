@@ -1709,3 +1709,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 新的本机 arm64 目录封装已由 afterPack 通过，物理 `.manifest.json` 存在；候选随后完成 Host、Profile、Client Loader 和交互 UI 启动，显示 `2.0.11`，并使用测试账号完成真实企业登录。Full Access 会话中的 Bash 无 `sandbox escalation`，`command -v gh` 返回登录 Shell 的 `/Users/mac/.local/bin/gh`，证明 Finder 启动环境已恢复用户 PATH；`npx` 无输出经 `/bin/zsh -lic` 交叉验证为本机登录 Shell 本身未安装 npm/npx，不再误判为权限拒绝。
 - 同一安装态的两轮 Bash Agent 指令分别显示首 token `8.2 s` / `8.7 s`、流式 `103 tok/s` / `71 tok/s`。原生 Computer Use Tool 随后通过 `computer_list_apps` 与 `computer_observe` 只读取得 Chrome 当前标签页及窗口标题，没有 `COMPUTER_PERMISSION_REQUIRED`、应用授权或 sandbox 错误；该轮显示首 token `8.1 s`、`73 tok/s`。这些是当前真实候选的单机样本，不冒充原始 DSH/2.0.8 的 30 组成对性能收据。
 - 当前只证明本机 arm64 unpacked candidate 的根因修复和交互链。因为修复属于 Base lane，必须先进入受保护的新公开仓库主线，再重新取得同一 exact SHA 的 CI、Windows/macOS 正式未签名安装器、Profile bootstrap、性能与平台收据；旧 `f8d5aa6…` 产物不得复用。所有新证据通过前继续禁止 R2 写入和官网下载页激活。
+
+## 2026-08-20 · 2.0.11 S41 Profile 内嵌 PTY 闭包进入真实打包边界
+
+- Draft PR `#9` 的 Node 24/Base SDK、Windows 未签名安装器、npm 三目标 clean-install 与 release-set 全部通过；macOS universal Job 在 afterPack 正确失败，`CI admission` 因而保持关闭。真实缺项是 Profile 复制的 `dsh-better-sidebar/node_modules/node-pty@1.1.0`：源码树包含 darwin arm64/x64 prebuild，但 Electron Builder 的主应用文件收集不会保留 `build/**` 下嵌套的 `node_modules`，先前本机单架构候选也只带了 Better Sidebar 自身而没有其独立依赖闭包。
+- 修复复用 Desktop 既有 `extraResources -> app.asar.unpacked` 边界，只复制该依赖运行所需的 `package.json`、`lib/**` 和三目标运行二进制，不复制源码、PDB 或 `build/Release`。afterPack 继续要求 macOS 两架构文件，并新增 Windows nested prebuild 静态门；真实 PTY smoke 同时加载根 DSH `node-pty` 与 Better Sidebar 自己的 `node-pty`，不能再靠 Node 向上解析到另一个版本而假绿。
+- 这是 Desktop/Profile fallback 打包闭包变化，继续属于 Base lane；不会作为 Better Sidebar plugin-only payload 发布，也没有使用创造模式伪装 Electron 打包能力。聚焦 package/runtime 测试为 `2 files / 57 tests`；本机按 CI 同序先准备权限、关闭 npm rebuild，再完成真实 universal 目录合并，afterPack 同时通过两架构静态 inventory 与根/嵌套两套 PTY 启动 smoke。新的 PR exact-SHA CI 完成前仍禁止合并及 R2 写入。

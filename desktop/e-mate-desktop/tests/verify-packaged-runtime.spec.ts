@@ -57,7 +57,7 @@ describe('packaged desktop runtime verification', () => {
 
     verifyPackagedNodePty(context('/build', platform), run)
 
-    expect(run).toHaveBeenCalledOnce()
+    expect(run).toHaveBeenCalledTimes(2)
     const [executable, args, options] = run.mock.calls[0]!
     expect(executable).toBe(expectedExecutable)
     const comparableArgs = platform === 'win32' ? args.map(argument => argument.toLowerCase()) : args
@@ -66,6 +66,10 @@ describe('packaged desktop runtime verification', () => {
       expectedCommand,
     ].map(argument => platform === 'win32' ? argument.toLowerCase() : argument)))
     expect(options).toMatchObject({ timeout: 60_000, env: { ELECTRON_RUN_AS_NODE: '1' } })
+    expect(run.mock.calls[1]![1]).toContain(join(
+      resolvePackagedUnpackedRoot(context('/build', platform)),
+      'build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty',
+    ))
   })
 
   it('fails packaging when the native PTY cannot start', () => {
@@ -218,6 +222,8 @@ describe('packaged desktop runtime verification', () => {
     'node_modules/@deepseek-ai/dsh/config/agent-presets/cordis/skills/cordis-plugin-development/SKILL.md',
     'node_modules/pnpm/bin/pnpm.mjs',
     'node_modules/node-pty/prebuilds/win32-x64/conpty.node',
+    'build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty/package.json',
+    'build/e-mate-profile/ecosystem/dsh-better-sidebar/node_modules/node-pty/prebuilds/win32-x64/conpty.node',
   ])('fails loud when physical runtime entry %s is absent from app.asar.unpacked', (missing) => {
     const runtimeContext = context('/build', 'win32')
     const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)
