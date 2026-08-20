@@ -14,7 +14,7 @@
   "files": ["lib", "runtime", "cordis.patch.yml", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
   "engines": { "node": "^22.19.0 || >=24.0.0" },
   "scripts": {
-    "build": "../../upstream/deepseek-harness/node_modules/.bin/tsdown src/index.ts src/args.ts --format esm --dts --clean --out-dir lib --deps.never-bundle '@deepseek-ai/**'",
+    "build": "node ../../upstream/deepseek-harness/node_modules/tsdown/dist/run.mjs src/index.ts src/args.ts --format esm --dts --clean --out-dir lib --deps.never-bundle '@deepseek-ai/**'",
     "test": "pnpm run build && node --test test/contract.test.mjs"
   },
   "dependencies": { "@deepseek-ai/schemastery": "3.18.1" },

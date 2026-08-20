@@ -1675,3 +1675,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 新仓库的受保护环境持有 Profile Ed25519 私钥，但没有也不应复制旧 R2 S3 长期密钥；用户已连接 Codex 原生 Cloudflare 插件。Profile workflow 因此只承担它唯一能安全完成的职责：接受 exact main CI、构建/组合目标组件、用 Base 信任根生产签名，并输出一个有界 publication bundle。旧的 AWS CLI、API-token 派生 S3 凭据和 workflow 内直接写 R2 路径已删除，避免仓库保留第二套发布权威。
 - `publication-plan.json` 将 immutable component/release 对象与三个 `no-store` activation pointer 分目录，逐项固定 key、URL、相对路径、content type、cache control、bytes、SHA-256，并记录 source commit、accepted CI run、preparation run、target generation/sequence/parent/changed set 及准备时公开 current pointer 的 bytes/SHA。Codex 原生 Cloudflare 插件必须先上传并公开回读全部 immutable 字节，再逐目标复核 expected current，最后写 activation；不同字节撞同 immutable key、父代变化或部分旧候选都会失败关闭。
 - 单元行为测试真实复制并逐文件回读 bootstrap 与 successor bundle，证明 activation 与 immutable 对象物理隔离、bootstrap expected current 为 null、successor 绑定 64 位旧指针摘要；workflow 合同还明确拒绝重新出现 R2/AWS secret。聚焦发布/分类测试 `18/18`、脚本语法与 diff check 通过。该 workflow authority 修改正确属于最后一次 Base lane；后续普通插件仍只生成变化组件、三目标组合与签名 publication bundle，不构建安装器。
+
+## 2026-08-20 · 2.0.11 S36 Profile bootstrap 的 Windows 组件产物闭包
+
+- exact main Profile bootstrap run `32333362899` 在 R2 写入前失败关闭：Windows Computer Use 已完成 build/test，但 emitter 因构建脚本提前删除 `native` allowlist 根目录而拒绝产物；Windows Xin Assistant 则因 npm script 直接执行 POSIX `.bin/tsdown`，在 `windows-2025` 上得到 command-not-found。其余组件目标成功，完整 generation 与签名 publication bundle 均未生成，线上 desired-state 没有部分激活。
+- Computer Use 的 Windows 运行能力本就按 inventory 声明为 `runtime_abi: none`、`native_paths: []`；构建现保留仓库固定的 macOS native 来源供统一 allowlist 枚举，再由既有 target filter 从 Windows payload 排除，不新增 Windows 自动化旁路。Xin 仅把同一固定 Harness `tsdown` 入口改为跨平台 `node …/dist/run.mjs`，没有改变编译参数或依赖闭包。
+- 两条窄合同分别锁定 Windows 构建不得删除 allowlist 根和 Xin 必须使用 Node 入口。该修复触及两个 platform-profile 的构建来源，按仓库合同诚实进入一次 Base lane；只有新的 exact-main CI、正式安装器和 Profile bootstrap 全部通过后，才允许原生 Cloudflare 发布。
