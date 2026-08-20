@@ -1603,3 +1603,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - R2 publisher 会按目标依次激活三个 stable desired-state；如果首个目标写入成功、后续目标失败，旧重试会把已经写入的首目标视为“已有 bootstrap”或“不是当前状态的直接后继”，导致同一已签发布永久卡住。R2 不提供跨对象原子事务，因此不能用本地成功假装三目标同时提交。
 - 发布前 CAS 校验现只增加一个严格幂等分支：公开对象经过原签名、target 和完整组件集合验证后，只有其 canonical envelope 与本次候选逐字节语义相等才视为该目标已经完成；任何其他已有对象仍拒绝 bootstrap，普通更新仍要求 exact parent generation、sequence 和 changed-component 声明。不可变组件上传、公开回读和最终 receipt 规则没有放宽。
 - 回归分别模拟 bootstrap 与直接后继在 `darwin-arm64` 已激活、其余两目标尚未激活的中断状态，两次重试均可继续生成完整三目标发布计划；错误父代和非同一候选继续由原 CAS 测试失败关闭。影响/组件/完整组合/R2 publisher 为 `29/29`，安装器发布合同 `9/9`，release boundary 与 diff check 通过。该修改触及共享发布器，正确属于 Base lane；尚未发生线上写入或激活。
+
+## 2026-08-20 · 2.0.11 S25 Base 发布性能收据独立失败关闭
+
+- 性能 evaluator 已绑定原始 `deepseek-harness-desktop` rc.7 reference 与候选 Base/Profile/Client 摘要，使用 TTFT p50/p95、吞吐慢尾 p50/p5，并且夹具或未回读原始 artifact 的输入统一非零退出；但正式 Desktop R2 publisher 旧流程只检查综合 `EMATE_S12_ACCEPTED_SHA`，仓库没有独立证明当前发布 SHA 已完成真实 30 组成对性能验收。
+- 最小门禁不增加第二套采集器，也不让 CI 夹具冒充真机：受保护 `r2-publish` 环境必须另外提供 `EMATE_PERFORMANCE_ACCEPTED_SHA`，且在下载候选后的任何 R2 写入之前逐字节等于 `GITHUB_SHA`。只有原始 DSH Desktop 与同一候选在相同机器、provider/model、数据集和网络上生成并通过生产 evaluator 后，维护者才能设置该受保护变量；plugin-only Profile 发布不走 Desktop installer publisher，因此不会因无关小插件更新重跑 Base 性能。
+- release/performance 聚焦合同 `13/13`、影响/组件/组合/R2 publisher `29/29`、release boundary 与 diff check 通过。当前变量尚未配置、真实 30 组成对收据尚未取得，故该门会按预期阻止 Base 上线；本片没有把缺失证据写成通过。

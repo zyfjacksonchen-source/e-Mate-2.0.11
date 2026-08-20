@@ -284,6 +284,8 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.doesNotMatch(desktopManifestSource, /const VERSION = '\d+\.\d+\.\d+'/u)
   assert.match(desktopPublisher.run, /version="\$\(jq -er '\.version/u)
   assert.match(desktopPublisher.run, /\.artifacts\[\$platform\]\.url/u)
+  assert.equal(desktopPublisher.env.EMATE_PERFORMANCE_ACCEPTED_SHA, '${{ vars.EMATE_PERFORMANCE_ACCEPTED_SHA }}')
+  assert.match(desktopPublisher.run, /test "\$GITHUB_SHA" = "\$EMATE_PERFORMANCE_ACCEPTED_SHA"/u)
   assert.ok(desktopPublisher.run.lastIndexOf('public-artifact') < desktopPublisher.run.indexOf('--key desktop/latest.json'))
   for (const job of ['windows', 'macos', 'manifest']) {
     const step = desktopRelease.jobs[job].steps.find(item => item.id === 'version')
