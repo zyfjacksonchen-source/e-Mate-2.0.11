@@ -1694,3 +1694,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 唯一 component inventory 现把 `@e-mate/dsh-plugin-xin-assistant` 标成 `desktop: blocked`、`cli: false`。同一真相源会让 CLI bundle 同步、Desktop fallback、Profile bootstrap、普通组件发布和完整 generation 全部排除它；组件源码仍保留，任何后续源码变化在重新准入前按 Base lane 失败关闭，不能以 plugin-only 偷渡回 2.0.11。
 - Desktop 与 CLI 将芯助手加入 retired owner：升级/修复 Profile 时同时移除旧 manifest dependency、bundle 声明及残留 package 目录。Desktop 不再投影专供芯助手的 `EMATE_MANAGED_PYTHON_PATH`，但 Vision Toolkit 仍使用自己既有的受管 Python runtime；macOS universal merge allowlist 也删除芯助手原生目录。原生 platform component 验证改由仍在 2.0.11 的 Computer Use helper 承担。
 - run `32339945078` 的 unsigned Desktop 字节虽已通过哈希、DMG、Universal、ad-hoc codesign、arm64 交互健康和 x86_64/Rosetta 启动验收，但它仍包含本次退出前的组合，现作废且不会上传 R2。只有本切片经受保护主线 Base/Windows/macOS 门禁重新构建后的 exact-SHA 产物才可继续性能、Computer Use、Cloudflare 与官网下载页发布。
+
+## 2026-08-20 · 2.0.11 S39 Profile Base SDK 保留唯一组合注册表
+
+- 芯助手退出后的公开主线 `6647da0b8b58bea60f2ca745dda81ee1a7722aa6` 已通过 exact-SHA CI run `32345100665` 和 build-only Release run `32345100809`。Profile bootstrap run `32347169086` 随后正确构建并验收 10 个组件、12 个目标，清单中没有 Xin Assistant；三个完整 generation 在签名和任何 R2 写入前统一失败关闭。
+- 根因不是插件代码或目标不兼容，而是 accepted Base SDK 的 allowlist 排除了 `build/e-mate-profile/bundles/registry.json`。Desktop 的既有 `installEmateDesktopProfile` 即使从 content-addressed generation 读取组件，仍需这份 1,627-byte 注册表验证受管 package roster；缺失时在 Host boot 前得到 `ENOENT`，因此不能把坏 generation 签名或激活。
+- 最小修复只把 `bundles/registry.json` 作为 Base 组合元数据加入 SDK，并把它纳入 SDK 完整性断言；同目录下任何其他 bundle 文件继续排除，组件代码和 payload 仍只能来自签名 generation。该文件由唯一 component inventory 生成，所以芯助手保持 blocked 后不会借注册表回到 2.0.11。
+- 本地边界验证实际 emit 6,926 个 Base SDK 文件、135,218,474 bytes；断言证明 registry 存在且没有第二个 `bundles/**` payload，仓库 release boundary `17/17` 与 diff check 通过。该修改触及 Base SDK authority，必须经新 PR、exact-main CI/Release 和 Profile bootstrap 重跑；在三目标完整 generation、签名 publication bundle、性能/Computer Use 收据与公开回读全部闭合前仍不写 R2。
