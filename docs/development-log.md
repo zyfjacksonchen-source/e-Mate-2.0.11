@@ -1621,3 +1621,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Profile release 的 validate Job 已从同 SHA 成功 CI impact artifact 读取 `publish_components` 并验证对应 component/composition Jobs，但 production publisher 旧接口没有接收这份列表，只验证三个候选各自声明的 `changed_components` 与实际 artifact 集合自洽。正常 CI 会生成一致数据，发布信任边界却没有证明“CI 判定变化哪些组件”和“最终签名哪些组件”是同一真相。
 - publish Job 现在把非 bootstrap 的 accepted `publish_components`、bootstrap 的完整 accepted inventory 转成同一个重复 `--changed` 参数；publisher 要求列表非空、排序、唯一、全部属于当前 Base inventory，并要求三个目标候选的 admission 逐字节语义一致。候选多报、漏报或换成另一组件均在生产签名、不可变上传和 desired-state 激活前失败。
 - 行为反例将一个已组合目标的 admission 从真实变化组件偷换为另一合法组件 ID；旧自洽链会直到后续 artifact 检查才间接失败，新边界直接报“candidate changed components do not match accepted CI impact”。影响/组件/组合/R2 publisher `29/29`、安装器发布合同 `9/9`、release boundary 与 diff check 通过。本切片修改发布权威，正确进入 Base lane；后续普通插件发布仍只传 classifier 已确认的变化集合。
+
+## 2026-08-20 · 2.0.11 S28 当前生产阻塞回读
+
+- 本节写入前的最新生产/门禁实现提交为 `60ee8205693dd3a4ebf6db2bf164b59d67f4ca46`，远端 `main` 仍为 `af124d75ccf2c46f423a69380dcbd1450692686f`；最近成功 main CI 仍是 run `32099808664`，绑定旧远端 SHA。没有可供 Profile publisher 接受的同 SHA CI run，本轮没有推送或伪造 CI artifact。
+- 公开 `darwin-arm64`、`darwin-x64`、`win32-x64` desired-state 继续全部返回 HTTP 404；因此首个 2.0.11 production bootstrap 尚未发生。`win-codex` 仍解析到 `laptop-adq973jn.local`，但系统 DNS 返回 `Could not resolve hostname`，不能取得 Windows 安装、重启、健康、回滚或 Full Access/CDP 真机收据。
+- 同一外部阻塞已跨 S14、S20、S25 与本节重复：需要维护者先把当前候选合入远端 main、取得 exact-SHA 三平台 CI/性能/Computer Use 验收，并恢复 Windows runner 或 `win-codex` 可达性；随后才能由受保护环境执行签名 bootstrap 与公共回读。仓库侧不得绕过这些门或把本地测试改名为生产证据。
