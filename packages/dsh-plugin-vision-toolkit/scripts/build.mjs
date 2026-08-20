@@ -17,13 +17,20 @@ function replaceExactlyOnce(value, before, after, label) {
   return value.replace(before, after)
 }
 
+async function readPinnedText(path) {
+  const value = await readFile(path, 'utf8')
+  const normalized = value.replaceAll('\r\n', '\n')
+  if (normalized.includes('\r')) throw new Error(`pinned dsh-vision-toolkit file has unsupported line endings: ${path}`)
+  return normalized
+}
+
 await rm(resolve(root, '.build'), { recursive: true, force: true })
 await mkdir(staged, { recursive: true })
 await cp(resolve(source, 'lib'), staged, { recursive: true })
 await cp(resolve(source, 'package.json'), resolve(root, '.build/package.json'))
 
 const upstreamIndex = resolve(staged, 'index.js')
-let index = await readFile(upstreamIndex, 'utf8')
+let index = await readPinnedText(upstreamIndex)
 const applyBefore = 'export async function apply(ctx, config = {}) {'
 const applyAfter = `export async function apply(ctx, config = {}, options = {}) {
     let managedReady = options.managed !== true;`
@@ -126,7 +133,7 @@ index = replaceExactlyOnce(
 await writeFile(upstreamIndex, index)
 
 const runtimeManagerPath = resolve(staged, 'runtime-manager.js')
-let runtimeManager = await readFile(runtimeManagerPath, 'utf8')
+let runtimeManager = await readPinnedText(runtimeManagerPath)
 runtimeManager = replaceExactlyOnce(
   runtimeManager,
   `    /** Resolve and fully prepare a candidate without changing the active runtime. */`,
@@ -142,7 +149,7 @@ runtimeManager = replaceExactlyOnce(
 await writeFile(runtimeManagerPath, runtimeManager)
 
 const configPath = resolve(staged, 'config.js')
-let config = await readFile(configPath, 'utf8')
+let config = await readPinnedText(configPath)
 config = replaceExactlyOnce(
   config,
   "protocol: z.union(['openai', 'anthropic']).default('openai'),",
@@ -164,7 +171,7 @@ config = replaceExactlyOnce(
 await writeFile(configPath, config)
 
 const runtimePath = resolve(staged, 'runtime.js')
-let runtime = await readFile(runtimePath, 'utf8')
+let runtime = await readPinnedText(runtimePath)
 runtime = replaceExactlyOnce(
   runtime,
   "VISION_API_PROTOCOL: this.config.provider.protocol === 'anthropic' ? 'anthropic' : 'chat_completions',",
@@ -174,7 +181,7 @@ runtime = replaceExactlyOnce(
 await writeFile(runtimePath, runtime)
 
 const webPath = resolve(staged, 'web.js')
-let web = await readFile(webPath, 'utf8')
+let web = await readPinnedText(webPath)
 const webTransforms = [
   [
     `    onRuntimeActivated;
@@ -230,7 +237,7 @@ for (const [before, after] of webTransforms) {
 await writeFile(webPath, web)
 
 const toolsPath = resolve(staged, 'tools.js')
-let tools = await readFile(toolsPath, 'utf8')
+let tools = await readPinnedText(toolsPath)
 tools = replaceExactlyOnce(
   tools,
   'export function createVisionTools(source, projectPresentation = presentationIdentity, lifecycleSignal) {',
@@ -285,7 +292,7 @@ for (const toolName of ['vision_ground', 'vision_detect']) tools = guardTool(too
 await writeFile(toolsPath, tools)
 
 const pathsPath = resolve(staged, 'paths.js')
-let paths = await readFile(pathsPath, 'utf8')
+let paths = await readPinnedText(pathsPath)
 paths = replaceExactlyOnce(
   paths,
   'export async function createPathPolicy(workspaceRaw, allowedDirs, outputDirRaw) {',
@@ -341,7 +348,7 @@ for (const [label, before] of [
 await writeFile(runtimePath, runtime)
 
 const runtimeInstallPath = resolve(staged, 'runtime-install.js')
-let runtimeInstall = await readFile(runtimeInstallPath, 'utf8')
+let runtimeInstall = await readPinnedText(runtimeInstallPath)
 runtimeInstall = replaceExactlyOnce(
   runtimeInstall,
   "const REQUIREMENTS_PATH = join(PACKAGE_ROOT, 'runtime', 'requirements.lock');",
@@ -424,7 +431,7 @@ await build({
   },
 })
 
-let client = (await readFile(resolve(staged, 'client.js'), 'utf8'))
+let client = (await readPinnedText(resolve(staged, 'client.js')))
   .replaceAll('@anionex/dsh-vision-toolkit', '@e-mate/dsh-plugin-vision-toolkit')
 client = replaceExactlyOnce(
   client,

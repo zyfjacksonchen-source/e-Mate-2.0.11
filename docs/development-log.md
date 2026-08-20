@@ -1737,3 +1737,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - PR `#10` 更新后的 CI run `32395386973` 已通过 impact 与完整 Node 24/source Job，随后 macOS arm64、Intel、Windows 的 Vision compatibility 和两套 Desktop installer 都在 `actions/setup-python` 阶段失败：该 action 的公开 manifest 尚无 CPython `3.12.14`，所以没有任何组件测试或安装器构建被误报成功。Computer Use 的非 Python 路径继续独立运行。
 - 产品的唯一 Python 权威本来就是 Desktop `prepare-python-runtime.mjs`：它固定 python-build-standalone release、三目标 archive SHA 和 CPython `3.12.14`，正式 App 也从这里取得运行时。组件矩阵与 Profile bootstrap 现复用同一脚本的目标选择入口，只下载当前 target 并把已校验解释器绝对路径交给 Vision；不再把 GitHub action 的可用版本清单当第二个 Base runtime。
 - `actions/setup-python` 仍以可用的 `3.12` 运行 `prepare-wheels.py`，该脚本只下载、重签和确定性重打固定 wheel 字节，不进入最终产品运行时。目标脚本本机 arm64 成功、跨 host target 在下载前拒绝；CI classifier `18/18`、release topology `10/10`、三份 workflow YAML 和 diff check 通过。新 exact SHA 必须重跑六个原生组件 Job与两套安装器后才可合并。
+
+## 2026-08-21 · 2.0.11 S45 Vision 跨平台 pinned source 与 Base SDK 解析闭环
+
+- PR `#10` 的 exact-SHA CI run `32398433767` 已证明两套安装器能越过 Python、wheel 与 PTY 准备，但 Vision 的 Base compatibility 仍失败关闭。Windows 在构建阶段报告 pinned apply contract changed，根因是子模块自己的 checkout 换行策略把已固定 JavaScript 变成 CRLF；macOS 则在行为测试加载 Base import 时从 Desktop 包根解析，而该 Job 按合同只恢复 Base SDK 编译字节、不安装 Desktop 依赖树。
+- Vision 构建现在只在读取 pinned upstream JavaScript 的单一边界把 CRLF 规范成 LF，并继续拒绝任何孤立 CR；所有 exact-once 补丁哨兵和 upstream commit 约束保持不变。生产 Profile resolver 只新增可注入的 Base runtime 解析锚点，默认仍是 Desktop；Vision 的 Base SDK 行为测试将非 Desktop 的声明导入指向 pinned Harness 已安装的原生 package graph，而 `@e-mate/desktop/vision-toolkit` 仍只从唯一 Desktop ABI seam 解析。没有复制 resolver、安装第二套 Desktop closure或放宽未声明 import。
+- 本地以 Base CPython `3.12.14` 复跑 Vision `9/9`，覆盖签名 wheel 的断网安装/复用、managed Web 只读、工具 sandbox、Responses 与策略失败关闭；Desktop resolver `2/2`、release boundary/emitter `28/28`、diff check 通过。旧 SHA 的失败安装器和组件证据继续作废；只有新 exact SHA 在 Windows、arm64、Intel 与两套安装器门禁全部通过后才能合并，当前仍未写 R2 或激活官网下载入口。

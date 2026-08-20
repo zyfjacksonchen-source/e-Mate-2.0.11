@@ -63,6 +63,7 @@ export function installProfilePackageResolver(
   componentRoots: Iterable<string> = [],
   baseRuntimeImports: Readonly<Record<string, string>> = {},
   loaderEntryUrl: string = import.meta.resolve('@deepseek-ai/cordis-plugin-loader'),
+  baseRuntimeEntryUrl: string = DESKTOP_ENTRY_URL,
 ): () => void {
   const components = [...componentRoots].map(root => ({
     prefix: pathToFileURL(`${realpathSync(resolve(root))}${sep}`).href,
@@ -79,7 +80,10 @@ export function installProfilePackageResolver(
         if (component !== undefined) {
           if (isBareSpecifier(specifier)) {
             if (isBaseProfileRuntimeSpecifier(specifier, component.imports)) {
-              return nextResolve(specifier, { ...context, parentURL: DESKTOP_ENTRY_URL })
+              const parentURL = specifier.startsWith(`${DESKTOP_PACKAGE_NAME}/`)
+                ? DESKTOP_ENTRY_URL
+                : baseRuntimeEntryUrl
+              return nextResolve(specifier, { ...context, parentURL })
             }
             if (BUILTIN_PACKAGES.has(specifier)) return nextResolve(specifier, context)
             throw new Error(`hot Profile component undeclared runtime import is blocked: ${specifier}`)

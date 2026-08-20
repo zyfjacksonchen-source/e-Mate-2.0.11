@@ -27,6 +27,7 @@ async function loadBuiltModule(relative = 'lib/index.mjs') {
     [fileURLToPath(root)],
     base.runtime_imports,
     new URL('.test-loader.mjs', root).href,
+    new URL('../../../upstream/deepseek-harness/packages/host/apiproxy/package.json', import.meta.url).href,
   )
   try {
     const module = await import(new URL(relative, root))
