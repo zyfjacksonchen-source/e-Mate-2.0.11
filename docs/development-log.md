@@ -1591,3 +1591,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 完成性审计发现目标合同虽声明 `65a995fa795d7007dd90818c939c5185b3fc1a1d` 是唯一验收的 2.0.10 前序，旧门禁只检查文档文本包含该 SHA，没有证明候选 Git 历史来自这些字节。另一条历史可以复制合同文本后进入分类，属于来源身份缺口。
 - change-impact 现在导出唯一 `ACCEPTED_PREDECESSOR`，`--base/--head` 在计算 diff 与任何构建前调用 Git ancestry 验证；非后代、缺失对象或非法 HEAD 统一产生无效合同并非零退出，不再降级为昂贵的 Base 构建。`check-target` 复用同一常量和验证函数，Profile 发布仍只接受这个 exact HEAD 的成功 CI run，因此没有第二份前序判断。
 - 正向证据证明当前 `HEAD` 的 merge-base 是精确 `65a995f…`；反例使用仓库根提交，函数与 CLI 均明确拒绝并返回状态 1。影响/组件/完整组合/R2 publisher 回归为 `29/29`，release boundary、target pin 与 diff check 通过。该分类器改动正确进入 Base lane；Goal 仍等待当前 SHA 的远端 CI/签名 bootstrap/三平台安装态收据。
+
+## 2026-08-20 · 2.0.11 S23 平台组件原生字节闭包失败关闭
+
+- 完成性审计发现 `verifyPlatformTarget` 旧实现只扫描声明 `native_paths` 内的 Mach-O/PE，且 `target:null` 的 portable 组件直接返回。这样 portable 插件可夹带原生二进制，平台组件也可把另一 OS 的 PE/ELF 放在声明闭包外，并用闭包内一个合法二进制满足最低检查，违背 target tuple 与“portable 不含 native”的合同。
+- 现有 Desktop 物化边界现在扫描签名 manifest 的完整文件集，精确识别 Mach-O、带真实 PE signature 的 DOS/PE 与 ELF。portable 发现任一原生格式即拒绝；platform-profile 的每个原生二进制必须位于声明的 sorted native closure，darwin 只接受严格 ad-hoc Mach-O，win32 只接受 PE，ELF 和跨 OS 混入均失败。校验仍在同一 `materialize/verifyMaterializedProfileComponent` 路径，没有为 CI 或更新器复制第二套规则。
+- 行为反例分别把 ELF 放入 portable payload、把第二个 PE 放到 Windows target 的声明闭包外，二者都在写 generation receipt 前失败；真实 macOS Xin native closure/codesign 正向路径继续通过。Profile release/component/generation/update `4 files / 17 tests`、Desktop 主进程与测试 TypeScript、仓库影响/组合 `29/29`、target pin 和 diff check 均通过。该信任边界属于 Desktop Base，正确触发 Base lane；普通 portable/平台插件源码仍由 inventory 的对应 plugin-only target jobs 构建。

@@ -158,17 +158,23 @@ export function parseProfileComponentManifest(
 const execFileAsync = promisify(execFile)
 const MACH_O_MAGICS = new Set(['feedface', 'feedfacf', 'cefaedfe', 'cffaedfe', 'cafebabe', 'bebafeca', 'cafebabf', 'bfbafeca'])
 
-async function binaryKind(path: string): Promise<'mach-o' | 'pe' | undefined> {
+async function binaryKind(path: string): Promise<'mach-o' | 'pe' | 'elf' | undefined> {
   const handle = await open(path, 'r')
-  const bytes = Buffer.alloc(4)
-  let bytesRead = 0
   try {
-    bytesRead = (await handle.read(bytes, 0, bytes.byteLength, 0)).bytesRead
+    const header = Buffer.alloc(64)
+    const bytesRead = (await handle.read(header, 0, header.byteLength, 0)).bytesRead
+    if (bytesRead >= 4 && MACH_O_MAGICS.has(header.subarray(0, 4).toString('hex'))) return 'mach-o'
+    if (bytesRead >= 4 && header.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) return 'elf'
+    if (bytesRead < 64 || header[0] !== 0x4d || header[1] !== 0x5a) return
+    const offset = header.readUInt32LE(0x3c)
+    const metadata = await handle.stat()
+    if (offset > metadata.size - 4) return
+    const signature = Buffer.alloc(4)
+    if ((await handle.read(signature, 0, signature.byteLength, offset)).bytesRead === 4
+      && signature.equals(Buffer.from([0x50, 0x45, 0x00, 0x00]))) return 'pe'
   } finally {
     await handle.close()
   }
-  if (bytesRead >= 4 && MACH_O_MAGICS.has(bytes.toString('hex'))) return 'mach-o'
-  if (bytesRead >= 2 && bytes[0] === 0x4d && bytes[1] === 0x5a) return 'pe'
 }
 
 async function verifyPlatformTarget(
@@ -177,10 +183,22 @@ async function verifyPlatformTarget(
   platform: NodeJS.Platform,
   arch: string,
 ): Promise<void> {
-  if (manifest.target === null) return
+  const binaries: Array<{ path: string, kind: 'mach-o' | 'pe' | 'elf' }> = []
+  for (const file of manifest.files) {
+    const path = join(directory, ...file.path.split('/'))
+    const kind = await binaryKind(path)
+    if (kind !== undefined) binaries.push({ path: file.path, kind })
+  }
+  if (manifest.target === null) {
+    if (binaries.length !== 0) throw new Error('portable component contains a native binary')
+    return
+  }
   if (manifest.target.platform !== platform || manifest.target.arch !== arch) {
     throw new Error('component target does not match this Desktop runtime')
   }
+  if (binaries.some(binary => !manifest.target!.native_paths.some(path => (
+    binary.path === path || binary.path.startsWith(`${path}/`)
+  )))) throw new Error('component native binary escaped its declared closure')
   const nativeFiles = manifest.files.filter(file => manifest.target!.native_paths.some(path => (
     file.path === path || file.path.startsWith(`${path}/`)
   )))
@@ -189,26 +207,21 @@ async function verifyPlatformTarget(
     return
   }
   if (nativeFiles.length === 0) throw new Error('platform component native closure is empty')
-  const binaries: Array<{ path: string, kind: 'mach-o' | 'pe' }> = []
-  for (const file of nativeFiles) {
-    const path = join(directory, ...file.path.split('/'))
-    const kind = await binaryKind(path)
-    if (kind !== undefined) binaries.push({ path, kind })
-  }
   if (platform === 'darwin') {
     const machO = binaries.filter(binary => binary.kind === 'mach-o')
-    if (manifest.target.signing.scheme !== 'adhoc' || machO.length === 0) {
+    if (manifest.target.signing.scheme !== 'adhoc' || machO.length === 0 || machO.length !== binaries.length) {
       throw new Error('macOS component native signing contract is invalid')
     }
     for (const binary of machO) {
-      await execFileAsync('/usr/bin/codesign', ['--verify', '--strict', binary.path])
-      const displayed = await execFileAsync('/usr/bin/codesign', ['-dvv', binary.path])
+      const path = join(directory, ...binary.path.split('/'))
+      await execFileAsync('/usr/bin/codesign', ['--verify', '--strict', path])
+      const displayed = await execFileAsync('/usr/bin/codesign', ['-dvv', path])
       if (!/Signature=adhoc/u.test(`${displayed.stdout}\n${displayed.stderr}`)) {
         throw new Error('macOS component native binary is not ad-hoc signed')
       }
     }
-  } else if (manifest.target.signing.scheme !== 'unsigned'
-    || binaries.every(binary => binary.kind !== 'pe')) {
+  } else if (manifest.target.signing.scheme !== 'unsigned' || binaries.length === 0
+    || binaries.some(binary => binary.kind !== 'pe')) {
     throw new Error('Windows component native signing contract is invalid')
   }
 }

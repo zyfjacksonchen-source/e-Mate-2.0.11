@@ -47,8 +47,20 @@ function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
-function fixture(): { reference: ProfileReleaseComponent, objects: Map<string, Buffer> } {
-  const files = [...payloadFiles].map(([path, bytes]) => ({
+function fixture(options: {
+  extraFiles?: ReadonlyMap<string, Buffer>
+  target?: ProfileReleaseComponent['target']
+} = {}): { reference: ProfileReleaseComponent, objects: Map<string, Buffer> } {
+  const target = options.target ?? null
+  const kind = target === null ? 'profile' : 'platform-profile'
+  const packageJson = {
+    ...packageValue,
+    eMate: { component: { ...packageValue.eMate.component, kind } },
+  }
+  const payload = new Map(payloadFiles)
+  payload.set('package.json', Buffer.from(`${JSON.stringify(packageJson, null, 2)}\n`))
+  for (const [path, bytes] of options.extraFiles ?? []) payload.set(path, bytes)
+  const files = [...payload].map(([path, bytes]) => ({
     path,
     bytes: bytes.byteLength,
     sha256: sha256(bytes),
@@ -59,8 +71,8 @@ function fixture(): { reference: ProfileReleaseComponent, objects: Map<string, B
     id: packageValue.name,
     slug: 'dsh-plugin-memory-evolve',
     version: packageValue.version,
-    kind: 'profile',
-    target: null,
+    kind,
+    target,
     source_commit: sourceCommit,
     base_contracts: [base.id],
     base_imports: [],
@@ -70,13 +82,14 @@ function fixture(): { reference: ProfileReleaseComponent, objects: Map<string, B
     total_bytes: files.reduce((sum, file) => sum + file.bytes, 0),
     files,
   }, null, 2)}\n`)
-  const manifestUrl = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-memory-evolve/v2.0.11/${sourceCommit}/manifest.json`
+  const targetPath = target === null ? '' : `/${target.platform}-${target.arch}`
+  const manifestUrl = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-memory-evolve/v2.0.11/${sourceCommit}${targetPath}/manifest.json`
   return {
     reference: {
       id: packageValue.name,
       version: packageValue.version,
-      kind: 'profile',
-      target: null,
+      kind,
+      target,
       profile_path: 'node_modules/@e-mate/dsh-plugin-memory-evolve',
       manifest_url: manifestUrl,
       manifest_bytes: manifest.byteLength,
@@ -85,7 +98,7 @@ function fixture(): { reference: ProfileReleaseComponent, objects: Map<string, B
     },
     objects: new Map([
       [manifestUrl, manifest],
-      ...[...payloadFiles].map(([path, bytes]) => [`${new URL('.', manifestUrl).href}files/${path}`, bytes] as const),
+      ...[...payload].map(([path, bytes]) => [`${new URL('.', manifestUrl).href}files/${path}`, bytes] as const),
     ]),
   }
 }
@@ -96,6 +109,55 @@ afterEach(async () => {
 })
 
 describe('Profile component materialization', () => {
+  it('rejects native binaries in portable components and outside a platform closure', async () => {
+    const elf = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00])
+    const portableRoot = await mkdtemp(join(tmpdir(), 'e-mate-portable-native-'))
+    temporary.push(portableRoot)
+    const portable = fixture({ extraFiles: new Map([['hidden/native.so', elf]]) })
+    await expect(materializeProfileComponent({
+      destination: join(portableRoot, 'component'),
+      reference: portable.reference,
+      base,
+      request: async url => {
+        const bytes = portable.objects.get(url)
+        return bytes === undefined ? new Response(null, { status: 404 }) : new Response(Uint8Array.from(bytes).buffer)
+      },
+    })).rejects.toThrow('portable component contains a native binary')
+
+    const pe = Buffer.alloc(68)
+    pe.write('MZ', 0, 'ascii')
+    pe.writeUInt32LE(64, 0x3c)
+    pe.set([0x50, 0x45, 0x00, 0x00], 64)
+    const target = {
+      platform: 'win32' as const,
+      arch: 'x64' as const,
+      runtime_abi: 'cpython-3.12',
+      minimum_os: '10.0',
+      signing: { scheme: 'unsigned' as const, identity: 'none' },
+      native_paths: ['runtime/vendor-native/win32-x64'],
+    }
+    const platformRoot = await mkdtemp(join(tmpdir(), 'e-mate-platform-native-'))
+    temporary.push(platformRoot)
+    const platform = fixture({
+      target,
+      extraFiles: new Map([
+        ['runtime/vendor-native/win32-x64/runtime.dll', pe],
+        ['hidden/escaped.dll', pe],
+      ]),
+    })
+    await expect(materializeProfileComponent({
+      destination: join(platformRoot, 'component'),
+      reference: platform.reference,
+      base,
+      platform: 'win32',
+      arch: 'x64',
+      request: async url => {
+        const bytes = platform.objects.get(url)
+        return bytes === undefined ? new Response(null, { status: 404 }) : new Response(Uint8Array.from(bytes).buffer)
+      },
+    })).rejects.toThrow('component native binary escaped its declared closure')
+  })
+
   it('rejects a platform manifest selected for another runtime target', () => {
     const { reference, objects } = fixture()
     const manifest = JSON.parse(objects.get(reference.manifest_url)!.toString())
