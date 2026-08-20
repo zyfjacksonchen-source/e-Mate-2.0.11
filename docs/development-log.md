@@ -1654,3 +1654,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 新公开仓库不能读取或迁移旧仓库 environment secret 的值，而 Base 中原 `e41eaa8769570d58` 信任根对应的私钥在当前发布环境不可用。继续保留它会让所有 production Profile bootstrap 在签名前永久失败；因此没有改名复用未知旧 secret，也没有绕过签名。
 - 为 `zyfjacksonchen-source/e-Mate-2.0.11` 独立生成 Ed25519 发布根。Base 只提交 SPKI 公钥及其 SHA-256 前 16 位 key id `e0a81164526dcbcd`；PKCS#8 私钥和同一 key id 分别进入受保护 `r2-publish` environment 的 `EMATE_PROFILE_SIGNING_PRIVATE_KEY`、`EMATE_PROFILE_SIGNING_KEY_ID`，本机临时私钥在公私钥匹配验证和 Secret 写入后立即删除。
 - 真实公私钥匹配检查通过；影响分类/Profile 组合/Profile publisher 聚焦回归 `21/21`、target pin 与 diff check 通过。信任根是 Base 发布输入，本切片必须经过新的 Base lane；R2 access secrets、当前 SHA 的性能/平台收据和三个公开 desired-state 仍未就绪，因此没有触发 bootstrap 或线上写入。
+
+## 2026-08-20 · 2.0.11 S33 首代 Profile 跨平台组件构建闭环
+
+- 新仓库首次 production Profile bootstrap run `32326434019` 在任何 R2 写入前安全失败：12 个组件目标成功，Windows 的 Computer Use、Xin Assistant 与 portable Shell 三个目标失败，三个完整 generation 和发布 Job 均跳过，公开 desired-state 未被部分激活。
+- 两个 Windows 目标的共同根因是 workflow 在 PowerShell 中使用 Bash 的 `$COMPONENT` 语法，pnpm 实际收到空 filter 并以“没有匹配项目”返回成功，直到 emitter 才发现 `lib` 不存在。组件 build/test 现固定使用 Bash、`set -euo pipefail` 与同一个环境变量；Computer Use 构建同时只在 Darwin 复制并校验原生 helper，Windows payload 明确删除 macOS native 目录，与 inventory 的 `native_paths: []` 一致。
+- Shell 失败来自自身测试读取 blocked GenUI 的已组装 bundle，令一个 hot-profile 组件无法独立构建。该跨组件断言已从 Shell owner 删除；GenUI 的注册和发布边界仍由其自身组件/完整组合门禁负责，不把另一组件的生成物塞进 Shell SDK。
+- 聚焦验证为仓库影响合同 `17/17`、Shell `38/38`、Computer Use `2/2`、组件 payload/Profile 组合 `11/11`，diff check 通过。本切片触及发布 workflow 与 platform component build，正确进入一次 Base lane；只有新 main exact-SHA CI 和复跑 bootstrap 成功后才允许签名并发布首代 generation。
+
+## 2026-08-20 · 2.0.11 S34 下载页版本绑定与 Linux Base 构建反例
+
+- PR `#3` 的首次远端门禁证明跨平台修复还有一个共享调用方：Computer Use 为 Windows payload 删除 macOS helper 时也在 Linux Base SDK 构建中删除了同一目录，随后 CLI bundle 同步因 `native` 不存在而失败。构建脚本现在只在 Windows 删除 native closure、macOS 从固定上游重建并校验、Linux 保留仓库内已固定的 Base SDK 输入；平台 payload 的目标隔离合同没有放宽。
+- 正式下载页脚本此前仍把 manifest 版本与两个安装包文件名固定为 `2.0.10`，且只接受三项 artifact 字段，遗漏真实发布器已固定的 `build_source_commit/build_run_id`。即使 2.0.11 `desktop/latest.json` 正确激活，页面也会按设计 fail closed 成“暂时无法下载”。页面现精确绑定 2.0.11，并严格接受、校验五项 provenance 字段；内容哈希文件更新为 `site.fc9d1cdb2ddd.js`。首页和 macOS 未签名图解同时说明全新安装 2.0.11、已安装 2.0.10 可在应用内确认更新。
+- Codex 原生 Cloudflare OAuth 已确认可直接列举、读取和上传 R2 对象，单对象 API 上限 300 MB；后续发布无需创建或复制长期 R2 密钥。当前只完成能力只读确认，尚未上传安装器、覆盖 `desktop/latest.json` 或修改官网下载线上对象。
+- Computer Use、release 与 impact 聚焦回归合计 `28/28`，diff check 通过。下载页和发布脚本属于 Base 发布输入，本切片继续由同一 PR 的 Base lane 验证；R2 仍须先上传 immutable 2.0.11 制品并公开回读，最后才能激活 latest 和上线页面。

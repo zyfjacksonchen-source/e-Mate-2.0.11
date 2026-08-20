@@ -372,6 +372,7 @@ describe('repository release boundary', () => {
     assert.match(workflow, /changed_args\+=\(--changed "\$component"\)/u)
     assert.match(workflow, /EMATE_PROFILE_SIGNING_PRIVATE_KEY: \$\{\{ secrets\.EMATE_PROFILE_SIGNING_PRIVATE_KEY \}\}/u)
     assert.match(workflow, /environment: r2-publish/u)
+    assert.match(workflow, /name: Build and test the target component\n\s+shell: bash[^]*?set -euo pipefail[^]*?pnpm --filter "\$COMPONENT" run build/u)
     assert.doesNotMatch(workflow, /pnpm --dir upstream\/deepseek-harness run build/u)
     assert.doesNotMatch(workflow, /yarn (?:build|dist:)/u)
 

@@ -6,11 +6,9 @@ import test from 'node:test'
 
 const root = new URL('../', import.meta.url)
 
-test('computer-use adapter preserves the immutable universal helper and macOS-only bundle', async () => {
+test('computer-use adapter preserves the immutable universal helper only on macOS', async () => {
   const pkg = JSON.parse(await readFile(new URL('package.json', root), 'utf8'))
   const patch = await readFile(new URL('cordis.patch.yml', root), 'utf8')
-  const manifest = JSON.parse(await readFile(new URL('native/macos/manifest.json', root), 'utf8'))
-  const helper = await readFile(new URL('native/macos/bin/dsh-computer-use-helper', root))
   const nativeBuilder = await readFile(new URL('scripts/build-native.mjs', root), 'utf8')
   const adapterBuilder = await readFile(new URL('scripts/build.mjs', root), 'utf8')
   const client = await readFile(new URL('lib/client.js', root), 'utf8')
@@ -21,9 +19,11 @@ test('computer-use adapter preserves the immutable universal helper and macOS-on
   assert.equal(pkg.eMate.harnessVersion, '0.1.0-rc.7')
   assert.match(patch, /process\.platform !== 'darwin'/u)
   assert.doesNotMatch(patch, /allowAllApps:\s*true/u)
-  assert.deepEqual(manifest.binary.architectures, ['arm64', 'x86_64'])
-  assert.equal(createHash('sha256').update(helper).digest('hex'), manifest.binary.sha256)
   if (process.platform === 'darwin') {
+    const manifest = JSON.parse(await readFile(new URL('native/macos/manifest.json', root), 'utf8'))
+    const helper = await readFile(new URL('native/macos/bin/dsh-computer-use-helper', root))
+    assert.deepEqual(manifest.binary.architectures, ['arm64', 'x86_64'])
+    assert.equal(createHash('sha256').update(helper).digest('hex'), manifest.binary.sha256)
     const verified = spawnSync('/usr/bin/codesign', ['--verify', '--strict', new URL('native/macos/bin/dsh-computer-use-helper', root).pathname], { encoding: 'utf8' })
     assert.equal(verified.status, 0, verified.stderr)
     const signature = spawnSync('/usr/bin/codesign', ['-dvv', new URL('native/macos/bin/dsh-computer-use-helper', root).pathname], { encoding: 'utf8' })
@@ -32,6 +32,8 @@ test('computer-use adapter preserves the immutable universal helper and macOS-on
   assert.doesNotMatch(nativeBuilder, /HELPER_ENTITLEMENTS|--entitlements|allow-jit|disable-library-validation/u)
   assert.match(adapterBuilder, /nativeManifest\.binary\.sha256/u)
   assert.match(adapterBuilder, /process\.platform === 'darwin'/u)
+  assert.match(adapterBuilder, /\['lib', 'assets', 'docs'\]/u)
+  assert.match(adapterBuilder, /process\.platform === 'win32'/u)
   assert.doesNotMatch(adapterBuilder, /--entitlements|allow-jit|allow-unsigned-executable-memory|disable-library-validation/u)
   assert.match(client, /@e-mate\/dsh-plugin-computer-use/u)
   assert.doesNotMatch(client, /@anionex\/dsh-computer-use/u)

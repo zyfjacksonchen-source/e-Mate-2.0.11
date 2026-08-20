@@ -181,10 +181,12 @@ jobs:
       - name: Restore and verify the accepted Base SDK
         run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
       - name: Build and test the target component
+        shell: bash
         env:
           COMPONENT: ${{ matrix.component }}
           EMATE_COMPONENT_TARGET: ${{ matrix.target }}
         run: |
+          set -euo pipefail
           pnpm --filter "$COMPONENT" run build
           pnpm --filter "$COMPONENT" run test
       - name: Emit the immutable target payload
