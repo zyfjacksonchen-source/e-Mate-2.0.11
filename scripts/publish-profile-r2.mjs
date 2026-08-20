@@ -1,13 +1,10 @@
 #!/usr/bin/env node
 
-import { spawn } from 'node:child_process'
 import { createHash, createPrivateKey, createPublicKey } from 'node:crypto'
-import { lstatSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { mkdir, rename, writeFile } from 'node:fs/promises'
+import { constants, copyFileSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { setTimeout as sleep } from 'node:timers/promises'
 import { loadReleaseBoundary } from './change-impact.mjs'
 import { scanComponentArtifacts } from './profile-release.mjs'
 import {
@@ -24,12 +21,10 @@ import {
 } from '../desktop/e-mate-desktop/src/profile-release.ts'
 
 const REPOSITORY = 'zyfjacksonchen-source/e-Mate-2.0.11'
-const BUCKET = 'emate-desktop-downloads'
 const ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
 const TARGET_NAMES = ['darwin-arm64', 'darwin-x64', 'win32-x64']
 const IMMUTABLE_CACHE = 'public,max-age=31536000,immutable'
 const MAX_CURRENT_BYTES = 1024 * 1024
-const MAX_COMMAND_OUTPUT = 1024 * 1024
 const SHA40 = /^[0-9a-f]{40}$/u
 
 function sha256(bytes) {
@@ -251,108 +246,19 @@ export function prepareProfilePublication(options) {
       },
     }
   })
-  return { base, candidates, objects: [...objectMap.values()].sort((a, b) => a.key.localeCompare(b.key)), releases }
+  return {
+    sourceCommit: options.sourceCommit,
+    base,
+    candidates,
+    objects: [...objectMap.values()].sort((a, b) => a.key.localeCompare(b.key)),
+    releases,
+  }
 }
 
 function writeFileSyncAtomic(path, bytes) {
   const temporary = `${path}.tmp`
   writeFileSync(temporary, bytes, { mode: 0o600 })
   renameSync(temporary, path)
-}
-
-function command(commandName, args) {
-  return new Promise((resolveCommand, reject) => {
-    const child = spawn(commandName, args, { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
-    let output = ''
-    const append = chunk => {
-      output += chunk
-      if (output.length > MAX_COMMAND_OUTPUT) child.kill('SIGKILL')
-    }
-    child.stdout.setEncoding('utf8').on('data', append)
-    child.stderr.setEncoding('utf8').on('data', append)
-    child.once('error', reject)
-    child.once('close', code => {
-      if (code === 0) resolveCommand(output)
-      else reject(Object.assign(new Error(`${commandName} exited with ${String(code)}: ${output}`), { output }))
-    })
-  })
-}
-
-function endpoint() {
-  const account = process.env.ECOREX_R2_ACCOUNT_ID
-  if (!/^[0-9a-f]{32}$/u.test(account ?? '')) throw new Error('ECOREX_R2_ACCOUNT_ID is missing or invalid')
-  return `https://${account}.r2.cloudflarestorage.com`
-}
-
-async function headObject(item) {
-  try {
-    const output = await command('aws', [
-      '--endpoint-url', endpoint(), 's3api', 'head-object', '--bucket', BUCKET, '--key', item.key, '--output', 'json',
-    ])
-    const value = JSON.parse(output)
-    if (value.ContentLength !== item.size || value.ContentType !== item.contentType
-      || value.CacheControl !== item.cacheControl || value.Metadata?.sha256 !== item.sha256) {
-      throw new Error(`R2 object identity collision: ${item.key}`)
-    }
-    return true
-  } catch (error) {
-    if (/\(404\)|Not Found|NoSuchKey/u.test(error?.output ?? '')) return false
-    throw error
-  }
-}
-
-async function putObject(item) {
-  await command('aws', [
-    '--endpoint-url', endpoint(), 's3api', 'put-object', '--bucket', BUCKET, '--key', item.key,
-    '--body', item.path, '--content-type', item.contentType, '--cache-control', item.cacheControl,
-    '--metadata', `sha256=${item.sha256}`,
-  ])
-}
-
-async function publicProbe(item) {
-  const response = await fetch(item.url, {
-    redirect: 'error', headers: { 'accept-encoding': 'identity', 'cache-control': 'no-cache' },
-  })
-  if (response.status !== 200 || response.body === null) {
-    throw new Error(`public Profile object returned ${response.status}: ${item.key}`)
-  }
-  const declared = response.headers.get('content-length')
-  if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/u.test(declared) || Number(declared) !== item.size)) {
-    throw new Error(`public Profile object length differs: ${item.key}`)
-  }
-  const digest = createHash('sha256')
-  const reader = response.body.getReader()
-  let size = 0
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    size += value.byteLength
-    if (size > item.size) {
-      await reader.cancel()
-      throw new Error(`public Profile object exceeds admitted size: ${item.key}`)
-    }
-    digest.update(value)
-  }
-  if (size !== item.size || digest.digest('hex') !== item.sha256) {
-    throw new Error(`public Profile object bytes differ: ${item.key}`)
-  }
-}
-
-async function retryPublicProbe(item) {
-  let last
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    try { await publicProbe(item); return } catch (cause) {
-      last = cause
-      if (attempt < 5) await sleep(1000 * 2 ** attempt)
-    }
-  }
-  throw last
-}
-
-async function publishImmutable(item) {
-  if (!await headObject(item)) await putObject(item)
-  if (!await headObject(item)) throw new Error(`R2 authenticated readback failed: ${item.key}`)
-  await retryPublicProbe(item)
 }
 
 async function readCurrent(target) {
@@ -382,7 +288,7 @@ async function readCurrent(target) {
   return bytes
 }
 
-function authorize(bootstrap) {
+function authorizePreparation(bootstrap) {
   if (process.env.GITHUB_ACTIONS !== 'true' || process.env.GITHUB_REPOSITORY !== REPOSITORY
     || process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch'
     || process.env.GITHUB_REF !== 'refs/heads/main'
@@ -390,12 +296,67 @@ function authorize(bootstrap) {
     || !SHA40.test(process.env.GITHUB_SHA ?? '')) {
     throw new Error(`Profile publication is allowed only by the main Profile release workflow in ${REPOSITORY}`)
   }
-  if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) throw new Error('R2 S3 credentials are missing')
+  if (!/^[1-9][0-9]*$/u.test(process.env.GITHUB_RUN_ID ?? '')
+    || !/^[1-9][0-9]*$/u.test(process.env.EMATE_ACCEPTED_CI_RUN_ID ?? '')) {
+    throw new Error('Profile publication provenance is missing')
+  }
   if ((process.env.EMATE_PROFILE_BOOTSTRAP === 'true') !== bootstrap) throw new Error('Profile bootstrap authority does not match the requested mode')
 }
 
-export async function publishProfileR2(options) {
-  authorize(options.bootstrap)
+function copyPublicationItem(item, output, group) {
+  const relativePath = `${group}/${item.key}`
+  const destination = join(output, ...relativePath.split('/'))
+  mkdirSync(dirname(destination), { recursive: true })
+  copyFileSync(item.path, destination, constants.COPYFILE_EXCL)
+  const copied = immutableItem(destination, item.key)
+  if (copied.size !== item.size || copied.sha256 !== item.sha256) {
+    throw new Error(`Profile publication bundle copy drifted: ${item.key}`)
+  }
+  return {
+    role: item.role,
+    key: item.key,
+    url: item.url,
+    path: relativePath,
+    bytes: item.size,
+    sha256: item.sha256,
+    content_type: item.contentType,
+    cache_control: item.cacheControl,
+  }
+}
+
+export function writeProfilePublicationBundle(prepared, output, currentByTarget, provenance = {}) {
+  const destination = resolve(output)
+  mkdirSync(destination, { recursive: false })
+  const immutableObjects = prepared.objects.map(item => copyPublicationItem(item, destination, 'immutable'))
+  const activations = prepared.releases.map(release => ({
+    target: release.target,
+    generation: release.generation,
+    sequence: release.sequence,
+    parent_generation: release.parent_generation,
+    changed_components: release.changed_components,
+    expected_current: currentByTarget.get(release.target) === undefined ? null : {
+      bytes: currentByTarget.get(release.target).byteLength,
+      sha256: sha256(currentByTarget.get(release.target)),
+    },
+    object: copyPublicationItem(release.stable, destination, 'activation'),
+  }))
+  const plan = {
+    schema_version: 1,
+    document_type: 'emate.profile-native-cloudflare-publication-plan',
+    status: 'prepared',
+    source_commit: prepared.sourceCommit,
+    accepted_ci_run_id: provenance.acceptedCiRunId,
+    preparation_run_id: provenance.preparationRunId,
+    base_contract_id: prepared.base.id,
+    immutable_objects: immutableObjects,
+    activations,
+  }
+  writeFileSyncAtomic(join(destination, 'publication-plan.json'), Buffer.from(`${JSON.stringify(plan, null, 2)}\n`))
+  return plan
+}
+
+export async function prepareSignedProfilePublication(options) {
+  authorizePreparation(options.bootstrap)
   const currentByTarget = new Map(await Promise.all(TARGET_NAMES.map(async target => [target, await readCurrent(target)])))
   const prepared = prepareProfilePublication({
     ...options,
@@ -404,50 +365,10 @@ export async function publishProfileR2(options) {
     keyId: process.env.EMATE_PROFILE_SIGNING_KEY_ID || undefined,
     currentByTarget,
   })
-  let cursor = 0
-  await Promise.all(Array.from({ length: 6 }, async () => {
-    while (cursor < prepared.objects.length) {
-      const item = prepared.objects[cursor]
-      cursor += 1
-      await publishImmutable(item)
-    }
-  }))
-  for (const release of prepared.releases) {
-    const current = await readCurrent(release.target)
-    const accepted = currentByTarget.get(release.target)
-    if ((current === undefined) !== (accepted === undefined)
-      || current !== undefined && !current.equals(accepted)) {
-      throw new Error(`public desired state changed during publication: ${release.target}`)
-    }
-  }
-  for (const release of prepared.releases) {
-    await putObject(release.stable)
-    if (!await headObject(release.stable)) throw new Error(`active desired-state readback failed: ${release.target}`)
-    await retryPublicProbe(release.stable)
-  }
-  const receipt = {
-    schema_version: 1,
-    document_type: 'emate.profile-r2-admission',
-    status: 'verified',
-    source_commit: process.env.GITHUB_SHA,
-    base_contract_id: prepared.base.id,
-    objects: prepared.objects.map(item => ({ key: item.key, url: item.url, bytes: item.size, sha256: item.sha256 })),
-    releases: prepared.releases.map(release => ({
-      target: release.target,
-      generation: release.generation,
-      sequence: release.sequence,
-      parent_generation: release.parent_generation,
-      changed_components: release.changed_components,
-      desired_state_url: release.stable.url,
-      bytes: release.stable.size,
-      sha256: release.stable.sha256,
-    })),
-  }
-  await mkdir(dirname(options.receipt), { recursive: true })
-  const temporary = `${options.receipt}.tmp`
-  await writeFile(temporary, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 })
-  await rename(temporary, options.receipt)
-  return receipt
+  return writeProfilePublicationBundle(prepared, options.bundle, currentByTarget, {
+    acceptedCiRunId: process.env.EMATE_ACCEPTED_CI_RUN_ID,
+    preparationRunId: process.env.GITHUB_RUN_ID,
+  })
 }
 
 async function main() {
@@ -455,23 +376,23 @@ async function main() {
     candidate: { type: 'string', multiple: true },
     'artifact-root': { type: 'string', multiple: true },
     changed: { type: 'string', multiple: true },
-    receipt: { type: 'string' },
+    bundle: { type: 'string' },
     bootstrap: { type: 'boolean', default: false },
   } })
   if (values.candidate?.length !== 3 || values['artifact-root']?.length === 0
-    || values.changed?.length === 0 || values.receipt === undefined) {
-    throw new Error('usage: publish-profile-r2.mjs --candidate <dir> (three targets) --artifact-root <dir> --changed <component> --receipt <path> [--bootstrap]')
+    || values.changed?.length === 0 || values.bundle === undefined) {
+    throw new Error('usage: publish-profile-r2.mjs --candidate <dir> (three targets) --artifact-root <dir> --changed <component> --bundle <directory> [--bootstrap]')
   }
   const root = fileURLToPath(new URL('..', import.meta.url))
-  const receipt = await publishProfileR2({
+  const plan = await prepareSignedProfilePublication({
     root,
     candidateDirectories: values.candidate,
     artifactRoots: values['artifact-root'],
     expectedChangedIds: values.changed,
-    receipt: resolve(values.receipt),
+    bundle: resolve(values.bundle),
     bootstrap: values.bootstrap,
   })
-  process.stdout.write(`${JSON.stringify({ status: receipt.status, releases: receipt.releases })}\n`)
+  process.stdout.write(`${JSON.stringify({ status: plan.status, activations: plan.activations.map(item => ({ target: item.target, generation: item.generation })) })}\n`)
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

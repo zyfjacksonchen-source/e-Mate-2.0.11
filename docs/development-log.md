@@ -1668,3 +1668,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 正式下载页脚本此前仍把 manifest 版本与两个安装包文件名固定为 `2.0.10`，且只接受三项 artifact 字段，遗漏真实发布器已固定的 `build_source_commit/build_run_id`。即使 2.0.11 `desktop/latest.json` 正确激活，页面也会按设计 fail closed 成“暂时无法下载”。页面现精确绑定 2.0.11，并严格接受、校验五项 provenance 字段；内容哈希文件更新为 `site.fc9d1cdb2ddd.js`。首页和 macOS 未签名图解同时说明全新安装 2.0.11、已安装 2.0.10 可在应用内确认更新。
 - Codex 原生 Cloudflare OAuth 已确认可直接列举、读取和上传 R2 对象，单对象 API 上限 300 MB；后续发布无需创建或复制长期 R2 密钥。当前只完成能力只读确认，尚未上传安装器、覆盖 `desktop/latest.json` 或修改官网下载线上对象。
 - Computer Use、release 与 impact 聚焦回归合计 `28/28`，diff check 通过。下载页和发布脚本属于 Base 发布输入，本切片继续由同一 PR 的 Base lane 验证；R2 仍须先上传 immutable 2.0.11 制品并公开回读，最后才能激活 latest 和上线页面。
+
+## 2026-08-20 · 2.0.11 S35 原生 Cloudflare Profile 发布权威
+
+- PR `#3` 已在公开仓库通过 exact-SHA Base、Windows unsigned、macOS universal unsigned、npm 三目标 clean-install 与 `CI admission`，随后以 squash commit `a9642a785617d3499cf986cc075fd814d7ddc6e1` 合入受保护 `main`。R2 `desktop/latest.json` 在此期间继续指向 2.0.10，没有用 PR 或半完成字节提前覆盖稳定入口。
+- 新仓库的受保护环境持有 Profile Ed25519 私钥，但没有也不应复制旧 R2 S3 长期密钥；用户已连接 Codex 原生 Cloudflare 插件。Profile workflow 因此只承担它唯一能安全完成的职责：接受 exact main CI、构建/组合目标组件、用 Base 信任根生产签名，并输出一个有界 publication bundle。旧的 AWS CLI、API-token 派生 S3 凭据和 workflow 内直接写 R2 路径已删除，避免仓库保留第二套发布权威。
+- `publication-plan.json` 将 immutable component/release 对象与三个 `no-store` activation pointer 分目录，逐项固定 key、URL、相对路径、content type、cache control、bytes、SHA-256，并记录 source commit、accepted CI run、preparation run、target generation/sequence/parent/changed set 及准备时公开 current pointer 的 bytes/SHA。Codex 原生 Cloudflare 插件必须先上传并公开回读全部 immutable 字节，再逐目标复核 expected current，最后写 activation；不同字节撞同 immutable key、父代变化或部分旧候选都会失败关闭。
+- 单元行为测试真实复制并逐文件回读 bootstrap 与 successor bundle，证明 activation 与 immutable 对象物理隔离、bootstrap expected current 为 null、successor 绑定 64 位旧指针摘要；workflow 合同还明确拒绝重新出现 R2/AWS secret。聚焦发布/分类测试 `18/18`、脚本语法与 diff check 通过。该 workflow authority 修改正确属于最后一次 Base lane；后续普通插件仍只生成变化组件、三目标组合与签名 publication bundle，不构建安装器。
