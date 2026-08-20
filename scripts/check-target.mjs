@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
+import { PRODUCT_UI_REFERENCE } from './change-impact.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const target = readFileSync(resolve(root, 'docs/target-contract.md'), 'utf8')
@@ -41,7 +42,7 @@ if (release.bin?.['e-mate'] !== 'lib/bin.js') throw new Error('TypeScript-built 
 if (!target.includes('Product name: `e-Mate`')) throw new Error('product name drifted')
 if (!target.includes('Repository: `zyfjacksonchen-source/e-Mate`')) throw new Error('repository identity drifted')
 if (!target.includes('df78045a127e32cb5b942defba52c539590d1596')) throw new Error('Harness source pin is missing')
-if (!target.includes('564a6b6c1d43fb6831dd4a5cd8026e472f063311')) throw new Error('e-Mate shell source pin is missing')
+if (!target.includes(PRODUCT_UI_REFERENCE.commit)) throw new Error('e-Mate shell source pin is missing')
 if (!target.includes('TypeScript/TSX')) throw new Error('TypeScript source contract is missing')
 if (!target.includes('019ff91c-47ca-7c11-93bd-863475181a18')) throw new Error('full e-Mate UI reference is missing')
 if (!target.includes('019ff665-d721-79a0-869d-338f086cf529')) throw new Error('chat interaction reference is missing')
@@ -52,7 +53,7 @@ if (/\b(?:WebSocket|EventSource)\b|\bfetch\s*\(|\/api\//.test(shellSource)) {
 
 for (const [name, path, expected] of [
   ['Harness', 'upstream/deepseek-harness', 'df78045a127e32cb5b942defba52c539590d1596'],
-  ['e-Mate shell', 'upstream/e-mate-2.0.5', '564a6b6c1d43fb6831dd4a5cd8026e472f063311'],
+  ['e-Mate shell', PRODUCT_UI_REFERENCE.path, PRODUCT_UI_REFERENCE.commit],
 ]) {
   try {
     const head = execFileSync('git', ['-C', resolve(root, path), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()

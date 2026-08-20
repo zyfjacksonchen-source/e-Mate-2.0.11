@@ -6,7 +6,7 @@ e-Mate 沿用 2.0.5 Skill Hub 的公开目录与不可变版本模型，不创�
 
 权威参考仍是：
 
-- 服务端注册表：`upstream/e-mate-2.0.5/ecorex/control_plane/skill_hub.py`；
+- 服务端注册表参考：固定 UI/历史服务源 `upstream/e-mate-2.0.5/ecorex/control_plane/skill_hub.py`，其 gitlink 必须保持 `564a6b6c1d43fb6831dd4a5cd8026e472f063311`；服务端后续候选必须在独立、远端可取回的服务来源发布，不能推进该 UI 基线 gitlink；
 - 服务端投影：`upstream/e-mate-2.0.5/desktop/src/v1/api/skillHubRuntimeContract.ts`；
 - 用户流程：`upstream/e-mate-2.0.5/desktop/src/v1/components/SkillsWorkspace.tsx`；
 - 本地解析与调用：固定 rc.7 的 `@deepseek-ai/dsh-skill-filesystem`、`ctx.skills` 与 `@deepseek-ai/dsh-tool-skill`。
@@ -49,7 +49,7 @@ e-Mate 沿用 2.0.5 Skill Hub 的公开目录与不可变版本模型，不创�
 - 安装意图的 consume/complete 必须绑定身份、设备、slug、version 和 digest。相同 completion receipt 的相同终态必须幂等；`POST /install-intents/reconcile` 必须可区分 `claimed|installed|failed`，供客户端在响应丢失或重启后对账。
 - publish/delete 的 `client_request_id` 由动作和精确不可变目标确定性生成；ZIP 文件顺序/时间固定，原始 ZIP 摘要只参与用户确认，不进入远端幂等身份。响应丢失后重试必须复用同一 ID，服务端对相同请求返回同一终态，对 ID 复用于其他目标则拒绝。
 
-仓库内固定的 2.0.5 服务源已实现内容/CAS 摘要、幂等 complete/reconcile、owned-publication 回读、按当前身份写不可变 tombstone 的 DELETE，以及幂等 publish/delete receipt；服务行为回归覆盖跨账号拒绝和 CAS 字节保留。该源代码尚未部署到权威线上环境，也没有真实账号/公网回读收据；在对应服务端版本发布并通过跨用户验收前，生产 Skill Hub 全链路仍保持未关闭，客户端不得用本地 fixture 冒充上线证据。
+本地服务候选 `9704c5bc1a5006d56c3237cd76c0b0f14b722957` 已验证内容/CAS 摘要、幂等 complete/reconcile、owned-publication 回读、不可变 tombstone、幂等 publish/delete receipt、跨账号拒绝和 CAS 字节保留；但该提交当前只保存在本机服务分支 `agent/e-mate-2.0.11-skill-hub-service`，不在权威远端可取回引用中，也不属于父仓库的固定 UI gitlink。只有服务候选单独发布到权威远端、由服务部署链绑定并取得真实账号/公网回读收据后，才能作为生产证据；客户端 fixture 或本机 Git 对象不能冒充上线闭环。
 
 ## 4. 本地生命周期事务
 

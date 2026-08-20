@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { parseProfileBaseContract, parseProfileReleaseEnvelope } from '../desktop/e-mate-desktop/src/profile-release.ts'
+import { PRODUCT_UI_REFERENCE } from './change-impact.mjs'
 import { emitComponent } from './component-release.mjs'
 import { composeProfileReleaseCandidate } from './profile-release.mjs'
 import { prepareProfilePublication } from './publish-profile-r2.mjs'
@@ -29,6 +30,10 @@ test('publication admits bootstrap and its direct successor before exposing acti
   execFileSync('git', [
     'update-index', '--add', '--cacheinfo',
     '160000,df78045a127e32cb5b942defba52c539590d1596,upstream/deepseek-harness',
+  ], { cwd: root })
+  execFileSync('git', [
+    'update-index', '--add', '--cacheinfo',
+    `160000,${PRODUCT_UI_REFERENCE.commit},${PRODUCT_UI_REFERENCE.path}`,
   ], { cwd: root })
   const componentRoot = join(root, 'packages/dsh-plugin-fixture')
   mkdirSync(join(componentRoot, 'lib'), { recursive: true })

@@ -6,6 +6,11 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const BASE_CONTRACT_PATH = 'desktop/e-mate-desktop/base-contract.json'
+export const PRODUCT_UI_REFERENCE = Object.freeze({
+  repository: 'zyfjacksonchen-source/ECoreX',
+  path: 'upstream/e-mate-2.0.5',
+  commit: '564a6b6c1d43fb6831dd4a5cd8026e472f063311',
+})
 const SHELL_COMPONENT_ROOT = 'packages/dsh/profile/plugins/emate-shell'
 const COMPONENT_INVENTORY_PATH = 'packages/dsh/profile/component-inventory.json'
 const STABLE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u
@@ -347,6 +352,9 @@ export function loadReleaseBoundary(root = resolve(fileURLToPath(new URL('..', i
     }
     if (trackedGitlinkCommit(root, 'upstream/deepseek-harness') !== baseContract.harness_commit) {
       errors.push('upstream/deepseek-harness: Git submodule commit does not match the Base contract')
+    }
+    if (trackedGitlinkCommit(root, PRODUCT_UI_REFERENCE.path) !== PRODUCT_UI_REFERENCE.commit) {
+      errors.push(`${PRODUCT_UI_REFERENCE.path}: Git submodule commit does not match the fixed product UI reference`)
     }
   } catch (cause) {
     errors.push(`Desktop/Harness package contract: ${cause instanceof Error ? cause.message : String(cause)}`)

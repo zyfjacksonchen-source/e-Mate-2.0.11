@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { baseSdkFingerprint } from './base-sdk.mjs'
-import { classifyChangedPaths, loadReleaseBoundary } from './change-impact.mjs'
+import { classifyChangedPaths, loadReleaseBoundary, PRODUCT_UI_REFERENCE } from './change-impact.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 
@@ -45,6 +45,11 @@ describe('repository release boundary', () => {
     const boundary = loadReleaseBoundary(root)
     assert.equal(boundary.valid, true, boundary.errors.join('\n'))
     assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v1-dsh-df78045a127e')
+    assert.deepEqual(PRODUCT_UI_REFERENCE, {
+      repository: 'zyfjacksonchen-source/ECoreX',
+      path: 'upstream/e-mate-2.0.5',
+      commit: '564a6b6c1d43fb6831dd4a5cd8026e472f063311',
+    })
     assert.deepEqual(boundary.baseContract.desktop_reference, {
       repository: 'anywhere-labs/deepseek-harness-desktop',
       commit: '6074088f5b660206e404b3591fab51fb99c69add',
@@ -57,7 +62,7 @@ describe('repository release boundary', () => {
     assert.deepEqual(boundary.components.flatMap(component => component.errors), [])
   })
 
-  it('pins the Harness gitlink while keeping component changes on the accepted Base SDK key', () => {
+  it('pins the Harness and product UI gitlinks while keeping component changes on the accepted Base SDK key', () => {
     const checkout = mkdtempSync(join(tmpdir(), 'e-mate-impact-checkout-'))
     try {
       const inventoryPath = 'packages/dsh/profile/component-inventory.json'
@@ -77,6 +82,10 @@ describe('repository release boundary', () => {
       execFileSync('git', [
         'update-index', '--add', '--cacheinfo',
         '160000,df78045a127e32cb5b942defba52c539590d1596,upstream/deepseek-harness',
+      ], { cwd: checkout })
+      execFileSync('git', [
+        'update-index', '--add', '--cacheinfo',
+        `160000,${PRODUCT_UI_REFERENCE.commit},${PRODUCT_UI_REFERENCE.path}`,
       ], { cwd: checkout })
       for (const component of inventory.components) {
         const manifest = JSON.parse(readFileSync(join(checkout, component.root, 'package.json'), 'utf8'))
@@ -113,6 +122,19 @@ describe('repository release boundary', () => {
       writeFileSync(join(checkout, componentProbe), 'export const probe = true\n')
       execFileSync('git', ['add', '--', componentProbe], { cwd: checkout })
       assert.equal(baseSdkFingerprint(checkout), acceptedBase)
+
+      execFileSync('git', [
+        'update-index', '--add', '--cacheinfo',
+        `160000,${'d'.repeat(40)},${PRODUCT_UI_REFERENCE.path}`,
+      ], { cwd: checkout })
+      assert.match(
+        loadReleaseBoundary(checkout).errors.join('\n'),
+        /Git submodule commit does not match the fixed product UI reference/u,
+      )
+      execFileSync('git', [
+        'update-index', '--add', '--cacheinfo',
+        `160000,${PRODUCT_UI_REFERENCE.commit},${PRODUCT_UI_REFERENCE.path}`,
+      ], { cwd: checkout })
 
       const computerUseManifestPath = 'packages/dsh-plugin-computer-use/package.json'
       const computerUseManifest = JSON.parse(readFileSync(join(checkout, computerUseManifestPath), 'utf8'))

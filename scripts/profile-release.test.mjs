@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
+import { PRODUCT_UI_REFERENCE } from './change-impact.mjs'
 import { componentRuntimeParserAvailable, emitComponent } from './component-release.mjs'
 import { composeProfileReleaseCandidate } from './profile-release.mjs'
 
@@ -29,6 +30,10 @@ function fixture() {
   execFileSync('git', [
     'update-index', '--add', '--cacheinfo',
     '160000,df78045a127e32cb5b942defba52c539590d1596,upstream/deepseek-harness',
+  ], { cwd: root })
+  execFileSync('git', [
+    'update-index', '--add', '--cacheinfo',
+    `160000,${PRODUCT_UI_REFERENCE.commit},${PRODUCT_UI_REFERENCE.path}`,
   ], { cwd: root })
   writeJson(join(root, 'desktop/e-mate-desktop/base-contract.json'), {
     schema_version: 1,
