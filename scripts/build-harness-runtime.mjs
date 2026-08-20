@@ -12,7 +12,7 @@ import { applyHarnessRuntimeAdapters } from './harness-runtime-adapters.mjs'
 
 const PRODUCT_VERSION = '2.0.11'
 const HARNESS_VERSION = '0.1.0-rc.7'
-const HARNESS_COMMIT = 'df78045a127e32cb5b942defba52c539590d1596'
+const HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
 const PNPM_VERSION = '11.7.0'
 
 const root = resolve(import.meta.dirname, '..')

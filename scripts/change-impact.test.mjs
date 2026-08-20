@@ -84,7 +84,7 @@ describe('repository release boundary', () => {
   it('accepts the checked-in base contract and every first-party component', () => {
     const boundary = loadReleaseBoundary(root)
     assert.equal(boundary.valid, true, boundary.errors.join('\n'))
-    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v2-dsh-df78045a127e')
+    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v2-dsh-2bc16230975f')
     assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.11')
     assert.deepEqual(PRODUCT_UI_REFERENCE, {
       repository: 'zyfjacksonchen-source/ECoreX',
@@ -134,7 +134,7 @@ describe('repository release boundary', () => {
       execFileSync('git', ['init', '--quiet'], { cwd: checkout })
       execFileSync('git', [
         'update-index', '--add', '--cacheinfo',
-        '160000,df78045a127e32cb5b942defba52c539590d1596,upstream/deepseek-harness',
+        '160000,2bc16230975f6cf02aa1b283b1f86de44007b059,upstream/deepseek-harness',
       ], { cwd: checkout })
       execFileSync('git', [
         'update-index', '--add', '--cacheinfo',

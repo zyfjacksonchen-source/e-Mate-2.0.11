@@ -26,7 +26,7 @@ function evidence(candidateOverrides = {}, count = 30) {
   return {
     schema_version: 1,
     evidence_kind: 'keyless-target-loop-collector-fixture',
-    harness_commit: 'df78045a127e32cb5b942defba52c539590d1596',
+    harness_commit: '2bc16230975f6cf02aa1b283b1f86de44007b059',
     paths: {
       baseline: { samples: baseline },
       emate_online: { samples: candidate },
@@ -64,7 +64,7 @@ test('accepts 30 paired samples and keeps keyless evidence production-blocked', 
         product: candidate ? 'e-mate-desktop' : 'deepseek-harness-desktop',
         source_commit: candidate ? 'e'.repeat(40) : '6074088f5b660206e404b3591fab51fb99c69add',
         desktop_reference_commit: '6074088f5b660206e404b3591fab51fb99c69add',
-        base_contract_id: candidate ? 'e-mate-desktop-profile-v2-dsh-df78045a127e' : 'dsh-desktop-rc7',
+        base_contract_id: candidate ? 'e-mate-desktop-profile-v2-dsh-2bc16230975f' : 'dsh-desktop-rc7',
         profile_generation: candidate ? 'candidate-generation' : 'baseline-generation',
         composition_sha256: candidate ? 'f'.repeat(64) : '1'.repeat(64),
         client_bundle_sha256: candidate ? '2'.repeat(64) : '3'.repeat(64),
