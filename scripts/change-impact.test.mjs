@@ -411,6 +411,7 @@ describe('repository release boundary', () => {
 
   it('makes the required CI admission consume only classifier outputs', () => {
     const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
+    assert.match(workflow, /impact:\n(?:.|\n)*?pnpm\/action-setup@v4(?:.|\n)*?pnpm install --frozen-lockfile --ignore-scripts(?:.|\n)*?Test the fail-closed classifier/u)
     assert.match(workflow, /source:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_base == 'true'/u)
     assert.match(workflow, /plugins:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_plugins == 'true'/u)
     assert.match(workflow, /include: \$\{\{ fromJSON\(needs\.impact\.outputs\.component_jobs_json\) \}\}/u)

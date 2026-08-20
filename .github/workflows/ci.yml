@@ -36,9 +36,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
+
+      - name: Install impact test dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Test the fail-closed classifier and payload boundary
         run: node --test scripts/change-impact.test.mjs scripts/component-release.test.mjs scripts/profile-release.test.mjs scripts/publish-profile-r2.test.mjs
