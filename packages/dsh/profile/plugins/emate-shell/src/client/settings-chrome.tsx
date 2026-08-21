@@ -49,6 +49,8 @@ export function SettingsTrigger({ wide, SettingsIcon }: TriggerProps) {
     const trigger = label.current?.closest('button')
     if (!(trigger instanceof HTMLButtonElement)) return undefined
     trigger.dataset.emateSettingsTrigger = ''
+    trigger.setAttribute('aria-hidden', 'true')
+    trigger.tabIndex = -1
 
     let open = document.querySelector(SETTINGS_CONTENT_SELECTOR) !== null
     const syncPanel = () => {
@@ -91,6 +93,8 @@ export function SettingsTrigger({ wide, SettingsIcon }: TriggerProps) {
       observer.disconnect()
       removeEventListener('popstate', syncPanel)
       delete trigger.dataset.emateSettingsTrigger
+      trigger.removeAttribute('aria-hidden')
+      trigger.removeAttribute('tabindex')
     }
   }, [])
 

@@ -452,6 +452,10 @@
   gap: 2px;
 }
 
+.settingsOwner > :global(button[data-emate-settings-trigger]) {
+  display: none !important;
+}
+
 .utilities {
   min-height: 36px;
   padding: 2px 6px;

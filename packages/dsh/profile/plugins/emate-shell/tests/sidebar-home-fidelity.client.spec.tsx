@@ -57,7 +57,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       width={248}
       renderSlot={(name) => name === 'sidebar.primary.action'
         ? <button type="button">能力中心</button>
-        : name === 'sidebar.settings' ? <button type="button" data-emate-settings-trigger="">打开设置</button>
+        : name === 'sidebar.settings' ? <button type="button" aria-hidden="true" tabIndex={-1} data-emate-settings-trigger="">打开设置</button>
           : name === 'sidebar.footer.action' ? <button type="button">用户中心</button> : null}
       createPortal={createPortal}
       useSessions={selector => selector(sessions)}
@@ -96,6 +96,8 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(screen.queryByRole('button', { name: '切换到暗色模式' })).toBeNull()
     expect(screen.queryByRole('button', { name: '打开设置' })).toBeNull()
     expect(document.querySelector('[data-emate-settings-trigger]')).not.toBeNull()
+    expect(document.querySelector<HTMLElement>('[data-emate-settings-owner]')?.hidden).toBe(false)
+    expect(sidebarCss).toMatch(/\.settingsOwner\s*>\s*:global\(button\[data-emate-settings-trigger\]\)[\s\S]*display:\s*none/u)
     expect(screen.getByRole('region', { name: '项目' }).textContent).toContain('季度报告')
     expect(screen.getByRole('region', { name: '项目' }).textContent).not.toContain('通用会话')
     expect(screen.getByRole('region', { name: '项目' }).getAttribute('data-dsh-workspace-drop-target')).toBe('')

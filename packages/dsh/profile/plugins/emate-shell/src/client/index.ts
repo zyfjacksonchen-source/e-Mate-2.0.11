@@ -63,13 +63,12 @@ export function registerSessionShare(ctx: any): void {
   }, SessionShareAction))
 }
 
-/** Mount e-Mate utilities in DSH's native Session header utility seat. */
+/** Mount e-Mate utilities once in DSH's native frame-wide overlay seat. */
 export function registerHeaderControls(ctx: any): void {
-  ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
-    name: 'conversation.session.header.utilities',
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay',
     id: 'e-mate-header-controls',
-    order: -30,
-    priority: -1,
+    order: -180,
     inject: () => ({
       getThemeScheme: () => ctx.theme.getTheme().active.colorScheme,
       subscribeTheme: (listener: () => void) => ctx.on('theme/change', listener),

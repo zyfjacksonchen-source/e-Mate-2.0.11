@@ -434,7 +434,7 @@ export function SidebarRoot({
         </nav>
 
         <div className={css.footer}>
-          <div hidden>{renderSlot('sidebar.settings', { wide: false })}</div>
+          <div className={css.settingsOwner} data-emate-settings-owner="">{renderSlot('sidebar.settings', { wide: false })}</div>
           {renderSlot('sidebar.footer.action', { wide })}
         </div>
 
