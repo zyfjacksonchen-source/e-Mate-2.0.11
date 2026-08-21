@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ci_run_id:
-        description: Successful CI run for this exact main commit (Base lane for bootstrap, plugin-only lane otherwise).
+        description: Successful CI run for the exact current main commit (push or same-SHA pull request evidence).
         required: true
         type: string
       bootstrap:
@@ -41,7 +41,7 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
-      - name: Accept only a successful CI run for the current main commit
+      - name: Accept only successful CI evidence for the exact current main commit
         id: run
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -53,10 +53,21 @@ jobs:
           [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID")"
           test "$(jq -er .head_sha <<<"$run_json")" = "$GITHUB_SHA"
-          test "$(jq -er .head_branch <<<"$run_json")" = main
-          test "$(jq -er .event <<<"$run_json")" = push
           test "$(jq -er .path <<<"$run_json")" = .github/workflows/ci.yml
           test "$(jq -er .conclusion <<<"$run_json")" = success
+          case "$(jq -er .event <<<"$run_json")" in
+            push)
+              test "$(jq -er .head_branch <<<"$run_json")" = main
+              ;;
+            pull_request)
+              jq -e --arg sha "$GITHUB_SHA" \
+                '.pull_requests | any(.base.ref == "main" and .head.sha == $sha)' <<<"$run_json" >/dev/null
+              ;;
+            *)
+              echo 'CI evidence must come from main push or a pull request targeting main.' >&2
+              exit 1
+              ;;
+          esac
           echo "source_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@v4

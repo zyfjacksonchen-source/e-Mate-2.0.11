@@ -66,7 +66,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: e-mate-change-impact-${{ github.sha }}
+          name: e-mate-change-impact-${{ steps.classify.outputs.head_sha }}
           path: change-impact.json
           if-no-files-found: error
           retention-days: 7
