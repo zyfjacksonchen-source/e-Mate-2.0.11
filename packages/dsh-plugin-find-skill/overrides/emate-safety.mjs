@@ -1,4 +1,5 @@
 import { lstat, readFile, rm } from 'node:fs/promises'
+import { lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
@@ -8,6 +9,58 @@ export function validateManagedSkillName(value) {
     throw new Error(`${String(value)} is not a valid managed skill name`)
   }
   return value
+}
+
+export function resolvePersistentSkillScope(config, source, requestedScope) {
+  const allowed = config.persistentSkillSources ?? []
+  if (allowed.length === 0) return requestedScope ?? config.installDefaultScope ?? 'temp'
+  if (!allowed.includes(source)) throw new Error('Skill source is not an approved external-connection source')
+  return 'global'
+}
+
+/** Promote legacy connector Skills from session-temporary storage before provider registration. */
+export function promotePersistentSkills(config, roots) {
+  const allowed = new Set(config.persistentSkillSources ?? [])
+  if (allowed.size === 0) return []
+  const promoted = []
+  let entries
+  try {
+    entries = readdirSync(roots.tempSkillDir, { withFileTypes: true })
+  } catch (error) {
+    if (error?.code === 'ENOENT') return []
+    throw error
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    try {
+      const name = validateManagedSkillName(entry.name)
+      const source = join(roots.tempSkillDir, name)
+      const target = join(roots.globalSkillDir, name)
+      const skill = lstatSync(join(source, 'SKILL.md'))
+      const receipt = lstatSync(join(source, '.dsh-find-skill.json'))
+      const metadata = JSON.parse(readFileSync(join(source, '.dsh-find-skill.json'), 'utf8'))
+      if (!skill.isFile() || skill.isSymbolicLink() || !receipt.isFile() || receipt.isSymbolicLink()
+        || metadata?.scope !== 'temp' || !allowed.has(metadata.source)) continue
+      try {
+        lstatSync(target)
+        continue
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error
+      }
+      mkdirSync(roots.globalSkillDir, { recursive: true })
+      renameSync(source, target)
+      try {
+        writeFileSync(join(target, '.dsh-find-skill.json'), JSON.stringify({ ...metadata, scope: 'global' }, null, 2), 'utf8')
+      } catch (error) {
+        renameSync(target, source)
+        throw error
+      }
+      promoted.push(name)
+    } catch {
+      // Invalid or conflicting legacy entries remain untouched for explicit user cleanup.
+    }
+  }
+  return promoted.sort()
 }
 
 function inside(root, target) {

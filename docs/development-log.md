@@ -1771,3 +1771,40 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - pinned DSH rc.7 的正式闭环能力只有 Session ZIP；e-Mate 的 `/emate.share` 当前固定失败关闭，Desktop/Profile 没有公开分享 provider 配置源，旧公网 `/api/v1/shares` 与 `/s/*` 又实测为 HTTP 502。继续显示“分享服务不可用”会把尚未部署的外部服务冒充成产品能力。
 - Shell 顶部入口因此收敛为“导出当前任务”，直接调用既有 `sessionLogDownload.download` 并复用同一 store、Modal、错误状态与附件归档，不新增上传、存储、链接或第二套 Session transport；已无消费者的 `callShare` 注入同步删除。公开链接所需的认证发布、不可变存储、安全渲染、过期与撤销仍须作为独立 Cloud Share 服务切片，经真实公网 create/read/revoke 验收后才能恢复 UI。
 - 精确 pnpm `11.7.0` 下 Shell component runner 为 `8 files / 41 tests`，CDP `9/9`、Computer Use `2/2`；仓库 impact/emitter/完整组合边界为 `32/32`，diff check 通过。该批仍是三个 changed Profile components 的 plugin-only 候选，不触发 Desktop Base 或安装器重建。
+
+## 2026-08-21 · 2.0.11 S50 图片事件冷读兼容回归 DSH Session 原生合同
+
+- 用户会话的 `SessionFormatUnsupportedError` 不是日志损坏：e-Mate 的 Base Host 通过 rc.7 `Session.append` 写入了下游 `emate/image-output`，但 declaration merge 只增加 TypeScript 词汇，rc.7 首个下游生产者尚无写入 envelope `ignorable: true` 的 API。热会话可继续工作，JSONL 写侧也按设计先持久化；会话冷读时，原生 `assertEventsSupported` 才因未知且未标记的事件拒绝重放。
+- 修复边界固定为一次 Base lane：在现有 `harness-runtime-adapters.mjs` 唯一装配点补 DSH 架构说明已预留的非 surface `ignorable` writer；`imagegen` 显式使用它；读取侧只把历史上精确的 `emate/image-output` 当作兼容事件。查看不改用户日志，其他未知且未标记事件继续拒绝，Shell 不捕获或隐藏格式错误，也不建立运行时 known-event registry。
+- 现有日志及 `ImageAttachmentRef` 保持原样，可由修复后的 Base 恢复。该切片必须用未来写入 marker、未知事件负例、真实冷读和安装态受影响会话重开证明；在这些证据完成前不得把当前 Base 候选发布为 2.0.11。
+
+## 2026-08-21 · 2.0.11 S51 在线分享恢复为可重启管理的 DSH Session ZIP 投影
+
+- Creation Mode 不再定义一次动态包：S02/S49 已用原生 `conversation.session.header.utilities`、`sessionLogDownload` 与 Connection RPC 证明该 Host/Client seam，本片只是把同一已存在普通组件的失败关闭 provider 接到外部发布终态；动态复制同一按钮/RPC 会形成必须删除的第二路径，且无法代表外部 R2 生命周期。永久实现继续只有现有 Shell 组件和 `/emate.share` Host 插件。
+- S49 的导出收敛保留为历史失败关闭记录；本片在已有身份与 Cloudflare 发布条件到齐后恢复同一顶部分享入口。Host 只调用 pinned `apiProxy.downloads.sessionLog({ includeDescendants: true })`，用现有 Model Gateway 短期会话凭据访问唯一 `/emate.share` provider；Client 不直接联网，也不建立第二套会话、事件、附件或本地分享状态源。
+- 独立 Worker 只把不可变 Session ZIP 写入专用 `emate-session-shares` R2。owner 与当前 session id 的 SHA-256 形成有界、分页的活动索引；每次打开弹层都从服务回读，创建响应不确定时同样回读，因此关闭、重载或重启后仍能复制和撤销全部有效链接。公开页面只提供无脚本 ZIP 下载，链接七天过期；发布桶不参与，跨账号或跨会话列表失败关闭。
+- 主代理聚焦验证为 Shell `8 files / 45 tests`、Host 分享和生图 envelope `2/2`、Worker `4/4`、Harness runtime/release provenance `16/16`，共享 DSH build 与 diff check 通过。Cloudflare 专用 bucket、生命周期和 Worker 尚未在本条证据时部署；只有真实账号完成 create → 关闭/重开回显 → public page/ZIP → revoke → 404/410 后才能记为生产闭环。
+
+## 2026-08-21 · 2.0.11 S52 对话自然披露与原生流式渲染恢复
+
+- 根因不是模型停止流式，也不是 GenUI 与 DSH 互斥，而是 Shell 新增的 `conversation.chat.node / assistant-step / priority -2` 包装器抢走了 pinned DSH priority `0` `AssistantNodeView` 的唯一所有权，并绕过 SlotRenderer 手工调用其他 entry。仓库里并不存在包装器假设的 priority `-1` legacy renderer；GenUI 原生也从未注册该 slot，只拥有 `tool.call.toolview`、input dock 与自身 fence DOM 增强。
+- 最小修复是删除该 Shell 包装器，让 pinned DSH 原生 Assistant 重新直接接收 running/streaming 状态；不添加另一个 handoff、事件或 renderer。共存测试直接组合原生 `AssistantMarkdown` 与 GenUI fence，证明流式正文、Reasoning/Think、GenUI 内容同时可见，且只隐藏 GenUI 自己的原始 fence 代码块。
+
+## 2026-08-21 · 2.0.11 S53 外部连接状态与连接 Skill 全局持久化
+
+- 飞书换会话重复授权的根因不是 OAuth token 被 Session 清理：官方 Lark CLI 将 profile 固定在 `~/.lark-cli`、refresh token 固定在 OS keychain；旧连接流程却把 `lark-doc` 等依赖装进 `skills-bridge/tmp`，且每次都先执行 `config init --new` 与 `auth login`，新 Session 看不到临时 Skill 后就错误重建连接。
+- 修复复用 pinned `dsh-find-skill` 的 global managed provider，不建立另一套 connector store。`skill_install` 只对部署配置中的精确外部连接来源开放，网络动作前经原生 UserQuestions 确认并强制 global；任意其他来源失败关闭，普通社区 Skill 仍只走 Skill Hub。启动时只把 receipt 来源命中该白名单的旧 temp 目录原子迁到 global，普通临时 Skill 原样保留。
+- 飞书工作流固定官方 CLI `1.0.88`，先执行 `auth status --json --verify`；已有有效 profile/token/scope 时跳过全部授权，只在真实 `not_configured`、过期、撤销或缺 scope 时分别执行一次 config/login。腾讯文档、钉钉和微信同样以 DSH Credentials/connector online 状态为设备级真值；Session 只拥有本次 Job 和取消，不拥有连接或凭据。
+
+## 2026-08-21 · 2.0.11 S54 Skill Hub 与在线分享生产服务验收
+
+- Codex 原生 Cloudflare 通道已部署 `emate-skill-hub` Worker（deployment `22b89fb0ab5b40c59c22502ddd4b4597`），绑定 APAC D1 `emate-skill-hub` 与专用 R2 `emate-skill-hub-packages`。客户端和身份传输的唯一默认根已切到该 Worker，仍由 Model Gateway 短期 session token 经 `/v1/consents/current` 验证。真实账号完成不可变 Skill 的 publish → search/detail → download/native inspect → intent/claim/complete/reconcile → owned readback → tombstone/delete replay；测试 publication 已 tombstone，不留公开目录项。
+- Codex 原生 Cloudflare 通道已部署 `emate-share` Worker（deployment `b70b0c38c3b5478cabe4f6540c1bee1d`），workers.dev 入口启用且 preview 关闭，只绑定专用 APAC R2 `emate-session-shares`。生命周期精确为对象七天删除、未完成 multipart 一天终止；发布桶未绑定。公网 `/healthz` 返回 200；真实账号以一份有效 Session ZIP 完成 create `201`、owner/session list `200`、公开页面与原字节 ZIP `200`、revoke `200`、撤销后 `404`、重复 revoke `200`，并在结束前确认列表为空。
+- 本机过期刷新凭据在验收开始时被身份服务正确拒绝；使用测试账号重新登录并选择记住登录后，新的 OS Keychain 全局会话生效。该状态属于设备账号而非当前 Session，后续新会话不得触发第二次登录。Worker/Client 不保存账号密码，验收输出也不包含 token。
+- 当前源码窄门禁：Share Worker `4/4`、Skill Hub Worker `4/4`、Skill Hub 组件 `17/17`、find-skill `8/8`、Shell `45/45`、Host/Profile 聚焦 `4/4`、Harness adapters `6/6`、release provenance `11/11`，`@e-mate/dsh` build 与 diff check 通过。服务闭环不等于 Desktop 发布完成；必须由本次 Base 源重新构建、安装并在真实 UI 复验后，才允许更新 Desktop/Profile activation。
+
+## 2026-08-21 · 2.0.11 S55 Base v3 兼容边界
+
+- S50/S51 改变了组件可依赖的 Base 行为：Session 下游事件 writer/legacy reader seam 以及 `/emate.share` Host 均不存在于已安装的 v2 Base；Skill Hub 的新 Model Gateway token 传输也须与新组件同时落地。继续沿用 v2 id 会让旧 Base 错误接受新 Shell/Skill Hub generation，形成“先热更、后不可用”的兼容性假绿。
+- 当前唯一 Base id 因此提升为 `e-mate-desktop-profile-v3-dsh-2bc16230975f`，全部 accepted/blocked component manifest 精确绑定 v3。旧 v2 Base 看到 v3 desired state 必须在下载组件前返回 `base-required`；只有新 Base 安装并通过 Renderer health 后才允许激活 v3 generation。本次一次性重建完整组件集合是 ABI 变化的必要成本，后续不触及 Base/ABI 的单组件变化仍走 plugin-only。
+- 仓库 release boundary `37/37`、Desktop Profile parser/generation `17/17` 与 exact contract check 已通过；当前合同真相源返回 v3。正式发布仍须验证旧 v2 Base → v3 release 的 `base-required` 与新 Base → v3 generation 的原子启动/回滚。

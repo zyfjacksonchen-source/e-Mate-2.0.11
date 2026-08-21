@@ -48,7 +48,7 @@
         "effects": ["persistent-state"],
         "guards": ["native-user-question", "session-scope", "workspace-scope"]
       },
-      "base_contracts": ["e-mate-desktop-profile-v2-dsh-2bc16230975f"]
+      "base_contracts": ["e-mate-desktop-profile-v3-dsh-2bc16230975f"]
     },
     "harnessVersion": "0.1.0-rc.7",
     "harnessCommit": "2bc16230975f6cf02aa1b283b1f86de44007b059"

@@ -24,15 +24,15 @@ function response(bytes: Uint8Array): Response {
 }
 
 describe('signed Profile update path', () => {
-  it('returns base-required for a signed rc.7-only release before fetching component bytes', async () => {
+  it('returns base-required for a signed v3 release on the installed v2 Base before fetching components', async () => {
     const { privateKey, publicKey } = generateKeyPairSync('ed25519')
     const oldBase: ProfileBaseContract = {
       schema_version: 1,
-      id: 'e-mate-desktop-profile-v1-dsh-rc6',
+      id: 'e-mate-desktop-profile-v2-dsh-2bc16230975f',
       desktop_api: 1,
       profile_format: 1,
-      harness_version: '0.1.0-rc.6',
-      harness_commit: '6'.repeat(40),
+      harness_version: '0.1.0-rc.7',
+      harness_commit: '7'.repeat(40),
       runtime_imports: {},
       profile_signing_keys: [{
         id: 'release-key',
@@ -49,7 +49,7 @@ describe('signed Profile update path', () => {
       sequence: 1,
       source_commit: commit,
       target,
-      base_contracts: ['e-mate-desktop-profile-v1-dsh-rc7'],
+      base_contracts: ['e-mate-desktop-profile-v3-dsh-2bc16230975f'],
       harness_contract: { version: '0.1.0-rc.7', commit: '7'.repeat(40) },
       components: [{
         id: '@e-mate/dsh-plugin-memory-evolve',
@@ -84,7 +84,7 @@ describe('signed Profile update path', () => {
       currentSequence: 0,
       releaseVersion: '2.0.11',
       sequence: 1,
-      requiredBaseContracts: ['e-mate-desktop-profile-v1-dsh-rc7'],
+      requiredBaseContracts: ['e-mate-desktop-profile-v3-dsh-2bc16230975f'],
     })
     expect(request).toHaveBeenCalledOnce()
     expect(request).toHaveBeenCalledWith(profileReleaseUrl(target), expect.objectContaining({ method: 'GET' }))

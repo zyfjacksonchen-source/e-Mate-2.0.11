@@ -57,6 +57,7 @@ export function registerSessionShare(ctx: any): void {
       hooks: { sessionLogDownload: ctx.sessionLogDownload.store },
       requestDownload: (sessionId: string) => ctx.sessionLogDownload.download(sessionId),
       dismissDownload: (sessionId: string) => { ctx.sessionLogDownload.dismiss(sessionId) },
+      callShare: (endpoint: string, payload: unknown) => ctx.connection.rpc.call('/emate.share', endpoint, payload),
     }),
   }, SessionShareAction))
 }

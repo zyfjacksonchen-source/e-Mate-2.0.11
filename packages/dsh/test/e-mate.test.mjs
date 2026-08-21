@@ -451,6 +451,8 @@ test('managed profile installation is idempotent', () => {
     assert.equal(patchById.get('emate-identity').config.enterprise.clientId, 'e-mate-web')
     assert.equal(patchById.get('emate-identity').config.enterprise.organization, 'emate-v2')
     assert.equal(patchById.get('emate-share').name, './plugins/share.js')
+    assert.deepEqual(patchById.get('emate-share').inject, ['apiProxy', 'connection', 'credentials'])
+    assert.equal(patchById.get('emate-share').config.rootUrl, 'https://emate-share.emate-zyfjacksonchen.workers.dev')
     assert.equal(patchById.get('emate-audit').name, './plugins/audit.js')
     assert.deepEqual(patchById.get('emate-audit').inject, [
       'connection', 'sessionPersistence', 'storageDomain', 'timer', 'emateModelPolicy', 'emateIdentity',
@@ -654,25 +656,98 @@ test('managed profile installation is idempotent', () => {
   }
 })
 
-test('public share capability stays on the target RPC seam and fails closed without a provider', async () => {
+test('public share RPC publishes the native DSH Session ZIP and revokes the returned link', async () => {
   let registration
+  const shareId = 'S'.repeat(32)
+  const expiresAt = new Date(Date.now() + 86_400_000).toISOString()
+  const requests = []
+  const sessionLogCalls = []
   applyShare({
+    apiProxy: { downloads: { sessionLog: async (request, signal) => {
+      sessionLogCalls.push(request)
+      assert.equal(signal.aborted, false)
+      return new Response(new Uint8Array([80, 75, 3, 4]), {
+        headers: { 'content-type': 'application/zip' },
+      })
+    } } },
+    credentials: { resolve: async ref => {
+      assert.equal(ref, 'E_MATE_MODEL_SESSION_TOKEN')
+      return { value: 'model-session-token-which-is-long-enough', source: 'test' }
+    } },
     connection: { rpc: { handle: (channel, handler, options) => {
       registration = { channel, handler, options }
       return async () => {}
     } } },
     effect: effect => effect(),
+  }, {
+    rootUrl: 'https://share.example',
+    fetchImplementation: async (input, init = {}) => {
+      const url = String(input)
+      requests.push({ url, init })
+      if (url.endsWith('/healthz')) {
+        return Response.json({ schema_version: 1, ready: true })
+      }
+      if (url.includes('/v1/shares?')) {
+        assert.equal(new Headers(init.headers).get('authorization'), 'Bearer model-session-token-which-is-long-enough')
+        assert.equal(url, `https://share.example/v1/shares?session_sha256=${createHash('sha256').update('session-1').digest('hex')}`)
+        return Response.json({
+          schema_version: 1,
+          shares: [{
+            id: shareId,
+            public_url: `https://share.example/s/${shareId}`,
+            expires_at: expiresAt,
+          }],
+        })
+      }
+      if (init.method === 'POST') {
+        assert.equal(new Headers(init.headers).get('authorization'), 'Bearer model-session-token-which-is-long-enough')
+        assert.equal(new Headers(init.headers).get('x-emate-session-sha256'), createHash('sha256').update('session-1').digest('hex'))
+        assert.deepEqual(new Uint8Array(await new Response(init.body).arrayBuffer()), new Uint8Array([80, 75, 3, 4]))
+        return Response.json({
+          schema_version: 1,
+          share: {
+            id: shareId,
+            public_url: `https://share.example/s/${shareId}`,
+            expires_at: expiresAt,
+          },
+        }, { status: 201 })
+      }
+      if (init.method === 'DELETE') return Response.json({ schema_version: 1, revoked: true })
+      return new Response(null, { status: 404 })
+    },
   })
   assert.equal(registration.channel, SHARE_CHANNEL)
   assert.deepEqual(registration.options, { authority: 'loopback' })
   assert.deepEqual(await registration.handler('status', {}), {
     ok: true,
+    value: { schema_version: 1, ready: true },
+  })
+  assert.deepEqual(await registration.handler('create', { session_id: 'session-1' }), {
+    ok: true,
     value: {
       schema_version: 1,
-      ready: false,
-      blocker: 'public-share-provider-not-configured',
+      share_id: shareId,
+      public_url: `https://share.example/s/${shareId}`,
+      expires_at: expiresAt,
     },
   })
+  assert.deepEqual(sessionLogCalls, [{ sessionId: 'session-1', includeDescendants: true }])
+  assert.deepEqual(await registration.handler('list', { session_id: 'session-1' }), {
+    ok: true,
+    value: {
+      schema_version: 1,
+      shares: [{
+        share_id: shareId,
+        public_url: `https://share.example/s/${shareId}`,
+        expires_at: expiresAt,
+      }],
+    },
+  })
+  assert.deepEqual(await registration.handler('revoke', { share_id: shareId }), {
+    ok: true,
+    value: { schema_version: 1, revoked: true },
+  })
+  assert.equal(requests.at(-1).url, `https://share.example/v1/shares/${shareId}`)
   assert.equal((await registration.handler('create', {})).error.code, 'bad-request')
   assert.equal((await registration.handler('status', [])).error.code, 'bad-request')
 })
@@ -1197,8 +1272,8 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       session: {
         header: { id: 'image-session', cwd: temporary },
         events: sessionEvents,
-        append(type, data) {
-          sessionEvents.push({ type, data, seq: sessionEvents.length, time: Date.now() })
+        append(type, data, options) {
+          sessionEvents.push({ type, data, ...options, seq: sessionEvents.length, time: Date.now() })
         },
         deriveMessages: () => sessionMessages,
       },
@@ -1242,6 +1317,8 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const generated = await imagegen.execute({ prompt: 'Generate one verified image.' }, execution())
     assert.equal(generated.images.length, 1)
     assert.equal(generated.images[0].model, 'gpt-image-2-pro')
+    assert.equal(sessionEvents.at(-1)?.type, 'emate/image-output')
+    assert.equal(sessionEvents.at(-1)?.ignorable, true)
     assert.deepEqual(requests.at(-1), {
       path: '/e-mate/model-api/v1/images/generations',
       body: { model: 'gpt-image-2-pro', prompt: 'Generate one verified image.' },
@@ -1262,6 +1339,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(generatedContent.some(block => block.type === 'text' && block.text.includes(attachmentId)), true)
     assert.deepEqual(sessionEvents.at(-1), {
       type: 'emate/image-output',
+      ignorable: true,
       data: {
         call_id: 'image-call-1',
         content: [{ type: 'image', attachment: generated.images[0].image }],
@@ -2025,19 +2103,19 @@ test('enterprise identity provider maps target credentials and the production HT
     provider.authenticatedRequest('https://mvdcm.ecoremedia.net/e-mate/model-api/v1/authenticated-probe?query=blocked'),
     /outside the managed enterprise root/,
   )
-  const skillHubUrl = 'https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1/skills?query=office&limit=24'
+  const skillHubUrl = 'https://emate-skill-hub.emate-zyfjacksonchen.workers.dev/ecorex-agent/client/skill-hub/v1/skills?query=office&limit=24'
   const skillHubResponse = await provider.authenticatedRequest(skillHubUrl)
   assert.equal(skillHubResponse.ok, true)
   assert.deepEqual(requests.at(-1), {
     url: skillHubUrl,
     path: '/ecorex-agent/client/skill-hub/v1/skills',
-    authorization: `Bearer ${accessToken}`,
+    authorization: `Bearer ${modelToken}`,
   })
   for (const target of [
-    'https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v10/skills?query=office&limit=24',
+    'https://emate-skill-hub.emate-zyfjacksonchen.workers.dev/ecorex-agent/client/skill-hub/v10/skills?query=office&limit=24',
     'https://example.com/ecorex-agent/client/skill-hub/v1/skills?query=office&limit=24',
-    'https://user:password@dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1/skills?query=office&limit=24',
-    'https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1/skills?query=office&limit=24#fragment',
+    'https://user:password@emate-skill-hub.emate-zyfjacksonchen.workers.dev/ecorex-agent/client/skill-hub/v1/skills?query=office&limit=24',
+    'https://emate-skill-hub.emate-zyfjacksonchen.workers.dev/ecorex-agent/client/skill-hub/v1/skills?query=office&limit=24#fragment',
   ]) {
     await assert.rejects(provider.authenticatedRequest(target), /outside the managed enterprise root/)
   }

@@ -7,6 +7,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 import { assertEvidenceSource, BUNDLED_PLUGIN_PACKAGES, generateEvidence, isAcceptedReleaseCommit, RELEASE_PACKAGES, TARGET_NATIVE_RUNTIME_FILES, verifyRelease, VERSION } from './release.mjs'
 import {
   buildR2Inventory,
@@ -62,6 +63,9 @@ async function pack(directory, expected, mutate = manifest => manifest) {
   }
   await file(packageRoot, 'runtime/source-manifest.json', JSON.stringify({
     product_version: VERSION, version: '0.1.0-rc.7', commit: HARNESS_COMMIT,
+    adapters_sha256: createHash('sha256').update(readFileSync(
+      fileURLToPath(new URL('./harness-runtime-adapters.mjs', import.meta.url)),
+    )).digest('hex'),
   }))
   const receipts = []
   for (const name of BUNDLED_PLUGIN_PACKAGES) {
@@ -201,6 +205,20 @@ test('release verification rejects temporary Harness build bytes', async () => {
     await file(join(stage, 'package'), 'runtime/.harness-build-stale/leak.txt', 'temporary build bytes')
     execFileSync('tar', ['-czf', join(root, filename('@e-mate/dsh')), '-C', stage, 'package'])
     assert.throws(() => verifyRelease(root), /temporary Harness build directory/u)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('release verification rejects a Harness runtime built with different Base adapters', async () => {
+  const root = await fixture()
+  try {
+    const stage = join(root, 'main-all-all')
+    const manifestPath = join(stage, 'package', 'runtime', 'source-manifest.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, adapters_sha256: 'f'.repeat(64) }))
+    execFileSync('tar', ['-czf', join(root, filename('@e-mate/dsh')), '-C', stage, 'package'])
+    assert.throws(() => verifyRelease(root), /wrong DeepSeek Harness closure/u)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

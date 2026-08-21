@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { AssistantMarkdown } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/chat/AssistantMarkdown.tsx'
+import { installDomFenceRenderer } from '../../../../../../upstream/plugins/dsh-genui/src/client/dom-fence.tsx'
 import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImagesDefinition } from '../src/client/image-gallery.tsx'
 import { ThinkingStatusBranding } from '../src/client/thinking-status.tsx'
 
@@ -28,6 +30,7 @@ const targetTool = readFileSync(resolve(targetRoot, 'ui-tool/src/client/tool/com
 const targetImages = readFileSync(resolve(targetRoot, 'ui-attachment/src/MessageImage.tsx'), 'utf8')
 const targetLightbox = readFileSync(resolve(targetRoot, 'ui-attachment/src/ImageLightbox.tsx'), 'utf8')
 const targetBundlePatch = readFileSync(resolve(targetRoot, '../bundle/web-app/cordis.patch.yml'), 'utf8')
+const genuiClient = readFileSync(resolve('../../../../../upstream/plugins/dsh-genui/src/client/index.tsx'), 'utf8')
 
 describe('target conversation fidelity contract', () => {
   it('leaves Message, Retry, Turn status and Tool disclosure to the pinned target', () => {
@@ -65,6 +68,41 @@ describe('target conversation fidelity contract', () => {
     expect(homeCss).toContain('--dsw-alias-state-business-primary: var(--emate-color-brand);')
     expect(source).toContain("ctx.slots.inject('conversation.composer.dock'")
     expect(source).toMatch(/id: 'stats',[\s\S]*?priority: -1/u)
+  })
+
+  it('keeps native streaming prose and reasoning visible beside the GenUI fence renderer', async () => {
+    const text = '原生流式正文\n\n```dsh-ui\n{"title":"卡片","items":[{"type":"text","content":"GenUI 内容"}]}\n```'
+    const view = render(
+      <div data-chat-anchor-key="14:assistant-step1:0" data-chat-flow-kind="assistant-step">
+        <AssistantMarkdown
+          blocks={[{ kind: 'reasoning', text: '正在分析' }, { kind: 'text', text }]}
+          streaming
+          t={((key: string) => key) as never}
+        />
+      </div>,
+    )
+    const dispose = installDomFenceRenderer({
+      sessions: { list: { getSnapshot: () => ({ current: 'session-native' }) } },
+    } as never, vi.fn())
+    try {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)) })
+      expect(screen.getByText('原生流式正文')).toBeTruthy()
+      expect(screen.getByText('正在分析')).toBeTruthy()
+      expect(view.container.querySelector('[data-streaming]')).not.toBeNull()
+      const stockFence = view.container.querySelector<HTMLElement>('.md-code-block')!
+      expect(stockFence.hasAttribute('data-genui-rendered')).toBe(true)
+      expect(stockFence.style.display).toBe('none')
+      expect(view.container.querySelector('.genui-dom-fence')?.textContent).toContain('GenUI 内容')
+    } finally {
+      dispose()
+    }
+    expect(source).not.toContain("key: 'assistant-step'")
+    expect(source).not.toContain("entries('conversation.chat.node')")
+    expect(targetAssistant).toContain('streaming={streaming}')
+    expect(targetAssistant).toContain('<ReasoningRow')
+    expect(genuiClient).toContain("ctx.slots.inject('tool.call.toolview'")
+    expect(genuiClient).toContain("ctx.slots.inject('conversation.input.dock'")
+    expect(genuiClient).not.toContain('conversation.chat.node')
   })
 
   it('styles the target produced-file buttons without registering a competing turn-tail chain entry', () => {

@@ -132,6 +132,10 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  apps/share-worker: {}
+
+  apps/skill-hub-worker: {}
+
   apps/usage-dashboard:
     dependencies:
       '@arco-design/web-react':

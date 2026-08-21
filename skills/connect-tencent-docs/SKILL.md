@@ -7,6 +7,8 @@ description: Connect Tencent Docs to e-Mate through its official remote MCP endp
 
 Use the existing `mcp_manage` tool and DSH's native `dsh-mcp-client`. Never ask for an access token, authorization code, client secret, or callback URL in chat.
 
+The MCP definition and credential are device-global. A new e-Mate session must reuse an existing `authorized: true, active: true` connection; reauthorization is valid only after the provider reports expiry, revocation, or missing scope.
+
 ## Workflow
 
 1. Call `mcp_manage` with `action: "list"`. If `tencent_docs` already has `active: true`, use its tools.

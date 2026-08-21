@@ -1,0 +1,24 @@
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "emate-share",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-21",
+  "workers_dev": true,
+  "vars": {
+    "PUBLIC_ORIGIN": "https://emate-share.emate-zyfjacksonchen.workers.dev",
+    "MODEL_SESSION_VALIDATION_URL": "https://mvdcm.ecoremedia.net/e-mate/model-api/v1/consents/current",
+    "SHARE_TTL_SECONDS": "604800",
+    "MAX_UPLOAD_BYTES": "104857600"
+  },
+  "r2_buckets": [
+    {
+      "binding": "SHARES",
+      "bucket_name": "emate-session-shares"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": { "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 }
+  }
+}
