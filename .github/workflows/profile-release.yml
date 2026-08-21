@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
           submodules: recursive
 
@@ -63,15 +63,26 @@ jobs:
               test "$(jq -er .head_branch <<<"$run_json")" = main
               ;;
             pull_request)
-              pr_number="$(jq -er '.pull_requests | if length == 1 then .[0].number else error("expected one pull request") end' <<<"$run_json")"
-              pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr_number")"
-              test "$(jq -er .merged <<<"$pr_json")" = true
-              test "$(jq -er .merge_commit_sha <<<"$pr_json")" = "$GITHUB_SHA"
-              test "$(jq -er .base.ref <<<"$pr_json")" = main
-              test "$(jq -er .head.sha <<<"$pr_json")" = "$source_sha"
-              test "$(git show -s --format=%P "$GITHUB_SHA")" = "$(jq -er .base.sha <<<"$pr_json")"
+              pr_json="$(
+                gh api -H 'Accept: application/vnd.github+json' \
+                  "repos/$GITHUB_REPOSITORY/commits/$source_sha/pulls" \
+                | jq -cer --arg source "$source_sha" \
+                  '[.[] | select(.merged_at != null and .base.ref == "main" and .head.sha == $source)]
+                   | if length == 1 then .[0] else error("expected one merged main pull request") end'
+              )"
+              merge_sha="$(jq -er .merge_commit_sha <<<"$pr_json")"
+              [[ "$merge_sha" =~ ^[0-9a-f]{40}$ ]]
+              test "$(git show -s --format=%P "$merge_sha")" = "$(jq -er .base.sha <<<"$pr_json")"
+              git merge-base --is-ancestor "$merge_sha" "$GITHUB_SHA"
               tested_tree="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$source_sha" --jq .tree.sha)"
-              test "$(git rev-parse "$GITHUB_SHA^{tree}")" = "$tested_tree"
+              test "$(git rev-parse "$merge_sha^{tree}")" = "$tested_tree"
+              test -z "$(git rev-list --merges "$merge_sha..$GITHUB_SHA")"
+              while IFS= read -r -d '' path; do
+                case "$path" in
+                  .github/workflows/profile-release.yml|scripts/change-impact.test.mjs) ;;
+                  *) echo "Current main contains an untested product change after the accepted PR: $path" >&2; exit 1 ;;
+                esac
+              done < <(git diff --no-renames --name-only -z "$merge_sha" "$GITHUB_SHA" --)
               ;;
             *)
               echo 'CI evidence must come from main push or a pull request targeting main.' >&2
