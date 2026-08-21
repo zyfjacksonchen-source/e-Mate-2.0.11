@@ -66,9 +66,17 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
       </nav>
       <SettingsChrome />
     </div>)
-    expect((await screen.findByRole('button', { name: '个人资料' }) as HTMLButtonElement).hidden).toBe(false)
-    expect((screen.getByText('Agent 预设').closest('button') as HTMLButtonElement).hidden).toBe(true)
-    expect((screen.getByText('视觉工具').closest('button') as HTMLButtonElement).hidden).toBe(true)
+    const profile = await screen.findByRole('button', { name: '个人资料' }) as HTMLButtonElement
+    const presets = screen.getByText('Agent 预设').closest('button') as HTMLButtonElement
+    const vision = screen.getByText('视觉工具').closest('button') as HTMLButtonElement
+    expect(profile.hidden).toBe(false)
+    expect(profile.style.display).toBe('')
+    expect(presets.hidden).toBe(true)
+    expect(presets.style.display).toBe('none')
+    expect(presets.getAttribute('aria-hidden')).toBe('true')
+    expect(vision.hidden).toBe(true)
+    expect(vision.style.display).toBe('none')
+    expect(vision.getAttribute('aria-hidden')).toBe('true')
   })
 
   it('ignores unrelated token mutations while retaining settings route synchronization', async () => {

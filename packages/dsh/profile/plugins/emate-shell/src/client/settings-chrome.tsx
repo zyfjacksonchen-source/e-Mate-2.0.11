@@ -28,7 +28,12 @@ export function applySettingsBrandCopy(root: ParentNode): void {
     node = walker.nextNode()
   }
   for (const button of root.querySelectorAll('nav button')) {
-    if (button instanceof HTMLButtonElement) button.hidden = HIDDEN_SETTINGS_SECTIONS.has(button.textContent?.trim() ?? '')
+    if (!(button instanceof HTMLButtonElement)) continue
+    const hidden = HIDDEN_SETTINGS_SECTIONS.has(button.textContent?.trim() ?? '')
+    button.hidden = hidden
+    button.style.display = hidden ? 'none' : ''
+    if (hidden) button.setAttribute('aria-hidden', 'true')
+    else button.removeAttribute('aria-hidden')
   }
 }
 
