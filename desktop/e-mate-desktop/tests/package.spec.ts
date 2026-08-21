@@ -1,6 +1,8 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
+import { Session } from '@deepseek-ai/dsh-session'
+import { PersistenceCoordinator } from '@deepseek-ai/dsh-session-persistence'
 import sharp from 'sharp'
 import { describe, expect, it } from 'vitest'
 
@@ -529,5 +531,44 @@ describe('published package surface', () => {
     expect(installed).toContain('const redundantEscalation =')
     expect(installed).toContain('if (!redundantEscalation) validateEscalationArgs(')
     expect(installed).toContain('args.justification === void 0 || redundantEscalation')
+  })
+
+  it('packages the native Session envelope and exact legacy image reader', () => {
+    const sessionPatch = '@deepseek-ai-dsh-session-npm-0.1.0-rc.7-ignorable.patch'
+    const persistencePatch = '@deepseek-ai-dsh-session-persistence-npm-0.1.0-rc.7-emate-image.patch'
+    const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
+
+    expect(workspaceManifest.resolutions).toMatchObject({
+      '@deepseek-ai/dsh-session@npm:0.1.0-rc.7': expect.stringContaining(sessionPatch),
+      '@deepseek-ai/dsh-session@npm:^0.1.0-rc.7': expect.stringContaining(sessionPatch),
+      '@deepseek-ai/dsh-session-persistence@npm:0.1.0-rc.7': expect.stringContaining(persistencePatch),
+      '@deepseek-ai/dsh-session-persistence@npm:^0.1.0-rc.7': expect.stringContaining(persistencePatch),
+    })
+    expect(lockfile).toContain('@deepseek-ai/dsh-session@patch:@deepseek-ai/dsh-session@npm%3A0.1.0-rc.7#~/.yarn/patches/')
+    expect(lockfile).toContain('@deepseek-ai/dsh-session-persistence@patch:@deepseek-ai/dsh-session-persistence@npm%3A0.1.0-rc.7#~/.yarn/patches/')
+
+    const session = Session.create('session-desktop-package-test' as never)
+    const append = session.append as unknown as (
+      type: string,
+      data: unknown,
+      options: { ignorable: true },
+    ) => { ignorable?: true }
+    expect(append.call(session, 'emate/image-output', { attachmentId: 'image-1' }, { ignorable: true }))
+      .toMatchObject({ ignorable: true })
+
+    type EventValidator = {
+      backend: { locate: () => undefined }
+      assertEventsSupported(meta: { id: string }, events: readonly { type: string; seq: number }[]): void
+    }
+    const validator = Object.create(PersistenceCoordinator.prototype) as EventValidator
+    validator.backend = { locate: () => undefined }
+    expect(() => validator.assertEventsSupported(
+      { id: 'session-desktop-package-test' },
+      [{ type: 'emate/image-output', seq: 105 }],
+    )).not.toThrow()
+    expect(() => validator.assertEventsSupported(
+      { id: 'session-desktop-package-test' },
+      [{ type: 'future/required-event', seq: 106 }],
+    )).toThrow(/future\/required-event/u)
   })
 })
