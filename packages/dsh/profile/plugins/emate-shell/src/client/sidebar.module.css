@@ -452,7 +452,7 @@
   gap: 2px;
 }
 
-.settingsOwner > :global(button[data-emate-settings-trigger]) {
+.settingsOwner :global(button[data-emate-settings-trigger]) {
   display: none !important;
 }
 
