@@ -60,7 +60,7 @@
       "base_imports": ["@deepseek-ai/dsh-settings", "@deepseek-ai/schemastery"],
       "authority_contract": {
         "effects": ["browser-control", "browser-read", "network-loopback"],
-        "guards": ["explicit-user-action", "fixed-endpoint", "native-approval", "native-user-question", "plugin-settings-grant", "session-scope"]
+        "guards": ["fixed-endpoint", "native-approval", "native-user-question", "plugin-settings-grant", "session-scope"]
       },
       "base_contracts": ["e-mate-desktop-profile-v2-dsh-2bc16230975f"]
     },

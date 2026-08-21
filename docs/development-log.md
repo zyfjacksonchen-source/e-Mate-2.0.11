@@ -1756,3 +1756,18 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 最小修复复用 pinned DSH 会话页头现有的 `conversation.session.header.utilities`，与分享按钮使用同一 `priority: -1` winner 集和 32px 中线；用户中心继续由独立 `sidebar.footer.action` 留在左下。会话路由隐藏侧栏的重复三按钮，首页、能力中心、设置和定时任务等没有会话页头的页面仍保留原入口；没有切换 Desktop 模式、增加 overlay、复制设置或身份逻辑。
 - Shell SlotTestRuntime 与 Client 回归为 `39/39`；组件 runner 使用仓库固定 pnpm `11.7.0` 完成独立 frozen-lock build/test。change-impact 对 5 个 Shell 源码/测试文件和本节记录实跑为 `lane=plugin-only`、唯一 publish component `@e-mate/dsh-client-shell`、Base contract `e-mate-desktop-profile-v2-dsh-2bc16230975f` 有效。该切片明确不重建 654 MiB Desktop release set；只有 exact-main plugin CI、完整 accepted generation 组合、签名 R2 差量、用户确认重启与安装态顶栏回归全部通过后才算生效。
 - 修复提交前先封存 exact-main 基线：Profile preparation run `32427734136` 绑定 accepted CI `32421847050`，经 Codex 原生 Cloudflare 通道发布 541 个不可变对象并逐一从 `r2.dev` 公网回读，`87,016,583` 字节全部通过计划 SHA-256；随后才激活 darwin-arm64 `3c45dc38…8a53`、darwin-x64 `ba629a4d…5b617`、win32-x64 `e51aabb5…e2b1` 三个 sequence `1` generation。激活后 R2 账本为 544 个对象、`87,044,440` 字节，三个 desired-state 公网字节与签名发布计划逐一一致；后续 Shell delta 必须以这三个 generation 为 `expected_current`，不得重发或覆盖本批不可变字节。
+
+## 2026-08-21 · 2.0.11 S48 产品呈现、CDP 优先与 Computer Use 显式触发
+
+- 主聊天此前直接呈现 pinned DSH 的 `tool-call` 行，Skill 搜索、详情解析和未知 Skill 等内部协议错误会以红色英文事件替代 Agent 面向用户的说明。最小修复只在 e-Mate Shell 产品呈现层隐藏 raw Tool/Skill 行；原始 call/result/error 继续留在 durable Session、审计和诊断链，Agent 仍以自然语言说明进度、结果与失败，不改 DSH 事件类型、存储或 Tool renderer。
+- 普通产品界面隐藏会话 Hero/页头的 preset 标签、通用设置中的 preset 行、`Agent 预设` 与 `视觉工具` 导航。实现复用 Slot shadowing 和既有 Settings 对话框投影；pinned `standard/code/minimal/cordis` 文件、Creation Mode 原生开发能力、Vision Host/Client/Tool/Skill/ToolView/paste/artifact/health 均继续在组合中，隐藏不等于删除。
+- CDP Profile 的 endpoint-bound control setting 默认开启且可从能力中心撤销；Chrome 自己的 `chrome://inspect/#remote-debugging` 安全开关仍是不可绕过的先决条件。系统提示把全部网页读取和操作固定为 CDP 第一优先级，扩展桥、开发者模式加载已解压扩展和 Computer Use 网页回退都不再是产品路径。
+- Computer Use 的渐进式暴露入口增加当前轮硬门：只有最新 direct user message 含 Shell 序列化的 `<computer-use explicit="true">` 标记时，activation、Skill-result 自动暴露、已有 Agent 恢复和执行 Tool 才可通过；下一轮普通请求立即失效。其应用 grant、native approval 与 macOS TCC 仍沿用 pinned 原生链，文件 Full Access 不被解释为电脑操控同意。
+- 聚焦检查为 Shell `41/41`、CDP `9/9`、Computer Use `2/2`。安装态另对用户报告的 `basic.txt` capsule 做了真实点击：pinned ProducedFiles → `workspaces.openPath` → macOS 原生 open 链成功在 TextEdit 打开 `/var/tmp/e-mate-2.0.11-acceptance.A44vN9/basic.txt` 并显示原始两行内容，因此没有基于单张截图另造文件打开器；若后续 exact 文件复现失败，只在现有 Host openPath 边界补可见错误回执。
+- 该切片只触及 Shell、CDP 与 Computer Use 三个 Profile component；后续必须由 impact classifier 给出 plugin-only 组件集合，分别构建 changed payload，与已接受的其余组件组合完整三目标 generation，再做 renderer health/rollback 和公开 desired-state 回读。不得因此重建 2.0.11 Desktop 安装器或重跑无关插件。
+
+## 2026-08-21 · 2.0.11 S49 分享入口回归原生 Session 导出
+
+- pinned DSH rc.7 的正式闭环能力只有 Session ZIP；e-Mate 的 `/emate.share` 当前固定失败关闭，Desktop/Profile 没有公开分享 provider 配置源，旧公网 `/api/v1/shares` 与 `/s/*` 又实测为 HTTP 502。继续显示“分享服务不可用”会把尚未部署的外部服务冒充成产品能力。
+- Shell 顶部入口因此收敛为“导出当前任务”，直接调用既有 `sessionLogDownload.download` 并复用同一 store、Modal、错误状态与附件归档，不新增上传、存储、链接或第二套 Session transport；已无消费者的 `callShare` 注入同步删除。公开链接所需的认证发布、不可变存储、安全渲染、过期与撤销仍须作为独立 Cloud Share 服务切片，经真实公网 create/read/revoke 验收后才能恢复 UI。
+- 精确 pnpm `11.7.0` 下 Shell component runner 为 `8 files / 41 tests`，CDP `9/9`、Computer Use `2/2`；仓库 impact/emitter/完整组合边界为 `32/32`，diff check 通过。该批仍是三个 changed Profile components 的 plugin-only 候选，不触发 Desktop Base 或安装器重建。

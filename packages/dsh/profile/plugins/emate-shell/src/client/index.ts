@@ -54,8 +54,6 @@ export function registerSessionShare(ctx: any): void {
     order: -20,
     priority: -1,
     inject: () => ({
-      callShare: (endpoint: string, payload: Record<string, unknown>) =>
-        ctx.connection.rpc.call('/emate.share', endpoint, payload),
       hooks: { sessionLogDownload: ctx.sessionLogDownload.store },
       requestDownload: (sessionId: string) => ctx.sessionLogDownload.download(sessionId),
       dismissDownload: (sessionId: string) => { ctx.sessionLogDownload.dismiss(sessionId) },
@@ -70,9 +68,6 @@ export function registerHeaderControls(ctx: any): void {
     id: 'e-mate-header-controls',
     order: -30,
     priority: -1,
-    children: {
-      'sidebar.settings': { kind: 'single', scope: 'root' },
-    },
     inject: () => ({
       getThemeScheme: () => ctx.theme.getTheme().active.colorScheme,
       subscribeTheme: (listener: () => void) => ctx.on('theme/change', listener),
@@ -80,8 +75,12 @@ export function registerHeaderControls(ctx: any): void {
         const scheme = ctx.theme.getTheme().active.colorScheme
         ctx.theme.setTheme(scheme === 'dark' ? 'light' : 'dark')
       },
+      openSettings: () => {
+        document.querySelector<HTMLButtonElement>('[data-emate-settings-trigger]')?.click()
+      },
       LightIcon: IconLightOutline16,
       DarkIcon: IconDarkOutline16,
+      SettingsIcon: IconSettingsOutline16,
     }),
   }, HeaderControls))
 }
@@ -118,9 +117,26 @@ function SkipTargetOnboarding({ complete }: { complete: () => void }) {
 }
 
 function HiddenSessionStats() { return null }
+function HiddenProductSurface() { return null }
+
+/** Keep DSH presets available internally while removing product-facing mode selectors. */
+export function registerManagedPresetSurfaces(ctx: any): void {
+  ctx.slots.inject('conversation.hero.agentPreset', () => ctx.slots.register({
+    name: 'conversation.hero.agentPreset',
+    priority: -1,
+  }, HiddenProductSurface))
+  for (const name of ['conversation.session.header.actions', 'settings.general.item'] as const) {
+    ctx.slots.inject(name, () => ctx.slots.register({
+      name,
+      id: 'agent-preset',
+      priority: -1,
+    }, HiddenProductSurface))
+  }
+}
 
 export function apply(ctx: any): void {
   registerComputerUseTrigger(ctx)
+  registerManagedPresetSurfaces(ctx)
   ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
     name: 'conversation.composer.dock',
     id: 'stats',

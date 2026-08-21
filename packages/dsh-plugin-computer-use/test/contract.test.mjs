@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import { hasExplicitComputerUseRequest } from '../lib/emate-explicit.js'
 
 const root = new URL('../', import.meta.url)
 
@@ -47,6 +48,26 @@ test('computer-use adapter preserves the immutable universal helper only on macO
   assert.match(leases, /approval prompts are disabled/u)
   assert.doesNotMatch(bundle, /standingFullAccess|emate-permission/u)
   assert.doesNotMatch(bundle, /^import .* from ["']zod["'];?$/mu)
+  assert.match(bundle, /current user request must explicitly select @电脑操控/u)
+  assert.match(bundle, /Use CDP browser tools first for webpage tasks/u)
   assert.match(bundle, /new URL\("\.\.\/native\/macos\/", import\.meta\.url\)/u)
   assert.match(bundle, /new URL\("\.\.\/scripts\/build-native\.mjs", import\.meta\.url\)/u)
+})
+
+test('Computer Use is authorized only by the latest direct user request', () => {
+  const message = text => ({
+    type: 'user/message',
+    data: { source: { kind: 'user' }, content: [{ type: 'text', text }] },
+  })
+  assert.equal(hasExplicitComputerUseRequest({ events: [] }), false)
+  assert.equal(hasExplicitComputerUseRequest({ events: [message('普通请求')] }), false)
+  assert.equal(hasExplicitComputerUseRequest({
+    events: [message('<computer-use explicit="true">用户已显式指定使用电脑操控完成本次请求。</computer-use>')],
+  }), true)
+  assert.equal(hasExplicitComputerUseRequest({
+    events: [
+      message('<computer-use explicit="true">用户已显式指定使用电脑操控完成本次请求。</computer-use>'),
+      message('下一轮普通请求'),
+    ],
+  }), false)
 })
