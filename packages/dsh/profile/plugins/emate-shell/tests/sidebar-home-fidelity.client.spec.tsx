@@ -51,6 +51,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     const openSession = vi.fn()
     const openSchedules = vi.fn()
     const pickWorkspace = vi.fn(async () => 'workspace-1')
+    const archiveSession = vi.fn(async () => {})
 
     render(<SidebarRoot
       collapsed={false}
@@ -73,13 +74,14 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       CopyIcon={Icon}
       EditIcon={Icon}
       ArchiveIcon={Icon}
+      DeleteIcon={Icon}
       CloseIcon={Icon}
       startSession={startSession}
       openSchedules={openSchedules}
       openSession={openSession}
       pickWorkspace={pickWorkspace}
       renameSession={async () => {}}
-      archiveSession={async () => {}}
+      archiveSession={archiveSession}
       toggleSidebar={() => {}}
       {...sidebarUtilityProps}
     />)
@@ -104,6 +106,17 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(startSession).toHaveBeenCalledWith()
     fireEvent.click(screen.getByRole('button', { name: '打开任务：通用任务' }))
     expect(openSession).toHaveBeenCalledWith('general-session')
+    fireEvent.click(screen.getByRole('button', { name: '批量删除会话' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择会话：项目任务' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择会话：通用任务' }))
+    fireEvent.click(within(screen.getByRole('toolbar', { name: '批量删除会话' })).getByRole('button', { name: '删除' }))
+    const deleteDialog = screen.getByRole('dialog', { name: '删除 2 个会话？' })
+    expect(deleteDialog.textContent).toContain('保留会话日志和项目文件')
+    fireEvent.click(within(deleteDialog).getByRole('button', { name: '删除 2 个会话' }))
+    await waitFor(() => {
+      expect(archiveSession.mock.calls).toEqual([['project-session'], ['general-session']])
+    })
+    expect(screen.getByText(/日志和项目文件已保留/u)).not.toBeNull()
     const taskMenu = screen.getByLabelText('管理任务：通用任务').closest('details')!
     fireEvent.click(screen.getByLabelText('管理任务：通用任务'))
     expect(taskMenu.open).toBe(true)
@@ -208,6 +221,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       CopyIcon={Icon}
       EditIcon={Icon}
       ArchiveIcon={Icon}
+      DeleteIcon={Icon}
       CloseIcon={Icon}
       startSession={() => {}}
       openSchedules={() => {}}
