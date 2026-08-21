@@ -1808,3 +1808,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - S50/S51 改变了组件可依赖的 Base 行为：Session 下游事件 writer/legacy reader seam 以及 `/emate.share` Host 均不存在于已安装的 v2 Base；Skill Hub 的新 Model Gateway token 传输也须与新组件同时落地。继续沿用 v2 id 会让旧 Base 错误接受新 Shell/Skill Hub generation，形成“先热更、后不可用”的兼容性假绿。
 - 当前唯一 Base id 因此提升为 `e-mate-desktop-profile-v3-dsh-2bc16230975f`，全部 accepted/blocked component manifest 精确绑定 v3。旧 v2 Base 看到 v3 desired state 必须在下载组件前返回 `base-required`；只有新 Base 安装并通过 Renderer health 后才允许激活 v3 generation。本次一次性重建完整组件集合是 ABI 变化的必要成本，后续不触及 Base/ABI 的单组件变化仍走 plugin-only。
 - 仓库 release boundary `37/37`、Desktop Profile parser/generation `17/17` 与 exact contract check 已通过；当前合同真相源返回 v3。正式发布仍须验证旧 v2 Base → v3 release 的 `base-required` 与新 Base → v3 generation 的原子启动/回滚。
+
+## 2026-08-21 · 2.0.11 S56 Desktop Session 运行时封装闭环与 Base v4
+
+- 正式 v3 DMG 的真实安装态重开 `测试生成图片` 会话仍触发 `SessionFormatUnsupportedError`。写入 Profile 已携带 `ignorable: true`，但 `harness-runtime-adapters.mjs` 只修改 CLI/Harness 的 pnpm 组装树；Electron Builder 实际封装的是 Desktop 自己的 Yarn 依赖树，最终 `app.asar.unpacked/node_modules/@deepseek-ai/dsh-session{,-persistence}` 保持原始 rc.7，导致插件启动前的冷读边界先拒绝历史 `emate/image-output`。
+- 修复复用 Desktop 已有的 Yarn patch 单一路径：`dsh-session` 只持久化显式 `ignorable: true`，`dsh-session-persistence` 只兼容历史上精确的 `emate/image-output`；其他未知且未标记事件继续失败关闭。Desktop package 行为测试直接执行最终依赖字节，证明新写入 envelope、生图历史冷读与未知事件负例，不再只测试 CLI 组装器源码。
+- v3 Base 已经存在且不具备该运行时行为，因此当前唯一 Base id 提升为 `e-mate-desktop-profile-v4-dsh-2bc16230975f`，所有组件精确绑定 v4；v3 必须在下载 v4 generation 前返回 `base-required`。正式发布必须以新 DMG 安装后重开原受影响会话作为收据，再完成完整组件 generation 与在线原子更新，旧 v3 构建不得激活。
