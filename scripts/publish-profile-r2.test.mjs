@@ -140,11 +140,15 @@ test('publication admits bootstrap and its direct successor before exposing acti
   ]), { acceptedCiRunId: '123', preparationRunId: '456' })
   assert.equal(plan.document_type, 'emate.profile-native-cloudflare-publication-plan')
   assert.equal(plan.source_commit, sourceCommit)
+  assert.equal(plan.main_commit, sourceCommit)
   assert.equal(plan.accepted_ci_run_id, '123')
   assert.equal(plan.preparation_run_id, '456')
   assert.equal(plan.activations.every(item => item.expected_current === null), true)
   assert.equal(plan.immutable_objects.every(item => item.path.startsWith('immutable/')), true)
   assert.equal(plan.activations.every(item => item.object.path.startsWith('activation/')), true)
+  assert.throws(() => writeProfilePublicationBundle(publication, join(root, 'dist/invalid-publication'), new Map(), {
+    mainCommit: 'not-a-commit',
+  }), /main commit is invalid/u)
   for (const item of [...plan.immutable_objects, ...plan.activations.map(entry => entry.object)]) {
     const bytes = readFileSync(join(bundle, ...item.path.split('/')))
     assert.equal(bytes.byteLength, item.bytes)

@@ -253,6 +253,7 @@ test('GitHub release packs once and validates the same tarball on three platform
     'source',
     'plugins',
     'base-platform-components',
+    'profile-portable-composition',
     'profile-composition',
     'enterprise',
     'desktop-windows',
@@ -285,7 +286,8 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.doesNotMatch(cleanInstall.run, /require\('\$npm_root/u)
   assert.match(readFileSync('scripts/build-harness-runtime.mjs', 'utf8'), /'--os=darwin', '--os=win32', '--cpu=arm64', '--cpu=x64'/u)
   assert.equal(release.jobs.r2.needs, undefined)
-  assert.deepEqual(release.on.push.branches, ['main'])
+  assert.equal(release.on.push, undefined)
+  assert.equal(release.on.pull_request, undefined)
   const r2 = release.jobs.r2.steps.find(step => step.name === 'Publish immutable release bytes to Cloudflare R2')
   assert.match(r2.run, /publish-r2\.mjs/u)
   assert.equal(r2.env.EMATE_R2_PUBLIC_ORIGIN, '${{ vars.EMATE_R2_PUBLIC_ORIGIN }}')

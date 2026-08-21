@@ -297,7 +297,8 @@ function authorizePreparation(bootstrap) {
     throw new Error(`Profile publication is allowed only by the main Profile release workflow in ${REPOSITORY}`)
   }
   if (!/^[1-9][0-9]*$/u.test(process.env.GITHUB_RUN_ID ?? '')
-    || !/^[1-9][0-9]*$/u.test(process.env.EMATE_ACCEPTED_CI_RUN_ID ?? '')) {
+    || !/^[1-9][0-9]*$/u.test(process.env.EMATE_ACCEPTED_CI_RUN_ID ?? '')
+    || !SHA40.test(process.env.EMATE_ACCEPTED_SOURCE_SHA ?? '')) {
     throw new Error('Profile publication provenance is missing')
   }
   if ((process.env.EMATE_PROFILE_BOOTSTRAP === 'true') !== bootstrap) throw new Error('Profile bootstrap authority does not match the requested mode')
@@ -326,6 +327,8 @@ function copyPublicationItem(item, output, group) {
 
 export function writeProfilePublicationBundle(prepared, output, currentByTarget, provenance = {}) {
   const destination = resolve(output)
+  const mainCommit = provenance.mainCommit ?? prepared.sourceCommit
+  if (!SHA40.test(mainCommit)) throw new Error('Profile publication main commit is invalid')
   mkdirSync(destination, { recursive: false })
   const immutableObjects = prepared.objects.map(item => copyPublicationItem(item, destination, 'immutable'))
   const activations = prepared.releases.map(release => ({
@@ -345,6 +348,7 @@ export function writeProfilePublicationBundle(prepared, output, currentByTarget,
     document_type: 'emate.profile-native-cloudflare-publication-plan',
     status: 'prepared',
     source_commit: prepared.sourceCommit,
+    main_commit: mainCommit,
     accepted_ci_run_id: provenance.acceptedCiRunId,
     preparation_run_id: provenance.preparationRunId,
     base_contract_id: prepared.base.id,
@@ -360,7 +364,7 @@ export async function prepareSignedProfilePublication(options) {
   const currentByTarget = new Map(await Promise.all(TARGET_NAMES.map(async target => [target, await readCurrent(target)])))
   const prepared = prepareProfilePublication({
     ...options,
-    sourceCommit: process.env.GITHUB_SHA,
+    sourceCommit: process.env.EMATE_ACCEPTED_SOURCE_SHA,
     privateKeyPem: process.env.EMATE_PROFILE_SIGNING_PRIVATE_KEY,
     keyId: process.env.EMATE_PROFILE_SIGNING_KEY_ID || undefined,
     currentByTarget,
@@ -368,6 +372,7 @@ export async function prepareSignedProfilePublication(options) {
   return writeProfilePublicationBundle(prepared, options.bundle, currentByTarget, {
     acceptedCiRunId: process.env.EMATE_ACCEPTED_CI_RUN_ID,
     preparationRunId: process.env.GITHUB_RUN_ID,
+    mainCommit: process.env.GITHUB_SHA,
   })
 }
 

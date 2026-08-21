@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ci_run_id:
-        description: Successful CI run for this exact main commit (Base lane for bootstrap, plugin-only lane otherwise).
+        description: Successful CI run for the current main commit or its exact merged pull-request tree.
         required: true
         type: string
       bootstrap:
@@ -31,7 +31,9 @@ jobs:
     timeout-minutes: 10
     outputs:
       source_sha: ${{ steps.run.outputs.source_sha }}
+      main_sha: ${{ steps.run.outputs.main_sha }}
       publish_components_json: ${{ steps.impact.outputs.publish_components_json }}
+      portable_publish: ${{ steps.impact.outputs.portable_publish }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -40,7 +42,7 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
-      - name: Accept only a successful CI run for the current main commit
+      - name: Accept only successful CI evidence for the exact current main tree
         id: run
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -51,12 +53,33 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID")"
-          test "$(jq -er .head_sha <<<"$run_json")" = "$GITHUB_SHA"
-          test "$(jq -er .head_branch <<<"$run_json")" = main
-          test "$(jq -er .event <<<"$run_json")" = push
+          source_sha="$(jq -er .head_sha <<<"$run_json")"
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
           test "$(jq -er .path <<<"$run_json")" = .github/workflows/ci.yml
           test "$(jq -er .conclusion <<<"$run_json")" = success
-          echo "source_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          case "$(jq -er .event <<<"$run_json")" in
+            push)
+              test "$source_sha" = "$GITHUB_SHA"
+              test "$(jq -er .head_branch <<<"$run_json")" = main
+              ;;
+            pull_request)
+              pr_number="$(jq -er '.pull_requests | if length == 1 then .[0].number else error("expected one pull request") end' <<<"$run_json")"
+              pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr_number")"
+              test "$(jq -er .merged <<<"$pr_json")" = true
+              test "$(jq -er .merge_commit_sha <<<"$pr_json")" = "$GITHUB_SHA"
+              test "$(jq -er .base.ref <<<"$pr_json")" = main
+              test "$(jq -er .head.sha <<<"$pr_json")" = "$source_sha"
+              test "$(git show -s --format=%P "$GITHUB_SHA")" = "$(jq -er .base.sha <<<"$pr_json")"
+              tested_tree="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$source_sha" --jq .tree.sha)"
+              test "$(git rev-parse "$GITHUB_SHA^{tree}")" = "$tested_tree"
+              ;;
+            *)
+              echo 'CI evidence must come from main push or a pull request targeting main.' >&2
+              exit 1
+              ;;
+          esac
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "main_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@v4
         with:
@@ -93,11 +116,16 @@ jobs:
             while IFS= read -r name; do job_succeeded "$name"; done < <(
               jq -r '.component_jobs[] | "Changed Profile component / \(.component) / \(.target)"' "$impact"
             )
-            for target in darwin-arm64 darwin-x64 win32-x64; do
-              job_succeeded "Complete Profile generation / $target"
-            done
+            if test "$(jq -er .portable_publish "$impact")" = true; then
+              job_succeeded 'Portable Profile generations'
+            else
+              for target in darwin-arm64 darwin-x64 win32-x64; do
+                job_succeeded "Complete Profile generation / $target"
+              done
+            fi
           fi
           echo "publish_components_json=$(jq -c .publish_components "$impact")" >> "$GITHUB_OUTPUT"
+          echo "portable_publish=$(jq -r .portable_publish "$impact")" >> "$GITHUB_OUTPUT"
 
   bootstrap-plan:
     name: Resolve the complete accepted component matrix
@@ -414,6 +442,7 @@ jobs:
           EMATE_PROFILE_SIGNING_KEY_ID: ${{ secrets.EMATE_PROFILE_SIGNING_KEY_ID }}
           EMATE_PROFILE_BOOTSTRAP: ${{ inputs.bootstrap }}
           EMATE_ACCEPTED_CI_RUN_ID: ${{ inputs.ci_run_id }}
+          EMATE_ACCEPTED_SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
           EXPECTED_CHANGED_COMPONENTS_JSON: ${{ inputs.bootstrap && needs.bootstrap-plan.outputs.components_json || needs.validate.outputs.publish_components_json }}
         run: |
           set -euo pipefail
