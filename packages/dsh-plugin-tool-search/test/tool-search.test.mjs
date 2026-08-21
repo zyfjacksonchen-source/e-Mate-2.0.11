@@ -154,3 +154,21 @@ test('plugin disposal restores the original native tool surface', async (t) => {
   await plugin.dispose()
   assert.deepEqual(names(ctx, agent), ['before_plugin'])
 })
+
+test('keeps a seventy-tool native catalog out of the initial request schema', async (t) => {
+  const { ctx } = await harness({ maxResults: 1 })
+  t.after(async () => ctx.fiber.dispose())
+  for (let index = 0; index < 70; index += 1) {
+    ctx.tools.register(fixture(`synthetic_tool_${index}`, `Synthetic capability number ${index}`))
+  }
+  const fullCatalogBytes = Buffer.byteLength(JSON.stringify(ctx.tools.schemas()))
+  const agent = createAgent(ctx, 'seventy-tools')
+  const initialSchemas = ctx.tools.schemas(agent)
+  const initialBytes = Buffer.byteLength(JSON.stringify(initialSchemas))
+
+  assert.deepEqual(initialSchemas.map(schema => schema.name), [TOOL_SEARCH_NAME])
+  assert.ok(initialBytes * 10 < fullCatalogBytes)
+  const found = await execute(ctx, agent, TOOL_SEARCH_NAME, { query: 'synthetic_tool_42', limit: 1 })
+  assert.deepEqual(found.value.tools, [{ name: 'synthetic_tool_42', status: 'loaded' }])
+  assert.deepEqual(names(ctx, agent), ['synthetic_tool_42', TOOL_SEARCH_NAME])
+})
