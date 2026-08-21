@@ -426,6 +426,7 @@ describe('repository release boundary', () => {
     assert.match(workflow, /name: Prepare the exact component Python runtime(?:.|\n)*?prepare-python-runtime\.mjs --target "\$TARGET"(?:.|\n)*?EMATE_BUILD_PYTHON: \$\{\{ steps\.component-python\.outputs\.python \}\}/u)
     assert.doesNotMatch(workflow, /python-version: '3\.12\.14'/u)
     assert.match(workflow, /name: Test the accepted platform component against the new Base\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
+    assert.match(workflow, /name: Export the exact accepted Base SDK run artifact(?:.|\n)*?name: e-mate-base-sdk-\$\{\{ needs\.impact\.outputs\.head_sha \}\}(?:.|\n)*?include-hidden-files: true(?:.|\n)*?retention-days: 30/u)
     assert.match(workflow, /runs-on: \$\{\{ matrix\.runner \}\}/u)
     assert.match(workflow, /name: Build and test only the changed component\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
     assert.match(workflow, /if: matrix\.publish == true/u)
@@ -469,6 +470,22 @@ describe('repository release boundary', () => {
     assert.match(workflow, /name: Build and test the target component\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
     assert.doesNotMatch(workflow, /pnpm --dir upstream\/deepseek-harness run build/u)
     assert.doesNotMatch(workflow, /yarn (?:build|dist:)/u)
+
+    const bootstrapComponents = workflow.slice(
+      workflow.indexOf('  bootstrap-components:'),
+      workflow.indexOf('  bootstrap-composition:'),
+    )
+    const bootstrapComposition = workflow.slice(
+      workflow.indexOf('  bootstrap-composition:'),
+      workflow.indexOf('  prepare-publication:'),
+    )
+    for (const job of [bootstrapComponents, bootstrapComposition]) {
+      assert.match(job, /name: Download the exact accepted Base SDK run artifact/u)
+      assert.match(job, /name: e-mate-base-sdk-\$\{\{ needs\.validate\.outputs\.source_sha \}\}/u)
+      assert.match(job, /github-token: \$\{\{ secrets\.GITHUB_TOKEN \}\}/u)
+      assert.match(job, /run-id: \$\{\{ inputs\.ci_run_id \}\}/u)
+      assert.doesNotMatch(job, /actions\/cache\/restore@v4|base-sdk\.mjs fingerprint|cache-hit/u)
+    }
 
     const publisher = readFileSync(new URL('./publish-profile-r2.mjs', import.meta.url), 'utf8')
     assert.match(publisher, /GITHUB_WORKFLOW_REF !== `\$\{REPOSITORY\}\/\.github\/workflows\/profile-release\.yml@refs\/heads\/main`/u)

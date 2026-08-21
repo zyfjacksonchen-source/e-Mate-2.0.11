@@ -212,23 +212,13 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm --dir upstream/deepseek-harness install --frozen-lockfile
-      - name: Resolve the accepted Base SDK cache key
-        id: base-sdk-key
-        shell: bash
-        run: echo "key=e-mate-base-sdk-$(node scripts/base-sdk.mjs fingerprint)" >> "$GITHUB_OUTPUT"
-      - name: Restore the accepted Base SDK
-        id: base-sdk
-        uses: actions/cache/restore@v4
+      - name: Download the exact accepted Base SDK run artifact
+        uses: actions/download-artifact@v4
         with:
+          name: e-mate-base-sdk-${{ needs.validate.outputs.source_sha }}
           path: .release-cache/base-sdk
-          key: ${{ steps.base-sdk-key.outputs.key }}
-          enableCrossOsArchive: true
-      - name: Refuse to rebuild a missing Base SDK
-        if: steps.base-sdk.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          echo 'The accepted Base SDK cache is unavailable; bootstrap will not rebuild Desktop or Harness.' >&2
-          exit 1
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.ci_run_id }}
       - name: Restore and verify the accepted Base SDK
         run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
       - name: Build and test the target component
@@ -294,23 +284,13 @@ jobs:
         with:
           node-version: '24'
       - run: corepack enable
-      - name: Resolve the accepted Base SDK cache key
-        id: base-sdk-key
-        shell: bash
-        run: echo "key=e-mate-base-sdk-$(node scripts/base-sdk.mjs fingerprint)" >> "$GITHUB_OUTPUT"
-      - name: Restore the accepted Base SDK
-        id: base-sdk
-        uses: actions/cache/restore@v4
+      - name: Download the exact accepted Base SDK run artifact
+        uses: actions/download-artifact@v4
         with:
+          name: e-mate-base-sdk-${{ needs.validate.outputs.source_sha }}
           path: .release-cache/base-sdk
-          key: ${{ steps.base-sdk-key.outputs.key }}
-          enableCrossOsArchive: true
-      - name: Refuse to rebuild a missing Base SDK
-        if: steps.base-sdk.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          echo 'The accepted Base SDK cache is unavailable; composition will not rebuild Desktop or Harness.' >&2
-          exit 1
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.ci_run_id }}
       - name: Restore and verify the accepted Base SDK
         run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
       - uses: actions/download-artifact@v4

@@ -1847,3 +1847,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - PR `#24` 的 Base v5 门禁为 `11` 个成功、`0` 个失败，精确 merge tree 为 `a392f004bf2fbfcda563727b75152671f419a897`。Profile preparation `32501390771` 复用已接受的 PR CI `32499340093`，18 个组件目标和三目标 14/14 generation 组合全部通过；最后一步在任何 R2 上传前失败关闭。公网 desired-state 实际并非空白，而是 Base v2 sequence `4`、13 组件。发布器错误地先用 Base v5 的 14 组件 inventory 校验这个已签旧 Base release，因而报 `signed Profile release does not contain the complete runtime component set`。
 - 最小修复只修改发布验证边界：先用同一受信 Ed25519 key 验签和目标校验公开 current，再调用现有 `selectProfileRelease`。仅当结果精确为 `base-required` 时，允许 sequence `1`、无 parent、完整 changed set 的新 Base bootstrap 以 CAS 替换稳定指针；当前 release 已兼容新 Base 时仍禁止非幂等 bootstrap，普通 successor 遇到跨 Base current 仍失败关闭。不可变组件、完整三目标、签名、公开 current SHA 与最后激活顺序均未放宽。
 - 聚焦回归为 release boundary + publication `20/20`；真实三个公开 v2 envelope 在 Base v5 下均解析为 `base-required`。本修复仍需独立受保护 CI 后重跑 preparation；已失败 run 没有 publication artifact、没有上传、没有 desired-state 激活，线上 sequence `4` 保持不变。
+
+## 2026-08-22 · 2.0.11 S63 Base SDK 跨工作流使用精确 CI 产物
+
+- Base v5 的 accepted PR CI 已生成并验证正确 SDK，但正式 Profile bootstrap 仍通过 Actions cache key 恢复；PR 作用域 cache 不对后续 `main` workflow dispatch 可见，导致第一次 bootstrap 在构建任何组件前失败，必须额外跑一次内容相同的 main Base CI 才能 seed cache。这不是产品变更需要全量重验，而是把性能缓存误作发布证据。
+- 最小修复不改变 `base-sdk.mjs`、Base ABI 或组件构建：Base source Job 在既有 emit/verify 后把 `.release-cache/base-sdk` 上传为 `e-mate-base-sdk-<tested-source-sha>` run artifact；Profile bootstrap 的组件矩阵与三目标组合只从用户指定且已验收的 `ci_run_id` 下载该同名 artifact，再由原 manifest/bytes/SHA 校验并安装。Actions cache 继续加速同一 CI 内部 Job，但不再跨工作流授权发布。
+- 仓库合同测试锁定 source artifact 名、30 天保留、hidden-path 上传，以及两个 bootstrap Job 的 exact run-id/source-SHA 下载；同时明确禁止它们退回 fingerprint/cache-hit 恢复。该 workflow authority 变更按分类器进入一次 Base lane；完成后后续 Base bootstrap 不再为“让缓存可见”重复全量主分支 CI，普通 plugin-only 发布路径仍不构建 Base。

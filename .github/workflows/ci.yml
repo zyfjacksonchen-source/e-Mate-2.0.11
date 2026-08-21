@@ -153,6 +153,15 @@ jobs:
           key: ${{ steps.base-sdk-key.outputs.key }}
           enableCrossOsArchive: true
 
+      - name: Export the exact accepted Base SDK run artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-base-sdk-${{ needs.impact.outputs.head_sha }}
+          path: .release-cache/base-sdk
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Export the exact built e-Mate profile for desktop jobs
         uses: actions/upload-artifact@v4
         with:
