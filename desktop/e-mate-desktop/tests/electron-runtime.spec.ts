@@ -782,7 +782,7 @@ describe('Electron compatibility runtime', () => {
       changedComponents: [{ id: '@e-mate/dsh-client-shell', version: '2.0.11', bytes: 4096 }],
       downloadBytes: 4096,
       release: {},
-    } as ProfileUpdateAvailable
+    } as unknown as ProfileUpdateAvailable
     const confirm = (runtime as unknown as {
       confirmProfileUpdate(update: ProfileUpdateAvailable): Promise<boolean>
     }).confirmProfileUpdate.bind(runtime)
