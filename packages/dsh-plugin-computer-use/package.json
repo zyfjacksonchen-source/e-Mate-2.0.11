@@ -48,7 +48,7 @@
       ],
       "authority_contract": {
         "effects": ["filesystem-write", "os-accessibility", "os-input-control", "os-screen-recording", "subprocess"],
-        "guards": ["native-approval", "os-tcc", "plugin-settings-grant", "session-scope", "workspace-scope"]
+        "guards": ["explicit-user-action", "native-approval", "os-tcc", "plugin-settings-grant", "session-scope", "workspace-scope"]
       },
       "base_contracts": ["e-mate-desktop-profile-v2-dsh-2bc16230975f"]
     },

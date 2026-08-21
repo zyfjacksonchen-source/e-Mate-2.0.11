@@ -43,13 +43,14 @@ describe('target conversation fidelity contract', () => {
     expect(targetBundlePatch).toContain('id: ui-deliverables')
   })
 
-  it('keeps target renderers while applying only the e-Mate type scale, gallery and disabled-trajectory boundary', () => {
+  it('keeps target renderers and durable events while hiding raw Tool protocol rows from product chat', () => {
     expect(chatCss).not.toMatch(/data-chat-flow-kind='(?:steering|model-retry|turn-error|command)'/u)
     expect(chatCss).not.toMatch(/data-turn-tail|data-emate-activity/u)
     expect(chatCss).toContain('--dsw-font-markdown-base: 14px/22px')
     expect(chatCss).toContain("[data-chat-flow-kind='user'] [data-time-hover-root]")
     expect(chatCss).toContain('"PingFang SC"')
     expect(chatCss).toContain('font-size: 14px !important;')
+    expect(chatCss).toContain(":global([data-chat-flow-kind='tool-call']) {\n  display: none;")
     expect(chatCss).toContain("[data-chat-flow-kind='tool-call'] [data-disclosure-row]")
     expect(chatCss).toContain('font-size: 13px;')
     expect(chatCss).toContain('width: 14px;')

@@ -5,7 +5,7 @@ import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HeaderControls } from '../src/client/header-controls.tsx'
-import { registerHeaderControls } from '../src/client/index.ts'
+import { registerHeaderControls, registerManagedPresetSurfaces } from '../src/client/index.ts'
 
 const Icon = () => <svg />
 
@@ -83,5 +83,36 @@ describe('desktop header controls', () => {
   it('does not depend on the unreachable advanced Desktop titlebar slot', () => {
     const source = readFileSync('src/client/index.ts', 'utf8')
     expect(source).not.toContain("ctx.slots.inject('desktop.titlebar.utilities'")
+  })
+
+  it('shadows only the product-facing preset selectors while preserving the native preset plugin', async () => {
+    type RootProps = PropsRenderSlots<
+      'conversation.hero.agentPreset' | 'conversation.session.header.actions' | 'settings.general.item'
+    >
+    const Root = ({ renderSlot, SessionProvider }: RootProps) => <>
+      {renderSlot('conversation.hero.agentPreset', {})}
+      {renderSlot('settings.general.item', {})}
+      <SessionProvider empty={() => null}>
+        {() => renderSlot('conversation.session.header.actions', {})}
+      </SessionProvider>
+    </>
+    const runtime = await SlotTestRuntime.create()
+    await runtime.root.declare({
+      'conversation.hero.agentPreset': { kind: 'single', scope: 'root' },
+      'conversation.session.header.actions': { kind: 'list', scope: 'session' },
+      'settings.general.item': { kind: 'list', scope: 'root' },
+    } as never, Root as never)
+    await runtime.mount({ inject: ['slots'], apply: registerManagedPresetSurfaces })
+    runtime.slots.register({ name: 'conversation.hero.agentPreset' } as never, () => <span>标准模式</span>)
+    runtime.slots.register({ name: 'settings.general.item', id: 'agent-preset' } as never, () => <span>Agent 预设</span>)
+    await runtime.sessions.add({ id: 'preset-session' })
+    runtime.slots.register({ name: 'conversation.session.header.actions', id: 'agent-preset' } as never, () => <span>标准模式</span>)
+    const view = runtime.renderRoot()
+    expect(view.queryByText('标准模式')).toBeNull()
+    expect(view.queryByText('Agent 预设')).toBeNull()
+    expect(runtime.slots.entries('conversation.hero.agentPreset')).toHaveLength(2)
+    expect(runtime.slots.entries('settings.general.item')).toHaveLength(2)
+    expect(runtime.slots.entries('conversation.session.header.actions')).toHaveLength(2)
+    await runtime.dispose()
   })
 })

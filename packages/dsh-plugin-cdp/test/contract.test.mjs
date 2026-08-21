@@ -15,7 +15,7 @@ import {
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 
-function settingsHarness(initial = false, endpoint = 'http://127.0.0.1:9222') {
+function settingsHarness(initial = true, endpoint = 'http://127.0.0.1:9222') {
   let value = { allowControl: initial, endpoint }
   let revision = 0
   return {
@@ -102,11 +102,11 @@ test('projects real CDP readiness and routes page mutations through native appro
     ])
     assert.deepEqual(await capabilities[0].status(new AbortController().signal), {
       state: 'ready',
-      detail: 'CDP 已连接 · 1 个页面 · 控制未启用',
-      action_ids: ['enable-control'],
+      detail: 'CDP 已连接 · 1 个页面 · 控制已启用',
+      action_ids: ['disable-control'],
     })
-    await capabilities[0].invoke('enable-control')
-    assert.equal(harness.get().allowControl, true)
+    await capabilities[0].invoke('disable-control')
+    assert.equal(harness.get().allowControl, false)
   } finally {
     globalThis.fetch = previousFetch
   }
@@ -115,7 +115,7 @@ test('projects real CDP readiness and routes page mutations through native appro
 test('rejects mutations before CDP when native approval policy is never', async () => {
   const tools = []
   let requests = 0
-  const harness = settingsHarness()
+  const harness = settingsHarness(false)
   apply({
     approval: {
       config: { policy: 'ask' },
@@ -196,7 +196,7 @@ test('does not reuse a browser-control grant for a different CDP endpoint', asyn
 
 test('lets an owning Agent change the same persisted control grant through UserQuestions', async () => {
   const tools = []
-  const harness = settingsHarness()
+  const harness = settingsHarness(false)
   apply({
     approval: { config: { policy: 'never' }, overrideOf: () => 'never' },
     settings: harness.settings,
@@ -213,4 +213,21 @@ test('lets an owning Agent change the same persisted control grant through UserQ
     signal: new AbortController().signal,
   }))
   assert.equal(harness.get().allowControl, true)
+})
+
+test('makes CDP the first browser path and reserves Computer Use for an explicit mention', async () => {
+  const prompts = []
+  const harness = settingsHarness()
+  apply({
+    approval: {},
+    settings: harness.settings,
+    tools: { register: () => () => undefined },
+    systemPrompt: { section: definition => { prompts.push(definition); return () => undefined } },
+    userQuestions: { ask: async () => { throw new Error('unexpected question') } },
+    emateCapabilities: { register: () => () => undefined },
+    effect: callback => callback(),
+  })
+  assert.equal(harness.get().allowControl, true)
+  assert.match(prompts[0].text, /every webpage read or operation, use these CDP browser tools first/u)
+  assert.match(prompts[0].text, /only when the user explicitly inserts @电脑操控/u)
 })

@@ -54,8 +54,6 @@ export function registerSessionShare(ctx: any): void {
     order: -20,
     priority: -1,
     inject: () => ({
-      callShare: (endpoint: string, payload: Record<string, unknown>) =>
-        ctx.connection.rpc.call('/emate.share', endpoint, payload),
       hooks: { sessionLogDownload: ctx.sessionLogDownload.store },
       requestDownload: (sessionId: string) => ctx.sessionLogDownload.download(sessionId),
       dismissDownload: (sessionId: string) => { ctx.sessionLogDownload.dismiss(sessionId) },
@@ -119,9 +117,26 @@ function SkipTargetOnboarding({ complete }: { complete: () => void }) {
 }
 
 function HiddenSessionStats() { return null }
+function HiddenProductSurface() { return null }
+
+/** Keep DSH presets available internally while removing product-facing mode selectors. */
+export function registerManagedPresetSurfaces(ctx: any): void {
+  ctx.slots.inject('conversation.hero.agentPreset', () => ctx.slots.register({
+    name: 'conversation.hero.agentPreset',
+    priority: -1,
+  }, HiddenProductSurface))
+  for (const name of ['conversation.session.header.actions', 'settings.general.item'] as const) {
+    ctx.slots.inject(name, () => ctx.slots.register({
+      name,
+      id: 'agent-preset',
+      priority: -1,
+    }, HiddenProductSurface))
+  }
+}
 
 export function apply(ctx: any): void {
   registerComputerUseTrigger(ctx)
+  registerManagedPresetSurfaces(ctx)
   ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
     name: 'conversation.composer.dock',
     id: 'stats',

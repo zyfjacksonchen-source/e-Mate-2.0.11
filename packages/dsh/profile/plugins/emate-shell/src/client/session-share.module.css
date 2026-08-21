@@ -12,6 +12,7 @@
 }
 
 .trigger:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.trigger:disabled { cursor: default; opacity: .6; }
 .trigger:focus-visible { outline: 2px solid var(--emate-color-brand, #ff6a1a); outline-offset: 2px; }
 
 :global(body[data-dsh-desktop-mode='advanced'] .dshDesktopFrame[data-desktop-platform='darwin']) .trigger {
@@ -30,24 +31,7 @@
 
 .dialog { width: min(680px, 100%); }
 
-.unavailable {
-  padding: 14px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 14px;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-layer-1);
-}
-
-.unavailable > svg { flex: none; color: var(--emate-color-brand, #ff6a1a); }
-.unavailable strong,
-.unavailable span { display: block; }
-.unavailable span { margin-top: 4px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
-
 .archive {
-  margin-top: 12px;
   padding: 14px;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 14px;
@@ -83,13 +67,6 @@
 
 .download:disabled { cursor: default; opacity: .6; }
 .download:focus-visible { outline: 2px solid var(--emate-color-brand, #ff6a1a); outline-offset: 2px; }
-
-.boundary {
-  margin: 12px 0 0;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-}
 
 @media (pointer: coarse) {
   .trigger { width: 44px; height: 44px; }

@@ -18,6 +18,13 @@
   line-height: 22px !important;
 }
 
+/* Product chat shows the Agent's user-facing narration. Keep raw Tool/Skill
+   events in the durable DSH transcript for audit and diagnostics, but do not
+   expose their internal protocol errors as conversation messages. */
+:global([data-chat-flow-kind='tool-call']) {
+  display: none;
+}
+
 :global([data-chat-flow-kind='tool-call'] [data-disclosure-row]),
 :global([data-chat-flow-kind='assistant-step'] [data-variant='think'] [data-disclosure-row]) {
   font-size: 13px;

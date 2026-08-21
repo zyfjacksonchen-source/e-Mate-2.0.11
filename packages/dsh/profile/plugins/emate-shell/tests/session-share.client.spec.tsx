@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -11,54 +11,40 @@ import { SessionShareAction } from '../src/client/session-share.tsx'
 afterEach(cleanup)
 
 describe('session share plugin', () => {
-  it('keeps public share fail-closed and downloads the local archive from the same dialog', async () => {
-    const callShare = vi.fn(async () => ({
-      ok: true,
-      value: {
-        schema_version: 1,
-        ready: false,
-        blocker: 'public-share-provider-not-configured',
-      },
-    }))
+  it('starts the native Session ZIP export without opening an unavailable public-share surface', () => {
     const requestDownload = vi.fn(async () => {})
     const dismissDownload = vi.fn()
     render(<SessionShareAction
       sessionId="session-207"
-      callShare={callShare}
       useSessionLogDownload={selector => selector({ bySession: {} })}
       requestDownload={requestDownload}
       dismissDownload={dismissDownload}
     />)
 
-    fireEvent.click(screen.getByRole('button', { name: '分享当前任务' }))
-    expect(await screen.findByRole('dialog', { name: '分享任务' })).toBeTruthy()
-    await waitFor(() => { expect(screen.getByText('分享服务不可用')).toBeTruthy() })
-    expect(screen.getByText(/本地 ZIP/u)).toBeTruthy()
-    expect(callShare).toHaveBeenCalledWith('status', {})
-    fireEvent.click(screen.getByRole('button', { name: '下载 ZIP' }))
+    fireEvent.click(screen.getByRole('button', { name: '导出当前任务' }))
     expect(requestDownload).toHaveBeenCalledWith('session-207')
-    fireEvent.click(screen.getByRole('button', { name: '关闭分享' }))
-    await waitFor(() => { expect(screen.queryByRole('dialog', { name: '分享任务' })).toBeNull() })
-    expect(dismissDownload).toHaveBeenCalledWith('session-207')
+    expect(screen.queryByText('分享服务不可用')).toBeNull()
   })
 
   it('projects the existing Session export state without a second transport or store', () => {
     const requestDownload = vi.fn(async () => {})
+    const dismissDownload = vi.fn()
     render(<SessionShareAction
       sessionId="session-207"
-      callShare={vi.fn()}
       useSessionLogDownload={selector => selector({
         bySession: { 'session-207': { open: true, status: 'error', error: 'archive unavailable' } },
       })}
       requestDownload={requestDownload}
-      dismissDownload={vi.fn()}
+      dismissDownload={dismissDownload}
     />)
 
-    expect(screen.getByRole('dialog', { name: '分享任务' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: '导出任务' })).toBeTruthy()
     expect(screen.getByRole('alert').textContent).toBe('archive unavailable')
+    fireEvent.click(screen.getByRole('button', { name: '关闭导出' }))
+    expect(dismissDownload).toHaveBeenCalledWith('session-207')
   })
 
-  it('registers only through the target session utility slot and Connection RPC', () => {
+  it('registers through the target session utility slot and native Session export controller', () => {
     const source = readFileSync('src/client/index.ts', 'utf8')
     const component = readFileSync('src/client/session-share.tsx', 'utf8')
     const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
@@ -69,9 +55,9 @@ describe('session share plugin', () => {
     expect(source).toContain("ctx.slots.inject('conversation.session.header.utilities'")
     expect(source).toContain("id: 'session-log-download'")
     expect(registration).toContain('priority: -1')
-    expect(source).toContain("ctx.connection.rpc.call('/emate.share', endpoint, payload)")
     expect(source).toContain('ctx.sessionLogDownload.download(sessionId)')
     expect(manifest.dsh.client.inject).toContain('@deepseek-ai/dsh-session-log-export')
+    expect(component).not.toMatch(/\bcallShare\s*\(/u)
     expect(`${source}\n${component}`).not.toMatch(/\b(?:fetch|WebSocket|EventSource|createSnapshotStore|defineStore)\s*\(/u)
   })
 

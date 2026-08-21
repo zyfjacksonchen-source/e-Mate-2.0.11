@@ -16,6 +16,7 @@ const SETTINGS_BRAND_COPY = new Map([
   ['DeepSeek 搜索提供方。', 'e-Mate 搜索服务。'],
   ['The DeepSeek search provider.', 'The e-Mate search service.'],
 ])
+const HIDDEN_SETTINGS_SECTIONS = new Set(['Agent 预设', 'Agent presets', '视觉工具', 'Vision'])
 
 export function applySettingsBrandCopy(root: ParentNode): void {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
@@ -25,6 +26,9 @@ export function applySettingsBrandCopy(root: ParentNode): void {
     const replacement = SETTINGS_BRAND_COPY.get(value.trim())
     if (replacement !== undefined) node.nodeValue = value.replace(value.trim(), replacement)
     node = walker.nextNode()
+  }
+  for (const button of root.querySelectorAll('nav button')) {
+    if (button instanceof HTMLButtonElement) button.hidden = HIDDEN_SETTINGS_SECTIONS.has(button.textContent?.trim() ?? '')
   }
 }
 

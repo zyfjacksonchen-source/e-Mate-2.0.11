@@ -57,6 +57,20 @@ describe('e-Mate 2.0.5 identity and settings fidelity', () => {
     expect(screen.getByText('e-Mate 搜索服务。')).toBeTruthy()
   })
 
+  it('hides managed preset and Vision navigation without removing their native registrations', async () => {
+    render(<div role="dialog">
+      <nav>
+        <button type="button">个人资料</button>
+        <button type="button">Agent 预设</button>
+        <button type="button">视觉工具</button>
+      </nav>
+      <SettingsChrome />
+    </div>)
+    expect((await screen.findByRole('button', { name: '个人资料' }) as HTMLButtonElement).hidden).toBe(false)
+    expect((screen.getByText('Agent 预设').closest('button') as HTMLButtonElement).hidden).toBe(true)
+    expect((screen.getByText('视觉工具').closest('button') as HTMLButtonElement).hidden).toBe(true)
+  })
+
   it('ignores unrelated token mutations while retaining settings route synchronization', async () => {
     const Icon = () => <svg />
     const view = render(<button type="button"><SettingsTrigger wide SettingsIcon={Icon} /></button>)
