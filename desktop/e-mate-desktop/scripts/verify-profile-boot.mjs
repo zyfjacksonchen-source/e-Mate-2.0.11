@@ -8,6 +8,8 @@ import { parseArgs } from 'node:util'
 import { runInThisContext } from 'node:vm'
 import { boot } from '@deepseek-ai/dsh-app-boot'
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
+import { CallId } from '@deepseek-ai/dsh-llm'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import {
   createLaunchEnvironmentSnapshot,
   DSH_LAUNCH_ENVIRONMENT_KEY,
@@ -208,6 +210,24 @@ try {
   }
   if (trayItems.some(item => item.label().startsWith('Profile:'))) {
     throw new Error('assembled e-Mate profile unexpectedly exposes a profile selector')
+  }
+  const disclosureAgent = ctx.agentLoop.create(
+    SessionId('profile-smoke-tool-disclosure'),
+    { provider: 'mock', model: 'mock' },
+  )
+  const initialToolNames = new Set(ctx.tools.schemas(disclosureAgent).map(schema => schema.name))
+  if (!initialToolNames.has('tool_search') || initialToolNames.has('office_write')) {
+    throw new Error('assembled Profile did not apply progressive Tool disclosure')
+  }
+  const disclosure = await ctx.tools.execute({
+    callId: CallId('profile-smoke-tool-search'),
+    name: 'tool_search',
+    arguments: { query: 'office document write', limit: 1 },
+    agent: disclosureAgent,
+    signal: new AbortController().signal,
+  })
+  if (disclosure.isError || !ctx.tools.schemas(disclosureAgent).some(schema => schema.name === 'office_write')) {
+    throw new Error('assembled Profile Tool Search did not reveal the original office_write Tool')
   }
   const response = await fetch(expectedUrl)
   const html = await response.text()

@@ -66,8 +66,10 @@ describe('repository release boundary', () => {
     )
 
     assert.match(agents, /First development rule: use native DSH Creation Mode first/u)
+    assert.match(agents, /resolve `desktop\/e-mate-desktop\/base-contract\.json` and the checked-in Harness\/Desktop-reference gitlinks/u)
     assert.match(agents, /Creation Mode is the development inner loop, not a release format or admission bypass/u)
     assert.match(target, /First development principle: native Creation Mode before permanent plugins/u)
+    assert.match(target, /“对照 DSH 原生” always means the Harness and Desktop-reference pins/u)
     assert.match(target, /shell-equivalent trust and is explicit opt-in/u)
     assert.match(profile, /roots:\s*\[\s*\{ path: managedPresetRoot\(profileDir\), trust: 'system' \},\s*\{ path: shippedPresetRoot\(\), trust: 'system' \}/u)
     assert.match(profilePatch, /id: ui-agent-preset\s+name: '@deepseek-ai\/dsh-client-ui-agent-preset'\s+disabled: false/u)
@@ -98,7 +100,7 @@ describe('repository release boundary', () => {
       harness_commit: '99f6f02fecdb7dff40c3fbc9470f5907c29f74ca',
       harness_version: '0.1.0-rc.7',
     })
-    assert.equal(boundary.components.length, 14)
+    assert.equal(boundary.components.length, 15)
     assert.equal(boundary.components.every(component => component.errors.length === 0), true)
     assert.deepEqual(boundary.components.flatMap(component => component.errors), [])
   })
@@ -257,13 +259,13 @@ describe('repository release boundary', () => {
   })
 
   it('admits one or several ordinary Profile component changes without a base build', () => {
-    const one = classify('packages/dsh-plugin-memory-evolve/src/index.ts')
+    const one = classify('packages/dsh-plugin-tool-search/src/index.ts')
     assert.equal(one.lane, 'plugin-only')
     assert.equal(one.run_base, false)
     assert.equal(one.portable_publish, true)
-    assert.deepEqual(one.components, ['@e-mate/dsh-plugin-memory-evolve'])
+    assert.deepEqual(one.components, ['@e-mate/dsh-plugin-tool-search'])
     assert.deepEqual(one.component_jobs, [{
-      component: '@e-mate/dsh-plugin-memory-evolve',
+      component: '@e-mate/dsh-plugin-tool-search',
       target: 'portable',
       runner: 'ubuntu-24.04',
       publish: true,

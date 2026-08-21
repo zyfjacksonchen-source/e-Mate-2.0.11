@@ -94,7 +94,10 @@ export function SessionRouteProjection({
       return
     }
     if (!['/', '/chat'].some(prefix => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`))) return
-    if (location.pathname !== path) history.pushState(null, '', path)
+    if (location.pathname !== path) {
+      history.pushState(null, '', path)
+      dispatchEvent(new PopStateEvent('popstate'))
+    }
   }, [current, phase])
 
   return null
