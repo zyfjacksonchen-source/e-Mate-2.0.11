@@ -101,6 +101,7 @@ describe('Codex-like process fold', () => {
 
     const header = screen.getByRole('button', { name: /正在运行 · 1 次工具调用，2 条思考/u })
     expect(header.getAttribute('aria-expanded')).toBe('false')
+    expect(header.querySelector('[data-emate-brain-icon]')).not.toBeNull()
     expect(screen.getByText('正在为你整理页面。')).toBeTruthy()
     expect(screen.getByText('页面已经整理完成。')).toBeTruthy()
     expect(view.container.querySelector('[data-streaming="true"]')).not.toBeNull()
@@ -134,5 +135,7 @@ describe('Codex-like process fold', () => {
     })
     expect(cssSource).toContain("[data-emate-process-collapsed] :global([data-variant='think'])")
     expect(cssSource).toContain(':has([data-emate-process-hidden])')
+    expect(cssSource).toContain('.header + *')
+    expect(cssSource).toContain('margin-top: 8px')
   })
 })

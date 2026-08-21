@@ -1,9 +1,17 @@
 .controls {
+  position: absolute;
+  z-index: 1;
+  top: 12px;
+  right: 24px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   height: 32px;
   color: var(--dsw-alias-label-primary);
+}
+
+:global([data-slot='conversation.session.header'] > header) {
+  padding-right: 140px;
 }
 
 .controls > button {
@@ -37,5 +45,13 @@
 }
 
 @media (max-width: 720px) {
+  .controls {
+    right: 12px;
+  }
+
+  :global([data-slot='conversation.session.header'] > header) {
+    padding-right: 92px;
+  }
+
   .runtimeStatus { display: none; }
 }

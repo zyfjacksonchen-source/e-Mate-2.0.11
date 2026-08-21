@@ -10,6 +10,10 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+.header + * {
+  margin-top: 8px;
+}
+
 .leading,
 .chevron {
   color: var(--dsw-alias-label-secondary);

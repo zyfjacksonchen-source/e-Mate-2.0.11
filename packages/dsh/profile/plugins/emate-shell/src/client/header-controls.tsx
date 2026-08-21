@@ -13,7 +13,7 @@ interface Props {
   SettingsIcon: Icon
 }
 
-/** e-Mate utilities projected into DSH's existing Session header utility seat. */
+/** e-Mate utilities projected once over DSH's complete root frame. */
 export function HeaderControls({
   getThemeScheme,
   subscribeTheme,
