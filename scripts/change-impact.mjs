@@ -559,6 +559,8 @@ export function classifyChangedPaths(paths, options = {}) {
   )))].sort()
   const componentJobs = componentJobsFor(boundary, components, publishComponents)
   const basePlatformComponentJobs = basePlatformComponentJobsFor(boundary)
+  const portablePublish = publishComponents.length > 0
+    && componentJobs.filter(job => job.publish).every(job => job.target === 'portable')
   const hasComponentWork = kinds.has('component') || kinds.has('component-test')
   let lane
   if (!boundary.valid || kinds.has('base') || hasComponentWork && kinds.has('enterprise')) lane = 'base'
@@ -575,6 +577,7 @@ export function classifyChangedPaths(paths, options = {}) {
     componentJobs,
     basePlatformComponentJobs,
     publishComponents,
+    portablePublish,
     boundary,
   })
 }
@@ -587,6 +590,7 @@ function result({
   componentJobs = [],
   basePlatformComponentJobs = [],
   publishComponents = [],
+  portablePublish = false,
   boundary,
   error,
 }) {
@@ -601,6 +605,7 @@ function result({
     component_jobs: componentJobs,
     base_platform_component_jobs: basePlatformComponentJobs,
     publish_components: publishComponents,
+    portable_publish: portablePublish,
     changed_paths: normalized,
     classifications,
     contract: {
@@ -682,6 +687,7 @@ function writeGithubOutput(path, value) {
     `component_jobs_json=${JSON.stringify(value.component_jobs)}`,
     `base_platform_component_jobs_json=${JSON.stringify(value.base_platform_component_jobs)}`,
     `publish_components_json=${JSON.stringify(value.publish_components)}`,
+    `portable_publish=${String(value.portable_publish)}`,
     `result_json=${JSON.stringify(value)}`,
     '',
   ].join('\n'))

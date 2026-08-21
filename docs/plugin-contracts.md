@@ -84,7 +84,7 @@ The normal change path is fixed:
 
 1. `change-impact` assigns the exact Git diff to Base, plugin-only, enterprise-only, verification-only, docs-only, or none; unknown/shared inputs fail to Base.
 2. A plugin-only job restores the accepted Base SDK and builds/tests only each changed component and target. A missing SDK fails rather than rebuilding Harness.
-3. Three target jobs merge those payloads with the signed accepted set, materialize all components, and boot the Host plus Web Loader. No installer is built.
+3. If every published payload is portable, one macOS job merges it with the signed accepted set and materializes all three targets, verifies the unchanged target-native closures, then boots the shared Host/Web Loader graph once on arm64. If any published payload is target-bound, each matching native target job still materializes and boots its own complete generation. No installer is built in either plugin-only path.
 4. `profile-release.yml` accepts only those exact successful CI artifacts and production-signs the same payload into a bounded native-Cloudflare publication bundle. The plan separates immutable changed objects from `no-store` activation pointers, records every byte count/SHA-256 plus the expected current pointer, and is published through the connected Codex Cloudflare plugin: upload and public-readback immutable bytes first, recheck every expected current pointer, then activate each target desired state last.
 5. The Desktop downloads only the confirmed delta, switches one generation atomically on restart, and commits it only after renderer health; otherwise it restores the last-known-good generation.
 

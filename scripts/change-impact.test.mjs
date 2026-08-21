@@ -260,6 +260,7 @@ describe('repository release boundary', () => {
     const one = classify('packages/dsh-plugin-memory-evolve/src/index.ts')
     assert.equal(one.lane, 'plugin-only')
     assert.equal(one.run_base, false)
+    assert.equal(one.portable_publish, true)
     assert.deepEqual(one.components, ['@e-mate/dsh-plugin-memory-evolve'])
     assert.deepEqual(one.component_jobs, [{
       component: '@e-mate/dsh-plugin-memory-evolve',
@@ -274,6 +275,7 @@ describe('repository release boundary', () => {
       'packages/dsh/profile/plugins/emate-shell/src/client/home.tsx',
     )
     assert.equal(several.lane, 'plugin-only')
+    assert.equal(several.portable_publish, true)
     assert.deepEqual(several.components, [
       '@e-mate/dsh-client-shell',
       '@e-mate/dsh-plugin-memory-evolve',
@@ -302,6 +304,7 @@ describe('repository release boundary', () => {
     const testsOnly = classify('packages/dsh-plugin-memory-evolve/test/index.test.mjs')
     assert.equal(testsOnly.lane, 'plugin-only')
     assert.equal(testsOnly.run_plugins, true)
+    assert.equal(testsOnly.portable_publish, false)
     assert.deepEqual(testsOnly.components, ['@e-mate/dsh-plugin-memory-evolve'])
     assert.deepEqual(testsOnly.publish_components, [])
 
@@ -310,6 +313,7 @@ describe('repository release boundary', () => {
       'packages/dsh-plugin-memory-evolve/src/index.ts',
     )
     assert.equal(sourceAndTests.lane, 'plugin-only')
+    assert.equal(sourceAndTests.portable_publish, true)
     assert.deepEqual(sourceAndTests.publish_components, ['@e-mate/dsh-plugin-memory-evolve'])
   })
 
@@ -348,6 +352,7 @@ describe('repository release boundary', () => {
     assert.equal(classify('packages/dsh-plugin-xin-assistant/runtime/vendor-native/darwin-arm64/library.dylib').lane, 'base')
 
     const impact = classify('packages/dsh-plugin-computer-use/scripts/build.mjs')
+    assert.equal(impact.portable_publish, false)
     assert.deepEqual(impact.component_jobs, [
       { component: '@e-mate/dsh-plugin-computer-use', target: 'darwin-arm64', runner: 'macos-15', publish: true },
       { component: '@e-mate/dsh-plugin-computer-use', target: 'darwin-x64', runner: 'macos-15-intel', publish: true },
@@ -422,12 +427,14 @@ describe('repository release boundary', () => {
     assert.match(workflow, /runs-on: \$\{\{ matrix\.runner \}\}/u)
     assert.match(workflow, /name: Build and test only the changed component\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
     assert.match(workflow, /if: matrix\.publish == true/u)
-    assert.match(workflow, /profile-composition:\n(?:.|\n)*?needs: \[impact, plugins\](?:.|\n)*?publish_components_json != '\[\]'(?:.|\n)*?Compose and boot the complete candidate generation/u)
+    assert.match(workflow, /profile-portable-composition:\n(?:.|\n)*?name: Portable Profile generations(?:.|\n)*?needs: \[impact, plugins\](?:.|\n)*?portable_publish == 'true'(?:.|\n)*?runs-on: macos-15(?:.|\n)*?Compose every target and boot the portable graph once/u)
+    assert.match(workflow, /for target in darwin-arm64 darwin-x64 win32-x64;(?:.|\n)*?node scripts\/profile-release\.mjs(?:.|\n)*?pids\+=\("\$!"\)(?:.|\n)*?wait "\$pid"(?:.|\n)*?verify-profile-boot\.mjs(?:.|\n)*?--target darwin-arm64/u)
+    assert.match(workflow, /profile-composition:\n(?:.|\n)*?needs: \[impact, plugins\](?:.|\n)*?portable_publish != 'true'(?:.|\n)*?Compose and boot the complete candidate generation/u)
     assert.match(workflow, /node scripts\/base-sdk\.mjs fingerprint/u)
     assert.match(workflow, /node scripts\/profile-release\.mjs(?:.|\n)*?verify-profile-boot\.mjs/u)
     assert.match(workflow, /if test "\$BASE_SHA" = 0000000000000000000000000000000000000000;(?:.|\n)*?ACCEPTED_PREDECESSOR/u)
     assert.match(workflow, /enterprise:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_enterprise == 'true'/u)
-    assert.match(workflow, /admission:\n(?:.|\n)*?case "\$LANE" in(?:.|\n)*?plugin-only\)(?:.|\n)*?test "\$PROFILE" = success(?:.|\n)*?test "\$SOURCE" = skipped(?:.|\n)*?test "\$WINDOWS" = skipped(?:.|\n)*?test "\$MACOS" = skipped/u)
+    assert.match(workflow, /admission:\n(?:.|\n)*?case "\$LANE" in(?:.|\n)*?plugin-only\)(?:.|\n)*?test "\$PORTABLE_PUBLISH" = true;(?:.|\n)*?test "\$PROFILE_PORTABLE" = success(?:.|\n)*?test "\$PROFILE" = skipped(?:.|\n)*?test "\$SOURCE" = skipped(?:.|\n)*?test "\$WINDOWS" = skipped(?:.|\n)*?test "\$MACOS" = skipped/u)
     assert.match(workflow, /base\)(?:.|\n)*?test "\$BASE_PLATFORM_COMPONENTS" = success/u)
     assert.doesNotMatch(workflow, /^\s+paths(?:-ignore)?:/mu)
   })
@@ -437,6 +444,7 @@ describe('repository release boundary', () => {
     assert.match(workflow, /test "\$\(jq -er \.head_sha <<<"\$run_json"\)" = "\$GITHUB_SHA"/u)
     assert.match(workflow, /test "\$\(jq -er \.conclusion <<<"\$run_json"\)" = success/u)
     assert.match(workflow, /job_succeeded 'CI admission'/u)
+    assert.match(workflow, /if test "\$\(jq -er \.portable_publish "\$impact"\)" = true;(?:.|\n)*?job_succeeded 'Portable Profile generations'(?:.|\n)*?Complete Profile generation \/ \$target/u)
     assert.doesNotMatch(workflow, /if test "\$BOOTSTRAP" = true; then[^]*?publish_components[^]*?= '\[\]'/u)
     assert.match(workflow, /node scripts\/component-release\.mjs inventory > component-inventory\.json/u)
     assert.match(workflow, /Bootstrap complete Profile generation \/ \$\{\{ matrix\.target \}\}/u)
@@ -460,9 +468,18 @@ describe('repository release boundary', () => {
     assert.match(publisher, /GITHUB_WORKFLOW_REF !== `\$\{REPOSITORY\}\/\.github\/workflows\/profile-release\.yml@refs\/heads\/main`/u)
 
     const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
+    const portableCandidateUpload = ci.match(/name: e-mate-profile-candidate-darwin-arm64-\$\{\{ needs\.impact\.outputs\.head_sha \}\}[^]*?retention-days: 7/u)?.[0]
+    assert.ok(portableCandidateUpload)
+    assert.doesNotMatch(portableCandidateUpload, /\/store(?:\s|$)/u)
     const candidateUpload = ci.match(/name: e-mate-profile-candidate-\$\{\{ matrix\.target \}\}[^]*?retention-days: 7/u)?.[0]
     assert.ok(candidateUpload)
     assert.doesNotMatch(candidateUpload, /\/store(?:\s|$)/u)
+  })
+
+  it('keeps the full carrier release manual instead of rebuilding it for every plugin change', () => {
+    const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
+    assert.match(workflow, /^on:\n\s+workflow_dispatch:/mu)
+    assert.doesNotMatch(workflow, /^\s+(?:pull_request|push):/mu)
   })
 
   it('fails unknown or malformed paths closed to base', () => {
