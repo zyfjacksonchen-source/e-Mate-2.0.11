@@ -73,8 +73,15 @@ describe('desktop header controls', () => {
     }
     const headerEntry = runtime.slots.entries('conversation.session.header.utilities')
       .find(entry => entry.options.id === 'e-mate-header-controls')
+    const hiddenSettingsTrigger = document.createElement('button')
+    hiddenSettingsTrigger.hidden = true
+    hiddenSettingsTrigger.dataset.emateSettingsTrigger = ''
+    const openSettings = vi.fn()
+    hiddenSettingsTrigger.addEventListener('click', openSettings)
+    view.container.append(hiddenSettingsTrigger)
     expect(headerEntry?.options.children).toBeUndefined()
-    expect(view.getByRole('button', { name: '打开设置' })).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: '打开设置' }))
+    expect(openSettings).toHaveBeenCalledOnce()
     expect(view.getByRole('button', { name: '分享当前任务' })).toBeTruthy()
     expect(view.container.querySelector('[data-emate-header-controls]')).not.toBeNull()
     await runtime.dispose()

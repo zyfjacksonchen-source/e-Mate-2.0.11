@@ -1848,6 +1848,11 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 最小修复只修改发布验证边界：先用同一受信 Ed25519 key 验签和目标校验公开 current，再调用现有 `selectProfileRelease`。仅当结果精确为 `base-required` 时，允许 sequence `1`、无 parent、完整 changed set 的新 Base bootstrap 以 CAS 替换稳定指针；当前 release 已兼容新 Base 时仍禁止非幂等 bootstrap，普通 successor 遇到跨 Base current 仍失败关闭。不可变组件、完整三目标、签名、公开 current SHA 与最后激活顺序均未放宽。
 - 聚焦回归为 release boundary + publication `20/20`；真实三个公开 v2 envelope 在 Base v5 下均解析为 `base-required`。本修复仍需独立受保护 CI 后重跑 preparation；已失败 run 没有 publication artifact、没有上传、没有 desired-state 激活，线上 sequence `4` 保持不变。
 
+## 2026-08-22 · 2.0.11 S62 会话工具按钮单一可见所有权
+
+- S60 用 URL 路由决定侧栏底部三按钮是否可见，仍会在恢复态或非标准导航下与 Session header 同时出现。真正稳定的边界是 DSH `sessions.current`：存在当前会话时，状态、主题和设置只由 `conversation.session.header.utilities` 呈现；不存在当前会话时才显示侧栏入口。
+- `sidebar.settings` 仍按 pinned DSH 合同挂载为唯一设置 Shell owner，会话中仅隐藏其触发器，页头设置按钮继续点击同一个原生 trigger 并打开同一面板；没有复制设置状态、Modal 或路由。Shell 全量 `48/48` 与 diff check 通过，本次仍是 Shell component-only 候选。
+
 ## 2026-08-22 · 2.0.11 S63 Base SDK 跨工作流使用精确 CI 产物
 
 - Base v5 的 accepted PR CI 已生成并验证正确 SDK，但正式 Profile bootstrap 仍通过 Actions cache key 恢复；PR 作用域 cache 不对后续 `main` workflow dispatch 可见，导致第一次 bootstrap 在构建任何组件前失败，必须额外跑一次内容相同的 main Base CI 才能 seed cache。这不是产品变更需要全量重验，而是把性能缓存误作发布证据。
