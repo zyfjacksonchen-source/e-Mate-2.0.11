@@ -19,6 +19,7 @@ const root = resolve(import.meta.dirname, '..')
 const harnessRoot = join(root, 'upstream', 'deepseek-harness')
 const runtimeRoot = join(root, 'packages', 'dsh', 'runtime')
 const output = join(runtimeRoot, 'harness')
+const adaptersPath = join(root, 'scripts', 'harness-runtime-adapters.mjs')
 
 function capture(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: 'utf8', ...options })
@@ -170,6 +171,7 @@ async function main() {
       version: HARNESS_VERSION,
       commit: HARNESS_COMMIT,
       lockfile_sha256: sha256(join(harnessRoot, 'pnpm-lock.yaml')),
+      adapters_sha256: sha256(adaptersPath),
       package_manager: `pnpm@${PNPM_VERSION}`,
       assembly: 'harness-pnpm-deploy-and-release-pack',
     })

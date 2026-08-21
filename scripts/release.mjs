@@ -20,6 +20,9 @@ const REPOSITORY = 'zyfjacksonchen-source/e-Mate-2.0.11'
 const TAG = `e-mate-v${VERSION}`
 const SHA256 = /^[0-9a-f]{64}$/u
 const GIT_COMMIT = /^[0-9a-f]{40}$/u
+const ADAPTERS_SHA256 = createHash('sha256').update(readFileSync(
+  fileURLToPath(new URL('./harness-runtime-adapters.mjs', import.meta.url)),
+)).digest('hex')
 
 export function isAcceptedReleaseCommit(environment = process.env) {
   const sourceCommit = environment.GITHUB_SHA ?? ''
@@ -161,7 +164,8 @@ function verifyMain(item, manifest, entries) {
     requireEntry(entries, `package/runtime/harness/node_modules/${entry}`, item.name)
   }
   const harness = tarJson(item.path, 'package/runtime/source-manifest.json')
-  if (harness.version !== HARNESS_VERSION || harness.commit !== HARNESS_COMMIT || harness.product_version !== VERSION) {
+  if (harness.version !== HARNESS_VERSION || harness.commit !== HARNESS_COMMIT
+    || harness.product_version !== VERSION || harness.adapters_sha256 !== ADAPTERS_SHA256) {
     throw new Error('@e-mate/dsh carries the wrong DeepSeek Harness closure')
   }
   const source = tarJson(item.path, 'package/lib/release-source.json')

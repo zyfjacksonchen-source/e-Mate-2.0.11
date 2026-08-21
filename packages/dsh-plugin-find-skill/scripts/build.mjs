@@ -61,13 +61,39 @@ cli = replaceSection(
 )
 await writeFile(cliPath, cli)
 
+const configPath = join(root, 'lib/config.js')
+let configSource = await readFile(configPath, 'utf8')
+configSource = replaceExactlyOnce(
+  configSource,
+  `    catalogSkills: Schema.array(Schema.object({`,
+  `    persistentSkillSources: Schema.array(Schema.string()).default([]),\n    catalogSkills: Schema.array(Schema.object({`,
+  'persistent source schema',
+)
+await writeFile(configPath, configSource)
+
+const configTypesPath = join(root, 'lib/config.d.ts')
+let configTypes = await readFile(configTypesPath, 'utf8')
+configTypes = replaceExactlyOnce(
+  configTypes,
+  `    /** Trusted install-only recommendations merged ahead of remote search results. */`,
+  `    /** Exact connector Skill sources that may be installed and are always device-global. */\n    readonly persistentSkillSources?: string[];\n    /** Trusted install-only recommendations merged ahead of remote search results. */`,
+  'persistent source types',
+)
+await writeFile(configTypesPath, configTypes)
+
 const installPath = join(root, 'lib/install.js')
 let install = await readFile(installPath, 'utf8')
 install = replaceExactlyOnce(
   install,
   `import { join } from 'node:path';`,
-  `import { join } from 'node:path';\nimport { removeManagedSkill } from "./emate-safety.js";`,
+  `import { join } from 'node:path';\nimport { removeManagedSkill, resolvePersistentSkillScope } from "./emate-safety.js";`,
   'remove imports',
+)
+install = replaceExactlyOnce(
+  install,
+  `    const targetScope = scope ?? config.installDefaultScope ?? 'temp';`,
+  `    const targetScope = resolvePersistentSkillScope(config, source, scope);`,
+  'persistent install scope',
 )
 install = replaceSection(
   install,
@@ -105,11 +131,51 @@ const toolsPath = join(root, 'lib/tools.js')
 let toolsSource = await readFile(toolsPath, 'utf8')
 toolsSource = replaceExactlyOnce(
   toolsSource,
+  `import { defineTool } from '@deepseek-ai/dsh-tools';`,
+  `import { defineTool } from '@deepseek-ai/dsh-tools';\nimport { resolvePersistentSkillScope } from "./emate-safety.js";`,
+  'persistent tool imports',
+)
+toolsSource = replaceExactlyOnce(
+  toolsSource,
+  `const INSTALL_DESCRIPTION = 'Install a skill discovered by skill_find into a managed scope: '\n    + 'temp (default; current session only), project (shared with the workspace), or global (all sessions). '\n    + 'The installed skill immediately appears in the skill catalog and loads via the skill tool. '\n    + 'If the user has not indicated a scope, ask them first via ask_user_question.';`,
+  `const INSTALL_DESCRIPTION = 'Install an approved external-connection Skill as a device-global capability. '\n    + 'Only exact deployment-configured connector sources are accepted; community Skill lifecycle remains owned by Skill Hub.';`,
+  'connector install description',
+)
+toolsSource = replaceExactlyOnce(
+  toolsSource,
+  `                const scope = parseScope(args.scope);`,
+  `                const scope = resolvePersistentSkillScope(config, args.source, parseScope(args.scope));`,
+  'connector tool scope',
+)
+toolsSource = replaceExactlyOnce(
+  toolsSource,
+  `                            question: \`是否安装 \${args.skill ?? '所选技能'} 到 \${scope ?? config.installDefaultScope ?? 'temp'} 范围？\`,`,
+  `                            question: \`是否将 \${args.skill ?? '所选连接技能'} 作为设备级全局能力安装？\\n来源：\${args.source}\`,`,
+  'connector confirmation',
+)
+toolsSource = replaceExactlyOnce(
+  toolsSource,
   `            async execute(args, exec) {\n                return removeSkill(provider, tempManager, parseScope(args.scope), args.name, exec.agent?.session.header.cwd);\n            },`,
   `            async execute(args, exec) {\n                return removeSkill(provider, tempManager, parseScope(args.scope), args.name, exec.agent?.session.header.cwd, async (target) => {\n                    const userQuestions = ctx.get('userQuestions');\n                    const answer = await userQuestions.ask({\n                        agent: exec.agent,\n                        questions: [{\n                                id: 'dsh-find-skill-remove',\n                                question: '是否删除 ' + target.name + '（' + target.scope + '）？\\n' + target.path,\n                                header: '删除技能',\n                                options: [\n                                    { label: '删除', description: '删除这个插件管理的技能目录。' },\n                                    { label: '取消', description: '保留当前技能。' },\n                                ],\n                            }],\n                    });\n                    return answer.answers[0]?.selected.includes('删除') === true;\n                });\n            },`,
   'tool removal',
 )
 await writeFile(toolsPath, toolsSource)
+
+const indexPath = join(root, 'lib/index.js')
+let indexSource = await readFile(indexPath, 'utf8')
+indexSource = replaceExactlyOnce(
+  indexSource,
+  `import { Config } from "./config.js";`,
+  `import { Config } from "./config.js";\nimport { promotePersistentSkills } from "./emate-safety.js";`,
+  'startup promotion import',
+)
+indexSource = replaceExactlyOnce(
+  indexSource,
+  `    // Managed provider over self-owned project/global roots.\n    const { provider } = registerManagedProvider((create) => ctx.skills.registerProvider(create), validated);\n    // Temporary skill manager; temp roots resolve per call site.\n    const roots = resolveRoots(validated);`,
+  `    const roots = resolveRoots(validated);\n    promotePersistentSkills(validated, roots);\n    // Managed provider over self-owned project/global roots.\n    const { provider } = registerManagedProvider((create) => ctx.skills.registerProvider(create), validated);\n    // Temporary skill manager; temp roots resolve per call site.`,
+  'startup promotion',
+)
+await writeFile(indexPath, indexSource)
 bundleRuntime()
 await writeFile(join(root, 'lib/index.js'), await readFile(join(root, '.runtime-bundle/index.js')))
 await rm(join(root, '.runtime-bundle'), { recursive: true, force: true })

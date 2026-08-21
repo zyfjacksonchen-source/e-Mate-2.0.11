@@ -584,7 +584,7 @@ export async function apply(ctx, config = {}) {
       exec.agent.session.append('emate/image-output', {
         call_id: String(exec.callId),
         content: [{ type: 'image', attachment: imageRef(image.image) }],
-      })
+      }, { ignorable: true })
       return { job_id: started.id, images: [image], failures: [] }
     },
     presentCall: args => ({

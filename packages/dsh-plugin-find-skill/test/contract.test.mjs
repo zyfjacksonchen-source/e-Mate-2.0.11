@@ -3,12 +3,18 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { parse } from 'yaml'
 
-import { removeManagedSkill, throwawayEnvironment } from '../lib/emate-safety.js'
+import {
+  promotePersistentSkills,
+  removeManagedSkill,
+  resolvePersistentSkillScope,
+  throwawayEnvironment,
+} from '../lib/emate-safety.js'
 
 const root = new URL('../', import.meta.url)
 
-test('find-skill is pinned, discovery-only, and uses the native subprocess seam', async () => {
+test('find-skill is pinned and limits persistent installation to connector sources', async () => {
   const pkg = JSON.parse(await readFile(new URL('package.json', root), 'utf8'))
   const patch = await readFile(new URL('cordis.patch.yml', root), 'utf8')
   const cli = await readFile(new URL('../lib/cli.js', import.meta.url), 'utf8')
@@ -19,23 +25,72 @@ test('find-skill is pinned, discovery-only, and uses the native subprocess seam'
   assert.equal(pkg.dsh.upstream.commit, '5a7f18b4535835a81de47c0cc2ca8ceb6e97a4e6')
   assert.match(patch, /cliCommand: 'pnpm dlx skills@1\.5\.22'/u)
   assert.match(patch, /registerFindTool: true/u)
-  assert.match(patch, /registerInstallTool: false/u)
+  assert.match(patch, /registerInstallTool: true/u)
   assert.match(patch, /registerRemoveTool: false/u)
   assert.match(patch, /registerCommand: false/u)
   assert.match(tools, /agent: exec\.agent/u)
   assert.doesNotMatch(patch, /\bnpx\b/u)
-  assert.match(patch, /tree\/skills-v2\.0\.9-r5\/skills\/connect-feishu-cli/u)
+  assert.match(patch, /tree\/skills-v2\.0\.11-r1\/skills\/connect-feishu-cli/u)
   assert.match(patch, /id: connect-tencent-docs/u)
   assert.match(cli, /subprocess\.spawn/u)
   assert.doesNotMatch(cli, /node:child_process/u)
   assert.doesNotMatch(cli, /\.\.\.process\.env/u)
   assert.match(tools, /Skill installation was cancelled by the user/u)
   assert.match(tools, /id: 'dsh-find-skill-remove'/u)
-  assert.match(tools, /question: `是否安装 \$\{args\.skill \?\? '所选技能'\}/u)
+  assert.match(tools, /resolvePersistentSkillScope\(config, args\.source/u)
+  assert.match(tools, /作为设备级全局能力安装/u)
+  assert.match(tools, /来源：\$\{args\.source\}/u)
   assert.match(tools, /title: args\.skill \?\? '安装技能'/u)
   assert.match(client, /String\(args\.skill \?\? ["']安装技能["']\)/u)
   assert.doesNotMatch(client, /String\(args\.source/u)
   assert.doesNotMatch(runtime, /^import .* from ['"]yaml['"];?$/mu)
+
+  const config = parse(patch)[0].insert[0].config
+  const catalogSources = config.catalogSkills.map(skill => skill.source)
+  assert.deepEqual(config.persistentSkillSources, ['larksuite/cli', ...catalogSources])
+  assert.equal(catalogSources.every(source => source.includes(
+    '/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.11-r1/skills/connect-',
+  )), true)
+})
+
+test('external-connection Skills are global and legacy temporary installs are promoted', async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), 'emate-find-skill-persistent-'))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  const roots = {
+    tempSkillDir: join(scratch, 'temp'),
+    globalSkillDir: join(scratch, 'global'),
+  }
+  await writeManagedSkill(roots.tempSkillDir, 'lark-doc', 'temp', 'larksuite/cli')
+  await writeManagedSkill(roots.tempSkillDir, 'ordinary-skill', 'temp', 'someone/community')
+  const config = { persistentSkillSources: ['larksuite/cli'], installDefaultScope: 'temp' }
+
+  assert.equal(resolvePersistentSkillScope(config, 'larksuite/cli', 'temp'), 'global')
+  assert.throws(
+    () => resolvePersistentSkillScope(config, 'someone/community', 'global'),
+    /not an approved external-connection source/u,
+  )
+  assert.deepEqual(promotePersistentSkills(config, roots), ['lark-doc'])
+  assert.equal((await stat(join(roots.globalSkillDir, 'lark-doc', 'SKILL.md'))).isFile(), true)
+  assert.equal(JSON.parse(await readFile(join(roots.globalSkillDir, 'lark-doc', '.dsh-find-skill.json'), 'utf8')).scope, 'global')
+  await assert.rejects(stat(join(roots.tempSkillDir, 'lark-doc')), { code: 'ENOENT' })
+  assert.equal((await stat(join(roots.tempSkillDir, 'ordinary-skill'))).isDirectory(), true)
+})
+
+test('external connection instructions reuse device-global state', async () => {
+  const skillsRoot = new URL('../../skills/', root)
+  const documents = await Promise.all([
+    'connect-feishu-cli',
+    'connect-tencent-docs',
+    'connect-dingtalk',
+    'connect-wechat-bot',
+  ].map(name => readFile(new URL(`${name}/SKILL.md`, skillsRoot), 'utf8')))
+  for (const document of documents) {
+    assert.match(document, /device-global/u)
+    assert.doesNotMatch(document, /current session only|scope appropriate/u)
+  }
+  assert.match(documents[0], /@larksuite\/cli@1\.0\.88 auth status --json --verify/u)
+  assert.doesNotMatch(documents[0], /@larksuite\/cli@latest/u)
+  assert.match(documents[0], /A new e-Mate session is never by itself a reason to authorize again/u)
 })
 
 test('find-skill uses the desktop-owned pnpm shim without relying on ambient PATH lookup', async () => {
@@ -123,12 +178,12 @@ function fakeRuntime(scratch) {
   return runtime
 }
 
-async function writeManagedSkill(root, name, scope) {
+async function writeManagedSkill(root, name, scope, source = 'test/source') {
   const target = join(root, name)
   await mkdir(target, { recursive: true })
   await writeFile(join(target, 'SKILL.md'), `---\nname: ${name}\ndescription: test skill\n---\nbody\n`, 'utf8')
   await writeFile(join(target, '.dsh-find-skill.json'), JSON.stringify({
-    source: 'test/source',
+    source,
     installedAt: Date.now(),
     scope,
   }), 'utf8')

@@ -9,7 +9,7 @@ export const MODEL_SESSION_REF = 'E_MATE_MODEL_SESSION_TOKEN'
 const MAX_JSON_BYTES = 2 * 1024 * 1024
 const REQUEST_TIMEOUT_MS = 15_000
 const REFRESH_EARLY_MS = 60_000
-const SKILL_HUB_ROOT = new URL('https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1')
+const SKILL_HUB_ROOT = new URL('https://emate-skill-hub.emate-zyfjacksonchen.workers.dev/ecorex-agent/client/skill-hub/v1')
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u
 const JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u
@@ -905,9 +905,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
       if (value === undefined) throw new Error('e-Mate login is required')
       const headers = new Headers(init.headers)
       if (headers.has('authorization')) throw new Error('e-Mate authenticated request cannot override authorization')
-      headers.set('authorization', `Bearer ${skillHubTarget
-        ? value.session.accessToken
-        : value.session.modelGateway.sessionToken}`)
+      headers.set('authorization', `Bearer ${value.session.modelGateway.sessionToken}`)
       return request(target, { ...init, redirect: 'error', headers })
     },
     async dispose() {

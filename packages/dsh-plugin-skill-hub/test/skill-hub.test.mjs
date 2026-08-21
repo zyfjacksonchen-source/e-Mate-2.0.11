@@ -247,7 +247,7 @@ test('publication confirmation can bind the exact immutable bytes before upload'
   const hub = createSkillHubClient({
     dshHome,
     store,
-    baseUrl: 'https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1',
+    baseUrl: 'https://emate-skill-hub.emate-zyfjacksonchen.workers.dev/ecorex-agent/client/skill-hub/v1',
     async request(url, init) {
       assert.equal(url.pathname, '/ecorex-agent/client/skill-hub/v1/skills')
       const uploaded = JSON.parse(init.body)
@@ -317,7 +317,7 @@ test('a lost publish response replays the persisted archive after restart', asyn
     dshHome,
     store,
     request,
-    baseUrl: 'https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1',
+    baseUrl: 'https://emate-skill-hub.emate-zyfjacksonchen.workers.dev/ecorex-agent/client/skill-hub/v1',
   })
   const first = client()
   await assert.rejects(
@@ -346,7 +346,7 @@ test('a lost delete response retries the exact owned publication with one stable
   const client = () => createSkillHubClient({
     dshHome,
     store: { inventory: async () => [], recover: async () => [] },
-    baseUrl: 'https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1',
+    baseUrl: 'https://emate-skill-hub.emate-zyfjacksonchen.workers.dev/ecorex-agent/client/skill-hub/v1',
     async request(url, init = {}) {
       if (url.pathname.endsWith('/publications/mine')) {
         assert.equal(url.searchParams.get('version'), card.version)
@@ -464,7 +464,7 @@ test('Agent natural language surface registers the complete typed lifecycle and 
     tools: { register(value) { tools.push(value) } },
     effect(callback) { return callback() },
   }
-  await apply(ctx, { dshHome, baseUrl: 'https://dl.ecoremedia.net/ecorex-agent/client/skill-hub/v1' })
+  await apply(ctx, { dshHome, baseUrl: 'https://emate-skill-hub.emate-zyfjacksonchen.workers.dev/ecorex-agent/client/skill-hub/v1' })
 
   assert.deepEqual(tools.map(tool => tool.name).sort(), [
     'e_mate_skill_hub_delete_publication',

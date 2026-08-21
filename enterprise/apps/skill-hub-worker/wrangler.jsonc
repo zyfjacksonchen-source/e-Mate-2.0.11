@@ -1,0 +1,28 @@
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "emate-skill-hub",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-21",
+  "workers_dev": true,
+  "vars": {
+    "MODEL_SESSION_VALIDATION_URL": "https://mvdcm.ecoremedia.net/e-mate/model-api/v1/consents/current"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "emate-skill-hub",
+      "database_id": "50f5662b-6ae3-4b54-96e0-eca896c0badc"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "PACKAGES",
+      "bucket_name": "emate-skill-hub-packages"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": { "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 }
+  }
+}
