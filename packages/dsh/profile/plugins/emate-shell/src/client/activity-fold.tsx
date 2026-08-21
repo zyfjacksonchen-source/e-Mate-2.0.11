@@ -1,5 +1,5 @@
 import { createElement, useMemo, useSyncExternalStore, type ReactNode } from 'react'
-import { DisclosureRow, IconThinkOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { DisclosureRow } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './activity-fold.module.css'
 
 type ChatNode = {
@@ -50,7 +50,7 @@ function hasNaturalMessage(node: ChatNode): boolean {
 }
 
 function isProcessNode(node: ChatNode): boolean {
-  return node.kind === 'tool-call' || node.kind === 'context' || hasReasoning(node)
+  return node.kind === 'tool-call' || hasReasoning(node)
 }
 
 function isRunning(node: ChatNode): boolean {
@@ -111,6 +111,28 @@ function label(summary: ActivityFoldSummary): string {
   return `${summary.running ? '正在运行' : '运行过程'}${counts.length > 0 ? ` · ${counts.join('，')}` : ''}`
 }
 
+function BrainProcessIcon() {
+  return (
+    <svg
+      data-emate-brain-process-icon=""
+      aria-hidden="true"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 6.2C10.8 3.7 7.3 3.5 5.9 5.8a3.6 3.6 0 0 0-2.2 5.5A3.6 3.6 0 0 0 6 17.1c1.4 2.3 4.8 2.1 6-.3" />
+      <path d="M12 6.2c1.2-2.5 4.7-2.7 6.1-.4a3.6 3.6 0 0 1 2.2 5.5 3.6 3.6 0 0 1-2.3 5.8c-1.4 2.3-4.8 2.1-6-.3" />
+      <path d="M12 6.2v7.5M7.1 9.2c.2 1.5 1.3 2.4 2.8 2.4m7-2.4c-.2 1.5-1.3 2.4-2.8 2.4M7.1 14.9h2m7.8 0h-2" />
+      <circle cx="12" cy="15.8" r="1.3" />
+    </svg>
+  )
+}
+
 function ActivityHeader({ summary, sessionId, expanded, children }: {
   summary: ActivityFoldSummary
   sessionId: string
@@ -124,7 +146,7 @@ function ActivityHeader({ summary, sessionId, expanded, children }: {
         leadingClassName={css.leading}
         titleClassName={css.title}
         chevronClassName={css.chevron}
-        icon={<IconThinkOutline14 size={14} />}
+        icon={<BrainProcessIcon />}
         title={label(summary)}
         open={expanded}
         expandable
@@ -171,6 +193,7 @@ function hiddenMarker(): ReactNode {
 function createProcessRenderer(ctx: any, kind: 'assistant-step' | 'tool-call' | 'context') {
   return function ProcessRenderer(props: any) {
     const { node, sessionId, useSession } = props as { node: ChatNode; sessionId: string; useSession: (selector: any) => any }
+    if (kind === 'context') return hiddenMarker()
     const order = useSession((snapshot: any) => snapshot.chat.order) as readonly string[]
     const nodes = useSession((snapshot: any) => snapshot.chat.nodes) as ReadonlyMap<string, ChatNode>
     const summary = useMemo(() => activityFoldSummary(order, nodes, node), [node, nodes, order])

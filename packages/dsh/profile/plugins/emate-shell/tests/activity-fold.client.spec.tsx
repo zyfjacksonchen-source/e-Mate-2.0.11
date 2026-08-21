@@ -108,11 +108,14 @@ describe('Codex-like process fold', () => {
     expect(screen.queryByText('上下文')).toBeNull()
     expect(screen.queryByText('GenUI：render_ui')).toBeNull()
     expect(view.container.querySelector('[data-emate-process-collapsed]')).not.toBeNull()
+    const icon = view.container.querySelector('[data-emate-brain-process-icon]')
+    expect(icon?.getAttribute('width')).toBe('14')
+    expect(icon?.getAttribute('height')).toBe('14')
 
     fireEvent.click(header)
     expect(header.getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByText('内部思考')).toBeTruthy()
-    expect(screen.getByText('上下文')).toBeTruthy()
+    expect(screen.queryByText('上下文')).toBeNull()
     expect(screen.getByText('第二段内部思考')).toBeTruthy()
     expect(screen.getByText('GenUI：render_ui')).toBeTruthy()
     expect(screen.getByText('正在为你整理页面。')).toBeTruthy()
@@ -122,12 +125,12 @@ describe('Codex-like process fold', () => {
   it('projects one process group without rewriting DSH nodes', () => {
     const nodes = new Map<string, any>([
       ['message', { key: 'message', kind: 'assistant-step', location: location(2), data: { blocks: [{ kind: 'text', text: '进度' }] } }],
-      ['context', { key: 'context', kind: 'context', location: location(2), data: {} }],
       ['tool', { key: 'tool', kind: 'tool-call', location: location(2), data: { root: { kind: 'tool-result' } } }],
+      ['context', { key: 'context', kind: 'context', location: location(2), data: {} }],
     ])
     expect(activityFoldSummary([...nodes.keys()], nodes, nodes.get('context'))).toEqual({
       turn: 2,
-      headerKey: 'context',
+      headerKey: 'tool',
       toolCount: 1,
       reasoningCount: 0,
       running: false,
