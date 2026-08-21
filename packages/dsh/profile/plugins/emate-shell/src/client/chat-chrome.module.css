@@ -18,13 +18,6 @@
   line-height: 22px !important;
 }
 
-/* Product chat shows the Agent's user-facing narration. Keep raw Tool/Skill
-   events in the durable DSH transcript for audit and diagnostics, but do not
-   expose their internal protocol errors as conversation messages. */
-:global([data-chat-flow-kind='tool-call']) {
-  display: none;
-}
-
 :global([data-chat-flow-kind='tool-call'] [data-disclosure-row]),
 :global([data-chat-flow-kind='assistant-step'] [data-variant='think'] [data-disclosure-row]) {
   font-size: 13px;
@@ -170,12 +163,6 @@
   outline: none;
   box-shadow: none;
   background: var(--dsw-alias-interactive-bg-hover);
-}
-
-/* Keep injected context in the durable transcript and model request while
-   hiding this internal execution metadata from the user-facing chat. */
-:global([data-slot='conversation'] div:has(> [data-disclosure-row] [data-context-source])) {
-  display: none !important;
 }
 
 /* The profile disables ui-trajectory, so target Inspect handoffs have no

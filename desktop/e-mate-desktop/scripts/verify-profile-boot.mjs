@@ -236,7 +236,6 @@ try {
     'dsh-at-file',
     '@e-mate/dsh-plugin-better-sidebar',
     'dsh-file-viewer',
-    'dsh-turn-fold',
     'dsh-visualize',
   ]) {
     if (!ids.has(id)) {

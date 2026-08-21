@@ -50,7 +50,6 @@ const PROTECTED_PLUGIN_NAMES = new Set<string>([
   'dsh-at-file',
   'dsh-better-sidebar',
   'dsh-file-viewer',
-  'dsh-turn-fold',
   'dsh-visualize',
 ])
 // FiberState is a const enum and has no runtime export from Cordis.

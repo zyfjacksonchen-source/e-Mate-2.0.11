@@ -14,7 +14,7 @@ const { privateKey, publicKey } = generateKeyPairSync('ed25519')
 const keyId = '0123456789abcdef'
 const base: ProfileBaseContract = {
   schema_version: 1,
-  id: 'e-mate-desktop-profile-v4-dsh-2bc16230975f',
+  id: 'e-mate-desktop-profile-v5-dsh-2bc16230975f',
   desktop_api: 1,
   profile_format: 1,
   harness_version: '0.1.0-rc.7',

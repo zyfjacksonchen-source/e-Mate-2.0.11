@@ -1826,3 +1826,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 安装态的 e-Mate CDP control grant 已默认开启，但 `127.0.0.1:9222` 没有监听；Chrome `chrome://inspect/#remote-debugging` 明确显示尚未勾选的原生安全开关。Chrome 136 起默认用户数据目录又会忽略启动参数式 remote-debugging，因此“不弹确认直接控制当前已登录 Chrome”只能通过改偏好或换隔离 profile，二者都不符合当前用户状态与 Chrome 安全边界；旧扩展桥也不应复活。
 - CDP 能力卡只新增一个显式用户动作，使用现有 DSH Subprocess 以固定参数打开 Chrome 原生设置页；不编辑 Chrome 文件、不点击安全开关、不增加扩展、IPC、浏览器进程管理器或第二套授权。Chrome 一次确认后由浏览器自身全局保持，e-Mate 的 endpoint-bound control grant 仍可独立撤销。
 - CDP `10/10`、find-skill `10/10`、仓库分类/组件产物合同 `29/29` 通过；当前实际 diff 被唯一分类器判为 `plugin-only`，只发布两个 portable component：`@e-mate/dsh-plugin-cdp` 与 `@e-mate/dsh-plugin-find-skill`，`run_base=false`、Base v4 合同有效。完整 generation 与安装态确认仍须以提交后的精确组件字节验证。
+
+## 2026-08-21 · 2.0.11 S59 原生进度自然披露与 Base v5
+
+- S52 只删除了 Shell 对 `assistant-step` 的临时覆盖，流式正文与 GenUI 已回到 pinned DSH 单一路径；用户安装态仍出现“X 次工具调用，Y 条消息”，根因是 Base 继续预装第三方 `dsh-turn-fold@0.2.2`。该包以 `priority:-1` 同时 shadow 原生 `assistant-step`、`tool-call` 与 `context`，并把未记录过的 turn 状态硬编码为默认折叠，因此不是 DSH 原生行为，也不是 GenUI 互斥。
+- 最小根因修复从受管 Profile roster、打包闭包和 Loader 必需集合删除 `dsh-turn-fold`，并把它列入 retired package，使已有安装升级时清退旧目录。热更新 Shell 只读取既有 `chat.order/nodes`：Agent 自然语言进度、结果、失败、图片与中断继续交给 priority `0` 的原生 `AssistantNodeView` 并保留 streaming；Reasoning/Think、Tool 与 Context 过程默认收进每回合唯一的“运行过程”折叠行，展开时仍委托原生 renderer 和既有 `tool.call.toolview` winner（含 GenUI）。没有 DOM observer、自动点击、新事件、第二 Store 或第二 transport。
+- 旧 Base v4 自带该包，无法由普通组件 generation 从磁盘与 Cordis 组合中安全移除；Base 合同因此提升为 `e-mate-desktop-profile-v5-dsh-2bc16230975f`。已启动但未签发、未上传的 v4 Profile bootstrap 被停止，避免发布已知错误基线；本次一次性 Base/完整 generation 成本完成后，不触及 Base roster 的 CDP、连接 Skill 或其他业务插件变化仍必须保持 component-only。
+- 当前窄验证收据：Shell 聚焦折叠/原生流式/GenUI 共存 `9/9`、Shell 全量 `47/47`、Profile 安装与旧包清退 `5/5`、Profile component/generation/release/update `19/19`、仓库 release boundary `37/37`；Shell 重建、Desktop Profile 同步、Host/Web/Client Loader 启动图与 diff check 均通过。正式完成仍以 Base v5 CI、安装态真实会话流式/展开回归及在线完整 generation 健康提交为准。

@@ -4077,7 +4077,6 @@ __metadata:
     "@types/react": "npm:^18"
     dsh-at-file: "https://github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz"
     dsh-file-viewer: "patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch"
-    dsh-turn-fold: "patch:dsh-turn-fold@https%3A//github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz#~/.yarn/patches/dsh-turn-fold-https-e835a4814f.patch"
     dsh-visualize: "file:vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz"
     electron: "npm:43.4.0"
     electron-builder: "npm:26.15.3"
@@ -7011,20 +7010,6 @@ __metadata:
     "@deepseek-ai/dsh-typert-protocol": ^0.1.0-rc.6
     react: ^18.2.0
   checksum: 10c0/33822310c6441bc373600241c3ac0cb5472c5db8b80404fa0b91a4ea3fc3cf5bac0ee7aeea106c8826b2c14b8d47c33bf1ef56950b475d0e4171e491de85cd32
-  languageName: node
-  linkType: hard
-
-"dsh-turn-fold@https://github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz":
-  version: 0.2.2
-  resolution: "dsh-turn-fold@https://github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz"
-  checksum: 10c0/380b133256007b0a1e2dc8df942c0664db1d5a070ad81c2ece53009849833e9004e982e22f7c8fd866fbb8ddb649586a203b9e0367768285e8cdea9d992ed213
-  languageName: node
-  linkType: hard
-
-"dsh-turn-fold@patch:dsh-turn-fold@https%3A//github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz#~/.yarn/patches/dsh-turn-fold-https-e835a4814f.patch":
-  version: 0.2.2
-  resolution: "dsh-turn-fold@patch:dsh-turn-fold@https%3A//github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz#~/.yarn/patches/dsh-turn-fold-https-e835a4814f.patch::version=0.2.2&hash=03b271"
-  checksum: 10c0/0663afa71bf25684e10962d58741000d17d2ca609d1f792596f39162ab57ba10990217863fee3c43a4ca0cb5103661a358f2ec1a5499ea06b3a15aba711bfc78
   languageName: node
   linkType: hard
 

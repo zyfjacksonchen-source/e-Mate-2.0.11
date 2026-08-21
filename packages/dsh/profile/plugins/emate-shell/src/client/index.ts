@@ -24,6 +24,7 @@ import {
   IconUserOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AccountControl, AccountSettings } from './account.tsx'
+import { registerActivityFold } from './activity-fold.tsx'
 import './chat-chrome.module.css'
 import { ComposerConnectors } from './composer-connectors.tsx'
 import { HomeProjection } from './home.tsx'
@@ -136,6 +137,7 @@ export function registerManagedPresetSurfaces(ctx: any): void {
 }
 
 export function apply(ctx: any): void {
+  registerActivityFold(ctx)
   registerComputerUseTrigger(ctx)
   registerManagedPresetSurfaces(ctx)
   ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({

@@ -71,7 +71,6 @@ const ECOSYSTEM_PLUGIN_PACKAGES = [
   { name: '@kelearns/dsh-navigation-bar', version: '0.2.1', entry: 'index.js', client: true, patchName: "'@kelearns/dsh-navigation-bar'" },
   { name: 'dsh-at-file', version: '0.6.2', entry: 'lib/index.js', client: true, patchName: 'dsh-at-file' },
   { name: 'dsh-file-viewer', version: '0.1.0', entry: 'lib/index.js', client: true, patchName: "'dsh-file-viewer'" },
-  { name: 'dsh-turn-fold', version: '0.2.2', entry: 'index.js', client: true, patchName: 'dsh-turn-fold' },
   { name: 'dsh-visualize', version: '0.1.0', entry: 'lib/index.mjs', client: true, patchName: "'dsh-visualize'" },
 ] as const
 
@@ -90,6 +89,7 @@ const RETIRED_PROFILE_PACKAGES = new Set([
   '@yuxianglin/dsh-bridge-browser',
   'dsh-better-sidebar',
   'dsh-search-mcp',
+  'dsh-turn-fold',
 ])
 const OWNED_PROFILE_PACKAGES = new Set([...MANAGED_PROFILE_PACKAGES, ...RETIRED_PROFILE_PACKAGES])
 const PROFILE_INSTALL_RECEIPT = '.e-mate-install.json'
