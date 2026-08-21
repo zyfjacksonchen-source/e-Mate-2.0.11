@@ -5,7 +5,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { parseProfileBaseContract, parseProfileReleaseEnvelope } from '../desktop/e-mate-desktop/src/profile-release.ts'
+import {
+  parseProfileBaseContract,
+  parseProfileReleaseEnvelope,
+  signProfileRelease,
+} from '../desktop/e-mate-desktop/src/profile-release.ts'
 import { PRODUCT_UI_REFERENCE } from './change-impact.mjs'
 import { emitComponent } from './component-release.mjs'
 import { composeProfileReleaseCandidate } from './profile-release.mjs'
@@ -134,6 +138,53 @@ test('publication admits bootstrap and its direct successor before exposing acti
   assert.deepEqual(publication.releases.map(release => release.target), ['darwin-arm64', 'darwin-x64', 'win32-x64'])
   assert.equal(publication.releases.every(release => release.stable.cacheControl === 'no-store'), true)
   assert.equal(publication.objects.filter(item => item.role === 'desired-state-immutable').length, 3)
+
+  const incompatibleCurrentByTarget = new Map(candidates.map(candidate => {
+    const payload = JSON.parse(readFileSync(join(candidate, 'payload.json'), 'utf8'))
+    const legacy = {
+      ...payload.components[0],
+      id: '@e-mate/dsh-plugin-legacy',
+      profile_path: 'node_modules/@e-mate/dsh-plugin-legacy',
+      manifest_url: payload.components[0].manifest_url.replace('/dsh-plugin-fixture/', '/dsh-plugin-legacy/'),
+    }
+    const envelope = signProfileRelease({
+      ...payload,
+      sequence: 4,
+      base_contracts: ['e-mate-desktop-profile-v2-dsh-2bc16230975f'],
+      components: [legacy],
+    }, privateKeyPem, keyId)
+    return [`${payload.target.platform}-${payload.target.arch}`, Buffer.from(JSON.stringify(envelope))]
+  }))
+  const migratedBootstrap = prepareProfilePublication({
+    root,
+    candidateDirectories: candidates,
+    artifactRoots: [join(root, 'dist/components')],
+    expectedChangedIds: [componentId],
+    sourceCommit,
+    privateKeyPem,
+    keyId,
+    currentByTarget: incompatibleCurrentByTarget,
+    bootstrap: true,
+  })
+  assert.equal(migratedBootstrap.releases.every(release => release.sequence === 1), true)
+
+  const compatibleCurrentByTarget = new Map(candidates.map(candidate => {
+    const payload = JSON.parse(readFileSync(join(candidate, 'payload.json'), 'utf8'))
+    const envelope = signProfileRelease({ ...payload, sequence: 4 }, privateKeyPem, keyId)
+    return [`${payload.target.platform}-${payload.target.arch}`, Buffer.from(JSON.stringify(envelope))]
+  }))
+  assert.throws(() => prepareProfilePublication({
+    root,
+    candidateDirectories: candidates,
+    artifactRoots: [join(root, 'dist/components')],
+    expectedChangedIds: [componentId],
+    sourceCommit,
+    privateKeyPem,
+    keyId,
+    currentByTarget: compatibleCurrentByTarget,
+    bootstrap: true,
+  }), /bootstrap candidate would replace an existing desired state/u)
+
   const bundle = join(root, 'dist/native-publication')
   const plan = writeProfilePublicationBundle(publication, bundle, new Map([
     ['darwin-arm64', undefined], ['darwin-x64', undefined], ['win32-x64', undefined],
