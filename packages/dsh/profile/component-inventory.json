@@ -115,6 +115,13 @@
       "cli": true
     },
     {
+      "id": "@e-mate/dsh-plugin-tool-search",
+      "root": "packages/dsh-plugin-tool-search",
+      "kind": "profile",
+      "desktop": "hot-profile",
+      "cli": true
+    },
+    {
       "id": "@e-mate/dsh-plugin-vision-toolkit",
       "root": "packages/dsh-plugin-vision-toolkit",
       "source_roots": ["upstream/plugins/dsh-vision-toolkit"],

@@ -46,6 +46,7 @@ describe('e-Mate desktop profile', () => {
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-vision-toolkit', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-cdp', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-skill-hub', 'lib', 'index.js'))).toBe(true)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-tool-search', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-file-import', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-computer-use', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-find-skill', 'lib', 'index.js'))).toBe(true)

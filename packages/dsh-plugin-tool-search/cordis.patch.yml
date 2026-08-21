@@ -1,0 +1,26 @@
+- insert:
+    - id: emate-tool-search
+      name: '@e-mate/dsh-plugin-tool-search'
+      inject: [agents, tools]
+      config:
+        alwaysVisible:
+          - ask_user_question
+          - bash
+          - browser_*
+          - create_goal
+          - edit
+          - get_goal
+          - glob
+          - grep
+          - pwsh
+          - read
+          - skill
+          - subagent
+          - subagent_fork
+          - todo_write
+          - update_goal
+          - web_search
+          - write
+        maxResults: 5
+        maxQueryChars: 512
+

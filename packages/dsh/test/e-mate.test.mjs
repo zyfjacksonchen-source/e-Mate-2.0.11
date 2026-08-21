@@ -365,6 +365,7 @@ test('managed profile installation is idempotent', () => {
       '@e-mate/dsh-plugin-memory-evolve',
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-search-mcp',
+      '@e-mate/dsh-plugin-tool-search',
     ]
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
@@ -977,6 +978,7 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
     const visible = new Set([
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-search-mcp',
+      '@e-mate/dsh-plugin-tool-search',
       '@e-mate/dsh-plugin-cdp',
     ])
     const packages = [
