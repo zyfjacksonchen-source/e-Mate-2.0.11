@@ -97,6 +97,7 @@ test('projects real CDP readiness and routes page mutations through native appro
     })
     assert.equal(capabilities.length, 1)
     assert.deepEqual(capabilities[0].actions, [
+      { id: 'open-remote-debugging', label: '打开 Chrome 设置', kind: 'primary' },
       { id: 'enable-control', label: '启用浏览器控制', kind: 'primary' },
       { id: 'disable-control', label: '停用浏览器控制', kind: 'secondary' },
     ])
@@ -107,6 +108,48 @@ test('projects real CDP readiness and routes page mutations through native appro
     })
     await capabilities[0].invoke('disable-control')
     assert.equal(harness.get().allowControl, false)
+  } finally {
+    globalThis.fetch = previousFetch
+  }
+})
+
+test('opens the fixed Chrome security page without changing the Chrome preference', async () => {
+  const capabilities = []
+  const spawns = []
+  const harness = settingsHarness()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async () => { throw new Error('CDP is not listening') }
+  try {
+    apply({
+      approval: {},
+      settings: harness.settings,
+      subprocess: {
+        resolveExecutable: async command => `/resolved/${command}`,
+        spawn: spec => {
+          spawns.push(spec)
+          return { done: Promise.resolve({ exitCode: 0 }) }
+        },
+      },
+      tools: { register: () => () => undefined },
+      systemPrompt: { section: () => () => undefined },
+      userQuestions: { ask: async () => { throw new Error('unexpected question') } },
+      emateCapabilities: {
+        register: definition => { capabilities.push(definition); return () => undefined },
+      },
+      effect: callback => callback(),
+    })
+    assert.deepEqual(await capabilities[0].status(new AbortController().signal), {
+      state: 'setup-required',
+      detail: '首次使用需在 Chrome 原生页面确认远程调试；确认后对所有 e-Mate 会话生效。',
+      action_ids: ['open-remote-debugging', 'disable-control'],
+    })
+    await capabilities[0].invoke('open-remote-debugging', undefined, new AbortController().signal)
+    const target = 'chrome://inspect/#remote-debugging'
+    assert.deepEqual(spawns[0].argv, process.platform === 'darwin'
+      ? ['/resolved/open', '-a', 'Google Chrome', target]
+      : process.platform === 'win32'
+        ? ['/resolved/cmd.exe', '/d', '/s', '/c', 'start', '', 'chrome.exe', target]
+        : ['/resolved/xdg-open', target])
   } finally {
     globalThis.fetch = previousFetch
   }

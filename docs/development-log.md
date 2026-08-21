@@ -1814,3 +1814,15 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 正式 v3 DMG 的真实安装态重开 `测试生成图片` 会话仍触发 `SessionFormatUnsupportedError`。写入 Profile 已携带 `ignorable: true`，但 `harness-runtime-adapters.mjs` 只修改 CLI/Harness 的 pnpm 组装树；Electron Builder 实际封装的是 Desktop 自己的 Yarn 依赖树，最终 `app.asar.unpacked/node_modules/@deepseek-ai/dsh-session{,-persistence}` 保持原始 rc.7，导致插件启动前的冷读边界先拒绝历史 `emate/image-output`。
 - 修复复用 Desktop 已有的 Yarn patch 单一路径：`dsh-session` 只持久化显式 `ignorable: true`，`dsh-session-persistence` 只兼容历史上精确的 `emate/image-output`；其他未知且未标记事件继续失败关闭。Desktop package 行为测试直接执行最终依赖字节，证明新写入 envelope、生图历史冷读与未知事件负例，不再只测试 CLI 组装器源码。
 - v3 Base 已经存在且不具备该运行时行为，因此当前唯一 Base id 提升为 `e-mate-desktop-profile-v4-dsh-2bc16230975f`，所有组件精确绑定 v4；v3 必须在下载 v4 generation 前返回 `base-required`。正式发布必须以新 DMG 安装后重开原受影响会话作为收据，再完成完整组件 generation 与在线原子更新，旧 v3 构建不得激活。
+
+## 2026-08-21 · 2.0.11 S57 连接 Skill 的签名全局投影
+
+- 飞书重复授权并非 provider token 失效：以官方 `@larksuite/cli@1.0.88 auth status --json --verify` 只读核验得到 `verified: true`。真正被 Agent 加载的 `$DSH_HOME/skills-bridge/global/connect-feishu-cli` 仍来自 2.0.9 `skills-v2.0.9-r2`，旧说明固定执行 `config init --new` 与 `auth login`；它覆盖了仓库中已改为“先 status、有效即复用”的 2.0.11 指令。
+- 永久修复仍落在现有 find-skill Profile component，不新增连接或凭据 store：四个第一方 bootstrap Skill 作为签名组件字节随包发货，启动时在 provider 注册前投影到同一个 DSH global managed root。只允许缺失目录、精确已知旧 e-Mate 来源或本组件上次写入的 receipt 更新；任意用户自有同名来源保持原样并报告冲突。切换使用同卷 staging/backup 与启动恢复，绝不读取、重置或迁移 `~/.lark-cli`、OS Keychain、DSH Credentials 或 IM 状态。
+- 远程安装白名单收窄为官方 `larksuite/cli` 域 Skill；四个 bootstrap Skill 已随组件存在，不再运行时下载自身。该改动只属于 `@e-mate/dsh-plugin-find-skill`，若组件门禁、完整 generation 组合与安装态跨会话复用均通过，必须保持 plugin-only，不得重建 Desktop Base。
+
+## 2026-08-21 · 2.0.11 S58 Chrome 原生 CDP 一次性启用入口
+
+- 安装态的 e-Mate CDP control grant 已默认开启，但 `127.0.0.1:9222` 没有监听；Chrome `chrome://inspect/#remote-debugging` 明确显示尚未勾选的原生安全开关。Chrome 136 起默认用户数据目录又会忽略启动参数式 remote-debugging，因此“不弹确认直接控制当前已登录 Chrome”只能通过改偏好或换隔离 profile，二者都不符合当前用户状态与 Chrome 安全边界；旧扩展桥也不应复活。
+- CDP 能力卡只新增一个显式用户动作，使用现有 DSH Subprocess 以固定参数打开 Chrome 原生设置页；不编辑 Chrome 文件、不点击安全开关、不增加扩展、IPC、浏览器进程管理器或第二套授权。Chrome 一次确认后由浏览器自身全局保持，e-Mate 的 endpoint-bound control grant 仍可独立撤销。
+- CDP `10/10`、find-skill `10/10`、仓库分类/组件产物合同 `29/29` 通过；当前实际 diff 被唯一分类器判为 `plugin-only`，只发布两个 portable component：`@e-mate/dsh-plugin-cdp` 与 `@e-mate/dsh-plugin-find-skill`，`run_base=false`、Base v4 合同有效。完整 generation 与安装态确认仍须以提交后的精确组件字节验证。

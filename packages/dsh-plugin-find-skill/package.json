@@ -11,7 +11,7 @@
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
-  "files": ["lib/index.js", "lib/index.d.ts", "lib/client.js", "lib/types", "pnpm-lock.yaml", "cordis.patch.yml", "README.md", "SOURCE.md", "LICENSE"],
+  "files": ["lib/index.js", "lib/index.d.ts", "lib/client.js", "lib/types", "lib/skills", "pnpm-lock.yaml", "cordis.patch.yml", "README.md", "SOURCE.md", "LICENSE"],
   "license": "MIT",
   "publishConfig": { "access": "public" },
   "engines": { "node": "^22.19.0 || >=24.0.0" },

@@ -6,6 +6,7 @@ import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import type {} from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-user-questions'
 import {
@@ -103,6 +104,30 @@ function configuredControl(control: { get(): ControlSettings }, endpoint: string
 async function setControl(ctx: Context, endpoint: string, allowControl: boolean): Promise<void> {
   if (!ctx.settings.writable) throw new Error('CDP control Settings are read-only')
   await ctx.settings.replace(CDP_CONTROL_SETTINGS_NAMESPACE, { allowControl, endpoint }, controlRevision(ctx))
+}
+
+async function openChromeRemoteDebugging(ctx: Context, signal?: AbortSignal): Promise<void> {
+  const target = 'chrome://inspect/#remote-debugging'
+  const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd.exe' : 'xdg-open'
+  const executable = await ctx.subprocess.resolveExecutable(command, {}, signal)
+  const argv = process.platform === 'darwin'
+    ? [executable, '-a', 'Google Chrome', target]
+    : process.platform === 'win32'
+      ? [executable, '/d', '/s', '/c', 'start', '', 'chrome.exe', target]
+      : [executable, target]
+  const handle = ctx.subprocess.spawn({
+    argv,
+    cwd: process.cwd(),
+    signal,
+    graceMs: 3_000,
+    stdio: {
+      stdin: 'ignore',
+      stdout: { maxBytes: 16 * 1024 },
+      stderr: { maxBytes: 16 * 1024 },
+    },
+  })
+  const outcome = await handle.done
+  if (outcome.exitCode !== 0) throw new Error('无法打开 Chrome 远程调试设置。')
 }
 
 function text(value: string): TextResult {
@@ -440,27 +465,30 @@ export function apply(ctx: CdpContext, config: Config = {}): void {
     icon_key: 'browser',
     order: 30,
     actions: [
+      { id: 'open-remote-debugging', label: '打开 Chrome 设置', kind: 'primary' },
       { id: 'enable-control', label: '启用浏览器控制', kind: 'primary' },
       { id: 'disable-control', label: '停用浏览器控制', kind: 'secondary' },
     ],
-    invoke: async (actionId: string) => {
-      if (actionId === 'enable-control') await setControl(ctx, endpoint, true)
+    invoke: async (actionId: string, _data: unknown, signal: AbortSignal) => {
+      if (actionId === 'open-remote-debugging') await openChromeRemoteDebugging(ctx, signal)
+      else if (actionId === 'enable-control') await setControl(ctx, endpoint, true)
       else if (actionId === 'disable-control') await setControl(ctx, endpoint, false)
       else throw new Error('unknown CDP capability action')
       return { allow_control: configuredControl(control, endpoint) }
     },
     status: async (signal: AbortSignal) => {
-      const action_ids = ctx.settings.writable
-        ? [configuredControl(control, endpoint) ? 'disable-control' : 'enable-control']
-        : []
+      const controlAction = ctx.settings.writable
+        ? configuredControl(control, endpoint) ? 'disable-control' : 'enable-control'
+        : undefined
+      const setupActionIds = ['open-remote-debugging', ...(controlAction === undefined ? [] : [controlAction])]
       try {
         const pages = await browser.pages(AbortSignal.any([signal, AbortSignal.timeout(2_000)]))
         return pages.length === 0
-          ? { state: 'setup-required', detail: 'CDP 已连接，但没有可用页面。请在 Chrome 打开 chrome://inspect/#remote-debugging。', action_ids }
-          : { state: 'ready', detail: `CDP 已连接 · ${pages.length} 个页面 · 控制${configuredControl(control, endpoint) ? '已启用' : '未启用'}`, action_ids }
+          ? { state: 'setup-required', detail: 'CDP 已连接，但没有可用页面。请在 Chrome 原生页面确认远程调试。', action_ids: setupActionIds }
+          : { state: 'ready', detail: `CDP 已连接 · ${pages.length} 个页面 · 控制${configuredControl(control, endpoint) ? '已启用' : '未启用'}`, action_ids: controlAction === undefined ? [] : [controlAction] }
       } catch {
         signal.throwIfAborted()
-        return { state: 'setup-required', detail: '请先在 Chrome 打开 chrome://inspect/#remote-debugging 并启用远程调试。', action_ids }
+        return { state: 'setup-required', detail: '首次使用需在 Chrome 原生页面确认远程调试；确认后对所有 e-Mate 会话生效。', action_ids: setupActionIds }
       }
     },
   }), 'emate.cdp: capability metadata')
