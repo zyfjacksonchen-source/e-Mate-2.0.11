@@ -17,24 +17,23 @@ afterEach(() => {
 describe('desktop header controls', () => {
   it('moves status, theme, and native settings into the Session header in compatibility mode', () => {
     const toggleTheme = vi.fn()
-    const renderSlot = vi.fn((name: string) => name === 'sidebar.settings'
-      ? <button type="button" data-emate-settings-trigger="" aria-label="打开设置"><Icon /></button>
-      : null)
+    const openSettings = vi.fn()
 
     render(<HeaderControls
-      renderSlot={renderSlot}
       getThemeScheme={() => 'dark'}
       subscribeTheme={() => () => {}}
       toggleTheme={toggleTheme}
+      openSettings={openSettings}
       LightIcon={Icon}
       DarkIcon={Icon}
+      SettingsIcon={Icon}
     />)
 
     expect(screen.getByRole('status', { name: '运行时已连接' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '切换到明亮模式' }))
     expect(toggleTheme).toHaveBeenCalledOnce()
-    expect(screen.getByRole('button', { name: '打开设置' })).toBeTruthy()
-    expect(renderSlot).toHaveBeenCalledWith('sidebar.settings', { wide: false })
+    fireEvent.click(screen.getByRole('button', { name: '打开设置' }))
+    expect(openSettings).toHaveBeenCalledOnce()
   })
 
   it('keeps its own controls on the same 32px center line as Share', () => {
@@ -45,7 +44,7 @@ describe('desktop header controls', () => {
     expect(share).toMatch(/\.trigger\s*\{[\s\S]*?height:\s*32px/u)
   })
 
-  it('assembles through the real DSH Session utility slot with the settings child declared', async () => {
+  it('assembles across multiple DSH Sessions without redeclaring the root settings slot', async () => {
     type RootProps = PropsRenderSlots<'conversation.session.header.utilities'>
     const Root = ({ renderSlot, SessionProvider }: RootProps) => (
       <SessionProvider empty={() => null}>
@@ -67,11 +66,14 @@ describe('desktop header controls', () => {
       order: -20,
       priority: -1,
     } as never, () => <button type="button">分享当前任务</button>)
-    runtime.slots.register({ name: 'sidebar.settings' } as never, () => (
-      <button type="button" data-emate-settings-trigger="">打开设置</button>
-    ))
     const view = runtime.renderRoot()
-    await runtime.sessions.add({ id: 'header-session' })
+    await runtime.sessions.add({ id: 'header-session-1' })
+    for (let index = 2; index <= 6; index++) {
+      await runtime.sessions.add({ id: `header-session-${index}` }, { current: false })
+    }
+    const headerEntry = runtime.slots.entries('conversation.session.header.utilities')
+      .find(entry => entry.options.id === 'e-mate-header-controls')
+    expect(headerEntry?.options.children).toBeUndefined()
     expect(view.getByRole('button', { name: '打开设置' })).toBeTruthy()
     expect(view.getByRole('button', { name: '分享当前任务' })).toBeTruthy()
     expect(view.container.querySelector('[data-emate-header-controls]')).not.toBeNull()

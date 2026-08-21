@@ -6,8 +6,7 @@
   color: var(--dsw-alias-label-primary);
 }
 
-.controls > button,
-.settings :global(button[data-emate-settings-trigger]) {
+.controls > button {
   width: 32px;
   height: 32px;
   min-width: 32px;
@@ -24,9 +23,7 @@
 }
 
 .controls > button:hover,
-.controls > button:focus-visible,
-.settings :global(button[data-emate-settings-trigger]:hover),
-.settings :global(button[data-emate-settings-trigger]:focus-visible) {
+.controls > button:focus-visible {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
@@ -37,12 +34,6 @@
   border-radius: 999px;
   flex: none;
   background: var(--emate-color-brand, #ff6a1a);
-}
-
-.settings {
-  width: 32px;
-  height: 32px;
-  display: inline-flex;
 }
 
 @media (max-width: 720px) {

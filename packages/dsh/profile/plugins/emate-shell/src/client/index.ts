@@ -70,9 +70,6 @@ export function registerHeaderControls(ctx: any): void {
     id: 'e-mate-header-controls',
     order: -30,
     priority: -1,
-    children: {
-      'sidebar.settings': { kind: 'single', scope: 'root' },
-    },
     inject: () => ({
       getThemeScheme: () => ctx.theme.getTheme().active.colorScheme,
       subscribeTheme: (listener: () => void) => ctx.on('theme/change', listener),
@@ -80,8 +77,12 @@ export function registerHeaderControls(ctx: any): void {
         const scheme = ctx.theme.getTheme().active.colorScheme
         ctx.theme.setTheme(scheme === 'dark' ? 'light' : 'dark')
       },
+      openSettings: () => {
+        document.querySelector<HTMLButtonElement>('[data-emate-settings-trigger]')?.click()
+      },
       LightIcon: IconLightOutline16,
       DarkIcon: IconDarkOutline16,
+      SettingsIcon: IconSettingsOutline16,
     }),
   }, HeaderControls))
 }
