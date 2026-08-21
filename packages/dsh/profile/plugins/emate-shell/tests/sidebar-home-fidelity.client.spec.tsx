@@ -36,7 +36,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
         'project-session': { id: 'project-session', displayTitle: '项目任务', running: false, blank: false, updatedAt: 2 },
         'general-session': { id: 'general-session', displayTitle: '通用任务', running: true, blank: false, updatedAt: 1 },
       },
-      current: 'general-session',
+      current: undefined,
       phase: 'ready' as const,
     }
     const workspaces = {
