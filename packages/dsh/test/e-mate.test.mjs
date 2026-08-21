@@ -1554,7 +1554,7 @@ test('Agent operation guidance owns the e-Mate persona and reuses Harness shell 
   assert.match(section.text, /installed find-skill provider/u)
   assert.match(section.text, /use `mcp_manage`/u)
   assert.match(section.text, /user-visible Chrome page exposed through the DSH CDP adapter/u)
-  assert.match(section.text, /do not ask the user to paste secrets into chat/u)
+  assert.match(section.text, /Do not invent a built-in connector or ask the user to paste secrets into chat/u)
   assert.equal(channel, SCHEDULES_CHANNEL)
   assert.deepEqual(options, { authority: 'loopback' })
   const schedules = await handler('list', {})
