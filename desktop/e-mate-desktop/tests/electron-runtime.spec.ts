@@ -1,5 +1,6 @@
 import { basename, dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ProfileUpdateAvailable } from '../src/profile-update.ts'
 import type { DesktopShellSpec } from '../src/runtime.ts'
 
 const updateAvailable = {
@@ -768,6 +769,34 @@ describe('Electron compatibility runtime', () => {
     await vi.waitFor(() => { expect(restart).toHaveBeenCalledOnce() })
   })
 
+  it('shows the signed component update confirmation in Chinese', async () => {
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const update = {
+      status: 'update-available',
+      currentGeneration: 'previous',
+      currentSequence: 2,
+      generationId: 'a'.repeat(64),
+      releaseVersion: '2.0.11',
+      sequence: 3,
+      changedComponents: [{ id: '@e-mate/dsh-client-shell', version: '2.0.11', bytes: 4096 }],
+      downloadBytes: 4096,
+      release: {},
+    } as ProfileUpdateAvailable
+    const confirm = (runtime as unknown as {
+      confirmProfileUpdate(update: ProfileUpdateAvailable): Promise<boolean>
+    }).confirmProfileUpdate.bind(runtime)
+
+    electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 1, checkboxChecked: false })
+    await expect(confirm(update)).resolves.toBe(false)
+    expect(electron.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
+      title: '发现 e-Mate 组件更新',
+      message: 'e-Mate 2.0.11 第 3 代组件已可更新。',
+      detail: expect.stringContaining('下载大小：4.0 KiB'),
+      buttons: ['更新并重启', '稍后'],
+    }))
+  })
+
   it('uses Electron networking and confirmation-gated macOS replacement', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const response = Response.json({ version: '2.1.0' })
@@ -795,15 +824,15 @@ describe('Electron compatibility runtime', () => {
       latestVersion: '2.0.0',
     })
     expect(electron.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
-      title: 'e-Mate Is Up to Date',
-      detail: 'Installed version: 2.0.0',
-      buttons: ['OK'],
+      title: 'e-Mate 已是最新版本',
+      detail: '已安装版本：2.0.0',
+      buttons: ['知道了'],
     }))
 
     await runtime.updates.showManualCheckResult(null)
     expect(electron.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
-      title: 'Unable to Check for Updates',
-      buttons: ['OK'],
+      title: '无法检查更新',
+      buttons: ['知道了'],
     }))
 
     electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 1, checkboxChecked: false })
@@ -813,8 +842,8 @@ describe('Electron compatibility runtime', () => {
     electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 0, checkboxChecked: false })
     await expect(runtime.updates.confirmDownload('2.1.0')).resolves.toBe(true)
     expect(electron.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
-      detail: 'e-Mate will download, verify, install, and reopen automatically.',
-      buttons: ['Update and Restart', 'Later'],
+      detail: '将自动下载并校验安装包，安装完成后重新打开 e-Mate。',
+      buttons: ['更新并重启', '稍后'],
     }))
     const controller = new AbortController()
     await runtime.updates.downloadAndOpen(updateAvailable, controller.signal)
@@ -841,8 +870,8 @@ describe('Electron compatibility runtime', () => {
     runtime.commitPreparedUpdateShutdown()
     expect(macUpdater.markShutdownReady).toHaveBeenCalledOnce()
     expect(electron.notifications[0]?.options).toEqual({
-      title: 'Installing e-Mate Update',
-      body: 'e-Mate 2.1.0 will reopen automatically.',
+      title: '正在安装 e-Mate 更新',
+      body: 'e-Mate 2.1.0 将自动重新打开。',
     })
 
     runtime.updates.notify({

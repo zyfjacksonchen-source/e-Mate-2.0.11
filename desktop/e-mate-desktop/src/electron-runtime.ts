@@ -175,8 +175,8 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       install: async (update, signal) => {
         await installProfileUpdate(configured, update, signal)
         this.showNotification({
-          title: 'Installing e-Mate Components',
-          body: `e-Mate ${update.releaseVersion} will reopen with the verified component generation.`,
+          title: '正在安装 e-Mate 组件',
+          body: `e-Mate ${update.releaseVersion} 将使用已验证的组件更新重新启动。`,
         })
         void this.requestRestart().catch((cause: unknown) => {
           process.stderr.write(`@e-mate/desktop: failed to restart after component update: ${cause instanceof Error ? cause.message : String(cause)}\n`)
@@ -441,10 +441,10 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private async confirmUpdateDownload(version: string): Promise<boolean> {
     const result = await dialog.showMessageBox({
       type: 'info',
-      title: 'e-Mate Update Available',
-      message: `e-Mate ${version} is available.`,
-      detail: 'e-Mate will download, verify, install, and reopen automatically.',
-      buttons: ['Update and Restart', 'Later'],
+      title: '发现 e-Mate 更新',
+      message: `e-Mate ${version} 已可更新。`,
+      detail: '将自动下载并校验安装包，安装完成后重新打开 e-Mate。',
+      buttons: ['更新并重启', '稍后'],
       defaultId: 1,
       cancelId: 1,
       noLink: true,
@@ -455,14 +455,14 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   /** Show the exact signed component delta before any component payload is downloaded. */
   private async confirmProfileUpdate(update: ProfileUpdateAvailable): Promise<boolean> {
     const components = update.changedComponents.length === 0
-      ? 'No component payload changed; only the signed generation receipt will update.'
+      ? '本次没有组件文件变更，仅更新签名代回执。'
       : update.changedComponents.map(component => `• ${component.id} ${component.version}`).join('\n')
     const result = await dialog.showMessageBox({
       type: 'info',
-      title: 'e-Mate Component Update Available',
-      message: `e-Mate ${update.releaseVersion} component generation ${update.sequence} is available.`,
-      detail: `${components}\n\nDownload: ${formatBytes(update.downloadBytes)}\nThe update will be verified, activated atomically, and committed only after restart health checks pass.`,
-      buttons: ['Update and Restart', 'Later'],
+      title: '发现 e-Mate 组件更新',
+      message: `e-Mate ${update.releaseVersion} 第 ${update.sequence} 代组件已可更新。`,
+      detail: `${components}\n\n下载大小：${formatBytes(update.downloadBytes)}\n更新包将先完成校验，再原子切换并重启；仅在启动健康检查通过后生效。`,
+      buttons: ['更新并重启', '稍后'],
       defaultId: 1,
       cancelId: 1,
       noLink: true,
@@ -475,10 +475,10 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (result === null) {
       await dialog.showMessageBox({
         type: 'warning',
-        title: 'Unable to Check for Updates',
-        message: 'e-Mate could not check for updates.',
-        detail: 'Please try again later.',
-        buttons: ['OK'],
+        title: '无法检查更新',
+        message: '暂时无法检查 e-Mate 更新。',
+        detail: '请稍后再试。',
+        buttons: ['知道了'],
         defaultId: 0,
         noLink: true,
       })
@@ -488,10 +488,10 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (result.status === 'up-to-date') {
       await dialog.showMessageBox({
         type: 'info',
-        title: 'e-Mate Is Up to Date',
-        message: 'No newer version of e-Mate is available.',
-        detail: `Installed version: ${result.currentVersion}`,
-        buttons: ['OK'],
+        title: 'e-Mate 已是最新版本',
+        message: '当前没有更新版本。',
+        detail: `已安装版本：${result.currentVersion}`,
+        buttons: ['知道了'],
         defaultId: 0,
         noLink: true,
       })
@@ -500,10 +500,10 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
 
     await dialog.showMessageBox({
       type: 'info',
-      title: 'e-Mate Update Available',
-      message: `e-Mate ${result.latestVersion} is available.`,
-      detail: 'Installer downloads are unavailable in this build.',
-      buttons: ['OK'],
+      title: '发现 e-Mate 更新',
+      message: `e-Mate ${result.latestVersion} 已可更新。`,
+      detail: '当前构建不支持下载安装包。',
+      buttons: ['知道了'],
       defaultId: 0,
       noLink: true,
     })
@@ -542,8 +542,8 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       })
       this.markMacUpdateShutdownReady = prepared.markShutdownReady
       this.showNotification({
-        title: 'Installing e-Mate Update',
-        body: `e-Mate ${update.latestVersion} will reopen automatically.`,
+        title: '正在安装 e-Mate 更新',
+        body: `e-Mate ${update.latestVersion} 将自动重新打开。`,
       })
       this.quitting = true
       spec.requestQuit(0)
