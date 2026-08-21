@@ -442,9 +442,9 @@ describe('repository release boundary', () => {
 
   it('prepares only an already admitted complete component generation for native Cloudflare publication', () => {
     const workflow = readFileSync(new URL('../.github/workflows/profile-release.yml', import.meta.url), 'utf8')
-    assert.match(workflow, /test "\$\(jq -er \.head_sha <<<"\$run_json"\)" = "\$GITHUB_SHA"/u)
+    assert.match(workflow, /source_sha="\$\(jq -er \.head_sha <<<"\$run_json"\)"/u)
     assert.match(workflow, /test "\$\(jq -er \.conclusion <<<"\$run_json"\)" = success/u)
-    assert.match(workflow, /push\)(?:.|\n)*?head_branch(?:.|\n)*?= main(?:.|\n)*?pull_request\)(?:.|\n)*?\.base\.ref == "main" and \.head\.sha == \$sha/u)
+    assert.match(workflow, /push\)(?:.|\n)*?test "\$source_sha" = "\$GITHUB_SHA"(?:.|\n)*?pull_request\)(?:.|\n)*?\.merge_commit_sha(?:.|\n)*?\.base\.sha(?:.|\n)*?git\/commits\/\$source_sha(?:.|\n)*?\$GITHUB_SHA\^\{tree\}/u)
     assert.match(workflow, /name: e-mate-change-impact-\$\{\{ steps\.run\.outputs\.source_sha \}\}/u)
     assert.match(workflow, /job_succeeded 'CI admission'/u)
     assert.match(workflow, /if test "\$\(jq -er \.portable_publish "\$impact"\)" = true;(?:.|\n)*?job_succeeded 'Portable Profile generations'(?:.|\n)*?Complete Profile generation \/ \$target/u)
@@ -461,6 +461,7 @@ describe('repository release boundary', () => {
     assert.match(workflow, /changed_args\+=\(--changed "\$component"\)/u)
     assert.match(workflow, /EMATE_PROFILE_SIGNING_PRIVATE_KEY: \$\{\{ secrets\.EMATE_PROFILE_SIGNING_PRIVATE_KEY \}\}/u)
     assert.match(workflow, /EMATE_ACCEPTED_CI_RUN_ID: \$\{\{ inputs\.ci_run_id \}\}/u)
+    assert.match(workflow, /EMATE_ACCEPTED_SOURCE_SHA: \$\{\{ needs\.validate\.outputs\.source_sha \}\}/u)
     assert.match(workflow, /environment: r2-publish/u)
     assert.doesNotMatch(workflow, /ECOREX_R2_ACCESS_KEY_ID|ECOREX_R2_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID/u)
     assert.match(workflow, /name: Build and test the target component\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)

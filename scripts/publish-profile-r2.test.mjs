@@ -140,6 +140,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
   ]), { acceptedCiRunId: '123', preparationRunId: '456' })
   assert.equal(plan.document_type, 'emate.profile-native-cloudflare-publication-plan')
   assert.equal(plan.source_commit, sourceCommit)
+  assert.equal(plan.main_commit, sourceCommit)
   assert.equal(plan.accepted_ci_run_id, '123')
   assert.equal(plan.preparation_run_id, '456')
   assert.equal(plan.activations.every(item => item.expected_current === null), true)
