@@ -1,0 +1,36 @@
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  min-height: 24px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.leading,
+.chevron {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message {
+  display: contents;
+}
+
+.message[data-emate-process-collapsed] :global([data-variant='think']) {
+  display: none;
+}
+
+:global([data-chat-flow-kind]:has([data-emate-process-hidden])) {
+  display: none;
+}

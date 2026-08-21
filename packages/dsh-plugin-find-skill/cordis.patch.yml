@@ -11,10 +11,6 @@
         compactDisposePolicy: keep
         persistentSkillSources:
           - larksuite/cli
-          - https://github.com/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.11-r1/skills/connect-feishu-cli
-          - https://github.com/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.11-r1/skills/connect-tencent-docs
-          - https://github.com/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.11-r1/skills/connect-dingtalk
-          - https://github.com/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.11-r1/skills/connect-wechat-bot
         prioritySources:
           - zyfjacksonchen-source
           - riba2534

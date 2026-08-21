@@ -32,7 +32,6 @@ describe('e-Mate desktop profile', () => {
       '@kelearns/dsh-navigation-bar',
       'dsh-at-file',
       'dsh-file-viewer',
-      'dsh-turn-fold',
       'dsh-visualize',
     ])
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-im')
@@ -52,7 +51,7 @@ describe('e-Mate desktop profile', () => {
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-find-skill', 'lib', 'index.js'))).toBe(true)
     const findSkillPatch = readFileSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-find-skill', 'cordis.patch.yml'), 'utf8')
     expect(findSkillPatch).toContain("cliCommand: 'pnpm dlx skills@1.5.22'")
-    expect(findSkillPatch).toContain('/tree/skills-v2.0.9-r5/skills/connect-feishu-cli')
+    expect(findSkillPatch).toContain('/tree/skills-v2.0.11-r1/skills/connect-feishu-cli')
     expect(findSkillPatch).not.toContain('/tree/main/skills/connect-feishu-cli')
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-mcp-manage', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'lib', 'index.js'))).toBe(true)
@@ -75,17 +74,7 @@ describe('e-Mate desktop profile', () => {
     expect(searchMcpHost).toContain('https://mcp.tavily.com/mcp/')
     expect(searchMcpHost).not.toMatch(/StdioClientTransport|duckduckgo|\bnpx\b/u)
     expect(existsSync(join(profile, 'node_modules', 'dsh-search-mcp'))).toBe(false)
-    const turnFoldClient = readFileSync(join(profile, 'node_modules', 'dsh-turn-fold', 'client.js'), 'utf8')
-    const labelBody = /function activityHeaderLabel\(fold\) \{([\s\S]*?)\n\t\t\}/u.exec(turnFoldClient)?.[1]
-    expect(labelBody).toBeDefined()
-    const activityHeaderLabel = new Function('fold', labelBody ?? '') as (fold: { toolCount: number, messageCount: number }) => string
-    expect(activityHeaderLabel({ toolCount: 4, messageCount: 2 })).toBe('4 次工具调用，2 条消息')
-    expect(turnFoldClient).toContain('v === undefined ? false : v')
-    expect(turnFoldClient).toContain('fold.activityCount > 0')
-    expect(turnFoldClient).toContain('assistantMustStayVisible(node)')
-    expect(turnFoldClient).toContain('toolFailed(node)')
-    expect(turnFoldClient).not.toContain('turnTimings')
-    expect(turnFoldClient).not.toMatch(/首 token|缓存命中|tok\/s|消耗.*token/u)
+    expect(existsSync(join(profile, 'node_modules', 'dsh-turn-fold'))).toBe(false)
     expect(existsSync(join(profile, 'node_modules', 'dsh-visualize', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(home, 'browser-extension'))).toBe(false)
     mkdirSync(join(home, 'browser-extension'))
@@ -164,9 +153,7 @@ describe('e-Mate desktop profile', () => {
       name: 'dsh-file-viewer',
       config: expect.objectContaining({ allowAbsolutePaths: false }),
     }))
-    expect(rows.find(row => row.id === 'dsh-turn-fold')).toEqual(expect.objectContaining({
-      name: 'dsh-turn-fold',
-    }))
+    expect(rows.map(row => row.id)).not.toContain('dsh-turn-fold')
     expect(rows.find(row => row.id === 'visualize')).toEqual(expect.objectContaining({
       name: 'dsh-visualize',
     }))
@@ -236,18 +223,23 @@ describe('e-Mate desktop profile', () => {
     manifest.dependencies['@e-mate/dsh-plugin-xin-assistant'] = '2.0.10'
     manifest.dependencies['@yuxianglin/dsh-bridge-browser'] = '0.0.1'
     manifest.dependencies['dsh-better-sidebar'] = '0.12.2'
+    manifest.dependencies['dsh-turn-fold'] = '0.2.2'
     const retiredXin = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant')
     const retiredSidebar = join(profile, 'node_modules', 'dsh-better-sidebar')
+    const retiredTurnFold = join(profile, 'node_modules', 'dsh-turn-fold')
     mkdirSync(retiredXin, { recursive: true })
     mkdirSync(retiredSidebar, { recursive: true })
+    mkdirSync(retiredTurnFold, { recursive: true })
     writeFileSync(join(retiredXin, 'stale.txt'), 'retired', { flag: 'w' })
     writeFileSync(join(retiredSidebar, 'stale.txt'), 'retired', { flag: 'w' })
+    writeFileSync(join(retiredTurnFold, 'stale.txt'), 'retired', { flag: 'w' })
     manifest.dsh.profile.bundles.push(
       '@xmanrui/dsh-im',
       '@e-mate/dsh-plugin-im',
       '@e-mate/dsh-plugin-xin-assistant',
       '@yuxianglin/dsh-bridge-browser',
       'dsh-better-sidebar',
+      'dsh-turn-fold',
     )
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
 
@@ -262,11 +254,14 @@ describe('e-Mate desktop profile', () => {
     expect(repaired.dependencies['@e-mate/dsh-plugin-xin-assistant']).toBeUndefined()
     expect(repaired.dependencies['@yuxianglin/dsh-bridge-browser']).toBeUndefined()
     expect(repaired.dependencies['dsh-better-sidebar']).toBeUndefined()
+    expect(repaired.dependencies['dsh-turn-fold']).toBeUndefined()
     expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-im')
     expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-xin-assistant')
     expect(repaired.dsh.profile.bundles).not.toContain('@yuxianglin/dsh-bridge-browser')
     expect(repaired.dsh.profile.bundles).not.toContain('dsh-better-sidebar')
+    expect(repaired.dsh.profile.bundles).not.toContain('dsh-turn-fold')
     expect(existsSync(retiredXin)).toBe(false)
     expect(existsSync(retiredSidebar)).toBe(false)
+    expect(existsSync(retiredTurnFold)).toBe(false)
   })
 })

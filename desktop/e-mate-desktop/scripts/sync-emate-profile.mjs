@@ -21,7 +21,6 @@ const ecosystemPlugins = [
   '@kelearns/dsh-navigation-bar',
   'dsh-at-file',
   'dsh-file-viewer',
-  'dsh-turn-fold',
   'dsh-visualize',
 ]
 

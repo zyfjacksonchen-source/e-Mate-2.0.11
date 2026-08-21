@@ -5,6 +5,13 @@ import { join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const upstream = resolve(root, '../../upstream/plugins/dsh-find-skill')
 const harness = resolve(root, '../../upstream/deepseek-harness')
+const productSkills = resolve(root, '../../skills')
+const bundledConnectorSkills = [
+  'connect-feishu-cli',
+  'connect-tencent-docs',
+  'connect-dingtalk',
+  'connect-wechat-bot',
+]
 const run = (cwd, ...args) => {
   const result = spawnSync('pnpm', args, { cwd, encoding: 'utf8', stdio: 'pipe' })
   if (result.status !== 0) throw new Error(`${args.join(' ')} failed:\n${result.stdout}${result.stderr}`)
@@ -40,6 +47,12 @@ run(join(upstream, 'client'), 'build')
 await rm(join(root, 'lib'), { recursive: true, force: true })
 await cp(join(upstream, 'lib'), join(root, 'lib'), { recursive: true })
 await cp(join(root, 'overrides/emate-safety.mjs'), join(root, 'lib/emate-safety.js'))
+for (const name of bundledConnectorSkills) {
+  const target = join(root, 'lib/skills', name)
+  await mkdir(join(target, 'agents'), { recursive: true })
+  await cp(join(productSkills, name, 'SKILL.md'), join(target, 'SKILL.md'))
+  await cp(join(productSkills, name, 'agents/openai.yaml'), join(target, 'agents/openai.yaml'))
+}
 await mkdir(join(root, 'lib/types/client'), { recursive: true })
 await cp(join(upstream, 'client/lib/client.js'), join(root, 'lib/client.js'))
 await cp(join(upstream, 'client/lib/types/index.d.ts'), join(root, 'lib/types/client/index.d.ts'))
@@ -166,13 +179,13 @@ let indexSource = await readFile(indexPath, 'utf8')
 indexSource = replaceExactlyOnce(
   indexSource,
   `import { Config } from "./config.js";`,
-  `import { Config } from "./config.js";\nimport { promotePersistentSkills } from "./emate-safety.js";`,
+  `import { Config } from "./config.js";\nimport { promotePersistentSkills, reconcileBundledConnectorSkills } from "./emate-safety.js";`,
   'startup promotion import',
 )
 indexSource = replaceExactlyOnce(
   indexSource,
   `    // Managed provider over self-owned project/global roots.\n    const { provider } = registerManagedProvider((create) => ctx.skills.registerProvider(create), validated);\n    // Temporary skill manager; temp roots resolve per call site.\n    const roots = resolveRoots(validated);`,
-  `    const roots = resolveRoots(validated);\n    promotePersistentSkills(validated, roots);\n    // Managed provider over self-owned project/global roots.\n    const { provider } = registerManagedProvider((create) => ctx.skills.registerProvider(create), validated);\n    // Temporary skill manager; temp roots resolve per call site.`,
+  `    const roots = resolveRoots(validated);\n    reconcileBundledConnectorSkills(validated, roots);\n    promotePersistentSkills(validated, roots);\n    // Managed provider over self-owned project/global roots.\n    const { provider } = registerManagedProvider((create) => ctx.skills.registerProvider(create), validated);\n    // Temporary skill manager; temp roots resolve per call site.`,
   'startup promotion',
 )
 await writeFile(indexPath, indexSource)

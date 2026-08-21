@@ -11,7 +11,7 @@
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
-  "files": ["lib/index.js", "lib/index.d.ts", "lib/client.js", "lib/types", "pnpm-lock.yaml", "cordis.patch.yml", "README.md", "SOURCE.md", "LICENSE"],
+  "files": ["lib/index.js", "lib/index.d.ts", "lib/client.js", "lib/types", "lib/skills", "pnpm-lock.yaml", "cordis.patch.yml", "README.md", "SOURCE.md", "LICENSE"],
   "license": "MIT",
   "publishConfig": { "access": "public" },
   "engines": { "node": "^22.19.0 || >=24.0.0" },
@@ -50,7 +50,7 @@
         "effects": ["network-remote", "persistent-state", "subprocess"],
         "guards": ["explicit-user-action", "fixed-catalog", "native-user-question"]
       },
-      "base_contracts": ["e-mate-desktop-profile-v4-dsh-2bc16230975f"]
+      "base_contracts": ["e-mate-desktop-profile-v5-dsh-2bc16230975f"]
     },
     "harnessVersion": "0.1.0-rc.7",
     "harnessCommit": "2bc16230975f6cf02aa1b283b1f86de44007b059"

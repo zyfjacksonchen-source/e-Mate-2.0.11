@@ -1814,3 +1814,22 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 正式 v3 DMG 的真实安装态重开 `测试生成图片` 会话仍触发 `SessionFormatUnsupportedError`。写入 Profile 已携带 `ignorable: true`，但 `harness-runtime-adapters.mjs` 只修改 CLI/Harness 的 pnpm 组装树；Electron Builder 实际封装的是 Desktop 自己的 Yarn 依赖树，最终 `app.asar.unpacked/node_modules/@deepseek-ai/dsh-session{,-persistence}` 保持原始 rc.7，导致插件启动前的冷读边界先拒绝历史 `emate/image-output`。
 - 修复复用 Desktop 已有的 Yarn patch 单一路径：`dsh-session` 只持久化显式 `ignorable: true`，`dsh-session-persistence` 只兼容历史上精确的 `emate/image-output`；其他未知且未标记事件继续失败关闭。Desktop package 行为测试直接执行最终依赖字节，证明新写入 envelope、生图历史冷读与未知事件负例，不再只测试 CLI 组装器源码。
 - v3 Base 已经存在且不具备该运行时行为，因此当前唯一 Base id 提升为 `e-mate-desktop-profile-v4-dsh-2bc16230975f`，所有组件精确绑定 v4；v3 必须在下载 v4 generation 前返回 `base-required`。正式发布必须以新 DMG 安装后重开原受影响会话作为收据，再完成完整组件 generation 与在线原子更新，旧 v3 构建不得激活。
+
+## 2026-08-21 · 2.0.11 S57 连接 Skill 的签名全局投影
+
+- 飞书重复授权并非 provider token 失效：以官方 `@larksuite/cli@1.0.88 auth status --json --verify` 只读核验得到 `verified: true`。真正被 Agent 加载的 `$DSH_HOME/skills-bridge/global/connect-feishu-cli` 仍来自 2.0.9 `skills-v2.0.9-r2`，旧说明固定执行 `config init --new` 与 `auth login`；它覆盖了仓库中已改为“先 status、有效即复用”的 2.0.11 指令。
+- 永久修复仍落在现有 find-skill Profile component，不新增连接或凭据 store：四个第一方 bootstrap Skill 作为签名组件字节随包发货，启动时在 provider 注册前投影到同一个 DSH global managed root。只允许缺失目录、精确已知旧 e-Mate 来源或本组件上次写入的 receipt 更新；任意用户自有同名来源保持原样并报告冲突。切换使用同卷 staging/backup 与启动恢复，绝不读取、重置或迁移 `~/.lark-cli`、OS Keychain、DSH Credentials 或 IM 状态。
+- 远程安装白名单收窄为官方 `larksuite/cli` 域 Skill；四个 bootstrap Skill 已随组件存在，不再运行时下载自身。该改动只属于 `@e-mate/dsh-plugin-find-skill`，若组件门禁、完整 generation 组合与安装态跨会话复用均通过，必须保持 plugin-only，不得重建 Desktop Base。
+
+## 2026-08-21 · 2.0.11 S58 Chrome 原生 CDP 一次性启用入口
+
+- 安装态的 e-Mate CDP control grant 已默认开启，但 `127.0.0.1:9222` 没有监听；Chrome `chrome://inspect/#remote-debugging` 明确显示尚未勾选的原生安全开关。Chrome 136 起默认用户数据目录又会忽略启动参数式 remote-debugging，因此“不弹确认直接控制当前已登录 Chrome”只能通过改偏好或换隔离 profile，二者都不符合当前用户状态与 Chrome 安全边界；旧扩展桥也不应复活。
+- CDP 能力卡只新增一个显式用户动作，使用现有 DSH Subprocess 以固定参数打开 Chrome 原生设置页；不编辑 Chrome 文件、不点击安全开关、不增加扩展、IPC、浏览器进程管理器或第二套授权。Chrome 一次确认后由浏览器自身全局保持，e-Mate 的 endpoint-bound control grant 仍可独立撤销。
+- CDP `10/10`、find-skill `10/10`、仓库分类/组件产物合同 `29/29` 通过；当前实际 diff 被唯一分类器判为 `plugin-only`，只发布两个 portable component：`@e-mate/dsh-plugin-cdp` 与 `@e-mate/dsh-plugin-find-skill`，`run_base=false`、Base v4 合同有效。完整 generation 与安装态确认仍须以提交后的精确组件字节验证。
+
+## 2026-08-21 · 2.0.11 S59 原生进度自然披露与 Base v5
+
+- S52 只删除了 Shell 对 `assistant-step` 的临时覆盖，流式正文与 GenUI 已回到 pinned DSH 单一路径；用户安装态仍出现“X 次工具调用，Y 条消息”，根因是 Base 继续预装第三方 `dsh-turn-fold@0.2.2`。该包以 `priority:-1` 同时 shadow 原生 `assistant-step`、`tool-call` 与 `context`，并把未记录过的 turn 状态硬编码为默认折叠，因此不是 DSH 原生行为，也不是 GenUI 互斥。
+- 最小根因修复从受管 Profile roster、打包闭包和 Loader 必需集合删除 `dsh-turn-fold`，并把它列入 retired package，使已有安装升级时清退旧目录。热更新 Shell 只读取既有 `chat.order/nodes`：Agent 自然语言进度、结果、失败、图片与中断继续交给 priority `0` 的原生 `AssistantNodeView` 并保留 streaming；Reasoning/Think、Tool 与 Context 过程默认收进每回合唯一的“运行过程”折叠行，展开时仍委托原生 renderer 和既有 `tool.call.toolview` winner（含 GenUI）。没有 DOM observer、自动点击、新事件、第二 Store 或第二 transport。
+- 旧 Base v4 自带该包，无法由普通组件 generation 从磁盘与 Cordis 组合中安全移除；Base 合同因此提升为 `e-mate-desktop-profile-v5-dsh-2bc16230975f`。已启动但未签发、未上传的 v4 Profile bootstrap 被停止，避免发布已知错误基线；本次一次性 Base/完整 generation 成本完成后，不触及 Base roster 的 CDP、连接 Skill 或其他业务插件变化仍必须保持 component-only。
+- 当前窄验证收据：Shell 聚焦折叠/原生流式/GenUI 共存 `9/9`、Shell 全量 `47/47`、Profile 安装与旧包清退 `5/5`、Profile component/generation/release/update `19/19`、仓库 release boundary `37/37`；Shell 重建、Desktop Profile 同步、Host/Web/Client Loader 启动图与 diff check 均通过。正式完成仍以 Base v5 CI、安装态真实会话流式/展开回归及在线完整 generation 健康提交为准。

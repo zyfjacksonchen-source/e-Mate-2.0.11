@@ -230,7 +230,6 @@
     "@kelearns/dsh-navigation-bar": "0.2.1",
     "dsh-at-file": "https://github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz",
     "dsh-file-viewer": "patch:dsh-file-viewer@file%3Avendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%23vendor/dsh-file-viewer-0.1.0-04ccb1dfe2b4.tgz%3A%3Ahash=744675&locator=%2540e-mate%252Fdesktop%2540workspace%253Ae-mate-desktop#~/.yarn/patches/dsh-file-viewer-file-a44402e584.patch",
-    "dsh-turn-fold": "patch:dsh-turn-fold@https%3A//github.com/Winter-And-You-Gone/dsh-turn-fold/archive/b5e47fe062d71527fe2c5212fd25c1ee20a7f7a4.tar.gz#~/.yarn/patches/dsh-turn-fold-https-e835a4814f.patch",
     "dsh-visualize": "file:vendor/dsh-visualize-0.1.0-5e2e8b72df3e.tgz",
     "fflate": "0.8.3",
     "koffi": "3.1.5",

@@ -1,8 +1,17 @@
+import { createHash } from 'node:crypto'
 import { lstat, readFile, rm } from 'node:fs/promises'
-import { lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
+import { copyFileSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
+const BUNDLED_CONNECTOR_FILES = ['SKILL.md', 'agents/openai.yaml']
+export const BUNDLED_CONNECTOR_SKILLS = [
+  'connect-feishu-cli',
+  'connect-tencent-docs',
+  'connect-dingtalk',
+  'connect-wechat-bot',
+]
 
 export function validateManagedSkillName(value) {
   if (typeof value !== 'string' || value.length > 128 || !SKILL_NAME.test(value)) {
@@ -61,6 +70,139 @@ export function promotePersistentSkills(config, roots) {
     }
   }
   return promoted.sort()
+}
+
+function directoryState(path, owned = false) {
+  try {
+    const entry = lstatSync(path)
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      if (owned) throw new Error(`${path} is not a regular managed directory`)
+      return 'conflict'
+    }
+    return 'directory'
+  } catch (error) {
+    if (error?.code === 'ENOENT') return 'missing'
+    throw error
+  }
+}
+
+function removeOwnedDirectory(path) {
+  const state = directoryState(path, true)
+  if (state === 'directory') rmSync(path, { recursive: true })
+}
+
+function skillDigest(root, name) {
+  const hash = createHash('sha256')
+  for (const relativePath of BUNDLED_CONNECTOR_FILES) {
+    const path = join(root, name, ...relativePath.split('/'))
+    const entry = lstatSync(path)
+    if (!entry.isFile() || entry.isSymbolicLink()) throw new Error(`${path} is not a regular bundled file`)
+    hash.update(relativePath)
+    hash.update('\0')
+    hash.update(readFileSync(path))
+    hash.update('\0')
+  }
+  return hash.digest('hex')
+}
+
+function existingSkillDigest(root, name) {
+  try {
+    return skillDigest(root, name)
+  } catch {
+    return undefined
+  }
+}
+
+function readManagedMetadata(target) {
+  try {
+    const path = join(target, '.dsh-find-skill.json')
+    const entry = lstatSync(path)
+    if (!entry.isFile() || entry.isSymbolicLink()) return undefined
+    const value = JSON.parse(readFileSync(path, 'utf8'))
+    return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function acceptedBundledSource(name, source, currentSource) {
+  return source === `e-mate-bundled:${name}`
+    || source === currentSource
+    || source === `https://github.com/zyfjacksonchen-source/e-Mate/tree/skills-v2.0.9/skills/${name}`
+    || source === `https://github.com/zyfjacksonchen-source/e-Mate/tree/skills-v2.0.9-r2/skills/${name}`
+}
+
+function stageBundledSkill(bundledRoot, staging, name, digest) {
+  mkdirSync(join(staging, 'agents'), { recursive: true })
+  for (const relativePath of BUNDLED_CONNECTOR_FILES) {
+    copyFileSync(
+      join(bundledRoot, name, ...relativePath.split('/')),
+      join(staging, ...relativePath.split('/')),
+    )
+  }
+  writeFileSync(join(staging, '.dsh-find-skill.json'), JSON.stringify({
+    source: `e-mate-bundled:${name}`,
+    skill: name,
+    installedAt: Date.now(),
+    scope: 'global',
+    bundleDigest: digest,
+    bundleVersion: 1,
+  }, null, 2), 'utf8')
+}
+
+function recoverBundledSwap(target, staging, backup) {
+  const targetState = directoryState(target)
+  const backupState = directoryState(backup, true)
+  if (targetState === 'missing' && backupState === 'directory') renameSync(backup, target)
+  else if (targetState === 'directory' && backupState === 'directory') removeOwnedDirectory(backup)
+  removeOwnedDirectory(staging)
+}
+
+/** Reconcile signed first-party connector instructions into the device-global managed root. */
+export function reconcileBundledConnectorSkills(
+  config,
+  roots,
+  bundledRoot = fileURLToPath(new URL('./skills/', import.meta.url)),
+) {
+  mkdirSync(roots.globalSkillDir, { recursive: true })
+  const result = { installed: [], updated: [], unchanged: [], conflicts: [] }
+  for (const name of BUNDLED_CONNECTOR_SKILLS) {
+    const catalog = (config.catalogSkills ?? []).filter(skill => skill.id === name)
+    if (catalog.length !== 1) throw new Error(`${name} must have exactly one catalog entry`)
+    const digest = skillDigest(bundledRoot, name)
+    const target = join(roots.globalSkillDir, name)
+    const staging = join(roots.globalSkillDir, `.${name}.e-mate-staging`)
+    const backup = join(roots.globalSkillDir, `.${name}.e-mate-backup`)
+    recoverBundledSwap(target, staging, backup)
+
+    const state = directoryState(target)
+    if (state === 'conflict') {
+      result.conflicts.push(name)
+      continue
+    }
+    const metadata = state === 'directory' ? readManagedMetadata(target) : undefined
+    if (state === 'directory' && !acceptedBundledSource(name, metadata?.source, catalog[0].source)) {
+      result.conflicts.push(name)
+      continue
+    }
+    if (state === 'directory' && metadata?.source === `e-mate-bundled:${name}`
+      && metadata.bundleDigest === digest && existingSkillDigest(roots.globalSkillDir, name) === digest) {
+      result.unchanged.push(name)
+      continue
+    }
+
+    stageBundledSkill(bundledRoot, staging, name, digest)
+    if (state === 'directory') renameSync(target, backup)
+    try {
+      renameSync(staging, target)
+    } catch (error) {
+      if (state === 'directory' && directoryState(target) === 'missing') renameSync(backup, target)
+      throw error
+    }
+    removeOwnedDirectory(backup)
+    result[state === 'directory' ? 'updated' : 'installed'].push(name)
+  }
+  return result
 }
 
 function inside(root, target) {

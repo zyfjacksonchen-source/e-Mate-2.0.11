@@ -84,7 +84,7 @@ describe('repository release boundary', () => {
   it('accepts the checked-in base contract and every first-party component', () => {
     const boundary = loadReleaseBoundary(root)
     assert.equal(boundary.valid, true, boundary.errors.join('\n'))
-    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v4-dsh-2bc16230975f')
+    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v5-dsh-2bc16230975f')
     assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.11')
     assert.deepEqual(PRODUCT_UI_REFERENCE, {
       repository: 'zyfjacksonchen-source/ECoreX',
