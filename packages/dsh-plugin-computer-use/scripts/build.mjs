@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const upstream = resolve(root, '../../upstream/plugins/dsh-computer-use')
 const harness = resolve(root, '../../upstream/deepseek-harness')
+const readText = async path => (await readFile(path, 'utf8')).replaceAll('\r\n', '\n')
 const bundleRuntime = () => {
   const result = spawnSync(process.execPath, [
     resolve(harness, 'node_modules/tsdown/dist/run.mjs'),
@@ -32,7 +33,7 @@ if (process.platform === 'darwin') {
   nativeManifest.binary.sha256 = createHash('sha256').update(await readFile(helper)).digest('hex')
   await writeFile(nativeManifestPath, `${JSON.stringify(nativeManifest, null, 2)}\n`)
 }
-let client = await readFile(join(root, 'lib/client.js'), 'utf8')
+let client = await readText(join(root, 'lib/client.js'))
 client = client.replaceAll('@anionex/dsh-computer-use', '@e-mate/dsh-plugin-computer-use')
 await writeFile(join(root, 'lib/client.js'), client)
 
@@ -42,7 +43,7 @@ function replaceExactlyOnce(source, before, after, label) {
   return source.replace(before, after)
 }
 const exposurePath = join(root, 'lib/exposure.js')
-let exposure = await readFile(exposurePath, 'utf8')
+let exposure = await readText(exposurePath)
 exposure = replaceExactlyOnce(
   exposure,
   `import { defineTool } from '@deepseek-ai/dsh-tools';`,
@@ -121,7 +122,7 @@ export function hasExplicitComputerUseRequest(session) {
 `)
 
 const skillPath = join(root, 'lib/skill.js')
-let skill = await readFile(skillPath, 'utf8')
+let skill = await readText(skillPath)
 skill = replaceExactlyOnce(
   skill,
   `export const COMPUTER_USE_SKILL_CONTENT = \`# DSH Computer Use
@@ -140,7 +141,7 @@ await writeFile(skillPath, skill)
 
 const indexPath = join(root, 'lib/index.js')
 bundleRuntime()
-let runtime = await readFile(join(root, '.runtime-bundle/index.js'), 'utf8')
+let runtime = await readText(join(root, '.runtime-bundle/index.js'))
 runtime = replaceExactlyOnce(runtime, 'new URL("../../native/macos/", import.meta.url)', 'new URL("../native/macos/", import.meta.url)', 'bundled native path')
 runtime = replaceExactlyOnce(runtime, 'new URL("../../scripts/build-native.mjs", import.meta.url)', 'new URL("../scripts/build-native.mjs", import.meta.url)', 'bundled native builder path')
 await writeFile(indexPath, runtime)
