@@ -256,6 +256,7 @@ export function apply(ctx: any): void {
         CopyIcon: IconCopyOutline16,
         EditIcon: IconEditOutline16,
         ArchiveIcon: IconArchiveOutline20,
+        DeleteIcon: IconTrashOutline16,
         CloseIcon: IconCloseOutline16,
         startSession,
         openSchedules: () => {

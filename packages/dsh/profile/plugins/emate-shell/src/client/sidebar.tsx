@@ -55,6 +55,7 @@ interface Props {
   CopyIcon: Icon
   EditIcon: Icon
   ArchiveIcon: Icon
+  DeleteIcon: Icon
   CloseIcon: Icon
   startSession: (workspaceId?: string) => void
   openSchedules: () => void
@@ -90,6 +91,7 @@ export function SidebarRoot({
   CopyIcon,
   EditIcon,
   ArchiveIcon,
+  DeleteIcon,
   CloseIcon,
   startSession,
   openSchedules,
@@ -124,6 +126,10 @@ export function SidebarRoot({
   const [renameTarget, setRenameTarget] = useState<SessionRow | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [busySession, setBusySession] = useState<string | null>(null)
+  const [selecting, setSelecting] = useState(false)
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(() => new Set())
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [bulkBusy, setBulkBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [pathname, setPathname] = useState(() => location.pathname)
   const themeScheme = useSyncExternalStore(subscribeTheme, getThemeScheme, getThemeScheme)
@@ -142,6 +148,9 @@ export function SidebarRoot({
   const searchRows = normalizedQuery === ''
     ? []
     : visibleRows.filter(row => row.displayTitle.toLocaleLowerCase('zh-CN').includes(normalizedQuery))
+  const selectableRows = searchOpen && normalizedQuery !== '' ? searchRows : visibleRows
+  const allSelectableSelected = selectableRows.length > 0
+    && selectableRows.every(row => selectedSessionIds.has(row.id))
 
   useEffect(() => {
     const sync = () => { setPathname(location.pathname) }
@@ -287,6 +296,53 @@ export function SidebarRoot({
     }
   }
 
+  const cancelBulkSelection = () => {
+    if (bulkBusy) return
+    setSelecting(false)
+    setSelectedSessionIds(new Set())
+    setDeleteConfirm(false)
+  }
+
+  const toggleSelected = (id: string) => {
+    setSelectedSessionIds(currentIds => {
+      const next = new Set(currentIds)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    setSelectedSessionIds(allSelectableSelected
+      ? new Set()
+      : new Set(selectableRows.map(row => row.id)))
+  }
+
+  const deleteSelected = async () => {
+    const idsToDelete = [...selectedSessionIds]
+    if (idsToDelete.length === 0 || bulkBusy) return
+    setBulkBusy(true)
+    setNotice(null)
+    const failed: string[] = []
+    for (const id of idsToDelete) {
+      try {
+        await archiveSession(id)
+      } catch {
+        failed.push(id)
+      }
+    }
+    setDeleteConfirm(false)
+    setBulkBusy(false)
+    if (failed.length > 0) {
+      setSelectedSessionIds(new Set(failed))
+      setNotice(`已移除 ${idsToDelete.length - failed.length} 个会话，${failed.length} 个会话删除失败。`)
+      return
+    }
+    setSelecting(false)
+    setSelectedSessionIds(new Set())
+    setNotice(`已从侧边栏移除 ${idsToDelete.length} 个会话；日志和项目文件已保留。`)
+  }
+
   const copyId = async (id: string) => {
     try {
       await navigator.clipboard.writeText(id)
@@ -296,7 +352,21 @@ export function SidebarRoot({
     }
   }
 
-  const sessionRow = (row: SessionRow) => (
+  const sessionRow = (row: SessionRow) => selecting ? (
+    <label className={`${css.selectRow} ${selectedSessionIds.has(row.id) ? css.selected : ''}`} key={row.id}>
+      <input
+        type="checkbox"
+        aria-label={`选择会话：${row.blank ? '新会话' : row.displayTitle}`}
+        checked={selectedSessionIds.has(row.id)}
+        disabled={bulkBusy}
+        onChange={() => { toggleSelected(row.id) }}
+      />
+      <span>{row.blank ? '新会话' : row.displayTitle}</span>
+      {row.running || row.pendingInteraction !== undefined
+        ? <i className={`${css.activity} ${row.pendingInteraction !== undefined ? css.waiting : ''}`} aria-label={row.pendingInteraction !== undefined ? '等待你确认' : '任务正在进行'} />
+        : null}
+    </label>
+  ) : (
     <div className={css.taskEntry} key={row.id}>
       <button
         className={`${css.taskRow} ${row.id === current ? css.current : ''}`}
@@ -349,11 +419,27 @@ export function SidebarRoot({
           {wide
             ? <span className={css.brand}><img className={css.logo} src="/assets/e-mate/logo.png" alt="e-Mate" /><small className={css.version}>2.0.11</small></span>
             : <button className={css.brand} type="button" aria-label="展开任务导航" onClick={toggleSidebar}><img className={css.mark} src="/assets/e-mate/xiaoxin-avatar.png" alt="" aria-hidden="true" /></button>}
-          {wide && (
+          {wide && <div className={css.brandActions}>
             <button className={css.iconButton} type="button" aria-label="搜索会话" aria-expanded={searchOpen} onClick={() => { setSearchOpen(value => !value) }}>
               <SearchIcon size={16} />
             </button>
-          )}
+            <button
+              className={css.iconButton}
+              type="button"
+              aria-label={selecting ? '取消批量删除会话' : '批量删除会话'}
+              aria-pressed={selecting}
+              disabled={visibleRows.length === 0 || bulkBusy}
+              onClick={() => {
+                if (selecting) cancelBulkSelection()
+                else {
+                  setSelecting(true)
+                  setNotice(null)
+                }
+              }}
+            >
+              <DeleteIcon size={16} />
+            </button>
+          </div>}
           <button className={css.closeButton} type="button" aria-label={collapsed ? '展开任务导航' : '收起任务导航'} onClick={toggleSidebar}>
             {wide ? <CloseIcon size={18} /> : <PanelIcon size={18} />}
           </button>
@@ -387,6 +473,12 @@ export function SidebarRoot({
         )}
 
         <nav className={css.taskNav} aria-label="会话与项目">
+          {selecting && <div className={css.bulkActions} role="toolbar" aria-label="批量删除会话">
+            <button type="button" disabled={selectableRows.length === 0 || bulkBusy} onClick={toggleSelectAll}>{allSelectableSelected ? '取消全选' : '全选'}</button>
+            <span>{selectedSessionIds.size} 个已选</span>
+            <button type="button" disabled={bulkBusy} onClick={cancelBulkSelection}>取消</button>
+            <button className={css.danger} type="button" disabled={selectedSessionIds.size === 0 || bulkBusy} onClick={() => { setDeleteConfirm(true) }}>删除</button>
+          </div>}
           {searchOpen && normalizedQuery !== '' ? (
             <section className={css.sidebarSection} aria-label="搜索结果">
               <div className={css.navHeading}><strong>搜索结果</strong><small>{searchRows.length}</small></div>
@@ -413,7 +505,7 @@ export function SidebarRoot({
                         return row === undefined || archived.has(id) || (row.blank && id !== current) ? [] : [row]
                       })
                       const open = expanded[workspace.workspaceId] !== false
-                      const shown = showAll[workspace.workspaceId] ? rows : rows.slice(0, COLLAPSED_SESSION_LIMIT)
+                      const shown = selecting || showAll[workspace.workspaceId] ? rows : rows.slice(0, COLLAPSED_SESSION_LIMIT)
                       return (
                         <div className={css.projectGroup} key={workspace.workspaceId}>
                           <div className={css.projectRow}>
@@ -457,6 +549,19 @@ export function SidebarRoot({
             <input autoFocus aria-label="任务名称" value={renameDraft} disabled={busySession !== null} onChange={event => { setRenameDraft(event.target.value) }} />
             <div><button type="button" disabled={busySession !== null} onClick={() => { setRenameTarget(null) }}>取消</button><button type="submit" disabled={busySession !== null || renameDraft.trim() === ''}>重命名</button></div>
           </form>
+        </div>,
+        document.body,
+      )}
+      {deleteConfirm && createPortal(
+        <div className={css.dialogBackdrop} role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !bulkBusy) setDeleteConfirm(false) }}>
+          <div className={css.dialog} role="dialog" aria-modal="true" aria-labelledby="emate-bulk-delete-title">
+            <h2 id="emate-bulk-delete-title">删除 {selectedSessionIds.size} 个会话？</h2>
+            <p>这些会话将从侧边栏移除。DSH 会保留会话日志和项目文件，避免误删本地工作。</p>
+            <div>
+              <button type="button" disabled={bulkBusy} onClick={() => { setDeleteConfirm(false) }}>取消</button>
+              <button className={css.dangerAction} type="button" disabled={bulkBusy} onClick={() => { void deleteSelected() }}>{bulkBusy ? '正在删除…' : `删除 ${selectedSessionIds.size} 个会话`}</button>
+            </div>
+          </div>
         </div>,
         document.body,
       )}
