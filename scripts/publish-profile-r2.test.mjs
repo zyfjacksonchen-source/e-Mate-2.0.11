@@ -146,6 +146,9 @@ test('publication admits bootstrap and its direct successor before exposing acti
   assert.equal(plan.activations.every(item => item.expected_current === null), true)
   assert.equal(plan.immutable_objects.every(item => item.path.startsWith('immutable/')), true)
   assert.equal(plan.activations.every(item => item.object.path.startsWith('activation/')), true)
+  assert.throws(() => writeProfilePublicationBundle(publication, join(root, 'dist/invalid-publication'), new Map(), {
+    mainCommit: 'not-a-commit',
+  }), /main commit is invalid/u)
   for (const item of [...plan.immutable_objects, ...plan.activations.map(entry => entry.object)]) {
     const bytes = readFileSync(join(bundle, ...item.path.split('/')))
     assert.equal(bytes.byteLength, item.bytes)
