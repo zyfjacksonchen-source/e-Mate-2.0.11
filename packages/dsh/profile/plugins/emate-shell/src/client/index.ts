@@ -105,7 +105,7 @@ export function registerComputerUseTrigger(ctx: any): void {
       clipboardText: () => '@电脑操控',
       serialize: (_ref, signal) => {
         signal.throwIfAborted()
-        return Promise.resolve('<computer-use explicit="true">用户已显式指定使用电脑操控完成本次请求。</computer-use>')
+        return Promise.resolve('@电脑操控')
       },
     },
   }

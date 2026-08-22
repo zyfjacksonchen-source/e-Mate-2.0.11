@@ -27,14 +27,6 @@
   white-space: nowrap;
 }
 
-.message {
-  display: contents;
-}
-
-.message[data-emate-process-collapsed] :global([data-variant='think']) {
-  display: none;
-}
-
 :global([data-chat-flow-kind]:has([data-emate-process-hidden])) {
   display: none;
 }

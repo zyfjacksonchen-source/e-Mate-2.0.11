@@ -126,6 +126,70 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(screen.getByRole('button', { name: '用户中心' })).not.toBeNull()
   })
 
+  it('batch-removes selected project and general sessions through the native archive action', async () => {
+    const sessions = {
+      ids: ['project-session', 'general-session'],
+      byId: {
+        'project-session': { id: 'project-session', displayTitle: '项目任务', running: false, blank: false, updatedAt: 2 },
+        'general-session': { id: 'general-session', displayTitle: '通用任务', running: false, blank: false, updatedAt: 1 },
+      },
+      current: undefined,
+      phase: 'ready' as const,
+    }
+    const workspaces = {
+      items: [
+        { workspaceId: 'workspace-1', path: '/work/quarterly', title: '季度报告', sessionIds: ['project-session'] },
+        { workspaceId: 'workspace-general', path: '/home/test/.dsh/e-mate/general', title: '通用会话', sessionIds: ['general-session'] },
+      ],
+      archivedSessionIds: [],
+      phase: 'ready' as const,
+    }
+    const archiveSession = vi.fn(async () => {})
+    const openSession = vi.fn()
+
+    render(<SidebarRoot
+      collapsed={false}
+      width={248}
+      renderSlot={() => null}
+      createPortal={createPortal}
+      useSessions={selector => selector(sessions)}
+      useWorkspaces={selector => selector(workspaces)}
+      NewChatIcon={Icon}
+      PanelIcon={Icon}
+      SearchIcon={Icon}
+      ScheduleIcon={Icon}
+      ChevronIcon={Icon}
+      FolderIcon={Icon}
+      PlusIcon={Icon}
+      EllipsisIcon={Icon}
+      CopyIcon={Icon}
+      EditIcon={Icon}
+      ArchiveIcon={Icon}
+      CloseIcon={Icon}
+      startSession={() => {}}
+      openSchedules={() => {}}
+      openSession={openSession}
+      pickWorkspace={async () => null}
+      renameSession={async () => {}}
+      archiveSession={archiveSession}
+      toggleSidebar={() => {}}
+      {...sidebarUtilityProps}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: '批量删除' }))
+    expect(screen.getByRole('checkbox', { name: '选择会话：项目任务' })).not.toBeNull()
+    expect(screen.getByRole('checkbox', { name: '选择会话：通用任务' })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: '打开任务：通用任务' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '全选' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除（2）' }))
+    expect(screen.getByRole('dialog', { name: '删除 2 个会话？' })).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
+    await waitFor(() => { expect(archiveSession).toHaveBeenCalledTimes(2) })
+    expect(archiveSession.mock.calls.map(([id]) => id).sort()).toEqual(['general-session', 'project-session'])
+    expect(screen.getByRole('status').textContent).toBe('已删除 2 个会话。')
+    expect(openSession).not.toHaveBeenCalled()
+  })
+
   it('uses current e-Mate Home copy and projects durable token/session facts', async () => {
     const phase = document.createElement('main')
     phase.dataset.phase = 'hero'

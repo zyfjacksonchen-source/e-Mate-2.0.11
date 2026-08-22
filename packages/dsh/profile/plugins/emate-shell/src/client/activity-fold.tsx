@@ -1,4 +1,4 @@
-import { createElement, useMemo, useSyncExternalStore, type ReactNode } from 'react'
+import { createElement, Fragment, useMemo, useSyncExternalStore, type ReactNode } from 'react'
 import { DisclosureRow } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './activity-fold.module.css'
 
@@ -192,6 +192,10 @@ function hiddenMarker(): ReactNode {
   return <span data-emate-process-hidden aria-hidden style={{ display: 'none' }} />
 }
 
+function assistantNodeWith(node: ChatNode, keep: (block: { kind?: string; text?: string }) => boolean): ChatNode {
+  return { ...node, data: { ...node.data, blocks: node.data?.blocks?.filter(keep) ?? [] } }
+}
+
 function createProcessRenderer(ctx: any, kind: 'assistant-step' | 'tool-call' | 'context') {
   return function ProcessRenderer(props: any) {
     const { node, sessionId, useSession } = props as { node: ChatNode; sessionId: string; useSession: (selector: any) => any }
@@ -202,18 +206,19 @@ function createProcessRenderer(ctx: any, kind: 'assistant-step' | 'tool-call' | 
 
     if (summary === null || !isProcessNode(node)) return renderNative(ctx, kind, props)
     const header = node.key === summary.headerKey
-    const natural = hasNaturalMessage(node)
-
-    if (kind === 'assistant-step' && natural) {
-      return (
-        <div
-          className={css.message}
-          data-emate-process-collapsed={!expanded || undefined}
-          data-emate-process-expanded={expanded || undefined}
-        >
-          {header && <ActivityHeader summary={summary} sessionId={sessionId} expanded={expanded} />}
-          {renderNative(ctx, kind, props)}
-        </div>
+    if (kind === 'assistant-step' && hasNaturalMessage(node)) {
+      const naturalProps = {
+        ...props,
+        node: assistantNodeWith(node, block => block.kind !== 'reasoning' && block.kind !== 'tool-call'),
+      }
+      const processProps = { ...props, node: assistantNodeWith(node, block => block.kind === 'reasoning') }
+      return createElement(Fragment, null,
+        header
+          ? <ActivityHeader summary={summary} sessionId={sessionId} expanded={expanded}>
+              {expanded ? renderNative(ctx, kind, processProps) : null}
+            </ActivityHeader>
+          : expanded ? renderNative(ctx, kind, processProps) : null,
+        renderNative(ctx, kind, naturalProps),
       )
     }
 
