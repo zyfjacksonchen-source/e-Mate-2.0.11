@@ -274,6 +274,27 @@
   font-weight: 400;
 }
 
+.batchActions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.batchActions button {
+  min-height: 24px;
+  padding: 0 4px;
+  border: 0;
+  color: var(--emate-muted);
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.batchActions .danger {
+  color: var(--emate-danger);
+}
+
 .rotated {
   transform: rotate(-90deg);
 }
@@ -346,6 +367,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.batchTaskRow {
+  padding-right: 12px;
+}
+
+.batchTaskRow input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--emate-brand);
 }
 
 .activity {
@@ -574,6 +606,12 @@
   font-size: 18px;
 }
 
+.dialog p {
+  margin: 0;
+  color: var(--emate-muted, #aaa);
+  line-height: 1.6;
+}
+
 .dialog input {
   min-height: 44px;
   padding: 0 12px;
@@ -603,6 +641,12 @@
   border-color: var(--emate-brand);
   color: white;
   background: var(--emate-brand);
+}
+
+.dialog .dangerButton {
+  border-color: var(--emate-danger);
+  color: white;
+  background: var(--emate-danger);
 }
 
 .root button:disabled,

@@ -108,7 +108,7 @@ describe('Codex-like process fold', () => {
     expect(screen.queryByText('内部思考')).toBeNull()
     expect(screen.queryByText('上下文')).toBeNull()
     expect(screen.queryByText('GenUI：render_ui')).toBeNull()
-    expect(view.container.querySelector('[data-emate-process-collapsed]')).not.toBeNull()
+    expect(screen.getByText('正在为你整理页面。').closest('[data-native-assistant]')?.querySelector('[data-variant="think"]')).toBeNull()
 
     fireEvent.click(header)
     expect(header.getAttribute('aria-expanded')).toBe('true')
@@ -118,6 +118,7 @@ describe('Codex-like process fold', () => {
     expect(screen.getByText('GenUI：render_ui')).toBeTruthy()
     expect(screen.getByText('正在为你整理页面。')).toBeTruthy()
     expect(screen.getByText('页面已经整理完成。')).toBeTruthy()
+    expect(screen.getByText('正在为你整理页面。').closest('[data-native-assistant]')?.querySelector('[data-variant="think"]')).toBeNull()
   })
 
   it('projects one process group without rewriting DSH nodes', () => {
@@ -133,7 +134,7 @@ describe('Codex-like process fold', () => {
       reasoningCount: 0,
       running: false,
     })
-    expect(cssSource).toContain("[data-emate-process-collapsed] :global([data-variant='think'])")
+    expect(cssSource).not.toContain("[data-emate-process-collapsed] :global([data-variant='think'])")
     expect(cssSource).toContain(':has([data-emate-process-hidden])')
     expect(cssSource).toContain('.header + *')
     expect(cssSource).toContain('margin-top: 8px')

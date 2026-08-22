@@ -119,6 +119,10 @@ export function SidebarRoot({
   const [renameTarget, setRenameTarget] = useState<SessionRow | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [busySession, setBusySession] = useState<string | null>(null)
+  const [batchMode, setBatchMode] = useState(false)
+  const [batchSelected, setBatchSelected] = useState<Set<string>>(() => new Set())
+  const [batchConfirming, setBatchConfirming] = useState(false)
+  const [batchBusy, setBatchBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [pathname, setPathname] = useState(() => location.pathname)
   const desktop = document.body.dataset.dshDesktopMode === 'advanced'
@@ -135,6 +139,7 @@ export function SidebarRoot({
   const searchRows = normalizedQuery === ''
     ? []
     : visibleRows.filter(row => row.displayTitle.toLocaleLowerCase('zh-CN').includes(normalizedQuery))
+  const allVisibleSelected = visibleRows.length > 0 && visibleRows.every(row => batchSelected.has(row.id))
 
   useEffect(() => {
     const sync = () => { setPathname(location.pathname) }
@@ -268,7 +273,7 @@ export function SidebarRoot({
   }
 
   const archive = async (id: string) => {
-    if (busySession !== null) return
+    if (busySession !== null || batchBusy) return
     setBusySession(id)
     setNotice(null)
     try {
@@ -277,6 +282,33 @@ export function SidebarRoot({
       setNotice(error instanceof Error ? error.message : '归档失败。')
     } finally {
       setBusySession(null)
+    }
+  }
+
+  const leaveBatchMode = () => {
+    setBatchMode(false)
+    setBatchSelected(new Set())
+    setBatchConfirming(false)
+  }
+
+  const archiveSelected = async () => {
+    const targets = [...batchSelected]
+    if (targets.length === 0 || batchBusy) return
+    setBatchBusy(true)
+    setNotice(null)
+    try {
+      const results = await Promise.allSettled(targets.map(archiveSession))
+      const failed = targets.filter((_, index) => results[index]?.status === 'rejected')
+      if (failed.length === 0) {
+        setNotice(`已删除 ${targets.length} 个会话。`)
+        leaveBatchMode()
+      } else {
+        setBatchSelected(new Set(failed))
+        setNotice(`已删除 ${targets.length - failed.length} 个会话，${failed.length} 个失败，请重试。`)
+      }
+    } finally {
+      setBatchBusy(false)
+      setBatchConfirming(false)
     }
   }
 
@@ -291,6 +323,25 @@ export function SidebarRoot({
 
   const sessionRow = (row: SessionRow) => (
     <div className={css.taskEntry} key={row.id}>
+      {batchMode ? (
+        <label className={`${css.taskRow} ${css.batchTaskRow} ${row.id === current ? css.current : ''}`}>
+          <input
+            type="checkbox"
+            aria-label={`选择会话：${row.blank ? '新会话' : row.displayTitle}`}
+            checked={batchSelected.has(row.id)}
+            disabled={batchBusy}
+            onChange={() => {
+              setBatchSelected((selected) => {
+                const next = new Set(selected)
+                if (next.has(row.id)) next.delete(row.id)
+                else next.add(row.id)
+                return next
+              })
+            }}
+          />
+          <span>{row.blank ? '新会话' : row.displayTitle}</span>
+        </label>
+      ) : <>
       <button
         className={`${css.taskRow} ${row.id === current ? css.current : ''}`}
         type="button"
@@ -313,6 +364,7 @@ export function SidebarRoot({
           <button type="button" className={css.danger} onClick={() => { void archive(row.id) }}><ArchiveIcon size={16} />归档</button>
         </div>
       </details>
+      </>}
     </div>
   )
 
@@ -423,6 +475,13 @@ export function SidebarRoot({
               <section className={css.sidebarSection} aria-label="会话">
                 <div className={css.navHeading}>
                   <button className={css.sectionToggle} type="button" aria-expanded={!sessionsCollapsed} onClick={() => { setSessionsCollapsed(value => !value) }}><ChevronIcon className={sessionsCollapsed ? css.rotated : undefined} size={14} /><span>会话</span><small>{generalRows.length}</small></button>
+                  <div className={css.batchActions}>
+                    {batchMode ? <>
+                      <button type="button" disabled={batchBusy || visibleRows.length === 0} onClick={() => { setBatchSelected(allVisibleSelected ? new Set() : new Set(visibleRows.map(row => row.id))) }}>{allVisibleSelected ? '取消全选' : '全选'}</button>
+                      <button type="button" disabled={batchBusy} onClick={leaveBatchMode}>取消</button>
+                      <button type="button" className={css.danger} disabled={batchBusy || batchSelected.size === 0} onClick={() => { setBatchConfirming(true) }}>删除{batchSelected.size > 0 ? `（${batchSelected.size}）` : ''}</button>
+                    </> : <button type="button" disabled={visibleRows.length === 0} onClick={() => { setSearchOpen(false); setQuery(''); setBatchMode(true); setBatchSelected(new Set()) }}>批量删除</button>}
+                  </div>
                 </div>
                 {!sessionsCollapsed && (sessionPhase === 'pending'
                   ? <p className={css.empty}>正在加载会话…</p>
@@ -446,6 +505,16 @@ export function SidebarRoot({
             <input autoFocus aria-label="任务名称" value={renameDraft} disabled={busySession !== null} onChange={event => { setRenameDraft(event.target.value) }} />
             <div><button type="button" disabled={busySession !== null} onClick={() => { setRenameTarget(null) }}>取消</button><button type="submit" disabled={busySession !== null || renameDraft.trim() === ''}>重命名</button></div>
           </form>
+        </div>,
+        document.body,
+      )}
+      {batchConfirming && createPortal(
+        <div className={css.dialogBackdrop} role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !batchBusy) setBatchConfirming(false) }}>
+          <section className={css.dialog} role="dialog" aria-modal="true" aria-labelledby="emate-batch-delete-title">
+            <h2 id="emate-batch-delete-title">删除 {batchSelected.size} 个会话？</h2>
+            <p>所选会话会从侧栏移除，本地历史记录仍由 DSH 保留。</p>
+            <div><button type="button" disabled={batchBusy} onClick={() => { setBatchConfirming(false) }}>取消</button><button type="button" className={css.dangerButton} disabled={batchBusy} onClick={() => { void archiveSelected() }}>{batchBusy ? '正在删除' : '确认删除'}</button></div>
+          </section>
         </div>,
         document.body,
       )}

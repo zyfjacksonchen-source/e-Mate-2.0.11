@@ -61,6 +61,8 @@ test('Computer Use is authorized only by the latest direct user request', () => 
   })
   assert.equal(hasExplicitComputerUseRequest({ events: [] }), false)
   assert.equal(hasExplicitComputerUseRequest({ events: [message('普通请求')] }), false)
+  assert.equal(hasExplicitComputerUseRequest({ events: [message('@电脑操控 读取当前应用')] }), true)
+  assert.equal(hasExplicitComputerUseRequest({ events: [message('请解释文本 @电脑操控 的含义')] }), false)
   assert.equal(hasExplicitComputerUseRequest({
     events: [message('<computer-use explicit="true">用户已显式指定使用电脑操控完成本次请求。</computer-use>')],
   }), true)

@@ -72,6 +72,8 @@ describe('e-Mate 2.0.11 composer projection', () => {
     })).toEqual({
       insert: { source: '功能', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' },
     })
+    const signal = new AbortController().signal
+    expect(registered?.codec?.serialize('computer-use', signal)).resolves.toBe('@电脑操控')
     expect(readFileSync('src/client/home.module.css', 'utf8')).toContain("font-family: 'DshChipCell', -apple-system")
   })
 
@@ -82,7 +84,7 @@ describe('e-Mate 2.0.11 composer projection', () => {
     expect(source).toContain("ctx.connection.rpc.call('/emate.mcpManage', 'active', {})")
     expect(source).toContain("name: '功能'")
     expect(source).toContain("label: '@电脑操控'")
-    expect(source).toContain('<computer-use explicit="true">')
+    expect(source).not.toContain('<computer-use explicit="true">')
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource)\s*\(/u)
     await waitFor(() => expect(styles).toContain('[data-composer-card]'))
   })
