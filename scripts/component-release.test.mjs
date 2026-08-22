@@ -35,6 +35,26 @@ describe('component payload closure', () => {
     }))
     const accepted = inventory.components.filter(component => component.desktop !== 'blocked')
     assert.equal(accepted.length, 14)
+    assert.deepEqual(accepted.map(component => component.id).sort(), [
+      '@e-mate/dsh-client-shell',
+      '@e-mate/dsh-plugin-better-sidebar',
+      '@e-mate/dsh-plugin-cdp',
+      '@e-mate/dsh-plugin-computer-use',
+      '@e-mate/dsh-plugin-file-import',
+      '@e-mate/dsh-plugin-find-skill',
+      '@e-mate/dsh-plugin-genui',
+      '@e-mate/dsh-plugin-mcp-manage',
+      '@e-mate/dsh-plugin-memory-evolve',
+      '@e-mate/dsh-plugin-office-skills',
+      '@e-mate/dsh-plugin-search-mcp',
+      '@e-mate/dsh-plugin-skill-hub',
+      '@e-mate/dsh-plugin-tool-search',
+      '@e-mate/dsh-plugin-vision-toolkit',
+    ].sort())
+    assert.deepEqual(
+      inventory.components.filter(component => component.desktop === 'blocked').map(component => component.id),
+      ['@e-mate/dsh-plugin-xin-assistant'],
+    )
     assert.equal(inventory.component_jobs.length, 18)
     assert.deepEqual(
       [...new Set(inventory.component_jobs.map(job => job.component))].sort(),
