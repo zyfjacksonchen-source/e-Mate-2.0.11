@@ -43,6 +43,7 @@ describe('desktop header controls', () => {
     expect(controls).toMatch(/conversation\.session\.header[\s\S]*padding-right:\s*140px/u)
     expect(share.match(/top:\s*1px/gu)).toHaveLength(2)
     expect(share).toMatch(/\.trigger\s*\{[\s\S]*?height:\s*32px/u)
+    expect(share).toMatch(/body:not\(\[data-dsh-desktop-mode='advanced'\]\)[\s\S]*translateY\(-8px\)/u)
   })
 
   it('stays mounted with no current Session and calls the one native settings trigger', async () => {
