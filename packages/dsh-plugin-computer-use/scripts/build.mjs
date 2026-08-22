@@ -103,7 +103,8 @@ exposure = replaceExactlyOnce(
 )
 await writeFile(exposurePath, exposure)
 
-await writeFile(join(root, 'lib/emate-explicit.js'), `const LEGACY_MARKER = '<computer-use explicit="true">'
+await writeFile(join(root, 'lib/emate-explicit.js'), `// Direct activation is visible; the legacy marker is accepted only when replaying old user history.
+const LEGACY_MARKER = '<computer-use explicit="true">'
 const DIRECT_TRIGGER = /^\\s*@电脑操控(?:\\s|$)/u
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
