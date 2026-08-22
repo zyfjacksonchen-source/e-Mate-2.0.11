@@ -15,7 +15,7 @@
 .trigger:disabled { cursor: default; opacity: .6; }
 .trigger:focus-visible { outline: 2px solid var(--emate-color-brand, #ff6a1a); outline-offset: 2px; }
 
-:global(body[data-dsh-desktop-mode='compatibility']) .trigger { transform: translateY(-8px); }
+:global(body[data-dsh-desktop-mode='compatibility']) .trigger { translate: 0 -8px; }
 
 :global(body[data-dsh-desktop-mode='advanced'] .dshDesktopFrame[data-desktop-platform='darwin']) .trigger {
   position: fixed;
