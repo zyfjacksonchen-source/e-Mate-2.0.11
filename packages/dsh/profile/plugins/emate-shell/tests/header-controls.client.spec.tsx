@@ -36,7 +36,7 @@ describe('desktop header controls', () => {
     expect(openSettings).toHaveBeenCalledOnce()
   })
 
-  it('keeps the controls on the 32px header line while reserving Session utility space', () => {
+  it('keeps all header controls aligned while reserving native Session utility space', () => {
     const controls = readFileSync('src/client/header-controls.module.css', 'utf8')
     const share = readFileSync('src/client/session-share.module.css', 'utf8')
     expect(controls).toMatch(/position:\s*absolute[\s\S]*top:\s*12px[\s\S]*display:\s*inline-flex[\s\S]*height:\s*32px/u)

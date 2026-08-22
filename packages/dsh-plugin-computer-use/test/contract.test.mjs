@@ -54,7 +54,7 @@ test('computer-use adapter preserves the immutable universal helper only on macO
   assert.match(bundle, /new URL\("\.\.\/scripts\/build-native\.mjs", import\.meta\.url\)/u)
 })
 
-test('Computer Use is authorized only by the latest direct user request', () => {
+test('Computer Use authorization expires before the next direct user request', () => {
   const message = text => ({
     type: 'user/message',
     data: { source: { kind: 'user' }, content: [{ type: 'text', text }] },
