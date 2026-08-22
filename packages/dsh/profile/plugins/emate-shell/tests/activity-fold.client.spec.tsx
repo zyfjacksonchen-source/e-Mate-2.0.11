@@ -113,12 +113,23 @@ describe('Codex-like process fold', () => {
     fireEvent.click(header)
     expect(header.getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByText('内部思考')).toBeTruthy()
-    expect(screen.getByText('上下文')).toBeTruthy()
+    expect(screen.queryByText('上下文')).toBeNull()
     expect(screen.getByText('第二段内部思考')).toBeTruthy()
     expect(screen.getByText('GenUI：render_ui')).toBeTruthy()
     expect(screen.getByText('正在为你整理页面。')).toBeTruthy()
     expect(screen.getByText('页面已经整理完成。')).toBeTruthy()
     expect(screen.getByText('正在为你整理页面。').closest('[data-native-assistant]')?.querySelector('[data-variant="think"]')).toBeNull()
+  })
+
+  it('never discloses injected context metadata, even when process detail is expanded', () => {
+    const nodes = new Map<string, any>([
+      ['context', { key: 'context', kind: 'context', location: location(9), data: { content: '内部上下文' } }],
+      ['tool', { key: 'tool', kind: 'tool-call', location: location(9), data: { root: { callId: 'call-9', name: 'bash' } } }],
+    ])
+    expect(activityFoldSummary([...nodes.keys()], nodes, nodes.get('tool'))).toMatchObject({
+      headerKey: 'tool',
+      toolCount: 1,
+    })
   })
 
   it('projects one process group without rewriting DSH nodes', () => {
@@ -129,7 +140,7 @@ describe('Codex-like process fold', () => {
     ])
     expect(activityFoldSummary([...nodes.keys()], nodes, nodes.get('context'))).toEqual({
       turn: 2,
-      headerKey: 'context',
+      headerKey: 'tool',
       toolCount: 1,
       reasoningCount: 0,
       running: false,
