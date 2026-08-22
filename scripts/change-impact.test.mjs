@@ -83,6 +83,32 @@ describe('repository release boundary', () => {
     ]) assert.match(packagedGate, new RegExp(required.replaceAll('.', '\\.'), 'u'), required)
   })
 
+  it('locks the fast iteration, immutable publication, and 2.0.11 lessons into repository rules', () => {
+    const agents = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8')
+
+    for (const heading of [
+      'Fixed version iteration protocol',
+      'Fast development loop',
+      'Release lanes and immutable publication',
+      '2.0.11 failure ledger: permanent rules',
+      'Definition of done',
+    ]) assert.match(agents, new RegExp(`^## ${heading.replaceAll('.', '\\.')}$`, 'mu'), heading)
+
+    for (const invariant of [
+      /actual installed production application is the runtime truth/u,
+      /plugin-only` release must not build Base, DMG, EXE, or unchanged components/u,
+      /Actions cache is never release evidence/u,
+      /publication prepared.*not online/u,
+      /CAS-activate stable pointers last/u,
+      /previous_known_good = parent/u,
+      /`mac-smoke` is CI-only and must never appear/u,
+      /Full Access is only the DSH filesystem\/sandbox domain/u,
+      /native CDP plugin first/u,
+      /Source tree is not the packaged product/u,
+      /Only this stage may be called "released" or "online"/u,
+    ]) assert.match(agents, invariant)
+  })
+
   it('accepts the checked-in base contract and every first-party component', () => {
     const boundary = loadReleaseBoundary(root)
     assert.equal(boundary.valid, true, boundary.errors.join('\n'))
@@ -408,6 +434,14 @@ describe('repository release boundary', () => {
     assert.equal(classify('enterprise/apps/auth-gateway/src/index.ts').lane, 'enterprise-only')
     assert.equal(classify('scripts/change-impact.test.mjs').lane, 'verification-only')
     assert.equal(classify('docs/development-log.md').lane, 'docs-only')
+
+    for (const path of ['AGENTS.md', 'docs/target-contract.md']) {
+      const impact = classify(path)
+      assert.equal(impact.lane, 'verification-only')
+      assert.equal(impact.run_base, false)
+      assert.equal(impact.run_plugins, false)
+      assert.deepEqual(impact.publish_components, [])
+    }
   })
 
   it('treats classifier and workflow authority changes as Base inputs', () => {
