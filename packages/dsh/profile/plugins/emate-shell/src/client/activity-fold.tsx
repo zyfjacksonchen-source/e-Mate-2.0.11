@@ -50,7 +50,7 @@ function hasNaturalMessage(node: ChatNode): boolean {
 }
 
 function isProcessNode(node: ChatNode): boolean {
-  return node.kind === 'tool-call' || node.kind === 'context' || hasReasoning(node)
+  return node.kind === 'tool-call' || hasReasoning(node)
 }
 
 function isRunning(node: ChatNode): boolean {
@@ -204,6 +204,7 @@ function createProcessRenderer(ctx: any, kind: 'assistant-step' | 'tool-call' | 
     const summary = useMemo(() => activityFoldSummary(order, nodes, node), [node, nodes, order])
     const expanded = useExpanded(sessionId, summary?.turn)
 
+    if (kind === 'context') return hiddenMarker()
     if (summary === null || !isProcessNode(node)) return renderNative(ctx, kind, props)
     const header = node.key === summary.headerKey
     if (kind === 'assistant-step' && hasNaturalMessage(node)) {
