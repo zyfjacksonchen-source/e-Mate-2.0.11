@@ -103,7 +103,7 @@ exposure = replaceExactlyOnce(
 )
 await writeFile(exposurePath, exposure)
 
-await writeFile(join(root, 'lib/emate-explicit.js'), `// Direct activation remains user-visible; the legacy marker is accepted only for historical user replay.
+await writeFile(join(root, 'lib/emate-explicit.js'), `// Direct activation remains user-visible; the legacy marker is accepted only while replaying an older user turn.
 const LEGACY_MARKER = '<computer-use explicit="true">'
 const DIRECT_TRIGGER = /^\\s*@电脑操控(?:\\s|$)/u
 function isRecord(value) {
