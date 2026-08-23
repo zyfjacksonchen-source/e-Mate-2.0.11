@@ -61,8 +61,8 @@ describe('e-Mate 2.0.12 identity and settings fidelity', () => {
     expect(aura).toContain("document.addEventListener('visibilitychange', updateVisibility)")
     expect(aura).toContain('cancelAnimationFrame(frame)')
     expect(aura).toContain("gl.getExtension('WEBGL_lose_context')?.loseContext()")
-    expect(sidebar).toContain(":global(body[data-dsh-desktop-mode='advanced']) .root")
-    expect(sidebar).toContain('background: color-mix(in srgb, var(--emate-canvas) 76%, rgba(244, 84, 18, .12));')
+    expect(sidebar).not.toContain(":global(body[data-dsh-desktop-mode='advanced']) .root")
+    expect(sidebar).toContain('background: var(--emate-canvas);')
     expect(sidebar).not.toContain('backdrop-filter')
 
     render(<SettingsChrome />)

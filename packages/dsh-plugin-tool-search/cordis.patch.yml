@@ -24,3 +24,20 @@
         maxResults: 5
         maxQueryChars: 512
 
+- id: web
+  config:
+    searchProvider: gpt-responses
+
+- id: web-search-deepseek
+  disabled: true
+
+- insert:
+    - id: emate-web-search-gpt
+      name: '@e-mate/dsh-plugin-tool-search/web-search'
+      inject: [web]
+      config:
+        apiKeyEnv: E_MATE_SEARCH_KEY_DEEPSEEK
+        baseURL: http://43.135.183.53:8080/v1
+        model: gpt-5.6-luna
+        allowInsecureHttp: true
+        maxOutputTokens: 4096

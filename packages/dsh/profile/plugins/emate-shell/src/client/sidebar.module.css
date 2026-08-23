@@ -48,10 +48,6 @@
   --emate-danger: oklch(0.72 0.18 28);
 }
 
-:global(body[data-dsh-desktop-mode='advanced']) .root {
-  background: color-mix(in srgb, var(--emate-canvas) 76%, rgba(244, 84, 18, .12));
-}
-
 .root *,
 .dialogBackdrop * {
   box-sizing: border-box;
@@ -842,15 +838,6 @@
     --emate-danger: CanvasText;
   }
 
-  :global(body[data-dsh-desktop-mode='advanced']) .root {
-    background: Canvas;
-  }
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  :global(body[data-dsh-desktop-mode='advanced']) .root {
-    background: var(--emate-canvas);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
