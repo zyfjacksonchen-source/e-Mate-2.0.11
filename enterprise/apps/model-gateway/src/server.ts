@@ -63,10 +63,10 @@ const managedCodexModelIds = new Set([
   'doubao-seed-2-0-pro-260215',
 ]);
 
-const deepSeekSearchCredentialRouteId = 'deepseek-web-search';
-const deepSeekSearchProviderId = 'deepseek-official';
-const deepSeekSearchBaseUrl = 'https://api.deepseek.com/anthropic/v1';
-const deepSeekSearchModelId = 'deepseek-v4-flash';
+const gptSearchCredentialRouteId = 'gpt-web-search';
+const gptSearchProviderId = 'gpt-responses';
+const gptSearchBaseUrl = 'http://43.135.183.53:8080/v1';
+const gptSearchModelId = 'gpt-5.6-luna';
 
 const runtimeApiMode = (route: ModelGatewayRoute): 'responses' | 'chat-completions' =>
   route.apiMode === 'chat-completions' ? 'chat-completions' : 'responses';
@@ -969,16 +969,18 @@ async function principal(
 }
 
 function principalAllowsRoute(identity: ModelGatewayPrincipal, routeId: string): boolean {
-  return routeId !== deepSeekSearchCredentialRouteId && identity.modelIds.includes(routeId);
+  return routeId !== gptSearchCredentialRouteId && identity.modelIds.includes(routeId);
 }
 
-function officialDeepSeekSearchCredentialRoute(
+function managedGptSearchCredentialRoute(
   routes: Map<string, ModelGatewayRoute>
 ): ModelGatewayRoute | undefined {
-  const route = routes.get(deepSeekSearchCredentialRouteId);
-  return route?.providerId === deepSeekSearchProviderId &&
-    route.upstreamBaseUrl === deepSeekSearchBaseUrl &&
-    route.upstreamModelId === deepSeekSearchModelId
+  const route = routes.get(gptSearchCredentialRouteId);
+  return route?.providerId === gptSearchProviderId &&
+    route.apiMode === 'responses' &&
+    route.allowInsecureHttpUpstream === true &&
+    route.upstreamBaseUrl === gptSearchBaseUrl &&
+    route.upstreamModelId === gptSearchModelId
     ? route
     : undefined;
 }
@@ -1428,10 +1430,12 @@ function validateRoute(route: ModelGatewayRoute): void {
     !identifierPattern.test(route.upstreamModelId) ||
     (route.fallbackUpstreamModelId !== undefined && !identifierPattern.test(route.fallbackUpstreamModelId)) ||
     !identifierPattern.test(route.providerId) ||
-    (route.id === deepSeekSearchCredentialRouteId &&
-      (route.providerId !== deepSeekSearchProviderId ||
-        route.upstreamBaseUrl !== deepSeekSearchBaseUrl ||
-        route.upstreamModelId !== deepSeekSearchModelId)) ||
+    (route.id === gptSearchCredentialRouteId &&
+      (route.providerId !== gptSearchProviderId ||
+        route.apiMode !== 'responses' ||
+        route.allowInsecureHttpUpstream !== true ||
+        route.upstreamBaseUrl !== gptSearchBaseUrl ||
+        route.upstreamModelId !== gptSearchModelId)) ||
     route.upstreamApiKey.length < 20 ||
     /\s/.test(route.upstreamApiKey) ||
     !route.label ||
@@ -1953,7 +1957,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
         let searchGrantStatus: 'granted' | 'denied' | 'unavailable' = 'unavailable';
         let searchApiKey: string | undefined;
         if (searchGrantRequested) {
-          const searchRoute = officialDeepSeekSearchCredentialRoute(routes);
+          const searchRoute = managedGptSearchCredentialRoute(routes);
           if (searchRoute && options.tenantModelRoutePolicy?.upstreamApiKey) {
             let enabled: boolean | undefined;
             try {
@@ -2017,6 +2021,8 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
             schemaVersion: 1,
             status: searchGrantStatus,
             purpose: 'web-search',
+            // Base-v6 wire identifiers stay stable; the reserved Gateway route
+            // below owns the concrete GPT Responses provider and secret file.
             provider: 'deepseek-official',
             credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
             ...(searchGrantStatus === 'granted' ? { upstreamApiKey: searchApiKey } : {}),

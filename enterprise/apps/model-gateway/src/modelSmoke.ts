@@ -106,15 +106,16 @@ function record(value: unknown): Record<string, unknown> | null {
 }
 
 function validateCatalog(routes: readonly ModelSmokeRoute[]): Map<string, ModelSmokeRoute> {
-  const searchCredentialRoute = routes.find(({ id }) => id === 'deepseek-web-search');
-  const callableRoutes = routes.filter(({ id }) => id !== 'deepseek-web-search');
+  const searchCredentialRoute = routes.find(({ id }) => id === 'gpt-web-search');
+  const callableRoutes = routes.filter(({ id }) => id !== 'gpt-web-search');
   if (
     routes.length !== routeContracts.length + (searchCredentialRoute ? 1 : 0) ||
     (searchCredentialRoute !== undefined &&
-      (searchCredentialRoute.providerId !== 'deepseek-official' ||
-        searchCredentialRoute.upstreamBaseUrl !== 'https://api.deepseek.com/anthropic/v1' ||
-        searchCredentialRoute.upstreamModelId !== 'deepseek-v4-flash' ||
-        searchCredentialRoute.allowInsecureHttpUpstream !== undefined ||
+      (searchCredentialRoute.providerId !== 'gpt-responses' ||
+        searchCredentialRoute.apiMode !== 'responses' ||
+        searchCredentialRoute.upstreamBaseUrl !== 'http://43.135.183.53:8080/v1' ||
+        searchCredentialRoute.upstreamModelId !== 'gpt-5.6-luna' ||
+        searchCredentialRoute.allowInsecureHttpUpstream !== true ||
         searchCredentialRoute.upstreamApiKey.length < 20 ||
         /\s/.test(searchCredentialRoute.upstreamApiKey)))
   ) {

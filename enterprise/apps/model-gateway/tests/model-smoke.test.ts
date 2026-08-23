@@ -144,16 +144,17 @@ test('writes only catalog-bound redacted evidence after all five live routes pas
   assert.equal(serialized.includes('Reply with OK.') || serialized.includes('A solid orange square.'), false);
 });
 
-test('accepts only the official search credential route without proxying it as a model', async () => {
+test('accepts only the managed GPT search credential route without proxying it as a model', async () => {
   const { fetchImplementation, requests } = mockFetch();
-  const searchCredentialRoute = {
+  const searchCredentialRoute: ModelSmokeRoute = {
     ...route(
-      'deepseek-web-search',
-      'chat-completions',
-      'deepseek-v4-flash',
-      'https://api.deepseek.com/anthropic/v1'
+      'gpt-web-search',
+      'responses',
+      'gpt-5.6-luna',
+      'http://43.135.183.53:8080/v1'
     ),
-    providerId: 'deepseek-official',
+    providerId: 'gpt-responses',
+    allowInsecureHttpUpstream: true,
   };
   const approval = await runModelSmoke({
     routes: [...routes, searchCredentialRoute],
@@ -166,12 +167,14 @@ test('accepts only the official search credential route without proxying it as a
 
   assert.equal(approval.results.length, 5);
   assert.equal(requests.length, 5);
-  assert.equal(requests.some(({ url }) => url.includes('/anthropic/v1')), false);
+  assert.equal(requests.some(({ url }) => url.includes('43.135.183.53')), false);
 
   for (const invalid of [
     { ...searchCredentialRoute, providerId: 'deepseek' },
     { ...searchCredentialRoute, upstreamBaseUrl: 'https://deepseek-provider.ecorex.internal:18443/v1' },
     { ...searchCredentialRoute, upstreamModelId: 'deepseek-chat' },
+    { ...searchCredentialRoute, apiMode: 'chat-completions' as const },
+    { ...searchCredentialRoute, allowInsecureHttpUpstream: undefined },
   ]) {
     await assert.rejects(
       runModelSmoke({

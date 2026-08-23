@@ -246,7 +246,7 @@ export function modelRouteIdsFromCatalog(value: unknown): string[] {
     return routeId;
   });
   if (new Set(routeIds).size !== routeIds.length) throw new Error('Duplicate Model Gateway route id');
-  const callableRouteIds = routeIds.filter((routeId) => routeId !== 'deepseek-web-search');
+  const callableRouteIds = routeIds.filter((routeId) => routeId !== 'gpt-web-search');
   if (callableRouteIds.length === 0) throw new Error('Invalid Model Gateway route catalog');
   return callableRouteIds;
 }
