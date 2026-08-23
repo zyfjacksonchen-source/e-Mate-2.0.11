@@ -1975,3 +1975,8 @@ The text highlights AI hallucination and human verification, legal use, real-act
 
 - PR `#44` 第四轮已通过目标合同、全组件测试、release carrier、Desktop immutable install 与 Base SDK 构建，却停在 Profile artifact 上传。根因是 Profile 中插件的开发期 `node_modules` 包含指回 Harness/pnpm store 的 symlink，而固定 `actions/upload-artifact@v4` 默认递归跟随 symlink；它因此进入不属于 Profile 制品的依赖图，而不是在上传真实 Profile 字节。
 - CI 与正式 Desktop release 现在继续上传同一 `packages/dsh/profile` 和全部 accepted component `lib`，但在唯一上传边界显式排除任意层级 `node_modules` 目录及后代。Desktop 的原生 `sync-emate-profile.mjs` 本就以 `dereference: false` 并过滤 symlink，不消费这些开发链接；本修复不删除运行时文件、不改变 Base/Profile/组件字节，也不增加第二打包路径。release 合同同时锁住两个 workflow 都必须保留排除项，防止正式发布再次遍历开发机依赖图。
+
+## 2026-08-23 · 2.0.12 S15 Profile artifact 改为无链接干净暂存树
+
+- 第五轮 CI 证明 S14 的 negated glob 只排除上传结果，不能阻止 `@actions/glob` 沿正向 Profile pattern 继续递归；上传仍停在相同步骤。根据 GitHub Actions Toolkit 的真实 `partialMatch` 实现，负 pattern 不参与目录下钻判断，因此不能把该写法保留为伪门禁。
+- 两个 workflow 现在先调用同一个 Node 标准库脚本，从已经 build/test 的 Profile 与 component `lib` 生成 `.release-cache/profile-artifact`。复制边界拒绝所有 symlink 和任意层级 `node_modules`，且没有 built component 时失败关闭；上传动作只读取这棵无链接暂存树，下载后仍恢复成原 `packages/dsh/profile` 与 `packages/dsh-plugin-*/lib` 布局。行为测试用真实目录 symlink 和实体 `node_modules` 证明两者都不会进入制品。稳定下载说明同时从错误的 2.0.10 修正为当前已公开验收的 2.0.11；没有改生产指针。

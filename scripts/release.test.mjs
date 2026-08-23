@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
@@ -19,6 +19,7 @@ import {
 import { releasePrefix, releaseSource } from './release-source.mjs'
 import { renderDownloadPage } from './render-download-page.mjs'
 import { prepareHarnessBaseImports } from './component-base-imports.mjs'
+import { stageDesktopProfileArtifact } from './stage-desktop-profile-artifact.mjs'
 
 const HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
 const DIGEST = '0'.repeat(64)
@@ -289,6 +290,44 @@ test('component tests resolve declared DSH imports only from the exact pinned Ba
   }
 })
 
+test('desktop profile artifacts contain built bytes without development links', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'emate-profile-artifact-'))
+  try {
+    const packagesRoot = join(root, 'packages')
+    const destination = join(root, 'artifact')
+    await file(packagesRoot, 'dsh/profile/cordis.patch.yml', '[]\n')
+    await file(packagesRoot, 'dsh/profile/component-inventory.json', JSON.stringify({
+      schema_version: 1,
+      components: [{
+        id: '@e-mate/dsh-plugin-example',
+        root: 'packages/dsh-plugin-example',
+        desktop: 'hot-profile',
+      }, {
+        id: '@e-mate/dsh-plugin-retired',
+        root: 'packages/dsh-plugin-retired',
+        desktop: 'blocked',
+      }],
+    }))
+    await file(packagesRoot, 'dsh/profile/plugins/emate-shell/lib/client.js', 'export {}\n')
+    await file(packagesRoot, 'dsh-plugin-example/lib/index.js', 'export {}\n')
+    await file(packagesRoot, 'dsh-plugin-example/lib/node_modules/hidden.js', 'throw new Error()\n')
+    await file(packagesRoot, 'dsh-plugin-retired/lib/index.js', 'throw new Error()\n')
+    const dependencyRoot = join(root, 'dependency-root')
+    await mkdir(dependencyRoot, { recursive: true })
+    await symlink(dependencyRoot, join(packagesRoot, 'dsh/profile/plugins/emate-shell/node_modules'), 'dir')
+
+    const receipt = await stageDesktopProfileArtifact({ packagesRoot, destination })
+    assert.equal(receipt.componentCount, 1)
+    assert.ok(existsSync(join(destination, 'dsh/profile/cordis.patch.yml')))
+    assert.ok(existsSync(join(destination, 'dsh-plugin-example/lib/index.js')))
+    assert.ok(!existsSync(join(destination, 'dsh/profile/plugins/emate-shell/node_modules')))
+    assert.ok(!existsSync(join(destination, 'dsh-plugin-example/lib/node_modules')))
+    assert.ok(!existsSync(join(destination, 'dsh-plugin-retired')))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('GitHub release packs once and validates the same tarball on three platforms', () => {
   const requireFromDsh = createRequire(resolve('packages/dsh/package.json'))
   const { parse } = requireFromDsh('yaml')
@@ -322,11 +361,13 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.equal(ci.jobs['desktop-windows'].needs, 'source')
   assert.equal(ci.jobs['desktop-macos'].needs, 'source')
   for (const [workflow, producer] of [[ci, 'source'], [desktopRelease, 'profile']]) {
+    const stage = workflow.jobs[producer].steps.find(step => step.name === 'Stage the exact built e-Mate profile without development links')
+    assert.equal(stage.run, 'node scripts/stage-desktop-profile-artifact.mjs')
     const artifact = workflow.jobs[producer].steps.find(step => step.uses === 'actions/upload-artifact@v4'
       && step.with.name.startsWith('e-mate-desktop-profile-'))
-    assert.match(artifact.with.path, /packages\/dsh-plugin-\*\/lib/u)
-    assert.match(artifact.with.path, /!packages\/dsh\/profile\/\*\*\/node_modules\n/u)
-    assert.match(artifact.with.path, /!packages\/dsh\/profile\/\*\*\/node_modules\/\*\*/u)
+    assert.match(artifact.with.path, /\.release-cache\/profile-artifact\/dsh\/profile/u)
+    assert.match(artifact.with.path, /\.release-cache\/profile-artifact\/dsh-plugin-\*\/lib/u)
+    assert.doesNotMatch(artifact.with.path, /^\s*packages\/dsh\/profile$/mu)
     assert.doesNotMatch(artifact.with.path, /browser-extension/u)
     for (const job of Object.values(workflow.jobs).filter(item => item.needs === producer)) {
       assert.equal(job.steps.find(step => step.uses === 'actions/download-artifact@v4').with.path, 'packages')

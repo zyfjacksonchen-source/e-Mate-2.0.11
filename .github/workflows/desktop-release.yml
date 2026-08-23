@@ -83,14 +83,14 @@ jobs:
           pnpm --dir upstream/deepseek-harness run build
           pnpm check:target
           pnpm test
+      - name: Stage the exact built e-Mate profile without development links
+        run: node scripts/stage-desktop-profile-artifact.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: e-mate-desktop-profile-${{ github.sha }}
           path: |
-            packages/dsh/profile
-            !packages/dsh/profile/**/node_modules
-            !packages/dsh/profile/**/node_modules/**
-            packages/dsh-plugin-*/lib
+            .release-cache/profile-artifact/dsh/profile
+            .release-cache/profile-artifact/dsh-plugin-*/lib
           if-no-files-found: error
           retention-days: 1
 
