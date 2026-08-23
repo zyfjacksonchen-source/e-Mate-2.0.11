@@ -104,6 +104,9 @@ describe('repository release boundary', () => {
       /`mac-smoke` is CI-only and must never appear/u,
       /Full Access is only the DSH filesystem\/sandbox domain/u,
       /native CDP plugin first/u,
+      /accepted installed e-Mate 2\.0\.11 artifact is the startup-performance baseline/u,
+      /accepted e-Mate 2\.0\.11 commit `6a7f4b9d59a1d8970345638946fb6564e2f5f93e`.*native Desktop startup flow/u,
+      /`candidate - paired 2\.0\.11 baseline` must be at most 10,000 ms/u,
       /Source tree is not the packaged product/u,
       /Only this stage may be called "released" or "online"/u,
     ]) assert.match(agents, invariant)

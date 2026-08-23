@@ -8,7 +8,9 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MACOS_UNIVERSAL_NATIVE_ENTRIES } from './mac-universal.ts'
 
-const RELEASE_STARTUP_CEILING_MS = 15_000
+// This timeout detects a broken candidate. Startup performance is a paired installed-artifact
+// comparison against accepted e-Mate 2.0.11, so this verifier must not invent an absolute budget.
+const RELEASE_HEALTH_TIMEOUT_MS = 180_000
 const RELEASE_SHUTDOWN_TIMEOUT_MS = 10_000
 
 function processAlive(pid: number): boolean {
@@ -88,7 +90,7 @@ function launchArchitecture(executable: string, arch: 'arm64' | 'x86_64', root: 
     if (child.pid === undefined) throw new Error(`${arch} packaged application did not start`)
     processGroup = child.pid
     const sleeper = new Int32Array(new SharedArrayBuffer(4))
-    const deadline = startedAt + RELEASE_STARTUP_CEILING_MS
+    const deadline = startedAt + RELEASE_HEALTH_TIMEOUT_MS
     while (!existsSync(healthAck)) {
       if (existsSync(healthFailure)) {
         throw new Error(`${arch} packaged application failed before ${outcome}: ${readFileSync(healthFailure, 'utf8')}`)
@@ -99,14 +101,11 @@ function launchArchitecture(executable: string, arch: 'arm64' | 'x86_64', root: 
         throw new Error(`${arch} packaged application exited before ${outcome}`)
       }
       if (Date.now() >= deadline) {
-        throw new Error(`${arch} packaged application did not acknowledge ${outcome} within ${String(RELEASE_STARTUP_CEILING_MS / 1000)} seconds`)
+        throw new Error(`${arch} packaged application did not acknowledge ${outcome} within ${String(RELEASE_HEALTH_TIMEOUT_MS / 1000)} seconds`)
       }
       Atomics.wait(sleeper, 0, 0, 200)
     }
     const elapsedMs = Date.now() - startedAt
-    if (elapsedMs > RELEASE_STARTUP_CEILING_MS) {
-      throw new Error(`${arch} packaged application exceeded the 15-second startup ceiling (${String(elapsedMs)} ms)`)
-    }
     console.log(`${arch} ${outcome} acknowledged in ${String(elapsedMs)} ms`)
   } finally {
     if (processGroup !== undefined) {

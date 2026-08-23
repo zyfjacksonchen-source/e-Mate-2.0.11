@@ -148,6 +148,69 @@ test('starts installed Chrome with an isolated persistent profile and fixed loop
   }
 })
 
+test('keeps Chrome out of application startup and starts it on first browser use', async () => {
+  const tools = []
+  const capabilities = []
+  const disposers = []
+  const harness = settingsHarness()
+  let browserRunning = false
+  let launches = 0
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async () => {
+    if (!browserRunning) throw new Error('CDP is not running')
+    return new Response(JSON.stringify([{
+      id: 'page-1',
+      type: 'page',
+      title: 'Example',
+      url: 'https://example.com/',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/page-1',
+    }]), { status: 200 })
+  }
+  try {
+    apply({
+      approval: {},
+      settings: harness.settings,
+      subprocess: {
+        resolveExecutable: async command => `/resolved/${command}`,
+        spawn: () => {
+          launches += 1
+          browserRunning = true
+          return { done: Promise.resolve({ exitCode: 0 }) }
+        },
+      },
+      tools: { register: definition => { tools.push(definition); return () => undefined } },
+      systemPrompt: { section: () => () => undefined },
+      userQuestions: { ask: async () => { throw new Error('unexpected question') } },
+      emateCapabilities: {
+        register: definition => { capabilities.push(definition); return () => undefined },
+      },
+      effect: callback => {
+        const dispose = callback()
+        if (typeof dispose === 'function') disposers.push(dispose)
+      },
+    })
+
+    assert.equal(launches, 0)
+    assert.deepEqual(await capabilities[0].status(new AbortController().signal), {
+      state: 'ready',
+      detail: '首次网页任务时自动启动 Chrome · 控制已启用',
+      action_ids: ['open-browser', 'disable-control'],
+    })
+    assert.equal(launches, 0)
+
+    const tabs = tools.find(tool => tool.name === 'browser_tabs')
+    assert.match((await tabs.execute({}, {
+      agent: { id: 'agent-1', session: {} },
+      callId: 'call-1',
+      signal: new AbortController().signal,
+    })).text, /page-1\tExample\thttps:\/\/example\.com\//u)
+    assert.equal(launches, 1)
+  } finally {
+    for (const dispose of disposers.reverse()) dispose()
+    globalThis.fetch = previousFetch
+  }
+})
+
 test('rejects mutations before CDP when native approval policy is never', async () => {
   const tools = []
   let requests = 0
