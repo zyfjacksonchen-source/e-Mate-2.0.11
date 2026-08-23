@@ -1970,3 +1970,8 @@ The text highlights AI hallucination and human verification, legal use, real-act
 
 - PR `#44` 第三轮已通过全部目标合同、组件 build/test 与 release carrier，随后 `yarn install --immutable` 在 Desktop SDK 冻结前拒绝 `dsh-workspace` 新增的 exact rc.7 descriptor。`package.json` 和 workspace lock 虽都已有该依赖，锁条目仍只有间接 `^0.1.0-rc.7` descriptor，且 workspace dependency 行未按 Yarn 确定顺序归一；本机已有安装状态再次遮住了 clean resolution 差异。
 - 只把同一个 `0.1.0-rc.7` 解析条目合并 exact/range descriptor，并按 Yarn 的确定顺序排列 workspace 依赖；没有升级、重解析或新增包，也没有关闭 immutable。正式候选继续以干净 CI 的 `yarn --immutable` 作为唯一依赖图证据。
+
+## 2026-08-23 · 2.0.12 S14 Profile 制品上传排除开发依赖链接
+
+- PR `#44` 第四轮已通过目标合同、全组件测试、release carrier、Desktop immutable install 与 Base SDK 构建，却停在 Profile artifact 上传。根因是 Profile 中插件的开发期 `node_modules` 包含指回 Harness/pnpm store 的 symlink，而固定 `actions/upload-artifact@v4` 默认递归跟随 symlink；它因此进入不属于 Profile 制品的依赖图，而不是在上传真实 Profile 字节。
+- CI 与正式 Desktop release 现在继续上传同一 `packages/dsh/profile` 和全部 accepted component `lib`，但在唯一上传边界显式排除任意层级 `node_modules` 目录及后代。Desktop 的原生 `sync-emate-profile.mjs` 本就以 `dereference: false` 并过滤 symlink，不消费这些开发链接；本修复不删除运行时文件、不改变 Base/Profile/组件字节，也不增加第二打包路径。release 合同同时锁住两个 workflow 都必须保留排除项，防止正式发布再次遍历开发机依赖图。

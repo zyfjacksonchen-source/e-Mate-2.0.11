@@ -325,6 +325,8 @@ test('GitHub release packs once and validates the same tarball on three platform
     const artifact = workflow.jobs[producer].steps.find(step => step.uses === 'actions/upload-artifact@v4'
       && step.with.name.startsWith('e-mate-desktop-profile-'))
     assert.match(artifact.with.path, /packages\/dsh-plugin-\*\/lib/u)
+    assert.match(artifact.with.path, /!packages\/dsh\/profile\/\*\*\/node_modules\n/u)
+    assert.match(artifact.with.path, /!packages\/dsh\/profile\/\*\*\/node_modules\/\*\*/u)
     assert.doesNotMatch(artifact.with.path, /browser-extension/u)
     for (const job of Object.values(workflow.jobs).filter(item => item.needs === producer)) {
       assert.equal(job.steps.find(step => step.uses === 'actions/download-artifact@v4').with.path, 'packages')

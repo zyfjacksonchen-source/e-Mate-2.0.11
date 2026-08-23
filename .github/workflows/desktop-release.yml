@@ -88,6 +88,8 @@ jobs:
           name: e-mate-desktop-profile-${{ github.sha }}
           path: |
             packages/dsh/profile
+            !packages/dsh/profile/**/node_modules
+            !packages/dsh/profile/**/node_modules/**
             packages/dsh-plugin-*/lib
           if-no-files-found: error
           retention-days: 1
