@@ -29,8 +29,8 @@ import type {
 import eMateLogo from '../../../../upstream/e-mate-2.0.5/desktop/src/v1/assets/emate-logo.png';
 import {
   AdminApiError,
-  ADMIN_MODEL_SESSION_KEY,
   ADMIN_TOKEN_SESSION_KEY,
+  clearLegacyAdminModelSession,
   abbreviateAuditValue,
   createTenantUser,
   deleteTenantUser,
@@ -43,16 +43,13 @@ import {
   loginAdmin,
   publishModelRoute,
   quotaTokens,
-  readAdminModelSession,
   resolveUsageDashboardPath,
   resetTenantUserPassword,
   revokeApiKey,
-  testModelConnection,
   updateModelRoute,
   updateModelRouteKey,
   updateTenantUser,
   type QuotaUnit,
-  type AdminModelSession,
 } from './api';
 import { messagesFor } from './i18n';
 
@@ -71,10 +68,6 @@ type ConsoleState =
 
 type CredentialPurpose = 'TASKS_ONLY' | 'MODELS_AND_TASKS';
 type UserStatusFilter = 'ALL' | Extract<AdminUserStatus, 'ACTIVE' | 'PENDING_APPROVAL'>;
-type ModelTestState =
-  | { kind: 'testing' }
-  | { kind: 'passed'; checkedAt: string }
-  | { kind: 'failed'; status: number | null };
 
 function errorMessage(status: number | null, copy: ReturnType<typeof messagesFor>): string {
   if (status === 401) return copy.authFailed;
@@ -93,13 +86,18 @@ function agreementExempt(roles: AdminUserRole[]): boolean {
   return roles.some((role) => role === 'TENANT_ADMIN' || role === 'AUDIT_ADMIN');
 }
 
+function adminErrorStatus(error: unknown): number | null {
+  const status = error instanceof AdminApiError ? error.status : null;
+  if (status === 401) clearLegacyAdminModelSession(sessionStorage);
+  return status;
+}
+
 export function App() {
   const copy = messagesFor(navigator.language || 'zh-CN');
-  const [token, setToken] = useState(() => sessionStorage.getItem(ADMIN_TOKEN_SESSION_KEY) ?? '');
-  const [modelSession, setModelSession] = useState<AdminModelSession | null>(() =>
-    readAdminModelSession(sessionStorage.getItem(ADMIN_MODEL_SESSION_KEY))
-  );
-  const [modelTests, setModelTests] = useState<Record<string, ModelTestState>>({});
+  const [token, setToken] = useState(() => {
+    clearLegacyAdminModelSession(sessionStorage);
+    return sessionStorage.getItem(ADMIN_TOKEN_SESSION_KEY) ?? '';
+  });
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
   const [loginBusy, setLoginBusy] = useState(false);
@@ -183,12 +181,10 @@ export function App() {
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        const status = error instanceof AdminApiError ? error.status : null;
+        const status = adminErrorStatus(error);
         if (status === 401) {
           sessionStorage.removeItem(ADMIN_TOKEN_SESSION_KEY);
-          sessionStorage.removeItem(ADMIN_MODEL_SESSION_KEY);
           setToken('');
-          setModelSession(null);
           setTokenError(copy.authFailed);
         }
         setState({ kind: 'error', status });
@@ -218,23 +214,19 @@ export function App() {
     )
       .then((session) => {
         sessionStorage.setItem(ADMIN_TOKEN_SESSION_KEY, session.accessToken);
-        sessionStorage.setItem(ADMIN_MODEL_SESSION_KEY, JSON.stringify(session.modelGateway));
         setToken(session.accessToken);
-        setModelSession(session.modelGateway);
         setPassword('');
       })
       .catch((error: unknown) => {
-        setTokenError(error instanceof AdminApiError && error.status === 403 ? copy.accessDenied : copy.authFailed);
+        setTokenError(adminErrorStatus(error) === 403 ? copy.accessDenied : copy.authFailed);
       })
       .finally(() => setLoginBusy(false));
   };
 
   const signOut = () => {
     sessionStorage.removeItem(ADMIN_TOKEN_SESSION_KEY);
-    sessionStorage.removeItem(ADMIN_MODEL_SESSION_KEY);
+    clearLegacyAdminModelSession(sessionStorage);
     setToken('');
-    setModelSession(null);
-    setModelTests({});
     setPassword('');
     setState({ kind: 'loading' });
   };
@@ -246,32 +238,13 @@ export function App() {
     try {
       await action(controller.signal);
       setReloadKey((value) => value + 1);
-    } catch {
+    } catch (error: unknown) {
+      adminErrorStatus(error);
       setMutationError(true);
       setReloadKey((value) => value + 1);
     } finally {
       setMutating(false);
     }
-  };
-
-  const runModelTest = (routeId: string) => {
-    if (!modelSession) return;
-    const controller = new AbortController();
-    setModelTests((current) => ({ ...current, [routeId]: { kind: 'testing' } }));
-    void testModelConnection(routeId, modelSession, controller.signal, {
-      origin: window.location.origin,
-    })
-      .then(({ checkedAt }) => {
-        setModelTests((current) => ({ ...current, [routeId]: { kind: 'passed', checkedAt } }));
-      })
-      .catch((error: unknown) => {
-        const status = error instanceof AdminApiError ? error.status : null;
-        if (status === 401) {
-          sessionStorage.removeItem(ADMIN_MODEL_SESSION_KEY);
-          setModelSession(null);
-        }
-        setModelTests((current) => ({ ...current, [routeId]: { kind: 'failed', status } }));
-      });
   };
 
   if (!token) {
@@ -689,10 +662,9 @@ export function App() {
                   {copy.addModel}
                 </Button>
               </div>
-              <Alert type='info' showIcon content={`${copy.modelsCatalogNotice} ${copy.modelTestUsageNotice}`} />
+              <Alert type='info' showIcon content={copy.modelsCatalogNotice} />
               <div className='record-list'>
                 {facts.routes.filter((route) => route.published).map((route) => {
-                  const modelTest = modelTests[route.routeId];
                   return <article key={route.routeId}>
                     <div>
                       <strong>{route.label}</strong>
@@ -701,29 +673,9 @@ export function App() {
                       </span>
                     </div>
                     <div className='record-actions'>
-                      {modelTest?.kind === 'passed' && (
-                        <Tag color='green'>{copy.modelTestPassed}</Tag>
-                      )}
-                      {modelTest?.kind === 'failed' && (
-                        <Tag color='red'>
-                          {modelTest.status === 401 ? copy.modelTestExpired : copy.modelTestFailed}
-                        </Tag>
-                      )}
                       <Tag color={route.keyConfigured ? 'green' : 'gray'}>
                         {route.keyConfigured ? copy.customKeyConfigured : copy.deploymentKey}
                       </Tag>
-                      <Button
-                        size='small'
-                        loading={modelTest?.kind === 'testing'}
-                        disabled={
-                          !route.enabled ||
-                          !modelSession ||
-                          !modelSession.allowedModelIds.includes(route.routeId)
-                        }
-                        onClick={() => runModelTest(route.routeId)}
-                      >
-                        {copy.testModelConnection}
-                      </Button>
                       <Button
                         size='small'
                         loading={mutating}

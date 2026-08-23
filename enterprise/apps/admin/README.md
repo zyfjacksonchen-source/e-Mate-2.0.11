@@ -18,10 +18,6 @@ authoritative services currently present in this repository.
   The Analytics API `sessionAuth` issuer, audience, client ID and Ed25519
   public keys must match Auth Gateway; every request rechecks the active
   database session and user before accepting the signed access token.
-- Keep the Auth Gateway `modelGateway.baseUrl` on the console origin and reverse
-  proxy that path (production: `/e-mate/model-api/`) to the existing Model
-  Gateway. The console stores its short-lived model session separately as
-  `e-mate.admin.model-session`; it never receives or calls an upstream API key.
 - Set `VITE_USAGE_DASHBOARD_PATH` to the same-origin deployed usage dashboard
   path, `/ecorex-agent/usage-panel/`. When absent, the console shows plain unavailable text
   instead of a non-working control.
@@ -30,21 +26,6 @@ authoritative services currently present in this repository.
   `e-mate.admin.access-token` `sessionStorage` entry and is never placed in a
   URL. The existing static hashed Bearer remains only as a bootstrap-compatible
   operations identity; it is not exposed by this UI.
-
-## Model connectivity test
-
-The model-route row reuses the authenticated Model Gateway session returned by
-password login. It first reads `/v1/models`, then follows the registered
-`capabilities.imageGeneration` fact to run either one bounded `/v1/responses`
-inference or one `/v1/images/generations` request. It does not branch on a model
-name, contact a provider directly, or create a second model transport.
-
-This is a real invocation: consent, tenant publication, route enablement,
-allowed-model policy, encrypted route key lookup, idempotency and usage audit
-remain enforced by Model Gateway. The UI therefore warns that every click can
-consume quota (and image tests can incur image-generation cost). A route not in
-the current administrator model session is disabled; an expired model session
-requires a new login.
 
 ## Authoritative services
 
@@ -70,8 +51,9 @@ credential.
 
 ## Local-runtime boundary
 
-The administrator control plane owns identity, model publication and redacted
-audit only. Production does not register runtime-registry, Session Index,
+The administrator control plane owns identity/account/authentication leases,
+managed model and search policy with bounded credential leases, and append-only
+redacted audit/usage only. It does not invoke models. Production does not register runtime-registry, Session Index,
 observability-policy or local-runtime status routes, and the console must not
 add a dependency on them. It cannot execute local commands, manipulate local
 sessions, tools, plugins, permissions or sandbox policy, or read prompts,

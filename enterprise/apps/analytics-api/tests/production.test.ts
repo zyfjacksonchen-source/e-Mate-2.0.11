@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
 import { parseProductionConfiguration } from '../src/production.ts';
@@ -91,7 +91,50 @@ test('production configuration maps a hashed bearer to fixed identity and denies
 
 test('production registers only identity, model-policy management and redacted audit surfaces', async () => {
   const source = readFileSync(new URL('../src/production.ts', import.meta.url), 'utf8');
-  const adminClient = readFileSync(new URL('../../admin/src/api.ts', import.meta.url), 'utf8');
+  const adminSourceExtension = /\.(?:[cm]?[jt]sx?)$/u;
+  for (const extension of ['ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs']) {
+    assert.match(`source.${extension}`, adminSourceExtension);
+  }
+  assert.doesNotMatch('styles.css', adminSourceExtension);
+  const readSourceTree = (directory: URL): Array<{ path: string; source: string }> => readdirSync(
+    directory,
+    { withFileTypes: true }
+  ).flatMap((entry) => {
+    const url = new URL(entry.isDirectory() ? `${entry.name}/` : entry.name, directory);
+    if (entry.isDirectory()) return readSourceTree(url);
+    return adminSourceExtension.test(entry.name)
+      ? [{ path: url.pathname, source: readFileSync(url, 'utf8') }]
+      : [];
+  });
+  const adminFiles = readSourceTree(new URL('../../admin/src/', import.meta.url));
+  const adminSource = adminFiles.map((file) => file.source).join('\n');
+  const compact = (value: string): string => value.replace(/['"`+\s]/gu, '');
+  const assertAllowedNetworkPaths = (value: string): void => {
+    const paths = [...compact(value).matchAll(/\/v1\/(?:[A-Za-z0-9_?./${}()=-]|&(?!&))*/gu)].map((match) => match[0]);
+    assert(paths.length > 0, 'Admin source must retain an allowlisted management route');
+    for (const path of paths) {
+      assert(
+        /^\/v1\/(?:auth\/password$|admin(?:\/|$))/u.test(path),
+        `Admin network path is not allowlisted: ${path}`
+      );
+    }
+  };
+  const assertUniqueAdminNetworkPrimitive = (value: string): void => {
+    const primitive = /\(options\.fetcher\s*\?\?\s*fetch\)\s*\(/gu;
+    assert.equal(
+      [...value.matchAll(primitive)].length,
+      1,
+      'Admin source must retain exactly one same-origin network primitive'
+    );
+    const remainder = value
+      .replace(primitive, '')
+      .replace(/fetcher\?:\s*typeof\s+fetch/gu, '');
+    assert.doesNotMatch(
+      remainder,
+      /\bfetch(?:er)?\b/u,
+      'Admin source may not bypass its unique same-origin network primitive'
+    );
+  };
   assert.doesNotMatch(source, /openRedisRuntimeRegistry|openPostgresSessionSummaryStore|openPostgresObservabilityPolicyStore/);
   assert.doesNotMatch(source, /\bregistry:|\bsessionIndex:|\bobservabilityPolicy:/);
   const productionWiring = source.match(/server = createAnalyticsServer\(\{(?<options>[\s\S]*?)\n    \}\);/u)?.groups?.options;
@@ -100,10 +143,57 @@ test('production registers only identity, model-policy management and redacted a
     [...productionWiring.matchAll(/^\s+([A-Za-z][A-Za-z0-9]*)(?=:)/gmu)].map((match) => match[1]).toSorted(),
     ['adminManagement', 'authenticate', 'consentStore', 'taskEvents', 'usageAnalytics']
   );
-  assert.doesNotMatch(
-    adminClient,
-    /\/v1\/(?:tools?|plugins?|skills?|files?|workspaces?|sessions?|memory|artifacts?|computer-use|cdp|schedules?|jobs?|shares?|profiles?|updates?|releases?|connections?)(?:\/|['"`?])/u
+  const adminPackage = JSON.parse(
+    readFileSync(new URL('../../admin/package.json', import.meta.url), 'utf8')
+  ) as { dependencies: Record<string, string>; devDependencies: Record<string, string> };
+  const allowedDependencies = [
+    '@arco-design/web-react',
+    '@e-mate/admin-contract',
+    '@icon-park/react',
+    '@types/node',
+    '@types/react',
+    '@types/react-dom',
+    '@vitejs/plugin-react',
+    'react',
+    'react-dom',
+    'typescript',
+    'vite',
+  ];
+  assert.deepEqual(
+    Object.keys({ ...adminPackage.dependencies, ...adminPackage.devDependencies }).toSorted(),
+    allowedDependencies
   );
+  const dependencySet = new Set(allowedDependencies);
+  for (const { path, source: adminFileSource } of adminFiles) {
+    for (const match of adminFileSource.matchAll(
+      /\b(?:import|export)\s+(?:type\s+)?(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]/gu
+    )) {
+      const specifier = match[1] as string;
+      if (specifier.startsWith('.')) continue;
+      const dependency = specifier.startsWith('@')
+        ? specifier.split('/').slice(0, 2).join('/')
+        : specifier.split('/')[0] as string;
+      assert(dependencySet.has(dependency), `Admin source dependency is not allowlisted: ${path}: ${specifier}`);
+    }
+  }
+  assert.deepEqual(
+    adminFiles.filter((file) => /\bfetch\b/u.test(file.source)).map((file) => file.path.split('/').at(-1)),
+    ['api.ts']
+  );
+  const adminApiSource = adminFiles.find((file) => file.path.endsWith('/api.ts'))?.source;
+  assert(adminApiSource);
+  assert.doesNotMatch(adminSource, /\b(?:XMLHttpRequest|WebSocket|EventSource)\b|\.sendBeacon\s*\(|\brequire\s*\(|\bimport\s*\(/u);
+  assertUniqueAdminNetworkPrimitive(adminSource);
+  assert.throws(
+    () => assertUniqueAdminNetworkPrimitive(`${adminSource}\nfetch(dynamicPath);`),
+    /unique same-origin network primitive/u
+  );
+  assertAllowedNetworkPaths(adminApiSource);
+  assert.throws(() => assertAllowedNetworkPaths("fetch('/v1/' + 'responses')"), /not allowlisted/u);
+  assert.throws(() => assertAllowedNetworkPaths("fetch('/v1/images/' + 'generations')"), /not allowlisted/u);
+  const modelToolSchema = /(?:tool_choice|parallel_tool_calls|tool_calls|function_call|toolChoice|parallelToolCalls|toolCalls|functionCall)/u;
+  assert.doesNotMatch(compact(adminSource), modelToolSchema);
+  assert.doesNotMatch(compact('const tools: string[] = [];'), modelToolSchema);
 
   const server = createAnalyticsServer({ authenticate: async () => null });
   await new Promise<void>((resolve, reject) => {
