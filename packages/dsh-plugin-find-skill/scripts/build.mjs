@@ -83,8 +83,8 @@ let configSource = await readFile(configPath, 'utf8')
 configSource = replaceExactlyOnce(
   configSource,
   `    catalogSkills: Schema.array(Schema.object({`,
-  `    persistentSkillSources: Schema.array(Schema.string()).default([]),\n    catalogSkills: Schema.array(Schema.object({`,
-  'persistent source schema',
+  `    persistentSkillCandidates: Schema.array(Schema.object({\n        source: Schema.string().required(),\n        legacySources: Schema.array(Schema.string()).default([]),\n        skill: Schema.string().required(),\n        version: Schema.string().required(),\n        contentDigest: Schema.string().required(),\n    })).default([]),\n    catalogSkills: Schema.array(Schema.object({`,
+  'persistent candidate schema',
 )
 await writeFile(configPath, configSource)
 
@@ -93,8 +93,8 @@ let configTypes = await readFile(configTypesPath, 'utf8')
 configTypes = replaceExactlyOnce(
   configTypes,
   `    /** Trusted install-only recommendations merged ahead of remote search results. */`,
-  `    /** Exact connector Skill sources that may be installed and are always device-global. */\n    readonly persistentSkillSources?: string[];\n    /** Trusted install-only recommendations merged ahead of remote search results. */`,
-  'persistent source types',
+  `    /** One immutable connector Skill candidate accepted for device-global installation. */\n    readonly persistentSkillCandidates?: ReadonlyArray<{\n        readonly source: string;\n        readonly legacySources?: string[];\n        readonly skill: string;\n        readonly version: string;\n        readonly contentDigest: string;\n    }>;\n    /** Trusted install-only recommendations merged ahead of remote search results. */`,
+  'persistent candidate types',
 )
 await writeFile(configTypesPath, configTypes)
 
@@ -103,14 +103,58 @@ let install = await readFile(installPath, 'utf8')
 install = replaceExactlyOnce(
   install,
   `import { join } from 'node:path';`,
-  `import { join } from 'node:path';\nimport { removeManagedSkill, resolvePersistentSkillScope } from "./emate-safety.js";`,
+  `import { join } from 'node:path';\nimport { managedSkillDigest, removeManagedSkill, replaceManagedSkillAtomically, resolvePersistentSkillCandidate, resolvePersistentSkillScope } from "./emate-safety.js";`,
   'remove imports',
 )
 install = replaceExactlyOnce(
   install,
   `    const targetScope = scope ?? config.installDefaultScope ?? 'temp';`,
-  `    const targetScope = resolvePersistentSkillScope(config, source, scope);`,
+  `    const pinned = resolvePersistentSkillCandidate(config, source, skillName);\n    const targetScope = resolvePersistentSkillScope(config, source, skillName, scope);`,
   'persistent install scope',
+)
+install = replaceExactlyOnce(
+  install,
+  `        const targetRoot = targetScope === 'temp'`,
+  `        const fetchedDigest = await managedSkillDigest(fetched.skillDir);\n        if (fetchedDigest !== pinned.contentDigest || parsed.name !== pinned.skill)\n            throw new Error('Downloaded Skill content does not match the approved version and SHA-256');\n        const targetRoot = targetScope === 'temp'`,
+  'pre-install content verification',
+)
+install = replaceExactlyOnce(
+  install,
+  `            source,\n            ...skillName !== undefined && skillName.length > 0 ? { skill: skillName } : {},\n            installedAt: Date.now(),\n            scope: targetScope,`,
+  `            source: pinned.source,\n            skill: pinned.skill,\n            installedAt: Date.now(),\n            sourceVersion: pinned.version,\n            receiptVersion: 1,\n            contentDigest: fetchedDigest,\n            scope: targetScope,`,
+  'install content receipt',
+)
+install = replaceSection(
+  install,
+  `        await mkdir(targetRoot, { recursive: true });`,
+  `        if (targetScope === 'temp') {`,
+  `        await replaceManagedSkillAtomically(fetched.skillDir, targetDir, {\n            source: pinned.source,\n            skill: pinned.skill,\n            installedAt: Date.now(),\n            sourceVersion: pinned.version,\n            receiptVersion: 1,\n            contentDigest: fetchedDigest,\n            scope: targetScope,\n        });\n`,
+  'atomic install activation',
+)
+install = replaceExactlyOnce(
+  install,
+  `        const fetched = await fetchSkillViaCli(subprocess, config.cliCommand ?? 'npx -y skills@1.5.22', meta.source, meta.skill, roots.tempSkillDir, signal);`,
+  `        const pinned = resolvePersistentSkillCandidate(config, meta.source, meta.skill);\n        const fetched = await fetchSkillViaCli(subprocess, config.cliCommand ?? 'npx -y skills@1.5.22', pinned.source, pinned.skill, roots.tempSkillDir, signal);`,
+  'update candidate',
+)
+install = replaceExactlyOnce(
+  install,
+  `    const { readMetadata, writeMetadata: persistMetadata } = await import("./metadata.js");`,
+  `    const { readMetadata } = await import("./metadata.js");`,
+  'update metadata import',
+)
+install = replaceExactlyOnce(
+  install,
+  `            await rm(dir, { recursive: true, force: true });`,
+  `            const fetchedDigest = await managedSkillDigest(fetched.skillDir);\n            if (fetchedDigest !== pinned.contentDigest || parsed.name !== pinned.skill)\n                throw new Error('Downloaded Skill content does not match the approved version and SHA-256');\n            await rm(dir, { recursive: true, force: true });`,
+  'pre-update content verification',
+)
+install = replaceSection(
+  install,
+  `            await rm(dir, { recursive: true, force: true });`,
+  `            if (candidate === 'temp') {`,
+  `            await replaceManagedSkillAtomically(fetched.skillDir, dir, { ...meta, source: pinned.source, skill: pinned.skill, installedAt: Date.now(), sourceVersion: pinned.version, receiptVersion: 1, contentDigest: fetchedDigest });\n`,
+  'atomic update activation',
 )
 install = replaceSection(
   install,
@@ -149,7 +193,7 @@ let toolsSource = await readFile(toolsPath, 'utf8')
 toolsSource = replaceExactlyOnce(
   toolsSource,
   `import { defineTool } from '@deepseek-ai/dsh-tools';`,
-  `import { defineTool } from '@deepseek-ai/dsh-tools';\nimport { resolvePersistentSkillScope } from "./emate-safety.js";`,
+  `import { defineTool } from '@deepseek-ai/dsh-tools';\nimport { findInstalledPersistentSkill, resolvePersistentSkillCandidate, resolvePersistentSkillScope } from "./emate-safety.js";\nimport { resolveRoots } from "./roots.js";`,
   'persistent tool imports',
 )
 toolsSource = replaceExactlyOnce(
@@ -161,14 +205,26 @@ toolsSource = replaceExactlyOnce(
 toolsSource = replaceExactlyOnce(
   toolsSource,
   `                const scope = parseScope(args.scope);`,
-  `                const scope = resolvePersistentSkillScope(config, args.source, parseScope(args.scope));`,
-  'connector tool scope',
+  `                const pinned = resolvePersistentSkillCandidate(config, args.source, args.skill);\n                const scope = resolvePersistentSkillScope(config, pinned.source, pinned.skill, parseScope(args.scope));`,
+  'connector tool candidate',
+)
+toolsSource = replaceExactlyOnce(
+  toolsSource,
+  `                const userQuestions = ctx.get('userQuestions');`,
+  `                const cwd = exec.agent?.session.header.cwd;\n                const installed = await findInstalledPersistentSkill(resolveRoots(config, cwd).globalSkillDir, pinned);\n                if (installed !== undefined) {\n                    const installedCandidate = (await provider.list({ cwd, signal: exec.signal })).find(item => item.name === installed.name && item.locator.path === installed.path);\n                    if (installedCandidate === undefined)\n                        throw new Error('Installed Skill receipt is not visible through the DSH provider');\n                    return { installed: true, name: installed.name, scope: 'global', path: installed.path, description: installedCandidate.description };\n                }\n                const userQuestions = ctx.get('userQuestions');`,
+  'installed connector reuse',
 )
 toolsSource = replaceExactlyOnce(
   toolsSource,
   `                            question: \`是否安装 \${args.skill ?? '所选技能'} 到 \${scope ?? config.installDefaultScope ?? 'temp'} 范围？\`,`,
-  `                            question: \`是否将 \${args.skill ?? '所选连接技能'} 作为设备级全局能力安装？\\n来源：\${args.source}\`,`,
-  'connector confirmation',
+  `                            question: \`是否将 \${pinned.skill} 作为设备级全局能力安装？\\n来源：\${pinned.source}\\n版本：\${pinned.version}\\nSHA-256：\${pinned.contentDigest}\`,`,
+  'exact connector confirmation',
+)
+toolsSource = replaceExactlyOnce(
+  toolsSource,
+  `                return installSkill(ctx.subprocess, agentRegister(agent, ctx), config, provider, tempManager, scope, args.source, args.skill, agent?.session.header.cwd, exec.signal, agent?.session.header.id);`,
+  `                return installSkill(ctx.subprocess, agentRegister(agent, ctx), config, provider, tempManager, scope, pinned.source, pinned.skill, agent?.session.header.cwd, exec.signal, agent?.session.header.id);`,
+  'exact connector installation',
 )
 toolsSource = replaceExactlyOnce(
   toolsSource,
@@ -191,6 +247,12 @@ indexSource = replaceExactlyOnce(
   `    // Managed provider over self-owned project/global roots.\n    const { provider } = registerManagedProvider((create) => ctx.skills.registerProvider(create), validated);\n    // Temporary skill manager; temp roots resolve per call site.\n    const roots = resolveRoots(validated);`,
   `    const roots = resolveRoots(validated);\n    reconcileBundledConnectorSkills(validated, roots);\n    promotePersistentSkills(validated, roots);\n    // Managed provider over self-owned project/global roots.\n    const { provider } = registerManagedProvider((create) => ctx.skills.registerProvider(create), validated);\n    // Temporary skill manager; temp roots resolve per call site.`,
   'startup promotion',
+)
+indexSource = replaceExactlyOnce(
+  indexSource,
+  `    registerCommand(ctx, validated, provider, tempManager);`,
+  `    if (validated.registerCommand !== false)\n        registerCommand(ctx, validated, provider, tempManager);`,
+  'command registration guard',
 )
 await writeFile(indexPath, indexSource)
 bundleRuntime()

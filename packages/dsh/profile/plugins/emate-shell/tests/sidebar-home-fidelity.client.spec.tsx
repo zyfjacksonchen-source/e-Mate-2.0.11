@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs'
 import { createPortal } from 'react-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HomeProjection } from '../src/client/home.tsx'
+import { startSessionFromRoute } from '../src/client/index.ts'
+import { SessionRouteProjection } from '../src/client/session-route.tsx'
 import { SidebarRoot } from '../src/client/sidebar.tsx'
 
 afterEach(() => {
@@ -29,6 +31,34 @@ const sidebarUtilityProps = {
 }
 
 describe('pinned e-Mate Sidebar and Home projection', () => {
+  it('keeps Home visible when rc.7 reuses the same blank session for a generic new task', async () => {
+    history.replaceState(null, '', '/chat/existing-blank')
+    const startSession = vi.fn()
+    const sessions = {
+      phase: 'ready' as const,
+      current: 'existing-blank',
+      byId: { 'existing-blank': { id: 'existing-blank', blank: true } },
+    }
+    const ctx = {
+      workspaces: {
+        list: { getSnapshot: () => ({ items: [{ workspaceId: 'general', path: '/home/test/.dsh/e-mate/general', title: '通用会话' }] }) },
+        startSession,
+      },
+    }
+
+    render(<SessionRouteProjection
+      useSessions={selector => selector(sessions)}
+      getSessions={() => sessions}
+      openSession={vi.fn()}
+      startHomeSession={() => { startSessionFromRoute(ctx) }}
+    />)
+    startSessionFromRoute(ctx)
+
+    await waitFor(() => { expect(location.pathname).toBe('/') })
+    expect(startSession).toHaveBeenCalledTimes(1)
+    expect(startSession).toHaveBeenCalledWith('general')
+  })
+
   it('keeps the current Sidebar hierarchy while driving real session and workspace actions', async () => {
     const sessions = {
       ids: ['project-session', 'general-session'],
@@ -301,6 +331,16 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
         id: 'schedule-1', session_id: 'session-1', session_title: '日报会话', kind: 'every',
         prompt: '生成日报', everySeconds: 300, scheduledAt: '2099-08-19T12:00:00.000Z', state: 'scheduled',
       }],
+      completed: [{
+        id: 'schedule-2', session_id: 'session-2', session_title: '周报会话', kind: 'at',
+        prompt: '提交周报', scheduledAt: '2026-08-19T12:00:00.000Z', state: 'completed',
+        completedAt: '2026-08-19T12:00:01.000Z',
+      }],
+      recent_runs: [{
+        id: 'schedule-3', session_id: 'session-3', session_title: '项目会话', kind: 'every',
+        prompt: '同步项目', everySeconds: 3600, scheduledAt: '2026-08-19T11:00:00.000Z',
+        ranAt: '2026-08-19T11:00:01.000Z',
+      }],
       errors: [],
     } }))
     const state = { ids: [], byId: {}, current: undefined }
@@ -314,14 +354,23 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       scheduleIcons={{ create: Icon, refresh: Icon, edit: Icon, delete: Icon }}
     />)
 
-    await waitFor(() => { expect(screen.getByRole('heading', { name: '定时任务' })).not.toBeNull() })
+    await waitFor(() => { expect(screen.getByRole('heading', { name: '已安排的任务' })).not.toBeNull() })
     await waitFor(() => { expect(screen.getByText('生成日报')).not.toBeNull() })
     expect(callSchedules).toHaveBeenCalledOnce()
     expect(screen.getByText('日报会话')).not.toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '新任务' }))
+    expect(screen.getByRole('heading', { name: '已完成' })).not.toBeNull()
+    expect(screen.getByText('提交周报')).not.toBeNull()
+    expect(screen.getByRole('heading', { name: '最近运行' })).not.toBeNull()
+    expect(screen.getByText('同步项目')).not.toBeNull()
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索已安排任务' }), { target: { value: '日报' } })
+    expect(screen.getByText('生成日报')).not.toBeNull()
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索已安排任务' }), { target: { value: '不存在' } })
+    expect(screen.getByText('没有匹配的定时任务。')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
     await waitFor(() => {
       expect(prepareSchedulePrompt).toHaveBeenCalledWith('请帮我创建一个定时任务。先向我确认执行时间和任务内容，再调用 schedule_create 保存。')
     })
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索已安排任务' }), { target: { value: '' } })
     fireEvent.click(screen.getByRole('button', { name: '修改' }))
     await waitFor(() => { expect(prepareSchedulePrompt).toHaveBeenCalledWith(expect.stringContaining('schedule_create 创建替代任务'), 'session-1') })
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
@@ -340,7 +389,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(source).toMatch(/ctx\.conversation\.input\.for\(scope\)\.setDraft\(prompt\)/u)
     expect(source).toMatch(/ctx\.sessions\.open\(sessionId\)/u)
     expect(source).toMatch(/ctx\.workspaces\.list\.getSnapshot\(\)\.items\.find\(isGeneralWorkspace\)/u)
-    expect(source).toMatch(/workspaceId === undefined && \['\/capabilities', '\/settings', '\/schedules'\]\.includes\(location\.pathname\)[\s\S]*?history\.pushState\(null, '', '\/'\)[\s\S]*?dispatchEvent\(new PopStateEvent\('popstate'\)\)[\s\S]*?return[\s\S]*?ctx\.workspaces\.startSession\(target\)/u)
+    expect(source).toMatch(/workspaceId === undefined && location\.pathname !== '\/'[\s\S]*?history\.pushState\(null, '', '\/'\)[\s\S]*?dispatchEvent\(new PopStateEvent\('popstate'\)\)[\s\S]*?return[\s\S]*?ctx\.workspaces\.startSession\(target\)/u)
     expect(source).toMatch(/ctx\.layout\.toggleSidebar\(\)/u)
     expect(source).toMatch(/ctx\.layout\.closeDetails\(\)/u)
     expect(source).toMatch(/ctx\.connection\.rpc\.call\('\/emate\.schedules', 'list', \{\}\)/u)

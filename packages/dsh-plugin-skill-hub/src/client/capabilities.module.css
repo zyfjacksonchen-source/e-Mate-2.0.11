@@ -22,8 +22,7 @@
   --elevation-dialog: 0 24px 72px oklch(0.2 0.01 258 / 0.2);
   position: absolute;
   z-index: 1;
-  inset-block: 0;
-  right: 0;
+  inset: 0;
   min-width: 0;
   overflow: hidden;
   color: var(--ink);
@@ -65,7 +64,7 @@
   width: min(1180px, calc(100% - 8px));
   height: calc(100% - 16px);
   min-height: 0;
-  margin: 8px 8px 8px 0;
+  margin: 8px auto;
   padding: 24px 32px 40px;
   border: 1px solid var(--rule);
   border-radius: 16px;

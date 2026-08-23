@@ -28,7 +28,8 @@ import { apply as applyHealth } from '../profile/plugins/health.js'
 import { apply as applyShare, SHARE_CHANNEL } from '../profile/plugins/share.js'
 import { apply as applyGeneralWorkspace } from '../profile/plugins/general-workspace.js'
 import * as settingsDocumentBoundary from '../profile/plugins/settings-document-boundary.js'
-import { apply as applyAgentOperations, SCHEDULES_CHANNEL } from '../profile/plugins/agent-operations.js'
+import { apply as applyAgentOperations } from '../profile/plugins/agent-operations.js'
+import { apply as applyShell } from '../profile/plugins/emate-shell/index.js'
 import { apply as applyCapabilities, CAPABILITIES_CHANNEL } from '../profile/plugins/capabilities.js'
 import { apply as applyQrGeneration } from '../profile/plugins/qr-generation.js'
 import {
@@ -44,7 +45,6 @@ import {
   validateModelPolicy,
 } from '../profile/plugins/model-policy.js'
 import { apply as applyAudit, AUDIT_CHANNEL, createTaskAuditFact, createUsageFact } from '../profile/plugins/audit.js'
-import { apply as applyShell } from '../profile/plugins/emate-shell/index.js'
 import {
   apply as applyIdentity,
   createEnterpriseIdentityProvider,
@@ -362,11 +362,10 @@ test('managed profile installation is idempotent', () => {
       '@e-mate/dsh-plugin-find-skill',
       '@e-mate/dsh-plugin-genui',
       '@e-mate/dsh-plugin-glass-composer',
-      '@e-mate/dsh-plugin-idesign',
       '@e-mate/dsh-plugin-mcp-manage',
       '@e-mate/dsh-plugin-memory-evolve',
       '@e-mate/dsh-plugin-office-skills',
-      '@e-mate/dsh-plugin-search-mcp',
+      '@e-mate/dsh-plugin-schedules',
       '@e-mate/dsh-plugin-tool-search',
     ]
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
@@ -378,13 +377,23 @@ test('managed profile installation is idempotent', () => {
     assert.equal(readFileSync(join(first.profile, 'package.json'), 'utf8'), manifest)
     assert.equal(readFileSync(join(first.profile, 'cordis.patch.yml'), 'utf8'), patch)
     profileManifest.dependencies['@e-mate/dsh-plugin-im'] = '2.0.8'
+    profileManifest.dependencies['@e-mate/dsh-plugin-idesign'] = '2.0.12'
+    profileManifest.dependencies['@e-mate/dsh-plugin-search-mcp'] = '2.0.11'
     profileManifest.dependencies['@e-mate/dsh-plugin-xin-assistant'] = '2.0.10'
     profileManifest.dependencies['@yuxianglin/dsh-bridge-browser'] = '0.0.1'
     const retiredXin = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant')
+    const retiredIDesign = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-idesign')
+    const retiredSearchMcp = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-search-mcp')
     mkdirSync(retiredXin, { recursive: true })
     writeFileSync(join(retiredXin, 'stale.txt'), 'retired')
+    mkdirSync(retiredIDesign, { recursive: true })
+    writeFileSync(join(retiredIDesign, 'stale.txt'), 'retired')
+    mkdirSync(retiredSearchMcp, { recursive: true })
+    writeFileSync(join(retiredSearchMcp, 'stale.txt'), 'retired')
     profileManifest.dsh.profile.bundles.push(
       '@e-mate/dsh-plugin-im',
+      '@e-mate/dsh-plugin-idesign',
+      '@e-mate/dsh-plugin-search-mcp',
       '@e-mate/dsh-plugin-xin-assistant',
       '@yuxianglin/dsh-bridge-browser',
     )
@@ -392,12 +401,18 @@ test('managed profile installation is idempotent', () => {
     installProfile(dshHome)
     const repairedManifest = JSON.parse(readFileSync(join(first.profile, 'package.json'), 'utf8'))
     assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-im'], undefined)
+    assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-idesign'], undefined)
+    assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-search-mcp'], undefined)
     assert.equal(repairedManifest.dependencies['@e-mate/dsh-plugin-xin-assistant'], undefined)
     assert.equal(repairedManifest.dependencies['@yuxianglin/dsh-bridge-browser'], undefined)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-im'), false)
+    assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-idesign'), false)
+    assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-search-mcp'), false)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@e-mate/dsh-plugin-xin-assistant'), false)
     assert.equal(repairedManifest.dsh.profile.bundles.includes('@yuxianglin/dsh-bridge-browser'), false)
     assert.equal(existsSync(retiredXin), false)
+    assert.equal(existsSync(retiredIDesign), false)
+    assert.equal(existsSync(retiredSearchMcp), false)
     const patchRows = parseYaml(patch).flatMap(operation => operation.insert ?? (operation.id ? [operation] : []))
     const patchById = new Map(patchRows.map(row => [row.id, row]))
     assert.deepEqual(patchById.get('credentials'), {
@@ -431,6 +446,18 @@ test('managed profile installation is idempotent', () => {
     assert.equal(patchById.get('sandbox-policy').config.mode, 'danger-full-access')
     assert.equal(patchById.get('approval').config.policy, 'never')
     assert.equal(patchById.get('permission').config.defaultPreset, 'danger-full-access')
+    assert.deepEqual(patchById.get('web').config, { searchProvider: 'deepseek-official' })
+    assert.deepEqual(patchById.get('web-search-deepseek'), {
+      id: 'web-search-deepseek',
+      disabled: false,
+      config: { apiKeyEnv: 'E_MATE_MODEL_KEY_DEEPSEEK' },
+    })
+    assert.deepEqual(patchById.get('tool-web'), {
+      id: 'tool-web',
+      disabled: false,
+      config: { fetch: false, searchTimeoutMs: 60000, searchMaxResults: 50 },
+    })
+    assert.equal(patchById.has('search-mcp'), false)
     assert.equal(patchById.get('llm-deepseek').disabled, true)
     assert.deepEqual(patchById.get('agent-default-model').config, {
       provider: 'e-mate-enterprise',
@@ -446,6 +473,7 @@ test('managed profile installation is idempotent', () => {
     })
     assert.equal(patchById.get('schedule').name, '@deepseek-ai/dsh-schedule')
     assert.equal(patchById.get('emate-schedule-import').name, './plugins/schedule-import.js')
+    assert.equal(patchById.has('emate-schedules'), false)
     assert.equal(patchById.get('emate-legacy-migration').name, './plugins/legacy-migration.js')
     assert.equal(patchById.get('emate-model-policy').name, './plugins/model-policy.js')
     assert.deepEqual(patchById.get('emate-model-policy').inject, [
@@ -461,9 +489,7 @@ test('managed profile installation is idempotent', () => {
       'connection', 'sessionPersistence', 'storageDomain', 'timer', 'emateModelPolicy', 'emateIdentity',
     ])
     assert.equal(patchById.get('emate-agent-operations').name, './plugins/agent-operations.js')
-    assert.deepEqual(patchById.get('emate-agent-operations').inject, [
-      'systemPrompt', 'connection', 'sessionPersistence',
-    ])
+    assert.deepEqual(patchById.get('emate-agent-operations').inject, ['systemPrompt'])
     assert.equal(patchById.has('ui-sidebar'), false)
     assert.equal(patchById.has('emate-shell'), false)
     assert.match(patch, /\.\/plugins\/health\.js/)
@@ -481,6 +507,9 @@ test('managed profile installation is idempotent', () => {
     assert.match(patch, /id: emate-legacy-migration[\s\S]*\.\/plugins\/legacy-migration\.js[\s\S]*inject: \[sessionPersistence, webServer\]/)
     assert.match(patch, /id: emate-schedule-import[\s\S]*\.\/plugins\/schedule-import\.js[\s\S]*inject: \[tools\]/)
     assert.ok(readFileSync(join(first.profile, 'plugins', 'agent-operations.js')).byteLength > 0)
+    const schedules = readFileSync(join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-schedules', 'lib', 'index.js'), 'utf8')
+    assert.match(schedules, /\/emate\.schedules/u)
+    assert.match(schedules, /foldScheduleEvents/u)
     assert.ok(readFileSync(join(first.profile, 'plugins', 'capabilities.js')).byteLength > 0)
     assert.ok(readFileSync(join(first.profile, 'plugins', 'general-workspace.js')).byteLength > 0)
     assert.ok(readFileSync(join(first.profile, 'plugins', 'settings-document-boundary.js')).byteLength > 0)
@@ -543,6 +572,10 @@ test('managed profile installation is idempotent', () => {
     assert.match(dumped.stdout, /- id: credentials\n  name: '@deepseek-ai\/dsh-credentials-local'\n  disabled: true/)
     assert.match(dumped.stdout, /- id: emate-credentials-os\n  name: \.\/plugins\/credentials-os\.js/)
     assert.match(dumped.stdout, /- id: ui-trajectory\n  name: '@deepseek-ai\/dsh-client-ui-trajectory'\n  disabled: true/)
+    assert.match(dumped.stdout, /- id: web\n  name: '@deepseek-ai\/dsh-web'\n  config:\n    searchProvider: deepseek-official/)
+    assert.match(dumped.stdout, /- id: web-search-deepseek\n  name: '@deepseek-ai\/dsh-web-search-deepseek'\n  config:\n    apiKeyEnv: E_MATE_MODEL_KEY_DEEPSEEK\n  disabled: false/)
+    assert.match(dumped.stdout, /- id: tool-web\n  name: '@deepseek-ai\/dsh-tool-web'\n  config:\n    fetch: false\n    searchTimeoutMs: 60000\n    searchMaxResults: 50\n  disabled: false/)
+    assert.doesNotMatch(dumped.stdout, /- id: search-mcp\b|TAVILY_API_KEY/)
     assert.doesNotMatch(dumped.stdout, /- id: credentials\n  name: '@deepseek-ai\/dsh-credentials-local'\n(?!  disabled: true)/)
     assert.doesNotMatch(dumped.stdout, /- id: ui-trajectory\n  name: '@deepseek-ai\/dsh-client-ui-trajectory'\n(?!  disabled: true)/)
     assert.match(binding.zod_module_sha256, /^[0-9a-f]{64}$/)
@@ -979,7 +1012,6 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
     const paths = installProfile(dshHome)
     const visible = new Set([
       '@e-mate/dsh-plugin-office-skills',
-      '@e-mate/dsh-plugin-search-mcp',
       '@e-mate/dsh-plugin-tool-search',
       '@e-mate/dsh-plugin-cdp',
     ])
@@ -993,7 +1025,7 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
       '@e-mate/dsh-plugin-mcp-manage',
       '@e-mate/dsh-plugin-memory-evolve',
       '@e-mate/dsh-plugin-office-skills',
-      '@e-mate/dsh-plugin-search-mcp',
+      '@e-mate/dsh-plugin-schedules',
     ]
     for (const name of packages) {
       const pluginRoot = join(paths.profile, 'node_modules', ...name.split('/'))
@@ -1385,6 +1417,20 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       },
     })
 
+    sessionMessages.push({
+      id: 'modify-text-on-image', role: 'user', source: { kind: 'user' },
+      content: [{ type: 'text', text: '图上的方林改为圣都。' }],
+    })
+    await imagegen.execute({ prompt: '把图片中的方林改成圣都。' }, execution())
+    assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/edits')
+
+    sessionMessages.push({
+      id: 'new-map-image', role: 'user', source: { kind: 'user' },
+      content: [{ type: 'text', text: '生成一张地图上的路线图。' }],
+    })
+    await imagegen.execute({ prompt: '生成一张地图上的路线图。' }, execution())
+    assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/generations')
+
     const edited = await imagegen.execute({
       prompt: 'Retouch only the supplied image.',
       image_url: [attachmentId],
@@ -1468,12 +1514,12 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     ])
     assert.deepEqual(concurrent.map(result => result.images.length), [1, 1])
     assert.equal(maximumSubmissions >= 2, true)
-    assert.deepEqual(policyModels, ['gpt-image-2-pro', 'gpt-image-2-pro', 'gpt-image-2-pro', 'gpt-image-2-pro', 'gpt-image-2-pro'])
+    assert.deepEqual(policyModels, Array(7).fill('gpt-image-2-pro'))
     assert.deepEqual(waitedJobs, jobs.map(job => job.id))
     assert.equal(requests.every(request => !('provider' in request.body) && !('api_key' in request.body)), true)
     const firstScope = `image-${createHash('sha256').update('image-session\0image-call-1').digest('hex').slice(0, 32)}`
     assert.deepEqual(requestScopes[0], { task: firstScope, trace: firstScope, session: firstScope, client: firstScope })
-    assert.equal(new Set(requestScopes.map(scope => scope.task)).size, 5)
+    assert.equal(new Set(requestScopes.map(scope => scope.task)).size, 7)
     await assert.rejects(
       imagegen.execute({ prompt: 'Edit missing image.', image_url: `sha256:${'f'.repeat(64)}` }, execution()),
       /not present in this e-Mate session/,
@@ -1514,40 +1560,11 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
   }
 })
 
-test('Agent operation guidance owns the e-Mate persona and reuses Harness shell and Job semantics', async () => {
+test('Agent operation guidance owns only the e-Mate persona', () => {
   let section
-  let channel
-  let handler
-  let options
-  const temporary = mkdtempSync(join(tmpdir(), 'emate-agent-operations-'))
-  const paths = installProfile(join(temporary, 'dsh'))
   applyAgentOperations({
     systemPrompt: { section: value => { section = value } },
-    connection: { rpc: { handle: (value, callback, config) => {
-      channel = value
-      handler = callback
-      options = config
-      return () => {}
-    } } },
-    sessionPersistence: {
-      listSnapshots: async () => [{ header: { id: 'session-1' }, revision: 'revision-1' }],
-      inspect: async () => ({
-        meta: { cwd: '/tmp/project', seedLength: 0 },
-        events: [
-          { type: 'session/title', seq: 0, time: 1, data: { title: '日报会话' } },
-          { type: 'schedule/change', seq: 1, time: 1, data: {
-            version: 1,
-            operation: 'create',
-            schedule: {
-              id: 'schedule-1', kind: 'every', prompt: '生成日报', everySeconds: 300,
-              scheduledAt: '2099-08-19T12:00:00.000Z',
-            },
-          } },
-        ],
-      }),
-    },
-    effect: callback => callback(),
-  }, { bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json') })
+  })
   assert.equal(section.name, 'emate:agent-operations')
   assert.equal(section.order, 180)
   assert.match(section.text, /我是小芯，你的 AI 办公助手/u)
@@ -1559,17 +1576,6 @@ test('Agent operation guidance owns the e-Mate persona and reuses Harness shell 
   assert.match(section.text, /use `mcp_manage`/u)
   assert.match(section.text, /user-visible Chrome page exposed through the DSH CDP adapter/u)
   assert.match(section.text, /Do not invent a built-in connector or ask the user to paste secrets into chat/u)
-  assert.equal(channel, SCHEDULES_CHANNEL)
-  assert.deepEqual(options, { authority: 'loopback' })
-  const schedules = await handler('list', {})
-  assert.equal(schedules.ok, true)
-  assert.deepEqual(schedules.value.errors, [])
-  assert.deepEqual(schedules.value.items[0], {
-    session_id: 'session-1', session_title: '日报会话', id: 'schedule-1', kind: 'every',
-    prompt: '生成日报', everySeconds: 300, scheduledAt: '2099-08-19T12:00:00.000Z',
-    state: 'scheduled', deliveryMode: 'session-local',
-  })
-  rmSync(temporary, { recursive: true, force: true })
 })
 
 test('identity agreements are immutable, explicit, and use the target Connection RPC', async () => {

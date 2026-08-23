@@ -119,7 +119,7 @@ describe('repository release boundary', () => {
   it('accepts the checked-in base contract and every first-party component', () => {
     const boundary = loadReleaseBoundary(root)
     assert.equal(boundary.valid, true, boundary.errors.join('\n'))
-    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v5-dsh-2bc16230975f')
+    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v6-dsh-2bc16230975f')
     assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.12')
     assert.deepEqual(PRODUCT_UI_REFERENCE, {
       repository: 'zyfjacksonchen-source/ECoreX',
@@ -133,7 +133,7 @@ describe('repository release boundary', () => {
       harness_commit: '99f6f02fecdb7dff40c3fbc9470f5907c29f74ca',
       harness_version: '0.1.0-rc.7',
     })
-    assert.equal(boundary.components.length, 17)
+    assert.equal(boundary.components.length, 16)
     assert.equal(boundary.components.every(component => component.errors.length === 0), true)
     assert.deepEqual(boundary.components.flatMap(component => component.errors), [])
   })
@@ -329,6 +329,23 @@ describe('repository release boundary', () => {
     assert.deepEqual(result.components, ['@e-mate/dsh-plugin-skill-hub'])
     assert.deepEqual(result.component_jobs, [{
       component: '@e-mate/dsh-plugin-skill-hub',
+      target: 'portable',
+      runner: 'ubuntu-24.04',
+      publish: true,
+    }])
+  })
+
+  it('keeps native Schedule management in its own hot component lane', () => {
+    const result = classify(
+      'packages/dsh-plugin-schedules/src/index.ts',
+      'packages/dsh-plugin-schedules/test/contracts.test.mjs',
+    )
+    assert.equal(result.lane, 'plugin-only')
+    assert.equal(result.run_base, false)
+    assert.equal(result.portable_publish, true)
+    assert.deepEqual(result.components, ['@e-mate/dsh-plugin-schedules'])
+    assert.deepEqual(result.component_jobs, [{
+      component: '@e-mate/dsh-plugin-schedules',
       target: 'portable',
       runner: 'ubuntu-24.04',
       publish: true,

@@ -8,7 +8,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate.git",
+    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate-2.0.11.git",
     "directory": "desktop/e-mate-desktop"
   },
   "type": "module",

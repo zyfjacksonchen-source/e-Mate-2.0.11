@@ -1,26 +1,36 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { parse } from 'yaml'
+import { apply } from '../lib/index.js'
+import { installSkill, updateSkill } from '../lib/install.js'
+import { registerTools } from '../lib/tools.js'
 
 import {
   BUNDLED_CONNECTOR_SKILLS,
+  findInstalledPersistentSkill,
+  managedSkillDigest,
   promotePersistentSkills,
+  recoverManagedSkillSwap,
   reconcileBundledConnectorSkills,
   removeManagedSkill,
+  resolvePersistentSkillCandidate,
   resolvePersistentSkillScope,
   throwawayEnvironment,
 } from '../lib/emate-safety.js'
 
 const root = new URL('../', import.meta.url)
+const PERSISTENT_SOURCE = 'https://github.com/larksuite/cli/tree/v1.0.88/skills'
+const PERSISTENT_VERSION = 'v1.0.88@2829ecd18846d8390dfac558125f602b07232206'
 
 test('find-skill is pinned and limits persistent installation to connector sources', async () => {
   const pkg = JSON.parse(await readFile(new URL('package.json', root), 'utf8'))
   const patch = await readFile(new URL('cordis.patch.yml', root), 'utf8')
   const cli = await readFile(new URL('../lib/cli.js', import.meta.url), 'utf8')
   const tools = await readFile(new URL('../lib/tools.js', import.meta.url), 'utf8')
+  const installer = await readFile(new URL('../lib/install.js', import.meta.url), 'utf8')
   const client = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   const runtime = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
   assert.equal(pkg.version, '2.0.12')
@@ -39,20 +49,76 @@ test('find-skill is pinned and limits persistent installation to connector sourc
   assert.doesNotMatch(cli, /\.\.\.process\.env/u)
   assert.match(tools, /Skill installation was cancelled by the user/u)
   assert.match(tools, /id: 'dsh-find-skill-remove'/u)
-  assert.match(tools, /resolvePersistentSkillScope\(config, args\.source/u)
+  assert.match(tools, /resolvePersistentSkillCandidate\(config, args\.source, args\.skill\)/u)
   assert.match(tools, /作为设备级全局能力安装/u)
-  assert.match(tools, /来源：\$\{args\.source\}/u)
+  assert.match(tools, /来源：\$\{pinned\.source\}/u)
+  assert.match(tools, /版本：\$\{pinned\.version\}/u)
+  assert.match(tools, /SHA-256：\$\{pinned\.contentDigest\}/u)
   assert.match(tools, /title: args\.skill \?\? '安装技能'/u)
   assert.match(client, /String\(args\.skill \?\? ["']安装技能["']\)/u)
   assert.doesNotMatch(client, /String\(args\.source/u)
   assert.doesNotMatch(runtime, /^import .* from ['"]yaml['"];?$/mu)
+  assert.match(runtime, /validated\.registerCommand !== false/u)
+  const installDigest = installer.indexOf('managedSkillDigest(fetched.skillDir)')
+  const installActivate = installer.indexOf('replaceManagedSkillAtomically(fetched.skillDir, targetDir')
+  const updateStart = installer.indexOf('export async function updateSkill')
+  const updateDigest = installer.indexOf('managedSkillDigest(fetched.skillDir)', updateStart)
+  const updateActivate = installer.indexOf('replaceManagedSkillAtomically(fetched.skillDir, dir', updateStart)
+  assert.ok(installDigest >= 0 && installDigest < installActivate)
+  assert.ok(updateStart >= 0 && updateDigest >= 0 && updateDigest < updateActivate)
+  assert.doesNotMatch(installer.slice(0, updateStart), /await rm\(targetDir/u)
+  assert.doesNotMatch(installer.slice(updateStart), /await rm\(dir/u)
+  assert.match(installer, /Downloaded Skill content does not match the approved version and SHA-256/u)
 
   const config = parse(patch)[0].insert[0].config
   const catalogSources = config.catalogSkills.map(skill => skill.source)
-  assert.deepEqual(config.persistentSkillSources, ['larksuite/cli'])
+  assert.equal(config.persistentSkillCandidates.length, 9)
+  assert.equal(config.persistentSkillCandidates.every(candidate =>
+    candidate.source === PERSISTENT_SOURCE
+      && candidate.version === PERSISTENT_VERSION
+      && candidate.legacySources?.length === 1
+      && candidate.legacySources[0] === 'larksuite/cli'
+      && /^[a-f0-9]{64}$/u.test(candidate.contentDigest)), true)
+  assert.deepEqual(config.persistentSkillCandidates.map(candidate => candidate.skill), [
+    'lark-shared', 'lark-doc', 'lark-im', 'lark-drive', 'lark-sheets',
+    'lark-base', 'lark-calendar', 'lark-task', 'lark-mail',
+  ])
   assert.equal(catalogSources.every(source => source.includes(
-    '/zyfjacksonchen-source/e-Mate/tree/skills-v2.0.12-r1/skills/connect-',
+    '/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.12-r1/skills/connect-',
   )), true)
+})
+
+test('registerCommand false leaves the real DSH command registry untouched', async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), 'emate-find-skill-no-command-'))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  let commandRegistrations = 0
+  const ctx = {
+    logger: () => ({ info: () => {} }),
+    tools: { register: () => { throw new Error('model tools must stay disabled in this test') } },
+    skills: {
+      register: () => () => {},
+      registerProvider: create => {
+        create({ invalidate: () => {} })
+        return () => {}
+      },
+    },
+    subprocess: {},
+    get: name => name === 'commands'
+      ? { register: () => { commandRegistrations += 1 } }
+      : undefined,
+    on: () => {},
+  }
+  apply(ctx, {
+    ...connectorConfig(),
+    globalSkillRoot: join(scratch, 'global'),
+    tempSkillRoot: join(scratch, 'temp'),
+    persistentSkillCandidates: [],
+    registerFindTool: false,
+    registerInstallTool: false,
+    registerRemoveTool: false,
+    registerCommand: false,
+  })
+  assert.equal(commandRegistrations, 0)
 })
 
 test('external-connection Skills are global and legacy temporary installs are promoted', async (t) => {
@@ -62,20 +128,352 @@ test('external-connection Skills are global and legacy temporary installs are pr
     tempSkillDir: join(scratch, 'temp'),
     globalSkillDir: join(scratch, 'global'),
   }
-  await writeManagedSkill(roots.tempSkillDir, 'lark-doc', 'temp', 'larksuite/cli')
+  const legacy = await writeManagedSkill(roots.tempSkillDir, 'lark-doc', 'temp', 'larksuite/cli')
   await writeManagedSkill(roots.tempSkillDir, 'ordinary-skill', 'temp', 'someone/community')
-  const config = { persistentSkillSources: ['larksuite/cli'], installDefaultScope: 'temp' }
+  const candidate = await persistentCandidate(legacy, 'lark-doc')
+  const config = { persistentSkillCandidates: [candidate], installDefaultScope: 'temp' }
 
-  assert.equal(resolvePersistentSkillScope(config, 'larksuite/cli', 'temp'), 'global')
+  assert.deepEqual(resolvePersistentSkillCandidate(config, PERSISTENT_SOURCE, 'lark-doc'), candidate)
+  assert.equal(resolvePersistentSkillScope(config, PERSISTENT_SOURCE, 'lark-doc', 'temp'), 'global')
   assert.throws(
-    () => resolvePersistentSkillScope(config, 'someone/community', 'global'),
-    /not an approved external-connection source/u,
+    () => resolvePersistentSkillScope(config, 'someone/community', 'lark-doc', 'global'),
+    /not an approved external-connection candidate/u,
   )
   assert.deepEqual(promotePersistentSkills(config, roots), ['lark-doc'])
   assert.equal((await stat(join(roots.globalSkillDir, 'lark-doc', 'SKILL.md'))).isFile(), true)
-  assert.equal(JSON.parse(await readFile(join(roots.globalSkillDir, 'lark-doc', '.dsh-find-skill.json'), 'utf8')).scope, 'global')
+  const receipt = JSON.parse(await readFile(join(roots.globalSkillDir, 'lark-doc', '.dsh-find-skill.json'), 'utf8'))
+  assert.equal(receipt.scope, 'global')
+  assert.equal(receipt.source, PERSISTENT_SOURCE)
+  assert.equal(receipt.sourceVersion, PERSISTENT_VERSION)
+  assert.equal(receipt.contentDigest, candidate.contentDigest)
   await assert.rejects(stat(join(roots.tempSkillDir, 'lark-doc')), { code: 'ENOENT' })
   assert.equal((await stat(join(roots.tempSkillDir, 'ordinary-skill'))).isDirectory(), true)
+})
+
+test('device-global install receipt is reused across sessions only for the same source and Skill', async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), 'emate-find-skill-global-reuse-'))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  const globalRoot = join(scratch, 'global')
+
+  const missingCandidate = persistentCandidateValue('lark-shared', '0'.repeat(64))
+  assert.equal(await findInstalledPersistentSkill(globalRoot, missingCandidate), undefined)
+  const target = await writeManagedSkill(globalRoot, 'lark-shared', 'global', 'larksuite/cli')
+  const receipt = JSON.parse(await readFile(join(target, '.dsh-find-skill.json'), 'utf8'))
+  delete receipt.receiptVersion
+  delete receipt.contentDigest
+  await writeFile(join(target, '.dsh-find-skill.json'), JSON.stringify(receipt), 'utf8')
+  const candidate = await persistentCandidate(target, 'lark-shared')
+
+  assert.deepEqual(
+    await findInstalledPersistentSkill(globalRoot, candidate),
+    { name: 'lark-shared', path: target },
+  )
+  const migrated = JSON.parse(await readFile(join(target, '.dsh-find-skill.json'), 'utf8'))
+  assert.equal(migrated.source, PERSISTENT_SOURCE)
+  assert.equal(migrated.sourceVersion, PERSISTENT_VERSION)
+  assert.equal(migrated.receiptVersion, 1)
+  assert.equal(migrated.contentDigest, candidate.contentDigest)
+  assert.equal(await findInstalledPersistentSkill(globalRoot, { ...candidate, source: 'other/source', legacySources: [] }), undefined)
+  assert.equal(await findInstalledPersistentSkill(globalRoot, { ...candidate, skill: 'lark-doc' }), undefined)
+  await writeFile(join(target, 'SKILL.md'), 'tampered after consent', 'utf8')
+  assert.equal(await findInstalledPersistentSkill(globalRoot, candidate), undefined)
+})
+
+test('an interrupted temp-to-global receipt migration self-heals without another question', async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), 'emate-find-skill-receipt-recovery-'))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  const globalRoot = join(scratch, 'global')
+  const target = await writeManagedSkill(globalRoot, 'lark-shared', 'temp', PERSISTENT_SOURCE)
+  const candidate = await persistentCandidate(target, 'lark-shared')
+  const leftover = join(globalRoot, '.lark-shared.e-mate-receipt-staging')
+  await writeFile(leftover, 'interrupted receipt bytes', 'utf8')
+
+  assert.deepEqual(await findInstalledPersistentSkill(globalRoot, candidate), {
+    name: 'lark-shared',
+    path: target,
+  })
+  const receipt = JSON.parse(await readFile(join(target, '.dsh-find-skill.json'), 'utf8'))
+  assert.equal(receipt.scope, 'global')
+  assert.equal(receipt.sourceVersion, PERSISTENT_VERSION)
+  assert.equal(receipt.contentDigest, candidate.contentDigest)
+  await assert.rejects(stat(leftover), { code: 'ENOENT' })
+})
+
+test('a receipt migration staging symlink is rejected without touching its target', async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), 'emate-find-skill-receipt-staging-symlink-'))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  const globalRoot = join(scratch, 'global')
+  const target = await writeManagedSkill(globalRoot, 'lark-shared', 'temp', PERSISTENT_SOURCE)
+  const candidate = await persistentCandidate(target, 'lark-shared')
+  const sentinel = join(scratch, 'outside-receipt-staging')
+  await writeFile(sentinel, 'do not overwrite', 'utf8')
+  await symlink(sentinel, join(globalRoot, '.lark-shared.e-mate-receipt-staging'))
+
+  assert.equal(await findInstalledPersistentSkill(globalRoot, candidate), undefined)
+  assert.equal(await readFile(sentinel, 'utf8'), 'do not overwrite')
+})
+
+test('skill_install skips the question in a new session only when the exact global receipt exists', async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), 'emate-find-skill-tool-reuse-'))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  const globalRoot = join(scratch, 'global')
+  const target = await writeManagedSkill(globalRoot, 'lark-shared', 'global', 'larksuite/cli')
+  const sharedCandidate = await persistentCandidate(target, 'lark-shared')
+  const docCandidate = persistentCandidateValue('lark-doc', '1'.repeat(64))
+  const registered = []
+  let questions = 0
+  let lastQuestion
+  const ctx = {
+    tools: { register: tool => { registered.push(tool) } },
+    get: () => ({
+      ask: async request => {
+        questions += 1
+        lastQuestion = request
+        return { answers: [{ selected: ['取消'] }] }
+      },
+    }),
+    subprocess: {},
+  }
+  const config = {
+    registerFindTool: false,
+    registerInstallTool: true,
+    registerRemoveTool: false,
+    persistentSkillCandidates: [sharedCandidate, docCandidate],
+    globalSkillRoot: globalRoot,
+    tempSkillRoot: join(scratch, 'temp'),
+  }
+  const provider = {
+    list: async () => [{ name: 'lark-shared', description: 'shared Lark capability', locator: { path: target } }],
+  }
+  registerTools(ctx, config, provider, { list: () => [] })
+  const install = registered.find(tool => tool.name === 'skill_install')
+
+  assert.deepEqual(await install.execute(
+    { source: PERSISTENT_SOURCE, skill: 'lark-shared', scope: 'global' },
+    { agent: { session: { header: { id: 'second-session', cwd: scratch } } } },
+  ), {
+    installed: true,
+    name: 'lark-shared',
+    scope: 'global',
+    path: target,
+    description: 'shared Lark capability',
+  })
+  assert.equal(questions, 0)
+
+  const restartedTools = []
+  const restartedCtx = {
+    ...ctx,
+    tools: { register: tool => { restartedTools.push(tool) } },
+  }
+  registerTools(restartedCtx, config, provider, { list: () => [] })
+  const restartedInstall = restartedTools.find(tool => tool.name === 'skill_install')
+  assert.deepEqual(await restartedInstall.execute(
+    { source: PERSISTENT_SOURCE, skill: 'lark-shared', scope: 'global' },
+    { agent: { session: { header: { id: 'after-runtime-restart', cwd: scratch } } } },
+  ), {
+    installed: true,
+    name: 'lark-shared',
+    scope: 'global',
+    path: target,
+    description: 'shared Lark capability',
+  })
+  assert.equal(questions, 0)
+
+  await assert.rejects(
+    install.execute(
+      { source: PERSISTENT_SOURCE, skill: 'lark-doc', scope: 'global' },
+      { agent: { session: { header: { id: 'changed-skill', cwd: scratch } } } },
+    ),
+    /cancelled by the user/u,
+  )
+  await assert.rejects(
+    install.execute(
+      { source: 'larksuite/cli', skill: 'lark-shared', scope: 'global' },
+      { agent: { session: { header: { id: 'changed-source', cwd: scratch } } } },
+    ),
+    /not an approved external-connection candidate/u,
+  )
+  assert.equal(questions, 1)
+  assert.match(lastQuestion.questions[0].question, new RegExp(PERSISTENT_VERSION.replaceAll('.', '\\.')))
+  assert.match(lastQuestion.questions[0].question, new RegExp(docCandidate.contentDigest))
+})
+
+test('pinned Skill bytes are verified before an existing device-global install is replaced', async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), 'emate-find-skill-pinned-install-'))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  const fixture = join(scratch, 'fixture', 'lark-doc')
+  const skillContent = '---\nname: lark-doc\ndescription: exact Lark document capability\n---\nbody\n'
+  await mkdir(fixture, { recursive: true })
+  await writeFile(join(fixture, 'SKILL.md'), skillContent, 'utf8')
+  const candidate = persistentCandidateValue('lark-doc', await managedSkillDigest(fixture))
+  const baseConfig = {
+    persistentSkillCandidates: [candidate],
+    globalSkillRoot: join(scratch, 'global'),
+    tempSkillRoot: join(scratch, 'fetches'),
+    cliCommand: 'pnpm dlx skills@1.5.22',
+  }
+  let notifications = 0
+  const provider = { notifyChanged: () => { notifications += 1 } }
+  const subprocess = fakeSkillFetchSubprocess('lark-doc', skillContent)
+  const result = await installSkill(
+    subprocess, () => {}, baseConfig, provider, { add: async () => {} },
+    'global', candidate.source, candidate.skill, scratch,
+  )
+  assert.equal(result.path, join(baseConfig.globalSkillRoot, 'lark-doc'))
+  const receipt = JSON.parse(await readFile(join(result.path, '.dsh-find-skill.json'), 'utf8'))
+  assert.equal(receipt.sourceVersion, PERSISTENT_VERSION)
+  assert.equal(receipt.contentDigest, candidate.contentDigest)
+  assert.equal(notifications, 1)
+
+  const before = await readFile(join(result.path, 'SKILL.md'), 'utf8')
+  const mismatched = { ...baseConfig, persistentSkillCandidates: [{ ...candidate, contentDigest: 'f'.repeat(64) }] }
+  await assert.rejects(
+    installSkill(
+      subprocess, () => {}, mismatched, provider, { add: async () => {} },
+      'global', candidate.source, candidate.skill, scratch,
+    ),
+    /does not match the approved version and SHA-256/u,
+  )
+  assert.equal(await readFile(join(result.path, 'SKILL.md'), 'utf8'), before)
+  assert.equal(notifications, 1)
+})
+
+test('device-global Skill update preserves the old bundle on digest failure and atomically records success', async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), 'emate-find-skill-pinned-update-'))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  const globalRoot = join(scratch, 'global')
+  const target = await writeManagedSkill(
+    globalRoot,
+    'lark-doc',
+    'global',
+    PERSISTENT_SOURCE,
+    '---\nname: lark-doc\ndescription: previous capability\n---\nprevious\n',
+  )
+  const nextContent = '---\nname: lark-doc\ndescription: updated capability\n---\nupdated\n'
+  const fixture = join(scratch, 'fixture', 'lark-doc')
+  await mkdir(fixture, { recursive: true })
+  await writeFile(join(fixture, 'SKILL.md'), nextContent, 'utf8')
+  const candidate = persistentCandidateValue('lark-doc', await managedSkillDigest(fixture))
+  const baseConfig = {
+    persistentSkillCandidates: [candidate],
+    globalSkillRoot: globalRoot,
+    tempSkillRoot: join(scratch, 'fetches'),
+    cliCommand: 'pnpm dlx skills@1.5.22',
+  }
+  let notifications = 0
+  const provider = { notifyChanged: () => { notifications += 1 } }
+  const tempManager = { list: () => [], remove: async () => false, add: async () => {} }
+
+  await assert.rejects(
+    updateSkill(
+      fakeSkillFetchSubprocess('lark-doc', nextContent), () => {},
+      { ...baseConfig, persistentSkillCandidates: [{ ...candidate, contentDigest: 'f'.repeat(64) }] },
+      provider, tempManager, 'global', 'lark-doc', scratch,
+    ),
+    /does not match the approved version and SHA-256/u,
+  )
+  assert.match(await readFile(join(target, 'SKILL.md'), 'utf8'), /previous/u)
+  assert.equal(notifications, 0)
+
+  const result = await updateSkill(
+    fakeSkillFetchSubprocess('lark-doc', nextContent), () => {}, baseConfig,
+    provider, tempManager, 'global', 'lark-doc', scratch,
+  )
+  assert.deepEqual(result, { updated: true, name: 'lark-doc', scope: 'global' })
+  assert.equal(await readFile(join(target, 'SKILL.md'), 'utf8'), nextContent)
+  const receipt = JSON.parse(await readFile(join(target, '.dsh-find-skill.json'), 'utf8'))
+  assert.equal(receipt.source, PERSISTENT_SOURCE)
+  assert.equal(receipt.sourceVersion, PERSISTENT_VERSION)
+  assert.equal(receipt.contentDigest, candidate.contentDigest)
+  assert.equal(receipt.receiptVersion, 1)
+  assert.equal(notifications, 1)
+})
+
+test('an interrupted managed Skill swap restores the complete previous directory', async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), 'emate-find-skill-swap-recovery-'))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  const target = join(scratch, 'global', 'lark-doc')
+  const backup = join(scratch, 'global', '.lark-doc.e-mate-backup')
+  const staging = join(scratch, 'global', '.lark-doc.e-mate-staging')
+  await mkdir(backup, { recursive: true })
+  await mkdir(staging, { recursive: true })
+  await writeFile(join(backup, 'SKILL.md'), 'complete previous Skill', 'utf8')
+  await writeFile(join(staging, 'SKILL.md'), 'partial next Skill', 'utf8')
+
+  await recoverManagedSkillSwap(target)
+
+  assert.equal(await readFile(join(target, 'SKILL.md'), 'utf8'), 'complete previous Skill')
+  await assert.rejects(stat(backup), { code: 'ENOENT' })
+  await assert.rejects(stat(staging), { code: 'ENOENT' })
+})
+
+test('managed Skill recovery rejects a swap symlink without touching its external target', async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), 'emate-find-skill-swap-symlink-'))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  const globalRoot = join(scratch, 'global')
+  const target = join(globalRoot, 'lark-doc')
+  const staging = join(globalRoot, '.lark-doc.e-mate-staging')
+  const external = join(scratch, 'outside')
+  await mkdir(globalRoot, { recursive: true })
+  await mkdir(external, { recursive: true })
+  await writeFile(join(external, 'sentinel'), 'do not delete', 'utf8')
+  await symlink(external, staging)
+
+  await assert.rejects(recoverManagedSkillSwap(target), /conflicting managed Skill swap entry/u)
+  assert.equal(await readFile(join(external, 'sentinel'), 'utf8'), 'do not delete')
+})
+
+test('a fetched receipt symlink is rejected before the existing Skill or external file changes', async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), 'emate-find-skill-receipt-symlink-'))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  const fixture = join(scratch, 'fixture', 'lark-doc')
+  const skillContent = '---\nname: lark-doc\ndescription: exact Lark document capability\n---\nbody\n'
+  await mkdir(fixture, { recursive: true })
+  await writeFile(join(fixture, 'SKILL.md'), skillContent, 'utf8')
+  const candidate = persistentCandidateValue('lark-doc', await managedSkillDigest(fixture))
+  const globalRoot = join(scratch, 'global')
+  const existing = await writeManagedSkill(globalRoot, 'lark-doc', 'global', candidate.source, 'keep previous Skill')
+  const sentinel = join(scratch, 'outside.json')
+  await writeFile(sentinel, 'do not overwrite', 'utf8')
+  const config = {
+    persistentSkillCandidates: [candidate],
+    globalSkillRoot: globalRoot,
+    tempSkillRoot: join(scratch, 'fetches'),
+    cliCommand: 'pnpm dlx skills@1.5.22',
+  }
+
+  await assert.rejects(
+    installSkill(
+      fakeSkillFetchSubprocess('lark-doc', skillContent, sentinel), () => {}, config,
+      { notifyChanged: () => {} }, { add: async () => {} },
+      'global', candidate.source, candidate.skill, scratch,
+    ),
+    /not a regular managed Skill entry/u,
+  )
+  assert.equal(await readFile(join(existing, 'SKILL.md'), 'utf8'), 'keep previous Skill')
+  assert.equal(await readFile(sentinel, 'utf8'), 'do not overwrite')
+})
+
+test('a legacy receipt symlink is never migrated or followed outside the managed Skill', async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), 'emate-find-skill-legacy-symlink-'))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  const globalRoot = join(scratch, 'global')
+  const target = join(globalRoot, 'lark-shared')
+  await mkdir(target, { recursive: true })
+  await writeFile(join(target, 'SKILL.md'), '---\nname: lark-shared\ndescription: shared\n---\nbody\n', 'utf8')
+  const candidate = await persistentCandidate(target, 'lark-shared')
+  const sentinel = join(scratch, 'outside-receipt.json')
+  const legacyReceipt = JSON.stringify({
+    source: 'larksuite/cli',
+    skill: 'lark-shared',
+    installedAt: Date.now(),
+    scope: 'global',
+  })
+  await writeFile(sentinel, legacyReceipt, 'utf8')
+  await symlink(sentinel, join(target, '.dsh-find-skill.json'))
+
+  assert.equal(await findInstalledPersistentSkill(globalRoot, candidate), undefined)
+  assert.equal(await readFile(sentinel, 'utf8'), legacyReceipt)
 })
 
 test('external connection instructions reuse device-global state', async () => {
@@ -238,10 +636,42 @@ function fakeRuntime(scratch) {
 
 function connectorConfig() {
   return {
-    catalogSkills: BUNDLED_CONNECTOR_SKILLS.map(name => ({
-      id: name,
-      source: `https://github.com/zyfjacksonchen-source/e-Mate/tree/skills-v2.0.12-r1/skills/${name}`,
-    })),
+    catalogSkills: BUNDLED_CONNECTOR_SKILLS.map(name => {
+      const source = `https://github.com/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.12-r1/skills/${name}`
+      return { id: name, name, source, url: source, keywords: [name] }
+    }),
+  }
+}
+
+function persistentCandidateValue(skill, contentDigest) {
+  return {
+    source: PERSISTENT_SOURCE,
+    legacySources: ['larksuite/cli'],
+    skill,
+    version: PERSISTENT_VERSION,
+    contentDigest,
+  }
+}
+
+async function persistentCandidate(target, skill) {
+  return persistentCandidateValue(skill, await managedSkillDigest(target))
+}
+
+function fakeSkillFetchSubprocess(skill, content, receiptTarget) {
+  return {
+    spawn({ cwd }) {
+      const done = (async () => {
+        const target = join(cwd, '.agents', 'skills', skill)
+        await mkdir(target, { recursive: true })
+        await writeFile(join(target, 'SKILL.md'), content, 'utf8')
+        if (receiptTarget !== undefined) {
+          await symlink(receiptTarget, join(target, '.dsh-find-skill.json'))
+        }
+        return { exitCode: 0 }
+      })()
+      const stream = { readFrom: () => ({ text: '' }) }
+      return { done, collected: { stdout: stream, stderr: stream } }
+    },
   }
 }
 
@@ -255,7 +685,10 @@ async function writeManagedSkill(root, name, scope, source = 'test/source', cont
   )
   await writeFile(join(target, '.dsh-find-skill.json'), JSON.stringify({
     source,
+    skill: name,
     installedAt: Date.now(),
+    receiptVersion: 1,
+    contentDigest: await managedSkillDigest(target),
     scope,
   }), 'utf8')
   return target

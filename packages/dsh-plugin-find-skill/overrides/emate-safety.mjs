@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
-import { lstat, readFile, rm } from 'node:fs/promises'
+import { cp, lstat, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { copyFileSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
@@ -20,17 +20,210 @@ export function validateManagedSkillName(value) {
   return value
 }
 
-export function resolvePersistentSkillScope(config, source, requestedScope) {
-  const allowed = config.persistentSkillSources ?? []
-  if (allowed.length === 0) return requestedScope ?? config.installDefaultScope ?? 'temp'
-  if (!allowed.includes(source)) throw new Error('Skill source is not an approved external-connection source')
+function validatePersistentSkillCandidate(candidate) {
+  if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)
+    || typeof candidate.source !== 'string' || candidate.source.length === 0
+    || typeof candidate.skill !== 'string' || !SKILL_NAME.test(candidate.skill)
+    || typeof candidate.version !== 'string' || candidate.version.length === 0
+    || typeof candidate.contentDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(candidate.contentDigest)
+    || (candidate.legacySources !== undefined
+      && (!Array.isArray(candidate.legacySources)
+        || candidate.legacySources.some(source => typeof source !== 'string' || source.length === 0)))) {
+    throw new Error('Persistent Skill candidate is invalid')
+  }
+  return candidate
+}
+
+function persistentSkillCandidates(config) {
+  if (!Array.isArray(config.persistentSkillCandidates)) throw new Error('Persistent Skill candidates are not configured')
+  return config.persistentSkillCandidates.map(validatePersistentSkillCandidate)
+}
+
+export function resolvePersistentSkillCandidate(config, source, skill) {
+  const matches = persistentSkillCandidates(config).filter(candidate =>
+    candidate.source === source && candidate.skill === skill)
+  if (matches.length !== 1) throw new Error('Skill source, version, and name are not an approved external-connection candidate')
+  return matches[0]
+}
+
+export function resolvePersistentSkillScope(config, source, skill, requestedScope) {
+  resolvePersistentSkillCandidate(config, source, skill)
   return 'global'
+}
+
+/** Hash the complete installed Skill bundle while excluding its self-referential receipt. */
+export async function managedSkillDigest(target) {
+  return managedSkillDigestSync(target)
+}
+
+function managedSkillDigestSync(target) {
+  const hash = createHash('sha256')
+  const root = lstatSync(target)
+  if (!root.isDirectory() || root.isSymbolicLink()) throw new Error(`${target} is not a regular managed Skill directory`)
+  const visit = (directory, prefix = '') => {
+    const entries = readdirSync(directory, { withFileTypes: true })
+    entries.sort((left, right) => left.name.localeCompare(right.name, 'en'))
+    for (const entry of entries) {
+      const relativePath = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+      if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) {
+        throw new Error(`${relativePath} is not a regular managed Skill entry`)
+      }
+      if (relativePath === '.dsh-find-skill.json') {
+        if (!entry.isFile()) throw new Error(`${relativePath} is not a regular managed Skill receipt`)
+        continue
+      }
+      hash.update(entry.isDirectory() ? 'directory\0' : 'file\0')
+      hash.update(relativePath)
+      hash.update('\0')
+      if (entry.isDirectory()) visit(join(directory, entry.name), relativePath)
+      else {
+        hash.update(readFileSync(join(directory, entry.name)))
+        hash.update('\0')
+      }
+    }
+  }
+  visit(target)
+  return hash.digest('hex')
+}
+
+async function asyncDirectoryState(path) {
+  try {
+    const entry = await lstat(path)
+    return entry.isDirectory() && !entry.isSymbolicLink() ? 'directory' : 'conflict'
+  } catch (error) {
+    if (error?.code === 'ENOENT') return 'missing'
+    throw error
+  }
+}
+
+function managedSwapPaths(target) {
+  const name = basename(target)
+  const parent = dirname(target)
+  return {
+    staging: join(parent, `.${name}.e-mate-staging`),
+    backup: join(parent, `.${name}.e-mate-backup`),
+  }
+}
+
+function writeManagedReceiptAtomicallySync(target, metadata) {
+  const receiptPath = join(target, '.dsh-find-skill.json')
+  const staging = join(dirname(target), `.${basename(target)}.e-mate-receipt-staging`)
+  try {
+    const entry = lstatSync(staging)
+    if (!entry.isFile() || entry.isSymbolicLink()) {
+      throw new Error(`${staging} is not a regular managed receipt staging file`)
+    }
+    rmSync(staging)
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+  try {
+    writeFileSync(staging, `${JSON.stringify(metadata, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' })
+    renameSync(staging, receiptPath)
+  } catch (error) {
+    try {
+      const entry = lstatSync(staging)
+      if (entry.isFile() && !entry.isSymbolicLink()) rmSync(staging)
+    } catch (cleanupError) {
+      if (cleanupError?.code !== 'ENOENT') throw cleanupError
+    }
+    throw error
+  }
+}
+
+/** Recover a previously interrupted same-filesystem managed Skill swap. */
+export async function recoverManagedSkillSwap(target) {
+  const paths = managedSwapPaths(target)
+  const targetState = await asyncDirectoryState(target)
+  const stagingState = await asyncDirectoryState(paths.staging)
+  const backupState = await asyncDirectoryState(paths.backup)
+  if ([targetState, stagingState, backupState].includes('conflict')) {
+    throw new Error(`${target} has a conflicting managed Skill swap entry`)
+  }
+  if (targetState === 'missing' && backupState === 'directory') await rename(paths.backup, target)
+  else if (targetState === 'directory' && backupState === 'directory') {
+    await rm(paths.backup, { recursive: true })
+  }
+  if (stagingState === 'directory') await rm(paths.staging, { recursive: true })
+  return paths
+}
+
+/** Stage, receipt, and activate a complete managed Skill without exposing a partial replacement. */
+export async function replaceManagedSkillAtomically(source, target, metadata) {
+  const paths = await recoverManagedSkillSwap(target)
+  try {
+    await cp(source, paths.staging, { recursive: true })
+    await writeFile(join(paths.staging, '.dsh-find-skill.json'), `${JSON.stringify(metadata, null, 2)}\n`, 'utf8')
+  } catch (error) {
+    await rm(paths.staging, { recursive: true, force: true })
+    throw error
+  }
+
+  const hadTarget = await asyncDirectoryState(target) === 'directory'
+  try {
+    if (hadTarget) await rename(target, paths.backup)
+    await rename(paths.staging, target)
+    if (hadTarget) await rm(paths.backup, { recursive: true })
+  } catch (error) {
+    if (hadTarget && await asyncDirectoryState(target) === 'missing'
+      && await asyncDirectoryState(paths.backup) === 'directory') {
+      await rename(paths.backup, target)
+    }
+    await rm(paths.staging, { recursive: true, force: true })
+    throw error
+  }
+}
+
+/** Return the exact device-global install receipt, if this source/Skill pair is already active. */
+export async function findInstalledPersistentSkill(globalRoot, candidate) {
+  validatePersistentSkillCandidate(candidate)
+  try {
+    await recoverManagedSkillSwap(resolve(globalRoot, candidate.skill))
+    let target
+    try {
+      target = await inspectManagedSkill(globalRoot, candidate.skill, 'global')
+    } catch {
+      // A crash after temp→global rename can leave exact bytes with the old temp receipt.
+      target = await inspectManagedSkill(globalRoot, candidate.skill, 'temp')
+    }
+    if (target === undefined) return undefined
+    const receiptPath = join(target, '.dsh-find-skill.json')
+    const metadata = JSON.parse(await readFile(receiptPath, 'utf8'))
+    const digest = await managedSkillDigest(target)
+    const exact = metadata.source === candidate.source
+      && metadata.skill === candidate.skill
+      && metadata.sourceVersion === candidate.version
+      && metadata.receiptVersion === 1
+      && metadata.contentDigest === candidate.contentDigest
+      && metadata.scope === 'global'
+      && digest === candidate.contentDigest
+    if (exact) return { name: candidate.skill, path: target }
+
+    const legacy = (metadata.source === candidate.source || (candidate.legacySources ?? []).includes(metadata.source))
+      && metadata.skill === candidate.skill
+      && digest === candidate.contentDigest
+    if (!legacy) return undefined
+    const migrated = {
+      ...metadata,
+      source: candidate.source,
+      skill: candidate.skill,
+      sourceVersion: candidate.version,
+      receiptVersion: 1,
+      contentDigest: candidate.contentDigest,
+      scope: 'global',
+    }
+    writeManagedReceiptAtomicallySync(target, migrated)
+    return { name: candidate.skill, path: target }
+  } catch {
+    // A malformed, modified, or foreign directory is never accepted as installation proof.
+    return undefined
+  }
 }
 
 /** Promote legacy connector Skills from session-temporary storage before provider registration. */
 export function promotePersistentSkills(config, roots) {
-  const allowed = new Set(config.persistentSkillSources ?? [])
-  if (allowed.size === 0) return []
+  const candidates = persistentSkillCandidates(config)
+  if (candidates.length === 0) return []
   const promoted = []
   let entries
   try {
@@ -48,8 +241,12 @@ export function promotePersistentSkills(config, roots) {
       const skill = lstatSync(join(source, 'SKILL.md'))
       const receipt = lstatSync(join(source, '.dsh-find-skill.json'))
       const metadata = JSON.parse(readFileSync(join(source, '.dsh-find-skill.json'), 'utf8'))
+      const matches = candidates.filter(candidate => candidate.skill === metadata?.skill
+        && (candidate.source === metadata?.source || (candidate.legacySources ?? []).includes(metadata?.source)))
+      const candidate = matches.length === 1 ? matches[0] : undefined
       if (!skill.isFile() || skill.isSymbolicLink() || !receipt.isFile() || receipt.isSymbolicLink()
-        || metadata?.scope !== 'temp' || !allowed.has(metadata.source)) continue
+        || metadata?.scope !== 'temp' || candidate === undefined || name !== candidate.skill
+        || managedSkillDigestSync(source) !== candidate.contentDigest) continue
       try {
         lstatSync(target)
         continue
@@ -59,7 +256,15 @@ export function promotePersistentSkills(config, roots) {
       mkdirSync(roots.globalSkillDir, { recursive: true })
       renameSync(source, target)
       try {
-        writeFileSync(join(target, '.dsh-find-skill.json'), JSON.stringify({ ...metadata, scope: 'global' }, null, 2), 'utf8')
+        writeManagedReceiptAtomicallySync(target, {
+          ...metadata,
+          source: candidate.source,
+          skill: candidate.skill,
+          sourceVersion: candidate.version,
+          receiptVersion: 1,
+          contentDigest: candidate.contentDigest,
+          scope: 'global',
+        })
       } catch (error) {
         renameSync(target, source)
         throw error
@@ -229,6 +434,8 @@ export async function inspectManagedSkill(root, name, scope) {
   }
   const skill = await lstat(join(target, 'SKILL.md'))
   if (!skill.isFile() || skill.isSymbolicLink()) throw new Error(`${target} has no regular SKILL.md`)
+  const receipt = await lstat(join(target, '.dsh-find-skill.json'))
+  if (!receipt.isFile() || receipt.isSymbolicLink()) throw new Error(`${target} has no regular managed receipt`)
 
   let metadata
   try {

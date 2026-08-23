@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
 import * as ToolSearch from '../lib/index.mjs'
+import * as Schedule from '../../../upstream/deepseek-harness/packages/schedule/schedule/lib/index.js'
 
 const { TOOL_SEARCH_NAME } = ToolSearch
 
@@ -49,6 +50,33 @@ async function execute(ctx, agent, name, args, parent) {
 function names(ctx, agent) {
   return ctx.tools.schemas(agent).map(schema => schema.name).sort()
 }
+
+class PersistenceProbe extends Service {
+  constructor(ctx) { super(ctx, 'sessionPersistence') }
+}
+
+test('keeps pinned Schedule tools Agent-local and executes them through the native definitions', async (t) => {
+  const ctx = new Context()
+  t.after(async () => ctx.fiber.dispose())
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(PersistenceProbe)
+  ctx.on('session/flush', () => {})
+  await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(Schedule)
+  await ctx.plugin(ToolSearch, { maxResults: 5 })
+  const agent = createAgent(ctx, 'schedule-disclosure')
+
+  assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list', TOOL_SEARCH_NAME])
+  const created = await execute(ctx, agent, 'schedule_create', { prompt: '生成日报', after_seconds: 3600 })
+  assert.equal(created.isError, false)
+  assert.equal(created.value.prompt, '生成日报')
+  const listed = await execute(ctx, agent, 'schedule_list', {})
+  assert.deepEqual(listed.value, [created.value])
+  const deleted = await execute(ctx, agent, 'schedule_delete', { id: created.value.id })
+  assert.deepEqual(deleted.value, { id: created.value.id, deleted: true })
+  assert.deepEqual((await execute(ctx, agent, 'schedule_list', {})).value, [])
+  assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list', TOOL_SEARCH_NAME])
+})
 
 test('discloses deferred native tools without replacing their execution path', async (t) => {
   const { ctx } = await harness({ alwaysVisible: ['read_*'], maxResults: 2 })

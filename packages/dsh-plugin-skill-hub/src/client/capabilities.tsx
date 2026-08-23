@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type FormEvent } from 'react'
+import { createPortal } from 'react-dom'
 import css from './capabilities.module.css'
 
 type HubCategory = 'third_party' | 'content_creation' | 'office_productivity'
@@ -209,11 +210,10 @@ export function CapabilitiesPage({
   SkillIcon,
   capabilityIcons,
 }: Props) {
-  const pageRef = useRef<HTMLElement>(null)
   const detailSlug = useRef<string | null>(null)
   const dismissedJobs = useRef(new Set<string>())
   const [open, setOpen] = useState(() => location.pathname === '/capabilities')
-  const [left, setLeft] = useState(280)
+  const [target, setTarget] = useState<Element | null>(null)
   const [tab, setTab] = useState<Tab>('discover')
   const [query, setQuery] = useState('')
   const [installedQuery, setInstalledQuery] = useState('')
@@ -266,15 +266,14 @@ export function CapabilitiesPage({
   }, [selectedCard])
 
   useLayoutEffect(() => {
-    if (!open || pageRef.current === null) return undefined
-    const overlay = pageRef.current.closest<HTMLElement>('[data-shell-overlay]')
-    const frame = overlay?.parentElement
-    const sidebar = frame?.firstElementChild
-    if (!(sidebar instanceof HTMLElement)) return undefined
-    const measure = () => { setLeft(sidebar.getBoundingClientRect().width) }
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(sidebar)
+    if (!open) {
+      setTarget(null)
+      return undefined
+    }
+    const findTarget = () => { setTarget(document.querySelector('[data-phase]')) }
+    findTarget()
+    const observer = new MutationObserver(findTarget)
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-phase'] })
     return () => { observer.disconnect() }
   }, [open])
 
@@ -500,10 +499,10 @@ export function CapabilitiesPage({
     return installed.filter(item => !needle || normal(`${item.slug} ${item.description}`).includes(needle))
   }, [installed, installedQuery])
 
-  if (!open) return null
+  if (!open || target === null) return null
 
-  return (
-    <main ref={pageRef} className={css.page} style={{ left }} data-emate-capabilities="">
+  return createPortal(
+    <main className={css.page} data-emate-capabilities="">
       <section className={css.workspace} aria-label="能力中心">
         <header className={css.header}>
           <div><h1>能力中心</h1><p>发现、安装并管理 e-Mate 的办公能力。</p></div>
@@ -641,6 +640,7 @@ export function CapabilitiesPage({
           <button className={css.dialogClose} type="button" aria-label="关闭凭据配置" disabled={loading} onClick={() => { setCredentialValue(''); setCredentialAction(null) }}><CloseIcon size={16} /></button>
         </form>
       </div>}
-    </main>
+    </main>,
+    target,
   )
 }

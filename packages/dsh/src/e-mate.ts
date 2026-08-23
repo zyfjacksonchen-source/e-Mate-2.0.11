@@ -48,10 +48,13 @@ const MANAGED_PROFILE_PACKAGES = new Set(PLUGIN_PACKAGES)
 const RETIRED_PROFILE_PACKAGES = new Set([
   '@e-mate/dsh-plugin-browser',
   '@e-mate/dsh-plugin-browser-panel',
+  '@e-mate/dsh-plugin-idesign',
   '@e-mate/dsh-plugin-im',
+  '@e-mate/dsh-plugin-search-mcp',
   '@e-mate/dsh-plugin-subagent',
   '@e-mate/dsh-plugin-xin-assistant',
   '@yuxianglin/dsh-bridge-browser',
+  'dsh-search-mcp',
 ])
 const OWNED_PROFILE_PACKAGES = new Set([...MANAGED_PROFILE_PACKAGES, ...RETIRED_PROFILE_PACKAGES])
 const UPDATE_RECEIPT_NAME = /^online-update-([0-9a-f]{8}-[0-9a-f-]{27})\.json$/iu
@@ -431,9 +434,7 @@ function profileCheck(paths) {
       && byId.get('emate-schedule-import')?.name === './plugins/schedule-import.js'
       && byId.get('emate-legacy-migration')?.name === './plugins/legacy-migration.js'
       && byId.get('emate-agent-operations')?.name === './plugins/agent-operations.js'
-      && JSON.stringify(byId.get('emate-agent-operations')?.inject) === JSON.stringify([
-        'systemPrompt', 'connection', 'sessionPersistence',
-      ])
+      && JSON.stringify(byId.get('emate-agent-operations')?.inject) === JSON.stringify(['systemPrompt'])
       && !byId.has('emate-office-ocr')
       && !byId.has('emate-browser-computer-use')
       && !byId.has('emate-memory')

@@ -50,6 +50,25 @@
   config:
     defaultPreset: danger-full-access
 
+# Keep the pinned rc.7 Web seam as the only search path. The enterprise model
+# policy projects this device-global credential reference into the native
+# Credentials service; no per-session Skill or second provider is required.
+- id: web
+  config:
+    searchProvider: deepseek-official
+
+- id: web-search-deepseek
+  disabled: false
+  config:
+    apiKeyEnv: E_MATE_MODEL_KEY_DEEPSEEK
+
+- id: tool-web
+  disabled: false
+  config:
+    fetch: false
+    searchTimeoutMs: 60000
+    searchMaxResults: 50
+
 - insert:
     - id: emate-settings-document-boundary
       name: ./plugins/settings-document-boundary.js
@@ -111,4 +130,4 @@
 
     - id: emate-agent-operations
       name: ./plugins/agent-operations.js
-      inject: [systemPrompt, connection, sessionPersistence]
+      inject: [systemPrompt]

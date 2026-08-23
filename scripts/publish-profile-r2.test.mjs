@@ -25,7 +25,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   const privateKeyPem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
   const keyId = '0123456789abcdef'
-  const baseId = 'e-mate-desktop-profile-v5-dsh-2bc16230975f'
+  const baseId = 'e-mate-desktop-profile-v6-dsh-2bc16230975f'
   const componentId = '@e-mate/dsh-plugin-fixture'
   const sourceCommit = 'a'.repeat(40)
   mkdirSync(join(root, 'desktop/e-mate-desktop'), { recursive: true })

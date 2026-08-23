@@ -133,6 +133,21 @@ export function registerManagedPresetSurfaces(ctx: any): void {
   }
 }
 
+/** Project the generic new-task action to Home before rc.7 opens its reusable blank session. */
+export function startSessionFromRoute(ctx: any, workspaceId?: string): void {
+  const target = workspaceId ?? ctx.workspaces.list.getSnapshot().items.find(isGeneralWorkspace)?.workspaceId
+  if (target === undefined) {
+    console.warn('e-Mate general workspace is not ready')
+    return
+  }
+  if (workspaceId === undefined && location.pathname !== '/') {
+    history.pushState(null, '', '/')
+    dispatchEvent(new PopStateEvent('popstate'))
+    return
+  }
+  ctx.workspaces.startSession(target)
+}
+
 export function apply(ctx: any): void {
   registerActivityFold(ctx)
   registerComputerUseTrigger(ctx)
@@ -142,19 +157,7 @@ export function apply(ctx: any): void {
     id: 'stats',
     priority: -1,
   }, HiddenSessionStats))
-  const startSession = (workspaceId?: string) => {
-    const target = workspaceId ?? ctx.workspaces.list.getSnapshot().items.find(isGeneralWorkspace)?.workspaceId
-    if (target === undefined) {
-      console.warn('e-Mate general workspace is not ready')
-      return
-    }
-    if (workspaceId === undefined && ['/capabilities', '/settings', '/schedules'].includes(location.pathname)) {
-      history.pushState(null, '', '/')
-      dispatchEvent(new PopStateEvent('popstate'))
-      return
-    }
-    ctx.workspaces.startSession(target)
-  }
+  const startSession = (workspaceId?: string) => { startSessionFromRoute(ctx, workspaceId) }
 
   const prepareSchedulePrompt = async (prompt: string, requestedSessionId?: string) => {
     if (requestedSessionId !== undefined) {

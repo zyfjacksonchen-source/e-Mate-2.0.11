@@ -51,7 +51,7 @@
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   mask-composite: exclude;
-  animation: emate-glass-orbit 12s linear infinite;
+  animation: emate-glass-orbit 4s linear infinite;
 }
 
 :global([data-composer-card][data-emate-glass-palette='brand']) {

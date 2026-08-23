@@ -94,13 +94,6 @@
       "cli": true
     },
     {
-      "id": "@e-mate/dsh-plugin-idesign",
-      "root": "packages/dsh-plugin-idesign",
-      "kind": "profile",
-      "desktop": "hot-profile",
-      "cli": true
-    },
-    {
       "id": "@e-mate/dsh-plugin-mcp-manage",
       "root": "packages/dsh-plugin-mcp-manage",
       "kind": "profile",
@@ -122,8 +115,8 @@
       "cli": true
     },
     {
-      "id": "@e-mate/dsh-plugin-search-mcp",
-      "root": "packages/dsh-plugin-search-mcp",
+      "id": "@e-mate/dsh-plugin-schedules",
+      "root": "packages/dsh-plugin-schedules",
       "kind": "profile",
       "desktop": "hot-profile",
       "cli": true

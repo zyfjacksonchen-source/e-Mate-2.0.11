@@ -1,0 +1,44 @@
+{
+  "name": "@e-mate/dsh-plugin-schedules",
+  "version": "2.0.12",
+  "description": "DSH-native schedule management projection for e-Mate.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "pnpm-lock.yaml",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" }
+  },
+  "eMate": {
+    "component": {
+      "schema_version": 1,
+      "id": "@e-mate/dsh-plugin-schedules",
+      "kind": "profile",
+      "base_imports": ["@deepseek-ai/dsh-schedule"],
+      "authority_contract": {
+        "effects": [],
+        "guards": ["read-only"]
+      },
+      "base_contracts": ["e-mate-desktop-profile-v6-dsh-2bc16230975f"]
+    },
+    "harnessVersion": "0.1.0-rc.7",
+    "harnessCommit": "2bc16230975f6cf02aa1b283b1f86de44007b059"
+  },
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "license": "MIT",
+  "private": true
+}

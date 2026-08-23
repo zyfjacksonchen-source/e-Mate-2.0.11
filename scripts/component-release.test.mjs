@@ -34,7 +34,7 @@ describe('component payload closure', () => {
       encoding: 'utf8',
     }))
     const accepted = inventory.components.filter(component => component.desktop !== 'blocked')
-    assert.equal(accepted.length, 16)
+    assert.equal(accepted.length, 15)
     assert.deepEqual(accepted.map(component => component.id).sort(), [
       '@e-mate/dsh-client-shell',
       '@e-mate/dsh-plugin-better-sidebar',
@@ -44,11 +44,10 @@ describe('component payload closure', () => {
       '@e-mate/dsh-plugin-find-skill',
       '@e-mate/dsh-plugin-genui',
       '@e-mate/dsh-plugin-glass-composer',
-      '@e-mate/dsh-plugin-idesign',
       '@e-mate/dsh-plugin-mcp-manage',
       '@e-mate/dsh-plugin-memory-evolve',
       '@e-mate/dsh-plugin-office-skills',
-      '@e-mate/dsh-plugin-search-mcp',
+      '@e-mate/dsh-plugin-schedules',
       '@e-mate/dsh-plugin-skill-hub',
       '@e-mate/dsh-plugin-tool-search',
       '@e-mate/dsh-plugin-vision-toolkit',
@@ -57,7 +56,7 @@ describe('component payload closure', () => {
       inventory.components.filter(component => component.desktop === 'blocked').map(component => component.id),
       ['@e-mate/dsh-plugin-xin-assistant'],
     )
-    assert.equal(inventory.component_jobs.length, 20)
+    assert.equal(inventory.component_jobs.length, 19)
     assert.deepEqual(
       [...new Set(inventory.component_jobs.map(job => job.component))].sort(),
       accepted.map(component => component.id).sort(),
@@ -194,6 +193,21 @@ describe('component payload closure', () => {
       '@deepseek-ai/dsh-tools': '0.1.0-rc.7',
       react: '^18.2.0',
     })
+  })
+
+  it('declares Schedule management as a read-only hot component over the native runtime', () => {
+    const root = join(repositoryRoot, 'packages/dsh-plugin-schedules')
+    const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+    const host = readFileSync(join(root, 'src/index.ts'), 'utf8')
+    assert.equal(manifest.main, 'lib/index.js')
+    assert.deepEqual(manifest.eMate.component.base_imports, ['@deepseek-ai/dsh-schedule'])
+    assert.deepEqual(manifest.eMate.component.authority_contract, {
+      effects: [],
+      guards: ['read-only'],
+    })
+    assert.match(host, /from '@deepseek-ai\/dsh-schedule'/u)
+    assert.match(host, /authority: 'loopback'/u)
+    assert.doesNotMatch(host, /setInterval|setTimeout|schedule_create|schedule_delete/u)
   })
 
 
