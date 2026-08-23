@@ -87,5 +87,7 @@ describe('e-Mate 2.0.12 composer projection', () => {
     expect(source).not.toContain('<computer-use explicit="true">')
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource)\s*\(/u)
     await waitFor(() => expect(styles).toContain('[data-composer-card]'))
+    expect(styles).toMatch(/\[data-phase='hero'\][\s\S]*?\[data-composer-card\][\s\S]*?--emate-composer-frame-bottom:\s*-28px/u)
+    expect(styles).toMatch(/\[data-phase='hero'\][\s\S]*?\[data-composer-card\][\s\S]*?--emate-composer-frame-radius:\s*24px/u)
   })
 })

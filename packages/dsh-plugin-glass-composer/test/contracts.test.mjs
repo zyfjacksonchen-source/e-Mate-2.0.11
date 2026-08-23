@@ -16,6 +16,8 @@ test('uses DSH settings and composer slots without a parallel browser lifecycle'
   assert.match(client, /settingsScope\.bind<GlassSettings>/)
   assert.match(client, /name: 'conversation\.input\.right'/)
   assert.match(client, /closest\('\[data-composer-card\]'\)/)
+  assert.match(css, /inset:\s*-2px -2px var\(--emate-composer-frame-bottom, -2px\)/)
+  assert.match(css, /border-radius:\s*var\(--emate-composer-frame-radius, inherit\)/)
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/)
   assert.match(css, /@media \(forced-colors: active\)/)
   assert.doesNotMatch(`${host}\n${client}\n${css}`, /MutationObserver|localStorage|tapIndex|backdrop-filter/)

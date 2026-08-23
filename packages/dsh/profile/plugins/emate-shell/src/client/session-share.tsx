@@ -9,8 +9,8 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import css from './session-share.module.css'
 
-interface Props {
-  sessionId: string
+export interface SessionShareActionProps {
+  sessionId: string | undefined
   callShare: (endpoint: string, payload: unknown) => Promise<unknown>
   useSessionLogDownload: <T>(selector: (state: SessionLogDownloadState) => T) => T
   requestDownload: (sessionId: string) => Promise<void>
@@ -87,8 +87,8 @@ function shareLinks(result: unknown): ShareLink[] {
 
 export function SessionShareAction({
   sessionId, callShare, useSessionLogDownload, requestDownload, dismissDownload,
-}: Props) {
-  const download = useSessionLogDownload(state => state.bySession[sessionId])
+}: SessionShareActionProps) {
+  const download = useSessionLogDownload(state => sessionId === undefined ? undefined : state.bySession[sessionId])
   const downloading = download?.status === 'downloading'
   const currentSession = useRef(sessionId)
   const operation = useRef(0)
@@ -127,7 +127,7 @@ export function SessionShareAction({
   }
 
   const create = async () => {
-    if (busy !== null) return
+    if (busy !== null || sessionId === undefined) return
     const requestedSession = sessionId
     const currentOperation = ++operation.current
     setBusy('create')
@@ -161,7 +161,7 @@ export function SessionShareAction({
   }
 
   const revoke = async (share: ShareLink) => {
-    if (busy !== null) return
+    if (busy !== null || sessionId === undefined) return
     const requestedSession = sessionId
     const currentOperation = ++operation.current
     setBusy(`revoke:${share.share_id}`)
@@ -187,8 +187,10 @@ export function SessionShareAction({
       type="button"
       className={css.trigger}
       aria-label="分享当前任务"
-      title="分享当前任务"
+      title={sessionId === undefined ? '开始任务后可分享' : '分享当前任务'}
+      disabled={sessionId === undefined}
       onClick={() => {
+        if (sessionId === undefined) return
         setOpen(true)
         setShares([])
         void refresh(sessionId)
@@ -270,6 +272,7 @@ export function SessionShareAction({
           disabled={downloading}
           aria-busy={downloading}
           onClick={() => {
+            if (sessionId === undefined) return
             setOpen(false)
             void requestDownload(sessionId)
           }}
@@ -281,7 +284,7 @@ export function SessionShareAction({
     </Modal>
     <Modal
       open={download?.open === true}
-      onClose={() => { dismissDownload(sessionId) }}
+      onClose={() => { if (sessionId !== undefined) dismissDownload(sessionId) }}
       title="导出任务"
       closeLabel="关闭导出"
       description="将当前任务、子任务和附件保存为本地 ZIP。"
@@ -299,7 +302,7 @@ export function SessionShareAction({
           className={css.primary}
           disabled={downloading}
           aria-busy={downloading}
-          onClick={() => { void requestDownload(sessionId) }}
+          onClick={() => { if (sessionId !== undefined) void requestDownload(sessionId) }}
         >
           <IconDownloadOutline16 size={16} />
           {downloading ? '正在准备…' : '下载 ZIP'}
@@ -308,3 +311,6 @@ export function SessionShareAction({
     </Modal>
   </>
 }
+
+/** The root application tool group owns sharing; suppress only DSH's old header export button. */
+export function HiddenSessionLogExport() { return null }

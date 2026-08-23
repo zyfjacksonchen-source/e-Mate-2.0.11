@@ -34,7 +34,7 @@ import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImage
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
 import { isGeneralWorkspace, SidebarRoot } from './sidebar.tsx'
 import { SessionRouteProjection } from './session-route.tsx'
-import { SessionShareAction } from './session-share.tsx'
+import { HiddenSessionLogExport } from './session-share.tsx'
 import {
   SettingsChrome,
   SettingsCloseLabel,
@@ -54,13 +54,7 @@ export function registerSessionShare(ctx: any): void {
     id: 'session-log-download',
     order: -20,
     priority: -1,
-    inject: () => ({
-      hooks: { sessionLogDownload: ctx.sessionLogDownload.store },
-      requestDownload: (sessionId: string) => ctx.sessionLogDownload.download(sessionId),
-      dismissDownload: (sessionId: string) => { ctx.sessionLogDownload.dismiss(sessionId) },
-      callShare: (endpoint: string, payload: unknown) => ctx.connection.rpc.call('/emate.share', endpoint, payload),
-    }),
-  }, SessionShareAction))
+  }, HiddenSessionLogExport))
 }
 
 /** Mount e-Mate utilities once in DSH's native frame-wide overlay seat. */
@@ -79,6 +73,10 @@ export function registerHeaderControls(ctx: any): void {
       openSettings: () => {
         document.querySelector<HTMLButtonElement>('[data-emate-settings-trigger]')?.click()
       },
+      hooks: { sessionLogDownload: ctx.sessionLogDownload.store },
+      requestDownload: (sessionId: string) => ctx.sessionLogDownload.download(sessionId),
+      dismissDownload: (sessionId: string) => { ctx.sessionLogDownload.dismiss(sessionId) },
+      callShare: (endpoint: string, payload: unknown) => ctx.connection.rpc.call('/emate.share', endpoint, payload),
       LightIcon: IconLightOutline16,
       DarkIcon: IconDarkOutline16,
       SettingsIcon: IconSettingsOutline16,

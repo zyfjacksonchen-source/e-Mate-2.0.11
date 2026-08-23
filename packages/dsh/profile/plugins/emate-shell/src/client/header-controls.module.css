@@ -5,13 +5,13 @@
   right: 24px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   height: 32px;
   color: var(--dsw-alias-label-primary);
 }
 
 :global([data-slot='conversation.session.header'] > header) {
-  padding-right: 140px;
+  padding-right: 176px;
 }
 
 .controls > button {
@@ -38,7 +38,7 @@
 .runtimeStatus {
   width: 8px;
   height: 8px;
-  margin: 0 8px;
+  margin: 0 4px;
   border-radius: 999px;
   flex: none;
   background: var(--emate-color-brand, #ff6a1a);
@@ -50,7 +50,7 @@
   }
 
   :global([data-slot='conversation.session.header'] > header) {
-    padding-right: 92px;
+    padding-right: 136px;
   }
 
   .runtimeStatus { display: none; }

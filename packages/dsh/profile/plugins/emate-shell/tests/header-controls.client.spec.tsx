@@ -24,11 +24,22 @@ describe('desktop header controls', () => {
       subscribeTheme={() => () => {}}
       toggleTheme={toggleTheme}
       openSettings={openSettings}
+      useSessions={selector => selector({ current: 'blank-session' })}
+      callShare={vi.fn()}
+      useSessionLogDownload={selector => selector({ bySession: {} })}
+      requestDownload={vi.fn()}
+      dismissDownload={vi.fn()}
       LightIcon={Icon}
       DarkIcon={Icon}
       SettingsIcon={Icon}
     />)
 
+    const controls = screen.getByLabelText('应用工具')
+    expect([...controls.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual([
+      '分享当前任务',
+      '切换到明亮模式',
+      '打开设置',
+    ])
     expect(screen.getByRole('status', { name: '运行时已连接' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '切换到明亮模式' }))
     expect(toggleTheme).toHaveBeenCalledOnce()
@@ -36,14 +47,13 @@ describe('desktop header controls', () => {
     expect(openSettings).toHaveBeenCalledOnce()
   })
 
-  it('keeps all header controls aligned while reserving native Session utility space', () => {
+  it('keeps share inside the one aligned root-frame group without positional offsets', () => {
     const controls = readFileSync('src/client/header-controls.module.css', 'utf8')
     const share = readFileSync('src/client/session-share.module.css', 'utf8')
-    expect(controls).toMatch(/position:\s*absolute[\s\S]*top:\s*12px[\s\S]*display:\s*inline-flex[\s\S]*height:\s*32px/u)
-    expect(controls).toMatch(/conversation\.session\.header[\s\S]*padding-right:\s*140px/u)
-    expect(share.match(/top:\s*1px/gu)).toHaveLength(2)
+    expect(controls).toMatch(/position:\s*absolute[\s\S]*top:\s*12px[\s\S]*display:\s*inline-flex[\s\S]*gap:\s*8px[\s\S]*height:\s*32px/u)
+    expect(controls).toMatch(/conversation\.session\.header[\s\S]*padding-right:\s*176px/u)
     expect(share).toMatch(/\.trigger\s*\{[\s\S]*?height:\s*32px/u)
-    expect(share).toMatch(/body:not\(\[data-dsh-desktop-mode='advanced'\]\)[\s\S]*translateY\(-8px\)/u)
+    expect(share).not.toMatch(/position:\s*fixed|translateY|top:\s*1px|right:\s*(?:72|210)px/u)
   })
 
   it('stays mounted with no current Session and calls the one native settings trigger', async () => {
@@ -54,10 +64,16 @@ describe('desktop header controls', () => {
       getTheme: () => ({ active: { colorScheme: 'dark' } }),
       setTheme: vi.fn(),
     } as never)
+    runtime.provide('connection', { rpc: { call: vi.fn() } } as never)
+    runtime.provide('sessionLogDownload', {
+      store: { getSnapshot: () => ({ bySession: {} }), subscribe: () => () => {} },
+      download: vi.fn(),
+      dismiss: vi.fn(),
+    } as never)
     await runtime.root.declare({
       'shell.overlay': { kind: 'list', scope: 'root' },
     } as never, Root as never)
-    await runtime.mount({ inject: ['slots', 'theme'], apply: registerHeaderControls })
+    await runtime.mount({ inject: ['slots', 'theme', 'connection', 'sessionLogDownload'], apply: registerHeaderControls })
     const view = runtime.renderRoot()
     const headerEntry = runtime.slots.entries('shell.overlay')
       .find(entry => entry.options.id === 'e-mate-header-controls')
@@ -72,6 +88,7 @@ describe('desktop header controls', () => {
     fireEvent.click(view.getByRole('button', { name: '打开设置' }))
     expect(openSettings).toHaveBeenCalledOnce()
     expect(view.container.querySelector('[data-emate-header-controls]')).not.toBeNull()
+    expect((view.getByRole('button', { name: '分享当前任务' }) as HTMLButtonElement).disabled).toBe(true)
     await runtime.dispose()
   })
 

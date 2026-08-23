@@ -42,9 +42,9 @@
   content: '';
   position: absolute;
   z-index: 2;
-  inset: -2px;
+  inset: -2px -2px var(--emate-composer-frame-bottom, -2px);
   padding: 2px;
-  border-radius: inherit;
+  border-radius: var(--emate-composer-frame-radius, inherit);
   background: conic-gradient(from var(--emate-glass-angle), var(--emate-glass-a), var(--emate-glass-b), var(--emate-glass-c), var(--emate-glass-a));
   pointer-events: none;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
