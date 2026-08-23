@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { loadReleaseBoundary } from './change-impact.mjs'
 import {
   componentFiles,
   componentRuntimeImports,
@@ -158,6 +159,27 @@ describe('component payload closure', () => {
         () => componentRuntimeImports([{ path: 'lib/index.js', source: rejected }]),
         /unsupported Desktop Base runtime import/u,
       )
+    }
+  })
+
+  it('matches every accepted component declaration to its emitted runtime imports', {
+    skip: !componentRuntimeParserAvailable() && 'Harness toolchain is intentionally absent in the impact lane',
+  }, () => {
+    const boundary = loadReleaseBoundary(repositoryRoot)
+    assert.equal(boundary.valid, true, boundary.errors.join('\n'))
+    for (const component of boundary.components.filter(candidate => candidate.desktop !== 'blocked')) {
+      const packageRoot = join(repositoryRoot, component.root)
+      const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
+      const entries = componentFiles(packageRoot, manifest)
+      const targets = component.kind === 'platform-profile' ? component.targets : [null]
+      for (const target of targets) {
+        const label = target === null ? 'portable' : `${target.platform}-${target.arch}`
+        assert.deepEqual(
+          componentRuntimeImports(targetEntries(entries, component, target)),
+          component.base_imports,
+          `${component.id} ${label}`,
+        )
+      }
     }
   })
 

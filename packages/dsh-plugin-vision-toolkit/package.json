@@ -69,10 +69,6 @@
       "kind": "platform-profile",
       "base_imports": [
         "@deepseek-ai/dsh-client-ui-primitives",
-        "@deepseek-ai/dsh-credentials",
-        "@deepseek-ai/dsh-settings",
-        "@deepseek-ai/dsh-tools",
-        "@deepseek-ai/schemastery",
         "@e-mate/desktop/vision-toolkit",
         "react"
       ],

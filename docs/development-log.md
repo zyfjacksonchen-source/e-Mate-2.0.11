@@ -1980,3 +1980,8 @@ The text highlights AI hallucination and human verification, legal use, real-act
 
 - 第五轮 CI 证明 S14 的 negated glob 只排除上传结果，不能阻止 `@actions/glob` 沿正向 Profile pattern 继续递归；上传仍停在相同步骤。根据 GitHub Actions Toolkit 的真实 `partialMatch` 实现，负 pattern 不参与目录下钻判断，因此不能把该写法保留为伪门禁。
 - 两个 workflow 现在先调用同一个 Node 标准库脚本，从已经 build/test 的 Profile 与 component `lib` 生成 `.release-cache/profile-artifact`。复制边界拒绝所有 symlink 和任意层级 `node_modules`，且没有 built component 时失败关闭；上传动作只读取这棵无链接暂存树，下载后仍恢复成原 `packages/dsh/profile` 与 `packages/dsh-plugin-*/lib` 布局。行为测试用真实目录 symlink 和实体 `node_modules` 证明两者都不会进入制品。稳定下载说明同时从错误的 2.0.10 修正为当前已公开验收的 2.0.11；没有改生产指针。
+
+## 2026-08-23 · 2.0.12 S16 emitted runtime ABI 全组件门禁
+
+- 合并后第一次从 exact-main 准备 Base v6 Profile bootstrap 时，在上传或激活任何生产对象前失败关闭：Glass portable 多声明一个只用于 TypeScript 类型的 `@deepseek-ai/dsh-client-runtime`，Skill Hub portable 漏声明 emitted `react-dom`，Vision 三个平台多声明四个只用于类型或已内联的 DSH 包。构建和聚焦测试均成功却未发现，是因为旧门禁分别验证手写 manifest 与解析器样例，没有对每个 accepted 组件的最终 allowlisted JS 字节做全等比较。
+- 三个 manifest 现只描述实际 emitted runtime imports；全局 Base v6 runtime ABI union 和 Base id 均未变化。发布合同新增单一全组件门禁，逐个 accepted portable/platform target 从 `files` 闭包提取真实外部 import 并要求与 `base_imports` 排序全等。Glass、Skill Hub 和 Vision 三目标共五个实际 payload 均已重新 emit 成功；旧 SHA 上仍运行的 CI、Desktop 和 npm carrier 已取消，不得复用为正式候选。Profile workflow 的 bootstrap 说明也同步为 accepted 2.0.12 Base。
