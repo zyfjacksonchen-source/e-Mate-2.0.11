@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-skill-hub",
-  "version": "2.0.11",
+  "version": "2.0.12",
   "description": "DSH-native Skill Hub catalog, lifecycle, Agent tools, and UI for e-Mate",
   "type": "module",
   "main": "lib/index.js",
@@ -75,7 +75,7 @@
         "effects": ["filesystem-read", "filesystem-write", "network-remote", "persistent-state", "skill-lifecycle"],
         "guards": ["atomic-receipt", "authenticated-identity", "explicit-user-action", "native-user-question", "session-scope", "workspace-scope"]
       },
-      "base_contracts": ["e-mate-desktop-profile-v5-dsh-2bc16230975f"]
+      "base_contracts": ["e-mate-desktop-profile-v6-dsh-2bc16230975f"]
     },
     "harnessVersion": "0.1.0-rc.7",
     "harnessCommit": "2bc16230975f6cf02aa1b283b1f86de44007b059"

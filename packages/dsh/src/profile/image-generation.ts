@@ -203,6 +203,7 @@ function imageCatalogContext(agent, messages) {
 }
 
 const SESSION_IMAGE_REFERENCE = /(?:上图|这张图|该图|原图|刚才(?:生成|上传)?的?(?:那张)?图|所附图片|附件(?:中|里)的图|(?:把|将)它(?:修改|改成|修成)|\b(?:this|that|above|previous|original|uploaded|attached)\s+(?:image|picture|photo)\b)/iu
+const SESSION_IMAGE_EDIT_LOCATOR = /(?:(?:^|[把将这那请，。；：\s])(?:图上(?:的)?|图片(?:中|上)(?:的)?)[^\n]{0,80}(?:改|修改|替换|删除|去掉|换成|修成|调整|重绘)|(?:改|修改|替换|删除|去掉|换成|修成|调整|重绘)[^\n]{0,80}(?:这张)?(?:图上(?:的)?|图片(?:中|上)(?:的)?))/iu
 
 function implicitEditImages(agent, task) {
   if (task.attachmentIds.length > 0) return task.attachmentIds
@@ -215,7 +216,8 @@ function implicitEditImages(agent, task) {
   const text = latestUserMessage(messages)?.content
     ?.filter(block => block?.type === 'text' && typeof block.text === 'string')
     .map(block => block.text).join('\n') ?? ''
-  if (!SESSION_IMAGE_REFERENCE.test(`${text}\n${task.prompt}`)) return []
+  const request = `${text}\n${task.prompt}`
+  if (!SESSION_IMAGE_REFERENCE.test(request) && !SESSION_IMAGE_EDIT_LOCATOR.test(request)) return []
   const history = eventImages(agent?.session?.events)
   const newest = uniqueImages(history.length === 0 ? messageImages(messages) : history, true)[0]
   if (newest === undefined) {

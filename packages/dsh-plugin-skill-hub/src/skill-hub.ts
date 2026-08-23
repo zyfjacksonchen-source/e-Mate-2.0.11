@@ -1439,6 +1439,10 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
     async search(filters = {}, signal) {
       if (typeof filters === 'string') filters = { query: filters }
       if (typeof filters !== 'object' || filters === null || Array.isArray(filters)) throw new Error('Skill search filters are invalid')
+      filters = { ...filters }
+      for (const key of ['category', 'tag', 'source', 'cursor']) {
+        if (filters[key] === '') delete filters[key]
+      }
       const query = filters.query ?? ''
       const limit = filters.limit ?? 24
       if (typeof query !== 'string' || query.length > 128

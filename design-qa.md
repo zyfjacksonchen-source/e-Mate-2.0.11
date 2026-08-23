@@ -403,3 +403,14 @@ final result: passed (target-native live message presentation, disclosure and fo
 - Main-agent Computer Use verified the real Tool/Job/Attachment path and opened the resulting image in the target gallery. Evidence: `artifacts/design-qa/S10-agent-qr/agent-qr-real-tool-job-attachment-1280x720.png`. The focused runtime contract test independently reopens the saved bytes and verifies a PNG signature.
 
 final result: passed (natural-language Agent QR generation, durable attachment and target image rendering)
+
+## S02 e-Mate login AURA Field Engine fidelity — 2026-08-23
+
+- Authoritative source: the user-licensed `/Users/mac/Downloads/AURA 页脚引擎.zip`, specifically its self-contained `index.html` WebGL engine. The supplied public URL currently redirects to the Vechooool catalog login surface, so the licensed local source—not the gated catalog shell—is the implementation reference.
+- Root cause: the first e-Mate pass replaced the source engine with a single orange 2D particle cloud and a different morph schedule. That removed the source's right-side grey-white rotating curl field, depth shading, additive blend, source layout offsets and the long drifting phase.
+- Scoped repair: `AuraField` now ports the source's 11,000/4,200-point form and wordmark buffers, golden-angle twisted sphere, exact vertex disturbance, grey-white-to-brand-orange fragment mix, additive blend, `13s` morph timing, right-side desktop placement, mobile placement, pointer disturbance and visibility cleanup. Only the resolved wordmark is changed from `AURA` to `e-Mate`; the existing Identity Gate, form, authentication RPC and product copy are unchanged.
+- Same-state comparison: `artifacts/design-qa/S02-login-aura/source-vs-emate-field-1280x720.png` places the licensed source and current e-Mate login side-by-side at `1280×720` during the drifting state. Both show the same right-side faceted white particle field, density, depth falloff and motion phase; the e-Mate panel intentionally overlays part of the field because the user-required black login form remains interactive and foreground-owned.
+- Responsive and runtime acceptance: the current login page was opened from the real pinned Harness Host at `1440×900`, `1280×720` and `390×844`. The mobile pass measured `clientWidth=scrollWidth=390` and `clientHeight=scrollHeight=844`; the field remains visible behind the form without horizontal or vertical document overflow. Browser console warnings/errors were empty.
+- Guardrail: the focused identity test now fixes source timing (`3s` resolved, `8s` drifting), grey-white field color, right-side desktop offset, point counts and WebGL lifecycle cleanup. The focused suite passes `13/13`; the Shell production bundle builds successfully.
+
+final result: passed (licensed AURA dual-state field, desktop/mobile layout and unchanged login seam)

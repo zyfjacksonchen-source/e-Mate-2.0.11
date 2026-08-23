@@ -405,7 +405,7 @@ await build({
   outDir: 'lib',
   deps: {
     alwaysBundle: ['saxes'],
-    neverBundle: ['@deepseek-ai/**', '@e-mate/desktop'],
+    neverBundle: ['@deepseek-ai/**', '@e-mate/desktop/**', '@standard-schema/spec'],
     onlyBundle: ['saxes', 'xmlchars'],
   },
 })
@@ -426,7 +426,7 @@ await build({
   outDir: resolve(root, '.test-lib'),
   deps: {
     alwaysBundle: ['saxes'],
-    neverBundle: ['@deepseek-ai/**', '@e-mate/desktop'],
+    neverBundle: ['@deepseek-ai/**', '@e-mate/desktop/**', '@standard-schema/spec'],
     onlyBundle: ['saxes', 'xmlchars'],
   },
 })

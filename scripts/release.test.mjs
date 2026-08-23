@@ -2,12 +2,12 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { assertEvidenceSource, BUNDLED_PLUGIN_PACKAGES, generateEvidence, isAcceptedReleaseCommit, RELEASE_PACKAGES, TARGET_NATIVE_RUNTIME_FILES, verifyRelease, VERSION } from './release.mjs'
 import {
   buildR2Inventory,
@@ -18,6 +18,8 @@ import {
 } from './publish-r2.mjs'
 import { releasePrefix, releaseSource } from './release-source.mjs'
 import { renderDownloadPage } from './render-download-page.mjs'
+import { prepareHarnessBaseImports } from './component-base-imports.mjs'
+import { stageDesktopProfileArtifact } from './stage-desktop-profile-artifact.mjs'
 
 const HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
 const DIGEST = '0'.repeat(64)
@@ -152,7 +154,7 @@ test('publication accepts only the exact 40-character release commit', () => {
 
 test('R2 immutable readback includes download metadata as well as bytes identity', () => {
   const item = {
-    filename: 'e-mate-dsh-2.0.11.tgz',
+    filename: 'e-mate-dsh-2.0.12.tgz',
     size: 207,
     sha256: DIGEST,
     contentType: 'application/gzip',
@@ -250,6 +252,82 @@ test('component builds reject a pnpm version different from the repository contr
   }
 })
 
+test('find-skill component builds prepare its exact pinned upstream workspace', () => {
+  const runner = readFileSync('scripts/component-run.mjs', 'utf8')
+  assert.match(runner, /component\.id === '@e-mate\/dsh-plugin-find-skill'[\s\S]*?--dir', 'upstream\/plugins\/dsh-find-skill', 'install', '--frozen-lockfile', '--ignore-scripts'/u)
+})
+
+test('component tests resolve declared DSH imports only from the exact pinned Base packages', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'emate-component-base-imports-'))
+  const componentRoot = join(root, 'component')
+  const harnessRoot = join(root, 'harness')
+  const source = join(harnessRoot, 'packages', 'skill')
+  try {
+    await file(source, 'package.json', JSON.stringify({
+      name: '@deepseek-ai/dsh-skill', version: '0.1.0-rc.7', type: 'module', exports: './index.js',
+    }))
+    await file(source, 'index.js', "export const pinnedVersion = '0.1.0-rc.7'\n")
+    await file(componentRoot, 'package.json', JSON.stringify({ type: 'module' }))
+    await file(componentRoot, 'lib/index.js', "export { pinnedVersion } from '@deepseek-ai/dsh-skill'\n")
+    prepareHarnessBaseImports({
+      componentRoot,
+      harnessRoot,
+      baseImports: ['@deepseek-ai/dsh-skill', 'react'],
+      runtimeImports: { '@deepseek-ai/dsh-skill': '0.1.0-rc.7', react: '18.3.1' },
+    })
+    const linked = join(componentRoot, 'node_modules', '@deepseek-ai', 'dsh-skill')
+    assert.equal(lstatSync(linked).isSymbolicLink(), true)
+    assert.equal(JSON.parse(readFileSync(join(linked, 'package.json'), 'utf8')).version, '0.1.0-rc.7')
+    assert.equal((await import(pathToFileURL(join(componentRoot, 'lib/index.js')).href)).pinnedVersion, '0.1.0-rc.7')
+    assert.throws(() => prepareHarnessBaseImports({
+      componentRoot: join(root, 'mismatch'),
+      harnessRoot,
+      baseImports: ['@deepseek-ai/dsh-skill'],
+      runtimeImports: { '@deepseek-ai/dsh-skill': '0.1.0-rc.6' },
+    }), /must equal 0\.1\.0-rc\.6/u)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('desktop profile artifacts contain built bytes without development links', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'emate-profile-artifact-'))
+  try {
+    const packagesRoot = join(root, 'packages')
+    const destination = join(root, 'artifact')
+    await file(packagesRoot, 'dsh/profile/cordis.patch.yml', '[]\n')
+    await file(packagesRoot, 'dsh/profile/component-inventory.json', JSON.stringify({
+      schema_version: 1,
+      components: [{
+        id: '@e-mate/dsh-plugin-example',
+        root: 'packages/dsh-plugin-example',
+        desktop: 'hot-profile',
+      }, {
+        id: '@e-mate/dsh-plugin-retired',
+        root: 'packages/dsh-plugin-retired',
+        desktop: 'blocked',
+      }],
+    }))
+    await file(packagesRoot, 'dsh/profile/plugins/emate-shell/lib/client.js', 'export {}\n')
+    await file(packagesRoot, 'dsh-plugin-example/lib/index.js', 'export {}\n')
+    await file(packagesRoot, 'dsh-plugin-example/lib/node_modules/hidden.js', 'throw new Error()\n')
+    await file(packagesRoot, 'dsh-plugin-retired/lib/index.js', 'throw new Error()\n')
+    const dependencyRoot = join(root, 'dependency-root')
+    await mkdir(dependencyRoot, { recursive: true })
+    await symlink(dependencyRoot, join(packagesRoot, 'dsh/profile/plugins/emate-shell/node_modules'), 'dir')
+
+    const receipt = await stageDesktopProfileArtifact({ packagesRoot, destination })
+    assert.equal(receipt.componentCount, 1)
+    assert.ok(existsSync(join(destination, 'dsh/profile/cordis.patch.yml')))
+    assert.ok(existsSync(join(destination, 'dsh-plugin-example/lib/index.js')))
+    assert.ok(!existsSync(join(destination, 'dsh/profile/plugins/emate-shell/node_modules')))
+    assert.ok(!existsSync(join(destination, 'dsh-plugin-example/lib/node_modules')))
+    assert.ok(!existsSync(join(destination, 'dsh-plugin-retired')))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('GitHub release packs once and validates the same tarball on three platforms', () => {
   const requireFromDsh = createRequire(resolve('packages/dsh/package.json'))
   const { parse } = requireFromDsh('yaml')
@@ -283,9 +361,13 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.equal(ci.jobs['desktop-windows'].needs, 'source')
   assert.equal(ci.jobs['desktop-macos'].needs, 'source')
   for (const [workflow, producer] of [[ci, 'source'], [desktopRelease, 'profile']]) {
+    const stage = workflow.jobs[producer].steps.find(step => step.name === 'Stage the exact built e-Mate profile without development links')
+    assert.equal(stage.run, 'node scripts/stage-desktop-profile-artifact.mjs')
     const artifact = workflow.jobs[producer].steps.find(step => step.uses === 'actions/upload-artifact@v4'
       && step.with.name.startsWith('e-mate-desktop-profile-'))
-    assert.match(artifact.with.path, /packages\/dsh-plugin-\*\/lib/u)
+    assert.match(artifact.with.path, /\.release-cache\/profile-artifact\/dsh\/profile/u)
+    assert.match(artifact.with.path, /\.release-cache\/profile-artifact\/dsh-plugin-\*\/lib/u)
+    assert.doesNotMatch(artifact.with.path, /^\s*packages\/dsh\/profile$/mu)
     assert.doesNotMatch(artifact.with.path, /browser-extension/u)
     for (const job of Object.values(workflow.jobs).filter(item => item.needs === producer)) {
       assert.equal(job.steps.find(step => step.uses === 'actions/download-artifact@v4').with.path, 'packages')
@@ -349,7 +431,7 @@ test('GitHub release packs once and validates the same tarball on three platform
 test('download page resolves unsigned desktop installers from the fail-closed R2 manifest', async () => {
   const page = renderDownloadPage(readFileSync('deploy/download-page/index.html', 'utf8'))
   const macGuide = readFileSync('deploy/download-page/install-macos.html', 'utf8')
-  const scriptName = 'site.fc9d1cdb2ddd.js'
+  const scriptName = 'site.f64ce25824c9.js'
   const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
   assert.equal(scriptName.split('.')[1], createHash('sha256').update(script).digest('hex').slice(0, 12))
   const manifestUrl = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json'
@@ -369,8 +451,8 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
   assert.match(page, /未签名/u)
   assert.match(page, /e-Mate 会校验、替换并自动重开/u)
   assert.match(page, /\/ecorex-agent\/admin\//u)
-  assert.match(macGuide, /全新安装 2\.0\.11/u)
-  assert.match(macGuide, /已安装 2\.0\.10 的用户可在应用内确认更新/u)
+  assert.match(macGuide, /全新安装 2\.0\.12/u)
+  assert.match(macGuide, /已安装 2\.0\.11 的用户可在应用内确认更新/u)
   assert.match(macGuide, /\/usr\/bin\/arch -arm64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)
   assert.match(macGuide, /\/usr\/bin\/arch -x86_64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)
   assert.match(macGuide, /Password:.*输入时不会显示任何字符/u)

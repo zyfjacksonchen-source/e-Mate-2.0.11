@@ -40,9 +40,9 @@ describe('packaged macOS installation cleanup', () => {
     roots.push(root)
     const current = app(root, 'e-Mate.app')
     const old = app(root, 'e-Mate 2.0.7.app')
-    const newer = app(root, 'e-Mate 2.0.11.app')
+    const newer = app(root, 'e-Mate 2.0.12.app')
     expect(obsoleteMacApplicationCopies([
-      { path: current, version: '2.0.10' }, { path: old, version: '2.0.7' }, { path: newer, version: '2.0.11' },
+      { path: current, version: '2.0.10' }, { path: old, version: '2.0.7' }, { path: newer, version: '2.0.12' },
     ], current, '2.0.10', [current])).toEqual([])
     expect(obsoleteMacApplicationCopies([
       { path: current, version: '2.0.10' }, { path: old, version: '2.0.7' },

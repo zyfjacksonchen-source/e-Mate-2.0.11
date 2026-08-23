@@ -34,7 +34,7 @@ import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImage
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
 import { isGeneralWorkspace, SidebarRoot } from './sidebar.tsx'
 import { SessionRouteProjection } from './session-route.tsx'
-import { SessionShareAction } from './session-share.tsx'
+import { HiddenSessionLogExport } from './session-share.tsx'
 import {
   SettingsChrome,
   SettingsCloseLabel,
@@ -54,13 +54,7 @@ export function registerSessionShare(ctx: any): void {
     id: 'session-log-download',
     order: -20,
     priority: -1,
-    inject: () => ({
-      hooks: { sessionLogDownload: ctx.sessionLogDownload.store },
-      requestDownload: (sessionId: string) => ctx.sessionLogDownload.download(sessionId),
-      dismissDownload: (sessionId: string) => { ctx.sessionLogDownload.dismiss(sessionId) },
-      callShare: (endpoint: string, payload: unknown) => ctx.connection.rpc.call('/emate.share', endpoint, payload),
-    }),
-  }, SessionShareAction))
+  }, HiddenSessionLogExport))
 }
 
 /** Mount e-Mate utilities once in DSH's native frame-wide overlay seat. */
@@ -79,6 +73,10 @@ export function registerHeaderControls(ctx: any): void {
       openSettings: () => {
         document.querySelector<HTMLButtonElement>('[data-emate-settings-trigger]')?.click()
       },
+      hooks: { sessionLogDownload: ctx.sessionLogDownload.store },
+      requestDownload: (sessionId: string) => ctx.sessionLogDownload.download(sessionId),
+      dismissDownload: (sessionId: string) => { ctx.sessionLogDownload.dismiss(sessionId) },
+      callShare: (endpoint: string, payload: unknown) => ctx.connection.rpc.call('/emate.share', endpoint, payload),
       LightIcon: IconLightOutline16,
       DarkIcon: IconDarkOutline16,
       SettingsIcon: IconSettingsOutline16,
@@ -135,6 +133,21 @@ export function registerManagedPresetSurfaces(ctx: any): void {
   }
 }
 
+/** Project the generic new-task action to Home before rc.7 opens its reusable blank session. */
+export function startSessionFromRoute(ctx: any, workspaceId?: string): void {
+  const target = workspaceId ?? ctx.workspaces.list.getSnapshot().items.find(isGeneralWorkspace)?.workspaceId
+  if (target === undefined) {
+    console.warn('e-Mate general workspace is not ready')
+    return
+  }
+  if (workspaceId === undefined && location.pathname !== '/') {
+    history.pushState(null, '', '/')
+    dispatchEvent(new PopStateEvent('popstate'))
+    return
+  }
+  ctx.workspaces.startSession(target)
+}
+
 export function apply(ctx: any): void {
   registerActivityFold(ctx)
   registerComputerUseTrigger(ctx)
@@ -144,19 +157,7 @@ export function apply(ctx: any): void {
     id: 'stats',
     priority: -1,
   }, HiddenSessionStats))
-  const startSession = (workspaceId?: string) => {
-    const target = workspaceId ?? ctx.workspaces.list.getSnapshot().items.find(isGeneralWorkspace)?.workspaceId
-    if (target === undefined) {
-      console.warn('e-Mate general workspace is not ready')
-      return
-    }
-    if (workspaceId === undefined && ['/capabilities', '/settings', '/schedules'].includes(location.pathname)) {
-      history.pushState(null, '', '/')
-      dispatchEvent(new PopStateEvent('popstate'))
-      return
-    }
-    ctx.workspaces.startSession(target)
-  }
+  const startSession = (workspaceId?: string) => { startSessionFromRoute(ctx, workspaceId) }
 
   const prepareSchedulePrompt = async (prompt: string, requestedSessionId?: string) => {
     if (requestedSessionId !== undefined) {

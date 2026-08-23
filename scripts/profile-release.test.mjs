@@ -23,7 +23,7 @@ function fixture() {
   roots.push(root)
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   const keyId = '0123456789abcdef'
-  const baseId = 'e-mate-desktop-profile-v5-dsh-2bc16230975f'
+  const baseId = 'e-mate-desktop-profile-v6-dsh-2bc16230975f'
   mkdirSync(join(root, 'desktop/e-mate-desktop'), { recursive: true })
   mkdirSync(join(root, 'packages/dsh/profile'), { recursive: true })
   execFileSync('git', ['init', '--quiet'], { cwd: root })
@@ -56,7 +56,7 @@ function fixture() {
       public_key_spki_der_base64: publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
     }],
   })
-  writeJson(join(root, 'desktop/e-mate-desktop/package.json'), { version: '2.0.11', dependencies: {} })
+  writeJson(join(root, 'desktop/e-mate-desktop/package.json'), { version: '2.0.12', dependencies: {} })
   const components = ['fixture-a', 'fixture-b'].map(slug => {
     const id = `@e-mate/dsh-plugin-${slug}`
     const componentRoot = join(root, 'packages', `dsh-plugin-${slug}`)
@@ -66,7 +66,7 @@ function fixture() {
     writeFileSync(join(componentRoot, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n")
     writeJson(join(componentRoot, 'package.json'), {
       name: id,
-      version: '2.0.11',
+      version: '2.0.12',
       type: 'module',
       main: 'lib/index.json',
       files: ['lib', 'cordis.patch.yml', 'pnpm-lock.yaml'],

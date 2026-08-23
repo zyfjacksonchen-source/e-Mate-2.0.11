@@ -1,4 +1,4 @@
-/** Compatibility profile composition over the official Web bundle and user plugins. */
+/** Native desktop profile composition over the official Web bundle and user plugins. */
 
 import { createRequire, findPackageJSON } from 'node:module'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -52,7 +52,7 @@ const PWSH_SANDBOX_ROW_ID = 'pwsh-sandbox'
 const UPSTREAM_PWSH_SANDBOX_PACKAGE = '@deepseek-ai/dsh-pwsh-sandbox'
 const DESKTOP_WINDOWS_PWSH_SANDBOX_ROW_ID = 'desktop-windows-pwsh-sandbox'
 const DESKTOP_WINDOWS_PWSH_SANDBOX_PACKAGE = '@e-mate/desktop/windows-pwsh-sandbox'
-const DEFAULT_DESKTOP_SHELL_MODE: DesktopShellMode = 'compatibility'
+const DEFAULT_DESKTOP_SHELL_MODE: DesktopShellMode = 'advanced'
 const SETTINGS_FILE_PACKAGE = '@deepseek-ai/dsh-settings-file'
 const DESKTOP_SETTINGS_NAMESPACE = 'dsh-desktop'
 const UI_LAYOUT_PACKAGE = '@deepseek-ai/dsh-client-ui-layout'
@@ -73,7 +73,7 @@ export function parseDesktopShellMode(value: unknown): DesktopShellMode {
 /**
  * Read a desktop mode from one parsed settings document.
  * @param document - untrusted settings document root.
- * @returns the selected mode, defaulting to compatibility when absent.
+ * @returns the selected mode, defaulting to the native desktop shell when absent.
  */
 export function desktopShellModeFromSettings(document: unknown): DesktopShellMode {
   if (typeof document !== 'object' || document === null || Array.isArray(document)) {
@@ -358,7 +358,7 @@ export function prepareDesktopProfile(
     dshHome: home,
     ...rowConfig(settings),
   } as SettingsFileConfig)
-  const mode = DEFAULT_DESKTOP_SHELL_MODE
+  const mode = platform === 'linux' ? 'compatibility' : DEFAULT_DESKTOP_SHELL_MODE
   patches.push({
     id: 'settings',
     config: settingsConfig,

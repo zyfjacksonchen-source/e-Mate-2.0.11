@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/desktop",
-  "version": "2.0.11",
+  "version": "2.0.12",
   "description": "e-Mate desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin",
   "license": "MIT",
   "publishConfig": {
@@ -225,6 +225,7 @@
     "@deepseek-ai/dsh-user-questions": "0.1.0-rc.7",
     "@deepseek-ai/dsh-web": "0.1.0-rc.7",
     "@deepseek-ai/dsh-web-app": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-workspace": "0.1.0-rc.7",
     "@deepseek-ai/dsh-workflow": "0.1.0-rc.7",
     "@deepseek-ai/schemastery": "3.18.1",
     "@kelearns/dsh-navigation-bar": "0.2.1",

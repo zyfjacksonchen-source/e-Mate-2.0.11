@@ -58,4 +58,5 @@ export function apply(ctx) {
       res.end(req.method === 'HEAD' ? undefined : manifest)
     },
   }), 'emate-shell: web manifest')
+
 }

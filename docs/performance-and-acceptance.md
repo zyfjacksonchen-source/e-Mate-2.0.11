@@ -1,10 +1,11 @@
 # Performance and acceptance
 
-This document is a release gate for e-Mate 2.0.11. A scenario is `passed` only with commands, screenshots or traces, immutable IDs, and the observed result. Missing enterprise accounts, credentials, platform capabilities, or real external targets are `blocked`; mocks cannot close a production acceptance item.
+This document is a release gate for e-Mate 2.0.12. A scenario is `passed` only with commands, screenshots or traces, immutable IDs, and the observed result. Missing enterprise accounts, credentials, platform capabilities, or real external targets are `blocked`; mocks cannot close a production acceptance item.
 
 ## Core browser and performance gates
 
 - Cold local Web LCP is at most 2.0 seconds and interactive time at most 2.5 seconds.
+- Installed-app startup is gated against the accepted 2.0.11 installed artifact, not an absolute 15-second ceiling. On the same machine and architecture, use the same install/copy state, authentication/profile state, launch command and probe boundary for one clean launch and three warm launches of both artifacts. For the clean sample, warm p75 and warm maximum, `candidate - paired 2.0.11 baseline` must be at most 10,000 ms. For an unauthenticated launch, stop the clock only when the login form is visible, AX-readable and clickable; AURA is part of the statically bundled login module and is mounted eagerly, with no dynamic import, CDN fetch or login-time asset download. WebGL readiness must not block form interaction.
 - INP p75 for typing, model selection, navigation, dialogs, and sidebar actions is at most 100 ms.
 - At 30 real events per second for 60 seconds, event-to-paint is p95 at most 50 ms and p99 at most 100 ms.
 - A 5,000-event session scrolls at an average of at least 55 fps, uses at most 300 MB JS heap, and has no steady-state main-thread task above 100 ms. Frame-drop percentage is diagnostic evidence only and is not a release gate.

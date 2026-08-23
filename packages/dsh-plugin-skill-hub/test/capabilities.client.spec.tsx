@@ -58,7 +58,7 @@ function renderPage(callSkillHub = vi.fn(async (endpoint: string) => {
     ? { ok: true, value: { schema_version: 1, items: capabilityItems } }
     : { ok: true, value: { accepted: true } })
   const setCredential = vi.fn(async () => ({ ok: true, value: {} }))
-  render(<CapabilitiesPage
+  render(<><div data-phase="hero" /><CapabilitiesPage
     callCapabilities={callCapabilities}
     callSkillHub={callSkillHub}
     setCredential={setCredential}
@@ -68,18 +68,18 @@ function renderPage(callSkillHub = vi.fn(async (endpoint: string) => {
     RefreshIcon={Icon}
     SkillIcon={Icon}
     capabilityIcons={{ browser: Icon, collaboration: Icon, image: Icon, office: Icon, ocr: Icon }}
-  />)
+  /></>)
   return { callCapabilities, callSkillHub, setCredential }
 }
 
 describe('capability center fidelity surface', () => {
-  it('keeps the target sidebar column and presents Skill Hub before built-in capabilities', async () => {
+  it('uses the native main phase as a standalone page and preserves the complete Skill Hub surface', async () => {
     renderPage()
     const page = document.querySelector<HTMLElement>('[data-emate-capabilities]')
     const hub = await screen.findByRole('region', { name: 'Skill Hub' })
     const builtins = screen.getByText('本机内置能力').closest('details')
 
-    expect(page?.style.left).toBe('280px')
+    expect(page?.parentElement?.hasAttribute('data-phase')).toBe(true)
     expect(hub.compareDocumentPosition(builtins!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole('tab', { name: '发现' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: /已安装/ })).toBeTruthy()

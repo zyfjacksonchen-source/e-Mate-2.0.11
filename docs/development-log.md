@@ -1886,3 +1886,97 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 根 `AGENTS.md` 现固定版本起点、当前 Base-bound DSH/Desktop reference、唯一 owner、Creation Mode、开发时间预算、四类发布 lane、Profile R2/CAS 次序、三目标部分激活恢复、Base→Profile bootstrap→官网顺序、真实父代自然语言更新，以及 `source fixed` / `candidate built` / `installed accepted` / `production released` 四级证据词。以后只有最后一级可称“已上线”；`profile-release.yml` 成功只代表 publication prepared，`mac-smoke` 永不进入 manifest、R2 或官网。
 - 2.0.11 的永久失败账本同时锁住：源码树不等于封装产品、pnpm CLI 树不等于 Desktop Yarn 树、组件 inventory/renderer/UI 只能有一个 owner、Session 下游事件必须显式 ignorable 并冷读、五类权限互不继承、CDP 浏览器优先、外部凭据跨会话复用、跨 Base 先选择再 bootstrap、公网终态与成对性能证据。隐藏能力不等于退役；删除组件必须同时清理 inventory、loader、封装、依赖和安装迁移。
 - 新仓库门禁不另造框架：`scripts/change-impact.test.mjs` 锁定上述语义锚点，并证明 `AGENTS.md`/目标合同只进入 `verification-only`、`run_base=false`、`run_plugins=false`；`scripts/component-release.test.mjs` 将 Desktop accepted set 从“数量 14”收紧为精确 ID 集合，GenUI 与 Vision Toolkit 不可被等量替换悄悄移出，芯助手保持唯一 blocked。聚焦收据为 release-boundary `20/20`、component payload `10/10`，完整 `pnpm run test:impact` 为 `34/34`；当前精确 diff 分类为 `verification-only`，不生成任何产品字节，因此本片明确不运行 Base、DMG、EXE、Profile/R2 或安装态发布。
+
+## 2026-08-23 · 2.0.12 S00 固定基线、范围与直接开发计划
+
+- 2.0.12 从已验收 2.0.11 提交 `6a7f4b9d59a1d8970345638946fb6564e2f5f93e` 开始；唯一 Base 仍为 `e-mate-desktop-profile-v5-dsh-2bc16230975f`，Harness 为 `0.1.0-rc.7@2bc16230975f6cf02aa1b283b1f86de44007b059`，Desktop reference 为 `6074088f5b660206e404b3591fab51fb99c69add`。没有用浮动分支、更新 RC 或另一个 Desktop 壳重新定义“原生”。本版本首次准入 AURA 动态登录页、Desktop 原生 vibrancy 半透明侧栏、Glass Composer 与 iDesign，因修改 Base contract、Desktop、inventory 和新组件集合，唯一 impact classifier 正确给出 `base`；后续已准入且兼容组件的小改仍必须回到 `plugin-only`，不得沿用本次首次 Base 成本。
+- 设计实现只复用现有 Shell/Identity/Sidebar/Composer 语义节点与 Desktop advanced-frame contract。AURA 登录成功后必须卸载动画并释放计时器、Canvas/WebGL 和监听器；半透明侧栏以原生 vibrancy 为主，Reduced Transparency/forced-colors 回退为不透明；Glass 只装饰 `data-composer-card`，不替换输入生命周期；应用图标、小芯形象和 e-Mate Logo 保持不变。iDesign 只采用 SHA-512 固定、MIT 的 `deepseek-idesign@0.2.0`，其原始 tarball 与许可证随组件 vendor，后续 Source Available 版本、专有模板、运行时 CDN/Google Fonts 和无许可模板全部拒绝。
+
+## 2026-08-23 · 2.0.12 S01 无安装构建、全组件合同与 Base ABI 收口
+
+- 遵守本环境“不得 `npm/pnpm install`、不得 `approve-builds`”约束：使用现有 2.0.11 依赖存储和绝对 Node 路径，为当前固定 DSH 源码重建 package-level workspace symlink view。DSH Host/Client TypeScript 与 tsdown、e-Mate Shell、全部 16 个 Desktop accepted components、`packages/dsh` 以及 `@e-mate/desktop` SDK/声明输出均从当前源码成功构建；芯助手继续是唯一 blocked component，没有进入 registry、generation 或 Desktop accepted set。
+- 聚焦收据：Shell `51/51`；Skill Hub Host `11/11` 与 UI `6/6`；better-sidebar `2/2`；CDP `10/10`；Computer Use `2/2`；file-import `6/6`；find-skill `10/10`；GenUI `1/1`；Glass `1/1`；iDesign `3/3`；MCP `4/4`；Memory `4/4`；Office `5/5`；Search MCP `5/5`；Tool Search `7/7`；Vision portable contract `2 passed / 7 native-target skipped`。`packages/dsh` 为 `43/43`，Desktop 类型检查通过且完整 Vitest 为 `50/50` 文件、`428 passed / 3 skipped`；仓库 release boundary、component payload/composition、Profile/R2 与 download-page 测试为 `45/45`，`check-target` 和 `git diff --check` 通过。
+- 门禁捕获并修正四类会在发布后才暴露的问题：find-skill/MCP/managed-profile 的 2.0.11 静态期望未随 accepted set 更新；iDesign 的上游 tarball 错放到只接受 Git submodule 的 external source root；iDesign 实际使用的 rc.7 `dsh-client-ui-conversation`、`dsh-host-webserver` 与 `dsh-workspace` 未进入精确 Base ABI；下载页 JS 改字节后仍沿用旧内容哈希文件名且安装图解仍写 2.0.10→2.0.12。修复只更新各自合同来源，不增加第二分类器、Loader、运行时依赖安装或兼容猜测。
+
+## 2026-08-23 · 2.0.12 S02 Session 冷读回归与后续正式门
+
+- Desktop 完整测试首次以最终 Yarn rc.7 运行图执行时复现 `emate/image-output` 没有保存 `ignorable: true`；原因不是 DSH Session 新设计失效，而是本机复用的 2.0.11 安装依赖早于当前 Desktop patch，源码 patch/lock 与实际测试字节不一致。当前无安装验证树已按仓库 `.yarn/patches` 精确应用 Session writer 与 legacy image reader 后，针对性 `23/23` 和完整 Desktop `428 passed / 3 skipped` 均通过。永久发布仍必须从正式 Desktop lock/patch 图生成最终 `afterPack` 字节，并执行写入、退出、冷读与未知事件失败关闭；不能把本地依赖修补冒充正式封装证据。
+- 本切片只到 `candidate built`。尚未完成的正式门保持失败关闭：Vision 两个 macOS 目标的离线 wheel 与 Desktop packaged Python、Computer Use universal helper、未签名 universal DMG、从 DMG 安装后的 AURA/侧栏/Composer/iDesign/全工具和插件、首 Token/tok/s 对照、2.0.11→2.0.12 自然语言更新/确认/原子重启/回滚、R2 immutable readback、`desktop/latest.json`、官网与未签名图解。上述终态全部通过且公开链无 `mac-smoke` 前，不得称 2.0.12 已发布。
+
+## 2026-08-23 · 2.0.12 S03 AURA 字标与登录启动门
+
+- 真实 Harness 登录页暴露 `e-Mate` 粒子字标在桌面构图中过大。修复只收小现有字标的桌面/窄屏宽度与高度上限并下移窄屏字标，不改 AURA 双态场、13 秒周期、Identity RPC 或登录表单。固定 Harness Host 的 `1280×720` 与 `390×844` 浏览器验收均无横向或纵向溢出，完整 `e-Mate` 分别可见于表单左侧与表单下方；收据为 `artifacts/design-qa/S02-login-aura/emate-wordmark-smaller-1280x720.png` 和 `artifacts/design-qa/S02-login-aura/emate-wordmark-smaller-390x844.png`。
+- 新增启动绝对门：真实安装候选从启动到可见、AX 可读且可点击的 Harness 表面不得超过 15 秒；未登录时以真实登录表单为终点。AURA 已由 `identity.tsx` 静态导入并与登录路由同步预置，禁止动态导入、运行时 CDN 或登录临时下载，WebGL 初始化不得阻塞表单。正式 macOS 包验证器也把原 180 秒健康等待收紧为 15 秒启动硬门，并在收到确认后复核实测 elapsed；聚焦验证为 Shell Identity `13/13`、Shell 全量 `51/51`、macOS release verifier `5/5`。原 clean ≤10 秒、warm p75 ≤5 秒且单次 ≤8 秒的更严格预算继续生效；上述源码与 Host 收据不替代待执行的 DMG 安装态原始计时。
+
+## 2026-08-23 · 2.0.12 S04 以 2.0.11 为启动基准并恢复原生按需 CDP
+
+- 用户明确废止 S03 的独立 15 秒硬门及旧 clean/warm 绝对秒数，仓库级标准改为 accepted 2.0.11 安装制品的成对基准：同机器、架构、安装/复制状态、认证/Profile 状态、启动命令和探针边界下，双方各跑一轮 clean 与三轮 warm；候选的 clean、warm p75、warm maximum 分别允许最多 `+10,000 ms`。`AGENTS.md` 同时把 accepted 2.0.11 `6a7f4b9d59a1d8970345638946fb6564e2f5f93e` 的唯一原生 Desktop 生命周期固定为 Electron ready → 受限 shell environment → receipt-governed 本地 Profile → in-process Cordis Host → loopback Web → native BrowserWindow → renderer health；不得增加 launcher、CLI Host 子进程或并行启动路径。AURA 仍必须静态打包并随登录路由预挂载，不得运行时下载或以 WebGL 阻塞表单。
+- 对照固定 Desktop reference `6074088f5b660206e404b3591fab51fb99c69add` 与 2.0.11 源码后确认 `desktop/e-mate-desktop/src/main.ts` 的启动顺序未变。原候选相对前代的真实回退来自 2.0.12 CDP 组件：Cordis effect 和能力状态轮询都会在应用启动时调用 `managedChrome.ensure()`，提前拉起 Chrome；2.0.11 只连接用户已启用 endpoint，没有这个启动期进程。最小修复保留同一个 DSH plugin、Tool、Settings、approval、Subprocess 与 managed runtime，只让生命周期 effect 持有 disposer，能力状态只读现有 endpoint；第一个 `browser_*` Tool 或“打开浏览器”动作继续调用既有 `ensure()`，自动启动系统 Chrome 的隔离 loopback CDP Profile，不恢复扩展、手动开发者加载、下载浏览器或第二浏览器路径。
+- 原始诊断口径均为 arm64、`EMATE_RELEASE_HEALTH_PROBE=1`、隔离 HOME/DSH_HOME/user-data，从 process spawn 到 `.release-health-ack`。修复前单样本为 2.0.11 clean `23,524 ms` / warm `10,168 ms`，2.0.12 clean `27,056 ms` / warm `15,189 ms`；临时禁用启动期 CDP 后 Host/Renderer 约减少 3.1 秒，定位与源码一致。产品提交 `180b68170bf229b0153e5a97c3223b616a6e7f93` 的精确应用与 accepted 2.0.11 使用双方全新复制路径、同一 DSH/Profile receipt，且每轮使用独立 Electron user-data 避免 Chromium SingletonLock 干扰：2.0.11 clean `22,816 ms`、warm `3,322 / 2,864 / 2,855 ms`；2.0.12 clean `22,164 ms`、warm `3,167 / 3,232 / 3,290 ms`。候选 clean 快 `652 ms`；nearest-rank warm p75/max 为 2.0.11 `3,322 ms`、2.0.12 `3,290 ms`，候选快 `32 ms`，三项回退均不大于零，启动门通过。
+- 聚焦门禁为 CDP `11/11`（新增“启动/能力轮询不拉起 Chrome，首个浏览器 Tool 恰好启动一次”的行为回归）、macOS release verifier `5/5`、release boundary `20/20`，`git diff --check` 通过。正式未签名流程的 macOS package tests `158/158` 与 runtime closure `197` 节点通过；构建机缺少 PATH npm 时只用 `/tmp` 转发到本机已有 npm CLI，未执行 install、approve-builds 或修改依赖/锁。产品提交 `180b68170bf229b0153e5a97c3223b616a6e7f93` 的精确 universal DMG 为 `399,924,111` bytes / SHA-256 `c9d729e9b88a4bea690593365dc1090dbcb177e4891fc62b23aa580ffdee144f`，DMG、deep ad-hoc code seal、arm64 renderer health（verifier clean copy `24,666 ms`）与 x86_64/Rosetta Electron readiness（`39,067 ms`）均通过；后两项是健康/兼容回执，不替代上述成对性能门。该候选尚未完成安装态 UI、全工具/插件、更新/回滚及公网发布，因此仍不得称为上线。
+- 安装态验收前的规范复核发现 `docs/target-contract.md` 仍残留 S03 的绝对 15 秒条款，与 `AGENTS.md`、性能规范和已通过的新成对门禁冲突。现已把目标合同同步为 accepted 2.0.11 成对基准与 `+10,000 ms` 容差，并在 release-boundary 测试中同时锁定新语句与旧语句不得出现；聚焦回归仍为 `20/20`。这是合同纠偏，不改变已构建产品字节。
+
+## 2026-08-23 · 2.0.12 S05 原生 Schedule 管理投影、iDesign 退役与 Base v6
+
+- 定时任务继续由 pinned DSH rc.7 `@deepseek-ai/dsh-schedule` 单独拥有：Agent-local `schedule_create/list/delete` 写同一 Session `schedule/change` 流，原生 runtime 驱动计时和执行。新增 `@e-mate/dsh-plugin-schedules` 只经 loopback 读取 `sessionPersistence`，用原生 `foldScheduleEvents`、`decodeScheduleChange`、`resolveEveryOccurrence` 与 `scheduleView` 投影跨会话当前任务、一次性完成记录和最近 20 条 dispatch；它没有任务表、timer、executor、写 RPC 或第二历史库。Shell 的创建/修改/删除入口只把草稿带回原所属 DSH 会话，修改遵循 create 成功后 delete 的原生组合。
+- rc.7 事件合同只有 `create`、`delete`、`dispatch`，当前状态只有 `scheduled`/`overdue`，因此完成态仅从一次性 dispatch 推导，最近运行仅来自原生 dispatch；rc.7 没有 pause、resume、edit、run-now 或单独 history Tool/event。本版明确不伪造这些状态和动作。Tool Search 组合行为证明 Agent-local `schedule_create/list/delete` 仍直接可见且执行原定义；Desktop 即使禁用旧 `emate-agent-operations`，独立 `emate-schedules` 组件仍装载。
+- 审计发现候选 `runtime_imports` 已加入 `@deepseek-ai/dsh-schedule` 并移除 iDesign 专用 imports，却继续复用已发布 Base v5 id；这会让旧 v5 把不兼容 desired state 判为普通组件更新。唯一候选合同现提升为 `e-mate-desktop-profile-v6-dsh-2bc16230975f`，全部 accepted/blocked component manifest 精确绑定 v6，更新负例锁定 installed v5 在下载组件前返回 `base-required`。`@e-mate/dsh-plugin-idesign` 已从 inventory、源码/构建/许可输入和 vendored 8.1 MiB tarball 完整删除，并由 CLI/Desktop retired 集合在升级时清退旧目录和 bundle row，不留 ghost installation。
+- 聚焦收据：Schedule 组件 build 与 `1/1` 行为测试、Shell build 与 `51/51`、Capability Center `6/6`、rc.7 原生 Schedule `131/131`、Tool Search 共存 `8/8`、`packages/dsh` `32/32`、Desktop Profile/组件/generation/release/update `24/24`、release-boundary/component `32/32`、Profile emit/publish `4/4` 均通过；exact contract check 返回 Base v6 `valid=true`，`git diff --check` 通过。仍需正式 Base v6 三平台封装、安装态自然语言 create/list/delete、dispatch 后完成/最近运行、更新确认/原子重启/回滚验收，未完成前不得称为上线。
+
+## 2026-08-23 · 2.0.12 S06 新任务路由、图片编辑指代与设备级 Skill 安装复用
+
+- 正式 2.0.12 arm64 App 回放证明点击“新任务”时主区变为空态、URL 却仍停在旧 `/chat/:blank`。固定 rc.7 的 `workspaces.startSession()` 会正确复用当前工作区已有 blank Session；问题在 e-Mate Shell 的共享入口只从设置类页面先回 `/`，而 `SessionRouteProjection` 又只在 current id 变化时纠正 URL。最小修复让所有无显式 workspace 的“新任务”先投影 `/` 并发送原生 popstate，再由同一个 rc.7 Session owner 打开或复用 blank Session；没有新增 Session、路由器或状态机。Shell 定向回归 `8/8` 与 tsdown build 通过。
+- 真实 `~/.dsh/sessions` 日志显示“图上的方林改为圣都”前两次调用带 `image_url` 并走 `/images/edits`，第三次模型漏传引用后才退化到 `/images/generations`。附件、Job、Gateway 与结果回显链路本身有效；共享隐式图片指代守卫遗漏“图上的/图片中的/图片上的”。只补齐这些中文指代表达，使模型漏传时仍绑定会话最新图片进入 edit；图片生成定向回归 `1/1` 通过。局部字体或画面仍可能被模型重绘，属于模型编辑质量边界，不伪装成确定性像素编辑。
+- 设备级 `lark-shared` receipt 已存在却在每个新 Session 重问安装，不是 rc.7 Full Access 或 `UserQuestionService` 丢状态，而是 Find Skill 在读取持久 receipt 前无条件提问。现在仅当 `source + skill + scope=global` 精确命中且原生 DSH Skill provider 可见时跨会话复用；Skill、source 或 receipt 变化仍走原生确认。Find Skill build 与 `12/12` 通过，没有把一次确认扩成全局免授权。
+- Glass Composer 四种配色仍共用唯一边框伪元素，只把一圈动画从 `12s` 调为 `6s`；包围范围、颜色、Composer 几何与顶栏未变，Reduced Motion 仍关闭动画。组件合同 `1/1` 与 diff check 通过。
+
+## 2026-08-23 · 2.0.12 S07 恢复公开现仓发布权威并冻结 Base v6 发布边界
+
+- 只读 GitHub/生产审计确认旧 `zyfjacksonchen-source/e-Mate` 已是 private 且 main 仍停在旧版本；accepted 2.0.11、required `CI admission`、线性 PR 主线、`r2-publish` 签名环境和生产收据都属于公开现仓 `zyfjacksonchen-source/e-Mate-2.0.11`。2.0.12 早期提交误把目标合同、四个发布脚本及六个 package repository 字段改回旧私有仓，按该状态合并会让 Profile preparation 因 `GITHUB_REPOSITORY` 不匹配而失败。
+- 唯一发布 authority 已恢复为公开现仓；四个内置 connector Skill 的本版 catalog URL 同步指向该仓待创建的不可变 `skills-v2.0.12-r1` 标签。2.0.9 历史 source URL 只用于识别和迁移旧 receipt，保持不变。`check-target` 继续作为共享权威并新增 Tool Search package metadata 覆盖，没有新增第二仓库分类器。
+- 修复后 `check-target` 通过，Find Skill build/合同 `12/12` 通过，Base/Profile/component/R2/download release 合同 `47/47` 通过。公开 `skills-v2.0.12-r1` 必须在最终主线冻结后创建；当前旧 `180b681` DMG 早于 Base v6、Schedule、iDesign 退役与后续 UI 修复，已经失效，禁止复用或上传。下一证据级别仍是最终 SHA 的 PR CI、Base SDK、正式 universal DMG/Windows EXE、安装态验收与不可变公网发布。
+
+## 2026-08-23 · 2.0.12 S08 最终源码审计收口与 Composer 光轨加速
+
+- 图片隐式编辑不能把普通新图提示绑定到历史图片。S06 新增的裸“图上/图片中”表达已从通用图片指代中移出，只有定位词与明确的改、换、删、重绘等编辑动作同现时才复用会话最新图片；带历史图片的“生成一张地图上的路线图”负例固定走 `/images/generations`。这保留“图上的方林改为圣都”的漏参恢复，同时避免把“地图上”误识别成“上图”。
+- 外部连接 Skill 的一次确认现在绑定真实不可变候选，而不只绑定可伪造的 `source + skill` 名称。允许清单固定为 `larksuite/cli` 的 `v1.0.88@2829ecd18846d8390dfac558125f602b07232206`、精确 GitHub tag/subpath、九个明确 `lark-*` Skill 与各自完整目录 SHA-256；确认框同时披露来源、版本、摘要和设备级全局范围。下载内容先在同卷 sibling staging 完整复制、写 receipt 并重算摘要，再以 sibling backup 原子切换；版本或字节不符、复制/写入/切换中断时旧安装保持或自动恢复，staging/backup/receipt 任一 symlink 都失败关闭且不得触碰外部目标。新建/更新 receipt 写入 `sourceVersion`、`receiptVersion` 与 `contentDigest`，跨会话复用前重新计算并要求全等。既有 `larksuite/cli` 旧 receipt 只有在 Skill 名称和实际字节恰好命中固定候选时才原子升级 receipt 并复用既有授权；内容被改、provider 不可见、source 或 Skill 变化都不会跳过确认，新的可变 `larksuite/cli` 请求更会在联网或写盘前直接拒绝。`registerCommand: false` 同时成为真实命令注册门，不能再从 `/skill` 绕开 `UserQuestions`。没有把飞书授权扩成其他连接或任意插件的全局许可。
+- Schedule 管理组件实际跨多个持久 Session 做只读投影，manifest 因此删除错误的 `session-scope` 声明，只保留 `read-only`；成功的 revision 仍缓存，单个 Session 的瞬态 inspect 失败不再缓存到下一次写事件，下一次列表会重试该 Session。Desktop repair 测试同步注入旧 iDesign dependency、bundle 与物理目录并证明全部清退，防止 CLI 有覆盖而 Desktop 封装缺少回归门。
+- Glass Composer 继续只用四种配色共享的唯一外框伪元素；用户确认 `6s` 仍慢后，将一圈时长收紧为 `4s`。边框范围、Composer 生命周期和 `prefers-reduced-motion: animation none` 不变。聚焦收据为 Glass `1/1`、Find Skill `21/21`（含真实 install/update 摘要失败保旧包、成功 receipt、swap/receipt 崩溃自愈及 symlink sentinel 负例）、DSH `43/43`、Schedule `1/1`、component release `11/11`、Desktop Profile `5/5` 与 `git diff --check`；九个摘要也已对固定 `v1.0.88` checkout 逐目录重算一致。公开 `skills-v2.0.12-r1` 标签仍是发布前门，必须在最终 accepted main SHA 上创建并验证远端标签精确绑定该 SHA；源码测试通过不等于标签或发布已经完成。
+
+## 2026-08-23 · 2.0.12 S09 联网搜索回归 rc.7 原生单路径
+
+- 回放固定 rc.7 组合确认 Base 已原生装载 `@deepseek-ai/dsh-web-search-deepseek`、`@deepseek-ai/dsh-web` 与 `@deepseek-ai/dsh-tool-web`；2.0.12 的实际故障来自 accepted `@e-mate/dsh-plugin-search-mcp` 覆盖 `web.searchProvider` 为 Tavily、关闭原生 DeepSeek provider，却要求本机不存在的 `TAVILY_API_KEY`。这不是 Tool Search 渐进披露或 Session 权限问题；`web_search` 本来就在 Tool Search 的直接可见集合中。
+- 唯一正式路径恢复为 `deepseek-official`，原生 provider 从 OS Credentials 按次解析企业模型策略已投影的设备级 `E_MATE_MODEL_KEY_DEEPSEEK`。Search MCP 从共享 inventory、生成 registry/Profile、Desktop 与 CLI 安装清单退出，升级/repair 同时清除新旧 Search MCP dependency、bundle row 和物理目录；没有新增 Secret、后端接口、Transport、Tool dispatcher、Skill 安装或每会话设置。
+- 当前实际设备已收到 DeepSeek runtime route，但代码合同只允许服务器为账户 `allowed_model_ids` 中的模型下发凭据，因此不能声称所有未来账户都必含 DeepSeek。若账户策略未包含 DeepSeek，原生搜索按 Credentials 合同失败关闭，不回退到用户自填或非治理 provider；这是真实产品边界，后端策略扩展不属于本次修复。
+- 生成后的 CLI 与 Desktop Profile registry 均不含 Search MCP 目录、package 或 Tavily credential ref；最终 Cordis 组合固定 `deepseek-official`、`E_MATE_MODEL_KEY_DEEPSEEK`、`tool-web.fetch=false`，Tool Search 的真实组合行直接保留 `web_search`。聚焦收据为 DSH `32/32`、Desktop Profile `5/5`、Tool Search `8/8`、release-boundary/component `32/32`、`check-target` 与 `git diff --check` 通过。这里证明新装、升级修复和正式生成物的开箱链；最终发布候选仍需在已登录安装态发起一次真实联网查询并保留结果/来源回执，本切片未改版本、R2 或发布链。
+
+## 2026-08-23 · 2.0.12 S10 真实用户逃逸缺陷门禁
+
+- 当天真实使用暴露的新任务停留旧会话、图片编辑退化、全局 Skill 重复确认、联网搜索错误默认和 Glass 包内动画漂移，不是同一种单元逻辑错误，而是五类证据断层：测试把错误产品默认写成合同、替身只验证调用没有验证用户终态、设备级状态只测单 Session、源码与 emitted/generation/安装字节混为一层，以及真实账号/上游语义没有进入正式候选验收。以后每条用户旅程先记录唯一 Owner、初始状态、用户动作、可见终态、持久化范围、制品层和账号边界；修复只落在首次能观察该不可变式的最低原生 Owner，不按截图在多个调用方补 guard。
+- 仓库现有 component/Base classifier 继续是唯一执行边界。单一兼容热组件只跑 Owner 集成、clean emitted bytes、完整 generation、在线增量更新后的受影响旅程与回滚；共享 DSH/Profile、Base ABI、inventory、锁、Desktop lifecycle、native helper、权限、打包或 updater 变化仍失败关闭到 Base。网络、凭据、OAuth 和模型语义的真实账号门与 lane 无关，受影响就必须执行；没有精确 SHA 的安装/更新终态，只能写 `source fixed` 或 `candidate built`。
+- 三个最小回归已补到既有 Owner：Shell 测试真实挂载 `SessionRouteProjection`，证明 rc.7 复用同一 blank id 时点击新任务仍停在 `/` 空态且只调用一次原生 start（定向 `8/8`）；Find Skill 用第二个运行时实例和同一 global root 再执行真实 `skill_install`，证明重启边界不重复询问而版本/来源/摘要变化仍重新确认（`21/21`）；Glass 测试在 build 后直接读取 `lib/client.js`，要求 `4s`、Reduced Motion 为 `none` 且禁止旧 `6s/12s`（`1/1`）。正式候选仍必须完成安装态新任务点击、真实账号联网搜索、真实 Provider 图片编辑质量、跨会话/应用重启 Skill 复用和 computed style 验收，Mock 或源码字符串不能替代。
+
+## 2026-08-23 · 2.0.12 S11 Find Skill 干净检出构建闭包
+
+- PR `#44` 的第一轮受保护 CI 正确在任何 Base SDK/安装器产出前阻断：本机复用树已有 `upstream/plugins/dsh-find-skill/{,client/}node_modules`，但干净递归 submodule checkout 没有这两棵被忽略的工具链；adapter 的 build 脚本因此在 `pnpm test` 中报 `pinned dsh-find-skill dependencies are missing`。这不是产品运行时依赖，也不能靠本机缓存或重跑解决。
+- 唯一组件 runner 现仅在构建 `@e-mate/dsh-plugin-find-skill` 时，从该固定 gitlink 自带的 `pnpm-lock.yaml` 执行一次 `--frozen-lockfile --ignore-scripts` 工具链准备，再继续原 build/test；普通组件、运行时与插件安装路径不受影响，没有在线运行时安装或第二构建器。release 测试锁住该精确 source root、frozen lock 和禁用 lifecycle scripts，CI 将以新提交从零重跑证明闭包。
+
+## 2026-08-23 · 2.0.12 S12 组件测试使用真实 Base v6 依赖面
+
+- PR `#44` 第二轮干净 CI 已越过 Find Skill 构建，随后测试加载 emitted `lib/index.js` 时找不到 `@deepseek-ai/dsh-skill`。本机独立组件目录残留的 workspace symlink 曾把这个缺口遮住；组件自身不应把 Base ABI 重装成运行时依赖，更不能沿用固定上游用于编译的 rc.6 devDependencies。
+- 唯一组件 runner 现根据已验证的 `base_imports`，从固定 rc.7 Harness 源树为缺失的 `@deepseek-ai/*` 建立仅供构建/测试的解析视图，并对既有或新建目标都复验包名和 Base contract 精确版本。它不进入组件 files、Profile generation 或用户运行时；行为反例同时证明 rc.7 能链接、rc.6 期望失败关闭。这样 source/Base/plugin 三条 lane 测的是同一 Base ABI，不再依赖开发机偶然的 pnpm 链接。
+
+## 2026-08-23 · 2.0.12 S13 Desktop 精确锁同步
+
+- PR `#44` 第三轮已通过全部目标合同、组件 build/test 与 release carrier，随后 `yarn install --immutable` 在 Desktop SDK 冻结前拒绝 `dsh-workspace` 新增的 exact rc.7 descriptor。`package.json` 和 workspace lock 虽都已有该依赖，锁条目仍只有间接 `^0.1.0-rc.7` descriptor，且 workspace dependency 行未按 Yarn 确定顺序归一；本机已有安装状态再次遮住了 clean resolution 差异。
+- 只把同一个 `0.1.0-rc.7` 解析条目合并 exact/range descriptor，并按 Yarn 的确定顺序排列 workspace 依赖；没有升级、重解析或新增包，也没有关闭 immutable。正式候选继续以干净 CI 的 `yarn --immutable` 作为唯一依赖图证据。
+
+## 2026-08-23 · 2.0.12 S14 Profile 制品上传排除开发依赖链接
+
+- PR `#44` 第四轮已通过目标合同、全组件测试、release carrier、Desktop immutable install 与 Base SDK 构建，却停在 Profile artifact 上传。根因是 Profile 中插件的开发期 `node_modules` 包含指回 Harness/pnpm store 的 symlink，而固定 `actions/upload-artifact@v4` 默认递归跟随 symlink；它因此进入不属于 Profile 制品的依赖图，而不是在上传真实 Profile 字节。
+- CI 与正式 Desktop release 现在继续上传同一 `packages/dsh/profile` 和全部 accepted component `lib`，但在唯一上传边界显式排除任意层级 `node_modules` 目录及后代。Desktop 的原生 `sync-emate-profile.mjs` 本就以 `dereference: false` 并过滤 symlink，不消费这些开发链接；本修复不删除运行时文件、不改变 Base/Profile/组件字节，也不增加第二打包路径。release 合同同时锁住两个 workflow 都必须保留排除项，防止正式发布再次遍历开发机依赖图。
+
+## 2026-08-23 · 2.0.12 S15 Profile artifact 改为无链接干净暂存树
+
+- 第五轮 CI 证明 S14 的 negated glob 只排除上传结果，不能阻止 `@actions/glob` 沿正向 Profile pattern 继续递归；上传仍停在相同步骤。根据 GitHub Actions Toolkit 的真实 `partialMatch` 实现，负 pattern 不参与目录下钻判断，因此不能把该写法保留为伪门禁。
+- 两个 workflow 现在先调用同一个 Node 标准库脚本，从已经 build/test 的 Profile 与 component `lib` 生成 `.release-cache/profile-artifact`。复制边界拒绝所有 symlink 和任意层级 `node_modules`，且没有 built component 时失败关闭；上传动作只读取这棵无链接暂存树，下载后仍恢复成原 `packages/dsh/profile` 与 `packages/dsh-plugin-*/lib` 布局。行为测试用真实目录 symlink 和实体 `node_modules` 证明两者都不会进入制品。稳定下载说明同时从错误的 2.0.10 修正为当前已公开验收的 2.0.11；没有改生产指针。

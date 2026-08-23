@@ -1,0 +1,72 @@
+{
+  "name": "@e-mate/dsh-plugin-glass-composer",
+  "version": "2.0.12",
+  "description": "DSH-native animated edge light and palette control for the e-Mate composer.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/",
+    "pnpm-lock.yaml",
+    "cordis.patch.yml",
+    "README.md",
+    "SOURCE.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "platform": "web"
+    },
+    "upstream": {
+      "repository": "VioletYJ/dsh-glass-composer",
+      "commit": "ab5d6040d3b81166d108ba35d1978e386a1b9300"
+    }
+  },
+  "eMate": {
+    "component": {
+      "schema_version": 1,
+      "id": "@e-mate/dsh-plugin-glass-composer",
+      "kind": "profile",
+      "base_imports": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-settings",
+        "@deepseek-ai/schemastery",
+        "react"
+      ],
+      "authority_contract": {
+        "effects": ["persistent-state"],
+        "guards": ["explicit-user-action"]
+      },
+      "base_contracts": ["e-mate-desktop-profile-v6-dsh-2bc16230975f"]
+    },
+    "harnessVersion": "0.1.0-rc.7",
+    "harnessCommit": "2bc16230975f6cf02aa1b283b1f86de44007b059",
+    "excludedUpstreamFeatures": [
+      "index-html-injection",
+      "local-storage-settings",
+      "mutation-observer-discovery",
+      "backdrop-blur"
+    ]
+  },
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "license": "MIT",
+  "private": true
+}

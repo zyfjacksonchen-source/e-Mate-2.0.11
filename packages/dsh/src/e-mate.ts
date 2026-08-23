@@ -29,7 +29,7 @@ import { migrateLegacySchedules } from './legacy-schedule.js'
 import { checkOsCredentialBackend } from './profile/credentials-os.js'
 
 export const PRODUCT = 'e-Mate'
-export const VERSION = '2.0.11'
+export const VERSION = '2.0.12'
 export const PROFILE = 'e-mate'
 export const DEFAULT_PORT = 3080
 export const HARNESS_VERSION = '0.1.0-rc.7'
@@ -48,10 +48,13 @@ const MANAGED_PROFILE_PACKAGES = new Set(PLUGIN_PACKAGES)
 const RETIRED_PROFILE_PACKAGES = new Set([
   '@e-mate/dsh-plugin-browser',
   '@e-mate/dsh-plugin-browser-panel',
+  '@e-mate/dsh-plugin-idesign',
   '@e-mate/dsh-plugin-im',
+  '@e-mate/dsh-plugin-search-mcp',
   '@e-mate/dsh-plugin-subagent',
   '@e-mate/dsh-plugin-xin-assistant',
   '@yuxianglin/dsh-bridge-browser',
+  'dsh-search-mcp',
 ])
 const OWNED_PROFILE_PACKAGES = new Set([...MANAGED_PROFILE_PACKAGES, ...RETIRED_PROFILE_PACKAGES])
 const UPDATE_RECEIPT_NAME = /^online-update-([0-9a-f]{8}-[0-9a-f-]{27})\.json$/iu
@@ -72,7 +75,7 @@ export function managedPaths(dshHome = resolveDshHome()) {
     run,
     state: join(run, 'instance.json'),
     log: join(data, 'logs', 'web.log'),
-    receipt: join(data, 'migrations', 'setup-2.0.11.json'),
+    receipt: join(data, 'migrations', 'setup-2.0.12.json'),
   }
 }
 
@@ -431,9 +434,7 @@ function profileCheck(paths) {
       && byId.get('emate-schedule-import')?.name === './plugins/schedule-import.js'
       && byId.get('emate-legacy-migration')?.name === './plugins/legacy-migration.js'
       && byId.get('emate-agent-operations')?.name === './plugins/agent-operations.js'
-      && JSON.stringify(byId.get('emate-agent-operations')?.inject) === JSON.stringify([
-        'systemPrompt', 'connection', 'sessionPersistence',
-      ])
+      && JSON.stringify(byId.get('emate-agent-operations')?.inject) === JSON.stringify(['systemPrompt'])
       && !byId.has('emate-office-ocr')
       && !byId.has('emate-browser-computer-use')
       && !byId.has('emate-memory')

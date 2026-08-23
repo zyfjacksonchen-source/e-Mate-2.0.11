@@ -39,6 +39,7 @@ describe('e-Mate desktop profile', () => {
     expect(manifest.dsh.profile.bundles).toContain('@e-mate/dsh-plugin-better-sidebar')
     expect(manifest.dsh.profile.bundles).toContain('@e-mate/dsh-plugin-genui')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-xin-assistant')
+    expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-search-mcp')
     expect(manifest.dsh.profile.bundles).not.toContain('dsh-search-mcp')
     expect(manifest.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-subagent')
     expect(existsSync(join(profile, 'node_modules', '@kelearns', 'dsh-navigation-bar', 'lib', 'client.js'))).toBe(true)
@@ -47,12 +48,13 @@ describe('e-Mate desktop profile', () => {
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-cdp', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-skill-hub', 'lib', 'index.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-tool-search', 'lib', 'index.mjs'))).toBe(true)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-schedules', 'lib', 'index.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-file-import', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-computer-use', 'lib', 'client.js'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-find-skill', 'lib', 'index.js'))).toBe(true)
     const findSkillPatch = readFileSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-find-skill', 'cordis.patch.yml'), 'utf8')
     expect(findSkillPatch).toContain("cliCommand: 'pnpm dlx skills@1.5.22'")
-    expect(findSkillPatch).toContain('/tree/skills-v2.0.11-r1/skills/connect-feishu-cli')
+    expect(findSkillPatch).toContain('/tree/skills-v2.0.12-r1/skills/connect-feishu-cli')
     expect(findSkillPatch).not.toContain('/tree/main/skills/connect-feishu-cli')
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-mcp-manage', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'lib', 'index.js'))).toBe(true)
@@ -71,9 +73,7 @@ describe('e-Mate desktop profile', () => {
     expect(fileViewerClient).not.toContain('"file-viewer: file open router"')
     expect(fileViewerClient).toContain('name: "conversation.session.header.actions"')
     expect(fileViewerClient).toContain('coordinator.openInSystem(sessionId, path)')
-    const searchMcpHost = readFileSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-search-mcp', 'lib', 'index.mjs'), 'utf8')
-    expect(searchMcpHost).toContain('https://mcp.tavily.com/mcp/')
-    expect(searchMcpHost).not.toMatch(/StdioClientTransport|duckduckgo|\bnpx\b/u)
+    expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-search-mcp'))).toBe(false)
     expect(existsSync(join(profile, 'node_modules', 'dsh-search-mcp'))).toBe(false)
     expect(existsSync(join(profile, 'node_modules', 'dsh-turn-fold'))).toBe(false)
     expect(existsSync(join(profile, 'node_modules', 'dsh-visualize', 'lib', 'client.js'))).toBe(true)
@@ -101,7 +101,7 @@ describe('e-Mate desktop profile', () => {
     const prepared = prepareDesktopProfile(undefined, home, process.platform, 'e-mate')
     const rows = composeEntries([prepared.patches])
     expect(prepared.profile.name).toBe('e-mate')
-    expect(prepared.mode).toBe('compatibility')
+    expect(prepared.mode).toBe(process.platform === 'linux' ? 'compatibility' : 'advanced')
     expect(rows.find(row => row.id === 'desktop-agent-update')).toEqual(expect.objectContaining({
       name: '@e-mate/desktop/agent-update',
     }))
@@ -126,9 +126,22 @@ describe('e-Mate desktop profile', () => {
       name: '@e-mate/dsh-plugin-better-sidebar',
     }))
     expect(rows.map(row => row.id)).not.toContain('better-sidebar')
-    expect(rows.find(row => row.id === 'search-mcp')).toEqual(expect.objectContaining({
-      name: './node_modules/@e-mate/dsh-plugin-search-mcp/lib/index.mjs',
+    expect(rows.map(row => row.id)).not.toContain('search-mcp')
+    expect(rows.find(row => row.id === 'web')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-web',
+      config: expect.objectContaining({ searchProvider: 'deepseek-official' }),
     }))
+    expect(rows.find(row => row.id === 'web-search-deepseek')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-web-search-deepseek',
+      disabled: false,
+      config: expect.objectContaining({ apiKeyEnv: 'E_MATE_MODEL_KEY_DEEPSEEK' }),
+    }))
+    expect(rows.find(row => row.id === 'tool-web')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-tool-web',
+      disabled: false,
+      config: expect.objectContaining({ fetch: false, searchTimeoutMs: 60000, searchMaxResults: 50 }),
+    }))
+    expect(rows.find(row => row.id === 'emate-tool-search')?.config?.alwaysVisible).toContain('web_search')
     expect(rows.find(row => row.id === 'emate-file-import')).toEqual(expect.objectContaining({
       name: '@e-mate/dsh-plugin-file-import',
     }))
@@ -146,6 +159,13 @@ describe('e-Mate desktop profile', () => {
       name: './node_modules/@e-mate/dsh-plugin-office-skills/lib/index.js',
     }))
     expect(rows.find(row => row.id === 'emate-agent-operations')?.disabled).toBe(true)
+    expect(rows.find(row => row.id === 'emate-schedules')).toEqual(expect.objectContaining({
+      name: './node_modules/@e-mate/dsh-plugin-schedules/lib/index.js',
+      inject: ['connection', 'sessionPersistence'],
+    }))
+    const schedules = readFileSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-schedules', 'lib', 'index.js'), 'utf8')
+    expect(schedules).toContain('/emate.schedules')
+    expect(schedules).toContain('foldScheduleEvents')
     expect(rows.map(row => row.id)).not.toContain('desktop-profiles')
     expect(rows.find(row => row.id === 'dsh-at-file')).toEqual(expect.objectContaining({
       name: 'dsh-at-file',
@@ -221,22 +241,32 @@ describe('e-Mate desktop profile', () => {
     }
     manifest.dependencies['@xmanrui/dsh-im'] = 'github:zyfjacksonchen-source/dsh-im#f984f73dcd67692141d4e475c8fbe887e2ce7062'
     manifest.dependencies['@e-mate/dsh-plugin-im'] = '2.0.8'
+    manifest.dependencies['@e-mate/dsh-plugin-idesign'] = '2.0.12'
+    manifest.dependencies['@e-mate/dsh-plugin-search-mcp'] = '2.0.11'
     manifest.dependencies['@e-mate/dsh-plugin-xin-assistant'] = '2.0.10'
     manifest.dependencies['@yuxianglin/dsh-bridge-browser'] = '0.0.1'
     manifest.dependencies['dsh-better-sidebar'] = '0.12.2'
     manifest.dependencies['dsh-turn-fold'] = '0.2.2'
     const retiredXin = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-xin-assistant')
+    const retiredIDesign = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-idesign')
+    const retiredSearchMcp = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-search-mcp')
     const retiredSidebar = join(profile, 'node_modules', 'dsh-better-sidebar')
     const retiredTurnFold = join(profile, 'node_modules', 'dsh-turn-fold')
     mkdirSync(retiredXin, { recursive: true })
+    mkdirSync(retiredIDesign, { recursive: true })
+    mkdirSync(retiredSearchMcp, { recursive: true })
     mkdirSync(retiredSidebar, { recursive: true })
     mkdirSync(retiredTurnFold, { recursive: true })
     writeFileSync(join(retiredXin, 'stale.txt'), 'retired', { flag: 'w' })
+    writeFileSync(join(retiredIDesign, 'stale.txt'), 'retired', { flag: 'w' })
+    writeFileSync(join(retiredSearchMcp, 'stale.txt'), 'retired', { flag: 'w' })
     writeFileSync(join(retiredSidebar, 'stale.txt'), 'retired', { flag: 'w' })
     writeFileSync(join(retiredTurnFold, 'stale.txt'), 'retired', { flag: 'w' })
     manifest.dsh.profile.bundles.push(
       '@xmanrui/dsh-im',
       '@e-mate/dsh-plugin-im',
+      '@e-mate/dsh-plugin-idesign',
+      '@e-mate/dsh-plugin-search-mcp',
       '@e-mate/dsh-plugin-xin-assistant',
       '@yuxianglin/dsh-bridge-browser',
       'dsh-better-sidebar',
@@ -252,16 +282,22 @@ describe('e-Mate desktop profile', () => {
     )
     expect(repaired.dsh.profile.bundles.at(-1)).toBe('@xmanrui/dsh-im')
     expect(repaired.dependencies['@e-mate/dsh-plugin-im']).toBeUndefined()
+    expect(repaired.dependencies['@e-mate/dsh-plugin-idesign']).toBeUndefined()
+    expect(repaired.dependencies['@e-mate/dsh-plugin-search-mcp']).toBeUndefined()
     expect(repaired.dependencies['@e-mate/dsh-plugin-xin-assistant']).toBeUndefined()
     expect(repaired.dependencies['@yuxianglin/dsh-bridge-browser']).toBeUndefined()
     expect(repaired.dependencies['dsh-better-sidebar']).toBeUndefined()
     expect(repaired.dependencies['dsh-turn-fold']).toBeUndefined()
     expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-im')
+    expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-idesign')
+    expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-search-mcp')
     expect(repaired.dsh.profile.bundles).not.toContain('@e-mate/dsh-plugin-xin-assistant')
     expect(repaired.dsh.profile.bundles).not.toContain('@yuxianglin/dsh-bridge-browser')
     expect(repaired.dsh.profile.bundles).not.toContain('dsh-better-sidebar')
     expect(repaired.dsh.profile.bundles).not.toContain('dsh-turn-fold')
     expect(existsSync(retiredXin)).toBe(false)
+    expect(existsSync(retiredIDesign)).toBe(false)
+    expect(existsSync(retiredSearchMcp)).toBe(false)
     expect(existsSync(retiredSidebar)).toBe(false)
     expect(existsSync(retiredTurnFold)).toBe(false)
   })

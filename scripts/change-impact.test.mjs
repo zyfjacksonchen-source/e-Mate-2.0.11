@@ -22,7 +22,7 @@ function classify(...paths) {
 }
 
 describe('repository release boundary', () => {
-  it('requires every candidate to descend from the accepted 2.0.10 commit', () => {
+  it('requires every candidate to descend from the accepted 2.0.11 commit', () => {
     const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
     const repositoryRoot = execFileSync('git', ['rev-list', '--max-parents=0', 'HEAD'], {
       cwd: root,
@@ -31,7 +31,7 @@ describe('repository release boundary', () => {
     assert.doesNotThrow(() => assertAcceptedPredecessor(root, head))
     assert.throws(
       () => assertAcceptedPredecessor(root, repositoryRoot),
-      new RegExp(`accepted 2\\.0\\.10 ${ACCEPTED_PREDECESSOR}`, 'u'),
+      new RegExp(`accepted 2\\.0\\.11 ${ACCEPTED_PREDECESSOR}`, 'u'),
     )
     const rejected = spawnSync(process.execPath, [
       'scripts/change-impact.mjs', '--base', repositoryRoot, '--head', repositoryRoot,
@@ -39,7 +39,7 @@ describe('repository release boundary', () => {
     assert.equal(rejected.status, 1)
     assert.match(
       JSON.parse(rejected.stdout).contract.errors.join('\n'),
-      new RegExp(`accepted 2\\.0\\.10 ${ACCEPTED_PREDECESSOR}`, 'u'),
+      new RegExp(`accepted 2\\.0\\.11 ${ACCEPTED_PREDECESSOR}`, 'u'),
     )
   })
 
@@ -85,6 +85,7 @@ describe('repository release boundary', () => {
 
   it('locks the fast iteration, immutable publication, and 2.0.11 lessons into repository rules', () => {
     const agents = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8')
+    const targetContract = readFileSync(new URL('../docs/target-contract.md', import.meta.url), 'utf8')
 
     for (const heading of [
       'Fixed version iteration protocol',
@@ -104,16 +105,22 @@ describe('repository release boundary', () => {
       /`mac-smoke` is CI-only and must never appear/u,
       /Full Access is only the DSH filesystem\/sandbox domain/u,
       /native CDP plugin first/u,
+      /accepted installed e-Mate 2\.0\.11 artifact is the startup-performance baseline/u,
+      /accepted e-Mate 2\.0\.11 commit `6a7f4b9d59a1d8970345638946fb6564e2f5f93e`.*native Desktop startup flow/u,
+      /`candidate - paired 2\.0\.11 baseline` must be at most 10,000 ms/u,
       /Source tree is not the packaged product/u,
       /Only this stage may be called "released" or "online"/u,
     ]) assert.match(agents, invariant)
+
+    assert.match(targetContract, /`candidate - paired 2\.0\.11 baseline` must be at most `10,000 ms`/u)
+    assert.doesNotMatch(targetContract, /Startup never exceeds 15 seconds/u)
   })
 
   it('accepts the checked-in base contract and every first-party component', () => {
     const boundary = loadReleaseBoundary(root)
     assert.equal(boundary.valid, true, boundary.errors.join('\n'))
-    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v5-dsh-2bc16230975f')
-    assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.11')
+    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v6-dsh-2bc16230975f')
+    assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.12')
     assert.deepEqual(PRODUCT_UI_REFERENCE, {
       repository: 'zyfjacksonchen-source/ECoreX',
       path: 'upstream/e-mate-2.0.5',
@@ -126,7 +133,7 @@ describe('repository release boundary', () => {
       harness_commit: '99f6f02fecdb7dff40c3fbc9470f5907c29f74ca',
       harness_version: '0.1.0-rc.7',
     })
-    assert.equal(boundary.components.length, 15)
+    assert.equal(boundary.components.length, 16)
     assert.equal(boundary.components.every(component => component.errors.length === 0), true)
     assert.deepEqual(boundary.components.flatMap(component => component.errors), [])
   })
@@ -322,6 +329,23 @@ describe('repository release boundary', () => {
     assert.deepEqual(result.components, ['@e-mate/dsh-plugin-skill-hub'])
     assert.deepEqual(result.component_jobs, [{
       component: '@e-mate/dsh-plugin-skill-hub',
+      target: 'portable',
+      runner: 'ubuntu-24.04',
+      publish: true,
+    }])
+  })
+
+  it('keeps native Schedule management in its own hot component lane', () => {
+    const result = classify(
+      'packages/dsh-plugin-schedules/src/index.ts',
+      'packages/dsh-plugin-schedules/test/contracts.test.mjs',
+    )
+    assert.equal(result.lane, 'plugin-only')
+    assert.equal(result.run_base, false)
+    assert.equal(result.portable_publish, true)
+    assert.deepEqual(result.components, ['@e-mate/dsh-plugin-schedules'])
+    assert.deepEqual(result.component_jobs, [{
+      component: '@e-mate/dsh-plugin-schedules',
       target: 'portable',
       runner: 'ubuntu-24.04',
       publish: true,

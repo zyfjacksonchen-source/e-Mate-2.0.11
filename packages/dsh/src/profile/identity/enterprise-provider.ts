@@ -848,7 +848,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
           termsAccepted: true,
           policyRead: true,
           lawfulUseConfirmed: true,
-          clientVersion: '2.0.11',
+          clientVersion: '2.0.12',
           locale: 'zh-CN',
         }),
       }, 'consent acceptance'), status.policy)

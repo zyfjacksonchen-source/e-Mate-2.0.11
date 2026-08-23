@@ -98,6 +98,32 @@ test('matches the authoritative e-Mate 2.0.5 normalized Skill CAS digest', () =>
   assert.notEqual(inspected.packageSha256, inspected.archiveSha256)
 })
 
+test('catalog search omits empty optional filters but rejects a non-string cursor', async () => {
+  const requests = []
+  const hub = createSkillHubClient({
+    dshHome: temporaryHome(),
+    store: {},
+    async request(url) {
+      requests.push(url)
+      return Response.json({ schema_version: 1, items: [], next_cursor: null })
+    },
+  })
+
+  assert.deepEqual(await hub.search({
+    category: 'office_productivity',
+    cursor: '',
+    limit: 20,
+    query: '',
+    tag: '',
+  }), { items: [], next_cursor: null })
+  assert.equal(requests[0].searchParams.get('category'), 'office_productivity')
+  assert.equal(requests[0].searchParams.get('cursor'), null)
+  assert.equal(requests[0].searchParams.get('tag'), null)
+  assert.equal(requests[0].searchParams.get('limit'), '20')
+
+  await assert.rejects(hub.search({ cursor: 0 }), /Skill search filters are invalid/u)
+})
+
 test('native rc.7 parser is the install commit gate', async () => {
   const dshHome = temporaryHome()
   const store = lifecycleStore(dshHome)

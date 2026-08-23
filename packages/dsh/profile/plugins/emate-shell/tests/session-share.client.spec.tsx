@@ -6,7 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import * as SessionLogExport from '../../../../../../upstream/deepseek-harness/packages/session-query/session-log-export/src/client/index.ts'
 import { inject, registerSessionShare } from '../src/client/index.ts'
-import { SessionShareAction } from '../src/client/session-share.tsx'
+import { HiddenSessionLogExport, SessionShareAction } from '../src/client/session-share.tsx'
 
 afterEach(cleanup)
 
@@ -151,19 +151,19 @@ describe('session share plugin', () => {
     expect(dismissDownload).toHaveBeenCalledWith('session-207')
   })
 
-  it('registers through the target session utility slot and native Session export controller', () => {
+  it('uses the root application tool group and native Session export controller', () => {
     const source = readFileSync('src/client/index.ts', 'utf8')
+    const header = readFileSync('src/client/header-controls.tsx', 'utf8')
     const component = readFileSync('src/client/session-share.tsx', 'utf8')
     const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
-    const registration = source.slice(
-      source.indexOf("ctx.slots.inject('conversation.session.header.utilities'"),
-      source.indexOf("ctx.slots.inject('conversation.input.right'"),
-    )
+    const registration = source.slice(0, source.indexOf('export function registerComputerUseTrigger'))
     expect(source).toContain("ctx.slots.inject('conversation.session.header.utilities'")
     expect(source).toContain("id: 'session-log-download'")
     expect(registration).toContain('priority: -1')
     expect(registration).toContain("ctx.connection.rpc.call('/emate.share', endpoint, payload)")
     expect(source).toContain('ctx.sessionLogDownload.download(sessionId)')
+    expect(header).toContain('<SessionShareAction')
+    expect(header).toContain("useSessions(state => state.current)")
     expect(manifest.dsh.client.inject).toContain('@deepseek-ai/dsh-session-log-export')
     expect(component).toContain("callShare('create', { session_id: requestedSession })")
     expect(component).toContain("callShare('list', { session_id: requestedSession })")
@@ -171,7 +171,7 @@ describe('session share plugin', () => {
     expect(component).not.toMatch(/\b(?:fetch|WebSocket|EventSource|createSnapshotStore|defineStore)\s*\(/u)
   })
 
-  it('boots with the target Session Export plugin and shadows its header action', async () => {
+  it('keeps the target Session Export controller while shadowing only its old header action', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 500 })))
     const ctx = new Context()
     await ctx.plugin(SlotRegistry).await()
@@ -198,18 +198,8 @@ describe('session share plugin', () => {
     expect(entries.map(entry => (entry.component as { name?: string }).name)).toContain('SessionLogDownloadHeaderAction')
     const winners = slots.entriesOfSlot('conversation.session.header.utilities')
     expect(winners).toHaveLength(1)
-    expect(winners[0]?.component).toBe(SessionShareAction)
+    expect(winners[0]?.component).toBe(HiddenSessionLogExport)
     expect((winners[0]?.component as { name?: string }).name).not.toBe('SessionLogDownloadHeaderAction')
-    const face = (winners[0]?.inject as () => {
-      hooks: { sessionLogDownload: unknown }
-      callShare: (endpoint: string, payload: unknown) => Promise<unknown>
-      requestDownload: (sessionId: string) => Promise<void>
-    })()
-    expect(face.hooks.sessionLogDownload).toBe(ctx.sessionLogDownload.store)
-    await face.callShare('status', {})
-    expect(ctx.connection.rpc.call).toHaveBeenCalledWith('/emate.share', 'status', {})
-    await expect(face.requestDownload('session-boot')).resolves.toBeUndefined()
-    expect(ctx.sessionLogDownload.store.getSnapshot().bySession['session-boot']?.status).toBe('error')
 
     await ctx.fiber.dispose()
   })

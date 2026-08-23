@@ -35,11 +35,11 @@ const typescriptSources = [
 ]
 for (const path of typescriptSources) readFileSync(resolve(root, path), 'utf8')
 
-if (manifest.version !== '2.0.11') throw new Error(`workspace version drifted: ${manifest.version}`)
-if (release.name !== '@e-mate/dsh' || release.version !== '2.0.11') {
+if (manifest.version !== '2.0.12') throw new Error(`workspace version drifted: ${manifest.version}`)
+if (release.name !== '@e-mate/dsh' || release.version !== '2.0.12') {
   throw new Error(`release identity drifted: ${release.name}@${release.version}`)
 }
-if (!release.description.startsWith('e-Mate 2.0.11')) throw new Error('release product name drifted')
+if (!release.description.startsWith('e-Mate 2.0.12')) throw new Error('release product name drifted')
 if (release.bin?.['e-mate'] !== 'lib/bin.js') throw new Error('TypeScript-built CLI entry drifted')
 if (!target.includes('Product name: `e-Mate`')) throw new Error('product name drifted')
 if (!target.includes(`Repository: \`${repository}\``)) throw new Error('repository identity drifted')
@@ -49,6 +49,7 @@ for (const path of [
   'packages/dsh-plugin-cdp/package.json',
   'packages/dsh-plugin-memory-evolve/package.json',
   'packages/dsh-plugin-office-skills/package.json',
+  'packages/dsh-plugin-tool-search/package.json',
 ]) {
   const value = JSON.parse(readFileSync(resolve(root, path), 'utf8'))
   if (value.repository?.url !== repositoryUrl) throw new Error(`repository package metadata drifted: ${path}`)
@@ -58,7 +59,7 @@ for (const path of ['scripts/release.mjs', 'scripts/publish-r2.mjs', 'scripts/pu
     throw new Error(`repository release authority drifted: ${path}`)
   }
 }
-if (!target.includes(ACCEPTED_PREDECESSOR)) throw new Error('accepted 2.0.10 predecessor is missing')
+if (!target.includes(ACCEPTED_PREDECESSOR)) throw new Error('accepted 2.0.11 predecessor is missing')
 if (!target.includes('2bc16230975f6cf02aa1b283b1f86de44007b059')) throw new Error('Harness source pin is missing')
 if (!target.includes(PRODUCT_UI_REFERENCE.commit)) throw new Error('e-Mate shell source pin is missing')
 if (!target.includes('TypeScript/TSX')) throw new Error('TypeScript source contract is missing')
@@ -96,4 +97,4 @@ for (const [name, path, expected] of [
 
 assertAcceptedPredecessor(root, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim())
 
-console.log('target contract: e-Mate 2.0.11 pins verified')
+console.log('target contract: e-Mate 2.0.12 pins verified')

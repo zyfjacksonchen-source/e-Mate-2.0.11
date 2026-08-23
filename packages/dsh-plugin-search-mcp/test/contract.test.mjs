@@ -28,7 +28,7 @@ test('adapter keeps native Web and credentials seams without arbitrary transport
     readFile(new URL('lib/index.mjs', root), 'utf8'),
   ])
   const pkg = JSON.parse(manifest)
-  assert.equal(pkg.version, '2.0.11')
+  assert.equal(pkg.version, '2.0.12')
   assert.deepEqual(pkg.dependencies, { '@modelcontextprotocol/sdk': '1.29.0' })
   assert.equal(pkg.eMate.harnessVersion, '0.1.0-rc.7')
   assert.match(patch, /searchProvider: search-mcp/u)

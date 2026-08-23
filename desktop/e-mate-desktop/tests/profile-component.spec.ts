@@ -12,7 +12,7 @@ import type { ProfileBaseContract, ProfileReleaseComponent } from '../src/profil
 
 const base: ProfileBaseContract = {
   schema_version: 1,
-  id: 'e-mate-desktop-profile-v5-dsh-2bc16230975f',
+  id: 'e-mate-desktop-profile-v6-dsh-2bc16230975f',
   desktop_api: 1,
   profile_format: 1,
   harness_version: '0.1.0-rc.7',
@@ -23,7 +23,7 @@ const base: ProfileBaseContract = {
 const sourceCommit = 'a'.repeat(40)
 const packageValue = {
   name: '@e-mate/dsh-plugin-memory-evolve',
-  version: '2.0.11',
+  version: '2.0.12',
   license: 'MIT',
   main: 'index.js',
   files: ['index.js'],
@@ -85,7 +85,7 @@ function fixture(options: {
     files,
   }, null, 2)}\n`)
   const targetPath = target === null ? '' : `/${target.platform}-${target.arch}`
-  const manifestUrl = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-memory-evolve/v2.0.11/${sourceCommit}${targetPath}/manifest.json`
+  const manifestUrl = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-memory-evolve/v2.0.12/${sourceCommit}${targetPath}/manifest.json`
   return {
     reference: {
       id: packageValue.name,
@@ -230,7 +230,7 @@ describe('Profile component materialization', () => {
       }
       const packageBytes = Buffer.from(`${JSON.stringify({
         name: id,
-        version: '2.0.11',
+        version: '2.0.12',
         license: 'MIT',
         main: 'index.mjs',
         dsh,
@@ -251,7 +251,7 @@ describe('Profile component materialization', () => {
         schema_version: 1,
         id,
         slug: 'dsh-plugin-computer-use',
-        version: '2.0.11',
+        version: '2.0.12',
         kind: 'platform-profile',
         target,
         source_commit: sourceCommit,
@@ -264,10 +264,10 @@ describe('Profile component materialization', () => {
         total_bytes: files.reduce((sum, file) => sum + file.bytes, 0),
         files,
       }, null, 2)}\n`)
-      const manifestUrl = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-computer-use/v2.0.11/${sourceCommit}/${targetName}/manifest.json`
+      const manifestUrl = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-computer-use/v2.0.12/${sourceCommit}/${targetName}/manifest.json`
       const reference: ProfileReleaseComponent = {
         id,
-        version: '2.0.11',
+        version: '2.0.12',
         kind: 'platform-profile',
         target,
         profile_path: `node_modules/${id}`,

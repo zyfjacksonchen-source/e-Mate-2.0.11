@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { applyHarnessRuntimeAdapters } from './harness-runtime-adapters.mjs'
 
-const PRODUCT_VERSION = '2.0.11'
+const PRODUCT_VERSION = '2.0.12'
 const HARNESS_VERSION = '0.1.0-rc.7'
 const HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
 const PNPM_VERSION = '11.7.0'

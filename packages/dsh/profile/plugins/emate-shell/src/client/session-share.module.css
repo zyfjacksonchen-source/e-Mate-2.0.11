@@ -15,23 +15,6 @@
 .trigger:disabled { cursor: default; opacity: .6; }
 .trigger:focus-visible { outline: 2px solid var(--emate-color-brand, #ff6a1a); outline-offset: 2px; }
 
-/* Compatibility keeps the native DSH frame; only advanced mode owns a fixed titlebar seat. */
-:global(body:not([data-dsh-desktop-mode='advanced'])) .trigger { transform: translateY(-8px); }
-
-:global(body[data-dsh-desktop-mode='advanced'] .dshDesktopFrame[data-desktop-platform='darwin']) .trigger {
-  position: fixed;
-  z-index: 1001;
-  top: 1px;
-  right: 72px;
-}
-
-:global(body[data-dsh-desktop-mode='advanced'] .dshDesktopFrame[data-desktop-platform='win32']) .trigger {
-  position: fixed;
-  z-index: 1001;
-  top: 1px;
-  right: 210px;
-}
-
 .dialog { width: min(680px, 100%); }
 
 .online,

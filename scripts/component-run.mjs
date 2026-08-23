@@ -2,8 +2,10 @@
 
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { loadReleaseBoundary } from './change-impact.mjs'
+import { prepareHarnessBaseImports } from './component-base-imports.mjs'
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -45,6 +47,15 @@ function run(args, env = process.env) {
 
 for (const component of components) {
   run(['--dir', component.root, 'install', '--ignore-workspace', '--frozen-lockfile'])
+  if (component.id === '@e-mate/dsh-plugin-find-skill') {
+    run(['--dir', 'upstream/plugins/dsh-find-skill', 'install', '--frozen-lockfile', '--ignore-scripts'])
+  }
+  prepareHarnessBaseImports({
+    componentRoot: resolve(component.root),
+    harnessRoot: resolve('upstream/deepseek-harness'),
+    baseImports: component.base_imports,
+    runtimeImports: boundary.baseContract.runtime_imports,
+  })
   run(['--dir', component.root, 'run', 'build'], command === 'check'
     ? { ...process.env, EMATE_COMPONENT_CHECK: '1' }
     : process.env)

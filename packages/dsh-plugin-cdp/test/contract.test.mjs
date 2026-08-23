@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
@@ -11,6 +13,7 @@ import {
   authorizeBrowserMutation,
   browserToolRequiresApproval,
   CDP_CONTROL_SETTINGS_NAMESPACE,
+  launchManagedChrome,
 } from '../lib/index.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
@@ -67,6 +70,7 @@ test('ships no extension, browser binary, runtime downloader, or MCP subprocess'
   assert.equal(manifest.eMate.harnessCommit, '2bc16230975f6cf02aa1b283b1f86de44007b059')
   assert.equal(manifest.files.includes('extension'), false)
   assert.doesNotMatch(source, /npx|playwright|puppeteer|chrome-devtools-mcp|child_process/iu)
+  assert.match(source, /persistent isolated profile and loopback-only CDP endpoint/u)
 })
 
 test('projects real CDP readiness and routes page mutations through native approval', async () => {
@@ -97,7 +101,7 @@ test('projects real CDP readiness and routes page mutations through native appro
     })
     assert.equal(capabilities.length, 1)
     assert.deepEqual(capabilities[0].actions, [
-      { id: 'open-remote-debugging', label: '打开 Chrome 设置', kind: 'primary' },
+      { id: 'open-browser', label: '打开浏览器', kind: 'primary' },
       { id: 'enable-control', label: '启用浏览器控制', kind: 'primary' },
       { id: 'disable-control', label: '停用浏览器控制', kind: 'secondary' },
     ])
@@ -113,16 +117,12 @@ test('projects real CDP readiness and routes page mutations through native appro
   }
 })
 
-test('opens the fixed Chrome security page without changing the Chrome preference', async () => {
-  const capabilities = []
+test('starts installed Chrome with an isolated persistent profile and fixed loopback port', async () => {
   const spawns = []
-  const harness = settingsHarness()
-  const previousFetch = globalThis.fetch
-  globalThis.fetch = async () => { throw new Error('CDP is not listening') }
+  const controller = new AbortController()
+  const profile = await mkdtemp(join(tmpdir(), 'e-mate-cdp-test-'))
   try {
-    apply({
-      approval: {},
-      settings: harness.settings,
+    await launchManagedChrome({
       subprocess: {
         resolveExecutable: async command => `/resolved/${command}`,
         spawn: spec => {
@@ -130,27 +130,83 @@ test('opens the fixed Chrome security page without changing the Chrome preferenc
           return { done: Promise.resolve({ exitCode: 0 }) }
         },
       },
-      tools: { register: () => () => undefined },
+    }, 'http://127.0.0.1:9222', profile, controller.signal)
+    const chromeArgs = [
+      '--remote-debugging-port=9222',
+      `--user-data-dir=${profile}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+      'about:blank',
+    ]
+    assert.deepEqual(spawns[0].argv, process.platform === 'darwin'
+      ? ['/resolved/open', '-na', 'Google Chrome', '--args', ...chromeArgs]
+      : process.platform === 'win32'
+        ? ['/resolved/cmd.exe', '/d', '/s', '/c', 'start', '', 'chrome.exe', ...chromeArgs]
+        : ['/resolved/google-chrome', ...chromeArgs])
+  } finally {
+    await rm(profile, { recursive: true, force: true })
+  }
+})
+
+test('keeps Chrome out of application startup and starts it on first browser use', async () => {
+  const tools = []
+  const capabilities = []
+  const disposers = []
+  const harness = settingsHarness()
+  let browserRunning = false
+  let launches = 0
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async () => {
+    if (!browserRunning) throw new Error('CDP is not running')
+    return new Response(JSON.stringify([{
+      id: 'page-1',
+      type: 'page',
+      title: 'Example',
+      url: 'https://example.com/',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/page-1',
+    }]), { status: 200 })
+  }
+  try {
+    apply({
+      approval: {},
+      settings: harness.settings,
+      subprocess: {
+        resolveExecutable: async command => `/resolved/${command}`,
+        spawn: () => {
+          launches += 1
+          browserRunning = true
+          return { done: Promise.resolve({ exitCode: 0 }) }
+        },
+      },
+      tools: { register: definition => { tools.push(definition); return () => undefined } },
       systemPrompt: { section: () => () => undefined },
       userQuestions: { ask: async () => { throw new Error('unexpected question') } },
       emateCapabilities: {
         register: definition => { capabilities.push(definition); return () => undefined },
       },
-      effect: callback => callback(),
+      effect: callback => {
+        const dispose = callback()
+        if (typeof dispose === 'function') disposers.push(dispose)
+      },
     })
+
+    assert.equal(launches, 0)
     assert.deepEqual(await capabilities[0].status(new AbortController().signal), {
-      state: 'setup-required',
-      detail: '首次使用需在 Chrome 原生页面确认远程调试；确认后对所有 e-Mate 会话生效。',
-      action_ids: ['open-remote-debugging', 'disable-control'],
+      state: 'ready',
+      detail: '首次网页任务时自动启动 Chrome · 控制已启用',
+      action_ids: ['open-browser', 'disable-control'],
     })
-    await capabilities[0].invoke('open-remote-debugging', undefined, new AbortController().signal)
-    const target = 'chrome://inspect/#remote-debugging'
-    assert.deepEqual(spawns[0].argv, process.platform === 'darwin'
-      ? ['/resolved/open', '-a', 'Google Chrome', target]
-      : process.platform === 'win32'
-        ? ['/resolved/cmd.exe', '/d', '/s', '/c', 'start', '', 'chrome.exe', target]
-        : ['/resolved/xdg-open', target])
+    assert.equal(launches, 0)
+
+    const tabs = tools.find(tool => tool.name === 'browser_tabs')
+    assert.match((await tabs.execute({}, {
+      agent: { id: 'agent-1', session: {} },
+      callId: 'call-1',
+      signal: new AbortController().signal,
+    })).text, /page-1\tExample\thttps:\/\/example\.com\//u)
+    assert.equal(launches, 1)
   } finally {
+    for (const dispose of disposers.reverse()) dispose()
     globalThis.fetch = previousFetch
   }
 })

@@ -19,10 +19,10 @@ function request(): MacUpdateRequest {
     parentPid: 123,
     currentApp: '/Applications/e-Mate.app',
     currentVersion: '2.0.10',
-    targetVersion: '2.0.11',
-    stagedApp: '/Applications/.e-Mate-2.0.11-aaaaaaaa.staged.app',
+    targetVersion: '2.0.12',
+    stagedApp: '/Applications/.e-Mate-2.0.12-aaaaaaaa.staged.app',
     backupApp: '/Applications/.e-Mate-2.0.10-aaaaaaaa.backup.app',
-    failedApp: '/Applications/.e-Mate-2.0.11-aaaaaaaa.failed.app',
+    failedApp: '/Applications/.e-Mate-2.0.12-aaaaaaaa.failed.app',
     trashApp: '/Users/test/.Trash/e-Mate 2.0.10 Update Backup aaaaaaaa.app',
     receiptPath: '/tmp/update/receipt.json',
     helperReadyPath: '/tmp/update/helper-ready.json',
@@ -61,7 +61,7 @@ describe('detached macOS update replacement', () => {
     await performMacUpdateSwap(update, adapter(events, async () => { events.push('healthy') }))
 
     expect(events).toEqual([
-      `validate-target:${update.stagedApp}:2.0.11`,
+      `validate-target:${update.stagedApp}:2.0.12`,
       `validate-installed:${update.currentApp}:2.0.10`,
       `missing:${update.backupApp}`,
       `missing:${update.failedApp}`,
@@ -120,34 +120,34 @@ describe('detached macOS update replacement', () => {
   it('writes the update acknowledgement only inside the matching update transaction', () => {
     const root = mkdtempSync(join(tmpdir(), 'e-mate-update-ack-'))
     temporaryRoots.push(root)
-    const transaction = join(root, 'updates', '2.0.11', 'install-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+    const transaction = join(root, 'updates', '2.0.12', 'install-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
     mkdirSync(transaction, { recursive: true })
     const path = join(transaction, 'startup-ack.json')
     const token = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 
-    expect(writeMacUpdateStartupAck(root, '2.0.11', {
+    expect(writeMacUpdateStartupAck(root, '2.0.12', {
       EMATE_MAC_UPDATE_ACK_PATH: path,
       EMATE_MAC_UPDATE_ACK_TOKEN: token,
-      EMATE_MAC_UPDATE_ACK_VERSION: '2.0.11',
-    })).toEqual({ status: 'installed', currentVersion: '2.0.11', targetVersion: '2.0.11' })
+      EMATE_MAC_UPDATE_ACK_VERSION: '2.0.12',
+    })).toEqual({ status: 'installed', currentVersion: '2.0.12', targetVersion: '2.0.12' })
 
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(expect.objectContaining({
       schemaVersion: 1,
       status: 'healthy',
       token,
-      version: '2.0.11',
+      version: '2.0.12',
     }))
-    expect(() => writeMacUpdateStartupAck(root, '2.0.11', {
+    expect(() => writeMacUpdateStartupAck(root, '2.0.12', {
       EMATE_MAC_UPDATE_ACK_PATH: join(root, '..', 'startup-ack.json'),
       EMATE_MAC_UPDATE_ACK_TOKEN: token,
-      EMATE_MAC_UPDATE_ACK_VERSION: '2.0.11',
+      EMATE_MAC_UPDATE_ACK_VERSION: '2.0.12',
     })).toThrow('path is invalid')
   })
 
   it('reports a persisted rollback after the restored app becomes healthy', async () => {
     const root = mkdtempSync(join(tmpdir(), 'e-mate-update-result-'))
     temporaryRoots.push(root)
-    const transaction = join(root, 'updates', '2.0.11', 'install-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+    const transaction = join(root, 'updates', '2.0.12', 'install-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
     mkdirSync(transaction, { recursive: true })
     const path = join(transaction, 'receipt.json')
     const token = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -155,13 +155,13 @@ describe('detached macOS update replacement', () => {
       schemaVersion: 1,
       status: 'rolled-back',
       token,
-      targetVersion: '2.0.11',
+      targetVersion: '2.0.12',
     }))
 
     await expect(readMacUpdateStartupResult(root, '2.0.10', {
       EMATE_MAC_UPDATE_RESULT_PATH: path,
       EMATE_MAC_UPDATE_RESULT_TOKEN: token,
-      EMATE_MAC_UPDATE_RESULT_VERSION: '2.0.11',
-    })).resolves.toEqual({ status: 'rolled-back', currentVersion: '2.0.10', targetVersion: '2.0.11' })
+      EMATE_MAC_UPDATE_RESULT_VERSION: '2.0.12',
+    })).resolves.toEqual({ status: 'rolled-back', currentVersion: '2.0.10', targetVersion: '2.0.12' })
   })
 })
