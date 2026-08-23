@@ -363,9 +363,12 @@ test('GitHub release packs once and validates the same tarball on three platform
   ])
   assert.equal(ci.jobs.source.needs, 'impact')
   assert.deepEqual(ci.jobs['base-platform-components'].needs, ['impact', 'source'])
-  assert.equal(ci.jobs['desktop-windows'].needs, 'source')
-  assert.equal(ci.jobs['desktop-macos'].needs, 'source')
-  for (const [workflow, producer] of [[ci, 'source'], [desktopRelease, 'profile']]) {
+  assert.deepEqual(ci.jobs['desktop-windows'].needs, ['impact', 'source'])
+  assert.deepEqual(ci.jobs['desktop-macos'].needs, ['impact', 'source'])
+  for (const [workflow, producer, consumers] of [
+    [ci, 'source', ['desktop-windows', 'desktop-macos']],
+    [desktopRelease, 'profile', ['windows', 'macos']],
+  ]) {
     const stage = workflow.jobs[producer].steps.find(step => step.name === 'Stage the exact built e-Mate profile without development links')
     assert.equal(stage.run, 'node scripts/stage-desktop-profile-artifact.mjs')
     const artifact = workflow.jobs[producer].steps.find(step => step.uses === 'actions/upload-artifact@v4'
@@ -374,7 +377,9 @@ test('GitHub release packs once and validates the same tarball on three platform
     assert.match(artifact.with.path, /\.release-cache\/profile-artifact\/dsh-plugin-\*\/lib/u)
     assert.doesNotMatch(artifact.with.path, /^\s*packages\/dsh\/profile$/mu)
     assert.doesNotMatch(artifact.with.path, /browser-extension/u)
-    for (const job of Object.values(workflow.jobs).filter(item => item.needs === producer)) {
+    for (const consumer of consumers) {
+      const job = workflow.jobs[consumer]
+      assert.ok(job.needs === producer || Array.isArray(job.needs) && job.needs.includes(producer))
       assert.equal(job.steps.find(step => step.uses === 'actions/download-artifact@v4').with.path, 'packages')
     }
   }

@@ -63,6 +63,16 @@ const chatRoute: ModelGatewayRoute = {
   providerMark: 'D',
   input: ['text'],
 };
+const searchCredentialRoute: ModelGatewayRoute = {
+  ...chatRoute,
+  id: 'deepseek-web-search',
+  upstreamModelId: 'deepseek-v4-flash',
+  upstreamBaseUrl: 'https://api.deepseek.com/anthropic/v1',
+  upstreamApiKey: 'search-route-bootstrap-key-that-is-never-leased',
+  providerId: 'deepseek-official',
+  label: 'DeepSeek Web Search Credential',
+  buttonLabel: 'DeepSeek Web Search Credential',
+};
 const limits = {
   tenantRequestsPerMinute: 1_000,
   tenantBurst: 1_000,
@@ -165,6 +175,23 @@ test('production authentication rejects a signed session immediately after its s
       ['tenant-a', 'user-a', 'session-1'],
     ]
   );
+});
+
+test('production client authentication never authorizes the search credential route as a model', async () => {
+  const allowedRouteIds: string[][] = [];
+  const authenticate = createProductionAuthenticator(
+    async () => null,
+    {
+      authenticateClientCredential: async (_token: string, routeIds: readonly string[]) => {
+        allowedRouteIds.push([...routeIds]);
+        return null;
+      },
+    } as never,
+    [route.id, searchCredentialRoute.id]
+  );
+
+  assert.equal(await authenticate('client-credential'), null);
+  assert.deepEqual(allowedRouteIds, [[route.id]]);
 });
 
 type TokenLimitTestState = {
@@ -2501,20 +2528,37 @@ test('delivers only the authenticated tenant runtime model routes without exposi
     buttonLabel: 'GPT-5.6 Luna · 深度',
   };
   const tenantKey = 'tenant-specific-provider-key-123456789';
+  const searchKey = 'tenant-specific-search-key-123456789';
+  const internalDeepSeekKey = 'internal-deepseek-chat-key-never-leased';
+  const internalDeepSeekRoute = {
+    ...chatRoute,
+    upstreamModelId: 'deepseek-v4-flash',
+    upstreamApiKey: internalDeepSeekKey,
+  };
+  const enabledCalls = new Map<string, number>();
+  const keyCalls: string[] = [];
   const identity = {
     tenantId: 'tenant-a',
     userId: 'user-a',
-    modelIds: [luna.id, chatRoute.id],
+    modelIds: [luna.id],
   };
   const consentStore = new InMemoryConsentStore(consentPolicy);
   await consentStore.accept(identity, consentInput);
   const server = createModelGatewayServer({
-    routes: [luna, chatRoute, imageRoute],
+    routes: [luna, internalDeepSeekRoute, searchCredentialRoute, imageRoute],
     authenticate: async (token) => token === sessionToken ? identity : null,
     consentStore,
     tenantModelRoutePolicy: {
-      isEnabled: async (_tenantId, routeId) => routeId !== chatRoute.id,
-      upstreamApiKey: async (_tenantId, routeId) => routeId === luna.id ? tenantKey : null,
+      isEnabled: async (_tenantId, routeId) => {
+        enabledCalls.set(routeId, (enabledCalls.get(routeId) ?? 0) + 1);
+        return true;
+      },
+      upstreamApiKey: async (_tenantId, routeId) => {
+        keyCalls.push(routeId);
+        return routeId === luna.id
+          ? tenantKey
+          : routeId === searchCredentialRoute.id ? searchKey : internalDeepSeekKey;
+      },
     },
     usageStore: new InMemoryUsageStore(limits),
     usageKeyId: 'usage-2026',
@@ -2529,8 +2573,12 @@ test('delivers only the authenticated tenant runtime model routes without exposi
   try {
     assert.equal((await fetch(`${baseUrl}/v1/runtime-models`)).status, 401);
     assert.equal((await fetch(`${baseUrl}/v1/runtime-models?all=true`, { headers: auth() })).status, 400);
+    assert.equal((await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.12&extra=true`, { headers: auth() })).status, 400);
     assert.equal((await fetch(`${baseUrl}/v1/runtime-models`, { method: 'POST', headers: auth() })).status, 405);
-    const response = await fetch(`${baseUrl}/v1/runtime-models`, { headers: auth() });
+    const legacyResponse = await fetch(`${baseUrl}/v1/runtime-models`, { headers: auth() });
+    assert.equal(legacyResponse.status, 200);
+    assert.deepEqual(Object.keys(await legacyResponse.json()).sort(), ['models', 'schemaVersion']);
+    const response = await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.12`, { headers: auth() });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('cache-control'), 'no-store');
     assert.equal(response.headers.get('access-control-allow-origin'), null);
@@ -2548,12 +2596,119 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         contextWindow: luna.contextWindow,
         maxTokens: luna.maxTokens,
       }],
+      searchCredentialGrant: {
+        schemaVersion: 1,
+        status: 'granted',
+        purpose: 'web-search',
+        provider: 'deepseek-official',
+        credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+        upstreamApiKey: searchKey,
+      },
     });
-    const catalog = JSON.stringify(await (await fetch(`${baseUrl}/v1/models`, { headers: auth() })).json());
+    assert.equal(enabledCalls.get(searchCredentialRoute.id), 1);
+    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 1);
+    assert.equal(keyCalls.includes(internalDeepSeekRoute.id), false);
+    const catalogResponse = await (await fetch(`${baseUrl}/v1/models`, { headers: auth() })).json() as {
+      models: Array<{ id: string }>;
+    };
+    assert.deepEqual(catalogResponse.models.map(({ id }) => id), [luna.id]);
+    const catalog = JSON.stringify(catalogResponse);
     assert.doesNotMatch(catalog, /provider-key|provider\.example/u);
+    assert.doesNotMatch(catalog, /search-key|internal-deepseek-chat-key|deepseek/u);
   } finally {
     server.close();
     await once(server, 'close');
+  }
+});
+
+test('keeps GPT runtime available while managed search is denied or unavailable', async () => {
+  const luna = {
+    ...route,
+    id: 'gpt-5.6-luna',
+    upstreamModelId: 'gpt-5.6-luna',
+    label: 'GPT-5.6 Luna',
+    buttonLabel: 'GPT-5.6 Luna · 深度',
+  };
+  const gptKey = 'tenant-gpt-key-value-123456789';
+  const searchSecret = 'search-secret-never-leak-123456789';
+  const internalSearchLikeRoute = {
+    ...chatRoute,
+    upstreamModelId: 'deepseek-v4-flash',
+    upstreamBaseUrl: 'https://api.deepseek.com/anthropic/v1',
+    upstreamApiKey: searchSecret,
+  };
+  const identity = { tenantId: 'tenant-a', userId: 'user-a', modelIds: [luna.id] };
+  const consentStore = new InMemoryConsentStore(consentPolicy);
+  await consentStore.accept(identity, consentInput);
+  const scenarios = [
+    {
+      routes: [luna],
+      policy: { isEnabled: async () => true, upstreamApiKey: async () => gptKey },
+      grantStatus: 'unavailable',
+    },
+    {
+      routes: [luna, searchCredentialRoute],
+      policy: {
+        isEnabled: async (_tenantId: string, routeId: string) => routeId !== searchCredentialRoute.id,
+        upstreamApiKey: async (_tenantId: string, routeId: string) => routeId === luna.id ? gptKey : searchSecret,
+      },
+      grantStatus: 'denied',
+    },
+    {
+      routes: [luna, searchCredentialRoute],
+      policy: {
+        isEnabled: async () => true,
+        upstreamApiKey: async (_tenantId: string, routeId: string) => routeId === luna.id ? gptKey : null,
+      },
+      grantStatus: 'unavailable',
+    },
+    {
+      routes: [luna, internalSearchLikeRoute],
+      policy: {
+        isEnabled: async () => true,
+        upstreamApiKey: async (_tenantId: string, routeId: string) => routeId === luna.id ? gptKey : searchSecret,
+      },
+      grantStatus: 'unavailable',
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const server = createModelGatewayServer({
+      routes: scenario.routes,
+      authenticate: async (token) => token === sessionToken ? identity : null,
+      consentStore,
+      tenantModelRoutePolicy: scenario.policy,
+      usageStore: new InMemoryUsageStore(limits),
+      usageKeyId: 'usage-2026',
+      usagePrivateKey: privateKey,
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    assert(address && typeof address === 'object');
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/v1/runtime-models?client_version=2.0.12`,
+        { headers: auth() },
+      );
+      assert.equal(response.status, 200);
+      const body = await response.json() as {
+        models: Array<{ id: string }>;
+        searchCredentialGrant: Record<string, unknown>;
+      };
+      assert.deepEqual(body.models.map(({ id }) => id), [luna.id]);
+      assert.deepEqual(body.searchCredentialGrant, {
+        schemaVersion: 1,
+        status: scenario.grantStatus,
+        purpose: 'web-search',
+        provider: 'deepseek-official',
+        credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+      });
+      assert.doesNotMatch(JSON.stringify(body), /search-secret-never-leak/u);
+    } finally {
+      server.close();
+      await once(server, 'close');
+    }
   }
 });
 

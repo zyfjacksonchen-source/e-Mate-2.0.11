@@ -25,6 +25,7 @@ jobs:
       run_base: ${{ steps.classify.outputs.run_base }}
       run_plugins: ${{ steps.classify.outputs.run_plugins }}
       run_enterprise: ${{ steps.classify.outputs.run_enterprise }}
+      run_verification: ${{ steps.classify.outputs.run_verification }}
       components_json: ${{ steps.classify.outputs.components_json }}
       component_jobs_json: ${{ steps.classify.outputs.component_jobs_json }}
       base_platform_component_jobs_json: ${{ steps.classify.outputs.base_platform_component_jobs_json }}
@@ -662,7 +663,7 @@ jobs:
 
   desktop-windows:
     name: Windows x64 / unsigned desktop installer
-    needs: source
+    needs: [impact, source]
     runs-on: windows-2025
     timeout-minutes: 90
     steps:
@@ -709,6 +710,14 @@ jobs:
         working-directory: desktop
         run: yarn dist:win
 
+      - name: Re-run the Loader and Profile acceptance owners
+        if: needs.impact.outputs.run_verification == 'true'
+        working-directory: desktop/e-mate-desktop
+        run: |
+          yarn verify:loader
+          yarn verify:profile
+          yarn verify:profile
+
       - uses: actions/upload-artifact@v4
         with:
           name: e-mate-windows-x64-unsigned
@@ -720,7 +729,7 @@ jobs:
 
   desktop-macos:
     name: macOS universal / unsigned desktop disk image
-    needs: source
+    needs: [impact, source]
     runs-on: macos-15
     timeout-minutes: 90
     steps:
@@ -765,6 +774,14 @@ jobs:
       - name: Build and verify the unsigned universal disk image
         working-directory: desktop
         run: yarn dist:mac-smoke
+
+      - name: Re-run the Loader and Profile acceptance owners
+        if: needs.impact.outputs.run_verification == 'true'
+        working-directory: desktop/e-mate-desktop
+        run: |
+          yarn verify:loader
+          yarn verify:profile
+          yarn verify:profile
 
       - uses: actions/upload-artifact@v4
         with:

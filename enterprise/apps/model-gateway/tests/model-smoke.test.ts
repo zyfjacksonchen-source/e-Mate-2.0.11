@@ -144,6 +144,49 @@ test('writes only catalog-bound redacted evidence after all five live routes pas
   assert.equal(serialized.includes('Reply with OK.') || serialized.includes('A solid orange square.'), false);
 });
 
+test('accepts only the official search credential route without proxying it as a model', async () => {
+  const { fetchImplementation, requests } = mockFetch();
+  const searchCredentialRoute = {
+    ...route(
+      'deepseek-web-search',
+      'chat-completions',
+      'deepseek-v4-flash',
+      'https://api.deepseek.com/anthropic/v1'
+    ),
+    providerId: 'deepseek-official',
+  };
+  const approval = await runModelSmoke({
+    routes: [...routes, searchCredentialRoute],
+    catalogSha256: '9'.repeat(64),
+    operator: 'release.operator',
+    timeoutMs: 10_000,
+    fetchImplementation,
+    randomId: randomId(),
+  });
+
+  assert.equal(approval.results.length, 5);
+  assert.equal(requests.length, 5);
+  assert.equal(requests.some(({ url }) => url.includes('/anthropic/v1')), false);
+
+  for (const invalid of [
+    { ...searchCredentialRoute, providerId: 'deepseek' },
+    { ...searchCredentialRoute, upstreamBaseUrl: 'https://deepseek-provider.ecorex.internal:18443/v1' },
+    { ...searchCredentialRoute, upstreamModelId: 'deepseek-chat' },
+  ]) {
+    await assert.rejects(
+      runModelSmoke({
+        routes: [...routes, invalid],
+        catalogSha256: '9'.repeat(64),
+        operator: 'release.operator',
+        timeoutMs: 10_000,
+        fetchImplementation,
+      }),
+      (error: unknown) =>
+        error instanceof ModelSmokeError && error.code === 'INVALID_CATALOG' && error.routeId === invalid.id
+    );
+  }
+});
+
 test('does not label an adapter-generated chat id as provider evidence', async () => {
   const { fetchImplementation } = mockFetch({ omitChatRequestId: true });
   const approval = await runModelSmoke({

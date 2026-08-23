@@ -63,6 +63,11 @@ const managedCodexModelIds = new Set([
   'doubao-seed-2-0-pro-260215',
 ]);
 
+const deepSeekSearchCredentialRouteId = 'deepseek-web-search';
+const deepSeekSearchProviderId = 'deepseek-official';
+const deepSeekSearchBaseUrl = 'https://api.deepseek.com/anthropic/v1';
+const deepSeekSearchModelId = 'deepseek-v4-flash';
+
 const runtimeApiMode = (route: ModelGatewayRoute): 'responses' | 'chat-completions' =>
   route.apiMode === 'chat-completions' ? 'chat-completions' : 'responses';
 
@@ -964,7 +969,18 @@ async function principal(
 }
 
 function principalAllowsRoute(identity: ModelGatewayPrincipal, routeId: string): boolean {
-  return identity.modelIds.includes(routeId);
+  return routeId !== deepSeekSearchCredentialRouteId && identity.modelIds.includes(routeId);
+}
+
+function officialDeepSeekSearchCredentialRoute(
+  routes: Map<string, ModelGatewayRoute>
+): ModelGatewayRoute | undefined {
+  const route = routes.get(deepSeekSearchCredentialRouteId);
+  return route?.providerId === deepSeekSearchProviderId &&
+    route.upstreamBaseUrl === deepSeekSearchBaseUrl &&
+    route.upstreamModelId === deepSeekSearchModelId
+    ? route
+    : undefined;
 }
 
 const auditSha256Pattern = /^[0-9a-f]{64}$/;
@@ -1412,6 +1428,10 @@ function validateRoute(route: ModelGatewayRoute): void {
     !identifierPattern.test(route.upstreamModelId) ||
     (route.fallbackUpstreamModelId !== undefined && !identifierPattern.test(route.fallbackUpstreamModelId)) ||
     !identifierPattern.test(route.providerId) ||
+    (route.id === deepSeekSearchCredentialRouteId &&
+      (route.providerId !== deepSeekSearchProviderId ||
+        route.upstreamBaseUrl !== deepSeekSearchBaseUrl ||
+        route.upstreamModelId !== deepSeekSearchModelId)) ||
     route.upstreamApiKey.length < 20 ||
     /\s/.test(route.upstreamApiKey) ||
     !route.label ||
@@ -1830,7 +1850,11 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
   return async (request: IncomingMessage, response: ServerResponse) => {
     try {
       const url = new URL(request.url ?? '/', 'http://model-gateway.internal');
-      if (url.hash || (url.pathname === '/v1/models' ? !validModelsQuery(url) : Boolean(url.search))) {
+      if (url.hash || (
+        url.pathname === '/v1/models' || url.pathname === '/v1/runtime-models'
+          ? !validModelsQuery(url)
+          : Boolean(url.search)
+      )) {
         throw new HttpError(400, 'INVALID_REQUEST', 'Query is not allowed');
       }
       const identity = await principal(request, options.authenticate);
@@ -1925,6 +1949,36 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
       }
       if (url.pathname === '/v1/runtime-models') {
         if (request.method !== 'GET') return method(response, 'GET');
+        const searchGrantRequested = url.searchParams.get('client_version') === '2.0.12';
+        let searchGrantStatus: 'granted' | 'denied' | 'unavailable' = 'unavailable';
+        let searchApiKey: string | undefined;
+        if (searchGrantRequested) {
+          const searchRoute = officialDeepSeekSearchCredentialRoute(routes);
+          if (searchRoute && options.tenantModelRoutePolicy?.upstreamApiKey) {
+            let enabled: boolean | undefined;
+            try {
+              enabled = await modelRouteEnabled(options.tenantModelRoutePolicy, identity.tenantId, searchRoute.id);
+            } catch {
+              enabled = undefined;
+            }
+            if (enabled === false) {
+              searchGrantStatus = 'denied';
+            } else if (enabled === true) {
+              try {
+                searchApiKey = (await options.tenantModelRoutePolicy.upstreamApiKey(
+                  identity.tenantId,
+                  searchRoute.id
+                )) ?? '';
+                if (searchApiKey.length < 20 || searchApiKey.length > 8_192 || /\s/.test(searchApiKey)) {
+                  throw new Error('Invalid managed search route key');
+                }
+                searchGrantStatus = 'granted';
+              } catch {
+                searchApiKey = undefined;
+              }
+            }
+          }
+        }
         const availableRoutes = (
           await Promise.all(
             options.routes.map(async (route) =>
@@ -1956,7 +2010,18 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
         if (availableRoutes.length === 0) {
           throw new HttpError(403, 'MODEL_ACCESS_DENIED', 'No model is available');
         }
-        json(response, 200, { schemaVersion: 1, models: availableRoutes });
+        json(response, 200, {
+          schemaVersion: 1,
+          models: availableRoutes,
+          ...(searchGrantRequested ? { searchCredentialGrant: {
+            schemaVersion: 1,
+            status: searchGrantStatus,
+            purpose: 'web-search',
+            provider: 'deepseek-official',
+            credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+            ...(searchGrantStatus === 'granted' ? { upstreamApiKey: searchApiKey } : {}),
+          } } : {}),
+        });
         return;
       }
       if (url.pathname === '/v1/usage/current') {

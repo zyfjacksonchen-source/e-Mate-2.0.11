@@ -134,7 +134,11 @@ describe('e-Mate desktop profile', () => {
     expect(rows.find(row => row.id === 'web-search-deepseek')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-web-search-deepseek',
       disabled: false,
-      config: expect.objectContaining({ apiKeyEnv: 'E_MATE_MODEL_KEY_DEEPSEEK' }),
+      config: expect.objectContaining({
+        apiKeyEnv: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+        baseURL: 'https://api.deepseek.com/anthropic/v1',
+        model: 'deepseek-v4-flash',
+      }),
     }))
     expect(rows.find(row => row.id === 'tool-web')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-tool-web',

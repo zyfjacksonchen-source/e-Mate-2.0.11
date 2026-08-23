@@ -119,6 +119,38 @@ test('production route schema accepts only the literal HTTP opt-in and a secret-
   }
 });
 
+test('production search credential route binds the official endpoint to its own secret file', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'e-mate-gateway-search-route-'));
+  const file = join(directory, 'gateway.json');
+  const searchCredentialRoute = productionRoute({
+    id: 'deepseek-web-search',
+    apiMode: 'chat-completions',
+    upstreamModelId: 'deepseek-v4-flash',
+    upstreamBaseUrl: 'https://api.deepseek.com/anthropic/v1',
+    upstreamApiKeyFile: '/run/secrets/deepseek-web-search-api-key',
+    providerId: 'deepseek-official',
+    label: 'DeepSeek Web Search Credential',
+    buttonLabel: 'DeepSeek Web Search Credential',
+    provider: 'DeepSeek',
+    providerMark: 'D',
+    reasoning: false,
+    input: ['text'],
+  });
+  try {
+    writeFileSync(file, JSON.stringify(configuration({ routes: [searchCredentialRoute] })));
+    assert.throws(() => loadProductionConfiguration(file), /TLS certificate path must be absolute/);
+
+    const { upstreamApiKeyFile: _upstreamApiKeyFile, ...inlineKeyRoute } = searchCredentialRoute;
+    writeFileSync(
+      file,
+      JSON.stringify(configuration({ routes: [{ ...inlineKeyRoute, upstreamApiKey: 'forbidden-inline-key' }] }))
+    );
+    assert.throws(() => loadProductionConfiguration(file), /Invalid Model Gateway production configuration/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 const windowsTest = process.platform === 'win32' ? test : test.skip;
 
 function setWindowsAcl(

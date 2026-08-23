@@ -14,6 +14,12 @@ const KEYCHAIN_MANIFEST_PREFIX = 'EMATE1:'
 const KEYCHAIN_MANIFEST = /^EMATE1:([0-9a-f]{16}):([1-9][0-9]{0,3}):([1-9][0-9]{0,4}):([A-Za-z0-9_-]{43})$/u
 const MAX_COMMAND_OUTPUT = 4 * 1024 * 1024
 const CREDENTIAL_REF = /^[A-Za-z_][A-Za-z0-9_]*$/u
+const MANAGED_MODEL_CREDENTIAL_REFS = new Set([
+  'E_MATE_MODEL_KEY_GPT',
+  'E_MATE_MODEL_KEY_DEEPSEEK',
+  'E_MATE_MODEL_KEY_DOUBAO',
+  'E_MATE_SEARCH_KEY_DEEPSEEK',
+])
 
 function keychainExpectScript(ref: string): string {
   if (!CREDENTIAL_REF.test(ref)) throw new Error('macOS Keychain credential reference is invalid')
@@ -410,11 +416,13 @@ export class CredentialStore {
   ) {}
 
   private inherited(ref: string): EnvironmentEntry | undefined {
+    if (MANAGED_MODEL_CREDENTIAL_REFS.has(ref)) return undefined
     const entry = this.environment.getFrom(ref, ['process'])
     return entry !== undefined && entry.value.length > 0 ? entry : undefined
   }
 
   private fallback(ref: string): EnvironmentEntry | undefined {
+    if (MANAGED_MODEL_CREDENTIAL_REFS.has(ref)) return undefined
     const entry = this.environment.getFrom(ref, ['project-env', 'user-env'])
     return entry !== undefined && entry.value.length > 0 ? entry : undefined
   }

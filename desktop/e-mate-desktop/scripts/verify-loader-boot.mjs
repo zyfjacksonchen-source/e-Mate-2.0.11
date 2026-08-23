@@ -105,7 +105,7 @@ try {
     BIN_NAME,
     prepared.rootConfig,
     [{ insert: [
-      { id: 'desktop-shell', name: '@e-mate/desktop' },
+      { id: 'desktop-shell', name: '@e-mate/desktop', config: { mode: 'compatibility' } },
       { id: 'third-party-smoke', name: THIRD_PARTY_NAME },
     ] }],
     (host) => {

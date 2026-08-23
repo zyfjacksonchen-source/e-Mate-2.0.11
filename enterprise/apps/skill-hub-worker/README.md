@@ -1,6 +1,6 @@
 # e-Mate Skill Hub Worker
 
-Authenticated Skill Hub control plane for the 2.0.12 DSH Profile component.
+Authenticated Skill Hub catalog and package service for the 2.0.12 DSH Profile component.
 
 - Model Gateway session validation is the only identity authority.
 - D1 stores immutable catalog, ownership, mutation, and install receipts.

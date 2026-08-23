@@ -72,6 +72,7 @@ export function createProductionAuthenticator(
   policy: Awaited<ReturnType<typeof openPostgresTenantModelRoutePolicy>>['policy'],
   routeIds: readonly string[]
 ): ReturnType<typeof createSessionTokenVerifier> {
+  const callableRouteIds = routeIds.filter((routeId) => routeId !== 'deepseek-web-search');
   return async (token) => {
     const sessionPrincipal = await authenticateSession(token);
     if (sessionPrincipal) {
@@ -84,7 +85,7 @@ export function createProductionAuthenticator(
         ? sessionPrincipal
         : null;
     }
-    return policy.authenticateClientCredential(token, routeIds);
+    return policy.authenticateClientCredential(token, callableRouteIds);
   };
 }
 

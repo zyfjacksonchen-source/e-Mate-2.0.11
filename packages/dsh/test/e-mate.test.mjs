@@ -450,7 +450,11 @@ test('managed profile installation is idempotent', () => {
     assert.deepEqual(patchById.get('web-search-deepseek'), {
       id: 'web-search-deepseek',
       disabled: false,
-      config: { apiKeyEnv: 'E_MATE_MODEL_KEY_DEEPSEEK' },
+      config: {
+        apiKeyEnv: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+        baseURL: 'https://api.deepseek.com/anthropic/v1',
+        model: 'deepseek-v4-flash',
+      },
     })
     assert.deepEqual(patchById.get('tool-web'), {
       id: 'tool-web',
@@ -564,7 +568,11 @@ test('managed profile installation is idempotent', () => {
       '--profile', 'e-mate', '--dump-config',
     ], {
       cwd: dshHome,
-      env: { ...process.env, DSH_HOME: dshHome },
+      env: {
+        ...process.env,
+        DSH_HOME: dshHome,
+        DEEPSEEK_SEARCH_BASE_URL: 'https://environment-override.invalid/anthropic/v1',
+      },
       encoding: 'utf8',
       maxBuffer: 8 * 1024 * 1024,
     })
@@ -573,7 +581,8 @@ test('managed profile installation is idempotent', () => {
     assert.match(dumped.stdout, /- id: emate-credentials-os\n  name: \.\/plugins\/credentials-os\.js/)
     assert.match(dumped.stdout, /- id: ui-trajectory\n  name: '@deepseek-ai\/dsh-client-ui-trajectory'\n  disabled: true/)
     assert.match(dumped.stdout, /- id: web\n  name: '@deepseek-ai\/dsh-web'\n  config:\n    searchProvider: deepseek-official/)
-    assert.match(dumped.stdout, /- id: web-search-deepseek\n  name: '@deepseek-ai\/dsh-web-search-deepseek'\n  config:\n    apiKeyEnv: E_MATE_MODEL_KEY_DEEPSEEK\n  disabled: false/)
+    assert.match(dumped.stdout, /- id: web-search-deepseek\n  name: '@deepseek-ai\/dsh-web-search-deepseek'\n  config:\n    apiKeyEnv: E_MATE_SEARCH_KEY_DEEPSEEK\n    baseURL: https:\/\/api\.deepseek\.com\/anthropic\/v1\n    model: deepseek-v4-flash\n  disabled: false/)
+    assert.doesNotMatch(dumped.stdout, /environment-override\.invalid/)
     assert.match(dumped.stdout, /- id: tool-web\n  name: '@deepseek-ai\/dsh-tool-web'\n  config:\n    fetch: false\n    searchTimeoutMs: 60000\n    searchMaxResults: 50\n  disabled: false/)
     assert.doesNotMatch(dumped.stdout, /- id: search-mcp\b|TAVILY_API_KEY/)
     assert.doesNotMatch(dumped.stdout, /- id: credentials\n  name: '@deepseek-ai\/dsh-credentials-local'\n(?!  disabled: true)/)
@@ -845,6 +854,22 @@ test('OS credential provider preserves target layering without exposing values t
   assert.deepEqual(described, { configured: true, source: 'keychain', writable: true })
   assert.equal(JSON.stringify(described).includes('next-account-secret'), false)
   assert.deepEqual(await credentials.resolve('PROJECT_ONLY'), { value: 'project-secret', source: 'project-env' })
+  for (const ref of [
+    'E_MATE_MODEL_KEY_GPT',
+    'E_MATE_MODEL_KEY_DEEPSEEK',
+    'E_MATE_MODEL_KEY_DOUBAO',
+    'E_MATE_SEARCH_KEY_DEEPSEEK',
+  ]) {
+    layers.process.set(ref, `${ref}-process-secret`)
+    layers['project-env'].set(ref, `${ref}-project-secret`)
+    layers['user-env'].set(ref, `${ref}-user-secret`)
+    assert.equal(await credentials.resolve(ref), undefined)
+    assert.deepEqual(await credentials.describe(ref), { configured: false, writable: true })
+    await credentials.set(ref, `${ref}-managed-secret`)
+    assert.deepEqual(await credentials.resolve(ref), { value: `${ref}-managed-secret`, source: 'keychain' })
+    assert.equal(await credentials.unset(ref), true)
+    assert.equal(await credentials.resolve(ref), undefined)
+  }
   layers.process.set('CONNECTOR_TOKEN', 'process-secret')
   assert.deepEqual(await credentials.resolve('CONNECTOR_TOKEN'), { value: 'process-secret', source: 'env' })
   assert.deepEqual(await credentials.describe('CONNECTOR_TOKEN'), { configured: true, source: 'env', writable: false })
@@ -1835,6 +1860,32 @@ test('enterprise identity provider maps target credentials and the production HT
     contentHash: agreementBundleSha256,
   }
   let accepted = false
+  const searchKey = 'managed-search-key-not-persisted-here'
+  const runtimePayload = {
+    schemaVersion: 1,
+    models: [{
+      id: 'gpt-5.6-luna',
+      apiMode: 'responses',
+      upstreamModelId: 'gpt-5.6-luna',
+      upstreamBaseUrl: 'http://provider.example:8080/v1',
+      allowInsecureHttpUpstream: true,
+      upstreamApiKey: 'runtime-provider-key-not-persisted-here',
+      label: 'GPT-5.6 Luna · 最大推理',
+      input: ['text', 'image'],
+      reasoning: true,
+      contextWindow: 1_050_000,
+      maxTokens: 128_000,
+    }],
+    searchCredentialGrant: {
+      schemaVersion: 1,
+      status: 'granted',
+      purpose: 'web-search',
+      provider: 'deepseek-official',
+      credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+      upstreamApiKey: searchKey,
+    },
+  }
+  let runtimeResponse = runtimePayload
   const requests = []
   let auditBody
   let taskAuditBody
@@ -1964,22 +2015,7 @@ test('enterprise identity provider maps target credentials and the production HT
       })
     }
     if (url.pathname.endsWith('/v1/runtime-models')) {
-      return json({
-        schemaVersion: 1,
-        models: [{
-          id: 'gpt-5.6-luna',
-          apiMode: 'responses',
-          upstreamModelId: 'gpt-5.6-luna',
-          upstreamBaseUrl: 'http://provider.example:8080/v1',
-          allowInsecureHttpUpstream: true,
-          upstreamApiKey: 'runtime-provider-key-not-persisted-here',
-          label: 'GPT-5.6 Luna · 最大推理',
-          input: ['text', 'image'],
-          reasoning: true,
-          contextWindow: 1_050_000,
-          maxTokens: 128_000,
-        }],
-      })
+      return json(runtimeResponse)
     }
     if (url.pathname.endsWith('/v1/authenticated-probe')
       || url.pathname.startsWith('/ecorex-agent/client/skill-hub/v1/')) {
@@ -2059,7 +2095,41 @@ test('enterprise identity provider maps target credentials and the production HT
   assert.equal(runtimePolicy.models[0].provider, 'e-mate-enterprise')
   assert.equal(runtimePolicy.models[0].credentialRef, 'E_MATE_MODEL_KEY_GPT')
   assert.equal(runtimePolicy.models[0].upstreamBaseUrl, 'http://provider.example:8080/v1')
+  assert.deepEqual(runtimePolicy.searchCredentialGrant, runtimePayload.searchCredentialGrant)
+  assert.equal(runtimePolicy.policy.allowed_model_ids.includes('deepseek'), false)
   assert.equal(values.has('E_MATE_MODEL_KEY_GPT'), false)
+  assert.equal(values.has('E_MATE_MODEL_KEY_DEEPSEEK'), false)
+  assert.equal(values.has('E_MATE_SEARCH_KEY_DEEPSEEK'), false)
+  assert.doesNotMatch(values.get('E_MATE_ENTERPRISE_SESSION'), /managed-search-key/u)
+  for (const status of ['denied', 'unavailable']) {
+    runtimeResponse = {
+      ...runtimePayload,
+      searchCredentialGrant: {
+        schemaVersion: 1,
+        status,
+        purpose: 'web-search',
+        provider: 'deepseek-official',
+        credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+      },
+    }
+    assert.equal((await provider.modelRuntimePolicy()).searchCredentialGrant.status, status)
+  }
+  for (const invalid of [
+    { ...runtimePayload, unexpected: true },
+    { ...runtimePayload, searchCredentialGrant: { ...runtimePayload.searchCredentialGrant, credentialRef: 'UNMANAGED_KEY' } },
+    { ...runtimePayload, searchCredentialGrant: { ...runtimePayload.searchCredentialGrant, status: 'denied' } },
+    { schemaVersion: 1, models: runtimePayload.models },
+  ]) {
+    runtimeResponse = invalid
+    await assert.rejects(provider.modelRuntimePolicy(), error => {
+      assert.match(error.message, /runtime models are invalid|search credential grant is invalid/u)
+      if (/search credential grant is invalid/u.test(error.message)) {
+        assert.equal(error.code, 'E_MATE_SEARCH_GRANT_INVALID')
+      }
+      return true
+    })
+  }
+  runtimeResponse = runtimePayload
   const accountSubject = provider.localAccountSubject()
   clock += 9 * 60_000
   let releaseModelCredential
@@ -2148,6 +2218,7 @@ test('enterprise identity provider maps target credentials and the production HT
   const runtimeRequests = requests.filter(request => request.path.endsWith('/v1/runtime-models'))
   assert.ok(runtimeRequests.length >= 2)
   assert.ok(runtimeRequests.every(request => request.authorization === `Bearer ${modelToken}`))
+  assert.ok(runtimeRequests.every(request => new URL(request.url).search === '?client_version=2.0.12'))
   const auditRequests = requests.filter(request => request.path.endsWith('/v1/audit/usage'))
   assert.equal(auditRequests.length, 1)
   assert.equal(auditRequests[0].authorization, `Bearer ${modelToken}`)
@@ -2282,20 +2353,42 @@ test('enterprise identity rejects expected gateway responses through the target 
   await assert.rejects(identityHandler('session.login', login), /UNKNOWN_CONTRACT_FAILURE/u)
 })
 
-test('enterprise model switch delegates to the target session, keeps its history and survives a cached-policy outage', async () => {
+test('enterprise model switch keeps native history and survives a cached-policy outage and cold restart', async () => {
   const temporary = mkdtempSync(join(tmpdir(), 'e-mate-model-policy-'))
   const cleanups = []
   const records = new Map()
+  const projectionRecords = new Map()
+  let rejectProjectionMarkerWrite = false
   const table = {
     entries: () => records.entries(),
+    get: key => records.get(key),
     put: async (key, value) => { records.set(key, structuredClone(value)) },
+    delete: async key => records.delete(key),
   }
+  const projectionTable = {
+    entries: () => projectionRecords.entries(),
+    get: key => projectionRecords.get(key),
+    put: async (key, value) => {
+      if (rejectProjectionMarkerWrite) throw new Error('simulated runtime projection marker failure')
+      projectionRecords.set(key, structuredClone(value))
+    },
+    delete: async key => projectionRecords.delete(key),
+  }
+  let rejectQuotaSnapshotWrite = false
   const quotaRecords = { snapshots: new Map(), reservations: new Map(), usage: new Map() }
-  const domain = { table: name => name === 'active' ? table : undefined, close: async () => {} }
+  const domain = {
+    table: name => name === 'active' ? table : name === 'runtime_projection' ? projectionTable : undefined,
+    close: async () => {},
+  }
   const quotaDomain = {
     table: name => ({
       entries: () => quotaRecords[name].entries(),
-      put: async (key, value) => { quotaRecords[name].set(key, structuredClone(value)) },
+      put: async (key, value) => {
+        if (name === 'snapshots' && rejectQuotaSnapshotWrite) {
+          throw new Error('simulated quota snapshot failure')
+        }
+        quotaRecords[name].set(key, structuredClone(value))
+      },
       delete: async key => quotaRecords[name].delete(key),
     }),
     close: async () => {},
@@ -2306,18 +2399,28 @@ test('enterprise model switch delegates to the target session, keeps its history
   let llmSettings = {
     providers: {
       'e-mate-enterprise': {
-        apiKeyEnv: 'E_MATE_MODEL_SESSION_TOKEN',
+        apiKeyEnv: 'E_MATE_MODEL_KEY_GPT',
         api: 'openai-responses',
-        baseURL: 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1',
+        baseURL: 'http://provider.example:8080/v1',
         models: [{ id: 'gpt-5.6-luna' }],
       },
     },
   }
   let defaultModelSettings
   let failDefaultModelWrite = false
+  let delayedCredentialWrite
+  let rejectedCredentialWrite
+  let credentialWriteRejected = false
   let projectedGptKey = 'production-key-redacted-for-test-123'
   let projectedGptBaseUrl = 'http://provider.example:8080/v1'
   let policyDefaultModel = 'gpt-5.6-luna'
+  let deepseekChatAllowed = true
+  let searchGrantStatus = 'granted'
+  let searchGrantFailure
+  let rejectSearchUnset = false
+  let projectedSearchKey = 'deepseek-key-redacted-for-test-123'
+  let projectedDeepseekChatKey = 'deepseek-chat-key-redacted-for-test-123'
+  credentialValues.set('E_MATE_MODEL_KEY_GPT', 'legacy-gpt-key-redacted-for-test-000')
   const session = {
     current: { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', reasoningEffort: 'max' },
     messages: [
@@ -2337,7 +2440,11 @@ test('enterprise model switch delegates to the target session, keeps its history
     schema_version: 1,
     account_subject: accountSubject,
     revision: 7,
-    allowed_model_ids: ['gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek', 'gpt-image-2-pro', 'gpt-image-2'],
+    allowed_model_ids: [
+      'gpt-5.6-luna', 'gpt-5.6-sol',
+      ...(deepseekChatAllowed ? ['deepseek'] : []),
+      'gpt-image-2-pro', 'gpt-image-2',
+    ],
     default_chat_model_id: policyDefaultModel,
     default_chat_reasoning_effort: policyDefaultModel === 'gpt-5.6-luna' ? 'max' : 'medium',
     image_primary_model_id: 'gpt-image-2-pro',
@@ -2381,7 +2488,7 @@ test('enterprise model switch delegates to the target session, keeps its history
   }
   try {
     const paths = installProfile(join(temporary, 'dsh-home'))
-    await applyModelPolicy({
+    const modelPolicyContext = {
       apiProxy,
       connection: { rpc: { handle: (channel, handler, options) => {
         rpc = { channel, handler, options }
@@ -2390,8 +2497,25 @@ test('enterprise model switch delegates to the target session, keeps its history
       llm: {},
       credentials: {
         resolve: async ref => credentialValues.has(ref) ? { value: credentialValues.get(ref), source: 'test' } : undefined,
-        set: async (ref, value) => { credentialValues.set(ref, value) },
-        unset: async ref => { credentialValues.delete(ref) },
+        set: async (ref, value) => {
+          if (delayedCredentialWrite?.ref === ref && delayedCredentialWrite.value === value) {
+            delayedCredentialWrite.started()
+            await delayedCredentialWrite.release
+            delayedCredentialWrite = undefined
+          }
+          if (rejectedCredentialWrite?.ref === ref && rejectedCredentialWrite.value === value) {
+            rejectedCredentialWrite = undefined
+            credentialWriteRejected = true
+            throw new Error('simulated ordered credential write failure')
+          }
+          credentialValues.set(ref, value)
+        },
+        unset: async ref => {
+          if (rejectSearchUnset && ref === 'E_MATE_SEARCH_KEY_DEEPSEEK') {
+            throw new Error('simulated search credential revocation failure')
+          }
+          credentialValues.delete(ref)
+        },
       },
       settings: {
         get: ns => ns === 'llm-pi-ai'
@@ -2434,6 +2558,7 @@ test('enterprise model switch delegates to the target session, keeps its history
         modelRuntimePolicy: async () => {
           calls.policy += 1
           if (!providerAvailable) throw new Error('enterprise unavailable')
+          if (searchGrantFailure !== undefined) throw searchGrantFailure
           return {
             policy: policy(),
             models: [
@@ -2463,20 +2588,28 @@ test('enterprise model switch delegates to the target session, keeps its history
                 contextWindow: 1_050_000,
                 maxTokens: 128_000,
               },
-              {
+              ...(deepseekChatAllowed ? [{
                 id: 'deepseek',
                 provider: 'e-mate-enterprise-deepseek',
                 credentialRef: 'E_MATE_MODEL_KEY_DEEPSEEK',
                 api: 'openai-completions',
                 upstreamModelId: 'deepseek-v4-flash',
                 upstreamBaseUrl: 'https://api.deepseek.com/v1',
-                upstreamApiKey: 'deepseek-key-redacted-for-test-123',
+                upstreamApiKey: projectedDeepseekChatKey,
                 label: 'DeepSeek V4 Pro · 最大推理',
                 input: ['text'],
                 contextWindow: 131_072,
                 maxTokens: 65_536,
-              },
+              }] : []),
             ],
+            searchCredentialGrant: {
+              schemaVersion: 1,
+              status: searchGrantStatus,
+              purpose: 'web-search',
+              provider: 'deepseek-official',
+              credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+              ...(searchGrantStatus === 'granted' ? { upstreamApiKey: projectedSearchKey } : {}),
+            },
           }
         },
       },
@@ -2496,22 +2629,28 @@ test('enterprise model switch delegates to the target session, keeps its history
         else assert.fail(`unexpected model policy event ${event}`)
         return () => {}
       },
-    }, { bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json') })
+    }
+    const modelPolicyConfig = { bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json') }
+    await applyModelPolicy(modelPolicyContext, modelPolicyConfig)
 
     assert.equal(rpc.channel, MODEL_POLICY_CHANNEL)
     assert.deepEqual(rpc.options, { authority: 'loopback' })
-    await assert.rejects(
-      requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })),
-      /native runtime model projection is not ready/,
+    assert.equal(credentialValues.has('E_MATE_SEARCH_KEY_DEEPSEEK'), false)
+    assert.deepEqual(
+      await requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })),
+      { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
     )
-    assert.equal(calls.policy, 0)
+    assert.equal(calls.policy, 1)
     const current = await rpc.handler('policy.current', {})
     assert.equal(current.ok, true)
     assert.equal(current.value.revision, 7)
     assert.equal('account_subject' in current.value, false)
     assert.match(records.get('active').policy_sha256, /^[0-9a-f]{64}$/)
+    assert.equal(projectionRecords.get('active').search_status, 'granted')
+    assert.doesNotMatch(JSON.stringify(projectionRecords.get('active')), /redacted-for-test/u)
     assert.equal(credentialValues.get('E_MATE_MODEL_KEY_GPT'), 'production-key-redacted-for-test-123')
-    assert.equal(credentialValues.get('E_MATE_MODEL_KEY_DEEPSEEK'), 'deepseek-key-redacted-for-test-123')
+    assert.equal(credentialValues.get('E_MATE_MODEL_KEY_DEEPSEEK'), projectedDeepseekChatKey)
+    assert.equal(credentialValues.get('E_MATE_SEARCH_KEY_DEEPSEEK'), projectedSearchKey)
     assert.equal(llmSettings.providers['e-mate-enterprise'].baseURL, 'http://provider.example:8080/v1')
     assert.equal(llmSettings.providers['e-mate-enterprise'].apiKeyEnv, 'E_MATE_MODEL_KEY_GPT')
     assert.deepEqual(
@@ -2535,9 +2674,51 @@ test('enterprise model switch delegates to the target session, keeps its history
     assert.doesNotMatch(JSON.stringify(llmSettings), /model-api/u)
     assert.equal((await rpc.handler('unknown', {})).error.code, 'bad-request')
 
+    searchGrantStatus = 'denied'
+    rejectQuotaSnapshotWrite = true
+    assert.equal((await modelPolicy.refresh({ force: true })).revision, 7)
+    assert.equal(credentialValues.has('E_MATE_SEARCH_KEY_DEEPSEEK'), false)
+    assert.equal(projectionRecords.has('active'), false)
+    await assert.rejects(
+      requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })),
+      /native runtime model projection is not ready/u,
+    )
+    rejectQuotaSnapshotWrite = false
+    await modelPolicy.refresh({ force: true })
+    assert.equal(projectionRecords.get('active').search_status, 'denied')
+    searchGrantStatus = 'granted'
+    await modelPolicy.refresh({ force: true })
+    assert.equal(credentialValues.get('E_MATE_SEARCH_KEY_DEEPSEEK'), projectedSearchKey)
+
     const projectedSettings = structuredClone(llmSettings)
     const projectedDefault = structuredClone(defaultModelSettings)
     const projectedCredentials = new Map(credentialValues)
+    const invalidatedSearchCredentials = new Map(projectedCredentials)
+    invalidatedSearchCredentials.delete('E_MATE_SEARCH_KEY_DEEPSEEK')
+    projectedSearchKey = 'slow-search-key-redacted-for-test-456'
+    projectedGptKey = 'fast-fail-gpt-key-redacted-for-test-456'
+    let releaseDelayedCredential
+    let markCredentialStarted
+    const credentialStarted = new Promise(resolve => { markCredentialStarted = resolve })
+    delayedCredentialWrite = {
+      ref: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+      value: projectedSearchKey,
+      started: markCredentialStarted,
+      release: new Promise(resolve => { releaseDelayedCredential = resolve }),
+    }
+    rejectedCredentialWrite = { ref: 'E_MATE_MODEL_KEY_GPT', value: projectedGptKey }
+    const orderedFailure = modelPolicy.refresh({ force: true })
+    await credentialStarted
+    assert.equal(credentialWriteRejected, false)
+    releaseDelayedCredential()
+    assert.equal((await orderedFailure).revision, 7)
+    assert.equal(credentialWriteRejected, true)
+    assert.deepEqual(llmSettings, projectedSettings)
+    assert.deepEqual(defaultModelSettings, projectedDefault)
+    assert.deepEqual(credentialValues, invalidatedSearchCredentials)
+    projectedSearchKey = 'deepseek-key-redacted-for-test-123'
+    projectedGptKey = 'production-key-redacted-for-test-123'
+
     projectedGptKey = 'rotated-key-redacted-for-test-456'
     projectedGptBaseUrl = 'http://provider.example:8081/v1'
     policyDefaultModel = 'gpt-5.6-sol'
@@ -2545,10 +2726,12 @@ test('enterprise model switch delegates to the target session, keeps its history
     assert.equal((await modelPolicy.refresh({ force: true })).revision, 7)
     assert.deepEqual(llmSettings, projectedSettings)
     assert.deepEqual(defaultModelSettings, projectedDefault)
-    assert.deepEqual(credentialValues, projectedCredentials)
+    assert.deepEqual(credentialValues, invalidatedSearchCredentials)
     projectedGptKey = 'production-key-redacted-for-test-123'
     projectedGptBaseUrl = 'http://provider.example:8080/v1'
     policyDefaultModel = 'gpt-5.6-luna'
+    await modelPolicy.refresh({ force: true })
+    assert.deepEqual(credentialValues, projectedCredentials)
 
     const models = await apiProxy.sessions.models({ rpcId: 'models-1', payload: { sessionId: 'session-1' } })
     assert.deepEqual(models.result.value.groups[0].models.map(model => model.id), [
@@ -2578,7 +2761,6 @@ test('enterprise model switch delegates to the target session, keeps its history
     assert.equal(blocked.result.error.code, 'model-unavailable')
     assert.deepEqual(calls.selected.map(call => call.model), ['gpt-5.6-luna', 'gpt-5.6-sol'])
     assert.ok(calls.selected.every(call => call.sessionId === 'session-1'))
-    const policyCallsBeforeHotPath = calls.policy
     assert.deepEqual(
       await requestPolicy({ agent: { id: 'session-1' }, turn: 1, step: 1 }, async () => structuredClone(session.current)),
       session.current,
@@ -2591,6 +2773,107 @@ test('enterprise model switch delegates to the target session, keeps its history
       await requestPolicy({}, async () => ({ provider: 'e-mate-enterprise-deepseek', model: 'deepseek-v4-flash' })),
       { provider: 'e-mate-enterprise-deepseek', model: 'deepseek-v4-flash' },
     )
+    deepseekChatAllowed = false
+    await modelPolicy.refresh({ force: true })
+    assert.equal(credentialValues.has('E_MATE_MODEL_KEY_DEEPSEEK'), false)
+    assert.equal(credentialValues.get('E_MATE_SEARCH_KEY_DEEPSEEK'), projectedSearchKey)
+    assert.equal(llmSettings.providers['e-mate-enterprise-deepseek'], undefined)
+    assert.deepEqual(
+      llmSettings.providers['e-mate-enterprise'].models.map(model => model.id),
+      ['gpt-5.6-luna', 'gpt-5.6-sol'],
+    )
+    assert.doesNotMatch(JSON.stringify(llmSettings), /redacted-for-test/u)
+    assert.deepEqual(
+      (await apiProxy.sessions.models({ rpcId: 'models-gpt-only', payload: { sessionId: 'session-1' } }))
+        .result.value.groups[0].models.map(model => model.id),
+      ['gpt-5.6-luna', 'gpt-5.6-sol'],
+    )
+    await assert.rejects(
+      requestPolicy({}, async () => ({ provider: 'e-mate-enterprise-deepseek', model: 'deepseek-v4-flash' })),
+      /not allowed/u,
+    )
+    searchGrantStatus = 'denied'
+    rejectSearchUnset = true
+    await assert.rejects(
+      modelPolicy.refresh({ force: true }),
+      /invalid search grant revocation failed/u,
+    )
+    assert.equal(projectionRecords.has('active'), false)
+    assert.equal(credentialValues.get('E_MATE_SEARCH_KEY_DEEPSEEK'), projectedSearchKey)
+    await assert.rejects(
+      requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })),
+      /invalid search grant revocation failed/u,
+    )
+    rejectSearchUnset = false
+    await modelPolicy.refresh({ force: true })
+    assert.equal(credentialValues.has('E_MATE_SEARCH_KEY_DEEPSEEK'), false)
+    assert.deepEqual(
+      await requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })),
+      { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+    )
+    credentialValues.set('E_MATE_SEARCH_KEY_DEEPSEEK', 'stale-search-key-redacted-for-test-000')
+    searchGrantStatus = 'unavailable'
+    await modelPolicy.refresh({ force: true })
+    assert.equal(credentialValues.has('E_MATE_SEARCH_KEY_DEEPSEEK'), false)
+    projectedSearchKey = 'rotated-search-key-redacted-for-test-789'
+    searchGrantStatus = 'granted'
+    await modelPolicy.refresh({ force: true })
+    assert.equal(credentialValues.get('E_MATE_SEARCH_KEY_DEEPSEEK'), projectedSearchKey)
+    searchGrantFailure = Object.assign(
+      new Error('e-Mate enterprise search credential grant is invalid'),
+      { code: 'E_MATE_SEARCH_GRANT_INVALID' },
+    )
+    rejectProjectionMarkerWrite = true
+    await assert.rejects(
+      modelPolicy.refresh({ force: true }),
+      /runtime projection marker failure/u,
+    )
+    assert.equal(projectionRecords.has('active'), false)
+    assert.equal(credentialValues.has('E_MATE_SEARCH_KEY_DEEPSEEK'), false)
+    await assert.rejects(
+      requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })),
+      /runtime projection marker failure/u,
+    )
+    rejectProjectionMarkerWrite = false
+    assert.equal((await modelPolicy.refresh({ force: true })).revision, 7)
+    assert.equal(credentialValues.has('E_MATE_SEARCH_KEY_DEEPSEEK'), false)
+    assert.equal(projectionRecords.get('active').search_status, 'unavailable')
+    assert.deepEqual(
+      await requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })),
+      { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+    )
+    searchGrantFailure = undefined
+    await modelPolicy.refresh({ force: true })
+    assert.equal(credentialValues.get('E_MATE_SEARCH_KEY_DEEPSEEK'), projectedSearchKey)
+    searchGrantFailure = Object.assign(
+      new Error('e-Mate enterprise search credential grant is invalid'),
+      { code: 'E_MATE_SEARCH_GRANT_INVALID' },
+    )
+    rejectSearchUnset = true
+    await assert.rejects(
+      modelPolicy.refresh({ force: true }),
+      /invalid search grant revocation failed/u,
+    )
+    assert.equal(projectionRecords.has('active'), false)
+    assert.equal(credentialValues.get('E_MATE_SEARCH_KEY_DEEPSEEK'), projectedSearchKey)
+    rejectSearchUnset = false
+    assert.equal((await modelPolicy.refresh({ force: true })).revision, 7)
+    assert.equal(credentialValues.has('E_MATE_SEARCH_KEY_DEEPSEEK'), false)
+    searchGrantFailure = undefined
+    await modelPolicy.refresh({ force: true })
+    assert.equal(credentialValues.get('E_MATE_SEARCH_KEY_DEEPSEEK'), projectedSearchKey)
+    rejectProjectionMarkerWrite = true
+    projectedSearchKey = 'marker-failure-search-key-redacted-for-test-321'
+    assert.equal((await modelPolicy.refresh({ force: true })).revision, 7)
+    assert.equal(projectionRecords.has('active'), false)
+    await assert.rejects(
+      requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })),
+      /native runtime model projection is not ready/u,
+    )
+    rejectProjectionMarkerWrite = false
+    await modelPolicy.refresh({ force: true })
+    assert.equal(credentialValues.get('E_MATE_SEARCH_KEY_DEEPSEEK'), projectedSearchKey)
+    const policyCallsBeforeHotPath = calls.policy
     await requestPolicy(
       { agent: { id: 'session-1' }, turn: 1, step: 1 },
       async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' }),
@@ -2659,6 +2942,13 @@ test('enterprise model switch delegates to the target session, keeps its history
     })
     assert.equal(cachedSwitch.result.ok, true)
     assert.deepEqual(session.messages, historyBeforeSwitch)
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
+    openedDomains = 0
+    await applyModelPolicy(modelPolicyContext, modelPolicyConfig)
+    assert.deepEqual(
+      await requestPolicy({}, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })),
+      { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+    )
     providerAvailable = true
     accountSubject = 'account:other-207'
     assert.deepEqual(
@@ -2666,6 +2956,19 @@ test('enterprise model switch delegates to the target session, keeps its history
       { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
     )
     assert.equal(records.get('active').account_subject, accountSubject)
+    accountSubject = 'account:invalid-search-grant-207'
+    credentialValues.set('E_MATE_SEARCH_KEY_DEEPSEEK', 'stale-no-cache-search-key-redacted-for-test-000')
+    searchGrantFailure = Object.assign(
+      new Error('e-Mate enterprise search credential grant is invalid'),
+      { code: 'E_MATE_SEARCH_GRANT_INVALID' },
+    )
+    await assert.rejects(
+      modelPolicy.refresh({ force: true }),
+      /search credential grant is invalid/u,
+    )
+    assert.equal(credentialValues.has('E_MATE_SEARCH_KEY_DEEPSEEK'), false)
+    assert.equal(projectionRecords.has('active'), false)
+    searchGrantFailure = undefined
     providerAvailable = false
     accountSubject = 'account:unavailable-207'
     await assert.rejects(

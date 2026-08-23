@@ -37,7 +37,7 @@ flowchart LR
   Upstream <-->|"loopback HTTP and WebSocket"| Client
 ```
 
-The launcher resolves one profile before the Loader tree mounts. `desktopProfiles.current` remains fixed until that whole Cordis generation is disposed. The `desktop-pnpm` Host row builds `desktopPnpm` from launcher-private facts and the upstream subprocess service. A profile or mode switch disposes the current generation and starts a new one; service references must not cross that boundary.
+The launcher resolves one profile before the Loader tree mounts. `desktopProfiles.current` remains fixed until that whole Cordis generation is disposed. The `desktop-pnpm` Host row builds `desktopPnpm` from launcher-private facts and the upstream subprocess service. Selecting another profile disposes the current generation and starts a new one; service references must not cross that boundary. e-Mate itself has no mode switch: macOS and Windows compose advanced mode, while Linux composes compatibility mode. Another product that mounts this reusable package with an explicit mode still owns its own generation boundary.
 
 The renderer receives ordinary Web Client modules over the existing loopback carrier. It cannot read these Host services directly, and e-Mate adds no preload or Electron IPC bridge for them. A plugin with browser UI continues to use normal DSH Host routes, RPC, client metadata, services, and slots.
 

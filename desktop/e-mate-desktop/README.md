@@ -28,24 +28,15 @@ Both methods return live stdout and stderr streams, a `done` promise that settle
 
 Plugin authors should use the supported contract imports, lifecycle rules, and adaptation patterns in the [Desktop plugin service architecture](docs/plugin-services.md).
 
-## Mode setting and restart boundary
+## Fixed product mode
 
-The `dsh-desktop.mode` field in the DSH home `settings.yaml` document is the single source of truth:
+The e-Mate launcher owns one presentation mode per platform: macOS and Windows use `advanced`, while Linux uses `compatibility`. The installed product does not expose a mode selector. A stale `dsh-desktop.mode` value in `settings.yaml` cannot override this product composition, and there is no parallel mode value in the profile manifest.
 
-```yaml
-dsh-desktop:
-  mode: compatibility # or advanced
-```
-
-The launcher reads the same file resolved by the active `@deepseek-ai/dsh-settings-file` row before composing a generation. The Host registers the `dsh-desktop` namespace with the standard settings service. There is no parallel mode value in the profile manifest.
-
-Users can select the other mode from the tray or edit the DSH home `settings.yaml` document by hand. The tray updates the registered `dsh-desktop` settings namespace, while a manual edit changes the same file observed by the settings provider. A committed change requests one orderly restart: the current Cordis tree disposes first, then Electron relaunches only after a successful zero-code shutdown. The application never hot-swaps root slots, native window materials, or Loader rows inside a live renderer generation.
-
-Linux supports compatibility mode only. Its tray mode command is disabled, and an advanced value is rejected rather than silently falling back.
+The reusable Desktop Host plugin still accepts an explicit mode when another composition mounts it directly. This package-level seam is used by compatibility tests; it is not a second runtime mode switch in e-Mate. The application never hot-swaps root slots, native window materials, or Loader rows inside a live renderer generation.
 
 ## Compatibility mode
 
-`dsh-desktop.mode` defaults to `compatibility`. This mode creates a normal operating-system window with its native frame and loads the official Web surface from the active DSH profile. macOS suppresses the visible page title. Windows retains the native caption icon and displays `e-Mate`, but removes the window menu bar. The operating system owns native title-bar color and appearance.
+Compatibility mode is the fixed Linux presentation and remains available to an explicit package-level Desktop composition. It creates a normal operating-system window with its native frame and loads the official Web surface from the active DSH profile. The operating system owns native title-bar color and appearance.
 
 The desktop Client module validates the mode and platform markers, then has no compatibility-mode effects. It does not provide or replace the `layout` service, register a `root` or `sidebar` occupant, install styles, or change the conversation surface. Compatibility mode preserves the selected profile's own layout, sidebar, and conversation composition; the ordinary `desktop` and `web` profiles therefore keep the official rows unchanged.
 
@@ -57,7 +48,7 @@ Windows PowerShell keeps the upstream `pwsh-sandbox` behavior and Windows ACL co
 
 ## Advanced mode
 
-Advanced mode is an explicitly composed desktop presentation for macOS and Windows. After all user patches have been read, the launcher disables the official `ui-layout` Loader row, keeps the official `ui-sidebar` and `ui-conversation` rows enabled, and applies the selected mode to `desktop-shell`.
+Advanced mode is the fixed e-Mate presentation for macOS and Windows. After all user patches have been read, the launcher disables the official `ui-layout` Loader row, keeps the official `ui-sidebar` and `ui-conversation` rows enabled, and applies the launcher-owned mode to `desktop-shell`.
 
 The desktop Client then provides the `layout` service for its own Cordis-fiber lifetime and registers only the `root` slot occupant. Its root declares seats for the unchanged upstream sidebar, conversation, details, and overlay contributions. The official sidebar remains the `sidebar` occupant and continues to declare the workspace browser, settings shell, and additive footer-action seats. This preserves its component behavior, collapse animation, and third-party extension points while the desktop package owns only frame geometry and native material.
 
@@ -156,7 +147,7 @@ On macOS and Windows, **Open DSH Terminal** opens a system terminal rooted at th
 
 ## Native lifecycle
 
-Closing the window hides it while the Host Cordis tree continues running. The tray reopens the window, selects the active profile, opens the isolated DSH terminal, checks for a stable release, changes mode through the standard settings namespace, or requests an explicit quit. Profile and mode changes both dispose the current Cordis tree before Electron relaunches. Native quit, `SIGINT`, and `SIGTERM` also request disposal before exit; a five-second deadline or a repeated request forces the final exit. Navigation and redirects remain on the exact loopback origin; external HTTP, HTTPS, and mail links open in the operating system, while the renderer uses `contextIsolation`, the Chromium sandbox, and no Node integration.
+Closing the window hides it while the Host Cordis tree continues running. The tray reopens the window, selects the active profile, opens the isolated DSH terminal, checks for a stable release, or requests an explicit quit. A profile change disposes the current Cordis tree before Electron relaunches. The e-Mate product does not expose a mode command; its platform-owned mode is resolved again only when the next generation starts. Native quit, `SIGINT`, and `SIGTERM` also request disposal before exit; a five-second deadline or a repeated request forces the final exit. Navigation and redirects remain on the exact loopback origin; external HTTP, HTTPS, and mail links open in the operating system, while the renderer uses `contextIsolation`, the Chromium sandbox, and no Node integration.
 
 ## Packaging
 
@@ -195,7 +186,7 @@ None. The same DSH Host and client feature plugins assemble model requests.
 ## Known Limitations and Deferred Work
 
 - Adding or removing a profile bundle requires restarting e-Mate; the launcher does not watch profile manifests. Selecting another profile from the tray performs that restart automatically.
-- Switching compatibility/advanced mode always restarts the application by design; a live generation never hot-swaps Loader rows, slot ownership, or native materials.
+- e-Mate does not expose a compatibility/advanced selector. macOS and Windows always compose advanced mode, Linux always composes compatibility mode, and a live generation never hot-swaps Loader rows, slot ownership, or native materials.
 - Advanced mode is unavailable on Linux. Linux continues to use the compatibility presentation.
 - The macOS and Windows tray terminal exposes private `dsh`, `pnpm`, and `node` shims. Separately, the Host runtime exposes the bundled `pnpm` command on the current Electron process `PATH` for ambient compatibility and provides the managed `desktopPnpm` service; none of these commands are added to the system `PATH`, and Linux currently has no desktop terminal command.
 - On Windows, the ambient `pnpm` command and lifecycle Node helper are `.cmd` shims. `desktopPnpm.run()` and `runPlugin()` avoid shell lookup for the manager process by launching exact packaged entries, while upstream `dsh plugin`, PowerShell, and Command Prompt can resolve the ambient shim through a command interpreter. A third-party plugin that calls Node `spawn('pnpm', { shell: false })`, or a lifecycle script that directly executes its `.cmd` `npm_node_execpath` with `shell: false`, remains non-portable and should use the managed service or a shell-aware launch path.

@@ -28,24 +28,15 @@ Cordis 的裸插件导入从持久化 profile 解析。一个范围受限的 Nod
 
 插件作者应遵循 [Desktop 插件 service 架构](docs/plugin-services.zh.md)中记录的受支持 contract import、生命周期规则与适配模式。
 
-## 模式设置与重启边界
+## 固定产品模式
 
-DSH home `settings.yaml` 文档中的 `dsh-desktop.mode` 字段是单一事实源：
+e-Mate Launcher 按平台拥有唯一呈现模式：macOS 与 Windows 固定使用 `advanced`，Linux 固定使用 `compatibility`。正式产品不暴露模式选择器；`settings.yaml` 中遗留的 `dsh-desktop.mode` 不能覆盖这份产品组合，profile manifest 中也不存在第二个模式值。
 
-```yaml
-dsh-desktop:
-  mode: compatibility # 或 advanced
-```
-
-Launcher 会在组合一个 generation 之前，读取当前 `@deepseek-ai/dsh-settings-file` row 解析到的同一份文件。Host 通过标准 settings service 注册 `dsh-desktop` namespace。profile manifest 中没有平行的模式值。
-
-用户可以从托盘选择另一种模式，也可以手工编辑 DSH home 中的 `settings.yaml` 文档。托盘会更新已注册的 `dsh-desktop` settings namespace，手工编辑则修改 settings provider 观察的同一文件。修改提交后会请求一次有序重启：先 dispose 当前 Cordis 树，仅当零退出码的 shutdown 成功时才让 Electron relaunch。应用绝不会在存活的 renderer generation 中热切换 root slot、原生窗口材质或 Loader row。
-
-Linux 只支持兼容模式。其托盘模式命令会被禁用，advanced 值会被拒绝，而不会静默降级。
+可复用的 Desktop Host plugin 在被其他组合直接挂载时仍接受显式模式。兼容性测试会使用这条 package-level seam，但它不是 e-Mate 运行时的第二个模式开关。应用绝不会在存活的 renderer generation 中热切换 root slot、原生窗口材质或 Loader row。
 
 ## 兼容模式
 
-`dsh-desktop.mode` 默认为 `compatibility`。该模式创建带有操作系统原生边框的普通窗口，并加载当前 DSH profile 中的官方 Web surface。macOS 会隐藏可见的页面标题。Windows 保留原生标题栏图标并显示 `e-Mate`，但会移除窗口菜单栏。原生标题栏颜色与外观由操作系统拥有。
+兼容模式是 Linux 的固定呈现，也保留给显式的 package-level Desktop 组合。该模式创建带有操作系统原生边框的普通窗口，并加载当前 DSH profile 中的官方 Web surface。原生标题栏颜色与外观由操作系统拥有。
 
 desktop Client module 会校验模式与平台 marker，随后在兼容模式下不产生任何 effect。它不提供或替换 `layout` service，不注册 `root` 或 `sidebar` occupant，不安装样式，也不改动 conversation surface。兼容模式会保留被选 profile 自身的 layout、sidebar 与 conversation 组合；普通 `desktop` 与 `web` profile 因而会原样保留官方 row。
 
@@ -57,7 +48,7 @@ Cordis row 会在 profile 激活期间登记原生窗口参数。Launcher 只在
 
 ## 高级模式
 
-高级模式是为 macOS 与 Windows 显式组合的 desktop 呈现。Launcher 会在读取全部用户 patch 后禁用官方 `ui-layout` Loader row，保持官方 `ui-sidebar` 与 `ui-conversation` row 启用，并把所选模式应用到 `desktop-shell`。
+高级模式是 e-Mate 在 macOS 与 Windows 上的固定呈现。Launcher 会在读取全部用户 patch 后禁用官方 `ui-layout` Loader row，保持官方 `ui-sidebar` 与 `ui-conversation` row 启用，并把 Launcher 拥有的模式应用到 `desktop-shell`。
 
 desktop Client 随后在自身 Cordis fiber 生命期内提供 `layout` service，并且只注册 `root` slot occupant。其 root 为不变的上游 sidebar、conversation、details 与 overlay contribution 声明 seat。官方 sidebar 继续作为 `sidebar` occupant，并继续声明 workspace browser、settings shell 与纯新增 footer action seat。这样会保留其组件行为、收起动画与第三方扩展点，而 desktop package 只拥有 frame 几何与原生材质。
 
@@ -156,7 +147,7 @@ Release operator 先把两个平台产物上传到按提交隔离的不可变前
 
 ## 原生生命周期
 
-关闭窗口会隐藏窗口，Host Cordis 树继续运行。托盘可以重新打开窗口、选择激活 profile、打开隔离的 DSH 终端、检查 stable release、通过标准 settings namespace 更改模式，或请求显式退出。Profile 与模式切换都会先 dispose 当前 Cordis 树，再让 Electron relaunch。原生退出、`SIGINT` 与 `SIGTERM` 也会在退出前请求 dispose；超过五秒或收到重复请求时会强制完成最终退出。导航与重定向被限制在确切的 loopback origin；外部 HTTP、HTTPS 与邮件链接由操作系统打开；renderer 启用 `contextIsolation` 与 Chromium sandbox，并关闭 Node integration。
+关闭窗口会隐藏窗口，Host Cordis 树继续运行。托盘可以重新打开窗口、选择激活 profile、打开隔离的 DSH 终端、检查 stable release，或请求显式退出。Profile 切换会先 dispose 当前 Cordis 树，再让 Electron relaunch。e-Mate 产品不暴露模式命令；平台拥有的固定模式只在下一个 generation 启动时重新解析。原生退出、`SIGINT` 与 `SIGTERM` 也会在退出前请求 dispose；超过五秒或收到重复请求时会强制完成最终退出。导航与重定向被限制在确切的 loopback origin；外部 HTTP、HTTPS 与邮件链接由操作系统打开；renderer 启用 `contextIsolation` 与 Chromium sandbox，并关闭 Node integration。
 
 ## 打包
 
@@ -195,7 +186,7 @@ corepack.cmd yarn dist:win
 ## 已知限制与暂缓事项
 
 - 添加或删除 profile bundle 后必须重启 e-Mate；Launcher 不监听 profile manifest。从托盘选择其他 profile 时会自动完成该重启。
-- 切换 compatibility/advanced 模式按设计必然重启应用；存活的 generation 不会热切换 Loader row、slot 所有权或原生材质。
+- e-Mate 不暴露 compatibility/advanced 选择器。macOS 与 Windows 始终组合 advanced 模式，Linux 始终组合 compatibility 模式；存活的 generation 不会热切换 Loader row、slot 所有权或原生材质。
 - Linux 不支持高级模式。Linux 继续使用兼容呈现。
 - macOS 与 Windows 托盘终端会提供私有 `dsh`、`pnpm` 与 `node` shim。除此之外，Host runtime 会在当前 Electron 进程的 `PATH` 中公开内置 `pnpm` 命令作为 ambient compatibility，并提供受管 `desktopPnpm` service；这些命令都不会加入系统 `PATH`，Linux 目前也没有 desktop 终端命令。
 - 在 Windows 上，ambient `pnpm` 命令与 lifecycle Node helper 是 `.cmd` shim。`desktopPnpm.run()` 与 `runPlugin()` 会启动准确的已打包 entry，从而避免 manager process 的 shell lookup；上游 `dsh plugin`、PowerShell 与命令提示符则可通过 command interpreter 解析 ambient shim。第三方插件直接调用 Node `spawn('pnpm', { shell: false })`，或 lifecycle script 直接以 `shell: false` 执行其 `.cmd` `npm_node_execpath`，仍属于不可移植行为，应改用受管 service 或 shell-aware 启动路径。

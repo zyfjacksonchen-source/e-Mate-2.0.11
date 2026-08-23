@@ -60,7 +60,9 @@
 - id: web-search-deepseek
   disabled: false
   config:
-    apiKeyEnv: E_MATE_MODEL_KEY_DEEPSEEK
+    apiKeyEnv: E_MATE_SEARCH_KEY_DEEPSEEK
+    baseURL: https://api.deepseek.com/anthropic/v1
+    model: deepseek-v4-flash
 
 - id: tool-web
   disabled: false
