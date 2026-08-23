@@ -52,6 +52,8 @@ const selectedTarget = generationOptions.target === undefined
       return { platform: match[1] ?? match[3], arch: match[2] ?? match[4] }
     })()
 const home = mkdtempSync(join(tmpdir(), 'dsh-desktop-profile-'))
+const previousDshHome = process.env.DSH_HOME
+process.env.DSH_HOME = home
 let ctx
 let releasePackageResolver
 let pnpmRuntime
@@ -61,8 +63,8 @@ const trayItems = []
 
 try {
   // Deliberately inject stale target state: the e-Mate desktop must still boot
-  // its fixed compatibility profile without exposing a mode selector.
-  writeFileSync(join(home, 'settings.yaml'), 'dsh-desktop:\n  mode: advanced\n')
+  // its fixed profile mode without exposing a mode selector.
+  writeFileSync(join(home, 'settings.yaml'), 'dsh-desktop:\n  mode: compatibility\n')
   const selectedBase = loadProfileBaseContract(
     generationOptions.base ?? fileURLToPath(new URL('../base-contract.json', import.meta.url)),
   )
@@ -191,11 +193,11 @@ try {
     }
   }
 
-  const expectedUrl = `http://127.0.0.1:${String(ctx.webServer.port)}/?dsh-desktop-mode=compatibility&dsh-desktop-platform=${selectedTarget.platform}`
+  const expectedUrl = `http://127.0.0.1:${String(ctx.webServer.port)}/?dsh-desktop-mode=${prepared.mode}&dsh-desktop-platform=${selectedTarget.platform}`
   if (mountedSpec?.url !== expectedUrl) {
     throw new Error(`desktop plugin produced an unexpected renderer URL: ${String(mountedSpec?.url)}`)
   }
-  if (mountedSpec?.mode !== 'compatibility') {
+  if (mountedSpec?.mode !== prepared.mode) {
     throw new Error(`desktop plugin produced an unexpected shell mode: ${String(mountedSpec?.mode)}`)
   }
   if (nativeThemeSource !== 'system') {
@@ -227,7 +229,7 @@ try {
     signal: new AbortController().signal,
   })
   if (disclosure.isError || !ctx.tools.schemas(disclosureAgent).some(schema => schema.name === 'office_write')) {
-    throw new Error('assembled Profile Tool Search did not reveal the original office_write Tool')
+    throw new Error(`assembled Profile Tool Search did not reveal the original office_write Tool: ${JSON.stringify(disclosure)}`)
   }
   const response = await fetch(expectedUrl)
   const html = await response.text()
@@ -248,8 +250,8 @@ try {
     '@e-mate/dsh-plugin-vision-toolkit',
     '@kelearns/dsh-navigation-bar',
     '@deepseek-ai/dsh-client-ui-conversation',
-    '@deepseek-ai/dsh-client-ui-layout',
     '@deepseek-ai/dsh-client-ui-sidebar',
+    ...(prepared.mode === 'compatibility' ? ['@deepseek-ai/dsh-client-ui-layout'] : []),
     selectedTarget.platform === 'darwin'
       ? '@deepseek-ai/dsh-client-ui-directory-picker-native'
       : '@deepseek-ai/dsh-client-ui-directory-picker-browse',
@@ -259,13 +261,16 @@ try {
     'dsh-visualize',
   ]) {
     if (!ids.has(id)) {
-      throw new Error(`assembled compatibility Web graph is missing ${id}; got ${[...ids].sort().join(', ')}`)
+      throw new Error(`assembled desktop Web graph is missing ${id}; got ${[...ids].sort().join(', ')}`)
     }
   }
-  for (const id of [selectedTarget.platform === 'darwin'
-    ? '@deepseek-ai/dsh-client-ui-directory-picker-browse'
-    : '@deepseek-ai/dsh-client-ui-directory-picker-native']) {
-    if (ids.has(id)) throw new Error(`assembled compatibility Web graph unexpectedly includes ${id}`)
+  for (const id of [
+    selectedTarget.platform === 'darwin'
+      ? '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+      : '@deepseek-ai/dsh-client-ui-directory-picker-native',
+    ...(prepared.mode === 'advanced' ? ['@deepseek-ai/dsh-client-ui-layout'] : []),
+  ]) {
+    if (ids.has(id)) throw new Error(`assembled desktop Web graph unexpectedly includes ${id}`)
   }
   if (globalThis.__ModuleLoader__ !== undefined || globalThis.window !== undefined) {
     throw new Error('client Loader smoke requires a clean Node global')
@@ -295,8 +300,19 @@ try {
     delete globalThis.window
   }
 } finally {
-  await ctx?.fiber.dispose()
-  releasePackageResolver?.()
-  pnpmRuntime?.dispose()
-  rmSync(home, { recursive: true, force: true })
+  try {
+    await ctx?.fiber.dispose()
+  } finally {
+    try {
+      releasePackageResolver?.()
+    } finally {
+      try {
+        pnpmRuntime?.dispose()
+      } finally {
+        if (previousDshHome === undefined) delete process.env.DSH_HOME
+        else process.env.DSH_HOME = previousDshHome
+        rmSync(home, { recursive: true, force: true })
+      }
+    }
+  }
 }

@@ -28,24 +28,15 @@ Both methods return live stdout and stderr streams, a `done` promise that settle
 
 Plugin authors should use the supported contract imports, lifecycle rules, and adaptation patterns in the [Desktop plugin service architecture](docs/plugin-services.md).
 
-## Mode setting and restart boundary
+## Fixed product mode
 
-The `dsh-desktop.mode` field in the DSH home `settings.yaml` document is the single source of truth:
+The e-Mate launcher owns one presentation mode per platform: macOS and Windows use `advanced`, while Linux uses `compatibility`. The installed product does not expose a mode selector. A stale `dsh-desktop.mode` value in `settings.yaml` cannot override this product composition, and there is no parallel mode value in the profile manifest.
 
-```yaml
-dsh-desktop:
-  mode: compatibility # or advanced
-```
-
-The launcher reads the same file resolved by the active `@deepseek-ai/dsh-settings-file` row before composing a generation. The Host registers the `dsh-desktop` namespace with the standard settings service. There is no parallel mode value in the profile manifest.
-
-Users can select the other mode from the tray or edit the DSH home `settings.yaml` document by hand. The tray updates the registered `dsh-desktop` settings namespace, while a manual edit changes the same file observed by the settings provider. A committed change requests one orderly restart: the current Cordis tree disposes first, then Electron relaunches only after a successful zero-code shutdown. The application never hot-swaps root slots, native window materials, or Loader rows inside a live renderer generation.
-
-Linux supports compatibility mode only. Its tray mode command is disabled, and an advanced value is rejected rather than silently falling back.
+The reusable Desktop Host plugin still accepts an explicit mode when another composition mounts it directly. This package-level seam is used by compatibility tests; it is not a second runtime mode switch in e-Mate. The application never hot-swaps root slots, native window materials, or Loader rows inside a live renderer generation.
 
 ## Compatibility mode
 
-`dsh-desktop.mode` defaults to `compatibility`. This mode creates a normal operating-system window with its native frame and loads the official Web surface from the active DSH profile. macOS suppresses the visible page title. Windows retains the native caption icon and displays `e-Mate`, but removes the window menu bar. The operating system owns native title-bar color and appearance.
+Compatibility mode is the fixed Linux presentation and remains available to an explicit package-level Desktop composition. It creates a normal operating-system window with its native frame and loads the official Web surface from the active DSH profile. The operating system owns native title-bar color and appearance.
 
 The desktop Client module validates the mode and platform markers, then has no compatibility-mode effects. It does not provide or replace the `layout` service, register a `root` or `sidebar` occupant, install styles, or change the conversation surface. Compatibility mode preserves the selected profile's own layout, sidebar, and conversation composition; the ordinary `desktop` and `web` profiles therefore keep the official rows unchanged.
 
@@ -57,7 +48,7 @@ Windows PowerShell keeps the upstream `pwsh-sandbox` behavior and Windows ACL co
 
 ## Advanced mode
 
-Advanced mode is an explicitly composed desktop presentation for macOS and Windows. After all user patches have been read, the launcher disables the official `ui-layout` Loader row, keeps the official `ui-sidebar` and `ui-conversation` rows enabled, and applies the selected mode to `desktop-shell`.
+Advanced mode is the fixed e-Mate presentation for macOS and Windows. After all user patches have been read, the launcher disables the official `ui-layout` Loader row, keeps the official `ui-sidebar` and `ui-conversation` rows enabled, and applies the launcher-owned mode to `desktop-shell`.
 
 The desktop Client then provides the `layout` service for its own Cordis-fiber lifetime and registers only the `root` slot occupant. Its root declares seats for the unchanged upstream sidebar, conversation, details, and overlay contributions. The official sidebar remains the `sidebar` occupant and continues to declare the workspace browser, settings shell, and additive footer-action seats. This preserves its component behavior, collapse animation, and third-party extension points while the desktop package owns only frame geometry and native material.
 
