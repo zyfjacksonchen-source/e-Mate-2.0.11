@@ -2007,3 +2007,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 严格按企业控制面的三类 allowlist 复审后，删除历史 Admin“测试联通”真实推理入口及其管理员模型 Session、状态、类型、文案和测试。管理端继续只保留账户/鉴权、受管模型目录与策略、追加式脱敏审计/用量；没有以健康探针或新 endpoint 替代被删功能。旧 `e-mate.admin.model-session` 名称仅保留为单向迁移清理键，初始化、所有管理请求的 `401` 和退出都会删除它，任何路径都不再读取或使用其内容。
 - 仓库门禁现在递归扫描 Admin 全部可打包脚本扩展（`ts/tsx/mts/cts/js/jsx/mjs/cjs`），以精确依赖集合、唯一同源网络原语和鉴权/`/v1/admin/*` 路由 allowlist 为主；登录只能由该原语使用固定 `/v1/auth/password`，`requestAdmin()` 则先用固定虚拟 HTTPS origin 规范化路径，再只接受 `/v1/admin` 及其子路径（可带 query），最后才进入唯一 `fetch` 调用。直接或拼接的 Responses/图片推理路径、明文或编码 dot-segment、绝对/协议相对 URL、hash 和 `/v1/administer` 近似路径必须在网络前失败；动态第二 `fetch` fixture 同样失败。Tool 边界依赖精确依赖集合、唯一网络出口和本地 Harness Owner，而不维护无限动词黑名单；明显的模型 Tool schema 标记仍失败，同时普通局部 `tools:` 声明不会误报。通用 Analytics 中未接入生产的 dormant 模块保持不变。聚焦证据为 Admin `15/15` 与 production build、Analytics production `4/4` 与 build、`git diff --check` 通过。
 - 首次 Enterprise-only exact-head CI 在业务检查全部通过后，暴露该 Job 的 checkout 没有像现有 Base/发布 Job 一样拉取锁定子模块，使用 Admin/Usage 真实品牌 Token 和 Logo 的干净构建失败。Enterprise-only checkout 现复用仓库已有的 `submodules: recursive`，不复制资产、不改产品边界。
+
+## 2026-08-24 · 2.0.12 S20 Enterprise 运行镜像闭包权限
+
+- `4d7a98d` 的 Analytics 候选曾在生产替换时于监听前退出；旧镜像已自动恢复且保持健康，Auth、Gateway、Web、PostgreSQL 与 Redis 未切换。只读复核确认真实 Docker healthcheck 一直使用 `/healthz`，没有依赖已经按控制面合同删除的 `/runtime/status`，因此不得为通过探针恢复禁用路由。
+- 使用同一候选镜像、同一 Compose 配置和同一 Secret 挂载执行不启动服务的运行用户预检，精确复现 `Cannot find module '@e-mate/admin-contract'`。根因是服务器 root-only 源码归档保留了 workspace package 的 `0700/0600` 权限；镜像仍以 root 复制闭包、再切换到 `10001:0`，导致构建阶段和 root 测试可读，正式 Bun CMD 无权穿过 `/app/packages/admin-contract`。这不是配置、Secret、PostgreSQL、健康探针或企业业务代码回归。
+- 唯一 Docker 运行时边界现在以 `--chown=10001:0` 复制三个服务各自应用、共享 packages 与 node_modules；Analytics、Gateway、Auth 每个最终 stage 都在声明 `USER 10001:0` 后直接 import 正式 production entry，任一 workspace 链接、文件权限或运行时依赖缺失都会令镜像构建失败。没有放宽源码归档权限、以 root 运行服务、恢复禁用 Analytics 模块或增加第二部署路径。正式生产重试仍必须基于合入后的精确提交重新构建，并先通过候选 import、配置/数据库只读预检和 `/healthz` 再原子替换。
