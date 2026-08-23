@@ -64,14 +64,20 @@ const chatRoute: ModelGatewayRoute = {
   input: ['text'],
 };
 const searchCredentialRoute: ModelGatewayRoute = {
-  ...chatRoute,
-  id: 'deepseek-web-search',
-  upstreamModelId: 'deepseek-v4-flash',
-  upstreamBaseUrl: 'https://api.deepseek.com/anthropic/v1',
+  ...route,
+  id: 'gpt-web-search',
+  apiMode: 'responses',
+  upstreamModelId: 'gpt-5.6-luna',
+  upstreamBaseUrl: 'http://43.135.183.53:8080/v1',
+  allowInsecureHttpUpstream: true,
   upstreamApiKey: 'search-route-bootstrap-key-that-is-never-leased',
-  providerId: 'deepseek-official',
-  label: 'DeepSeek Web Search Credential',
-  buttonLabel: 'DeepSeek Web Search Credential',
+  providerId: 'gpt-responses',
+  label: 'GPT Web Search Credential',
+  buttonLabel: 'GPT Web Search Credential',
+  provider: 'Managed GPT Responses',
+  providerMark: 'G',
+  reasoning: false,
+  input: ['text'],
 };
 const limits = {
   tenantRequestsPerMinute: 1_000,
