@@ -45,6 +45,9 @@ function run(args, env = process.env) {
 
 for (const component of components) {
   run(['--dir', component.root, 'install', '--ignore-workspace', '--frozen-lockfile'])
+  if (component.id === '@e-mate/dsh-plugin-find-skill') {
+    run(['--dir', 'upstream/plugins/dsh-find-skill', 'install', '--frozen-lockfile', '--ignore-scripts'])
+  }
   run(['--dir', component.root, 'run', 'build'], command === 'check'
     ? { ...process.env, EMATE_COMPONENT_CHECK: '1' }
     : process.env)

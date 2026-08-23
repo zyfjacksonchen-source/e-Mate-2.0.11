@@ -1955,3 +1955,8 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 当天真实使用暴露的新任务停留旧会话、图片编辑退化、全局 Skill 重复确认、联网搜索错误默认和 Glass 包内动画漂移，不是同一种单元逻辑错误，而是五类证据断层：测试把错误产品默认写成合同、替身只验证调用没有验证用户终态、设备级状态只测单 Session、源码与 emitted/generation/安装字节混为一层，以及真实账号/上游语义没有进入正式候选验收。以后每条用户旅程先记录唯一 Owner、初始状态、用户动作、可见终态、持久化范围、制品层和账号边界；修复只落在首次能观察该不可变式的最低原生 Owner，不按截图在多个调用方补 guard。
 - 仓库现有 component/Base classifier 继续是唯一执行边界。单一兼容热组件只跑 Owner 集成、clean emitted bytes、完整 generation、在线增量更新后的受影响旅程与回滚；共享 DSH/Profile、Base ABI、inventory、锁、Desktop lifecycle、native helper、权限、打包或 updater 变化仍失败关闭到 Base。网络、凭据、OAuth 和模型语义的真实账号门与 lane 无关，受影响就必须执行；没有精确 SHA 的安装/更新终态，只能写 `source fixed` 或 `candidate built`。
 - 三个最小回归已补到既有 Owner：Shell 测试真实挂载 `SessionRouteProjection`，证明 rc.7 复用同一 blank id 时点击新任务仍停在 `/` 空态且只调用一次原生 start（定向 `8/8`）；Find Skill 用第二个运行时实例和同一 global root 再执行真实 `skill_install`，证明重启边界不重复询问而版本/来源/摘要变化仍重新确认（`21/21`）；Glass 测试在 build 后直接读取 `lib/client.js`，要求 `4s`、Reduced Motion 为 `none` 且禁止旧 `6s/12s`（`1/1`）。正式候选仍必须完成安装态新任务点击、真实账号联网搜索、真实 Provider 图片编辑质量、跨会话/应用重启 Skill 复用和 computed style 验收，Mock 或源码字符串不能替代。
+
+## 2026-08-23 · 2.0.12 S11 Find Skill 干净检出构建闭包
+
+- PR `#44` 的第一轮受保护 CI 正确在任何 Base SDK/安装器产出前阻断：本机复用树已有 `upstream/plugins/dsh-find-skill/{,client/}node_modules`，但干净递归 submodule checkout 没有这两棵被忽略的工具链；adapter 的 build 脚本因此在 `pnpm test` 中报 `pinned dsh-find-skill dependencies are missing`。这不是产品运行时依赖，也不能靠本机缓存或重跑解决。
+- 唯一组件 runner 现仅在构建 `@e-mate/dsh-plugin-find-skill` 时，从该固定 gitlink 自带的 `pnpm-lock.yaml` 执行一次 `--frozen-lockfile --ignore-scripts` 工具链准备，再继续原 build/test；普通组件、运行时与插件安装路径不受影响，没有在线运行时安装或第二构建器。release 测试锁住该精确 source root、frozen lock 和禁用 lifecycle scripts，CI 将以新提交从零重跑证明闭包。

@@ -250,6 +250,11 @@ test('component builds reject a pnpm version different from the repository contr
   }
 })
 
+test('find-skill component builds prepare its exact pinned upstream workspace', () => {
+  const runner = readFileSync('scripts/component-run.mjs', 'utf8')
+  assert.match(runner, /component\.id === '@e-mate\/dsh-plugin-find-skill'[\s\S]*?--dir', 'upstream\/plugins\/dsh-find-skill', 'install', '--frozen-lockfile', '--ignore-scripts'/u)
+})
+
 test('GitHub release packs once and validates the same tarball on three platforms', () => {
   const requireFromDsh = createRequire(resolve('packages/dsh/package.json'))
   const { parse } = requireFromDsh('yaml')
