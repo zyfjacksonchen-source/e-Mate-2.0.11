@@ -85,6 +85,7 @@ describe('repository release boundary', () => {
 
   it('locks the fast iteration, immutable publication, and 2.0.11 lessons into repository rules', () => {
     const agents = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8')
+    const targetContract = readFileSync(new URL('../docs/target-contract.md', import.meta.url), 'utf8')
 
     for (const heading of [
       'Fixed version iteration protocol',
@@ -110,6 +111,9 @@ describe('repository release boundary', () => {
       /Source tree is not the packaged product/u,
       /Only this stage may be called "released" or "online"/u,
     ]) assert.match(agents, invariant)
+
+    assert.match(targetContract, /`candidate - paired 2\.0\.11 baseline` must be at most `10,000 ms`/u)
+    assert.doesNotMatch(targetContract, /Startup never exceeds 15 seconds/u)
   })
 
   it('accepts the checked-in base contract and every first-party component', () => {
