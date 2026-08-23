@@ -1,0 +1,96 @@
+@property --emate-glass-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.root {
+  display: inline-flex;
+  align-items: center;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+.button:disabled {
+  cursor: default;
+  opacity: .45;
+}
+
+:global([data-composer-card][data-emate-glass-palette]:not([data-emate-glass-palette='off']))::before {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  inset: -2px;
+  padding: 2px;
+  border-radius: inherit;
+  background: conic-gradient(from var(--emate-glass-angle), var(--emate-glass-a), var(--emate-glass-b), var(--emate-glass-c), var(--emate-glass-a));
+  pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: emate-glass-orbit 12s linear infinite;
+}
+
+:global([data-composer-card][data-emate-glass-palette='brand']) {
+  --emate-glass-a: rgba(244, 84, 18, .18);
+  --emate-glass-b: rgba(255, 132, 46, .95);
+  --emate-glass-c: rgba(255, 194, 120, .25);
+}
+
+:global([data-composer-card][data-emate-glass-palette='rgb']) {
+  --emate-glass-a: #ff4d4f;
+  --emate-glass-b: #52d273;
+  --emate-glass-c: #3d8bfd;
+}
+
+:global([data-composer-card][data-emate-glass-palette='violet']) {
+  --emate-glass-a: rgba(118, 76, 255, .22);
+  --emate-glass-b: #aa79ff;
+  --emate-glass-c: #6945ff;
+}
+
+:global([data-composer-card][data-emate-glass-palette='cyan-pink']) {
+  --emate-glass-a: #36d7e7;
+  --emate-glass-b: #ff71c6;
+  --emate-glass-c: #69f0ff;
+}
+
+@keyframes emate-glass-orbit {
+  to { --emate-glass-angle: 360deg; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :global([data-composer-card][data-emate-glass-palette]:not([data-emate-glass-palette='off']))::before {
+    animation: none;
+    --emate-glass-angle: 45deg;
+  }
+}
+
+@media (forced-colors: active) {
+  :global([data-composer-card][data-emate-glass-palette]:not([data-emate-glass-palette='off']))::before {
+    display: none;
+  }
+}

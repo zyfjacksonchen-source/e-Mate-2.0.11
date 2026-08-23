@@ -52,7 +52,7 @@ describe('e-Mate desktop profile', () => {
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-find-skill', 'lib', 'index.js'))).toBe(true)
     const findSkillPatch = readFileSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-find-skill', 'cordis.patch.yml'), 'utf8')
     expect(findSkillPatch).toContain("cliCommand: 'pnpm dlx skills@1.5.22'")
-    expect(findSkillPatch).toContain('/tree/skills-v2.0.11-r1/skills/connect-feishu-cli')
+    expect(findSkillPatch).toContain('/tree/skills-v2.0.12-r1/skills/connect-feishu-cli')
     expect(findSkillPatch).not.toContain('/tree/main/skills/connect-feishu-cli')
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-mcp-manage', 'lib', 'index.mjs'))).toBe(true)
     expect(existsSync(join(profile, 'node_modules', '@e-mate', 'dsh-plugin-office-skills', 'lib', 'index.js'))).toBe(true)
@@ -101,7 +101,7 @@ describe('e-Mate desktop profile', () => {
     const prepared = prepareDesktopProfile(undefined, home, process.platform, 'e-mate')
     const rows = composeEntries([prepared.patches])
     expect(prepared.profile.name).toBe('e-mate')
-    expect(prepared.mode).toBe('compatibility')
+    expect(prepared.mode).toBe(process.platform === 'linux' ? 'compatibility' : 'advanced')
     expect(rows.find(row => row.id === 'desktop-agent-update')).toEqual(expect.objectContaining({
       name: '@e-mate/desktop/agent-update',
     }))

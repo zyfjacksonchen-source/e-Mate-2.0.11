@@ -23,7 +23,7 @@ test('find-skill is pinned and limits persistent installation to connector sourc
   const tools = await readFile(new URL('../lib/tools.js', import.meta.url), 'utf8')
   const client = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   const runtime = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
-  assert.equal(pkg.version, '2.0.11')
+  assert.equal(pkg.version, '2.0.12')
   assert.equal(pkg.dsh.upstream.commit, '5a7f18b4535835a81de47c0cc2ca8ceb6e97a4e6')
   assert.match(patch, /cliCommand: 'pnpm dlx skills@1\.5\.22'/u)
   assert.match(patch, /registerFindTool: true/u)
@@ -32,7 +32,7 @@ test('find-skill is pinned and limits persistent installation to connector sourc
   assert.match(patch, /registerCommand: false/u)
   assert.match(tools, /agent: exec\.agent/u)
   assert.doesNotMatch(patch, /\bnpx\b/u)
-  assert.match(patch, /tree\/skills-v2\.0\.11-r1\/skills\/connect-feishu-cli/u)
+  assert.match(patch, /tree\/skills-v2\.0\.12-r1\/skills\/connect-feishu-cli/u)
   assert.match(patch, /id: connect-tencent-docs/u)
   assert.match(cli, /subprocess\.spawn/u)
   assert.doesNotMatch(cli, /node:child_process/u)
@@ -51,7 +51,7 @@ test('find-skill is pinned and limits persistent installation to connector sourc
   const catalogSources = config.catalogSkills.map(skill => skill.source)
   assert.deepEqual(config.persistentSkillSources, ['larksuite/cli'])
   assert.equal(catalogSources.every(source => source.includes(
-    '/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.11-r1/skills/connect-',
+    '/zyfjacksonchen-source/e-Mate/tree/skills-v2.0.12-r1/skills/connect-',
   )), true)
 })
 
@@ -240,7 +240,7 @@ function connectorConfig() {
   return {
     catalogSkills: BUNDLED_CONNECTOR_SKILLS.map(name => ({
       id: name,
-      source: `https://github.com/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.11-r1/skills/${name}`,
+      source: `https://github.com/zyfjacksonchen-source/e-Mate/tree/skills-v2.0.12-r1/skills/${name}`,
     })),
   }
 }

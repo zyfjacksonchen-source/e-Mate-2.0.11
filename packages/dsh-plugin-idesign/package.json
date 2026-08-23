@@ -1,0 +1,74 @@
+{
+  "name": "@e-mate/dsh-plugin-idesign",
+  "version": "2.0.12",
+  "description": "e-Mate adaptation of the MIT deepseek-idesign 0.2.0 studio for the pinned DSH rc.7 runtime.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/",
+    "studio/dist/",
+    "vendor/",
+    "pnpm-lock.yaml",
+    "cordis.patch.yml",
+    "README.md",
+    "SOURCE.md",
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    },
+    "upstream": {
+      "repository": "Devin-AXIS/iPolloWork",
+      "package": "deepseek-idesign@0.2.0",
+      "integrity": "sha512-srwVnWHSnuuTgMpkfqfnhJD7OO8BtC1nzY6SUIG+gE2K+odZ1yr+GH/swyNNcRMiOPo3YdCslDGq/bkTYlAlBA=="
+    }
+  },
+  "eMate": {
+    "component": {
+      "schema_version": 1,
+      "id": "@e-mate/dsh-plugin-idesign",
+      "kind": "profile",
+      "base_imports": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-host-webserver",
+        "@deepseek-ai/dsh-workspace",
+        "react"
+      ],
+      "authority_contract": {
+        "effects": ["filesystem-read", "filesystem-write", "network-loopback"],
+        "guards": ["atomic-receipt", "explicit-user-action", "fixed-catalog", "session-scope", "workspace-scope"]
+      },
+      "base_contracts": ["e-mate-desktop-profile-v5-dsh-2bc16230975f"]
+    },
+    "harnessVersion": "0.1.0-rc.7",
+    "harnessCommit": "2bc16230975f6cf02aa1b283b1f86de44007b059",
+    "excludedFeatures": [
+      "proprietary-template",
+      "runtime-cdn-template",
+      "runtime-google-font-template",
+      "arbitrary-workspace-path",
+      "automatic-chat-submit"
+    ]
+  },
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "license": "MIT",
+  "private": true
+}

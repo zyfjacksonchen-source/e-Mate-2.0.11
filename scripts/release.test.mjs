@@ -152,7 +152,7 @@ test('publication accepts only the exact 40-character release commit', () => {
 
 test('R2 immutable readback includes download metadata as well as bytes identity', () => {
   const item = {
-    filename: 'e-mate-dsh-2.0.11.tgz',
+    filename: 'e-mate-dsh-2.0.12.tgz',
     size: 207,
     sha256: DIGEST,
     contentType: 'application/gzip',
@@ -349,7 +349,7 @@ test('GitHub release packs once and validates the same tarball on three platform
 test('download page resolves unsigned desktop installers from the fail-closed R2 manifest', async () => {
   const page = renderDownloadPage(readFileSync('deploy/download-page/index.html', 'utf8'))
   const macGuide = readFileSync('deploy/download-page/install-macos.html', 'utf8')
-  const scriptName = 'site.fc9d1cdb2ddd.js'
+  const scriptName = 'site.f64ce25824c9.js'
   const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
   assert.equal(scriptName.split('.')[1], createHash('sha256').update(script).digest('hex').slice(0, 12))
   const manifestUrl = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json'
@@ -369,8 +369,8 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
   assert.match(page, /未签名/u)
   assert.match(page, /e-Mate 会校验、替换并自动重开/u)
   assert.match(page, /\/ecorex-agent\/admin\//u)
-  assert.match(macGuide, /全新安装 2\.0\.11/u)
-  assert.match(macGuide, /已安装 2\.0\.10 的用户可在应用内确认更新/u)
+  assert.match(macGuide, /全新安装 2\.0\.12/u)
+  assert.match(macGuide, /已安装 2\.0\.11 的用户可在应用内确认更新/u)
   assert.match(macGuide, /\/usr\/bin\/arch -arm64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)
   assert.match(macGuide, /\/usr\/bin\/arch -x86_64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)
   assert.match(macGuide, /Password:.*输入时不会显示任何字符/u)

@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-computer-use",
-  "version": "2.0.11",
+  "version": "2.0.12",
   "description": "e-Mate adapter for Anionex dsh-computer-use on the pinned rc.7 runtime",
   "type": "module",
   "main": "lib/index.js",

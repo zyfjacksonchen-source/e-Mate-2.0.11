@@ -19,7 +19,7 @@ const base: ProfileBaseContract = {
   profile_format: 1,
   harness_version: '0.1.0-rc.7',
   harness_commit: '2bc16230975f6cf02aa1b283b1f86de44007b059',
-  runtime_imports: { '@e-mate/desktop/vision-toolkit': '2.0.11' },
+  runtime_imports: { '@e-mate/desktop/vision-toolkit': '2.0.12' },
   profile_signing_keys: [{
     id: keyId,
     algorithm: 'ed25519',
@@ -30,7 +30,7 @@ const commit = 'a'.repeat(40)
 const payload: ProfileReleasePayload = {
   schema_version: 1,
   product: 'e-Mate',
-  release_version: '2.0.11',
+  release_version: '2.0.12',
   sequence: 7,
   source_commit: commit,
   target: { platform: 'darwin', arch: 'arm64' },
@@ -38,11 +38,11 @@ const payload: ProfileReleasePayload = {
   harness_contract: { version: base.harness_version, commit: base.harness_commit },
   components: [{
     id: '@e-mate/dsh-plugin-memory-evolve',
-    version: '2.0.11',
+    version: '2.0.12',
     kind: 'profile',
     target: null,
     profile_path: 'node_modules/@e-mate/dsh-plugin-memory-evolve',
-    manifest_url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-memory-evolve/v2.0.11/${commit}/manifest.json`,
+    manifest_url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-memory-evolve/v2.0.12/${commit}/manifest.json`,
     manifest_bytes: 123,
     manifest_sha256: 'b'.repeat(64),
     manifest_source_commit: commit,
@@ -69,7 +69,7 @@ describe('signed Profile desired state', () => {
     expect(parseProfileBaseContract(value)).toEqual(base)
     expect(parseProfileBaseContract({
       ...value,
-      runtime_imports: { '@e-mate/plugin': '2.0.11' },
+      runtime_imports: { '@e-mate/plugin': '2.0.12' },
     })).toBeUndefined()
     expect(parseProfileBaseContract({ ...value, ignored: true })).toBeUndefined()
     expect(parseProfileBaseContract({
@@ -129,11 +129,11 @@ describe('signed Profile desired state', () => {
       ...payload,
       components: [{
         id: '@e-mate/dsh-plugin-computer-use',
-        version: '2.0.11',
+        version: '2.0.12',
         kind: 'platform-profile',
         target,
         profile_path: 'node_modules/@e-mate/dsh-plugin-computer-use',
-        manifest_url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-computer-use/v2.0.11/${commit}/darwin-arm64/manifest.json`,
+        manifest_url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-computer-use/v2.0.12/${commit}/darwin-arm64/manifest.json`,
         manifest_bytes: 123,
         manifest_sha256: 'c'.repeat(64),
         manifest_source_commit: commit,

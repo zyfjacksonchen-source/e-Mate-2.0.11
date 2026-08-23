@@ -1,14 +1,14 @@
-# e-Mate 2.0.11 target contract
+# e-Mate 2.0.12 target contract
 
 This file is the implementation source of truth. Development records may add evidence but may not weaken these obligations.
 
 ## Identity and source pins
 
 - Product name: `e-Mate`
-- Repository: `zyfjacksonchen-source/e-Mate-2.0.11`
-- Desktop base candidate: `@e-mate/desktop@2.0.11`
-- Product Profile release: `2.0.11`
-- Accepted predecessor: Desktop `2.0.10` at `65a995fa795d7007dd90818c939c5185b3fc1a1d`; every 2.0.11 change starts from those exact accepted bytes and contracts.
+- Repository: `zyfjacksonchen-source/e-Mate`
+- Desktop base candidate: `@e-mate/desktop@2.0.12`
+- Product Profile release: `2.0.12`
+- Accepted predecessor: e-Mate `2.0.11` at `6a7f4b9d59a1d8970345638946fb6564e2f5f93e`; every 2.0.12 change starts from that exact source tree and its accepted Base v5/Profile contracts.
 - Executable: `e-mate`
 - Harness source: `zyfjacksonchen-source/deepseek-harness@2bc16230975f6cf02aa1b283b1f86de44007b059` (upstream `deepseek-ai/deepseek-harness@99f6f02fecdb7dff40c3fbc9470f5907c29f74ca` plus the accepted bounded prompt, redundant-permission, attachment-overlay dismissal, and e-Mate Base assembly adapters recorded below)
 - Harness source version: `0.1.0-rc.7`
@@ -76,6 +76,8 @@ The product-owned built-in list contains image generation/editing, Office, OCR, 
 
 GenUI is a first-party portable Profile component and Vision Toolkit is a first-party target-specific platform Profile component in the accepted Desktop set, not ecosystem packages hidden inside the Base. GenUI retains the exact pinned upstream Tool/client bundle. Vision registers its upstream DSH Tools, Settings, Skills, subprocess and Web surfaces from one component; each signed target artifact carries the complete offline CPython wheel closure, while the Desktop exposes only the versioned `@e-mate/desktop/vision-toolkit` path to its packaged platform Python. Reintroducing `@omdsh-dev/dsh-genui`, `@anionex/dsh-vision-toolkit`, a Desktop-owned Vision loader row, an online runtime dependency installer, or another model/credential route is a contract failure.
 
+e-Mate 2.0.12 additionally admits two portable Profile components without changing the Base ABI. `@e-mate/dsh-plugin-glass-composer` may style only the existing semantic `data-composer-card` boundary, owns one DSH Settings namespace and one `conversation.input.right` control, and must not inject the index, scan the DOM, store browser-local state, blur the composer, or replace its input lifecycle. `@e-mate/dsh-plugin-idesign` is derived only from the integrity-pinned MIT `deepseek-idesign@0.2.0` artifact, retains the native `conversation.view`, `WorkspaceRegistry`, same-origin `/ipollowork-design`, per-process token, `design/**` path, 20 MiB, symlink and atomic-write boundaries, and may only stage an Agent request in the current draft. Its fixed catalog excludes later Source Available releases, the proprietary WeChat template, runtime-CDN/Google-Fonts templates and any template without bundled license evidence.
+
 Vision is enterprise-policy managed and ready without a user configuration page, so the ordinary e-Mate Settings navigation hides its native Settings section while retaining the component's Tool views, paste input, artifact presentation, health, Skill, subprocess and Host runtime. A hidden product setting must never be implemented by removing the Vision component or its native client graph.
 
 Search MCP uses one fixed HTTPS provider catalog and the native DSH Web/Credentials seams. Its generic capability action uses a masked browser field and the one-way native `credentials.set` API to write only the currently advertised local credential reference; the secret must never enter capability RPC data, `UserQuestions`, Agent arguments/results, Settings, logs, or component manifests. A card that reports setup-required without a reachable native configuration action is not accepted.
@@ -92,6 +94,7 @@ CDP is the first and default path for every webpage read or operation. It uses t
 
 - “Everything is a plugin” means product behavior is delivered through ordinary DSH Profile bundles, client slots, and generated assets. It does not authorize changes to the pinned Harness source, a second plugin loader, a second update service, or Desktop-owned platform lifecycle code inside a product plugin.
 - The Desktop base is the immutable native carrier: Electron, the pinned Harness/runtime closure, the existing Desktop startup and shutdown lifecycle, updater trust root, native helpers, and platform packaging/signing inputs. Browser behavior belongs to the CDP Profile component, not the Base. A Base release retains the 2.0.10 macOS arm64 interactive-shell, x86_64/Rosetta native-readiness, Windows renderer-health, closure, signature, clean-start, and warm-start gates.
+- Startup never exceeds 15 seconds on an accepted installed candidate. An unauthenticated candidate reaches the real visible, AX-readable, clickable login form within that ceiling; its AURA renderer is statically bundled and eagerly mounted with the login route, never fetched or dynamically imported at login time, and failure or delay of WebGL cannot block identity input.
 - An official Profile component is one immutable package or product Profile layer with its own id, version, byte count, SHA-256, provenance, and exact compatibility declaration. Third-party Profile dependencies and bundles remain a separate user-owned overlay; an official update must not install, remove, enable, disable, reorder, or upgrade them.
 - A portable Profile component has `target: null`. A platform Profile component is independently releasable only when the inventory, component manifest and signed desired state bind the same exact tuple: `platform`, `arch`, native `runtime_abi`, `minimum_os`, signing scheme/identity and sorted native closure. The authoritative matrix is `darwin-arm64`, `darwin-x64` and `win32-x64`; each target builds and tests on its matching runner and emits only that target's native bytes. The client selects a platform/architecture desired state before download and rejects a mismatched tuple, native closure, binary format or signing declaration. `minimum_os` records the native capability floor; a capability below that floor stays unavailable without blocking unrelated portable components in the same generation.
 - Compatibility is an explicit tested contract id, never an inferred SemVer range. A component manifest lists the exact accepted Desktop base contract ids and Harness contract id. For example, a component tested only with an rc.7 base is not offered to an rc.6 base. If the installed base is not explicitly listed, update selection must choose a compatible Base release; if none exists, it fails closed without staging the component.

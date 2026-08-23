@@ -15,7 +15,7 @@ import { releasePrefix } from './release-source.mjs'
 
 export const R2_BUCKET = 'emate-desktop-downloads'
 export const R2_PUBLIC_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
-const REPOSITORY = 'zyfjacksonchen-source/e-Mate-2.0.11'
+const REPOSITORY = 'zyfjacksonchen-source/e-Mate'
 const EVIDENCE_FILES = [
   'SHA256SUMS',
   'release-manifest.json',
@@ -105,7 +105,7 @@ export function buildR2Inventory(
   }
   const prefix = releasePrefix(sourceCommit)
   if (manifest.download.manifest_url !== `${R2_PUBLIC_ORIGIN}/${prefix}/release-manifest.json`
-    || manifest.download.tarball_url !== `${R2_PUBLIC_ORIGIN}/${prefix}/e-mate-dsh-2.0.11.tgz`) {
+    || manifest.download.tarball_url !== `${R2_PUBLIC_ORIGIN}/${prefix}/e-mate-dsh-2.0.12.tgz`) {
     throw new Error('R2 release manifest download source is invalid')
   }
   const packageRecords = release.map(item => record(item.path, 'npm-package', publicOrigin, prefix))

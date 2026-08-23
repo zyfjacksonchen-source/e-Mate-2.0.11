@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
+import { AuraField } from './aura-field.tsx'
 import css from './identity.module.css'
 
 interface AgreementDocument {
@@ -361,26 +362,46 @@ export function IdentityGate({ callIdentity }: Props) {
     )
   }
 
+  const loginTitle = state?.ready !== true
+    ? '登录服务尚未就绪'
+    : authView === 'register'
+      ? registration === null ? '创建 e-Mate 账号' : '注册申请已提交'
+      : '欢迎回来'
+  const loginSubtitle = state?.ready !== true
+    ? '正在连接 e-Mate 企业身份服务'
+    : authView === 'register'
+      ? registration === null ? '提交真实资料，等待管理员审核后即可登录' : '管理员审核完成后即可使用账号登录'
+      : '登录 e-Mate，继续与小芯协作'
+
   return createPortal(
-    <main className={css.gate} data-emate-identity-gate="login">
+    <main className={`${css.gate} ${css.loginGate}`} data-emate-identity-gate="login">
+      <AuraField />
+      <header className={css.brandHeader}>
+        <img src="/assets/e-mate/logo.png" alt="e-Mate" />
+        <span>AI OFFICE AGENT</span>
+      </header>
+      <section className={css.brandStory} aria-label="e-Mate 产品介绍">
+        <strong>全场景办公 AI Agent</strong>
+        <p>e‑Mate 是由亦芯打造的桌面端 AI Agent。小芯在同一个工作空间中连接模型、Skills、本地文件与办公工具，帮助用户通过自然语言完成跨应用任务。</p>
+      </section>
       <section className={css.loginPanel} aria-labelledby="emate-login-title">
-        <img className={css.logo} src="/assets/e-mate/logo.png" alt="e-Mate" />
+        <div className={css.loginIntro}>
+          <h1 id="emate-login-title">{loginTitle}</h1>
+          <p>{loginSubtitle}</p>
+        </div>
         {state?.ready !== true ? (
           <div className={css.blocked}>
-            <h1 id="emate-login-title">登录服务尚未就绪</h1>
             <p>{state?.blocker ?? error ?? '正在验证企业身份服务…'}</p>
             <button className={css.primaryButton} type="button" disabled={busy} onClick={() => { void load() }}>重新检查</button>
           </div>
         ) : authView === 'register' && registration !== null ? (
           <div className={css.pending} role="status">
-            <h1 id="emate-login-title">注册申请已提交</h1>
             <p>管理员审核真实姓名并设置每周 Token 用量后，即可使用账号登录。</p>
             <small>申请编号 {registration.registration_id}</small>
             <button className={css.primaryButton} type="button" onClick={() => { setAuthView('login'); setError(null) }}>返回登录</button>
           </div>
         ) : authView === 'register' ? (
           <form className={css.loginForm} onSubmit={event => { void register(event) }}>
-            <h1 id="emate-login-title" className={css.visuallyHidden}>注册 e-Mate</h1>
             <label><span>账号</span><input type="text" autoComplete="username" autoCapitalize="none" spellCheck={false} minLength={3} maxLength={128} value={account} disabled={busy} onChange={event => { setAccount(event.target.value); if (error) setError(null) }} /></label>
             <label><span>真实姓名</span><input type="text" autoComplete="name" minLength={2} maxLength={128} value={realName} disabled={busy} onChange={event => { setRealName(event.target.value); if (error) setError(null) }} /></label>
             <label><span>密码（至少 10 位）</span><input type="password" autoComplete="new-password" minLength={10} maxLength={256} value={registrationPassword} disabled={busy} onChange={event => { setRegistrationPassword(event.target.value); if (error) setError(null) }} /></label>
@@ -394,7 +415,6 @@ export function IdentityGate({ callIdentity }: Props) {
           </form>
         ) : (
           <form className={css.loginForm} onSubmit={event => { void login(event) }}>
-            <h1 id="emate-login-title" className={css.visuallyHidden}>登录 e-Mate</h1>
             <label><span>账号或邮箱</span><input type="text" autoComplete="username" autoCapitalize="none" spellCheck={false} value={identifier} disabled={busy} onChange={event => { setIdentifier(event.target.value); if (error) setError(null) }} /></label>
             <label><span>密码</span><input type="password" autoComplete="current-password" value={password} disabled={busy} onChange={event => { setPassword(event.target.value); if (error) setError(null) }} /></label>
             <label className={css.remember}><input type="checkbox" checked={rememberLogin} disabled={busy} onChange={event => setRememberLogin(event.target.checked)} /><span>保持登录</span></label>

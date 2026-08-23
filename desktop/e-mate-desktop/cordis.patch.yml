@@ -1,10 +1,10 @@
-# Desktop Host operations compose around the existing Web bundle. Compatibility
-# mode keeps upstream ownership of the rendered UI.
+# Desktop Host operations compose around the existing Web bundle. Advanced mode
+# reuses the native Desktop frame and upstream sidebar/conversation surfaces.
 - insert:
     - id: desktop-shell
       name: '@e-mate/desktop'
       config:
-        mode: compatibility
+        mode: advanced
     - id: desktop-terminal
       name: '@e-mate/desktop/terminal'
       disabled: !!js process.platform === 'linux'

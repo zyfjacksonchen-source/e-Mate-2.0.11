@@ -1,0 +1,3 @@
+- insert:
+    - id: emate-glass-composer
+      name: '@e-mate/dsh-plugin-glass-composer'

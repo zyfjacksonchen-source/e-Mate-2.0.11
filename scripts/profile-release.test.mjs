@@ -56,7 +56,7 @@ function fixture() {
       public_key_spki_der_base64: publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
     }],
   })
-  writeJson(join(root, 'desktop/e-mate-desktop/package.json'), { version: '2.0.11', dependencies: {} })
+  writeJson(join(root, 'desktop/e-mate-desktop/package.json'), { version: '2.0.12', dependencies: {} })
   const components = ['fixture-a', 'fixture-b'].map(slug => {
     const id = `@e-mate/dsh-plugin-${slug}`
     const componentRoot = join(root, 'packages', `dsh-plugin-${slug}`)
@@ -66,7 +66,7 @@ function fixture() {
     writeFileSync(join(componentRoot, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n")
     writeJson(join(componentRoot, 'package.json'), {
       name: id,
-      version: '2.0.11',
+      version: '2.0.12',
       type: 'module',
       main: 'lib/index.json',
       files: ['lib', 'cordis.patch.yml', 'pnpm-lock.yaml'],

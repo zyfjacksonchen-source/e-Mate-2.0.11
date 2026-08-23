@@ -19,7 +19,7 @@ import type { DesktopRuntime, DesktopShellSpec } from '../src/runtime.ts'
 import { RENDERER_BOOT_REPORT_PATH, type RendererBootReport } from '../src/renderer-boot-contract.ts'
 
 const config: DesktopConfig = {
-  mode: 'compatibility',
+  mode: 'advanced',
   width: 1280,
   height: 840,
   minWidth: 900,
@@ -129,10 +129,10 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
 }
 
 describe('desktop Host plugin', () => {
-  it('defaults to compatibility mode and validates both schemas', () => {
+  it('defaults to advanced mode and validates both schemas', () => {
     expect(Config({} as DesktopConfig)).toEqual(config)
-    expect(Config({ mode: 'advanced' } as DesktopConfig)).toEqual({ ...config, mode: 'advanced' })
-    expect(DesktopSettingsSchema({} as DesktopSettings)).toEqual({ mode: 'compatibility' })
+    expect(Config({ mode: 'compatibility' } as DesktopConfig)).toEqual({ ...config, mode: 'compatibility' })
+    expect(DesktopSettingsSchema({} as DesktopSettings)).toEqual({ mode: 'advanced' })
     expect(() => Config({ mode: 'custom' } as never)).toThrow()
     expect(String(DESKTOP_SETTINGS_NAMESPACE)).toBe('dsh-desktop')
   })
@@ -184,8 +184,8 @@ describe('desktop Host plugin', () => {
     expect(vi.mocked(harness.ctx.settings.register)).not.toHaveBeenCalled()
     expect(loaderAwait).not.toHaveBeenCalled()
     expect(harness.shell()).toEqual(expect.objectContaining({
-      mode: 'compatibility',
-      url: 'http://127.0.0.1:43120/?dsh-desktop-mode=compatibility&dsh-desktop-platform=darwin',
+      mode: 'advanced',
+      url: 'http://127.0.0.1:43120/?dsh-desktop-mode=advanced&dsh-desktop-platform=darwin',
       productName: 'e-Mate',
       windowTitle: 'e-Mate',
       readThemeSource: expect.any(Function),
@@ -197,7 +197,7 @@ describe('desktop Host plugin', () => {
     harness.notifyTheme('dark')
     expect(harness.setThemeSource).toHaveBeenCalledWith('dark')
 
-    await expect(harness.shell()?.requestModeChange('advanced')).rejects.toThrow('fixed to compatibility')
+    await expect(harness.shell()?.requestModeChange('compatibility')).rejects.toThrow('fixed to advanced')
     expect(harness.update).not.toHaveBeenCalled()
   })
 

@@ -1886,3 +1886,24 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 根 `AGENTS.md` 现固定版本起点、当前 Base-bound DSH/Desktop reference、唯一 owner、Creation Mode、开发时间预算、四类发布 lane、Profile R2/CAS 次序、三目标部分激活恢复、Base→Profile bootstrap→官网顺序、真实父代自然语言更新，以及 `source fixed` / `candidate built` / `installed accepted` / `production released` 四级证据词。以后只有最后一级可称“已上线”；`profile-release.yml` 成功只代表 publication prepared，`mac-smoke` 永不进入 manifest、R2 或官网。
 - 2.0.11 的永久失败账本同时锁住：源码树不等于封装产品、pnpm CLI 树不等于 Desktop Yarn 树、组件 inventory/renderer/UI 只能有一个 owner、Session 下游事件必须显式 ignorable 并冷读、五类权限互不继承、CDP 浏览器优先、外部凭据跨会话复用、跨 Base 先选择再 bootstrap、公网终态与成对性能证据。隐藏能力不等于退役；删除组件必须同时清理 inventory、loader、封装、依赖和安装迁移。
 - 新仓库门禁不另造框架：`scripts/change-impact.test.mjs` 锁定上述语义锚点，并证明 `AGENTS.md`/目标合同只进入 `verification-only`、`run_base=false`、`run_plugins=false`；`scripts/component-release.test.mjs` 将 Desktop accepted set 从“数量 14”收紧为精确 ID 集合，GenUI 与 Vision Toolkit 不可被等量替换悄悄移出，芯助手保持唯一 blocked。聚焦收据为 release-boundary `20/20`、component payload `10/10`，完整 `pnpm run test:impact` 为 `34/34`；当前精确 diff 分类为 `verification-only`，不生成任何产品字节，因此本片明确不运行 Base、DMG、EXE、Profile/R2 或安装态发布。
+
+## 2026-08-23 · 2.0.12 S00 固定基线、范围与直接开发计划
+
+- 2.0.12 从已验收 2.0.11 提交 `6a7f4b9d59a1d8970345638946fb6564e2f5f93e` 开始；唯一 Base 仍为 `e-mate-desktop-profile-v5-dsh-2bc16230975f`，Harness 为 `0.1.0-rc.7@2bc16230975f6cf02aa1b283b1f86de44007b059`，Desktop reference 为 `6074088f5b660206e404b3591fab51fb99c69add`。没有用浮动分支、更新 RC 或另一个 Desktop 壳重新定义“原生”。本版本首次准入 AURA 动态登录页、Desktop 原生 vibrancy 半透明侧栏、Glass Composer 与 iDesign，因修改 Base contract、Desktop、inventory 和新组件集合，唯一 impact classifier 正确给出 `base`；后续已准入且兼容组件的小改仍必须回到 `plugin-only`，不得沿用本次首次 Base 成本。
+- 设计实现只复用现有 Shell/Identity/Sidebar/Composer 语义节点与 Desktop advanced-frame contract。AURA 登录成功后必须卸载动画并释放计时器、Canvas/WebGL 和监听器；半透明侧栏以原生 vibrancy 为主，Reduced Transparency/forced-colors 回退为不透明；Glass 只装饰 `data-composer-card`，不替换输入生命周期；应用图标、小芯形象和 e-Mate Logo 保持不变。iDesign 只采用 SHA-512 固定、MIT 的 `deepseek-idesign@0.2.0`，其原始 tarball 与许可证随组件 vendor，后续 Source Available 版本、专有模板、运行时 CDN/Google Fonts 和无许可模板全部拒绝。
+
+## 2026-08-23 · 2.0.12 S01 无安装构建、全组件合同与 Base ABI 收口
+
+- 遵守本环境“不得 `npm/pnpm install`、不得 `approve-builds`”约束：使用现有 2.0.11 依赖存储和绝对 Node 路径，为当前固定 DSH 源码重建 package-level workspace symlink view。DSH Host/Client TypeScript 与 tsdown、e-Mate Shell、全部 16 个 Desktop accepted components、`packages/dsh` 以及 `@e-mate/desktop` SDK/声明输出均从当前源码成功构建；芯助手继续是唯一 blocked component，没有进入 registry、generation 或 Desktop accepted set。
+- 聚焦收据：Shell `51/51`；Skill Hub Host `11/11` 与 UI `6/6`；better-sidebar `2/2`；CDP `10/10`；Computer Use `2/2`；file-import `6/6`；find-skill `10/10`；GenUI `1/1`；Glass `1/1`；iDesign `3/3`；MCP `4/4`；Memory `4/4`；Office `5/5`；Search MCP `5/5`；Tool Search `7/7`；Vision portable contract `2 passed / 7 native-target skipped`。`packages/dsh` 为 `43/43`，Desktop 类型检查通过且完整 Vitest 为 `50/50` 文件、`428 passed / 3 skipped`；仓库 release boundary、component payload/composition、Profile/R2 与 download-page 测试为 `45/45`，`check-target` 和 `git diff --check` 通过。
+- 门禁捕获并修正四类会在发布后才暴露的问题：find-skill/MCP/managed-profile 的 2.0.11 静态期望未随 accepted set 更新；iDesign 的上游 tarball 错放到只接受 Git submodule 的 external source root；iDesign 实际使用的 rc.7 `dsh-client-ui-conversation`、`dsh-host-webserver` 与 `dsh-workspace` 未进入精确 Base ABI；下载页 JS 改字节后仍沿用旧内容哈希文件名且安装图解仍写 2.0.10→2.0.12。修复只更新各自合同来源，不增加第二分类器、Loader、运行时依赖安装或兼容猜测。
+
+## 2026-08-23 · 2.0.12 S02 Session 冷读回归与后续正式门
+
+- Desktop 完整测试首次以最终 Yarn rc.7 运行图执行时复现 `emate/image-output` 没有保存 `ignorable: true`；原因不是 DSH Session 新设计失效，而是本机复用的 2.0.11 安装依赖早于当前 Desktop patch，源码 patch/lock 与实际测试字节不一致。当前无安装验证树已按仓库 `.yarn/patches` 精确应用 Session writer 与 legacy image reader 后，针对性 `23/23` 和完整 Desktop `428 passed / 3 skipped` 均通过。永久发布仍必须从正式 Desktop lock/patch 图生成最终 `afterPack` 字节，并执行写入、退出、冷读与未知事件失败关闭；不能把本地依赖修补冒充正式封装证据。
+- 本切片只到 `candidate built`。尚未完成的正式门保持失败关闭：Vision 两个 macOS 目标的离线 wheel 与 Desktop packaged Python、Computer Use universal helper、未签名 universal DMG、从 DMG 安装后的 AURA/侧栏/Composer/iDesign/全工具和插件、首 Token/tok/s 对照、2.0.11→2.0.12 自然语言更新/确认/原子重启/回滚、R2 immutable readback、`desktop/latest.json`、官网与未签名图解。上述终态全部通过且公开链无 `mac-smoke` 前，不得称 2.0.12 已发布。
+
+## 2026-08-23 · 2.0.12 S03 AURA 字标与登录启动门
+
+- 真实 Harness 登录页暴露 `e-Mate` 粒子字标在桌面构图中过大。修复只收小现有字标的桌面/窄屏宽度与高度上限并下移窄屏字标，不改 AURA 双态场、13 秒周期、Identity RPC 或登录表单。固定 Harness Host 的 `1280×720` 与 `390×844` 浏览器验收均无横向或纵向溢出，完整 `e-Mate` 分别可见于表单左侧与表单下方；收据为 `artifacts/design-qa/S02-login-aura/emate-wordmark-smaller-1280x720.png` 和 `artifacts/design-qa/S02-login-aura/emate-wordmark-smaller-390x844.png`。
+- 新增启动绝对门：真实安装候选从启动到可见、AX 可读且可点击的 Harness 表面不得超过 15 秒；未登录时以真实登录表单为终点。AURA 已由 `identity.tsx` 静态导入并与登录路由同步预置，禁止动态导入、运行时 CDN 或登录临时下载，WebGL 初始化不得阻塞表单。正式 macOS 包验证器也把原 180 秒健康等待收紧为 15 秒启动硬门，并在收到确认后复核实测 elapsed；聚焦验证为 Shell Identity `13/13`、Shell 全量 `51/51`、macOS release verifier `5/5`。原 clean ≤10 秒、warm p75 ≤5 秒且单次 ≤8 秒的更严格预算继续生效；上述源码与 Host 收据不替代待执行的 DMG 安装态原始计时。

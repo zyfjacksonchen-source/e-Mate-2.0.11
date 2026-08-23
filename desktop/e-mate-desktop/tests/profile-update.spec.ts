@@ -45,7 +45,7 @@ describe('signed Profile update path', () => {
     const payload: ProfileReleasePayload = {
       schema_version: 1,
       product: 'e-Mate',
-      release_version: '2.0.11',
+      release_version: '2.0.12',
       sequence: 1,
       source_commit: commit,
       target,
@@ -53,11 +53,11 @@ describe('signed Profile update path', () => {
       harness_contract: { version: '0.1.0-rc.7', commit: '7'.repeat(40) },
       components: [{
         id: '@e-mate/dsh-plugin-memory-evolve',
-        version: '2.0.11',
+        version: '2.0.12',
         kind: 'profile',
         target: null,
         profile_path: 'node_modules/@e-mate/dsh-plugin-memory-evolve',
-        manifest_url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-memory-evolve/v2.0.11/${commit}/manifest.json`,
+        manifest_url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-memory-evolve/v2.0.12/${commit}/manifest.json`,
         manifest_bytes: 123,
         manifest_sha256: '8'.repeat(64),
         manifest_source_commit: commit,
@@ -82,7 +82,7 @@ describe('signed Profile update path', () => {
       status: 'base-required',
       currentGeneration: 'bundled',
       currentSequence: 0,
-      releaseVersion: '2.0.11',
+      releaseVersion: '2.0.12',
       sequence: 1,
       requiredBaseContracts: ['e-mate-desktop-profile-v5-dsh-2bc16230975f'],
     })
@@ -109,7 +109,7 @@ describe('signed Profile update path', () => {
       }],
     }
     const id = '@e-mate/dsh-plugin-memory-evolve'
-    const version = '2.0.11'
+    const version = '2.0.12'
     const commit = 'a'.repeat(40)
     const dsh = { bundle: { patch: './cordis.patch.yml' } }
     const packageBytes = Buffer.from(`${JSON.stringify({

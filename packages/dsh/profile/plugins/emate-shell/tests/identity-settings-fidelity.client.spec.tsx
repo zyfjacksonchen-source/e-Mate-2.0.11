@@ -5,6 +5,7 @@ import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AccountControl, AccountSettings } from '../src/client/account.tsx'
+import { auraMorphProgress, auraPointCount } from '../src/client/aura-field.tsx'
 import { IdentityGate, type IdentityBootstrap, type RpcResult } from '../src/client/identity.tsx'
 import { SessionRouteProjection } from '../src/client/session-route.tsx'
 import { SettingsChrome, SettingsTrigger } from '../src/client/settings-chrome.tsx'
@@ -35,20 +36,63 @@ afterEach(() => {
   history.replaceState(null, '', '/')
 })
 
-describe('e-Mate 2.0.5 identity and settings fidelity', () => {
-  it('keeps the pinned LoginPage measurements and current SettingsDialog copy', () => {
-    const upstream = readFileSync(join(process.cwd(), '../../../../../upstream/e-mate-2.0.5/desktop/src/v1/styles/layout.css'), 'utf8')
+describe('e-Mate 2.0.12 identity and settings fidelity', () => {
+  it('keeps the AURA login contract and current SettingsDialog copy', () => {
     const identity = readFileSync(join(process.cwd(), 'src/client/identity.module.css'), 'utf8')
+    const identityView = readFileSync(join(process.cwd(), 'src/client/identity.tsx'), 'utf8')
+    const aura = readFileSync(join(process.cwd(), 'src/client/aura-field.tsx'), 'utf8')
+    const sidebar = readFileSync(join(process.cwd(), 'src/client/sidebar.module.css'), 'utf8')
 
-    expect(upstream).toContain('.ex-login-panel {\n  width: min(360px, 100%);')
-    expect(upstream).toContain('.ex-login-logo {\n  width: 172px;\n  height: 40px;')
-    expect(identity).toContain('width: min(386px, 100%);')
-    expect(identity).toContain('padding: max(24px, calc(50dvh - 90px)) 24px 24px;')
-    expect(identity).toContain('width: 172px;\n  height: 40px;')
+    expect(auraPointCount(640)).toBe(4_200)
+    expect(auraPointCount(641)).toBe(11_000)
+    expect(auraMorphProgress(3)).toBe(1)
+    expect(auraMorphProgress(8)).toBe(0)
+    expect(aura).toContain('vec3 fieldColor = vec3(0.5, 0.5, 0.5);')
+    expect(aura).toContain('narrow ? 0 : aspect * 0.34')
+    expect(aura).toContain('const widthFraction = narrow ? 0.74 : 0.46')
+    expect(aura).toContain('const maximumWordHeight = narrow ? 0.18 : 0.32')
+    expect(aura).toContain('narrow ? -0.74 : -0.36')
+    expect(identityView).toContain("import { AuraField } from './aura-field.tsx'")
+    expect(identityView).not.toContain("import('./aura-field")
+    expect(identityView).not.toContain('lazy(() =>')
+    expect(identity).toContain('grid-template-columns: minmax(0, 1fr) minmax(360px, 456px);')
+    expect(identity).toContain('width: min(456px, 100%);')
+    expect(identity).toContain('border-radius: 12px;')
+    expect(aura).toContain("document.addEventListener('visibilitychange', updateVisibility)")
+    expect(aura).toContain('cancelAnimationFrame(frame)')
+    expect(aura).toContain("gl.getExtension('WEBGL_lose_context')?.loseContext()")
+    expect(sidebar).toContain(":global(body[data-dsh-desktop-mode='advanced']) .root")
+    expect(sidebar).toContain('background: color-mix(in srgb, var(--emate-canvas) 76%, rgba(244, 84, 18, .12));')
+    expect(sidebar).not.toContain('backdrop-filter')
 
     render(<SettingsChrome />)
     expect(screen.getByRole('heading', { name: '设置' })).toBeTruthy()
     expect(screen.getByText('管理个人资料、常规设置、知识和记忆。')).toBeTruthy()
+  })
+
+  it('renders the branded AURA login copy without changing the login RPC seam', async () => {
+    const callIdentity = vi.fn(async (endpoint: string): Promise<RpcResult> => endpoint === 'identity.bootstrap'
+      ? {
+          ok: true,
+          value: {
+            schema_version: 1,
+            ready: true,
+            authenticated: false,
+            workspace_unlocked: false,
+            agreements,
+          },
+        }
+      : { ok: false, error: { message: 'unexpected call' } })
+
+    const view = render(<IdentityGate callIdentity={callIdentity} />)
+    expect(await screen.findByRole('heading', { name: '欢迎回来' })).toBeTruthy()
+    expect(screen.getByText('登录 e-Mate，继续与小芯协作')).toBeTruthy()
+    expect(screen.getByText('全场景办公 AI Agent')).toBeTruthy()
+    expect(screen.getByText(/e‑Mate 是由亦芯打造的桌面端 AI Agent/)).toBeTruthy()
+    expect(screen.getByAltText('e-Mate')).toBeTruthy()
+    expect(document.querySelector('[data-aura-field]')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '登录' })).toBeTruthy()
+    view.unmount()
   })
 
   it('renames target plugin chrome to the e-Mate capability center without replacing target settings', async () => {

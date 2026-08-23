@@ -8,7 +8,42 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MACOS_UNIVERSAL_NATIVE_ENTRIES } from './mac-universal.ts'
 
-const RELEASE_HEALTH_TIMEOUT_MS = 180_000
+const RELEASE_STARTUP_CEILING_MS = 15_000
+const RELEASE_SHUTDOWN_TIMEOUT_MS = 10_000
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function waitForExit(pid: number, timeoutMs: number): boolean {
+  const sleeper = new Int32Array(new SharedArrayBuffer(4))
+  const deadline = Date.now() + timeoutMs
+  while (processAlive(pid) && Date.now() < deadline) Atomics.wait(sleeper, 0, 0, 100)
+  return !processAlive(pid)
+}
+
+function terminateProcess(pid: number): void {
+  try { process.kill(pid, 'SIGTERM') } catch { return }
+  if (!waitForExit(pid, RELEASE_SHUTDOWN_TIMEOUT_MS)) {
+    try { process.kill(pid, 'SIGKILL') } catch {}
+  }
+}
+
+function terminateProbeChrome(userDataDir: string): void {
+  const result = spawnSync('/bin/ps', ['-axo', 'pid=,command='], { encoding: 'utf8' })
+  if (result.error !== undefined) throw result.error
+  if (result.status !== 0) throw new Error('/bin/ps failed while cleaning the release browser probe')
+  for (const line of result.stdout.split('\n')) {
+    const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
+    if (match === null || !match[2]!.includes(`--user-data-dir=${userDataDir}`)) continue
+    terminateProcess(Number(match[1]))
+  }
+}
 
 /** Injectable filesystem and command boundaries for release verification. */
 export interface MacReleaseVerificationOptions {
@@ -53,7 +88,7 @@ function launchArchitecture(executable: string, arch: 'arm64' | 'x86_64', root: 
     if (child.pid === undefined) throw new Error(`${arch} packaged application did not start`)
     processGroup = child.pid
     const sleeper = new Int32Array(new SharedArrayBuffer(4))
-    const deadline = Date.now() + RELEASE_HEALTH_TIMEOUT_MS
+    const deadline = startedAt + RELEASE_STARTUP_CEILING_MS
     while (!existsSync(healthAck)) {
       if (existsSync(healthFailure)) {
         throw new Error(`${arch} packaged application failed before ${outcome}: ${readFileSync(healthFailure, 'utf8')}`)
@@ -64,15 +99,20 @@ function launchArchitecture(executable: string, arch: 'arm64' | 'x86_64', root: 
         throw new Error(`${arch} packaged application exited before ${outcome}`)
       }
       if (Date.now() >= deadline) {
-        throw new Error(`${arch} packaged application did not acknowledge ${outcome} within ${String(RELEASE_HEALTH_TIMEOUT_MS / 1000)} seconds`)
+        throw new Error(`${arch} packaged application did not acknowledge ${outcome} within ${String(RELEASE_STARTUP_CEILING_MS / 1000)} seconds`)
       }
       Atomics.wait(sleeper, 0, 0, 200)
     }
-    console.log(`${arch} ${outcome} acknowledged in ${String(Date.now() - startedAt)} ms`)
+    const elapsedMs = Date.now() - startedAt
+    if (elapsedMs > RELEASE_STARTUP_CEILING_MS) {
+      throw new Error(`${arch} packaged application exceeded the 15-second startup ceiling (${String(elapsedMs)} ms)`)
+    }
+    console.log(`${arch} ${outcome} acknowledged in ${String(elapsedMs)} ms`)
   } finally {
     if (processGroup !== undefined) {
-      try { process.kill(-processGroup, 'SIGKILL') } catch {}
+      terminateProcess(-processGroup)
     }
+    terminateProbeChrome(join(root, `dsh-${arch}`, 'runtime', 'cdp-chrome'))
   }
 }
 

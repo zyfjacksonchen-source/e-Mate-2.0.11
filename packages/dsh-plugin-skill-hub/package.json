@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-skill-hub",
-  "version": "2.0.11",
+  "version": "2.0.12",
   "description": "DSH-native Skill Hub catalog, lifecycle, Agent tools, and UI for e-Mate",
   "type": "module",
   "main": "lib/index.js",

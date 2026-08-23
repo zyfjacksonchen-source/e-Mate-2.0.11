@@ -38,7 +38,7 @@ const base: ProfileBaseContract = {
 const payload: ProfileReleasePayload = {
   schema_version: 1,
   product: 'e-Mate',
-  release_version: '2.0.11',
+  release_version: '2.0.12',
   sequence: 2,
   source_commit: 'a'.repeat(40),
   target: { platform: 'darwin', arch: 'arm64' },
@@ -46,11 +46,11 @@ const payload: ProfileReleasePayload = {
   harness_contract: { version: base.harness_version, commit: base.harness_commit },
   components: [{
     id: '@e-mate/dsh-plugin-memory-evolve',
-    version: '2.0.11',
+    version: '2.0.12',
     kind: 'profile',
     target: null,
     profile_path: 'node_modules/@e-mate/dsh-plugin-memory-evolve',
-    manifest_url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-memory-evolve/v2.0.11/${'a'.repeat(40)}/manifest.json`,
+    manifest_url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/components/dsh-plugin-memory-evolve/v2.0.12/${'a'.repeat(40)}/manifest.json`,
     manifest_bytes: 100,
     manifest_sha256: 'b'.repeat(64),
     manifest_source_commit: 'a'.repeat(40),

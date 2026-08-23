@@ -87,6 +87,20 @@
       "cli": true
     },
     {
+      "id": "@e-mate/dsh-plugin-glass-composer",
+      "root": "packages/dsh-plugin-glass-composer",
+      "kind": "profile",
+      "desktop": "hot-profile",
+      "cli": true
+    },
+    {
+      "id": "@e-mate/dsh-plugin-idesign",
+      "root": "packages/dsh-plugin-idesign",
+      "kind": "profile",
+      "desktop": "hot-profile",
+      "cli": true
+    },
+    {
       "id": "@e-mate/dsh-plugin-mcp-manage",
       "root": "packages/dsh-plugin-mcp-manage",
       "kind": "profile",

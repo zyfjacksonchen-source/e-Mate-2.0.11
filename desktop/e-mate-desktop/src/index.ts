@@ -37,7 +37,7 @@ export interface DesktopSettings {
 
 /** Schema registered with the standard settings service. */
 export const DesktopSettingsSchema: z<DesktopSettings> = z.object({
-  mode: z.union(['compatibility', 'advanced'] as const).default('compatibility'),
+  mode: z.union(['compatibility', 'advanced'] as const).default('advanced'),
 })
 
 /** Native window configuration. */
@@ -56,7 +56,7 @@ export interface Config {
 
 /** Validated native window configuration. */
 export const Config: z<Config> = z.object({
-  mode: z.union(['compatibility', 'advanced'] as const).default('compatibility'),
+  mode: z.union(['compatibility', 'advanced'] as const).default('advanced'),
   width: z.number().step(1).min(800).default(1280),
   height: z.number().step(1).min(600).default(840),
   minWidth: z.number().step(1).min(640).default(900),
@@ -151,7 +151,7 @@ export function apply(ctx: Context, config: Config): void {
       resourceRoots: () => workspaceRegistry.list().map(workspace => workspace.path),
       requestQuit: appExit,
       requestModeChange: async () => {
-        throw new Error('@e-mate/desktop: shell mode is fixed to compatibility')
+        throw new Error(`@e-mate/desktop: shell mode is fixed to ${config.mode}`)
       },
     }),
     '@e-mate/desktop: native shell generation',

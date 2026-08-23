@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
@@ -12,9 +13,9 @@ const bundledConnectorSkills = [
   'connect-dingtalk',
   'connect-wechat-bot',
 ]
-const run = (cwd, ...args) => {
-  const result = spawnSync('pnpm', args, { cwd, encoding: 'utf8', stdio: 'pipe' })
-  if (result.status !== 0) throw new Error(`${args.join(' ')} failed:\n${result.stdout}${result.stderr}`)
+const runNode = (cwd, entry, ...args) => {
+  const result = spawnSync(process.execPath, [entry, ...args], { cwd, encoding: 'utf8', stdio: 'pipe' })
+  if (result.status !== 0) throw new Error(`${entry} ${args.join(' ')} failed:\n${result.stdout}${result.stderr}`)
 }
 const bundleRuntime = () => {
   const result = spawnSync(process.execPath, [
@@ -41,9 +42,12 @@ function replaceSection(source, start, end, replacement, label) {
   return `${source.slice(0, from)}${replacement}${source.slice(to)}`
 }
 
-run(upstream, 'install', '--frozen-lockfile', '--config.minimumReleaseAge=0')
-run(upstream, 'build')
-run(join(upstream, 'client'), 'build')
+if (!existsSync(join(upstream, 'node_modules')) || !existsSync(join(upstream, 'client/node_modules'))) {
+  throw new Error('pinned dsh-find-skill dependencies are missing; prepare the workspace once before component builds')
+}
+runNode(upstream, resolve(upstream, 'node_modules/typescript/bin/tsc'), '-p', 'tsconfig.json')
+runNode(join(upstream, 'client'), resolve(upstream, 'client/node_modules/typescript/bin/tsc'), '-p', 'tsconfig.json')
+runNode(join(upstream, 'client'), resolve(upstream, 'client/node_modules/tsdown/dist/run.mjs'), '--env.DSH_BUILD_FACE', 'client')
 await rm(join(root, 'lib'), { recursive: true, force: true })
 await cp(join(upstream, 'lib'), join(root, 'lib'), { recursive: true })
 await cp(join(root, 'overrides/emate-safety.mjs'), join(root, 'lib/emate-safety.js'))

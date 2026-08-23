@@ -108,7 +108,7 @@ describe('desktop profile composition', () => {
     })
     expect(inserted).toContainEqual(expect.objectContaining({
       name: DESKTOP_PACKAGE_NAME,
-      config: { mode: 'compatibility' },
+      config: { mode: 'advanced' },
     }))
     expect(patches).toContainEqual(expect.objectContaining({
       id: 'webserver',
@@ -143,7 +143,7 @@ describe('desktop profile composition', () => {
     expect(readFileSync(prepared.rootConfig, 'utf8')).toBe('[]\n')
     expect(prepared.homeDir).toBe(home)
     expect(fileURLToPath(prepared.bareModuleBaseUrl)).toBe(join(prepared.profile.dir, 'package.json'))
-    expect(prepared.mode).toBe('compatibility')
+    expect(prepared.mode).toBe('advanced')
 
     const rows = composeEntries([prepared.patches])
     for (const [id, name] of [
@@ -154,7 +154,7 @@ describe('desktop profile composition', () => {
       const matching = rows.filter(row => row.id === id)
       expect(matching).toHaveLength(1)
       expect(matching[0]).toEqual(expect.objectContaining({ name }))
-      expect(matching[0]?.disabled).toBeFalsy()
+      expect(matching[0]?.disabled).toBe(id === 'ui-layout')
     }
     expect(rows.find(row => row.id === 'directory-picker')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-host-directory-picker-auto',
@@ -221,34 +221,38 @@ describe('desktop profile composition', () => {
     })
     expect(rows.find(row => row.id === 'desktop-shell')).toEqual(expect.objectContaining({
       name: '@e-mate/desktop',
-      config: expect.objectContaining({ mode: 'compatibility' }),
+      config: expect.objectContaining({ mode: 'advanced' }),
     }))
   })
 
-  it('keeps compatibility mode fixed when stale settings request advanced mode', () => {
+  it('keeps advanced mode fixed when stale settings request compatibility mode', () => {
     const home = temporaryHome()
-    writeFileSync(join(home, 'settings.yaml'), 'dsh-desktop:\n  mode: advanced\n')
+    writeFileSync(join(home, 'settings.yaml'), 'dsh-desktop:\n  mode: compatibility\n')
 
     const prepared = prepareDesktopProfile(undefined, home, 'darwin')
     const rows = composeEntries([prepared.patches])
 
-    expect(prepared.mode).toBe('compatibility')
+    expect(prepared.mode).toBe('advanced')
     expect(rows.find(row => row.id === 'desktop-shell')).toEqual(expect.objectContaining({
       disabled: false,
-      config: expect.objectContaining({ mode: 'compatibility' }),
+      config: expect.objectContaining({ mode: 'advanced' }),
     }))
     expect(rows.find(row => row.id === 'settings')).toEqual(expect.objectContaining({
       config: expect.objectContaining({ dshHome: home }),
     }))
   })
 
-  it('reads JSON settings and defaults an absent desktop namespace to compatibility', () => {
+  it('reads JSON settings and defaults an absent desktop namespace to advanced', () => {
     const home = temporaryHome()
     const path = join(home, 'desktop-settings.json')
     writeFileSync(path, JSON.stringify({ 'dsh-desktop': { mode: 'advanced' } }))
 
     expect(readDesktopShellMode({ path })).toBe('advanced')
-    expect(desktopShellModeFromSettings({ unrelated: { enabled: true } })).toBe('compatibility')
+    expect(desktopShellModeFromSettings({ unrelated: { enabled: true } })).toBe('advanced')
+  })
+
+  it('keeps Linux on the supported compatibility fallback', () => {
+    expect(prepareDesktopProfile(undefined, temporaryHome(), 'linux').mode).toBe('compatibility')
   })
 
   it('rejects invalid settings roots, sections, modes, and YAML', () => {

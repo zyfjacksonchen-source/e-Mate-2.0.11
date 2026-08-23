@@ -91,7 +91,7 @@ def assert_arch(data: bytes, target: str) -> None:
 
 
 def fetch(url: str, expected_bytes: int, expected_sha: str) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": "e-mate-vision-wheel-builder/2.0.11"})
+    request = urllib.request.Request(url, headers={"User-Agent": "e-mate-vision-wheel-builder/2.0.12"})
     with urllib.request.urlopen(request, timeout=60) as response:
         data = response.read(expected_bytes + 1)
     if len(data) != expected_bytes or sha256(data) != expected_sha:

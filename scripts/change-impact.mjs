@@ -6,7 +6,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const BASE_CONTRACT_PATH = 'desktop/e-mate-desktop/base-contract.json'
-export const ACCEPTED_PREDECESSOR = '65a995fa795d7007dd90818c939c5185b3fc1a1d'
+export const ACCEPTED_PREDECESSOR = '6a7f4b9d59a1d8970345638946fb6564e2f5f93e'
 export const PRODUCT_UI_REFERENCE = Object.freeze({
   repository: 'zyfjacksonchen-source/ECoreX',
   path: 'upstream/e-mate-2.0.5',
@@ -630,7 +630,7 @@ function failureResult(paths, error) {
   })
 }
 
-/** Require every release candidate to descend from the one accepted 2.0.10 commit. */
+/** Require every release candidate to descend from the accepted 2.0.11 baseline. */
 export function assertAcceptedPredecessor(root, head) {
   if (!SHA40.test(head)) throw new Error('head must be a full lowercase commit id')
   try {
@@ -639,7 +639,7 @@ export function assertAcceptedPredecessor(root, head) {
       stdio: 'ignore',
     })
   } catch {
-    throw new Error(`release head does not descend from accepted 2.0.10 ${ACCEPTED_PREDECESSOR}`)
+    throw new Error(`release head does not descend from accepted 2.0.11 ${ACCEPTED_PREDECESSOR}`)
   }
 }
 

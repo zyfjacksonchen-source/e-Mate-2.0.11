@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-search-mcp",
-  "version": "2.0.11",
+  "version": "2.0.12",
   "description": "e-Mate adapter for the pinned dsh-search-mcp provider",
   "type": "module",
   "license": "MIT",

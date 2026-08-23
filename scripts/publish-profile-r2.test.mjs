@@ -62,7 +62,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
       public_key_spki_der_base64: publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
     }],
   })
-  writeJson(join(root, 'desktop/e-mate-desktop/package.json'), { version: '2.0.11', dependencies: {} })
+  writeJson(join(root, 'desktop/e-mate-desktop/package.json'), { version: '2.0.12', dependencies: {} })
   writeJson(join(root, 'packages/dsh/profile/component-inventory.json'), { schema_version: 1, components: [{
     id: componentId,
     root: 'packages/dsh-plugin-fixture',
@@ -75,7 +75,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
   writeFileSync(join(componentRoot, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n")
   writeJson(join(componentRoot, 'package.json'), {
     name: componentId,
-    version: '2.0.11',
+    version: '2.0.12',
     type: 'module',
     main: 'lib/index.json',
     files: ['lib', 'cordis.patch.yml', 'pnpm-lock.yaml'],

@@ -417,7 +417,7 @@ export async function apply(ctx, config = {}) {
       query: { type: 'string', description: 'Search text; omit for the catalog.' },
       category: { type: 'string', enum: ['third_party', 'content_creation', 'office_productivity'] },
       tag: { type: 'string' },
-      cursor: { type: 'string', description: 'Opaque next_cursor returned by the preceding page.' },
+      cursor: { type: 'string', description: 'Opaque next_cursor returned by the preceding page. Omit on the first page; never invent a cursor or send an empty value.' },
       limit: { type: 'integer', description: 'Page size from 1 to 100.' },
     },
     output: jsonOutput,

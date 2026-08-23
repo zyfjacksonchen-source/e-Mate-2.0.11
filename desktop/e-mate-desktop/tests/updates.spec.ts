@@ -131,9 +131,9 @@ describe('desktop update Host plugin', () => {
       currentGeneration: 'bundled',
       currentSequence: 0,
       generationId: 'a'.repeat(64),
-      releaseVersion: '2.0.11',
+      releaseVersion: '2.0.12',
       sequence: 2,
-      changedComponents: [{ id: '@e-mate/dsh-plugin-memory-evolve', version: '2.0.11', bytes: 321 }],
+      changedComponents: [{ id: '@e-mate/dsh-plugin-memory-evolve', version: '2.0.12', bytes: 321 }],
       downloadBytes: 321,
       release: {} as ProfileUpdateAvailable['release'],
     } satisfies ProfileUpdateAvailable
@@ -148,7 +148,7 @@ describe('desktop update Host plugin', () => {
     await expect(harness.runInteractiveUpdate()).resolves.toEqual({
       status: 'scheduled',
       installedVersion: '2.0.0',
-      latestVersion: '2.0.11',
+      latestVersion: '2.0.12',
       updateKind: 'components',
       componentGeneration: release.generationId,
       components: ['@e-mate/dsh-plugin-memory-evolve'],
@@ -167,9 +167,9 @@ describe('desktop update Host plugin', () => {
       currentGeneration: 'bundled',
       currentSequence: 0,
       generationId: 'b'.repeat(64),
-      releaseVersion: '2.0.11',
+      releaseVersion: '2.0.12',
       sequence: 4,
-      changedComponents: [{ id: '@e-mate/dsh-client-shell', version: '2.0.11', bytes: 99 }],
+      changedComponents: [{ id: '@e-mate/dsh-client-shell', version: '2.0.12', bytes: 99 }],
       downloadBytes: 99,
       release: {} as ProfileUpdateAvailable['release'],
     } satisfies ProfileUpdateAvailable
@@ -199,7 +199,7 @@ describe('desktop update Host plugin', () => {
         status: 'base-required' as const,
         currentGeneration: 'bundled',
         currentSequence: 0,
-        releaseVersion: '2.0.11',
+        releaseVersion: '2.0.12',
         sequence: 3,
         requiredBaseContracts: ['e-mate-desktop-profile-v1-dsh-rc7'],
       })),
@@ -211,7 +211,7 @@ describe('desktop update Host plugin', () => {
     await expect(harness.runInteractiveUpdate()).resolves.toEqual({
       status: 'base-required',
       installedVersion: '2.0.0',
-      latestVersion: '2.0.11',
+      latestVersion: '2.0.12',
       requiredBaseContracts: ['e-mate-desktop-profile-v1-dsh-rc7'],
     })
     expect(profile.confirm).not.toHaveBeenCalled()

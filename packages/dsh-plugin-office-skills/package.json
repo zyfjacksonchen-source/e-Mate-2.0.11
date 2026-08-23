@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-office-skills",
-  "version": "2.0.11",
+  "version": "2.0.12",
   "description": "Clean-room DOCX, PDF, XLSX, and PPTX skills for the e-Mate profile",
   "type": "module",
   "main": "lib/index.js",
@@ -32,7 +32,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate-2.0.11.git",
+    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate.git",
     "directory": "packages/dsh-plugin-office-skills"
   },
   "engines": {

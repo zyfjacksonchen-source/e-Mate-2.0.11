@@ -15,7 +15,7 @@
   inset: 0;
   min-width: 320px;
   min-height: 0;
-  padding: max(24px, calc(50dvh - 90px)) 24px 24px;
+  padding: 16px;
   box-sizing: border-box;
   display: flex;
   align-items: flex-start;
@@ -41,22 +41,131 @@
   --emate-danger: oklch(0.72 0.18 28);
 }
 
-.loginPanel {
-  width: min(386px, 100%);
-  flex: none;
+.loginGate {
+  --emate-canvas: #050505;
+  --emate-workspace: #0b0b0b;
+  --emate-surface: #141414;
+  --emate-raised: #1b1b1b;
+  --emate-hover: #202020;
+  --emate-ink: #f7f4f1;
+  --emate-muted: #99938e;
+  --emate-rule: rgba(255, 255, 255, .14);
+  --emate-brand: #f45412;
+  --emate-brand-ink: #fff;
+  --emate-danger: #ff7c6b;
+  padding: clamp(86px, 10vh, 124px) clamp(28px, 6vw, 92px) clamp(42px, 7vh, 82px);
   display: grid;
-  gap: 24px;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 456px);
+  align-items: center;
+  justify-content: stretch;
+  gap: clamp(48px, 8vw, 140px);
+  overflow: hidden;
+  color: var(--emate-ink);
+  background: #050505;
 }
 
-.logo {
-  width: 172px;
-  height: 40px;
+:global(body[data-ds-dark-theme]) .loginGate {
+  --emate-canvas: #050505;
+  --emate-workspace: #0b0b0b;
+  --emate-surface: #141414;
+  --emate-raised: #1b1b1b;
+  --emate-hover: #202020;
+  --emate-ink: #f7f4f1;
+  --emate-muted: #99938e;
+  --emate-rule: rgba(255, 255, 255, .14);
+  --emate-brand-ink: #fff;
+  --emate-danger: #ff7c6b;
+}
+
+.brandHeader {
+  position: absolute;
+  z-index: 2;
+  top: 28px;
+  left: clamp(28px, 4.5vw, 72px);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.brandHeader img {
+  width: 154px;
+  height: 36px;
   display: block;
   object-fit: contain;
   object-position: left center;
+  filter: invert(1) hue-rotate(180deg);
 }
 
-:global(body[data-ds-dark-theme]) .logo,
+.brandHeader span {
+  padding-left: 16px;
+  border-left: 1px solid rgba(255, 255, 255, .18);
+  color: rgba(255, 255, 255, .48);
+  font: 500 10px/1 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  letter-spacing: .18em;
+}
+
+.brandStory {
+  position: relative;
+  z-index: 2;
+  width: min(560px, 100%);
+  align-self: end;
+  padding-bottom: 8px;
+}
+
+.brandStory strong {
+  display: block;
+  margin-bottom: 14px;
+  color: #fff;
+  font-size: clamp(24px, 2.7vw, 42px);
+  line-height: 1.14;
+  letter-spacing: -.035em;
+}
+
+.brandStory p {
+  max-width: 530px;
+  margin: 0;
+  color: rgba(255, 255, 255, .58);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.loginPanel {
+  position: relative;
+  z-index: 3;
+  width: min(456px, 100%);
+  max-height: calc(100dvh - 132px);
+  padding: clamp(28px, 4.6vh, 46px);
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 18px;
+  display: grid;
+  gap: 26px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: rgba(10, 10, 10, .94);
+  box-shadow: 0 30px 100px rgba(0, 0, 0, .46);
+}
+
+.loginIntro h1,
+.loginIntro p {
+  margin: 0;
+}
+
+.loginIntro h1 {
+  color: #fff;
+  font-size: clamp(30px, 3vw, 42px);
+  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: -.04em;
+}
+
+.loginIntro p {
+  margin-top: 10px;
+  color: var(--emate-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 :global(body[data-ds-dark-theme]) .agreementHeader img {
   filter: invert(1) hue-rotate(180deg);
 }
@@ -73,7 +182,7 @@
 }
 
 .loginForm > label:not(.remember) > span:first-child {
-  color: var(--emate-muted);
+  color: rgba(255, 255, 255, .66);
   font-size: 12px;
   line-height: 16px;
 }
@@ -84,7 +193,7 @@
   padding: 0 12px;
   box-sizing: border-box;
   border: 1px solid var(--emate-rule);
-  border-radius: 10px;
+  border-radius: 12px;
   outline: 2px solid transparent;
   outline-offset: 1px;
   color: var(--emate-ink);
@@ -144,8 +253,6 @@
   margin: 0;
 }
 
-.pending h1,
-.blocked h1,
 .agreementHeader h1 {
   font-size: 20px;
   line-height: 28px;
@@ -168,10 +275,10 @@
 }
 
 .gate button {
-  min-height: 32px;
+  min-height: 40px;
   padding: 0 12px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -197,6 +304,10 @@
   font-weight: 600;
 }
 
+.loginGate .primaryButton {
+  min-height: 46px;
+}
+
 .gate button:disabled {
   cursor: not-allowed;
   opacity: .5;
@@ -209,7 +320,6 @@
   line-height: 16px;
 }
 
-.blocked h1,
 .blocked p,
 .agreementHeader h1,
 .agreementHeader p,
@@ -325,8 +435,42 @@
   }
 }
 
+@media (max-width: 900px) {
+  .loginGate {
+    grid-template-columns: minmax(0, 456px);
+    justify-content: center;
+    padding-inline: 24px;
+  }
+
+  .brandStory {
+    display: none;
+  }
+}
+
 @media (max-width: 640px) {
   .gate { padding: max(16px, calc(50dvh - 90px)) 16px 16px; }
+  .loginGate {
+    padding: 76px 16px 16px;
+    align-items: center;
+  }
+  .brandHeader {
+    top: 18px;
+    left: 18px;
+    gap: 10px;
+  }
+  .brandHeader img {
+    width: 116px;
+    height: 28px;
+  }
+  .brandHeader span {
+    padding-left: 10px;
+    font-size: 8px;
+  }
+  .loginPanel {
+    max-height: calc(100dvh - 92px);
+    padding: 24px;
+    gap: 22px;
+  }
   .gate button { min-height: 44px; }
   .agreementPanel { max-height: calc(100dvh - 16px); }
   .agreementHeader { align-items: flex-start; flex-direction: column; gap: 10px; }
@@ -349,6 +493,10 @@
     --emate-brand: Highlight;
     --emate-brand-ink: HighlightText;
     --emate-danger: CanvasText;
+  }
+
+  .loginGate {
+    background: Canvas;
   }
 }
 

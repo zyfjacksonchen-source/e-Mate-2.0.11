@@ -1,4 +1,4 @@
-/** Small dependency-free CDP client restricted to a user-enabled loopback endpoint. */
+/** Small dependency-free CDP client restricted to an e-Mate-managed loopback endpoint. */
 
 const MAX_JSON_BYTES = 1024 * 1024
 const MAX_TARGETS = 256
