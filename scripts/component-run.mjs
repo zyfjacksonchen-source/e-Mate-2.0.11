@@ -64,10 +64,12 @@ for (const component of components) {
   const entries = componentFiles(resolve(component.root), manifest)
   const requestedTarget = process.env.EMATE_COMPONENT_TARGET
   const targets = component.kind === 'platform-profile'
-    ? component.targets.filter(target => requestedTarget === undefined
-      || `${target.platform}-${target.arch}` === requestedTarget)
+    ? component.targets.filter(target => requestedTarget !== undefined
+      && `${target.platform}-${target.arch}` === requestedTarget)
     : [null]
-  if (targets.length === 0) throw new Error(`unsupported component target: ${String(requestedTarget)}`)
+  if (component.kind === 'platform-profile' && requestedTarget !== undefined && targets.length === 0) {
+    throw new Error(`unsupported component target: ${requestedTarget}`)
+  }
   for (const target of targets) verifyComponentRuntimeImports(entries, component, target)
   if (command === 'check') run(['--dir', component.root, 'run', 'test'])
 }

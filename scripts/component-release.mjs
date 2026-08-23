@@ -206,7 +206,7 @@ export function verifyComponentRuntimeImports(entries, component, target = null)
   const baseImports = componentRuntimeImports(targetEntries(entries, component, target))
   if (JSON.stringify(baseImports) !== JSON.stringify(component.base_imports)) {
     const label = target === null ? 'portable' : `${target.platform}-${target.arch}`
-    throw new Error(`component runtime imports do not match its fixed Base ABI declaration: ${component.id} ${label}`)
+    throw new Error(`component runtime imports do not match its fixed Base ABI declaration: ${component.id} ${label}; declared ${JSON.stringify(component.base_imports)}, emitted ${JSON.stringify(baseImports)}`)
   }
   return baseImports
 }
