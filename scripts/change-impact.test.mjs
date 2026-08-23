@@ -519,6 +519,8 @@ describe('repository release boundary', () => {
     assert.match(workflow, /source_sha="\$\(jq -er \.head_sha <<<"\$run_json"\)"/u)
     assert.match(workflow, /test "\$\(jq -er \.conclusion <<<"\$run_json"\)" = success/u)
     assert.match(workflow, /push\)(?:.|\n)*?test "\$source_sha" = "\$GITHUB_SHA"(?:.|\n)*?pull_request\)(?:.|\n)*?commits\/\$source_sha\/pulls(?:.|\n)*?\.merged_at != null(?:.|\n)*?\.merge_commit_sha(?:.|\n)*?\.base\.sha(?:.|\n)*?git\/commits\/\$source_sha(?:.|\n)*?\$merge_sha\^\{tree\}(?:.|\n)*?git diff --no-renames --name-only -z "\$merge_sha" "\$GITHUB_SHA"/u)
+    assert.match(workflow, /later_paths\+=\(--path "\$path"\)(?:.|\n)*?node scripts\/change-impact\.mjs "\$\{later_paths\[@\]\}"(?:.|\n)*?enterprise-only\|docs-only\|verification-only/u)
+    assert.doesNotMatch(workflow, /enterprise\/\*|docs\/\*|AGENTS\.md/u)
     assert.match(workflow, /name: e-mate-change-impact-\$\{\{ steps\.run\.outputs\.source_sha \}\}/u)
     assert.match(workflow, /job_succeeded 'CI admission'/u)
     assert.match(workflow, /if test "\$\(jq -er \.portable_publish "\$impact"\)" = true;(?:.|\n)*?job_succeeded 'Portable Profile generations'(?:.|\n)*?Complete Profile generation \/ \$target/u)

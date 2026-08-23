@@ -77,12 +77,17 @@ jobs:
               tested_tree="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$source_sha" --jq .tree.sha)"
               test "$(git rev-parse "$merge_sha^{tree}")" = "$tested_tree"
               test -z "$(git rev-list --merges "$merge_sha..$GITHUB_SHA")"
+              later_paths=()
               while IFS= read -r -d '' path; do
-                case "$path" in
-                  .github/workflows/profile-release.yml|scripts/change-impact.test.mjs) ;;
-                  *) echo "Current main contains an untested product change after the accepted PR: $path" >&2; exit 1 ;;
-                esac
+                later_paths+=(--path "$path")
               done < <(git diff --no-renames --name-only -z "$merge_sha" "$GITHUB_SHA" --)
+              if (( ${#later_paths[@]} > 0 )); then
+                later_lane="$(node scripts/change-impact.mjs "${later_paths[@]}" | jq -er .lane)"
+                case "$later_lane" in
+                  enterprise-only|docs-only|verification-only) ;;
+                  *) echo "Current main contains an untested product change after the accepted PR." >&2; exit 1 ;;
+                esac
+              fi
               ;;
             *)
               echo 'CI evidence must come from main push or a pull request targeting main.' >&2
