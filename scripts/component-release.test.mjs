@@ -12,6 +12,7 @@ import {
   componentRuntimeParserAvailable,
   emitComponent,
   targetEntries,
+  verifyComponentRuntimeImports,
 } from './component-release.mjs'
 
 const root = await mkdtemp(join(tmpdir(), 'e-mate-component-release-'))
@@ -159,6 +160,22 @@ describe('component payload closure', () => {
         /unsupported Desktop Base runtime import/u,
       )
     }
+  })
+
+  it('compares emitted runtime imports to the declared Base ABI', {
+    skip: !componentRuntimeParserAvailable() && 'Harness toolchain is intentionally absent in the impact lane',
+  }, () => {
+    const source = join(root, 'declared-imports.js')
+    writeFileSync(source, 'import { defineTool } from "@deepseek-ai/dsh-tools"\n')
+    const component = { id: '@e-mate/test', base_imports: ['@deepseek-ai/dsh-tools'] }
+    assert.deepEqual(verifyComponentRuntimeImports([{ path: 'lib/index.js', source }], component), [
+      '@deepseek-ai/dsh-tools',
+    ])
+    component.base_imports = []
+    assert.throws(
+      () => verifyComponentRuntimeImports([{ path: 'lib/index.js', source }], component),
+      /@e-mate\/test portable/u,
+    )
   })
 
   it('declares the real Shell package entry in its component allowlist', () => {

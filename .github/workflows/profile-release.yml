@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       bootstrap:
-        description: Create the first complete signed Profile generation for the accepted 2.0.11 Base.
+        description: Create the first complete signed Profile generation for the accepted 2.0.12 Base.
         required: true
         type: boolean
         default: false

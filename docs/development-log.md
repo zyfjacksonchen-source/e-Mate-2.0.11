@@ -1980,3 +1980,8 @@ The text highlights AI hallucination and human verification, legal use, real-act
 
 - 第五轮 CI 证明 S14 的 negated glob 只排除上传结果，不能阻止 `@actions/glob` 沿正向 Profile pattern 继续递归；上传仍停在相同步骤。根据 GitHub Actions Toolkit 的真实 `partialMatch` 实现，负 pattern 不参与目录下钻判断，因此不能把该写法保留为伪门禁。
 - 两个 workflow 现在先调用同一个 Node 标准库脚本，从已经 build/test 的 Profile 与 component `lib` 生成 `.release-cache/profile-artifact`。复制边界拒绝所有 symlink 和任意层级 `node_modules`，且没有 built component 时失败关闭；上传动作只读取这棵无链接暂存树，下载后仍恢复成原 `packages/dsh/profile` 与 `packages/dsh-plugin-*/lib` 布局。行为测试用真实目录 symlink 和实体 `node_modules` 证明两者都不会进入制品。稳定下载说明同时从错误的 2.0.10 修正为当前已公开验收的 2.0.11；没有改生产指针。
+
+## 2026-08-23 · 2.0.12 S16 emitted runtime ABI 全组件门禁
+
+- 合并后第一次从 exact-main 准备 Base v6 Profile bootstrap 时，在上传或激活任何生产对象前失败关闭：Glass portable 多声明一个只用于 TypeScript 类型的 `@deepseek-ai/dsh-client-runtime`，Skill Hub portable 漏声明 emitted `react-dom`。构建和聚焦测试均成功却未发现，是因为旧门禁分别验证手写 manifest 与解析器样例，没有对每个 accepted 组件的最终 allowlisted JS 字节做全等比较。
+- 唯一组件 runner 现在在 portable build 或带精确 `EMATE_COMPONENT_TARGET` 的平台 build 后立即从 `files` 闭包提取真实外部 import，并要求与 `base_imports` 排序全等；没有目标 Python/runtime 的通用检查构建不冒充平台发布字节，三套 Base compatibility Jobs 负责各自目标，发布 emit 复用同一验证函数。PR clean target CI 进一步定位到 Vision 构建的反馈环：其 `neverBundle` 把通配符写成字符串，但当前固定 tsdown 只对 RegExp 做前缀匹配；未链接四个 DSH 包时它们偶然保持 external，按 manifest 链接后却被整体打入组件，导致同一声明反向改变 emitted imports。现改用仓库其他组件已采用的 `^@deepseek-ai/` 与 `^@e-mate/desktop/` RegExp，并以行为断言锁定，Vision 恢复原完整 Base ABI 声明。Glass 与 Skill Hub 的修正、全局 Base v6 runtime ABI union 和 Base id 均保持不变；旧 SHA 上的 CI、Desktop、npm carrier 和本机 stale-lib payload 全部作废。Profile workflow 的 bootstrap 说明同步为 accepted 2.0.12 Base。
