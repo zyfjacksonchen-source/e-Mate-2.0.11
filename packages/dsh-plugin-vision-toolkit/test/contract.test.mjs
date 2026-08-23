@@ -39,10 +39,11 @@ async function loadBuiltModule(relative = 'lib/index.mjs') {
 }
 
 test('Vision Toolkit preserves the native Host and Client surfaces as one managed Profile component', async () => {
-  const [manifest, patch, source, built, client] = await Promise.all([
+  const [manifest, patch, source, buildScript, built, client] = await Promise.all([
     readFile(new URL('package.json', root), 'utf8'),
     readFile(new URL('cordis.patch.yml', root), 'utf8'),
     readFile(new URL('src/index.ts', root), 'utf8'),
+    readFile(new URL('scripts/build.mjs', root), 'utf8'),
     readFile(new URL('lib/index.mjs', root), 'utf8'),
     readFile(new URL('lib/client.js', root), 'utf8'),
   ])
@@ -81,6 +82,10 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
   assert.match(source, /sandboxPolicy\.resolve/u)
   assert.match(source, /'sandboxPolicy'/u)
   assert.match(source, /@e-mate\/desktop\/vision-toolkit/u)
+  assert.equal(
+    buildScript.includes("neverBundle: [/^@deepseek-ai\\//, /^@e-mate\\/desktop\\//, '@standard-schema/spec']"),
+    true,
+  )
   assert.match(built, /vision_glance/u)
   assert.match(built, /vision_long_screenshot_ocr/u)
   assert.match(built, /@e-mate\/dsh-plugin-vision-toolkit/u)
