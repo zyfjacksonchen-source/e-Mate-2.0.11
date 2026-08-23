@@ -649,6 +649,7 @@ jobs:
         with:
           ref: ${{ needs.impact.outputs.head_sha }}
           persist-credentials: false
+          submodules: recursive
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
