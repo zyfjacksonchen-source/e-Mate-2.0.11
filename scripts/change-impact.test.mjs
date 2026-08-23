@@ -352,6 +352,23 @@ describe('repository release boundary', () => {
     }])
   })
 
+  it('keeps managed GPT web search inside the already accepted Tool Search hot component', () => {
+    const result = classify(
+      'packages/dsh-plugin-tool-search/src/web-search.ts',
+      'packages/dsh-plugin-tool-search/test/web-search.test.mjs',
+    )
+    assert.equal(result.lane, 'plugin-only')
+    assert.equal(result.run_base, false)
+    assert.equal(result.portable_publish, true)
+    assert.deepEqual(result.components, ['@e-mate/dsh-plugin-tool-search'])
+    assert.deepEqual(result.component_jobs, [{
+      component: '@e-mate/dsh-plugin-tool-search',
+      target: 'portable',
+      runner: 'ubuntu-24.04',
+      publish: true,
+    }])
+  })
+
   it('runs the owning component gate for test-only changes without emitting release bytes', () => {
     const testsOnly = classify('packages/dsh-plugin-memory-evolve/test/index.test.mjs')
     assert.equal(testsOnly.lane, 'plugin-only')

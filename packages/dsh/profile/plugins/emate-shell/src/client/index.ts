@@ -356,7 +356,7 @@ export function apply(ctx: any): void {
     name: 'settings.close',
     priority: -1,
   }, SettingsCloseLabel))
-  for (const [id, order] of [['welcome-notice', -100], ['deepseek-official', 0]] as const) {
+  for (const [id, order] of [['welcome-notice', -100]] as const) {
     ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
       name: 'settings.onboarding',
       id,

@@ -227,6 +227,28 @@ describe('component payload closure', () => {
     assert.doesNotMatch(host, /setInterval|setTimeout|schedule_create|schedule_delete/u)
   })
 
+  it('keeps managed GPT web search in the accepted Tool Search hot component', () => {
+    const root = join(repositoryRoot, 'packages/dsh-plugin-tool-search')
+    const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+    const host = readFileSync(join(root, 'src/web-search.ts'), 'utf8')
+    const patch = readFileSync(join(root, 'cordis.patch.yml'), 'utf8')
+    assert.equal(manifest.exports['./web-search'].default, './lib/web-search.mjs')
+    assert.deepEqual(manifest.eMate.component.base_imports, [
+      '@deepseek-ai/dsh-credentials',
+      '@deepseek-ai/dsh-llm',
+      '@deepseek-ai/dsh-tools',
+    ])
+    assert.deepEqual(manifest.eMate.component.authority_contract, {
+      effects: ['credentials-read', 'network-remote'],
+      guards: ['enterprise-policy', 'fixed-endpoint', 'read-only', 'session-scope'],
+    })
+    assert.match(host, /ctx\.get\('credentials'\)/u)
+    assert.match(host, /registerSearchProvider/u)
+    assert.match(patch, /searchProvider: gpt-responses/u)
+    assert.match(patch, /apiKeyEnv: E_MATE_SEARCH_KEY_DEEPSEEK/u)
+    assert.doesNotMatch(host, /defineTool|process\.env|^\s*apiKey\??:/mu)
+  })
+
 
   it('selects only the native closure declared for one platform target', () => {
     const inventory = JSON.parse(readFileSync(
