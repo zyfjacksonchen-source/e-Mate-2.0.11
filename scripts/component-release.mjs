@@ -202,6 +202,15 @@ export function componentRuntimeImports(entries) {
   return [...imports].sort(comparePath)
 }
 
+export function verifyComponentRuntimeImports(entries, component, target = null) {
+  const baseImports = componentRuntimeImports(targetEntries(entries, component, target))
+  if (JSON.stringify(baseImports) !== JSON.stringify(component.base_imports)) {
+    const label = target === null ? 'portable' : `${target.platform}-${target.arch}`
+    throw new Error(`component runtime imports do not match its fixed Base ABI declaration: ${component.id} ${label}`)
+  }
+  return baseImports
+}
+
 /** Emit one deterministic, unpacked component payload and integrity manifest. */
 export function emitComponent(options) {
   const root = resolve(options.root)
@@ -216,11 +225,9 @@ export function emitComponent(options) {
     throw new Error('component output must be a repository child directory')
   }
   const target = selectTarget(component, options.target)
-  const entries = targetEntries(componentFiles(packageRoot, manifest), component, target)
-  const baseImports = componentRuntimeImports(entries)
-  if (JSON.stringify(baseImports) !== JSON.stringify(component.base_imports)) {
-    throw new Error(`component runtime imports do not match its fixed Base ABI declaration: ${component.id}`)
-  }
+  const componentEntries = componentFiles(packageRoot, manifest)
+  const entries = targetEntries(componentEntries, component, target)
+  const baseImports = verifyComponentRuntimeImports(componentEntries, component, target)
   rmSync(output, { recursive: true, force: true })
   const payloadRoot = join(output, 'files')
   mkdirSync(payloadRoot, { recursive: true })

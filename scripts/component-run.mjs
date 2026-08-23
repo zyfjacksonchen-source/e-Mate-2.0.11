@@ -6,6 +6,7 @@ import { resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { loadReleaseBoundary } from './change-impact.mjs'
 import { prepareHarnessBaseImports } from './component-base-imports.mjs'
+import { componentFiles, verifyComponentRuntimeImports } from './component-release.mjs'
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -59,5 +60,14 @@ for (const component of components) {
   run(['--dir', component.root, 'run', 'build'], command === 'check'
     ? { ...process.env, EMATE_COMPONENT_CHECK: '1' }
     : process.env)
+  const manifest = JSON.parse(readFileSync(resolve(component.root, 'package.json'), 'utf8'))
+  const entries = componentFiles(resolve(component.root), manifest)
+  const requestedTarget = process.env.EMATE_COMPONENT_TARGET
+  const targets = component.kind === 'platform-profile'
+    ? component.targets.filter(target => requestedTarget === undefined
+      || `${target.platform}-${target.arch}` === requestedTarget)
+    : [null]
+  if (targets.length === 0) throw new Error(`unsupported component target: ${String(requestedTarget)}`)
+  for (const target of targets) verifyComponentRuntimeImports(entries, component, target)
   if (command === 'check') run(['--dir', component.root, 'run', 'test'])
 }

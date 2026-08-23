@@ -6,13 +6,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { loadReleaseBoundary } from './change-impact.mjs'
 import {
   componentFiles,
   componentRuntimeImports,
   componentRuntimeParserAvailable,
   emitComponent,
   targetEntries,
+  verifyComponentRuntimeImports,
 } from './component-release.mjs'
 
 const root = await mkdtemp(join(tmpdir(), 'e-mate-component-release-'))
@@ -162,25 +162,20 @@ describe('component payload closure', () => {
     }
   })
 
-  it('matches every accepted component declaration to its emitted runtime imports', {
+  it('compares emitted runtime imports to the declared Base ABI', {
     skip: !componentRuntimeParserAvailable() && 'Harness toolchain is intentionally absent in the impact lane',
   }, () => {
-    const boundary = loadReleaseBoundary(repositoryRoot)
-    assert.equal(boundary.valid, true, boundary.errors.join('\n'))
-    for (const component of boundary.components.filter(candidate => candidate.desktop !== 'blocked')) {
-      const packageRoot = join(repositoryRoot, component.root)
-      const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
-      const entries = componentFiles(packageRoot, manifest)
-      const targets = component.kind === 'platform-profile' ? component.targets : [null]
-      for (const target of targets) {
-        const label = target === null ? 'portable' : `${target.platform}-${target.arch}`
-        assert.deepEqual(
-          componentRuntimeImports(targetEntries(entries, component, target)),
-          component.base_imports,
-          `${component.id} ${label}`,
-        )
-      }
-    }
+    const source = join(root, 'declared-imports.js')
+    writeFileSync(source, 'import { defineTool } from "@deepseek-ai/dsh-tools"\n')
+    const component = { id: '@e-mate/test', base_imports: ['@deepseek-ai/dsh-tools'] }
+    assert.deepEqual(verifyComponentRuntimeImports([{ path: 'lib/index.js', source }], component), [
+      '@deepseek-ai/dsh-tools',
+    ])
+    component.base_imports = []
+    assert.throws(
+      () => verifyComponentRuntimeImports([{ path: 'lib/index.js', source }], component),
+      /@e-mate\/test portable/u,
+    )
   })
 
   it('declares the real Shell package entry in its component allowlist', () => {

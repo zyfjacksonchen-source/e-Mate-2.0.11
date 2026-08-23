@@ -257,6 +257,11 @@ test('find-skill component builds prepare its exact pinned upstream workspace', 
   assert.match(runner, /component\.id === '@e-mate\/dsh-plugin-find-skill'[\s\S]*?--dir', 'upstream\/plugins\/dsh-find-skill', 'install', '--frozen-lockfile', '--ignore-scripts'/u)
 })
 
+test('component builds verify emitted imports before accepting their tests', () => {
+  const runner = readFileSync('scripts/component-run.mjs', 'utf8')
+  assert.match(runner, /'run', 'build'[\s\S]*?verifyComponentRuntimeImports\(entries, component, target\)[\s\S]*?'run', 'test'/u)
+})
+
 test('component tests resolve declared DSH imports only from the exact pinned Base packages', async () => {
   const root = mkdtempSync(join(tmpdir(), 'emate-component-base-imports-'))
   const componentRoot = join(root, 'component')
