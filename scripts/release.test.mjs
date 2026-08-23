@@ -2,12 +2,12 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { assertEvidenceSource, BUNDLED_PLUGIN_PACKAGES, generateEvidence, isAcceptedReleaseCommit, RELEASE_PACKAGES, TARGET_NATIVE_RUNTIME_FILES, verifyRelease, VERSION } from './release.mjs'
 import {
   buildR2Inventory,
@@ -18,6 +18,7 @@ import {
 } from './publish-r2.mjs'
 import { releasePrefix, releaseSource } from './release-source.mjs'
 import { renderDownloadPage } from './render-download-page.mjs'
+import { prepareHarnessBaseImports } from './component-base-imports.mjs'
 
 const HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
 const DIGEST = '0'.repeat(64)
@@ -253,6 +254,39 @@ test('component builds reject a pnpm version different from the repository contr
 test('find-skill component builds prepare its exact pinned upstream workspace', () => {
   const runner = readFileSync('scripts/component-run.mjs', 'utf8')
   assert.match(runner, /component\.id === '@e-mate\/dsh-plugin-find-skill'[\s\S]*?--dir', 'upstream\/plugins\/dsh-find-skill', 'install', '--frozen-lockfile', '--ignore-scripts'/u)
+})
+
+test('component tests resolve declared DSH imports only from the exact pinned Base packages', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'emate-component-base-imports-'))
+  const componentRoot = join(root, 'component')
+  const harnessRoot = join(root, 'harness')
+  const source = join(harnessRoot, 'packages', 'skill')
+  try {
+    await file(source, 'package.json', JSON.stringify({
+      name: '@deepseek-ai/dsh-skill', version: '0.1.0-rc.7', type: 'module', exports: './index.js',
+    }))
+    await file(source, 'index.js', "export const pinnedVersion = '0.1.0-rc.7'\n")
+    await file(componentRoot, 'package.json', JSON.stringify({ type: 'module' }))
+    await file(componentRoot, 'lib/index.js', "export { pinnedVersion } from '@deepseek-ai/dsh-skill'\n")
+    prepareHarnessBaseImports({
+      componentRoot,
+      harnessRoot,
+      baseImports: ['@deepseek-ai/dsh-skill', 'react'],
+      runtimeImports: { '@deepseek-ai/dsh-skill': '0.1.0-rc.7', react: '18.3.1' },
+    })
+    const linked = join(componentRoot, 'node_modules', '@deepseek-ai', 'dsh-skill')
+    assert.equal(lstatSync(linked).isSymbolicLink(), true)
+    assert.equal(JSON.parse(readFileSync(join(linked, 'package.json'), 'utf8')).version, '0.1.0-rc.7')
+    assert.equal((await import(pathToFileURL(join(componentRoot, 'lib/index.js')).href)).pinnedVersion, '0.1.0-rc.7')
+    assert.throws(() => prepareHarnessBaseImports({
+      componentRoot: join(root, 'mismatch'),
+      harnessRoot,
+      baseImports: ['@deepseek-ai/dsh-skill'],
+      runtimeImports: { '@deepseek-ai/dsh-skill': '0.1.0-rc.6' },
+    }), /must equal 0\.1\.0-rc\.6/u)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('GitHub release packs once and validates the same tarball on three platforms', () => {

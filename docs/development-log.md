@@ -1960,3 +1960,8 @@ The text highlights AI hallucination and human verification, legal use, real-act
 
 - PR `#44` 的第一轮受保护 CI 正确在任何 Base SDK/安装器产出前阻断：本机复用树已有 `upstream/plugins/dsh-find-skill/{,client/}node_modules`，但干净递归 submodule checkout 没有这两棵被忽略的工具链；adapter 的 build 脚本因此在 `pnpm test` 中报 `pinned dsh-find-skill dependencies are missing`。这不是产品运行时依赖，也不能靠本机缓存或重跑解决。
 - 唯一组件 runner 现仅在构建 `@e-mate/dsh-plugin-find-skill` 时，从该固定 gitlink 自带的 `pnpm-lock.yaml` 执行一次 `--frozen-lockfile --ignore-scripts` 工具链准备，再继续原 build/test；普通组件、运行时与插件安装路径不受影响，没有在线运行时安装或第二构建器。release 测试锁住该精确 source root、frozen lock 和禁用 lifecycle scripts，CI 将以新提交从零重跑证明闭包。
+
+## 2026-08-23 · 2.0.12 S12 组件测试使用真实 Base v6 依赖面
+
+- PR `#44` 第二轮干净 CI 已越过 Find Skill 构建，随后测试加载 emitted `lib/index.js` 时找不到 `@deepseek-ai/dsh-skill`。本机独立组件目录残留的 workspace symlink 曾把这个缺口遮住；组件自身不应把 Base ABI 重装成运行时依赖，更不能沿用固定上游用于编译的 rc.6 devDependencies。
+- 唯一组件 runner 现根据已验证的 `base_imports`，从固定 rc.7 Harness 源树为缺失的 `@deepseek-ai/*` 建立仅供构建/测试的解析视图，并对既有或新建目标都复验包名和 Base contract 精确版本。它不进入组件 files、Profile generation 或用户运行时；行为反例同时证明 rc.7 能链接、rc.6 期望失败关闭。这样 source/Base/plugin 三条 lane 测的是同一 Base ABI，不再依赖开发机偶然的 pnpm 链接。
