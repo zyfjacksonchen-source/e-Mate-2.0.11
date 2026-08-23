@@ -236,6 +236,32 @@ test('production registers only identity, model-policy management and redacted a
   }
 });
 
+test('service images prove their runtime closure as the declared unprivileged user', () => {
+  const dockerfile = readFileSync(new URL('../../../deploy/Dockerfile.services', import.meta.url), 'utf8');
+  const runtimeStageMarker = 'FROM ${BUN_IMAGE} AS ';
+  for (const [stage, application, entry] of [
+    ['analytics', 'analytics-api', 'production.js'],
+    ['gateway', 'model-gateway', 'production.js'],
+    ['auth', 'auth-gateway', 'production.js'],
+  ] as const) {
+    const start = dockerfile.indexOf(`${runtimeStageMarker}${stage}`);
+    assert.notEqual(start, -1, `missing ${stage} runtime image`);
+    const next = dockerfile.indexOf(`\n${runtimeStageMarker}`, start + runtimeStageMarker.length);
+    const block = dockerfile.slice(start, next === -1 ? undefined : next);
+    assert.match(block, /COPY --from=build --chown=10001:0 \/app\/node_modules \.\/node_modules/u);
+    assert.match(block, new RegExp(
+      `COPY --from=build --chown=10001:0 /app/apps/${application} ./apps/${application}`,
+      'u'
+    ));
+    assert.match(block, /COPY --from=build --chown=10001:0 \/app\/packages \.\/packages/u);
+    assert.match(block, /USER 10001:0/u);
+    assert.match(block, new RegExp(
+      `RUN bun -e "await import\\('./apps/${application}/dist/${entry}'\\)"`,
+      'u'
+    ));
+  }
+});
+
 test('production configuration rejects non-secret paths, unknown fields, invalid roles, and duplicate hashes', () => {
   assert.throws(
     () => parseProductionConfiguration(configuration('C:\\secrets\\principals.json'), secretReader(principals())),
