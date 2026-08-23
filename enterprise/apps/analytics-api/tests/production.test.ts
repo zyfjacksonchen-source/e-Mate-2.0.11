@@ -91,8 +91,19 @@ test('production configuration maps a hashed bearer to fixed identity and denies
 
 test('production registers only identity, model-policy management and redacted audit surfaces', async () => {
   const source = readFileSync(new URL('../src/production.ts', import.meta.url), 'utf8');
+  const adminClient = readFileSync(new URL('../../admin/src/api.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /openRedisRuntimeRegistry|openPostgresSessionSummaryStore|openPostgresObservabilityPolicyStore/);
   assert.doesNotMatch(source, /\bregistry:|\bsessionIndex:|\bobservabilityPolicy:/);
+  const productionWiring = source.match(/server = createAnalyticsServer\(\{(?<options>[\s\S]*?)\n    \}\);/u)?.groups?.options;
+  assert(productionWiring);
+  assert.deepEqual(
+    [...productionWiring.matchAll(/^\s+([A-Za-z][A-Za-z0-9]*)(?=:)/gmu)].map((match) => match[1]).toSorted(),
+    ['adminManagement', 'authenticate', 'consentStore', 'taskEvents', 'usageAnalytics']
+  );
+  assert.doesNotMatch(
+    adminClient,
+    /\/v1\/(?:tools?|plugins?|skills?|files?|workspaces?|sessions?|memory|artifacts?|computer-use|cdp|schedules?|jobs?|shares?|profiles?|updates?|releases?|connections?)(?:\/|['"`?])/u
+  );
 
   const server = createAnalyticsServer({ authenticate: async () => null });
   await new Promise<void>((resolve, reject) => {
@@ -110,6 +121,21 @@ test('production registers only identity, model-policy management and redacted a
       '/v1/operations/observability',
       '/v1/observability-policy',
       '/v1/observability-policy/rollback',
+      '/v1/tools/execute',
+      '/v1/plugins/install',
+      '/v1/skills/enable',
+      '/v1/files/read',
+      '/v1/workspaces/project-1',
+      '/v1/memory/search',
+      '/v1/computer-use/activate',
+      '/v1/cdp/navigate',
+      '/v1/schedules/create',
+      '/v1/jobs/dispatch',
+      '/v1/shares/share-1',
+      '/v1/profiles/activate',
+      '/v1/updates/apply',
+      '/v1/releases/publish',
+      '/v1/connections/authorize',
     ]) {
       const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
       assert.equal(response.status, 404, path);

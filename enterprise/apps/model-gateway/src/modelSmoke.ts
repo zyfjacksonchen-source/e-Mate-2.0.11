@@ -12,7 +12,7 @@ export type ModelSmokeRoute = Pick<
   | 'allowInsecureHttpUpstream'
   | 'upstreamApiKey'
   | 'maxTokens'
->;
+> & { providerId?: string };
 
 type SmokeMethod = 'live-inference' | 'live-image-generation';
 
@@ -106,8 +106,21 @@ function record(value: unknown): Record<string, unknown> | null {
 }
 
 function validateCatalog(routes: readonly ModelSmokeRoute[]): Map<string, ModelSmokeRoute> {
-  if (routes.length !== routeContracts.length) throw new ModelSmokeError('INVALID_CATALOG');
-  const byId = new Map(routes.map((route) => [route.id, route]));
+  const searchCredentialRoute = routes.find(({ id }) => id === 'deepseek-web-search');
+  const callableRoutes = routes.filter(({ id }) => id !== 'deepseek-web-search');
+  if (
+    routes.length !== routeContracts.length + (searchCredentialRoute ? 1 : 0) ||
+    (searchCredentialRoute !== undefined &&
+      (searchCredentialRoute.providerId !== 'deepseek-official' ||
+        searchCredentialRoute.upstreamBaseUrl !== 'https://api.deepseek.com/anthropic/v1' ||
+        searchCredentialRoute.upstreamModelId !== 'deepseek-v4-flash' ||
+        searchCredentialRoute.allowInsecureHttpUpstream !== undefined ||
+        searchCredentialRoute.upstreamApiKey.length < 20 ||
+        /\s/.test(searchCredentialRoute.upstreamApiKey)))
+  ) {
+    throw new ModelSmokeError('INVALID_CATALOG', searchCredentialRoute?.id);
+  }
+  const byId = new Map(callableRoutes.map((route) => [route.id, route]));
   if (byId.size !== routeContracts.length) throw new ModelSmokeError('INVALID_CATALOG');
   for (const contract of routeContracts) {
     const route = byId.get(contract.id);

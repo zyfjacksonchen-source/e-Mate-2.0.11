@@ -147,6 +147,18 @@ export type RuntimeModel = {
   maxTokens: number
 }
 
+type SearchCredentialGrantBase = {
+  schemaVersion: 1
+  purpose: 'web-search'
+  provider: 'deepseek-official'
+  credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK'
+}
+
+export type SearchCredentialGrant = SearchCredentialGrantBase & (
+  | { status: 'granted'; upstreamApiKey: string }
+  | { status: 'denied' | 'unavailable' }
+)
+
 type ProviderOptions = {
   credentials: Credentials
   enterprise: EnterpriseConfig
@@ -253,7 +265,7 @@ function runtimeUpstreamBaseUrl(value: unknown, allowInsecureHttp: boolean): str
 
 function runtimeModels(value: unknown, allowed: readonly string[]): RuntimeModel[] {
   if (!isRecord(value)
-    || !exact(value, ['schemaVersion', 'models'])
+    || !exact(value, ['schemaVersion', 'models', 'searchCredentialGrant'])
     || value.schemaVersion !== 1
     || !Array.isArray(value.models)
     || value.models.length < 1
@@ -313,6 +325,43 @@ function runtimeModels(value: unknown, allowed: readonly string[]): RuntimeModel
       maxTokens: Number(model.maxTokens),
     }
   })
+}
+
+function searchCredentialGrant(value: unknown): SearchCredentialGrant {
+  const grant = isRecord(value) && isRecord(value.searchCredentialGrant)
+    ? value.searchCredentialGrant
+    : undefined
+  if (!isRecord(value)
+    || !exact(value, ['schemaVersion', 'models', 'searchCredentialGrant'])
+    || !isRecord(grant)
+    || (grant.status !== 'granted' && grant.status !== 'denied' && grant.status !== 'unavailable')
+    || !exact(grant, [
+      'schemaVersion', 'status', 'purpose', 'provider', 'credentialRef',
+      ...(grant.status === 'granted' ? ['upstreamApiKey'] : []),
+    ])
+    || grant.schemaVersion !== 1
+    || grant.purpose !== 'web-search'
+    || grant.provider !== 'deepseek-official'
+    || grant.credentialRef !== 'E_MATE_SEARCH_KEY_DEEPSEEK'
+    || (grant.status === 'granted' && (
+      typeof grant.upstreamApiKey !== 'string'
+      || grant.upstreamApiKey.length < 20
+      || grant.upstreamApiKey.length > 8_192
+      || /\s/u.test(grant.upstreamApiKey)
+    ))) {
+    const error = new Error('e-Mate enterprise search credential grant is invalid')
+    ;(error as Error & { code: string }).code = 'E_MATE_SEARCH_GRANT_INVALID'
+    throw error
+  }
+  const base: SearchCredentialGrantBase = {
+    schemaVersion: 1,
+    purpose: 'web-search',
+    provider: 'deepseek-official',
+    credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+  }
+  return grant.status === 'granted'
+    ? { ...base, status: 'granted', upstreamApiKey: grant.upstreamApiKey as string }
+    : { ...base, status: grant.status }
 }
 
 function session(value: unknown, expectedModelRoot: string): Session {
@@ -703,11 +752,15 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
   const modelRuntimePolicy = async () => {
     const value = await active(true)
     if (value === undefined) throw new Error('e-Mate login is required')
-    const models = runtimeModels(
-      await modelCall(value, '/v1/runtime-models', { method: 'GET' }, 'runtime models'),
-      value.session.modelGateway.allowedModelIds,
+    const response = await modelCall(
+      value,
+      '/v1/runtime-models?client_version=2.0.12',
+      { method: 'GET' },
+      'runtime models',
     )
-    return { policy: policyFor(value, models), models }
+    const grant = searchCredentialGrant(response)
+    const models = runtimeModels(response, value.session.modelGateway.allowedModelIds)
+    return { policy: policyFor(value, models), models, searchCredentialGrant: grant }
   }
 
   const provider = {

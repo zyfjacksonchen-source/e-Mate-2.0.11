@@ -394,22 +394,100 @@ const RUNTIME_CREDENTIAL_REFS = new Set([
   'E_MATE_MODEL_KEY_GPT',
   'E_MATE_MODEL_KEY_DEEPSEEK',
   'E_MATE_MODEL_KEY_DOUBAO',
+  'E_MATE_SEARCH_KEY_DEEPSEEK',
 ])
+const SEARCH_CREDENTIAL_REF = 'E_MATE_SEARCH_KEY_DEEPSEEK'
+const SEARCH_GRANT_ERROR_CODE = 'E_MATE_SEARCH_GRANT_INVALID'
+const RUNTIME_PROJECTION_KEY = 'active'
 
-function hasNativeRuntimeProjection(ctx) {
-  const value = ctx.settings?.get?.('llm-pi-ai')
-  if (!isRecord(value) || !isRecord(value.providers)) return false
-  const providers = Object.values(value.providers)
-  return providers.length > 0 && providers.every(provider => isRecord(provider)
-    && typeof provider.apiKeyEnv === 'string'
-    && RUNTIME_CREDENTIAL_REFS.has(provider.apiKeyEnv))
+function searchGrantError(message = 'e-Mate managed search credential projection is invalid') {
+  return Object.assign(new Error(message), { code: SEARCH_GRANT_ERROR_CODE })
 }
 
-async function projectRuntimeModels(ctx, models, policy) {
+function isSearchGrantError(error) {
+  return isRecord(error) && error.code === SEARCH_GRANT_ERROR_CODE
+}
+
+async function presentRuntimeCredentialRefs(ctx) {
+  const refs = []
+  for (const ref of RUNTIME_CREDENTIAL_REFS) {
+    const hit = await ctx.credentials.resolve(ref)
+    if (typeof hit?.value === 'string' && hit.value.length > 0) refs.push(ref)
+  }
+  return refs.sort()
+}
+
+async function runtimeProjectionMarker(ctx, policy, searchStatus) {
+  const marker = {
+    schema_version: 1,
+    account_subject: policy.account_subject,
+    policy_revision: policy.revision,
+    policy_sha256: policy.policy_sha256,
+    expires_at: policy.expires_at,
+    search_status: searchStatus,
+    llm_settings_sha256: sha256(canonicalJson(ctx.settings.get('llm-pi-ai') ?? {})),
+    default_model_sha256: sha256(canonicalJson(ctx.settings.get('agent-default-model') ?? {})),
+    credential_refs: await presentRuntimeCredentialRefs(ctx),
+  }
+  return { ...marker, projection_sha256: sha256(canonicalJson(marker)) }
+}
+
+async function matchesRuntimeProjection(ctx, marker, policy) {
+  if (!isRecord(marker)
+    || marker.schema_version !== 1
+    || marker.account_subject !== policy.account_subject
+    || marker.policy_revision !== policy.revision
+    || marker.policy_sha256 !== policy.policy_sha256
+    || marker.expires_at !== policy.expires_at
+    || !['granted', 'denied', 'unavailable'].includes(marker.search_status)
+    || marker.llm_settings_sha256 !== sha256(canonicalJson(ctx.settings.get('llm-pi-ai') ?? {}))
+    || marker.default_model_sha256 !== sha256(canonicalJson(ctx.settings.get('agent-default-model') ?? {}))
+    || !Array.isArray(marker.credential_refs)
+    || marker.credential_refs.some(ref => !RUNTIME_CREDENTIAL_REFS.has(ref))
+    || new Set(marker.credential_refs).size !== marker.credential_refs.length
+    || marker.projection_sha256 !== sha256(canonicalJson({
+      schema_version: marker.schema_version,
+      account_subject: marker.account_subject,
+      policy_revision: marker.policy_revision,
+      policy_sha256: marker.policy_sha256,
+      expires_at: marker.expires_at,
+      search_status: marker.search_status,
+      llm_settings_sha256: marker.llm_settings_sha256,
+      default_model_sha256: marker.default_model_sha256,
+      credential_refs: marker.credential_refs,
+    }))) return false
+  const refs = await presentRuntimeCredentialRefs(ctx)
+  return canonicalJson(refs) === canonicalJson(marker.credential_refs)
+    && marker.credential_refs.includes(SEARCH_CREDENTIAL_REF) === (marker.search_status === 'granted')
+}
+
+async function projectRuntimeModels(ctx, models, policy, searchGrant) {
   if (!Array.isArray(models) || models.length < 1 || models.length > CHAT_MODELS.size) {
     throw new Error('e-Mate runtime model projection is invalid')
   }
-  const credentials = new Map()
+  if (!isRecord(searchGrant)
+    || (searchGrant.status !== 'granted'
+      && searchGrant.status !== 'denied'
+      && searchGrant.status !== 'unavailable')
+    || Object.keys(searchGrant).sort().join(',') !== [
+      'credentialRef', 'provider', 'purpose', 'schemaVersion', 'status',
+      ...(searchGrant.status === 'granted' ? ['upstreamApiKey'] : []),
+    ].sort().join(',')
+    || searchGrant.schemaVersion !== 1
+    || searchGrant.purpose !== 'web-search'
+    || searchGrant.provider !== 'deepseek-official'
+    || searchGrant.credentialRef !== SEARCH_CREDENTIAL_REF
+    || (searchGrant.status === 'granted' && (
+      typeof searchGrant.upstreamApiKey !== 'string'
+      || searchGrant.upstreamApiKey.length < 20
+      || searchGrant.upstreamApiKey.length > 8_192
+      || /\s/u.test(searchGrant.upstreamApiKey)
+    ))) {
+    throw searchGrantError()
+  }
+  const credentials = new Map(searchGrant.status === 'granted'
+    ? [[SEARCH_CREDENTIAL_REF, searchGrant.upstreamApiKey]]
+    : [])
   const providers = {}
   for (const model of models) {
     if (!isRecord(model)
@@ -425,6 +503,7 @@ async function projectRuntimeModels(ctx, models, policy) {
       || !Number.isSafeInteger(model.contextWindow)
       || !Number.isSafeInteger(model.maxTokens)
       || model.id === 'deepseek' && model.upstreamModelId !== 'deepseek-v4-flash'
+      || model.credentialRef === SEARCH_CREDENTIAL_REF && searchGrant.status !== 'granted'
       || !RUNTIME_CREDENTIAL_REFS.has(model.credentialRef)
       || !RUNTIME_REASONING.has(model.upstreamModelId)
       || !['openai-responses', 'openai-completions'].includes(model.api)) {
@@ -460,13 +539,14 @@ async function projectRuntimeModels(ctx, models, policy) {
     providers[model.provider] = provider
   }
 
-  const previousCredentials = new Map(await Promise.all(
-    [...RUNTIME_CREDENTIAL_REFS].map(async ref => [ref, await ctx.credentials.resolve(ref)]),
-  ))
+  const previousCredentials = new Map()
+  for (const ref of RUNTIME_CREDENTIAL_REFS) {
+    previousCredentials.set(ref, await ctx.credentials.resolve(ref))
+  }
   const previousLlmSettings = structuredClone(ctx.settings.get('llm-pi-ai') ?? {})
   const previousDefaultModel = structuredClone(ctx.settings.get('agent-default-model') ?? {})
   try {
-    await Promise.all([...credentials].map(([ref, value]) => ctx.credentials.set(ref, value)))
+    for (const [ref, value] of credentials) await ctx.credentials.set(ref, value)
     const next = { providers }
     if (canonicalJson(ctx.settings.get('llm-pi-ai')) !== canonicalJson(next)) {
       await ctx.settings.replace('llm-pi-ai', next)
@@ -481,18 +561,29 @@ async function projectRuntimeModels(ctx, models, policy) {
     if (canonicalJson(ctx.settings.get('agent-default-model')) !== canonicalJson(defaultSelection)) {
       await ctx.settings.replace('agent-default-model', defaultSelection)
     }
-    await Promise.all([...RUNTIME_CREDENTIAL_REFS]
-      .filter(ref => !credentials.has(ref))
-      .map(ref => ctx.credentials.unset(ref)))
+    for (const ref of RUNTIME_CREDENTIAL_REFS) {
+      if (!credentials.has(ref)) {
+        try {
+          await ctx.credentials.unset(ref)
+        } catch (error) {
+          if (ref === SEARCH_CREDENTIAL_REF && searchGrant.status !== 'granted') {
+            throw searchGrantError('e-Mate managed search credential revocation failed')
+          }
+          throw error
+        }
+      }
+    }
   } catch (error) {
-    const rollback = await Promise.allSettled([
-      ctx.settings.replace('agent-default-model', previousDefaultModel),
-      ctx.settings.replace('llm-pi-ai', previousLlmSettings),
-      ...[...previousCredentials].map(([ref, hit]) => hit === undefined
+    const rollbackFailures = []
+    for (const restore of [
+      () => ctx.settings.replace('agent-default-model', previousDefaultModel),
+      () => ctx.settings.replace('llm-pi-ai', previousLlmSettings),
+      ...[...previousCredentials].map(([ref, hit]) => () => hit === undefined
         ? ctx.credentials.unset(ref)
         : ctx.credentials.set(ref, hit.value)),
-    ])
-    const rollbackFailures = rollback.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+    ]) {
+      try { await restore() } catch (rollbackError) { rollbackFailures.push(rollbackError) }
+    }
     if (rollbackFailures.length > 0) {
       throw new AggregateError([error, ...rollbackFailures], 'e-Mate runtime model projection rollback failed')
     }
@@ -500,12 +591,37 @@ async function projectRuntimeModels(ctx, models, policy) {
   }
 }
 
-function createService(ctx, table, quota) {
+function createService(ctx, table, projectionTable, quota) {
   let cached = [...table.entries()].find(([key]) => key === 'active')?.[1]
   let validatedCache
-  let runtimeReady = typeof ctx.emateIdentity.modelRuntimePolicy !== 'function' || hasNativeRuntimeProjection(ctx)
+  const hasRuntimePolicy = typeof ctx.emateIdentity.modelRuntimePolicy === 'function'
+  let runtimeReady = !hasRuntimePolicy
+  let checkingRuntime
   let lastRefresh = 0
   let refreshing
+
+  const degradeInvalidSearchGrant = async policy => {
+    runtimeReady = false
+    let markerDeleteError
+    try {
+      await projectionTable.delete(RUNTIME_PROJECTION_KEY)
+    } catch (error) {
+      markerDeleteError = error
+    }
+    try {
+      await ctx.credentials.unset(SEARCH_CREDENTIAL_REF)
+    } catch (error) {
+      throw new AggregateError(
+        markerDeleteError === undefined ? [error] : [error, markerDeleteError],
+        'e-Mate invalid search grant revocation failed',
+      )
+    }
+    if (policy !== undefined) {
+      const marker = await runtimeProjectionMarker(ctx, policy, 'unavailable')
+      await projectionTable.put(RUNTIME_PROJECTION_KEY, marker)
+      runtimeReady = true
+    }
+  }
 
   const identityState = async () => {
     const state = await ctx.emateIdentity.state()
@@ -550,17 +666,35 @@ function createService(ctx, table, quota) {
           ? await ctx.emateIdentity.modelRuntimePolicy()
           : { policy: await ctx.emateIdentity.modelPolicy() }
         const policy = validateModelPolicy(runtime.policy, state.account_subject, now)
+        if (runtime.models !== undefined) {
+          runtimeReady = false
+          try {
+            await ctx.credentials.unset(SEARCH_CREDENTIAL_REF)
+          } catch {
+            throw searchGrantError('e-Mate managed search credential invalidation failed')
+          }
+          await projectionTable.delete(RUNTIME_PROJECTION_KEY)
+        }
         await quota.refresh(policy)
         if (runtime.models !== undefined) {
-          await projectRuntimeModels(ctx, runtime.models, policy)
-          runtimeReady = true
+          await projectRuntimeModels(ctx, runtime.models, policy, runtime.searchCredentialGrant)
         }
         await table.put('active', policy)
+        if (runtime.models !== undefined) {
+          await projectionTable.put(
+            RUNTIME_PROJECTION_KEY,
+            await runtimeProjectionMarker(ctx, policy, runtime.searchCredentialGrant.status),
+          )
+          runtimeReady = true
+        }
         cached = policy
         lastRefresh = now
         return policy
       } catch (error) {
         const fallback = validCached(state.account_subject, now)
+        if (isSearchGrantError(error)) {
+          await degradeInvalidSearchGrant(fallback)
+        }
         if (fallback !== undefined) {
           lastRefresh = now
           return fallback
@@ -573,6 +707,27 @@ function createService(ctx, table, quota) {
       return await promise
     } finally {
       if (refreshing?.promise === promise) refreshing = undefined
+    }
+  }
+
+  const ensureRuntimeReady = async () => {
+    if (runtimeReady || !hasRuntimePolicy) return
+    if (checkingRuntime !== undefined) return checkingRuntime
+    checkingRuntime = (async () => {
+      const state = await identityState()
+      const current = validCached(state.account_subject, Date.now())
+      if (current !== undefined
+        && await matchesRuntimeProjection(ctx, projectionTable.get(RUNTIME_PROJECTION_KEY), current)) {
+        runtimeReady = true
+        return
+      }
+      await refresh({ force: true })
+      if (!runtimeReady) throw new Error('e-Mate native runtime model projection is not ready')
+    })()
+    try {
+      await checkingRuntime
+    } finally {
+      checkingRuntime = undefined
     }
   }
 
@@ -591,7 +746,10 @@ function createService(ctx, table, quota) {
     }
     return policy
   }
-  const activePolicy = async () => activeCached(true) ?? refresh({ force: true })
+  const activePolicy = async () => {
+    await ensureRuntimeReady()
+    return activeCached(true) ?? refresh({ force: true })
+  }
 
   return {
     refresh,
@@ -720,10 +878,22 @@ export async function apply(ctx, config = {}) {
     receipt_id: z.string().regex(RECEIPT),
     policy_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
   })
+  const runtimeProjectionRecord = z.object({
+    schema_version: z.literal(1),
+    account_subject: z.string().regex(SUBJECT),
+    policy_revision: z.number().int().min(1),
+    policy_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    expires_at: z.iso.datetime(),
+    search_status: z.enum(['granted', 'denied', 'unavailable']),
+    llm_settings_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    default_model_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    credential_refs: z.array(z.enum([...RUNTIME_CREDENTIAL_REFS])).max(RUNTIME_CREDENTIAL_REFS.size),
+    projection_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+  })
   const domain = await ctx.storageDomain.open(defineDomain({
     name: 'emate_model_policy',
     version: 1,
-    tables: { active: domainTable(policyRecord) },
+    tables: { active: domainTable(policyRecord), runtime_projection: domainTable(runtimeProjectionRecord) },
   }))
   ctx.effect(() => () => domain.close(), 'emate.modelPolicy: close target storage domain')
   const quotaSnapshot = z.object({
@@ -776,7 +946,7 @@ export async function apply(ctx, config = {}) {
     quotaDomain.table('reservations'),
     quotaDomain.table('usage'),
   )
-  const service = createService(ctx, domain.table('active'), quota)
+  const service = createService(ctx, domain.table('active'), domain.table('runtime_projection'), quota)
   ctx.provide('emateModelPolicy', service)
   ctx.effect(() => installApiPolicy(ctx, service), 'emate.modelPolicy: target ApiProxy policy projection')
   ctx.on('agent/request', async (payload, next) => {
