@@ -1965,3 +1965,8 @@ The text highlights AI hallucination and human verification, legal use, real-act
 
 - PR `#44` 第二轮干净 CI 已越过 Find Skill 构建，随后测试加载 emitted `lib/index.js` 时找不到 `@deepseek-ai/dsh-skill`。本机独立组件目录残留的 workspace symlink 曾把这个缺口遮住；组件自身不应把 Base ABI 重装成运行时依赖，更不能沿用固定上游用于编译的 rc.6 devDependencies。
 - 唯一组件 runner 现根据已验证的 `base_imports`，从固定 rc.7 Harness 源树为缺失的 `@deepseek-ai/*` 建立仅供构建/测试的解析视图，并对既有或新建目标都复验包名和 Base contract 精确版本。它不进入组件 files、Profile generation 或用户运行时；行为反例同时证明 rc.7 能链接、rc.6 期望失败关闭。这样 source/Base/plugin 三条 lane 测的是同一 Base ABI，不再依赖开发机偶然的 pnpm 链接。
+
+## 2026-08-23 · 2.0.12 S13 Desktop 精确锁同步
+
+- PR `#44` 第三轮已通过全部目标合同、组件 build/test 与 release carrier，随后 `yarn install --immutable` 在 Desktop SDK 冻结前拒绝 `dsh-workspace` 新增的 exact rc.7 descriptor。`package.json` 和 workspace lock 虽都已有该依赖，锁条目仍只有间接 `^0.1.0-rc.7` descriptor，且 workspace dependency 行未按 Yarn 确定顺序归一；本机已有安装状态再次遮住了 clean resolution 差异。
+- 只把同一个 `0.1.0-rc.7` 解析条目合并 exact/range descriptor，并按 Yarn 的确定顺序排列 workspace 依赖；没有升级、重解析或新增包，也没有关闭 immutable。正式候选继续以干净 CI 的 `yarn --immutable` 作为唯一依赖图证据。
