@@ -37,7 +37,7 @@ flowchart LR
   Upstream <-->|"loopback HTTP 与 WebSocket"| Client
 ```
 
-Launcher 会在 Loader tree 挂载前解析一个 profile。`desktopProfiles.current` 在整个 Cordis generation dispose 前保持不变。`desktop-pnpm` Host row 会根据 launcher 私有 fact 与上游 subprocess service 构造 `desktopPnpm`。切换 profile 或模式会 dispose 当前 generation 并启动新 generation；service reference 不能跨越该边界。
+Launcher 会在 Loader tree 挂载前解析一个 profile。`desktopProfiles.current` 在整个 Cordis generation dispose 前保持不变。`desktop-pnpm` Host row 会根据 launcher 私有 fact 与上游 subprocess service 构造 `desktopPnpm`。选择另一个 profile 会 dispose 当前 generation 并启动新 generation；service reference 不能跨越该边界。e-Mate 自身没有模式切换：macOS 与 Windows 组合 advanced 模式，Linux 组合 compatibility 模式。其他产品如果以显式模式挂载该可复用 package，仍由该产品拥有自己的 generation 边界。
 
 Renderer 通过现有 loopback carrier 接收普通 Web Client module，无法直接读取这些 Host service；e-Mate 也不会为它们增加 preload 或 Electron IPC bridge。包含浏览器 UI 的插件继续使用普通 DSH Host route、RPC、client metadata、service 与 slot。
 

@@ -479,6 +479,7 @@ describe('repository release boundary', () => {
     assert.match(workflow, /impact:\n(?:.|\n)*?pnpm\/action-setup@v4(?:.|\n)*?pnpm install --frozen-lockfile --ignore-scripts(?:.|\n)*?Test the fail-closed classifier/u)
     assert.match(workflow, /source:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_base == 'true'/u)
     assert.match(workflow, /plugins:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_plugins == 'true'/u)
+    assert.match(workflow, /run_verification: \$\{\{ steps\.classify\.outputs\.run_verification \}\}/u)
     assert.match(workflow, /include: \$\{\{ fromJSON\(needs\.impact\.outputs\.component_jobs_json\) \}\}/u)
     assert.match(workflow, /base-platform-components:\n(?:.|\n)*?needs: \[impact, source\](?:.|\n)*?include: \$\{\{ fromJSON\(needs\.impact\.outputs\.base_platform_component_jobs_json\) \}\}/u)
     assert.match(workflow, /name: Prepare the exact component Python runtime(?:.|\n)*?prepare-python-runtime\.mjs --target "\$TARGET"(?:.|\n)*?EMATE_BUILD_PYTHON: \$\{\{ steps\.component-python\.outputs\.python \}\}/u)
@@ -498,6 +499,18 @@ describe('repository release boundary', () => {
     assert.match(workflow, /enterprise:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_enterprise == 'true'/u)
     assert.match(workflow, /admission:\n(?:.|\n)*?case "\$LANE" in(?:.|\n)*?plugin-only\)(?:.|\n)*?test "\$PORTABLE_PUBLISH" = true;(?:.|\n)*?test "\$PROFILE_PORTABLE" = success(?:.|\n)*?test "\$PROFILE" = skipped(?:.|\n)*?test "\$SOURCE" = skipped(?:.|\n)*?test "\$WINDOWS" = skipped(?:.|\n)*?test "\$MACOS" = skipped/u)
     assert.match(workflow, /base\)(?:.|\n)*?test "\$BASE_PLATFORM_COMPONENTS" = success/u)
+    for (const [jobName, nextJobName] of [
+      ['desktop-windows', 'desktop-macos'],
+      ['desktop-macos', 'admission'],
+    ]) {
+      const start = workflow.indexOf(`  ${jobName}:`)
+      const end = workflow.indexOf(`\n  ${nextJobName}:`, start + 3)
+      const job = workflow.slice(start, end < 0 ? undefined : end)
+      assert.match(job, /needs: \[impact, source\]/u)
+      assert.match(job, /if: needs\.impact\.outputs\.run_verification == 'true'/u)
+      assert.match(job, /yarn verify:loader/u)
+      assert.equal(job.match(/yarn verify:profile/gu)?.length, 2)
+    }
     assert.doesNotMatch(workflow, /^\s+paths(?:-ignore)?:/mu)
   })
 
