@@ -284,7 +284,6 @@ export function HomeProjection({
               </div>
             </>}
             {!scheduleLoading && query !== '' && visibleScheduleCount === 0 && <p className={css.scheduleEmpty}>没有匹配的定时任务。</p>}
-            <p className={css.scheduleNote}>任务来自 DSH rc.7 原生 Schedule 事件；原生支持计划、逾期、完成与执行记录，不提供暂停或恢复状态。修改会先创建替代任务，成功后再删除旧任务。</p>
             {scheduleReadErrors > 0 && <p className={css.scheduleError} role="alert">有 {scheduleReadErrors} 个会话的定时任务日志无法读取。</p>}
             {(scheduleLoading || scheduleBusy !== null) && <p className={css.scheduleStatus} role="status">{scheduleLoading ? '正在读取定时任务…' : '正在打开所属会话…'}</p>}
             {scheduleError !== null && <p className={css.scheduleError} role="alert">{scheduleError}</p>}

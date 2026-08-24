@@ -29,6 +29,7 @@ const sidebarUtilityProps = {
   LightIcon: Icon,
   DarkIcon: Icon,
 }
+const useReadyWorkspaces = <T,>(selector: (state: { baselinesReady: boolean }) => T) => selector({ baselinesReady: true })
 
 describe('pinned e-Mate Sidebar and Home projection', () => {
   it('keeps Home visible when rc.7 reuses the same blank session for a generic new task', async () => {
@@ -48,6 +49,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
 
     render(<SessionRouteProjection
       useSessions={selector => selector(sessions)}
+      useWorkspaces={useReadyWorkspaces}
       getSessions={() => sessions}
       openSession={vi.fn()}
       startHomeSession={() => { startSessionFromRoute(ctx) }}
@@ -213,6 +215,8 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     fireEvent.click(screen.getByRole('button', { name: '全选' }))
     fireEvent.click(screen.getByRole('button', { name: '删除（2）' }))
     expect(screen.getByRole('dialog', { name: '删除 2 个会话？' })).not.toBeNull()
+    expect(screen.getByRole('dialog', { name: '删除 2 个会话？' }).textContent).toContain('本地历史记录仍由 e-Mate 保留。')
+    expect(screen.getByRole('dialog', { name: '删除 2 个会话？' }).textContent).not.toContain('DSH')
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
     await waitFor(() => { expect(archiveSession).toHaveBeenCalledTimes(2) })
     expect(archiveSession.mock.calls.map(([id]) => id).sort()).toEqual(['general-session', 'project-session'])
@@ -400,6 +404,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(styles).toMatch(/button:first-child > svg\) \{\s*display: none;/u)
     expect(styles).toMatch(/button:first-child::before\) \{\s*content: '\/';/u)
     expect(home).not.toMatch(/Runtime Scheduler|由 Runtime|从 Runtime/u)
+    expect(home).not.toContain('任务来自 DSH rc.7 原生 Schedule 事件')
   })
 
   it('keeps the target mobile session title clear of the real sidebar trigger', () => {

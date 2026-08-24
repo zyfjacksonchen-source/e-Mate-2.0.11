@@ -768,14 +768,9 @@
   line-height: 1.35;
 }
 
-.scheduleNote,
 .scheduleStatus,
 .scheduleError {
   font-size: 12px;
-}
-
-.scheduleNote {
-  color: var(--emate-color-muted);
 }
 
 .scheduleStatus {
