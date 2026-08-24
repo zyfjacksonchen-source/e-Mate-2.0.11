@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
 import { Context } from '../upstream/deepseek-harness/vendor/cordis/lib/index.js'
 import LlmRuntime, { CallId, LlmAdapter, createUserMessage } from '../upstream/deepseek-harness/packages/llm/llm/lib/index.js'
@@ -12,6 +12,7 @@ import AgentLoop from '../upstream/deepseek-harness/packages/core/agent-loop/lib
 
 const HARNESS_COMMIT = 'e13ce9d953037a2f40d866d17f5a7e00cbc15d66'
 const DESKTOP_REFERENCE_COMMIT = '6074088f5b660206e404b3591fab51fb99c69add'
+const EVIDENCE_SCHEMA_VERSION = 2
 const MIN_SAMPLES = 30
 const wait = milliseconds => new Promise(resolveWait => setTimeout(resolveWait, milliseconds))
 const sha256 = value => createHash('sha256').update(value).digest('hex')
@@ -77,16 +78,34 @@ function metric(samples, name, percentileValue) {
 function validSamples(path) {
   if (!Array.isArray(path.samples) || path.samples.length < MIN_SAMPLES) return false
   const pairIds = new Set()
+  const scenarios = new Map()
+  const armOrders = new Set()
   for (const sample of path.samples) {
     if (typeof sample.pair_id !== 'string' || pairIds.has(sample.pair_id)
-      || !Number.isFinite(sample.ttft_ms) || sample.ttft_ms < 0
+      || !['short-text', 'history-20', 'read-only-tool'].includes(sample.scenario)
+      || !['AB', 'BA'].includes(sample.arm_order)
+      || !Number.isFinite(sample.submit_to_first_visible_text_ms) || sample.submit_to_first_visible_text_ms < 0
+      || !Number.isFinite(sample.user_message_to_first_text_delta_ms) || sample.user_message_to_first_text_delta_ms < 0
+      || !Number.isFinite(sample.first_chunk_to_paint_ms) || sample.first_chunk_to_paint_ms < 0
+      || !Number.isFinite(sample.local_pre_provider_ms) || sample.local_pre_provider_ms < 0
       || !Number.isFinite(sample.output_tokens_per_second) || sample.output_tokens_per_second <= 0
       || !Number.isFinite(sample.tool_call_to_start_ms) || sample.tool_call_to_start_ms < 0
       || !Number.isFinite(sample.tool_result_to_next_request_ms) || sample.tool_result_to_next_request_ms < 0
-      || sample.duplicate_event_count !== 0) return false
+      || !Number.isFinite(sample.queue_wait_ms) || sample.queue_wait_ms < 0
+      || !isSha256(sample.request_header_sha256)
+      || !Number.isSafeInteger(sample.request_header_bytes) || sample.request_header_bytes < 0
+      || !Number.isSafeInteger(sample.request_tool_count) || sample.request_tool_count < 0
+      || sample.duplicate_model_request_count !== 0
+      || sample.duplicate_tool_execution_count !== 0
+      || sample.duplicate_job_execution_count !== 0
+      || sample.duplicate_deliverable_count !== 0) return false
     pairIds.add(sample.pair_id)
+    scenarios.set(sample.scenario, (scenarios.get(sample.scenario) ?? 0) + 1)
+    armOrders.add(sample.arm_order)
   }
-  return true
+  return [...scenarios.values()].every(count => count >= 10)
+    && scenarios.size === 3
+    && armOrders.size === 2
 }
 
 function comparePath(baseline, candidate) {
@@ -94,17 +113,19 @@ function comparePath(baseline, candidate) {
   const summaries = {}
   for (const percentileValue of [0.5, 0.95]) {
     const label = `p${String(percentileValue * 100)}`
-    const baseTtft = metric(baseline.samples, 'ttft_ms', percentileValue)
-    const candidateTtft = metric(candidate.samples, 'ttft_ms', percentileValue)
-    const ttftRate = percentileValue === 0.5 ? 0.05 : 0.10
-    const ttftLimit = baseTtft + Math.max(50, baseTtft * ttftRate)
-    summaries[label] = {
-      ttft_ms: { baseline: baseTtft, candidate: candidateTtft, limit: ttftLimit },
+    const absoluteAllowance = percentileValue === 0.5 ? 50 : 100
+    const relativeAllowance = percentileValue === 0.5 ? 0.03 : 0.05
+    summaries[label] = {}
+    for (const name of ['submit_to_first_visible_text_ms', 'user_message_to_first_text_delta_ms']) {
+      const baseTtft = metric(baseline.samples, name, percentileValue)
+      const candidateTtft = metric(candidate.samples, name, percentileValue)
+      const ttftLimit = baseTtft + Math.max(absoluteAllowance, baseTtft * relativeAllowance)
+      summaries[label][name] = { baseline: baseTtft, candidate: candidateTtft, limit: ttftLimit }
+      if (candidateTtft > ttftLimit) failures.push(`${label} ${name} ${candidateTtft}ms > ${ttftLimit}ms`)
     }
-    if (candidateTtft > ttftLimit) failures.push(`${label} TTFT ${candidateTtft}ms > ${ttftLimit}ms`)
   }
 
-  for (const [percentileValue, throughputRate] of [[0.5, 0.05], [0.05, 0.10]]) {
+  for (const [percentileValue, throughputRate] of [[0.5, 0.03], [0.05, 0.05]]) {
     const label = `p${String(percentileValue * 100)}`
     const baseThroughput = metric(baseline.samples, 'output_tokens_per_second', percentileValue)
     const candidateThroughput = metric(candidate.samples, 'output_tokens_per_second', percentileValue)
@@ -120,12 +141,40 @@ function comparePath(baseline, candidate) {
     }
   }
 
+  for (const [percentileValue, allowance] of [[0.5, 10], [0.95, 25]]) {
+    const label = `p${String(percentileValue * 100)}`
+    const base = metric(baseline.samples, 'local_pre_provider_ms', percentileValue)
+    const observed = metric(candidate.samples, 'local_pre_provider_ms', percentileValue)
+    summaries[label] ??= {}
+    summaries[label].local_pre_provider_ms = { baseline: base, candidate: observed, limit: base + allowance }
+    if (observed > base + allowance) failures.push(`${label} local_pre_provider_ms ${observed}ms > ${base + allowance}ms`)
+  }
+
+  const basePaintP95 = metric(baseline.samples, 'first_chunk_to_paint_ms', 0.95)
+  const paintP95 = metric(candidate.samples, 'first_chunk_to_paint_ms', 0.95)
+  const paintP99 = metric(candidate.samples, 'first_chunk_to_paint_ms', 0.99)
+  summaries.p95.first_chunk_to_paint_ms = { baseline: basePaintP95, candidate: paintP95, delta_limit: basePaintP95 + 10, absolute_limit: 50 }
+  summaries.p99 = { first_chunk_to_paint_ms: { candidate: paintP99, absolute_limit: 100 } }
+  if (paintP95 > basePaintP95 + 10 || paintP95 > 50) failures.push(`p95 first_chunk_to_paint_ms ${paintP95}ms exceeds +10ms or 50ms absolute limit`)
+  if (paintP99 > 100) failures.push(`p99 first_chunk_to_paint_ms ${paintP99}ms > 100ms`)
+
   for (const name of ['tool_call_to_start_ms', 'tool_result_to_next_request_ms']) {
     const base = metric(baseline.samples, name, 0.95)
     const observed = metric(candidate.samples, name, 0.95)
-    summaries.p95[name] = { baseline: base, candidate: observed, absolute_limit: base + 50, relative_limit: base * 1.10 }
-    if (observed - base > 50 || (base === 0 ? observed !== 0 : observed > base * 1.10)) {
-      failures.push(`p95 ${name} ${observed}ms exceeds +50ms and/or +10% limits from ${base}ms`)
+    summaries.p95[name] = { baseline: base, candidate: observed, absolute_limit: base + 25, relative_limit: base * 1.05 }
+    if (observed - base > 25 || (base === 0 ? observed !== 0 : observed > base * 1.05)) {
+      failures.push(`p95 ${name} ${observed}ms exceeds +25ms and/or +5% limits from ${base}ms`)
+    }
+  }
+
+  const baselineByPair = new Map(baseline.samples.map(sample => [sample.pair_id, sample]))
+  for (const sample of candidate.samples) {
+    const paired = baselineByPair.get(sample.pair_id)
+    if (paired === undefined) continue
+    if (sample.request_header_sha256 !== paired.request_header_sha256
+      || sample.request_header_bytes !== paired.request_header_bytes
+      || sample.request_tool_count !== paired.request_tool_count) {
+      failures.push(`request header mismatch for ${sample.pair_id}`)
     }
   }
   return { passed: failures.length === 0, failures, summaries }
@@ -134,12 +183,15 @@ function comparePath(baseline, candidate) {
 function validRuntimeIdentity(runtime) {
   return runtime !== null && typeof runtime === 'object'
     && typeof runtime.product === 'string' && runtime.product.length > 0
+    && /^2\.0\.(12|13)$/.test(runtime.product_version)
     && /^[a-f0-9]{40}$/.test(runtime.source_commit)
     && runtime.desktop_reference_commit === DESKTOP_REFERENCE_COMMIT
     && typeof runtime.base_contract_id === 'string' && runtime.base_contract_id.length > 0
     && typeof runtime.profile_generation === 'string' && runtime.profile_generation.length > 0
     && isSha256(runtime.composition_sha256)
     && isSha256(runtime.client_bundle_sha256)
+    && isSha256(runtime.desktop_artifact_sha256)
+    && Number.isSafeInteger(runtime.desktop_artifact_bytes) && runtime.desktop_artifact_bytes > 0
 }
 
 function validEnterpriseReceipt(receipt) {
@@ -151,7 +203,9 @@ function validEnterpriseReceipt(receipt) {
 
 export function evaluateEvidence(evidence) {
   const failures = []
-  if (evidence?.schema_version !== 1 || evidence?.harness_commit !== HARNESS_COMMIT) {
+  if (evidence?.schema_version !== EVIDENCE_SCHEMA_VERSION
+    || evidence?.comparison_kind !== 'installed-2.0.12-vs-2.0.13'
+    || evidence?.harness_commit !== HARNESS_COMMIT) {
     failures.push('evidence schema or Harness pin mismatch')
   }
   const baseline = evidence?.paths?.baseline
@@ -210,9 +264,12 @@ function validateProductionReceipts(evidence) {
   let receiptsComplete = true
   for (const receipt of receipts) {
     if (receipt === undefined
+      || typeof receipt.performance_run_id !== 'string' || receipt.performance_run_id.length < 16
+      || receipt.performance_run_id !== evidence.performance_run_id
       || receipt.harness_commit !== HARNESS_COMMIT
       || typeof receipt.provider !== 'string' || receipt.provider.length === 0 || receipt.provider.includes('fixture')
       || typeof receipt.model !== 'string' || receipt.model.length === 0 || receipt.model.includes('fixture')
+      || typeof receipt.reasoning_level !== 'string' || receipt.reasoning_level.length === 0
       || typeof receipt.tool !== 'string' || receipt.tool.length === 0
       || !isSha256(receipt.acceptance_identity_sha256)
       || !isSha256(receipt.dataset_sha256)
@@ -223,6 +280,10 @@ function validateProductionReceipts(evidence) {
       || !isSha256(receipt.raw_samples_artifact?.sha256)
       || !['provider-invocation-receipt', 'provider-usage-receipt', 'trace'].includes(receipt.provider_receipt_artifact?.kind)
       || !isSha256(receipt.provider_receipt_artifact?.sha256)
+      || receipt.request_header_artifact?.kind !== 'request-headers'
+      || !isSha256(receipt.request_header_artifact?.sha256)
+      || receipt.renderer_paint_artifact?.kind !== 'renderer-paint-trace'
+      || !isSha256(receipt.renderer_paint_artifact?.sha256)
       || !Number.isFinite(Date.parse(receipt.started_at))
       || !Number.isFinite(Date.parse(receipt.finished_at))
       || Date.parse(receipt.finished_at) <= Date.parse(receipt.started_at)
@@ -246,19 +307,20 @@ function validateProductionReceipts(evidence) {
   })) {
     failures.push('PRODUCTION_SAMPLE_RECEIPT_MISMATCH')
   }
-  const pairingKeys = ['provider', 'model', 'tool', 'acceptance_identity_sha256', 'dataset_sha256']
+  const pairingKeys = ['provider', 'model', 'reasoning_level', 'tool', 'acceptance_identity_sha256', 'dataset_sha256']
   const baseline = receipts[0]
   if (baseline !== undefined && receipts.some(receipt => pairingKeys.some(key => receipt?.[key] !== baseline[key])
     || canonical(receipt?.environment) !== canonical(baseline.environment))) {
     failures.push('PRODUCTION_PATHS_ARE_NOT_EXACTLY_PAIRED')
   }
-  if (baseline?.runtime?.product !== 'deepseek-harness-desktop'
-    || baseline?.runtime?.source_commit !== DESKTOP_REFERENCE_COMMIT) {
+  if (baseline?.runtime?.product !== 'e-mate-desktop'
+    || baseline?.runtime?.product_version !== '2.0.12') {
     failures.push('PRODUCTION_BASELINE_RUNTIME_MISMATCH')
   }
   const online = receipts[1]
   const offline = receipts[2]
   if (online?.runtime?.product !== 'e-mate-desktop'
+    || online?.runtime?.product_version !== '2.0.13'
     || canonical(online?.runtime) !== canonical(offline?.runtime)
     || canonical(baseline?.runtime) === canonical(online?.runtime)) {
     failures.push('PRODUCTION_CANDIDATE_RUNTIME_MISMATCH')
@@ -281,14 +343,22 @@ async function verifyProductionArtifacts(evidence, input) {
   const root = dirname(resolve(input))
   for (const [pathName, path] of Object.entries(checked.paths ?? {})) {
     const receipt = path.run_receipt
-    const artifactKeys = ['raw_samples_artifact', 'provider_receipt_artifact']
+    const artifactKeys = [
+      'raw_samples_artifact',
+      'provider_receipt_artifact',
+      'request_header_artifact',
+      'renderer_paint_artifact',
+    ]
     if (pathName !== 'baseline') artifactKeys.push('enterprise_receipt_artifact')
     for (const key of artifactKeys) {
       const artifact = receipt?.[key]
       if (typeof artifact?.path !== 'string' || !isSha256(artifact.sha256)) return checked
+      const artifactPath = resolve(root, artifact.path)
+      const rel = relative(root, artifactPath)
+      if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return checked
       let bytes
       try {
-        bytes = await readFile(resolve(root, artifact.path))
+        bytes = await readFile(artifactPath)
       } catch {
         return checked
       }
@@ -302,6 +372,16 @@ async function verifyProductionArtifacts(evidence, input) {
       } else if (key === 'enterprise_receipt_artifact') {
         try {
           if (canonical(JSON.parse(bytes)) !== canonical(receipt.enterprise_receipt)) return checked
+        } catch {
+          return checked
+        }
+      } else if (key === 'request_header_artifact' || key === 'renderer_paint_artifact') {
+        try {
+          const binding = JSON.parse(bytes)
+          if (binding?.schema_version !== EVIDENCE_SCHEMA_VERSION
+            || binding?.performance_run_id !== evidence.performance_run_id
+            || binding?.path_name !== pathName
+            || binding?.sample_ids_sha256 !== receipt.sample_ids_sha256) return checked
         } catch {
           return checked
         }
@@ -350,6 +430,7 @@ async function collectPath(name, samples, enterpriseState) {
   }))
 
   const output = []
+  const fixtureHeader = canonical({ provider: 'parity-fixture', model: 'parity-fixture', tools: ['parity_probe'] })
   for (let index = 0; index < samples; index += 1) {
     const pairId = `pair-${String(index + 1).padStart(2, '0')}`
     const responseId = `${name}-response-${pairId}`
@@ -382,10 +463,10 @@ async function collectPath(name, samples, enterpriseState) {
     const toolEvents = toolAgent.session.events
     const call = toolEvents.find(event => event.type === 'tool/call')
     const result = toolEvents.find(event => event.type === 'tool/result')
-    const duplicateEventCount = Math.max(0, toolEvents.filter(event => event.type === 'tool/call').length - 1)
+    const duplicateToolExecutionCount = Math.max(0, toolEvents.filter(event => event.type === 'tool/call').length - 1)
       + Math.max(0, toolEvents.filter(event => event.type === 'tool/result').length - 1)
-      + Math.max(0, responseEvents.filter(event => event.type === 'assistant/message').length - 1)
-      + Math.max(0, toolEvents.filter(event => event.type === 'assistant/message').length - 2)
+    const duplicateModelRequestCount = Math.max(0, (adapter.requestCounts.get(responseId) ?? 0) - 1)
+      + Math.max(0, (adapter.requestCounts.get(toolId) ?? 0) - 2)
     const toolStart = toolStarts.get(toolId)
     const nextRequest = adapter.requestStarts.get(`${toolId}:2`)
     if (call?.type !== 'tool/call' || result?.type !== 'tool/result'
@@ -394,11 +475,23 @@ async function collectPath(name, samples, enterpriseState) {
     }
     output.push({
       pair_id: pairId,
-      ttft_ms: deltas[0].time - responseUser.time,
+      scenario: ['short-text', 'history-20', 'read-only-tool'][index % 30 < 10 ? 0 : index % 30 < 20 ? 1 : 2],
+      arm_order: index % 2 === 0 ? 'AB' : 'BA',
+      submit_to_first_visible_text_ms: deltas[0].time - responseUser.time,
+      user_message_to_first_text_delta_ms: deltas[0].time - responseUser.time,
+      first_chunk_to_paint_ms: 0,
+      local_pre_provider_ms: 0,
       output_tokens_per_second: outputTokens / ((deltas.at(-1).time - deltas[0].time) / 1_000),
       tool_call_to_start_ms: toolStart - call.time,
       tool_result_to_next_request_ms: nextRequest - result.time,
-      duplicate_event_count: duplicateEventCount,
+      queue_wait_ms: 0,
+      request_header_sha256: sha256(fixtureHeader),
+      request_header_bytes: Buffer.byteLength(fixtureHeader),
+      request_tool_count: 1,
+      duplicate_model_request_count: duplicateModelRequestCount,
+      duplicate_tool_execution_count: duplicateToolExecutionCount,
+      duplicate_job_execution_count: 0,
+      duplicate_deliverable_count: 0,
     })
     await Promise.all([responseHandle.dispose(), toolHandle.dispose()])
   }
@@ -407,17 +500,25 @@ async function collectPath(name, samples, enterpriseState) {
 }
 
 async function createFixture(samples) {
+  const baseline = await collectPath('baseline', samples, { endpoint: 'not-applicable' })
+  const fixturePath = (path, enterpriseState) => ({
+    path,
+    enterprise_state: enterpriseState,
+    samples: structuredClone(baseline.samples),
+  })
   return {
-    schema_version: 1,
+    schema_version: EVIDENCE_SCHEMA_VERSION,
+    comparison_kind: 'installed-2.0.12-vs-2.0.13',
+    performance_run_id: 'fixture-performance-v2',
     evidence_kind: 'keyless-target-loop-collector-fixture',
     harness_commit: HARNESS_COMMIT,
-    note: 'Generated by the pinned real AgentLoop; validates collection/comparison only and is not production provider evidence.',
+    note: 'Collected once through the pinned real AgentLoop and cloned into equivalent comparison arms; browser paint and pre-provider values are synthetic zeros, so this validates schema/comparison only and is not production evidence.',
     paths: {
-      baseline: await collectPath('baseline', samples, { endpoint: 'not-applicable' }),
-      emate_online: await collectPath('emate-online', samples, {
+      baseline,
+      emate_online: fixturePath('emate-online', {
         endpoint: 'available', lease: 'valid-cached', model_policy: 'valid-cached', audit: 'async-outbox',
       }),
-      emate_enterprise_unavailable_valid_cache: await collectPath('emate-offline-valid-cache', samples, {
+      emate_enterprise_unavailable_valid_cache: fixturePath('emate-offline-valid-cache', {
         endpoint: 'unavailable', lease: 'valid-cached', model_policy: 'valid-cached', audit: 'async-outbox',
       }),
     },

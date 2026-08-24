@@ -35,6 +35,30 @@ Renderer input is already validated Harness event/result data. Renderers may own
 
 `office-skills` registers four clean-room Skills for documents, PDF, spreadsheets and presentations. It contains no Python interpreter, format library, OCR model or document Worker. A Skill can guide the Agent to a target-owned/approved toolchain, but must report the real missing capability rather than manufacture an artifact or completion.
 
+## 2.0.13 component and lazy-load contracts
+
+The 2.0.13 Base v7 roster may add only the smallest ordinary Profile components needed for canvas, typed deliverables and the dsh-pet adapter. Goal presentation and the shared details container extend the existing Shell/native Goal UI seams unless a Creation Mode experiment proves that a separate component is required. Adding a component merely to split files or claim plugin compliance is prohibited.
+
+The intended ownership is:
+
+- `@e-mate/dsh-client-shell`: owns the one shared details layout, visible entry controls, `@目标` handoff, Goal composition, product copy and visual fixes. It stores only ephemeral selected-panel/navigation state. Goal, project files, canvas pages, artifacts and pet task state remain external projections.
+- `@e-mate/dsh-plugin-better-sidebar`: remains the one project file reader. Its admitted e-Mate adapter is intentionally narrower than the community workbench: target Connection RPC, WorkspaceRegistry canonical root, 500-entry directories, 512 KiB fatal UTF-8 reads, symlink exclusion and no terminal/Git/subagent/browser transport. The Shell must make this existing `conversation.view`/service reachable rather than embed the upstream sidebar runtime.
+- `@e-mate/dsh-plugin-canvas` (candidate id): owns Excalidraw registration, project-page serialization, atomic file writes, Attachment/Artifact insertion and sandboxed preview/export. Its proposed authority is `effects: [filesystem-read, filesystem-write, persistent-state]`, `guards: [atomic-receipt, explicit-user-action, sandbox-policy, session-scope, workspace-scope]`. Final metadata must use only the repository closed vocabulary and match implementation exactly.
+- `@e-mate/dsh-plugin-deliverables` (candidate id): owns the typed terminal projection and lazy preview registry over real Tool/Job/Attachment/Artifact facts. Its proposed authority is read-only unless implementation requires project file reads; opening/reveal/download must use the existing Host/browser action and declare any resulting effect rather than hiding it in the Shell.
+- `@e-mate/dsh-plugin-pet` (candidate id): adapts `npc-dao/dsh-pet@f501139cfb155fd46717a79bb1c158da064dce15` and maps existing client projections to animation state. Only its MIT code is reusable: the upstream `dsh` and `aliang` sprite assets are explicitly excluded from that MIT license and must not enter e-Mate. The adapter performs no model, Tool or Job operation. Its fixed same-origin 小芯 atlas is an admitted component asset; persisting a user toggle may use the existing Settings service, with `effects: [persistent-state]`, `guards: [explicit-user-action]` when the component writes it directly.
+
+Every candidate id above is provisional until S28/S31/S32/S33 names the exact existing owner and the component inventory, package metadata, signed manifest and Base v7 all agree. A component without a distinct lifecycle/authority boundary must be folded into its existing owner instead of shipped.
+
+Heavy UI is import-cold by default:
+
+- Excalidraw, PDF/Office/code/media preview engines, contact sheets and pet office-scene assets load only after the corresponding visible user action or idle state that cannot delay first response.
+- No canvas, preview or pet package registers a model Tool merely to render UI. Their metadata must not change ordinary `request/header.tools`.
+- Excalidraw fonts/icons, pet atlases and preview support assets are immutable same-origin bytes inside the signed component. Runtime CDN, default asset host, telemetry, online marketplace and font fetch are release failures.
+- Lazy chunks are content-addressed release inputs, covered by component byte/SHA/NOTICE and offline tests. A missing chunk shows a truthful retryable error and cannot blank chat or report the underlying task failed.
+- Background prefetch is forbidden while a foreground chat is waiting for its first text token. Reduced-motion, hidden/minimized windows and disposal must stop animation/timers and release listeners, decoders and canvases.
+
+The shared details area is a Shell layout seam, not a plugin bus. It may select one registered detail surface and pass the standard Session kit plus typed identity; it cannot expose another RPC envelope, duplicate a plugin's store, value-import another component's implementation, or retain content after the owning session/component is disposed.
+
 Search stays on the pinned rc.7 `@deepseek-ai/dsh-web-search-deepseek` provider and native `web_search` Tool. The Profile selects that one provider and projects only the enterprise device credential reference; it ships no Search MCP component, browser-facing MCP socket, Session-local installer, or parallel search event stream. `genui` uses the target tool-view/panel slots, while `better-sidebar` uses target Workspace/Session services and hides project files for general conversations. Subagent behavior remains entirely native to the pinned Harness; e-Mate ships no subagent compatibility package.
 
 Browser capability is the ordinary `@e-mate/dsh-plugin-cdp` DSH adapter. It accepts only an explicit literal loopback CDP endpoint, binds target selection and snapshot references to the active Agent session, exposes actions as native DSH Tools, and routes mutations through the native approval policy. It ships no extension, side panel, browser binary, downloader, chat/session gateway, model/settings UI or second approval system. A missing or non-loopback CDP endpoint fails closed.
@@ -44,6 +68,41 @@ Browser capability is the ordinary `@e-mate/dsh-plugin-cdp` DSH adapter. It acce
 Image generation/editing adapts the final e-Mate 2.0.5 Codex-like `imagegen` contract pinned at `564a6b6c1d43fb6831dd4a5cd8026e472f063311` to the target runtime. It calls the existing e-Mate Model Gateway through `emateIdentity` instead of importing the legacy Python provider runner or creating a second image credential. The local Tool is registered through target `ctx.tools`, executes under one owner-scoped target `ctx.jobs` record, and stores the verified result through target `ctx.attachments`. Its public arguments are exactly required `prompt` plus optional `image_url`; in 2.0.11 `image_url` is narrowed to one or more image attachment IDs already present in the authoritative current session. Generation posts JSON to `/v1/images/generations`; editing re-reads the referenced bytes and posts multipart data to `/v1/images/edits`. Both operations submit only `gpt-image-2-pro`. Users and the Agent cannot pass or select an image model, provider, output path, size, quality, timeout, or concurrency policy. Provider credentials and any eligible `gpt-image-2-pro → gpt-image-2` fallback remain server-side.
 
 Each call produces exactly one independent output and one remote Job. Multiple outputs use separate concurrent `imagegen` Tool calls through the target scheduler; the plugin does not expose a second `tasks` batch protocol. Each result must commit a terminal Job descriptor before download. The adapter checks status/model, byte limit, MIME, `Content-Length`, ETag, declared SHA-256 and actual SHA-256 before `ctx.attachments.saveImage`; only then does the Tool render a real Harness ImageBlock. The browser does not classify image intent or manufacture progress. An absent verified Image API root disables this adapter; it never guesses an endpoint, reads production material directly, falls back to a local provider key, or changes the selected chat model.
+
+For 2.0.13, the same Tool/Job contract also governs multi-image orchestration. One requested output or independent edit is one `imagegen` call and one Job; an edit receives exactly its selected source Attachment IDs, and only an explicit fusion request receives several. The product default dispatch concurrency is 1, measured upward to at most 4 by the release performance contract. A 429/503 or unknown completion is terminal for that item until the user explicitly retries; without a provider invocation status/idempotency API the runtime must not replay it automatically. Foreground chat waiting for first text token has dispatch priority over queued image work. `image_pack` remains a packaging projection over exact successful current-session Attachment IDs, never a second execution batch.
+
+## Goal, scheduling and task-projection boundary
+
+Pinned rc.7 already supplies the complete Goal domain: one same-session Goal, `goal/change`, a whole-value `goal` Session Projection, compare-and-set Remote mutations, `/goal`, `get_goal`/`create_goal`/`update_goal`, direct-human authority, process-local activation, and the race-fenced same-session round driver. e-Mate presentation consumes those exact services.
+
+- `@目标` is an input/menu entry into native Goal create/focus behavior. It does not append a synthetic user message, parse goal keywords, persist a browser object or bypass direct-human authority.
+- A no-Goal surface may collect objective text and call the native create Remote/Tool path chosen by its authority; an existing-Goal surface reads the Projection and invokes mutations with the latest `{id, revision}`. A CAS failure is displayed and followed by authoritative reread, never overwritten locally.
+- Natural-language and autonomous creation are already supported by `create_goal` from a direct top-level human request. Subagents, schedules, background plugins and non-human turns cannot create a Goal.
+- Todo, Queue, Schedule, Job and Deliverable relationships are projections keyed by their native identities. A Goal details view may join them for display but cannot copy their phase, retry, completion or scheduling state into the Goal event.
+- Schedule may retain a user-created Goal reference for navigation/reminder only. `schedule_create/list/delete` and native dispatch remain the only scheduler actions; dispatch never creates, resumes, re-arms, completes or blocks a Goal.
+- Restart and fork preserve the durable Goal while activation is disarmed. Only an explicit human resume through native `update_goal`/Remote may rearm it.
+
+## Typed deliverable projection
+
+A deliverable is admitted only from a real terminal Tool/Job fact and is keyed by `sessionId`, `turnId`, source identity and either an Attachment/Artifact identity or a validated HTTPS URL. The projection vocabulary is:
+
+```text
+DeliverableItem
+  id, sessionId, turnId, source
+  kind: image | text | code | pdf | office | archive |
+        audio | video | html | web-link | unknown
+  name, mime, size, sha256
+  attachmentId or httpsUrl
+  previewCapability, status
+```
+
+The projector does not scan Markdown, DOM, prose paths or arbitrary disk directories. Preview/open/reveal/download/copy actions revalidate the referenced source at activation. HTTPS links display their actual parsed domain and never run as same-origin content. HTML uses a no-same-origin sandbox; corrupt, missing, oversized or unsupported items remain visible with their true error. Goal completion surfaces may cite only successful deliverables whose source is still resolvable.
+
+## Pet projection boundary
+
+The pet is presentation, not an execution Agent. Its state reducer consumes only existing structured Goal/Todo/Queue/Job/Tool/Deliverable projections, uses the precedence fixed in the slice contract, and changes sprite state without emitting session events. It cannot inspect token text, prompt/output content, hidden reasoning, DOM text, filesystem changes or model traffic. Clicking the pet opens the shared details surface with redacted structured state; it never dispatches a Tool or grants authority.
+
+The fixed dsh-pet revision, standard v2 atlas and optional 30×8 office-scene extension are signed offline assets. A missing or invalid extension falls back to the standard v2 rows; it cannot block startup, composer input, first token or Goal execution. The Settings toggle uses the existing DSH Settings namespace and has an accessible 44px control, reduced-motion behavior and deterministic disposal.
 
 ## External connections
 

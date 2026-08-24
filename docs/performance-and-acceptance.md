@@ -1,11 +1,11 @@
 # Performance and acceptance
 
-This document is a release gate for e-Mate 2.0.12. A scenario is `passed` only with commands, screenshots or traces, immutable IDs, and the observed result. Missing enterprise accounts, credentials, platform capabilities, or real external targets are `blocked`; mocks cannot close a production acceptance item.
+This document is a release gate for e-Mate 2.0.13. A scenario is `passed` only with commands, screenshots or traces, immutable IDs, and the observed result. Missing enterprise accounts, credentials, platform capabilities, or real external targets are `blocked`; mocks cannot close a production acceptance item.
 
 ## Core browser and performance gates
 
 - Cold local Web LCP is at most 2.0 seconds and interactive time at most 2.5 seconds.
-- Installed-app startup is gated against the accepted 2.0.11 installed artifact, not an absolute 15-second ceiling. On the same machine and architecture, use the same install/copy state, authentication/profile state, launch command and probe boundary for one clean launch and three warm launches of both artifacts. For the clean sample, warm p75 and warm maximum, `candidate - paired 2.0.11 baseline` must be at most 10,000 ms. For an unauthenticated launch, stop the clock only when the login form is visible, AX-readable and clickable; AURA is part of the statically bundled login module and is mounted eagerly, with no dynamic import, CDN fetch or login-time asset download. WebGL readiness must not block form interaction.
+- Installed-app startup is gated against the frozen final 2.0.12 installed artifact/Profile combination in [`slices/2.0.13.md`](slices/2.0.13.md), not an absolute ceiling. On the same machine and architecture, use the same install/copy state, authentication/profile state, launch command and probe boundary for one clean launch and three warm launches of both artifacts. For the clean sample, warm p75 and warm maximum, `candidate - paired 2.0.12 baseline` must be at most 10,000 ms. For an unauthenticated launch, stop the clock only when the login form is visible, AX-readable and clickable; AURA is part of the statically bundled login module and is mounted eagerly, with no dynamic import, CDN fetch or login-time asset download. WebGL readiness must not block form interaction.
 - INP p75 for typing, model selection, navigation, dialogs, and sidebar actions is at most 100 ms.
 - At 30 real events per second for 60 seconds, event-to-paint is p95 at most 50 ms and p99 at most 100 ms.
 - A 5,000-event session scrolls at an average of at least 55 fps, uses at most 300 MB JS heap, and has no steady-state main-thread task above 100 ms. Frame-drop percentage is diagnostic evidence only and is not a release gate.
@@ -13,21 +13,52 @@ This document is a release gate for e-Mate 2.0.12. A scenario is `passed` only w
 - A Shell adapter that observes the conversation DOM must process only the changed marker subtree. Unrelated streamed-token `childList` mutations must not cause a document-wide selector scan; the component behavior test is the repository gate for this hot path.
 - Chrome Performance Trace (gzip is accepted when the uncompressed SHA/size remain in the metrics receipt), React Profiler summary, fixed replay dataset, viewport, build SHA, Node/browser version, and before/after figures are retained per release.
 
-### Harness parity for response and Tool latency
+### TTFT v2, streaming and Tool-latency parity
 
-Run paired samples on the same machine, browser, network, provider model, prompt set, Tool fixture and warm/cold state: pinned Harness `0.1.0-rc.7` is the baseline; e-Mate uses a valid cached login lease, the same locally cached model policy and asynchronous audit outbox. Use at least 30 successful samples per path and retain raw timings.
+TTFT v2 has two comparisons and neither substitutes for the other:
 
-- first response/TTFT adds at most 5% at p50 and 10% at p95, with an absolute allowance of 50 ms when that is larger than the percentage allowance;
-- steady streamed generation throughput (provider output tokens per second, excluding TTFT) is no more than 5% lower at p50 and 10% lower at p5; the low tail is the slow side of a throughput distribution;
-- persisted Tool-call event to real Tool start, and Tool-result persistence to the next model request, each add at most 50 ms at p95 and no more than 10% versus the target baseline;
-- repeat the paired run with the enterprise endpoint unavailable while the login lease and last valid model policy remain valid. Local execution must stay within the same budgets, the audit outbox may remain pending, and no response/Tool event may be duplicated;
-- new login, expired/revoked lease and invalid model policy are correctness failures and are measured separately; they must fail closed and are not included in the steady local-runtime latency sample.
+1. Final installed 2.0.12 versus the exact installed 2.0.13 candidate, for every published chat model.
+2. Pinned native DSH rc.7 Goal versus the 2.0.13 Goal presentation/association path, for the default model.
 
-If provider or network variance makes a paired sample incomparable, discard both members with the same documented reason and rerun; do not average unrelated providers, models or time windows into a passing result.
+All samples run on the same machine, architecture, browser, network, provider route, model/reasoning level, dataset, authentication/Profile state and warm/cold state. Every published chat model receives 30 AB/BA pairs: 10 short text, 10 with a 20-turn history and 10 with one deterministic read-only Tool. The Goal comparison receives at least 30 pairs. Separately collect 10 paired first requests after update/restart, a 5,000-event session, long Markdown/code, and Goal active/inactive. Do not average across model, prompt class, Goal state, network window or cold/warm state. When a result consumes 80% of any allowed regression budget, expand that exact cohort to 60 pairs.
 
-`pnpm performance:parity --fixture --output <receipt.json>` is an explicit collector/evaluator self-check. It runs the pinned Agent Loop and derives timings only from its real `user/message`, `assistant/chunk`, `assistant/message`, `tool/call`, and `tool/result` events plus the real Tool body/request boundaries. It creates 30 paired samples for baseline, online, and enterprise-unavailable-with-valid-cache cohorts, deliberately reports `fixture-passed-production-blocked`, and exits non-zero: the deterministic provider does not load the e-Mate Desktop/Profile and cannot prove production latency. Omitting both `--fixture` and `--input` is an error.
+Each raw sample records monotonic timestamps or bounded durations for:
 
-A production `--input` can report `passed` only when every cohort supplies an immutable run receipt bound to the pinned Harness commit, approved identity digest, exact provider/model/Tool/dataset, identical machine/OS/architecture/Node/browser/network environment, start/finish times, raw sample-ID/sample digests, and two existing artifact files: the raw samples and a Provider invocation/usage receipt or trace. The baseline must identify the pinned original `deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add`; both e-Mate cohorts must identify the same candidate source commit, Base contract, Profile generation, component-composition digest, and client-bundle digest. Each e-Mate path additionally supplies a verified enterprise-runtime receipt that binds the cached lease, model policy, and audit outbox, with online/offline using the same lease and policy. The evaluator reads and SHA-256 verifies every artifact relative to the input receipt. Relabeling a handwritten fixture, setting a JSON verification flag, using the same runtime for baseline and candidate, or omitting any artifact stays blocked and exits non-zero.
+- user submit to first visibly painted non-empty assistant text;
+- durable `user/message` to first non-empty text delta;
+- first visible chunk arrival to browser paint;
+- submit to Host receipt, turn to request header, policy, quota reservation, request preparation, adapter dispatch and adapter first chunk;
+- Provider invocation/response identity, provider timestamp/usage, request-header SHA-256/bytes/Tool count;
+- output-token throughput excluding TTFT, Tool-call persistence to real Tool start, Tool-result persistence to next request, duplicate executions and independent queue wait.
+
+Do not record prompt text, output text, credentials, bearer/session tokens, raw account/session identities or sensitive paths. Cross-process clocks are correlated by IDs and local durations; wall-clock values from different processes are never directly subtracted.
+
+Hard gates, evaluated per model and scenario, are:
+
+- TTFT p50: candidate ≤ baseline + `max(50 ms, 3%)`;
+- TTFT p95: candidate ≤ baseline + `max(100 ms, 5%)`;
+- local pre-provider p50/p95: candidate delta ≤ `+10 ms / +25 ms`;
+- first visible chunk→paint p95: candidate delta ≤ `+10 ms` and absolute ≤ `50 ms`; p99 absolute ≤ `100 ms`;
+- steady throughput p50/p5: candidate ≥ `97% / 95%` of baseline;
+- each Tool handoff p95: candidate delta ≤ `+25 ms` and ≤ `+5%`;
+- duplicate model requests, Tool executions, Job executions and terminal projections: `0`;
+- paired cold first request after update/restart: candidate delta ≤ `500 ms`.
+
+Ordinary-chat request headers are a correctness gate before latency evaluation. System header bytes, Tool header bytes, Tool count/order, route, model and reasoning level must equal the frozen 2.0.12 baseline. Only a native Goal scenario may include the pinned rc.7 Goal Tools. Canvas, preview, pet and other presentation components cannot enter the resident Tool header. A header mismatch fails the cohort even if timings pass.
+
+The local hot path remains one stream and one paint scheduler. The accepted implementation appends each chunk immediately and uses at most the existing single `requestAnimationFrame` layer. Token buffers, typewriter effects, a second throttle, body-wide MutationObserver scans and periodic document sweeps are prohibited. ActivityFold must select only the current turn through the native location index. GenUI's fallback may inspect changed subtrees and known mounts only; its native fence registry channel remains preferred.
+
+Audit and quota correctness cannot be traded for latency. The current global Promise tails may change only when a phase trace shows more than 25 ms p95 contribution: audit may then queue per Session while preserving write-ahead, flush, order and deduplication; unlimited quota may take a synchronous path only for a cryptographically/locally verified unlimited policy, while finite quota keeps its durable reservation. Shiki changes only when traces prove 2.0.13 triggers it earlier than native DSH and it causes a gate failure. Model replacement, connection double-send, speculative warming, hidden retry and security-prompt trimming are prohibited.
+
+Repeat the normal paired cohorts with the enterprise endpoint unavailable while the same valid cached lease and model policy remain present. Local execution must stay inside the same budgets, audit may remain pending, and no response/Tool/Job/deliverable event may duplicate. New login, expired/revoked lease and invalid policy are separate correctness failures and are excluded from steady-state latency statistics.
+
+If provider/network or machine interference makes a pair incomparable, discard both members with the same non-sensitive reason and rerun that pair. The evaluator must reject missing pair members, post-hoc cohort moves and unrelated time windows.
+
+`pnpm performance:parity --fixture --output <receipt.json>` remains only a collector/evaluator self-check. TTFT v2 requires `schema_version: 2`; a fixture deliberately reports `fixture-passed-production-blocked` and exits non-zero because it does not load the released Desktop/Profile or a real provider. Omitting both `--fixture` and `--input` is an error.
+
+A production input can report `passed` only when every cohort supplies an immutable `performance_run_id` and run receipt bound to exact source commit, Desktop artifact SHA/bytes, Base id, Profile generation, component-composition/client-bundle digests, pinned Harness/Desktop-reference commits, redacted identity/policy/lease digests, provider/model/reasoning/Tool/dataset identity, machine/OS/architecture/Node/browser/network conditions, start/finish times and raw sample-ID digests. It references and SHA-256 verifies separate raw-timing, Provider invocation/usage, request-header, renderer-paint and enterprise-runtime artifacts. Baseline and candidate artifacts must be distinct and the candidate installed bytes must be the bytes later released.
+
+Desktop and Profile release admission require the same successful `performance_run_id`; a missing, fixture, superseded, mismatched or semantically incomplete performance receipt fails closed. Relabeling v1 evidence, setting a boolean verification flag, using one runtime for both arms, or hashing an artifact without validating its content cannot close the gate.
 
 ## Project memory isolation and binding
 

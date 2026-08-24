@@ -1,4 +1,4 @@
-# e-Mate 2.0.12 target contract
+# e-Mate 2.0.13 target contract
 
 This file is the implementation source of truth. Development records may add evidence but may not weaken these obligations.
 
@@ -6,10 +6,11 @@ This file is the implementation source of truth. Development records may add evi
 
 - Product name: `e-Mate`
 - Repository: `zyfjacksonchen-source/e-Mate-2.0.11`
-- Desktop base candidate: `@e-mate/desktop@2.0.12`
-- Product Profile release: `2.0.12`
-- Accepted predecessor: e-Mate `2.0.11` at `6a7f4b9d59a1d8970345638946fb6564e2f5f93e`; every 2.0.12 change starts from that exact source tree and its accepted Base v5/Profile contracts.
-- Current candidate Base contract: `e-mate-desktop-profile-v6-dsh-2bc16230975f`. Base v5 is intentionally incompatible because the exact runtime-import ABI changed; a v5 installation must select a signed v6 Base before downloading any v6 Profile component.
+- Desktop base candidate: `@e-mate/desktop@2.0.13`
+- Product Profile release: `2.0.13`
+- Accepted predecessor: the formally published e-Mate `2.0.12` Desktop manifest, three-target Profile desired state and installed receipts frozen in [`slices/2.0.13.md`](slices/2.0.13.md). The development source starts at `5fb9d595749ee9de4f8019ae4decce02ad3af541` / tree `20580c664c8f9f4eb130386f090c02c39ab1d413`; its publication identities remain distinct and must not be relabelled as this source commit.
+- Historical Git ancestry floor: accepted e-Mate 2.0.11 source `6a7f4b9d59a1d8970345638946fb6564e2f5f93e`. Every 2.0.13 release candidate must still descend from it; this source-integrity floor does not replace the installed 2.0.12 regression baseline above.
+- Checked-in predecessor Base contract: `e-mate-desktop-profile-v6-dsh-2bc16230975f`. The 2.0.13 target is a new v7 contract because its first-party component roster and supported runtime-import closure change; the exact v7 id becomes valid only when the generated Base contract, inventory, SDK, tests and installed receipt agree. A v6 installation must select the signed v7 Base before downloading a v7-only Profile component.
 - Executable: `e-mate`
 - Harness source: `zyfjacksonchen-source/deepseek-harness@e13ce9d953037a2f40d866d17f5a7e00cbc15d66` (upstream `deepseek-ai/deepseek-harness@99f6f02fecdb7dff40c3fbc9470f5907c29f74ca` plus the accepted bounded Session, Schedule, Job, Tool, model-directory, prompt, redundant-permission and attachment-overlay changes recorded below)
 - Harness source version: `0.1.0-rc.7`
@@ -17,6 +18,22 @@ This file is the implementation source of truth. Development records may add evi
 - Browser shell and component source: task `019ff91c-47ca-7c11-93bd-863475181a18`, represented by the final e-Mate 2.0.4/2.0.5 UI state at exact 2.0.5 commit `564a6b6c1d43fb6831dd4a5cd8026e472f063311`
 - Chat interaction source: Codex prototype `019ff665-d721-79a0-869d-338f086cf529`
 - “Harness” identifies the pinned technical foundation only and must not be used as the product or UI name.
+
+## 2.0.13 overlay invariants
+
+The older version-specific sections below remain binding where they describe preserved behavior. The following 2.0.13 invariants take precedence where a historical version number or acceptance baseline differs:
+
+- Ordinary model calls retain the frozen 2.0.12 system header, Tool header, route, selected model, reasoning level, ApiProxy carrier, policy, quota and audit semantics byte-for-byte. Pet, canvas, previews, Goal presentation and shared details are browser/UI projections and do not enter the ordinary resident Tool header.
+- The one current Goal is owned exclusively by pinned rc.7 `@deepseek-ai/dsh-goal`: durable state is the `goal/change` stream and `goal` Session Projection, mutation is CAS `{id, revision}`, live continuation authority is process-local, and restart/fork disarms without rewriting durable phase. `@目标`, natural-language creation, Agent creation, Queue/Todo/Schedule associations and the expanded Goal surface must reuse the native Command/Tool/Remote/Projection/round-driver path; none may create a second Goal record, driver or scheduler.
+- One shared right-side details area is the only product container for Goal details, project files, canvas and typed deliverable previews. It owns layout/navigation state only; each capability continues to read and mutate its native owner. Opening a panel cannot copy Goal, Queue, Schedule, Attachment, Artifact or file state into a browser store.
+- Better Sidebar remains the project-file owner already admitted by the Profile. 2.0.13 makes its Explorer/file service reachable through “项目文件” and the shared details area, while not exposing or cloning its Terminal, Git, Subagent or Browser workbench pages in the e-Mate product surface.
+- Cowart is an interaction reference only. The shipped canvas is a first-party Profile component over pinned MIT Excalidraw with all fonts/assets self-hosted. It persists project pages through the existing Host file boundary, accepts materials by Attachment/Artifact identity, sandboxes HTML without same-origin authority, and adds no cloud collaboration, telemetry, model route, credential or store.
+- Multi-image work remains N independent native `imagegen` Tool/Job executions. Default concurrency is 1; the release may raise it only after the measured step-up contract in [`performance-and-acceptance.md`](performance-and-acceptance.md), never above 4. A failed invocation is not retried automatically while the upstream lacks an idempotency/status query.
+- Typed terminal deliverables are projected only from real successful Tool/Job events and their Attachment/Artifact identities. Markdown/DOM scanning, filename guessing, browser-manufactured success and a Goal completion card that cites a missing or failed artifact are prohibited.
+- The desktop pet reuses only the MIT code from `npc-dao/dsh-pet@f501139cfb155fd46717a79bb1c158da064dce15`; its upstream `dsh`/`aliang` sprite assets are license-excluded and cannot be copied. e-Mate is default-on as the independently licensed 112px 小芯 v2 sprite, maps structured Goal/Todo/Queue/Job/Tool/Deliverable state into the contracted 30 office scenes, pauses during first response/background/minimized/reduced-motion states, and never consumes token deltas or internal reasoning.
+- CDP stays the first browser path. Computer Use can run only after the latest direct user message carries the exact `@电脑操控` authority; the two paths hand off serially at native Tool boundaries and never control the same page concurrently. AutoGPTBrowser and any second browser Agent/runtime are outside this release.
+- UI release notes describe user capabilities only. Package, plugin, upstream-project and internal component names must not be shown to ordinary users.
+- The release baseline for 2.0.13 regression and TTFT is the final installed 2.0.12 artifact/Profile combination recorded in the slice contract. The older 2.0.11 startup comparison remains historical evidence but cannot replace the new paired 2.0.12 comparison.
 
 ## First development principle: native Creation Mode before permanent plugins
 
