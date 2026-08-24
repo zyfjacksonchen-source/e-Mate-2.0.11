@@ -8,7 +8,9 @@ import type {
   TenantUsageEventPage,
   UsageMetrics,
 } from '@e-mate/monitoring-contract';
+import type { TenantUser } from '@e-mate/admin-contract';
 import {
+  auditVisibleUsers,
   queryForPeriod,
   queryForDay,
   queryForRange,
@@ -244,6 +246,29 @@ test('adds event pagination only to event queries and preserves configured query
   );
 });
 
+test('excludes internal audit accounts by stable id or exact display name', () => {
+  const user = (userId: string, displayName: string): TenantUser => ({
+    schemaVersion: 1,
+    userId,
+    displayName,
+    roles: ['MEMBER'],
+    status: 'ACTIVE',
+    tokenLimit: null,
+    allowedModelIds: [],
+    createdAt: '2026-08-24T00:00:00.000Z',
+    updatedAt: '2026-08-24T00:00:00.000Z',
+  });
+  assert.deepEqual(
+    auditVisibleUsers([
+      user('emate-admin', 'Renamed admin'),
+      user('test-id', '测试'),
+      user('acceptance-id', '验收用户'),
+      user('member-1', '正常用户'),
+    ]).map(({ userId }) => userId),
+    ['member-1']
+  );
+});
+
 test('rejects event pages outside the selected tenant ledger scope', () => {
   const query = {
     from: '2026-07-01T00:00:00.000Z',
@@ -293,12 +318,17 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
   assert.match(source, /usageUserTrend/);
   assert.match(source, /scenarioBuckets/);
   assert.match(source, /displayNameByUserId/);
+  assert.match(source, /<select[\s\S]*aria-label=\{copy\.chartMetric\}/);
+  assert.doesNotMatch(source, /<Select value=\{chartMetric\}/);
+  assert.match(source, /<Fragment key=\{bucketStart\}>[\s\S]*selectedDayQuery\?\.from === bucketStart && dayDetailPanel/);
   assert.match(source, /selectedUserIds\.length \? \{ userIds: selectedUserIds \}/);
   assert.match(source, /eventTypeLabels\[type\].*type/);
   assert.match(source, /status === 401[\s\S]*refreshUsageSession/);
   assert.doesNotMatch(source, /models\.slice/);
   assert.doesNotMatch(source, /eventState\.events[\s\S]{0,160}eventCount/);
-  assert.match(readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8'), /\/v1\/admin\/users/);
+  const apiSource = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8');
+  assert.match(apiSource, /\/v1\/admin\/users/);
+  assert.match(apiSource, /const scopedQuery = \{ \.\.\.query, userIds \}/);
 });
 
 test('builds for the production usage-panel path and same-origin enterprise API', () => {

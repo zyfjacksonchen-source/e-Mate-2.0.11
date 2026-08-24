@@ -53,6 +53,24 @@ export type UsageLogout = {
   clientRequestId: string;
 };
 
+const excludedAuditUserIds = new Set([
+  'emate-admin',
+  '03ff8d33-94e8-46f6-883b-dd80330cbe7c',
+  'cae2a9ef-2110-41ab-990d-151658c549e7',
+]);
+const excludedAuditDisplayNames = new Set(['企业管理员', 'e-Mate 企业管理员', '验收用户', '测试']);
+
+export function auditVisibleUsers(users: TenantUser[]): TenantUser[] {
+  return users.filter(
+    ({ userId, displayName }) =>
+      !excludedAuditUserIds.has(userId) && !excludedAuditDisplayNames.has(displayName.trim())
+  );
+}
+
+function auditVisibleUserIds(userIds: Iterable<string>): string[] {
+  return [...new Set([...userIds].filter((userId) => !excludedAuditUserIds.has(userId)))];
+}
+
 export class UsageApiError extends Error {
   readonly status: number;
 
@@ -302,12 +320,29 @@ export async function loadUsageDashboard(
   query: UsageQuery,
   signal: AbortSignal
 ): Promise<UsageDashboardData> {
-  const parameters = usageQueryString(query);
-  const [projectionValue, reconciliationValue, taskSummaryValue, users] = await Promise.all([
+  const allUsers = await loadQuotaUsers(token, signal);
+  const users = allUsers ? auditVisibleUsers(allUsers) : null;
+  const visibleUserIds = new Set(users?.map(({ userId }) => userId) ?? []);
+  if (!users) {
+    const seedParameters = usageQueryString(query);
+    const [seedProjection, seedTaskSummary] = await Promise.all([
+      readJson(`/v1/usage/summary?${seedParameters}`, token, signal).then(parseTenantUsageProjection),
+      readJson(`/v1/tasks/summary?${taskQueryString(query)}`, token, signal).then(parseTenantTaskSummary),
+    ]);
+    for (const userId of auditVisibleUserIds([
+      ...seedProjection.groups.map(({ userId }) => userId),
+      ...seedTaskSummary.userEventCounts.map(({ userId }) => userId),
+    ])) visibleUserIds.add(userId);
+  }
+  const userIds = (query.userIds ?? [...visibleUserIds]).filter((userId) => visibleUserIds.has(userId));
+  // ponytail: reuse the existing <=100 inclusive user scope; add an exclude-user query only when a tenant exceeds it.
+  if (userIds.length === 0 || userIds.length > 100) throw new UsageApiError(503);
+  const scopedQuery = { ...query, userIds };
+  const parameters = usageQueryString(scopedQuery);
+  const [projectionValue, reconciliationValue, taskSummaryValue] = await Promise.all([
     readJson(`/v1/usage/summary?${parameters}`, token, signal),
     readJson(`/v1/usage/reconciliation?${parameters}`, token, signal),
-    readJson(`/v1/tasks/summary?${taskQueryString(query)}`, token, signal),
-    loadQuotaUsers(token, signal),
+    readJson(`/v1/tasks/summary?${taskQueryString(scopedQuery)}`, token, signal),
   ]);
   return {
     ...validateDashboardPair(

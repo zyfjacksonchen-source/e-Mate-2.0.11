@@ -422,8 +422,27 @@ a {
   font-size: var(--text-caption-size);
 }
 
-.chart-toolbar .arco-select {
+.chart-toolbar select {
   width: 150px;
+  min-height: var(--target-desktop);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  padding: 0 var(--space-3);
+  color: var(--color-ink);
+  background: var(--color-raised);
+  font: inherit;
+  color-scheme: light;
+  cursor: pointer;
+}
+
+:root[data-theme='dark'] .chart-toolbar select {
+  color-scheme: dark;
+}
+
+.chart-toolbar select:hover,
+.chart-toolbar select:focus-visible {
+  border-color: var(--control-hover-border);
+  background: var(--control-hover-surface);
 }
 
 .details-toolbar .arco-select {

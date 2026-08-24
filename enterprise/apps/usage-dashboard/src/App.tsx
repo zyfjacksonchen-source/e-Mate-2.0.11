@@ -1,6 +1,6 @@
 import { Alert, Button, Drawer, Empty, Input, Link, Select, Spin, Tag } from '@arco-design/web-react';
 import { ChartHistogram, ChartLine, CheckOne, Home, Refresh, UserBusiness } from '@icon-park/react';
-import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
+import { Fragment, type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { TaskEventType, TaskScenario, TenantUsageEvent } from '@e-mate/monitoring-contract';
 import eMateLogo from '../../../../upstream/e-mate-2.0.5/desktop/src/v1/assets/emate-logo.png';
 import {
@@ -397,6 +397,8 @@ export function App() {
   const models = projection ? usageModels(projection) : [];
   const userUsage = projection ? usageUsers(projection) : [];
   const displayNameByUserId = new Map(knownUsers.map(({ userId, displayName }) => [userId, displayName]));
+  const visibleAuditUserIds = ready?.users?.map(({ userId }) => userId) ?? [];
+  const scopedUserIds = selectedUserIds.length ? selectedUserIds : visibleAuditUserIds;
   const selectedUserSet = new Set(selectedUserIds);
   const userUsageById = new Map(userUsage.map((entry) => [entry.userId, entry]));
   const userEventCountById = new Map(
@@ -580,7 +582,7 @@ export function App() {
         to: projection.to,
         timezone: projection.timezone,
         bucket: projection.bucket,
-        ...(selectedUserIds.length ? { userIds: selectedUserIds } : {}),
+        ...(scopedUserIds.length ? { userIds: scopedUserIds } : {}),
       } satisfies UsageQuery)
     : null;
   const toggleDayDetail = (bucketStart: string) => {
@@ -590,7 +592,7 @@ export function App() {
       return;
     }
     if (!projection) return;
-    setSelectedDayQuery(queryForDay(bucketStart, projection.to, projection.timezone, selectedUserIds));
+    setSelectedDayQuery(queryForDay(bucketStart, projection.to, projection.timezone, scopedUserIds));
   };
   const loadEventPage = (cursor: string | null, existing: TenantUsageEvent[]) => {
     if (!projection || !eventQuery) return;
@@ -625,6 +627,67 @@ export function App() {
     setEventsOpen(true);
     loadEventPage(null, []);
   };
+  const dayDetailPanel = selectedDayQuery ? (
+    <section className='day-detail' aria-live='polite'>
+      <div className='day-detail-heading'>
+        <div>
+          <h3>{copy.dayDetails} · {day(selectedDayQuery.from)}</h3>
+          <p>{copy.dayDetailsDescription}</p>
+        </div>
+        <Button size='small' onClick={resetDayDetail}>{copy.close}</Button>
+      </div>
+      {dayDetail.kind === 'loading' && <Spin dot />}
+      {dayDetail.kind === 'error' && <Alert type='error' content={copy.loadFailed} showIcon />}
+      {dayData && dayTaskSummary && (
+        <>
+          <div className='day-detail-grid'>
+            <section>
+              <h4>{copy.eventDistribution}</h4>
+              <div className='taxonomy-grid'>
+                {dayTaskSummary.eventTypeCounts
+                  .filter(({ eventCount }) => eventCount !== '0')
+                  .map(({ type, eventCount }) => (
+                    <span key={type}>{eventTypeLabels[type]}<small>{exactCount(eventCount, locale)}</small></span>
+                  ))}
+              </div>
+            </section>
+            <section>
+              <h4>{copy.taskDistribution}</h4>
+              {dayHasUnclassifiedTasks && <p className='source-empty'>{copy.unclassifiedScenarioNotice}</p>}
+              <div className='taxonomy-grid'>
+                {dayVisibleScenarioCounts.map(({ scenario, taskCount }) => (
+                  <span key={scenario}>{scenarioLabels[scenario]}<small>{exactCount(taskCount, locale)}</small></span>
+                ))}
+              </div>
+            </section>
+          </div>
+          <div className='table-scroll day-usage-table'>
+            <h4>{copy.details}</h4>
+            <table>
+              <thead><tr><th>{copy.user}</th><th>{copy.model}</th><th>{copy.requests}</th><th>{copy.totalTokens}</th><th>{copy.cost}</th></tr></thead>
+              <tbody>
+                {dayUsageRows.map((row) => (
+                  <tr key={`${row.userId}:${row.modelId}`}>
+                    <td>
+                      <strong>{displayNameByUserId.get(row.userId) ?? row.userId}</strong>
+                      {displayNameByUserId.has(row.userId) &&
+                        displayNameByUserId.get(row.userId) !== row.userId && (
+                        <small className='table-subline'>{row.userId}</small>
+                      )}
+                    </td><td>{row.modelId}</td>
+                    <td>{exactCount(row.metrics.totalRequests, locale)}</td>
+                    <td>{tokenCount(row.metrics.totalTokens)}</td>
+                    <td>{exactCost(row.metrics.costUsd, locale)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {dayUsageRows.length === 0 && <Empty description={copy.noData} />}
+          </div>
+        </>
+      )}
+    </section>
+  ) : null;
   const mismatchCount = reconciliation
     ? Object.values(reconciliation.checks)
         .reduce((total, value) => total + BigInt(value), 0n)
@@ -842,10 +905,14 @@ export function App() {
                   <div className='chart-toolbar'>
                     <label>
                       <span>{copy.chartMetric}</span>
-                      <Select value={chartMetric} onChange={(value) => setChartMetric(value as ChartMetric)}>
-                        <Select.Option value='requests'>{copy.callsMetric}</Select.Option>
-                        <Select.Option value='tokens'>{copy.tokensMetric}</Select.Option>
-                      </Select>
+                      <select
+                        aria-label={copy.chartMetric}
+                        value={chartMetric}
+                        onChange={(event) => setChartMetric(event.currentTarget.value as ChartMetric)}
+                      >
+                        <option value='requests'>{copy.callsMetric}</option>
+                        <option value='tokens'>{copy.tokensMetric}</option>
+                      </select>
                     </label>
                     <ChartLine size={22} />
                   </div>
@@ -964,114 +1031,55 @@ export function App() {
                     {trends.map(({ bucketStart, metrics }) => {
                       const totalWidth = percentage(metrics.totalRequests, maximumRequests);
                       return (
-                        <button
-                          type='button'
-                          className={`trend-row${selectedDayQuery?.from === bucketStart ? ' is-selected' : ''}`}
-                          key={bucketStart}
-                          onClick={() => toggleDayDetail(bucketStart)}
-                          aria-expanded={selectedDayQuery?.from === bucketStart}
-                        >
-                          <time dateTime={bucketStart}>{day(bucketStart)}</time>
-                          <div className='trend-bars'>
-                            <div
-                              className='trend-track'
-                              role='img'
-                              aria-label={`${day(bucketStart)}: ${copy.accounted} ${metrics.accountedRequests}, ${copy.rejected} ${metrics.rejectedRequests}, ${copy.pending} ${metrics.pendingRequests}`}
-                            >
+                        <Fragment key={bucketStart}>
+                          <button
+                            type='button'
+                            className={`trend-row${selectedDayQuery?.from === bucketStart ? ' is-selected' : ''}`}
+                            onClick={() => toggleDayDetail(bucketStart)}
+                            aria-expanded={selectedDayQuery?.from === bucketStart}
+                          >
+                            <time dateTime={bucketStart}>{day(bucketStart)}</time>
+                            <div className='trend-bars'>
                               <div
-                                className='trend-total'
-                                style={
-                                  {
-                                    '--trend-total': `${totalWidth}%`,
-                                  } as CSSProperties
-                                }
+                                className='trend-track'
+                                role='img'
+                                aria-label={`${day(bucketStart)}: ${copy.accounted} ${metrics.accountedRequests}, ${copy.rejected} ${metrics.rejectedRequests}, ${copy.pending} ${metrics.pendingRequests}`}
                               >
-                                <span
-                                  className='trend-accounted'
-                                  style={{ width: `${percentage(metrics.accountedRequests, metrics.totalRequests)}%` }}
-                                />
-                                <span
-                                  className='trend-rejected'
-                                  style={{ width: `${percentage(metrics.rejectedRequests, metrics.totalRequests)}%` }}
-                                />
-                                <span
-                                  className='trend-pending'
-                                  style={{ width: `${percentage(metrics.pendingRequests, metrics.totalRequests)}%` }}
-                                />
+                                <div
+                                  className='trend-total'
+                                  style={
+                                    {
+                                      '--trend-total': `${totalWidth}%`,
+                                    } as CSSProperties
+                                  }
+                                >
+                                  <span
+                                    className='trend-accounted'
+                                    style={{ width: `${percentage(metrics.accountedRequests, metrics.totalRequests)}%` }}
+                                  />
+                                  <span
+                                    className='trend-rejected'
+                                    style={{ width: `${percentage(metrics.rejectedRequests, metrics.totalRequests)}%` }}
+                                  />
+                                  <span
+                                    className='trend-pending'
+                                    style={{ width: `${percentage(metrics.pendingRequests, metrics.totalRequests)}%` }}
+                                  />
+                                </div>
+                              </div>
+                              <div className='token-track' aria-label={`${copy.totalTokens} ${metrics.totalTokens}`}>
+                                <span style={{ width: `${percentage(metrics.totalTokens, maximumTokens)}%` }} />
                               </div>
                             </div>
-                            <div className='token-track' aria-label={`${copy.totalTokens} ${metrics.totalTokens}`}>
-                              <span style={{ width: `${percentage(metrics.totalTokens, maximumTokens)}%` }} />
-                            </div>
-                          </div>
-                          <span className='trend-values'>
-                            <strong>{exactCount(metrics.totalRequests, locale)}</strong>
-                            <small>{tokenCount(metrics.totalTokens)} Token</small>
-                          </span>
-                        </button>
+                            <span className='trend-values'>
+                              <strong>{exactCount(metrics.totalRequests, locale)}</strong>
+                              <small>{tokenCount(metrics.totalTokens)} Token</small>
+                            </span>
+                          </button>
+                          {selectedDayQuery?.from === bucketStart && dayDetailPanel}
+                        </Fragment>
                       );
                     })}
-                    {selectedDayQuery && (
-                      <section className='day-detail' aria-live='polite'>
-                        <div className='day-detail-heading'>
-                          <div>
-                            <h3>{copy.dayDetails} · {day(selectedDayQuery.from)}</h3>
-                            <p>{copy.dayDetailsDescription}</p>
-                          </div>
-                          <Button size='small' onClick={resetDayDetail}>{copy.close}</Button>
-                        </div>
-                        {dayDetail.kind === 'loading' && <Spin dot />}
-                        {dayDetail.kind === 'error' && <Alert type='error' content={copy.loadFailed} showIcon />}
-                        {dayData && dayTaskSummary && (
-                          <>
-                            <div className='day-detail-grid'>
-                              <section>
-                                <h4>{copy.eventDistribution}</h4>
-                                <div className='taxonomy-grid'>
-                                  {dayTaskSummary.eventTypeCounts
-                                    .filter(({ eventCount }) => eventCount !== '0')
-                                    .map(({ type, eventCount }) => (
-                                      <span key={type}>{eventTypeLabels[type]}<small>{exactCount(eventCount, locale)}</small></span>
-                                    ))}
-                                </div>
-                              </section>
-                              <section>
-                                <h4>{copy.taskDistribution}</h4>
-                                {dayHasUnclassifiedTasks && <p className='source-empty'>{copy.unclassifiedScenarioNotice}</p>}
-                                <div className='taxonomy-grid'>
-                                  {dayVisibleScenarioCounts.map(({ scenario, taskCount }) => (
-                                      <span key={scenario}>{scenarioLabels[scenario]}<small>{exactCount(taskCount, locale)}</small></span>
-                                  ))}
-                                </div>
-                              </section>
-                            </div>
-                            <div className='table-scroll day-usage-table'>
-                              <h4>{copy.details}</h4>
-                              <table>
-                                <thead><tr><th>{copy.user}</th><th>{copy.model}</th><th>{copy.requests}</th><th>{copy.totalTokens}</th><th>{copy.cost}</th></tr></thead>
-                                <tbody>
-                                  {dayUsageRows.map((row) => (
-                                    <tr key={`${row.userId}:${row.modelId}`}>
-                                      <td>
-                                        <strong>{displayNameByUserId.get(row.userId) ?? row.userId}</strong>
-                                        {displayNameByUserId.has(row.userId) &&
-                                          displayNameByUserId.get(row.userId) !== row.userId && (
-                                          <small className='table-subline'>{row.userId}</small>
-                                        )}
-                                      </td><td>{row.modelId}</td>
-                                      <td>{exactCount(row.metrics.totalRequests, locale)}</td>
-                                      <td>{tokenCount(row.metrics.totalTokens)}</td>
-                                      <td>{exactCost(row.metrics.costUsd, locale)}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                              {dayUsageRows.length === 0 && <Empty description={copy.noData} />}
-                            </div>
-                          </>
-                        )}
-                      </section>
-                    )}
                   </div>
                 )}
               </article>
