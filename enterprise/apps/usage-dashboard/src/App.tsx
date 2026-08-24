@@ -29,12 +29,27 @@ import {
   usageModels,
   usageDetails,
   usageTrend,
+  usageUserTrend,
   usageUsers,
 } from './usage-data';
 
 const TOKEN_SESSION_KEY = 'e-mate.usage.access-token';
 const REFRESH_TOKEN_SESSION_KEY = 'e-mate.usage.refresh-token';
 const periodOptions = [7, 30, 90] as const;
+const usageColumnKeys = [
+  'user', 'model', 'status', 'events', 'requests', 'input', 'output', 'cache', 'tokens', 'quota', 'cost',
+] as const;
+type UsageColumn = (typeof usageColumnKeys)[number];
+type ChartMetric = 'requests' | 'tokens';
+const scenarioColors: Record<TaskScenario, string> = {
+  GENERAL: '#8b8b84',
+  CONTENT_CREATION: '#ef6c24',
+  DOCUMENT_EDITING: '#4d7cff',
+  SYSTEM_MAINTENANCE: '#8b5cf6',
+  ASSET_PRODUCTION: '#e8a317',
+  DATA_PROCESSING: '#16a085',
+  SEARCH_QUERY: '#d44f73',
+};
 
 function localDateTime(value: Date): string {
   return new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
@@ -127,6 +142,8 @@ export function App() {
   const [rangeError, setRangeError] = useState<string | null>(null);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [knownUsers, setKnownUsers] = useState<Array<{ userId: string; displayName: string }>>([]);
+  const [chartMetric, setChartMetric] = useState<ChartMetric>('tokens');
+  const [usageColumns, setUsageColumns] = useState<UsageColumn[]>(() => [...usageColumnKeys]);
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
   );
@@ -376,8 +393,10 @@ export function App() {
   const reconciliation = ready?.reconciliation;
   const taskSummary = ready?.taskSummary;
   const trends = projection ? usageTrend(projection) : [];
+  const userTrends = projection ? usageUserTrend(projection) : [];
   const models = projection ? usageModels(projection) : [];
   const userUsage = projection ? usageUsers(projection) : [];
+  const displayNameByUserId = new Map(knownUsers.map(({ userId, displayName }) => [userId, displayName]));
   const selectedUserSet = new Set(selectedUserIds);
   const userUsageById = new Map(userUsage.map((entry) => [entry.userId, entry]));
   const userEventCountById = new Map(
@@ -438,6 +457,18 @@ export function App() {
       ]).filter(({ userId }) => selectedUserSet.size === 0 || selectedUserSet.has(userId));
   const maximumRequests = maxCount(trends.map(({ metrics }) => metrics.totalRequests));
   const maximumTokens = maxCount(trends.map(({ metrics }) => metrics.totalTokens));
+  const chartValue = (metrics: (typeof userTrends)[number]['metrics']) =>
+    chartMetric === 'requests' ? metrics.totalRequests : metrics.totalTokens;
+  const chartUsers = [...userUsage]
+    .sort((left, right) => {
+      const difference = BigInt(chartValue(right.metrics)) - BigInt(chartValue(left.metrics));
+      return difference === 0n ? left.userId.localeCompare(right.userId) : difference > 0n ? 1 : -1;
+    })
+    .slice(0, 8);
+  const chartUserIds = new Set(chartUsers.map(({ userId }) => userId));
+  const visibleUserTrends = userTrends.filter(({ userId }) => chartUserIds.has(userId));
+  const userTrendByKey = new Map(visibleUserTrends.map((entry) => [`${entry.bucketStart}\0${entry.userId}`, entry]));
+  const maximumUserTrend = maxCount(visibleUserTrends.map(({ metrics }) => chartValue(metrics)));
   const maximumModelCalls = maxCount(models.map(({ callCount }) => callCount));
   const taskSourceReady = taskSummary?.sourceState === 'AUTHORITATIVE';
   const usageSourceReady = projection ? hasUsageFacts(projection) : false;
@@ -468,6 +499,20 @@ export function App() {
   const dayVisibleScenarioCounts = dayTaskSummary?.scenarioCounts.filter(({ taskCount }) => taskCount !== '0') ?? [];
   const hasUnclassifiedTasks = visibleScenarioCounts.some(({ scenario }) => scenario === 'GENERAL');
   const dayHasUnclassifiedTasks = dayVisibleScenarioCounts.some(({ scenario }) => scenario === 'GENERAL');
+  const scenarioBuckets = new Map<string, Map<TaskScenario, string>>();
+  for (const { bucketStart, scenario, taskCount } of taskSummary?.scenarioBuckets ?? []) {
+    const counts = scenarioBuckets.get(bucketStart) ?? new Map<TaskScenario, string>();
+    counts.set(scenario, taskCount);
+    scenarioBuckets.set(bucketStart, counts);
+  }
+  const scenarioTrendRows = [...scenarioBuckets]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([bucketStart, counts]) => ({
+      bucketStart,
+      counts,
+      total: [...counts.values()].reduce((total, value) => total + BigInt(value), 0n).toString(),
+    }));
+  const maximumScenarioTasks = maxCount(scenarioTrendRows.map(({ total }) => total));
   const scenarioLabels: Record<TaskScenario, string> = {
     GENERAL: copy.taxonomyGeneral,
     CONTENT_CREATION: copy.taxonomyCreative,
@@ -476,6 +521,19 @@ export function App() {
     ASSET_PRODUCTION: copy.taxonomyMaterial,
     DATA_PROCESSING: copy.taxonomyData,
     SEARCH_QUERY: copy.taxonomySearch,
+  };
+  const usageColumnLabels: Record<UsageColumn, string> = {
+    user: copy.user,
+    model: copy.model,
+    status: copy.userStatus,
+    events: copy.userEventCount,
+    requests: copy.requests,
+    input: copy.inputTokens,
+    output: copy.outputTokens,
+    cache: copy.cacheTokens,
+    tokens: copy.totalTokens,
+    quota: copy.configuredQuota,
+    cost: copy.cost,
   };
   const eventTypeLabels: Record<TaskEventType, string> = {
     RECEIVED: copy.eventReceived,
@@ -496,6 +554,25 @@ export function App() {
     if (status === 'SUSPENDED') return copy.suspended;
     if (status === 'DELETED') return copy.deleted;
     return '—';
+  };
+  const renderUsageCell = (column: UsageColumn, row: (typeof userRows)[number]): ReactNode => {
+    if (column === 'user') return <><strong>{row.displayName}</strong><small className='table-subline'>{row.userId}</small></>;
+    if (column === 'model') return row.modelIds.join(', ') || '—';
+    if (column === 'status') return userStatusLabel(row.status);
+    if (column === 'events') return exactCount(row.eventCount, locale);
+    if (column === 'requests') return exactCount(row.metrics.totalRequests, locale);
+    if (column === 'input') return tokenCount(row.metrics.inputTokens);
+    if (column === 'output') return tokenCount(row.metrics.outputTokens);
+    if (column === 'cache') {
+      return tokenCount((BigInt(row.metrics.cacheReadTokens) + BigInt(row.metrics.cacheWriteTokens)).toString());
+    }
+    if (column === 'cost') return exactCost(row.metrics.costUsd, locale);
+    if (row.tokenLimit === undefined) return copy.quotaUnavailable;
+    if (row.tokenLimit === null) return copy.unlimited;
+    if (column === 'quota') {
+      return <span className='quota-cell'>{tokenCount(String(row.tokenLimit))}<small>{copy.weeklyQuota}</small></span>;
+    }
+    return tokenCount(row.metrics.totalTokens);
   };
   const eventQuery = projection
     ? (selectedDayQuery ?? {
@@ -762,12 +839,121 @@ export function App() {
                     <h2>{copy.trend}</h2>
                     <p>{copy.trendDescription}</p>
                   </div>
-                  <ChartLine size={22} />
+                  <div className='chart-toolbar'>
+                    <label>
+                      <span>{copy.chartMetric}</span>
+                      <Select value={chartMetric} onChange={(value) => setChartMetric(value as ChartMetric)}>
+                        <Select.Option value='requests'>{copy.callsMetric}</Select.Option>
+                        <Select.Option value='tokens'>{copy.tokensMetric}</Select.Option>
+                      </Select>
+                    </label>
+                    <ChartLine size={22} />
+                  </div>
                 </div>
                 {trends.length === 0 ? (
                   <Empty description={copy.noData} />
                 ) : (
                   <div className='trend-list'>
+                    <div className='analysis-charts'>
+                      <section className='analysis-chart-card'>
+                        <div className='analysis-chart-heading'>
+                          <div>
+                            <h3>{copy.userTrend}</h3>
+                            <p>{copy.userTrendDescription}</p>
+                          </div>
+                          <small>{copy.topUsersNotice}</small>
+                        </div>
+                        {chartUsers.length === 0 ? (
+                          <Empty description={copy.noData} />
+                        ) : (
+                          <div className='usage-heatmap-scroll'>
+                            <div
+                              className='usage-heatmap-header'
+                              style={{
+                                gridTemplateColumns: `minmax(132px, 180px) repeat(${trends.length}, minmax(58px, 1fr))`,
+                              }}
+                            >
+                              <span>{copy.user}</span>
+                              {trends.map(({ bucketStart }) => <time key={bucketStart}>{day(bucketStart)}</time>)}
+                            </div>
+                            {chartUsers.map(({ userId }) => (
+                              <div
+                                className='usage-heatmap-row'
+                                key={userId}
+                                style={{
+                                  gridTemplateColumns: `minmax(132px, 180px) repeat(${trends.length}, minmax(58px, 1fr))`,
+                                }}
+                              >
+                                <strong title={userId}>{displayNameByUserId.get(userId) ?? userId}</strong>
+                                {trends.map(({ bucketStart }) => {
+                                  const value = chartValue(
+                                    userTrendByKey.get(`${bucketStart}\0${userId}`)?.metrics ?? emptyMetrics()
+                                  );
+                                  const intensity = percentage(value, maximumUserTrend);
+                                  return (
+                                    <span
+                                      className='usage-heat-cell'
+                                      key={bucketStart}
+                                      title={`${displayNameByUserId.get(userId) ?? userId} · ${day(bucketStart)} · ${
+                                        chartMetric === 'requests' ? exactCount(value, locale) : `${tokenCount(value)} Token`
+                                      }`}
+                                      style={{
+                                        backgroundColor: value === '0'
+                                          ? 'var(--color-raised)'
+                                          : `color-mix(in srgb, var(--color-brand) ${Math.max(12, intensity)}%, var(--color-raised))`,
+                                      }}
+                                    >
+                                      {chartMetric === 'requests' ? exactCount(value, locale) : tokenCount(value)}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </section>
+
+                      <section className='analysis-chart-card'>
+                        <div className='analysis-chart-heading'>
+                          <div>
+                            <h3>{copy.scenarioTrend}</h3>
+                            <p>{copy.scenarioTrendDescription}</p>
+                          </div>
+                        </div>
+                        {hasUnclassifiedTasks && <p className='source-empty'>{copy.unclassifiedScenarioNotice}</p>}
+                        <div className='scenario-legend'>
+                          {visibleScenarioCounts.map(({ scenario }) => (
+                            <span key={scenario} style={{ '--scenario-color': scenarioColors[scenario] } as CSSProperties}>
+                              {scenarioLabels[scenario]}
+                            </span>
+                          ))}
+                        </div>
+                        <div className='scenario-trend-list'>
+                          {scenarioTrendRows.map(({ bucketStart, counts, total }) => (
+                            <div className='scenario-trend-row' key={bucketStart}>
+                              <time>{day(bucketStart)}</time>
+                              <div className='scenario-track'>
+                                <div className='scenario-total' style={{ width: `${percentage(total, maximumScenarioTasks)}%` }}>
+                                  {visibleScenarioCounts.map(({ scenario }) => (
+                                    <span
+                                      key={scenario}
+                                      title={`${scenarioLabels[scenario]} · ${exactCount(counts.get(scenario) ?? '0', locale)}`}
+                                      style={{
+                                        width: `${percentage(counts.get(scenario) ?? '0', total)}%`,
+                                        backgroundColor: scenarioColors[scenario],
+                                      }}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                              <strong>{exactCount(total, locale)}</strong>
+                            </div>
+                          ))}
+                        </div>
+                        {scenarioTrendRows.length === 0 && <Empty description={copy.noData} />}
+                      </section>
+                    </div>
+
                     <div className='trend-legend' aria-hidden='true'>
                       <span className='accounted-dot'>{copy.accounted}</span>
                       <span className='rejected-dot'>{copy.rejected}</span>
@@ -866,7 +1052,13 @@ export function App() {
                                 <tbody>
                                   {dayUsageRows.map((row) => (
                                     <tr key={`${row.userId}:${row.modelId}`}>
-                                      <td>{row.userId}</td><td>{row.modelId}</td>
+                                      <td>
+                                        <strong>{displayNameByUserId.get(row.userId) ?? row.userId}</strong>
+                                        {displayNameByUserId.has(row.userId) &&
+                                          displayNameByUserId.get(row.userId) !== row.userId && (
+                                          <small className='table-subline'>{row.userId}</small>
+                                        )}
+                                      </td><td>{row.modelId}</td>
                                       <td>{exactCount(row.metrics.totalRequests, locale)}</td>
                                       <td>{tokenCount(row.metrics.totalTokens)}</td>
                                       <td>{exactCost(row.metrics.costUsd, locale)}</td>
@@ -987,61 +1179,47 @@ export function App() {
                   <h2>{copy.details}</h2>
                   <p>{copy.accuracyBoundary}</p>
                 </div>
-                <UserBusiness size={22} />
+                <div className='details-toolbar'>
+                  <label>
+                    <span>{copy.visibleColumns}</span>
+                    <Select
+                      mode='multiple'
+                      value={usageColumns}
+                      maxTagCount={1}
+                      onChange={(value) => {
+                        const columns = value as UsageColumn[];
+                        setUsageColumns(columns.length ? columns : ['user']);
+                      }}
+                    >
+                      {usageColumnKeys.map((column) => (
+                        <Select.Option key={column} value={column}>{usageColumnLabels[column]}</Select.Option>
+                      ))}
+                    </Select>
+                  </label>
+                  <UserBusiness size={22} />
+                </div>
               </div>
               <div className='table-scroll'>
                 <table>
                   <thead>
                     <tr>
-                      <th>{copy.user}</th>
-                      <th>{copy.model}</th>
-                      <th>{copy.userStatus}</th>
-                      <th title={copy.userEventScope}>{copy.userEventCount}</th>
-                      <th>{copy.requests}</th>
-                      <th>{copy.inputTokens}</th>
-                      <th>{copy.outputTokens}</th>
-                      <th>{copy.cacheTokens}</th>
-                      <th>{copy.totalTokens}</th>
-                      <th>{copy.configuredQuota}</th>
-                      <th>{copy.cost}</th>
+                      {usageColumns.map((column) => (
+                        <th key={column} title={column === 'events' ? copy.userEventScope : undefined}>
+                          {usageColumnLabels[column]}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {userRows.map((row) => {
-                      const cacheTokens = (
-                        BigInt(row.metrics.cacheReadTokens) + BigInt(row.metrics.cacheWriteTokens)
-                      ).toString();
-                      const quota = row.tokenLimit;
-                      return (
-                        <tr key={row.userId}>
-                          <td>
-                            <strong>{row.displayName}</strong>
-                            <small className='table-subline'>{row.userId}</small>
+                    {userRows.map((row) => (
+                      <tr key={row.userId}>
+                        {usageColumns.map((column) => (
+                          <td key={column} title={column === 'events' ? copy.userEventScope : undefined}>
+                            {renderUsageCell(column, row)}
                           </td>
-                          <td>{row.modelIds.join(', ') || '—'}</td>
-                          <td>{userStatusLabel(row.status)}</td>
-                          <td title={copy.userEventScope}>{exactCount(row.eventCount, locale)}</td>
-                          <td>{exactCount(row.metrics.totalRequests, locale)}</td>
-                          <td>{tokenCount(row.metrics.inputTokens)}</td>
-                          <td>{tokenCount(row.metrics.outputTokens)}</td>
-                          <td>{tokenCount(cacheTokens)}</td>
-                          <td>{tokenCount(row.metrics.totalTokens)}</td>
-                          <td>
-                            {quota === undefined ? (
-                              copy.quotaUnavailable
-                            ) : quota === null ? (
-                              copy.unlimited
-                            ) : (
-                              <span className='quota-cell'>
-                                {tokenCount(String(quota))}
-                                <small>{copy.weeklyQuota}</small>
-                              </span>
-                            )}
-                          </td>
-                          <td>{exactCost(row.metrics.costUsd, locale)}</td>
-                        </tr>
-                      );
-                    })}
+                        ))}
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
                 {userRows.length === 0 && <Empty description={copy.noData} />}

@@ -55,6 +55,11 @@ export type TenantTaskSummary = {
     scenario: TaskScenario;
     taskCount: string;
   }>;
+  scenarioBuckets: Array<{
+    bucketStart: string;
+    scenario: TaskScenario;
+    taskCount: string;
+  }>;
   eventTypeCounts: Array<{
     type: TaskEventType;
     eventCount: string;
@@ -300,6 +305,7 @@ export function parseTenantTaskSummary(value: unknown): TenantTaskSummary {
       'sourceState',
       'summary',
       'scenarioCounts',
+      'scenarioBuckets',
       'eventTypeCounts',
       'userEventCounts',
     ],
@@ -353,6 +359,34 @@ export function parseTenantTaskSummary(value: unknown): TenantTaskSummary {
     scenarioCounts.reduce((total, item) => total + BigInt(item.taskCount), BigInt(0)) !== BigInt(summary.receivedTasks)
   ) {
     throw new Error('Inconsistent task scenario counts');
+  }
+
+  if (!Array.isArray(input.scenarioBuckets) || input.scenarioBuckets.length > TASK_SCENARIOS.length * 367) {
+    throw new Error('Invalid task scenario buckets');
+  }
+  const scenarioBuckets = input.scenarioBuckets.map((entry) => {
+    const item = record(entry, 'task scenario bucket');
+    exact(item, ['bucketStart', 'scenario', 'taskCount'], 'task scenario bucket');
+    const bucketStart = timestamp(item.bucketStart, 'task scenario bucket start');
+    if (
+      !taskScenarios.has(item.scenario as TaskScenario) ||
+      Date.parse(bucketStart) < Date.parse(from) - 86_400_000 ||
+      Date.parse(bucketStart) >= Date.parse(to)
+    ) {
+      throw new Error('Invalid task scenario bucket');
+    }
+    return {
+      bucketStart,
+      scenario: item.scenario as TaskScenario,
+      taskCount: countString(item.taskCount, 'scenario bucket task count'),
+    };
+  });
+  if (
+    new Set(scenarioBuckets.map(({ bucketStart, scenario }) => `${bucketStart}\0${scenario}`)).size !==
+      scenarioBuckets.length ||
+    scenarioBuckets.reduce((total, item) => total + BigInt(item.taskCount), 0n) !== BigInt(summary.receivedTasks)
+  ) {
+    throw new Error('Inconsistent task scenario buckets');
   }
 
   if (!Array.isArray(input.eventTypeCounts) || input.eventTypeCounts.length !== TASK_EVENT_TYPES.length) {
@@ -414,6 +448,7 @@ export function parseTenantTaskSummary(value: unknown): TenantTaskSummary {
     sourceState,
     summary,
     scenarioCounts,
+    scenarioBuckets,
     eventTypeCounts,
     userEventCounts,
   };

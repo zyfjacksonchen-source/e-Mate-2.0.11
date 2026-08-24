@@ -167,6 +167,13 @@ test('task summary uses only authoritative task rows and exact decimal strings',
             scenario_counts: {
               CONTENT_CREATION: '2',
             },
+            scenario_buckets: [
+              {
+                bucketStart: '2026-07-25T16:00:00+00:00',
+                scenario: 'CONTENT_CREATION',
+                taskCount: '2',
+              },
+            ],
             event_type_counts: {
               RECEIVED: '2',
               COMPLETED: '1',
@@ -187,6 +194,7 @@ test('task summary uses only authoritative task rows and exact decimal strings',
   const summary = await store.summary(principal, {
     from: '2026-07-25T00:00:00.000Z',
     to: '2026-07-27T00:00:00.000Z',
+    timezone: 'Asia/Shanghai',
     userIds: ['user-1', 'user-2'],
   });
 
@@ -197,6 +205,9 @@ test('task summary uses only authoritative task rows and exact decimal strings',
     cancelledTasks: '0',
   });
   assert.equal(summary.scenarioCounts.find(({ scenario }) => scenario === 'CONTENT_CREATION')?.taskCount, '2');
+  assert.deepEqual(summary.scenarioBuckets, [
+    { bucketStart: '2026-07-25T16:00:00.000Z', scenario: 'CONTENT_CREATION', taskCount: '2' },
+  ]);
   assert.equal(summary.eventTypeCounts.find(({ type }) => type === 'WAITING_INPUT')?.eventCount, '1');
   assert.deepEqual(summary.userEventCounts, [
     { userId: 'user-1', eventCount: '7' },
@@ -205,10 +216,12 @@ test('task summary uses only authoritative task rows and exact decimal strings',
   assert.match(statement, /user_event_counts AS[\s\S]*GROUP BY event\.user_id/);
   assert.doesNotMatch(statement, /\bLIMIT\b/);
   assert.match(statement, /user_id = ANY\(\$4::text\[\]\)/);
+  assert.match(statement, /received_at AT TIME ZONE \$5/);
   assert.deepEqual(parameters, [
     'tenant-1',
     '2026-07-25T00:00:00.000Z',
     '2026-07-27T00:00:00.000Z',
     ['user-1', 'user-2'],
+    'Asia/Shanghai',
   ]);
 });

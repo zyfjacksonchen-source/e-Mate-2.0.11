@@ -127,7 +127,7 @@ export function usageQueryString(query: UsageQuery, events = false, cursor: stri
 }
 
 export function taskQueryString(query: UsageQuery): string {
-  const parameters = new URLSearchParams({ from: query.from, to: query.to });
+  const parameters = new URLSearchParams({ from: query.from, to: query.to, timezone: query.timezone });
   for (const userId of query.userIds ?? []) parameters.append('userId', userId);
   return parameters.toString();
 }

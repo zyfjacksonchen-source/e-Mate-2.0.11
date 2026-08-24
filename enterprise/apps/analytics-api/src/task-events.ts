@@ -18,6 +18,7 @@ const terminalTypes = new Set<TaskEventType>(['COMPLETED', 'FAILED', 'CANCELLED'
 export type TaskEventQuery = {
   from: string;
   to: string;
+  timezone?: string;
   userIds?: string[];
 };
 
@@ -51,6 +52,7 @@ type SummaryRow = {
   failed_tasks: string;
   cancelled_tasks: string;
   scenario_counts: Record<string, string> | null;
+  scenario_buckets: Array<{ bucketStart: string; scenario: TaskScenario; taskCount: string }> | null;
   event_type_counts: Record<string, string> | null;
   user_event_counts: Array<{ userId: string; eventCount: string }> | null;
 };
@@ -297,10 +299,23 @@ export class PostgresTaskEventStore implements TaskEventStore {
       throw new Error('Invalid task event user filter');
     }
     const filteredUserIds = userIds.map(principalId);
+    const timezone = query.timezone ?? 'UTC';
+    try {
+      if (
+        timezone.length < 1 ||
+        timezone.length > 64 ||
+        /\p{Cc}/u.test(timezone) ||
+        !new Intl.DateTimeFormat('en-US', { timeZone: timezone }).resolvedOptions().timeZone
+      ) {
+        throw new Error('Invalid timezone');
+      }
+    } catch {
+      throw new Error('Invalid task event timezone');
+    }
     const result = await this.#pool.query<SummaryRow>(
       `
       WITH cohort AS (
-        SELECT tenant_id, task_id, user_id, scenario, status, terminal_at
+        SELECT tenant_id, task_id, user_id, scenario, received_at, status, terminal_at
           FROM e_mate_task_fact
          WHERE tenant_id = $1
            AND received_at >= $2::timestamptz
@@ -325,6 +340,13 @@ export class PostgresTaskEventStore implements TaskEventStore {
           FROM cohort
          GROUP BY scenario
       ),
+      scenario_buckets AS (
+        SELECT date_trunc('day', received_at AT TIME ZONE $5) AT TIME ZONE $5 AS bucket_start,
+               scenario,
+               count(*)::text AS task_count
+          FROM cohort
+         GROUP BY bucket_start, scenario
+      ),
       event_counts AS (
         SELECT event.type, count(*)::text AS event_count
           FROM e_mate_task_event AS event
@@ -345,6 +367,20 @@ export class PostgresTaskEventStore implements TaskEventStore {
                '{}'::jsonb
              ) AS scenario_counts,
              COALESCE(
+               (
+                 SELECT jsonb_agg(
+                   jsonb_build_object(
+                     'bucketStart', bucket_start,
+                     'scenario', scenario,
+                     'taskCount', task_count
+                   )
+                   ORDER BY bucket_start, scenario
+                 )
+                   FROM scenario_buckets
+               ),
+               '[]'::jsonb
+             ) AS scenario_buckets,
+             COALESCE(
                (SELECT jsonb_object_agg(type, event_count) FROM event_counts),
                '{}'::jsonb
              ) AS event_type_counts,
@@ -360,7 +396,7 @@ export class PostgresTaskEventStore implements TaskEventStore {
              ) AS user_event_counts
         FROM totals
     `,
-      [tenantId, from, to, filteredUserIds]
+      [tenantId, from, to, filteredUserIds, timezone]
     );
     const row = result.rows[0];
     if (!row) throw new Error('Task event totals were unavailable');
@@ -381,6 +417,11 @@ export class PostgresTaskEventStore implements TaskEventStore {
       scenarioCounts: TASK_SCENARIOS.map((scenario) => ({
         scenario,
         taskCount: row.scenario_counts?.[scenario] ?? '0',
+      })),
+      scenarioBuckets: (row.scenario_buckets ?? []).map(({ bucketStart, scenario, taskCount }) => ({
+        bucketStart: iso(bucketStart),
+        scenario,
+        taskCount,
       })),
       eventTypeCounts: TASK_EVENT_TYPES.map((type) => ({
         type,

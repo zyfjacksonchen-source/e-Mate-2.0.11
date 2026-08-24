@@ -5,6 +5,10 @@ export type UsageTrendPoint = {
   metrics: UsageMetrics;
 };
 
+export type UsageUserTrendPoint = UsageTrendPoint & {
+  userId: string;
+};
+
 export type UsageDetail = {
   userId: string;
   modelId: string;
@@ -83,6 +87,21 @@ export function usageTrend(projection: TenantUsageProjection): UsageTrendPoint[]
     bucketStart,
     metrics,
   }));
+}
+
+export function usageUserTrend(projection: TenantUsageProjection): UsageUserTrendPoint[] {
+  const groups = new Map<string, UsageUserTrendPoint>();
+  for (const group of projection.groups) {
+    const key = `${group.bucketStart}\0${group.userId}`;
+    groups.set(key, {
+      bucketStart: group.bucketStart,
+      userId: group.userId,
+      metrics: addMetrics(groups.get(key)?.metrics ?? emptyMetrics(), group.metrics),
+    });
+  }
+  return [...groups.values()].sort((left, right) =>
+    left.bucketStart.localeCompare(right.bucketStart) || left.userId.localeCompare(right.userId)
+  );
 }
 
 export function usageDetails(projection: TenantUsageProjection): UsageDetail[] {

@@ -79,6 +79,9 @@ class FakeTaskEvents implements TaskEventStore {
         cancelledTasks: count('CANCELLED'),
       },
       scenarioCounts: TASK_SCENARIOS.map((scenario) => ({ scenario, taskCount: scenarioCount(scenario) })),
+      scenarioBuckets: TASK_SCENARIOS
+        .map((scenario) => ({ bucketStart: query.from, scenario, taskCount: scenarioCount(scenario) }))
+        .filter(({ taskCount }) => taskCount !== '0'),
       eventTypeCounts: TASK_EVENT_TYPES.map((type) => ({ type, eventCount: eventCount(type) })),
       userEventCounts: [...new Set([...this.events.entries()]
         .filter(
@@ -209,7 +212,11 @@ test('task summary is role-gated and tenant-isolated', async () => {
     const query = 'from=2026-07-25T00%3A00%3A00.000Z&to=2026-07-26T00%3A00%3A00.000Z';
     assert.equal((await fetch(`${baseUrl}/v1/tasks/summary?${query}`, { headers: auth('employee') })).status, 403);
     const tenant1 = await fetch(`${baseUrl}/v1/tasks/summary?${query}`, { headers: auth('auditor') });
-    assert.equal(((await tenant1.json()) as TenantTaskSummary).tenantId, 'tenant-1');
+    const tenant1Summary = (await tenant1.json()) as TenantTaskSummary;
+    assert.equal(tenant1Summary.tenantId, 'tenant-1');
+    assert.deepEqual(tenant1Summary.scenarioBuckets, [
+      { bucketStart: '2026-07-25T00:00:00.000Z', scenario: 'CONTENT_CREATION', taskCount: '1' },
+    ]);
     const filtered = await fetch(`${baseUrl}/v1/tasks/summary?${query}&userId=user-1&userId=user-2`, {
       headers: auth('auditor'),
     });
@@ -223,6 +230,11 @@ test('task summary is role-gated and tenant-isolated', async () => {
     );
     assert.equal(
       (await fetch(`${baseUrl}/v1/tasks/summary?${query}&userId=invalid%20user`, { headers: auth('auditor') }))
+        .status,
+      400
+    );
+    assert.equal(
+      (await fetch(`${baseUrl}/v1/tasks/summary?${query}&timezone=Not%2FAZone`, { headers: auth('auditor') }))
         .status,
       400
     );

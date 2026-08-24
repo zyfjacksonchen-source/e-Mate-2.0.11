@@ -353,22 +353,27 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
 }
 
 function taskEventQuery(url: URL): TaskEventQuery {
-  const allowed = new Set(['from', 'to', 'userId']);
+  const allowed = new Set(['from', 'to', 'timezone', 'userId']);
   if (
     [...url.searchParams.keys()].some((key) => !allowed.has(key)) ||
     ['from', 'to'].some((key) => url.searchParams.getAll(key).length !== 1) ||
+    url.searchParams.getAll('timezone').length > 1 ||
     url.searchParams.getAll('userId').length > 100
   ) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
   }
   const from = url.searchParams.get('from');
   const to = url.searchParams.get('to');
+  const timezone = url.searchParams.get('timezone') ?? 'UTC';
   const userIds = url.searchParams.getAll('userId');
   if (
     !from ||
     !to ||
     !isIsoTimestamp(from) ||
     !isIsoTimestamp(to) ||
+    timezone.length < 1 ||
+    timezone.length > 64 ||
+    /\p{Cc}/u.test(timezone) ||
     new Set(userIds).size !== userIds.length ||
     userIds.some((userId) => !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId))
   ) {
@@ -378,7 +383,14 @@ function taskEventQuery(url: URL): TaskEventQuery {
   if (duration <= 0 || duration > 366 * 86_400_000 || Date.parse(to) > Date.now()) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
   }
-  return { from, to, ...(userIds.length ? { userIds } : {}) };
+  try {
+    if (!new Intl.DateTimeFormat('en-US', { timeZone: timezone }).resolvedOptions().timeZone) {
+      throw new Error('Invalid timezone');
+    }
+  } catch {
+    throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
+  }
+  return { from, to, timezone, ...(userIds.length ? { userIds } : {}) };
 }
 
 function usageEventPage(url: URL): { cursor: string | null; limit: number } {

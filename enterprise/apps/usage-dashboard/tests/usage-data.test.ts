@@ -33,6 +33,7 @@ import {
   usageDetails,
   usageModels,
   usageTrend,
+  usageUserTrend,
   usageUsers,
 } from '../src/usage-data.ts';
 import { messagesFor } from '../src/i18n.ts';
@@ -52,6 +53,29 @@ const metrics = (overrides: Partial<UsageMetrics> = {}): UsageMetrics => ({
   zeroCostUsageEvents: '0',
   unpricedUsageEvents: '0',
   ...overrides,
+});
+
+test('aggregates user trend across models without mixing dates or users', () => {
+  const projection = {
+    groups: [
+      { bucketStart: '2026-07-29T00:00:00.000Z', userId: 'user-1', modelId: 'model-1', metrics: metrics() },
+      { bucketStart: '2026-07-29T00:00:00.000Z', userId: 'user-1', modelId: 'model-2', metrics: metrics() },
+      { bucketStart: '2026-07-30T00:00:00.000Z', userId: 'user-1', modelId: 'model-1', metrics: metrics() },
+      { bucketStart: '2026-07-29T00:00:00.000Z', userId: 'user-2', modelId: 'model-1', metrics: metrics() },
+    ],
+  } as TenantUsageProjection;
+  assert.deepEqual(
+    usageUserTrend(projection).map(({ bucketStart, userId, metrics: value }) => ({
+      bucketStart,
+      userId,
+      totalRequests: value.totalRequests,
+    })),
+    [
+      { bucketStart: '2026-07-29T00:00:00.000Z', userId: 'user-1', totalRequests: '2' },
+      { bucketStart: '2026-07-29T00:00:00.000Z', userId: 'user-2', totalRequests: '1' },
+      { bucketStart: '2026-07-30T00:00:00.000Z', userId: 'user-1', totalRequests: '1' },
+    ]
+  );
 });
 
 test('aggregates exact counts and decimals without Number coercion', () => {
@@ -196,7 +220,8 @@ test('adds event pagination only to event queries and preserves configured query
   };
   assert.equal(new URLSearchParams(usageQueryString(query)).has('limit'), false);
   assert.deepEqual(new URLSearchParams(usageQueryString(query)).getAll('userId'), ['user-1', 'user-2']);
-  assert.deepEqual([...new URLSearchParams(taskQueryString(query)).keys()], ['from', 'to', 'userId', 'userId']);
+  assert.deepEqual([...new URLSearchParams(taskQueryString(query)).keys()], ['from', 'to', 'timezone', 'userId', 'userId']);
+  assert.equal(new URLSearchParams(taskQueryString(query)).get('timezone'), 'Asia/Shanghai');
   assert.deepEqual(new URLSearchParams(taskQueryString(query)).getAll('userId'), ['user-1', 'user-2']);
   assert.equal(new URLSearchParams(usageQueryString(query, true, 'cursor-1')).get('cursor'), 'cursor-1');
   assert.deepEqual(
@@ -253,6 +278,9 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
     'copy.customRange',
     'copy.userFilter',
     'copy.modelCallStatus',
+    'copy.userTrend',
+    'copy.scenarioTrend',
+    'copy.visibleColumns',
   ]) {
     assert.match(source, new RegExp(metric.replace('.', '\\.')));
   }
@@ -262,6 +290,9 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
   assert.match(source, /queryForRange/);
   assert.match(source, /mode='multiple'/);
   assert.match(source, /queryForDay/);
+  assert.match(source, /usageUserTrend/);
+  assert.match(source, /scenarioBuckets/);
+  assert.match(source, /displayNameByUserId/);
   assert.match(source, /selectedUserIds\.length \? \{ userIds: selectedUserIds \}/);
   assert.match(source, /eventTypeLabels\[type\].*type/);
   assert.match(source, /status === 401[\s\S]*refreshUsageSession/);
