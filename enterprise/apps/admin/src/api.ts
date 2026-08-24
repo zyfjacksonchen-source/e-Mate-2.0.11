@@ -24,14 +24,18 @@ import {
 } from '@e-mate/admin-contract';
 
 export const ADMIN_TOKEN_SESSION_KEY = 'e-mate.admin.access-token';
-export const LEGACY_ADMIN_MODEL_SESSION_KEY = 'e-mate.admin.model-session';
+export const ADMIN_MODEL_SESSION_KEY = 'e-mate.admin.model-session';
 
-export function clearLegacyAdminModelSession(storage: Pick<Storage, 'removeItem'>): void {
-  storage.removeItem(LEGACY_ADMIN_MODEL_SESSION_KEY);
-}
+export type AdminModelSession = {
+  basePath: string;
+  sessionToken: string;
+  expiresAt: string;
+  allowedModelIds: string[];
+};
 
 export type AdminLoginSession = {
   accessToken: string;
+  modelGateway: AdminModelSession;
 };
 
 export type AdminPasswordLogin = {
@@ -87,6 +91,22 @@ export function resolveSameOriginPath(configured: string | undefined, path: stri
   return `${endpoint.pathname}${endpoint.search}`;
 }
 
+export function resolveModelGatewayPath(configured: string, origin: string): string {
+  const target = new URL(configured, origin);
+  if (
+    target.origin !== origin ||
+    target.protocol !== 'https:' ||
+    target.username ||
+    target.password ||
+    target.search ||
+    target.hash ||
+    !/^\/e-mate\/model-api\/?$/.test(target.pathname)
+  ) {
+    throw new Error('Invalid Model Gateway URL');
+  }
+  return '/e-mate/model-api/';
+}
+
 export function resolveUsageDashboardPath(configured: string | undefined, origin: string): string | null {
   if (!configured) return null;
   const target = new URL(configured, origin);
@@ -104,7 +124,10 @@ type StatusRequestOptions = {
 
 type SameOriginRoute =
   | { kind: 'auth'; base?: string }
-  | { kind: 'admin'; path: string };
+  | { kind: 'admin'; path: string }
+  | { kind: 'model'; base: string; path: ModelTestPath };
+
+type ModelTestPath = '/v1/models' | '/v1/responses' | '/v1/images/generations';
 
 const adminValidationOrigin = 'https://e-mate.invalid';
 
@@ -123,6 +146,11 @@ function normalizeAdminPath(path: string): string {
   return `${target.pathname}${target.search}`;
 }
 
+function normalizeModelTestPath(path: string): ModelTestPath {
+  if (path === '/v1/models' || path === '/v1/responses' || path === '/v1/images/generations') return path;
+  throw new Error('Admin model test path is not allowlisted');
+}
+
 async function sameOriginRequest(
   route: SameOriginRoute,
   signal: AbortSignal,
@@ -130,7 +158,7 @@ async function sameOriginRequest(
   init: RequestInit
 ): Promise<Response> {
   const path = route.kind === 'auth' ? '/v1/auth/password' : route.path;
-  const base = route.kind === 'auth' ? route.base : options.apiBase;
+  const base = route.kind === 'auth' ? route.base : route.kind === 'model' ? route.base : options.apiBase;
   return (options.fetcher ?? fetch)(resolveSameOriginPath(base, path, options.origin), {
     ...init,
     cache: 'no-store',
@@ -156,14 +184,193 @@ export async function loginAdmin(
   });
   if (!response.ok) throw new AdminApiError(response.status);
   const value = (await response.json()) as Record<string, unknown>;
+  const modelGateway = value.modelGateway as Record<string, unknown> | undefined;
+  const allowedModelIds = modelGateway?.allowedModelIds;
+  const expiresAt = modelGateway?.expiresAt;
   if (
     value.schemaVersion !== 1 ||
     typeof value.accessToken !== 'string' ||
-    !/^[^\s]{32,4096}$/.test(value.accessToken)
+    !/^[^\s]{32,4096}$/.test(value.accessToken) ||
+    !modelGateway ||
+    typeof modelGateway.baseUrl !== 'string' ||
+    typeof modelGateway.sessionToken !== 'string' ||
+    !/^[^\s]{32,8192}$/.test(modelGateway.sessionToken) ||
+    typeof expiresAt !== 'string' ||
+    !Number.isFinite(Date.parse(expiresAt)) ||
+    Date.parse(expiresAt) <= Date.now() ||
+    !Array.isArray(allowedModelIds) ||
+    allowedModelIds.length < 1 ||
+    allowedModelIds.length > 20 ||
+    allowedModelIds.some((id) => typeof id !== 'string' || !/^[A-Za-z0-9._-]{1,80}$/.test(id)) ||
+    new Set(allowedModelIds).size !== allowedModelIds.length
   ) {
     throw new AdminApiError(503);
   }
-  return { accessToken: value.accessToken };
+  return {
+    accessToken: value.accessToken,
+    modelGateway: {
+      basePath: resolveModelGatewayPath(modelGateway.baseUrl, options.origin),
+      sessionToken: modelGateway.sessionToken,
+      expiresAt,
+      allowedModelIds: [...allowedModelIds],
+    },
+  };
+}
+
+export function readAdminModelSession(value: string | null): AdminModelSession | null {
+  if (!value) return null;
+  try {
+    const session = JSON.parse(value) as Partial<AdminModelSession>;
+    return session.basePath === '/e-mate/model-api/' &&
+      typeof session.sessionToken === 'string' && /^[^\s]{32,8192}$/.test(session.sessionToken) &&
+      typeof session.expiresAt === 'string' && Number.isFinite(Date.parse(session.expiresAt)) &&
+      Array.isArray(session.allowedModelIds) && session.allowedModelIds.length > 0 &&
+      session.allowedModelIds.length <= 20 &&
+      session.allowedModelIds.every((id) => typeof id === 'string' && /^[A-Za-z0-9._-]{1,80}$/.test(id)) &&
+      new Set(session.allowedModelIds).size === session.allowedModelIds.length
+      ? session as AdminModelSession
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+type ModelCatalogEntry = {
+  id: string;
+  capabilities: { imageGeneration: boolean };
+};
+
+export type ModelConnectionResult = {
+  method: 'live-inference' | 'live-image-generation';
+  checkedAt: string;
+};
+
+async function modelRequest(
+  session: AdminModelSession,
+  signal: AbortSignal,
+  options: StatusRequestOptions,
+  path: string,
+  init: RequestInit = {}
+): Promise<Response> {
+  if (Date.parse(session.expiresAt) <= Date.now()) throw new AdminApiError(401);
+  const headers = new Headers(init.headers);
+  if (!headers.has('accept')) headers.set('accept', 'application/json');
+  headers.set('authorization', `Bearer ${session.sessionToken}`);
+  const response = await sameOriginRequest(
+    { kind: 'model', base: session.basePath, path: normalizeModelTestPath(path) },
+    signal,
+    options,
+    { ...init, headers, redirect: 'error' }
+  );
+  if (!response.ok) throw new AdminApiError(response.status);
+  return response;
+}
+
+function parseModelCatalog(value: unknown): ModelCatalogEntry[] {
+  const models = typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>).models
+    : undefined;
+  if (!Array.isArray(models)) throw new AdminApiError(503);
+  const parsed = models.map((entry) => {
+    const record = typeof entry === 'object' && entry !== null && !Array.isArray(entry)
+      ? entry as Record<string, unknown>
+      : null;
+    const capabilities = record?.capabilities;
+    if (
+      !record ||
+      typeof record.id !== 'string' ||
+      !capabilities ||
+      typeof capabilities !== 'object' ||
+      Array.isArray(capabilities) ||
+      typeof (capabilities as Record<string, unknown>).imageGeneration !== 'boolean'
+    ) {
+      throw new AdminApiError(503);
+    }
+    return {
+      id: record.id,
+      capabilities: { imageGeneration: (capabilities as Record<string, unknown>).imageGeneration as boolean },
+    };
+  });
+  if (parsed.length < 1 || parsed.length > 20 || new Set(parsed.map(({ id }) => id)).size !== parsed.length) {
+    throw new AdminApiError(503);
+  }
+  return parsed;
+}
+
+async function consumeModelStream(response: Response): Promise<void> {
+  if (!(response.headers.get('content-type') ?? '').includes('text/event-stream') || !response.body) {
+    throw new AdminApiError(503);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let body = '';
+  let bytes = 0;
+  try {
+    while (true) {
+      // This is a 32-token connectivity probe; fail closed on an unexpectedly large stream.
+      // eslint-disable-next-line no-await-in-loop
+      const next = await reader.read();
+      if (next.done) break;
+      bytes += next.value.byteLength;
+      if (bytes > 256 * 1024) throw new AdminApiError(503);
+      body += decoder.decode(next.value, { stream: true });
+    }
+    body += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+  const completed = body.split('\n').some((line) => {
+    if (!line.startsWith('data:')) return false;
+    try {
+      return (JSON.parse(line.slice(5).trim()) as { type?: unknown }).type === 'response.completed';
+    } catch {
+      return false;
+    }
+  });
+  if (!completed) throw new AdminApiError(503);
+}
+
+export async function testModelConnection(
+  routeId: string,
+  session: AdminModelSession,
+  signal: AbortSignal,
+  options: StatusRequestOptions
+): Promise<ModelConnectionResult> {
+  if (!session.allowedModelIds.includes(routeId)) throw new AdminApiError(403);
+  const catalogResponse = await modelRequest(session, signal, options, '/v1/models');
+  const catalog = parseModelCatalog(await catalogResponse.json());
+  const route = catalog.find(({ id }) => id === routeId);
+  if (!route) throw new AdminApiError(403);
+  const scope = `admin-model-test-${crypto.randomUUID()}`;
+  const headers = {
+    'content-type': 'application/json',
+    session_id: scope,
+    'x-client-request-id': scope,
+    'x-e-mate-task-id': scope,
+    'x-e-mate-trace-id': scope,
+  };
+  if (route.capabilities.imageGeneration) {
+    const response = await modelRequest(session, signal, options, '/v1/images/generations', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model: routeId, prompt: 'A solid orange square.', size: '1024x1024' }),
+    });
+    await response.body?.cancel();
+    return { method: 'live-image-generation', checkedAt: new Date().toISOString() };
+  }
+  const response = await modelRequest(session, signal, options, '/v1/responses', {
+    method: 'POST',
+    headers: { ...headers, accept: 'text/event-stream' },
+    body: JSON.stringify({
+      model: routeId,
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Reply with OK.' }] }],
+      max_output_tokens: 32,
+      stream: true,
+      store: false,
+    }),
+  });
+  await consumeModelStream(response);
+  return { method: 'live-inference', checkedAt: new Date().toISOString() };
 }
 
 export async function requestAdmin(

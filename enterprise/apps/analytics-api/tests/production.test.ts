@@ -89,7 +89,7 @@ test('production configuration maps a hashed bearer to fixed identity and denies
   assert.equal(parseProductionConfiguration(withoutRedis, readSecret).port, 4190);
 });
 
-test('production registers only identity, model-policy management and redacted audit surfaces', async () => {
+test('production registers only identity, model-policy management, bounded model probes, and redacted audit surfaces', async () => {
   const source = readFileSync(new URL('../src/production.ts', import.meta.url), 'utf8');
   const adminSourceExtension = /\.(?:[cm]?[jt]sx?)$/u;
   for (const extension of ['ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs']) {
@@ -110,11 +110,11 @@ test('production registers only identity, model-policy management and redacted a
   const adminSource = adminFiles.map((file) => file.source).join('\n');
   const compact = (value: string): string => value.replace(/['"`+\s]/gu, '');
   const assertAllowedNetworkPaths = (value: string): void => {
-    const paths = [...compact(value).matchAll(/\/v1\/(?:[A-Za-z0-9_?./${}()=-]|&(?!&))*/gu)].map((match) => match[0]);
+    const paths = [...value.matchAll(/(['"`])(\/v1\/[^'"`\r\n]*)\1/gu)].map((match) => compact(match[2]));
     assert(paths.length > 0, 'Admin source must retain an allowlisted management route');
     for (const path of paths) {
       assert(
-        /^\/v1\/(?:auth\/password$|admin(?:\/|$))/u.test(path),
+        /^\/v1\/(?:auth\/password$|admin(?:\/|$)|models$|responses$|images\/generations$)/u.test(path),
         `Admin network path is not allowlisted: ${path}`
       );
     }
@@ -189,11 +189,13 @@ test('production registers only identity, model-policy management and redacted a
     /unique same-origin network primitive/u
   );
   assertAllowedNetworkPaths(adminApiSource);
-  assert.throws(() => assertAllowedNetworkPaths("fetch('/v1/' + 'responses')"), /not allowlisted/u);
-  assert.throws(() => assertAllowedNetworkPaths("fetch('/v1/images/' + 'generations')"), /not allowlisted/u);
+  assert.throws(() => assertAllowedNetworkPaths("fetch('/v1/' + 'chat/completions')"), /not allowlisted/u);
+  assert.throws(() => assertAllowedNetworkPaths("fetch('/v1/images/' + 'edits')"), /not allowlisted/u);
   const modelToolSchema = /(?:tool_choice|parallel_tool_calls|tool_calls|function_call|toolChoice|parallelToolCalls|toolCalls|functionCall)/u;
   assert.doesNotMatch(compact(adminSource), modelToolSchema);
   assert.doesNotMatch(compact('const tools: string[] = [];'), modelToolSchema);
+  const adminVite = readFileSync(new URL('../../admin/vite.config.ts', import.meta.url), 'utf8');
+  assert.match(adminVite, /'\/e-mate\/model-api'/u);
 
   const server = createAnalyticsServer({ authenticate: async () => null });
   await new Promise<void>((resolve, reject) => {

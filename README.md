@@ -34,7 +34,8 @@ e-Mate 2.0.12 是基于固定 DeepSeek Harness `0.1.0-rc.7` 与 `deepseek-harnes
 - `approval/policy: never` 表示需要 `ctx.approval` 的操作被拒绝，不表示自动同意。
 - Computer Use 只接受插件设置中的 `allowAllApps`、精确应用 grant，或原生交互 lease；e-Mate 不把 Full Access 映射为全应用授权。
 - `find-skill` 只负责发现。Skill 的安装、更新、启用、禁用、卸载、上传和删除统一由 Skill Hub 的版本/SHA/WAL 事务处理。
-- 企业管理端只负责鉴权、模型策略和异步脱敏审计，不得控制本地插件、工具审批、会话、Job 或执行。
+- 企业管理端负责鉴权、受管模型/搜索策略、有界凭据租约与异步脱敏审计，不得控制本地插件、工具审批、会话、Job 或执行。
+- 管理员可在模型路由页手动发起一次最小真实联通测试：文本路由仅请求 32 Token 的固定回复，图片路由仅生成固定橙色方块。请求只经同源 Model Gateway 的短期管理会话，计入配额与脱敏审计，不传入 Tool schema、不暴露上游 Key、不保存生成内容，也不调用本地 Harness。
 
 ## 开发与发布
 
