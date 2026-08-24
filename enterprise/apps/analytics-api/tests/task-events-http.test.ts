@@ -49,7 +49,8 @@ class FakeTaskEvents implements TaskEventStore {
 
   async summary(principal: RuntimeRegistryPrincipal, query: TaskEventQuery): Promise<TenantTaskSummary> {
     const tasks = [...this.tasks.entries()].filter(
-      ([key, task]) => key.startsWith(`${principal.tenantId}\0`) && (!query.userId || task.userId === query.userId)
+      ([key, task]) =>
+        key.startsWith(`${principal.tenantId}\0`) && (!query.userIds?.length || query.userIds.includes(task.userId))
     );
     const count = (status: string): string => String(tasks.filter(([, task]) => task.status === status).length);
     const scenarioCount = (scenario: TaskEventInput['scenario']): string =>
@@ -59,7 +60,7 @@ class FakeTaskEvents implements TaskEventStore {
         [...this.events.entries()].filter(
           ([key, stored]) =>
             key.startsWith(`${principal.tenantId}\0`) &&
-            (!query.userId || stored.userId === query.userId) &&
+            (!query.userIds?.length || query.userIds.includes(stored.userId)) &&
             stored.event.type === type
         ).length
       );
@@ -81,7 +82,9 @@ class FakeTaskEvents implements TaskEventStore {
       eventTypeCounts: TASK_EVENT_TYPES.map((type) => ({ type, eventCount: eventCount(type) })),
       userEventCounts: [...new Set([...this.events.entries()]
         .filter(
-          ([key, stored]) => key.startsWith(`${principal.tenantId}\0`) && (!query.userId || stored.userId === query.userId)
+          ([key, stored]) =>
+            key.startsWith(`${principal.tenantId}\0`) &&
+            (!query.userIds?.length || query.userIds.includes(stored.userId))
         )
         .map(([, stored]) => stored.userId))]
         .sort()
@@ -90,7 +93,7 @@ class FakeTaskEvents implements TaskEventStore {
           eventCount: String([...this.events.entries()].filter(
             ([key, stored]) =>
               key.startsWith(`${principal.tenantId}\0`) &&
-              (!query.userId || stored.userId === query.userId) &&
+              (!query.userIds?.length || query.userIds.includes(stored.userId)) &&
               stored.userId === userId
           ).length),
         })),
@@ -207,12 +210,17 @@ test('task summary is role-gated and tenant-isolated', async () => {
     assert.equal((await fetch(`${baseUrl}/v1/tasks/summary?${query}`, { headers: auth('employee') })).status, 403);
     const tenant1 = await fetch(`${baseUrl}/v1/tasks/summary?${query}`, { headers: auth('auditor') });
     assert.equal(((await tenant1.json()) as TenantTaskSummary).tenantId, 'tenant-1');
-    const filtered = await fetch(`${baseUrl}/v1/tasks/summary?${query}&userId=user-1`, {
+    const filtered = await fetch(`${baseUrl}/v1/tasks/summary?${query}&userId=user-1&userId=user-2`, {
       headers: auth('auditor'),
     });
     assert.deepEqual(((await filtered.json()) as TenantTaskSummary).userEventCounts, [
       { userId: 'user-1', eventCount: '1' },
     ]);
+    assert.equal(
+      (await fetch(`${baseUrl}/v1/tasks/summary?${query}&userId=user-1&userId=user-1`, { headers: auth('auditor') }))
+        .status,
+      400
+    );
     assert.equal(
       (await fetch(`${baseUrl}/v1/tasks/summary?${query}&userId=invalid%20user`, { headers: auth('auditor') }))
         .status,

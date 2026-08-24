@@ -8,6 +8,7 @@ import {
   loadUsageEvents,
   loginUsageAccount,
   logoutUsageAccount,
+  queryForDay,
   queryForPeriod,
   queryForRange,
   refreshUsageAccount,
@@ -26,6 +27,7 @@ import {
   hasUsageFacts,
   percentage,
   usageModels,
+  usageDetails,
   usageTrend,
   usageUsers,
 } from './usage-data';
@@ -33,7 +35,6 @@ import {
 const TOKEN_SESSION_KEY = 'e-mate.usage.access-token';
 const REFRESH_TOKEN_SESSION_KEY = 'e-mate.usage.refresh-token';
 const periodOptions = [7, 30, 90] as const;
-const ALL_USERS = '__all__';
 
 function localDateTime(value: Date): string {
   return new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
@@ -54,6 +55,8 @@ type EventState =
   | { kind: 'loading'; events: TenantUsageEvent[] }
   | { kind: 'ready'; events: TenantUsageEvent[]; nextCursor: string | null }
   | { kind: 'error'; events: TenantUsageEvent[] };
+
+type DayDetailState = { kind: 'idle' } | DashboardState;
 
 function MetricCard({
   label,
@@ -122,16 +125,20 @@ export function App() {
   const [customFrom, setCustomFrom] = useState(() => localDateTime(new Date(Date.now() - 7 * 86_400_000)));
   const [customTo, setCustomTo] = useState(() => localDateTime(new Date()));
   const [rangeError, setRangeError] = useState<string | null>(null);
-  const [selectedUserId, setSelectedUserId] = useState('');
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [knownUsers, setKnownUsers] = useState<Array<{ userId: string; displayName: string }>>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
   );
   const [reloadKey, setReloadKey] = useState(0);
   const [dashboard, setDashboard] = useState<DashboardState>({ kind: 'loading' });
+  const [selectedDayQuery, setSelectedDayQuery] = useState<UsageQuery | null>(null);
+  const [dayDetail, setDayDetail] = useState<DayDetailState>({ kind: 'idle' });
   const [eventsOpen, setEventsOpen] = useState(false);
   const [eventState, setEventState] = useState<EventState>({ kind: 'idle', events: [] });
   const pendingRefresh = useRef<Promise<UsageAuthSession> | null>(null);
+  const customFromInput = useRef<HTMLInputElement>(null);
+  const customToInput = useRef<HTMLInputElement>(null);
   const authBase = import.meta.env.VITE_AUTH_API_BASE as string | undefined;
   const authClientId = (import.meta.env.VITE_AUTH_CLIENT_ID as string | undefined) ?? 'e-mate-admin';
 
@@ -168,7 +175,7 @@ export function App() {
   useEffect(() => {
     if (!token) return;
     const controller = new AbortController();
-    const query = { ...range, ...(selectedUserId ? { userId: selectedUserId } : {}) };
+    const query = { ...range, ...(selectedUserIds.length ? { userIds: selectedUserIds } : {}) };
     setDashboard({ kind: 'loading' });
     void loadUsageDashboard(token, query, controller.signal)
       .then((data) => {
@@ -198,32 +205,62 @@ export function App() {
             clearUsageSession();
             setToken('');
             setKnownUsers([]);
-            setSelectedUserId('');
+            setSelectedUserIds([]);
             setTokenError(copy.authFailed);
           }
         }
         setDashboard({ kind: 'error', status });
       });
     return () => controller.abort();
-  }, [copy.authFailed, range.bucket, range.from, range.timezone, range.to, reloadKey, selectedUserId, token]);
+  }, [copy.authFailed, range.bucket, range.from, range.timezone, range.to, reloadKey, selectedUserIds, token]);
+
+  useEffect(() => {
+    if (!token || !selectedDayQuery) {
+      setDayDetail({ kind: 'idle' });
+      return;
+    }
+    const controller = new AbortController();
+    setDayDetail({ kind: 'loading' });
+    void loadUsageDashboard(token, selectedDayQuery, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) setDayDetail({ kind: 'ready', data });
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setDayDetail({ kind: 'error', status: error instanceof UsageApiError ? error.status : null });
+        }
+      });
+    return () => controller.abort();
+  }, [reloadKey, selectedDayQuery, token]);
 
   const resetEvents = () => {
     setEventsOpen(false);
     setEventState({ kind: 'idle', events: [] });
   };
 
+  const resetDayDetail = () => {
+    setSelectedDayQuery(null);
+    setDayDetail({ kind: 'idle' });
+  };
+
   const selectPeriod = (value: (typeof periodOptions)[number] | 'custom') => {
     setPeriod(value);
     setRangeError(null);
     resetEvents();
+    resetDayDetail();
     if (value !== 'custom') setRange(queryForPeriod(value));
   };
 
   const applyCustomRange = () => {
+    const fromValue = customFromInput.current?.value ?? customFrom;
+    const toValue = customToInput.current?.value ?? customTo;
     try {
-      setRange(queryForRange(new Date(customFrom), new Date(customTo)));
+      setRange(queryForRange(new Date(fromValue), new Date(toValue)));
+      setCustomFrom(fromValue);
+      setCustomTo(toValue);
       setRangeError(null);
       resetEvents();
+      resetDayDetail();
     } catch {
       setRangeError(copy.invalidRange);
     }
@@ -253,7 +290,7 @@ export function App() {
         sessionStorage.setItem(TOKEN_SESSION_KEY, session.accessToken);
         sessionStorage.setItem(REFRESH_TOKEN_SESSION_KEY, session.refreshToken);
         setKnownUsers([]);
-        setSelectedUserId('');
+        setSelectedUserIds([]);
         setToken(session.accessToken);
         setPassword('');
       })
@@ -268,7 +305,7 @@ export function App() {
     clearUsageSession();
     setToken('');
     setKnownUsers([]);
-    setSelectedUserId('');
+    setSelectedUserIds([]);
     if (!refreshToken) return;
     void logoutUsageAccount(
       {
@@ -341,6 +378,7 @@ export function App() {
   const trends = projection ? usageTrend(projection) : [];
   const models = projection ? usageModels(projection) : [];
   const userUsage = projection ? usageUsers(projection) : [];
+  const selectedUserSet = new Set(selectedUserIds);
   const userUsageById = new Map(userUsage.map((entry) => [entry.userId, entry]));
   const userEventCountById = new Map(
     (taskSummary?.userEventCounts ?? []).map((entry) => [entry.userId, entry.eventCount])
@@ -397,8 +435,9 @@ export function App() {
             modelIds: [],
             metrics: emptyMetrics(),
           })),
-      ]).filter(({ userId }) => !selectedUserId || userId === selectedUserId);
+      ]).filter(({ userId }) => selectedUserSet.size === 0 || selectedUserSet.has(userId));
   const maximumRequests = maxCount(trends.map(({ metrics }) => metrics.totalRequests));
+  const maximumTokens = maxCount(trends.map(({ metrics }) => metrics.totalTokens));
   const maximumModelCalls = maxCount(models.map(({ callCount }) => callCount));
   const taskSourceReady = taskSummary?.sourceState === 'AUTHORITATIVE';
   const usageSourceReady = projection ? hasUsageFacts(projection) : false;
@@ -422,6 +461,13 @@ export function App() {
     : '0';
   const successRate = projection ? callSuccessRate(projection.summary) : null;
   const activeUsers = projection ? new Set(projection.groups.map(({ userId }) => userId)).size.toString() : '0';
+  const dayData = dayDetail.kind === 'ready' ? dayDetail.data : null;
+  const dayTaskSummary = dayData?.taskSummary;
+  const dayUsageRows = dayData ? usageDetails(dayData.projection) : [];
+  const visibleScenarioCounts = taskSummary?.scenarioCounts.filter(({ taskCount }) => taskCount !== '0') ?? [];
+  const dayVisibleScenarioCounts = dayTaskSummary?.scenarioCounts.filter(({ taskCount }) => taskCount !== '0') ?? [];
+  const hasUnclassifiedTasks = visibleScenarioCounts.some(({ scenario }) => scenario === 'GENERAL');
+  const dayHasUnclassifiedTasks = dayVisibleScenarioCounts.some(({ scenario }) => scenario === 'GENERAL');
   const scenarioLabels: Record<TaskScenario, string> = {
     GENERAL: copy.taxonomyGeneral,
     CONTENT_CREATION: copy.taxonomyCreative,
@@ -452,14 +498,23 @@ export function App() {
     return '—';
   };
   const eventQuery = projection
-    ? ({
+    ? (selectedDayQuery ?? {
         from: projection.from,
         to: projection.to,
         timezone: projection.timezone,
         bucket: projection.bucket,
-        ...(selectedUserId ? { userId: selectedUserId } : {}),
+        ...(selectedUserIds.length ? { userIds: selectedUserIds } : {}),
       } satisfies UsageQuery)
     : null;
+  const toggleDayDetail = (bucketStart: string) => {
+    resetEvents();
+    if (selectedDayQuery?.from === bucketStart) {
+      resetDayDetail();
+      return;
+    }
+    if (!projection) return;
+    setSelectedDayQuery(queryForDay(bucketStart, projection.to, projection.timezone, selectedUserIds));
+  };
   const loadEventPage = (cursor: string | null, existing: TenantUsageEvent[]) => {
     if (!projection || !eventQuery) return;
     const controller = new AbortController();
@@ -552,44 +607,66 @@ export function App() {
         </header>
 
         <section className='filter-bar' aria-label={copy.filters}>
-          <label>
+          <div className='period-filter'>
             <span>{copy.period}</span>
-            <Select
-              value={period}
-              onChange={(value) => selectPeriod(value as (typeof periodOptions)[number] | 'custom')}
-              aria-label={copy.period}
-            >
-              <Select.Option value={7}>{copy.last7Days}</Select.Option>
-              <Select.Option value={30}>{copy.last30Days}</Select.Option>
-              <Select.Option value={90}>{copy.last90Days}</Select.Option>
-              <Select.Option value='custom'>{copy.customRange}</Select.Option>
-            </Select>
-          </label>
+            <div className='period-buttons' role='group' aria-label={copy.period}>
+              {(
+                [
+                  [7, copy.last7Days],
+                  [30, copy.last30Days],
+                  [90, copy.last90Days],
+                  ['custom', copy.customRange],
+                ] as const
+              ).map(([value, label]) => (
+                <Button
+                  key={value}
+                  type={period === value ? 'primary' : 'secondary'}
+                  onClick={() => selectPeriod(value)}
+                  aria-pressed={period === value}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+          </div>
           {period === 'custom' && (
-            <>
+            <div className='custom-range'>
               <label>
                 <span>{copy.from}</span>
-                <input type='datetime-local' value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} />
+                <input
+                  ref={customFromInput}
+                  type='datetime-local'
+                  value={customFrom}
+                  onChange={(event) => setCustomFrom(event.target.value)}
+                />
               </label>
               <label>
                 <span>{copy.to}</span>
-                <input type='datetime-local' value={customTo} onChange={(event) => setCustomTo(event.target.value)} />
+                <input
+                  ref={customToInput}
+                  type='datetime-local'
+                  value={customTo}
+                  onChange={(event) => setCustomTo(event.target.value)}
+                />
               </label>
               <Button onClick={applyCustomRange}>{copy.apply}</Button>
-            </>
+            </div>
           )}
           <label className='user-filter'>
             <span>{copy.userFilter}</span>
             <Select
-              value={selectedUserId || ALL_USERS}
+              mode='multiple'
+              value={selectedUserIds}
+              placeholder={copy.allUsers}
+              allowClear
               showSearch
               onChange={(value) => {
                 resetEvents();
-                setSelectedUserId(value === ALL_USERS ? '' : String(value));
+                resetDayDetail();
+                setSelectedUserIds(value as string[]);
               }}
               aria-label={copy.userFilter}
             >
-              <Select.Option value={ALL_USERS}>{copy.allUsers}</Select.Option>
               {knownUsers.map((user) => (
                 <Select.Option value={user.userId} key={user.userId}>
                   {user.displayName === user.userId ? user.userId : `${user.displayName} · ${user.userId}`}
@@ -597,7 +674,7 @@ export function App() {
               ))}
             </Select>
           </label>
-          {selectedUserId && <Tag>{copy.filteredUser}: {selectedUserId}</Tag>}
+          {selectedUserIds.length > 0 && <Tag>{copy.filteredUsers}: {selectedUserIds.length}</Tag>}
         </section>
         {rangeError && <Alert className='dashboard-alert' type='error' content={rangeError} showIcon />}
 
@@ -695,49 +772,114 @@ export function App() {
                       <span className='accounted-dot'>{copy.accounted}</span>
                       <span className='rejected-dot'>{copy.rejected}</span>
                       <span className='pending-dot'>{copy.pending}</span>
+                      <span className='token-dot'>{copy.totalTokens}</span>
                     </div>
+                    <p className='trend-hint'>{copy.clickDayForDetails}</p>
                     {trends.map(({ bucketStart, metrics }) => {
                       const totalWidth = percentage(metrics.totalRequests, maximumRequests);
                       return (
-                        <div className='trend-row' key={bucketStart}>
+                        <button
+                          type='button'
+                          className={`trend-row${selectedDayQuery?.from === bucketStart ? ' is-selected' : ''}`}
+                          key={bucketStart}
+                          onClick={() => toggleDayDetail(bucketStart)}
+                          aria-expanded={selectedDayQuery?.from === bucketStart}
+                        >
                           <time dateTime={bucketStart}>{day(bucketStart)}</time>
-                          <div
-                            className='trend-track'
-                            role='img'
-                            aria-label={`${day(bucketStart)}: ${copy.accounted} ${metrics.accountedRequests}, ${copy.rejected} ${metrics.rejectedRequests}, ${copy.pending} ${metrics.pendingRequests}`}
-                          >
+                          <div className='trend-bars'>
                             <div
-                              className='trend-total'
-                              style={
-                                {
-                                  '--trend-total': `${totalWidth}%`,
-                                } as CSSProperties
-                              }
+                              className='trend-track'
+                              role='img'
+                              aria-label={`${day(bucketStart)}: ${copy.accounted} ${metrics.accountedRequests}, ${copy.rejected} ${metrics.rejectedRequests}, ${copy.pending} ${metrics.pendingRequests}`}
                             >
-                              <span
-                                className='trend-accounted'
-                                style={{
-                                  width: `${percentage(metrics.accountedRequests, metrics.totalRequests)}%`,
-                                }}
-                              />
-                              <span
-                                className='trend-rejected'
-                                style={{
-                                  width: `${percentage(metrics.rejectedRequests, metrics.totalRequests)}%`,
-                                }}
-                              />
-                              <span
-                                className='trend-pending'
-                                style={{
-                                  width: `${percentage(metrics.pendingRequests, metrics.totalRequests)}%`,
-                                }}
-                              />
+                              <div
+                                className='trend-total'
+                                style={
+                                  {
+                                    '--trend-total': `${totalWidth}%`,
+                                  } as CSSProperties
+                                }
+                              >
+                                <span
+                                  className='trend-accounted'
+                                  style={{ width: `${percentage(metrics.accountedRequests, metrics.totalRequests)}%` }}
+                                />
+                                <span
+                                  className='trend-rejected'
+                                  style={{ width: `${percentage(metrics.rejectedRequests, metrics.totalRequests)}%` }}
+                                />
+                                <span
+                                  className='trend-pending'
+                                  style={{ width: `${percentage(metrics.pendingRequests, metrics.totalRequests)}%` }}
+                                />
+                              </div>
+                            </div>
+                            <div className='token-track' aria-label={`${copy.totalTokens} ${metrics.totalTokens}`}>
+                              <span style={{ width: `${percentage(metrics.totalTokens, maximumTokens)}%` }} />
                             </div>
                           </div>
-                          <strong>{exactCount(metrics.totalRequests, locale)}</strong>
-                        </div>
+                          <span className='trend-values'>
+                            <strong>{exactCount(metrics.totalRequests, locale)}</strong>
+                            <small>{tokenCount(metrics.totalTokens)} Token</small>
+                          </span>
+                        </button>
                       );
                     })}
+                    {selectedDayQuery && (
+                      <section className='day-detail' aria-live='polite'>
+                        <div className='day-detail-heading'>
+                          <div>
+                            <h3>{copy.dayDetails} · {day(selectedDayQuery.from)}</h3>
+                            <p>{copy.dayDetailsDescription}</p>
+                          </div>
+                          <Button size='small' onClick={resetDayDetail}>{copy.close}</Button>
+                        </div>
+                        {dayDetail.kind === 'loading' && <Spin dot />}
+                        {dayDetail.kind === 'error' && <Alert type='error' content={copy.loadFailed} showIcon />}
+                        {dayData && dayTaskSummary && (
+                          <>
+                            <div className='day-detail-grid'>
+                              <section>
+                                <h4>{copy.eventDistribution}</h4>
+                                <div className='taxonomy-grid'>
+                                  {dayTaskSummary.eventTypeCounts
+                                    .filter(({ eventCount }) => eventCount !== '0')
+                                    .map(({ type, eventCount }) => (
+                                      <span key={type}>{eventTypeLabels[type]}<small>{exactCount(eventCount, locale)}</small></span>
+                                    ))}
+                                </div>
+                              </section>
+                              <section>
+                                <h4>{copy.taskDistribution}</h4>
+                                {dayHasUnclassifiedTasks && <p className='source-empty'>{copy.unclassifiedScenarioNotice}</p>}
+                                <div className='taxonomy-grid'>
+                                  {dayVisibleScenarioCounts.map(({ scenario, taskCount }) => (
+                                      <span key={scenario}>{scenarioLabels[scenario]}<small>{exactCount(taskCount, locale)}</small></span>
+                                  ))}
+                                </div>
+                              </section>
+                            </div>
+                            <div className='table-scroll day-usage-table'>
+                              <h4>{copy.details}</h4>
+                              <table>
+                                <thead><tr><th>{copy.user}</th><th>{copy.model}</th><th>{copy.requests}</th><th>{copy.totalTokens}</th><th>{copy.cost}</th></tr></thead>
+                                <tbody>
+                                  {dayUsageRows.map((row) => (
+                                    <tr key={`${row.userId}:${row.modelId}`}>
+                                      <td>{row.userId}</td><td>{row.modelId}</td>
+                                      <td>{exactCount(row.metrics.totalRequests, locale)}</td>
+                                      <td>{tokenCount(row.metrics.totalTokens)}</td>
+                                      <td>{exactCost(row.metrics.costUsd, locale)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                              {dayUsageRows.length === 0 && <Empty description={copy.noData} />}
+                            </div>
+                          </>
+                        )}
+                      </section>
+                    )}
                   </div>
                 )}
               </article>
@@ -751,7 +893,9 @@ export function App() {
                   <ChartHistogram size={22} />
                 </div>
 
-                {selectedUserId && <p className='scope-note'>{copy.userEventDetail}: {selectedUserId}</p>}
+                {selectedUserIds.length > 0 && (
+                  <p className='scope-note'>{copy.userEventDetail}: {selectedUserIds.join(', ')}</p>
+                )}
 
                 <div className='distribution-section'>
                   <h3>{copy.modelCallStatus}</h3>
@@ -810,14 +954,16 @@ export function App() {
 
                 <div className='distribution-section'>
                   <h3>{copy.taskDistribution}</h3>
+                  {hasUnclassifiedTasks && <p className='source-empty'>{copy.unclassifiedScenarioNotice}</p>}
                   <div className='taxonomy-grid'>
-                    {taskSummary.scenarioCounts.map(({ scenario, taskCount }) => (
+                    {visibleScenarioCounts.map(({ scenario, taskCount }) => (
                       <span key={scenario}>
                         {scenarioLabels[scenario]}
                         <small>{taskSourceReady ? exactCount(taskCount, locale) : '—'}</small>
                       </span>
                     ))}
                   </div>
+                  {visibleScenarioCounts.length === 0 && <p className='source-empty'>{copy.noData}</p>}
                 </div>
 
                 <div className='distribution-section'>

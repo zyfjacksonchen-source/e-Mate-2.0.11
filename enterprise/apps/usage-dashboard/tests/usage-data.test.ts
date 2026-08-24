@@ -10,6 +10,7 @@ import type {
 } from '@e-mate/monitoring-contract';
 import {
   queryForPeriod,
+  queryForDay,
   queryForRange,
   loginUsageAccount,
   logoutUsageAccount,
@@ -191,13 +192,23 @@ test('adds event pagination only to event queries and preserves configured query
     to: '2026-07-02T00:00:00.000Z',
     timezone: 'Asia/Shanghai',
     bucket: 'DAY' as const,
-    userId: 'user-1',
+    userIds: ['user-1', 'user-2'],
   };
   assert.equal(new URLSearchParams(usageQueryString(query)).has('limit'), false);
-  assert.equal(new URLSearchParams(usageQueryString(query)).get('userId'), 'user-1');
-  assert.deepEqual([...new URLSearchParams(taskQueryString(query)).keys()], ['from', 'to', 'userId']);
-  assert.equal(new URLSearchParams(taskQueryString(query)).get('userId'), 'user-1');
+  assert.deepEqual(new URLSearchParams(usageQueryString(query)).getAll('userId'), ['user-1', 'user-2']);
+  assert.deepEqual([...new URLSearchParams(taskQueryString(query)).keys()], ['from', 'to', 'userId', 'userId']);
+  assert.deepEqual(new URLSearchParams(taskQueryString(query)).getAll('userId'), ['user-1', 'user-2']);
   assert.equal(new URLSearchParams(usageQueryString(query, true, 'cursor-1')).get('cursor'), 'cursor-1');
+  assert.deepEqual(
+    queryForDay('2026-07-01T00:00:00.000Z', '2026-07-02T12:00:00.000Z', 'Asia/Shanghai', ['user-1']),
+    {
+      from: '2026-07-01T00:00:00.000Z',
+      to: '2026-07-02T00:00:00.000Z',
+      timezone: 'Asia/Shanghai',
+      bucket: 'DAY',
+      userIds: ['user-1'],
+    }
+  );
   assert.equal(
     resolveSameOriginApiPath('/e-mate/enterprise-api/', '/v1/usage/summary?from=one', 'https://example.test'),
     '/e-mate/enterprise-api/v1/usage/summary?from=one'
@@ -249,7 +260,9 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
   assert.match(source, /copy\.weeklyQuota/);
   assert.match(source, /taskSummary\?\.userEventCounts/);
   assert.match(source, /queryForRange/);
-  assert.match(source, /selectedUserId \? \{ userId: selectedUserId \}/);
+  assert.match(source, /mode='multiple'/);
+  assert.match(source, /queryForDay/);
+  assert.match(source, /selectedUserIds\.length \? \{ userIds: selectedUserIds \}/);
   assert.match(source, /eventTypeLabels\[type\].*type/);
   assert.match(source, /status === 401[\s\S]*refreshUsageSession/);
   assert.doesNotMatch(source, /models\.slice/);

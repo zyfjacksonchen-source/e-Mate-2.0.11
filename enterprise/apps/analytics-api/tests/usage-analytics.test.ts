@@ -103,12 +103,12 @@ test('usage reader sums exact grouped facts and exposes ledger mismatches', asyn
     '2026-07-27T00:00:00.000Z',
     'day',
     'Asia/Shanghai',
-    null,
+    [],
     null,
   ]);
   assert.equal(statements[0]?.match(/GREATEST\(/g)?.length, 2);
   assert.equal(statements[0]?.match(/\$2::timestamptz/g)?.length, 4);
-  assert.deepEqual(calls[1], ['tenant-1', '2026-07-25T00:00:00.000Z', '2026-07-27T00:00:00.000Z', null, null]);
+  assert.deepEqual(calls[1], ['tenant-1', '2026-07-25T00:00:00.000Z', '2026-07-27T00:00:00.000Z', [], null]);
   assert.match(statements[1] ?? '', /left\(audit_invocation\.invocation_id, 13\) = 'auditreceipt_'/);
   assert.match(statements[1] ?? '', /task\.status <> 'FINALIZED'/);
   assert.doesNotMatch(statements[1] ?? '', /\$[67]\b/);
@@ -194,7 +194,7 @@ test('usage event drill-down is ordered, exact and cursor-bounded', async () => 
       to: '2026-07-26T00:00:00.000Z',
       timezone: 'UTC',
       bucket: 'DAY',
-      userId: 'user-1',
+      userIds: ['user-1', 'user-2'],
     },
     null,
     1
@@ -212,7 +212,7 @@ test('usage event drill-down is ordered, exact and cursor-bounded', async () => 
     'tenant-1',
     '2026-07-25T00:00:00.000Z',
     '2026-07-26T00:00:00.000Z',
-    'user-1',
+    ['user-1', 'user-2'],
     null,
   ]);
   assert.equal(parameters[10], 2);

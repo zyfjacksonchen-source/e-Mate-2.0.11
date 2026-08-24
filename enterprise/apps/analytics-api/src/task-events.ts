@@ -18,7 +18,7 @@ const terminalTypes = new Set<TaskEventType>(['COMPLETED', 'FAILED', 'CANCELLED'
 export type TaskEventQuery = {
   from: string;
   to: string;
-  userId?: string;
+  userIds?: string[];
 };
 
 export type TaskEventWriteResult = 'ACCEPTED' | 'REPLAY' | 'CONFLICT' | 'NOT_RECEIVED';
@@ -287,7 +287,16 @@ export class PostgresTaskEventStore implements TaskEventStore {
     if (Date.parse(from) >= Date.parse(to) || Date.parse(to) > Date.parse(generatedAt)) {
       throw new Error('Invalid task event query');
     }
-    const userId = query.userId ? principalId(query.userId) : null;
+    const userIds = query.userIds ?? [];
+    if (
+      !Array.isArray(userIds) ||
+      userIds.length > 100 ||
+      new Set(userIds).size !== userIds.length ||
+      userIds.some((userId) => typeof userId !== 'string')
+    ) {
+      throw new Error('Invalid task event user filter');
+    }
+    const filteredUserIds = userIds.map(principalId);
     const result = await this.#pool.query<SummaryRow>(
       `
       WITH cohort AS (
@@ -296,7 +305,7 @@ export class PostgresTaskEventStore implements TaskEventStore {
          WHERE tenant_id = $1
            AND received_at >= $2::timestamptz
            AND received_at < $3::timestamptz
-           AND ($4::text IS NULL OR user_id = $4)
+           AND (cardinality($4::text[]) = 0 OR user_id = ANY($4::text[]))
       ),
       totals AS (
         SELECT count(*)::text AS received_tasks,
@@ -351,7 +360,7 @@ export class PostgresTaskEventStore implements TaskEventStore {
              ) AS user_event_counts
         FROM totals
     `,
-      [tenantId, from, to, userId]
+      [tenantId, from, to, filteredUserIds]
     );
     const row = result.rows[0];
     if (!row) throw new Error('Task event totals were unavailable');

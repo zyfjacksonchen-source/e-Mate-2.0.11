@@ -205,6 +205,34 @@ a {
   border-bottom: 1px solid var(--color-rule);
 }
 
+.period-filter,
+.custom-range {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.period-filter {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.period-filter > span {
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line);
+}
+
+.period-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.period-buttons .arco-btn {
+  min-height: var(--target-desktop);
+}
+
 .filter-bar label {
   min-width: 142px;
   display: grid;
@@ -215,7 +243,7 @@ a {
 }
 
 .filter-bar .user-filter {
-  min-width: min(260px, 100%);
+  min-width: min(360px, 100%);
 }
 
 .filter-bar .arco-select,
@@ -331,7 +359,7 @@ a {
 
 .analysis-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.75fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: var(--space-4);
   margin-bottom: var(--space-4);
@@ -420,22 +448,67 @@ a {
   background: var(--usage-pending);
 }
 
+.token-dot::before,
+.token-track span {
+  background: var(--color-brand);
+}
+
 .trend-row {
+  width: 100%;
   min-height: var(--target-desktop);
   display: grid;
-  grid-template-columns: 56px minmax(140px, 1fr) 72px;
+  grid-template-columns: 64px minmax(180px, 1fr) 96px;
   align-items: center;
   gap: var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  padding: var(--space-1) var(--space-2);
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
   font-size: var(--text-caption-size);
+}
+
+.trend-row.is-selected {
+  border-color: var(--color-brand);
+  background: var(--color-selected);
+}
+
+@media (hover: hover) {
+  .trend-row:hover {
+    background: var(--color-hover);
+  }
 }
 
 .trend-row time {
   color: var(--color-ink-muted);
 }
 
-.trend-row strong {
+.trend-values {
+  display: grid;
+  justify-items: end;
+}
+
+.trend-values strong {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.trend-values small,
+.trend-hint {
+  color: var(--color-ink-subtle);
+  font-size: 10px;
+}
+
+.trend-hint {
+  margin: 0;
+}
+
+.trend-bars {
+  display: grid;
+  gap: var(--space-1);
 }
 
 .trend-track {
@@ -451,6 +524,65 @@ a {
   display: flex;
   overflow: hidden;
   border-radius: inherit;
+}
+
+.token-track {
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--color-raised);
+}
+
+.token-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.day-detail {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-brand);
+  border-radius: var(--radius-card);
+  background: var(--color-raised);
+}
+
+.day-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.day-detail h3,
+.day-detail h4 {
+  margin: 0;
+}
+
+.day-detail-heading p {
+  margin: var(--space-1) 0 0;
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption-size);
+}
+
+.day-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.day-detail-grid h4,
+.day-usage-table h4 {
+  margin-bottom: var(--space-2);
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption-size);
+}
+
+.day-usage-table {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-rule);
 }
 
 .accuracy-note {
@@ -964,6 +1096,16 @@ tbody tr:last-child td {
     flex-direction: column;
   }
 
+  .period-filter,
+  .custom-range {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .period-buttons .arco-btn {
+    flex: 1 1 auto;
+  }
+
   .filter-bar label,
   .filter-bar .user-filter {
     width: 100%;
@@ -988,11 +1130,15 @@ tbody tr:last-child td {
   }
 
   .trend-row {
-    grid-template-columns: 46px minmax(96px, 1fr) 54px;
+    grid-template-columns: 46px minmax(96px, 1fr) 70px;
     gap: var(--space-2);
   }
 
   .taxonomy-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .day-detail-grid {
     grid-template-columns: 1fr;
   }
 

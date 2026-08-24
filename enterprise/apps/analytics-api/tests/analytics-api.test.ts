@@ -323,7 +323,7 @@ async function withServer<T>(
             groups: [
               {
                 bucketStart: '2026-07-25T16:00:00.000Z',
-                userId: query.userId ?? 'user-1',
+                userId: query.userIds?.[0] ?? 'user-1',
                 modelId: query.modelId ?? 'gpt-5.6-sol',
                 metrics,
               },
@@ -357,7 +357,7 @@ async function withServer<T>(
             kind: 'USAGE',
             eventId: 'response-1',
             occurredAt: '2026-07-25T16:00:00.000Z',
-            userId: query.userId ?? 'user-1',
+            userId: query.userIds?.[0] ?? 'user-1',
             taskId: 'task-1',
             traceId: 'trace-1',
             modelId: query.modelId ?? 'gpt-5.6-sol',
@@ -822,6 +822,22 @@ test('usage metrics are tenant-bound, exact and independently reconcilable', asy
     });
     assert.equal(events.status, 200);
     assert.equal(((await events.json()) as { events: Array<{ eventId: string }> }).events[0]?.eventId, 'response-1');
+    assert.equal(
+      (
+        await fetch(`${baseUrl}/v1/usage/summary?${query}&userId=user-1&userId=user-2`, {
+          headers: auth('auditor', false),
+        })
+      ).status,
+      200
+    );
+    assert.equal(
+      (
+        await fetch(`${baseUrl}/v1/usage/summary?${query}&userId=user-1&userId=user-1`, {
+          headers: auth('auditor', false),
+        })
+      ).status,
+      400
+    );
     const invalidQueries = [
       '',
       `${query}&tenantId=tenant-2`,

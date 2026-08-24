@@ -16,7 +16,7 @@ export type UsageQuery = {
   to: string;
   timezone: string;
   bucket: UsageBucket;
-  userId?: string;
+  userIds?: string[];
 };
 
 export type UsageDashboardData = {
@@ -91,6 +91,26 @@ export function queryForRange(from: Date, to: Date, now = new Date()): UsageQuer
   };
 }
 
+export function queryForDay(
+  bucketStart: string,
+  overallTo: string,
+  timezone: string,
+  userIds: string[] = []
+): UsageQuery {
+  const from = new Date(bucketStart);
+  const end = Math.min(from.getTime() + 86_400_000, Date.parse(overallTo));
+  if (!Number.isFinite(from.getTime()) || !Number.isFinite(end) || end <= from.getTime()) {
+    throw new Error('Invalid usage day');
+  }
+  return {
+    from: from.toISOString(),
+    to: new Date(end).toISOString(),
+    timezone,
+    bucket: 'DAY',
+    ...(userIds.length ? { userIds: [...userIds] } : {}),
+  };
+}
+
 export function usageQueryString(query: UsageQuery, events = false, cursor: string | null = null): string {
   const parameters = new URLSearchParams({
     from: query.from,
@@ -98,7 +118,7 @@ export function usageQueryString(query: UsageQuery, events = false, cursor: stri
     timezone: query.timezone,
     bucket: query.bucket,
   });
-  if (query.userId) parameters.set('userId', query.userId);
+  for (const userId of query.userIds ?? []) parameters.append('userId', userId);
   if (events) {
     if (cursor) parameters.set('cursor', cursor);
     parameters.set('limit', '100');
@@ -108,7 +128,7 @@ export function usageQueryString(query: UsageQuery, events = false, cursor: stri
 
 export function taskQueryString(query: UsageQuery): string {
   const parameters = new URLSearchParams({ from: query.from, to: query.to });
-  if (query.userId) parameters.set('userId', query.userId);
+  for (const userId of query.userIds ?? []) parameters.append('userId', userId);
   return parameters.toString();
 }
 

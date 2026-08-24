@@ -187,7 +187,7 @@ test('task summary uses only authoritative task rows and exact decimal strings',
   const summary = await store.summary(principal, {
     from: '2026-07-25T00:00:00.000Z',
     to: '2026-07-27T00:00:00.000Z',
-    userId: 'user-1',
+    userIds: ['user-1', 'user-2'],
   });
 
   assert.deepEqual(summary.summary, {
@@ -204,11 +204,11 @@ test('task summary uses only authoritative task rows and exact decimal strings',
   ]);
   assert.match(statement, /user_event_counts AS[\s\S]*GROUP BY event\.user_id/);
   assert.doesNotMatch(statement, /\bLIMIT\b/);
-  assert.match(statement, /\(\$4::text IS NULL OR user_id = \$4\)/);
+  assert.match(statement, /user_id = ANY\(\$4::text\[\]\)/);
   assert.deepEqual(parameters, [
     'tenant-1',
     '2026-07-25T00:00:00.000Z',
     '2026-07-27T00:00:00.000Z',
-    'user-1',
+    ['user-1', 'user-2'],
   ]);
 });

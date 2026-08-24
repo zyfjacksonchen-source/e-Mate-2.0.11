@@ -303,7 +303,8 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
   ]);
   if (
     [...url.searchParams.keys()].some((key) => !allowed.has(key)) ||
-    [...allowed].some((key) => url.searchParams.getAll(key).length > 1)
+    ['from', 'to', 'timezone', 'bucket', 'modelId', ...(events ? ['cursor', 'limit'] : [])]
+      .some((key) => url.searchParams.getAll(key).length > 1)
   ) {
     throw new HttpError(400, 'INVALID_USAGE_QUERY', 'Invalid usage query');
   }
@@ -311,7 +312,7 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
   const to = url.searchParams.get('to');
   const timezone = url.searchParams.get('timezone') ?? 'UTC';
   const bucket = url.searchParams.get('bucket') ?? 'DAY';
-  const userId = url.searchParams.get('userId');
+  const userIds = url.searchParams.getAll('userId');
   const modelId = url.searchParams.get('modelId');
   if (
     !from ||
@@ -322,7 +323,9 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
     timezone.length < 1 ||
     timezone.length > 64 ||
     /\p{Cc}/u.test(timezone) ||
-    (userId !== null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId)) ||
+    userIds.length > 100 ||
+    new Set(userIds).size !== userIds.length ||
+    userIds.some((userId) => !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId)) ||
     (modelId !== null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(modelId))
   ) {
     throw new HttpError(400, 'INVALID_USAGE_QUERY', 'Invalid usage query');
@@ -344,7 +347,7 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
     to,
     timezone,
     bucket: bucket as UsageAnalyticsQuery['bucket'],
-    ...(userId ? { userId } : {}),
+    ...(userIds.length ? { userIds } : {}),
     ...(modelId ? { modelId } : {}),
   };
 }
@@ -354,19 +357,20 @@ function taskEventQuery(url: URL): TaskEventQuery {
   if (
     [...url.searchParams.keys()].some((key) => !allowed.has(key)) ||
     ['from', 'to'].some((key) => url.searchParams.getAll(key).length !== 1) ||
-    url.searchParams.getAll('userId').length > 1
+    url.searchParams.getAll('userId').length > 100
   ) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
   }
   const from = url.searchParams.get('from');
   const to = url.searchParams.get('to');
-  const userId = url.searchParams.get('userId');
+  const userIds = url.searchParams.getAll('userId');
   if (
     !from ||
     !to ||
     !isIsoTimestamp(from) ||
     !isIsoTimestamp(to) ||
-    (userId !== null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId))
+    new Set(userIds).size !== userIds.length ||
+    userIds.some((userId) => !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId))
   ) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
   }
@@ -374,7 +378,7 @@ function taskEventQuery(url: URL): TaskEventQuery {
   if (duration <= 0 || duration > 366 * 86_400_000 || Date.parse(to) > Date.now()) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
   }
-  return { from, to, ...(userId ? { userId } : {}) };
+  return { from, to, ...(userIds.length ? { userIds } : {}) };
 }
 
 function usageEventPage(url: URL): { cursor: string | null; limit: number } {
