@@ -2048,3 +2048,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 联网搜索生产策略继续复用现有 Model Gateway、租户策略和 `/v1/runtime-models?client_version=2.0.12` 三态租约，不增加控制面或本地执行权限。唯一保留且不可调用的目录行改为 `gpt-web-search / gpt-responses / responses / gpt-5.6-luna / http://43.135.183.53:8080/v1`，要求字面量 `allowInsecureHttpUpstream: true` 与独立 `/run/secrets/gpt-web-search-api-key` 文件；它从 Auth 模型目录、Model Gateway 可调用路由、`/v1/models` 和五路真实模型 Smoke 中全部排除。
 - 已发布 Base v6 的 runtime grant wire schema 保持 `deepseek-official / E_MATE_SEARCH_KEY_DEEPSEEK`，仅作为旧 Base 已固定的设备级搜索租约标识；具体 GPT provider、endpoint、模型和 Secret 身份由保留 route 约束。该 Search Secret 即使初始字节获准复用已有 GPT 自定义 Key，也必须复制为不同文件和挂载，不能与聊天 Secret 别名、替代或回退。无查询的 2.0.11 响应继续精确为 `{schemaVersion, models}`，只有 2.0.12 协商租约。
 - 本切片只改 Auth/Gateway 生产配置和对应合同，必须由 classifier 判为 enterprise-only。正式激活需基于合入主线的精确提交构建 Gateway，先在同一生产网络以相同只读配置/Secret 做无公开端口 canary，再只原子替换 Gateway；Auth、Analytics、Web、PostgreSQL、Redis 的容器身份必须保持不变。真实 GPT-only 用户搜索、引用回读、拒绝/轮换和审计对账通过前不得称为上线。
+
+## 2026-08-24 · 2.0.12 S25 企业管理端有界真实模型联通恢复
+
+- 用户明确恢复管理端真实文本/图片模型联通测试。实现复用 Auth Gateway 登录回执中既有的短期 Model Gateway session 和管理端唯一同源网络原语；地址必须精确为当前 HTTPS origin 的 `/e-mate/model-api/`，session 单独保存在当前标签页的 `sessionStorage`，过期或跨源立即失败关闭。没有增加管理 API 到 Provider 的代理、第二 transport、本地 Harness/Tool 调用或上游 Key 暴露。
+- 管理员只能在已发布、已启用且同时属于登录允许集合和 `/v1/models` 权威目录的 route 上手动点击一次测试。文本路径固定 `Reply with OK.`、`max_output_tokens=32`、`stream=true`、`store=false`，并要求 256 KiB 内出现 `response.completed`；图片路径只固定生成 `1024x1024` 橙色方块并立即取消响应体。两条路径均不接受自定义提示词、Tool schema 或客户端上游配置，继续计入既有配额与脱敏审计。
+- 精准验证通过：Admin API `18/18`、Admin TypeScript/test/production build、Analytics production boundary `5/5` 与 TypeScript production build、`git diff --check`。门禁从源码抽取网络路径时按引号边界读取字符串字面量，避免把闭引号后的 `return path` 误吞为 URL；固定 allowlist 仍只有 Auth password、`/v1/admin/*`、models、Responses 与 images generations，第二 fetch、XHR/WebSocket/EventSource 和模型 Tool schema 继续失败关闭。生产静态包与真实账号/路由终证在本条提交时尚未激活，不得据此声称生产联通已经恢复。
