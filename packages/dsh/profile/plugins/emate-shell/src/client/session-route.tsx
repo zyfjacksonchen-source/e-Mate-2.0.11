@@ -6,8 +6,13 @@ interface SessionListState {
   byId: Record<string, unknown>
 }
 
+interface WorkspaceListState {
+  baselinesReady: boolean
+}
+
 interface Props {
   useSessions: <T>(selector: (state: SessionListState) => T) => T
+  useWorkspaces: <T>(selector: (state: WorkspaceListState) => T) => T
   getSessions: () => SessionListState
   openSession: (id: string) => void
   startHomeSession: () => void
@@ -27,19 +32,21 @@ function chatId(pathname: string): string | null {
 
 export function SessionRouteProjection({
   useSessions,
+  useWorkspaces,
   getSessions,
   openSession,
   startHomeSession,
 }: Props) {
   const phase = useSessions(state => state.phase)
   const current = useSessions(state => state.current)
+  const workspacesReady = useWorkspaces(state => state.baselinesReady)
   const initialized = useRef(false)
   const pending = useRef<PendingRoute>(null)
   const previousCurrent = useRef(current)
 
   const applyLocation = () => {
     const state = getSessions()
-    if (state.phase !== 'ready') return
+    if (state.phase !== 'ready' || !workspacesReady) return
     if (location.pathname === '/') {
       pending.current = null
       startHomeSession()
@@ -69,10 +76,10 @@ export function SessionRouteProjection({
     const onPopState = () => { applyLocation() }
     addEventListener('popstate', onPopState)
     return () => { removeEventListener('popstate', onPopState) }
-  }, [getSessions, openSession, startHomeSession])
+  }, [getSessions, openSession, startHomeSession, workspacesReady])
 
   useEffect(() => {
-    if (phase !== 'ready') return
+    if (phase !== 'ready' || !workspacesReady) return
     const changed = previousCurrent.current !== current
     previousCurrent.current = current
     if (!initialized.current) {
@@ -98,7 +105,7 @@ export function SessionRouteProjection({
       history.pushState(null, '', path)
       dispatchEvent(new PopStateEvent('popstate'))
     }
-  }, [current, phase])
+  }, [current, phase, workspacesReady])
 
   return null
 }

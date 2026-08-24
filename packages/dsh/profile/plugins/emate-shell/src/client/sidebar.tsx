@@ -512,7 +512,7 @@ export function SidebarRoot({
         <div className={css.dialogBackdrop} role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !batchBusy) setBatchConfirming(false) }}>
           <section className={css.dialog} role="dialog" aria-modal="true" aria-labelledby="emate-batch-delete-title">
             <h2 id="emate-batch-delete-title">删除 {batchSelected.size} 个会话？</h2>
-            <p>所选会话会从侧栏移除，本地历史记录仍由 DSH 保留。</p>
+            <p>所选会话会从侧栏移除，本地历史记录仍由 e-Mate 保留。</p>
             <div><button type="button" disabled={batchBusy} onClick={() => { setBatchConfirming(false) }}>取消</button><button type="button" className={css.dangerButton} disabled={batchBusy} onClick={() => { void archiveSelected() }}>{batchBusy ? '正在删除' : '确认删除'}</button></div>
           </section>
         </div>,

@@ -2054,3 +2054,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - 用户明确恢复管理端真实文本/图片模型联通测试。实现复用 Auth Gateway 登录回执中既有的短期 Model Gateway session 和管理端唯一同源网络原语；地址必须精确为当前 HTTPS origin 的 `/e-mate/model-api/`，session 单独保存在当前标签页的 `sessionStorage`，过期或跨源立即失败关闭。没有增加管理 API 到 Provider 的代理、第二 transport、本地 Harness/Tool 调用或上游 Key 暴露。
 - 管理员只能在已发布、已启用且同时属于登录允许集合和 `/v1/models` 权威目录的 route 上手动点击一次测试。文本路径固定 `Reply with OK.`、`max_output_tokens=32`、`stream=true`、`store=false`，并要求 256 KiB 内出现 `response.completed`；图片路径只固定生成 `1024x1024` 橙色方块并立即取消响应体。两条路径均不接受自定义提示词、Tool schema 或客户端上游配置，继续计入既有配额与脱敏审计。
 - 精准验证通过：Admin API `18/18`、Admin TypeScript/test/production build、Analytics production boundary `5/5` 与 TypeScript production build、`git diff --check`。门禁从源码抽取网络路径时按引号边界读取字符串字面量，避免把闭引号后的 `return path` 误吞为 URL；固定 allowlist 仍只有 Auth password、`/v1/admin/*`、models、Responses 与 images generations，第二 fetch、XHR/WebSocket/EventSource 和模型 Tool schema 继续失败关闭。生产静态包与真实账号/路由终证在本条提交时尚未激活，不得据此声称生产联通已经恢复。
+
+## 2026-08-24 · 2.0.12 S26 首页 Workspace 冷启动竞态与产品文案收口
+
+- 正式安装态曾出现首页输入框退化为“选择一个工作区开始”，但同一 App 重载或从定时任务点击“新任务”后又恢复“通用会话”。回放到 pinned DSH rc.7 的唯一 Session/Workspace owner 后确认：`SessionRouteProjection` 只等待 Session baseline；冷启动时 Session 先 ready、Workspace baseline 仍未完成，`startSessionFromRoute` 找不到通用 Workspace 后返回，而路由投影不再重试。最小修复不新增 Session、Workspace、Composer 或兜底路径，只同时订阅原生 `workspaces.baselinesReady`，两层 baseline 都 ready 后才执行一次原有 Home session 启动。新增反例先锁定 Workspace 未 ready 时不得启动，切为 ready 后恰好启动一次。
+- 用户可见文案同步收口：定时任务页面删除解释 DSH rc.7 Schedule 能力边界的底部说明及其孤立样式；批量删除确认框把“本地历史记录仍由 DSH 保留”改为“本地历史记录仍由 e-Mate 保留”。底层 archive/Session persistence 行为、Schedule owner、事件与历史保留合同均未改变。
+- 精确 pnpm `11.7.0` 下 Shell component runner 完成独立 frozen-lock build，`9 files / 53 tests` 全过；影响分类只命中 `@e-mate/dsh-client-shell` portable component，返回 `lane=plugin-only`、`run_base=false`、Base v6 合同有效。该切片不得构建 Base、DMG、EXE 或未变化插件；仍需从精确提交生成 Shell payload、与 accepted set 组合完整 generation，并在正式安装态冷启动和对应文案 UI 回放通过后才能声称生效。

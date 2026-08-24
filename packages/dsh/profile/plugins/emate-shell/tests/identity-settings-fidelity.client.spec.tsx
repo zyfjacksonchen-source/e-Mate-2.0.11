@@ -10,6 +10,8 @@ import { IdentityGate, type IdentityBootstrap, type RpcResult } from '../src/cli
 import { SessionRouteProjection } from '../src/client/session-route.tsx'
 import { SettingsChrome, SettingsTrigger } from '../src/client/settings-chrome.tsx'
 
+const useReadyWorkspaces = <T,>(selector: (state: { baselinesReady: boolean }) => T) => selector({ baselinesReady: true })
+
 const agreements = {
   ready: true,
   bundle_sha256: 'bundle',
@@ -238,6 +240,7 @@ describe('e-Mate 2.0.12 identity and settings fidelity', () => {
         <IdentityGate callIdentity={callIdentity} />
         <SessionRouteProjection
           useSessions={selector => selector(sessions)}
+          useWorkspaces={useReadyWorkspaces}
           getSessions={() => latest.current}
           openSession={openSession}
           startHomeSession={vi.fn()}
@@ -261,6 +264,7 @@ describe('e-Mate 2.0.12 identity and settings fidelity', () => {
     const state = { phase: 'ready' as const, current: 'project', byId: { project: {}, other: {} } }
     const view = render(<SessionRouteProjection
       useSessions={selector => selector(state)}
+      useWorkspaces={useReadyWorkspaces}
       getSessions={() => state}
       openSession={openSession}
       startHomeSession={startHomeSession}
@@ -276,6 +280,26 @@ describe('e-Mate 2.0.12 identity and settings fidelity', () => {
     view.unmount()
   })
 
+  it('waits for the native Workspace baseline before starting the managed Home session', async () => {
+    const startHomeSession = vi.fn()
+    const state = { phase: 'ready' as const, current: undefined, byId: {} }
+    let workspacesReady = false
+    const route = () => <SessionRouteProjection
+      useSessions={selector => selector(state)}
+      useWorkspaces={selector => selector({ baselinesReady: workspacesReady })}
+      getSessions={() => state}
+      openSession={() => {}}
+      startHomeSession={startHomeSession}
+    />
+
+    const view = render(route())
+    expect(startHomeSession).not.toHaveBeenCalled()
+    workspacesReady = true
+    view.rerender(route())
+    await waitFor(() => { expect(startHomeSession).toHaveBeenCalledOnce() })
+    view.unmount()
+  })
+
   it('closes an overlay route when the target session selection really changes', async () => {
     history.replaceState(null, '', '/capabilities?category=collaboration')
     let selectSession!: (id: string) => void
@@ -288,6 +312,7 @@ describe('e-Mate 2.0.12 identity and settings fidelity', () => {
       const state = { phase: 'ready' as const, current, byId: { 'session-1': {}, 'session-2': {} } }
       return <SessionRouteProjection
         useSessions={selector => selector(state)}
+        useWorkspaces={useReadyWorkspaces}
         getSessions={() => state}
         openSession={() => {}}
         startHomeSession={() => {}}
@@ -315,6 +340,7 @@ describe('e-Mate 2.0.12 identity and settings fidelity', () => {
       const state = { phase: 'ready' as const, current, byId: { 'session-1': {}, 'session-2': {} } }
       return <SessionRouteProjection
         useSessions={selector => selector(state)}
+        useWorkspaces={useReadyWorkspaces}
         getSessions={() => state}
         openSession={() => {}}
         startHomeSession={() => {}}
