@@ -4,6 +4,13 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_candidate:
+        description: Build the protected-main release candidate distributions
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -28,9 +35,23 @@ jobs:
       run_verification: ${{ steps.classify.outputs.run_verification }}
       components_json: ${{ steps.classify.outputs.components_json }}
       component_jobs_json: ${{ steps.classify.outputs.component_jobs_json }}
+      ci_component_jobs_json: ${{ steps.classify.outputs.ci_component_jobs_json }}
       base_platform_component_jobs_json: ${{ steps.classify.outputs.base_platform_component_jobs_json }}
+      ci_base_platform_component_jobs_json: ${{ steps.classify.outputs.ci_base_platform_component_jobs_json }}
       publish_components_json: ${{ steps.classify.outputs.publish_components_json }}
       portable_publish: ${{ steps.classify.outputs.portable_publish }}
+      shared_runtime: ${{ steps.classify.outputs.shared_runtime }}
+      profile: ${{ steps.classify.outputs.profile }}
+      macos_runtime: ${{ steps.classify.outputs.macos_runtime }}
+      macos_packaging: ${{ steps.classify.outputs.macos_packaging }}
+      windows_runtime: ${{ steps.classify.outputs.windows_runtime }}
+      windows_packaging: ${{ steps.classify.outputs.windows_packaging }}
+      enterprise: ${{ steps.classify.outputs.enterprise }}
+      release_verifier: ${{ steps.classify.outputs.release_verifier }}
+      macos_app_smoke: ${{ steps.classify.outputs.macos_app_smoke }}
+      windows_app_smoke: ${{ steps.classify.outputs.windows_app_smoke }}
+      macos_distribution: ${{ steps.classify.outputs.macos_distribution }}
+      windows_distribution: ${{ steps.classify.outputs.windows_distribution }}
       head_sha: ${{ steps.classify.outputs.head_sha }}
     steps:
       - uses: actions/checkout@v6
@@ -55,13 +76,21 @@ jobs:
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          PROTECTED_MAIN: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+          RELEASE_CANDIDATE: ${{ github.event_name == 'workflow_dispatch' && inputs.release_candidate }}
         run: |
+          set -euo pipefail
+          if test -z "$BASE_SHA"; then BASE_SHA="$(git rev-parse "$HEAD_SHA^")"; fi
           if test "$BASE_SHA" = 0000000000000000000000000000000000000000; then
             BASE_SHA="$(node --input-type=module -e "import { ACCEPTED_PREDECESSOR } from './scripts/change-impact.mjs'; process.stdout.write(ACCEPTED_PREDECESSOR)")"
           fi
+          context_args=()
+          if test "$PROTECTED_MAIN" = true; then context_args+=(--protected-main); fi
+          if test "$RELEASE_CANDIDATE" = true; then context_args+=(--release-candidate); fi
           node scripts/change-impact.mjs \
             --base "$BASE_SHA" \
             --head "$HEAD_SHA" \
+            "${context_args[@]}" \
             --github-output "$GITHUB_OUTPUT" > change-impact.json
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
@@ -205,7 +234,7 @@ jobs:
           printf '### CI timing\n\n| Job | Seconds | Result |\n|---|---:|---|\n| Source | %s | %s |\n' "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   plugins:
-    name: Changed Profile component / ${{ matrix.component }} / ${{ matrix.target }}
+    name: Changed Profile components / ${{ matrix.target }}
     needs: impact
     if: needs.impact.outputs.run_plugins == 'true'
     runs-on: ${{ matrix.runner }}
@@ -213,7 +242,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.impact.outputs.component_jobs_json) }}
+        include: ${{ fromJSON(needs.impact.outputs.ci_component_jobs_json) }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -236,7 +265,7 @@ jobs:
 
       - name: Prepare the exact component Python runtime
         id: component-python
-        if: matrix.component == '@e-mate/dsh-plugin-vision-toolkit'
+        if: contains(matrix.components, '@e-mate/dsh-plugin-vision-toolkit')
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
@@ -276,37 +305,41 @@ jobs:
       - name: Build and test only the changed component
         shell: bash
         env:
-          COMPONENT: ${{ matrix.component }}
+          COMPONENTS_JSON: ${{ toJSON(matrix.components) }}
           EMATE_COMPONENT_TARGET: ${{ matrix.target }}
           EMATE_BUILD_PYTHON: ${{ steps.component-python.outputs.python }}
         run: |
           set -euo pipefail
-          node scripts/component-run.mjs check --component "$COMPONENT"
+          while IFS= read -r component; do
+            node scripts/component-run.mjs check --component "$component"
+          done < <(node --input-type=module -e 'for (const id of JSON.parse(process.env.COMPONENTS_JSON)) console.log(id)')
 
       - name: Emit the immutable component payload
-        if: matrix.publish == true
+        if: toJSON(matrix.publish_components) != '[]'
         shell: bash
         env:
-          COMPONENT: ${{ matrix.component }}
+          PUBLISH_COMPONENTS_JSON: ${{ toJSON(matrix.publish_components) }}
           SOURCE_COMMIT: ${{ needs.impact.outputs.head_sha }}
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          slug="${COMPONENT#@e-mate/}"
-          target_args=()
-          output="dist/components/$slug"
-          if [[ "$TARGET" != portable ]]; then
-            target_args=(--target "$TARGET")
-            output="$output/$TARGET"
-          fi
-          node scripts/component-release.mjs emit \
-            --component "$COMPONENT" \
-            --source-commit "$SOURCE_COMMIT" \
-            "${target_args[@]}" \
-            --out "$output"
+          while IFS= read -r component; do
+            slug="${component#@e-mate/}"
+            target_args=()
+            output="dist/components/$slug"
+            if [[ "$TARGET" != portable ]]; then
+              target_args=(--target "$TARGET")
+              output="$output/$TARGET"
+            fi
+            node scripts/component-release.mjs emit \
+              --component "$component" \
+              --source-commit "$SOURCE_COMMIT" \
+              "${target_args[@]}" \
+              --out "$output"
+          done < <(node --input-type=module -e 'for (const id of JSON.parse(process.env.PUBLISH_COMPONENTS_JSON)) console.log(id)')
 
       - uses: actions/upload-artifact@v4
-        if: matrix.publish == true
+        if: toJSON(matrix.publish_components) != '[]'
         with:
           name: e-mate-component-${{ strategy.job-index }}-${{ matrix.target }}-${{ needs.impact.outputs.head_sha }}
           path: dist/components
@@ -314,7 +347,7 @@ jobs:
           retention-days: 7
 
   base-platform-components:
-    name: Base compatibility / ${{ matrix.component }} / ${{ matrix.target }}
+    name: Base compatibility / ${{ matrix.target }}
     needs: [impact, source]
     if: needs.impact.outputs.run_base == 'true'
     runs-on: ${{ matrix.runner }}
@@ -322,7 +355,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.impact.outputs.base_platform_component_jobs_json) }}
+        include: ${{ fromJSON(needs.impact.outputs.ci_base_platform_component_jobs_json) }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -344,7 +377,7 @@ jobs:
 
       - name: Prepare the exact component Python runtime
         id: component-python
-        if: matrix.component == '@e-mate/dsh-plugin-vision-toolkit'
+        if: contains(matrix.components, '@e-mate/dsh-plugin-vision-toolkit')
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
@@ -384,12 +417,14 @@ jobs:
       - name: Test the accepted platform component against the new Base
         shell: bash
         env:
-          COMPONENT: ${{ matrix.component }}
+          COMPONENTS_JSON: ${{ toJSON(matrix.components) }}
           EMATE_COMPONENT_TARGET: ${{ matrix.target }}
           EMATE_BUILD_PYTHON: ${{ steps.component-python.outputs.python }}
         run: |
           set -euo pipefail
-          node scripts/component-run.mjs check --component "$COMPONENT"
+          while IFS= read -r component; do
+            node scripts/component-run.mjs check --component "$component"
+          done < <(node --input-type=module -e 'for (const id of JSON.parse(process.env.COMPONENTS_JSON)) console.log(id)')
 
   profile-portable-composition:
     name: Portable Profile generations
@@ -709,8 +744,9 @@ jobs:
           printf '### CI timing\n\n| Job | Seconds | Result |\n|---|---:|---|\n| Enterprise | %s | %s |\n' "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   desktop-windows:
-    name: Windows x64 / unsigned desktop installer
+    name: Windows x64 / app smoke or distribution
     needs: [impact, source]
+    if: needs.impact.outputs.windows_app_smoke == 'true'
     runs-on: windows-2025
     timeout-minutes: 90
     env:
@@ -778,13 +814,13 @@ jobs:
         working-directory: desktop
         run: yarn install --immutable
 
-      - name: Build the pull-request app-directory smoke
-        if: github.event_name == 'pull_request'
+      - name: Build and verify the Windows app directory
+        if: needs.impact.outputs.windows_distribution != 'true'
         working-directory: desktop
         run: yarn package:dir
 
       - name: Build and verify the formal unsigned Windows installer
-        if: github.event_name == 'push'
+        if: needs.impact.outputs.windows_distribution == 'true'
         working-directory: desktop
         run: yarn dist:win
 
@@ -796,13 +832,13 @@ jobs:
           yarn verify:profile
 
       - name: Resolve the formal Desktop version
-        if: github.event_name == 'push'
+        if: needs.impact.outputs.windows_distribution == 'true'
         id: version
         shell: bash
         run: echo "value=$(node -p \"require('./desktop/e-mate-desktop/package.json').version\")" >> "$GITHUB_OUTPUT"
 
       - name: Stage only the verified formal Windows bytes
-        if: github.event_name == 'push'
+        if: needs.impact.outputs.windows_distribution == 'true'
         run: >-
           node scripts/stage-desktop-ci-artifact.mjs stage
           --platform win32
@@ -814,7 +850,7 @@ jobs:
           --version "${{ steps.version.outputs.value }}"
 
       - name: Export the exact formal Windows bytes
-        if: github.event_name == 'push'
+        if: needs.impact.outputs.windows_distribution == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: e-mate-desktop-windows-${{ needs.impact.outputs.head_sha }}
@@ -833,8 +869,9 @@ jobs:
           printf '### CI timing\n\n| Job | Seconds | Result |\n|---|---:|---|\n| Windows desktop | %s | %s |\n' "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   desktop-macos:
-    name: macOS universal / unsigned desktop disk image
+    name: macOS universal / app smoke or distribution
     needs: [impact, source]
+    if: needs.impact.outputs.macos_app_smoke == 'true'
     runs-on: macos-15
     timeout-minutes: 90
     env:
@@ -900,13 +937,13 @@ jobs:
         working-directory: desktop
         run: yarn install --immutable
 
-      - name: Build the pull-request app-directory smoke
-        if: github.event_name == 'pull_request'
+      - name: Build and verify the macOS app directory
+        if: needs.impact.outputs.macos_distribution != 'true'
         working-directory: desktop
         run: yarn package:dir
 
       - name: Build and verify the formal unsigned universal disk image
-        if: github.event_name == 'push'
+        if: needs.impact.outputs.macos_distribution == 'true'
         working-directory: desktop
         run: yarn dist:mac-unsigned-release
 
@@ -918,12 +955,12 @@ jobs:
           yarn verify:profile
 
       - name: Resolve the formal Desktop version
-        if: github.event_name == 'push'
+        if: needs.impact.outputs.macos_distribution == 'true'
         id: version
         run: echo "value=$(node -p \"require('./desktop/e-mate-desktop/package.json').version\")" >> "$GITHUB_OUTPUT"
 
       - name: Stage only the verified formal macOS bytes
-        if: github.event_name == 'push'
+        if: needs.impact.outputs.macos_distribution == 'true'
         run: >-
           node scripts/stage-desktop-ci-artifact.mjs stage
           --platform darwin
@@ -935,7 +972,7 @@ jobs:
           --version "${{ steps.version.outputs.value }}"
 
       - name: Export the exact formal macOS bytes
-        if: github.event_name == 'push'
+        if: needs.impact.outputs.macos_distribution == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: e-mate-desktop-macos-${{ needs.impact.outputs.head_sha }}
@@ -972,6 +1009,8 @@ jobs:
           PORTABLE_PUBLISH: ${{ needs.impact.outputs.portable_publish }}
           RUN_ENTERPRISE: ${{ needs.impact.outputs.run_enterprise }}
           ENTERPRISE: ${{ needs.enterprise.result }}
+          RUN_WINDOWS_APP_SMOKE: ${{ needs.impact.outputs.windows_app_smoke }}
+          RUN_MACOS_APP_SMOKE: ${{ needs.impact.outputs.macos_app_smoke }}
           WINDOWS: ${{ needs.desktop-windows.result }}
           MACOS: ${{ needs.desktop-macos.result }}
         run: |
@@ -982,11 +1021,19 @@ jobs:
             false) test "$ENTERPRISE" = skipped ;;
             *) exit 1 ;;
           esac
+          case "$RUN_WINDOWS_APP_SMOKE" in
+            true) test "$WINDOWS" = success ;;
+            false) test "$WINDOWS" = skipped ;;
+            *) exit 1 ;;
+          esac
+          case "$RUN_MACOS_APP_SMOKE" in
+            true) test "$MACOS" = success ;;
+            false) test "$MACOS" = skipped ;;
+            *) exit 1 ;;
+          esac
           case "$LANE" in
             base)
               test "$SOURCE" = success
-              test "$WINDOWS" = success
-              test "$MACOS" = success
               test "$BASE_PLATFORM_COMPONENTS" = success
               test "$PLUGINS" = skipped
               test "$PROFILE_PORTABLE" = skipped
@@ -1005,8 +1052,6 @@ jobs:
                 test "$PROFILE" = success
               fi
               test "$SOURCE" = skipped
-              test "$WINDOWS" = skipped
-              test "$MACOS" = skipped
               test "$BASE_PLATFORM_COMPONENTS" = skipped
               ;;
             enterprise-only)
@@ -1014,8 +1059,6 @@ jobs:
               test "$PLUGINS" = skipped
               test "$PROFILE_PORTABLE" = skipped
               test "$PROFILE" = skipped
-              test "$WINDOWS" = skipped
-              test "$MACOS" = skipped
               test "$BASE_PLATFORM_COMPONENTS" = skipped
               ;;
             docs-only|verification-only|none)
@@ -1023,8 +1066,6 @@ jobs:
               test "$PLUGINS" = skipped
               test "$PROFILE_PORTABLE" = skipped
               test "$PROFILE" = skipped
-              test "$WINDOWS" = skipped
-              test "$MACOS" = skipped
               test "$BASE_PLATFORM_COMPONENTS" = skipped
               ;;
             *) exit 1 ;;

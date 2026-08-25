@@ -96,6 +96,27 @@ const VERIFICATION_PATHS = new Set([
   'scripts/profile-release.test.mjs',
   'scripts/publish-profile-r2.test.mjs',
 ])
+const IMPACT_DIMENSIONS = [
+  'shared_runtime',
+  'profile',
+  'macos_runtime',
+  'macos_packaging',
+  'windows_runtime',
+  'windows_packaging',
+  'enterprise',
+  'release_verifier',
+]
+const PACKAGING_SHARED_PATHS = new Set([
+  'desktop/package.json',
+  'desktop/yarn.lock',
+  'desktop/.yarnrc.yml',
+  'desktop/e-mate-desktop/package.json',
+])
+const RELEASE_VERIFIER_PREFIXES = [
+  '.github/workflows/',
+  'artifacts/',
+  'scripts/',
+]
 
 function record(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -494,6 +515,28 @@ export function componentJobsFor(boundary, componentIds, publishIds = []) {
   })
 }
 
+function ciComponentJobsFor(boundary, componentIds, publishIds = []) {
+  const jobs = componentJobsFor(boundary, componentIds, publishIds)
+  return [
+    ...jobs.filter(job => job.target === 'portable').map(job => ({
+      target: job.target,
+      runner: job.runner,
+      components: [job.component],
+      publish_components: job.publish ? [job.component] : [],
+    })),
+    ...PLATFORM_TARGETS.flatMap(target => {
+      const targetJobs = jobs.filter(job => job.target === target)
+      const components = targetJobs.map(job => job.component)
+      return components.length === 0 ? [] : [{
+        target,
+        runner: TARGET_RUNNERS.get(target),
+        components,
+        publish_components: targetJobs.filter(job => job.publish).map(job => job.component),
+      }]
+    }),
+  ]
+}
+
 /** Validate every accepted platform component against a newly built Base. */
 export function basePlatformComponentJobsFor(boundary) {
   return componentJobsFor(
@@ -537,6 +580,120 @@ function classifyPath(path, boundary) {
   return { kind: 'base', path, reason: 'unknown path fails closed' }
 }
 
+function emptyDimensions() {
+  return Object.fromEntries(IMPACT_DIMENSIONS.map(name => [name, false]))
+}
+
+function allDimensions() {
+  return Object.fromEntries(IMPACT_DIMENSIONS.map(name => [name, true]))
+}
+
+function dimensionsFor(classifications, boundary) {
+  const dimensions = emptyDimensions()
+  const mark = (...names) => names.forEach(name => { dimensions[name] = true })
+  for (const item of classifications) {
+    const path = item.path
+    if (item.reason === 'unknown path fails closed' || path === '<classifier>') return allDimensions()
+    if (item.kind === 'enterprise') {
+      mark('enterprise')
+      continue
+    }
+    if (item.kind === 'component' || item.kind === 'component-test') {
+      mark('profile')
+      const component = boundary?.components.find(candidate => candidate.id === item.component)
+      if (component?.kind === 'platform-profile') mark('macos_runtime', 'windows_runtime')
+      continue
+    }
+    if (item.kind === 'docs') continue
+    if (item.kind === 'verification') {
+      if (RELEASE_VERIFIER_PREFIXES.some(prefix => path.startsWith(prefix))) mark('release_verifier')
+      continue
+    }
+    if (path === 'scripts/change-impact.mjs' || path === '.github/workflows/ci.yml') return allDimensions()
+    if (path.startsWith('.github/workflows/')) {
+      mark('release_verifier')
+      if (path.includes('profile-release')) mark('profile')
+      if (/(?:desktop-(?:release|publication)|release\.yml$)/u.test(path)) {
+        mark('macos_packaging', 'windows_packaging')
+      }
+      continue
+    }
+    if (PACKAGING_SHARED_PATHS.has(path) || path.startsWith('desktop/.yarn/')) {
+      mark('shared_runtime', 'macos_packaging', 'windows_packaging')
+      continue
+    }
+    if (path.startsWith('desktop/e-mate-desktop/')) {
+      if (componentTestPath(path)) {
+        mark('release_verifier')
+        continue
+      }
+      if (path === BASE_CONTRACT_PATH
+        || /\/(?:cordis\.patch\.yml|scripts\/sync-emate-profile|src\/(?:e-mate-profile|profile(?:-|\.|s\.)))/u.test(path)) {
+        mark('shared_runtime', 'profile')
+        continue
+      }
+      if (/\/src\/(?:agent-update|install-recovery|installation-cleanup|profile-update|update-|updates\.)/u.test(path)) {
+        mark('shared_runtime', 'macos_packaging', 'windows_packaging')
+        continue
+      }
+      if (/\/(?:build\/(?:assistedMessages\.yml|installer\.nsh|windows-update-transaction)|scripts\/(?:package-win|verify-win-installer)|src\/windows-update-installer)\b/iu.test(path)) {
+        mark('windows_runtime', 'windows_packaging')
+        continue
+      }
+      if (/\/(?:scripts\/(?:generate-mac-app-icon|mac-universal|package-mac|release-mac|release-preflight|verify-mac)|src\/(?:mac-universal-inventory|mac-update-helper|mac-update-installer))\b/iu.test(path)) {
+        mark('macos_runtime', 'macos_packaging')
+        continue
+      }
+      if (/\/(?:build\/|scripts\/(?:desktop-release-manifest|generate-tray-icons|package-dir|prepare-python-runtime|verify-licenses|verify-packaged-runtime)|vendor\/)/u.test(path)) {
+        mark('shared_runtime', 'macos_packaging', 'windows_packaging')
+        continue
+      }
+      if (/\/src\/windows-/u.test(path)) mark('windows_runtime')
+      else if (/\/src\/mac-/u.test(path)) mark('macos_runtime')
+      else mark('shared_runtime')
+      continue
+    }
+    if (path.startsWith('packages/dsh/') || path.startsWith('upstream/deepseek-harness')) {
+      mark('shared_runtime', 'profile')
+      continue
+    }
+    if (path.startsWith('scripts/')) {
+      mark('release_verifier')
+      if (/profile|component|stage-desktop-profile/u.test(path)) mark('profile')
+      if (/base-sdk|build-harness|harness-|release\.mjs|release-source/u.test(path)) mark('shared_runtime')
+      continue
+    }
+    if (BASE_PATHS.includes(path) || BASE_PREFIXES.some(prefix => path.startsWith(prefix))) {
+      mark('shared_runtime', 'profile')
+      continue
+    }
+    return allDimensions()
+  }
+  return dimensions
+}
+
+function ciPlan(lane, dimensions, options) {
+  const releaseCandidate = options.releaseCandidate === true
+  const base = lane === 'base'
+  const appSmoke = {
+    macos: releaseCandidate || base && (
+      dimensions.shared_runtime || dimensions.profile || dimensions.macos_runtime || dimensions.macos_packaging
+    ),
+    windows: releaseCandidate || base && (
+      dimensions.shared_runtime || dimensions.profile || dimensions.windows_runtime || dimensions.windows_packaging
+    ),
+  }
+  return {
+    app_smoke: appSmoke,
+    distribution: {
+      macos: releaseCandidate || dimensions.macos_packaging
+        || options.protectedMain === true && appSmoke.macos,
+      windows: releaseCandidate || dimensions.windows_packaging
+        || options.protectedMain === true && appSmoke.windows,
+    },
+  }
+}
+
 /** Classify normalized repository paths using one fail-closed release boundary. */
 export function classifyChangedPaths(paths, options = {}) {
   const root = resolve(options.root ?? fileURLToPath(new URL('..', import.meta.url)))
@@ -559,7 +716,14 @@ export function classifyChangedPaths(paths, options = {}) {
     item.kind === 'component' && item.component !== undefined ? [item.component] : []
   )))].sort()
   const componentJobs = componentJobsFor(boundary, components, publishComponents)
+  const ciComponentJobs = ciComponentJobsFor(boundary, components, publishComponents)
   const basePlatformComponentJobs = basePlatformComponentJobsFor(boundary)
+  const ciBasePlatformComponentJobs = ciComponentJobsFor(
+    boundary,
+    boundary.components
+      .filter(component => component.desktop === 'platform-profile')
+      .map(component => component.id),
+  )
   const portablePublish = publishComponents.length > 0
     && componentJobs.filter(job => job.publish).every(job => job.target === 'portable')
   const hasComponentWork = kinds.has('component') || kinds.has('component-test')
@@ -570,16 +734,25 @@ export function classifyChangedPaths(paths, options = {}) {
   else if (kinds.has('verification')) lane = 'verification-only'
   else if (kinds.has('docs')) lane = 'docs-only'
   else lane = 'none'
+  if (options.releaseCandidate === true && options.protectedMain !== true) {
+    return failureResult(normalized, 'release candidate mode requires protected main')
+  }
+  if (options.releaseCandidate === true) lane = 'base'
+  const dimensions = dimensionsFor(classifications, boundary)
   return result({
     lane,
     normalized,
     classifications,
     components,
     componentJobs,
+    ciComponentJobs,
     basePlatformComponentJobs,
+    ciBasePlatformComponentJobs,
     publishComponents,
     portablePublish,
     boundary,
+    dimensions,
+    ci: ciPlan(lane, dimensions, options),
   })
 }
 
@@ -589,10 +762,14 @@ function result({
   classifications,
   components,
   componentJobs = [],
+  ciComponentJobs = [],
   basePlatformComponentJobs = [],
+  ciBasePlatformComponentJobs = [],
   publishComponents = [],
   portablePublish = false,
   boundary,
+  dimensions = allDimensions(),
+  ci = { app_smoke: { macos: true, windows: true }, distribution: { macos: true, windows: true } },
   error,
 }) {
   return {
@@ -600,13 +777,17 @@ function result({
     lane,
     run_base: lane === 'base',
     run_plugins: lane === 'plugin-only',
-    run_enterprise: classifications.some(item => item.kind === 'enterprise'),
+    run_enterprise: dimensions.enterprise,
     run_verification: lane !== 'none',
     components,
     component_jobs: componentJobs,
+    ci_component_jobs: ciComponentJobs,
     base_platform_component_jobs: basePlatformComponentJobs,
+    ci_base_platform_component_jobs: ciBasePlatformComponentJobs,
     publish_components: publishComponents,
     portable_publish: portablePublish,
+    ...dimensions,
+    ci,
     changed_paths: normalized,
     classifications,
     contract: {
@@ -628,7 +809,9 @@ function failureResult(paths, error) {
     classifications: [{ kind: 'base', path: '<classifier>', reason: error }],
     components: [],
     componentJobs: [],
+    ciComponentJobs: [],
     basePlatformComponentJobs: [],
+    ciBasePlatformComponentJobs: [],
     publishComponents: [],
     error,
   })
@@ -665,6 +848,8 @@ function parseArguments(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const name = argv[index]
     if (name === '--check-contract') options.checkContract = true
+    else if (name === '--protected-main') options.protectedMain = true
+    else if (name === '--release-candidate') options.releaseCandidate = true
     else if (['--base', '--head', '--paths-from', '--github-output', '--root'].includes(name)) {
       const value = argv[index + 1]
       if (value === undefined) throw new Error(`${name} requires a value`)
@@ -689,9 +874,16 @@ function writeGithubOutput(path, value) {
     `run_verification=${String(value.run_verification)}`,
     `components_json=${JSON.stringify(value.components)}`,
     `component_jobs_json=${JSON.stringify(value.component_jobs)}`,
+    `ci_component_jobs_json=${JSON.stringify(value.ci_component_jobs)}`,
     `base_platform_component_jobs_json=${JSON.stringify(value.base_platform_component_jobs)}`,
+    `ci_base_platform_component_jobs_json=${JSON.stringify(value.ci_base_platform_component_jobs)}`,
     `publish_components_json=${JSON.stringify(value.publish_components)}`,
     `portable_publish=${String(value.portable_publish)}`,
+    ...IMPACT_DIMENSIONS.map(name => `${name}=${String(value[name])}`),
+    `macos_app_smoke=${String(value.ci.app_smoke.macos)}`,
+    `windows_app_smoke=${String(value.ci.app_smoke.windows)}`,
+    `macos_distribution=${String(value.ci.distribution.macos)}`,
+    `windows_distribution=${String(value.ci.distribution.windows)}`,
     `result_json=${JSON.stringify(value)}`,
     '',
   ].join('\n'))
@@ -725,7 +917,11 @@ function main() {
     inputError = cause instanceof Error ? cause.message : String(cause)
   }
   const value = inputError === undefined
-    ? classifyChangedPaths(paths, { root })
+    ? classifyChangedPaths(paths, {
+      root,
+      protectedMain: options.protectedMain,
+      releaseCandidate: options.releaseCandidate,
+    })
     : failureResult(paths, inputError)
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
   if (options.githuboutput !== undefined) writeGithubOutput(options.githuboutput, value)

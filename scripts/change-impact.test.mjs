@@ -21,6 +21,10 @@ function classify(...paths) {
   return classifyChangedPaths(paths, { root })
 }
 
+function classifyWith(options, ...paths) {
+  return classifyChangedPaths(paths, { root, ...options })
+}
+
 describe('repository release boundary', () => {
   it('requires every candidate to descend from the accepted 2.0.11 commit', () => {
     const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
@@ -326,11 +330,11 @@ describe('repository release boundary', () => {
     assert.equal(one.run_base, false)
     assert.equal(one.portable_publish, true)
     assert.deepEqual(one.components, ['@e-mate/dsh-plugin-tool-search'])
-    assert.deepEqual(one.component_jobs, [{
-      component: '@e-mate/dsh-plugin-tool-search',
+    assert.deepEqual(one.ci_component_jobs, [{
       target: 'portable',
       runner: 'ubuntu-24.04',
-      publish: true,
+      components: ['@e-mate/dsh-plugin-tool-search'],
+      publish_components: ['@e-mate/dsh-plugin-tool-search'],
     }])
 
     const several = classify(
@@ -356,11 +360,11 @@ describe('repository release boundary', () => {
     assert.equal(result.lane, 'plugin-only')
     assert.equal(result.run_base, false)
     assert.deepEqual(result.components, ['@e-mate/dsh-plugin-skill-hub'])
-    assert.deepEqual(result.component_jobs, [{
-      component: '@e-mate/dsh-plugin-skill-hub',
+    assert.deepEqual(result.ci_component_jobs, [{
       target: 'portable',
       runner: 'ubuntu-24.04',
-      publish: true,
+      components: ['@e-mate/dsh-plugin-skill-hub'],
+      publish_components: ['@e-mate/dsh-plugin-skill-hub'],
     }])
   })
 
@@ -373,11 +377,11 @@ describe('repository release boundary', () => {
     assert.equal(result.run_base, false)
     assert.equal(result.portable_publish, true)
     assert.deepEqual(result.components, ['@e-mate/dsh-plugin-schedules'])
-    assert.deepEqual(result.component_jobs, [{
-      component: '@e-mate/dsh-plugin-schedules',
+    assert.deepEqual(result.ci_component_jobs, [{
       target: 'portable',
       runner: 'ubuntu-24.04',
-      publish: true,
+      components: ['@e-mate/dsh-plugin-schedules'],
+      publish_components: ['@e-mate/dsh-plugin-schedules'],
     }])
   })
 
@@ -390,11 +394,11 @@ describe('repository release boundary', () => {
     assert.equal(result.run_base, false)
     assert.equal(result.portable_publish, true)
     assert.deepEqual(result.components, ['@e-mate/dsh-plugin-tool-search'])
-    assert.deepEqual(result.component_jobs, [{
-      component: '@e-mate/dsh-plugin-tool-search',
+    assert.deepEqual(result.ci_component_jobs, [{
       target: 'portable',
       runner: 'ubuntu-24.04',
-      publish: true,
+      components: ['@e-mate/dsh-plugin-tool-search'],
+      publish_components: ['@e-mate/dsh-plugin-tool-search'],
     }])
   })
 
@@ -436,13 +440,22 @@ describe('repository release boundary', () => {
     assert.equal(componentAndEnterprise.run_enterprise, true)
 
     const base = classify('desktop/e-mate-desktop/src/main.ts')
-    assert.deepEqual(base.base_platform_component_jobs, [
-      { component: '@e-mate/dsh-plugin-computer-use', target: 'darwin-arm64', runner: 'macos-15', publish: false },
-      { component: '@e-mate/dsh-plugin-computer-use', target: 'darwin-x64', runner: 'macos-15-intel', publish: false },
-      { component: '@e-mate/dsh-plugin-computer-use', target: 'win32-x64', runner: 'windows-2025', publish: false },
-      { component: '@e-mate/dsh-plugin-vision-toolkit', target: 'darwin-arm64', runner: 'macos-15', publish: false },
-      { component: '@e-mate/dsh-plugin-vision-toolkit', target: 'darwin-x64', runner: 'macos-15-intel', publish: false },
-      { component: '@e-mate/dsh-plugin-vision-toolkit', target: 'win32-x64', runner: 'windows-2025', publish: false },
+    assert.deepEqual(base.ci_base_platform_component_jobs, [
+      {
+        target: 'darwin-arm64', runner: 'macos-15',
+        components: ['@e-mate/dsh-plugin-computer-use', '@e-mate/dsh-plugin-vision-toolkit'],
+        publish_components: [],
+      },
+      {
+        target: 'darwin-x64', runner: 'macos-15-intel',
+        components: ['@e-mate/dsh-plugin-computer-use', '@e-mate/dsh-plugin-vision-toolkit'],
+        publish_components: [],
+      },
+      {
+        target: 'win32-x64', runner: 'windows-2025',
+        components: ['@e-mate/dsh-plugin-computer-use', '@e-mate/dsh-plugin-vision-toolkit'],
+        publish_components: [],
+      },
     ])
   })
 
@@ -461,10 +474,22 @@ describe('repository release boundary', () => {
 
     const impact = classify('packages/dsh-plugin-computer-use/scripts/build.mjs')
     assert.equal(impact.portable_publish, false)
-    assert.deepEqual(impact.component_jobs, [
-      { component: '@e-mate/dsh-plugin-computer-use', target: 'darwin-arm64', runner: 'macos-15', publish: true },
-      { component: '@e-mate/dsh-plugin-computer-use', target: 'darwin-x64', runner: 'macos-15-intel', publish: true },
-      { component: '@e-mate/dsh-plugin-computer-use', target: 'win32-x64', runner: 'windows-2025', publish: true },
+    assert.deepEqual(impact.ci_component_jobs, [
+      {
+        target: 'darwin-arm64', runner: 'macos-15',
+        components: ['@e-mate/dsh-plugin-computer-use'],
+        publish_components: ['@e-mate/dsh-plugin-computer-use'],
+      },
+      {
+        target: 'darwin-x64', runner: 'macos-15-intel',
+        components: ['@e-mate/dsh-plugin-computer-use'],
+        publish_components: ['@e-mate/dsh-plugin-computer-use'],
+      },
+      {
+        target: 'win32-x64', runner: 'windows-2025',
+        components: ['@e-mate/dsh-plugin-computer-use'],
+        publish_components: ['@e-mate/dsh-plugin-computer-use'],
+      },
     ])
   })
 
@@ -477,31 +502,141 @@ describe('repository release boundary', () => {
     const findSkill = classify('upstream/plugins/dsh-find-skill')
     assert.equal(findSkill.lane, 'plugin-only')
     assert.deepEqual(findSkill.components, ['@e-mate/dsh-plugin-find-skill'])
-    assert.deepEqual(findSkill.component_jobs, [{
-      component: '@e-mate/dsh-plugin-find-skill',
+    assert.deepEqual(findSkill.ci_component_jobs, [{
       target: 'portable',
       runner: 'ubuntu-24.04',
-      publish: true,
+      components: ['@e-mate/dsh-plugin-find-skill'],
+      publish_components: ['@e-mate/dsh-plugin-find-skill'],
     }])
 
     const genui = classify('upstream/plugins/dsh-genui')
     assert.equal(genui.lane, 'plugin-only')
     assert.deepEqual(genui.components, ['@e-mate/dsh-plugin-genui'])
-    assert.deepEqual(genui.component_jobs, [{
-      component: '@e-mate/dsh-plugin-genui',
+    assert.deepEqual(genui.ci_component_jobs, [{
       target: 'portable',
       runner: 'ubuntu-24.04',
-      publish: true,
+      components: ['@e-mate/dsh-plugin-genui'],
+      publish_components: ['@e-mate/dsh-plugin-genui'],
     }])
 
     const vision = classify('upstream/plugins/dsh-vision-toolkit')
     assert.equal(vision.lane, 'plugin-only')
     assert.deepEqual(vision.components, ['@e-mate/dsh-plugin-vision-toolkit'])
-    assert.deepEqual(vision.component_jobs, [
-      { component: '@e-mate/dsh-plugin-vision-toolkit', target: 'darwin-arm64', runner: 'macos-15', publish: true },
-      { component: '@e-mate/dsh-plugin-vision-toolkit', target: 'darwin-x64', runner: 'macos-15-intel', publish: true },
-      { component: '@e-mate/dsh-plugin-vision-toolkit', target: 'win32-x64', runner: 'windows-2025', publish: true },
+    assert.deepEqual(vision.ci_component_jobs, [
+      {
+        target: 'darwin-arm64', runner: 'macos-15',
+        components: ['@e-mate/dsh-plugin-vision-toolkit'],
+        publish_components: ['@e-mate/dsh-plugin-vision-toolkit'],
+      },
+      {
+        target: 'darwin-x64', runner: 'macos-15-intel',
+        components: ['@e-mate/dsh-plugin-vision-toolkit'],
+        publish_components: ['@e-mate/dsh-plugin-vision-toolkit'],
+      },
+      {
+        target: 'win32-x64', runner: 'windows-2025',
+        components: ['@e-mate/dsh-plugin-vision-toolkit'],
+        publish_components: ['@e-mate/dsh-plugin-vision-toolkit'],
+      },
     ])
+  })
+
+  it('owns platform impact and the PR/release build plan without workflow path rules', () => {
+    const runtime = classify('desktop/e-mate-desktop/src/main.ts')
+    assert.deepEqual(runtime.ci, {
+      app_smoke: { macos: true, windows: true },
+      distribution: { macos: false, windows: false },
+    })
+    assert.equal(runtime.shared_runtime, true)
+    assert.equal(runtime.macos_packaging, false)
+    assert.equal(runtime.windows_packaging, false)
+
+    const protectedRuntime = classifyWith(
+      { protectedMain: true },
+      'desktop/e-mate-desktop/src/main.ts',
+    )
+    assert.deepEqual(protectedRuntime.ci.distribution, { macos: true, windows: true })
+
+    const macPackaging = classify('desktop/e-mate-desktop/scripts/package-mac.ts')
+    assert.deepEqual(macPackaging.ci, {
+      app_smoke: { macos: true, windows: false },
+      distribution: { macos: true, windows: false },
+    })
+    assert.equal(macPackaging.macos_runtime, true)
+    assert.equal(macPackaging.macos_packaging, true)
+
+    const windowsRuntime = classify('desktop/e-mate-desktop/src/windows-directory-picker.ts')
+    assert.equal(windowsRuntime.windows_runtime, true)
+    assert.equal(windowsRuntime.windows_packaging, false)
+    assert.deepEqual(windowsRuntime.ci, {
+      app_smoke: { macos: false, windows: true },
+      distribution: { macos: false, windows: false },
+    })
+
+    const updater = classify('desktop/e-mate-desktop/src/update-checker.ts')
+    assert.deepEqual(updater.ci.distribution, { macos: true, windows: true })
+    assert.deepEqual(
+      classify('desktop/e-mate-desktop/build/assistedMessages.yml').ci.distribution,
+      { macos: false, windows: true },
+    )
+
+    const profile = classify('packages/dsh-plugin-tool-search/src/index.ts')
+    assert.equal(profile.profile, true)
+    const verifier = classify('scripts/performance-parity.mjs')
+    assert.equal(verifier.release_verifier, true)
+    assert.deepEqual(verifier.ci, {
+      app_smoke: { macos: false, windows: false },
+      distribution: { macos: false, windows: false },
+    })
+
+    const releaseCandidate = classifyWith(
+      { protectedMain: true, releaseCandidate: true },
+      'docs/development-log.md',
+    )
+    assert.deepEqual(releaseCandidate.ci, {
+      app_smoke: { macos: true, windows: true },
+      distribution: { macos: true, windows: true },
+    })
+    assert.equal(classifyWith(
+      { releaseCandidate: true },
+      'desktop/e-mate-desktop/src/main.ts',
+    ).contract.valid, false)
+    const protectedCli = spawnSync(process.execPath, [
+      'scripts/change-impact.mjs', '--path', 'docs/development-log.md',
+      '--protected-main', '--release-candidate',
+    ], { cwd: root, encoding: 'utf8' })
+    assert.equal(protectedCli.status, 0, protectedCli.stderr)
+    assert.equal(JSON.parse(protectedCli.stdout).lane, 'base')
+    const unprotectedCli = spawnSync(process.execPath, [
+      'scripts/change-impact.mjs', '--path', 'docs/development-log.md', '--release-candidate',
+    ], { cwd: root, encoding: 'utf8' })
+    assert.equal(unprotectedCli.status, 1)
+
+    const enterprise = classify('enterprise/apps/auth-gateway/src/index.ts')
+    assert.equal(enterprise.enterprise, true)
+    assert.deepEqual(enterprise.ci, {
+      app_smoke: { macos: false, windows: false },
+      distribution: { macos: false, windows: false },
+    })
+  })
+
+  it('aggregates changed native components into one setup job per target', () => {
+    const impact = classify(
+      'packages/dsh-plugin-computer-use/src/index.ts',
+      'packages/dsh-plugin-vision-toolkit/src/index.ts',
+    )
+    assert.equal(impact.component_jobs.length, 6)
+    assert.equal(impact.component_jobs.every(job => (
+      typeof job.component === 'string' && typeof job.publish === 'boolean'
+    )), true)
+    assert.equal(impact.ci_component_jobs.length, 3)
+    for (const job of impact.ci_component_jobs) {
+      assert.deepEqual(job.components, [
+        '@e-mate/dsh-plugin-computer-use',
+        '@e-mate/dsh-plugin-vision-toolkit',
+      ])
+      assert.deepEqual(job.publish_components, job.components)
+    }
   })
 
   it('keeps the DSH-native CDP adapter in the component lane', () => {
@@ -538,16 +673,16 @@ describe('repository release boundary', () => {
     assert.match(workflow, /source:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_base == 'true'/u)
     assert.match(workflow, /plugins:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_plugins == 'true'/u)
     assert.match(workflow, /run_verification: \$\{\{ steps\.classify\.outputs\.run_verification \}\}/u)
-    assert.match(workflow, /include: \$\{\{ fromJSON\(needs\.impact\.outputs\.component_jobs_json\) \}\}/u)
-    assert.match(workflow, /base-platform-components:\n(?:.|\n)*?needs: \[impact, source\](?:.|\n)*?include: \$\{\{ fromJSON\(needs\.impact\.outputs\.base_platform_component_jobs_json\) \}\}/u)
+    assert.match(workflow, /include: \$\{\{ fromJSON\(needs\.impact\.outputs\.ci_component_jobs_json\) \}\}/u)
+    assert.match(workflow, /base-platform-components:\n(?:.|\n)*?needs: \[impact, source\](?:.|\n)*?include: \$\{\{ fromJSON\(needs\.impact\.outputs\.ci_base_platform_component_jobs_json\) \}\}/u)
     assert.match(workflow, /name: Prepare the exact component Python runtime(?:.|\n)*?prepare-python-runtime\.mjs --target "\$TARGET"(?:.|\n)*?EMATE_BUILD_PYTHON: \$\{\{ steps\.component-python\.outputs\.python \}\}/u)
     assert.doesNotMatch(workflow, /python-version: '3\.12\.14'/u)
-    assert.match(workflow, /name: Test the accepted platform component against the new Base\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
+    assert.match(workflow, /name: Test the accepted platform component against the new Base\n\s+shell: bash[^]*?COMPONENTS_JSON: \$\{\{ toJSON\(matrix\.components\) \}\}[^]*?node scripts\/component-run\.mjs check --component "\$component"/u)
     assert.match(workflow, /name: Export the exact accepted Base SDK run artifact(?:.|\n)*?name: e-mate-base-sdk-\$\{\{ needs\.impact\.outputs\.head_sha \}\}(?:.|\n)*?include-hidden-files: true(?:.|\n)*?retention-days: 30/u)
     assert.match(workflow, /name: Build pinned DeepSeek Harness\n\s+run: pnpm build:harness/u)
     assert.match(workflow, /runs-on: \$\{\{ matrix\.runner \}\}/u)
-    assert.match(workflow, /name: Build and test only the changed component\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
-    assert.match(workflow, /if: matrix\.publish == true/u)
+    assert.match(workflow, /name: Build and test only the changed component\n\s+shell: bash[^]*?COMPONENTS_JSON: \$\{\{ toJSON\(matrix\.components\) \}\}[^]*?node scripts\/component-run\.mjs check --component "\$component"/u)
+    assert.match(workflow, /if: toJSON\(matrix\.publish_components\) != '\[\]'/u)
     assert.match(workflow, /profile-portable-composition:\n(?:.|\n)*?name: Portable Profile generations(?:.|\n)*?needs: \[impact, plugins\](?:.|\n)*?portable_publish == 'true'(?:.|\n)*?runs-on: macos-15(?:.|\n)*?Compose every target and boot the portable graph once/u)
     assert.equal(workflow.match(/--snapshot artifacts\/release\/profile-current-snapshot\.json\n\s+--materialize-current dist\/profile-current/gu)?.length, 2)
     assert.doesNotMatch(workflow, /curl[^]*desktop\/profile\/desired-state/u)
@@ -558,12 +693,14 @@ describe('repository release boundary', () => {
     assert.match(workflow, /if test "\$BASE_SHA" = 0000000000000000000000000000000000000000;(?:.|\n)*?ACCEPTED_PREDECESSOR/u)
     assert.match(workflow, /name: e-mate-change-impact-\$\{\{ steps\.classify\.outputs\.head_sha \}\}/u)
     assert.match(workflow, /enterprise:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_enterprise == 'true'/u)
-    const enterpriseJob = workflow.slice(workflow.indexOf('  enterprise:'), workflow.indexOf('\n  desktop-windows:'))
+    const enterpriseStart = workflow.indexOf('\n  enterprise:')
+    const enterpriseJob = workflow.slice(enterpriseStart, workflow.indexOf('\n  desktop-windows:', enterpriseStart))
     assert.match(enterpriseJob, /fetch-depth: 1(?:.|\n)*?sparse-checkout: \|\n\s+enterprise\n\s+package\.json(?:.|\n)*?sparse-checkout-cone-mode: false(?:.|\n)*?submodules: false/u)
     assert.match(enterpriseJob, /repository: zyfjacksonchen-source\/EcoreX(?:.|\n)*?ref: 564a6b6c1d43fb6831dd4a5cd8026e472f063311(?:.|\n)*?desktop\/src\/styles\/tokens\.css(?:.|\n)*?desktop\/src\/v1\/assets\/emate-logo\.png(?:.|\n)*?submodules: false/u)
     assert.doesNotMatch(enterpriseJob, /submodules: recursive/u)
     assert.match(workflow, /RUN_ENTERPRISE: \$\{\{ needs\.impact\.outputs\.run_enterprise \}\}(?:.|\n)*?case "\$RUN_ENTERPRISE" in\n\s+true\) test "\$ENTERPRISE" = success ;;\n\s+false\) test "\$ENTERPRISE" = skipped ;;/u)
-    assert.match(workflow, /admission:\n(?:.|\n)*?case "\$LANE" in(?:.|\n)*?plugin-only\)(?:.|\n)*?test "\$PORTABLE_PUBLISH" = true;(?:.|\n)*?test "\$PROFILE_PORTABLE" = success(?:.|\n)*?test "\$PROFILE" = skipped(?:.|\n)*?test "\$SOURCE" = skipped(?:.|\n)*?test "\$WINDOWS" = skipped(?:.|\n)*?test "\$MACOS" = skipped/u)
+    assert.match(workflow, /admission:\n(?:.|\n)*?RUN_WINDOWS_APP_SMOKE:(?:.|\n)*?case "\$RUN_WINDOWS_APP_SMOKE" in\n\s+true\) test "\$WINDOWS" = success ;;\n\s+false\) test "\$WINDOWS" = skipped ;;/u)
+    assert.match(workflow, /case "\$RUN_MACOS_APP_SMOKE" in\n\s+true\) test "\$MACOS" = success ;;\n\s+false\) test "\$MACOS" = skipped ;;/u)
     assert.match(workflow, /base\)(?:.|\n)*?test "\$BASE_PLATFORM_COMPONENTS" = success/u)
     const sourceJob = workflow.slice(workflow.indexOf('  source:'), workflow.indexOf('\n  plugins:'))
     assert.doesNotMatch(sourceJob, /enterprise\/pnpm-lock\.yaml|pnpm --dir enterprise|pnpm enterprise:/u)
@@ -584,8 +721,9 @@ describe('repository release boundary', () => {
       assert.match(job, /if: needs\.impact\.outputs\.run_verification == 'true'/u)
       assert.match(job, /yarn verify:loader/u)
       assert.equal(job.match(/yarn verify:profile/gu)?.length, 1)
-      assert.match(job, /if: github\.event_name == 'pull_request'(?:.|\n)*?yarn package:dir/u)
-      assert.match(job, /if: github\.event_name == 'push'/u)
+      const platform = jobName === 'desktop-windows' ? 'windows' : 'macos'
+      assert.match(job, new RegExp(`if: needs\\.impact\\.outputs\\.${platform}_distribution != 'true'[^]*?yarn package:dir`, 'u'))
+      assert.match(job, new RegExp(`if: needs\\.impact\\.outputs\\.${platform}_distribution == 'true'`, 'u'))
       assert.match(job, /ELECTRON_CACHE: \$\{\{ github\.workspace \}\}\/\.release-cache\/electron/u)
       assert.match(job, /ELECTRON_BUILDER_CACHE: \$\{\{ github\.workspace \}\}\/\.release-cache\/electron-builder/u)
       assert.match(job, /key: desktop-tools-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-\$\{\{ hashFiles\('desktop\/package\.json', 'desktop\/yarn\.lock', 'desktop\/\.yarn\/patches\/\*\*'/u)
@@ -677,9 +815,23 @@ describe('repository release boundary', () => {
   })
 
   it('fails unknown or malformed paths closed to base', () => {
-    assert.equal(classify('new-unowned-root/file.ts').lane, 'base')
+    const unknown = classify('new-unowned-root/file.ts')
+    assert.equal(unknown.lane, 'base')
+    assert.equal(unknown.run_enterprise, true)
+    for (const dimension of [
+      'shared_runtime', 'profile', 'macos_runtime', 'macos_packaging',
+      'windows_runtime', 'windows_packaging', 'enterprise', 'release_verifier',
+    ]) assert.equal(unknown[dimension], true, dimension)
+    assert.deepEqual(unknown.ci, {
+      app_smoke: { macos: true, windows: true },
+      distribution: { macos: true, windows: true },
+    })
     const invalid = classify('../outside')
     assert.equal(invalid.lane, 'base')
     assert.equal(invalid.contract.valid, false)
+    assert.deepEqual(invalid.ci, {
+      app_smoke: { macos: true, windows: true },
+      distribution: { macos: true, windows: true },
+    })
   })
 })

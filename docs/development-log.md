@@ -2595,3 +2595,16 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有源码 diff 与 workflow contract test；无 GitHub run id、platform artifact id/bytes/SHA、安装态、签名或公开写入。
 - Remaining blockers: 唯一 strict staging helper及其 symlink/格式/forbidden-tree 负例由并行 Build-once owner提交，主代理必须先合入该 exact helper再移植本 workflow；随后 protected-main attempt-1 必须真实生成并回读两平台 closed artifact。任何缺失文件或 provenance 均保持失败关闭。
 - Next exact action: 提交本最小 CI diff；主代理按依赖顺序合入共享 staging owner与本提交，运行 protected CI，并将真实 artifact IDs/文件清单/bytes/SHA交给后续 Desktop release 直接消费，禁止重建。
+## 2026-08-26 · 2.0.13 PR2 影响维度与 PR 快速链
+
+- Goal checkpoint: 在 build-once 合同已固定后，把普通 PR 的应用目录 smoke 与正式 DMG/NSIS 分发构建从同一影响权威派生；本条不构建候选、不安装、不调用模型、不签名或发布。
+- Frozen baseline / current HEAD: 独立 worktree `codex/pr2-impact-fastchain` 从 `feat/2.0.13-native-perf-producer` exact `f0fbb9017321053f5f0aad41832ba80e09a43f03` 创建；Base/Harness/Desktop reference 未改，性能 probe 文件未触碰。
+- Binding documents read: 完整读取根 `AGENTS.md`、`target-contract.md`、`plugin-contracts.md`、`performance-and-acceptance.md`、上一条完整日志和 ponytail skill；追踪唯一 change-impact、CI matrix、Base SDK/Profile artifact 与正式 macOS/Windows package owner。
+- Inspected native seam: `scripts/change-impact.mjs` 已是 coarse lane、组件 inventory、平台 target/runner 和 CI matrix 的唯一权威；CI 已有原生 `package:dir`、正式 `dist:mac-unsigned-release`/`dist:win` 与 admission owner，因此无需第二分类器、路径表或构建协议。
+- Experiment or why unnecessary: 该变更属于 Git diff/CI/release plane，Creation Mode 不能表示 GitHub matrix、原生 runner 或 installer provenance。使用现有 Node 标准库表驱动测试直接覆盖普通 PR、protected main、受保护 release-candidate、macOS/Windows/updater、enterprise、release verifier、未知/非法路径和双 native component 聚合。
+- Decision and forbidden alternatives: classifier 现在闭合输出 `shared_runtime/profile/macos_runtime/macos_packaging/windows_runtime/windows_packaging/enterprise/release_verifier` 与 `ci.app_smoke/distribution`。普通 runtime PR 只跑 `package:dir`；packaging/updater、protected-main affected Base 或 protected release-candidate 才跑唯一正式 DMG/NSIS。未知路径全维度 fail closed。native component 只在新增的 CI matrix 按 target 聚合；既有 `component_jobs[].component/publish` 逐组件 release 消费合同保持不变。禁止 YAML 复制 path 规则、生成或上传 mac-smoke 作为 release 字节、重复 checkout/install 或从 cache冒充 artifact。
+- Changed scope: 仅修改唯一 impact classifier、既有 impact 合同测试、`ci.yml` 和 append 本记录；未修改 performance probe、Desktop/Profile/Harness 产品运行时、模型 header/路由、企业服务、R2/Feed/desired state 或用户数据。
+- Verification commands and results: bundled Node 24 `--check scripts/change-impact.mjs` 通过；`change-impact.test.mjs` 为 `24/24`；与 `component-release.test.mjs` 合跑为 `33 passed / 4 intentional Harness-toolchain skips / 0 failed`；Ruby YAML parse 与 `git diff --check` 通过。完整四文件 impact 命令在本独立 worktree因未安装 `fflate` 无法启动两个 Profile consumer，未记为通过且没有安装依赖掩盖环境缺口。
+- Immutable evidence / receipt: 当前只有 source-fixed diff和本地无密钥合同测试；没有 CI run、DMG、EXE、Profile generation、安装态或 production receipt。
+- Remaining blockers: 主代理须与 PR1 artifact staging 最小合并并由 protected PR CI 验证 GitHub expression/matrix；只有 protected main exact SHA 的正式 distribution artifacts可供后续 release复用。
+- Next exact action: 主代理复核并移植本提交；PR1 staging包裹同一正式输出而不重建，随后运行 exact protected CI，失败只修受影响 stage。
