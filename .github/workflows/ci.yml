@@ -79,6 +79,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
+      - name: Start job timing
+        id: timing
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -161,6 +165,16 @@ jobs:
       - name: Stage the exact built e-Mate profile without development links
         run: node scripts/stage-desktop-profile-artifact.mjs
 
+      - name: Bind the staged Profile bytes to the source and Base
+        run: >-
+          node scripts/desktop-admission.mjs
+          profile-build-receipt
+          --commit "$GITHUB_SHA"
+          --profile .release-cache/profile-artifact
+          --inventory packages/dsh/profile/component-inventory.json
+          --base-contract desktop/e-mate-desktop/base-contract.json
+          --out .release-cache/profile-build-receipt/profile-build-receipt.json
+
       - name: Export the exact built e-Mate profile for desktop jobs
         uses: actions/upload-artifact@v4
         with:
@@ -169,10 +183,26 @@ jobs:
             .release-cache/profile-artifact/dsh/profile
             .release-cache/profile-artifact/dsh-plugin-*/lib
           if-no-files-found: error
-          retention-days: 1
+          retention-days: ${{ github.event_name == 'push' && 30 || 1 }}
+
+      - name: Export the Profile build receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-desktop-profile-build-receipt-${{ github.sha }}
+          path: .release-cache/profile-build-receipt/profile-build-receipt.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Check patch whitespace
         run: git diff --check
+
+      - name: Summarize job timing
+        if: always()
+        env:
+          STARTED: ${{ steps.timing.outputs.started }}
+        run: |
+          elapsed=$(( $(date +%s) - STARTED ))
+          printf '### CI timing\n\n| Job | Seconds | Result |\n|---|---:|---|\n| Source | %s | %s |\n' "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   plugins:
     name: Changed Profile component / ${{ matrix.component }} / ${{ matrix.target }}
@@ -630,11 +660,34 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
+      - name: Start job timing
+        id: timing
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.impact.outputs.head_sha }}
+          fetch-depth: 1
           persist-credentials: false
-          submodules: recursive
+          sparse-checkout: |
+            enterprise
+            package.json
+          sparse-checkout-cone-mode: false
+          submodules: false
+
+      - name: Restore the two pinned e-Mate design assets used by Enterprise
+        uses: actions/checkout@v6
+        with:
+          repository: zyfjacksonchen-source/EcoreX
+          ref: 564a6b6c1d43fb6831dd4a5cd8026e472f063311
+          path: upstream/e-mate-2.0.5
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            desktop/src/styles/tokens.css
+            desktop/src/v1/assets/emate-logo.png
+          sparse-checkout-cone-mode: false
+          submodules: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
@@ -647,12 +700,28 @@ jobs:
           pnpm enterprise:test
           pnpm enterprise:build
 
+      - name: Summarize job timing
+        if: always()
+        env:
+          STARTED: ${{ steps.timing.outputs.started }}
+        run: |
+          elapsed=$(( $(date +%s) - STARTED ))
+          printf '### CI timing\n\n| Job | Seconds | Result |\n|---|---:|---|\n| Enterprise | %s | %s |\n' "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+
   desktop-windows:
     name: Windows x64 / unsigned desktop installer
     needs: [impact, source]
     runs-on: windows-2025
     timeout-minutes: 90
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.release-cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.release-cache/electron-builder
     steps:
+      - name: Start job timing
+        id: timing
+        shell: bash
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -697,37 +766,85 @@ jobs:
           path: ${{ steps.yarn-cache.outputs.dir }}
           key: desktop-yarn-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/yarn.lock', 'desktop/.yarnrc.yml') }}
 
+      - name: Restore Electron and electron-builder tool downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ELECTRON_CACHE }}
+            ${{ env.ELECTRON_BUILDER_CACHE }}
+          key: desktop-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/package.json', 'desktop/yarn.lock', 'desktop/.yarn/patches/**', 'desktop/e-mate-desktop/package.json', 'desktop/e-mate-desktop/scripts/package-dir.mjs', 'desktop/e-mate-desktop/scripts/package-win.ts', 'desktop/e-mate-desktop/scripts/verify-win-installer.ts', 'desktop/e-mate-desktop/build/app-icon.png') }}
+
       - name: Install the exact desktop closure
         working-directory: desktop
         run: yarn install --immutable
 
-      - name: Build and verify the unsigned Windows installer
+      - name: Build the pull-request app-directory smoke
+        if: github.event_name == 'pull_request'
+        working-directory: desktop
+        run: yarn package:dir
+
+      - name: Build and verify the formal unsigned Windows installer
+        if: github.event_name == 'push'
         working-directory: desktop
         run: yarn dist:win
 
-      - name: Re-run the Loader and Profile acceptance owners
+      - name: Verify the source Loader and Profile owners once
         if: needs.impact.outputs.run_verification == 'true'
         working-directory: desktop/e-mate-desktop
         run: |
           yarn verify:loader
           yarn verify:profile
-          yarn verify:profile
 
-      - uses: actions/upload-artifact@v4
+      - name: Resolve the formal Desktop version
+        if: github.event_name == 'push'
+        id: version
+        shell: bash
+        run: echo "value=$(node -p \"require('./desktop/e-mate-desktop/package.json').version\")" >> "$GITHUB_OUTPUT"
+
+      - name: Stage only the verified formal Windows bytes
+        if: github.event_name == 'push'
+        run: >-
+          node scripts/stage-desktop-ci-artifact.mjs stage
+          --platform win32
+          --source-commit "${{ needs.impact.outputs.head_sha }}"
+          --ci-run-id "$GITHUB_RUN_ID"
+          --base-contract desktop/e-mate-desktop/base-contract.json
+          --source desktop/e-mate-desktop/dist
+          --out .release-cache/desktop-ci/windows
+          --version "${{ steps.version.outputs.value }}"
+
+      - name: Export the exact formal Windows bytes
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
         with:
-          name: e-mate-windows-x64-unsigned
-          path: |
-            desktop/e-mate-desktop/dist/*.exe
-            desktop/e-mate-desktop/dist/*.blockmap
+          name: e-mate-desktop-windows-${{ needs.impact.outputs.head_sha }}
+          path: .release-cache/desktop-ci/windows
+          compression-level: 0
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
+
+      - name: Summarize job timing
+        if: always()
+        shell: bash
+        env:
+          STARTED: ${{ steps.timing.outputs.started }}
+        run: |
+          elapsed=$(( $(date +%s) - STARTED ))
+          printf '### CI timing\n\n| Job | Seconds | Result |\n|---|---:|---|\n| Windows desktop | %s | %s |\n' "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   desktop-macos:
     name: macOS universal / unsigned desktop disk image
     needs: [impact, source]
     runs-on: macos-15
     timeout-minutes: 90
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.release-cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.release-cache/electron-builder
     steps:
+      - name: Start job timing
+        id: timing
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -771,28 +888,69 @@ jobs:
           path: ${{ steps.yarn-cache.outputs.dir }}
           key: desktop-yarn-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/yarn.lock', 'desktop/.yarnrc.yml') }}
 
+      - name: Restore Electron and electron-builder tool downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ELECTRON_CACHE }}
+            ${{ env.ELECTRON_BUILDER_CACHE }}
+          key: desktop-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/package.json', 'desktop/yarn.lock', 'desktop/.yarn/patches/**', 'desktop/e-mate-desktop/package.json', 'desktop/e-mate-desktop/scripts/package-dir.mjs', 'desktop/e-mate-desktop/scripts/package-mac-unsigned-release.ts', 'desktop/e-mate-desktop/scripts/verify-mac-release.ts', 'desktop/e-mate-desktop/build/app-icon-mac.png') }}
+
       - name: Install the exact desktop closure
         working-directory: desktop
         run: yarn install --immutable
 
-      - name: Build and verify the unsigned universal disk image
+      - name: Build the pull-request app-directory smoke
+        if: github.event_name == 'pull_request'
         working-directory: desktop
-        run: yarn dist:mac-smoke
+        run: yarn package:dir
 
-      - name: Re-run the Loader and Profile acceptance owners
+      - name: Build and verify the formal unsigned universal disk image
+        if: github.event_name == 'push'
+        working-directory: desktop
+        run: yarn dist:mac-unsigned-release
+
+      - name: Verify the source Loader and Profile owners once
         if: needs.impact.outputs.run_verification == 'true'
         working-directory: desktop/e-mate-desktop
         run: |
           yarn verify:loader
           yarn verify:profile
-          yarn verify:profile
 
-      - uses: actions/upload-artifact@v4
+      - name: Resolve the formal Desktop version
+        if: github.event_name == 'push'
+        id: version
+        run: echo "value=$(node -p \"require('./desktop/e-mate-desktop/package.json').version\")" >> "$GITHUB_OUTPUT"
+
+      - name: Stage only the verified formal macOS bytes
+        if: github.event_name == 'push'
+        run: >-
+          node scripts/stage-desktop-ci-artifact.mjs stage
+          --platform darwin
+          --source-commit "${{ needs.impact.outputs.head_sha }}"
+          --ci-run-id "$GITHUB_RUN_ID"
+          --base-contract desktop/e-mate-desktop/base-contract.json
+          --source desktop/e-mate-desktop/dist/mac-unsigned-release
+          --out .release-cache/desktop-ci/macos
+          --version "${{ steps.version.outputs.value }}"
+
+      - name: Export the exact formal macOS bytes
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
         with:
-          name: e-mate-macos-universal-unsigned
-          path: desktop/e-mate-desktop/dist/mac-smoke/*
+          name: e-mate-desktop-macos-${{ needs.impact.outputs.head_sha }}
+          path: .release-cache/desktop-ci/macos
+          compression-level: 0
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
+
+      - name: Summarize job timing
+        if: always()
+        env:
+          STARTED: ${{ steps.timing.outputs.started }}
+        run: |
+          elapsed=$(( $(date +%s) - STARTED ))
+          printf '### CI timing\n\n| Job | Seconds | Result |\n|---|---:|---|\n| macOS desktop | %s | %s |\n' "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   admission:
     name: CI admission

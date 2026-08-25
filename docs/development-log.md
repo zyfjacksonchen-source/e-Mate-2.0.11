@@ -2581,3 +2581,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有 source-fixed commit 前 diff与本地无密钥 fixture；没有 GitHub protected-main artifact、签名 admission、候选安装、上传或生产指针变化。
 - Remaining blockers: CI PR必须使用本 helper生成 source-specific formal EXE/DMG artifacts和 Profile build receipt；合并后以 exact main run 验证真实 artifacts，再继续 Performance、Admission、签名、Cloudflare发布及安装/更新/回滚。
 - Next exact action: 提交本切片供主代理按依赖顺序合入；CI 先调用唯一 stage owner，再运行 exact protected-main CI 和无重建 Desktop release。
+
+## 2026-08-26 · 2.0.13 CI PR1 低风险瘦身与 Build-once 入口
+
+- Goal checkpoint: 按仓库既有 CI 效率合同先移除平台流水线浪费，并让 protected-main 只上传可直接进入后续验收的正式字节；本条不运行安装器、不触发 workflow、签名、R2、Feed 或 desired state。
+- Frozen baseline / current HEAD: 独立干净 worktree `codex/ci-pr1-slim` 从 `public-2011/feat/2.0.13-native-perf-producer` exact `f0fbb9017321053f5f0aad41832ba80e09a43f03` 创建；Base/Harness/Desktop reference 保持 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606` / `6074088f5b660206e404b3591fab51fb99c69add`。
+- Binding documents read: 完整读取根 `AGENTS.md`、`docs/target-contract.md`、上一条完整开发记录和 ponytail skill；复核 `ci.yml`、正式 macOS/Windows package/verifier、Profile build receipt owner、Enterprise 直接依赖及既有 impact workflow test。
+- Inspected native seam: `dist:win` 和 `dist:mac-unsigned-release` 已分别持有最终安装器及 packaged runtime 验证；`desktop-admission.mjs profile-build-receipt` 已是 Profile 字节收据 owner；Enterprise 只从固定 ECoreX gitlink读取 `tokens.css` 与 `emate-logo.png`，无需递归初始化全部 submodule。
+- Experiment or why unnecessary: CI/release plane 不能由 Creation Mode 表示，故不创建动态插件。以 workflow contract test验证 PR 只走 `package:dir`、protected-main 才走 formal dist、每个平台 Profile 只验证一次、缓存键覆盖版本/lock/patch/installer输入、Enterprise shallow sparse checkout和四个 job timing summary。
+- Decision and forbidden alternatives: 平台产物只允许通过唯一共享 `stage-desktop-ci-artifact.mjs` strict stage 后上传，文件集为正式 DMG/EXE、真实存在时的 blockmap、`desktop-runtime-verification.json` 与 `desktop-artifact-receipt.json`，`compression-level: 0`；禁止 mac-smoke、`.app`、unpacked tree、Python closure、`node_modules` 或 wildcard build directory进入 artifact。普通 PR 不产发行物，protected-main artifact 以 exact head SHA 命名；缓存不作为发布证据。
+- Changed scope: 仅修改 `.github/workflows/ci.yml`、既有 `scripts/change-impact.test.mjs` 和本记录；新增 Profile build receipt artifact、Enterprise 两文件 sparse checkout、Electron/electron-builder OS cache、四个 job timing summary，并删除两平台重复 `verify:profile`。未改性能 probe、DSH/Desktop runtime、Profile内容、模型链、企业产品代码或生产状态。
+- Verification commands and results: bundled Node 运行 `node --test scripts/change-impact.test.mjs` 为 `22/22`；Ruby YAML parser通过；`git diff --check`通过。未运行 formal DMG/EXE，因此本条只记 source-fixed。
+- Immutable evidence / receipt: 当前只有源码 diff 与 workflow contract test；无 GitHub run id、platform artifact id/bytes/SHA、安装态、签名或公开写入。
+- Remaining blockers: 唯一 strict staging helper及其 symlink/格式/forbidden-tree 负例由并行 Build-once owner提交，主代理必须先合入该 exact helper再移植本 workflow；随后 protected-main attempt-1 必须真实生成并回读两平台 closed artifact。任何缺失文件或 provenance 均保持失败关闭。
+- Next exact action: 提交本最小 CI diff；主代理按依赖顺序合入共享 staging owner与本提交，运行 protected CI，并将真实 artifact IDs/文件清单/bytes/SHA交给后续 Desktop release 直接消费，禁止重建。
