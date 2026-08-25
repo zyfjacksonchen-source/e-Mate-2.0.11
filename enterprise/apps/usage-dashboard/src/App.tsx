@@ -8,9 +8,10 @@ import {
   loadUsageEvents,
   loginUsageAccount,
   logoutUsageAccount,
+  queryForDateRange,
   queryForDay,
   queryForPeriod,
-  queryForRange,
+  queryForYesterday,
   refreshUsageAccount,
   UsageApiError,
   type UsageAuthSession,
@@ -40,7 +41,7 @@ const usageColumnKeys = [
   'user', 'model', 'status', 'events', 'requests', 'input', 'output', 'cache', 'tokens', 'quota', 'cost',
 ] as const;
 type UsageColumn = (typeof usageColumnKeys)[number];
-type ChartMetric = 'requests' | 'tokens';
+type ChartMetric = 'activity' | 'requests' | 'tokens';
 const scenarioColors: Record<TaskScenario, string> = {
   GENERAL: '#8b8b84',
   CONTENT_CREATION: '#ef6c24',
@@ -51,8 +52,8 @@ const scenarioColors: Record<TaskScenario, string> = {
   SEARCH_QUERY: '#d44f73',
 };
 
-function localDateTime(value: Date): string {
-  return new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+function localDate(value: Date): string {
+  return new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 }
 
 function clearUsageSession() {
@@ -135,14 +136,14 @@ export function App() {
   const [password, setPassword] = useState('');
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [loginBusy, setLoginBusy] = useState(false);
-  const [period, setPeriod] = useState<(typeof periodOptions)[number] | 'custom'>(7);
+  const [period, setPeriod] = useState<(typeof periodOptions)[number] | 'yesterday' | 'custom'>(7);
   const [range, setRange] = useState<UsageQuery>(() => queryForPeriod(7));
-  const [customFrom, setCustomFrom] = useState(() => localDateTime(new Date(Date.now() - 7 * 86_400_000)));
-  const [customTo, setCustomTo] = useState(() => localDateTime(new Date()));
+  const [customFrom, setCustomFrom] = useState(() => localDate(new Date(Date.now() - 6 * 86_400_000)));
+  const [customTo, setCustomTo] = useState(() => localDate(new Date()));
   const [rangeError, setRangeError] = useState<string | null>(null);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [knownUsers, setKnownUsers] = useState<Array<{ userId: string; displayName: string }>>([]);
-  const [chartMetric, setChartMetric] = useState<ChartMetric>('tokens');
+  const [chartMetric, setChartMetric] = useState<ChartMetric>('activity');
   const [usageColumns, setUsageColumns] = useState<UsageColumn[]>(() => [...usageColumnKeys]);
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
@@ -260,19 +261,20 @@ export function App() {
     setDayDetail({ kind: 'idle' });
   };
 
-  const selectPeriod = (value: (typeof periodOptions)[number] | 'custom') => {
+  const selectPeriod = (value: (typeof periodOptions)[number] | 'yesterday' | 'custom') => {
     setPeriod(value);
     setRangeError(null);
     resetEvents();
     resetDayDetail();
-    if (value !== 'custom') setRange(queryForPeriod(value));
+    if (value === 'yesterday') setRange(queryForYesterday());
+    else if (value !== 'custom') setRange(queryForPeriod(value));
   };
 
   const applyCustomRange = () => {
     const fromValue = customFromInput.current?.value ?? customFrom;
     const toValue = customToInput.current?.value ?? customTo;
     try {
-      setRange(queryForRange(new Date(fromValue), new Date(toValue)));
+      setRange(queryForDateRange(fromValue, toValue));
       setCustomFrom(fromValue);
       setCustomTo(toValue);
       setRangeError(null);
@@ -461,16 +463,23 @@ export function App() {
   const maximumTokens = maxCount(trends.map(({ metrics }) => metrics.totalTokens));
   const chartValue = (metrics: (typeof userTrends)[number]['metrics']) =>
     chartMetric === 'requests' ? metrics.totalRequests : metrics.totalTokens;
-  const chartUsers = [...userUsage]
+  const chartValueForUser = (row: (typeof userRows)[number]) =>
+    chartMetric === 'activity' ? row.eventCount : chartValue(row.metrics);
+  const chartUsers = userRows
+    .filter(
+      ({ eventCount, metrics }) =>
+        BigInt(eventCount) > 0n || BigInt(metrics.totalRequests) > 0n || BigInt(metrics.totalTokens) > 0n
+    )
     .sort((left, right) => {
-      const difference = BigInt(chartValue(right.metrics)) - BigInt(chartValue(left.metrics));
+      const difference = BigInt(chartValueForUser(right)) - BigInt(chartValueForUser(left));
       return difference === 0n ? left.userId.localeCompare(right.userId) : difference > 0n ? 1 : -1;
-    })
-    .slice(0, 8);
+    });
   const chartUserIds = new Set(chartUsers.map(({ userId }) => userId));
   const visibleUserTrends = userTrends.filter(({ userId }) => chartUserIds.has(userId));
   const userTrendByKey = new Map(visibleUserTrends.map((entry) => [`${entry.bucketStart}\0${entry.userId}`, entry]));
-  const maximumUserTrend = maxCount(visibleUserTrends.map(({ metrics }) => chartValue(metrics)));
+  const maximumUserTrend = chartMetric === 'activity'
+    ? maxCount(chartUsers.map(({ eventCount }) => eventCount))
+    : maxCount(visibleUserTrends.map(({ metrics }) => chartValue(metrics)));
   const maximumModelCalls = maxCount(models.map(({ callCount }) => callCount));
   const taskSourceReady = taskSummary?.sourceState === 'AUTHORITATIVE';
   const usageSourceReady = projection ? hasUsageFacts(projection) : false;
@@ -493,7 +502,15 @@ export function App() {
     ? (BigInt(projection.summary.accountedRequests) + BigInt(projection.summary.rejectedRequests)).toString()
     : '0';
   const successRate = projection ? callSuccessRate(projection.summary) : null;
-  const activeUsers = projection ? new Set(projection.groups.map(({ userId }) => userId)).size.toString() : '0';
+  const taskActiveUserIds = new Set(
+    (taskSummary?.userEventCounts ?? [])
+      .filter(({ eventCount }) => BigInt(eventCount) > 0n)
+      .map(({ userId }) => userId)
+  );
+  const meteredUserIds = new Set(projection?.groups.map(({ userId }) => userId) ?? []);
+  const activeUserIds = new Set([...taskActiveUserIds, ...meteredUserIds]);
+  const activeUsers = activeUserIds.size.toString();
+  const unmeteredTaskUsers = [...taskActiveUserIds].filter((userId) => !meteredUserIds.has(userId));
   const dayData = dayDetail.kind === 'ready' ? dayDetail.data : null;
   const dayTaskSummary = dayData?.taskSummary;
   const dayUsageRows = dayData ? usageDetails(dayData.projection) : [];
@@ -736,8 +753,8 @@ export function App() {
             <Button
               icon={<Refresh />}
               onClick={() => {
-                if (period !== 'custom') setRange(queryForPeriod(period));
-                else setReloadKey((value) => value + 1);
+                if (period === 'custom') setReloadKey((value) => value + 1);
+                else setRange(period === 'yesterday' ? queryForYesterday() : queryForPeriod(period));
               }}
               loading={dashboard.kind === 'loading'}
             >
@@ -752,6 +769,7 @@ export function App() {
             <div className='period-buttons' role='group' aria-label={copy.period}>
               {(
                 [
+                  ['yesterday', copy.yesterday],
                   [7, copy.last7Days],
                   [30, copy.last30Days],
                   [90, copy.last90Days],
@@ -775,7 +793,8 @@ export function App() {
                 <span>{copy.from}</span>
                 <input
                   ref={customFromInput}
-                  type='datetime-local'
+                  type='date'
+                  max={localDate(new Date())}
                   value={customFrom}
                   onChange={(event) => setCustomFrom(event.target.value)}
                 />
@@ -784,7 +803,8 @@ export function App() {
                 <span>{copy.to}</span>
                 <input
                   ref={customToInput}
-                  type='datetime-local'
+                  type='date'
+                  max={localDate(new Date())}
                   value={customTo}
                   onChange={(event) => setCustomTo(event.target.value)}
                 />
@@ -879,14 +899,26 @@ export function App() {
               />
               <MetricCard
                 label={copy.activeUsers}
-                value={usageSourceReady ? exactCount(activeUsers, locale) : '—'}
+                value={taskSourceReady || usageSourceReady ? exactCount(activeUsers, locale) : '—'}
                 detail={
-                  usageSourceReady
-                    ? `${exactCount(models.length.toString(), locale)} ${copy.modelDistribution}`
+                  taskSourceReady || usageSourceReady
+                    ? copy.activeUsersScope
                     : copy.noData
                 }
               />
             </section>
+
+            {taskSourceReady && unmeteredTaskUsers.length > 0 && (
+              <Alert
+                className='dashboard-alert'
+                type='warning'
+                content={`${copy.usageCoverageWarning} ${copy.taskLedgerUsers}: ${exactCount(
+                  taskActiveUserIds.size.toString(),
+                  locale
+                )}; ${copy.meteredUsers}: ${exactCount(meteredUserIds.size.toString(), locale)}.`}
+                showIcon
+              />
+            )}
 
             {successRate !== null && (
               <p className='accuracy-note summary-note'>
@@ -910,6 +942,7 @@ export function App() {
                         value={chartMetric}
                         onChange={(event) => setChartMetric(event.currentTarget.value as ChartMetric)}
                       >
+                        <option value='activity'>{copy.activityMetric}</option>
                         <option value='requests'>{copy.callsMetric}</option>
                         <option value='tokens'>{copy.tokensMetric}</option>
                       </select>
@@ -926,7 +959,11 @@ export function App() {
                         <div className='analysis-chart-heading'>
                           <div>
                             <h3>{copy.userTrend}</h3>
-                            <p>{copy.userTrendDescription}</p>
+                            <p>
+                              {chartMetric === 'activity'
+                                ? copy.activityUserTrendDescription
+                                : copy.userTrendDescription}
+                            </p>
                           </div>
                           <small>{copy.topUsersNotice}</small>
                         </div>
@@ -937,31 +974,54 @@ export function App() {
                             <div
                               className='usage-heatmap-header'
                               style={{
-                                gridTemplateColumns: `minmax(132px, 180px) repeat(${trends.length}, minmax(58px, 1fr))`,
+                                gridTemplateColumns: chartMetric === 'activity'
+                                  ? 'minmax(132px, 180px) minmax(120px, 1fr)'
+                                  : `minmax(132px, 180px) repeat(${trends.length}, minmax(58px, 1fr))`,
                               }}
                             >
                               <span>{copy.user}</span>
-                              {trends.map(({ bucketStart }) => <time key={bucketStart}>{day(bucketStart)}</time>)}
+                              {chartMetric === 'activity'
+                                ? <span>{copy.selectedRangeTotal}</span>
+                                : trends.map(({ bucketStart }) => <time key={bucketStart}>{day(bucketStart)}</time>)}
                             </div>
-                            {chartUsers.map(({ userId }) => (
+                            {chartUsers.map((user) => (
                               <div
                                 className='usage-heatmap-row'
-                                key={userId}
+                                key={user.userId}
                                 style={{
-                                  gridTemplateColumns: `minmax(132px, 180px) repeat(${trends.length}, minmax(58px, 1fr))`,
+                                  gridTemplateColumns: chartMetric === 'activity'
+                                    ? 'minmax(132px, 180px) minmax(120px, 1fr)'
+                                    : `minmax(132px, 180px) repeat(${trends.length}, minmax(58px, 1fr))`,
                                 }}
                               >
-                                <strong title={userId}>{displayNameByUserId.get(userId) ?? userId}</strong>
-                                {trends.map(({ bucketStart }) => {
+                                <strong title={user.userId}>
+                                  {displayNameByUserId.get(user.userId) ?? user.displayName}
+                                </strong>
+                                {chartMetric === 'activity' ? (
+                                  <span
+                                    className='usage-heat-cell'
+                                    title={`${displayNameByUserId.get(user.userId) ?? user.displayName} · ${copy.selectedRangeTotal} · ${exactCount(user.eventCount, locale)}`}
+                                    style={{
+                                      backgroundColor: user.eventCount === '0'
+                                        ? 'var(--color-raised)'
+                                        : `color-mix(in srgb, var(--color-brand) ${Math.max(
+                                            12,
+                                            percentage(user.eventCount, maximumUserTrend)
+                                          )}%, var(--color-raised))`,
+                                    }}
+                                  >
+                                    {exactCount(user.eventCount, locale)}
+                                  </span>
+                                ) : trends.map(({ bucketStart }) => {
                                   const value = chartValue(
-                                    userTrendByKey.get(`${bucketStart}\0${userId}`)?.metrics ?? emptyMetrics()
+                                    userTrendByKey.get(`${bucketStart}\0${user.userId}`)?.metrics ?? emptyMetrics()
                                   );
                                   const intensity = percentage(value, maximumUserTrend);
                                   return (
                                     <span
                                       className='usage-heat-cell'
                                       key={bucketStart}
-                                      title={`${displayNameByUserId.get(userId) ?? userId} · ${day(bucketStart)} · ${
+                                      title={`${displayNameByUserId.get(user.userId) ?? user.displayName} · ${day(bucketStart)} · ${
                                         chartMetric === 'requests' ? exactCount(value, locale) : `${tokenCount(value)} Token`
                                       }`}
                                       style={{

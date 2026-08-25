@@ -67,8 +67,15 @@ export function auditVisibleUsers(users: TenantUser[]): TenantUser[] {
   );
 }
 
-function auditVisibleUserIds(userIds: Iterable<string>): string[] {
-  return [...new Set([...userIds].filter((userId) => !excludedAuditUserIds.has(userId)))];
+export function auditVisibleLedgerUserIds(
+  userIds: Iterable<string>,
+  directoryUsers: TenantUser[] | null = null
+): string[] {
+  const excludedUserIds = new Set(excludedAuditUserIds);
+  for (const { userId, displayName } of directoryUsers ?? []) {
+    if (excludedAuditDisplayNames.has(displayName.trim())) excludedUserIds.add(userId);
+  }
+  return [...new Set([...userIds].filter((userId) => !excludedUserIds.has(userId)))];
 }
 
 export class UsageApiError extends Error {
@@ -85,6 +92,36 @@ export function queryForPeriod(days: number, now = new Date()): UsageQuery {
     throw new Error('Invalid usage period');
   }
   return queryForRange(new Date(now.getTime() - days * 86_400_000), now, now);
+}
+
+function localDateStart(value: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return new Date(Number.NaN);
+  const [, yearValue, monthValue, dayValue] = match;
+  const year = Number(yearValue);
+  const month = Number(monthValue) - 1;
+  const day = Number(dayValue);
+  const date = new Date(year, month, day);
+  return date.getFullYear() === year && date.getMonth() === month && date.getDate() === day
+    ? date
+    : new Date(Number.NaN);
+}
+
+export function queryForDateRange(fromValue: string, toValue: string, now = new Date()): UsageQuery {
+  const from = localDateStart(fromValue);
+  const inclusiveTo = localDateStart(toValue);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (inclusiveTo.getTime() > today.getTime()) throw new Error('Invalid usage range');
+  const to = inclusiveTo.getTime() === today.getTime()
+    ? now
+    : new Date(inclusiveTo.getFullYear(), inclusiveTo.getMonth(), inclusiveTo.getDate() + 1);
+  return queryForRange(from, to, now);
+}
+
+export function queryForYesterday(now = new Date()): UsageQuery {
+  const to = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const from = new Date(to.getFullYear(), to.getMonth(), to.getDate() - 1);
+  return queryForRange(from, to, now);
 }
 
 export function queryForRange(from: Date, to: Date, now = new Date()): UsageQuery {
@@ -322,19 +359,20 @@ export async function loadUsageDashboard(
 ): Promise<UsageDashboardData> {
   const allUsers = await loadQuotaUsers(token, signal);
   const users = allUsers ? auditVisibleUsers(allUsers) : null;
-  const visibleUserIds = new Set(users?.map(({ userId }) => userId) ?? []);
-  if (!users) {
+  let candidateUserIds = query.userIds;
+  if (!candidateUserIds) {
     const seedParameters = usageQueryString(query);
     const [seedProjection, seedTaskSummary] = await Promise.all([
       readJson(`/v1/usage/summary?${seedParameters}`, token, signal).then(parseTenantUsageProjection),
       readJson(`/v1/tasks/summary?${taskQueryString(query)}`, token, signal).then(parseTenantTaskSummary),
     ]);
-    for (const userId of auditVisibleUserIds([
+    candidateUserIds = [
       ...seedProjection.groups.map(({ userId }) => userId),
       ...seedTaskSummary.userEventCounts.map(({ userId }) => userId),
-    ])) visibleUserIds.add(userId);
+    ];
+    if (candidateUserIds.length === 0) candidateUserIds = users?.map(({ userId }) => userId) ?? [];
   }
-  const userIds = (query.userIds ?? [...visibleUserIds]).filter((userId) => visibleUserIds.has(userId));
+  const userIds = auditVisibleLedgerUserIds(candidateUserIds, allUsers);
   // ponytail: reuse the existing <=100 inclusive user scope; add an exclude-user query only when a tenant exceeds it.
   if (userIds.length === 0 || userIds.length > 100) throw new UsageApiError(503);
   const scopedQuery = { ...query, userIds };

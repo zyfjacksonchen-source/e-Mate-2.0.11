@@ -10,10 +10,13 @@ import type {
 } from '@e-mate/monitoring-contract';
 import type { TenantUser } from '@e-mate/admin-contract';
 import {
+  auditVisibleLedgerUserIds,
   auditVisibleUsers,
+  queryForDateRange,
   queryForPeriod,
   queryForDay,
   queryForRange,
+  queryForYesterday,
   loginUsageAccount,
   logoutUsageAccount,
   refreshUsageAccount,
@@ -188,6 +191,15 @@ test('rejects invalid periods and cross-scope dashboard pairs', () => {
     () => queryForRange(new Date('2026-07-01T00:00:00.000Z'), new Date('2026-07-04T00:00:00.000Z'), now),
     /Invalid usage range/
   );
+  const localNow = new Date(2026, 7, 25, 9, 57, 30);
+  const yesterday = queryForYesterday(localNow);
+  assert.deepEqual(
+    [new Date(yesterday.from).getDate(), new Date(yesterday.from).getHours(), new Date(yesterday.to).getDate(), new Date(yesterday.to).getHours()],
+    [24, 0, 25, 0]
+  );
+  assert.equal(queryForDateRange('2026-08-25', '2026-08-25', localNow).to, localNow.toISOString());
+  assert.throws(() => queryForDateRange('2026-08-25', '2026-08-26', localNow), /Invalid usage range/);
+  assert.throws(() => queryForDateRange('2026-02-30', '2026-08-25', localNow), /Invalid usage range/);
   const projection = {
     tenantId: 'tenant-a',
     from: '2026-07-01T00:00:00.000Z',
@@ -267,6 +279,13 @@ test('excludes internal audit accounts by stable id or exact display name', () =
     ]).map(({ userId }) => userId),
     ['member-1']
   );
+  assert.deepEqual(
+    auditVisibleLedgerUserIds(
+      ['ledger-only', 'test-id', 'member-1', 'ledger-only'],
+      [user('test-id', '测试'), user('member-1', '正常用户')]
+    ),
+    ['ledger-only', 'member-1']
+  );
 });
 
 test('rejects event pages outside the selected tenant ledger scope', () => {
@@ -312,7 +331,14 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
   assert.doesNotMatch(source, /metrics\.totalTokens[\s\S]{0,120}tokenLimit|<progress/);
   assert.match(source, /copy\.weeklyQuota/);
   assert.match(source, /taskSummary\?\.userEventCounts/);
-  assert.match(source, /queryForRange/);
+  assert.match(source, /const activeUserIds = new Set\(\[\.\.\.taskActiveUserIds, \.\.\.meteredUserIds\]\)/);
+  assert.match(source, /copy\.usageCoverageWarning/);
+  assert.match(source, /value='activity'/);
+  assert.doesNotMatch(source, /\.slice\(0, 8\)/);
+  assert.match(source, /queryForDateRange/);
+  assert.match(source, /copy\.yesterday/);
+  assert.match(source, /type='date'/);
+  assert.doesNotMatch(source, /datetime-local/);
   assert.match(source, /mode='multiple'/);
   assert.match(source, /queryForDay/);
   assert.match(source, /usageUserTrend/);
@@ -328,6 +354,8 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
   assert.doesNotMatch(source, /eventState\.events[\s\S]{0,160}eventCount/);
   const apiSource = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8');
   assert.match(apiSource, /\/v1\/admin\/users/);
+  assert.match(apiSource, /candidateUserIds = \[/);
+  assert.match(apiSource, /seedTaskSummary\.userEventCounts/);
   assert.match(apiSource, /const scopedQuery = \{ \.\.\.query, userIds \}/);
 });
 
