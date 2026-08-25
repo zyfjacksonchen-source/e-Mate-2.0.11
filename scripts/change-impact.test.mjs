@@ -416,6 +416,15 @@ describe('repository release boundary', () => {
     ]) assert.equal(classify(...paths).lane, 'base', paths.join(', '))
     assert.equal(classify('packages/dsh-plugin-memory-evolve/pnpm-lock.yaml').lane, 'plugin-only')
 
+    const pureBase = classify('desktop/e-mate-desktop/src/main.ts')
+    const baseAndEnterprise = classify('desktop/e-mate-desktop/src/main.ts', 'enterprise/apps/auth-gateway/src/index.ts')
+    const componentAndEnterprise = classify('packages/dsh-plugin-memory-evolve/src/index.ts', 'enterprise/apps/auth-gateway/src/index.ts')
+    assert.equal(pureBase.run_enterprise, false)
+    assert.equal(baseAndEnterprise.lane, 'base')
+    assert.equal(baseAndEnterprise.run_enterprise, true)
+    assert.equal(componentAndEnterprise.lane, 'base')
+    assert.equal(componentAndEnterprise.run_enterprise, true)
+
     const base = classify('desktop/e-mate-desktop/src/main.ts')
     assert.deepEqual(base.base_platform_component_jobs, [
       { component: '@e-mate/dsh-plugin-computer-use', target: 'darwin-arm64', runner: 'macos-15', publish: false },
@@ -492,7 +501,9 @@ describe('repository release boundary', () => {
   })
 
   it('keeps enterprise, verification, and docs changes out of product builds', () => {
-    assert.equal(classify('enterprise/apps/auth-gateway/src/index.ts').lane, 'enterprise-only')
+    const enterprise = classify('enterprise/apps/auth-gateway/src/index.ts')
+    assert.equal(enterprise.lane, 'enterprise-only')
+    assert.equal(enterprise.run_enterprise, true)
     assert.equal(classify('scripts/change-impact.test.mjs').lane, 'verification-only')
     assert.equal(classify('docs/development-log.md').lane, 'docs-only')
 
@@ -537,8 +548,11 @@ describe('repository release boundary', () => {
     assert.match(workflow, /if test "\$BASE_SHA" = 0000000000000000000000000000000000000000;(?:.|\n)*?ACCEPTED_PREDECESSOR/u)
     assert.match(workflow, /name: e-mate-change-impact-\$\{\{ steps\.classify\.outputs\.head_sha \}\}/u)
     assert.match(workflow, /enterprise:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_enterprise == 'true'/u)
+    assert.match(workflow, /RUN_ENTERPRISE: \$\{\{ needs\.impact\.outputs\.run_enterprise \}\}(?:.|\n)*?case "\$RUN_ENTERPRISE" in\n\s+true\) test "\$ENTERPRISE" = success ;;\n\s+false\) test "\$ENTERPRISE" = skipped ;;/u)
     assert.match(workflow, /admission:\n(?:.|\n)*?case "\$LANE" in(?:.|\n)*?plugin-only\)(?:.|\n)*?test "\$PORTABLE_PUBLISH" = true;(?:.|\n)*?test "\$PROFILE_PORTABLE" = success(?:.|\n)*?test "\$PROFILE" = skipped(?:.|\n)*?test "\$SOURCE" = skipped(?:.|\n)*?test "\$WINDOWS" = skipped(?:.|\n)*?test "\$MACOS" = skipped/u)
     assert.match(workflow, /base\)(?:.|\n)*?test "\$BASE_PLATFORM_COMPONENTS" = success/u)
+    const sourceJob = workflow.slice(workflow.indexOf('  source:'), workflow.indexOf('\n  plugins:'))
+    assert.doesNotMatch(sourceJob, /enterprise\/pnpm-lock\.yaml|pnpm --dir enterprise|pnpm enterprise:/u)
     for (const [jobName, nextJobName] of [
       ['desktop-windows', 'desktop-macos'],
       ['desktop-macos', 'admission'],

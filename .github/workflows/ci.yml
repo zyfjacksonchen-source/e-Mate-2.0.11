@@ -95,13 +95,11 @@ jobs:
             pnpm-lock.yaml
             packages/dsh-plugin-*/pnpm-lock.yaml
             packages/dsh/profile/plugins/emate-shell/pnpm-lock.yaml
-            enterprise/pnpm-lock.yaml
             upstream/deepseek-harness/pnpm-lock.yaml
 
       - name: Install exact workspaces
         run: |
           pnpm install --frozen-lockfile
-          pnpm --dir enterprise install --frozen-lockfile
           pnpm --dir upstream/deepseek-harness install --frozen-lockfile
 
       - name: Build pinned DeepSeek Harness
@@ -111,9 +109,6 @@ jobs:
         run: |
           pnpm check:target
           pnpm test
-          pnpm enterprise:check
-          pnpm enterprise:test
-          pnpm enterprise:build
 
       - name: Check release carrier
         run: pnpm test:release
@@ -629,7 +624,7 @@ jobs:
           retention-days: 7
 
   enterprise:
-    name: Enterprise-only contracts
+    name: Enterprise contracts
     needs: impact
     if: needs.impact.outputs.run_enterprise == 'true'
     runs-on: ubuntu-24.04
@@ -817,12 +812,18 @@ jobs:
           PROFILE: ${{ needs.profile-composition.result }}
           PUBLISH_COMPONENTS: ${{ needs.impact.outputs.publish_components_json }}
           PORTABLE_PUBLISH: ${{ needs.impact.outputs.portable_publish }}
+          RUN_ENTERPRISE: ${{ needs.impact.outputs.run_enterprise }}
           ENTERPRISE: ${{ needs.enterprise.result }}
           WINDOWS: ${{ needs.desktop-windows.result }}
           MACOS: ${{ needs.desktop-macos.result }}
         run: |
           set -euo pipefail
           test "$IMPACT" = success
+          case "$RUN_ENTERPRISE" in
+            true) test "$ENTERPRISE" = success ;;
+            false) test "$ENTERPRISE" = skipped ;;
+            *) exit 1 ;;
+          esac
           case "$LANE" in
             base)
               test "$SOURCE" = success
@@ -832,7 +833,6 @@ jobs:
               test "$PLUGINS" = skipped
               test "$PROFILE_PORTABLE" = skipped
               test "$PROFILE" = skipped
-              test "$ENTERPRISE" = skipped
               ;;
             plugin-only)
               test "$PLUGINS" = success
@@ -847,13 +847,11 @@ jobs:
                 test "$PROFILE" = success
               fi
               test "$SOURCE" = skipped
-              test "$ENTERPRISE" = skipped
               test "$WINDOWS" = skipped
               test "$MACOS" = skipped
               test "$BASE_PLATFORM_COMPONENTS" = skipped
               ;;
             enterprise-only)
-              test "$ENTERPRISE" = success
               test "$SOURCE" = skipped
               test "$PLUGINS" = skipped
               test "$PROFILE_PORTABLE" = skipped
@@ -867,7 +865,6 @@ jobs:
               test "$PLUGINS" = skipped
               test "$PROFILE_PORTABLE" = skipped
               test "$PROFILE" = skipped
-              test "$ENTERPRISE" = skipped
               test "$WINDOWS" = skipped
               test "$MACOS" = skipped
               test "$BASE_PLATFORM_COMPONENTS" = skipped

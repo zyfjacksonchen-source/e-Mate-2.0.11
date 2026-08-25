@@ -600,7 +600,7 @@ function result({
     lane,
     run_base: lane === 'base',
     run_plugins: lane === 'plugin-only',
-    run_enterprise: lane === 'enterprise-only',
+    run_enterprise: classifications.some(item => item.kind === 'enterprise'),
     run_verification: lane !== 'none',
     components,
     component_jobs: componentJobs,
