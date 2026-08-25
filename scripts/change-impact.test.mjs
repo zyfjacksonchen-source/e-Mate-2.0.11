@@ -734,9 +734,26 @@ describe('repository release boundary', () => {
     assert.match(workflow, /name: e-mate-desktop-profile-build-receipt-\$\{\{ github\.sha \}\}/u)
     assert.match(workflow, /desktop-windows:(?:.|\n)*?yarn dist:win/u)
     assert.match(workflow, /desktop-macos:(?:.|\n)*?yarn dist:mac-unsigned-release/u)
+    const platformJobNames = [
+      'Windows x64 / unsigned desktop installer',
+      'macOS universal / unsigned desktop disk image',
+    ]
+    const releaseConsumers = [
+      readFileSync(new URL('../.github/workflows/desktop-release.yml', import.meta.url), 'utf8'),
+      readFileSync(new URL('../.github/workflows/profile-release.yml', import.meta.url), 'utf8'),
+      readFileSync(new URL('../.github/workflows/desktop-performance.yml', import.meta.url), 'utf8'),
+      readFileSync(new URL('./desktop-admission.mjs', import.meta.url), 'utf8'),
+    ]
+    for (const name of platformJobNames) {
+      assert.ok(workflow.includes(`name: ${name}`))
+      for (const consumer of releaseConsumers) assert.ok(consumer.includes(name))
+    }
     assert.match(workflow, /name: e-mate-desktop-windows-\$\{\{ needs\.impact\.outputs\.head_sha \}\}/u)
     assert.match(workflow, /name: e-mate-desktop-macos-\$\{\{ needs\.impact\.outputs\.head_sha \}\}/u)
     assert.doesNotMatch(workflow, /yarn dist:mac-smoke|name: e-mate-(?:windows-x64|macos-universal)-unsigned/u)
+
+    const coordinator = readFileSync(new URL('../.github/workflows/release-coordinator.yml', import.meta.url), 'utf8')
+    assert.match(coordinator, /--workflow desktop-release\.yml\n\s+--inputs '\{"ci_run_id":"\$\{\{ needs\.ci\.outputs\.run_id \}\}","source_sha":"\$\{\{ inputs\.source_sha \}\}"\}'/u)
     assert.equal(workflow.match(/GITHUB_STEP_SUMMARY/gu)?.length, 4)
     assert.doesNotMatch(workflow, /^\s+paths(?:-ignore)?:/mu)
   })

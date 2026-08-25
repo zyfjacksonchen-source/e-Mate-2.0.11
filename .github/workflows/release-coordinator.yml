@@ -99,7 +99,7 @@ jobs:
         run: >-
           node scripts/release-coordinator.mjs dispatch --source "$EMATE_SOURCE"
           --workflow desktop-release.yml
-          --inputs '{"ci_run_id":"${{ needs.ci.outputs.run_id }}"}'
+          --inputs '{"ci_run_id":"${{ needs.ci.outputs.run_id }}","source_sha":"${{ inputs.source_sha }}"}'
       - id: artifact
         run: node scripts/release-coordinator.mjs artifact --run-id "${{ steps.run.outputs.run_id }}" --name "e-mate-desktop-release-$EMATE_SOURCE"
 

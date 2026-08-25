@@ -744,7 +744,7 @@ jobs:
           printf '### CI timing\n\n| Job | Seconds | Result |\n|---|---:|---|\n| Enterprise | %s | %s |\n' "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   desktop-windows:
-    name: Windows x64 / app smoke or distribution
+    name: Windows x64 / unsigned desktop installer
     needs: [impact, source]
     if: needs.impact.outputs.windows_app_smoke == 'true'
     runs-on: windows-2025
@@ -869,7 +869,7 @@ jobs:
           printf '### CI timing\n\n| Job | Seconds | Result |\n|---|---:|---|\n| Windows desktop | %s | %s |\n' "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   desktop-macos:
-    name: macOS universal / app smoke or distribution
+    name: macOS universal / unsigned desktop disk image
     needs: [impact, source]
     if: needs.impact.outputs.macos_app_smoke == 'true'
     runs-on: macos-15
