@@ -204,6 +204,21 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(pickDirectory).toHaveBeenCalledTimes(3)
   })
 
+  it('keeps ownership across a same-path synthetic popstate', async () => {
+    history.replaceState(null, '', '/')
+    let resolvePick!: (path: string) => void
+    const pickDirectory = vi.fn(() => new Promise<string>(resolve => { resolvePick = resolve }))
+    const create = vi.fn(async ({ path }: { path: string }) => ({ workspaceId: `workspace:${path}` }))
+    const pending = attachWorkspaceFromRoute({ workspaces: { pickDirectory, create } })
+
+    dispatchEvent(new PopStateEvent('popstate'))
+    resolvePick('/work/selected')
+
+    await expect(pending).resolves.toBe('workspace:/work/selected')
+    expect(create).toHaveBeenCalledOnce()
+    expect(create).toHaveBeenCalledWith({ path: '/work/selected' })
+  })
+
   it('attaches once and drops late picker or attach results after a route switch', async () => {
     history.replaceState(null, '', '/')
     const create = vi.fn(async ({ path }: { path: string }) => ({ workspaceId: `workspace:${path}` }))
@@ -218,6 +233,8 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     pickDirectory.mockReturnValueOnce(new Promise(resolve => { resolvePick = resolve }))
     const pickedLate = attachWorkspaceFromRoute(ctx)
     history.pushState(null, '', '/capabilities')
+    dispatchEvent(new PopStateEvent('popstate'))
+    history.pushState(null, '', '/')
     dispatchEvent(new PopStateEvent('popstate'))
     resolvePick('/work/late')
     await expect(pickedLate).resolves.toBeNull()

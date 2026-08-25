@@ -203,7 +203,9 @@ function captureRouteFence(ctx: any): RouteFence {
   const sourcePath = location.pathname
   const sourceSession = ctx.sessions.list.getSnapshot().current
   let stale = false
-  const onNavigation = () => { stale = true }
+  const onNavigation = () => {
+    if (location.pathname !== sourcePath) stale = true
+  }
   addEventListener('popstate', onNavigation)
   const unsubscribe = ctx.sessions.list.subscribe?.(() => {
     if (ctx.sessions.list.getSnapshot().current !== sourceSession) stale = true
