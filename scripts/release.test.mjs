@@ -17,7 +17,7 @@ import {
   writeR2PublicationPlan,
 } from './publish-r2.mjs'
 import { releasePrefix, releaseSource } from './release-source.mjs'
-import { renderDownloadPage } from './render-download-page.mjs'
+import { stageDownloadPage, validateDownloadPage } from './render-download-page.mjs'
 import { prepareHarnessBaseImports } from './component-base-imports.mjs'
 import { stageDesktopProfileArtifact } from './stage-desktop-profile-artifact.mjs'
 import {
@@ -398,7 +398,12 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.deepEqual(Object.keys(release.jobs), ['pack', 'clean-install', 'evidence'])
   assert.equal(release.jobs['clean-install'].needs, 'pack')
   assert.equal(release.jobs.evidence.needs, 'pack')
-  assert.match(release.jobs.evidence.steps.find(step => step.name === 'Render the immutable candidate download page').run, /render-download-page\.mjs/u)
+  const website = release.jobs.evidence.steps.find(step => step.name === 'Stage the immutable candidate download site')
+  assert.equal(website.run, 'node scripts/render-download-page.mjs --commit "$GITHUB_SHA" --out dist/download-page --plan dist/website-publication-plan.json')
+  const releaseCandidate = release.jobs.evidence.steps.find(step => step.uses === 'actions/upload-artifact@v4')
+  assert.match(releaseCandidate.with.path, /^\s*dist\/download-page\s*$/mu)
+  assert.match(releaseCandidate.with.path, /dist\/website-publication-plan\.json/u)
+  assert.doesNotMatch(releaseCandidate.with.path, /dist\/download-page\/index\.html/u)
   const cleanInstall = release.jobs['clean-install'].steps.find(step => step.name === 'Install tarballs with npm and run setup checks')
   assert.equal((cleanInstall.run.match(/node "\$cli" setup$/gmu) ?? []).length, 2)
   assert.ok(cleanInstall.run.includes('version="$(node -p "require(process.argv[1]).version" "$npm_root/@e-mate/dsh/package.json")"'))
@@ -457,11 +462,69 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.match(readFileSync('.gitattributes', 'utf8'), /^\* text=auto eol=lf$/mu)
 })
 
-test('one admitted producer feeds the updater, legacy 2.0.12, and download page', async t => {
-  const page = renderDownloadPage(readFileSync('deploy/download-page/index.html', 'utf8'))
+test('download site stages exact bytes and a closed non-published server plan', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'e-mate-download-site-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const output = join(root, 'download-page')
+  await file(output, 'stale-template.html', 'stale')
+  const planPath = join(root, 'website-publication-plan.json')
+  const plan = stageDownloadPage({
+    outputDirectory: output,
+    planPath,
+    sourceCommit: SOURCE_COMMIT,
+  })
+  assert.deepEqual(Object.keys(plan), [
+    'schema_version', 'document_type', 'status', 'source_commit', 'staged_directory', 'publication_contract', 'files',
+  ])
+  assert.deepEqual(Object.keys(plan.publication_contract), [
+    'target', 'strategy', 'preserve_unrelated_content', 'switch_symlink_last', 'server_writes_performed',
+    'r2_writes_performed', 'published', 'live_verified',
+  ])
+  assert.equal(plan.status, 'prepared')
+  assert.equal(plan.source_commit, SOURCE_COMMIT)
+  assert.equal(plan.staged_directory, 'download-page')
+  assert.deepEqual(plan.publication_contract, {
+    target: 'website-server',
+    strategy: 'versioned-relative-symlink',
+    preserve_unrelated_content: true,
+    switch_symlink_last: true,
+    server_writes_performed: false,
+    r2_writes_performed: false,
+    published: false,
+    live_verified: false,
+  })
+  assert.equal(existsSync(join(output, 'stale-template.html')), false)
+  assert.deepEqual(plan.files.map(entry => entry.relative_path), [
+    'assets/e-mate-hero-decor.d7f99a88447b.png',
+    'assets/emate-desktop-workspace.622f3434f88c.jpg',
+    'assets/emate-download-icon.5014add964e1.svg',
+    'assets/emate-download-robot.9fbe832b9873.png',
+    'assets/emate-logo.e0bf52b1480f.png',
+    'assets/emate-mark.1a6dbbe3b5fe.png',
+    'assets/emate-platform-apple.0bed6ae6a1b9.png',
+    'assets/emate-platform-windows.dd86c8094b5a.png',
+    'index.html',
+    'install-macos.html',
+    'site.a8feef4609f9.js',
+    'styles.c2f7dccc8398.css',
+  ])
+  for (const entry of plan.files) {
+    assert.deepEqual(Object.keys(entry), ['relative_path', 'bytes', 'sha256', 'content_type'])
+    assert.ok(readFileSync(join('deploy/download-page', entry.relative_path)).equals(readFileSync(join(output, entry.relative_path))))
+  }
+  assert.deepEqual(JSON.parse(readFileSync(planPath, 'utf8')), plan)
+})
+
+test('one admitted producer feeds the updater, legacy 2.0.12, and 2.0.13 download site', async t => {
+  const page = readFileSync('deploy/download-page/index.html', 'utf8')
   const macGuide = readFileSync('deploy/download-page/install-macos.html', 'utf8')
   const scriptName = 'site.a8feef4609f9.js'
   const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
+  assert.equal(validateDownloadPage(page, macGuide, script), '2.0.13')
+  assert.throws(
+    () => validateDownloadPage(page.replace('data-desktop-version="2.0.13"', 'data-desktop-version="2.0.12"'), macGuide, script),
+    /desktop manifest contract is incomplete/u,
+  )
   assert.equal(scriptName.split('.')[1], createHash('sha256').update(script).digest('hex').slice(0, 12))
   for (const platform of ['macos', 'windows']) assert.match(page, new RegExp(`data-platform="${platform}"`, 'u'))
   for (const artifact of ['darwin', 'win32']) assert.match(script, new RegExp(`artifacts\\.${artifact}`, 'u'))
@@ -489,8 +552,10 @@ test('one admitted producer feeds the updater, legacy 2.0.12, and download page'
   assert.match(page, /未签名/u)
   assert.match(page, /e-Mate 会校验、替换并自动重开/u)
   assert.match(page, /\/ecorex-agent\/admin\//u)
-  assert.match(macGuide, /全新安装 2\.0\.12/u)
-  assert.match(macGuide, /已安装 2\.0\.11 的用户可在应用内确认更新/u)
+  assert.match(page, /已安装 2\.0\.12 的用户可在应用内确认更新到 2\.0\.13/u)
+  assert.match(macGuide, /全新安装 2\.0\.13/u)
+  assert.match(macGuide, /已安装 2\.0\.12 的用户可在应用内确认更新/u)
+  assert.doesNotMatch(`${page}\n${macGuide}`, /@e-mate|dsh-plugin|dsh-pet|Cowart|Excalidraw/u)
   assert.match(macGuide, /\/usr\/bin\/arch -arm64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)
   assert.match(macGuide, /\/usr\/bin\/arch -x86_64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)
   assert.match(macGuide, /Password:.*输入时不会显示任何字符/u)

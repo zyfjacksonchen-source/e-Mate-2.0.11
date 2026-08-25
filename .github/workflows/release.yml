@@ -164,8 +164,8 @@ jobs:
       - name: Generate SHA256, manifest, SPDX and license inventory
         run: node scripts/release.mjs evidence --from dist/npm --out dist/release
 
-      - name: Render the immutable candidate download page
-        run: node scripts/render-download-page.mjs --commit "$GITHUB_SHA" --out dist/download-page/index.html
+      - name: Stage the immutable candidate download site
+        run: node scripts/render-download-page.mjs --commit "$GITHUB_SHA" --out dist/download-page --plan dist/website-publication-plan.json
 
       - name: Verify generated evidence checksums
         run: |
@@ -182,6 +182,7 @@ jobs:
             dist/npm/*
             dist/release/*
             dist/r2/r2-publication-plan.json
-            dist/download-page/index.html
+            dist/download-page
+            dist/website-publication-plan.json
           if-no-files-found: error
           retention-days: 7
