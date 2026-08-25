@@ -96,6 +96,9 @@ const RETIRED_PROFILE_PACKAGES = new Set([
 const OWNED_PROFILE_PACKAGES = new Set([...MANAGED_PROFILE_PACKAGES, ...RETIRED_PROFILE_PACKAGES])
 const PROFILE_INSTALL_RECEIPT = '.e-mate-install.json'
 const COMPONENT_STORE_METADATA = new Set(['.e-mate-component.json', '.e-mate-component-manifest.json'])
+const WINDOWS_MANAGED_PACKAGE_LAYOUT = 'win32-materialized-v1'
+const LINKED_MANAGED_PACKAGE_LAYOUT = 'linked-v1'
+const WARM_ROOT_IDENTITY_FILE = /(?:^package\.json$|\.(?:[cm]?js|json|ya?ml)$)/u
 
 const DEFAULT_SETTINGS = 'ui-theme:\n  preference: dark\nagent-default-model:\n  provider: e-mate-enterprise\n  model: gpt-5.6-luna\n  reasoningEffort: max\n'
 const DEFAULT_MODEL_SETTINGS = 'agent-default-model:\n  provider: e-mate-enterprise\n  model: gpt-5.6-luna\n  reasoningEffort: max\n'
@@ -177,37 +180,98 @@ function samePath(left: string, right: string): boolean {
   return normalized(realpathSync(left)) === normalized(realpathSync(right))
 }
 
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw cause
+  }
+}
+
+function managedPackageLayout(): string {
+  return process.platform === 'win32' ? WINDOWS_MANAGED_PACKAGE_LAYOUT : LINKED_MANAGED_PACKAGE_LAYOUT
+}
+
+function materializedDirectoryCurrent(source: string, target: string): boolean {
+  return readdirSync(source, { withFileTypes: true }).every(entry => {
+    const from = join(source, entry.name)
+    const to = join(target, entry.name)
+    const sourceMetadata = statSync(from)
+    const targetMetadata = lstatSync(to)
+    if (targetMetadata.isSymbolicLink()) return false
+    if (sourceMetadata.isDirectory()) {
+      return targetMetadata.isDirectory() && materializedDirectoryCurrent(from, to)
+    }
+    return sourceMetadata.isFile() && targetMetadata.isFile()
+      && sourceMetadata.size === targetMetadata.size && sha256(from) === sha256(to)
+  })
+}
+
+function managedPackageFullyCurrent(source: string, target: string): boolean {
+  try {
+    const targetRoot = lstatSync(target)
+    if (!targetRoot.isDirectory() || targetRoot.isSymbolicLink()) return false
+    return readdirSync(source, { withFileTypes: true })
+      .filter(entry => !COMPONENT_STORE_METADATA.has(entry.name))
+      .every(entry => {
+        const from = join(source, entry.name)
+        const to = join(target, entry.name)
+        const sourceMetadata = statSync(from)
+        const targetMetadata = lstatSync(to)
+        if (sourceMetadata.isDirectory()) {
+          return process.platform === 'win32'
+            ? targetMetadata.isDirectory() && !targetMetadata.isSymbolicLink()
+              && materializedDirectoryCurrent(from, to)
+            : targetMetadata.isSymbolicLink() && samePath(from, to)
+        }
+        return sourceMetadata.isFile() && targetMetadata.isFile() && !targetMetadata.isSymbolicLink()
+          && sourceMetadata.size === targetMetadata.size && sha256(from) === sha256(to)
+      })
+  } catch {
+    return false
+  }
+}
+
 /** Keep package metadata patchable while loading large immutable directories from the app bundle. */
 function installManagedPackage(
   source: string,
   target: string,
   deferCleanup?: (path: string) => void,
 ): void {
+  const candidate = `${target}.e-mate-next-${process.pid}-${randomUUID()}`
   const previous = `${target}.e-mate-stale-${process.pid}-${randomUUID()}`
   let movedPrevious = false
+  let activatedCandidate = false
   try {
-    if (existsSync(target)) {
-      renameSync(target, previous)
-      movedPrevious = true
-    }
-    mkdirSync(target, { recursive: true })
+    mkdirSync(candidate, { recursive: true })
     for (const entry of readdirSync(source, { withFileTypes: true })) {
       if (COMPONENT_STORE_METADATA.has(entry.name)) continue
       const from = join(source, entry.name)
-      const to = join(target, entry.name)
+      const to = join(candidate, entry.name)
       if (statSync(from).isDirectory()) {
-        symlinkSync(resolve(from), to, process.platform === 'win32' ? 'junction' : 'dir')
+        if (process.platform === 'win32') cpSync(from, to, { recursive: true, force: true, dereference: true })
+        else symlinkSync(resolve(from), to, 'dir')
       } else {
         cpSync(from, to, { force: true })
       }
     }
+    if (!managedPackageFullyCurrent(source, candidate)) throw new Error('managed package materialization is incomplete')
+    if (pathExists(target)) {
+      renameSync(target, previous)
+      movedPrevious = true
+    }
+    renameSync(candidate, target)
+    activatedCandidate = true
     if (movedPrevious) {
       if (deferCleanup === undefined) rmSync(previous, { recursive: true, force: true })
       else deferCleanup(previous)
     }
   } catch (cause) {
-    rmSync(target, { recursive: true, force: true })
-    if (movedPrevious && !existsSync(target)) renameSync(previous, target)
+    rmSync(candidate, { recursive: true, force: true })
+    if (activatedCandidate) rmSync(target, { recursive: true, force: true })
+    if (movedPrevious && !pathExists(target)) renameSync(previous, target)
     throw cause
   }
 }
@@ -218,6 +282,8 @@ function managedPackageCurrent(
   overrides: ReadonlyMap<string, string> = new Map(),
 ): boolean {
   try {
+    const targetRoot = lstatSync(target)
+    if (!targetRoot.isDirectory() || targetRoot.isSymbolicLink()) return false
     return readdirSync(source, { withFileTypes: true })
       .filter(entry => !COMPONENT_STORE_METADATA.has(entry.name))
       .every(entry => {
@@ -225,12 +291,16 @@ function managedPackageCurrent(
       const to = join(target, entry.name)
       const sourceMetadata = statSync(from)
       const targetMetadata = lstatSync(to)
-      return sourceMetadata.isDirectory()
-        ? targetMetadata.isSymbolicLink() && samePath(from, to)
-        : targetMetadata.isFile() && !targetMetadata.isSymbolicLink()
-          && (overrides.has(entry.name)
-            ? sha256Bytes(overrides.get(entry.name)!) === sha256(to)
-            : sourceMetadata.size === targetMetadata.size && sha256(from) === sha256(to))
+      if (sourceMetadata.isDirectory()) {
+        return process.platform === 'win32'
+          ? targetMetadata.isDirectory() && !targetMetadata.isSymbolicLink()
+          : targetMetadata.isSymbolicLink() && samePath(from, to)
+      }
+      if (!sourceMetadata.isFile() || !targetMetadata.isFile() || targetMetadata.isSymbolicLink()) return false
+      const override = overrides.get(entry.name)
+      if (override !== undefined) return sha256Bytes(override) === sha256(to)
+      return sourceMetadata.size === targetMetadata.size
+        && (!WARM_ROOT_IDENTITY_FILE.test(entry.name) || sha256(from) === sha256(to))
       })
   } catch {
     return false
@@ -282,12 +352,13 @@ function installedProfileCurrent(
 ): boolean {
   try {
     const receipt = JSON.parse(readFileSync(join(profile, PROFILE_INSTALL_RECEIPT), 'utf8')) as Record<string, unknown>
-    if (receipt.schema_version !== 1
+    if (receipt.schema_version !== 2
       || receipt.version !== EMATE_DESKTOP_PROFILE_VERSION
       || receipt.harness_commit !== HARNESS_COMMIT
       || receipt.dsh_home !== resolve(dshHome)
       || receipt.source_root !== resolve(sourceRoot)
-      || receipt.profile_generation !== (generation?.id ?? 'bundled')) return false
+      || receipt.profile_generation !== (generation?.id ?? 'bundled')
+      || receipt.managed_package_layout !== managedPackageLayout()) return false
 
     const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, unknown>
@@ -513,12 +584,13 @@ export function installEmateDesktopProfile(
     throw new Error('e-Mate desktop profile plugins are incomplete')
   }
   atomicWrite(join(profile, PROFILE_INSTALL_RECEIPT), `${JSON.stringify({
-    schema_version: 1,
+    schema_version: 2,
     version: EMATE_DESKTOP_PROFILE_VERSION,
     harness_commit: HARNESS_COMMIT,
     dsh_home: resolve(dshHome),
     source_root: resolve(sourceRoot),
     profile_generation: generation?.id ?? 'bundled',
+    managed_package_layout: managedPackageLayout(),
   }, null, 2)}\n`, 0o600)
   return profile
 }
