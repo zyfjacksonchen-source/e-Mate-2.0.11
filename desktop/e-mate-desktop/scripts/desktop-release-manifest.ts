@@ -6,7 +6,7 @@ import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadProfileBaseContract } from '../src/profile-release.ts'
-import { validateAdmittedDesktopReleaseManifest } from '../src/update-checker.ts'
+import { validateUnsignedAdmittedDesktopReleaseManifest } from '../src/update-checker.ts'
 
 const desktopManifest = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -73,7 +73,7 @@ export async function createDesktopArtifactCandidate(options: DesktopReleaseMani
   })
 }
 
-/** Form the only public 11-field manifest from a candidate and protected admission outputs. */
+/** Form the exact unsigned 11-field input accepted only by the external signer. */
 export async function admitDesktopReleaseManifest(options: DesktopReleaseAdmissionOptions): Promise<void> {
   const candidate = await jsonFile(options.candidate)
   if (!hasExactKeys(candidate, [
@@ -98,7 +98,7 @@ export async function admitDesktopReleaseManifest(options: DesktopReleaseAdmissi
     github_artifact_provenance: await jsonFile(options.githubArtifactProvenance),
     artifacts: candidate.artifacts,
   }
-  if (!validateAdmittedDesktopReleaseManifest(manifest)) {
+  if (!validateUnsignedAdmittedDesktopReleaseManifest(manifest)) {
     throw new Error('desktop admitted release manifest is invalid')
   }
   await atomicJson(options.output, manifest)

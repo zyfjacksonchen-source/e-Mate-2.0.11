@@ -137,11 +137,11 @@ npx @e-mate/desktop
 
 ## 桌面操作
 
-打包后的 macOS 与 Windows 应用会在启动 60 秒后查询稳定 R2 清单 `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json`，并在每次检查完成六小时后再次查询。每次 no-cache 请求的期限为 15 秒，并与托盘中的 **Check for Updates…** 命令共用一个 in-flight operation。只有规范 stable SemVer、来源提交、平台 URL、字节数与 SHA-256 共同构成一个有效不可变发布身份时才接受响应。后台检查遇到网络、HTTP、超时、无效响应、相同版本或服务端旧版本时保持静默。手工检查一定会显示原生结果对话框：相同或旧版本会显示当前安装版本，失败会提示用户重试，严格更新的版本则显示 **Update and Restart** 或 **Later**。自动更新提示会按版本记录，用户仍可从托盘显式重试。开发运行、未打包启动与 Linux 不会下载安装包。
+打包后的 Base v7 macOS 与 Windows 应用会在启动 60 秒后查询签名 R2 清单 `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/signed/latest.json`，并在每次检查完成六小时后再次查询。现有 updater 必须先用随 Base 打包的 Ed25519 公钥验证完整 canonical manifest，之后才能比较版本或选择制品。每次 no-cache 请求的期限为 15 秒，并与托盘中的 **Check for Updates…** 命令共用一个 in-flight operation。网络、HTTP、超时、无效响应、相同或旧版本及签名失败均保持静默；开发运行、未打包启动与 Linux 不会下载安装包。
 
 选择 **Update and Restart** 后，应用会先重新确认服务端版本没有变化，然后才首次请求对应平台用于计数的固定下载入口。e-Mate 使用 Electron 网络跟随 service redirect，把不超过 1 GiB 的文件流式写入私有、按版本划分的 user-data 目录，并在安装前核对清单字节数、SHA-256 和 DMG 或 Windows PE 容器。对于已经安装 2.0.10 的 macOS，应用还会校验挂载包的身份、版本、Universal 主程序与原生文件清单，以及完整 ad-hoc 签名；detached helper 必须先持久化就绪，且只允许规范的 `Applications/e-Mate.app`。Cordis 完整释放并写入 shutdown-ready 后才交换，旧版会保留到新 renderer 报告健康；失败则恢复、重启旧版并显示回滚结果，健康提交后的回执或旧包清理失败绝不会撤掉新版本。2.0.9 第一次升级 2.0.10 仍使用 2.0.9 自带的旧 DMG 手工交接，因为已安装的旧二进制无法远程获得新 updater 逻辑。Windows 会在同一次确认后启动准备好的 NSIS 安装器并请求有序退出，不再弹出第二个应用确认框。任何路径都不会静默提权、全局关闭 Gatekeeper 或冒充 publisher 身份。
 
-Release operator 先把两个平台产物上传到按提交隔离的不可变前缀，并从公网回读核对字节数与 SHA-256。只有原生验收完成后，workflow 才最后原子替换 `desktop/latest.json`，并从公网逐字节回读。该清单同时是 updater 和下载页的唯一版本真值，不再存在独立 Redis 版本开关。
+已发布 2.0.12 的 `desktop/latest.json` 永久冻结为 equal-version 兼容 tombstone，因为其安装态 parser 无法验证新签名。只有 exact-byte 原生验收与公网回读通过后，受保护的外部 admission owner 才能把同一 signed manifest 写入版本专属人工路径和唯一活跃 signed pointer。Base v7 继续复用原 updater、下载校验和平台事务，不增加第二 updater 或 Redis 版本开关。
 
 在 macOS 与 Windows 上，**Open DSH Terminal** 会打开以当前激活 profile 为工作目录的系统终端。欢迎信息会显示应用版本、当前 profile、profile 目录与 DSH home，并列出配置与插件管理命令。在该终端内，裸 `dsh`、`dsh --dump-config`，以及没有选择 profile 的 plugin 子命令都会默认使用当前激活 profile；显式 `--profile` 与上游 `web` alias 会保留原有含义。e-Mate 会在自身 user-data 目录下按 profile 生成私有 `dsh`、`pnpm` 与 `node` shim，设置 `DSH_HOME`，使用当前 profile 作为工作目录，并且只在该终端的 `PATH` 前置 shim 目录；之后切换 profile 不会改变已经打开的终端命令。它不会修改全局环境或 shell 启动文件。macOS launcher 会先保留用户的交互式 zsh 或 bash 设置，再恢复 desktop 自有变量。Windows 会依次选择 PowerShell 7、Windows PowerShell 或命令提示符，并在新的 Windows Terminal 窗口中打开；如果 `wt.exe` 不可用，则由私有 `cmd start` broker 创建可见控制台。同步启动失败与 broker 非正常退出会显示在原生错误对话框中。Linux 不组合该终端命令。
 

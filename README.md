@@ -6,7 +6,7 @@ e-Mate 2.0.12 是基于固定 DeepSeek Harness `0.1.0-rc.7` 与 `deepseek-harnes
 
 ## 下载与安装
 
-正式激活后从 [e-Mate 官方下载页](https://dl.ecoremedia.net/e-mate/update/) 获取与 `desktop/latest.json` 同源、同 SHA-256 的安装包：
+正式激活后从 [e-Mate 官方下载页](https://dl.ecoremedia.net/e-mate/update/) 获取由版本专属签名清单绑定、并展示精确 SHA-256 的安装包：
 
 - macOS 13+，Universal（Apple 芯片与 Intel Mac）。
 - Windows 10/11 x64。
@@ -53,4 +53,4 @@ pnpm test:release
 
 `packages/dsh/profile/component-inventory.json` 是 CLI、Desktop、分类器、组合器与发布器共用的唯一组件清单。每个 accepted 组件拥有独立 frozen lock 和签名运行闭包；Plugin-only CI 恢复已接受的 Base SDK，只构建变化组件，再与完整 accepted set 在三个目标上组合验证。Base CI 才构建 Desktop 安装器，并额外对所有平台组件运行原生兼容矩阵。
 
-发布严格复用已通过 exact-main CI 的原字节：先上传并公开回读 commit-scoped immutable 安装器/组件，最后才激活各目标 desired state 与 `desktop/latest.json`。`mac-smoke`、本地候选和失败构建永远不能进入 R2 或官网下载页。
+发布严格复用已通过 exact-main CI 的原字节：先 create-only 上传并公开回读 commit-scoped immutable 安装器/组件和版本专属 signed manifest，最后才 CAS 激活各目标 desired state 与 Base v7 的 `desktop/signed/latest.json`；旧 `desktop/latest.json` 永久冻结为 2.0.12 兼容 tombstone。`mac-smoke`、本地候选和失败构建永远不能进入 R2 或官网下载页。

@@ -116,6 +116,8 @@ try {
       isPackaged: false,
       canDownload: true,
       currentVersion: '2.0.0',
+      currentScheduleProtocolFloor: selectedBase.schedule_protocol_floor,
+      trustedManifestKeys: selectedBase.profile_signing_keys,
       statePath: join(home, 'update-state.json'),
       request: async () => { throw new Error('profile smoke must not perform update requests') },
       confirmDownload: async () => false,

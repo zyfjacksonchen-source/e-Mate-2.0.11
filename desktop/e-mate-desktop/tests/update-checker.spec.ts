@@ -1,14 +1,33 @@
+import { generateKeyPairSync, sign } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import {
   DESKTOP_VERSION_ENDPOINT,
   MAX_VERSION_RESPONSE_BYTES,
-  checkForStableUpdate,
+  checkForStableUpdate as checkForStableUpdateRaw,
   compareSemVerVersions,
   parseSemVer,
+  type DesktopReleaseSigningKey,
+  type UpdateCheckOptions,
   type UpdateRequest,
 } from '../src/update-checker.ts'
 
 const SOURCE_COMMIT = 'a'.repeat(40)
+const MANIFEST_SIGNATURE_CONTEXT = Buffer.from('e-mate-desktop-release-manifest-v1\0', 'utf8')
+const { privateKey: manifestPrivateKey, publicKey: manifestPublicKey } = generateKeyPairSync('ed25519')
+const TRUSTED_MANIFEST_KEYS: readonly DesktopReleaseSigningKey[] = [{
+  id: 'desktop-release-test-key',
+  algorithm: 'ed25519',
+  public_key_spki_der_base64: manifestPublicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
+}]
+
+function checkForStableUpdate(
+  options: Omit<UpdateCheckOptions, 'trustedManifestKeys'> & Pick<Partial<UpdateCheckOptions>, 'trustedManifestKeys'>,
+) {
+  return checkForStableUpdateRaw({
+    ...options,
+    trustedManifestKeys: options.trustedManifestKeys ?? TRUSTED_MANIFEST_KEYS,
+  })
+}
 
 function versionResponse(version: unknown, scheduleProtocolFloor: unknown = 1, init: ResponseInit = {}): Response {
   return Response.json(versionManifest(version, scheduleProtocolFloor), init)
@@ -16,7 +35,7 @@ function versionResponse(version: unknown, scheduleProtocolFloor: unknown = 1, i
 
 function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): Record<string, unknown> {
   const release = typeof version === 'string' ? version : 'invalid'
-  return {
+  return signManifest({
     schema_version: 1,
     document_type: 'emate.desktop-release-manifest',
     release_status: 'admitted',
@@ -36,7 +55,30 @@ function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): 
       darwin: manifestArtifact(release, 'darwin'),
       win32: manifestArtifact(release, 'win32'),
     },
+  })
+}
+
+function signManifest(
+  manifest: Record<string, unknown>,
+  context: Buffer = MANIFEST_SIGNATURE_CONTEXT,
+): Record<string, unknown> {
+  const value = sign(
+    null,
+    Buffer.concat([context, Buffer.from(canonicalJson(manifest), 'utf8')]),
+    manifestPrivateKey,
+  ).toString('base64')
+  return {
+    ...manifest,
+    signature: { algorithm: 'ed25519', key_id: TRUSTED_MANIFEST_KEYS[0]!.id, value },
   }
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value)
+  if (typeof value === 'number') return String(value)
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  const record = value as Record<string, unknown>
+  return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`
 }
 
 function releaseArtifact(version: string, platform: 'darwin' | 'win32') {
@@ -161,6 +203,8 @@ describe('public Desktop version check', () => {
 
     expect(calls).toHaveLength(1)
     expect(calls[0]?.url).toBe(DESKTOP_VERSION_ENDPOINT)
+    expect(calls[0]?.url).toBe('https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/signed/latest.json')
+    expect(calls[0]?.url).not.toBe('https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json')
     expect(calls[0]?.url).not.toContain('/api/downloads/')
     expect(calls[0]?.init).toMatchObject({
       method: 'GET',
@@ -193,6 +237,54 @@ describe('public Desktop version check', () => {
   })
 
   it.each([
+    ['missing signature', () => {
+      const { signature: _, ...unsigned } = versionManifest('2.1.0')
+      return unsigned
+    }],
+    ['unknown key', () => {
+      const manifest = versionManifest('2.1.0') as Record<string, any>
+      manifest.signature.key_id = 'unknown-key'
+      return manifest
+    }],
+    ['malformed signature', () => {
+      const manifest = versionManifest('2.1.0') as Record<string, any>
+      manifest.signature.value = 'not base64'
+      return manifest
+    }],
+    ['signature field drift', () => {
+      const manifest = versionManifest('2.1.0') as Record<string, any>
+      manifest.signature.note = 'unexpected'
+      return manifest
+    }],
+    ['mutated signed body', () => {
+      const manifest = versionManifest('2.1.0') as Record<string, any>
+      manifest.artifacts.win32.sha256 = '9'.repeat(64)
+      return manifest
+    }],
+    ['wrong signature context', () => {
+      const { signature: _, ...unsigned } = versionManifest('2.1.0')
+      return signManifest(unsigned, Buffer.from('other-release-context\0', 'utf8'))
+    }],
+  ])('fails closed for a manifest with %s', async (_case, fixture) => {
+    await expect(checkForStableUpdate({
+      platform: 'darwin',
+      currentVersion: '2.0.0',
+      currentScheduleProtocolFloor: 1,
+      request: async () => Response.json(fixture()),
+    })).resolves.toBeNull()
+  })
+
+  it('fails closed when the installed Base supplies no matching trust root', async () => {
+    await expect(checkForStableUpdate({
+      platform: 'darwin',
+      currentVersion: '2.0.0',
+      currentScheduleProtocolFloor: 1,
+      trustedManifestKeys: [],
+      request: async () => versionResponse('2.1.0'),
+    })).resolves.toBeNull()
+  })
+
+  it.each([
     ['2.0.0', '2.0.0'],
     ['2.0.1', '2.0.0'],
   ])('reports no update for installed %s and service %s', async (currentVersion, latestVersion) => {
@@ -205,6 +297,19 @@ describe('public Desktop version check', () => {
       status: 'up-to-date',
       currentVersion,
       latestVersion,
+    })
+  })
+
+  it('never turns a correctly signed lower version into a rollback install', async () => {
+    await expect(checkForStableUpdate({
+      platform: 'win32',
+      currentVersion: '2.0.13',
+      currentScheduleProtocolFloor: 1,
+      request: async () => versionResponse('2.0.12'),
+    })).resolves.toEqual({
+      status: 'up-to-date',
+      currentVersion: '2.0.13',
+      latestVersion: '2.0.12',
     })
   })
 

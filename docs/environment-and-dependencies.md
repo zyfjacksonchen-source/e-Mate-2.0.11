@@ -30,7 +30,9 @@ e-Mate 2.0.11 is an Electron desktop application derived from the pinned `deepse
 | Portable Profile component | One DSH Host/Client plugin, generated assets and bundled non-Base dependencies | Plugin-only delta after full generation composition |
 | Platform Profile component | Computer Use or Vision target closure bound to exact OS/arch/runtime/signing tuple | Per-target plugin delta after native matrix |
 | Signed desired state | Complete accepted component set and exact Base/Harness contract | Activated last per target |
-| `desktop/latest.json` | Current Base installer identity and immutable artifact metadata | Activated last after installer acceptance |
+| `desktop/latest.json` | Frozen exact 2.0.12 compatibility tombstone for legacy v6 parsers | Never advanced beyond 2.0.12 |
+| `desktop/manual/v<version>/latest.json` | Create-only signed Base installer identity for formal manual bootstrap | Published and publicly read back before the active pointer |
+| `desktop/signed/latest.json` | Base v7 active signed installer identity | CAS-activated last after installer acceptance |
 
 `packages/dsh/profile/component-inventory.json` is the only accepted component roster. The CLI bundle copier, Desktop bootstrap, impact classifier, release emitter and full-generation composer consume that file. Xin Assistant is explicitly blocked from 2.0.11.
 
@@ -46,7 +48,7 @@ Vision uses the fixed Desktop CPython 3.12.14 ABI but owns its target-specific P
 - Harness/Desktop ABI, permissions, updater, Electron/native helper, shared Profile input, root/Desktop lock, packaging/signing or incompatible contract changes select Base. Base CI builds the installers and runs all accepted platform components against the new Base SDK on their native target matrix.
 - Unknown or incomplete provenance selects Base. Workflow-local path lists and manual labels cannot downgrade it.
 
-Publication never rebuilds accepted bytes. The protected workflow consumes an exact successful main CI run, production-signs Profile metadata, uploads only missing commit-scoped immutable objects, verifies authenticated and public bytes/SHA-256, rechecks the expected current pointer, and activates desired state last. The same rule applies to `desktop/latest.json`. A CI-only `mac-smoke` artifact is permanently ineligible.
+Publication never rebuilds accepted bytes. The protected workflow consumes an exact successful main CI run, production-signs Profile metadata, uploads only missing commit-scoped immutable objects, verifies authenticated and public bytes/SHA-256, rechecks the expected current pointer, and activates desired state last. Base v7 follows the same order through a create-only version manifest and the signed active pointer; legacy `desktop/latest.json` remains the exact 2.0.12 tombstone. A CI-only `mac-smoke` artifact is permanently ineligible.
 
 ## Capability and permission boundaries
 

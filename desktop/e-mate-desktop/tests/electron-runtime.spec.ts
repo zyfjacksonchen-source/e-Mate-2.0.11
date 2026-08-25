@@ -1093,10 +1093,18 @@ describe('Electron compatibility runtime', () => {
       canDownload: false,
       currentVersion: '2.0.12',
       currentScheduleProtocolFloor: 0,
+      trustedManifestKeys: [],
       statePath: join('/tmp/dsh-desktop-user-data', 'updates', 'state.json'),
     })
     runtime.configureProfileUpdates({
-      base: { schedule_protocol_floor: 1 },
+      base: {
+        schedule_protocol_floor: 1,
+        profile_signing_keys: [{
+          id: 'release-key',
+          algorithm: 'ed25519',
+          public_key_spki_der_base64: 'test-public-key',
+        }],
+      },
       target: { platform: 'darwin', arch: 'arm64' },
       expectedComponentIds: [],
       generationRoot: '/tmp/generations',
@@ -1104,6 +1112,7 @@ describe('Electron compatibility runtime', () => {
       activeGenerationId: 'bundled',
     } as unknown as Omit<ProfileUpdateContext, 'request'>)
     expect(runtime.updates.currentScheduleProtocolFloor).toBe(1)
+    expect(runtime.updates.trustedManifestKeys).toEqual([expect.objectContaining({ id: 'release-key' })])
     electron.app.isPackaged = true
     expect(runtime.updates).toMatchObject({ isPackaged: true, canDownload: true })
 

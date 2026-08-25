@@ -1,3 +1,4 @@
+import { generateKeyPairSync, sign } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,7 +9,7 @@ import type {
   DesktopRuntime,
   DesktopTrayItem,
 } from '../src/runtime.ts'
-import type { UpdateCheckResult } from '../src/update-checker.ts'
+import type { DesktopReleaseSigningKey, UpdateCheckResult } from '../src/update-checker.ts'
 import type { DesktopProfileUpdateAdapter, ProfileUpdateAvailable } from '../src/profile-update.ts'
 import { apply, Config, inject, type Config as UpdateConfig, type InteractiveUpdateResult } from '../src/updates.ts'
 
@@ -20,6 +21,13 @@ const testConfig: UpdateConfig = {
 }
 
 const SOURCE_COMMIT = 'a'.repeat(40)
+const MANIFEST_SIGNATURE_CONTEXT = Buffer.from('e-mate-desktop-release-manifest-v1\0', 'utf8')
+const { privateKey: manifestPrivateKey, publicKey: manifestPublicKey } = generateKeyPairSync('ed25519')
+const TRUSTED_MANIFEST_KEYS: readonly DesktopReleaseSigningKey[] = [{
+  id: 'desktop-release-test-key',
+  algorithm: 'ed25519',
+  public_key_spki_der_base64: manifestPublicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
+}]
 
 function versionResponse(
   version: unknown,
@@ -27,13 +35,15 @@ function versionResponse(
   mutate?: (manifest: Record<string, any>) => void,
 ): Response {
   const manifest = versionManifest(version, scheduleProtocolFloor)
-  mutate?.(manifest)
-  return Response.json(manifest)
+  if (mutate === undefined) return Response.json(manifest)
+  const { signature: _, ...unsigned } = manifest
+  mutate(unsigned)
+  return Response.json(signManifest(unsigned))
 }
 
 function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): Record<string, any> {
   const release = typeof version === 'string' ? version : 'invalid'
-  return {
+  return signManifest({
     schema_version: 1,
     document_type: 'emate.desktop-release-manifest',
     release_status: 'admitted',
@@ -82,7 +92,30 @@ function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): 
         build_run_id: '456',
       },
     },
+  })
+}
+
+function signManifest(manifest: Record<string, any>): Record<string, any> {
+  return {
+    ...manifest,
+    signature: {
+      algorithm: 'ed25519',
+      key_id: TRUSTED_MANIFEST_KEYS[0]!.id,
+      value: sign(
+        null,
+        Buffer.concat([MANIFEST_SIGNATURE_CONTEXT, Buffer.from(canonicalJson(manifest), 'utf8')]),
+        manifestPrivateKey,
+      ).toString('base64'),
+    },
   }
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value)
+  if (typeof value === 'number') return String(value)
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  const record = value as Record<string, unknown>
+  return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`
 }
 
 interface Harness {
@@ -133,6 +166,7 @@ async function createHarness(options: {
       platform: 'darwin',
       currentVersion: '2.0.0',
       currentScheduleProtocolFloor: options.currentScheduleProtocolFloor ?? 1,
+      trustedManifestKeys: TRUSTED_MANIFEST_KEYS,
       statePath,
       canDownload: options.canDownload ?? true,
       request: options.request ?? (async () => versionResponse('2.0.0')),

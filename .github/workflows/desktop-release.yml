@@ -279,5 +279,5 @@ jobs:
         run: |
           test "$GITHUB_REF" = refs/heads/main
           test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/desktop-release.yml@refs/heads/main"
-          echo "::error::PROTECTED_DESKTOP_ADMISSION_REQUIRED: build-only output is a performance-pending candidate; a protected admission owner must form the exact 11-field manifest and the external signer/CAS owner must activate those unchanged bytes"
+          echo "::error::PROTECTED_DESKTOP_ADMISSION_REQUIRED: build-only output is a performance-pending candidate; a protected admission owner must form the exact unsigned 11-field manifest, and an external signer/CAS owner must add only the Ed25519 signature, create desktop/manual/v<manifest.version>/latest.json without overwrite, read back identical bytes, then CAS desktop/signed/latest.json while leaving desktop/latest.json frozen at 2.0.12"
           exit 1

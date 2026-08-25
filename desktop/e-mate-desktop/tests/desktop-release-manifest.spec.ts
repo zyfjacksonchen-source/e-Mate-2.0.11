@@ -8,7 +8,7 @@ import {
   createDesktopArtifactCandidate,
   DESKTOP_RELEASE_VERSION,
 } from '../scripts/desktop-release-manifest.ts'
-import { validateAdmittedDesktopReleaseManifest } from '../src/update-checker.ts'
+import { validateUnsignedAdmittedDesktopReleaseManifest } from '../src/update-checker.ts'
 
 const roots: string[] = []
 
@@ -104,7 +104,7 @@ describe('desktop release manifest', () => {
     })).rejects.toThrow('unexpected desktop artifact name')
   })
 
-  it('is the only producer of an updater-admitted 11-field public manifest', async () => {
+  it('is the only producer of the external signer\'s unsigned 11-field input', async () => {
     const root = await releaseFixture()
     const candidate = join(root, 'desktop-candidate.json')
     const output = join(root, 'latest.json')
@@ -115,7 +115,7 @@ describe('desktop release manifest', () => {
 
     const manifest = JSON.parse(await readFile(output, 'utf8'))
     expect(Object.keys(manifest)).toHaveLength(11)
-    expect(validateAdmittedDesktopReleaseManifest(manifest)).toBe(true)
+    expect(validateUnsignedAdmittedDesktopReleaseManifest(manifest)).toBe(true)
   })
 
   it('rejects the old public shape and admission drift without writing latest.json', async () => {
@@ -128,7 +128,7 @@ describe('desktop release manifest', () => {
     delete oldPublicManifest.document_type
     delete oldPublicManifest.release_status
     oldPublicManifest.base_contract_id = 'e-mate-desktop-profile-v7-dsh-e13ce9d95303'
-    expect(validateAdmittedDesktopReleaseManifest(oldPublicManifest)).toBe(false)
+    expect(validateUnsignedAdmittedDesktopReleaseManifest(oldPublicManifest)).toBe(false)
 
     const provenance = JSON.parse(await readFile(inputs.githubArtifactProvenance, 'utf8'))
     provenance.source_commit = 'b'.repeat(40)
@@ -136,6 +136,20 @@ describe('desktop release manifest', () => {
     await expect(admitDesktopReleaseManifest({ candidate, ...inputs, output }))
       .rejects.toThrow('admitted release manifest is invalid')
     await expect(readFile(output)).rejects.toThrow()
+  })
+
+  it('rejects an unsigned input that cannot be represented by canonical JSON', async () => {
+    const root = await releaseFixture()
+    const candidate = join(root, 'desktop-candidate.json')
+    const output = join(root, 'latest.json')
+    const commit = 'a'.repeat(40)
+    const inputs = await admissionInputs(root, commit)
+    const performance = JSON.parse(await readFile(inputs.performance, 'utf8'))
+    performance.verifier = { threshold: 0.95 }
+    await writeFile(inputs.performance, JSON.stringify(performance))
+
+    await expect(admitDesktopReleaseManifest({ candidate, ...inputs, output }))
+      .rejects.toThrow('admitted release manifest is invalid')
   })
 })
 

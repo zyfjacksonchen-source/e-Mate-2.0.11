@@ -155,6 +155,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   readonly platform: DesktopPlatform
   readonly updates: DesktopUpdateAdapter & {
     currentScheduleProtocolFloor: number
+    trustedManifestKeys: ProfileUpdateContext['base']['profile_signing_keys']
     profile: DesktopProfileUpdateAdapter | undefined
   } = {
     get isPackaged() { return app.isPackaged },
@@ -162,6 +163,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     get platform() { return process.platform === 'darwin' || process.platform === 'win32' ? process.platform : undefined },
     get currentVersion() { return PRODUCT_VERSION },
     currentScheduleProtocolFloor: 0,
+    trustedManifestKeys: [],
     get statePath() { return join(app.getPath('userData'), 'updates', 'state.json') },
     request: (url, init) => net.fetch(url, init),
     profile: undefined,
@@ -204,6 +206,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   configureProfileUpdates(context: Omit<ProfileUpdateContext, 'request'>): void {
     if (this.updates.profile !== undefined) throw new Error('@e-mate/desktop: Profile updater is already configured')
     this.updates.currentScheduleProtocolFloor = context.base.schedule_protocol_floor
+    this.updates.trustedManifestKeys = context.base.profile_signing_keys
     const configured: ProfileUpdateContext = {
       ...context,
       request: (url, init) => net.fetch(url, init),

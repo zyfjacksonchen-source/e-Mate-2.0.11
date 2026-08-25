@@ -6,14 +6,21 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
 export const RELEASE_SOURCE_PLACEHOLDER = '__EMATE_RELEASE_SOURCE_COMMIT__'
-export const DESKTOP_MANIFEST_URL = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json'
-export const DESKTOP_SCRIPT = './site.fb5efdd1422c.js'
+const desktopVersion = JSON.parse(readFileSync(new URL('../desktop/e-mate-desktop/package.json', import.meta.url), 'utf8')).version
+if (typeof desktopVersion !== 'string' || !/^\d+\.\d+\.\d+$/u.test(desktopVersion)) {
+  throw new Error('download page requires the stable Desktop package version')
+}
+export const DESKTOP_MANIFEST_URL = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/manual/v${desktopVersion}/latest.json`
+export const DESKTOP_SCRIPT = './site.638b4a4a290d.js'
 
 export function renderDownloadPage(template) {
+  const script = readFileSync(new URL(`../deploy/download-page/${DESKTOP_SCRIPT.slice(2)}`, import.meta.url), 'utf8')
   if (template.includes(RELEASE_SOURCE_PLACEHOLDER)
     || !template.includes(DESKTOP_SCRIPT)
     || !template.includes('data-platform-switch')
-    || !template.includes('data-downloads')) {
+    || !template.includes('data-downloads')
+    || !script.includes(`const VERSION = "${desktopVersion}";`)
+    || !script.includes('`${R2_ORIGIN}/desktop/manual/v${VERSION}/latest.json`')) {
     throw new Error('download page desktop manifest contract is incomplete')
   }
   return template

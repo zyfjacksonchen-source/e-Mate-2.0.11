@@ -166,6 +166,7 @@ export function apply(ctx: Context, config: Config): void {
             currentVersion: adapter.currentVersion,
             currentScheduleProtocolFloor: adapter.currentScheduleProtocolFloor,
             platform: adapter.platform,
+            trustedManifestKeys: adapter.trustedManifestKeys,
             signal: controller.signal,
             request: adapter.request,
           })
