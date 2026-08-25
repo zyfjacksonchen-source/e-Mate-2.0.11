@@ -22,7 +22,7 @@ function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): 
     release_status: 'admitted',
     version,
     source_commit: SOURCE_COMMIT,
-    base_contract_id: 'e-mate-desktop-profile-v7-dsh-2bc16230975f',
+    base_contract_id: 'e-mate-desktop-profile-v7-dsh-e13ce9d95303',
     schedule_protocol_floor: scheduleProtocolFloor,
     profile_component_aggregate: profileComponentAggregateSummary(),
     performance: {
@@ -44,8 +44,6 @@ function releaseArtifact(version: string, platform: 'darwin' | 'win32') {
     url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v${encodeURIComponent(version)}/${SOURCE_COMMIT}/e-Mate-${version}-${platform === 'darwin' ? 'mac-universal.dmg' : 'win-x64-Setup.exe'}`,
     bytes: 1024,
     sha256: '0'.repeat(64),
-    build_source_commit: sourceCommit,
-    build_run_id: '123',
   }
 }
 
@@ -155,7 +153,7 @@ describe('public Desktop version check', () => {
       currentVersion: '2.9.9',
       latestVersion: '2.10.0',
       sourceCommit: SOURCE_COMMIT,
-      baseContractId: 'e-mate-desktop-profile-v7-dsh-2bc16230975f',
+      baseContractId: 'e-mate-desktop-profile-v7-dsh-e13ce9d95303',
       scheduleProtocolFloor: 1,
       manifestIdentity: expect.stringMatching(/^[0-9a-f]{64}$/u),
       artifact: releaseArtifact('2.10.0', 'darwin'),
@@ -225,6 +223,7 @@ describe('public Desktop version check', () => {
     ['non-canonical default port', (manifest: Record<string, any>) => { manifest.artifacts.darwin.url = manifest.artifacts.darwin.url.replace('.r2.dev/', '.r2.dev:443/') }],
     ['disguised platform suffix', (manifest: Record<string, any>) => { manifest.artifacts.darwin.url = manifest.artifacts.darwin.url.replace('.dmg', '.exe.dmg') }],
     ['invalid digest', (manifest: Record<string, any>) => { manifest.artifacts.darwin.sha256 = 'ABC' }],
+    ['invalid Base contract id', (manifest: Record<string, any>) => { manifest.base_contract_id = 'v7' }],
     ['coerced Profile digest', (manifest: Record<string, any>) => { manifest.profile_component_aggregate.aggregate_sha256 = ['1'.repeat(64)] }],
   ])('rejects a newer release with %s', async (_label, mutate) => {
     const manifest = versionManifest('2.1.0')

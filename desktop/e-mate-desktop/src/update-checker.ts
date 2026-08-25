@@ -74,6 +74,7 @@ const DESKTOP_RELEASE_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.
 const DESKTOP_RELEASE_PATH_PREFIX = '/desktop/releases/v'
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u
 const SOURCE_COMMIT_PATTERN = /^[0-9a-f]{40}$/u
+const BASE_CONTRACT_ID_PATTERN = /^e-mate-desktop-profile-v[1-9][0-9]*-dsh-[0-9a-f]{12}$/u
 const RUN_ID_PATTERN = /^[1-9][0-9]*$/u
 const RELEASE_TARGETS = ['darwin-arm64', 'darwin-x64', 'win32-x64'] as const
 
@@ -239,7 +240,7 @@ function parseAdmittedDesktopReleaseManifest(value: unknown): ParsedDesktopRelea
   ]) || value.schema_version !== 1 || value.document_type !== 'emate.desktop-release-manifest'
     || value.release_status !== 'admitted' || typeof value.version !== 'string'
     || typeof value.source_commit !== 'string' || !SOURCE_COMMIT_PATTERN.test(value.source_commit)
-    || typeof value.base_contract_id !== 'string'
+    || typeof value.base_contract_id !== 'string' || !BASE_CONTRACT_ID_PATTERN.test(value.base_contract_id)
     || !isPositiveSafeInteger(value.schedule_protocol_floor)
     || !hasExactKeys(value.artifacts, ['darwin', 'win32'])) return null
   const version = parseCanonicalStableVersion(value.version)
@@ -325,7 +326,6 @@ export function validateDesktopReleaseArtifact(
   platform: DesktopReleasePlatform,
   version: string,
   value: unknown,
-  expectedSourceCommit?: string,
 ): DesktopReleaseArtifact | null {
   if (!isRecord(value)
     || typeof value.url !== 'string'
@@ -424,10 +424,4 @@ function canonicalJson(value: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort()
-  const wanted = [...expected].sort()
-  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index])
 }
