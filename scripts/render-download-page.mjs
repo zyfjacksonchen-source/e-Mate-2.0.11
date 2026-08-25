@@ -11,7 +11,7 @@ if (typeof desktopVersion !== 'string' || !/^\d+\.\d+\.\d+$/u.test(desktopVersio
   throw new Error('download page requires the stable Desktop package version')
 }
 export const DESKTOP_MANIFEST_URL = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/manual/v${desktopVersion}/latest.json`
-export const DESKTOP_SCRIPT = './site.638b4a4a290d.js'
+export const DESKTOP_SCRIPT = './site.a8feef4609f9.js'
 
 export function renderDownloadPage(template) {
   const script = readFileSync(new URL(`../deploy/download-page/${DESKTOP_SCRIPT.slice(2)}`, import.meta.url), 'utf8')

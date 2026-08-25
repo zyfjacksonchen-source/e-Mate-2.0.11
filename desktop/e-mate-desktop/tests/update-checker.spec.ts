@@ -41,7 +41,7 @@ function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): 
     release_status: 'admitted',
     version,
     source_commit: SOURCE_COMMIT,
-    base_contract_id: 'e-mate-desktop-profile-v7-dsh-e13ce9d95303',
+    base_contract_id: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
     schedule_protocol_floor: scheduleProtocolFloor,
     profile_component_aggregate: profileComponentAggregateSummary(),
     performance: {
@@ -195,7 +195,7 @@ describe('public Desktop version check', () => {
       currentVersion: '2.9.9',
       latestVersion: '2.10.0',
       sourceCommit: SOURCE_COMMIT,
-      baseContractId: 'e-mate-desktop-profile-v7-dsh-e13ce9d95303',
+      baseContractId: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
       scheduleProtocolFloor: 1,
       manifestIdentity: expect.stringMatching(/^[0-9a-f]{64}$/u),
       artifact: releaseArtifact('2.10.0', 'darwin'),

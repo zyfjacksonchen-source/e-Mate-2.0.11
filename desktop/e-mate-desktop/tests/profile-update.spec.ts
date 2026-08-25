@@ -51,7 +51,7 @@ describe('signed Profile update path', () => {
       source_commit: commit,
       schedule_protocol_floor: 1,
       target,
-      base_contracts: ['e-mate-desktop-profile-v7-dsh-e13ce9d95303'],
+      base_contracts: ['e-mate-desktop-profile-v7-dsh-b2b1650b01f0'],
       harness_contract: { version: '0.1.0-rc.7', commit: '7'.repeat(40) },
       components: [{
         id: '@e-mate/dsh-plugin-memory-evolve',
@@ -86,7 +86,7 @@ describe('signed Profile update path', () => {
       currentSequence: 0,
       releaseVersion: '2.0.12',
       sequence: 1,
-      requiredBaseContracts: ['e-mate-desktop-profile-v7-dsh-e13ce9d95303'],
+      requiredBaseContracts: ['e-mate-desktop-profile-v7-dsh-b2b1650b01f0'],
     })
     expect(request).toHaveBeenCalledOnce()
     expect(request).toHaveBeenCalledWith(profileReleaseUrl(target), expect.objectContaining({ method: 'GET' }))

@@ -127,7 +127,7 @@ describe('desktop release manifest', () => {
     const oldPublicManifest = JSON.parse(await readFile(candidate, 'utf8'))
     delete oldPublicManifest.document_type
     delete oldPublicManifest.release_status
-    oldPublicManifest.base_contract_id = 'e-mate-desktop-profile-v7-dsh-e13ce9d95303'
+    oldPublicManifest.base_contract_id = 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0'
     expect(validateUnsignedAdmittedDesktopReleaseManifest(oldPublicManifest)).toBe(false)
 
     const provenance = JSON.parse(await readFile(inputs.githubArtifactProvenance, 'utf8'))

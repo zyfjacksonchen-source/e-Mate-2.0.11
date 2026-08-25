@@ -119,7 +119,7 @@ describe('repository release boundary', () => {
   it('accepts the checked-in base contract and every first-party component', () => {
     const boundary = loadReleaseBoundary(root)
     assert.equal(boundary.valid, true, boundary.errors.join('\n'))
-    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v7-dsh-e13ce9d95303')
+    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0')
     assert.equal(boundary.baseContract.schedule_protocol_floor, 1)
     assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.13')
     assert.deepEqual(PRODUCT_UI_REFERENCE, {
@@ -170,7 +170,7 @@ describe('repository release boundary', () => {
       execFileSync('git', ['init', '--quiet'], { cwd: checkout })
       execFileSync('git', [
         'update-index', '--add', '--cacheinfo',
-        '160000,e13ce9d953037a2f40d866d17f5a7e00cbc15d66,upstream/deepseek-harness',
+        '160000,b2b1650b01f0ee88d81837a9b5c050f9f763f606,upstream/deepseek-harness',
       ], { cwd: checkout })
       execFileSync('git', [
         'update-index', '--add', '--cacheinfo',

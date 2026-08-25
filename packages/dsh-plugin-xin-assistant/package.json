@@ -30,10 +30,10 @@
         "@deepseek-ai/schemastery"
       ],
       "authority_contract": { "effects": [], "guards": [] },
-      "base_contracts": ["e-mate-desktop-profile-v7-dsh-e13ce9d95303"]
+      "base_contracts": ["e-mate-desktop-profile-v7-dsh-b2b1650b01f0"]
     },
     "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "e13ce9d953037a2f40d866d17f5a7e00cbc15d66",
+    "harnessCommit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606",
     "cliSha256": "936c5a16ada2d59144b39848535f4ab36d0fb87b07665955513d20abc0606767",
     "pythonDependencies": {
       "requests": "2.32.5",

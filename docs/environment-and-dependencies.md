@@ -16,7 +16,7 @@ e-Mate 2.0.11 is an Electron desktop application derived from the pinned `deepse
 - Node 24.x from `.nvmrc`.
 - Corepack with exact `pnpm@11.7.0` from the root `packageManager` field.
 - Desktop uses its pinned Yarn 4.18.0 project and lock.
-- Harness is exactly `zyfjacksonchen-source/deepseek-harness@e13ce9d953037a2f40d866d17f5a7e00cbc15d66`, declared `0.1.0-rc.7`, based on upstream `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`.
+- Harness is exactly `zyfjacksonchen-source/deepseek-harness@b2b1650b01f0ee88d81837a9b5c050f9f763f606`, declared `0.1.0-rc.7`, based on upstream `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`.
 - Base CI builds that clean Harness source once, records the emitted-library hashes in the Base SDK, and materializes those same libraries into the Desktop Yarn closure before packaging; platform jobs restore the SDK instead of rebuilding or using stale registry bytes.
 - Desktop lifecycle is traced to `anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add`.
 - Main source is TypeScript/TSX. Browser bundles use the pinned Harness `clientBundle` preset; generated JavaScript is not a second source implementation.
