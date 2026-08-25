@@ -58,7 +58,7 @@ jobs:
           pnpm --dir upstream/deepseek-harness install --frozen-lockfile
 
       - name: Build pinned DeepSeek Harness
-        run: pnpm --dir upstream/deepseek-harness run build
+        run: pnpm build:harness
 
       - name: Build and test
         run: |

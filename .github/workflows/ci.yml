@@ -105,7 +105,7 @@ jobs:
           pnpm --dir upstream/deepseek-harness install --frozen-lockfile
 
       - name: Build pinned DeepSeek Harness
-        run: pnpm --dir upstream/deepseek-harness run build
+        run: pnpm build:harness
 
       - name: Check target pin and e-Mate behavior
         run: |
@@ -690,6 +690,15 @@ jobs:
           name: e-mate-desktop-profile-${{ github.sha }}
           path: packages
 
+      - name: Restore the exact Base SDK built by the source gate
+        uses: actions/download-artifact@v4
+        with:
+          name: e-mate-base-sdk-${{ needs.impact.outputs.head_sha }}
+          path: .release-cache/base-sdk
+
+      - name: Install and verify the exact Base SDK
+        run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
+
       - name: Prepare the exact offline Windows Vision runtime
         run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets win32-x64
 
@@ -755,6 +764,15 @@ jobs:
         with:
           name: e-mate-desktop-profile-${{ github.sha }}
           path: packages
+
+      - name: Restore the exact Base SDK built by the source gate
+        uses: actions/download-artifact@v4
+        with:
+          name: e-mate-base-sdk-${{ needs.impact.outputs.head_sha }}
+          path: .release-cache/base-sdk
+
+      - name: Install and verify the exact Base SDK
+        run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
 
       - name: Prepare the exact offline universal macOS Vision runtime
         run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets darwin-arm64,darwin-x64

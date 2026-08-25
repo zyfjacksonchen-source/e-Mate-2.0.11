@@ -9,10 +9,9 @@ import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { applyHarnessRuntimeAdapters } from './harness-runtime-adapters.mjs'
+import { HARNESS_COMMIT, HARNESS_VERSION, verifyHarnessBuildReceipt } from './harness-provenance.mjs'
 
 const PRODUCT_VERSION = '2.0.12'
-const HARNESS_VERSION = '0.1.0-rc.7'
-const HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
 const PNPM_VERSION = '11.7.0'
 
 const root = resolve(import.meta.dirname, '..')
@@ -42,11 +41,7 @@ function sha256(path) {
 }
 
 function assertSource() {
-  const commit = capture('git', ['-C', harnessRoot, 'rev-parse', 'HEAD'])
-  const version = JSON.parse(readFileSync(join(harnessRoot, 'apps', 'cli', 'package.json'), 'utf8')).version
-  if (commit !== HARNESS_COMMIT || version !== HARNESS_VERSION) {
-    throw new Error(`pinned Harness drifted (version=${String(version)}, commit=${commit})`)
-  }
+  verifyHarnessBuildReceipt(root)
   if (!existsSync(join(harnessRoot, 'apps', 'cli', 'lib', 'bin.js'))) {
     throw new Error('pinned Harness build is missing; run its pnpm build before assembling the runtime')
   }

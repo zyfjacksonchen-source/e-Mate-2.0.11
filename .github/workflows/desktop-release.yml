@@ -80,9 +80,15 @@ jobs:
       - run: |
           pnpm install --frozen-lockfile
           pnpm --dir upstream/deepseek-harness install --frozen-lockfile
-          pnpm --dir upstream/deepseek-harness run build
+          pnpm build:harness
           pnpm check:target
           pnpm test
+          corepack enable
+          cd desktop
+          yarn install --immutable
+          yarn build:sdk
+          cd ..
+          node scripts/base-sdk.mjs emit --directory .release-cache/base-sdk
       - name: Stage the exact built e-Mate profile without development links
         run: node scripts/stage-desktop-profile-artifact.mjs
       - uses: actions/upload-artifact@v4
@@ -93,6 +99,13 @@ jobs:
             .release-cache/profile-artifact/dsh-plugin-*/lib
           if-no-files-found: error
           retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-base-sdk-${{ github.sha }}
+          path: .release-cache/base-sdk
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
 
   windows:
     if: ${{ !inputs.publish && inputs.reuse_run_id == '' }}
@@ -116,6 +129,12 @@ jobs:
         with:
           name: e-mate-desktop-profile-${{ github.sha }}
           path: packages
+      - uses: actions/download-artifact@v4
+        with:
+          name: e-mate-base-sdk-${{ github.sha }}
+          path: .release-cache/base-sdk
+      - name: Install and verify the exact Base SDK
+        run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
       - name: Prepare the exact offline Windows Vision runtime
         run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets win32-x64
       - name: Resolve Yarn cache folder
@@ -168,6 +187,14 @@ jobs:
           path: packages
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.reuse_run_id != '' && format('e-mate-base-sdk-{0}', needs.reuse.outputs.source_sha) || format('e-mate-base-sdk-{0}', github.sha) }}
+          path: .release-cache/base-sdk
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}
+      - name: Install and verify the exact Base SDK
+        run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
       - name: Prepare the exact offline universal macOS Vision runtime
         run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets darwin-arm64,darwin-x64
       - name: Resolve Yarn cache folder

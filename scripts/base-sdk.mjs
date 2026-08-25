@@ -15,13 +15,18 @@ import {
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { classifyChangedPaths, loadReleaseBoundary } from './change-impact.mjs'
+import { verifyHarnessBuildReceipt, verifyHarnessDesktopRuntime } from './harness-provenance.mjs'
+
+function compareText(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0
+}
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
 function visitFiles(repositoryRoot, directory, include, files) {
-  for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+  for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => compareText(left.name, right.name))) {
     const path = join(directory, entry.name)
     const metadata = lstatSync(path)
     const relativePath = relative(repositoryRoot, path).split(sep).join('/')
@@ -37,7 +42,7 @@ function visitFiles(repositoryRoot, directory, include, files) {
 }
 
 function visitHarnessLibs(repositoryRoot, directory, files) {
-  for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+  for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => compareText(left.name, right.name))) {
     const path = join(directory, entry.name)
     const metadata = lstatSync(path)
     if (metadata.isSymbolicLink()) {
@@ -78,6 +83,15 @@ function compiledFiles(repositoryRoot) {
       executable: false,
     })
   }
+  for (const relativePath of [
+    '.release-cache/harness-build.json',
+    'desktop/e-mate-desktop/build/harness-runtime-provenance.json',
+  ]) {
+    const source = join(repositoryRoot, relativePath)
+    const metadata = lstatSync(source)
+    if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`base SDK provenance is not a regular file: ${relativePath}`)
+    files.push({ path: relativePath, source, executable: false })
+  }
   const unique = new Map(files.map(file => [file.path, file]))
   if (unique.size !== files.length || !files.some(file => file.path.startsWith('upstream/deepseek-harness/'))
     || !files.some(file => file.path.startsWith('desktop/e-mate-desktop/lib/'))
@@ -85,7 +99,7 @@ function compiledFiles(repositoryRoot) {
     || !files.some(file => file.path.includes('/build/e-mate-profile/plugins/'))) {
     throw new Error('accepted Base SDK build closure is incomplete')
   }
-  return [...unique.values()].sort((left, right) => left.path.localeCompare(right.path))
+  return [...unique.values()].sort((left, right) => compareText(left.path, right.path))
 }
 
 function loadContract(root) {
@@ -117,7 +131,7 @@ export function baseSdkFingerprint(root) {
   const digest = createHash('sha256').update('e-mate-base-sdk-input-v1\0')
   let count = 0
   const classifications = new Map(impact.classifications.map(value => [value.path, value.kind]))
-  for (const row of rows.sort((left, right) => left.path.localeCompare(right.path))) {
+  for (const row of rows.sort((left, right) => compareText(left.path, right.path))) {
     if (classifications.get(row.path) !== 'base') continue
     digest.update(`${row.mode}\0${row.object}\0${row.path}\0`)
     count += 1
@@ -134,6 +148,8 @@ export function emitBaseSdk(root, output) {
   if (output === root || outputRelative === '' || outputRelative === '..' || outputRelative.startsWith(`..${sep}`)) {
     throw new Error('base SDK output must be a repository child directory')
   }
+  verifyHarnessBuildReceipt(root)
+  verifyHarnessDesktopRuntime(root)
   const contract = loadContract(root)
   const entries = compiledFiles(root)
   rmSync(output, { recursive: true, force: true })

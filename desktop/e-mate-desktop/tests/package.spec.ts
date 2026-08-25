@@ -508,17 +508,15 @@ describe('published package surface', () => {
   })
 
   it('ignores redundant shell escalation metadata under the current policy', () => {
-    const bashPatch = 'patch:@deepseek-ai/dsh-tool-bash@npm%3A0.1.0-rc.7#~/.yarn/patches/@deepseek-ai-dsh-tool-bash-npm-0.1.0-rc.7-b4db1f9f9e.patch'
-    const pwshPatch = 'patch:@deepseek-ai/dsh-tool-pwsh@npm%3A0.1.0-rc.7#~/.yarn/patches/@deepseek-ai-dsh-tool-pwsh-npm-0.1.0-rc.7-5c1a523622.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
     const workspaceRequire = createRequire(new URL('package.json', packageRoot))
 
-    expect(workspaceManifest.resolutions).toMatchObject({
-      '@deepseek-ai/dsh-tool-bash@npm:^0.1.0-rc.7': bashPatch,
-      '@deepseek-ai/dsh-tool-pwsh@npm:^0.1.0-rc.7': pwshPatch,
-    })
-    expect(lockfile).toContain('@deepseek-ai/dsh-tool-bash@patch:@deepseek-ai/dsh-tool-bash@npm%3A0.1.0-rc.7#~/.yarn/patches/')
-    expect(lockfile).toContain('@deepseek-ai/dsh-tool-pwsh@patch:@deepseek-ai/dsh-tool-pwsh@npm%3A0.1.0-rc.7#~/.yarn/patches/')
+    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-tool-bash@npm:^0.1.0-rc.7'])
+      .toBe('npm:0.1.0-rc.7')
+    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-tool-pwsh@npm:^0.1.0-rc.7'])
+      .toBe('npm:0.1.0-rc.7')
+    expect(lockfile).not.toContain('@deepseek-ai/dsh-tool-bash@patch:')
+    expect(lockfile).not.toContain('@deepseek-ai/dsh-tool-pwsh@patch:')
     for (const packageName of ['@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tool-pwsh']) {
       const packageManifest = workspaceRequire.resolve(`${packageName}/package.json`)
       const installed = readFileSync(join(dirname(packageManifest), 'lib/index.js'), 'utf8')
@@ -543,19 +541,15 @@ describe('published package surface', () => {
     expect(installed).toContain('args.justification === void 0 || redundantEscalation')
   })
 
-  it('packages the native Session envelope and exact legacy image reader', () => {
-    const sessionPatch = '@deepseek-ai-dsh-session-npm-0.1.0-rc.7-ignorable.patch'
-    const persistencePatch = '@deepseek-ai-dsh-session-persistence-npm-0.1.0-rc.7-emate-image.patch'
+  it('packages the native Session envelope and fail-closed reader without overlays', () => {
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
 
-    expect(workspaceManifest.resolutions).toMatchObject({
-      '@deepseek-ai/dsh-session@npm:0.1.0-rc.7': expect.stringContaining(sessionPatch),
-      '@deepseek-ai/dsh-session@npm:^0.1.0-rc.7': expect.stringContaining(sessionPatch),
-      '@deepseek-ai/dsh-session-persistence@npm:0.1.0-rc.7': expect.stringContaining(persistencePatch),
-      '@deepseek-ai/dsh-session-persistence@npm:^0.1.0-rc.7': expect.stringContaining(persistencePatch),
-    })
-    expect(lockfile).toContain('@deepseek-ai/dsh-session@patch:@deepseek-ai/dsh-session@npm%3A0.1.0-rc.7#~/.yarn/patches/')
-    expect(lockfile).toContain('@deepseek-ai/dsh-session-persistence@patch:@deepseek-ai/dsh-session-persistence@npm%3A0.1.0-rc.7#~/.yarn/patches/')
+    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-session@npm:^0.1.0-rc.7'])
+      .toBe('npm:0.1.0-rc.7')
+    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-session-persistence@npm:^0.1.0-rc.7'])
+      .toBe('npm:0.1.0-rc.7')
+    expect(lockfile).not.toContain('@deepseek-ai/dsh-session@patch:')
+    expect(lockfile).not.toContain('@deepseek-ai/dsh-session-persistence@patch:')
 
     const session = Session.create('session-desktop-package-test' as never)
     const append = session.append as unknown as (
@@ -568,17 +562,17 @@ describe('published package surface', () => {
 
     type EventValidator = {
       backend: { locate: () => undefined }
-      assertEventsSupported(meta: { id: string }, events: readonly { type: string; seq: number }[]): void
+      assertEventsSupported(meta: { id: string }, events: readonly { type: string; seq: number; ignorable?: true }[]): void
     }
     const validator = Object.create(PersistenceCoordinator.prototype) as EventValidator
     validator.backend = { locate: () => undefined }
     expect(() => validator.assertEventsSupported(
       { id: 'session-desktop-package-test' },
-      [{ type: 'emate/image-output', seq: 105 }],
+      [{ type: 'emate/image-output', seq: 105, ignorable: true }],
     )).not.toThrow()
     expect(() => validator.assertEventsSupported(
       { id: 'session-desktop-package-test' },
-      [{ type: 'future/required-event', seq: 106 }],
-    )).toThrow(/future\/required-event/u)
+      [{ type: 'emate/image-output', seq: 106 }],
+    )).toThrow(/emate\/image-output/u)
   })
 })

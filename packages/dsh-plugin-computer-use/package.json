@@ -53,6 +53,6 @@
       "base_contracts": ["e-mate-desktop-profile-v6-dsh-2bc16230975f"]
     },
     "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "2bc16230975f6cf02aa1b283b1f86de44007b059"
+    "harnessCommit": "e13ce9d953037a2f40d866d17f5a7e00cbc15d66"
   }
 }

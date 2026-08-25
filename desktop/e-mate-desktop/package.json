@@ -71,6 +71,7 @@
   "files": [
     "base-contract.json",
     "build/e-mate-profile/**",
+    "build/harness-runtime-provenance.json",
     "build/app-icon.png",
     "build/app-icon-mac.png",
     "build/tray-icon.svg",
@@ -104,7 +105,7 @@
   "scripts": {
     "prepare:python": "node scripts/prepare-python-runtime.mjs",
     "build": "yarn run prepare:python && yarn run build:sdk",
-    "build:sdk": "node scripts/sync-emate-profile.mjs && node scripts/generate-mac-app-icon.mjs && node scripts/generate-tray-icons.mjs && node scripts/clean.mjs && tsdown && tsc -p tsconfig.json --emitDeclarationOnly && tsc -p tsconfig.client.json --emitDeclarationOnly",
+    "build:sdk": "node ../../scripts/harness-provenance.mjs sync-desktop && node scripts/sync-emate-profile.mjs && node scripts/generate-mac-app-icon.mjs && node scripts/generate-tray-icons.mjs && node scripts/clean.mjs && tsdown && tsc -p tsconfig.json --emitDeclarationOnly && tsc -p tsconfig.client.json --emitDeclarationOnly",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.tests.client.json --noEmit",
     "test": "vitest run",
     "verify:closure": "node --test scripts/runtime-closure.spec.mjs && node scripts/verify-runtime-closure.mjs",
@@ -230,8 +231,8 @@
     "@deepseek-ai/dsh-user-questions": "0.1.0-rc.7",
     "@deepseek-ai/dsh-web": "0.1.0-rc.7",
     "@deepseek-ai/dsh-web-app": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-workspace": "0.1.0-rc.7",
     "@deepseek-ai/dsh-workflow": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-workspace": "0.1.0-rc.7",
     "@deepseek-ai/schemastery": "3.18.1",
     "@kelearns/dsh-navigation-bar": "0.2.1",
     "dsh-at-file": "https://github.com/omdsh-dev/dsh-at-file/archive/4bc90873ae188bcdf55534ff8fd3071e88f192e4.tar.gz",
@@ -282,6 +283,7 @@
     "files": [
       "base-contract.json",
       "build/e-mate-profile/**",
+      "build/harness-runtime-provenance.json",
       "build/app-icon.png",
       "build/app-icon-mac.png",
       "build/tray-icon.svg",

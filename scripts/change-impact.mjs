@@ -266,7 +266,7 @@ function validateBaseContract(value) {
     errors.push('base contract Desktop rc.7 reference drifted')
   }
   if (value.harness_version !== '0.1.0-rc.7') errors.push('base contract Harness version drifted')
-  if (value.harness_commit !== '2bc16230975f6cf02aa1b283b1f86de44007b059') {
+  if (value.harness_commit !== 'e13ce9d953037a2f40d866d17f5a7e00cbc15d66') {
     errors.push('base contract Harness commit drifted')
   }
   const runtimeImports = record(value.runtime_imports) ? Object.entries(value.runtime_imports) : []

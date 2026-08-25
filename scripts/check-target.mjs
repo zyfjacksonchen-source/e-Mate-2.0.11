@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { ACCEPTED_PREDECESSOR, assertAcceptedPredecessor, PRODUCT_UI_REFERENCE } from './change-impact.mjs'
+import { assertHarnessSource, HARNESS_COMMIT } from './harness-provenance.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const repository = 'zyfjacksonchen-source/e-Mate-2.0.11'
@@ -60,7 +61,7 @@ for (const path of ['scripts/release.mjs', 'scripts/publish-r2.mjs', 'scripts/pu
   }
 }
 if (!target.includes(ACCEPTED_PREDECESSOR)) throw new Error('accepted 2.0.11 predecessor is missing')
-if (!target.includes('2bc16230975f6cf02aa1b283b1f86de44007b059')) throw new Error('Harness source pin is missing')
+if (!target.includes(HARNESS_COMMIT)) throw new Error('Harness source pin is missing')
 if (!target.includes(PRODUCT_UI_REFERENCE.commit)) throw new Error('e-Mate shell source pin is missing')
 if (!target.includes('TypeScript/TSX')) throw new Error('TypeScript source contract is missing')
 if (!target.includes('019ff91c-47ca-7c11-93bd-863475181a18')) throw new Error('full e-Mate UI reference is missing')
@@ -83,7 +84,7 @@ const legacyBrowserVendor = readdirSync(resolve(root, 'desktop/e-mate-desktop/ve
 if (legacyBrowserVendor !== undefined) throw new Error(`legacy extension browser vendor returned: ${legacyBrowserVendor}`)
 
 for (const [name, path, expected] of [
-  ['Harness', 'upstream/deepseek-harness', '2bc16230975f6cf02aa1b283b1f86de44007b059'],
+  ['Harness', 'upstream/deepseek-harness', HARNESS_COMMIT],
   ['e-Mate shell', PRODUCT_UI_REFERENCE.path, PRODUCT_UI_REFERENCE.commit],
 ]) {
   try {
@@ -94,6 +95,8 @@ for (const [name, path, expected] of [
     throw new Error(`${name} submodule is missing; run git submodule update --init --recursive`)
   }
 }
+
+assertHarnessSource(root)
 
 assertAcceptedPredecessor(root, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim())
 

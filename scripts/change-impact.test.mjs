@@ -169,7 +169,7 @@ describe('repository release boundary', () => {
       execFileSync('git', ['init', '--quiet'], { cwd: checkout })
       execFileSync('git', [
         'update-index', '--add', '--cacheinfo',
-        '160000,2bc16230975f6cf02aa1b283b1f86de44007b059,upstream/deepseek-harness',
+        '160000,e13ce9d953037a2f40d866d17f5a7e00cbc15d66,upstream/deepseek-harness',
       ], { cwd: checkout })
       execFileSync('git', [
         'update-index', '--add', '--cacheinfo',
@@ -503,6 +503,7 @@ describe('repository release boundary', () => {
     assert.doesNotMatch(workflow, /python-version: '3\.12\.14'/u)
     assert.match(workflow, /name: Test the accepted platform component against the new Base\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
     assert.match(workflow, /name: Export the exact accepted Base SDK run artifact(?:.|\n)*?name: e-mate-base-sdk-\$\{\{ needs\.impact\.outputs\.head_sha \}\}(?:.|\n)*?include-hidden-files: true(?:.|\n)*?retention-days: 30/u)
+    assert.match(workflow, /name: Build pinned DeepSeek Harness\n\s+run: pnpm build:harness/u)
     assert.match(workflow, /runs-on: \$\{\{ matrix\.runner \}\}/u)
     assert.match(workflow, /name: Build and test only the changed component\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
     assert.match(workflow, /if: matrix\.publish == true/u)
@@ -524,6 +525,12 @@ describe('repository release boundary', () => {
       const end = workflow.indexOf(`\n  ${nextJobName}:`, start + 3)
       const job = workflow.slice(start, end < 0 ? undefined : end)
       assert.match(job, /needs: \[impact, source\]/u)
+      assert.match(job, /name: e-mate-base-sdk-\$\{\{ needs\.impact\.outputs\.head_sha \}\}/u)
+      assert.match(job, /node scripts\/base-sdk\.mjs install --directory \.release-cache\/base-sdk/u)
+      assert.ok(
+        job.indexOf('base-sdk.mjs install') < job.indexOf('yarn install --immutable'),
+        `${jobName} must restore the accepted Base SDK before Yarn materializes Desktop`,
+      )
       assert.match(job, /if: needs\.impact\.outputs\.run_verification == 'true'/u)
       assert.match(job, /yarn verify:loader/u)
       assert.equal(job.match(/yarn verify:profile/gu)?.length, 2)
@@ -593,6 +600,8 @@ describe('repository release boundary', () => {
     const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
     assert.match(workflow, /^on:\n\s+workflow_dispatch:/mu)
     assert.doesNotMatch(workflow, /^\s+(?:pull_request|push):/mu)
+    assert.match(workflow, /name: Build pinned DeepSeek Harness\n\s+run: pnpm build:harness/u)
+    assert.doesNotMatch(workflow, /pnpm --dir upstream\/deepseek-harness run build/u)
   })
 
   it('fails unknown or malformed paths closed to base', () => {

@@ -15,7 +15,7 @@ import { PACKAGE_NAME, releaseSource } from './release-source.mjs'
 
 export const VERSION = '2.0.12'
 const HARNESS_VERSION = '0.1.0-rc.7'
-const HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
+const HARNESS_COMMIT = 'e13ce9d953037a2f40d866d17f5a7e00cbc15d66'
 const REPOSITORY = 'zyfjacksonchen-source/e-Mate-2.0.11'
 const TAG = `e-mate-v${VERSION}`
 const SHA256 = /^[0-9a-f]{64}$/u

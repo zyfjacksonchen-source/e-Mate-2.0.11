@@ -4,7 +4,7 @@ The normative product and source boundaries live in [target-contract.md](target-
 
 ## Runtime ownership
 
-DeepSeek Harness `0.1.0-rc.7` at downstream commit `2bc16230975f6cf02aa1b283b1f86de44007b059` (upstream base `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`) is the only local runtime core. It owns the Agent Loop, sessions, durable event logs, model calls, tools, approvals, attachments, Jobs, plugin loading, reconnect semantics, and persistence.
+DeepSeek Harness `0.1.0-rc.7` at downstream commit `e13ce9d953037a2f40d866d17f5a7e00cbc15d66` (upstream base `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`) is the only local runtime core. It owns the Agent Loop, sessions, durable event logs, model calls, tools, approvals, attachments, Jobs, plugin loading, reconnect semantics, and persistence.
 
 `@e-mate/desktop@2.0.11` is the native carrier for Electron, the pinned Harness closure, startup/shutdown, updater trust, packaged platform runtimes and renderer-health recovery. Product branding and behavior live in independently versioned Profile components selected by one signed generation. Neither layer replaces the Harness runtime, and there is no Runtime/Browser platform-package family or second plugin loader.
 

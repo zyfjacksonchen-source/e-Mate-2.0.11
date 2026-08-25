@@ -15,6 +15,7 @@
     "packages/dsh"
   ],
   "scripts": {
+    "build:harness": "node scripts/harness-provenance.mjs build",
     "check:target": "node scripts/check-target.mjs",
     "check:release-boundary": "node scripts/change-impact.mjs --check-contract",
     "component:inventory": "node scripts/component-release.mjs inventory",
@@ -22,7 +23,8 @@
     "performance:fixture": "node scripts/create-performance-fixture.mjs",
     "performance:parity": "pnpm run check:target && node scripts/performance-parity.mjs",
     "test:performance:parity": "node --test scripts/performance-parity.test.mjs",
-    "test": "pnpm run test:impact && node --test scripts/create-chat-state-fixture.test.mjs && pnpm run test:performance:parity && node scripts/component-run.mjs check && pnpm --filter @e-mate/dsh build && pnpm --filter @e-mate/dsh test",
+    "test": "pnpm run test:harness-provenance && pnpm run test:impact && node --test scripts/create-chat-state-fixture.test.mjs && pnpm run test:performance:parity && node scripts/component-run.mjs check && pnpm --filter @e-mate/dsh build && pnpm --filter @e-mate/dsh test",
+    "test:harness-provenance": "node --test scripts/harness-provenance.test.mjs scripts/harness-runtime-adapters.test.mjs",
     "test:impact": "node --test scripts/change-impact.test.mjs scripts/component-release.test.mjs scripts/profile-release.test.mjs scripts/publish-profile-r2.test.mjs",
     "test:release": "node --test scripts/release.test.mjs",
     "build": "node scripts/component-run.mjs build && pnpm --filter @e-mate/dsh build",

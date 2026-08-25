@@ -27,7 +27,7 @@ const base: ProfileBaseContract = {
   desktop_api: 1,
   profile_format: 1,
   harness_version: '0.1.0-rc.7',
-  harness_commit: '2bc16230975f6cf02aa1b283b1f86de44007b059',
+  harness_commit: 'e13ce9d953037a2f40d866d17f5a7e00cbc15d66',
   runtime_imports: {},
   profile_signing_keys: [{
     id: 'test-key',

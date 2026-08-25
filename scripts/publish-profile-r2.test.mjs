@@ -33,7 +33,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
   execFileSync('git', ['init', '--quiet'], { cwd: root })
   execFileSync('git', [
     'update-index', '--add', '--cacheinfo',
-    '160000,2bc16230975f6cf02aa1b283b1f86de44007b059,upstream/deepseek-harness',
+    '160000,e13ce9d953037a2f40d866d17f5a7e00cbc15d66,upstream/deepseek-harness',
   ], { cwd: root })
   execFileSync('git', [
     'update-index', '--add', '--cacheinfo',
@@ -54,7 +54,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
       harness_version: '0.1.0-rc.7',
     },
     harness_version: '0.1.0-rc.7',
-    harness_commit: '2bc16230975f6cf02aa1b283b1f86de44007b059',
+    harness_commit: 'e13ce9d953037a2f40d866d17f5a7e00cbc15d66',
     runtime_imports: {},
     profile_signing_keys: [{
       id: keyId,
@@ -83,7 +83,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
     eMate: {
       component: { schema_version: 1, id: componentId, kind: 'profile', base_imports: [], authority_contract: { effects: [], guards: [] }, base_contracts: [baseId] },
       harnessVersion: '0.1.0-rc.7',
-      harnessCommit: '2bc16230975f6cf02aa1b283b1f86de44007b059',
+      harnessCommit: 'e13ce9d953037a2f40d866d17f5a7e00cbc15d66',
     },
     license: 'MIT',
   })

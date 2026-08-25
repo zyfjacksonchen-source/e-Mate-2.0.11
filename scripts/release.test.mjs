@@ -21,7 +21,7 @@ import { renderDownloadPage } from './render-download-page.mjs'
 import { prepareHarnessBaseImports } from './component-base-imports.mjs'
 import { stageDesktopProfileArtifact } from './stage-desktop-profile-artifact.mjs'
 
-const HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
+const HARNESS_COMMIT = 'e13ce9d953037a2f40d866d17f5a7e00cbc15d66'
 const DIGEST = '0'.repeat(64)
 const R2_FIXTURE_PUBLIC_ORIGIN = 'https://downloads.e-mate.example'
 const SOURCE_COMMIT = '70ff2ce2e340682f4aad2be27e4ec8f1d74ee913'
@@ -362,6 +362,8 @@ test('GitHub release packs once and validates the same tarball on three platform
     'admission',
   ])
   assert.equal(ci.jobs.source.needs, 'impact')
+  assert.equal(ci.jobs.source.steps.find(step => step.name === 'Build pinned DeepSeek Harness').run, 'pnpm build:harness')
+  assert.equal(release.jobs.pack.steps.find(step => step.name === 'Build pinned DeepSeek Harness').run, 'pnpm build:harness')
   assert.deepEqual(ci.jobs['base-platform-components'].needs, ['impact', 'source'])
   assert.deepEqual(ci.jobs['desktop-windows'].needs, ['impact', 'source'])
   assert.deepEqual(ci.jobs['desktop-macos'].needs, ['impact', 'source'])
@@ -381,8 +383,18 @@ test('GitHub release packs once and validates the same tarball on three platform
       const job = workflow.jobs[consumer]
       assert.ok(job.needs === producer || Array.isArray(job.needs) && job.needs.includes(producer))
       assert.equal(job.steps.find(step => step.uses === 'actions/download-artifact@v4').with.path, 'packages')
+      const base = job.steps.find(step => step.uses === 'actions/download-artifact@v4'
+        && String(step.with.name).includes('e-mate-base-sdk-'))
+      assert.equal(base.with.path, '.release-cache/base-sdk')
+      assert.equal(
+        job.steps.find(step => step.name === 'Install and verify the exact Base SDK').run,
+        'node scripts/base-sdk.mjs install --directory .release-cache/base-sdk',
+      )
     }
   }
+  const desktopBaseBuild = desktopRelease.jobs.profile.steps.find(step => String(step.run).includes('pnpm build:harness')).run
+  assert.match(desktopBaseBuild, /yarn build:sdk/u)
+  assert.match(desktopBaseBuild, /base-sdk\.mjs emit/u)
   assert.deepEqual(
     release.jobs['clean-install'].strategy.matrix.include.map(item => [item.platform, item.runner]),
     [['darwin-arm64', 'macos-15'], ['darwin-x64', 'macos-15-intel'], ['win32-x64', 'windows-2025']],
