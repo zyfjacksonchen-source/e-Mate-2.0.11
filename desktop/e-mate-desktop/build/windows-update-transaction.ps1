@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('Prepare', 'Apply', 'Monitor', 'SelfTest')]
+  [ValidateSet('Inspect', 'Bootstrap', 'Prepare', 'Apply', 'Monitor', 'SelfTest')]
   [string]$Operation,
   [string]$RequestPath,
   [string]$Token,
@@ -7,6 +7,8 @@ param(
   [string]$InstallDirectory,
   [ValidateSet('CurrentUser', 'all')]
   [string]$InstallMode = 'CurrentUser',
+  [string]$TargetVersion,
+  [string]$BaseContractPath,
   [string]$OutputPath
 )
 
@@ -150,14 +152,38 @@ function Remove-FileDurable([string]$Path) {
 
 function Get-IdentityProperties {
   return @(
-    'transactionId', 'token', 'targetVersion', 'sourceCommit', 'baseContractId',
+    'transactionId', 'token', 'admission', 'targetVersion', 'sourceCommit', 'baseContractId',
     'scheduleProtocolFloor', 'manifestIdentity', 'artifact', 'canonicalDirectory', 'transactionRoot'
   )
 }
 
+function Assert-Admission($Admission) {
+  Assert-ExactProperties $Admission @('kind', 'signatureStatus', 'publisher', 'certificateThumbprint')
+  if ($Admission.kind -ceq 'managed-manifest') {
+    Assert-True ($null -eq $Admission.signatureStatus -and $null -eq $Admission.publisher -and $null -eq $Admission.certificateThumbprint) 'managed admission signature rejected'
+    return
+  }
+  Assert-True ($Admission.kind -ceq 'manual-installer') 'update admission rejected'
+  if ($Admission.signatureStatus -ceq 'unsigned') {
+    Assert-True ($null -eq $Admission.publisher -and $null -eq $Admission.certificateThumbprint) 'unsigned admission identity rejected'
+    return
+  }
+  Assert-True ($Admission.signatureStatus -ceq 'valid') 'manual signature status rejected'
+  Assert-True ($Admission.publisher -is [string] -and $Admission.publisher.Length -gt 0 -and $Admission.publisher.Length -le 512 -and $Admission.publisher -notmatch '[\x00\r\n]') 'manual publisher rejected'
+  Assert-True ($Admission.certificateThumbprint -is [string] -and $Admission.certificateThumbprint -cmatch '^[0-9a-f]{40}$') 'manual publisher thumbprint rejected'
+}
+
+function Assert-SameAdmission($Actual, $Expected) {
+  Assert-Admission $Actual
+  Assert-Admission $Expected
+  foreach ($name in @('kind', 'signatureStatus', 'publisher', 'certificateThumbprint')) {
+    Assert-True ($Actual.$name -ceq $Expected.$name) "installer admission mismatch: $name"
+  }
+}
+
 function Assert-Artifact($Actual, $Expected) {
   Assert-ExactProperties $Actual @('url', 'bytes', 'sha256')
-  Assert-True ($Actual.url -is [string]) 'artifact URL rejected'
+  Assert-True ($null -eq $Actual.url -or $Actual.url -is [string]) 'artifact URL rejected'
   Assert-True (($Actual.bytes -is [int] -or $Actual.bytes -is [long]) -and [int64]$Actual.bytes -gt 0) 'artifact size rejected'
   Assert-True ($Actual.sha256 -is [string] -and $Actual.sha256 -cmatch '^[0-9a-f]{64}$') 'artifact hash rejected'
   Assert-True ($Actual.url -ceq $Expected.url) 'artifact URL mismatch'
@@ -168,6 +194,7 @@ function Assert-Artifact($Actual, $Expected) {
 function Assert-CommitIdentity($Document, $Request) {
   Assert-True ($Document.transactionId -ceq $Request.transactionId) 'transaction mismatch'
   Assert-True ($Document.token -ceq $Request.token) 'token mismatch'
+  Assert-SameAdmission $Document.admission $Request.admission
   Assert-True ($Document.targetVersion -ceq $Request.targetVersion) 'target version mismatch'
   Assert-True ($Document.sourceCommit -ceq $Request.sourceCommit) 'source commit mismatch'
   Assert-True ($Document.baseContractId -ceq $Request.baseContractId) 'Base contract mismatch'
@@ -193,12 +220,188 @@ function Assert-MailboxAcl([string]$MailboxPath, [string]$OwnerSid) {
   Assert-True $sawOwner 'mailbox owner rule missing'
 }
 
+function Set-PrivateDirectoryAcl([string]$Path, [string]$OwnerSid) {
+  $owner = [Security.Principal.SecurityIdentifier]::new($OwnerSid)
+  $acl = [Security.AccessControl.DirectorySecurity]::new()
+  $acl.SetOwner($owner)
+  $acl.SetAccessRuleProtection($true, $false)
+  foreach ($sid in @($OwnerSid, 'S-1-5-18', 'S-1-5-32-544')) {
+    $identity = [Security.Principal.SecurityIdentifier]::new($sid)
+    $rule = [Security.AccessControl.FileSystemAccessRule]::new(
+      $identity,
+      [Security.AccessControl.FileSystemRights]::FullControl,
+      [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
+      [Security.AccessControl.PropagationFlags]::None,
+      [Security.AccessControl.AccessControlType]::Allow
+    )
+    [void]$acl.AddAccessRule($rule)
+  }
+  Set-Acl -LiteralPath $Path -AclObject $acl
+  Assert-MailboxAcl $Path $OwnerSid
+}
+
+function Get-InstallerAdmission([string]$Path) {
+  $signature = Get-AuthenticodeSignature -LiteralPath $Path
+  if ($signature.Status -eq [System.Management.Automation.SignatureStatus]::NotSigned) {
+    return [pscustomobject][ordered]@{
+      kind = 'manual-installer'
+      signatureStatus = 'unsigned'
+      publisher = $null
+      certificateThumbprint = $null
+    }
+  }
+  Assert-True ($signature.Status -eq [System.Management.Automation.SignatureStatus]::Valid) "installer signature rejected: $($signature.Status)"
+  Assert-True ($null -ne $signature.SignerCertificate) 'valid installer signature has no signer certificate'
+  $publisher = $signature.SignerCertificate.Subject
+  $thumbprint = $signature.SignerCertificate.Thumbprint.ToLowerInvariant()
+  $admission = [pscustomobject][ordered]@{
+    kind = 'manual-installer'
+    signatureStatus = 'valid'
+    publisher = $publisher
+    certificateThumbprint = $thumbprint
+  }
+  Assert-Admission $admission
+  return $admission
+}
+
+function Assert-SameInstallerAdmission($Request) {
+  if ($Request.admission.kind -cne 'manual-installer') { return }
+  Assert-SameAdmission (Get-InstallerAdmission $InstallerPath) $Request.admission
+}
+
+function Get-ManualInstallContext {
+  Assert-True ($TargetVersion -cmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') 'manual target version rejected'
+  $installer = Assert-RealFile $InstallerPath
+  $canonical = Get-FullPath $InstallDirectory
+  $current = Assert-RealFile (Join-Path $canonical $script:ProductExecutable)
+  $currentVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($current.FullName).ProductVersion
+  Assert-True ($currentVersion -cmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') 'installed version rejected'
+  Assert-True ([version]$TargetVersion -gt [version]$currentVersion) 'manual installer is not newer than the installed version'
+  $base = Read-BoundedJson $BaseContractPath
+  Assert-True ($base.id -is [string] -and $base.id -cmatch '^[A-Za-z0-9._-]{1,200}$') 'manual Base contract rejected'
+  Assert-True (($base.schedule_protocol_floor -is [int] -or $base.schedule_protocol_floor -is [long]) -and [int64]$base.schedule_protocol_floor -gt 0 -and [int64]$base.schedule_protocol_floor -le [int]::MaxValue) 'manual Schedule floor rejected'
+  $sha256 = Get-Sha256 $installer.FullName
+  return [ordered]@{
+    installer = $installer
+    canonical = $canonical
+    current = $current
+    currentVersion = $currentVersion
+    sha256 = $sha256
+    baseContractId = $base.id
+    scheduleProtocolFloor = [int]$base.schedule_protocol_floor
+    admission = Get-InstallerAdmission $installer.FullName
+  }
+}
+
+function Get-InstallerProcessId {
+  $process = Get-CimInstance Win32_Process -Filter "ProcessId = $PID" -ErrorAction Stop
+  Assert-True ($null -ne $process -and [int64]$process.ParentProcessId -gt 1 -and [int64]$process.ParentProcessId -le [int]::MaxValue) 'manual installer process rejected'
+  return [int]$process.ParentProcessId
+}
+
+function Write-InspectionResult([string]$Action, $Context) {
+  $content = @('[update]', "action=$Action")
+  if ($null -ne $Context) {
+    $publisher = if ($null -eq $Context.admission.publisher) { '' } else { $Context.admission.publisher }
+    Assert-True ($publisher -notmatch '[\x00\r\n]') 'publisher cannot be represented in installer UI'
+    $content += @(
+      "currentVersion=$($Context.currentVersion)",
+      "targetVersion=$TargetVersion",
+      "sha256=$($Context.sha256)",
+      "signatureStatus=$($Context.admission.signatureStatus)",
+      "publisher=$publisher"
+    )
+  }
+  [IO.File]::WriteAllText($OutputPath, ($content -join "`r`n") + "`r`n", [Text.UTF8Encoding]::new($false))
+}
+
+function Invoke-Inspect {
+  if (-not (Test-Path -LiteralPath (Join-Path (Get-FullPath $InstallDirectory) $script:ProductExecutable))) {
+    Write-InspectionResult 'fresh' $null
+    return
+  }
+  Write-InspectionResult 'manual' (Get-ManualInstallContext)
+}
+
+function Invoke-Bootstrap {
+  $context = Get-ManualInstallContext
+  $ownerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  Assert-True ($ownerSid -match '^S-1-(?:[0-9]+-){1,14}[0-9]+$') 'manual update owner SID rejected'
+  $userData = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)) 'e-Mate'
+  $mailboxRoot = Join-Path $userData 'updates\windows-base'
+  [IO.Directory]::CreateDirectory($mailboxRoot) | Out-Null
+  Set-PrivateDirectoryAcl $mailboxRoot $ownerSid
+  $pendingPath = Join-Path $mailboxRoot 'pending.json'
+  Assert-True (-not (Test-Path -LiteralPath $pendingPath)) 'another Windows update requires recovery before a manual update'
+  $transactionId = [Guid]::NewGuid().ToString('D')
+  $tokenValue = [Guid]::NewGuid().ToString('D')
+  $mailboxPath = Join-Path $mailboxRoot $transactionId
+  [IO.Directory]::CreateDirectory($mailboxPath) | Out-Null
+  Set-PrivateDirectoryAcl $mailboxPath $ownerSid
+  $requestFile = Join-Path $mailboxPath 'request.json'
+  $request = [ordered]@{
+    schemaVersion = 1
+    documentType = 'emate.windows-update-request'
+    appId = $script:AppId
+    transactionId = $transactionId
+    token = $tokenValue
+    parentPid = Get-InstallerProcessId
+    ownerSid = $ownerSid
+    admission = $context.admission
+    currentVersion = $context.currentVersion
+    targetVersion = $TargetVersion
+    sourceCommit = $null
+    baseContractId = $context.baseContractId
+    scheduleProtocolFloor = $context.scheduleProtocolFloor
+    manifestIdentity = $context.sha256
+    artifact = [ordered]@{ url = $null; bytes = [int64]$context.installer.Length; sha256 = $context.sha256 }
+    installerPath = $context.installer.FullName
+    currentExecutable = $context.current.FullName
+    currentExecutableSha256 = Get-Sha256 $context.current.FullName
+    canonicalDirectory = $context.canonical
+    transactionRoot = Join-Path (Join-Path (Split-Path -Parent $context.canonical) ".$script:AppId-update") $transactionId
+    mailboxPath = $mailboxPath
+    pendingPath = $pendingPath
+    createdAt = Get-UtcIsoTimestamp
+  }
+  $savedRequestPath = $script:RequestPath
+  $savedToken = $script:Token
+  try {
+    $script:RequestPath = $requestFile
+    $script:Token = $tokenValue
+    Write-DurableJson $requestFile $request -Exclusive
+    Read-Request | Out-Null
+    Write-DurableJson $pendingPath ([ordered]@{
+      schemaVersion = 1
+      requestPath = $requestFile
+      transactionId = $transactionId
+      token = $tokenValue
+    }) -Exclusive
+    $content = @(
+      '[update]',
+      'action=bootstrap',
+      "request=$requestFile",
+      "token=$tokenValue",
+      "sha256=$($context.sha256)"
+    ) -join "`r`n"
+    [IO.File]::WriteAllText($OutputPath, $content + "`r`n", [Text.UTF8Encoding]::new($false))
+  } catch {
+    if (-not (Test-Path -LiteralPath $pendingPath)) {
+      Remove-Item -LiteralPath $mailboxPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    throw
+  } finally {
+    $script:RequestPath = $savedRequestPath
+    $script:Token = $savedToken
+  }
+}
+
 function Read-Request {
   Assert-True ($Token -match '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') 'invalid private update token'
   $request = Read-BoundedJson $RequestPath
   Assert-ExactProperties $request @(
     'schemaVersion', 'documentType', 'appId', 'transactionId', 'token', 'parentPid',
-    'ownerSid', 'currentVersion', 'targetVersion', 'sourceCommit', 'baseContractId',
+    'ownerSid', 'admission', 'currentVersion', 'targetVersion', 'sourceCommit', 'baseContractId',
     'scheduleProtocolFloor', 'manifestIdentity', 'artifact', 'installerPath',
     'currentExecutable', 'currentExecutableSha256', 'canonicalDirectory', 'transactionRoot',
     'mailboxPath', 'pendingPath', 'createdAt'
@@ -210,12 +413,13 @@ function Read-Request {
   Assert-True ($request.token -ceq $Token) 'private update token rejected'
   Assert-True (($request.parentPid -is [int] -or $request.parentPid -is [long]) -and [int64]$request.parentPid -gt 1 -and [int64]$request.parentPid -le [int]::MaxValue) 'parent PID rejected'
   Assert-True ($request.ownerSid -match '^S-1-(?:[0-9]+-){1,14}[0-9]+$') 'owner SID rejected'
+  Assert-Admission $request.admission
   Assert-True ($request.currentVersion -is [string] -and $request.currentVersion -cmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') 'current version rejected'
   Assert-True ($request.targetVersion -is [string] -and $request.targetVersion -cmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') 'target version rejected'
   try {
     Assert-True ([version]$request.targetVersion -gt [version]$request.currentVersion) 'target version is not newer'
   } catch { throw 'request version range rejected' }
-  Assert-True ($request.sourceCommit -match '^[0-9a-f]{40}$') 'source commit rejected'
+  Assert-True ($null -eq $request.sourceCommit -or $request.sourceCommit -is [string] -and $request.sourceCommit -cmatch '^[0-9a-f]{40}$') 'source commit rejected'
   Assert-True ($request.baseContractId -match '^[A-Za-z0-9._-]{1,200}$') 'Base contract rejected'
   Assert-True (($request.scheduleProtocolFloor -is [int] -or $request.scheduleProtocolFloor -is [long]) -and [int64]$request.scheduleProtocolFloor -gt 0 -and [int64]$request.scheduleProtocolFloor -le [int]::MaxValue) 'Schedule floor rejected'
   Assert-True ($request.manifestIdentity -match '^[0-9a-f]{64}$') 'manifest identity rejected'
@@ -236,10 +440,16 @@ function Read-Request {
     [IO.Path]::GetPathRoot($root), [IO.Path]::GetPathRoot($canonical)
   )) 'transaction root is not same-volume'
   Assert-True (Test-SamePath $request.currentExecutable (Join-Path $canonical $script:ProductExecutable)) 'current executable path mismatch'
-  $artifactUri = [Uri]$request.artifact.url
-  Assert-True ($artifactUri.Scheme -ceq 'https' -and $artifactUri.Host -ceq 'pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev') 'artifact origin rejected'
-  Assert-True ($artifactUri.Query.Length -eq 0 -and $artifactUri.Fragment.Length -eq 0) 'artifact URL suffix rejected'
-  Assert-True ($artifactUri.AbsolutePath -cmatch ('^/desktop/releases/v' + [Regex]::Escape($request.targetVersion) + '/' + [Regex]::Escape($request.sourceCommit) + '/[^/]+\.exe$')) 'artifact release identity mismatch'
+  if ($request.admission.kind -ceq 'managed-manifest') {
+    Assert-True ($request.sourceCommit -is [string] -and $request.artifact.url -is [string]) 'managed artifact identity missing'
+    $artifactUri = [Uri]$request.artifact.url
+    Assert-True ($artifactUri.Scheme -ceq 'https' -and $artifactUri.Host -ceq 'pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev') 'artifact origin rejected'
+    Assert-True ($artifactUri.Query.Length -eq 0 -and $artifactUri.Fragment.Length -eq 0) 'artifact URL suffix rejected'
+    Assert-True ($artifactUri.AbsolutePath -cmatch ('^/desktop/releases/v' + [Regex]::Escape($request.targetVersion) + '/' + [Regex]::Escape($request.sourceCommit) + '/[^/]+\.exe$')) 'artifact release identity mismatch'
+  } else {
+    Assert-True ($null -eq $request.sourceCommit -and $null -eq $request.artifact.url) 'manual installer claimed remote manifest authority'
+    Assert-True ($request.manifestIdentity -ceq $request.artifact.sha256) 'manual installer admission hash mismatch'
+  }
   $created = [DateTimeOffset]::MinValue
   Assert-True ($request.createdAt -is [string] -and $request.createdAt -cmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$' -and [DateTimeOffset]::TryParse($request.createdAt, [ref]$created)) 'request timestamp rejected'
   Assert-MailboxAcl $mailbox $request.ownerSid
@@ -251,6 +461,7 @@ function Assert-InstallerContext($Request) {
   Assert-True (Test-SamePath $installer.FullName $Request.installerPath) 'Setup path mismatch'
   Assert-True ($installer.Length -eq [int64]$Request.artifact.bytes) 'Setup size mismatch'
   Assert-True ((Get-Sha256 $installer.FullName) -ceq $Request.artifact.sha256) 'Setup hash mismatch'
+  Assert-SameInstallerAdmission $Request
   Assert-True (Test-SamePath $InstallDirectory $Request.canonicalDirectory) 'NSIS install directory mismatch'
 }
 
@@ -278,6 +489,7 @@ function New-Journal($Request) {
     phase = 'staging'
     transactionId = $Request.transactionId
     token = $Request.token
+    admission = $Request.admission
     currentVersion = $Request.currentVersion
     targetVersion = $Request.targetVersion
     sourceCommit = $Request.sourceCommit
@@ -299,7 +511,7 @@ function New-Journal($Request) {
 
 function Assert-JournalIdentity($Journal, $Request) {
   Assert-ExactProperties $Journal @(
-    'schemaVersion', 'documentType', 'phase', 'transactionId', 'token', 'currentVersion',
+    'schemaVersion', 'documentType', 'phase', 'transactionId', 'token', 'admission', 'currentVersion',
     'targetVersion', 'sourceCommit', 'baseContractId', 'scheduleProtocolFloor',
     'manifestIdentity', 'artifact', 'installMode', 'canonicalDirectory', 'transactionRoot',
     'candidateDirectory', 'lastGoodDirectory', 'failedDirectory', 'candidateExecutable',
@@ -307,6 +519,7 @@ function Assert-JournalIdentity($Journal, $Request) {
   )
   Assert-True ($Journal.schemaVersion -eq 1 -and $Journal.documentType -ceq 'emate.windows-update-journal') 'journal type rejected'
   Assert-True ($Journal.transactionId -ceq $Request.transactionId -and $Journal.token -ceq $Request.token) 'journal owner rejected'
+  Assert-SameAdmission $Journal.admission $Request.admission
   Assert-True ($Journal.currentVersion -ceq $Request.currentVersion -and $Journal.targetVersion -ceq $Request.targetVersion) 'journal version rejected'
   Assert-True ($Journal.sourceCommit -ceq $Request.sourceCommit -and $Journal.baseContractId -ceq $Request.baseContractId) 'journal identity rejected'
   Assert-True ([int]$Journal.scheduleProtocolFloor -eq [int]$Request.scheduleProtocolFloor) 'journal Schedule floor rejected'
@@ -525,6 +738,7 @@ function Write-Ready($Request) {
     documentType = 'emate.windows-update-ready'
     transactionId = $Request.transactionId
     token = $Request.token
+    admission = $Request.admission
     targetVersion = $Request.targetVersion
     sourceCommit = $Request.sourceCommit
     baseContractId = $Request.baseContractId
@@ -534,6 +748,35 @@ function Write-Ready($Request) {
     canonicalDirectory = $Request.canonicalDirectory
     transactionRoot = $Request.transactionRoot
     setupPid = $PID
+  }) -Exclusive
+}
+
+function Write-ManualShutdown($Request) {
+  Assert-True ($Request.admission.kind -ceq 'manual-installer') 'manual shutdown requires manual admission'
+  $matching = @(Get-CimInstance Win32_Process -Filter "Name = '$script:ProductExecutable'" -ErrorAction Stop |
+    Where-Object { $_.ExecutablePath -and (Test-SamePath $_.ExecutablePath $Request.currentExecutable) })
+  Assert-True ($matching.Count -eq 0) 'close e-Mate before continuing the manual update'
+  $path = Join-Path $Request.mailboxPath 'shutdown.json'
+  if (Test-Path -LiteralPath $path) {
+    $existing = Wait-Document $path 'emate.windows-update-shutdown' $Request 1
+    Assert-True ([int]$existing.parentPid -eq [int]$Request.parentPid) 'manual shutdown PID mismatch'
+    return
+  }
+  Write-DurableJson $path ([ordered]@{
+    schemaVersion = 1
+    documentType = 'emate.windows-update-shutdown'
+    transactionId = $Request.transactionId
+    token = $Request.token
+    admission = $Request.admission
+    targetVersion = $Request.targetVersion
+    sourceCommit = $Request.sourceCommit
+    baseContractId = $Request.baseContractId
+    scheduleProtocolFloor = [int]$Request.scheduleProtocolFloor
+    manifestIdentity = $Request.manifestIdentity
+    artifact = $Request.artifact
+    canonicalDirectory = $Request.canonicalDirectory
+    transactionRoot = $Request.transactionRoot
+    parentPid = [int]$Request.parentPid
   }) -Exclusive
 }
 
@@ -767,7 +1010,12 @@ function Invoke-Apply {
   if (@('staged', 'ready') -contains $journal.phase) {
     Write-Ready $request
     if ($journal.phase -ceq 'staged') { Set-Phase $journal 'ready' }
-    $shutdown = Wait-ShutdownWhileParentLives $request
+    if ($request.admission.kind -ceq 'manual-installer') {
+      Write-ManualShutdown $request
+      $shutdown = Wait-Document (Join-Path $request.mailboxPath 'shutdown.json') 'emate.windows-update-shutdown' $request 1
+    } else {
+      $shutdown = Wait-ShutdownWhileParentLives $request
+    }
     if ($null -eq $shutdown) {
       Invoke-StagedRollback $journal $request
       Finalize-Transaction $request
@@ -775,7 +1023,7 @@ function Invoke-Apply {
       return
     }
     Assert-True ([int]$shutdown.parentPid -eq [int]$request.parentPid) 'shutdown PID mismatch'
-    Wait-ParentExit $request
+    if ($request.admission.kind -ceq 'managed-manifest') { Wait-ParentExit $request }
   } else {
     Write-Ready $request
   }
@@ -862,6 +1110,7 @@ function Invoke-Monitor {
       documentType = 'emate.windows-update-confirmed'
       transactionId = $request.transactionId
       token = $request.token
+      admission = $request.admission
       targetVersion = $request.targetVersion
       sourceCommit = $request.sourceCommit
       baseContractId = $request.baseContractId
@@ -1061,6 +1310,8 @@ function Invoke-SelfTest {
 
 try {
   switch ($Operation) {
+    'Inspect' { Invoke-Inspect }
+    'Bootstrap' { Invoke-Bootstrap }
     'Prepare' { Invoke-Prepare }
     'Apply' { Invoke-Apply }
     'Monitor' { Invoke-Monitor }

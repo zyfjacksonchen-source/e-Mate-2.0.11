@@ -42,13 +42,13 @@ const POLL_MS = 100
 
 const REQUEST_KEYS = [
   'schemaVersion', 'documentType', 'appId', 'transactionId', 'token', 'parentPid',
-  'ownerSid', 'currentVersion', 'targetVersion', 'sourceCommit', 'baseContractId',
+  'ownerSid', 'admission', 'currentVersion', 'targetVersion', 'sourceCommit', 'baseContractId',
   'scheduleProtocolFloor', 'manifestIdentity', 'artifact', 'installerPath',
   'currentExecutable', 'currentExecutableSha256', 'canonicalDirectory', 'transactionRoot',
   'mailboxPath', 'pendingPath', 'createdAt',
 ] as const
 const JOURNAL_KEYS = [
-  'schemaVersion', 'documentType', 'phase', 'transactionId', 'token', 'currentVersion',
+  'schemaVersion', 'documentType', 'phase', 'transactionId', 'token', 'admission', 'currentVersion',
   'targetVersion', 'sourceCommit', 'baseContractId', 'scheduleProtocolFloor',
   'manifestIdentity', 'artifact', 'installMode', 'canonicalDirectory', 'transactionRoot',
   'candidateDirectory', 'lastGoodDirectory', 'failedDirectory', 'candidateExecutable',
@@ -57,6 +57,31 @@ const JOURNAL_KEYS = [
 const CANDIDATE_START_PHASES = [
   'candidate-at-canonical', 'awaiting-ack', 'confirmed', 'confirmed-unknown',
 ] as const
+
+/** Authority bound to the request before the first canonical-directory rename. */
+export type WindowsUpdateAdmission = {
+  readonly kind: 'managed-manifest'
+  readonly signatureStatus: null
+  readonly publisher: null
+  readonly certificateThumbprint: null
+} | {
+  readonly kind: 'manual-installer'
+  readonly signatureStatus: 'unsigned'
+  readonly publisher: null
+  readonly certificateThumbprint: null
+} | {
+  readonly kind: 'manual-installer'
+  readonly signatureStatus: 'valid'
+  readonly publisher: string
+  readonly certificateThumbprint: string
+}
+
+/** Immutable installer bytes; manual admission has no claimed remote URL. */
+export interface WindowsUpdateArtifact {
+  readonly url: string | null
+  readonly bytes: number
+  readonly sha256: string
+}
 
 /** Durable, complete identity authorized for one physical Base replacement. */
 export interface WindowsUpdateRequest {
@@ -67,13 +92,14 @@ export interface WindowsUpdateRequest {
   readonly token: string
   readonly parentPid: number
   readonly ownerSid: string
+  readonly admission: WindowsUpdateAdmission
   readonly currentVersion: string
   readonly targetVersion: string
-  readonly sourceCommit: string
+  readonly sourceCommit: string | null
   readonly baseContractId: string
   readonly scheduleProtocolFloor: number
   readonly manifestIdentity: string
-  readonly artifact: DesktopReleaseArtifact
+  readonly artifact: WindowsUpdateArtifact
   readonly installerPath: string
   readonly currentExecutable: string
   readonly currentExecutableSha256: string
@@ -111,12 +137,13 @@ interface ReadyReceipt {
   readonly documentType: 'emate.windows-update-ready'
   readonly transactionId: string
   readonly token: string
+  readonly admission: WindowsUpdateAdmission
   readonly targetVersion: string
-  readonly sourceCommit: string
+  readonly sourceCommit: string | null
   readonly baseContractId: string
   readonly scheduleProtocolFloor: number
   readonly manifestIdentity: string
-  readonly artifact: DesktopReleaseArtifact
+  readonly artifact: WindowsUpdateArtifact
   readonly canonicalDirectory: string
   readonly transactionRoot: string
   readonly setupPid: number
@@ -175,9 +202,50 @@ function positiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) > 0
 }
 
-function sameArtifact(left: unknown, right: DesktopReleaseArtifact): boolean {
+function sameArtifact(left: unknown, right: WindowsUpdateArtifact): boolean {
   return isRecord(left) && exactKeys(left, ['url', 'bytes', 'sha256'])
     && left.url === right.url && left.bytes === right.bytes && left.sha256 === right.sha256
+}
+
+function sameAdmission(left: unknown, right: WindowsUpdateAdmission): boolean {
+  const parsed = parseAdmission(left)
+  return parsed !== undefined
+    && parsed.kind === right.kind
+    && parsed.signatureStatus === right.signatureStatus
+    && parsed.publisher === right.publisher
+    && parsed.certificateThumbprint === right.certificateThumbprint
+}
+
+function sameCommitIdentityValue(
+  key: string,
+  actual: unknown,
+  expected: unknown,
+  request: WindowsUpdateRequest,
+): boolean {
+  if (key === 'artifact') return sameArtifact(actual, request.artifact)
+  if (key === 'admission') return sameAdmission(actual, request.admission)
+  return actual === expected
+}
+
+function parseAdmission(value: unknown): WindowsUpdateAdmission | undefined {
+  if (!isRecord(value) || !exactKeys(value, [
+    'kind', 'signatureStatus', 'publisher', 'certificateThumbprint',
+  ])) return undefined
+  if (value.kind === 'managed-manifest' && value.signatureStatus === null
+    && value.publisher === null && value.certificateThumbprint === null) {
+    return value as unknown as WindowsUpdateAdmission
+  }
+  if (value.kind !== 'manual-installer') return undefined
+  if (value.signatureStatus === 'unsigned' && value.publisher === null
+    && value.certificateThumbprint === null) return value as unknown as WindowsUpdateAdmission
+  if (value.signatureStatus === 'valid'
+    && typeof value.publisher === 'string' && value.publisher.length > 0 && value.publisher.length <= 512
+    && !/[\0\r\n]/u.test(value.publisher)
+    && typeof value.certificateThumbprint === 'string'
+    && /^[0-9a-f]{40}$/u.test(value.certificateThumbprint)) {
+    return value as unknown as WindowsUpdateAdmission
+  }
+  return undefined
 }
 
 function parseIsoTimestamp(value: unknown): value is string {
@@ -188,19 +256,24 @@ function parseIsoTimestamp(value: unknown): value is string {
 
 /** Parse a request without trusting public `--updated`/`--force-run` switches. */
 export function parseWindowsUpdateRequest(value: unknown, requestPath: string, token: string): WindowsUpdateRequest {
+  const admission = isRecord(value) ? parseAdmission(value.admission) : undefined
   if (!isRecord(value) || !exactKeys(value, REQUEST_KEYS)
     || value.schemaVersion !== 1 || value.documentType !== DOCUMENT_TYPE || value.appId !== APP_ID
     || typeof value.transactionId !== 'string' || !UUID_V4.test(value.transactionId)
     || typeof value.token !== 'string' || !UUID_V4.test(value.token) || value.token !== token
     || !positiveSafeInteger(value.parentPid) || typeof value.ownerSid !== 'string' || !SID.test(value.ownerSid)
+    || admission === undefined
     || !stableVersion(value.currentVersion) || !stableVersion(value.targetVersion)
     || (compareSemVerVersions(value.targetVersion, value.currentVersion) ?? 0) <= 0
-    || typeof value.sourceCommit !== 'string' || !SOURCE_COMMIT.test(value.sourceCommit)
+    || !(value.sourceCommit === null || typeof value.sourceCommit === 'string' && SOURCE_COMMIT.test(value.sourceCommit))
     || typeof value.baseContractId !== 'string' || !BASE_CONTRACT_ID.test(value.baseContractId)
     || !positiveSafeInteger(value.scheduleProtocolFloor)
     || typeof value.manifestIdentity !== 'string' || !SHA256.test(value.manifestIdentity)
-    || validateDesktopReleaseArtifact('win32', value.targetVersion, value.artifact) === null
     || !isRecord(value.artifact)
+    || !exactKeys(value.artifact, ['url', 'bytes', 'sha256'])
+    || !(value.artifact.url === null || typeof value.artifact.url === 'string')
+    || !positiveSafeInteger(value.artifact.bytes)
+    || typeof value.artifact.sha256 !== 'string' || !SHA256.test(value.artifact.sha256)
     || typeof value.installerPath !== 'string' || typeof value.currentExecutable !== 'string'
     || typeof value.currentExecutableSha256 !== 'string' || !SHA256.test(value.currentExecutableSha256)
     || typeof value.canonicalDirectory !== 'string' || typeof value.transactionRoot !== 'string'
@@ -212,6 +285,15 @@ export function parseWindowsUpdateRequest(value: unknown, requestPath: string, t
   const mailbox = resolve(dirname(requestPath))
   const canonicalParent = resolve(dirname(request.canonicalDirectory))
   const transactionContainer = join(canonicalParent, `.${APP_ID}-update`)
+  const managedAdmission = request.admission.kind === 'managed-manifest'
+    && request.sourceCommit !== null
+    && request.artifact.url !== null
+    && validateDesktopReleaseArtifact('win32', request.targetVersion, request.artifact) !== null
+    && new URL(request.artifact.url).pathname.includes(`/${request.sourceCommit}/`)
+  const manualAdmission = request.admission.kind === 'manual-installer'
+    && request.sourceCommit === null
+    && request.artifact.url === null
+    && request.manifestIdentity === request.artifact.sha256
   if (!sameWindowsPath(requestPath, join(mailbox, 'request.json'))
     || !sameWindowsPath(request.mailboxPath, mailbox)
     || !sameWindowsPath(request.pendingPath, join(dirname(mailbox), 'pending.json'))
@@ -221,7 +303,7 @@ export function parseWindowsUpdateRequest(value: unknown, requestPath: string, t
     || sameWindowsPath(request.transactionRoot, request.canonicalDirectory)
     || inside(resolve(request.canonicalDirectory), resolve(request.transactionRoot))
     || inside(resolve(request.transactionRoot), resolve(request.canonicalDirectory))
-    || !new URL(request.artifact.url).pathname.includes(`/${request.sourceCommit}/`)) {
+    || !managedAdmission && !manualAdmission) {
     throw new Error('Windows update request path or identity is invalid')
   }
   return request
@@ -411,6 +493,7 @@ function commitIdentity(request: WindowsUpdateRequest): Record<string, unknown> 
   return {
     transactionId: request.transactionId,
     token: request.token,
+    admission: request.admission,
     targetVersion: request.targetVersion,
     sourceCommit: request.sourceCommit,
     baseContractId: request.baseContractId,
@@ -428,9 +511,8 @@ function assertReady(value: unknown, request: WindowsUpdateRequest): asserts val
     'schemaVersion', 'documentType', ...Object.keys(identity), 'setupPid',
   ]) || value.schemaVersion !== 1 || value.documentType !== 'emate.windows-update-ready'
     || !positiveSafeInteger(value.setupPid)
-    || Object.entries(identity).some(([key, expected]) => key === 'artifact'
-      ? !sameArtifact(value[key], request.artifact)
-      : value[key] !== expected)) {
+    || Object.entries(identity).some(([key, expected]) =>
+      !sameCommitIdentityValue(key, value[key], expected, request))) {
     throw new Error('Windows update READY receipt is invalid')
   }
 }
@@ -446,9 +528,8 @@ function assertCandidateJournal(
     || value.installMode !== 'CurrentUser' && value.installMode !== 'all'
     || typeof value.candidateExecutableSha256 !== 'string' || !SHA256.test(value.candidateExecutableSha256)
     || !parseIsoTimestamp(value.updatedAt)
-    || Object.entries(commitIdentity(request)).some(([key, expected]) => key === 'artifact'
-      ? !sameArtifact(value[key], request.artifact)
-      : value[key] !== expected)
+    || Object.entries(commitIdentity(request)).some(([key, expected]) =>
+      !sameCommitIdentityValue(key, value[key], expected, request))
     || !sameWindowsPath(String(value.candidateDirectory), join(request.transactionRoot, 'candidate'))
     || !sameWindowsPath(String(value.lastGoodDirectory), join(request.transactionRoot, 'last-good'))
     || !sameWindowsPath(String(value.failedDirectory), join(request.transactionRoot, 'failed'))
@@ -529,6 +610,12 @@ export async function scheduleWindowsUpdateInstallation(
     token,
     parentPid: options.parentPid ?? process.pid,
     ownerSid,
+    admission: {
+      kind: 'managed-manifest',
+      signatureStatus: null,
+      publisher: null,
+      certificateThumbprint: null,
+    },
     currentVersion: options.currentVersion,
     targetVersion: options.targetVersion,
     sourceCommit: options.sourceCommit,
@@ -632,9 +719,8 @@ function assertConfirmation(value: unknown, request: WindowsUpdateRequest): void
     'schemaVersion', 'documentType', ...Object.keys(identity), 'confirmedAt',
   ]) || value.schemaVersion !== 1 || value.documentType !== 'emate.windows-update-confirmed'
     || !parseIsoTimestamp(value.confirmedAt)
-    || Object.entries(identity).some(([key, expected]) => key === 'artifact'
-      ? !sameArtifact(value[key], request.artifact)
-      : value[key] !== expected)) {
+    || Object.entries(identity).some(([key, expected]) =>
+      !sameCommitIdentityValue(key, value[key], expected, request))) {
     throw new Error('Windows update confirmation is invalid')
   }
 }

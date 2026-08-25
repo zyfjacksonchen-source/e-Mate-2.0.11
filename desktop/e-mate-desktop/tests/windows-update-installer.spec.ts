@@ -84,6 +84,7 @@ function ready(request: WindowsUpdateRequest): Record<string, unknown> {
     documentType: 'emate.windows-update-ready',
     transactionId: request.transactionId,
     token: request.token,
+    admission: request.admission,
     targetVersion: request.targetVersion,
     sourceCommit: request.sourceCommit,
     baseContractId: request.baseContractId,
@@ -108,6 +109,7 @@ function candidateJournal(
     phase,
     transactionId: request.transactionId,
     token: request.token,
+    admission: request.admission,
     currentVersion: request.currentVersion,
     targetVersion: request.targetVersion,
     sourceCommit: request.sourceCommit,
@@ -211,6 +213,46 @@ describe('Windows Base update private handshake', () => {
       .rejects.toThrow('identity is invalid')
     await expect(schedule(fixture(), adapter(), { manifestIdentity: '' }))
       .rejects.toThrow('identity is invalid')
+  })
+
+  it('accepts only hash-bound manual installer admissions without claiming managed authority', async () => {
+    const files = fixture()
+    const prepared = await schedule(files, adapter((request) => {
+      writeFileSync(join(request.mailboxPath, 'ready.json'), JSON.stringify(ready(request)))
+    }))
+    const requestPath = join(prepared.request.mailboxPath, 'request.json')
+    const manual = {
+      ...prepared.request,
+      admission: {
+        kind: 'manual-installer',
+        signatureStatus: 'unsigned',
+        publisher: null,
+        certificateThumbprint: null,
+      },
+      sourceCommit: null,
+      manifestIdentity: prepared.request.artifact.sha256,
+      artifact: { ...prepared.request.artifact, url: null },
+    }
+    expect(parseWindowsUpdateRequest(manual, requestPath, prepared.request.token))
+      .toMatchObject({ admission: { kind: 'manual-installer', signatureStatus: 'unsigned' } })
+    expect(parseWindowsUpdateRequest({
+      ...manual,
+      admission: {
+        kind: 'manual-installer',
+        signatureStatus: 'valid',
+        publisher: 'CN=e-Mate Release',
+        certificateThumbprint: 'c'.repeat(40),
+      },
+    }, requestPath, prepared.request.token))
+      .toMatchObject({ admission: { signatureStatus: 'valid', publisher: 'CN=e-Mate Release' } })
+    expect(() => parseWindowsUpdateRequest({
+      ...manual,
+      artifact: prepared.request.artifact,
+    }, requestPath, prepared.request.token)).toThrow('path or identity')
+    expect(() => parseWindowsUpdateRequest({
+      ...prepared.request,
+      admission: manual.admission,
+    }, requestPath, prepared.request.token)).toThrow('path or identity')
   })
 
   it('allows only one pending transaction in the fixed user mailbox', async () => {
@@ -401,6 +443,7 @@ describe('Windows Base update private handshake', () => {
       documentType: 'emate.windows-update-confirmed',
       transactionId: prepared.request.transactionId,
       token: prepared.request.token,
+      admission: prepared.request.admission,
       targetVersion: prepared.request.targetVersion,
       sourceCommit: prepared.request.sourceCommit,
       baseContractId: prepared.request.baseContractId,

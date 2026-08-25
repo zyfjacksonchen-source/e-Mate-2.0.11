@@ -51,6 +51,39 @@ describe('pinned assisted-NSIS atomic update seam', () => {
     expect(() => source('build/installer.nsi')).toThrow()
   })
 
+  it('bridges only an interactive existing-install first hop and binds signed or unsigned Setup identity', () => {
+    const include = source('build/installer.nsh')
+    const coordinator = source('build/windows-update-transaction.ps1')
+
+    // A complete managed receipt remains the only silent/automatic authority.
+    expect(include.match(/StrCpy \$\{OUT_VAR\} "true"/gu)).toHaveLength(2)
+    expect(include).toContain('IfSilent emateAutomaticWithoutReceipt emateInteractiveManualUpdate')
+    expect(include).toContain('An automatic e-Mate update requires a private update receipt.')
+
+    // Existing interactive installs show the exact bytes before any durable bootstrap write.
+    const inspect = include.indexOf('emateRunUpdateTransaction "Inspect"')
+    const confirmation = include.indexOf('MessageBox MB_ICONEXCLAMATION|MB_YESNO|MB_DEFBUTTON2')
+    const bootstrap = include.indexOf('emateRunUpdateTransaction "Bootstrap"')
+    expect(inspect).toBeGreaterThan(0)
+    expect(include.indexOf('${FileExists} "$INSTDIR\\${APP_EXECUTABLE_FILENAME}"'))
+      .toBeLessThan(inspect)
+    expect(confirmation).toBeGreaterThan(inspect)
+    expect(bootstrap).toBeGreaterThan(confirmation)
+    expect(include).toContain('SHA-256: $emateUpdateSha256')
+    expect(include).toContain('未签名')
+    expect(include).toContain('发布者: $emateUpdatePublisher')
+
+    // Fresh install remains on electron-builder; both manual admission variants reuse one journal.
+    expect(include).toContain('$emateUpdateAction == "fresh"')
+    expect(coordinator).toContain("$Admission.kind -ceq 'managed-manifest'")
+    expect(coordinator).toContain("$Admission.kind -ceq 'manual-installer'")
+    expect(coordinator).toContain("signatureStatus = 'unsigned'")
+    expect(coordinator).toContain("signatureStatus = 'valid'")
+    expect(coordinator).toContain('Assert-SameInstallerAdmission $Request')
+    expect(coordinator).toContain("if ($request.admission.kind -ceq 'manual-installer')")
+    expect(coordinator).toContain('Write-ManualShutdown $request')
+  })
+
   it('stages before READY and journals both forward renames plus both rollback renames', () => {
     const coordinator = source('build/windows-update-transaction.ps1')
     const phases = [
