@@ -164,6 +164,7 @@ export function apply(ctx: Context, config: Config): void {
           if (adapter.platform === undefined) return null
           return await checkForStableUpdate({
             currentVersion: adapter.currentVersion,
+            currentScheduleProtocolFloor: adapter.currentScheduleProtocolFloor,
             platform: adapter.platform,
             signal: controller.signal,
             request: adapter.request,
@@ -489,10 +490,7 @@ export function apply(ctx: Context, config: Config): void {
 }
 
 function sameUpdate(left: AvailableUpdate | undefined, right: AvailableUpdate): boolean {
-  return left?.latestVersion === right.latestVersion
-    && left.artifact.url === right.artifact.url
-    && left.artifact.bytes === right.artifact.bytes
-    && left.artifact.sha256 === right.artifact.sha256
+  return left?.manifestIdentity === right.manifestIdentity
 }
 
 function parseState(text: string): UpdateStateV2 {

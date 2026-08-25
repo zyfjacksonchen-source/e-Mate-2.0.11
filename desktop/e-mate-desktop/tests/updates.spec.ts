@@ -19,18 +19,70 @@ const testConfig: UpdateConfig = {
   requestTimeoutMs: 1000,
 }
 
-function versionResponse(version: unknown): Response {
+const SOURCE_COMMIT = 'a'.repeat(40)
+
+function versionResponse(
+  version: unknown,
+  scheduleProtocolFloor: unknown = 1,
+  mutate?: (manifest: Record<string, any>) => void,
+): Response {
+  const manifest = versionManifest(version, scheduleProtocolFloor)
+  mutate?.(manifest)
+  return Response.json(manifest)
+}
+
+function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): Record<string, any> {
   const release = typeof version === 'string' ? version : 'invalid'
-  return Response.json({
+  return {
+    schema_version: 1,
+    document_type: 'emate.desktop-release-manifest',
+    release_status: 'admitted',
     version,
+    source_commit: SOURCE_COMMIT,
+    base_contract_id: 'e-mate-desktop-profile-v7-dsh-2bc16230975f',
+    schedule_protocol_floor: scheduleProtocolFloor,
+    profile_component_aggregate: {
+      aggregate_sha256: '1'.repeat(64),
+      inventory_sha256: '2'.repeat(64),
+      staged_profile_tree_sha256: '3'.repeat(64),
+      targets: ['darwin-arm64', 'darwin-x64', 'win32-x64'].map(target => ({
+        target,
+        profile_generation: '5'.repeat(64),
+        component_aggregate_sha256: '6'.repeat(64),
+      })),
+    },
+    performance: {
+      performance_run_id: 'performance-run-id',
+      admission_sha256: '4'.repeat(64),
+      signature_key_id: '0123456789abcdef',
+      verifier: {},
+    },
+    github_artifact_provenance: {
+      schema_version: 1,
+      document_type: 'emate.github-artifact-provenance',
+      source_commit: SOURCE_COMMIT,
+      artifacts: [
+        { role: 'desktop_candidate', name: `e-mate-desktop-release-${SOURCE_COMMIT}`, artifact_id: '11', digest: `sha256:${'7'.repeat(64)}`, run_id: '123', run_attempt: 1 },
+        { role: 'performance_admission', name: `e-mate-performance-admission-${SOURCE_COMMIT}`, artifact_id: '12', digest: `sha256:${'8'.repeat(64)}`, run_id: '124', run_attempt: 1 },
+      ],
+    },
     artifacts: {
       darwin: {
-        url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v${release}/${'a'.repeat(40)}/e-Mate-${release}-mac-universal.dmg`,
+        url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v${encodeURIComponent(release)}/${SOURCE_COMMIT}/e-Mate-${release}-mac-universal.dmg`,
         bytes: 1024,
         sha256: '0'.repeat(64),
+        build_source_commit: SOURCE_COMMIT,
+        build_run_id: '123',
+      },
+      win32: {
+        url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v${encodeURIComponent(release)}/${SOURCE_COMMIT}/e-Mate-${release}-win-x64-Setup.exe`,
+        bytes: 1024,
+        sha256: '0'.repeat(64),
+        build_source_commit: SOURCE_COMMIT,
+        build_run_id: '456',
       },
     },
-  })
+  }
 }
 
 interface Harness {
@@ -58,6 +110,7 @@ async function createHarness(options: {
   readonly notify?: (notification: DesktopNotification) => void
   readonly profile?: DesktopProfileUpdateAdapter
   readonly state?: string
+  readonly currentScheduleProtocolFloor?: number
 } = {}): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-updates-'))
   const statePath = join(root, 'private', 'state.json')
@@ -79,6 +132,7 @@ async function createHarness(options: {
       isPackaged: options.packaged ?? true,
       platform: 'darwin',
       currentVersion: '2.0.0',
+      currentScheduleProtocolFloor: options.currentScheduleProtocolFloor ?? 1,
       statePath,
       canDownload: options.canDownload ?? true,
       request: options.request ?? (async () => versionResponse('2.0.0')),
@@ -366,6 +420,71 @@ describe('desktop update Host plugin', () => {
     expect(harness.downloadAndOpen).not.toHaveBeenCalled()
     expect(harness.showManualCheckResult).not.toHaveBeenCalled()
     expect(harness.tray.label()).toBe('e-Mate 2.2.0 Available')
+  })
+
+  it('fails closed before confirmation when the release is below the installed Schedule protocol floor', async () => {
+    const request = vi.fn(async () => versionResponse('99.0.0', 1))
+    const harness = await createHarness({
+      config: { ...testConfig, enabled: false },
+      currentScheduleProtocolFloor: 2,
+      request,
+      confirmDownload: async () => true,
+    })
+
+    await expect(harness.runInteractiveUpdate()).resolves.toEqual({
+      status: 'failed',
+      installedVersion: '2.0.0',
+    })
+    expect(request).toHaveBeenCalledOnce()
+    expect(harness.confirmDownload).not.toHaveBeenCalled()
+    expect(harness.downloadAndOpen).not.toHaveBeenCalled()
+  })
+
+  it('rechecks the Schedule protocol floor after confirmation', async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(versionResponse('2.1.0', 2))
+      .mockResolvedValueOnce(versionResponse('2.1.0', 3))
+    const harness = await createHarness({
+      config: { ...testConfig, enabled: false },
+      currentScheduleProtocolFloor: 1,
+      request,
+      confirmDownload: async () => true,
+    })
+
+    await expect(harness.runInteractiveUpdate()).resolves.toEqual({
+      status: 'superseded',
+      installedVersion: '2.0.0',
+      latestVersion: '2.1.0',
+    })
+    expect(harness.confirmDownload).toHaveBeenCalledOnce()
+    expect(harness.downloadAndOpen).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['Profile aggregate', (manifest: Record<string, any>) => { manifest.profile_component_aggregate.aggregate_sha256 = '9'.repeat(64) }],
+    ['performance run', (manifest: Record<string, any>) => { manifest.performance.performance_run_id = 'performance-run-rotated' }],
+    ['performance admission', (manifest: Record<string, any>) => { manifest.performance.admission_sha256 = '9'.repeat(64) }],
+    ['performance verifier', (manifest: Record<string, any>) => { manifest.performance.verifier = { run_id: '999' } }],
+    ['GitHub provenance', (manifest: Record<string, any>) => { manifest.github_artifact_provenance.artifacts[0].digest = `sha256:${'9'.repeat(64)}` }],
+    ['other platform artifact', (manifest: Record<string, any>) => { manifest.artifacts.win32.sha256 = '9'.repeat(64) }],
+  ])('rejects the confirmed update after %s identity drift', async (_label, mutate) => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(versionResponse('2.1.0'))
+      .mockResolvedValueOnce(versionResponse('2.1.0', 1, mutate))
+    const harness = await createHarness({
+      config: { ...testConfig, enabled: false },
+      request,
+      confirmDownload: async () => true,
+    })
+
+    await expect(harness.runInteractiveUpdate()).resolves.toEqual({
+      status: 'superseded',
+      installedVersion: '2.0.0',
+      latestVersion: '2.1.0',
+    })
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(harness.confirmDownload).toHaveBeenCalledOnce()
+    expect(harness.downloadAndOpen).not.toHaveBeenCalled()
   })
 
   it.each([

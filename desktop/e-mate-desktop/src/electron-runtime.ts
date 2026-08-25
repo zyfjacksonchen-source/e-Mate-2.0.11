@@ -46,6 +46,10 @@ import { prepareTrayIcon } from './tray-icons.ts'
 import { downloadDesktopUpdate } from './update-download.ts'
 import type { UpdateCheckResult } from './update-checker.ts'
 import { desktopWindowOptions } from './window-options.ts'
+import {
+  admittedWindowsUpdateIdentity,
+  scheduleWindowsUpdateInstallation,
+} from './windows-update-installer.ts'
 
 /** Return the presentation mode opposite the active generation. */
 export function nextDesktopShellMode(mode: DesktopShellSpec['mode']): DesktopShellSpec['mode'] {
@@ -124,11 +128,15 @@ export type RendererBootFailureReason = 'renderer-failed' | 'renderer-timeout'
 /** Native adapter used by the e-Mate launcher and owned by its Cordis shell plugin. */
 export class ElectronDesktopRuntime implements DesktopRuntime {
   readonly platform: DesktopPlatform
-  readonly updates: DesktopUpdateAdapter & { profile: DesktopProfileUpdateAdapter | undefined } = {
+  readonly updates: DesktopUpdateAdapter & {
+    currentScheduleProtocolFloor: number
+    profile: DesktopProfileUpdateAdapter | undefined
+  } = {
     get isPackaged() { return app.isPackaged },
     get canDownload() { return app.isPackaged && (process.platform === 'darwin' || process.platform === 'win32') },
     get platform() { return process.platform === 'darwin' || process.platform === 'win32' ? process.platform : undefined },
     get currentVersion() { return PRODUCT_VERSION },
+    currentScheduleProtocolFloor: 0,
     get statePath() { return join(app.getPath('userData'), 'updates', 'state.json') },
     request: (url, init) => net.fetch(url, init),
     profile: undefined,
@@ -150,8 +158,8 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private rendererBootMonitoring = false
   private rendererBootTimer: NodeJS.Timeout | undefined
   private bootFailureReason: RendererBootFailureReason | undefined
-  private markMacUpdateShutdownReady: (() => void) | undefined
   private directoryPickTask: Promise<string | null> | undefined
+  private markPreparedUpdateShutdownReady: (() => void) | undefined
 
   constructor(
     private readonly restart: () => Promise<void>,
@@ -166,6 +174,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   /** Bind the signed component updater to the generation selected for this process. */
   configureProfileUpdates(context: Omit<ProfileUpdateContext, 'request'>): void {
     if (this.updates.profile !== undefined) throw new Error('@e-mate/desktop: Profile updater is already configured')
+    this.updates.currentScheduleProtocolFloor = context.base.schedule_protocol_floor
     const configured: ProfileUpdateContext = {
       ...context,
       request: (url, init) => net.fetch(url, init),
@@ -391,9 +400,9 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
 
   /** Allow the detached updater to replace the app only after Cordis disposed cleanly. */
   commitPreparedUpdateShutdown(): void {
-    const markReady = this.markMacUpdateShutdownReady
+    const markReady = this.markPreparedUpdateShutdownReady
     if (markReady === undefined) return
-    this.markMacUpdateShutdownReady = undefined
+    this.markPreparedUpdateShutdownReady = undefined
     markReady()
   }
 
@@ -565,7 +574,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         parentPid: process.pid,
         signal,
       })
-      this.markMacUpdateShutdownReady = prepared.markShutdownReady
+      this.markPreparedUpdateShutdownReady = prepared.markShutdownReady
       this.showNotification({
         title: '正在安装 e-Mate 更新',
         body: `e-Mate ${update.latestVersion} 将自动重新打开。`,
@@ -578,37 +587,28 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     const spec = this.scheduled
     if (spec === undefined) throw new Error('@e-mate/desktop: no active shell can exit for update installation')
     signal.throwIfAborted()
-    await this.launchWindowsUpdateInstaller(artifactPath)
+    const identity = admittedWindowsUpdateIdentity(update)
+    const prepared = await scheduleWindowsUpdateInstallation({
+      installerPath: artifactPath,
+      currentExecutable: process.execPath,
+      userDataPath: app.getPath('userData'),
+      currentVersion: update.currentVersion,
+      targetVersion: update.latestVersion,
+      sourceCommit: identity.sourceCommit,
+      baseContractId: identity.baseContractId,
+      scheduleProtocolFloor: identity.scheduleProtocolFloor,
+      manifestIdentity: identity.manifestIdentity,
+      artifact: update.artifact,
+      parentPid: process.pid,
+      signal,
+    })
+    this.markPreparedUpdateShutdownReady = prepared.markShutdownReady
+    this.showNotification({
+      title: '正在安装 e-Mate 更新',
+      body: `e-Mate ${update.latestVersion} 将自动重新打开。`,
+    })
     this.quitting = true
     spec.requestQuit(0)
-  }
-
-  /** Start the downloaded NSIS installer before releasing the current process. */
-  private async launchWindowsUpdateInstaller(installerPath: string): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      let child: ReturnType<typeof spawn>
-      try {
-        child = spawn(installerPath, ['--updated', '--force-run'], {
-          detached: true,
-          stdio: 'ignore',
-          shell: false,
-          windowsHide: false,
-        })
-      } catch (cause) {
-        reject(cause)
-        return
-      }
-      const fail = (cause: Error): void => { reject(cause) }
-      child.once('error', fail)
-      child.once('spawn', () => {
-        child.off('error', fail)
-        child.once('error', cause => {
-          process.stderr.write(`@e-mate/desktop: update installer failed after launch: ${cause.message}\n`)
-        })
-        child.unref()
-        resolve()
-      })
-    })
   }
 
   /** Keep native-terminal launch failures visible in a packaged GUI process. */

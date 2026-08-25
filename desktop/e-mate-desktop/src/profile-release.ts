@@ -27,6 +27,7 @@ export interface ProfileBaseContract {
   readonly id: string
   readonly desktop_api: number
   readonly profile_format: number
+  readonly schedule_protocol_floor: number
   readonly harness_version: string
   readonly harness_commit: string
   readonly runtime_imports: Readonly<Record<string, string>>
@@ -131,10 +132,11 @@ function strictBase64(value: unknown): Buffer | undefined {
 export function parseProfileBaseContract(value: unknown): ProfileBaseContract | undefined {
   if (!record(value) || !exactKeys(value, [
     'schema_version', 'id', 'desktop_api', 'profile_format', 'desktop_reference',
-    'harness_version', 'harness_commit', 'runtime_imports', 'profile_signing_keys',
+    'schedule_protocol_floor', 'harness_version', 'harness_commit', 'runtime_imports', 'profile_signing_keys',
   ]) || value.schema_version !== 1 || typeof value.id !== 'string' || !BASE_ID.test(value.id)
     || !Number.isSafeInteger(value.desktop_api) || (value.desktop_api as number) <= 0
     || !Number.isSafeInteger(value.profile_format) || (value.profile_format as number) <= 0
+    || !Number.isSafeInteger(value.schedule_protocol_floor) || (value.schedule_protocol_floor as number) <= 0
     || typeof value.harness_version !== 'string' || !HARNESS_VERSION.test(value.harness_version)
     || typeof value.harness_commit !== 'string' || !SHA40.test(value.harness_commit)
     || !record(value.desktop_reference)
@@ -178,6 +180,7 @@ export function parseProfileBaseContract(value: unknown): ProfileBaseContract | 
     id: value.id,
     desktop_api: value.desktop_api as number,
     profile_format: value.profile_format as number,
+    schedule_protocol_floor: value.schedule_protocol_floor as number,
     harness_version: value.harness_version,
     harness_commit: value.harness_commit,
     runtime_imports: Object.fromEntries(runtimeImports) as Record<string, string>,

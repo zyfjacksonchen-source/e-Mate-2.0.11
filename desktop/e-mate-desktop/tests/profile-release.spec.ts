@@ -17,6 +17,7 @@ const base: ProfileBaseContract = {
   id: 'e-mate-desktop-profile-v6-dsh-2bc16230975f',
   desktop_api: 1,
   profile_format: 1,
+  schedule_protocol_floor: 1,
   harness_version: '0.1.0-rc.7',
   harness_commit: 'e13ce9d953037a2f40d866d17f5a7e00cbc15d66',
   runtime_imports: { '@e-mate/desktop/vision-toolkit': '2.0.12' },
@@ -72,6 +73,9 @@ describe('signed Profile desired state', () => {
       runtime_imports: { '@e-mate/plugin': '2.0.12' },
     })).toBeUndefined()
     expect(parseProfileBaseContract({ ...value, ignored: true })).toBeUndefined()
+    for (const scheduleProtocolFloor of [undefined, 0, 1.5, '1']) {
+      expect(parseProfileBaseContract({ ...value, schedule_protocol_floor: scheduleProtocolFloor })).toBeUndefined()
+    }
     expect(parseProfileBaseContract({
       ...value,
       profile_signing_keys: [{ ...base.profile_signing_keys[0], algorithm: 'rsa' }],

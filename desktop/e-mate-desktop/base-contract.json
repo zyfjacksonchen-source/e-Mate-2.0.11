@@ -3,6 +3,7 @@
   "id": "e-mate-desktop-profile-v6-dsh-2bc16230975f",
   "desktop_api": 1,
   "profile_format": 1,
+  "schedule_protocol_floor": 1,
   "desktop_reference": {
     "repository": "anywhere-labs/deepseek-harness-desktop",
     "commit": "6074088f5b660206e404b3591fab51fb99c69add",

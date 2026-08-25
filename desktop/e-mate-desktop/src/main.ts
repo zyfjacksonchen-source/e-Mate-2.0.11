@@ -68,6 +68,10 @@ import {
   formatWindowsVolumeConcern,
   type WindowsVolumeConcern,
 } from './windows-volume-diagnostics.ts'
+import {
+  beginWindowsUpdateCandidateStartup,
+  completeWindowsUpdateCandidateStartup,
+} from './windows-update-installer.ts'
 
 const BIN_NAME = '@e-mate/desktop'
 const PRODUCT_NAME = 'e-Mate'
@@ -135,6 +139,9 @@ async function start(): Promise<void> {
     app.quit()
     return
   }
+  const windowsUpdateCandidate = await beginWindowsUpdateCandidateStartup({
+    currentVersion: app.getVersion(),
+  })
 
   let current: Context | undefined
   let profileStartup: DesktopProfileStartup | undefined
@@ -459,6 +466,10 @@ async function start(): Promise<void> {
         rolledBackInstall = undefined
       }
     }
+    await completeWindowsUpdateCandidateStartup(windowsUpdateCandidate, {
+      id: baseContract.id,
+      scheduleProtocolFloor: baseContract.schedule_protocol_floor,
+    })
     markDesktopProfileHealthy(selectionStatePath, activeProfileName)
     markProfileGenerationHealthy(generationStatePath, profileGenerationStartup.generation_id)
     profileGenerationCommitted = true

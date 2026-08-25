@@ -97,6 +97,8 @@ export interface DesktopUpdateAdapter {
   readonly platform: DesktopReleasePlatform | undefined
   /** Installed desktop product version. */
   readonly currentVersion: string
+  /** Schedule protocol floor loaded from the packaged Base contract. */
+  readonly currentScheduleProtocolFloor: number
   /** Private file used for update-prompt history. */
   readonly statePath: string
   /** Request adapter backed by Electron's native network session. */

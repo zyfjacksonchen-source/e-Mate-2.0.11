@@ -329,8 +329,12 @@ describe('published package surface', () => {
     expect(manifest.scripts?.['check:win-package']).toContain('tests/update-checker.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/update-download.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-directory-picker.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-update-installer.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-update-transaction.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).toContain('yarn run test:windows-update-transaction')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-volume-diagnostics.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run verify:closure')
+    expect(manifest.scripts?.['test:windows-update-transaction']).toContain('-Operation SelfTest')
     expect(manifest.scripts?.['verify:cli']).toBe('node scripts/verify-cli-runtime.mjs')
     expect(manifest.scripts?.check).toContain('yarn run verify:cli')
     expect(workspaceManifest.scripts?.['dist:mac']).toBe('yarn workspace @e-mate/desktop dist:mac')
@@ -458,7 +462,7 @@ describe('published package surface', () => {
     expect(lockfile).not.toContain('dsh-better-sidebar@')
   })
 
-  it('resolves electron-builder through the pinned app-builder-lib keychain patch', () => {
+  it('resolves electron-builder through the one pinned app-builder-lib patch chain', () => {
     const patchResolution = 'patch:app-builder-lib@npm%3A26.15.3#./patches/app-builder-lib@26.15.3.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
     const patch = readFileSync(new URL('patches/app-builder-lib@26.15.3.patch', workspaceRoot), 'utf8')
@@ -467,6 +471,10 @@ describe('published package surface', () => {
     const electronBuilderRequire = createRequire(electronBuilderManifest)
     const appBuilderManifest = electronBuilderRequire.resolve('app-builder-lib/package.json')
     const installedCodeSign = readFileSync(join(dirname(appBuilderManifest), 'out/codeSign/macCodeSign.js'), 'utf8')
+    const installedInstallSection = readFileSync(
+      join(dirname(appBuilderManifest), 'templates/nsis/installSection.nsh'),
+      'utf8',
+    )
 
     expect(workspaceManifest.resolutions).toMatchObject({
       'app-builder-lib@npm:26.15.3': patchResolution,
@@ -476,6 +484,15 @@ describe('published package surface', () => {
     expect(patch).toContain('"-k", keychainPassword, keychainFile')
     expect(installedCodeSign).toContain('importCerts(keychainFile, certPaths, cscPasswords, keychainPassword)')
     expect(installedCodeSign).toContain('"-k", keychainPassword, keychainFile')
+    expect(patch).toContain('diff --git a/templates/nsis/installSection.nsh b/templates/nsis/installSection.nsh')
+    expect(installedInstallSection).toContain('!ifmacrodef customUpdateInstallShouldRun')
+    expect(installedInstallSection).toContain('$R7 == "true"')
+    expect(installedInstallSection).toContain('Goto appBuilderInstallSectionDone')
+    expect(installedInstallSection.indexOf('!insertmacro customUpdateInstall\n'))
+      .toBeLessThan(installedInstallSection.indexOf('!insertmacro CHECK_APP_RUNNING'))
+    expect(installedInstallSection).toContain('!insertmacro uninstallOldVersion SHELL_CONTEXT')
+    expect(installedInstallSection).toContain('!insertmacro installApplicationFiles')
+    expect(installedInstallSection).toContain('!ifmacrodef customInstall')
   })
 
   it('starts restricted Windows shells with a hidden console show state', () => {
