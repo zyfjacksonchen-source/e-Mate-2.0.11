@@ -2608,3 +2608,16 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有 source-fixed diff和本地无密钥合同测试；没有 CI run、DMG、EXE、Profile generation、安装态或 production receipt。
 - Remaining blockers: 主代理须与 PR1 artifact staging 最小合并并由 protected PR CI 验证 GitHub expression/matrix；只有 protected main exact SHA 的正式 distribution artifacts可供后续 release复用。
 - Next exact action: 主代理复核并移植本提交；PR1 staging包裹同一正式输出而不重建，随后运行 exact protected CI，失败只修受影响 stage。
+## 2026-08-26 · 2.0.13 TTFT v2 安装态 Profile 真实性绑定
+
+- Goal checkpoint: 终审发现 Darwin probe 为每次启动创建空 `userData`，实际会使用 bundled Profile，但 installed receipt 仍写入冻结/候选 generation；本条只关闭安装态 Profile 假绑定，不调用模型、不安装正式候选、不 dispatch、推送或发布。
+- Frozen baseline / current HEAD: 独立分支 `codex/perf-profile-install-truth` 基于 producer exact `62a77b62628d01c53befc5970bf5a7c9d048c475`；冻结 2.0.12 source/Base/package/Profile generation 与候选 Base/Harness/Desktop reference 未改。
+- Binding documents read: 完整复核根 `AGENTS.md`、ponytail skill、`target-contract.md`、`performance-and-acceptance.md`、最新完整日志、Darwin probe、Profile generation/component/release 原生实现、DSH Profile 安装 receipt 与 performance workflow。
+- Inspected native seam: Desktop 唯一 Profile authority 位于隔离 `userData/profile-generations/{state.json,store/}`；`loadProfileGeneration()` 已验签 release、完整组件 inventory、manifest、文件集/摘要/权限与平台目标，`assembleProfileGeneration()` 已提供同一离线物化路径；DSH 最终安装 generation 由 `DSH_HOME/profiles/e-mate/.e-mate-install.json` 记录，无需第二 schema、事件、存储或协议。
+- Experiment or why unnecessary: 复用上述原生 loader/assembler。基线只接受 owner-only installation root 下预置的 v6 Base、inventory、非 bundled state 与 content-addressed store，并只复制签名 release 引用的闭包；候选将已下载、已验收 publication bundle 映射成禁止联网的 fetch-compatible request。测试覆盖正确闭包复制、symlink 拒绝、运行态 bundled 回退和 DSH receipt generation 漂移；未读取真实用户 Home 或联网补字节。
+- Decision and forbidden alternatives: 每次启动前把已验证模板复制到新 `userData`，启动后必须回读 state 且 `active=last_known_good=expected`，再次完整验证物理 generation，再核对 DSH receipt 的 generation、Harness 与 DSH home；任何缺文件、签名/manifest/摘要漂移、symlink/逃逸、bundled 回退或 receipt 不一致均失败关闭。禁止相信 plan/installed receipt 的声明值、读取实时用户 Profile、从 R2补下载、降级 bundled 或复制未引用的旧 generation。
+- Changed scope: 只修改现有 performance probe/窄测试、性能合同并 append 本记录；未改 Desktop/DSH/Profile updater、普通聊天/模型 hot path、header/路由、企业服务、Base、R2/Feed/desired state 或用户数据。
+- Verification commands and results: bundled Node `v24.19.0` 对 probe `--check` 通过；probe、acceptance owner 与 parity 三组聚焦测试合计 `30/30`，change-impact 合同测试 `22/22`；`git diff --check` 通过。测试仅证明合同/本地文件边界，不记为真实四模型 production pass。
+- Immutable evidence / receipt: 当前只有 exact-base 源码 diff 与无密钥测试；没有读取凭据、真实用户 Profile、调用模型、生成 production `performance_run_id`、签名、上传或生产写入。
+- Remaining blockers: runner owner 仍须在 installation root 单独预置精确 2.0.12 `base-contract.json`、`component-inventory.json`、state/store 与既有 app/runtime receipt；protected attempt-1 仍须实际物化候选 publication、启动两臂并完成四模型采集。任一预置或运行态 authority 缺失保持 OPEN。
+- Next exact action: 主代理复核并合并本提交；随后仅在 exact protected-main attempt-1 runner 做真实安装态 Profile preflight 和四模型采集，失败不得复用旧 evidence。

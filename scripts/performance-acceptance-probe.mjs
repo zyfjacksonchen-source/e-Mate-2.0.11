@@ -3,11 +3,19 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises'
 import { arch, homedir, hostname } from 'node:os'
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
+import {
+  assembleProfileGeneration,
+  loadProfileGeneration,
+} from '../desktop/e-mate-desktop/src/profile-generation.ts'
+import {
+  loadProfileBaseContract,
+  verifyProfileRelease,
+} from '../desktop/e-mate-desktop/src/profile-release.ts'
 
 const SHA256 = /^[0-9a-f]{64}$/u
 const OPAQUE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
@@ -40,6 +48,7 @@ const BASELINE_SOURCE_COMMIT = '9fbc70ad56c4f263dfa0aa0085f19eded134e32d'
 const BASELINE_BASE_CONTRACT = 'e-mate-desktop-profile-v6-dsh-2bc16230975f'
 const CANDIDATE_BASE_CONTRACT = 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0'
 const MACOS_BUNDLE_ID = 'net.ecoremedia.e-mate'
+const PROFILE_STATE_KEYS = Object.freeze(['active', 'last_known_good', 'schema_version'])
 const LOOPBACK_ORIGIN = 'http://127.0.0.1:3080'
 const BROKER_ACTIONS = new Set(['usage-snapshot', 'auth-available', 'auth-unavailable', 'status'])
 const MAX_BROKER_BYTES = 1024 * 1024
@@ -678,6 +687,221 @@ async function readClosedJson(path, label) {
   }
 }
 
+function exactKeys(value, expected) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).sort().join('\0') === [...expected].sort().join('\0')
+}
+
+async function assertClosedTree(root, label) {
+  const canonicalRoot = resolve(root)
+  const rootInfo = await lstat(canonicalRoot)
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink() || await realpath(canonicalRoot) !== canonicalRoot) {
+    throw new Error(`${label} must be one canonical real directory`)
+  }
+  const walk = async directory => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name)
+      const info = await lstat(path)
+      const child = relative(canonicalRoot, path)
+      if (child === '' || child.startsWith(`..${sep}`) || child === '..' || isAbsolute(child)
+        || info.isSymbolicLink()) throw new Error(`${label} contains a symlink or escaping path`)
+      if (info.isDirectory()) await walk(path)
+      else if (!info.isFile()) throw new Error(`${label} contains a special filesystem entry`)
+    }
+  }
+  await walk(canonicalRoot)
+  return canonicalRoot
+}
+
+async function strictProfileState(path, expectedGeneration, label) {
+  const value = await readClosedJson(path, label)
+  if (!exactKeys(value, PROFILE_STATE_KEYS) || value.schema_version !== 1
+    || value.active !== expectedGeneration || value.last_known_good !== expectedGeneration
+    || value.active === 'bundled') {
+    throw new Error(`${label} is not armed to the exact accepted Profile generation`)
+  }
+  return value
+}
+
+async function profileInventoryIds(path, label) {
+  const value = await readClosedJson(path, label)
+  if (!exactKeys(value, ['schema_version', 'components']) || value.schema_version !== 1
+    || !Array.isArray(value.components) || value.components.length === 0) {
+    throw new Error(`${label} is invalid`)
+  }
+  const ids = value.components
+    .filter(item => item?.desktop !== 'blocked')
+    .map(item => item?.id)
+    .sort()
+  if (ids.some(id => typeof id !== 'string' || id.length === 0) || new Set(ids).size !== ids.length) {
+    throw new Error(`${label} has an invalid component identity`)
+  }
+  return ids
+}
+
+function darwinProfileTarget(target) {
+  return { platform: 'darwin', arch: target === 'darwin-arm64' ? 'arm64' : 'x64' }
+}
+
+function containedPath(root, path, label) {
+  const resolved = resolve(root, ...path.split('/'))
+  const child = relative(root, resolved)
+  if (child === '..' || child.startsWith(`..${sep}`) || isAbsolute(child)) {
+    throw new Error(`${label} escaped its downloaded bundle`)
+  }
+  return resolved
+}
+
+async function writeExactProfileState(directory, generation) {
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  await writeFile(join(directory, 'state.json'), `${JSON.stringify({
+    schema_version: 1,
+    active: generation,
+    last_known_good: generation,
+  }, null, 2)}\n`, { mode: 0o600, flag: 'wx' })
+}
+
+/** Copy only a natively verified generation and its referenced component closure. */
+export async function installVerifiedProfileTemplate(options) {
+  const source = resolve(options.source)
+  const destination = resolve(options.destination)
+  await strictProfileState(join(source, 'state.json'), options.generation, 'preinstalled Profile state')
+  const sourceStore = await assertClosedTree(join(source, 'store'), 'preinstalled Profile store')
+  const verified = await (options.load ?? loadProfileGeneration)({
+    root: sourceStore,
+    id: options.generation,
+    base: options.base,
+    expected_component_ids: options.expected_component_ids,
+    target: options.target,
+  })
+  if (verified.id !== options.generation) throw new Error('preinstalled Profile generation identity drifted')
+  await mkdir(join(destination, 'store/generations'), { recursive: true, mode: 0o700 })
+  await mkdir(join(destination, 'store/components'), { recursive: true, mode: 0o700 })
+  const generationSource = join(sourceStore, 'generations', options.generation)
+  const generationEntries = await readdir(generationSource)
+  if (generationEntries.length !== 1 || generationEntries[0] !== 'release.json') {
+    throw new Error('preinstalled Profile generation directory is not exact')
+  }
+  await cp(generationSource, join(destination, 'store/generations', options.generation), {
+    recursive: true, force: false, errorOnExist: true,
+  })
+  for (const reference of verified.release.payload.components) {
+    await cp(
+      join(sourceStore, 'components', reference.manifest_sha256),
+      join(destination, 'store/components', reference.manifest_sha256),
+      { recursive: true, force: false, errorOnExist: true },
+    )
+  }
+  await writeExactProfileState(destination, options.generation)
+  await assertClosedTree(destination, 'isolated Profile template')
+  await (options.load ?? loadProfileGeneration)({
+    root: join(destination, 'store'),
+    id: options.generation,
+    base: options.base,
+    expected_component_ids: options.expected_component_ids,
+    target: options.target,
+  })
+  return { root: destination, generation: options.generation, base: options.base,
+    expected_component_ids: options.expected_component_ids, target: options.target }
+}
+
+async function publicationObjects(publicationRoot, plan) {
+  const objects = new Map()
+  for (const item of plan.immutable_objects ?? []) {
+    if (typeof item?.url !== 'string' || typeof item?.path !== 'string'
+      || !Number.isSafeInteger(item.bytes) || item.bytes <= 0 || !SHA256.test(item.sha256 ?? '')
+      || objects.has(item.url)) throw new Error('Profile publication object contract is invalid')
+    const path = containedPath(publicationRoot, item.path, 'Profile publication object')
+    const identity = await regularFileIdentity(path, 'Profile publication object')
+    if (identity.bytes !== item.bytes || identity.sha256 !== item.sha256) {
+      throw new Error('Profile publication object bytes drifted')
+    }
+    objects.set(item.url, identity.path)
+  }
+  return objects
+}
+
+async function prepareCandidateProfileTemplate(plan, target, destination) {
+  const publicationRoot = await assertClosedTree(
+    resolve(plan.profile_authority.publication_root),
+    'downloaded Profile publication bundle',
+  )
+  const publication = await readClosedJson(join(publicationRoot, 'publication-plan.json'), 'Profile publication plan')
+  const basePath = resolve('desktop/e-mate-desktop/base-contract.json')
+  await regularFileIdentity(basePath, 'candidate Desktop Base contract')
+  const base = loadProfileBaseContract(basePath)
+  const expectedIds = await profileInventoryIds(
+    resolve('packages/dsh/profile/component-inventory.json'),
+    'candidate Profile component inventory',
+  )
+  const authority = plan.profile_authority.receipt.targets.find(item => item.target === target)
+  const activation = publication.activations?.find(item => item?.target === target)
+  if (publication.document_type !== 'emate.profile-native-cloudflare-publication-plan'
+    || publication.status !== 'prepared' || publication.source_commit !== plan.source_commit
+    || publication.main_commit !== plan.source_commit || publication.base_contract_id !== base.id
+    || base.id !== CANDIDATE_BASE_CONTRACT || activation?.generation !== authority?.profile_generation
+    || activation?.sequence !== 1 || activation?.object?.role !== 'desired-state-active'
+    || canonical(activation?.changed_components) !== canonical(expectedIds)
+    || !exactKeys(activation?.object, ['bytes', 'cache_control', 'content_type', 'key', 'path', 'role', 'sha256', 'url'])) {
+    throw new Error('candidate Profile publication does not match its accepted authority')
+  }
+  const activePath = containedPath(publicationRoot, activation.object.path, 'candidate active Profile release')
+  const activeIdentity = await regularFileIdentity(activePath, 'candidate active Profile release')
+  if (activeIdentity.bytes !== activation.object.bytes || activeIdentity.sha256 !== activation.object.sha256) {
+    throw new Error('candidate active Profile release bytes drifted')
+  }
+  let envelope
+  try { envelope = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await readFile(activePath))) } catch {
+    throw new Error('candidate active Profile release is invalid')
+  }
+  const release = verifyProfileRelease(envelope, base)
+  if (release === undefined || release.payload.source_commit !== plan.source_commit) {
+    throw new Error('candidate active Profile release signature is invalid')
+  }
+  const objects = await publicationObjects(publicationRoot, publication)
+  const request = async (url, init) => {
+    if (init.method !== 'GET' || init.redirect !== 'error' || init.cache !== 'no-store') {
+      throw new Error('offline Profile materialization received an unexpected request')
+    }
+    const path = objects.get(url)
+    if (path === undefined) throw new Error('offline Profile publication is missing one referenced object')
+    const bytes = await readFile(path)
+    return new Response(bytes, { status: 200, headers: { 'content-length': String(bytes.byteLength) } })
+  }
+  await mkdir(join(destination, 'store'), { recursive: true, mode: 0o700 })
+  const verified = await assembleProfileGeneration({
+    root: join(destination, 'store'), release, base,
+    expected_component_ids: expectedIds,
+    target: darwinProfileTarget(target), request,
+  })
+  if (verified.id !== authority.profile_generation) throw new Error('materialized candidate Profile generation drifted')
+  await writeExactProfileState(destination, verified.id)
+  await assertClosedTree(destination, 'candidate isolated Profile template')
+  return { root: destination, generation: verified.id, base,
+    expected_component_ids: expectedIds, target: darwinProfileTarget(target) }
+}
+
+export async function verifyRuntimeProfileBinding(selected, userData, home, load = loadProfileGeneration) {
+  const profileRoot = join(userData, 'profile-generations')
+  await strictProfileState(join(profileRoot, 'state.json'), selected.profile.generation, 'running Profile state')
+  await assertClosedTree(profileRoot, 'running Profile generation store')
+  await load({
+    root: join(profileRoot, 'store'), id: selected.profile.generation,
+    base: selected.profile.base, expected_component_ids: selected.profile.expected_component_ids,
+    target: selected.profile.target,
+  })
+  const receipt = await readClosedJson(join(home, 'profiles/e-mate/.e-mate-install.json'), 'running DSH Profile receipt')
+  if (!exactKeys(receipt, [
+    'schema_version', 'version', 'harness_commit', 'dsh_home', 'source_root',
+    'profile_generation', 'managed_package_layout',
+  ]) || receipt.schema_version !== 2 || receipt.dsh_home !== resolve(home)
+    || receipt.profile_generation !== selected.profile.generation
+    || receipt.harness_commit !== selected.profile.base.harness_commit
+    || typeof receipt.source_root !== 'string' || !isAbsolute(receipt.source_root)) {
+    throw new Error('running DSH Profile receipt does not match the accepted generation')
+  }
+}
+
 function targetForDarwin(machineArch = arch()) {
   if (machineArch === 'arm64') return 'darwin-arm64'
   if (machineArch === 'x64') return 'darwin-x64'
@@ -768,6 +992,39 @@ export async function prepareDarwinRuntimeLane(plan, config, options = {}) {
       baselineApp,
       target,
     )
+    const profileTemplates = options.prepareProfiles === undefined
+      ? await (async () => {
+          const baselineBasePath = join(root, 'baseline/base-contract.json')
+          await regularFileIdentity(baselineBasePath, 'frozen 2.0.12 Desktop Base contract')
+          const baselineBase = loadProfileBaseContract(baselineBasePath)
+          if (baselineBase.id !== BASELINE_BASE_CONTRACT) {
+            throw new Error('frozen 2.0.12 Desktop Base contract identity drifted')
+          }
+          const baselineIds = await profileInventoryIds(
+            join(root, 'baseline/component-inventory.json'),
+            'frozen 2.0.12 Profile component inventory',
+          )
+          return {
+            baseline: await installVerifiedProfileTemplate({
+              source: join(root, 'baseline/profile-generations'),
+              destination: join(work, 'profile-templates/baseline/profile-generations'),
+              generation: predecessor.profile_generation,
+              base: baselineBase,
+              expected_component_ids: baselineIds,
+              target: darwinProfileTarget(target),
+            }),
+            candidate: await prepareCandidateProfileTemplate(
+              plan,
+              target,
+              join(work, 'profile-templates/candidate/profile-generations'),
+            ),
+          }
+        })()
+      : await options.prepareProfiles({ root, work, target, predecessor, plan })
+    if (profileTemplates?.baseline?.generation !== predecessor.profile_generation
+      || profileTemplates?.candidate?.generation !== profile.profile_generation) {
+      throw new Error('installed Profile templates do not match the frozen runtime receipts')
+    }
 
     const candidateManifest = await readClosedJson(
       join(plan.candidate_artifacts_root, 'desktop-candidate.json'),
@@ -824,8 +1081,8 @@ export async function prepareDarwinRuntimeLane(plan, config, options = {}) {
       target,
       work,
       launch_sequence: 0,
-      baseline: { ...baselineApp, receipt: baselineReceipt },
-      candidate: { ...candidateApp, receipt: candidateReceipt },
+      baseline: { ...baselineApp, receipt: baselineReceipt, profile: profileTemplates.baseline },
+      candidate: { ...candidateApp, receipt: candidateReceipt, profile: profileTemplates.candidate },
       cleanup: async () => { await rm(work, { recursive: true, force: true }) },
     }
   } catch (cause) {
@@ -935,6 +1192,14 @@ export async function launchDarwinRuntime(lane, arm) {
   const home = join(lane.work, `${arm}-dsh-home`)
   const userData = join(lane.work, `${arm}-user-data-${String(lane.launch_sequence)}`)
   await Promise.all([mkdir(home, { mode: 0o700, recursive: true }), mkdir(userData, { mode: 0o700 })])
+  await cp(selected.profile.root, join(userData, 'profile-generations'), {
+    recursive: true, force: false, errorOnExist: true,
+  })
+  await strictProfileState(
+    join(userData, 'profile-generations/state.json'),
+    selected.profile.generation,
+    'isolated pre-launch Profile state',
+  )
   const allowed = Object.fromEntries([
     'HOME', 'LANG', 'LC_ALL', 'LOGNAME', 'PATH', 'SHELL', 'TMPDIR', 'USER',
   ].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]))
@@ -949,8 +1214,20 @@ export async function launchDarwinRuntime(lane, arm) {
       ...(lane.node_options_preload === undefined ? {} : { NODE_OPTIONS: `--require=${lane.node_options_preload}` }),
     },
   })
-  await waitForLoopback(child)
-  const cdp = await bootstrapCdp(await waitForDevToolsPort(child, userData))
+  let cdp
+  try {
+    await waitForLoopback(child)
+    await verifyRuntimeProfileBinding(selected, userData, home)
+    cdp = await bootstrapCdp(await waitForDevToolsPort(child, userData))
+  } catch (cause) {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+    await Promise.race([
+      new Promise(resolveExit => child.once('exit', resolveExit)),
+      delay(5_000).then(() => { if (child.exitCode === null) child.kill('SIGKILL') }),
+    ])
+    await rm(userData, { recursive: true, force: true })
+    throw cause
+  }
   return {
     child, home, user_data: userData, cdp,
     stop: async () => {
@@ -960,6 +1237,7 @@ export async function launchDarwinRuntime(lane, arm) {
         new Promise(resolveExit => child.once('exit', resolveExit)),
         delay(5_000).then(() => { if (child.exitCode === null) child.kill('SIGKILL') }),
       ])
+      await rm(userData, { recursive: true, force: true })
     },
   }
 }

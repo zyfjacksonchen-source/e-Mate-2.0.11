@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { chmod, cp, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import test from 'node:test'
 import {
   assertNoPrivatePayload,
@@ -13,11 +13,13 @@ import {
   buildCdpPreBootstrapScript,
   deriveAuthoritySample,
   loadRunnerPrivateConfig,
+  installVerifiedProfileTemplate,
   ownedExecutionSchedule,
   parseMuxAssistantTextDelta,
   prepareDarwinRuntimeLane,
   runRunnerBroker,
   strictJoinUsageAttempts,
+  verifyRuntimeProfileBinding,
 } from './performance-acceptance-probe.mjs'
 
 const digest = 'a'.repeat(64)
@@ -272,6 +274,10 @@ test('prepares exact frozen and candidate macOS application bytes with read-only
   }
   const options = {
     platform: 'darwin', arch: 'arm64',
+    prepareProfiles: async () => ({
+      baseline: { generation: 'd8769641262169a3b53369030a236f573e71499c22893d279e0a0c42df20ac93' },
+      candidate: { generation: '1'.repeat(64) },
+    }),
     run: async (executable, args) => {
       if (executable.endsWith('plutil') && args[0] === '-extract') return 'net.ecoremedia.e-mate\n'
       if (executable.endsWith('hdiutil') && args[0] === 'attach') {
@@ -292,6 +298,83 @@ test('prepares exact frozen and candidate macOS application bytes with read-only
   assert.equal(lane.candidate.receipt.runtime.profile_generation, '1'.repeat(64))
   assert.equal(lane.candidate.receipt.install_receipt.package_sha256, sha256(dmg))
   await lane.cleanup()
+})
+
+test('copies only one verified preinstalled Profile closure and rejects symlinked stores', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'e-mate-profile-template-')))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const generation = '1'.repeat(64)
+  const manifest = '2'.repeat(64)
+  const source = join(root, 'source')
+  await mkdir(join(source, 'store/generations', generation), { recursive: true })
+  await mkdir(join(source, 'store/components', manifest), { recursive: true })
+  await writeFile(join(source, 'state.json'), `${JSON.stringify({
+    schema_version: 1, active: generation, last_known_good: generation,
+  })}\n`)
+  await writeFile(join(source, 'store/generations', generation, 'release.json'), '{}\n')
+  await writeFile(join(source, 'store/components', manifest, 'payload'), 'verified\n')
+  const release = { payload: { components: [{ manifest_sha256: manifest }] } }
+  const load = async options => {
+    await realpath(join(options.root, 'generations', generation, 'release.json'))
+    await realpath(join(options.root, 'components', manifest, 'payload'))
+    return { id: generation, release }
+  }
+  const installed = await installVerifiedProfileTemplate({
+    source,
+    destination: join(root, 'destination'),
+    generation,
+    base: {},
+    expected_component_ids: ['@e-mate/component'],
+    target: { platform: 'darwin', arch: 'arm64' },
+    load,
+  })
+  assert.equal(installed.generation, generation)
+  await symlink(join(source, 'store/components', manifest, 'payload'), join(source, 'store/escape'))
+  await assert.rejects(installVerifiedProfileTemplate({
+    source,
+    destination: join(root, 'rejected'),
+    generation,
+    base: {},
+    expected_component_ids: ['@e-mate/component'],
+    target: { platform: 'darwin', arch: 'arm64' },
+    load,
+  }), /symlink or escaping path/u)
+})
+
+test('fails closed when the launched app falls back to bundled Profile state or a mismatched DSH receipt', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'e-mate-running-profile-')))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const generation = '3'.repeat(64)
+  const userData = join(root, 'user-data')
+  const home = join(root, 'dsh-home')
+  await mkdir(join(userData, 'profile-generations/store'), { recursive: true })
+  await mkdir(join(home, 'profiles/e-mate'), { recursive: true })
+  const statePath = join(userData, 'profile-generations/state.json')
+  const receiptPath = join(home, 'profiles/e-mate/.e-mate-install.json')
+  const state = { schema_version: 1, active: generation, last_known_good: generation }
+  const receipt = {
+    schema_version: 2, version: '2.0.13', harness_commit: 'a'.repeat(40),
+    dsh_home: resolve(home), source_root: resolve(root), profile_generation: generation,
+    managed_package_layout: 'linked-v1',
+  }
+  await writeFile(statePath, `${JSON.stringify(state)}\n`)
+  await writeFile(receiptPath, `${JSON.stringify(receipt)}\n`)
+  const selected = { profile: {
+    generation, base: { harness_commit: 'a'.repeat(40) }, expected_component_ids: [],
+    target: { platform: 'darwin', arch: 'arm64' },
+  } }
+  await assert.doesNotReject(verifyRuntimeProfileBinding(selected, userData, home, async () => ({})))
+  await writeFile(statePath, `${JSON.stringify({ schema_version: 1, active: 'bundled', last_known_good: 'bundled' })}\n`)
+  await assert.rejects(
+    verifyRuntimeProfileBinding(selected, userData, home, async () => ({})),
+    /exact accepted Profile generation/u,
+  )
+  await writeFile(statePath, `${JSON.stringify(state)}\n`)
+  await writeFile(receiptPath, `${JSON.stringify({ ...receipt, profile_generation: '4'.repeat(64) })}\n`)
+  await assert.rejects(
+    verifyRuntimeProfileBinding(selected, userData, home, async () => ({})),
+    /receipt does not match/u,
+  )
 })
 
 test('requires the running bytes to equal the owner-verified collector digest', () => {
