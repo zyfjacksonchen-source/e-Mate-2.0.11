@@ -3,12 +3,15 @@ import { lstat, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
 
-const BASELINE_HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
-const CANDIDATE_HARNESS_COMMIT = 'b2b1650b01f0ee88d81837a9b5c050f9f763f606'
+export const BASELINE_HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
+export const CANDIDATE_HARNESS_COMMIT = 'b2b1650b01f0ee88d81837a9b5c050f9f763f606'
 const DESKTOP_REFERENCE_COMMIT = '6074088f5b660206e404b3591fab51fb99c69add'
 const EVIDENCE_SCHEMA_VERSION = 2
-const MIN_SAMPLES = 30
-const PATH_NAMES = ['baseline', 'emate_online', 'emate_enterprise_unavailable_valid_cache']
+export const MIN_SAMPLES = 30
+export const PERFORMANCE_PATH_NAMES = Object.freeze([
+  'baseline', 'emate_online', 'emate_enterprise_unavailable_valid_cache',
+])
+const PATH_NAMES = PERFORMANCE_PATH_NAMES
 const PERFORMANCE_MODEL_FIELDS = ['route_id', 'provider', 'model', 'reasoning_effort']
 const PHASE_FIELDS = [
   'submit_to_host_ms',
@@ -18,7 +21,8 @@ const PHASE_FIELDS = [
   'prepare_ms',
   'adapter_to_first_chunk_ms',
 ]
-const SCENARIOS = ['short-text', 'history-20', 'read-only-tool']
+export const PERFORMANCE_SCENARIOS = Object.freeze(['short-text', 'history-20', 'read-only-tool'])
+const SCENARIOS = PERFORMANCE_SCENARIOS
 const NATIVE_SAMPLE_FIELDS = [
   'pair_id', 'scenario', 'arm_order', 'session_id_sha256', 'turn', 'step',
   'user_message_to_first_text_delta_ms', 'output_tokens_per_second',

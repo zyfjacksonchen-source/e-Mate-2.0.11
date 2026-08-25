@@ -33,7 +33,7 @@ jobs:
     name: TTFT evidence
     environment: performance-admission
     runs-on: [self-hosted, e-mate-performance]
-    timeout-minutes: 45
+    timeout-minutes: 180
     outputs:
       luna_artifact_id: ${{ steps.upload-luna.outputs['artifact-id'] }}
       sol_artifact_id: ${{ steps.upload-sol.outputs['artifact-id'] }}
@@ -311,6 +311,27 @@ jobs:
             --profile-release-bundle .performance/profile-publication \
             --base-contract desktop/e-mate-desktop/base-contract.json \
             --out "$STAGE_DIRECTORY/profile-component-aggregate.json"
+
+      - name: Collect the exact installed-state production cohorts once
+        env:
+          COLLECTOR: ${{ vars.EMATE_PERFORMANCE_COLLECTOR }}
+          COLLECTOR_SHA256: ${{ vars.EMATE_PERFORMANCE_COLLECTOR_SHA256 }}
+          EVIDENCE_ROOT: ${{ vars.EMATE_PERFORMANCE_EVIDENCE_ROOT }}
+        run: |
+          set -euo pipefail
+          test -n "$COLLECTOR"
+          test -n "$COLLECTOR_SHA256"
+          test -n "$EVIDENCE_ROOT"
+          [[ "$COLLECTOR" = /* ]]
+          [[ "$EVIDENCE_ROOT" = /* ]]
+          pnpm performance:acceptance \
+            --collector "$COLLECTOR" \
+            --collector-sha256 "$COLLECTOR_SHA256" \
+            --scratch "$RUNNER_TEMP/e-mate-performance-source-$GITHUB_SHA" \
+            --handoff "$EVIDENCE_ROOT/$GITHUB_SHA" \
+            --source-commit "$GITHUB_SHA" \
+            --candidate-artifacts "$GITHUB_WORKSPACE/.performance/desktop" \
+            --profile-artifacts "$GITHUB_WORKSPACE/.performance/profile-publication"
 
       - name: Copy only the exact source-partitioned production evidence
         env:
