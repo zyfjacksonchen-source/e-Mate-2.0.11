@@ -505,7 +505,7 @@ test('download site stages exact bytes and a closed non-published server plan', 
     'assets/emate-platform-windows.dd86c8094b5a.png',
     'index.html',
     'install-macos.html',
-    'site.a8feef4609f9.js',
+    'site.865115b8aa11.js',
     'styles.c2f7dccc8398.css',
   ])
   for (const entry of plan.files) {
@@ -518,7 +518,7 @@ test('download site stages exact bytes and a closed non-published server plan', 
 test('one admitted producer feeds the updater, legacy 2.0.12, and 2.0.13 download site', async t => {
   const page = readFileSync('deploy/download-page/index.html', 'utf8')
   const macGuide = readFileSync('deploy/download-page/install-macos.html', 'utf8')
-  const scriptName = 'site.a8feef4609f9.js'
+  const scriptName = 'site.865115b8aa11.js'
   const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
   assert.equal(validateDownloadPage(page, macGuide, script), '2.0.13')
   assert.throws(
@@ -614,7 +614,7 @@ test('one admitted producer feeds the updater, legacy 2.0.12, and 2.0.13 downloa
     source_commit: commit,
     artifacts: [
       { role: 'desktop_candidate', name: `e-mate-desktop-release-${commit}`, artifact_id: '11', digest: `sha256:${'7'.repeat(64)}`, run_id: '123', run_attempt: 1 },
-      { role: 'performance_admission', name: `e-mate-performance-admission-${commit}`, artifact_id: '12', digest: `sha256:${'8'.repeat(64)}`, run_id: '124', run_attempt: 1 },
+      { role: 'performance_admission', name: `e-mate-performance-admission-${commit}-attempt-1`, artifact_id: '12', digest: `sha256:${'8'.repeat(64)}`, run_id: '124', run_attempt: 1 },
     ],
   }))
   const output = join(root, 'latest.json')

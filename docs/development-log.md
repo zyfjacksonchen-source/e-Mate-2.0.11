@@ -2414,3 +2414,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有 source-fixed commit 前 diff 与本地无密钥 fixture；未运行真实模型、未接触凭据、未注册 runner、未签名 admission、未发布。旧 performance evidence 和 workflow `32888885073` 不可复用。
 - Remaining blockers: 必须从 exact 2.0.12/2.0.13 安装字节按新 schema 重采同模型同场景真实 Provider/paint/header evidence，并由 protected-main verifier 产生新 `performance_run_id` 与签名 admission；性能结果、安装态和发布继续 OPEN。
 - Next exact action: 主代理复核并移植本提交，经 protected CI 后只把当前 verifier 字节交给外部 collector；不得使用旧 evidence root 或以 fixture 关闭生产门。
+
+## 2026-08-26 · 2.0.13 四模型 TTFT v2 aggregate 发布门
+
+- Goal checkpoint: 在同口径场景合同收紧后补齐四个正式聊天模型各自独立的生产性能准入；本条只实现仓库侧 evidence 分流、aggregate 验签、工作流和更新来源合同，不采集真实模型、不生成候选、不签名或发布。
+- Frozen baseline / current HEAD: 独立 worktree `codex/performance-four-model-aggregate` 从已包含 TTFT v2 场景合同的 `8f5a8f2a4de101d639b2ea4132d617bff4c1938e` 创建；Base/Harness 身份保持不变，未触碰 `legacy-update-ack` 工作树。
+- Binding documents read: 完整读取根 `AGENTS.md`、`target-contract.md`、`performance-and-acceptance.md`、`slices/2.0.13.md`、上一条完整日志，并逐字段核对外部受保护 performance/publication action 的四模型 aggregate 实现。
+- Inspected native seam: 继续复用唯一 `desktop-performance`→外部 signer→`desktop-admission`→manifest/updater 链。固定 roster 为 Luna、Sol、DeepSeek、Doubao；每个 leaf 保留现有 TTFT v2 verifier、20 个 support receipt、重算 Profile aggregate及独立 `performance_run_id`，外层只投影原有四字段 performance summary。
+- Experiment or why unnecessary: 该变更属于 release-plane provenance 与闭合集验签，Creation Mode 不能表示 GitHub artifact、签名或安装字节，故不创建动态插件。没有运行真实模型或读取凭据；使用本地签名 fixture 验证 exact `4 × 22 + 1 = 89` 文件、缺模型、重复 child run 与 fixture 拒绝。
+- Decision and forbidden alternatives: 四个 leaf 按 `luna/sol/deepseek/doubao` 和公开 route/provider/model/reasoning 固定顺序独立比较，禁止跨模型混样、缺项、重复 run、rerun、fixture 或 Goal 样本进入 2.0.13 aggregate。外层使用 domain-separated 签名和 ordered child digest；更新 manifest 仍只有 `performance_run_id/admission_sha256/signature_key_id/verifier` 四字段。GitHub performance 与 publication action 均精确 pin 到受保护 main `eca005391708dc6ac3057a8702995e2475cdaaf2`，artifact provenance 只接受 `run_attempt=1` 和 `-attempt-1` 名称。
+- Changed scope: 修改 Desktop performance/admission/publication workflows、`scripts/desktop-admission.mjs` 及既有测试、更新器与下载页同一 provenance validator、三份绑定合同和本记录；下载页脚本因字节变化按真实 SHA-256 前 12 位从 `site.a8feef4609f9.js` 更名为 `site.865115b8aa11.js`。未改 child verifier/schema、模型路由、Base/Profile/Harness、外部 action、R2/Feed/desired state 或用户数据。
+- Verification commands and results: `node --test scripts/desktop-admission.test.mjs` 为 `8/8`；`node --test scripts/release.test.mjs` 为 `15/15`；Desktop `update-checker.spec.ts`、`desktop-release-manifest.spec.ts`、`updates.spec.ts` 为 `3 files / 103 tests` 全过；下载页测试同时确认脚本文件名等于当前内容 SHA-256 前 12 位。`git diff --check` 通过。
+- Immutable evidence / receipt: 外部受保护 action pin 为 `eca005391708dc6ac3057a8702995e2475cdaaf2`；当前只有 source-fixed diff 和无密钥 fixture。没有 production evidence、真实 `performance_run_id`、签名 admission、候选安装、上传或生产指针变化。
+- Remaining blockers: 必须由 exact protected-main workflow 从四个正式模型各自的新 schema v2 真实安装态证据生成四个 attempt-1 leaf，再由固定外部 action生成 aggregate并由 Desktop admission 回验；候选、安装态、更新/回滚和公开发布仍为 OPEN。
+- Next exact action: 主代理复核并移植本提交，运行受保护 CI；随后只允许 source-partitioned collector 填入四个完整 cohort，缺任一真实 leaf 即保持发布门关闭。

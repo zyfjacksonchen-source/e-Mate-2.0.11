@@ -126,7 +126,7 @@ function githubArtifactProvenance() {
       },
       {
         role: 'performance_admission',
-        name: `e-mate-performance-admission-${SOURCE_COMMIT}`,
+        name: `e-mate-performance-admission-${SOURCE_COMMIT}-attempt-1`,
         artifact_id: '12',
         digest: `sha256:${'8'.repeat(64)}`,
         run_id: '124',
@@ -330,6 +330,13 @@ describe('public Desktop version check', () => {
     ['invalid digest', (manifest: Record<string, any>) => { manifest.artifacts.darwin.sha256 = 'ABC' }],
     ['invalid Base contract id', (manifest: Record<string, any>) => { manifest.base_contract_id = 'v7' }],
     ['coerced Profile digest', (manifest: Record<string, any>) => { manifest.profile_component_aggregate.aggregate_sha256 = ['1'.repeat(64)] }],
+    ['performance artifact without attempt-1 suffix', (manifest: Record<string, any>) => {
+      manifest.github_artifact_provenance.artifacts[1].name = `e-mate-performance-admission-${SOURCE_COMMIT}`
+    }],
+    ['performance rerun provenance', (manifest: Record<string, any>) => {
+      manifest.github_artifact_provenance.artifacts[1].name = `e-mate-performance-admission-${SOURCE_COMMIT}-attempt-2`
+      manifest.github_artifact_provenance.artifacts[1].run_attempt = 2
+    }],
   ])('rejects a newer release with %s', async (_label, mutate) => {
     const manifest = versionManifest('2.1.0')
     mutate(manifest)

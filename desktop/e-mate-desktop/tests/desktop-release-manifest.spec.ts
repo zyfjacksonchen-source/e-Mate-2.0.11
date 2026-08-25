@@ -200,7 +200,7 @@ async function admissionInputs(root: string, sourceCommit: string) {
     source_commit: sourceCommit,
     artifacts: [
       { role: 'desktop_candidate', name: `e-mate-desktop-release-${sourceCommit}`, artifact_id: '11', digest: `sha256:${'7'.repeat(64)}`, run_id: '123', run_attempt: 1 },
-      { role: 'performance_admission', name: `e-mate-performance-admission-${sourceCommit}`, artifact_id: '12', digest: `sha256:${'8'.repeat(64)}`, run_id: '124', run_attempt: 1 },
+      { role: 'performance_admission', name: `e-mate-performance-admission-${sourceCommit}-attempt-1`, artifact_id: '12', digest: `sha256:${'8'.repeat(64)}`, run_id: '124', run_attempt: 1 },
     ],
   }))
   return { profileComponentAggregate, performance, githubArtifactProvenance }

@@ -21,7 +21,7 @@ if (typeof desktopVersion !== 'string' || !/^\d+\.\d+\.\d+$/u.test(desktopVersio
   throw new Error('download page requires the stable Desktop package version')
 }
 const SOURCE_DIRECTORY = fileURLToPath(new URL('../deploy/download-page/', import.meta.url))
-const DESKTOP_SCRIPT = 'site.a8feef4609f9.js'
+const DESKTOP_SCRIPT = 'site.865115b8aa11.js'
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/u
 const CONTENT_TYPES = Object.freeze({
   '.css': 'text/css; charset=utf-8',

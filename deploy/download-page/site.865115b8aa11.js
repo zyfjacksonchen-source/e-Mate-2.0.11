@@ -163,12 +163,12 @@ function validateGithubArtifactProvenance(raw, sourceCommit) {
     const role = roles[index];
     const name = role === "desktop_candidate"
       ? `e-mate-desktop-release-${sourceCommit}`
-      : `e-mate-performance-admission-${sourceCommit}`;
+      : `e-mate-performance-admission-${sourceCommit}-attempt-1`;
     exactKeys(artifact, ["role", "name", "artifact_id", "digest", "run_id", "run_attempt"], "GitHub 制品来源项");
     if (artifact.role !== role || artifact.name !== name || typeof artifact.artifact_id !== "string" || !RUN_ID.test(artifact.artifact_id)
       || typeof artifact.digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(artifact.digest)
       || typeof artifact.run_id !== "string" || !RUN_ID.test(artifact.run_id)
-      || !Number.isSafeInteger(artifact.run_attempt) || artifact.run_attempt < 1) {
+      || artifact.run_attempt !== 1) {
       throw new Error("GitHub 制品来源项身份无效");
     }
   });
