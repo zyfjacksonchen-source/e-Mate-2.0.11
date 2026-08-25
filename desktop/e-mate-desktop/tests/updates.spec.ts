@@ -250,6 +250,8 @@ describe('desktop update Host plugin', () => {
     expect(profile.confirm).toHaveBeenCalledWith(release)
     expect(profile.install).toHaveBeenCalledOnce()
     expect(baseRequest).not.toHaveBeenCalled()
+    expect(harness.tray.label()).toBe('e-Mate 2.0.12 Update Available')
+    expect(harness.tray.label()).not.toMatch(/@e-mate\/|dsh-plugin|component\.id|插件|组件/u)
   })
 
   it('pushes one native prompt per signed component generation', async () => {
@@ -307,7 +309,10 @@ describe('desktop update Host plugin', () => {
       requiredBaseContracts: ['e-mate-desktop-profile-v1-dsh-rc7'],
     })
     expect(profile.confirm).not.toHaveBeenCalled()
-    expect(harness.notifications).toEqual([expect.objectContaining({ title: 'Desktop Base Update Required' })])
+    expect(harness.notifications).toEqual([{
+      title: '需要更新 e-Mate',
+      body: 'e-Mate 2.0.12 需要更新应用版本后才能使用。',
+    }])
   })
 
   it('exposes the packaged 60-second and six-hour background policy', () => {

@@ -1048,7 +1048,28 @@ describe('Electron compatibility runtime', () => {
     await vi.waitFor(() => { expect(restart).toHaveBeenCalledOnce() })
   })
 
-  it('shows the signed component update confirmation in Chinese', async () => {
+  it.each([
+    {
+      changedComponents: [] as ProfileUpdateAvailable['changedComponents'],
+      downloadBytes: 0,
+      expectedSummary: '本次仅更新发布回执，无需下载新的能力文件。',
+      expectedBytes: '0 B',
+    },
+    {
+      changedComponents: [
+        { id: '@e-mate/dsh-plugin-private', version: '2.0.13', bytes: 2048 },
+        { id: 'component.id', version: '2.0.13', bytes: 2048 },
+      ],
+      downloadBytes: 4096,
+      expectedSummary: '本次包含 2 项办公能力与体验优化。',
+      expectedBytes: '4.0 KiB',
+    },
+  ])('shows a user-facing signed update confirmation without internal identities: %#', async ({
+    changedComponents,
+    downloadBytes,
+    expectedSummary,
+    expectedBytes,
+  }) => {
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
     const update = {
@@ -1058,8 +1079,8 @@ describe('Electron compatibility runtime', () => {
       generationId: 'a'.repeat(64),
       releaseVersion: '2.0.13',
       sequence: 3,
-      changedComponents: [{ id: '@e-mate/dsh-client-shell', version: '2.0.13', bytes: 4096 }],
-      downloadBytes: 4096,
+      changedComponents,
+      downloadBytes,
       release: {},
     } as unknown as ProfileUpdateAvailable
     const confirm = (runtime as unknown as {
@@ -1068,12 +1089,21 @@ describe('Electron compatibility runtime', () => {
 
     electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 1, checkboxChecked: false })
     await expect(confirm(update)).resolves.toBe(false)
-    expect(electron.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
-      title: '发现 e-Mate 组件更新',
-      message: 'e-Mate 2.0.13 第 3 代组件已可更新。',
-      detail: expect.stringContaining('下载大小：4.0 KiB'),
+    const dialogCall = (electron.dialog.showMessageBox.mock.calls as unknown as Array<[{
+      title: string
+      message: string
+      detail: string
+    }]>).at(-1)![0]
+    expect(dialogCall).toEqual(expect.objectContaining({
+      title: '发现 e-Mate 更新',
+      message: 'e-Mate 2.0.13 第 3 代已可更新。',
+      detail: expect.stringContaining(`${expectedSummary}\n\n下载大小：${expectedBytes}`),
       buttons: ['更新并重启', '稍后'],
     }))
+    expect(dialogCall.detail).toContain('原子切换')
+    expect(dialogCall.detail).toContain('自动回滚')
+    expect([dialogCall.title, dialogCall.message, dialogCall.detail].join('\n'))
+      .not.toMatch(/@e-mate\/|dsh-plugin|component\.id|插件|组件/u)
   })
 
   it('uses Electron networking and confirmation-gated macOS replacement', async () => {

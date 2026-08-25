@@ -46,6 +46,7 @@ import type { RendererBootReport } from './renderer-boot-contract.ts'
 import { prepareTrayIcon } from './tray-icons.ts'
 import { downloadDesktopUpdate } from './update-download.ts'
 import type { UpdateCheckResult } from './update-checker.ts'
+import { formatUpdateBytes, profileUpdateCapabilitySummary } from './update-presentation.ts'
 import { desktopWindowOptions } from './window-options.ts'
 import {
   admittedWindowsUpdateIdentity,
@@ -112,12 +113,6 @@ function inside(root: string, candidate: string): boolean {
 function safeResourceName(name: string, fallback: string): string {
   const value = basename(name).normalize('NFC').replace(/[<>:"/\\|?*\u0000-\u001f]/gu, '_').trim()
   return value === '' || value === '.' || value === '..' ? fallback : value.slice(0, 180)
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
 }
 
 /** Main-process deadline for one Renderer generation to settle its client Loader. */
@@ -217,8 +212,8 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       install: async (update, signal) => {
         await installProfileUpdate(configured, update, signal)
         this.showNotification({
-          title: '正在安装 e-Mate 组件',
-          body: `e-Mate ${update.releaseVersion} 将使用已验证的组件更新重新启动。`,
+          title: '正在安装 e-Mate 更新',
+          body: `e-Mate ${update.releaseVersion} 已完成校验，将重新启动并在启动检查通过后生效。`,
         })
         void this.requestRestart().catch((cause: unknown) => {
           process.stderr.write(`@e-mate/desktop: failed to restart after component update: ${cause instanceof Error ? cause.message : String(cause)}\n`)
@@ -581,16 +576,14 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     return result.response === 0
   }
 
-  /** Show the exact signed component delta before any component payload is downloaded. */
+  /** Show the signed update summary before any payload is downloaded. */
   private async confirmProfileUpdate(update: ProfileUpdateAvailable): Promise<boolean> {
-    const components = update.changedComponents.length === 0
-      ? '本次没有组件文件变更，仅更新签名代回执。'
-      : update.changedComponents.map(component => `• ${component.id} ${component.version}`).join('\n')
+    const capabilitySummary = profileUpdateCapabilitySummary(update.changedComponents.length)
     const result = await dialog.showMessageBox({
       type: 'info',
-      title: '发现 e-Mate 组件更新',
-      message: `e-Mate ${update.releaseVersion} 第 ${update.sequence} 代组件已可更新。`,
-      detail: `${components}\n\n下载大小：${formatBytes(update.downloadBytes)}\n更新包将先完成校验，再原子切换并重启；仅在启动健康检查通过后生效。`,
+      title: '发现 e-Mate 更新',
+      message: `e-Mate ${update.releaseVersion} 第 ${update.sequence} 代已可更新。`,
+      detail: `${capabilitySummary}\n\n下载大小：${formatUpdateBytes(update.downloadBytes)}\n更新包将先完成校验，再原子切换并重启；仅在启动健康检查通过后生效，失败将自动回滚。`,
       buttons: ['更新并重启', '稍后'],
       defaultId: 1,
       cancelId: 1,

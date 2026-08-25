@@ -2095,3 +2095,31 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 正式 macOS DMG 为 `390527181` bytes / SHA-256 `d2cb459d2e8648213e0b38aa6e210c1a727937be77993b2493e2a7848d5d3b2e`，Windows EXE 为 `272939381` bytes / SHA-256 `52b84e14cce5ad49ada282b9a41913aa751db43765c8dba44088d66148dcd186`；darwin-x64/win32-x64 sequence 3 generation 分别为 `6ec6b157ea2668d4670bc332457bc85fe2f895d982a85a4a6b53a12e316e70ce` / `963ede65e703b338e23c0728519db8dee476b0465609fa17c4c9d481442fc5b6`。fixture 原始 JSON 仅在临时目录，不进入发布证据或仓库。
 - Remaining blockers: S27 仍缺最终安装态 2.0.12 的 30 组成对真实提供方 TTFT v2 baseline/原始 trace；Base v7 尚未生成；S28–S35 的源码、组件、安装态、跨平台、更新、回滚和公开发布均未开始或未关闭。开发凭据只可经既有 Auth/OS keystore/managed Secret/SSH 临时使用，严禁写入日志、仓库、命令输出或回执。
 - Next exact action: 先定位并补齐最终安装态 TTFT v2 采集 seam 与 2.0.12 baseline receipt，再进入 S28 的 Base v7、共享详情区、两处已证实流式热路径和三项视觉修复；普通模型请求头必须逐字节保持冻结基线。
+
+## 2026-08-25 · 2.0.13 事故聚合更新展示脱敏
+
+- Goal checkpoint: 本修复仅收口更新链的用户可见投影，不扩展 2.0.13 功能范围，不改变发布状态。
+- Frozen baseline / current HEAD: 独立 worktree 从事故聚合 `2873c1d8c0aac6533ec6442906acc4ee927e7a2a` 创建；未修改版本、Base contract 或 Harness gitlink。
+- Binding documents read: 完整读取根 `AGENTS.md`、`docs/target-contract.md` 与本日志上一条完整记录。
+- Inspected native seam: Profile update 的 `changedComponents` 仍是差量、字节和结构化 id 的唯一真相源；Electron 确认框、Agent Tool renderer、原生通知与托盘只是其用户可见投影。
+- Experiment or why unnecessary: 该 seam 已由现有 Desktop adapter、Tool 和测试直接证明，无需 Creation Mode 实验。
+- Decision and forbidden alternatives: 保留 `components`、`componentGeneration` 和 `requiredBaseContracts` 结构化值供内部调试；用户层只按差量数量显示稳定能力摘要，不新增 notes store、更新器或发布元数据路径。
+- Changed scope: 仅修改 Desktop 更新可见文案、共享展示 helper、三组窄回归和根 README 的唯一用户说明；同步把稳定 legacy 入口事实从 2.0.11 更正为已发布 2.0.12 tombstone。
+- Verification commands and results: Desktop 窄回归 `agent-update` / `electron-runtime` / `updates` 为 `3 files / 71 tests` 全过；修正测试类型后 `electron-runtime` `39/39` 再验通过；Desktop 四个 TypeScript face 全过。
+- Immutable evidence / receipt: 本条只产生 source-fixed Git 证据，没有生成、签名、上传或激活任何安装包、Profile generation 或生产指针。
+- Remaining blockers: 需由主聚合在最终版本与 Base/Harness 身份提交后重跑相同窄门禁，并在真实安装态确认可见层不泄露内部 id。
+- Next exact action: 将本独立 source-fixed commit 合入主聚合，解决最终 README 版本文案后重跑相同回归；未取得用户发布授权前不进入任何生产发布步骤。
+
+## 2026-08-25 · 2.0.13 更新展示脱敏重放到最终产品版本
+
+- Goal checkpoint: 将既有用户可见更新展示修复重放到已切换产品身份的 2.0.13 事故聚合；不扩展功能范围，不进入发布链。
+- Frozen baseline / current HEAD: 重放基线为 `e4e8df0c10d26048284b6af1311eaa61c53b1bab`，原修复提交为 `5908a654870414fb9a3176de38b15c6744d69e5f`；本切片未修改版本、Base contract 或 Harness gitlink。
+- Binding documents read: 完整读取根 `AGENTS.md`、`docs/target-contract.md` 与本日志上一条完整记录，并核对当前 `desktop/e-mate-desktop/base-contract.json`。
+- Inspected native seam: Profile update 的 `changedComponents`、`componentGeneration` 与 `requiredBaseContracts` 继续作为签名、差量、审计和诊断的内部结构化真相；Electron 确认框、Agent Tool renderer、系统提示、通知与托盘只投影稳定的用户能力摘要。
+- Experiment or why unnecessary: 现有共享展示 helper 和 Desktop adapter 已覆盖全部可见投影，无需增加 notes store、第二 updater 或第二渲染路径。
+- Decision and forbidden alternatives: 冲突解决保留产品版本 `2.0.13`、legacy `desktop/latest.json` 的真实 `2.0.12` tombstone、用户能力摘要、原子切换与失败回滚语义；内部 id 不在用户层直出，但不从内部更新结果中删除。
+- Changed scope: 仅重放 Desktop 更新文案、共享展示 helper、三组窄回归和根 README；`development-log.md` 只追加本记录，未改写历史。
+- Verification commands and results: Desktop `agent-update` / `electron-runtime` / `updates` 为 `3 files / 71 tests` 全过；四个 TypeScript face 全过；根 README 的 2.0.13 产品版本、2.0.12 tombstone、能力摘要与原子更新文案门禁通过；Desktop 英文/中文 README 的 `README.i18n.yaml` Git blob 哈希均匹配。`node scripts/check-target.mjs` 未通过：基线源码要求 Harness `e13ce9d953037a2f40d866d17f5a7e00cbc15d66`，但 `e4e8df0` 的 gitlink 仍为 `85bef24c764feb034465ea4e0d34442249ee4cc7`；该身份漂移先于且独立于本修复，本切片按边界不修改它。
+- Immutable evidence / receipt: 本条只产生 source-fixed Git 证据；没有生成、签名、上传、激活或发布任何安装包、Profile generation、manifest 或生产指针。
+- Remaining blockers: 主聚合必须由 Harness/Base identity owner 让 Harness 常量、Base contract 与 gitlink 精确一致并重跑 `check-target`；最终安装态仍需确认普通用户确认框、Agent Tool 终态与系统提示不泄露内部名称。
+- Next exact action: 主聚合复核并合入本提交；Harness/Base owner 关闭既有身份漂移后重跑版本门禁，之后才允许进入候选安装态验收，严禁本地构建进入生产链。

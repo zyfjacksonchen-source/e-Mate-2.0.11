@@ -324,8 +324,8 @@ export function apply(ctx: Context, config: Config): void {
         if (confirmedUpdate === undefined || !sameProfileUpdate(confirmedUpdate, update) || disposed) {
           if (!disposed) {
             adapter.notify(confirmedUpdate === undefined
-              ? { title: 'e-Mate Component Update Changed', body: 'The signed component release changed or now requires a different Desktop Base.' }
-              : { title: 'e-Mate Component Update Changed', body: `Component generation ${confirmedUpdate.sequence} is now available. Please confirm the new release.` })
+              ? { title: 'e-Mate 更新已变化', body: '已签名更新已变化或需要更新应用版本，请重新检查并确认。' }
+              : { title: 'e-Mate 更新已变化', body: `e-Mate 第 ${confirmedUpdate.sequence} 代已可用，请重新确认。` })
           }
           if (rechecked?.status === 'base-required') return baseRequired(rechecked)
           return confirmedUpdate === undefined
@@ -343,8 +343,8 @@ export function apply(ctx: Context, config: Config): void {
         } catch {
           if (!disposed) {
             adapter.notify({
-              title: 'e-Mate Component Update Failed',
-              body: 'The component generation could not be downloaded, verified, or activated. The current generation was not changed.',
+              title: 'e-Mate 更新未完成',
+              body: '本次能力更新未能完成下载、校验或启用，当前版本保持不变。',
             })
           }
           return profileResult('failed', confirmedUpdate)
@@ -397,8 +397,8 @@ export function apply(ctx: Context, config: Config): void {
             return (await offerDownload(update, false)) ?? failed(update.latestVersion)
           }
           adapter.notify({
-            title: 'Desktop Base Update Required',
-            body: `Component release ${checkedProfile.releaseVersion} requires a newer compatible Desktop Base.`,
+            title: '需要更新 e-Mate',
+            body: `e-Mate ${checkedProfile.releaseVersion} 需要更新应用版本后才能使用。`,
           })
           return baseRequired(checkedProfile)
         }
@@ -456,11 +456,11 @@ export function apply(ctx: Context, config: Config): void {
       group: 'status',
       order: 10,
       label: () => downloadingProfile !== undefined
-        ? `Installing e-Mate ${downloadingProfile.releaseVersion} Components…`
+        ? `Installing e-Mate ${downloadingProfile.releaseVersion} Update…`
         : downloadingVersion !== undefined
           ? `Downloading e-Mate ${downloadingVersion}…`
           : availableProfileUpdate !== undefined
-            ? `e-Mate ${availableProfileUpdate.releaseVersion} Components Available`
+            ? `e-Mate ${availableProfileUpdate.releaseVersion} Update Available`
             : availableUpdate === undefined
               ? checking ? 'Checking for Updates…' : 'Check for Updates…'
               : `e-Mate ${availableUpdate.latestVersion} Available`,

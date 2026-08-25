@@ -2,7 +2,7 @@
 
 e-Mate 2.0.13 是基于固定 DeepSeek Harness `0.1.0-rc.7` 与 `deepseek-harness-desktop` 原生生命周期封装的桌面 Agent 工作区。Harness 继续拥有 Agent Loop、会话、事件、工具、审批、Jobs、插件与本地数据；e-Mate 只在这些原生扩展面上提供产品 Profile、企业鉴权、模型策略和异步脱敏审计。
 
-> 当前仓库仍处于 2.0.13 正式发布前验收阶段。稳定 R2 下载入口在 exact-main 安装器、完整 Profile generation、性能、真实 Computer Use、企业链路和公开回读全部通过前继续保留 2.0.11，不会提前指向候选字节。实时记录见 [`docs/development-log.md`](docs/development-log.md)，不可越界项见 [`docs/target-contract.md`](docs/target-contract.md)。
+> 当前仓库仍处于 2.0.13 正式发布前验收阶段。稳定 R2 下载入口在 exact-main 安装器、完整 Profile generation、性能、真实 Computer Use、企业链路和公开回读全部通过前继续保留 2.0.12，不会提前指向候选字节。实时记录见 [`docs/development-log.md`](docs/development-log.md)，不可越界项见 [`docs/target-contract.md`](docs/target-contract.md)。
 
 ## 下载与安装
 
@@ -18,11 +18,11 @@ e-Mate 2.0.13 是基于固定 DeepSeek Harness `0.1.0-rc.7` 与 `deepseek-harnes
 
 ## 更新方式
 
-安装 2.0.13 Base 后，用户可直接对 Agent 说“检查更新”“更新 e-Mate”。自然语言只调用类型化的 `e_mate_desktop_update` Tool，并委托同一个 Desktop 更新服务：
+安装 2.0.13 Base 后，用户可直接对 Agent 说“检查更新”或“更新 e-Mate”。自然语言只调用类型化的 `e_mate_desktop_update` Tool，并委托同一个 Desktop 更新服务：
 
 1. 验证签名的当前平台 desired state 与 Base/Harness 兼容合同；
-2. 在原生确认框展示版本、变化组件和下载字节；
-3. 只下载缺失的内容寻址组件；
+2. 在原生确认框展示版本、发布代、用户能力摘要和下载字节；
+3. 只下载缺失的内容寻址更新文件；
 4. 组装完整 inactive Profile generation，原子切换并重启；
 5. Renderer 健康后提交，失败自动恢复上一 generation。
 
