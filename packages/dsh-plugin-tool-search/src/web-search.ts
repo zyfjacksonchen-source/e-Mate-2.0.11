@@ -187,7 +187,7 @@ class GptResponsesSearchProvider implements WebSearchProvider {
           authorization: `Bearer ${apiKey}`,
           'content-type': 'application/json',
           accept: 'application/json',
-          'user-agent': 'e-mate/2.0.12',
+          'user-agent': 'e-mate/2.0.13',
         },
         body: JSON.stringify({
           model: this.config.model,

@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-file-import",
-  "version": "2.0.12",
+  "version": "2.0.13",
   "description": "Session-bound local file import for the e-Mate DSH composer.",
   "type": "module",
   "main": "lib/index.js",

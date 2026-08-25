@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-cdp",
-  "version": "2.0.12",
+  "version": "2.0.13",
   "description": "DSH-native Chrome DevTools Protocol adapter for e-Mate",
   "type": "module",
   "main": "lib/index.mjs",

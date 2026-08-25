@@ -121,7 +121,7 @@ describe('repository release boundary', () => {
     assert.equal(boundary.valid, true, boundary.errors.join('\n'))
     assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v7-dsh-e13ce9d95303')
     assert.equal(boundary.baseContract.schedule_protocol_floor, 1)
-    assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.12')
+    assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.13')
     assert.deepEqual(PRODUCT_UI_REFERENCE, {
       repository: 'zyfjacksonchen-source/ECoreX',
       path: 'upstream/e-mate-2.0.5',

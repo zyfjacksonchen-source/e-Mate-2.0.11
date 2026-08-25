@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh-plugin-genui",
-  "version": "2.0.12",
-  "description": "e-Mate 2.0.12 compatibility build of dsh-genui for the pinned local runtime.",
+  "version": "2.0.13",
+  "description": "e-Mate 2.0.13 compatibility build of dsh-genui for the pinned local runtime.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

@@ -165,7 +165,7 @@ test('publication accepts only the exact 40-character release commit', () => {
 
 test('R2 immutable readback includes download metadata as well as bytes identity', () => {
   const item = {
-    filename: 'e-mate-dsh-2.0.12.tgz',
+    filename: `e-mate-dsh-${VERSION}.tgz`,
     size: 207,
     sha256: DIGEST,
     contentType: 'application/gzip',

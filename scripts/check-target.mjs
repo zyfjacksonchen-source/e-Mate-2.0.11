@@ -8,8 +8,15 @@ const root = resolve(import.meta.dirname, '..')
 const repository = 'zyfjacksonchen-source/e-Mate-2.0.11'
 const repositoryUrl = `git+https://github.com/${repository}.git`
 const target = readFileSync(resolve(root, 'docs/target-contract.md'), 'utf8')
+const productVersion = '2.0.13'
 const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
+const desktopWorkspace = JSON.parse(readFileSync(resolve(root, 'desktop/package.json'), 'utf8'))
+const desktop = JSON.parse(readFileSync(resolve(root, 'desktop/e-mate-desktop/package.json'), 'utf8'))
 const release = JSON.parse(readFileSync(resolve(root, 'packages/dsh/package.json'), 'utf8'))
+const componentInventory = JSON.parse(readFileSync(
+  resolve(root, 'packages/dsh/profile/component-inventory.json'),
+  'utf8',
+))
 const shellSource = [
   'packages/dsh/profile/plugins/emate-shell/src/client/index.ts',
   'packages/dsh/profile/plugins/emate-shell/src/client/home.tsx',
@@ -36,11 +43,23 @@ const typescriptSources = [
 ]
 for (const path of typescriptSources) readFileSync(resolve(root, path), 'utf8')
 
-if (manifest.version !== '2.0.12') throw new Error(`workspace version drifted: ${manifest.version}`)
-if (release.name !== '@e-mate/dsh' || release.version !== '2.0.12') {
+for (const [name, value] of [
+  ['workspace', manifest],
+  ['desktop workspace', desktopWorkspace],
+  ['desktop', desktop],
+]) {
+  if (value.version !== productVersion) throw new Error(`${name} version drifted: ${value.version}`)
+}
+if (release.name !== '@e-mate/dsh' || release.version !== productVersion) {
   throw new Error(`release identity drifted: ${release.name}@${release.version}`)
 }
-if (!release.description.startsWith('e-Mate 2.0.12')) throw new Error('release product name drifted')
+if (!release.description.startsWith(`e-Mate ${productVersion}`)) throw new Error('release product name drifted')
+for (const component of componentInventory.components.filter(component => component.desktop !== 'blocked')) {
+  const value = JSON.parse(readFileSync(resolve(root, component.root, 'package.json'), 'utf8'))
+  if (value.name !== component.id || value.version !== productVersion) {
+    throw new Error(`official Profile component identity drifted: ${value.name}@${value.version}`)
+  }
+}
 if (release.bin?.['e-mate'] !== 'lib/bin.js') throw new Error('TypeScript-built CLI entry drifted')
 if (!target.includes('Product name: `e-Mate`')) throw new Error('product name drifted')
 if (!target.includes(`Repository: \`${repository}\``)) throw new Error('repository identity drifted')
@@ -100,4 +119,4 @@ assertHarnessSource(root)
 
 assertAcceptedPredecessor(root, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim())
 
-console.log('target contract: e-Mate 2.0.12 pins verified')
+console.log(`target contract: e-Mate ${productVersion} pins verified`)

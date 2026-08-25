@@ -648,7 +648,7 @@ describe('Electron compatibility runtime', () => {
         appExecutable: process.execPath,
         electronVersion: '43.4.0',
         profileName: 'desktop',
-        productVersion: '2.0.12',
+        productVersion: '2.0.13',
         profileDir: '/tmp/dsh-home/profiles/desktop',
         homeDir: '/tmp/dsh-home',
         spawn: expect.any(Function),
@@ -1056,9 +1056,9 @@ describe('Electron compatibility runtime', () => {
       currentGeneration: 'previous',
       currentSequence: 2,
       generationId: 'a'.repeat(64),
-      releaseVersion: '2.0.12',
+      releaseVersion: '2.0.13',
       sequence: 3,
-      changedComponents: [{ id: '@e-mate/dsh-client-shell', version: '2.0.12', bytes: 4096 }],
+      changedComponents: [{ id: '@e-mate/dsh-client-shell', version: '2.0.13', bytes: 4096 }],
       downloadBytes: 4096,
       release: {},
     } as unknown as ProfileUpdateAvailable
@@ -1070,7 +1070,7 @@ describe('Electron compatibility runtime', () => {
     await expect(confirm(update)).resolves.toBe(false)
     expect(electron.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
       title: '发现 e-Mate 组件更新',
-      message: 'e-Mate 2.0.12 第 3 代组件已可更新。',
+      message: 'e-Mate 2.0.13 第 3 代组件已可更新。',
       detail: expect.stringContaining('下载大小：4.0 KiB'),
       buttons: ['更新并重启', '稍后'],
     }))
@@ -1091,7 +1091,7 @@ describe('Electron compatibility runtime', () => {
     expect(runtime.updates).toMatchObject({
       isPackaged: false,
       canDownload: false,
-      currentVersion: '2.0.12',
+      currentVersion: '2.0.13',
       currentScheduleProtocolFloor: 0,
       trustedManifestKeys: [],
       statePath: join('/tmp/dsh-desktop-user-data', 'updates', 'state.json'),

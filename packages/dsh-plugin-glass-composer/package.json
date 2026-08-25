@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-glass-composer",
-  "version": "2.0.12",
+  "version": "2.0.13",
   "description": "DSH-native animated edge light and palette control for the e-Mate composer.",
   "type": "module",
   "main": "lib/index.js",

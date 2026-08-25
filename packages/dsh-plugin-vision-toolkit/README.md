@@ -1,6 +1,6 @@
 # @e-mate/dsh-plugin-vision-toolkit
 
-This package is the e-Mate `2.0.12` Profile component for `Anionex/dsh-vision-toolkit` commit `29850a83871d4b7a7cc13e251420c5a440e2f69e`.
+This package is the e-Mate `2.0.13` Profile component for `Anionex/dsh-vision-toolkit` commit `29850a83871d4b7a7cc13e251420c5a440e2f69e`.
 
 It keeps the upstream DSH Tool, Skill, Subprocess, Settings, Agent and session lifecycle. The adapter supplies the architecture-matched Python runtime through the fixed Desktop Base ABI and projects only the image-capable enterprise model route into the upstream Settings namespace.
 
