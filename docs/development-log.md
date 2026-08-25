@@ -2190,3 +2190,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有 source-fixed Git 证据；没有生成、签名、安装、上传、激活或发布任何字节。
 - Remaining blockers: TQ-13 仍缺同一冻结字节的 macOS B2b、Windows transaction、old-v1/fork/replay、真实 due/cold resume/时区/离线和双平台更新回滚；全部 13 项真实闭环仍为 `0/13`。
 - Next exact action: 独立提交身份合同修正；随后追加首次 Creation Mode 原地验证回执并继续最终 P0/TQ 源码门禁，生产链保持关闭。
+
+## 2026-08-25 · 2.0.13 原生 Creation Mode 首轮原地验证
+
+- Goal checkpoint: 按新增仓库准则执行第一次真实开发内循环，验证“一切皆插件”的可达 seam 和边界；本记录是 development evidence，不把任何 P0/TQ、切片或发布标记完成。
+- Frozen baseline / current HEAD: 运行态验证开始于聚合 `6543ba2a232a9110aab4242a6f25ae784a18ceb0`，记录时为 `f5d51edbda691acbe46491c8e6b5607bb940b04e`；目标 Base 为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`，Harness 为 `0.1.0-rc.7` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`，Desktop reference 为 `6074088f5b660206e404b3591fab51fb99c69add`。
+- Binding documents read: 完整读取根 `AGENTS.md`、`docs/target-contract.md`、最新 development log，以及 pinned rc.7 `cordis-plugin-development` 420 行 Skill 和 `editing-cordis-compositions` Skill；核对安装态 2.0.12 内三项 shipped cordis preset/Skill 文件真实存在。
+- Inspected native seam: 原生 `cordis_inspect_list/query/self`、Host Tool Registry、`session/event`、Client `shell.overlay` Slot、用户批准，以及 define/run/update/stop/undefine 是唯一动态开发生命周期；e-Mate Profile 继续由同一 Cordis Host、Session、Tool、Slot 和普通组件组合启动。
+- Experiment or why unnecessary: 在隔离 DSH_HOME 和测试 Session 中，真实执行 `cordis_define` 得到 `proof-1/pkg-1`，`cordis_run` 激活动态 Tool `emate_live_probe` 并返回 `{nonce:'creation-mode-ok',owner:'native-tools'}`；`cordis_stop` 后 Tool 不可见，`cordis_undefine` 后插件列表为空。另一个动态包随进程退出消失，同一 Session id 在新进程检查仍为空。rc.7 Web e2e 同时完成 define→用户批准→Client overlay 挂载→stop 撤除。
+- Decision and forbidden alternatives: Shell 路由/hover/composer、Schedules、Better Sidebar 和 Tool Search 等既有 Profile Owner 可先通过对应 Client Slot 或 Host Service/Event/Tool seam 原地试验，再固化回同一个普通组件；Session 持久化/Harness pin、Windows native picker/Profile 物理化、Desktop updater/签名、Gateway/Auth/Share 服务端属于 Base 或服务端 Owner，绝不能包装成动态插件。动态包不写 Session/Event store，不接触 desired-state、R2、Feed、签名或生产指针。
+- Changed scope: 验证过程没有修改产品源码、Base、Profile、Harness、Desktop 或生产状态；本提交只 append 本记录。隔离目录只含测试 Profile 与空 Session 状态，不含真实用户数据。
+- Verification commands and results: pinned rc.7 Web `apps/web/tests/cordis-tool-round.e2e.ts` 为 `5/5`；原生 Tool Registry 完成 inspect/define/run/call/stop/undefine 和新进程易失性检查；e-Mate 隔离 Profile `setup --check --json` 全过，13 个 pinned bundle 与 cordis/Better Sidebar/Glass Composer/Schedules 共存，Web `/api/e-mate/health` 返回 `version=2.0.13`、`profile=e-mate`、`active_runs=0`；Desktop Profile `15/15`、Shell 路由/标题/输入框 `30/30`、Schedules `1/1`。
+- Immutable evidence / receipt: Git 记录保存精确源码身份、命令和结论；动态 Package 与隔离状态按合同进程内易失，没有进入 Profile generation、安装包或发布物，也没有生产写入。
+- Remaining blockers: 该结果不替代 Windows 正式安装态三项 P0、跨日/多会话/原生 picker、真实账号、性能、更新、回滚和公开回读；后续每项插件修改仍需留下自己的原地热替换与 owning regression 证据。
+- Next exact action: 继续用 Creation Mode 验证下一项可插件化 P0/TQ；Base-only/服务端问题沿各自 pinned 原生 Owner 修复，候选冻结后才汇总为普通 Profile generation 和 Base 发布。
