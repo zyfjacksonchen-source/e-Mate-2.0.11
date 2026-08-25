@@ -98,6 +98,7 @@ describe('desktop profile composition', () => {
     expect(() => ensureDesktopProfile(home)).toThrow('dsh.profile.bundles must be an array')
   })
 
+  // A cold Windows home materializes the full dependency junction fallback; keep its I/O budget local.
   it('assembles the Host shell without replacing the upstream client shell', () => {
     const home = temporaryHome()
     const prepared = prepareDesktopProfile(undefined, home, 'darwin')
@@ -189,7 +190,7 @@ describe('desktop profile composition', () => {
     }))
     expect(rows.map(row => row.id)).not.toContain('desktop-computer-use-setup')
     expect(rows.map(row => row.id)).not.toContain('desktop-profiles')
-  })
+  }, 15_000)
 
   it('boots a selected Web profile without overriding its compatibility UI rows', () => {
     const home = temporaryHome()
@@ -268,7 +269,7 @@ describe('desktop profile composition', () => {
     expect(() => readDesktopShellMode({ path })).toThrow('invalid settings document')
   })
 
-  it('pins the Windows browse picker and desktop pwsh provider without replacing process boundaries', () => {
+  it('adapts one Windows native picker and desktop pwsh provider without replacing DSH seams', () => {
     const home = temporaryHome()
     writeFileSync(join(home, 'cordis.patch.yml'), [
       '- id: pwsh-sandbox',
@@ -287,15 +288,33 @@ describe('desktop profile composition', () => {
       disabled: true,
     }))
     expect(rows).toContainEqual(expect.objectContaining({
-      id: 'desktop-directory-picker-browse-host',
-      name: '@deepseek-ai/dsh-host-directory-picker-browse',
+      id: 'desktop-windows-directory-picker',
+      name: '@e-mate/desktop/windows-directory-picker',
     }))
     expect(rows).toContainEqual(expect.objectContaining({
-      id: 'desktop-directory-picker-browse-surface',
-      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse',
+      id: 'desktop-directory-picker-native-surface',
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-native',
     }))
-    expect(rows.map(row => row.name)).not.toContain('@deepseek-ai/dsh-host-directory-picker-native')
-    expect(rows.map(row => row.name)).not.toContain('@deepseek-ai/dsh-client-ui-directory-picker-native')
+    expect(rows.filter(row => row.disabled !== true && [
+      '@e-mate/desktop/windows-directory-picker',
+      '@deepseek-ai/dsh-host-directory-picker-auto',
+      '@deepseek-ai/dsh-host-directory-picker-native',
+      '@deepseek-ai/dsh-host-directory-picker-browse',
+    ].includes(row.name))).toEqual([
+      expect.objectContaining({
+        id: 'desktop-windows-directory-picker',
+        name: '@e-mate/desktop/windows-directory-picker',
+      }),
+    ])
+    expect(rows.filter(row => row.disabled !== true && [
+      '@deepseek-ai/dsh-client-ui-directory-picker-native',
+      '@deepseek-ai/dsh-client-ui-directory-picker-browse',
+    ].includes(row.name))).toEqual([
+      expect.objectContaining({
+        id: 'desktop-directory-picker-native-surface',
+        name: '@deepseek-ai/dsh-client-ui-directory-picker-native',
+      }),
+    ])
     expect(rows.find(row => row.id === 'subprocess')).toEqual({
       id: 'subprocess',
       name: '@deepseek-ai/dsh-subprocess-local',

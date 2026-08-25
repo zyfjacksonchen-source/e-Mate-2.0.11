@@ -17,8 +17,6 @@ import { ChartLine, Plus, Refresh, UserBusiness } from '@icon-park/react';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import type {
   AdminApiKeyMetadata,
-  AdminApiKeyPrincipalType,
-  AdminApiKeyScope,
   AdminModelRoute,
   AdminUserRole,
   AdminUserStatus,
@@ -69,7 +67,6 @@ type ConsoleState =
   | { kind: 'ready'; facts: ConsoleFacts }
   | { kind: 'error'; status: number | null };
 
-type CredentialPurpose = 'TASKS_ONLY' | 'MODELS_AND_TASKS';
 type UserStatusFilter = 'ALL' | Extract<AdminUserStatus, 'ACTIVE' | 'PENDING_APPROVAL'>;
 type ModelTestState =
   | { kind: 'testing' }
@@ -133,9 +130,6 @@ export function App() {
   const [keyModal, setKeyModal] = useState(false);
   const [keyLabel, setKeyLabel] = useState('');
   const [keyUserId, setKeyUserId] = useState('');
-  const [credentialPurpose, setCredentialPurpose] = useState<CredentialPurpose>('TASKS_ONLY');
-  const [principalType, setPrincipalType] = useState<AdminApiKeyPrincipalType>('DEVICE');
-  const [principalId, setPrincipalId] = useState('');
   const [oneTimeSecret, setOneTimeSecret] = useState<string | null>(null);
   const [routeKeyModal, setRouteKeyModal] = useState<AdminModelRoute | null>(null);
   const [routeApiKey, setRouteApiKey] = useState('');
@@ -352,23 +346,17 @@ export function App() {
   const createKey = () =>
     void mutate(async (signal) => {
       const user = keyUserId;
-      const scopes: AdminApiKeyScope[] =
-        credentialPurpose === 'MODELS_AND_TASKS' ? ['task-events:write', 'models:invoke'] : ['task-events:write'];
-      const keyPrincipalType = credentialPurpose === 'MODELS_AND_TASKS' ? 'USER' : principalType;
       const result = await issueApiKey(token, signal, requestOptions, {
         schemaVersion: 1,
         label: keyLabel.trim(),
-        principalType: keyPrincipalType,
-        principalId: keyPrincipalType === 'USER' ? user : principalId.trim(),
+        principalType: 'USER',
+        principalId: user,
         userId: user,
-        scopes,
+        scopes: ['models:invoke'],
       });
       setKeyModal(false);
       setKeyLabel('');
       setKeyUserId('');
-      setCredentialPurpose('TASKS_ONLY');
-      setPrincipalType('DEVICE');
-      setPrincipalId('');
       setOneTimeSecret(result.secret);
     });
 
@@ -658,7 +646,9 @@ export function App() {
                       </span>
                     </div>
                     <div className='record-actions'>
-                      <Tag>{item.scopes.includes('models:invoke') ? copy.modelsAndTasks : copy.tasksOnly}</Tag>
+                      <Tag>
+                        {item.scopes.includes('task-events:write') ? copy.legacyTaskCredential : copy.modelAccess}
+                      </Tag>
                       <Tag color={item.revokedAt ? 'gray' : 'green'}>{item.revokedAt ? copy.revoked : copy.active}</Tag>
                       {!item.revokedAt && (
                         <Button
@@ -1155,17 +1145,11 @@ export function App() {
       <Modal
         title={copy.issueKey}
         visible={keyModal}
-        onCancel={() => {
-          setKeyModal(false);
-          setCredentialPurpose('TASKS_ONLY');
-        }}
+        onCancel={() => setKeyModal(false)}
         onOk={createKey}
         okButtonProps={{
           loading: mutating,
-          disabled:
-            !keyLabel.trim() ||
-            !keyUserId ||
-            (credentialPurpose === 'TASKS_ONLY' && principalType === 'DEVICE' && !principalId.trim()),
+          disabled: !keyLabel.trim() || !keyUserId,
         }}
         unmountOnExit
       >
@@ -1180,46 +1164,7 @@ export function App() {
               .filter((user) => user.status === 'ACTIVE')
               .map((user) => ({ label: `${user.displayName} · ${user.userId}`, value: user.userId }))}
           />
-          <label>{copy.credentialUse}</label>
-          <Select
-            value={credentialPurpose}
-            onChange={(value) => {
-              const purpose = value as CredentialPurpose;
-              setCredentialPurpose(purpose);
-              if (purpose === 'MODELS_AND_TASKS') {
-                setPrincipalType('USER');
-                setPrincipalId('');
-              }
-            }}
-            options={[
-              { label: copy.tasksOnly, value: 'TASKS_ONLY' },
-              { label: copy.modelsAndTasks, value: 'MODELS_AND_TASKS' },
-            ]}
-          />
-          {credentialPurpose === 'TASKS_ONLY' && (
-            <>
-              <label>{copy.principalType}</label>
-              <Select
-                value={principalType}
-                onChange={(value) => setPrincipalType(value as AdminApiKeyPrincipalType)}
-                options={[
-                  { label: copy.device, value: 'DEVICE' },
-                  { label: copy.user, value: 'USER' },
-                ]}
-              />
-              {principalType === 'DEVICE' && (
-                <>
-                  <label htmlFor='principal-id'>{copy.deviceId}</label>
-                  <Input id='principal-id' value={principalId} onChange={setPrincipalId} />
-                </>
-              )}
-            </>
-          )}
-          <Alert
-            type='info'
-            showIcon
-            content={credentialPurpose === 'MODELS_AND_TASKS' ? copy.modelsAndTasksNotice : copy.tasksOnlyNotice}
-          />
+          <Alert type='info' showIcon content={copy.modelAccessNotice} />
         </div>
       </Modal>
 

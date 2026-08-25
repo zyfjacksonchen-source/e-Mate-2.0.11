@@ -1,0 +1,91 @@
+name: Prepare e-Mate Desktop Cloudflare handoff
+
+on:
+  workflow_dispatch:
+    inputs:
+      main_ci_run_id:
+        description: Successful attempt-1 protected-main CI run for this exact source commit.
+        required: true
+        type: string
+      admission_artifact_id:
+        description: Exact e-mate-desktop-admission-<source SHA> artifact ID.
+        required: true
+        type: string
+      macos_artifact_id:
+        description: Exact compression-level-0 macOS staging artifact ID.
+        required: true
+        type: string
+      windows_artifact_id:
+        description: Exact compression-level-0 Windows staging artifact ID.
+        required: true
+        type: string
+      expected_signed_current:
+        description: Literal absent, or the Cloudflare plugin's fresh desktop/signed/latest.json identity as <bytes>:<sha256>.
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: e-mate-desktop-cloudflare-handoff-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    name: Desktop Cloudflare plugin handoff
+    environment: r2-publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Accept only one protected-main workflow attempt
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = zyfjacksonchen-source/e-Mate-2.0.11
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REF_PROTECTED" = true
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/desktop-publication.yml@refs/heads/main"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Sign the exact admission and prepare the Cloudflare plugin handoff
+        id: prepare
+        uses: zyfjacksonchen-source/e-mate-desktop-publication@799284ba3b4935184dd84be3da877f5a4a4c8733
+        env:
+          EMATE_GITHUB_PROVENANCE_TOKEN: ${{ github.token }}
+          EMATE_DESKTOP_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.EMATE_PROFILE_SIGNING_PRIVATE_KEY }}
+        with:
+          source-sha: ${{ github.sha }}
+          main-ci-run-id: ${{ inputs.main_ci_run_id }}
+          admission-artifact-id: ${{ inputs.admission_artifact_id }}
+          macos-artifact-id: ${{ inputs.macos_artifact_id }}
+          windows-artifact-id: ${{ inputs.windows_artifact_id }}
+          expected-signed-current: ${{ inputs.expected_signed_current }}
+          signing-key-id: ${{ secrets.EMATE_PROFILE_SIGNING_KEY_ID }}
+
+      - name: Require the exact three-file handoff
+        env:
+          ARTIFACT_NAME: ${{ steps.prepare.outputs['artifact-name'] }}
+          ARTIFACT_PATH: ${{ steps.prepare.outputs['artifact-path'] }}
+          STATUS: ${{ steps.prepare.outputs.status }}
+        run: |
+          set -euo pipefail
+          test "$STATUS" = ready-for-cloudflare-plugin
+          test "$ARTIFACT_NAME" = "e-mate-desktop-cloudflare-handoff-$GITHUB_SHA"
+          test -d "$ARTIFACT_PATH"
+          test "$(find "$ARTIFACT_PATH" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort | paste -sd, -)" = "cloudflare-plugin-handoff.json,cloudflare-publication-plan.json,desktop-release-signed.json"
+          test "$(find "$ARTIFACT_PATH" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.prepare.outputs['artifact-name'] }}
+          path: ${{ steps.prepare.outputs['artifact-path'] }}
+          include-hidden-files: false
+          if-no-files-found: error
+          retention-days: 30

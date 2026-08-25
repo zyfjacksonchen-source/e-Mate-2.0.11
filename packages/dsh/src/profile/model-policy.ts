@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
+import { LOGGED_OUT_CREDENTIAL } from './credentials-os.js'
 import { loadTargetStorageDomain } from './target-runtime.js'
 
 export const name = 'emate-model-policy'
@@ -396,8 +397,10 @@ const RUNTIME_CREDENTIAL_REFS = new Set([
   'E_MATE_MODEL_KEY_DOUBAO',
   'E_MATE_SEARCH_KEY_DEEPSEEK',
 ])
+const IDENTITY_SESSION_REF = 'E_MATE_ENTERPRISE_SESSION'
 const SEARCH_CREDENTIAL_REF = 'E_MATE_SEARCH_KEY_DEEPSEEK'
 const SEARCH_GRANT_ERROR_CODE = 'E_MATE_SEARCH_GRANT_INVALID'
+const PROJECTION_SUPERSEDED = 'E_MATE_RUNTIME_PROJECTION_SUPERSEDED'
 const RUNTIME_PROJECTION_KEY = 'active'
 
 function searchGrantError(message = 'e-Mate managed search credential projection is invalid') {
@@ -406,6 +409,12 @@ function searchGrantError(message = 'e-Mate managed search credential projection
 
 function isSearchGrantError(error) {
   return isRecord(error) && error.code === SEARCH_GRANT_ERROR_CODE
+}
+
+function projectionSuperseded() {
+  return Object.assign(new Error('e-Mate runtime model projection was superseded'), {
+    code: PROJECTION_SUPERSEDED,
+  })
 }
 
 async function presentRuntimeCredentialRefs(ctx) {
@@ -461,7 +470,7 @@ async function matchesRuntimeProjection(ctx, marker, policy) {
     && marker.credential_refs.includes(SEARCH_CREDENTIAL_REF) === (marker.search_status === 'granted')
 }
 
-async function projectRuntimeModels(ctx, models, policy, searchGrant) {
+async function projectRuntimeModels(ctx, models, policy, searchGrant, isCurrent = () => true) {
   if (!Array.isArray(models) || models.length < 1 || models.length > CHAT_MODELS.size) {
     throw new Error('e-Mate runtime model projection is invalid')
   }
@@ -543,13 +552,32 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant) {
   for (const ref of RUNTIME_CREDENTIAL_REFS) {
     previousCredentials.set(ref, await ctx.credentials.resolve(ref))
   }
+  const current = async operation => {
+    if (!isCurrent()) throw projectionSuperseded()
+    const result = await operation()
+    if (!isCurrent()) throw projectionSuperseded()
+    return result
+  }
+  if (!isCurrent()) throw projectionSuperseded()
   const previousLlmSettings = structuredClone(ctx.settings.get('llm-pi-ai') ?? {})
   const previousDefaultModel = structuredClone(ctx.settings.get('agent-default-model') ?? {})
+  const settingRevisions = new Map(ctx.settings.describe().map(({ ns, revision }) => [ns, revision]))
+  const llmRevision = settingRevisions.get('llm-pi-ai')
+  const defaultRevision = settingRevisions.get('agent-default-model')
+  if (typeof llmRevision !== 'number' || !Number.isSafeInteger(llmRevision)
+    || typeof defaultRevision !== 'number' || !Number.isSafeInteger(defaultRevision)) {
+    throw new Error('e-Mate runtime model Settings revisions are unavailable')
+  }
+  let projectedLlmRevision
+  let projectedDefaultRevision
   try {
-    for (const [ref, value] of credentials) await ctx.credentials.set(ref, value)
+    for (const [ref, value] of credentials) await current(() => ctx.credentials.set(ref, value))
     const next = { providers }
     if (canonicalJson(ctx.settings.get('llm-pi-ai')) !== canonicalJson(next)) {
-      await ctx.settings.replace('llm-pi-ai', next)
+      await current(async () => {
+        await ctx.settings.replace('llm-pi-ai', next, llmRevision)
+        projectedLlmRevision = llmRevision + 1
+      })
     }
     const defaultModel = models.find(model => model.id === policy.default_chat_model_id)
     if (defaultModel === undefined) throw new Error('e-Mate default runtime model is unavailable')
@@ -559,14 +587,18 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant) {
       reasoningEffort: policy.default_chat_reasoning_effort,
     }
     if (canonicalJson(ctx.settings.get('agent-default-model')) !== canonicalJson(defaultSelection)) {
-      await ctx.settings.replace('agent-default-model', defaultSelection)
+      await current(async () => {
+        await ctx.settings.replace('agent-default-model', defaultSelection, defaultRevision)
+        projectedDefaultRevision = defaultRevision + 1
+      })
     }
     for (const ref of RUNTIME_CREDENTIAL_REFS) {
       if (!credentials.has(ref)) {
         try {
-          await ctx.credentials.unset(ref)
+          await current(() => ctx.credentials.unset(ref))
         } catch (error) {
-          if (ref === SEARCH_CREDENTIAL_REF && searchGrant.status !== 'granted') {
+          if (error?.code !== PROJECTION_SUPERSEDED
+            && ref === SEARCH_CREDENTIAL_REF && searchGrant.status !== 'granted') {
             throw searchGrantError('e-Mate managed search credential revocation failed')
           }
           throw error
@@ -575,14 +607,43 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant) {
     }
   } catch (error) {
     const rollbackFailures = []
-    for (const restore of [
-      () => ctx.settings.replace('agent-default-model', previousDefaultModel),
-      () => ctx.settings.replace('llm-pi-ai', previousLlmSettings),
-      ...[...previousCredentials].map(([ref, hit]) => () => hit === undefined
-        ? ctx.credentials.unset(ref)
-        : ctx.credentials.set(ref, hit.value)),
-    ]) {
-      try { await restore() } catch (rollbackError) { rollbackFailures.push(rollbackError) }
+    let superseded = error?.code === PROJECTION_SUPERSEDED || !isCurrent()
+    if (!superseded) {
+      for (const { ns, value, revision } of [
+        { ns: 'agent-default-model', value: previousDefaultModel, revision: projectedDefaultRevision },
+        { ns: 'llm-pi-ai', value: previousLlmSettings, revision: projectedLlmRevision },
+      ]) {
+        if (revision === undefined) continue
+        try {
+          await current(() => ctx.settings.replace(ns, value, revision))
+        } catch (rollbackError) {
+          rollbackFailures.push(rollbackError)
+          if (rollbackError?.code === PROJECTION_SUPERSEDED || !isCurrent()) {
+            superseded = true
+            break
+          }
+        }
+      }
+    }
+    if (!superseded) {
+      for (const [ref, hit] of previousCredentials) {
+        try {
+          await current(() => hit === undefined
+            ? ctx.credentials.unset(ref)
+            : ctx.credentials.set(ref, hit.value))
+        } catch (rollbackError) {
+          rollbackFailures.push(rollbackError)
+          if (rollbackError?.code === PROJECTION_SUPERSEDED || !isCurrent()) {
+            superseded = true
+            break
+          }
+        }
+      }
+    }
+    if (superseded) {
+      await Promise.allSettled([...RUNTIME_CREDENTIAL_REFS].map(ref => ctx.credentials.set(ref, LOGGED_OUT_CREDENTIAL)))
+      const deleted = await Promise.allSettled([...RUNTIME_CREDENTIAL_REFS].map(ref => ctx.credentials.unset(ref)))
+      rollbackFailures.push(...deleted.filter(result => result.status === 'rejected').map(result => result.reason))
     }
     if (rollbackFailures.length > 0) {
       throw new AggregateError([error, ...rollbackFailures], 'e-Mate runtime model projection rollback failed')
@@ -599,6 +660,10 @@ function createService(ctx, table, projectionTable, quota) {
   let checkingRuntime
   let lastRefresh = 0
   let refreshing
+  let identityCredentialGeneration = 0
+  ctx.on('credentials/updated', ref => {
+    if (ref === IDENTITY_SESSION_REF) identityCredentialGeneration += 1
+  })
 
   const degradeInvalidSearchGrant = async policy => {
     runtimeReady = false
@@ -665,26 +730,36 @@ function createService(ctx, table, projectionTable, quota) {
         const runtime = typeof ctx.emateIdentity.modelRuntimePolicy === 'function'
           ? await ctx.emateIdentity.modelRuntimePolicy()
           : { policy: await ctx.emateIdentity.modelPolicy() }
+        const expectedIdentityGeneration = identityCredentialGeneration
+        const isCurrent = () => expectedIdentityGeneration === identityCredentialGeneration
+        const current = async operation => {
+          if (!isCurrent()) throw projectionSuperseded()
+          const result = await operation()
+          if (!isCurrent()) throw projectionSuperseded()
+          return result
+        }
         const policy = validateModelPolicy(runtime.policy, state.account_subject, now)
         if (runtime.models !== undefined) {
           runtimeReady = false
           try {
-            await ctx.credentials.unset(SEARCH_CREDENTIAL_REF)
-          } catch {
+            await current(() => ctx.credentials.unset(SEARCH_CREDENTIAL_REF))
+          } catch (error) {
+            if (error?.code === PROJECTION_SUPERSEDED) throw error
             throw searchGrantError('e-Mate managed search credential invalidation failed')
           }
-          await projectionTable.delete(RUNTIME_PROJECTION_KEY)
+          await current(() => projectionTable.delete(RUNTIME_PROJECTION_KEY))
         }
-        await quota.refresh(policy)
+        await current(() => quota.refresh(policy))
         if (runtime.models !== undefined) {
-          await projectRuntimeModels(ctx, runtime.models, policy, runtime.searchCredentialGrant)
+          await projectRuntimeModels(ctx, runtime.models, policy, runtime.searchCredentialGrant, isCurrent)
         }
-        await table.put('active', policy)
+        await current(() => table.put('active', policy))
         if (runtime.models !== undefined) {
-          await projectionTable.put(
+          const marker = await runtimeProjectionMarker(ctx, policy, runtime.searchCredentialGrant.status)
+          await current(() => projectionTable.put(
             RUNTIME_PROJECTION_KEY,
-            await runtimeProjectionMarker(ctx, policy, runtime.searchCredentialGrant.status),
-          )
+            marker,
+          ))
           runtimeReady = true
         }
         cached = policy

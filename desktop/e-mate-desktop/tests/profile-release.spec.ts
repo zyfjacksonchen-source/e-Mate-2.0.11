@@ -14,11 +14,12 @@ const { privateKey, publicKey } = generateKeyPairSync('ed25519')
 const keyId = '0123456789abcdef'
 const base: ProfileBaseContract = {
   schema_version: 1,
-  id: 'e-mate-desktop-profile-v6-dsh-2bc16230975f',
+  id: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
   desktop_api: 1,
   profile_format: 1,
+  schedule_protocol_floor: 1,
   harness_version: '0.1.0-rc.7',
-  harness_commit: '2bc16230975f6cf02aa1b283b1f86de44007b059',
+  harness_commit: 'b2b1650b01f0ee88d81837a9b5c050f9f763f606',
   runtime_imports: { '@e-mate/desktop/vision-toolkit': '2.0.12' },
   profile_signing_keys: [{
     id: keyId,
@@ -33,6 +34,7 @@ const payload: ProfileReleasePayload = {
   release_version: '2.0.12',
   sequence: 7,
   source_commit: commit,
+  schedule_protocol_floor: base.schedule_protocol_floor,
   target: { platform: 'darwin', arch: 'arm64' },
   base_contracts: [base.id],
   harness_contract: { version: base.harness_version, commit: base.harness_commit },
@@ -72,6 +74,9 @@ describe('signed Profile desired state', () => {
       runtime_imports: { '@e-mate/plugin': '2.0.12' },
     })).toBeUndefined()
     expect(parseProfileBaseContract({ ...value, ignored: true })).toBeUndefined()
+    for (const scheduleProtocolFloor of [undefined, 0, 1.5, '1']) {
+      expect(parseProfileBaseContract({ ...value, schedule_protocol_floor: scheduleProtocolFloor })).toBeUndefined()
+    }
     expect(parseProfileBaseContract({
       ...value,
       profile_signing_keys: [{ ...base.profile_signing_keys[0], algorithm: 'rsa' }],
@@ -100,6 +105,14 @@ describe('signed Profile desired state', () => {
   it('requires an explicitly accepted Base contract and a strictly newer sequence', () => {
     expect(selectProfileRelease(payload, base, 6)).toBe('update')
     expect(selectProfileRelease(payload, base, 7)).toBe('current')
+    const higherFloor = { ...payload, schedule_protocol_floor: 2 }
+    const envelope = signProfileRelease(higherFloor, privatePem, keyId)
+    expect(parseProfileReleaseEnvelope(encoded(envelope), base)).toEqual(envelope)
+    expect(selectProfileRelease(higherFloor, base, 0)).toBe('base-required')
+    expect(parseProfileReleaseEnvelope(encoded(signProfileRelease({
+      ...payload,
+      schedule_protocol_floor: 0,
+    }, privatePem, keyId)), base)).toBeUndefined()
   })
 
   it('verifies a newer Harness envelope before requiring a Base update', () => {

@@ -7,7 +7,7 @@ import { parseConsentPolicy, type ConsentPolicy } from '@e-mate/admin-contract';
 import { openPostgresConsentStore } from '@e-mate/consent-store';
 import { openPostgresAdminManagementStore, type AdminModelRouteDefinition } from './admin-management.ts';
 import type { RuntimeRegistryPrincipal } from './runtime-registry.ts';
-import { createAnalyticsServer, createManagementAuthenticator, type AuthenticateBearer } from './server.ts';
+import { createAnalyticsServer, type AuthenticateBearer } from './server.ts';
 import { openPostgresTaskEventStore } from './task-events.ts';
 import { openPostgresUsageAnalyticsReader } from './usage-analytics.ts';
 import {
@@ -414,7 +414,7 @@ export async function startProductionAnalyticsApi(configurationFile: string): Pr
         (await accessSessions.authenticate(bearer)) ?? (await bootstrapAuthenticate(bearer));
     }
     server = createAnalyticsServer({
-      authenticate: createManagementAuthenticator(authenticate, admin.store),
+      authenticate: authenticate,
       usageAnalytics: usage.reader,
       taskEvents: tasks.store,
       adminManagement: admin.store,

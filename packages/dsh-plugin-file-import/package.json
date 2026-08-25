@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-file-import",
-  "version": "2.0.12",
+  "version": "2.0.13",
   "description": "Session-bound local file import for the e-Mate DSH composer.",
   "type": "module",
   "main": "lib/index.js",
@@ -46,10 +46,10 @@
         "effects": ["filesystem-read", "filesystem-write", "network-loopback"],
         "guards": ["atomic-receipt", "explicit-user-action", "session-scope", "workspace-scope"]
       },
-      "base_contracts": ["e-mate-desktop-profile-v6-dsh-2bc16230975f"]
+      "base_contracts": ["e-mate-desktop-profile-v7-dsh-b2b1650b01f0"]
     },
     "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "2bc16230975f6cf02aa1b283b1f86de44007b059",
+    "harnessCommit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606",
     "excludedFeatures": [
       "independent-store",
       "independent-router",

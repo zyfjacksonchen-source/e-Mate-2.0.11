@@ -16,7 +16,7 @@ export type UsageQuery = {
   to: string;
   timezone: string;
   bucket: UsageBucket;
-  userId?: string;
+  userIds?: string[];
 };
 
 export type UsageDashboardData = {
@@ -53,6 +53,31 @@ export type UsageLogout = {
   clientRequestId: string;
 };
 
+const excludedAuditUserIds = new Set([
+  'emate-admin',
+  '03ff8d33-94e8-46f6-883b-dd80330cbe7c',
+  'cae2a9ef-2110-41ab-990d-151658c549e7',
+]);
+const excludedAuditDisplayNames = new Set(['企业管理员', 'e-Mate 企业管理员', '验收用户', '测试']);
+
+export function auditVisibleUsers(users: TenantUser[]): TenantUser[] {
+  return users.filter(
+    ({ userId, displayName }) =>
+      !excludedAuditUserIds.has(userId) && !excludedAuditDisplayNames.has(displayName.trim())
+  );
+}
+
+export function auditVisibleLedgerUserIds(
+  userIds: Iterable<string>,
+  directoryUsers: TenantUser[] | null = null
+): string[] {
+  const excludedUserIds = new Set(excludedAuditUserIds);
+  for (const { userId, displayName } of directoryUsers ?? []) {
+    if (excludedAuditDisplayNames.has(displayName.trim())) excludedUserIds.add(userId);
+  }
+  return [...new Set([...userIds].filter((userId) => !excludedUserIds.has(userId)))];
+}
+
 export class UsageApiError extends Error {
   readonly status: number;
 
@@ -67,6 +92,36 @@ export function queryForPeriod(days: number, now = new Date()): UsageQuery {
     throw new Error('Invalid usage period');
   }
   return queryForRange(new Date(now.getTime() - days * 86_400_000), now, now);
+}
+
+function localDateStart(value: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return new Date(Number.NaN);
+  const [, yearValue, monthValue, dayValue] = match;
+  const year = Number(yearValue);
+  const month = Number(monthValue) - 1;
+  const day = Number(dayValue);
+  const date = new Date(year, month, day);
+  return date.getFullYear() === year && date.getMonth() === month && date.getDate() === day
+    ? date
+    : new Date(Number.NaN);
+}
+
+export function queryForDateRange(fromValue: string, toValue: string, now = new Date()): UsageQuery {
+  const from = localDateStart(fromValue);
+  const inclusiveTo = localDateStart(toValue);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (inclusiveTo.getTime() > today.getTime()) throw new Error('Invalid usage range');
+  const to = inclusiveTo.getTime() === today.getTime()
+    ? now
+    : new Date(inclusiveTo.getFullYear(), inclusiveTo.getMonth(), inclusiveTo.getDate() + 1);
+  return queryForRange(from, to, now);
+}
+
+export function queryForYesterday(now = new Date()): UsageQuery {
+  const to = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const from = new Date(to.getFullYear(), to.getMonth(), to.getDate() - 1);
+  return queryForRange(from, to, now);
 }
 
 export function queryForRange(from: Date, to: Date, now = new Date()): UsageQuery {
@@ -91,6 +146,26 @@ export function queryForRange(from: Date, to: Date, now = new Date()): UsageQuer
   };
 }
 
+export function queryForDay(
+  bucketStart: string,
+  overallTo: string,
+  timezone: string,
+  userIds: string[] = []
+): UsageQuery {
+  const from = new Date(bucketStart);
+  const end = Math.min(from.getTime() + 86_400_000, Date.parse(overallTo));
+  if (!Number.isFinite(from.getTime()) || !Number.isFinite(end) || end <= from.getTime()) {
+    throw new Error('Invalid usage day');
+  }
+  return {
+    from: from.toISOString(),
+    to: new Date(end).toISOString(),
+    timezone,
+    bucket: 'DAY',
+    ...(userIds.length ? { userIds: [...userIds] } : {}),
+  };
+}
+
 export function usageQueryString(query: UsageQuery, events = false, cursor: string | null = null): string {
   const parameters = new URLSearchParams({
     from: query.from,
@@ -98,7 +173,7 @@ export function usageQueryString(query: UsageQuery, events = false, cursor: stri
     timezone: query.timezone,
     bucket: query.bucket,
   });
-  if (query.userId) parameters.set('userId', query.userId);
+  for (const userId of query.userIds ?? []) parameters.append('userId', userId);
   if (events) {
     if (cursor) parameters.set('cursor', cursor);
     parameters.set('limit', '100');
@@ -107,8 +182,8 @@ export function usageQueryString(query: UsageQuery, events = false, cursor: stri
 }
 
 export function taskQueryString(query: UsageQuery): string {
-  const parameters = new URLSearchParams({ from: query.from, to: query.to });
-  if (query.userId) parameters.set('userId', query.userId);
+  const parameters = new URLSearchParams({ from: query.from, to: query.to, timezone: query.timezone });
+  for (const userId of query.userIds ?? []) parameters.append('userId', userId);
   return parameters.toString();
 }
 
@@ -282,12 +357,30 @@ export async function loadUsageDashboard(
   query: UsageQuery,
   signal: AbortSignal
 ): Promise<UsageDashboardData> {
-  const parameters = usageQueryString(query);
-  const [projectionValue, reconciliationValue, taskSummaryValue, users] = await Promise.all([
+  const allUsers = await loadQuotaUsers(token, signal);
+  const users = allUsers ? auditVisibleUsers(allUsers) : null;
+  let candidateUserIds = query.userIds;
+  if (!candidateUserIds) {
+    const seedParameters = usageQueryString(query);
+    const [seedProjection, seedTaskSummary] = await Promise.all([
+      readJson(`/v1/usage/summary?${seedParameters}`, token, signal).then(parseTenantUsageProjection),
+      readJson(`/v1/tasks/summary?${taskQueryString(query)}`, token, signal).then(parseTenantTaskSummary),
+    ]);
+    candidateUserIds = [
+      ...seedProjection.groups.map(({ userId }) => userId),
+      ...seedTaskSummary.userEventCounts.map(({ userId }) => userId),
+    ];
+    if (candidateUserIds.length === 0) candidateUserIds = users?.map(({ userId }) => userId) ?? [];
+  }
+  const userIds = auditVisibleLedgerUserIds(candidateUserIds, allUsers);
+  // ponytail: reuse the existing <=100 inclusive user scope; add an exclude-user query only when a tenant exceeds it.
+  if (userIds.length === 0 || userIds.length > 100) throw new UsageApiError(503);
+  const scopedQuery = { ...query, userIds };
+  const parameters = usageQueryString(scopedQuery);
+  const [projectionValue, reconciliationValue, taskSummaryValue] = await Promise.all([
     readJson(`/v1/usage/summary?${parameters}`, token, signal),
     readJson(`/v1/usage/reconciliation?${parameters}`, token, signal),
-    readJson(`/v1/tasks/summary?${taskQueryString(query)}`, token, signal),
-    loadQuotaUsers(token, signal),
+    readJson(`/v1/tasks/summary?${taskQueryString(scopedQuery)}`, token, signal),
   ]);
   return {
     ...validateDashboardPair(

@@ -40,7 +40,7 @@ function releaseArtifact(
   version: string,
   bytes: Uint8Array = platform === 'darwin' ? dmgArtifact() : windowsArtifact(),
 ): DesktopReleaseArtifact {
-  const suffix = platform === 'darwin' ? 'mac-universal.dmg' : 'win-x64.exe'
+  const suffix = platform === 'darwin' ? 'mac-universal.dmg' : 'win-x64-Setup.exe'
   return {
     url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v${encodeURIComponent(version)}/${'a'.repeat(40)}/e-Mate-${version}-${suffix}`,
     bytes: bytes.byteLength,

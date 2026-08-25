@@ -3,11 +3,13 @@ import { test } from 'node:test'
 import { Context, Service } from '@deepseek-ai/cordis'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { CallId, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
 import * as ToolSearch from '../lib/index.mjs'
 import * as Schedule from '../../../upstream/deepseek-harness/packages/schedule/schedule/lib/index.js'
+import SubagentRuntime from '../../../upstream/deepseek-harness/packages/subagent/subagent/lib/index.js'
+import * as SpawnInProcess from '../../../upstream/deepseek-harness/packages/subagent/subagent-spawn-in-process/lib/index.js'
 
 const { TOOL_SEARCH_NAME } = ToolSearch
 
@@ -21,6 +23,44 @@ function fixture(name, description) {
     parameters: {},
     async execute() { return [{ type: 'text', text: `ran:${name}` }] },
   })
+}
+
+function toolCallResponse(id, name, args) {
+  const argumentsJson = JSON.stringify(args)
+  return [
+    { type: 'block-start', index: 0, blockType: 'tool-call' },
+    { type: 'tool-call-delta', index: 0, id: CallId(id), name, argumentsDelta: argumentsJson },
+    { type: 'block-end', index: 0, block: { type: 'tool-call', id: CallId(id), name, arguments: argumentsJson } },
+    { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } },
+    { type: 'finish', reason: { kind: 'tool-calls' } },
+  ]
+}
+
+function textResponse(text) {
+  return [
+    { type: 'block-start', index: 0, blockType: 'text' },
+    { type: 'text-delta', index: 0, text },
+    { type: 'block-end', index: 0, block: { type: 'text', text } },
+    { type: 'usage', usage: { inputTokens: 10, outputTokens: text.length } },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ]
+}
+
+class ScriptedAdapter extends LlmAdapter {
+  constructor(script) {
+    super()
+    this.script = script
+  }
+
+  resolveModel(provider, model) {
+    return Promise.resolve({ provider, id: model, name: model })
+  }
+
+  async * stream(options) {
+    const next = this.script.shift()
+    if (next === undefined) throw new Error('script exhausted')
+    for (const chunk of next(options)) yield chunk
+  }
 }
 
 async function harness(config = {}, install = true) {
@@ -78,6 +118,47 @@ test('keeps pinned Schedule tools Agent-local and executes them through the nati
   assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list', TOOL_SEARCH_NAME])
 })
 
+test('restores a Schedule request header without restricting Agent-local tool names', async (t) => {
+  const ctx = new Context()
+  t.after(async () => ctx.fiber.dispose())
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(PersistenceProbe)
+  ctx.on('session/flush', () => {})
+  await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(Schedule)
+  const agent = createAgent(ctx, 'schedule-restore')
+  agent.session.append('request/header', {
+    header: {
+      config: { provider: 'mock', model: 'mock' },
+      tools: [
+        ...ctx.tools.schemas(agent),
+        { name: TOOL_SEARCH_NAME, description: 'Search tools', parameters: { type: 'object', properties: {} } },
+      ],
+    },
+    reason: 'initial',
+  })
+
+  await ctx.plugin(ToolSearch, { maxResults: 5 })
+
+  assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list', TOOL_SEARCH_NAME])
+  assert.deepEqual((await execute(ctx, agent, 'schedule_list', {})).value, [])
+})
+
+test('keeps Schedule tools visible when Tool Search registers first', async (t) => {
+  const ctx = new Context()
+  t.after(async () => ctx.fiber.dispose())
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(PersistenceProbe)
+  ctx.on('session/flush', () => {})
+  await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(ToolSearch, { maxResults: 5 })
+  await ctx.plugin(Schedule)
+  const agent = createAgent(ctx, 'schedule-late-registration')
+
+  assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list', TOOL_SEARCH_NAME])
+  assert.deepEqual((await execute(ctx, agent, 'schedule_list', {})).value, [])
+})
+
 test('discloses deferred native tools without replacing their execution path', async (t) => {
   const { ctx } = await harness({ alwaysVisible: ['read_*'], maxResults: 2 })
   t.after(async () => ctx.fiber.dispose())
@@ -93,6 +174,112 @@ test('discloses deferred native tools without replacing their execution path', a
   assert.deepEqual(names(ctx, agent), ['office_write', 'read_file', TOOL_SEARCH_NAME])
   assert.equal((await execute(ctx, agent, 'office_write', {})).isError, false)
   assert.equal(agent.session.events.some(event => event.type === 'tool-search/selection'), false)
+})
+
+test('uses bounded CJK aliases without changing the initial header or adding a plugin-owned query event', async (t) => {
+  const config = {
+    maxResults: 1,
+    searchAliases: {
+      imagegen: ['生图', '生成封面', '内页图片', '把图片中', '图片编辑'],
+    },
+  }
+  const { ctx } = await harness(config)
+  t.after(async () => ctx.fiber.dispose())
+  const { ctx: baselineCtx } = await harness({ maxResults: 1 })
+  t.after(async () => baselineCtx.fiber.dispose())
+  ctx.tools.register(fixture('imagegen', 'Generate or edit one image'))
+  ctx.tools.register(fixture('image_metadata', 'Inspect image metadata and error logs'))
+  baselineCtx.tools.register(fixture('imagegen', 'Generate or edit one image'))
+  baselineCtx.tools.register(fixture('image_metadata', 'Inspect image metadata and error logs'))
+  const agent = createAgent(ctx, 'cjk-image-disclosure')
+  const baselineAgent = createAgent(baselineCtx, 'baseline-image-disclosure')
+  const initialHeader = JSON.stringify(ctx.tools.schemas(agent))
+
+  assert.deepEqual(names(ctx, agent), [TOOL_SEARCH_NAME])
+  assert.equal(initialHeader, JSON.stringify(baselineCtx.tools.schemas(baselineAgent)))
+  assert.equal(initialHeader.includes('imagegen'), false)
+  assert.equal(initialHeader.includes('生成封面'), false)
+  const generation = await execute(ctx, agent, TOOL_SEARCH_NAME, { query: '生成封面和六张内页图片' })
+  assert.deepEqual(generation.value.tools, [{ name: 'imagegen', status: 'loaded' }])
+  assert.equal(agent.session.events.some(event => JSON.stringify(event).includes('生成封面和六张内页图片')), false)
+})
+
+test('CJK image aliases find an edit but do not recall imagegen for diagnostics', async (t) => {
+  const { ctx } = await harness({
+    maxResults: 2,
+    searchAliases: { imagegen: ['改图', '把图中', '把图上', '把图片中', '图片编辑'] },
+  })
+  t.after(async () => ctx.fiber.dispose())
+  ctx.tools.register(fixture('imagegen', 'Generate or edit one image'))
+  ctx.tools.register(fixture('image_metadata', 'Inspect image metadata and error logs'))
+  const editAgent = createAgent(ctx, 'cjk-image-edit')
+  const edit = await execute(ctx, editAgent, TOOL_SEARCH_NAME, { query: '把图中3处武汉全部改成成都' })
+  assert.deepEqual(edit.value.tools, [{ name: 'imagegen', status: 'loaded' }])
+
+  const diagnosticAgent = createAgent(ctx, 'cjk-image-negative')
+  const diagnostic = await execute(ctx, diagnosticAgent, TOOL_SEARCH_NAME, { query: '检查图片元数据和错误日志' })
+  assert.equal(diagnostic.value.tools.some(tool => tool.name === 'imagegen'), false)
+  assert.deepEqual(names(ctx, diagnosticAgent), [TOOL_SEARCH_NAME])
+})
+
+test('a real pinned spawn child follows the image leaf through tool_search to imagegen', async (t) => {
+  const ctx = new Context()
+  t.after(async () => ctx.fiber.dispose())
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(SubagentRuntime)
+  await ctx.plugin(SpawnInProcess, { providerName: 'spawn' })
+  const executed = []
+  ctx.tools.register(defineContentToolFixture({
+    name: 'imagegen',
+    description: 'Generate or edit one image',
+    parameters: { prompt: { type: 'string', required: true } },
+    async execute(args) {
+      executed.push(args)
+      return [{ type: 'text', text: 'image receipt committed' }]
+    },
+  }))
+  ctx.tools.register(fixture('unrelated_write', 'Write unrelated data'))
+  await ctx.plugin(ToolSearch, { maxResults: 1, searchAliases: { imagegen: ['生图'] } })
+  const leafArgs = { prompt: 'Generate exactly one leaf image.' }
+  const leafPrompt = 'Call tool_search once with query "生图", then call imagegen exactly once.'
+  ctx.llm.registerAdapter(['mock'], new ScriptedAdapter([
+    (request) => {
+      assert.match(JSON.stringify(request.messages), /tool_search.*生图.*imagegen/u)
+      assert.deepEqual(request.tools.map(tool => tool.name), [TOOL_SEARCH_NAME])
+      return toolCallResponse('leaf-search', TOOL_SEARCH_NAME, { query: '生图' })
+    },
+    (request) => {
+      assert.deepEqual(request.tools.map(tool => tool.name).sort(), ['imagegen', TOOL_SEARCH_NAME])
+      return toolCallResponse('leaf-image', 'imagegen', leafArgs)
+    },
+    request => {
+      assert.deepEqual(request.tools.map(tool => tool.name).sort(), ['imagegen', TOOL_SEARCH_NAME])
+      return textResponse('leaf complete')
+    },
+  ]))
+  const parent = createAgent(ctx, 'image-leaf-parent')
+  const run = await ctx.subagents.start('spawn', {
+    label: 'e-mate:image-leaf:test',
+    prompt: [{ type: 'text', text: leafPrompt }],
+    parent,
+    agentOptions: { provider: 'mock', model: 'mock' },
+    toolFilter: { allow: ['imagegen'] },
+    persona: 'Execute exactly one image leaf.',
+    signal,
+  })
+
+  const result = await run.result
+  assert.equal(result.stopReason, 'completed')
+  assert.deepEqual(executed, [leafArgs])
+  assert.deepEqual(names(ctx, run.localAgent), ['imagegen', TOOL_SEARCH_NAME])
+  const searchCall = run.localAgent.session.events.find(event => event.type === 'tool/call'
+    && event.data.name === TOOL_SEARCH_NAME)
+  assert.ok(searchCall)
+  assert.deepEqual(JSON.parse(searchCall.data.arguments), { query: '生图' })
+  assert.equal(run.localAgent.session.events.some(event => event.type === 'tool-search/selection'), false)
+  assert.equal((await execute(ctx, run.localAgent, 'unrelated_write', {})).isError, true)
+  await run.dispose()
 })
 
 test('restores only a post-plugin request/header and never mistakes a legacy full catalog for a selection', async (t) => {
@@ -126,6 +313,9 @@ test('restores only a post-plugin request/header and never mistakes a legacy ful
 
   assert.deepEqual(names(ctx, restored), ['office_write', 'read_file', TOOL_SEARCH_NAME])
   assert.deepEqual(names(ctx, legacy), ['read_file', TOOL_SEARCH_NAME])
+  ctx.tools.register(fixture('late_probe', 'Late external capability'))
+  assert.deepEqual(names(ctx, restored), ['office_write', 'read_file', TOOL_SEARCH_NAME])
+  assert.deepEqual(names(ctx, legacy), ['read_file', TOOL_SEARCH_NAME])
 })
 
 test('intersects with an existing per-agent restriction and does not disclose its denied schema', async (t) => {
@@ -145,16 +335,73 @@ test('intersects with an existing per-agent restriction and does not disclose it
   await handle.dispose()
 })
 
-test('rebuilds from the real inherited view when tools change', async (t) => {
+test('same-named Agent-local tools stay outside the global catalog and restriction', async (t) => {
+  const { ctx } = await harness()
+  t.after(async () => ctx.fiber.dispose())
+  const createLocal = id => ctx.agents.create({
+    sessionId: SessionId(id),
+    agentOptions: { provider: 'mock', model: 'mock' },
+    setup(agentCtx) { agentCtx.tools.register(fixture('agent_status', `Status for ${id}`)) },
+  })
+  const left = await createLocal('local-left')
+  const right = await createLocal('local-right')
+
+  for (const handle of [left, right]) {
+    assert.deepEqual(names(ctx, handle.agent), ['agent_status', TOOL_SEARCH_NAME])
+    assert.deepEqual((await execute(ctx, handle.agent, TOOL_SEARCH_NAME, { query: 'agent status' })).value.tools, [])
+    assert.equal((await execute(ctx, handle.agent, 'agent_status', {})).isError, false)
+  }
+  await left.dispose()
+  await right.dispose()
+})
+
+test('keeps native tools usable when progressive restriction cannot be installed', async (t) => {
+  const { ctx } = await harness({}, false)
+  t.after(async () => ctx.fiber.dispose())
+  ctx.tools.register(fixture('native_probe', 'Native capability'))
+  await ctx.plugin(ToolSearch)
+
+  const handle = await ctx.agents.create({
+    sessionId: SessionId('restriction-failure'),
+    agentOptions: { provider: 'mock', model: 'mock' },
+    setup(agentCtx) {
+      agentCtx.tools.restrict = () => { throw new Error('simulated stale allow list') }
+    },
+  })
+
+  assert.deepEqual(names(ctx, handle.agent), ['native_probe'])
+  assert.equal((await execute(ctx, handle.agent, 'native_probe', {})).isError, false)
+  await handle.dispose()
+})
+
+test('rebuilds from the real inherited view and preserves selected eligible globals', async (t) => {
   const { ctx } = await harness()
   t.after(async () => ctx.fiber.dispose())
   ctx.tools.register(fixture('first_probe', 'First capability'))
   const agent = createAgent(ctx, 'late-tool')
+  assert.deepEqual((await execute(ctx, agent, TOOL_SEARCH_NAME, { query: 'first capability' })).value.tools, [
+    { name: 'first_probe', status: 'loaded' },
+  ])
   ctx.tools.register(fixture('late_probe', 'Late external capability'))
 
-  assert.deepEqual(names(ctx, agent), [TOOL_SEARCH_NAME])
+  assert.deepEqual(names(ctx, agent), ['first_probe', TOOL_SEARCH_NAME])
   const found = await execute(ctx, agent, TOOL_SEARCH_NAME, { query: 'late external' })
   assert.deepEqual(found.value.tools, [{ name: 'late_probe', status: 'loaded' }])
+  assert.deepEqual(names(ctx, agent), ['first_probe', 'late_probe', TOOL_SEARCH_NAME])
+})
+
+test('rebuild drops removed selections instead of reviving them after re-registration', async (t) => {
+  const { ctx } = await harness()
+  t.after(async () => ctx.fiber.dispose())
+  const remove = ctx.tools.register(fixture('ephemeral_probe', 'Ephemeral capability'))
+  const agent = createAgent(ctx, 'removed-tool')
+  await execute(ctx, agent, TOOL_SEARCH_NAME, { query: 'ephemeral capability' })
+  assert.deepEqual(names(ctx, agent), ['ephemeral_probe', TOOL_SEARCH_NAME])
+
+  remove()
+  assert.deepEqual(names(ctx, agent), [TOOL_SEARCH_NAME])
+  ctx.tools.register(fixture('ephemeral_probe', 'Ephemeral capability restored'))
+  assert.deepEqual(names(ctx, agent), [TOOL_SEARCH_NAME])
 })
 
 test('rejects nested Code Mode dispatch and invalid requests without changing visibility', async (t) => {
@@ -173,14 +420,28 @@ test('rejects nested Code Mode dispatch and invalid requests without changing vi
   assert.deepEqual(names(ctx, agent), before)
 })
 
-test('plugin disposal restores the original native tool surface', async (t) => {
-  const { ctx, plugin } = await harness()
+test('keeps selections isolated across Agents and disposal restores the native surface', async (t) => {
+  const { ctx, plugin } = await harness({ maxResults: 1 })
   t.after(async () => ctx.fiber.dispose())
-  ctx.tools.register(fixture('before_plugin', 'Registered capability'))
-  const agent = createAgent(ctx, 'dispose')
-  assert.deepEqual(names(ctx, agent), [TOOL_SEARCH_NAME])
+  ctx.tools.register(fixture('agent_alpha', 'Alpha capability'))
+  ctx.tools.register(fixture('agent_beta', 'Beta capability'))
+  const left = await ctx.agents.create({
+    sessionId: SessionId('isolation-left'), agentOptions: { provider: 'mock', model: 'mock' },
+  })
+  const right = await ctx.agents.create({
+    sessionId: SessionId('isolation-right'), agentOptions: { provider: 'mock', model: 'mock' },
+  })
+  await execute(ctx, left.agent, TOOL_SEARCH_NAME, { query: 'alpha capability' })
+  await execute(ctx, right.agent, TOOL_SEARCH_NAME, { query: 'beta capability' })
+  assert.deepEqual(names(ctx, left.agent), ['agent_alpha', TOOL_SEARCH_NAME])
+  assert.deepEqual(names(ctx, right.agent), ['agent_beta', TOOL_SEARCH_NAME])
+
+  await left.dispose()
+  ctx.tools.register(fixture('after_left_dispose', 'Registered after one Agent disposed'))
+  assert.deepEqual(names(ctx, right.agent), ['agent_beta', TOOL_SEARCH_NAME])
   await plugin.dispose()
-  assert.deepEqual(names(ctx, agent), ['before_plugin'])
+  assert.deepEqual(names(ctx, right.agent), ['after_left_dispose', 'agent_alpha', 'agent_beta'])
+  await right.dispose()
 })
 
 test('keeps a seventy-tool native catalog out of the initial request schema', async (t) => {

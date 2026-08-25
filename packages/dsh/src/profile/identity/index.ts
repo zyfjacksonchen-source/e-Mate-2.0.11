@@ -20,9 +20,9 @@ const badRequest = message => ({
   error: { code: 'bad-request', message, details: { issues: [] } },
 })
 
-const unavailable = message => ({
+const internalFailure = message => ({
   ok: false,
-  error: { code: 'unavailable', message, details: { issues: [] } },
+  error: { code: 'internal', message, details: {} },
 })
 
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -158,6 +158,22 @@ function requireReceipt(value, operation) {
     throw new Error(`e-Mate enterprise ${operation} receipt is invalid`)
   }
   return value.receipt_id
+}
+
+function logoutResult(value) {
+  if (!isRecord(value)
+    || !['revoked', 'unknown'].includes(value.remote_revocation)
+    || Object.keys(value).sort().join(',') !== (value.remote_revocation === 'revoked'
+      ? 'receipt_id,remote_revocation'
+      : 'remote_revocation')
+    || (value.remote_revocation === 'revoked'
+      ? typeof value.receipt_id !== 'string' || value.receipt_id.length < 1
+      : value.receipt_id !== undefined)) {
+    throw new Error('e-Mate enterprise logout result is invalid')
+  }
+  return value.remote_revocation === 'revoked'
+    ? { remote_revocation: 'revoked', receipt_id: value.receipt_id }
+    : { remote_revocation: 'unknown' }
 }
 
 export function apply(ctx, config = {}) {
@@ -347,16 +363,32 @@ export function apply(ctx, config = {}) {
         if (typeof config.identityProvider?.logout !== 'function') {
           throw new Error('e-Mate enterprise identity logout is unavailable')
         }
-        const receiptId = requireReceipt(await config.identityProvider.logout({
-          client_request_id: payload.client_request_id,
-        }), 'logout')
-        const state = await bootstrap(config)
-        if (state.authenticated || state.workspace_unlocked) {
-          throw new Error('e-Mate enterprise logout did not revoke the active lease')
+        let outcome
+        try {
+          outcome = await config.identityProvider.logout({
+            client_request_id: payload.client_request_id,
+          })
+        } catch {
+          return internalFailure('当前应用已停止使用此登录；本机凭据清理未确认完成，请勿关闭或重启应用并联系管理员。')
+        }
+        let result
+        try {
+          result = logoutResult(outcome)
+        } catch {
+          return internalFailure('当前应用已停止使用此登录；退出结果未确认完成，请保持应用打开并联系管理员。')
+        }
+        let state
+        try {
+          state = await bootstrap(config)
+          if (state.authenticated || state.workspace_unlocked) {
+            return internalFailure('当前应用已停止使用此登录；退出后的本机状态复核失败，请保持应用打开并联系管理员。')
+          }
+        } catch {
+          return internalFailure('当前应用已停止使用此登录；退出后的本机状态复核失败，请保持应用打开并联系管理员。')
         }
         return {
           ok: true,
-          value: { schema_version: 1, receipt_id: receiptId, state },
+          value: { schema_version: 1, ...result, state },
         }
       }
       if (endpoint === 'session.password') {
@@ -417,9 +449,10 @@ export function apply(ctx, config = {}) {
           ctx.logger?.warn?.(
             `e-Mate enterprise identity ${endpoint} unavailable (${error.reason}${error.status === undefined ? '' : ` ${error.status}`})`,
           )
-          return unavailable(error.message)
+          return internalFailure(error.message)
         }
-        throw error
+        ctx.logger?.warn?.(`e-Mate enterprise identity ${endpoint} failed (unexpected)`)
+        return internalFailure('企业身份服务暂时不可用，请稍后重试。')
       }
     },
     { authority: 'loopback' },

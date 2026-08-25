@@ -248,7 +248,7 @@ function validateBaseContract(value) {
   const errors = []
   if (!record(value)) return ['base contract must be an object']
   if (!exactKeys(value, [
-    'schema_version', 'id', 'desktop_api', 'profile_format', 'desktop_reference',
+    'schema_version', 'id', 'desktop_api', 'profile_format', 'schedule_protocol_floor', 'desktop_reference',
     'harness_version', 'harness_commit', 'runtime_imports', 'profile_signing_keys',
   ])) errors.push('base contract fields are invalid')
   if (value.schema_version !== 1) errors.push('base contract schema_version must be 1')
@@ -257,6 +257,7 @@ function validateBaseContract(value) {
   }
   if (value.desktop_api !== 1) errors.push('base contract desktop_api must be 1')
   if (value.profile_format !== 1) errors.push('base contract profile_format must be 1')
+  if (value.schedule_protocol_floor !== 1) errors.push('base contract schedule_protocol_floor must be 1')
   const reference = record(value.desktop_reference) ? value.desktop_reference : {}
   if (reference.repository !== 'anywhere-labs/deepseek-harness-desktop'
     || reference.commit !== '6074088f5b660206e404b3591fab51fb99c69add'
@@ -266,7 +267,7 @@ function validateBaseContract(value) {
     errors.push('base contract Desktop rc.7 reference drifted')
   }
   if (value.harness_version !== '0.1.0-rc.7') errors.push('base contract Harness version drifted')
-  if (value.harness_commit !== '2bc16230975f6cf02aa1b283b1f86de44007b059') {
+  if (value.harness_commit !== 'b2b1650b01f0ee88d81837a9b5c050f9f763f606') {
     errors.push('base contract Harness commit drifted')
   }
   const runtimeImports = record(value.runtime_imports) ? Object.entries(value.runtime_imports) : []
@@ -599,7 +600,7 @@ function result({
     lane,
     run_base: lane === 'base',
     run_plugins: lane === 'plugin-only',
-    run_enterprise: lane === 'enterprise-only',
+    run_enterprise: classifications.some(item => item.kind === 'enterprise'),
     run_verification: lane !== 'none',
     components,
     component_jobs: componentJobs,
@@ -611,6 +612,9 @@ function result({
     contract: {
       valid: boundary?.valid ?? false,
       base_contract_id: typeof boundary?.baseContract?.id === 'string' ? boundary.baseContract.id : null,
+      schedule_protocol_floor: Number.isSafeInteger(boundary?.baseContract?.schedule_protocol_floor)
+        ? boundary.baseContract.schedule_protocol_floor
+        : null,
       errors: boundary?.errors ?? (error === undefined ? [] : [error]),
     },
   }

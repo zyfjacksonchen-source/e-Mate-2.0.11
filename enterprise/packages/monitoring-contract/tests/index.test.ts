@@ -49,6 +49,10 @@ test('task events accept metadata only and task summaries conserve explicit outc
       { scenario: 'DATA_PROCESSING', taskCount: '0' },
       { scenario: 'SEARCH_QUERY', taskCount: '0' },
     ],
+    scenarioBuckets: [
+      { bucketStart: '2026-07-25T00:00:00.000Z', scenario: 'CONTENT_CREATION', taskCount: '1' },
+      { bucketStart: '2026-07-25T00:00:00.000Z', scenario: 'DOCUMENT_EDITING', taskCount: '1' },
+    ],
     eventTypeCounts: [
       { type: 'RECEIVED', eventCount: '2' },
       { type: 'FIRST_RESPONSE', eventCount: '2' },
@@ -90,6 +94,12 @@ test('task events accept metadata only and task summaries conserve explicit outc
     parseTenantTaskSummary({
       ...summary,
       userEventCounts: [{ userId: 'user-1', eventCount: '14' }],
+    })
+  );
+  assert.throws(() =>
+    parseTenantTaskSummary({
+      ...summary,
+      scenarioBuckets: [{ ...summary.scenarioBuckets[0], taskCount: '3' }],
     })
   );
 });

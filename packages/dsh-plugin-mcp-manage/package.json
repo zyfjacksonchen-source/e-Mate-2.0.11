@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-mcp-manage",
-  "version": "2.0.12",
+  "version": "2.0.13",
   "description": "DSH-native MCP connection management for e-Mate",
   "type": "module",
   "license": "MIT",
@@ -37,10 +37,10 @@
         "effects": ["credentials-read", "credentials-write", "desktop-restart", "host-plugin-install", "network-remote", "persistent-state", "subprocess"],
         "guards": ["atomic-receipt", "explicit-user-action", "fixed-catalog", "native-user-question"]
       },
-      "base_contracts": ["e-mate-desktop-profile-v6-dsh-2bc16230975f"]
+      "base_contracts": ["e-mate-desktop-profile-v7-dsh-b2b1650b01f0"]
     },
     "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "2bc16230975f6cf02aa1b283b1f86de44007b059",
+    "harnessCommit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606",
     "runtime": "@deepseek-ai/dsh-mcp-client",
     "mcpSdkVersion": "1.29.0"
   },

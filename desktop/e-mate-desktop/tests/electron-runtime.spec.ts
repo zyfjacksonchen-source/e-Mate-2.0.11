@@ -1,12 +1,19 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ProfileUpdateAvailable } from '../src/profile-update.ts'
+import type { ProfileUpdateAvailable, ProfileUpdateContext } from '../src/profile-update.ts'
 import type { DesktopShellSpec } from '../src/runtime.ts'
 
 const updateAvailable = {
   status: 'update-available',
   currentVersion: '2.0.10',
   latestVersion: '2.1.0',
+  sourceCommit: 'a'.repeat(40),
+  baseContractId: 'e-mate-desktop-profile-v7',
+  scheduleProtocolFloor: 1,
+  manifestIdentity: 'b'.repeat(64),
   artifact: {
     url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.1.0/${'a'.repeat(40)}/e-Mate-2.1.0-mac-universal.dmg`,
     bytes: 1024,
@@ -18,13 +25,14 @@ const windowsUpdateAvailable = {
   ...updateAvailable,
   artifact: {
     ...updateAvailable.artifact,
-    url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.1.0/${'a'.repeat(40)}/e-Mate-2.1.0-win-x64.exe`,
+    url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.1.0/${'a'.repeat(40)}/e-Mate-2.1.0-win-x64-Setup.exe`,
   },
 } as const
 
 const terminal = vi.hoisted(() => ({ open: vi.fn() }))
 const updater = vi.hoisted(() => ({ download: vi.fn() }))
 const macUpdater = vi.hoisted(() => ({ schedule: vi.fn(), markShutdownReady: vi.fn() }))
+const windowsUpdater = vi.hoisted(() => ({ schedule: vi.fn(), markShutdownReady: vi.fn() }))
 const childProcess = vi.hoisted(() => {
   type Listener = (...args: unknown[]) => void
   const listeners = new Map<string, Listener[]>()
@@ -64,6 +72,16 @@ vi.mock('../src/mac-update-installer.ts', () => ({
   scheduleMacUpdateInstallation: macUpdater.schedule,
 }))
 
+vi.mock('../src/windows-update-installer.ts', () => ({
+  admittedWindowsUpdateIdentity: (update: typeof windowsUpdateAvailable) => ({
+    sourceCommit: update.sourceCommit,
+    baseContractId: update.baseContractId,
+    scheduleProtocolFloor: update.scheduleProtocolFloor,
+    manifestIdentity: update.manifestIdentity,
+  }),
+  scheduleWindowsUpdateInstallation: windowsUpdater.schedule,
+}))
+
 vi.mock('node:child_process', async importOriginal => ({
   ...await importOriginal<typeof import('node:child_process')>(),
   spawn: childProcess.spawn,
@@ -82,7 +100,7 @@ const electron = vi.hoisted(() => {
   const dialog = {
     showErrorBox: vi.fn(),
     showMessageBox: vi.fn(async () => ({ response: 0, checkboxChecked: false })),
-    showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] })),
+    showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })),
     showSaveDialog: vi.fn(async () => ({ canceled: true })),
   }
   const appIcon = {
@@ -123,6 +141,8 @@ const electron = vi.hoisted(() => {
     readonly isMinimized = vi.fn(() => false)
     readonly restore = vi.fn()
     readonly show = vi.fn()
+    readonly hide = vi.fn()
+    readonly isVisible = vi.fn(() => this.show.mock.calls.length > 0)
     readonly focus = vi.fn()
     readonly on = browserWindowOn
     readonly off = browserWindowOff
@@ -262,9 +282,13 @@ describe('Electron compatibility runtime', () => {
     updater.download.mockReset()
     macUpdater.schedule.mockReset()
     macUpdater.schedule.mockResolvedValue({ markShutdownReady: macUpdater.markShutdownReady })
+    windowsUpdater.schedule.mockReset()
+    windowsUpdater.schedule.mockResolvedValue({ markShutdownReady: windowsUpdater.markShutdownReady })
     electron.loadURL.mockReset()
     electron.loadURL.mockResolvedValue(undefined)
     electron.dialog.showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: false })
+    electron.dialog.showOpenDialog.mockReset()
+    electron.dialog.showOpenDialog.mockResolvedValue({ canceled: true, filePaths: [] })
     electron.shell.openPath.mockResolvedValue('')
     electron.systemPreferences.isTrustedAccessibilityClient.mockReturnValue(false)
     electron.nativeTheme.themeSource = 'system'
@@ -273,6 +297,23 @@ describe('Electron compatibility runtime', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('fails closed when the selected Base Schedule package lacks native admission', async () => {
+    const { loadClosedScheduleDeliveryAdmission } = await import('../src/electron-runtime.ts')
+    const root = mkdtempSync(join(tmpdir(), 'e-mate-schedule-admission-'))
+    const schedule = join(root, 'node_modules', '@deepseek-ai', 'dsh-schedule')
+    try {
+      mkdirSync(schedule, { recursive: true })
+      writeFileSync(join(root, 'package.json'), '{}\n')
+      writeFileSync(join(schedule, 'package.json'), '{"name":"@deepseek-ai/dsh-schedule","type":"module","main":"index.js"}\n')
+      writeFileSync(join(schedule, 'index.js'), 'export const fixture = true\n')
+
+      await expect(loadClosedScheduleDeliveryAdmission(pathToFileURL(join(root, 'package.json')).href))
+        .rejects.toThrow('selected Base Schedule package has no delivery admission')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('uses the native macOS frame, Dock icon, and template tray image', async () => {
@@ -408,6 +449,50 @@ describe('Electron compatibility runtime', () => {
 
     await release()
     expect(electron.trays[0]?.off).toHaveBeenCalledWith('click', expect.any(Function))
+  })
+
+  it('opens one parented Windows folder chooser and returns its selected path', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    electron.dialog.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['C:\\Work'] })
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+
+    await expect(runtime.pickDirectory()).resolves.toBe('C:\\Work')
+    expect(electron.dialog.showOpenDialog).toHaveBeenCalledWith(
+      electron.browserWindows[0],
+      {
+        title: '选择工作区目录',
+        properties: ['openDirectory', 'dontAddToRecent'],
+      },
+    )
+
+    await release()
+  })
+
+  it('single-flights one Windows chooser and opens a new generation after cancellation', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    let resolveDialog!: (result: { canceled: boolean; filePaths: string[] }) => void
+    electron.dialog.showOpenDialog.mockReturnValue(
+      new Promise(resolve => { resolveDialog = resolve }),
+    )
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+
+    const first = runtime.pickDirectory()
+    const repeated = runtime.pickDirectory()
+    expect(electron.dialog.showOpenDialog).toHaveBeenCalledOnce()
+    resolveDialog({ canceled: true, filePaths: [] })
+    await expect(Promise.all([first, repeated])).resolves.toEqual([null, null])
+
+    electron.dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: ['C:\\Next'] })
+    await expect(runtime.pickDirectory()).resolves.toBe('C:\\Next')
+    expect(electron.dialog.showOpenDialog).toHaveBeenCalledTimes(2)
+
+    await release()
   })
 
   it('does not mount a registration disposed before Host boot settles', async () => {
@@ -576,7 +661,7 @@ describe('Electron compatibility runtime', () => {
         appExecutable: process.execPath,
         electronVersion: '43.4.0',
         profileName: 'desktop',
-        productVersion: '2.0.12',
+        productVersion: '2.0.13',
         profileDir: '/tmp/dsh-home/profiles/desktop',
         homeDir: '/tmp/dsh-home',
         spawn: expect.any(Function),
@@ -640,6 +725,8 @@ describe('Electron compatibility runtime', () => {
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const onRendererBoot = vi.fn()
     const runtime = new ElectronDesktopRuntime(async () => {}, onRendererBoot)
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
     const report = {
       status: 'failed' as const,
       plugins: ['dsh-vision-router'],
@@ -662,18 +749,223 @@ describe('Electron compatibility runtime', () => {
     }))
     const recoveryCalls = electron.dialog.showMessageBox.mock.calls as unknown as Array<[{ detail?: string }]>
     expect(recoveryCalls[0]?.[0].detail).toContain('vision_crop')
+    expect(electron.browserWindows[0]?.show).not.toHaveBeenCalled()
+    await release()
   })
 
-  it('commits a healthy renderer without showing recovery', async () => {
+  it('shows an ordinary healthy renderer exactly once', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const onRendererBoot = vi.fn()
     const runtime = new ElectronDesktopRuntime(async () => {}, onRendererBoot)
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+    const window = electron.browserWindows[0]
+    const ready = window?.once.mock.calls.find(([event]) => event === 'ready-to-show')?.[1]
+    expect(ready).toEqual(expect.any(Function))
+
+    ready()
+    runtime.show()
+    expect(window?.show).not.toHaveBeenCalled()
 
     runtime.reportRendererBoot({ status: 'healthy' })
 
     expect(onRendererBoot).toHaveBeenCalledWith({ status: 'healthy' })
     expect(electron.dialog.showMessageBox).not.toHaveBeenCalled()
+    expect(window?.show).toHaveBeenCalledOnce()
+    expect(window?.focus).toHaveBeenCalledOnce()
+    await release()
+  })
+
+  it('keeps a macOS update probation window hidden after renderer health', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {}, () => {}, true)
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+    const window = electron.browserWindows[0]
+
+    runtime.reportRendererBoot({ status: 'healthy' })
+
+    expect(window?.show).not.toHaveBeenCalled()
+    expect(window?.focus).not.toHaveBeenCalled()
+    await release()
+  })
+
+  it('does not acknowledge probation when the Schedule latch is missing', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {}, () => {}, true)
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+    const window = electron.browserWindows[0]
+    const acknowledge = vi.fn()
+    runtime.reportRendererBoot({ status: 'healthy' })
+
+    await expect(runtime.commitRendererStartup(acknowledge))
+      .rejects.toThrow('Schedule startup latch is not configured')
+
+    expect(acknowledge).not.toHaveBeenCalled()
+    expect(window?.show).not.toHaveBeenCalled()
+    await release()
+  })
+
+  it('does not acknowledge probation when its window is already unavailable', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {}, () => {}, true)
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+    const window = electron.browserWindows[0]
+    const acknowledge = vi.fn()
+    runtime.configureScheduleStartupLatch(() => {})
+    window?.isDestroyed.mockReturnValue(true)
+    runtime.reportRendererBoot({ status: 'healthy' })
+
+    await expect(runtime.commitRendererStartup(acknowledge))
+      .rejects.toThrow('macOS update window is unavailable')
+
+    expect(acknowledge).not.toHaveBeenCalled()
+    expect(window?.show).not.toHaveBeenCalled()
+    await release()
+  })
+
+  it('shows a healthy macOS update only after its startup acknowledgement commits', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {}, () => {}, true)
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+    const window = electron.browserWindows[0]
+    const ready = window?.once.mock.calls.find(([event]) => event === 'ready-to-show')?.[1]
+    const events: string[] = []
+    window?.show.mockImplementationOnce(() => { events.push('show') })
+    runtime.configureScheduleStartupLatch(() => { events.push('open-schedule') })
+    const acknowledge = vi.fn(() => {
+      events.push('ack')
+      return async () => { events.push('applied') }
+    })
+    const duplicate = vi.fn()
+    runtime.reportRendererBoot({ status: 'healthy' })
+
+    await runtime.commitRendererStartup(acknowledge)
+    await runtime.commitRendererStartup(duplicate)
+    ready()
+
+    expect(acknowledge).toHaveBeenCalledOnce()
+    expect(duplicate).not.toHaveBeenCalled()
+    expect(events).toEqual(['ack', 'show', 'open-schedule', 'applied'])
+    expect(window?.show).toHaveBeenCalledOnce()
+    expect(window?.focus).toHaveBeenCalledTimes(2)
+    await release()
+  })
+
+  it('rejects a failed macOS startup acknowledgement without showing the probation window', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {}, () => {}, true)
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+    const window = electron.browserWindows[0]
+    runtime.configureScheduleStartupLatch(() => {})
+    runtime.reportRendererBoot({ status: 'healthy' })
+
+    await expect(runtime.commitRendererStartup(() => { throw new Error('ack write failed') }))
+      .rejects.toThrow('ack write failed')
+    runtime.show()
+    expect(window?.show).not.toHaveBeenCalled()
+    expect(window?.focus).not.toHaveBeenCalled()
+    await release()
+  })
+
+  it('rechecks the same probation window after acknowledgement before opening Schedule', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {}, () => {}, true)
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+    const window = electron.browserWindows[0]
+    const openSchedule = vi.fn()
+    const applied = vi.fn()
+    runtime.configureScheduleStartupLatch(openSchedule)
+    runtime.reportRendererBoot({ status: 'healthy' })
+
+    await expect(runtime.commitRendererStartup(() => {
+      window?.isDestroyed.mockReturnValue(true)
+      return applied
+    })).rejects.toThrow('macOS update window became unavailable during commit')
+
+    expect(openSchedule).not.toHaveBeenCalled()
+    expect(applied).not.toHaveBeenCalled()
+    expect(window?.show).not.toHaveBeenCalled()
+    await release()
+  })
+
+  it('binds the same Schedule latch idempotently and rejects a different owner', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {}, () => {}, true)
+    const open = vi.fn()
+
+    runtime.configureScheduleStartupLatch(open)
+
+    expect(() => { runtime.configureScheduleStartupLatch(open) }).not.toThrow()
+    expect(() => { runtime.configureScheduleStartupLatch(() => {}) })
+      .toThrow('Schedule startup latch is already configured')
+  })
+
+  it('does not pretend to reclose probation when commit-applied IPC fails after Schedule opens', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {}, () => {}, true)
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+    const window = electron.browserWindows[0]
+    const events: string[] = []
+    window?.show.mockImplementationOnce(() => { events.push('show') })
+    runtime.configureScheduleStartupLatch(() => { events.push('open-schedule') })
+    runtime.reportRendererBoot({ status: 'healthy' })
+
+    await expect(runtime.commitRendererStartup(async () => async () => {
+      events.push('applied')
+      throw new Error('commit-applied IPC failed')
+    })).rejects.toThrow('commit-applied IPC failed')
+
+    expect(events).toEqual(['show', 'open-schedule', 'applied'])
+    expect(window?.hide).not.toHaveBeenCalled()
+    runtime.show()
+    expect(window?.show).toHaveBeenCalledOnce()
+    expect(window?.focus).toHaveBeenCalledTimes(2)
+    await release()
+  })
+
+  it('keeps macOS probation hidden until asynchronous IPC confirmation settles', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {}, () => {}, true)
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+    const window = electron.browserWindows[0]
+    let confirm!: () => void
+    const confirmed = new Promise<void>(resolve => { confirm = resolve })
+    const openSchedule = vi.fn()
+    const duplicate = vi.fn()
+    runtime.configureScheduleStartupLatch(openSchedule)
+    runtime.reportRendererBoot({ status: 'healthy' })
+
+    const commit = runtime.commitRendererStartup(async () => { await confirmed })
+    const repeated = runtime.commitRendererStartup(duplicate)
+    await Promise.resolve()
+    expect(window?.show).not.toHaveBeenCalled()
+    expect(window?.focus).not.toHaveBeenCalled()
+
+    confirm()
+    await Promise.all([commit, repeated])
+    expect(duplicate).not.toHaveBeenCalled()
+    expect(openSchedule).toHaveBeenCalledOnce()
+    expect(window?.show).toHaveBeenCalledOnce()
+    expect(window?.focus).toHaveBeenCalledOnce()
+    await release()
   })
 
   it('does not block a release probe on the interactive recovery dialog', async () => {
@@ -769,7 +1061,28 @@ describe('Electron compatibility runtime', () => {
     await vi.waitFor(() => { expect(restart).toHaveBeenCalledOnce() })
   })
 
-  it('shows the signed component update confirmation in Chinese', async () => {
+  it.each([
+    {
+      changedComponents: [] as ProfileUpdateAvailable['changedComponents'],
+      downloadBytes: 0,
+      expectedSummary: '本次仅更新发布回执，无需下载新的能力文件。',
+      expectedBytes: '0 B',
+    },
+    {
+      changedComponents: [
+        { id: '@e-mate/dsh-plugin-private', version: '2.0.13', bytes: 2048 },
+        { id: 'component.id', version: '2.0.13', bytes: 2048 },
+      ],
+      downloadBytes: 4096,
+      expectedSummary: '本次包含 2 项办公能力与体验优化。',
+      expectedBytes: '4.0 KiB',
+    },
+  ])('shows a user-facing signed update confirmation without internal identities: %#', async ({
+    changedComponents,
+    downloadBytes,
+    expectedSummary,
+    expectedBytes,
+  }) => {
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
     const update = {
@@ -777,10 +1090,10 @@ describe('Electron compatibility runtime', () => {
       currentGeneration: 'previous',
       currentSequence: 2,
       generationId: 'a'.repeat(64),
-      releaseVersion: '2.0.12',
+      releaseVersion: '2.0.13',
       sequence: 3,
-      changedComponents: [{ id: '@e-mate/dsh-client-shell', version: '2.0.12', bytes: 4096 }],
-      downloadBytes: 4096,
+      changedComponents,
+      downloadBytes,
       release: {},
     } as unknown as ProfileUpdateAvailable
     const confirm = (runtime as unknown as {
@@ -789,12 +1102,21 @@ describe('Electron compatibility runtime', () => {
 
     electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 1, checkboxChecked: false })
     await expect(confirm(update)).resolves.toBe(false)
-    expect(electron.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
-      title: '发现 e-Mate 组件更新',
-      message: 'e-Mate 2.0.12 第 3 代组件已可更新。',
-      detail: expect.stringContaining('下载大小：4.0 KiB'),
+    const dialogCall = (electron.dialog.showMessageBox.mock.calls as unknown as Array<[{
+      title: string
+      message: string
+      detail: string
+    }]>).at(-1)![0]
+    expect(dialogCall).toEqual(expect.objectContaining({
+      title: '发现 e-Mate 更新',
+      message: 'e-Mate 2.0.13 第 3 代已可更新。',
+      detail: expect.stringContaining(`${expectedSummary}\n\n下载大小：${expectedBytes}`),
       buttons: ['更新并重启', '稍后'],
     }))
+    expect(dialogCall.detail).toContain('原子切换')
+    expect(dialogCall.detail).toContain('自动回滚')
+    expect([dialogCall.title, dialogCall.message, dialogCall.detail].join('\n'))
+      .not.toMatch(/@e-mate\/|dsh-plugin|component\.id|插件|组件/u)
   })
 
   it('uses Electron networking and confirmation-gated macOS replacement', async () => {
@@ -812,9 +1134,28 @@ describe('Electron compatibility runtime', () => {
     expect(runtime.updates).toMatchObject({
       isPackaged: false,
       canDownload: false,
-      currentVersion: '2.0.12',
+      currentVersion: '2.0.13',
+      currentScheduleProtocolFloor: 0,
+      trustedManifestKeys: [],
       statePath: join('/tmp/dsh-desktop-user-data', 'updates', 'state.json'),
     })
+    runtime.configureProfileUpdates({
+      base: {
+        schedule_protocol_floor: 1,
+        profile_signing_keys: [{
+          id: 'release-key',
+          algorithm: 'ed25519',
+          public_key_spki_der_base64: 'test-public-key',
+        }],
+      },
+      target: { platform: 'darwin', arch: 'arm64' },
+      expectedComponentIds: [],
+      generationRoot: '/tmp/generations',
+      generationStatePath: '/tmp/generations/state.json',
+      activeGenerationId: 'bundled',
+    } as unknown as Omit<ProfileUpdateContext, 'request'>)
+    expect(runtime.updates.currentScheduleProtocolFloor).toBe(1)
+    expect(runtime.updates.trustedManifestKeys).toEqual([expect.objectContaining({ id: 'release-key' })])
     electron.app.isPackaged = true
     expect(runtime.updates).toMatchObject({ isPackaged: true, canDownload: true })
 
@@ -862,6 +1203,11 @@ describe('Electron compatibility runtime', () => {
       userDataPath: '/tmp/dsh-desktop-user-data',
       homeDirectory: '/tmp/dsh-home',
       helperModulePath: expect.stringMatching(/mac-update-helper\.js$/u),
+      sourceCommit: updateAvailable.sourceCommit,
+      baseContractId: updateAvailable.baseContractId,
+      scheduleProtocolFloor: updateAvailable.scheduleProtocolFloor,
+      manifestIdentity: updateAvailable.manifestIdentity,
+      artifact: updateAvailable.artifact,
       parentPid: process.pid,
       signal: controller.signal,
     }))
@@ -887,7 +1233,7 @@ describe('Electron compatibility runtime', () => {
     expect(notification?.once).not.toHaveBeenCalled()
   })
 
-  it('starts the downloaded Windows installer before requesting orderly exit', async () => {
+  it('requires Windows Setup READY before requesting orderly exit', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     updater.download.mockResolvedValueOnce('C:\\Updates\\e-Mate-2.1.0-windows.exe')
     const requestQuit = vi.fn()
@@ -895,27 +1241,26 @@ describe('Electron compatibility runtime', () => {
     const runtime = new ElectronDesktopRuntime(async () => {})
     runtime.schedule({ ...spec, requestQuit })
 
-    const pending = runtime.updates.downloadAndOpen(windowsUpdateAvailable, new AbortController().signal)
-    await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenCalledOnce() })
-    expect(childProcess.spawn).toHaveBeenCalledWith(
-      'C:\\Updates\\e-Mate-2.1.0-windows.exe',
-      ['--updated', '--force-run'],
-      {
-        detached: true,
-        stdio: 'ignore',
-        shell: false,
-        windowsHide: false,
-      },
-    )
-    expect(requestQuit).not.toHaveBeenCalled()
-    childProcess.emit('spawn')
-    await pending
-
-    expect(childProcess.child.unref).toHaveBeenCalledOnce()
+    await runtime.updates.downloadAndOpen(windowsUpdateAvailable, new AbortController().signal)
+    expect(windowsUpdater.schedule).toHaveBeenCalledWith(expect.objectContaining({
+      installerPath: 'C:\\Updates\\e-Mate-2.1.0-windows.exe',
+      currentExecutable: process.execPath,
+      currentVersion: '2.0.10',
+      targetVersion: '2.1.0',
+      sourceCommit: windowsUpdateAvailable.sourceCommit,
+      baseContractId: windowsUpdateAvailable.baseContractId,
+      scheduleProtocolFloor: windowsUpdateAvailable.scheduleProtocolFloor,
+      manifestIdentity: windowsUpdateAvailable.manifestIdentity,
+      artifact: windowsUpdateAvailable.artifact,
+      parentPid: process.pid,
+    }))
     expect(requestQuit).toHaveBeenCalledWith(0)
+    expect(windowsUpdater.markShutdownReady).not.toHaveBeenCalled()
+    runtime.commitPreparedUpdateShutdown()
+    expect(windowsUpdater.markShutdownReady).toHaveBeenCalledOnce()
   })
 
-  it('does not exit when the downloaded Windows installer fails to spawn', async () => {
+  it('does not exit when Windows Setup fails before READY', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     updater.download.mockResolvedValueOnce('C:\\Updates\\e-Mate-2.1.0-windows.exe')
     const requestQuit = vi.fn()
@@ -923,12 +1268,9 @@ describe('Electron compatibility runtime', () => {
     const runtime = new ElectronDesktopRuntime(async () => {})
     runtime.schedule({ ...spec, requestQuit })
 
-    const pending = runtime.updates.downloadAndOpen(windowsUpdateAvailable, new AbortController().signal)
-    await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenCalledOnce() })
-    childProcess.emit('error', new Error('blocked'))
-
-    await expect(pending).rejects.toThrow('blocked')
-    expect(childProcess.child.unref).not.toHaveBeenCalled()
+    windowsUpdater.schedule.mockRejectedValueOnce(new Error('blocked before READY'))
+    await expect(runtime.updates.downloadAndOpen(windowsUpdateAvailable, new AbortController().signal))
+      .rejects.toThrow('blocked before READY')
     expect(requestQuit).not.toHaveBeenCalled()
   })
 
@@ -940,10 +1282,7 @@ describe('Electron compatibility runtime', () => {
     runtime.schedule(spec)
     const dialogCalls = electron.dialog.showMessageBox.mock.calls.length
 
-    const pending = runtime.updates.downloadAndOpen(windowsUpdateAvailable, new AbortController().signal)
-    await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenCalledOnce() })
-    childProcess.emit('spawn')
-    await pending
+    await runtime.updates.downloadAndOpen(windowsUpdateAvailable, new AbortController().signal)
 
     expect(electron.dialog.showMessageBox).toHaveBeenCalledTimes(dialogCalls)
   })

@@ -38,7 +38,6 @@ const generationArguments = [
   generationOptions.store,
   generationOptions.generation,
   generationOptions.base,
-  generationOptions.target,
 ]
 if (generationArguments.some(value => value !== undefined)
   && generationArguments.some(value => value === undefined)) {
@@ -117,6 +116,8 @@ try {
       isPackaged: false,
       canDownload: true,
       currentVersion: '2.0.0',
+      currentScheduleProtocolFloor: selectedBase.schedule_protocol_floor,
+      trustedManifestKeys: selectedBase.profile_signing_keys,
       statePath: join(home, 'update-state.json'),
       request: async () => { throw new Error('profile smoke must not perform update requests') },
       confirmDownload: async () => false,
@@ -133,6 +134,7 @@ try {
       nativeThemeSource = mountedSpec.readThemeSource()
     },
     show() {},
+    async pickDirectory() { return home },
     registerTrayItem(item) {
       trayItems.push(item)
       return {
@@ -182,14 +184,13 @@ try {
     throw new Error('assembled desktop profile is missing the desktop pnpm Host capability')
   }
   const picker = ctx.directoryPicker.capability()
-  const expectedPicker = selectedTarget.platform === 'darwin' ? 'native' : 'browse'
-  if (picker.kind !== expectedPicker) {
-    throw new Error(`assembled ${selectedTarget.platform} profile selected ${picker.kind} instead of ${expectedPicker} directory picker`)
+  if (picker.kind !== 'native') {
+    throw new Error(`assembled ${selectedTarget.platform} profile selected ${picker.kind} instead of native directory picker`)
   }
-  if (picker.kind === 'browse') {
-    const listing = await picker.list(home)
-    if (listing.path !== home) {
-      throw new Error(`assembled Windows browse picker listed ${listing.path} instead of ${home}`)
+  if (selectedTarget.platform === 'win32') {
+    const picked = await picker.pick(new AbortController().signal)
+    if (picked !== home) {
+      throw new Error(`assembled Windows native picker returned ${String(picked)} instead of ${home}`)
     }
   }
 
@@ -252,9 +253,7 @@ try {
     '@deepseek-ai/dsh-client-ui-conversation',
     '@deepseek-ai/dsh-client-ui-sidebar',
     ...(prepared.mode === 'compatibility' ? ['@deepseek-ai/dsh-client-ui-layout'] : []),
-    selectedTarget.platform === 'darwin'
-      ? '@deepseek-ai/dsh-client-ui-directory-picker-native'
-      : '@deepseek-ai/dsh-client-ui-directory-picker-browse',
+    '@deepseek-ai/dsh-client-ui-directory-picker-native',
     'dsh-at-file',
     '@e-mate/dsh-plugin-better-sidebar',
     'dsh-file-viewer',
@@ -265,9 +264,7 @@ try {
     }
   }
   for (const id of [
-    selectedTarget.platform === 'darwin'
-      ? '@deepseek-ai/dsh-client-ui-directory-picker-browse'
-      : '@deepseek-ai/dsh-client-ui-directory-picker-native',
+    '@deepseek-ai/dsh-client-ui-directory-picker-browse',
     ...(prepared.mode === 'advanced' ? ['@deepseek-ai/dsh-client-ui-layout'] : []),
   ]) {
     if (ids.has(id)) throw new Error(`assembled desktop Web graph unexpectedly includes ${id}`)

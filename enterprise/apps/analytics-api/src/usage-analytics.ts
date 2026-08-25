@@ -17,7 +17,7 @@ export type UsageAnalyticsQuery = {
   to: string;
   timezone: string;
   bucket: UsageBucket;
-  userId?: string;
+  userIds?: string[];
   modelId?: string;
 };
 
@@ -175,12 +175,21 @@ function validateQuery(query: UsageAnalyticsQuery): UsageAnalyticsQuery {
   } catch {
     throw new Error('Invalid usage timezone');
   }
+  const userIds = query.userIds ?? [];
+  if (
+    !Array.isArray(userIds) ||
+    userIds.length > 100 ||
+    new Set(userIds).size !== userIds.length ||
+    userIds.some((userId) => typeof userId !== 'string')
+  ) {
+    throw new Error('Invalid usage user filter');
+  }
   return {
     from,
     to,
     timezone,
     bucket: query.bucket,
-    ...(query.userId ? { userId: identifier(query.userId, 'usage user id') } : {}),
+    ...(userIds.length ? { userIds: userIds.map((userId) => identifier(userId, 'usage user id')) } : {}),
     ...(query.modelId ? { modelId: identifier(query.modelId, 'usage model id') } : {}),
   };
 }
@@ -241,7 +250,7 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
       query.to,
       query.bucket.toLowerCase(),
       query.timezone,
-      query.userId ?? null,
+      query.userIds ?? [],
       query.modelId ?? null,
     ];
     const grouped = await this.#pool.query<AggregateRow>(
@@ -264,7 +273,7 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
          WHERE tenant_id = $1
            AND COALESCE(finished_at, prepared_at) >= $2::timestamptz
            AND COALESCE(finished_at, prepared_at) < $3::timestamptz
-           AND ($6::text IS NULL OR user_id = $6)
+           AND (cardinality($6::text[]) = 0 OR user_id = ANY($6::text[]))
            AND ($7::text IS NULL OR model_id = $7)
          GROUP BY user_id, model_id, bucket_start
       ),
@@ -290,7 +299,7 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
          WHERE tenant_id = $1
            AND recorded_at >= $2::timestamptz
            AND recorded_at < $3::timestamptz
-           AND ($6::text IS NULL OR user_id = $6)
+           AND (cardinality($6::text[]) = 0 OR user_id = ANY($6::text[]))
            AND ($7::text IS NULL OR model_id = $7)
          GROUP BY user_id, model_id, bucket_start
       )
@@ -342,7 +351,7 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
          WHERE tenant_id = $1
            AND COALESCE(finished_at, prepared_at) >= $2::timestamptz
            AND COALESCE(finished_at, prepared_at) < $3::timestamptz
-           AND ($4::text IS NULL OR user_id = $4)
+           AND (cardinality($4::text[]) = 0 OR user_id = ANY($4::text[]))
            AND ($5::text IS NULL OR model_id = $5)
       ),
       touched_tasks AS (
@@ -351,7 +360,7 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
          WHERE tenant_id = $1
            AND recorded_at >= $2::timestamptz
            AND recorded_at < $3::timestamptz
-           AND ($4::text IS NULL OR user_id = $4)
+           AND (cardinality($4::text[]) = 0 OR user_id = ANY($4::text[]))
            AND ($5::text IS NULL OR model_id = $5)
       ),
       attempt_totals AS (
@@ -405,7 +414,7 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
            AND invocation.status = 'COMPLETED'
            AND invocation.finished_at >= $2::timestamptz
            AND invocation.finished_at < $3::timestamptz
-           AND ($4::text IS NULL OR invocation.user_id = $4)
+           AND (cardinality($4::text[]) = 0 OR invocation.user_id = ANY($4::text[]))
            AND ($5::text IS NULL OR invocation.model_id = $5)
            AND attempt.provider_response_id IS NULL
       ),
@@ -421,7 +430,7 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
          WHERE attempt.tenant_id = $1
            AND attempt.recorded_at >= $2::timestamptz
            AND attempt.recorded_at < $3::timestamptz
-           AND ($4::text IS NULL OR attempt.user_id = $4)
+           AND (cardinality($4::text[]) = 0 OR attempt.user_id = ANY($4::text[]))
            AND ($5::text IS NULL OR attempt.model_id = $5)
            AND invocation.invocation_id IS NULL
       )
@@ -434,7 +443,7 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
         FROM distinct_tasks, task_mismatches, completed_without_usage,
              usage_without_invocation
     `,
-      [tenantId, query.from, query.to, query.userId ?? null, query.modelId ?? null]
+      [tenantId, query.from, query.to, query.userIds ?? [], query.modelId ?? null]
     );
     const check = reconciled.rows[0];
     if (!check) throw new Error('Usage reconciliation was unavailable');
@@ -525,7 +534,7 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
        WHERE tenant_id = $1
          AND event_at >= $2::timestamptz
          AND event_at < $3::timestamptz
-         AND ($4::text IS NULL OR user_id = $4)
+         AND (cardinality($4::text[]) = 0 OR user_id = ANY($4::text[]))
          AND ($5::text IS NULL OR model_id = $5)
          AND (
            $6::timestamptz IS NULL OR
@@ -539,7 +548,7 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
         tenantId,
         query.from,
         query.to,
-        query.userId ?? null,
+        query.userIds ?? [],
         query.modelId ?? null,
         cursorAt,
         cursorKind,

@@ -95,28 +95,23 @@ jobs:
             pnpm-lock.yaml
             packages/dsh-plugin-*/pnpm-lock.yaml
             packages/dsh/profile/plugins/emate-shell/pnpm-lock.yaml
-            enterprise/pnpm-lock.yaml
             upstream/deepseek-harness/pnpm-lock.yaml
 
       - name: Install exact workspaces
         run: |
           pnpm install --frozen-lockfile
-          pnpm --dir enterprise install --frozen-lockfile
           pnpm --dir upstream/deepseek-harness install --frozen-lockfile
 
       - name: Build pinned DeepSeek Harness
-        run: pnpm --dir upstream/deepseek-harness run build
+        run: pnpm build:harness
 
       - name: Check target pin and e-Mate behavior
         run: |
           pnpm check:target
           pnpm test
-          pnpm enterprise:check
-          pnpm enterprise:test
-          pnpm enterprise:build
 
       - name: Check release carrier
-        run: node --test scripts/release.test.mjs
+        run: pnpm test:release
 
       - name: Resolve the immutable Base SDK cache key
         id: base-sdk-key
@@ -435,16 +430,11 @@ jobs:
         working-directory: desktop
         run: yarn install --immutable
 
-      - name: Fetch all currently accepted signed desired states
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p dist/profile-current
-          for target in darwin-arm64 darwin-x64 win32-x64; do
-            curl --fail --silent --show-error --max-redirs 0 --proto '=https' --tlsv1.2 --max-filesize 1048576 \
-              --output "dist/profile-current/$target.json" \
-              "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/desired-state/$target.json"
-          done
+      - name: Materialize the Cloudflare plugin desired-state snapshot
+        run: >-
+          node scripts/publish-profile-r2.mjs
+          --snapshot artifacts/release/profile-current-snapshot.json
+          --materialize-current dist/profile-current
 
       - name: Compose every target and boot the portable graph once
         shell: bash
@@ -589,16 +579,11 @@ jobs:
         working-directory: desktop
         run: yarn install --immutable
 
-      - name: Fetch the currently accepted signed desired state
-        shell: bash
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist/profile-current
-          curl --fail --silent --show-error --max-redirs 0 --proto '=https' --tlsv1.2 --max-filesize 1048576 \
-            --output "dist/profile-current/$TARGET.json" \
-            "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/desired-state/$TARGET.json"
+      - name: Materialize the Cloudflare plugin desired-state snapshot
+        run: >-
+          node scripts/publish-profile-r2.mjs
+          --snapshot artifacts/release/profile-current-snapshot.json
+          --materialize-current dist/profile-current
 
       - name: Compose and boot the complete candidate generation
         shell: bash
@@ -639,7 +624,7 @@ jobs:
           retention-days: 7
 
   enterprise:
-    name: Enterprise-only contracts
+    name: Enterprise contracts
     needs: impact
     if: needs.impact.outputs.run_enterprise == 'true'
     runs-on: ubuntu-24.04
@@ -689,6 +674,15 @@ jobs:
         with:
           name: e-mate-desktop-profile-${{ github.sha }}
           path: packages
+
+      - name: Restore the exact Base SDK built by the source gate
+        uses: actions/download-artifact@v4
+        with:
+          name: e-mate-base-sdk-${{ needs.impact.outputs.head_sha }}
+          path: .release-cache/base-sdk
+
+      - name: Install and verify the exact Base SDK
+        run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
 
       - name: Prepare the exact offline Windows Vision runtime
         run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets win32-x64
@@ -756,6 +750,15 @@ jobs:
           name: e-mate-desktop-profile-${{ github.sha }}
           path: packages
 
+      - name: Restore the exact Base SDK built by the source gate
+        uses: actions/download-artifact@v4
+        with:
+          name: e-mate-base-sdk-${{ needs.impact.outputs.head_sha }}
+          path: .release-cache/base-sdk
+
+      - name: Install and verify the exact Base SDK
+        run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
+
       - name: Prepare the exact offline universal macOS Vision runtime
         run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets darwin-arm64,darwin-x64
 
@@ -809,12 +812,18 @@ jobs:
           PROFILE: ${{ needs.profile-composition.result }}
           PUBLISH_COMPONENTS: ${{ needs.impact.outputs.publish_components_json }}
           PORTABLE_PUBLISH: ${{ needs.impact.outputs.portable_publish }}
+          RUN_ENTERPRISE: ${{ needs.impact.outputs.run_enterprise }}
           ENTERPRISE: ${{ needs.enterprise.result }}
           WINDOWS: ${{ needs.desktop-windows.result }}
           MACOS: ${{ needs.desktop-macos.result }}
         run: |
           set -euo pipefail
           test "$IMPACT" = success
+          case "$RUN_ENTERPRISE" in
+            true) test "$ENTERPRISE" = success ;;
+            false) test "$ENTERPRISE" = skipped ;;
+            *) exit 1 ;;
+          esac
           case "$LANE" in
             base)
               test "$SOURCE" = success
@@ -824,7 +833,6 @@ jobs:
               test "$PLUGINS" = skipped
               test "$PROFILE_PORTABLE" = skipped
               test "$PROFILE" = skipped
-              test "$ENTERPRISE" = skipped
               ;;
             plugin-only)
               test "$PLUGINS" = success
@@ -839,13 +847,11 @@ jobs:
                 test "$PROFILE" = success
               fi
               test "$SOURCE" = skipped
-              test "$ENTERPRISE" = skipped
               test "$WINDOWS" = skipped
               test "$MACOS" = skipped
               test "$BASE_PLATFORM_COMPONENTS" = skipped
               ;;
             enterprise-only)
-              test "$ENTERPRISE" = success
               test "$SOURCE" = skipped
               test "$PLUGINS" = skipped
               test "$PROFILE_PORTABLE" = skipped
@@ -859,7 +865,6 @@ jobs:
               test "$PLUGINS" = skipped
               test "$PROFILE_PORTABLE" = skipped
               test "$PROFILE" = skipped
-              test "$ENTERPRISE" = skipped
               test "$WINDOWS" = skipped
               test "$MACOS" = skipped
               test "$BASE_PLATFORM_COMPONENTS" = skipped

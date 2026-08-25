@@ -111,7 +111,7 @@ export class PostgresTenantModelRoutePolicy implements TenantModelRoutePolicy {
          WHERE key.token_hash = $1
            AND key.revoked_at IS NULL
            AND key.principal_type = 'USER'
-           AND 'models:invoke' = ANY(key.scopes)
+           AND key.scopes = ARRAY['models:invoke']::text[]
            AND app_user.tenant_id = key.tenant_id
            AND app_user.user_id = key.user_id
            AND app_user.status = 'ACTIVE'

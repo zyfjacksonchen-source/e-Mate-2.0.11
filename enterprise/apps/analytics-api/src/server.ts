@@ -8,12 +8,7 @@ import {
 } from '@e-mate/observability-policy-contract';
 import { parseRuntimeRegistryHeartbeat, type RuntimeRegistryHeartbeat } from '@e-mate/runtime-registry-contract';
 import { parseSessionSummarySearchResult, parseSessionSummaryWrite } from '@e-mate/session-index-contract';
-import {
-  parseMonitoringPeriod,
-  parseTaskEventInput,
-  type MonitoringPeriod,
-  type TaskEventInput,
-} from '@e-mate/monitoring-contract';
+import { parseMonitoringPeriod, type MonitoringPeriod } from '@e-mate/monitoring-contract';
 import {
   parseAdminApiKeyCreate,
   parseAdminConsentQuery,
@@ -32,7 +27,7 @@ import type { ObservabilityPolicyMutationResult, ObservabilityPolicyStore } from
 import type { SessionSummaryStore } from './session-index.ts';
 import type { PlatformMonitoringReader } from './prometheus-monitoring.ts';
 import type { UsageAnalyticsQuery, UsageAnalyticsReader } from './usage-analytics.ts';
-import type { TaskEventQuery, TaskEventStore, TaskEventWriteResult } from './task-events.ts';
+import type { TaskEventQuery, TaskEventStore } from './task-events.ts';
 
 const maxBodyBytes = 64 * 1024;
 const statusRoles = new Set(['SUPER_ADMIN', 'TENANT_ADMIN', 'AUDIT_ADMIN']);
@@ -40,7 +35,6 @@ const policyWriteRoles = new Set(['SUPER_ADMIN', 'TENANT_ADMIN']);
 const platformMonitoringRoles = new Set(['SUPER_ADMIN']);
 const usageRoles = new Set(['SUPER_ADMIN', 'TENANT_ADMIN', 'AUDIT_ADMIN']);
 const managementRoles = new Set(['SUPER_ADMIN', 'TENANT_ADMIN']);
-const taskEventWriteScope = 'task-events:write';
 
 export type AuthenticateBearer = (bearer: string) => Promise<RuntimeRegistryPrincipal | null>;
 
@@ -195,12 +189,6 @@ function requireRole(identity: RuntimeRegistryPrincipal, roles: ReadonlySet<stri
   }
 }
 
-function requireScope(identity: RuntimeRegistryPrincipal, scope: string): void {
-  if (!identity.scopes?.includes(scope)) {
-    throw new HttpError(403, 'ACCESS_DENIED', 'Access denied');
-  }
-}
-
 function requireEnterprisePrincipal(identity: RuntimeRegistryPrincipal): void {
   if (identity.scopes?.length) {
     throw new HttpError(403, 'ACCESS_DENIED', 'Access denied');
@@ -303,7 +291,8 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
   ]);
   if (
     [...url.searchParams.keys()].some((key) => !allowed.has(key)) ||
-    [...allowed].some((key) => url.searchParams.getAll(key).length > 1)
+    ['from', 'to', 'timezone', 'bucket', 'modelId', ...(events ? ['cursor', 'limit'] : [])]
+      .some((key) => url.searchParams.getAll(key).length > 1)
   ) {
     throw new HttpError(400, 'INVALID_USAGE_QUERY', 'Invalid usage query');
   }
@@ -311,7 +300,7 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
   const to = url.searchParams.get('to');
   const timezone = url.searchParams.get('timezone') ?? 'UTC';
   const bucket = url.searchParams.get('bucket') ?? 'DAY';
-  const userId = url.searchParams.get('userId');
+  const userIds = url.searchParams.getAll('userId');
   const modelId = url.searchParams.get('modelId');
   if (
     !from ||
@@ -322,7 +311,9 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
     timezone.length < 1 ||
     timezone.length > 64 ||
     /\p{Cc}/u.test(timezone) ||
-    (userId !== null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId)) ||
+    userIds.length > 100 ||
+    new Set(userIds).size !== userIds.length ||
+    userIds.some((userId) => !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId)) ||
     (modelId !== null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(modelId))
   ) {
     throw new HttpError(400, 'INVALID_USAGE_QUERY', 'Invalid usage query');
@@ -344,29 +335,35 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
     to,
     timezone,
     bucket: bucket as UsageAnalyticsQuery['bucket'],
-    ...(userId ? { userId } : {}),
+    ...(userIds.length ? { userIds } : {}),
     ...(modelId ? { modelId } : {}),
   };
 }
 
 function taskEventQuery(url: URL): TaskEventQuery {
-  const allowed = new Set(['from', 'to', 'userId']);
+  const allowed = new Set(['from', 'to', 'timezone', 'userId']);
   if (
     [...url.searchParams.keys()].some((key) => !allowed.has(key)) ||
     ['from', 'to'].some((key) => url.searchParams.getAll(key).length !== 1) ||
-    url.searchParams.getAll('userId').length > 1
+    url.searchParams.getAll('timezone').length > 1 ||
+    url.searchParams.getAll('userId').length > 100
   ) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
   }
   const from = url.searchParams.get('from');
   const to = url.searchParams.get('to');
-  const userId = url.searchParams.get('userId');
+  const timezone = url.searchParams.get('timezone') ?? 'UTC';
+  const userIds = url.searchParams.getAll('userId');
   if (
     !from ||
     !to ||
     !isIsoTimestamp(from) ||
     !isIsoTimestamp(to) ||
-    (userId !== null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId))
+    timezone.length < 1 ||
+    timezone.length > 64 ||
+    /\p{Cc}/u.test(timezone) ||
+    new Set(userIds).size !== userIds.length ||
+    userIds.some((userId) => !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId))
   ) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
   }
@@ -374,7 +371,14 @@ function taskEventQuery(url: URL): TaskEventQuery {
   if (duration <= 0 || duration > 366 * 86_400_000 || Date.parse(to) > Date.now()) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
   }
-  return { from, to, ...(userId ? { userId } : {}) };
+  try {
+    if (!new Intl.DateTimeFormat('en-US', { timeZone: timezone }).resolvedOptions().timeZone) {
+      throw new Error('Invalid timezone');
+    }
+  } catch {
+    throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
+  }
+  return { from, to, timezone, ...(userIds.length ? { userIds } : {}) };
 }
 
 function usageEventPage(url: URL): { cursor: string | null; limit: number } {
@@ -411,19 +415,6 @@ function usageEventPage(url: URL): { cursor: string | null; limit: number } {
     throw new HttpError(400, 'INVALID_USAGE_QUERY', 'Invalid usage query');
   }
   return { cursor, limit };
-}
-
-export function createManagementAuthenticator(
-  authenticate: AuthenticateBearer,
-  adminManagement: AdminManagementStore
-): AuthenticateBearer {
-  return async (bearer) => {
-    if (bearer.startsWith('emate_twe_')) {
-      const taskEventPrincipal = await adminManagement.authenticateTaskEventBearer(bearer);
-      if (taskEventPrincipal) return taskEventPrincipal;
-    }
-    return authenticate(bearer);
-  };
 }
 
 export function createAnalyticsHandler({
@@ -779,39 +770,6 @@ export function createAnalyticsHandler({
         } catch {
           throw new HttpError(503, 'MONITORING_UNAVAILABLE', 'Platform monitoring temporarily unavailable');
         }
-        return;
-      }
-      if (url.pathname === '/v1/tasks/events') {
-        rejectQuery(url);
-        if (request.method !== 'POST') {
-          methodNotAllowed(response, 'POST');
-          return;
-        }
-        const identity = await principal(request, authenticate);
-        requireScope(identity, taskEventWriteScope);
-        if (!taskEvents) {
-          throw new HttpError(503, 'TASK_EVENTS_UNAVAILABLE', 'Task events temporarily unavailable');
-        }
-        let event: TaskEventInput;
-        try {
-          event = parseTaskEventInput(await readJson(request));
-        } catch (error) {
-          if (error instanceof HttpError) throw error;
-          throw new HttpError(400, 'INVALID_TASK_EVENT', 'Invalid task event');
-        }
-        let result: TaskEventWriteResult;
-        try {
-          result = await taskEvents.append(identity, event);
-        } catch {
-          throw new HttpError(503, 'TASK_EVENTS_UNAVAILABLE', 'Task events temporarily unavailable');
-        }
-        if (result === 'CONFLICT') {
-          throw new HttpError(409, 'TASK_EVENT_CONFLICT', 'Task event conflicts with stored facts');
-        }
-        if (result === 'NOT_RECEIVED') {
-          throw new HttpError(409, 'TASK_NOT_RECEIVED', 'Task has not been received');
-        }
-        json(response, result === 'ACCEPTED' ? 202 : 200, { status: result });
         return;
       }
       if (url.pathname === '/v1/tasks/summary') {

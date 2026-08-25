@@ -60,6 +60,10 @@ describe('published package surface', () => {
       types: './lib/types/windows-pwsh-sandbox.d.ts',
       default: './lib/windows-pwsh-sandbox.js',
     })
+    expect(manifest.exports).toHaveProperty('./windows-directory-picker', {
+      types: './lib/types/windows-directory-picker.d.ts',
+      default: './lib/windows-directory-picker.js',
+    })
     expect(manifest.exports).toHaveProperty('./terminal', {
       types: './lib/types/terminal.d.ts',
       default: './lib/terminal.js',
@@ -143,6 +147,7 @@ describe('published package surface', () => {
     const config = readFileSync(new URL('tsdown.config.ts', packageRoot), 'utf8')
 
     expect(config).toContain("'windows-pwsh-sandbox': 'src/windows-pwsh-sandbox.ts'")
+    expect(config).toContain("'windows-directory-picker': 'src/windows-directory-picker.ts'")
     expect(config).toContain("'windows-acl-runner': 'src/windows-acl-runner.ts'")
     expect(config).toContain("'desktop-cli': 'src/desktop-cli.ts'")
     expect(config).toContain("'desktop-runtime-environment': 'src/desktop-runtime-environment.ts'")
@@ -181,7 +186,7 @@ describe('published package surface', () => {
     const electronReady = main.indexOf('await app.whenReady()')
     const nativeReadyAck = main.indexOf("'.release-native-ready-ack'")
     const releaseAck = main.indexOf("'.release-health-ack'")
-    const profileCleanup = main.indexOf('deferredProfileCleanup.map')
+    const profileCleanup = main.indexOf('for (const path of deferredProfileCleanup)')
     const cleanup = main.indexOf('const cleanup = app.isPackaged')
 
     expect(recover).toBeGreaterThanOrEqual(0)
@@ -263,6 +268,7 @@ describe('published package surface', () => {
     expect(manifest.build?.files).toEqual([
       'base-contract.json',
       'build/e-mate-profile/**',
+      'build/harness-runtime-provenance.json',
       'build/app-icon.png',
       'build/app-icon-mac.png',
       'build/tray-icon.svg',
@@ -316,11 +322,20 @@ describe('published package surface', () => {
     expect(manifest.scripts?.['dist:win']).toBe('node scripts/package-win.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run build')
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run typecheck')
+    expect(manifest.scripts?.['check:win-package']).toContain('tests/e-mate-profile-win.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).toContain('tests/electron-runtime.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/package-win.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).toContain('tests/plugin.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).toContain('tests/profile.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/update-checker.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/update-download.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-directory-picker.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-update-installer.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-update-transaction.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).toContain('yarn run test:windows-update-transaction')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-volume-diagnostics.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run verify:closure')
+    expect(manifest.scripts?.['test:windows-update-transaction']).toContain('-Operation SelfTest')
     expect(manifest.scripts?.['verify:cli']).toBe('node scripts/verify-cli-runtime.mjs')
     expect(manifest.scripts?.check).toContain('yarn run verify:cli')
     expect(workspaceManifest.scripts?.['dist:mac']).toBe('yarn workspace @e-mate/desktop dist:mac')
@@ -448,7 +463,7 @@ describe('published package surface', () => {
     expect(lockfile).not.toContain('dsh-better-sidebar@')
   })
 
-  it('resolves electron-builder through the pinned app-builder-lib keychain patch', () => {
+  it('resolves electron-builder through the one pinned app-builder-lib patch chain', () => {
     const patchResolution = 'patch:app-builder-lib@npm%3A26.15.3#./patches/app-builder-lib@26.15.3.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
     const patch = readFileSync(new URL('patches/app-builder-lib@26.15.3.patch', workspaceRoot), 'utf8')
@@ -457,6 +472,10 @@ describe('published package surface', () => {
     const electronBuilderRequire = createRequire(electronBuilderManifest)
     const appBuilderManifest = electronBuilderRequire.resolve('app-builder-lib/package.json')
     const installedCodeSign = readFileSync(join(dirname(appBuilderManifest), 'out/codeSign/macCodeSign.js'), 'utf8')
+    const installedInstallSection = readFileSync(
+      join(dirname(appBuilderManifest), 'templates/nsis/installSection.nsh'),
+      'utf8',
+    )
 
     expect(workspaceManifest.resolutions).toMatchObject({
       'app-builder-lib@npm:26.15.3': patchResolution,
@@ -466,6 +485,18 @@ describe('published package surface', () => {
     expect(patch).toContain('"-k", keychainPassword, keychainFile')
     expect(installedCodeSign).toContain('importCerts(keychainFile, certPaths, cscPasswords, keychainPassword)')
     expect(installedCodeSign).toContain('"-k", keychainPassword, keychainFile')
+    expect(patch).toContain('diff --git a/templates/nsis/installSection.nsh b/templates/nsis/installSection.nsh')
+    expect(installedInstallSection).toContain('!ifmacrodef customUpdateInstallShouldRun')
+    expect(installedInstallSection).toContain('$R7 == "true"')
+    expect(installedInstallSection).toContain('Goto appBuilderInstallSectionDone')
+    expect(installedInstallSection.indexOf('!insertmacro customUpdateInstallPrepare'))
+      .toBeGreaterThan(installedInstallSection.lastIndexOf('!insertmacro CHECK_APP_RUNNING'))
+    expect(installedInstallSection.indexOf('!insertmacro customUpdateInstallApply'))
+      .toBeGreaterThan(installedInstallSection.indexOf('!insertmacro installApplicationFiles'))
+    expect(installedInstallSection).toContain('!insertmacro uninstallOldVersion SHELL_CONTEXT')
+    expect(installedInstallSection.match(/!insertmacro installApplicationFiles/gu)).toHaveLength(1)
+    expect(installedInstallSection.match(/!insertmacro registryAddInstallInfo/gu)).toHaveLength(1)
+    expect(installedInstallSection).toContain('!ifmacrodef customInstall')
   })
 
   it('starts restricted Windows shells with a hidden console show state', () => {
@@ -498,17 +529,15 @@ describe('published package surface', () => {
   })
 
   it('ignores redundant shell escalation metadata under the current policy', () => {
-    const bashPatch = 'patch:@deepseek-ai/dsh-tool-bash@npm%3A0.1.0-rc.7#~/.yarn/patches/@deepseek-ai-dsh-tool-bash-npm-0.1.0-rc.7-b4db1f9f9e.patch'
-    const pwshPatch = 'patch:@deepseek-ai/dsh-tool-pwsh@npm%3A0.1.0-rc.7#~/.yarn/patches/@deepseek-ai-dsh-tool-pwsh-npm-0.1.0-rc.7-5c1a523622.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
     const workspaceRequire = createRequire(new URL('package.json', packageRoot))
 
-    expect(workspaceManifest.resolutions).toMatchObject({
-      '@deepseek-ai/dsh-tool-bash@npm:^0.1.0-rc.7': bashPatch,
-      '@deepseek-ai/dsh-tool-pwsh@npm:^0.1.0-rc.7': pwshPatch,
-    })
-    expect(lockfile).toContain('@deepseek-ai/dsh-tool-bash@patch:@deepseek-ai/dsh-tool-bash@npm%3A0.1.0-rc.7#~/.yarn/patches/')
-    expect(lockfile).toContain('@deepseek-ai/dsh-tool-pwsh@patch:@deepseek-ai/dsh-tool-pwsh@npm%3A0.1.0-rc.7#~/.yarn/patches/')
+    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-tool-bash@npm:^0.1.0-rc.7'])
+      .toBe('npm:0.1.0-rc.7')
+    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-tool-pwsh@npm:^0.1.0-rc.7'])
+      .toBe('npm:0.1.0-rc.7')
+    expect(lockfile).not.toContain('@deepseek-ai/dsh-tool-bash@patch:')
+    expect(lockfile).not.toContain('@deepseek-ai/dsh-tool-pwsh@patch:')
     for (const packageName of ['@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tool-pwsh']) {
       const packageManifest = workspaceRequire.resolve(`${packageName}/package.json`)
       const installed = readFileSync(join(dirname(packageManifest), 'lib/index.js'), 'utf8')
@@ -533,19 +562,15 @@ describe('published package surface', () => {
     expect(installed).toContain('args.justification === void 0 || redundantEscalation')
   })
 
-  it('packages the native Session envelope and exact legacy image reader', () => {
-    const sessionPatch = '@deepseek-ai-dsh-session-npm-0.1.0-rc.7-ignorable.patch'
-    const persistencePatch = '@deepseek-ai-dsh-session-persistence-npm-0.1.0-rc.7-emate-image.patch'
+  it('packages the native Session envelope and fail-closed reader without overlays', () => {
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
 
-    expect(workspaceManifest.resolutions).toMatchObject({
-      '@deepseek-ai/dsh-session@npm:0.1.0-rc.7': expect.stringContaining(sessionPatch),
-      '@deepseek-ai/dsh-session@npm:^0.1.0-rc.7': expect.stringContaining(sessionPatch),
-      '@deepseek-ai/dsh-session-persistence@npm:0.1.0-rc.7': expect.stringContaining(persistencePatch),
-      '@deepseek-ai/dsh-session-persistence@npm:^0.1.0-rc.7': expect.stringContaining(persistencePatch),
-    })
-    expect(lockfile).toContain('@deepseek-ai/dsh-session@patch:@deepseek-ai/dsh-session@npm%3A0.1.0-rc.7#~/.yarn/patches/')
-    expect(lockfile).toContain('@deepseek-ai/dsh-session-persistence@patch:@deepseek-ai/dsh-session-persistence@npm%3A0.1.0-rc.7#~/.yarn/patches/')
+    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-session@npm:^0.1.0-rc.7'])
+      .toBe('npm:0.1.0-rc.7')
+    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-session-persistence@npm:^0.1.0-rc.7'])
+      .toBe('npm:0.1.0-rc.7')
+    expect(lockfile).not.toContain('@deepseek-ai/dsh-session@patch:')
+    expect(lockfile).not.toContain('@deepseek-ai/dsh-session-persistence@patch:')
 
     const session = Session.create('session-desktop-package-test' as never)
     const append = session.append as unknown as (
@@ -558,17 +583,17 @@ describe('published package surface', () => {
 
     type EventValidator = {
       backend: { locate: () => undefined }
-      assertEventsSupported(meta: { id: string }, events: readonly { type: string; seq: number }[]): void
+      assertEventsSupported(meta: { id: string }, events: readonly { type: string; seq: number; ignorable?: true }[]): void
     }
     const validator = Object.create(PersistenceCoordinator.prototype) as EventValidator
     validator.backend = { locate: () => undefined }
     expect(() => validator.assertEventsSupported(
       { id: 'session-desktop-package-test' },
-      [{ type: 'emate/image-output', seq: 105 }],
+      [{ type: 'emate/image-output', seq: 105, ignorable: true }],
     )).not.toThrow()
     expect(() => validator.assertEventsSupported(
       { id: 'session-desktop-package-test' },
-      [{ type: 'future/required-event', seq: 106 }],
-    )).toThrow(/future\/required-event/u)
+      [{ type: 'emate/image-output', seq: 106 }],
+    )).toThrow(/emate\/image-output/u)
   })
 })

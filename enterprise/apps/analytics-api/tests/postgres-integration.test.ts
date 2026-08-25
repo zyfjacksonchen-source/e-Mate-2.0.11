@@ -6,7 +6,6 @@ import { verifyPassword, type ScryptVerifier } from '@e-mate/auth-credential';
 import { AdminManagementError, openPostgresAdminManagementStore } from '../src/admin-management.ts';
 import { openPostgresObservabilityPolicyStore } from '../src/observability-policy.ts';
 import { openPostgresSessionSummaryStore } from '../src/session-index.ts';
-import { openPostgresTaskEventStore } from '../src/task-events.ts';
 
 const postgresUrl = process.env.E_MATE_TEST_POSTGRES_URL;
 
@@ -260,84 +259,6 @@ test(
 );
 
 test(
-  'real PostgreSQL keeps task outcomes explicit, idempotent and tenant-isolated',
-  {
-    skip: postgresUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set',
-  },
-  async () => {
-    const { store, close } = await openPostgresTaskEventStore(postgresUrl as string);
-    const run = randomUUID();
-    const tenantId = `tenant-task-${run}`;
-    const otherTenantId = `tenant-task-other-${run}`;
-    const taskId = `task-${run}`;
-    const user = { tenantId, userId: 'user-1', roles: [] };
-    const otherTenantUser = { ...user, tenantId: otherTenantId };
-    const receivedAt = new Date(Date.now() - 120_000).toISOString();
-    const failedAt = new Date(Date.now() - 60_000).toISOString();
-    const event = {
-      schemaVersion: 1 as const,
-      eventId: `received-${run}`,
-      taskId,
-      type: 'RECEIVED' as const,
-      scenario: 'CONTENT_CREATION' as const,
-      occurredAt: receivedAt,
-    };
-    const cleanup = new Pool({ connectionString: postgresUrl as string });
-    try {
-      assert.equal(await store.append(user, event), 'ACCEPTED');
-      assert.equal(await store.append(user, event), 'REPLAY');
-      assert.equal(await store.append(otherTenantUser, event), 'ACCEPTED');
-      assert.equal(
-        await store.append(user, {
-          ...event,
-          eventId: `failed-${run}`,
-          type: 'FAILED',
-          occurredAt: failedAt,
-        }),
-        'ACCEPTED'
-      );
-      assert.equal(
-        await store.append(user, {
-          ...event,
-          eventId: `completed-${run}`,
-          type: 'COMPLETED',
-          occurredAt: new Date().toISOString(),
-        }),
-        'CONFLICT'
-      );
-      const summary = await store.summary(user, {
-        from: new Date(Date.now() - 180_000).toISOString(),
-        to: new Date().toISOString(),
-      });
-      assert.deepEqual(summary.summary, {
-        receivedTasks: '1',
-        successfulTasks: '0',
-        failedTasks: '1',
-        cancelledTasks: '0',
-      });
-      assert.equal(
-        (
-          await store.summary(otherTenantUser, {
-            from: new Date(Date.now() - 180_000).toISOString(),
-            to: new Date().toISOString(),
-          })
-        ).summary.failedTasks,
-        '0'
-      );
-    } finally {
-      await close();
-      await cleanup
-        .query('DELETE FROM e_mate_task_event WHERE tenant_id = ANY($1)', [[tenantId, otherTenantId]])
-        .catch(() => undefined);
-      await cleanup
-        .query('DELETE FROM e_mate_task_fact WHERE tenant_id = ANY($1)', [[tenantId, otherTenantId]])
-        .catch(() => undefined);
-      await cleanup.end();
-    }
-  }
-);
-
-test(
   'real PostgreSQL provisions login credentials and revokes every session on password reset',
   {
     skip: postgresUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set',
@@ -479,13 +400,13 @@ test(
         allowedModelIds: ['gpt-5.6-sol'],
         initialPassword: 'InitialPass-2026!',
       });
-      const issued = await store.issueApiKey(admin, {
+      await store.issueApiKey(admin, {
         schemaVersion: 1,
         label: 'Desktop',
         principalType: 'USER',
         principalId: userId,
         userId,
-        scopes: ['task-events:write', 'models:invoke'],
+        scopes: ['models:invoke'],
       });
 
       const deletion = { schemaVersion: 1 as const, expectedUpdatedAt: created.updatedAt };
@@ -494,7 +415,6 @@ test(
       assert.equal((await store.listUsers(admin)).users[0]?.status, 'DELETED');
       assert.equal((await store.listUsers(admin)).users[0]?.tokenLimit, 50_000);
       assert.equal((await store.listApiKeys(admin)).keys[0]?.revokedAt !== null, true);
-      assert.equal(await store.authenticateTaskEventBearer(issued.secret), null);
       assert.equal(
         (
           await cleanup.query<{ count: string }>(

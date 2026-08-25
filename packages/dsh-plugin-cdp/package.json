@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-cdp",
-  "version": "2.0.12",
+  "version": "2.0.13",
   "description": "DSH-native Chrome DevTools Protocol adapter for e-Mate",
   "type": "module",
   "main": "lib/index.mjs",
@@ -62,9 +62,9 @@
         "effects": ["browser-control", "browser-read", "network-loopback", "subprocess"],
         "guards": ["explicit-user-action", "fixed-endpoint", "native-approval", "native-user-question", "plugin-settings-grant", "session-scope"]
       },
-      "base_contracts": ["e-mate-desktop-profile-v6-dsh-2bc16230975f"]
+      "base_contracts": ["e-mate-desktop-profile-v7-dsh-b2b1650b01f0"]
     },
     "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "2bc16230975f6cf02aa1b283b1f86de44007b059"
+    "harnessCommit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606"
   }
 }

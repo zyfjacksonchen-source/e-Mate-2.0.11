@@ -1,6 +1,6 @@
 import { Alert, Button, Drawer, Empty, Input, Link, Select, Spin, Tag } from '@arco-design/web-react';
 import { ChartHistogram, ChartLine, CheckOne, Home, Refresh, UserBusiness } from '@icon-park/react';
-import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
+import { Fragment, type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { TaskEventType, TaskScenario, TenantUsageEvent } from '@e-mate/monitoring-contract';
 import eMateLogo from '../../../../upstream/e-mate-2.0.5/desktop/src/v1/assets/emate-logo.png';
 import {
@@ -8,8 +8,10 @@ import {
   loadUsageEvents,
   loginUsageAccount,
   logoutUsageAccount,
+  queryForDateRange,
+  queryForDay,
   queryForPeriod,
-  queryForRange,
+  queryForYesterday,
   refreshUsageAccount,
   UsageApiError,
   type UsageAuthSession,
@@ -26,17 +28,32 @@ import {
   hasUsageFacts,
   percentage,
   usageModels,
+  usageDetails,
   usageTrend,
+  usageUserTrend,
   usageUsers,
 } from './usage-data';
 
 const TOKEN_SESSION_KEY = 'e-mate.usage.access-token';
 const REFRESH_TOKEN_SESSION_KEY = 'e-mate.usage.refresh-token';
 const periodOptions = [7, 30, 90] as const;
-const ALL_USERS = '__all__';
+const usageColumnKeys = [
+  'user', 'model', 'status', 'events', 'requests', 'input', 'output', 'cache', 'tokens', 'quota', 'cost',
+] as const;
+type UsageColumn = (typeof usageColumnKeys)[number];
+type ChartMetric = 'activity' | 'requests' | 'tokens';
+const scenarioColors: Record<TaskScenario, string> = {
+  GENERAL: '#8b8b84',
+  CONTENT_CREATION: '#ef6c24',
+  DOCUMENT_EDITING: '#4d7cff',
+  SYSTEM_MAINTENANCE: '#8b5cf6',
+  ASSET_PRODUCTION: '#e8a317',
+  DATA_PROCESSING: '#16a085',
+  SEARCH_QUERY: '#d44f73',
+};
 
-function localDateTime(value: Date): string {
-  return new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+function localDate(value: Date): string {
+  return new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 }
 
 function clearUsageSession() {
@@ -54,6 +71,8 @@ type EventState =
   | { kind: 'loading'; events: TenantUsageEvent[] }
   | { kind: 'ready'; events: TenantUsageEvent[]; nextCursor: string | null }
   | { kind: 'error'; events: TenantUsageEvent[] };
+
+type DayDetailState = { kind: 'idle' } | DashboardState;
 
 function MetricCard({
   label,
@@ -117,21 +136,27 @@ export function App() {
   const [password, setPassword] = useState('');
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [loginBusy, setLoginBusy] = useState(false);
-  const [period, setPeriod] = useState<(typeof periodOptions)[number] | 'custom'>(7);
+  const [period, setPeriod] = useState<(typeof periodOptions)[number] | 'yesterday' | 'custom'>(7);
   const [range, setRange] = useState<UsageQuery>(() => queryForPeriod(7));
-  const [customFrom, setCustomFrom] = useState(() => localDateTime(new Date(Date.now() - 7 * 86_400_000)));
-  const [customTo, setCustomTo] = useState(() => localDateTime(new Date()));
+  const [customFrom, setCustomFrom] = useState(() => localDate(new Date(Date.now() - 6 * 86_400_000)));
+  const [customTo, setCustomTo] = useState(() => localDate(new Date()));
   const [rangeError, setRangeError] = useState<string | null>(null);
-  const [selectedUserId, setSelectedUserId] = useState('');
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [knownUsers, setKnownUsers] = useState<Array<{ userId: string; displayName: string }>>([]);
+  const [chartMetric, setChartMetric] = useState<ChartMetric>('activity');
+  const [usageColumns, setUsageColumns] = useState<UsageColumn[]>(() => [...usageColumnKeys]);
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
   );
   const [reloadKey, setReloadKey] = useState(0);
   const [dashboard, setDashboard] = useState<DashboardState>({ kind: 'loading' });
+  const [selectedDayQuery, setSelectedDayQuery] = useState<UsageQuery | null>(null);
+  const [dayDetail, setDayDetail] = useState<DayDetailState>({ kind: 'idle' });
   const [eventsOpen, setEventsOpen] = useState(false);
   const [eventState, setEventState] = useState<EventState>({ kind: 'idle', events: [] });
   const pendingRefresh = useRef<Promise<UsageAuthSession> | null>(null);
+  const customFromInput = useRef<HTMLInputElement>(null);
+  const customToInput = useRef<HTMLInputElement>(null);
   const authBase = import.meta.env.VITE_AUTH_API_BASE as string | undefined;
   const authClientId = (import.meta.env.VITE_AUTH_CLIENT_ID as string | undefined) ?? 'e-mate-admin';
 
@@ -168,7 +193,7 @@ export function App() {
   useEffect(() => {
     if (!token) return;
     const controller = new AbortController();
-    const query = { ...range, ...(selectedUserId ? { userId: selectedUserId } : {}) };
+    const query = { ...range, ...(selectedUserIds.length ? { userIds: selectedUserIds } : {}) };
     setDashboard({ kind: 'loading' });
     void loadUsageDashboard(token, query, controller.signal)
       .then((data) => {
@@ -198,32 +223,63 @@ export function App() {
             clearUsageSession();
             setToken('');
             setKnownUsers([]);
-            setSelectedUserId('');
+            setSelectedUserIds([]);
             setTokenError(copy.authFailed);
           }
         }
         setDashboard({ kind: 'error', status });
       });
     return () => controller.abort();
-  }, [copy.authFailed, range.bucket, range.from, range.timezone, range.to, reloadKey, selectedUserId, token]);
+  }, [copy.authFailed, range.bucket, range.from, range.timezone, range.to, reloadKey, selectedUserIds, token]);
+
+  useEffect(() => {
+    if (!token || !selectedDayQuery) {
+      setDayDetail({ kind: 'idle' });
+      return;
+    }
+    const controller = new AbortController();
+    setDayDetail({ kind: 'loading' });
+    void loadUsageDashboard(token, selectedDayQuery, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) setDayDetail({ kind: 'ready', data });
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setDayDetail({ kind: 'error', status: error instanceof UsageApiError ? error.status : null });
+        }
+      });
+    return () => controller.abort();
+  }, [reloadKey, selectedDayQuery, token]);
 
   const resetEvents = () => {
     setEventsOpen(false);
     setEventState({ kind: 'idle', events: [] });
   };
 
-  const selectPeriod = (value: (typeof periodOptions)[number] | 'custom') => {
+  const resetDayDetail = () => {
+    setSelectedDayQuery(null);
+    setDayDetail({ kind: 'idle' });
+  };
+
+  const selectPeriod = (value: (typeof periodOptions)[number] | 'yesterday' | 'custom') => {
     setPeriod(value);
     setRangeError(null);
     resetEvents();
-    if (value !== 'custom') setRange(queryForPeriod(value));
+    resetDayDetail();
+    if (value === 'yesterday') setRange(queryForYesterday());
+    else if (value !== 'custom') setRange(queryForPeriod(value));
   };
 
   const applyCustomRange = () => {
+    const fromValue = customFromInput.current?.value ?? customFrom;
+    const toValue = customToInput.current?.value ?? customTo;
     try {
-      setRange(queryForRange(new Date(customFrom), new Date(customTo)));
+      setRange(queryForDateRange(fromValue, toValue));
+      setCustomFrom(fromValue);
+      setCustomTo(toValue);
       setRangeError(null);
       resetEvents();
+      resetDayDetail();
     } catch {
       setRangeError(copy.invalidRange);
     }
@@ -253,7 +309,7 @@ export function App() {
         sessionStorage.setItem(TOKEN_SESSION_KEY, session.accessToken);
         sessionStorage.setItem(REFRESH_TOKEN_SESSION_KEY, session.refreshToken);
         setKnownUsers([]);
-        setSelectedUserId('');
+        setSelectedUserIds([]);
         setToken(session.accessToken);
         setPassword('');
       })
@@ -268,7 +324,7 @@ export function App() {
     clearUsageSession();
     setToken('');
     setKnownUsers([]);
-    setSelectedUserId('');
+    setSelectedUserIds([]);
     if (!refreshToken) return;
     void logoutUsageAccount(
       {
@@ -339,8 +395,13 @@ export function App() {
   const reconciliation = ready?.reconciliation;
   const taskSummary = ready?.taskSummary;
   const trends = projection ? usageTrend(projection) : [];
+  const userTrends = projection ? usageUserTrend(projection) : [];
   const models = projection ? usageModels(projection) : [];
   const userUsage = projection ? usageUsers(projection) : [];
+  const displayNameByUserId = new Map(knownUsers.map(({ userId, displayName }) => [userId, displayName]));
+  const visibleAuditUserIds = ready?.users?.map(({ userId }) => userId) ?? [];
+  const scopedUserIds = selectedUserIds.length ? selectedUserIds : visibleAuditUserIds;
+  const selectedUserSet = new Set(selectedUserIds);
   const userUsageById = new Map(userUsage.map((entry) => [entry.userId, entry]));
   const userEventCountById = new Map(
     (taskSummary?.userEventCounts ?? []).map((entry) => [entry.userId, entry.eventCount])
@@ -397,8 +458,28 @@ export function App() {
             modelIds: [],
             metrics: emptyMetrics(),
           })),
-      ]).filter(({ userId }) => !selectedUserId || userId === selectedUserId);
+      ]).filter(({ userId }) => selectedUserSet.size === 0 || selectedUserSet.has(userId));
   const maximumRequests = maxCount(trends.map(({ metrics }) => metrics.totalRequests));
+  const maximumTokens = maxCount(trends.map(({ metrics }) => metrics.totalTokens));
+  const chartValue = (metrics: (typeof userTrends)[number]['metrics']) =>
+    chartMetric === 'requests' ? metrics.totalRequests : metrics.totalTokens;
+  const chartValueForUser = (row: (typeof userRows)[number]) =>
+    chartMetric === 'activity' ? row.eventCount : chartValue(row.metrics);
+  const chartUsers = userRows
+    .filter(
+      ({ eventCount, metrics }) =>
+        BigInt(eventCount) > 0n || BigInt(metrics.totalRequests) > 0n || BigInt(metrics.totalTokens) > 0n
+    )
+    .sort((left, right) => {
+      const difference = BigInt(chartValueForUser(right)) - BigInt(chartValueForUser(left));
+      return difference === 0n ? left.userId.localeCompare(right.userId) : difference > 0n ? 1 : -1;
+    });
+  const chartUserIds = new Set(chartUsers.map(({ userId }) => userId));
+  const visibleUserTrends = userTrends.filter(({ userId }) => chartUserIds.has(userId));
+  const userTrendByKey = new Map(visibleUserTrends.map((entry) => [`${entry.bucketStart}\0${entry.userId}`, entry]));
+  const maximumUserTrend = chartMetric === 'activity'
+    ? maxCount(chartUsers.map(({ eventCount }) => eventCount))
+    : maxCount(visibleUserTrends.map(({ metrics }) => chartValue(metrics)));
   const maximumModelCalls = maxCount(models.map(({ callCount }) => callCount));
   const taskSourceReady = taskSummary?.sourceState === 'AUTHORITATIVE';
   const usageSourceReady = projection ? hasUsageFacts(projection) : false;
@@ -421,7 +502,36 @@ export function App() {
     ? (BigInt(projection.summary.accountedRequests) + BigInt(projection.summary.rejectedRequests)).toString()
     : '0';
   const successRate = projection ? callSuccessRate(projection.summary) : null;
-  const activeUsers = projection ? new Set(projection.groups.map(({ userId }) => userId)).size.toString() : '0';
+  const taskActiveUserIds = new Set(
+    (taskSummary?.userEventCounts ?? [])
+      .filter(({ eventCount }) => BigInt(eventCount) > 0n)
+      .map(({ userId }) => userId)
+  );
+  const meteredUserIds = new Set(projection?.groups.map(({ userId }) => userId) ?? []);
+  const activeUserIds = new Set([...taskActiveUserIds, ...meteredUserIds]);
+  const activeUsers = activeUserIds.size.toString();
+  const unmeteredTaskUsers = [...taskActiveUserIds].filter((userId) => !meteredUserIds.has(userId));
+  const dayData = dayDetail.kind === 'ready' ? dayDetail.data : null;
+  const dayTaskSummary = dayData?.taskSummary;
+  const dayUsageRows = dayData ? usageDetails(dayData.projection) : [];
+  const visibleScenarioCounts = taskSummary?.scenarioCounts.filter(({ taskCount }) => taskCount !== '0') ?? [];
+  const dayVisibleScenarioCounts = dayTaskSummary?.scenarioCounts.filter(({ taskCount }) => taskCount !== '0') ?? [];
+  const hasUnclassifiedTasks = visibleScenarioCounts.some(({ scenario }) => scenario === 'GENERAL');
+  const dayHasUnclassifiedTasks = dayVisibleScenarioCounts.some(({ scenario }) => scenario === 'GENERAL');
+  const scenarioBuckets = new Map<string, Map<TaskScenario, string>>();
+  for (const { bucketStart, scenario, taskCount } of taskSummary?.scenarioBuckets ?? []) {
+    const counts = scenarioBuckets.get(bucketStart) ?? new Map<TaskScenario, string>();
+    counts.set(scenario, taskCount);
+    scenarioBuckets.set(bucketStart, counts);
+  }
+  const scenarioTrendRows = [...scenarioBuckets]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([bucketStart, counts]) => ({
+      bucketStart,
+      counts,
+      total: [...counts.values()].reduce((total, value) => total + BigInt(value), 0n).toString(),
+    }));
+  const maximumScenarioTasks = maxCount(scenarioTrendRows.map(({ total }) => total));
   const scenarioLabels: Record<TaskScenario, string> = {
     GENERAL: copy.taxonomyGeneral,
     CONTENT_CREATION: copy.taxonomyCreative,
@@ -430,6 +540,19 @@ export function App() {
     ASSET_PRODUCTION: copy.taxonomyMaterial,
     DATA_PROCESSING: copy.taxonomyData,
     SEARCH_QUERY: copy.taxonomySearch,
+  };
+  const usageColumnLabels: Record<UsageColumn, string> = {
+    user: copy.user,
+    model: copy.model,
+    status: copy.userStatus,
+    events: copy.userEventCount,
+    requests: copy.requests,
+    input: copy.inputTokens,
+    output: copy.outputTokens,
+    cache: copy.cacheTokens,
+    tokens: copy.totalTokens,
+    quota: copy.configuredQuota,
+    cost: copy.cost,
   };
   const eventTypeLabels: Record<TaskEventType, string> = {
     RECEIVED: copy.eventReceived,
@@ -451,15 +574,43 @@ export function App() {
     if (status === 'DELETED') return copy.deleted;
     return '—';
   };
+  const renderUsageCell = (column: UsageColumn, row: (typeof userRows)[number]): ReactNode => {
+    if (column === 'user') return <><strong>{row.displayName}</strong><small className='table-subline'>{row.userId}</small></>;
+    if (column === 'model') return row.modelIds.join(', ') || '—';
+    if (column === 'status') return userStatusLabel(row.status);
+    if (column === 'events') return exactCount(row.eventCount, locale);
+    if (column === 'requests') return exactCount(row.metrics.totalRequests, locale);
+    if (column === 'input') return tokenCount(row.metrics.inputTokens);
+    if (column === 'output') return tokenCount(row.metrics.outputTokens);
+    if (column === 'cache') {
+      return tokenCount((BigInt(row.metrics.cacheReadTokens) + BigInt(row.metrics.cacheWriteTokens)).toString());
+    }
+    if (column === 'cost') return exactCost(row.metrics.costUsd, locale);
+    if (row.tokenLimit === undefined) return copy.quotaUnavailable;
+    if (row.tokenLimit === null) return copy.unlimited;
+    if (column === 'quota') {
+      return <span className='quota-cell'>{tokenCount(String(row.tokenLimit))}<small>{copy.weeklyQuota}</small></span>;
+    }
+    return tokenCount(row.metrics.totalTokens);
+  };
   const eventQuery = projection
-    ? ({
+    ? (selectedDayQuery ?? {
         from: projection.from,
         to: projection.to,
         timezone: projection.timezone,
         bucket: projection.bucket,
-        ...(selectedUserId ? { userId: selectedUserId } : {}),
+        ...(scopedUserIds.length ? { userIds: scopedUserIds } : {}),
       } satisfies UsageQuery)
     : null;
+  const toggleDayDetail = (bucketStart: string) => {
+    resetEvents();
+    if (selectedDayQuery?.from === bucketStart) {
+      resetDayDetail();
+      return;
+    }
+    if (!projection) return;
+    setSelectedDayQuery(queryForDay(bucketStart, projection.to, projection.timezone, scopedUserIds));
+  };
   const loadEventPage = (cursor: string | null, existing: TenantUsageEvent[]) => {
     if (!projection || !eventQuery) return;
     const controller = new AbortController();
@@ -493,6 +644,67 @@ export function App() {
     setEventsOpen(true);
     loadEventPage(null, []);
   };
+  const dayDetailPanel = selectedDayQuery ? (
+    <section className='day-detail' aria-live='polite'>
+      <div className='day-detail-heading'>
+        <div>
+          <h3>{copy.dayDetails} · {day(selectedDayQuery.from)}</h3>
+          <p>{copy.dayDetailsDescription}</p>
+        </div>
+        <Button size='small' onClick={resetDayDetail}>{copy.close}</Button>
+      </div>
+      {dayDetail.kind === 'loading' && <Spin dot />}
+      {dayDetail.kind === 'error' && <Alert type='error' content={copy.loadFailed} showIcon />}
+      {dayData && dayTaskSummary && (
+        <>
+          <div className='day-detail-grid'>
+            <section>
+              <h4>{copy.eventDistribution}</h4>
+              <div className='taxonomy-grid'>
+                {dayTaskSummary.eventTypeCounts
+                  .filter(({ eventCount }) => eventCount !== '0')
+                  .map(({ type, eventCount }) => (
+                    <span key={type}>{eventTypeLabels[type]}<small>{exactCount(eventCount, locale)}</small></span>
+                  ))}
+              </div>
+            </section>
+            <section>
+              <h4>{copy.taskDistribution}</h4>
+              {dayHasUnclassifiedTasks && <p className='source-empty'>{copy.unclassifiedScenarioNotice}</p>}
+              <div className='taxonomy-grid'>
+                {dayVisibleScenarioCounts.map(({ scenario, taskCount }) => (
+                  <span key={scenario}>{scenarioLabels[scenario]}<small>{exactCount(taskCount, locale)}</small></span>
+                ))}
+              </div>
+            </section>
+          </div>
+          <div className='table-scroll day-usage-table'>
+            <h4>{copy.details}</h4>
+            <table>
+              <thead><tr><th>{copy.user}</th><th>{copy.model}</th><th>{copy.requests}</th><th>{copy.totalTokens}</th><th>{copy.cost}</th></tr></thead>
+              <tbody>
+                {dayUsageRows.map((row) => (
+                  <tr key={`${row.userId}:${row.modelId}`}>
+                    <td>
+                      <strong>{displayNameByUserId.get(row.userId) ?? row.userId}</strong>
+                      {displayNameByUserId.has(row.userId) &&
+                        displayNameByUserId.get(row.userId) !== row.userId && (
+                        <small className='table-subline'>{row.userId}</small>
+                      )}
+                    </td><td>{row.modelId}</td>
+                    <td>{exactCount(row.metrics.totalRequests, locale)}</td>
+                    <td>{tokenCount(row.metrics.totalTokens)}</td>
+                    <td>{exactCost(row.metrics.costUsd, locale)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {dayUsageRows.length === 0 && <Empty description={copy.noData} />}
+          </div>
+        </>
+      )}
+    </section>
+  ) : null;
   const mismatchCount = reconciliation
     ? Object.values(reconciliation.checks)
         .reduce((total, value) => total + BigInt(value), 0n)
@@ -541,8 +753,8 @@ export function App() {
             <Button
               icon={<Refresh />}
               onClick={() => {
-                if (period !== 'custom') setRange(queryForPeriod(period));
-                else setReloadKey((value) => value + 1);
+                if (period === 'custom') setReloadKey((value) => value + 1);
+                else setRange(period === 'yesterday' ? queryForYesterday() : queryForPeriod(period));
               }}
               loading={dashboard.kind === 'loading'}
             >
@@ -552,44 +764,69 @@ export function App() {
         </header>
 
         <section className='filter-bar' aria-label={copy.filters}>
-          <label>
+          <div className='period-filter'>
             <span>{copy.period}</span>
-            <Select
-              value={period}
-              onChange={(value) => selectPeriod(value as (typeof periodOptions)[number] | 'custom')}
-              aria-label={copy.period}
-            >
-              <Select.Option value={7}>{copy.last7Days}</Select.Option>
-              <Select.Option value={30}>{copy.last30Days}</Select.Option>
-              <Select.Option value={90}>{copy.last90Days}</Select.Option>
-              <Select.Option value='custom'>{copy.customRange}</Select.Option>
-            </Select>
-          </label>
+            <div className='period-buttons' role='group' aria-label={copy.period}>
+              {(
+                [
+                  ['yesterday', copy.yesterday],
+                  [7, copy.last7Days],
+                  [30, copy.last30Days],
+                  [90, copy.last90Days],
+                  ['custom', copy.customRange],
+                ] as const
+              ).map(([value, label]) => (
+                <Button
+                  key={value}
+                  type={period === value ? 'primary' : 'secondary'}
+                  onClick={() => selectPeriod(value)}
+                  aria-pressed={period === value}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+          </div>
           {period === 'custom' && (
-            <>
+            <div className='custom-range'>
               <label>
                 <span>{copy.from}</span>
-                <input type='datetime-local' value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} />
+                <input
+                  ref={customFromInput}
+                  type='date'
+                  max={localDate(new Date())}
+                  value={customFrom}
+                  onChange={(event) => setCustomFrom(event.target.value)}
+                />
               </label>
               <label>
                 <span>{copy.to}</span>
-                <input type='datetime-local' value={customTo} onChange={(event) => setCustomTo(event.target.value)} />
+                <input
+                  ref={customToInput}
+                  type='date'
+                  max={localDate(new Date())}
+                  value={customTo}
+                  onChange={(event) => setCustomTo(event.target.value)}
+                />
               </label>
               <Button onClick={applyCustomRange}>{copy.apply}</Button>
-            </>
+            </div>
           )}
           <label className='user-filter'>
             <span>{copy.userFilter}</span>
             <Select
-              value={selectedUserId || ALL_USERS}
+              mode='multiple'
+              value={selectedUserIds}
+              placeholder={copy.allUsers}
+              allowClear
               showSearch
               onChange={(value) => {
                 resetEvents();
-                setSelectedUserId(value === ALL_USERS ? '' : String(value));
+                resetDayDetail();
+                setSelectedUserIds(value as string[]);
               }}
               aria-label={copy.userFilter}
             >
-              <Select.Option value={ALL_USERS}>{copy.allUsers}</Select.Option>
               {knownUsers.map((user) => (
                 <Select.Option value={user.userId} key={user.userId}>
                   {user.displayName === user.userId ? user.userId : `${user.displayName} · ${user.userId}`}
@@ -597,7 +834,7 @@ export function App() {
               ))}
             </Select>
           </label>
-          {selectedUserId && <Tag>{copy.filteredUser}: {selectedUserId}</Tag>}
+          {selectedUserIds.length > 0 && <Tag>{copy.filteredUsers}: {selectedUserIds.length}</Tag>}
         </section>
         {rangeError && <Alert className='dashboard-alert' type='error' content={rangeError} showIcon />}
 
@@ -662,14 +899,26 @@ export function App() {
               />
               <MetricCard
                 label={copy.activeUsers}
-                value={usageSourceReady ? exactCount(activeUsers, locale) : '—'}
+                value={taskSourceReady || usageSourceReady ? exactCount(activeUsers, locale) : '—'}
                 detail={
-                  usageSourceReady
-                    ? `${exactCount(models.length.toString(), locale)} ${copy.modelDistribution}`
+                  taskSourceReady || usageSourceReady
+                    ? copy.activeUsersScope
                     : copy.noData
                 }
               />
             </section>
+
+            {taskSourceReady && unmeteredTaskUsers.length > 0 && (
+              <Alert
+                className='dashboard-alert'
+                type='warning'
+                content={`${copy.usageCoverageWarning} ${copy.taskLedgerUsers}: ${exactCount(
+                  taskActiveUserIds.size.toString(),
+                  locale
+                )}; ${copy.meteredUsers}: ${exactCount(meteredUserIds.size.toString(), locale)}.`}
+                showIcon
+              />
+            )}
 
             {successRate !== null && (
               <p className='accuracy-note summary-note'>
@@ -685,57 +934,210 @@ export function App() {
                     <h2>{copy.trend}</h2>
                     <p>{copy.trendDescription}</p>
                   </div>
-                  <ChartLine size={22} />
+                  <div className='chart-toolbar'>
+                    <label>
+                      <span>{copy.chartMetric}</span>
+                      <select
+                        aria-label={copy.chartMetric}
+                        value={chartMetric}
+                        onChange={(event) => setChartMetric(event.currentTarget.value as ChartMetric)}
+                      >
+                        <option value='activity'>{copy.activityMetric}</option>
+                        <option value='requests'>{copy.callsMetric}</option>
+                        <option value='tokens'>{copy.tokensMetric}</option>
+                      </select>
+                    </label>
+                    <ChartLine size={22} />
+                  </div>
                 </div>
                 {trends.length === 0 ? (
                   <Empty description={copy.noData} />
                 ) : (
                   <div className='trend-list'>
+                    <div className='analysis-charts'>
+                      <section className='analysis-chart-card'>
+                        <div className='analysis-chart-heading'>
+                          <div>
+                            <h3>{copy.userTrend}</h3>
+                            <p>
+                              {chartMetric === 'activity'
+                                ? copy.activityUserTrendDescription
+                                : copy.userTrendDescription}
+                            </p>
+                          </div>
+                          <small>{copy.topUsersNotice}</small>
+                        </div>
+                        {chartUsers.length === 0 ? (
+                          <Empty description={copy.noData} />
+                        ) : (
+                          <div className='usage-heatmap-scroll'>
+                            <div
+                              className='usage-heatmap-header'
+                              style={{
+                                gridTemplateColumns: chartMetric === 'activity'
+                                  ? 'minmax(132px, 180px) minmax(120px, 1fr)'
+                                  : `minmax(132px, 180px) repeat(${trends.length}, minmax(58px, 1fr))`,
+                              }}
+                            >
+                              <span>{copy.user}</span>
+                              {chartMetric === 'activity'
+                                ? <span>{copy.selectedRangeTotal}</span>
+                                : trends.map(({ bucketStart }) => <time key={bucketStart}>{day(bucketStart)}</time>)}
+                            </div>
+                            {chartUsers.map((user) => (
+                              <div
+                                className='usage-heatmap-row'
+                                key={user.userId}
+                                style={{
+                                  gridTemplateColumns: chartMetric === 'activity'
+                                    ? 'minmax(132px, 180px) minmax(120px, 1fr)'
+                                    : `minmax(132px, 180px) repeat(${trends.length}, minmax(58px, 1fr))`,
+                                }}
+                              >
+                                <strong title={user.userId}>
+                                  {displayNameByUserId.get(user.userId) ?? user.displayName}
+                                </strong>
+                                {chartMetric === 'activity' ? (
+                                  <span
+                                    className='usage-heat-cell'
+                                    title={`${displayNameByUserId.get(user.userId) ?? user.displayName} · ${copy.selectedRangeTotal} · ${exactCount(user.eventCount, locale)}`}
+                                    style={{
+                                      backgroundColor: user.eventCount === '0'
+                                        ? 'var(--color-raised)'
+                                        : `color-mix(in srgb, var(--color-brand) ${Math.max(
+                                            12,
+                                            percentage(user.eventCount, maximumUserTrend)
+                                          )}%, var(--color-raised))`,
+                                    }}
+                                  >
+                                    {exactCount(user.eventCount, locale)}
+                                  </span>
+                                ) : trends.map(({ bucketStart }) => {
+                                  const value = chartValue(
+                                    userTrendByKey.get(`${bucketStart}\0${user.userId}`)?.metrics ?? emptyMetrics()
+                                  );
+                                  const intensity = percentage(value, maximumUserTrend);
+                                  return (
+                                    <span
+                                      className='usage-heat-cell'
+                                      key={bucketStart}
+                                      title={`${displayNameByUserId.get(user.userId) ?? user.displayName} · ${day(bucketStart)} · ${
+                                        chartMetric === 'requests' ? exactCount(value, locale) : `${tokenCount(value)} Token`
+                                      }`}
+                                      style={{
+                                        backgroundColor: value === '0'
+                                          ? 'var(--color-raised)'
+                                          : `color-mix(in srgb, var(--color-brand) ${Math.max(12, intensity)}%, var(--color-raised))`,
+                                      }}
+                                    >
+                                      {chartMetric === 'requests' ? exactCount(value, locale) : tokenCount(value)}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </section>
+
+                      <section className='analysis-chart-card'>
+                        <div className='analysis-chart-heading'>
+                          <div>
+                            <h3>{copy.scenarioTrend}</h3>
+                            <p>{copy.scenarioTrendDescription}</p>
+                          </div>
+                        </div>
+                        {hasUnclassifiedTasks && <p className='source-empty'>{copy.unclassifiedScenarioNotice}</p>}
+                        <div className='scenario-legend'>
+                          {visibleScenarioCounts.map(({ scenario }) => (
+                            <span key={scenario} style={{ '--scenario-color': scenarioColors[scenario] } as CSSProperties}>
+                              {scenarioLabels[scenario]}
+                            </span>
+                          ))}
+                        </div>
+                        <div className='scenario-trend-list'>
+                          {scenarioTrendRows.map(({ bucketStart, counts, total }) => (
+                            <div className='scenario-trend-row' key={bucketStart}>
+                              <time>{day(bucketStart)}</time>
+                              <div className='scenario-track'>
+                                <div className='scenario-total' style={{ width: `${percentage(total, maximumScenarioTasks)}%` }}>
+                                  {visibleScenarioCounts.map(({ scenario }) => (
+                                    <span
+                                      key={scenario}
+                                      title={`${scenarioLabels[scenario]} · ${exactCount(counts.get(scenario) ?? '0', locale)}`}
+                                      style={{
+                                        width: `${percentage(counts.get(scenario) ?? '0', total)}%`,
+                                        backgroundColor: scenarioColors[scenario],
+                                      }}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                              <strong>{exactCount(total, locale)}</strong>
+                            </div>
+                          ))}
+                        </div>
+                        {scenarioTrendRows.length === 0 && <Empty description={copy.noData} />}
+                      </section>
+                    </div>
+
                     <div className='trend-legend' aria-hidden='true'>
                       <span className='accounted-dot'>{copy.accounted}</span>
                       <span className='rejected-dot'>{copy.rejected}</span>
                       <span className='pending-dot'>{copy.pending}</span>
+                      <span className='token-dot'>{copy.totalTokens}</span>
                     </div>
+                    <p className='trend-hint'>{copy.clickDayForDetails}</p>
                     {trends.map(({ bucketStart, metrics }) => {
                       const totalWidth = percentage(metrics.totalRequests, maximumRequests);
                       return (
-                        <div className='trend-row' key={bucketStart}>
-                          <time dateTime={bucketStart}>{day(bucketStart)}</time>
-                          <div
-                            className='trend-track'
-                            role='img'
-                            aria-label={`${day(bucketStart)}: ${copy.accounted} ${metrics.accountedRequests}, ${copy.rejected} ${metrics.rejectedRequests}, ${copy.pending} ${metrics.pendingRequests}`}
+                        <Fragment key={bucketStart}>
+                          <button
+                            type='button'
+                            className={`trend-row${selectedDayQuery?.from === bucketStart ? ' is-selected' : ''}`}
+                            onClick={() => toggleDayDetail(bucketStart)}
+                            aria-expanded={selectedDayQuery?.from === bucketStart}
                           >
-                            <div
-                              className='trend-total'
-                              style={
-                                {
-                                  '--trend-total': `${totalWidth}%`,
-                                } as CSSProperties
-                              }
-                            >
-                              <span
-                                className='trend-accounted'
-                                style={{
-                                  width: `${percentage(metrics.accountedRequests, metrics.totalRequests)}%`,
-                                }}
-                              />
-                              <span
-                                className='trend-rejected'
-                                style={{
-                                  width: `${percentage(metrics.rejectedRequests, metrics.totalRequests)}%`,
-                                }}
-                              />
-                              <span
-                                className='trend-pending'
-                                style={{
-                                  width: `${percentage(metrics.pendingRequests, metrics.totalRequests)}%`,
-                                }}
-                              />
+                            <time dateTime={bucketStart}>{day(bucketStart)}</time>
+                            <div className='trend-bars'>
+                              <div
+                                className='trend-track'
+                                role='img'
+                                aria-label={`${day(bucketStart)}: ${copy.accounted} ${metrics.accountedRequests}, ${copy.rejected} ${metrics.rejectedRequests}, ${copy.pending} ${metrics.pendingRequests}`}
+                              >
+                                <div
+                                  className='trend-total'
+                                  style={
+                                    {
+                                      '--trend-total': `${totalWidth}%`,
+                                    } as CSSProperties
+                                  }
+                                >
+                                  <span
+                                    className='trend-accounted'
+                                    style={{ width: `${percentage(metrics.accountedRequests, metrics.totalRequests)}%` }}
+                                  />
+                                  <span
+                                    className='trend-rejected'
+                                    style={{ width: `${percentage(metrics.rejectedRequests, metrics.totalRequests)}%` }}
+                                  />
+                                  <span
+                                    className='trend-pending'
+                                    style={{ width: `${percentage(metrics.pendingRequests, metrics.totalRequests)}%` }}
+                                  />
+                                </div>
+                              </div>
+                              <div className='token-track' aria-label={`${copy.totalTokens} ${metrics.totalTokens}`}>
+                                <span style={{ width: `${percentage(metrics.totalTokens, maximumTokens)}%` }} />
+                              </div>
                             </div>
-                          </div>
-                          <strong>{exactCount(metrics.totalRequests, locale)}</strong>
-                        </div>
+                            <span className='trend-values'>
+                              <strong>{exactCount(metrics.totalRequests, locale)}</strong>
+                              <small>{tokenCount(metrics.totalTokens)} Token</small>
+                            </span>
+                          </button>
+                          {selectedDayQuery?.from === bucketStart && dayDetailPanel}
+                        </Fragment>
                       );
                     })}
                   </div>
@@ -751,7 +1153,9 @@ export function App() {
                   <ChartHistogram size={22} />
                 </div>
 
-                {selectedUserId && <p className='scope-note'>{copy.userEventDetail}: {selectedUserId}</p>}
+                {selectedUserIds.length > 0 && (
+                  <p className='scope-note'>{copy.userEventDetail}: {selectedUserIds.join(', ')}</p>
+                )}
 
                 <div className='distribution-section'>
                   <h3>{copy.modelCallStatus}</h3>
@@ -810,14 +1214,16 @@ export function App() {
 
                 <div className='distribution-section'>
                   <h3>{copy.taskDistribution}</h3>
+                  {hasUnclassifiedTasks && <p className='source-empty'>{copy.unclassifiedScenarioNotice}</p>}
                   <div className='taxonomy-grid'>
-                    {taskSummary.scenarioCounts.map(({ scenario, taskCount }) => (
+                    {visibleScenarioCounts.map(({ scenario, taskCount }) => (
                       <span key={scenario}>
                         {scenarioLabels[scenario]}
                         <small>{taskSourceReady ? exactCount(taskCount, locale) : '—'}</small>
                       </span>
                     ))}
                   </div>
+                  {visibleScenarioCounts.length === 0 && <p className='source-empty'>{copy.noData}</p>}
                 </div>
 
                 <div className='distribution-section'>
@@ -841,61 +1247,47 @@ export function App() {
                   <h2>{copy.details}</h2>
                   <p>{copy.accuracyBoundary}</p>
                 </div>
-                <UserBusiness size={22} />
+                <div className='details-toolbar'>
+                  <label>
+                    <span>{copy.visibleColumns}</span>
+                    <Select
+                      mode='multiple'
+                      value={usageColumns}
+                      maxTagCount={1}
+                      onChange={(value) => {
+                        const columns = value as UsageColumn[];
+                        setUsageColumns(columns.length ? columns : ['user']);
+                      }}
+                    >
+                      {usageColumnKeys.map((column) => (
+                        <Select.Option key={column} value={column}>{usageColumnLabels[column]}</Select.Option>
+                      ))}
+                    </Select>
+                  </label>
+                  <UserBusiness size={22} />
+                </div>
               </div>
               <div className='table-scroll'>
                 <table>
                   <thead>
                     <tr>
-                      <th>{copy.user}</th>
-                      <th>{copy.model}</th>
-                      <th>{copy.userStatus}</th>
-                      <th title={copy.userEventScope}>{copy.userEventCount}</th>
-                      <th>{copy.requests}</th>
-                      <th>{copy.inputTokens}</th>
-                      <th>{copy.outputTokens}</th>
-                      <th>{copy.cacheTokens}</th>
-                      <th>{copy.totalTokens}</th>
-                      <th>{copy.configuredQuota}</th>
-                      <th>{copy.cost}</th>
+                      {usageColumns.map((column) => (
+                        <th key={column} title={column === 'events' ? copy.userEventScope : undefined}>
+                          {usageColumnLabels[column]}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {userRows.map((row) => {
-                      const cacheTokens = (
-                        BigInt(row.metrics.cacheReadTokens) + BigInt(row.metrics.cacheWriteTokens)
-                      ).toString();
-                      const quota = row.tokenLimit;
-                      return (
-                        <tr key={row.userId}>
-                          <td>
-                            <strong>{row.displayName}</strong>
-                            <small className='table-subline'>{row.userId}</small>
+                    {userRows.map((row) => (
+                      <tr key={row.userId}>
+                        {usageColumns.map((column) => (
+                          <td key={column} title={column === 'events' ? copy.userEventScope : undefined}>
+                            {renderUsageCell(column, row)}
                           </td>
-                          <td>{row.modelIds.join(', ') || '—'}</td>
-                          <td>{userStatusLabel(row.status)}</td>
-                          <td title={copy.userEventScope}>{exactCount(row.eventCount, locale)}</td>
-                          <td>{exactCount(row.metrics.totalRequests, locale)}</td>
-                          <td>{tokenCount(row.metrics.inputTokens)}</td>
-                          <td>{tokenCount(row.metrics.outputTokens)}</td>
-                          <td>{tokenCount(cacheTokens)}</td>
-                          <td>{tokenCount(row.metrics.totalTokens)}</td>
-                          <td>
-                            {quota === undefined ? (
-                              copy.quotaUnavailable
-                            ) : quota === null ? (
-                              copy.unlimited
-                            ) : (
-                              <span className='quota-cell'>
-                                {tokenCount(String(quota))}
-                                <small>{copy.weeklyQuota}</small>
-                              </span>
-                            )}
-                          </td>
-                          <td>{exactCost(row.metrics.costUsd, locale)}</td>
-                        </tr>
-                      );
-                    })}
+                        ))}
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
                 {userRows.length === 0 && <Empty description={copy.noData} />}

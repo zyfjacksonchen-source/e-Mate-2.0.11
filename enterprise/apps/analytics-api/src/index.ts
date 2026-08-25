@@ -15,7 +15,6 @@ export {
 export {
   createAnalyticsHandler,
   createAnalyticsServer,
-  createManagementAuthenticator,
   type AnalyticsApiOptions,
   type AuthenticateBearer,
 } from './server.ts';
@@ -52,5 +51,4 @@ export {
   PostgresTaskEventStore,
   type TaskEventQuery,
   type TaskEventStore,
-  type TaskEventWriteResult,
 } from './task-events.ts';

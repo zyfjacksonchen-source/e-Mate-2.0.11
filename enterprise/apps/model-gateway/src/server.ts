@@ -67,6 +67,7 @@ const gptSearchCredentialRouteId = 'gpt-web-search';
 const gptSearchProviderId = 'gpt-responses';
 const gptSearchBaseUrl = 'http://43.135.183.53:8080/v1';
 const gptSearchModelId = 'gpt-5.6-luna';
+const runtimeModelsClientVersions = new Set(['2.0.12', '2.0.13']);
 
 const runtimeApiMode = (route: ModelGatewayRoute): 'responses' | 'chat-completions' =>
   route.apiMode === 'chat-completions' ? 'chat-completions' : 'responses';
@@ -1211,7 +1212,6 @@ function parseAuditTaskBatch(
     if (
       event.eventId !== envelope.event_id ||
       !taskEventIdPattern.test(event.eventId) ||
-      event.scenario !== 'GENERAL' ||
       occurredAtMs < Date.UTC(2000, 0, 1) ||
       occurredAtMs > Date.now() + 5 * 60_000 ||
       envelope.payload_sha256 !== createHash('sha256').update(canonicalJson(event)).digest('hex')
@@ -1953,7 +1953,11 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
       }
       if (url.pathname === '/v1/runtime-models') {
         if (request.method !== 'GET') return method(response, 'GET');
-        const searchGrantRequested = url.searchParams.get('client_version') === '2.0.12';
+        const clientVersion = url.searchParams.get('client_version');
+        if (clientVersion !== null && !runtimeModelsClientVersions.has(clientVersion)) {
+          throw new HttpError(400, 'UNSUPPORTED_CLIENT_VERSION', 'Unsupported runtime models client version');
+        }
+        const searchGrantRequested = clientVersion !== null;
         let searchGrantStatus: 'granted' | 'denied' | 'unavailable' = 'unavailable';
         let searchApiKey: string | undefined;
         if (searchGrantRequested) {

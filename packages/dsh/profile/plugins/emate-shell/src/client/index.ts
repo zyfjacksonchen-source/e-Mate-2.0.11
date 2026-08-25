@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { createElement, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import {
@@ -118,6 +118,63 @@ function SkipTargetOnboarding({ complete }: { complete: () => void }) {
 function HiddenSessionStats() { return null }
 function HiddenProductSurface() { return null }
 
+const STANDALONE_PRODUCT_ROUTES = new Set(['/schedules', '/capabilities'])
+
+function StandaloneProductSurface() {
+  return createElement('div', {
+    'data-phase': 'product',
+    'data-emate-product-surface': '',
+  })
+}
+
+/** Keep standalone product routes from inheriting a resident Session's body or header. */
+export function registerRouteScopedConversationHeader(ctx: any): void {
+  ctx.slots.inject('conversation', () => {
+    let disposeShadow: (() => void) | undefined
+    const sync = () => {
+      const hide = STANDALONE_PRODUCT_ROUTES.has(location.pathname)
+      if (hide === (disposeShadow !== undefined)) return
+      if (hide) {
+        ctx.layout.closeDetails()
+        disposeShadow = ctx.slots.register({ name: 'conversation', priority: -1 }, StandaloneProductSurface)
+      } else {
+        const dispose = disposeShadow
+        disposeShadow = undefined
+        dispose?.()
+      }
+    }
+    addEventListener('popstate', sync)
+    sync()
+    return () => {
+      removeEventListener('popstate', sync)
+      disposeShadow?.()
+    }
+  })
+  ctx.slots.inject('conversation.session.header', () => {
+    let disposeShadow: (() => void) | undefined
+    const sync = () => {
+      const hide = STANDALONE_PRODUCT_ROUTES.has(location.pathname)
+      if (hide === (disposeShadow !== undefined)) return
+      if (hide) {
+        disposeShadow = ctx.slots.register({
+          name: 'conversation.session.header',
+          priority: -1,
+        }, HiddenProductSurface)
+      } else {
+        const dispose = disposeShadow
+        disposeShadow = undefined
+        dispose?.()
+      }
+    }
+    addEventListener('popstate', sync)
+    sync()
+    return () => {
+      removeEventListener('popstate', sync)
+      disposeShadow?.()
+    }
+  })
+}
+
 /** Keep DSH presets available internally while removing product-facing mode selectors. */
 export function registerManagedPresetSurfaces(ctx: any): void {
   ctx.slots.inject('conversation.hero.agentPreset', () => ctx.slots.register({
@@ -133,43 +190,120 @@ export function registerManagedPresetSurfaces(ctx: any): void {
   }
 }
 
-/** Project the generic new-task action to Home before rc.7 opens its reusable blank session. */
-export function startSessionFromRoute(ctx: any, workspaceId?: string): void {
-  const target = workspaceId ?? ctx.workspaces.list.getSnapshot().items.find(isGeneralWorkspace)?.workspaceId
-  if (target === undefined) {
-    console.warn('e-Mate general workspace is not ready')
-    return
+interface RouteFence {
+  current(): boolean
+  dispose(): void
+}
+
+const routeGenerations = new WeakMap<object, number>()
+
+function captureRouteFence(ctx: any): RouteFence {
+  const generation = (routeGenerations.get(ctx) ?? 0) + 1
+  routeGenerations.set(ctx, generation)
+  const sourcePath = location.pathname
+  const sourceSession = ctx.sessions.list.getSnapshot().current
+  let stale = false
+  const onNavigation = () => {
+    if (location.pathname !== sourcePath) stale = true
   }
-  if (workspaceId === undefined && location.pathname !== '/') {
-    history.pushState(null, '', '/')
+  addEventListener('popstate', onNavigation)
+  const unsubscribe = ctx.sessions.list.subscribe?.(() => {
+    if (ctx.sessions.list.getSnapshot().current !== sourceSession) stale = true
+  }) ?? (() => {})
+  let disposed = false
+  const dispose = () => {
+    if (disposed) return
+    disposed = true
+    removeEventListener('popstate', onNavigation)
+    unsubscribe()
+  }
+  return {
+    current: () => routeGenerations.get(ctx) === generation && !stale && location.pathname === sourcePath
+      && ctx.sessions.list.getSnapshot().current === sourceSession,
+    dispose,
+  }
+}
+
+/** Resolve through rc.7's native blank reuse, then let only the owning route generation open it. */
+export async function startSessionFromRoute(ctx: any, workspaceId?: string): Promise<boolean> {
+  const workspaces = ctx.workspaces.list.getSnapshot()
+  if (workspaces.baselinesReady !== true) throw new Error('new task unavailable')
+  const target = workspaceId ?? workspaces.items.find(isGeneralWorkspace)?.workspaceId
+  if (target === undefined) throw new Error('new task unavailable')
+  const sessions = ctx.sessions.list.getSnapshot()
+  const current = sessions.current
+  const workspace = workspaces.items.find((item: any) => item.workspaceId === target)
+  if (current !== undefined && sessions.byId?.[current]?.blank === true && workspace?.sessionIds?.includes(current)) {
+    if (location.pathname !== '/') {
+      history.pushState(null, '', '/')
+      dispatchEvent(new PopStateEvent('popstate'))
+    }
+    return true
+  }
+  const fence = captureRouteFence(ctx)
+  try {
+    const sessionId = await ctx.workspaces.connectWorkspace(target)
+    if (!fence.current()) return false
+    fence.dispose()
+    ctx.sessions.open(sessionId)
+    if (location.pathname !== '/') history.pushState(null, '', '/')
+    dispatchEvent(new PopStateEvent('popstate'))
+    return true
+  } catch (error: unknown) {
+    if (!fence.current()) return false
+    throw error
+  } finally {
+    fence.dispose()
+  }
+}
+
+/** Change only the route; SessionRouteProjection remains the single current-Session owner. */
+export function openSessionFromRoute(id: string): void {
+  const route = `/chat/${encodeURIComponent(id)}`
+  if (location.pathname !== route) history.pushState(null, '', route)
+  dispatchEvent(new PopStateEvent('popstate'))
+}
+
+/** Use the rc.7 Workspace runtime's single native Host directory-picker seam. */
+export function pickWorkspaceDirectory(ctx: any): Promise<string | null> {
+  return ctx.workspaces.pickDirectory()
+}
+
+/** Attach one picked Workspace only while the initiating route generation still owns the UI. */
+export async function attachWorkspaceFromRoute(ctx: any): Promise<string | null> {
+  const fence = captureRouteFence(ctx)
+  try {
+    const path = await pickWorkspaceDirectory(ctx)
+    if (path === null || !fence.current()) return null
+    const workspace = await ctx.workspaces.create({ path })
+    return fence.current() ? workspace.workspaceId : null
+  } catch (error: unknown) {
+    if (!fence.current()) return null
+    throw error
+  } finally {
+    fence.dispose()
+  }
+}
+
+/** Hand one Schedule intent to its native Session only while the initiating route still owns the UI. */
+export async function prepareSchedulePromptFromRoute(
+  ctx: any,
+  prompt: string,
+  requestedSessionId?: string,
+): Promise<void> {
+  if (requestedSessionId !== undefined) {
+    const requestedScope = ctx.sessions.scope(requestedSessionId)
+    if (requestedScope === undefined) throw new Error(`session "${requestedSessionId}" is not addressable`)
+    ctx.conversation.input.for(requestedScope).setDraft(prompt)
+    ctx.sessions.open(requestedSessionId)
+    const route = `/chat/${encodeURIComponent(requestedSessionId)}`
+    if (location.pathname !== route) history.pushState(null, '', route)
     dispatchEvent(new PopStateEvent('popstate'))
     return
   }
-  ctx.workspaces.startSession(target)
-}
 
-export function apply(ctx: any): void {
-  registerActivityFold(ctx)
-  registerComputerUseTrigger(ctx)
-  registerManagedPresetSurfaces(ctx)
-  ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
-    name: 'conversation.composer.dock',
-    id: 'stats',
-    priority: -1,
-  }, HiddenSessionStats))
-  const startSession = (workspaceId?: string) => { startSessionFromRoute(ctx, workspaceId) }
-
-  const prepareSchedulePrompt = async (prompt: string, requestedSessionId?: string) => {
-    if (requestedSessionId !== undefined) {
-      const requestedScope = ctx.sessions.scope(requestedSessionId)
-      if (requestedScope === undefined) throw new Error(`session "${requestedSessionId}" is not addressable`)
-      ctx.conversation.input.for(requestedScope).setDraft(prompt)
-      ctx.sessions.open(requestedSessionId)
-      const route = `/chat/${encodeURIComponent(requestedSessionId)}`
-      if (location.pathname !== route) history.pushState(null, '', route)
-      dispatchEvent(new PopStateEvent('popstate'))
-      return
-    }
+  const fence = captureRouteFence(ctx)
+  try {
     const workspaceState = ctx.workspaces.list.getSnapshot()
     const current = ctx.sessions.list.getSnapshot().current
     let workspace = current === undefined
@@ -179,18 +313,37 @@ export function apply(ctx: any): void {
       ?? workspaceState.items[0]
     if (workspace === undefined) {
       const path = await ctx.workspaces.pickDirectory()
+      if (!fence.current()) return
       if (path === null) throw new Error('请选择项目文件夹后继续。')
       workspace = await ctx.workspaces.create({ path })
+      if (!fence.current()) return
     }
     const sessionId = await ctx.workspaces.connectWorkspace(workspace.workspaceId)
+    if (!fence.current()) return
     const scope = ctx.sessions.scope(sessionId)
     if (scope === undefined) throw new Error(`session "${sessionId}" is not addressable`)
+    fence.dispose()
     ctx.conversation.input.for(scope).setDraft(prompt)
     ctx.sessions.open(sessionId)
     const route = `/chat/${encodeURIComponent(sessionId)}`
     if (location.pathname !== route) history.pushState(null, '', route)
     dispatchEvent(new PopStateEvent('popstate'))
+  } finally {
+    fence.dispose()
   }
+}
+
+export function apply(ctx: any): void {
+  registerActivityFold(ctx)
+  registerComputerUseTrigger(ctx)
+  registerManagedPresetSurfaces(ctx)
+  registerRouteScopedConversationHeader(ctx)
+  ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
+    name: 'conversation.composer.dock',
+    id: 'stats',
+    priority: -1,
+  }, HiddenSessionStats))
+  const startSession = (workspaceId?: string) => startSessionFromRoute(ctx, workspaceId)
 
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay',
@@ -199,7 +352,7 @@ export function apply(ctx: any): void {
     inject: () => ({
       getSessions: () => ctx.sessions.list.getSnapshot(),
       openSession: (id: string) => { ctx.sessions.open(id) },
-      startHomeSession: () => { startSession() },
+      startHomeSession: () => startSession(),
     }),
   }, SessionRouteProjection))
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
@@ -263,12 +416,8 @@ export function apply(ctx: any): void {
           history.pushState(null, '', '/schedules')
           dispatchEvent(new PopStateEvent('popstate'))
         },
-        openSession: (id: string) => { ctx.sessions.open(id) },
-        pickWorkspace: async () => {
-          const path = await ctx.workspaces.pickDirectory()
-          if (path === null) return null
-          return (await ctx.workspaces.create({ path })).workspaceId
-        },
+        openSession: openSessionFromRoute,
+        pickWorkspace: () => attachWorkspaceFromRoute(ctx),
         renameSession: async (id: string, title: string) => {
           const session = ctx.sessions.binding(id)?.session
           if (session === undefined) throw new Error(`unknown session "${id}"`)
@@ -294,8 +443,9 @@ export function apply(ctx: any): void {
     id: 'e-mate-home',
     order: -20,
     inject: () => ({
-      openSession: (id: string) => { ctx.sessions.open(id) },
-      prepareSchedulePrompt,
+      openSession: openSessionFromRoute,
+      prepareSchedulePrompt: (prompt: string, sessionId?: string) =>
+        prepareSchedulePromptFromRoute(ctx, prompt, sessionId),
       callSchedules: () => ctx.connection.rpc.call('/emate.schedules', 'list', {}),
       closeDetails: () => { ctx.layout.closeDetails() },
       toggleSidebar: () => { ctx.layout.toggleSidebar() },

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import {
+  canonicalProfileJson,
   parseProfileBaseContract,
   parseProfileReleaseEnvelope,
   signProfileRelease,
@@ -13,11 +14,105 @@ import {
 import { PRODUCT_UI_REFERENCE } from './change-impact.mjs'
 import { emitComponent } from './component-release.mjs'
 import { composeProfileReleaseCandidate } from './profile-release.mjs'
-import { prepareProfilePublication, writeProfilePublicationBundle } from './publish-profile-r2.mjs'
+import {
+  createProfileCurrentSnapshot,
+  loadProfileCurrentSnapshot,
+  materializeProfileCurrentSnapshot,
+  parseProfileCurrentSnapshot,
+  prepareProfilePublication,
+  writeProfilePublicationBundle,
+} from './publish-profile-r2.mjs'
 
 function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
 }
+
+function rehashSnapshot(value) {
+  const { snapshot_sha256: ignored, ...body } = value
+  return {
+    ...body,
+    snapshot_sha256: createHash('sha256').update(canonicalProfileJson(body)).digest('hex'),
+  }
+}
+
+test('Cloudflare current snapshot is closed, bounded, canonical, and network-free', t => {
+  const root = mkdtempSync(join(tmpdir(), 'e-mate-profile-current-snapshot-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const expected = {
+    releaseVersion: '2.0.13',
+    baseContractId: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
+  }
+  const currentByTarget = new Map([
+    ['darwin-arm64', Buffer.from('{"target":"darwin-arm64"}\n')],
+    ['darwin-x64', undefined],
+    ['win32-x64', Buffer.from('{"target":"win32-x64"}\n')],
+  ])
+  const snapshot = createProfileCurrentSnapshot({
+    currentByTarget,
+    ...expected,
+    capturedAt: '2026-08-25T10:00:00.000Z',
+  })
+  const parsed = parseProfileCurrentSnapshot(snapshot, expected)
+  assert.equal(parsed.currentByTarget.get('darwin-arm64').equals(currentByTarget.get('darwin-arm64')), true)
+  assert.equal(parsed.currentByTarget.get('darwin-x64'), undefined)
+  assert.equal(parsed.currentByTarget.get('win32-x64').equals(currentByTarget.get('win32-x64')), true)
+
+  const path = join(root, 'snapshot.json')
+  writeJson(path, snapshot)
+  assert.equal(loadProfileCurrentSnapshot(path, expected).snapshot.snapshot_sha256, snapshot.snapshot_sha256)
+  assert.throws(
+    () => materializeProfileCurrentSnapshot(path, join(root, 'absent-output'), expected),
+    /requires a present current desired state/u,
+  )
+
+  const missing = structuredClone(snapshot)
+  delete missing.targets['darwin-x64']
+  assert.throws(() => parseProfileCurrentSnapshot(rehashSnapshot(missing), expected), /snapshot is invalid/u)
+
+  const noncanonical = structuredClone(snapshot)
+  noncanonical.targets['darwin-arm64'].content_base64 += '='
+  assert.throws(() => parseProfileCurrentSnapshot(rehashSnapshot(noncanonical), expected), /snapshot bytes are invalid/u)
+
+  assert.throws(() => createProfileCurrentSnapshot({
+    currentByTarget: new Map([
+      ['darwin-arm64', Buffer.alloc(1024 * 1024 + 1)],
+      ['darwin-x64', undefined],
+      ['win32-x64', undefined],
+    ]),
+    ...expected,
+    capturedAt: '2026-08-25T10:00:00.000Z',
+  }), /current desired state is invalid/u)
+
+  writeFileSync(join(root, 'malformed.json'), '{')
+  assert.throws(() => loadProfileCurrentSnapshot(join(root, 'malformed.json'), expected), /snapshot JSON is invalid/u)
+  writeFileSync(join(root, 'oversize.json'), Buffer.alloc(5 * 1024 * 1024 + 1))
+  assert.throws(() => loadProfileCurrentSnapshot(join(root, 'oversize.json'), expected), /snapshot size is invalid/u)
+
+  const complete = createProfileCurrentSnapshot({
+    currentByTarget: new Map([
+      ['darwin-arm64', Buffer.from('arm64')],
+      ['darwin-x64', Buffer.from('x64')],
+      ['win32-x64', Buffer.from('win')],
+    ]),
+    ...expected,
+    capturedAt: '2026-08-25T10:00:00.000Z',
+  })
+  const completePath = join(root, 'complete.json')
+  writeJson(completePath, complete)
+  const output = join(root, 'materialized')
+  materializeProfileCurrentSnapshot(completePath, output, expected)
+  assert.equal(readFileSync(join(output, 'darwin-arm64.json'), 'utf8'), 'arm64')
+  assert.equal(readFileSync(join(output, 'darwin-x64.json'), 'utf8'), 'x64')
+  assert.equal(readFileSync(join(output, 'win32-x64.json'), 'utf8'), 'win')
+
+  const publisher = readFileSync(new URL('./publish-profile-r2.mjs', import.meta.url), 'utf8')
+  const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const release = readFileSync(new URL('../.github/workflows/profile-release.yml', import.meta.url), 'utf8')
+  assert.doesNotMatch(publisher, /\bfetch\s*\(/u)
+  assert.doesNotMatch(ci, /curl[^]*desktop\/profile\/desired-state/u)
+  assert.equal(ci.match(/--materialize-current dist\/profile-current/gu)?.length, 2)
+  assert.match(release, /--snapshot artifacts\/release\/profile-current-snapshot\.json/u)
+})
 
 test('publication admits bootstrap and its direct successor before exposing active desired state', async t => {
   const root = mkdtempSync(join(tmpdir(), 'e-mate-profile-publish-'))
@@ -25,7 +120,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   const privateKeyPem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
   const keyId = '0123456789abcdef'
-  const baseId = 'e-mate-desktop-profile-v6-dsh-2bc16230975f'
+  const baseId = 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0'
   const componentId = '@e-mate/dsh-plugin-fixture'
   const sourceCommit = 'a'.repeat(40)
   mkdirSync(join(root, 'desktop/e-mate-desktop'), { recursive: true })
@@ -33,7 +128,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
   execFileSync('git', ['init', '--quiet'], { cwd: root })
   execFileSync('git', [
     'update-index', '--add', '--cacheinfo',
-    '160000,2bc16230975f6cf02aa1b283b1f86de44007b059,upstream/deepseek-harness',
+    '160000,b2b1650b01f0ee88d81837a9b5c050f9f763f606,upstream/deepseek-harness',
   ], { cwd: root })
   execFileSync('git', [
     'update-index', '--add', '--cacheinfo',
@@ -46,6 +141,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
     id: baseId,
     desktop_api: 1,
     profile_format: 1,
+    schedule_protocol_floor: 1,
     desktop_reference: {
       repository: 'anywhere-labs/deepseek-harness-desktop',
       commit: '6074088f5b660206e404b3591fab51fb99c69add',
@@ -54,7 +150,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
       harness_version: '0.1.0-rc.7',
     },
     harness_version: '0.1.0-rc.7',
-    harness_commit: '2bc16230975f6cf02aa1b283b1f86de44007b059',
+    harness_commit: 'b2b1650b01f0ee88d81837a9b5c050f9f763f606',
     runtime_imports: {},
     profile_signing_keys: [{
       id: keyId,
@@ -83,7 +179,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
     eMate: {
       component: { schema_version: 1, id: componentId, kind: 'profile', base_imports: [], authority_contract: { effects: [], guards: [] }, base_contracts: [baseId] },
       harnessVersion: '0.1.0-rc.7',
-      harnessCommit: '2bc16230975f6cf02aa1b283b1f86de44007b059',
+      harnessCommit: 'b2b1650b01f0ee88d81837a9b5c050f9f763f606',
     },
     license: 'MIT',
   })
@@ -120,6 +216,23 @@ test('publication admits bootstrap and its direct successor before exposing acti
     ]),
     bootstrap: true,
   }), /candidate changed components do not match accepted CI impact/u)
+  writeJson(join(candidates[0], 'admission.json'), {
+    ...driftedAdmission,
+    schedule_protocol_floor: 2,
+  })
+  assert.throws(() => prepareProfilePublication({
+    root,
+    candidateDirectories: candidates,
+    artifactRoots: [join(root, 'dist/components')],
+    expectedChangedIds: [componentId],
+    sourceCommit,
+    privateKeyPem,
+    keyId,
+    currentByTarget: new Map([
+      ['darwin-arm64', undefined], ['darwin-x64', undefined], ['win32-x64', undefined],
+    ]),
+    bootstrap: true,
+  }), /Profile candidate admission is invalid/u)
   writeJson(join(candidates[0], 'admission.json'), driftedAdmission)
   const publication = prepareProfilePublication({
     root,
@@ -194,6 +307,8 @@ test('publication admits bootstrap and its direct successor before exposing acti
   assert.equal(plan.main_commit, sourceCommit)
   assert.equal(plan.accepted_ci_run_id, '123')
   assert.equal(plan.preparation_run_id, '456')
+  assert.equal(plan.base_contract_id, baseId)
+  assert.equal(plan.schedule_protocol_floor, 1)
   assert.equal(plan.activations.every(item => item.expected_current === null), true)
   assert.equal(plan.immutable_objects.every(item => item.path.startsWith('immutable/')), true)
   assert.equal(plan.activations.every(item => item.object.path.startsWith('activation/')), true)

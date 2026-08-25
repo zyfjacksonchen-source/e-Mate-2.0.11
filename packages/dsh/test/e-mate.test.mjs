@@ -9,12 +9,16 @@ import test from 'node:test'
 import { unzipSync } from 'fflate'
 import { parse as parseYaml } from 'yaml'
 import { Context } from '../../../upstream/deepseek-harness/vendor/cordis/lib/index.js'
+import AgentRegistry, { Inbox } from '../../../upstream/deepseek-harness/packages/core/agent/lib/index.js'
+import { Session, SessionId, SESSION_FORMAT_VERSION } from '../../../upstream/deepseek-harness/packages/core/session/lib/index.js'
 import { LocalAttachmentStore } from '../../../upstream/deepseek-harness/packages/attachment/attachment-local/lib/index.js'
+import LocalJobRegistry from '../../../upstream/deepseek-harness/packages/jobs/jobs-local/lib/index.js'
 import { FileSettingsProvider } from '../../../upstream/deepseek-harness/packages/settings/settings-file/lib/index.js'
 
 import {
   HARNESS_COMMIT,
   HARNESS_VERSION,
+  VERSION,
   checkEnvironment,
   latestUpdateReceipt,
   managedStatus,
@@ -172,32 +176,32 @@ test('version gates match the release contract', () => {
 test('online update target parsing rejects tags and downgrade ordering is SemVer-correct', () => {
   const requestId = '11111111-1111-4111-8111-111111111111'
   const sourceCommit = 'a'.repeat(40)
-  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.12/${sourceCommit}`
+  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.13/${sourceCommit}`
   const releaseSource = {
     schema_version: 1,
     product: 'e-Mate',
-    version: '2.0.12',
+    version: '2.0.13',
     package_name: '@e-mate/dsh',
     source_commit: sourceCommit,
     manifest_url: `${base}/release-manifest.json`,
-    tarball_url: `${base}/e-mate-dsh-2.0.12.tgz`,
+    tarball_url: `${base}/e-mate-dsh-2.0.13.tgz`,
   }
   const request = {
     schema_version: 1,
     request_id: requestId,
-    target: '2.0.12',
-    current_version: '2.0.12',
+    target: '2.0.13',
+    current_version: '2.0.13',
     release_source: releaseSource,
     previous_release_source: releaseSource,
   }
   assert.equal(normalizeUpdateTarget(), 'latest')
   assert.equal(normalizeUpdateTarget('latest'), 'latest')
-  assert.equal(normalizeUpdateTarget('2.0.12-rc.1'), '2.0.12-rc.1')
+  assert.equal(normalizeUpdateTarget('2.0.13-rc.1'), '2.0.13-rc.1')
   assert.throws(() => normalizeUpdateTarget('next'), /invalid update version/)
   assert.throws(() => normalizeUpdateTarget('2.0'), /invalid update version/)
-  assert.equal(validateStagedVersion('latest', '2.0.12'), '2.0.12')
-  assert.equal(validateStagedVersion('2.0.12', '2.0.12'), '2.0.12')
-  assert.throws(() => validateStagedVersion('2.0.12', '2.0.7'), /does not match requested version/)
+  assert.equal(validateStagedVersion('latest', '2.0.13'), '2.0.13')
+  assert.equal(validateStagedVersion('2.0.13', '2.0.13'), '2.0.13')
+  assert.throws(() => validateStagedVersion('2.0.13', '2.0.7'), /does not match requested version/)
   assert.throws(() => validateStagedVersion('latest', 'not-semver'), /version is invalid/)
   assert.equal(validateUpdateRequest(request, requestId), request)
   assert.throws(
@@ -213,7 +217,7 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   assert.throws(() => parsePackageIntegrity(JSON.stringify('sha256-invalid')), /integrity is invalid/)
   assert.equal(compareVersions('2.0.7', '2.0.7-rc.1'), 1)
   assert.equal(compareVersions('2.0.7-rc.1', '2.0.7-rc.2'), -1)
-  assert.equal(compareVersions('2.0.12', '2.0.7'), 1)
+  assert.equal(compareVersions('2.0.13', '2.0.7'), 1)
   assert.equal(globalPrefixForBinPath('/opt/e-mate/lib/node_modules/@e-mate/dsh/lib/bin.js', 'darwin'), '/opt/e-mate')
   assert.equal(
     globalPrefixForBinPath('C:\\Users\\e-mate\\AppData\\Roaming\\npm\\node_modules\\@e-mate\\dsh\\lib\\bin.js', 'win32'),
@@ -221,34 +225,34 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   )
   assert.throws(() => globalPrefixForBinPath('/repo/packages/dsh/lib/bin.js', 'darwin'), /global npm installation/u)
   assert.deepEqual(validateReleaseSource(releaseSource), releaseSource)
-  const desktopPrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.12/${sourceCommit}`
+  const desktopPrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.13/${sourceCommit}`
   assert.deepEqual(validateLatestReleasePointer({
     schema_version: 1,
-    version: '2.0.12',
+    version: '2.0.13',
     source_commit: sourceCommit,
     artifacts: {
       darwin: {
-        url: `${desktopPrefix}/e-Mate-2.0.12-mac-universal.dmg`,
+        url: `${desktopPrefix}/e-Mate-2.0.13-mac-universal.dmg`,
         bytes: 1,
         sha256: 'ab'.repeat(32),
       },
       win32: {
-        url: `${desktopPrefix}/e-Mate-2.0.12-win-x64-Setup.exe`,
+        url: `${desktopPrefix}/e-Mate-2.0.13-win-x64-Setup.exe`,
         bytes: 1,
         sha256: 'cd'.repeat(32),
       },
     },
   }), releaseSource)
-  assert.equal(compareVersions('2.0.12', '2.0.5'), 1)
+  assert.equal(compareVersions('2.0.13', '2.0.5'), 1)
   assert.throws(() => validateReleaseSource({ ...releaseSource, manifest_url: 'http://example.com/release-manifest.json' }), /URL is invalid/u)
   const sha512 = 'ab'.repeat(64)
   const artifactIntegrity = `sha512-${Buffer.from(sha512, 'hex').toString('base64')}`
   const artifact = {
-    name: '@e-mate/dsh', version: '2.0.12', kind: 'main', filename: 'e-mate-dsh-2.0.12.tgz',
+    name: '@e-mate/dsh', version: '2.0.13', kind: 'main', filename: 'e-mate-dsh-2.0.13.tgz',
     size: 207, sha256: 'cd'.repeat(32), sha512, integrity: artifactIntegrity,
   }
   const manifest = {
-    schema_version: 1, product: 'e-Mate', version: '2.0.12', source_commit: sourceCommit,
+    schema_version: 1, product: 'e-Mate', version: '2.0.13', source_commit: sourceCommit,
     packages: [artifact], download: { ...releaseSource, size: artifact.size, sha256: artifact.sha256, sha512, integrity: artifactIntegrity },
   }
   assert.equal(validateReleaseManifest(manifest, releaseSource).integrity, artifactIntegrity)
@@ -280,7 +284,7 @@ test('status projects only the latest bounded online-update receipt', async () =
       product: 'e-Mate',
       request_id: first,
       status: 'failed-before-change',
-      requested_version: '2.0.12',
+      requested_version: '2.0.13',
       previous_version: '2.0.7',
       error: 'must not reach status output',
       finished_at: '2026-08-15T01:00:00.000Z',
@@ -290,18 +294,18 @@ test('status projects only the latest bounded online-update receipt', async () =
       product: 'e-Mate',
       request_id: second,
       status: 'completed',
-      requested_version: '2.0.12',
+      requested_version: '2.0.13',
       previous_version: '2.0.7',
-      installed_version: '2.0.12',
+      installed_version: '2.0.13',
       error: 'must not reach status output',
       finished_at: '2026-08-15T02:00:00.000Z',
     }))
     const expected = {
       request_id: second,
       status: 'completed',
-      requested_version: '2.0.12',
+      requested_version: '2.0.13',
       previous_version: '2.0.7',
-      installed_version: '2.0.12',
+      installed_version: '2.0.13',
       finished_at: '2026-08-15T02:00:00.000Z',
     }
     assert.deepEqual(latestUpdateReceipt(dshHome), expected)
@@ -340,9 +344,15 @@ test('online updates admit only one live detached helper', () => {
 
 test('runtime resolves only the exact Harness source', () => {
   const runtime = resolveHarness()
+  assert.equal(HARNESS_COMMIT, 'b2b1650b01f0ee88d81837a9b5c050f9f763f606')
   assert.equal(runtime.version, HARNESS_VERSION)
   assert.equal(runtime.commit, HARNESS_COMMIT)
   assert.ok(['development-source', 'packaged-runtime'].includes(runtime.source))
+  assert.equal(
+    JSON.parse(readFileSync(new URL('../profile/plugins/emate-shell/package.json', import.meta.url), 'utf8')).eMate.harnessCommit,
+    HARNESS_COMMIT,
+  )
+  assert.match(readFileSync(new URL('../THIRD_PARTY_NOTICES.txt', import.meta.url), 'utf8'), new RegExp(HARNESS_COMMIT, 'u'))
 })
 
 test('managed profile installation is idempotent', () => {
@@ -371,7 +381,7 @@ test('managed profile installation is idempotent', () => {
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
     ])
-    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.12'])))
+    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.13'])))
     const patch = readFileSync(join(first.profile, 'cordis.patch.yml'), 'utf8')
     installProfile(dshHome)
     assert.equal(readFileSync(join(first.profile, 'package.json'), 'utf8'), manifest)
@@ -507,7 +517,7 @@ test('managed profile installation is idempotent', () => {
     assert.doesNotMatch(patch, /emate-(?:office-ocr|browser-computer-use|memory|dream|learning)/)
     assert.match(patch, /id: emate-model-policy[\s\S]*\.\/plugins\/model-policy\.js[\s\S]*inject: \[apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity\]/)
     assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, emateModelPolicy, emateIdentity\]/)
-    assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*inject: \[tools, jobs, attachments, sandboxPolicy, emateIdentity, emateModelPolicy, emateCapabilities\][\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
+    assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*inject: \[tools, jobs, attachments, sandboxPolicy, subagents, emateIdentity, emateModelPolicy, emateCapabilities\][\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
     assert.match(patch, /id: emate-legacy-migration[\s\S]*\.\/plugins\/legacy-migration\.js[\s\S]*inject: \[sessionPersistence, webServer\]/)
     assert.match(patch, /id: emate-schedule-import[\s\S]*\.\/plugins\/schedule-import\.js[\s\S]*inject: \[tools\]/)
     assert.ok(readFileSync(join(first.profile, 'plugins', 'agent-operations.js')).byteLength > 0)
@@ -531,7 +541,7 @@ test('managed profile installation is idempotent', () => {
       const pluginRoot = join(first.profile, 'node_modules', ...name.split('/'))
       const pluginManifest = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'))
       assert.equal(pluginManifest.name, name)
-      assert.equal(pluginManifest.version, '2.0.12')
+      assert.equal(pluginManifest.version, '2.0.13')
       assert.ok(readFileSync(join(pluginRoot, pluginManifest.main)).byteLength > 0)
       const pluginPatch = readFileSync(join(pluginRoot, pluginManifest.dsh.bundle.patch), 'utf8')
       assert.ok(pluginPatch.length >= 2)
@@ -608,7 +618,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(client, /data-chain-overlay-fallback/)
     assert.match(client, /ctx\.slots\.inject\(["']shell\.overlay["']/)
     assert.match(client, /welcome-notice/)
-    assert.match(client, /deepseek-official/)
+    assert.doesNotMatch(client, /deepseek-official/)
     assert.match(client, /priority:\s*-1/)
     assert.match(client, /e-mate-identity-gate/)
     assert.match(client, /e-mate-user-center/)
@@ -1201,20 +1211,54 @@ test('image capability stays visible and inert until its managed endpoint is con
 })
 
 test('image generation reuses the Model Gateway with Harness Jobs and attachments', async () => {
+  const imageGenerationSource = readFileSync(new URL('../src/profile/image-generation.ts', import.meta.url), 'utf8')
+  assert.equal(imageGenerationSource.match(/ctx\.jobs\.startWhenAvailable\(/gu)?.length, 1)
+  assert.doesNotMatch(imageGenerationSource, /ctx\.jobs\.start\(/u)
   const temporary = mkdtempSync(join(tmpdir(), 'e-mate-image-generation-'))
   const context = new Context()
   const cleanups = []
   let attachmentFiber
+  let jobFiber
   try {
-    const paths = installProfile(join(temporary, 'dsh-home'))
-    attachmentFiber = await context.plugin(LocalAttachmentStore, { dshHome: join(temporary, 'dsh-home') })
+    const dshHome = join(temporary, 'dsh-home')
+    const harness = resolveHarness()
+    const toolsModule = resolveHarnessModule(harness, 'packages/core/tools', '@deepseek-ai/dsh-tools')
+    const llmModule = resolveHarnessModule(harness, 'packages/llm/llm', '@deepseek-ai/dsh-llm')
+    const bindingPath = join(temporary, 'runtime-binding.json')
+    writeFileSync(bindingPath, JSON.stringify({
+      schema_version: 1,
+      product: 'e-Mate',
+      version: VERSION,
+      dsh_home: dshHome,
+      harness_commit: HARNESS_COMMIT,
+      tools_module: toolsModule,
+      tools_module_sha256: createHash('sha256').update(readFileSync(toolsModule)).digest('hex'),
+      llm_module: llmModule,
+      llm_module_sha256: createHash('sha256').update(readFileSync(llmModule)).digest('hex'),
+    }))
+    await context.plugin(AgentRegistry)
+    jobFiber = await context.plugin(LocalJobRegistry)
+    attachmentFiber = await context.plugin(LocalAttachmentStore, { dshHome })
     const inputBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+    const alternateBytes = readFileSync(new URL('../../../upstream/deepseek-harness/examples/acp-agent/tests/snapshots/read-image/workspace/red.png', import.meta.url))
+    const rejectedBytes = readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-custom-form.png', import.meta.url))
+    const unreviewedBytes = readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-custom-form.zh.png', import.meta.url))
     const requests = []
     const requestScopes = []
     let remoteCounter = 0
     let nextFailureStatus
+    let nextCorruptData = false
+    let nextPrivateRequestError = false
+    let nextNoop = false
+    let nextResponseBytes
+    let requestGate
+    let requestGateEntered
+    let rejectOutputSave = false
+    let rejectParentOutputRead = false
+    let parentOutputAttachmentId
     let activeSubmissions = 0
     let maximumSubmissions = 0
+    const jobTimeline = []
     const json = (value, status = 200) => new Response(JSON.stringify(value), {
       status,
       headers: { 'content-type': 'application/json' },
@@ -1224,6 +1268,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         assert.equal(url.origin, 'https://model.example')
         assert.equal(url.pathname.startsWith('/e-mate/model-api/v1/images/'), true)
         const outgoing = new Request(url, init)
+        jobTimeline.push(`provider:${outgoing.headers.get('x-client-request-id')}`)
         requestScopes.push({
           task: outgoing.headers.get('x-e-mate-task-id'),
           trace: outgoing.headers.get('x-e-mate-trace-id'),
@@ -1232,20 +1277,33 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         })
         activeSubmissions += 1
         maximumSubmissions = Math.max(maximumSubmissions, activeSubmissions)
-        await new Promise(resolveImmediate => setImmediate(resolveImmediate))
-        activeSubmissions -= 1
+        try {
+          await new Promise(resolveImmediate => setImmediate(resolveImmediate))
+          if (requestGate !== undefined) {
+            requestGateEntered?.()
+            await Promise.race([
+              requestGate,
+              new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true })),
+            ])
+          }
+        } finally {
+          activeSubmissions -= 1
+        }
+        let sourceBytes
         if (url.pathname.endsWith('/generations')) {
           requests.push({ path: url.pathname, body: await outgoing.json() })
         } else if (url.pathname.endsWith('/edits')) {
           const form = await outgoing.formData()
           const images = [...form.entries()].filter(([key]) => key === 'image' || key === 'image[]')
+          const imageBuffers = await Promise.all(images.map(([, value]) => value.arrayBuffer().then(Buffer.from)))
+          sourceBytes = imageBuffers[0]
           requests.push({
             path: url.pathname,
             body: {
               model: form.get('model'),
               prompt: form.get('prompt'),
               imageFields: images.map(([key]) => key),
-              imageBytes: await Promise.all(images.map(([, value]) => value.arrayBuffer().then(buffer => buffer.byteLength))),
+              imageBytes: imageBuffers.map(buffer => buffer.byteLength),
             },
           })
         } else {
@@ -1256,52 +1314,258 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
           nextFailureStatus = undefined
           return json({ error: 'upstream unavailable' }, status)
         }
+        if (nextPrivateRequestError) {
+          nextPrivateRequestError = false
+          throw new Error('private /Users/example/image-key prompt must not enter Job detail')
+        }
+        const responseBytes = nextResponseBytes ?? (nextNoop && sourceBytes !== undefined
+          ? sourceBytes
+          : sourceBytes?.equals(inputBytes) ? alternateBytes : inputBytes)
+        nextResponseBytes = undefined
+        nextNoop = false
+        const b64Json = nextCorruptData ? 'invalid base64 / private' : responseBytes.toString('base64')
+        nextCorruptData = false
         return json({
           id: `image-response-${++remoteCounter}`,
-          data: [{ b64_json: inputBytes.toString('base64') }],
+          data: [{ b64_json: b64Json }],
           usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
         })
+      },
+    }
+    const imageAttachments = {
+      imageLimits: context.attachments.imageLimits,
+      async readImage(ref, signal) {
+        if (rejectParentOutputRead && ref.attachmentId === parentOutputAttachmentId) {
+          rejectParentOutputRead = false
+          parentOutputAttachmentId = undefined
+          throw new Error('private /Users/example/parent-cas must not enter the receipt')
+        }
+        return await context.attachments.readImage(ref, signal)
+      },
+      async saveImage(input) {
+        if (rejectOutputSave) {
+          rejectOutputSave = false
+          throw new Error('simulated local attachment commit failure')
+        }
+        const saved = await context.attachments.saveImage(input)
+        if (rejectParentOutputRead) parentOutputAttachmentId = saved.attachmentId
+        return saved
       },
     }
     const tools = new Map()
     const jobs = []
     const waitedJobs = []
+    context.jobs.onJobDone(snapshot => { jobTimeline.push(`settled:${snapshot.id}`) })
     const controllers = []
     const capabilities = []
+    const cleanupWarnings = []
     const policyModels = []
     let sandboxMode = 'read-only'
     let preStep
-    const modelPolicy = { assertModel: async model => { policyModels.push(model) } }
+    let modelPolicyGate
+    let modelPolicyGateEntered
+    const modelPolicy = { assertModel: async model => {
+      policyModels.push(model)
+      modelPolicyGateEntered?.()
+      await modelPolicyGate
+    } }
+    const childRuns = []
+    const disposedChildReceiptCounts = []
+    const parentReceiptBeforeChildDispose = []
+    const hangingChildDisposals = []
+    let duplicateLeafAttempt = false
+    let duplicateLeafRejectedBeforeRequest = false
+    let injectChildReceiptSecret = false
+    let nextLeafMutation
+    let rejectNextDispose = false
+    let hangNextDispose = false
+    let throwNextImageJobStarter = false
+    let rejectCleanupWarning = false
+    let skipNextLeafInvocation = false
+    let imageReviewAsk
+    const mismatchedLeafRetryGuards = []
+    const subagents = {
+      list: () => ['spawn'],
+      async start(provider, request) {
+        assert.equal(provider, 'spawn')
+        assert.deepEqual(request.toolFilter, { allow: ['imagegen'] })
+        const id = `image-child-${childRuns.length + 1}`
+        const childEvents = [{
+          type: 'subagent/descriptor',
+          data: { mode: 'one-shot', provider: 'spawn', label: request.label, version: 2 },
+          seq: 0,
+          time: Date.now(),
+        }]
+        const leafMutation = nextLeafMutation
+        nextLeafMutation = undefined
+        const childMessages = [{
+          id: `${id}-prompt`, role: 'user', source: { kind: 'user' }, content: request.prompt,
+        }]
+        if (leafMutation?.extraImages !== undefined) {
+          childMessages[0].content = [
+            ...childMessages[0].content,
+            ...leafMutation.extraImages.map(attachment => ({ type: 'image', attachment })),
+          ]
+        }
+        const child = {
+          id,
+          session: {
+            header: { id, parentSession: request.parent.id, cwd: temporary },
+            events: childEvents,
+            append(type, data, options) {
+              childEvents.push({ type, data, ...options, seq: childEvents.length, time: Date.now() })
+            },
+            deriveMessages: () => childMessages,
+          },
+        }
+        const promptText = request.prompt.find(block => block.type === 'text')?.text ?? ''
+        const exactArgs = JSON.parse(promptText.split('\n').at(-1))
+        const attemptedArgs = leafMutation === undefined
+          ? exactArgs
+          : leafMutation.rewrite(structuredClone(exactArgs))
+        const ordinal = childRuns.length + 1
+        const rejectDispose = rejectNextDispose
+        rejectNextDispose = false
+        const hangDispose = hangNextDispose
+        hangNextDispose = false
+        const skipInvocation = skipNextLeafInvocation
+        skipNextLeafInvocation = false
+        const result = Promise.resolve().then(async () => {
+          if (skipInvocation) return { output: [], stopReason: 'completed' }
+          try {
+            await tools.get('imagegen').execute(attemptedArgs, {
+              agent: child,
+              callId: `image-leaf-${ordinal}`,
+              signal: request.signal,
+            })
+            if (injectChildReceiptSecret) {
+              childEvents.find(event => event.type === 'emate/image-output').data.prompt = 'private child prompt'
+              injectChildReceiptSecret = false
+            }
+            if (duplicateLeafAttempt) {
+              const before = requests.length
+              await assert.rejects(
+                tools.get('imagegen').execute(exactArgs, {
+                  agent: child,
+                  callId: `image-leaf-${ordinal}-duplicate`,
+                  signal: request.signal,
+                }),
+                /only once/u,
+              )
+              duplicateLeafRejectedBeforeRequest = requests.length === before
+            }
+            return { output: [], stopReason: 'completed' }
+          } catch {
+            if (leafMutation !== undefined) {
+              const before = requests.length
+              await assert.rejects(
+                tools.get('imagegen').execute(exactArgs, {
+                  agent: child,
+                  callId: `image-leaf-${ordinal}-after-mismatch`,
+                  signal: request.signal,
+                }),
+                /only once/u,
+              )
+              mismatchedLeafRetryGuards.push(requests.length === before)
+            }
+            return { output: [], stopReason: request.signal.aborted ? 'aborted' : 'error' }
+          }
+        })
+        const run = {
+          id,
+          localAgent: child,
+          result,
+          async dispose() {
+            await result
+            if (hangDispose) {
+              hangingChildDisposals.push(id)
+              await new Promise(() => {})
+            }
+            parentReceiptBeforeChildDispose.push(request.parent.session.events.some(event =>
+              event.type === 'emate/image-output'
+              && event.data?.revision === 2
+              && event.data?.child_session_id === id))
+            disposedChildReceiptCounts.push(childEvents.filter(event => event.type === 'emate/image-output').length)
+            childEvents.length = 0
+            for (let index = jobs.length - 1; index >= 0; index -= 1) {
+              if (jobs[index].spec.owner === child) jobs.splice(index, 1)
+            }
+            if (rejectDispose) throw new Error('private /Users/example/dispose must not escape cleanup')
+          },
+        }
+        childRuns.push(run)
+        return run
+      },
+    }
     const pluginCtx = {
-      tools: { register: tool => { tools.set(tool.name, tool); return () => { tools.delete(tool.name) } } },
+      logger: { warn: message => {
+        cleanupWarnings.push(message)
+        if (rejectCleanupWarning) {
+          rejectCleanupWarning = false
+          throw new Error('private /Users/example/logger must not escape cleanup')
+        }
+      } },
+      tools: {
+        register: tool => { tools.set(tool.name, tool); return () => { tools.delete(tool.name) } },
+        schemas: () => [...tools.values()],
+      },
       jobs: {
-        attachController: kind => { controllers.push(kind); return () => {} },
-        start(spec) {
+        attachController(kind) {
+          controllers.push(kind)
+          return context.jobs.attachController(kind)
+        },
+        startWhenAvailable(spec, signal) {
           assert.equal(spec.kind, 'emate-image')
-          assert.equal(spec.owner.id, 'image-session')
-          const id = `emate-image-${jobs.length + 1}`
-          const run = spec.run()
-          jobs.push({ id, spec, ...run })
-          return id
+          assert.doesNotMatch(spec.owner.id, /^image-child-\d+$/u)
+          const startSpec = throwNextImageJobStarter
+            ? { ...spec, run() { throw new Error('simulated image Job starter failure') } }
+            : spec
+          throwNextImageJobStarter = false
+          const registry = context.jobs
+          const admission = registry.startWhenAvailable(startSpec, signal)
+          const { id } = admission
+          const done = registry.wait(id, 120_000, startSpec.owner).then((snapshot) => {
+            let output = ''
+            try {
+              output = registry.read(id, startSpec.owner).text
+            } catch (error) {
+              if (context.jobs !== undefined) throw error
+            }
+            return {
+              status: snapshot.status,
+              ...(snapshot.detail === undefined ? {} : { detail: snapshot.detail }),
+              ...(output === '' ? {} : { output }),
+            }
+          })
+          jobs.push({ id, spec: startSpec, done, admitted: admission.admitted })
+          void admission.admitted.then(
+            () => { jobTimeline.push(`admitted:${id}`) },
+            () => {},
+          )
+          return admission
         },
         async wait(id, _timeoutMs, owner) {
-          const job = jobs.find(value => value.id === id)
-          assert.ok(job)
-          assert.equal(owner.id, 'image-session')
           waitedJobs.push(id)
-          const outcome = await job.done
-          return { id, kind: job.spec.kind, label: job.spec.label, status: outcome.status, reported: true }
+          return await context.jobs.wait(id, _timeoutMs, owner)
         },
+        get(id, owner) {
+          return context.jobs.get(id, owner)
+        },
+        kill: (id, owner, reason) => context.jobs.kill(id, owner, reason),
       },
-      attachments: context.attachments,
+      attachments: imageAttachments,
       sandboxPolicy: { resolve: () => ({ mode: sandboxMode, workspaceRoot: temporary }) },
       get: name => name === 'emateIdentity'
         ? identity
         : name === 'emateModelPolicy'
           ? modelPolicy
-          : name === 'emateCapabilities'
-            ? { register: definition => { capabilities.push(definition); return () => {} } }
-            : undefined,
+          : name === 'subagents'
+            ? subagents
+            : name === 'emateCapabilities'
+              ? { register: definition => { capabilities.push(definition); return () => {} } }
+              : name === 'userQuestions' && imageReviewAsk !== undefined
+                ? { ask: imageReviewAsk }
+              : undefined,
       effect(effect) {
         const cleanup = effect()
         if (typeof cleanup === 'function') cleanups.push(cleanup)
@@ -1314,7 +1578,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       },
     }
     await applyImageGeneration(pluginCtx, {
-      bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json'),
+      bindingPath,
       rootUrl: 'https://model.example/e-mate/model-api/v1',
     })
     assert.deepEqual([...tools.keys()], ['imagegen', 'image_pack'])
@@ -1326,11 +1590,26 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       detail: 'gpt-image-2-pro',
       action_ids: [],
     })
+    const registeredImagegen = tools.get('imagegen')
+    tools.delete('imagegen')
+    assert.deepEqual(await capabilities[0].status(), {
+      state: 'blocked',
+      detail: '图像 Tool 注册尚未就绪。',
+      action_ids: [],
+    })
+    tools.set('imagegen', registeredImagegen)
+    const toolHeaderContract = JSON.stringify([...tools.values()].map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    })))
     const sessionMessages = []
     const sessionEvents = []
     const agent = {
       id: 'image-session',
+      ctx: context.plugin(() => {}).ctx,
       session: {
+        id: 'image-session',
         header: { id: 'image-session', cwd: temporary },
         events: sessionEvents,
         append(type, data, options) {
@@ -1339,13 +1618,57 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         deriveMessages: () => sessionMessages,
       },
     }
+    context.agents.register(agent)
     let callIndex = 0
     const execution = () => ({
       agent,
       callId: `image-call-${++callIndex}`,
       signal: new AbortController().signal,
     })
+    const nativeParentScopes = new WeakMap()
+    const nativeParent = (rawId) => {
+      const id = SessionId(rawId)
+      const scopeFiber = context.plugin(() => {})
+      const session = Session.create(id, undefined, {
+        version: SESSION_FORMAT_VERSION,
+        id,
+        createdAt: Date.now(),
+        cwd: temporary,
+      })
+      const parent = {
+        id,
+        options: {},
+        session,
+        inbox: new Inbox(session, { inserted: () => {}, discarded: () => {}, claimed: () => {} }),
+        status: 'idle',
+        ctx: scopeFiber.ctx,
+        send: () => {},
+        followup: () => {},
+        steer: () => ({ outcome: Promise.resolve({ status: 'rejected' }) }),
+        inject: () => {},
+        cancel() {},
+        runMaintenance: job => job(new AbortController().signal),
+        whenIdle: () => Promise.resolve(),
+      }
+      context.agents.register(parent)
+      nativeParentScopes.set(parent, scopeFiber)
+      return parent
+    }
+    const waitFor = async (read, message) => {
+      const deadline = Date.now() + 2_000
+      while (Date.now() < deadline) {
+        const value = read()
+        if (value !== undefined) return value
+        await new Promise(resolveImmediate => setImmediate(resolveImmediate))
+      }
+      throw new Error(message)
+    }
+    const terminalReceipt = (parent, callId) => parent.session.events
+      .findLast(event => event.type === 'emate/image-output'
+        && event.data?.call_id === callId
+        && event.data?.status !== 'running')?.data
     const imagegen = tools.get('imagegen')
+    assert.equal(imagegen.isConcurrencySafe({}), false)
     assert.deepEqual(Object.keys(imagegen.parameters.properties), ['prompt', 'image_url'])
     assert.deepEqual(imagegen.parameters.required, ['prompt'])
     assert.match(imagegen.description, /Never pass a provider, model, output path, size, quality, timeout, or concurrency policy/u)
@@ -1378,6 +1701,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const generated = await imagegen.execute({ prompt: 'Generate one verified image.' }, execution())
     assert.equal(generated.images.length, 1)
     assert.equal(generated.images[0].model, 'gpt-image-2-pro')
+    assert.equal(generated.status, 'completed')
     assert.equal(sessionEvents.at(-1)?.type, 'emate/image-output')
     assert.equal(sessionEvents.at(-1)?.ignorable, true)
     assert.deepEqual(requests.at(-1), {
@@ -1392,22 +1716,127 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       output: JSON.stringify({
         image_count: 1,
         failure_count: 0,
+        receipt_status: 'completed',
         request_ids: [generated.images[0].request_id],
         attachment_ids: [attachmentId],
       }),
     })
     assert.equal(generatedContent.some(block => block.type === 'image'), false)
     assert.equal(generatedContent.some(block => block.type === 'text' && block.text.includes(attachmentId)), true)
-    assert.deepEqual(sessionEvents.at(-1), {
-      type: 'emate/image-output',
-      ignorable: true,
-      data: {
-        call_id: 'image-call-1',
-        content: [{ type: 'image', attachment: generated.images[0].image }],
-      },
-      seq: 0,
-      time: sessionEvents[0].time,
+    assert.equal(sessionEvents.at(-1).data.schema_version, 2)
+    assert.equal(sessionEvents.at(-1).data.call_id, 'image-call-1')
+    assert.equal(sessionEvents.at(-1).data.operation, 'generate')
+    assert.equal(sessionEvents.at(-1).data.status, 'completed')
+    assert.equal(sessionEvents.at(-1).data.billing_status, 'recorded')
+    assert.equal(sessionEvents.at(-1).data.parent_session_id, 'image-session')
+    assert.match(sessionEvents.at(-1).data.child_session_id, /^image-child-\d+$/u)
+    assert.equal(sessionEvents.at(-1).data.provider_request_id, generated.images[0].request_id)
+    assert.equal(sessionEvents.at(-1).data.client_request_id, requestScopes[0].client)
+    assert.deepEqual(sessionEvents.at(-1).data.verifier, {
+      structural: 'attachment-cas-v1',
+      semantic: 'not-required',
     })
+    assert.deepEqual(sessionEvents.at(-1).data.content, [{ type: 'image', attachment: generated.images[0].image }])
+    assert.deepEqual(
+      sessionEvents.filter(event => event.data?.call_id === 'image-call-1')
+        .map(event => [event.data.revision, event.data.status, event.data.billing_status]),
+      [[1, 'running', 'unknown'], [2, 'completed', 'recorded']],
+    )
+    await new Promise(resolveImmediate => setImmediate(resolveImmediate))
+    assert.deepEqual(disposedChildReceiptCounts, [1])
+    assert.deepEqual(parentReceiptBeforeChildDispose, [true])
+    assert.equal(childRuns[0].localAgent.session.events.length, 0)
+    assert.equal(pluginCtx.jobs.get(generated.job_id, agent).ownerSession, agent.id)
+    assert.deepEqual(imagegen.output.presentationMeta({}, generated), {
+      $eMateDeliverables: {
+        schema_version: 1,
+        items: [{
+          kind: 'image',
+          name: 'e-Mate-image.png',
+          mime: 'image/png',
+          size: generated.images[0].image.bytes,
+          sha256: attachmentId.slice('sha256:'.length),
+          locator: {
+            kind: 'image-attachment',
+            attachment_id: attachmentId,
+            media_type: 'image/png',
+            bytes: generated.images[0].image.bytes,
+            width: generated.images[0].image.width,
+            height: generated.images[0].image.height,
+          },
+        }],
+      },
+    })
+    const requestsAfterFirst = requests.length
+    await assert.rejects(
+      imagegen.execute({ prompt: 'A replay must not invoke the provider.' }, {
+        agent, callId: 'image-call-1', signal: new AbortController().signal,
+      }),
+      /already has a terminal receipt.*new explicit retry Tool call/iu,
+    )
+    assert.equal(requests.length, requestsAfterFirst)
+    const legacyEvents = [{
+      type: 'emate/image-output',
+      data: {
+        call_id: 'legacy-image-call',
+        content: [{ type: 'image', attachment: selected }],
+      },
+    }]
+    await assert.rejects(
+      imagegen.execute({ prompt: 'A legacy terminal call must not replay the provider.' }, {
+        agent: {
+          id: 'legacy-image-session',
+          session: {
+            header: { id: 'legacy-image-session', cwd: temporary },
+            events: legacyEvents,
+            deriveMessages: () => [],
+          },
+        },
+        callId: 'legacy-image-call',
+        signal: new AbortController().signal,
+      }),
+      /already has a terminal receipt.*new explicit retry Tool call/iu,
+    )
+    assert.equal(requests.length, requestsAfterFirst)
+    assert.equal(legacyEvents.length, 1)
+    const runningOnly = structuredClone(sessionEvents.find(event =>
+      event.data?.call_id === 'image-call-1' && event.data?.revision === 1))
+    const replayEvents = [runningOnly]
+    const replayAgent = {
+      id: 'image-session',
+      session: {
+        header: { id: 'image-session', cwd: temporary },
+        events: replayEvents,
+        append(type, data, options) {
+          replayEvents.push({ type, data, ...options, seq: replayEvents.length, time: Date.now() })
+        },
+        deriveMessages: () => [],
+      },
+    }
+    await assert.rejects(
+      imagegen.execute({ prompt: 'A restart must not replay an unknown invocation.' }, {
+        agent: replayAgent, callId: 'image-call-1', signal: new AbortController().signal,
+      }),
+      /outcome is unknown after restart.*automatic replay is disabled/iu,
+    )
+    assert.equal(requests.length, requestsAfterFirst)
+    assert.equal(replayEvents.length, 1)
+    const restartedAgent = {
+      id: 'image-session-restarted',
+      session: {
+        header: { id: 'image-session', cwd: temporary },
+        events: structuredClone(sessionEvents),
+        deriveMessages: () => [],
+      },
+    }
+    const restartedMessage = {
+      id: 'restart-edit', role: 'user', source: { kind: 'user' },
+      content: [{ type: 'text', text: '继续修改上图。' }],
+    }
+    const restarted = await preStep({ agent: restartedAgent }, async () => ({
+      kind: 'enter', messages: [restartedMessage],
+    }))
+    assert.match(restarted.messages.at(-1).content[0].text, new RegExp(attachmentId))
     sessionMessages.push({
       id: 'generated-tool-result',
       source: { kind: 'tool', callId: 'image-call-1' },
@@ -1430,8 +1859,23 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.match(resumed.messages.at(-1).content[0].text, /normally the newest image/u)
     sessionMessages.push(modifyAbove)
 
+    nextResponseBytes = unreviewedBytes
     const implicitEdit = await imagegen.execute({ prompt: 'Retouch the referenced image only.' }, execution())
     assert.equal(implicitEdit.images.length, 1)
+    assert.equal(implicitEdit.status, 'needs-review')
+    assert.equal(implicitEdit.receipt.verification.source_output, 'distinct')
+    assert.equal(implicitEdit.receipt.verification.semantic, 'needs-review')
+    assert.deepEqual(await jobs.at(-1).done, {
+      status: 'failed',
+      detail: '1 image needs review',
+      output: JSON.stringify({
+        image_count: 0,
+        failure_count: 1,
+        receipt_status: 'needs-review',
+        request_ids: [implicitEdit.images[0].request_id],
+        attachment_ids: [],
+      }),
+    })
     assert.deepEqual(requests.at(-1), {
       path: '/e-mate/model-api/v1/images/edits',
       body: {
@@ -1446,8 +1890,149 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       id: 'modify-text-on-image', role: 'user', source: { kind: 'user' },
       content: [{ type: 'text', text: '图上的方林改为圣都。' }],
     })
-    await imagegen.execute({ prompt: '把图片中的方林改成圣都。' }, execution())
+    const textEdit = await imagegen.execute({ prompt: '把图片中的方林改成圣都。' }, execution())
     assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/edits')
+    assert.equal(textEdit.status, 'needs-review')
+    assert.deepEqual(textEdit.receipt.verification.text_replacement, {
+      old_text_sha256: createHash('sha256').update('方林').digest('hex'),
+      new_text_sha256: createHash('sha256').update('圣都').digest('hex'),
+      requested_regions: null,
+      status: 'needs-review',
+    })
+    assert.doesNotMatch(JSON.stringify(textEdit.receipt), /方林|圣都/u)
+    assert.deepEqual(imagegen.output.presentationMeta({}, textEdit), {
+      $eMateDeliverables: {
+        schema_version: 2,
+        items: [],
+        review_candidates: [{
+          kind: 'image',
+          operation: 'edit',
+          reason: 'semantic-verifier-unavailable',
+          name: 'e-Mate-image-review.png',
+          mime: 'image/png',
+          size: textEdit.images[0].image.bytes,
+          sha256: textEdit.images[0].image.attachmentId.slice('sha256:'.length),
+          locator: {
+            kind: 'image-attachment',
+            attachment_id: textEdit.images[0].image.attachmentId,
+            media_type: 'image/png',
+            bytes: textEdit.images[0].image.bytes,
+            width: textEdit.images[0].image.width,
+            height: textEdit.images[0].image.height,
+          },
+          sources: [{
+            kind: 'image-attachment',
+            attachment_id: textEdit.receipt.sources[0].attachmentId,
+            media_type: textEdit.receipt.sources[0].mediaType,
+            bytes: textEdit.receipt.sources[0].bytes,
+            width: textEdit.receipt.sources[0].width,
+            height: textEdit.receipt.sources[0].height,
+          }],
+        }],
+      },
+    })
+    assert.doesNotMatch(JSON.stringify(imagegen.output.presentationMeta({}, textEdit)), /方林|圣都|Retouch|private/u)
+
+    sessionMessages.push({
+      id: 'multi-region-text-edit', role: 'user', source: { kind: 'user' },
+      content: [{ type: 'text', text: '把图中 3 处“武汉”全部改为“成都”。' }],
+    })
+    const multiRegionEdit = await imagegen.execute({ prompt: '3处“武汉”全部改为“成都”。' }, execution())
+    assert.equal(multiRegionEdit.status, 'needs-review')
+    assert.deepEqual(multiRegionEdit.receipt.verification.text_replacement, {
+      old_text_sha256: createHash('sha256').update('武汉').digest('hex'),
+      new_text_sha256: createHash('sha256').update('成都').digest('hex'),
+      requested_regions: 3,
+      status: 'needs-review',
+    })
+    assert.doesNotMatch(JSON.stringify(multiRegionEdit.receipt), /武汉|成都/u)
+
+    const confirmedExecution = execution()
+    let confirmedReview
+    imageReviewAsk = async request => {
+      confirmedReview = request
+      assert.equal(request.agent, agent)
+      assert.equal(request.signal.aborted, false)
+      assert.equal(request.questions.length, 1)
+      const question = request.questions[0]
+      assert.equal(question.intent.kind, 'image-review')
+      assert.equal(question.intent.sources.length, 1)
+      assert.equal(question.intent.sources[0].attachmentId, attachmentId)
+      assert.notEqual(question.intent.output.attachmentId, attachmentId)
+      assert.match(question.detail, /只把标题中的旧名称改成新名称/u)
+      assert.match(question.detail, /系统只确认了源图与候选图的 SHA-256 不同/u)
+      const pending = agent.session.events.findLast(event => event.type === 'emate/image-output'
+        && event.data?.call_id === confirmedExecution.callId)
+      assert.equal(pending.data.revision, 2)
+      assert.equal(pending.data.status, 'needs-review')
+      assert.equal(pending.data.output.attachmentId, question.intent.output.attachmentId)
+      assert.deepEqual(pending.data.content, [{ type: 'image', attachment: question.intent.output }])
+      return { answers: [{ id: question.id, selected: [question.intent.approve] }] }
+    }
+    const requestsBeforeConfirmedReview = requests.length
+    const confirmedEdit = await imagegen.execute({
+      prompt: '只把标题中的旧名称改成新名称。',
+      image_url: attachmentId,
+    }, confirmedExecution)
+    imageReviewAsk = undefined
+    assert.ok(confirmedReview)
+    assert.equal(requests.length, requestsBeforeConfirmedReview + 1)
+    assert.equal(confirmedEdit.status, 'completed')
+    assert.equal(confirmedEdit.receipt.failure_code, undefined)
+    assert.deepEqual(confirmedEdit.receipt.verifier, {
+      structural: 'attachment-cas-v1',
+      semantic: 'native-user-confirmation-v1',
+    })
+    assert.deepEqual(confirmedEdit.receipt.verification.human_review, {
+      decision: 'accepted',
+      requirement_sha256: createHash('sha256').update('只把标题中的旧名称改成新名称。').digest('hex'),
+    })
+    assert.equal(confirmedEdit.receipt.verification.semantic, 'passed')
+    assert.deepEqual(
+      sessionEvents.filter(event => event.data?.call_id === confirmedExecution.callId)
+        .map(event => [event.data.revision, event.data.status]),
+      [[1, 'running'], [2, 'needs-review'], [3, 'completed']],
+    )
+    assert.equal(imagegen.output.presentationMeta({}, confirmedEdit).$eMateDeliverables.items.length, 1)
+    assert.deepEqual(await jobs.at(-1).done, {
+      status: 'completed',
+      detail: '1 image, 0 failures',
+      output: JSON.stringify({
+        image_count: 1,
+        failure_count: 0,
+        receipt_status: 'completed',
+        request_ids: [confirmedEdit.images[0].request_id],
+        attachment_ids: [confirmedEdit.images[0].image.attachmentId],
+      }),
+    })
+
+    const rejectedExecution = execution()
+    let rejectedCandidateId
+    nextResponseBytes = rejectedBytes
+    imageReviewAsk = async request => {
+      const question = request.questions[0]
+      rejectedCandidateId = question.intent.output.attachmentId
+      return { answers: [{ id: question.id, selected: ['拒绝结果'] }] }
+    }
+    const requestsBeforeRejectedReview = requests.length
+    await assert.rejects(
+      imagegen.execute({ prompt: '删除图片右上角标识。', image_url: attachmentId }, rejectedExecution),
+      /rejected by the user/u,
+    )
+    imageReviewAsk = undefined
+    assert.equal(requests.length, requestsBeforeRejectedReview + 1)
+    const rejectedReceipt = terminalReceipt(agent, rejectedExecution.callId)
+    assert.equal(rejectedReceipt.revision, 3)
+    assert.equal(rejectedReceipt.status, 'failed')
+    assert.equal(rejectedReceipt.failure_code, 'user-rejected')
+    assert.equal(rejectedReceipt.output.attachmentId, rejectedCandidateId)
+    assert.deepEqual(rejectedReceipt.content, [])
+    assert.deepEqual(rejectedReceipt.verification.human_review, {
+      decision: 'rejected',
+      requirement_sha256: createHash('sha256').update('删除图片右上角标识。').digest('hex'),
+    })
+    assert.equal(rejectedReceipt.verification.semantic, 'failed')
+    assert.equal((await jobs.at(-1).done).status, 'failed')
 
     sessionMessages.push({
       id: 'new-map-image', role: 'user', source: { kind: 'user' },
@@ -1461,6 +2046,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       image_url: [attachmentId],
     }, execution())
     assert.equal(edited.images[0].model, 'gpt-image-2-pro')
+    assert.equal(edited.status, 'needs-review')
     assert.deepEqual(requests.at(-1), {
       path: '/e-mate/model-api/v1/images/edits',
       body: {
@@ -1471,11 +2057,12 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       },
     })
 
-    const second = await context.attachments.saveImage({
-      data: readFileSync(new URL('../../../upstream/deepseek-harness/examples/acp-agent/tests/snapshots/read-image/workspace/red.png', import.meta.url)),
+    const storedSecond = await context.attachments.saveImage({
+      data: readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-models-page.png', import.meta.url)),
       mediaType: 'image/png',
-      name: 'red.png',
+      name: 'diagram.png',
     })
+    const second = { ...storedSecond, name: join(temporary, 'private', 'diagram.png') }
     await assert.rejects(
       imagegen.execute({ prompt: 'Edit both current images independently.' }, {
         agent: {
@@ -1483,6 +2070,9 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
           session: {
             header: { id: 'multi-image-session', cwd: temporary },
             events: [],
+            append(type, data, options) {
+              this.events.push({ type, data, ...options, seq: this.events.length, time: Date.now() })
+            },
             deriveMessages: () => [{
               id: 'multi-image-message', role: 'user', source: { kind: 'user' },
               content: [
@@ -1498,12 +2088,67 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       /multiple source images.*exact attachment ID/iu,
     )
     sessionMessages.push({
-      id: 'second-tool-result', source: { kind: 'tool', callId: 'image-call-pack' },
-      content: [{
-        type: 'tool-result', toolCallId: 'image-call-pack', isError: false,
-        content: [{ type: 'image', attachment: second }],
-      }],
+      id: 'second-user-upload', role: 'user', source: { kind: 'user' },
+      content: [{ type: 'image', attachment: second }, { type: 'text', text: '这是第二张源图。' }],
     })
+    const fused = await imagegen.execute({
+      prompt: 'Fuse these two references into one new composition.',
+      image_url: [attachmentId, second.attachmentId],
+    }, execution())
+    assert.equal(fused.status, 'needs-review')
+    assert.equal(fused.receipt.operation, 'fusion')
+    assert.deepEqual(requests.at(-1).body.imageFields, ['image[]', 'image[]'])
+    assert.deepEqual(fused.receipt.sources.map(ref => ref.attachmentId), [attachmentId, second.attachmentId])
+    assert.doesNotMatch(JSON.stringify(fused.receipt), /private|e-mate-image-generation-/u)
+
+    const assertLeafBindingRejects = async (args, rewrite, extraImages = []) => {
+      const before = {
+        jobs: jobs.length,
+        policy: policyModels.length,
+        requests: requests.length,
+        retryGuards: mismatchedLeafRetryGuards.length,
+      }
+      nextLeafMutation = { rewrite, extraImages }
+      const exec = execution()
+      await assert.rejects(
+        imagegen.execute(args, exec),
+        /exactly one valid durable image receipt/u,
+      )
+      await new Promise(resolveImmediate => setImmediate(resolveImmediate))
+      assert.deepEqual({
+        jobs: jobs.length,
+        policy: policyModels.length,
+        requests: requests.length,
+        retryGuards: mismatchedLeafRetryGuards.length,
+      }, { ...before, retryGuards: before.retryGuards + 1 })
+      assert.equal(mismatchedLeafRetryGuards.at(-1), true)
+      assert.equal(disposedChildReceiptCounts.at(-1), 0)
+      const terminal = sessionEvents.filter(event => event.data?.call_id === exec.callId && event.data?.revision === 2)
+      assert.equal(terminal.length, 1)
+      assert.equal(terminal[0].data.status, 'failed')
+      assert.equal(terminal[0].data.billing_status, 'not-submitted')
+      assert.equal(terminal[0].data.failure_code, 'validation-failed')
+      assert.equal('job_id' in terminal[0].data, false)
+      assert.equal('client_request_id' in terminal[0].data, false)
+      assert.equal('provider_request_id' in terminal[0].data, false)
+    }
+    await assertLeafBindingRejects(
+      { prompt: 'Generate only the parent-authorized prompt.' },
+      args => ({ ...args, prompt: 'Generate a different child prompt.' }),
+    )
+    await assertLeafBindingRejects(
+      { prompt: 'Edit only the parent-authorized source.', image_url: attachmentId },
+      args => ({ ...args, image_url: second.attachmentId }),
+      [second],
+    )
+    await assertLeafBindingRejects(
+      {
+        prompt: 'Fuse the parent-authorized sources in order.',
+        image_url: [attachmentId, second.attachmentId],
+      },
+      args => ({ ...args, image_url: [...args.image_url].reverse() }),
+    )
+
     const imagePack = tools.get('image_pack')
     await assert.rejects(
       imagePack.execute({ image_url: [attachmentId, second.attachmentId] }, execution()),
@@ -1511,18 +2156,64 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     )
     assert.equal(existsSync(join(temporary, '.e-mate', 'images')), false)
     sandboxMode = 'workspace-write'
+    await assert.rejects(
+      imagePack.execute({ image_url: [rejectedCandidateId] }, execution()),
+      /not a successful current-session image output/u,
+    )
+    sessionMessages.push({
+      id: 'unverified-image-tool-result', source: { kind: 'tool', callId: 'image-call-unverified-pack' },
+      content: [{
+        type: 'tool-result', toolCallId: 'image-call-unverified-pack', isError: false,
+        content: [{ type: 'image', attachment: implicitEdit.images[0].image }],
+      }],
+    })
+    await assert.rejects(
+      imagePack.execute({ image_url: [attachmentId, implicitEdit.images[0].image.attachmentId] }, execution()),
+      /not a successful current-session image output/u,
+    )
+    sessionEvents.push({
+      type: 'emate/image-output',
+      data: {
+        status: 'completed',
+        output: implicitEdit.images[0].image,
+        content: [{ type: 'image', attachment: implicitEdit.images[0].image }],
+      },
+    })
+    await assert.rejects(
+      imagePack.execute({ image_url: [implicitEdit.images[0].image.attachmentId] }, execution()),
+      /not a successful current-session image output/u,
+    )
+    sessionEvents.pop()
+    assert.equal(existsSync(join(temporary, '.e-mate', 'images')), false)
+    const confirmedPack = await imagePack.execute({
+      image_url: [confirmedEdit.images[0].image.attachmentId],
+    }, execution())
+    assert.equal(confirmedPack.image_count, 1)
     const packed = await imagePack.execute({ image_url: [attachmentId, second.attachmentId] }, execution())
     assert.equal(packed.image_count, 2)
     assert.match(packed.relative_path, /^\.e-mate\/images\/e-Mate-images-[0-9a-f]{12}\.zip$/u)
     const archive = unzipSync(readFileSync(join(temporary, packed.relative_path)))
     assert.deepEqual(Object.keys(archive), ['image-001.png', 'image-002.png'])
     assert.equal(Buffer.from(archive['image-001.png']).equals(inputBytes), true)
-    assert.equal(Buffer.from(archive['image-002.png']).equals(readFileSync(new URL('../../../upstream/deepseek-harness/examples/acp-agent/tests/snapshots/read-image/workspace/red.png', import.meta.url))), true)
+    assert.equal(Buffer.from(archive['image-002.png']).equals(readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-models-page.png', import.meta.url))), true)
     assert.deepEqual(imagePack.presentCall({ image_url: [attachmentId, second.attachmentId] }), {
       card: 'generic', title: '打包图片', kind: 'edit', rawInput: '2 images',
       locations: [{ path: packed.relative_path }],
     })
     assert.match(imagePack.output.render({}, packed)[0].text, /2 张图片打包到本地产物/u)
+    assert.deepEqual(imagePack.output.presentationMeta({}, packed), {
+      $eMateDeliverables: {
+        schema_version: 1,
+        items: [{
+          kind: 'archive',
+          name: packed.relative_path.split('/').at(-1),
+          mime: 'application/zip',
+          size: packed.bytes,
+          sha256: null,
+          locator: { kind: 'workspace-file', relative_path: packed.relative_path },
+        }],
+      },
+    })
     sandboxMode = 'danger-full-access'
     assert.deepEqual(
       await imagePack.execute({ image_url: [attachmentId, second.attachmentId] }, execution()),
@@ -1533,32 +2224,435 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       id: 'new-variants-message', role: 'user', source: { kind: 'user' },
       content: [{ type: 'text', text: '生成两个全新的独立方案。' }],
     })
-    const concurrent = await Promise.all([
-      imagegen.execute({ prompt: 'Generate independent variant A.' }, execution()),
-      imagegen.execute({ prompt: 'Generate independent variant B.' }, execution()),
+    duplicateLeafAttempt = true
+    const firstParent = nativeParent('image-session-first-parent')
+    const secondParent = nativeParent('image-session-second-parent')
+    const jobsBeforeConcurrentParents = jobs.length
+    const policiesBeforeConcurrentParents = policyModels.length
+    const timelineBeforeConcurrentParents = jobTimeline.length
+    const concurrent = await Promise.allSettled([
+      imagegen.execute({ prompt: 'Generate independent variant A.' }, {
+        agent: firstParent,
+        callId: 'first-parent-image-call',
+        signal: new AbortController().signal,
+      }),
+      imagegen.execute({ prompt: 'Generate independent variant B.' }, {
+        agent: secondParent,
+        callId: 'second-parent-image-call',
+        signal: new AbortController().signal,
+      }),
     ])
-    assert.deepEqual(concurrent.map(result => result.images.length), [1, 1])
-    assert.equal(maximumSubmissions >= 2, true)
-    assert.deepEqual(policyModels, Array(7).fill('gpt-image-2-pro'))
-    assert.deepEqual(waitedJobs, jobs.map(job => job.id))
+    duplicateLeafAttempt = false
+    assert.deepEqual(concurrent.map(result => result.status), ['fulfilled', 'fulfilled'])
+    const [firstConcurrent, secondConcurrent] = concurrent.map(result => result.value)
+    assert.equal(duplicateLeafRejectedBeforeRequest, true)
+    assert.equal(maximumSubmissions, 1)
+    assert.equal(policyModels.every(model => model === 'gpt-image-2-pro'), true)
+    assert.equal(policyModels.length, policiesBeforeConcurrentParents + 2)
+    assert.equal(jobs.length, jobsBeforeConcurrentParents + 2)
+    const concurrentTimeline = jobTimeline.slice(timelineBeforeConcurrentParents)
+    assert.deepEqual(concurrentTimeline.filter(entry => !entry.startsWith('provider:')), [
+      `admitted:${firstConcurrent.job_id}`,
+      `settled:${firstConcurrent.job_id}`,
+      `admitted:${secondConcurrent.job_id}`,
+      `settled:${secondConcurrent.job_id}`,
+    ])
+    assert.ok(concurrentTimeline.indexOf(`provider:${firstConcurrent.receipt.client_request_id}`)
+      < concurrentTimeline.indexOf(`settled:${firstConcurrent.job_id}`))
+    assert.ok(concurrentTimeline.indexOf(`settled:${firstConcurrent.job_id}`)
+      < concurrentTimeline.indexOf(`provider:${secondConcurrent.receipt.client_request_id}`))
+    assert.equal(pluginCtx.jobs.get(firstConcurrent.job_id, firstParent).ownerSession, firstParent.id)
+    assert.throws(
+      () => pluginCtx.jobs.get(firstConcurrent.job_id, secondParent),
+      /belongs to another session/u,
+    )
+    assert.equal(pluginCtx.jobs.kill(firstConcurrent.job_id, firstParent), 'already-finished')
+    assert.throws(
+      () => pluginCtx.jobs.kill(firstConcurrent.job_id, secondParent),
+      /belongs to another session/u,
+    )
+    assert.deepEqual([...waitedJobs].sort(), jobs.map(job => job.id).sort())
     assert.equal(requests.every(request => !('provider' in request.body) && !('api_key' in request.body)), true)
-    const firstScope = `image-${createHash('sha256').update('image-session\0image-call-1').digest('hex').slice(0, 32)}`
+    const firstScope = `image-${createHash('sha256').update('image-child-1\0image-leaf-1').digest('hex').slice(0, 32)}`
     assert.deepEqual(requestScopes[0], { task: firstScope, trace: firstScope, session: firstScope, client: firstScope })
-    assert.equal(new Set(requestScopes.map(scope => scope.task)).size, 7)
+    assert.equal(new Set(requestScopes.map(scope => scope.task)).size, requestScopes.length)
+
+    const admissionActiveParent = nativeParent('image-admission-active-parent')
+    const killedParent = nativeParent('image-admission-killed-parent')
+    const killedWithoutReasonParent = nativeParent('image-admission-killed-without-reason-parent')
+    const abortedParent = nativeParent('image-admission-aborted-parent')
+    const disposedParent = nativeParent('image-admission-disposed-parent')
+    const starterFailureParent = nativeParent('image-admission-starter-failure-parent')
+    const admissionFollowerParent = nativeParent('image-admission-follower-parent')
+    const jobsBeforeAdmissionCases = jobs.length
+    const providersBeforeAdmissionCases = jobTimeline.filter(entry => entry.startsWith('provider:')).length
+    const timelineBeforeAdmissionCases = jobTimeline.length
+    let releaseAdmissionGate
+    requestGate = new Promise(resolveGate => { releaseAdmissionGate = resolveGate })
+    const admissionGateEntered = new Promise(resolveEntered => { requestGateEntered = resolveEntered })
+
+    const activeAdmissionCall = imagegen.execute({ prompt: 'Hold the admitted provider lane.' }, {
+      agent: admissionActiveParent,
+      callId: 'admission-active-call',
+      signal: new AbortController().signal,
+    })
+    const activeAdmissionOutcome = Promise.allSettled([activeAdmissionCall])
+    await admissionGateEntered
+    const activeAdmissionJob = await waitFor(
+      () => jobs.length >= jobsBeforeAdmissionCases + 1 ? jobs[jobsBeforeAdmissionCases] : undefined,
+      'active image Job was not registered',
+    )
+    assert.equal(context.jobs.get(activeAdmissionJob.id, admissionActiveParent).status, 'running')
+    assert.equal(jobTimeline.filter(entry => entry.startsWith('provider:')).length, providersBeforeAdmissionCases + 1)
+
+    const killedCall = imagegen.execute({ prompt: 'Remain queued until native kill.' }, {
+      agent: killedParent,
+      callId: 'admission-killed-call',
+      signal: new AbortController().signal,
+    })
+    const killedOutcome = Promise.allSettled([killedCall])
+    const killedJob = await waitFor(
+      () => jobs.length >= jobsBeforeAdmissionCases + 2 ? jobs[jobsBeforeAdmissionCases + 1] : undefined,
+      'killed image Job was not registered while waiting',
+    )
+    assert.equal(context.jobs.list(killedParent).some(job => job.id === killedJob.id && job.status === 'running'), true)
+    assert.equal(context.jobs.get(killedJob.id, killedParent).id, killedJob.id)
+    assert.throws(() => context.jobs.get(killedJob.id, admissionActiveParent), /belongs to another session/u)
+    assert.equal(context.jobs.kill(killedJob.id, killedParent, 'cancel queued image'), 'requested')
+    assert.deepEqual((await killedOutcome).map(result => result.status), ['rejected'])
+    const killedSnapshot = context.jobs.get(killedJob.id, killedParent)
+    assert.equal(killedSnapshot.id, killedJob.id)
+    assert.equal(killedSnapshot.kind, 'emate-image')
+    assert.equal(killedSnapshot.ownerSession, killedParent.id)
+    assert.equal(killedSnapshot.status, 'killed')
+    assert.equal(killedSnapshot.detail, 'cancel queued image')
+    assert.equal(killedSnapshot.reported, true)
+    const killedReceipt = terminalReceipt(killedParent, 'admission-killed-call')
+    assert.equal(killedReceipt.job_id, killedJob.id)
+    assert.equal(killedReceipt.status, 'cancelled')
+    assert.equal(killedReceipt.failure_code, 'cancelled')
+    assert.equal(killedReceipt.billing_status, 'not-submitted')
+    assert.equal('provider_request_id' in killedReceipt, false)
+    assert.equal(jobTimeline.filter(entry => entry.startsWith('provider:')).length, providersBeforeAdmissionCases + 1)
+
+    const killedWithoutReasonCall = imagegen.execute({ prompt: 'Remain queued until native kill without reason.' }, {
+      agent: killedWithoutReasonParent,
+      callId: 'admission-killed-without-reason-call',
+      signal: new AbortController().signal,
+    })
+    const killedWithoutReasonOutcome = Promise.allSettled([killedWithoutReasonCall])
+    const killedWithoutReasonJob = await waitFor(
+      () => jobs.length >= jobsBeforeAdmissionCases + 3 ? jobs[jobsBeforeAdmissionCases + 2] : undefined,
+      'reasonless-killed image Job was not registered while waiting',
+    )
+    assert.equal(context.jobs.kill(killedWithoutReasonJob.id, killedWithoutReasonParent), 'requested')
+    assert.deepEqual((await killedWithoutReasonOutcome).map(result => result.status), ['rejected'])
+    const killedWithoutReasonSnapshot = context.jobs.get(killedWithoutReasonJob.id, killedWithoutReasonParent)
+    assert.equal(killedWithoutReasonSnapshot.status, 'killed')
+    assert.equal('detail' in killedWithoutReasonSnapshot, false)
+    const killedWithoutReasonReceipt = terminalReceipt(
+      killedWithoutReasonParent,
+      'admission-killed-without-reason-call',
+    )
+    assert.equal(killedWithoutReasonReceipt.job_id, killedWithoutReasonJob.id)
+    assert.equal(killedWithoutReasonReceipt.status, 'cancelled')
+    assert.equal(killedWithoutReasonReceipt.failure_code, 'cancelled')
+    assert.equal(killedWithoutReasonReceipt.billing_status, 'not-submitted')
+    assert.equal('provider_request_id' in killedWithoutReasonReceipt, false)
+    assert.equal(jobTimeline.filter(entry => entry.startsWith('provider:')).length, providersBeforeAdmissionCases + 1)
+
+    const queuedAbort = new AbortController()
+    const abortedCall = imagegen.execute({ prompt: 'Remain queued until native abort.' }, {
+      agent: abortedParent,
+      callId: 'admission-aborted-call',
+      signal: queuedAbort.signal,
+    })
+    const abortedOutcome = Promise.allSettled([abortedCall])
+    const abortedJob = await waitFor(
+      () => jobs.length >= jobsBeforeAdmissionCases + 4 ? jobs[jobsBeforeAdmissionCases + 3] : undefined,
+      'aborted image Job was not registered while waiting',
+    )
+    queuedAbort.abort(new Error('abort queued image'))
+    assert.deepEqual((await abortedOutcome).map(result => result.status), ['rejected'])
+    assert.match(context.jobs.get(abortedJob.id, abortedParent).detail, /admission aborted/u)
+    assert.equal(context.jobs.get(abortedJob.id, abortedParent).status, 'killed')
+    const abortedReceipt = terminalReceipt(abortedParent, 'admission-aborted-call')
+    assert.equal(abortedReceipt.job_id, abortedJob.id)
+    assert.equal(abortedReceipt.status, 'cancelled')
+    assert.equal(abortedReceipt.failure_code, 'admission-aborted')
+    assert.equal(abortedReceipt.billing_status, 'not-submitted')
+    assert.equal('provider_request_id' in abortedReceipt, false)
+    assert.equal(jobTimeline.filter(entry => entry.startsWith('provider:')).length, providersBeforeAdmissionCases + 1)
+
+    const disposedCall = imagegen.execute({ prompt: 'Remain queued until owner teardown.' }, {
+      agent: disposedParent,
+      callId: 'admission-owner-disposed-call',
+      signal: new AbortController().signal,
+    })
+    const disposedOutcome = Promise.allSettled([disposedCall])
+    const disposedJob = await waitFor(
+      () => jobs.length >= jobsBeforeAdmissionCases + 5 ? jobs[jobsBeforeAdmissionCases + 4] : undefined,
+      'owner-disposed image Job was not registered while waiting',
+    )
+    const disposedScope = nativeParentScopes.get(disposedParent)
+    assert.ok(disposedScope)
+    await disposedScope.dispose()
+    assert.deepEqual((await disposedOutcome).map(result => result.status), ['rejected'])
+    assert.throws(() => context.jobs.get(disposedJob.id, disposedParent), new RegExp(`unknown job ${disposedJob.id}`, 'u'))
+    const disposedReceipt = terminalReceipt(disposedParent, 'admission-owner-disposed-call')
+    assert.equal(disposedReceipt.job_id, disposedJob.id)
+    assert.equal(disposedReceipt.status, 'failed')
+    assert.equal(disposedReceipt.failure_code, 'validation-failed')
+    assert.equal(disposedReceipt.billing_status, 'not-submitted')
+    assert.equal('provider_request_id' in disposedReceipt, false)
+    assert.equal(jobTimeline.filter(entry => entry.startsWith('provider:')).length, providersBeforeAdmissionCases + 1)
+
+    throwNextImageJobStarter = true
+    const starterFailureCall = imagegen.execute({ prompt: 'Preserve the allocated id if producer hooks fail.' }, {
+      agent: starterFailureParent,
+      callId: 'admission-starter-failure-call',
+      signal: new AbortController().signal,
+    })
+    const starterFailureOutcome = Promise.allSettled([starterFailureCall])
+    const starterFailureJob = await waitFor(
+      () => jobs.length >= jobsBeforeAdmissionCases + 6 ? jobs[jobsBeforeAdmissionCases + 5] : undefined,
+      'starter-failure image Job was not registered while waiting',
+    )
+    assert.equal(context.jobs.get(starterFailureJob.id, starterFailureParent).status, 'running')
+
+    const followerCall = imagegen.execute({ prompt: 'Run once after the failed queued starter.' }, {
+      agent: admissionFollowerParent,
+      callId: 'admission-follower-call',
+      signal: new AbortController().signal,
+    })
+    const followerOutcome = Promise.allSettled([followerCall])
+    const followerJob = await waitFor(
+      () => jobs.length >= jobsBeforeAdmissionCases + 7 ? jobs[jobsBeforeAdmissionCases + 6] : undefined,
+      'follower image Job was not registered while waiting',
+    )
+    assert.equal(context.jobs.get(followerJob.id, admissionFollowerParent).status, 'running')
+    assert.equal(jobTimeline.filter(entry => entry.startsWith('provider:')).length, providersBeforeAdmissionCases + 1)
+
+    releaseAdmissionGate()
+    requestGate = undefined
+    requestGateEntered = undefined
+    const [activeAdmissionSettled] = await activeAdmissionOutcome
+    const [starterFailureSettled] = await starterFailureOutcome
+    const [followerSettled] = await followerOutcome
+    assert.equal(activeAdmissionSettled.status, 'fulfilled')
+    assert.equal(starterFailureSettled.status, 'rejected')
+    assert.equal(followerSettled.status, 'fulfilled')
+    assert.match(context.jobs.get(starterFailureJob.id, starterFailureParent).detail, /simulated image Job starter failure/u)
+    assert.equal(context.jobs.get(starterFailureJob.id, starterFailureParent).status, 'failed')
+    const starterFailureReceipt = terminalReceipt(starterFailureParent, 'admission-starter-failure-call')
+    assert.equal(starterFailureReceipt.job_id, starterFailureJob.id)
+    assert.equal(starterFailureReceipt.status, 'failed')
+    assert.equal(starterFailureReceipt.failure_code, 'validation-failed')
+    assert.equal(starterFailureReceipt.billing_status, 'not-submitted')
+    assert.equal('provider_request_id' in starterFailureReceipt, false)
+    assert.equal(followerSettled.value.job_id, followerJob.id)
+    const admissionTimeline = jobTimeline.slice(timelineBeforeAdmissionCases)
+    assert.ok(admissionTimeline.indexOf(`settled:${activeAdmissionJob.id}`)
+      < admissionTimeline.indexOf(`provider:${followerSettled.value.receipt.client_request_id}`))
+    assert.ok(admissionTimeline.indexOf(`settled:${starterFailureJob.id}`)
+      < admissionTimeline.indexOf(`provider:${followerSettled.value.receipt.client_request_id}`))
+    assert.equal(jobTimeline.filter(entry => entry.startsWith('provider:')).length, providersBeforeAdmissionCases + 2)
+
+    const rogueEvents = [{
+      type: 'subagent/descriptor',
+      data: { mode: 'one-shot', provider: 'spawn', label: 'e-mate:image-leaf:untrusted', version: 2 },
+    }]
+    const requestsBeforeRogueLeaf = requests.length
     await assert.rejects(
-      imagegen.execute({ prompt: 'Edit missing image.', image_url: `sha256:${'f'.repeat(64)}` }, execution()),
+      imagegen.execute({ prompt: 'An unrelated subagent must not enter the provider leaf.' }, {
+        agent: {
+          id: 'rogue-image-child',
+          session: {
+            header: { id: 'rogue-image-child', parentSession: 'rogue-image-parent', cwd: temporary },
+            events: rogueEvents,
+            deriveMessages: () => [],
+            append(type, data, options) { rogueEvents.push({ type, data, ...options }) },
+          },
+        },
+        callId: 'rogue-image-call',
+        signal: new AbortController().signal,
+      }),
+      /not authorized by its native parent/u,
+    )
+    assert.equal(requests.length, requestsBeforeRogueLeaf)
+
+    const requestsBeforeZeroInvocation = requests.length
+    skipNextLeafInvocation = true
+    const zeroInvocationExec = execution()
+    await assert.rejects(
+      imagegen.execute({ prompt: 'A leaf that calls no image Tool is not submitted.' }, zeroInvocationExec),
+      /exactly one valid durable image receipt/u,
+    )
+    assert.equal(requests.length, requestsBeforeZeroInvocation)
+    const zeroInvocationReceipt = sessionEvents.findLast(event => event.data?.call_id === zeroInvocationExec.callId)?.data
+    assert.equal(zeroInvocationReceipt.status, 'failed')
+    assert.equal(zeroInvocationReceipt.billing_status, 'not-submitted')
+    assert.equal(zeroInvocationReceipt.failure_code, 'validation-failed')
+    assert.equal('job_id' in zeroInvocationReceipt, false)
+    assert.equal('client_request_id' in zeroInvocationReceipt, false)
+    assert.equal('provider_request_id' in zeroInvocationReceipt, false)
+
+    const requestsBeforeHangingDispose = requests.length
+    const childrenBeforeHangingDispose = childRuns.length
+    const timelineBeforeHangingDispose = jobTimeline.length
+    hangNextDispose = true
+    const hangingDisposeCall = imagegen.execute({ prompt: 'Return terminal truth before hanging child cleanup.' }, execution())
+    let hangingDisposeDeadline
+    const hangingDisposeResult = await Promise.race([
+      hangingDisposeCall,
+      new Promise((_, reject) => {
+        hangingDisposeDeadline = setTimeout(() => reject(new Error('terminal image result waited for child cleanup')), 1_000)
+      }),
+    ]).finally(() => clearTimeout(hangingDisposeDeadline))
+    assert.equal(hangingDisposeResult.status, 'completed')
+    assert.equal(requests.length, requestsBeforeHangingDispose + 1)
+    const hangingChild = childRuns[childrenBeforeHangingDispose]
+    await waitFor(
+      () => hangingChildDisposals.includes(hangingChild.id) ? true : undefined,
+      'terminal image child disposal did not enter its simulated hang',
+    )
+    const afterHangingDispose = await imagegen.execute({ prompt: 'A later parent call is not locked by prior cleanup.' }, execution())
+    assert.equal(afterHangingDispose.status, 'completed')
+    assert.equal(requests.length, requestsBeforeHangingDispose + 2)
+    const hangingDisposeTimeline = jobTimeline.slice(timelineBeforeHangingDispose)
+    assert.ok(hangingDisposeTimeline.indexOf(`settled:${hangingDisposeResult.job_id}`)
+      < hangingDisposeTimeline.indexOf(`provider:${afterHangingDispose.receipt.client_request_id}`))
+    assert.equal(hangingChildDisposals.includes(hangingChild.id), true)
+
+    const requestsBeforeDisposeFailure = requests.length
+    rejectNextDispose = true
+    rejectCleanupWarning = true
+    const disposeFailureExec = execution()
+    const disposeFailureResult = await imagegen.execute({ prompt: 'Commit success before bounded cleanup.' }, disposeFailureExec)
+    assert.equal(requests.length, requestsBeforeDisposeFailure + 1)
+    assert.equal(disposeFailureResult.status, 'completed')
+    assert.equal(disposeFailureResult.receipt.call_id, disposeFailureExec.callId)
+    assert.equal(disposeFailureResult.receipt.provider_request_id, disposeFailureResult.images[0].request_id)
+    await new Promise(resolveImmediate => setImmediate(resolveImmediate))
+    assert.deepEqual(cleanupWarnings, ['e-Mate image subagent cleanup failed'])
+    assert.doesNotMatch(JSON.stringify(cleanupWarnings), /private|Users|dispose/iu)
+    const requestsAfterDisposeFailure = requests.length
+    await assert.rejects(
+      imagegen.execute({ prompt: 'Cleanup failure must not induce replay.' }, disposeFailureExec),
+      /already has a terminal receipt/u,
+    )
+    assert.equal(requests.length, requestsAfterDisposeFailure)
+
+    const requestsBeforeParentCasFailure = requests.length
+    rejectParentOutputRead = true
+    const parentCasExec = execution()
+    await assert.rejects(
+      imagegen.execute({
+        prompt: 'Preserve source and provider identity when parent CAS read fails.',
+        image_url: attachmentId,
+      }, parentCasExec),
+      /could not be verified in the parent Attachment CAS/u,
+    )
+    assert.equal(requests.length, requestsBeforeParentCasFailure + 1)
+    const parentCasReceipt = sessionEvents.findLast(event => event.data?.call_id === parentCasExec.callId)?.data
+    assert.equal(parentCasReceipt.revision, 3)
+    assert.equal(parentCasReceipt.status, 'failed')
+    assert.equal(parentCasReceipt.billing_status, 'recorded')
+    assert.equal(parentCasReceipt.failure_code, 'parent-attachment-cas-unavailable')
+    assert.match(parentCasReceipt.job_id, /^emate-image-/u)
+    assert.match(parentCasReceipt.provider_request_id, /^image-response-/u)
+    assert.match(parentCasReceipt.client_request_id, /^image-/u)
+    assert.equal(parentCasReceipt.model, 'gpt-image-2-pro')
+    assert.match(parentCasReceipt.output.attachmentId, /^sha256:[0-9a-f]{64}$/u)
+    assert.deepEqual(parentCasReceipt.sources.map(source => source.attachmentId), [attachmentId])
+    assert.deepEqual(parentCasReceipt.verification, {
+      structural: 'failed', source_output: 'distinct', semantic: 'needs-review',
+    })
+    assert.deepEqual(parentCasReceipt.content, [])
+    assert.doesNotMatch(JSON.stringify(parentCasReceipt), /private|Users|parent-cas/iu)
+    const restartedParentCasAgent = {
+      id: 'image-session-restarted-after-parent-cas',
+      session: {
+        header: { id: 'image-session', cwd: temporary },
+        events: structuredClone(sessionEvents),
+        deriveMessages: () => [],
+      },
+    }
+    const requestsBeforeParentCasRestart = requests.length
+    await assert.rejects(
+      imagegen.execute({ prompt: 'Restart must not replay the recorded provider call.' }, {
+        agent: restartedParentCasAgent,
+        callId: parentCasExec.callId,
+        signal: new AbortController().signal,
+      }),
+      /already has a terminal receipt/u,
+    )
+    assert.equal(requests.length, requestsBeforeParentCasRestart)
+
+    const requestsBeforeCorruptData = requests.length
+    nextCorruptData = true
+    const corruptDataExec = execution()
+    await assert.rejects(
+      imagegen.execute({ prompt: 'Capture provider ID before corrupt image data fails.' }, corruptDataExec),
+      /receipt status failed/u,
+    )
+    assert.equal(requests.length, requestsBeforeCorruptData + 1)
+    const corruptDataReceipt = sessionEvents.findLast(event => event.data?.call_id === corruptDataExec.callId)?.data
+    assert.equal(corruptDataReceipt.status, 'failed')
+    assert.equal(corruptDataReceipt.billing_status, 'recorded')
+    assert.match(corruptDataReceipt.provider_request_id, /^image-response-/u)
+    assert.match(corruptDataReceipt.job_id, /^emate-image-/u)
+    assert.match(corruptDataReceipt.client_request_id, /^image-/u)
+    assert.equal(corruptDataReceipt.failure_code, 'provider-result-uncommitted')
+    assert.deepEqual(await jobs.at(-1).done, { status: 'failed', detail: 'Image task failed' })
+
+    const requestsBeforePrivateFailure = requests.length
+    nextPrivateRequestError = true
+    const privateFailureExec = execution()
+    await assert.rejects(
+      imagegen.execute({ prompt: 'Do not expose private provider failures.' }, privateFailureExec),
+      /receipt status unknown/u,
+    )
+    assert.equal(requests.length, requestsBeforePrivateFailure + 1)
+    const privateFailureReceipt = sessionEvents.findLast(event => event.data?.call_id === privateFailureExec.callId)?.data
+    assert.equal(privateFailureReceipt.billing_status, 'unknown')
+    assert.equal(privateFailureReceipt.failure_code, 'provider-outcome-unknown')
+    assert.deepEqual(await jobs.at(-1).done, { status: 'failed', detail: 'Image task failed' })
+    assert.doesNotMatch(JSON.stringify({ receipt: privateFailureReceipt, job: await jobs.at(-1).done }), /private|Users|image-key|prompt/iu)
+
+    const requestsBeforePreflightFailures = requests.length
+    const missingImageExec = execution()
+    await assert.rejects(
+      imagegen.execute({ prompt: 'Edit missing image.', image_url: `sha256:${'f'.repeat(64)}` }, missingImageExec),
       /not present in this e-Mate session/,
     )
+    const missingImageReceipts = sessionEvents.filter(event => event.data?.call_id === missingImageExec.callId)
+    assert.equal(missingImageReceipts.length, 1)
+    assert.equal(missingImageReceipts[0].data.revision, 2)
+    assert.equal(missingImageReceipts[0].data.status, 'failed')
+    assert.equal(missingImageReceipts[0].data.billing_status, 'not-submitted')
+    assert.equal(missingImageReceipts[0].data.failure_code, 'validation-failed')
+    const invalidArgsExec = execution()
     await assert.rejects(
-      imagegen.execute({ prompt: 'Do not accept caller-selected model.', model: 'gpt-image-2' }, execution()),
+      imagegen.execute({ prompt: 'Do not accept caller-selected model.', model: 'gpt-image-2' }, invalidArgsExec),
       /additional property|only prompt and optional image_url/iu,
     )
+    const invalidArgsReceipts = sessionEvents.filter(event => event.data?.call_id === invalidArgsExec.callId)
+    assert.equal(invalidArgsReceipts.length, 1)
+    assert.equal(invalidArgsReceipts[0].data.revision, 2)
+    assert.equal(invalidArgsReceipts[0].data.status, 'failed')
+    assert.equal(invalidArgsReceipts[0].data.billing_status, 'not-submitted')
+    const emptyEditEvents = []
     await assert.rejects(
       imagegen.execute({ prompt: 'Modify the above image only.' }, {
         agent: {
           id: 'empty-image-session',
           session: {
             header: { id: 'empty-image-session', cwd: temporary },
+            events: emptyEditEvents,
+            append(type, data, options) {
+              emptyEditEvents.push({ type, data, ...options, seq: emptyEditEvents.length, time: Date.now() })
+            },
             deriveMessages: () => [{
               id: 'empty-edit', role: 'user', source: { kind: 'user' },
               content: [{ type: 'text', text: '修改上图。' }],
@@ -1569,14 +2663,188 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       }),
       /needs a source image.*upload one image once/u,
     )
+    assert.equal(emptyEditEvents.length, 1)
+    assert.equal(emptyEditEvents[0].data.revision, 2)
+    assert.equal(emptyEditEvents[0].data.status, 'failed')
+    assert.equal(emptyEditEvents[0].data.billing_status, 'not-submitted')
+    assert.equal(requests.length, requestsBeforePreflightFailures)
     const requestsBeforeFailure = requests.length
     nextFailureStatus = 503
     await assert.rejects(
       imagegen.execute({ prompt: 'Do not retry an unknown upstream failure.' }, execution()),
-      /HTTP 503/u,
+      /receipt status unknown/u,
     )
     assert.equal(requests.length, requestsBeforeFailure + 1)
-    assert.deepEqual(waitedJobs, jobs.map(job => job.id))
+    assert.equal(sessionEvents.at(-1).data.status, 'unknown')
+    assert.equal(sessionEvents.at(-1).data.billing_status, 'unknown')
+    assert.equal(sessionEvents.at(-1).data.failure_code, 'http-503')
+    assert.equal(sessionEvents.at(-1).data.parent_session_id, 'image-session')
+    assert.match(sessionEvents.at(-1).data.child_session_id, /^image-child-\d+$/u)
+    assert.equal(sessionEvents.at(-1).data.client_request_id, requestScopes.at(-1).client)
+    assert.equal('provider_request_id' in sessionEvents.at(-1).data, false)
+    const requestsBeforeRateLimit = requests.length
+    nextFailureStatus = 429
+    await assert.rejects(
+      imagegen.execute({ prompt: 'Do not retry a rate limit response.' }, execution()),
+      /receipt status unknown/u,
+    )
+    assert.equal(requests.length, requestsBeforeRateLimit + 1)
+    assert.equal(sessionEvents.at(-1).data.failure_code, 'http-429')
+
+    const requestsBeforeUntrustedReceipt = requests.length
+    injectChildReceiptSecret = true
+    await assert.rejects(
+      imagegen.execute({ prompt: 'Reject fields outside the receipt schema.' }, execution()),
+      /exactly one valid durable image receipt/u,
+    )
+    assert.equal(requests.length, requestsBeforeUntrustedReceipt + 1)
+    assert.equal(sessionEvents.at(-1).data.status, 'unknown')
+    assert.doesNotMatch(JSON.stringify(sessionEvents), /private child prompt/u)
+
+    const requestsBeforeCommitFailure = requests.length
+    rejectOutputSave = true
+    await assert.rejects(
+      imagegen.execute({ prompt: 'Record a known provider result even if local attachment commit fails.' }, execution()),
+      /receipt status failed/u,
+    )
+    assert.equal(requests.length, requestsBeforeCommitFailure + 1)
+    assert.equal(sessionEvents.at(-1).data.status, 'failed')
+    assert.equal(sessionEvents.at(-1).data.billing_status, 'recorded')
+    assert.match(sessionEvents.at(-1).data.provider_request_id, /^image-response-/u)
+    assert.match(sessionEvents.at(-1).data.client_request_id, /^image-/u)
+    assert.equal(sessionEvents.at(-1).data.failure_code, 'provider-result-uncommitted')
+
+    const unsupportedEvents = []
+    const unsupportedAgent = {
+      id: 'unsupported-image-session',
+      session: {
+        header: { id: 'unsupported-image-session', cwd: temporary },
+        events: unsupportedEvents,
+        deriveMessages: () => [{
+          id: 'unsupported-image-source', role: 'user', source: { kind: 'user' },
+          content: [{ type: 'image', attachment: { ...selected, mediaType: 'image/gif' } }],
+        }],
+        append(type, data, options) {
+          unsupportedEvents.push({ type, data, ...options, seq: unsupportedEvents.length, time: Date.now() })
+        },
+      },
+    }
+    const requestsBeforeValidationFailure = requests.length
+    await assert.rejects(
+      imagegen.execute({ prompt: 'Reject unsupported source media.', image_url: selected.attachmentId }, {
+        agent: unsupportedAgent,
+        callId: 'unsupported-source-call',
+        signal: new AbortController().signal,
+      }),
+      /receipt status failed/u,
+    )
+    assert.equal(requests.length, requestsBeforeValidationFailure)
+    assert.equal(unsupportedEvents.at(-1).data.billing_status, 'not-submitted')
+    assert.equal('job_id' in unsupportedEvents.at(-1).data, false)
+    assert.equal('client_request_id' in unsupportedEvents.at(-1).data, false)
+
+    let releaseModelPolicy
+    modelPolicyGate = new Promise(resolveGate => { releaseModelPolicy = resolveGate })
+    const enteredModelPolicy = new Promise(resolveEntered => { modelPolicyGateEntered = resolveEntered })
+    const preSubmitCancelController = new AbortController()
+    const requestsBeforePreSubmitCancel = requests.length
+    const preSubmitCancelled = imagegen.execute({ prompt: 'Cancel before any image submission.' }, {
+      ...execution(), signal: preSubmitCancelController.signal,
+    })
+    await enteredModelPolicy
+    preSubmitCancelController.abort(new Error('cancelled before image submission'))
+    releaseModelPolicy()
+    await assert.rejects(preSubmitCancelled, /receipt status cancelled/u)
+    modelPolicyGate = undefined
+    modelPolicyGateEntered = undefined
+    assert.equal(requests.length, requestsBeforePreSubmitCancel)
+    assert.equal(sessionEvents.at(-1).data.status, 'cancelled')
+    assert.equal(sessionEvents.at(-1).data.billing_status, 'not-submitted')
+
+    const requestsBeforeNoop = requests.length
+    nextNoop = true
+    await assert.rejects(
+      imagegen.execute({ prompt: 'Change the supplied image.', image_url: second.attachmentId }, execution()),
+      /receipt status failed/u,
+    )
+    assert.equal(requests.length, requestsBeforeNoop + 1)
+    assert.equal(sessionEvents.at(-1).data.status, 'failed')
+    assert.equal(sessionEvents.at(-1).data.failure_code, 'source-output-same-sha256')
+    assert.equal(sessionEvents.at(-1).data.content.length, 0)
+    assert.equal((await imagePack.execute({ image_url: [second.attachmentId] }, execution())).image_count, 1)
+
+    let releaseRequestGate
+    requestGate = new Promise(resolveGate => { releaseRequestGate = resolveGate })
+    const enteredGate = new Promise(resolveEntered => { requestGateEntered = resolveEntered })
+    const cancelController = new AbortController()
+    const cancelExecution = execution()
+    cancelExecution.signal = cancelController.signal
+    const cancelled = imagegen.execute({ prompt: 'Cancel this image exactly once.' }, cancelExecution)
+    await enteredGate
+    cancelController.abort(new Error('cancelled by test'))
+    await assert.rejects(cancelled, /receipt status cancelled/u)
+    releaseRequestGate()
+    requestGate = undefined
+    requestGateEntered = undefined
+    assert.equal(sessionEvents.at(-1).data.status, 'cancelled')
+    assert.equal(sessionEvents.at(-1).data.billing_status, 'unknown')
+    assert.equal(sessionEvents.at(-1).data.failure_code, 'cancelled')
+    assert.equal(JSON.stringify([...tools.values()].map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    }))), toolHeaderContract)
+
+    const serviceActiveParent = nativeParent('image-service-active-parent')
+    const serviceWaitingParent = nativeParent('image-service-waiting-parent')
+    const jobsBeforeServiceTeardown = jobs.length
+    const providersBeforeServiceTeardown = jobTimeline.filter(entry => entry.startsWith('provider:')).length
+    let releaseServiceGate
+    requestGate = new Promise(resolveGate => { releaseServiceGate = resolveGate })
+    const serviceGateEntered = new Promise(resolveEntered => { requestGateEntered = resolveEntered })
+    const serviceActiveCall = imagegen.execute({ prompt: 'Hold one provider through service teardown.' }, {
+      agent: serviceActiveParent,
+      callId: 'service-active-call',
+      signal: new AbortController().signal,
+    })
+    const serviceActiveOutcome = Promise.allSettled([serviceActiveCall])
+    await serviceGateEntered
+    const serviceActiveJob = await waitFor(
+      () => jobs.length >= jobsBeforeServiceTeardown + 1 ? jobs[jobsBeforeServiceTeardown] : undefined,
+      'service-active image Job was not registered',
+    )
+    const serviceWaitingCall = imagegen.execute({ prompt: 'Remain queued through service teardown.' }, {
+      agent: serviceWaitingParent,
+      callId: 'service-waiting-call',
+      signal: new AbortController().signal,
+    })
+    const serviceWaitingOutcome = Promise.allSettled([serviceWaitingCall])
+    const serviceWaitingJob = await waitFor(
+      () => jobs.length >= jobsBeforeServiceTeardown + 2 ? jobs[jobsBeforeServiceTeardown + 1] : undefined,
+      'service-waiting image Job was not registered',
+    )
+    assert.equal(context.jobs.get(serviceActiveJob.id, serviceActiveParent).status, 'running')
+    assert.equal(context.jobs.get(serviceWaitingJob.id, serviceWaitingParent).status, 'running')
+    assert.equal(jobTimeline.filter(entry => entry.startsWith('provider:')).length, providersBeforeServiceTeardown + 1)
+    await jobFiber.dispose()
+    jobFiber = undefined
+    releaseServiceGate()
+    requestGate = undefined
+    requestGateEntered = undefined
+    assert.deepEqual((await serviceActiveOutcome).map(result => result.status), ['rejected'])
+    assert.deepEqual((await serviceWaitingOutcome).map(result => result.status), ['rejected'])
+    const serviceActiveReceipt = terminalReceipt(serviceActiveParent, 'service-active-call')
+    const serviceWaitingReceipt = terminalReceipt(serviceWaitingParent, 'service-waiting-call')
+    assert.equal(serviceActiveReceipt.job_id, serviceActiveJob.id)
+    assert.equal(serviceActiveReceipt.status, 'unknown')
+    assert.equal(serviceActiveReceipt.failure_code, 'provider-outcome-unknown')
+    assert.equal(serviceWaitingReceipt.job_id, serviceWaitingJob.id)
+    assert.equal(serviceWaitingReceipt.status, 'failed')
+    assert.equal(serviceWaitingReceipt.failure_code, 'validation-failed')
+    assert.equal(serviceWaitingReceipt.billing_status, 'not-submitted')
+    assert.equal('provider_request_id' in serviceWaitingReceipt, false)
+    assert.equal(jobTimeline.filter(entry => entry.startsWith('provider:')).length, providersBeforeServiceTeardown + 1)
+    assert.deepEqual([...waitedJobs].sort(), jobs.map(job => job.id).sort())
   } finally {
     for (const cleanup of cleanups.reverse()) await cleanup()
     await attachmentFiber?.dispose()
@@ -1721,17 +2989,17 @@ test('identity agreements are immutable, explicit, and use the target Connection
       logout: async ({ client_request_id }) => {
         assert.equal(client_request_id, 'session_logout:test-1')
         authenticated = false
-        return { receipt_id: 'logout-receipt-1' }
+        return { remote_revocation: 'revoked', receipt_id: 'logout-receipt-1' }
       },
     },
   })
   const challenge = await configuredRegistration('verification.issue', { purpose: 'registration' })
   assert.equal(challenge.value.image_data_url, captchaImage)
   challengeExpiresAt = '2020-01-01T00:00:00.000Z'
-  await assert.rejects(
-    configuredRegistration('verification.issue', { purpose: 'registration' }),
-    /registration challenge is invalid/,
-  )
+  const invalidChallenge = await configuredRegistration('verification.issue', { purpose: 'registration' })
+  assert.equal(invalidChallenge.ok, false)
+  assert.equal(invalidChallenge.error.code, 'internal')
+  assert.doesNotMatch(invalidChallenge.error.message, /registration challenge is invalid/)
   challengeExpiresAt = '2030-01-01T00:00:00.000Z'
   const registered = await configuredRegistration('session.register', {
     account: ' test.user ',
@@ -1788,6 +3056,7 @@ test('identity agreements are immutable, explicit, and use the target Connection
     client_request_id: 'session_logout:test-1',
     confirmed: true,
   })
+  assert.equal(loggedOut.value.remote_revocation, 'revoked')
   assert.equal(loggedOut.value.receipt_id, 'logout-receipt-1')
   assert.equal(loggedOut.value.state.authenticated, false)
   assert.equal((await configuredRegistration('session.logout', {
@@ -1811,10 +3080,10 @@ test('identity agreements are immutable, explicit, and use the target Connection
     providerLegalName: '亦芯测试主体',
     identityProvider: { bootstrap: async () => ({ authenticated: true, workspace_unlocked: false }) },
   })
-  await assert.rejects(
-    invalidBootstrap('identity.bootstrap', {}),
-    /identity bootstrap is invalid/,
-  )
+  const invalidBootstrapResult = await invalidBootstrap('identity.bootstrap', {})
+  assert.equal(invalidBootstrapResult.ok, false)
+  assert.equal(invalidBootstrapResult.error.code, 'internal')
+  assert.doesNotMatch(invalidBootstrapResult.error.message, /identity bootstrap is invalid/)
 })
 
 test('enterprise identity provider maps target credentials and the production HTTP contracts without exposing tokens', async () => {
@@ -1966,7 +3235,7 @@ test('enterprise identity provider maps target credentials and the production HT
           acceptanceId: 'acceptance-receipt-207',
           userId: 'user-207',
           acceptedAt: new Date(clock).toISOString(),
-          clientVersion: '2.0.12',
+          clientVersion: '2.0.13',
           locale: 'zh-CN',
         } : null,
       })
@@ -1978,7 +3247,7 @@ test('enterprise identity provider maps target credentials and the production HT
         acceptanceId: 'acceptance-receipt-207',
         userId: 'user-207',
         acceptedAt: new Date(clock).toISOString(),
-        clientVersion: '2.0.12',
+        clientVersion: '2.0.13',
         locale: 'zh-CN',
       })
     }
@@ -2015,6 +3284,7 @@ test('enterprise identity provider maps target credentials and the production HT
       })
     }
     if (url.pathname.endsWith('/v1/runtime-models')) {
+      assert.equal(url.search, '?client_version=2.0.13')
       return json(runtimeResponse)
     }
     if (url.pathname.endsWith('/v1/authenticated-probe')
@@ -2218,7 +3488,6 @@ test('enterprise identity provider maps target credentials and the production HT
   const runtimeRequests = requests.filter(request => request.path.endsWith('/v1/runtime-models'))
   assert.ok(runtimeRequests.length >= 2)
   assert.ok(runtimeRequests.every(request => request.authorization === `Bearer ${modelToken}`))
-  assert.ok(runtimeRequests.every(request => new URL(request.url).search === '?client_version=2.0.12'))
   const auditRequests = requests.filter(request => request.path.endsWith('/v1/audit/usage'))
   assert.equal(auditRequests.length, 1)
   assert.equal(auditRequests[0].authorization, `Bearer ${modelToken}`)
@@ -2241,6 +3510,7 @@ test('enterprise identity provider maps target credentials and the production HT
   await provider.login({ identifier: 'test.user', password: 'secret-value', remember_login: true })
   values.set('E_MATE_MODEL_KEY_GPT', 'runtime-provider-key-not-persisted-here')
   const logout = await provider.logout({ client_request_id: 'logout-request-207' })
+  assert.equal(logout.remote_revocation, 'revoked')
   assert.equal(logout.receipt_id, 'logout-receipt-207')
   assert.equal(values.size, 0)
 
@@ -2326,7 +3596,7 @@ test('enterprise identity rejects expected gateway responses through the target 
   response = { status: 500, body: { error: { code: 'ACCOUNT_EXISTS', message: 'sensitive upstream detail' } } }
   assert.deepEqual(await identityHandler('session.register', payload), {
     ok: false,
-    error: { code: 'unavailable', message: '企业身份服务暂时不可用，请稍后重试。', details: { issues: [] } },
+    error: { code: 'internal', message: '企业身份服务暂时不可用，请稍后重试。', details: {} },
   })
 
   const login = { identifier: 'test.user', password: 'old-password', remember_login: true }
@@ -2338,19 +3608,22 @@ test('enterprise identity rejects expected gateway responses through the target 
   response = { status: 500, body: { error: { code: 'INVALID_GRANT' } } }
   assert.deepEqual(await identityHandler('session.login', login), {
     ok: false,
-    error: { code: 'unavailable', message: '企业身份服务暂时不可用，请稍后重试。', details: { issues: [] } },
+    error: { code: 'internal', message: '企业身份服务暂时不可用，请稍后重试。', details: {} },
   })
   assert.match(warnings.at(-1), /session\.login unavailable \(upstream-http 500\)/u)
   transportFailure = true
   assert.deepEqual(await identityHandler('session.login', login), {
     ok: false,
-    error: { code: 'unavailable', message: '企业身份服务暂时不可用，请稍后重试。', details: { issues: [] } },
+    error: { code: 'internal', message: '企业身份服务暂时不可用，请稍后重试。', details: {} },
   })
   assert.equal(requestSignal instanceof AbortSignal, true)
   assert.match(warnings.at(-1), /session\.login unavailable \(transport\)/u)
   transportFailure = false
   response = { status: 400, body: { error: { code: 'UNKNOWN_CONTRACT_FAILURE' } } }
-  await assert.rejects(identityHandler('session.login', login), /UNKNOWN_CONTRACT_FAILURE/u)
+  assert.deepEqual(await identityHandler('session.login', login), {
+    ok: false,
+    error: { code: 'internal', message: '企业身份服务暂时不可用，请稍后重试。', details: {} },
+  })
 })
 
 test('enterprise model switch keeps native history and survives a cached-policy outage and cold restart', async () => {
@@ -2407,6 +3680,10 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     },
   }
   let defaultModelSettings
+  const settingsRevisions = new Map([
+    ['llm-pi-ai', 0],
+    ['agent-default-model', 0],
+  ])
   let failDefaultModelWrite = false
   let delayedCredentialWrite
   let rejectedCredentialWrite
@@ -2518,10 +3795,17 @@ test('enterprise model switch keeps native history and survives a cached-policy 
         },
       },
       settings: {
+        describe: () => [...settingsRevisions].map(([ns, revision]) => ({ ns, revision })),
         get: ns => ns === 'llm-pi-ai'
           ? structuredClone(llmSettings)
           : ns === 'agent-default-model' ? structuredClone(defaultModelSettings) : undefined,
-        replace: async (ns, value) => {
+        replace: async (ns, value, expectedRevision) => {
+          const revision = settingsRevisions.get(ns)
+          assert.notEqual(revision, undefined)
+          if (expectedRevision !== undefined && expectedRevision !== revision) {
+            throw Object.assign(new Error('simulated Settings revision conflict'), { code: 'SETTINGS_CONFLICT' })
+          }
+          const previous = ns === 'llm-pi-ai' ? llmSettings : defaultModelSettings
           if (ns === 'llm-pi-ai') llmSettings = structuredClone(value)
           else if (ns === 'agent-default-model') {
             if (failDefaultModelWrite) {
@@ -2531,6 +3815,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
             defaultModelSettings = structuredClone(value)
           }
           else assert.fail(`unexpected settings namespace ${ns}`)
+          if (JSON.stringify(previous) !== JSON.stringify(value)) settingsRevisions.set(ns, revision + 1)
         },
       },
       storageDomain: { open: async () => openedDomains++ === 0 ? domain : quotaDomain },
@@ -2626,6 +3911,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
         if (event === 'agent/request') requestPolicy = handler
         else if (event === 'llm/stream') streamPolicy = handler
         else if (event === 'session/event' || event === 'session/flush') modelPolicyHandlers.set(event, handler)
+        else if (event === 'credentials/updated') modelPolicyHandlers.set(event, handler)
         else assert.fail(`unexpected model policy event ${event}`)
         return () => {}
       },
@@ -2673,6 +3959,41 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     assert.doesNotMatch(JSON.stringify(llmSettings), /redacted-for-test/u)
     assert.doesNotMatch(JSON.stringify(llmSettings), /model-api/u)
     assert.equal((await rpc.handler('unknown', {})).error.code, 'bad-request')
+
+    const nextGenerationSettings = structuredClone(llmSettings)
+    nextGenerationSettings.providers['e-mate-enterprise'].baseURL = 'http://next-generation.example:8088/v1'
+    const nextGenerationDefault = {
+      provider: 'e-mate-enterprise',
+      model: 'gpt-5.6-sol',
+      reasoningEffort: 'medium',
+    }
+    projectedSearchKey = 'superseded-search-key-redacted-for-test-456'
+    let releaseSupersededWrite
+    let markSupersededWriteStarted
+    const supersededWriteStarted = new Promise(resolve => { markSupersededWriteStarted = resolve })
+    delayedCredentialWrite = {
+      ref: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+      value: projectedSearchKey,
+      started: markSupersededWriteStarted,
+      release: new Promise(resolve => { releaseSupersededWrite = resolve }),
+    }
+    const supersededProjection = modelPolicy.refresh({ force: true })
+    await supersededWriteStarted
+    llmSettings = structuredClone(nextGenerationSettings)
+    defaultModelSettings = structuredClone(nextGenerationDefault)
+    settingsRevisions.set('llm-pi-ai', settingsRevisions.get('llm-pi-ai') + 1)
+    settingsRevisions.set('agent-default-model', settingsRevisions.get('agent-default-model') + 1)
+    modelPolicyHandlers.get('credentials/updated')('E_MATE_ENTERPRISE_SESSION')
+    releaseSupersededWrite()
+    assert.equal((await supersededProjection).revision, 7)
+    assert.deepEqual(llmSettings, nextGenerationSettings)
+    assert.deepEqual(defaultModelSettings, nextGenerationDefault)
+    for (const ref of [
+      'E_MATE_MODEL_KEY_GPT', 'E_MATE_MODEL_KEY_DEEPSEEK',
+      'E_MATE_MODEL_KEY_DOUBAO', 'E_MATE_SEARCH_KEY_DEEPSEEK',
+    ]) assert.equal(credentialValues.has(ref), false)
+    projectedSearchKey = 'deepseek-key-redacted-for-test-123'
+    await modelPolicy.refresh({ force: true })
 
     searchGrantStatus = 'denied'
     rejectQuotaSnapshotWrite = true

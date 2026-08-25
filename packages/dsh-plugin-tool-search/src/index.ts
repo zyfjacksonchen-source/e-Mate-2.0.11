@@ -17,6 +17,7 @@ export interface Config {
   alwaysVisible?: string[]
   maxResults?: number
   maxQueryChars?: number
+  searchAliases?: Record<string, string[]>
 }
 
 const RESULT_STATUSES = ['loaded', 'already_loaded', 'unavailable'] as const
@@ -26,12 +27,14 @@ interface ResolvedConfig {
   readonly alwaysVisible: readonly RegExp[]
   readonly maxResults: number
   readonly maxQueryChars: number
+  readonly searchAliases: ReadonlyMap<string, readonly string[]>
 }
 
 interface CatalogEntry {
   readonly schema: ToolSchema
   readonly normalizedName: string
   readonly normalizedDescription: string
+  readonly normalizedAliases: readonly string[]
   readonly tokens: readonly string[]
   readonly frequencies: ReadonlyMap<string, number>
 }
@@ -63,12 +66,18 @@ function termFrequencies(tokens: readonly string[]): Map<string, number> {
   return result
 }
 
-function catalogEntry(schema: ToolSchema): CatalogEntry {
-  const tokens = [...tokenize(schema.name), ...tokenize(schema.description)]
+function catalogEntry(schema: ToolSchema, aliases: readonly string[]): CatalogEntry {
+  const normalizedAliases = aliases.map(normalizeText)
+  const tokens = [
+    ...tokenize(schema.name),
+    ...tokenize(schema.description),
+    ...normalizedAliases.flatMap(tokenize),
+  ]
   return {
     schema,
     normalizedName: normalizeText(schema.name),
     normalizedDescription: normalizeText(schema.description),
+    normalizedAliases,
     tokens,
     frequencies: termFrequencies(tokens),
   }
@@ -112,6 +121,11 @@ function rankCatalog(query: string, entries: readonly CatalogEntry[]): CatalogEn
       if (rawTerms.has(entry.normalizedName)) score += 100_000
       if (normalizedQuery && entry.normalizedName.includes(normalizedQuery)) score += 1_000
       if (normalizedQuery && entry.normalizedDescription.includes(normalizedQuery)) score += 100
+      for (const alias of entry.normalizedAliases) {
+        if (alias === normalizedQuery) score += 500_000
+        else if (normalizedQuery.includes(alias)) score += 5_000
+        else if (alias.includes(normalizedQuery)) score += 500
+      }
       const nameTokens = new Set(tokenize(entry.schema.name))
       for (const term of queryTokens) {
         const frequency = entry.frequencies.get(term) ?? 0
@@ -157,10 +171,27 @@ function resolveConfig(config: Config): ResolvedConfig {
     seen.add(pattern)
     return wildcard(pattern)
   })
+  const aliasEntries = Object.entries(config.searchAliases ?? {})
+  if (aliasEntries.length > 128) throw new Error('tool-search: searchAliases supports at most 128 tools')
+  const searchAliases = new Map(aliasEntries.map(([toolName, aliases]) => {
+    if (!toolName || toolName.trim() !== toolName || !Array.isArray(aliases) || aliases.length > 32) {
+      throw new Error('tool-search: searchAliases requires a tool name and at most 32 aliases')
+    }
+    const normalized = new Set<string>()
+    for (const alias of aliases) {
+      if (typeof alias !== 'string' || alias.length < 2 || alias.length > 64 || alias.trim() !== alias
+        || alias.includes('\0') || normalized.has(normalizeText(alias))) {
+        throw new Error('tool-search: aliases must be unique strings of 2 to 64 characters without surrounding whitespace')
+      }
+      normalized.add(normalizeText(alias))
+    }
+    return [toolName, [...aliases]] as const
+  }))
   return {
     alwaysVisible,
     maxResults: positiveInteger('maxResults', config.maxResults, 5),
     maxQueryChars: positiveInteger('maxQueryChars', config.maxQueryChars, 512),
+    searchAliases,
   }
 }
 
@@ -267,18 +298,23 @@ export function apply(ctx: Context, config: Config = {}): void {
     }
   }
 
-  function install(agent: Agent): void {
+  function install(agent: Agent, previousSelection?: ReadonlySet<string>): void {
     if (states.has(agent)) return
     const inheritedSchemas = ctx.tools.schemas(agent)
     // Code/both modes own their own generated SDK disclosure. Do not layer a
     // Native-only search transport over that presentation.
     if (inheritedSchemas.some(schema => schema.name === 'run_code')) return
-    const catalog = new Map(inheritedSchemas.map(schema => [schema.name, catalogEntry(schema)]))
+    const restrictableNames = new Set(ctx.tools.schemas().map(schema => schema.name))
+    const catalog = new Map(inheritedSchemas
+      .filter(schema => restrictableNames.has(schema.name))
+      .map(schema => [schema.name, catalogEntry(schema, resolved.searchAliases.get(schema.name) ?? [])]))
     const eligibleNames = new Set(catalog.keys())
     const state: AgentState = {
       agent,
       catalog,
-      selectedNames: restoreSelection(agent, eligibleNames, resolved),
+      selectedNames: previousSelection === undefined
+        ? restoreSelection(agent, eligibleNames, resolved)
+        : new Set([...previousSelection].filter(name => eligibleNames.has(name))),
       allowedNames: [],
     }
     states.set(agent, state)
@@ -329,10 +365,15 @@ export function apply(ctx: Context, config: Config = {}): void {
         execute: (args, exec) => Promise.resolve(search(state, args.query, args.limit, exec.agent, exec.parent)),
       })))
       refreshRestriction(state)
-    } catch (error: unknown) {
+    } catch {
       states.delete(agent)
-      mutateRegistry(() => { state.removeSearchTool?.() })
-      throw error
+      try {
+        mutateRegistry(() => {
+          state.liftRestriction?.()
+          state.removeSearchTool?.()
+        })
+      } catch {}
+      ctx.logger.warn('e-Mate Tool Search unavailable; keeping the native Agent tool surface')
     }
   }
 
@@ -353,8 +394,9 @@ export function apply(ctx: Context, config: Config = {}): void {
     // Rebuild from the real post-policy inherited view. Tool-set changes are
     // rare; this keeps one source of truth and avoids a second tool registry.
     for (const agent of ctx.agents.list()) {
+      const previousSelection = states.get(agent)?.selectedNames
       uninstall(agent)
-      install(agent)
+      install(agent, previousSelection)
     }
   })
   for (const agent of ctx.agents.list()) install(agent)
@@ -362,4 +404,3 @@ export function apply(ctx: Context, config: Config = {}): void {
     for (const agent of [...states.keys()]) uninstall(agent)
   }, 'emate-tool-search: per-agent native restrictions')
 }
-

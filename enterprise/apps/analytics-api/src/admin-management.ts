@@ -36,7 +36,6 @@ import { AUTH_CREDENTIAL_SCHEMA_SQL, derivePasswordVerifier, normalizeLoginIdent
 import type { RuntimeRegistryPrincipal } from './runtime-registry.ts';
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
-const clientCredentialSecretPattern = /^emate_twe_[A-Za-z0-9_-]{43}$/;
 
 export type AdminModelRouteDefinition = {
   routeId: string;
@@ -53,7 +52,6 @@ export type AdminManagementStore = {
   listApiKeys(principal: RuntimeRegistryPrincipal): Promise<AdminApiKeyList>;
   issueApiKey(principal: RuntimeRegistryPrincipal, input: AdminApiKeyCreate): Promise<AdminApiKeyCreationResult>;
   revokeApiKey(principal: RuntimeRegistryPrincipal, keyId: string): Promise<boolean>;
-  authenticateTaskEventBearer(bearer: string): Promise<RuntimeRegistryPrincipal | null>;
   listModelRoutes(principal: RuntimeRegistryPrincipal): Promise<AdminModelRouteList>;
   updateModelRoute(
     principal: RuntimeRegistryPrincipal,
@@ -295,22 +293,6 @@ export class InMemoryAdminManagementStore implements AdminManagementStore {
     if (!key || key.tenantId !== tenantId) return false;
     if (!key.revokedAt) key.revokedAt = new Date(this.#now()).toISOString();
     return true;
-  }
-
-  async authenticateTaskEventBearer(bearer: string): Promise<RuntimeRegistryPrincipal | null> {
-    if (!clientCredentialSecretPattern.test(bearer)) return null;
-    const hash = keyHash(bearer);
-    const key = [...this.#keys.values()].find((candidate) => candidate.tokenHash === hash);
-    if (!key || key.revokedAt || !key.scopes.includes('task-events:write')) return null;
-    const user = this.#tenantUsers(key.tenantId).get(key.userId);
-    if (!user || user.status !== 'ACTIVE') return null;
-    key.lastUsedAt = new Date(this.#now()).toISOString();
-    return {
-      tenantId: key.tenantId,
-      userId: key.userId,
-      roles: [],
-      scopes: [...key.scopes],
-    };
   }
 
   async listModelRoutes(principal: RuntimeRegistryPrincipal): Promise<AdminModelRouteList> {
@@ -575,16 +557,27 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
         FOREIGN KEY (tenant_id, user_id)
           REFERENCES e_mate_tenant_user (tenant_id, user_id)
       );
+      UPDATE e_mate_admin_api_key
+         SET revoked_at = COALESCE(revoked_at, now())
+       WHERE 'task-events:write' = ANY(scopes);
       ALTER TABLE e_mate_admin_api_key
         DROP CONSTRAINT IF EXISTS e_mate_admin_api_key_scopes_check;
       ALTER TABLE e_mate_admin_api_key
         ADD CONSTRAINT e_mate_admin_api_key_scopes_check CHECK (
           (
-            scopes = ARRAY['task-events:write']::text[]
-            OR scopes = ARRAY['models:invoke']::text[]
-            OR scopes = ARRAY['task-events:write', 'models:invoke']::text[]
+            scopes = ARRAY['models:invoke']::text[]
+            AND principal_type = 'USER'
           )
-          AND ('models:invoke' <> ALL(scopes) OR principal_type = 'USER')
+          OR (
+            revoked_at IS NOT NULL
+            AND (
+              scopes = ARRAY['task-events:write']::text[]
+              OR (
+                scopes = ARRAY['task-events:write', 'models:invoke']::text[]
+                AND principal_type = 'USER'
+              )
+            )
+          )
         );
       CREATE TABLE IF NOT EXISTS e_mate_tenant_model_route (
         tenant_id text NOT NULL,
@@ -1044,39 +1037,6 @@ export class PostgresAdminManagementStore implements AdminManagementStore {
     } finally {
       client.release();
     }
-  }
-
-  async authenticateTaskEventBearer(bearer: string): Promise<RuntimeRegistryPrincipal | null> {
-    if (!clientCredentialSecretPattern.test(bearer)) return null;
-    const result = await this.#pool.query<{ tenant_id: string; user_id: string; scopes: string[] }>(
-      `
-      UPDATE e_mate_admin_api_key AS key
-         SET last_used_at = now()
-        FROM e_mate_tenant_user AS app_user
-       WHERE key.token_hash = $1
-         AND key.revoked_at IS NULL
-         AND 'task-events:write' = ANY(key.scopes)
-         AND app_user.tenant_id = key.tenant_id
-         AND app_user.user_id = key.user_id
-         AND app_user.status = 'ACTIVE'
-      RETURNING key.tenant_id, key.user_id, key.scopes
-    `,
-      [keyHash(bearer)]
-    );
-    const row = result.rows[0];
-    if (
-      !row ||
-      !row.scopes.includes('task-events:write') ||
-      row.scopes.some((scope) => scope !== 'task-events:write' && scope !== 'models:invoke')
-    ) {
-      return null;
-    }
-    return {
-      tenantId: identifier(row.tenant_id, 'tenant id'),
-      userId: identifier(row.user_id, 'user id'),
-      roles: [],
-      scopes: [...row.scopes],
-    };
   }
 
   async listModelRoutes(principal: RuntimeRegistryPrincipal): Promise<AdminModelRouteList> {

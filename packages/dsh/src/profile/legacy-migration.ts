@@ -49,10 +49,22 @@ export function registerLegacyArtifactDownload(ctx, dshHome) {
   })
 }
 
+export async function runOptionalLegacyMigration(ctx, options) {
+  try {
+    return await migrateLegacySessions({ ...options, skipUnavailableSources: true })
+  } catch {
+    ctx.logger.warn(
+      'e-Mate legacy session migration rejected; current sessions remain authoritative',
+      { event: 'migration-rejected' },
+    )
+    throw new Error('e-Mate legacy session migration rejected')
+  }
+}
+
 export function apply(ctx) {
   const dshHome = resolve(process.env.DSH_HOME || join(homedir(), '.dsh'))
   ctx.effect(() => registerLegacyArtifactDownload(ctx, dshHome), 'emate legacy artifact download')
   ctx.effect(async () => {
-    await migrateLegacySessions({ sessionPersistence: ctx.sessionPersistence, dshHome })
-  })
+    await runOptionalLegacyMigration(ctx, { sessionPersistence: ctx.sessionPersistence, dshHome })
+  }, 'emate legacy session migration')
 }

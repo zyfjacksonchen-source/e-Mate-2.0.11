@@ -91,6 +91,13 @@ test('production configuration maps a hashed bearer to fixed identity and denies
 
 test('production registers only identity, model-policy management, bounded model probes, and redacted audit surfaces', async () => {
   const source = readFileSync(new URL('../src/production.ts', import.meta.url), 'utf8');
+  const serverSource = readFileSync(new URL('../src/server.ts', import.meta.url), 'utf8');
+  const taskReaderSource = readFileSync(new URL('../src/task-events.ts', import.meta.url), 'utf8');
+  const gatewayServerSource = readFileSync(new URL('../../model-gateway/src/server.ts', import.meta.url), 'utf8');
+  const gatewayStoreSource = readFileSync(
+    new URL('../../model-gateway/src/postgres-usage-store.ts', import.meta.url),
+    'utf8'
+  );
   const adminSourceExtension = /\.(?:[cm]?[jt]sx?)$/u;
   for (const extension of ['ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs']) {
     assert.match(`source.${extension}`, adminSourceExtension);
@@ -136,6 +143,12 @@ test('production registers only identity, model-policy management, bounded model
     );
   };
   assert.doesNotMatch(source, /openRedisRuntimeRegistry|openPostgresSessionSummaryStore|openPostgresObservabilityPolicyStore/);
+  assert.doesNotMatch(source, /createManagementAuthenticator/);
+  assert.doesNotMatch(serverSource, /['"]\/v1\/tasks\/events['"]/u);
+  assert.doesNotMatch(taskReaderSource, /\b(?:append|initialize)\s*\(/u);
+  assert.doesNotMatch(taskReaderSource, /\b(?:INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b/u);
+  assert.match(gatewayServerSource, /['"]\/v1\/audit\/tasks['"]/u);
+  assert.match(gatewayStoreSource, /async ingestAuditTasks\(/u);
   assert.doesNotMatch(source, /\bregistry:|\bsessionIndex:|\bobservabilityPolicy:/);
   const productionWiring = source.match(/server = createAnalyticsServer\(\{(?<options>[\s\S]*?)\n    \}\);/u)?.groups?.options;
   assert(productionWiring);
@@ -222,6 +235,7 @@ test('production registers only identity, model-policy management, bounded model
       '/v1/computer-use/activate',
       '/v1/cdp/navigate',
       '/v1/schedules/create',
+      '/v1/tasks/events',
       '/v1/jobs/dispatch',
       '/v1/shares/share-1',
       '/v1/profiles/activate',

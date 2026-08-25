@@ -22,3 +22,112 @@ index 3bde9755d703a70fc3a45c048c249559fef78d82..9db6a66ee59dbe28a167683b791d8357
      }
      return {
          keychainFile,
+diff --git a/templates/nsis/installSection.nsh b/templates/nsis/installSection.nsh
+--- a/templates/nsis/installSection.nsh
++++ b/templates/nsis/installSection.nsh
+@@ -11,6 +11,13 @@ StrCpy $appExe "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+ # must be called before uninstallOldVersion
+ !insertmacro setLinkVars
+ 
++Var /GLOBAL keepShortcuts
++StrCpy $keepShortcuts "false"
++
++!ifmacrodef customUpdateInstallShouldRun
++  !insertmacro customUpdateInstallShouldRun $R7
++!endif
++
+ !ifdef ONE_CLICK
+   !ifdef HEADER_ICO
+     File /oname=$PLUGINSDIR\installerHeaderico.ico "${HEADER_ICO}"
+@@ -39,29 +46,45 @@ StrCpy $appExe "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+ 
+-Var /GLOBAL keepShortcuts
+-StrCpy $keepShortcuts "false"
+-!insertMacro setIsTryToKeepShortcuts
+-${if} $isTryToKeepShortcuts == "true"
+-  ReadRegStr $R1 SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" KeepShortcuts
+-
+-  ${if} $R1 == "true"
+-  ${andIf} ${FileExists} "$appExe"
+-    StrCpy $keepShortcuts "true"
+-  ${endIf}
+-${endif}
+-
+-!insertmacro uninstallOldVersion SHELL_CONTEXT
+-!insertmacro handleUninstallResult SHELL_CONTEXT
+-
+-${if} $installMode == "all"
+-  !insertmacro uninstallOldVersion HKEY_CURRENT_USER
+-  !insertmacro handleUninstallResult HKEY_CURRENT_USER
+-${endIf}
+-
+-SetOutPath $INSTDIR
+-
+-!ifdef UNINSTALLER_ICON
+-  File /oname=uninstallerIcon.ico "${UNINSTALLER_ICON}"
+-!endif
+-
+-!insertmacro installApplicationFiles
++!ifmacrodef customUpdateInstallShouldRun
++  ${if} $R7 == "true"
++    !insertmacro customUpdateInstallPrepare
++  ${endif}
++!endif
++
++${if} $R7 != "true"
++  !insertMacro setIsTryToKeepShortcuts
++  ${if} $isTryToKeepShortcuts == "true"
++    ReadRegStr $R1 SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" KeepShortcuts
++
++    ${if} $R1 == "true"
++    ${andIf} ${FileExists} "$appExe"
++      StrCpy $keepShortcuts "true"
++    ${endIf}
++  ${endIf}
++
++  !insertmacro uninstallOldVersion SHELL_CONTEXT
++  !insertmacro handleUninstallResult SHELL_CONTEXT
++
++  ${if} $installMode == "all"
++    !insertmacro uninstallOldVersion HKEY_CURRENT_USER
++    !insertmacro handleUninstallResult HKEY_CURRENT_USER
++  ${endIf}
++${endIf}
++
++${if} $R7 != "true"
++${orIf} $emateUpdateAction == "stage"
++  SetOutPath $INSTDIR
++
++  !ifdef UNINSTALLER_ICON
++    File /oname=uninstallerIcon.ico "${UNINSTALLER_ICON}"
++  !endif
++
++  !insertmacro installApplicationFiles
++${endif}
++
++!ifmacrodef customUpdateInstallShouldRun
++  ${if} $R7 == "true"
++    !insertmacro customUpdateInstallApply
++  ${endif}
++!endif
++
+ !insertmacro registryAddInstallInfo
+@@ -82,6 +105,12 @@ StrCpy $keepShortcuts "false"
+   !insertmacro customInstall
+ !endif
+ 
++!ifmacrodef customUpdateInstallShouldRun
++  ${if} $R7 == "true"
++    Goto appBuilderInstallSectionDone
++  ${endif}
++!endif
++
+ !macro doStartApp
+   # otherwise app window will be in background
+   HideWindow
+@@ -108,3 +137,5 @@ StrCpy $keepShortcuts "false"
+     !insertmacro doStartApp
+   ${endIf}
+ !endif
++
++appBuilderInstallSectionDone:

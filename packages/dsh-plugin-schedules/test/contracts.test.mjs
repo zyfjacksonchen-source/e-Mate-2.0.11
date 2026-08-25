@@ -19,18 +19,25 @@ test('projects real native Schedule events without owning execution or storage',
   mkdirSync(deepseek, { recursive: true })
   symlinkSync(join(repository, 'upstream', 'deepseek-harness', 'packages', 'schedule', 'schedule'), join(deepseek, 'dsh-schedule'), 'dir')
   const { apply, SCHEDULES_CHANNEL } = await import(pathToFileURL(join(component, 'lib', 'index.js')).href)
+  const { serverResponseSchema } = await import(pathToFileURL(join(
+    repository, 'upstream', 'deepseek-harness', 'packages', 'host', 'apiproxy', 'lib', 'types', 'api', 'rpc.schema.js',
+  )).href)
   let route
   let inspectCount = 0
+  let listFailure
   apply({
     connection: { rpc: { handle: (channel, handler, options) => {
       route = { channel, handler, options }
       return () => {}
     } } },
     sessionPersistence: {
-      listSnapshots: async () => [
-        { header: { id: 'session-1' }, revision: 'revision-1' },
-        { header: { id: 'session-bad' }, revision: 'revision-bad' },
-      ],
+      listSnapshots: async () => {
+        if (listFailure !== undefined) throw listFailure
+        return [
+          { header: { id: 'session-1' }, revision: 'revision-1' },
+          { header: { id: 'session-bad' }, revision: 'revision-bad' },
+        ]
+      },
       inspect: async id => {
         inspectCount += 1
         if (String(id) === 'session-bad') throw new Error('corrupt session')
@@ -84,13 +91,28 @@ test('projects real native Schedule events without owning execution or storage',
     session_id: 'session-1', session_title: '日报会话', id: 'schedule-2', kind: 'at',
     prompt: '提交周报', scheduledAt: '2026-08-19T12:00:00.000Z', ranAt: '2026-08-19T12:00:01.000Z',
   }])
-  assert.deepEqual(await route.handler('unknown', {}), {
+  const badRequest = await route.handler('unknown', {})
+  assert.deepEqual(badRequest, {
     ok: false,
     error: { code: 'bad-request', message: 'unknown e-Mate schedules endpoint', details: { issues: [] } },
   })
+  assert.doesNotThrow(() => serverResponseSchema.parse({
+    type: 'server-response', rpcId: 'schedule-bad-request', result: badRequest,
+  }))
   const second = await route.handler('list', {})
   assert.deepEqual(second.value.errors, [{ session_id: 'session-bad', message: '该会话的定时任务日志无法读取。' }])
   assert.equal(inspectCount, 3)
+
+  listFailure = new Error('private persistence path /Users/example/.dsh/session.jsonl')
+  const internal = await route.handler('list', {})
+  assert.deepEqual(internal, {
+    ok: false,
+    error: { code: 'internal', message: '定时任务暂时无法读取。', details: {} },
+  })
+  assert.doesNotMatch(JSON.stringify(internal), /private persistence|\/Users\/example|session\.jsonl/u)
+  assert.doesNotThrow(() => serverResponseSchema.parse({
+    type: 'server-response', rpcId: 'schedule-internal', result: internal,
+  }))
 
   const source = readFileSync(join(root, 'src', 'index.ts'), 'utf8')
   assert.match(source, /from '@deepseek-ai\/dsh-schedule'/u)

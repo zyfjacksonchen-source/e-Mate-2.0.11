@@ -1,0 +1,270 @@
+name: Admit e-Mate Desktop release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: Successful protected-main CI run for the exact source commit.
+        required: true
+        type: string
+      desktop_run_id:
+        description: Successful build-only Desktop run containing the exact candidate artifact.
+        required: true
+        type: string
+      desktop_artifact_id:
+        description: Exact GitHub artifact ID for e-mate-desktop-release-<source SHA>.
+        required: true
+        type: string
+      profile_release_run_id:
+        description: Successful bootstrap Profile release run containing all three signed desired states.
+        required: true
+        type: string
+      profile_artifact_id:
+        description: Exact GitHub artifact ID for the signed Profile publication bundle.
+        required: true
+        type: string
+      performance_workflow_run_id:
+        description: Successful TTFT v2 performance admission workflow run.
+        required: true
+        type: string
+      performance_artifact_id:
+        description: Exact GitHub artifact ID for e-mate-performance-admission-<source SHA>-attempt-1.
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: e-mate-desktop-admission-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  admission:
+    name: Desktop release admission
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            upstream/deepseek-harness/pnpm-lock.yaml
+
+      - name: Accept only the exact protected main source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          DESKTOP_RUN_ID: ${{ inputs.desktop_run_id }}
+          DESKTOP_ARTIFACT_ID: ${{ inputs.desktop_artifact_id }}
+          PROFILE_RUN_ID: ${{ inputs.profile_release_run_id }}
+          PROFILE_ARTIFACT_ID: ${{ inputs.profile_artifact_id }}
+          PERFORMANCE_RUN_ID: ${{ inputs.performance_workflow_run_id }}
+          PERFORMANCE_ARTIFACT_ID: ${{ inputs.performance_artifact_id }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = zyfjacksonchen-source/e-Mate-2.0.11
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REF_PROTECTED" = true
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/desktop-admission.yml@refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          for value in "$CI_RUN_ID" "$DESKTOP_RUN_ID" "$DESKTOP_ARTIFACT_ID" "$PROFILE_RUN_ID" \
+            "$PROFILE_ARTIFACT_ID" "$PERFORMANCE_RUN_ID" "$PERFORMANCE_ARTIFACT_ID"; do
+            [[ "$value" =~ ^[1-9][0-9]*$ ]]
+          done
+          mkdir -p .admission/metadata
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" > .admission/metadata/main-ref.json
+          for pair in \
+            "ci:$CI_RUN_ID" \
+            "desktop:$DESKTOP_RUN_ID" \
+            "profile:$PROFILE_RUN_ID" \
+            "performance:$PERFORMANCE_RUN_ID"; do
+            label="${pair%%:*}"
+            run_id="${pair#*:}"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > ".admission/metadata/$label-run.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" > ".admission/metadata/$label-jobs.json"
+          done
+          ci_artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100")"
+          ci_artifact_id="$(jq -er --arg name "e-mate-change-impact-$GITHUB_SHA" \
+            '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one CI impact artifact") end' <<<"$ci_artifacts")"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ci_artifact_id" > .admission/metadata/ci-artifact.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$DESKTOP_ARTIFACT_ID" > .admission/metadata/desktop-artifact.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$PROFILE_ARTIFACT_ID" > .admission/metadata/profile-publication-artifact.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$PERFORMANCE_ARTIFACT_ID" > .admission/metadata/performance-artifact.json
+
+      - name: Download the exact Desktop candidate artifact
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.desktop_artifact_id }}
+          path: .admission/desktop
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.desktop_run_id }}
+
+      - name: Resolve the candidate's exact Profile build artifacts
+        id: profile-build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          candidate=.admission/desktop/desktop-candidate.json
+          test -f "$candidate"
+          profile_build_run_id="$(jq -er '.artifacts.win32.build_run_id | select(test("^[1-9][0-9]*$"))' "$candidate")"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$profile_build_run_id" > .admission/metadata/profile-build-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$profile_build_run_id/jobs?per_page=100" > .admission/metadata/profile-build-jobs.json
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$profile_build_run_id/artifacts?per_page=100")"
+          profile_artifact_id="$(jq -er --arg name "e-mate-desktop-profile-$GITHUB_SHA" \
+            '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one Profile build artifact") end' <<<"$artifacts")"
+          receipt_artifact_id="$(jq -er --arg name "e-mate-desktop-profile-build-receipt-$GITHUB_SHA" \
+            '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one Profile build receipt artifact") end' <<<"$artifacts")"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$profile_artifact_id" > .admission/metadata/profile-build-artifact.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$receipt_artifact_id" > .admission/metadata/profile-build-receipt-artifact.json
+          echo "run_id=$profile_build_run_id" >> "$GITHUB_OUTPUT"
+          echo "artifact_id=$profile_artifact_id" >> "$GITHUB_OUTPUT"
+          echo "receipt_artifact_id=$receipt_artifact_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download the exact staged Profile bytes
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.profile-build.outputs.artifact_id }}
+          path: .admission/profile-build
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.profile-build.outputs.run_id }}
+
+      - name: Download the exact staged Profile build receipt
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.profile-build.outputs.receipt_artifact_id }}
+          path: .admission/profile-build-receipt
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.profile-build.outputs.run_id }}
+
+      - name: Download the exact signed Profile publication bundle
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.profile_artifact_id }}
+          path: .admission/profile-publication
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.profile_release_run_id }}
+
+      - name: Download the exact signed TTFT v2 admission bundle
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.performance_artifact_id }}
+          path: .admission/performance
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.performance_workflow_run_id }}
+
+      - name: Install the exact existing admission verifier dependencies
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm --dir upstream/deepseek-harness install --frozen-lockfile --ignore-scripts
+
+      - name: Recompute the Profile component aggregate from signed bytes
+        env:
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          PROFILE_RUN_ID: ${{ inputs.profile_release_run_id }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require(process.argv[1]).version" desktop/e-mate-desktop/package.json)"
+          node scripts/desktop-admission.mjs profile-aggregate \
+            --commit "$GITHUB_SHA" \
+            --ci-run-id "$CI_RUN_ID" \
+            --profile-run-id "$PROFILE_RUN_ID" \
+            --release-version "$version" \
+            --profile .admission/profile-build \
+            --inventory packages/dsh/profile/component-inventory.json \
+            --profile-receipt .admission/profile-build-receipt/profile-build-receipt.json \
+            --profile-release-bundle .admission/profile-publication \
+            --base-contract desktop/e-mate-desktop/base-contract.json \
+            --out .admission/profile-component-aggregate.json
+
+      - name: Verify the signed performance admission and its protected source identity
+        run: >-
+          node scripts/desktop-admission.mjs
+          performance-summary
+          --commit "$GITHUB_SHA"
+          --candidate .admission/desktop/desktop-candidate.json
+          --profile-aggregate .admission/profile-component-aggregate.json
+          --performance-bundle .admission/performance
+          --verifier-source scripts/performance-parity.mjs
+          --base-contract desktop/e-mate-desktop/base-contract.json
+          --out .admission/performance-summary.json
+
+      - name: Re-run the signed admission's exact TTFT v2 verifier
+        run: |
+          set -euo pipefail
+          verifier_source="$(node --input-type=module -e '
+            import { readFileSync } from "node:fs"
+            const value = JSON.parse(readFileSync(".admission/performance/performance-admission.json", "utf8"))
+            if (value?.verifier?.source !== "scripts/performance-parity.mjs") process.exit(1)
+            process.stdout.write(value.verifier.source)
+          ')"
+          node "$verifier_source" \
+            --input .admission/performance/e-mate-performance-evidence.json \
+            --output .admission/reverified-performance-evidence.json
+          cmp -s .admission/performance/e-mate-performance-evidence.json .admission/reverified-performance-evidence.json
+
+      - name: Validate GitHub run, job, artifact, and branch provenance
+        env:
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          DESKTOP_RUN_ID: ${{ inputs.desktop_run_id }}
+          DESKTOP_ARTIFACT_ID: ${{ inputs.desktop_artifact_id }}
+          PROFILE_RUN_ID: ${{ inputs.profile_release_run_id }}
+          PROFILE_ARTIFACT_ID: ${{ inputs.profile_artifact_id }}
+          PERFORMANCE_RUN_ID: ${{ inputs.performance_workflow_run_id }}
+          PERFORMANCE_ARTIFACT_ID: ${{ inputs.performance_artifact_id }}
+        run: >-
+          node scripts/desktop-admission.mjs
+          github-provenance
+          --commit "$GITHUB_SHA"
+          --candidate .admission/desktop/desktop-candidate.json
+          --metadata .admission/metadata
+          --ci-run-id "$CI_RUN_ID"
+          --desktop-run-id "$DESKTOP_RUN_ID"
+          --desktop-artifact-id "$DESKTOP_ARTIFACT_ID"
+          --profile-run-id "$PROFILE_RUN_ID"
+          --profile-artifact-id "$PROFILE_ARTIFACT_ID"
+          --performance-run-id "$PERFORMANCE_RUN_ID"
+          --performance-artifact-id "$PERFORMANCE_ARTIFACT_ID"
+          --out .admission/github-artifact-provenance.json
+
+      - name: Form the exact unsigned 11-field Desktop manifest
+        run: >-
+          node desktop/e-mate-desktop/scripts/desktop-release-manifest.ts
+          admit
+          --candidate .admission/desktop/desktop-candidate.json
+          --profile-aggregate .admission/profile-component-aggregate.json
+          --performance .admission/performance-summary.json
+          --github-provenance .admission/github-artifact-provenance.json
+          --out .admission/output/desktop-release-unsigned.json
+
+      - name: Stage only the external signer's two admitted inputs
+        run: |
+          set -euo pipefail
+          cp desktop/e-mate-desktop/base-contract.json .admission/output/base-contract.json
+          test "$(find .admission/output -maxdepth 1 -type f -printf '%f\n' | sort | paste -sd, -)" = "base-contract.json,desktop-release-unsigned.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-desktop-admission-${{ github.sha }}
+          path: |
+            .admission/output/base-contract.json
+            .admission/output/desktop-release-unsigned.json
+          if-no-files-found: error
+          retention-days: 30

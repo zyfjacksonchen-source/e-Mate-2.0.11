@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { mkdir, symlink, writeFile } from 'node:fs/promises'
@@ -11,17 +11,28 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { assertEvidenceSource, BUNDLED_PLUGIN_PACKAGES, generateEvidence, isAcceptedReleaseCommit, RELEASE_PACKAGES, TARGET_NATIVE_RUNTIME_FILES, verifyRelease, VERSION } from './release.mjs'
 import {
   buildR2Inventory,
-  matchesR2Head,
   normalizeProductionPublicOrigin,
   R2_BUCKET,
   R2_PUBLIC_ORIGIN,
+  writeR2PublicationPlan,
 } from './publish-r2.mjs'
 import { releasePrefix, releaseSource } from './release-source.mjs'
-import { renderDownloadPage } from './render-download-page.mjs'
+import { stageDownloadPage, validateDownloadPage } from './render-download-page.mjs'
 import { prepareHarnessBaseImports } from './component-base-imports.mjs'
 import { stageDesktopProfileArtifact } from './stage-desktop-profile-artifact.mjs'
+import {
+  admitDesktopReleaseManifest,
+  createDesktopArtifactCandidate,
+} from '../desktop/e-mate-desktop/scripts/desktop-release-manifest.ts'
+import {
+  DESKTOP_VERSION_ENDPOINT,
+  checkForStableUpdate,
+  validateAdmittedDesktopReleaseManifest,
+  validateDesktopReleaseArtifact,
+  validateUnsignedAdmittedDesktopReleaseManifest,
+} from '../desktop/e-mate-desktop/src/update-checker.ts'
 
-const HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
+const HARNESS_COMMIT = 'b2b1650b01f0ee88d81837a9b5c050f9f763f606'
 const DIGEST = '0'.repeat(64)
 const R2_FIXTURE_PUBLIC_ORIGIN = 'https://downloads.e-mate.example'
 const SOURCE_COMMIT = '70ff2ce2e340682f4aad2be27e4ec8f1d74ee913'
@@ -128,6 +139,10 @@ test('release evidence requires the one bundled package and emits hashes plus SP
     assert.equal(r2.prefix, releasePrefix(SOURCE_COMMIT))
     assert.equal(r2.objects.length, 6)
     assert.ok(r2.objects.every(item => item.key === `${releasePrefix(SOURCE_COMMIT)}/${item.filename}` && item.url === `${R2_FIXTURE_PUBLIC_ORIGIN}/${item.key}`))
+    const plan = await writeR2PublicationPlan(root, output, join(root, 'r2-publication-plan.json'), SOURCE_COMMIT)
+    assert.equal(plan.publication_authority, 'codex-cloudflare-plugin')
+    assert.equal(plan.objects.length, 6)
+    assert.ok(plan.objects.every(item => !('path' in item) && /^(?:npm|release)\/[^/]+$/u.test(item.artifact_path)))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -150,25 +165,6 @@ test('publication accepts only the exact 40-character release commit', () => {
   assert.equal(isAcceptedReleaseCommit({ GITHUB_SHA: SOURCE_COMMIT, EMATE_ACCEPTED_SHA: SOURCE_COMMIT }), true)
   assert.equal(isAcceptedReleaseCommit({ GITHUB_SHA: DIGEST, EMATE_ACCEPTED_SHA: DIGEST }), false)
   assert.equal(isAcceptedReleaseCommit({ GITHUB_SHA: SOURCE_COMMIT, EMATE_ACCEPTED_SHA: 'a'.repeat(40) }), false)
-})
-
-test('R2 immutable readback includes download metadata as well as bytes identity', () => {
-  const item = {
-    filename: 'e-mate-dsh-2.0.12.tgz',
-    size: 207,
-    sha256: DIGEST,
-    contentType: 'application/gzip',
-  }
-  const head = {
-    ContentLength: item.size,
-    ContentType: item.contentType,
-    ContentDisposition: `attachment; filename="${item.filename}"`,
-    CacheControl: 'public,max-age=31536000,immutable',
-    Metadata: { sha256: item.sha256 },
-  }
-  assert.equal(matchesR2Head(head, item), true)
-  assert.equal(matchesR2Head({ ...head, CacheControl: 'no-cache' }, item), false)
-  assert.equal(matchesR2Head({ ...head, Metadata: { sha256: 'f'.repeat(64) } }, item), false)
 })
 
 test('production R2 download origin is the owned public bucket', () => {
@@ -362,6 +358,8 @@ test('GitHub release packs once and validates the same tarball on three platform
     'admission',
   ])
   assert.equal(ci.jobs.source.needs, 'impact')
+  assert.equal(ci.jobs.source.steps.find(step => step.name === 'Build pinned DeepSeek Harness').run, 'pnpm build:harness')
+  assert.equal(release.jobs.pack.steps.find(step => step.name === 'Build pinned DeepSeek Harness').run, 'pnpm build:harness')
   assert.deepEqual(ci.jobs['base-platform-components'].needs, ['impact', 'source'])
   assert.deepEqual(ci.jobs['desktop-windows'].needs, ['impact', 'source'])
   assert.deepEqual(ci.jobs['desktop-macos'].needs, ['impact', 'source'])
@@ -381,88 +379,183 @@ test('GitHub release packs once and validates the same tarball on three platform
       const job = workflow.jobs[consumer]
       assert.ok(job.needs === producer || Array.isArray(job.needs) && job.needs.includes(producer))
       assert.equal(job.steps.find(step => step.uses === 'actions/download-artifact@v4').with.path, 'packages')
+      const base = job.steps.find(step => step.uses === 'actions/download-artifact@v4'
+        && String(step.with.name).includes('e-mate-base-sdk-'))
+      assert.equal(base.with.path, '.release-cache/base-sdk')
+      assert.equal(
+        job.steps.find(step => step.name === 'Install and verify the exact Base SDK').run,
+        'node scripts/base-sdk.mjs install --directory .release-cache/base-sdk',
+      )
     }
   }
+  const desktopBaseBuild = desktopRelease.jobs.profile.steps.find(step => String(step.run).includes('pnpm build:harness')).run
+  assert.match(desktopBaseBuild, /yarn build:sdk/u)
+  assert.match(desktopBaseBuild, /base-sdk\.mjs emit/u)
   assert.deepEqual(
     release.jobs['clean-install'].strategy.matrix.include.map(item => [item.platform, item.runner]),
     [['darwin-arm64', 'macos-15'], ['darwin-x64', 'macos-15-intel'], ['win32-x64', 'windows-2025']],
   )
-  assert.deepEqual(Object.keys(release.jobs), ['pack', 'clean-install', 'evidence', 'r2'])
+  assert.deepEqual(Object.keys(release.jobs), ['pack', 'clean-install', 'evidence'])
   assert.equal(release.jobs['clean-install'].needs, 'pack')
   assert.equal(release.jobs.evidence.needs, 'pack')
-  assert.match(release.jobs.evidence.steps.find(step => step.name === 'Render the immutable candidate download page').run, /render-download-page\.mjs/u)
+  const website = release.jobs.evidence.steps.find(step => step.name === 'Stage the immutable candidate download site')
+  assert.equal(website.run, 'node scripts/render-download-page.mjs --commit "$GITHUB_SHA" --out dist/download-page --plan dist/website-publication-plan.json')
+  const releaseCandidate = release.jobs.evidence.steps.find(step => step.uses === 'actions/upload-artifact@v4')
+  assert.match(releaseCandidate.with.path, /^\s*dist\/download-page\s*$/mu)
+  assert.match(releaseCandidate.with.path, /dist\/website-publication-plan\.json/u)
+  assert.doesNotMatch(releaseCandidate.with.path, /dist\/download-page\/index\.html/u)
   const cleanInstall = release.jobs['clean-install'].steps.find(step => step.name === 'Install tarballs with npm and run setup checks')
   assert.equal((cleanInstall.run.match(/node "\$cli" setup$/gmu) ?? []).length, 2)
   assert.ok(cleanInstall.run.includes('version="$(node -p "require(process.argv[1]).version" "$npm_root/@e-mate/dsh/package.json")"'))
   assert.doesNotMatch(cleanInstall.run, /require\('\$npm_root/u)
   assert.match(readFileSync('scripts/build-harness-runtime.mjs', 'utf8'), /'--os=darwin', '--os=win32', '--cpu=arm64', '--cpu=x64'/u)
-  assert.equal(release.jobs.r2.needs, undefined)
   assert.equal(release.on.push, undefined)
   assert.equal(release.on.pull_request, undefined)
-  const r2 = release.jobs.r2.steps.find(step => step.name === 'Publish immutable release bytes to Cloudflare R2')
-  assert.match(r2.run, /publish-r2\.mjs/u)
-  assert.equal(r2.env.EMATE_R2_PUBLIC_ORIGIN, '${{ vars.EMATE_R2_PUBLIC_ORIGIN }}')
-  assert.equal(release.on.workflow_dispatch.inputs.publish.default, false)
-  assert.equal(release.on.workflow_dispatch.inputs.release_run_id.default, '')
-  assert.match(release.jobs.r2.steps.find(step => step.name === 'Validate the accepted build-only run').run, /head_sha/u)
-  assert.equal(release.jobs.r2.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], '${{ inputs.release_run_id }}')
+  const plan = release.jobs.evidence.steps.find(step => step.name === 'Emit the Cloudflare plugin publication plan')
+  assert.match(plan.run, /publish-r2\.mjs/u)
+  assert.match(plan.run, /--commit "\$GITHUB_SHA"/u)
+  const releaseWorkflow = readFileSync('.github/workflows/release.yml', 'utf8')
+  assert.doesNotMatch(releaseWorkflow, /secrets\.|AWS_|ECOREX_R2_|r2-publish|aws |s3api|cloudflarestorage/u)
+  const r2PlanSource = readFileSync('scripts/publish-r2.mjs', 'utf8')
+  assert.match(r2PlanSource, /publication_authority: 'codex-cloudflare-plugin'/u)
+  assert.doesNotMatch(r2PlanSource, /spawn\(|fetch\(|put-object|head-object|AWS_|ECOREX_R2_|cloudflarestorage/u)
   assert.doesNotMatch(readFileSync('.github/workflows/release.yml', 'utf8'), /npm view '@e-mate\/dsh@2\.0\.8'|release\.mjs publish/u)
   const desktopReleaseSource = readFileSync('.github/workflows/desktop-release.yml', 'utf8')
   const desktopManifestSource = readFileSync('desktop/e-mate-desktop/scripts/desktop-release-manifest.ts', 'utf8')
-  const desktopPublisher = desktopRelease.jobs.r2.steps.find(step => step.name === 'Publish accepted desktop bytes to Cloudflare R2')
-  assert.equal(desktopRelease.jobs.r2.needs, undefined)
-  assert.equal(desktopRelease.on.workflow_dispatch.inputs.release_run_id.default, '')
+  assert.equal(desktopRelease.jobs.r2, undefined)
+  assert.equal(desktopRelease.on.workflow_dispatch.inputs.publish, undefined)
+  assert.equal(desktopRelease.on.workflow_dispatch.inputs.release_run_id, undefined)
   assert.equal(desktopRelease.on.workflow_dispatch.inputs.reuse_run_id.default, '')
   assert.match(desktopRelease.jobs.reuse.steps[0].run, /Build and verify the e-Mate profile/u)
   assert.match(desktopRelease.jobs.reuse.steps[0].run, /Build unsigned Windows x64 installer/u)
+  assert.match(desktopRelease.jobs.reuse.steps[0].run, /test "\$source_sha" = "\$GITHUB_SHA"/u)
   assert.match(desktopRelease.jobs.macos.if, /needs\.reuse\.result == 'success'/u)
+  for (const [job, name] of [['windows', 'e-mate-desktop-windows-'], ['macos', 'e-mate-desktop-macos-']]) {
+    const upload = desktopRelease.jobs[job].steps.find(step => step.uses === 'actions/upload-artifact@v4'
+      && String(step.with.name).startsWith(name))
+    assert.equal(upload.with['compression-level'], 0)
+    assert.equal(upload.with['retention-days'], 30)
+  }
   assert.equal(desktopRelease.jobs.macos.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], "${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}")
   assert.equal(desktopRelease.jobs.manifest.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], "${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}")
-  assert.match(desktopRelease.jobs.manifest.steps.find(step => step.name === 'Generate exact R2 release manifest').run, /--mac-commit/u)
-  assert.match(desktopRelease.jobs.manifest.steps.find(step => step.name === 'Generate exact R2 release manifest').run, /--win-run/u)
-  assert.match(desktopRelease.jobs.r2.steps.find(step => step.name === 'Validate the accepted build-only run').run, /head_sha/u)
-  assert.equal(desktopRelease.jobs.r2.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], '${{ inputs.release_run_id }}')
+  const candidateStep = desktopRelease.jobs.manifest.steps.find(step => step.name === 'Generate performance-pending Desktop artifact candidate')
+  assert.match(candidateStep.run, /desktop-release-manifest\.ts candidate/u)
+  assert.match(candidateStep.run, /--mac-commit/u)
+  assert.match(candidateStep.run, /--win-run/u)
+  assert.match(candidateStep.run, /--out dist\/desktop\/desktop-candidate\.json/u)
+  assert.doesNotMatch(candidateStep.run, /latest\.json/u)
   assert.match(desktopManifestSource, /readFileSync\(new URL\('\.\.\/package\.json'/u)
+  assert.match(desktopManifestSource, /loadProfileBaseContract/u)
+  assert.match(desktopManifestSource, /schedule_protocol_floor/u)
+  assert.match(desktopManifestSource, /validateUnsignedAdmittedDesktopReleaseManifest/u)
+  assert.match(desktopManifestSource, /desktop-release-manifest/u)
+  assert.match(desktopManifestSource, /profile_component_aggregate/u)
+  assert.match(desktopManifestSource, /github_artifact_provenance/u)
   assert.doesNotMatch(desktopManifestSource, /const VERSION = '\d+\.\d+\.\d+'/u)
-  assert.match(desktopPublisher.run, /version="\$\(jq -er '\.version/u)
-  assert.match(desktopPublisher.run, /\.artifacts\[\$platform\]\.url/u)
-  assert.equal(desktopPublisher.env.EMATE_PERFORMANCE_ACCEPTED_SHA, '${{ vars.EMATE_PERFORMANCE_ACCEPTED_SHA }}')
-  assert.match(desktopPublisher.run, /test "\$GITHUB_SHA" = "\$EMATE_PERFORMANCE_ACCEPTED_SHA"/u)
-  assert.ok(desktopPublisher.run.lastIndexOf('public-artifact') < desktopPublisher.run.indexOf('--key desktop/latest.json'))
   for (const job of ['windows', 'macos', 'manifest']) {
     const step = desktopRelease.jobs[job].steps.find(item => item.id === 'version')
     assert.match(step.run, /node -p "require\(process\.argv\[1\]\)\.version"/u)
     assert.doesNotMatch(step.run, /node -p \\"require/u)
   }
   assert.doesNotMatch(desktopReleaseSource, /e-Mate-\d+\.\d+\.\d+-(?:mac|win)|releases\/v\d+\.\d+\.\d+/u)
+  assert.doesNotMatch(desktopReleaseSource, /AWS_|ECOREX_R2_|r2-publish|aws |s3api|cloudflarestorage/u)
   assert.match(readFileSync('.gitattributes', 'utf8'), /^\* text=auto eol=lf$/mu)
 })
 
-test('download page resolves unsigned desktop installers from the fail-closed R2 manifest', async () => {
-  const page = renderDownloadPage(readFileSync('deploy/download-page/index.html', 'utf8'))
+test('download site stages exact bytes and a closed non-published server plan', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'e-mate-download-site-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const output = join(root, 'download-page')
+  await file(output, 'stale-template.html', 'stale')
+  const planPath = join(root, 'website-publication-plan.json')
+  const plan = stageDownloadPage({
+    outputDirectory: output,
+    planPath,
+    sourceCommit: SOURCE_COMMIT,
+  })
+  assert.deepEqual(Object.keys(plan), [
+    'schema_version', 'document_type', 'status', 'source_commit', 'staged_directory', 'publication_contract', 'files',
+  ])
+  assert.deepEqual(Object.keys(plan.publication_contract), [
+    'target', 'strategy', 'preserve_unrelated_content', 'switch_symlink_last', 'server_writes_performed',
+    'r2_writes_performed', 'published', 'live_verified',
+  ])
+  assert.equal(plan.status, 'prepared')
+  assert.equal(plan.source_commit, SOURCE_COMMIT)
+  assert.equal(plan.staged_directory, 'download-page')
+  assert.deepEqual(plan.publication_contract, {
+    target: 'website-server',
+    strategy: 'versioned-relative-symlink',
+    preserve_unrelated_content: true,
+    switch_symlink_last: true,
+    server_writes_performed: false,
+    r2_writes_performed: false,
+    published: false,
+    live_verified: false,
+  })
+  assert.equal(existsSync(join(output, 'stale-template.html')), false)
+  assert.deepEqual(plan.files.map(entry => entry.relative_path), [
+    'assets/e-mate-hero-decor.d7f99a88447b.png',
+    'assets/emate-desktop-workspace.622f3434f88c.jpg',
+    'assets/emate-download-icon.5014add964e1.svg',
+    'assets/emate-download-robot.9fbe832b9873.png',
+    'assets/emate-logo.e0bf52b1480f.png',
+    'assets/emate-mark.1a6dbbe3b5fe.png',
+    'assets/emate-platform-apple.0bed6ae6a1b9.png',
+    'assets/emate-platform-windows.dd86c8094b5a.png',
+    'index.html',
+    'install-macos.html',
+    'site.a8feef4609f9.js',
+    'styles.c2f7dccc8398.css',
+  ])
+  for (const entry of plan.files) {
+    assert.deepEqual(Object.keys(entry), ['relative_path', 'bytes', 'sha256', 'content_type'])
+    assert.ok(readFileSync(join('deploy/download-page', entry.relative_path)).equals(readFileSync(join(output, entry.relative_path))))
+  }
+  assert.deepEqual(JSON.parse(readFileSync(planPath, 'utf8')), plan)
+})
+
+test('one admitted producer feeds the updater, legacy 2.0.12, and 2.0.13 download site', async t => {
+  const page = readFileSync('deploy/download-page/index.html', 'utf8')
   const macGuide = readFileSync('deploy/download-page/install-macos.html', 'utf8')
-  const scriptName = 'site.f64ce25824c9.js'
+  const scriptName = 'site.a8feef4609f9.js'
   const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
+  assert.equal(validateDownloadPage(page, macGuide, script), '2.0.13')
+  assert.throws(
+    () => validateDownloadPage(page.replace('data-desktop-version="2.0.13"', 'data-desktop-version="2.0.12"'), macGuide, script),
+    /desktop manifest contract is incomplete/u,
+  )
   assert.equal(scriptName.split('.')[1], createHash('sha256').update(script).digest('hex').slice(0, 12))
-  const manifestUrl = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json'
-  assert.match(script, new RegExp(manifestUrl.replaceAll('.', '\\.')))
   for (const platform of ['macos', 'windows']) assert.match(page, new RegExp(`data-platform="${platform}"`, 'u'))
   for (const artifact of ['darwin', 'win32']) assert.match(script, new RegExp(`artifacts\\.${artifact}`, 'u'))
   const publishedVersion = /const VERSION = "(\d+\.\d+\.\d+)";/u.exec(script)?.[1]
   assert.equal(typeof publishedVersion, 'string')
+  const baseContract = JSON.parse(readFileSync('desktop/e-mate-desktop/base-contract.json', 'utf8'))
+  assert.equal(baseContract.profile_signing_keys.length, 1)
+  assert.match(script, new RegExp(baseContract.profile_signing_keys[0].id, 'u'))
+  assert.match(script, new RegExp(baseContract.profile_signing_keys[0].public_key_spki_der_base64.replaceAll('+', '\\+'), 'u'))
+  const manifestUrl = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/manual/v${publishedVersion}/latest.json`
+  assert.match(script, /desktop\/manual\/v\$\{VERSION\}\/latest\.json/u)
+  assert.equal(DESKTOP_VERSION_ENDPOINT, 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/signed/latest.json')
+  assert.notEqual(DESKTOP_VERSION_ENDPOINT, 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json')
   for (const filename of [`e-Mate-${publishedVersion}-mac-universal.dmg`, `e-Mate-${publishedVersion}-win-x64-Setup.exe`]) {
     assert.match(script, new RegExp(filename.replaceAll('.', '\\.'), 'u'))
   }
   assert.match(script, /manifest\.source_commit/u)
+  assert.match(script, /manifest\.base_contract_id/u)
+  assert.match(script, /manifest\.schedule_protocol_floor/u)
   assert.match(script, /Number\.isSafeInteger\(artifact\.bytes\)/u)
   assert.match(script, /artifact\.build_source_commit/u)
   assert.match(script, /artifact\.build_run_id/u)
+  assert.match(script, /validateManifestSignatureShape/u)
   assert.match(script, /\^\[0-9a-f\]\{64\}\$/u)
   assert.match(page, /未签名/u)
   assert.match(page, /e-Mate 会校验、替换并自动重开/u)
   assert.match(page, /\/ecorex-agent\/admin\//u)
-  assert.match(macGuide, /全新安装 2\.0\.12/u)
-  assert.match(macGuide, /已安装 2\.0\.11 的用户可在应用内确认更新/u)
+  assert.match(page, /已安装 2\.0\.12 的用户可在应用内确认更新到 2\.0\.13/u)
+  assert.match(macGuide, /全新安装 2\.0\.13/u)
+  assert.match(macGuide, /已安装 2\.0\.12 的用户可在应用内确认更新/u)
+  assert.doesNotMatch(`${page}\n${macGuide}`, /@e-mate|dsh-plugin|dsh-pet|Cowart|Excalidraw/u)
   assert.match(macGuide, /\/usr\/bin\/arch -arm64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)
   assert.match(macGuide, /\/usr\/bin\/arch -x86_64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)
   assert.match(macGuide, /Password:.*输入时不会显示任何字符/u)
@@ -477,21 +570,148 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
     assert.match(page, new RegExp(`\\./assets/${asset.replaceAll('.', '\\.')}\\b`, 'u'))
   }
   assert.doesNotMatch(page, /__EMATE_RELEASE_SOURCE_COMMIT__|npm install|nodejs\.org|e-mate setup|e-mate launch/u)
-  const { normalizeDownloadIndex } = await import(`../deploy/download-page/${scriptName}`)
+  const { normalizeDownloadIndex, verifyDownloadIndex } = await import(`../deploy/download-page/${scriptName}`)
+  const root = mkdtempSync(join(tmpdir(), 'e-mate-public-manifest-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
   const commit = 'a'.repeat(40)
-  const releasePrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v${publishedVersion}/${commit}`
-  const fixture = {
+  const macArtifact = join(root, `e-Mate-${publishedVersion}-mac-universal.dmg`)
+  const windowsArtifact = join(root, `e-Mate-${publishedVersion}-win-x64-Setup.exe`)
+  await writeFile(macArtifact, 'mac')
+  await writeFile(windowsArtifact, 'win')
+  const candidate = join(root, 'desktop-candidate.json')
+  await createDesktopArtifactCandidate({
+    macArtifact,
+    windowsArtifact,
+    sourceCommit: commit,
+    macSourceCommit: commit,
+    windowsSourceCommit: commit,
+    macBuildRunId: '123',
+    windowsBuildRunId: '456',
+    output: candidate,
+  })
+  const profileComponentAggregate = join(root, 'profile-component-aggregate.json')
+  const performance = join(root, 'performance.json')
+  const githubArtifactProvenance = join(root, 'github-artifact-provenance.json')
+  await writeFile(profileComponentAggregate, JSON.stringify({
+    aggregate_sha256: '1'.repeat(64),
+    inventory_sha256: '2'.repeat(64),
+    staged_profile_tree_sha256: '3'.repeat(64),
+    targets: ['darwin-arm64', 'darwin-x64', 'win32-x64'].map(target => ({
+      target,
+      profile_generation: '5'.repeat(64),
+      component_aggregate_sha256: '6'.repeat(64),
+    })),
+  }))
+  await writeFile(performance, JSON.stringify({
+    performance_run_id: 'performance-run-id',
+    admission_sha256: '4'.repeat(64),
+    signature_key_id: '0123456789abcdef',
+    verifier: {},
+  }))
+  await writeFile(githubArtifactProvenance, JSON.stringify({
     schema_version: 1,
-    version: publishedVersion,
+    document_type: 'emate.github-artifact-provenance',
     source_commit: commit,
-    artifacts: {
-      darwin: { url: `${releasePrefix}/e-Mate-${publishedVersion}-mac-universal.dmg`, bytes: 123, sha256: 'b'.repeat(64), build_source_commit: commit, build_run_id: '123' },
-      win32: { url: `${releasePrefix}/e-Mate-${publishedVersion}-win-x64-Setup.exe`, bytes: 456, sha256: 'c'.repeat(64), build_source_commit: 'd'.repeat(40), build_run_id: '456' },
+    artifacts: [
+      { role: 'desktop_candidate', name: `e-mate-desktop-release-${commit}`, artifact_id: '11', digest: `sha256:${'7'.repeat(64)}`, run_id: '123', run_attempt: 1 },
+      { role: 'performance_admission', name: `e-mate-performance-admission-${commit}`, artifact_id: '12', digest: `sha256:${'8'.repeat(64)}`, run_id: '124', run_attempt: 1 },
+    ],
+  }))
+  const output = join(root, 'latest.json')
+  await admitDesktopReleaseManifest({
+    candidate,
+    profileComponentAggregate,
+    performance,
+    githubArtifactProvenance,
+    output,
+  })
+  const manifest = JSON.parse(readFileSync(output, 'utf8'))
+  assert.equal(Object.keys(manifest).length, 11)
+  assert.equal(validateUnsignedAdmittedDesktopReleaseManifest(manifest), true)
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+  const trustedKeys = [{
+    id: 'e0a81164526dcbcd',
+    algorithm: 'ed25519',
+    public_key_spki_der_base64: publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
+  }]
+  const canonical = value => Array.isArray(value)
+    ? `[${value.map(canonical).join(',')}]`
+    : value !== null && typeof value === 'object'
+      ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`
+      : JSON.stringify(value)
+  const signedManifest = {
+    ...manifest,
+    signature: {
+      algorithm: 'ed25519',
+      key_id: trustedKeys[0].id,
+      value: sign(null, Buffer.concat([
+        Buffer.from('e-mate-desktop-release-manifest-v1\0', 'utf8'),
+        Buffer.from(canonical(manifest), 'utf8'),
+      ]), privateKey).toString('base64'),
     },
   }
-  assert.deepEqual(normalizeDownloadIndex(fixture).downloads.map(item => item.target), ['macos-universal', 'windows-x64'])
+  assert.equal(Object.keys(signedManifest).length, 12)
+  assert.equal(validateAdmittedDesktopReleaseManifest(signedManifest, trustedKeys), true)
+  await assert.doesNotReject(() => verifyDownloadIndex(signedManifest, {
+    id: trustedKeys[0].id,
+    spki: trustedKeys[0].public_key_spki_der_base64,
+  }))
+  const normalized = normalizeDownloadIndex(signedManifest)
+  assert.equal(normalized.base_contract_id, manifest.base_contract_id)
+  assert.equal(normalized.schedule_protocol_floor, 1)
+  assert.deepEqual(normalized.downloads.map(item => item.target), ['macos-universal', 'windows-x64'])
+  // Frozen 2.0.12@9fbc70ad parses only version/artifacts and therefore ignores the admitted fields.
+  const legacy2012 = value => value && typeof value === 'object'
+    && typeof value.version === 'string' && /^\d+\.\d+\.\d+$/u.test(value.version)
+    && value.artifacts && typeof value.artifacts === 'object'
+    && ['darwin', 'win32'].every(platform => validateDesktopReleaseArtifact(
+      platform, value.version, value.artifacts[platform],
+    ) !== null)
+  assert.equal(legacy2012(signedManifest), true)
+  const richFutureManifest = structuredClone(signedManifest)
+  richFutureManifest.version = '9.9.9'
+  for (const platform of ['darwin', 'win32']) {
+    richFutureManifest.artifacts[platform].url = richFutureManifest.artifacts[platform].url.replaceAll(
+      `v${publishedVersion}`, 'v9.9.9',
+    ).replaceAll(`e-Mate-${publishedVersion}-`, 'e-Mate-9.9.9-')
+  }
+  assert.equal(legacy2012(richFutureManifest), true)
+  assert.equal(validateAdmittedDesktopReleaseManifest(richFutureManifest, trustedKeys), false)
+  assert.equal(await checkForStableUpdate({
+    currentVersion: '2.0.11',
+    currentScheduleProtocolFloor: 1,
+    platform: 'darwin',
+    trustedManifestKeys: trustedKeys,
+    request: async url => {
+      assert.equal(url, DESKTOP_VERSION_ENDPOINT)
+      return Response.json(signedManifest)
+    },
+  }).then(result => result?.status), 'update-available')
+  const oldSixField = {
+    schema_version: manifest.schema_version,
+    version: manifest.version,
+    source_commit: manifest.source_commit,
+    base_contract_id: manifest.base_contract_id,
+    schedule_protocol_floor: manifest.schedule_protocol_floor,
+    artifacts: manifest.artifacts,
+  }
+  assert.equal(validateUnsignedAdmittedDesktopReleaseManifest(oldSixField), false)
+  assert.equal(validateAdmittedDesktopReleaseManifest(oldSixField, trustedKeys), false)
+  assert.throws(() => normalizeDownloadIndex(oldSixField), /桌面发布清单 字段无效/u)
+  const missingFloor = { ...signedManifest }
+  delete missingFloor.schedule_protocol_floor
+  assert.throws(() => normalizeDownloadIndex(missingFloor), /桌面发布清单 字段无效/u)
+  assert.throws(() => normalizeDownloadIndex({ ...signedManifest, schedule_protocol_floor: 0 }), /桌面发布清单身份无效/u)
   assert.throws(() => normalizeDownloadIndex({
-    ...fixture,
-    artifacts: { ...fixture.artifacts, darwin: { ...fixture.artifacts.darwin, url: 'https://example.com/e-Mate.dmg' } },
+    ...signedManifest,
+    artifacts: { ...signedManifest.artifacts, darwin: { ...signedManifest.artifacts.darwin, url: 'https://example.com/e-Mate.dmg' } },
   }), /桌面制品身份无效/u)
+  const signatureDrift = structuredClone(signedManifest)
+  signatureDrift.signature.value = `${signatureDrift.signature.value[0] === 'A' ? 'B' : 'A'}${signatureDrift.signature.value.slice(1)}`
+  assert.equal(validateAdmittedDesktopReleaseManifest(signatureDrift, trustedKeys), false)
+  await assert.rejects(() => verifyDownloadIndex(signatureDrift, {
+    id: trustedKeys[0].id,
+    spki: trustedKeys[0].public_key_spki_der_base64,
+  }), /签名验证失败/u)
+  assert.equal(manifestUrl.endsWith(`/desktop/manual/v${publishedVersion}/latest.json`), true)
 })

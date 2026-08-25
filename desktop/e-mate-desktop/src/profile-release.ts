@@ -27,6 +27,7 @@ export interface ProfileBaseContract {
   readonly id: string
   readonly desktop_api: number
   readonly profile_format: number
+  readonly schedule_protocol_floor: number
   readonly harness_version: string
   readonly harness_commit: string
   readonly runtime_imports: Readonly<Record<string, string>>
@@ -66,6 +67,7 @@ export interface ProfileReleasePayload {
   readonly release_version: string
   readonly sequence: number
   readonly source_commit: string
+  readonly schedule_protocol_floor: number
   readonly target: ProfileReleaseTarget
   readonly base_contracts: readonly string[]
   readonly harness_contract: {
@@ -131,10 +133,11 @@ function strictBase64(value: unknown): Buffer | undefined {
 export function parseProfileBaseContract(value: unknown): ProfileBaseContract | undefined {
   if (!record(value) || !exactKeys(value, [
     'schema_version', 'id', 'desktop_api', 'profile_format', 'desktop_reference',
-    'harness_version', 'harness_commit', 'runtime_imports', 'profile_signing_keys',
+    'schedule_protocol_floor', 'harness_version', 'harness_commit', 'runtime_imports', 'profile_signing_keys',
   ]) || value.schema_version !== 1 || typeof value.id !== 'string' || !BASE_ID.test(value.id)
     || !Number.isSafeInteger(value.desktop_api) || (value.desktop_api as number) <= 0
     || !Number.isSafeInteger(value.profile_format) || (value.profile_format as number) <= 0
+    || !Number.isSafeInteger(value.schedule_protocol_floor) || (value.schedule_protocol_floor as number) <= 0
     || typeof value.harness_version !== 'string' || !HARNESS_VERSION.test(value.harness_version)
     || typeof value.harness_commit !== 'string' || !SHA40.test(value.harness_commit)
     || !record(value.desktop_reference)
@@ -178,6 +181,7 @@ export function parseProfileBaseContract(value: unknown): ProfileBaseContract | 
     id: value.id,
     desktop_api: value.desktop_api as number,
     profile_format: value.profile_format as number,
+    schedule_protocol_floor: value.schedule_protocol_floor as number,
     harness_version: value.harness_version,
     harness_commit: value.harness_commit,
     runtime_imports: Object.fromEntries(runtimeImports) as Record<string, string>,
@@ -321,13 +325,14 @@ function parseComponent(value: unknown, releaseTarget: ProfileReleaseTarget): Pr
 
 function parsePayload(value: unknown): ProfileReleasePayload | undefined {
   if (!record(value) || !exactKeys(value, [
-    'schema_version', 'product', 'release_version', 'sequence', 'source_commit',
+    'schema_version', 'product', 'release_version', 'sequence', 'source_commit', 'schedule_protocol_floor',
     'target', 'base_contracts', 'harness_contract', 'components',
   ])) return
   if (value.schema_version !== 1 || value.product !== 'e-Mate'
     || typeof value.release_version !== 'string' || !STABLE_VERSION.test(value.release_version)
     || !Number.isSafeInteger(value.sequence) || (value.sequence as number) <= 0
     || typeof value.source_commit !== 'string' || !SHA40.test(value.source_commit)
+    || !Number.isSafeInteger(value.schedule_protocol_floor) || (value.schedule_protocol_floor as number) <= 0
     || !sortedUniqueStrings(value.base_contracts)
     || !record(value.harness_contract)
     || !exactKeys(value.harness_contract, ['version', 'commit'])
@@ -346,6 +351,7 @@ function parsePayload(value: unknown): ProfileReleasePayload | undefined {
     release_version: value.release_version,
     sequence: value.sequence as number,
     source_commit: value.source_commit,
+    schedule_protocol_floor: value.schedule_protocol_floor as number,
     target,
     base_contracts: [...value.base_contracts],
     harness_contract: {
@@ -402,10 +408,11 @@ export function verifyProfileRelease(value: unknown, base: ProfileBaseContract):
 /** Select an update without ever inferring compatibility from SemVer. */
 export function selectProfileRelease(
   payload: ProfileReleasePayload,
-  installedBase: Pick<ProfileBaseContract, 'id' | 'harness_version' | 'harness_commit'>,
+  installedBase: Pick<ProfileBaseContract, 'id' | 'harness_version' | 'harness_commit' | 'schedule_protocol_floor'>,
   installedSequence: number,
 ): ProfileReleaseSelection {
   if (!payload.base_contracts.includes(installedBase.id)
+    || payload.schedule_protocol_floor !== installedBase.schedule_protocol_floor
     || payload.harness_contract.version !== installedBase.harness_version
     || payload.harness_contract.commit !== installedBase.harness_commit) return 'base-required'
   return payload.sequence > installedSequence ? 'update' : 'current'

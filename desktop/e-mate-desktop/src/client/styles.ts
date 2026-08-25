@@ -10,7 +10,8 @@ import { SIDEBAR_COLLAPSED } from './layout-state.ts'
 /** Advanced-shell stylesheet kept as a plain string so the package client bundle stays self-contained. */
 const ADVANCED_STYLES = `
 html, body, #root { width: 100%; height: 100%; }
-body[data-dsh-desktop-mode="advanced"] { margin: 0; background: transparent !important; }
+body[data-dsh-desktop-mode="advanced"] { --dsh-desktop-caption-safe-width: 0px; margin: 0; background: transparent !important; }
+body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"] { --dsh-desktop-caption-safe-width: max(${WINDOWS_CAPTION_CONTROLS_WIDTH}px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))); }
 .dshDesktopFrame { position: relative; display: grid; grid-template-rows: 100%; width: 100%; height: 100%; overflow: hidden; background: transparent; }
 .dshDesktopSidebarSurface { --dsw-specific-sidebar-fill: transparent; position: relative; grid-column: 1; grid-row: 1; min-width: 0; overflow: hidden; background: transparent; border-right: 1px solid var(--dsw-alias-border-l1); }
 .dshDesktopUpstreamSidebar { box-sizing: border-box; width: 100%; height: 100%; }
@@ -30,10 +31,10 @@ body[data-dsh-desktop-mode="advanced"] { margin: 0; background: transparent !imp
 .dshDesktopFrame[data-desktop-platform="win32"] .dshDesktopConversationSurface,
 .dshDesktopFrame[data-desktop-platform="win32"] .dshDesktopDetailsSurface { grid-row: 2; }
 .dshDesktopWindowsCaptionRow { position: relative; grid-column: 2 / -1; grid-row: 1; min-width: 0; background: var(--dsw-alias-bg-base); }
-.dshDesktopWindowsCaptionRow::before { content: ""; position: absolute; inset: 0 ${WINDOWS_CAPTION_CONTROLS_WIDTH}px 0 0; user-select: none; -webkit-app-region: drag; }
+.dshDesktopWindowsCaptionRow::before { content: ""; position: absolute; inset: 0 var(--dsh-desktop-caption-safe-width) 0 0; user-select: none; -webkit-app-region: drag; }
 .dshDesktopTitlebarUtilities { position: absolute; z-index: 1001; top: 1px; right: 112px; height: 32px; display: inline-flex; align-items: center; gap: 4px; pointer-events: auto; -webkit-app-region: no-drag; }
-.dshDesktopFrame[data-desktop-platform="win32"] .dshDesktopTitlebarUtilities { right: ${WINDOWS_CAPTION_CONTROLS_WIDTH + 112}px; }
-body[data-dsh-desktop-platform="win32"] [data-dsh-panel-toggles] { right: ${WINDOWS_CAPTION_CONTROLS_WIDTH + 10}px; }
+.dshDesktopFrame[data-desktop-platform="win32"] .dshDesktopTitlebarUtilities { right: calc(var(--dsh-desktop-caption-safe-width) + 112px); }
+body[data-dsh-desktop-platform="win32"] [data-dsh-panel-toggles] { right: calc(var(--dsh-desktop-caption-safe-width) + 10px); }
 .dshDesktopFrame[data-sidebar-collapsed] { transition: grid-template-columns var(--ds-transition-duration-slow) var(--ds-ease-in-out); }
 .dshDesktopOverlay { position: absolute; z-index: 1000; inset: 0; pointer-events: none; }
 .dshDesktopOverlay > * { pointer-events: auto; }

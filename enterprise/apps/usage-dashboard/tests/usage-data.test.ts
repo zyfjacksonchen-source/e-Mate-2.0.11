@@ -8,9 +8,15 @@ import type {
   TenantUsageEventPage,
   UsageMetrics,
 } from '@e-mate/monitoring-contract';
+import type { TenantUser } from '@e-mate/admin-contract';
 import {
+  auditVisibleLedgerUserIds,
+  auditVisibleUsers,
+  queryForDateRange,
   queryForPeriod,
+  queryForDay,
   queryForRange,
+  queryForYesterday,
   loginUsageAccount,
   logoutUsageAccount,
   refreshUsageAccount,
@@ -32,6 +38,7 @@ import {
   usageDetails,
   usageModels,
   usageTrend,
+  usageUserTrend,
   usageUsers,
 } from '../src/usage-data.ts';
 import { messagesFor } from '../src/i18n.ts';
@@ -51,6 +58,29 @@ const metrics = (overrides: Partial<UsageMetrics> = {}): UsageMetrics => ({
   zeroCostUsageEvents: '0',
   unpricedUsageEvents: '0',
   ...overrides,
+});
+
+test('aggregates user trend across models without mixing dates or users', () => {
+  const projection = {
+    groups: [
+      { bucketStart: '2026-07-29T00:00:00.000Z', userId: 'user-1', modelId: 'model-1', metrics: metrics() },
+      { bucketStart: '2026-07-29T00:00:00.000Z', userId: 'user-1', modelId: 'model-2', metrics: metrics() },
+      { bucketStart: '2026-07-30T00:00:00.000Z', userId: 'user-1', modelId: 'model-1', metrics: metrics() },
+      { bucketStart: '2026-07-29T00:00:00.000Z', userId: 'user-2', modelId: 'model-1', metrics: metrics() },
+    ],
+  } as TenantUsageProjection;
+  assert.deepEqual(
+    usageUserTrend(projection).map(({ bucketStart, userId, metrics: value }) => ({
+      bucketStart,
+      userId,
+      totalRequests: value.totalRequests,
+    })),
+    [
+      { bucketStart: '2026-07-29T00:00:00.000Z', userId: 'user-1', totalRequests: '2' },
+      { bucketStart: '2026-07-29T00:00:00.000Z', userId: 'user-2', totalRequests: '1' },
+      { bucketStart: '2026-07-30T00:00:00.000Z', userId: 'user-1', totalRequests: '1' },
+    ]
+  );
 });
 
 test('aggregates exact counts and decimals without Number coercion', () => {
@@ -161,6 +191,15 @@ test('rejects invalid periods and cross-scope dashboard pairs', () => {
     () => queryForRange(new Date('2026-07-01T00:00:00.000Z'), new Date('2026-07-04T00:00:00.000Z'), now),
     /Invalid usage range/
   );
+  const localNow = new Date(2026, 7, 25, 9, 57, 30);
+  const yesterday = queryForYesterday(localNow);
+  assert.deepEqual(
+    [new Date(yesterday.from).getDate(), new Date(yesterday.from).getHours(), new Date(yesterday.to).getDate(), new Date(yesterday.to).getHours()],
+    [24, 0, 25, 0]
+  );
+  assert.equal(queryForDateRange('2026-08-25', '2026-08-25', localNow).to, localNow.toISOString());
+  assert.throws(() => queryForDateRange('2026-08-25', '2026-08-26', localNow), /Invalid usage range/);
+  assert.throws(() => queryForDateRange('2026-02-30', '2026-08-25', localNow), /Invalid usage range/);
   const projection = {
     tenantId: 'tenant-a',
     from: '2026-07-01T00:00:00.000Z',
@@ -191,13 +230,24 @@ test('adds event pagination only to event queries and preserves configured query
     to: '2026-07-02T00:00:00.000Z',
     timezone: 'Asia/Shanghai',
     bucket: 'DAY' as const,
-    userId: 'user-1',
+    userIds: ['user-1', 'user-2'],
   };
   assert.equal(new URLSearchParams(usageQueryString(query)).has('limit'), false);
-  assert.equal(new URLSearchParams(usageQueryString(query)).get('userId'), 'user-1');
-  assert.deepEqual([...new URLSearchParams(taskQueryString(query)).keys()], ['from', 'to', 'userId']);
-  assert.equal(new URLSearchParams(taskQueryString(query)).get('userId'), 'user-1');
+  assert.deepEqual(new URLSearchParams(usageQueryString(query)).getAll('userId'), ['user-1', 'user-2']);
+  assert.deepEqual([...new URLSearchParams(taskQueryString(query)).keys()], ['from', 'to', 'timezone', 'userId', 'userId']);
+  assert.equal(new URLSearchParams(taskQueryString(query)).get('timezone'), 'Asia/Shanghai');
+  assert.deepEqual(new URLSearchParams(taskQueryString(query)).getAll('userId'), ['user-1', 'user-2']);
   assert.equal(new URLSearchParams(usageQueryString(query, true, 'cursor-1')).get('cursor'), 'cursor-1');
+  assert.deepEqual(
+    queryForDay('2026-07-01T00:00:00.000Z', '2026-07-02T12:00:00.000Z', 'Asia/Shanghai', ['user-1']),
+    {
+      from: '2026-07-01T00:00:00.000Z',
+      to: '2026-07-02T00:00:00.000Z',
+      timezone: 'Asia/Shanghai',
+      bucket: 'DAY',
+      userIds: ['user-1'],
+    }
+  );
   assert.equal(
     resolveSameOriginApiPath('/e-mate/enterprise-api/', '/v1/usage/summary?from=one', 'https://example.test'),
     '/e-mate/enterprise-api/v1/usage/summary?from=one'
@@ -205,6 +255,36 @@ test('adds event pagination only to event queries and preserves configured query
   assert.throws(
     () => resolveSameOriginApiPath('https://other.test/', '/v1/usage/summary', 'https://example.test'),
     /share the dashboard origin/
+  );
+});
+
+test('excludes internal audit accounts by stable id or exact display name', () => {
+  const user = (userId: string, displayName: string): TenantUser => ({
+    schemaVersion: 1,
+    userId,
+    displayName,
+    roles: ['MEMBER'],
+    status: 'ACTIVE',
+    tokenLimit: null,
+    allowedModelIds: [],
+    createdAt: '2026-08-24T00:00:00.000Z',
+    updatedAt: '2026-08-24T00:00:00.000Z',
+  });
+  assert.deepEqual(
+    auditVisibleUsers([
+      user('emate-admin', 'Renamed admin'),
+      user('test-id', '测试'),
+      user('acceptance-id', '验收用户'),
+      user('member-1', '正常用户'),
+    ]).map(({ userId }) => userId),
+    ['member-1']
+  );
+  assert.deepEqual(
+    auditVisibleLedgerUserIds(
+      ['ledger-only', 'test-id', 'member-1', 'ledger-only'],
+      [user('test-id', '测试'), user('member-1', '正常用户')]
+    ),
+    ['ledger-only', 'member-1']
   );
 });
 
@@ -242,19 +322,41 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
     'copy.customRange',
     'copy.userFilter',
     'copy.modelCallStatus',
+    'copy.userTrend',
+    'copy.scenarioTrend',
+    'copy.visibleColumns',
   ]) {
     assert.match(source, new RegExp(metric.replace('.', '\\.')));
   }
   assert.doesNotMatch(source, /metrics\.totalTokens[\s\S]{0,120}tokenLimit|<progress/);
   assert.match(source, /copy\.weeklyQuota/);
   assert.match(source, /taskSummary\?\.userEventCounts/);
-  assert.match(source, /queryForRange/);
-  assert.match(source, /selectedUserId \? \{ userId: selectedUserId \}/);
+  assert.match(source, /const activeUserIds = new Set\(\[\.\.\.taskActiveUserIds, \.\.\.meteredUserIds\]\)/);
+  assert.match(source, /copy\.usageCoverageWarning/);
+  assert.match(source, /value='activity'/);
+  assert.doesNotMatch(source, /\.slice\(0, 8\)/);
+  assert.match(source, /queryForDateRange/);
+  assert.match(source, /copy\.yesterday/);
+  assert.match(source, /type='date'/);
+  assert.doesNotMatch(source, /datetime-local/);
+  assert.match(source, /mode='multiple'/);
+  assert.match(source, /queryForDay/);
+  assert.match(source, /usageUserTrend/);
+  assert.match(source, /scenarioBuckets/);
+  assert.match(source, /displayNameByUserId/);
+  assert.match(source, /<select[\s\S]*aria-label=\{copy\.chartMetric\}/);
+  assert.doesNotMatch(source, /<Select value=\{chartMetric\}/);
+  assert.match(source, /<Fragment key=\{bucketStart\}>[\s\S]*selectedDayQuery\?\.from === bucketStart && dayDetailPanel/);
+  assert.match(source, /selectedUserIds\.length \? \{ userIds: selectedUserIds \}/);
   assert.match(source, /eventTypeLabels\[type\].*type/);
   assert.match(source, /status === 401[\s\S]*refreshUsageSession/);
   assert.doesNotMatch(source, /models\.slice/);
   assert.doesNotMatch(source, /eventState\.events[\s\S]{0,160}eventCount/);
-  assert.match(readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8'), /\/v1\/admin\/users/);
+  const apiSource = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8');
+  assert.match(apiSource, /\/v1\/admin\/users/);
+  assert.match(apiSource, /candidateUserIds = \[/);
+  assert.match(apiSource, /seedTaskSummary\.userEventCounts/);
+  assert.match(apiSource, /const scopedQuery = \{ \.\.\.query, userIds \}/);
 });
 
 test('builds for the production usage-panel path and same-origin enterprise API', () => {

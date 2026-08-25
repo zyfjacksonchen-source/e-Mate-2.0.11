@@ -3,6 +3,7 @@ import type { RendererBootReport } from './renderer-boot-contract.ts'
 import type { DesktopProfileUpdateAdapter } from './profile-update.ts'
 import type {
   DesktopReleasePlatform,
+  DesktopReleaseSigningKey,
   UpdateCheckResult,
   UpdateRequest,
 } from './update-checker.ts'
@@ -97,6 +98,10 @@ export interface DesktopUpdateAdapter {
   readonly platform: DesktopReleasePlatform | undefined
   /** Installed desktop product version. */
   readonly currentVersion: string
+  /** Schedule protocol floor loaded from the packaged Base contract. */
+  readonly currentScheduleProtocolFloor: number
+  /** Desktop manifest keys loaded from the packaged Base contract. */
+  readonly trustedManifestKeys: readonly DesktopReleaseSigningKey[]
   /** Private file used for update-prompt history. */
   readonly statePath: string
   /** Request adapter backed by Electron's native network session. */
@@ -170,6 +175,9 @@ export interface DesktopRuntime {
 
   /** Reveal and focus the current window, if mounted. */
   show(): void
+
+  /** Open the platform's native single-directory chooser. */
+  pickDirectory(): Promise<string | null>
 
   /**
    * Contribute one command to the native tray for the current Cordis lifetime.

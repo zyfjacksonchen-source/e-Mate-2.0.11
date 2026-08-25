@@ -27,6 +27,7 @@ export default defineConfig([
       'mac-update-installer': 'src/mac-update-installer.ts',
       'mac-update-helper': 'src/mac-update-helper.ts',
       'vision-toolkit': 'src/vision-toolkit.ts',
+      'windows-directory-picker': 'src/windows-directory-picker.ts',
       'windows-pwsh-sandbox': 'src/windows-pwsh-sandbox.ts',
       'windows-acl-runner': 'src/windows-acl-runner.ts',
       main: 'src/main.ts',

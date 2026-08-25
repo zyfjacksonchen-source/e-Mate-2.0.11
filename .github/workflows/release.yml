@@ -2,24 +2,13 @@ name: Release e-Mate
 
 on:
   workflow_dispatch:
-    inputs:
-      publish:
-        description: Publish an already built and accepted carrier run to a new immutable R2 prefix.
-        required: true
-        type: boolean
-        default: false
-      release_run_id:
-        description: Successful build-only run ID containing the exact accepted carrier; required only when publishing.
-        required: false
-        type: string
-        default: ''
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: ${{ inputs.publish && 'e-mate-r2-publication' || format('{0}-{1}', github.workflow, github.ref) }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -27,7 +16,6 @@ env:
 
 jobs:
   pack:
-    if: ${{ !inputs.publish }}
     name: Build and pack npm tarball
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -58,7 +46,7 @@ jobs:
           pnpm --dir upstream/deepseek-harness install --frozen-lockfile
 
       - name: Build pinned DeepSeek Harness
-        run: pnpm --dir upstream/deepseek-harness run build
+        run: pnpm build:harness
 
       - name: Build and test
         run: |
@@ -83,7 +71,6 @@ jobs:
           retention-days: 7
 
   clean-install:
-    if: ${{ !inputs.publish }}
     name: Clean install ${{ matrix.platform }}
     needs: pack
     runs-on: ${{ matrix.runner }}
@@ -154,7 +141,6 @@ jobs:
           trap - EXIT
 
   evidence:
-    if: ${{ !inputs.publish }}
     name: Verify release set and generate evidence
     needs: pack
     runs-on: ubuntu-24.04
@@ -178,13 +164,16 @@ jobs:
       - name: Generate SHA256, manifest, SPDX and license inventory
         run: node scripts/release.mjs evidence --from dist/npm --out dist/release
 
-      - name: Render the immutable candidate download page
-        run: node scripts/render-download-page.mjs --commit "$GITHUB_SHA" --out dist/download-page/index.html
+      - name: Stage the immutable candidate download site
+        run: node scripts/render-download-page.mjs --commit "$GITHUB_SHA" --out dist/download-page --plan dist/website-publication-plan.json
 
       - name: Verify generated evidence checksums
         run: |
           cd dist/npm && sha256sum -c ../release/SHA256SUMS
           cd ../release && sha256sum -c EVIDENCE_SHA256SUMS
+
+      - name: Emit the Cloudflare plugin publication plan
+        run: node scripts/publish-r2.mjs --npm dist/npm --evidence dist/release --plan dist/r2/r2-publication-plan.json --commit "$GITHUB_SHA"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -192,70 +181,8 @@ jobs:
           path: |
             dist/npm/*
             dist/release/*
-            dist/download-page/index.html
+            dist/r2/r2-publication-plan.json
+            dist/download-page
+            dist/website-publication-plan.json
           if-no-files-found: error
           retention-days: 7
-
-  r2:
-    name: Publish immutable R2 download objects
-    if: inputs.publish
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    environment: r2-publish
-    concurrency:
-      group: e-mate-r2-publish
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Validate the accepted build-only run
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
-        run: |
-          set -euo pipefail
-          [[ "$RELEASE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID")"
-          test "$(jq -er .head_sha <<<"$run_json")" = "$GITHUB_SHA"
-          test "$(jq -er .conclusion <<<"$run_json")" = success
-          test "$(jq -er .event <<<"$run_json")" = workflow_dispatch
-          test "$(jq -er .path <<<"$run_json")" = .github/workflows/release.yml
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: e-mate-release-candidate
-          path: dist
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.release_run_id }}
-
-      - name: Recheck candidate bytes
-        run: |
-          cd dist/npm && sha256sum -c ../release/SHA256SUMS
-          cd ../release && sha256sum -c EVIDENCE_SHA256SUMS
-
-      - name: Verify R2 client
-        run: aws --version
-
-      - name: Publish immutable release bytes to Cloudflare R2
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.ECOREX_R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.ECOREX_R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          AWS_EC2_METADATA_DISABLED: 'true'
-          ECOREX_R2_ACCOUNT_ID: ${{ secrets.ECOREX_R2_ACCOUNT_ID }}
-          EMATE_R2_PUBLIC_ORIGIN: ${{ vars.EMATE_R2_PUBLIC_ORIGIN }}
-          EMATE_ACCEPTED_SHA: ${{ vars.EMATE_S12_ACCEPTED_SHA }}
-        run: node scripts/publish-r2.mjs --npm dist/npm --evidence dist/release --receipt dist/r2/r2-download-admission.json
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: e-mate-r2-admission
-          path: dist/r2/r2-download-admission.json
-          if-no-files-found: error
-          retention-days: 30

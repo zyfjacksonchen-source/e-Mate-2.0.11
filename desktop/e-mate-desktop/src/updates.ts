@@ -1,5 +1,6 @@
 /** Cordis Host plugin for scheduled and interactive e-Mate updates. */
 
+import { createHash } from 'node:crypto'
 import { open } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
@@ -48,6 +49,7 @@ declare module '@deepseek-ai/cordis' {
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647
 const MAX_STATE_BYTES = 4 * 1024
+const PROFILE_PROMPT_PAIR_DOMAIN = 'e-mate-profile-update-prompt-pair-v1\0'
 
 /** Scheduled update policy. */
 export interface Config {
@@ -72,6 +74,7 @@ export const Config: z<Config> = z.object({
 interface UpdateStateV2 {
   readonly version: 2
   readonly lastPromptedVersion?: string
+  /** Target generation in legacy state; current/target pair digest after the next explicit decline. */
   readonly lastPromptedGeneration?: string
 }
 
@@ -137,19 +140,37 @@ export function apply(ctx: Context, config: Config): void {
       }
     })()
 
-    const rememberPrompt = async (version: string): Promise<void> => {
-      await stateReady
-      if (state.lastPromptedVersion === version) return
-      state = { ...state, lastPromptedVersion: version }
-      await persistState()
+    let stateMutationTail = Promise.resolve()
+    const mutateState = (mutation: (current: UpdateStateV2) => UpdateStateV2): Promise<void> => {
+      const task = stateMutationTail.then(async () => {
+        await stateReady
+        const next = mutation(state)
+        if (next === state) return
+        state = next
+        await persistState()
+      })
+      stateMutationTail = task.catch(() => undefined)
+      return task
     }
 
-    const rememberProfilePrompt = async (generationId: string): Promise<void> => {
-      await stateReady
-      if (state.lastPromptedGeneration === generationId) return
-      state = { ...state, lastPromptedGeneration: generationId }
-      await persistState()
-    }
+    const rememberPrompt = async (version: string): Promise<void> => await mutateState(current => (
+      current.lastPromptedVersion === version ? current : { ...current, lastPromptedVersion: version }
+    ))
+
+    const rememberProfileDecline = async (update: ProfileUpdateAvailable): Promise<void> => await mutateState(current => {
+      if (disposed) return current
+      const pair = profilePromptPair(update.currentGeneration, update.generationId)
+      return current.lastPromptedGeneration === pair ? current : { ...current, lastPromptedGeneration: pair }
+    })
+
+    const clearProfileDecline = async (update: ProfileUpdateAvailable): Promise<void> => await mutateState(current => {
+      if (disposed
+        || current.lastPromptedGeneration !== profilePromptPair(update.currentGeneration, update.generationId)) return current
+      return {
+        version: 2,
+        ...(current.lastPromptedVersion === undefined ? {} : { lastPromptedVersion: current.lastPromptedVersion }),
+      }
+    })
 
     const startCheck = (): Promise<UpdateCheckResult | null> => {
       if (inFlight !== undefined) return inFlight
@@ -164,7 +185,9 @@ export function apply(ctx: Context, config: Config): void {
           if (adapter.platform === undefined) return null
           return await checkForStableUpdate({
             currentVersion: adapter.currentVersion,
+            currentScheduleProtocolFloor: adapter.currentScheduleProtocolFloor,
             platform: adapter.platform,
+            trustedManifestKeys: adapter.trustedManifestKeys,
             signal: controller.signal,
             request: adapter.request,
           })
@@ -314,7 +337,12 @@ export function apply(ctx: Context, config: Config): void {
         } catch {
           return profileResult('failed', update)
         }
-        if (!confirmed) return profileResult('declined', update)
+        if (!confirmed) {
+          if (!disposed) await rememberProfileDecline(update)
+          return profileResult('declined', update)
+        }
+        if (disposed) return profileResult('failed', update)
+        await clearProfileDecline(update)
         if (disposed) return profileResult('failed', update)
 
         const rechecked = await startProfileCheck()
@@ -322,8 +350,8 @@ export function apply(ctx: Context, config: Config): void {
         if (confirmedUpdate === undefined || !sameProfileUpdate(confirmedUpdate, update) || disposed) {
           if (!disposed) {
             adapter.notify(confirmedUpdate === undefined
-              ? { title: 'e-Mate Component Update Changed', body: 'The signed component release changed or now requires a different Desktop Base.' }
-              : { title: 'e-Mate Component Update Changed', body: `Component generation ${confirmedUpdate.sequence} is now available. Please confirm the new release.` })
+              ? { title: 'e-Mate 更新已变化', body: '已签名更新已变化或需要更新应用版本，请重新检查并确认。' }
+              : { title: 'e-Mate 更新已变化', body: `e-Mate 第 ${confirmedUpdate.sequence} 代已可用，请重新确认。` })
           }
           if (rechecked?.status === 'base-required') return baseRequired(rechecked)
           return confirmedUpdate === undefined
@@ -341,8 +369,8 @@ export function apply(ctx: Context, config: Config): void {
         } catch {
           if (!disposed) {
             adapter.notify({
-              title: 'e-Mate Component Update Failed',
-              body: 'The component generation could not be downloaded, verified, or activated. The current generation was not changed.',
+              title: 'e-Mate 更新未完成',
+              body: '本次能力更新未能完成下载、校验或启用，当前版本保持不变。',
             })
           }
           return profileResult('failed', confirmedUpdate)
@@ -372,8 +400,8 @@ export function apply(ctx: Context, config: Config): void {
     ): Promise<InteractiveUpdateResult | undefined> => {
       if (disposed || profileAdapter === undefined) return profileResult('failed', update)
       await stateReady
-      if (disposed || (automatic && state.lastPromptedGeneration === update.generationId)) return
-      await rememberProfilePrompt(update.generationId)
+      if (disposed || (automatic
+        && state.lastPromptedGeneration === profilePromptPair(update.currentGeneration, update.generationId))) return
       if (!disposed) return startProfileDownload(update)
     }
 
@@ -395,8 +423,8 @@ export function apply(ctx: Context, config: Config): void {
             return (await offerDownload(update, false)) ?? failed(update.latestVersion)
           }
           adapter.notify({
-            title: 'Desktop Base Update Required',
-            body: `Component release ${checkedProfile.releaseVersion} requires a newer compatible Desktop Base.`,
+            title: '需要更新 e-Mate',
+            body: `e-Mate ${checkedProfile.releaseVersion} 需要更新应用版本后才能使用。`,
           })
           return baseRequired(checkedProfile)
         }
@@ -454,11 +482,11 @@ export function apply(ctx: Context, config: Config): void {
       group: 'status',
       order: 10,
       label: () => downloadingProfile !== undefined
-        ? `Installing e-Mate ${downloadingProfile.releaseVersion} Components…`
+        ? `Installing e-Mate ${downloadingProfile.releaseVersion} Update…`
         : downloadingVersion !== undefined
           ? `Downloading e-Mate ${downloadingVersion}…`
           : availableProfileUpdate !== undefined
-            ? `e-Mate ${availableProfileUpdate.releaseVersion} Components Available`
+            ? `e-Mate ${availableProfileUpdate.releaseVersion} Update Available`
             : availableUpdate === undefined
               ? checking ? 'Checking for Updates…' : 'Check for Updates…'
               : `e-Mate ${availableUpdate.latestVersion} Available`,
@@ -483,16 +511,23 @@ export function apply(ctx: Context, config: Config): void {
       const pending: Promise<unknown>[] = [stateReady]
       if (inFlight !== undefined) pending.push(inFlight)
       if (profileInFlight !== undefined) pending.push(profileInFlight)
+      pending.push(stateMutationTail)
       await Promise.allSettled(pending)
     }
   }, '@e-mate/desktop: update polling, confirmation, and installer handoff')
 }
 
 function sameUpdate(left: AvailableUpdate | undefined, right: AvailableUpdate): boolean {
-  return left?.latestVersion === right.latestVersion
-    && left.artifact.url === right.artifact.url
-    && left.artifact.bytes === right.artifact.bytes
-    && left.artifact.sha256 === right.artifact.sha256
+  return left?.manifestIdentity === right.manifestIdentity
+}
+
+function profilePromptPair(currentGeneration: string, targetGeneration: string): string {
+  return createHash('sha256')
+    .update(PROFILE_PROMPT_PAIR_DOMAIN)
+    .update(currentGeneration)
+    .update('\0')
+    .update(targetGeneration)
+    .digest('hex')
 }
 
 function parseState(text: string): UpdateStateV2 {

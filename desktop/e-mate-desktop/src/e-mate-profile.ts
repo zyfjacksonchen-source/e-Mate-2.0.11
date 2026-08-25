@@ -12,10 +12,12 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { unpackedAsarPath } from './packaged-runtime-path.ts'
 
@@ -29,7 +31,7 @@ if (typeof EMATE_DESKTOP_PROFILE_VERSION !== 'string'
   || !/^\d+\.\d+\.\d+$/u.test(EMATE_DESKTOP_PROFILE_VERSION)) {
   throw new Error('e-Mate desktop package version must be a stable semantic version')
 }
-const HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
+const HARNESS_COMMIT = 'b2b1650b01f0ee88d81837a9b5c050f9f763f606'
 const sourceRoot = unpackedAsarPath(
   fileURLToPath(new URL('../build/e-mate-profile/', import.meta.url)),
 )
@@ -96,6 +98,11 @@ const RETIRED_PROFILE_PACKAGES = new Set([
 const OWNED_PROFILE_PACKAGES = new Set([...MANAGED_PROFILE_PACKAGES, ...RETIRED_PROFILE_PACKAGES])
 const PROFILE_INSTALL_RECEIPT = '.e-mate-install.json'
 const COMPONENT_STORE_METADATA = new Set(['.e-mate-component.json', '.e-mate-component-manifest.json'])
+const WINDOWS_MANAGED_PACKAGE_LAYOUT = 'win32-materialized-v1'
+const LINKED_MANAGED_PACKAGE_LAYOUT = 'linked-v1'
+const MANAGED_PACKAGE_NEXT_SUFFIX = '.e-mate-next'
+const MANAGED_PACKAGE_STALE_SUFFIX = '.e-mate-stale'
+export const EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS = 3
 
 const DEFAULT_SETTINGS = 'ui-theme:\n  preference: dark\nagent-default-model:\n  provider: e-mate-enterprise\n  model: gpt-5.6-luna\n  reasoningEffort: max\n'
 const DEFAULT_MODEL_SETTINGS = 'agent-default-model:\n  provider: e-mate-enterprise\n  model: gpt-5.6-luna\n  reasoningEffort: max\n'
@@ -177,37 +184,211 @@ function samePath(left: string, right: string): boolean {
   return normalized(realpathSync(left)) === normalized(realpathSync(right))
 }
 
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw cause
+  }
+}
+
+function managedPackageLayout(): string {
+  return process.platform === 'win32' ? WINDOWS_MANAGED_PACKAGE_LAYOUT : LINKED_MANAGED_PACKAGE_LAYOUT
+}
+
+function portablePath(path: string): string {
+  return path.split(sep).join('/')
+}
+
+function packageRelativePath(source: string, value: string): string {
+  if (isAbsolute(value)) throw new Error('managed package entry must be relative')
+  const local = relative(resolve(source), resolve(source, value))
+  if (local === '' || local === '..' || local.startsWith(`..${sep}`) || isAbsolute(local)) {
+    throw new Error('managed package entry escapes its package root')
+  }
+  return portablePath(local)
+}
+
+function declaredExportPaths(value: unknown): string[] {
+  if (typeof value === 'string') return [value]
+  if (Array.isArray(value)) return value.flatMap(declaredExportPaths)
+  if (value !== null && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).flatMap(declaredExportPaths)
+  }
+  return []
+}
+
+function managedPackageCriticalEntries(source: string): ReadonlySet<string> {
+  const manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')) as {
+    main?: unknown
+    exports?: Record<string, unknown>
+    dsh?: { bundle?: { patch?: unknown }; client?: unknown }
+  }
+  const mainEntries = typeof manifest.main === 'string'
+    ? [manifest.main]
+    : declaredExportPaths(manifest.exports?.['.'])
+  if (mainEntries.length === 0) throw new Error('managed package has no main entry')
+  const entries = ['package.json', ...mainEntries]
+  if (manifest.dsh?.client !== undefined) {
+    const clients = declaredExportPaths(manifest.exports?.['./client'])
+    if (clients.length === 0) throw new Error('managed client package has no client export')
+    entries.push(...clients)
+  }
+  if (manifest.dsh?.bundle?.patch !== undefined) {
+    if (typeof manifest.dsh.bundle.patch !== 'string') throw new Error('managed package patch entry is invalid')
+    entries.push(manifest.dsh.bundle.patch)
+  }
+  return new Set(entries.map(entry => packageRelativePath(source, entry)))
+}
+
+function visibleEntries(path: string, componentRoot: boolean): string[] {
+  return readdirSync(path)
+    .filter(name => !componentRoot || !COMPONENT_STORE_METADATA.has(name))
+    .sort()
+}
+
+function sameEntries(source: string, target: string, componentRoot: boolean): boolean {
+  const expected = visibleEntries(source, componentRoot)
+  const actual = visibleEntries(target, false)
+  return expected.length === actual.length && expected.every((name, index) => actual[index] === name)
+}
+
+function managedFileCurrent(
+  source: string,
+  target: string,
+  entry: string,
+  overrides: ReadonlyMap<string, string>,
+): boolean {
+  const parts = entry.split('/')
+  if (process.platform === 'win32') {
+    let current = target
+    for (const part of parts.slice(0, -1)) {
+      current = join(current, part)
+      const metadata = lstatSync(current)
+      if (!metadata.isDirectory() || metadata.isSymbolicLink()) return false
+    }
+  }
+  const from = join(source, ...parts)
+  const to = join(target, ...parts)
+  const targetMetadata = lstatSync(to)
+  if (!targetMetadata.isFile() || targetMetadata.isSymbolicLink()) return false
+  const override = overrides.get(entry)
+  if (override !== undefined) return sha256Bytes(override) === sha256(to)
+  const sourceMetadata = statSync(from)
+  return sourceMetadata.isFile() && sourceMetadata.size === targetMetadata.size && sha256(from) === sha256(to)
+}
+
+function materializedDirectoryCurrent(
+  sourceRoot: string,
+  targetRoot: string,
+  overrides: ReadonlyMap<string, string>,
+  source = sourceRoot,
+  target = targetRoot,
+  prefix = '',
+): boolean {
+  if (!sameEntries(source, target, prefix === '')) return false
+  return readdirSync(source, { withFileTypes: true })
+    .filter(entry => prefix !== '' || !COMPONENT_STORE_METADATA.has(entry.name))
+    .every(entry => {
+      const from = join(source, entry.name)
+      const to = join(target, entry.name)
+      const targetMetadata = lstatSync(to)
+      if (targetMetadata.isSymbolicLink()) return false
+      const local = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+      if (entry.isDirectory()) {
+        return targetMetadata.isDirectory()
+          && materializedDirectoryCurrent(sourceRoot, targetRoot, overrides, from, to, local)
+      }
+      return entry.isFile() && managedFileCurrent(sourceRoot, targetRoot, local, overrides)
+    })
+}
+
+function managedPackageFullyCurrent(
+  source: string,
+  target: string,
+  overrides: ReadonlyMap<string, string> = new Map(),
+): boolean {
+  try {
+    const targetRoot = lstatSync(target)
+    if (!targetRoot.isDirectory() || targetRoot.isSymbolicLink()) return false
+    if (process.platform === 'win32') return materializedDirectoryCurrent(source, target, overrides)
+    if (!sameEntries(source, target, true)) return false
+    return readdirSync(source, { withFileTypes: true })
+      .filter(entry => !COMPONENT_STORE_METADATA.has(entry.name))
+      .every(entry => {
+        const from = join(source, entry.name)
+        const to = join(target, entry.name)
+        const targetMetadata = lstatSync(to)
+        if (entry.isDirectory()) return targetMetadata.isSymbolicLink() && samePath(from, to)
+        return entry.isFile() && managedFileCurrent(source, target, entry.name, overrides)
+      })
+  } catch {
+    return false
+  }
+}
+
+function managedPackageTransactionPaths(target: string): { readonly candidate: string; readonly stale: string } {
+  return {
+    candidate: `${target}${MANAGED_PACKAGE_NEXT_SUFFIX}`,
+    stale: `${target}${MANAGED_PACKAGE_STALE_SUFFIX}`,
+  }
+}
+
+function removeWithoutFollowing(path: string): void {
+  if (!pathExists(path)) return
+  const metadata = lstatSync(path)
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) unlinkSync(path)
+  else rmSync(path, { recursive: true, force: true })
+}
+
 /** Keep package metadata patchable while loading large immutable directories from the app bundle. */
 function installManagedPackage(
   source: string,
   target: string,
+  overrides: ReadonlyMap<string, string> = new Map(),
   deferCleanup?: (path: string) => void,
 ): void {
-  const previous = `${target}.e-mate-stale-${process.pid}-${randomUUID()}`
+  if (managedPackageFullyCurrent(source, target, overrides)) return
+  const { candidate, stale } = managedPackageTransactionPaths(target)
+  if (pathExists(candidate) || pathExists(stale)) {
+    throw new Error('managed package transaction recovery is incomplete')
+  }
   let movedPrevious = false
+  let activatedCandidate = false
   try {
-    if (existsSync(target)) {
-      renameSync(target, previous)
-      movedPrevious = true
-    }
-    mkdirSync(target, { recursive: true })
+    mkdirSync(candidate, { recursive: true })
     for (const entry of readdirSync(source, { withFileTypes: true })) {
       if (COMPONENT_STORE_METADATA.has(entry.name)) continue
       const from = join(source, entry.name)
-      const to = join(target, entry.name)
-      if (statSync(from).isDirectory()) {
-        symlinkSync(resolve(from), to, process.platform === 'win32' ? 'junction' : 'dir')
+      const to = join(candidate, entry.name)
+      if (entry.isDirectory()) {
+        if (process.platform === 'win32') cpSync(from, to, { recursive: true, force: true, dereference: true })
+        else symlinkSync(resolve(from), to, 'dir')
       } else {
-        cpSync(from, to, { force: true })
+        const override = overrides.get(entry.name)
+        if (override === undefined) cpSync(from, to, { force: true })
+        else writeFileSync(to, override)
       }
     }
+    if (!managedPackageFullyCurrent(source, candidate, overrides)) {
+      throw new Error('managed package materialization is incomplete')
+    }
+    if (pathExists(target)) {
+      renameSync(target, stale)
+      movedPrevious = true
+    }
+    renameSync(candidate, target)
+    activatedCandidate = true
     if (movedPrevious) {
-      if (deferCleanup === undefined) rmSync(previous, { recursive: true, force: true })
-      else deferCleanup(previous)
+      if (deferCleanup === undefined) removeWithoutFollowing(stale)
+      else deferCleanup(stale)
     }
   } catch (cause) {
-    rmSync(target, { recursive: true, force: true })
-    if (movedPrevious && !existsSync(target)) renameSync(previous, target)
+    removeWithoutFollowing(candidate)
+    if (activatedCandidate) removeWithoutFollowing(target)
+    if (movedPrevious && !pathExists(target)) renameSync(stale, target)
     throw cause
   }
 }
@@ -218,22 +399,158 @@ function managedPackageCurrent(
   overrides: ReadonlyMap<string, string> = new Map(),
 ): boolean {
   try {
-    return readdirSync(source, { withFileTypes: true })
+    const targetRoot = lstatSync(target)
+    if (!targetRoot.isDirectory() || targetRoot.isSymbolicLink() || !sameEntries(source, target, true)) return false
+    const criticalEntries = managedPackageCriticalEntries(source)
+    const rootsCurrent = readdirSync(source, { withFileTypes: true })
       .filter(entry => !COMPONENT_STORE_METADATA.has(entry.name))
       .every(entry => {
-      const from = join(source, entry.name)
-      const to = join(target, entry.name)
-      const sourceMetadata = statSync(from)
-      const targetMetadata = lstatSync(to)
-      return sourceMetadata.isDirectory()
-        ? targetMetadata.isSymbolicLink() && samePath(from, to)
-        : targetMetadata.isFile() && !targetMetadata.isSymbolicLink()
-          && (overrides.has(entry.name)
-            ? sha256Bytes(overrides.get(entry.name)!) === sha256(to)
-            : sourceMetadata.size === targetMetadata.size && sha256(from) === sha256(to))
+        const from = join(source, entry.name)
+        const to = join(target, entry.name)
+        const targetMetadata = lstatSync(to)
+        if (entry.isDirectory()) {
+          return process.platform === 'win32'
+            ? targetMetadata.isDirectory() && !targetMetadata.isSymbolicLink()
+            : targetMetadata.isSymbolicLink() && samePath(from, to)
+        }
+        if (!entry.isFile() || !targetMetadata.isFile() || targetMetadata.isSymbolicLink()) return false
+        const override = overrides.get(entry.name)
+        return targetMetadata.size === (override === undefined ? statSync(from).size : Buffer.byteLength(override))
       })
+    return rootsCurrent && [...criticalEntries].every(entry => managedFileCurrent(source, target, entry, overrides))
   } catch {
     return false
+  }
+}
+
+function managedPackageTargets(profile: string): readonly string[] {
+  return [
+    join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar'),
+    ...PLUGIN_PACKAGES.map(name => join(profile, 'node_modules', ...name.split('/'))),
+    ...ECOSYSTEM_PLUGIN_PACKAGES.map(plugin => join(profile, 'node_modules', plugin.name)),
+  ]
+}
+
+function managedCleanupArtifacts(profile: string): readonly string[] {
+  return managedPackageTargets(profile).flatMap(target => {
+    const transaction = managedPackageTransactionPaths(target)
+    return [transaction.candidate, transaction.stale]
+  })
+}
+
+function normalizedPath(path: string): string {
+  const normalized = resolve(path)
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+}
+
+function managedCleanupArtifact(profile: string, path: string): string {
+  const requested = normalizedPath(path)
+  const artifact = managedCleanupArtifacts(profile).find(candidate => normalizedPath(candidate) === requested)
+  if (artifact === undefined) throw new Error('managed profile cleanup path is outside the owned package transaction set')
+  return resolve(artifact)
+}
+
+function managedCleanupKey(profile: string, path: string): string {
+  return portablePath(relative(resolve(profile), resolve(path)))
+}
+
+function readProfileInstallReceipt(profile: string): Record<string, unknown> {
+  const receipt = JSON.parse(readFileSync(join(profile, PROFILE_INSTALL_RECEIPT), 'utf8')) as Record<string, unknown>
+  if (receipt.schema_version !== 2 || receipt.version !== EMATE_DESKTOP_PROFILE_VERSION
+    || receipt.harness_commit !== HARNESS_COMMIT) {
+    throw new Error('managed profile cleanup receipt identity is invalid')
+  }
+  return receipt
+}
+
+function managedCleanupAttempt(receipt: Record<string, unknown>, key: string): number {
+  const attempts = receipt.cleanup_attempts
+  if (attempts === undefined) return 0
+  if (attempts === null || typeof attempts !== 'object' || Array.isArray(attempts)) {
+    return EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS
+  }
+  const value = (attempts as Record<string, unknown>)[key]
+  if (value === undefined) return 0
+  return Number.isSafeInteger(value) && Number(value) >= 0
+    ? Math.min(Number(value), EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS)
+    : EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS
+}
+
+function writeManagedCleanupAttempt(profile: string, key: string, value?: number): void {
+  const receipt = readProfileInstallReceipt(profile)
+  const allowed = new Set(managedCleanupArtifacts(profile).map(path => managedCleanupKey(profile, path)))
+  if (!allowed.has(key)) throw new Error('managed profile cleanup key is outside the owned package transaction set')
+  const current = receipt.cleanup_attempts
+  const attempts = Object.fromEntries(current !== null && typeof current === 'object' && !Array.isArray(current)
+    ? Object.entries(current as Record<string, unknown>).filter(([candidate, attempt]) => (
+        allowed.has(candidate) && Number.isSafeInteger(attempt) && Number(attempt) > 0
+        && Number(attempt) <= EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS
+      ))
+    : []) as Record<string, number>
+  if (value === undefined || value === 0) delete attempts[key]
+  else attempts[key] = Math.min(value, EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS)
+  if (Object.keys(attempts).length === 0) delete receipt.cleanup_attempts
+  else receipt.cleanup_attempts = attempts
+  atomicWrite(join(profile, PROFILE_INSTALL_RECEIPT), `${JSON.stringify(receipt, null, 2)}\n`, 0o600)
+}
+
+function recoverManagedPackageTransactions(profile: string): void {
+  for (const target of managedPackageTargets(profile)) {
+    const { candidate, stale } = managedPackageTransactionPaths(target)
+    removeWithoutFollowing(candidate)
+    if (!pathExists(stale)) continue
+    const staleMetadata = lstatSync(stale)
+    if (!staleMetadata.isDirectory() || staleMetadata.isSymbolicLink()) {
+      throw new Error('managed package stale transaction is not a physical directory')
+    }
+    removeWithoutFollowing(target)
+    renameSync(stale, target)
+  }
+}
+
+function deferManagedPackageCleanup(
+  profile: string,
+  deferCleanup?: (path: string) => void,
+): void {
+  const receipt = readProfileInstallReceipt(profile)
+  for (const path of managedCleanupArtifacts(profile)) {
+    if (!pathExists(path)) continue
+    const key = managedCleanupKey(profile, path)
+    if (managedCleanupAttempt(receipt, key) >= EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS) continue
+    if (deferCleanup === undefined) {
+      removeWithoutFollowing(path)
+      writeManagedCleanupAttempt(profile, key)
+    } else {
+      deferCleanup(path)
+    }
+  }
+}
+
+/** Delete only a deterministic managed-package sibling and persist a bounded retry after failure. */
+export async function cleanupEmateDesktopProfileArtifact(profile: string, path: string): Promise<void> {
+  const artifact = managedCleanupArtifact(profile, path)
+  const key = managedCleanupKey(profile, artifact)
+  const receipt = readProfileInstallReceipt(profile)
+  const attempts = managedCleanupAttempt(receipt, key)
+  if (attempts >= EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS) {
+    throw new Error('managed profile cleanup retry limit is exhausted')
+  }
+  try {
+    if (pathExists(artifact)) {
+      const metadata = lstatSync(artifact)
+      if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+        throw new Error('managed profile cleanup artifact is not a physical directory')
+      }
+      await rm(artifact, { recursive: true, force: true })
+    }
+    writeManagedCleanupAttempt(profile, key)
+  } catch (cause) {
+    try {
+      writeManagedCleanupAttempt(profile, key, attempts + 1)
+    } catch (receiptCause) {
+      throw new AggregateError([cause, receiptCause], 'managed profile cleanup and retry receipt both failed')
+    }
+    throw cause
   }
 }
 
@@ -282,12 +599,13 @@ function installedProfileCurrent(
 ): boolean {
   try {
     const receipt = JSON.parse(readFileSync(join(profile, PROFILE_INSTALL_RECEIPT), 'utf8')) as Record<string, unknown>
-    if (receipt.schema_version !== 1
+    if (receipt.schema_version !== 2
       || receipt.version !== EMATE_DESKTOP_PROFILE_VERSION
       || receipt.harness_commit !== HARNESS_COMMIT
       || receipt.dsh_home !== resolve(dshHome)
       || receipt.source_root !== resolve(sourceRoot)
-      || receipt.profile_generation !== (generation?.id ?? 'bundled')) return false
+      || receipt.profile_generation !== (generation?.id ?? 'bundled')
+      || receipt.managed_package_layout !== managedPackageLayout()) return false
 
     const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, unknown>
@@ -376,8 +694,12 @@ export function installEmateDesktopProfile(
   }
   rmSync(join(dshHome, 'browser-extension'), { recursive: true, force: true })
   rmSync(join(dshHome, 'ext-bridge-token'), { force: true })
-  if (installedProfileCurrent(profile, dshHome, generation)) return profile
+  if (installedProfileCurrent(profile, dshHome, generation)) {
+    deferManagedPackageCleanup(profile, deferCleanup)
+    return profile
+  }
 
+  recoverManagedPackageTransactions(profile)
   rmSync(join(profile, PROFILE_INSTALL_RECEIPT), { force: true })
   cpSync(join(sourceRoot, 'plugins'), join(profile, 'plugins'), { recursive: true, force: true })
   atomicWrite(
@@ -417,16 +739,14 @@ export function installEmateDesktopProfile(
   const shellSource = componentSource('@e-mate/dsh-client-shell', generation)
   const shellTarget = join(profile, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar')
   mkdirSync(dirname(shellTarget), { recursive: true })
-  installManagedPackage(shellSource, shellTarget, deferCleanup)
+  installManagedPackage(shellSource, shellTarget, new Map(), deferCleanup)
 
   for (const name of PLUGIN_PACKAGES) {
     const source = componentSource(name, generation)
     const target = join(profile, 'node_modules', ...name.split('/'))
+    const overrides = adaptedPluginPatch(source, name)
     mkdirSync(dirname(target), { recursive: true })
-    installManagedPackage(source, target, deferCleanup)
-    for (const [patchName, patch] of adaptedPluginPatch(source, name)) {
-      atomicWrite(join(target, patchName), patch)
-    }
+    installManagedPackage(source, target, overrides, deferCleanup)
   }
 
   for (const expected of ECOSYSTEM_PLUGIN_PACKAGES) {
@@ -457,10 +777,7 @@ export function installEmateDesktopProfile(
       || typeof manifest.dsh?.bundle?.patch !== 'string') {
       throw new Error(`${expected.name} package contract does not match the pinned e-Mate desktop profile`)
     }
-    installManagedPackage(source, target, deferCleanup)
-    for (const [patchName, patch] of adaptedEcosystemPatch(source, expected)) {
-      atomicWrite(join(target, patchName), patch)
-    }
+    installManagedPackage(source, target, adaptedEcosystemPatch(source, expected), deferCleanup)
   }
 
   const tools = packageEntry('@deepseek-ai/dsh-tools')
@@ -513,12 +830,13 @@ export function installEmateDesktopProfile(
     throw new Error('e-Mate desktop profile plugins are incomplete')
   }
   atomicWrite(join(profile, PROFILE_INSTALL_RECEIPT), `${JSON.stringify({
-    schema_version: 1,
+    schema_version: 2,
     version: EMATE_DESKTOP_PROFILE_VERSION,
     harness_commit: HARNESS_COMMIT,
     dsh_home: resolve(dshHome),
     source_root: resolve(sourceRoot),
     profile_generation: generation?.id ?? 'bundled',
+    managed_package_layout: managedPackageLayout(),
   }, null, 2)}\n`, 0o600)
   return profile
 }

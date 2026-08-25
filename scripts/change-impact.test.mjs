@@ -58,6 +58,7 @@ describe('repository release boundary', () => {
   it('makes native rc.7 Creation Mode the guarded development first rule', () => {
     const agents = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8')
     const target = readFileSync(new URL('../docs/target-contract.md', import.meta.url), 'utf8')
+    const slice = readFileSync(new URL('../docs/slices/2.0.13.md', import.meta.url), 'utf8')
     const profile = readFileSync(new URL('../desktop/e-mate-desktop/src/profile.ts', import.meta.url), 'utf8')
     const profilePatch = readFileSync(new URL('../packages/dsh/profile/cordis.patch.yml', import.meta.url), 'utf8')
     const packagedGate = readFileSync(
@@ -67,10 +68,19 @@ describe('repository release boundary', () => {
 
     assert.match(agents, /First development rule: use native DSH Creation Mode first/u)
     assert.match(agents, /resolve `desktop\/e-mate-desktop\/base-contract\.json` and the checked-in Harness\/Desktop-reference gitlinks/u)
+    assert.match(agents, /default development path is the shipped rc\.7 `cordis` preset/u)
+    assert.match(agents, /define\/run\/stop\/undefine and hot-replace lifecycle in the explicitly selected isolated local development session/u)
+    assert.match(agents, /After every change, exercise the narrow real interaction and owning regression there immediately/u)
     assert.match(agents, /Creation Mode is the development inner loop, not a release format or admission bypass/u)
+    assert.match(agents, /batch coherent changes only at version freeze/u)
+    assert.match(agents, /receives no signing, R2, Feed, production desired-state/u)
+    assert.match(agents, /never replaces installed-state, cross-platform, performance, rollback, or release acceptance/u)
+    assert.match(agents, /Base-only work instead follows the pinned Desktop lifecycle/u)
     assert.match(target, /First development principle: native Creation Mode before permanent plugins/u)
     assert.match(target, /“对照 DSH 原生” always means the Harness and Desktop-reference pins/u)
     assert.match(target, /shell-equivalent trust and is explicit opt-in/u)
+    assert.match(slice, /2\.0\.13 Base v7 候选已按 bounded diff 原子固定为同一 rc\.7 的 `b2b1650b01f0ee88d81837a9b5c050f9f763f606`/u)
+    assert.match(slice, /正式 Harness pin、Base v7 与 SDK 身份已在源码层对齐/u)
     assert.match(profile, /roots:\s*\[\s*\{ path: managedPresetRoot\(profileDir\), trust: 'system' \},\s*\{ path: shippedPresetRoot\(\), trust: 'system' \}/u)
     assert.match(profilePatch, /id: ui-agent-preset\s+name: '@deepseek-ai\/dsh-client-ui-agent-preset'\s+disabled: false/u)
     for (const required of [
@@ -119,8 +129,9 @@ describe('repository release boundary', () => {
   it('accepts the checked-in base contract and every first-party component', () => {
     const boundary = loadReleaseBoundary(root)
     assert.equal(boundary.valid, true, boundary.errors.join('\n'))
-    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v6-dsh-2bc16230975f')
-    assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.12')
+    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0')
+    assert.equal(boundary.baseContract.schedule_protocol_floor, 1)
+    assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.13')
     assert.deepEqual(PRODUCT_UI_REFERENCE, {
       repository: 'zyfjacksonchen-source/ECoreX',
       path: 'upstream/e-mate-2.0.5',
@@ -136,6 +147,14 @@ describe('repository release boundary', () => {
     assert.equal(boundary.components.length, 16)
     assert.equal(boundary.components.every(component => component.errors.length === 0), true)
     assert.deepEqual(boundary.components.flatMap(component => component.errors), [])
+    const blocked = JSON.parse(readFileSync(join(root, 'packages/dsh-plugin-xin-assistant/package.json'), 'utf8'))
+    assert.deepEqual(blocked.eMate.component.base_contracts, [boundary.baseContract.id])
+    assert.equal(blocked.eMate.harnessCommit, boundary.baseContract.harness_commit)
+    assert.equal(boundary.components.find(component => component.id === blocked.name)?.desktop, 'blocked')
+    const retired = JSON.parse(readFileSync(join(root, 'packages/dsh-plugin-search-mcp/package.json'), 'utf8'))
+    assert.deepEqual(retired.eMate.component.base_contracts, ['e-mate-desktop-profile-v6-dsh-2bc16230975f'])
+    assert.equal(retired.eMate.harnessCommit, '2bc16230975f6cf02aa1b283b1f86de44007b059')
+    assert.equal(boundary.components.some(component => component.id === retired.name), false)
   })
 
   it('detects a transitive Harness version hidden in a component lock peer context', () => {
@@ -169,7 +188,7 @@ describe('repository release boundary', () => {
       execFileSync('git', ['init', '--quiet'], { cwd: checkout })
       execFileSync('git', [
         'update-index', '--add', '--cacheinfo',
-        '160000,2bc16230975f6cf02aa1b283b1f86de44007b059,upstream/deepseek-harness',
+        '160000,b2b1650b01f0ee88d81837a9b5c050f9f763f606,upstream/deepseek-harness',
       ], { cwd: checkout })
       execFileSync('git', [
         'update-index', '--add', '--cacheinfo',
@@ -194,6 +213,16 @@ describe('repository release boundary', () => {
       baseContract.runtime_imports.react = '18.3.2'
       writeFileSync(basePath, `${JSON.stringify(baseContract, null, 2)}\n`)
       assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /Base runtime import react must equal 18\.3\.2/u)
+      copyFileSync(join(root, 'desktop/e-mate-desktop/base-contract.json'), basePath)
+
+      const missingFloor = JSON.parse(readFileSync(basePath, 'utf8'))
+      delete missingFloor.schedule_protocol_floor
+      writeFileSync(basePath, `${JSON.stringify(missingFloor, null, 2)}\n`)
+      assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /base contract fields are invalid/u)
+      const invalidFloor = JSON.parse(readFileSync(join(root, 'desktop/e-mate-desktop/base-contract.json'), 'utf8'))
+      invalidFloor.schedule_protocol_floor = 0
+      writeFileSync(basePath, `${JSON.stringify(invalidFloor, null, 2)}\n`)
+      assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /schedule_protocol_floor must be 1/u)
       copyFileSync(join(root, 'desktop/e-mate-desktop/base-contract.json'), basePath)
 
       const memoryPath = join(checkout, 'packages/dsh-plugin-memory-evolve/package.json')
@@ -397,6 +426,15 @@ describe('repository release boundary', () => {
     ]) assert.equal(classify(...paths).lane, 'base', paths.join(', '))
     assert.equal(classify('packages/dsh-plugin-memory-evolve/pnpm-lock.yaml').lane, 'plugin-only')
 
+    const pureBase = classify('desktop/e-mate-desktop/src/main.ts')
+    const baseAndEnterprise = classify('desktop/e-mate-desktop/src/main.ts', 'enterprise/apps/auth-gateway/src/index.ts')
+    const componentAndEnterprise = classify('packages/dsh-plugin-memory-evolve/src/index.ts', 'enterprise/apps/auth-gateway/src/index.ts')
+    assert.equal(pureBase.run_enterprise, false)
+    assert.equal(baseAndEnterprise.lane, 'base')
+    assert.equal(baseAndEnterprise.run_enterprise, true)
+    assert.equal(componentAndEnterprise.lane, 'base')
+    assert.equal(componentAndEnterprise.run_enterprise, true)
+
     const base = classify('desktop/e-mate-desktop/src/main.ts')
     assert.deepEqual(base.base_platform_component_jobs, [
       { component: '@e-mate/dsh-plugin-computer-use', target: 'darwin-arm64', runner: 'macos-15', publish: false },
@@ -419,6 +457,7 @@ describe('repository release boundary', () => {
 
     assert.equal(classify('packages/dsh-plugin-xin-assistant/src/index.ts').lane, 'base')
     assert.equal(classify('packages/dsh-plugin-xin-assistant/runtime/vendor-native/darwin-arm64/library.dylib').lane, 'base')
+    assert.equal(classify('packages/dsh-plugin-search-mcp/package.json').lane, 'base')
 
     const impact = classify('packages/dsh-plugin-computer-use/scripts/build.mjs')
     assert.equal(impact.portable_publish, false)
@@ -472,7 +511,9 @@ describe('repository release boundary', () => {
   })
 
   it('keeps enterprise, verification, and docs changes out of product builds', () => {
-    assert.equal(classify('enterprise/apps/auth-gateway/src/index.ts').lane, 'enterprise-only')
+    const enterprise = classify('enterprise/apps/auth-gateway/src/index.ts')
+    assert.equal(enterprise.lane, 'enterprise-only')
+    assert.equal(enterprise.run_enterprise, true)
     assert.equal(classify('scripts/change-impact.test.mjs').lane, 'verification-only')
     assert.equal(classify('docs/development-log.md').lane, 'docs-only')
 
@@ -503,10 +544,13 @@ describe('repository release boundary', () => {
     assert.doesNotMatch(workflow, /python-version: '3\.12\.14'/u)
     assert.match(workflow, /name: Test the accepted platform component against the new Base\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
     assert.match(workflow, /name: Export the exact accepted Base SDK run artifact(?:.|\n)*?name: e-mate-base-sdk-\$\{\{ needs\.impact\.outputs\.head_sha \}\}(?:.|\n)*?include-hidden-files: true(?:.|\n)*?retention-days: 30/u)
+    assert.match(workflow, /name: Build pinned DeepSeek Harness\n\s+run: pnpm build:harness/u)
     assert.match(workflow, /runs-on: \$\{\{ matrix\.runner \}\}/u)
     assert.match(workflow, /name: Build and test only the changed component\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
     assert.match(workflow, /if: matrix\.publish == true/u)
     assert.match(workflow, /profile-portable-composition:\n(?:.|\n)*?name: Portable Profile generations(?:.|\n)*?needs: \[impact, plugins\](?:.|\n)*?portable_publish == 'true'(?:.|\n)*?runs-on: macos-15(?:.|\n)*?Compose every target and boot the portable graph once/u)
+    assert.equal(workflow.match(/--snapshot artifacts\/release\/profile-current-snapshot\.json\n\s+--materialize-current dist\/profile-current/gu)?.length, 2)
+    assert.doesNotMatch(workflow, /curl[^]*desktop\/profile\/desired-state/u)
     assert.match(workflow, /for target in darwin-arm64 darwin-x64 win32-x64;(?:.|\n)*?node scripts\/profile-release\.mjs(?:.|\n)*?pids\+=\("\$!"\)(?:.|\n)*?wait "\$pid"(?:.|\n)*?verify-profile-boot\.mjs(?:.|\n)*?--target darwin-arm64/u)
     assert.match(workflow, /profile-composition:\n(?:.|\n)*?needs: \[impact, plugins\](?:.|\n)*?portable_publish != 'true'(?:.|\n)*?Compose and boot the complete candidate generation/u)
     assert.match(workflow, /node scripts\/base-sdk\.mjs fingerprint/u)
@@ -514,8 +558,11 @@ describe('repository release boundary', () => {
     assert.match(workflow, /if test "\$BASE_SHA" = 0000000000000000000000000000000000000000;(?:.|\n)*?ACCEPTED_PREDECESSOR/u)
     assert.match(workflow, /name: e-mate-change-impact-\$\{\{ steps\.classify\.outputs\.head_sha \}\}/u)
     assert.match(workflow, /enterprise:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_enterprise == 'true'/u)
+    assert.match(workflow, /RUN_ENTERPRISE: \$\{\{ needs\.impact\.outputs\.run_enterprise \}\}(?:.|\n)*?case "\$RUN_ENTERPRISE" in\n\s+true\) test "\$ENTERPRISE" = success ;;\n\s+false\) test "\$ENTERPRISE" = skipped ;;/u)
     assert.match(workflow, /admission:\n(?:.|\n)*?case "\$LANE" in(?:.|\n)*?plugin-only\)(?:.|\n)*?test "\$PORTABLE_PUBLISH" = true;(?:.|\n)*?test "\$PROFILE_PORTABLE" = success(?:.|\n)*?test "\$PROFILE" = skipped(?:.|\n)*?test "\$SOURCE" = skipped(?:.|\n)*?test "\$WINDOWS" = skipped(?:.|\n)*?test "\$MACOS" = skipped/u)
     assert.match(workflow, /base\)(?:.|\n)*?test "\$BASE_PLATFORM_COMPONENTS" = success/u)
+    const sourceJob = workflow.slice(workflow.indexOf('  source:'), workflow.indexOf('\n  plugins:'))
+    assert.doesNotMatch(sourceJob, /enterprise\/pnpm-lock\.yaml|pnpm --dir enterprise|pnpm enterprise:/u)
     for (const [jobName, nextJobName] of [
       ['desktop-windows', 'desktop-macos'],
       ['desktop-macos', 'admission'],
@@ -524,6 +571,12 @@ describe('repository release boundary', () => {
       const end = workflow.indexOf(`\n  ${nextJobName}:`, start + 3)
       const job = workflow.slice(start, end < 0 ? undefined : end)
       assert.match(job, /needs: \[impact, source\]/u)
+      assert.match(job, /name: e-mate-base-sdk-\$\{\{ needs\.impact\.outputs\.head_sha \}\}/u)
+      assert.match(job, /node scripts\/base-sdk\.mjs install --directory \.release-cache\/base-sdk/u)
+      assert.ok(
+        job.indexOf('base-sdk.mjs install') < job.indexOf('yarn install --immutable'),
+        `${jobName} must restore the accepted Base SDK before Yarn materializes Desktop`,
+      )
       assert.match(job, /if: needs\.impact\.outputs\.run_verification == 'true'/u)
       assert.match(job, /yarn verify:loader/u)
       assert.equal(job.match(/yarn verify:profile/gu)?.length, 2)
@@ -535,6 +588,8 @@ describe('repository release boundary', () => {
     const workflow = readFileSync(new URL('../.github/workflows/profile-release.yml', import.meta.url), 'utf8')
     assert.match(workflow, /source_sha="\$\(jq -er \.head_sha <<<"\$run_json"\)"/u)
     assert.match(workflow, /test "\$\(jq -er \.conclusion <<<"\$run_json"\)" = success/u)
+    assert.match(workflow, /test "\$GITHUB_RUN_ATTEMPT" = 1/u)
+    assert.match(workflow, /test "\$\(jq -er \.run_attempt <<<"\$run_json"\)" = 1/u)
     assert.match(workflow, /push\)(?:.|\n)*?test "\$source_sha" = "\$GITHUB_SHA"(?:.|\n)*?pull_request\)(?:.|\n)*?commits\/\$source_sha\/pulls(?:.|\n)*?\.merged_at != null(?:.|\n)*?\.merge_commit_sha(?:.|\n)*?\.base\.sha(?:.|\n)*?git\/commits\/\$source_sha(?:.|\n)*?\$merge_sha\^\{tree\}(?:.|\n)*?git diff --no-renames --name-only -z "\$merge_sha" "\$GITHUB_SHA"/u)
     assert.match(workflow, /later_paths\+=\(--path "\$path"\)(?:.|\n)*?node scripts\/change-impact\.mjs "\$\{later_paths\[@\]\}"(?:.|\n)*?enterprise-only\|docs-only\|verification-only/u)
     assert.doesNotMatch(workflow, /enterprise\/\*|docs\/\*|AGENTS\.md/u)
@@ -548,6 +603,7 @@ describe('repository release boundary', () => {
     assert.match(workflow, /prepare-python-runtime\.mjs --target "\$TARGET"/u)
     assert.doesNotMatch(workflow, /python-version: '3\.12\.14'/u)
     assert.match(workflow, /node scripts\/publish-profile-r2\.mjs/u)
+    assert.match(workflow, /--snapshot artifacts\/release\/profile-current-snapshot\.json/u)
     assert.match(workflow, /--bundle dist\/profile-publication/u)
     assert.match(workflow, /e-mate-profile-native-cloudflare-publication-/u)
     assert.match(workflow, /EXPECTED_CHANGED_COMPONENTS_JSON:/u)
@@ -579,6 +635,8 @@ describe('repository release boundary', () => {
 
     const publisher = readFileSync(new URL('./publish-profile-r2.mjs', import.meta.url), 'utf8')
     assert.match(publisher, /GITHUB_WORKFLOW_REF !== `\$\{REPOSITORY\}\/\.github\/workflows\/profile-release\.yml@refs\/heads\/main`/u)
+    assert.match(publisher, /GITHUB_RUN_ATTEMPT !== '1'/u)
+    assert.doesNotMatch(publisher, /\bfetch\s*\(/u)
 
     const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
     const portableCandidateUpload = ci.match(/name: e-mate-profile-candidate-darwin-arm64-\$\{\{ needs\.impact\.outputs\.head_sha \}\}[^]*?retention-days: 7/u)?.[0]
@@ -593,6 +651,8 @@ describe('repository release boundary', () => {
     const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
     assert.match(workflow, /^on:\n\s+workflow_dispatch:/mu)
     assert.doesNotMatch(workflow, /^\s+(?:pull_request|push):/mu)
+    assert.match(workflow, /name: Build pinned DeepSeek Harness\n\s+run: pnpm build:harness/u)
+    assert.doesNotMatch(workflow, /pnpm --dir upstream\/deepseek-harness run build/u)
   })
 
   it('fails unknown or malformed paths closed to base', () => {

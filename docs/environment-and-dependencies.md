@@ -16,7 +16,8 @@ e-Mate 2.0.11 is an Electron desktop application derived from the pinned `deepse
 - Node 24.x from `.nvmrc`.
 - Corepack with exact `pnpm@11.7.0` from the root `packageManager` field.
 - Desktop uses its pinned Yarn 4.18.0 project and lock.
-- Harness is exactly `zyfjacksonchen-source/deepseek-harness@2bc16230975f6cf02aa1b283b1f86de44007b059`, declared `0.1.0-rc.7`, based on upstream `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`.
+- Harness is exactly `zyfjacksonchen-source/deepseek-harness@b2b1650b01f0ee88d81837a9b5c050f9f763f606`, declared `0.1.0-rc.7`, based on upstream `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`.
+- Base CI builds that clean Harness source once, records the emitted-library hashes in the Base SDK, and materializes those same libraries into the Desktop Yarn closure before packaging; platform jobs restore the SDK instead of rebuilding or using stale registry bytes.
 - Desktop lifecycle is traced to `anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add`.
 - Main source is TypeScript/TSX. Browser bundles use the pinned Harness `clientBundle` preset; generated JavaScript is not a second source implementation.
 - The root lock owns Base/CLI inputs. Every accepted Profile component owns a separate frozen `pnpm-lock.yaml`, is installed outside the root workspace, and ships that lock plus its signed runtime closure.
@@ -29,7 +30,9 @@ e-Mate 2.0.11 is an Electron desktop application derived from the pinned `deepse
 | Portable Profile component | One DSH Host/Client plugin, generated assets and bundled non-Base dependencies | Plugin-only delta after full generation composition |
 | Platform Profile component | Computer Use or Vision target closure bound to exact OS/arch/runtime/signing tuple | Per-target plugin delta after native matrix |
 | Signed desired state | Complete accepted component set and exact Base/Harness contract | Activated last per target |
-| `desktop/latest.json` | Current Base installer identity and immutable artifact metadata | Activated last after installer acceptance |
+| `desktop/latest.json` | Frozen exact 2.0.12 compatibility tombstone for legacy v6 parsers | Never advanced beyond 2.0.12 |
+| `desktop/manual/v<version>/latest.json` | Create-only signed Base installer identity for formal manual bootstrap | Published and publicly read back before the active pointer |
+| `desktop/signed/latest.json` | Base v7 active signed installer identity | CAS-activated last after installer acceptance |
 
 `packages/dsh/profile/component-inventory.json` is the only accepted component roster. The CLI bundle copier, Desktop bootstrap, impact classifier, release emitter and full-generation composer consume that file. Xin Assistant is explicitly blocked from 2.0.11.
 
@@ -45,7 +48,7 @@ Vision uses the fixed Desktop CPython 3.12.14 ABI but owns its target-specific P
 - Harness/Desktop ABI, permissions, updater, Electron/native helper, shared Profile input, root/Desktop lock, packaging/signing or incompatible contract changes select Base. Base CI builds the installers and runs all accepted platform components against the new Base SDK on their native target matrix.
 - Unknown or incomplete provenance selects Base. Workflow-local path lists and manual labels cannot downgrade it.
 
-Publication never rebuilds accepted bytes. The protected workflow consumes an exact successful main CI run, production-signs Profile metadata, uploads only missing commit-scoped immutable objects, verifies authenticated and public bytes/SHA-256, rechecks the expected current pointer, and activates desired state last. The same rule applies to `desktop/latest.json`. A CI-only `mac-smoke` artifact is permanently ineligible.
+Publication never rebuilds accepted bytes. The protected workflow consumes an exact successful main CI run, production-signs Profile metadata, uploads only missing commit-scoped immutable objects, verifies authenticated and public bytes/SHA-256, rechecks the expected current pointer, and activates desired state last. Base v7 follows the same order through a create-only version manifest and the signed active pointer; legacy `desktop/latest.json` remains the exact 2.0.12 tombstone. A CI-only `mac-smoke` artifact is permanently ineligible.
 
 ## Capability and permission boundaries
 

@@ -2,13 +2,21 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { ACCEPTED_PREDECESSOR, assertAcceptedPredecessor, PRODUCT_UI_REFERENCE } from './change-impact.mjs'
+import { assertHarnessSource, HARNESS_COMMIT } from './harness-provenance.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const repository = 'zyfjacksonchen-source/e-Mate-2.0.11'
 const repositoryUrl = `git+https://github.com/${repository}.git`
 const target = readFileSync(resolve(root, 'docs/target-contract.md'), 'utf8')
+const productVersion = '2.0.13'
 const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
+const desktopWorkspace = JSON.parse(readFileSync(resolve(root, 'desktop/package.json'), 'utf8'))
+const desktop = JSON.parse(readFileSync(resolve(root, 'desktop/e-mate-desktop/package.json'), 'utf8'))
 const release = JSON.parse(readFileSync(resolve(root, 'packages/dsh/package.json'), 'utf8'))
+const componentInventory = JSON.parse(readFileSync(
+  resolve(root, 'packages/dsh/profile/component-inventory.json'),
+  'utf8',
+))
 const shellSource = [
   'packages/dsh/profile/plugins/emate-shell/src/client/index.ts',
   'packages/dsh/profile/plugins/emate-shell/src/client/home.tsx',
@@ -35,11 +43,23 @@ const typescriptSources = [
 ]
 for (const path of typescriptSources) readFileSync(resolve(root, path), 'utf8')
 
-if (manifest.version !== '2.0.12') throw new Error(`workspace version drifted: ${manifest.version}`)
-if (release.name !== '@e-mate/dsh' || release.version !== '2.0.12') {
+for (const [name, value] of [
+  ['workspace', manifest],
+  ['desktop workspace', desktopWorkspace],
+  ['desktop', desktop],
+]) {
+  if (value.version !== productVersion) throw new Error(`${name} version drifted: ${value.version}`)
+}
+if (release.name !== '@e-mate/dsh' || release.version !== productVersion) {
   throw new Error(`release identity drifted: ${release.name}@${release.version}`)
 }
-if (!release.description.startsWith('e-Mate 2.0.12')) throw new Error('release product name drifted')
+if (!release.description.startsWith(`e-Mate ${productVersion}`)) throw new Error('release product name drifted')
+for (const component of componentInventory.components.filter(component => component.desktop !== 'blocked')) {
+  const value = JSON.parse(readFileSync(resolve(root, component.root, 'package.json'), 'utf8'))
+  if (value.name !== component.id || value.version !== productVersion) {
+    throw new Error(`official Profile component identity drifted: ${value.name}@${value.version}`)
+  }
+}
 if (release.bin?.['e-mate'] !== 'lib/bin.js') throw new Error('TypeScript-built CLI entry drifted')
 if (!target.includes('Product name: `e-Mate`')) throw new Error('product name drifted')
 if (!target.includes(`Repository: \`${repository}\``)) throw new Error('repository identity drifted')
@@ -60,7 +80,7 @@ for (const path of ['scripts/release.mjs', 'scripts/publish-r2.mjs', 'scripts/pu
   }
 }
 if (!target.includes(ACCEPTED_PREDECESSOR)) throw new Error('accepted 2.0.11 predecessor is missing')
-if (!target.includes('2bc16230975f6cf02aa1b283b1f86de44007b059')) throw new Error('Harness source pin is missing')
+if (!target.includes(HARNESS_COMMIT)) throw new Error('Harness source pin is missing')
 if (!target.includes(PRODUCT_UI_REFERENCE.commit)) throw new Error('e-Mate shell source pin is missing')
 if (!target.includes('TypeScript/TSX')) throw new Error('TypeScript source contract is missing')
 if (!target.includes('019ff91c-47ca-7c11-93bd-863475181a18')) throw new Error('full e-Mate UI reference is missing')
@@ -83,7 +103,7 @@ const legacyBrowserVendor = readdirSync(resolve(root, 'desktop/e-mate-desktop/ve
 if (legacyBrowserVendor !== undefined) throw new Error(`legacy extension browser vendor returned: ${legacyBrowserVendor}`)
 
 for (const [name, path, expected] of [
-  ['Harness', 'upstream/deepseek-harness', '2bc16230975f6cf02aa1b283b1f86de44007b059'],
+  ['Harness', 'upstream/deepseek-harness', HARNESS_COMMIT],
   ['e-Mate shell', PRODUCT_UI_REFERENCE.path, PRODUCT_UI_REFERENCE.commit],
 ]) {
   try {
@@ -95,6 +115,8 @@ for (const [name, path, expected] of [
   }
 }
 
+assertHarnessSource(root)
+
 assertAcceptedPredecessor(root, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim())
 
-console.log('target contract: e-Mate 2.0.12 pins verified')
+console.log(`target contract: e-Mate ${productVersion} pins verified`)

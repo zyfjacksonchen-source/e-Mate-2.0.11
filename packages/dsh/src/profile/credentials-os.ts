@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { loadTargetCredentials } from './target-runtime.js'
 
 export const name = 'emate-credentials-os'
+export const LOGGED_OUT_CREDENTIAL = 'E_MATE_CREDENTIAL_LOGGED_OUT_V1'
 
 const KEYCHAIN_SERVICE = 'net.ecoremedia.e-mate.credentials.v1'
 const KEYCHAIN_CHUNK_BYTES = 96
@@ -14,7 +15,9 @@ const KEYCHAIN_MANIFEST_PREFIX = 'EMATE1:'
 const KEYCHAIN_MANIFEST = /^EMATE1:([0-9a-f]{16}):([1-9][0-9]{0,3}):([1-9][0-9]{0,4}):([A-Za-z0-9_-]{43})$/u
 const MAX_COMMAND_OUTPUT = 4 * 1024 * 1024
 const CREDENTIAL_REF = /^[A-Za-z_][A-Za-z0-9_]*$/u
-const MANAGED_MODEL_CREDENTIAL_REFS = new Set([
+const MANAGED_IDENTITY_CREDENTIAL_REFS = new Set([
+  'E_MATE_ENTERPRISE_SESSION',
+  'E_MATE_MODEL_SESSION_TOKEN',
   'E_MATE_MODEL_KEY_GPT',
   'E_MATE_MODEL_KEY_DEEPSEEK',
   'E_MATE_MODEL_KEY_DOUBAO',
@@ -416,13 +419,13 @@ export class CredentialStore {
   ) {}
 
   private inherited(ref: string): EnvironmentEntry | undefined {
-    if (MANAGED_MODEL_CREDENTIAL_REFS.has(ref)) return undefined
+    if (MANAGED_IDENTITY_CREDENTIAL_REFS.has(ref)) return undefined
     const entry = this.environment.getFrom(ref, ['process'])
     return entry !== undefined && entry.value.length > 0 ? entry : undefined
   }
 
   private fallback(ref: string): EnvironmentEntry | undefined {
-    if (MANAGED_MODEL_CREDENTIAL_REFS.has(ref)) return undefined
+    if (MANAGED_IDENTITY_CREDENTIAL_REFS.has(ref)) return undefined
     const entry = this.environment.getFrom(ref, ['project-env', 'user-env'])
     return entry !== undefined && entry.value.length > 0 ? entry : undefined
   }
@@ -431,10 +434,15 @@ export class CredentialStore {
     const inherited = this.inherited(ref)
     if (inherited !== undefined) return { value: inherited.value, source: 'env' }
     const cached = this.resolved.get(ref)
-    if (cached !== undefined) return { value: cached, source: this.backend.source }
+    if (cached !== undefined) {
+      return cached === LOGGED_OUT_CREDENTIAL && MANAGED_IDENTITY_CREDENTIAL_REFS.has(ref)
+        ? undefined
+        : { value: cached, source: this.backend.source }
+    }
     const stored = await this.backend.get(ref)
     if (stored !== undefined && stored.length > 0) {
       this.resolved.set(ref, stored)
+      if (stored === LOGGED_OUT_CREDENTIAL && MANAGED_IDENTITY_CREDENTIAL_REFS.has(ref)) return undefined
       return { value: stored, source: this.backend.source }
     }
     const fallback = this.fallback(ref)
@@ -442,6 +450,12 @@ export class CredentialStore {
   }
 
   async describe(ref: string): Promise<{ configured: boolean; source?: string; writable: boolean }> {
+    if (MANAGED_IDENTITY_CREDENTIAL_REFS.has(ref)) {
+      const hit = await this.resolve(ref)
+      return hit === undefined
+        ? { configured: false, writable: true }
+        : { configured: true, source: hit.source, writable: true }
+    }
     if (this.inherited(ref) !== undefined) return { configured: true, source: 'env', writable: false }
     if (this.resolved.has(ref)) return { configured: true, source: this.backend.source, writable: true }
     if (await this.backend.has(ref)) return { configured: true, source: this.backend.source, writable: true }

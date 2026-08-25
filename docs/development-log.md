@@ -2063,3 +2063,298 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - PR `#54` 的 accepted CI `32679795052` 绑定 source commit `4d6ad9d7b32e041c149ba9bb81782ae66cc26a1c`，公开主线 merge commit 为 `5bef129c6177de371aea2a3ae5ed262a5a0d0967`，两者 source tree 全等。Profile preparation run `32680121831` 只生成变化后的 Shell payload，并与已接受组件组合三目标第 3 代 generation；publication plan 共 `14` 个不可变对象、`3` 个 activation objects、`2,637,089` bytes。所有不可变对象上传后从公开 R2 逐项按 HTTP、bytes 与 SHA-256 回读，再以旧 desired-state 精确 SHA 做 CAS 激活；一次性认证 Worker 随后删除且 URL 返回 `404`。darwin-arm64 最终 generation 为 `d8769641262169a3b53369030a236f573e71499c22893d279e0a0c42df20ac93`，darwin-x64 为 `6ec6b157ea2668d4670bc332457bc85fe2f895d982a85a4a6b53a12e316e70ce`，win32-x64 为 `963ede65e703b338e23c0728519db8dee476b0465609fa17c4c9d481442fc5b6`；三个公开 desired-state 均为 sequence `3`、`application/json`、`no-store` 并逐字节匹配签名计划。
 - `/Applications/e-Mate.app` 的正式用户账号先确认本机 active/last-known-good 仍为第 1 代 `992b3decd90f4f3dc07ac827838796cc8a195c48a995a01a5fb3adb109dcba2e`，关闭此前已打开的第 2 代旧提示后，从真实首页聊天框自然语言发送“检查并安装 e-Mate 最新更新”。客户端重新读取公网指针，明确显示“第 3 代组件”、Shell 与 Tool Search 两个相对第 1 代的变化组件以及 `2.6 MiB` 下载大小；用户确认路径完成校验、原子切换和重启。最终本地收据为 active/last-known-good=`d8769641262169a3b53369030a236f573e71499c22893d279e0a0c42df20ac93`、previous-known-good=`992b3decd90f4f3dc07ac827838796cc8a195c48a995a01a5fb3adb109dcba2e`，证明没有把 Profile 更新退化成 Base/DMG 全量安装。
 - 第 3 代安装态在健康门提交后和再次正常退出冷启动后都显示“通用会话”、完整输入框“给小芯发送消息，支持粘贴图片或文件”、外部连接/动效/模型/发送控件及首页概览，不再出现“选择一个工作区开始”。定时任务独立页完整保留创建、建议、当前/完成/运行记录，但旧 DSH rc.7 底部说明不存在；批量删除真实进入选择模式并打开确认框，文案为“本地历史记录仍由 e-Mate 保留”，随后取消，未删除任何用户会话。这组安装态证据完成 S26 的 Profile 增量闭环，不代表 Gateway、正式 Desktop Feed、官网下载链或 2.0.12 全版本发布已经完成。
+
+## 2026-08-24 · 2.0.12 S27 企业用量审计面板交互闭环
+
+- 本切片严格限定在线企业用量审计面板：Analytics API 让汇总、任务事件、对账和日期明细共同接受同一组多用户筛选，HTTP 入口只接受有界、非重复的用户 id；Usage Dashboard 补齐最近 7/30/90 天快捷范围、自定义起止时间、多选用户、范围整体调用/Token 可视化，以及点击日期展开任务事件类型、使用场景和用户/模型用量。没有修改 e-Mate 客户端、Desktop、插件、Profile、Feed、R2 或本地 DSH 运行链。
+- 任务场景只展示任务账本真实分类；当前历史记录仍提供 `GENERAL` 时明确显示为“未分类 / 历史数据”，面板不以标题、Tool 或模型调用推测并伪造分类。要得到真实业务场景，后续应由唯一任务账本生产者提供原生 scenario，不应在报表层重分类。
+- 精确验证为 Usage Dashboard `16/16`、TypeScript 与 production build 通过；Analytics 全量测试 `35 passed / 6 environment-integration skipped / 0 failed`、TypeScript 与 production build 通过，`git diff --check` 通过。生产 Analytics 镜像为 `e-mate/analytics-api:e-mate-2.0.12-usage-audit-da7a8f`，真实 PostgreSQL 只读查询验证多用户与单日路径；最终静态 release 为 `/srv/ecorex-agent-usage-panel/releases/usage-2.0.12-audit-custom-9ee1d064ca1a`，公网首页与正式 JS 均 HTTP 200 且 JS SHA-256 与本地构建全等。已登录浏览器真实回放确认自定义时间保留并生效、同时选择两个用户后汇总变化、日期下钻展示当日事件/场景/用量，企业 API `/healthz` 为 `ok`。激活回执保存在生产主机 `/root/e-mate-bootstrap/20260824T075112Z-usage-panel-custom-9ee1d064ca1a/activation.receipt`。
+
+## 2026-08-24 · 2.0.12 S28 企业用量可视化分析与姓名展示
+
+- 本切片仍严格限定在线企业用量审计面板。Usage Dashboard 新增按日、按用户的使用热力图，支持在 Token 与调用次数之间切换；新增按日场景用量与构成图，并让时间范围、多用户筛选同时约束汇总、趋势、场景与明细。明细表支持多选自定义显示列；用户维度优先展示企业目录姓名，在下钻中保留姓名与用户 id 以便审计。没有修改 e-Mate 客户端、Desktop、插件、Profile、Feed 或 R2。
+- 当前真实任务账本仍由 `packages/dsh/src/profile/audit.ts` 的唯一生产者把 scenario 固定写为 `GENERAL`，所以历史场景继续如实显示“未分类 / 历史数据”，报表层没有通过标题或 Tool 猜测分类。精准分类所需的客户端原生修复已移交任务 `01a02e48-f61f-7352-bc86-b5ec8771d46c`，要求在已锚定 DSH rc 基线的唯一生产点做确定性分类并保持隐私与生命周期稳定；本分支不包含该客户端改动。
+- 精确验证为 Monitoring Contract `6/6`、Usage Dashboard `17/17`、Analytics `35 passed / 6 environment-integration skipped / 0 failed`，三处 TypeScript/production build 均通过。生产真实 PostgreSQL 首次暴露 JSONB 时间为 `+00:00`、而合同只接受规范 `Z` 的边界问题；修复只在 Analytics 唯一 SQL 结果边界规范化时间，并用真实 PostgreSQL 形态补充反例。最终 Analytics 镜像为 `e-mate/analytics-api:e-mate-2.0.12-usage-analysis-32252e4`，静态 release 为 `/srv/ecorex-agent-usage-panel/releases/usage-2.0.12-analysis-435a4e69cb8e`，激活回执为 `/root/e-mate-bootstrap/20260824T082606Z-usage-analysis-fix-32252e4ef4ba/activation.receipt`；只替换 Analytics 与审计面板静态资源，Auth、Gateway、Web、PostgreSQL、Redis 均未重建。已登录生产浏览器回放确认姓名展示、用户筛选、Token/调用切换、场景趋势、自定义列、日期下钻、7/30 天与自定义范围均生效，页面无全局横向溢出。
+
+## 2026-08-24 · 2.0.12 S29 审计面板原地明细与内部账号排除
+
+- 日期下钻此前只有一个共享明细节点，固定渲染在全部日期行之后；现仍复用同一查询与状态，只把该节点放到被选日期行之后，同一行再次点击或“关闭”均原地收起。分析指标的 Arco 弹出层在自动化路径可展开、真实鼠标路径却不稳定，最小修复改用原生 `select`，保持 Token/调用数量两个既有指标和样式，不再依赖弹出层。
+- `企业管理员 / e-Mate 企业管理员`、`验收用户`、`测试` 三类内部账号由管理目录的稳定 id 与精确展示名共同识别；Dashboard 在读取任何汇总、对账、任务或事件数据前，把现有查询收窄到其余可见用户的同一组权威 user id。它们因此不进入概览、趋势、场景、用户表、日期下钻或调用审计，但底层原始账本未删除，Analytics、客户端、Auth、Gateway、数据库和采集合同均未修改。
+- Usage Dashboard 类型检查、`18/18` 测试与 production build 通过。生产静态 release 最终原子切换为 `/srv/ecorex-agent-usage-panel/releases/usage-2.0.12-inline-audit-06422cb0600e`，旧 `usage-2.0.12-analysis-435a4e69cb8e` 与首个候选 `usage-2.0.12-inline-audit-ff7bde0658fe` 均保留回退，最终激活回执为 `/root/e-mate-bootstrap/20260824T085720Z-usage-inline-audit-06422cb/activation.receipt`；公网 HTML 与 JS 均为 HTTP 200、`no-store` 且 SHA-256 与本地构建全等。已登录生产浏览器确认内部账号排除后任务数、调用、Token 与活跃用户同步变化，原生指标切换生效，日期明细位于所选行与下一行之间并可再次点击收起，调用明细中也不含三类账号。
+
+## 2026-08-24 · 2.0.13 S27 合同与基线 checkpoint
+
+- Goal checkpoint: 唯一 2.0.13 主 Goal 已创建并保持 active；没有 token budget，也没有并行 Goal。当前记录只关闭文档、已发布身份和 TTFT v2 证据结构，不把 S27 或 2.0.13 标记完成。
+- Frozen baseline / current HEAD: 开发分支从 `5fb9d595749ee9de4f8019ae4decce02ad3af541` / tree `20580c664c8f9f4eb130386f090c02c39ab1d413` 建立。公开 Desktop `2.0.12` 绑定 source `9fbc70ad56c4f263dfa0aa0085f19eded134e32d`、build run `32658103294`、Base `e-mate-desktop-profile-v6-dsh-2bc16230975f` 与三目标 Profile sequence 3；本机正式安装为 2.0.12 且 active/last-known-good 为 darwin-arm64 generation `d8769641262169a3b53369030a236f573e71499c22893d279e0a0c42df20ac93`。源码身份、公开制品身份和安装态身份保持分列，未互相冒充。
+- Binding documents read: 完整读取根 `AGENTS.md`、`docs/target-contract.md`、`docs/plugin-contracts.md`、`docs/performance-and-acceptance.md` 与最新 development log；新增 `docs/slices/2.0.13.md`，并把 Goal、共享详情区、画布、产物、宠物、浏览器和性能不变量写回上层合同。
+- Inspected native seam: pinned rc.7 已有单一 `goal/change`/Goal Projection/CAS/Command/Tool/Remote/round driver；Better Sidebar 已有安全受限的 WorkspaceRegistry/Host RPC/`conversation.view`，根因是产品入口不可达；ActivityFold 在每个节点读取全量 `chat.order`，GenUI fallback 对 `document.body` 做全页观察、全页查询和周期扫描；普通流式链已经是 chunk 立即追加加唯一一层 `requestAnimationFrame`。
+- Experiment or why unnecessary: 本 checkpoint 的 owner/边界均可由固定源码和现有组件测试直接证明，无需动态 Creation Mode 猜测接口；后续新增持久组件若仍有未知 seam，必须先按原生 define/run/stop/undefine 做最小可逆实验。TTFT fixture 通过固定 rc.7 AgentLoop 真实采集一次 30 组样本并克隆为等价比较臂，仅验证采集链、schema 与比较器；浏览器 paint/pre-provider 为合成零值，明确不能成为生产性能证据。
+- Decision and forbidden alternatives: 不接入 AutoGPTBrowser、tldraw、Cowart 运行时、第二 Goal/Queue/Schedule/Browser/Store/transport 或用户 BYOK。固定研究/依赖身份为 dsh-pet `f501139cfb155fd46717a79bb1c158da064dce15`（只复用 MIT 代码，排除上游 sprites）、Cowart `c934452ead956f501655f242fd0b8cfa90bea509`（仅交互参考）与 `@excalidraw/excalidraw@0.18.1`（MIT，自托管资产）；精确 tarball/integrity/NOTICE 边界记录在切片和插件合同。
+- Changed scope: 仅修改 2.0.13 文档合同、TTFT v2 证据验证器及其窄测试；未改产品运行时代码、Base/Profile、模型头、路由、凭据、用户数据、原 2.0.12 工作树或用户未跟踪证据。
+- Verification commands and results: 固定 Node 24.19.0 下 `node --check scripts/performance-parity.mjs` 通过，`node --test scripts/performance-parity.test.mjs` 为 `4/4`；`node scripts/performance-parity.mjs --fixture --samples 30` 采集三路径各 30 条等价样本，得到 `fixture-passed-production-blocked`、零比较失败并按合同 exit 1；`node scripts/check-target.mjs` 与 `git diff --check` 通过。新 worktree 的 Harness 因共享 TypeScript build state 而缺失输出，执行一次 `tsc -b tsconfig.host.json --force` 与 host tsdown 后恢复；没有修改 Harness 源码或共享 Git 配置。
+- Immutable evidence / receipt: 正式 macOS DMG 为 `390527181` bytes / SHA-256 `d2cb459d2e8648213e0b38aa6e210c1a727937be77993b2493e2a7848d5d3b2e`，Windows EXE 为 `272939381` bytes / SHA-256 `52b84e14cce5ad49ada282b9a41913aa751db43765c8dba44088d66148dcd186`；darwin-x64/win32-x64 sequence 3 generation 分别为 `6ec6b157ea2668d4670bc332457bc85fe2f895d982a85a4a6b53a12e316e70ce` / `963ede65e703b338e23c0728519db8dee476b0465609fa17c4c9d481442fc5b6`。fixture 原始 JSON 仅在临时目录，不进入发布证据或仓库。
+- Remaining blockers: S27 仍缺最终安装态 2.0.12 的 30 组成对真实提供方 TTFT v2 baseline/原始 trace；Base v7 尚未生成；S28–S35 的源码、组件、安装态、跨平台、更新、回滚和公开发布均未开始或未关闭。开发凭据只可经既有 Auth/OS keystore/managed Secret/SSH 临时使用，严禁写入日志、仓库、命令输出或回执。
+- Next exact action: 先定位并补齐最终安装态 TTFT v2 采集 seam 与 2.0.12 baseline receipt，再进入 S28 的 Base v7、共享详情区、两处已证实流式热路径和三项视觉修复；普通模型请求头必须逐字节保持冻结基线。
+
+## 2026-08-25 · 2.0.13 事故聚合更新展示脱敏
+
+- Goal checkpoint: 本修复仅收口更新链的用户可见投影，不扩展 2.0.13 功能范围，不改变发布状态。
+- Frozen baseline / current HEAD: 独立 worktree 从事故聚合 `2873c1d8c0aac6533ec6442906acc4ee927e7a2a` 创建；未修改版本、Base contract 或 Harness gitlink。
+- Binding documents read: 完整读取根 `AGENTS.md`、`docs/target-contract.md` 与本日志上一条完整记录。
+- Inspected native seam: Profile update 的 `changedComponents` 仍是差量、字节和结构化 id 的唯一真相源；Electron 确认框、Agent Tool renderer、原生通知与托盘只是其用户可见投影。
+- Experiment or why unnecessary: 该 seam 已由现有 Desktop adapter、Tool 和测试直接证明，无需 Creation Mode 实验。
+- Decision and forbidden alternatives: 保留 `components`、`componentGeneration` 和 `requiredBaseContracts` 结构化值供内部调试；用户层只按差量数量显示稳定能力摘要，不新增 notes store、更新器或发布元数据路径。
+- Changed scope: 仅修改 Desktop 更新可见文案、共享展示 helper、三组窄回归和根 README 的唯一用户说明；同步把稳定 legacy 入口事实从 2.0.11 更正为已发布 2.0.12 tombstone。
+- Verification commands and results: Desktop 窄回归 `agent-update` / `electron-runtime` / `updates` 为 `3 files / 71 tests` 全过；修正测试类型后 `electron-runtime` `39/39` 再验通过；Desktop 四个 TypeScript face 全过。
+- Immutable evidence / receipt: 本条只产生 source-fixed Git 证据，没有生成、签名、上传或激活任何安装包、Profile generation 或生产指针。
+- Remaining blockers: 需由主聚合在最终版本与 Base/Harness 身份提交后重跑相同窄门禁，并在真实安装态确认可见层不泄露内部 id。
+- Next exact action: 将本独立 source-fixed commit 合入主聚合，解决最终 README 版本文案后重跑相同回归；未取得用户发布授权前不进入任何生产发布步骤。
+
+## 2026-08-25 · 2.0.13 更新展示脱敏重放到最终产品版本
+
+- Goal checkpoint: 将既有用户可见更新展示修复重放到已切换产品身份的 2.0.13 事故聚合；不扩展功能范围，不进入发布链。
+- Frozen baseline / current HEAD: 重放基线为 `e4e8df0c10d26048284b6af1311eaa61c53b1bab`，原修复提交为 `5908a654870414fb9a3176de38b15c6744d69e5f`；本切片未修改版本、Base contract 或 Harness gitlink。
+- Binding documents read: 完整读取根 `AGENTS.md`、`docs/target-contract.md` 与本日志上一条完整记录，并核对当前 `desktop/e-mate-desktop/base-contract.json`。
+- Inspected native seam: Profile update 的 `changedComponents`、`componentGeneration` 与 `requiredBaseContracts` 继续作为签名、差量、审计和诊断的内部结构化真相；Electron 确认框、Agent Tool renderer、系统提示、通知与托盘只投影稳定的用户能力摘要。
+- Experiment or why unnecessary: 现有共享展示 helper 和 Desktop adapter 已覆盖全部可见投影，无需增加 notes store、第二 updater 或第二渲染路径。
+- Decision and forbidden alternatives: 冲突解决保留产品版本 `2.0.13`、legacy `desktop/latest.json` 的真实 `2.0.12` tombstone、用户能力摘要、原子切换与失败回滚语义；内部 id 不在用户层直出，但不从内部更新结果中删除。
+- Changed scope: 仅重放 Desktop 更新文案、共享展示 helper、三组窄回归和根 README；`development-log.md` 只追加本记录，未改写历史。
+- Verification commands and results: Desktop `agent-update` / `electron-runtime` / `updates` 为 `3 files / 71 tests` 全过；四个 TypeScript face 全过；根 README 的 2.0.13 产品版本、2.0.12 tombstone、能力摘要与原子更新文案门禁通过；Desktop 英文/中文 README 的 `README.i18n.yaml` Git blob 哈希均匹配。`node scripts/check-target.mjs` 未通过：基线源码要求 Harness `e13ce9d953037a2f40d866d17f5a7e00cbc15d66`，但 `e4e8df0` 的 gitlink 仍为 `85bef24c764feb034465ea4e0d34442249ee4cc7`；该身份漂移先于且独立于本修复，本切片按边界不修改它。
+- Immutable evidence / receipt: 本条只产生 source-fixed Git 证据；没有生成、签名、上传、激活或发布任何安装包、Profile generation、manifest 或生产指针。
+- Remaining blockers: 主聚合必须由 Harness/Base identity owner 让 Harness 常量、Base contract 与 gitlink 精确一致并重跑 `check-target`；最终安装态仍需确认普通用户确认框、Agent Tool 终态与系统提示不泄露内部名称。
+- Next exact action: 主聚合复核并合入本提交；Harness/Base owner 关闭既有身份漂移后重跑版本门禁，之后才允许进入候选安装态验收，严禁本地构建进入生产链。
+
+## 2026-08-25 · 2.0.13 S27 TTFT v2 安装态证据导出闭环
+
+- Goal checkpoint: 本切片只补齐 S27 的安装态性能证据导出和 fail-closed 验证器，不把真实 Provider 性能、S27 或 2.0.13 标记完成。
+- Frozen baseline / current HEAD: 独立 worktree 从事故聚合 `b79cfbf4d7731cbe127f6e705f999c1dc574704a` 创建；当前分支仍携带旧 Harness 合同常量，最终聚合必须由身份 owner 锁到批准的 Harness/Base 后重跑本门禁。
+- Binding documents read: 完整读取根 `AGENTS.md`、`docs/target-contract.md`、`docs/performance-and-acceptance.md`、`docs/slices/2.0.13.md`、最新完整 development log，以及 pinned Harness `AGENTS.md` 与 pre-push skill。
+- Inspected native seam: DSH `session/event` 已提供 `user/message`、`request/header`、`assistant/chunk`、`tool/call`、`tool/result` 和终态事件；`agent/request` / `llm/stream` 是原生 waterfall；Session stats 与 e-Mate quota/audit ledger 已提供 usage、policy 和去重事实。原生 session telemetry 会携带正文、Tool arguments/results、请求头和 cwd，不能原样成为跨边界生产证据；renderer paint 与安装包身份必须由同一安装态外部验收探针关联。
+- Experiment or why unnecessary: 未增加常驻采集插件。验收态 assembler 直接连接已脱敏的 native Session、request waterfall、Provider receipt、renderer paint、installed runtime 和 enterprise receipt；fixture 的 Harness imports 改为只在 `--fixture` 时动态加载，生产验证路径不要求装载 Harness runtime。
+- Decision and forbidden alternatives: 继续使用原生事件、现有 audit/quota 与单一 receipt 路径，不增加第二 store/protocol、普通模型 Tool、正文采集或热路径 listener。所有 source artifact 使用闭合 schema、相对路径、逐样本 `pair_id` 对账和 run-scoped SHA-256 身份；只改哈希而不匹配语义不能通过。
+- Changed scope: 修改 `scripts/performance-parity.mjs`、其窄测试和性能合同；增加 acceptance-only `--assemble <manifest> --output <evidence>`，自动生成 raw samples/run receipt，并加强 native/provider/header/paint/install/enterprise artifact 的逐样本语义、安装字节和隐私字段校验。未修改 Desktop、DSH 产品运行时、Base/Profile、模型头、路由、凭据、发布脚本或线上状态。
+- Verification commands and results: Node 24.19.0 下 `node --test scripts/performance-parity.test.mjs` 为 `5/5`；覆盖 30 组成对样本、硬门禁、fixture 生产阻断、安装态六类 artifact 组装、逐样本关联、symlink source 拒绝，以及“修改语义并同步重算 artifact/run receipt 哈希仍被拒绝”。
+- Immutable evidence / receipt: 本条只有 source-fixed Git 证据；测试 artifact 全部位于系统临时目录并清理，没有生成、签名、上传、激活或发布生产性能回执与安装包。
+- Remaining blockers: 必须先把最终 Harness/Base/Profile/source identity 锁定并更新验证器 pin；仍需批准的真实验收账号、最终安装态 2.0.12 与 2.0.13、同机同网正式模型 30 组 AB/BA、外部 renderer paint 探针、Provider invocation/response 回执和安装回执。fixture 或本地 unpacked runtime 不能关闭这些阻断。
+- Next exact action: 主聚合复核并合入本 source-fixed commit，在最终 identity 上重跑窄测试；随后仅在隔离验收目录用同一安装态运行生成六类脱敏 artifact，执行 `--assemble` 后再以 `--input` 回读，只有 `gate_status=passed` 的同一 `performance_run_id` 才可供 Desktop/Profile 准入引用。
+
+## 2026-08-25 · 2.0.13 runtime-models 搜索授权版本协商修复
+
+- Goal checkpoint: 本修复只关闭 2.0.13 客户端与既有企业模型/搜索策略端点的版本协商断裂，不处理其他 P0，也不进入发布链。
+- Frozen baseline / current HEAD: 独立 worktree 精确基于事故聚合 `77454a2fdf1802365cd29802582b2382a2e8997f`；Base 为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`，Harness 为 `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Inspected native seam: `enterprise-provider.ts` 只调用既有 `/v1/runtime-models?client_version=2.0.13` 并严格要求 `searchCredentialGrant`；Gateway 同一路由却只在 `client_version=2.0.12` 时返回该字段，导致 2.0.13 在模型目录投影前整体失败。
+- Decision and forbidden alternatives: Gateway 在同一路由保留无 query 的 2.0.11 精确旧 schema，精确允许 2.0.12/2.0.13 并为两者返回同一搜索授权合同；未知版本以 `UNSUPPORTED_CLIENT_VERSION` 失败关闭。没有新增 endpoint、回退、宽松默认、第二模型策略或凭据路径。
+- Changed scope: 仅修改 Model Gateway 的版本 allowlist、服务端合同回归和客户端现有 HTTP 合同 fixture；未改 R2、AGENTS、网站、发布工作流、模型路由或凭据所有权。
+- Verification commands and results: 根因回归在修复前精确失败；修复后 Gateway 2.0.12/2.0.13/未知版本合同 `1/1`、搜索 denied/unavailable `1/1`、Gateway TypeScript 通过，DSH enterprise identity 2.0.13 精确 query/grant 合同 `1/1`，change-impact 对精确变更判定为有效 Base lane，`git diff --check` 通过。
+- Immutable evidence / receipt: 本条只有 source-fixed Git 证据；未生成、签名、上传、激活或发布任何安装包、Profile generation、manifest 或生产指针。
+- Remaining blocker: 主聚合合入后仍须在最终候选上重跑相同窄门禁；生产 Gateway 部署与真实安装态联网搜索验收属于后续单独授权步骤，本提交不声称上线。
+
+## 2026-08-25 · 2.0.13 仓库级创造模式内循环 scope amendment
+
+- Goal checkpoint: 后续可插件化开发默认改为“Codex 修改后立即通过原生创造模式在隔离开发会话原地生效和验证，版本冻结时再统一固化发布”；本条只收紧开发方法，不改变 2.0.13 功能范围或发布状态。
+- Frozen baseline / current HEAD: 独立 worktree 精确基于事故聚合 `7e126fcd43eb1489868fbf4da76823d56015b50e`；Base 为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`，Harness 为 `0.1.0-rc.7` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`，Desktop reference 为 `6074088f5b660206e404b3591fab51fb99c69add`。
+- Binding documents read: 完整读取根 `AGENTS.md`、`docs/target-contract.md` 与本日志上一条完整记录，并核对当前 `desktop/e-mate-desktop/base-contract.json` 和 Harness gitlink。
+- Inspected native seam: 仓库已有唯一 “First development rule: use native DSH Creation Mode first” 章节、rc.7 `cordis` preset、两项原生创作 Skill、`cordis_inspect_*` 和 define/run/stop/undefine 生命周期；`scripts/change-impact.test.mjs` 已是该仓库准则的最窄可执行合同。
+- Experiment or why unnecessary: 本切片只修改仓库治理文本和合同测试，不改运行时行为，因此不启动动态包；后续每项可插件化产品改动才必须在当前隔离开发会话执行原生热替换和真实窄交互验证。
+- Decision and forbidden alternatives: 创造模式是默认开发内循环且仅为进程内开发证据，重启即消失；不得持有签名、R2、Feed、生产 desired-state 或发布权限，不得直接成为发布物或替代安装态、跨平台、性能、回滚验收。每项原地验证后仍回到既有 Owner 的普通 Profile 插件，多项已验证改动只在版本冻结时汇总；Base-only 修改继续沿 pinned Desktop lifecycle，禁止第二套热更新、运行时、存储或协议。
+- Changed scope: 仅修改根 `AGENTS.md`、已有 `scripts/change-impact.test.mjs` 合同断言并 append 本记录；未修改功能源码、Profile、Base、Harness、Desktop、生产配置或发布状态。
+- Verification commands and results: 使用安装态 Electron 所带 Node `24.18.1` 执行 `--test scripts/change-impact.test.mjs`，仓库 release boundary `22/22` 全过，其中 Creation Mode 准则合同通过；`git diff --check` 通过。
+- Immutable evidence / receipt: 本条只有 source-fixed Git 提交证据；没有生成、签名、安装、上传、激活或发布任何制品。
+- Remaining blockers: 主聚合需复核并合入本规则提交；每个后续插件切片仍须分别留下原地热替换证据、永久插件映射与最窄回归，正式版本仍按原安装态和发布门禁执行。
+- Next exact action: 运行最窄合同测试与 diff 检查，提交独立规则变更并回传 SHA；主代理合入后按新内循环继续各切片，不触发生产链。
+
+## 2026-08-25 · 2.0.13 DSH 源码门禁过期合同修复
+
+- Goal checkpoint: 本修复只恢复最终 P0/TQ 候选的 DSH 源码门禁，不改变产品功能、Owner 或发布状态。
+- Frozen baseline / current HEAD: 修复基于事故聚合 `6543ba2a232a9110aab4242a6f25ae784a18ceb0`；Base 为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`，Harness 为 `0.1.0-rc.7` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Binding documents read: 核对根 `AGENTS.md`、`docs/target-contract.md`、最新 development log、Identity typed RPC 实现和 managed Profile 物理化测试。
+- Inspected native seam: 搜索 Provider/模型策略继续由 `profile/cordis.patch.yml` 与 model-policy 所有，Shell client bundle 不应复制该策略字符串；`/emate.identity` 已在唯一 RPC 边界把未预期异常转成 `{ok:false,error:{code:'internal'}}` 并隐藏内部原因。
+- Experiment or why unnecessary: 本次只修复与现有已证明运行时合同不一致的测试断言，没有新的插件行为或未知 seam，因此不定义动态 Creation Mode Package。
+- Decision and forbidden alternatives: 将 Shell 中的 Provider 字符串断言改成负向边界；验证码与 bootstrap 的内部失败改验 typed envelope 和不泄漏内部诊断。禁止为让旧断言通过而把模型策略复制进 UI，或重新让 RPC reject 原始异常。
+- Changed scope: 仅修改 `packages/dsh/test/e-mate.test.mjs` 三处过期断言并追加本记录；未改生产源码、Profile、Desktop、Gateway、凭据、更新或发布链。
+- Verification commands and results: 在 `packages/dsh` 使用 Node `24.19.0` 执行 `node --test test/e-mate.test.mjs test/identity-lifecycle.test.mjs test/legacy-migration.test.mjs`，`52/52` 通过；`git diff --check` 通过。
+- Immutable evidence / receipt: 本条只有 source-fixed Git 证据；没有生成、签名、安装、上传、激活或发布任何制品。
+- Remaining blockers: 仍须修正 S27/S34 文档中的旧 Harness `2bc162...` 身份并记录 `b2b1650...` bounded diff；最终 P0/TQ 安装态、性能、更新、回滚和生产回读仍未关闭。
+- Next exact action: 独立提交测试合同修复；随后对 Harness/Base 身份文档和首次 Creation Mode 运行态证据做单独 append-only 修正，再重跑聚合源码门禁。
+
+## 2026-08-25 · 2.0.13 Harness Base v7 身份合同修正
+
+- Goal checkpoint: 本修正关闭 S27/S34 当前态文档仍停留在 2.0.12 Harness pin 的硬冲突，只更新已存在源码事实，不把 TQ-13、S27、S34 或发布标记完成。
+- Frozen baseline / current HEAD: 修正基于聚合 `571197c7929d02cc460c17d0eac0c4100b5765a7`；2.0.12 发布基线仍为 Base v6 / `2bc16230975f6cf02aa1b283b1f86de44007b059`，2.0.13 候选为 Base `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / Harness `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Binding documents read: 核对 `AGENTS.md`、`docs/target-contract.md`、`docs/slices/2.0.13.md`、`desktop/e-mate-desktop/base-contract.json`、Harness gitlink 与最新 development log。
+- Inspected native seam: Harness `b2b1650...` 是 `2bc162...` 的单一后继链，包含已审 `2318269...` Schedule startup admission，并继续收纳 Tool provenance、Job admission、Session cold-list、model-directory 与 image-edit review；Desktop reference 仍为 `6074088...`，没有第二 Harness fork 或运行时。
+- Experiment or why unnecessary: 本次只修正权威合同与执行门禁，不改变运行时；`git merge-base --is-ancestor 2318269... b2b1650...`、gitlink、Base contract 和 `check-target` 已直接证明身份，无需动态 Package 模拟 Base-only provenance。
+- Decision and forbidden alternatives: 切片合同现在明确分开 2.0.12 发布基线 `2bc162...` 与 2.0.13 候选 `b2b1650...`。TQ-13 只关闭 source pin/Base/SDK 身份缺口；冻结构建、installed transaction、真实 due、双平台更新与回滚继续 OPEN，不能因文档对齐而宣称功能闭环。
+- Changed scope: 仅更新 `docs/slices/2.0.13.md` 的当前 Harness/TQ-13 状态、在既有 release-boundary 测试增加两条精确身份断言并追加本记录；未改 Harness、Base、Profile、Desktop、Schedule 运行时或发布链。
+- Verification commands and results: `git merge-base --is-ancestor 2318269e77f1a36169445e2556199ef4d9a1625d b2b1650b01f0ee88d81837a9b5c050f9f763f606` 通过；`node --test scripts/change-impact.test.mjs` 为 `22/22`；`node scripts/check-target.mjs` 通过；`git diff --check` 通过。
+- Immutable evidence / receipt: 当前只有 source-fixed Git 证据；没有生成、签名、安装、上传、激活或发布任何字节。
+- Remaining blockers: TQ-13 仍缺同一冻结字节的 macOS B2b、Windows transaction、old-v1/fork/replay、真实 due/cold resume/时区/离线和双平台更新回滚；全部 13 项真实闭环仍为 `0/13`。
+- Next exact action: 独立提交身份合同修正；随后追加首次 Creation Mode 原地验证回执并继续最终 P0/TQ 源码门禁，生产链保持关闭。
+
+## 2026-08-25 · 2.0.13 原生 Creation Mode 首轮原地验证
+
+- Goal checkpoint: 按新增仓库准则执行第一次真实开发内循环，验证“一切皆插件”的可达 seam 和边界；本记录是 development evidence，不把任何 P0/TQ、切片或发布标记完成。
+- Frozen baseline / current HEAD: 运行态验证开始于聚合 `6543ba2a232a9110aab4242a6f25ae784a18ceb0`，记录时为 `f5d51edbda691acbe46491c8e6b5607bb940b04e`；目标 Base 为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`，Harness 为 `0.1.0-rc.7` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`，Desktop reference 为 `6074088f5b660206e404b3591fab51fb99c69add`。
+- Binding documents read: 完整读取根 `AGENTS.md`、`docs/target-contract.md`、最新 development log，以及 pinned rc.7 `cordis-plugin-development` 420 行 Skill 和 `editing-cordis-compositions` Skill；核对安装态 2.0.12 内三项 shipped cordis preset/Skill 文件真实存在。
+- Inspected native seam: 原生 `cordis_inspect_list/query/self`、Host Tool Registry、`session/event`、Client `shell.overlay` Slot、用户批准，以及 define/run/update/stop/undefine 是唯一动态开发生命周期；e-Mate Profile 继续由同一 Cordis Host、Session、Tool、Slot 和普通组件组合启动。
+- Experiment or why unnecessary: 在隔离 DSH_HOME 和测试 Session 中，真实执行 `cordis_define` 得到 `proof-1/pkg-1`，`cordis_run` 激活动态 Tool `emate_live_probe` 并返回 `{nonce:'creation-mode-ok',owner:'native-tools'}`；`cordis_stop` 后 Tool 不可见，`cordis_undefine` 后插件列表为空。另一个动态包随进程退出消失，同一 Session id 在新进程检查仍为空。rc.7 Web e2e 同时完成 define→用户批准→Client overlay 挂载→stop 撤除。
+- Decision and forbidden alternatives: Shell 路由/hover/composer、Schedules、Better Sidebar 和 Tool Search 等既有 Profile Owner 可先通过对应 Client Slot 或 Host Service/Event/Tool seam 原地试验，再固化回同一个普通组件；Session 持久化/Harness pin、Windows native picker/Profile 物理化、Desktop updater/签名、Gateway/Auth/Share 服务端属于 Base 或服务端 Owner，绝不能包装成动态插件。动态包不写 Session/Event store，不接触 desired-state、R2、Feed、签名或生产指针。
+- Changed scope: 验证过程没有修改产品源码、Base、Profile、Harness、Desktop 或生产状态；本提交只 append 本记录。隔离目录只含测试 Profile 与空 Session 状态，不含真实用户数据。
+- Verification commands and results: pinned rc.7 Web `apps/web/tests/cordis-tool-round.e2e.ts` 为 `5/5`；原生 Tool Registry 完成 inspect/define/run/call/stop/undefine 和新进程易失性检查；e-Mate 隔离 Profile `setup --check --json` 全过，13 个 pinned bundle 与 cordis/Better Sidebar/Glass Composer/Schedules 共存，Web `/api/e-mate/health` 返回 `version=2.0.13`、`profile=e-mate`、`active_runs=0`；Desktop Profile `15/15`、Shell 路由/标题/输入框 `30/30`、Schedules `1/1`。
+- Immutable evidence / receipt: Git 记录保存精确源码身份、命令和结论；动态 Package 与隔离状态按合同进程内易失，没有进入 Profile generation、安装包或发布物，也没有生产写入。
+- Remaining blockers: 该结果不替代 Windows 正式安装态三项 P0、跨日/多会话/原生 picker、真实账号、性能、更新、回滚和公开回读；后续每项插件修改仍需留下自己的原地热替换与 owning regression 证据。
+- Next exact action: 继续用 Creation Mode 验证下一项可插件化 P0/TQ；Base-only/服务端问题沿各自 pinned 原生 Owner 修复，候选冻结后才汇总为普通 Profile generation 和 Base 发布。
+
+## 2026-08-25 · 2.0.13 P0/TQ 聚合源码门禁 checkpoint
+
+- Goal checkpoint: 三项 Windows P0 与 TQ-01..13 的当前聚合已通过本机完整 source gate；本条只把候选提升为 source-fixed，安装态、性能、更新、回滚和生产发布仍未开始。
+- Frozen baseline / current HEAD: 门禁运行于 `26a0050d46a2ca33569f0acb3099b9c0051b5edd`；对比基线为公开主线 `5fb9d595749ee9de4f8019ae4decce02ad3af541`，Base 为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`。
+- Binding documents read: 核对根 `AGENTS.md`、目标/插件/性能合同、2.0.13 切片、最新 development log、change-impact 输出与 P0/TQ owning tests。
+- Inspected native seam: change-impact 对 204 条候选路径判定 `lane=base`、`run_base=true`、`run_enterprise=true`、`run_verification=true`，15 个已准入组件继续由各自普通 Profile Owner 构建；共享 Harness/Desktop/enterprise 变化没有被错误降级为 plugin-only。
+- Experiment or why unnecessary: 可插件化边界已由上一条 Creation Mode 运行态验证；本 checkpoint 验证永久源码、构建和 CI Owner，不再创建重复动态 Package。首次命令只因环境使用 pnpm `11.19.0` 和 enterprise 缺少 node_modules 失败，改用仓库固定 pnpm `11.7.0` 并按 frozen lock 安装后重跑成功，未改产品逻辑。
+- Decision and forbidden alternatives: source gate 必须同时覆盖 Profile 组件、DSH、Desktop、enterprise 和 release/admission；不能因单个 Shell 或 Creation Mode 测试通过而跳过 Base/服务端 Owner，也不能用错误包管理器结果冒充源码失败。
+- Changed scope: 本 checkpoint 没有修改产品源码；完整构建产生的 Vision requirements 临时机械 diff 已按运行前 Git 状态移除，用户既有未跟踪截图、provenance 与 node_modules 保持未纳入 Git。本提交只 append 本记录。
+- Verification commands and results: 固定 pnpm `11.7.0` 的根 `pnpm test` exit 0，含 release-boundary `40/40`、Shell `67/67`、DSH `56/56` 和全部组件 owning tests；`pnpm test:release` 为 `22/22`；enterprise `check`、`test`、`build` 全部 exit 0；Desktop `typecheck` exit 0，Vitest 为 `54 passed / 1 skipped` 文件、`585 passed / 4 skipped` 测试；`check-target` 通过，change-impact 合同 `valid=true`、错误为空，`git diff --check` 通过。
+- Immutable evidence / receipt: 当前只有 Git/source/build-test 输出；没有签名安装包、Profile generation、performance_run_id、安装回执、R2 对象或公开指针。
+- Remaining blockers: 仍需受保护 PR/CI、正式不可变构建、macOS/Windows 同字节安装、三项 P0 跨日/双会话/picker、TQ-01..13 全矩阵、TTFT v2、更新/回滚和 Cloudflare 插件公开回读。Vision 的 7 项平台运行时测试与 Desktop 的 4 项平台条件测试必须在对应正式目标补齐。
+- Next exact action: 提交本 checkpoint，复核最终 diff 与公共远端保护状态；随后推送候选 PR，先让 CI admission 验证同一源码，禁止在合并/准入前写 R2、Feed 或官网。
+
+## 2026-08-25 · 2.0.13 Windows 候选启动物理路径一致性修复
+
+- Goal checkpoint: 修复 P0/TQ 候选在真实 Windows CI 首次暴露的 Base 更新握手误拒绝；本条只恢复同一原生更新链，不把安装态、更新回滚或发布标记完成。
+- Frozen baseline / current HEAD: 失败候选为 `97f04018c83d70e036f7fd830bbb53f146546811`，PR 为 `#56`，CI run 为 `32843830729`；Base 为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`，Harness 为 `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Binding documents read: 核对根 `AGENTS.md`、目标/插件/性能合同、2.0.13 切片、最新 development log，并追踪 `beginWindowsUpdateCandidateStartup()`、唯一调用方、调度端 `realFile()` 与 Windows 更新握手测试。
+- Inspected native seam: 调度端已经用共享异步 `realFile()` 完成无 symlink 的真实文件检查与物理路径规范化；候选启动端却单独使用 `realpathSync()` 加重复 `lstatSync()`，在 Windows 临时目录/短路径规范化下会把同一物理候选误判为不同 canonical path。
+- Experiment or why unnecessary: 远端真实 Windows runner 的 `check:win-package` 精确复现为 `windows-update-installer.spec.ts` 两项失败，均在读取候选 journal 前被 `Windows update candidate path or version is invalid` 拒绝；macOS 同测试通过说明这是平台路径规范化差异，不是 journal、版本或产品插件行为。
+- Decision and forbidden alternatives: 候选启动端改为复用唯一 `realFile()`，删除平行同步规范化与重复文件元数据校验；保留现有 canonical directory、版本、journal、hash、exclusive started receipt 和 Base identity 全部防线。该责任属于 Desktop Base 私有握手，禁止包装成 Creation Mode/Profile 插件，也不通过放宽路径比较或跳过 Windows 测试掩盖。
+- Changed scope: 仅修改 `desktop/e-mate-desktop/src/windows-update-installer.ts` 的候选可执行文件解析并 append 本记录；未改协议 schema、安装器、Profile、Harness、R2、Feed、desired state 或生产状态。
+- Verification commands and results: 本机 Node `24.19.0` 下 Windows installer/transaction 窄回归为 `2 files / 21 tests` 全过；Desktop 主 TypeScript face 通过；`git diff --check` 通过。真实 Windows CI 重跑尚未取得结果，因此当前只为 source-fixed checkpoint。
+- Immutable evidence / receipt: Git diff 与 PR CI 失败日志绑定到上述 run/job；没有生成、签名、安装、上传、激活或发布任何新字节。
+- Remaining blockers: 必须将修复推送到同一 PR，让新的真实 Windows runner 通过 `check:win-package` 和 unsigned installer 构建；随后仍需同一冻结字节的 Windows 安装、P0/TQ、在线更新和失败回滚验收。
+- Next exact action: 提交并推送最小修复，等待 PR #56 全部 CI 收敛；若 Windows 仍失败，只处理新的精确失败 owner，生产链继续关闭。
+
+## 2026-08-25 · 2.0.13 Windows 更新恢复项幂等清理修复
+
+- Goal checkpoint: 继续关闭同一 PR 的真实 Windows Base 更新事务门禁；本条只修复恢复项缺失时的幂等查询，不把更新、回滚或发布标记完成。
+- Frozen baseline / current HEAD: 路径修复候选为 `35649817fa17ed45e620e94489dcb957a3592932`，PR `#56`，CI run `32844912068`；Base/Harness 身份保持不变。
+- Binding documents read: 复核根 `AGENTS.md`、目标/切片合同、上一条完整记录，以及 `windows-update-transaction.ps1` 的 Register/Remove/SelfTest 唯一恢复项链和对应源合同测试。
+- Inspected native seam: Windows runner 已证明 installer/transaction 等 `16 files / 253 tests` 全过，路径误拒绝已关闭；随后 PowerShell SelfTest 在成功删除专属恢复值后，用 `Get-ItemPropertyValue -ErrorAction SilentlyContinue` 查询不存在的值仍向顶层错误边界返回失败。
+- Experiment or why unnecessary: 新 run 的精确末尾错误为专属 `e-MateUpdateRecovery-<transactionId>` property 不存在，发生在注册、核对、删除之后；不是安装包构建、Profile、Harness、插件或权限问题。当前 Mac 没有 PowerShell，真实 runner 是该边界的最窄执行证据。
+- Decision and forbidden alternatives: 新增单一 `Get-RecoveryValue()`，通过原生 .NET `RegistryKey.GetValue(..., DoNotExpandEnvironmentNames)` 将“键/值不存在”确定性映射为 `$null`，并让生产 `Remove-Recovery` 与 SelfTest 共用；保留 transaction-id 命名、命令 owner 比对、删除和 `RegFlushKey`。禁止吞掉任意错误、跳过 SelfTest 或放宽恢复项所有权。
+- Changed scope: 仅修改 Windows 更新事务脚本、既有源合同断言并 append 本记录；未改 schema、Desktop UI、Profile、Harness、发布或生产状态。
+- Verification commands and results: 本机 Node `24.19.0` 下 `windows-update-transaction.spec.ts` 为 `1 file / 9 tests` 全过，`git diff --check` 通过；真实 PowerShell SelfTest 和 unsigned installer 必须由新 Windows CI 重跑确认，本条不预先宣称通过。
+- Immutable evidence / receipt: 失败事实绑定 CI run `32844912068` 的 Windows job `97793781939`；没有签名、安装、R2/Feed/desired-state 写入。
+- Remaining blockers: 新候选必须通过源合同和 Windows PowerShell SelfTest，再通过完整 CI；之后仍需冻结字节的真实 Windows 安装、在线更新、失败回滚和 P0/TQ 验收。
+- Next exact action: 运行本机最窄源合同与 diff 检查，提交推送后只等待新的真实 Windows owner 结果；生产链保持关闭。
+
+## 2026-08-25 · 2.0.13 Windows NSIS 快捷方式变量编译顺序修复
+
+- Goal checkpoint: 继续关闭 PR `#56` 的真实 Windows 安装包编译门禁；本条只修复 electron-builder 原生快捷方式变量在私有更新事务分支中的首次展开顺序，不把安装、更新回滚或发布标记完成。
+- Frozen baseline / current HEAD: 失败候选为 `525817412ae17df49ad3f84885d2313cfa75d2a9`，CI run 为 `32847226281`，Windows job 为 `97801253707`；Base/Harness 身份保持 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Binding documents read: 复核根 `AGENTS.md`、目标/插件/性能合同、2.0.13 切片、上一条完整记录、pinned `app-builder-lib@26.15.3` 原始 NSIS 模板和唯一自定义 installer include。
+- Inspected native seam: 真实 runner 已通过 Windows 源测试、PowerShell SelfTest 和应用打包，随后 makensis 在展开原生 `addStartMenuLink` 时报告 `$keepShortcuts` 未知。该原生宏读取全局 `$keepShortcuts`；私有事务宏在 upstream 声明之前首次展开同一宏，形成纯编译顺序错误。
+- Experiment or why unnecessary: 对 Yarn 缓存中的原始 `app-builder-lib@26.15.3` 解包后执行完整补丁 `git apply --check` 和实际 apply，确认补丁可重放；无需新增快捷方式实现、关闭 warning-as-error、跳过 NSIS 或改变更新准入。
+- Decision and forbidden alternatives: 将 upstream 已有 `Var /GLOBAL keepShortcuts` 与默认 `false` 初始化前移到 `setLinkVars` 后、所有安装分支共同入口，删除原位置重复声明；普通安装仍在原位置执行 `setIsTryToKeepShortcuts` 并可覆写为 `true`，私有事务分支确定性沿原生“重建快捷方式”语义。安装器仍属于 Desktop Base owner，禁止伪装成 Creation Mode/Profile 插件。
+- Changed scope: 仅修改 pinned `app-builder-lib` 补丁、对应 Yarn patch hash/checksum、既有 Windows 事务合同断言并 append 本记录；未改事务协议、Profile、Harness、R2、Feed、desired state 或生产状态。
+- Verification commands and results: 原始包完整补丁 `git apply --check` 通过；`windows-update-transaction.spec.ts` 为 `1 file / 9 tests` 全过；`package.spec.ts` 的 pinned app-builder patch-chain 定向合同为 `1/1`；`git diff --check` 通过。真实 makensis 必须由新 Windows CI 重跑确认，本条不预先宣称通过。
+- Immutable evidence / receipt: 失败事实绑定上述 run/job；当前只有 source-fixed diff，没有生成、签名、安装、上传、激活或发布任何新字节。
+- Remaining blockers: 新候选必须先通过 Windows makensis 和完整 PR CI；之后仍需冻结同字节的 Windows 安装、P0/TQ、在线更新、失败回滚和性能验收。
+- Next exact action: 提交并推送最小补丁，让同一受保护 PR 的 Windows runner 编译真实 NSIS；只处理随后出现的精确 owner 失败，生产链保持关闭。
+
+## 2026-08-25 · 2.0.13 Windows NSIS 单一进程检查宏修复
+
+- Goal checkpoint: 继续关闭 PR `#56` 的 Windows makensis 门禁；本条只消除自定义事务与 upstream 安装路径对同一进程检查宏的重复编译展开，不把候选、安装或发布标记完成。
+- Frozen baseline / current HEAD: `$keepShortcuts` 顺序修复候选为 `b6bdfd5175d777631fef16ed729b8afb10494aed`，CI run 为 `32853827955`，Windows job 为 `97822283753`；Base/Harness 身份不变。
+- Binding documents read: 复核根 `AGENTS.md`、目标/切片合同、上一条完整记录、electron-builder `installSection.nsh`、自定义 `installer.nsh` 和对应事务合同测试。
+- Inspected native seam: 新 runner 已证明 `$keepShortcuts` 编译错误消失，并继续通过 `16 files / 253 tests`、PowerShell transaction SelfTest、runtime closure 和应用 ASAR 打包；makensis 随后因自定义手动确认分支与 upstream 各展开一次 `CHECK_APP_RUNNING` 而报 `CmdPath already declared`。该宏含编译期全局变量声明，运行时分支互斥不能避免重复声明。
+- Experiment or why unnecessary: 无需复制或改写 upstream 进程检测。将现有事务拆为同一流程的两个时点：私有回执/手动 SHA 确认仍在任何旧版本 mutation 前决定 `$R7`，upstream 唯一 `CHECK_APP_RUNNING` 完成后才 bootstrap/prepare/apply；仍在 `uninstallOldVersion` 前短路。
+- Decision and forbidden alternatives: 删除自定义 include 中的 `CHECK_APP_RUNNING` 展开；复用现有 `$emateUpdateAction=manual` 信号把 Bootstrap 移入 `customUpdateInstall` 起点，不增加变量、协议、第二安装器或容错回退。fresh install、拒绝确认、managed receipt 与 manual receipt 的准入语义保持不变。
+- Changed scope: 仅修改 pinned app-builder 补丁、自定义 installer include、Yarn patch hash/checksum和两项既有合同断言并 append 本记录；未改 PowerShell 事务协议、Profile、Harness 或生产链。
+- Verification commands and results: 原始 `app-builder-lib@26.15.3` 完整补丁 `git apply --check` 通过；`windows-update-transaction.spec.ts` 为 `9/9`；pinned app-builder patch-chain 定向合同为 `1/1`；合同同时断言 decision 在 upstream 检查前、custom execute 在最后一次 upstream 检查后且在旧版本 mutation 前、自定义 include 不含 `CHECK_APP_RUNNING`；`git diff --check` 通过。
+- Immutable evidence / receipt: 新失败绑定上述 run/job，前置 253 项和 SelfTest 成功事实来自同一 job；当前仍只有 source-fixed diff，没有生成、签名、安装、上传或激活发布字节。
+- Remaining blockers: 必须由下一 Windows runner 真实编译 NSIS 并完成完整 PR CI；随后仍缺同一冻结字节的安装、P0/TQ、更新回滚和性能验收。
+- Next exact action: 取消已被本修复取代的 run 剩余任务，提交推送最小修复并等待新 Windows makensis；生产发布链保持关闭。
+
+## 2026-08-25 · 2.0.13 Windows NSIS 单一安装宏路径修复
+
+- Goal checkpoint: 继续关闭 PR `#56` 的 Windows makensis 门禁；本条将私有更新事务收敛到 electron-builder 唯一解包、注册和快捷方式路径，不把候选、安装态或发布标记完成。
+- Frozen baseline / current HEAD: 单一进程检查修复候选为 `85daba3905268bc1f8a3643df9b84087ec050ebd`，CI run 为 `32855312930`，Windows job 为 `97827430089`；Base/Harness 身份保持不变。
+- Binding documents read: 复核根 `AGENTS.md`、目标/切片合同、上一条完整记录、pinned `app-builder-lib@26.15.3` 原始 NSIS 模板、自定义 installer include 和两项安装链合同测试。
+- Inspected native seam: 新 runner 已通过 Source、Enterprise、六项 Base compatibility、Windows `16 files / 253 tests` 和 PowerShell SelfTest；makensis 随后在自定义事务与 upstream 各展开一次 `installApplicationFiles` 时报告 `packageArch already declared`。该宏及其下游注册/快捷方式宏包含编译期全局变量，运行时短路无法消除重复声明。
+- Experiment or why unnecessary: 不再逐个前移全局变量。事务只保留 Prepare/Apply 两个时点：upstream 唯一进程检查后 Prepare 选择 candidate，upstream 唯一 `installApplicationFiles` 完成后 Apply/Monitor；registry、Start Menu、Desktop、file association 和 `customInstall` 全部继续由 upstream 各执行一次。
+- Decision and forbidden alternatives: 普通安装维持原生 uninstall/extract/start 路径；私有 `stage` 跳过旧版卸载、把唯一解包定向到 candidate，`resume` 跳过重复解包，两者完成事务后复用同一 upstream 注册路径。禁止复制 electron-builder 宏、增加第二安装器、吞掉 warning-as-error 或把 Desktop Base 更新事务伪装成 Creation Mode/Profile 插件。
+- Changed scope: 仅修改 pinned app-builder 补丁、自定义 installer include、Yarn patch hash/checksum和既有合同测试并 append 本记录；未改 PowerShell schema、Profile、Harness、R2、Feed、desired state 或生产状态。
+- Verification commands and results: 原始 Yarn cache 中的 `app-builder-lib@26.15.3` 完整补丁 `git apply --check` 与实际重放均通过，重放模板与安装态模板字节一致；`windows-update-transaction.spec.ts` 为 `9/9`，pinned app-builder patch-chain 定向合同为 `1/1`，`git diff --check` 通过。真实 makensis 必须由下一次 Windows CI 确认。
+- Immutable evidence / receipt: 失败事实绑定上述 run/job；当前只有 source-fixed diff，没有生成、签名、安装、上传、激活或发布任何新字节。
+- Remaining blockers: 新候选必须通过 Windows makensis 和完整受保护 PR CI；随后仍需同一冻结字节的 Windows 安装、三项 P0/TQ、在线更新、失败回滚和性能验收。
+- Next exact action: 取消已被替代的旧 run，提交并推送唯一宏路径修复；等待新的真实 Windows runner 生成 unsigned installer，生产链继续关闭。
+
+## 2026-08-25 · 2.0.13 Profile 回滚后更新提示恢复修复
+
+- Goal checkpoint: 在正式 2.0.13 候选安装前关闭本机已观察到的 Profile generation 回滚后不再自动提示同一恢复目标的问题；本条只修复更新提示去重 owner，不把 Profile 激活、安装态或发布标记完成。
+- Frozen baseline / current HEAD: 修复基于受保护 PR `#56` 已全绿的 `dae78fcd40bf42620f4fd6d4916d899d450d7348`；Base/Harness 身份保持 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。本机 2.0.12 安装态的 generation state 为 `active=last_known_good=bundled`，旧 v6 generation 缓存仍存在。
+- Binding documents read: 复核根 `AGENTS.md`、`docs/target-contract.md` 中 `(current generation, target generation)` 后台提示去重合同、`docs/slices/2.0.13.md`、上一条完整记录，以及 `updates.ts`、`profile-update.ts`、`profile-generation.ts` 与对应测试。
+- Inspected native seam: `ProfileUpdateAvailable` 已由唯一原生检查链同时携带 `currentGeneration` 与 `generationId`；更新状态却只持久化 `lastPromptedGeneration`。因此从已提示目标回滚到 `bundled` 或另一 generation 后，相同目标仍被误判为同一提示，直到目标 ID 改变才偶然恢复。
+- Experiment or why unnecessary: 本机状态精确为 `active=bundled` 且 `lastPromptedGeneration=d876...`，缓存中的 d876 generation 属于 Base v6 / Harness `2bc162...`，不能由 Base v7 恢复；初始回滚原因没有不可变收据，故不臆测。现有字段和确定性状态机已足以复现持续抑制，无需新存储、网络或 Creation Mode 模拟 Desktop lifecycle。
+- Decision and forbidden alternatives: 继续复用唯一 v2 update state，只增加 `lastPromptedCurrentGeneration` 并按 current/target pair 比较；旧 target-only v2 状态被视为没有已记录 pair，因此在当前 generation 只重新提示一次并原地补齐字段。相同 pair 不重复，不同 current 的同一 target 会重新提示。禁止恢复不兼容旧 generation、清缓存、伪造新目标 ID、增加第二 updater 或把 Desktop 生命周期包装成 Profile 插件。
+- Changed scope: 仅修改 `desktop/e-mate-desktop/src/updates.ts`、既有 `updates.spec.ts` 与 append 本记录；未改 Profile generation 格式、签名/desired state、Harness、组件 roster、R2、Feed、官网或生产状态。
+- Verification commands and results: Desktop `profile-generation.spec.ts`、`profile-update.spec.ts`、`updates.spec.ts` 为 `3 files / 42 tests` 全过；主源码与测试 TypeScript 均通过；其中覆盖首次 pair 持久化、相同 pair 不重复、current 改变或回滚为 bundled 而 target 相同重新提示及旧 v2 target-only 状态迁移；`git diff --check` 通过。
+- Immutable evidence / receipt: 当前只有 source-fixed diff 与本机只读状态证据。`desktop-release` run `32860583362` 在本修复前从 `dae78fc` 启动，即使完成也属于已取代候选，不得安装、验收或发布；此前 CI `mac-smoke` 同样未安装且永久不具备发布资格。
+- Remaining blockers: 必须提交并推送该最小修复，重新通过 exact-HEAD PR CI 与只构建不发布的正式 Desktop candidate workflow；之后才可执行 macOS 手工候选 UI/P0 验收。Windows 真机、原生 signed updater transaction、Profile v7 激活、性能、回滚和生产回读仍 OPEN。
+- Next exact action: 提交并推送 pair 去重修复，让 PR #56 在新 HEAD 重跑受保护 CI；作废旧 run 候选，生产链保持关闭。
+
+## 2026-08-25 · 2.0.13 Profile 提示状态向后兼容与回滚重试修正
+
+- Goal checkpoint: 独立复审否决并取代上一条 `ac7ff896edd2d635c95b986a1116783090e342b1` 的四字段 v2 状态方案；本条只修复同一 Desktop updater 状态链，不把候选、安装态或发布标记完成。
+- Frozen baseline / current HEAD: 待修正 HEAD 为 `ac7ff896edd2d635c95b986a1116783090e342b1`，其父提交 `dae78fcd40bf42620f4fd6d4916d899d450d7348` 的受保护 PR CI 已通过；Base/Harness 仍为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Binding documents read: 重新读取唯一 Goal、Git/HEAD、完整 `AGENTS.md`、`target-contract.md`、2.0.13 切片合同、最新完整日志，并核对 `updates.ts` 的所有 prompt/state 调用方及 Profile generation/update 测试。
+- Inspected native seam: 旧 2.0.12 Base 的 v2 reader 只接受 `version`、`lastPromptedVersion`、`lastPromptedGeneration` 三个键；`ac7ff89` 新增第四键会使旧 Base 回读时重置整个状态并丢失 Base 提示记录。该方案还在确认前持久化 pair，导致 A→B 启动失败回滚 A 后同一恢复目标继续被抑制；Base/Profile 并发原子写也可能以完成顺序覆盖彼此快照。
+- Experiment or why unnecessary: 两个独立只读复审分别检查旧 Base reader、A→B→A 生命周期和并发写序；无需新文件、schema、存储或 Creation Mode，因为该 owner 是 Desktop 生命周期且现有单一状态文件已可表达正确语义。
+- Decision and forbidden alternatives: 保持旧 v2 精确三键格式，在现有 `lastPromptedGeneration` 中存放带 domain 的 `SHA-256(currentGeneration,targetGeneration)`；旧 target-only 值自然只迁移提示一次。只在用户明确拒绝时记录 pair；用户后来手动接受时先持久化清除相同拒绝摘要，再走原生 recheck/install，使安装失败或 B 启动失败回滚 A 后可重新提示。状态 mutation/write 由单一 Promise tail 串行且失败不毒死后续写。禁止第四字段、第二状态文件、恢复不兼容 generation、伪造目标或新增 updater。
+- Changed scope: 修正 `desktop/e-mate-desktop/src/updates.ts`、扩充既有 `updates.spec.ts`，并更新 2.0.13 最终范围合同；未改 Profile schema、Harness、roster、R2、Feed、desired state 或生产状态。
+- Verification commands and results: `profile-generation.spec.ts`、`profile-update.spec.ts`、`updates.spec.ts` 共 `3 files / 48 tests` 全过；生产与测试 TypeScript 均通过；`git diff --check` 通过。覆盖旧 reader 接受、legacy target-only 迁移、同 pair 拒绝去重、current/target 变化、手动接受清除、即时安装失败、B 激活失败回滚 A、确认异常、supersede、dispose、Base/Profile 并发及失败写后继续。
+- Immutable evidence / receipt: 只有当前 source-fixed diff；`ac7ff89` 和旧 `dae78fc` release run 均永久作废，不得安装、验收或发布。没有生成、签名、安装、上传或激活任何字节。
+- Remaining blockers: 必须形成新提交并通过 exact-HEAD PR CI，再启动全新只构建不发布的正式 Desktop candidate；macOS/Windows 同一字节安装态、P0/TQ、性能、更新/回滚与公开回读继续 OPEN。
+- Next exact action: 提交并推送本修正，等待 PR #56 新 CI 全绿；随后仅从新 HEAD 生成正式候选，继续拒绝任何 2.0.12 UI 或 mac-smoke 作为 2.0.13 证据。
+
+## 2026-08-25 · 2.0.13 最终事故范围与 2.0.14 接力边界
+
+- Goal checkpoint: 按用户最新决定将本任务终态收敛为三个 Windows P0、共享 Windows Profile 物化前置项和 TQ-01..13 的 2.0.13 正式发布；其余原计划未闭环能力转入独立 2.0.14 接力，不提前结束当前 Goal。
+- Frozen baseline / current HEAD: 范围修订发生在上述 Profile 状态修正尚未提交时；当前源码基线、Base v7、Harness pin、PR #56 与生产隔离边界均不变。
+- Binding documents read: 核对唯一 Goal、根 `AGENTS.md`、目标/插件/性能合同、完整 2.0.13 切片、最新日志和当前 Git 状态；2.0.14 独立任务只接收只读恢复与后续审计结果。
+- Inspected native seam: 这是发布范围与任务所有权修订，不改变任何运行时 seam。2.0.13 的 P0/TQ owner/carrier/验收矩阵继续有效，不能因移交其他能力而降低门槛。
+- Experiment or why unnecessary: 无需产品实验；范围必须先写入切片合同，避免当前分支与新任务并发修改、把源码候选误当发布内容或把未验功能静默塞入事故版。
+- Decision and forbidden alternatives: 2.0.13 候选、roster、更新说明和正式字节只容纳 P0/TQ 闭环所需变化；Goal、Canvas、非 TQ ImageGen、通用 Deliverables、Pet/30 动作、C03 图标、Better Sidebar 扩展及其他未闭环新能力保持 OPEN 并移交 2.0.14。2.0.14 在 2.0.13 发布前只能只读审计和写自己的合同，禁止触碰本分支或生产链。
+- Changed scope: 仅更新 `docs/slices/2.0.13.md` 并 append 本记录；创建新的 Codex 接力任务不改变仓库或发布状态。
+- Verification commands and results: 文档范围与现有 P0/TQ 矩阵交叉核对；`git diff --check` 通过。独立缺口审计仍在执行，结果将按 owner、证据、依赖和最小验收发送给 2.0.14 任务。
+- Immutable evidence / receipt: 新接力任务 id 为 `01a0396e-5295-7e02-8549-edfe44451fee`；没有构建、安装、上传或发布任何字节。
+- Remaining blockers: 2.0.13 仍须完成 exact-HEAD CI、正式候选、双平台 P0/TQ、性能、安全、更新、回滚及生产公开回读；2.0.14 清单中的所有项默认 OPEN，不能反向阻塞或替代 2.0.13 的事故门。
+- Next exact action: 继续完成 2.0.13 Profile 状态修正提交和正式候选；审计返回后只向 2.0.14 任务发送结构化清单，本任务直到 2.0.13 真正发布才结束。
+
+## 2026-08-25 · 2.0.13 越界审计分类候选排除
+
+- Goal checkpoint: 根据 2.0.14 独立缺口审计，将已经进入当前历史但不属于三个 P0、共享 Windows Profile 前置项或 TQ-01..13 的任务场景分类候选从 2.0.13 事故版排除；分类保持为 2.0.14 OPEN 候选。
+- Frozen baseline / current HEAD: 审计基于 `release/2.0.13-p0-tq@6b6ca145a827aa4deb322b3b13721ed76f2bf42f`；越界分类提交为 `7836d70997046e71cbc844b7aff67aa8b15a941d`。其子提交 `7e79c969318077c3f20833ecb1f81c340abe4a1a` 关闭 Analytics/Admin 第二审计写入口，经独立复审认定为现有 target contract 的单一生产者安全边界，不随分类反向。
+- Binding documents read: 核对用户最新最终范围、根 `AGENTS.md`、`target-contract.md`、2.0.13 切片、完整 development log、两提交全部文件和后续 descendant touches；2.0.14 审计清单已发送到任务 `01a0396e-5295-7e02-8549-edfe44451fee`。
+- Inspected native seam: `7836d70` 改动客户端 `emate.audit` 场景推导、provenance、outbox 隔离与 identity rejection，形成尚无最终 Base/Profile/真实投递/生产面回执的非 TQ 能力；`7e79c96` 则移除 `/v1/tasks/events`、旧 `task-events:write` 凭据及合并 scope，使既有 `emate.audit → Model Gateway → task ledger` 成为唯一生产写链。
+- Experiment or why unnecessary: 先机械反向两提交的实验被独立复审判为 P1：会重新开放 caller-controlled 第二写入口和双生产者。该实验未提交并已完整中止；最终只反向 `7836d70`。机械反向同时带走了一处后来仍由 Model Policy 测试需要的 settings revision fixture，该夹带变化已最小保留。
+- Decision and forbidden alternatives: 2.0.13 恢复分类前的 `GENERAL` 任务事实，不发布场景分类；保留单一生产者退役闭包作为安全不变量，但不在更新说明宣传为新能力。禁止重新开放 Analytics/Admin task-event 写入、改写公共历史、整枝重建或把分类隐藏在事故版字节。分类在 2.0.14 重新按唯一 owner、隐私、稳定性和真实 Gateway/Postgres/UI 对账准入。
+- Changed scope: 反向应用 `7836d70` 涉及的 7 个 DSH 文件，选择性保留 `identity-lifecycle.test.mjs` 当前 Model Policy settings revision fixture，并同步目标/切片范围合同；未触碰 P0/TQ 产品 owner、Desktop updater、企业单一生产者、R2、Feed、desired state 或安装态。
+- Verification commands and results: 反向范围的 DSH 首轮 `52/53`，唯一失败是机械反向误带走无关 settings `describe/revision` fixture；恢复后定向 `8/8`、完整 DSH `53/53` 与 Shell `67/67` 全过。两提交全反向的企业 `check/test/build` 实验曾通过，但因独立安全复审否决而不作为最终 diff 证据；最终保留 `7e79c96` 的企业字节由新受保护 CI 重验。`git diff --check` 通过。
+- Immutable evidence / receipt: CI run `32863107272` 属于排除前 `6b6ca14`，已请求取消且不得作为候选；当前只有源码反向 diff，没有生成、安装或发布字节。
+- Remaining blockers: 必须提交/推送排除变化并让新 exact HEAD 通过完整 PR CI；随后才能生成正式 macOS 候选。Windows 真机和 P0/TQ 全部安装/更新/回滚门仍 OPEN。
+- Next exact action: 复核最终反向 diff 只移除分类候选且保留单一生产者闭包，提交后重跑 PR #56 CI，生产链继续关闭。
+
+## 2026-08-25 · 2.0.13 Windows 冷 Profile 合同测试时限修正
+
+- Goal checkpoint: 受保护 CI 在 exact HEAD `22538ac7ead211ec19833391863d131641d4c805` 的 Windows 安装器作业中只因一条 Profile 组合合同超过 Vitest 默认 5 秒而失败；本条只修测试时限误判，不改变生产 Profile、打包器或发布范围。
+- Frozen baseline / current HEAD: 失败绑定 run `32864830246` / job `97859184341`；其余 target、Harness、企业合同和六项 Base 兼容矩阵均已通过，macOS 包作业仍独立执行。生产、R2、Feed、desired state 与安装态均未写入。
+- Binding documents read: 核对根 `AGENTS.md`、2.0.13 最终 P0/TQ 边界、`profile.spec.ts`、`profile.ts`、Vitest 配置、Windows package check 及本次/上一绿跑的同名测试日志。
+- Inspected native seam: 该断言以冷 `$DSH_HOME` 调用唯一 `prepareDesktopProfile`，会物化完整依赖 junction fallback 并验证 Host/Web/Profile 组合；这是有意的磁盘密集型集成合同，不是纯内存单元测试。生产 owner 与所有调用方不变。
+- Experiment or why unnecessary: 本次 Windows runner 中同一测试在 `5.984s` 完成后，其余同文件测试继续通过；上一全绿 run `32857386958` / job `97834652832` 的同一未变测试为 `1.606s`。`dae78fc..22538ac` 对 `profile.ts`、`profile.spec.ts`、Vitest 配置和 package scripts 无 diff，排除本轮逻辑死锁或新 I/O 路径。
+- Decision and forbidden alternatives: 只为这一条完整冷 Profile 合同设置局部 `15_000ms` 预算并写明 Windows junction/冷盘原因；其余 252 项继续使用默认 5 秒。禁止全局放宽、重试隐藏、删除组合断言、绕过 junction 物化或修改生产启动逻辑。
+- Changed scope: 仅修改 `desktop/e-mate-desktop/tests/profile.spec.ts` 并 append 本记录；没有新增依赖或触碰产品字节。
+- Verification commands and results: `profile.spec.ts` 本机 `15/15` 通过，测试 TypeScript 检查通过，`git diff --check` 通过；必须由下一次 Windows CI 证明该局部预算覆盖真实冷 runner 且安装器其余检查继续执行。
+- Immutable evidence / receipt: 当前只有 CI 失败/历史对照与 source-fixed diff；run `32864830246` 因 Windows job 失败不能作为发布门或候选依据，即使其 macOS job随后成功也只可作诊断证据。
+- Remaining blockers: 提交并推送后必须重新通过 exact-HEAD 全量 PR CI，再生成全新正式候选；不得复用当前失败 run 的任何制品。
+- Next exact action: 在主代理复核最小 diff 后提交、推送并等待新 CI；生产发布链继续关闭。

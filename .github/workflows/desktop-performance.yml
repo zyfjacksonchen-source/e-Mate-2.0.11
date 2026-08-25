@@ -1,0 +1,550 @@
+name: Admit e-Mate Desktop performance
+
+on:
+  workflow_dispatch:
+    inputs:
+      main_ci_run_id:
+        description: Successful protected-main CI run for this exact source commit.
+        required: true
+        type: string
+      desktop_artifact_id:
+        description: Exact three-file e-mate-desktop-release artifact measured by the performance rig.
+        required: true
+        type: string
+      profile_release_run_id:
+        description: Successful exact-source Profile release run containing the signed publication bundle.
+        required: true
+        type: string
+      profile_artifact_id:
+        description: Exact e-mate-profile-native-cloudflare-publication artifact used by the installed candidate.
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: e-mate-desktop-performance-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    name: TTFT evidence
+    environment: performance-admission
+    runs-on: [self-hosted, e-mate-performance]
+    timeout-minutes: 45
+    outputs:
+      artifact_id: ${{ steps.upload.outputs['artifact-id'] }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          clean: true
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Validate exact protected-main inputs
+        id: provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ inputs.main_ci_run_id }}
+          DESKTOP_ARTIFACT_ID: ${{ inputs.desktop_artifact_id }}
+          PROFILE_RUN_ID: ${{ inputs.profile_release_run_id }}
+          PROFILE_ARTIFACT_ID: ${{ inputs.profile_artifact_id }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = zyfjacksonchen-source/e-Mate-2.0.11
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          test "${GITHUB_REF_PROTECTED:-}" = true
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/desktop-performance.yml@refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          for value in "$CI_RUN_ID" "$DESKTOP_ARTIFACT_ID" "$PROFILE_RUN_ID" "$PROFILE_ARTIFACT_ID"; do
+            [[ "$value" =~ ^[1-9][0-9]*$ ]]
+          done
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$GITHUB_SHA"
+
+          ci_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID")"
+          test "$(jq -er '.repository.full_name' <<<"$ci_json")" = "$GITHUB_REPOSITORY"
+          test "$(jq -er '.head_sha' <<<"$ci_json")" = "$GITHUB_SHA"
+          test "$(jq -er '.head_branch' <<<"$ci_json")" = main
+          test "$(jq -er '.path' <<<"$ci_json")" = .github/workflows/ci.yml
+          test "$(jq -er '.event' <<<"$ci_json")" = push
+          test "$(jq -er '.status' <<<"$ci_json")" = completed
+          test "$(jq -er '.conclusion' <<<"$ci_json")" = success
+          test "$(jq -er '.run_attempt' <<<"$ci_json")" = 1
+          ci_jobs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/jobs?per_page=100")"
+          jq -e '[.jobs[] | select(.name == "CI admission" and .status == "completed" and .conclusion == "success")] | length == 1' \
+            <<<"$ci_jobs" >/dev/null
+
+          desktop_artifact="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$DESKTOP_ARTIFACT_ID")"
+          test "$(jq -er '.id | tostring' <<<"$desktop_artifact")" = "$DESKTOP_ARTIFACT_ID"
+          test "$(jq -er '.name' <<<"$desktop_artifact")" = "e-mate-desktop-release-$GITHUB_SHA"
+          test "$(jq -er '.expired' <<<"$desktop_artifact")" = false
+          jq -e '.size_in_bytes > 0 and (.digest | test("^sha256:[0-9a-f]{64}$"))' <<<"$desktop_artifact" >/dev/null
+          test "$(jq -er '.workflow_run.head_sha' <<<"$desktop_artifact")" = "$GITHUB_SHA"
+          desktop_run_id="$(jq -er '.workflow_run.id | tostring | select(test("^[1-9][0-9]*$"))' <<<"$desktop_artifact")"
+          desktop_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$desktop_run_id")"
+          test "$(jq -er '.repository.full_name' <<<"$desktop_json")" = "$GITHUB_REPOSITORY"
+          test "$(jq -er '.head_sha' <<<"$desktop_json")" = "$GITHUB_SHA"
+          test "$(jq -er '.head_branch' <<<"$desktop_json")" = main
+          test "$(jq -er '.path' <<<"$desktop_json")" = .github/workflows/desktop-release.yml
+          test "$(jq -er '.event' <<<"$desktop_json")" = workflow_dispatch
+          test "$(jq -er '.status' <<<"$desktop_json")" = completed
+          test "$(jq -er '.conclusion' <<<"$desktop_json")" = success
+          test "$(jq -er '.run_attempt' <<<"$desktop_json")" = 1
+          desktop_jobs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$desktop_run_id/jobs?per_page=100")"
+          for name in 'Build unsigned macOS universal disk image' 'Bind native artifacts to the release manifest'; do
+            jq -e --arg name "$name" \
+              '[.jobs[] | select(.name == $name and .status == "completed" and .conclusion == "success")] | length == 1' \
+              <<<"$desktop_jobs" >/dev/null
+          done
+
+          profile_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PROFILE_RUN_ID")"
+          test "$(jq -er '.repository.full_name' <<<"$profile_json")" = "$GITHUB_REPOSITORY"
+          test "$(jq -er '.head_sha' <<<"$profile_json")" = "$GITHUB_SHA"
+          test "$(jq -er '.head_branch' <<<"$profile_json")" = main
+          test "$(jq -er '.path' <<<"$profile_json")" = .github/workflows/profile-release.yml
+          test "$(jq -er '.event' <<<"$profile_json")" = workflow_dispatch
+          test "$(jq -er '.status' <<<"$profile_json")" = completed
+          test "$(jq -er '.conclusion' <<<"$profile_json")" = success
+          test "$(jq -er '.run_attempt' <<<"$profile_json")" = 1
+          profile_artifact="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$PROFILE_ARTIFACT_ID")"
+          test "$(jq -er '.id | tostring' <<<"$profile_artifact")" = "$PROFILE_ARTIFACT_ID"
+          test "$(jq -er '.name' <<<"$profile_artifact")" = "e-mate-profile-native-cloudflare-publication-$GITHUB_SHA"
+          test "$(jq -er '.expired' <<<"$profile_artifact")" = false
+          jq -e '.size_in_bytes > 0 and (.digest | test("^sha256:[0-9a-f]{64}$"))' <<<"$profile_artifact" >/dev/null
+          test "$(jq -er '.workflow_run.id | tostring' <<<"$profile_artifact")" = "$PROFILE_RUN_ID"
+          test "$(jq -er '.workflow_run.head_sha' <<<"$profile_artifact")" = "$GITHUB_SHA"
+          profile_jobs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PROFILE_RUN_ID/jobs?per_page=100")"
+          for name in \
+            'Validate accepted CI evidence' \
+            'Bootstrap complete Profile generation / darwin-arm64' \
+            'Bootstrap complete Profile generation / darwin-x64' \
+            'Bootstrap complete Profile generation / win32-x64' \
+            'Prepare signed native Cloudflare publication bundle'; do
+            jq -e --arg name "$name" \
+              '[.jobs[] | select(.name == $name and .status == "completed" and .conclusion == "success")] | length == 1' \
+              <<<"$profile_jobs" >/dev/null
+          done
+          echo "desktop_run_id=$desktop_run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download the exact three-file Desktop candidate
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.desktop_artifact_id }}
+          path: .performance/desktop
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.provenance.outputs.desktop_run_id }}
+
+      - name: Verify Desktop bytes and resolve their Profile build run
+        id: candidate
+        env:
+          DESKTOP_RUN_ID: ${{ steps.provenance.outputs.desktop_run_id }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto'
+          import { createReadStream } from 'node:fs'
+          import { appendFile, lstat, readFile, readdir } from 'node:fs/promises'
+          import { resolve } from 'node:path'
+
+          const root = resolve('.performance/desktop')
+          const source = process.env.GITHUB_SHA
+          const desktopRunId = process.env.DESKTOP_RUN_ID
+          const version = JSON.parse(await readFile('desktop/e-mate-desktop/package.json', 'utf8')).version
+          const base = JSON.parse(await readFile('desktop/e-mate-desktop/base-contract.json', 'utf8'))
+          const names = {
+            darwin: `e-Mate-${version}-mac-universal.dmg`,
+            win32: `e-Mate-${version}-win-x64-Setup.exe`,
+          }
+          const expected = ['desktop-candidate.json', names.darwin, names.win32].sort()
+          const entries = await readdir(root, { withFileTypes: true })
+          if (JSON.stringify(entries.map(entry => entry.name).sort()) !== JSON.stringify(expected)
+            || entries.some(entry => !entry.isFile() || entry.isSymbolicLink())) {
+            throw new Error('Desktop candidate must contain exactly candidate, DMG, and EXE files')
+          }
+          const candidatePath = resolve(root, 'desktop-candidate.json')
+          const candidateInfo = await lstat(candidatePath)
+          if (!candidateInfo.isFile() || candidateInfo.isSymbolicLink()
+            || candidateInfo.size <= 0 || candidateInfo.size > 1024 * 1024) {
+            throw new Error('Desktop candidate manifest is invalid')
+          }
+          const candidate = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await readFile(candidatePath)))
+          const exact = (value, keys) => value !== null && typeof value === 'object' && !Array.isArray(value)
+            && Object.keys(value).sort().join('\0') === [...keys].sort().join('\0')
+          if (!exact(candidate, [
+            'schema_version', 'document_type', 'release_status', 'version', 'source_commit',
+            'schedule_protocol_floor', 'artifacts',
+          ]) || candidate.schema_version !== 1 || candidate.document_type !== 'emate.desktop-artifact-candidate'
+            || candidate.release_status !== 'performance-pending' || candidate.version !== version
+            || candidate.source_commit !== source || candidate.schedule_protocol_floor !== base.schedule_protocol_floor
+            || !exact(candidate.artifacts, ['darwin', 'win32'])) {
+            throw new Error('Desktop candidate identity is invalid')
+          }
+          const prefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v${version}/${source}/`
+          async function digest(path) {
+            const hash = createHash('sha256')
+            for await (const chunk of createReadStream(path)) hash.update(chunk)
+            return hash.digest('hex')
+          }
+          for (const platform of ['darwin', 'win32']) {
+            const artifact = candidate.artifacts[platform]
+            const path = resolve(root, names[platform])
+            const info = await lstat(path)
+            if (!exact(artifact, ['url', 'bytes', 'sha256', 'build_source_commit', 'build_run_id'])
+              || artifact.url !== `${prefix}${names[platform]}`
+              || !Number.isSafeInteger(artifact.bytes) || artifact.bytes !== info.size || artifact.bytes <= 0
+              || !/^[0-9a-f]{64}$/u.test(artifact.sha256) || artifact.sha256 !== await digest(path)
+              || artifact.build_source_commit !== source || !/^[1-9][0-9]*$/u.test(artifact.build_run_id)) {
+              throw new Error(`Desktop candidate ${platform} bytes are invalid`)
+            }
+          }
+          if (candidate.artifacts.darwin.build_run_id !== desktopRunId) {
+            throw new Error('Desktop candidate is not owned by the selected Desktop run')
+          }
+          await appendFile(process.env.GITHUB_OUTPUT, `profile_build_run_id=${candidate.artifacts.win32.build_run_id}\n`)
+          NODE
+
+      - name: Resolve the candidate's exact staged Profile artifacts
+        id: profile-build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROFILE_BUILD_RUN_ID: ${{ steps.candidate.outputs.profile_build_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$PROFILE_BUILD_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PROFILE_BUILD_RUN_ID")"
+          test "$(jq -er '.repository.full_name' <<<"$run_json")" = "$GITHUB_REPOSITORY"
+          test "$(jq -er '.head_sha' <<<"$run_json")" = "$GITHUB_SHA"
+          test "$(jq -er '.head_branch' <<<"$run_json")" = main
+          test "$(jq -er '.path' <<<"$run_json")" = .github/workflows/desktop-release.yml
+          test "$(jq -er '.event' <<<"$run_json")" = workflow_dispatch
+          test "$(jq -er '.status' <<<"$run_json")" = completed
+          test "$(jq -er '.conclusion' <<<"$run_json")" = success
+          test "$(jq -er '.run_attempt' <<<"$run_json")" = 1
+          jobs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PROFILE_BUILD_RUN_ID/jobs?per_page=100")"
+          for name in 'Build and verify the e-Mate profile' 'Build unsigned Windows x64 installer'; do
+            jq -e --arg name "$name" \
+              '[.jobs[] | select(.name == $name and .status == "completed" and .conclusion == "success")] | length == 1' \
+              <<<"$jobs" >/dev/null
+          done
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PROFILE_BUILD_RUN_ID/artifacts?per_page=100")"
+          accepted_artifact() {
+            jq -cer --arg name "$1" --arg run "$PROFILE_BUILD_RUN_ID" --arg source "$GITHUB_SHA" '
+              [.artifacts[] | select(.name == $name and .expired == false and .size_in_bytes > 0
+                and (.digest | test("^sha256:[0-9a-f]{64}$"))
+                and (.workflow_run.id | tostring) == $run and .workflow_run.head_sha == $source)]
+              | if length == 1 then .[0] else error("expected exactly one accepted artifact") end
+            ' <<<"$artifacts"
+          }
+          profile="$(accepted_artifact "e-mate-desktop-profile-$GITHUB_SHA")"
+          receipt="$(accepted_artifact "e-mate-desktop-profile-build-receipt-$GITHUB_SHA")"
+          profile_artifact_id="$(jq -er '.id | tostring | select(test("^[1-9][0-9]*$"))' <<<"$profile")"
+          receipt_artifact_id="$(jq -er '.id | tostring | select(test("^[1-9][0-9]*$"))' <<<"$receipt")"
+          test "$profile_artifact_id" != "$receipt_artifact_id"
+          echo "artifact_id=$profile_artifact_id" >> "$GITHUB_OUTPUT"
+          echo "receipt_artifact_id=$receipt_artifact_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download the exact staged Profile bytes
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.profile-build.outputs.artifact_id }}
+          path: .performance/profile-build
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.candidate.outputs.profile_build_run_id }}
+
+      - name: Download the exact staged Profile receipt
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.profile-build.outputs.receipt_artifact_id }}
+          path: .performance/profile-build-receipt
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.candidate.outputs.profile_build_run_id }}
+
+      - name: Download the exact signed Profile publication bundle
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.profile_artifact_id }}
+          path: .performance/profile-publication
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.profile_release_run_id }}
+
+      - name: Install only the existing aggregate verifier dependency
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Create an isolated admission directory
+        id: stage
+        run: |
+          set -euo pipefail
+          directory="$(mktemp -d "$RUNNER_TEMP/e-mate-performance-$GITHUB_SHA.XXXXXX")"
+          chmod 700 "$directory"
+          echo "directory=$directory" >> "$GITHUB_OUTPUT"
+
+      - name: Recompute the Profile aggregate from staged and signed bytes
+        env:
+          CI_RUN_ID: ${{ inputs.main_ci_run_id }}
+          PROFILE_RUN_ID: ${{ inputs.profile_release_run_id }}
+          STAGE_DIRECTORY: ${{ steps.stage.outputs.directory }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require(process.argv[1]).version" desktop/e-mate-desktop/package.json)"
+          node scripts/desktop-admission.mjs profile-aggregate \
+            --commit "$GITHUB_SHA" \
+            --ci-run-id "$CI_RUN_ID" \
+            --profile-run-id "$PROFILE_RUN_ID" \
+            --release-version "$version" \
+            --profile .performance/profile-build \
+            --inventory packages/dsh/profile/component-inventory.json \
+            --profile-receipt .performance/profile-build-receipt/profile-build-receipt.json \
+            --profile-release-bundle .performance/profile-publication \
+            --base-contract desktop/e-mate-desktop/base-contract.json \
+            --out "$STAGE_DIRECTORY/profile-component-aggregate.json"
+
+      - name: Copy only the exact source-partitioned production evidence
+        env:
+          EVIDENCE_ROOT: ${{ vars.EMATE_PERFORMANCE_EVIDENCE_ROOT }}
+          STAGE_DIRECTORY: ${{ steps.stage.outputs.directory }}
+        run: |
+          set -euo pipefail
+          test -n "$EVIDENCE_ROOT"
+          [[ "$EVIDENCE_ROOT" = /* ]]
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto'
+          import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
+          import { dirname, isAbsolute, posix, relative, resolve, sep } from 'node:path'
+
+          const evidenceName = 'e-mate-performance-evidence.json'
+          const aggregateName = 'profile-component-aggregate.json'
+          const verifierName = 'scripts/performance-parity.mjs'
+          const pathNames = ['baseline', 'emate_online', 'emate_enterprise_unavailable_valid_cache']
+          const commonFields = [
+            'raw_samples_artifact', 'native_trace_artifact', 'provider_receipt_artifact',
+            'request_header_artifact', 'renderer_paint_artifact', 'installed_runtime_artifact',
+          ]
+          const evidenceRoot = resolve(required('EVIDENCE_ROOT'))
+          const stageRoot = resolve(required('STAGE_DIRECTORY'))
+          const rootInfo = await lstat(evidenceRoot)
+          if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink() || await realpath(evidenceRoot) !== evidenceRoot) {
+            throw new Error('evidence root must be a canonical, non-symlink directory')
+          }
+          const sourceRoot = resolve(evidenceRoot, required('GITHUB_SHA'))
+          if (relative(evidenceRoot, sourceRoot) !== process.env.GITHUB_SHA) {
+            throw new Error('source evidence partition escaped its fixed root')
+          }
+          const sourceInfo = await lstat(sourceRoot)
+          if (!sourceInfo.isDirectory() || sourceInfo.isSymbolicLink() || await realpath(sourceRoot) !== sourceRoot) {
+            throw new Error('source evidence directory must be a canonical, non-symlink directory')
+          }
+          const stageEntries = await readdir(stageRoot, { withFileTypes: true })
+          if (stageEntries.length !== 1 || stageEntries[0].name !== aggregateName
+            || !stageEntries[0].isFile() || stageEntries[0].isSymbolicLink()) {
+            throw new Error('admission directory was not isolated from prior files')
+          }
+
+          const actualFiles = []
+          async function walk(directory) {
+            for (const entry of await readdir(directory, { withFileTypes: true })) {
+              const path = resolve(directory, entry.name)
+              const info = await lstat(path)
+              if (info.isSymbolicLink()) throw new Error('source evidence must not contain symlinks')
+              if (info.isDirectory()) await walk(path)
+              else if (info.isFile()) actualFiles.push(relative(sourceRoot, path).split(sep).join('/'))
+              else throw new Error('source evidence contains an unsupported entry')
+            }
+          }
+          await walk(sourceRoot)
+          const evidenceBytes = await readFile(resolve(sourceRoot, evidenceName))
+          if (evidenceBytes.byteLength <= 0 || evidenceBytes.byteLength > 64 * 1024 * 1024) {
+            throw new Error('production evidence root JSON is empty or oversized')
+          }
+          const evidence = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(evidenceBytes))
+          if (evidence?.evidence_kind !== 'production-real-provider'
+            || evidence?.comparison_kind !== 'installed-2.0.12-vs-2.0.13') {
+            throw new Error('only production installed-state TTFT evidence is accepted')
+          }
+          const support = []
+          for (const pathName of pathNames) {
+            const fields = pathName === 'baseline' ? commonFields : [...commonFields, 'enterprise_receipt_artifact']
+            for (const field of fields) {
+              const path = evidence.paths?.[pathName]?.run_receipt?.[field]?.path
+              if (typeof path !== 'string' || path.length === 0 || isAbsolute(path)
+                || path.includes('\\') || posix.normalize(path) !== path
+                || /[\u0000-\u001f\u007f*?\[\]]/u.test(path)
+                || path.split('/').some(part => part === '' || part === '.' || part === '..' || part.startsWith('-'))
+                || [evidenceName, aggregateName, verifierName].includes(path)) {
+                throw new Error(`invalid ${pathName} ${field} path`)
+              }
+              support.push(path)
+            }
+          }
+          if (support.length !== 20 || new Set(support).size !== 20) {
+            throw new Error('production evidence must reference exactly 20 unique support files')
+          }
+          const expectedSourceFiles = [evidenceName, verifierName, ...support].sort()
+          if (JSON.stringify(actualFiles.sort()) !== JSON.stringify(expectedSourceFiles)) {
+            throw new Error('source evidence file set is not exact')
+          }
+          if (expectedSourceFiles.some(path => path.toLowerCase().includes('mac-smoke'))) {
+            throw new Error('mac-smoke is forbidden from performance admission')
+          }
+          const protectedVerifier = await readFile(resolve(process.env.GITHUB_WORKSPACE, verifierName))
+          const stagedVerifier = await readFile(resolve(sourceRoot, verifierName))
+          if (!protectedVerifier.equals(stagedVerifier)) {
+            throw new Error('performance verifier differs from protected-main source bytes')
+          }
+          for (const path of expectedSourceFiles) {
+            const source = resolve(sourceRoot, path)
+            const contained = relative(sourceRoot, source)
+            if (contained === '..' || contained.startsWith(`..${sep}`) || isAbsolute(contained)) {
+              throw new Error('source evidence path escapes its source partition')
+            }
+            const info = await lstat(source)
+            if (!info.isFile() || info.isSymbolicLink() || info.size <= 0 || info.size > 64 * 1024 * 1024) {
+              throw new Error(`source evidence file is empty, oversized, or not regular: ${path}`)
+            }
+            const output = resolve(stageRoot, path)
+            await mkdir(dirname(output), { recursive: true, mode: 0o700 })
+            await writeFile(output, await readFile(source), { flag: 'wx', mode: 0o600 })
+          }
+          const copiedVerifier = await readFile(resolve(stageRoot, verifierName))
+          if (createHash('sha256').update(copiedVerifier).digest('hex')
+            !== createHash('sha256').update(protectedVerifier).digest('hex')) {
+            throw new Error('copied verifier bytes drifted')
+          }
+          function required(name) {
+            const value = process.env[name]
+            if (value === undefined || value === '') throw new Error(`${name} is required`)
+            return value
+          }
+          NODE
+
+      - name: Re-run the exact protected-main TTFT verifier and bind the aggregate
+        env:
+          STAGE_DIRECTORY: ${{ steps.stage.outputs.directory }}
+        run: |
+          set -euo pipefail
+          verified="$(mktemp "$RUNNER_TEMP/e-mate-performance-verified.XXXXXX.json")"
+          node scripts/performance-parity.mjs \
+            --input "$STAGE_DIRECTORY/e-mate-performance-evidence.json" \
+            --output "$verified"
+          mv "$verified" "$STAGE_DIRECTORY/e-mate-performance-evidence.json"
+          node --input-type=module <<'NODE'
+          import { lstat, readFile, readdir } from 'node:fs/promises'
+          import { relative, resolve, sep } from 'node:path'
+
+          const root = resolve(process.env.STAGE_DIRECTORY)
+          const evidence = JSON.parse(await readFile(resolve(root, 'e-mate-performance-evidence.json'), 'utf8'))
+          const aggregate = JSON.parse(await readFile(resolve(root, 'profile-component-aggregate.json'), 'utf8'))
+          const candidate = JSON.parse(await readFile('.performance/desktop/desktop-candidate.json', 'utf8'))
+          const base = JSON.parse(await readFile('desktop/e-mate-desktop/base-contract.json', 'utf8'))
+          if (evidence.evidence_kind !== 'production-real-provider'
+            || evidence.production_artifacts_verified !== true
+            || evidence.decision?.gate_status !== 'passed'
+            || evidence.decision?.failures?.length !== 0
+            || evidence.decision?.production_receipt_failures?.length !== 0
+            || aggregate.targets?.length !== 3) {
+            throw new Error('protected-main verifier did not produce a passed production result')
+          }
+          for (const pathName of ['emate_online', 'emate_enterprise_unavailable_valid_cache']) {
+            const receipt = evidence.paths?.[pathName]?.run_receipt
+            const runtime = receipt?.runtime
+            const install = receipt?.install_receipt
+            const target = aggregate.targets.find(item => item.target === install?.target)
+            const artifact = install?.target?.startsWith('darwin-') ? candidate.artifacts?.darwin : candidate.artifacts?.win32
+            if (runtime?.source_commit !== process.env.GITHUB_SHA
+              || runtime?.base_contract_id !== base.id
+              || runtime?.profile_generation !== target?.profile_generation
+              || runtime?.composition_sha256 !== target?.component_aggregate_sha256
+              || runtime?.desktop_artifact_sha256 !== artifact?.sha256
+              || runtime?.desktop_artifact_bytes !== artifact?.bytes) {
+              throw new Error(`${pathName} is not bound to the admitted source, Base, Profile, and installer bytes`)
+            }
+          }
+          const files = []
+          async function walk(directory) {
+            for (const entry of await readdir(directory, { withFileTypes: true })) {
+              const path = resolve(directory, entry.name)
+              const info = await lstat(path)
+              if (info.isSymbolicLink()) throw new Error('admitted evidence contains a symlink')
+              if (info.isDirectory()) await walk(path)
+              else if (info.isFile()) files.push(relative(root, path).split(sep).join('/'))
+              else throw new Error('admitted evidence contains an unsupported entry')
+            }
+          }
+          await walk(root)
+          if (files.length !== 23 || !files.includes('profile-component-aggregate.json')
+            || files.some(path => path.toLowerCase().includes('mac-smoke'))) {
+            throw new Error('admitted performance artifact file set is not exact')
+          }
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: e-mate-performance-evidence-${{ github.sha }}-attempt-1
+          path: ${{ steps.stage.outputs.directory }}
+          include-hidden-files: false
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove the runner-local admitted copy
+        if: always()
+        env:
+          STAGE_DIRECTORY: ${{ steps.stage.outputs.directory }}
+        run: |
+          if test -n "${STAGE_DIRECTORY:-}" && [[ "$STAGE_DIRECTORY" = "$RUNNER_TEMP"/e-mate-performance-* ]]; then
+            rm -rf -- "$STAGE_DIRECTORY"
+          fi
+
+  admission:
+    name: Performance admission
+    needs: evidence
+    environment: r2-publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Sign only the exact protected evidence and release artifacts
+        id: admit
+        uses: zyfjacksonchen-source/e-mate-desktop-publication/performance@c1bf49db627b411077cea7b914981c931484131f
+        env:
+          EMATE_GITHUB_PROVENANCE_TOKEN: ${{ github.token }}
+          EMATE_DESKTOP_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.EMATE_PROFILE_SIGNING_PRIVATE_KEY }}
+        with:
+          source-sha: ${{ github.sha }}
+          main-ci-run-id: ${{ inputs.main_ci_run_id }}
+          desktop-artifact-id: ${{ inputs.desktop_artifact_id }}
+          profile-release-run-id: ${{ inputs.profile_release_run_id }}
+          profile-artifact-id: ${{ inputs.profile_artifact_id }}
+          evidence-artifact-id: ${{ needs.evidence.outputs.artifact_id }}
+          signing-key-id: ${{ secrets.EMATE_PROFILE_SIGNING_KEY_ID }}
+
+      - name: Require the unique attempt-1 admission identity
+        env:
+          ARTIFACT_NAME: ${{ steps.admit.outputs['artifact-name'] }}
+          ARTIFACT_PATH: ${{ steps.admit.outputs['artifact-path'] }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$ARTIFACT_NAME" = "e-mate-performance-admission-$GITHUB_SHA-attempt-1"
+          test -d "$ARTIFACT_PATH"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.admit.outputs['artifact-name'] }}
+          path: ${{ steps.admit.outputs['artifact-path'] }}
+          include-hidden-files: false
+          if-no-files-found: error
+          retention-days: 30
