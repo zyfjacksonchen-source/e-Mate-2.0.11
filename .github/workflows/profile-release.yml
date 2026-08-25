@@ -107,7 +107,7 @@ jobs:
             test "$(jq -er .lane "$impact")" = plugin-only
             test "$(jq -er '.publish_components | length > 0' "$impact")" = true
             while IFS= read -r name; do job_succeeded "$name"; done < <(
-              jq -r '.component_jobs[] | "Changed Profile component / \(.component) / \(.target)"' "$impact"
+              jq -r '.ci_component_jobs | map(.target) | unique[] | "Changed Profile components / \(.)"' "$impact"
             )
             if test "$(jq -er .portable_publish "$impact")" = true; then
               job_succeeded 'Portable Profile generations'

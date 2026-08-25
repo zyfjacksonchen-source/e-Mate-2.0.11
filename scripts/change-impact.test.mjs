@@ -560,7 +560,7 @@ describe('repository release boundary', () => {
     const macPackaging = classify('desktop/e-mate-desktop/scripts/package-mac.ts')
     assert.deepEqual(macPackaging.ci, {
       app_smoke: { macos: true, windows: false },
-      distribution: { macos: true, windows: false },
+      distribution: { macos: false, windows: false },
     })
     assert.equal(macPackaging.macos_runtime, true)
     assert.equal(macPackaging.macos_packaging, true)
@@ -572,12 +572,19 @@ describe('repository release boundary', () => {
       app_smoke: { macos: false, windows: true },
       distribution: { macos: false, windows: false },
     })
+    assert.deepEqual(classifyWith(
+      { protectedMain: true },
+      'desktop/e-mate-desktop/src/windows-directory-picker.ts',
+    ).ci, {
+      app_smoke: { macos: true, windows: true },
+      distribution: { macos: true, windows: true },
+    })
 
     const updater = classify('desktop/e-mate-desktop/src/update-checker.ts')
-    assert.deepEqual(updater.ci.distribution, { macos: true, windows: true })
+    assert.deepEqual(updater.ci.distribution, { macos: false, windows: false })
     assert.deepEqual(
       classify('desktop/e-mate-desktop/build/assistedMessages.yml').ci.distribution,
-      { macos: false, windows: true },
+      { macos: false, windows: false },
     )
 
     const profile = classify('packages/dsh-plugin-tool-search/src/index.ts')
@@ -615,6 +622,13 @@ describe('repository release boundary', () => {
     const enterprise = classify('enterprise/apps/auth-gateway/src/index.ts')
     assert.equal(enterprise.enterprise, true)
     assert.deepEqual(enterprise.ci, {
+      app_smoke: { macos: false, windows: false },
+      distribution: { macos: false, windows: false },
+    })
+    assert.deepEqual(classifyWith(
+      { protectedMain: true },
+      'packages/dsh-plugin-tool-search/src/index.ts',
+    ).ci, {
       app_smoke: { macos: false, windows: false },
       distribution: { macos: false, windows: false },
     })
@@ -756,6 +770,19 @@ describe('repository release boundary', () => {
     assert.match(coordinator, /--workflow desktop-release\.yml\n\s+--inputs '\{"ci_run_id":"\$\{\{ needs\.ci\.outputs\.run_id \}\}","source_sha":"\$\{\{ inputs\.source_sha \}\}"\}'/u)
     assert.equal(workflow.match(/GITHUB_STEP_SUMMARY/gu)?.length, 4)
     assert.doesNotMatch(workflow, /^\s+paths(?:-ignore)?:/mu)
+
+    for (const name of [
+      'Windows x64 / unsigned desktop installer',
+      'macOS universal / unsigned desktop disk image',
+    ]) {
+      assert.ok(workflow.includes(`name: ${name}`), name)
+      for (const path of [
+        '../.github/workflows/desktop-release.yml',
+        '../.github/workflows/desktop-performance.yml',
+        '../.github/workflows/profile-release.yml',
+        './desktop-admission.mjs',
+      ]) assert.ok(readFileSync(new URL(path, import.meta.url), 'utf8').includes(name), `${path}: ${name}`)
+    }
   })
 
   it('prepares only an already admitted complete component generation for native Cloudflare publication', () => {
@@ -771,6 +798,8 @@ describe('repository release boundary', () => {
     assert.doesNotMatch(workflow, /pull_request\)|commits\/\$source_sha\/pulls|later_paths/u)
     assert.match(workflow, /name: e-mate-change-impact-\$\{\{ steps\.run\.outputs\.source_sha \}\}/u)
     assert.match(workflow, /job_succeeded 'CI admission'/u)
+    assert.match(workflow, /\.ci_component_jobs \| map\(\.target\) \| unique\[\] \| "Changed Profile components \/ \\\(.\)"/u)
+    assert.doesNotMatch(workflow, /\.component_jobs\[\].*Changed Profile component \/ \\\(.component\)/u)
     assert.match(workflow, /if test "\$\(jq -er \.portable_publish "\$impact"\)" = true;(?:.|\n)*?job_succeeded 'Portable Profile generations'(?:.|\n)*?Complete Profile generation \/ \$target/u)
     assert.doesNotMatch(workflow, /if test "\$BOOTSTRAP" = true; then[^]*?publish_components[^]*?= '\[\]'/u)
     assert.match(workflow, /node scripts\/component-release\.mjs inventory > component-inventory\.json/u)
@@ -841,14 +870,14 @@ describe('repository release boundary', () => {
     ]) assert.equal(unknown[dimension], true, dimension)
     assert.deepEqual(unknown.ci, {
       app_smoke: { macos: true, windows: true },
-      distribution: { macos: true, windows: true },
+      distribution: { macos: false, windows: false },
     })
     const invalid = classify('../outside')
     assert.equal(invalid.lane, 'base')
     assert.equal(invalid.contract.valid, false)
     assert.deepEqual(invalid.ci, {
       app_smoke: { macos: true, windows: true },
-      distribution: { macos: true, windows: true },
+      distribution: { macos: false, windows: false },
     })
   })
 })

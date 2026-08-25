@@ -2621,3 +2621,15 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有 exact-base 源码 diff 与无密钥测试；没有读取凭据、真实用户 Profile、调用模型、生成 production `performance_run_id`、签名、上传或生产写入。
 - Remaining blockers: runner owner 仍须在 installation root 单独预置精确 2.0.12 `base-contract.json`、`component-inventory.json`、state/store 与既有 app/runtime receipt；protected attempt-1 仍须实际物化候选 publication、启动两臂并完成四模型采集。任一预置或运行态 authority 缺失保持 OPEN。
 - Next exact action: 主代理复核并合并本提交；随后仅在 exact protected-main attempt-1 runner 做真实安装态 Profile preflight 和四模型采集，失败不得复用旧 evidence。
+## 2026-08-26 · 2.0.13 PR2 合并后发布边界修复
+
+- Goal checkpoint: 修复 PR1/PR2 合并后普通 PR 误产正式安装器、protected-main Base 单端漏产及聚合组件发布消费者仍校验旧 job 名的根因；不触碰 release coordinator、产品运行时或生产状态。
+- Frozen baseline / current HEAD: 独立干净 worktree `codex/pr2-impact-contract-fix` 从 `feat/2.0.13-native-perf-producer` exact `e05ff397d2fc3d2c7a6fbb5a657a3e0077c184e9` 创建。
+- Binding documents read: 完整读取根 `AGENTS.md`、当前 change-impact/CI/Profile release 合同、最新完整日志与 ponytail skill；以“普通 PR 不产发行物、protected-main Base 同 SHA 双平台一次构建、旧消费者稳定名称不漂移”为准。
+- Inspected native seam: 唯一根因位于 `ciPlan()` 的 formal 判定、CI 两个稳定 job 名和 Profile release 对聚合 CI matrix 的消费；公开逐组件 `component_jobs` schema 无需修改。
+- Decision and forbidden alternatives: `formal = releaseCandidate || (protectedMain && lane === base)`，formal 时双平台 app-smoke/distribution 同时开启；普通 PR 只按影响维度跑 `package:dir` 且 distribution 全 false；plugin-only main 不建安装器。CI 恢复两平台旧稳定名称，Profile release 只从 `ci_component_jobs` 去重 target 校验聚合 job。禁止 PR 正式字节、单端 Base freeze、复制路径分类或修改 coordinator。
+- Changed scope: 仅修改 change-impact 计划、既有 CI/Profile workflow、合同测试并 append 本记录；未修改 release coordinator、Desktop/DSH/Profile bytes、性能 probe、R2/Feed/desired state 或用户数据。
+- Verification commands and results: bundled Node 24 `--check scripts/change-impact.mjs` 通过；change-impact 与 component-release 合跑 `33 passed / 4 intentional Harness-toolchain skips / 0 failed`；两份 workflow Ruby YAML parse 和 `git diff --check` 通过。干净 worktree 未安装依赖，完整 `test:impact` 的两个 Profile consumer 未启动且不记为通过。
+- Immutable evidence / receipt: 只有 source-fixed diff 与无密钥合同测试；没有 CI run、DMG、EXE、签名、安装或生产写入。
+- Remaining blockers: 主代理需先与并行 coordinator source-SHA 修复做无冲突合并，再由 exact protected-main attempt-1 CI 真实证明双平台 artifacts、聚合 plugin-only Profile release 与 downstream job-name接受。
+- Next exact action: 提交本独立修复供主代理移植；不推送、不 dispatch、不发布。

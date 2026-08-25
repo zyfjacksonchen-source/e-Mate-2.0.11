@@ -675,22 +675,18 @@ function dimensionsFor(classifications, boundary) {
 function ciPlan(lane, dimensions, options) {
   const releaseCandidate = options.releaseCandidate === true
   const base = lane === 'base'
+  const formal = releaseCandidate || (options.protectedMain === true && base)
   const appSmoke = {
-    macos: releaseCandidate || base && (
+    macos: formal || base && (
       dimensions.shared_runtime || dimensions.profile || dimensions.macos_runtime || dimensions.macos_packaging
     ),
-    windows: releaseCandidate || base && (
+    windows: formal || base && (
       dimensions.shared_runtime || dimensions.profile || dimensions.windows_runtime || dimensions.windows_packaging
     ),
   }
   return {
     app_smoke: appSmoke,
-    distribution: {
-      macos: releaseCandidate || dimensions.macos_packaging
-        || options.protectedMain === true && appSmoke.macos,
-      windows: releaseCandidate || dimensions.windows_packaging
-        || options.protectedMain === true && appSmoke.windows,
-    },
+    distribution: { macos: formal, windows: formal },
   }
 }
 
@@ -769,7 +765,7 @@ function result({
   portablePublish = false,
   boundary,
   dimensions = allDimensions(),
-  ci = { app_smoke: { macos: true, windows: true }, distribution: { macos: true, windows: true } },
+  ci = { app_smoke: { macos: true, windows: true }, distribution: { macos: false, windows: false } },
   error,
 }) {
   return {
