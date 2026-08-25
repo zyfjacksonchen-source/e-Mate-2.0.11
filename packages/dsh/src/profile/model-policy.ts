@@ -561,11 +561,23 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant, isCurrent 
   if (!isCurrent()) throw projectionSuperseded()
   const previousLlmSettings = structuredClone(ctx.settings.get('llm-pi-ai') ?? {})
   const previousDefaultModel = structuredClone(ctx.settings.get('agent-default-model') ?? {})
+  const settingRevisions = new Map(ctx.settings.describe().map(({ ns, revision }) => [ns, revision]))
+  const llmRevision = settingRevisions.get('llm-pi-ai')
+  const defaultRevision = settingRevisions.get('agent-default-model')
+  if (typeof llmRevision !== 'number' || !Number.isSafeInteger(llmRevision)
+    || typeof defaultRevision !== 'number' || !Number.isSafeInteger(defaultRevision)) {
+    throw new Error('e-Mate runtime model Settings revisions are unavailable')
+  }
+  let projectedLlmRevision
+  let projectedDefaultRevision
   try {
     for (const [ref, value] of credentials) await current(() => ctx.credentials.set(ref, value))
     const next = { providers }
     if (canonicalJson(ctx.settings.get('llm-pi-ai')) !== canonicalJson(next)) {
-      await current(() => ctx.settings.replace('llm-pi-ai', next))
+      await current(async () => {
+        await ctx.settings.replace('llm-pi-ai', next, llmRevision)
+        projectedLlmRevision = llmRevision + 1
+      })
     }
     const defaultModel = models.find(model => model.id === policy.default_chat_model_id)
     if (defaultModel === undefined) throw new Error('e-Mate default runtime model is unavailable')
@@ -575,7 +587,10 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant, isCurrent 
       reasoningEffort: policy.default_chat_reasoning_effort,
     }
     if (canonicalJson(ctx.settings.get('agent-default-model')) !== canonicalJson(defaultSelection)) {
-      await current(() => ctx.settings.replace('agent-default-model', defaultSelection))
+      await current(async () => {
+        await ctx.settings.replace('agent-default-model', defaultSelection, defaultRevision)
+        projectedDefaultRevision = defaultRevision + 1
+      })
     }
     for (const ref of RUNTIME_CREDENTIAL_REFS) {
       if (!credentials.has(ref)) {
@@ -592,13 +607,24 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant, isCurrent 
     }
   } catch (error) {
     const rollbackFailures = []
-    for (const restore of [
-      () => ctx.settings.replace('agent-default-model', previousDefaultModel),
-      () => ctx.settings.replace('llm-pi-ai', previousLlmSettings),
-    ]) {
-      try { await restore() } catch (rollbackError) { rollbackFailures.push(rollbackError) }
-    }
     let superseded = error?.code === PROJECTION_SUPERSEDED || !isCurrent()
+    if (!superseded) {
+      for (const { ns, value, revision } of [
+        { ns: 'agent-default-model', value: previousDefaultModel, revision: projectedDefaultRevision },
+        { ns: 'llm-pi-ai', value: previousLlmSettings, revision: projectedLlmRevision },
+      ]) {
+        if (revision === undefined) continue
+        try {
+          await current(() => ctx.settings.replace(ns, value, revision))
+        } catch (rollbackError) {
+          rollbackFailures.push(rollbackError)
+          if (rollbackError?.code === PROJECTION_SUPERSEDED || !isCurrent()) {
+            superseded = true
+            break
+          }
+        }
+      }
+    }
     if (!superseded) {
       for (const [ref, hit] of previousCredentials) {
         try {

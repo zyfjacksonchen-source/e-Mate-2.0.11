@@ -2412,6 +2412,10 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     },
   }
   let defaultModelSettings
+  const settingsRevisions = new Map([
+    ['llm-pi-ai', 0],
+    ['agent-default-model', 0],
+  ])
   let failDefaultModelWrite = false
   let delayedCredentialWrite
   let rejectedCredentialWrite
@@ -2523,10 +2527,17 @@ test('enterprise model switch keeps native history and survives a cached-policy 
         },
       },
       settings: {
+        describe: () => [...settingsRevisions].map(([ns, revision]) => ({ ns, revision })),
         get: ns => ns === 'llm-pi-ai'
           ? structuredClone(llmSettings)
           : ns === 'agent-default-model' ? structuredClone(defaultModelSettings) : undefined,
-        replace: async (ns, value) => {
+        replace: async (ns, value, expectedRevision) => {
+          const revision = settingsRevisions.get(ns)
+          assert.notEqual(revision, undefined)
+          if (expectedRevision !== undefined && expectedRevision !== revision) {
+            throw Object.assign(new Error('simulated Settings revision conflict'), { code: 'SETTINGS_CONFLICT' })
+          }
+          const previous = ns === 'llm-pi-ai' ? llmSettings : defaultModelSettings
           if (ns === 'llm-pi-ai') llmSettings = structuredClone(value)
           else if (ns === 'agent-default-model') {
             if (failDefaultModelWrite) {
@@ -2536,6 +2547,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
             defaultModelSettings = structuredClone(value)
           }
           else assert.fail(`unexpected settings namespace ${ns}`)
+          if (JSON.stringify(previous) !== JSON.stringify(value)) settingsRevisions.set(ns, revision + 1)
         },
       },
       storageDomain: { open: async () => openedDomains++ === 0 ? domain : quotaDomain },
@@ -2679,6 +2691,41 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     assert.doesNotMatch(JSON.stringify(llmSettings), /redacted-for-test/u)
     assert.doesNotMatch(JSON.stringify(llmSettings), /model-api/u)
     assert.equal((await rpc.handler('unknown', {})).error.code, 'bad-request')
+
+    const nextGenerationSettings = structuredClone(llmSettings)
+    nextGenerationSettings.providers['e-mate-enterprise'].baseURL = 'http://next-generation.example:8088/v1'
+    const nextGenerationDefault = {
+      provider: 'e-mate-enterprise',
+      model: 'gpt-5.6-sol',
+      reasoningEffort: 'medium',
+    }
+    projectedSearchKey = 'superseded-search-key-redacted-for-test-456'
+    let releaseSupersededWrite
+    let markSupersededWriteStarted
+    const supersededWriteStarted = new Promise(resolve => { markSupersededWriteStarted = resolve })
+    delayedCredentialWrite = {
+      ref: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+      value: projectedSearchKey,
+      started: markSupersededWriteStarted,
+      release: new Promise(resolve => { releaseSupersededWrite = resolve }),
+    }
+    const supersededProjection = modelPolicy.refresh({ force: true })
+    await supersededWriteStarted
+    llmSettings = structuredClone(nextGenerationSettings)
+    defaultModelSettings = structuredClone(nextGenerationDefault)
+    settingsRevisions.set('llm-pi-ai', settingsRevisions.get('llm-pi-ai') + 1)
+    settingsRevisions.set('agent-default-model', settingsRevisions.get('agent-default-model') + 1)
+    modelPolicyHandlers.get('credentials/updated')('E_MATE_ENTERPRISE_SESSION')
+    releaseSupersededWrite()
+    assert.equal((await supersededProjection).revision, 7)
+    assert.deepEqual(llmSettings, nextGenerationSettings)
+    assert.deepEqual(defaultModelSettings, nextGenerationDefault)
+    for (const ref of [
+      'E_MATE_MODEL_KEY_GPT', 'E_MATE_MODEL_KEY_DEEPSEEK',
+      'E_MATE_MODEL_KEY_DOUBAO', 'E_MATE_SEARCH_KEY_DEEPSEEK',
+    ]) assert.equal(credentialValues.has(ref), false)
+    projectedSearchKey = 'deepseek-key-redacted-for-test-123'
+    await modelPolicy.refresh({ force: true })
 
     searchGrantStatus = 'denied'
     rejectQuotaSnapshotWrite = true
