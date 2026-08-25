@@ -8,7 +8,11 @@ import {
 } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
-import { PERFORMANCE_MODEL_LEAF_IDS, PERFORMANCE_MODEL_ROSTER } from './desktop-admission.mjs'
+import {
+  PERFORMANCE_MODEL_LEAF_IDS,
+  PERFORMANCE_MODEL_ROSTER,
+  profilePublicationTreeSha256,
+} from './desktop-admission.mjs'
 import {
   BASELINE_HARNESS_COMMIT,
   CANDIDATE_HARNESS_COMMIT,
@@ -28,6 +32,7 @@ const VERIFIER_NAME = 'scripts/performance-parity.mjs'
 const BASELINE_SOURCE_COMMIT = '9fbc70ad56c4f263dfa0aa0085f19eded134e32d'
 const BASELINE_BASE_CONTRACT = 'e-mate-desktop-profile-v6-dsh-2bc16230975f'
 const CANDIDATE_BASE_CONTRACT = 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0'
+const PROFILE_TARGETS = Object.freeze(['darwin-arm64', 'darwin-x64', 'win32-x64'])
 const BASELINE_INSTALLS = Object.freeze({
   'darwin-arm64': Object.freeze({
     sha256: 'd2cb459d2e8648213e0b38aa6e210c1a727937be77993b2493e2a7848d5d3b2e',
@@ -127,6 +132,15 @@ async function boundedRegularFile(path, label) {
   }
 }
 
+async function boundedJson(path, label) {
+  await boundedRegularFile(path, label)
+  try {
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await readFile(path)))
+  } catch {
+    throw new Error(`${label} must be valid JSON`)
+  }
+}
+
 function exactObject(value, keys) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     && Object.keys(value).sort().join('\0') === [...keys].sort().join('\0')
@@ -182,9 +196,55 @@ export function createAcceptancePlan(input) {
     baseline_harness_commit: BASELINE_HARNESS_COMMIT,
     collector_sha256: input.collectorSha256,
     candidate_artifacts_root: input.candidateArtifactsRoot,
-    profile_artifacts_root: input.profileArtifactsRoot,
+    profile_authority: input.profileAuthority,
     scratch_root: input.scratchRoot,
     models,
+  }
+}
+
+export async function loadProfileAcceptanceAuthority(input) {
+  const publicationRoot = await canonicalDirectory(input.publicationRoot, 'profile publication')
+  const authorityPath = resolve(input.authorityPath)
+  const aggregatePath = resolve(input.aggregatePath)
+  const [receipt, aggregate, publicationTreeSha256] = await Promise.all([
+    boundedJson(authorityPath, 'profile performance authority'),
+    boundedJson(aggregatePath, 'profile component aggregate'),
+    profilePublicationTreeSha256(publicationRoot),
+  ])
+  const validTarget = (target, index) => exactObject(target, [
+    'target', 'profile_generation', 'composition_sha256', 'client_bundle_sha256',
+  ]) && target.target === PROFILE_TARGETS[index]
+    && [target.profile_generation, target.composition_sha256, target.client_bundle_sha256]
+      .every(value => typeof value === 'string' && SHA256.test(value))
+  const validAggregateTarget = (target, index) => exactObject(target, [
+    'target', 'profile_generation', 'component_aggregate_sha256',
+  ]) && target.target === PROFILE_TARGETS[index]
+    && [target.profile_generation, target.component_aggregate_sha256]
+      .every(value => typeof value === 'string' && SHA256.test(value))
+  if (!exactObject(receipt, [
+    'schema_version', 'document_type', 'source_commit', 'base_contract_id',
+    'publication_tree_sha256', 'profile_component_aggregate_sha256', 'targets',
+  ]) || receipt.schema_version !== 1
+    || receipt.document_type !== 'emate.profile-performance-authorities'
+    || receipt.source_commit !== input.sourceCommit || receipt.base_contract_id !== CANDIDATE_BASE_CONTRACT
+    || receipt.publication_tree_sha256 !== publicationTreeSha256
+    || !Array.isArray(receipt.targets) || receipt.targets.length !== PROFILE_TARGETS.length
+    || !receipt.targets.every(validTarget)
+    || !exactObject(aggregate, ['aggregate_sha256', 'inventory_sha256', 'staged_profile_tree_sha256', 'targets'])
+    || receipt.profile_component_aggregate_sha256 !== aggregate.aggregate_sha256
+    || ![aggregate.aggregate_sha256, aggregate.inventory_sha256, aggregate.staged_profile_tree_sha256]
+      .every(value => typeof value === 'string' && SHA256.test(value))
+    || !Array.isArray(aggregate.targets) || aggregate.targets.length !== PROFILE_TARGETS.length
+    || !aggregate.targets.every(validAggregateTarget)
+    || receipt.targets.some((target, index) => target.profile_generation !== aggregate.targets[index].profile_generation
+      || target.composition_sha256 !== aggregate.targets[index].component_aggregate_sha256)) {
+    throw new Error('profile performance authority does not match the signed Profile publication aggregate')
+  }
+  return {
+    publication_root: publicationRoot,
+    authority_path: await realpath(authorityPath),
+    aggregate_path: await realpath(aggregatePath),
+    receipt,
   }
 }
 
@@ -266,6 +326,7 @@ export function assertInstalledAuthorities(evidence, plan, candidateManifest) {
   const predecessor = BASELINE_INSTALLS[target]
   const candidateKey = target === 'win32-x64' ? 'win32' : 'darwin'
   const candidate = candidateManifest.artifacts?.[candidateKey]
+  const profile = plan.profile_authority.receipt.targets.find(item => item.target === target)
   if (predecessor === undefined
     || baseline.runtime.source_commit !== BASELINE_SOURCE_COMMIT
     || baseline.runtime.base_contract_id !== BASELINE_BASE_CONTRACT
@@ -278,6 +339,10 @@ export function assertInstalledAuthorities(evidence, plan, candidateManifest) {
     || candidate === undefined
     || online.runtime.source_commit !== plan.source_commit
     || online.runtime.base_contract_id !== CANDIDATE_BASE_CONTRACT
+    || profile === undefined
+    || online.runtime.profile_generation !== profile.profile_generation
+    || online.runtime.composition_sha256 !== profile.composition_sha256
+    || online.runtime.client_bundle_sha256 !== profile.client_bundle_sha256
     || online.runtime.desktop_artifact_sha256 !== candidate.sha256
     || online.runtime.desktop_artifact_bytes !== candidate.bytes
     || online.install_receipt.package_sha256 !== candidate.sha256
@@ -312,6 +377,15 @@ async function walkFiles(root, directory = root) {
 
 export async function finalizeAcceptanceCapture(plan, handoffRoot) {
   const handoff = await emptyNewDirectory(handoffRoot, 'performance handoff')
+  const profileAuthority = await loadProfileAcceptanceAuthority({
+    publicationRoot: plan.profile_authority.publication_root,
+    authorityPath: plan.profile_authority.authority_path,
+    aggregatePath: plan.profile_authority.aggregate_path,
+    sourceCommit: plan.source_commit,
+  })
+  if (canonical(profileAuthority) !== canonical(plan.profile_authority)) {
+    throw new Error('profile performance authority changed during collection')
+  }
   const candidateManifest = JSON.parse(await readFile(
     join(plan.candidate_artifacts_root, 'desktop-candidate.json'),
     'utf8',
@@ -362,17 +436,23 @@ async function main() {
       'source-commit': { type: 'string' },
       'candidate-artifacts': { type: 'string' },
       'profile-artifacts': { type: 'string' },
+      'profile-authorities': { type: 'string' },
+      'profile-aggregate': { type: 'string' },
     },
     strict: true,
   })
-  for (const key of ['collector', 'collector-sha256', 'scratch', 'handoff', 'source-commit', 'candidate-artifacts', 'profile-artifacts']) {
+  for (const key of [
+    'collector', 'collector-sha256', 'scratch', 'handoff', 'source-commit', 'candidate-artifacts',
+    'profile-artifacts', 'profile-authorities', 'profile-aggregate',
+  ]) {
     if (values[key] === undefined) throw new Error(`--${key} is required`)
   }
   if (!SOURCE_COMMIT.test(values['source-commit']) || !SHA256.test(values['collector-sha256'])) {
     throw new Error('source commit or collector digest is invalid')
   }
   assertAcceptanceOwnerEnvironment(process.env, values['source-commit'])
-  if (![values.collector, values.scratch, values.handoff, values['candidate-artifacts'], values['profile-artifacts']].every(isAbsolute)) {
+  if (![values.collector, values.scratch, values.handoff, values['candidate-artifacts'], values['profile-artifacts'],
+    values['profile-authorities'], values['profile-aggregate']].every(isAbsolute)) {
     throw new Error('collector and acceptance paths must be absolute')
   }
   await boundedRegularFile(values.collector, 'performance collector')
@@ -381,7 +461,12 @@ async function main() {
     throw new Error('performance collector is not the exact configured executable')
   }
   const candidateArtifactsRoot = await canonicalDirectory(values['candidate-artifacts'], 'candidate artifacts')
-  const profileArtifactsRoot = await canonicalDirectory(values['profile-artifacts'], 'profile artifacts')
+  const profileAuthority = await loadProfileAcceptanceAuthority({
+    publicationRoot: values['profile-artifacts'],
+    authorityPath: values['profile-authorities'],
+    aggregatePath: values['profile-aggregate'],
+    sourceCommit: values['source-commit'],
+  })
   const scratchRoot = await emptyNewDirectory(values.scratch, 'performance scratch')
   await mkdir(join(scratchRoot, 'models'), { mode: 0o700 })
   for (const roster of PERFORMANCE_MODEL_ROSTER) {
@@ -391,7 +476,7 @@ async function main() {
     sourceCommit: values['source-commit'],
     collectorSha256: values['collector-sha256'],
     candidateArtifactsRoot,
-    profileArtifactsRoot,
+    profileAuthority,
     scratchRoot,
   })
   const planPath = join(scratchRoot, 'acceptance-plan.json')

@@ -310,13 +310,15 @@ jobs:
             --profile-receipt .performance/profile-build-receipt/profile-build-receipt.json \
             --profile-release-bundle .performance/profile-publication \
             --base-contract desktop/e-mate-desktop/base-contract.json \
-            --out "$STAGE_DIRECTORY/profile-component-aggregate.json"
+            --out "$STAGE_DIRECTORY/profile-component-aggregate.json" \
+            --performance-authorities-out "$STAGE_DIRECTORY/profile-performance-authorities.json"
 
       - name: Collect the exact installed-state production cohorts once
         env:
           COLLECTOR: ${{ vars.EMATE_PERFORMANCE_COLLECTOR }}
           COLLECTOR_SHA256: ${{ vars.EMATE_PERFORMANCE_COLLECTOR_SHA256 }}
           EVIDENCE_ROOT: ${{ vars.EMATE_PERFORMANCE_EVIDENCE_ROOT }}
+          STAGE_DIRECTORY: ${{ steps.stage.outputs.directory }}
         run: |
           set -euo pipefail
           test -n "$COLLECTOR"
@@ -331,7 +333,9 @@ jobs:
             --handoff "$EVIDENCE_ROOT/$GITHUB_SHA" \
             --source-commit "$GITHUB_SHA" \
             --candidate-artifacts "$GITHUB_WORKSPACE/.performance/desktop" \
-            --profile-artifacts "$GITHUB_WORKSPACE/.performance/profile-publication"
+            --profile-artifacts "$GITHUB_WORKSPACE/.performance/profile-publication" \
+            --profile-authorities "$STAGE_DIRECTORY/profile-performance-authorities.json" \
+            --profile-aggregate "$STAGE_DIRECTORY/profile-component-aggregate.json"
 
       - name: Copy only the exact source-partitioned production evidence
         env:

@@ -60,7 +60,7 @@ function inventory() {
   return {
     schema_version: 1,
     components: [{
-      id: '@e-mate/dsh-plugin-example', root: 'packages/dsh-plugin-example',
+      id: '@e-mate/dsh-client-shell', root: 'packages/dsh/profile/plugins/emate-shell',
       kind: 'profile', desktop: 'hot-profile', cli: true,
     }],
   }
@@ -76,19 +76,19 @@ async function profileFixture(root) {
   await json(basePath, base)
   await json(inventoryPath, inventory())
   await json(join(profileRoot, 'dsh/profile/component-inventory.json'), inventory())
-  await file(join(profileRoot, 'dsh-plugin-example/lib/index.js'), 'export {}\n')
+  await file(join(profileRoot, 'emate-shell/lib/client.js'), 'export {}\n')
   const receiptPath = join(root, 'profile-build-receipt.json')
   await createProfileBuildReceipt({
     sourceCommit: SOURCE, baseContract: basePath, inventory: inventoryPath,
     profile: profileRoot, output: receiptPath,
   })
 
-  const packageBytes = Buffer.from('{"name":"@e-mate/dsh-plugin-example"}\n')
+  const packageBytes = Buffer.from('{"name":"@e-mate/dsh-client-shell"}\n')
   const entryBytes = Buffer.from('export {}\n')
   const manifest = {
     schema_version: 1,
-    id: '@e-mate/dsh-plugin-example',
-    slug: 'dsh-plugin-example',
+    id: '@e-mate/dsh-client-shell',
+    slug: 'dsh-client-shell',
     version: '2.0.13',
     kind: 'profile',
     target: null,
@@ -98,23 +98,23 @@ async function profileFixture(root) {
     base_imports: [],
     authority_contract: { effects: [], guards: [] },
     harness_contract: { version: base.harness_version, commit: base.harness_commit },
-    package_entry: 'lib/index.js',
+    package_entry: 'lib/client.js',
     dsh: {},
     total_bytes: packageBytes.length + entryBytes.length,
     files: [
-      { path: 'lib/index.js', bytes: entryBytes.length, sha256: sha256(entryBytes), mode: '0644' },
+      { path: 'lib/client.js', bytes: entryBytes.length, sha256: sha256(entryBytes), mode: '0644' },
       { path: 'package.json', bytes: packageBytes.length, sha256: sha256(packageBytes), mode: '0644' },
     ],
   }
   const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`)
-  const manifestKey = `desktop/profile/components/dsh-plugin-example/v2.0.13/${SOURCE}/manifest.json`
+  const manifestKey = `desktop/profile/components/dsh-client-shell/v2.0.13/${SOURCE}/manifest.json`
   const manifestUrl = `${ORIGIN}/${manifestKey}`
   const reference = {
     id: manifest.id,
     version: manifest.version,
     kind: manifest.kind,
     target: null,
-    profile_path: 'node_modules/@e-mate/dsh-plugin-example',
+    profile_path: 'node_modules/@deepseek-ai/dsh-client-ui-sidebar',
     manifest_url: manifestUrl,
     manifest_bytes: manifestBytes.length,
     manifest_sha256: sha256(manifestBytes),
@@ -130,7 +130,7 @@ async function profileFixture(root) {
     }
   }
   immutable.push(await object('component', manifestKey, `immutable/${manifestKey}`, manifestBytes))
-  for (const [path, bytes] of [['lib/index.js', entryBytes], ['package.json', packageBytes]]) {
+  for (const [path, bytes] of [['lib/client.js', entryBytes], ['package.json', packageBytes]]) {
     const key = `${manifestKey.slice(0, -'manifest.json'.length)}files/${path}`
     immutable.push(await object('component', key, `immutable/${key}`, bytes))
   }
@@ -229,14 +229,21 @@ test('Profile aggregate is recomputed from staged bytes, signed desired states, 
   try {
     const fixture = await profileFixture(root)
     const output = join(root, 'profile-component-aggregate.json')
+    const performanceOutput = join(root, 'profile-performance-authorities.json')
     const aggregate = await createProfileComponentAggregate({
       sourceCommit: SOURCE, ciRunId: '100', profileRunId: '103', releaseVersion: '2.0.13',
       baseContract: fixture.basePath, inventory: fixture.inventoryPath, profile: fixture.profileRoot,
-      profileReceipt: fixture.receiptPath, publicationBundle: fixture.bundle, output,
+      profileReceipt: fixture.receiptPath, publicationBundle: fixture.bundle, output, performanceOutput,
     })
     assert.deepEqual(aggregate.targets.map(item => item.target), TARGETS)
     assert.match(aggregate.aggregate_sha256, /^[0-9a-f]{64}$/u)
-    await file(join(fixture.profileRoot, 'dsh-plugin-example/lib/index.js'), 'mutated\n')
+    const performance = JSON.parse(await readFile(performanceOutput, 'utf8'))
+    assert.deepEqual(performance.targets.map(item => item.client_bundle_sha256), TARGETS.map(() => sha256('export {}\n')))
+    assert.deepEqual(
+      performance.targets.map(item => item.composition_sha256),
+      aggregate.targets.map(item => item.component_aggregate_sha256),
+    )
+    await file(join(fixture.profileRoot, 'emate-shell/lib/client.js'), 'mutated\n')
     await assert.rejects(() => createProfileComponentAggregate({
       sourceCommit: SOURCE, ciRunId: '100', profileRunId: '103', releaseVersion: '2.0.13',
       baseContract: fixture.basePath, inventory: fixture.inventoryPath, profile: fixture.profileRoot,

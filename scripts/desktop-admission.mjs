@@ -23,6 +23,7 @@ const SHA40 = /^[0-9a-f]{40}$/u
 const SHA256 = /^[0-9a-f]{64}$/u
 const RUN_ID = /^[1-9][0-9]*$/u
 const PROFILE_TREE_CONTEXT = Buffer.from('e-mate-staged-profile-tree-v1\0', 'utf8')
+const PROFILE_PUBLICATION_CONTEXT = Buffer.from('e-mate-profile-publication-tree-v1\0', 'utf8')
 const PROFILE_COMPONENT_CONTEXT = Buffer.from('e-mate-profile-component-aggregate-v1\0', 'utf8')
 const PROFILE_AGGREGATE_CONTEXT = Buffer.from('e-mate-profile-aggregate-v1\0', 'utf8')
 const PERFORMANCE_SIGNATURE_CONTEXT = Buffer.from('e-mate-performance-admission-v1\0', 'utf8')
@@ -133,6 +134,10 @@ async function treeEntries(root) {
     throw new Error('admission tree exceeds the accepted file or byte boundary')
   }
   return { entries, bytes }
+}
+
+export async function profilePublicationTreeSha256(root) {
+  return canonicalDigest(PROFILE_PUBLICATION_CONTEXT, (await treeEntries(root)).entries)
 }
 
 async function atomicJson(path, value) {
@@ -287,6 +292,7 @@ export async function createProfileComponentAggregate(options) {
   }
 
   const targets = []
+  const performanceTargets = []
   const consumedObjects = new Set()
   for (let index = 0; index < TARGETS.length; index += 1) {
     const target = TARGETS[index]
@@ -330,6 +336,7 @@ export async function createProfileComponentAggregate(options) {
     }
     consumedObjects.add(immutableRelease.item.url)
 
+    let clientBundleSha256
     for (const reference of release.payload.components) {
       const inventoryComponent = inventoryContract.byId.get(reference.id)
       const expectedTarget = inventoryComponent?.kind === 'platform-profile'
@@ -350,6 +357,11 @@ export async function createProfileComponentAggregate(options) {
       }
       const manifest = parseProfileComponentManifest(await readFile(manifestObject.path), reference, base)
       if (manifest === undefined) throw new Error(`Profile component manifest is invalid: ${target}/${reference.id}`)
+      if (reference.id === '@e-mate/dsh-client-shell') {
+        const client = manifest.files.filter(file => file.path === 'lib/client.js')
+        if (client.length !== 1) throw new Error(`Profile client bundle is missing: ${target}`)
+        clientBundleSha256 = client[0].sha256
+      }
       consumedObjects.add(manifestObject.item.url)
       for (const file of manifest.files) {
         const object = objects.get(componentFileUrl(reference, file.path))
@@ -359,14 +371,24 @@ export async function createProfileComponentAggregate(options) {
         consumedObjects.add(object.item.url)
       }
     }
+    const componentAggregateSha256 = canonicalDigest(PROFILE_COMPONENT_CONTEXT, {
+      target,
+      components: release.payload.components,
+    })
     targets.push({
       target,
       profile_generation: activation.generation,
-      component_aggregate_sha256: canonicalDigest(PROFILE_COMPONENT_CONTEXT, {
-        target,
-        components: release.payload.components,
-      }),
+      component_aggregate_sha256: componentAggregateSha256,
     })
+    if (options.performanceOutput !== undefined) {
+      if (clientBundleSha256 === undefined) throw new Error(`Profile client bundle authority is missing: ${target}`)
+      performanceTargets.push({
+        target,
+        profile_generation: activation.generation,
+        composition_sha256: componentAggregateSha256,
+        client_bundle_sha256: clientBundleSha256,
+      })
+    }
   }
 
   if (consumedObjects.size !== objects.size) {
@@ -392,6 +414,17 @@ export async function createProfileComponentAggregate(options) {
     ...unsigned,
   }
   await atomicJson(options.output, aggregate)
+  if (options.performanceOutput !== undefined) {
+    await atomicJson(options.performanceOutput, {
+      schema_version: 1,
+      document_type: 'emate.profile-performance-authorities',
+      source_commit: options.sourceCommit,
+      base_contract_id: base.id,
+      publication_tree_sha256: canonicalDigest(PROFILE_PUBLICATION_CONTEXT, bundleTree.entries),
+      profile_component_aggregate_sha256: aggregate.aggregate_sha256,
+      targets: performanceTargets,
+    })
+  }
   return aggregate
 }
 
@@ -810,7 +843,7 @@ async function main() {
     'base-contract', 'candidate', 'ci-run-id', 'commit', 'desktop-artifact-id', 'desktop-run-id', 'inventory',
     'metadata', 'out', 'performance-artifact-id', 'performance-bundle', 'performance-run-id', 'profile',
     'profile-aggregate', 'profile-artifact-id', 'profile-receipt', 'profile-release-bundle', 'profile-run-id',
-    'release-version', 'verifier-source',
+    'release-version', 'verifier-source', 'performance-authorities-out',
   ].map(name => [name, { type: 'string' }])) })
   if (command === 'profile-build-receipt') {
     await createProfileBuildReceipt({
@@ -824,6 +857,8 @@ async function main() {
       profile: option(values, 'profile'), inventory: option(values, 'inventory'),
       profileReceipt: option(values, 'profile-receipt'), publicationBundle: option(values, 'profile-release-bundle'),
       baseContract: option(values, 'base-contract'), output: option(values, 'out'),
+      ...(values['performance-authorities-out'] === undefined
+        ? {} : { performanceOutput: option(values, 'performance-authorities-out') }),
     })
   } else if (command === 'performance-summary') {
     await createPerformanceSummary({

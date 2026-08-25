@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { PERFORMANCE_MODEL_ROSTER } from './desktop-admission.mjs'
+import { PERFORMANCE_MODEL_ROSTER, profilePublicationTreeSha256 } from './desktop-admission.mjs'
 import {
   assertAcceptanceOwnerEnvironment,
   assertCapturedSourceLayout,
@@ -12,6 +12,7 @@ import {
   createAcceptancePlan,
   createPairSchedule,
   finalizeAcceptanceCapture,
+  loadProfileAcceptanceAuthority,
 } from './performance-acceptance.mjs'
 
 const sourceCommit = 'e'.repeat(40)
@@ -25,6 +26,47 @@ const ownerEnvironment = {
   GITHUB_SHA: sourceCommit,
   GITHUB_REPOSITORY: 'owner/repository',
   GITHUB_WORKFLOW_REF: 'owner/repository/.github/workflows/desktop-performance.yml@refs/heads/main',
+}
+const profileTargets = ['darwin-arm64', 'darwin-x64', 'win32-x64']
+
+async function profileAuthorityFixture(root) {
+  await mkdir(join(root, 'profile-publication'))
+  const publicationRoot = await realpath(join(root, 'profile-publication'))
+  await writeFile(join(publicationRoot, 'publication-plan.json'), '{}\n')
+  const aggregate = {
+    aggregate_sha256: '1'.repeat(64),
+    inventory_sha256: '2'.repeat(64),
+    staged_profile_tree_sha256: '3'.repeat(64),
+    targets: profileTargets.map((target, index) => ({
+      target,
+      profile_generation: String(index + 4).repeat(64),
+      component_aggregate_sha256: String(index + 7).repeat(64),
+    })),
+  }
+  const aggregatePath = join(root, 'profile-component-aggregate.json')
+  await writeFile(aggregatePath, `${JSON.stringify(aggregate)}\n`)
+  const receipt = {
+    schema_version: 1,
+    document_type: 'emate.profile-performance-authorities',
+    source_commit: sourceCommit,
+    base_contract_id: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
+    publication_tree_sha256: await profilePublicationTreeSha256(publicationRoot),
+    profile_component_aggregate_sha256: aggregate.aggregate_sha256,
+    targets: aggregate.targets.map(target => ({
+      target: target.target,
+      profile_generation: target.profile_generation,
+      composition_sha256: target.component_aggregate_sha256,
+      client_bundle_sha256: 'a'.repeat(64),
+    })),
+  }
+  const authorityPath = join(root, 'profile-performance-authorities.json')
+  await writeFile(authorityPath, `${JSON.stringify(receipt)}\n`)
+  return {
+    publicationRoot,
+    authorityPath,
+    aggregatePath,
+    authority: await loadProfileAcceptanceAuthority({ publicationRoot, authorityPath, aggregatePath, sourceCommit }),
+  }
 }
 
 test('requires the exact protected-main one-shot owner', () => {
@@ -65,7 +107,7 @@ test('pins the closed four-model roster and both Harness identities in the probe
     sourceCommit,
     collectorSha256: 'a'.repeat(64),
     candidateArtifactsRoot: '/candidate',
-    profileArtifactsRoot: '/profile',
+    profileAuthority: { receipt: { targets: [] } },
     scratchRoot: '/scratch',
   })
   assert.equal(plan.harness_commit, 'b2b1650b01f0ee88d81837a9b5c050f9f763f606')
@@ -73,6 +115,8 @@ test('pins the closed four-model roster and both Harness identities in the probe
   assert.deepEqual(plan.models.map(model => model.performance_model), PERFORMANCE_MODEL_ROSTER)
   assert.equal(new Set(plan.models.map(model => model.performance_run_id)).size, 4)
   assert.ok(plan.models.every(model => model.expected_files.length === 18 && model.schedule.length === 30))
+  assert.equal(plan.profile_artifacts_root, undefined)
+  assert.deepEqual(plan.profile_authority, { receipt: { targets: [] } })
 })
 
 test('wires the one-shot producer before the existing exact-85 consumer', async () => {
@@ -82,13 +126,24 @@ test('wires the one-shot producer before the existing exact-85 consumer', async 
   assert.ok(producer > 0 && consumer > producer)
   assert.match(workflow, /EMATE_PERFORMANCE_COLLECTOR_SHA256/u)
   assert.match(workflow, /--handoff "\$EVIDENCE_ROOT\/\$GITHUB_SHA"/u)
+  assert.match(workflow, /--performance-authorities-out "\$STAGE_DIRECTORY\/profile-performance-authorities\.json"/u)
+  assert.match(workflow, /--profile-authorities "\$STAGE_DIRECTORY\/profile-performance-authorities\.json"/u)
   assert.doesNotMatch(workflow.slice(producer, consumer), /--fixture/u)
 })
 
-test('binds installed receipts to the frozen predecessor and downloaded candidate', () => {
+test('binds installed receipts to the frozen predecessor and exact Profile target', () => {
+  const profile = {
+    target: 'darwin-arm64',
+    profile_generation: '4'.repeat(64),
+    composition_sha256: '7'.repeat(64),
+    client_bundle_sha256: 'a'.repeat(64),
+  }
   const candidateRuntime = {
     source_commit: sourceCommit,
     base_contract_id: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
+    profile_generation: profile.profile_generation,
+    composition_sha256: profile.composition_sha256,
+    client_bundle_sha256: profile.client_bundle_sha256,
     desktop_artifact_sha256: '5'.repeat(64),
     desktop_artifact_bytes: 200,
   }
@@ -120,7 +175,7 @@ test('binds installed receipts to the frozen predecessor and downloaded candidat
       },
     },
   }
-  const plan = { source_commit: sourceCommit }
+  const plan = { source_commit: sourceCommit, profile_authority: { receipt: { targets: [profile] } } }
   const candidate = { source_commit: sourceCommit, artifacts: { darwin: { sha256: '5'.repeat(64), bytes: 200 } } }
   assert.doesNotThrow(() => assertInstalledAuthorities(evidence, plan, candidate))
   const relabelled = structuredClone(evidence)
@@ -129,6 +184,45 @@ test('binds installed receipts to the frozen predecessor and downloaded candidat
     () => assertInstalledAuthorities(relabelled, plan, candidate),
     /does not match the frozen artifacts/u,
   )
+  for (const mutate of [
+    value => {
+      value.paths.emate_online.run_receipt.install_receipt.target = 'darwin-x64'
+      value.paths.emate_enterprise_unavailable_valid_cache.run_receipt.install_receipt.target = 'darwin-x64'
+    },
+    value => {
+      value.paths.emate_online.run_receipt.runtime.profile_generation = 'b'.repeat(64)
+      value.paths.emate_enterprise_unavailable_valid_cache.run_receipt.runtime.profile_generation = 'b'.repeat(64)
+    },
+    value => {
+      value.paths.emate_online.run_receipt.runtime.composition_sha256 = 'b'.repeat(64)
+      value.paths.emate_enterprise_unavailable_valid_cache.run_receipt.runtime.composition_sha256 = 'b'.repeat(64)
+    },
+    value => {
+      value.paths.emate_online.run_receipt.runtime.client_bundle_sha256 = 'b'.repeat(64)
+      value.paths.emate_enterprise_unavailable_valid_cache.run_receipt.runtime.client_bundle_sha256 = 'b'.repeat(64)
+    },
+  ]) {
+    const drifted = structuredClone(evidence)
+    mutate(drifted)
+    assert.throws(
+      () => assertInstalledAuthorities(drifted, plan, candidate),
+      /does not match the frozen artifacts/u,
+    )
+  }
+})
+
+test('rejects a Profile root or receipt that drifts from its signed-publication authority', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'e-mate-profile-performance-authority-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const fixture = await profileAuthorityFixture(root)
+  assert.equal(fixture.authority.receipt.targets.length, 3)
+  await writeFile(join(fixture.publicationRoot, 'publication-plan.json'), '{"drift":true}\n')
+  await assert.rejects(() => loadProfileAcceptanceAuthority({
+    publicationRoot: fixture.publicationRoot,
+    authorityPath: fixture.authorityPath,
+    aggregatePath: fixture.aggregatePath,
+    sourceCommit,
+  }), /does not match the signed Profile publication aggregate/u)
 })
 
 test('accepts only one manifest plus the exact 17 source artifacts', async t => {
@@ -138,7 +232,7 @@ test('accepts only one manifest plus the exact 17 source artifacts', async t => 
     sourceCommit,
     collectorSha256: 'a'.repeat(64),
     candidateArtifactsRoot: '/candidate',
-    profileArtifactsRoot: '/profile',
+    profileAuthority: { receipt: { targets: [] } },
     scratchRoot: root,
   })
   for (const name of plan.models[0].expected_files) await writeFile(join(root, name), '{}\n')
@@ -153,9 +247,7 @@ test('assembles four fixture-shaped capture trees into the exact production hand
   const scratchRoot = join(root, 'scratch')
   await mkdir(join(scratchRoot, 'models'), { recursive: true })
   const candidateRoot = join(root, 'candidate')
-  const profileRoot = join(root, 'profile')
   await mkdir(candidateRoot)
-  await mkdir(profileRoot)
   await writeFile(join(candidateRoot, 'desktop-candidate.json'), `${JSON.stringify({
     source_commit: sourceCommit,
     artifacts: {
@@ -164,11 +256,12 @@ test('assembles four fixture-shaped capture trees into the exact production hand
     },
   })}\n`)
   const collectorSha256 = 'a'.repeat(64)
+  const profileFixture = await profileAuthorityFixture(root)
   const plan = createAcceptancePlan({
     sourceCommit,
     collectorSha256,
     candidateArtifactsRoot: candidateRoot,
-    profileArtifactsRoot: profileRoot,
+    profileAuthority: profileFixture.authority,
     scratchRoot,
   })
   const json = (path, value) => writeFile(path, `${JSON.stringify(value, null, 2)}\n`)
@@ -274,10 +367,10 @@ test('assembles four fixture-shaped capture trees into the exact production hand
           ? 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0'
           : 'e-mate-desktop-profile-v6-dsh-2bc16230975f',
         profile_generation: candidate
-          ? 'candidate-generation'
+          ? plan.profile_authority.receipt.targets[0].profile_generation
           : 'd8769641262169a3b53369030a236f573e71499c22893d279e0a0c42df20ac93',
-        composition_sha256: candidate ? '1'.repeat(64) : '2'.repeat(64),
-        client_bundle_sha256: candidate ? '3'.repeat(64) : '4'.repeat(64),
+        composition_sha256: candidate ? plan.profile_authority.receipt.targets[0].composition_sha256 : '2'.repeat(64),
+        client_bundle_sha256: candidate ? plan.profile_authority.receipt.targets[0].client_bundle_sha256 : '4'.repeat(64),
         desktop_artifact_sha256: candidate
           ? '5'.repeat(64)
           : 'd2cb459d2e8648213e0b38aa6e210c1a727937be77993b2493e2a7848d5d3b2e',

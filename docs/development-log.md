@@ -2484,3 +2484,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有 exact-base源码diff与无密钥合同测试；没有读取凭据、调用付费模型、dispatch workflow、安装候选、生成真实 `performance_run_id`、签名、上传或生产写入。
 - Remaining blockers: self-hosted runner必须提供外部 hash-pinned probe，实际驱动exact安装态2.0.12与candidate、读取native Session/request、真实renderer paint及model-gateway UsageStore/enterprise receipts，并通过受保护环境配置 `EMATE_PERFORMANCE_COLLECTOR(_SHA256)`；该外部 authority hook尚未在本地存在或运行，故四模型production evidence、admission和发布继续OPEN。
 - Next exact action: 主代理复核本最小owner提交并合入protected main；runner owner安装/审查probe后才可手工dispatch performance workflow，任何authority缺失保持fail closed。
+
+## 2026-08-26 · 2.0.13 TTFT v2 Profile 安装权威绑定修订
+
+- Goal checkpoint: 主复核发现首版 acceptance owner 只把 Profile publication root 交给 probe，终态仅要求候选 `profile_generation` 非空，未将 installed runtime 绑定到三目标 signed Profile publication；本条只关闭该 fail-closed 缺口，不采集模型、不发布。
+- Frozen baseline / current HEAD: 修订基于独立提交 `c859ca9b19d29e9e470ffc75c508f0474eb87b18`；源码基线仍为 protected main exact `eb372d715c9355fcca16fdc61c615867490e34f1`，2.0.12 三目标 package/Profile generation 冻结值不变。
+- Binding documents read: 复核根 `AGENTS.md`、ponytail skill、`target-contract.md`、`performance-and-acceptance.md`、`slices/2.0.13.md`、上一条完整记录、既有 `desktop-admission` Profile aggregate parser、Profile release/component manifest consumer及 performance owner直接调用者。
+- Inspected native seam: `createProfileComponentAggregate()` 已完整验签三目标 desired state，并校验 inventory、Profile build receipt、immutable/active release一致性、全部 component manifest/file closure及无多余文件；现有四字段 aggregate不能新增客户端 digest，否则会破坏 updater与外部签名 schema。Shell component manifest 已由 signed desired state固定，`lib/client.js` 文件条目提供所需真实摘要。
+- Experiment or why unnecessary: 沿同一既有解析循环生成 acceptance-only派生 receipt，不新增 Profile格式、线上 aggregate或运行时事件；receipt绑定 publication tree、既有 aggregate、三目标 generation/component aggregate和 Shell client bundle SHA。owner 在启动 probe 前和装配 handoff 前重验 root/receipt/aggregate，并用目标行校验两条 candidate installed receipt。
+- Decision and forbidden alternatives: `composition_sha256` 对应既有 target `component_aggregate_sha256`，`client_bundle_sha256` 对应 signed Shell manifest 的唯一 `lib/client.js`；baseline继续只匹配冻结三目标 generation/package。禁止相信 probe自填 generation/digest、猜测 publication文件名、扩展线上 aggregate、兼容缺字段 evidence或把 receipt当成发布签名。
+- Changed scope: 最小修改既有 admission parser/测试、acceptance owner/测试和 performance workflow参数，修订两份绑定合同并append本记录；未改 Desktop/Profile updater schema、普通聊天/runtime hot path、模型header/路由、外部 signer、R2/Feed/desired state或用户数据。
+- Verification commands and results: bundled Node `--check`通过；合并后的 `test:performance:parity` 为 `18/18`，`desktop-admission.test.mjs` 为 `8/8`，覆盖 signed desired state派生、publication root漂移、错误 target/generation/composition/client digest及四模型17→21→exact 85装配；`test:impact` 为 `35 passed / 5 Harness-toolchain skips / 0 failed`，`git diff --check`通过。
+- Immutable evidence / receipt: 当前只有源码diff和无密钥合同fixture；未读取凭据、调用模型、dispatch workflow、安装候选、签名、上传或改生产状态。
+- Remaining blockers: 受保护 self-hosted runner仍必须提供已审查且SHA锁定的外部 probe，从真实 installed 2.0.12/candidate和 enterprise UsageStore取得 renderer/provider/lease authority；本修订只保证错误Profile无法进入aggregate，不能替代真实采集。
+- Next exact action: 主代理复核追加提交并合入 protected main；只允许合并后workflow重新派生Profile receipt并启动一次真实采集，旧 owner输出继续作废。
