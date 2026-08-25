@@ -2162,3 +2162,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 本条只有 source-fixed Git 提交证据；没有生成、签名、安装、上传、激活或发布任何制品。
 - Remaining blockers: 主聚合需复核并合入本规则提交；每个后续插件切片仍须分别留下原地热替换证据、永久插件映射与最窄回归，正式版本仍按原安装态和发布门禁执行。
 - Next exact action: 运行最窄合同测试与 diff 检查，提交独立规则变更并回传 SHA；主代理合入后按新内循环继续各切片，不触发生产链。
+
+## 2026-08-25 · 2.0.13 DSH 源码门禁过期合同修复
+
+- Goal checkpoint: 本修复只恢复最终 P0/TQ 候选的 DSH 源码门禁，不改变产品功能、Owner 或发布状态。
+- Frozen baseline / current HEAD: 修复基于事故聚合 `6543ba2a232a9110aab4242a6f25ae784a18ceb0`；Base 为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`，Harness 为 `0.1.0-rc.7` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Binding documents read: 核对根 `AGENTS.md`、`docs/target-contract.md`、最新 development log、Identity typed RPC 实现和 managed Profile 物理化测试。
+- Inspected native seam: 搜索 Provider/模型策略继续由 `profile/cordis.patch.yml` 与 model-policy 所有，Shell client bundle 不应复制该策略字符串；`/emate.identity` 已在唯一 RPC 边界把未预期异常转成 `{ok:false,error:{code:'internal'}}` 并隐藏内部原因。
+- Experiment or why unnecessary: 本次只修复与现有已证明运行时合同不一致的测试断言，没有新的插件行为或未知 seam，因此不定义动态 Creation Mode Package。
+- Decision and forbidden alternatives: 将 Shell 中的 Provider 字符串断言改成负向边界；验证码与 bootstrap 的内部失败改验 typed envelope 和不泄漏内部诊断。禁止为让旧断言通过而把模型策略复制进 UI，或重新让 RPC reject 原始异常。
+- Changed scope: 仅修改 `packages/dsh/test/e-mate.test.mjs` 三处过期断言并追加本记录；未改生产源码、Profile、Desktop、Gateway、凭据、更新或发布链。
+- Verification commands and results: 在 `packages/dsh` 使用 Node `24.19.0` 执行 `node --test test/e-mate.test.mjs test/identity-lifecycle.test.mjs test/legacy-migration.test.mjs`，`52/52` 通过；`git diff --check` 通过。
+- Immutable evidence / receipt: 本条只有 source-fixed Git 证据；没有生成、签名、安装、上传、激活或发布任何制品。
+- Remaining blockers: 仍须修正 S27/S34 文档中的旧 Harness `2bc162...` 身份并记录 `b2b1650...` bounded diff；最终 P0/TQ 安装态、性能、更新、回滚和生产回读仍未关闭。
+- Next exact action: 独立提交测试合同修复；随后对 Harness/Base 身份文档和首次 Creation Mode 运行态证据做单独 append-only 修正，再重跑聚合源码门禁。

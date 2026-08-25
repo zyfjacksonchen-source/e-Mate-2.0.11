@@ -626,7 +626,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(client, /data-chain-overlay-fallback/)
     assert.match(client, /ctx\.slots\.inject\(["']shell\.overlay["']/)
     assert.match(client, /welcome-notice/)
-    assert.match(client, /deepseek-official/)
+    assert.doesNotMatch(client, /deepseek-official/)
     assert.match(client, /priority:\s*-1/)
     assert.match(client, /e-mate-identity-gate/)
     assert.match(client, /e-mate-user-center/)
@@ -3004,10 +3004,10 @@ test('identity agreements are immutable, explicit, and use the target Connection
   const challenge = await configuredRegistration('verification.issue', { purpose: 'registration' })
   assert.equal(challenge.value.image_data_url, captchaImage)
   challengeExpiresAt = '2020-01-01T00:00:00.000Z'
-  await assert.rejects(
-    configuredRegistration('verification.issue', { purpose: 'registration' }),
-    /registration challenge is invalid/,
-  )
+  const invalidChallenge = await configuredRegistration('verification.issue', { purpose: 'registration' })
+  assert.equal(invalidChallenge.ok, false)
+  assert.equal(invalidChallenge.error.code, 'internal')
+  assert.doesNotMatch(invalidChallenge.error.message, /registration challenge is invalid/)
   challengeExpiresAt = '2030-01-01T00:00:00.000Z'
   const registered = await configuredRegistration('session.register', {
     account: ' test.user ',
@@ -3088,10 +3088,10 @@ test('identity agreements are immutable, explicit, and use the target Connection
     providerLegalName: '亦芯测试主体',
     identityProvider: { bootstrap: async () => ({ authenticated: true, workspace_unlocked: false }) },
   })
-  await assert.rejects(
-    invalidBootstrap('identity.bootstrap', {}),
-    /identity bootstrap is invalid/,
-  )
+  const invalidBootstrapResult = await invalidBootstrap('identity.bootstrap', {})
+  assert.equal(invalidBootstrapResult.ok, false)
+  assert.equal(invalidBootstrapResult.error.code, 'internal')
+  assert.doesNotMatch(invalidBootstrapResult.error.message, /identity bootstrap is invalid/)
 })
 
 test('enterprise identity provider maps target credentials and the production HTTP contracts without exposing tokens', async () => {
