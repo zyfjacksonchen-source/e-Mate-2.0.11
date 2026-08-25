@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { PERFORMANCE_MODEL_ROSTER, profilePublicationTreeSha256 } from './desktop-admission.mjs'
 import {
@@ -12,6 +13,7 @@ import {
   createAcceptancePlan,
   createPairSchedule,
   finalizeAcceptanceCapture,
+  loadCollectorProvenance,
   loadProfileAcceptanceAuthority,
 } from './performance-acceptance.mjs'
 
@@ -28,6 +30,10 @@ const ownerEnvironment = {
   GITHUB_WORKFLOW_REF: 'owner/repository/.github/workflows/desktop-performance.yml@refs/heads/main',
 }
 const profileTargets = ['darwin-arm64', 'darwin-x64', 'win32-x64']
+const collectorProvenance = {
+  source_sha256: 'a'.repeat(64),
+  installed_sha256: 'a'.repeat(64),
+}
 
 async function profileAuthorityFixture(root) {
   await mkdir(join(root, 'profile-publication'))
@@ -106,6 +112,7 @@ test('pins the closed four-model roster and both Harness identities in the probe
   const plan = createAcceptancePlan({
     sourceCommit,
     collectorSha256: 'a'.repeat(64),
+    collectorProvenance,
     candidateArtifactsRoot: '/candidate',
     profileAuthority: { receipt: { targets: [] } },
     scratchRoot: '/scratch',
@@ -114,6 +121,7 @@ test('pins the closed four-model roster and both Harness identities in the probe
   assert.equal(plan.baseline_harness_commit, '2bc16230975f6cf02aa1b283b1f86de44007b059')
   assert.deepEqual(plan.models.map(model => model.performance_model), PERFORMANCE_MODEL_ROSTER)
   assert.equal(new Set(plan.models.map(model => model.performance_run_id)).size, 4)
+  assert.deepEqual(plan.collector_provenance, collectorProvenance)
   assert.ok(plan.models.every(model => model.expected_files.length === 18 && model.schedule.length === 30))
   assert.equal(plan.profile_artifacts_root, undefined)
   assert.deepEqual(plan.profile_authority, { receipt: { targets: [] } })
@@ -125,10 +133,31 @@ test('wires the one-shot producer before the existing exact-85 consumer', async 
   const consumer = workflow.indexOf('Copy only the exact source-partitioned production evidence')
   assert.ok(producer > 0 && consumer > producer)
   assert.match(workflow, /EMATE_PERFORMANCE_COLLECTOR_SHA256/u)
+  assert.match(workflow, /--collector-source "\$COLLECTOR_SOURCE"/u)
   assert.match(workflow, /--handoff "\$EVIDENCE_ROOT\/\$GITHUB_SHA"/u)
   assert.match(workflow, /--performance-authorities-out "\$STAGE_DIRECTORY\/profile-performance-authorities\.json"/u)
   assert.match(workflow, /--profile-authorities "\$STAGE_DIRECTORY\/profile-performance-authorities\.json"/u)
   assert.doesNotMatch(workflow.slice(producer, consumer), /--fixture/u)
+})
+
+test('binds the runner-installed collector to the protected-main source bytes', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'e-mate-performance-provenance-')))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const source = fileURLToPath(new URL('./performance-acceptance-probe.mjs', import.meta.url))
+  const installed = join(root, 'installed.mjs')
+  await copyFile(source, installed)
+  const digest = sha256(await readFile(source))
+  assert.deepEqual(await loadCollectorProvenance({
+    sourcePath: source,
+    installedPath: installed,
+    configuredSha256: digest,
+  }), { source_sha256: digest, installed_sha256: digest })
+  await writeFile(installed, '#!/usr/bin/env node\n// drift\n')
+  await assert.rejects(loadCollectorProvenance({
+    sourcePath: source,
+    installedPath: installed,
+    configuredSha256: digest,
+  }), /exact protected-main source bytes/u)
 })
 
 test('binds installed receipts to the frozen predecessor and exact Profile target', () => {
@@ -231,6 +260,7 @@ test('accepts only one manifest plus the exact 17 source artifacts', async t => 
   const plan = createAcceptancePlan({
     sourceCommit,
     collectorSha256: 'a'.repeat(64),
+    collectorProvenance,
     candidateArtifactsRoot: '/candidate',
     profileAuthority: { receipt: { targets: [] } },
     scratchRoot: root,
@@ -260,6 +290,7 @@ test('assembles four fixture-shaped capture trees into the exact production hand
   const plan = createAcceptancePlan({
     sourceCommit,
     collectorSha256,
+    collectorProvenance,
     candidateArtifactsRoot: candidateRoot,
     profileAuthority: profileFixture.authority,
     scratchRoot,

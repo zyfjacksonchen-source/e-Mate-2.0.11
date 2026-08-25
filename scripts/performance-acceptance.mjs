@@ -195,10 +195,37 @@ export function createAcceptancePlan(input) {
     harness_commit: CANDIDATE_HARNESS_COMMIT,
     baseline_harness_commit: BASELINE_HARNESS_COMMIT,
     collector_sha256: input.collectorSha256,
+    collector_provenance: input.collectorProvenance,
     candidate_artifacts_root: input.candidateArtifactsRoot,
     profile_authority: input.profileAuthority,
     scratch_root: input.scratchRoot,
     models,
+  }
+}
+
+export async function loadCollectorProvenance(input) {
+  if (![input.sourcePath, input.installedPath].every(isAbsolute)
+    || !SHA256.test(input.configuredSha256)) {
+    throw new Error('collector provenance requires absolute paths and one SHA-256')
+  }
+  await Promise.all([
+    boundedRegularFile(input.sourcePath, 'protected-main collector source'),
+    boundedRegularFile(input.installedPath, 'runner-installed collector'),
+  ])
+  const [sourcePath, installedPath, sourceSha256, installedSha256] = await Promise.all([
+    realpath(input.sourcePath),
+    realpath(input.installedPath),
+    fileSha256(input.sourcePath),
+    fileSha256(input.installedPath),
+  ])
+  const protectedSource = await realpath(new URL('./performance-acceptance-probe.mjs', import.meta.url))
+  if (sourcePath !== protectedSource || sourcePath !== input.sourcePath || installedPath !== input.installedPath
+    || installedSha256 !== input.configuredSha256 || sourceSha256 !== installedSha256) {
+    throw new Error('runner-installed collector is not the exact protected-main source bytes')
+  }
+  return {
+    source_sha256: sourceSha256,
+    installed_sha256: installedSha256,
   }
 }
 
@@ -250,7 +277,7 @@ export async function loadProfileAcceptanceAuthority(input) {
 
 async function runCollector(executable, planPath) {
   await new Promise((resolveRun, rejectRun) => {
-    const child = spawn(executable, ['--plan', planPath], {
+    const child = spawn(process.execPath, [executable, '--plan', planPath], {
       shell: false,
       stdio: 'ignore',
       env: Object.fromEntries([
@@ -430,6 +457,7 @@ async function main() {
   const { values } = parseArgs({
     options: {
       collector: { type: 'string' },
+      'collector-source': { type: 'string' },
       'collector-sha256': { type: 'string' },
       scratch: { type: 'string' },
       handoff: { type: 'string' },
@@ -442,7 +470,7 @@ async function main() {
     strict: true,
   })
   for (const key of [
-    'collector', 'collector-sha256', 'scratch', 'handoff', 'source-commit', 'candidate-artifacts',
+    'collector', 'collector-source', 'collector-sha256', 'scratch', 'handoff', 'source-commit', 'candidate-artifacts',
     'profile-artifacts', 'profile-authorities', 'profile-aggregate',
   ]) {
     if (values[key] === undefined) throw new Error(`--${key} is required`)
@@ -451,15 +479,15 @@ async function main() {
     throw new Error('source commit or collector digest is invalid')
   }
   assertAcceptanceOwnerEnvironment(process.env, values['source-commit'])
-  if (![values.collector, values.scratch, values.handoff, values['candidate-artifacts'], values['profile-artifacts'],
+  if (![values.collector, values['collector-source'], values.scratch, values.handoff, values['candidate-artifacts'], values['profile-artifacts'],
     values['profile-authorities'], values['profile-aggregate']].every(isAbsolute)) {
     throw new Error('collector and acceptance paths must be absolute')
   }
-  await boundedRegularFile(values.collector, 'performance collector')
-  if (await realpath(values.collector) !== values.collector
-    || await fileSha256(values.collector) !== values['collector-sha256']) {
-    throw new Error('performance collector is not the exact configured executable')
-  }
+  const collectorProvenance = await loadCollectorProvenance({
+    sourcePath: values['collector-source'],
+    installedPath: values.collector,
+    configuredSha256: values['collector-sha256'],
+  })
   const candidateArtifactsRoot = await canonicalDirectory(values['candidate-artifacts'], 'candidate artifacts')
   const profileAuthority = await loadProfileAcceptanceAuthority({
     publicationRoot: values['profile-artifacts'],
@@ -475,6 +503,7 @@ async function main() {
   const plan = createAcceptancePlan({
     sourceCommit: values['source-commit'],
     collectorSha256: values['collector-sha256'],
+    collectorProvenance,
     candidateArtifactsRoot,
     profileAuthority,
     scratchRoot,

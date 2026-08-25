@@ -2498,3 +2498,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有源码diff和无密钥合同fixture；未读取凭据、调用模型、dispatch workflow、安装候选、签名、上传或改生产状态。
 - Remaining blockers: 受保护 self-hosted runner仍必须提供已审查且SHA锁定的外部 probe，从真实 installed 2.0.12/candidate和 enterprise UsageStore取得 renderer/provider/lease authority；本修订只保证错误Profile无法进入aggregate，不能替代真实采集。
 - Next exact action: 主代理复核追加提交并合入 protected main；只允许合并后workflow重新派生Profile receipt并启动一次真实采集，旧 owner输出继续作废。
+
+## 2026-08-26 · 2.0.13 TTFT v2 external probe 源码 provenance 与失败关闭骨架
+
+- Goal checkpoint: 在 acceptance one-shot owner 已绑定 runner collector hash 但仓库没有该 hash 对应源码的情况下，补入受版本控制的 Node 24 probe 实体，并关闭 protected-main source bytes、runner 安装副本与受保护配置 digest 的同一性；不运行模型、不读取凭据、不安装、dispatch、推送或发布。
+- Frozen baseline / current HEAD: 独立 worktree `codex/external-perf-probe-impl` 从 `feat/2.0.13-native-perf-producer` exact `cf678e019708bbb6706fc236bebdde7673265410` 创建，包含 one-shot owner `c859ca9b19d29e9e470ffc75c508f0474eb87b18` 和 Profile authority 修订；Base/Harness/Profile 身份未改。
+- Binding documents read: 完整读取根 `AGENTS.md`、`target-contract.md`、`plugin-contracts.md`、`performance-and-acceptance.md`、`slices/2.0.13.md`、上一条完整日志和 ponytail skill；追踪 owner/workflow、assembler/verifier、pinned DSH `complex-history.perf.ts` 双 rAF、release-health 隔离启动和 Analytics `/v1/usage/events`。
+- Inspected native seam: 安装态 renderer 可通过 pre-bootstrap CDP 在同一 `performance.now()` 时钟观测 send/chunk/text/paint；enterprise usage API有分页 ledger，但当前 pinned Desktop/DSH 未向外部 Node 暴露可与其 exact join 的原生 durable/live Session/request/Tool read-only authority。缺该 authority 时，外部 probe 无法诚实产生17个生产 source artifacts。
+- Experiment or why unnecessary: 新增纯标准库 probe/测试，正反例覆盖同钟双 rAF、Usage extra/missing/ambiguous exact join、域分离 hash、offline-valid-cache 边界、owner-only config、无正文/密钥字段与 source/installed digest 漂移。没有启动 Desktop、Provider 或外部服务。
+- Decision and forbidden alternatives: owner 现在同时计算 protected-main source 与 runner copy digest，并要求二者等于配置 SHA；私有 plan记录 source/installed digest。probe只允许固定 OS 保护路径中的 keychain/local-secret-broker引用，不能从 workflow env/plan取得凭据。因原生 Session authority 缺失，main 在 preflight 后明确非零退出；禁止用 DOM正文、时间窗口猜测、私有日志或 fixture 冒充 production pass。
+- Changed scope: 新增 `scripts/performance-acceptance-probe.mjs`和一个窄测试；修改既有 owner/测试、performance workflow、根测试命令和两份性能绑定文档并 append 本记录。未改 Desktop/DSH/Profile/Session/API/LLM热路径、事件/存储/协议/Tool/header、模型路由、R2/Feed/desired state或用户数据。
+- Verification commands and results: bundled Node `v24.19.0 --test scripts/performance-acceptance-probe.test.mjs` 为 `5/5`；两个新增/修改脚本 `node --check` 通过；`git diff --check` 通过。完整 `performance-acceptance.test.mjs` 在该独立 worktree 因禁止安装且缺现有 devDependency `fflate` 未运行，不能记为通过。
+- Immutable evidence / receipt: 只有源码 diff 和无密钥合同测试；没有 collector 安装副本、runner config、Session/Provider/paint source、真实 `performance_run_id`、安装态或 production evidence。
+- Remaining blockers: 需要在 pinned DSH 已有 Session authority 上提供最小 runner-private read-only exporter，返回当前唯一 Session 的 request/header、Tool start/result和provider关联ID，且必须有受审源码/runner scope；随后 probe 才能实现 exact 2.0.12→2.0.13 隔离启动、30×4真实采集、17源文件关闭与完整测试。当前生产性能门保持 OPEN。
+- Next exact action: 主代理复核并移植本提交；先决定由 DSH 原生 Session export seam 还是既有 runner-private joined exporter承担只读关联，禁止在 Desktop hot path新增 listener。接口落地后补全 probe runtime并在 protected runner安装同字节副本，再进行首次真实采集。
