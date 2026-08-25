@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, rmdir } from 'node:fs/promises'
-import { arch, homedir } from 'node:os'
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises'
+import { arch, homedir, hostname } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
@@ -39,9 +39,17 @@ const BASELINE_INSTALLS = Object.freeze({
 const BASELINE_SOURCE_COMMIT = '9fbc70ad56c4f263dfa0aa0085f19eded134e32d'
 const BASELINE_BASE_CONTRACT = 'e-mate-desktop-profile-v6-dsh-2bc16230975f'
 const CANDIDATE_BASE_CONTRACT = 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0'
+const MACOS_BUNDLE_ID = 'net.ecoremedia.e-mate'
 const LOOPBACK_ORIGIN = 'http://127.0.0.1:3080'
 const BROKER_ACTIONS = new Set(['usage-snapshot', 'auth-available', 'auth-unavailable', 'status'])
 const MAX_BROKER_BYTES = 1024 * 1024
+const PATHS = Object.freeze(['baseline', 'emate_online', 'emate_enterprise_unavailable_valid_cache'])
+const PROMPTS = Object.freeze({
+  seed: index => `Context warmup ${String(index)}. Reply with exactly OK.`,
+  'short-text': 'Reply with exactly OK.',
+  'history-20': 'Reply with exactly OK.',
+  'read-only-tool': 'First reply checking. Then call get_goal exactly once. Finally reply done.',
+})
 
 const canonical = value => Array.isArray(value)
   ? `[${value.map(canonical).join(',')}]`
@@ -127,6 +135,17 @@ export async function resolveRunnerBroker(configPath, reference) {
     throw new Error('runner broker must be one canonical owner-matched 0700 executable')
   }
   return path
+}
+
+async function resolveAcceptancePreload(configPath, path) {
+  if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('offline-control status returned no absolute preload path')
+  const [configInfo, info] = await Promise.all([lstat(configPath), lstat(path)])
+  const resolved = resolve(path)
+  if (!info.isFile() || info.isSymbolicLink() || await realpath(resolved) !== resolved
+    || info.uid !== configInfo.uid || (info.mode & 0o077) !== 0) {
+    throw new Error('acceptance-only NODE_OPTIONS preload must be canonical, owner-matched, and private')
+  }
+  return resolved
 }
 
 export async function runRunnerBroker(configPath, reference, action, input, options = {}) {
@@ -355,9 +374,9 @@ export function buildCdpPreBootstrapScript() {
       return result;
     };
     const api = Object.freeze({
-      selfTest: () => ({
+      selfTest: (requireDom = true) => ({
         transport: globalThis.WebSocket !== NativeWebSocket ? 'mux-string-server-request-v1' : null,
-        dom: exactDom() && 'conversation-scroll/composer-seat/send-structural-v1',
+        dom: requireDom ? exactDom() && 'conversation-scroll/composer-seat/send-structural-v1' : 'deferred-until-owned-session',
       }),
       beginSample,
       finishSample,
@@ -404,11 +423,15 @@ export function strictJoinUsageAttempts(input) {
   if ([...beforeIds].some(eventId => !afterIds.has(eventId))) {
     throw new Error('usage authority cursor history changed during the sample')
   }
+  if (delta.some(event => typeof event.taskId !== 'string' || event.taskId.length === 0)) {
+    throw new Error('usage authority contains an event without one task identity')
+  }
   const relevant = delta.filter(event => !event.taskId.startsWith('auditreceipt_')
     && !event.taskId.startsWith('harness:'))
   if (relevant.length !== input.expected_attempts * 2
-    || relevant.some(event => event.userId !== input.account || event.modelId !== input.model
-      || event.providerId !== input.provider || typeof event.taskId !== 'string' || event.taskId.length === 0
+    || new Set(relevant.map(event => event.userId)).size !== 1
+    || relevant.some(event => typeof event.userId !== 'string' || event.userId.length === 0
+      || event.modelId !== input.model || event.providerId !== input.provider
       || typeof event.traceId !== 'string' || event.traceId.length === 0
       || !Number.isFinite(Date.parse(event.occurredAt)))) {
     throw new Error('usage authority contains extra or missing events for the dedicated account')
@@ -547,7 +570,6 @@ export function deriveAuthoritySample(input) {
   }
 
   const joined = strictJoinUsageAttempts({
-    account: input.account,
     model: input.model,
     provider: input.provider,
     performance_run_id: input.performance_run_id,
@@ -669,13 +691,16 @@ async function verifyDarwinApp(appPath, target, run = command) {
     throw new Error('performance application must be one canonical app bundle')
   }
   const executable = await regularFileIdentity(join(resolved, 'Contents/MacOS/e-Mate'), 'installed e-Mate executable')
-  await run('/usr/bin/plutil', ['-lint', join(resolved, 'Contents/Info.plist')])
+  const plist = join(resolved, 'Contents/Info.plist')
+  await run('/usr/bin/plutil', ['-lint', plist])
+  const bundleId = (await run('/usr/bin/plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', plist])).trim()
+  if (bundleId !== MACOS_BUNDLE_ID) throw new Error('installed e-Mate has the wrong application bundle identifier')
   await run('/usr/bin/lipo', [executable.path, '-verify_arch', target === 'darwin-arm64' ? 'arm64' : 'x86_64'])
   await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--verbose=2', resolved])
-  return { app_path: resolved, executable }
+  return { app_path: resolved, executable, bundle_id: bundleId }
 }
 
-function assertInstalledReceipt(receipt, expected, executable, target) {
+function assertInstalledReceipt(receipt, expected, application, target) {
   if (receipt?.kind !== 'installed-runtime-receipt'
     || receipt.runtime?.product !== 'e-mate-desktop'
     || receipt.runtime?.product_version !== expected.version
@@ -686,11 +711,11 @@ function assertInstalledReceipt(receipt, expected, executable, target) {
     || receipt.runtime?.desktop_artifact_bytes !== expected.bytes
     || receipt.install_receipt?.installation_kind !== 'installed-application'
     || receipt.install_receipt?.target !== target
-    || receipt.install_receipt?.bundle_id !== 'com.emate.desktop'
+    || receipt.install_receipt?.bundle_id !== application.bundle_id
     || receipt.install_receipt?.package_sha256 !== expected.sha256
     || receipt.install_receipt?.package_bytes !== expected.bytes
-    || receipt.install_receipt?.installed_executable_sha256 !== executable.sha256
-    || receipt.install_receipt?.installed_executable_bytes !== executable.bytes) {
+    || receipt.install_receipt?.installed_executable_sha256 !== application.executable.sha256
+    || receipt.install_receipt?.installed_executable_bytes !== application.executable.bytes) {
     throw new Error('installed runtime receipt does not match the exact application bytes')
   }
   return receipt
@@ -740,7 +765,7 @@ export async function prepareDarwinRuntimeLane(plan, config, options = {}) {
         version: '2.0.12', source_commit: BASELINE_SOURCE_COMMIT, base_contract_id: BASELINE_BASE_CONTRACT,
         profile_generation: predecessor.profile_generation, sha256: predecessor.sha256, bytes: predecessor.bytes,
       },
-      baselineApp.executable,
+      baselineApp,
       target,
     )
 
@@ -788,7 +813,7 @@ export async function prepareDarwinRuntimeLane(plan, config, options = {}) {
     const candidateReceipt = {
       kind: 'installed-runtime-receipt', runtime,
       install_receipt: {
-        installation_kind: 'installed-application', target, bundle_id: 'com.emate.desktop',
+        installation_kind: 'installed-application', target, bundle_id: candidateApp.bundle_id,
         package_sha256: artifact.sha256, package_bytes: artifact.bytes,
         installed_executable_sha256: candidateApp.executable.sha256,
         installed_executable_bytes: candidateApp.executable.bytes,
@@ -798,6 +823,7 @@ export async function prepareDarwinRuntimeLane(plan, config, options = {}) {
     return {
       target,
       work,
+      launch_sequence: 0,
       baseline: { ...baselineApp, receipt: baselineReceipt },
       candidate: { ...candidateApp, receipt: candidateReceipt },
       cleanup: async () => { await rm(work, { recursive: true, force: true }) },
@@ -884,7 +910,7 @@ async function bootstrapCdp(port) {
       const result = await cdp.call('Runtime.evaluate', {
         expression: `(() => {
           if (document.readyState !== 'complete' || globalThis.__ematePerformanceProbe === undefined) return null;
-          try { return globalThis.__ematePerformanceProbe.selfTest(); }
+          try { return globalThis.__ematePerformanceProbe.selfTest(false); }
           catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
         })()`,
         returnByValue: true,
@@ -892,7 +918,7 @@ async function bootstrapCdp(port) {
       const value = result?.result?.value
       if (value?.error !== undefined) throw new Error(`installed renderer bootstrap failed: ${value.error}`)
       if (value?.transport === 'mux-string-server-request-v1'
-        && value?.dom === 'conversation-scroll/composer-seat/send-structural-v1') return cdp
+        && value?.dom === 'deferred-until-owned-session') return cdp
       await delay(100)
     }
     throw new Error('installed renderer did not satisfy the CDP bootstrap self-test in 30 seconds')
@@ -905,15 +931,24 @@ async function bootstrapCdp(port) {
 export async function launchDarwinRuntime(lane, arm) {
   const selected = arm === 'baseline' ? lane.baseline : arm === 'candidate' ? lane.candidate : undefined
   if (selected === undefined) throw new Error('unknown installed runtime arm')
+  lane.launch_sequence += 1
   const home = join(lane.work, `${arm}-dsh-home`)
-  const userData = join(lane.work, `${arm}-user-data`)
-  await Promise.all([mkdir(home, { mode: 0o700 }), mkdir(userData, { mode: 0o700 })])
+  const userData = join(lane.work, `${arm}-user-data-${String(lane.launch_sequence)}`)
+  await Promise.all([mkdir(home, { mode: 0o700, recursive: true }), mkdir(userData, { mode: 0o700 })])
   const allowed = Object.fromEntries([
     'HOME', 'LANG', 'LC_ALL', 'LOGNAME', 'PATH', 'SHELL', 'TMPDIR', 'USER',
   ].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]))
   const child = spawn(selected.executable.path, [
     `--user-data-dir=${userData}`, '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0',
-  ], { shell: false, stdio: 'ignore', env: { ...allowed, DSH_HOME: home } })
+  ], {
+    shell: false,
+    stdio: 'ignore',
+    env: {
+      ...allowed,
+      DSH_HOME: home,
+      ...(lane.node_options_preload === undefined ? {} : { NODE_OPTIONS: `--require=${lane.node_options_preload}` }),
+    },
+  })
   await waitForLoopback(child)
   const cdp = await bootstrapCdp(await waitForDevToolsPort(child, userData))
   return {
@@ -926,6 +961,421 @@ export async function launchDarwinRuntime(lane, arm) {
         delay(5_000).then(() => { if (child.exitCode === null) child.kill('SIGKILL') }),
       ])
     },
+  }
+}
+
+async function rpc(method, payload) {
+  const response = await fetch(`${LOOPBACK_ORIGIN}/api/${method}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'client-request', rpcId: `performance-${method}-${randomUUID()}`, method, payload }),
+  })
+  if (!response.ok) throw new Error(`${method} failed over HTTP ${String(response.status)}`)
+  const body = await response.json()
+  if (body?.result?.ok !== true) throw new Error(`${method} failed: ${body?.result?.error?.code ?? 'invalid-response'}`)
+  return body.result.value
+}
+
+async function completeHistory(sessionId) {
+  const pages = []
+  let beforeSeq
+  for (let page = 0; page < 100; page += 1) {
+    const value = await rpc('session.history', {
+      sessionId, maxMessages: 200, ...(beforeSeq === undefined ? {} : { beforeSeq }),
+    })
+    if (!Array.isArray(value?.events) || typeof value.hasMore !== 'boolean') {
+      throw new Error('session.history returned an invalid page')
+    }
+    const events = value.events.map(entry => entry?.event)
+    if (events.some(event => !Number.isSafeInteger(event?.seq) || !Number.isFinite(event?.time))) {
+      throw new Error('session.history page lost native seq/time')
+    }
+    pages.unshift(events)
+    if (!value.hasMore) break
+    const first = events[0]?.seq
+    if (!Number.isSafeInteger(first) || first <= 0) throw new Error('session.history pagination did not advance')
+    beforeSeq = first
+    if (page === 99) throw new Error('session.history exceeded its closed pagination bound')
+  }
+  const events = pages.flat()
+  if (events.some((event, index) => event.seq !== index)) throw new Error('session.history is not one contiguous native log')
+  return events
+}
+
+async function waitForTurnEnd(sessionId, turn) {
+  for (let attempt = 0; attempt < 3_000; attempt += 1) {
+    const events = await completeHistory(sessionId)
+    const terminal = events.find(event => event.type === 'turn/end' && event.data?.turn === turn)
+    if (terminal !== undefined) {
+      if (terminal.data?.reason?.kind !== 'completed') throw new Error('acceptance turn did not complete')
+      return events
+    }
+    await delay(100)
+  }
+  throw new Error('acceptance turn did not complete in five minutes')
+}
+
+async function selectModel(sessionId, performanceModel) {
+  const selected = await rpc('session.selectModel', {
+    sessionId,
+    provider: performanceModel.provider,
+    model: performanceModel.model,
+    reasoningEffort: performanceModel.reasoning_effort,
+  })
+  if (selected?.selected?.provider !== performanceModel.provider
+    || selected.selected.model !== performanceModel.model
+    || selected.selected.reasoningEffort !== performanceModel.reasoning_effort) {
+    throw new Error('installed Session did not select the exact performance model leaf')
+  }
+}
+
+async function seedHistory(sessionId) {
+  for (let turn = 1; turn <= 20; turn += 1) {
+    await rpc('session.prompt', {
+      sessionId, mode: 'queue', content: [{ type: 'text', text: PROMPTS.seed(turn) }],
+    })
+    await waitForTurnEnd(sessionId, turn)
+  }
+}
+
+async function uniqueBlankSession() {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const value = await rpc('session.list', {})
+    if (!Array.isArray(value?.items)) throw new Error('session.list returned no native Session rows')
+    const blank = value.items.filter(item => item?.blank === true)
+    if (blank.length > 1) throw new Error('acceptance runtime exposed more than one reusable blank Session')
+    if (blank.length === 1 && typeof blank[0].sessionId === 'string') return blank[0].sessionId
+    await delay(100)
+  }
+  throw new Error('acceptance runtime did not expose one native blank Session in 30 seconds')
+}
+
+async function activateOwnedSession(cdp, sessionId, blank) {
+  const pathname = blank ? '/' : `/chat/${encodeURIComponent(sessionId)}`
+  await cdp.call('Page.reload', { ignoreCache: true })
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const result = await cdp.call('Runtime.evaluate', {
+      expression: `(() => { if (document.readyState !== 'complete' || globalThis.__ematePerformanceProbe === undefined) return null;
+        const pathname = ${JSON.stringify(pathname)};
+        if (location.pathname !== pathname) {
+          history.pushState(null, '', pathname);
+          dispatchEvent(new PopStateEvent('popstate'));
+          return null;
+        }
+        try { return globalThis.__ematePerformanceProbe.selfTest(true); }
+        catch (error) { return null; } })()`,
+      returnByValue: true,
+    })
+    const value = result?.result?.value
+    if (value?.transport === 'mux-string-server-request-v1'
+      && value?.dom === 'conversation-scroll/composer-seat/send-structural-v1') return
+    await delay(100)
+  }
+  throw new Error('owned Session did not become the exact visible composer in 30 seconds')
+}
+
+async function prepareTrustedClick(cdp, input) {
+  const result = await cdp.call('Runtime.evaluate', {
+    expression: `(() => {
+      const textarea = document.querySelector('[data-composer-seat] [data-composer-card] textarea:enabled');
+      const card = textarea?.closest('[data-composer-card]');
+      const buttons = card === null || card === undefined ? [] : [...card.querySelectorAll(':scope > div:last-child > div:last-child > button[aria-label]')];
+      if (!(textarea instanceof HTMLTextAreaElement) || buttons.length !== 1) return { error: 'exact composer is unavailable' };
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      if (setter === undefined) return { error: 'native textarea setter is unavailable' };
+      setter.call(textarea, ${JSON.stringify(input.prompt)});
+      textarea.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: null }));
+      globalThis.__ematePerformanceProbe.beginSample(${JSON.stringify({
+        sampleKey: input.sample_key, sessionId: input.session_id, turn: input.turn, step: input.step,
+      })});
+      const rect = buttons[0].getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0 || buttons[0].disabled) return { error: 'exact send control is unavailable' };
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    })()`,
+    returnByValue: true,
+  })
+  const value = result?.result?.value
+  if (!Number.isFinite(value?.x) || !Number.isFinite(value?.y)) {
+    throw new Error(value?.error ?? 'renderer did not prepare the trusted acceptance submit')
+  }
+  await cdp.call('Input.dispatchMouseEvent', { type: 'mousePressed', x: value.x, y: value.y, button: 'left', clickCount: 1 })
+  await cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: value.x, y: value.y, button: 'left', clickCount: 1 })
+}
+
+async function finishPaint(cdp, sampleKey) {
+  for (let attempt = 0; attempt < 3_000; attempt += 1) {
+    const result = await cdp.call('Runtime.evaluate', {
+      expression: `(() => { try { return { value: globalThis.__ematePerformanceProbe.finishSample(${JSON.stringify(sampleKey)}) }; }
+        catch (error) { const message = error instanceof Error ? error.message : String(error); return message.includes('incomplete') ? null : { error: message }; } })()`,
+      returnByValue: true,
+    })
+    const value = result?.result?.value
+    if (value?.error !== undefined) throw new Error(`renderer paint capture failed: ${value.error}`)
+    if (value?.value !== undefined) return value.value
+    await delay(100)
+  }
+  throw new Error('renderer paint capture did not complete in five minutes')
+}
+
+function requestAttempts(events, turn, candidate) {
+  const starts = events.map((event, index) => ({ event, index }))
+    .filter(({ event }) => event.type === 'step/start' && event.data?.turn === turn)
+  return starts.map(({ event, index }, attemptIndex) => {
+    const end = starts[attemptIndex + 1]?.index ?? events.length
+    const own = events.slice(index, end).find(candidateEvent => candidateEvent.type === 'request/header')?.data?.header
+    const prior = events.slice(0, index).findLast(candidateEvent => candidateEvent.type === 'request/header')?.data?.header
+    const header = own ?? prior
+    if (header === undefined) throw new Error('native request has no effective request/header')
+    return {
+      ordinal: attemptIndex + 1, turn, step: event.data.step,
+      request_id: `${String(turn)}:${String(event.data.step)}`,
+      effective_header: header,
+      ...(candidate ? { diagnostic: null } : {}),
+    }
+  })
+}
+
+function brokerEvents(value) {
+  if (value === null || typeof value !== 'object' || !Array.isArray(value.events)) {
+    throw new Error('usage-snapshot broker returned no complete events array')
+  }
+  return value.events
+}
+
+function enterpriseReceipt(value, endpoint) {
+  const receipt = value?.receipt
+  if (receipt?.endpoint !== endpoint || receipt.inference_gateway !== 'available') {
+    throw new Error('offline-control status did not prove the requested endpoint boundary')
+  }
+  return receipt
+}
+
+async function writeJson(path, value) {
+  assertNoPrivatePayload(value)
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
+}
+
+function artifactBinding(model, pathName) {
+  return {
+    schema_version: 2,
+    performance_run_id: model.performance_run_id,
+    path_name: pathName,
+    sample_ids_sha256: sha256(canonical(model.schedule.map(row => row.pair_id))),
+  }
+}
+
+async function collectPath(input) {
+  const { model, pathName, runtime, lane, config, configPath } = input
+  const candidate = pathName !== 'baseline'
+  const prefix = pathName.replaceAll('_', '-')
+  const accumulator = input.accumulator ?? {
+    native: [], headers: [], provider: [], paint: [], sessionIds: new Set(),
+    startedAt: new Date().toISOString(), browserProduct: undefined, historySeedSessionId: undefined,
+  }
+  const { native, headers, provider, paint } = accumulator
+  const startedAt = accumulator.startedAt
+  const browser = await runtime.cdp.call('Browser.getVersion')
+  accumulator.browserProduct ??= browser?.product
+  for (const row of input.rows ?? model.schedule) {
+    const index = model.schedule.indexOf(row)
+    if (index < 0) throw new Error('collector row is outside the owned schedule')
+    let sessionId
+    if (row.scenario === 'history-20') {
+      if (accumulator.historySeedSessionId === undefined) {
+        const seed = await rpc('session.create', {})
+        if (typeof seed?.sessionId !== 'string' || seed.sessionId.length === 0) throw new Error('session.create returned no history seed Session id')
+        await rpc('session.rename', { sessionId: seed.sessionId, title: 'Performance acceptance history seed' })
+        await selectModel(seed.sessionId, model.performance_model)
+        await seedHistory(seed.sessionId)
+        accumulator.historySeedSessionId = seed.sessionId
+      }
+      const fork = await rpc('session.fork', { sessionId: accumulator.historySeedSessionId })
+      sessionId = fork?.sessionId
+    } else {
+      sessionId = await uniqueBlankSession()
+      await rpc('session.rename', { sessionId, title: 'Performance acceptance' })
+    }
+    if (typeof sessionId !== 'string' || sessionId.length === 0) throw new Error('native Session creation returned no Session id')
+    if (accumulator.sessionIds.has(sessionId)) throw new Error('native Session identity was reused across acceptance samples')
+    accumulator.sessionIds.add(sessionId)
+    await selectModel(sessionId, model.performance_model)
+    await activateOwnedSession(runtime.cdp, sessionId, row.scenario !== 'history-20')
+    const before = brokerEvents(await runRunnerBroker(configPath, config.admin_usage_exporter.reference, 'usage-snapshot', {
+      account: config.acceptance_identity.reference,
+      model: model.performance_model.model,
+      provider: model.performance_model.provider,
+    }))
+    const turn = row.scenario === 'history-20' ? 21 : 1
+    const sampleKey = `${model.performance_run_id}:${pathName}:${row.pair_id}`
+    await prepareTrustedClick(runtime.cdp, {
+      prompt: PROMPTS[row.scenario], sample_key: sampleKey, session_id: sessionId, turn, step: 1,
+    })
+    const [events, rendererPaint] = await Promise.all([
+      waitForTurnEnd(sessionId, turn),
+      finishPaint(runtime.cdp, sampleKey),
+    ])
+    const after = brokerEvents(await runRunnerBroker(configPath, config.admin_usage_exporter.reference, 'usage-snapshot', {
+      account: config.acceptance_identity.reference,
+      model: model.performance_model.model,
+      provider: model.performance_model.provider,
+    }))
+    const message = events.filter(event => event.type === 'user/message' && event.data?.source?.kind === 'user').at(-1)
+    if (typeof message?.data?.id !== 'string') throw new Error('native acceptance user/message has no stable id')
+    const attempts = requestAttempts(events, turn, candidate)
+    const sample = deriveAuthoritySample({
+      performance_run_id: model.performance_run_id,
+      path_name: pathName,
+      path_execution_ordinal: index + 1,
+      pair_id: row.pair_id,
+      scenario: row.scenario,
+      arm_order: row.arm_order,
+      session_id: sessionId,
+      message_id: message.data.id,
+      turn,
+      step: 1,
+      events,
+      request_attempts: attempts,
+      usage_before_events: before,
+      usage_after_events: after,
+      account: config.acceptance_identity.reference,
+      account_exclusive: true,
+      max_parallel: 1,
+      model: model.performance_model.model,
+      provider: model.performance_model.provider,
+      job_execution_count: 0,
+      deliverable_count: 0,
+      paint: rendererPaint,
+    })
+    native.push(sample.native)
+    headers.push(sample.headers)
+    provider.push(sample.provider)
+    paint.push(sample.paint)
+  }
+  if (input.finalize === false) return accumulator
+  if (native.length !== 30 || headers.length !== 30 || provider.length !== 30 || paint.length !== 30
+    || accumulator.sessionIds.size !== 30) {
+    throw new Error('path finalization requires exactly 30 collected samples')
+  }
+  const finishedAt = new Date().toISOString()
+  const binding = artifactBinding(model, pathName)
+  const directory = join(input.plan.scratch_root, model.output_directory)
+  await Promise.all([
+    writeJson(join(directory, `${prefix}.native.json`), { ...binding, kind: 'native-session-trace', source: 'dsh-session-events', samples: native }),
+    writeJson(join(directory, `${prefix}.headers.json`), { ...binding, kind: 'request-headers', source: 'dsh-request-header-waterfall', samples: headers }),
+    writeJson(join(directory, `${prefix}.provider.json`), {
+      ...binding, kind: 'provider-invocation-receipt', source: 'managed-provider-receipts',
+      provider: model.performance_model.provider, model: model.performance_model.model,
+      reasoning_level: model.performance_model.reasoning_effort, samples: provider,
+    }),
+    writeJson(join(directory, `${prefix}.paint.json`), { ...binding, kind: 'renderer-paint-trace', source: 'desktop-renderer-paint', samples: paint }),
+  ])
+  const selected = candidate ? lane.candidate : lane.baseline
+  const installed = structuredClone(selected.receipt)
+  installed.install_receipt.launched_at = startedAt
+  await writeJson(join(directory, `${prefix}.installed.json`), {
+    ...binding, kind: 'installed-runtime-receipt', source: 'installed-application',
+    runtime: installed.runtime, install_receipt: installed.install_receipt,
+  })
+  let receipt
+  if (candidate) {
+    receipt = enterpriseReceipt(await runRunnerBroker(
+      configPath, config.offline_control.reference, 'status', {},
+    ), pathName === 'emate_online' ? 'available' : 'unavailable')
+    await writeJson(join(directory, `${prefix}.enterprise.json`), {
+      ...binding, kind: 'enterprise-runtime-receipt', source: 'e-mate-enterprise-state', receipt,
+    })
+  }
+  return {
+    tool: `e-mate-performance-probe@sha256:${input.plan.collector_sha256}`,
+    dataset_sha256: sha256(canonical({
+      contract: DATASET_CONTRACT,
+      prompts: Object.fromEntries(['short-text', 'history-20', 'read-only-tool']
+        .map(key => [key, sha256(PROMPTS[key])])),
+    })),
+    acceptance_identity_sha256: domainHash(model.performance_run_id, 'acceptance-identity', config.acceptance_identity.reference),
+    started_at: startedAt,
+    finished_at: finishedAt,
+    environment: {
+      machine_id_sha256: domainHash(model.performance_run_id, 'machine', hostname()),
+      os: 'macOS', arch: lane.target.slice('darwin-'.length), node: process.versions.node,
+      browser: accumulator.browserProduct ?? 'unknown', network_profile: 'fixed',
+    },
+    native_trace_artifact: `${prefix}.native.json`,
+    provider_receipt_artifact: `${prefix}.provider.json`,
+    request_header_artifact: `${prefix}.headers.json`,
+    renderer_paint_artifact: `${prefix}.paint.json`,
+    installed_runtime_artifact: `${prefix}.installed.json`,
+    ...(candidate ? {
+      enterprise_state: pathName === 'emate_online'
+        ? { endpoint: 'available', lease: 'valid-cached', model_policy: 'valid-cached', audit: 'async-outbox' }
+        : { endpoint: 'unavailable', lease: 'valid-cached', model_policy: 'valid-cached', audit: 'async-outbox' },
+      enterprise_receipt_artifact: `${prefix}.enterprise.json`,
+      enterprise_receipt: receipt,
+    } : {}),
+  }
+}
+
+export function ownedExecutionSchedule(model) {
+  if (!Array.isArray(model?.schedule) || model.schedule.length !== 30) {
+    throw new Error('model leaf must own exactly 30 scheduled rows')
+  }
+  return model.schedule.flatMap((row, index) => {
+    const expected = row.arm_order === 'AB'
+      ? PATHS
+      : ['emate_online', 'emate_enterprise_unavailable_valid_cache', 'baseline']
+    if (!Array.isArray(row.path_order) || canonical(row.path_order) !== canonical(expected)) {
+      throw new Error('model leaf path order drifted from its AB/BA arm')
+    }
+    return row.path_order.map(path_name => ({ row, path_name, path_execution_ordinal: index + 1 }))
+  })
+}
+
+async function collectPlan(plan, config, configPath, lane) {
+  for (const model of plan.models) {
+    const accumulators = {}
+    for (const execution of ownedExecutionSchedule(model)) {
+        const row = execution.row
+        const pathName = execution.path_name
+        const action = pathName === 'emate_enterprise_unavailable_valid_cache' ? 'auth-unavailable' : 'auth-available'
+        await runRunnerBroker(configPath, config.offline_control.reference, action, {})
+        const runtime = await launchDarwinRuntime(lane, pathName === 'baseline' ? 'baseline' : 'candidate')
+        try {
+          accumulators[pathName] = await collectPath({
+            plan, model, pathName, runtime, lane, config, configPath,
+            rows: [row], accumulator: accumulators[pathName], finalize: false,
+          })
+        } finally {
+          await runtime.stop()
+        }
+    }
+    const paths = {}
+    for (const pathName of PATHS) {
+      const action = pathName === 'emate_enterprise_unavailable_valid_cache' ? 'auth-unavailable' : 'auth-available'
+      await runRunnerBroker(configPath, config.offline_control.reference, action, {})
+      const runtime = await launchDarwinRuntime(lane, pathName === 'baseline' ? 'baseline' : 'candidate')
+      try {
+        paths[pathName] = await collectPath({
+          plan, model, pathName, runtime, lane, config, configPath,
+          rows: [], accumulator: accumulators[pathName], finalize: true,
+        })
+      } finally {
+        await runtime.stop()
+      }
+    }
+    await runRunnerBroker(configPath, config.offline_control.reference, 'auth-available', {})
+    if (Object.keys(paths).length !== 3) throw new Error('acceptance model leaf did not collect all three paths')
+    assertOfflineValidCacheBoundary(paths.emate_online.enterprise_receipt, paths.emate_enterprise_unavailable_valid_cache.enterprise_receipt)
+    for (const path of Object.values(paths)) delete path.enterprise_receipt
+    await writeJson(join(plan.scratch_root, model.output_directory, 'manifest.json'), {
+      schema_version: 2,
+      comparison_kind: 'installed-2.0.12-vs-2.0.13',
+      performance_run_id: model.performance_run_id,
+      evidence_kind: 'production-real-provider',
+      harness_commit: plan.harness_commit,
+      baseline_harness_commit: plan.baseline_harness_commit,
+      performance_model: model.performance_model,
+      paths,
+    })
   }
 }
 
@@ -943,10 +1393,9 @@ async function main() {
   let lane
   try {
     lane = await prepareDarwinRuntimeLane(plan, config)
-    for (const arm of ['baseline', 'candidate']) {
-      const runtime = await launchDarwinRuntime(lane, arm)
-      await runtime.stop()
-    }
+    const offlineStatus = await runRunnerBroker(configPath, config.offline_control.reference, 'status', {})
+    lane.node_options_preload = await resolveAcceptancePreload(configPath, offlineStatus?.preload_path)
+    await collectPlan(plan, config, configPath, lane)
   } finally {
     await lane?.cleanup()
     await releaseLock()

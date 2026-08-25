@@ -13,6 +13,7 @@ import {
   buildCdpPreBootstrapScript,
   deriveAuthoritySample,
   loadRunnerPrivateConfig,
+  ownedExecutionSchedule,
   parseMuxAssistantTextDelta,
   prepareDarwinRuntimeLane,
   runRunnerBroker,
@@ -234,7 +235,8 @@ test('prepares exact frozen and candidate macOS application bytes with read-only
   const baselineApp = join(root, 'baseline/e-Mate.app')
   await app(baselineApp, 'baseline-executable')
   const baselineExecutable = Buffer.from('baseline-executable')
-  await writeFile(join(root, 'baseline/installed-runtime.json'), `${JSON.stringify({
+  const receiptPath = join(root, 'baseline/installed-runtime.json')
+  const installedReceipt = {
     kind: 'installed-runtime-receipt',
     runtime: {
       product: 'e-mate-desktop', product_version: '2.0.12',
@@ -250,7 +252,8 @@ test('prepares exact frozen and candidate macOS application bytes with read-only
       package_bytes: 390_527_181,
       installed_executable_sha256: sha256(baselineExecutable), installed_executable_bytes: baselineExecutable.byteLength,
     },
-  })}\n`, { mode: 0o600 })
+  }
+  await writeFile(receiptPath, `${JSON.stringify(installedReceipt)}\n`, { mode: 0o600 })
   const candidateRoot = join(root, 'artifacts')
   const sourceApp = join(root, 'candidate-source/e-Mate.app')
   await Promise.all([mkdir(candidateRoot, { mode: 0o700 }), app(sourceApp, 'candidate-executable')])
@@ -260,21 +263,32 @@ test('prepares exact frozen and candidate macOS application bytes with read-only
     source_commit: 'e'.repeat(40), version: '2.0.13',
     artifacts: { darwin: { build_source_commit: 'e'.repeat(40), sha256: sha256(dmg), bytes: dmg.byteLength } },
   })}\n`)
-  const lane = await prepareDarwinRuntimeLane({
+  const plan = {
     source_commit: 'e'.repeat(40), candidate_artifacts_root: candidateRoot,
     profile_authority: { receipt: { targets: [{
       target: 'darwin-arm64', profile_generation: '1'.repeat(64),
       composition_sha256: '2'.repeat(64), client_bundle_sha256: '3'.repeat(64),
     }] } },
-  }, { installation_root: root }, {
+  }
+  const options = {
     platform: 'darwin', arch: 'arm64',
     run: async (executable, args) => {
+      if (executable.endsWith('plutil') && args[0] === '-extract') return 'net.ecoremedia.e-mate\n'
       if (executable.endsWith('hdiutil') && args[0] === 'attach') {
         await cp(sourceApp, join(args[args.indexOf('-mountpoint') + 1], 'e-Mate.app'), { recursive: true })
       } else if (executable.endsWith('ditto')) await cp(args[0], args[1], { recursive: true })
     },
-  })
+  }
+  await assert.rejects(
+    prepareDarwinRuntimeLane(plan, { installation_root: root }, options),
+    /installed runtime receipt does not match/u,
+  )
+  installedReceipt.install_receipt.bundle_id = 'net.ecoremedia.e-mate'
+  await writeFile(receiptPath, `${JSON.stringify(installedReceipt)}\n`)
+  const lane = await prepareDarwinRuntimeLane(plan, { installation_root: root }, options)
   assert.equal(lane.target, 'darwin-arm64')
+  assert.equal(lane.baseline.receipt.install_receipt.bundle_id, 'net.ecoremedia.e-mate')
+  assert.equal(lane.candidate.receipt.install_receipt.bundle_id, 'net.ecoremedia.e-mate')
   assert.equal(lane.candidate.receipt.runtime.profile_generation, '1'.repeat(64))
   assert.equal(lane.candidate.receipt.install_receipt.package_sha256, sha256(dmg))
   await lane.cleanup()
@@ -299,4 +313,23 @@ test('requires the running bytes to equal the owner-verified collector digest', 
   const environment = { GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: 'e'.repeat(40) }
   assert.doesNotThrow(() => assertProbePlan(plan, digest, environment))
   assert.throws(() => assertProbePlan(plan, 'b'.repeat(64), environment), /protected-main source bytes/u)
+})
+
+test('executes every owned AB/BA path in the actual declared order', () => {
+  const schedule = Array.from({ length: 30 }, (_, index) => ({
+    pair_id: `pair-${String(index + 1)}`,
+    arm_order: index % 2 === 0 ? 'AB' : 'BA',
+    path_order: index % 2 === 0
+      ? ['baseline', 'emate_online', 'emate_enterprise_unavailable_valid_cache']
+      : ['emate_online', 'emate_enterprise_unavailable_valid_cache', 'baseline'],
+  }))
+  const executions = ownedExecutionSchedule({ schedule })
+  assert.equal(executions.length, 90)
+  assert.deepEqual(executions.slice(0, 6).map(item => [item.path_name, item.path_execution_ordinal]), [
+    ['baseline', 1], ['emate_online', 1], ['emate_enterprise_unavailable_valid_cache', 1],
+    ['emate_online', 2], ['emate_enterprise_unavailable_valid_cache', 2], ['baseline', 2],
+  ])
+  const drift = structuredClone(schedule)
+  drift[0].path_order.reverse()
+  assert.throws(() => ownedExecutionSchedule({ schedule: drift }), /path order drifted/u)
 })

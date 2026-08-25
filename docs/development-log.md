@@ -2554,3 +2554,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 只有源码diff与无密钥测试；没有真实runner config、安装态启动回执、Provider evidence、performance_run_id或production pass。
 - Remaining blockers: runner须创建精确owner-only config、冻结2.0.12 app/installed-runtime receipt与两个私有broker；真实4×30×3采集仍须在protected self-hosted runner执行并由17源文件/85文件handoff终验。任一字段缺失按样本失败关闭。
 - Next exact action: 提交本独立分支供主代理移植；合入protected main后注册ephemeral runner并只运行一次真实performance workflow，失败不得复用旧evidence。
+
+## 2026-08-26 · 2.0.13 TTFT v2 四模型真实采集循环闭合
+
+- Goal checkpoint: 在 installed Darwin lane 已能验证并启动两代真实应用但仍未执行样本的基础上，补齐四模型、每模型 30 组、每组 3 path 的实际 AB/BA 采集编排与 exact 17 source artifacts；本地只做无模型窄测试，不运行 Provider、安装或 workflow。
+- Frozen baseline / current HEAD: 独立分支 `codex/external-perf-probe-orchestration` 从提交 `2f96f384bc793363ce6f605d8403fa968c94c661` 继续；冻结 2.0.12 source/Base/package/Profile、候选 Base/Harness/Desktop reference 与四模型 roster 未改。
+- Binding documents read: 复核根 `AGENTS.md`、ponytail skill、`target-contract.md`、`performance-and-acceptance.md`、`slices/2.0.13.md`、上一条完整日志、现有 Session route/RPC、renderer DOM/mux、Usage ledger 与 owner/verifier 合同。
+- Inspected native seam: 使用现有 `session.create`、`session.rename`、`session.selectModel`、`session.prompt`、`session.history` 与 `/chat/<sessionId>` route projection；发送只经安装态 composer 的 trusted CDP click，文本首 chunk 只按目标 Session/turn/step 的真实 mux frame 识别。Provider 继续由 runner-private Usage broker 的完整 before/after ID 集合差与排他账号单飞配对；offline 只由同一 acceptance-only preload 控制认证端点，模型 gateway 保持可用。
+- Experiment or why unnecessary: 新增无密钥正反例覆盖实际 AB/BA path 顺序、旧错误 bundle id 拒绝与真实 `net.ecoremedia.e-mate` receipt；既有测试继续覆盖 mux 字符串协议、run-scoped hash、Usage 多/少/外来/PENDING、Tool 唯一可观测边界、offline valid-cache、broker 权限和 DMG 清理。没有为测试调用模型或伪造 production evidence。
+- Decision and forbidden alternatives: 每个样本使用唯一 native Session；每模型/path 只真实构造一次 20-turn 固定历史，再复用原生 `session.fork` 为 10 个 history 样本产生各自完整原生日志，避免约 2,400 次无信息重复调用。read-only-tool 只要求原生 `get_goal` 一次；每次通过原生 chat route 精确绑定本次 Session，不以“出现任意聊天框”判定。三 path 按 plan 的 AB/BA 顺序逐项隔离启动/退出，样本写入各 path 的 1..30 ordinal，最后原子关闭 manifest 加 17 source files。禁止第二产品接口、DOM正文扫描、普通 header、时间窗 Usage join、body-start 伪计时、旧 bundle id、缺字段降级或 fixture 重标。
+- Changed scope: 只修改既有 `scripts/performance-acceptance-probe.mjs`、其窄测试并 append 本记录；未改 Desktop/DSH/Profile/Session协议、模型路由/header、企业服务、Base、R2/Feed/desired state 或用户数据。
+- Verification commands and results: bundled Node 对 probe `--check` 通过；probe 与 parity 聚焦测试合计 `20/20`；`git diff --check` 通过。完整 acceptance owner 测试仍因该独立 worktree 未安装既有 devDependency `fflate` 而未启动，不记为通过。
+- Immutable evidence / receipt: 当前只有源码 diff 与无密钥测试；没有真实 runner config/broker、四模型调用、17 个 production source files、performance admission、上传或生产写入。
+- Remaining blockers: 合入 protected main 后，ephemeral self-hosted runner 必须提供 owner-only frozen baseline receipt、安装根、两个 broker 与 acceptance-only preload，并实际跑完四模型 360 个 path sample；任一模型、Session、Usage、paint、offline cache、安装或 artifact 字段缺失即整次失败关闭。
+- Next exact action: 提交本第二阶段最小 diff 交主代理复核；只允许 exact protected-main attempt-1 workflow 在真实 runner 运行，禁止本地开发链触及生产发布或复用旧 evidence。
