@@ -1,0 +1,459 @@
+import assert from 'node:assert/strict'
+import { createHash, generateKeyPairSync, sign } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
+import test from 'node:test'
+import {
+  createGithubArtifactProvenance,
+  createPerformanceSummary,
+  createProfileBuildReceipt,
+  createProfileComponentAggregate,
+} from './desktop-admission.mjs'
+import { profileGenerationId } from '../desktop/e-mate-desktop/src/profile-generation.ts'
+import { canonicalProfileJson, signProfileRelease } from '../desktop/e-mate-desktop/src/profile-release.ts'
+
+const SOURCE = 'a'.repeat(40)
+const ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
+const TARGETS = ['darwin-arm64', 'darwin-x64', 'win32-x64']
+const PERFORMANCE_CONTEXT = Buffer.from('e-mate-performance-admission-v1\0', 'utf8')
+
+function sha256(bytes) {
+  return createHash('sha256').update(bytes).digest('hex')
+}
+
+async function file(path, bytes) {
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, bytes)
+}
+
+async function json(path, value) {
+  await file(path, `${JSON.stringify(value, null, 2)}\n`)
+}
+
+function fixtureBase(publicKey) {
+  return {
+    schema_version: 1,
+    id: 'e-mate-test-base',
+    desktop_api: 1,
+    profile_format: 1,
+    schedule_protocol_floor: 1,
+    desktop_reference: {
+      repository: 'example/desktop', commit: 'b'.repeat(40),
+      harness_repository: 'example/harness', harness_commit: 'c'.repeat(40), harness_version: '0.1.0-rc.7',
+    },
+    harness_version: '0.1.0-rc.7',
+    harness_commit: 'd'.repeat(40),
+    runtime_imports: {},
+    profile_signing_keys: [{
+      id: 'test-key', algorithm: 'ed25519',
+      public_key_spki_der_base64: publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
+    }],
+  }
+}
+
+function inventory() {
+  return {
+    schema_version: 1,
+    components: [{
+      id: '@e-mate/dsh-plugin-example', root: 'packages/dsh-plugin-example',
+      kind: 'profile', desktop: 'hot-profile', cli: true,
+    }],
+  }
+}
+
+async function profileFixture(root) {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+  const privateKeyPem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
+  const base = fixtureBase(publicKey)
+  const basePath = join(root, 'base-contract.json')
+  const inventoryPath = join(root, 'component-inventory.json')
+  const profileRoot = join(root, 'profile')
+  await json(basePath, base)
+  await json(inventoryPath, inventory())
+  await json(join(profileRoot, 'dsh/profile/component-inventory.json'), inventory())
+  await file(join(profileRoot, 'dsh-plugin-example/lib/index.js'), 'export {}\n')
+  const receiptPath = join(root, 'profile-build-receipt.json')
+  await createProfileBuildReceipt({
+    sourceCommit: SOURCE, baseContract: basePath, inventory: inventoryPath,
+    profile: profileRoot, output: receiptPath,
+  })
+
+  const packageBytes = Buffer.from('{"name":"@e-mate/dsh-plugin-example"}\n')
+  const entryBytes = Buffer.from('export {}\n')
+  const manifest = {
+    schema_version: 1,
+    id: '@e-mate/dsh-plugin-example',
+    slug: 'dsh-plugin-example',
+    version: '2.0.13',
+    kind: 'profile',
+    target: null,
+    source_commit: SOURCE,
+    base_contracts: [base.id],
+    schedule_protocol_floor: 1,
+    base_imports: [],
+    authority_contract: { effects: [], guards: [] },
+    harness_contract: { version: base.harness_version, commit: base.harness_commit },
+    package_entry: 'lib/index.js',
+    dsh: {},
+    total_bytes: packageBytes.length + entryBytes.length,
+    files: [
+      { path: 'lib/index.js', bytes: entryBytes.length, sha256: sha256(entryBytes), mode: '0644' },
+      { path: 'package.json', bytes: packageBytes.length, sha256: sha256(packageBytes), mode: '0644' },
+    ],
+  }
+  const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`)
+  const manifestKey = `desktop/profile/components/dsh-plugin-example/v2.0.13/${SOURCE}/manifest.json`
+  const manifestUrl = `${ORIGIN}/${manifestKey}`
+  const reference = {
+    id: manifest.id,
+    version: manifest.version,
+    kind: manifest.kind,
+    target: null,
+    profile_path: 'node_modules/@e-mate/dsh-plugin-example',
+    manifest_url: manifestUrl,
+    manifest_bytes: manifestBytes.length,
+    manifest_sha256: sha256(manifestBytes),
+    manifest_source_commit: SOURCE,
+  }
+  const bundle = join(root, 'publication')
+  const immutable = []
+  async function object(role, key, path, bytes, cacheControl = 'public,max-age=31536000,immutable') {
+    await file(join(bundle, ...path.split('/')), bytes)
+    return {
+      role, key, url: `${ORIGIN}/${key}`, path, bytes: bytes.length, sha256: sha256(bytes),
+      content_type: 'application/json', cache_control: cacheControl,
+    }
+  }
+  immutable.push(await object('component', manifestKey, `immutable/${manifestKey}`, manifestBytes))
+  for (const [path, bytes] of [['lib/index.js', entryBytes], ['package.json', packageBytes]]) {
+    const key = `${manifestKey.slice(0, -'manifest.json'.length)}files/${path}`
+    immutable.push(await object('component', key, `immutable/${key}`, bytes))
+  }
+  const activations = []
+  for (const target of TARGETS) {
+    const [platform, arch] = target.split('-')
+    const payload = {
+      schema_version: 1,
+      product: 'e-Mate',
+      release_version: '2.0.13',
+      sequence: 1,
+      source_commit: SOURCE,
+      schedule_protocol_floor: 1,
+      target: { platform, arch },
+      base_contracts: [base.id],
+      harness_contract: { version: base.harness_version, commit: base.harness_commit },
+      components: [reference],
+    }
+    const generation = profileGenerationId(payload)
+    const envelopeBytes = Buffer.from(`${JSON.stringify(signProfileRelease(payload, privateKeyPem, 'test-key'), null, 2)}\n`)
+    const immutableKey = `desktop/profile/releases/${generation}/${target}.json`
+    immutable.push(await object('desired-state-immutable', immutableKey, `immutable/${immutableKey}`, envelopeBytes))
+    const activeKey = `desktop/profile/desired-state/${target}.json`
+    activations.push({
+      target, generation, sequence: 1, parent_generation: null,
+      changed_components: [reference.id], expected_current: null,
+      object: await object('desired-state-active', activeKey, `activation/${activeKey}`, envelopeBytes, 'no-store'),
+    })
+  }
+  await json(join(bundle, 'publication-plan.json'), {
+    schema_version: 1,
+    document_type: 'emate.profile-native-cloudflare-publication-plan',
+    status: 'prepared',
+    source_commit: SOURCE,
+    main_commit: SOURCE,
+    accepted_ci_run_id: '100',
+    preparation_run_id: '103',
+    base_contract_id: base.id,
+    schedule_protocol_floor: 1,
+    immutable_objects: immutable,
+    activations,
+  })
+  return { base, basePath, privateKey, inventoryPath, profileRoot, receiptPath, bundle }
+}
+
+async function desktopCandidate(root) {
+  const version = '2.0.13'
+  const files = {
+    darwin: { name: `e-Mate-${version}-mac-universal.dmg`, bytes: Buffer.from('mac-installer') },
+    win32: { name: `e-Mate-${version}-win-x64-Setup.exe`, bytes: Buffer.from('win-installer') },
+  }
+  for (const item of Object.values(files)) await file(join(root, item.name), item.bytes)
+  const candidate = {
+    schema_version: 1,
+    document_type: 'emate.desktop-artifact-candidate',
+    release_status: 'performance-pending',
+    version,
+    source_commit: SOURCE,
+    schedule_protocol_floor: 1,
+    artifacts: Object.fromEntries(Object.entries(files).map(([platform, item]) => [platform, {
+      url: `${ORIGIN}/desktop/releases/v${version}/${SOURCE}/${item.name}`,
+      bytes: item.bytes.length,
+      sha256: sha256(item.bytes),
+      build_source_commit: SOURCE,
+      build_run_id: platform === 'darwin' ? '102' : '101',
+    }])),
+  }
+  const path = join(root, 'desktop-candidate.json')
+  await json(path, candidate)
+  return { path, candidate }
+}
+
+test('Profile build receipt rejects links instead of hashing outside the staged artifact', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'desktop-admission-profile-link-'))
+  try {
+    const { publicKey } = generateKeyPairSync('ed25519')
+    const basePath = join(root, 'base-contract.json')
+    const inventoryPath = join(root, 'component-inventory.json')
+    const profileRoot = join(root, 'profile')
+    await json(basePath, fixtureBase(publicKey))
+    await json(inventoryPath, inventory())
+    await json(join(profileRoot, 'dsh/profile/component-inventory.json'), inventory())
+    await file(join(root, 'outside.txt'), 'outside\n')
+    await symlink(join(root, 'outside.txt'), join(profileRoot, 'outside-link'))
+    await assert.rejects(() => createProfileBuildReceipt({
+      sourceCommit: SOURCE, baseContract: basePath, inventory: inventoryPath,
+      profile: profileRoot, output: join(root, 'receipt.json'),
+    }), /contains a symlink/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Profile aggregate is recomputed from staged bytes, signed desired states, and component objects', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'desktop-admission-profile-'))
+  try {
+    const fixture = await profileFixture(root)
+    const output = join(root, 'profile-component-aggregate.json')
+    const aggregate = await createProfileComponentAggregate({
+      sourceCommit: SOURCE, ciRunId: '100', profileRunId: '103', releaseVersion: '2.0.13',
+      baseContract: fixture.basePath, inventory: fixture.inventoryPath, profile: fixture.profileRoot,
+      profileReceipt: fixture.receiptPath, publicationBundle: fixture.bundle, output,
+    })
+    assert.deepEqual(aggregate.targets.map(item => item.target), TARGETS)
+    assert.match(aggregate.aggregate_sha256, /^[0-9a-f]{64}$/u)
+    await file(join(fixture.profileRoot, 'dsh-plugin-example/lib/index.js'), 'mutated\n')
+    await assert.rejects(() => createProfileComponentAggregate({
+      sourceCommit: SOURCE, ciRunId: '100', profileRunId: '103', releaseVersion: '2.0.13',
+      baseContract: fixture.basePath, inventory: fixture.inventoryPath, profile: fixture.profileRoot,
+      profileReceipt: fixture.receiptPath, publicationBundle: fixture.bundle, output,
+    }), /does not match its build receipt/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+async function performanceFixture(root, profile) {
+  const candidate = await desktopCandidate(join(root, 'desktop'))
+  const aggregate = {
+    aggregate_sha256: '1'.repeat(64), inventory_sha256: '2'.repeat(64), staged_profile_tree_sha256: '3'.repeat(64),
+    targets: TARGETS.map(target => ({
+      target, profile_generation: '4'.repeat(64), component_aggregate_sha256: '5'.repeat(64),
+    })),
+  }
+  const aggregatePath = join(root, 'profile-aggregate.json')
+  await json(aggregatePath, aggregate)
+  const performanceRoot = join(root, 'performance')
+  const sourcePath = join(root, 'performance-parity.mjs')
+  await file(sourcePath, 'export {}\n')
+  const supportingBytes = Buffer.from('{}\n')
+  const path = (name, candidate) => ({
+    run_receipt: Object.fromEntries([
+      ['raw_samples_artifact', 'raw-samples'],
+      ['native_trace_artifact', 'native-session-trace'],
+      ['provider_receipt_artifact', 'provider-invocation-receipt'],
+      ['request_header_artifact', 'request-headers'],
+      ['renderer_paint_artifact', 'renderer-paint-trace'],
+      ['installed_runtime_artifact', 'installed-runtime-receipt'],
+      ...(candidate ? [['enterprise_receipt_artifact', 'enterprise-runtime-receipt']] : []),
+    ].map(([field, kind]) => [field, {
+      kind, path: `evidence/${name}/${field}.json`, sha256: sha256(supportingBytes),
+    }])),
+  })
+  const evidence = {
+    schema_version: 2,
+    comparison_kind: 'installed-2.0.12-vs-2.0.13',
+    performance_run_id: 'performance-run-accepted-1',
+    evidence_kind: 'production-real-provider',
+    harness_commit: profile.base.harness_commit,
+    paths: {
+      baseline: path('baseline', false),
+      emate_online: path('emate_online', true),
+      emate_enterprise_unavailable_valid_cache: path('emate_enterprise_unavailable_valid_cache', true),
+    },
+    production_artifacts_verified: true,
+    decision: { gate_status: 'passed', failures: [], production_receipt_failures: [], comparisons: {} },
+  }
+  const evidenceBytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`)
+  await file(join(performanceRoot, 'e-mate-performance-evidence.json'), evidenceBytes)
+  for (const evidencePath of Object.values(evidence.paths)) {
+    for (const descriptor of Object.values(evidencePath.run_receipt)) {
+      await file(join(performanceRoot, ...descriptor.path.split('/')), supportingBytes)
+    }
+  }
+  const verifier = {
+    contract: 'ttft-v2', source: 'scripts/performance-parity.mjs', source_commit: SOURCE,
+    source_sha256: sha256(await readFile(sourcePath)), harness_commit: profile.base.harness_commit,
+    evidence_filename: 'e-mate-performance-evidence.json',
+    decision_sha256: sha256(Buffer.from(`${JSON.stringify(evidence.decision, null, 2)}\n`, 'utf8')),
+    gate_status: 'passed',
+  }
+  const unsigned = {
+    schema_version: 1,
+    document_type: 'emate.performance-admission',
+    status: 'passed',
+    performance_run_id: evidence.performance_run_id,
+    source_commit: SOURCE,
+    base_contract_id: profile.base.id,
+    profile_component_aggregate_sha256: aggregate.aggregate_sha256,
+    desktop_artifacts: {
+      darwin: {
+        bytes: candidate.candidate.artifacts.darwin.bytes,
+        sha256: candidate.candidate.artifacts.darwin.sha256,
+      },
+      win32: {
+        bytes: candidate.candidate.artifacts.win32.bytes,
+        sha256: candidate.candidate.artifacts.win32.sha256,
+      },
+    },
+    evidence_sha256: sha256(evidenceBytes),
+    verifier,
+  }
+  const signature = sign(null, Buffer.concat([
+    PERFORMANCE_CONTEXT, Buffer.from(canonicalProfileJson(unsigned), 'utf8'),
+  ]), profile.privateKey).toString('base64')
+  await json(join(performanceRoot, 'performance-admission.json'), {
+    ...unsigned, signature: { algorithm: 'ed25519', key_id: 'test-key', value: signature },
+  })
+  return { aggregatePath, candidate, performanceRoot, sourcePath }
+}
+
+test('performance summary accepts only the exact signed TTFT v2 bundle', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'desktop-admission-performance-'))
+  try {
+    const profile = await profileFixture(join(root, 'profile-fixture'))
+    const fixture = await performanceFixture(root, profile)
+    const summary = await createPerformanceSummary({
+      sourceCommit: SOURCE, baseContract: profile.basePath, candidate: fixture.candidate.path,
+      profileAggregate: fixture.aggregatePath, performanceBundle: fixture.performanceRoot,
+      verifierSource: fixture.sourcePath, output: join(root, 'summary.json'),
+    })
+    assert.equal(summary.performance_run_id, 'performance-run-accepted-1')
+    assert.equal(summary.signature_key_id, 'test-key')
+    await json(join(fixture.performanceRoot, 'extra.json'), {})
+    await assert.rejects(() => createPerformanceSummary({
+      sourceCommit: SOURCE, baseContract: profile.basePath, candidate: fixture.candidate.path,
+      profileAggregate: fixture.aggregatePath, performanceBundle: fixture.performanceRoot,
+      verifierSource: fixture.sourcePath, output: join(root, 'summary.json'),
+    }), /file set is invalid/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+function run(id, path, event = 'workflow_dispatch') {
+  return {
+    id: Number(id), path, head_sha: SOURCE, head_branch: 'main', event,
+    status: 'completed', conclusion: 'success', run_attempt: 1,
+    repository: { full_name: 'zyfjacksonchen-source/e-Mate-2.0.11' },
+  }
+}
+
+function jobs(names) {
+  return { jobs: names.map(name => ({ name, conclusion: 'success' })) }
+}
+
+function artifact(id, name, runId) {
+  return {
+    id: Number(id), name, expired: false, digest: `sha256:${String(id).padStart(64, '0')}`,
+    workflow_run: { id: Number(runId), head_sha: SOURCE },
+  }
+}
+
+test('GitHub provenance rejects the old repository and binds exact protected-main artifacts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'desktop-admission-github-'))
+  try {
+    const desktop = await desktopCandidate(join(root, 'desktop'))
+    const metadata = join(root, 'metadata')
+    await json(join(metadata, 'main-ref.json'), { object: { sha: SOURCE } })
+    await json(join(metadata, 'ci-run.json'), run('100', '.github/workflows/ci.yml', 'push'))
+    await json(join(metadata, 'desktop-run.json'), run('102', '.github/workflows/desktop-release.yml'))
+    await json(join(metadata, 'profile-run.json'), run('103', '.github/workflows/profile-release.yml'))
+    await json(join(metadata, 'performance-run.json'), run('104', '.github/workflows/desktop-performance.yml'))
+    await json(join(metadata, 'profile-build-run.json'), run('101', '.github/workflows/desktop-release.yml'))
+    await json(join(metadata, 'ci-jobs.json'), jobs(['CI admission']))
+    await json(join(metadata, 'desktop-jobs.json'), jobs([
+      'Build unsigned macOS universal disk image', 'Bind native artifacts to the release manifest',
+    ]))
+    await json(join(metadata, 'profile-jobs.json'), jobs([
+      'Validate accepted CI evidence',
+      ...TARGETS.map(target => `Bootstrap complete Profile generation / ${target}`),
+      'Prepare signed native Cloudflare publication bundle',
+    ]))
+    await json(join(metadata, 'performance-jobs.json'), jobs(['Performance admission']))
+    await json(join(metadata, 'profile-build-jobs.json'), jobs([
+      'Build and verify the e-Mate profile', 'Build unsigned Windows x64 installer',
+    ]))
+    await json(join(metadata, 'desktop-artifact.json'), artifact('201', `e-mate-desktop-release-${SOURCE}`, '102'))
+    await json(join(metadata, 'ci-artifact.json'), artifact('206', `e-mate-change-impact-${SOURCE}`, '100'))
+    await json(join(metadata, 'profile-publication-artifact.json'), artifact('202', `e-mate-profile-native-cloudflare-publication-${SOURCE}`, '103'))
+    await json(join(metadata, 'performance-artifact.json'), artifact('203', `e-mate-performance-admission-${SOURCE}`, '104'))
+    await json(join(metadata, 'profile-build-artifact.json'), artifact('204', `e-mate-desktop-profile-${SOURCE}`, '101'))
+    await json(join(metadata, 'profile-build-receipt-artifact.json'), artifact('205', `e-mate-desktop-profile-build-receipt-${SOURCE}`, '101'))
+    const options = {
+      sourceCommit: SOURCE, candidate: desktop.path, metadata,
+      ciRunId: '100', desktopRunId: '102', profileRunId: '103', performanceRunId: '104',
+      desktopArtifactId: '201', profileArtifactId: '202', performanceArtifactId: '203',
+      output: join(root, 'github-artifact-provenance.json'),
+    }
+    const { provenance } = await createGithubArtifactProvenance(options)
+    assert.deepEqual(provenance.artifacts.map(item => item.role), ['desktop_candidate', 'performance_admission'])
+    const invalid = run('100', '.github/workflows/ci.yml', 'push')
+    invalid.repository.full_name = 'zyfjacksonchen-source/e-Mate'
+    await json(join(metadata, 'ci-run.json'), invalid)
+    await assert.rejects(() => createGithubArtifactProvenance(options), /CI run provenance is invalid/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('workflow is build-only and uploads only the two external signer inputs', async () => {
+  const workflow = await readFile('.github/workflows/desktop-admission.yml', 'utf8')
+  const desktopBuild = await readFile('.github/workflows/desktop-release.yml', 'utf8')
+  const { parse } = createRequire(resolve('packages/dsh/package.json'))('yaml')
+  const parsed = parse(workflow)
+  const ci = parse(await readFile('.github/workflows/ci.yml', 'utf8'))
+  const desktopRelease = parse(desktopBuild)
+  const profileRelease = parse(await readFile('.github/workflows/profile-release.yml', 'utf8'))
+  assert.deepEqual(Object.keys(parsed.jobs), ['admission'])
+  assert.equal(parsed.jobs.admission.name, 'Desktop release admission')
+  assert.ok(Object.values(ci.jobs).some(job => job.name === 'CI admission'))
+  assert.ok(Object.values(desktopRelease.jobs).some(job => job.name === 'Build and verify the e-Mate profile'))
+  assert.ok(Object.values(desktopRelease.jobs).some(job => job.name === 'Build unsigned Windows x64 installer'))
+  assert.ok(Object.values(desktopRelease.jobs).some(job => job.name === 'Build unsigned macOS universal disk image'))
+  assert.ok(Object.values(desktopRelease.jobs).some(job => job.name === 'Bind native artifacts to the release manifest'))
+  assert.ok(Object.values(profileRelease.jobs).some(job => job.name === 'Validate accepted CI evidence'))
+  assert.ok(Object.values(profileRelease.jobs).some(job => job.name === 'Bootstrap complete Profile generation / ${{ matrix.target }}'))
+  assert.ok(Object.values(profileRelease.jobs).some(job => job.name === 'Prepare signed native Cloudflare publication bundle'))
+  const upload = parsed.jobs.admission.steps.find(step => step.uses === 'actions/upload-artifact@v4')
+  assert.equal(upload.with.name, 'e-mate-desktop-admission-${{ github.sha }}')
+  assert.equal(upload.with.path.trim(), [
+    '.admission/output/base-contract.json', '.admission/output/desktop-release-unsigned.json',
+  ].join('\n'))
+  assert.match(workflow, /^\s+name: Desktop release admission$/mu)
+  assert.match(workflow, /GITHUB_REF_PROTECTED" = true/u)
+  assert.match(workflow, /zyfjacksonchen-source\/e-Mate-2\.0\.11/u)
+  assert.doesNotMatch(workflow, /zyfjacksonchen-source\/e-Mate(?:\s|$)/u)
+  assert.match(workflow, /desktop-release-manifest\.ts\s+admit/u)
+  assert.match(workflow, /value\.verifier\.source/u)
+  assert.match(workflow, /node "\$verifier_source"/u)
+  assert.match(workflow, /cmp -s \.admission\/performance\/e-mate-performance-evidence\.json/u)
+  assert.match(workflow, /submodules: recursive/u)
+  assert.match(workflow, /pnpm --dir upstream\/deepseek-harness install --frozen-lockfile --ignore-scripts/u)
+  assert.match(workflow, /base-contract\.json,desktop-release-unsigned\.json/u)
+  assert.doesNotMatch(workflow, /secrets\.|aws |wrangler|r2-publish|desktop\/latest\.json/u)
+  assert.match(desktopBuild, /e-mate-desktop-profile-build-receipt-\$\{\{ github\.sha \}\}/u)
+  assert.match(desktopBuild, /include-hidden-files: true/u)
+  assert.match(desktopBuild, /retention-days: 30/u)
+})

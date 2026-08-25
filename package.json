@@ -26,7 +26,7 @@
     "test": "pnpm run test:harness-provenance && pnpm run test:impact && node --test scripts/create-chat-state-fixture.test.mjs && pnpm run test:performance:parity && node scripts/component-run.mjs check && pnpm --filter @e-mate/dsh build && pnpm --filter @e-mate/dsh test",
     "test:harness-provenance": "node --test scripts/harness-provenance.test.mjs scripts/harness-runtime-adapters.test.mjs",
     "test:impact": "node --test scripts/change-impact.test.mjs scripts/component-release.test.mjs scripts/profile-release.test.mjs scripts/publish-profile-r2.test.mjs",
-    "test:release": "node --test scripts/release.test.mjs",
+    "test:release": "node --test scripts/desktop-admission.test.mjs scripts/release.test.mjs",
     "build": "node scripts/component-run.mjs build && pnpm --filter @e-mate/dsh build",
     "enterprise:check": "pnpm --dir enterprise check",
     "enterprise:test": "pnpm --dir enterprise test",

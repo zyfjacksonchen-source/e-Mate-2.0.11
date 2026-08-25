@@ -116,7 +116,7 @@ jobs:
           pnpm enterprise:build
 
       - name: Check release carrier
-        run: node --test scripts/release.test.mjs
+        run: pnpm test:release
 
       - name: Resolve the immutable Base SDK cache key
         id: base-sdk-key

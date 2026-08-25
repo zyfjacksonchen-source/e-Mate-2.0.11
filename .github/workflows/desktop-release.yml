@@ -92,14 +92,30 @@ jobs:
           node scripts/base-sdk.mjs emit --directory .release-cache/base-sdk
       - name: Stage the exact built e-Mate profile without development links
         run: node scripts/stage-desktop-profile-artifact.mjs
+      - name: Bind the staged Profile bytes to the source and Base
+        run: >-
+          node scripts/desktop-admission.mjs
+          profile-build-receipt
+          --commit "$GITHUB_SHA"
+          --profile .release-cache/profile-artifact
+          --inventory packages/dsh/profile/component-inventory.json
+          --base-contract desktop/e-mate-desktop/base-contract.json
+          --out .release-cache/profile-build-receipt/profile-build-receipt.json
       - uses: actions/upload-artifact@v4
         with:
           name: e-mate-desktop-profile-${{ github.sha }}
           path: |
             .release-cache/profile-artifact/dsh/profile
             .release-cache/profile-artifact/dsh-plugin-*/lib
+          include-hidden-files: true
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-desktop-profile-build-receipt-${{ github.sha }}
+          path: .release-cache/profile-build-receipt/profile-build-receipt.json
+          if-no-files-found: error
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         with:
           name: e-mate-base-sdk-${{ github.sha }}
