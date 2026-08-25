@@ -89,7 +89,7 @@
     emateUpdateSelectionFinished:
   !macroend
 
-  !macro customUpdateInstall
+  !macro customUpdateInstallPrepare
     ${if} $emateUpdateAction == "manual"
       !insertmacro emateRunUpdateTransaction "Bootstrap"
       ReadINIStr $emateUpdateAction "$emateUpdateOutput" "update" "action"
@@ -111,23 +111,20 @@
 
     ${if} $emateUpdateAction == "stage"
       StrCpy $INSTDIR "$emateUpdateCandidate"
-      SetOutPath $INSTDIR
-      !ifdef UNINSTALLER_ICON
-        File /oname=uninstallerIcon.ico "${UNINSTALLER_ICON}"
-      !endif
-      !insertmacro installApplicationFiles
     ${elseIf} $emateUpdateAction != "resume"
       DetailPrint "Unexpected e-Mate update prepare action: $emateUpdateAction"
       SetErrorLevel 1
       Quit
     ${endif}
+  !macroend
 
+  !macro customUpdateInstallApply
     StrCpy $INSTDIR "$emateUpdateCanonical"
     !insertmacro emateRunUpdateTransaction "Apply"
     ReadINIStr $emateUpdateAction "$emateUpdateOutput" "update" "action"
     ${if} $emateUpdateAction == "rolled-back"
       ${StdUtils.ExecShellAsUser} $R8 "$emateUpdateCanonical\${APP_EXECUTABLE_FILENAME}" "open" ""
-      Goto emateUpdateInstallFinished
+      Goto appBuilderInstallSectionDone
     ${endif}
 
     ${if} $emateUpdateAction == "launch"
@@ -144,7 +141,7 @@
       ReadINIStr $emateUpdateAction "$emateUpdateOutput" "update" "action"
       ${if} $emateUpdateAction == "rolled-back"
         ${StdUtils.ExecShellAsUser} $R8 "$emateUpdateCanonical\${APP_EXECUTABLE_FILENAME}" "open" ""
-        Goto emateUpdateInstallFinished
+        Goto appBuilderInstallSectionDone
       ${elseIf} $emateUpdateAction != "committed"
       ${andIf} $emateUpdateAction != "forward-only"
         DetailPrint "Unexpected e-Mate update monitor action: $emateUpdateAction"
@@ -155,16 +152,5 @@
 
     StrCpy $INSTDIR "$emateUpdateCanonical"
     StrCpy $appExe "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
-    !insertmacro registryAddInstallInfo
-    !insertmacro addStartMenuLink "false"
-    !insertmacro addDesktopLink "false"
-    !ifmacrodef registerFileAssociations
-      !insertmacro registerFileAssociations
-    !endif
-    !ifmacrodef customInstall
-      !insertmacro customInstall
-    !endif
-
-    emateUpdateInstallFinished:
   !macroend
 !endif

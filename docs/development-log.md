@@ -2274,3 +2274,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 新失败绑定上述 run/job，前置 253 项和 SelfTest 成功事实来自同一 job；当前仍只有 source-fixed diff，没有生成、签名、安装、上传或激活发布字节。
 - Remaining blockers: 必须由下一 Windows runner 真实编译 NSIS 并完成完整 PR CI；随后仍缺同一冻结字节的安装、P0/TQ、更新回滚和性能验收。
 - Next exact action: 取消已被本修复取代的 run 剩余任务，提交推送最小修复并等待新 Windows makensis；生产发布链保持关闭。
+
+## 2026-08-25 · 2.0.13 Windows NSIS 单一安装宏路径修复
+
+- Goal checkpoint: 继续关闭 PR `#56` 的 Windows makensis 门禁；本条将私有更新事务收敛到 electron-builder 唯一解包、注册和快捷方式路径，不把候选、安装态或发布标记完成。
+- Frozen baseline / current HEAD: 单一进程检查修复候选为 `85daba3905268bc1f8a3643df9b84087ec050ebd`，CI run 为 `32855312930`，Windows job 为 `97827430089`；Base/Harness 身份保持不变。
+- Binding documents read: 复核根 `AGENTS.md`、目标/切片合同、上一条完整记录、pinned `app-builder-lib@26.15.3` 原始 NSIS 模板、自定义 installer include 和两项安装链合同测试。
+- Inspected native seam: 新 runner 已通过 Source、Enterprise、六项 Base compatibility、Windows `16 files / 253 tests` 和 PowerShell SelfTest；makensis 随后在自定义事务与 upstream 各展开一次 `installApplicationFiles` 时报告 `packageArch already declared`。该宏及其下游注册/快捷方式宏包含编译期全局变量，运行时短路无法消除重复声明。
+- Experiment or why unnecessary: 不再逐个前移全局变量。事务只保留 Prepare/Apply 两个时点：upstream 唯一进程检查后 Prepare 选择 candidate，upstream 唯一 `installApplicationFiles` 完成后 Apply/Monitor；registry、Start Menu、Desktop、file association 和 `customInstall` 全部继续由 upstream 各执行一次。
+- Decision and forbidden alternatives: 普通安装维持原生 uninstall/extract/start 路径；私有 `stage` 跳过旧版卸载、把唯一解包定向到 candidate，`resume` 跳过重复解包，两者完成事务后复用同一 upstream 注册路径。禁止复制 electron-builder 宏、增加第二安装器、吞掉 warning-as-error 或把 Desktop Base 更新事务伪装成 Creation Mode/Profile 插件。
+- Changed scope: 仅修改 pinned app-builder 补丁、自定义 installer include、Yarn patch hash/checksum和既有合同测试并 append 本记录；未改 PowerShell schema、Profile、Harness、R2、Feed、desired state 或生产状态。
+- Verification commands and results: 原始 Yarn cache 中的 `app-builder-lib@26.15.3` 完整补丁 `git apply --check` 与实际重放均通过，重放模板与安装态模板字节一致；`windows-update-transaction.spec.ts` 为 `9/9`，pinned app-builder patch-chain 定向合同为 `1/1`，`git diff --check` 通过。真实 makensis 必须由下一次 Windows CI 确认。
+- Immutable evidence / receipt: 失败事实绑定上述 run/job；当前只有 source-fixed diff，没有生成、签名、安装、上传、激活或发布任何新字节。
+- Remaining blockers: 新候选必须通过 Windows makensis 和完整受保护 PR CI；随后仍需同一冻结字节的 Windows 安装、三项 P0/TQ、在线更新、失败回滚和性能验收。
+- Next exact action: 取消已被替代的旧 run，提交并推送唯一宏路径修复；等待新的真实 Windows runner 生成 unsigned installer，生产链继续关闭。
