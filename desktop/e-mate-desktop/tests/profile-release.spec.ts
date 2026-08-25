@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto'
+import { generateKeyPairSync, sign } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
   canonicalProfileJson,
@@ -113,6 +113,30 @@ describe('signed Profile desired state', () => {
       ...payload,
       schedule_protocol_floor: 0,
     }, privatePem, keyId)), base)).toBeUndefined()
+  })
+
+  it('verifies a pre-floor release only as Base migration evidence', () => {
+    const { schedule_protocol_floor: ignored, ...legacyPayload } = payload
+    const legacy = {
+      schema_version: 1,
+      payload: legacyPayload,
+      signature: {
+        algorithm: 'ed25519',
+        key_id: keyId,
+        value: sign(null, Buffer.concat([
+          Buffer.from('e-mate-profile-release-v1\0', 'utf8'),
+          Buffer.from(canonicalProfileJson(legacyPayload), 'utf8'),
+        ]), privatePem).toString('base64'),
+      },
+    }
+    const verified = parseProfileReleaseEnvelope(encoded(legacy), base)
+
+    expect(verified?.payload.schedule_protocol_floor).toBe(0)
+    expect(selectProfileRelease(verified!.payload, base, 0)).toBe('base-required')
+    expect(parseProfileReleaseEnvelope(encoded({
+      ...legacy,
+      payload: { ...legacyPayload, schedule_protocol_floor: 0 },
+    }), base)).toBeUndefined()
   })
 
   it('verifies a newer Harness envelope before requiring a Base update', () => {
