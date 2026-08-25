@@ -2148,3 +2148,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Verification commands and results: 根因回归在修复前精确失败；修复后 Gateway 2.0.12/2.0.13/未知版本合同 `1/1`、搜索 denied/unavailable `1/1`、Gateway TypeScript 通过，DSH enterprise identity 2.0.13 精确 query/grant 合同 `1/1`，change-impact 对精确变更判定为有效 Base lane，`git diff --check` 通过。
 - Immutable evidence / receipt: 本条只有 source-fixed Git 证据；未生成、签名、上传、激活或发布任何安装包、Profile generation、manifest 或生产指针。
 - Remaining blocker: 主聚合合入后仍须在最终候选上重跑相同窄门禁；生产 Gateway 部署与真实安装态联网搜索验收属于后续单独授权步骤，本提交不声称上线。
+
+## 2026-08-25 · 2.0.13 仓库级创造模式内循环 scope amendment
+
+- Goal checkpoint: 后续可插件化开发默认改为“Codex 修改后立即通过原生创造模式在隔离开发会话原地生效和验证，版本冻结时再统一固化发布”；本条只收紧开发方法，不改变 2.0.13 功能范围或发布状态。
+- Frozen baseline / current HEAD: 独立 worktree 精确基于事故聚合 `7e126fcd43eb1489868fbf4da76823d56015b50e`；Base 为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`，Harness 为 `0.1.0-rc.7` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`，Desktop reference 为 `6074088f5b660206e404b3591fab51fb99c69add`。
+- Binding documents read: 完整读取根 `AGENTS.md`、`docs/target-contract.md` 与本日志上一条完整记录，并核对当前 `desktop/e-mate-desktop/base-contract.json` 和 Harness gitlink。
+- Inspected native seam: 仓库已有唯一 “First development rule: use native DSH Creation Mode first” 章节、rc.7 `cordis` preset、两项原生创作 Skill、`cordis_inspect_*` 和 define/run/stop/undefine 生命周期；`scripts/change-impact.test.mjs` 已是该仓库准则的最窄可执行合同。
+- Experiment or why unnecessary: 本切片只修改仓库治理文本和合同测试，不改运行时行为，因此不启动动态包；后续每项可插件化产品改动才必须在当前隔离开发会话执行原生热替换和真实窄交互验证。
+- Decision and forbidden alternatives: 创造模式是默认开发内循环且仅为进程内开发证据，重启即消失；不得持有签名、R2、Feed、生产 desired-state 或发布权限，不得直接成为发布物或替代安装态、跨平台、性能、回滚验收。每项原地验证后仍回到既有 Owner 的普通 Profile 插件，多项已验证改动只在版本冻结时汇总；Base-only 修改继续沿 pinned Desktop lifecycle，禁止第二套热更新、运行时、存储或协议。
+- Changed scope: 仅修改根 `AGENTS.md`、已有 `scripts/change-impact.test.mjs` 合同断言并 append 本记录；未修改功能源码、Profile、Base、Harness、Desktop、生产配置或发布状态。
+- Verification commands and results: 使用安装态 Electron 所带 Node `24.18.1` 执行 `--test scripts/change-impact.test.mjs`，仓库 release boundary `22/22` 全过，其中 Creation Mode 准则合同通过；`git diff --check` 通过。
+- Immutable evidence / receipt: 本条只有 source-fixed Git 提交证据；没有生成、签名、安装、上传、激活或发布任何制品。
+- Remaining blockers: 主聚合需复核并合入本规则提交；每个后续插件切片仍须分别留下原地热替换证据、永久插件映射与最窄回归，正式版本仍按原安装态和发布门禁执行。
+- Next exact action: 运行最窄合同测试与 diff 检查，提交独立规则变更并回传 SHA；主代理合入后按新内循环继续各切片，不触发生产链。
