@@ -105,7 +105,7 @@ jobs:
           test "$(jq -er '.conclusion' <<<"$desktop_json")" = success
           test "$(jq -er '.run_attempt' <<<"$desktop_json")" = 1
           desktop_jobs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$desktop_run_id/jobs?per_page=100")"
-          for name in 'Build unsigned macOS universal disk image' 'Bind native artifacts to the release manifest'; do
+          for name in 'Bind exact protected-main CI artifacts to the release manifest'; do
             jq -e --arg name "$name" \
               '[.jobs[] | select(.name == $name and .status == "completed" and .conclusion == "success")] | length == 1' \
               <<<"$desktop_jobs" >/dev/null
@@ -148,10 +148,10 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ steps.provenance.outputs.desktop_run_id }}
 
-      - name: Verify Desktop bytes and resolve their Profile build run
+      - name: Verify Desktop bytes and resolve their CI producer run
         id: candidate
         env:
-          DESKTOP_RUN_ID: ${{ steps.provenance.outputs.desktop_run_id }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
@@ -162,7 +162,7 @@ jobs:
 
           const root = resolve('.performance/desktop')
           const source = process.env.GITHUB_SHA
-          const desktopRunId = process.env.DESKTOP_RUN_ID
+          const ciRunId = process.env.CI_RUN_ID
           const version = JSON.parse(await readFile('desktop/e-mate-desktop/package.json', 'utf8')).version
           const base = JSON.parse(await readFile('desktop/e-mate-desktop/base-contract.json', 'utf8'))
           const names = {
@@ -211,8 +211,9 @@ jobs:
               throw new Error(`Desktop candidate ${platform} bytes are invalid`)
             }
           }
-          if (candidate.artifacts.darwin.build_run_id !== desktopRunId) {
-            throw new Error('Desktop candidate is not owned by the selected Desktop run')
+          if (candidate.artifacts.darwin.build_run_id !== ciRunId
+            || candidate.artifacts.win32.build_run_id !== ciRunId) {
+            throw new Error('Desktop candidate installers are not owned by the selected CI run')
           }
           await appendFile(process.env.GITHUB_OUTPUT, `profile_build_run_id=${candidate.artifacts.win32.build_run_id}\n`)
           NODE
@@ -229,13 +230,13 @@ jobs:
           test "$(jq -er '.repository.full_name' <<<"$run_json")" = "$GITHUB_REPOSITORY"
           test "$(jq -er '.head_sha' <<<"$run_json")" = "$GITHUB_SHA"
           test "$(jq -er '.head_branch' <<<"$run_json")" = main
-          test "$(jq -er '.path' <<<"$run_json")" = .github/workflows/desktop-release.yml
-          test "$(jq -er '.event' <<<"$run_json")" = workflow_dispatch
+          test "$(jq -er '.path' <<<"$run_json")" = .github/workflows/ci.yml
+          test "$(jq -er '.event' <<<"$run_json")" = push
           test "$(jq -er '.status' <<<"$run_json")" = completed
           test "$(jq -er '.conclusion' <<<"$run_json")" = success
           test "$(jq -er '.run_attempt' <<<"$run_json")" = 1
           jobs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PROFILE_BUILD_RUN_ID/jobs?per_page=100")"
-          for name in 'Build and verify the e-Mate profile' 'Build unsigned Windows x64 installer'; do
+          for name in 'CI admission' 'Node 24 / target contracts and unit tests' 'Windows x64 / unsigned desktop installer' 'macOS universal / unsigned desktop disk image'; do
             jq -e --arg name "$name" \
               '[.jobs[] | select(.name == $name and .status == "completed" and .conclusion == "success")] | length == 1' \
               <<<"$jobs" >/dev/null

@@ -195,7 +195,7 @@ async function desktopCandidate(root) {
       bytes: item.bytes.length,
       sha256: sha256(item.bytes),
       build_source_commit: SOURCE,
-      build_run_id: platform === 'darwin' ? '102' : '101',
+      build_run_id: '100',
     }])),
   }
   const path = join(root, 'desktop-candidate.json')
@@ -454,10 +454,12 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
     await json(join(metadata, 'desktop-run.json'), run('102', '.github/workflows/desktop-release.yml'))
     await json(join(metadata, 'profile-run.json'), run('103', '.github/workflows/profile-release.yml'))
     await json(join(metadata, 'performance-run.json'), run('104', '.github/workflows/desktop-performance.yml'))
-    await json(join(metadata, 'profile-build-run.json'), run('101', '.github/workflows/desktop-release.yml'))
-    await json(join(metadata, 'ci-jobs.json'), jobs(['CI admission']))
+    await json(join(metadata, 'ci-jobs.json'), jobs([
+      'CI admission', 'Node 24 / target contracts and unit tests',
+      'Windows x64 / unsigned desktop installer', 'macOS universal / unsigned desktop disk image',
+    ]))
     await json(join(metadata, 'desktop-jobs.json'), jobs([
-      'Build unsigned macOS universal disk image', 'Bind native artifacts to the release manifest',
+      'Bind exact protected-main CI artifacts to the release manifest',
     ]))
     await json(join(metadata, 'profile-jobs.json'), jobs([
       'Validate accepted CI evidence',
@@ -465,15 +467,15 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
       'Prepare signed native Cloudflare publication bundle',
     ]))
     await json(join(metadata, 'performance-jobs.json'), jobs(['Performance admission']))
-    await json(join(metadata, 'profile-build-jobs.json'), jobs([
-      'Build and verify the e-Mate profile', 'Build unsigned Windows x64 installer',
-    ]))
     await json(join(metadata, 'desktop-artifact.json'), artifact('201', `e-mate-desktop-release-${SOURCE}`, '102'))
     await json(join(metadata, 'ci-artifact.json'), artifact('206', `e-mate-change-impact-${SOURCE}`, '100'))
     await json(join(metadata, 'profile-publication-artifact.json'), artifact('202', `e-mate-profile-native-cloudflare-publication-${SOURCE}`, '103'))
     await json(join(metadata, 'performance-artifact.json'), artifact('203', `e-mate-performance-admission-${SOURCE}-attempt-1`, '104'))
-    await json(join(metadata, 'profile-build-artifact.json'), artifact('204', `e-mate-desktop-profile-${SOURCE}`, '101'))
-    await json(join(metadata, 'profile-build-receipt-artifact.json'), artifact('205', `e-mate-desktop-profile-build-receipt-${SOURCE}`, '101'))
+    await json(join(metadata, 'base-sdk-artifact.json'), artifact('204', `e-mate-base-sdk-${SOURCE}`, '100'))
+    await json(join(metadata, 'profile-build-artifact.json'), artifact('205', `e-mate-desktop-profile-${SOURCE}`, '100'))
+    await json(join(metadata, 'profile-build-receipt-artifact.json'), artifact('207', `e-mate-desktop-profile-build-receipt-${SOURCE}`, '100'))
+    await json(join(metadata, 'windows-ci-artifact.json'), artifact('208', `e-mate-desktop-windows-${SOURCE}`, '100'))
+    await json(join(metadata, 'macos-ci-artifact.json'), artifact('209', `e-mate-desktop-macos-${SOURCE}`, '100'))
     const options = {
       sourceCommit: SOURCE, candidate: desktop.path, metadata,
       ciRunId: '100', desktopRunId: '102', profileRunId: '103', performanceRunId: '104',
@@ -506,10 +508,8 @@ test('workflow is build-only and uploads only the two external signer inputs', a
   assert.deepEqual(Object.keys(parsed.jobs), ['admission'])
   assert.equal(parsed.jobs.admission.name, 'Desktop release admission')
   assert.ok(Object.values(ci.jobs).some(job => job.name === 'CI admission'))
-  assert.ok(Object.values(desktopRelease.jobs).some(job => job.name === 'Build and verify the e-Mate profile'))
-  assert.ok(Object.values(desktopRelease.jobs).some(job => job.name === 'Build unsigned Windows x64 installer'))
-  assert.ok(Object.values(desktopRelease.jobs).some(job => job.name === 'Build unsigned macOS universal disk image'))
-  assert.ok(Object.values(desktopRelease.jobs).some(job => job.name === 'Bind native artifacts to the release manifest'))
+  assert.deepEqual(Object.keys(desktopRelease.jobs), ['manifest'])
+  assert.ok(Object.values(desktopRelease.jobs).some(job => job.name === 'Bind exact protected-main CI artifacts to the release manifest'))
   assert.ok(Object.values(profileRelease.jobs).some(job => job.name === 'Validate accepted CI evidence'))
   assert.ok(Object.values(profileRelease.jobs).some(job => job.name === 'Bootstrap complete Profile generation / ${{ matrix.target }}'))
   assert.ok(Object.values(profileRelease.jobs).some(job => job.name === 'Prepare signed native Cloudflare publication bundle'))
@@ -530,8 +530,9 @@ test('workflow is build-only and uploads only the two external signer inputs', a
   assert.match(workflow, /pnpm --dir upstream\/deepseek-harness install --frozen-lockfile --ignore-scripts/u)
   assert.match(workflow, /base-contract\.json,desktop-release-unsigned\.json/u)
   assert.doesNotMatch(workflow, /secrets\.|aws |wrangler|r2-publish|desktop\/latest\.json/u)
-  assert.match(desktopBuild, /e-mate-desktop-profile-build-receipt-\$\{\{ github\.sha \}\}/u)
-  assert.match(desktopBuild, /include-hidden-files: true/u)
+  assert.match(desktopBuild, /e-mate-desktop-profile-build-receipt-\$\{\{ inputs\.source_sha \}\}/u)
+  assert.match(desktopBuild, /stage-desktop-ci-artifact\.mjs verify/u)
+  assert.doesNotMatch(desktopBuild, /build:harness|pnpm test|yarn install|build:sdk|dist:win|dist:mac/u)
   assert.match(desktopBuild, /retention-days: 30/u)
 })
 
@@ -550,6 +551,9 @@ test('performance evidence and signing use their existing isolated environments'
   assert.match(workflow, /test "\$\{GITHUB_REF_PROTECTED:-\}" = true/u)
   assert.match(workflow, /test "\$GITHUB_RUN_ATTEMPT" = 1/u)
   assert.match(workflow, /GITHUB_WORKFLOW_REF" = "\$GITHUB_REPOSITORY\/\.github\/workflows\/desktop-performance\.yml@refs\/heads\/main"/u)
+  assert.match(workflow, /Desktop candidate installers are not owned by the selected CI run/u)
+  assert.match(workflow, /test "\$\(jq -er '\.path' <<<"\$run_json"\)" = \.github\/workflows\/ci\.yml/u)
+  assert.doesNotMatch(workflow, /Build and verify the e-Mate profile|Build unsigned macOS universal disk image/u)
   assert.match(workflow, /files\.length !== 92/u)
   for (const leafId of PERFORMANCE_MODEL_LEAF_IDS) {
     assert.match(workflow, new RegExp(`e-mate-performance-evidence-${leafId}-\\$\\{\\{ github\\.sha \\}\\}-attempt-1`, 'u'))

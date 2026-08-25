@@ -116,43 +116,50 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.desktop_run_id }}
 
-      - name: Resolve the candidate's exact Profile build artifacts
-        id: profile-build
+      - name: Resolve the exact CI-owned Profile and platform artifacts
+        id: ci-build
         env:
           GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
         run: |
           set -euo pipefail
           candidate=.admission/desktop/desktop-candidate.json
           test -f "$candidate"
-          profile_build_run_id="$(jq -er '.artifacts.win32.build_run_id | select(test("^[1-9][0-9]*$"))' "$candidate")"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$profile_build_run_id" > .admission/metadata/profile-build-run.json
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$profile_build_run_id/jobs?per_page=100" > .admission/metadata/profile-build-jobs.json
-          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$profile_build_run_id/artifacts?per_page=100")"
-          profile_artifact_id="$(jq -er --arg name "e-mate-desktop-profile-$GITHUB_SHA" \
-            '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one Profile build artifact") end' <<<"$artifacts")"
-          receipt_artifact_id="$(jq -er --arg name "e-mate-desktop-profile-build-receipt-$GITHUB_SHA" \
-            '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one Profile build receipt artifact") end' <<<"$artifacts")"
+          test "$(jq -er .artifacts.win32.build_run_id "$candidate")" = "$CI_RUN_ID"
+          test "$(jq -er .artifacts.darwin.build_run_id "$candidate")" = "$CI_RUN_ID"
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100")"
+          artifact_id() {
+            jq -er --arg name "$1" \
+              '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one exact CI artifact") end' <<<"$artifacts"
+          }
+          profile_artifact_id="$(artifact_id "e-mate-desktop-profile-$GITHUB_SHA")"
+          receipt_artifact_id="$(artifact_id "e-mate-desktop-profile-build-receipt-$GITHUB_SHA")"
+          base_sdk_artifact_id="$(artifact_id "e-mate-base-sdk-$GITHUB_SHA")"
+          windows_artifact_id="$(artifact_id "e-mate-desktop-windows-$GITHUB_SHA")"
+          macos_artifact_id="$(artifact_id "e-mate-desktop-macos-$GITHUB_SHA")"
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$profile_artifact_id" > .admission/metadata/profile-build-artifact.json
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$receipt_artifact_id" > .admission/metadata/profile-build-receipt-artifact.json
-          echo "run_id=$profile_build_run_id" >> "$GITHUB_OUTPUT"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$base_sdk_artifact_id" > .admission/metadata/base-sdk-artifact.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$windows_artifact_id" > .admission/metadata/windows-ci-artifact.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$macos_artifact_id" > .admission/metadata/macos-ci-artifact.json
           echo "artifact_id=$profile_artifact_id" >> "$GITHUB_OUTPUT"
           echo "receipt_artifact_id=$receipt_artifact_id" >> "$GITHUB_OUTPUT"
 
       - name: Download the exact staged Profile bytes
         uses: actions/download-artifact@v4
         with:
-          artifact-ids: ${{ steps.profile-build.outputs.artifact_id }}
+          artifact-ids: ${{ steps.ci-build.outputs.artifact_id }}
           path: .admission/profile-build
           github-token: ${{ github.token }}
-          run-id: ${{ steps.profile-build.outputs.run_id }}
+          run-id: ${{ inputs.ci_run_id }}
 
       - name: Download the exact staged Profile build receipt
         uses: actions/download-artifact@v4
         with:
-          artifact-ids: ${{ steps.profile-build.outputs.receipt_artifact_id }}
+          artifact-ids: ${{ steps.ci-build.outputs.receipt_artifact_id }}
           path: .admission/profile-build-receipt
           github-token: ${{ github.token }}
-          run-id: ${{ steps.profile-build.outputs.run_id }}
+          run-id: ${{ inputs.ci_run_id }}
 
       - name: Download the exact signed Profile publication bundle
         uses: actions/download-artifact@v4

@@ -2568,3 +2568,16 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有源码 diff 与无密钥测试；没有真实 runner config/broker、四模型调用、17 个 production source files、performance admission、上传或生产写入。
 - Remaining blockers: 合入 protected main 后，ephemeral self-hosted runner 必须提供 owner-only frozen baseline receipt、安装根、两个 broker 与 acceptance-only preload，并实际跑完四模型 360 个 path sample；任一模型、Session、Usage、paint、offline cache、安装或 artifact 字段缺失即整次失败关闭。
 - Next exact action: 提交本第二阶段最小 diff 交主代理复核；只允许 exact protected-main attempt-1 workflow 在真实 runner 运行，禁止本地开发链触及生产发布或复用旧 evidence。
+## 2026-08-26 · 2.0.13 Build-once Desktop release ownership
+
+- Goal checkpoint: 将受保护 main CI 的 Base SDK、共享 Desktop、Profile、Windows EXE 与 macOS DMG 固定为唯一构建字节；后续 Desktop/Profile/performance/admission 只下载、重验、绑定，不重建或发布。
+- Frozen baseline / current HEAD: 独立 worktree `codex/build-once-release` 从 `feat/2.0.13-native-perf-producer@62a77b62628d01c53befc5970bf5a7c9d048c475` 创建；未读取或修改生产 R2、Feed、desired state、签名或安装态。
+- Binding documents read: 完整读取根 `AGENTS.md`、`target-contract.md`、上一条 development log 与用户提供的 CI/发行优化合同；冲突时以 Build once → Verify many → Sign exact bytes → Publish without rebuild 为准。
+- Inspected native seam: `ci.yml` 已产出 Base SDK、staged Profile、Windows/macOS artifacts；旧 `desktop-release.yml` 又完整安装 Harness/Desktop toolchain、重跑测试、重建 SDK/Profile/EXE/DMG，且 Admission/Performance 把 Profile 与 Windows bytes 错归到 Desktop release run。现有 Base SDK manifest 已闭合哈希 shared Desktop `lib`，无需第二 shared receipt。
+- Experiment or why unnecessary: 该变更只涉及 GitHub artifact/provenance release plane，Creation Mode 不能表示。新增同一 strict staging/verify helper，以 installer、可选真实 blockmap、runtime receipt 和 artifact receipt 的 closed fileset验证 source、CI run、Base、Harness、bytes、SHA-256及 PE/UDIF；未新增构建或传输路径。
+- Decision and forbidden alternatives: Desktop release 只接受 exact repository/protected main/source/attempt-1/success CI admission，并消费 source-specific Base/Profile/Profile receipt/Windows/macOS artifacts；candidate 的两端 `build_run_id` 均保持原 CI run。禁止 release rerun Harness/tests/Yarn SDK/electron-builder，禁止 mac-smoke、cache authority、重标旧 bytes、伪造 blockmap或第二 shared truth。
+- Changed scope: 修改 Desktop release、Profile release source acceptance、Performance/Admission artifact owner接线、唯一 CI platform receipt helper及其合同测试；未修改 `ci.yml`、change-impact 分类器、performance probe、产品 runtime、Base/Profile/Harness bytes或生产发布面。
+- Verification commands and results: `pnpm run test:release` 24/24；`pnpm run test:impact` 35 passed / 5 environment-skipped / 0 failed；`git diff --check` 通过。CI staging workflow需在合并本 helper 后调用其 `stage` 命令，才形成完整 protected-main生产链。
+- Immutable evidence / receipt: 当前只有 source-fixed commit 前 diff与本地无密钥 fixture；没有 GitHub protected-main artifact、签名 admission、候选安装、上传或生产指针变化。
+- Remaining blockers: CI PR必须使用本 helper生成 source-specific formal EXE/DMG artifacts和 Profile build receipt；合并后以 exact main run 验证真实 artifacts，再继续 Performance、Admission、签名、Cloudflare发布及安装/更新/回滚。
+- Next exact action: 提交本切片供主代理按依赖顺序合入；CI 先调用唯一 stage owner，再运行 exact protected-main CI 和无重建 Desktop release。

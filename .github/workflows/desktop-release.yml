@@ -3,276 +3,181 @@ name: Release e-Mate Desktop
 on:
   workflow_dispatch:
     inputs:
-      reuse_run_id:
-        description: Prior build run whose successful profile and Windows artifacts may be reused by a macOS-only retry.
-        required: false
+      ci_run_id:
+        description: Attempt-1 protected-main CI run that built the exact release bytes.
+        required: true
         type: string
-        default: ''
+      source_sha:
+        description: Exact protected-main source SHA accepted by that CI run.
+        required: true
+        type: string
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: e-mate-desktop-release-${{ inputs.source_sha }}
   cancel-in-progress: false
 
 env:
   DSH_TELEMETRY_DISABLED: '1'
 
 jobs:
-  reuse:
-    if: ${{ inputs.reuse_run_id != '' }}
-    name: Validate reusable profile and Windows artifacts
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      source_sha: ${{ steps.accepted.outputs.source_sha }}
-    steps:
-      - name: Accept only the prior run's successful unaffected jobs
-        id: accepted
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
-        run: |
-          set -euo pipefail
-          [[ "$REUSE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REUSE_RUN_ID")"
-          source_sha="$(jq -er '.head_sha | select(test("^[0-9a-f]{40}$"))' <<<"$run_json")"
-          test "$source_sha" = "$GITHUB_SHA"
-          test "$(jq -er .event <<<"$run_json")" = workflow_dispatch
-          test "$(jq -er .path <<<"$run_json")" = .github/workflows/desktop-release.yml
-          jobs_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REUSE_RUN_ID/jobs?per_page=100")"
-          jq -e '.jobs | any(.name == "Build and verify the e-Mate profile" and .conclusion == "success")' <<<"$jobs_json" >/dev/null
-          jq -e '.jobs | any(.name == "Build unsigned Windows x64 installer" and .conclusion == "success")' <<<"$jobs_json" >/dev/null
-          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
-
-  profile:
-    if: ${{ inputs.reuse_run_id == '' }}
-    name: Build and verify the e-Mate profile
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          submodules: recursive
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: pnpm
-          cache-dependency-path: |
-            pnpm-lock.yaml
-            packages/dsh-plugin-*/pnpm-lock.yaml
-            packages/dsh/profile/plugins/emate-shell/pnpm-lock.yaml
-            upstream/deepseek-harness/pnpm-lock.yaml
-      - run: |
-          pnpm install --frozen-lockfile
-          pnpm --dir upstream/deepseek-harness install --frozen-lockfile
-          pnpm build:harness
-          pnpm check:target
-          pnpm test
-          corepack enable
-          cd desktop
-          yarn install --immutable
-          yarn build:sdk
-          cd ..
-          node scripts/base-sdk.mjs emit --directory .release-cache/base-sdk
-      - name: Stage the exact built e-Mate profile without development links
-        run: node scripts/stage-desktop-profile-artifact.mjs
-      - name: Bind the staged Profile bytes to the source and Base
-        run: >-
-          node scripts/desktop-admission.mjs
-          profile-build-receipt
-          --commit "$GITHUB_SHA"
-          --profile .release-cache/profile-artifact
-          --inventory packages/dsh/profile/component-inventory.json
-          --base-contract desktop/e-mate-desktop/base-contract.json
-          --out .release-cache/profile-build-receipt/profile-build-receipt.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: e-mate-desktop-profile-${{ github.sha }}
-          path: |
-            .release-cache/profile-artifact/dsh/profile
-            .release-cache/profile-artifact/dsh-plugin-*/lib
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 30
-      - uses: actions/upload-artifact@v4
-        with:
-          name: e-mate-desktop-profile-build-receipt-${{ github.sha }}
-          path: .release-cache/profile-build-receipt/profile-build-receipt.json
-          if-no-files-found: error
-          retention-days: 30
-      - uses: actions/upload-artifact@v4
-        with:
-          name: e-mate-base-sdk-${{ github.sha }}
-          path: .release-cache/base-sdk
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 30
-
-  windows:
-    if: ${{ inputs.reuse_run_id == '' }}
-    name: Build unsigned Windows x64 installer
-    needs: profile
-    runs-on: windows-2025
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-          submodules: recursive
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22.23.2'
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - run: corepack enable
-      - uses: actions/download-artifact@v4
-        with:
-          name: e-mate-desktop-profile-${{ github.sha }}
-          path: packages
-      - uses: actions/download-artifact@v4
-        with:
-          name: e-mate-base-sdk-${{ github.sha }}
-          path: .release-cache/base-sdk
-      - name: Install and verify the exact Base SDK
-        run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
-      - name: Prepare the exact offline Windows Vision runtime
-        run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets win32-x64
-      - name: Resolve Yarn cache folder
-        id: yarn-cache
-        shell: bash
-        run: echo "dir=$(cd desktop && yarn config get cacheFolder)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
-        with:
-          path: ${{ steps.yarn-cache.outputs.dir }}
-          key: desktop-yarn-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/yarn.lock', 'desktop/.yarnrc.yml') }}
-      - working-directory: desktop
-        run: yarn install --immutable
-      - working-directory: desktop
-        run: yarn dist:win
-      - name: Resolve packaged desktop version
-        id: version
-        working-directory: desktop
-        shell: bash
-        run: |
-          version="$(node -p "require(process.argv[1]).version" "./e-mate-desktop/package.json")"
-          echo "value=$version" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: e-mate-desktop-windows-${{ github.sha }}
-          path: desktop/e-mate-desktop/dist/e-Mate-${{ steps.version.outputs.value }}-win-x64-Setup.exe
-          compression-level: 0
-          if-no-files-found: error
-          retention-days: 30
-
-  macos:
-    if: ${{ always() && ((inputs.reuse_run_id == '' && needs.profile.result == 'success') || (inputs.reuse_run_id != '' && needs.reuse.result == 'success')) }}
-    name: Build unsigned macOS universal disk image
-    needs: [profile, reuse]
-    runs-on: macos-15
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-          submodules: recursive
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22.23.2'
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - run: corepack enable
-      - uses: actions/download-artifact@v4
-        with:
-          name: ${{ inputs.reuse_run_id != '' && format('e-mate-desktop-profile-{0}', needs.reuse.outputs.source_sha) || format('e-mate-desktop-profile-{0}', github.sha) }}
-          path: packages
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: ${{ inputs.reuse_run_id != '' && format('e-mate-base-sdk-{0}', needs.reuse.outputs.source_sha) || format('e-mate-base-sdk-{0}', github.sha) }}
-          path: .release-cache/base-sdk
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}
-      - name: Install and verify the exact Base SDK
-        run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
-      - name: Prepare the exact offline universal macOS Vision runtime
-        run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets darwin-arm64,darwin-x64
-      - name: Resolve Yarn cache folder
-        id: yarn-cache
-        run: echo "dir=$(cd desktop && yarn config get cacheFolder)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
-        with:
-          path: ${{ steps.yarn-cache.outputs.dir }}
-          key: desktop-yarn-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/yarn.lock', 'desktop/.yarnrc.yml') }}
-      - working-directory: desktop
-        run: yarn install --immutable
-      - working-directory: desktop
-        run: yarn dist:mac-unsigned-release
-      - name: Resolve packaged desktop version
-        id: version
-        working-directory: desktop
-        run: |
-          version="$(node -p "require(process.argv[1]).version" "./e-mate-desktop/package.json")"
-          echo "value=$version" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: e-mate-desktop-macos-${{ github.sha }}
-          path: desktop/e-mate-desktop/dist/mac-unsigned-release/e-Mate-${{ steps.version.outputs.value }}-mac-universal.dmg
-          compression-level: 0
-          if-no-files-found: error
-          retention-days: 30
-
   manifest:
-    if: ${{ always() && needs.macos.result == 'success' && ((inputs.reuse_run_id == '' && needs.windows.result == 'success') || (inputs.reuse_run_id != '' && needs.reuse.result == 'success')) }}
-    name: Bind native artifacts to the release manifest
-    needs: [reuse, windows, macos]
+    name: Bind exact protected-main CI artifacts to the release manifest
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.source_sha }}
           persist-credentials: false
+
       - uses: actions/setup-node@v6
         with:
           node-version: '22.23.2'
-      - uses: actions/download-artifact@v4
+
+      - name: Accept only the exact attempt-1 protected-main CI producer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = zyfjacksonchen-source/e-Mate-2.0.11
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          test "${GITHUB_REF_PROTECTED:-}" = true
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/desktop-release.yml@refs/heads/main"
+          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID")"
+          test "$(jq -er .repository.full_name <<<"$run_json")" = "$GITHUB_REPOSITORY"
+          test "$(jq -er .path <<<"$run_json")" = .github/workflows/ci.yml
+          test "$(jq -er .event <<<"$run_json")" = push
+          test "$(jq -er .head_branch <<<"$run_json")" = main
+          test "$(jq -er .head_sha <<<"$run_json")" = "$SOURCE_SHA"
+          test "$(jq -er .status <<<"$run_json")" = completed
+          test "$(jq -er .conclusion <<<"$run_json")" = success
+          test "$(jq -er .run_attempt <<<"$run_json")" = 1
+          jobs_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/jobs?per_page=100")"
+          for name in \
+            'CI admission' \
+            'Node 24 / target contracts and unit tests' \
+            'Windows x64 / unsigned desktop installer' \
+            'macOS universal / unsigned desktop disk image'; do
+            test "$(jq -r --arg name "$name" '[.jobs[] | select(.name == $name and .conclusion == "success")] | length' <<<"$jobs_json")" = 1
+          done
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100")"
+          for name in \
+            "e-mate-base-sdk-$SOURCE_SHA" \
+            "e-mate-desktop-profile-$SOURCE_SHA" \
+            "e-mate-desktop-profile-build-receipt-$SOURCE_SHA" \
+            "e-mate-desktop-windows-$SOURCE_SHA" \
+            "e-mate-desktop-macos-$SOURCE_SHA"; do
+            test "$(jq -r --arg name "$name" '[.artifacts[] | select(.name == $name and .expired == false and (.digest | test("^sha256:[0-9a-f]{64}$")))] | length' <<<"$artifacts")" = 1
+          done
+
+      - name: Download the exact accepted Base SDK
+        uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.reuse_run_id != '' && format('e-mate-desktop-windows-{0}', needs.reuse.outputs.source_sha) || format('e-mate-desktop-windows-{0}', github.sha) }}
-          path: dist/desktop
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}
-      - uses: actions/download-artifact@v4
+          name: e-mate-base-sdk-${{ inputs.source_sha }}
+          path: .release-inputs/base-sdk
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.ci_run_id }}
+
+      - name: Download the exact accepted staged Profile
+        uses: actions/download-artifact@v4
         with:
-          name: e-mate-desktop-macos-${{ github.sha }}
-          path: dist/desktop
-      - name: Resolve manifest version
+          name: e-mate-desktop-profile-${{ inputs.source_sha }}
+          path: .release-inputs/profile
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.ci_run_id }}
+
+      - name: Download the exact accepted Profile build receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: e-mate-desktop-profile-build-receipt-${{ inputs.source_sha }}
+          path: .release-inputs/profile-receipt
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.ci_run_id }}
+
+      - name: Download the exact accepted Windows installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: e-mate-desktop-windows-${{ inputs.source_sha }}
+          path: .release-inputs/windows
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.ci_run_id }}
+
+      - name: Download the exact accepted macOS installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: e-mate-desktop-macos-${{ inputs.source_sha }}
+          path: .release-inputs/macos
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.ci_run_id }}
+
+      - name: Verify Base SDK, shared Desktop, Profile, and platform receipts
+        env:
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/base-sdk.mjs verify --directory .release-inputs/base-sdk
+          jq -e '.files | any(.path | startswith("desktop/e-mate-desktop/lib/"))' .release-inputs/base-sdk/manifest.json >/dev/null
+          node scripts/desktop-admission.mjs profile-build-receipt \
+            --commit "$SOURCE_SHA" \
+            --profile .release-inputs/profile \
+            --inventory packages/dsh/profile/component-inventory.json \
+            --base-contract desktop/e-mate-desktop/base-contract.json \
+            --out .release-inputs/recomputed-profile-build-receipt.json
+          cmp -s .release-inputs/profile-receipt/profile-build-receipt.json .release-inputs/recomputed-profile-build-receipt.json
+          node scripts/stage-desktop-ci-artifact.mjs verify \
+            --platform win32 --source-commit "$SOURCE_SHA" --ci-run-id "$CI_RUN_ID" \
+            --base-contract desktop/e-mate-desktop/base-contract.json --directory .release-inputs/windows
+          node scripts/stage-desktop-ci-artifact.mjs verify \
+            --platform darwin --source-commit "$SOURCE_SHA" --ci-run-id "$CI_RUN_ID" \
+            --base-contract desktop/e-mate-desktop/base-contract.json --directory .release-inputs/macos
+
+      - name: Stage only the exact CI-produced installer bytes
         id: version
         run: |
-          version="$(node -p "require(process.argv[1]).version" "./desktop/e-mate-desktop/package.json")"
+          set -euo pipefail
+          version="$(node -p "require(process.argv[1]).version" desktop/e-mate-desktop/package.json)"
+          mkdir -p dist/desktop
+          cp ".release-inputs/macos/e-Mate-$version-mac-universal.dmg" dist/desktop/
+          cp ".release-inputs/windows/e-Mate-$version-win-x64-Setup.exe" dist/desktop/
           echo "value=$version" >> "$GITHUB_OUTPUT"
+
       - name: Generate performance-pending Desktop artifact candidate
+        env:
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
         run: >-
           node desktop/e-mate-desktop/scripts/desktop-release-manifest.ts
           candidate
           --mac dist/desktop/e-Mate-${{ steps.version.outputs.value }}-mac-universal.dmg
           --win dist/desktop/e-Mate-${{ steps.version.outputs.value }}-win-x64-Setup.exe
-          --commit "$GITHUB_SHA"
-          --mac-commit "$GITHUB_SHA"
-          --win-commit "${{ inputs.reuse_run_id != '' && needs.reuse.outputs.source_sha || github.sha }}"
-          --mac-run "$GITHUB_RUN_ID"
-          --win-run "${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}"
+          --commit "$SOURCE_SHA"
+          --mac-commit "$SOURCE_SHA"
+          --win-commit "$SOURCE_SHA"
+          --mac-run "$CI_RUN_ID"
+          --win-run "$CI_RUN_ID"
           --out dist/desktop/desktop-candidate.json
+
       - uses: actions/upload-artifact@v4
         with:
-          name: e-mate-desktop-release-${{ github.sha }}
-          path: dist/desktop/*
+          name: e-mate-desktop-release-${{ inputs.source_sha }}
+          path: |
+            dist/desktop/desktop-candidate.json
+            dist/desktop/e-Mate-${{ steps.version.outputs.value }}-mac-universal.dmg
+            dist/desktop/e-Mate-${{ steps.version.outputs.value }}-win-x64-Setup.exe
+          compression-level: 0
           if-no-files-found: error
           retention-days: 30

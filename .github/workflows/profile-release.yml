@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ci_run_id:
-        description: Successful CI run for the current main commit or its exact merged pull-request tree.
+        description: Attempt-1 protected-main CI run for the exact current main commit.
         required: true
         type: string
       bootstrap:
@@ -49,53 +49,26 @@ jobs:
           CI_RUN_ID: ${{ inputs.ci_run_id }}
         run: |
           set -euo pipefail
+          test "$GITHUB_REPOSITORY" = zyfjacksonchen-source/e-Mate-2.0.11
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
           test "$GITHUB_REF" = refs/heads/main
+          test "${GITHUB_REF_PROTECTED:-}" = true
           test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/profile-release.yml@refs/heads/main"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID")"
           source_sha="$(jq -er .head_sha <<<"$run_json")"
           [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
+          test "$(jq -er .repository.full_name <<<"$run_json")" = "$GITHUB_REPOSITORY"
           test "$(jq -er .path <<<"$run_json")" = .github/workflows/ci.yml
+          test "$(jq -er .event <<<"$run_json")" = push
+          test "$(jq -er .head_branch <<<"$run_json")" = main
+          test "$(jq -er .status <<<"$run_json")" = completed
           test "$(jq -er .conclusion <<<"$run_json")" = success
           test "$(jq -er .run_attempt <<<"$run_json")" = 1
-          case "$(jq -er .event <<<"$run_json")" in
-            push)
-              test "$source_sha" = "$GITHUB_SHA"
-              test "$(jq -er .head_branch <<<"$run_json")" = main
-              ;;
-            pull_request)
-              pr_json="$(
-                gh api -H 'Accept: application/vnd.github+json' \
-                  "repos/$GITHUB_REPOSITORY/commits/$source_sha/pulls" \
-                | jq -cer --arg source "$source_sha" \
-                  '[.[] | select(.merged_at != null and .base.ref == "main" and .head.sha == $source)]
-                   | if length == 1 then .[0] else error("expected one merged main pull request") end'
-              )"
-              merge_sha="$(jq -er .merge_commit_sha <<<"$pr_json")"
-              [[ "$merge_sha" =~ ^[0-9a-f]{40}$ ]]
-              test "$(git show -s --format=%P "$merge_sha")" = "$(jq -er .base.sha <<<"$pr_json")"
-              git merge-base --is-ancestor "$merge_sha" "$GITHUB_SHA"
-              tested_tree="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$source_sha" --jq .tree.sha)"
-              test "$(git rev-parse "$merge_sha^{tree}")" = "$tested_tree"
-              test -z "$(git rev-list --merges "$merge_sha..$GITHUB_SHA")"
-              later_paths=()
-              while IFS= read -r -d '' path; do
-                later_paths+=(--path "$path")
-              done < <(git diff --no-renames --name-only -z "$merge_sha" "$GITHUB_SHA" --)
-              if (( ${#later_paths[@]} > 0 )); then
-                later_lane="$(node scripts/change-impact.mjs "${later_paths[@]}" | jq -er .lane)"
-                case "$later_lane" in
-                  enterprise-only|docs-only|verification-only) ;;
-                  *) echo "Current main contains an untested product change after the accepted PR." >&2; exit 1 ;;
-                esac
-              fi
-              ;;
-            *)
-              echo 'CI evidence must come from main push or a pull request targeting main.' >&2
-              exit 1
-              ;;
-          esac
+          test "$source_sha" = "$GITHUB_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$source_sha"
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
           echo "main_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 

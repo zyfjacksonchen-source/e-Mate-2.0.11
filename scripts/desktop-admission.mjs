@@ -740,10 +740,10 @@ export async function createGithubArtifactProvenance(options) {
     throw new Error('GitHub admission identifiers are invalid')
   }
   const { artifacts: candidateArtifact } = await verifyDesktopCandidateBundle(options.candidate, options.sourceCommit)
-  if (candidateArtifact.darwin.build_run_id !== options.desktopRunId) {
-    throw new Error('Desktop candidate is not owned by the selected Desktop run')
+  if (candidateArtifact.darwin.build_run_id !== options.ciRunId
+    || candidateArtifact.win32.build_run_id !== options.ciRunId) {
+    throw new Error('Desktop candidate installers are not owned by the selected CI run')
   }
-  const profileBuildRunId = candidateArtifact.win32.build_run_id
   const ciRun = githubRun(await metadata(options.metadata, 'ci-run.json'), {
     id: options.ciRunId, path: '.github/workflows/ci.yml', event: 'push',
     sourceCommit: options.sourceCommit, label: 'CI',
@@ -760,22 +760,16 @@ export async function createGithubArtifactProvenance(options) {
     id: options.performanceRunId, path: '.github/workflows/desktop-performance.yml', event: 'workflow_dispatch',
     sourceCommit: options.sourceCommit, label: 'performance',
   })
-  githubRun(await metadata(options.metadata, 'profile-build-run.json'), {
-    id: profileBuildRunId, path: '.github/workflows/desktop-release.yml', event: 'workflow_dispatch',
-    sourceCommit: options.sourceCommit, label: 'Profile build',
-  })
   successfulJob(await metadata(options.metadata, 'ci-jobs.json'), 'CI admission', 'CI')
-  successfulJob(await metadata(options.metadata, 'desktop-jobs.json'), 'Build unsigned macOS universal disk image', 'Desktop')
-  successfulJob(await metadata(options.metadata, 'desktop-jobs.json'), 'Bind native artifacts to the release manifest', 'Desktop')
+  successfulJob(await metadata(options.metadata, 'ci-jobs.json'), 'Node 24 / target contracts and unit tests', 'CI')
+  successfulJob(await metadata(options.metadata, 'ci-jobs.json'), 'Windows x64 / unsigned desktop installer', 'CI')
+  successfulJob(await metadata(options.metadata, 'ci-jobs.json'), 'macOS universal / unsigned desktop disk image', 'CI')
+  successfulJob(await metadata(options.metadata, 'desktop-jobs.json'), 'Bind exact protected-main CI artifacts to the release manifest', 'Desktop')
   const profileJobs = await metadata(options.metadata, 'profile-jobs.json')
   successfulJob(profileJobs, 'Validate accepted CI evidence', 'Profile')
   for (const target of TARGETS) successfulJob(profileJobs, `Bootstrap complete Profile generation / ${target}`, 'Profile')
   successfulJob(profileJobs, 'Prepare signed native Cloudflare publication bundle', 'Profile')
   successfulJob(await metadata(options.metadata, 'performance-jobs.json'), 'Performance admission', 'performance')
-  const profileBuildJobs = await metadata(options.metadata, 'profile-build-jobs.json')
-  successfulJob(profileBuildJobs, 'Build and verify the e-Mate profile', 'Profile build')
-  successfulJob(profileBuildJobs, 'Build unsigned Windows x64 installer', 'Profile build')
-
   const mainRef = await metadata(options.metadata, 'main-ref.json')
   if (mainRef?.object?.sha !== options.sourceCommit) throw new Error('GitHub main branch head drifted')
 
@@ -793,20 +787,24 @@ export async function createGithubArtifactProvenance(options) {
     id: options.profileArtifactId, name: `e-mate-profile-native-cloudflare-publication-${options.sourceCommit}`,
     runId: options.profileRunId, sourceCommit: options.sourceCommit, label: 'Profile publication',
   })
-  const profileBuildArtifact = await metadata(options.metadata, 'profile-build-artifact.json')
-  const profileBuildReceiptArtifact = await metadata(options.metadata, 'profile-build-receipt-artifact.json')
+  const ciOwnedArtifacts = [
+    [await metadata(options.metadata, 'base-sdk-artifact.json'), `e-mate-base-sdk-${options.sourceCommit}`, 'Base SDK'],
+    [await metadata(options.metadata, 'profile-build-artifact.json'), `e-mate-desktop-profile-${options.sourceCommit}`, 'Profile build'],
+    [await metadata(options.metadata, 'profile-build-receipt-artifact.json'), `e-mate-desktop-profile-build-receipt-${options.sourceCommit}`, 'Profile build receipt'],
+    [await metadata(options.metadata, 'windows-ci-artifact.json'), `e-mate-desktop-windows-${options.sourceCommit}`, 'Windows CI installer'],
+    [await metadata(options.metadata, 'macos-ci-artifact.json'), `e-mate-desktop-macos-${options.sourceCommit}`, 'macOS CI installer'],
+  ]
+  const artifactIds = new Set()
   for (const [value, name, label] of [
-    [profileBuildArtifact, `e-mate-desktop-profile-${options.sourceCommit}`, 'Profile build'],
-    [profileBuildReceiptArtifact, `e-mate-desktop-profile-build-receipt-${options.sourceCommit}`, 'Profile build receipt'],
+    ...ciOwnedArtifacts,
   ]) {
     if (!record(value) || !RUN_ID.test(String(value.id))) throw new Error(`GitHub ${label} artifact ID is invalid`)
     githubArtifact(value, {
-      id: String(value.id), name, runId: profileBuildRunId,
+      id: String(value.id), name, runId: options.ciRunId,
       sourceCommit: options.sourceCommit, label,
     })
-  }
-  if (String(profileBuildArtifact.id) === String(profileBuildReceiptArtifact.id)) {
-    throw new Error('GitHub Profile build artifacts share an identity')
+    if (artifactIds.has(String(value.id))) throw new Error('GitHub CI build artifacts share an identity')
+    artifactIds.add(String(value.id))
   }
   const performance = githubArtifact(await metadata(options.metadata, 'performance-artifact.json'), {
     id: options.performanceArtifactId, name: `e-mate-performance-admission-${options.sourceCommit}-attempt-1`,
@@ -828,7 +826,7 @@ export async function createGithubArtifactProvenance(options) {
     ],
   }
   await atomicJson(options.output, provenance)
-  return { provenance, profileBuildRunId, ciRun, profileRun }
+  return { provenance, ciRun, profileRun }
 }
 
 function option(values, name) {
