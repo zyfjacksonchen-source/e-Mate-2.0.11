@@ -461,3 +461,21 @@ test('workflow is build-only and uploads only the two external signer inputs', a
   assert.match(desktopBuild, /include-hidden-files: true/u)
   assert.match(desktopBuild, /retention-days: 30/u)
 })
+
+test('performance evidence and signing use their existing isolated environments', async () => {
+  const workflow = await readFile('.github/workflows/desktop-performance.yml', 'utf8')
+  const { parse } = createRequire(resolve('packages/dsh/package.json'))('yaml')
+  const parsed = parse(workflow)
+  assert.equal(parsed.jobs.evidence.environment, 'performance-admission')
+  assert.equal(parsed.jobs.admission.environment, 'r2-publish')
+  assert.equal(parsed.jobs.admission.needs, 'evidence')
+  const signer = parsed.jobs.admission.steps.find(step => step.id === 'admit')
+  assert.equal(signer.uses, 'zyfjacksonchen-source/e-mate-desktop-publication/performance@c1bf49db627b411077cea7b914981c931484131f')
+  assert.deepEqual([...workflow.matchAll(/secrets\.([A-Z0-9_]+)/gu)].map(match => match[1]).sort(), [
+    'EMATE_PROFILE_SIGNING_KEY_ID', 'EMATE_PROFILE_SIGNING_PRIVATE_KEY',
+  ])
+  assert.match(workflow, /test "\$\{GITHUB_REF_PROTECTED:-\}" = true/u)
+  assert.match(workflow, /test "\$GITHUB_RUN_ATTEMPT" = 1/u)
+  assert.match(workflow, /GITHUB_WORKFLOW_REF" = "\$GITHUB_REPOSITORY\/\.github\/workflows\/desktop-performance\.yml@refs\/heads\/main"/u)
+  assert.doesNotMatch(workflow, /AWS_|ECOREX_R2_|R2_ACCESS|R2_SECRET|\b(?:aws|wrangler|s3api)\b|cloudflarestorage|desktop\/latest\.json/u)
+})

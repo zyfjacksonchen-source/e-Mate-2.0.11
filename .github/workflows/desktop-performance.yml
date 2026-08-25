@@ -508,7 +508,7 @@ jobs:
   admission:
     name: Performance admission
     needs: evidence
-    environment: performance-admission
+    environment: r2-publish
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
