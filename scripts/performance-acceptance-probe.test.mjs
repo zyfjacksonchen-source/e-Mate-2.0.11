@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { chmod, cp, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import {
   assertNoPrivatePayload,
@@ -12,6 +13,7 @@ import {
   acquireSingleRunLock,
   buildCdpPreBootstrapScript,
   deriveAuthoritySample,
+  loadFrozenBaselineBaseContract,
   loadRunnerPrivateConfig,
   installVerifiedProfileTemplate,
   ownedExecutionSchedule,
@@ -21,6 +23,7 @@ import {
   strictJoinUsageAttempts,
   verifyRuntimeProfileBinding,
 } from './performance-acceptance-probe.mjs'
+import { loadProfileBaseContract } from '../desktop/e-mate-desktop/src/profile-release.ts'
 
 const digest = 'a'.repeat(64)
 const performanceRunId = 'performance-run-0001'
@@ -298,6 +301,26 @@ test('prepares exact frozen and candidate macOS application bytes with read-only
   assert.equal(lane.candidate.receipt.runtime.profile_generation, '1'.repeat(64))
   assert.equal(lane.candidate.receipt.install_receipt.package_sha256, sha256(dmg))
   await lane.cleanup()
+})
+
+test('accepts only the byte-exact pre-floor v6 Base as an in-memory floor-0 view', async t => {
+  const fixture = fileURLToPath(new URL('fixtures/performance/v6-base-contract.json', import.meta.url))
+  const base = await loadFrozenBaselineBaseContract(fixture)
+  assert.equal(base.id, 'e-mate-desktop-profile-v6-dsh-2bc16230975f')
+  assert.equal(base.harness_commit, '2bc16230975f6cf02aa1b283b1f86de44007b059')
+  assert.equal(base.schedule_protocol_floor, 0)
+  assert.throws(() => loadProfileBaseContract(fixture), /Base contract is invalid/u)
+
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'e-mate-v6-base-negative-')))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const incomplete = JSON.parse(await readFile(fixture, 'utf8'))
+  delete incomplete.profile_format
+  const incompletePath = join(root, 'base-contract.json')
+  await writeFile(incompletePath, `${JSON.stringify(incomplete, null, 2)}\n`)
+  await assert.rejects(
+    loadFrozenBaselineBaseContract(incompletePath),
+    /identity drifted/u,
+  )
 })
 
 test('copies only one verified preinstalled Profile closure and rejects symlinked stores', async t => {

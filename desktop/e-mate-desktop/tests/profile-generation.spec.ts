@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto'
+import { createHash, generateKeyPairSync } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,7 +13,12 @@ import {
   resolveProfileGenerationStartup,
   stageProfileGeneration,
 } from '../src/profile-generation.ts'
-import { signProfileRelease, type ProfileBaseContract, type ProfileReleasePayload } from '../src/profile-release.ts'
+import {
+  canonicalProfileJson,
+  signProfileRelease,
+  type ProfileBaseContract,
+  type ProfileReleasePayload,
+} from '../src/profile-release.ts'
 
 const temporary: string[] = []
 afterEach(async () => {
@@ -120,6 +125,12 @@ describe('Profile generation state', () => {
     const second = signProfileRelease(payload, privatePem, 'test-key')
     expect(first).toEqual(second)
     expect(profileGenerationId(first.payload)).toBe(profileGenerationId(second.payload))
+  })
+
+  it('preserves the content identity of a parsed pre-floor generation', () => {
+    const { schedule_protocol_floor: ignored, ...legacy } = payload
+    const expected = createHash('sha256').update(canonicalProfileJson(legacy)).digest('hex')
+    expect(profileGenerationId({ ...payload, schedule_protocol_floor: 0 })).toBe(expected)
   })
 
   it('falls back to bundled bytes when a staged generation is missing', async () => {

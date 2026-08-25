@@ -14,6 +14,7 @@ import {
 } from '../desktop/e-mate-desktop/src/profile-generation.ts'
 import {
   loadProfileBaseContract,
+  parseProfileBaseContract,
   verifyProfileRelease,
 } from '../desktop/e-mate-desktop/src/profile-release.ts'
 
@@ -46,6 +47,9 @@ const BASELINE_INSTALLS = Object.freeze({
 })
 const BASELINE_SOURCE_COMMIT = '9fbc70ad56c4f263dfa0aa0085f19eded134e32d'
 const BASELINE_BASE_CONTRACT = 'e-mate-desktop-profile-v6-dsh-2bc16230975f'
+const BASELINE_BASE_CONTRACT_BYTES = 1_598
+const BASELINE_BASE_CONTRACT_SHA256 = '964a26f282345a46cd919e0dd3fe1caf9270d4cf732b2c2ab81b1dc168a6a990'
+const BASELINE_HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
 const CANDIDATE_BASE_CONTRACT = 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0'
 const MACOS_BUNDLE_ID = 'net.ecoremedia.e-mate'
 const PROFILE_STATE_KEYS = Object.freeze(['active', 'last_known_good', 'schema_version'])
@@ -739,6 +743,24 @@ async function profileInventoryIds(path, label) {
   return ids
 }
 
+/** Load only the exact pre-floor v6 contract as an in-memory legacy floor-0 view. */
+export async function loadFrozenBaselineBaseContract(path) {
+  const identity = await regularFileIdentity(path, 'frozen 2.0.12 Desktop Base contract')
+  const value = await readClosedJson(identity.path, 'frozen 2.0.12 Desktop Base contract')
+  if (identity.bytes !== BASELINE_BASE_CONTRACT_BYTES || identity.sha256 !== BASELINE_BASE_CONTRACT_SHA256
+    || !exactKeys(value, [
+      'schema_version', 'id', 'desktop_api', 'profile_format', 'desktop_reference',
+      'harness_version', 'harness_commit', 'runtime_imports', 'profile_signing_keys',
+    ]) || value.id !== BASELINE_BASE_CONTRACT || value.harness_version !== '0.1.0-rc.7'
+    || value.harness_commit !== BASELINE_HARNESS_COMMIT
+    || value.desktop_reference?.commit !== '6074088f5b660206e404b3591fab51fb99c69add') {
+    throw new Error('frozen 2.0.12 Desktop Base contract identity drifted')
+  }
+  const validated = parseProfileBaseContract({ ...value, schedule_protocol_floor: 1 })
+  if (validated === undefined) throw new Error('frozen 2.0.12 Desktop Base contract is invalid')
+  return { ...validated, schedule_protocol_floor: 0 }
+}
+
 function darwinProfileTarget(target) {
   return { platform: 'darwin', arch: target === 'darwin-arm64' ? 'arm64' : 'x64' }
 }
@@ -995,11 +1017,7 @@ export async function prepareDarwinRuntimeLane(plan, config, options = {}) {
     const profileTemplates = options.prepareProfiles === undefined
       ? await (async () => {
           const baselineBasePath = join(root, 'baseline/base-contract.json')
-          await regularFileIdentity(baselineBasePath, 'frozen 2.0.12 Desktop Base contract')
-          const baselineBase = loadProfileBaseContract(baselineBasePath)
-          if (baselineBase.id !== BASELINE_BASE_CONTRACT) {
-            throw new Error('frozen 2.0.12 Desktop Base contract identity drifted')
-          }
+          const baselineBase = await loadFrozenBaselineBaseContract(baselineBasePath)
           const baselineIds = await profileInventoryIds(
             join(root, 'baseline/component-inventory.json'),
             'frozen 2.0.12 Profile component inventory',

@@ -2633,3 +2633,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 只有 source-fixed diff 与无密钥合同测试；没有 CI run、DMG、EXE、签名、安装或生产写入。
 - Remaining blockers: 主代理需先与并行 coordinator source-SHA 修复做无冲突合并，再由 exact protected-main attempt-1 CI 真实证明双平台 artifacts、聚合 plugin-only Profile release 与 downstream job-name接受。
 - Next exact action: 提交本独立修复供主代理移植；不推送、不 dispatch、不发布。
+
+## 2026-08-26 · 2.0.13 TTFT v2 冻结 v6 Profile 历史合同兼容
+
+- Goal checkpoint: 真实 runner 预置完成后，原生 loader 证明冻结 v6 Base、release 与 component manifests 均早于 `schedule_protocol_floor`，现有 v7 parser 会在读取真实 d876 generation 前失败；本条只兼容该精确历史字节，不修改冻结文件、不调用模型、不 dispatch、推送或发布。
+- Frozen baseline / current HEAD: 独立分支 `codex/perf-v6-profile-compat` 基于 producer exact `cb737381de20e41439c2a388e2a1a6abfc55ee11`；冻结 v6 Base id/Harness/Profile generation 为 `e-mate-desktop-profile-v6-dsh-2bc16230975f` / `2bc16230975f6cf02aa1b283b1f86de44007b059` / `d8769641262169a3b53369030a236f573e71499c22893d279e0a0c42df20ac93`。
+- Binding documents read: 完整复核根 `AGENTS.md`、ponytail skill、`target-contract.md`、`performance-and-acceptance.md`、最新完整日志、Profile Base/release/component/generation parser 与 probe 的 baseline prepare 调用链。
+- Inspected native seam: v7 `loadProfileBaseContract()` 要求正整数 floor；冻结 v6 Base 文件、签名 release 与15个 materialized component manifests均完全缺少该字段。release parser已有“缺字段→0”历史表示，但 generation id仍错误地把合成的0写入 hash，component parser也拒绝缺字段，因此只修 Base loader不足以验证真实 store。
+- Experiment or why unnecessary: probe 只对 byte-exact v6 fixture（1598 bytes，SHA-256 `964a26f282345a46cd919e0dd3fe1caf9270d4cf732b2c2ab81b1dc168a6a990`）及精确 Base/Harness/Desktop reference创建内存 floor-0 视图；普通 Base parser保持原样。原生 component parser仅在收到该不可由普通 parser产生的 floor-0 view时接受“恰好只缺 floor”的旧 manifest；generation id在 floor=0时按原始无字段 payload计算。
+- Decision and forbidden alternatives: 不改写或重签 v6 文件，不允许任意旧 Base、显式 floor=0 Base、缺其他字段的 manifest或现代 Base缺 floor；兼容只用于验收 probe 的冻结 predecessor，候选和产品更新继续使用严格 v7合同。
+- Changed scope: 最小修改 probe baseline Base loader、原生 component/generation的历史语义、已有三组窄测试，新增一份 byte-exact v6 Base测试 fixture并更新性能合同；未改 Desktop启动、普通Profile updater、模型链、R2/Feed/desired state或用户数据。
+- Verification commands and results: byte-exact fixture正例与缺其他字段反例通过；Profile component/generation/release Vitest `20/20`，probe/acceptance/parity Node测试 `31/31`，probe `--check` 与 `git diff --check`通过。另以 owner-provisioned安装根实际运行原生 `loadProfileGeneration()`及完整 `installVerifiedProfileTemplate()`，d876 generation、15个组件、floor 0均通过且临时复制已清理。
+- Immutable evidence / receipt: 当前只有源码 diff、byte-exact历史fixture、本机 owner-provisioned只读 store验证输出；没有读取用户live Profile、凭据或正文，没有真实模型调用、production `performance_run_id`、上传或生产写入。
+- Remaining blockers: protected attempt-1 runner仍须以同一冻结字节执行完整两臂启动和四模型采集；本修复只关闭 v6 native load 阻断，不把本地 store验证记为 production performance pass。
+- Next exact action: 主代理复核提交并合入 producer；随后重跑 exact runner preflight，任何 Base/store字节或 generation差异继续失败关闭。
