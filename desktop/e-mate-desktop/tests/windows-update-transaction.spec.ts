@@ -24,6 +24,7 @@ describe('pinned assisted-NSIS atomic update seam', () => {
   it('enters the custom seam only for a complete private transaction before any old-version mutation', () => {
     const patch = source('patches/app-builder-lib@26.15.3.patch', workspaceRoot)
     const installed = source('node_modules/app-builder-lib/templates/nsis/installSection.nsh')
+    const decision = installed.indexOf('!insertmacro customUpdateInstallShouldRun $R7')
     const seam = installed.indexOf('!insertmacro customUpdateInstall\n')
     expect(patch).toContain('!ifmacrodef customUpdateInstallShouldRun')
     expect(installed.slice(installed.indexOf('!ifmacrodef customUpdateInstallShouldRun'), seam))
@@ -33,7 +34,8 @@ describe('pinned assisted-NSIS atomic update seam', () => {
     expect(installed.indexOf('Var /GLOBAL keepShortcuts')).toBeLessThan(seam)
     expect(installed.match(/Var \/GLOBAL keepShortcuts/gu)).toHaveLength(1)
     expect(seam).toBeGreaterThan(installed.indexOf('!insertmacro setLinkVars'))
-    expect(seam).toBeLessThan(installed.indexOf('!insertmacro CHECK_APP_RUNNING'))
+    expect(decision).toBeLessThan(installed.indexOf('!insertmacro CHECK_APP_RUNNING'))
+    expect(seam).toBeGreaterThan(installed.lastIndexOf('!insertmacro CHECK_APP_RUNNING'))
     expect(seam).toBeLessThan(installed.indexOf('!insertmacro uninstallOldVersion SHELL_CONTEXT'))
   })
 
@@ -49,6 +51,7 @@ describe('pinned assisted-NSIS atomic update seam', () => {
     expect(include).toContain('$emateUpdateToken != ""')
     expect(include).toContain('The private e-Mate update request is incomplete.')
     expect(include).toContain('!macro customUpdateInstall')
+    expect(include).not.toContain('!insertmacro CHECK_APP_RUNNING')
     expect(include).not.toContain('!macro customUnInstallSection')
     expect(() => source('build/installer.nsi')).toThrow()
   })

@@ -2260,3 +2260,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 失败事实绑定上述 run/job；当前只有 source-fixed diff，没有生成、签名、安装、上传、激活或发布任何新字节。
 - Remaining blockers: 新候选必须先通过 Windows makensis 和完整 PR CI；之后仍需冻结同字节的 Windows 安装、P0/TQ、在线更新、失败回滚和性能验收。
 - Next exact action: 提交并推送最小补丁，让同一受保护 PR 的 Windows runner 编译真实 NSIS；只处理随后出现的精确 owner 失败，生产链保持关闭。
+
+## 2026-08-25 · 2.0.13 Windows NSIS 单一进程检查宏修复
+
+- Goal checkpoint: 继续关闭 PR `#56` 的 Windows makensis 门禁；本条只消除自定义事务与 upstream 安装路径对同一进程检查宏的重复编译展开，不把候选、安装或发布标记完成。
+- Frozen baseline / current HEAD: `$keepShortcuts` 顺序修复候选为 `b6bdfd5175d777631fef16ed729b8afb10494aed`，CI run 为 `32853827955`，Windows job 为 `97822283753`；Base/Harness 身份不变。
+- Binding documents read: 复核根 `AGENTS.md`、目标/切片合同、上一条完整记录、electron-builder `installSection.nsh`、自定义 `installer.nsh` 和对应事务合同测试。
+- Inspected native seam: 新 runner 已证明 `$keepShortcuts` 编译错误消失，并继续通过 `16 files / 253 tests`、PowerShell transaction SelfTest、runtime closure 和应用 ASAR 打包；makensis 随后因自定义手动确认分支与 upstream 各展开一次 `CHECK_APP_RUNNING` 而报 `CmdPath already declared`。该宏含编译期全局变量声明，运行时分支互斥不能避免重复声明。
+- Experiment or why unnecessary: 无需复制或改写 upstream 进程检测。将现有事务拆为同一流程的两个时点：私有回执/手动 SHA 确认仍在任何旧版本 mutation 前决定 `$R7`，upstream 唯一 `CHECK_APP_RUNNING` 完成后才 bootstrap/prepare/apply；仍在 `uninstallOldVersion` 前短路。
+- Decision and forbidden alternatives: 删除自定义 include 中的 `CHECK_APP_RUNNING` 展开；复用现有 `$emateUpdateAction=manual` 信号把 Bootstrap 移入 `customUpdateInstall` 起点，不增加变量、协议、第二安装器或容错回退。fresh install、拒绝确认、managed receipt 与 manual receipt 的准入语义保持不变。
+- Changed scope: 仅修改 pinned app-builder 补丁、自定义 installer include、Yarn patch hash/checksum和两项既有合同断言并 append 本记录；未改 PowerShell 事务协议、Profile、Harness 或生产链。
+- Verification commands and results: 原始 `app-builder-lib@26.15.3` 完整补丁 `git apply --check` 通过；`windows-update-transaction.spec.ts` 为 `9/9`；pinned app-builder patch-chain 定向合同为 `1/1`；合同同时断言 decision 在 upstream 检查前、custom execute 在最后一次 upstream 检查后且在旧版本 mutation 前、自定义 include 不含 `CHECK_APP_RUNNING`；`git diff --check` 通过。
+- Immutable evidence / receipt: 新失败绑定上述 run/job，前置 253 项和 SelfTest 成功事实来自同一 job；当前仍只有 source-fixed diff，没有生成、签名、安装、上传或激活发布字节。
+- Remaining blockers: 必须由下一 Windows runner 真实编译 NSIS 并完成完整 PR CI；随后仍缺同一冻结字节的安装、P0/TQ、更新回滚和性能验收。
+- Next exact action: 取消已被本修复取代的 run 剩余任务，提交推送最小修复并等待新 Windows makensis；生产发布链保持关闭。

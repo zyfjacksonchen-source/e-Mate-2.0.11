@@ -25,7 +25,7 @@ index 3bde9755d703a70fc3a45c048c249559fef78d82..9db6a66ee59dbe28a167683b791d8357
 diff --git a/templates/nsis/installSection.nsh b/templates/nsis/installSection.nsh
 --- a/templates/nsis/installSection.nsh
 +++ b/templates/nsis/installSection.nsh
-@@ -11,6 +11,17 @@ StrCpy $appExe "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+@@ -11,6 +11,13 @@ StrCpy $appExe "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
  # must be called before uninstallOldVersion
  !insertmacro setLinkVars
  
@@ -34,25 +34,28 @@ diff --git a/templates/nsis/installSection.nsh b/templates/nsis/installSection.n
 +
 +!ifmacrodef customUpdateInstallShouldRun
 +  !insertmacro customUpdateInstallShouldRun $R7
-+  ${if} $R7 == "true"
-+    !insertmacro customUpdateInstall
-+    Goto appBuilderInstallSectionDone
-+  ${endif}
 +!endif
 +
  !ifdef ONE_CLICK
    !ifdef HEADER_ICO
      File /oname=$PLUGINSDIR\installerHeaderico.ico "${HEADER_ICO}"
-@@ -38,8 +49,5 @@ StrCpy $appExe "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+@@ -38,8 +45,12 @@ StrCpy $appExe "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
    ${endif}
  !endif
 -
 -Var /GLOBAL keepShortcuts
 -StrCpy $keepShortcuts "false"
++
++!ifmacrodef customUpdateInstallShouldRun
++  ${if} $R7 == "true"
++    !insertmacro customUpdateInstall
++    Goto appBuilderInstallSectionDone
++  ${endif}
++!endif
  !insertMacro setIsTryToKeepShortcuts
  ${if} $isTryToKeepShortcuts == "true"
    ReadRegStr $R1 SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" KeepShortcuts
-@@ -108,3 +115,5 @@ StrCpy $keepShortcuts "false"
+@@ -108,3 +119,5 @@ StrCpy $keepShortcuts "false"
      !insertmacro doStartApp
    ${endIf}
  !endif

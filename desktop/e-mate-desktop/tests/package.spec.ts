@@ -490,7 +490,7 @@ describe('published package surface', () => {
     expect(installedInstallSection).toContain('$R7 == "true"')
     expect(installedInstallSection).toContain('Goto appBuilderInstallSectionDone')
     expect(installedInstallSection.indexOf('!insertmacro customUpdateInstall\n'))
-      .toBeLessThan(installedInstallSection.indexOf('!insertmacro CHECK_APP_RUNNING'))
+      .toBeGreaterThan(installedInstallSection.lastIndexOf('!insertmacro CHECK_APP_RUNNING'))
     expect(installedInstallSection).toContain('!insertmacro uninstallOldVersion SHELL_CONTEXT')
     expect(installedInstallSection).toContain('!insertmacro installApplicationFiles')
     expect(installedInstallSection).toContain('!ifmacrodef customInstall')

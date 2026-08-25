@@ -84,7 +84,13 @@
       SetErrorLevel 2
       Quit
     emateManualUpdateConfirmed:
-      !insertmacro CHECK_APP_RUNNING
+      StrCpy ${OUT_VAR} "true"
+
+    emateUpdateSelectionFinished:
+  !macroend
+
+  !macro customUpdateInstall
+    ${if} $emateUpdateAction == "manual"
       !insertmacro emateRunUpdateTransaction "Bootstrap"
       ReadINIStr $emateUpdateAction "$emateUpdateOutput" "update" "action"
       ReadINIStr $emateUpdateRequest "$emateUpdateOutput" "update" "request"
@@ -96,12 +102,8 @@
         SetErrorLevel 1
         Quit
       ${endif}
-      StrCpy ${OUT_VAR} "true"
+    ${endif}
 
-    emateUpdateSelectionFinished:
-  !macroend
-
-  !macro customUpdateInstall
     !insertmacro emateRunUpdateTransaction "Prepare"
     ReadINIStr $emateUpdateAction "$emateUpdateOutput" "update" "action"
     ReadINIStr $emateUpdateCandidate "$emateUpdateOutput" "update" "candidate"
