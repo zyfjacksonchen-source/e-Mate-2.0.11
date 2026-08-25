@@ -183,7 +183,7 @@ export function HomeProjection({
     }
     const findTarget = () => {
       setTarget(document.querySelector(schedules
-        ? '[data-phase]'
+        ? '[data-emate-product-surface]'
         : '[data-phase="hero"] [data-chain-overlay-fallback="conversation.composer"] > div'))
     }
     findTarget()

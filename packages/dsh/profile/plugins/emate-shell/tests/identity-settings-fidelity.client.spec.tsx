@@ -300,7 +300,7 @@ describe('e-Mate 2.0.12 identity and settings fidelity', () => {
     view.unmount()
   })
 
-  it('closes an overlay route when the target session selection really changes', async () => {
+  it('keeps a standalone product route when the current Session changes behind it', async () => {
     history.replaceState(null, '', '/capabilities?category=collaboration')
     let selectSession!: (id: string) => void
     const popstate = vi.fn()
@@ -322,9 +322,38 @@ describe('e-Mate 2.0.12 identity and settings fidelity', () => {
     const view = render(<Runtime />)
     expect(location.pathname).toBe('/capabilities')
     act(() => { selectSession('session-2') })
-    expect(location.pathname).toBe('/chat/session-2')
-    expect(popstate).toHaveBeenCalledOnce()
+    expect(location.pathname).toBe('/capabilities')
+    expect(popstate).not.toHaveBeenCalled()
     removeEventListener('popstate', popstate)
+    view.unmount()
+  })
+
+  it('routes the same current Session only after its first prompt makes it non-blank', async () => {
+    history.replaceState(null, '', '/')
+    let markSent!: () => void
+    const startHomeSession = vi.fn()
+
+    function Runtime() {
+      const [blank, setBlank] = React.useState(true)
+      markSent = () => { setBlank(false) }
+      const state = {
+        phase: 'ready' as const,
+        current: 'session-1',
+        byId: { 'session-1': { blank } },
+      }
+      return <SessionRouteProjection
+        useSessions={selector => selector(state)}
+        getSessions={() => state}
+        openSession={() => {}}
+        startHomeSession={startHomeSession}
+      />
+    }
+
+    const view = render(<Runtime />)
+    await waitFor(() => { expect(startHomeSession).toHaveBeenCalledOnce() })
+    expect(location.pathname).toBe('/')
+    act(markSent)
+    await waitFor(() => { expect(location.pathname).toBe('/chat/session-1') })
     view.unmount()
   })
 

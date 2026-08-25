@@ -273,7 +273,10 @@ export function apply(ctx: Context, config: Config = {}): void {
     // Code/both modes own their own generated SDK disclosure. Do not layer a
     // Native-only search transport over that presentation.
     if (inheritedSchemas.some(schema => schema.name === 'run_code')) return
-    const catalog = new Map(inheritedSchemas.map(schema => [schema.name, catalogEntry(schema)]))
+    const restrictableNames = new Set(ctx.tools.schemas().map(schema => schema.name))
+    const catalog = new Map(inheritedSchemas
+      .filter(schema => restrictableNames.has(schema.name))
+      .map(schema => [schema.name, catalogEntry(schema)]))
     const eligibleNames = new Set(catalog.keys())
     const state: AgentState = {
       agent,
@@ -362,4 +365,3 @@ export function apply(ctx: Context, config: Config = {}): void {
     for (const agent of [...states.keys()]) uninstall(agent)
   }, 'emate-tool-search: per-agent native restrictions')
 }
-

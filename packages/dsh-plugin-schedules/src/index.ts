@@ -109,7 +109,7 @@ export function apply(ctx) {
         },
       }
     } catch {
-      return { ok: false, error: { code: 'unavailable', message: '定时任务暂时无法读取。', details: { issues: [] } } }
+      return { ok: false, error: { code: 'internal', message: '定时任务暂时无法读取。', details: {} } }
     }
   }, { authority: 'loopback' }), 'emate.schedules: native Schedule projection')
 }

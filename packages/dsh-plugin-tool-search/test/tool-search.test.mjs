@@ -78,6 +78,32 @@ test('keeps pinned Schedule tools Agent-local and executes them through the nati
   assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list', TOOL_SEARCH_NAME])
 })
 
+test('restores a Schedule request header without restricting Agent-local tool names', async (t) => {
+  const ctx = new Context()
+  t.after(async () => ctx.fiber.dispose())
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(PersistenceProbe)
+  ctx.on('session/flush', () => {})
+  await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(Schedule)
+  const agent = createAgent(ctx, 'schedule-restore')
+  agent.session.append('request/header', {
+    header: {
+      config: { provider: 'mock', model: 'mock' },
+      tools: [
+        ...ctx.tools.schemas(agent),
+        { name: TOOL_SEARCH_NAME, description: 'Search tools', parameters: { type: 'object', properties: {} } },
+      ],
+    },
+    reason: 'initial',
+  })
+
+  await ctx.plugin(ToolSearch, { maxResults: 5 })
+
+  assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list', TOOL_SEARCH_NAME])
+  assert.deepEqual((await execute(ctx, agent, 'schedule_list', {})).value, [])
+})
+
 test('discloses deferred native tools without replacing their execution path', async (t) => {
   const { ctx } = await harness({ alwaysVisible: ['read_*'], maxResults: 2 })
   t.after(async () => ctx.fiber.dispose())

@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react'
 interface SessionListState {
   phase: 'pending' | 'ready'
   current?: string
-  byId: Record<string, unknown>
+  byId: Record<string, { blank?: boolean }>
 }
 
 interface WorkspaceListState {
@@ -39,10 +39,10 @@ export function SessionRouteProjection({
 }: Props) {
   const phase = useSessions(state => state.phase)
   const current = useSessions(state => state.current)
+  const currentBlank = useSessions(state => state.current === undefined ? undefined : state.byId[state.current]?.blank)
   const workspacesReady = useWorkspaces(state => state.baselinesReady)
   const initialized = useRef(false)
   const pending = useRef<PendingRoute>(null)
-  const previousCurrent = useRef(current)
 
   const applyLocation = () => {
     const state = getSessions()
@@ -80,8 +80,6 @@ export function SessionRouteProjection({
 
   useEffect(() => {
     if (phase !== 'ready' || !workspacesReady) return
-    const changed = previousCurrent.current !== current
-    previousCurrent.current = current
     if (!initialized.current) {
       initialized.current = true
       applyLocation()
@@ -94,18 +92,14 @@ export function SessionRouteProjection({
         return
       }
     }
-    const path = current === undefined ? '/' : `/chat/${encodeURIComponent(current)}`
-    if (changed && ['/capabilities', '/settings', '/schedules'].includes(location.pathname)) {
-      history.pushState(null, '', path)
-      dispatchEvent(new PopStateEvent('popstate'))
-      return
-    }
+    const path = current === undefined || currentBlank === true ? '/' : `/chat/${encodeURIComponent(current)}`
+    if (['/capabilities', '/settings', '/schedules'].includes(location.pathname)) return
     if (!['/', '/chat'].some(prefix => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`))) return
     if (location.pathname !== path) {
       history.pushState(null, '', path)
       dispatchEvent(new PopStateEvent('popstate'))
     }
-  }, [current, phase, workspacesReady])
+  }, [current, currentBlank, phase, workspacesReady])
 
   return null
 }

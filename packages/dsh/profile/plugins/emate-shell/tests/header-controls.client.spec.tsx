@@ -1,18 +1,23 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { WINDOWS_CAPTION_CONTROLS_WIDTH } from '../../../../../../desktop/e-mate-desktop/src/window-chrome.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HeaderControls } from '../src/client/header-controls.tsx'
-import { registerHeaderControls, registerManagedPresetSurfaces } from '../src/client/index.ts'
+import {
+  registerHeaderControls,
+  registerManagedPresetSurfaces,
+  registerRouteScopedConversationHeader,
+} from '../src/client/index.ts'
 
 const Icon = () => <svg />
 
 afterEach(() => {
   cleanup()
   delete document.body.dataset.dshDesktopMode
+  history.replaceState(null, '', '/')
 })
 
 describe('desktop header controls', () => {
@@ -129,6 +134,64 @@ describe('desktop header controls', () => {
     const source = readFileSync('src/client/index.ts', 'utf8')
     expect(source).not.toContain("ctx.slots.inject('desktop.titlebar.utilities'")
     expect(source).toContain("ctx.slots.inject('shell.overlay'")
+  })
+
+  it('hides resident Session header chrome throughout standalone product routes', async () => {
+    type RootProps = PropsRenderSlots<'conversation.session.header'>
+    const Root = ({ renderSlot, SessionProvider }: RootProps) => (
+      <SessionProvider empty={() => null}>
+        {() => renderSlot('conversation.session.header', {})}
+      </SessionProvider>
+    )
+    const runtime = await SlotTestRuntime.create()
+    await runtime.root.declare({
+      'conversation.session.header': { kind: 'single', scope: 'session' },
+    } as never, Root as never)
+    await runtime.sessions.add({ id: 'session-1' })
+    runtime.slots.register({ name: 'conversation.session.header' } as never, () => <header>旧会话标题</header>)
+    history.replaceState(null, '', '/schedules')
+    await runtime.mount({ inject: ['slots'], apply: registerRouteScopedConversationHeader })
+    const view = runtime.renderRoot()
+
+    expect(view.queryByText('旧会话标题')).toBeNull()
+    act(() => {
+      history.pushState(null, '', '/capabilities')
+      dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await runtime.flush()
+    expect(view.queryByText('旧会话标题')).toBeNull()
+    act(() => {
+      history.pushState(null, '', '/chat/session-1')
+      dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await runtime.flush()
+    expect(view.queryByText('旧会话标题')).not.toBeNull()
+    await runtime.dispose()
+  })
+
+  it('replaces the resident conversation with one route-owned standalone surface', async () => {
+    type RootProps = PropsRenderSlots<'conversation'>
+    const Root = ({ renderSlot }: RootProps) => renderSlot('conversation', {})
+    const runtime = await SlotTestRuntime.create()
+    const closeDetails = vi.fn()
+    runtime.provide('layout', { closeDetails } as never)
+    await runtime.root.declare({ conversation: { kind: 'single', scope: 'root' } } as never, Root as never)
+    runtime.slots.register({ name: 'conversation' } as never, () => <main>旧会话正文与输入框</main>)
+    history.replaceState(null, '', '/schedules')
+    await runtime.mount({ inject: ['slots', 'layout'], apply: registerRouteScopedConversationHeader })
+    const view = runtime.renderRoot()
+
+    expect(view.queryByText('旧会话正文与输入框')).toBeNull()
+    expect(view.container.querySelectorAll('[data-emate-product-surface]')).toHaveLength(1)
+    expect(closeDetails).toHaveBeenCalledOnce()
+    act(() => {
+      history.pushState(null, '', '/chat/session-1')
+      dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await runtime.flush()
+    expect(view.queryByText('旧会话正文与输入框')).not.toBeNull()
+    expect(view.container.querySelector('[data-emate-product-surface]')).toBeNull()
+    await runtime.dispose()
   })
 
   it('shadows only the product-facing preset selectors while preserving the native preset plugin', async () => {

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { createElement, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import {
@@ -118,6 +118,63 @@ function SkipTargetOnboarding({ complete }: { complete: () => void }) {
 function HiddenSessionStats() { return null }
 function HiddenProductSurface() { return null }
 
+const STANDALONE_PRODUCT_ROUTES = new Set(['/schedules', '/capabilities'])
+
+function StandaloneProductSurface() {
+  return createElement('div', {
+    'data-phase': 'product',
+    'data-emate-product-surface': '',
+  })
+}
+
+/** Keep standalone product routes from inheriting a resident Session's body or header. */
+export function registerRouteScopedConversationHeader(ctx: any): void {
+  ctx.slots.inject('conversation', () => {
+    let disposeShadow: (() => void) | undefined
+    const sync = () => {
+      const hide = STANDALONE_PRODUCT_ROUTES.has(location.pathname)
+      if (hide === (disposeShadow !== undefined)) return
+      if (hide) {
+        ctx.layout.closeDetails()
+        disposeShadow = ctx.slots.register({ name: 'conversation', priority: -1 }, StandaloneProductSurface)
+      } else {
+        const dispose = disposeShadow
+        disposeShadow = undefined
+        dispose?.()
+      }
+    }
+    addEventListener('popstate', sync)
+    sync()
+    return () => {
+      removeEventListener('popstate', sync)
+      disposeShadow?.()
+    }
+  })
+  ctx.slots.inject('conversation.session.header', () => {
+    let disposeShadow: (() => void) | undefined
+    const sync = () => {
+      const hide = STANDALONE_PRODUCT_ROUTES.has(location.pathname)
+      if (hide === (disposeShadow !== undefined)) return
+      if (hide) {
+        disposeShadow = ctx.slots.register({
+          name: 'conversation.session.header',
+          priority: -1,
+        }, HiddenProductSurface)
+      } else {
+        const dispose = disposeShadow
+        disposeShadow = undefined
+        dispose?.()
+      }
+    }
+    addEventListener('popstate', sync)
+    sync()
+    return () => {
+      removeEventListener('popstate', sync)
+      disposeShadow?.()
+    }
+  })
+}
+
 /** Keep DSH presets available internally while removing product-facing mode selectors. */
 export function registerManagedPresetSurfaces(ctx: any): void {
   ctx.slots.inject('conversation.hero.agentPreset', () => ctx.slots.register({
@@ -148,28 +205,53 @@ export function startSessionFromRoute(ctx: any, workspaceId?: string): void {
   ctx.workspaces.startSession(target)
 }
 
-export function apply(ctx: any): void {
-  registerActivityFold(ctx)
-  registerComputerUseTrigger(ctx)
-  registerManagedPresetSurfaces(ctx)
-  ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
-    name: 'conversation.composer.dock',
-    id: 'stats',
-    priority: -1,
-  }, HiddenSessionStats))
-  const startSession = (workspaceId?: string) => { startSessionFromRoute(ctx, workspaceId) }
+interface RouteFence {
+  current(): boolean
+  dispose(): void
+}
 
-  const prepareSchedulePrompt = async (prompt: string, requestedSessionId?: string) => {
-    if (requestedSessionId !== undefined) {
-      const requestedScope = ctx.sessions.scope(requestedSessionId)
-      if (requestedScope === undefined) throw new Error(`session "${requestedSessionId}" is not addressable`)
-      ctx.conversation.input.for(requestedScope).setDraft(prompt)
-      ctx.sessions.open(requestedSessionId)
-      const route = `/chat/${encodeURIComponent(requestedSessionId)}`
-      if (location.pathname !== route) history.pushState(null, '', route)
-      dispatchEvent(new PopStateEvent('popstate'))
-      return
-    }
+function captureRouteFence(ctx: any): RouteFence {
+  const sourcePath = location.pathname
+  const sourceSession = ctx.sessions.list.getSnapshot().current
+  let stale = false
+  const onNavigation = () => { stale = true }
+  addEventListener('popstate', onNavigation)
+  const unsubscribe = ctx.sessions.list.subscribe?.(() => {
+    if (ctx.sessions.list.getSnapshot().current !== sourceSession) stale = true
+  }) ?? (() => {})
+  let disposed = false
+  const dispose = () => {
+    if (disposed) return
+    disposed = true
+    removeEventListener('popstate', onNavigation)
+    unsubscribe()
+  }
+  return {
+    current: () => !stale && location.pathname === sourcePath
+      && ctx.sessions.list.getSnapshot().current === sourceSession,
+    dispose,
+  }
+}
+
+/** Hand one Schedule intent to its native Session only while the initiating route still owns the UI. */
+export async function prepareSchedulePromptFromRoute(
+  ctx: any,
+  prompt: string,
+  requestedSessionId?: string,
+): Promise<void> {
+  if (requestedSessionId !== undefined) {
+    const requestedScope = ctx.sessions.scope(requestedSessionId)
+    if (requestedScope === undefined) throw new Error(`session "${requestedSessionId}" is not addressable`)
+    ctx.conversation.input.for(requestedScope).setDraft(prompt)
+    ctx.sessions.open(requestedSessionId)
+    const route = `/chat/${encodeURIComponent(requestedSessionId)}`
+    if (location.pathname !== route) history.pushState(null, '', route)
+    dispatchEvent(new PopStateEvent('popstate'))
+    return
+  }
+
+  const fence = captureRouteFence(ctx)
+  try {
     const workspaceState = ctx.workspaces.list.getSnapshot()
     const current = ctx.sessions.list.getSnapshot().current
     let workspace = current === undefined
@@ -179,18 +261,37 @@ export function apply(ctx: any): void {
       ?? workspaceState.items[0]
     if (workspace === undefined) {
       const path = await ctx.workspaces.pickDirectory()
+      if (!fence.current()) return
       if (path === null) throw new Error('请选择项目文件夹后继续。')
       workspace = await ctx.workspaces.create({ path })
+      if (!fence.current()) return
     }
     const sessionId = await ctx.workspaces.connectWorkspace(workspace.workspaceId)
+    if (!fence.current()) return
     const scope = ctx.sessions.scope(sessionId)
     if (scope === undefined) throw new Error(`session "${sessionId}" is not addressable`)
+    fence.dispose()
     ctx.conversation.input.for(scope).setDraft(prompt)
     ctx.sessions.open(sessionId)
     const route = `/chat/${encodeURIComponent(sessionId)}`
     if (location.pathname !== route) history.pushState(null, '', route)
     dispatchEvent(new PopStateEvent('popstate'))
+  } finally {
+    fence.dispose()
   }
+}
+
+export function apply(ctx: any): void {
+  registerActivityFold(ctx)
+  registerComputerUseTrigger(ctx)
+  registerManagedPresetSurfaces(ctx)
+  registerRouteScopedConversationHeader(ctx)
+  ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
+    name: 'conversation.composer.dock',
+    id: 'stats',
+    priority: -1,
+  }, HiddenSessionStats))
+  const startSession = (workspaceId?: string) => { startSessionFromRoute(ctx, workspaceId) }
 
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay',
@@ -295,7 +396,8 @@ export function apply(ctx: any): void {
     order: -20,
     inject: () => ({
       openSession: (id: string) => { ctx.sessions.open(id) },
-      prepareSchedulePrompt,
+      prepareSchedulePrompt: (prompt: string, sessionId?: string) =>
+        prepareSchedulePromptFromRoute(ctx, prompt, sessionId),
       callSchedules: () => ctx.connection.rpc.call('/emate.schedules', 'list', {}),
       closeDetails: () => { ctx.layout.closeDetails() },
       toggleSidebar: () => { ctx.layout.toggleSidebar() },

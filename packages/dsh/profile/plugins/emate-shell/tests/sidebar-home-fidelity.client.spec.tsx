@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 import { createPortal } from 'react-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HomeProjection } from '../src/client/home.tsx'
-import { startSessionFromRoute } from '../src/client/index.ts'
+import { prepareSchedulePromptFromRoute, startSessionFromRoute } from '../src/client/index.ts'
 import { SessionRouteProjection } from '../src/client/session-route.tsx'
 import { SidebarRoot } from '../src/client/sidebar.tsx'
 
@@ -59,6 +59,43 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     await waitFor(() => { expect(location.pathname).toBe('/') })
     expect(startSession).toHaveBeenCalledTimes(1)
     expect(startSession).toHaveBeenCalledWith('general')
+  })
+
+  it('drops a late schedule handoff after the initiating route changes', async () => {
+    history.replaceState(null, '', '/schedules')
+    let resolveConnect!: (id: string) => void
+    const connectWorkspace = vi.fn(() => new Promise<string>(resolve => { resolveConnect = resolve }))
+    const setDraft = vi.fn()
+    const sessions = { current: 'old-session' }
+    const open = vi.fn((id: string) => { sessions.current = id })
+    const ctx = {
+      sessions: {
+        list: { getSnapshot: () => sessions },
+        open,
+        scope: (id: string) => id === 'late-session' ? { id } : undefined,
+      },
+      workspaces: {
+        list: { getSnapshot: () => ({
+          items: [{ workspaceId: 'general', sessionIds: ['old-session'] }],
+          recentWorkspaceId: 'general',
+        }) },
+        connectWorkspace,
+      },
+      conversation: { input: { for: () => ({ setDraft }) } },
+    }
+
+    const pending = prepareSchedulePromptFromRoute(ctx, '创建日报')
+    history.pushState(null, '', '/capabilities')
+    dispatchEvent(new PopStateEvent('popstate'))
+    history.pushState(null, '', '/schedules')
+    dispatchEvent(new PopStateEvent('popstate'))
+    resolveConnect('late-session')
+
+    await expect(pending).resolves.toBeUndefined()
+    expect(location.pathname).toBe('/schedules')
+    expect(sessions.current).toBe('old-session')
+    expect(setDraft).not.toHaveBeenCalled()
+    expect(open).not.toHaveBeenCalled()
   })
 
   it('keeps the current Sidebar hierarchy while driving real session and workspace actions', async () => {
@@ -327,6 +364,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     history.replaceState(null, '', '/schedules')
     const phase = document.createElement('main')
     phase.dataset.phase = 'active'
+    phase.dataset.emateProductSurface = ''
     document.body.append(phase)
     const prepareSchedulePrompt = vi.fn(async () => {})
     const callSchedules = vi.fn(async () => ({ ok: true, value: {
