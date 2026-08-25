@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -19,6 +19,10 @@ const testConfig: UpdateConfig = {
   intervalMs: 1000,
   requestTimeoutMs: 1000,
 }
+
+const BUNDLED_TO_B_PROMPT = 'bf9e83d3eefba3bcb20cc11f9640d2c598ae6e83bee5c53b5d4d94ce1291322b'
+const A_TO_B_PROMPT = 'edfff6d9f21745628565983c573472d57fc10650e1012559c479626b2f193f59'
+const C_TO_B_PROMPT = '6dc1916effcc7915941805b471f2a06c5f5a8b290592417f4cfd0c1db4bdd372'
 
 const SOURCE_COMMIT = 'a'.repeat(40)
 const MANIFEST_SIGNATURE_CONTEXT = Buffer.from('e-mate-desktop-release-manifest-v1\0', 'utf8')
@@ -116,6 +120,34 @@ function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
   const record = value as Record<string, unknown>
   return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`
+}
+
+function profileUpdate(currentGeneration: string, generationId = 'b'.repeat(64)): ProfileUpdateAvailable {
+  return {
+    status: 'update-available',
+    currentGeneration,
+    currentSequence: currentGeneration === 'bundled' ? 0 : 3,
+    generationId,
+    releaseVersion: '2.0.12',
+    sequence: 4,
+    changedComponents: [{ id: '@e-mate/dsh-client-shell', version: '2.0.12', bytes: 99 }],
+    downloadBytes: 99,
+    release: {} as ProfileUpdateAvailable['release'],
+  }
+}
+
+function parseWithOldBaseV2Reader(text: string): Record<string, unknown> {
+  const value: unknown = JSON.parse(text)
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('invalid state')
+  const record = value as Record<string, unknown>
+  if (record.version !== 2
+    || (record.lastPromptedVersion !== undefined && typeof record.lastPromptedVersion !== 'string')
+    || (record.lastPromptedGeneration !== undefined
+      && (typeof record.lastPromptedGeneration !== 'string' || !/^[0-9a-f]{64}$/u.test(record.lastPromptedGeneration)))
+    || Object.keys(record).some(key => !['version', 'lastPromptedVersion', 'lastPromptedGeneration'].includes(key))) {
+    throw new Error('invalid state')
+  }
+  return record
 }
 
 interface Harness {
@@ -249,12 +281,13 @@ describe('desktop update Host plugin', () => {
     expect(profile.check).toHaveBeenCalledTimes(2)
     expect(profile.confirm).toHaveBeenCalledWith(release)
     expect(profile.install).toHaveBeenCalledOnce()
+    await expect(stat(harness.statePath)).rejects.toMatchObject({ code: 'ENOENT' })
     expect(baseRequest).not.toHaveBeenCalled()
     expect(harness.tray.label()).toBe('e-Mate 2.0.12 Update Available')
     expect(harness.tray.label()).not.toMatch(/@e-mate\/|dsh-plugin|component\.id|插件|组件/u)
   })
 
-  it('pushes one native prompt per current and target component generation pair', async () => {
+  it('stores a declined Profile pair that the old Base v2 reader accepts', async () => {
     vi.useFakeTimers()
     const release = {
       status: 'update-available',
@@ -276,10 +309,11 @@ describe('desktop update Host plugin', () => {
 
     await vi.advanceTimersByTimeAsync(testConfig.initialDelayMs)
     await vi.waitFor(() => { expect(profile.confirm).toHaveBeenCalledOnce() })
-    expect(JSON.parse(await readFile(harness.statePath, 'utf8'))).toEqual({
-      version: 2,
-      lastPromptedCurrentGeneration: release.currentGeneration,
-      lastPromptedGeneration: release.generationId,
+    await vi.waitFor(async () => {
+      expect(parseWithOldBaseV2Reader(await readFile(harness.statePath, 'utf8'))).toEqual({
+        version: 2,
+        lastPromptedGeneration: BUNDLED_TO_B_PROMPT,
+      })
     })
 
     await vi.advanceTimersByTimeAsync(testConfig.intervalMs)
@@ -310,8 +344,7 @@ describe('desktop update Host plugin', () => {
       profile,
       state: JSON.stringify({
         version: 2,
-        lastPromptedCurrentGeneration: release.currentGeneration,
-        lastPromptedGeneration: release.generationId,
+        lastPromptedGeneration: BUNDLED_TO_B_PROMPT,
       }),
     })
 
@@ -320,8 +353,7 @@ describe('desktop update Host plugin', () => {
     expect(profile.confirm).not.toHaveBeenCalled()
     expect(JSON.parse(await readFile(harness.statePath, 'utf8'))).toEqual({
       version: 2,
-      lastPromptedCurrentGeneration: release.currentGeneration,
-      lastPromptedGeneration: release.generationId,
+      lastPromptedGeneration: BUNDLED_TO_B_PROMPT,
     })
   })
 
@@ -347,8 +379,7 @@ describe('desktop update Host plugin', () => {
       profile,
       state: JSON.stringify({
         version: 2,
-        lastPromptedCurrentGeneration: 'a'.repeat(64),
-        lastPromptedGeneration: release.generationId,
+        lastPromptedGeneration: A_TO_B_PROMPT,
       }),
     })
 
@@ -356,8 +387,7 @@ describe('desktop update Host plugin', () => {
     await vi.waitFor(() => { expect(profile.confirm).toHaveBeenCalledOnce() })
     expect(JSON.parse(await readFile(harness.statePath, 'utf8'))).toEqual({
       version: 2,
-      lastPromptedCurrentGeneration: 'bundled',
-      lastPromptedGeneration: release.generationId,
+      lastPromptedGeneration: BUNDLED_TO_B_PROMPT,
     })
   })
 
@@ -383,8 +413,7 @@ describe('desktop update Host plugin', () => {
       profile,
       state: JSON.stringify({
         version: 2,
-        lastPromptedCurrentGeneration: 'a'.repeat(64),
-        lastPromptedGeneration: release.generationId,
+        lastPromptedGeneration: A_TO_B_PROMPT,
       }),
     })
 
@@ -392,8 +421,7 @@ describe('desktop update Host plugin', () => {
     await vi.waitFor(() => { expect(profile.confirm).toHaveBeenCalledOnce() })
     expect(JSON.parse(await readFile(harness.statePath, 'utf8'))).toEqual({
       version: 2,
-      lastPromptedCurrentGeneration: release.currentGeneration,
-      lastPromptedGeneration: release.generationId,
+      lastPromptedGeneration: C_TO_B_PROMPT,
     })
   })
 
@@ -429,8 +457,186 @@ describe('desktop update Host plugin', () => {
     expect(JSON.parse(await readFile(harness.statePath, 'utf8'))).toEqual({
       version: 2,
       lastPromptedVersion: '2.1.0',
-      lastPromptedCurrentGeneration: 'bundled',
-      lastPromptedGeneration: release.generationId,
+      lastPromptedGeneration: BUNDLED_TO_B_PROMPT,
+    })
+  })
+
+  it('does not suppress a real A to B retry after activation fails and remains on A', async () => {
+    vi.useFakeTimers()
+    const release = profileUpdate('a'.repeat(64))
+    const profile = {
+      check: vi.fn(async () => release),
+      confirm: vi.fn(async () => true),
+      install: vi.fn(async () => { throw new Error('activation failed') }),
+    } satisfies DesktopProfileUpdateAdapter
+    const harness = await createHarness({ profile })
+
+    await vi.advanceTimersByTimeAsync(testConfig.initialDelayMs)
+    await vi.waitFor(() => { expect(profile.install).toHaveBeenCalledOnce() })
+    await expect(stat(harness.statePath)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    await vi.advanceTimersByTimeAsync(testConfig.intervalMs)
+    await vi.waitFor(() => { expect(profile.install).toHaveBeenCalledTimes(2) })
+    expect(profile.confirm).toHaveBeenCalledTimes(2)
+    await expect(stat(harness.statePath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('clears an old A to B decline before scheduling so a failed B activation can retry from A', async () => {
+    const release = profileUpdate('a'.repeat(64))
+    const acceptedProfile = {
+      check: vi.fn(async () => release),
+      confirm: vi.fn(async () => true),
+      install: vi.fn(async () => {}),
+    } satisfies DesktopProfileUpdateAdapter
+    const accepted = await createHarness({
+      packaged: false,
+      profile: acceptedProfile,
+      state: JSON.stringify({ version: 2, lastPromptedGeneration: A_TO_B_PROMPT }),
+    })
+
+    await expect(accepted.runInteractiveUpdate()).resolves.toMatchObject({ status: 'scheduled' })
+    const clearedState = await readFile(accepted.statePath, 'utf8')
+    expect(parseWithOldBaseV2Reader(clearedState)).toEqual({ version: 2 })
+
+    const rolledBackProfile = {
+      check: vi.fn(async () => release),
+      confirm: vi.fn(async () => false),
+      install: vi.fn(async () => {}),
+    } satisfies DesktopProfileUpdateAdapter
+    const rolledBack = await createHarness({ profile: rolledBackProfile, state: clearedState })
+
+    await vi.waitFor(() => { expect(rolledBackProfile.confirm).toHaveBeenCalledOnce() })
+    expect(rolledBackProfile.install).not.toHaveBeenCalled()
+    await vi.waitFor(async () => {
+      expect(parseWithOldBaseV2Reader(await readFile(rolledBack.statePath, 'utf8'))).toEqual({
+        version: 2,
+        lastPromptedGeneration: A_TO_B_PROMPT,
+      })
+    })
+  })
+
+  it('does not persist a Profile pair when confirmation throws or the offer is superseded', async () => {
+    const release = profileUpdate('a'.repeat(64))
+    const throwing = {
+      check: vi.fn(async () => release),
+      confirm: vi.fn(async () => { throw new Error('dialog failed') }),
+      install: vi.fn(async () => {}),
+    } satisfies DesktopProfileUpdateAdapter
+    const failed = await createHarness({
+      packaged: false,
+      profile: throwing,
+      config: { ...testConfig, enabled: false },
+    })
+
+    await expect(failed.runInteractiveUpdate()).resolves.toMatchObject({ status: 'failed' })
+    await expect(stat(failed.statePath)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    const rotated = profileUpdate('a'.repeat(64), 'c'.repeat(64))
+    const supersededProfile = {
+      check: vi.fn().mockResolvedValueOnce(release).mockResolvedValueOnce(rotated),
+      confirm: vi.fn(async () => true),
+      install: vi.fn(async () => {}),
+    } satisfies DesktopProfileUpdateAdapter
+    const superseded = await createHarness({
+      packaged: false,
+      profile: supersededProfile,
+      config: { ...testConfig, enabled: false },
+    })
+
+    await expect(superseded.runInteractiveUpdate()).resolves.toMatchObject({
+      status: 'superseded',
+      componentGeneration: rotated.generationId,
+    })
+    expect(supersededProfile.install).not.toHaveBeenCalled()
+    await expect(stat(superseded.statePath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('does not persist a declined Profile pair after the update owner is disposed', async () => {
+    vi.useFakeTimers()
+    const release = profileUpdate('a'.repeat(64))
+    let resolveConfirmation!: (confirmed: boolean) => void
+    const confirmation = new Promise<boolean>(resolve => { resolveConfirmation = resolve })
+    const profile = {
+      check: vi.fn(async () => release),
+      confirm: vi.fn(async () => await confirmation),
+      install: vi.fn(async () => {}),
+    } satisfies DesktopProfileUpdateAdapter
+    const harness = await createHarness({ profile })
+
+    await vi.advanceTimersByTimeAsync(testConfig.initialDelayMs)
+    await vi.waitFor(() => { expect(profile.confirm).toHaveBeenCalledOnce() })
+    await harness.dispose()
+    resolveConfirmation(false)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    await expect(stat(harness.statePath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('serializes concurrent Base and Profile prompt writes without dropping either v2 field', async () => {
+    vi.useFakeTimers()
+    const release = profileUpdate('bundled')
+    let resolveProfileConfirmation!: (confirmed: boolean) => void
+    const profileConfirmation = new Promise<boolean>(resolve => { resolveProfileConfirmation = resolve })
+    const profile = {
+      check: vi.fn()
+        .mockResolvedValueOnce(release)
+        .mockRejectedValueOnce(new Error('Profile check unavailable')),
+      confirm: vi.fn(async () => await profileConfirmation),
+      install: vi.fn(async () => {}),
+    } satisfies DesktopProfileUpdateAdapter
+    const harness = await createHarness({
+      profile,
+      request: async () => versionResponse('2.1.0'),
+      confirmDownload: async () => false,
+    })
+
+    await vi.advanceTimersByTimeAsync(testConfig.initialDelayMs)
+    await vi.waitFor(() => { expect(profile.confirm).toHaveBeenCalledOnce() })
+    const basePrompt = harness.runInteractiveUpdate()
+    resolveProfileConfirmation(false)
+    await expect(basePrompt).resolves.toMatchObject({ status: 'declined', latestVersion: '2.1.0' })
+    await vi.waitFor(async () => {
+      expect(JSON.parse(await readFile(harness.statePath, 'utf8'))).toEqual({
+        version: 2,
+        lastPromptedVersion: '2.1.0',
+        lastPromptedGeneration: BUNDLED_TO_B_PROMPT,
+      })
+    })
+  })
+
+  it('does not let one failed state write poison the next serialized mutation', async () => {
+    const release = profileUpdate('bundled')
+    let resolveProfileConfirmation!: (confirmed: boolean) => void
+    const profileConfirmation = new Promise<boolean>(resolve => { resolveProfileConfirmation = resolve })
+    const profile = {
+      check: vi.fn()
+        .mockResolvedValueOnce(release)
+        .mockRejectedValueOnce(new Error('Profile check unavailable')),
+      confirm: vi.fn(async () => await profileConfirmation),
+      install: vi.fn(async () => {}),
+    } satisfies DesktopProfileUpdateAdapter
+    const harness = await createHarness({
+      packaged: false,
+      profile,
+      state: JSON.stringify({ version: 2 }),
+      request: async () => versionResponse('2.1.0'),
+      confirmDownload: async () => false,
+    })
+
+    const profilePrompt = harness.runInteractiveUpdate()
+    await vi.waitFor(() => { expect(profile.confirm).toHaveBeenCalledOnce() })
+    await rm(harness.statePath)
+    await mkdir(harness.statePath)
+    resolveProfileConfirmation(false)
+    await expect(profilePrompt).resolves.toMatchObject({ status: 'declined', updateKind: 'components' })
+    await rm(harness.statePath, { recursive: true })
+
+    await expect(harness.runInteractiveUpdate()).resolves.toMatchObject({ status: 'declined', latestVersion: '2.1.0' })
+    expect(parseWithOldBaseV2Reader(await readFile(harness.statePath, 'utf8'))).toEqual({
+      version: 2,
+      lastPromptedVersion: '2.1.0',
+      lastPromptedGeneration: BUNDLED_TO_B_PROMPT,
     })
   })
 

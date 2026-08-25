@@ -2302,3 +2302,31 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有 source-fixed diff 与本机只读状态证据。`desktop-release` run `32860583362` 在本修复前从 `dae78fc` 启动，即使完成也属于已取代候选，不得安装、验收或发布；此前 CI `mac-smoke` 同样未安装且永久不具备发布资格。
 - Remaining blockers: 必须提交并推送该最小修复，重新通过 exact-HEAD PR CI 与只构建不发布的正式 Desktop candidate workflow；之后才可执行 macOS 手工候选 UI/P0 验收。Windows 真机、原生 signed updater transaction、Profile v7 激活、性能、回滚和生产回读仍 OPEN。
 - Next exact action: 提交并推送 pair 去重修复，让 PR #56 在新 HEAD 重跑受保护 CI；作废旧 run 候选，生产链保持关闭。
+
+## 2026-08-25 · 2.0.13 Profile 提示状态向后兼容与回滚重试修正
+
+- Goal checkpoint: 独立复审否决并取代上一条 `ac7ff896edd2d635c95b986a1116783090e342b1` 的四字段 v2 状态方案；本条只修复同一 Desktop updater 状态链，不把候选、安装态或发布标记完成。
+- Frozen baseline / current HEAD: 待修正 HEAD 为 `ac7ff896edd2d635c95b986a1116783090e342b1`，其父提交 `dae78fcd40bf42620f4fd6d4916d899d450d7348` 的受保护 PR CI 已通过；Base/Harness 仍为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Binding documents read: 重新读取唯一 Goal、Git/HEAD、完整 `AGENTS.md`、`target-contract.md`、2.0.13 切片合同、最新完整日志，并核对 `updates.ts` 的所有 prompt/state 调用方及 Profile generation/update 测试。
+- Inspected native seam: 旧 2.0.12 Base 的 v2 reader 只接受 `version`、`lastPromptedVersion`、`lastPromptedGeneration` 三个键；`ac7ff89` 新增第四键会使旧 Base 回读时重置整个状态并丢失 Base 提示记录。该方案还在确认前持久化 pair，导致 A→B 启动失败回滚 A 后同一恢复目标继续被抑制；Base/Profile 并发原子写也可能以完成顺序覆盖彼此快照。
+- Experiment or why unnecessary: 两个独立只读复审分别检查旧 Base reader、A→B→A 生命周期和并发写序；无需新文件、schema、存储或 Creation Mode，因为该 owner 是 Desktop 生命周期且现有单一状态文件已可表达正确语义。
+- Decision and forbidden alternatives: 保持旧 v2 精确三键格式，在现有 `lastPromptedGeneration` 中存放带 domain 的 `SHA-256(currentGeneration,targetGeneration)`；旧 target-only 值自然只迁移提示一次。只在用户明确拒绝时记录 pair；用户后来手动接受时先持久化清除相同拒绝摘要，再走原生 recheck/install，使安装失败或 B 启动失败回滚 A 后可重新提示。状态 mutation/write 由单一 Promise tail 串行且失败不毒死后续写。禁止第四字段、第二状态文件、恢复不兼容 generation、伪造目标或新增 updater。
+- Changed scope: 修正 `desktop/e-mate-desktop/src/updates.ts`、扩充既有 `updates.spec.ts`，并更新 2.0.13 最终范围合同；未改 Profile schema、Harness、roster、R2、Feed、desired state 或生产状态。
+- Verification commands and results: `profile-generation.spec.ts`、`profile-update.spec.ts`、`updates.spec.ts` 共 `3 files / 48 tests` 全过；生产与测试 TypeScript 均通过；`git diff --check` 通过。覆盖旧 reader 接受、legacy target-only 迁移、同 pair 拒绝去重、current/target 变化、手动接受清除、即时安装失败、B 激活失败回滚 A、确认异常、supersede、dispose、Base/Profile 并发及失败写后继续。
+- Immutable evidence / receipt: 只有当前 source-fixed diff；`ac7ff89` 和旧 `dae78fc` release run 均永久作废，不得安装、验收或发布。没有生成、签名、安装、上传或激活任何字节。
+- Remaining blockers: 必须形成新提交并通过 exact-HEAD PR CI，再启动全新只构建不发布的正式 Desktop candidate；macOS/Windows 同一字节安装态、P0/TQ、性能、更新/回滚与公开回读继续 OPEN。
+- Next exact action: 提交并推送本修正，等待 PR #56 新 CI 全绿；随后仅从新 HEAD 生成正式候选，继续拒绝任何 2.0.12 UI 或 mac-smoke 作为 2.0.13 证据。
+
+## 2026-08-25 · 2.0.13 最终事故范围与 2.0.14 接力边界
+
+- Goal checkpoint: 按用户最新决定将本任务终态收敛为三个 Windows P0、共享 Windows Profile 物化前置项和 TQ-01..13 的 2.0.13 正式发布；其余原计划未闭环能力转入独立 2.0.14 接力，不提前结束当前 Goal。
+- Frozen baseline / current HEAD: 范围修订发生在上述 Profile 状态修正尚未提交时；当前源码基线、Base v7、Harness pin、PR #56 与生产隔离边界均不变。
+- Binding documents read: 核对唯一 Goal、根 `AGENTS.md`、目标/插件/性能合同、完整 2.0.13 切片、最新日志和当前 Git 状态；2.0.14 独立任务只接收只读恢复与后续审计结果。
+- Inspected native seam: 这是发布范围与任务所有权修订，不改变任何运行时 seam。2.0.13 的 P0/TQ owner/carrier/验收矩阵继续有效，不能因移交其他能力而降低门槛。
+- Experiment or why unnecessary: 无需产品实验；范围必须先写入切片合同，避免当前分支与新任务并发修改、把源码候选误当发布内容或把未验功能静默塞入事故版。
+- Decision and forbidden alternatives: 2.0.13 候选、roster、更新说明和正式字节只容纳 P0/TQ 闭环所需变化；Goal、Canvas、非 TQ ImageGen、通用 Deliverables、Pet/30 动作、C03 图标、Better Sidebar 扩展及其他未闭环新能力保持 OPEN 并移交 2.0.14。2.0.14 在 2.0.13 发布前只能只读审计和写自己的合同，禁止触碰本分支或生产链。
+- Changed scope: 仅更新 `docs/slices/2.0.13.md` 并 append 本记录；创建新的 Codex 接力任务不改变仓库或发布状态。
+- Verification commands and results: 文档范围与现有 P0/TQ 矩阵交叉核对；`git diff --check` 通过。独立缺口审计仍在执行，结果将按 owner、证据、依赖和最小验收发送给 2.0.14 任务。
+- Immutable evidence / receipt: 新接力任务 id 为 `01a0396e-5295-7e02-8549-edfe44451fee`；没有构建、安装、上传或发布任何字节。
+- Remaining blockers: 2.0.13 仍须完成 exact-HEAD CI、正式候选、双平台 P0/TQ、性能、安全、更新、回滚及生产公开回读；2.0.14 清单中的所有项默认 OPEN，不能反向阻塞或替代 2.0.13 的事故门。
+- Next exact action: 继续完成 2.0.13 Profile 状态修正提交和正式候选；审计返回后只向 2.0.14 任务发送结构化清单，本任务直到 2.0.13 真正发布才结束。
