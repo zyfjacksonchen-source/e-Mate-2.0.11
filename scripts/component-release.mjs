@@ -256,6 +256,7 @@ export function emitComponent(options) {
     target,
     source_commit: sourceCommit,
     base_contracts: [...manifest.eMate.component.base_contracts].sort(),
+    schedule_protocol_floor: boundary.baseContract.schedule_protocol_floor,
     base_imports: baseImports,
     authority_contract: {
       effects: [...component.authority_contract.effects],
@@ -316,6 +317,7 @@ function main() {
     process.stdout.write(`${JSON.stringify({
       schema_version: 1,
       base_contract_id: boundary.baseContract.id,
+      schedule_protocol_floor: boundary.baseContract.schedule_protocol_floor,
       components: boundary.components.map(component => ({
         id: component.id,
         version: component.version,

@@ -174,6 +174,7 @@ export function emitBaseSdk(root, output) {
   const manifest = {
     schema_version: 2,
     base_contract_id: contract.id,
+    schedule_protocol_floor: contract.schedule_protocol_floor,
     desktop_reference_commit: contract.desktop_reference.commit,
     harness_version: contract.harness_version,
     harness_commit: contract.harness_commit,
@@ -190,6 +191,7 @@ function validateManifest(root, input) {
   const manifest = JSON.parse(readFileSync(join(input, 'manifest.json'), 'utf8'))
   if (manifest.schema_version !== 2
     || manifest.base_contract_id !== contract.id
+    || manifest.schedule_protocol_floor !== contract.schedule_protocol_floor
     || manifest.desktop_reference_commit !== contract.desktop_reference.commit
     || manifest.harness_version !== contract.harness_version
     || manifest.harness_commit !== contract.harness_commit
@@ -264,6 +266,7 @@ function main() {
   process.stdout.write(`${JSON.stringify({
     schema_version: value.schema_version,
     base_contract_id: value.base_contract_id,
+    schedule_protocol_floor: value.schedule_protocol_floor,
     harness_commit: value.harness_commit,
     files: value.files.length,
     total_bytes: value.total_bytes,

@@ -49,8 +49,9 @@ describe('signed Profile update path', () => {
       release_version: '2.0.12',
       sequence: 1,
       source_commit: commit,
+      schedule_protocol_floor: 1,
       target,
-      base_contracts: ['e-mate-desktop-profile-v6-dsh-2bc16230975f'],
+      base_contracts: ['e-mate-desktop-profile-v7-dsh-e13ce9d95303'],
       harness_contract: { version: '0.1.0-rc.7', commit: '7'.repeat(40) },
       components: [{
         id: '@e-mate/dsh-plugin-memory-evolve',
@@ -85,7 +86,7 @@ describe('signed Profile update path', () => {
       currentSequence: 0,
       releaseVersion: '2.0.12',
       sequence: 1,
-      requiredBaseContracts: ['e-mate-desktop-profile-v6-dsh-2bc16230975f'],
+      requiredBaseContracts: ['e-mate-desktop-profile-v7-dsh-e13ce9d95303'],
     })
     expect(request).toHaveBeenCalledOnce()
     expect(request).toHaveBeenCalledWith(profileReleaseUrl(target), expect.objectContaining({ method: 'GET' }))
@@ -136,6 +137,7 @@ describe('signed Profile update path', () => {
       target: null,
       source_commit: commit,
       base_contracts: [base.id],
+      schedule_protocol_floor: base.schedule_protocol_floor,
       base_imports: [],
       authority_contract: { effects: [], guards: [] },
       harness_contract: { version: base.harness_version, commit: base.harness_commit },
@@ -151,6 +153,7 @@ describe('signed Profile update path', () => {
       release_version: version,
       sequence: 1,
       source_commit: commit,
+      schedule_protocol_floor: base.schedule_protocol_floor,
       target: { platform: 'darwin', arch: 'arm64' },
       base_contracts: [base.id],
       harness_contract: { version: base.harness_version, commit: base.harness_commit },

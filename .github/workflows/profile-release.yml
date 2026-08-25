@@ -114,8 +114,10 @@ jobs:
           set -euo pipefail
           impact=dist/accepted-impact/change-impact.json
           base_id="$(jq -er .id desktop/e-mate-desktop/base-contract.json)"
+          schedule_floor="$(jq -er .schedule_protocol_floor desktop/e-mate-desktop/base-contract.json)"
           test "$(jq -er .contract.valid "$impact")" = true
           test "$(jq -er .contract.base_contract_id "$impact")" = "$base_id"
+          test "$(jq -er .contract.schedule_protocol_floor "$impact")" = "$schedule_floor"
           jobs_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/jobs?per_page=100")"
           job_succeeded() {
             jq -e --arg name "$1" '.jobs | any(.name == $name and .conclusion == "success")' <<<"$jobs_json" >/dev/null

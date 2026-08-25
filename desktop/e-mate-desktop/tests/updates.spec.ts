@@ -197,7 +197,11 @@ describe('desktop update Host plugin', () => {
       install: vi.fn(async () => {}),
     } satisfies DesktopProfileUpdateAdapter
     const baseRequest = vi.fn(async () => versionResponse('2.1.0'))
-    const harness = await createHarness({ profile, request: baseRequest })
+    const harness = await createHarness({
+      profile,
+      request: baseRequest,
+      config: { ...testConfig, initialDelayMs: 10_000 },
+    })
 
     await expect(harness.runInteractiveUpdate()).resolves.toEqual({
       status: 'scheduled',

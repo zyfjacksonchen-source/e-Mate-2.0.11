@@ -12,7 +12,7 @@ import type { ProfileBaseContract, ProfileReleaseComponent } from '../src/profil
 
 const base: ProfileBaseContract = {
   schema_version: 1,
-  id: 'e-mate-desktop-profile-v6-dsh-2bc16230975f',
+  id: 'e-mate-desktop-profile-v7-dsh-e13ce9d95303',
   desktop_api: 1,
   profile_format: 1,
   schedule_protocol_floor: 1,
@@ -77,6 +77,7 @@ function fixture(options: {
     target,
     source_commit: sourceCommit,
     base_contracts: [base.id],
+    schedule_protocol_floor: base.schedule_protocol_floor,
     base_imports: [],
     authority_contract: packageValue.eMate.component.authority_contract,
     harness_contract: { version: base.harness_version, commit: base.harness_commit },
@@ -121,6 +122,9 @@ describe('Profile component materialization', () => {
     })
     const manifest = JSON.parse(manifestBytes.toString())
     manifest.authority_contract.effects = ['filesystem-root']
+    expect(parseProfileComponentManifest(Buffer.from(JSON.stringify(manifest)), reference, base)).toBeUndefined()
+    manifest.authority_contract.effects = ['persistent-state']
+    manifest.schedule_protocol_floor = 0
     expect(parseProfileComponentManifest(Buffer.from(JSON.stringify(manifest)), reference, base)).toBeUndefined()
   })
 
@@ -257,6 +261,7 @@ describe('Profile component materialization', () => {
         target,
         source_commit: sourceCommit,
         base_contracts: [base.id],
+        schedule_protocol_floor: base.schedule_protocol_floor,
         base_imports: [],
         authority_contract: { effects: [], guards: [] },
         harness_contract: { version: base.harness_version, commit: base.harness_commit },

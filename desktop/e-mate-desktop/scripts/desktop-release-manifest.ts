@@ -5,6 +5,7 @@ import { createReadStream, readFileSync } from 'node:fs'
 import { mkdir, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadProfileBaseContract } from '../src/profile-release.ts'
 
 const desktopManifest = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -16,6 +17,7 @@ if (typeof DESKTOP_RELEASE_VERSION !== 'string'
 }
 const R2_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/u
+const baseContract = loadProfileBaseContract(fileURLToPath(new URL('../base-contract.json', import.meta.url)))
 
 export interface DesktopReleaseManifestOptions {
   readonly macArtifact: string
@@ -57,6 +59,8 @@ export async function createDesktopReleaseManifest(options: DesktopReleaseManife
     schema_version: 1,
     version: DESKTOP_RELEASE_VERSION,
     source_commit: options.sourceCommit,
+    base_contract_id: baseContract.id,
+    schedule_protocol_floor: baseContract.schedule_protocol_floor,
     artifacts: { darwin, win32 },
   }, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
   await rename(temporary, output)

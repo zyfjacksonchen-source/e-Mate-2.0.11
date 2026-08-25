@@ -435,9 +435,13 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.match(desktopRelease.jobs.r2.steps.find(step => step.name === 'Validate the accepted build-only run').run, /head_sha/u)
   assert.equal(desktopRelease.jobs.r2.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], '${{ inputs.release_run_id }}')
   assert.match(desktopManifestSource, /readFileSync\(new URL\('\.\.\/package\.json'/u)
+  assert.match(desktopManifestSource, /loadProfileBaseContract/u)
+  assert.match(desktopManifestSource, /schedule_protocol_floor/u)
   assert.doesNotMatch(desktopManifestSource, /const VERSION = '\d+\.\d+\.\d+'/u)
   assert.match(desktopPublisher.run, /version="\$\(jq -er '\.version/u)
   assert.match(desktopPublisher.run, /\.artifacts\[\$platform\]\.url/u)
+  assert.match(desktopPublisher.run, /\.base_contract_id/u)
+  assert.match(desktopPublisher.run, /\.schedule_protocol_floor/u)
   assert.equal(desktopPublisher.env.EMATE_PERFORMANCE_ACCEPTED_SHA, '${{ vars.EMATE_PERFORMANCE_ACCEPTED_SHA }}')
   assert.match(desktopPublisher.run, /test "\$GITHUB_SHA" = "\$EMATE_PERFORMANCE_ACCEPTED_SHA"/u)
   assert.ok(desktopPublisher.run.lastIndexOf('public-artifact') < desktopPublisher.run.indexOf('--key desktop/latest.json'))
@@ -453,7 +457,7 @@ test('GitHub release packs once and validates the same tarball on three platform
 test('download page resolves unsigned desktop installers from the fail-closed R2 manifest', async () => {
   const page = renderDownloadPage(readFileSync('deploy/download-page/index.html', 'utf8'))
   const macGuide = readFileSync('deploy/download-page/install-macos.html', 'utf8')
-  const scriptName = 'site.f64ce25824c9.js'
+  const scriptName = 'site.78a554c241ad.js'
   const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
   assert.equal(scriptName.split('.')[1], createHash('sha256').update(script).digest('hex').slice(0, 12))
   const manifestUrl = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json'
@@ -466,6 +470,8 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
     assert.match(script, new RegExp(filename.replaceAll('.', '\\.'), 'u'))
   }
   assert.match(script, /manifest\.source_commit/u)
+  assert.match(script, /manifest\.base_contract_id/u)
+  assert.match(script, /manifest\.schedule_protocol_floor/u)
   assert.match(script, /Number\.isSafeInteger\(artifact\.bytes\)/u)
   assert.match(script, /artifact\.build_source_commit/u)
   assert.match(script, /artifact\.build_run_id/u)
@@ -496,12 +502,21 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
     schema_version: 1,
     version: publishedVersion,
     source_commit: commit,
+    base_contract_id: 'e-mate-desktop-profile-v7-dsh-e13ce9d95303',
+    schedule_protocol_floor: 1,
     artifacts: {
       darwin: { url: `${releasePrefix}/e-Mate-${publishedVersion}-mac-universal.dmg`, bytes: 123, sha256: 'b'.repeat(64), build_source_commit: commit, build_run_id: '123' },
       win32: { url: `${releasePrefix}/e-Mate-${publishedVersion}-win-x64-Setup.exe`, bytes: 456, sha256: 'c'.repeat(64), build_source_commit: 'd'.repeat(40), build_run_id: '456' },
     },
   }
-  assert.deepEqual(normalizeDownloadIndex(fixture).downloads.map(item => item.target), ['macos-universal', 'windows-x64'])
+  const normalized = normalizeDownloadIndex(fixture)
+  assert.equal(normalized.base_contract_id, fixture.base_contract_id)
+  assert.equal(normalized.schedule_protocol_floor, 1)
+  assert.deepEqual(normalized.downloads.map(item => item.target), ['macos-universal', 'windows-x64'])
+  const missingFloor = { ...fixture }
+  delete missingFloor.schedule_protocol_floor
+  assert.throws(() => normalizeDownloadIndex(missingFloor), /桌面发布清单 字段无效/u)
+  assert.throws(() => normalizeDownloadIndex({ ...fixture, schedule_protocol_floor: 0 }), /桌面发布清单身份无效/u)
   assert.throws(() => normalizeDownloadIndex({
     ...fixture,
     artifacts: { ...fixture.artifacts, darwin: { ...fixture.artifacts.darwin, url: 'https://example.com/e-Mate.dmg' } },

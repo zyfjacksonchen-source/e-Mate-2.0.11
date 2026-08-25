@@ -119,7 +119,8 @@ describe('repository release boundary', () => {
   it('accepts the checked-in base contract and every first-party component', () => {
     const boundary = loadReleaseBoundary(root)
     assert.equal(boundary.valid, true, boundary.errors.join('\n'))
-    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v6-dsh-2bc16230975f')
+    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v7-dsh-e13ce9d95303')
+    assert.equal(boundary.baseContract.schedule_protocol_floor, 1)
     assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.12')
     assert.deepEqual(PRODUCT_UI_REFERENCE, {
       repository: 'zyfjacksonchen-source/ECoreX',
@@ -194,6 +195,16 @@ describe('repository release boundary', () => {
       baseContract.runtime_imports.react = '18.3.2'
       writeFileSync(basePath, `${JSON.stringify(baseContract, null, 2)}\n`)
       assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /Base runtime import react must equal 18\.3\.2/u)
+      copyFileSync(join(root, 'desktop/e-mate-desktop/base-contract.json'), basePath)
+
+      const missingFloor = JSON.parse(readFileSync(basePath, 'utf8'))
+      delete missingFloor.schedule_protocol_floor
+      writeFileSync(basePath, `${JSON.stringify(missingFloor, null, 2)}\n`)
+      assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /base contract fields are invalid/u)
+      const invalidFloor = JSON.parse(readFileSync(join(root, 'desktop/e-mate-desktop/base-contract.json'), 'utf8'))
+      invalidFloor.schedule_protocol_floor = 0
+      writeFileSync(basePath, `${JSON.stringify(invalidFloor, null, 2)}\n`)
+      assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /schedule_protocol_floor must be 1/u)
       copyFileSync(join(root, 'desktop/e-mate-desktop/base-contract.json'), basePath)
 
       const memoryPath = join(checkout, 'packages/dsh-plugin-memory-evolve/package.json')

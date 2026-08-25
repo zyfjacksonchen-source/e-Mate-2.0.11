@@ -325,6 +325,7 @@ export function validateDesktopReleaseArtifact(
   platform: DesktopReleasePlatform,
   version: string,
   value: unknown,
+  expectedSourceCommit?: string,
 ): DesktopReleaseArtifact | null {
   if (!isRecord(value)
     || typeof value.url !== 'string'
@@ -423,4 +424,10 @@ function canonicalJson(value: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort()
+  const wanted = [...expected].sort()
+  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index])
 }

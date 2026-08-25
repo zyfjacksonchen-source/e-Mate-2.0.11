@@ -1,6 +1,6 @@
 import { basename, dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ProfileUpdateAvailable } from '../src/profile-update.ts'
+import type { ProfileUpdateAvailable, ProfileUpdateContext } from '../src/profile-update.ts'
 import type { DesktopShellSpec } from '../src/runtime.ts'
 
 const updateAvailable = {
@@ -876,8 +876,18 @@ describe('Electron compatibility runtime', () => {
       isPackaged: false,
       canDownload: false,
       currentVersion: '2.0.12',
+      currentScheduleProtocolFloor: 0,
       statePath: join('/tmp/dsh-desktop-user-data', 'updates', 'state.json'),
     })
+    runtime.configureProfileUpdates({
+      base: { schedule_protocol_floor: 1 },
+      target: { platform: 'darwin', arch: 'arm64' },
+      expectedComponentIds: [],
+      generationRoot: '/tmp/generations',
+      generationStatePath: '/tmp/generations/state.json',
+      activeGenerationId: 'bundled',
+    } as unknown as Omit<ProfileUpdateContext, 'request'>)
+    expect(runtime.updates.currentScheduleProtocolFloor).toBe(1)
     electron.app.isPackaged = true
     expect(runtime.updates).toMatchObject({ isPackaged: true, canDownload: true })
 

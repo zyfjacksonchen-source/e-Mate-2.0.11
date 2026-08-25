@@ -59,6 +59,7 @@ export interface ProfileComponentManifest {
   readonly target: ProfileComponentTarget | null
   readonly source_commit: string
   readonly base_contracts: readonly string[]
+  readonly schedule_protocol_floor: number
   readonly base_imports: readonly string[]
   readonly authority_contract: ProfileComponentAuthorityContract
   readonly harness_contract: {
@@ -141,6 +142,7 @@ export function parseProfileComponentManifest(
   } catch { return }
   if (!record(value) || !exactKeys(value, [
     'schema_version', 'id', 'slug', 'version', 'kind', 'target', 'source_commit', 'base_contracts',
+    'schedule_protocol_floor',
     'base_imports', 'authority_contract', 'harness_contract', 'package_entry', 'dsh', 'total_bytes', 'files',
   ]) || value.schema_version !== 1
     || value.id !== reference.id || value.slug !== componentSlug(reference.id)
@@ -148,6 +150,7 @@ export function parseProfileComponentManifest(
     || value.kind !== reference.kind || value.source_commit !== reference.manifest_source_commit
     || typeof value.source_commit !== 'string' || !SHA40.test(value.source_commit)
     || !sortedUniqueStrings(value.base_contracts) || !value.base_contracts.includes(base.id)
+    || value.schedule_protocol_floor !== base.schedule_protocol_floor
     || !sortedUniqueStrings(value.base_imports, true)
     || value.base_imports.some(name => !Object.hasOwn(base.runtime_imports, name))
     || parseAuthorityContract(value.authority_contract) === undefined
@@ -177,6 +180,7 @@ export function parseProfileComponentManifest(
     target,
     source_commit: reference.manifest_source_commit,
     base_contracts: [...value.base_contracts],
+    schedule_protocol_floor: base.schedule_protocol_floor,
     base_imports: [...value.base_imports],
     authority_contract: parseAuthorityContract(value.authority_contract)!,
     harness_contract: { version: base.harness_version, commit: base.harness_commit },

@@ -1,5 +1,7 @@
 const MAX_INDEX_BYTES = 64 * 1024;
 const VERSION = "2.0.12";
+const BASE_CONTRACT_ID = "e-mate-desktop-profile-v7-dsh-e13ce9d95303";
+const SCHEDULE_PROTOCOL_FLOOR = 1;
 const R2_ORIGIN = "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev";
 const DESKTOP_MANIFEST_URL = "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json";
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -29,8 +31,9 @@ function safeText(value, label, pattern) {
 
 export function normalizeDownloadIndex(raw) {
   const manifest = object(raw, "桌面发布清单");
-  exactKeys(manifest, ["schema_version", "version", "source_commit", "artifacts"], "桌面发布清单");
-  if (manifest.schema_version !== 1 || manifest.version !== VERSION || !SOURCE_COMMIT.test(manifest.source_commit)) {
+  exactKeys(manifest, ["schema_version", "version", "source_commit", "base_contract_id", "schedule_protocol_floor", "artifacts"], "桌面发布清单");
+  if (manifest.schema_version !== 1 || manifest.version !== VERSION || !SOURCE_COMMIT.test(manifest.source_commit)
+    || manifest.base_contract_id !== BASE_CONTRACT_ID || manifest.schedule_protocol_floor !== SCHEDULE_PROTOCOL_FLOOR) {
     throw new Error("桌面发布清单身份无效");
   }
   const artifacts = object(manifest.artifacts, "桌面制品");
@@ -42,6 +45,8 @@ export function normalizeDownloadIndex(raw) {
   return Object.freeze({
     version: manifest.version,
     source_commit: manifest.source_commit,
+    base_contract_id: manifest.base_contract_id,
+    schedule_protocol_floor: manifest.schedule_protocol_floor,
     distribution_mode: "adhoc-unsigned-release",
     downloads: Object.freeze(downloads),
   });

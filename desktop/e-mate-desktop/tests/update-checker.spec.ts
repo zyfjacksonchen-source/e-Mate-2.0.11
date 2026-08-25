@@ -44,6 +44,8 @@ function releaseArtifact(version: string, platform: 'darwin' | 'win32') {
     url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v${encodeURIComponent(version)}/${SOURCE_COMMIT}/e-Mate-${version}-${platform === 'darwin' ? 'mac-universal.dmg' : 'win-x64-Setup.exe'}`,
     bytes: 1024,
     sha256: '0'.repeat(64),
+    build_source_commit: sourceCommit,
+    build_run_id: '123',
   }
 }
 
@@ -195,7 +197,6 @@ describe('public Desktop version check', () => {
   it.each([
     ['2.0.0', '2.0.0'],
     ['2.0.1', '2.0.0'],
-    ['2.0.0+installed', '2.0.0+release'],
   ])('reports no update for installed %s and service %s', async (currentVersion, latestVersion) => {
     await expect(checkForStableUpdate({
       platform: 'darwin',

@@ -50,6 +50,8 @@ describe('desktop release manifest', () => {
       schema_version: 1,
       version: '2.0.12',
       source_commit: commit,
+      base_contract_id: 'e-mate-desktop-profile-v7-dsh-e13ce9d95303',
+      schedule_protocol_floor: 1,
       artifacts: {
         darwin: {
           url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.12/${commit}/e-Mate-2.0.12-mac-universal.dmg`,

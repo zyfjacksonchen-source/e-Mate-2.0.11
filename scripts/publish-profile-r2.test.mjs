@@ -25,7 +25,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   const privateKeyPem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
   const keyId = '0123456789abcdef'
-  const baseId = 'e-mate-desktop-profile-v6-dsh-2bc16230975f'
+  const baseId = 'e-mate-desktop-profile-v7-dsh-e13ce9d95303'
   const componentId = '@e-mate/dsh-plugin-fixture'
   const sourceCommit = 'a'.repeat(40)
   mkdirSync(join(root, 'desktop/e-mate-desktop'), { recursive: true })
@@ -46,6 +46,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
     id: baseId,
     desktop_api: 1,
     profile_format: 1,
+    schedule_protocol_floor: 1,
     desktop_reference: {
       repository: 'anywhere-labs/deepseek-harness-desktop',
       commit: '6074088f5b660206e404b3591fab51fb99c69add',
@@ -120,6 +121,23 @@ test('publication admits bootstrap and its direct successor before exposing acti
     ]),
     bootstrap: true,
   }), /candidate changed components do not match accepted CI impact/u)
+  writeJson(join(candidates[0], 'admission.json'), {
+    ...driftedAdmission,
+    schedule_protocol_floor: 2,
+  })
+  assert.throws(() => prepareProfilePublication({
+    root,
+    candidateDirectories: candidates,
+    artifactRoots: [join(root, 'dist/components')],
+    expectedChangedIds: [componentId],
+    sourceCommit,
+    privateKeyPem,
+    keyId,
+    currentByTarget: new Map([
+      ['darwin-arm64', undefined], ['darwin-x64', undefined], ['win32-x64', undefined],
+    ]),
+    bootstrap: true,
+  }), /Profile candidate admission is invalid/u)
   writeJson(join(candidates[0], 'admission.json'), driftedAdmission)
   const publication = prepareProfilePublication({
     root,
@@ -194,6 +212,8 @@ test('publication admits bootstrap and its direct successor before exposing acti
   assert.equal(plan.main_commit, sourceCommit)
   assert.equal(plan.accepted_ci_run_id, '123')
   assert.equal(plan.preparation_run_id, '456')
+  assert.equal(plan.base_contract_id, baseId)
+  assert.equal(plan.schedule_protocol_floor, 1)
   assert.equal(plan.activations.every(item => item.expected_current === null), true)
   assert.equal(plan.immutable_objects.every(item => item.path.startsWith('immutable/')), true)
   assert.equal(plan.activations.every(item => item.object.path.startsWith('activation/')), true)

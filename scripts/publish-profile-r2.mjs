@@ -107,6 +107,9 @@ function loadCandidate(directory, base, expectedIds, sourceCommit, privateKeyPem
     || admission?.schema_version !== 1 || admission.document_type !== 'emate.profile-generation-admission'
     || admission.status !== 'verified' || admission.signature_kind !== 'ephemeral'
     || admission.source_commit !== sourceCommit || admission.candidate_generation !== generation
+    || admission.base_contract_id !== base.id
+    || admission.schedule_protocol_floor !== base.schedule_protocol_floor
+    || payload.schedule_protocol_floor !== base.schedule_protocol_floor
     || canonicalProfileJson(admission.target) !== canonicalProfileJson(payload.target)
     || !Array.isArray(admission.changed_components) || admission.changed_components.length === 0
     || new Set(admission.changed_components).size !== admission.changed_components.length
@@ -359,6 +362,7 @@ export function writeProfilePublicationBundle(prepared, output, currentByTarget,
     accepted_ci_run_id: provenance.acceptedCiRunId,
     preparation_run_id: provenance.preparationRunId,
     base_contract_id: prepared.base.id,
+    schedule_protocol_floor: prepared.base.schedule_protocol_floor,
     immutable_objects: immutableObjects,
     activations,
   }

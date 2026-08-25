@@ -23,7 +23,7 @@ function fixture() {
   roots.push(root)
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   const keyId = '0123456789abcdef'
-  const baseId = 'e-mate-desktop-profile-v6-dsh-2bc16230975f'
+  const baseId = 'e-mate-desktop-profile-v7-dsh-e13ce9d95303'
   mkdirSync(join(root, 'desktop/e-mate-desktop'), { recursive: true })
   mkdirSync(join(root, 'packages/dsh/profile'), { recursive: true })
   execFileSync('git', ['init', '--quiet'], { cwd: root })
@@ -40,6 +40,7 @@ function fixture() {
     id: baseId,
     desktop_api: 1,
     profile_format: 1,
+    schedule_protocol_floor: 1,
     desktop_reference: {
       repository: 'anywhere-labs/deepseek-harness-desktop',
       commit: '6074088f5b660206e404b3591fab51fb99c69add',
@@ -142,6 +143,8 @@ test('a changed component is merged with the complete signed accepted set before
     keyId,
   })
   assert.equal(first.admission.sequence, 1)
+  assert.equal(first.admission.schedule_protocol_floor, 1)
+  assert.equal(first.release.payload.schedule_protocol_floor, 1)
   assert.equal(first.admission.parent_generation, null)
   assert.equal(first.admission.signature_kind, 'production')
   assert.deepEqual(first.release.payload.components.map(component => component.id), components.map(component => component.id))

@@ -35,6 +35,8 @@ describe('component payload closure', () => {
       encoding: 'utf8',
     }))
     const accepted = inventory.components.filter(component => component.desktop !== 'blocked')
+    assert.equal(inventory.base_contract_id, 'e-mate-desktop-profile-v7-dsh-e13ce9d95303')
+    assert.equal(inventory.schedule_protocol_floor, 1)
     assert.equal(accepted.length, 15)
     assert.deepEqual(accepted.map(component => component.id).sort(), [
       '@e-mate/dsh-client-shell',

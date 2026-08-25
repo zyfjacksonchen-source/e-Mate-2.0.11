@@ -23,7 +23,7 @@ afterEach(async () => {
 const { privateKey, publicKey } = generateKeyPairSync('ed25519')
 const base: ProfileBaseContract = {
   schema_version: 1,
-  id: 'e-mate-desktop-profile-v6-dsh-2bc16230975f',
+  id: 'e-mate-desktop-profile-v7-dsh-e13ce9d95303',
   desktop_api: 1,
   profile_format: 1,
   schedule_protocol_floor: 1,
@@ -42,6 +42,7 @@ const payload: ProfileReleasePayload = {
   release_version: '2.0.12',
   sequence: 2,
   source_commit: 'a'.repeat(40),
+  schedule_protocol_floor: base.schedule_protocol_floor,
   target: { platform: 'darwin', arch: 'arm64' },
   base_contracts: [base.id],
   harness_contract: { version: base.harness_version, commit: base.harness_commit },

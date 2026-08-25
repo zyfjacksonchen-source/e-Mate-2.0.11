@@ -248,7 +248,7 @@ function validateBaseContract(value) {
   const errors = []
   if (!record(value)) return ['base contract must be an object']
   if (!exactKeys(value, [
-    'schema_version', 'id', 'desktop_api', 'profile_format', 'desktop_reference',
+    'schema_version', 'id', 'desktop_api', 'profile_format', 'schedule_protocol_floor', 'desktop_reference',
     'harness_version', 'harness_commit', 'runtime_imports', 'profile_signing_keys',
   ])) errors.push('base contract fields are invalid')
   if (value.schema_version !== 1) errors.push('base contract schema_version must be 1')
@@ -257,6 +257,7 @@ function validateBaseContract(value) {
   }
   if (value.desktop_api !== 1) errors.push('base contract desktop_api must be 1')
   if (value.profile_format !== 1) errors.push('base contract profile_format must be 1')
+  if (value.schedule_protocol_floor !== 1) errors.push('base contract schedule_protocol_floor must be 1')
   const reference = record(value.desktop_reference) ? value.desktop_reference : {}
   if (reference.repository !== 'anywhere-labs/deepseek-harness-desktop'
     || reference.commit !== '6074088f5b660206e404b3591fab51fb99c69add'
@@ -611,6 +612,9 @@ function result({
     contract: {
       valid: boundary?.valid ?? false,
       base_contract_id: typeof boundary?.baseContract?.id === 'string' ? boundary.baseContract.id : null,
+      schedule_protocol_floor: Number.isSafeInteger(boundary?.baseContract?.schedule_protocol_floor)
+        ? boundary.baseContract.schedule_protocol_floor
+        : null,
       errors: boundary?.errors ?? (error === undefined ? [] : [error]),
     },
   }

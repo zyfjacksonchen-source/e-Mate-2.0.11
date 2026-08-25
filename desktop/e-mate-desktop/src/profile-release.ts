@@ -67,6 +67,7 @@ export interface ProfileReleasePayload {
   readonly release_version: string
   readonly sequence: number
   readonly source_commit: string
+  readonly schedule_protocol_floor: number
   readonly target: ProfileReleaseTarget
   readonly base_contracts: readonly string[]
   readonly harness_contract: {
@@ -324,13 +325,14 @@ function parseComponent(value: unknown, releaseTarget: ProfileReleaseTarget): Pr
 
 function parsePayload(value: unknown): ProfileReleasePayload | undefined {
   if (!record(value) || !exactKeys(value, [
-    'schema_version', 'product', 'release_version', 'sequence', 'source_commit',
+    'schema_version', 'product', 'release_version', 'sequence', 'source_commit', 'schedule_protocol_floor',
     'target', 'base_contracts', 'harness_contract', 'components',
   ])) return
   if (value.schema_version !== 1 || value.product !== 'e-Mate'
     || typeof value.release_version !== 'string' || !STABLE_VERSION.test(value.release_version)
     || !Number.isSafeInteger(value.sequence) || (value.sequence as number) <= 0
     || typeof value.source_commit !== 'string' || !SHA40.test(value.source_commit)
+    || !Number.isSafeInteger(value.schedule_protocol_floor) || (value.schedule_protocol_floor as number) <= 0
     || !sortedUniqueStrings(value.base_contracts)
     || !record(value.harness_contract)
     || !exactKeys(value.harness_contract, ['version', 'commit'])
@@ -349,6 +351,7 @@ function parsePayload(value: unknown): ProfileReleasePayload | undefined {
     release_version: value.release_version,
     sequence: value.sequence as number,
     source_commit: value.source_commit,
+    schedule_protocol_floor: value.schedule_protocol_floor as number,
     target,
     base_contracts: [...value.base_contracts],
     harness_contract: {
@@ -405,10 +408,11 @@ export function verifyProfileRelease(value: unknown, base: ProfileBaseContract):
 /** Select an update without ever inferring compatibility from SemVer. */
 export function selectProfileRelease(
   payload: ProfileReleasePayload,
-  installedBase: Pick<ProfileBaseContract, 'id' | 'harness_version' | 'harness_commit'>,
+  installedBase: Pick<ProfileBaseContract, 'id' | 'harness_version' | 'harness_commit' | 'schedule_protocol_floor'>,
   installedSequence: number,
 ): ProfileReleaseSelection {
   if (!payload.base_contracts.includes(installedBase.id)
+    || payload.schedule_protocol_floor !== installedBase.schedule_protocol_floor
     || payload.harness_contract.version !== installedBase.harness_version
     || payload.harness_contract.commit !== installedBase.harness_commit) return 'base-required'
   return payload.sequence > installedSequence ? 'update' : 'current'

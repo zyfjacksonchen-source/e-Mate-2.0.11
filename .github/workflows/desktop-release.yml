@@ -333,6 +333,10 @@ jobs:
           origin="https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev"
           version="$(jq -er '.version | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' dist/desktop/latest.json)"
           test "$(jq -er .source_commit dist/desktop/latest.json)" = "$GITHUB_SHA"
+          base_id="$(jq -er .id desktop/e-mate-desktop/base-contract.json)"
+          schedule_floor="$(jq -er '.schedule_protocol_floor | select(type == "number" and . > 0 and floor == .)' desktop/e-mate-desktop/base-contract.json)"
+          test "$(jq -er .base_contract_id dist/desktop/latest.json)" = "$base_id"
+          test "$(jq -er .schedule_protocol_floor dist/desktop/latest.json)" = "$schedule_floor"
           prefix="desktop/releases/v${version}/${GITHUB_SHA}"
           for platform in darwin win32; do
             file="$(jq -er --arg platform "$platform" '.artifacts[$platform].url | split("/")[-1]' dist/desktop/latest.json)"
