@@ -137,6 +137,14 @@ describe('repository release boundary', () => {
     assert.equal(boundary.components.length, 16)
     assert.equal(boundary.components.every(component => component.errors.length === 0), true)
     assert.deepEqual(boundary.components.flatMap(component => component.errors), [])
+    const blocked = JSON.parse(readFileSync(join(root, 'packages/dsh-plugin-xin-assistant/package.json'), 'utf8'))
+    assert.deepEqual(blocked.eMate.component.base_contracts, [boundary.baseContract.id])
+    assert.equal(blocked.eMate.harnessCommit, boundary.baseContract.harness_commit)
+    assert.equal(boundary.components.find(component => component.id === blocked.name)?.desktop, 'blocked')
+    const retired = JSON.parse(readFileSync(join(root, 'packages/dsh-plugin-search-mcp/package.json'), 'utf8'))
+    assert.deepEqual(retired.eMate.component.base_contracts, ['e-mate-desktop-profile-v6-dsh-2bc16230975f'])
+    assert.equal(retired.eMate.harnessCommit, '2bc16230975f6cf02aa1b283b1f86de44007b059')
+    assert.equal(boundary.components.some(component => component.id === retired.name), false)
   })
 
   it('detects a transitive Harness version hidden in a component lock peer context', () => {
@@ -430,6 +438,7 @@ describe('repository release boundary', () => {
 
     assert.equal(classify('packages/dsh-plugin-xin-assistant/src/index.ts').lane, 'base')
     assert.equal(classify('packages/dsh-plugin-xin-assistant/runtime/vendor-native/darwin-arm64/library.dylib').lane, 'base')
+    assert.equal(classify('packages/dsh-plugin-search-mcp/package.json').lane, 'base')
 
     const impact = classify('packages/dsh-plugin-computer-use/scripts/build.mjs')
     assert.equal(impact.portable_publish, false)
