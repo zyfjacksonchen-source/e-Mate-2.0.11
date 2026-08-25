@@ -106,7 +106,7 @@
       inject: [apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity]
     - id: emate-audit
       name: ./plugins/audit.js
-      inject: [agents, skills, tools, connection, sessionPersistence, storageDomain, timer, emateModelPolicy, emateIdentity]
+      inject: [connection, sessionPersistence, storageDomain, timer, emateModelPolicy, emateIdentity]
     - id: emate-capabilities
       name: ./plugins/capabilities.js
       inject: [connection]

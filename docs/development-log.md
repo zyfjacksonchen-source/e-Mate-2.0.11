@@ -2330,3 +2330,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 新接力任务 id 为 `01a0396e-5295-7e02-8549-edfe44451fee`；没有构建、安装、上传或发布任何字节。
 - Remaining blockers: 2.0.13 仍须完成 exact-HEAD CI、正式候选、双平台 P0/TQ、性能、安全、更新、回滚及生产公开回读；2.0.14 清单中的所有项默认 OPEN，不能反向阻塞或替代 2.0.13 的事故门。
 - Next exact action: 继续完成 2.0.13 Profile 状态修正提交和正式候选；审计返回后只向 2.0.14 任务发送结构化清单，本任务直到 2.0.13 真正发布才结束。
+
+## 2026-08-25 · 2.0.13 越界审计分类候选排除
+
+- Goal checkpoint: 根据 2.0.14 独立缺口审计，将已经进入当前历史但不属于三个 P0、共享 Windows Profile 前置项或 TQ-01..13 的任务场景分类候选从 2.0.13 事故版排除；分类保持为 2.0.14 OPEN 候选。
+- Frozen baseline / current HEAD: 审计基于 `release/2.0.13-p0-tq@6b6ca145a827aa4deb322b3b13721ed76f2bf42f`；越界分类提交为 `7836d70997046e71cbc844b7aff67aa8b15a941d`。其子提交 `7e79c969318077c3f20833ecb1f81c340abe4a1a` 关闭 Analytics/Admin 第二审计写入口，经独立复审认定为现有 target contract 的单一生产者安全边界，不随分类反向。
+- Binding documents read: 核对用户最新最终范围、根 `AGENTS.md`、`target-contract.md`、2.0.13 切片、完整 development log、两提交全部文件和后续 descendant touches；2.0.14 审计清单已发送到任务 `01a0396e-5295-7e02-8549-edfe44451fee`。
+- Inspected native seam: `7836d70` 改动客户端 `emate.audit` 场景推导、provenance、outbox 隔离与 identity rejection，形成尚无最终 Base/Profile/真实投递/生产面回执的非 TQ 能力；`7e79c96` 则移除 `/v1/tasks/events`、旧 `task-events:write` 凭据及合并 scope，使既有 `emate.audit → Model Gateway → task ledger` 成为唯一生产写链。
+- Experiment or why unnecessary: 先机械反向两提交的实验被独立复审判为 P1：会重新开放 caller-controlled 第二写入口和双生产者。该实验未提交并已完整中止；最终只反向 `7836d70`。机械反向同时带走了一处后来仍由 Model Policy 测试需要的 settings revision fixture，该夹带变化已最小保留。
+- Decision and forbidden alternatives: 2.0.13 恢复分类前的 `GENERAL` 任务事实，不发布场景分类；保留单一生产者退役闭包作为安全不变量，但不在更新说明宣传为新能力。禁止重新开放 Analytics/Admin task-event 写入、改写公共历史、整枝重建或把分类隐藏在事故版字节。分类在 2.0.14 重新按唯一 owner、隐私、稳定性和真实 Gateway/Postgres/UI 对账准入。
+- Changed scope: 反向应用 `7836d70` 涉及的 7 个 DSH 文件，选择性保留 `identity-lifecycle.test.mjs` 当前 Model Policy settings revision fixture，并同步目标/切片范围合同；未触碰 P0/TQ 产品 owner、Desktop updater、企业单一生产者、R2、Feed、desired state 或安装态。
+- Verification commands and results: 反向范围的 DSH 首轮 `52/53`，唯一失败是机械反向误带走无关 settings `describe/revision` fixture；恢复后定向 `8/8`、完整 DSH `53/53` 与 Shell `67/67` 全过。两提交全反向的企业 `check/test/build` 实验曾通过，但因独立安全复审否决而不作为最终 diff 证据；最终保留 `7e79c96` 的企业字节由新受保护 CI 重验。`git diff --check` 通过。
+- Immutable evidence / receipt: CI run `32863107272` 属于排除前 `6b6ca14`，已请求取消且不得作为候选；当前只有源码反向 diff，没有生成、安装或发布字节。
+- Remaining blockers: 必须提交/推送排除变化并让新 exact HEAD 通过完整 PR CI；随后才能生成正式 macOS 候选。Windows 真机和 P0/TQ 全部安装/更新/回滚门仍 OPEN。
+- Next exact action: 复核最终反向 diff 只移除分类候选且保留单一生产者闭包，提交后重跑 PR #56 CI，生产链继续关闭。
