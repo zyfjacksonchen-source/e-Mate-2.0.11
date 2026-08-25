@@ -343,6 +343,7 @@ describe('e-Mate 2.0.13 identity and settings fidelity', () => {
       }
       return <SessionRouteProjection
         useSessions={selector => selector(state)}
+        useWorkspaces={useReadyWorkspaces}
         getSessions={() => state}
         openSession={() => {}}
         startHomeSession={startHomeSession}

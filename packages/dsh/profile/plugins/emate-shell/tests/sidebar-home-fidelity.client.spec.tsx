@@ -36,6 +36,9 @@ const sidebarUtilityProps = {
   DarkIcon: Icon,
 }
 const useReadyWorkspaces = <T,>(selector: (state: { baselinesReady: boolean }) => T) => selector({ baselinesReady: true })
+const idleSessions = {
+  list: { getSnapshot: () => ({ current: undefined }), subscribe: () => () => {} },
+}
 
 describe('pinned e-Mate Sidebar and Home projection', () => {
   it('keeps Home visible when rc.7 reuses the same blank session for a generic new task', async () => {
@@ -172,6 +175,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
 
     render(<SessionRouteProjection
       useSessions={selector => selector(sessions)}
+      useWorkspaces={useReadyWorkspaces}
       getSessions={() => sessions}
       openSession={open}
       startHomeSession={() => {}}
@@ -209,7 +213,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     let resolvePick!: (path: string) => void
     const pickDirectory = vi.fn(() => new Promise<string>(resolve => { resolvePick = resolve }))
     const create = vi.fn(async ({ path }: { path: string }) => ({ workspaceId: `workspace:${path}` }))
-    const pending = attachWorkspaceFromRoute({ workspaces: { pickDirectory, create } })
+    const pending = attachWorkspaceFromRoute({ sessions: idleSessions, workspaces: { pickDirectory, create } })
 
     dispatchEvent(new PopStateEvent('popstate'))
     resolvePick('/work/selected')
@@ -223,7 +227,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     history.replaceState(null, '', '/')
     const create = vi.fn(async ({ path }: { path: string }) => ({ workspaceId: `workspace:${path}` }))
     const pickDirectory = vi.fn(async () => '/work/selected')
-    const ctx = { workspaces: { pickDirectory, create } }
+    const ctx = { sessions: idleSessions, workspaces: { pickDirectory, create } }
 
     await expect(attachWorkspaceFromRoute(ctx)).resolves.toBe('workspace:/work/selected')
     expect(create).toHaveBeenCalledOnce()
