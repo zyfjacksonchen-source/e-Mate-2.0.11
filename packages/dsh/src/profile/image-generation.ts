@@ -5,11 +5,44 @@ import { zipSync } from 'fflate'
 import { loadTargetLlm, loadTargetTools } from './target-runtime.js'
 
 export const name = 'emate-image-generation'
-export const inject = ['tools', 'jobs', 'attachments', 'sandboxPolicy', 'emateIdentity', 'emateModelPolicy', 'emateCapabilities']
+export const inject = ['tools', 'jobs', 'attachments', 'sandboxPolicy', 'subagents', 'emateIdentity', 'emateModelPolicy', 'emateCapabilities']
 
 interface ImageOutputEventData {
+  readonly schema_version: 2
+  readonly revision: number
   readonly call_id: string
-  readonly content: readonly [{ readonly type: 'image'; readonly attachment: ReturnType<typeof imageRef> }]
+  readonly operation: 'generate' | 'edit' | 'fusion'
+  readonly status: 'running' | 'completed' | 'needs-review' | 'failed' | 'cancelled' | 'unknown'
+  readonly billing_status: 'not-submitted' | 'recorded' | 'unknown'
+  readonly parent_session_id: string
+  readonly sources: readonly ReturnType<typeof imageRef>[]
+  readonly content: readonly { readonly type: 'image'; readonly attachment: ReturnType<typeof imageRef> }[]
+  readonly child_session_id?: string
+  readonly job_id?: string
+  readonly provider_request_id?: string
+  readonly client_request_id?: string
+  readonly model?: string
+  readonly output?: ReturnType<typeof imageRef>
+  readonly verifier: {
+    readonly structural: 'attachment-cas-v1'
+    readonly semantic: 'not-required' | 'not-configured' | 'native-user-confirmation-v1'
+  }
+  readonly verification: {
+    readonly structural: 'passed' | 'failed' | 'not-run'
+    readonly source_output: 'distinct' | 'same' | 'not-applicable' | 'unknown'
+    readonly semantic: 'passed' | 'needs-review' | 'failed' | 'not-applicable'
+    readonly human_review?: {
+      readonly decision: 'accepted' | 'rejected'
+      readonly requirement_sha256: string
+    }
+    readonly text_replacement?: {
+      readonly old_text_sha256: string
+      readonly new_text_sha256: string
+      readonly requested_regions: number | null
+      readonly status: 'passed' | 'needs-review' | 'failed'
+    }
+  }
+  readonly failure_code?: string
 }
 
 declare module '@deepseek-ai/dsh-session/types' {
@@ -24,6 +57,8 @@ declare module '@deepseek-ai/dsh-session/types' {
 }
 
 const IMAGE_MODEL = 'gpt-image-2-pro'
+const IMAGE_RECEIPT_VERSION = 2
+const IMAGE_LEAF_LABEL = 'e-mate:image-leaf:'
 const MAX_PROMPT_CHARS = 20_000
 const MAX_EDIT_IMAGES = 16
 const MAX_EDIT_IMAGE_BYTES = 5 * 1024 * 1024
@@ -31,8 +66,30 @@ const MAX_PACK_IMAGES = 100
 const MAX_PACK_BYTES = 100 * 1024 * 1024
 const IMAGE_TIMEOUT_MS = 610_000
 const ATTACHMENT_ID = /^sha256:[0-9a-f]{64}$/u
+const SHA256 = /^[0-9a-f]{64}$/u
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
+
+function sessionIdentity(agent) {
+  const id = agent?.session?.header?.id ?? agent?.id
+  if (typeof id !== 'string' || id.length === 0) throw new Error('image generation requires a stable Session identity')
+  return id
+}
+
+function parentSessionIdentity(agent) {
+  const id = agent?.session?.header?.parentSession
+  if (typeof id !== 'string' || id.length === 0) throw new Error('image subagent requires its native parent Session identity')
+  return id
+}
+
+function verifier(operation, reviewDecision) {
+  return {
+    structural: 'attachment-cas-v1',
+    semantic: operation === 'generate'
+      ? 'not-required'
+      : reviewDecision === undefined ? 'not-configured' : 'native-user-confirmation-v1',
+  }
+}
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -96,14 +153,19 @@ async function responseJson(response, maximum, label) {
   }
 }
 
+function receiptImageName(value) {
+  return typeof value === 'string' && value.length <= 255 && !/[\\/\0]/u.test(value) ? value : undefined
+}
+
 function imageRef(value) {
+  const name = receiptImageName(value.name)
   return {
     attachmentId: value.attachmentId,
     mediaType: value.mediaType,
     bytes: value.bytes,
     width: value.width,
     height: value.height,
-    ...(value.name === undefined ? {} : { name: value.name }),
+    ...(name === undefined ? {} : { name }),
   }
 }
 
@@ -115,6 +177,392 @@ function validImageRef(value) {
     && Number.isSafeInteger(value.width) && value.width > 0
     && Number.isSafeInteger(value.height) && value.height > 0
     && (value.name === undefined || typeof value.name === 'string')
+}
+
+function sameImageRef(left, right) {
+  return validImageRef(left) && validImageRef(right)
+    && left.attachmentId === right.attachmentId
+    && left.mediaType === right.mediaType
+    && left.bytes === right.bytes
+    && left.width === right.width
+    && left.height === right.height
+    && receiptImageName(left.name) === receiptImageName(right.name)
+}
+
+function imageOperation(refs) {
+  return refs.length === 0 ? 'generate' : refs.length === 1 ? 'edit' : 'fusion'
+}
+
+function sha256Text(value) {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function textReplacementAcceptance(prompt, status = 'needs-review') {
+  const patterns = [
+    /(?:共\s*)?(\d+)\s*处\s*[“"']?([^“”"'，。,.;]{1,32})[”"']?\s*(?:全部)?\s*(?:改为|改成|替换为|换成)\s*[“"']?([^“”"'，。,.;]{1,32})/iu,
+    /(?:把|将)?\s*(?:图片|图像|图)?(?:中|里|上)(?:的)?\s*[“"']?([^“”"'，。,.;]{1,32})[”"']?\s*(?:全部)?\s*(?:改为|改成|替换为|换成)\s*[“"']?([^“”"'，。,.;]{1,32})/iu,
+    /\breplace\s+[“"']?([^“”"'\n]{1,64})[”"']?\s+with\s+[“"']?([^“”"'\n]{1,64})/iu,
+  ]
+  for (const [index, pattern] of patterns.entries()) {
+    const match = pattern.exec(prompt)
+    if (match === null) continue
+    const offset = index === 0 ? 1 : 0
+    const oldText = match[1 + offset]?.trim()
+    const newText = match[2 + offset]?.trim()
+    if (!oldText || !newText || oldText === newText) return undefined
+    const requested = index === 0 ? Number(match[1]) : null
+    return {
+      old_text_sha256: sha256Text(oldText),
+      new_text_sha256: sha256Text(newText),
+      requested_regions: Number.isSafeInteger(requested) && requested > 0 ? requested : null,
+      status,
+    }
+  }
+  return undefined
+}
+
+function leafDescriptor(agent) {
+  const descriptor = [...agent?.session?.events ?? []]
+    .reverse().find(event => event?.type === 'subagent/descriptor')?.data
+  if (descriptor?.mode !== 'one-shot' || typeof descriptor.label !== 'string'
+    || !descriptor.label.startsWith(IMAGE_LEAF_LABEL)) return undefined
+  return descriptor.label.slice(IMAGE_LEAF_LABEL.length)
+}
+
+function failureCode(error, submitted, aborted) {
+  if (aborted) return 'cancelled'
+  const message = error instanceof Error ? error.message : String(error)
+  const status = /HTTP (\d{3})/u.exec(message)?.[1]
+  if (status !== undefined) return `http-${status}`
+  return submitted ? 'provider-outcome-unknown' : 'validation-failed'
+}
+
+function failedReceipt(
+  callId,
+  operation,
+  sources,
+  status,
+  submitted,
+  code,
+  parentSessionId,
+  childSessionId,
+  jobId,
+  clientRequestId,
+  providerRequestId,
+  revision = 1,
+) {
+  return {
+    schema_version: IMAGE_RECEIPT_VERSION,
+    revision,
+    call_id: String(callId),
+    operation,
+    status,
+    billing_status: providerRequestId === undefined ? submitted ? 'unknown' : 'not-submitted' : 'recorded',
+    parent_session_id: parentSessionId,
+    sources: sources.map(imageRef),
+    content: [],
+    ...(childSessionId === undefined ? {} : { child_session_id: String(childSessionId) }),
+    ...(jobId === undefined ? {} : { job_id: String(jobId) }),
+    ...(clientRequestId === undefined ? {} : { client_request_id: clientRequestId }),
+    ...(providerRequestId === undefined ? {} : { provider_request_id: providerRequestId, model: IMAGE_MODEL }),
+    verifier: verifier(operation),
+    verification: {
+      structural: 'not-run',
+      source_output: 'unknown',
+      semantic: status === 'failed' ? 'failed' : 'needs-review',
+    },
+    failure_code: code,
+  }
+}
+
+function runningReceipt(callId, operation, sources, parentSessionId) {
+  return {
+    schema_version: IMAGE_RECEIPT_VERSION,
+    revision: 1,
+    call_id: String(callId),
+    operation,
+    status: 'running',
+    billing_status: 'unknown',
+    parent_session_id: parentSessionId,
+    sources: sources.map(imageRef),
+    content: [],
+    verifier: verifier(operation),
+    verification: {
+      structural: 'not-run',
+      source_output: 'unknown',
+      semantic: 'needs-review',
+    },
+    failure_code: 'in-flight',
+  }
+}
+
+function appendImageReceipt(agent, receipt) {
+  agent.session.append('emate/image-output', receipt, { ignorable: true })
+}
+
+function assertFreshParentCall(agent, callId) {
+  const id = String(callId ?? '')
+  if (id.length === 0) throw new Error('image generation requires a stable e-Mate Tool call identity')
+  const events = [...agent?.session?.events ?? []]
+  const legacyTerminal = events.some(event => event?.type === 'emate/image-output'
+    && exactKeys(event.data, ['call_id', 'content'])
+    && event.data.call_id === id
+    && Array.isArray(event.data.content)
+    && event.data.content.length === 1
+    && event.data.content[0]?.type === 'image'
+    && validImageRef(event.data.content[0].attachment))
+  const receipts = events
+    .filter(event => event?.type === 'emate/image-output'
+      && event.data?.schema_version === IMAGE_RECEIPT_VERSION
+      && event.data?.call_id === id)
+    .map(event => event.data)
+  if (legacyTerminal) throw new Error('image call already has a terminal receipt; use a new explicit retry Tool call')
+  if (receipts.length === 0) return
+  if (receipts.every(receipt => receipt.revision === 1 && receipt.status === 'running')) {
+    throw new Error('image call outcome is unknown after restart; automatic replay is disabled, use a new explicit retry Tool call')
+  }
+  throw new Error('image call already has a terminal receipt; use a new explicit retry Tool call')
+}
+
+function imageResultStatus(refs, value, reviewDecision) {
+  const operation = imageOperation(refs)
+  if (operation === 'generate') return 'completed'
+  if (refs.some(ref => ref.attachmentId === value.image.attachmentId)) return 'failed'
+  return reviewDecision === 'accepted' ? 'completed' : reviewDecision === 'rejected' ? 'failed' : 'needs-review'
+}
+
+function verifiedReceipt(
+  callId,
+  task,
+  refs,
+  value,
+  jobId,
+  parentSessionId,
+  childSessionId,
+  clientRequestId,
+  reviewDecision,
+) {
+  const operation = imageOperation(refs)
+  const sameSource = refs.some(ref => ref.attachmentId === value.image.attachmentId)
+  const status = imageResultStatus(refs, value, reviewDecision)
+  const semantic = operation === 'generate'
+    ? 'not-applicable'
+    : sameSource || reviewDecision === 'rejected' ? 'failed'
+      : reviewDecision === 'accepted' ? 'passed' : 'needs-review'
+  const textReplacement = operation === 'generate' ? undefined : textReplacementAcceptance(task.prompt, semantic)
+  return {
+    schema_version: IMAGE_RECEIPT_VERSION,
+    revision: 1,
+    call_id: String(callId),
+    operation,
+    status,
+    billing_status: 'recorded',
+    parent_session_id: parentSessionId,
+    sources: refs.map(imageRef),
+    content: status === 'failed' ? [] : [{ type: 'image', attachment: imageRef(value.image) }],
+    child_session_id: childSessionId,
+    job_id: String(jobId),
+    provider_request_id: value.request_id,
+    client_request_id: clientRequestId,
+    model: value.model,
+    output: imageRef(value.image),
+    verifier: verifier(operation, reviewDecision),
+    verification: {
+      structural: 'passed',
+      source_output: operation === 'generate' ? 'not-applicable' : sameSource ? 'same' : 'distinct',
+      semantic,
+      ...(reviewDecision === undefined ? {} : {
+        human_review: {
+          decision: reviewDecision,
+          requirement_sha256: sha256Text(task.prompt),
+        },
+      }),
+      ...(textReplacement === undefined ? {} : { text_replacement: textReplacement }),
+    },
+    ...(sameSource
+      ? { failure_code: 'source-output-same-sha256' }
+      : reviewDecision === 'rejected' ? { failure_code: 'user-rejected' } : {}),
+  }
+}
+
+async function reviewImageCandidate(
+  ctx,
+  authorization,
+  childCallId,
+  task,
+  refs,
+  value,
+  jobId,
+  parentSessionId,
+  childSessionId,
+  clientRequestId,
+  signal,
+) {
+  const candidate = verifiedReceipt(
+    childCallId, task, refs, value, jobId, parentSessionId, childSessionId, clientRequestId,
+  )
+  appendImageReceipt(authorization.owner, parentReceipt(
+    candidate, authorization.parentCallId, parentSessionId, childSessionId, 2,
+  ))
+  const userQuestions = ctx.get('userQuestions')
+  if (userQuestions === undefined) return undefined
+  const approve = '确认结果'
+  const reject = '拒绝结果'
+  const questionId = `image-review-${jobId}`
+  const sources = refs.map(imageRef)
+  const output = imageRef(value.image)
+  const detail = [
+    '修改目标：',
+    task.prompt,
+    '',
+    '结构化差异证据：',
+    ...sources.map((source, index) => `- 源图 ${index + 1}：${source.attachmentId}（${source.width}×${source.height}）`),
+    `- 候选结果：${output.attachmentId}（${output.width}×${output.height}）`,
+    '- 系统只确认了源图与候选图的 SHA-256 不同；修改语义需要你对照图片确认。',
+  ].join('\n')
+  try {
+    const answer = await userQuestions.ask({
+      agent: authorization.owner,
+      signal,
+      questions: [{
+        id: questionId,
+        header: '改图结果确认',
+        question: '请对照源图确认候选结果是否完整完成修改目标。',
+        detail,
+        options: [
+          { label: approve, description: '确认候选图已完整满足修改目标。' },
+          { label: reject, description: '结果不正确；本次任务失败，可显式重新修改。' },
+        ],
+        intent: { kind: 'image-review', approve, sources, output },
+      }],
+    })
+    const selected = answer?.answers?.find(item => item?.id === questionId)
+    return selected?.custom === undefined
+      && selected?.selected?.length === 1
+      && selected.selected[0] === approve
+      ? 'accepted'
+      : 'rejected'
+  } catch (error) {
+    if (signal.aborted) throw error
+    return undefined
+  }
+}
+
+function validVerification(value, operation, status, sameSource) {
+  if (!isRecord(value)) return false
+  const humanReview = value.human_review
+  const textReplacement = value.text_replacement
+  const keys = [
+    'semantic', 'source_output', 'structural',
+    ...(humanReview === undefined ? [] : ['human_review']),
+    ...(textReplacement === undefined ? [] : ['text_replacement']),
+  ]
+  if (!exactKeys(value, keys)) return false
+  if (humanReview !== undefined && (!exactKeys(humanReview, ['decision', 'requirement_sha256'])
+    || !['accepted', 'rejected'].includes(humanReview.decision)
+    || typeof humanReview.requirement_sha256 !== 'string' || !SHA256.test(humanReview.requirement_sha256)
+    || operation === 'generate' || sameSource)) return false
+  if (textReplacement !== undefined && (!exactKeys(textReplacement, [
+    'new_text_sha256', 'old_text_sha256', 'requested_regions', 'status',
+  ])
+    || typeof textReplacement.old_text_sha256 !== 'string' || !SHA256.test(textReplacement.old_text_sha256)
+    || typeof textReplacement.new_text_sha256 !== 'string' || !SHA256.test(textReplacement.new_text_sha256)
+    || textReplacement.old_text_sha256 === textReplacement.new_text_sha256
+    || textReplacement.requested_regions !== null
+      && (!Number.isSafeInteger(textReplacement.requested_regions) || textReplacement.requested_regions < 1)
+    || textReplacement.status !== value.semantic
+    || operation === 'generate')) return false
+  if (status === 'completed') {
+    if (operation === 'generate') {
+      return humanReview === undefined && value.structural === 'passed'
+        && value.source_output === 'not-applicable' && value.semantic === 'not-applicable'
+    }
+    return !sameSource && humanReview?.decision === 'accepted'
+      && value.structural === 'passed' && value.source_output === 'distinct' && value.semantic === 'passed'
+  }
+  if (status === 'needs-review') {
+    return operation !== 'generate' && !sameSource && humanReview === undefined && value.structural === 'passed'
+      && value.source_output === 'distinct' && value.semantic === 'needs-review'
+  }
+  if (status === 'failed' && sameSource) {
+    return operation !== 'generate' && humanReview === undefined && value.structural === 'passed'
+      && value.source_output === 'same' && value.semantic === 'failed'
+  }
+  if (status === 'failed' && humanReview?.decision === 'rejected') {
+    return operation !== 'generate' && !sameSource && value.structural === 'passed'
+      && value.source_output === 'distinct' && value.semantic === 'failed'
+  }
+  return value.structural === 'not-run' && value.source_output === 'unknown'
+    && humanReview === undefined && value.semantic === (status === 'failed' ? 'failed' : 'needs-review')
+}
+
+function validChildReceipt(value, refs, parentSessionId, childSessionId) {
+  const keys = new Set([
+    'billing_status', 'call_id', 'child_session_id', 'content', 'failure_code', 'job_id', 'model', 'operation',
+    'output', 'parent_session_id', 'provider_request_id', 'client_request_id', 'revision', 'schema_version', 'sources',
+    'status', 'verification', 'verifier',
+  ])
+  if (!isRecord(value)
+    || Object.keys(value).some(key => !keys.has(key))
+    || value.schema_version !== IMAGE_RECEIPT_VERSION
+    || value.revision !== 1
+    || typeof value.call_id !== 'string' || value.call_id.length === 0
+    || value.operation !== imageOperation(refs)
+    || !['completed', 'needs-review', 'failed', 'cancelled', 'unknown'].includes(value.status)
+    || !['not-submitted', 'recorded', 'unknown'].includes(value.billing_status)
+    || value.parent_session_id !== parentSessionId
+    || value.child_session_id !== childSessionId
+    || !Array.isArray(value.sources)
+    || value.sources.length !== refs.length
+    || value.sources.some((ref, index) => !sameImageRef(ref, refs[index]))
+    || !Array.isArray(value.content)
+    || !exactKeys(value.verifier, ['semantic', 'structural'])
+    || value.verifier.structural !== 'attachment-cas-v1'
+    || value.verifier.semantic !== (value.operation === 'generate'
+      ? 'not-required'
+      : value.verification?.human_review === undefined ? 'not-configured' : 'native-user-confirmation-v1')
+    || value.failure_code !== undefined && (typeof value.failure_code !== 'string' || value.failure_code.length > 128)
+    || value.job_id !== undefined && (typeof value.job_id !== 'string' || value.job_id.length === 0)
+    || value.provider_request_id !== undefined
+      && (typeof value.provider_request_id !== 'string' || !IDENTIFIER.test(value.provider_request_id))
+    || value.client_request_id !== undefined
+      && (typeof value.client_request_id !== 'string' || !IDENTIFIER.test(value.client_request_id))) return false
+  if (value.output !== undefined && !validImageRef(value.output)) return false
+  const sameSource = value.output !== undefined && refs.some(ref => ref.attachmentId === value.output.attachmentId)
+  if (!validVerification(value.verification, value.operation, value.status, sameSource)) return false
+  if (value.status === 'completed' || value.status === 'needs-review') {
+    return value.output !== undefined
+      && value.content.length === 1
+      && value.content[0]?.type === 'image'
+      && sameImageRef(value.content[0]?.attachment, value.output)
+      && typeof value.job_id === 'string'
+      && value.billing_status === 'recorded'
+      && typeof value.provider_request_id === 'string'
+      && typeof value.client_request_id === 'string'
+      && value.model === IMAGE_MODEL
+  }
+  if (value.content.length !== 0) return false
+  if (value.status === 'failed' && value.billing_status === 'recorded') {
+    if (typeof value.job_id !== 'string' || typeof value.provider_request_id !== 'string'
+      || typeof value.client_request_id !== 'string' || value.model !== IMAGE_MODEL) return false
+    return value.output !== undefined && (sameSource
+      ? value.failure_code === 'source-output-same-sha256'
+      : value.verification?.human_review?.decision === 'rejected' && value.failure_code === 'user-rejected')
+      || value.output === undefined && value.failure_code === 'provider-result-uncommitted'
+  }
+  if (value.billing_status === 'unknown') {
+    return ['unknown', 'cancelled'].includes(value.status)
+      && value.output === undefined && typeof value.job_id === 'string'
+      && typeof value.client_request_id === 'string' && value.provider_request_id === undefined
+      && value.model === undefined
+  }
+  const hasJobScope = typeof value.job_id === 'string' && typeof value.client_request_id === 'string'
+  const hasNoJobScope = value.job_id === undefined && value.client_request_id === undefined
+  return value.billing_status === 'not-submitted'
+    && ['failed', 'cancelled'].includes(value.status)
+    && value.output === undefined && (hasJobScope || hasNoJobScope)
+    && value.provider_request_id === undefined
+    && value.model === undefined
 }
 
 function messageImages(messages, generatedOnly = false) {
@@ -181,6 +629,30 @@ function sessionImage(agent, attachmentId) {
   throw new Error(`image attachment ${attachmentId} is not present in this e-Mate session`)
 }
 
+function validCompletedParentReceipt(value, parentSessionId) {
+  return isRecord(value)
+    && [2, 3].includes(value.revision)
+    && value.status === 'completed'
+    && typeof value.child_session_id === 'string'
+    && Array.isArray(value.sources)
+    && validChildReceipt({ ...value, revision: 1 }, value.sources, parentSessionId, value.child_session_id)
+}
+
+function successfulSessionImage(agent, attachmentId) {
+  const uploaded = uniqueImages(messageImages(sessionMessages(agent)
+    .filter(message => message?.source?.kind === 'user')), true)
+    .find(candidate => candidate.attachmentId === attachmentId)
+  if (uploaded !== undefined) return uploaded
+  const parentSessionId = sessionIdentity(agent)
+  const image = uniqueImages((agent?.session?.events ?? [])
+    .filter(event => event?.type === 'emate/image-output'
+      && validCompletedParentReceipt(event.data, parentSessionId))
+    .map(event => event.data.output), true)
+    .find(candidate => candidate.attachmentId === attachmentId)
+  if (image !== undefined) return image
+  throw new Error(`image attachment ${attachmentId} is not a successful current-session image output`)
+}
+
 function latestUserMessage(messages) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]?.source?.kind === 'user') return messages[index]
@@ -199,11 +671,11 @@ function imageCatalogContext(agent, messages) {
     : `Images selected in the current user request, in attachment order: ${current.map(image => `\`${image.attachmentId}\``).join(', ')}. `
   const history = recent.length === 0 ? ''
     : `Recent images already stored in this conversation, newest first: ${recent.map(image => `\`${image.attachmentId}\``).join(', ')}. `
-  return `${selected}${history}For an edit or reference request such as \"修改上图\", call imagegen with the matching exact image_url attachment ID (normally the newest image when the user says \"上图\"); never ask the user to upload an image already listed here. For several independent edits, make one concurrent imagegen call per source and pass exactly one image_url to each call; never send the whole selected group to every edit. Explicitly pass multiple IDs only when the user asks to fuse those references into one output. A request for a wholly new image must omit image_url. To deliver several images together, call image_pack once with their exact attachment IDs.`
+  return `${selected}${history}For an edit or reference request such as \"修改上图\", call imagegen with the matching exact image_url attachment ID (normally the newest image when the user says \"上图\"); never ask the user to upload an image already listed here. For several independent edits, make one imagegen call per source, one at a time, and pass exactly one image_url to each call; never send the whole selected group to every edit. Explicitly pass multiple IDs only when the user asks to fuse those references into one output. A request for a wholly new image must omit image_url. To deliver several images together, call image_pack once with their exact attachment IDs.`
 }
 
 const SESSION_IMAGE_REFERENCE = /(?:上图|这张图|该图|原图|刚才(?:生成|上传)?的?(?:那张)?图|所附图片|附件(?:中|里)的图|(?:把|将)它(?:修改|改成|修成)|\b(?:this|that|above|previous|original|uploaded|attached)\s+(?:image|picture|photo)\b)/iu
-const SESSION_IMAGE_EDIT_LOCATOR = /(?:(?:^|[把将这那请，。；：\s])(?:图上(?:的)?|图片(?:中|上)(?:的)?)[^\n]{0,80}(?:改|修改|替换|删除|去掉|换成|修成|调整|重绘)|(?:改|修改|替换|删除|去掉|换成|修成|调整|重绘)[^\n]{0,80}(?:这张)?(?:图上(?:的)?|图片(?:中|上)(?:的)?))/iu
+const SESSION_IMAGE_EDIT_LOCATOR = /(?:(?:^|[把将这那请，。；：\s])(?:图|图片)(?:中|上|里)(?:的)?[^\n]{0,80}(?:改|修改|替换|删除|去掉|换成|修成|调整|重绘)|(?:改|修改|替换|删除|去掉|换成|修成|调整|重绘)[^\n]{0,80}(?:这张)?(?:图|图片)(?:中|上|里)(?:的)?)/iu
 
 function implicitEditImages(agent, task) {
   if (task.attachmentIds.length > 0) return task.attachmentIds
@@ -242,6 +714,11 @@ function normalizeTask(args) {
     throw new Error('image_url must contain current-session image attachment IDs')
   }
   return { prompt, attachmentIds: [...new Set(attachmentIds)] }
+}
+
+function attemptedImageOperation(args) {
+  if (!isRecord(args) || args.image_url === undefined) return 'generate'
+  return Array.isArray(args.image_url) && args.image_url.length > 1 ? 'fusion' : 'edit'
 }
 
 function normalizePack(args) {
@@ -330,7 +807,7 @@ async function publishImagePack(root, relativePath, data, signal) {
 
 async function createImagePack(ctx, agent, args, signal) {
   const pack = normalizePack(args)
-  const refs = pack.attachmentIds.map(id => sessionImage(agent, id))
+  const refs = pack.attachmentIds.map(id => successfulSessionImage(agent, id))
   const entries = {}
   let total = 0
   for (const [index, ref] of refs.entries()) {
@@ -373,11 +850,15 @@ function requestScope(exec) {
   const callId = String(exec.callId ?? '')
   if (sessionId.length === 0 || callId.length === 0) throw new Error('image generation requires a stable e-Mate Tool scope')
   const id = createHash('sha256').update(sessionId).update('\0').update(callId).digest('hex').slice(0, 32)
+  const clientRequestId = `image-${id}`
   return {
-    'x-e-mate-task-id': `image-${id}`,
-    'x-e-mate-trace-id': `image-${id}`,
-    session_id: `image-${id}`,
-    'x-client-request-id': `image-${id}`,
+    clientRequestId,
+    headers: {
+      'x-e-mate-task-id': clientRequestId,
+      'x-e-mate-trace-id': clientRequestId,
+      session_id: clientRequestId,
+      'x-client-request-id': clientRequestId,
+    },
   }
 }
 
@@ -385,7 +866,8 @@ function createImageClient({ request, root, attachments }) {
   const imageLimit = Math.min(attachments.imageLimits.maxImageBytes, attachments.imageLimits.maxMessageImageBytes)
   const responseLimit = Math.ceil(imageLimit * 4 / 3) + 256 * 1024
 
-  async function execute(task, refs, signal, scope) {
+  async function execute(task, refs, signal, scope, onSubmit, onProviderResponse) {
+    signal.throwIfAborted()
     const headers = new Headers({ accept: 'application/json', ...scope })
     let body
     let path
@@ -402,18 +884,30 @@ function createImageClient({ request, root, attachments }) {
       for (const [index, ref] of refs.entries()) {
         if (!MEDIA_TYPES.has(ref.mediaType)) throw new Error(`${ref.mediaType} is unsupported by e-Mate image editing`)
         const stored = await attachments.readImage(ref, signal)
+        if (stored.ref.attachmentId !== ref.attachmentId
+          || stored.ref.mediaType !== ref.mediaType
+          || stored.ref.bytes !== ref.bytes
+          || stored.ref.width !== ref.width
+          || stored.ref.height !== ref.height) {
+          throw new Error('e-Mate image edit source no longer matches its attachment receipt')
+        }
         if (stored.data.byteLength > MAX_EDIT_IMAGE_BYTES) throw new Error('e-Mate image edit input exceeds 5 MiB')
         const extension = ref.mediaType === 'image/png' ? 'png' : ref.mediaType === 'image/jpeg' ? 'jpg' : 'webp'
         form.append(field, new Blob([new Uint8Array(stored.data)], { type: ref.mediaType }), `image-${index + 1}.${extension}`)
       }
       body = form
     }
+    signal.throwIfAborted()
+    onSubmit()
     const value = await responseJson(await request(endpoint(root, path), {
       method: 'POST', headers, body, redirect: 'error', signal,
     }), responseLimit, `e-Mate image ${refs.length === 0 ? 'generation' : 'edit'}`)
     if (!exactKeys(value, ['id', 'data', 'usage']) || typeof value.id !== 'string' || !IDENTIFIER.test(value.id)
-      || !Array.isArray(value.data) || value.data.length !== 1 || !isRecord(value.usage)
-      || !exactKeys(value.data[0], ['b64_json']) || typeof value.data[0].b64_json !== 'string'
+      || !Array.isArray(value.data) || value.data.length !== 1 || !isRecord(value.usage)) {
+      throw new Error('e-Mate image response is invalid')
+    }
+    onProviderResponse(value.id)
+    if (!exactKeys(value.data[0], ['b64_json']) || typeof value.data[0].b64_json !== 'string'
       || !/^[A-Za-z0-9+/]+={0,2}$/u.test(value.data[0].b64_json)) {
       throw new Error('e-Mate image response is invalid')
     }
@@ -423,11 +917,18 @@ function createImageClient({ request, root, attachments }) {
       throw new Error('e-Mate image response bytes are invalid')
     }
     const detected = detectedImage(data)
+    const expectedId = `sha256:${createHash('sha256').update(data).digest('hex')}`
     const attachment = await attachments.saveImage({
       data,
       mediaType: detected.mediaType,
       name: `e-Mate-image.${detected.extension}`,
     })
+    if (!validImageRef(attachment)
+      || attachment.attachmentId !== expectedId
+      || attachment.mediaType !== detected.mediaType
+      || attachment.bytes !== data.byteLength) {
+      throw new Error('e-Mate image output does not match its attachment receipt')
+    }
     return { request_id: value.id, model: IMAGE_MODEL, image: imageRef(attachment) }
   }
 
@@ -437,7 +938,7 @@ function createImageClient({ request, root, attachments }) {
 function startImageJob(ctx, owner, execSignal, operation) {
   if (owner === undefined) throw new Error('image generation requires an owning e-Mate Agent')
   let result
-  const id = ctx.jobs.start({
+  const admission = ctx.jobs.startWhenAvailable({
     kind: 'emate-image',
     label: 'Generate or edit e-Mate image',
     owner,
@@ -445,7 +946,8 @@ function startImageJob(ctx, owner, execSignal, operation) {
     run() {
       const controller = new AbortController()
       const onAbort = () => controller.abort(execSignal.reason)
-      execSignal.addEventListener('abort', onAbort, { once: true })
+      if (execSignal.aborted) controller.abort(execSignal.reason)
+      else execSignal.addEventListener('abort', onAbort, { once: true })
       result = Promise.resolve().then(() => operation(controller.signal)).finally(() => {
         execSignal.removeEventListener('abort', onAbort)
       })
@@ -453,24 +955,33 @@ function startImageJob(ctx, owner, execSignal, operation) {
         cancel: reason => controller.abort(reason),
         done: result.then(
           value => ({
-            status: 'completed',
-            detail: '1 image, 0 failures',
+            status: value.status === 'completed' ? 'completed' : 'failed',
+            detail: value.status === 'completed'
+              ? '1 image, 0 failures'
+              : value.status === 'needs-review' ? '1 image needs review' : 'image verification failed',
             output: JSON.stringify({
-              image_count: 1,
-              failure_count: 0,
+              image_count: value.status === 'completed' ? 1 : 0,
+              failure_count: value.status === 'completed' ? 0 : 1,
+              receipt_status: value.status,
               request_ids: [value.request_id],
-              attachment_ids: [value.image.attachmentId],
+              attachment_ids: value.status === 'completed' ? [value.image.attachmentId] : [],
             }),
           }),
-          error => ({
+          () => ({
             status: controller.signal.aborted ? 'killed' : 'failed',
-            detail: error instanceof Error ? error.message : String(error),
+            detail: controller.signal.aborted ? 'Image task cancelled' : 'Image task failed',
           }),
         ),
       }
     },
-  })
-  return { id, result }
+  }, execSignal)
+  return {
+    id: admission.id,
+    result: admission.admitted.then(() => {
+      if (result === undefined) throw new Error('image Job admitted without producer hooks')
+      return result
+    }),
+  }
 }
 
 const imageOutput = {
@@ -480,14 +991,113 @@ const imageOutput = {
       job_id: { type: 'string', required: true },
       images: { type: 'array', required: true, items: { type: 'json' } },
       failures: { type: 'array', required: true, items: { type: 'json' } },
+      status: { type: 'string', required: true, enum: ['completed', 'needs-review'] },
+      receipt: { type: 'json', required: true },
     },
   },
-  render: (_args, value) => [
+  render: (_args, value) => [{
+    type: 'text',
+    text: value.status === 'completed'
+      ? `Generated 1 structurally verified image. Current-session image attachment ID for future image_url: ${value.images[0].image.attachmentId}`
+      : `The edited image was saved, but its requested visual or text change still needs human review. Current-session image attachment ID: ${value.images[0].image.attachmentId}`,
+  }],
+  presentationMeta: (_args, value) => {
+    const image = value.images[0].image
+    const locator = {
+      kind: 'image-attachment',
+      attachment_id: image.attachmentId,
+      media_type: image.mediaType,
+      bytes: image.bytes,
+      width: image.width,
+      height: image.height,
+    }
+    if (value.status === 'completed') {
+      return {
+        $eMateDeliverables: {
+          schema_version: 1,
+          items: [{
+            kind: 'image',
+            name: image.name ?? `e-Mate-image.${imageExtension(image.mediaType)}`,
+            mime: image.mediaType,
+            size: image.bytes,
+            sha256: image.attachmentId.slice('sha256:'.length),
+            locator,
+          }],
+        },
+      }
+    }
+    return {
+      $eMateDeliverables: {
+        schema_version: 2,
+        items: [],
+        review_candidates: [{
+          kind: 'image',
+          operation: value.receipt.operation,
+          reason: 'semantic-verifier-unavailable',
+          name: `e-Mate-image-review.${imageExtension(image.mediaType)}`,
+          mime: image.mediaType,
+          size: image.bytes,
+          sha256: image.attachmentId.slice('sha256:'.length),
+          locator,
+          sources: value.receipt.sources.map(source => ({
+            kind: 'image-attachment',
+            attachment_id: source.attachmentId,
+            media_type: source.mediaType,
+            bytes: source.bytes,
+            width: source.width,
+            height: source.height,
+          })),
+        }],
+      },
+    }
+  },
+}
+
+function imageLeafPrompt(task, refs) {
+  const argumentsValue = {
+    prompt: task.prompt,
+    ...(refs.length === 0 ? {} : {
+      image_url: refs.length === 1 ? refs[0].attachmentId : refs.map(ref => ref.attachmentId),
+    }),
+  }
+  return [
     {
       type: 'text',
-      text: `Generated 1 image. Current-session image attachment ID for future image_url: ${value.images[0].image.attachmentId}`,
+      text: 'This is one e-Mate image leaf. Call tool_search once with query "生图", then call imagegen exactly once with the exact JSON arguments below. Do not retry, call any other tool, or claim success from prose; the parent reads only the durable image receipt.\n'
+        + JSON.stringify(argumentsValue),
     },
-  ],
+    ...refs.map(ref => ({ type: 'image', attachment: imageRef(ref) })),
+  ]
+}
+
+function childImageReceipt(run, refs, parentSessionId) {
+  const receipts = run.localAgent?.session?.events
+    ?.filter(event => event?.type === 'emate/image-output' && event.data?.schema_version === IMAGE_RECEIPT_VERSION)
+    .map(event => event.data) ?? []
+  if (receipts.length !== 1 || !validChildReceipt(receipts[0], refs, parentSessionId, String(run.id))) {
+    throw new Error('image subagent did not produce exactly one valid durable image receipt')
+  }
+  return receipts[0]
+}
+
+function parentReceipt(receipt, callId, parentSessionId, childSessionId, revision = 2) {
+  return {
+    ...receipt,
+    revision,
+    call_id: String(callId),
+    parent_session_id: parentSessionId,
+    child_session_id: String(childSessionId),
+    sources: receipt.sources.map(imageRef),
+    content: receipt.content.map(block => ({ type: 'image', attachment: imageRef(block.attachment) })),
+    ...(receipt.output === undefined ? {} : { output: imageRef(receipt.output) }),
+  }
+}
+
+function finalParentRevision(agent, callId) {
+  return agent.session.events.some(event => event?.type === 'emate/image-output'
+    && event.data?.call_id === String(callId)
+    && event.data?.revision === 2
+    && event.data?.status === 'needs-review') ? 3 : 2
 }
 
 const imagePackOutput = {
@@ -503,6 +1113,19 @@ const imagePackOutput = {
     type: 'text',
     text: `已将 ${value.image_count} 张图片打包到本地产物：${value.relative_path}（${value.bytes} bytes）。`,
   }],
+  presentationMeta: (_args, value) => ({
+    $eMateDeliverables: {
+      schema_version: 1,
+      items: [{
+        kind: 'archive',
+        name: value.relative_path.slice(value.relative_path.lastIndexOf('/') + 1),
+        mime: 'application/zip',
+        size: value.bytes,
+        sha256: null,
+        locator: { kind: 'workspace-file', relative_path: value.relative_path },
+      }],
+    },
+  }),
 }
 
 export async function apply(ctx, config = {}) {
@@ -522,19 +1145,37 @@ export async function apply(ctx, config = {}) {
     icon_key: 'image',
     order: 10,
     actions: [],
-    status: async () => root === undefined
-      ? {
+    status: async () => {
+      if (root === undefined) {
+        return {
           state: config.rootUrl === undefined ? 'setup-required' : 'blocked',
           detail: configurationError ?? '企业管理端尚未下发生图服务地址。',
           action_ids: [],
         }
-      : { state: 'ready', detail: IMAGE_MODEL, action_ids: [] },
+      }
+      const modelPolicy = ctx.get('emateModelPolicy')
+      const subagents = ctx.get('subagents')
+      if (modelPolicy === undefined || !subagents?.list().includes('spawn')) {
+        return { state: 'blocked', detail: '图像任务运行链尚未就绪。', action_ids: [] }
+      }
+      if (!ctx.tools.schemas().some(schema => schema.name === 'imagegen')) {
+        return { state: 'blocked', detail: '图像 Tool 注册尚未就绪。', action_ids: [] }
+      }
+      try {
+        await modelPolicy.assertModel(IMAGE_MODEL)
+        return { state: 'ready', detail: IMAGE_MODEL, action_ids: [] }
+      } catch {
+        return { state: 'blocked', detail: '当前账号暂不可使用图像模型。', action_ids: [] }
+      }
+    },
   }), 'emate.image: capability metadata')
   if (root === undefined) return
   const identity = ctx.get('emateIdentity')
   if (identity === undefined) throw new Error('managed image generation requires emateIdentity')
   const modelPolicy = ctx.get('emateModelPolicy')
   if (modelPolicy === undefined) throw new Error('managed image generation requires emateModelPolicy')
+  const subagents = ctx.get('subagents')
+  if (subagents === undefined) throw new Error('managed image generation requires the native DSH subagent runtime')
   const client = createImageClient({
     request: identity.request.bind(identity),
     root,
@@ -558,9 +1199,10 @@ export async function apply(ctx, config = {}) {
     }
   })
   ctx.effect(() => ctx.jobs.attachController('emate-image'), 'emate.image: target Job controller')
+  const authorizedLeaves = new Map()
   ctx.tools.register(defineTool({
     name: 'imagegen',
-    description: 'Generate or edit one independent image through the fixed e-Mate gpt-image-2-pro route. For an edit, copy the exact sha256: value labeled as the current-session image attachment ID by a prior imagegen or job_output result into image_url; never pass its Job ID, request ID, or a URL. For multiple independent edits, make separate concurrent imagegen calls and pass exactly one source ID to each call. Pass multiple explicit IDs only for reference fusion into one output. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.',
+    description: 'Generate or edit one independent image through the fixed e-Mate gpt-image-2-pro route. For an edit, copy the exact sha256: value labeled as the current-session image attachment ID by a prior imagegen or job_output result into image_url; never pass its Job ID, request ID, or a URL. For multiple independent edits, make separate imagegen calls one at a time and pass exactly one source ID to each call. Pass multiple explicit IDs only for reference fusion into one output. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.',
     parameters: {
       prompt: { type: 'string', required: true, description: 'One image generation or edit instruction.' },
       image_url: {
@@ -569,25 +1211,275 @@ export async function apply(ctx, config = {}) {
       },
     },
     output: imageOutput,
-    isConcurrencySafe: () => true,
+    // The native AgentLoop owns the per-parent exclusive lane.
+    isConcurrencySafe: () => false,
     timeoutMs: IMAGE_TIMEOUT_MS,
     async execute(args, exec) {
-      exec.signal.throwIfAborted()
-      const task = normalizeTask(args)
-      task.attachmentIds = implicitEditImages(exec.agent, task)
-      await modelPolicy.assertModel(IMAGE_MODEL)
-      const refs = task.attachmentIds.map(id => sessionImage(exec.agent, id))
-      const scope = requestScope(exec)
-      const started = startImageJob(ctx, exec.agent, exec.signal, signal => client.execute(task, refs, signal, scope))
-      const [image] = await Promise.all([
-        started.result,
-        ctx.jobs.wait(started.id, IMAGE_TIMEOUT_MS, exec.agent, exec.signal),
-      ])
-      exec.agent.session.append('emate/image-output', {
-        call_id: String(exec.callId),
-        content: [{ type: 'image', attachment: imageRef(image.image) }],
-      }, { ignorable: true })
-      return { job_id: started.id, images: [image], failures: [] }
+      const authorizationToken = leafDescriptor(exec.agent)
+      if (authorizationToken === undefined) assertFreshParentCall(exec.agent, exec.callId)
+      const authorization = authorizationToken === undefined ? undefined : authorizedLeaves.get(authorizationToken)
+      if (authorizationToken !== undefined) {
+        if (authorization === undefined) throw new Error('image subagent is not authorized by its native parent')
+        if (authorization.used) {
+          throw new Error('one image subagent may execute imagegen only once; retry from the parent task')
+        }
+        authorization.used = true
+      }
+      const parentSessionId = authorization === undefined
+        ? sessionIdentity(exec.agent)
+        : parentSessionIdentity(exec.agent)
+      const childSessionId = authorization === undefined ? undefined : sessionIdentity(exec.agent)
+      let operation = attemptedImageOperation(args)
+      let refs = []
+      let task
+      try {
+        exec.signal.throwIfAborted()
+        task = normalizeTask(args)
+        task.attachmentIds = implicitEditImages(exec.agent, task)
+        operation = imageOperation(task.attachmentIds)
+        if (authorization !== undefined && (authorization.parentSessionId !== exec.agent?.session?.header?.parentSession
+          || authorization.operation !== operation
+          || authorization.promptSha256 !== sha256Text(task.prompt)
+          || authorization.attachmentIds.length !== task.attachmentIds.length
+          || authorization.attachmentIds.some((id, index) => id !== task.attachmentIds[index]))) {
+          throw new Error('image subagent is not authorized by its native parent')
+        }
+        refs = task.attachmentIds.map(id => sessionImage(exec.agent, id))
+      } catch (error) {
+        if (authorization === undefined) {
+          appendImageReceipt(exec.agent, failedReceipt(
+            exec.callId,
+            operation,
+            refs,
+            exec.signal.aborted ? 'cancelled' : 'failed',
+            false,
+            failureCode(error, false, exec.signal.aborted),
+            parentSessionId,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            2,
+          ))
+        }
+        throw error
+      }
+
+      if (authorization !== undefined) {
+        let submitted = false
+        let started
+        let terminalJob
+        let clientRequestId
+        let providerRequestId
+        try {
+          await modelPolicy.assertModel(IMAGE_MODEL)
+          exec.signal.throwIfAborted()
+          const scope = requestScope(exec)
+          clientRequestId = scope.clientRequestId
+          started = startImageJob(ctx, authorization.owner, exec.signal, async (signal) => {
+            const value = await client.execute(
+              task,
+              refs,
+              signal,
+              scope.headers,
+              () => {
+                submitted = true
+                authorization.submitted = true
+              },
+              value => { providerRequestId = value },
+            )
+            let reviewDecision
+            if (imageResultStatus(refs, value) === 'needs-review') {
+              if (started?.id === undefined) throw new Error('image Job identity is unavailable for native review')
+              reviewDecision = await reviewImageCandidate(
+                ctx,
+                authorization,
+                exec.callId,
+                task,
+                refs,
+                value,
+                started.id,
+                parentSessionId,
+                childSessionId,
+                clientRequestId,
+                signal,
+              )
+            }
+            return { ...value, reviewDecision, status: imageResultStatus(refs, value, reviewDecision) }
+          })
+          let image
+          try {
+            image = await started.result
+          } catch (error) {
+            terminalJob = await ctx.jobs.wait(started.id, IMAGE_TIMEOUT_MS, authorization.owner).catch(() => undefined)
+            throw error
+          }
+          await ctx.jobs.wait(started.id, IMAGE_TIMEOUT_MS, authorization.owner, exec.signal)
+          const receipt = verifiedReceipt(
+            exec.callId,
+            task,
+            refs,
+            image,
+            started.id,
+            parentSessionId,
+            childSessionId,
+            clientRequestId,
+            image.reviewDecision,
+          )
+          appendImageReceipt(exec.agent, receipt)
+          if (receipt.status === 'failed') {
+            if (receipt.failure_code === 'user-rejected') {
+              throw new Error('e-Mate image edit was rejected by the user; use a new explicit retry Tool call')
+            }
+            throw new Error('e-Mate image edit verification failed because source and output have the same SHA-256')
+          }
+          return {
+            job_id: started.id,
+            images: [{ request_id: image.request_id, model: image.model, image: image.image }],
+            failures: [],
+            status: receipt.status,
+            receipt,
+          }
+        } catch (error) {
+          const alreadyRecorded = exec.agent.session.events.some(event => event?.type === 'emate/image-output'
+            && event.data?.schema_version === IMAGE_RECEIPT_VERSION
+            && event.data?.call_id === String(exec.callId))
+          if (!alreadyRecorded) {
+            const aborted = exec.signal.aborted
+            const message = error instanceof Error ? error.message : String(error)
+            const nativeCancellationCode = terminalJob?.status === 'killed'
+              ? message === 'background job admission aborted' && terminalJob.detail === 'admission aborted'
+                ? 'admission-aborted'
+                : /^background job admission cancelled before producer start(?:$|: )/u.test(message)
+                  ? 'cancelled'
+                  : undefined
+              : undefined
+            appendImageReceipt(exec.agent, failedReceipt(
+              exec.callId,
+              operation,
+              refs,
+              providerRequestId !== undefined
+                ? 'failed'
+                : nativeCancellationCode !== undefined || aborted ? 'cancelled' : submitted ? 'unknown' : 'failed',
+              submitted,
+              providerRequestId === undefined
+                ? nativeCancellationCode ?? failureCode(error, submitted, aborted)
+                : 'provider-result-uncommitted',
+              parentSessionId,
+              childSessionId,
+              started?.id,
+              started === undefined ? undefined : clientRequestId,
+              providerRequestId,
+            ))
+          }
+          throw error
+        }
+      }
+
+      appendImageReceipt(exec.agent, runningReceipt(exec.callId, operation, refs, parentSessionId))
+      const childAuthorizationToken = randomUUID()
+      const childAuthorization = {
+        owner: exec.agent,
+        parentCallId: String(exec.callId),
+        operation,
+        parentSessionId,
+        promptSha256: sha256Text(task.prompt),
+        attachmentIds: [...task.attachmentIds],
+        used: false,
+        submitted: false,
+      }
+      authorizedLeaves.set(childAuthorizationToken, childAuthorization)
+      let run
+      let childReceipt
+      try {
+        run = await subagents.start('spawn', {
+          label: `${IMAGE_LEAF_LABEL}${childAuthorizationToken}`,
+          prompt: imageLeafPrompt(task, refs),
+          parent: exec.agent,
+          signal: exec.signal,
+          toolFilter: { allow: ['imagegen'] },
+          persona: 'Execute exactly one image leaf through the supplied native image tool. Tool output and the durable receipt are authoritative; never infer success from prose.',
+        })
+        let runError
+        try {
+          await run.result
+        } catch (error) {
+          runError = error
+        }
+        try {
+          childReceipt = childImageReceipt(run, refs, parentSessionId)
+        } catch (error) {
+          throw runError ?? error
+        }
+        if (childReceipt.output !== undefined) {
+          try {
+            const stored = await ctx.attachments.readImage(childReceipt.output, exec.signal)
+            if (!sameImageRef(stored.ref, childReceipt.output)) throw new Error('attachment mismatch')
+          } catch {
+            throw new Error('image subagent output could not be verified in the parent Attachment CAS')
+          }
+        }
+        const receipt = parentReceipt(
+          childReceipt,
+          exec.callId,
+          parentSessionId,
+          run.id,
+          finalParentRevision(exec.agent, exec.callId),
+        )
+        appendImageReceipt(exec.agent, receipt)
+        if (receipt.status !== 'completed' && receipt.status !== 'needs-review') {
+          if (receipt.failure_code === 'user-rejected') {
+            throw new Error('e-Mate image edit was rejected by the user; use a new explicit retry Tool call')
+          }
+          throw new Error(`image subagent ended with receipt status ${receipt.status}`)
+        }
+        return {
+          job_id: receipt.job_id,
+          images: [{ request_id: receipt.provider_request_id, model: receipt.model, image: receipt.output }],
+          failures: [],
+          status: receipt.status,
+          receipt,
+        }
+      } catch (error) {
+        const revision = finalParentRevision(exec.agent, exec.callId)
+        const alreadyRecorded = exec.agent.session.events.some(event => event?.type === 'emate/image-output'
+          && event.data?.schema_version === IMAGE_RECEIPT_VERSION
+          && event.data?.call_id === String(exec.callId)
+          && event.data?.revision === revision)
+        if (!alreadyRecorded) {
+          const aborted = exec.signal.aborted
+          appendImageReceipt(exec.agent, childReceipt === undefined
+            ? failedReceipt(
+              exec.callId,
+              operation,
+              refs,
+              aborted ? 'cancelled' : childAuthorization.submitted ? 'unknown' : 'failed',
+              childAuthorization.submitted,
+              failureCode(error, childAuthorization.submitted, aborted),
+              parentSessionId,
+              run?.id,
+              undefined,
+              undefined,
+              undefined,
+              revision,
+            )
+            : {
+              ...parentReceipt(childReceipt, exec.callId, parentSessionId, run.id, revision),
+              status: 'failed',
+              content: [],
+              verification: { ...childReceipt.verification, structural: 'failed' },
+              failure_code: 'parent-attachment-cas-unavailable',
+            })
+        }
+        throw error
+      } finally {
+        authorizedLeaves.delete(childAuthorizationToken)
+        void Promise.resolve().then(() => run?.dispose()).catch(() => {
+          try {
+            ctx.logger?.warn?.('e-Mate image subagent cleanup failed')
+          } catch {}
+        })
+      }
     },
     presentCall: args => ({
       card: 'generic',
