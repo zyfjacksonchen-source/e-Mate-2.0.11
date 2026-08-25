@@ -479,3 +479,50 @@ test('performance evidence and signing use their existing isolated environments'
   assert.match(workflow, /GITHUB_WORKFLOW_REF" = "\$GITHUB_REPOSITORY\/\.github\/workflows\/desktop-performance\.yml@refs\/heads\/main"/u)
   assert.doesNotMatch(workflow, /AWS_|ECOREX_R2_|R2_ACCESS|R2_SECRET|\b(?:aws|wrangler|s3api)\b|cloudflarestorage|desktop\/latest\.json/u)
 })
+
+test('Desktop publication workflow only emits the exact Cloudflare plugin handoff', async () => {
+  const workflow = await readFile('.github/workflows/desktop-publication.yml', 'utf8')
+  const { parse } = createRequire(resolve('packages/dsh/package.json'))('yaml')
+  const parsed = parse(workflow)
+  assert.deepEqual(Object.keys(parsed.on), ['workflow_dispatch'])
+  assert.deepEqual(Object.keys(parsed.on.workflow_dispatch.inputs), [
+    'main_ci_run_id', 'admission_artifact_id', 'macos_artifact_id',
+    'windows_artifact_id', 'expected_signed_current',
+  ])
+  assert.equal(Object.values(parsed.on.workflow_dispatch.inputs).every(input => input.required === true && input.type === 'string'), true)
+  assert.deepEqual(Object.keys(parsed.jobs), ['handoff'])
+  assert.deepEqual(parsed.permissions, { actions: 'read', contents: 'read' })
+  const job = parsed.jobs.handoff
+  assert.equal(job.name, 'Desktop Cloudflare plugin handoff')
+  assert.equal(job.environment, 'r2-publish')
+  const invocation = job.steps.find(step => step.id === 'prepare')
+  assert.equal(invocation.uses, 'zyfjacksonchen-source/e-mate-desktop-publication@799284ba3b4935184dd84be3da877f5a4a4c8733')
+  assert.deepEqual(invocation.with, {
+    'source-sha': '${{ github.sha }}',
+    'main-ci-run-id': '${{ inputs.main_ci_run_id }}',
+    'admission-artifact-id': '${{ inputs.admission_artifact_id }}',
+    'macos-artifact-id': '${{ inputs.macos_artifact_id }}',
+    'windows-artifact-id': '${{ inputs.windows_artifact_id }}',
+    'expected-signed-current': '${{ inputs.expected_signed_current }}',
+    'signing-key-id': '${{ secrets.EMATE_PROFILE_SIGNING_KEY_ID }}',
+  })
+  assert.deepEqual(invocation.env, {
+    EMATE_GITHUB_PROVENANCE_TOKEN: '${{ github.token }}',
+    EMATE_DESKTOP_SIGNING_PRIVATE_KEY_PEM: '${{ secrets.EMATE_PROFILE_SIGNING_PRIVATE_KEY }}',
+  })
+  assert.deepEqual(job.steps.filter(step => step.uses).map(step => step.uses), [
+    'actions/setup-node@v6',
+    'zyfjacksonchen-source/e-mate-desktop-publication@799284ba3b4935184dd84be3da877f5a4a4c8733',
+    'actions/upload-artifact@v4',
+  ])
+  const upload = job.steps.find(step => step.uses === 'actions/upload-artifact@v4')
+  assert.equal(upload.with.name, "${{ steps.prepare.outputs['artifact-name'] }}")
+  assert.equal(upload.with.path, "${{ steps.prepare.outputs['artifact-path'] }}")
+  assert.match(workflow, /GITHUB_REF_PROTECTED" = true/u)
+  assert.match(workflow, /GITHUB_RUN_ATTEMPT" = 1/u)
+  assert.match(workflow, /desktop-publication\.yml@refs\/heads\/main/u)
+  assert.match(workflow, /ready-for-cloudflare-plugin/u)
+  assert.match(workflow, /cloudflare-plugin-handoff\.json,cloudflare-publication-plan\.json,desktop-release-signed\.json/u)
+  assert.doesNotMatch(workflow, /\b(?:curl|wget|wrangler|aws)\b|api\.cloudflare\.com|\.r2\.cloudflarestorage\.com|pub-ada3f610c0234a76838f4e19fe2bb25e\.r2\.dev/iu)
+  assert.doesNotMatch(workflow, /secrets\.(?:CLOUDFLARE|R2|AWS)/iu)
+})
