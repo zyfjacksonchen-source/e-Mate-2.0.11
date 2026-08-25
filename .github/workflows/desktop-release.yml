@@ -167,8 +167,9 @@ jobs:
         with:
           name: e-mate-desktop-windows-${{ github.sha }}
           path: desktop/e-mate-desktop/dist/e-Mate-${{ steps.version.outputs.value }}-win-x64-Setup.exe
+          compression-level: 0
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
 
   macos:
     if: ${{ always() && ((inputs.reuse_run_id == '' && needs.profile.result == 'success') || (inputs.reuse_run_id != '' && needs.reuse.result == 'success')) }}
@@ -225,8 +226,9 @@ jobs:
         with:
           name: e-mate-desktop-macos-${{ github.sha }}
           path: desktop/e-mate-desktop/dist/mac-unsigned-release/e-Mate-${{ steps.version.outputs.value }}-mac-universal.dmg
+          compression-level: 0
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
 
   manifest:
     if: ${{ always() && needs.macos.result == 'success' && ((inputs.reuse_run_id == '' && needs.windows.result == 'success') || (inputs.reuse_run_id != '' && needs.reuse.result == 'success')) }}

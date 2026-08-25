@@ -425,6 +425,12 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.match(desktopRelease.jobs.reuse.steps[0].run, /Build unsigned Windows x64 installer/u)
   assert.match(desktopRelease.jobs.reuse.steps[0].run, /test "\$source_sha" = "\$GITHUB_SHA"/u)
   assert.match(desktopRelease.jobs.macos.if, /needs\.reuse\.result == 'success'/u)
+  for (const [job, name] of [['windows', 'e-mate-desktop-windows-'], ['macos', 'e-mate-desktop-macos-']]) {
+    const upload = desktopRelease.jobs[job].steps.find(step => step.uses === 'actions/upload-artifact@v4'
+      && String(step.with.name).startsWith(name))
+    assert.equal(upload.with['compression-level'], 0)
+    assert.equal(upload.with['retention-days'], 30)
+  }
   assert.equal(desktopRelease.jobs.macos.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], "${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}")
   assert.equal(desktopRelease.jobs.manifest.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], "${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}")
   const candidateStep = desktopRelease.jobs.manifest.steps.find(step => step.name === 'Generate performance-pending Desktop artifact candidate')
