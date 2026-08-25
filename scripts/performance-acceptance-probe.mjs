@@ -491,7 +491,8 @@ export function assertOfflineValidCacheBoundary(online, offline) {
     || online.policy_refreshed_at !== offline.policy_refreshed_at
     || times.some(value => !Number.isFinite(value))
     || times[0] >= times[1] || times[0] >= times[2]
-    || !SHA256.test(offline.audit_outbox_sha256)) {
+    || !SHA256.test(online.audit_status_sha256)
+    || !SHA256.test(offline.audit_status_sha256)) {
     throw new Error('offline path did not isolate only the auth and policy control plane inside valid cache windows')
   }
   return {
@@ -499,13 +500,28 @@ export function assertOfflineValidCacheBoundary(online, offline) {
     inference_gateway: offline.inference_gateway,
     lease_sha256: offline.lease_sha256,
     model_policy_sha256: offline.model_policy_sha256,
-    audit_outbox_sha256: offline.audit_outbox_sha256,
+    audit_status_sha256: offline.audit_status_sha256,
     lease_refreshed_at: offline.lease_refreshed_at,
     policy_refreshed_at: offline.policy_refreshed_at,
     lease_expires_at: offline.lease_expires_at,
     policy_expires_at: offline.policy_expires_at,
     finished_at: offline.finished_at,
   }
+}
+
+export function nativeAuditStatusSha256(value) {
+  const keys = [
+    'blocked', 'delivered', 'delivered_tokens', 'pending', 'pending_tokens',
+    'schema_version', 'task_events_delivered', 'task_events_pending',
+  ]
+  if (value === null || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).sort().join('\0') !== keys.sort().join('\0')
+    || value.schema_version !== 1
+    || keys.filter(key => key !== 'schema_version')
+      .some(key => !Number.isSafeInteger(value[key]) || value[key] < 0)) {
+    throw new Error('native audit.status returned an invalid closed status')
+  }
+  return sha256(canonical(value))
 }
 
 function one(rows, label) {
@@ -1272,6 +1288,21 @@ async function rpc(method, payload) {
   return body.result.value
 }
 
+async function connectionRpc(channel, endpoint, payload) {
+  const rpcId = `performance-${endpoint}-${randomUUID()}`
+  const response = await fetch(`${LOOPBACK_ORIGIN}${channel}/${endpoint}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'client-request', rpcId, method: endpoint, payload }),
+  })
+  if (!response.ok) throw new Error(`${endpoint} failed over HTTP ${String(response.status)}`)
+  const body = await response.json()
+  if (body?.rpcId !== rpcId || body?.result?.ok !== true) {
+    throw new Error(`${endpoint} failed: ${body?.result?.error?.code ?? 'invalid-response'}`)
+  }
+  return body.result.value
+}
+
 async function completeHistory(sessionId) {
   const pages = []
   let beforeSeq
@@ -1438,12 +1469,15 @@ function brokerEvents(value) {
   return value.events
 }
 
-function enterpriseReceipt(value, endpoint) {
+function enterpriseReceipt(value, endpoint, auditStatus) {
   const receipt = value?.receipt
   if (receipt?.endpoint !== endpoint || receipt.inference_gateway !== 'available') {
     throw new Error('offline-control status did not prove the requested endpoint boundary')
   }
-  return receipt
+  if ('audit_outbox_sha256' in receipt || 'audit_status_sha256' in receipt) {
+    throw new Error('offline-control broker cannot claim the native DSH audit authority')
+  }
+  return { ...receipt, audit_status_sha256: nativeAuditStatusSha256(auditStatus) }
 }
 
 async function writeJson(path, value) {
@@ -1574,9 +1608,10 @@ async function collectPath(input) {
   })
   let receipt
   if (candidate) {
+    const auditStatus = await connectionRpc('/emate.audit', 'audit.status', {})
     receipt = enterpriseReceipt(await runRunnerBroker(
       configPath, config.offline_control.reference, 'status', {},
-    ), pathName === 'emate_online' ? 'available' : 'unavailable')
+    ), pathName === 'emate_online' ? 'available' : 'unavailable', auditStatus)
     await writeJson(join(directory, `${prefix}.enterprise.json`), {
       ...binding, kind: 'enterprise-runtime-receipt', source: 'e-mate-enterprise-state', receipt,
     })

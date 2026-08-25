@@ -15,6 +15,7 @@ import {
   deriveAuthoritySample,
   loadFrozenBaselineBaseContract,
   loadRunnerPrivateConfig,
+  nativeAuditStatusSha256,
   installVerifiedProfileTemplate,
   ownedExecutionSchedule,
   parseMuxAssistantTextDelta,
@@ -107,17 +108,28 @@ test('joins native attempts and usage only by the exact dedicated scope and ids'
 test('offline-valid-cache cuts only auth and policy control plane', () => {
   const online = {
     endpoint: 'available', lease_sha256: digest, model_policy_sha256: 'b'.repeat(64),
+    audit_status_sha256: 'd'.repeat(64),
     lease_refreshed_at: '2026-08-26T00:00:00.000Z', policy_refreshed_at: '2026-08-26T00:00:00.000Z',
   }
   const offline = {
     ...online, endpoint: 'unavailable', inference_gateway: 'available',
     finished_at: '2026-08-26T00:05:00.000Z', lease_expires_at: '2026-08-26T01:00:00.000Z',
-    policy_expires_at: '2026-08-26T01:00:00.000Z', audit_outbox_sha256: 'c'.repeat(64),
+    policy_expires_at: '2026-08-26T01:00:00.000Z', audit_status_sha256: 'c'.repeat(64),
   }
   assert.equal(assertOfflineValidCacheBoundary(online, offline).lease_sha256, digest)
   assert.throws(() => assertOfflineValidCacheBoundary(online, {
     ...offline, inference_gateway: 'unavailable',
   }), /isolate only/u)
+})
+
+test('hashes only the closed native audit.status projection', () => {
+  const status = {
+    schema_version: 1, pending: 1, delivered: 2, blocked: 0,
+    pending_tokens: 3, delivered_tokens: 4,
+    task_events_pending: 5, task_events_delivered: 6,
+  }
+  assert.match(nativeAuditStatusSha256(status), /^[0-9a-f]{64}$/u)
+  assert.throws(() => nativeAuditStatusSha256({ ...status, audit_outbox_sha256: digest }), /invalid closed status/u)
 })
 
 test('derives one duplicate-free sample from native Session, full Usage delta, and renderer authorities', () => {

@@ -341,14 +341,14 @@ function installMatchesEnvironment(install, environment) {
 
 function validEnterpriseReceipt(receipt) {
   return exactKeys(receipt, [
-    'endpoint', 'inference_gateway', 'lease_sha256', 'model_policy_sha256', 'audit_outbox_sha256',
+    'endpoint', 'inference_gateway', 'lease_sha256', 'model_policy_sha256', 'audit_status_sha256',
     'lease_refreshed_at', 'policy_refreshed_at', 'lease_expires_at', 'policy_expires_at', 'finished_at',
   ])
     && ['available', 'unavailable'].includes(receipt.endpoint)
     && receipt.inference_gateway === 'available'
     && isSha256(receipt.lease_sha256)
     && isSha256(receipt.model_policy_sha256)
-    && isSha256(receipt.audit_outbox_sha256)
+    && isSha256(receipt.audit_status_sha256)
     && ['lease_refreshed_at', 'policy_refreshed_at', 'lease_expires_at', 'policy_expires_at', 'finished_at']
       .every(key => Number.isFinite(Date.parse(receipt[key])))
 }

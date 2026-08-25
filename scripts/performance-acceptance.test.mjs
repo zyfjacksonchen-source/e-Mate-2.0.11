@@ -427,7 +427,7 @@ test('assembles four fixture-shaped capture trees into the exact production hand
             inference_gateway: 'available',
             lease_sha256: '9'.repeat(64),
             model_policy_sha256: 'b'.repeat(64),
-            audit_outbox_sha256: pathName === 'emate_online' ? 'c'.repeat(64) : 'd'.repeat(64),
+            audit_status_sha256: pathName === 'emate_online' ? 'c'.repeat(64) : 'd'.repeat(64),
             lease_refreshed_at: '2026-08-25T23:00:00.000Z',
             policy_refreshed_at: '2026-08-25T23:00:00.000Z',
             lease_expires_at: '2026-08-26T02:00:00.000Z',
