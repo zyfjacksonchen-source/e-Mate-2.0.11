@@ -2372,3 +2372,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 两个失败 run 永久不能作为候选或发布证据；当前只有 source-fixed diff 和只读日志/快照证据，没有上传、激活或生产写入。
 - Remaining blockers: 提交后必须通过新受保护 PR CI，再从新的 protected-main SHA 生成 Desktop/Profile 候选、性能与 admission；同一字节的 macOS/Windows 安装、P0/TQ、更新、回滚和公开回读继续 OPEN。
 - Next exact action: 跑定向发布合同，提交并推送最小修复，走受保护 PR 合并与全新 exact-main 候选；所有旧候选作废，生产链继续关闭。
+
+## 2026-08-26 · 2.0.12→2.0.13 macOS 原生更新 ACK 前驱桥接修复
+
+- Goal checkpoint: 在正式候选安装前关闭真实 2.0.12 原生 helper 无法确认 2.0.13 启动、必然超时回滚的 P0；本条只修唯一 macOS ACK seam，不安装、不上传、不激活或发布候选。
+- Frozen baseline / current HEAD: 修复从受保护 `main@100a670f283e6b9fcb1d032b086b37a45d9279c4` 独立分支开始；候选 Base/Harness 仍为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`，目标只允许精确 `2.0.12→2.0.13`。
+- Binding documents read: 完整复核根 `AGENTS.md`、`target-contract.md`、2.0.13 最终范围合同、上一条完整日志、候选 ACK/原子替换实现及本机已安装 2.0.12 `app.asar` 中同一模块的 source map。
+- Inspected native seam: 2.0.12 helper 启动新应用时只传 `EMATE_MAC_UPDATE_ACK_PATH/TOKEN/VERSION`，而 2.0.13 只接受含 source/Base/floor/manifest/artifact/appId/arch 等 12 字段的新握手；因此候选在 renderer 健康后仍会拒绝环境，旧 helper 等待 60 秒后回滚。旧 helper 在看到六字段旧 ACK 前始终保留 predecessor backup。
+- Experiment or why unnecessary: 从真实安装包复原旧请求的 15 个生成字段、路径命名和六字段 ACK，不凭记忆造兼容格式。该 owner 是 Electron 原子替换/进程生命周期，Creation Mode 无法安全模拟且不适用；无需第二 updater、Profile 路径或新依赖。
+- Decision and forbidden alternatives: 在唯一 `writeMacUpdateStartupAck()` 入口识别精确三字段集合，严格读取 no-follow、限长、精确 15 键的旧请求，并只允许 2.0.12 predecessor、2.0.13 target、canonical app/transaction/Trash 路径。旧 ACK 延迟到既有 `commitApplied`，即 probation 窗口可见且 Schedule admission 打开后才耐久写入，使失败仍由旧 helper 原子回滚。任意缺字段、混入新字段、未知字段、扩展/漂移请求均失败关闭；完整 12 字段新协议及 source/Base/floor/manifest/artifact/appId/arch、pending owner、installed receipt、IPC confirmation 校验完全不变。禁止接受任意 partial env、为旧请求伪造 provenance、提前写 ACK 或绕过 Schedule/rollback。
+- Changed scope: 仅修改 `desktop/e-mate-desktop/src/mac-update-installer.ts`、既有 `mac-update-installer.spec.ts` 并 append 本记录；未改 updater 下载/manifest、Base/Profile/Harness、R2、Feed、desired state、真实安装态或用户数据。
+- Verification commands and results: `mac-update-installer.spec.ts` 与 `electron-runtime.spec.ts` 首轮为 `2 files / 124 tests` 全过；补充请求漂移反例后 `mac-update-installer.spec.ts` 为 `86/86`，生产及测试 TypeScript 均通过，`git diff --check` 通过。覆盖真实旧三字段正例、ACK 延迟、缺失/混合/未知字段、错误前驱、扩展与 probation 中漂移请求、新完整协议回归，以及 ACK 未 apply 时 predecessor 原子回滚。
+- Immutable evidence / receipt: 根因输入来自本机已安装 2.0.12 包内 source map；源码修复绑定本分支后续提交。没有生成、签名、安装、上传、激活或发布任何新字节，既有 candidate run/artifact 因缺少本修复不得作为可发布候选。
+- Remaining blockers: 新提交必须通过受保护 CI，并从合并后的 exact main 重建正式候选；随后必须从未改动的真实 2.0.12 经原生在线更新验证成功、失败回滚、Schedule admission、Profile/Base 回执和安装后版本/哈希，当前源码测试不能替代安装态门禁。
+- Next exact action: 提交本最小桥接并交主代理复核；禁止复用旧候选，生产链保持关闭。
