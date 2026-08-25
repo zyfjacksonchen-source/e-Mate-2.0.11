@@ -16,28 +16,25 @@ const PHASE_FIELDS = [
   'prepare_ms',
   'adapter_to_first_chunk_ms',
 ]
+const SCENARIOS = ['short-text', 'history-20', 'read-only-tool']
 const NATIVE_SAMPLE_FIELDS = [
   'pair_id', 'scenario', 'arm_order', 'session_id_sha256', 'turn', 'step',
   'user_message_to_first_text_delta_ms', 'output_tokens_per_second',
-  'tool_call_to_start_ms', 'tool_result_to_next_request_ms', 'queue_wait_ms',
+  'queue_wait_ms',
   'duplicate_model_request_count', 'duplicate_tool_execution_count',
   'duplicate_job_execution_count', 'duplicate_deliverable_count',
 ]
-const REQUEST_SAMPLE_FIELDS = [
-  'pair_id', 'request_header_sha256', 'request_header_bytes', 'request_tool_count',
-  'local_pre_provider_ms', ...PHASE_FIELDS,
-]
+const NATIVE_TOOL_SAMPLE_FIELDS = ['tool_call_to_start_ms', 'tool_result_to_next_request_ms']
+const REQUEST_SAMPLE_FIELDS = ['pair_id', 'requests']
+const REQUEST_ATTEMPT_FIELDS = ['ordinal', 'request_header_sha256', 'request_header_bytes', 'request_tool_count']
+const REQUEST_CANDIDATE_ATTEMPT_FIELDS = [...REQUEST_ATTEMPT_FIELDS, 'diagnostic']
+const REQUEST_DIAGNOSTIC_FIELDS = ['local_pre_provider_ms', ...PHASE_FIELDS]
 const PAINT_SAMPLE_FIELDS = ['pair_id', 'submit_to_first_visible_text_ms', 'first_chunk_to_paint_ms']
-const PROVIDER_SAMPLE_FIELDS = [
-  'pair_id', 'provider_invocation_id_sha256', 'provider_response_id_sha256',
+const PROVIDER_SAMPLE_FIELDS = ['pair_id', 'provider_attempts']
+const PROVIDER_ATTEMPT_FIELDS = [
+  'ordinal', 'provider_invocation_id_sha256', 'provider_response_id_sha256',
   'provider_usage_sha256', 'input_tokens', 'output_tokens',
 ]
-const EVIDENCE_SAMPLE_FIELDS = [...new Set([
-  ...NATIVE_SAMPLE_FIELDS,
-  ...REQUEST_SAMPLE_FIELDS,
-  ...PAINT_SAMPLE_FIELDS,
-  ...PROVIDER_SAMPLE_FIELDS,
-])]
 const RUNTIME_FIELDS = [
   'product', 'product_version', 'source_commit', 'desktop_reference_commit',
   'base_contract_id', 'profile_generation', 'composition_sha256',
@@ -110,53 +107,100 @@ function metric(samples, name, percentileValue) {
   return percentile(samples.map(sample => sample[name]), percentileValue)
 }
 
-function validSamples(path) {
+function nativeSampleFields(scenario) {
+  return scenario === 'read-only-tool'
+    ? [...NATIVE_SAMPLE_FIELDS, ...NATIVE_TOOL_SAMPLE_FIELDS]
+    : NATIVE_SAMPLE_FIELDS
+}
+
+function evidenceSampleFields(pathName, scenario) {
+  return [...new Set([
+    ...nativeSampleFields(scenario),
+    ...REQUEST_SAMPLE_FIELDS,
+    ...PAINT_SAMPLE_FIELDS,
+    ...PROVIDER_SAMPLE_FIELDS,
+  ])]
+}
+
+function expectedAttemptCount(scenario) {
+  return scenario === 'read-only-tool' ? 2 : 1
+}
+
+function validDiagnostic(pathName, attempt) {
+  if (pathName === 'baseline') return attempt.diagnostic === undefined
+  return attempt.diagnostic === null
+    || (exactKeys(attempt.diagnostic, REQUEST_DIAGNOSTIC_FIELDS)
+      && REQUEST_DIAGNOSTIC_FIELDS.every(name => nonNegative(attempt.diagnostic[name])))
+}
+
+function validRequestAttempts(sample, pathName) {
+  const fields = pathName === 'baseline' ? REQUEST_ATTEMPT_FIELDS : REQUEST_CANDIDATE_ATTEMPT_FIELDS
+  return Array.isArray(sample.requests)
+    && sample.requests.length === expectedAttemptCount(sample.scenario)
+    && sample.requests.every((attempt, index) => exactKeys(attempt, fields)
+      && attempt.ordinal === index + 1
+      && isSha256(attempt.request_header_sha256)
+      && positiveInteger(attempt.request_header_bytes)
+      && Number.isSafeInteger(attempt.request_tool_count) && attempt.request_tool_count >= 0
+      && validDiagnostic(pathName, attempt))
+}
+
+function validProviderAttempts(sample, invocationIds, responseIds) {
+  if (!Array.isArray(sample.provider_attempts)
+    || sample.provider_attempts.length !== expectedAttemptCount(sample.scenario)) return false
+  for (const [index, attempt] of sample.provider_attempts.entries()) {
+    if (!exactKeys(attempt, PROVIDER_ATTEMPT_FIELDS)
+      || attempt.ordinal !== index + 1
+      || !isSha256(attempt.provider_invocation_id_sha256) || invocationIds.has(attempt.provider_invocation_id_sha256)
+      || !isSha256(attempt.provider_response_id_sha256) || responseIds.has(attempt.provider_response_id_sha256)
+      || !isSha256(attempt.provider_usage_sha256)
+      || !Number.isSafeInteger(attempt.input_tokens) || attempt.input_tokens < 0
+      || !positiveInteger(attempt.output_tokens)) return false
+    invocationIds.add(attempt.provider_invocation_id_sha256)
+    responseIds.add(attempt.provider_response_id_sha256)
+  }
+  return true
+}
+
+function validSamples(path, pathName) {
   if (!Array.isArray(path.samples) || path.samples.length < MIN_SAMPLES) return false
   const pairIds = new Set()
   const invocationIds = new Set()
   const responseIds = new Set()
   const scenarios = new Map()
-  const armOrders = new Set()
+  const scenarioArmOrders = new Map()
   for (const sample of path.samples) {
-    if (!exactKeys(sample, EVIDENCE_SAMPLE_FIELDS)
+    if (!isRecord(sample)
       || typeof sample.pair_id !== 'string' || pairIds.has(sample.pair_id)
-      || !['short-text', 'history-20', 'read-only-tool'].includes(sample.scenario)
+      || !SCENARIOS.includes(sample.scenario)
+      || !exactKeys(sample, evidenceSampleFields(pathName, sample.scenario))
       || !['AB', 'BA'].includes(sample.arm_order)
       || !Number.isFinite(sample.submit_to_first_visible_text_ms) || sample.submit_to_first_visible_text_ms < 0
       || !Number.isFinite(sample.user_message_to_first_text_delta_ms) || sample.user_message_to_first_text_delta_ms < 0
       || !Number.isFinite(sample.first_chunk_to_paint_ms) || sample.first_chunk_to_paint_ms < 0
-      || !Number.isFinite(sample.local_pre_provider_ms) || sample.local_pre_provider_ms < 0
       || !Number.isFinite(sample.output_tokens_per_second) || sample.output_tokens_per_second <= 0
-      || !Number.isFinite(sample.tool_call_to_start_ms) || sample.tool_call_to_start_ms < 0
-      || !Number.isFinite(sample.tool_result_to_next_request_ms) || sample.tool_result_to_next_request_ms < 0
       || !Number.isFinite(sample.queue_wait_ms) || sample.queue_wait_ms < 0
-      || PHASE_FIELDS.some(name => !nonNegative(sample[name]))
-      || !isSha256(sample.request_header_sha256)
-      || !positiveInteger(sample.request_header_bytes)
-      || !Number.isSafeInteger(sample.request_tool_count) || sample.request_tool_count < 0
-      || !isSha256(sample.provider_invocation_id_sha256) || invocationIds.has(sample.provider_invocation_id_sha256)
-      || !isSha256(sample.provider_response_id_sha256) || responseIds.has(sample.provider_response_id_sha256)
-      || !isSha256(sample.provider_usage_sha256)
+      || (sample.scenario === 'read-only-tool'
+        && (!nonNegative(sample.tool_call_to_start_ms) || !nonNegative(sample.tool_result_to_next_request_ms)))
+      || !validRequestAttempts(sample, pathName)
+      || !validProviderAttempts(sample, invocationIds, responseIds)
       || !isSha256(sample.session_id_sha256)
       || !positiveInteger(sample.turn) || !positiveInteger(sample.step)
-      || !Number.isSafeInteger(sample.input_tokens) || sample.input_tokens < 0
-      || !positiveInteger(sample.output_tokens)
       || sample.duplicate_model_request_count !== 0
       || sample.duplicate_tool_execution_count !== 0
       || sample.duplicate_job_execution_count !== 0
       || sample.duplicate_deliverable_count !== 0) return false
     pairIds.add(sample.pair_id)
-    invocationIds.add(sample.provider_invocation_id_sha256)
-    responseIds.add(sample.provider_response_id_sha256)
     scenarios.set(sample.scenario, (scenarios.get(sample.scenario) ?? 0) + 1)
-    armOrders.add(sample.arm_order)
+    if (!scenarioArmOrders.has(sample.scenario)) scenarioArmOrders.set(sample.scenario, new Set())
+    scenarioArmOrders.get(sample.scenario).add(sample.arm_order)
   }
   return [...scenarios.values()].every(count => count >= 10)
     && scenarios.size === 3
-    && armOrders.size === 2
+    && [...scenarioArmOrders.values()].every(orders => orders.size === 2)
 }
 
-function comparePath(baseline, candidate) {
+function compareScenario(baselineSamples, candidateSamples) {
   const failures = []
   const summaries = {}
   for (const percentileValue of [0.5, 0.95]) {
@@ -165,8 +209,8 @@ function comparePath(baseline, candidate) {
     const relativeAllowance = percentileValue === 0.5 ? 0.03 : 0.05
     summaries[label] = {}
     for (const name of ['submit_to_first_visible_text_ms', 'user_message_to_first_text_delta_ms']) {
-      const baseTtft = metric(baseline.samples, name, percentileValue)
-      const candidateTtft = metric(candidate.samples, name, percentileValue)
+      const baseTtft = metric(baselineSamples, name, percentileValue)
+      const candidateTtft = metric(candidateSamples, name, percentileValue)
       const ttftLimit = baseTtft + Math.max(absoluteAllowance, baseTtft * relativeAllowance)
       summaries[label][name] = { baseline: baseTtft, candidate: candidateTtft, limit: ttftLimit }
       if (candidateTtft > ttftLimit) failures.push(`${label} ${name} ${candidateTtft}ms > ${ttftLimit}ms`)
@@ -175,8 +219,8 @@ function comparePath(baseline, candidate) {
 
   for (const [percentileValue, throughputRate] of [[0.5, 0.03], [0.05, 0.05]]) {
     const label = `p${String(percentileValue * 100)}`
-    const baseThroughput = metric(baseline.samples, 'output_tokens_per_second', percentileValue)
-    const candidateThroughput = metric(candidate.samples, 'output_tokens_per_second', percentileValue)
+    const baseThroughput = metric(baselineSamples, 'output_tokens_per_second', percentileValue)
+    const candidateThroughput = metric(candidateSamples, 'output_tokens_per_second', percentileValue)
     const throughputLimit = baseThroughput * (1 - throughputRate)
     summaries[label] ??= {}
     summaries[label].output_tokens_per_second = {
@@ -189,43 +233,55 @@ function comparePath(baseline, candidate) {
     }
   }
 
-  for (const [percentileValue, allowance] of [[0.5, 10], [0.95, 25]]) {
-    const label = `p${String(percentileValue * 100)}`
-    const base = metric(baseline.samples, 'local_pre_provider_ms', percentileValue)
-    const observed = metric(candidate.samples, 'local_pre_provider_ms', percentileValue)
-    summaries[label] ??= {}
-    summaries[label].local_pre_provider_ms = { baseline: base, candidate: observed, limit: base + allowance }
-    if (observed > base + allowance) failures.push(`${label} local_pre_provider_ms ${observed}ms > ${base + allowance}ms`)
-  }
-
-  const basePaintP95 = metric(baseline.samples, 'first_chunk_to_paint_ms', 0.95)
-  const paintP95 = metric(candidate.samples, 'first_chunk_to_paint_ms', 0.95)
-  const paintP99 = metric(candidate.samples, 'first_chunk_to_paint_ms', 0.99)
+  const basePaintP95 = metric(baselineSamples, 'first_chunk_to_paint_ms', 0.95)
+  const paintP95 = metric(candidateSamples, 'first_chunk_to_paint_ms', 0.95)
+  const paintP99 = metric(candidateSamples, 'first_chunk_to_paint_ms', 0.99)
   summaries.p95.first_chunk_to_paint_ms = { baseline: basePaintP95, candidate: paintP95, delta_limit: basePaintP95 + 10, absolute_limit: 50 }
   summaries.p99 = { first_chunk_to_paint_ms: { candidate: paintP99, absolute_limit: 100 } }
   if (paintP95 > basePaintP95 + 10 || paintP95 > 50) failures.push(`p95 first_chunk_to_paint_ms ${paintP95}ms exceeds +10ms or 50ms absolute limit`)
   if (paintP99 > 100) failures.push(`p99 first_chunk_to_paint_ms ${paintP99}ms > 100ms`)
 
-  for (const name of ['tool_call_to_start_ms', 'tool_result_to_next_request_ms']) {
-    const base = metric(baseline.samples, name, 0.95)
-    const observed = metric(candidate.samples, name, 0.95)
-    summaries.p95[name] = { baseline: base, candidate: observed, absolute_limit: base + 25, relative_limit: base * 1.05 }
-    if (observed - base > 25 || (base === 0 ? observed !== 0 : observed > base * 1.05)) {
-      failures.push(`p95 ${name} ${observed}ms exceeds +25ms and/or +5% limits from ${base}ms`)
+  if (baselineSamples[0]?.scenario === 'read-only-tool') {
+    for (const name of NATIVE_TOOL_SAMPLE_FIELDS) {
+      const base = metric(baselineSamples, name, 0.95)
+      const observed = metric(candidateSamples, name, 0.95)
+      summaries.p95[name] = { baseline: base, candidate: observed, absolute_limit: base + 25, relative_limit: base * 1.05 }
+      if (observed - base > 25 || (base === 0 ? observed !== 0 : observed > base * 1.05)) {
+        failures.push(`p95 ${name} ${observed}ms exceeds +25ms and/or +5% limits from ${base}ms`)
+      }
     }
   }
 
-  const baselineByPair = new Map(baseline.samples.map(sample => [sample.pair_id, sample]))
-  for (const sample of candidate.samples) {
+  const baselineByPair = new Map(baselineSamples.map(sample => [sample.pair_id, sample]))
+  for (const sample of candidateSamples) {
     const paired = baselineByPair.get(sample.pair_id)
     if (paired === undefined) continue
-    if (sample.request_header_sha256 !== paired.request_header_sha256
-      || sample.request_header_bytes !== paired.request_header_bytes
-      || sample.request_tool_count !== paired.request_tool_count) {
+    const requestIdentity = requests => requests.map(attempt => Object.fromEntries(
+      REQUEST_ATTEMPT_FIELDS.map(field => [field, attempt[field]]),
+    ))
+    if (canonical(requestIdentity(sample.requests)) !== canonical(requestIdentity(paired.requests))) {
       failures.push(`request header mismatch for ${sample.pair_id}`)
     }
   }
   return { passed: failures.length === 0, failures, summaries }
+}
+
+function comparePath(baseline, candidate) {
+  const failures = []
+  const scenarios = {}
+  for (const scenario of SCENARIOS) {
+    const comparison = compareScenario(
+      baseline.samples.filter(sample => sample.scenario === scenario),
+      candidate.samples.filter(sample => sample.scenario === scenario),
+    )
+    scenarios[scenario] = comparison
+    failures.push(...comparison.failures.map(failure => `${scenario}: ${failure}`))
+  }
+  const diagnostics = Object.fromEntries(candidate.samples
+    .flatMap(sample => sample.requests
+      .filter(attempt => attempt.diagnostic !== null)
+      .map(attempt => [`${sample.pair_id}:${String(attempt.ordinal)}`, attempt.diagnostic])))
+  return { passed: failures.length === 0, failures, scenarios, diagnostics }
 }
 
 function validRuntimeIdentity(runtime) {
@@ -284,7 +340,7 @@ export function evaluateEvidence(evidence) {
   const online = evidence?.paths?.emate_online
   const offline = evidence?.paths?.emate_enterprise_unavailable_valid_cache
   for (const [name, path] of Object.entries({ baseline, emate_online: online, emate_enterprise_unavailable_valid_cache: offline })) {
-    if (!validSamples(path ?? {})) failures.push(`${name} requires at least 30 unique, valid, duplicate-free samples`)
+    if (!validSamples(path ?? {}, name)) failures.push(`${name} requires at least 30 unique, valid, duplicate-free samples`)
   }
   if (offline?.enterprise_state?.endpoint !== 'unavailable'
     || offline?.enterprise_state?.lease !== 'valid-cached'
@@ -293,9 +349,15 @@ export function evaluateEvidence(evidence) {
     failures.push('offline path must declare unavailable endpoint with a valid cached lease/policy and async audit outbox')
   }
   const baselineIds = baseline?.samples?.map(sample => sample.pair_id).sort().join('\n')
+  const baselineByPair = new Map(baseline?.samples?.map(sample => [sample.pair_id, sample]) ?? [])
   for (const [name, path] of Object.entries({ emate_online: online, emate_enterprise_unavailable_valid_cache: offline })) {
     if (path?.samples?.map(sample => sample.pair_id).sort().join('\n') !== baselineIds) {
       failures.push(`${name} pair IDs do not match the baseline`)
+    } else if (path?.samples?.some(sample => {
+      const paired = baselineByPair.get(sample.pair_id)
+      return paired?.scenario !== sample.scenario || paired.arm_order !== sample.arm_order
+    })) {
+      failures.push(`${name} scenario or arm order does not match the baseline`)
     }
   }
   const comparisons = {}
@@ -420,12 +482,14 @@ function validateProductionReceipts(evidence) {
 
 function exactSampleSet(rows, samples, fields) {
   if (!Array.isArray(rows) || rows.length !== samples.length
-    || rows.some(row => !exactKeys(row, fields))) return false
+    || rows.some(row => !exactKeys(row, typeof fields === 'function' ? fields(row) : fields))) return false
   const byPair = new Map(rows.map(row => [row.pair_id, row]))
   if (byPair.size !== rows.length) return false
   return samples.every(sample => {
     const row = byPair.get(sample.pair_id)
-    return row !== undefined && fields.every(field => canonical(row[field]) === canonical(sample[field]))
+    if (row === undefined) return false
+    const expectedFields = typeof fields === 'function' ? fields(row) : fields
+    return expectedFields.every(field => canonical(row[field]) === canonical(sample[field]))
   })
 }
 
@@ -436,7 +500,7 @@ function validNativeTrace(value, evidence, pathName, receipt, samples) {
       'sample_ids_sha256', 'samples',
     ])
     && value.source === 'dsh-session-events'
-    && exactSampleSet(value.samples, samples, NATIVE_SAMPLE_FIELDS)
+    && exactSampleSet(value.samples, samples, row => nativeSampleFields(row.scenario))
 }
 
 function validProviderReceipt(value, evidence, pathName, receipt, samples) {
@@ -450,8 +514,10 @@ function validProviderReceipt(value, evidence, pathName, receipt, samples) {
     || value.model !== receipt.model
     || value.reasoning_level !== receipt.reasoning_level
     || !exactSampleSet(value.samples, samples, PROVIDER_SAMPLE_FIELDS)) return false
-  return new Set(value.samples.map(row => row.provider_invocation_id_sha256)).size === samples.length
-    && new Set(value.samples.map(row => row.provider_response_id_sha256)).size === samples.length
+  const invocationIds = value.samples.flatMap(row => row.provider_attempts.map(attempt => attempt.provider_invocation_id_sha256))
+  const responseIds = value.samples.flatMap(row => row.provider_attempts.map(attempt => attempt.provider_response_id_sha256))
+  return new Set(invocationIds).size === invocationIds.length
+    && new Set(responseIds).size === responseIds.length
 }
 
 function validRequestHeaders(value, evidence, pathName, receipt, samples) {
@@ -677,7 +743,7 @@ async function assemblePath(evidence, pathName, config, manifestRoot, outputRoot
     samples,
     run_receipt: receipt,
   }
-  if (!validSamples(path)
+  if (!validSamples(path, pathName)
     || !validNativeTrace(native.value, evidence, pathName, receipt, samples)
     || !validProviderReceipt(provider.value, evidence, pathName, receipt, samples)
     || !validRequestHeaders(request.value, evidence, pathName, receipt, samples)
@@ -841,81 +907,91 @@ async function collectPath(name, samples, enterpriseState) {
   const fixtureHeader = canonical({ provider: 'parity-fixture', model: 'parity-fixture', tools: ['parity_probe'] })
   for (let index = 0; index < samples; index += 1) {
     const pairId = `pair-${String(index + 1).padStart(2, '0')}`
-    const responseId = `${name}-response-${pairId}`
-    const responseHandle = await ctx.agents.create({
-      sessionId: SessionId(responseId),
+    const scenario = SCENARIOS[index % 30 < 10 ? 0 : index % 30 < 20 ? 1 : 2]
+    const sessionId = `${name}-${scenario === 'read-only-tool' ? 'tool' : 'response'}-${pairId}`
+    const handle = await ctx.agents.create({
+      sessionId: SessionId(sessionId),
       agentOptions: { provider: 'parity-fixture', model: 'parity-fixture' },
     })
-    const responseAgent = responseHandle.agent
-    const responseIdle = waitForIdle(ctx, responseAgent)
-    responseAgent.followup(createUserMessage({ content: [{ type: 'text', text: pairId }], source: { kind: 'user' } }))
-    await responseIdle
-    const responseEvents = responseAgent.session.events
-    const responseUser = responseEvents.find(event => event.type === 'user/message')
-    const deltas = textDeltas(responseEvents)
-    const response = responseEvents.find(event => event.type === 'assistant/message')
+    const agent = handle.agent
+    if (scenario === 'history-20') {
+      for (let history = 0; history < 20; history += 1) {
+        const historyIdle = waitForIdle(ctx, agent)
+        agent.followup(createUserMessage({
+          content: [{ type: 'text', text: `${pairId}-history-${String(history + 1)}` }],
+          source: { kind: 'user' },
+        }))
+        await historyIdle
+      }
+    }
+    const measuredFrom = agent.session.events.length
+    const idle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: pairId }], source: { kind: 'user' } }))
+    await idle
+    const events = agent.session.events.slice(measuredFrom)
+    const responseUser = events.find(event => event.type === 'user/message')
+    const deltas = textDeltas(events)
+    const response = events.findLast(event => event.type === 'assistant/message')
     const outputTokens = response?.type === 'assistant/message' ? response.data.usage?.outputTokens : undefined
     if (responseUser?.type !== 'user/message' || deltas.length < 2 || typeof outputTokens !== 'number') {
-      throw new Error(`${responseId} did not produce the expected real response events`)
+      throw new Error(`${sessionId} did not produce the expected real response events`)
     }
 
-    const toolId = `${name}-tool-${pairId}`
-    const toolHandle = await ctx.agents.create({
-      sessionId: SessionId(toolId),
-      agentOptions: { provider: 'parity-fixture', model: 'parity-fixture' },
-    })
-    const toolAgent = toolHandle.agent
-    const toolIdle = waitForIdle(ctx, toolAgent)
-    toolAgent.followup(createUserMessage({ content: [{ type: 'text', text: pairId }], source: { kind: 'user' } }))
-    await toolIdle
-    const toolEvents = toolAgent.session.events
-    const call = toolEvents.find(event => event.type === 'tool/call')
-    const result = toolEvents.find(event => event.type === 'tool/result')
-    const duplicateToolExecutionCount = Math.max(0, toolEvents.filter(event => event.type === 'tool/call').length - 1)
-      + Math.max(0, toolEvents.filter(event => event.type === 'tool/result').length - 1)
-    const duplicateModelRequestCount = Math.max(0, (adapter.requestCounts.get(responseId) ?? 0) - 1)
-      + Math.max(0, (adapter.requestCounts.get(toolId) ?? 0) - 2)
-    const toolStart = toolStarts.get(toolId)
-    const nextRequest = adapter.requestStarts.get(`${toolId}:2`)
-    if (call?.type !== 'tool/call' || result?.type !== 'tool/result'
-      || toolStart === undefined || nextRequest === undefined) {
-      throw new Error(`${toolId} did not produce the expected real Tool events`)
+    const expectedRequests = expectedAttemptCount(scenario)
+    const measuredRequests = (adapter.requestCounts.get(sessionId) ?? 0) - (scenario === 'history-20' ? 20 : 0)
+    const call = events.find(event => event.type === 'tool/call')
+    const result = events.find(event => event.type === 'tool/result')
+    const duplicateToolExecutionCount = scenario === 'read-only-tool'
+      ? Math.max(0, events.filter(event => event.type === 'tool/call').length - 1)
+        + Math.max(0, events.filter(event => event.type === 'tool/result').length - 1)
+      : 0
+    const toolStart = toolStarts.get(sessionId)
+    const nextRequest = adapter.requestStarts.get(`${sessionId}:${String((scenario === 'history-20' ? 20 : 0) + 2)}`)
+    if (measuredRequests !== expectedRequests
+      || (scenario === 'read-only-tool' && (call?.type !== 'tool/call' || result?.type !== 'tool/result'
+        || toolStart === undefined || nextRequest === undefined))
+      || (scenario !== 'read-only-tool' && (call !== undefined || result !== undefined))) {
+      throw new Error(`${sessionId} did not produce the expected ${scenario} request shape`)
     }
     output.push({
       pair_id: pairId,
-      scenario: ['short-text', 'history-20', 'read-only-tool'][index % 30 < 10 ? 0 : index % 30 < 20 ? 1 : 2],
+      scenario,
       arm_order: index % 2 === 0 ? 'AB' : 'BA',
-      session_id_sha256: sha256(responseId),
-      turn: 1,
-      step: 1,
+      session_id_sha256: sha256(sessionId),
+      turn: scenario === 'history-20' ? 21 : 1,
+      step: scenario === 'read-only-tool' ? 2 : 1,
       submit_to_first_visible_text_ms: deltas[0].time - responseUser.time,
       user_message_to_first_text_delta_ms: deltas[0].time - responseUser.time,
       first_chunk_to_paint_ms: 0,
-      local_pre_provider_ms: 0,
-      submit_to_host_ms: 0,
-      turn_to_request_header_ms: 0,
-      policy_ms: 0,
-      quota_ms: 0,
-      prepare_ms: 0,
-      adapter_to_first_chunk_ms: 0,
       output_tokens_per_second: outputTokens / ((deltas.at(-1).time - deltas[0].time) / 1_000),
-      tool_call_to_start_ms: toolStart - call.time,
-      tool_result_to_next_request_ms: nextRequest - result.time,
+      ...(scenario === 'read-only-tool' ? {
+        tool_call_to_start_ms: toolStart - call.time,
+        tool_result_to_next_request_ms: nextRequest - result.time,
+      } : {}),
       queue_wait_ms: 0,
-      request_header_sha256: sha256(fixtureHeader),
-      request_header_bytes: Buffer.byteLength(fixtureHeader),
-      request_tool_count: 1,
-      provider_invocation_id_sha256: sha256(`fixture-invocation:${name}:${pairId}`),
-      provider_response_id_sha256: sha256(`fixture-response:${name}:${pairId}`),
-      provider_usage_sha256: sha256(canonical({ input_tokens: 1, output_tokens: outputTokens })),
-      input_tokens: 1,
-      output_tokens: outputTokens,
-      duplicate_model_request_count: duplicateModelRequestCount,
+      requests: Array.from({ length: expectedRequests }, (_, attempt) => ({
+        ordinal: attempt + 1,
+        request_header_sha256: sha256(`${fixtureHeader}:${String(attempt + 1)}`),
+        request_header_bytes: Buffer.byteLength(fixtureHeader),
+        request_tool_count: 1,
+      })),
+      provider_attempts: Array.from({ length: expectedRequests }, (_, attempt) => {
+        const attemptOutputTokens = scenario === 'read-only-tool' && attempt === 0 ? 1 : outputTokens
+        return {
+          ordinal: attempt + 1,
+          provider_invocation_id_sha256: sha256(`fixture-invocation:${name}:${pairId}:${String(attempt + 1)}`),
+          provider_response_id_sha256: sha256(`fixture-response:${name}:${pairId}:${String(attempt + 1)}`),
+          provider_usage_sha256: sha256(canonical({ attempt: attempt + 1, input_tokens: 1, output_tokens: attemptOutputTokens })),
+          input_tokens: 1,
+          output_tokens: attemptOutputTokens,
+        }
+      }),
+      duplicate_model_request_count: Math.max(0, measuredRequests - expectedRequests),
       duplicate_tool_execution_count: duplicateToolExecutionCount,
       duplicate_job_execution_count: 0,
       duplicate_deliverable_count: 0,
     })
-    await Promise.all([responseHandle.dispose(), toolHandle.dispose()])
+    await handle.dispose()
   }
   await ctx.fiber.dispose()
   return { path: name, enterprise_state: enterpriseState, samples: output }
@@ -926,7 +1002,10 @@ async function createFixture(samples) {
   const fixturePath = (path, enterpriseState) => ({
     path,
     enterprise_state: enterpriseState,
-    samples: structuredClone(baseline.samples),
+    samples: structuredClone(baseline.samples).map(sample => ({
+      ...sample,
+      requests: sample.requests.map(attempt => ({ ...attempt, diagnostic: null })),
+    })),
   })
   return {
     schema_version: EVIDENCE_SCHEMA_VERSION,
@@ -934,7 +1013,7 @@ async function createFixture(samples) {
     performance_run_id: 'fixture-performance-v2',
     evidence_kind: 'keyless-target-loop-collector-fixture',
     harness_commit: HARNESS_COMMIT,
-    note: 'Collected once through the pinned real AgentLoop and cloned into equivalent comparison arms; browser paint and pre-provider values are synthetic zeros, so this validates schema/comparison only and is not production evidence.',
+    note: 'Collected once through the pinned real AgentLoop with distinct short, 20-turn-history, and two-request read-only-Tool shapes, then cloned into equivalent comparison arms. Browser paint is a fixture-only zero and candidate request diagnostics are explicitly unavailable; this validates schema/comparison only and is not production evidence.',
     paths: {
       baseline,
       emate_online: fixturePath('emate-online', {

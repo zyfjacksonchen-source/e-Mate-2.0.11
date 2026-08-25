@@ -2400,3 +2400,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 外部 action reviewed main SHA `6be6cf166889899fb9ce6956ccf0f12e9ecc40e3`；本仓库当前只有 source-fixed diff。没有 Cloudflare Worker、R2写入、指针变化、候选安装或生产发布。
 - Remaining blockers: 提交并通过新 PR CI、合并到受保护 main、重跑 exact-main CI/Desktop/Profile/Performance/admission；随后按 Cloudflare 插件一次性 Worker的multipart/CAS合同上传并公开回读，并完成真实2.0.12→2.0.13更新、故障回滚和双平台P0/TQ验收。
 - Next exact action: 复核最小 diff、提交并更新 PR #58；当前生产链继续关闭，所有旧 run/artifact 永久作废。
+
+## 2026-08-26 · 2.0.13 TTFT v2 同口径场景合同收紧
+
+- Goal checkpoint: 现有 performance admission 会把三种场景池化、要求非 Tool 样本伪填 Tool timing，并以单组 Provider/request 字段表示实际有两次模型请求的 read-only Tool；本条只修正证据合同、verifier 与 fixture，不采集真实模型、不生成候选或发布。
+- Frozen baseline / current HEAD: 独立 worktree `codex/performance-v2-real-contract` 从 `public-2011/main@100a670f283e6b9fcb1d032b086b37a45d9279c4` 创建；Base/Harness/Desktop reference 仍为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606` / `6074088f5b660206e404b3591fab51fb99c69add`。
+- Binding documents read: 完整读取 `AGENTS.md`、`target-contract.md`、`slices/2.0.13.md`、`performance-and-acceptance.md` 与本日志此前最后一条；实现前先更新三份绑定合同。
+- Inspected native seam: 证据继续由同一 20 个 source-partitioned 文件、native Session trace、request-header artifact、managed Provider receipt、renderer paint、installed/enterprise receipt 和 `scripts/performance-parity.mjs` 组装；workflow 外壳与外部 signer/action 未改。旧 closed row 每个 pair 只有一组 request/Provider 字段，且 `exactKeys()` 强制所有场景拥有数值 Tool/waterfall 字段，无法诚实表达现有运行路径。
+- Experiment or why unnecessary: 可执行反例证明 short-text 基线 `100ms`→候选 `160ms`、另两类均 `1000ms` 时旧池化 evaluator 仍通过结构门；删除非 Tool timing 或加入第二 Provider attempt 则被旧 schema 拒绝。修复后使用 exact `b2b1650...` 已构建 AgentLoop 闭包运行 30 行 fixture：三类各 10，request attempt 为 `1/1/2`，非 Tool 带 Tool timing 为 `0` 条，结果仍为 `fixture-passed-production-blocked`。
+- Decision and forbidden alternatives: 保持 `schema_version: 2` 和既有 20 文件，只把它收紧为首个可生产的 v2 语义：三场景闭合判别 row、ordered request/Provider attempts、每次 candidate request attempt 的 diagnostic 为 `null` 或闭合非负对象；硬门逐场景计算。禁止旧 evidence 兼容 parser、字段聚合哈希、非 Tool 补零、跨场景 percentile、多模型 aggregate 和 fixture 重标 production；此前所有 v2 evidence/admission 作废并须重采。
+- Changed scope: 修改 `docs/target-contract.md`、`docs/performance-and-acceptance.md`、`docs/slices/2.0.13.md`、`scripts/performance-parity.mjs`、既有 `scripts/performance-parity.test.mjs` 并 append 本记录；未改 workflow、20 文件外壳、Desktop/Profile/Harness、模型路径、生产 R2/Feed/desired state 或用户数据。
+- Verification commands and results: `pnpm run test:performance:parity` 为 `10 passed / 0 failed`；覆盖逐场景 TTFT、非 Tool 字段缺省/伪零、旧 flat v2 拒绝、1/1/2 attempts、第二 header 漂移、重复 Provider invocation、candidate diagnostic 非硬门及 source-artifact semantic rehash。exact Harness fixture 为 `fixture-passed-production-blocked`，三类各 10 且形状符合合同；`git diff --check` 通过。
+- Immutable evidence / receipt: 当前只有 source-fixed commit 前 diff 与本地无密钥 fixture；未运行真实模型、未接触凭据、未注册 runner、未签名 admission、未发布。旧 performance evidence 和 workflow `32888885073` 不可复用。
+- Remaining blockers: 必须从 exact 2.0.12/2.0.13 安装字节按新 schema 重采同模型同场景真实 Provider/paint/header evidence，并由 protected-main verifier 产生新 `performance_run_id` 与签名 admission；性能结果、安装态和发布继续 OPEN。
+- Next exact action: 主代理复核并移植本提交，经 protected CI 后只把当前 verifier 字节交给外部 collector；不得使用旧 evidence root 或以 fixture 关闭生产门。

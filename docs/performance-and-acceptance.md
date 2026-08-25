@@ -22,27 +22,30 @@ TTFT v2 has two comparisons and neither substitutes for the other:
 
 All samples run on the same machine, architecture, browser, network, provider route, model/reasoning level, dataset, authentication/Profile state and warm/cold state. Every published chat model receives 30 AB/BA pairs: 10 short text, 10 with a 20-turn history and 10 with one deterministic read-only Tool. The Goal comparison receives at least 30 pairs. Separately collect 10 paired first requests after update/restart, a 5,000-event session, long Markdown/code, and Goal active/inactive. Do not average across model, prompt class, Goal state, network window or cold/warm state. When a result consumes 80% of any allowed regression budget, expand that exact cohort to 60 pairs.
 
-Each raw sample records monotonic timestamps or bounded durations for:
+Each raw sample records monotonic timestamps or bounded durations for the installed-arm hard comparison:
 
 - user submit to first visibly painted non-empty assistant text;
 - durable `user/message` to first non-empty text delta;
 - first visible chunk arrival to browser paint;
-- submit to Host receipt, turn to request header, policy, quota reservation, request preparation, adapter dispatch and adapter first chunk;
-- Provider invocation/response identity, provider timestamp/usage, request-header SHA-256/bytes/Tool count;
-- output-token throughput excluding TTFT, Tool-call persistence to real Tool start, Tool-result persistence to next request, duplicate executions and independent queue wait.
+- ordered Provider invocation/response identities, timestamp/usage and request-header SHA-256/bytes/Tool count for every model request in the sample;
+- output-token throughput excluding TTFT, duplicate executions and independent queue wait;
+- only for `read-only-tool`, Tool-call persistence to real Tool start and Tool-result persistence to the second request.
+
+The 2.0.13 request-side phases `submit→Host`, `turn→request header`, policy, quota reservation, request preparation, adapter dispatch→first chunk and their derived `local_pre_provider` value are candidate-only diagnostics because the exact installed 2.0.12 predecessor does not expose the same boundaries. They may be retained in the candidate request artifact when observed, but are never zero-filled, never required from the baseline and never used as a hard parity comparison. A missing diagnostic cannot make a hard cohort pass or fail; a present diagnostic must still satisfy the closed non-negative schema.
 
 Do not record prompt text, output text, credentials, bearer/session tokens, raw account/session identities or sensitive paths. Cross-process clocks are correlated by IDs and local durations; wall-clock values from different processes are never directly subtracted.
 
-Hard gates, evaluated per model and scenario, are:
+Hard gates, evaluated separately per model and per scenario, are:
 
 - TTFT p50: candidate ≤ baseline + `max(50 ms, 3%)`;
 - TTFT p95: candidate ≤ baseline + `max(100 ms, 5%)`;
-- local pre-provider p50/p95: candidate delta ≤ `+10 ms / +25 ms`;
 - first visible chunk→paint p95: candidate delta ≤ `+10 ms` and absolute ≤ `50 ms`; p99 absolute ≤ `100 ms`;
 - steady throughput p50/p5: candidate ≥ `97% / 95%` of baseline;
-- each Tool handoff p95: candidate delta ≤ `+25 ms` and ≤ `+5%`;
+- each `read-only-tool` Tool handoff p95: candidate delta ≤ `+25 ms` and ≤ `+5%`; non-Tool samples have no Tool timing fields and a numeric placeholder, including `0`, is invalid;
 - duplicate model requests, Tool executions, Job executions and terminal projections: `0`;
 - paired cold first request after update/restart: candidate delta ≤ `500 ms`.
+
+`short-text` and `history-20` each contain exactly one ordered model request/Provider attempt. `read-only-tool` contains exactly two: the request that selects the Tool and the request after the durable Tool result. Both request headers, Provider invocation/response identities and usage receipts must remain separately verifiable; hashing two identities into one aggregate or keeping only the terminal attempt is invalid. Percentiles are never pooled across the three scenarios.
 
 Ordinary-chat request headers are a correctness gate before latency evaluation. System header bytes, Tool header bytes, Tool count/order, route, model and reasoning level must equal the frozen 2.0.12 baseline. Only a native Goal scenario may include the pinned rc.7 Goal Tools. Canvas, preview, pet and other presentation components cannot enter the resident Tool header. A header mismatch fails the cohort even if timings pass.
 
@@ -54,11 +57,13 @@ Repeat the normal paired cohorts with the enterprise endpoint unavailable while 
 
 If provider/network or machine interference makes a pair incomparable, discard both members with the same non-sensitive reason and rerun that pair. The evaluator must reject missing pair members, post-hoc cohort moves and unrelated time windows.
 
-`pnpm performance:parity --fixture --output <receipt.json>` remains only a collector/evaluator self-check. TTFT v2 requires `schema_version: 2`; a fixture deliberately reports `fixture-passed-production-blocked` and exits non-zero because it does not load the released Desktop/Profile or a real provider. Choose exactly one of `--fixture`, `--input <evidence.json>` or the acceptance-only `--assemble <manifest.json> --output <evidence.json>` mode.
+`pnpm performance:parity --fixture --output <receipt.json>` remains only a collector/evaluator self-check. Its short, 20-turn-history and read-only-Tool rows exercise those three distinct native AgentLoop shapes; it does not run an unrelated Tool session for non-Tool rows or fill absent Tool/request-waterfall timing with zero. TTFT v2 requires `schema_version: 2`; a fixture deliberately reports `fixture-passed-production-blocked` and exits non-zero because it does not load the released Desktop/Profile, browser paint collector or a real provider. Choose exactly one of `--fixture`, `--input <evidence.json>` or the acceptance-only `--assemble <manifest.json> --output <evidence.json>` mode.
+
+This 2.0.13 contract is the first admissible production meaning of TTFT `schema_version: 2`. The closed scenario variants, ordered request/Provider attempts and candidate-only diagnostics intentionally invalidate every earlier v2 evidence directory, verifier signature and performance admission. No compatibility parser, relabel or old-evidence migration is permitted; production evidence is recollected from the exact installed bytes against the exact current protected verifier.
 
 A production input can report `passed` only when every cohort supplies an immutable `performance_run_id` and run receipt bound to exact source commit, Desktop artifact SHA/bytes, Base id, Profile generation, component-composition/client-bundle digests, pinned Harness/Desktop-reference commits, redacted identity/policy/lease digests, provider/model/reasoning/Tool/dataset identity, machine/OS/architecture/Node/browser/network conditions, start/finish times and raw sample-ID digests. The assembler joins, by `pair_id`, separate sanitized native-Session, Provider invocation/usage, request-header/waterfall, renderer-paint, installed-runtime and enterprise-runtime artifacts and emits the raw sample and run receipts. All source artifacts and the manifest remain in the output evidence directory; absolute or escaping paths fail closed. Baseline and candidate artifacts must be distinct and the candidate installed bytes must be the bytes later released.
 
-The acceptance exporter never consumes or emits prompt/output bodies, Tool arguments/results, raw account or Session IDs, credentials or filesystem paths. Session and Provider identifiers are run-scoped SHA-256 values. The native DSH Session/event log, `agent/request`/`llm/stream` waterfall, existing usage/audit ledger and external installed-renderer paint probe remain the authorities; no production plugin, event store, protocol or resident listener is added. Every source artifact has a closed schema and its rows must exactly reproduce the assembled sample fields. Rehashing an empty, incomplete or semantically different artifact therefore cannot satisfy production admission.
+The acceptance exporter never consumes or emits prompt/output bodies, Tool arguments/results, raw account or Session IDs, credentials or filesystem paths. Session and Provider identifiers are run-scoped SHA-256 values. The native DSH Session/event log, ordered request-header records, existing usage/audit ledger and external installed-renderer paint probe remain the hard-evidence authorities; candidate-only `agent/request`/`llm/stream` waterfall diagnostics stay in the same request artifact without becoming a baseline requirement. No production plugin, event store, protocol or resident listener is added. Every source artifact has a closed scenario-discriminated schema and its rows must exactly reproduce the assembled sample fields. Rehashing an empty, incomplete or semantically different artifact therefore cannot satisfy production admission.
 
 Desktop and Profile release admission require the same successful `performance_run_id`; a missing, fixture, superseded, mismatched or semantically incomplete performance receipt fails closed. Relabeling v1 evidence, setting a boolean verification flag, using one runtime for both arms, or hashing an artifact without validating its content cannot close the gate.
 

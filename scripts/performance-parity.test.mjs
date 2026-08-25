@@ -18,16 +18,7 @@ const canonical = value => Array.isArray(value)
     : JSON.stringify(value)
 const sha256 = value => createHash('sha256').update(value).digest('hex')
 
-const sample = (index, overrides = {}) => ({
-  pair_id: `pair-${String(index).padStart(2, '0')}`,
-  scenario: index <= 10 ? 'short-text' : index <= 20 ? 'history-20' : 'read-only-tool',
-  arm_order: index % 2 === 0 ? 'AB' : 'BA',
-  session_id_sha256: sha256(`session-${String(index)}`),
-  turn: 1,
-  step: 1,
-  submit_to_first_visible_text_ms: 100,
-  user_message_to_first_text_delta_ms: 100,
-  first_chunk_to_paint_ms: 10,
+const diagnostic = () => ({
   local_pre_provider_ms: 10,
   submit_to_host_ms: 1,
   turn_to_request_header_ms: 9,
@@ -35,28 +26,53 @@ const sample = (index, overrides = {}) => ({
   quota_ms: 2,
   prepare_ms: 2,
   adapter_to_first_chunk_ms: 90,
-  output_tokens_per_second: 100,
-  tool_call_to_start_ms: 20,
-  tool_result_to_next_request_ms: 20,
-  queue_wait_ms: 0,
-  request_header_sha256: '0'.repeat(64),
-  request_header_bytes: 100,
-  request_tool_count: 1,
-  provider_invocation_id_sha256: sha256(`invocation-${String(index)}`),
-  provider_response_id_sha256: sha256(`response-${String(index)}`),
-  provider_usage_sha256: sha256(`usage-${String(index)}`),
-  input_tokens: 10,
-  output_tokens: 10,
-  duplicate_model_request_count: 0,
-  duplicate_tool_execution_count: 0,
-  duplicate_job_execution_count: 0,
-  duplicate_deliverable_count: 0,
-  ...overrides,
 })
+
+const sample = (index, overrides = {}, candidate = false) => {
+  const scenario = index <= 10 ? 'short-text' : index <= 20 ? 'history-20' : 'read-only-tool'
+  const attempts = scenario === 'read-only-tool' ? 2 : 1
+  return {
+    pair_id: `pair-${String(index).padStart(2, '0')}`,
+    scenario,
+    arm_order: index % 2 === 0 ? 'AB' : 'BA',
+    session_id_sha256: sha256(`session-${String(index)}`),
+    turn: scenario === 'history-20' ? 21 : 1,
+    step: scenario === 'read-only-tool' ? 2 : 1,
+    submit_to_first_visible_text_ms: 100,
+    user_message_to_first_text_delta_ms: 100,
+    first_chunk_to_paint_ms: 10,
+    output_tokens_per_second: 100,
+    ...(scenario === 'read-only-tool' ? {
+      tool_call_to_start_ms: 20,
+      tool_result_to_next_request_ms: 20,
+    } : {}),
+    queue_wait_ms: 0,
+    requests: Array.from({ length: attempts }, (_, attempt) => ({
+      ordinal: attempt + 1,
+      request_header_sha256: sha256(`header-${String(index)}-${String(attempt + 1)}`),
+      request_header_bytes: 100,
+      request_tool_count: 1,
+      ...(candidate ? { diagnostic: null } : {}),
+    })),
+    provider_attempts: Array.from({ length: attempts }, (_, attempt) => ({
+      ordinal: attempt + 1,
+      provider_invocation_id_sha256: sha256(`invocation-${String(index)}-${String(attempt + 1)}`),
+      provider_response_id_sha256: sha256(`response-${String(index)}-${String(attempt + 1)}`),
+      provider_usage_sha256: sha256(`usage-${String(index)}-${String(attempt + 1)}`),
+      input_tokens: 10,
+      output_tokens: 10,
+    })),
+    duplicate_model_request_count: 0,
+    duplicate_tool_execution_count: 0,
+    duplicate_job_execution_count: 0,
+    duplicate_deliverable_count: 0,
+    ...overrides,
+  }
+}
 
 function evidence(candidateOverrides = {}, count = 30) {
   const baseline = Array.from({ length: count }, (_, index) => sample(index + 1))
-  const candidate = Array.from({ length: count }, (_, index) => sample(index + 1, candidateOverrides))
+  const candidate = Array.from({ length: count }, (_, index) => sample(index + 1, candidateOverrides, true))
   return {
     schema_version: 2,
     comparison_kind: 'installed-2.0.12-vs-2.0.13',
@@ -70,7 +86,7 @@ function evidence(candidateOverrides = {}, count = 30) {
         enterprise_state: {
           endpoint: 'unavailable', lease: 'valid-cached', model_policy: 'valid-cached', audit: 'async-outbox',
         },
-        samples: candidate,
+        samples: structuredClone(candidate),
       },
     },
   }
@@ -81,8 +97,6 @@ test('accepts 30 paired samples and keeps keyless evidence production-blocked', 
     submit_to_first_visible_text_ms: 150,
     user_message_to_first_text_delta_ms: 150,
     output_tokens_per_second: 97,
-    tool_call_to_start_ms: 21,
-    tool_result_to_next_request_ms: 21,
   })).gate_status, 'fixture-passed-production-blocked')
   const relabelled = evidence()
   relabelled.evidence_kind = 'production-real-provider'
@@ -164,6 +178,104 @@ test('uses the slow throughput tail rather than the fastest tail', () => {
   assert.ok(result.failures.some(failure => failure.includes('p5 throughput')))
 })
 
+test('evaluates each scenario independently instead of pooling distributions', () => {
+  const observed = evidence()
+  for (const path of [observed.paths.baseline, observed.paths.emate_online, observed.paths.emate_enterprise_unavailable_valid_cache]) {
+    for (const item of path.samples) {
+      if (item.scenario !== 'short-text') {
+        item.submit_to_first_visible_text_ms = 1_000
+        item.user_message_to_first_text_delta_ms = 1_000
+      }
+    }
+  }
+  for (const path of [observed.paths.emate_online, observed.paths.emate_enterprise_unavailable_valid_cache]) {
+    for (const item of path.samples.filter(candidate => candidate.scenario === 'short-text')) {
+      item.submit_to_first_visible_text_ms = 160
+      item.user_message_to_first_text_delta_ms = 160
+    }
+  }
+  const result = evaluateEvidence(observed)
+  assert.equal(result.gate_status, 'failed')
+  assert.ok(result.failures.some(failure => failure.includes('short-text: p50 submit_to_first_visible_text_ms')))
+})
+
+test('keeps Tool timing absent outside read-only-tool and rejects numeric placeholders', () => {
+  assert.equal(evaluateEvidence(evidence()).gate_status, 'fixture-passed-production-blocked')
+  const placeholder = evidence()
+  placeholder.paths.emate_online.samples[0].tool_call_to_start_ms = 0
+  placeholder.paths.emate_enterprise_unavailable_valid_cache.samples[0].tool_call_to_start_ms = 0
+  assert.equal(evaluateEvidence(placeholder).gate_status, 'failed')
+})
+
+test('invalidates the superseded flat schema-version-2 sample shape', () => {
+  const legacy = evidence()
+  for (const path of Object.values(legacy.paths)) {
+    const item = path.samples[0]
+    delete item.requests
+    delete item.provider_attempts
+    item.request_header_sha256 = '0'.repeat(64)
+    item.request_header_bytes = 100
+    item.request_tool_count = 1
+    item.provider_invocation_id_sha256 = '1'.repeat(64)
+    item.provider_response_id_sha256 = '2'.repeat(64)
+    item.provider_usage_sha256 = '3'.repeat(64)
+    item.input_tokens = 10
+    item.output_tokens = 10
+  }
+  assert.equal(legacy.schema_version, 2)
+  assert.equal(evaluateEvidence(legacy).gate_status, 'failed')
+})
+
+test('requires one Provider request for text scenarios and two ordered requests for read-only-tool', () => {
+  const missingSecond = evidence()
+  for (const path of [missingSecond.paths.emate_online, missingSecond.paths.emate_enterprise_unavailable_valid_cache]) {
+    const tool = path.samples.find(item => item.scenario === 'read-only-tool')
+    tool.requests.pop()
+    tool.provider_attempts.pop()
+  }
+  assert.equal(evaluateEvidence(missingSecond).gate_status, 'failed')
+
+  const unexpectedSecond = evidence()
+  for (const path of [unexpectedSecond.paths.emate_online, unexpectedSecond.paths.emate_enterprise_unavailable_valid_cache]) {
+    const text = path.samples.find(item => item.scenario === 'short-text')
+    text.requests.push({ ...text.requests[0], ordinal: 2, request_header_sha256: 'f'.repeat(64) })
+    text.provider_attempts.push({
+      ...text.provider_attempts[0], ordinal: 2,
+      provider_invocation_id_sha256: 'e'.repeat(64), provider_response_id_sha256: 'd'.repeat(64),
+    })
+  }
+  assert.equal(evaluateEvidence(unexpectedSecond).gate_status, 'failed')
+
+  const secondHeaderDrift = evidence()
+  for (const path of [secondHeaderDrift.paths.emate_online, secondHeaderDrift.paths.emate_enterprise_unavailable_valid_cache]) {
+    const tool = path.samples.find(item => item.scenario === 'read-only-tool')
+    tool.requests[1].request_header_sha256 = 'f'.repeat(64)
+  }
+  const headerResult = evaluateEvidence(secondHeaderDrift)
+  assert.equal(headerResult.gate_status, 'failed')
+  assert.ok(headerResult.failures.some(failure => failure.includes('request header mismatch')))
+
+  const duplicateProviderAttempt = evidence()
+  for (const path of [duplicateProviderAttempt.paths.emate_online, duplicateProviderAttempt.paths.emate_enterprise_unavailable_valid_cache]) {
+    const tool = path.samples.find(item => item.scenario === 'read-only-tool')
+    tool.provider_attempts[1].provider_invocation_id_sha256 = tool.provider_attempts[0].provider_invocation_id_sha256
+  }
+  assert.equal(evaluateEvidence(duplicateProviderAttempt).gate_status, 'failed')
+})
+
+test('validates candidate-only diagnostics without using them as a parity gate', () => {
+  const observed = evidence()
+  for (const path of [observed.paths.emate_online, observed.paths.emate_enterprise_unavailable_valid_cache]) {
+    for (const item of path.samples) {
+      for (const attempt of item.requests) attempt.diagnostic = diagnostic()
+    }
+  }
+  observed.paths.emate_online.samples[0].requests[0].diagnostic.local_pre_provider_ms = 100_000
+  assert.equal(evaluateEvidence(observed).gate_status, 'fixture-passed-production-blocked')
+  observed.paths.emate_online.samples[0].requests[0].diagnostic.policy_ms = -1
+  assert.equal(evaluateEvidence(observed).gate_status, 'failed')
+})
+
 test('only verified production evidence may return a successful process status', () => {
   assert.equal(exitCodeForGateStatus('passed'), 0)
   assert.equal(exitCodeForGateStatus('fixture-passed-production-blocked'), 1)
@@ -175,7 +287,13 @@ test('fails closed on missing samples, duplicate events, latency, throughput, or
   assert.equal(evaluateEvidence(evidence({ duplicate_tool_execution_count: 1 })).gate_status, 'failed')
   assert.equal(evaluateEvidence(evidence({ submit_to_first_visible_text_ms: 201 })).gate_status, 'failed')
   assert.equal(evaluateEvidence(evidence({ output_tokens_per_second: 94 })).gate_status, 'failed')
-  assert.equal(evaluateEvidence(evidence({ tool_call_to_start_ms: 22 })).gate_status, 'failed')
+  const slowTool = evidence()
+  for (const path of [slowTool.paths.emate_online, slowTool.paths.emate_enterprise_unavailable_valid_cache]) {
+    for (const item of path.samples.filter(candidate => candidate.scenario === 'read-only-tool')) {
+      item.tool_call_to_start_ms = 22
+    }
+  }
+  assert.equal(evaluateEvidence(slowTool).gate_status, 'failed')
   const invalidOffline = evidence()
   invalidOffline.paths.emate_enterprise_unavailable_valid_cache.enterprise_state.lease = 'expired'
   assert.equal(evaluateEvidence(invalidOffline).gate_status, 'failed')
@@ -184,20 +302,14 @@ test('fails closed on missing samples, duplicate events, latency, throughput, or
 const nativeFields = [
   'pair_id', 'scenario', 'arm_order', 'session_id_sha256', 'turn', 'step',
   'user_message_to_first_text_delta_ms', 'output_tokens_per_second',
-  'tool_call_to_start_ms', 'tool_result_to_next_request_ms', 'queue_wait_ms',
+  'queue_wait_ms',
   'duplicate_model_request_count', 'duplicate_tool_execution_count',
   'duplicate_job_execution_count', 'duplicate_deliverable_count',
 ]
-const requestFields = [
-  'pair_id', 'request_header_sha256', 'request_header_bytes', 'request_tool_count',
-  'local_pre_provider_ms', 'submit_to_host_ms', 'turn_to_request_header_ms',
-  'policy_ms', 'quota_ms', 'prepare_ms', 'adapter_to_first_chunk_ms',
-]
+const nativeToolFields = ['tool_call_to_start_ms', 'tool_result_to_next_request_ms']
+const requestFields = ['pair_id', 'requests']
 const paintFields = ['pair_id', 'submit_to_first_visible_text_ms', 'first_chunk_to_paint_ms']
-const providerFields = [
-  'pair_id', 'provider_invocation_id_sha256', 'provider_response_id_sha256',
-  'provider_usage_sha256', 'input_tokens', 'output_tokens',
-]
+const providerFields = ['pair_id', 'provider_attempts']
 const pick = (value, keys) => Object.fromEntries(keys.map(key => [key, value[key]]))
 
 test('assembles only linked installed-state artifacts and rejects a rehashed semantic mismatch', async t => {
@@ -212,11 +324,13 @@ test('assembles only linked installed-state artifacts and rejects a rehashed sem
   }
   for (const pathName of ['baseline', 'emate_online', 'emate_enterprise_unavailable_valid_cache']) {
     const candidate = pathName !== 'baseline'
-    const samples = Array.from({ length: 30 }, (_, index) => sample(index + 1))
+    const samples = Array.from({ length: 30 }, (_, index) => sample(index + 1, {}, candidate))
     const binding = { schema_version: 2, performance_run_id: performanceRunId, path_name: pathName, sample_ids_sha256: sampleIdsSha256 }
     const native = {
       ...binding, kind: 'native-session-trace', source: 'dsh-session-events',
-      samples: samples.map(item => pick(item, nativeFields)),
+      samples: samples.map(item => pick(item, item.scenario === 'read-only-tool'
+        ? [...nativeFields, ...nativeToolFields]
+        : nativeFields)),
     }
     const provider = {
       ...binding, kind: 'provider-invocation-receipt', source: 'managed-provider-receipts',
