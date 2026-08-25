@@ -1,0 +1,174 @@
+name: Coordinate e-Mate release admission
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact protected-main source commit to release.
+        required: true
+        type: string
+      version:
+        description: Exact e-Mate version recorded by the source.
+        required: true
+        type: string
+      release_mode:
+        description: Accepted release lane.
+        required: true
+        type: choice
+        options: [base]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: e-mate-release-coordinator
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  EMATE_SOURCE: ${{ inputs.source_sha }}
+  EMATE_VERSION: ${{ inputs.version }}
+
+jobs:
+  ci:
+    name: Resolve exact protected-main CI
+    runs-on: ubuntu-24.04
+    outputs:
+      run_id: ${{ steps.ci.outputs.ci_run_id }}
+      macos_artifact_id: ${{ steps.macos.outputs.artifact_id }}
+      windows_artifact_id: ${{ steps.windows.outputs.artifact_id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Require the exact protected release source
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = zyfjacksonchen-source/e-Mate-2.0.11
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REF_PROTECTED" = true
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$EMATE_SOURCE" = "$GITHUB_SHA"
+          test "$EMATE_VERSION" = "$(node -p "require('./desktop/e-mate-desktop/package.json').version")"
+          test "${{ inputs.release_mode }}" = base
+      - id: ci
+        run: node scripts/release-coordinator.mjs resolve-ci --source "$EMATE_SOURCE"
+      - id: macos
+        run: node scripts/release-coordinator.mjs artifact --run-id "${{ steps.ci.outputs.ci_run_id }}" --name "e-mate-desktop-macos-$EMATE_SOURCE"
+      - id: windows
+        run: node scripts/release-coordinator.mjs artifact --run-id "${{ steps.ci.outputs.ci_run_id }}" --name "e-mate-desktop-windows-$EMATE_SOURCE"
+
+  profile:
+    name: Prepare exact Profile bytes
+    needs: ci
+    runs-on: ubuntu-24.04
+    outputs:
+      run_id: ${{ steps.run.outputs.run_id }}
+      artifact_id: ${{ steps.artifact.outputs.artifact_id }}
+    steps:
+      - uses: actions/checkout@v6
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v6
+        with: { node-version: '24' }
+      - id: run
+        run: >-
+          node scripts/release-coordinator.mjs dispatch --source "$EMATE_SOURCE"
+          --workflow profile-release.yml
+          --inputs '{"ci_run_id":"${{ needs.ci.outputs.run_id }}","bootstrap":"true"}'
+      - id: artifact
+        run: node scripts/release-coordinator.mjs artifact --run-id "${{ steps.run.outputs.run_id }}" --name "e-mate-profile-native-cloudflare-publication-$EMATE_SOURCE"
+
+  desktop:
+    name: Bind exact CI Desktop bytes
+    needs: ci
+    runs-on: ubuntu-24.04
+    outputs:
+      run_id: ${{ steps.run.outputs.run_id }}
+      artifact_id: ${{ steps.artifact.outputs.artifact_id }}
+    steps:
+      - uses: actions/checkout@v6
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v6
+        with: { node-version: '24' }
+      - id: run
+        run: >-
+          node scripts/release-coordinator.mjs dispatch --source "$EMATE_SOURCE"
+          --workflow desktop-release.yml
+          --inputs '{"ci_run_id":"${{ needs.ci.outputs.run_id }}"}'
+      - id: artifact
+        run: node scripts/release-coordinator.mjs artifact --run-id "${{ steps.run.outputs.run_id }}" --name "e-mate-desktop-release-$EMATE_SOURCE"
+
+  performance:
+    name: Admit installed performance
+    needs: [ci, profile, desktop]
+    runs-on: ubuntu-24.04
+    outputs:
+      run_id: ${{ steps.run.outputs.run_id }}
+      artifact_id: ${{ steps.artifact.outputs.artifact_id }}
+    steps:
+      - uses: actions/checkout@v6
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v6
+        with: { node-version: '24' }
+      - id: run
+        run: >-
+          node scripts/release-coordinator.mjs dispatch --source "$EMATE_SOURCE"
+          --workflow desktop-performance.yml
+          --inputs '{"main_ci_run_id":"${{ needs.ci.outputs.run_id }}","desktop_artifact_id":"${{ needs.desktop.outputs.artifact_id }}","profile_release_run_id":"${{ needs.profile.outputs.run_id }}","profile_artifact_id":"${{ needs.profile.outputs.artifact_id }}"}'
+      - id: artifact
+        run: node scripts/release-coordinator.mjs artifact --run-id "${{ steps.run.outputs.run_id }}" --name "e-mate-performance-admission-$EMATE_SOURCE-attempt-1"
+
+  admission:
+    name: Admit exact release bytes
+    needs: [ci, profile, desktop, performance]
+    runs-on: ubuntu-24.04
+    outputs:
+      run_id: ${{ steps.run.outputs.run_id }}
+      artifact_id: ${{ steps.artifact.outputs.artifact_id }}
+    steps:
+      - uses: actions/checkout@v6
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v6
+        with: { node-version: '24' }
+      - id: run
+        run: >-
+          node scripts/release-coordinator.mjs dispatch --source "$EMATE_SOURCE"
+          --workflow desktop-admission.yml
+          --inputs '{"ci_run_id":"${{ needs.ci.outputs.run_id }}","desktop_run_id":"${{ needs.desktop.outputs.run_id }}","desktop_artifact_id":"${{ needs.desktop.outputs.artifact_id }}","profile_release_run_id":"${{ needs.profile.outputs.run_id }}","profile_artifact_id":"${{ needs.profile.outputs.artifact_id }}","performance_workflow_run_id":"${{ needs.performance.outputs.run_id }}","performance_artifact_id":"${{ needs.performance.outputs.artifact_id }}"}'
+      - id: artifact
+        run: node scripts/release-coordinator.mjs artifact --run-id "${{ steps.run.outputs.run_id }}" --name "e-mate-desktop-admission-$EMATE_SOURCE"
+
+  state:
+    name: Freeze admitted release state
+    needs: [ci, profile, desktop, performance, admission]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v6
+        with: { node-version: '24' }
+      - name: Emit the Cloudflare-plugin handoff state
+        env:
+          EMATE_EXPECTED_VERSION: ${{ inputs.version }}
+        run: >-
+          node scripts/release-coordinator.mjs state
+          --source "$EMATE_SOURCE" --version "$EMATE_VERSION" --mode "${{ inputs.release_mode }}"
+          --ci-run "${{ needs.ci.outputs.run_id }}"
+          --profile-run "${{ needs.profile.outputs.run_id }}" --profile-artifact "${{ needs.profile.outputs.artifact_id }}"
+          --desktop-run "${{ needs.desktop.outputs.run_id }}" --desktop-artifact "${{ needs.desktop.outputs.artifact_id }}"
+          --performance-run "${{ needs.performance.outputs.run_id }}" --performance-artifact "${{ needs.performance.outputs.artifact_id }}"
+          --admission-run "${{ needs.admission.outputs.run_id }}" --admission-artifact "${{ needs.admission.outputs.artifact_id }}"
+          --macos-artifact "${{ needs.ci.outputs.macos_artifact_id }}" --windows-artifact "${{ needs.ci.outputs.windows_artifact_id }}"
+          --out release-state.json
+      - run: test "$(jq -r .status release-state.json)" = admitted-awaiting-cloudflare-plugin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-release-state-${{ inputs.source_sha }}
+          path: release-state.json
+          if-no-files-found: error
+          retention-days: 30
