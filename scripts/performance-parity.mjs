@@ -3,11 +3,13 @@ import { lstat, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
 
-const HARNESS_COMMIT = 'b2b1650b01f0ee88d81837a9b5c050f9f763f606'
+const BASELINE_HARNESS_COMMIT = '2bc16230975f6cf02aa1b283b1f86de44007b059'
+const CANDIDATE_HARNESS_COMMIT = 'b2b1650b01f0ee88d81837a9b5c050f9f763f606'
 const DESKTOP_REFERENCE_COMMIT = '6074088f5b660206e404b3591fab51fb99c69add'
 const EVIDENCE_SCHEMA_VERSION = 2
 const MIN_SAMPLES = 30
 const PATH_NAMES = ['baseline', 'emate_online', 'emate_enterprise_unavailable_valid_cache']
+const PERFORMANCE_MODEL_FIELDS = ['route_id', 'provider', 'model', 'reasoning_effort']
 const PHASE_FIELDS = [
   'submit_to_host_ms',
   'turn_to_request_header_ms',
@@ -64,6 +66,11 @@ function isRecord(value) {
 
 function exactKeys(value, keys) {
   return isRecord(value) && Object.keys(value).sort().join('\n') === [...keys].sort().join('\n')
+}
+
+function validPerformanceModel(value) {
+  return exactKeys(value, PERFORMANCE_MODEL_FIELDS)
+    && PERFORMANCE_MODEL_FIELDS.every(key => typeof value[key] === 'string' && value[key].length > 0)
 }
 
 function nonNegative(value) {
@@ -333,8 +340,9 @@ export function evaluateEvidence(evidence) {
   const failures = []
   if (evidence?.schema_version !== EVIDENCE_SCHEMA_VERSION
     || evidence?.comparison_kind !== 'installed-2.0.12-vs-2.0.13'
-    || evidence?.harness_commit !== HARNESS_COMMIT) {
-    failures.push('evidence schema or Harness pin mismatch')
+    || evidence?.harness_commit !== CANDIDATE_HARNESS_COMMIT
+    || !validPerformanceModel(evidence?.performance_model)) {
+    failures.push('evidence schema, model, or candidate Harness pin mismatch')
   }
   const baseline = evidence?.paths?.baseline
   const online = evidence?.paths?.emate_online
@@ -400,16 +408,17 @@ function validateProductionReceipts(evidence) {
   let receiptsComplete = true
   for (const [index, receipt] of receipts.entries()) {
     const candidate = index !== 0
+    const expectedHarnessCommit = candidate ? CANDIDATE_HARNESS_COMMIT : BASELINE_HARNESS_COMMIT
     if (receipt === undefined
       || !exactKeys(receipt, candidate
         ? [...RUN_RECEIPT_FIELDS, 'enterprise_receipt', 'enterprise_receipt_artifact']
         : RUN_RECEIPT_FIELDS)
       || typeof receipt.performance_run_id !== 'string' || receipt.performance_run_id.length < 16
       || receipt.performance_run_id !== evidence.performance_run_id
-      || receipt.harness_commit !== HARNESS_COMMIT
-      || typeof receipt.provider !== 'string' || receipt.provider.length === 0 || receipt.provider.includes('fixture')
-      || typeof receipt.model !== 'string' || receipt.model.length === 0 || receipt.model.includes('fixture')
-      || typeof receipt.reasoning_level !== 'string' || receipt.reasoning_level.length === 0
+      || receipt.harness_commit !== expectedHarnessCommit
+      || receipt.provider !== evidence.performance_model?.provider || receipt.provider.includes('fixture')
+      || receipt.model !== evidence.performance_model?.model || receipt.model.includes('fixture')
+      || receipt.reasoning_level !== evidence.performance_model?.reasoning_effort
       || typeof receipt.tool !== 'string' || receipt.tool.length === 0
       || !isSha256(receipt.acceptance_identity_sha256)
       || !isSha256(receipt.dataset_sha256)
@@ -583,6 +592,7 @@ export async function verifyProductionArtifacts(evidence, input) {
     performance_run_id: evidence.performance_run_id,
     evidence_kind: evidence.evidence_kind,
     harness_commit: evidence.harness_commit,
+    performance_model: evidence.performance_model,
     paths: {},
   }
   const root = dirname(resolve(input))
@@ -714,7 +724,7 @@ async function assemblePath(evidence, pathName, config, manifestRoot, outputRoot
   const sampleIdsSha256 = sha256(canonical(samples.map(sample => sample.pair_id)))
   const receipt = {
     performance_run_id: evidence.performance_run_id,
-    harness_commit: evidence.harness_commit,
+    harness_commit: candidate ? CANDIDATE_HARNESS_COMMIT : BASELINE_HARNESS_COMMIT,
     provider: provider.value.provider,
     model: provider.value.model,
     reasoning_level: provider.value.reasoning_level,
@@ -744,6 +754,9 @@ async function assemblePath(evidence, pathName, config, manifestRoot, outputRoot
     run_receipt: receipt,
   }
   if (!validSamples(path, pathName)
+    || receipt.provider !== evidence.performance_model.provider
+    || receipt.model !== evidence.performance_model.model
+    || receipt.reasoning_level !== evidence.performance_model.reasoning_effort
     || !validNativeTrace(native.value, evidence, pathName, receipt, samples)
     || !validProviderReceipt(provider.value, evidence, pathName, receipt, samples)
     || !validRequestHeaders(request.value, evidence, pathName, receipt, samples)
@@ -772,13 +785,14 @@ export async function assembleProductionEvidence(manifestPath, outputPath) {
   const manifest = JSON.parse(await readFile(resolvedManifest, 'utf8'))
   if (!exactKeys(manifest, [
     'schema_version', 'comparison_kind', 'performance_run_id', 'evidence_kind',
-    'harness_commit', 'paths',
+    'harness_commit', 'performance_model', 'paths',
   ])
     || manifest.schema_version !== EVIDENCE_SCHEMA_VERSION
     || manifest.comparison_kind !== 'installed-2.0.12-vs-2.0.13'
     || typeof manifest.performance_run_id !== 'string' || manifest.performance_run_id.length < 16
     || manifest.evidence_kind !== 'production-real-provider'
-    || manifest.harness_commit !== HARNESS_COMMIT
+    || manifest.harness_commit !== CANDIDATE_HARNESS_COMMIT
+    || !validPerformanceModel(manifest.performance_model)
     || !exactKeys(manifest.paths, PATH_NAMES)) {
     throw new Error('production assembly manifest is invalid')
   }
@@ -788,6 +802,7 @@ export async function assembleProductionEvidence(manifestPath, outputPath) {
     performance_run_id: manifest.performance_run_id,
     evidence_kind: manifest.evidence_kind,
     harness_commit: manifest.harness_commit,
+    performance_model: manifest.performance_model,
     paths: {},
   }
   for (const pathName of PATH_NAMES) {
@@ -1012,7 +1027,10 @@ async function createFixture(samples) {
     comparison_kind: 'installed-2.0.12-vs-2.0.13',
     performance_run_id: 'fixture-performance-v2',
     evidence_kind: 'keyless-target-loop-collector-fixture',
-    harness_commit: HARNESS_COMMIT,
+    harness_commit: CANDIDATE_HARNESS_COMMIT,
+    performance_model: {
+      route_id: 'fixture', provider: 'fixture-provider', model: 'fixture-model', reasoning_effort: 'fixture',
+    },
     note: 'Collected once through the pinned real AgentLoop with distinct short, 20-turn-history, and two-request read-only-Tool shapes, then cloned into equivalent comparison arms. Browser paint is a fixture-only zero and candidate request diagnostics are explicitly unavailable; this validates schema/comparison only and is not production evidence.',
     paths: {
       baseline,

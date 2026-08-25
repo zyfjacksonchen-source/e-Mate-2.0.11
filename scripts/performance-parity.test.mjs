@@ -79,6 +79,9 @@ function evidence(candidateOverrides = {}, count = 30) {
     performance_run_id: 'performance-run-test-v2',
     evidence_kind: 'keyless-target-loop-collector-fixture',
     harness_commit: 'b2b1650b01f0ee88d81837a9b5c050f9f763f606',
+    performance_model: {
+      route_id: 'fixture-route', provider: 'provider', model: 'model', reasoning_effort: 'medium',
+    },
     paths: {
       baseline: { samples: baseline },
       emate_online: { samples: candidate },
@@ -107,7 +110,9 @@ test('accepts 30 paired samples and keeps keyless evidence production-blocked', 
     const candidate = pathName !== 'baseline'
     const body = {
       performance_run_id: relabelled.performance_run_id,
-      harness_commit: relabelled.harness_commit,
+      harness_commit: candidate
+        ? 'b2b1650b01f0ee88d81837a9b5c050f9f763f606'
+        : '2bc16230975f6cf02aa1b283b1f86de44007b059',
       provider: 'provider', model: 'model', reasoning_level: 'medium', tool: 'tool', dataset_sha256: 'a'.repeat(64),
       acceptance_identity_sha256: '9'.repeat(64),
       sample_ids_sha256: sha256(canonical(path.samples.map(item => item.pair_id))),
@@ -398,6 +403,9 @@ test('assembles only linked installed-state artifacts and rejects a rehashed sem
     performance_run_id: performanceRunId,
     evidence_kind: 'production-real-provider',
     harness_commit: 'b2b1650b01f0ee88d81837a9b5c050f9f763f606',
+    performance_model: {
+      route_id: 'luna', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', reasoning_effort: 'medium',
+    },
     paths,
   }
   const manifestPath = join(root, 'manifest.json')
@@ -405,7 +413,42 @@ test('assembles only linked installed-state artifacts and rejects a rehashed sem
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
   const assembled = await assembleProductionEvidence(manifestPath, outputPath)
   const verified = await verifyProductionArtifacts(assembled, outputPath)
+  assert.deepEqual(assembled.performance_model, manifest.performance_model)
+  assert.deepEqual(verified.performance_model, manifest.performance_model)
+  assert.equal(assembled.paths.baseline.run_receipt.harness_commit, '2bc16230975f6cf02aa1b283b1f86de44007b059')
+  assert.equal(assembled.paths.emate_online.run_receipt.harness_commit, 'b2b1650b01f0ee88d81837a9b5c050f9f763f606')
+  assert.equal(assembled.paths.emate_enterprise_unavailable_valid_cache.run_receipt.harness_commit, 'b2b1650b01f0ee88d81837a9b5c050f9f763f606')
   assert.equal(evaluateEvidence(verified).gate_status, 'passed')
+
+  const expandedModelManifest = structuredClone(manifest)
+  expandedModelManifest.performance_model.extra = 'not-closed'
+  const expandedModelManifestPath = join(root, 'expanded-model-manifest.json')
+  await writeFile(expandedModelManifestPath, `${JSON.stringify(expandedModelManifest, null, 2)}\n`)
+  await assert.rejects(
+    assembleProductionEvidence(expandedModelManifestPath, join(root, 'expanded-model-evidence.json')),
+    /production assembly manifest is invalid/u,
+  )
+
+  const mismatchedModelManifest = structuredClone(manifest)
+  mismatchedModelManifest.performance_model.model = 'gpt-5.6-sol'
+  const mismatchedModelManifestPath = join(root, 'mismatched-model-manifest.json')
+  await writeFile(mismatchedModelManifestPath, `${JSON.stringify(mismatchedModelManifest, null, 2)}\n`)
+  await assert.rejects(
+    assembleProductionEvidence(mismatchedModelManifestPath, join(root, 'mismatched-model-evidence.json')),
+    /baseline assembly artifacts are incomplete or inconsistent/u,
+  )
+
+  const wrongHarness = structuredClone(verified)
+  const wrongHarnessReceipt = wrongHarness.paths.baseline.run_receipt
+  wrongHarnessReceipt.harness_commit = manifest.harness_commit
+  const wrongHarnessBody = { ...wrongHarnessReceipt }
+  delete wrongHarnessBody.receipt_sha256
+  wrongHarnessReceipt.receipt_sha256 = sha256(canonical(wrongHarnessBody))
+  assert.ok(evaluateEvidence(wrongHarness).production_receipt_failures.includes('PRODUCTION_RUN_RECEIPT_INCOMPLETE'))
+
+  const wrongModel = structuredClone(verified)
+  wrongModel.performance_model = { ...wrongModel.performance_model, model: 'gpt-5.6-sol' }
+  assert.ok(evaluateEvidence(wrongModel).production_receipt_failures.includes('PRODUCTION_RUN_RECEIPT_INCOMPLETE'))
 
   await symlink(paths.baseline.native_trace_artifact, join(root, 'linked.native.json'))
   const linkedManifest = structuredClone(manifest)
