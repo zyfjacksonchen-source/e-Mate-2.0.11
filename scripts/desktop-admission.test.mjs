@@ -487,7 +487,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   assert.deepEqual(Object.keys(parsed.on), ['workflow_dispatch'])
   assert.deepEqual(Object.keys(parsed.on.workflow_dispatch.inputs), [
     'main_ci_run_id', 'admission_artifact_id', 'macos_artifact_id',
-    'windows_artifact_id', 'expected_signed_current',
+    'windows_artifact_id', 'expected_signed_current', 'expected_legacy_current',
   ])
   assert.equal(Object.values(parsed.on.workflow_dispatch.inputs).every(input => input.required === true && input.type === 'string'), true)
   assert.deepEqual(Object.keys(parsed.jobs), ['handoff'])
@@ -496,7 +496,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   assert.equal(job.name, 'Desktop Cloudflare plugin handoff')
   assert.equal(job.environment, 'r2-publish')
   const invocation = job.steps.find(step => step.id === 'prepare')
-  assert.equal(invocation.uses, 'zyfjacksonchen-source/e-mate-desktop-publication@799284ba3b4935184dd84be3da877f5a4a4c8733')
+  assert.equal(invocation.uses, 'zyfjacksonchen-source/e-mate-desktop-publication@6be6cf166889899fb9ce6956ccf0f12e9ecc40e3')
   assert.deepEqual(invocation.with, {
     'source-sha': '${{ github.sha }}',
     'main-ci-run-id': '${{ inputs.main_ci_run_id }}',
@@ -504,6 +504,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
     'macos-artifact-id': '${{ inputs.macos_artifact_id }}',
     'windows-artifact-id': '${{ inputs.windows_artifact_id }}',
     'expected-signed-current': '${{ inputs.expected_signed_current }}',
+    'expected-legacy-current': '${{ inputs.expected_legacy_current }}',
     'signing-key-id': '${{ secrets.EMATE_PROFILE_SIGNING_KEY_ID }}',
   })
   assert.deepEqual(invocation.env, {
@@ -512,7 +513,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   })
   assert.deepEqual(job.steps.filter(step => step.uses).map(step => step.uses), [
     'actions/setup-node@v6',
-    'zyfjacksonchen-source/e-mate-desktop-publication@799284ba3b4935184dd84be3da877f5a4a4c8733',
+    'zyfjacksonchen-source/e-mate-desktop-publication@6be6cf166889899fb9ce6956ccf0f12e9ecc40e3',
     'actions/upload-artifact@v4',
   ])
   const upload = job.steps.find(step => step.uses === 'actions/upload-artifact@v4')

@@ -2386,3 +2386,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 根因输入来自本机已安装 2.0.12 包内 source map；源码修复绑定本分支后续提交。没有生成、签名、安装、上传、激活或发布任何新字节，既有 candidate run/artifact 因缺少本修复不得作为可发布候选。
 - Remaining blockers: 新提交必须通过受保护 CI，并从合并后的 exact main 重建正式候选；随后必须从未改动的真实 2.0.12 经原生在线更新验证成功、失败回滚、Schedule admission、Profile/Base 回执和安装后版本/哈希，当前源码测试不能替代安装态门禁。
 - Next exact action: 提交本最小桥接并交主代理复核；禁止复用旧候选，生产链保持关闭。
+
+## 2026-08-26 · 2.0.12→2.0.13 旧更新入口单调迁移闭环
+
+- Goal checkpoint: 在 ACK 修复后继续沿真实已安装 2.0.12 更新链追踪可达性；发现既有合同会让全部 v6 客户端永久读到 equal-version 2.0.12，故在重新构建候选前修复唯一生产发布 seam，不上传或激活任何字节。
+- Frozen baseline / current HEAD: 调查和修复基于 `hotfix/2.0.13-legacy-update-ack@2a37a442b303a0ed397797cf3193a6745575d80b`；此前 `main@100a670f283e6b9fcb1d032b086b37a45d9279c4` 的 Desktop/Profile/Performance 候选及当前 PR CI 均因缺少本修复作废，不能复用。
+- Binding documents read: 重新核对唯一 Goal、根 `AGENTS.md`、`target-contract.md`、2.0.13 切片、环境/发布合同、完整上一条日志、正式安装包内 2.0.12 updater/parser/source map和外部 signer action。
+- Inspected native seam: 已发布 2.0.12 只轮询固定 R2 `desktop/latest.json`，reader 上限 16 KiB且只消费 `version/artifacts`；它忽略 rich/signature 额外字段，但仍强制同一 R2 origin、commit-scoped 版本路径、bytes、SHA-256、DMG/PE 格式，并在 macOS 走深度签名和原生替换/回滚。原合同永久冻结该入口会使真实用户永远看不到 2.0.13，人工下载不是在线更新闭环。
+- Experiment or why unnecessary: 既有 `release.test.mjs` 已可执行证明旧 parser 接受同一 rich signed manifest，新增旧 reader 16 KiB 上限回归即可；不改产品 parser、不新增 updater、服务、Profile carrier或客户端协议。外部发布 action 的计划/CAS 行为由其既有 Node 合同测试覆盖。
+- Decision and forbidden alternatives: 将 exact signed manifest 作为人工不可变路径、v7 signed feed和legacy bootstrap的唯一字节。发布顺序固定为 immutable上传和完整公网回读→signed pointer原生条件写/CAS及回读→legacy pointer以精确 948-byte 2.0.12 predecessor为条件、绝对最后CAS及回读。Base v7以后只读signed feed，legacy永久停在2.0.13。禁止本地/测试字节、两份manifest、非条件覆盖、把后续版本写入legacy或另造迁移器。
+- Changed scope: 外部受保护 publication action 已在独立仓库以 PR #1 合并为固定 main `6be6cf166889899fb9ce6956ccf0f12e9ecc40e3`；本仓库只更新其 immutable pin/必填 predecessor input、既有合同测试、目标/环境/切片合同与本记录。未改 Desktop runtime、Base/Profile/Harness、R2、Feed、desired state、安装态或用户数据。
+- Verification commands and results: 外部 action Node tests `50/50` 全过；本仓库 workflow/input/pin/16 KiB 与 release 合同定向 Node tests `22/22` 全过，`git diff --check` 通过，仍须由新 exact-HEAD CI 再验。旧 2.0.12 predecessor为 `948` bytes / SHA-256 `e6d5e045364bdac97ea7fef41b1e28a20af06c9f4ffdd85d2c136e982d12a7dc`。
+- Immutable evidence / receipt: 外部 action reviewed main SHA `6be6cf166889899fb9ce6956ccf0f12e9ecc40e3`；本仓库当前只有 source-fixed diff。没有 Cloudflare Worker、R2写入、指针变化、候选安装或生产发布。
+- Remaining blockers: 提交并通过新 PR CI、合并到受保护 main、重跑 exact-main CI/Desktop/Profile/Performance/admission；随后按 Cloudflare 插件一次性 Worker的multipart/CAS合同上传并公开回读，并完成真实2.0.12→2.0.13更新、故障回滚和双平台P0/TQ验收。
+- Next exact action: 复核最小 diff、提交并更新 PR #58；当前生产链继续关闭，所有旧 run/artifact 永久作废。

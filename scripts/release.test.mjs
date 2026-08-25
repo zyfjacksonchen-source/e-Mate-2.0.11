@@ -650,6 +650,8 @@ test('one admitted producer feeds the updater, legacy 2.0.12, and 2.0.13 downloa
       ]), privateKey).toString('base64'),
     },
   }
+  const signedManifestBytes = Buffer.from(JSON.stringify(signedManifest), 'utf8')
+  assert.ok(signedManifestBytes.byteLength <= 16 * 1024)
   assert.equal(Object.keys(signedManifest).length, 12)
   assert.equal(validateAdmittedDesktopReleaseManifest(signedManifest, trustedKeys), true)
   await assert.doesNotReject(() => verifyDownloadIndex(signedManifest, {
