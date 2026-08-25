@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -16,7 +17,9 @@ import { composeEntries } from '@deepseek-ai/dsh-app-boot'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   EMATE_DESKTOP_PROFILE_VERSION,
+  EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS,
   EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
+  cleanupEmateDesktopProfileArtifact,
   installEmateDesktopProfile,
 } from '../src/e-mate-profile.ts'
 import { prepareDesktopProfile } from '../src/profile.ts'
@@ -215,7 +218,7 @@ describe('e-Mate desktop profile', () => {
     roots.push(home)
     const profile = installEmateDesktopProfile(home)
     const cdpManifest = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-cdp', 'package.json')
-    const sentinel = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-cdp', '.warm-start-sentinel')
+    const sentinel = join(profile, '.warm-start-sentinel')
     const firstModified = readFileSync(join(profile, '.e-mate-install.json'), 'utf8')
 
     writeFileSync(sentinel, 'preserved only when the immutable install is reused')
@@ -226,7 +229,24 @@ describe('e-Mate desktop profile', () => {
     rmSync(cdpManifest)
     installEmateDesktopProfile(home)
     expect(existsSync(cdpManifest)).toBe(true)
-    expect(existsSync(sentinel)).toBe(false)
+    expect(existsSync(sentinel)).toBe(true)
+  })
+
+  it('repairs a managed package with a top-level extra while preserving package-external data', () => {
+    const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
+    roots.push(home)
+    const profile = installEmateDesktopProfile(home)
+    const cdpPackage = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-cdp')
+    const extra = join(cdpPackage, '.unexpected-top-level-entry')
+    const external = join(profile, 'node_modules', 'user-owned-package', 'data.txt')
+    mkdirSync(join(profile, 'node_modules', 'user-owned-package'), { recursive: true })
+    writeFileSync(extra, 'must not survive inside a managed package')
+    writeFileSync(external, 'outside the managed package owner')
+
+    installEmateDesktopProfile(home)
+
+    expect(existsSync(extra)).toBe(false)
+    expect(readFileSync(external, 'utf8')).toBe('outside the managed package owner')
   })
 
   it('repairs an explicitly constructed legacy managed-package directory link', () => {
@@ -253,25 +273,6 @@ describe('e-Mate desktop profile', () => {
       schema_version: 2,
       managed_package_layout: process.platform === 'win32' ? 'win32-materialized-v1' : 'linked-v1',
     }))
-  })
-
-  it.runIf(process.platform === 'win32')('keeps a real Windows warm launch off nested managed-package payloads', () => {
-    const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
-    roots.push(home)
-    const profile = installEmateDesktopProfile(home)
-    const receiptPath = join(profile, '.e-mate-install.json')
-    const packageRoot = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-schedules')
-    const nestedPayload = join(packageRoot, 'lib', 'index.js')
-    const sentinel = join(packageRoot, '.warm-start-sentinel')
-    const receipt = readFileSync(receiptPath, 'utf8')
-    writeFileSync(sentinel, 'warm path reused')
-    rmSync(nestedPayload)
-
-    installEmateDesktopProfile(home)
-
-    expect(existsSync(nestedPayload)).toBe(false)
-    expect(readFileSync(receiptPath, 'utf8')).toBe(receipt)
-    expect(readFileSync(sentinel, 'utf8')).toBe('warm path reused')
   })
 
   it('rejects a managed package root reparse point', () => {
@@ -313,7 +314,7 @@ describe('e-Mate desktop profile', () => {
     const profile = installEmateDesktopProfile(home)
     const library = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-schedules', 'lib')
     const sourceLibrary = realpathSync(library)
-    const sentinel = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-schedules', '.warm-start-sentinel')
+    const sentinel = join(profile, '.warm-start-sentinel')
     const receipt = readFileSync(join(profile, '.e-mate-install.json'), 'utf8')
     writeFileSync(sentinel, 'warm path reused')
 
@@ -356,6 +357,62 @@ describe('e-Mate desktop profile', () => {
 
     expect(readFileSync(sentinel, 'utf8')).toBe('previous package tree')
     expect(existsSync(join(cdpPackage, 'package.json'))).toBe(false)
+  })
+
+  it('recovers a deterministic swap interrupted between the two renames', () => {
+    const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
+    roots.push(home)
+    const profile = installEmateDesktopProfile(home)
+    const target = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-cdp')
+    const candidate = `${target}.e-mate-next`
+    const stale = `${target}.e-mate-stale`
+    renameSync(target, stale)
+    mkdirSync(candidate)
+    writeFileSync(join(candidate, 'partial.txt'), 'interrupted candidate')
+
+    installEmateDesktopProfile(home)
+
+    expect(existsSync(join(target, 'package.json'))).toBe(true)
+    expect(existsSync(candidate)).toBe(false)
+    expect(existsSync(stale)).toBe(false)
+  })
+
+  it('persists and bounds failed stale cleanup without following an external link', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-'))
+    roots.push(home)
+    const profile = installEmateDesktopProfile(home)
+    const target = join(profile, 'node_modules', '@e-mate', 'dsh-plugin-cdp')
+    const deferred: string[] = []
+    rmSync(join(target, 'package.json'))
+    installEmateDesktopProfile(home, path => { deferred.push(path) })
+    const stale = `${target}.e-mate-stale`
+    expect(deferred).toContain(stale)
+    const warmDeferred: string[] = []
+    installEmateDesktopProfile(home, path => { warmDeferred.push(path) })
+    expect(warmDeferred).toContain(stale)
+
+    const outside = join(home, 'outside-cleanup-owner')
+    mkdirSync(outside)
+    writeFileSync(join(outside, 'keep.txt'), 'must remain')
+    rmSync(stale, { recursive: true, force: true })
+    symlinkSync(outside, stale, 'dir')
+    const linkedDeferred: string[] = []
+    installEmateDesktopProfile(home, path => { linkedDeferred.push(path) })
+    expect(linkedDeferred).toContain(stale)
+    await expect(cleanupEmateDesktopProfileArtifact(profile, outside)).rejects.toThrow('outside the owned')
+    for (let attempt = 0; attempt < EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS; attempt += 1) {
+      await expect(cleanupEmateDesktopProfileArtifact(profile, stale)).rejects.toThrow('not a physical directory')
+    }
+    await expect(cleanupEmateDesktopProfileArtifact(profile, stale)).rejects.toThrow('retry limit is exhausted')
+
+    const retried: string[] = []
+    installEmateDesktopProfile(home, path => { retried.push(path) })
+    expect(retried).not.toContain(stale)
+    expect(readFileSync(join(outside, 'keep.txt'), 'utf8')).toBe('must remain')
+    const receipt = JSON.parse(readFileSync(join(profile, '.e-mate-install.json'), 'utf8')) as {
+      cleanup_attempts?: Record<string, number>
+    }
+    expect(Object.values(receipt.cleanup_attempts ?? {})).toContain(EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS)
   })
 
   it('preserves a native DSH plugin dependency and bundle across managed profile repair', () => {

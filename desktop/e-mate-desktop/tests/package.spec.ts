@@ -181,7 +181,7 @@ describe('published package surface', () => {
     const electronReady = main.indexOf('await app.whenReady()')
     const nativeReadyAck = main.indexOf("'.release-native-ready-ack'")
     const releaseAck = main.indexOf("'.release-health-ack'")
-    const profileCleanup = main.indexOf('deferredProfileCleanup.map')
+    const profileCleanup = main.indexOf('for (const path of deferredProfileCleanup)')
     const cleanup = main.indexOf('const cleanup = app.isPackaged')
 
     expect(recover).toBeGreaterThanOrEqual(0)
@@ -316,6 +316,7 @@ describe('published package surface', () => {
     expect(manifest.scripts?.['dist:win']).toBe('node scripts/package-win.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run build')
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run typecheck')
+    expect(manifest.scripts?.['check:win-package']).toContain('tests/e-mate-profile-win.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/package-win.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/update-checker.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/update-download.spec.ts')

@@ -4,7 +4,6 @@ import { app, dialog, shell } from 'electron'
 import type { Context } from '@deepseek-ai/cordis'
 import { randomUUID } from 'node:crypto'
 import { existsSync, writeFileSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -39,6 +38,7 @@ import {
   EMATE_DESKTOP_PROFILE_VERSION,
   EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
   EMATE_PROFILE_NAME,
+  cleanupEmateDesktopProfileArtifact,
   emateProfileComponentSources,
   installEmateDesktopProfile,
 } from './e-mate-profile.ts'
@@ -284,14 +284,14 @@ async function start(): Promise<void> {
         ? {}
         : { activeRelease: profileGenerationStartup.generation.release }),
     })
-    const deferredProfileCleanup: string[] = []
+    const deferredProfileCleanup = new Set<string>()
     const activeProfileGeneration = profileGenerationStartup.generation === undefined ? undefined : {
       id: profileGenerationStartup.generation.id,
       componentDirectories: profileGenerationStartup.generation.component_directories,
     }
     installEmateDesktopProfile(
       homeDir,
-      path => { deferredProfileCleanup.push(path) },
+      path => { deferredProfileCleanup.add(path) },
       activeProfileGeneration,
     )
     profileStatePath = selectionStatePath
@@ -498,11 +498,13 @@ async function start(): Promise<void> {
         mode: 0o600,
       })
     }
-    await Promise.all(deferredProfileCleanup.map(async (path) => {
-      await rm(path, { recursive: true, force: true })
-    })).catch((cause: unknown) => {
-      process.stderr.write(`${BIN_NAME}: stale managed profile cleanup failed: ${cause instanceof Error ? cause.message : String(cause)}\n`)
-    })
+    for (const path of deferredProfileCleanup) {
+      try {
+        await cleanupEmateDesktopProfileArtifact(activeProfileDir, path)
+      } catch {
+        process.stderr.write(`${BIN_NAME}: stale managed profile cleanup deferred for bounded retry\n`)
+      }
+    }
     const cleanup = app.isPackaged
       ? await cleanupObsoleteMacApplications({
           platform: process.platform,
