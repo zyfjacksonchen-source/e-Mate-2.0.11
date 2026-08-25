@@ -2,16 +2,17 @@
   position: absolute;
   z-index: 1;
   top: 12px;
-  right: 24px;
+  right: calc(24px + var(--dsh-desktop-caption-safe-width, 0px));
   display: inline-flex;
   align-items: center;
   gap: 8px;
   height: 32px;
   color: var(--dsw-alias-label-primary);
+  -webkit-app-region: no-drag;
 }
 
 :global([data-slot='conversation.session.header'] > header) {
-  padding-right: 176px;
+  padding-right: calc(176px + var(--dsh-desktop-caption-safe-width, 0px));
 }
 
 .controls > button {
@@ -35,6 +36,11 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+.controls > button:focus-visible {
+  outline: 2px solid var(--emate-color-brand, #ff6a1a);
+  outline-offset: 2px;
+}
+
 .runtimeStatus {
   width: 8px;
   height: 8px;
@@ -46,11 +52,11 @@
 
 @media (max-width: 720px) {
   .controls {
-    right: 12px;
+    right: calc(12px + var(--dsh-desktop-caption-safe-width, 0px));
   }
 
   :global([data-slot='conversation.session.header'] > header) {
-    padding-right: 136px;
+    padding-right: calc(136px + var(--dsh-desktop-caption-safe-width, 0px));
   }
 
   .runtimeStatus { display: none; }

@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
+import { WINDOWS_CAPTION_CONTROLS_WIDTH } from '../../../../../../desktop/e-mate-desktop/src/window-chrome.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HeaderControls } from '../src/client/header-controls.tsx'
 import { registerHeaderControls, registerManagedPresetSurfaces } from '../src/client/index.ts'
@@ -50,10 +51,42 @@ describe('desktop header controls', () => {
   it('keeps share inside the one aligned root-frame group without positional offsets', () => {
     const controls = readFileSync('src/client/header-controls.module.css', 'utf8')
     const share = readFileSync('src/client/session-share.module.css', 'utf8')
-    expect(controls).toMatch(/position:\s*absolute[\s\S]*top:\s*12px[\s\S]*display:\s*inline-flex[\s\S]*gap:\s*8px[\s\S]*height:\s*32px/u)
-    expect(controls).toMatch(/conversation\.session\.header[\s\S]*padding-right:\s*176px/u)
+    const settings = readFileSync('src/client/settings-chrome.module.css', 'utf8')
+    expect(controls).toMatch(/position:\s*absolute[\s\S]*top:\s*12px[\s\S]*right:\s*calc\(24px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)[\s\S]*display:\s*inline-flex[\s\S]*gap:\s*8px[\s\S]*height:\s*32px[\s\S]*-webkit-app-region:\s*no-drag/u)
+    expect(controls).toMatch(/conversation\.session\.header[\s\S]*padding-right:\s*calc\(176px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
+    expect(controls).toMatch(/@media \(max-width:\s*720px\)[\s\S]*right:\s*calc\(12px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)[\s\S]*padding-right:\s*calc\(136px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)[\s\S]*\.runtimeStatus\s*\{\s*display:\s*none;/u)
+    expect(controls).toMatch(/\.controls > button:focus-visible[\s\S]*outline:\s*2px solid[\s\S]*outline-offset:\s*2px/u)
+    expect(controls).not.toMatch(/@media[\s\S]*\.controls > button\s*\{[^}]*display:\s*none/u)
+    expect(settings).toMatch(/padding:\s*16px calc\(20px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\) 16px 20px !important/u)
+    expect(settings).toMatch(/button:has\(\[data-emate-settings-close\]\)[\s\S]*width:\s*44px;[\s\S]*height:\s*44px;/u)
+    expect(settings).toMatch(/data-emate-settings-close\]\):focus-visible[\s\S]*outline-offset:\s*-2px/u)
+    expect(`${controls}\n${settings}`).not.toContain('138')
     expect(share).toMatch(/\.trigger\s*\{[\s\S]*?height:\s*32px/u)
     expect(share).not.toMatch(/position:\s*fixed|translateY|top:\s*1px|right:\s*(?:72|210)px/u)
+  })
+
+  it('keeps every core control left of the native caption at the minimum window across 100/125/150 percent', () => {
+    const minimumWindowWidth = 900
+    const desktop = readFileSync('../../../../../desktop/e-mate-desktop/src/index.ts', 'utf8')
+    const desktopStyles = readFileSync('../../../../../desktop/e-mate-desktop/src/client/styles.ts', 'utf8')
+    expect(desktop).toContain(`minWidth: z.number().step(1).min(640).default(${minimumWindowWidth})`)
+    expect(desktopStyles).toMatch(/--dsh-desktop-caption-safe-width: max\(\$\{WINDOWS_CAPTION_CONTROLS_WIDTH\}px, calc\(100vw - env\(titlebar-area-x, 0px\) - env\(titlebar-area-width, 100vw\)\)\);/u)
+
+    for (const scale of [1, 1.25, 1.5]) {
+      const viewport = minimumWindowWidth / scale
+      const compact = viewport <= 720
+      const safeGap = compact ? 12 : 24
+      const childCount = compact ? 3 : 4
+      const statusWidth = compact ? 0 : 16
+      const groupWidth = 3 * 32 + statusWidth + (childCount - 1) * 8
+      const captionLeft = viewport - WINDOWS_CAPTION_CONTROLS_WIDTH
+      const groupRight = captionLeft - safeGap
+
+      expect(groupRight + 4).toBeLessThanOrEqual(captionLeft)
+      expect(groupRight - groupWidth - 4).toBeGreaterThanOrEqual(0)
+      expect((compact ? 136 : 176) + WINDOWS_CAPTION_CONTROLS_WIDTH).toBeLessThan(viewport)
+      expect(captionLeft - 20).toBeGreaterThan(44)
+    }
   })
 
   it('stays mounted with no current Session and calls the one native settings trigger', async () => {
