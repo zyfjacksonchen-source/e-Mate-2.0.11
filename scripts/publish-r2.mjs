@@ -1,16 +1,15 @@
 #!/usr/bin/env node
 
-// Publishes the already-admitted npm release bytes to the existing e-Mate R2
-// bucket. The stable download page is switched only after Computer Use passes.
-import { spawn } from 'node:child_process'
+// Historical filename retained for release-carrier compatibility. This module
+// only emits a byte-bound publication plan; the connected Codex Cloudflare
+// plugin is the sole authority allowed to read or write production R2 objects.
 import { createHash } from 'node:crypto'
 import { lstatSync, readFileSync } from 'node:fs'
-import { mkdir, open, rename, writeFile } from 'node:fs/promises'
+import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { setTimeout as sleep } from 'node:timers/promises'
-import { isAcceptedReleaseCommit, VERSION, verifyRelease } from './release.mjs'
+import { VERSION, verifyRelease } from './release.mjs'
 import { releasePrefix } from './release-source.mjs'
 
 export const R2_BUCKET = 'emate-desktop-downloads'
@@ -24,7 +23,6 @@ const EVIDENCE_FILES = [
   'EVIDENCE_SHA256SUMS',
 ]
 const SHA256 = /^[0-9a-f]{64}$/u
-const MAX_COMMAND_OUTPUT = 1024 * 1024
 const IMMUTABLE_CACHE_CONTROL = 'public,max-age=31536000,immutable'
 
 function digest(path) {
@@ -39,14 +37,6 @@ function contentType(filename) {
 
 function contentDisposition(filename) {
   return `attachment; filename="${filename}"`
-}
-
-export function matchesR2Head(value, item) {
-  return value.ContentLength === item.size
-    && value.ContentType === item.contentType
-    && value.ContentDisposition === contentDisposition(item.filename)
-    && value.CacheControl === IMMUTABLE_CACHE_CONTROL
-    && value.Metadata?.sha256 === item.sha256
 }
 
 function normalizePublicOrigin(value) {
@@ -84,6 +74,8 @@ function record(path, role, publicOrigin, prefix) {
     size: metadata.size,
     sha256: digest(path),
     contentType: contentType(filename),
+    contentDisposition: contentDisposition(filename),
+    cacheControl: IMMUTABLE_CACHE_CONTROL,
     path,
   }
 }
@@ -142,160 +134,40 @@ export function buildR2Inventory(
   }
 }
 
-function command(commandName, args) {
-  return new Promise((resolveCommand, reject) => {
-    const child = spawn(commandName, args, { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
-    let output = ''
-    const append = chunk => {
-      output += chunk
-      if (output.length > MAX_COMMAND_OUTPUT) child.kill('SIGKILL')
-    }
-    child.stdout.setEncoding('utf8').on('data', append)
-    child.stderr.setEncoding('utf8').on('data', append)
-    child.once('error', reject)
-    child.once('close', code => {
-      if (code === 0) resolveCommand(output)
-      else reject(Object.assign(new Error(`${commandName} exited with ${String(code)}: ${output}`), { output }))
-    })
-  })
-}
-
-function endpoint() {
-  const account = process.env.ECOREX_R2_ACCOUNT_ID
-  if (!/^[0-9a-f]{32}$/u.test(account ?? '')) throw new Error('ECOREX_R2_ACCOUNT_ID is missing or invalid')
-  return `https://${account}.r2.cloudflarestorage.com`
-}
-
-async function headObject(item) {
-  try {
-    const output = await command('aws', [
-      '--endpoint-url', endpoint(), 's3api', 'head-object', '--bucket', R2_BUCKET, '--key', item.key, '--output', 'json',
-    ])
-    const value = JSON.parse(output)
-    if (!matchesR2Head(value, item)) {
-      throw new Error(`R2 immutable object collision: ${item.key}`)
-    }
-    return true
-  } catch (error) {
-    if (/\(404\)|Not Found|NoSuchKey/u.test(error?.output ?? '')) return false
-    throw error
+export async function writeR2PublicationPlan(npmDirectory, evidenceDirectory, planPath, sourceCommit) {
+  if (basename(planPath) !== 'r2-publication-plan.json') throw new Error('R2 publication plan filename is invalid')
+  const inventory = buildR2Inventory(npmDirectory, evidenceDirectory, sourceCommit, R2_PUBLIC_ORIGIN)
+  const plan = {
+    ...inventory,
+    document_type: 'emate.cloudflare-plugin-r2-publication-plan',
+    repository: REPOSITORY,
+    publication_authority: 'codex-cloudflare-plugin',
+    objects: inventory.objects.map(({ path, contentType, contentDisposition, cacheControl, ...item }) => ({
+      ...item,
+      artifact_path: `${item.role === 'npm-package' ? 'npm' : 'release'}/${item.filename}`,
+      content_type: contentType,
+      content_disposition: contentDisposition,
+      cache_control: cacheControl,
+    })),
   }
-}
-
-async function putObject(item) {
-  await command('aws', [
-    '--endpoint-url', endpoint(), 's3api', 'put-object',
-    '--bucket', R2_BUCKET,
-    '--key', item.key,
-    '--body', item.path,
-    '--content-type', item.contentType,
-    '--content-disposition', contentDisposition(item.filename),
-    '--cache-control', IMMUTABLE_CACHE_CONTROL,
-    '--metadata', `sha256=${item.sha256}`,
-  ])
-}
-
-async function publicProbe(item) {
-  const response = await fetch(item.url, {
-    method: 'HEAD',
-    redirect: 'error',
-    headers: { 'accept-encoding': 'identity', 'cache-control': 'no-cache' },
-  })
-  if (response.status !== 200 || response.headers.get('content-length') !== String(item.size)) {
-    throw new Error(`R2 public HEAD did not admit ${item.key}`)
-  }
-  const file = await open(item.path, 'r')
-  try {
-    const ranges = [[0, Math.min(15, item.size - 1)], [Math.max(0, item.size - 16), item.size - 1]]
-    for (const [start, end] of ranges.filter((value, index, values) => index === 0 || value[0] !== values[0][0])) {
-      const result = await fetch(item.url, {
-        redirect: 'error',
-        headers: { range: `bytes=${start}-${end}`, 'accept-encoding': 'identity', 'cache-control': 'no-cache' },
-      })
-      const bytes = Buffer.from(await result.arrayBuffer())
-      const local = Buffer.alloc(end - start + 1)
-      await file.read(local, 0, local.length, start)
-      if (result.status !== 206 || result.headers.get('content-range') !== `bytes ${start}-${end}/${item.size}`
-        || !bytes.equals(local)) throw new Error(`R2 public bytes did not admit ${item.key}`)
-    }
-  } finally {
-    await file.close()
-  }
-}
-
-async function publishObject(item) {
-  if (!await headObject(item)) await putObject(item)
-  if (!await headObject(item)) throw new Error(`R2 authenticated readback failed: ${item.key}`)
-  let lastError
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      await publicProbe(item)
-      return
-    } catch (error) {
-      lastError = error
-      if (attempt < 4) await sleep(1000 * 2 ** attempt)
-    }
-  }
-  throw lastError
-}
-
-function receiptObject(item) {
-  return {
-    role: item.role,
-    filename: item.filename,
-    key: item.key,
-    url: item.url,
-    size: item.size,
-    sha256: item.sha256,
-  }
-}
-
-function authorize() {
-  if (process.env.GITHUB_ACTIONS !== 'true' || process.env.GITHUB_REPOSITORY !== REPOSITORY
-    || process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || !isAcceptedReleaseCommit()) {
-    throw new Error(`R2 publication is allowed only by workflow dispatch for the accepted commit in ${REPOSITORY}`)
-  }
-  if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
-    throw new Error('R2 S3 credentials are missing')
-  }
-  normalizeProductionPublicOrigin(process.env.EMATE_R2_PUBLIC_ORIGIN)
-}
-
-export async function publishR2(npmDirectory, evidenceDirectory, receiptPath) {
-  authorize()
-  if (basename(receiptPath) !== 'r2-download-admission.json') throw new Error('R2 receipt filename is invalid')
-  const inventory = buildR2Inventory(
-    npmDirectory,
-    evidenceDirectory,
-    process.env.GITHUB_SHA,
-    process.env.EMATE_R2_PUBLIC_ORIGIN,
-  )
-  let cursor = 0
-  await Promise.all(Array.from({ length: 3 }, async () => {
-    while (cursor < inventory.objects.length) {
-      const index = cursor
-      cursor += 1
-      await publishObject(inventory.objects[index])
-    }
-  }))
-  const receipt = { ...inventory, status: 'verified', max_parallel_uploads: 3, objects: inventory.objects.map(receiptObject) }
-  await mkdir(dirname(receiptPath), { recursive: true })
-  const temporary = `${receiptPath}.tmp`
-  await writeFile(temporary, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 })
-  await rename(temporary, receiptPath)
-  await publishObject(record(receiptPath, 'r2-admission', inventory.public_origin, inventory.prefix))
-  console.log(`e-Mate R2 admission: ${receipt.objects.length} release objects verified under ${inventory.prefix}`)
-  return receipt
+  await mkdir(dirname(planPath), { recursive: true })
+  const temporary = `${planPath}.${process.pid}.tmp`
+  await writeFile(temporary, `${JSON.stringify(plan, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
+  await rename(temporary, planPath)
+  return plan
 }
 
 async function main() {
   const { values } = parseArgs({
-    options: { npm: { type: 'string' }, evidence: { type: 'string' }, receipt: { type: 'string' } },
+    options: {
+      npm: { type: 'string' }, evidence: { type: 'string' }, plan: { type: 'string' }, commit: { type: 'string' },
+    },
   })
-  if (values.npm === undefined || values.evidence === undefined || values.receipt === undefined) {
-    throw new Error('usage: publish-r2.mjs --npm <tarball directory> --evidence <evidence directory> --receipt <receipt path>')
+  if (values.npm === undefined || values.evidence === undefined || values.plan === undefined
+    || values.commit === undefined || !/^[0-9a-f]{40}$/u.test(values.commit)) {
+    throw new Error('usage: publish-r2.mjs --npm <tarball directory> --evidence <evidence directory> --plan <plan path> --commit <source SHA>')
   }
-  await publishR2(values.npm, values.evidence, values.receipt)
+  await writeR2PublicationPlan(values.npm, values.evidence, values.plan, values.commit)
 }
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])) await main()

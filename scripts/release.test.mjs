@@ -11,10 +11,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { assertEvidenceSource, BUNDLED_PLUGIN_PACKAGES, generateEvidence, isAcceptedReleaseCommit, RELEASE_PACKAGES, TARGET_NATIVE_RUNTIME_FILES, verifyRelease, VERSION } from './release.mjs'
 import {
   buildR2Inventory,
-  matchesR2Head,
   normalizeProductionPublicOrigin,
   R2_BUCKET,
   R2_PUBLIC_ORIGIN,
+  writeR2PublicationPlan,
 } from './publish-r2.mjs'
 import { releasePrefix, releaseSource } from './release-source.mjs'
 import { renderDownloadPage } from './render-download-page.mjs'
@@ -139,6 +139,10 @@ test('release evidence requires the one bundled package and emits hashes plus SP
     assert.equal(r2.prefix, releasePrefix(SOURCE_COMMIT))
     assert.equal(r2.objects.length, 6)
     assert.ok(r2.objects.every(item => item.key === `${releasePrefix(SOURCE_COMMIT)}/${item.filename}` && item.url === `${R2_FIXTURE_PUBLIC_ORIGIN}/${item.key}`))
+    const plan = await writeR2PublicationPlan(root, output, join(root, 'r2-publication-plan.json'), SOURCE_COMMIT)
+    assert.equal(plan.publication_authority, 'codex-cloudflare-plugin')
+    assert.equal(plan.objects.length, 6)
+    assert.ok(plan.objects.every(item => !('path' in item) && /^(?:npm|release)\/[^/]+$/u.test(item.artifact_path)))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -161,25 +165,6 @@ test('publication accepts only the exact 40-character release commit', () => {
   assert.equal(isAcceptedReleaseCommit({ GITHUB_SHA: SOURCE_COMMIT, EMATE_ACCEPTED_SHA: SOURCE_COMMIT }), true)
   assert.equal(isAcceptedReleaseCommit({ GITHUB_SHA: DIGEST, EMATE_ACCEPTED_SHA: DIGEST }), false)
   assert.equal(isAcceptedReleaseCommit({ GITHUB_SHA: SOURCE_COMMIT, EMATE_ACCEPTED_SHA: 'a'.repeat(40) }), false)
-})
-
-test('R2 immutable readback includes download metadata as well as bytes identity', () => {
-  const item = {
-    filename: `e-mate-dsh-${VERSION}.tgz`,
-    size: 207,
-    sha256: DIGEST,
-    contentType: 'application/gzip',
-  }
-  const head = {
-    ContentLength: item.size,
-    ContentType: item.contentType,
-    ContentDisposition: `attachment; filename="${item.filename}"`,
-    CacheControl: 'public,max-age=31536000,immutable',
-    Metadata: { sha256: item.sha256 },
-  }
-  assert.equal(matchesR2Head(head, item), true)
-  assert.equal(matchesR2Head({ ...head, CacheControl: 'no-cache' }, item), false)
-  assert.equal(matchesR2Head({ ...head, Metadata: { sha256: 'f'.repeat(64) } }, item), false)
 })
 
 test('production R2 download origin is the owned public bucket', () => {
@@ -410,7 +395,7 @@ test('GitHub release packs once and validates the same tarball on three platform
     release.jobs['clean-install'].strategy.matrix.include.map(item => [item.platform, item.runner]),
     [['darwin-arm64', 'macos-15'], ['darwin-x64', 'macos-15-intel'], ['win32-x64', 'windows-2025']],
   )
-  assert.deepEqual(Object.keys(release.jobs), ['pack', 'clean-install', 'evidence', 'r2'])
+  assert.deepEqual(Object.keys(release.jobs), ['pack', 'clean-install', 'evidence'])
   assert.equal(release.jobs['clean-install'].needs, 'pack')
   assert.equal(release.jobs.evidence.needs, 'pack')
   assert.match(release.jobs.evidence.steps.find(step => step.name === 'Render the immutable candidate download page').run, /render-download-page\.mjs/u)
@@ -419,26 +404,22 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.ok(cleanInstall.run.includes('version="$(node -p "require(process.argv[1]).version" "$npm_root/@e-mate/dsh/package.json")"'))
   assert.doesNotMatch(cleanInstall.run, /require\('\$npm_root/u)
   assert.match(readFileSync('scripts/build-harness-runtime.mjs', 'utf8'), /'--os=darwin', '--os=win32', '--cpu=arm64', '--cpu=x64'/u)
-  assert.equal(release.jobs.r2.needs, undefined)
   assert.equal(release.on.push, undefined)
   assert.equal(release.on.pull_request, undefined)
-  const r2 = release.jobs.r2.steps.find(step => step.name === 'Publish immutable release bytes to Cloudflare R2')
-  assert.match(r2.run, /publish-r2\.mjs/u)
-  assert.equal(r2.env.EMATE_R2_PUBLIC_ORIGIN, '${{ vars.EMATE_R2_PUBLIC_ORIGIN }}')
-  assert.equal(release.on.workflow_dispatch.inputs.publish.default, false)
-  assert.equal(release.on.workflow_dispatch.inputs.release_run_id.default, '')
-  assert.match(release.jobs.r2.steps.find(step => step.name === 'Validate the accepted build-only run').run, /head_sha/u)
-  assert.equal(release.jobs.r2.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], '${{ inputs.release_run_id }}')
+  const plan = release.jobs.evidence.steps.find(step => step.name === 'Emit the Cloudflare plugin publication plan')
+  assert.match(plan.run, /publish-r2\.mjs/u)
+  assert.match(plan.run, /--commit "\$GITHUB_SHA"/u)
+  const releaseWorkflow = readFileSync('.github/workflows/release.yml', 'utf8')
+  assert.doesNotMatch(releaseWorkflow, /secrets\.|AWS_|ECOREX_R2_|r2-publish|aws |s3api|cloudflarestorage/u)
+  const r2PlanSource = readFileSync('scripts/publish-r2.mjs', 'utf8')
+  assert.match(r2PlanSource, /publication_authority: 'codex-cloudflare-plugin'/u)
+  assert.doesNotMatch(r2PlanSource, /spawn\(|fetch\(|put-object|head-object|AWS_|ECOREX_R2_|cloudflarestorage/u)
   assert.doesNotMatch(readFileSync('.github/workflows/release.yml', 'utf8'), /npm view '@e-mate\/dsh@2\.0\.8'|release\.mjs publish/u)
   const desktopReleaseSource = readFileSync('.github/workflows/desktop-release.yml', 'utf8')
   const desktopManifestSource = readFileSync('desktop/e-mate-desktop/scripts/desktop-release-manifest.ts', 'utf8')
-  assert.equal(desktopRelease.jobs.r2.needs, undefined)
-  assert.equal(desktopRelease.jobs.r2.steps.length, 1)
-  assert.match(desktopRelease.jobs.r2.steps[0].run, /PROTECTED_DESKTOP_ADMISSION_REQUIRED/u)
-  assert.match(desktopRelease.jobs.r2.steps[0].run, /GITHUB_REF.*refs\/heads\/main/u)
-  assert.match(desktopRelease.jobs.r2.steps[0].run, /GITHUB_WORKFLOW_REF.*desktop-release\.yml@refs\/heads\/main/u)
-  assert.doesNotMatch(JSON.stringify(desktopRelease.jobs.r2), /actions\/checkout|secrets\.|aws |environment/u)
-  assert.equal(desktopRelease.on.workflow_dispatch.inputs.release_run_id.default, '')
+  assert.equal(desktopRelease.jobs.r2, undefined)
+  assert.equal(desktopRelease.on.workflow_dispatch.inputs.publish, undefined)
+  assert.equal(desktopRelease.on.workflow_dispatch.inputs.release_run_id, undefined)
   assert.equal(desktopRelease.on.workflow_dispatch.inputs.reuse_run_id.default, '')
   assert.match(desktopRelease.jobs.reuse.steps[0].run, /Build and verify the e-Mate profile/u)
   assert.match(desktopRelease.jobs.reuse.steps[0].run, /Build unsigned Windows x64 installer/u)
@@ -466,10 +447,7 @@ test('GitHub release packs once and validates the same tarball on three platform
     assert.doesNotMatch(step.run, /node -p \\"require/u)
   }
   assert.doesNotMatch(desktopReleaseSource, /e-Mate-\d+\.\d+\.\d+-(?:mac|win)|releases\/v\d+\.\d+\.\d+/u)
-  assert.match(desktopRelease.jobs.r2.steps[0].run, /create desktop\/manual\/v<manifest\.version>\/latest\.json without overwrite/u)
-  assert.match(desktopRelease.jobs.r2.steps[0].run, /read back identical bytes, then CAS desktop\/signed\/latest\.json/u)
-  assert.match(desktopRelease.jobs.r2.steps[0].run, /desktop\/signed\/latest\.json/u)
-  assert.match(desktopRelease.jobs.r2.steps[0].run, /desktop\/latest\.json frozen at 2\.0\.12/u)
+  assert.doesNotMatch(desktopReleaseSource, /AWS_|ECOREX_R2_|r2-publish|aws |s3api|cloudflarestorage/u)
   assert.match(readFileSync('.gitattributes', 'utf8'), /^\* text=auto eol=lf$/mu)
 })
 

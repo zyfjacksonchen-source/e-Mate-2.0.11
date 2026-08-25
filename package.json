@@ -33,7 +33,6 @@
     "enterprise:build": "pnpm --dir enterprise build",
     "pack:check": "pnpm --filter @e-mate/dsh pack --pack-destination dist/npm",
     "release:evidence": "node scripts/release.mjs evidence --from dist/npm --out dist/release",
-    "release:publish": "node scripts/release.mjs publish --from dist/npm",
-    "release:r2": "node scripts/publish-r2.mjs --npm dist/npm --evidence dist/release --receipt dist/r2/r2-download-admission.json"
+    "release:publish": "node scripts/release.mjs publish --from dist/npm"
   }
 }

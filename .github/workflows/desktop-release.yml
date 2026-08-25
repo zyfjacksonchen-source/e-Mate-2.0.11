@@ -3,16 +3,6 @@ name: Release e-Mate Desktop
 on:
   workflow_dispatch:
     inputs:
-      publish:
-        description: Publish an already built and Computer Use-accepted artifact run to R2.
-        required: true
-        type: boolean
-        default: false
-      release_run_id:
-        description: Successful build-only run ID containing the exact accepted installers; required only when publishing.
-        required: false
-        type: string
-        default: ''
       reuse_run_id:
         description: Prior build run whose successful profile and Windows artifacts may be reused by a macOS-only retry.
         required: false
@@ -24,7 +14,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: ${{ inputs.publish && 'e-mate-desktop-r2-publication' || format('{0}-{1}', github.workflow, github.ref) }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -32,7 +22,7 @@ env:
 
 jobs:
   reuse:
-    if: ${{ !inputs.publish && inputs.reuse_run_id != '' }}
+    if: ${{ inputs.reuse_run_id != '' }}
     name: Validate reusable profile and Windows artifacts
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -58,7 +48,7 @@ jobs:
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
 
   profile:
-    if: ${{ !inputs.publish && inputs.reuse_run_id == '' }}
+    if: ${{ inputs.reuse_run_id == '' }}
     name: Build and verify the e-Mate profile
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -125,7 +115,7 @@ jobs:
           retention-days: 30
 
   windows:
-    if: ${{ !inputs.publish && inputs.reuse_run_id == '' }}
+    if: ${{ inputs.reuse_run_id == '' }}
     name: Build unsigned Windows x64 installer
     needs: profile
     runs-on: windows-2025
@@ -181,7 +171,7 @@ jobs:
           retention-days: 7
 
   macos:
-    if: ${{ always() && !inputs.publish && ((inputs.reuse_run_id == '' && needs.profile.result == 'success') || (inputs.reuse_run_id != '' && needs.reuse.result == 'success')) }}
+    if: ${{ always() && ((inputs.reuse_run_id == '' && needs.profile.result == 'success') || (inputs.reuse_run_id != '' && needs.reuse.result == 'success')) }}
     name: Build unsigned macOS universal disk image
     needs: [profile, reuse]
     runs-on: macos-15
@@ -239,7 +229,7 @@ jobs:
           retention-days: 7
 
   manifest:
-    if: ${{ always() && !inputs.publish && needs.macos.result == 'success' && ((inputs.reuse_run_id == '' && needs.windows.result == 'success') || (inputs.reuse_run_id != '' && needs.reuse.result == 'success')) }}
+    if: ${{ always() && needs.macos.result == 'success' && ((inputs.reuse_run_id == '' && needs.windows.result == 'success') || (inputs.reuse_run_id != '' && needs.reuse.result == 'success')) }}
     name: Bind native artifacts to the release manifest
     needs: [reuse, windows, macos]
     runs-on: ubuntu-24.04
@@ -284,16 +274,3 @@ jobs:
           path: dist/desktop/*
           if-no-files-found: error
           retention-days: 30
-
-  r2:
-    name: BLOCKED - protected admission and Desktop signer required
-    if: inputs.publish
-    runs-on: ubuntu-24.04
-    timeout-minutes: 1
-    steps:
-      - name: Stop before a build candidate can become the public manifest
-        run: |
-          test "$GITHUB_REF" = refs/heads/main
-          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/desktop-release.yml@refs/heads/main"
-          echo "::error::PROTECTED_DESKTOP_ADMISSION_REQUIRED: build-only output is a performance-pending candidate; a protected admission owner must form the exact unsigned 11-field manifest, and an external signer/CAS owner must add only the Ed25519 signature, create desktop/manual/v<manifest.version>/latest.json without overwrite, read back identical bytes, then CAS desktop/signed/latest.json while leaving desktop/latest.json frozen at 2.0.12"
-          exit 1
