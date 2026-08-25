@@ -2618,7 +2618,8 @@ test('delivers only the authenticated tenant runtime model routes without exposi
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('cache-control'), 'no-store');
     assert.equal(response.headers.get('access-control-allow-origin'), null);
-    assert.deepEqual(await response.json(), {
+    const releasedClientBody = await response.json();
+    assert.deepEqual(releasedClientBody, {
       schemaVersion: 1,
       models: [{
         id: luna.id,
@@ -2641,8 +2642,23 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         upstreamApiKey: searchKey,
       },
     });
-    assert.equal(enabledCalls.get(searchCredentialRoute.id), 1);
-    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 1);
+    const currentClientResponse = await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.13`, {
+      headers: auth(),
+    });
+    assert.equal(currentClientResponse.status, 200);
+    assert.deepEqual(await currentClientResponse.json(), releasedClientBody);
+    const unknownClientResponse = await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.14`, {
+      headers: auth(),
+    });
+    assert.equal(unknownClientResponse.status, 400);
+    assert.deepEqual(await unknownClientResponse.json(), {
+      error: {
+        code: 'UNSUPPORTED_CLIENT_VERSION',
+        message: 'Unsupported runtime models client version',
+      },
+    });
+    assert.equal(enabledCalls.get(searchCredentialRoute.id), 2);
+    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 2);
     assert.equal(keyCalls.includes(internalDeepSeekRoute.id), false);
     const catalogResponse = await (await fetch(`${baseUrl}/v1/models`, { headers: auth() })).json() as {
       models: Array<{ id: string }>;

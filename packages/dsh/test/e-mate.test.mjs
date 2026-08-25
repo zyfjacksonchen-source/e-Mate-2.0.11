@@ -3299,6 +3299,7 @@ test('enterprise identity provider maps target credentials and the production HT
       })
     }
     if (url.pathname.endsWith('/v1/runtime-models')) {
+      assert.equal(url.search, '?client_version=2.0.13')
       return json(runtimeResponse)
     }
     if (url.pathname.endsWith('/v1/authenticated-probe')
@@ -3528,7 +3529,6 @@ test('enterprise identity provider maps target credentials and the production HT
   const runtimeRequests = requests.filter(request => request.path.endsWith('/v1/runtime-models'))
   assert.ok(runtimeRequests.length >= 2)
   assert.ok(runtimeRequests.every(request => request.authorization === `Bearer ${modelToken}`))
-  assert.ok(runtimeRequests.every(request => new URL(request.url).search === '?client_version=2.0.13'))
   const auditRequests = requests.filter(request => request.path.endsWith('/v1/audit/usage'))
   assert.equal(auditRequests.length, 1)
   assert.equal(auditRequests[0].authorization, `Bearer ${modelToken}`)

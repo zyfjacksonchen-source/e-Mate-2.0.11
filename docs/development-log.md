@@ -2137,3 +2137,14 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 本条只有 source-fixed Git 证据；测试 artifact 全部位于系统临时目录并清理，没有生成、签名、上传、激活或发布生产性能回执与安装包。
 - Remaining blockers: 必须先把最终 Harness/Base/Profile/source identity 锁定并更新验证器 pin；仍需批准的真实验收账号、最终安装态 2.0.12 与 2.0.13、同机同网正式模型 30 组 AB/BA、外部 renderer paint 探针、Provider invocation/response 回执和安装回执。fixture 或本地 unpacked runtime 不能关闭这些阻断。
 - Next exact action: 主聚合复核并合入本 source-fixed commit，在最终 identity 上重跑窄测试；随后仅在隔离验收目录用同一安装态运行生成六类脱敏 artifact，执行 `--assemble` 后再以 `--input` 回读，只有 `gate_status=passed` 的同一 `performance_run_id` 才可供 Desktop/Profile 准入引用。
+
+## 2026-08-25 · 2.0.13 runtime-models 搜索授权版本协商修复
+
+- Goal checkpoint: 本修复只关闭 2.0.13 客户端与既有企业模型/搜索策略端点的版本协商断裂，不处理其他 P0，也不进入发布链。
+- Frozen baseline / current HEAD: 独立 worktree 精确基于事故聚合 `77454a2fdf1802365cd29802582b2382a2e8997f`；Base 为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`，Harness 为 `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Inspected native seam: `enterprise-provider.ts` 只调用既有 `/v1/runtime-models?client_version=2.0.13` 并严格要求 `searchCredentialGrant`；Gateway 同一路由却只在 `client_version=2.0.12` 时返回该字段，导致 2.0.13 在模型目录投影前整体失败。
+- Decision and forbidden alternatives: Gateway 在同一路由保留无 query 的 2.0.11 精确旧 schema，精确允许 2.0.12/2.0.13 并为两者返回同一搜索授权合同；未知版本以 `UNSUPPORTED_CLIENT_VERSION` 失败关闭。没有新增 endpoint、回退、宽松默认、第二模型策略或凭据路径。
+- Changed scope: 仅修改 Model Gateway 的版本 allowlist、服务端合同回归和客户端现有 HTTP 合同 fixture；未改 R2、AGENTS、网站、发布工作流、模型路由或凭据所有权。
+- Verification commands and results: 根因回归在修复前精确失败；修复后 Gateway 2.0.12/2.0.13/未知版本合同 `1/1`、搜索 denied/unavailable `1/1`、Gateway TypeScript 通过，DSH enterprise identity 2.0.13 精确 query/grant 合同 `1/1`，change-impact 对精确变更判定为有效 Base lane，`git diff --check` 通过。
+- Immutable evidence / receipt: 本条只有 source-fixed Git 证据；未生成、签名、上传、激活或发布任何安装包、Profile generation、manifest 或生产指针。
+- Remaining blocker: 主聚合合入后仍须在最终候选上重跑相同窄门禁；生产 Gateway 部署与真实安装态联网搜索验收属于后续单独授权步骤，本提交不声称上线。
