@@ -98,6 +98,7 @@ describe('desktop profile composition', () => {
     expect(() => ensureDesktopProfile(home)).toThrow('dsh.profile.bundles must be an array')
   })
 
+  // A cold Windows home materializes the full dependency junction fallback; keep its I/O budget local.
   it('assembles the Host shell without replacing the upstream client shell', () => {
     const home = temporaryHome()
     const prepared = prepareDesktopProfile(undefined, home, 'darwin')
@@ -189,7 +190,7 @@ describe('desktop profile composition', () => {
     }))
     expect(rows.map(row => row.id)).not.toContain('desktop-computer-use-setup')
     expect(rows.map(row => row.id)).not.toContain('desktop-profiles')
-  })
+  }, 15_000)
 
   it('boots a selected Web profile without overriding its compatibility UI rows', () => {
     const home = temporaryHome()

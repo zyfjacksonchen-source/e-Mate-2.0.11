@@ -2344,3 +2344,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: CI run `32863107272` 属于排除前 `6b6ca14`，已请求取消且不得作为候选；当前只有源码反向 diff，没有生成、安装或发布字节。
 - Remaining blockers: 必须提交/推送排除变化并让新 exact HEAD 通过完整 PR CI；随后才能生成正式 macOS 候选。Windows 真机和 P0/TQ 全部安装/更新/回滚门仍 OPEN。
 - Next exact action: 复核最终反向 diff 只移除分类候选且保留单一生产者闭包，提交后重跑 PR #56 CI，生产链继续关闭。
+
+## 2026-08-25 · 2.0.13 Windows 冷 Profile 合同测试时限修正
+
+- Goal checkpoint: 受保护 CI 在 exact HEAD `22538ac7ead211ec19833391863d131641d4c805` 的 Windows 安装器作业中只因一条 Profile 组合合同超过 Vitest 默认 5 秒而失败；本条只修测试时限误判，不改变生产 Profile、打包器或发布范围。
+- Frozen baseline / current HEAD: 失败绑定 run `32864830246` / job `97859184341`；其余 target、Harness、企业合同和六项 Base 兼容矩阵均已通过，macOS 包作业仍独立执行。生产、R2、Feed、desired state 与安装态均未写入。
+- Binding documents read: 核对根 `AGENTS.md`、2.0.13 最终 P0/TQ 边界、`profile.spec.ts`、`profile.ts`、Vitest 配置、Windows package check 及本次/上一绿跑的同名测试日志。
+- Inspected native seam: 该断言以冷 `$DSH_HOME` 调用唯一 `prepareDesktopProfile`，会物化完整依赖 junction fallback 并验证 Host/Web/Profile 组合；这是有意的磁盘密集型集成合同，不是纯内存单元测试。生产 owner 与所有调用方不变。
+- Experiment or why unnecessary: 本次 Windows runner 中同一测试在 `5.984s` 完成后，其余同文件测试继续通过；上一全绿 run `32857386958` / job `97834652832` 的同一未变测试为 `1.606s`。`dae78fc..22538ac` 对 `profile.ts`、`profile.spec.ts`、Vitest 配置和 package scripts 无 diff，排除本轮逻辑死锁或新 I/O 路径。
+- Decision and forbidden alternatives: 只为这一条完整冷 Profile 合同设置局部 `15_000ms` 预算并写明 Windows junction/冷盘原因；其余 252 项继续使用默认 5 秒。禁止全局放宽、重试隐藏、删除组合断言、绕过 junction 物化或修改生产启动逻辑。
+- Changed scope: 仅修改 `desktop/e-mate-desktop/tests/profile.spec.ts` 并 append 本记录；没有新增依赖或触碰产品字节。
+- Verification commands and results: `profile.spec.ts` 本机 `15/15` 通过，测试 TypeScript 检查通过，`git diff --check` 通过；必须由下一次 Windows CI 证明该局部预算覆盖真实冷 runner 且安装器其余检查继续执行。
+- Immutable evidence / receipt: 当前只有 CI 失败/历史对照与 source-fixed diff；run `32864830246` 因 Windows job 失败不能作为发布门或候选依据，即使其 macOS job随后成功也只可作诊断证据。
+- Remaining blockers: 提交并推送后必须重新通过 exact-HEAD 全量 PR CI，再生成全新正式候选；不得复用当前失败 run 的任何制品。
+- Next exact action: 在主代理复核最小 diff 后提交、推送并等待新 CI；生产发布链继续关闭。
