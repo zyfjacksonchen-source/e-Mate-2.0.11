@@ -28,7 +28,7 @@ on:
         required: true
         type: string
       performance_artifact_id:
-        description: Exact GitHub artifact ID for e-mate-performance-admission-<source SHA>.
+        description: Exact GitHub artifact ID for e-mate-performance-admission-<source SHA>-attempt-1.
         required: true
         type: string
 

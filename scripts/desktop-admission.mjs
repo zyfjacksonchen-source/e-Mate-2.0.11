@@ -553,7 +553,7 @@ function githubRun(value, expected) {
     || value.head_sha !== expected.sourceCommit || value.head_branch !== 'main'
     || value.event !== expected.event || value.status !== 'completed' || value.conclusion !== 'success'
     || value.repository?.full_name !== REPOSITORY
-    || !Number.isSafeInteger(value.run_attempt) || value.run_attempt <= 0) {
+    || value.run_attempt !== 1) {
     throw new Error(`GitHub ${expected.label} run provenance is invalid`)
   }
   return value
@@ -657,7 +657,7 @@ export async function createGithubArtifactProvenance(options) {
     throw new Error('GitHub Profile build artifacts share an identity')
   }
   const performance = githubArtifact(await metadata(options.metadata, 'performance-artifact.json'), {
-    id: options.performanceArtifactId, name: `e-mate-performance-admission-${options.sourceCommit}`,
+    id: options.performanceArtifactId, name: `e-mate-performance-admission-${options.sourceCommit}-attempt-1`,
     runId: options.performanceRunId, sourceCommit: options.sourceCommit, label: 'performance admission',
   })
   const provenance = {

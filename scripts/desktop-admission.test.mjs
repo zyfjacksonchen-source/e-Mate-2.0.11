@@ -398,7 +398,7 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
     await json(join(metadata, 'desktop-artifact.json'), artifact('201', `e-mate-desktop-release-${SOURCE}`, '102'))
     await json(join(metadata, 'ci-artifact.json'), artifact('206', `e-mate-change-impact-${SOURCE}`, '100'))
     await json(join(metadata, 'profile-publication-artifact.json'), artifact('202', `e-mate-profile-native-cloudflare-publication-${SOURCE}`, '103'))
-    await json(join(metadata, 'performance-artifact.json'), artifact('203', `e-mate-performance-admission-${SOURCE}`, '104'))
+    await json(join(metadata, 'performance-artifact.json'), artifact('203', `e-mate-performance-admission-${SOURCE}-attempt-1`, '104'))
     await json(join(metadata, 'profile-build-artifact.json'), artifact('204', `e-mate-desktop-profile-${SOURCE}`, '101'))
     await json(join(metadata, 'profile-build-receipt-artifact.json'), artifact('205', `e-mate-desktop-profile-build-receipt-${SOURCE}`, '101'))
     const options = {
@@ -409,6 +409,10 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
     }
     const { provenance } = await createGithubArtifactProvenance(options)
     assert.deepEqual(provenance.artifacts.map(item => item.role), ['desktop_candidate', 'performance_admission'])
+    const rerun = run('100', '.github/workflows/ci.yml', 'push')
+    rerun.run_attempt = 2
+    await json(join(metadata, 'ci-run.json'), rerun)
+    await assert.rejects(() => createGithubArtifactProvenance(options), /CI run provenance is invalid/u)
     const invalid = run('100', '.github/workflows/ci.yml', 'push')
     invalid.repository.full_name = 'zyfjacksonchen-source/e-Mate'
     await json(join(metadata, 'ci-run.json'), invalid)
