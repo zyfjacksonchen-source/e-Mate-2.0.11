@@ -209,16 +209,15 @@ jobs:
       - name: Re-run the signed admission's exact TTFT v2 verifier
         run: |
           set -euo pipefail
-          verifier_source="$(node --input-type=module -e '
-            import { readFileSync } from "node:fs"
-            const value = JSON.parse(readFileSync(".admission/performance/performance-admission.json", "utf8"))
-            if (value?.verifier?.source !== "scripts/performance-parity.mjs") process.exit(1)
-            process.stdout.write(value.verifier.source)
-          ')"
-          node "$verifier_source" \
-            --input .admission/performance/e-mate-performance-evidence.json \
-            --output .admission/reverified-performance-evidence.json
-          cmp -s .admission/performance/e-mate-performance-evidence.json .admission/reverified-performance-evidence.json
+          mapfile -t child_paths < <(node --input-type=module -e \
+            "import { PERFORMANCE_MODEL_LEAF_IDS as r } from './scripts/desktop-admission.mjs'; console.log(r.map((x, i) => 'children/' + String(i + 1).padStart(2, '0') + '-' + x).join('\\n'))")
+          test "${#child_paths[@]}" = 4
+          for child_path in "${child_paths[@]}"; do
+            evidence=".admission/performance/$child_path/e-mate-performance-evidence.json"
+            verified="$(mktemp "$RUNNER_TEMP/e-mate-admission-$(basename "$child_path").XXXXXX.json")"
+            node scripts/performance-parity.mjs --input "$evidence" --output "$verified"
+            cmp -s "$evidence" "$verified"
+          done
 
       - name: Validate GitHub run, job, artifact, and branch provenance
         env:

@@ -196,6 +196,42 @@ function ackEnvironment(update: MacUpdateRequest, path: string): NodeJS.ProcessE
   }
 }
 
+function legacyTransactionRequest(root: string) {
+  const transactionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const token = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  const canonicalRoot = realpathSync(root)
+  const state = join(canonicalRoot, 'updates', '2.0.13', `install-${transactionId}`)
+  mkdirSync(state, { recursive: true })
+  const suffix = transactionId.slice(0, 8)
+  const currentApp = '/Applications/e-Mate.app'
+  return {
+    requestPath: join(state, 'request.json'),
+    ackPath: join(state, 'startup-ack.json'),
+    environment: {
+      EMATE_MAC_UPDATE_ACK_PATH: join(state, 'startup-ack.json'),
+      EMATE_MAC_UPDATE_ACK_TOKEN: token,
+      EMATE_MAC_UPDATE_ACK_VERSION: '2.0.13',
+    } satisfies NodeJS.ProcessEnv,
+    request: {
+      schemaVersion: 1,
+      transactionId,
+      parentPid: 123,
+      currentApp,
+      currentVersion: '2.0.12',
+      targetVersion: '2.0.13',
+      stagedApp: `/Applications/.e-Mate-2.0.13-${suffix}.staged.app`,
+      backupApp: `/Applications/.e-Mate-2.0.12-${suffix}.backup.app`,
+      failedApp: `/Applications/.e-Mate-2.0.13-${suffix}.failed.app`,
+      trashApp: join(homedir(), '.Trash', `e-Mate 2.0.12 Update Backup ${suffix}.app`),
+      receiptPath: join(state, 'receipt.json'),
+      helperReadyPath: join(state, 'helper-ready.json'),
+      shutdownReadyPath: join(state, 'shutdown-ready.json'),
+      ackPath: join(state, 'startup-ack.json'),
+      ackToken: token,
+    },
+  }
+}
+
 function installedBaseReceipt(update: MacUpdateRequest) {
   return {
     schemaVersion: 1,
@@ -974,6 +1010,110 @@ describe('detached macOS update replacement', () => {
     expect(events).toContain('receipt:completed-cleanup-failed')
     expect(events).not.toContain(`rename:${update.currentApp}:${update.failedApp}`)
     expect(events).not.toContain(`launch:${update.currentApp}:rollback`)
+  })
+
+  it('accepts the exact 2.0.12 three-field acknowledgement only after probation applies', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'e-mate-legacy-update-ack-'))
+    temporaryRoots.push(root)
+    const legacy = legacyTransactionRequest(root)
+    writeMacUpdateDurableJson(legacy.requestPath, legacy.request)
+    const sender = vi.fn(async () => async () => {})
+
+    const acknowledgement = await writeMacUpdateStartupAck(
+      root,
+      '2.0.13',
+      legacy.environment,
+      undefined,
+      sender,
+    )
+
+    expect(acknowledgement).toEqual(expect.objectContaining({
+      status: 'installed',
+      currentVersion: '2.0.13',
+      targetVersion: '2.0.13',
+    }))
+    expect(() => lstatSync(legacy.ackPath)).toThrow()
+    expect(sender).not.toHaveBeenCalled()
+
+    await acknowledgement?.commitApplied()
+
+    expect(JSON.parse(readFileSync(legacy.ackPath, 'utf8'))).toEqual({
+      schemaVersion: 1,
+      status: 'healthy',
+      token: legacy.request.ackToken,
+      version: '2.0.13',
+      pid: process.pid,
+      acknowledgedAt: expect.any(String),
+    })
+    expect(sender).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    'missing path',
+    'missing token',
+    'missing version',
+    'mixed modern field',
+    'unknown field',
+    'wrong predecessor request',
+    'expanded legacy request',
+  ])('rejects non-exact legacy acknowledgement input: %s', async (label) => {
+    const root = mkdtempSync(join(tmpdir(), 'e-mate-legacy-update-ack-'))
+    temporaryRoots.push(root)
+    const legacy = legacyTransactionRequest(root)
+    const environment: NodeJS.ProcessEnv = { ...legacy.environment }
+    const requestValue: Record<string, unknown> = { ...legacy.request }
+    if (label === 'missing path') delete environment.EMATE_MAC_UPDATE_ACK_PATH
+    else if (label === 'missing token') delete environment.EMATE_MAC_UPDATE_ACK_TOKEN
+    else if (label === 'missing version') delete environment.EMATE_MAC_UPDATE_ACK_VERSION
+    else if (label === 'mixed modern field') environment.EMATE_MAC_UPDATE_ACK_TRANSACTION_ID = legacy.request.transactionId
+    else if (label === 'unknown field') environment.EMATE_MAC_UPDATE_ACK_UNEXPECTED = 'forged'
+    else if (label === 'wrong predecessor request') requestValue.currentVersion = '2.0.11'
+    else requestValue.unexpected = 'forged'
+    writeMacUpdateDurableJson(legacy.requestPath, requestValue)
+    const sender = vi.fn(async () => async () => {})
+
+    await expect(writeMacUpdateStartupAck(root, '2.0.13', environment, undefined, sender))
+      .rejects.toThrow(/macOS update startup acknowledgement environment is invalid|legacy macOS update request is invalid/u)
+
+    expect(() => lstatSync(legacy.ackPath)).toThrow()
+    expect(sender).not.toHaveBeenCalled()
+  })
+
+  it('rejects a legacy request changed during probation before writing its acknowledgement', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'e-mate-legacy-update-ack-'))
+    temporaryRoots.push(root)
+    const legacy = legacyTransactionRequest(root)
+    writeMacUpdateDurableJson(legacy.requestPath, legacy.request)
+    const acknowledgement = await writeMacUpdateStartupAck(root, '2.0.13', legacy.environment)
+    writeMacUpdateDurableJson(legacy.requestPath, { ...legacy.request, parentPid: 456 })
+
+    expect(acknowledgement).toBeDefined()
+    await expect(acknowledgement!.commitApplied()).rejects.toThrow('request changed before startup commit')
+
+    expect(() => lstatSync(legacy.ackPath)).toThrow()
+  })
+
+  it('keeps the legacy predecessor rollbackable when probation never applies its acknowledgement', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'e-mate-legacy-update-ack-'))
+    temporaryRoots.push(root)
+    const legacy = legacyTransactionRequest(root)
+    writeMacUpdateDurableJson(legacy.requestPath, legacy.request)
+    const acknowledgement = await writeMacUpdateStartupAck(root, '2.0.13', legacy.environment)
+    const events: string[] = []
+    const update = request()
+
+    await expect(performMacUpdateSwap(update, adapter(events, async () => {
+      expect(() => lstatSync(legacy.ackPath)).toThrow()
+      throw new Error('probation failed before Schedule admission')
+    }))).rejects.toThrow('probation failed before Schedule admission')
+
+    expect(acknowledgement).toBeDefined()
+    expect(() => lstatSync(legacy.ackPath)).toThrow()
+    expect(events).toContain(`rename:${update.currentApp}:${update.backupApp}`)
+    expect(events).toContain(`rename:${update.currentApp}:${update.failedApp}`)
+    expect(events).toContain(`rename:${update.backupApp}:${update.currentApp}`)
+    expect(events).toContain('receipt:rolled-back')
+    expect(events).toContain(`launch:${update.currentApp}:rollback`)
   })
 
   it('writes the update acknowledgement only inside the matching update transaction', async () => {

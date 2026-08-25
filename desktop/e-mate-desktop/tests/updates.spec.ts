@@ -77,7 +77,7 @@ function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): 
       source_commit: SOURCE_COMMIT,
       artifacts: [
         { role: 'desktop_candidate', name: `e-mate-desktop-release-${SOURCE_COMMIT}`, artifact_id: '11', digest: `sha256:${'7'.repeat(64)}`, run_id: '123', run_attempt: 1 },
-        { role: 'performance_admission', name: `e-mate-performance-admission-${SOURCE_COMMIT}`, artifact_id: '12', digest: `sha256:${'8'.repeat(64)}`, run_id: '124', run_attempt: 1 },
+        { role: 'performance_admission', name: `e-mate-performance-admission-${SOURCE_COMMIT}-attempt-1`, artifact_id: '12', digest: `sha256:${'8'.repeat(64)}`, run_id: '124', run_attempt: 1 },
       ],
     },
     artifacts: {

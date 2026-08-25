@@ -395,13 +395,13 @@ function isGithubArtifactProvenance(value: unknown, sourceCommit: string): boole
       const role = roles[index]
       const name = role === 'desktop_candidate'
         ? `e-mate-desktop-release-${sourceCommit}`
-        : `e-mate-performance-admission-${sourceCommit}`
+        : `e-mate-performance-admission-${sourceCommit}-attempt-1`
       return hasExactKeys(artifact, ['role', 'name', 'artifact_id', 'digest', 'run_id', 'run_attempt'])
         && artifact.role === role && artifact.name === name
         && typeof artifact.artifact_id === 'string' && RUN_ID_PATTERN.test(artifact.artifact_id)
         && typeof artifact.digest === 'string' && /^sha256:[0-9a-f]{64}$/u.test(artifact.digest)
         && typeof artifact.run_id === 'string' && RUN_ID_PATTERN.test(artifact.run_id)
-        && Number.isSafeInteger(artifact.run_attempt) && (artifact.run_attempt as number) > 0
+        && artifact.run_attempt === 1
     })
 }
 

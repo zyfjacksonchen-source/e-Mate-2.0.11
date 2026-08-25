@@ -7,6 +7,8 @@ import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import {
   createGithubArtifactProvenance,
+  PERFORMANCE_MODEL_LEAF_IDS,
+  PERFORMANCE_MODEL_ROSTER,
   createPerformanceSummary,
   createProfileBuildReceipt,
   createProfileComponentAggregate,
@@ -18,6 +20,7 @@ const SOURCE = 'a'.repeat(40)
 const ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
 const TARGETS = ['darwin-arm64', 'darwin-x64', 'win32-x64']
 const PERFORMANCE_CONTEXT = Buffer.from('e-mate-performance-admission-v1\0', 'utf8')
+const PERFORMANCE_AGGREGATE_CONTEXT = Buffer.from('e-mate-performance-aggregate-admission-v1\0', 'utf8')
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
@@ -244,7 +247,7 @@ test('Profile aggregate is recomputed from staged bytes, signed desired states, 
   }
 })
 
-async function performanceFixture(root, profile) {
+async function performanceFixture(root, profile, options = {}) {
   const candidate = await desktopCandidate(join(root, 'desktop'))
   const aggregate = {
     aggregate_sha256: '1'.repeat(64), inventory_sha256: '2'.repeat(64), staged_profile_tree_sha256: '3'.repeat(64),
@@ -258,8 +261,11 @@ async function performanceFixture(root, profile) {
   const sourcePath = join(root, 'performance-parity.mjs')
   await file(sourcePath, 'export {}\n')
   const supportingBytes = Buffer.from('{}\n')
-  const path = (name, candidate) => ({
+  const path = (name, candidate, roster) => ({
     run_receipt: Object.fromEntries([
+      ['provider', roster.provider],
+      ['model', roster.model],
+      ['reasoning_level', roster.reasoning_effort],
       ['raw_samples_artifact', 'raw-samples'],
       ['native_trace_artifact', 'native-session-trace'],
       ['provider_receipt_artifact', 'provider-invocation-receipt'],
@@ -267,64 +273,102 @@ async function performanceFixture(root, profile) {
       ['renderer_paint_artifact', 'renderer-paint-trace'],
       ['installed_runtime_artifact', 'installed-runtime-receipt'],
       ...(candidate ? [['enterprise_receipt_artifact', 'enterprise-runtime-receipt']] : []),
-    ].map(([field, kind]) => [field, {
+    ].map(([field, kind]) => field.endsWith('_artifact') ? [field, {
       kind, path: `evidence/${name}/${field}.json`, sha256: sha256(supportingBytes),
-    }])),
+    }] : [field, kind])),
   })
-  const evidence = {
-    schema_version: 2,
-    comparison_kind: 'installed-2.0.12-vs-2.0.13',
-    performance_run_id: 'performance-run-accepted-1',
-    evidence_kind: 'production-real-provider',
-    harness_commit: profile.base.harness_commit,
-    paths: {
-      baseline: path('baseline', false),
-      emate_online: path('emate_online', true),
-      emate_enterprise_unavailable_valid_cache: path('emate_enterprise_unavailable_valid_cache', true),
-    },
-    production_artifacts_verified: true,
-    decision: { gate_status: 'passed', failures: [], production_receipt_failures: [], comparisons: {} },
-  }
-  const evidenceBytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`)
-  await file(join(performanceRoot, 'e-mate-performance-evidence.json'), evidenceBytes)
-  for (const evidencePath of Object.values(evidence.paths)) {
-    for (const descriptor of Object.values(evidencePath.run_receipt)) {
-      await file(join(performanceRoot, ...descriptor.path.split('/')), supportingBytes)
+  const desktopArtifacts = Object.fromEntries(['darwin', 'win32'].map(platform => [platform, {
+    bytes: candidate.candidate.artifacts[platform].bytes,
+    sha256: candidate.candidate.artifacts[platform].sha256,
+  }]))
+  const models = []
+  for (const [index, roster] of PERFORMANCE_MODEL_ROSTER.entries()) {
+    if (options.omitRouteId === roster.route_id) continue
+    const childRoot = join(performanceRoot, 'children', `${String(index + 1).padStart(2, '0')}-${PERFORMANCE_MODEL_LEAF_IDS[index]}`)
+    const evidence = {
+      schema_version: 2,
+      comparison_kind: 'installed-2.0.12-vs-2.0.13',
+      performance_run_id: options.duplicateRunId ? 'performance-child-run-duplicate' : `performance-child-run-${index + 1}`,
+      evidence_kind: options.evidenceKind ?? 'production-real-provider',
+      harness_commit: profile.base.harness_commit,
+      performance_model: options.modelDrift && index === 0 ? { ...roster, model: 'wrong-model' } : roster,
+      paths: {
+        baseline: path('baseline', false, roster),
+        emate_online: path('emate_online', true, roster),
+        emate_enterprise_unavailable_valid_cache: path('emate_enterprise_unavailable_valid_cache', true, roster),
+      },
+      production_artifacts_verified: true,
+      decision: { gate_status: 'passed', failures: [], production_receipt_failures: [], comparisons: {} },
     }
+    const evidenceBytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`)
+    await file(join(childRoot, 'e-mate-performance-evidence.json'), evidenceBytes)
+    for (const evidencePath of Object.values(evidence.paths)) {
+      for (const [field, descriptor] of Object.entries(evidencePath.run_receipt)) {
+        if (field.endsWith('_artifact')) await file(join(childRoot, ...descriptor.path.split('/')), supportingBytes)
+      }
+    }
+    const verifier = {
+      contract: 'ttft-v2', source: 'scripts/performance-parity.mjs', source_commit: SOURCE,
+      source_sha256: sha256(await readFile(sourcePath)), harness_commit: profile.base.harness_commit,
+      evidence_filename: 'e-mate-performance-evidence.json',
+      decision_sha256: sha256(Buffer.from(`${JSON.stringify(evidence.decision, null, 2)}\n`, 'utf8')),
+      gate_status: 'passed',
+    }
+    const unsigned = {
+      schema_version: 1,
+      document_type: 'emate.performance-admission',
+      status: 'passed',
+      performance_run_id: evidence.performance_run_id,
+      source_commit: SOURCE,
+      base_contract_id: profile.base.id,
+      profile_component_aggregate_sha256: aggregate.aggregate_sha256,
+      desktop_artifacts: desktopArtifacts,
+      evidence_sha256: sha256(evidenceBytes),
+      verifier,
+    }
+    const signature = sign(null, Buffer.concat([
+      PERFORMANCE_CONTEXT, Buffer.from(canonicalProfileJson(unsigned), 'utf8'),
+    ]), profile.privateKey).toString('base64')
+    const admission = {
+      ...unsigned, signature: { algorithm: 'ed25519', key_id: 'test-key', value: signature },
+    }
+    const admissionBytes = Buffer.from(`${JSON.stringify(admission, null, 2)}\n`)
+    await file(join(childRoot, 'performance-admission.json'), admissionBytes)
+    models.push({
+      route_id: roster.route_id,
+      performance_run_id: evidence.performance_run_id,
+      admission_sha256: sha256(admissionBytes),
+      evidence_sha256: sha256(evidenceBytes),
+      verifier,
+    })
   }
-  const verifier = {
-    contract: 'ttft-v2', source: 'scripts/performance-parity.mjs', source_commit: SOURCE,
+  const aggregateVerifier = {
+    contract: 'ttft-v2-aggregate', source: 'scripts/performance-parity.mjs', source_commit: SOURCE,
     source_sha256: sha256(await readFile(sourcePath)), harness_commit: profile.base.harness_commit,
-    evidence_filename: 'e-mate-performance-evidence.json',
-    decision_sha256: sha256(Buffer.from(`${JSON.stringify(evidence.decision, null, 2)}\n`, 'utf8')),
+    evidence_filename: 'performance-admission.json',
+    decision_sha256: sha256(Buffer.from(canonicalProfileJson(models.map(child => child.verifier.decision_sha256)), 'utf8')),
     gate_status: 'passed',
   }
-  const unsigned = {
+  const aggregateRunId = `performance-aggregate-${sha256(Buffer.from(canonicalProfileJson(models), 'utf8')).slice(0, 40)}`
+  const aggregateUnsigned = {
     schema_version: 1,
-    document_type: 'emate.performance-admission',
+    document_type: 'emate.performance-aggregate-admission',
     status: 'passed',
-    performance_run_id: evidence.performance_run_id,
+    performance_run_id: aggregateRunId,
     source_commit: SOURCE,
     base_contract_id: profile.base.id,
     profile_component_aggregate_sha256: aggregate.aggregate_sha256,
-    desktop_artifacts: {
-      darwin: {
-        bytes: candidate.candidate.artifacts.darwin.bytes,
-        sha256: candidate.candidate.artifacts.darwin.sha256,
-      },
-      win32: {
-        bytes: candidate.candidate.artifacts.win32.bytes,
-        sha256: candidate.candidate.artifacts.win32.sha256,
-      },
-    },
-    evidence_sha256: sha256(evidenceBytes),
-    verifier,
+    desktop_artifacts: desktopArtifacts,
+    roster: PERFORMANCE_MODEL_ROSTER,
+    children: models,
+    evidence_sha256: sha256(Buffer.from(canonicalProfileJson(models.map(child => child.evidence_sha256)), 'utf8')),
+    verifier: aggregateVerifier,
   }
-  const signature = sign(null, Buffer.concat([
-    PERFORMANCE_CONTEXT, Buffer.from(canonicalProfileJson(unsigned), 'utf8'),
+  const aggregateSignature = sign(null, Buffer.concat([
+    PERFORMANCE_AGGREGATE_CONTEXT, Buffer.from(canonicalProfileJson(aggregateUnsigned), 'utf8'),
   ]), profile.privateKey).toString('base64')
   await json(join(performanceRoot, 'performance-admission.json'), {
-    ...unsigned, signature: { algorithm: 'ed25519', key_id: 'test-key', value: signature },
+    ...aggregateUnsigned, signature: { algorithm: 'ed25519', key_id: 'test-key', value: aggregateSignature },
   })
   return { aggregatePath, candidate, performanceRoot, sourcePath }
 }
@@ -339,7 +383,7 @@ test('performance summary accepts only the exact signed TTFT v2 bundle', async (
       profileAggregate: fixture.aggregatePath, performanceBundle: fixture.performanceRoot,
       verifierSource: fixture.sourcePath, output: join(root, 'summary.json'),
     })
-    assert.equal(summary.performance_run_id, 'performance-run-accepted-1')
+    assert.match(summary.performance_run_id, /^performance-aggregate-[0-9a-f]{40}$/u)
     assert.equal(summary.signature_key_id, 'test-key')
     await json(join(fixture.performanceRoot, 'extra.json'), {})
     await assert.rejects(() => createPerformanceSummary({
@@ -349,6 +393,28 @@ test('performance summary accepts only the exact signed TTFT v2 bundle', async (
     }), /file set is invalid/u)
   } finally {
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('performance aggregate fails closed for missing, duplicate, drifted, or fixture model evidence', async () => {
+  for (const options of [
+    { omitRouteId: PERFORMANCE_MODEL_ROSTER[3].route_id },
+    { duplicateRunId: true },
+    { modelDrift: true },
+    { evidenceKind: 'fixture' },
+  ]) {
+    const root = await mkdtemp(join(tmpdir(), 'desktop-admission-performance-negative-'))
+    try {
+      const profile = await profileFixture(join(root, 'profile-fixture'))
+      const fixture = await performanceFixture(root, profile, options)
+      await assert.rejects(() => createPerformanceSummary({
+        sourceCommit: SOURCE, baseContract: profile.basePath, candidate: fixture.candidate.path,
+        profileAggregate: fixture.aggregatePath, performanceBundle: fixture.performanceRoot,
+        verifierSource: fixture.sourcePath, output: join(root, 'summary.json'),
+      }))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   }
 })
 
@@ -450,9 +516,9 @@ test('workflow is build-only and uploads only the two external signer inputs', a
   assert.match(workflow, /zyfjacksonchen-source\/e-Mate-2\.0\.11/u)
   assert.doesNotMatch(workflow, /zyfjacksonchen-source\/e-Mate(?:\s|$)/u)
   assert.match(workflow, /desktop-release-manifest\.ts\s+admit/u)
-  assert.match(workflow, /value\.verifier\.source/u)
-  assert.match(workflow, /node "\$verifier_source"/u)
-  assert.match(workflow, /cmp -s \.admission\/performance\/e-mate-performance-evidence\.json/u)
+  assert.match(workflow, /PERFORMANCE_MODEL_LEAF_IDS/u)
+  assert.match(workflow, /test "\$\{#child_paths\[@\]\}" = 4/u)
+  assert.match(workflow, /'children\/' \+ String\(i \+ 1\)\.padStart\(2, '0'\) \+ '-' \+ x/u)
   assert.match(workflow, /submodules: recursive/u)
   assert.match(workflow, /pnpm --dir upstream\/deepseek-harness install --frozen-lockfile --ignore-scripts/u)
   assert.match(workflow, /base-contract\.json,desktop-release-unsigned\.json/u)
@@ -470,13 +536,18 @@ test('performance evidence and signing use their existing isolated environments'
   assert.equal(parsed.jobs.admission.environment, 'r2-publish')
   assert.equal(parsed.jobs.admission.needs, 'evidence')
   const signer = parsed.jobs.admission.steps.find(step => step.id === 'admit')
-  assert.equal(signer.uses, 'zyfjacksonchen-source/e-mate-desktop-publication/performance@c1bf49db627b411077cea7b914981c931484131f')
+  assert.equal(signer.uses, 'zyfjacksonchen-source/e-mate-desktop-publication/performance@eca005391708dc6ac3057a8702995e2475cdaaf2')
   assert.deepEqual([...workflow.matchAll(/secrets\.([A-Z0-9_]+)/gu)].map(match => match[1]).sort(), [
     'EMATE_PROFILE_SIGNING_KEY_ID', 'EMATE_PROFILE_SIGNING_PRIVATE_KEY',
   ])
   assert.match(workflow, /test "\$\{GITHUB_REF_PROTECTED:-\}" = true/u)
   assert.match(workflow, /test "\$GITHUB_RUN_ATTEMPT" = 1/u)
   assert.match(workflow, /GITHUB_WORKFLOW_REF" = "\$GITHUB_REPOSITORY\/\.github\/workflows\/desktop-performance\.yml@refs\/heads\/main"/u)
+  assert.match(workflow, /files\.length !== 92/u)
+  for (const leafId of PERFORMANCE_MODEL_LEAF_IDS) {
+    assert.match(workflow, new RegExp(`e-mate-performance-evidence-${leafId}-\\$\\{\\{ github\\.sha \\}\\}-attempt-1`, 'u'))
+    assert.match(workflow, new RegExp(`${leafId}-evidence-artifact-id:`, 'u'))
+  }
   assert.doesNotMatch(workflow, /AWS_|ECOREX_R2_|R2_ACCESS|R2_SECRET|\b(?:aws|wrangler|s3api)\b|cloudflarestorage|desktop\/latest\.json/u)
 })
 
@@ -487,7 +558,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   assert.deepEqual(Object.keys(parsed.on), ['workflow_dispatch'])
   assert.deepEqual(Object.keys(parsed.on.workflow_dispatch.inputs), [
     'main_ci_run_id', 'admission_artifact_id', 'macos_artifact_id',
-    'windows_artifact_id', 'expected_signed_current',
+    'windows_artifact_id', 'expected_signed_current', 'expected_legacy_current',
   ])
   assert.equal(Object.values(parsed.on.workflow_dispatch.inputs).every(input => input.required === true && input.type === 'string'), true)
   assert.deepEqual(Object.keys(parsed.jobs), ['handoff'])
@@ -496,7 +567,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   assert.equal(job.name, 'Desktop Cloudflare plugin handoff')
   assert.equal(job.environment, 'r2-publish')
   const invocation = job.steps.find(step => step.id === 'prepare')
-  assert.equal(invocation.uses, 'zyfjacksonchen-source/e-mate-desktop-publication@799284ba3b4935184dd84be3da877f5a4a4c8733')
+  assert.equal(invocation.uses, 'zyfjacksonchen-source/e-mate-desktop-publication@eca005391708dc6ac3057a8702995e2475cdaaf2')
   assert.deepEqual(invocation.with, {
     'source-sha': '${{ github.sha }}',
     'main-ci-run-id': '${{ inputs.main_ci_run_id }}',
@@ -504,6 +575,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
     'macos-artifact-id': '${{ inputs.macos_artifact_id }}',
     'windows-artifact-id': '${{ inputs.windows_artifact_id }}',
     'expected-signed-current': '${{ inputs.expected_signed_current }}',
+    'expected-legacy-current': '${{ inputs.expected_legacy_current }}',
     'signing-key-id': '${{ secrets.EMATE_PROFILE_SIGNING_KEY_ID }}',
   })
   assert.deepEqual(invocation.env, {
@@ -512,7 +584,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   })
   assert.deepEqual(job.steps.filter(step => step.uses).map(step => step.uses), [
     'actions/setup-node@v6',
-    'zyfjacksonchen-source/e-mate-desktop-publication@799284ba3b4935184dd84be3da877f5a4a4c8733',
+    'zyfjacksonchen-source/e-mate-desktop-publication@eca005391708dc6ac3057a8702995e2475cdaaf2',
     'actions/upload-artifact@v4',
   ])
   const upload = job.steps.find(step => step.uses === 'actions/upload-artifact@v4')

@@ -23,6 +23,10 @@ on:
         description: Literal absent, or the Cloudflare plugin's fresh desktop/signed/latest.json identity as <bytes>:<sha256>.
         required: true
         type: string
+      expected_legacy_current:
+        description: The Cloudflare plugin's fresh desktop/latest.json identity as <bytes>:<sha256>; only the frozen 2.0.12 predecessor is accepted.
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -56,7 +60,7 @@ jobs:
 
       - name: Sign the exact admission and prepare the Cloudflare plugin handoff
         id: prepare
-        uses: zyfjacksonchen-source/e-mate-desktop-publication@799284ba3b4935184dd84be3da877f5a4a4c8733
+        uses: zyfjacksonchen-source/e-mate-desktop-publication@eca005391708dc6ac3057a8702995e2475cdaaf2
         env:
           EMATE_GITHUB_PROVENANCE_TOKEN: ${{ github.token }}
           EMATE_DESKTOP_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.EMATE_PROFILE_SIGNING_PRIVATE_KEY }}
@@ -67,6 +71,7 @@ jobs:
           macos-artifact-id: ${{ inputs.macos_artifact_id }}
           windows-artifact-id: ${{ inputs.windows_artifact_id }}
           expected-signed-current: ${{ inputs.expected_signed_current }}
+          expected-legacy-current: ${{ inputs.expected_legacy_current }}
           signing-key-id: ${{ secrets.EMATE_PROFILE_SIGNING_KEY_ID }}
 
       - name: Require the exact three-file handoff

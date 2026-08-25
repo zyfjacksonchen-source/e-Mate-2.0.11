@@ -42,6 +42,7 @@ const ACK_ARTIFACT = 'EMATE_MAC_UPDATE_ACK_ARTIFACT'
 const ACK_CURRENT_APP = 'EMATE_MAC_UPDATE_ACK_CURRENT_APP'
 const ACK_APP_ID = 'EMATE_MAC_UPDATE_ACK_APP_ID'
 const ACK_TARGET_ARCH = 'EMATE_MAC_UPDATE_ACK_TARGET_ARCH'
+const LEGACY_ACK_ENVIRONMENT_KEYS = [ACK_PATH, ACK_TOKEN, ACK_VERSION] as const
 const ACK_ENVIRONMENT_KEYS = [
   ACK_PATH,
   ACK_TOKEN,
@@ -69,6 +70,8 @@ const STARTUP_TIMEOUT_MS = 60_000
 const CANDIDATE_TERM_TIMEOUT_MS = 10_000
 const CANDIDATE_KILL_TIMEOUT_MS = 5_000
 const MAX_TRANSACTION_JSON_BYTES = 64 * 1024
+const LEGACY_UPDATE_PREDECESSOR = '2.0.12'
+const LEGACY_UPDATE_TARGET = '2.0.13'
 
 export interface MacUpdateRequest {
   schemaVersion: 1
@@ -96,6 +99,24 @@ export interface MacUpdateRequest {
   manifestIdentity: string
   targetArch: 'arm64' | 'x64'
   artifact: DesktopReleaseArtifact
+}
+
+interface LegacyMacUpdateRequest {
+  schemaVersion: 1
+  transactionId: string
+  parentPid: number
+  currentApp: string
+  currentVersion: typeof LEGACY_UPDATE_PREDECESSOR
+  targetVersion: typeof LEGACY_UPDATE_TARGET
+  stagedApp: string
+  backupApp: string
+  failedApp: string
+  trashApp: string
+  receiptPath: string
+  helperReadyPath: string
+  shutdownReadyPath: string
+  ackPath: string
+  ackToken: string
 }
 
 interface MacUpdateCommitIdentity {
@@ -639,6 +660,55 @@ function validateRequest(value: unknown, requestPath: string): MacUpdateRequest 
 /** Open the helper request without following a replaceable request-file symlink. */
 export function readMacUpdateRequest(requestPath: string): MacUpdateRequest {
   return validateRequest(readJsonNoFollow(requestPath), requestPath)
+}
+
+const LEGACY_REQUEST_KEYS = [
+  'schemaVersion', 'transactionId', 'parentPid', 'currentApp', 'currentVersion', 'targetVersion',
+  'stagedApp', 'backupApp', 'failedApp', 'trashApp', 'receiptPath', 'helperReadyPath',
+  'shutdownReadyPath', 'ackPath', 'ackToken',
+] as const
+
+function readLegacyMacUpdateRequest(requestPath: string): LegacyMacUpdateRequest {
+  const value = readJsonNoFollow(requestPath)
+  if (value === null || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== LEGACY_REQUEST_KEYS.length
+    || !LEGACY_REQUEST_KEYS.every(key => Object.hasOwn(value, key))) {
+    throw new Error('legacy macOS update request is invalid')
+  }
+  const request = value as Partial<LegacyMacUpdateRequest>
+  if (request.schemaVersion !== 1 || typeof request.transactionId !== 'string' || !TRANSACTION_ID.test(request.transactionId)
+    || !Number.isSafeInteger(request.parentPid) || (request.parentPid ?? 0) <= 1
+    || typeof request.currentApp !== 'string' || typeof request.stagedApp !== 'string'
+    || typeof request.backupApp !== 'string' || typeof request.failedApp !== 'string'
+    || typeof request.trashApp !== 'string' || typeof request.receiptPath !== 'string'
+    || typeof request.helperReadyPath !== 'string' || typeof request.shutdownReadyPath !== 'string'
+    || typeof request.ackPath !== 'string' || typeof request.ackToken !== 'string' || !TOKEN.test(request.ackToken)
+    || request.currentVersion !== LEGACY_UPDATE_PREDECESSOR || request.targetVersion !== LEGACY_UPDATE_TARGET) {
+    throw new Error('legacy macOS update request is invalid')
+  }
+  const root = realDirectory(dirname(requestPath))
+  const suffix = request.transactionId.slice(0, 8)
+  const appParent = dirname(resolve(request.currentApp))
+  if (basename(root) !== `install-${request.transactionId}`
+    || basename(dirname(root)) !== LEGACY_UPDATE_TARGET || basename(dirname(dirname(root))) !== 'updates'
+    || basename(requestPath) !== 'request.json'
+    || resolve(request.receiptPath) !== join(root, 'receipt.json')
+    || resolve(request.helperReadyPath) !== join(root, 'helper-ready.json')
+    || resolve(request.shutdownReadyPath) !== join(root, 'shutdown-ready.json')
+    || resolve(request.ackPath) !== join(root, 'startup-ack.json')
+    || ![join('/Applications', 'e-Mate.app'), join(homedir(), 'Applications', 'e-Mate.app')]
+      .includes(resolve(request.currentApp))
+    || resolve(request.stagedApp) !== join(appParent, `.e-Mate-${LEGACY_UPDATE_TARGET}-${suffix}.staged.app`)
+    || resolve(request.backupApp) !== join(appParent, `.e-Mate-${LEGACY_UPDATE_PREDECESSOR}-${suffix}.backup.app`)
+    || resolve(request.failedApp) !== join(appParent, `.e-Mate-${LEGACY_UPDATE_TARGET}-${suffix}.failed.app`)
+    || resolve(request.trashApp) !== join(homedir(), '.Trash', `e-Mate ${LEGACY_UPDATE_PREDECESSOR} Update Backup ${suffix}.app`)) {
+    throw new Error('legacy macOS update request is invalid')
+  }
+  return request as LegacyMacUpdateRequest
+}
+
+function sameLegacyMacUpdateRequest(left: LegacyMacUpdateRequest, right: LegacyMacUpdateRequest): boolean {
+  return LEGACY_REQUEST_KEYS.every(key => left[key] === right[key])
 }
 
 interface MacUpdatePendingReceipt extends MacUpdateCommitIdentity {
@@ -1700,6 +1770,49 @@ function sendMacUpdateCommit(
   })
 }
 
+function prepareLegacyMacUpdateStartupAck(
+  userDataPath: string,
+  currentVersion: string,
+  environment: NodeJS.ProcessEnv,
+  io: MacUpdateDurableIO,
+): MacUpdateStartupAcknowledgement {
+  const path = environment[ACK_PATH]
+  const token = environment[ACK_TOKEN]
+  const version = environment[ACK_VERSION]
+  if (path === undefined || token === undefined || version !== LEGACY_UPDATE_TARGET
+    || currentVersion !== LEGACY_UPDATE_TARGET || !TOKEN.test(token)) {
+    throw new Error('legacy macOS update startup acknowledgement environment is invalid')
+  }
+  const root = realDirectory(userDataPath)
+  const expectedRoot = realDirectory(join(root, 'updates', LEGACY_UPDATE_TARGET))
+  const resolvedPath = join(realDirectory(dirname(path)), basename(path))
+  if (!isAbsolute(path) || !inside(expectedRoot, resolvedPath) || basename(path) !== 'startup-ack.json') {
+    throw new Error('legacy macOS update startup acknowledgement path is invalid')
+  }
+  const requestPath = join(dirname(resolvedPath), 'request.json')
+  const request = readLegacyMacUpdateRequest(requestPath)
+  if (request.ackPath !== resolvedPath || request.ackToken !== token) {
+    throw new Error('legacy macOS update startup acknowledgement environment is invalid')
+  }
+  assertMissing(resolvedPath)
+  const commitApplied = async (): Promise<void> => {
+    const current = readLegacyMacUpdateRequest(requestPath)
+    if (!sameLegacyMacUpdateRequest(current, request)) {
+      throw new Error('legacy macOS update request changed before startup commit')
+    }
+    assertMissing(resolvedPath)
+    writeMacUpdateDurableJson(resolvedPath, {
+      schemaVersion: 1,
+      status: 'healthy',
+      token,
+      version,
+      pid: process.pid,
+      acknowledgedAt: new Date().toISOString(),
+    }, io)
+  }
+  return { status: 'installed', currentVersion, targetVersion: version, commitApplied }
+}
+
 /** A new application calls this only after its renderer has reported healthy. */
 export async function writeMacUpdateStartupAck(
   userDataPath: string,
@@ -1709,6 +1822,10 @@ export async function writeMacUpdateStartupAck(
   send: MacUpdateCommitSender = sendMacUpdateCommit,
 ): Promise<MacUpdateStartupAcknowledgement | undefined> {
   const suppliedAckKeys = Object.keys(environment).filter(name => name.startsWith('EMATE_MAC_UPDATE_ACK_'))
+  if (suppliedAckKeys.length === LEGACY_ACK_ENVIRONMENT_KEYS.length
+    && LEGACY_ACK_ENVIRONMENT_KEYS.every(name => suppliedAckKeys.includes(name))) {
+    return prepareLegacyMacUpdateStartupAck(userDataPath, currentVersion, environment, io)
+  }
   const path = environment[ACK_PATH]
   const token = environment[ACK_TOKEN]
   const version = environment[ACK_VERSION]

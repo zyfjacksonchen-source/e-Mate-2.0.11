@@ -2372,3 +2372,101 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 两个失败 run 永久不能作为候选或发布证据；当前只有 source-fixed diff 和只读日志/快照证据，没有上传、激活或生产写入。
 - Remaining blockers: 提交后必须通过新受保护 PR CI，再从新的 protected-main SHA 生成 Desktop/Profile 候选、性能与 admission；同一字节的 macOS/Windows 安装、P0/TQ、更新、回滚和公开回读继续 OPEN。
 - Next exact action: 跑定向发布合同，提交并推送最小修复，走受保护 PR 合并与全新 exact-main 候选；所有旧候选作废，生产链继续关闭。
+
+## 2026-08-26 · 2.0.12→2.0.13 macOS 原生更新 ACK 前驱桥接修复
+
+- Goal checkpoint: 在正式候选安装前关闭真实 2.0.12 原生 helper 无法确认 2.0.13 启动、必然超时回滚的 P0；本条只修唯一 macOS ACK seam，不安装、不上传、不激活或发布候选。
+- Frozen baseline / current HEAD: 修复从受保护 `main@100a670f283e6b9fcb1d032b086b37a45d9279c4` 独立分支开始；候选 Base/Harness 仍为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`，目标只允许精确 `2.0.12→2.0.13`。
+- Binding documents read: 完整复核根 `AGENTS.md`、`target-contract.md`、2.0.13 最终范围合同、上一条完整日志、候选 ACK/原子替换实现及本机已安装 2.0.12 `app.asar` 中同一模块的 source map。
+- Inspected native seam: 2.0.12 helper 启动新应用时只传 `EMATE_MAC_UPDATE_ACK_PATH/TOKEN/VERSION`，而 2.0.13 只接受含 source/Base/floor/manifest/artifact/appId/arch 等 12 字段的新握手；因此候选在 renderer 健康后仍会拒绝环境，旧 helper 等待 60 秒后回滚。旧 helper 在看到六字段旧 ACK 前始终保留 predecessor backup。
+- Experiment or why unnecessary: 从真实安装包复原旧请求的 15 个生成字段、路径命名和六字段 ACK，不凭记忆造兼容格式。该 owner 是 Electron 原子替换/进程生命周期，Creation Mode 无法安全模拟且不适用；无需第二 updater、Profile 路径或新依赖。
+- Decision and forbidden alternatives: 在唯一 `writeMacUpdateStartupAck()` 入口识别精确三字段集合，严格读取 no-follow、限长、精确 15 键的旧请求，并只允许 2.0.12 predecessor、2.0.13 target、canonical app/transaction/Trash 路径。旧 ACK 延迟到既有 `commitApplied`，即 probation 窗口可见且 Schedule admission 打开后才耐久写入，使失败仍由旧 helper 原子回滚。任意缺字段、混入新字段、未知字段、扩展/漂移请求均失败关闭；完整 12 字段新协议及 source/Base/floor/manifest/artifact/appId/arch、pending owner、installed receipt、IPC confirmation 校验完全不变。禁止接受任意 partial env、为旧请求伪造 provenance、提前写 ACK 或绕过 Schedule/rollback。
+- Changed scope: 仅修改 `desktop/e-mate-desktop/src/mac-update-installer.ts`、既有 `mac-update-installer.spec.ts` 并 append 本记录；未改 updater 下载/manifest、Base/Profile/Harness、R2、Feed、desired state、真实安装态或用户数据。
+- Verification commands and results: `mac-update-installer.spec.ts` 与 `electron-runtime.spec.ts` 首轮为 `2 files / 124 tests` 全过；补充请求漂移反例后 `mac-update-installer.spec.ts` 为 `86/86`，生产及测试 TypeScript 均通过，`git diff --check` 通过。覆盖真实旧三字段正例、ACK 延迟、缺失/混合/未知字段、错误前驱、扩展与 probation 中漂移请求、新完整协议回归，以及 ACK 未 apply 时 predecessor 原子回滚。
+- Immutable evidence / receipt: 根因输入来自本机已安装 2.0.12 包内 source map；源码修复绑定本分支后续提交。没有生成、签名、安装、上传、激活或发布任何新字节，既有 candidate run/artifact 因缺少本修复不得作为可发布候选。
+- Remaining blockers: 新提交必须通过受保护 CI，并从合并后的 exact main 重建正式候选；随后必须从未改动的真实 2.0.12 经原生在线更新验证成功、失败回滚、Schedule admission、Profile/Base 回执和安装后版本/哈希，当前源码测试不能替代安装态门禁。
+- Next exact action: 提交本最小桥接并交主代理复核；禁止复用旧候选，生产链保持关闭。
+
+## 2026-08-26 · 2.0.12→2.0.13 旧更新入口单调迁移闭环
+
+- Goal checkpoint: 在 ACK 修复后继续沿真实已安装 2.0.12 更新链追踪可达性；发现既有合同会让全部 v6 客户端永久读到 equal-version 2.0.12，故在重新构建候选前修复唯一生产发布 seam，不上传或激活任何字节。
+- Frozen baseline / current HEAD: 调查和修复基于 `hotfix/2.0.13-legacy-update-ack@2a37a442b303a0ed397797cf3193a6745575d80b`；此前 `main@100a670f283e6b9fcb1d032b086b37a45d9279c4` 的 Desktop/Profile/Performance 候选及当前 PR CI 均因缺少本修复作废，不能复用。
+- Binding documents read: 重新核对唯一 Goal、根 `AGENTS.md`、`target-contract.md`、2.0.13 切片、环境/发布合同、完整上一条日志、正式安装包内 2.0.12 updater/parser/source map和外部 signer action。
+- Inspected native seam: 已发布 2.0.12 只轮询固定 R2 `desktop/latest.json`，reader 上限 16 KiB且只消费 `version/artifacts`；它忽略 rich/signature 额外字段，但仍强制同一 R2 origin、commit-scoped 版本路径、bytes、SHA-256、DMG/PE 格式，并在 macOS 走深度签名和原生替换/回滚。原合同永久冻结该入口会使真实用户永远看不到 2.0.13，人工下载不是在线更新闭环。
+- Experiment or why unnecessary: 既有 `release.test.mjs` 已可执行证明旧 parser 接受同一 rich signed manifest，新增旧 reader 16 KiB 上限回归即可；不改产品 parser、不新增 updater、服务、Profile carrier或客户端协议。外部发布 action 的计划/CAS 行为由其既有 Node 合同测试覆盖。
+- Decision and forbidden alternatives: 将 exact signed manifest 作为人工不可变路径、v7 signed feed和legacy bootstrap的唯一字节。发布顺序固定为 immutable上传和完整公网回读→signed pointer原生条件写/CAS及回读→legacy pointer以精确 948-byte 2.0.12 predecessor为条件、绝对最后CAS及回读。Base v7以后只读signed feed，legacy永久停在2.0.13。禁止本地/测试字节、两份manifest、非条件覆盖、把后续版本写入legacy或另造迁移器。
+- Changed scope: 外部受保护 publication action 已在独立仓库以 PR #1 合并为固定 main `6be6cf166889899fb9ce6956ccf0f12e9ecc40e3`；本仓库只更新其 immutable pin/必填 predecessor input、既有合同测试、目标/环境/切片合同与本记录。未改 Desktop runtime、Base/Profile/Harness、R2、Feed、desired state、安装态或用户数据。
+- Verification commands and results: 外部 action Node tests `50/50` 全过；本仓库 workflow/input/pin/16 KiB 与 release 合同定向 Node tests `22/22` 全过，`git diff --check` 通过，仍须由新 exact-HEAD CI 再验。旧 2.0.12 predecessor为 `948` bytes / SHA-256 `e6d5e045364bdac97ea7fef41b1e28a20af06c9f4ffdd85d2c136e982d12a7dc`。
+- Immutable evidence / receipt: 外部 action reviewed main SHA `6be6cf166889899fb9ce6956ccf0f12e9ecc40e3`；本仓库当前只有 source-fixed diff。没有 Cloudflare Worker、R2写入、指针变化、候选安装或生产发布。
+- Remaining blockers: 提交并通过新 PR CI、合并到受保护 main、重跑 exact-main CI/Desktop/Profile/Performance/admission；随后按 Cloudflare 插件一次性 Worker的multipart/CAS合同上传并公开回读，并完成真实2.0.12→2.0.13更新、故障回滚和双平台P0/TQ验收。
+- Next exact action: 复核最小 diff、提交并更新 PR #58；当前生产链继续关闭，所有旧 run/artifact 永久作废。
+
+## 2026-08-26 · 2.0.13 TTFT v2 同口径场景合同收紧
+
+- Goal checkpoint: 现有 performance admission 会把三种场景池化、要求非 Tool 样本伪填 Tool timing，并以单组 Provider/request 字段表示实际有两次模型请求的 read-only Tool；本条只修正证据合同、verifier 与 fixture，不采集真实模型、不生成候选或发布。
+- Frozen baseline / current HEAD: 独立 worktree `codex/performance-v2-real-contract` 从 `public-2011/main@100a670f283e6b9fcb1d032b086b37a45d9279c4` 创建；Base/Harness/Desktop reference 仍为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606` / `6074088f5b660206e404b3591fab51fb99c69add`。
+- Binding documents read: 完整读取 `AGENTS.md`、`target-contract.md`、`slices/2.0.13.md`、`performance-and-acceptance.md` 与本日志此前最后一条；实现前先更新三份绑定合同。
+- Inspected native seam: 证据继续由同一 20 个 source-partitioned 文件、native Session trace、request-header artifact、managed Provider receipt、renderer paint、installed/enterprise receipt 和 `scripts/performance-parity.mjs` 组装；workflow 外壳与外部 signer/action 未改。旧 closed row 每个 pair 只有一组 request/Provider 字段，且 `exactKeys()` 强制所有场景拥有数值 Tool/waterfall 字段，无法诚实表达现有运行路径。
+- Experiment or why unnecessary: 可执行反例证明 short-text 基线 `100ms`→候选 `160ms`、另两类均 `1000ms` 时旧池化 evaluator 仍通过结构门；删除非 Tool timing 或加入第二 Provider attempt 则被旧 schema 拒绝。修复后使用 exact `b2b1650...` 已构建 AgentLoop 闭包运行 30 行 fixture：三类各 10，request attempt 为 `1/1/2`，非 Tool 带 Tool timing 为 `0` 条，结果仍为 `fixture-passed-production-blocked`。
+- Decision and forbidden alternatives: 保持 `schema_version: 2` 和既有 20 文件，只把它收紧为首个可生产的 v2 语义：三场景闭合判别 row、ordered request/Provider attempts、每次 candidate request attempt 的 diagnostic 为 `null` 或闭合非负对象；硬门逐场景计算。禁止旧 evidence 兼容 parser、字段聚合哈希、非 Tool 补零、跨场景 percentile、多模型 aggregate 和 fixture 重标 production；此前所有 v2 evidence/admission 作废并须重采。
+- Changed scope: 修改 `docs/target-contract.md`、`docs/performance-and-acceptance.md`、`docs/slices/2.0.13.md`、`scripts/performance-parity.mjs`、既有 `scripts/performance-parity.test.mjs` 并 append 本记录；未改 workflow、20 文件外壳、Desktop/Profile/Harness、模型路径、生产 R2/Feed/desired state 或用户数据。
+- Verification commands and results: `pnpm run test:performance:parity` 为 `10 passed / 0 failed`；覆盖逐场景 TTFT、非 Tool 字段缺省/伪零、旧 flat v2 拒绝、1/1/2 attempts、第二 header 漂移、重复 Provider invocation、candidate diagnostic 非硬门及 source-artifact semantic rehash。exact Harness fixture 为 `fixture-passed-production-blocked`，三类各 10 且形状符合合同；`git diff --check` 通过。
+- Immutable evidence / receipt: 当前只有 source-fixed commit 前 diff 与本地无密钥 fixture；未运行真实模型、未接触凭据、未注册 runner、未签名 admission、未发布。旧 performance evidence 和 workflow `32888885073` 不可复用。
+- Remaining blockers: 必须从 exact 2.0.12/2.0.13 安装字节按新 schema 重采同模型同场景真实 Provider/paint/header evidence，并由 protected-main verifier 产生新 `performance_run_id` 与签名 admission；性能结果、安装态和发布继续 OPEN。
+- Next exact action: 主代理复核并移植本提交，经 protected CI 后只把当前 verifier 字节交给外部 collector；不得使用旧 evidence root 或以 fixture 关闭生产门。
+
+## 2026-08-26 · 2.0.13 四模型 TTFT v2 aggregate 发布门
+
+- Goal checkpoint: 在同口径场景合同收紧后补齐四个正式聊天模型各自独立的生产性能准入；本条只实现仓库侧 evidence 分流、aggregate 验签、工作流和更新来源合同，不采集真实模型、不生成候选、不签名或发布。
+- Frozen baseline / current HEAD: 独立 worktree `codex/performance-four-model-aggregate` 从已包含 TTFT v2 场景合同的 `8f5a8f2a4de101d639b2ea4132d617bff4c1938e` 创建；Base/Harness 身份保持不变，未触碰 `legacy-update-ack` 工作树。
+- Binding documents read: 完整读取根 `AGENTS.md`、`target-contract.md`、`performance-and-acceptance.md`、`slices/2.0.13.md`、上一条完整日志，并逐字段核对外部受保护 performance/publication action 的四模型 aggregate 实现。
+- Inspected native seam: 继续复用唯一 `desktop-performance`→外部 signer→`desktop-admission`→manifest/updater 链。固定 roster 为 Luna、Sol、DeepSeek、Doubao；每个 leaf 保留现有 TTFT v2 verifier、20 个 support receipt、重算 Profile aggregate及独立 `performance_run_id`，外层只投影原有四字段 performance summary。
+- Experiment or why unnecessary: 该变更属于 release-plane provenance 与闭合集验签，Creation Mode 不能表示 GitHub artifact、签名或安装字节，故不创建动态插件。没有运行真实模型或读取凭据；使用本地签名 fixture 验证 exact `4 × 22 + 1 = 89` 文件、缺模型、重复 child run 与 fixture 拒绝。
+- Decision and forbidden alternatives: 四个 leaf 按 `luna/sol/deepseek/doubao` 和公开 route/provider/model/reasoning 固定顺序独立比较，禁止跨模型混样、缺项、重复 run、rerun、fixture 或 Goal 样本进入 2.0.13 aggregate。外层使用 domain-separated 签名和 ordered child digest；更新 manifest 仍只有 `performance_run_id/admission_sha256/signature_key_id/verifier` 四字段。GitHub performance 与 publication action 均精确 pin 到受保护 main `eca005391708dc6ac3057a8702995e2475cdaaf2`，artifact provenance 只接受 `run_attempt=1` 和 `-attempt-1` 名称。
+- Changed scope: 修改 Desktop performance/admission/publication workflows、`scripts/desktop-admission.mjs` 及既有测试、更新器与下载页同一 provenance validator、三份绑定合同和本记录；下载页脚本因字节变化按真实 SHA-256 前 12 位从 `site.a8feef4609f9.js` 更名为 `site.865115b8aa11.js`。未改 child verifier/schema、模型路由、Base/Profile/Harness、外部 action、R2/Feed/desired state 或用户数据。
+- Verification commands and results: `node --test scripts/desktop-admission.test.mjs` 为 `8/8`；`node --test scripts/release.test.mjs` 为 `15/15`；Desktop `update-checker.spec.ts`、`desktop-release-manifest.spec.ts`、`updates.spec.ts` 为 `3 files / 103 tests` 全过；下载页测试同时确认脚本文件名等于当前内容 SHA-256 前 12 位。`git diff --check` 通过。
+- Immutable evidence / receipt: 外部受保护 action pin 为 `eca005391708dc6ac3057a8702995e2475cdaaf2`；当前只有 source-fixed diff 和无密钥 fixture。没有 production evidence、真实 `performance_run_id`、签名 admission、候选安装、上传或生产指针变化。
+- Remaining blockers: 必须由 exact protected-main workflow 从四个正式模型各自的新 schema v2 真实安装态证据生成四个 attempt-1 leaf，再由固定外部 action生成 aggregate并由 Desktop admission 回验；候选、安装态、更新/回滚和公开发布仍为 OPEN。
+- Next exact action: 主代理复核并移植本提交，运行受保护 CI；随后只允许 source-partitioned collector 填入四个完整 cohort，缺任一真实 leaf 即保持发布门关闭。
+
+## 2026-08-26 · 2.0.13 S35 legacy bootstrap 与 R2 条件晋升终审
+
+- Goal checkpoint: 在四模型 aggregate 合入发布分支前，独立复核真实安装态 2.0.12 updater、一次性 v6→v7 bootstrap 和 Cloudflare 大制品写入边界；本条只收紧仓库级规则与发布合同，未写生产。
+- Frozen baseline / current HEAD: 安装态仍为 `/Applications/e-Mate.app` 2.0.12；发布分支已包含 `8f5a8f2a4de101d639b2ea4132d617bff4c1938e` 和四模型提交 `cdd4332`，正式候选尚未重建。
+- Binding documents read: 根 `AGENTS.md`、`target-contract.md`、`slices/2.0.13.md`、上一条完整日志；外部 publication protected main 固定为 `eca005391708dc6ac3057a8702995e2475cdaaf2`。
+- Inspected native seam: 直接调用安装包内 2.0.12 `app.asar/lib/update-checker.js` 喂入完整 12 字段 rich manifest；2950-byte 样本被识别为 `2.0.12→2.0.13`，旧 parser 只消费 `version/artifacts`，但保留固定 R2 origin、版本/commit path、bytes、SHA-256、无重定向、DMG/PE 与 macOS 原生替换/ACK 回滚。2.0.13 只读并严格验签 `desktop/signed/latest.json`。
+- Experiment or why unnecessary: updater 信任与 R2 发布属于 Base/release plane，Creation Mode 不能代表。Cloudflare 终审确认 multipart `complete()` 没有条件写，直接完成到最终 key 存在预检后覆盖竞态；R2 条件 `put` 才能在临时对象全量回读后 create-only 晋升。
+- Decision and forbidden alternatives: 仓库级规则与 target contract 统一为唯一 2.0.13 legacy 例外：同一 admitted signed bytes 先 immutable/公开回读，再 signed CAS/回读，legacy 以精确 948-byte 2.0.12 前驱绝对最后 CAS，之后永久停在 2.0.13。multipart 只到随机临时 key，再以条件 `put` 晋升；禁止直接完成到最终 key、用 multipart ETag 冒充 SHA、无条件 pointer 删除或第二迁移器。signed 已切而 legacy 未切时保留 signed，fresh-read 后幂等恢复同一计划；不执行无法 CAS 到 absent 的删除回滚。
+- Changed scope: 仅修订根 `AGENTS.md` 和本切片 S35 发布规则并 append 本记录；未改 updater、外部 action、候选字节、Profile、R2、Feed、官网、安装态或用户数据。
+- Verification commands and results: 安装态 checker 正例返回精确 update-available；外部 action 完整 `node --test` 为 62/62，本仓四模型 admission/release 窄测为 23/23；相关 diff check 通过。
+- Immutable evidence / receipt: 外部 action protected main `eca005391708dc6ac3057a8702995e2475cdaaf2`；公开 legacy 仍为 948 bytes / SHA-256 `e6d5e045364bdac97ea7fef41b1e28a20af06c9f4ffdd85d2c136e982d12a7dc`，signed/manual 2.0.13 前缀仍为空。没有 Worker、R2 写入、pointer 变化或候选安装。
+- Remaining blockers: 提交本合同修订并通过 protected CI；exact-main Desktop/Profile/四模型性能/admission 候选完成后，Cloudflare Worker 必须真实实现临时 multipart+条件晋升、旧 pointer 原字节/ETag 回滚收据、双 pointer/installer/Profile/Feed/官网完整公开回读。macOS 旧 updater 需成功与故障回滚；Windows 旧链没有同等级健康 ACK，必须单列实机安装/失败恢复证据。
+- Next exact action: 提交并推送唯一发布分支，废弃旧 CI；等待 exact source CI 全绿后才构建正式候选，生产写入继续为零。
+
+## 2026-08-26 · 2.0.13 TTFT v2 模型与双 Harness 身份闭环
+
+- Goal checkpoint: 在四模型 aggregate 已接线但尚未采集生产证据时，关闭 leaf assembler 会丢弃 `performance_model`、以及三条 path receipt 全部被错误重标为候选 Harness 的两个发布阻断；本条不采集真实模型、不生成候选、不签名或发布。
+- Frozen baseline / current HEAD: 独立 worktree `fix/performance-real-baseline-contract` 从当前发布源 `588cb5ca10c381fe918be6dfefd6bc76edfa73d5` 创建；候选/Base Harness 为 `b2b1650b01f0ee88d81837a9b5c050f9f763f606`，真实 2.0.12 baseline Harness 为 `2bc16230975f6cf02aa1b283b1f86de44007b059`。
+- Binding documents read: 完整读取根 `AGENTS.md`、`target-contract.md`、`performance-and-acceptance.md`、`slices/2.0.13.md` 和上一条完整开发记录；继续固定 schema v2、20 个支持文件、四模型 leaf/outer aggregate 与唯一 evidence/receipt 路径。
+- Inspected native seam: `scripts/performance-parity.mjs` 是现有 manifest→source artifacts→run receipts→verified evidence 唯一组装/验签入口。旧 manifest closed keys 不接受 `performance_model`，verified object 又会丢弃它；`assemblePath()` 同时把 baseline run receipt 的 Harness 强制写成候选 pin。外部受保护 publication action `eca005391708dc6ac3057a8702995e2475cdaaf2` 已精确校验 top-level candidate Harness 和 closed `performance_model`，但不要求 baseline path 冒充 candidate，因此无需跨仓改动。
+- Experiment or why unnecessary: 使用既有生产组装测试的三条 source-partitioned path 构造正反例；组装后逐字段验证模型对象原样保留、baseline/candidate receipts 分别绑定真实 pin，并对 closed-model 扩字段、模型漂移和重算摘要后的 baseline relabel 失败关闭。没有读取凭据、运行付费模型、注册 runner 或添加 collector。
+- Decision and forbidden alternatives: top-level/verifier Harness 继续绑定 candidate/Base；baseline path receipt 固定绑定 `2bc162...`，两条 candidate receipt 固定绑定 `b2b165...`。闭合 `performance_model` 经 manifest、assembler、verifier 原样保留，并与每条 receipt 的 provider/model/reasoning 一致。禁止 relabel、兼容旧 evidence、放宽 schema、增加第二事件/collector或把 fixture 标为 production。
+- Changed scope: 修改三份绑定合同、`scripts/performance-parity.mjs`、既有 `scripts/performance-parity.test.mjs` 并 append 本记录；workflow、Desktop admission、外部 publication action、20 文件外壳、Base/Profile/Harness、模型路由、R2/Feed/desired state 与用户数据均未改。
+- Verification commands and results: `pnpm run test:performance:parity`（使用工作区 Node PATH）为 `10/10`；`node --test scripts/desktop-admission.test.mjs` 为 `8/8`；`git diff --check` 通过。直接 fixture 自检因独立 worktree 未包含已构建的 `upstream/deepseek-harness/vendor/cordis/lib/index.js` 而未启动，此环境缺失不能作为 fixture 或 production 结果；现有单测仍确认 keyless/重标 evidence 保持 `fixture-passed-production-blocked`。
+- Immutable evidence / receipt: 当前只有 source-fixed diff、无密钥组装 fixture 与 protected external action pin `eca005391708dc6ac3057a8702995e2475cdaaf2`；旧 evidence 全部继续作废。没有真实 Provider evidence、`performance_run_id`、签名 admission、候选安装、上传或生产写入。
+- Remaining blockers: 必须从 exact installed 2.0.12/2.0.13 bytes 按四个正式模型分别采集 3 path×30 AB/BA 的真实 source artifacts，并由合并后的 protected verifier 和固定外部 action 产生四 leaf/outer admission；缺任一模型、真实 renderer/provider/installed/enterprise receipt 或实机门禁均保持发布关闭。
+- Next exact action: 提交本最小合同修复交主代理复核并移植；合入 protected main 后才允许外部 collector 使用新 manifest，禁止复用旧 evidence、手工补字段或把 baseline Harness 重标为 candidate。
+
+## 2026-08-26 · 2.0.13 TTFT v2 双 Harness 显式证据修订
+
+- Goal checkpoint: 独立审查确认前一修复已让 baseline receipt 使用真实 pin，但生产 evidence 自身仍只声明 candidate Harness，baseline 身份隐藏在 verifier 常量中；本条补齐显式可签证据字段，不采集模型、不发布。
+- Frozen baseline / current HEAD: 修订基于独立提交 `614f66ca837d2b06cc2ae5312eb91d6bc19c68a7`；candidate/Base Harness 固定 `b2b1650b01f0ee88d81837a9b5c050f9f763f606`，2.0.12 baseline Harness 固定 `2bc16230975f6cf02aa1b283b1f86de44007b059`。
+- Binding documents read: 复核三份 TTFT 绑定合同、前一条日志、唯一 assembler/verifier 与外部 protected publication action 的 evidence consumer；append 本修订而不改写历史记录。
+- Inspected native seam: manifest、assembled evidence 与 `verifyProductionArtifacts()` checked output 共用同一 top-level evidence shape；因此只需在该 shape 增加 closed `baseline_harness_commit`，并让唯一 receipt validator 从 evidence 两个显式字段分别验证三条路径，无需新 receipt、事件、collector、workflow 或更新 summary。
+- Experiment or why unnecessary: 正例验证 assemble→verify 同时保留 candidate/baseline 两字段；反例覆盖 manifest 缺失/错误 baseline 字段、已组装 production evidence 缺失/错误字段、baseline receipt 错标 candidate、candidate receipt 错标 baseline，且重算 receipt digest 仍失败关闭。
+- Decision and forbidden alternatives: `harness_commit` 继续只表示 candidate/Base，`baseline_harness_commit` 只表示真实 2.0.12 baseline；production 两者均必填精确值，fixture 显式写 `fixture-only` 且仍不能进入 production。禁止从 path 猜 baseline、Verifier 隐式补字段、接受旧 production evidence 或增加兼容 schema。
+- Changed scope: 继续只修改三份绑定合同、现有 `performance-parity` verifier/测试并 append 本记录；外部 action/schema、四字段 summary、workflow、20 支持文件、Base/Profile/Harness、R2 与用户数据未改。
+- Verification commands and results: `pnpm run test:performance:parity` 为 `10/10`；`node --test scripts/desktop-admission.test.mjs` 为 `8/8`；`git diff --check` 通过。不以 fixture CLI 或外部环境缺失冒充生产通过。
+- Immutable evidence / receipt: 当前仍只有源码与无密钥测试，外部 action 保持 `eca005391708dc6ac3057a8702995e2475cdaaf2`；没有真实 Provider、安装态、admission、上传或生产写入。
+- Remaining blockers: 四模型真实 source-partitioned evidence、签名 leaf/outer admission 与安装/更新/回滚门禁仍全部 OPEN；本字段修订使旧 production evidence 必然作废。
+- Next exact action: 提交本修订交主代理移植；只有合并后的 protected verifier 可用于新生产采集。
