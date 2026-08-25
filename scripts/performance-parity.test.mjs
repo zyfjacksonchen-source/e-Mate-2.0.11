@@ -235,7 +235,7 @@ test('assembles only linked installed-state artifacts and rejects a rehashed sem
       product: 'e-mate-desktop', product_version: candidate ? '2.0.13' : '2.0.12',
       source_commit: candidate ? 'e'.repeat(40) : '4'.repeat(40),
       desktop_reference_commit: '6074088f5b660206e404b3591fab51fb99c69add',
-      base_contract_id: candidate ? 'e-mate-desktop-profile-v7-dsh-e13ce9d95303' : 'dsh-desktop-rc7',
+      base_contract_id: candidate ? 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0' : 'dsh-desktop-rc7',
       profile_generation: candidate ? 'candidate-generation' : 'baseline-generation',
       composition_sha256: candidate ? 'f'.repeat(64) : '1'.repeat(64),
       client_bundle_sha256: candidate ? '2'.repeat(64) : '3'.repeat(64),
@@ -283,7 +283,7 @@ test('assembles only linked installed-state artifacts and rejects a rehashed sem
     comparison_kind: 'installed-2.0.12-vs-2.0.13',
     performance_run_id: performanceRunId,
     evidence_kind: 'production-real-provider',
-    harness_commit: 'e13ce9d953037a2f40d866d17f5a7e00cbc15d66',
+    harness_commit: 'b2b1650b01f0ee88d81837a9b5c050f9f763f606',
     paths,
   }
   const manifestPath = join(root, 'manifest.json')
