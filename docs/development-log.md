@@ -2512,3 +2512,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有源码 diff、可运行合同测试与两版 native seam 审查结论；没有真实 Provider、安装态、`performance_run_id`、签名、上传或生产写入。
 - Remaining blockers: hash-pinned 外部 probe 仍须完成其余 17 个原生/Renderer/Provider/installed/enterprise authority source 的真实采集；四模型、候选安装、更新/回滚与公开发布全部保持 OPEN。
 - Next exact action: 提交本合同修订并与外部 probe runtime 合并到 protected-main 候选；通过 exact attempt-1 CI 后才允许真实采集，任何缺失 authority 继续 fail closed。
+
+## 2026-08-26 · 2.0.13 TTFT v2 Profile authority 临时文件隔离
+
+- Goal checkpoint: 独立终审发现 performance workflow 把 acceptance-only Profile authority receipt 写入只允许唯一 aggregate 的 stage 根，必然触发随后 exact-one 与 exact-file-count 门禁；本条只修复工作流文件边界。
+- Frozen baseline / current HEAD: 基于 native Tool handoff 收敛提交 `9d8f869368ed11c2c5a65c811a1631b49e442da1`；候选、Profile、Harness、安装态和生产状态未变。
+- Binding documents read: 根 `AGENTS.md`、`docs/performance-and-acceptance.md`、`docs/slices/2.0.13.md`、上一条完整记录及 workflow 的 stage copy/count/cleanup 直接调用链。
+- Inspected native seam: `profile-component-aggregate.json` 是 stage 根唯一允许文件；`profile-performance-authorities.json` 只在 aggregate 生成与 one-shot collector 间传递，无需进入上传目录。
+- Experiment or why unnecessary: 直接以现有 workflow 合同测试锁定 authority receipt 不再位于 `STAGE_DIRECTORY`，无需新增目录协议、artifact 或运行时逻辑。
+- Decision and forbidden alternatives: authority receipt 固定写入 runner 私有临时根并在 `always()` 清理；stage 继续只持 aggregate。禁止放宽 exact-one/exact-count 门禁或把 authority receipt混入公开 evidence。
+- Changed scope: 仅修改 `.github/workflows/desktop-performance.yml` 与既有 `scripts/performance-acceptance.test.mjs`，未改采集 schema、assembler/verifier、Desktop/Profile/Harness、模型链或发布状态。
+- Verification commands and results: 使用工作区 bundled Node/Pnpm 运行 `pnpm run test:performance:parity` 为 `18/18`，`node --test scripts/desktop-admission.test.mjs` 为 `8/8`，`git diff --check` 通过；不以窄测替代 protected CI 或生产采集。
+- Immutable evidence / receipt: 当前只有未发布源码 diff；无真实模型调用、安装、签名、上传或生产写入。
+- Remaining blockers: 真实外部 probe、四模型 production evidence、签名 admission、安装/更新/回滚及 P0+TQ13 实机验收仍全部 OPEN。
+- Next exact action: 运行 performance parity、desktop admission 与 diff check，提交后与外部 probe runtime 合并，只有 exact protected-main attempt-1 CI 可启动真实采集。

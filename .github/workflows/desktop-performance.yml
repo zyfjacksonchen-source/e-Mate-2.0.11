@@ -296,6 +296,7 @@ jobs:
         env:
           CI_RUN_ID: ${{ inputs.main_ci_run_id }}
           PROFILE_RUN_ID: ${{ inputs.profile_release_run_id }}
+          PERFORMANCE_AUTHORITIES: ${{ runner.temp }}/e-mate-profile-performance-authorities-${{ github.sha }}.json
           STAGE_DIRECTORY: ${{ steps.stage.outputs.directory }}
         run: |
           set -euo pipefail
@@ -311,13 +312,14 @@ jobs:
             --profile-release-bundle .performance/profile-publication \
             --base-contract desktop/e-mate-desktop/base-contract.json \
             --out "$STAGE_DIRECTORY/profile-component-aggregate.json" \
-            --performance-authorities-out "$STAGE_DIRECTORY/profile-performance-authorities.json"
+            --performance-authorities-out "$PERFORMANCE_AUTHORITIES"
 
       - name: Collect the exact installed-state production cohorts once
         env:
           COLLECTOR: ${{ vars.EMATE_PERFORMANCE_COLLECTOR }}
           COLLECTOR_SHA256: ${{ vars.EMATE_PERFORMANCE_COLLECTOR_SHA256 }}
           EVIDENCE_ROOT: ${{ vars.EMATE_PERFORMANCE_EVIDENCE_ROOT }}
+          PERFORMANCE_AUTHORITIES: ${{ runner.temp }}/e-mate-profile-performance-authorities-${{ github.sha }}.json
           STAGE_DIRECTORY: ${{ steps.stage.outputs.directory }}
         run: |
           set -euo pipefail
@@ -334,7 +336,7 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --candidate-artifacts "$GITHUB_WORKSPACE/.performance/desktop" \
             --profile-artifacts "$GITHUB_WORKSPACE/.performance/profile-publication" \
-            --profile-authorities "$STAGE_DIRECTORY/profile-performance-authorities.json" \
+            --profile-authorities "$PERFORMANCE_AUTHORITIES" \
             --profile-aggregate "$STAGE_DIRECTORY/profile-component-aggregate.json"
 
       - name: Copy only the exact source-partitioned production evidence
@@ -605,10 +607,14 @@ jobs:
       - name: Remove the runner-local admitted copy
         if: always()
         env:
+          PERFORMANCE_AUTHORITIES: ${{ runner.temp }}/e-mate-profile-performance-authorities-${{ github.sha }}.json
           STAGE_DIRECTORY: ${{ steps.stage.outputs.directory }}
         run: |
           if test -n "${STAGE_DIRECTORY:-}" && [[ "$STAGE_DIRECTORY" = "$RUNNER_TEMP"/e-mate-performance-* ]]; then
             rm -rf -- "$STAGE_DIRECTORY"
+          fi
+          if test -n "${PERFORMANCE_AUTHORITIES:-}" && [[ "$PERFORMANCE_AUTHORITIES" = "$RUNNER_TEMP"/e-mate-profile-performance-authorities-*.json ]]; then
+            rm -f -- "$PERFORMANCE_AUTHORITIES"
           fi
 
   admission:

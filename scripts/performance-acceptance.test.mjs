@@ -126,8 +126,10 @@ test('wires the one-shot producer before the existing exact-85 consumer', async 
   assert.ok(producer > 0 && consumer > producer)
   assert.match(workflow, /EMATE_PERFORMANCE_COLLECTOR_SHA256/u)
   assert.match(workflow, /--handoff "\$EVIDENCE_ROOT\/\$GITHUB_SHA"/u)
-  assert.match(workflow, /--performance-authorities-out "\$STAGE_DIRECTORY\/profile-performance-authorities\.json"/u)
-  assert.match(workflow, /--profile-authorities "\$STAGE_DIRECTORY\/profile-performance-authorities\.json"/u)
+  assert.match(workflow, /PERFORMANCE_AUTHORITIES: \$\{\{ runner\.temp \}\}\/e-mate-profile-performance-authorities-\$\{\{ github\.sha \}\}\.json/u)
+  assert.match(workflow, /--performance-authorities-out "\$PERFORMANCE_AUTHORITIES"/u)
+  assert.match(workflow, /--profile-authorities "\$PERFORMANCE_AUTHORITIES"/u)
+  assert.doesNotMatch(workflow, /\$STAGE_DIRECTORY\/profile-performance-authorities\.json/u)
   assert.doesNotMatch(workflow.slice(producer, consumer), /--fixture/u)
 })
 
