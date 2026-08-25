@@ -1,4 +1,7 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProfileUpdateAvailable, ProfileUpdateContext } from '../src/profile-update.ts'
 import type { DesktopShellSpec } from '../src/runtime.ts'
@@ -298,9 +301,19 @@ describe('Electron compatibility runtime', () => {
 
   it('fails closed when the selected Base Schedule package lacks native admission', async () => {
     const { loadClosedScheduleDeliveryAdmission } = await import('../src/electron-runtime.ts')
+    const root = mkdtempSync(join(tmpdir(), 'e-mate-schedule-admission-'))
+    const schedule = join(root, 'node_modules', '@deepseek-ai', 'dsh-schedule')
+    try {
+      mkdirSync(schedule, { recursive: true })
+      writeFileSync(join(root, 'package.json'), '{}\n')
+      writeFileSync(join(schedule, 'package.json'), '{"name":"@deepseek-ai/dsh-schedule","type":"module","main":"index.js"}\n')
+      writeFileSync(join(schedule, 'index.js'), 'export const fixture = true\n')
 
-    await expect(loadClosedScheduleDeliveryAdmission(new URL('../package.json', import.meta.url).href))
-      .rejects.toThrow('selected Base Schedule package has no delivery admission')
+      await expect(loadClosedScheduleDeliveryAdmission(pathToFileURL(join(root, 'package.json')).href))
+        .rejects.toThrow('selected Base Schedule package has no delivery admission')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('uses the native macOS frame, Dock icon, and template tray image', async () => {

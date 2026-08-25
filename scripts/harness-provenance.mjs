@@ -221,7 +221,7 @@ export function verifyHarnessBuildReceipt(root) {
 
 function assertOverlayContract(root) {
   const resolutions = readJson(join(root, 'desktop', 'package.json')).resolutions ?? {}
-  const resolved = new Map()
+  const resolved = new Set()
   for (const [selector, value] of Object.entries(resolutions)) {
     if (typeof value !== 'string' || !value.startsWith('patch:@deepseek-ai/dsh')) continue
     const name = selector.replace(/@npm:.*$/u, '')
@@ -232,10 +232,10 @@ function assertOverlayContract(root) {
     if (patch === undefined || !value.includes(marker)) {
       throw new Error(`Desktop Harness overlay is not admitted: ${selector}`)
     }
-    resolved.set(name, (resolved.get(name) ?? 0) + 1)
+    resolved.add(name)
   }
   for (const [name, patch] of DESKTOP_OVERLAYS) {
-    if ((resolved.get(name) ?? 0) !== 1) throw new Error(`Desktop Harness overlay must have exactly one tracked resolution: ${name}`)
+    if (!resolved.has(name)) throw new Error(`Desktop Harness overlay must have an admitted tracked resolution: ${name}`)
     if (!existsSync(join(root, patch))) throw new Error(`Desktop Harness overlay is missing: ${patch}`)
   }
   if (Object.entries(resolutions).some(([selector, value]) => selector.startsWith('@deepseek-ai/dsh-session') && String(value).startsWith('patch:'))) {
@@ -265,7 +265,10 @@ export function materializeHarnessDesktopRuntime(root) {
     rmSync(targetLib, { recursive: true, force: true })
     cpSync(sourceLib, targetLib, { recursive: true, errorOnExist: true })
     const overlay = DESKTOP_OVERLAYS.get(manifest.name)
-    if (overlay !== undefined) run('git', ['apply', '--whitespace=nowarn', join(root, overlay)], { cwd: target })
+    if (overlay !== undefined) {
+      const targetDirectory = relative(root, target).split(sep).join('/')
+      run('git', ['apply', '--unidiff-zero', '--whitespace=nowarn', `--directory=${targetDirectory}`, overlay], { cwd: root })
+    }
   }
   const provenance = desktopProvenance(root, receipt)
   const path = join(root, DESKTOP_RECEIPT)

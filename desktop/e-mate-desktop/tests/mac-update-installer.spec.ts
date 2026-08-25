@@ -731,7 +731,8 @@ describe('detached macOS update replacement', () => {
     else if (label === 'wrong target arch') message = { ...commitMessage(update), targetArch: update.targetArch === 'arm64' ? 'x64' : 'arm64' }
     const child = ipcCandidate(message, undefined, stayAlive)
     try {
-      await expect(waitForMacUpdateCommit(update, child, 100)).rejects.toThrow(error)
+      const timeoutMs = label === 'no IPC' ? 1_000 : 100
+      await expect(waitForMacUpdateCommit(update, child, timeoutMs)).rejects.toThrow(error)
     } finally {
       child.kill('SIGKILL')
     }

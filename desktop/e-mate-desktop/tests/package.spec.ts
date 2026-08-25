@@ -268,6 +268,7 @@ describe('published package surface', () => {
     expect(manifest.build?.files).toEqual([
       'base-contract.json',
       'build/e-mate-profile/**',
+      'build/harness-runtime-provenance.json',
       'build/app-icon.png',
       'build/app-icon-mac.png',
       'build/tray-icon.svg',

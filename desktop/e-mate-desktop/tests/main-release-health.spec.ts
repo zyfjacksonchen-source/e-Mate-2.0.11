@@ -1,6 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const startup = vi.hoisted(() => ({
@@ -97,7 +98,7 @@ vi.mock('../src/mac-update-installer.ts', () => ({
 
 vi.mock('../src/profile.ts', () => ({
   prepareDesktopProfile: vi.fn(() => ({
-    bareModuleBaseUrl: new URL('../package.json', import.meta.url).href,
+    bareModuleBaseUrl: pathToFileURL(join(startup.root, 'profile', 'package.json')).href,
     homeDir: join(startup.root, 'dsh'),
     mode: 'advanced',
     patches: [],
@@ -169,6 +170,12 @@ const savedElectronVersion = Object.getOwnPropertyDescriptor(process.versions, '
 beforeEach(() => {
   startup.exits.length = 0
   startup.root = mkdtempSync(join(tmpdir(), 'e-mate-main-probe-'))
+  const profile = join(startup.root, 'profile')
+  const schedule = join(profile, 'node_modules', '@deepseek-ai', 'dsh-schedule')
+  mkdirSync(schedule, { recursive: true })
+  writeFileSync(join(profile, 'package.json'), '{}\n')
+  writeFileSync(join(schedule, 'package.json'), '{"name":"@deepseek-ai/dsh-schedule","type":"module","main":"index.js"}\n')
+  writeFileSync(join(schedule, 'index.js'), 'export const fixture = true\n')
   startup.boot.mockReset()
   startup.recover.mockReset().mockReturnValue({ status: 'none' })
   startup.resume.mockReset()
