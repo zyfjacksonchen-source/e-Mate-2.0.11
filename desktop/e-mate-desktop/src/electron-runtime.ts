@@ -17,8 +17,9 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { copyFile, lstat, mkdir, realpath, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { basename, isAbsolute, join, relative, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
 import {
@@ -28,7 +29,7 @@ import {
   type ProfileUpdateAvailable,
   type ProfileUpdateContext,
 } from './profile-update.ts'
-import { scheduleMacUpdateInstallation } from './mac-update-installer.ts'
+import { scheduleMacUpdateInstallation, type MacUpdateAppliedSender } from './mac-update-installer.ts'
 import type {
   DesktopNotification,
   DesktopPlatform,
@@ -125,6 +126,30 @@ export const RENDERER_BOOT_TIMEOUT_MS = 30_000
 /** Failure class used by startup recovery to distinguish a hung Renderer. */
 export type RendererBootFailureReason = 'renderer-failed' | 'renderer-timeout'
 
+interface ScheduleDeliveryAdmission {
+  readonly isOpen: boolean
+  open(): void
+}
+
+type ScheduleDeliveryAdmissionConstructor = new (open: boolean) => ScheduleDeliveryAdmission
+
+/** Load one closed native Schedule admission from the selected Profile Base. */
+export async function loadClosedScheduleDeliveryAdmission(
+  profileBaseUrl: string,
+): Promise<ScheduleDeliveryAdmission> {
+  const entry = createRequire(profileBaseUrl).resolve('@deepseek-ai/dsh-schedule')
+  const schedule = await import(pathToFileURL(entry).href) as Record<string, unknown>
+  const Admission = schedule.ScheduleDeliveryAdmission
+  if (typeof Admission !== 'function') {
+    throw new Error('@e-mate/desktop: selected Base Schedule package has no delivery admission')
+  }
+  const admission = new (Admission as ScheduleDeliveryAdmissionConstructor)(false)
+  if (admission.isOpen !== false || typeof admission.open !== 'function') {
+    throw new Error('@e-mate/desktop: selected Base Schedule delivery admission is invalid')
+  }
+  return admission
+}
+
 /** Native adapter used by the e-Mate launcher and owned by its Cordis shell plugin. */
 export class ElectronDesktopRuntime implements DesktopRuntime {
   readonly platform: DesktopPlatform
@@ -156,14 +181,18 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private terminalSpec: DesktopTerminalSpec | undefined
   private rendererBootReported = false
   private rendererBootMonitoring = false
+  private rendererHealthy = false
   private rendererBootTimer: NodeJS.Timeout | undefined
   private bootFailureReason: RendererBootFailureReason | undefined
-  private directoryPickTask: Promise<string | null> | undefined
   private markPreparedUpdateShutdownReady: (() => void) | undefined
+  private openScheduleStartupLatch: (() => void | Promise<void>) | undefined
+  private rendererStartupCommitTask: Promise<void> | undefined
+  private directoryPickTask: Promise<string | null> | undefined
 
   constructor(
     private readonly restart: () => Promise<void>,
     private readonly onRendererBoot: (report: RendererBootReport) => void = () => {},
+    private rendererStartupProbation = false,
   ) {
     if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
       throw new Error(`@e-mate/desktop: unsupported Electron platform ${process.platform}`)
@@ -218,6 +247,14 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     this.rendererBootTimer.unref()
   }
 
+  /** Put a recovered, potentially-applied macOS candidate back on the existing startup probation path. */
+  beginRendererStartupProbation(): void {
+    if (this.rendererHealthy || this.rendererStartupProbation) {
+      throw new Error('@e-mate/desktop: renderer startup probation cannot be started now')
+    }
+    this.rendererStartupProbation = true
+  }
+
   /** Stop a pending deadline while startup is being torn down for another failure. */
   stopRendererBootMonitoring(): void {
     this.rendererBootMonitoring = false
@@ -265,11 +302,62 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
 
   /** @inheritdoc */
   show(): void {
+    if (!this.rendererHealthy || this.rendererStartupProbation) return
     const window = this.window
     if (window === undefined || window.isDestroyed()) return
     if (window.isMinimized()) window.restore()
-    window.show()
+    if (!window.isVisible()) window.show()
     window.focus()
+  }
+
+  /** Commit one healthy probation launch only after its durable acknowledgement succeeds. */
+  async commitRendererStartup(
+    commit: () => void | MacUpdateAppliedSender | Promise<void | MacUpdateAppliedSender>,
+  ): Promise<void> {
+    if (!this.rendererStartupProbation) return
+    this.rendererStartupCommitTask ??= this.commitRendererStartupOnce(commit)
+    await this.rendererStartupCommitTask
+  }
+
+  private async commitRendererStartupOnce(
+    commit: () => void | MacUpdateAppliedSender | Promise<void | MacUpdateAppliedSender>,
+  ): Promise<void> {
+    if (!this.rendererHealthy) throw new Error('@e-mate/desktop: renderer startup is not healthy')
+    const openScheduleStartupLatch = this.openScheduleStartupLatch
+    if (openScheduleStartupLatch === undefined) {
+      throw new Error('@e-mate/desktop: macOS update Schedule startup latch is not configured')
+    }
+    const window = this.window
+    if (window === undefined || window.isDestroyed()) {
+      throw new Error('@e-mate/desktop: macOS update window is unavailable')
+    }
+    const applied = await commit()
+    if (this.window !== window || window.isDestroyed()) {
+      throw new Error('@e-mate/desktop: macOS update window became unavailable during commit')
+    }
+    this.rendererStartupProbation = false
+    try {
+      this.show()
+      if (this.window !== window || window.isDestroyed() || !window.isVisible()) {
+        throw new Error('@e-mate/desktop: macOS update window did not become visible')
+      }
+    } catch (cause) {
+      this.rendererStartupProbation = true
+      if (!window.isDestroyed()) window.hide()
+      throw cause
+    }
+    // The Schedule latch is one-way. After invoking it, failure must stay forward-only.
+    await openScheduleStartupLatch()
+    if (typeof applied === 'function') await applied()
+  }
+
+  /** Bind the Base-owned Schedule controller before a probation renderer can be committed. */
+  configureScheduleStartupLatch(open: () => void | Promise<void>): void {
+    if (this.openScheduleStartupLatch === open) return
+    if (this.openScheduleStartupLatch !== undefined) {
+      throw new Error('@e-mate/desktop: Schedule startup latch is already configured')
+    }
+    this.openScheduleStartupLatch = open
   }
 
   /** @inheritdoc */
@@ -366,6 +454,10 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       this.onRendererBoot(report)
     } catch (cause) {
       process.stderr.write(`@e-mate/desktop: failed to persist renderer boot health: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+    }
+    if (report.status === 'healthy') {
+      this.rendererHealthy = true
+      this.show()
     }
     if (report.status === 'failed' && process.env.EMATE_RELEASE_HEALTH_PROBE !== '1') {
       void this.showRendererBootRecovery(report).catch((cause: unknown) => {
@@ -571,6 +663,11 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         userDataPath: app.getPath('userData'),
         homeDirectory: app.getPath('home'),
         helperModulePath: fileURLToPath(new URL('./mac-update-helper.js', import.meta.url)),
+        sourceCommit: update.sourceCommit,
+        baseContractId: update.baseContractId,
+        scheduleProtocolFloor: update.scheduleProtocolFloor,
+        manifestIdentity: update.manifestIdentity,
+        artifact: update.artifact,
         parentPid: process.pid,
         signal,
       })
