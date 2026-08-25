@@ -2246,3 +2246,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 失败事实绑定 CI run `32844912068` 的 Windows job `97793781939`；没有签名、安装、R2/Feed/desired-state 写入。
 - Remaining blockers: 新候选必须通过源合同和 Windows PowerShell SelfTest，再通过完整 CI；之后仍需冻结字节的真实 Windows 安装、在线更新、失败回滚和 P0/TQ 验收。
 - Next exact action: 运行本机最窄源合同与 diff 检查，提交推送后只等待新的真实 Windows owner 结果；生产链保持关闭。
+
+## 2026-08-25 · 2.0.13 Windows NSIS 快捷方式变量编译顺序修复
+
+- Goal checkpoint: 继续关闭 PR `#56` 的真实 Windows 安装包编译门禁；本条只修复 electron-builder 原生快捷方式变量在私有更新事务分支中的首次展开顺序，不把安装、更新回滚或发布标记完成。
+- Frozen baseline / current HEAD: 失败候选为 `525817412ae17df49ad3f84885d2313cfa75d2a9`，CI run 为 `32847226281`，Windows job 为 `97801253707`；Base/Harness 身份保持 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Binding documents read: 复核根 `AGENTS.md`、目标/插件/性能合同、2.0.13 切片、上一条完整记录、pinned `app-builder-lib@26.15.3` 原始 NSIS 模板和唯一自定义 installer include。
+- Inspected native seam: 真实 runner 已通过 Windows 源测试、PowerShell SelfTest 和应用打包，随后 makensis 在展开原生 `addStartMenuLink` 时报告 `$keepShortcuts` 未知。该原生宏读取全局 `$keepShortcuts`；私有事务宏在 upstream 声明之前首次展开同一宏，形成纯编译顺序错误。
+- Experiment or why unnecessary: 对 Yarn 缓存中的原始 `app-builder-lib@26.15.3` 解包后执行完整补丁 `git apply --check` 和实际 apply，确认补丁可重放；无需新增快捷方式实现、关闭 warning-as-error、跳过 NSIS 或改变更新准入。
+- Decision and forbidden alternatives: 将 upstream 已有 `Var /GLOBAL keepShortcuts` 与默认 `false` 初始化前移到 `setLinkVars` 后、所有安装分支共同入口，删除原位置重复声明；普通安装仍在原位置执行 `setIsTryToKeepShortcuts` 并可覆写为 `true`，私有事务分支确定性沿原生“重建快捷方式”语义。安装器仍属于 Desktop Base owner，禁止伪装成 Creation Mode/Profile 插件。
+- Changed scope: 仅修改 pinned `app-builder-lib` 补丁、对应 Yarn patch hash/checksum、既有 Windows 事务合同断言并 append 本记录；未改事务协议、Profile、Harness、R2、Feed、desired state 或生产状态。
+- Verification commands and results: 原始包完整补丁 `git apply --check` 通过；`windows-update-transaction.spec.ts` 为 `1 file / 9 tests` 全过；`package.spec.ts` 的 pinned app-builder patch-chain 定向合同为 `1/1`；`git diff --check` 通过。真实 makensis 必须由新 Windows CI 重跑确认，本条不预先宣称通过。
+- Immutable evidence / receipt: 失败事实绑定上述 run/job；当前只有 source-fixed diff，没有生成、签名、安装、上传、激活或发布任何新字节。
+- Remaining blockers: 新候选必须先通过 Windows makensis 和完整 PR CI；之后仍需冻结同字节的 Windows 安装、P0/TQ、在线更新、失败回滚和性能验收。
+- Next exact action: 提交并推送最小补丁，让同一受保护 PR 的 Windows runner 编译真实 NSIS；只处理随后出现的精确 owner 失败，生产链保持关闭。

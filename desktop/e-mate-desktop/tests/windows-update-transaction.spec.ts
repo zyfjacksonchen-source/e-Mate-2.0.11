@@ -30,6 +30,8 @@ describe('pinned assisted-NSIS atomic update seam', () => {
       .toContain('$R7 == "true"')
     expect(installed.slice(installed.indexOf('!ifmacrodef customUpdateInstallShouldRun'), seam))
       .not.toContain('${isUpdated}')
+    expect(installed.indexOf('Var /GLOBAL keepShortcuts')).toBeLessThan(seam)
+    expect(installed.match(/Var \/GLOBAL keepShortcuts/gu)).toHaveLength(1)
     expect(seam).toBeGreaterThan(installed.indexOf('!insertmacro setLinkVars'))
     expect(seam).toBeLessThan(installed.indexOf('!insertmacro CHECK_APP_RUNNING'))
     expect(seam).toBeLessThan(installed.indexOf('!insertmacro uninstallOldVersion SHELL_CONTEXT'))
