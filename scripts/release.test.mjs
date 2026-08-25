@@ -20,6 +20,14 @@ import { releasePrefix, releaseSource } from './release-source.mjs'
 import { renderDownloadPage } from './render-download-page.mjs'
 import { prepareHarnessBaseImports } from './component-base-imports.mjs'
 import { stageDesktopProfileArtifact } from './stage-desktop-profile-artifact.mjs'
+import {
+  admitDesktopReleaseManifest,
+  createDesktopArtifactCandidate,
+} from '../desktop/e-mate-desktop/scripts/desktop-release-manifest.ts'
+import {
+  validateAdmittedDesktopReleaseManifest,
+  validateDesktopReleaseArtifact,
+} from '../desktop/e-mate-desktop/src/update-checker.ts'
 
 const HARNESS_COMMIT = 'e13ce9d953037a2f40d866d17f5a7e00cbc15d66'
 const DIGEST = '0'.repeat(64)
@@ -421,30 +429,34 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.doesNotMatch(readFileSync('.github/workflows/release.yml', 'utf8'), /npm view '@e-mate\/dsh@2\.0\.8'|release\.mjs publish/u)
   const desktopReleaseSource = readFileSync('.github/workflows/desktop-release.yml', 'utf8')
   const desktopManifestSource = readFileSync('desktop/e-mate-desktop/scripts/desktop-release-manifest.ts', 'utf8')
-  const desktopPublisher = desktopRelease.jobs.r2.steps.find(step => step.name === 'Publish accepted desktop bytes to Cloudflare R2')
   assert.equal(desktopRelease.jobs.r2.needs, undefined)
+  assert.equal(desktopRelease.jobs.r2.steps.length, 1)
+  assert.match(desktopRelease.jobs.r2.steps[0].run, /PROTECTED_DESKTOP_ADMISSION_REQUIRED/u)
+  assert.match(desktopRelease.jobs.r2.steps[0].run, /GITHUB_REF.*refs\/heads\/main/u)
+  assert.match(desktopRelease.jobs.r2.steps[0].run, /GITHUB_WORKFLOW_REF.*desktop-release\.yml@refs\/heads\/main/u)
+  assert.doesNotMatch(JSON.stringify(desktopRelease.jobs.r2), /actions\/checkout|secrets\.|aws |environment/u)
   assert.equal(desktopRelease.on.workflow_dispatch.inputs.release_run_id.default, '')
   assert.equal(desktopRelease.on.workflow_dispatch.inputs.reuse_run_id.default, '')
   assert.match(desktopRelease.jobs.reuse.steps[0].run, /Build and verify the e-Mate profile/u)
   assert.match(desktopRelease.jobs.reuse.steps[0].run, /Build unsigned Windows x64 installer/u)
+  assert.match(desktopRelease.jobs.reuse.steps[0].run, /test "\$source_sha" = "\$GITHUB_SHA"/u)
   assert.match(desktopRelease.jobs.macos.if, /needs\.reuse\.result == 'success'/u)
   assert.equal(desktopRelease.jobs.macos.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], "${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}")
   assert.equal(desktopRelease.jobs.manifest.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], "${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}")
-  assert.match(desktopRelease.jobs.manifest.steps.find(step => step.name === 'Generate exact R2 release manifest').run, /--mac-commit/u)
-  assert.match(desktopRelease.jobs.manifest.steps.find(step => step.name === 'Generate exact R2 release manifest').run, /--win-run/u)
-  assert.match(desktopRelease.jobs.r2.steps.find(step => step.name === 'Validate the accepted build-only run').run, /head_sha/u)
-  assert.equal(desktopRelease.jobs.r2.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], '${{ inputs.release_run_id }}')
+  const candidateStep = desktopRelease.jobs.manifest.steps.find(step => step.name === 'Generate performance-pending Desktop artifact candidate')
+  assert.match(candidateStep.run, /desktop-release-manifest\.ts candidate/u)
+  assert.match(candidateStep.run, /--mac-commit/u)
+  assert.match(candidateStep.run, /--win-run/u)
+  assert.match(candidateStep.run, /--out dist\/desktop\/desktop-candidate\.json/u)
+  assert.doesNotMatch(candidateStep.run, /latest\.json/u)
   assert.match(desktopManifestSource, /readFileSync\(new URL\('\.\.\/package\.json'/u)
   assert.match(desktopManifestSource, /loadProfileBaseContract/u)
   assert.match(desktopManifestSource, /schedule_protocol_floor/u)
+  assert.match(desktopManifestSource, /validateAdmittedDesktopReleaseManifest/u)
+  assert.match(desktopManifestSource, /desktop-release-manifest/u)
+  assert.match(desktopManifestSource, /profile_component_aggregate/u)
+  assert.match(desktopManifestSource, /github_artifact_provenance/u)
   assert.doesNotMatch(desktopManifestSource, /const VERSION = '\d+\.\d+\.\d+'/u)
-  assert.match(desktopPublisher.run, /version="\$\(jq -er '\.version/u)
-  assert.match(desktopPublisher.run, /\.artifacts\[\$platform\]\.url/u)
-  assert.match(desktopPublisher.run, /\.base_contract_id/u)
-  assert.match(desktopPublisher.run, /\.schedule_protocol_floor/u)
-  assert.equal(desktopPublisher.env.EMATE_PERFORMANCE_ACCEPTED_SHA, '${{ vars.EMATE_PERFORMANCE_ACCEPTED_SHA }}')
-  assert.match(desktopPublisher.run, /test "\$GITHUB_SHA" = "\$EMATE_PERFORMANCE_ACCEPTED_SHA"/u)
-  assert.ok(desktopPublisher.run.lastIndexOf('public-artifact') < desktopPublisher.run.indexOf('--key desktop/latest.json'))
   for (const job of ['windows', 'macos', 'manifest']) {
     const step = desktopRelease.jobs[job].steps.find(item => item.id === 'version')
     assert.match(step.run, /node -p "require\(process\.argv\[1\]\)\.version"/u)
@@ -454,10 +466,10 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.match(readFileSync('.gitattributes', 'utf8'), /^\* text=auto eol=lf$/mu)
 })
 
-test('download page resolves unsigned desktop installers from the fail-closed R2 manifest', async () => {
+test('one admitted producer feeds the updater, legacy 2.0.12, and download page', async t => {
   const page = renderDownloadPage(readFileSync('deploy/download-page/index.html', 'utf8'))
   const macGuide = readFileSync('deploy/download-page/install-macos.html', 'utf8')
-  const scriptName = 'site.78a554c241ad.js'
+  const scriptName = 'site.fb5efdd1422c.js'
   const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
   assert.equal(scriptName.split('.')[1], createHash('sha256').update(script).digest('hex').slice(0, 12))
   const manifestUrl = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json'
@@ -496,29 +508,91 @@ test('download page resolves unsigned desktop installers from the fail-closed R2
   }
   assert.doesNotMatch(page, /__EMATE_RELEASE_SOURCE_COMMIT__|npm install|nodejs\.org|e-mate setup|e-mate launch/u)
   const { normalizeDownloadIndex } = await import(`../deploy/download-page/${scriptName}`)
+  const root = mkdtempSync(join(tmpdir(), 'e-mate-public-manifest-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
   const commit = 'a'.repeat(40)
-  const releasePrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v${publishedVersion}/${commit}`
-  const fixture = {
+  const macArtifact = join(root, `e-Mate-${publishedVersion}-mac-universal.dmg`)
+  const windowsArtifact = join(root, `e-Mate-${publishedVersion}-win-x64-Setup.exe`)
+  await writeFile(macArtifact, 'mac')
+  await writeFile(windowsArtifact, 'win')
+  const candidate = join(root, 'desktop-candidate.json')
+  await createDesktopArtifactCandidate({
+    macArtifact,
+    windowsArtifact,
+    sourceCommit: commit,
+    macSourceCommit: commit,
+    windowsSourceCommit: commit,
+    macBuildRunId: '123',
+    windowsBuildRunId: '456',
+    output: candidate,
+  })
+  const profileComponentAggregate = join(root, 'profile-component-aggregate.json')
+  const performance = join(root, 'performance.json')
+  const githubArtifactProvenance = join(root, 'github-artifact-provenance.json')
+  await writeFile(profileComponentAggregate, JSON.stringify({
+    aggregate_sha256: '1'.repeat(64),
+    inventory_sha256: '2'.repeat(64),
+    staged_profile_tree_sha256: '3'.repeat(64),
+    targets: ['darwin-arm64', 'darwin-x64', 'win32-x64'].map(target => ({
+      target,
+      profile_generation: '5'.repeat(64),
+      component_aggregate_sha256: '6'.repeat(64),
+    })),
+  }))
+  await writeFile(performance, JSON.stringify({
+    performance_run_id: 'performance-run-id',
+    admission_sha256: '4'.repeat(64),
+    signature_key_id: '0123456789abcdef',
+    verifier: {},
+  }))
+  await writeFile(githubArtifactProvenance, JSON.stringify({
     schema_version: 1,
-    version: publishedVersion,
+    document_type: 'emate.github-artifact-provenance',
     source_commit: commit,
-    base_contract_id: 'e-mate-desktop-profile-v7-dsh-e13ce9d95303',
-    schedule_protocol_floor: 1,
-    artifacts: {
-      darwin: { url: `${releasePrefix}/e-Mate-${publishedVersion}-mac-universal.dmg`, bytes: 123, sha256: 'b'.repeat(64), build_source_commit: commit, build_run_id: '123' },
-      win32: { url: `${releasePrefix}/e-Mate-${publishedVersion}-win-x64-Setup.exe`, bytes: 456, sha256: 'c'.repeat(64), build_source_commit: 'd'.repeat(40), build_run_id: '456' },
-    },
-  }
-  const normalized = normalizeDownloadIndex(fixture)
-  assert.equal(normalized.base_contract_id, fixture.base_contract_id)
+    artifacts: [
+      { role: 'desktop_candidate', name: `e-mate-desktop-release-${commit}`, artifact_id: '11', digest: `sha256:${'7'.repeat(64)}`, run_id: '123', run_attempt: 1 },
+      { role: 'performance_admission', name: `e-mate-performance-admission-${commit}`, artifact_id: '12', digest: `sha256:${'8'.repeat(64)}`, run_id: '124', run_attempt: 1 },
+    ],
+  }))
+  const output = join(root, 'latest.json')
+  await admitDesktopReleaseManifest({
+    candidate,
+    profileComponentAggregate,
+    performance,
+    githubArtifactProvenance,
+    output,
+  })
+  const manifest = JSON.parse(readFileSync(output, 'utf8'))
+  assert.equal(Object.keys(manifest).length, 11)
+  assert.equal(validateAdmittedDesktopReleaseManifest(manifest), true)
+  const normalized = normalizeDownloadIndex(manifest)
+  assert.equal(normalized.base_contract_id, manifest.base_contract_id)
   assert.equal(normalized.schedule_protocol_floor, 1)
   assert.deepEqual(normalized.downloads.map(item => item.target), ['macos-universal', 'windows-x64'])
-  const missingFloor = { ...fixture }
+  // Frozen 2.0.12@9fbc70ad parses only version/artifacts and therefore ignores the admitted fields.
+  const legacy2012 = value => value && typeof value === 'object'
+    && typeof value.version === 'string' && /^\d+\.\d+\.\d+$/u.test(value.version)
+    && value.artifacts && typeof value.artifacts === 'object'
+    && ['darwin', 'win32'].every(platform => validateDesktopReleaseArtifact(
+      platform, value.version, value.artifacts[platform],
+    ) !== null)
+  assert.equal(legacy2012(manifest), true)
+  const oldSixField = {
+    schema_version: manifest.schema_version,
+    version: manifest.version,
+    source_commit: manifest.source_commit,
+    base_contract_id: manifest.base_contract_id,
+    schedule_protocol_floor: manifest.schedule_protocol_floor,
+    artifacts: manifest.artifacts,
+  }
+  assert.equal(validateAdmittedDesktopReleaseManifest(oldSixField), false)
+  assert.throws(() => normalizeDownloadIndex(oldSixField), /桌面发布清单 字段无效/u)
+  const missingFloor = { ...manifest }
   delete missingFloor.schedule_protocol_floor
   assert.throws(() => normalizeDownloadIndex(missingFloor), /桌面发布清单 字段无效/u)
-  assert.throws(() => normalizeDownloadIndex({ ...fixture, schedule_protocol_floor: 0 }), /桌面发布清单身份无效/u)
+  assert.throws(() => normalizeDownloadIndex({ ...manifest, schedule_protocol_floor: 0 }), /桌面发布清单身份无效/u)
   assert.throws(() => normalizeDownloadIndex({
-    ...fixture,
-    artifacts: { ...fixture.artifacts, darwin: { ...fixture.artifacts.darwin, url: 'https://example.com/e-Mate.dmg' } },
+    ...manifest,
+    artifacts: { ...manifest.artifacts, darwin: { ...manifest.artifacts.darwin, url: 'https://example.com/e-Mate.dmg' } },
   }), /桌面制品身份无效/u)
 })

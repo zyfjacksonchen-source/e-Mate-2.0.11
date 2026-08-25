@@ -1,11 +1,12 @@
-const MAX_INDEX_BYTES = 64 * 1024;
+export const MAX_INDEX_BYTES = 64 * 1024;
 const VERSION = "2.0.12";
-const BASE_CONTRACT_ID = "e-mate-desktop-profile-v7-dsh-e13ce9d95303";
-const SCHEDULE_PROTOCOL_FLOOR = 1;
 const R2_ORIGIN = "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev";
 const DESKTOP_MANIFEST_URL = "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json";
 const SHA256 = /^[0-9a-f]{64}$/;
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/;
+const BASE_CONTRACT_ID = /^e-mate-desktop-profile-v[1-9][0-9]*-dsh-[0-9a-f]{12}$/;
+const RUN_ID = /^[1-9][0-9]*$/;
+const RELEASE_TARGETS = Object.freeze(["darwin-arm64", "darwin-x64", "win32-x64"]);
 const TARGETS = Object.freeze({
   "windows-x64": Object.freeze({ platform: "windows", architecture: "x64", label: "Windows x64" }),
   "macos-universal": Object.freeze({ platform: "macos", architecture: "universal", label: "macOS Universal" }),
@@ -31,11 +32,20 @@ function safeText(value, label, pattern) {
 
 export function normalizeDownloadIndex(raw) {
   const manifest = object(raw, "桌面发布清单");
-  exactKeys(manifest, ["schema_version", "version", "source_commit", "base_contract_id", "schedule_protocol_floor", "artifacts"], "桌面发布清单");
-  if (manifest.schema_version !== 1 || manifest.version !== VERSION || !SOURCE_COMMIT.test(manifest.source_commit)
-    || manifest.base_contract_id !== BASE_CONTRACT_ID || manifest.schedule_protocol_floor !== SCHEDULE_PROTOCOL_FLOOR) {
+  exactKeys(manifest, [
+    "schema_version", "document_type", "release_status", "version", "source_commit", "base_contract_id",
+    "schedule_protocol_floor", "profile_component_aggregate", "performance", "github_artifact_provenance", "artifacts",
+  ], "桌面发布清单");
+  if (manifest.schema_version !== 1 || manifest.document_type !== "emate.desktop-release-manifest"
+    || manifest.release_status !== "admitted" || manifest.version !== VERSION
+    || typeof manifest.source_commit !== "string" || !SOURCE_COMMIT.test(manifest.source_commit)
+    || typeof manifest.base_contract_id !== "string" || !BASE_CONTRACT_ID.test(manifest.base_contract_id)
+    || !Number.isSafeInteger(manifest.schedule_protocol_floor) || manifest.schedule_protocol_floor < 1) {
     throw new Error("桌面发布清单身份无效");
   }
+  validateProfileComponentAggregateSummary(manifest.profile_component_aggregate);
+  validatePerformanceAdmissionSummary(manifest.performance);
+  validateGithubArtifactProvenance(manifest.github_artifact_provenance, manifest.source_commit);
   const artifacts = object(manifest.artifacts, "桌面制品");
   exactKeys(artifacts, ["darwin", "win32"], "桌面制品");
   const downloads = [
@@ -52,12 +62,75 @@ export function normalizeDownloadIndex(raw) {
   });
 }
 
+export function parseDownloadIndexText(payload) {
+  if (typeof payload !== "string" || new TextEncoder().encode(payload).byteLength > MAX_INDEX_BYTES) {
+    throw new Error("下载索引过大");
+  }
+  return normalizeDownloadIndex(JSON.parse(payload));
+}
+
+function validateProfileComponentAggregateSummary(raw) {
+  const value = object(raw, "Profile 汇总");
+  exactKeys(value, ["aggregate_sha256", "inventory_sha256", "staged_profile_tree_sha256", "targets"], "Profile 汇总");
+  if (![value.aggregate_sha256, value.inventory_sha256, value.staged_profile_tree_sha256]
+    .every(item => typeof item === "string" && SHA256.test(item))
+    || !Array.isArray(value.targets) || value.targets.length !== RELEASE_TARGETS.length) {
+    throw new Error("Profile 汇总身份无效");
+  }
+  value.targets.forEach((rawTarget, index) => {
+    const target = object(rawTarget, "Profile 目标");
+    exactKeys(target, ["target", "profile_generation", "component_aggregate_sha256"], "Profile 目标");
+    if (target.target !== RELEASE_TARGETS[index]
+      || typeof target.profile_generation !== "string" || !SHA256.test(target.profile_generation)
+      || typeof target.component_aggregate_sha256 !== "string" || !SHA256.test(target.component_aggregate_sha256)) {
+      throw new Error("Profile 目标身份无效");
+    }
+  });
+}
+
+function validatePerformanceAdmissionSummary(raw) {
+  const value = object(raw, "性能准入");
+  exactKeys(value, ["performance_run_id", "admission_sha256", "signature_key_id", "verifier"], "性能准入");
+  if (typeof value.performance_run_id !== "string" || typeof value.admission_sha256 !== "string"
+    || !SHA256.test(value.admission_sha256) || typeof value.signature_key_id !== "string") {
+    throw new Error("性能准入身份无效");
+  }
+  object(value.verifier, "性能准入验证器");
+}
+
+function validateGithubArtifactProvenance(raw, sourceCommit) {
+  const value = object(raw, "GitHub 制品来源");
+  const roles = ["desktop_candidate", "performance_admission"];
+  exactKeys(value, ["schema_version", "document_type", "source_commit", "artifacts"], "GitHub 制品来源");
+  if (value.schema_version !== 1 || value.document_type !== "emate.github-artifact-provenance"
+    || value.source_commit !== sourceCommit || !Array.isArray(value.artifacts) || value.artifacts.length !== roles.length
+    || new Set(value.artifacts.map(artifact => artifact?.artifact_id)).size !== roles.length) {
+    throw new Error("GitHub 制品来源身份无效");
+  }
+  value.artifacts.forEach((rawArtifact, index) => {
+    const artifact = object(rawArtifact, "GitHub 制品来源项");
+    const role = roles[index];
+    const name = role === "desktop_candidate"
+      ? `e-mate-desktop-release-${sourceCommit}`
+      : `e-mate-performance-admission-${sourceCommit}`;
+    exactKeys(artifact, ["role", "name", "artifact_id", "digest", "run_id", "run_attempt"], "GitHub 制品来源项");
+    if (artifact.role !== role || artifact.name !== name || typeof artifact.artifact_id !== "string" || !RUN_ID.test(artifact.artifact_id)
+      || typeof artifact.digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(artifact.digest)
+      || typeof artifact.run_id !== "string" || !RUN_ID.test(artifact.run_id)
+      || !Number.isSafeInteger(artifact.run_attempt) || artifact.run_attempt < 1) {
+      throw new Error("GitHub 制品来源项身份无效");
+    }
+  });
+}
+
 function releaseArtifact(raw, sourceCommit, targetId, fileName) {
   const artifact = object(raw, "桌面制品");
   exactKeys(artifact, ["url", "bytes", "sha256", "build_source_commit", "build_run_id"], "桌面制品");
   if (artifact.url !== `${R2_ORIGIN}/desktop/releases/v${VERSION}/${sourceCommit}/${fileName}`
-    || !Number.isSafeInteger(artifact.bytes) || artifact.bytes < 1 || !SHA256.test(artifact.sha256)
-    || !SOURCE_COMMIT.test(artifact.build_source_commit) || !/^[1-9][0-9]*$/.test(artifact.build_run_id)) {
+    || !Number.isSafeInteger(artifact.bytes) || artifact.bytes < 1
+    || typeof artifact.sha256 !== "string" || !SHA256.test(artifact.sha256)
+    || artifact.build_source_commit !== sourceCommit
+    || typeof artifact.build_run_id !== "string" || !RUN_ID.test(artifact.build_run_id)) {
     throw new Error("桌面制品身份无效");
   }
   const target = TARGETS[targetId];
@@ -135,7 +208,7 @@ async function fetchIndex(url) {
     if (contentLength > MAX_INDEX_BYTES) throw new Error("下载索引过大");
     const payload = await response.text();
     if (new TextEncoder().encode(payload).byteLength > MAX_INDEX_BYTES) throw new Error("下载索引过大");
-    return normalizeDownloadIndex(JSON.parse(payload));
+    return parseDownloadIndexText(payload);
   } finally {
     clearTimeout(timeout);
   }
