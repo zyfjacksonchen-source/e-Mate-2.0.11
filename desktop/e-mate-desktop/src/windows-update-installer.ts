@@ -12,7 +12,6 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  realpathSync,
   renameSync,
   rmSync,
   unlinkSync,
@@ -687,11 +686,9 @@ export async function beginWindowsUpdateCandidateStartup(options: {
     throw new Error('incomplete Windows update candidate identity')
   }
   const request = parseWindowsUpdateRequest(readBoundedJsonSync(requestPath), requestPath, token)
-  const currentExecutable = realpathSync(options.currentExecutable ?? process.execPath)
+  const currentExecutable = await realFile(options.currentExecutable ?? process.execPath)
   const currentVersion = options.currentVersion ?? process.env.npm_package_version
-  const executableMetadata = lstatSync(currentExecutable)
-  if (!executableMetadata.isFile() || executableMetadata.isSymbolicLink()
-    || !sameWindowsPath(dirname(currentExecutable), request.canonicalDirectory)
+  if (!sameWindowsPath(dirname(currentExecutable), request.canonicalDirectory)
     || currentVersion !== request.targetVersion) {
     throw new Error('Windows update candidate path or version is invalid')
   }

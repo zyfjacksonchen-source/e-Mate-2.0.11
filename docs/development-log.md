@@ -2218,3 +2218,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有 Git/source/build-test 输出；没有签名安装包、Profile generation、performance_run_id、安装回执、R2 对象或公开指针。
 - Remaining blockers: 仍需受保护 PR/CI、正式不可变构建、macOS/Windows 同字节安装、三项 P0 跨日/双会话/picker、TQ-01..13 全矩阵、TTFT v2、更新/回滚和 Cloudflare 插件公开回读。Vision 的 7 项平台运行时测试与 Desktop 的 4 项平台条件测试必须在对应正式目标补齐。
 - Next exact action: 提交本 checkpoint，复核最终 diff 与公共远端保护状态；随后推送候选 PR，先让 CI admission 验证同一源码，禁止在合并/准入前写 R2、Feed 或官网。
+
+## 2026-08-25 · 2.0.13 Windows 候选启动物理路径一致性修复
+
+- Goal checkpoint: 修复 P0/TQ 候选在真实 Windows CI 首次暴露的 Base 更新握手误拒绝；本条只恢复同一原生更新链，不把安装态、更新回滚或发布标记完成。
+- Frozen baseline / current HEAD: 失败候选为 `97f04018c83d70e036f7fd830bbb53f146546811`，PR 为 `#56`，CI run 为 `32843830729`；Base 为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`，Harness 为 `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Binding documents read: 核对根 `AGENTS.md`、目标/插件/性能合同、2.0.13 切片、最新 development log，并追踪 `beginWindowsUpdateCandidateStartup()`、唯一调用方、调度端 `realFile()` 与 Windows 更新握手测试。
+- Inspected native seam: 调度端已经用共享异步 `realFile()` 完成无 symlink 的真实文件检查与物理路径规范化；候选启动端却单独使用 `realpathSync()` 加重复 `lstatSync()`，在 Windows 临时目录/短路径规范化下会把同一物理候选误判为不同 canonical path。
+- Experiment or why unnecessary: 远端真实 Windows runner 的 `check:win-package` 精确复现为 `windows-update-installer.spec.ts` 两项失败，均在读取候选 journal 前被 `Windows update candidate path or version is invalid` 拒绝；macOS 同测试通过说明这是平台路径规范化差异，不是 journal、版本或产品插件行为。
+- Decision and forbidden alternatives: 候选启动端改为复用唯一 `realFile()`，删除平行同步规范化与重复文件元数据校验；保留现有 canonical directory、版本、journal、hash、exclusive started receipt 和 Base identity 全部防线。该责任属于 Desktop Base 私有握手，禁止包装成 Creation Mode/Profile 插件，也不通过放宽路径比较或跳过 Windows 测试掩盖。
+- Changed scope: 仅修改 `desktop/e-mate-desktop/src/windows-update-installer.ts` 的候选可执行文件解析并 append 本记录；未改协议 schema、安装器、Profile、Harness、R2、Feed、desired state 或生产状态。
+- Verification commands and results: 本机 Node `24.19.0` 下 Windows installer/transaction 窄回归为 `2 files / 21 tests` 全过；Desktop 主 TypeScript face 通过；`git diff --check` 通过。真实 Windows CI 重跑尚未取得结果，因此当前只为 source-fixed checkpoint。
+- Immutable evidence / receipt: Git diff 与 PR CI 失败日志绑定到上述 run/job；没有生成、签名、安装、上传、激活或发布任何新字节。
+- Remaining blockers: 必须将修复推送到同一 PR，让新的真实 Windows runner 通过 `check:win-package` 和 unsigned installer 构建；随后仍需同一冻结字节的 Windows 安装、P0/TQ、在线更新和失败回滚验收。
+- Next exact action: 提交并推送最小修复，等待 PR #56 全部 CI 收敛；若 Windows 仍失败，只处理新的精确失败 owner，生产链继续关闭。
