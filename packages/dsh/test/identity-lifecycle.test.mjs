@@ -469,6 +469,10 @@ test('identity credential generation fences a late runtime projection without pe
   const policyRecords = new Map()
   const projectionRecords = new Map()
   const settings = new Map()
+  const settingRevisions = new Map([
+    ['llm-pi-ai', 0],
+    ['agent-default-model', 0],
+  ])
   const handlers = new Map()
   let releaseSearch
   let markSearchStarted
@@ -538,7 +542,12 @@ test('identity credential generation fences a late runtime projection without pe
     },
     settings: {
       get: name => structuredClone(settings.get(name)),
-      replace: async (name, value) => { settings.set(name, structuredClone(value)) },
+      describe: () => [...settingRevisions].map(([ns, revision]) => ({ ns, revision })),
+      replace: async (name, value, revision) => {
+        assert.equal(revision, settingRevisions.get(name))
+        settings.set(name, structuredClone(value))
+        settingRevisions.set(name, revision + 1)
+      },
     },
     on: (event, handler) => {
       handlers.set(event, handler)

@@ -10,6 +10,7 @@ import {
   registrationRejectionMessage,
 } from './enterprise-provider.js'
 export { createEnterpriseIdentityProvider, MODEL_SESSION_REF } from './enterprise-provider.js'
+export { TaskAuditUploadRejection } from './task-audit-upload-rejection.js'
 
 export const inject = ['connection', 'credentials', 'timer']
 export const IDENTITY_CHANNEL = '/emate.identity'

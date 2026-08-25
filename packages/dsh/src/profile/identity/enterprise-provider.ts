@@ -4,6 +4,7 @@ import {
   agreementDocuments,
 } from './agreements.js'
 import { LOGGED_OUT_CREDENTIAL } from '../credentials-os.js'
+import { TaskAuditUploadRejection } from './task-audit-upload-rejection.js'
 
 const SESSION_REF = 'E_MATE_ENTERPRISE_SESSION'
 export const MODEL_SESSION_REF = 'E_MATE_MODEL_SESSION_TOKEN'
@@ -543,6 +544,12 @@ async function responseJson(response: Response, label: string): Promise<unknown>
     if (label === 'login' && response.status === 401 && code === 'INVALID_GRANT') {
       throw new LoginRejection(LOGIN_REJECTION_MESSAGE)
     }
+    if (label === 'task audit'
+      && (response.status === 400 && code === 'INVALID_AUDIT_TASK'
+        || response.status === 409 && code === 'AUDIT_TASK_CONFLICT')) {
+      throw new TaskAuditUploadRejection(response.status, response.status === 409 ? 'conflict' : 'invalid')
+    }
+    if (label === 'task audit') throw new Error('e-Mate enterprise task audit request failed')
     const messages: Record<string, string> = {
       INVALID_GRANT: '账号或密码错误',
       APPROVAL_REQUIRED: '账号正在等待管理员审核',
