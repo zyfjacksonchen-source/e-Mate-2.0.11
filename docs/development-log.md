@@ -2456,3 +2456,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有 source-fixed diff、无密钥组装 fixture 与 protected external action pin `eca005391708dc6ac3057a8702995e2475cdaaf2`；旧 evidence 全部继续作废。没有真实 Provider evidence、`performance_run_id`、签名 admission、候选安装、上传或生产写入。
 - Remaining blockers: 必须从 exact installed 2.0.12/2.0.13 bytes 按四个正式模型分别采集 3 path×30 AB/BA 的真实 source artifacts，并由合并后的 protected verifier 和固定外部 action 产生四 leaf/outer admission；缺任一模型、真实 renderer/provider/installed/enterprise receipt 或实机门禁均保持发布关闭。
 - Next exact action: 提交本最小合同修复交主代理复核并移植；合入 protected main 后才允许外部 collector 使用新 manifest，禁止复用旧 evidence、手工补字段或把 baseline Harness 重标为 candidate。
+
+## 2026-08-26 · 2.0.13 TTFT v2 双 Harness 显式证据修订
+
+- Goal checkpoint: 独立审查确认前一修复已让 baseline receipt 使用真实 pin，但生产 evidence 自身仍只声明 candidate Harness，baseline 身份隐藏在 verifier 常量中；本条补齐显式可签证据字段，不采集模型、不发布。
+- Frozen baseline / current HEAD: 修订基于独立提交 `614f66ca837d2b06cc2ae5312eb91d6bc19c68a7`；candidate/Base Harness 固定 `b2b1650b01f0ee88d81837a9b5c050f9f763f606`，2.0.12 baseline Harness 固定 `2bc16230975f6cf02aa1b283b1f86de44007b059`。
+- Binding documents read: 复核三份 TTFT 绑定合同、前一条日志、唯一 assembler/verifier 与外部 protected publication action 的 evidence consumer；append 本修订而不改写历史记录。
+- Inspected native seam: manifest、assembled evidence 与 `verifyProductionArtifacts()` checked output 共用同一 top-level evidence shape；因此只需在该 shape 增加 closed `baseline_harness_commit`，并让唯一 receipt validator 从 evidence 两个显式字段分别验证三条路径，无需新 receipt、事件、collector、workflow 或更新 summary。
+- Experiment or why unnecessary: 正例验证 assemble→verify 同时保留 candidate/baseline 两字段；反例覆盖 manifest 缺失/错误 baseline 字段、已组装 production evidence 缺失/错误字段、baseline receipt 错标 candidate、candidate receipt 错标 baseline，且重算 receipt digest 仍失败关闭。
+- Decision and forbidden alternatives: `harness_commit` 继续只表示 candidate/Base，`baseline_harness_commit` 只表示真实 2.0.12 baseline；production 两者均必填精确值，fixture 显式写 `fixture-only` 且仍不能进入 production。禁止从 path 猜 baseline、Verifier 隐式补字段、接受旧 production evidence 或增加兼容 schema。
+- Changed scope: 继续只修改三份绑定合同、现有 `performance-parity` verifier/测试并 append 本记录；外部 action/schema、四字段 summary、workflow、20 支持文件、Base/Profile/Harness、R2 与用户数据未改。
+- Verification commands and results: `pnpm run test:performance:parity` 为 `10/10`；`node --test scripts/desktop-admission.test.mjs` 为 `8/8`；`git diff --check` 通过。不以 fixture CLI 或外部环境缺失冒充生产通过。
+- Immutable evidence / receipt: 当前仍只有源码与无密钥测试，外部 action 保持 `eca005391708dc6ac3057a8702995e2475cdaaf2`；没有真实 Provider、安装态、admission、上传或生产写入。
+- Remaining blockers: 四模型真实 source-partitioned evidence、签名 leaf/outer admission 与安装/更新/回滚门禁仍全部 OPEN；本字段修订使旧 production evidence 必然作废。
+- Next exact action: 提交本修订交主代理移植；只有合并后的 protected verifier 可用于新生产采集。

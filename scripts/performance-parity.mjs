@@ -338,11 +338,13 @@ function validEnterpriseReceipt(receipt) {
 
 export function evaluateEvidence(evidence) {
   const failures = []
+  const production = evidence?.evidence_kind === 'production-real-provider'
   if (evidence?.schema_version !== EVIDENCE_SCHEMA_VERSION
     || evidence?.comparison_kind !== 'installed-2.0.12-vs-2.0.13'
     || evidence?.harness_commit !== CANDIDATE_HARNESS_COMMIT
+    || (production && evidence?.baseline_harness_commit !== BASELINE_HARNESS_COMMIT)
     || !validPerformanceModel(evidence?.performance_model)) {
-    failures.push('evidence schema, model, or candidate Harness pin mismatch')
+    failures.push('evidence schema, model, or Harness pins mismatch')
   }
   const baseline = evidence?.paths?.baseline
   const online = evidence?.paths?.emate_online
@@ -375,7 +377,6 @@ export function evaluateEvidence(evidence) {
       failures.push(...comparisons[name].failures.map(failure => `${name}: ${failure}`))
     }
   }
-  const production = evidence?.evidence_kind === 'production-real-provider'
   const productionReceiptFailures = production ? validateProductionReceipts(evidence) : []
   const productionArtifactsVerified = production
     && verifiedProductionEvidence.get(evidence) === sha256(canonical(evidence))
@@ -408,7 +409,7 @@ function validateProductionReceipts(evidence) {
   let receiptsComplete = true
   for (const [index, receipt] of receipts.entries()) {
     const candidate = index !== 0
-    const expectedHarnessCommit = candidate ? CANDIDATE_HARNESS_COMMIT : BASELINE_HARNESS_COMMIT
+    const expectedHarnessCommit = candidate ? evidence.harness_commit : evidence.baseline_harness_commit
     if (receipt === undefined
       || !exactKeys(receipt, candidate
         ? [...RUN_RECEIPT_FIELDS, 'enterprise_receipt', 'enterprise_receipt_artifact']
@@ -592,6 +593,7 @@ export async function verifyProductionArtifacts(evidence, input) {
     performance_run_id: evidence.performance_run_id,
     evidence_kind: evidence.evidence_kind,
     harness_commit: evidence.harness_commit,
+    baseline_harness_commit: evidence.baseline_harness_commit,
     performance_model: evidence.performance_model,
     paths: {},
   }
@@ -724,7 +726,7 @@ async function assemblePath(evidence, pathName, config, manifestRoot, outputRoot
   const sampleIdsSha256 = sha256(canonical(samples.map(sample => sample.pair_id)))
   const receipt = {
     performance_run_id: evidence.performance_run_id,
-    harness_commit: candidate ? CANDIDATE_HARNESS_COMMIT : BASELINE_HARNESS_COMMIT,
+    harness_commit: candidate ? evidence.harness_commit : evidence.baseline_harness_commit,
     provider: provider.value.provider,
     model: provider.value.model,
     reasoning_level: provider.value.reasoning_level,
@@ -785,13 +787,14 @@ export async function assembleProductionEvidence(manifestPath, outputPath) {
   const manifest = JSON.parse(await readFile(resolvedManifest, 'utf8'))
   if (!exactKeys(manifest, [
     'schema_version', 'comparison_kind', 'performance_run_id', 'evidence_kind',
-    'harness_commit', 'performance_model', 'paths',
+    'harness_commit', 'baseline_harness_commit', 'performance_model', 'paths',
   ])
     || manifest.schema_version !== EVIDENCE_SCHEMA_VERSION
     || manifest.comparison_kind !== 'installed-2.0.12-vs-2.0.13'
     || typeof manifest.performance_run_id !== 'string' || manifest.performance_run_id.length < 16
     || manifest.evidence_kind !== 'production-real-provider'
     || manifest.harness_commit !== CANDIDATE_HARNESS_COMMIT
+    || manifest.baseline_harness_commit !== BASELINE_HARNESS_COMMIT
     || !validPerformanceModel(manifest.performance_model)
     || !exactKeys(manifest.paths, PATH_NAMES)) {
     throw new Error('production assembly manifest is invalid')
@@ -802,6 +805,7 @@ export async function assembleProductionEvidence(manifestPath, outputPath) {
     performance_run_id: manifest.performance_run_id,
     evidence_kind: manifest.evidence_kind,
     harness_commit: manifest.harness_commit,
+    baseline_harness_commit: manifest.baseline_harness_commit,
     performance_model: manifest.performance_model,
     paths: {},
   }
@@ -1028,6 +1032,7 @@ async function createFixture(samples) {
     performance_run_id: 'fixture-performance-v2',
     evidence_kind: 'keyless-target-loop-collector-fixture',
     harness_commit: CANDIDATE_HARNESS_COMMIT,
+    baseline_harness_commit: 'fixture-only',
     performance_model: {
       route_id: 'fixture', provider: 'fixture-provider', model: 'fixture-model', reasoning_effort: 'fixture',
     },

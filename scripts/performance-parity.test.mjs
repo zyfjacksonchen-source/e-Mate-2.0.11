@@ -79,6 +79,7 @@ function evidence(candidateOverrides = {}, count = 30) {
     performance_run_id: 'performance-run-test-v2',
     evidence_kind: 'keyless-target-loop-collector-fixture',
     harness_commit: 'b2b1650b01f0ee88d81837a9b5c050f9f763f606',
+    baseline_harness_commit: 'fixture-only',
     performance_model: {
       route_id: 'fixture-route', provider: 'provider', model: 'model', reasoning_effort: 'medium',
     },
@@ -103,6 +104,7 @@ test('accepts 30 paired samples and keeps keyless evidence production-blocked', 
   })).gate_status, 'fixture-passed-production-blocked')
   const relabelled = evidence()
   relabelled.evidence_kind = 'production-real-provider'
+  relabelled.baseline_harness_commit = '2bc16230975f6cf02aa1b283b1f86de44007b059'
   assert.equal(evaluateEvidence(relabelled).gate_status, 'fixture-passed-production-blocked')
   assert.deepEqual(evaluateEvidence(relabelled).production_receipt_failures, ['PRODUCTION_RUN_RECEIPT_INCOMPLETE'])
 
@@ -162,6 +164,14 @@ test('accepts 30 paired samples and keeps keyless evidence production-blocked', 
   relabelled.production_artifacts_verified = true
   assert.equal(evaluateEvidence(relabelled).gate_status, 'fixture-passed-production-blocked')
   assert.equal(evaluateEvidence(relabelled).production_blocker, 'PRODUCTION_ARTIFACTS_NOT_VERIFIED')
+
+  const missingBaselineHarness = structuredClone(relabelled)
+  delete missingBaselineHarness.baseline_harness_commit
+  assert.equal(evaluateEvidence(missingBaselineHarness).gate_status, 'failed')
+
+  const wrongBaselineHarness = structuredClone(relabelled)
+  wrongBaselineHarness.baseline_harness_commit = wrongBaselineHarness.harness_commit
+  assert.equal(evaluateEvidence(wrongBaselineHarness).gate_status, 'failed')
 
   const sameRuntime = structuredClone(relabelled)
   const forged = sameRuntime.paths.emate_online.run_receipt
@@ -403,6 +413,7 @@ test('assembles only linked installed-state artifacts and rejects a rehashed sem
     performance_run_id: performanceRunId,
     evidence_kind: 'production-real-provider',
     harness_commit: 'b2b1650b01f0ee88d81837a9b5c050f9f763f606',
+    baseline_harness_commit: '2bc16230975f6cf02aa1b283b1f86de44007b059',
     performance_model: {
       route_id: 'luna', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', reasoning_effort: 'medium',
     },
@@ -415,10 +426,30 @@ test('assembles only linked installed-state artifacts and rejects a rehashed sem
   const verified = await verifyProductionArtifacts(assembled, outputPath)
   assert.deepEqual(assembled.performance_model, manifest.performance_model)
   assert.deepEqual(verified.performance_model, manifest.performance_model)
+  assert.equal(assembled.baseline_harness_commit, manifest.baseline_harness_commit)
+  assert.equal(verified.baseline_harness_commit, manifest.baseline_harness_commit)
   assert.equal(assembled.paths.baseline.run_receipt.harness_commit, '2bc16230975f6cf02aa1b283b1f86de44007b059')
   assert.equal(assembled.paths.emate_online.run_receipt.harness_commit, 'b2b1650b01f0ee88d81837a9b5c050f9f763f606')
   assert.equal(assembled.paths.emate_enterprise_unavailable_valid_cache.run_receipt.harness_commit, 'b2b1650b01f0ee88d81837a9b5c050f9f763f606')
   assert.equal(evaluateEvidence(verified).gate_status, 'passed')
+
+  const missingBaselineHarnessManifest = structuredClone(manifest)
+  delete missingBaselineHarnessManifest.baseline_harness_commit
+  const missingBaselineHarnessManifestPath = join(root, 'missing-baseline-harness-manifest.json')
+  await writeFile(missingBaselineHarnessManifestPath, `${JSON.stringify(missingBaselineHarnessManifest, null, 2)}\n`)
+  await assert.rejects(
+    assembleProductionEvidence(missingBaselineHarnessManifestPath, join(root, 'missing-baseline-harness-evidence.json')),
+    /production assembly manifest is invalid/u,
+  )
+
+  const wrongBaselineHarnessManifest = structuredClone(manifest)
+  wrongBaselineHarnessManifest.baseline_harness_commit = manifest.harness_commit
+  const wrongBaselineHarnessManifestPath = join(root, 'wrong-baseline-harness-manifest.json')
+  await writeFile(wrongBaselineHarnessManifestPath, `${JSON.stringify(wrongBaselineHarnessManifest, null, 2)}\n`)
+  await assert.rejects(
+    assembleProductionEvidence(wrongBaselineHarnessManifestPath, join(root, 'wrong-baseline-harness-evidence.json')),
+    /production assembly manifest is invalid/u,
+  )
 
   const expandedModelManifest = structuredClone(manifest)
   expandedModelManifest.performance_model.extra = 'not-closed'
@@ -445,6 +476,14 @@ test('assembles only linked installed-state artifacts and rejects a rehashed sem
   delete wrongHarnessBody.receipt_sha256
   wrongHarnessReceipt.receipt_sha256 = sha256(canonical(wrongHarnessBody))
   assert.ok(evaluateEvidence(wrongHarness).production_receipt_failures.includes('PRODUCTION_RUN_RECEIPT_INCOMPLETE'))
+
+  const wrongCandidateHarness = structuredClone(verified)
+  const wrongCandidateHarnessReceipt = wrongCandidateHarness.paths.emate_online.run_receipt
+  wrongCandidateHarnessReceipt.harness_commit = manifest.baseline_harness_commit
+  const wrongCandidateHarnessBody = { ...wrongCandidateHarnessReceipt }
+  delete wrongCandidateHarnessBody.receipt_sha256
+  wrongCandidateHarnessReceipt.receipt_sha256 = sha256(canonical(wrongCandidateHarnessBody))
+  assert.ok(evaluateEvidence(wrongCandidateHarness).production_receipt_failures.includes('PRODUCTION_RUN_RECEIPT_INCOMPLETE'))
 
   const wrongModel = structuredClone(verified)
   wrongModel.performance_model = { ...wrongModel.performance_model, model: 'gpt-5.6-sol' }
