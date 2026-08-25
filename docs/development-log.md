@@ -2204,3 +2204,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: Git 记录保存精确源码身份、命令和结论；动态 Package 与隔离状态按合同进程内易失，没有进入 Profile generation、安装包或发布物，也没有生产写入。
 - Remaining blockers: 该结果不替代 Windows 正式安装态三项 P0、跨日/多会话/原生 picker、真实账号、性能、更新、回滚和公开回读；后续每项插件修改仍需留下自己的原地热替换与 owning regression 证据。
 - Next exact action: 继续用 Creation Mode 验证下一项可插件化 P0/TQ；Base-only/服务端问题沿各自 pinned 原生 Owner 修复，候选冻结后才汇总为普通 Profile generation 和 Base 发布。
+
+## 2026-08-25 · 2.0.13 P0/TQ 聚合源码门禁 checkpoint
+
+- Goal checkpoint: 三项 Windows P0 与 TQ-01..13 的当前聚合已通过本机完整 source gate；本条只把候选提升为 source-fixed，安装态、性能、更新、回滚和生产发布仍未开始。
+- Frozen baseline / current HEAD: 门禁运行于 `26a0050d46a2ca33569f0acb3099b9c0051b5edd`；对比基线为公开主线 `5fb9d595749ee9de4f8019ae4decce02ad3af541`，Base 为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`。
+- Binding documents read: 核对根 `AGENTS.md`、目标/插件/性能合同、2.0.13 切片、最新 development log、change-impact 输出与 P0/TQ owning tests。
+- Inspected native seam: change-impact 对 204 条候选路径判定 `lane=base`、`run_base=true`、`run_enterprise=true`、`run_verification=true`，15 个已准入组件继续由各自普通 Profile Owner 构建；共享 Harness/Desktop/enterprise 变化没有被错误降级为 plugin-only。
+- Experiment or why unnecessary: 可插件化边界已由上一条 Creation Mode 运行态验证；本 checkpoint 验证永久源码、构建和 CI Owner，不再创建重复动态 Package。首次命令只因环境使用 pnpm `11.19.0` 和 enterprise 缺少 node_modules 失败，改用仓库固定 pnpm `11.7.0` 并按 frozen lock 安装后重跑成功，未改产品逻辑。
+- Decision and forbidden alternatives: source gate 必须同时覆盖 Profile 组件、DSH、Desktop、enterprise 和 release/admission；不能因单个 Shell 或 Creation Mode 测试通过而跳过 Base/服务端 Owner，也不能用错误包管理器结果冒充源码失败。
+- Changed scope: 本 checkpoint 没有修改产品源码；完整构建产生的 Vision requirements 临时机械 diff 已按运行前 Git 状态移除，用户既有未跟踪截图、provenance 与 node_modules 保持未纳入 Git。本提交只 append 本记录。
+- Verification commands and results: 固定 pnpm `11.7.0` 的根 `pnpm test` exit 0，含 release-boundary `40/40`、Shell `67/67`、DSH `56/56` 和全部组件 owning tests；`pnpm test:release` 为 `22/22`；enterprise `check`、`test`、`build` 全部 exit 0；Desktop `typecheck` exit 0，Vitest 为 `54 passed / 1 skipped` 文件、`585 passed / 4 skipped` 测试；`check-target` 通过，change-impact 合同 `valid=true`、错误为空，`git diff --check` 通过。
+- Immutable evidence / receipt: 当前只有 Git/source/build-test 输出；没有签名安装包、Profile generation、performance_run_id、安装回执、R2 对象或公开指针。
+- Remaining blockers: 仍需受保护 PR/CI、正式不可变构建、macOS/Windows 同字节安装、三项 P0 跨日/双会话/picker、TQ-01..13 全矩阵、TTFT v2、更新/回滚和 Cloudflare 插件公开回读。Vision 的 7 项平台运行时测试与 Desktop 的 4 项平台条件测试必须在对应正式目标补齐。
+- Next exact action: 提交本 checkpoint，复核最终 diff 与公共远端保护状态；随后推送候选 PR，先让 CI admission 验证同一源码，禁止在合并/准入前写 R2、Feed 或官网。
