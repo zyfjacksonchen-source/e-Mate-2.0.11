@@ -35,6 +35,7 @@ const sample = (index, overrides = {}, candidate = false) => {
     pair_id: `pair-${String(index).padStart(2, '0')}`,
     scenario,
     arm_order: index % 2 === 0 ? 'AB' : 'BA',
+    path_execution_ordinal: index,
     session_id_sha256: sha256(`session-${String(index)}`),
     turn: scenario === 'history-20' ? 21 : 1,
     step: scenario === 'read-only-tool' ? 2 : 1,
@@ -48,6 +49,7 @@ const sample = (index, overrides = {}, candidate = false) => {
     queue_wait_ms: 0,
     requests: Array.from({ length: attempts }, (_, attempt) => ({
       ordinal: attempt + 1,
+      request_id_sha256: sha256(`request-${String(index)}-${String(attempt + 1)}`),
       request_header_sha256: sha256(`header-${String(index)}-${String(attempt + 1)}`),
       request_header_bytes: 100,
       request_tool_count: 1,
@@ -55,6 +57,7 @@ const sample = (index, overrides = {}, candidate = false) => {
     })),
     provider_attempts: Array.from({ length: attempts }, (_, attempt) => ({
       ordinal: attempt + 1,
+      request_id_sha256: sha256(`request-${String(index)}-${String(attempt + 1)}`),
       provider_invocation_id_sha256: sha256(`invocation-${String(index)}-${String(attempt + 1)}`),
       provider_response_id_sha256: sha256(`response-${String(index)}-${String(attempt + 1)}`),
       provider_usage_sha256: sha256(`usage-${String(index)}-${String(attempt + 1)}`),
@@ -150,9 +153,16 @@ test('accepts 30 paired samples and keeps keyless evidence production-blocked', 
     }
     if (candidate) {
       body.enterprise_receipt = {
+        endpoint: pathName === 'emate_online' ? 'available' : 'unavailable',
+        inference_gateway: 'available',
         lease_sha256: '4'.repeat(64),
         model_policy_sha256: '5'.repeat(64),
         audit_outbox_sha256: pathName === 'emate_online' ? '6'.repeat(64) : '7'.repeat(64),
+        lease_refreshed_at: '2026-08-14T23:00:00.000Z',
+        policy_refreshed_at: '2026-08-14T23:00:00.000Z',
+        lease_expires_at: '2026-08-15T02:00:00.000Z',
+        policy_expires_at: '2026-08-15T02:00:00.000Z',
+        finished_at: '2026-08-15T00:01:00.000Z',
       }
       body.enterprise_receipt_artifact = {
         kind: 'enterprise-runtime-receipt', path: `${pathName}-enterprise.json`, sha256: '8'.repeat(64),
@@ -213,7 +223,7 @@ test('evaluates each scenario independently instead of pooling distributions', (
   assert.ok(result.failures.some(failure => failure.includes('short-text: p50 submit_to_first_visible_text_ms')))
 })
 
-test('keeps Tool timing absent outside read-only-tool and rejects numeric placeholders', () => {
+test('keeps Tool timing absent outside read-only-tool and rejects obsolete body-start fields', () => {
   assert.equal(evaluateEvidence(evidence()).gate_status, 'fixture-passed-production-blocked')
   const placeholder = evidence()
   placeholder.paths.emate_online.samples[0].tool_result_to_next_request_ms = 0
@@ -304,7 +314,7 @@ test('fails closed on missing samples, duplicate events, latency, throughput, or
   const slowTool = evidence()
   for (const path of [slowTool.paths.emate_online, slowTool.paths.emate_enterprise_unavailable_valid_cache]) {
     for (const item of path.samples.filter(candidate => candidate.scenario === 'read-only-tool')) {
-      item.tool_result_to_next_request_ms = 22
+      item.tool_result_to_next_request_ms = 30
     }
   }
   assert.equal(evaluateEvidence(slowTool).gate_status, 'failed')
@@ -314,7 +324,7 @@ test('fails closed on missing samples, duplicate events, latency, throughput, or
 })
 
 const nativeFields = [
-  'pair_id', 'scenario', 'arm_order', 'session_id_sha256', 'turn', 'step',
+  'pair_id', 'scenario', 'arm_order', 'path_execution_ordinal', 'session_id_sha256', 'turn', 'step',
   'user_message_to_first_text_delta_ms', 'output_tokens_per_second',
   'queue_wait_ms',
   'duplicate_model_request_count', 'duplicate_tool_execution_count',
@@ -399,8 +409,15 @@ test('assembles only linked installed-state artifacts and rejects a rehashed sem
         enterprise_receipt_artifact: await writeJson(`${prefix}.enterprise.json`, {
           ...binding, kind: 'enterprise-runtime-receipt', source: 'e-mate-enterprise-state',
           receipt: {
+            endpoint: pathName === 'emate_online' ? 'available' : 'unavailable',
+            inference_gateway: 'available',
             lease_sha256: '4'.repeat(64), model_policy_sha256: '5'.repeat(64),
             audit_outbox_sha256: pathName === 'emate_online' ? '6'.repeat(64) : '7'.repeat(64),
+            lease_refreshed_at: '2026-08-14T23:00:00.000Z',
+            policy_refreshed_at: '2026-08-14T23:00:00.000Z',
+            lease_expires_at: '2026-08-15T02:00:00.000Z',
+            policy_expires_at: '2026-08-15T02:00:00.000Z',
+            finished_at: '2026-08-15T00:01:00.000Z',
           },
         }),
       } : {}),

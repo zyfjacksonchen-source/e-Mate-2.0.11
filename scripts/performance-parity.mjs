@@ -24,7 +24,7 @@ const PHASE_FIELDS = [
 export const PERFORMANCE_SCENARIOS = Object.freeze(['short-text', 'history-20', 'read-only-tool'])
 const SCENARIOS = PERFORMANCE_SCENARIOS
 const NATIVE_SAMPLE_FIELDS = [
-  'pair_id', 'scenario', 'arm_order', 'session_id_sha256', 'turn', 'step',
+  'pair_id', 'scenario', 'arm_order', 'path_execution_ordinal', 'session_id_sha256', 'turn', 'step',
   'user_message_to_first_text_delta_ms', 'output_tokens_per_second',
   'queue_wait_ms',
   'duplicate_model_request_count', 'duplicate_tool_execution_count',
@@ -32,13 +32,13 @@ const NATIVE_SAMPLE_FIELDS = [
 ]
 const NATIVE_TOOL_SAMPLE_FIELDS = ['tool_result_to_next_request_ms']
 const REQUEST_SAMPLE_FIELDS = ['pair_id', 'requests']
-const REQUEST_ATTEMPT_FIELDS = ['ordinal', 'request_header_sha256', 'request_header_bytes', 'request_tool_count']
+const REQUEST_ATTEMPT_FIELDS = ['ordinal', 'request_id_sha256', 'request_header_sha256', 'request_header_bytes', 'request_tool_count']
 const REQUEST_CANDIDATE_ATTEMPT_FIELDS = [...REQUEST_ATTEMPT_FIELDS, 'diagnostic']
 const REQUEST_DIAGNOSTIC_FIELDS = ['local_pre_provider_ms', ...PHASE_FIELDS]
 const PAINT_SAMPLE_FIELDS = ['pair_id', 'submit_to_first_visible_text_ms', 'first_chunk_to_paint_ms']
 const PROVIDER_SAMPLE_FIELDS = ['pair_id', 'provider_attempts']
 const PROVIDER_ATTEMPT_FIELDS = [
-  'ordinal', 'provider_invocation_id_sha256', 'provider_response_id_sha256',
+  'ordinal', 'request_id_sha256', 'provider_invocation_id_sha256', 'provider_response_id_sha256',
   'provider_usage_sha256', 'input_tokens', 'output_tokens',
 ]
 const RUNTIME_FIELDS = [
@@ -150,6 +150,7 @@ function validRequestAttempts(sample, pathName) {
     && sample.requests.length === expectedAttemptCount(sample.scenario)
     && sample.requests.every((attempt, index) => exactKeys(attempt, fields)
       && attempt.ordinal === index + 1
+      && isSha256(attempt.request_id_sha256)
       && isSha256(attempt.request_header_sha256)
       && positiveInteger(attempt.request_header_bytes)
       && Number.isSafeInteger(attempt.request_tool_count) && attempt.request_tool_count >= 0
@@ -162,6 +163,7 @@ function validProviderAttempts(sample, invocationIds, responseIds) {
   for (const [index, attempt] of sample.provider_attempts.entries()) {
     if (!exactKeys(attempt, PROVIDER_ATTEMPT_FIELDS)
       || attempt.ordinal !== index + 1
+      || !isSha256(attempt.request_id_sha256)
       || !isSha256(attempt.provider_invocation_id_sha256) || invocationIds.has(attempt.provider_invocation_id_sha256)
       || !isSha256(attempt.provider_response_id_sha256) || responseIds.has(attempt.provider_response_id_sha256)
       || !isSha256(attempt.provider_usage_sha256)
@@ -180,12 +182,13 @@ function validSamples(path, pathName) {
   const responseIds = new Set()
   const scenarios = new Map()
   const scenarioArmOrders = new Map()
-  for (const sample of path.samples) {
+  for (const [sampleIndex, sample] of path.samples.entries()) {
     if (!isRecord(sample)
       || typeof sample.pair_id !== 'string' || pairIds.has(sample.pair_id)
       || !SCENARIOS.includes(sample.scenario)
       || !exactKeys(sample, evidenceSampleFields(pathName, sample.scenario))
       || !['AB', 'BA'].includes(sample.arm_order)
+      || sample.path_execution_ordinal !== sampleIndex + 1
       || !Number.isFinite(sample.submit_to_first_visible_text_ms) || sample.submit_to_first_visible_text_ms < 0
       || !Number.isFinite(sample.user_message_to_first_text_delta_ms) || sample.user_message_to_first_text_delta_ms < 0
       || !Number.isFinite(sample.first_chunk_to_paint_ms) || sample.first_chunk_to_paint_ms < 0
@@ -194,6 +197,8 @@ function validSamples(path, pathName) {
       || (sample.scenario === 'read-only-tool' && !nonNegative(sample.tool_result_to_next_request_ms))
       || !validRequestAttempts(sample, pathName)
       || !validProviderAttempts(sample, invocationIds, responseIds)
+      || sample.requests.some((request, index) => request.request_id_sha256
+        !== sample.provider_attempts[index]?.request_id_sha256)
       || !isSha256(sample.session_id_sha256)
       || !positiveInteger(sample.turn) || !positiveInteger(sample.step)
       || sample.duplicate_model_request_count !== 0
@@ -267,7 +272,9 @@ function compareScenario(baselineSamples, candidateSamples) {
     const paired = baselineByPair.get(sample.pair_id)
     if (paired === undefined) continue
     const requestIdentity = requests => requests.map(attempt => Object.fromEntries(
-      REQUEST_ATTEMPT_FIELDS.map(field => [field, attempt[field]]),
+      REQUEST_ATTEMPT_FIELDS
+        .filter(field => field !== 'request_id_sha256')
+        .map(field => [field, attempt[field]]),
     ))
     if (canonical(requestIdentity(sample.requests)) !== canonical(requestIdentity(paired.requests))) {
       failures.push(`request header mismatch for ${sample.pair_id}`)
@@ -333,10 +340,17 @@ function installMatchesEnvironment(install, environment) {
 }
 
 function validEnterpriseReceipt(receipt) {
-  return exactKeys(receipt, ['lease_sha256', 'model_policy_sha256', 'audit_outbox_sha256'])
+  return exactKeys(receipt, [
+    'endpoint', 'inference_gateway', 'lease_sha256', 'model_policy_sha256', 'audit_outbox_sha256',
+    'lease_refreshed_at', 'policy_refreshed_at', 'lease_expires_at', 'policy_expires_at', 'finished_at',
+  ])
+    && ['available', 'unavailable'].includes(receipt.endpoint)
+    && receipt.inference_gateway === 'available'
     && isSha256(receipt.lease_sha256)
     && isSha256(receipt.model_policy_sha256)
     && isSha256(receipt.audit_outbox_sha256)
+    && ['lease_refreshed_at', 'policy_refreshed_at', 'lease_expires_at', 'policy_expires_at', 'finished_at']
+      .every(key => Number.isFinite(Date.parse(receipt[key])))
 }
 
 export function evaluateEvidence(evidence) {
@@ -487,7 +501,14 @@ function validateProductionReceipts(evidence) {
     && isSha256(receipt?.enterprise_receipt_artifact?.sha256))) {
     failures.push('PRODUCTION_ENTERPRISE_RUNTIME_RECEIPT_INCOMPLETE')
   } else if (online.enterprise_receipt.lease_sha256 !== offline.enterprise_receipt.lease_sha256
-    || online.enterprise_receipt.model_policy_sha256 !== offline.enterprise_receipt.model_policy_sha256) {
+    || online.enterprise_receipt.model_policy_sha256 !== offline.enterprise_receipt.model_policy_sha256
+    || online.enterprise_receipt.lease_refreshed_at !== offline.enterprise_receipt.lease_refreshed_at
+    || online.enterprise_receipt.policy_refreshed_at !== offline.enterprise_receipt.policy_refreshed_at
+    || online.enterprise_receipt.endpoint !== 'available'
+    || offline.enterprise_receipt.endpoint !== 'unavailable'
+    || offline.enterprise_receipt.inference_gateway !== 'available'
+    || Date.parse(offline.enterprise_receipt.finished_at) >= Date.parse(offline.enterprise_receipt.lease_expires_at)
+    || Date.parse(offline.enterprise_receipt.finished_at) >= Date.parse(offline.enterprise_receipt.policy_expires_at)) {
     failures.push('PRODUCTION_ENTERPRISE_STATE_NOT_PAIRED')
   }
   return [...new Set(failures)]
@@ -976,6 +997,7 @@ async function collectPath(name, samples, enterpriseState) {
       pair_id: pairId,
       scenario,
       arm_order: index % 2 === 0 ? 'AB' : 'BA',
+      path_execution_ordinal: index + 1,
       session_id_sha256: sha256(sessionId),
       turn: scenario === 'history-20' ? 21 : 1,
       step: scenario === 'read-only-tool' ? 2 : 1,
@@ -989,6 +1011,7 @@ async function collectPath(name, samples, enterpriseState) {
       queue_wait_ms: 0,
       requests: Array.from({ length: expectedRequests }, (_, attempt) => ({
         ordinal: attempt + 1,
+        request_id_sha256: sha256(`fixture-request:${name}:${pairId}:${String(attempt + 1)}`),
         request_header_sha256: sha256(`${fixtureHeader}:${String(attempt + 1)}`),
         request_header_bytes: Buffer.byteLength(fixtureHeader),
         request_tool_count: 1,
@@ -997,6 +1020,7 @@ async function collectPath(name, samples, enterpriseState) {
         const attemptOutputTokens = scenario === 'read-only-tool' && attempt === 0 ? 1 : outputTokens
         return {
           ordinal: attempt + 1,
+          request_id_sha256: sha256(`fixture-request:${name}:${pairId}:${String(attempt + 1)}`),
           provider_invocation_id_sha256: sha256(`fixture-invocation:${name}:${pairId}:${String(attempt + 1)}`),
           provider_response_id_sha256: sha256(`fixture-response:${name}:${pairId}:${String(attempt + 1)}`),
           provider_usage_sha256: sha256(canonical({ attempt: attempt + 1, input_tokens: 1, output_tokens: attemptOutputTokens })),
