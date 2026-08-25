@@ -137,7 +137,7 @@ The release evidence covers the following end-to-end user journeys:
 
 - model selection changes the actual next provider route while preserving the same conversation context; upstream instability and weak-network interruption recover through the existing retry/reconnect path without duplicate user messages, assistant answers, Tool calls, usage facts, or audit receipts;
 - the composer, navigation and non-message product chrome keep their accepted e-Mate references, while the conversation stream itself is exercised against the pinned Harness Message, Retry, TurnStatus, Tool, Disclosure and Actions renderers. The earlier `019ff665-d721-79a0-869d-338f086cf529` and 2.0.4/2.0.5 custom message-flow projections were explicitly withdrawn; only the real attachment image gallery remains as an e-Mate message visual exception;
-- image generation and editing cover one generation, one edit, concurrent jobs, attachment/context ownership, and a measured step-up run that records the maximum stable concurrency before the first bounded rejection or degraded budget; the caller still cannot choose the image model;
+- image generation and editing cover one generation, one edit, parent→one native Subagent→one Image Job ownership, source/output Attachment isolation, independent output verification, and a measured 1→2→4 active-child step-up run that records the maximum stable concurrency before the first bounded rejection or degraded budget; the caller still cannot choose the image model;
 - DOCX/XLSX/PPTX/PDF create-read-edit-export-reopen, OCR/Vision, CDP browser search/interaction/download, GenUI and the selected Sidebar execute through their real target paths;
 - Feishu, Tencent Docs, WeChat and DingTalk must be discoverable by the user and Agent, open the correct connection surface, and reach the provider's real authorization handoff. The 2.0.7 release gate stops before submitting a real OAuth consent, QR confirmation, credential or external write;
 - non-deleted legacy sessions remain visible and can continue, project/general-session memory remains isolated, and Skill Hub cross-user publish/search/download/install uses the target plugin path;
@@ -194,7 +194,7 @@ Linux、Gemini 和 5,000 条会话反向滚动掉帧率不属于 2.0.7 发布阻
 1. 日常变更只跑受影响包的一个聚焦回归、必要的 TypeScript/build 和 `git diff --check`；不重复跑未触及平台的全套测试。
 2. 一个切片稳定后只在该提交 SHA 跑一次组合 CI。CI 通过后复用同一制品，不在部署阶段重新构建。
 3. 候选部署只替换受影响服务，记录前后容器 ID、健康状态和回退收据；只跑该路由的一次真账号/真上游 canonical smoke。
-4. 付费和慢测试集中到发布候选：图片只跑 1、2、4 并发；性能用固定 30 组数据；Windows/macOS 真机、npm、R2、Office、Browser 各跑一次。
+4. 付费和慢测试集中到发布候选：图片按父任务拆分为“一子代理一输出/一修改”，只跑 active child 1、2、4 三档，每档 30 轮并记录父/子/Job/Attachment/invocation 对应、串图、迟到、取消、429/503、unknown、重复调用和重复计费；性能用固定 30 组数据；Windows/macOS 真机、npm、R2、Office、Browser 各跑一次。
 5. 主代理执行 Computer Use。失败项按一个根因一个子代理修复，主代理只重跑失败场景及最近邻回归，不从头重复整套。
 6. 所有结果绑定同一账号、Session、项目、fixture、commit、制品 SHA 和 receipt；缺真实环境就明确 `blocked`，不使用 Mock 关闭真实验收项。
 7. 任务审计回归优先用一个无工具短 turn：预期固定为 3 个事件，可同时验证本地 outbox、生产 PG、Analytics 汇总、Usage 用户事件列和重启幂等，避免为事件计数重复跑付费工具场景。
