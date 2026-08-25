@@ -2428,3 +2428,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 外部受保护 action pin 为 `eca005391708dc6ac3057a8702995e2475cdaaf2`；当前只有 source-fixed diff 和无密钥 fixture。没有 production evidence、真实 `performance_run_id`、签名 admission、候选安装、上传或生产指针变化。
 - Remaining blockers: 必须由 exact protected-main workflow 从四个正式模型各自的新 schema v2 真实安装态证据生成四个 attempt-1 leaf，再由固定外部 action生成 aggregate并由 Desktop admission 回验；候选、安装态、更新/回滚和公开发布仍为 OPEN。
 - Next exact action: 主代理复核并移植本提交，运行受保护 CI；随后只允许 source-partitioned collector 填入四个完整 cohort，缺任一真实 leaf 即保持发布门关闭。
+
+## 2026-08-26 · 2.0.13 S35 legacy bootstrap 与 R2 条件晋升终审
+
+- Goal checkpoint: 在四模型 aggregate 合入发布分支前，独立复核真实安装态 2.0.12 updater、一次性 v6→v7 bootstrap 和 Cloudflare 大制品写入边界；本条只收紧仓库级规则与发布合同，未写生产。
+- Frozen baseline / current HEAD: 安装态仍为 `/Applications/e-Mate.app` 2.0.12；发布分支已包含 `8f5a8f2a4de101d639b2ea4132d617bff4c1938e` 和四模型提交 `cdd4332`，正式候选尚未重建。
+- Binding documents read: 根 `AGENTS.md`、`target-contract.md`、`slices/2.0.13.md`、上一条完整日志；外部 publication protected main 固定为 `eca005391708dc6ac3057a8702995e2475cdaaf2`。
+- Inspected native seam: 直接调用安装包内 2.0.12 `app.asar/lib/update-checker.js` 喂入完整 12 字段 rich manifest；2950-byte 样本被识别为 `2.0.12→2.0.13`，旧 parser 只消费 `version/artifacts`，但保留固定 R2 origin、版本/commit path、bytes、SHA-256、无重定向、DMG/PE 与 macOS 原生替换/ACK 回滚。2.0.13 只读并严格验签 `desktop/signed/latest.json`。
+- Experiment or why unnecessary: updater 信任与 R2 发布属于 Base/release plane，Creation Mode 不能代表。Cloudflare 终审确认 multipart `complete()` 没有条件写，直接完成到最终 key 存在预检后覆盖竞态；R2 条件 `put` 才能在临时对象全量回读后 create-only 晋升。
+- Decision and forbidden alternatives: 仓库级规则与 target contract 统一为唯一 2.0.13 legacy 例外：同一 admitted signed bytes 先 immutable/公开回读，再 signed CAS/回读，legacy 以精确 948-byte 2.0.12 前驱绝对最后 CAS，之后永久停在 2.0.13。multipart 只到随机临时 key，再以条件 `put` 晋升；禁止直接完成到最终 key、用 multipart ETag 冒充 SHA、无条件 pointer 删除或第二迁移器。signed 已切而 legacy 未切时保留 signed，fresh-read 后幂等恢复同一计划；不执行无法 CAS 到 absent 的删除回滚。
+- Changed scope: 仅修订根 `AGENTS.md` 和本切片 S35 发布规则并 append 本记录；未改 updater、外部 action、候选字节、Profile、R2、Feed、官网、安装态或用户数据。
+- Verification commands and results: 安装态 checker 正例返回精确 update-available；外部 action 完整 `node --test` 为 62/62，本仓四模型 admission/release 窄测为 23/23；相关 diff check 通过。
+- Immutable evidence / receipt: 外部 action protected main `eca005391708dc6ac3057a8702995e2475cdaaf2`；公开 legacy 仍为 948 bytes / SHA-256 `e6d5e045364bdac97ea7fef41b1e28a20af06c9f4ffdd85d2c136e982d12a7dc`，signed/manual 2.0.13 前缀仍为空。没有 Worker、R2 写入、pointer 变化或候选安装。
+- Remaining blockers: 提交本合同修订并通过 protected CI；exact-main Desktop/Profile/四模型性能/admission 候选完成后，Cloudflare Worker 必须真实实现临时 multipart+条件晋升、旧 pointer 原字节/ETag 回滚收据、双 pointer/installer/Profile/Feed/官网完整公开回读。macOS 旧 updater 需成功与故障回滚；Windows 旧链没有同等级健康 ACK，必须单列实机安装/失败恢复证据。
+- Next exact action: 提交并推送唯一发布分支，废弃旧 CI；等待 exact source CI 全绿后才构建正式候选，生产写入继续为零。
