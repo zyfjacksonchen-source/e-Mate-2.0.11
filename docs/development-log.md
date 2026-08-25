@@ -2176,3 +2176,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 本条只有 source-fixed Git 证据；没有生成、签名、安装、上传、激活或发布任何制品。
 - Remaining blockers: 仍须修正 S27/S34 文档中的旧 Harness `2bc162...` 身份并记录 `b2b1650...` bounded diff；最终 P0/TQ 安装态、性能、更新、回滚和生产回读仍未关闭。
 - Next exact action: 独立提交测试合同修复；随后对 Harness/Base 身份文档和首次 Creation Mode 运行态证据做单独 append-only 修正，再重跑聚合源码门禁。
+
+## 2026-08-25 · 2.0.13 Harness Base v7 身份合同修正
+
+- Goal checkpoint: 本修正关闭 S27/S34 当前态文档仍停留在 2.0.12 Harness pin 的硬冲突，只更新已存在源码事实，不把 TQ-13、S27、S34 或发布标记完成。
+- Frozen baseline / current HEAD: 修正基于聚合 `571197c7929d02cc460c17d0eac0c4100b5765a7`；2.0.12 发布基线仍为 Base v6 / `2bc16230975f6cf02aa1b283b1f86de44007b059`，2.0.13 候选为 Base `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / Harness `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Binding documents read: 核对 `AGENTS.md`、`docs/target-contract.md`、`docs/slices/2.0.13.md`、`desktop/e-mate-desktop/base-contract.json`、Harness gitlink 与最新 development log。
+- Inspected native seam: Harness `b2b1650...` 是 `2bc162...` 的单一后继链，包含已审 `2318269...` Schedule startup admission，并继续收纳 Tool provenance、Job admission、Session cold-list、model-directory 与 image-edit review；Desktop reference 仍为 `6074088...`，没有第二 Harness fork 或运行时。
+- Experiment or why unnecessary: 本次只修正权威合同与执行门禁，不改变运行时；`git merge-base --is-ancestor 2318269... b2b1650...`、gitlink、Base contract 和 `check-target` 已直接证明身份，无需动态 Package 模拟 Base-only provenance。
+- Decision and forbidden alternatives: 切片合同现在明确分开 2.0.12 发布基线 `2bc162...` 与 2.0.13 候选 `b2b1650...`。TQ-13 只关闭 source pin/Base/SDK 身份缺口；冻结构建、installed transaction、真实 due、双平台更新与回滚继续 OPEN，不能因文档对齐而宣称功能闭环。
+- Changed scope: 仅更新 `docs/slices/2.0.13.md` 的当前 Harness/TQ-13 状态、在既有 release-boundary 测试增加两条精确身份断言并追加本记录；未改 Harness、Base、Profile、Desktop、Schedule 运行时或发布链。
+- Verification commands and results: `git merge-base --is-ancestor 2318269e77f1a36169445e2556199ef4d9a1625d b2b1650b01f0ee88d81837a9b5c050f9f763f606` 通过；`node --test scripts/change-impact.test.mjs` 为 `22/22`；`node scripts/check-target.mjs` 通过；`git diff --check` 通过。
+- Immutable evidence / receipt: 当前只有 source-fixed Git 证据；没有生成、签名、安装、上传、激活或发布任何字节。
+- Remaining blockers: TQ-13 仍缺同一冻结字节的 macOS B2b、Windows transaction、old-v1/fork/replay、真实 due/cold resume/时区/离线和双平台更新回滚；全部 13 项真实闭环仍为 `0/13`。
+- Next exact action: 独立提交身份合同修正；随后追加首次 Creation Mode 原地验证回执并继续最终 P0/TQ 源码门禁，生产链保持关闭。

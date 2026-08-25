@@ -58,6 +58,7 @@ describe('repository release boundary', () => {
   it('makes native rc.7 Creation Mode the guarded development first rule', () => {
     const agents = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8')
     const target = readFileSync(new URL('../docs/target-contract.md', import.meta.url), 'utf8')
+    const slice = readFileSync(new URL('../docs/slices/2.0.13.md', import.meta.url), 'utf8')
     const profile = readFileSync(new URL('../desktop/e-mate-desktop/src/profile.ts', import.meta.url), 'utf8')
     const profilePatch = readFileSync(new URL('../packages/dsh/profile/cordis.patch.yml', import.meta.url), 'utf8')
     const packagedGate = readFileSync(
@@ -78,6 +79,8 @@ describe('repository release boundary', () => {
     assert.match(target, /First development principle: native Creation Mode before permanent plugins/u)
     assert.match(target, /“对照 DSH 原生” always means the Harness and Desktop-reference pins/u)
     assert.match(target, /shell-equivalent trust and is explicit opt-in/u)
+    assert.match(slice, /2\.0\.13 Base v7 候选已按 bounded diff 原子固定为同一 rc\.7 的 `b2b1650b01f0ee88d81837a9b5c050f9f763f606`/u)
+    assert.match(slice, /正式 Harness pin、Base v7 与 SDK 身份已在源码层对齐/u)
     assert.match(profile, /roots:\s*\[\s*\{ path: managedPresetRoot\(profileDir\), trust: 'system' \},\s*\{ path: shippedPresetRoot\(\), trust: 'system' \}/u)
     assert.match(profilePatch, /id: ui-agent-preset\s+name: '@deepseek-ai\/dsh-client-ui-agent-preset'\s+disabled: false/u)
     for (const required of [
