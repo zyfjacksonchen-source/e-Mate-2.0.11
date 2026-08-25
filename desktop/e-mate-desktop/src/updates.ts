@@ -72,6 +72,7 @@ export const Config: z<Config> = z.object({
 interface UpdateStateV2 {
   readonly version: 2
   readonly lastPromptedVersion?: string
+  readonly lastPromptedCurrentGeneration?: string
   readonly lastPromptedGeneration?: string
 }
 
@@ -144,10 +145,11 @@ export function apply(ctx: Context, config: Config): void {
       await persistState()
     }
 
-    const rememberProfilePrompt = async (generationId: string): Promise<void> => {
+    const rememberProfilePrompt = async (currentGeneration: string, generationId: string): Promise<void> => {
       await stateReady
-      if (state.lastPromptedGeneration === generationId) return
-      state = { ...state, lastPromptedGeneration: generationId }
+      if (state.lastPromptedCurrentGeneration === currentGeneration
+        && state.lastPromptedGeneration === generationId) return
+      state = { ...state, lastPromptedCurrentGeneration: currentGeneration, lastPromptedGeneration: generationId }
       await persistState()
     }
 
@@ -374,8 +376,9 @@ export function apply(ctx: Context, config: Config): void {
     ): Promise<InteractiveUpdateResult | undefined> => {
       if (disposed || profileAdapter === undefined) return profileResult('failed', update)
       await stateReady
-      if (disposed || (automatic && state.lastPromptedGeneration === update.generationId)) return
-      await rememberProfilePrompt(update.generationId)
+      if (disposed || (automatic && state.lastPromptedCurrentGeneration === update.currentGeneration
+        && state.lastPromptedGeneration === update.generationId)) return
+      await rememberProfilePrompt(update.currentGeneration, update.generationId)
       if (!disposed) return startProfileDownload(update)
     }
 
@@ -499,14 +502,23 @@ function parseState(text: string): UpdateStateV2 {
   if (!isRecord(value)
     || value.version !== 2
     || (value.lastPromptedVersion !== undefined && !isStableVersion(value.lastPromptedVersion))
+    || (value.lastPromptedCurrentGeneration !== undefined
+      && (typeof value.lastPromptedCurrentGeneration !== 'string'
+        || !/^(?:bundled|[0-9a-f]{64})$/u.test(value.lastPromptedCurrentGeneration)
+        || value.lastPromptedGeneration === undefined))
     || (value.lastPromptedGeneration !== undefined
       && (typeof value.lastPromptedGeneration !== 'string' || !/^[0-9a-f]{64}$/u.test(value.lastPromptedGeneration)))
-    || Object.keys(value).some(key => !['version', 'lastPromptedVersion', 'lastPromptedGeneration'].includes(key))) {
+    || Object.keys(value).some(key => ![
+      'version', 'lastPromptedVersion', 'lastPromptedCurrentGeneration', 'lastPromptedGeneration',
+    ].includes(key))) {
     throw new Error('invalid v2 update state')
   }
   return {
     version: 2,
     ...(value.lastPromptedVersion === undefined ? {} : { lastPromptedVersion: value.lastPromptedVersion as string }),
+    ...(value.lastPromptedCurrentGeneration === undefined
+      ? {}
+      : { lastPromptedCurrentGeneration: value.lastPromptedCurrentGeneration as string }),
     ...(value.lastPromptedGeneration === undefined ? {} : { lastPromptedGeneration: value.lastPromptedGeneration as string }),
   }
 }

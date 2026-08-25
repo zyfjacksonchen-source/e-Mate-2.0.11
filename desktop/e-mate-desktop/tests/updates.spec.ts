@@ -254,7 +254,7 @@ describe('desktop update Host plugin', () => {
     expect(harness.tray.label()).not.toMatch(/@e-mate\/|dsh-plugin|component\.id|插件|组件/u)
   })
 
-  it('pushes one native prompt per signed component generation', async () => {
+  it('pushes one native prompt per current and target component generation pair', async () => {
     vi.useFakeTimers()
     const release = {
       status: 'update-available',
@@ -278,6 +278,7 @@ describe('desktop update Host plugin', () => {
     await vi.waitFor(() => { expect(profile.confirm).toHaveBeenCalledOnce() })
     expect(JSON.parse(await readFile(harness.statePath, 'utf8'))).toEqual({
       version: 2,
+      lastPromptedCurrentGeneration: release.currentGeneration,
       lastPromptedGeneration: release.generationId,
     })
 
@@ -285,6 +286,152 @@ describe('desktop update Host plugin', () => {
     await vi.waitFor(() => { expect(profile.check).toHaveBeenCalledTimes(2) })
     expect(profile.confirm).toHaveBeenCalledOnce()
     expect(profile.install).not.toHaveBeenCalled()
+  })
+
+  it('does not repeat a component prompt while the current and target generation pair is unchanged', async () => {
+    vi.useFakeTimers()
+    const release = {
+      status: 'update-available',
+      currentGeneration: 'bundled',
+      currentSequence: 0,
+      generationId: 'b'.repeat(64),
+      releaseVersion: '2.0.12',
+      sequence: 4,
+      changedComponents: [{ id: '@e-mate/dsh-client-shell', version: '2.0.12', bytes: 99 }],
+      downloadBytes: 99,
+      release: {} as ProfileUpdateAvailable['release'],
+    } satisfies ProfileUpdateAvailable
+    const profile = {
+      check: vi.fn(async () => release),
+      confirm: vi.fn(async () => false),
+      install: vi.fn(async () => {}),
+    } satisfies DesktopProfileUpdateAdapter
+    const harness = await createHarness({
+      profile,
+      state: JSON.stringify({
+        version: 2,
+        lastPromptedCurrentGeneration: release.currentGeneration,
+        lastPromptedGeneration: release.generationId,
+      }),
+    })
+
+    await vi.advanceTimersByTimeAsync(testConfig.initialDelayMs)
+    await vi.waitFor(() => { expect(profile.check).toHaveBeenCalledOnce() })
+    expect(profile.confirm).not.toHaveBeenCalled()
+    expect(JSON.parse(await readFile(harness.statePath, 'utf8'))).toEqual({
+      version: 2,
+      lastPromptedCurrentGeneration: release.currentGeneration,
+      lastPromptedGeneration: release.generationId,
+    })
+  })
+
+  it('prompts for the same target after the current generation rolls back to bundled', async () => {
+    vi.useFakeTimers()
+    const release = {
+      status: 'update-available',
+      currentGeneration: 'bundled',
+      currentSequence: 0,
+      generationId: 'b'.repeat(64),
+      releaseVersion: '2.0.12',
+      sequence: 4,
+      changedComponents: [{ id: '@e-mate/dsh-client-shell', version: '2.0.12', bytes: 99 }],
+      downloadBytes: 99,
+      release: {} as ProfileUpdateAvailable['release'],
+    } satisfies ProfileUpdateAvailable
+    const profile = {
+      check: vi.fn(async () => release),
+      confirm: vi.fn(async () => false),
+      install: vi.fn(async () => {}),
+    } satisfies DesktopProfileUpdateAdapter
+    const harness = await createHarness({
+      profile,
+      state: JSON.stringify({
+        version: 2,
+        lastPromptedCurrentGeneration: 'a'.repeat(64),
+        lastPromptedGeneration: release.generationId,
+      }),
+    })
+
+    await vi.advanceTimersByTimeAsync(testConfig.initialDelayMs)
+    await vi.waitFor(() => { expect(profile.confirm).toHaveBeenCalledOnce() })
+    expect(JSON.parse(await readFile(harness.statePath, 'utf8'))).toEqual({
+      version: 2,
+      lastPromptedCurrentGeneration: 'bundled',
+      lastPromptedGeneration: release.generationId,
+    })
+  })
+
+  it('prompts for the same target after the current generation changes', async () => {
+    vi.useFakeTimers()
+    const release = {
+      status: 'update-available',
+      currentGeneration: 'c'.repeat(64),
+      currentSequence: 3,
+      generationId: 'b'.repeat(64),
+      releaseVersion: '2.0.12',
+      sequence: 4,
+      changedComponents: [{ id: '@e-mate/dsh-client-shell', version: '2.0.12', bytes: 99 }],
+      downloadBytes: 99,
+      release: {} as ProfileUpdateAvailable['release'],
+    } satisfies ProfileUpdateAvailable
+    const profile = {
+      check: vi.fn(async () => release),
+      confirm: vi.fn(async () => false),
+      install: vi.fn(async () => {}),
+    } satisfies DesktopProfileUpdateAdapter
+    const harness = await createHarness({
+      profile,
+      state: JSON.stringify({
+        version: 2,
+        lastPromptedCurrentGeneration: 'a'.repeat(64),
+        lastPromptedGeneration: release.generationId,
+      }),
+    })
+
+    await vi.advanceTimersByTimeAsync(testConfig.initialDelayMs)
+    await vi.waitFor(() => { expect(profile.confirm).toHaveBeenCalledOnce() })
+    expect(JSON.parse(await readFile(harness.statePath, 'utf8'))).toEqual({
+      version: 2,
+      lastPromptedCurrentGeneration: release.currentGeneration,
+      lastPromptedGeneration: release.generationId,
+    })
+  })
+
+  it('migrates a target-only v2 state and prompts once from bundled', async () => {
+    vi.useFakeTimers()
+    const release = {
+      status: 'update-available',
+      currentGeneration: 'bundled',
+      currentSequence: 0,
+      generationId: 'b'.repeat(64),
+      releaseVersion: '2.0.12',
+      sequence: 4,
+      changedComponents: [{ id: '@e-mate/dsh-client-shell', version: '2.0.12', bytes: 99 }],
+      downloadBytes: 99,
+      release: {} as ProfileUpdateAvailable['release'],
+    } satisfies ProfileUpdateAvailable
+    const profile = {
+      check: vi.fn(async () => release),
+      confirm: vi.fn(async () => false),
+      install: vi.fn(async () => {}),
+    } satisfies DesktopProfileUpdateAdapter
+    const harness = await createHarness({
+      profile,
+      state: JSON.stringify({
+        version: 2,
+        lastPromptedVersion: '2.1.0',
+        lastPromptedGeneration: release.generationId,
+      }),
+    })
+
+    await vi.advanceTimersByTimeAsync(testConfig.initialDelayMs)
+    await vi.waitFor(() => { expect(profile.confirm).toHaveBeenCalledOnce() })
+    expect(JSON.parse(await readFile(harness.statePath, 'utf8'))).toEqual({
+      version: 2,
+      lastPromptedVersion: '2.1.0',
+      lastPromptedCurrentGeneration: 'bundled',
+      lastPromptedGeneration: release.generationId,
+    })
   })
 
   it('reports Base-required when no compatible Desktop Base is published', async () => {

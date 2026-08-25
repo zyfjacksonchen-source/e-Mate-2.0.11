@@ -2288,3 +2288,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 失败事实绑定上述 run/job；当前只有 source-fixed diff，没有生成、签名、安装、上传、激活或发布任何新字节。
 - Remaining blockers: 新候选必须通过 Windows makensis 和完整受保护 PR CI；随后仍需同一冻结字节的 Windows 安装、三项 P0/TQ、在线更新、失败回滚和性能验收。
 - Next exact action: 取消已被替代的旧 run，提交并推送唯一宏路径修复；等待新的真实 Windows runner 生成 unsigned installer，生产链继续关闭。
+
+## 2026-08-25 · 2.0.13 Profile 回滚后更新提示恢复修复
+
+- Goal checkpoint: 在正式 2.0.13 候选安装前关闭本机已观察到的 Profile generation 回滚后不再自动提示同一恢复目标的问题；本条只修复更新提示去重 owner，不把 Profile 激活、安装态或发布标记完成。
+- Frozen baseline / current HEAD: 修复基于受保护 PR `#56` 已全绿的 `dae78fcd40bf42620f4fd6d4916d899d450d7348`；Base/Harness 身份保持 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。本机 2.0.12 安装态的 generation state 为 `active=last_known_good=bundled`，旧 v6 generation 缓存仍存在。
+- Binding documents read: 复核根 `AGENTS.md`、`docs/target-contract.md` 中 `(current generation, target generation)` 后台提示去重合同、`docs/slices/2.0.13.md`、上一条完整记录，以及 `updates.ts`、`profile-update.ts`、`profile-generation.ts` 与对应测试。
+- Inspected native seam: `ProfileUpdateAvailable` 已由唯一原生检查链同时携带 `currentGeneration` 与 `generationId`；更新状态却只持久化 `lastPromptedGeneration`。因此从已提示目标回滚到 `bundled` 或另一 generation 后，相同目标仍被误判为同一提示，直到目标 ID 改变才偶然恢复。
+- Experiment or why unnecessary: 本机状态精确为 `active=bundled` 且 `lastPromptedGeneration=d876...`，缓存中的 d876 generation 属于 Base v6 / Harness `2bc162...`，不能由 Base v7 恢复；初始回滚原因没有不可变收据，故不臆测。现有字段和确定性状态机已足以复现持续抑制，无需新存储、网络或 Creation Mode 模拟 Desktop lifecycle。
+- Decision and forbidden alternatives: 继续复用唯一 v2 update state，只增加 `lastPromptedCurrentGeneration` 并按 current/target pair 比较；旧 target-only v2 状态被视为没有已记录 pair，因此在当前 generation 只重新提示一次并原地补齐字段。相同 pair 不重复，不同 current 的同一 target 会重新提示。禁止恢复不兼容旧 generation、清缓存、伪造新目标 ID、增加第二 updater 或把 Desktop 生命周期包装成 Profile 插件。
+- Changed scope: 仅修改 `desktop/e-mate-desktop/src/updates.ts`、既有 `updates.spec.ts` 与 append 本记录；未改 Profile generation 格式、签名/desired state、Harness、组件 roster、R2、Feed、官网或生产状态。
+- Verification commands and results: Desktop `profile-generation.spec.ts`、`profile-update.spec.ts`、`updates.spec.ts` 为 `3 files / 42 tests` 全过；主源码与测试 TypeScript 均通过；其中覆盖首次 pair 持久化、相同 pair 不重复、current 改变或回滚为 bundled 而 target 相同重新提示及旧 v2 target-only 状态迁移；`git diff --check` 通过。
+- Immutable evidence / receipt: 当前只有 source-fixed diff 与本机只读状态证据。`desktop-release` run `32860583362` 在本修复前从 `dae78fc` 启动，即使完成也属于已取代候选，不得安装、验收或发布；此前 CI `mac-smoke` 同样未安装且永久不具备发布资格。
+- Remaining blockers: 必须提交并推送该最小修复，重新通过 exact-HEAD PR CI 与只构建不发布的正式 Desktop candidate workflow；之后才可执行 macOS 手工候选 UI/P0 验收。Windows 真机、原生 signed updater transaction、Profile v7 激活、性能、回滚和生产回读仍 OPEN。
+- Next exact action: 提交并推送 pair 去重修复，让 PR #56 在新 HEAD 重跑受保护 CI；作废旧 run 候选，生产链保持关闭。
