@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import {
+  canonicalProfileJson,
   parseProfileBaseContract,
   parseProfileReleaseEnvelope,
   signProfileRelease,
@@ -13,11 +14,105 @@ import {
 import { PRODUCT_UI_REFERENCE } from './change-impact.mjs'
 import { emitComponent } from './component-release.mjs'
 import { composeProfileReleaseCandidate } from './profile-release.mjs'
-import { prepareProfilePublication, writeProfilePublicationBundle } from './publish-profile-r2.mjs'
+import {
+  createProfileCurrentSnapshot,
+  loadProfileCurrentSnapshot,
+  materializeProfileCurrentSnapshot,
+  parseProfileCurrentSnapshot,
+  prepareProfilePublication,
+  writeProfilePublicationBundle,
+} from './publish-profile-r2.mjs'
 
 function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
 }
+
+function rehashSnapshot(value) {
+  const { snapshot_sha256: ignored, ...body } = value
+  return {
+    ...body,
+    snapshot_sha256: createHash('sha256').update(canonicalProfileJson(body)).digest('hex'),
+  }
+}
+
+test('Cloudflare current snapshot is closed, bounded, canonical, and network-free', t => {
+  const root = mkdtempSync(join(tmpdir(), 'e-mate-profile-current-snapshot-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const expected = {
+    releaseVersion: '2.0.13',
+    baseContractId: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
+  }
+  const currentByTarget = new Map([
+    ['darwin-arm64', Buffer.from('{"target":"darwin-arm64"}\n')],
+    ['darwin-x64', undefined],
+    ['win32-x64', Buffer.from('{"target":"win32-x64"}\n')],
+  ])
+  const snapshot = createProfileCurrentSnapshot({
+    currentByTarget,
+    ...expected,
+    capturedAt: '2026-08-25T10:00:00.000Z',
+  })
+  const parsed = parseProfileCurrentSnapshot(snapshot, expected)
+  assert.equal(parsed.currentByTarget.get('darwin-arm64').equals(currentByTarget.get('darwin-arm64')), true)
+  assert.equal(parsed.currentByTarget.get('darwin-x64'), undefined)
+  assert.equal(parsed.currentByTarget.get('win32-x64').equals(currentByTarget.get('win32-x64')), true)
+
+  const path = join(root, 'snapshot.json')
+  writeJson(path, snapshot)
+  assert.equal(loadProfileCurrentSnapshot(path, expected).snapshot.snapshot_sha256, snapshot.snapshot_sha256)
+  assert.throws(
+    () => materializeProfileCurrentSnapshot(path, join(root, 'absent-output'), expected),
+    /requires a present current desired state/u,
+  )
+
+  const missing = structuredClone(snapshot)
+  delete missing.targets['darwin-x64']
+  assert.throws(() => parseProfileCurrentSnapshot(rehashSnapshot(missing), expected), /snapshot is invalid/u)
+
+  const noncanonical = structuredClone(snapshot)
+  noncanonical.targets['darwin-arm64'].content_base64 += '='
+  assert.throws(() => parseProfileCurrentSnapshot(rehashSnapshot(noncanonical), expected), /snapshot bytes are invalid/u)
+
+  assert.throws(() => createProfileCurrentSnapshot({
+    currentByTarget: new Map([
+      ['darwin-arm64', Buffer.alloc(1024 * 1024 + 1)],
+      ['darwin-x64', undefined],
+      ['win32-x64', undefined],
+    ]),
+    ...expected,
+    capturedAt: '2026-08-25T10:00:00.000Z',
+  }), /current desired state is invalid/u)
+
+  writeFileSync(join(root, 'malformed.json'), '{')
+  assert.throws(() => loadProfileCurrentSnapshot(join(root, 'malformed.json'), expected), /snapshot JSON is invalid/u)
+  writeFileSync(join(root, 'oversize.json'), Buffer.alloc(5 * 1024 * 1024 + 1))
+  assert.throws(() => loadProfileCurrentSnapshot(join(root, 'oversize.json'), expected), /snapshot size is invalid/u)
+
+  const complete = createProfileCurrentSnapshot({
+    currentByTarget: new Map([
+      ['darwin-arm64', Buffer.from('arm64')],
+      ['darwin-x64', Buffer.from('x64')],
+      ['win32-x64', Buffer.from('win')],
+    ]),
+    ...expected,
+    capturedAt: '2026-08-25T10:00:00.000Z',
+  })
+  const completePath = join(root, 'complete.json')
+  writeJson(completePath, complete)
+  const output = join(root, 'materialized')
+  materializeProfileCurrentSnapshot(completePath, output, expected)
+  assert.equal(readFileSync(join(output, 'darwin-arm64.json'), 'utf8'), 'arm64')
+  assert.equal(readFileSync(join(output, 'darwin-x64.json'), 'utf8'), 'x64')
+  assert.equal(readFileSync(join(output, 'win32-x64.json'), 'utf8'), 'win')
+
+  const publisher = readFileSync(new URL('./publish-profile-r2.mjs', import.meta.url), 'utf8')
+  const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const release = readFileSync(new URL('../.github/workflows/profile-release.yml', import.meta.url), 'utf8')
+  assert.doesNotMatch(publisher, /\bfetch\s*\(/u)
+  assert.doesNotMatch(ci, /curl[^]*desktop\/profile\/desired-state/u)
+  assert.equal(ci.match(/--materialize-current dist\/profile-current/gu)?.length, 2)
+  assert.match(release, /--snapshot artifacts\/release\/profile-current-snapshot\.json/u)
+})
 
 test('publication admits bootstrap and its direct successor before exposing active desired state', async t => {
   const root = mkdtempSync(join(tmpdir(), 'e-mate-profile-publish-'))

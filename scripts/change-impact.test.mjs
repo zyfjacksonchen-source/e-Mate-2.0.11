@@ -519,6 +519,8 @@ describe('repository release boundary', () => {
     assert.match(workflow, /name: Build and test only the changed component\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
     assert.match(workflow, /if: matrix\.publish == true/u)
     assert.match(workflow, /profile-portable-composition:\n(?:.|\n)*?name: Portable Profile generations(?:.|\n)*?needs: \[impact, plugins\](?:.|\n)*?portable_publish == 'true'(?:.|\n)*?runs-on: macos-15(?:.|\n)*?Compose every target and boot the portable graph once/u)
+    assert.equal(workflow.match(/--snapshot artifacts\/release\/profile-current-snapshot\.json\n\s+--materialize-current dist\/profile-current/gu)?.length, 2)
+    assert.doesNotMatch(workflow, /curl[^]*desktop\/profile\/desired-state/u)
     assert.match(workflow, /for target in darwin-arm64 darwin-x64 win32-x64;(?:.|\n)*?node scripts\/profile-release\.mjs(?:.|\n)*?pids\+=\("\$!"\)(?:.|\n)*?wait "\$pid"(?:.|\n)*?verify-profile-boot\.mjs(?:.|\n)*?--target darwin-arm64/u)
     assert.match(workflow, /profile-composition:\n(?:.|\n)*?needs: \[impact, plugins\](?:.|\n)*?portable_publish != 'true'(?:.|\n)*?Compose and boot the complete candidate generation/u)
     assert.match(workflow, /node scripts\/base-sdk\.mjs fingerprint/u)
@@ -553,6 +555,8 @@ describe('repository release boundary', () => {
     const workflow = readFileSync(new URL('../.github/workflows/profile-release.yml', import.meta.url), 'utf8')
     assert.match(workflow, /source_sha="\$\(jq -er \.head_sha <<<"\$run_json"\)"/u)
     assert.match(workflow, /test "\$\(jq -er \.conclusion <<<"\$run_json"\)" = success/u)
+    assert.match(workflow, /test "\$GITHUB_RUN_ATTEMPT" = 1/u)
+    assert.match(workflow, /test "\$\(jq -er \.run_attempt <<<"\$run_json"\)" = 1/u)
     assert.match(workflow, /push\)(?:.|\n)*?test "\$source_sha" = "\$GITHUB_SHA"(?:.|\n)*?pull_request\)(?:.|\n)*?commits\/\$source_sha\/pulls(?:.|\n)*?\.merged_at != null(?:.|\n)*?\.merge_commit_sha(?:.|\n)*?\.base\.sha(?:.|\n)*?git\/commits\/\$source_sha(?:.|\n)*?\$merge_sha\^\{tree\}(?:.|\n)*?git diff --no-renames --name-only -z "\$merge_sha" "\$GITHUB_SHA"/u)
     assert.match(workflow, /later_paths\+=\(--path "\$path"\)(?:.|\n)*?node scripts\/change-impact\.mjs "\$\{later_paths\[@\]\}"(?:.|\n)*?enterprise-only\|docs-only\|verification-only/u)
     assert.doesNotMatch(workflow, /enterprise\/\*|docs\/\*|AGENTS\.md/u)
@@ -566,6 +570,7 @@ describe('repository release boundary', () => {
     assert.match(workflow, /prepare-python-runtime\.mjs --target "\$TARGET"/u)
     assert.doesNotMatch(workflow, /python-version: '3\.12\.14'/u)
     assert.match(workflow, /node scripts\/publish-profile-r2\.mjs/u)
+    assert.match(workflow, /--snapshot artifacts\/release\/profile-current-snapshot\.json/u)
     assert.match(workflow, /--bundle dist\/profile-publication/u)
     assert.match(workflow, /e-mate-profile-native-cloudflare-publication-/u)
     assert.match(workflow, /EXPECTED_CHANGED_COMPONENTS_JSON:/u)
@@ -597,6 +602,8 @@ describe('repository release boundary', () => {
 
     const publisher = readFileSync(new URL('./publish-profile-r2.mjs', import.meta.url), 'utf8')
     assert.match(publisher, /GITHUB_WORKFLOW_REF !== `\$\{REPOSITORY\}\/\.github\/workflows\/profile-release\.yml@refs\/heads\/main`/u)
+    assert.match(publisher, /GITHUB_RUN_ATTEMPT !== '1'/u)
+    assert.doesNotMatch(publisher, /\bfetch\s*\(/u)
 
     const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
     const portableCandidateUpload = ci.match(/name: e-mate-profile-candidate-darwin-arm64-\$\{\{ needs\.impact\.outputs\.head_sha \}\}[^]*?retention-days: 7/u)?.[0]

@@ -435,16 +435,11 @@ jobs:
         working-directory: desktop
         run: yarn install --immutable
 
-      - name: Fetch all currently accepted signed desired states
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p dist/profile-current
-          for target in darwin-arm64 darwin-x64 win32-x64; do
-            curl --fail --silent --show-error --max-redirs 0 --proto '=https' --tlsv1.2 --max-filesize 1048576 \
-              --output "dist/profile-current/$target.json" \
-              "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/desired-state/$target.json"
-          done
+      - name: Materialize the Cloudflare plugin desired-state snapshot
+        run: >-
+          node scripts/publish-profile-r2.mjs
+          --snapshot artifacts/release/profile-current-snapshot.json
+          --materialize-current dist/profile-current
 
       - name: Compose every target and boot the portable graph once
         shell: bash
@@ -589,16 +584,11 @@ jobs:
         working-directory: desktop
         run: yarn install --immutable
 
-      - name: Fetch the currently accepted signed desired state
-        shell: bash
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist/profile-current
-          curl --fail --silent --show-error --max-redirs 0 --proto '=https' --tlsv1.2 --max-filesize 1048576 \
-            --output "dist/profile-current/$TARGET.json" \
-            "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/desired-state/$TARGET.json"
+      - name: Materialize the Cloudflare plugin desired-state snapshot
+        run: >-
+          node scripts/publish-profile-r2.mjs
+          --snapshot artifacts/release/profile-current-snapshot.json
+          --materialize-current dist/profile-current
 
       - name: Compose and boot the complete candidate generation
         shell: bash

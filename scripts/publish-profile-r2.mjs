@@ -26,7 +26,12 @@ const ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
 const TARGET_NAMES = ['darwin-arm64', 'darwin-x64', 'win32-x64']
 const IMMUTABLE_CACHE = 'public,max-age=31536000,immutable'
 const MAX_CURRENT_BYTES = 1024 * 1024
+const MAX_CURRENT_SNAPSHOT_BYTES = 5 * 1024 * 1024
+const CURRENT_SNAPSHOT_DOCUMENT = 'emate.profile-current-desired-state-snapshot'
+const CURRENT_SNAPSHOT_AUTHORITY = 'codex-cloudflare-plugin'
 const SHA40 = /^[0-9a-f]{40}$/u
+const SHA256 = /^[0-9a-f]{64}$/u
+const STABLE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
@@ -34,6 +39,136 @@ function sha256(bytes) {
 
 function targetName(target) {
   return `${target.platform}-${target.arch}`
+}
+
+function record(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function exactKeys(value, expected) {
+  const actual = Object.keys(value).sort()
+  const wanted = [...expected].sort()
+  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index])
+}
+
+function currentSnapshotIdentity(root) {
+  const releaseVersion = JSON.parse(readFileSync(join(root, 'desktop/e-mate-desktop/package.json'), 'utf8')).version
+  const baseContractId = JSON.parse(readFileSync(join(root, 'desktop/e-mate-desktop/base-contract.json'), 'utf8')).id
+  if (typeof releaseVersion !== 'string' || !STABLE_VERSION.test(releaseVersion)
+    || typeof baseContractId !== 'string' || baseContractId === '') {
+    throw new Error('Profile current snapshot candidate identity is invalid')
+  }
+  return { releaseVersion, baseContractId }
+}
+
+function currentSnapshotBody(value) {
+  return {
+    schema_version: value.schema_version,
+    document_type: value.document_type,
+    capture_authority: value.capture_authority,
+    source_origin: value.source_origin,
+    candidate_release_version: value.candidate_release_version,
+    candidate_base_contract_id: value.candidate_base_contract_id,
+    captured_at: value.captured_at,
+    targets: value.targets,
+  }
+}
+
+/** Build one reviewable, network-free snapshot from bytes read by the connected Cloudflare plugin. */
+export function createProfileCurrentSnapshot(options) {
+  if (!(options.currentByTarget instanceof Map)
+    || canonicalProfileJson([...options.currentByTarget.keys()].sort()) !== canonicalProfileJson([...TARGET_NAMES].sort())) {
+    throw new Error('Profile current snapshot must contain exactly the three Desktop targets')
+  }
+  const targets = Object.fromEntries(TARGET_NAMES.map(target => {
+    const value = options.currentByTarget.get(target)
+    if (value === undefined) return [target, { status: 'absent' }]
+    const bytes = Buffer.from(value)
+    if (bytes.byteLength === 0 || bytes.byteLength > MAX_CURRENT_BYTES) {
+      throw new Error(`Profile current desired state is invalid: ${target}`)
+    }
+    return [target, {
+      status: 'present',
+      bytes: bytes.byteLength,
+      sha256: sha256(bytes),
+      content_base64: bytes.toString('base64'),
+    }]
+  }))
+  const body = {
+    schema_version: 1,
+    document_type: CURRENT_SNAPSHOT_DOCUMENT,
+    capture_authority: CURRENT_SNAPSHOT_AUTHORITY,
+    source_origin: ORIGIN,
+    candidate_release_version: options.releaseVersion,
+    candidate_base_contract_id: options.baseContractId,
+    captured_at: options.capturedAt,
+    targets,
+  }
+  const snapshot = {
+    ...body,
+    snapshot_sha256: sha256(Buffer.from(canonicalProfileJson(body), 'utf8')),
+  }
+  return parseProfileCurrentSnapshot(snapshot, {
+    releaseVersion: options.releaseVersion,
+    baseContractId: options.baseContractId,
+  }).snapshot
+}
+
+/** Parse an exact three-target snapshot without consulting production R2. */
+export function parseProfileCurrentSnapshot(value, expected) {
+  if (!record(value) || !exactKeys(value, [
+    'schema_version', 'document_type', 'capture_authority', 'source_origin',
+    'candidate_release_version', 'candidate_base_contract_id', 'captured_at', 'targets', 'snapshot_sha256',
+  ]) || value.schema_version !== 1 || value.document_type !== CURRENT_SNAPSHOT_DOCUMENT
+    || value.capture_authority !== CURRENT_SNAPSHOT_AUTHORITY || value.source_origin !== ORIGIN
+    || value.candidate_release_version !== expected.releaseVersion
+    || value.candidate_base_contract_id !== expected.baseContractId
+    || typeof value.captured_at !== 'string'
+    || !Number.isFinite(Date.parse(value.captured_at))
+    || new Date(value.captured_at).toISOString() !== value.captured_at
+    || !record(value.targets)
+    || canonicalProfileJson(Object.keys(value.targets).sort()) !== canonicalProfileJson([...TARGET_NAMES].sort())
+    || !SHA256.test(value.snapshot_sha256 ?? '')
+    || value.snapshot_sha256 !== sha256(Buffer.from(canonicalProfileJson(currentSnapshotBody(value)), 'utf8'))) {
+    throw new Error('Profile current desired-state snapshot is invalid')
+  }
+  const currentByTarget = new Map()
+  for (const target of TARGET_NAMES) {
+    const entry = value.targets[target]
+    if (!record(entry) || entry.status === 'absent' && !exactKeys(entry, ['status'])) {
+      throw new Error(`Profile current desired-state snapshot entry is invalid: ${target}`)
+    }
+    if (entry.status === 'absent') {
+      currentByTarget.set(target, undefined)
+      continue
+    }
+    if (entry.status !== 'present' || !exactKeys(entry, ['status', 'bytes', 'sha256', 'content_base64'])
+      || !Number.isSafeInteger(entry.bytes) || entry.bytes <= 0 || entry.bytes > MAX_CURRENT_BYTES
+      || !SHA256.test(entry.sha256 ?? '') || typeof entry.content_base64 !== 'string' || entry.content_base64 === '') {
+      throw new Error(`Profile current desired-state snapshot entry is invalid: ${target}`)
+    }
+    const bytes = Buffer.from(entry.content_base64, 'base64')
+    if (bytes.toString('base64') !== entry.content_base64
+      || bytes.byteLength !== entry.bytes || sha256(bytes) !== entry.sha256) {
+      throw new Error(`Profile current desired-state snapshot bytes are invalid: ${target}`)
+    }
+    currentByTarget.set(target, bytes)
+  }
+  return { snapshot: value, currentByTarget }
+}
+
+export function loadProfileCurrentSnapshot(path, expected) {
+  const metadata = regularFile(path)
+  if (metadata.size === 0 || metadata.size > MAX_CURRENT_SNAPSHOT_BYTES) {
+    throw new Error('Profile current desired-state snapshot size is invalid')
+  }
+  let value
+  try {
+    value = JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    throw new Error('Profile current desired-state snapshot JSON is invalid')
+  }
+  return parseProfileCurrentSnapshot(value, expected)
 }
 
 function regularFile(path) {
@@ -271,31 +406,17 @@ function writeFileSyncAtomic(path, bytes) {
   renameSync(temporary, path)
 }
 
-async function readCurrent(target) {
-  const url = `${ORIGIN}/desktop/profile/desired-state/${target}.json`
-  const response = await fetch(url, { redirect: 'error', headers: { 'cache-control': 'no-cache' } })
-  if (response.status === 404) return
-  if (response.status !== 200 || response.body === null) throw new Error(`current desired state request failed: ${target}`)
-  const declared = response.headers.get('content-length')
-  if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/u.test(declared) || Number(declared) > MAX_CURRENT_BYTES)) {
-    throw new Error(`current desired state length is invalid: ${target}`)
+export function materializeProfileCurrentSnapshot(snapshotPath, output, expected) {
+  const { currentByTarget } = loadProfileCurrentSnapshot(snapshotPath, expected)
+  const destination = resolve(output)
+  if (TARGET_NAMES.some(target => currentByTarget.get(target) === undefined)) {
+    throw new Error('Profile composition requires a present current desired state for every Desktop target')
   }
-  const chunks = []
-  const reader = response.body.getReader()
-  let size = 0
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    size += value.byteLength
-    if (size > MAX_CURRENT_BYTES) {
-      await reader.cancel()
-      throw new Error(`current desired state is too large: ${target}`)
-    }
-    chunks.push(Buffer.from(value))
+  mkdirSync(destination, { recursive: false })
+  for (const target of TARGET_NAMES) {
+    writeFileSyncAtomic(join(destination, `${target}.json`), currentByTarget.get(target))
   }
-  const bytes = Buffer.concat(chunks, size)
-  if (bytes.byteLength === 0 || bytes.byteLength > MAX_CURRENT_BYTES) throw new Error(`current desired state is invalid: ${target}`)
-  return bytes
+  return currentByTarget
 }
 
 function authorizePreparation(bootstrap) {
@@ -303,7 +424,7 @@ function authorizePreparation(bootstrap) {
     || process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch'
     || process.env.GITHUB_REF !== 'refs/heads/main'
     || process.env.GITHUB_WORKFLOW_REF !== `${REPOSITORY}/.github/workflows/profile-release.yml@refs/heads/main`
-    || !SHA40.test(process.env.GITHUB_SHA ?? '')) {
+    || process.env.GITHUB_RUN_ATTEMPT !== '1' || !SHA40.test(process.env.GITHUB_SHA ?? '')) {
     throw new Error(`Profile publication is allowed only by the main Profile release workflow in ${REPOSITORY}`)
   }
   if (!/^[1-9][0-9]*$/u.test(process.env.GITHUB_RUN_ID ?? '')
@@ -372,7 +493,10 @@ export function writeProfilePublicationBundle(prepared, output, currentByTarget,
 
 export async function prepareSignedProfilePublication(options) {
   authorizePreparation(options.bootstrap)
-  const currentByTarget = new Map(await Promise.all(TARGET_NAMES.map(async target => [target, await readCurrent(target)])))
+  const { currentByTarget } = loadProfileCurrentSnapshot(
+    options.currentSnapshot,
+    currentSnapshotIdentity(options.root),
+  )
   const prepared = prepareProfilePublication({
     ...options,
     sourceCommit: process.env.EMATE_ACCEPTED_SOURCE_SHA,
@@ -393,18 +517,37 @@ async function main() {
     'artifact-root': { type: 'string', multiple: true },
     changed: { type: 'string', multiple: true },
     bundle: { type: 'string' },
+    snapshot: { type: 'string' },
+    'materialize-current': { type: 'string' },
     bootstrap: { type: 'boolean', default: false },
   } })
-  if (values.candidate?.length !== 3 || values['artifact-root']?.length === 0
-    || values.changed?.length === 0 || values.bundle === undefined) {
-    throw new Error('usage: publish-profile-r2.mjs --candidate <dir> (three targets) --artifact-root <dir> --changed <component> --bundle <directory> [--bootstrap]')
-  }
   const root = fileURLToPath(new URL('..', import.meta.url))
+  if (values['materialize-current'] !== undefined) {
+    if (values.snapshot === undefined || values.candidate !== undefined || values['artifact-root'] !== undefined
+      || values.changed !== undefined || values.bundle !== undefined || values.bootstrap) {
+      throw new Error('usage: publish-profile-r2.mjs --snapshot <file> --materialize-current <directory>')
+    }
+    const currentByTarget = materializeProfileCurrentSnapshot(
+      resolve(values.snapshot),
+      resolve(values['materialize-current']),
+      currentSnapshotIdentity(root),
+    )
+    process.stdout.write(`${JSON.stringify({
+      status: 'materialized',
+      targets: TARGET_NAMES.map(target => ({ target, bytes: currentByTarget.get(target).byteLength })),
+    })}\n`)
+    return
+  }
+  if (values.candidate?.length !== 3 || values['artifact-root']?.length === 0
+    || values.changed?.length === 0 || values.bundle === undefined || values.snapshot === undefined) {
+    throw new Error('usage: publish-profile-r2.mjs --candidate <dir> (three targets) --artifact-root <dir> --changed <component> --snapshot <file> --bundle <directory> [--bootstrap]')
+  }
   const plan = await prepareSignedProfilePublication({
     root,
     candidateDirectories: values.candidate,
     artifactRoots: values['artifact-root'],
     expectedChangedIds: values.changed,
+    currentSnapshot: resolve(values.snapshot),
     bundle: resolve(values.bundle),
     bootstrap: values.bootstrap,
   })

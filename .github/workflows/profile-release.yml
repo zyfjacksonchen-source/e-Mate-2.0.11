@@ -50,6 +50,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_RUN_ATTEMPT" = 1
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID")"
@@ -57,6 +58,7 @@ jobs:
           [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
           test "$(jq -er .path <<<"$run_json")" = .github/workflows/ci.yml
           test "$(jq -er .conclusion <<<"$run_json")" = success
+          test "$(jq -er .run_attempt <<<"$run_json")" = 1
           case "$(jq -er .event <<<"$run_json")" in
             push)
               test "$source_sha" = "$GITHUB_SHA"
@@ -460,6 +462,7 @@ jobs:
             --candidate dist/profile-candidates/win32-x64 \
             --artifact-root dist/components \
             "${changed_args[@]}" \
+            --snapshot artifacts/release/profile-current-snapshot.json \
             --bundle dist/profile-publication \
             "${bootstrap_args[@]}"
       - uses: actions/upload-artifact@v4
