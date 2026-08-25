@@ -2647,3 +2647,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有源码 diff、byte-exact历史fixture、本机 owner-provisioned只读 store验证输出；没有读取用户live Profile、凭据或正文，没有真实模型调用、production `performance_run_id`、上传或生产写入。
 - Remaining blockers: protected attempt-1 runner仍须以同一冻结字节执行完整两臂启动和四模型采集；本修复只关闭 v6 native load 阻断，不把本地 store验证记为 production performance pass。
 - Next exact action: 主代理复核提交并合入 producer；随后重跑 exact runner preflight，任何 Base/store字节或 generation差异继续失败关闭。
+
+## 2026-08-26 · 2.0.13 S35 Build-once publication closure and frozen-v6 performance compatibility
+
+- Goal checkpoint: 唯一主 Goal `01a02e48-f61f-7352-bc86-b5ec8771d46c` 保持 active；本记录只关闭正式 CI 恢复前的两个源码阻断，不宣称发布完成。
+- Frozen baseline / current HEAD: frozen 2.0.12 Base v6 / Profile `d8769641262169a3b53369030a236f573e71499c22893d279e0a0c42df20ac93`；producer 起点 `cb737381de20e41439c2a388e2a1a6abfc55ee11`，外部 publication protected-main 合入 SHA `9fa786244ed80e2202cc0907d6fd3d276a9e4d2f`。
+- Binding documents read: 根 `AGENTS.md`、`docs/target-contract.md`、`docs/slices/2.0.13.md`、`docs/performance-and-acceptance.md` 与上一条完整日志。
+- Inspected native seam: performance probe 仍使用原生 Base/Profile parser 与 `loadProfileGeneration()`；仅 byte-exact 冻结 v6 Base 产生内存 floor-0 兼容视图并保持原 generation identity。Desktop publication 仍由仓库外 fixed-SHA action 验证 protected-main Build-once 平台闭包并生成 Cloudflare plugin handoff。
+- Experiment or why unnecessary: 真实 owner-provisioned v6 store 已通过原生 generation load 与 template install；外部 action 以无密钥闭包 fixture 覆盖 installer、runtime receipt、artifact receipt、可选 blockmap、额外文件、摘要漂移和压缩漂移。未运行生产模型、上传或激活。
+- Decision and forbidden alternatives: 不改冻结合同、不放宽普通 parser、不重写历史 generation、不让 Desktop release 重建安装包。publication action 只接受 exact main CI owner/run/bytes，只有 installer 进入发布计划；receipt/blockmap/mac-smoke/额外文件均不得公开。
+- Changed scope: probe 的精确 v6 兼容视图与测试 fixture；外部 publication verifier 两文件；主仓两个 workflow fixed pin、对应合同测试与本切片合同。未改模型头、路由、流式链、R2、Feed、desired state、官网或用户数据。
+- Verification commands and results: `pnpm run test:impact` 37 pass/5 intentional skip；`pnpm run test:release` 24/24；release coordinator 3/3；performance parity/probe 31/31；Desktop admission 8/8；外部 action Node 24 `node --test` 66/66；workflow YAML 与 `git diff --check` 通过。
+- Immutable evidence / receipt: 外部 protected-main merge `9fa786244ed80e2202cc0907d6fd3d276a9e4d2f`；producer 源码测试与本机 owner-provisioned store验证。没有 production `performance_run_id`、签名 admission、候选安装、Cloudflare 写入或公开指针变化。
+- Remaining blockers: Cloudflare 大文件 plugin bridge、私有生产证据 broker、官网可执行 handoff 与 exact protected-main attempt-1 全链仍须通过；双平台安装/更新/回滚与公网回读仍 OPEN。
+- Next exact action: 合入本记录与 fixed pin，推送同一 source SHA，运行 PR CI；只有通过后合并 protected main 并以 attempt-1 artifacts 启动 coordinator 和 one-shot production performance runner。
