@@ -1721,7 +1721,7 @@ test('identity agreements are immutable, explicit, and use the target Connection
       logout: async ({ client_request_id }) => {
         assert.equal(client_request_id, 'session_logout:test-1')
         authenticated = false
-        return { receipt_id: 'logout-receipt-1' }
+        return { remote_revocation: 'revoked', receipt_id: 'logout-receipt-1' }
       },
     },
   })
@@ -1788,6 +1788,7 @@ test('identity agreements are immutable, explicit, and use the target Connection
     client_request_id: 'session_logout:test-1',
     confirmed: true,
   })
+  assert.equal(loggedOut.value.remote_revocation, 'revoked')
   assert.equal(loggedOut.value.receipt_id, 'logout-receipt-1')
   assert.equal(loggedOut.value.state.authenticated, false)
   assert.equal((await configuredRegistration('session.logout', {
@@ -2241,6 +2242,7 @@ test('enterprise identity provider maps target credentials and the production HT
   await provider.login({ identifier: 'test.user', password: 'secret-value', remember_login: true })
   values.set('E_MATE_MODEL_KEY_GPT', 'runtime-provider-key-not-persisted-here')
   const logout = await provider.logout({ client_request_id: 'logout-request-207' })
+  assert.equal(logout.remote_revocation, 'revoked')
   assert.equal(logout.receipt_id, 'logout-receipt-207')
   assert.equal(values.size, 0)
 
@@ -2326,7 +2328,7 @@ test('enterprise identity rejects expected gateway responses through the target 
   response = { status: 500, body: { error: { code: 'ACCOUNT_EXISTS', message: 'sensitive upstream detail' } } }
   assert.deepEqual(await identityHandler('session.register', payload), {
     ok: false,
-    error: { code: 'unavailable', message: '企业身份服务暂时不可用，请稍后重试。', details: { issues: [] } },
+    error: { code: 'internal', message: '企业身份服务暂时不可用，请稍后重试。', details: {} },
   })
 
   const login = { identifier: 'test.user', password: 'old-password', remember_login: true }
@@ -2338,19 +2340,22 @@ test('enterprise identity rejects expected gateway responses through the target 
   response = { status: 500, body: { error: { code: 'INVALID_GRANT' } } }
   assert.deepEqual(await identityHandler('session.login', login), {
     ok: false,
-    error: { code: 'unavailable', message: '企业身份服务暂时不可用，请稍后重试。', details: { issues: [] } },
+    error: { code: 'internal', message: '企业身份服务暂时不可用，请稍后重试。', details: {} },
   })
   assert.match(warnings.at(-1), /session\.login unavailable \(upstream-http 500\)/u)
   transportFailure = true
   assert.deepEqual(await identityHandler('session.login', login), {
     ok: false,
-    error: { code: 'unavailable', message: '企业身份服务暂时不可用，请稍后重试。', details: { issues: [] } },
+    error: { code: 'internal', message: '企业身份服务暂时不可用，请稍后重试。', details: {} },
   })
   assert.equal(requestSignal instanceof AbortSignal, true)
   assert.match(warnings.at(-1), /session\.login unavailable \(transport\)/u)
   transportFailure = false
   response = { status: 400, body: { error: { code: 'UNKNOWN_CONTRACT_FAILURE' } } }
-  await assert.rejects(identityHandler('session.login', login), /UNKNOWN_CONTRACT_FAILURE/u)
+  assert.deepEqual(await identityHandler('session.login', login), {
+    ok: false,
+    error: { code: 'internal', message: '企业身份服务暂时不可用，请稍后重试。', details: {} },
+  })
 })
 
 test('enterprise model switch keeps native history and survives a cached-policy outage and cold restart', async () => {
@@ -2626,6 +2631,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
         if (event === 'agent/request') requestPolicy = handler
         else if (event === 'llm/stream') streamPolicy = handler
         else if (event === 'session/event' || event === 'session/flush') modelPolicyHandlers.set(event, handler)
+        else if (event === 'credentials/updated') modelPolicyHandlers.set(event, handler)
         else assert.fail(`unexpected model policy event ${event}`)
         return () => {}
       },

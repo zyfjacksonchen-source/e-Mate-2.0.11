@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ComponentType, type FormEvent } from 
 import { createPortal } from 'react-dom'
 import { IconPlusOutline16, IconUserOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
+  IDENTITY_CHANGED_EVENT,
   type IdentityBootstrap,
   type RpcResult,
   validBootstrap,
@@ -37,10 +38,10 @@ function requestId(prefix: string): string {
   return `${prefix}:${crypto.randomUUID()}`
 }
 
-function validMutation(value: unknown, password = false): value is {
+function validMutation(value: unknown): value is {
   schema_version: 1
   receipt_id: string
-  reauthentication_required?: true
+  reauthentication_required: true
   state: IdentityBootstrap
 } {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
@@ -48,7 +49,25 @@ function validMutation(value: unknown, password = false): value is {
   return result.schema_version === 1
     && typeof result.receipt_id === 'string'
     && result.receipt_id.length > 0
-    && (!password || result.reauthentication_required === true)
+    && result.reauthentication_required === true
+    && validBootstrap(result.state)
+    && result.state.authenticated === false
+    && result.state.workspace_unlocked === false
+}
+
+function validLogout(value: unknown): value is {
+  schema_version: 1
+  remote_revocation: 'revoked' | 'unknown'
+  receipt_id?: string
+  state: IdentityBootstrap
+} {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const result = value as Record<string, unknown>
+  return result.schema_version === 1
+    && (result.remote_revocation === 'revoked' || result.remote_revocation === 'unknown')
+    && (result.remote_revocation === 'revoked'
+      ? typeof result.receipt_id === 'string' && result.receipt_id.length > 0
+      : result.receipt_id === undefined)
     && validBootstrap(result.state)
     && result.state.authenticated === false
     && result.state.workspace_unlocked === false
@@ -131,12 +150,21 @@ export function AccountControl({ callIdentity, wide, placement = 'sidebar', User
         client_request_id: stableId,
         confirmed: true,
       })
-      if (!result.ok) throw new Error(result.error?.message ?? '退出登录失败。')
-      if (!validMutation(result.value)) throw new Error('企业服务器返回了无效退出凭证。')
+      if (!result.ok) {
+        dispatchEvent(new CustomEvent(IDENTITY_CHANGED_EVENT, {
+          detail: { logout_incomplete: true },
+        }))
+        throw new Error('退出登录暂未完成，请稍后重试。')
+      }
+      if (!validLogout(result.value)) throw new Error('企业服务器返回了无效退出状态。')
       logoutRequestId.current = null
-      location.reload()
-    } catch (logoutError) {
-      setError(message(logoutError))
+      setState(result.value.state)
+      setConfirming(false)
+      dispatchEvent(new CustomEvent(IDENTITY_CHANGED_EVENT, {
+        detail: { remote_revocation: result.value.remote_revocation },
+      }))
+    } catch {
+      setError('退出登录暂未完成，请稍后重试。')
     } finally {
       setBusy(false)
     }
@@ -276,7 +304,7 @@ export function AccountSettings({ callIdentity }: Props) {
       setNewPassword('')
       setConfirmPassword('')
       if (!result.ok) throw new Error(result.error?.message ?? '修改密码失败。')
-      if (!validMutation(result.value, true)) throw new Error('企业服务器返回了无效改密凭证。')
+      if (!validMutation(result.value)) throw new Error('企业服务器返回了无效改密凭证。')
       passwordRequestId.current = null
       setStatus('密码已更新，旧租约已撤销，正在返回登录页…')
       window.setTimeout(() => { location.reload() }, 800)

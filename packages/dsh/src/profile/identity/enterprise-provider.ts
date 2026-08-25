@@ -1,8 +1,9 @@
-import { createPublicKey, randomUUID } from 'node:crypto'
+import { createHash, createPublicKey } from 'node:crypto'
 import {
   agreementBundleSha256,
   agreementDocuments,
 } from './agreements.js'
+import { LOGGED_OUT_CREDENTIAL } from '../credentials-os.js'
 
 const SESSION_REF = 'E_MATE_ENTERPRISE_SESSION'
 export const MODEL_SESSION_REF = 'E_MATE_MODEL_SESSION_TOKEN'
@@ -34,12 +35,26 @@ const RUNTIME_MODEL_CONTRACT = new Map([
 export const RUNTIME_MODEL_CREDENTIAL_REFS = Object.freeze(
   [...new Set([...RUNTIME_MODEL_CONTRACT.values()].map(({ credentialRef }) => credentialRef))],
 )
+const LOCAL_CREDENTIAL_REFS = Object.freeze([
+  SESSION_REF,
+  MODEL_SESSION_REF,
+  ...RUNTIME_MODEL_CREDENTIAL_REFS,
+  'E_MATE_SEARCH_KEY_DEEPSEEK',
+])
 const ADMIN_ROLES = new Set(['TENANT_ADMIN', 'AUDIT_ADMIN'])
 const REGISTRATION_REJECTION_MESSAGES = {
   INVALID_CHALLENGE: '验证码无效或已过期',
   ACCOUNT_EXISTS: '该账号已存在',
 } as const
 const LOGIN_REJECTION_MESSAGE = '账号或密码错误'
+const REFRESH_FAILURE_CODES = [
+  'INVALID_GRANT', 'SESSION_REVOKED', 'TOKEN_REUSED', 'CLIENT_FORBIDDEN',
+  'APPROVAL_REQUIRED', 'POLICY_REQUIRED', 'RATE_LIMITED', 'INVALID_REQUEST',
+] as const
+type RefreshFailureCode = typeof REFRESH_FAILURE_CODES[number] | 'UNKNOWN'
+const TERMINAL_REFRESH_FAILURE_CODES = new Set<RefreshFailureCode>([
+  'INVALID_GRANT', 'SESSION_REVOKED', 'TOKEN_REUSED',
+])
 
 class RegistrationRejection extends Error {
   constructor(readonly code: keyof typeof REGISTRATION_REJECTION_MESSAGES) {
@@ -55,6 +70,12 @@ class LoginRejection extends Error {}
 
 export function loginRejectionMessage(error: unknown): string | undefined {
   return error instanceof LoginRejection ? LOGIN_REJECTION_MESSAGE : undefined
+}
+
+class RefreshFailure extends Error {
+  constructor(readonly code: RefreshFailureCode, readonly status: number, message: string) {
+    super(message)
+  }
 }
 
 export class IdentityServiceUnavailable extends Error {
@@ -529,6 +550,16 @@ async function responseJson(response: Response, label: string): Promise<unknown>
       SESSION_REVOKED: '登录已失效，请重新登录',
       TOKEN_REUSED: '登录刷新凭据已失效，请重新登录',
     }
+    if (label === 'session refresh') {
+      const closedCode = REFRESH_FAILURE_CODES.includes(code as typeof REFRESH_FAILURE_CODES[number])
+        ? code as typeof REFRESH_FAILURE_CODES[number]
+        : 'UNKNOWN'
+      throw new RefreshFailure(
+        closedCode,
+        response.status,
+        messages[code] ?? `e-Mate enterprise session refresh failed (HTTP_${response.status})`,
+      )
+    }
     throw new Error(messages[code] ?? `e-Mate enterprise ${label} failed (${code})`)
   }
   return value
@@ -596,6 +627,25 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
   let initialized = false
   let loading: Promise<StoredSession | undefined> | undefined
   let refreshing: Promise<StoredSession> | undefined
+  let leaseRevision = 0
+  let credentialMutation: Promise<void> = Promise.resolve()
+  let loggingOut: Promise<{ remote_revocation: 'revoked'; receipt_id: string } | { remote_revocation: 'unknown' }> | undefined
+
+  const mutateCredentials = <T>(mutation: () => Promise<T>): Promise<T> => {
+    const result = credentialMutation.then(mutation, mutation)
+    credentialMutation = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  const clearCredentials = async (refs: readonly string[]) => {
+    await Promise.allSettled(refs.map(ref => Promise.resolve()
+      .then(() => options.credentials.set(ref, LOGGED_OUT_CREDENTIAL))))
+    const results = await Promise.allSettled(refs.map(ref => Promise.resolve()
+      .then(() => options.credentials.unset(ref))))
+    if (results.some(result => result.status === 'rejected')) {
+      throw new Error('e-Mate enterprise credentials could not be cleared')
+    }
+  }
 
   const call = async (root: string, path: string, init: RequestInit, label: string) => {
     let response: Response
@@ -612,40 +662,47 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     return responseJson(response, label)
   }
 
-  const clear = async () => {
+  const clear = () => {
+    leaseRevision += 1
     current = undefined
-    await Promise.all([
-      options.credentials.unset(SESSION_REF),
-      options.credentials.unset(MODEL_SESSION_REF),
-      ...RUNTIME_MODEL_CREDENTIAL_REFS.map(ref => options.credentials.unset(ref)),
-    ])
+    initialized = true
+    loading = undefined
+    return mutateCredentials(() => clearCredentials(LOCAL_CREDENTIAL_REFS))
   }
 
-  const save = async (value: StoredSession) => {
-    if (current?.session.identity.tenantId !== value.session.identity.tenantId
-      || current.session.identity.userId !== value.session.identity.userId) current = undefined
+  const save = (value: StoredSession, expectedRevision = leaseRevision) => mutateCredentials(async () => {
+    let sessionWritten = false
+    let modelSessionWritten = false
     try {
+      if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
+      if (current?.session.identity.tenantId !== value.session.identity.tenantId
+        || current.session.identity.userId !== value.session.identity.userId) current = undefined
       await options.credentials.set(SESSION_REF, JSON.stringify(value))
+      sessionWritten = true
+      if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
       await options.credentials.set(MODEL_SESSION_REF, value.session.modelGateway.sessionToken)
+      modelSessionWritten = true
+      if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
       current = value
     } catch (error) {
-      current = undefined
-      await Promise.allSettled([
-        options.credentials.unset(SESSION_REF),
-        options.credentials.unset(MODEL_SESSION_REF),
-        ...RUNTIME_MODEL_CREDENTIAL_REFS.map(ref => options.credentials.unset(ref)),
-      ])
+      const currentMutation = expectedRevision === leaseRevision
+      const credentialsWritten = sessionWritten || modelSessionWritten
+      if (currentMutation || credentialsWritten) current = undefined
+      const refs = currentMutation || credentialsWritten ? LOCAL_CREDENTIAL_REFS : []
+      await clearCredentials(refs).catch(() => undefined)
       throw error
     }
-  }
+  })
 
   const load = async () => {
     if (current !== undefined) return current
     if (loading !== undefined) return loading
     if (initialized) return undefined
+    const expectedRevision = leaseRevision
     loading = (async () => {
       const hit = await options.credentials.resolve(SESSION_REF)
       if (hit === undefined) return undefined
+      if (hit.value === LOGGED_OUT_CREDENTIAL) return undefined
       let value: StoredSession
       try {
         value = storedSession(JSON.parse(hit.value), modelRoot)
@@ -657,20 +714,26 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
         await clear()
         return undefined
       }
-      await options.credentials.set(MODEL_SESSION_REF, value.session.modelGateway.sessionToken)
-      current = value
+      await mutateCredentials(async () => {
+        if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
+        await options.credentials.set(MODEL_SESSION_REF, value.session.modelGateway.sessionToken)
+        if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
+        current = value
+      })
       return value
     })()
     try {
-      return await loading
-    } finally {
+      const value = await loading
       initialized = true
+      return value
+    } finally {
       loading = undefined
     }
   }
 
   const refresh = async (value: StoredSession) => {
     if (refreshing !== undefined) return refreshing
+    const expectedRevision = leaseRevision
     refreshing = (async () => {
       const refreshed = session(await call(authRoot, '/v1/auth/refresh', {
         method: 'POST',
@@ -678,7 +741,10 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
         body: JSON.stringify({
           clientId,
           refreshToken: value.session.refreshToken,
-          refreshRequestId: `refresh-${randomUUID()}`,
+          refreshRequestId: `refresh-v1-${createHash('sha256')
+            .update('e-mate-refresh-request-v1\0', 'utf8')
+            .update(value.session.refreshToken, 'utf8')
+            .digest('base64url')}`,
         }),
       }, 'session refresh'), modelRoot)
       const next: StoredSession = {
@@ -688,13 +754,16 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
         session: refreshed,
         ...(value.consent === undefined ? {} : { consent: value.consent }),
       }
-      await save(next)
+      await save(next, expectedRevision)
       return next
     })()
     try {
       return await refreshing
     } catch (error) {
-      if (Date.parse(value.session.expiresAt) <= now() && !(error instanceof IdentityServiceUnavailable)) {
+      if (expectedRevision === leaseRevision
+        && Date.parse(value.session.expiresAt) <= now()
+        && error instanceof RefreshFailure
+        && TERMINAL_REFRESH_FAILURE_CODES.has(error.code)) {
         await clear().catch(() => undefined)
       }
       throw error
@@ -734,30 +803,36 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
   }
 
   const liveConsent = async (value: StoredSession) => {
+    const expectedRevision = leaseRevision
     try {
       const status = consentStatus(await modelCall(value, '/v1/consents/current', { method: 'GET' }, 'consent status'))
+      if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
       if (status.policy.contentHash !== agreementBundleSha256) {
         throw new Error('e-Mate enterprise agreement policy does not match this installed version')
       }
       if (JSON.stringify(value.consent) !== JSON.stringify(status)) {
-        await save({ ...value, consent: status })
+        await save({ ...value, consent: status }, expectedRevision)
       }
       return status
     } catch (error) {
+      if (expectedRevision !== leaseRevision) throw error
       if (value.consent?.policy.contentHash === agreementBundleSha256) return value.consent
       throw error
     }
   }
 
   const modelRuntimePolicy = async () => {
+    const expectedRevision = leaseRevision
     const value = await active(true)
     if (value === undefined) throw new Error('e-Mate login is required')
+    if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
     const response = await modelCall(
       value,
       '/v1/runtime-models?client_version=2.0.12',
       { method: 'GET' },
       'runtime models',
     )
+    if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
     const grant = searchCredentialGrant(response)
     const models = runtimeModels(response, value.session.modelGateway.allowedModelIds)
     return { policy: policyFor(value, models), models, searchCredentialGrant: grant }
@@ -837,6 +912,8 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
       }, 'registration'))
     },
     async login(input: { identifier: string; password: string; remember_login: boolean }) {
+      leaseRevision += 1
+      const expectedRevision = leaseRevision
       const authenticated = session(await call(authRoot, '/v1/auth/password', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -847,27 +924,53 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
           password: input.password,
         }),
       }, 'login'), modelRoot)
+      if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
       await save({
         schema_version: 1,
         remember_login: input.remember_login,
         received_at: new Date(now()).toISOString(),
         session: authenticated,
-      })
+      }, expectedRevision)
     },
     async logout(input: { client_request_id: string }) {
-      const value = await active(false)
-      if (value === undefined) throw new Error('e-Mate login is required')
-      const receipt = mutationReceipt(await call(authRoot, '/v1/auth/logout', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          clientId,
-          refreshToken: value.session.refreshToken,
-          clientRequestId: input.client_request_id,
-        }),
-      }, 'logout'), false)
-      await clear()
-      return receipt
+      if (loggingOut !== undefined) return loggingOut
+      loggingOut = (async () => {
+        const value = current
+        let cleanupFailure: unknown
+        try {
+          await clear()
+        } catch (error) {
+          cleanupFailure = error
+        }
+        let result: { remote_revocation: 'revoked'; receipt_id: string } | { remote_revocation: 'unknown' } = {
+          remote_revocation: 'unknown',
+        }
+        try {
+          if (value !== undefined) {
+            result = {
+              remote_revocation: 'revoked',
+              ...mutationReceipt(await call(authRoot, '/v1/auth/logout', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  clientId,
+                  refreshToken: value.session.refreshToken,
+                  clientRequestId: input.client_request_id,
+                }),
+              }, 'logout'), false),
+            }
+          }
+        } catch {
+          // A missing receipt leaves remote completion unknown; explicit logout still invalidates this device.
+        }
+        if (cleanupFailure !== undefined) throw cleanupFailure
+        return result
+      })()
+      try {
+        return await loggingOut
+      } finally {
+        loggingOut = undefined
+      }
     },
     async changePassword(input: { current_password: string; new_password: string; client_request_id: string }) {
       const value = await active(false)
@@ -889,7 +992,9 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     async acceptAgreements() {
       const value = await active(true)
       if (value === undefined) throw new Error('e-Mate login is required')
+      const expectedRevision = leaseRevision
       const status = consentStatus(await modelCall(value, '/v1/consents/current', { method: 'GET' }, 'consent status'))
+      if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
       if (status.policy.contentHash !== agreementBundleSha256) {
         throw new Error('e-Mate enterprise agreement policy does not match this installed version')
       }
@@ -905,7 +1010,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
           locale: 'zh-CN',
         }),
       }, 'consent acceptance'), status.policy)
-      await save({ ...value, consent: { schemaVersion: 1, policy: status.policy, required: false, acceptance } })
+      await save({ ...value, consent: { schemaVersion: 1, policy: status.policy, required: false, acceptance } }, expectedRevision)
     },
     async modelRuntimePolicy() {
       return modelRuntimePolicy()

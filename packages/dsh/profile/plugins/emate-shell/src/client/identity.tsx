@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { AuraField } from './aura-field.tsx'
 import css from './identity.module.css'
@@ -57,6 +57,10 @@ export type RpcResult =
   | { ok: true; value: unknown }
   | { ok: false; error?: { message?: string } }
 
+export const IDENTITY_CHANGED_EVENT = 'emate:identity-changed'
+export const REMOTE_LOGOUT_UNKNOWN_MESSAGE = '本机已退出；企业会话撤销状态未知，请稍后重新登录确认。'
+export const LOGOUT_INCOMPLETE_MESSAGE = '当前应用已停止使用此登录；本机凭据清理或远端撤销未确认完成，请勿关闭或重启应用并联系管理员。'
+
 interface Props {
   callIdentity: (endpoint: string, payload: Record<string, unknown>) => Promise<RpcResult>
 }
@@ -100,24 +104,51 @@ export function IdentityGate({ callIdentity }: Props) {
   const [challenge, setChallenge] = useState<RegistrationChallenge | null>(null)
   const [challengeBusy, setChallengeBusy] = useState(false)
   const [registration, setRegistration] = useState<RegistrationReceipt | null>(null)
+  const identityLoadRevision = useRef(0)
+  const identityGateMounted = useRef(false)
   const [accepted, setAccepted] = useState<ReadonlySet<string>>(() => new Set())
   const [returnPath] = useState(() => ['/login', '/register', '/agreement'].includes(location.pathname)
     ? '/'
     : `${location.pathname}${location.search}${location.hash}`)
 
-  const load = async () => {
-    setError(null)
+  const load = async (notice: string | null = null) => {
+    const revision = identityLoadRevision.current + 1
+    identityLoadRevision.current = revision
+    setError(notice)
     try {
       const result = await callIdentity('identity.bootstrap', {})
+      if (!identityGateMounted.current || revision !== identityLoadRevision.current) return
       if (!result.ok) throw new Error(result.error?.message ?? '企业身份服务拒绝了请求。')
       if (!validBootstrap(result.value)) throw new Error('企业身份服务返回了无效状态。')
       setState(result.value)
     } catch (loadError) {
+      if (!identityGateMounted.current || revision !== identityLoadRevision.current) return
       setError(errorMessage(loadError))
     }
   }
 
+  useEffect(() => {
+    identityGateMounted.current = true
+    return () => {
+      identityGateMounted.current = false
+      identityLoadRevision.current += 1
+    }
+  }, [])
+
   useEffect(() => { void load() }, [])
+
+  useEffect(() => {
+    const refresh = (event: Event) => {
+      const notice = event instanceof CustomEvent && event.detail?.logout_incomplete === true
+        ? LOGOUT_INCOMPLETE_MESSAGE
+        : event instanceof CustomEvent && event.detail?.remote_revocation === 'unknown'
+          ? REMOTE_LOGOUT_UNKNOWN_MESSAGE
+          : null
+      void load(notice)
+    }
+    addEventListener(IDENTITY_CHANGED_EVENT, refresh)
+    return () => { removeEventListener(IDENTITY_CHANGED_EVENT, refresh) }
+  }, [])
 
   const mode = state?.ready !== true || !state.authenticated
     ? 'login'

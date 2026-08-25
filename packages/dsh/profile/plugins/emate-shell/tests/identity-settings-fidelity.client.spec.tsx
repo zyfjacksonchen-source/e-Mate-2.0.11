@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import React from 'react'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AccountControl, AccountSettings } from '../src/client/account.tsx'
 import { auraMorphProgress, auraPointCount } from '../src/client/aura-field.tsx'
@@ -437,6 +437,72 @@ describe('e-Mate 2.0.12 identity and settings fidelity', () => {
     expect(await screen.findByText(/管理员无需签署用户协议/u)).toBeTruthy()
     administrator.unmount()
 
+  })
+
+  it('projects an unknown remote logout as locally signed out without a receipt or a 500 error', async () => {
+    const signedOut: IdentityBootstrap = {
+      schema_version: 1,
+      ready: true,
+      authenticated: false,
+      workspace_unlocked: false,
+      agreements,
+    }
+    let loggedOut = false
+    const callIdentity = vi.fn(async (endpoint: string): Promise<RpcResult> => {
+      if (endpoint === 'identity.bootstrap') return { ok: true, value: loggedOut ? signedOut : signedIn }
+      if (endpoint === 'session.logout') {
+        loggedOut = true
+        return {
+          ok: true,
+          value: {
+            schema_version: 1,
+            remote_revocation: 'unknown',
+            state: signedOut,
+          },
+        }
+      }
+      return { ok: false, error: { message: '用量暂不可用' } }
+    })
+    const Icon = () => <svg />
+
+    render(<IdentityGate callIdentity={callIdentity} />)
+    render(<AccountControl callIdentity={callIdentity} wide UserIcon={Icon} expandSidebar={() => {}} />)
+    fireEvent.click(await screen.findByLabelText('用户中心，测试用户'))
+    fireEvent.click(await screen.findByRole('button', { name: '退出登录' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '退出登录' }))
+
+    expect(await screen.findByRole('heading', { name: '欢迎回来' })).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toBe('本机已退出；企业会话撤销状态未知，请稍后重新登录确认。')
+    expect(document.body.textContent).not.toContain('500')
+    expect(callIdentity.mock.calls.filter(([endpoint]) => endpoint === 'session.logout')).toHaveLength(1)
+  })
+
+  it('rejects mismatched logout receipt states without restoring or fabricating identity', async () => {
+    const signedOut: IdentityBootstrap = {
+      schema_version: 1,
+      ready: true,
+      authenticated: false,
+      workspace_unlocked: false,
+      agreements,
+    }
+    const Icon = () => <svg />
+    for (const invalid of [
+      { schema_version: 1, remote_revocation: 'revoked', state: signedOut },
+      { schema_version: 1, remote_revocation: 'unknown', receipt_id: 'fabricated-receipt', state: signedOut },
+    ]) {
+      const callIdentity = vi.fn(async (endpoint: string): Promise<RpcResult> => endpoint === 'identity.bootstrap'
+        ? { ok: true, value: signedIn }
+        : endpoint === 'session.logout'
+          ? { ok: true, value: invalid }
+          : { ok: false, error: { message: '用量暂不可用' } })
+      const view = render(<AccountControl callIdentity={callIdentity} wide UserIcon={Icon} expandSidebar={() => {}} />)
+      fireEvent.click(await screen.findByLabelText('用户中心，测试用户'))
+      fireEvent.click(await screen.findByRole('button', { name: '退出登录' }))
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '退出登录' }))
+      expect((await within(screen.getByRole('dialog')).findByRole('alert')).textContent).toBe('退出登录暂未完成，请稍后重试。')
+      expect(callIdentity.mock.calls.filter(([endpoint]) => endpoint === 'session.logout')).toHaveLength(1)
+      view.unmount()
+    }
   })
 
   it('renders an unlimited weekly quota without exposing its numeric sentinel', async () => {
