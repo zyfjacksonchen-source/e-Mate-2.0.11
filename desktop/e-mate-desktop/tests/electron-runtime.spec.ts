@@ -82,7 +82,7 @@ const electron = vi.hoisted(() => {
   const dialog = {
     showErrorBox: vi.fn(),
     showMessageBox: vi.fn(async () => ({ response: 0, checkboxChecked: false })),
-    showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] })),
+    showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })),
     showSaveDialog: vi.fn(async () => ({ canceled: true })),
   }
   const appIcon = {
@@ -265,6 +265,8 @@ describe('Electron compatibility runtime', () => {
     electron.loadURL.mockReset()
     electron.loadURL.mockResolvedValue(undefined)
     electron.dialog.showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: false })
+    electron.dialog.showOpenDialog.mockReset()
+    electron.dialog.showOpenDialog.mockResolvedValue({ canceled: true, filePaths: [] })
     electron.shell.openPath.mockResolvedValue('')
     electron.systemPreferences.isTrustedAccessibilityClient.mockReturnValue(false)
     electron.nativeTheme.themeSource = 'system'
@@ -408,6 +410,50 @@ describe('Electron compatibility runtime', () => {
 
     await release()
     expect(electron.trays[0]?.off).toHaveBeenCalledWith('click', expect.any(Function))
+  })
+
+  it('opens one parented Windows folder chooser and returns its selected path', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    electron.dialog.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['C:\\Work'] })
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+
+    await expect(runtime.pickDirectory()).resolves.toBe('C:\\Work')
+    expect(electron.dialog.showOpenDialog).toHaveBeenCalledWith(
+      electron.browserWindows[0],
+      {
+        title: '选择工作区目录',
+        properties: ['openDirectory', 'dontAddToRecent'],
+      },
+    )
+
+    await release()
+  })
+
+  it('single-flights one Windows chooser and opens a new generation after cancellation', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    let resolveDialog!: (result: { canceled: boolean; filePaths: string[] }) => void
+    electron.dialog.showOpenDialog.mockReturnValue(
+      new Promise(resolve => { resolveDialog = resolve }),
+    )
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+
+    const first = runtime.pickDirectory()
+    const repeated = runtime.pickDirectory()
+    expect(electron.dialog.showOpenDialog).toHaveBeenCalledOnce()
+    resolveDialog({ canceled: true, filePaths: [] })
+    await expect(Promise.all([first, repeated])).resolves.toEqual([null, null])
+
+    electron.dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: ['C:\\Next'] })
+    await expect(runtime.pickDirectory()).resolves.toBe('C:\\Next')
+    expect(electron.dialog.showOpenDialog).toHaveBeenCalledTimes(2)
+
+    await release()
   })
 
   it('does not mount a registration disposed before Host boot settles', async () => {

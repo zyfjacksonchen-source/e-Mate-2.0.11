@@ -34,6 +34,10 @@
       "types": "./lib/types/windows-pwsh-sandbox.d.ts",
       "default": "./lib/windows-pwsh-sandbox.js"
     },
+    "./windows-directory-picker": {
+      "types": "./lib/types/windows-directory-picker.d.ts",
+      "default": "./lib/windows-directory-picker.js"
+    },
     "./terminal": {
       "types": "./lib/types/terminal.d.ts",
       "default": "./lib/terminal.js"
@@ -173,6 +177,7 @@
     "@deepseek-ai/dsh-goal": "0.1.0-rc.7",
     "@deepseek-ai/dsh-home-paths": "0.1.0-rc.7",
     "@deepseek-ai/dsh-host-apiproxy": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-host-directory-picker": "0.1.0-rc.7",
     "@deepseek-ai/dsh-host-directory-picker-browse": "0.1.0-rc.7",
     "@deepseek-ai/dsh-host-directory-picker-native": "0.1.0-rc.7",
     "@deepseek-ai/dsh-host-plugin-inventory": "0.1.0-rc.7",

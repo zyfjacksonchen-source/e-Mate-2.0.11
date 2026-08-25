@@ -262,11 +262,16 @@ export function openSessionFromRoute(id: string): void {
   dispatchEvent(new PopStateEvent('popstate'))
 }
 
+/** Use the rc.7 Workspace runtime's single native Host directory-picker seam. */
+export function pickWorkspaceDirectory(ctx: any): Promise<string | null> {
+  return ctx.workspaces.pickDirectory()
+}
+
 /** Attach one picked Workspace only while the initiating route generation still owns the UI. */
 export async function attachWorkspaceFromRoute(ctx: any): Promise<string | null> {
   const fence = captureRouteFence(ctx)
   try {
-    const path = await ctx.workspaces.pickDirectory()
+    const path = await pickWorkspaceDirectory(ctx)
     if (path === null || !fence.current()) return null
     const workspace = await ctx.workspaces.create({ path })
     return fence.current() ? workspace.workspaceId : null

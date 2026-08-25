@@ -8,6 +8,7 @@ import { HomeProjection } from '../src/client/home.tsx'
 import {
   attachWorkspaceFromRoute,
   openSessionFromRoute,
+  pickWorkspaceDirectory,
   prepareSchedulePromptFromRoute,
   startSessionFromRoute,
 } from '../src/client/index.ts'
@@ -189,6 +190,51 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(sessions.current).toBe('target/session')
   })
 
+  it('uses only the native Workspace picker seam and fails closed when it is unavailable', async () => {
+    const failure = new Error('host.pickDirectory needs the native capability; the composed picker serves "browse"')
+    const pickDirectory = vi.fn()
+      .mockResolvedValueOnce('/work/picked')
+      .mockResolvedValueOnce(null)
+      .mockRejectedValueOnce(failure)
+    const ctx = { workspaces: { pickDirectory } }
+
+    await expect(pickWorkspaceDirectory(ctx)).resolves.toBe('/work/picked')
+    await expect(pickWorkspaceDirectory(ctx)).resolves.toBeNull()
+    await expect(pickWorkspaceDirectory(ctx)).rejects.toBe(failure)
+    expect(pickDirectory).toHaveBeenCalledTimes(3)
+  })
+
+  it('attaches once and drops late picker or attach results after a route switch', async () => {
+    history.replaceState(null, '', '/')
+    const create = vi.fn(async ({ path }: { path: string }) => ({ workspaceId: `workspace:${path}` }))
+    const pickDirectory = vi.fn(async () => '/work/selected')
+    const ctx = { workspaces: { pickDirectory, create } }
+
+    await expect(attachWorkspaceFromRoute(ctx)).resolves.toBe('workspace:/work/selected')
+    expect(create).toHaveBeenCalledOnce()
+    expect(create).toHaveBeenCalledWith({ path: '/work/selected' })
+
+    let resolvePick!: (path: string) => void
+    pickDirectory.mockReturnValueOnce(new Promise(resolve => { resolvePick = resolve }))
+    const pickedLate = attachWorkspaceFromRoute(ctx)
+    history.pushState(null, '', '/capabilities')
+    dispatchEvent(new PopStateEvent('popstate'))
+    resolvePick('/work/late')
+    await expect(pickedLate).resolves.toBeNull()
+    expect(create).toHaveBeenCalledTimes(1)
+
+    history.replaceState(null, '', '/')
+    let resolveCreate!: (workspace: { workspaceId: string }) => void
+    pickDirectory.mockResolvedValueOnce('/work/durable')
+    create.mockReturnValueOnce(new Promise(resolve => { resolveCreate = resolve }))
+    const createdLate = attachWorkspaceFromRoute(ctx)
+    await vi.waitFor(() => { expect(create).toHaveBeenCalledWith({ path: '/work/durable' }) })
+    history.pushState(null, '', '/schedules')
+    dispatchEvent(new PopStateEvent('popstate'))
+    resolveCreate({ workspaceId: 'workspace-durable' })
+    await expect(createdLate).resolves.toBeNull()
+  })
+
   it('keeps the current Sidebar hierarchy while driving real session and workspace actions', async () => {
     const sessions = {
       ids: ['project-session', 'general-session'],
@@ -210,7 +256,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     const startSession = vi.fn(async () => true)
     const openSession = vi.fn()
     const openSchedules = vi.fn()
-    const pickWorkspace = vi.fn(async () => 'workspace-1')
+    const pickWorkspace = vi.fn(async (): Promise<string | null> => 'workspace-1')
 
     render(<SidebarRoot
       collapsed={false}
@@ -280,9 +326,28 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(sidebarCss).toContain('right: anchor(right)')
     fireEvent.click(screen.getByRole('button', { name: '添加项目文件夹' }))
     await waitFor(() => { expect(startSession).toHaveBeenCalledWith('workspace-1') })
+    let resolvePick!: (workspaceId: string | null) => void
+    pickWorkspace.mockImplementationOnce(() => new Promise(resolve => { resolvePick = resolve }))
+    const addProject = screen.getByRole('button', { name: '添加项目文件夹' })
+    fireEvent.click(addProject)
+    fireEvent.click(addProject)
+    expect(pickWorkspace).toHaveBeenCalledTimes(2)
+    resolvePick(null)
+    await waitFor(() => { expect((addProject as HTMLButtonElement).disabled).toBe(false) })
+    const privateFailure = 'directory picker failed: host.pickDirectory needs the native capability; the composed picker serves "browse"'
+    pickWorkspace.mockRejectedValueOnce(new Error(privateFailure))
+    fireEvent.click(addProject)
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toBe('项目文件夹暂时无法添加，请重试。')
+    })
+    expect(screen.queryByText(privateFailure)).toBeNull()
+    pickWorkspace.mockRejectedValueOnce(new Error(privateFailure))
+    fireEvent.click(addProject)
+    await waitFor(() => { expect(pickWorkspace).toHaveBeenCalledTimes(4) })
+    expect(screen.getAllByText('项目文件夹暂时无法添加，请重试。')).toHaveLength(1)
     pickWorkspace.mockRejectedValueOnce(new Error('/private/legacy/project: attach failed'))
-    fireEvent.click(screen.getByRole('button', { name: '添加项目文件夹' }))
-    await waitFor(() => { expect(screen.getByRole('status').textContent).toBe('项目文件夹暂时无法添加，请重试。') })
+    fireEvent.click(addProject)
+    await waitFor(() => { expect(pickWorkspace).toHaveBeenCalledTimes(5) })
     expect(screen.queryByText(/private\/legacy/u)).toBeNull()
     startSession.mockRejectedValueOnce(new Error('/private/session/store: create failed'))
     fireEvent.click(screen.getByRole('button', { name: '新建任务' }))

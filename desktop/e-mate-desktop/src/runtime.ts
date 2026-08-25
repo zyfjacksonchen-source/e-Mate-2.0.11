@@ -171,6 +171,9 @@ export interface DesktopRuntime {
   /** Reveal and focus the current window, if mounted. */
   show(): void
 
+  /** Open the platform's native single-directory chooser. */
+  pickDirectory(): Promise<string | null>
+
   /**
    * Contribute one command to the native tray for the current Cordis lifetime.
    * @param item - dynamic label, state, and invocation owned by the caller.
