@@ -170,6 +170,8 @@ describe('pinned assisted-NSIS atomic update seam', () => {
     expect(coordinator).not.toContain("-Name 'e-MateUpdateRecovery' -Force")
     expect(coordinator).toContain("[ValidateSet('CurrentUser', 'all')]")
     expect(coordinator).toContain('[EmateUpdateNative]::RegFlushKey($key.Handle)')
+    expect(coordinator).toContain('[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames')
+    expect(coordinator).not.toContain('Get-ItemPropertyValue -LiteralPath $key')
     expect(coordinator).toContain('function Test-ProcessPath([int]$ProcessId')
     expect(coordinator).toContain("if ($Journal.phase -cne 'rolled-back') { Stop-ExactCandidate $Journal }")
     expect(coordinator).toContain("'another transaction was modified'")

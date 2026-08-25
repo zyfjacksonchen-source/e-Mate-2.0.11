@@ -614,10 +614,25 @@ function Register-Recovery($Request) {
   Flush-RecoveryKey $key
 }
 
+function Get-RecoveryValue($Request) {
+  $key = Get-RecoveryKey $Request
+  if (-not (Test-Path -LiteralPath $key)) { return $null }
+  $registryKey = Get-Item -LiteralPath $key
+  try {
+    return $registryKey.GetValue(
+      (Get-RecoveryName $Request),
+      $null,
+      [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+    )
+  } finally {
+    $registryKey.Close()
+  }
+}
+
 function Remove-Recovery($Request) {
   $key = Get-RecoveryKey $Request
   $name = Get-RecoveryName $Request
-  $existing = Get-ItemPropertyValue -LiteralPath $key -Name $name -ErrorAction SilentlyContinue
+  $existing = Get-RecoveryValue $Request
   if ($null -eq $existing) { return }
   Assert-True ($existing -ceq (Get-RecoveryCommand $Request)) 'recovery command owner mismatch'
   Remove-ItemProperty -LiteralPath $key -Name $name -Force
@@ -1199,10 +1214,10 @@ function Invoke-SelfTest {
     try {
       Assert-True (-not (Test-Path -LiteralPath $script:RecoveryKeyOverride)) 'recovery self-test key already exists'
       Register-Recovery $recoveryRequest
-      $registered = Get-ItemPropertyValue -LiteralPath $script:RecoveryKeyOverride -Name (Get-RecoveryName $recoveryRequest)
+      $registered = Get-RecoveryValue $recoveryRequest
       Assert-True ($registered -ceq (Get-RecoveryCommand $recoveryRequest)) 'missing-key recovery registration failed'
       Remove-Recovery $recoveryRequest
-      $removed = Get-ItemPropertyValue -LiteralPath $script:RecoveryKeyOverride -Name (Get-RecoveryName $recoveryRequest) -ErrorAction SilentlyContinue
+      $removed = Get-RecoveryValue $recoveryRequest
       Assert-True ($null -eq $removed) 'recovery self-test value was not removed'
     } finally {
       Remove-Item -LiteralPath $script:RecoveryKeyOverride -Recurse -Force -ErrorAction SilentlyContinue

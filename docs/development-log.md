@@ -2232,3 +2232,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: Git diff 与 PR CI 失败日志绑定到上述 run/job；没有生成、签名、安装、上传、激活或发布任何新字节。
 - Remaining blockers: 必须将修复推送到同一 PR，让新的真实 Windows runner 通过 `check:win-package` 和 unsigned installer 构建；随后仍需同一冻结字节的 Windows 安装、P0/TQ、在线更新和失败回滚验收。
 - Next exact action: 提交并推送最小修复，等待 PR #56 全部 CI 收敛；若 Windows 仍失败，只处理新的精确失败 owner，生产链继续关闭。
+
+## 2026-08-25 · 2.0.13 Windows 更新恢复项幂等清理修复
+
+- Goal checkpoint: 继续关闭同一 PR 的真实 Windows Base 更新事务门禁；本条只修复恢复项缺失时的幂等查询，不把更新、回滚或发布标记完成。
+- Frozen baseline / current HEAD: 路径修复候选为 `35649817fa17ed45e620e94489dcb957a3592932`，PR `#56`，CI run `32844912068`；Base/Harness 身份保持不变。
+- Binding documents read: 复核根 `AGENTS.md`、目标/切片合同、上一条完整记录，以及 `windows-update-transaction.ps1` 的 Register/Remove/SelfTest 唯一恢复项链和对应源合同测试。
+- Inspected native seam: Windows runner 已证明 installer/transaction 等 `16 files / 253 tests` 全过，路径误拒绝已关闭；随后 PowerShell SelfTest 在成功删除专属恢复值后，用 `Get-ItemPropertyValue -ErrorAction SilentlyContinue` 查询不存在的值仍向顶层错误边界返回失败。
+- Experiment or why unnecessary: 新 run 的精确末尾错误为专属 `e-MateUpdateRecovery-<transactionId>` property 不存在，发生在注册、核对、删除之后；不是安装包构建、Profile、Harness、插件或权限问题。当前 Mac 没有 PowerShell，真实 runner 是该边界的最窄执行证据。
+- Decision and forbidden alternatives: 新增单一 `Get-RecoveryValue()`，通过原生 .NET `RegistryKey.GetValue(..., DoNotExpandEnvironmentNames)` 将“键/值不存在”确定性映射为 `$null`，并让生产 `Remove-Recovery` 与 SelfTest 共用；保留 transaction-id 命名、命令 owner 比对、删除和 `RegFlushKey`。禁止吞掉任意错误、跳过 SelfTest 或放宽恢复项所有权。
+- Changed scope: 仅修改 Windows 更新事务脚本、既有源合同断言并 append 本记录；未改 schema、Desktop UI、Profile、Harness、发布或生产状态。
+- Verification commands and results: 本机 Node `24.19.0` 下 `windows-update-transaction.spec.ts` 为 `1 file / 9 tests` 全过，`git diff --check` 通过；真实 PowerShell SelfTest 和 unsigned installer 必须由新 Windows CI 重跑确认，本条不预先宣称通过。
+- Immutable evidence / receipt: 失败事实绑定 CI run `32844912068` 的 Windows job `97793781939`；没有签名、安装、R2/Feed/desired-state 写入。
+- Remaining blockers: 新候选必须通过源合同和 Windows PowerShell SelfTest，再通过完整 CI；之后仍需冻结字节的真实 Windows 安装、在线更新、失败回滚和 P0/TQ 验收。
+- Next exact action: 运行本机最窄源合同与 diff 检查，提交推送后只等待新的真实 Windows owner 结果；生产链保持关闭。
