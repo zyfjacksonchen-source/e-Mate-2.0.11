@@ -28,6 +28,7 @@ const COPY_BUFFER_BYTES = 1024 * 1024
 const MAX_ATTACHMENT_BYTES = 512 * 1024 * 1024
 const MAX_SESSIONS = 100_000
 const MAX_MESSAGE_ROWS = 2_000_000
+const SOURCE_UNAVAILABLE_CODES = new Set(['EACCES', 'EBUSY', 'ENOENT', 'ENOTDIR', 'EPERM', 'ESTALE'])
 const PROTECTED_ATTACHMENT_PARTS = new Set([
   '.env', '.git', '.ssh', 'browser', 'browser_profile', 'cache', 'cookies', 'credentials', 'keychain', 'profiles', 'secrets',
 ])
@@ -61,10 +62,12 @@ export interface LegacyMigrationOptions {
   environment?: NodeJS.ProcessEnv
   platform?: NodeJS.Platform
   sources?: LegacySource[]
+  skipUnavailableSources?: boolean
 }
 
 export interface LegacyMigrationResult {
   source_found: boolean
+  unavailable_sources?: number
   imported_sessions: number
   reused_sessions: number
   receipt_path: string
@@ -105,6 +108,14 @@ function stableId(prefix: string, ...parts: unknown[]) {
 
 function isRecord(value: unknown): value is JsonRecord {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isUnavailableSource(error: unknown, source: LegacySource) {
+  if (!isRecord(error) || typeof error.code !== 'string' || !SOURCE_UNAVAILABLE_CODES.has(error.code)) return false
+  if (typeof error.path !== 'string' || error.path.includes('\u0000')) return false
+  const root = resolve(source.root)
+  const path = resolve(error.path)
+  return path === root || path.startsWith(`${root}${sep}`)
 }
 
 function canonicalJson(value: unknown): string {
@@ -848,7 +859,26 @@ export async function migrateLegacySessions(options: LegacyMigrationOptions): Pr
   }
   const scratch = mkdtempSync(join(tmpdir(), 'e-mate-legacy-sessions-'))
   try {
-    const snapshots = sources.map(source => snapshotSource({ ...source, root: resolve(source.root), database: resolve(source.database) }, scratch))
+    const snapshots: SourceSnapshot[] = []
+    let unavailable = 0
+    for (const source of sources) {
+      try {
+        snapshots.push(snapshotSource({ ...source, root: resolve(source.root), database: resolve(source.database) }, scratch))
+      } catch (error: unknown) {
+        if (!options.skipUnavailableSources || !isUnavailableSource(error, source)) throw error
+        unavailable += 1
+      }
+    }
+    if (snapshots.length === 0) {
+      return {
+        source_found: false,
+        unavailable_sources: unavailable,
+        imported_sessions: 0,
+        reused_sessions: 0,
+        receipt_path: receiptPath,
+        source_fingerprints: [],
+      }
+    }
     const generalWorkspace = join(dshHome, 'e-mate', 'general')
     const plans = mergePlans(snapshots.flatMap(snapshot => snapshot.source.family !== 'cowagent'
       ? planRuntime(snapshot, generalWorkspace)
@@ -898,6 +928,7 @@ export async function migrateLegacySessions(options: LegacyMigrationOptions): Pr
     })
     return {
       source_found: true,
+      ...(unavailable > 0 ? { unavailable_sources: unavailable } : {}),
       imported_sessions: absent.length,
       reused_sessions: reused,
       receipt_path: receiptPath,

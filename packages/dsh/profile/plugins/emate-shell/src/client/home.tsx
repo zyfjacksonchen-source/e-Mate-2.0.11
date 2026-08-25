@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useState, type ComponentType } from 'react'
 import { createPortal } from 'react-dom'
 import css from './home.module.css'
+import { newestSessionFirst } from './sidebar.tsx'
 import { formatTokenCount } from './token-format.ts'
 
 interface SessionRow {
@@ -305,7 +306,7 @@ export function HomeProjection({
       : total + usage.uncachedInputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
   }, 0)
   const recent = [...visible]
-    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .sort(newestSessionFirst)
     .slice(0, 2)
   const today = new Date()
   const dayCounts = Array.from({ length: 7 }, (_, offset) => {

@@ -15,7 +15,7 @@ interface Props {
   useWorkspaces: <T>(selector: (state: WorkspaceListState) => T) => T
   getSessions: () => SessionListState
   openSession: (id: string) => void
-  startHomeSession: () => void
+  startHomeSession: () => void | Promise<unknown>
 }
 
 type PendingRoute = string | null
@@ -44,12 +44,20 @@ export function SessionRouteProjection({
   const initialized = useRef(false)
   const pending = useRef<PendingRoute>(null)
 
+  const ensureHomeSession = () => {
+    try {
+      void Promise.resolve(startHomeSession()).catch(() => {})
+    } catch {
+      // Home remains usable while the native session authority reports the failure.
+    }
+  }
+
   const applyLocation = () => {
     const state = getSessions()
     if (state.phase !== 'ready' || !workspacesReady) return
     if (location.pathname === '/') {
       pending.current = null
-      startHomeSession()
+      ensureHomeSession()
       return
     }
     if (!location.pathname.startsWith('/chat')) return
@@ -57,7 +65,7 @@ export function SessionRouteProjection({
     if (id === null || !Object.prototype.hasOwnProperty.call(state.byId, id)) {
       history.replaceState(null, '', '/')
       pending.current = null
-      startHomeSession()
+      ensureHomeSession()
       return
     }
     pending.current = state.current === id ? null : id
@@ -67,7 +75,7 @@ export function SessionRouteProjection({
       } catch {
         history.replaceState(null, '', '/')
         pending.current = null
-        startHomeSession()
+        ensureHomeSession()
       }
     }
   }

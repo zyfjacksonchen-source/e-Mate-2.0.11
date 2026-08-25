@@ -11,6 +11,13 @@ interface SessionRow {
   updatedAt: number
 }
 
+export function newestSessionFirst(left: Pick<SessionRow, 'id' | 'updatedAt'>, right: Pick<SessionRow, 'id' | 'updatedAt'>): number {
+  const leftTime = Number.isFinite(left.updatedAt) ? left.updatedAt : Number.NEGATIVE_INFINITY
+  const rightTime = Number.isFinite(right.updatedAt) ? right.updatedAt : Number.NEGATIVE_INFINITY
+  if (leftTime !== rightTime) return rightTime > leftTime ? 1 : -1
+  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+}
+
 interface SessionState {
   ids: string[]
   byId: Record<string, SessionRow>
@@ -56,7 +63,7 @@ interface Props {
   EditIcon: Icon
   ArchiveIcon: Icon
   CloseIcon: Icon
-  startSession: (workspaceId?: string) => void
+  startSession: (workspaceId?: string) => void | Promise<unknown>
   openSchedules: () => void
   openSession: (id: string) => void
   pickWorkspace: () => Promise<string | null>
@@ -131,8 +138,9 @@ export function SidebarRoot({
   const projectWorkspaces = useMemo(() => workspaces.filter(workspace => !isGeneralWorkspace(workspace)), [workspaces])
   const visibleRows = useMemo(() => ids
     .map(id => byId[id])
-    .filter((row): row is SessionRow => row !== undefined && !archived.has(row.id) && (!row.blank || row.id === current)),
-  [archived, byId, current, ids])
+    .filter((row): row is SessionRow => row !== undefined && !archived.has(row.id))
+    .sort(newestSessionFirst),
+  [archived, byId, ids])
   const accounted = useMemo(() => new Set(projectWorkspaces.flatMap(workspace => workspace.sessionIds)), [projectWorkspaces])
   const generalRows = visibleRows.filter(row => !accounted.has(row.id))
   const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN')
@@ -249,11 +257,25 @@ export function SidebarRoot({
     setNotice(null)
     try {
       const workspaceId = await pickWorkspace()
-      if (workspaceId !== null) startSession(workspaceId)
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '项目文件夹暂时不可用。')
+      if (workspaceId === null) return
+      try {
+        await startSession(workspaceId)
+      } catch {
+        setNotice('项目文件夹已添加，但新任务暂时无法创建。请稍后从项目中重试。')
+      }
+    } catch {
+      setNotice('项目文件夹暂时无法添加，请重试。')
     } finally {
       setPicking(false)
+    }
+  }
+
+  const beginSession = async (workspaceId?: string) => {
+    setNotice(null)
+    try {
+      await (workspaceId === undefined ? startSession() : startSession(workspaceId))
+    } catch {
+      setNotice('新任务暂时无法创建，请重试。')
     }
   }
 
@@ -404,7 +426,7 @@ export function SidebarRoot({
           </button>
         </div>
 
-        <button className={css.newSession} type="button" aria-label="新建任务" aria-current={pathname === '/' ? 'page' : undefined} onClick={() => { startSession() }}>
+        <button className={css.newSession} type="button" aria-label="新建任务" aria-current={pathname === '/' ? 'page' : undefined} onClick={() => { void beginSession() }}>
           <NewChatIcon size={18} />
           {wide && <span>新任务</span>}
         </button>
@@ -455,18 +477,18 @@ export function SidebarRoot({
                     : <div className={css.projectList}>{projectWorkspaces.map(workspace => {
                       const rows = workspace.sessionIds.flatMap(id => {
                         const row = byId[id]
-                        return row === undefined || archived.has(id) || (row.blank && id !== current) ? [] : [row]
-                      })
+                        return row === undefined || archived.has(id) ? [] : [row]
+                      }).sort(newestSessionFirst)
                       const open = expanded[workspace.workspaceId] !== false
                       const shown = showAll[workspace.workspaceId] ? rows : rows.slice(0, COLLAPSED_SESSION_LIMIT)
                       return (
                         <div className={css.projectGroup} key={workspace.workspaceId}>
                           <div className={css.projectRow}>
-                            <button className={css.projectMain} type="button" title={`${workspace.title}\n${workspace.path}`} onClick={() => { rows[0] ? openSession(rows[0].id) : startSession(workspace.workspaceId) }}><FolderIcon size={16} /><span>{workspace.title}</span></button>
+                            <button className={css.projectMain} type="button" title={`${workspace.title}\n${workspace.path}`} onClick={() => { rows[0] ? openSession(rows[0].id) : void beginSession(workspace.workspaceId) }}><FolderIcon size={16} /><span>{workspace.title}</span></button>
                             <button className={css.iconButton} type="button" aria-label={open ? `折叠 ${workspace.title} 会话` : `展开 ${workspace.title} 会话`} onClick={() => { setExpanded(value => ({ ...value, [workspace.workspaceId]: !open })) }}><ChevronIcon className={!open ? css.rotated : undefined} size={14} /></button>
-                            <button className={css.iconButton} type="button" aria-label={`为 ${workspace.title} 创建新会话`} onClick={() => { startSession(workspace.workspaceId) }}><PlusIcon size={16} /></button>
+                            <button className={css.iconButton} type="button" aria-label={`为 ${workspace.title} 创建新会话`} onClick={() => { void beginSession(workspace.workspaceId) }}><PlusIcon size={16} /></button>
                           </div>
-                          {open && <div className={css.projectSessions}>{rows.length ? shown.map(sessionRow) : <button className={css.projectEmpty} type="button" onClick={() => { startSession(workspace.workspaceId) }}><PlusIcon size={16} /><span>新建项目会话</span></button>}{rows.length > COLLAPSED_SESSION_LIMIT && <button className={css.showMore} type="button" onClick={() => { setShowAll(value => ({ ...value, [workspace.workspaceId]: !value[workspace.workspaceId] })) }}>{showAll[workspace.workspaceId] ? '收起' : `查看更多（${rows.length - shown.length}）`}</button>}</div>}
+                          {open && <div className={css.projectSessions}>{rows.length ? shown.map(sessionRow) : <button className={css.projectEmpty} type="button" onClick={() => { void beginSession(workspace.workspaceId) }}><PlusIcon size={16} /><span>新建项目会话</span></button>}{rows.length > COLLAPSED_SESSION_LIMIT && <button className={css.showMore} type="button" onClick={() => { setShowAll(value => ({ ...value, [workspace.workspaceId]: !value[workspace.workspaceId] })) }}>{showAll[workspace.workspaceId] ? '收起' : `查看更多（${rows.length - shown.length}）`}</button>}</div>}
                         </div>
                       )
                     })}</div>)}

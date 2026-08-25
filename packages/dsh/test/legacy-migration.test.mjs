@@ -14,7 +14,7 @@ import { DomainFacility } from '../../../upstream/deepseek-harness/packages/stor
 import { JsonStorageBackend } from '../../../upstream/deepseek-harness/packages/storage/storage-json/lib/index.js'
 import WorkspaceRegistry from '../../../upstream/deepseek-harness/packages/workspace/workspace/lib/index.js'
 import { defaultLegacySources, migrateLegacySessions } from '../lib/legacy-migration.js'
-import { registerLegacyArtifactDownload } from '../profile/plugins/legacy-migration.js'
+import { registerLegacyArtifactDownload, runOptionalLegacyMigration } from '../profile/plugins/legacy-migration.js'
 import { apply as applyGeneralWorkspace } from '../profile/plugins/general-workspace.js'
 
 const temporary = []
@@ -162,6 +162,76 @@ test('default legacy discovery resolves candidate roots without Array.map callba
     environment: {},
     platform: 'darwin',
   }), [])
+})
+
+test('an optional legacy source disappearing after discovery is a bounded no-op', async () => {
+  const root = scratch()
+  const sourceRoot = join(root, 'cow')
+  const dshHome = join(root, 'dsh')
+  const source = join(sourceRoot, 'conversations.db')
+  const harness = await harnessPersistence(join(dshHome, 'sessions'))
+  try {
+    await harness.ctx.sessionPersistence.create({
+      version: 0,
+      id: 'current-session',
+      createdAt: 1_700_000_000_000,
+      cwd: join(root, 'current'),
+      delegationDepth: 0,
+    })
+    const before = await harness.ctx.sessionPersistence.list()
+    const result = await runOptionalLegacyMigration({
+      sessionPersistence: harness.ctx.sessionPersistence,
+      logger: { warn: assert.fail },
+    }, {
+      sessionPersistence: harness.ctx.sessionPersistence,
+      dshHome,
+      sources: [{ family: 'cowagent', root: sourceRoot, database: source }],
+    })
+
+    assert.equal(result.source_found, false)
+    assert.equal(result.unavailable_sources, 1)
+    assert.deepEqual(await harness.ctx.sessionPersistence.list(), before)
+  } finally {
+    await harness.dispose()
+  }
+})
+
+test('a corrupt optional legacy source fails closed without leaking its path or changing current sessions', async () => {
+  const root = scratch()
+  const sourceRoot = join(root, 'cow-private')
+  const dshHome = join(root, 'dsh')
+  mkdirSync(sourceRoot)
+  const source = join(sourceRoot, 'conversations.db')
+  writeFileSync(source, 'not sqlite')
+  const harness = await harnessPersistence(join(dshHome, 'sessions'))
+  const warnings = []
+  try {
+    await harness.ctx.sessionPersistence.create({
+      version: 0,
+      id: 'current-session',
+      createdAt: 1_700_000_000_000,
+      cwd: join(root, 'current'),
+      delegationDepth: 0,
+    })
+    const before = await harness.ctx.sessionPersistence.list()
+    await assert.rejects(runOptionalLegacyMigration({
+      sessionPersistence: harness.ctx.sessionPersistence,
+      logger: { warn(...args) { warnings.push(args) } },
+    }, {
+      sessionPersistence: harness.ctx.sessionPersistence,
+      dshHome,
+      sources: [{ family: 'cowagent', root: sourceRoot, database: source }],
+    }), error => error?.message === 'e-Mate legacy session migration rejected')
+
+    assert.deepEqual(warnings, [[
+      'e-Mate legacy session migration rejected; current sessions remain authoritative',
+      { event: 'migration-rejected' },
+    ]])
+    assert.equal(JSON.stringify(warnings).includes(sourceRoot), false)
+    assert.deepEqual(await harness.ctx.sessionPersistence.list(), before)
+  } finally {
+    await harness.dispose()
+  }
 })
 
 test('imports CowAgent sessions through the real Harness SessionPersistence and replays idempotently', async () => {
