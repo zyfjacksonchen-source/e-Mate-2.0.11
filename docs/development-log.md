@@ -2123,3 +2123,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 本条只产生 source-fixed Git 证据；没有生成、签名、上传、激活或发布任何安装包、Profile generation、manifest 或生产指针。
 - Remaining blockers: 主聚合必须由 Harness/Base identity owner 让 Harness 常量、Base contract 与 gitlink 精确一致并重跑 `check-target`；最终安装态仍需确认普通用户确认框、Agent Tool 终态与系统提示不泄露内部名称。
 - Next exact action: 主聚合复核并合入本提交；Harness/Base owner 关闭既有身份漂移后重跑版本门禁，之后才允许进入候选安装态验收，严禁本地构建进入生产链。
+
+## 2026-08-25 · 2.0.13 S27 TTFT v2 安装态证据导出闭环
+
+- Goal checkpoint: 本切片只补齐 S27 的安装态性能证据导出和 fail-closed 验证器，不把真实 Provider 性能、S27 或 2.0.13 标记完成。
+- Frozen baseline / current HEAD: 独立 worktree 从事故聚合 `b79cfbf4d7731cbe127f6e705f999c1dc574704a` 创建；当前分支仍携带旧 Harness 合同常量，最终聚合必须由身份 owner 锁到批准的 Harness/Base 后重跑本门禁。
+- Binding documents read: 完整读取根 `AGENTS.md`、`docs/target-contract.md`、`docs/performance-and-acceptance.md`、`docs/slices/2.0.13.md`、最新完整 development log，以及 pinned Harness `AGENTS.md` 与 pre-push skill。
+- Inspected native seam: DSH `session/event` 已提供 `user/message`、`request/header`、`assistant/chunk`、`tool/call`、`tool/result` 和终态事件；`agent/request` / `llm/stream` 是原生 waterfall；Session stats 与 e-Mate quota/audit ledger 已提供 usage、policy 和去重事实。原生 session telemetry 会携带正文、Tool arguments/results、请求头和 cwd，不能原样成为跨边界生产证据；renderer paint 与安装包身份必须由同一安装态外部验收探针关联。
+- Experiment or why unnecessary: 未增加常驻采集插件。验收态 assembler 直接连接已脱敏的 native Session、request waterfall、Provider receipt、renderer paint、installed runtime 和 enterprise receipt；fixture 的 Harness imports 改为只在 `--fixture` 时动态加载，生产验证路径不要求装载 Harness runtime。
+- Decision and forbidden alternatives: 继续使用原生事件、现有 audit/quota 与单一 receipt 路径，不增加第二 store/protocol、普通模型 Tool、正文采集或热路径 listener。所有 source artifact 使用闭合 schema、相对路径、逐样本 `pair_id` 对账和 run-scoped SHA-256 身份；只改哈希而不匹配语义不能通过。
+- Changed scope: 修改 `scripts/performance-parity.mjs`、其窄测试和性能合同；增加 acceptance-only `--assemble <manifest> --output <evidence>`，自动生成 raw samples/run receipt，并加强 native/provider/header/paint/install/enterprise artifact 的逐样本语义、安装字节和隐私字段校验。未修改 Desktop、DSH 产品运行时、Base/Profile、模型头、路由、凭据、发布脚本或线上状态。
+- Verification commands and results: Node 24.19.0 下 `node --test scripts/performance-parity.test.mjs` 为 `5/5`；覆盖 30 组成对样本、硬门禁、fixture 生产阻断、安装态六类 artifact 组装、逐样本关联、symlink source 拒绝，以及“修改语义并同步重算 artifact/run receipt 哈希仍被拒绝”。
+- Immutable evidence / receipt: 本条只有 source-fixed Git 证据；测试 artifact 全部位于系统临时目录并清理，没有生成、签名、上传、激活或发布生产性能回执与安装包。
+- Remaining blockers: 必须先把最终 Harness/Base/Profile/source identity 锁定并更新验证器 pin；仍需批准的真实验收账号、最终安装态 2.0.12 与 2.0.13、同机同网正式模型 30 组 AB/BA、外部 renderer paint 探针、Provider invocation/response 回执和安装回执。fixture 或本地 unpacked runtime 不能关闭这些阻断。
+- Next exact action: 主聚合复核并合入本 source-fixed commit，在最终 identity 上重跑窄测试；随后仅在隔离验收目录用同一安装态运行生成六类脱敏 artifact，执行 `--assemble` 后再以 `--input` 回读，只有 `gate_status=passed` 的同一 `performance_run_id` 才可供 Desktop/Profile 准入引用。
