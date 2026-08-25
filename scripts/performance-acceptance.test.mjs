@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { PERFORMANCE_MODEL_ROSTER, profilePublicationTreeSha256 } from './desktop-admission.mjs'
 import {
@@ -13,7 +12,6 @@ import {
   createAcceptancePlan,
   createPairSchedule,
   finalizeAcceptanceCapture,
-  loadCollectorProvenance,
   loadProfileAcceptanceAuthority,
 } from './performance-acceptance.mjs'
 
@@ -30,11 +28,6 @@ const ownerEnvironment = {
   GITHUB_WORKFLOW_REF: 'owner/repository/.github/workflows/desktop-performance.yml@refs/heads/main',
 }
 const profileTargets = ['darwin-arm64', 'darwin-x64', 'win32-x64']
-const collectorProvenance = {
-  source_sha256: 'a'.repeat(64),
-  installed_sha256: 'a'.repeat(64),
-}
-
 async function profileAuthorityFixture(root) {
   await mkdir(join(root, 'profile-publication'))
   const publicationRoot = await realpath(join(root, 'profile-publication'))
@@ -112,7 +105,13 @@ test('pins the closed four-model roster and both Harness identities in the probe
   const plan = createAcceptancePlan({
     sourceCommit,
     collectorSha256: 'a'.repeat(64),
-    collectorProvenance,
+    workflowOwner: {
+      repository: ownerEnvironment.GITHUB_REPOSITORY,
+      workflow_ref: ownerEnvironment.GITHUB_WORKFLOW_REF,
+      run_id: '123',
+      run_attempt: 1,
+      source_commit: sourceCommit,
+    },
     candidateArtifactsRoot: '/candidate',
     profileAuthority: { receipt: { targets: [] } },
     scratchRoot: '/scratch',
@@ -121,7 +120,8 @@ test('pins the closed four-model roster and both Harness identities in the probe
   assert.equal(plan.baseline_harness_commit, '2bc16230975f6cf02aa1b283b1f86de44007b059')
   assert.deepEqual(plan.models.map(model => model.performance_model), PERFORMANCE_MODEL_ROSTER)
   assert.equal(new Set(plan.models.map(model => model.performance_run_id)).size, 4)
-  assert.deepEqual(plan.collector_provenance, collectorProvenance)
+  assert.equal(plan.collector_provenance, undefined)
+  assert.equal(plan.workflow_owner.run_id, '123')
   assert.ok(plan.models.every(model => model.expected_files.length === 18 && model.schedule.length === 30))
   assert.equal(plan.profile_artifacts_root, undefined)
   assert.deepEqual(plan.profile_authority, { receipt: { targets: [] } })
@@ -132,32 +132,12 @@ test('wires the one-shot producer before the existing exact-85 consumer', async 
   const producer = workflow.indexOf('pnpm performance:acceptance')
   const consumer = workflow.indexOf('Copy only the exact source-partitioned production evidence')
   assert.ok(producer > 0 && consumer > producer)
-  assert.match(workflow, /EMATE_PERFORMANCE_COLLECTOR_SHA256/u)
-  assert.match(workflow, /--collector-source "\$COLLECTOR_SOURCE"/u)
+  assert.doesNotMatch(workflow, /EMATE_PERFORMANCE_COLLECTOR(?:_SHA256)?/u)
+  assert.doesNotMatch(workflow, /--collector(?:-source|-sha256)?/u)
   assert.match(workflow, /--handoff "\$EVIDENCE_ROOT\/\$GITHUB_SHA"/u)
   assert.match(workflow, /--performance-authorities-out "\$STAGE_DIRECTORY\/profile-performance-authorities\.json"/u)
   assert.match(workflow, /--profile-authorities "\$STAGE_DIRECTORY\/profile-performance-authorities\.json"/u)
   assert.doesNotMatch(workflow.slice(producer, consumer), /--fixture/u)
-})
-
-test('binds the runner-installed collector to the protected-main source bytes', async t => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'e-mate-performance-provenance-')))
-  t.after(() => rm(root, { recursive: true, force: true }))
-  const source = fileURLToPath(new URL('./performance-acceptance-probe.mjs', import.meta.url))
-  const installed = join(root, 'installed.mjs')
-  await copyFile(source, installed)
-  const digest = sha256(await readFile(source))
-  assert.deepEqual(await loadCollectorProvenance({
-    sourcePath: source,
-    installedPath: installed,
-    configuredSha256: digest,
-  }), { source_sha256: digest, installed_sha256: digest })
-  await writeFile(installed, '#!/usr/bin/env node\n// drift\n')
-  await assert.rejects(loadCollectorProvenance({
-    sourcePath: source,
-    installedPath: installed,
-    configuredSha256: digest,
-  }), /exact protected-main source bytes/u)
 })
 
 test('binds installed receipts to the frozen predecessor and exact Profile target', () => {
@@ -260,7 +240,11 @@ test('accepts only one manifest plus the exact 17 source artifacts', async t => 
   const plan = createAcceptancePlan({
     sourceCommit,
     collectorSha256: 'a'.repeat(64),
-    collectorProvenance,
+    workflowOwner: {
+      repository: 'zyfjacksonchen-source/e-Mate-2.0.11',
+      workflow_ref: 'zyfjacksonchen-source/e-Mate-2.0.11/.github/workflows/desktop-performance.yml@refs/heads/main',
+      run_id: '123', run_attempt: 1, source_commit: sourceCommit,
+    },
     candidateArtifactsRoot: '/candidate',
     profileAuthority: { receipt: { targets: [] } },
     scratchRoot: root,
@@ -290,7 +274,11 @@ test('assembles four fixture-shaped capture trees into the exact production hand
   const plan = createAcceptancePlan({
     sourceCommit,
     collectorSha256,
-    collectorProvenance,
+    workflowOwner: {
+      repository: 'zyfjacksonchen-source/e-Mate-2.0.11',
+      workflow_ref: 'zyfjacksonchen-source/e-Mate-2.0.11/.github/workflows/desktop-performance.yml@refs/heads/main',
+      run_id: '123', run_attempt: 1, source_commit: sourceCommit,
+    },
     candidateArtifactsRoot: candidateRoot,
     profileAuthority: profileFixture.authority,
     scratchRoot,
@@ -315,6 +303,7 @@ test('assembles four fixture-shaped capture trees into the exact production hand
         const attempts = row.scenario === 'read-only-tool' ? 2 : 1
         const requests = Array.from({ length: attempts }, (_, attempt) => ({
           ordinal: attempt + 1,
+          request_id_sha256: sha256(`request:${model.performance_run_id}:${pathName}:${row.pair_id}:${String(attempt + 1)}`),
           request_header_sha256: sha256(`header:${model.leaf_id}:${row.pair_id}:${String(attempt + 1)}`),
           request_header_bytes: 100 + attempt,
           request_tool_count: row.scenario === 'read-only-tool' && attempt === 0 ? 1 : 0,
@@ -322,6 +311,7 @@ test('assembles four fixture-shaped capture trees into the exact production hand
         }))
         const providerAttempts = Array.from({ length: attempts }, (_, attempt) => ({
           ordinal: attempt + 1,
+          request_id_sha256: requests[attempt].request_id_sha256,
           provider_invocation_id_sha256: sha256(`invocation:${model.leaf_id}:${pathName}:${row.pair_id}:${String(attempt + 1)}`),
           provider_response_id_sha256: sha256(`response:${model.leaf_id}:${pathName}:${row.pair_id}:${String(attempt + 1)}`),
           provider_usage_sha256: sha256(`usage:${model.leaf_id}:${pathName}:${row.pair_id}:${String(attempt + 1)}`),
@@ -332,6 +322,7 @@ test('assembles four fixture-shaped capture trees into the exact production hand
           pair_id: row.pair_id,
           scenario: row.scenario,
           arm_order: row.arm_order,
+          path_execution_ordinal: index + 1,
           session_id_sha256: sha256(`session:${model.leaf_id}:${pathName}:${row.pair_id}`),
           turn: 1,
           step: 1,
@@ -343,7 +334,7 @@ test('assembles four fixture-shaped capture trees into the exact production hand
           duplicate_job_execution_count: 0,
           duplicate_deliverable_count: 0,
           ...(row.scenario === 'read-only-tool'
-            ? { tool_call_to_start_ms: 1, tool_result_to_next_request_ms: 1 }
+            ? { tool_result_to_next_request_ms: 1 }
             : {}),
           requests,
           provider_attempts: providerAttempts,
@@ -352,7 +343,7 @@ test('assembles four fixture-shaped capture trees into the exact production hand
         }
       })
       const nativeKeys = [
-        'pair_id', 'scenario', 'arm_order', 'session_id_sha256', 'turn', 'step',
+        'pair_id', 'scenario', 'arm_order', 'path_execution_ordinal', 'session_id_sha256', 'turn', 'step',
         'user_message_to_first_text_delta_ms', 'output_tokens_per_second', 'queue_wait_ms',
         'duplicate_model_request_count', 'duplicate_tool_execution_count',
         'duplicate_job_execution_count', 'duplicate_deliverable_count',
@@ -363,7 +354,7 @@ test('assembles four fixture-shaped capture trees into the exact production hand
         kind: 'native-session-trace',
         source: 'dsh-session-events',
         samples: samples.map(sample => pick(sample, sample.scenario === 'read-only-tool'
-          ? [...nativeKeys, 'tool_call_to_start_ms', 'tool_result_to_next_request_ms']
+          ? [...nativeKeys, 'tool_result_to_next_request_ms']
           : nativeKeys)),
       })
       await json(join(directory, `${prefix}.provider.json`), {
@@ -430,9 +421,16 @@ test('assembles four fixture-shaped capture trees into the exact production hand
           kind: 'enterprise-runtime-receipt',
           source: 'e-mate-enterprise-state',
           receipt: {
+            endpoint: pathName === 'emate_online' ? 'available' : 'unavailable',
+            inference_gateway: 'available',
             lease_sha256: '9'.repeat(64),
             model_policy_sha256: 'b'.repeat(64),
             audit_outbox_sha256: pathName === 'emate_online' ? 'c'.repeat(64) : 'd'.repeat(64),
+            lease_refreshed_at: '2026-08-25T23:00:00.000Z',
+            policy_refreshed_at: '2026-08-25T23:00:00.000Z',
+            lease_expires_at: '2026-08-26T02:00:00.000Z',
+            policy_expires_at: '2026-08-26T02:00:00.000Z',
+            finished_at: '2026-08-26T01:00:00.000Z',
           },
         })
       }

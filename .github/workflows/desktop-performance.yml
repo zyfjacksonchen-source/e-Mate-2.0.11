@@ -315,22 +315,13 @@ jobs:
 
       - name: Collect the exact installed-state production cohorts once
         env:
-          COLLECTOR: ${{ vars.EMATE_PERFORMANCE_COLLECTOR }}
-          COLLECTOR_SHA256: ${{ vars.EMATE_PERFORMANCE_COLLECTOR_SHA256 }}
-          COLLECTOR_SOURCE: ${{ github.workspace }}/scripts/performance-acceptance-probe.mjs
           EVIDENCE_ROOT: ${{ vars.EMATE_PERFORMANCE_EVIDENCE_ROOT }}
           STAGE_DIRECTORY: ${{ steps.stage.outputs.directory }}
         run: |
           set -euo pipefail
-          test -n "$COLLECTOR"
-          test -n "$COLLECTOR_SHA256"
           test -n "$EVIDENCE_ROOT"
-          [[ "$COLLECTOR" = /* ]]
           [[ "$EVIDENCE_ROOT" = /* ]]
           pnpm performance:acceptance \
-            --collector "$COLLECTOR" \
-            --collector-source "$COLLECTOR_SOURCE" \
-            --collector-sha256 "$COLLECTOR_SHA256" \
             --scratch "$RUNNER_TEMP/e-mate-performance-source-$GITHUB_SHA" \
             --handoff "$EVIDENCE_ROOT/$GITHUB_SHA" \
             --source-commit "$GITHUB_SHA" \

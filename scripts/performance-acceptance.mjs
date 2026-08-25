@@ -7,6 +7,7 @@ import {
   copyFile, lstat, mkdir, readFile, readdir, realpath, writeFile,
 } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import {
   PERFORMANCE_MODEL_LEAF_IDS,
@@ -195,37 +196,11 @@ export function createAcceptancePlan(input) {
     harness_commit: CANDIDATE_HARNESS_COMMIT,
     baseline_harness_commit: BASELINE_HARNESS_COMMIT,
     collector_sha256: input.collectorSha256,
-    collector_provenance: input.collectorProvenance,
+    workflow_owner: input.workflowOwner,
     candidate_artifacts_root: input.candidateArtifactsRoot,
     profile_authority: input.profileAuthority,
     scratch_root: input.scratchRoot,
     models,
-  }
-}
-
-export async function loadCollectorProvenance(input) {
-  if (![input.sourcePath, input.installedPath].every(isAbsolute)
-    || !SHA256.test(input.configuredSha256)) {
-    throw new Error('collector provenance requires absolute paths and one SHA-256')
-  }
-  await Promise.all([
-    boundedRegularFile(input.sourcePath, 'protected-main collector source'),
-    boundedRegularFile(input.installedPath, 'runner-installed collector'),
-  ])
-  const [sourcePath, installedPath, sourceSha256, installedSha256] = await Promise.all([
-    realpath(input.sourcePath),
-    realpath(input.installedPath),
-    fileSha256(input.sourcePath),
-    fileSha256(input.installedPath),
-  ])
-  const protectedSource = await realpath(new URL('./performance-acceptance-probe.mjs', import.meta.url))
-  if (sourcePath !== protectedSource || sourcePath !== input.sourcePath || installedPath !== input.installedPath
-    || installedSha256 !== input.configuredSha256 || sourceSha256 !== installedSha256) {
-    throw new Error('runner-installed collector is not the exact protected-main source bytes')
-  }
-  return {
-    source_sha256: sourceSha256,
-    installed_sha256: installedSha256,
   }
 }
 
@@ -320,14 +295,18 @@ function assertManifestOwned(manifest, model, collectorSha256) {
 }
 
 function assertExactSchedule(evidence, model) {
-  const expected = model.schedule.map(({ pair_id, scenario, arm_order }) => ({ pair_id, scenario, arm_order }))
+  const expected = model.schedule.map(({ pair_id, scenario, arm_order }, index) => ({
+    pair_id, scenario, arm_order, path_execution_ordinal: index + 1,
+  }))
   const sessions = new Set()
   const invocations = new Set()
   const responses = new Set()
   for (const pathName of PERFORMANCE_PATH_NAMES) {
     const samples = evidence.paths[pathName].samples
     if (samples.length !== 30
-      || canonical(samples.map(({ pair_id, scenario, arm_order }) => ({ pair_id, scenario, arm_order }))) !== canonical(expected)) {
+      || canonical(samples.map(({ pair_id, scenario, arm_order, path_execution_ordinal }) => ({
+        pair_id, scenario, arm_order, path_execution_ordinal,
+      }))) !== canonical(expected)) {
       throw new Error(`${model.performance_model.route_id} ${pathName} did not execute the exact owned schedule`)
     }
     for (const sample of samples) {
@@ -456,9 +435,6 @@ export async function finalizeAcceptanceCapture(plan, handoffRoot) {
 async function main() {
   const { values } = parseArgs({
     options: {
-      collector: { type: 'string' },
-      'collector-source': { type: 'string' },
-      'collector-sha256': { type: 'string' },
       scratch: { type: 'string' },
       handoff: { type: 'string' },
       'source-commit': { type: 'string' },
@@ -470,24 +446,19 @@ async function main() {
     strict: true,
   })
   for (const key of [
-    'collector', 'collector-source', 'collector-sha256', 'scratch', 'handoff', 'source-commit', 'candidate-artifacts',
+    'scratch', 'handoff', 'source-commit', 'candidate-artifacts',
     'profile-artifacts', 'profile-authorities', 'profile-aggregate',
   ]) {
     if (values[key] === undefined) throw new Error(`--${key} is required`)
   }
-  if (!SOURCE_COMMIT.test(values['source-commit']) || !SHA256.test(values['collector-sha256'])) {
-    throw new Error('source commit or collector digest is invalid')
-  }
+  if (!SOURCE_COMMIT.test(values['source-commit'])) throw new Error('source commit is invalid')
   assertAcceptanceOwnerEnvironment(process.env, values['source-commit'])
-  if (![values.collector, values['collector-source'], values.scratch, values.handoff, values['candidate-artifacts'], values['profile-artifacts'],
+  if (![values.scratch, values.handoff, values['candidate-artifacts'], values['profile-artifacts'],
     values['profile-authorities'], values['profile-aggregate']].every(isAbsolute)) {
     throw new Error('collector and acceptance paths must be absolute')
   }
-  const collectorProvenance = await loadCollectorProvenance({
-    sourcePath: values['collector-source'],
-    installedPath: values.collector,
-    configuredSha256: values['collector-sha256'],
-  })
+  const collector = fileURLToPath(new URL('./performance-acceptance-probe.mjs', import.meta.url))
+  const collectorSha256 = await fileSha256(collector)
   const candidateArtifactsRoot = await canonicalDirectory(values['candidate-artifacts'], 'candidate artifacts')
   const profileAuthority = await loadProfileAcceptanceAuthority({
     publicationRoot: values['profile-artifacts'],
@@ -502,15 +473,21 @@ async function main() {
   }
   const plan = createAcceptancePlan({
     sourceCommit: values['source-commit'],
-    collectorSha256: values['collector-sha256'],
-    collectorProvenance,
+    collectorSha256,
+    workflowOwner: {
+      repository: process.env.GITHUB_REPOSITORY,
+      workflow_ref: process.env.GITHUB_WORKFLOW_REF,
+      run_id: process.env.GITHUB_RUN_ID,
+      run_attempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+      source_commit: values['source-commit'],
+    },
     candidateArtifactsRoot,
     profileAuthority,
     scratchRoot,
   })
   const planPath = join(scratchRoot, 'acceptance-plan.json')
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
-  await runCollector(values.collector, planPath)
+  await runCollector(collector, planPath)
   await finalizeAcceptanceCapture(plan, values.handoff)
 }
 

@@ -2512,3 +2512,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 只有源码 diff 和无密钥合同测试；没有 collector 安装副本、runner config、Session/Provider/paint source、真实 `performance_run_id`、安装态或 production evidence。
 - Remaining blockers: 需要在 pinned DSH 已有 Session authority 上提供最小 runner-private read-only exporter，返回当前唯一 Session 的 request/header、Tool start/result和provider关联ID，且必须有受审源码/runner scope；随后 probe 才能实现 exact 2.0.12→2.0.13 隔离启动、30×4真实采集、17源文件关闭与完整测试。当前生产性能门保持 OPEN。
 - Next exact action: 主代理复核并移植本提交；先决定由 DSH 原生 Session export seam 还是既有 runner-private joined exporter承担只读关联，禁止在 Desktop hot path新增 listener。接口落地后补全 probe runtime并在 protected runner安装同字节副本，再进行首次真实采集。
+
+## 2026-08-26 · 2.0.13 TTFT v2 installed Darwin probe orchestration
+
+- Goal checkpoint: 将外部 probe 的无条件失败骨架收敛为受保护 checkout 自执行、真实 macOS安装/CDP preflight与严格证据派生；不读取凭据、不运行模型、不dispatch、推送、合并或发布。
+- Frozen baseline / current HEAD: 独立分支 `codex/external-perf-probe-orchestration` 基于 probe skeleton `f937c5ad3425e9d20353efb55924865cd0fa9c2a`；2.0.12 source/Base/package/Profile与 candidate Harness/Desktop reference pin未改。
+- Binding documents read: 根 `AGENTS.md`、target/plugin/performance合同、S27–S35切片、上一条完整日志及 ponytail skill。
+- Inspected native seam: 安装态Host固定loopback、HTTP RPC与字符串 `/api/events.mux`；renderer已有稳定 composer/streaming data anchors；Provider Analytics仅暴露REQUEST/USAGE共同task/trace/model/provider键，不暴露native→provider直接外键；Tool body-start在冻结基线不可观测。
+- Experiment or why unnecessary: 复用HTTP/WS/CDP、Session event/header、完整Usage分页集合差、现有安装/Profile收据，不改DSH/Desktop。Darwin测试以注入的系统命令边界验证冻结receipt、候选DMG复制及清理；没有用fixture冒充production。
+- Decision and forbidden alternatives: collector固定为当前protected checkout并绑定workflow run/attempt；所有ID hash带run scope；provider/native attempt共享`request_id_sha256`；Tool仅保留`tool_result_to_next_request_ms`。runner broker固定为同owner canonical 0700 executable、无shell、bounded JSON stdin/stdout；禁止第二collector、body-start hook、时间窗join、正文扫描和普通header增量。
+- Changed scope: 修改performance probe/owner/workflow/verifier及既有测试与两份性能合同；未改产品runtime、Session/API、模型路由/header、Base/Profile、R2/Feed或用户数据。
+- Verification commands and results: bundled Node probe tests `9/9`，parity tests `10/10`；三个修改脚本`node --check`与`git diff --check`通过。acceptance owner测试因该独立worktree缺既有devDependency `fflate`未启动，明确不记为通过。
+- Immutable evidence / receipt: 只有源码diff与无密钥测试；没有真实runner config、安装态启动回执、Provider evidence、performance_run_id或production pass。
+- Remaining blockers: runner须创建精确owner-only config、冻结2.0.12 app/installed-runtime receipt与两个私有broker；真实4×30×3采集仍须在protected self-hosted runner执行并由17源文件/85文件handoff终验。任一字段缺失按样本失败关闭。
+- Next exact action: 提交本独立分支供主代理移植；合入protected main后注册ephemeral runner并只运行一次真实performance workflow，失败不得复用旧evidence。
