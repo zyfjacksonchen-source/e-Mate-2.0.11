@@ -2358,3 +2358,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有 CI 失败/历史对照与 source-fixed diff；run `32864830246` 因 Windows job 失败不能作为发布门或候选依据，即使其 macOS job随后成功也只可作诊断证据。
 - Remaining blockers: 提交并推送后必须重新通过 exact-HEAD 全量 PR CI，再生成全新正式候选；不得复用当前失败 run 的任何制品。
 - Next exact action: 在主代理复核最小 diff 后提交、推送并等待新 CI；生产发布链继续关闭。
+
+## 2026-08-26 · 2.0.13 正式候选跨 Base Profile 验签与 Windows 冷物化门禁修正
+
+- Goal checkpoint: 受保护 `main` 首轮正式 Desktop/Profile 候选暴露两个发布准备阻断；本条只修复共同验签迁移边界和一条 Windows 冷磁盘测试时限，不把候选、安装态或发布标记完成。
+- Frozen baseline / current HEAD: 失败候选绑定 `main@de09046e24d50e4d9c41cb67b75d183483b80da0`、accepted CI run `32873388124`、Desktop run `32876823255` 和 Profile run `32876823223`；Base/Harness 仍为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Binding documents read: 重新读取唯一 Goal、完整 `AGENTS.md`、`target-contract.md`、2.0.13 最终范围合同、最新日志、`profile-release.ts` 全部调用方、线上三目标快照和两条失败 job 日志。
+- Inspected native seam: Profile 发布准备必须先用 v7 信任根验签线上 2.0.12 desired state，再由 `selectProfileRelease()` 判定 `base-required`；但新增 `schedule_protocol_floor` 后的严格解析器在验签前拒绝了缺少该字段的历史已签名 payload，使合法迁移入口不可达。Windows 安装器则在同一源码树的四次物理 Profile 安装/修复合同上由 PR runner 的 `3.618s` 漂移到正式 runner 的 `9.031s`，测试实际继续完成而默认 `5s` 已先判失败；其余 `252/253` 通过。
+- Experiment or why unnecessary: 用仓库内 Cloudflare 插件捕获的真实三目标 2.0.12 快照逐一回放；修复后三者均完整 Ed25519 验签并只归类为内部 floor `0` / `base-required`。当前格式中显式 floor `0`、签名漂移、额外字段和非法 payload 仍失败关闭。Windows 对照使用 exact-tree PR job `97866495210` 与正式 job `97899403846`，排除本轮生产物化逻辑变化或死锁。
+- Decision and forbidden alternatives: 签名始终覆盖原始 payload；只对精确旧键集合做验签后归一化，缺失 floor 永远不能匹配 floor-aware Base。当前格式继续要求正整数。Windows 仅给该四次物理安装集成合同局部 `15_000ms`，不放宽全局、不删除修复断言、不隐藏失败、不增加第二发布器或绕过 Profile 签名/父代检查。
+- Changed scope: 修改 `desktop/e-mate-desktop/src/profile-release.ts`、既有 `profile-release.spec.ts`、`e-mate-profile-win.spec.ts` 并 append 本记录；未改 Profile payload 生成格式、Base/Harness、组件 roster、R2、Feed、desired state、生产安装态或用户数据。
+- Verification commands and results: 真实三目标快照均输出 `verified=true`、`floor=0`、`selection=base-required`；`profile-release.spec.ts` 为 `7/7`；生产与测试 TypeScript 检查通过；`publish-profile-r2.test.mjs` / `profile-release.test.mjs` 合并为 `4 passed / 1 toolchain-absent skipped / 0 failed`；新 exact-HEAD CI 待提交后执行；`git diff --check` 通过。
+- Immutable evidence / receipt: 两个失败 run 永久不能作为候选或发布证据；当前只有 source-fixed diff 和只读日志/快照证据，没有上传、激活或生产写入。
+- Remaining blockers: 提交后必须通过新受保护 PR CI，再从新的 protected-main SHA 生成 Desktop/Profile 候选、性能与 admission；同一字节的 macOS/Windows 安装、P0/TQ、更新、回滚和公开回读继续 OPEN。
+- Next exact action: 跑定向发布合同，提交并推送最小修复，走受保护 PR 合并与全新 exact-main 候选；所有旧候选作废，生产链继续关闭。

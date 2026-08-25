@@ -18,6 +18,7 @@ afterEach(() => {
 })
 
 describe.runIf(process.platform === 'win32')('Windows managed Profile materialization', () => {
+  // Four physical Profile installs can exceed Vitest's unit-test default on a cold Windows runner.
   it('uses physical directories and repairs a missing declared main without scanning unrelated nested files', () => {
     const home = mkdtempSync(join(tmpdir(), 'e-mate-desktop-profile-win-'))
     roots.push(home)
@@ -47,5 +48,5 @@ describe.runIf(process.platform === 'win32')('Windows managed Profile materializ
     writeFileSync(topLevelExtra, 'managed roots are exact sets')
     installEmateDesktopProfile(home)
     expect(existsSync(topLevelExtra)).toBe(false)
-  })
+  }, 15_000)
 })

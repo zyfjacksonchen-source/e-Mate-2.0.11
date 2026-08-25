@@ -119,7 +119,7 @@ export function canonicalProfileJson(value: unknown): string {
   return canonical(value)
 }
 
-function signatureBytes(payload: ProfileReleasePayload): Buffer {
+function signatureBytes(payload: unknown): Buffer {
   return Buffer.concat([SIGNATURE_CONTEXT, Buffer.from(canonicalProfileJson(payload), 'utf8')])
 }
 
@@ -324,15 +324,19 @@ function parseComponent(value: unknown, releaseTarget: ProfileReleaseTarget): Pr
 }
 
 function parsePayload(value: unknown): ProfileReleasePayload | undefined {
-  if (!record(value) || !exactKeys(value, [
+  if (!record(value)) return
+  const keys = [
     'schema_version', 'product', 'release_version', 'sequence', 'source_commit', 'schedule_protocol_floor',
     'target', 'base_contracts', 'harness_contract', 'components',
-  ])) return
+  ]
+  const legacy = exactKeys(value, keys.filter(key => key !== 'schedule_protocol_floor'))
+  if (!legacy && !exactKeys(value, keys)) return
+  const scheduleProtocolFloor = legacy ? 0 : value.schedule_protocol_floor
   if (value.schema_version !== 1 || value.product !== 'e-Mate'
     || typeof value.release_version !== 'string' || !STABLE_VERSION.test(value.release_version)
     || !Number.isSafeInteger(value.sequence) || (value.sequence as number) <= 0
     || typeof value.source_commit !== 'string' || !SHA40.test(value.source_commit)
-    || !Number.isSafeInteger(value.schedule_protocol_floor) || (value.schedule_protocol_floor as number) <= 0
+    || !Number.isSafeInteger(scheduleProtocolFloor) || (!legacy && (scheduleProtocolFloor as number) <= 0)
     || !sortedUniqueStrings(value.base_contracts)
     || !record(value.harness_contract)
     || !exactKeys(value.harness_contract, ['version', 'commit'])
@@ -351,7 +355,8 @@ function parsePayload(value: unknown): ProfileReleasePayload | undefined {
     release_version: value.release_version,
     sequence: value.sequence as number,
     source_commit: value.source_commit,
-    schedule_protocol_floor: value.schedule_protocol_floor as number,
+    // A verified pre-floor release is migration evidence only and can never match a floor-aware Base.
+    schedule_protocol_floor: scheduleProtocolFloor as number,
     target,
     base_contracts: [...value.base_contracts],
     harness_contract: {
@@ -392,7 +397,7 @@ export function verifyProfileRelease(value: unknown, base: ProfileBaseContract):
   try {
     valid = verify(
       null,
-      signatureBytes(payload),
+      signatureBytes(value.payload),
       createPublicKey({ key: publicBytes, format: 'der', type: 'spki' }),
       signature,
     )
