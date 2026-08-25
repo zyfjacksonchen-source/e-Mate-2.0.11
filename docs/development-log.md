@@ -2498,3 +2498,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有源码diff和无密钥合同fixture；未读取凭据、调用模型、dispatch workflow、安装候选、签名、上传或改生产状态。
 - Remaining blockers: 受保护 self-hosted runner仍必须提供已审查且SHA锁定的外部 probe，从真实 installed 2.0.12/candidate和 enterprise UsageStore取得 renderer/provider/lease authority；本修订只保证错误Profile无法进入aggregate，不能替代真实采集。
 - Next exact action: 主代理复核追加提交并合入 protected main；只允许合并后workflow重新派生Profile receipt并启动一次真实采集，旧 owner输出继续作废。
+
+## 2026-08-26 · 2.0.13 TTFT v2 原生 Tool handoff 权威收敛
+
+- Goal checkpoint: 外部生产 probe 开始实现后，独立只读审查发现 schema 要求的 Tool call→body start 在冻结 2.0.12 没有同口径生产 authority；本条删除不可实施的单边指标，只保留用户原始工具衔接门禁所需的 Tool result→第二次 request，不采集模型、不构建或发布。
+- Frozen baseline / current HEAD: 修订基于 acceptance owner `cf678e019708bbb6706fc236bebdde7673265410`；2.0.12 Harness 仍为 `2bc16230975f6cf02aa1b283b1f86de44007b059`，候选/Base Harness 仍为 `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Binding documents read: 完整复核根 `AGENTS.md`、`target-contract.md`、`performance-and-acceptance.md`、`slices/2.0.13.md`、上一条完整日志与 ponytail skill；未从聊天记忆或 fixture 推断生产 seam。
+- Inspected native seam: 两版 DSH 都只把 `tool/call`、`tool/result` 和后续 request/header/Provider attempt 持久化；真实 body start 只在 ToolRuntime 私有 `dispatchToolBody()` 内。创造模式只有模型 Tool 入口，会改变被测工具头和 Session；给基线临时安装新 Profile 又会改变冻结 generation/composition；候选单边 listener 或新 loopback RPC 均不可比较。
+- Experiment or why unnecessary: 未尝试污染真实安装态。现有 fixture 内可直接读取 Tool body 的时间不具备安装态 authority；审查同时确认 `tool/result.time` 与同一 Session 后续 request 顺序是两臂共有的原生证据，因此不需要第二事件、listener、RPC、Profile component 或跨进程时钟相减。
+- Decision and forbidden alternatives: `read-only-tool` 的生产硬字段只保留 `tool_result_to_next_request_ms`，继续按 p95 `+25ms` 且 `+5%` 双门验证；普通场景仍禁止用 0 占位。禁止合成 Tool start、从 Tool 参数/正文推断、候选单边埋点、模型驱动创造模式预热或放宽 Provider 两次 attempt/重复执行门禁。
+- Changed scope: 最小修改唯一 assembler/verifier、既有两份窄测试和两份 TTFT 合同；删除 fixture 的无用 Tool-start Map。未改 Desktop/Profile/Harness、普通聊天 header/路由、Provider、Session/runtime 热路径、workflow、R2/Feed/desired state 或用户数据。
+- Verification commands and results: bundled Node `--check scripts/performance-parity.mjs` 通过；`pnpm run test:performance:parity` 为 `18/18`；`node --test scripts/desktop-admission.test.mjs` 为 `8/8`；`git diff --check` 通过。
+- Immutable evidence / receipt: 当前只有源码 diff、可运行合同测试与两版 native seam 审查结论；没有真实 Provider、安装态、`performance_run_id`、签名、上传或生产写入。
+- Remaining blockers: hash-pinned 外部 probe 仍须完成其余 17 个原生/Renderer/Provider/installed/enterprise authority source 的真实采集；四模型、候选安装、更新/回滚与公开发布全部保持 OPEN。
+- Next exact action: 提交本合同修订并与外部 probe runtime 合并到 protected-main 候选；通过 exact attempt-1 CI 后才允许真实采集，任何缺失 authority 继续 fail closed。

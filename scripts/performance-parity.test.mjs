@@ -43,7 +43,6 @@ const sample = (index, overrides = {}, candidate = false) => {
     first_chunk_to_paint_ms: 10,
     output_tokens_per_second: 100,
     ...(scenario === 'read-only-tool' ? {
-      tool_call_to_start_ms: 20,
       tool_result_to_next_request_ms: 20,
     } : {}),
     queue_wait_ms: 0,
@@ -217,8 +216,8 @@ test('evaluates each scenario independently instead of pooling distributions', (
 test('keeps Tool timing absent outside read-only-tool and rejects numeric placeholders', () => {
   assert.equal(evaluateEvidence(evidence()).gate_status, 'fixture-passed-production-blocked')
   const placeholder = evidence()
-  placeholder.paths.emate_online.samples[0].tool_call_to_start_ms = 0
-  placeholder.paths.emate_enterprise_unavailable_valid_cache.samples[0].tool_call_to_start_ms = 0
+  placeholder.paths.emate_online.samples[0].tool_result_to_next_request_ms = 0
+  placeholder.paths.emate_enterprise_unavailable_valid_cache.samples[0].tool_result_to_next_request_ms = 0
   assert.equal(evaluateEvidence(placeholder).gate_status, 'failed')
 })
 
@@ -305,7 +304,7 @@ test('fails closed on missing samples, duplicate events, latency, throughput, or
   const slowTool = evidence()
   for (const path of [slowTool.paths.emate_online, slowTool.paths.emate_enterprise_unavailable_valid_cache]) {
     for (const item of path.samples.filter(candidate => candidate.scenario === 'read-only-tool')) {
-      item.tool_call_to_start_ms = 22
+      item.tool_result_to_next_request_ms = 22
     }
   }
   assert.equal(evaluateEvidence(slowTool).gate_status, 'failed')
@@ -321,7 +320,7 @@ const nativeFields = [
   'duplicate_model_request_count', 'duplicate_tool_execution_count',
   'duplicate_job_execution_count', 'duplicate_deliverable_count',
 ]
-const nativeToolFields = ['tool_call_to_start_ms', 'tool_result_to_next_request_ms']
+const nativeToolFields = ['tool_result_to_next_request_ms']
 const requestFields = ['pair_id', 'requests']
 const paintFields = ['pair_id', 'submit_to_first_visible_text_ms', 'first_chunk_to_paint_ms']
 const providerFields = ['pair_id', 'provider_attempts']

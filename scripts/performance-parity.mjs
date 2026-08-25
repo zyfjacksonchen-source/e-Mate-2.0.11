@@ -30,7 +30,7 @@ const NATIVE_SAMPLE_FIELDS = [
   'duplicate_model_request_count', 'duplicate_tool_execution_count',
   'duplicate_job_execution_count', 'duplicate_deliverable_count',
 ]
-const NATIVE_TOOL_SAMPLE_FIELDS = ['tool_call_to_start_ms', 'tool_result_to_next_request_ms']
+const NATIVE_TOOL_SAMPLE_FIELDS = ['tool_result_to_next_request_ms']
 const REQUEST_SAMPLE_FIELDS = ['pair_id', 'requests']
 const REQUEST_ATTEMPT_FIELDS = ['ordinal', 'request_header_sha256', 'request_header_bytes', 'request_tool_count']
 const REQUEST_CANDIDATE_ATTEMPT_FIELDS = [...REQUEST_ATTEMPT_FIELDS, 'diagnostic']
@@ -191,8 +191,7 @@ function validSamples(path, pathName) {
       || !Number.isFinite(sample.first_chunk_to_paint_ms) || sample.first_chunk_to_paint_ms < 0
       || !Number.isFinite(sample.output_tokens_per_second) || sample.output_tokens_per_second <= 0
       || !Number.isFinite(sample.queue_wait_ms) || sample.queue_wait_ms < 0
-      || (sample.scenario === 'read-only-tool'
-        && (!nonNegative(sample.tool_call_to_start_ms) || !nonNegative(sample.tool_result_to_next_request_ms)))
+      || (sample.scenario === 'read-only-tool' && !nonNegative(sample.tool_result_to_next_request_ms))
       || !validRequestAttempts(sample, pathName)
       || !validProviderAttempts(sample, invocationIds, responseIds)
       || !isSha256(sample.session_id_sha256)
@@ -915,13 +914,11 @@ async function collectPath(name, samples, enterpriseState) {
   await ctx.plugin(AgentLoop, { agents: [] })
   const adapter = new FixtureAdapter()
   ctx.llm.registerAdapter(['parity-fixture'], adapter)
-  const toolStarts = new Map()
   ctx.tools.register(defineContentToolFixture({
     name: 'parity_probe',
     description: 'Measure the target Tool lifecycle.',
     parameters: { sampleId: { type: 'string' } },
     async execute({ sampleId }) {
-      toolStarts.set(sampleId, Date.now())
       return [{ type: 'text', text: `observed ${sampleId}` }]
     },
   }))
@@ -968,11 +965,10 @@ async function collectPath(name, samples, enterpriseState) {
       ? Math.max(0, events.filter(event => event.type === 'tool/call').length - 1)
         + Math.max(0, events.filter(event => event.type === 'tool/result').length - 1)
       : 0
-    const toolStart = toolStarts.get(sessionId)
     const nextRequest = adapter.requestStarts.get(`${sessionId}:${String((scenario === 'history-20' ? 20 : 0) + 2)}`)
     if (measuredRequests !== expectedRequests
       || (scenario === 'read-only-tool' && (call?.type !== 'tool/call' || result?.type !== 'tool/result'
-        || toolStart === undefined || nextRequest === undefined))
+        || nextRequest === undefined))
       || (scenario !== 'read-only-tool' && (call !== undefined || result !== undefined))) {
       throw new Error(`${sessionId} did not produce the expected ${scenario} request shape`)
     }
@@ -988,7 +984,6 @@ async function collectPath(name, samples, enterpriseState) {
       first_chunk_to_paint_ms: 0,
       output_tokens_per_second: outputTokens / ((deltas.at(-1).time - deltas[0].time) / 1_000),
       ...(scenario === 'read-only-tool' ? {
-        tool_call_to_start_ms: toolStart - call.time,
         tool_result_to_next_request_ms: nextRequest - result.time,
       } : {}),
       queue_wait_ms: 0,

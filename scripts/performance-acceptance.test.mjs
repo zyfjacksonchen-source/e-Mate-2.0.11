@@ -312,7 +312,7 @@ test('assembles four fixture-shaped capture trees into the exact production hand
           duplicate_job_execution_count: 0,
           duplicate_deliverable_count: 0,
           ...(row.scenario === 'read-only-tool'
-            ? { tool_call_to_start_ms: 1, tool_result_to_next_request_ms: 1 }
+            ? { tool_result_to_next_request_ms: 1 }
             : {}),
           requests,
           provider_attempts: providerAttempts,
@@ -332,7 +332,7 @@ test('assembles four fixture-shaped capture trees into the exact production hand
         kind: 'native-session-trace',
         source: 'dsh-session-events',
         samples: samples.map(sample => pick(sample, sample.scenario === 'read-only-tool'
-          ? [...nativeKeys, 'tool_call_to_start_ms', 'tool_result_to_next_request_ms']
+          ? [...nativeKeys, 'tool_result_to_next_request_ms']
           : nativeKeys)),
       })
       await json(join(directory, `${prefix}.provider.json`), {

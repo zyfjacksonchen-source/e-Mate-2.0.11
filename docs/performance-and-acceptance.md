@@ -31,7 +31,7 @@ Each raw sample records monotonic timestamps or bounded durations for the instal
 - first visible chunk arrival to browser paint;
 - ordered Provider invocation/response identities, timestamp/usage and request-header SHA-256/bytes/Tool count for every model request in the sample;
 - output-token throughput excluding TTFT, duplicate executions and independent queue wait;
-- only for `read-only-tool`, Tool-call persistence to real Tool start and Tool-result persistence to the second request.
+- only for `read-only-tool`, Tool-result persistence to the second request. The frozen 2.0.12 Session has no externally observable Tool-body-start boundary, so production evidence must not add a candidate-only listener, RPC, or synthetic timestamp for it.
 
 The 2.0.13 request-side phases `submit→Host`, `turn→request header`, policy, quota reservation, request preparation, adapter dispatch→first chunk and their derived `local_pre_provider` value are candidate-only diagnostics because the exact installed 2.0.12 predecessor does not expose the same boundaries. They may be retained in the candidate request artifact when observed, but are never zero-filled, never required from the baseline and never used as a hard parity comparison. A missing diagnostic cannot make a hard cohort pass or fail; a present diagnostic must still satisfy the closed non-negative schema.
 
