@@ -8,12 +8,7 @@ import {
 } from '@e-mate/observability-policy-contract';
 import { parseRuntimeRegistryHeartbeat, type RuntimeRegistryHeartbeat } from '@e-mate/runtime-registry-contract';
 import { parseSessionSummarySearchResult, parseSessionSummaryWrite } from '@e-mate/session-index-contract';
-import {
-  parseMonitoringPeriod,
-  parseTaskEventInput,
-  type MonitoringPeriod,
-  type TaskEventInput,
-} from '@e-mate/monitoring-contract';
+import { parseMonitoringPeriod, type MonitoringPeriod } from '@e-mate/monitoring-contract';
 import {
   parseAdminApiKeyCreate,
   parseAdminConsentQuery,
@@ -32,7 +27,7 @@ import type { ObservabilityPolicyMutationResult, ObservabilityPolicyStore } from
 import type { SessionSummaryStore } from './session-index.ts';
 import type { PlatformMonitoringReader } from './prometheus-monitoring.ts';
 import type { UsageAnalyticsQuery, UsageAnalyticsReader } from './usage-analytics.ts';
-import type { TaskEventQuery, TaskEventStore, TaskEventWriteResult } from './task-events.ts';
+import type { TaskEventQuery, TaskEventStore } from './task-events.ts';
 
 const maxBodyBytes = 64 * 1024;
 const statusRoles = new Set(['SUPER_ADMIN', 'TENANT_ADMIN', 'AUDIT_ADMIN']);
@@ -40,7 +35,6 @@ const policyWriteRoles = new Set(['SUPER_ADMIN', 'TENANT_ADMIN']);
 const platformMonitoringRoles = new Set(['SUPER_ADMIN']);
 const usageRoles = new Set(['SUPER_ADMIN', 'TENANT_ADMIN', 'AUDIT_ADMIN']);
 const managementRoles = new Set(['SUPER_ADMIN', 'TENANT_ADMIN']);
-const taskEventWriteScope = 'task-events:write';
 
 export type AuthenticateBearer = (bearer: string) => Promise<RuntimeRegistryPrincipal | null>;
 
@@ -191,12 +185,6 @@ function adminConsentQuery(url: URL) {
 
 function requireRole(identity: RuntimeRegistryPrincipal, roles: ReadonlySet<string>): void {
   if (!identity.roles.some((role) => roles.has(role))) {
-    throw new HttpError(403, 'ACCESS_DENIED', 'Access denied');
-  }
-}
-
-function requireScope(identity: RuntimeRegistryPrincipal, scope: string): void {
-  if (!identity.scopes?.includes(scope)) {
     throw new HttpError(403, 'ACCESS_DENIED', 'Access denied');
   }
 }
@@ -427,19 +415,6 @@ function usageEventPage(url: URL): { cursor: string | null; limit: number } {
     throw new HttpError(400, 'INVALID_USAGE_QUERY', 'Invalid usage query');
   }
   return { cursor, limit };
-}
-
-export function createManagementAuthenticator(
-  authenticate: AuthenticateBearer,
-  adminManagement: AdminManagementStore
-): AuthenticateBearer {
-  return async (bearer) => {
-    if (bearer.startsWith('emate_twe_')) {
-      const taskEventPrincipal = await adminManagement.authenticateTaskEventBearer(bearer);
-      if (taskEventPrincipal) return taskEventPrincipal;
-    }
-    return authenticate(bearer);
-  };
 }
 
 export function createAnalyticsHandler({
@@ -795,39 +770,6 @@ export function createAnalyticsHandler({
         } catch {
           throw new HttpError(503, 'MONITORING_UNAVAILABLE', 'Platform monitoring temporarily unavailable');
         }
-        return;
-      }
-      if (url.pathname === '/v1/tasks/events') {
-        rejectQuery(url);
-        if (request.method !== 'POST') {
-          methodNotAllowed(response, 'POST');
-          return;
-        }
-        const identity = await principal(request, authenticate);
-        requireScope(identity, taskEventWriteScope);
-        if (!taskEvents) {
-          throw new HttpError(503, 'TASK_EVENTS_UNAVAILABLE', 'Task events temporarily unavailable');
-        }
-        let event: TaskEventInput;
-        try {
-          event = parseTaskEventInput(await readJson(request));
-        } catch (error) {
-          if (error instanceof HttpError) throw error;
-          throw new HttpError(400, 'INVALID_TASK_EVENT', 'Invalid task event');
-        }
-        let result: TaskEventWriteResult;
-        try {
-          result = await taskEvents.append(identity, event);
-        } catch {
-          throw new HttpError(503, 'TASK_EVENTS_UNAVAILABLE', 'Task events temporarily unavailable');
-        }
-        if (result === 'CONFLICT') {
-          throw new HttpError(409, 'TASK_EVENT_CONFLICT', 'Task event conflicts with stored facts');
-        }
-        if (result === 'NOT_RECEIVED') {
-          throw new HttpError(409, 'TASK_NOT_RECEIVED', 'Task has not been received');
-        }
-        json(response, result === 'ACCEPTED' ? 202 : 200, { status: result });
         return;
       }
       if (url.pathname === '/v1/tasks/summary') {

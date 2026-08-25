@@ -3,6 +3,7 @@ import { createCipheriv, createHash, generateKeyPairSync, verify } from 'node:cr
 import { once } from 'node:events';
 import test from 'node:test';
 import { InMemoryConsentStore } from '@e-mate/consent-store';
+import { TASK_SCENARIOS } from '@e-mate/monitoring-contract';
 import {
   createModelGatewayServer,
   InMemoryUsageStore,
@@ -114,20 +115,23 @@ test('uses default route policy only when a tenant has no explicit route row', a
   assert.equal(await policy.isEnabled('tenant-a', 'gpt-5.4'), false);
 });
 
-test('checks long-lived client credentials on every request and exposes only currently enabled routes', async () => {
+test('accepts only active model-only credentials and rejects retired combined credentials', async () => {
   const credential = `emate_twe_${'c'.repeat(43)}`;
-  let active = true;
+  let credentialState: 'model-only' | 'combined' | 'revoked' = 'model-only';
   let queryCount = 0;
   const pool = {
     query: async (statement: string, parameters: unknown[]) => {
       queryCount += 1;
-      assert.equal(statement.includes("'models:invoke' = ANY(key.scopes)"), true);
+      assert.equal(statement.includes("key.scopes = ARRAY['models:invoke']::text[]"), true);
       assert.equal(statement.includes("key.principal_type = 'USER'"), true);
       assert.equal(statement.includes("app_user.status = 'ACTIVE'"), true);
       assert.equal(statement.includes('key.revoked_at IS NULL'), true);
       assert.equal(parameters.includes(credential), false);
       return {
-        rows: active ? [{ tenant_id: 'tenant-a', user_id: 'user-a', model_ids: ['gpt-5.6-luna'] }] : [],
+        rows:
+          credentialState === 'model-only'
+            ? [{ tenant_id: 'tenant-a', user_id: 'user-a', model_ids: ['gpt-5.6-luna'] }]
+            : [],
       };
     },
   };
@@ -137,10 +141,12 @@ test('checks long-lived client credentials on every request and exposes only cur
     userId: 'user-a',
     modelIds: ['gpt-5.6-luna'],
   });
-  active = false;
+  credentialState = 'combined';
+  assert.equal(await policy.authenticateClientCredential(credential, ['gpt-5.6-luna', 'gpt-5.6-sol']), null);
+  credentialState = 'revoked';
   assert.equal(await policy.authenticateClientCredential(credential, ['gpt-5.6-luna', 'gpt-5.6-sol']), null);
   assert.equal(await policy.authenticateClientCredential('not-a-client-credential', ['gpt-5.6-luna']), null);
-  assert.equal(queryCount, 2);
+  assert.equal(queryCount, 3);
 });
 
 test('production authentication rejects a signed session immediately after its session or user is revoked', async () => {
@@ -580,6 +586,30 @@ test('ingests only metadata task audit events atomically and idempotently', asyn
       Array.from({ length: 3 }, () => ['accepted_at', 'event_id', 'payload_sha256', 'receipt_id'])
     );
     assert.deepEqual(await (await upload([received, tool, completed])).json(), receipts);
+
+    const classified = TASK_SCENARIOS.filter((scenario) => scenario !== 'GENERAL').flatMap((scenario, index) => [
+      auditTaskRecord(index + 10, 0, 'RECEIVED', { scenario }),
+      auditTaskRecord(index + 10, 1, 'TOOL_EXECUTION', { scenario }),
+    ]);
+    const classifiedResponse = await upload(classified);
+    assert.equal(classifiedResponse.status, 200);
+    const classifiedReceipts = await classifiedResponse.json();
+    assert.equal((classifiedReceipts as { receipts: unknown[] }).receipts.length, classified.length);
+    assert.deepEqual(await (await upload(classified)).json(), classifiedReceipts);
+
+    const stableReceived = auditTaskRecord(30, 0, 'RECEIVED', { scenario: 'CONTENT_CREATION' });
+    assert.equal((await upload([stableReceived])).status, 200);
+    const drifted = auditTaskRecord(30, 1, 'TOOL_EXECUTION', { scenario: 'DOCUMENT_EDITING' });
+    assert.equal((await upload([drifted])).status, 409);
+    const stable = auditTaskRecord(30, 1, 'TOOL_EXECUTION', { scenario: 'CONTENT_CREATION' });
+    assert.equal((await upload([stable])).status, 200);
+
+    const validAfterPoison = auditTaskRecord(31, 0, 'RECEIVED', { scenario: 'SEARCH_QUERY' });
+    const unknownScenario = auditTaskRecord(32, 0, 'RECEIVED', { scenario: 'UNKNOWN' });
+    const poisoned = await upload([validAfterPoison, unknownScenario]);
+    assert.equal(poisoned.status, 400);
+    assert.equal(((await poisoned.json()) as { error: { code: string } }).error.code, 'INVALID_AUDIT_TASK');
+    assert.equal((await upload([validAfterPoison])).status, 200);
 
     const changed = auditTaskRecord(1, 0, 'RECEIVED', {
       occurredAt: new Date(Date.now() - 5_000).toISOString(),

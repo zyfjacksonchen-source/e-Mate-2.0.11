@@ -31,9 +31,9 @@ authoritative services currently present in this repository.
 
 - Initialize `PostgresAdminManagementStore` with the same redacted route
   catalog configured in Model Gateway and pass it as `adminManagement`.
-- Compose the enterprise authenticator with `createManagementAuthenticator`.
-  Enterprise administrator tokens retain roles and no task-event write scope;
-  issued task credentials receive only `task-events:write` and no roles.
+- Enterprise administrator tokens retain roles and no task-event write scope.
+  Newly issued user credentials receive only `models:invoke`; task audit is
+  accepted only by Model Gateway from the signed-in e-Mate session.
 - Use the same PostgreSQL database for Analytics and Model Gateway. Production
   Model Gateway reads `e_mate_tenant_model_route` before catalog responses and
   before upstream or usage-journal access. Read failures are fail-closed.
@@ -41,13 +41,11 @@ authoritative services currently present in this repository.
   `MEMBER`. `SUPER_ADMIN` remains an out-of-band bootstrap role and cannot be
   minted by password login.
 
-Task-event credentials are random opaque Bearer secrets. The API returns a new
-secret once, persists only its SHA-256 digest, exposes redacted metadata on
-later reads, verifies the exact `task-events:write` scope, and supports
-revocation. They belong to the generic Analytics audit-ingest surface; the
-current Desktop does not receive them. Local e-Mate uploads metadata-only audit
-facts with its short-lived Model Gateway session, and Renderer receives neither
-credential.
+Existing task-event credential metadata remains listable and revocable so
+historical administration records are preserved, but Analytics exposes no task
+event write endpoint and no longer authenticates those legacy secrets. Local
+e-Mate uploads metadata-only audit facts with its short-lived Model Gateway
+session, and Renderer receives neither credential.
 
 ## Local-runtime boundary
 

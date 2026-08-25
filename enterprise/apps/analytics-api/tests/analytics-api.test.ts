@@ -13,7 +13,7 @@ import {
   type RuntimeRegistryPrincipal,
 } from '../src/runtime-registry.ts';
 import type { SessionIndexSearch, SessionIndexWriteResult, SessionSummaryStore } from '../src/session-index.ts';
-import { createAnalyticsServer, createManagementAuthenticator } from '../src/server.ts';
+import { createAnalyticsServer } from '../src/server.ts';
 
 type FakeEntry = {
   value: string;
@@ -375,7 +375,7 @@ async function withServer<T>(
     },
     adminManagement,
     consentStore,
-    authenticate: createManagementAuthenticator(async (token) => users[token] ?? null, adminManagement),
+    authenticate: async (token) => users[token] ?? null,
   });
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
@@ -482,7 +482,7 @@ test('HTTP API binds identity to bearer principal and enforces roles and methods
   });
 });
 
-test('admin APIs derive tenant scope and keep administrator and task-event credentials separated', async () => {
+test('admin APIs derive tenant scope and keep administrator and model credentials separated', async () => {
   await withServer(async (baseUrl) => {
     const injected = await fetch(`${baseUrl}/v1/admin/users`, {
       method: 'POST',
@@ -600,12 +600,29 @@ test('admin APIs derive tenant scope and keep administrator and task-event crede
         principalType: 'USER',
         principalId: 'user-a',
         userId: 'user-a',
-        scopes: ['task-events:write', 'models:invoke'],
+        scopes: ['models:invoke'],
       }),
     });
     assert.equal(issuedResponse.status, 201);
     const issued = (await issuedResponse.json()) as { secret: string };
-    assert.equal((await fetch(`${baseUrl}/v1/admin/users`, { headers: auth(issued.secret, false) })).status, 403);
+    assert.equal((await fetch(`${baseUrl}/v1/admin/users`, { headers: auth(issued.secret, false) })).status, 401);
+    assert.equal(
+      (
+        await fetch(`${baseUrl}/v1/admin/api-keys`, {
+          method: 'POST',
+          headers: auth('admin'),
+          body: JSON.stringify({
+            schemaVersion: 1,
+            label: 'Retired task writer',
+            principalType: 'USER',
+            principalId: 'user-a',
+            userId: 'user-a',
+            scopes: ['task-events:write'],
+          }),
+        })
+      ).status,
+      400
+    );
     assert.equal(
       (
         await fetch(`${baseUrl}/v1/tasks/events`, {
@@ -614,17 +631,17 @@ test('admin APIs derive tenant scope and keep administrator and task-event crede
           body: JSON.stringify({}),
         })
       ).status,
-      503
+      404
     );
     assert.equal(
       (
         await fetch(`${baseUrl}/v1/runtime-registry/heartbeats`, {
           method: 'POST',
           headers: auth(issued.secret),
-          body: JSON.stringify(heartbeat('task-token-instance', 1)),
+          body: JSON.stringify(heartbeat('model-token-instance', 1)),
         })
       ).status,
-      403
+      401
     );
     assert.equal(
       (
@@ -634,7 +651,7 @@ test('admin APIs derive tenant scope and keep administrator and task-event crede
           body: JSON.stringify({}),
         })
       ).status,
-      403
+      404
     );
 
     const modelApiKey = 'tenant-provider-key-that-is-long-enough';
@@ -753,7 +770,7 @@ test('admin APIs derive tenant scope and keep administrator and task-event crede
           body: JSON.stringify({}),
         })
       ).status,
-      401
+      404
     );
   });
 });

@@ -64,6 +64,15 @@ test('user administration filters approval state and reuses the existing batch p
   assert.doesNotMatch(vite, /runtime\/status/);
 });
 
+test('credential UI issues only user model access and labels retired task credentials', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const copy = messagesFor('zh-CN');
+  assert.match(app, /principalType: 'USER',[\s\S]*scopes: \['models:invoke'\]/u);
+  assert.match(app, /scopes\.includes\('task-events:write'\) \? copy\.legacyTaskCredential/u);
+  assert.doesNotMatch(app, /TASKS_ONLY|MODELS_AND_TASKS/u);
+  assert.equal(copy.legacyTaskCredential, '旧任务同步凭据（已停用）');
+});
+
 test('admin API paths must stay on the console origin', () => {
   assert.equal(
     resolveSameOriginPath('/e-mate/enterprise-api/', '/v1/admin/users', origin),
@@ -332,7 +341,7 @@ test('consent audit requests retain audit evidence without sending tenant or pol
   assert.equal(call?.init?.body, undefined);
 });
 
-test('admin mutations derive tenant server-side and task secrets never appear in list responses', async () => {
+test('admin mutations derive tenant server-side and client secrets never appear in list responses', async () => {
   const calls: Array<{ input: string; init?: RequestInit }> = [];
   const responses = [
     new Response(
@@ -371,10 +380,10 @@ test('admin mutations derive tenant server-side and task secrets never appear in
           schemaVersion: 1,
           keyId: 'key-1',
           label: 'Desktop',
-          principalType: 'DEVICE',
-          principalId: 'device-1',
+          principalType: 'USER',
+          principalId: 'user-1',
           userId: 'user-1',
-          scopes: ['task-events:write'],
+          scopes: ['models:invoke'],
           createdAt: '2026-07-30T10:00:00.000Z',
           lastUsedAt: null,
           revokedAt: null,
@@ -414,10 +423,10 @@ test('admin mutations derive tenant server-side and task secrets never appear in
   const issued = await issueApiKey('admin-token', signal, options, {
     schemaVersion: 1,
     label: 'Desktop',
-    principalType: 'DEVICE',
-    principalId: 'device-1',
+    principalType: 'USER',
+    principalId: 'user-1',
     userId: 'user-1',
-    scopes: ['task-events:write'],
+    scopes: ['models:invoke'],
   });
 
   assert.equal(JSON.stringify(keys).includes('emate_twe_'), false);

@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   parseAdminApiKeyCreate,
   parseAdminApiKeyCreationResult,
+  parseAdminApiKeyList,
   parseAdminModelRouteKeyUpdate,
   parseAdminModelRoutePublication,
   parseAdminModelRouteUpdate,
@@ -170,7 +171,7 @@ test('administrator password inputs are strict and never accept weak or extra fi
   );
 });
 
-test('task event credentials are least-privilege and user-bound', () => {
+test('new credentials are model-only while legacy task metadata remains readable', () => {
   assert.deepEqual(
     parseAdminApiKeyCreate({
       schemaVersion: 1,
@@ -178,20 +179,33 @@ test('task event credentials are least-privilege and user-bound', () => {
       principalType: 'USER',
       principalId: 'user-1',
       userId: 'user-1',
-      scopes: ['task-events:write'],
+      scopes: ['models:invoke'],
     }).scopes,
-    ['task-events:write']
+    ['models:invoke']
   );
-  assert.deepEqual(
-    parseAdminApiKeyCreate({
-      schemaVersion: 1,
-      label: 'Desktop user',
-      principalType: 'USER',
-      principalId: 'user-1',
-      userId: 'user-1',
-      scopes: ['models:invoke', 'task-events:write'],
-    }).scopes,
-    ['task-events:write', 'models:invoke']
+  assert.throws(
+    () =>
+      parseAdminApiKeyCreate({
+        schemaVersion: 1,
+        label: 'Retired task writer',
+        principalType: 'USER',
+        principalId: 'user-1',
+        userId: 'user-1',
+        scopes: ['task-events:write'],
+      }),
+    /scopes/
+  );
+  assert.throws(
+    () =>
+      parseAdminApiKeyCreate({
+        schemaVersion: 1,
+        label: 'Retired combined writer',
+        principalType: 'USER',
+        principalId: 'user-1',
+        userId: 'user-1',
+        scopes: ['models:invoke', 'task-events:write'],
+      }),
+    /scopes/
   );
   assert.throws(
     () =>
@@ -201,7 +215,7 @@ test('task event credentials are least-privilege and user-bound', () => {
         principalType: 'USER',
         principalId: 'user-2',
         userId: 'user-1',
-        scopes: ['task-events:write'],
+        scopes: ['models:invoke'],
       }),
     /must match/
   );
@@ -238,10 +252,10 @@ test('one-time key responses require the issued secret shape', () => {
       schemaVersion: 1,
       keyId: 'key-1',
       label: 'Laptop',
-      principalType: 'DEVICE',
-      principalId: 'device-1',
+      principalType: 'USER',
+      principalId: 'user-1',
       userId: 'user-1',
-      scopes: ['task-events:write'],
+      scopes: ['models:invoke'],
       createdAt: '2026-07-30T10:00:00.000Z',
       lastUsedAt: null,
       revokedAt: null,
@@ -250,6 +264,40 @@ test('one-time key responses require the issued secret shape', () => {
   };
   assert.equal(parseAdminApiKeyCreationResult(value).secret, value.secret);
   assert.throws(() => parseAdminApiKeyCreationResult({ ...value, secret: 'plaintext' }), /creation result/);
+});
+
+test('legacy task scopes are accepted only as revoked history', () => {
+  const key = {
+    schemaVersion: 1,
+    keyId: 'key-legacy',
+    label: 'Legacy task writer',
+    principalType: 'DEVICE',
+    principalId: 'device-1',
+    userId: 'user-1',
+    scopes: ['task-events:write'],
+    createdAt: '2026-07-30T10:00:00.000Z',
+    lastUsedAt: null,
+    revokedAt: '2026-08-25T00:00:00.000Z',
+  };
+  const combined = {
+    ...key,
+    keyId: 'key-combined',
+    principalType: 'USER',
+    principalId: 'user-1',
+    scopes: ['task-events:write', 'models:invoke'],
+  };
+  assert.deepEqual(
+    parseAdminApiKeyList({ schemaVersion: 1, keys: [key, combined] }).keys.map(({ scopes }) => scopes),
+    [['task-events:write'], ['task-events:write', 'models:invoke']]
+  );
+  assert.throws(
+    () => parseAdminApiKeyList({ schemaVersion: 1, keys: [{ ...key, revokedAt: null }] }),
+    /must be revoked/
+  );
+  assert.throws(
+    () => parseAdminApiKeyList({ schemaVersion: 1, keys: [{ ...combined, revokedAt: null }] }),
+    /must be revoked/
+  );
 });
 
 test('model route updates accept only a boolean enablement policy', () => {

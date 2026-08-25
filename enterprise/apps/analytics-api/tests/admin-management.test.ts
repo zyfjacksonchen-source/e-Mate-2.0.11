@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AdminManagementError, InMemoryAdminManagementStore, createManagementAuthenticator } from '../src/index.ts';
+import type { Pool } from 'pg';
+import { AdminManagementError, InMemoryAdminManagementStore, PostgresAdminManagementStore } from '../src/index.ts';
 import type { RuntimeRegistryPrincipal } from '../src/runtime-registry.ts';
 
 const tenantAdmin = (tenantId: string): RuntimeRegistryPrincipal => ({
@@ -105,7 +106,7 @@ test('model catalog removal is tenant-scoped, fail-closed, and reversible only f
   );
 });
 
-test('client credentials are shown once, scope-bound, user-bound, and revocable', async () => {
+test('new client credentials are model-only, user-bound, and revocable', async () => {
   let now = Date.parse('2026-07-30T10:00:00.000Z');
   const store = new InMemoryAdminManagementStore([], () => now);
   const admin = tenantAdmin('tenant-a');
@@ -121,48 +122,33 @@ test('client credentials are shown once, scope-bound, user-bound, and revocable'
   const issued = await store.issueApiKey(admin, {
     schemaVersion: 1,
     label: 'Desktop',
-    principalType: 'DEVICE',
-    principalId: 'device-a',
-    userId: 'user-a',
-    scopes: ['task-events:write'],
-  });
-  assert.match(issued.secret, /^emate_twe_[A-Za-z0-9_-]{43}$/);
-  assert.equal(JSON.stringify(await store.listApiKeys(admin)).includes(issued.secret), false);
-  assert.deepEqual(await store.authenticateTaskEventBearer(issued.secret), {
-    tenantId: 'tenant-a',
-    userId: 'user-a',
-    roles: [],
-    scopes: ['task-events:write'],
-  });
-  const combined = await store.issueApiKey(admin, {
-    schemaVersion: 1,
-    label: 'e-Mate access',
-    principalType: 'USER',
-    principalId: 'user-a',
-    userId: 'user-a',
-    scopes: ['task-events:write', 'models:invoke'],
-  });
-  assert.deepEqual((await store.authenticateTaskEventBearer(combined.secret))?.scopes, [
-    'task-events:write',
-    'models:invoke',
-  ]);
-  const modelOnly = await store.issueApiKey(admin, {
-    schemaVersion: 1,
-    label: 'Model access',
     principalType: 'USER',
     principalId: 'user-a',
     userId: 'user-a',
     scopes: ['models:invoke'],
   });
-  assert.equal(await store.authenticateTaskEventBearer(modelOnly.secret), null);
+  assert.match(issued.secret, /^emate_twe_[A-Za-z0-9_-]{43}$/);
+  assert.equal(JSON.stringify(await store.listApiKeys(admin)).includes(issued.secret), false);
+  for (const scopes of [['task-events:write'], ['task-events:write', 'models:invoke']] as const) {
+    await assert.rejects(
+      store.issueApiKey(admin, {
+        schemaVersion: 1,
+        label: 'Retired task writer',
+        principalType: 'USER',
+        principalId: 'user-a',
+        userId: 'user-a',
+        scopes: [...scopes],
+      }),
+      /key scopes/
+    );
+  }
 
   now += 1_000;
   assert.equal(await store.revokeApiKey(admin, issued.key.keyId), true);
-  assert.equal(await store.authenticateTaskEventBearer(issued.secret), null);
   assert.equal(await store.revokeApiKey(tenantAdmin('tenant-b'), issued.key.keyId), false);
 });
 
-test('suspended and missing users cannot receive task event credentials', async () => {
+test('suspended and missing users cannot receive model credentials', async () => {
   const store = new InMemoryAdminManagementStore([]);
   const admin = tenantAdmin('tenant-a');
   const created = await store.createUser(admin, {
@@ -190,7 +176,7 @@ test('suspended and missing users cannot receive task event credentials', async 
       principalType: 'USER',
       principalId: 'user-a',
       userId: 'user-a',
-      scopes: ['task-events:write'],
+      scopes: ['models:invoke'],
     }),
     (error: unknown) => error instanceof AdminManagementError && error.code === 'USER_UNAVAILABLE'
   );
@@ -208,13 +194,13 @@ test('deleting a user is idempotent, terminal, and revokes existing credentials'
     allowedModelIds: ['gpt-5.6-sol'],
     initialPassword: 'InitialPass-2026!',
   });
-  const issued = await store.issueApiKey(admin, {
+  await store.issueApiKey(admin, {
     schemaVersion: 1,
     label: 'Desktop',
     principalType: 'USER',
     principalId: 'user-a',
     userId: 'user-a',
-    scopes: ['task-events:write', 'models:invoke'],
+    scopes: ['models:invoke'],
   });
 
   const deletion = { schemaVersion: 1 as const, expectedUpdatedAt: created.updatedAt };
@@ -223,7 +209,6 @@ test('deleting a user is idempotent, terminal, and revokes existing credentials'
   const deleted = (await store.listUsers(admin)).users[0];
   assert.equal(deleted?.status, 'DELETED');
   assert.equal((await store.listApiKeys(admin)).keys[0]?.revokedAt !== null, true);
-  assert.equal(await store.authenticateTaskEventBearer(issued.secret), null);
   assert.equal(
     await store.updateUser(admin, 'user-a', {
       schemaVersion: 1,
@@ -249,31 +234,22 @@ test('deleting a user is idempotent, terminal, and revokes existing credentials'
   );
 });
 
-test('enterprise and task-event authenticators remain separated by roles and scopes', async () => {
-  const store = new InMemoryAdminManagementStore([]);
-  const admin = tenantAdmin('tenant-a');
-  await store.createUser(admin, {
-    schemaVersion: 1,
-    userId: 'user-a',
-    displayName: 'User A',
-    roles: ['MEMBER'],
-    tokenLimit: 1_000,
-    allowedModelIds: ['gpt-5.6-sol'],
-    initialPassword: 'InitialPass-2026!',
-  });
-  const issued = await store.issueApiKey(admin, {
-    schemaVersion: 1,
-    label: 'Desktop',
-    principalType: 'USER',
-    principalId: 'user-a',
-    userId: 'user-a',
-    scopes: ['task-events:write'],
-  });
-  const authenticate = createManagementAuthenticator(
-    async (bearer) => (bearer === 'admin-token' ? admin : null),
-    store
-  );
-  assert.deepEqual(await authenticate('admin-token'), admin);
-  assert.deepEqual((await authenticate(issued.secret))?.roles, []);
-  assert.deepEqual((await authenticate(issued.secret))?.scopes, ['task-events:write']);
+test('credential migration revokes every legacy task scope before validating the model-only constraint', async () => {
+  const statements: string[] = [];
+  const pool = {
+    query: async (sql: string) => {
+      statements.push(sql);
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  await new PostgresAdminManagementStore(pool, []).initialize();
+  const schema = statements[0] as string;
+  const revoke = schema.indexOf("WHERE 'task-events:write' = ANY(scopes)");
+  const constraint = schema.indexOf('ADD CONSTRAINT e_mate_admin_api_key_scopes_check');
+  assert(revoke >= 0 && constraint > revoke);
+  assert.match(schema, /SET revoked_at = COALESCE\(revoked_at, now\(\)\)/u);
+  assert.match(schema, /scopes = ARRAY\['models:invoke'\]::text\[\][\s\S]*principal_type = 'USER'/u);
+  assert.match(schema, /revoked_at IS NOT NULL[\s\S]*ARRAY\['task-events:write'\]::text\[\]/u);
+  assert.match(schema, /revoked_at IS NOT NULL[\s\S]*ARRAY\['task-events:write', 'models:invoke'\]::text\[\]/u);
+  assert.doesNotMatch(schema, /NOT VALID/u);
 });

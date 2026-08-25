@@ -555,6 +555,9 @@ function parseAdminApiKeyMetadataValue(value: unknown): AdminApiKeyMetadata {
   if (metadata.scopes.includes('models:invoke') && metadata.principalType !== 'USER') {
     throw new Error('Model access key must be user-bound');
   }
+  if (metadata.scopes.includes('task-events:write') && metadata.revokedAt === null) {
+    throw new Error('Legacy task credential must be revoked');
+  }
   return metadata;
 }
 
@@ -573,6 +576,9 @@ export function parseAdminApiKeyCreate(value: unknown): AdminApiKeyCreate {
     throw new Error('User key principal must match its user');
   }
   const scopes = apiKeyScopes(input.scopes);
+  if (scopes.length !== 1 || scopes[0] !== 'models:invoke') {
+    throw new Error('Invalid key scopes');
+  }
   if (scopes.includes('models:invoke') && principalType !== 'USER') {
     throw new Error('Model access key must be user-bound');
   }

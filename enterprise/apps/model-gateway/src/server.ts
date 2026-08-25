@@ -1211,7 +1211,6 @@ function parseAuditTaskBatch(
     if (
       event.eventId !== envelope.event_id ||
       !taskEventIdPattern.test(event.eventId) ||
-      event.scenario !== 'GENERAL' ||
       occurredAtMs < Date.UTC(2000, 0, 1) ||
       occurredAtMs > Date.now() + 5 * 60_000 ||
       envelope.payload_sha256 !== createHash('sha256').update(canonicalJson(event)).digest('hex')

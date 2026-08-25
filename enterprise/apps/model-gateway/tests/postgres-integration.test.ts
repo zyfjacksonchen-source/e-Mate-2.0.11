@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { Pool } from 'pg';
+import { TASK_SCENARIOS } from '@e-mate/monitoring-contract';
 import { openPostgresAdminManagementStore } from '../../analytics-api/src/admin-management.ts';
 import type { RuntimeRegistryPrincipal } from '../../analytics-api/src/runtime-registry.ts';
 import {
@@ -88,6 +89,81 @@ async function createActiveTestUsers(
     )
   );
 }
+
+test(
+  'real PostgreSQL accepts the task scenario contract while freezing each task classification',
+  { skip: databaseUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set' },
+  async () => {
+    const suffix = randomUUID();
+    const tenantId = `task-audit-${suffix}`;
+    const userId = `user-${suffix}`;
+    const database = pool();
+    const store = new PostgresUsageStore(database, limits);
+    const startedAt = Date.now() - 60_000;
+    type RecordInput = Parameters<PostgresUsageStore['ingestAuditTasks']>[0][number];
+    const record = (
+      task: number,
+      sequence: number,
+      type: RecordInput['event']['type'],
+      scenario: string
+    ): RecordInput => {
+      const taskId = `task_${createHash('sha256').update(`${suffix}:${task}`).digest('hex')}`;
+      const eventId = `taskevent_${createHash('sha256')
+        .update(`${suffix}:${task}:${sequence}:${type}`)
+        .digest('hex')}`;
+      return {
+        tenantId,
+        userId,
+        payloadSha256: createHash('sha256').update(`${eventId}:${scenario}`).digest('hex'),
+        event: {
+          schemaVersion: 1,
+          eventId,
+          taskId,
+          type,
+          scenario,
+          occurredAt: new Date(startedAt + task * 100 + sequence).toISOString(),
+        },
+      } as RecordInput;
+    };
+    try {
+      await store.initialize();
+      const mixed = TASK_SCENARIOS.flatMap((scenario, index) => [
+        record(index + 1, 0, 'RECEIVED', scenario),
+        record(index + 1, 1, 'TOOL_EXECUTION', scenario),
+      ]);
+      const receipts = await store.ingestAuditTasks(mixed);
+      assert.equal(receipts.length, mixed.length);
+      assert.deepEqual(await store.ingestAuditTasks(mixed), receipts);
+
+      const rows = await database.query<{ scenario: string; task_count: string }>(
+        `SELECT scenario, count(*)::text AS task_count
+           FROM e_mate_task_fact
+          WHERE tenant_id = $1
+          GROUP BY scenario
+          ORDER BY scenario`,
+        [tenantId]
+      );
+      assert.deepEqual(
+        rows.rows,
+        [...TASK_SCENARIOS].sort().map((scenario) => ({ scenario, task_count: '1' }))
+      );
+
+      const drifted = record(1, 2, 'ARTIFACT_UPDATED', 'DOCUMENT_EDITING');
+      await assert.rejects(store.ingestAuditTasks([drifted]), /compatible received task/i);
+      const stable = record(1, 2, 'ARTIFACT_UPDATED', 'GENERAL');
+      assert.equal((await store.ingestAuditTasks([stable])).length, 1);
+
+      const validAfterPoison = record(20, 0, 'RECEIVED', 'SEARCH_QUERY');
+      const unknownScenario = record(21, 0, 'RECEIVED', 'UNKNOWN');
+      await assert.rejects(store.ingestAuditTasks([validAfterPoison, unknownScenario]), /invalid task audit record/i);
+      assert.equal((await store.ingestAuditTasks([validAfterPoison])).length, 1);
+    } finally {
+      await database.query('DELETE FROM e_mate_task_event WHERE tenant_id = $1', [tenantId]).catch(() => undefined);
+      await database.query('DELETE FROM e_mate_task_fact WHERE tenant_id = $1', [tenantId]).catch(() => undefined);
+      await database.end().catch(() => undefined);
+    }
+  }
+);
 
 test(
   'real PostgreSQL atomically ingests direct-runtime audit usage into the authoritative ledger',

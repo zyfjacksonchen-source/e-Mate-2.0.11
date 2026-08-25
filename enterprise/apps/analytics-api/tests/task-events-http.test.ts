@@ -9,7 +9,7 @@ import {
 } from '@e-mate/monitoring-contract';
 import type { RuntimeRegistryPrincipal, RuntimeRegistryStore } from '../src/runtime-registry.ts';
 import { createAnalyticsServer } from '../src/server.ts';
-import type { TaskEventQuery, TaskEventStore, TaskEventWriteResult } from '../src/task-events.ts';
+import type { TaskEventQuery, TaskEventStore } from '../src/task-events.ts';
 
 const users: Record<string, RuntimeRegistryPrincipal> = {
   employee: { tenantId: 'tenant-1', userId: 'user-1', roles: [], scopes: ['task-events:write'] },
@@ -18,34 +18,22 @@ const users: Record<string, RuntimeRegistryPrincipal> = {
   tenant2: { tenantId: 'tenant-2', userId: 'auditor-2', roles: ['AUDIT_ADMIN'] },
 };
 
-class FakeTaskEvents implements TaskEventStore {
-  readonly events = new Map<string, { userId: string; event: TaskEventInput }>();
-  readonly tasks = new Map<string, { userId: string; scenario: TaskEventInput['scenario']; status: string }>();
+const received = {
+  schemaVersion: 1,
+  eventId: 'event-received',
+  taskId: 'task-1',
+  type: 'RECEIVED',
+  scenario: 'CONTENT_CREATION',
+  occurredAt: '2026-07-25T10:00:00.000Z',
+} as const;
 
-  async append(principal: RuntimeRegistryPrincipal, event: TaskEventInput): Promise<TaskEventWriteResult> {
-    const eventKey = `${principal.tenantId}\0${event.eventId}`;
-    const existing = this.events.get(eventKey);
-    if (existing) {
-      return existing.userId === principal.userId && JSON.stringify(existing.event) === JSON.stringify(event)
-        ? 'REPLAY'
-        : 'CONFLICT';
-    }
-    const taskKey = `${principal.tenantId}\0${event.taskId}`;
-    const task = this.tasks.get(taskKey);
-    if (event.type === 'RECEIVED') {
-      if (task) return 'CONFLICT';
-      this.tasks.set(taskKey, { userId: principal.userId, scenario: event.scenario, status: 'RECEIVED' });
-    } else if (!task) {
-      return 'NOT_RECEIVED';
-    } else if (task.userId !== principal.userId || task.scenario !== event.scenario) {
-      return 'CONFLICT';
-    } else if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(event.type)) {
-      if (task.status !== 'RECEIVED') return 'CONFLICT';
-      task.status = event.type;
-    }
-    this.events.set(eventKey, { userId: principal.userId, event });
-    return 'ACCEPTED';
-  }
+class FakeTaskEvents implements TaskEventStore {
+  readonly events = new Map<string, { userId: string; event: TaskEventInput }>([
+    [`tenant-1\0${received.eventId}`, { userId: 'user-1', event: received }],
+  ]);
+  readonly tasks = new Map<string, { userId: string; scenario: TaskEventInput['scenario']; status: string }>([
+    [`tenant-1\0${received.taskId}`, { userId: 'user-1', scenario: received.scenario, status: 'RECEIVED' }],
+  ]);
 
   async summary(principal: RuntimeRegistryPrincipal, query: TaskEventQuery): Promise<TenantTaskSummary> {
     const tasks = [...this.tasks.entries()].filter(
@@ -118,7 +106,7 @@ const registry: RuntimeRegistryStore = {
   }),
 };
 
-async function withServer(run: (baseUrl: string) => Promise<void>): Promise<void> {
+async function withServer(run: (baseUrl: string, taskEvents: FakeTaskEvents) => Promise<void>): Promise<void> {
   const taskEvents = new FakeTaskEvents();
   const server = createAnalyticsServer({
     registry,
@@ -131,7 +119,7 @@ async function withServer(run: (baseUrl: string) => Promise<void>): Promise<void
   });
   const address = server.address() as AddressInfo;
   try {
-    await run(`http://127.0.0.1:${address.port}`);
+    await run(`http://127.0.0.1:${address.port}`, taskEvents);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
@@ -142,73 +130,28 @@ const auth = (token: string): Record<string, string> => ({
   'content-type': 'application/json',
 });
 
-const received = {
-  schemaVersion: 1,
-  eventId: 'event-received',
-  taskId: 'task-1',
-  type: 'RECEIVED',
-  scenario: 'CONTENT_CREATION',
-  occurredAt: '2026-07-25T10:00:00.000Z',
-} as const;
-
-test('task event endpoint is authenticated, metadata-only and idempotent', async () => {
-  await withServer(async (baseUrl) => {
-    const send = (body: unknown) =>
-      fetch(`${baseUrl}/v1/tasks/events`, {
-        method: 'POST',
-        headers: auth('employee'),
-        body: JSON.stringify(body),
+test('task event write endpoint is absent and cannot mutate the read projection', async () => {
+  await withServer(async (baseUrl, taskEvents) => {
+    const before = JSON.stringify({ tasks: [...taskEvents.tasks], events: [...taskEvents.events] });
+    for (const [method, token] of [
+      ['POST', 'employee'],
+      ['POST', 'auditor'],
+      ['GET', 'employee'],
+    ] as const) {
+      const response = await fetch(`${baseUrl}/v1/tasks/events`, {
+        method,
+        headers: auth(token),
+        ...(method === 'POST' ? { body: JSON.stringify(received) } : {}),
       });
-    assert.equal((await send(received)).status, 202);
-    assert.equal((await send(received)).status, 200);
-    assert.equal((await send({ ...received, prompt: 'must not be collected' })).status, 400);
-    assert.equal((await send({ ...received, tenantId: 'tenant-2' })).status, 400);
-    assert.equal((await send({ ...received, type: 'ACCOUNTED' })).status, 400);
-    assert.equal(
-      (
-        await fetch(`${baseUrl}/v1/tasks/events`, {
-          method: 'POST',
-          headers: auth('unscoped'),
-          body: JSON.stringify({ ...received, eventId: 'event-unscoped' }),
-        })
-      ).status,
-      403
-    );
-  });
-});
-
-test('task outcomes require explicit received and terminal events', async () => {
-  await withServer(async (baseUrl) => {
-    const send = (body: unknown) =>
-      fetch(`${baseUrl}/v1/tasks/events`, {
-        method: 'POST',
-        headers: auth('employee'),
-        body: JSON.stringify(body),
-      });
-    assert.equal(
-      (
-        await send({
-          ...received,
-          eventId: 'event-unreceived-failed',
-          taskId: 'task-unreceived',
-          type: 'FAILED',
-        })
-      ).status,
-      409
-    );
-    await send(received);
-    assert.equal((await send({ ...received, eventId: 'event-failed', type: 'FAILED' })).status, 202);
-    assert.equal((await send({ ...received, eventId: 'event-completed', type: 'COMPLETED' })).status, 409);
+      assert.equal(response.status, 404);
+      assert.equal(((await response.json()) as { error: { code: string } }).error.code, 'NOT_FOUND');
+    }
+    assert.equal(JSON.stringify({ tasks: [...taskEvents.tasks], events: [...taskEvents.events] }), before);
   });
 });
 
 test('task summary is role-gated and tenant-isolated', async () => {
   await withServer(async (baseUrl) => {
-    await fetch(`${baseUrl}/v1/tasks/events`, {
-      method: 'POST',
-      headers: auth('employee'),
-      body: JSON.stringify(received),
-    });
     const query = 'from=2026-07-25T00%3A00%3A00.000Z&to=2026-07-26T00%3A00%3A00.000Z';
     assert.equal((await fetch(`${baseUrl}/v1/tasks/summary?${query}`, { headers: auth('employee') })).status, 403);
     const tenant1 = await fetch(`${baseUrl}/v1/tasks/summary?${query}`, { headers: auth('auditor') });

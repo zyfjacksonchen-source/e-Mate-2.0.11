@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
+import { TASK_SCENARIOS } from '@e-mate/monitoring-contract';
 import {
   InvocationAdmissionError,
   AuditTaskConflictError,
@@ -21,6 +22,8 @@ import {
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const maxCount = Number.MAX_SAFE_INTEGER;
+const taskScenarios = new Set<string>(TASK_SCENARIOS);
+const taskScenarioSql = TASK_SCENARIOS.map((scenario) => `'${scenario}'`).join(', ');
 
 type TaskRow = {
   tenant_id: string;
@@ -491,11 +494,7 @@ export class PostgresUsageStore implements UsageStore {
         task_id text NOT NULL,
         user_id text NOT NULL,
         scenario text NOT NULL CHECK (
-          scenario IN (
-            'GENERAL', 'CONTENT_CREATION', 'DOCUMENT_EDITING',
-            'SYSTEM_MAINTENANCE', 'ASSET_PRODUCTION',
-            'DATA_PROCESSING', 'SEARCH_QUERY'
-          )
+          scenario IN (${taskScenarioSql})
         ),
         received_event_id text NOT NULL,
         received_at timestamptz NOT NULL,
@@ -523,11 +522,7 @@ export class PostgresUsageStore implements UsageStore {
           )
         ),
         scenario text NOT NULL CHECK (
-          scenario IN (
-            'GENERAL', 'CONTENT_CREATION', 'DOCUMENT_EDITING',
-            'SYSTEM_MAINTENANCE', 'ASSET_PRODUCTION',
-            'DATA_PROCESSING', 'SEARCH_QUERY'
-          )
+          scenario IN (${taskScenarioSql})
         ),
         occurred_at timestamptz NOT NULL,
         recorded_at timestamptz NOT NULL DEFAULT now(),
@@ -542,21 +537,13 @@ export class PostgresUsageStore implements UsageStore {
         DROP CONSTRAINT IF EXISTS e_mate_task_fact_scenario_check;
       ALTER TABLE e_mate_task_fact
         ADD CONSTRAINT e_mate_task_fact_scenario_check CHECK (
-          scenario IN (
-            'GENERAL', 'CONTENT_CREATION', 'DOCUMENT_EDITING',
-            'SYSTEM_MAINTENANCE', 'ASSET_PRODUCTION',
-            'DATA_PROCESSING', 'SEARCH_QUERY'
-          )
+          scenario IN (${taskScenarioSql})
         );
       ALTER TABLE e_mate_task_event
         DROP CONSTRAINT IF EXISTS e_mate_task_event_scenario_check;
       ALTER TABLE e_mate_task_event
         ADD CONSTRAINT e_mate_task_event_scenario_check CHECK (
-          scenario IN (
-            'GENERAL', 'CONTENT_CREATION', 'DOCUMENT_EDITING',
-            'SYSTEM_MAINTENANCE', 'ASSET_PRODUCTION',
-            'DATA_PROCESSING', 'SEARCH_QUERY'
-          )
+          scenario IN (${taskScenarioSql})
         );
       `);
       await client.query('COMMIT');
@@ -1460,7 +1447,7 @@ export class PostgresUsageStore implements UsageStore {
         !identifierPattern.test(record.userId) ||
         !/^taskevent_[0-9a-f]{64}$/.test(record.event.eventId) ||
         !identifierPattern.test(record.event.taskId) ||
-        record.event.scenario !== 'GENERAL' ||
+        !taskScenarios.has(record.event.scenario) ||
         !/^[0-9a-f]{64}$/.test(record.payloadSha256) ||
         eventIds.has(record.event.eventId) ||
         Number.isNaN(occurredAt.getTime())
