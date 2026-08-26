@@ -739,7 +739,7 @@ describe('repository release boundary', () => {
       assert.match(job, new RegExp(`if: needs\\.impact\\.outputs\\.${platform}_distribution != 'true'[^]*?yarn package:dir`, 'u'))
       assert.match(job, new RegExp(`if: needs\\.impact\\.outputs\\.${platform}_distribution == 'true'`, 'u'))
       assert.match(job, /ELECTRON_CACHE: \$\{\{ github\.workspace \}\}\/\.release-cache\/electron/u)
-      assert.match(job, /ELECTRON_BUILDER_CACHE: \$\{\{ runner\.temp \}\}\/e-mate-electron-builder/u)
+      assert.match(job, /ELECTRON_BUILDER_CACHE: \$\{\{ github\.workspace \}\}\/\.\.\/e-mate-electron-builder/u)
       assert.match(job, /key: desktop-tools-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-\$\{\{ hashFiles\('desktop\/package\.json', 'desktop\/yarn\.lock', 'desktop\/\.yarn\/patches\/\*\*'/u)
       assert.match(job, /node scripts\/stage-desktop-ci-artifact\.mjs stage(?:.|\n)*?--source-commit "\$\{\{ needs\.impact\.outputs\.head_sha \}\}"(?:.|\n)*?--ci-run-id "\$GITHUB_RUN_ID"(?:.|\n)*?--base-contract desktop\/e-mate-desktop\/base-contract\.json/u)
       assert.match(job, /compression-level: 0/u)
