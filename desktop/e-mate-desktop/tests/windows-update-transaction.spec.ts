@@ -113,6 +113,15 @@ describe('pinned assisted-NSIS atomic update seam', () => {
     expect(coordinator).toContain("@('2.0.12.1', '2.0.12.00', '02.0.12.0', '2.0', '2.0.12-beta', '')")
   })
 
+  it('keeps the staged app path within the legacy Windows extraction budget', () => {
+    const coordinator = source('build/windows-update-transaction.ps1')
+    expect(coordinator).toContain('$script:TransactionIdPrefixChars = 12')
+    expect(coordinator).toContain("Join-Path (Join-Path (Split-Path -Parent (Get-FullPath $CanonicalDirectory)) '.u') $compactId")
+    expect(coordinator).toContain("$candidate = Join-Path $root 'c'")
+    expect(coordinator).toContain("-le 11) 'candidate path budget exceeded'")
+    expect(coordinator).not.toContain('.net.ecoremedia.e-mate-update')
+  })
+
   it('stages before READY and journals both forward renames plus both rollback renames', () => {
     const coordinator = source('build/windows-update-transaction.ps1')
     const phases = [
