@@ -2717,3 +2717,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 失败 run `32916353656` 日志证明 Windows 安装器验证通过后才在 shell 解析退出 2；没有 admitted artifact、安装态或生产写入。
 - Remaining blockers: 新 PR、protected-main attempt-1、性能/admission、Cloudflare、官网及实机验收全部保持 OPEN。
 - Next exact action: 提交最小修复并新建 PR；全绿后合并得到新的唯一 source SHA，重新构建正式字节。
+
+## 2026-08-26 · 2.0.13 正式 staging 跨 Shell 参数闭环
+
+- Goal checkpoint: protected-main `8d67a529b55ddb4a065d3f5c389ef711c35528ab` 再次证明 Windows 安装器本体与校验成功，但版本 argv 缺显式相对前缀，随后 PowerShell 又将 Bash 风格 run-id 环境变量解析为空；同一 run 的全部字节继续作废。
+- Frozen baseline / current HEAD: 失败 CI run `32918150868`；本修复从该 exact protected main 建立干净分支，只修正式 staging 参数交接。
+- Binding documents read: 根 `AGENTS.md`、Build-once CI/staging 合同、S35 与上一条完整日志。
+- Inspected native seam: `require(process.argv[1])` 对裸 `desktop/...` 按模块名解析而不是当前目录文件；Windows stage 默认 shell 是 PowerShell，`$GITHUB_RUN_ID` 不是其环境变量语法。两者均使已验证安装器无法进入闭合 artifact。
+- Experiment or why unnecessary: 版本路径增加唯一 `./`；run id 直接使用 Actions 已解析的 `${{ github.run_id }}`，在进入任一 shell 前固化。两个平台继续共用同一命令，不增加 shell 分支、helper 或手工版本。
+- Decision and forbidden alternatives: 在参数边界修一次，禁止切换默认 shell掩盖问题、从文件名猜版本、复用失败 run 安装器或让 staging 接受空 run id。
+- Changed scope: CI 两平台 version/stage 参数、既有合同测试及本记录；未改产品、打包输入、安装器、Profile、模型链、R2、Feed、官网或用户数据。
+- Verification commands and results: change-impact `24/24`、`git diff --check` 通过；合同逐平台锁定显式相对路径与 GitHub run-id 上下文。
+- Immutable evidence / receipt: run `32918150868` 的 Windows 日志显示真实安装器验证成功后出现 `MODULE_NOT_FOUND` 与空 `--ci-run-id`；没有 admitted artifact、安装态或生产写入。
+- Remaining blockers: 新 PR 与新 protected-main attempt-1、性能/admission、Cloudflare、官网和实机验收仍 OPEN。
+- Next exact action: 提交干净 PR，合并后只认新的 protected-main source 与 attempt-1 字节。
