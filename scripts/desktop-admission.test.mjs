@@ -184,9 +184,9 @@ async function desktopCandidate(root) {
   }
   for (const item of Object.values(files)) await file(join(root, item.name), item.bytes)
   const candidate = {
-    schema_version: 1,
+    schema_version: 2,
     document_type: 'emate.desktop-artifact-candidate',
-    release_status: 'performance-pending',
+    release_status: 'admission-pending',
     version,
     source_commit: SOURCE,
     schedule_protocol_floor: 1,
@@ -453,7 +453,6 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
     await json(join(metadata, 'ci-run.json'), run('100', '.github/workflows/ci.yml', 'push'))
     await json(join(metadata, 'desktop-run.json'), run('102', '.github/workflows/desktop-release.yml'))
     await json(join(metadata, 'profile-run.json'), run('103', '.github/workflows/profile-release.yml'))
-    await json(join(metadata, 'performance-run.json'), run('104', '.github/workflows/desktop-performance.yml'))
     await json(join(metadata, 'ci-jobs.json'), jobs([
       'CI admission', 'Node 24 / target contracts and unit tests',
       'Windows x64 / unsigned desktop installer', 'macOS universal / unsigned desktop disk image',
@@ -466,11 +465,9 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
       ...TARGETS.map(target => `Bootstrap complete Profile generation / ${target}`),
       'Prepare signed native Cloudflare publication bundle',
     ]))
-    await json(join(metadata, 'performance-jobs.json'), jobs(['Performance admission']))
     await json(join(metadata, 'desktop-artifact.json'), artifact('201', `e-mate-desktop-release-${SOURCE}`, '102'))
     await json(join(metadata, 'ci-artifact.json'), artifact('206', `e-mate-change-impact-${SOURCE}`, '100'))
     await json(join(metadata, 'profile-publication-artifact.json'), artifact('202', `e-mate-profile-native-cloudflare-publication-${SOURCE}`, '103'))
-    await json(join(metadata, 'performance-artifact.json'), artifact('203', `e-mate-performance-admission-${SOURCE}-attempt-1`, '104'))
     await json(join(metadata, 'base-sdk-artifact.json'), artifact('204', `e-mate-base-sdk-${SOURCE}`, '100'))
     await json(join(metadata, 'profile-build-artifact.json'), artifact('205', `e-mate-desktop-profile-${SOURCE}`, '100'))
     await json(join(metadata, 'profile-build-receipt-artifact.json'), artifact('207', `e-mate-desktop-profile-build-receipt-${SOURCE}`, '100'))
@@ -478,12 +475,12 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
     await json(join(metadata, 'macos-ci-artifact.json'), artifact('209', `e-mate-desktop-macos-${SOURCE}`, '100'))
     const options = {
       sourceCommit: SOURCE, candidate: desktop.path, metadata,
-      ciRunId: '100', desktopRunId: '102', profileRunId: '103', performanceRunId: '104',
-      desktopArtifactId: '201', profileArtifactId: '202', performanceArtifactId: '203',
+      ciRunId: '100', desktopRunId: '102', profileRunId: '103',
+      desktopArtifactId: '201', profileArtifactId: '202',
       output: join(root, 'github-artifact-provenance.json'),
     }
     const { provenance } = await createGithubArtifactProvenance(options)
-    assert.deepEqual(provenance.artifacts.map(item => item.role), ['desktop_candidate', 'performance_admission'])
+    assert.deepEqual(provenance.artifacts.map(item => item.role), ['desktop_candidate'])
     const rerun = run('100', '.github/workflows/ci.yml', 'push')
     rerun.run_attempt = 2
     await json(join(metadata, 'ci-run.json'), rerun)
@@ -524,11 +521,7 @@ test('workflow is build-only and uploads only the two external signer inputs', a
   assert.match(workflow, /zyfjacksonchen-source\/e-Mate-2\.0\.11/u)
   assert.doesNotMatch(workflow, /zyfjacksonchen-source\/e-Mate(?:\s|$)/u)
   assert.match(workflow, /desktop-release-manifest\.ts\s+admit/u)
-  assert.match(workflow, /PERFORMANCE_MODEL_LEAF_IDS/u)
-  assert.match(workflow, /test "\$\{#child_paths\[@\]\}" = 4/u)
-  assert.match(workflow, /'children\/' \+ String\(i \+ 1\)\.padStart\(2, '0'\) \+ '-' \+ x/u)
-  assert.match(workflow, /submodules: recursive/u)
-  assert.match(workflow, /pnpm --dir upstream\/deepseek-harness install --frozen-lockfile --ignore-scripts/u)
+  assert.doesNotMatch(workflow, /performance_workflow_run_id|performance_artifact_id|PERFORMANCE_MODEL_LEAF_IDS|performance-summary/u)
   assert.match(workflow, /base-contract\.json,desktop-release-unsigned\.json/u)
   assert.doesNotMatch(workflow, /secrets\.|aws |wrangler|r2-publish|desktop\/latest\.json/u)
   assert.match(desktopBuild, /e-mate-desktop-profile-build-receipt-\$\{\{ inputs\.source_sha \}\}/u)
@@ -556,7 +549,7 @@ test('performance evidence and signing use their existing isolated environments'
   assert.equal(parsed.jobs.admission.environment, 'r2-publish')
   assert.equal(parsed.jobs.admission.needs, 'evidence')
   const signer = parsed.jobs.admission.steps.find(step => step.id === 'admit')
-  assert.equal(signer.uses, 'zyfjacksonchen-source/e-mate-desktop-publication/performance@4193d2ae0a87327f161ce4a5b69bf60aee1ab052')
+  assert.equal(signer.uses, 'zyfjacksonchen-source/e-mate-desktop-publication/performance@5e254e06905d7d930bc27117692d70d92456e8e7')
   assert.deepEqual([...workflow.matchAll(/secrets\.([A-Z0-9_]+)/gu)].map(match => match[1]).sort(), [
     'EMATE_PROFILE_SIGNING_KEY_ID', 'EMATE_PROFILE_SIGNING_PRIVATE_KEY',
   ])
@@ -592,7 +585,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   assert.equal(job.name, 'Desktop Cloudflare plugin handoff')
   assert.equal(job.environment, 'r2-publish')
   const invocation = job.steps.find(step => step.id === 'prepare')
-  assert.equal(invocation.uses, 'zyfjacksonchen-source/e-mate-desktop-publication@4193d2ae0a87327f161ce4a5b69bf60aee1ab052')
+  assert.equal(invocation.uses, 'zyfjacksonchen-source/e-mate-desktop-publication@5e254e06905d7d930bc27117692d70d92456e8e7')
   assert.deepEqual(invocation.with, {
     'source-sha': '${{ github.sha }}',
     'main-ci-run-id': '${{ inputs.main_ci_run_id }}',
@@ -609,7 +602,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   })
   assert.deepEqual(job.steps.filter(step => step.uses).map(step => step.uses), [
     'actions/setup-node@v6',
-    'zyfjacksonchen-source/e-mate-desktop-publication@4193d2ae0a87327f161ce4a5b69bf60aee1ab052',
+    'zyfjacksonchen-source/e-mate-desktop-publication@5e254e06905d7d930bc27117692d70d92456e8e7',
     'actions/upload-artifact@v4',
   ])
   const upload = job.steps.find(step => step.uses === 'actions/upload-artifact@v4')

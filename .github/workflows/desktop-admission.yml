@@ -23,14 +23,6 @@ on:
         description: Exact GitHub artifact ID for the signed Profile publication bundle.
         required: true
         type: string
-      performance_workflow_run_id:
-        description: Successful TTFT v2 performance admission workflow run.
-        required: true
-        type: string
-      performance_artifact_id:
-        description: Exact GitHub artifact ID for e-mate-performance-admission-<source SHA>-attempt-1.
-        required: true
-        type: string
 
 permissions:
   actions: read
@@ -73,8 +65,6 @@ jobs:
           DESKTOP_ARTIFACT_ID: ${{ inputs.desktop_artifact_id }}
           PROFILE_RUN_ID: ${{ inputs.profile_release_run_id }}
           PROFILE_ARTIFACT_ID: ${{ inputs.profile_artifact_id }}
-          PERFORMANCE_RUN_ID: ${{ inputs.performance_workflow_run_id }}
-          PERFORMANCE_ARTIFACT_ID: ${{ inputs.performance_artifact_id }}
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = zyfjacksonchen-source/e-Mate-2.0.11
@@ -85,7 +75,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
           for value in "$CI_RUN_ID" "$DESKTOP_RUN_ID" "$DESKTOP_ARTIFACT_ID" "$PROFILE_RUN_ID" \
-            "$PROFILE_ARTIFACT_ID" "$PERFORMANCE_RUN_ID" "$PERFORMANCE_ARTIFACT_ID"; do
+            "$PROFILE_ARTIFACT_ID"; do
             [[ "$value" =~ ^[1-9][0-9]*$ ]]
           done
           mkdir -p .admission/metadata
@@ -93,8 +83,7 @@ jobs:
           for pair in \
             "ci:$CI_RUN_ID" \
             "desktop:$DESKTOP_RUN_ID" \
-            "profile:$PROFILE_RUN_ID" \
-            "performance:$PERFORMANCE_RUN_ID"; do
+            "profile:$PROFILE_RUN_ID"; do
             label="${pair%%:*}"
             run_id="${pair#*:}"
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > ".admission/metadata/$label-run.json"
@@ -106,7 +95,6 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ci_artifact_id" > .admission/metadata/ci-artifact.json
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$DESKTOP_ARTIFACT_ID" > .admission/metadata/desktop-artifact.json
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$PROFILE_ARTIFACT_ID" > .admission/metadata/profile-publication-artifact.json
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$PERFORMANCE_ARTIFACT_ID" > .admission/metadata/performance-artifact.json
 
       - name: Download the exact Desktop candidate artifact
         uses: actions/download-artifact@v4
@@ -173,15 +161,6 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.profile_release_run_id }}
 
-      - name: Download the exact signed TTFT v2 admission bundle
-        uses: actions/download-artifact@v4
-        with:
-          artifact-ids: ${{ inputs.performance_artifact_id }}
-          merge-multiple: true
-          path: .admission/performance
-          github-token: ${{ github.token }}
-          run-id: ${{ inputs.performance_workflow_run_id }}
-
       - name: Install the exact existing admission verifier dependencies
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
@@ -206,31 +185,6 @@ jobs:
             --base-contract desktop/e-mate-desktop/base-contract.json \
             --out .admission/profile-component-aggregate.json
 
-      - name: Verify the signed performance admission and its protected source identity
-        run: >-
-          node scripts/desktop-admission.mjs
-          performance-summary
-          --commit "$GITHUB_SHA"
-          --candidate .admission/desktop/desktop-candidate.json
-          --profile-aggregate .admission/profile-component-aggregate.json
-          --performance-bundle .admission/performance
-          --verifier-source scripts/performance-parity.mjs
-          --base-contract desktop/e-mate-desktop/base-contract.json
-          --out .admission/performance-summary.json
-
-      - name: Re-run the signed admission's exact TTFT v2 verifier
-        run: |
-          set -euo pipefail
-          mapfile -t child_paths < <(node --input-type=module -e \
-            "import { PERFORMANCE_MODEL_LEAF_IDS as r } from './scripts/desktop-admission.mjs'; console.log(r.map((x, i) => 'children/' + String(i + 1).padStart(2, '0') + '-' + x).join('\\n'))")
-          test "${#child_paths[@]}" = 4
-          for child_path in "${child_paths[@]}"; do
-            evidence=".admission/performance/$child_path/e-mate-performance-evidence.json"
-            verified="$(mktemp "$RUNNER_TEMP/e-mate-admission-$(basename "$child_path").XXXXXX.json")"
-            node scripts/performance-parity.mjs --input "$evidence" --output "$verified"
-            cmp -s "$evidence" "$verified"
-          done
-
       - name: Validate GitHub run, job, artifact, and branch provenance
         env:
           CI_RUN_ID: ${{ inputs.ci_run_id }}
@@ -238,8 +192,6 @@ jobs:
           DESKTOP_ARTIFACT_ID: ${{ inputs.desktop_artifact_id }}
           PROFILE_RUN_ID: ${{ inputs.profile_release_run_id }}
           PROFILE_ARTIFACT_ID: ${{ inputs.profile_artifact_id }}
-          PERFORMANCE_RUN_ID: ${{ inputs.performance_workflow_run_id }}
-          PERFORMANCE_ARTIFACT_ID: ${{ inputs.performance_artifact_id }}
         run: >-
           node scripts/desktop-admission.mjs
           github-provenance
@@ -251,17 +203,14 @@ jobs:
           --desktop-artifact-id "$DESKTOP_ARTIFACT_ID"
           --profile-run-id "$PROFILE_RUN_ID"
           --profile-artifact-id "$PROFILE_ARTIFACT_ID"
-          --performance-run-id "$PERFORMANCE_RUN_ID"
-          --performance-artifact-id "$PERFORMANCE_ARTIFACT_ID"
           --out .admission/github-artifact-provenance.json
 
-      - name: Form the exact unsigned 11-field Desktop manifest
+      - name: Form the exact unsigned 10-field Desktop manifest
         run: >-
           node desktop/e-mate-desktop/scripts/desktop-release-manifest.ts
           admit
           --candidate .admission/desktop/desktop-candidate.json
           --profile-aggregate .admission/profile-component-aggregate.json
-          --performance .admission/performance-summary.json
           --github-provenance .admission/github-artifact-provenance.json
           --out .admission/output/desktop-release-unsigned.json
 

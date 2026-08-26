@@ -12,7 +12,7 @@ import {
 } from '../src/update-checker.ts'
 
 const SOURCE_COMMIT = 'a'.repeat(40)
-const MANIFEST_SIGNATURE_CONTEXT = Buffer.from('e-mate-desktop-release-manifest-v1\0', 'utf8')
+const MANIFEST_SIGNATURE_CONTEXT = Buffer.from('e-mate-desktop-release-manifest-v2\0', 'utf8')
 const { privateKey: manifestPrivateKey, publicKey: manifestPublicKey } = generateKeyPairSync('ed25519')
 const TRUSTED_MANIFEST_KEYS: readonly DesktopReleaseSigningKey[] = [{
   id: 'desktop-release-test-key',
@@ -36,7 +36,7 @@ function versionResponse(version: unknown, scheduleProtocolFloor: unknown = 1, i
 function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): Record<string, unknown> {
   const release = typeof version === 'string' ? version : 'invalid'
   return signManifest({
-    schema_version: 1,
+    schema_version: 2,
     document_type: 'emate.desktop-release-manifest',
     release_status: 'admitted',
     version,
@@ -44,12 +44,6 @@ function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): 
     base_contract_id: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
     schedule_protocol_floor: scheduleProtocolFloor,
     profile_component_aggregate: profileComponentAggregateSummary(),
-    performance: {
-      performance_run_id: 'performance-run-id',
-      admission_sha256: '4'.repeat(64),
-      signature_key_id: '0123456789abcdef',
-      verifier: {},
-    },
     github_artifact_provenance: githubArtifactProvenance(),
     artifacts: {
       darwin: manifestArtifact(release, 'darwin'),
@@ -122,14 +116,6 @@ function githubArtifactProvenance() {
         artifact_id: '11',
         digest: `sha256:${'7'.repeat(64)}`,
         run_id: '123',
-        run_attempt: 1,
-      },
-      {
-        role: 'performance_admission',
-        name: `e-mate-performance-admission-${SOURCE_COMMIT}-attempt-1`,
-        artifact_id: '12',
-        digest: `sha256:${'8'.repeat(64)}`,
-        run_id: '124',
         run_attempt: 1,
       },
     ],
@@ -330,12 +316,11 @@ describe('public Desktop version check', () => {
     ['invalid digest', (manifest: Record<string, any>) => { manifest.artifacts.darwin.sha256 = 'ABC' }],
     ['invalid Base contract id', (manifest: Record<string, any>) => { manifest.base_contract_id = 'v7' }],
     ['coerced Profile digest', (manifest: Record<string, any>) => { manifest.profile_component_aggregate.aggregate_sha256 = ['1'.repeat(64)] }],
-    ['performance artifact without attempt-1 suffix', (manifest: Record<string, any>) => {
-      manifest.github_artifact_provenance.artifacts[1].name = `e-mate-performance-admission-${SOURCE_COMMIT}`
+    ['duplicate candidate provenance', (manifest: Record<string, any>) => {
+      manifest.github_artifact_provenance.artifacts.push({ ...manifest.github_artifact_provenance.artifacts[0] })
     }],
-    ['performance rerun provenance', (manifest: Record<string, any>) => {
-      manifest.github_artifact_provenance.artifacts[1].name = `e-mate-performance-admission-${SOURCE_COMMIT}-attempt-2`
-      manifest.github_artifact_provenance.artifacts[1].run_attempt = 2
+    ['candidate rerun provenance', (manifest: Record<string, any>) => {
+      manifest.github_artifact_provenance.artifacts[0].run_attempt = 2
     }],
   ])('rejects a newer release with %s', async (_label, mutate) => {
     const manifest = versionManifest('2.1.0')
@@ -365,10 +350,10 @@ describe('public Desktop version check', () => {
   })
 
   it.each([
-    ['performance-pending candidate', () => ({
+    ['admission-pending candidate', () => ({
       ...versionManifest('2.1.0'),
       document_type: 'emate.desktop-artifact-candidate',
-      release_status: 'performance-pending',
+      release_status: 'admission-pending',
     })],
     ['legacy public schema', () => {
       const value = versionManifest('2.1.0')

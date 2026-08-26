@@ -482,7 +482,7 @@ test('GitHub release packs once and validates the same tarball on three platform
   for (const download of desktopRelease.jobs.manifest.steps.filter(step => step.uses === 'actions/download-artifact@v4')) {
     assert.equal(download.with['run-id'], '${{ inputs.ci_run_id }}')
   }
-  const candidateStep = desktopRelease.jobs.manifest.steps.find(step => step.name === 'Generate performance-pending Desktop artifact candidate')
+  const candidateStep = desktopRelease.jobs.manifest.steps.find(step => step.name === 'Generate admission-pending Desktop artifact candidate')
   assert.match(candidateStep.run, /desktop-release-manifest\.ts candidate/u)
   assert.match(candidateStep.run, /--mac-commit/u)
   assert.match(candidateStep.run, /--win-run/u)
@@ -514,7 +514,7 @@ test('download site stages exact bytes and a closed release-bound website handof
   const planPath = join(root, 'website-publication-plan.json')
   const releaseStatePath = join(root, 'release-state.json')
   await writeFile(releaseStatePath, `${JSON.stringify({
-    schema_version: 2,
+    schema_version: 3,
     document_type: 'emate.release-state',
     source_sha: SOURCE_COMMIT,
     version: VERSION,
@@ -524,7 +524,6 @@ test('download site stages exact bytes and a closed release-bound website handof
       ci: { status: 'accepted', run_id: '1' },
       profile: { status: 'accepted', run_id: '2', artifact_id: '3', artifact_digest: `sha256:${'3'.repeat(64)}`, artifact_bytes: 3 },
       desktop: { status: 'accepted', run_id: '4', artifact_id: '5', artifact_digest: `sha256:${'5'.repeat(64)}`, artifact_bytes: 5 },
-      performance: { status: 'accepted', run_id: '6', artifact_id: '7', artifact_digest: `sha256:${'7'.repeat(64)}`, artifact_bytes: 7 },
       admission: { status: 'accepted', run_id: '8', artifact_id: '9', artifact_digest: `sha256:${'9'.repeat(64)}`, artifact_bytes: 9 },
       publication: {
         status: 'pending-cloudflare-plugin',
@@ -553,7 +552,7 @@ test('download site stages exact bytes and a closed release-bound website handof
   assert.equal(plan.staged_directory, 'download-page')
   assert.equal(plan.release_state.artifact_name, `e-mate-release-state-${SOURCE_COMMIT}`)
   assert.match(plan.release_state.sha256, /^[0-9a-f]{64}$/u)
-  assert.equal(plan.desktop_publication_predecessor.action_commit, '4193d2ae0a87327f161ce4a5b69bf60aee1ab052')
+  assert.equal(plan.desktop_publication_predecessor.action_commit, '5e254e06905d7d930bc27117692d70d92456e8e7')
   assert.equal(plan.desktop_publication_predecessor.artifact_name, `e-mate-desktop-cloudflare-handoff-${SOURCE_COMMIT}`)
   assert.equal(plan.publication_contract.server_root, '/srv/ecorex-agent-download')
   assert.equal(plan.publication_contract.version_directory, `releases/site-emate-${VERSION}-${SOURCE_COMMIT}`)
@@ -576,7 +575,7 @@ test('download site stages exact bytes and a closed release-bound website handof
     'assets/emate-platform-windows.dd86c8094b5a.png',
     'index.html',
     'install-macos.html',
-    'site.865115b8aa11.js',
+    'site.a1a94f1e36f1.js',
     'styles.c2f7dccc8398.css',
   ])
   for (const entry of plan.public_readback.files) {
@@ -605,7 +604,7 @@ test('download site stages exact bytes and a closed release-bound website handof
 test('one admitted producer feeds the updater, legacy 2.0.12, and 2.0.13 download site', async t => {
   const page = readFileSync('deploy/download-page/index.html', 'utf8')
   const macGuide = readFileSync('deploy/download-page/install-macos.html', 'utf8')
-  const scriptName = 'site.865115b8aa11.js'
+  const scriptName = 'site.a1a94f1e36f1.js'
   const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
   assert.equal(validateDownloadPage(page, macGuide, script), '2.0.13')
   assert.throws(
@@ -677,7 +676,6 @@ test('one admitted producer feeds the updater, legacy 2.0.12, and 2.0.13 downloa
     output: candidate,
   })
   const profileComponentAggregate = join(root, 'profile-component-aggregate.json')
-  const performance = join(root, 'performance.json')
   const githubArtifactProvenance = join(root, 'github-artifact-provenance.json')
   await writeFile(profileComponentAggregate, JSON.stringify({
     aggregate_sha256: '1'.repeat(64),
@@ -689,31 +687,23 @@ test('one admitted producer feeds the updater, legacy 2.0.12, and 2.0.13 downloa
       component_aggregate_sha256: '6'.repeat(64),
     })),
   }))
-  await writeFile(performance, JSON.stringify({
-    performance_run_id: 'performance-run-id',
-    admission_sha256: '4'.repeat(64),
-    signature_key_id: '0123456789abcdef',
-    verifier: {},
-  }))
   await writeFile(githubArtifactProvenance, JSON.stringify({
     schema_version: 1,
     document_type: 'emate.github-artifact-provenance',
     source_commit: commit,
     artifacts: [
       { role: 'desktop_candidate', name: `e-mate-desktop-release-${commit}`, artifact_id: '11', digest: `sha256:${'7'.repeat(64)}`, run_id: '123', run_attempt: 1 },
-      { role: 'performance_admission', name: `e-mate-performance-admission-${commit}-attempt-1`, artifact_id: '12', digest: `sha256:${'8'.repeat(64)}`, run_id: '124', run_attempt: 1 },
     ],
   }))
   const output = join(root, 'latest.json')
   await admitDesktopReleaseManifest({
     candidate,
     profileComponentAggregate,
-    performance,
     githubArtifactProvenance,
     output,
   })
   const manifest = JSON.parse(readFileSync(output, 'utf8'))
-  assert.equal(Object.keys(manifest).length, 11)
+  assert.equal(Object.keys(manifest).length, 10)
   assert.equal(validateUnsignedAdmittedDesktopReleaseManifest(manifest), true)
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   const trustedKeys = [{
@@ -732,14 +722,14 @@ test('one admitted producer feeds the updater, legacy 2.0.12, and 2.0.13 downloa
       algorithm: 'ed25519',
       key_id: trustedKeys[0].id,
       value: sign(null, Buffer.concat([
-        Buffer.from('e-mate-desktop-release-manifest-v1\0', 'utf8'),
+        Buffer.from('e-mate-desktop-release-manifest-v2\0', 'utf8'),
         Buffer.from(canonical(manifest), 'utf8'),
       ]), privateKey).toString('base64'),
     },
   }
   const signedManifestBytes = Buffer.from(JSON.stringify(signedManifest), 'utf8')
   assert.ok(signedManifestBytes.byteLength <= 16 * 1024)
-  assert.equal(Object.keys(signedManifest).length, 12)
+  assert.equal(Object.keys(signedManifest).length, 11)
   assert.equal(validateAdmittedDesktopReleaseManifest(signedManifest, trustedKeys), true)
   await assert.doesNotReject(() => verifyDownloadIndex(signedManifest, {
     id: trustedKeys[0].id,

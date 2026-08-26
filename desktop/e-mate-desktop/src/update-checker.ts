@@ -83,7 +83,7 @@ const SOURCE_COMMIT_PATTERN = /^[0-9a-f]{40}$/u
 const BASE_CONTRACT_ID_PATTERN = /^e-mate-desktop-profile-v[1-9][0-9]*-dsh-[0-9a-f]{12}$/u
 const RUN_ID_PATTERN = /^[1-9][0-9]*$/u
 const RELEASE_TARGETS = ['darwin-arm64', 'darwin-x64', 'win32-x64'] as const
-const MANIFEST_SIGNATURE_CONTEXT = Buffer.from('e-mate-desktop-release-manifest-v1\0', 'utf8')
+const MANIFEST_SIGNATURE_CONTEXT = Buffer.from('e-mate-desktop-release-manifest-v2\0', 'utf8')
 
 const SEMVER_PATTERN =
   /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u
@@ -263,7 +263,7 @@ function parseAdmittedDesktopReleaseManifest(
 ): ParsedDesktopReleaseManifest | null {
   if (!hasExactKeys(value, [
     'schema_version', 'document_type', 'release_status', 'version', 'source_commit', 'base_contract_id',
-    'schedule_protocol_floor', 'profile_component_aggregate', 'performance', 'github_artifact_provenance', 'artifacts',
+    'schedule_protocol_floor', 'profile_component_aggregate', 'github_artifact_provenance', 'artifacts',
     'signature',
   ]) || !isManifestSignature(value.signature)) return null
   const { signature, ...unsigned } = value
@@ -282,8 +282,8 @@ function parseAdmittedDesktopReleaseManifest(
 function parseUnsignedAdmittedDesktopReleaseManifest(value: unknown): ParsedDesktopReleaseManifest | null {
   if (!hasExactKeys(value, [
     'schema_version', 'document_type', 'release_status', 'version', 'source_commit', 'base_contract_id',
-    'schedule_protocol_floor', 'profile_component_aggregate', 'performance', 'github_artifact_provenance', 'artifacts',
-  ]) || value.schema_version !== 1 || value.document_type !== 'emate.desktop-release-manifest'
+    'schedule_protocol_floor', 'profile_component_aggregate', 'github_artifact_provenance', 'artifacts',
+  ]) || value.schema_version !== 2 || value.document_type !== 'emate.desktop-release-manifest'
     || value.release_status !== 'admitted' || typeof value.version !== 'string'
     || typeof value.source_commit !== 'string' || !SOURCE_COMMIT_PATTERN.test(value.source_commit)
     || typeof value.base_contract_id !== 'string' || !BASE_CONTRACT_ID_PATTERN.test(value.base_contract_id)
@@ -292,7 +292,6 @@ function parseUnsignedAdmittedDesktopReleaseManifest(value: unknown): ParsedDesk
   const version = parseCanonicalStableVersion(value.version)
   if (version === null) return null
   if (!isProfileComponentAggregateSummary(value.profile_component_aggregate)
-    || !isPerformanceAdmissionSummary(value.performance)
     || !isGithubArtifactProvenance(value.github_artifact_provenance, value.source_commit as string)) return null
   const darwin = parseManifestArtifact('darwin', version.version, value.source_commit as string, value.artifacts.darwin)
   const win32 = parseManifestArtifact('win32', version.version, value.source_commit as string, value.artifacts.win32)
@@ -374,16 +373,8 @@ function isProfileComponentAggregateSummary(value: unknown): boolean {
       && typeof target.component_aggregate_sha256 === 'string' && SHA256_PATTERN.test(target.component_aggregate_sha256))
 }
 
-function isPerformanceAdmissionSummary(value: unknown): boolean {
-  return hasExactKeys(value, ['performance_run_id', 'admission_sha256', 'signature_key_id', 'verifier'])
-    && typeof value.performance_run_id === 'string'
-    && typeof value.admission_sha256 === 'string' && SHA256_PATTERN.test(value.admission_sha256)
-    && typeof value.signature_key_id === 'string'
-    && isRecord(value.verifier)
-}
-
 function isGithubArtifactProvenance(value: unknown, sourceCommit: string): boolean {
-  const roles = ['desktop_candidate', 'performance_admission'] as const
+  const roles = ['desktop_candidate'] as const
   return hasExactKeys(value, ['schema_version', 'document_type', 'source_commit', 'artifacts'])
     && value.schema_version === 1
     && value.document_type === 'emate.github-artifact-provenance'
@@ -393,9 +384,7 @@ function isGithubArtifactProvenance(value: unknown, sourceCommit: string): boole
     && new Set(value.artifacts.map(artifact => artifact?.artifact_id)).size === roles.length
     && value.artifacts.every((artifact, index) => {
       const role = roles[index]
-      const name = role === 'desktop_candidate'
-        ? `e-mate-desktop-release-${sourceCommit}`
-        : `e-mate-performance-admission-${sourceCommit}-attempt-1`
+      const name = `e-mate-desktop-release-${sourceCommit}`
       return hasExactKeys(artifact, ['role', 'name', 'artifact_id', 'digest', 'run_id', 'run_attempt'])
         && artifact.role === role && artifact.name === name
         && typeof artifact.artifact_id === 'string' && RUN_ID_PATTERN.test(artifact.artifact_id)

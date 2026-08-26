@@ -25,7 +25,7 @@ const A_TO_B_PROMPT = 'edfff6d9f21745628565983c573472d57fc10650e1012559c479626b2
 const C_TO_B_PROMPT = '6dc1916effcc7915941805b471f2a06c5f5a8b290592417f4cfd0c1db4bdd372'
 
 const SOURCE_COMMIT = 'a'.repeat(40)
-const MANIFEST_SIGNATURE_CONTEXT = Buffer.from('e-mate-desktop-release-manifest-v1\0', 'utf8')
+const MANIFEST_SIGNATURE_CONTEXT = Buffer.from('e-mate-desktop-release-manifest-v2\0', 'utf8')
 const { privateKey: manifestPrivateKey, publicKey: manifestPublicKey } = generateKeyPairSync('ed25519')
 const TRUSTED_MANIFEST_KEYS: readonly DesktopReleaseSigningKey[] = [{
   id: 'desktop-release-test-key',
@@ -48,7 +48,7 @@ function versionResponse(
 function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): Record<string, any> {
   const release = typeof version === 'string' ? version : 'invalid'
   return signManifest({
-    schema_version: 1,
+    schema_version: 2,
     document_type: 'emate.desktop-release-manifest',
     release_status: 'admitted',
     version,
@@ -65,19 +65,12 @@ function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): 
         component_aggregate_sha256: '6'.repeat(64),
       })),
     },
-    performance: {
-      performance_run_id: 'performance-run-id',
-      admission_sha256: '4'.repeat(64),
-      signature_key_id: '0123456789abcdef',
-      verifier: {},
-    },
     github_artifact_provenance: {
       schema_version: 1,
       document_type: 'emate.github-artifact-provenance',
       source_commit: SOURCE_COMMIT,
       artifacts: [
         { role: 'desktop_candidate', name: `e-mate-desktop-release-${SOURCE_COMMIT}`, artifact_id: '11', digest: `sha256:${'7'.repeat(64)}`, run_id: '123', run_attempt: 1 },
-        { role: 'performance_admission', name: `e-mate-performance-admission-${SOURCE_COMMIT}-attempt-1`, artifact_id: '12', digest: `sha256:${'8'.repeat(64)}`, run_id: '124', run_attempt: 1 },
       ],
     },
     artifacts: {
@@ -858,9 +851,7 @@ describe('desktop update Host plugin', () => {
 
   it.each([
     ['Profile aggregate', (manifest: Record<string, any>) => { manifest.profile_component_aggregate.aggregate_sha256 = '9'.repeat(64) }],
-    ['performance run', (manifest: Record<string, any>) => { manifest.performance.performance_run_id = 'performance-run-rotated' }],
-    ['performance admission', (manifest: Record<string, any>) => { manifest.performance.admission_sha256 = '9'.repeat(64) }],
-    ['performance verifier', (manifest: Record<string, any>) => { manifest.performance.verifier = { run_id: '999' } }],
+    ['candidate provenance run', (manifest: Record<string, any>) => { manifest.github_artifact_provenance.artifacts[0].run_id = '999' }],
     ['GitHub provenance', (manifest: Record<string, any>) => { manifest.github_artifact_provenance.artifacts[0].digest = `sha256:${'9'.repeat(64)}` }],
     ['other platform artifact', (manifest: Record<string, any>) => { manifest.artifacts.win32.sha256 = '9'.repeat(64) }],
   ])('rejects the confirmed update after %s identity drift', async (_label, mutate) => {

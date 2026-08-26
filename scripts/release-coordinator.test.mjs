@@ -23,11 +23,11 @@ test('release state binds every artifact id, digest, and byte count', async t =>
   const output = join(root, 'release-state.json')
   const options = {
     source: 'a'.repeat(40), version: '2.0.13', mode: 'base', 'ci-run': '1', out: output,
-    ...Object.fromEntries(['profile', 'desktop', 'performance', 'admission', 'macos', 'windows'].flatMap((name, index) => [
+    ...Object.fromEntries(['profile', 'desktop', 'admission', 'macos', 'windows'].flatMap((name, index) => [
       [`${name}-artifact`, String(index + 2)],
       [`${name}-digest`, `sha256:${String(index).repeat(64)}`],
       [`${name}-bytes`, String(index + 10)],
-      ...(['profile', 'desktop', 'performance', 'admission'].includes(name) ? [[`${name}-run`, String(index + 20)]] : []),
+      ...(['profile', 'desktop', 'admission'].includes(name) ? [[`${name}-run`, String(index + 20)]] : []),
     ])),
   }
   const previous = process.env.EMATE_EXPECTED_VERSION
@@ -35,18 +35,19 @@ test('release state binds every artifact id, digest, and byte count', async t =>
   t.after(() => previous === undefined ? delete process.env.EMATE_EXPECTED_VERSION : process.env.EMATE_EXPECTED_VERSION = previous)
   emitState(options)
   const state = JSON.parse(await readFile(output, 'utf8'))
-  assert.equal(state.schema_version, 2)
+  assert.equal(state.schema_version, 3)
   assert.deepEqual(state.stages.publication.macos, {
-    artifact_id: '6', artifact_digest: `sha256:${'4'.repeat(64)}`, artifact_bytes: 14,
+    artifact_id: '5', artifact_digest: `sha256:${'3'.repeat(64)}`, artifact_bytes: 13,
   })
   assert.throws(() => emitState({ ...options, out: join(root, 'bad.json'), 'desktop-digest': 'bad' }), /identity is invalid/u)
 })
 
 test('coordinator emits one release-bound website handoff and performs no publication write', async () => {
   const workflow = await readFile(new URL('../.github/workflows/release-coordinator.yml', import.meta.url), 'utf8')
-  for (const stage of ['profile-release.yml', 'desktop-release.yml', 'desktop-performance.yml', 'desktop-admission.yml']) {
+  for (const stage of ['profile-release.yml', 'desktop-release.yml', 'desktop-admission.yml']) {
     assert.match(workflow, new RegExp(stage.replaceAll('.', '\\.')))
   }
+  assert.doesNotMatch(workflow, /desktop-performance\.yml|performance_workflow_run_id|performance_artifact_id/u)
   assert.match(workflow, /admitted-awaiting-cloudflare-plugin/u)
   assert.match(workflow, /website_public_origin/u)
   assert.match(workflow, /website_expected_active_target/u)

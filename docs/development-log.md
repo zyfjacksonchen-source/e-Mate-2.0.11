@@ -2953,3 +2953,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 上述三个失败 run 永久作为负例；凭据只经既有私密边界恢复，未进入本记录。当前只有源码与测试证据，没有新的 protected-main、候选、正式 performance artifact 或生产发布回执。
 - Remaining blockers: 独立 PR/受保护主干 CI、新 exact-source Desktop/Profile 候选、一次正式 performance run、signed admission、双平台安装/更新/回滚、Cloudflare 三入口和官网切换仍保持 OPEN。
 - Next exact action: 提交最小修复 PR；CI 全绿后只消费新的 protected-main attempt-1 字节，清理前先确认无运行进程，再注册一次性 Runner 执行唯一新 performance run，并根据固定私密日志处理任何剩余根因。
+
+## 2026-08-27 · 2.0.13 发布链取消性能回执合同闭环
+
+- Goal checkpoint: 用户明确取消性能回执与性能任务作为 2.0.13 发布要求；本条从唯一现有发布链删除该准入依赖，不把“取消”伪装为通过、豁免或占位回执。唯一主 Goal 保持 active，待 exact-byte 安装、更新、回滚、Cloudflare 与官网公开回读闭环。
+- Frozen baseline / current HEAD: 独立主仓修复分支基于 authoritative `public-2011/main@1a98ffc05ed1fe23c43564715b984ad1653c0fb2`；Base `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`、Harness `0.1.0-rc.7@b2b1650b01f0ee88d81837a9b5c050f9f763f606` 与 Desktop reference `6074088f5b660206e404b3591fab51fb99c69add` 不变。公网 emergency legacy 2.0.13 不因本源码修改自动改变。
+- Binding documents read: 唯一主 Goal、根 `AGENTS.md`、`docs/target-contract.md`、`docs/slices/2.0.13.md`、`docs/performance-and-acceptance.md` 与前一条完整日志；外部 publication action 无独立仓库准则。
+- Inspected native seam: protected-main CI 只产一次 EXE/DMG/Profile；`desktop-release.yml` 形成 candidate，`desktop-admission.yml` 重算 Profile 与 GitHub provenance，固定外部 action 签名，Base updater 与官网下载页共同验证同一 manifest，coordinator 只传精确 run/artifact 身份。旧实现把可选 TTFT producer 插在 coordinator→admission→manifest→signer→updater/website 全链，造成缺性能 artifact 即不能发布。
+- Experiment or why unnecessary: 未新增 waiver schema、第二 coordinator 或兼容 parser；直接把现有 candidate 升为 schema2 `admission-pending`、unsigned/signed manifest 升为无 `performance` 的 schema2、release-state 升为无 performance stage 的 schema3，并让 Base updater、官网 verifier 和外部 signer 同时消费该唯一形状。冻结 2.0.12 reader 只读取 `version/artifacts` 并忽略新增字段，仍可消费同一 bootstrap bytes。
+- Decision and forbidden alternatives: 性能采集器、assembler、verifier 与 `desktop-performance.yml` 保留为默认不运行的独立诊断，但 coordinator/admission/signer/publication 不调用它；不得生成 `user-waived`、sentinel、boolean pass、`performance_run_id`、summary、receipt 或 signature 填补已删除字段。安装态功能、安全、权限、原子更新、失败回滚、制品 provenance、签名隔离、CAS 和公开回读硬门不变。
+- Changed scope: 主仓只修改现有 Desktop candidate/manifest producer、updater、admission/coordinator/publication workflows、GitHub provenance、官网同源 verifier/哈希资产、绑定测试与四份合同；可选 performance workflow 仅把 candidate parser 和固定 action pin 对齐 schema2。外部 publication action 删除根 signer 的 performance 下载/验证/字段，保留 `/performance` 可选诊断 action。
+- Verification commands and results: 外部 action Node 24 全套 `82/82`、`git diff --check`；主仓 release/admission/coordinator `28/28`；Desktop manifest/updater/update lifecycle `3 files / 101 tests`；Desktop 全类型检查 exit 0；当前 `git diff --check` 通过。没有运行性能采集，也没有把此前失败 run 当作通过。
+- Immutable evidence / receipt: 外部 PR `zyfjacksonchen-source/e-mate-desktop-publication#6` 已 squash 合入 protected main `5e254e06905d7d930bc27117692d70d92456e8e7`，主仓 workflow 精确钉住该 SHA。当前尚无新的主仓 protected-main SHA、CI candidate、签名 manifest 或生产写入。
+- Remaining blockers: 主仓修复 PR 与 protected-main CI；从该精确 source 生成 Desktop/Profile/admission/publication handoff；macOS/Windows 真实旧版更新、启动、健康提交、失败回滚及物理字节核对；Cloudflare plugin immutable/CAS/public readback、三目标 desired state 与官网切换。
+- Next exact action: 提交并合入本主仓最小修复；只消费其 attempt-1 protected-main artifact set，直接运行不含 performance stage 的 coordinator，再按已冻结发布计划完成双平台安装更新和生产公开闭环。

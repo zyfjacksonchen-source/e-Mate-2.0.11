@@ -21,13 +21,13 @@ if (typeof desktopVersion !== 'string' || !/^\d+\.\d+\.\d+$/u.test(desktopVersio
   throw new Error('download page requires the stable Desktop package version')
 }
 const SOURCE_DIRECTORY = fileURLToPath(new URL('../deploy/download-page/', import.meta.url))
-const DESKTOP_SCRIPT = 'site.865115b8aa11.js'
+const DESKTOP_SCRIPT = 'site.a1a94f1e36f1.js'
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/u
 const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/u
 const POSITIVE_ID = /^[1-9][0-9]*$/u
 const PUBLICATION_ACTION = Object.freeze({
   repository: 'zyfjacksonchen-source/e-mate-desktop-publication',
-  commit: '4193d2ae0a87327f161ce4a5b69bf60aee1ab052',
+  commit: '5e254e06905d7d930bc27117692d70d92456e8e7',
 })
 const CONTENT_TYPES = Object.freeze({
   '.css': 'text/css; charset=utf-8',
@@ -133,14 +133,13 @@ function releaseState(path, sourceCommit) {
     ci: ['run_id', 'status'],
     profile: ['artifact_bytes', 'artifact_digest', 'artifact_id', 'run_id', 'status'],
     desktop: ['artifact_bytes', 'artifact_digest', 'artifact_id', 'run_id', 'status'],
-    performance: ['artifact_bytes', 'artifact_digest', 'artifact_id', 'run_id', 'status'],
     admission: ['artifact_bytes', 'artifact_digest', 'artifact_id', 'run_id', 'status'],
     publication: ['macos', 'status', 'windows'],
   }
-  const identities = [state?.stages?.profile, state?.stages?.desktop, state?.stages?.performance, state?.stages?.admission,
+  const identities = [state?.stages?.profile, state?.stages?.desktop, state?.stages?.admission,
     state?.stages?.publication?.macos, state?.stages?.publication?.windows]
   if (keys(state) !== ['document_type', 'release_mode', 'schema_version', 'source_sha', 'stages', 'status', 'version'].sort().join(',')
-    || state.schema_version !== 2 || state.document_type !== 'emate.release-state'
+    || state.schema_version !== 3 || state.document_type !== 'emate.release-state'
     || state.status !== 'admitted-awaiting-cloudflare-plugin' || state.release_mode !== 'base'
     || state.source_sha !== sourceCommit || state.version !== desktopVersion
     || keys(state.stages) !== Object.keys(stages).sort().join(',')
@@ -151,7 +150,7 @@ function releaseState(path, sourceCommit) {
     || !POSITIVE_ID.test(state.stages.ci.run_id)
     || identities.some(value => !POSITIVE_ID.test(String(value?.artifact_id)) || !SHA256_DIGEST.test(value?.artifact_digest ?? '')
       || !Number.isSafeInteger(value?.artifact_bytes) || value.artifact_bytes <= 0)
-    || [state.stages.profile, state.stages.desktop, state.stages.performance, state.stages.admission]
+    || [state.stages.profile, state.stages.desktop, state.stages.admission]
       .some(value => !POSITIVE_ID.test(String(value.run_id)))) {
     throw new Error('website handoff release state is not the exact admitted source')
   }
