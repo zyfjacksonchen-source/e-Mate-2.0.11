@@ -356,6 +356,9 @@ describe('repository release boundary', () => {
     assert.equal(classifyChangedPaths([path], { root }).lane, 'base')
     assert.equal(classifyChangedPaths([path], { root, acceptedProfileCompatible: false }).lane, 'base')
     assert.equal(classifyChangedPaths([path], { root, acceptedProfileCompatible: true }).lane, 'plugin-only')
+    assert.equal(classifyChangedPaths([
+      'packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx',
+    ], { root, acceptedProfileCompatible: false }).lane, 'plugin-only')
   })
 
   it('keeps the Skill Hub Host, Agent tools, and UI in one hot component lane', () => {
