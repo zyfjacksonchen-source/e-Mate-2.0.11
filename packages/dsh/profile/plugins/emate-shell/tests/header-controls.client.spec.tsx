@@ -3,7 +3,12 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
-import { WINDOWS_CAPTION_CONTROLS_WIDTH } from '../../../../../../desktop/e-mate-desktop/src/window-chrome.ts'
+import {
+  WINDOWS_CAPTION_BUTTON_WIDTH,
+  WINDOWS_CAPTION_CONTROLS_WIDTH,
+  WINDOWS_CAPTION_SYMBOL_COLOR,
+  WINDOWS_CAPTION_SYMBOL_SIZE,
+} from '../../../../../../desktop/e-mate-desktop/src/window-chrome.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HeaderControls } from '../src/client/header-controls.tsx'
 import {
@@ -60,6 +65,9 @@ describe('desktop header controls', () => {
     expect(controls).toMatch(/position:\s*absolute[\s\S]*top:\s*12px[\s\S]*right:\s*calc\(24px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)[\s\S]*display:\s*inline-flex[\s\S]*gap:\s*8px[\s\S]*height:\s*32px[\s\S]*-webkit-app-region:\s*no-drag/u)
     expect(controls).toMatch(/conversation\.session\.header[\s\S]*padding-right:\s*calc\(176px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
     expect(controls).toMatch(/@media \(max-width:\s*720px\)[\s\S]*right:\s*calc\(12px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)[\s\S]*padding-right:\s*calc\(136px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)[\s\S]*\.runtimeStatus\s*\{\s*display:\s*none;/u)
+    expect(controls).toMatch(/data-dsh-desktop-platform='win32'[\s\S]*top:\s*0;[\s\S]*right:\s*var\(--dsh-desktop-caption-safe-width, 0px\);[\s\S]*gap:\s*0;[\s\S]*color:\s*var\(--dsh-desktop-caption-symbol-color, #7f858f\);/u)
+    expect(controls).toMatch(/data-dsh-desktop-platform='win32'[\s\S]*width:\s*var\(--dsh-desktop-caption-button-width, 46px\);[\s\S]*min-width:\s*var\(--dsh-desktop-caption-button-width, 46px\);[\s\S]*border-radius:\s*0;/u)
+    expect(controls).toMatch(/data-dsh-desktop-platform='win32'[\s\S]*button svg[\s\S]*width:\s*var\(--dsh-desktop-caption-symbol-size, 12px\);[\s\S]*height:\s*var\(--dsh-desktop-caption-symbol-size, 12px\);/u)
     expect(controls).toMatch(/\.controls > button:focus-visible[\s\S]*outline:\s*2px solid[\s\S]*outline-offset:\s*2px/u)
     expect(controls).not.toMatch(/@media[\s\S]*\.controls > button\s*\{[^}]*display:\s*none/u)
     expect(settings).toMatch(/padding:\s*16px calc\(20px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\) 16px 20px !important/u)
@@ -80,18 +88,18 @@ describe('desktop header controls', () => {
     for (const scale of [1, 1.25, 1.5]) {
       const viewport = minimumWindowWidth / scale
       const compact = viewport <= 720
-      const safeGap = compact ? 12 : 24
-      const childCount = compact ? 3 : 4
       const statusWidth = compact ? 0 : 16
-      const groupWidth = 3 * 32 + statusWidth + (childCount - 1) * 8
+      const groupWidth = 3 * WINDOWS_CAPTION_BUTTON_WIDTH + statusWidth
       const captionLeft = viewport - WINDOWS_CAPTION_CONTROLS_WIDTH
-      const groupRight = captionLeft - safeGap
+      const groupRight = captionLeft
 
-      expect(groupRight + 4).toBeLessThanOrEqual(captionLeft)
+      expect(groupRight).toBe(captionLeft)
       expect(groupRight - groupWidth - 4).toBeGreaterThanOrEqual(0)
-      expect((compact ? 136 : 176) + WINDOWS_CAPTION_CONTROLS_WIDTH).toBeLessThan(viewport)
+      expect((compact ? 146 : 162) + WINDOWS_CAPTION_CONTROLS_WIDTH).toBeLessThan(viewport)
       expect(captionLeft - 20).toBeGreaterThan(44)
     }
+    expect(WINDOWS_CAPTION_SYMBOL_SIZE).toBe(12)
+    expect(WINDOWS_CAPTION_SYMBOL_COLOR).toBe('#7f858f')
   })
 
   it('stays mounted with no current Session and calls the one native settings trigger', async () => {

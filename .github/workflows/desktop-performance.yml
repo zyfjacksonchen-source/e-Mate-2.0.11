@@ -152,7 +152,7 @@ jobs:
       - name: Verify Desktop bytes and resolve their CI producer run
         id: candidate
         env:
-          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          CI_RUN_ID: ${{ inputs.main_ci_run_id }}
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'

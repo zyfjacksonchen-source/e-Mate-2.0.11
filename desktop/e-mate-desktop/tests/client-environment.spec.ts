@@ -11,7 +11,10 @@ import {
   MACOS_DRAG_REGION_HEIGHT,
   MACOS_TITLEBAR_HEIGHT,
   MACOS_TRAFFIC_LIGHT_SAFE_WIDTH,
+  WINDOWS_CAPTION_BUTTON_WIDTH,
   WINDOWS_CAPTION_CONTROLS_WIDTH,
+  WINDOWS_CAPTION_SYMBOL_COLOR,
+  WINDOWS_CAPTION_SYMBOL_SIZE,
   WINDOWS_TITLEBAR_HEIGHT,
 } from '../src/window-chrome.ts'
 
@@ -90,6 +93,9 @@ describe('advanced desktop layout', () => {
       expect(css).toMatch(/\.dshDesktopWindowsCaptionRow \{[^}]*grid-column: 2 \/ -1;[^}]*grid-row: 1;/)
       expect(css).toMatch(/body\[data-dsh-desktop-mode="advanced"\] \{[^}]*--dsh-desktop-caption-safe-width:\s*0px;/)
       expect(css).toMatch(new RegExp(`body\\[data-dsh-desktop-mode="advanced"\\]\\[data-dsh-desktop-platform="win32"\\] \\{[^}]*--dsh-desktop-caption-safe-width: max\\(${WINDOWS_CAPTION_CONTROLS_WIDTH}px, calc\\(100vw - env\\(titlebar-area-x, 0px\\) - env\\(titlebar-area-width, 100vw\\)\\)\\);`))
+      expect(css).toContain(`--dsh-desktop-caption-button-width: ${WINDOWS_CAPTION_BUTTON_WIDTH}px`)
+      expect(css).toContain(`--dsh-desktop-caption-symbol-size: ${WINDOWS_CAPTION_SYMBOL_SIZE}px`)
+      expect(css).toContain(`--dsh-desktop-caption-symbol-color: ${WINDOWS_CAPTION_SYMBOL_COLOR}`)
       expect(css).not.toMatch(/data-dsh-desktop-platform="(?:darwin|linux)"[^}]*--dsh-desktop-caption-safe-width:/)
       expect(css.match(new RegExp(`${WINDOWS_CAPTION_CONTROLS_WIDTH}px`, 'gu'))).toHaveLength(1)
       expect(css).toMatch(/\.dshDesktopWindowsCaptionRow::before \{[^}]*inset: 0 var\(--dsh-desktop-caption-safe-width\) 0 0;[^}]*-webkit-app-region: drag;/)
