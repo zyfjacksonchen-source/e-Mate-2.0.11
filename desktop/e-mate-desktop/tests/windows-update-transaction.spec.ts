@@ -104,6 +104,21 @@ describe('pinned assisted-NSIS atomic update seam', () => {
     expect(coordinator).toContain('Write-ManualShutdown $request')
   })
 
+  it('secures the current-user update mailbox without privileged owner or SACL writes', () => {
+    const coordinator = source('build/windows-update-transaction.ps1')
+    const secureDirectory = coordinator.slice(
+      coordinator.indexOf('function Set-PrivateDirectoryAcl'),
+      coordinator.indexOf('function Get-InstallerAdmission'),
+    )
+    expect(secureDirectory).toContain('& icacls.exe $Path')
+    expect(secureDirectory).toContain("'/inheritance:r'")
+    expect(secureDirectory).toContain("'/grant:r'")
+    expect(secureDirectory).toContain('Assert-MailboxAcl $Path $OwnerSid')
+    expect(coordinator).toContain('$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value')
+    expect(secureDirectory).not.toContain('Set-Acl')
+    expect(secureDirectory).not.toContain('.SetOwner(')
+  })
+
   it('canonicalizes only the zero fourth field emitted by real Windows ProductVersion metadata', () => {
     const coordinator = source('build/windows-update-transaction.ps1')
     const normalize = coordinator.slice(
