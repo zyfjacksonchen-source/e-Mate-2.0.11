@@ -2814,3 +2814,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 实机更新前已关闭 e-Mate，并将 `.dsh/e-mate` 117 文件/30,980,229 bytes 与 Roaming `e-Mate` 5,563 非 junction 文件/201,697,831 bytes 复制到私有可恢复备份；失败 Bootstrap 未创建 pending authority。
 - Remaining blockers: 修复必须合入 protected main 并重建内嵌脚本的新 Setup，再完成 2.0.12→2.0.13 原地更新、启动、会话和回滚实测；当前 `aa3288…` 候选永久作废。
 - Next exact action: 提交最小 PR，等待新 exact main Windows artifact 后立即在同一安装态走原生更新链。
+
+## 2026-08-26 · 2.0.13 Windows ProductVersion 全事务规范化
+
+- Goal checkpoint: 新主线候选开始实机更新前，对唯一事务链做完端到端静态追踪，发现先前只在 `Inspect/Bootstrap` 规范化 Windows 四段 ProductVersion；`Prepare` 旧 Base 校验、候选校验与交换/回滚身份校验仍直接比较原始四段值。安装尚未启动，用户目录未交换。
+- Frozen baseline / current HEAD: 受保护主线 `3be5826b3b7f7aedd3da0d76780e92c73ab05fef`；该 SHA 的 Windows artifact `9596507425` 因本缺口作废，不进入安装或发布。
+- Binding documents read: 根 `AGENTS.md` 的共享根因准则、Windows 原子更新合同、S35 与上一条完整记录。
+- Inspected native seam: 全文件只有四处读取 `FileVersionInfo.ProductVersion`；入口已经使用 `ConvertTo-CanonicalProductVersion()`，其余三处未复用，真实旧 Base `2.0.12.0` 会在 `Assert-OriginalCurrent()` fail closed，候选及回滚身份也存在同类风险。
+- Experiment or why unnecessary: 无需启动安装即可由真实 2.0.12 metadata 与确定性代码路径证明失败；修复把剩余三处全部收口到既有严格规范化函数，合同测试锁定全文件恰好四处调用。
+- Decision and forbidden alternatives: 只复用既有函数，不放宽版本语法、不新增兼容分支、不改 request/journal 版本格式；非零第四段和其他非法形式仍拒绝。
+- Changed scope: Windows transaction 三个版本读取点、既有合同测试和本记录；未改安装字节以外的平台能力、用户数据或发布指针。
+- Verification commands and results: Windows 原生 SelfTest、窄合同测试和新 exact-main CI 待回填；`git diff --check` 通过。
+- Immutable evidence / receipt: 原 2.0.12 安装 exe SHA-256 仍为 `70e17703a946fe94c4f80b468b61c70e4419cca2cf1580cc14e0dfe803935b47`；事务根与 journal 均未创建。
+- Remaining blockers: 合入 protected main、重新构建 Windows Setup，并完整跑通 Prepare→stage→Apply→Monitor→commit 与用户数据保留。
+- Next exact action: 提交第二个最小 PR；旧候选不安装，只消费覆盖全部四处读取的新主线字节。
