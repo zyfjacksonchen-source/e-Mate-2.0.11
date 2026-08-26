@@ -2,7 +2,7 @@
 
 import type { BrowserWindowConstructorOptions, NativeImage } from 'electron'
 import type { DesktopPlatform, DesktopShellSpec } from './runtime.ts'
-import { WINDOWS_TITLEBAR_HEIGHT } from './window-chrome.ts'
+import { WINDOWS_CAPTION_SYMBOL_COLOR, WINDOWS_TITLEBAR_HEIGHT } from './window-chrome.ts'
 
 /**
  * Build a secure BrowserWindow while preserving the operating system frame.
@@ -90,7 +90,7 @@ export function advancedWindowOptions(
       titleBarStyle: 'hidden',
       titleBarOverlay: {
         color: '#00000000',
-        symbolColor: '#7f858f',
+        symbolColor: WINDOWS_CAPTION_SYMBOL_COLOR,
         height: WINDOWS_TITLEBAR_HEIGHT,
       },
       backgroundColor: '#00000000',

@@ -2842,3 +2842,16 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 失败事务保留 pending/request/journal 与不完整 candidate 供审计；更新前私有备份仍可恢复。
 - Remaining blockers: 合入 protected main、重建最终 Setup，并从干净 pending 状态重新跑通完整事务。
 - Next exact action: 提交最小路径预算 PR；新 CI 字节到达后归档失败 staging，再执行唯一最终实机更新。
+## 2026-08-26 · 2.0.13 正式性能恢复与发布前置纠错
+
+- Goal checkpoint: 用户在 emergency legacy Desktop 更新入口已公开回读后明确要求恢复正式性能测试并更新官网；本 checkpoint 撤销后续“免测收尾”路线，但不改写 emergency publication 的历史事实。
+- Frozen baseline / current HEAD: 起点为 protected `public-2011/main` `a9632e787e8843c189cbb79a9725c72461982dcd`；已成功 CI `32971421254`、Desktop `32974052237`、Profile `32974255196`，其精确安装器和 emergency `desktop/latest.json` 身份记录于 `artifacts/receipts/release-2.0.13-emergency-publication-a9632e7.md`。
+- Binding documents read: 根 `AGENTS.md`、`target-contract.md`、S35、TTFT v2、最新 development log、Desktop performance/admission/coordinator workflow 与今日失败链。
+- Inspected native seam: `desktop-performance.yml` 唯一输入名为 `main_ci_run_id`，但候选校验步骤错误读取不存在的 `inputs.ci_run_id`；历史 run `32928852497` 已在同一步下载完候选后失败。当前受保护主线仍保留该确定性错误，直接 dispatch 必然重复失败。Windows 标题栏原生三按钮已由 `window-chrome.ts` 固定 138px/32px 与 `symbolColor`，应用侧分享/主题/设置却另用 32px 按钮、18px 图标、主题色和 24px 间隔；视觉漂移来自两个尺寸/颜色真相源。
+- Experiment or why unnecessary: 只读 GitHub 回执证明历史 performance runner 曾正常接单并在精确候选校验处失败；源码全文件搜索确认仅该一处错误引用，其他三个消费者均使用 `main_ci_run_id`。先补一条合同反例，禁止再次用昂贵 workflow 发现同一输入漂移。
+- Decision and forbidden alternatives: 在正式性能前先把该共享 input boundary 修为 `inputs.main_ci_run_id` 并以现有测试锁定；因为当前 admission 把 workflow source SHA、CI、Desktop、Profile 与性能 artifact 绑定，修复后的 source 不能冒充旧 `a9632e7` 安装器，必须由新 protected-main exact SHA 重新产生一次不可变双端候选。Windows 应用侧三枚图标复用现有原生 caption 宽度/颜色常量投影的 CSS token，贴住原生按钮左缘；macOS 保持原布局。不得手工改 artifact source、伪造 performance run、只切官网或再造标题栏。
+- Changed scope: 一处 performance workflow 输入映射、一条既有合同测试、Windows 标题栏共享尺寸/颜色 token 与应用工具 CSS、对应窄测试、今日构建发布事故防复发仓库准则、emergency publication 不可变回执与本 append-only checkpoint；未改模型头、路由、Base/Profile/Harness、R2、Feed、官网或用户数据。
+- Verification commands and results: change-impact/component/profile/publication 合同合计 `42/42`（首次缺固定 `dsh-genui` 子模块时 `41/42`，初始化精确 gitlink 后仅重跑 owning component `13/13`）、Desktop admission/workflow `8/8`、Desktop client environment/window options `18/18`、e-Mate Shell bundle build 与 Windows 标题栏静态合同通过，`git diff --check` 通过。全量 upstream `build:lib:client` 在未先生成 host remotes 的干净本机树因既有 remote 类型缺失失败，不记为本 diff 通过或失败；PR CI 仍须完成正式闭包验证。
+- Immutable evidence / receipt: 现阶段只有历史成功/失败 GitHub run 和公开 emergency pointer/installer 回读；没有新 source 候选、正式 performance/admission、signed/manual pointer 或官网切换。
+- Remaining blockers: 定向检查、PR/protected-main、新 exact CI/Desktop/Profile、四模型 installed performance、signed admission、Cloudflare 正式三入口一致性与官网原子切换仍 OPEN。
+- Next exact action: 运行最窄合同；提交并推送一个 source-fix PR，CI 全绿后只消费新 protected-main attempt-1 字节，启动 one-shot performance runner，随后按 admission→Cloudflare plugin→官网 current 顺序闭环。

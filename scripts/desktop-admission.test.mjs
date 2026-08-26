@@ -564,6 +564,8 @@ test('performance evidence and signing use their existing isolated environments'
   assert.match(workflow, /test "\$GITHUB_RUN_ATTEMPT" = 1/u)
   assert.match(workflow, /GITHUB_WORKFLOW_REF" = "\$GITHUB_REPOSITORY\/\.github\/workflows\/desktop-performance\.yml@refs\/heads\/main"/u)
   assert.match(workflow, /Desktop candidate installers are not owned by the selected CI run/u)
+  assert.match(workflow, /CI_RUN_ID: \$\{\{ inputs\.main_ci_run_id \}\}/u)
+  assert.doesNotMatch(workflow, /inputs\.ci_run_id/u)
   assert.match(workflow, /test "\$\(jq -er '\.path' <<<"\$run_json"\)" = \.github\/workflows\/ci\.yml/u)
   assert.doesNotMatch(workflow, /Build and verify the e-Mate profile|Build unsigned macOS universal disk image/u)
   assert.match(workflow, /files\.length !== 92/u)

@@ -50,6 +50,29 @@
   background: var(--emate-color-brand, #ff6a1a);
 }
 
+:global(body[data-dsh-desktop-platform='win32']) .controls {
+  top: 0;
+  right: var(--dsh-desktop-caption-safe-width, 0px);
+  gap: 0;
+  color: var(--dsh-desktop-caption-symbol-color, #7f858f);
+}
+
+:global(body[data-dsh-desktop-platform='win32']) .controls > button {
+  width: var(--dsh-desktop-caption-button-width, 46px);
+  min-width: var(--dsh-desktop-caption-button-width, 46px);
+  border-radius: 0;
+}
+
+:global(body[data-dsh-desktop-platform='win32']) .controls > button svg {
+  width: var(--dsh-desktop-caption-symbol-size, 12px);
+  height: var(--dsh-desktop-caption-symbol-size, 12px);
+  color: inherit;
+}
+
+:global(body[data-dsh-desktop-platform='win32']) [data-slot='conversation.session.header'] > header {
+  padding-right: calc(162px + var(--dsh-desktop-caption-safe-width, 0px));
+}
+
 @media (max-width: 720px) {
   .controls {
     right: calc(12px + var(--dsh-desktop-caption-safe-width, 0px));
@@ -60,4 +83,12 @@
   }
 
   .runtimeStatus { display: none; }
+
+  :global(body[data-dsh-desktop-platform='win32']) .controls {
+    right: var(--dsh-desktop-caption-safe-width, 0px);
+  }
+
+  :global(body[data-dsh-desktop-platform='win32']) [data-slot='conversation.session.header'] > header {
+    padding-right: calc(146px + var(--dsh-desktop-caption-safe-width, 0px));
+  }
 }
