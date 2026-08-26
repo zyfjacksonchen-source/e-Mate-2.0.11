@@ -835,7 +835,7 @@ jobs:
         if: needs.impact.outputs.windows_distribution == 'true'
         id: version
         shell: bash
-        run: echo "value=$(node -p \"require('./desktop/e-mate-desktop/package.json').version\")" >> "$GITHUB_OUTPUT"
+        run: echo "value=$(node -p 'require(process.argv[1]).version' desktop/e-mate-desktop/package.json)" >> "$GITHUB_OUTPUT"
 
       - name: Stage only the verified formal Windows bytes
         if: needs.impact.outputs.windows_distribution == 'true'
@@ -957,7 +957,7 @@ jobs:
       - name: Resolve the formal Desktop version
         if: needs.impact.outputs.macos_distribution == 'true'
         id: version
-        run: echo "value=$(node -p \"require('./desktop/e-mate-desktop/package.json').version\")" >> "$GITHUB_OUTPUT"
+        run: echo "value=$(node -p 'require(process.argv[1]).version' desktop/e-mate-desktop/package.json)" >> "$GITHUB_OUTPUT"
 
       - name: Stage only the verified formal macOS bytes
         if: needs.impact.outputs.macos_distribution == 'true'

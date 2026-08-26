@@ -2703,3 +2703,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 只有失败 run `32914225143`、源码修复、只读官网前驱与公网 index 对账；没有候选安装器、安装态、生产写入或公开指针变化。
 - Remaining blockers: 新 exact PR CI、protected-main attempt-1、四模型性能、admission、Cloudflare 发布、公网回读和实机安装/更新/回滚仍保持 OPEN。
 - Next exact action: 推送本校正后的唯一候选，PR CI 全绿后合入 protected main；只消费 main attempt-1 字节继续实机与生产发布。
+
+## 2026-08-26 · 2.0.13 protected-main Windows 正式字节后处理修复
+
+- Goal checkpoint: protected-main attempt-1 已真实生成并验证 Windows 2.0.13 安装器，但紧随其后的版本读取步骤在 Git Bash 因嵌套双引号失败；该 SHA 的全部字节继续作废，不进入 coordinator 或发布。
+- Frozen baseline / current HEAD: protected-main `034bf3e89a7461edd6acb6df4e336d60a5f471a9`，CI run `32916353656`；本修复基于同一已审计候选源，仅修改共享 CI 后处理语句和合同测试。
+- Binding documents read: 根 `AGENTS.md`、Build-once CI 合同、S35 与上一条完整日志。
+- Inspected native seam: `dist:win`、安装器校验、Loader/Profile 校验均成功；失败只在 `Resolve the formal Desktop version` 的 Git Bash 脚本解析，PR 因 distribution=false 不执行该正式后处理路径。
+- Experiment or why unnecessary: 复用仓库其他正式流程已采用的 `node -p 'require(process.argv[1]).version' <path>` 写法，同时修正 Windows/macOS 两个同源步骤并由现有 change-impact 合同锁定，未增加 helper 或平台分支。
+- Decision and forbidden alternatives: 修共享版本读取一次，不绕过失败 job、不手工拼版本、不复用失败 run 已生成的安装器，也不把 PR smoke 冒充正式后处理覆盖。
+- Changed scope: CI 两个版本读取步骤、既有合同测试和本 append-only 记录；未改产品、打包输入、安装器字节、模型链、Profile、R2、Feed、官网或用户数据。
+- Verification commands and results: change-impact `24/24`，`git diff --check` 通过；仍须由新 PR 和新 protected-main attempt-1 双平台正式路径证明。
+- Immutable evidence / receipt: 失败 run `32916353656` 日志证明 Windows 安装器验证通过后才在 shell 解析退出 2；没有 admitted artifact、安装态或生产写入。
+- Remaining blockers: 新 PR、protected-main attempt-1、性能/admission、Cloudflare、官网及实机验收全部保持 OPEN。
+- Next exact action: 提交最小修复并新建 PR；全绿后合并得到新的唯一 source SHA，重新构建正式字节。
