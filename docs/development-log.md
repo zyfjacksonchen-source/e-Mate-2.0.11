@@ -2939,3 +2939,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: `33008900166` 永久记录为 owner 环境缺失负例；当前只有源码测试证据，没有新的 protected-main SHA、Desktop/Profile 候选、performance admission 或生产发布回执。
 - Remaining blockers: 独立 PR/受保护主干 CI、新 exact-source Desktop/Profile 候选、重新运行一次性 performance owner、signed admission、双平台安装/更新/回滚、Cloudflare 三入口和官网原子切换均保持 OPEN。
 - Next exact action: 提交最小修复 PR；CI 全绿后只消费新的 protected-main attempt-1 字节，重新注册一次性性能 Runner 并从新 run 继续 admission→Cloudflare→官网链。
+
+## 2026-08-27 · 2.0.13 正式性能失败诊断与 one-shot 锁清理闭环
+
+- Goal checkpoint: owner 环境修复后的正式性能采集器已能进入真实 Collect，但连续失败只输出“查看私密日志”，源码却没有创建该日志，且运行时清理抛错会跳过 one-shot owner lock 释放；本条只闭合既有探针的可诊断性和清理顺序，不改性能样本、阈值或产品运行时。
+- Frozen baseline / current HEAD: 独立修复分支基于 protected `public-2011/main@bc2f739924cc1d5d89ff751728527089465d98c2`；失败 performance runs 为 `33016923617`、`33017806761`、`33018958170`。
+- Binding documents read: 唯一主 Goal、根 `AGENTS.md`、`target-contract.md`、`performance-and-acceptance.md`、S35 与最新完整 development log。
+- Inspected native seam: `main()` 的 `finally` 顺序等待 runtime lane cleanup 后才调用 lock release；cleanup 失败或进程中断会残留精确 lock。顶层 catch 只打印固定公开错误，未实现其声称存在的 runner-private failure log，因此正式 run 无法区分 broker、安装态、CDP 或 cleanup 失败。
+- Experiment or why unnecessary: 第一轮修复已由 `33016923617` 证明 owner 字段到达 probe；受控 runner 诊断进一步暴露过期 native enterprise lease、过期 Usage exporter 授权和残留 lock，均沿既有 OS keychain/secret broker/原生会话路径刷新或清理，未向仓库或公开日志输出凭据。`33018958170` 在 just-in-time 原生会话刷新后仍失败，证明不能继续靠重复 dispatch 猜测。
+- Decision and forbidden alternatives: 新增一个最小 cleanup helper，始终先收集 runtime cleanup 失败、再释放 owner lock，并在两者都失败时保留两个 cause；顶层 catch 只在受保护配置同目录写固定、owner-matched、普通文件、`0600`、最大 64 KiB 的私密堆栈，公开 stderr 继续不暴露细节。禁止把私密错误写入 Actions 日志、artifact、仓库或性能证据，也禁止自动删除未知/在用 lock。
+- Changed scope: 仅 `scripts/performance-acceptance-probe.mjs`、其既有测试和本 append-only 记录；无 Desktop/Profile/Harness/模型/路由/Base/R2/Feed/官网或用户数据变化。
+- Verification commands and results: 固定 Node 24 的 probe 聚焦测试 `15/15`；完整 performance parity/acceptance/probe 套件 `34/34`；`git diff --check` 通过。干净 worktree 初次缺少仓库锁定 `fflate`，使用 lockfile 和既有缓存、禁用安装脚本补齐后重跑通过，不记为产品失败。
+- Immutable evidence / receipt: 上述三个失败 run 永久作为负例；凭据只经既有私密边界恢复，未进入本记录。当前只有源码与测试证据，没有新的 protected-main、候选、正式 performance artifact 或生产发布回执。
+- Remaining blockers: 独立 PR/受保护主干 CI、新 exact-source Desktop/Profile 候选、一次正式 performance run、signed admission、双平台安装/更新/回滚、Cloudflare 三入口和官网切换仍保持 OPEN。
+- Next exact action: 提交最小修复 PR；CI 全绿后只消费新的 protected-main attempt-1 字节，清理前先确认无运行进程，再注册一次性 Runner 执行唯一新 performance run，并根据固定私密日志处理任何剩余根因。
