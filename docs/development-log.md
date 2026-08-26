@@ -2967,3 +2967,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 外部 PR `zyfjacksonchen-source/e-mate-desktop-publication#6` 已 squash 合入 protected main `5e254e06905d7d930bc27117692d70d92456e8e7`，主仓 workflow 精确钉住该 SHA。当前尚无新的主仓 protected-main SHA、CI candidate、签名 manifest 或生产写入。
 - Remaining blockers: 主仓修复 PR 与 protected-main CI；从该精确 source 生成 Desktop/Profile/admission/publication handoff；macOS/Windows 真实旧版更新、启动、健康提交、失败回滚及物理字节核对；Cloudflare plugin immutable/CAS/public readback、三目标 desired state 与官网切换。
 - Next exact action: 提交并合入本主仓最小修复；只消费其 attempt-1 protected-main artifact set，直接运行不含 performance stage 的 coordinator，再按已冻结发布计划完成双平台安装更新和生产公开闭环。
+
+## 2026-08-27 · 2.0.13 取消性能回执 PR 前置合同纠错
+
+- Goal checkpoint: PR `#81` 首次 CI 在任何平台构建前被 release-impact 合同测试拒绝；本条只更新两个仍锁定旧“性能硬门”的仓库规则断言，不恢复已取消的性能准入。
+- Frozen baseline / current HEAD: PR 首个 head `7f6cce6`，失败 run `33022710106`；受保护基线仍为 `1a98ffc05ed1fe23c43564715b984ad1653c0fb2`。
+- Binding documents read: 根 `AGENTS.md`、`target-contract.md`、上一条取消性能回执合同记录和精确失败日志。
+- Inspected native seam: `scripts/change-impact.test.mjs` 两条断言仍要求 Creation Mode 文案包含 performance release acceptance，并要求 2.0.11 启动差不超过 10 秒作为硬门；产品、classifier、artifact 和平台 job 均未启动。
+- Experiment or why unnecessary: 将两条断言改为锁定“Creation Mode 不替代安装/跨平台/回滚/发布验收”与“启动性能为可选诊断”，本地完整 release-impact 四文件套件恢复通过。
+- Decision and forbidden alternatives: 修改绑定测试以匹配用户最新合同；不回滚 `AGENTS.md`，不把已取消的性能门重新塞回发布链，也不 rerun 已跳过的平台 job。
+- Changed scope: 仅既有 `scripts/change-impact.test.mjs` 两条合同断言和本记录。
+- Verification commands and results: Node 24 release-impact/component/profile publication 套件 `43 tests / 38 passed / 5 intentional Harness-toolchain skips / 0 failed`；`git diff --check` 待提交前复核。
+- Immutable evidence / receipt: `33022710106` 永久保留为前置合同负例，没有产生候选或生产写入。
+- Remaining blockers: 更新 PR head、通过新 attempt-1 CI、合入 protected main 后再启动正式候选链。
+- Next exact action: 提交本测试纠错到同一 PR 并等待新 head 的前置合同与完整 Base CI。

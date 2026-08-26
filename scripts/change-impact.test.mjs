@@ -78,7 +78,7 @@ describe('repository release boundary', () => {
     assert.match(agents, /Creation Mode is the development inner loop, not a release format or admission bypass/u)
     assert.match(agents, /batch coherent changes only at version freeze/u)
     assert.match(agents, /receives no signing, R2, Feed, production desired-state/u)
-    assert.match(agents, /never replaces installed-state, cross-platform, performance, rollback, or release acceptance/u)
+    assert.match(agents, /never replaces installed-state, cross-platform, rollback, or release acceptance/u)
     assert.match(agents, /Base-only work instead follows the pinned Desktop lifecycle/u)
     assert.match(target, /First development principle: native Creation Mode before permanent plugins/u)
     assert.match(target, /“对照 DSH 原生” always means the Harness and Desktop-reference pins/u)
@@ -121,12 +121,12 @@ describe('repository release boundary', () => {
       /native CDP plugin first/u,
       /accepted installed e-Mate 2\.0\.11 artifact is the startup-performance baseline/u,
       /accepted e-Mate 2\.0\.11 commit `6a7f4b9d59a1d8970345638946fb6564e2f5f93e`.*native Desktop startup flow/u,
-      /`candidate - paired 2\.0\.11 baseline` must be at most 10,000 ms/u,
+      /Startup timing remains an optional diagnostic/u,
       /Source tree is not the packaged product/u,
       /Only this stage may be called "released" or "online"/u,
     ]) assert.match(agents, invariant)
 
-    assert.match(targetContract, /`candidate - paired 2\.0\.11 baseline` must be at most `10,000 ms`/u)
+    assert.match(targetContract, /Performance evidence is optional diagnostics/u)
     assert.doesNotMatch(targetContract, /Startup never exceeds 15 seconds/u)
   })
 
