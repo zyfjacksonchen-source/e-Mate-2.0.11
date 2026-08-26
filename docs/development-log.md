@@ -2855,3 +2855,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 现阶段只有历史成功/失败 GitHub run 和公开 emergency pointer/installer 回读；没有新 source 候选、正式 performance/admission、signed/manual pointer 或官网切换。
 - Remaining blockers: 定向检查、PR/protected-main、新 exact CI/Desktop/Profile、四模型 installed performance、signed admission、Cloudflare 正式三入口一致性与官网原子切换仍 OPEN。
 - Next exact action: 运行最窄合同；提交并推送一个 source-fix PR，CI 全绿后只消费新 protected-main attempt-1 字节，启动 one-shot performance runner，随后按 admission→Cloudflare plugin→官网 current 顺序闭环。
+
+## 2026-08-27 · 2.0.13 首次 Profile bootstrap 前组件 Lane 定责修复
+
+- Goal checkpoint: 子代理顶层投影的独立 Shell 修复在普通组件 CI 中暴露发布分类缺口；本条只修发布 Lane 定责，不改 Session、ImageGen、组件实现或生产指针。
+- Frozen baseline / current HEAD: 独立分支基于受保护 `main@4530b373a6652c2ae909e460112be985232ac02c`；候选 Base/Harness 为 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Binding documents read: 重新核对根 `AGENTS.md`、`target-contract.md`、`environment-and-dependencies.md`、Profile 组合/发布脚本、当前三目标快照和失败 CI 回执。
+- Inspected native seam: 变更分类器此前只按源码路径判定组件 Lane；公网和仓库快照中的三目标当前 desired state 均仍是 2.0.12/Base v6，而候选组件只允许 Base v7。组件 CI 因而先被误派到 `plugin-only`，随后在唯一完整 generation composer 中正确拒绝 `base-required` 父代。
+- Experiment or why unnecessary: 三目标公网字节与受控快照的 bytes/SHA-256 完全一致，均为 sequence 3、Base v6、Harness `2bc16230975f6cf02aa1b283b1f86de44007b059`，排除快照陈旧或候选 Shell 载荷损坏；失败发生在读取候选 Shell 字节之前。
+- Decision and forbidden alternatives: 复用现有签名 Profile parser 和 `selectProfileRelease()`，只有三目标当前 desired state 全部与候选 Base 兼容时才允许发布型组件变更进入 `plugin-only`；缺失、损坏、目标不符或 `base-required` 均失败关闭到 `base`。禁止跳过组合、伪造 v7 父代、降级组件兼容表、复用 v6 组件引用或由工作流标签覆盖分类器。
+- Changed scope: 仅修改唯一影响分类器、其窄测试和两份绑定开发准则；子代理投影修复仍由独立 `@e-mate/dsh-client-shell` PR 持有。
+- Verification commands and results: Node 24 分类器 `25/25`（含 publishable/test-only pre-bootstrap 正反例）、组件闭包 `9 passed / 4 toolchain-absent skipped`、Profile 组合/发布 `4 passed / 1 toolchain-absent skipped`，`git diff --check` 通过；受保护 CI 仍待提交后执行。
+- Immutable evidence / receipt: 失败诊断绑定 Shell source-fix CI run `32990225194`；它不能作为候选或发布证据。当前无安装、上传、R2、Feed、desired-state 或官网写入。
+- Remaining blockers: 提交并通过独立 PR 全量 Base CI；合并后重基 Shell 修复并以新的 exact main 候选重建。首次完整 Profile bootstrap、双平台安装/更新和公开回读继续 OPEN。
+- Next exact action: 跑最窄分类器与发布合同，提交独立修复并等待受保护 PR CI；生产链保持关闭。
