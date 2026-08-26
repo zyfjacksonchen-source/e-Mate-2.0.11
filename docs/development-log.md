@@ -2661,6 +2661,7 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 外部 protected-main merge `9fa786244ed80e2202cc0907d6fd3d276a9e4d2f`；producer 源码测试与本机 owner-provisioned store验证。没有 production `performance_run_id`、签名 admission、候选安装、Cloudflare 写入或公开指针变化。
 - Remaining blockers: Cloudflare 大文件 plugin bridge、私有生产证据 broker、官网可执行 handoff 与 exact protected-main attempt-1 全链仍须通过；双平台安装/更新/回滚与公网回读仍 OPEN。
 - Next exact action: 合入本记录与 fixed pin，推送同一 source SHA，运行 PR CI；只有通过后合并 protected main 并以 attempt-1 artifacts 启动 coordinator 和 one-shot production performance runner。
+
 ## 2026-08-26 · 2.0.13 官网原子发布交接闭环
 
 - Goal checkpoint: 发布终审发现旧 `website-publication-plan.json` 只有文件清单和说明文字，未绑定 coordinator release-state、Desktop/Cloudflare 前驱、官网 active 前驱或公开回读；本条只补可执行交接，不部署或写生产。
@@ -2674,3 +2675,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前只有源码diff与无密钥fixture；没有workflow run、Cloudflare/官网写入、pointer切换或公开回读收据。
 - Remaining blockers: 合入protected main后必须用官网owner fresh前驱派发 exact attempt-1 coordinator；Cloudflare插件先发布并公开回读同一admitted Desktop bytes，官网owner再按计划落版本目录、CAS切active并逐文件公开回读，任一身份漂移保持发布关闭。
 - Next exact action: 提交本独立修复供主代理立即移植；禁止从本地worktree直接上传、切软链或改生产。
+
+## 2026-08-26 · 2.0.13 正式 CI 前发布依赖收口
+
+- Goal checkpoint: 只关闭正式 attempt-1 前的发布依赖与私有 runner 预检，不把本机辅助验证、fixture 或外部源码合入误报为上线。
+- Frozen baseline / current HEAD: 冻结 v6 Profile generation `d8769641262169a3b53369030a236f573e71499c22893d279e0a0c42df20ac93`；外部 Desktop publication protected-main 最终 fixed SHA `de2868c574098c356ce0b88c02d6c3afd29d47be`。
+- Binding documents read: 根 `AGENTS.md`、S35 合同、TTFT v2 合同、Build-once CI 合同及最新完整日志。
+- Inspected native seam: Cloudflare plugin handoff 的平台 artifact 是 exact 3/4-entry Stored ZIP；大对象桥验证完整 archive 与 installer 摘要，经随机 temp 全读回后 create-only 晋升并只清理本次 temp。性能 probe 的审计证据直接读取 loopback-only `/emate.audit/audit.status`，broker 不得自报 audit hash。
+- Experiment or why unnecessary: 外部 action/Worker 全量无密钥测试 `88/88`；主仓 impact `37 pass/5 intentional skip`、release `24/24`、coordinator `4/4`、performance `32/32`、YAML/脚本/diff均通过。本机私有 usage broker 用授权 Analytics 只读分页接口得到4条脱敏匹配事件；offline-control 通过原生 refresh 恢复仍在有效期内的企业/模型缓存，带 `{}` 输入的独立 status 复跑 exit 0，且无 audit 字段。未调用模型、未写账本/R2/官网。
+- Decision and forbidden alternatives: 生产 R2 仍只由连接的 Cloudflare plugin执行；GitHub/本地不得持有R2写权限。大文件 Worker一次一对象、短寿命、无指针写/任意删除；官网由独立 owner在Cloudflare公开回读后切 active。Analytics 会话过期必须重新原生刷新，不能复用空输出或过期缓存。
+- Changed scope: fixed publication pin、真实多文件大对象桥、原生 audit status证据、官网可执行 handoff及其合同测试；本机 broker/keychain只属于 owner-only runner状态，不入仓、不入artifact。
+- Verification commands and results: `pnpm run test:impact` 37/42通过且5项为明确Harness-toolchain skip；`pnpm run test:release` 24/24；coordinator 4/4；performance 32/32；external publication 88/88；两份workflow YAML、两个脚本check与diff check通过。
+- Immutable evidence / receipt: 外部 protected-main `de2868c574098c356ce0b88c02d6c3afd29d47be`；本机 broker权限目录0700、可执行0700、state/preload0600与专用Keychain项。仍没有 exact candidate DMG/EXE、production performance run、签名 admission、Cloudflare写入、官网切换或双平台安装回执。
+- Remaining blockers: PR与protected-main attempt-1、正式四模型性能采集、签名admission、Cloudflare/Profile/Desktop发布、公网回读、macOS/Windows安装更新回滚仍须按顺序完成。
+- Next exact action: 提交并推送唯一source SHA，等待PR CI通过后合入protected main；只消费该main attempt-1产生的同一字节继续实机与发布。
