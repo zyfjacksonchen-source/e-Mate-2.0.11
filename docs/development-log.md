@@ -2865,7 +2865,7 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Experiment or why unnecessary: 三目标公网字节与受控快照的 bytes/SHA-256 完全一致，均为 sequence 3、Base v6、Harness `2bc16230975f6cf02aa1b283b1f86de44007b059`，排除快照陈旧或候选 Shell 载荷损坏；失败发生在读取候选 Shell 字节之前。
 - Decision and forbidden alternatives: 复用现有签名 Profile parser 和 `selectProfileRelease()`，只有三目标当前 desired state 全部与候选 Base 兼容时才允许发布型组件变更进入 `plugin-only`；缺失、损坏、目标不符或 `base-required` 均失败关闭到 `base`。禁止跳过组合、伪造 v7 父代、降级组件兼容表、复用 v6 组件引用或由工作流标签覆盖分类器。
 - Changed scope: 仅修改唯一影响分类器、其窄测试和两份绑定开发准则；子代理投影修复仍由独立 `@e-mate/dsh-client-shell` PR 持有。
-- Verification commands and results: Node 24 分类器 `26/26`、组件闭包 `9 passed / 4 toolchain-absent skipped`、Profile 组合/发布 `4 passed / 1 toolchain-absent skipped`，`git diff --check` 通过；受保护 CI 仍待提交后执行。
+- Verification commands and results: Node 24 分类器 `25/25`（含 publishable/test-only pre-bootstrap 正反例）、组件闭包 `9 passed / 4 toolchain-absent skipped`、Profile 组合/发布 `4 passed / 1 toolchain-absent skipped`，`git diff --check` 通过；受保护 CI 仍待提交后执行。
 - Immutable evidence / receipt: 失败诊断绑定 Shell source-fix CI run `32990225194`；它不能作为候选或发布证据。当前无安装、上传、R2、Feed、desired-state 或官网写入。
 - Remaining blockers: 提交并通过独立 PR 全量 Base CI；合并后重基 Shell 修复并以新的 exact main 候选重建。首次完整 Profile bootstrap、双平台安装/更新和公开回读继续 OPEN。
 - Next exact action: 跑最窄分类器与发布合同，提交独立修复并等待受保护 PR CI；生产链保持关闭。
