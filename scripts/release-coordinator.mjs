@@ -3,6 +3,7 @@ import { appendFileSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 const SHA = /^[0-9a-f]{40}$/u
+const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/u
 const POSITIVE_ID = /^[1-9][0-9]*$/u
 
 export function parseArgs(argv) {
@@ -95,12 +96,18 @@ function resolveArtifact(runId, name) {
   output({ artifact_id: artifact.id, artifact_digest: artifact.digest, artifact_bytes: artifact.size_in_bytes })
 }
 
-function emitState(options) {
-  const required = ['source', 'version', 'mode', 'ci-run', 'profile-run', 'profile-artifact', 'desktop-run', 'desktop-artifact',
-    'performance-run', 'performance-artifact', 'admission-run', 'admission-artifact', 'macos-artifact', 'windows-artifact']
+export function emitState(options) {
+  const artifact = name => ({
+    artifact_id: options[`${name}-artifact`],
+    artifact_digest: options[`${name}-digest`],
+    artifact_bytes: Number(options[`${name}-bytes`]),
+  })
+  const required = ['source', 'version', 'mode', 'ci-run',
+    ...['profile', 'desktop', 'performance', 'admission'].flatMap(name => [`${name}-run`, `${name}-artifact`, `${name}-digest`, `${name}-bytes`]),
+    ...['macos', 'windows'].flatMap(name => [`${name}-artifact`, `${name}-digest`, `${name}-bytes`])]
   if (required.some(key => !options[key])) throw new Error('release state is incomplete')
   const state = {
-    schema_version: 1,
+    schema_version: 2,
     document_type: 'emate.release-state',
     source_sha: options.source,
     version: options.version,
@@ -108,15 +115,21 @@ function emitState(options) {
     status: 'admitted-awaiting-cloudflare-plugin',
     stages: {
       ci: { status: 'accepted', run_id: options['ci-run'] },
-      profile: { status: 'accepted', run_id: options['profile-run'], artifact_id: options['profile-artifact'] },
-      desktop: { status: 'accepted', run_id: options['desktop-run'], artifact_id: options['desktop-artifact'] },
-      performance: { status: 'accepted', run_id: options['performance-run'], artifact_id: options['performance-artifact'] },
-      admission: { status: 'accepted', run_id: options['admission-run'], artifact_id: options['admission-artifact'] },
-      publication: { status: 'pending-cloudflare-plugin', macos_artifact_id: options['macos-artifact'], windows_artifact_id: options['windows-artifact'] },
+      profile: { status: 'accepted', run_id: options['profile-run'], ...artifact('profile') },
+      desktop: { status: 'accepted', run_id: options['desktop-run'], ...artifact('desktop') },
+      performance: { status: 'accepted', run_id: options['performance-run'], ...artifact('performance') },
+      admission: { status: 'accepted', run_id: options['admission-run'], ...artifact('admission') },
+      publication: { status: 'pending-cloudflare-plugin', macos: artifact('macos'), windows: artifact('windows') },
     },
   }
+  const identities = [state.stages.profile, state.stages.desktop, state.stages.performance, state.stages.admission,
+    state.stages.publication.macos, state.stages.publication.windows]
   if (!SHA.test(state.source_sha) || state.version !== process.env.EMATE_EXPECTED_VERSION || state.release_mode !== 'base'
-    || Object.values(state.stages).some(stage => Object.entries(stage).some(([key, value]) => key.endsWith('_id') && !POSITIVE_ID.test(String(value))))) {
+    || !POSITIVE_ID.test(state.stages.ci.run_id)
+    || identities.some(value => !POSITIVE_ID.test(value.artifact_id) || !SHA256_DIGEST.test(value.artifact_digest)
+      || !Number.isSafeInteger(value.artifact_bytes) || value.artifact_bytes <= 0)
+    || [state.stages.profile, state.stages.desktop, state.stages.performance, state.stages.admission]
+      .some(value => !POSITIVE_ID.test(value.run_id))) {
     throw new Error('release state identity is invalid')
   }
   writeFileSync(options.out, `${JSON.stringify(state, null, 2)}\n`, { flag: 'wx' })

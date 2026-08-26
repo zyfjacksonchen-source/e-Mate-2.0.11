@@ -442,12 +442,9 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.deepEqual(Object.keys(release.jobs), ['pack', 'clean-install', 'evidence'])
   assert.equal(release.jobs['clean-install'].needs, 'pack')
   assert.equal(release.jobs.evidence.needs, 'pack')
-  const website = release.jobs.evidence.steps.find(step => step.name === 'Stage the immutable candidate download site')
-  assert.equal(website.run, 'node scripts/render-download-page.mjs --commit "$GITHUB_SHA" --out dist/download-page --plan dist/website-publication-plan.json')
+  assert.equal(release.jobs.evidence.steps.find(step => step.name === 'Stage the immutable candidate download site'), undefined)
   const releaseCandidate = release.jobs.evidence.steps.find(step => step.uses === 'actions/upload-artifact@v4')
-  assert.match(releaseCandidate.with.path, /^\s*dist\/download-page\s*$/mu)
-  assert.match(releaseCandidate.with.path, /dist\/website-publication-plan\.json/u)
-  assert.doesNotMatch(releaseCandidate.with.path, /dist\/download-page\/index\.html/u)
+  assert.doesNotMatch(releaseCandidate.with.path, /download-page|website-publication-plan/u)
   const cleanInstall = release.jobs['clean-install'].steps.find(step => step.name === 'Install tarballs with npm and run setup checks')
   assert.equal((cleanInstall.run.match(/node "\$cli" setup$/gmu) ?? []).length, 2)
   assert.ok(cleanInstall.run.includes('version="$(node -p "require(process.argv[1]).version" "$npm_root/@e-mate/dsh/package.json")"'))
@@ -508,39 +505,65 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.match(readFileSync('.gitattributes', 'utf8'), /^\* text=auto eol=lf$/mu)
 })
 
-test('download site stages exact bytes and a closed non-published server plan', async t => {
+test('download site stages exact bytes and a closed release-bound website handoff', async t => {
   const root = mkdtempSync(join(tmpdir(), 'e-mate-download-site-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const output = join(root, 'download-page')
   await file(output, 'stale-template.html', 'stale')
   const planPath = join(root, 'website-publication-plan.json')
+  const releaseStatePath = join(root, 'release-state.json')
+  await writeFile(releaseStatePath, `${JSON.stringify({
+    schema_version: 2,
+    document_type: 'emate.release-state',
+    source_sha: SOURCE_COMMIT,
+    version: VERSION,
+    release_mode: 'base',
+    status: 'admitted-awaiting-cloudflare-plugin',
+    stages: {
+      ci: { status: 'accepted', run_id: '1' },
+      profile: { status: 'accepted', run_id: '2', artifact_id: '3', artifact_digest: `sha256:${'3'.repeat(64)}`, artifact_bytes: 3 },
+      desktop: { status: 'accepted', run_id: '4', artifact_id: '5', artifact_digest: `sha256:${'5'.repeat(64)}`, artifact_bytes: 5 },
+      performance: { status: 'accepted', run_id: '6', artifact_id: '7', artifact_digest: `sha256:${'7'.repeat(64)}`, artifact_bytes: 7 },
+      admission: { status: 'accepted', run_id: '8', artifact_id: '9', artifact_digest: `sha256:${'9'.repeat(64)}`, artifact_bytes: 9 },
+      publication: {
+        status: 'pending-cloudflare-plugin',
+        macos: { artifact_id: '10', artifact_digest: `sha256:${'a'.repeat(64)}`, artifact_bytes: 10 },
+        windows: { artifact_id: '11', artifact_digest: `sha256:${'b'.repeat(64)}`, artifact_bytes: 11 },
+      },
+    },
+  }, null, 2)}\n`)
   const plan = stageDownloadPage({
     outputDirectory: output,
     planPath,
     sourceCommit: SOURCE_COMMIT,
+    releaseStatePath,
+    websitePublicOrigin: 'https://downloads.e-mate.example/releases/',
+    expectedActiveTarget: 'versions/2.0.12',
+    expectedActiveIndex: `636:${'a'.repeat(64)}`,
   })
   assert.deepEqual(Object.keys(plan), [
-    'schema_version', 'document_type', 'status', 'source_commit', 'staged_directory', 'publication_contract', 'files',
+    'schema_version', 'document_type', 'status', 'source_commit', 'version', 'staged_directory', 'release_state',
+    'desktop_publication_predecessor', 'publication_contract', 'public_readback',
   ])
-  assert.deepEqual(Object.keys(plan.publication_contract), [
-    'target', 'strategy', 'preserve_unrelated_content', 'switch_symlink_last', 'server_writes_performed',
-    'r2_writes_performed', 'published', 'live_verified',
-  ])
-  assert.equal(plan.status, 'prepared')
+  assert.equal(plan.schema_version, 2)
+  assert.equal(plan.status, 'ready-for-website-publication-owner')
   assert.equal(plan.source_commit, SOURCE_COMMIT)
+  assert.equal(plan.version, VERSION)
   assert.equal(plan.staged_directory, 'download-page')
-  assert.deepEqual(plan.publication_contract, {
-    target: 'website-server',
-    strategy: 'versioned-relative-symlink',
-    preserve_unrelated_content: true,
-    switch_symlink_last: true,
-    server_writes_performed: false,
-    r2_writes_performed: false,
-    published: false,
-    live_verified: false,
-  })
+  assert.equal(plan.release_state.artifact_name, `e-mate-release-state-${SOURCE_COMMIT}`)
+  assert.match(plan.release_state.sha256, /^[0-9a-f]{64}$/u)
+  assert.equal(plan.desktop_publication_predecessor.action_commit, 'de2868c574098c356ce0b88c02d6c3afd29d47be')
+  assert.equal(plan.desktop_publication_predecessor.artifact_name, `e-mate-desktop-cloudflare-handoff-${SOURCE_COMMIT}`)
+  assert.equal(plan.publication_contract.version_directory, `versions/${SOURCE_COMMIT}`)
+  assert.equal(plan.publication_contract.active_symlink, 'active')
+  assert.equal(plan.publication_contract.expected_active_relative_target, 'versions/2.0.12')
+  assert.deepEqual(plan.publication_contract.expected_active_index, { bytes: 636, sha256: 'a'.repeat(64) })
+  assert.equal(plan.publication_contract.require_cloudflare_public_readback_first, true)
+  assert.equal(plan.publication_contract.server_writes_performed, false)
+  assert.equal(plan.publication_contract.r2_writes_performed, false)
   assert.equal(existsSync(join(output, 'stale-template.html')), false)
-  assert.deepEqual(plan.files.map(entry => entry.relative_path), [
+  assert.equal(plan.public_readback.origin, 'https://downloads.e-mate.example/releases/')
+  assert.deepEqual(plan.public_readback.files.map(entry => entry.relative_path), [
     'assets/e-mate-hero-decor.d7f99a88447b.png',
     'assets/emate-desktop-workspace.622f3434f88c.jpg',
     'assets/emate-download-icon.5014add964e1.svg',
@@ -554,11 +577,27 @@ test('download site stages exact bytes and a closed non-published server plan', 
     'site.865115b8aa11.js',
     'styles.c2f7dccc8398.css',
   ])
-  for (const entry of plan.files) {
-    assert.deepEqual(Object.keys(entry), ['relative_path', 'bytes', 'sha256', 'content_type'])
+  for (const entry of plan.public_readback.files) {
+    assert.deepEqual(Object.keys(entry), ['relative_path', 'bytes', 'sha256', 'content_type', 'url'])
     assert.ok(readFileSync(join('deploy/download-page', entry.relative_path)).equals(readFileSync(join(output, entry.relative_path))))
   }
   assert.deepEqual(JSON.parse(readFileSync(planPath, 'utf8')), plan)
+
+  const base = { outputDirectory: output, planPath, sourceCommit: SOURCE_COMMIT, releaseStatePath }
+  assert.throws(() => stageDownloadPage({ ...base, websitePublicOrigin: 'http://example.test', expectedActiveTarget: 'absent', expectedActiveIndex: 'absent' }), /HTTPS/u)
+  assert.throws(() => stageDownloadPage({ ...base, websitePublicOrigin: 'https://example.test', expectedActiveTarget: '../active', expectedActiveIndex: 'absent' }), /active target/u)
+  assert.throws(() => stageDownloadPage({ ...base, websitePublicOrigin: 'https://example.test', expectedActiveTarget: 'absent', expectedActiveIndex: `1:${DIGEST}` }), /both be absent/u)
+  const driftedStatePath = join(root, 'drifted-release-state.json')
+  const driftedState = JSON.parse(readFileSync(releaseStatePath, 'utf8'))
+  driftedState.stages.ci.extra = true
+  await writeFile(driftedStatePath, JSON.stringify(driftedState))
+  assert.throws(() => stageDownloadPage({
+    ...base,
+    releaseStatePath: driftedStatePath,
+    websitePublicOrigin: 'https://example.test',
+    expectedActiveTarget: 'absent',
+    expectedActiveIndex: 'absent',
+  }), /not the exact admitted source/u)
 })
 
 test('one admitted producer feeds the updater, legacy 2.0.12, and 2.0.13 download site', async t => {

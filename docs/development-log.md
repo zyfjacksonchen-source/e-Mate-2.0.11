@@ -2661,3 +2661,16 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 外部 protected-main merge `9fa786244ed80e2202cc0907d6fd3d276a9e4d2f`；producer 源码测试与本机 owner-provisioned store验证。没有 production `performance_run_id`、签名 admission、候选安装、Cloudflare 写入或公开指针变化。
 - Remaining blockers: Cloudflare 大文件 plugin bridge、私有生产证据 broker、官网可执行 handoff 与 exact protected-main attempt-1 全链仍须通过；双平台安装/更新/回滚与公网回读仍 OPEN。
 - Next exact action: 合入本记录与 fixed pin，推送同一 source SHA，运行 PR CI；只有通过后合并 protected main 并以 attempt-1 artifacts 启动 coordinator 和 one-shot production performance runner。
+## 2026-08-26 · 2.0.13 官网原子发布交接闭环
+
+- Goal checkpoint: 发布终审发现旧 `website-publication-plan.json` 只有文件清单和说明文字，未绑定 coordinator release-state、Desktop/Cloudflare 前驱、官网 active 前驱或公开回读；本条只补可执行交接，不部署或写生产。
+- Frozen baseline / current HEAD: 独立分支 `codex/website-publication-handoff` 基于 producer exact `cb737381de20e41439c2a388e2a1a6abfc55ee11`；外部 Desktop publication action 固定为 `zyfjacksonchen-source/e-mate-desktop-publication@de2868c574098c356ce0b88c02d6c3afd29d47be`。
+- Binding documents read: 完整读取根 `AGENTS.md`、`target-contract.md`、最新 development log、ponytail skill及现有 release coordinator、Desktop publication action、下载页 staging owner。
+- Inspected native seam: coordinator 已解析 exact attempt-1 CI及 Profile/Desktop/performance/admission artifacts，但 release-state只留ID且未产官网交接；旧 npm release workflow生成的官网计划不在受保护 Desktop协调链内，不能作为2.0.13发布权威。
+- Experiment or why unnecessary: release-state v2复用现有 artifact resolver输出，将ID、GitHub archive digest和bytes闭合；同一 state job用既有下载页stager生成无网络、无写入 handoff，无需第二发布器、SSH脚本或Cloudflare凭据。
+- Decision and forbidden alternatives: coordinator要求官网owner fresh提供 HTTPS origin、`active`相对软链目标及当前index bytes/SHA；候选固定写入 `versions/<source SHA>`，先完成 exact Desktop Cloudflare handoff和公开回读，最后才由官网owner切换 `active`。计划逐文件固定URL/content type/bytes/SHA并声明所有生产写和live verification均为false。旧npm carrier不再输出可误认成正式官网计划。
+- Changed scope: 仅修改 release coordinator、下载页stager、旧carrier工件清单及其窄测试；未改产品runtime、Desktop/Profile/Harness bytes、模型链、R2/Feed/desired state、官网或用户数据。
+- Verification commands and results: website handoff定向测试 `1/1`、coordinator测试 `4/4`、两份workflow YAML解析、两个脚本`node --check`及`git diff --check`通过。完整旧 release suite另有与本diff无关的缺失 `yaml` devDependency环境阻断，未记为通过。
+- Immutable evidence / receipt: 当前只有源码diff与无密钥fixture；没有workflow run、Cloudflare/官网写入、pointer切换或公开回读收据。
+- Remaining blockers: 合入protected main后必须用官网owner fresh前驱派发 exact attempt-1 coordinator；Cloudflare插件先发布并公开回读同一admitted Desktop bytes，官网owner再按计划落版本目录、CAS切active并逐文件公开回读，任一身份漂移保持发布关闭。
+- Next exact action: 提交本独立修复供主代理立即移植；禁止从本地worktree直接上传、切软链或改生产。

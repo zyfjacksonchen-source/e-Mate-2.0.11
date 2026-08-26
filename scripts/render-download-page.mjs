@@ -23,6 +23,12 @@ if (typeof desktopVersion !== 'string' || !/^\d+\.\d+\.\d+$/u.test(desktopVersio
 const SOURCE_DIRECTORY = fileURLToPath(new URL('../deploy/download-page/', import.meta.url))
 const DESKTOP_SCRIPT = 'site.865115b8aa11.js'
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/u
+const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/u
+const POSITIVE_ID = /^[1-9][0-9]*$/u
+const PUBLICATION_ACTION = Object.freeze({
+  repository: 'zyfjacksonchen-source/e-mate-desktop-publication',
+  commit: 'de2868c574098c356ce0b88c02d6c3afd29d47be',
+})
 const CONTENT_TYPES = Object.freeze({
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -101,13 +107,81 @@ function safeStagePaths(sourceDirectory, outputDirectory, planPath) {
   return { source, output, plan }
 }
 
+function exactIdentity(value, label) {
+  if (value === 'absent') return null
+  const match = /^(\d+):([0-9a-f]{64})$/u.exec(value ?? '')
+  const bytes = Number(match?.[1])
+  if (match === null || !Number.isSafeInteger(bytes) || bytes <= 0) throw new Error(`${label} must be absent or <bytes>:<sha256>`)
+  return { bytes, sha256: match[2] }
+}
+
+function publicOrigin(value) {
+  let url
+  try { url = new URL(value) } catch { throw new Error('website public origin must be an absolute HTTPS URL') }
+  if (url.protocol !== 'https:' || url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '') {
+    throw new Error('website public origin must be an absolute HTTPS URL without credentials, query, or fragment')
+  }
+  return `${url.href.replace(/\/+$/u, '')}/`
+}
+
+function releaseState(path, sourceCommit) {
+  const bytes = readFileSync(path)
+  let state
+  try { state = JSON.parse(bytes) } catch { throw new Error('website handoff requires a valid release state') }
+  const keys = value => Object.keys(value ?? {}).sort().join(',')
+  const stages = {
+    ci: ['run_id', 'status'],
+    profile: ['artifact_bytes', 'artifact_digest', 'artifact_id', 'run_id', 'status'],
+    desktop: ['artifact_bytes', 'artifact_digest', 'artifact_id', 'run_id', 'status'],
+    performance: ['artifact_bytes', 'artifact_digest', 'artifact_id', 'run_id', 'status'],
+    admission: ['artifact_bytes', 'artifact_digest', 'artifact_id', 'run_id', 'status'],
+    publication: ['macos', 'status', 'windows'],
+  }
+  const identities = [state?.stages?.profile, state?.stages?.desktop, state?.stages?.performance, state?.stages?.admission,
+    state?.stages?.publication?.macos, state?.stages?.publication?.windows]
+  if (keys(state) !== ['document_type', 'release_mode', 'schema_version', 'source_sha', 'stages', 'status', 'version'].sort().join(',')
+    || state.schema_version !== 2 || state.document_type !== 'emate.release-state'
+    || state.status !== 'admitted-awaiting-cloudflare-plugin' || state.release_mode !== 'base'
+    || state.source_sha !== sourceCommit || state.version !== desktopVersion
+    || keys(state.stages) !== Object.keys(stages).sort().join(',')
+    || Object.entries(stages).some(([name, expected]) => keys(state.stages[name]) !== expected.sort().join(','))
+    || keys(state.stages.publication?.macos) !== ['artifact_bytes', 'artifact_digest', 'artifact_id'].join(',')
+    || keys(state.stages.publication?.windows) !== ['artifact_bytes', 'artifact_digest', 'artifact_id'].join(',')
+    || Object.entries(state.stages).some(([name, stage]) => stage.status !== (name === 'publication' ? 'pending-cloudflare-plugin' : 'accepted'))
+    || !POSITIVE_ID.test(state.stages.ci.run_id)
+    || identities.some(value => !POSITIVE_ID.test(String(value?.artifact_id)) || !SHA256_DIGEST.test(value?.artifact_digest ?? '')
+      || !Number.isSafeInteger(value?.artifact_bytes) || value.artifact_bytes <= 0)
+    || [state.stages.profile, state.stages.desktop, state.stages.performance, state.stages.admission]
+      .some(value => !POSITIVE_ID.test(String(value.run_id)))) {
+    throw new Error('website handoff release state is not the exact admitted source')
+  }
+  return {
+    value: state,
+    identity: { bytes: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex') },
+  }
+}
+
 export function stageDownloadPage({
   sourceDirectory = SOURCE_DIRECTORY,
   outputDirectory,
   planPath,
   sourceCommit,
+  releaseStatePath,
+  websitePublicOrigin,
+  expectedActiveTarget,
+  expectedActiveIndex,
 }) {
   if (!SOURCE_COMMIT.test(sourceCommit ?? '')) throw new Error('download page requires an exact source commit')
+  if (typeof releaseStatePath !== 'string') throw new Error('download page requires the admitted release state')
+  if (expectedActiveTarget !== 'absent' && !/^versions\/[A-Za-z0-9._-]+$/u.test(expectedActiveTarget ?? '')) {
+    throw new Error('website active target must be absent or one safe versions/<id> path')
+  }
+  const predecessorIndex = exactIdentity(expectedActiveIndex, 'website active index')
+  if ((expectedActiveTarget === 'absent') !== (predecessorIndex === null)) {
+    throw new Error('website active target and index predecessor must both be absent or both be present')
+  }
+  const origin = publicOrigin(websitePublicOrigin)
+  const admitted = releaseState(releaseStatePath, sourceCommit)
   const paths = safeStagePaths(sourceDirectory, outputDirectory, planPath)
   const sourceFiles = inventory(paths.source)
   const read = name => readFileSync(join(paths.source, name), 'utf8')
@@ -126,22 +200,47 @@ export function stageDownloadPage({
   }
 
   const plan = {
-    schema_version: 1,
+    schema_version: 2,
     document_type: 'emate.website-publication-plan',
-    status: 'prepared',
+    status: 'ready-for-website-publication-owner',
     source_commit: sourceCommit,
+    version: desktopVersion,
     staged_directory: 'download-page',
+    release_state: {
+      artifact_name: `e-mate-release-state-${sourceCommit}`,
+      ...admitted.identity,
+      stages: admitted.value.stages,
+    },
+    desktop_publication_predecessor: {
+      action_repository: PUBLICATION_ACTION.repository,
+      action_commit: PUBLICATION_ACTION.commit,
+      artifact_name: `e-mate-desktop-cloudflare-handoff-${sourceCommit}`,
+      required_status: 'ready-for-cloudflare-plugin',
+      require_cloudflare_public_readback: true,
+    },
     publication_contract: {
       target: 'website-server',
+      authority: 'website-server-owner',
       strategy: 'versioned-relative-symlink',
+      version_directory: `versions/${sourceCommit}`,
+      active_symlink: 'active',
+      candidate_relative_target: `versions/${sourceCommit}`,
+      expected_active_relative_target: expectedActiveTarget === 'absent' ? null : expectedActiveTarget,
+      expected_active_index: predecessorIndex,
       preserve_unrelated_content: true,
       switch_symlink_last: true,
+      require_cloudflare_public_readback_first: true,
       server_writes_performed: false,
       r2_writes_performed: false,
       published: false,
       live_verified: false,
     },
-    files: stagedFiles,
+    public_readback: {
+      origin,
+      active_index_url: new URL('index.html', origin).href,
+      requirements: ['https-200', 'no-redirect', 'content-type', 'content-length', 'sha256', 'installer-links-admitted'],
+      files: stagedFiles.map(file => ({ ...file, url: new URL(file.relative_path, origin).href })),
+    },
   }
   mkdirSync(dirname(paths.plan), { recursive: true })
   writeFileSync(paths.plan, `${JSON.stringify(plan, null, 2)}\n`)
@@ -150,12 +249,30 @@ export function stageDownloadPage({
 
 function main() {
   const { values } = parseArgs({
-    options: { out: { type: 'string' }, plan: { type: 'string' }, commit: { type: 'string' } },
+    options: {
+      out: { type: 'string' },
+      plan: { type: 'string' },
+      commit: { type: 'string' },
+      'release-state': { type: 'string' },
+      'public-origin': { type: 'string' },
+      'expected-active-target': { type: 'string' },
+      'expected-active-index': { type: 'string' },
+    },
   })
-  if (values.out === undefined || values.plan === undefined || values.commit === undefined) {
-    throw new Error('usage: render-download-page.mjs --out <directory> --plan <path> --commit <sha>')
+  if (values.out === undefined || values.plan === undefined || values.commit === undefined
+    || values['release-state'] === undefined || values['public-origin'] === undefined
+    || values['expected-active-target'] === undefined || values['expected-active-index'] === undefined) {
+    throw new Error('usage: render-download-page.mjs --out <directory> --plan <path> --commit <sha> --release-state <path> --public-origin <https-url> --expected-active-target <absent|versions/id> --expected-active-index <absent|bytes:sha256>')
   }
-  stageDownloadPage({ outputDirectory: values.out, planPath: values.plan, sourceCommit: values.commit })
+  stageDownloadPage({
+    outputDirectory: values.out,
+    planPath: values.plan,
+    sourceCommit: values.commit,
+    releaseStatePath: values['release-state'],
+    websitePublicOrigin: values['public-origin'],
+    expectedActiveTarget: values['expected-active-target'],
+    expectedActiveIndex: values['expected-active-index'],
+  })
 }
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])) main()

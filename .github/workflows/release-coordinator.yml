@@ -16,6 +16,18 @@ on:
         required: true
         type: choice
         options: [base]
+      website_public_origin:
+        description: Exact HTTPS origin served through the website active symlink.
+        required: true
+        type: string
+      website_expected_active_target:
+        description: Literal absent, or the website owner's fresh relative active target versions/<id>.
+        required: true
+        type: string
+      website_expected_active_index:
+        description: Literal absent, or the fresh public active index identity as <bytes>:<sha256>.
+        required: true
+        type: string
 
 permissions:
   actions: write
@@ -37,7 +49,11 @@ jobs:
     outputs:
       run_id: ${{ steps.ci.outputs.ci_run_id }}
       macos_artifact_id: ${{ steps.macos.outputs.artifact_id }}
+      macos_artifact_digest: ${{ steps.macos.outputs.artifact_digest }}
+      macos_artifact_bytes: ${{ steps.macos.outputs.artifact_bytes }}
       windows_artifact_id: ${{ steps.windows.outputs.artifact_id }}
+      windows_artifact_digest: ${{ steps.windows.outputs.artifact_digest }}
+      windows_artifact_bytes: ${{ steps.windows.outputs.artifact_bytes }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -70,6 +86,8 @@ jobs:
     outputs:
       run_id: ${{ steps.run.outputs.run_id }}
       artifact_id: ${{ steps.artifact.outputs.artifact_id }}
+      artifact_digest: ${{ steps.artifact.outputs.artifact_digest }}
+      artifact_bytes: ${{ steps.artifact.outputs.artifact_bytes }}
     steps:
       - uses: actions/checkout@v6
         with: { persist-credentials: false }
@@ -90,6 +108,8 @@ jobs:
     outputs:
       run_id: ${{ steps.run.outputs.run_id }}
       artifact_id: ${{ steps.artifact.outputs.artifact_id }}
+      artifact_digest: ${{ steps.artifact.outputs.artifact_digest }}
+      artifact_bytes: ${{ steps.artifact.outputs.artifact_bytes }}
     steps:
       - uses: actions/checkout@v6
         with: { persist-credentials: false }
@@ -110,6 +130,8 @@ jobs:
     outputs:
       run_id: ${{ steps.run.outputs.run_id }}
       artifact_id: ${{ steps.artifact.outputs.artifact_id }}
+      artifact_digest: ${{ steps.artifact.outputs.artifact_digest }}
+      artifact_bytes: ${{ steps.artifact.outputs.artifact_bytes }}
     steps:
       - uses: actions/checkout@v6
         with: { persist-credentials: false }
@@ -130,6 +152,8 @@ jobs:
     outputs:
       run_id: ${{ steps.run.outputs.run_id }}
       artifact_id: ${{ steps.artifact.outputs.artifact_id }}
+      artifact_digest: ${{ steps.artifact.outputs.artifact_digest }}
+      artifact_bytes: ${{ steps.artifact.outputs.artifact_bytes }}
     steps:
       - uses: actions/checkout@v6
         with: { persist-credentials: false }
@@ -159,16 +183,38 @@ jobs:
           node scripts/release-coordinator.mjs state
           --source "$EMATE_SOURCE" --version "$EMATE_VERSION" --mode "${{ inputs.release_mode }}"
           --ci-run "${{ needs.ci.outputs.run_id }}"
-          --profile-run "${{ needs.profile.outputs.run_id }}" --profile-artifact "${{ needs.profile.outputs.artifact_id }}"
-          --desktop-run "${{ needs.desktop.outputs.run_id }}" --desktop-artifact "${{ needs.desktop.outputs.artifact_id }}"
-          --performance-run "${{ needs.performance.outputs.run_id }}" --performance-artifact "${{ needs.performance.outputs.artifact_id }}"
-          --admission-run "${{ needs.admission.outputs.run_id }}" --admission-artifact "${{ needs.admission.outputs.artifact_id }}"
-          --macos-artifact "${{ needs.ci.outputs.macos_artifact_id }}" --windows-artifact "${{ needs.ci.outputs.windows_artifact_id }}"
+          --profile-run "${{ needs.profile.outputs.run_id }}" --profile-artifact "${{ needs.profile.outputs.artifact_id }}" --profile-digest "${{ needs.profile.outputs.artifact_digest }}" --profile-bytes "${{ needs.profile.outputs.artifact_bytes }}"
+          --desktop-run "${{ needs.desktop.outputs.run_id }}" --desktop-artifact "${{ needs.desktop.outputs.artifact_id }}" --desktop-digest "${{ needs.desktop.outputs.artifact_digest }}" --desktop-bytes "${{ needs.desktop.outputs.artifact_bytes }}"
+          --performance-run "${{ needs.performance.outputs.run_id }}" --performance-artifact "${{ needs.performance.outputs.artifact_id }}" --performance-digest "${{ needs.performance.outputs.artifact_digest }}" --performance-bytes "${{ needs.performance.outputs.artifact_bytes }}"
+          --admission-run "${{ needs.admission.outputs.run_id }}" --admission-artifact "${{ needs.admission.outputs.artifact_id }}" --admission-digest "${{ needs.admission.outputs.artifact_digest }}" --admission-bytes "${{ needs.admission.outputs.artifact_bytes }}"
+          --macos-artifact "${{ needs.ci.outputs.macos_artifact_id }}" --macos-digest "${{ needs.ci.outputs.macos_artifact_digest }}" --macos-bytes "${{ needs.ci.outputs.macos_artifact_bytes }}"
+          --windows-artifact "${{ needs.ci.outputs.windows_artifact_id }}" --windows-digest "${{ needs.ci.outputs.windows_artifact_digest }}" --windows-bytes "${{ needs.ci.outputs.windows_artifact_bytes }}"
           --out release-state.json
       - run: test "$(jq -r .status release-state.json)" = admitted-awaiting-cloudflare-plugin
+      - name: Emit the closed website publication handoff
+        env:
+          WEBSITE_PUBLIC_ORIGIN: ${{ inputs.website_public_origin }}
+          WEBSITE_EXPECTED_ACTIVE_TARGET: ${{ inputs.website_expected_active_target }}
+          WEBSITE_EXPECTED_ACTIVE_INDEX: ${{ inputs.website_expected_active_index }}
+        run: >-
+          node scripts/render-download-page.mjs
+          --commit "$EMATE_SOURCE"
+          --out website-handoff/download-page
+          --plan website-handoff/website-publication-plan.json
+          --release-state release-state.json
+          --public-origin "$WEBSITE_PUBLIC_ORIGIN"
+          --expected-active-target "$WEBSITE_EXPECTED_ACTIVE_TARGET"
+          --expected-active-index "$WEBSITE_EXPECTED_ACTIVE_INDEX"
       - uses: actions/upload-artifact@v4
         with:
           name: e-mate-release-state-${{ inputs.source_sha }}
           path: release-state.json
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-website-handoff-${{ inputs.source_sha }}
+          path: website-handoff
+          include-hidden-files: false
           if-no-files-found: error
           retention-days: 30
