@@ -2897,3 +2897,31 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 本地 deterministic bundle `lib/client.js` 为 `282820` bytes / SHA-256 `9992724fc2af2f3a779afb64bacbc6c6d43a55bf198f1561d728fdcac9beb2a9`，入口 `index.js` 为 `2152` bytes / SHA-256 `84a45acf8b667f0ccdecdc53d17bfee5e109159a9219c4cde36513677780e789`；这些是开发证据，不是签名发布字节。
 - Remaining blockers: 重基后的 exact source PR/Base CI、首次三目标完整 Profile bootstrap/boot、隔离安装态派 1/2/4 子代理时顶层计数、父入口可达、搜索/批量/Home、连接重建、重启、Profile 激活/回滚及最终签名 generation identity 尚未完成。
 - Next exact action: 提交 source-fix PR；只消费 exact protected-main CI 产出的 Shell payload，在隔离 non-production Profile 上完成上述安装态矩阵后才允许进入正式 Profile 发布。
+
+## 2026-08-27 · 2.0.13 emergency legacy 正式发布恢复边界
+
+- Goal checkpoint: 子代理投影合入受保护主干后准备正式性能/发布时，公网只读回读证明 `desktop/latest.json` 已被 emergency 2.0.13 占用，而正式发布 action 仍只接受冻结 2.0.12 前驱；本条修复唯一发布前驱边界并删除 post-emergency 的非必要 Base 运行时增量，不执行生产写入。
+- Frozen baseline / current HEAD: 起点为 protected `public-2011/main@9f229900081e03d088012d28edfc1f5b8bb1ced1`、CI `32996160263`；公网 emergency legacy 为 `948` bytes / SHA-256 `1d70004c726e458525205dd370ebea595b3121ffd2afe49d7c65d646c4ac19c4`，`desktop/signed/latest.json` 仍为 `404`；官网 index 仍为 `636` bytes / SHA-256 `02ea7f5f44ef41390c41901b3f385754bc333f19be4a9aa0efe582890a7a252c`。
+- Binding documents read: 唯一主 Goal、根 `AGENTS.md`、`target-contract.md`、`plugin-contracts.md`、`performance-and-acceptance.md`、S35、最新完整 development log、Desktop/Profile/performance/admission/coordinator/publication workflows 与固定外部 publication action。
+- Inspected native seam: Base updater 只接受远端更高 SemVer，已安装 emergency 2.0.13 不会自动消费另一组同版本 Base；post-emergency Desktop 改动只把既有 Windows caption 的 `46px/12px/#7f858f` 常量再投影为 CSS 变量，而 Shell 已有完全相同 fallback。生产 signer 在固定 action 内把 legacy 前驱硬编码为单一 2.0.12 tombstone。
+- Experiment or why unnecessary: 删除三项重复 Desktop CSS 常量投影及其测试后，工作树相对 `a9632e787e8843c189cbb79a9725c72461982dcd` 的 `desktop/e-mate-desktop/src` 和对应 client environment 测试 diff 为空；Shell 的 Windows safe-area/fallback 与子代理 selector 保持不变。外部 action 增加唯一 emergency identity 正例后全套 `88/88`，任意其他 948-byte identity 仍失败关闭。
+- Decision and forbidden alternatives: legacy CAS 只接受冻结 2.0.12 或上述唯一 immutable emergency 2.0.13 identity；不接受任意同 SemVer、内容推断、无条件覆盖或第二 updater。已安装 emergency cohort 的用户可见修复必须全部由首次完整 Profile 承担，因此删除而不是保留 post-emergency Base 运行时差异。正式 signed/manual/legacy 最终仍必须是同一 admitted manifest bytes，legacy 仍是绝对最后条件写。
+- Changed scope: 外部 publication action 的精确双前驱校验/文档/测试；主仓固定 action pin、performance/publication/website handoff 合同、四个重复 Desktop 常量投影文件的反向删除及绑定文档。本条未改 Harness、Session/ImageGen/Subagent、模型头/路由、安装器事务、R2、Feed、desired state、官网或用户数据。
+- Verification commands and results: 外部 action Node 24 `88/88`、`git diff --check`；主仓 Desktop admission/release/coordinator `28/28`、`git diff --check`；相对 emergency source 的 Desktop runtime/test diff 为空。验证列车 Desktop run `33000731208` 成功；首次完整 Profile run `33000733886` 为 `25/25` 成功，三目标完整组合、boot 和签名交接准备均通过。
+- Immutable evidence / receipt: 外部 PR `zyfjacksonchen-source/e-mate-desktop-publication#5` 已合入 protected main `4193d2ae0a87327f161ce4a5b69bf60aee1ab052`。Desktop artifact `9618497574` 为 `679913746` bytes / `sha256:49b9287aed4fb587a7bcd4d984ff60911b6a9597bf5bc34c9972dab3f238b7f1`；Profile publication artifact `9618933972` 为 `74741125` bytes / `sha256:b4c4f9511a12dc4e9ed46c18b8771e436b67a1ddf185f27fc01d66d3b4e2f982`。二者绑定旧 source `9f229900…`，只证明链路，不是本修复后的最终候选。
+- Remaining blockers: 本恢复 diff 仍须独立 PR、受保护主干 CI 与新的 exact-source Desktop/Profile；随后才可运行四模型安装态性能、signed admission、双平台安装/更新/回滚、Cloudflare plugin 三入口 CAS、公网回读和官网 `current` 切换。现有 emergency 安装 cohort 还须以正式 Profile 激活/重启和顶层 1/2/4 子代理矩阵证明等价，不能以源码 diff 关闭。
+- Next exact action: 提交本最小恢复 PR并等待 protected CI；只消费其 attempt-1 artifact set，禁止复用 `9f229900…` 候选继续 performance 或生产发布。
+
+## 2026-08-27 · 2.0.13 emergency legacy PR 首次 CI 纠错
+
+- Goal checkpoint: 正式发布恢复 PR 的首次完整 CI 在 Windows 标题栏几何测试失败；本条只修测试继续读取已删除重复 Base 常量造成的 `NaN`，不恢复运行时增量。
+- Frozen baseline / current HEAD: PR `#78` head `21b4fafffa28068498acfbaa9911de401fd27c9e`，失败 CI `33002121754`；受保护基线仍为 `9f229900081e03d088012d28edfc1f5b8bb1ced1`。
+- Binding documents read: 唯一主 Goal、根 `AGENTS.md`、S35、上一条 emergency legacy 正式发布恢复边界。
+- Inspected native seam: Shell CSS 已把 Windows 按钮宽度、符号尺寸与颜色的离线 fallback 固定为 `46px`、`12px`、`#7f858f`；测试仍从已按上一条决策删除的 Desktop 导出读取同值，未导出符号在运行时变为 `undefined`，三按钮宽度计算因此得到 `NaN`。
+- Experiment or why unnecessary: CI 精确失败为 `header-controls.client.spec.tsx:97` 的 `expected NaN to be greater than or equal to 0`；删除三个失效导入并让几何测试使用已经由同文件 CSS 正则锁定的 `46px` fallback 后，聚焦测试 `8/8` 通过。
+- Decision and forbidden alternatives: 只调整 Profile 所有的合同测试，不恢复 Desktop 常量、CSS token 或同版本 Base 差异；产品运行时继续保持相对 emergency source 的 Desktop diff 为空。
+- Changed scope: `@e-mate/dsh-client-shell` Windows 标题栏测试与本 append-only 记录；无产品运行时代码、R2、Feed、desired state、官网或用户数据写入。
+- Verification commands and results: 固定 Harness Host/Client 本地构建通过；`vitest run tests/header-controls.client.spec.tsx` 为 `1 file / 8 tests` 全过；`git diff --check` 通过。修正后的 PR CI 待回填。
+- Immutable evidence / receipt: 首次失败 CI `33002121754` 永久保留为负例，不可作为候选或发布证据。
+- Remaining blockers: 修正后的 PR CI、受保护主干、新 exact-source Desktop/Profile、正式性能/admission、双平台安装/更新/回滚、Cloudflare 三入口与官网原子切换均保持 OPEN。
+- Next exact action: 更新同一 PR 并等待精确 head CI；通过后才合入受保护主干并生成一次新的候选集。

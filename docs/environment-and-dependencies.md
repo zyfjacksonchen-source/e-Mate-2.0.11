@@ -30,7 +30,7 @@ e-Mate 2.0.11 is an Electron desktop application derived from the pinned `deepse
 | Portable Profile component | One DSH Host/Client plugin, generated assets and bundled non-Base dependencies | Plugin-only delta after full generation composition |
 | Platform Profile component | Computer Use or Vision target closure bound to exact OS/arch/runtime/signing tuple | Per-target plugin delta after native matrix |
 | Signed desired state | Complete accepted component set and exact Base/Harness contract | Activated last per target |
-| `desktop/latest.json` | One-time v6→v7 bootstrap pointer: exact 2.0.12 predecessor until final 2.0.13 activation, then the exact accepted signed 2.0.13 bytes | CAS-advanced once to 2.0.13 as the absolute last publication write; never advanced again |
+| `desktop/latest.json` | One-time v6→v7 bootstrap pointer: exact frozen 2.0.12 or receipted emergency 2.0.13 predecessor until final activation, then the exact accepted signed 2.0.13 bytes | CAS-advanced to the formal 2.0.13 bytes as the absolute last publication write; never advanced again |
 | `desktop/manual/v<version>/latest.json` | Create-only signed Base installer identity for formal manual bootstrap | Published and publicly read back before the active pointer |
 | `desktop/signed/latest.json` | Base v7 active signed installer identity | CAS-activated last after installer acceptance |
 

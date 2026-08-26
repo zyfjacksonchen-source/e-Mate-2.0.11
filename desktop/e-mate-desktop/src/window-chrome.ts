@@ -12,12 +12,3 @@ export const WINDOWS_TITLEBAR_HEIGHT = 32
 
 /** Width reserved for the three native Windows caption controls in CSS pixels. */
 export const WINDOWS_CAPTION_CONTROLS_WIDTH = 138
-
-/** Width of one native Windows caption control in CSS pixels. */
-export const WINDOWS_CAPTION_BUTTON_WIDTH = WINDOWS_CAPTION_CONTROLS_WIDTH / 3
-
-/** Apparent native Windows caption glyph size in CSS pixels. */
-export const WINDOWS_CAPTION_SYMBOL_SIZE = 12
-
-/** Native Windows caption glyph color shared with adjacent app utilities. */
-export const WINDOWS_CAPTION_SYMBOL_COLOR = '#7f858f'

@@ -2,10 +2,7 @@ import {
   MACOS_DRAG_REGION_HEIGHT,
   MACOS_TITLEBAR_HEIGHT,
   MACOS_TRAFFIC_LIGHT_SAFE_WIDTH,
-  WINDOWS_CAPTION_BUTTON_WIDTH,
   WINDOWS_CAPTION_CONTROLS_WIDTH,
-  WINDOWS_CAPTION_SYMBOL_COLOR,
-  WINDOWS_CAPTION_SYMBOL_SIZE,
   WINDOWS_TITLEBAR_HEIGHT,
 } from '../window-chrome.ts'
 import { SIDEBAR_COLLAPSED } from './layout-state.ts'
@@ -14,7 +11,7 @@ import { SIDEBAR_COLLAPSED } from './layout-state.ts'
 const ADVANCED_STYLES = `
 html, body, #root { width: 100%; height: 100%; }
 body[data-dsh-desktop-mode="advanced"] { --dsh-desktop-caption-safe-width: 0px; margin: 0; background: transparent !important; }
-body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"] { --dsh-desktop-caption-safe-width: max(${WINDOWS_CAPTION_CONTROLS_WIDTH}px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))); --dsh-desktop-caption-button-width: ${WINDOWS_CAPTION_BUTTON_WIDTH}px; --dsh-desktop-caption-symbol-size: ${WINDOWS_CAPTION_SYMBOL_SIZE}px; --dsh-desktop-caption-symbol-color: ${WINDOWS_CAPTION_SYMBOL_COLOR}; }
+body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"] { --dsh-desktop-caption-safe-width: max(${WINDOWS_CAPTION_CONTROLS_WIDTH}px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))); }
 .dshDesktopFrame { position: relative; display: grid; grid-template-rows: 100%; width: 100%; height: 100%; overflow: hidden; background: transparent; }
 .dshDesktopSidebarSurface { --dsw-specific-sidebar-fill: transparent; position: relative; grid-column: 1; grid-row: 1; min-width: 0; overflow: hidden; background: transparent; border-right: 1px solid var(--dsw-alias-border-l1); }
 .dshDesktopUpstreamSidebar { box-sizing: border-box; width: 100%; height: 100%; }
