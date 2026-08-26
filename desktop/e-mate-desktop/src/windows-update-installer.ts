@@ -35,6 +35,7 @@ const SOURCE_COMMIT = /^[0-9a-f]{40}$/u
 const BASE_CONTRACT_ID = /^[A-Za-z0-9._-]{1,200}$/u
 const SID = /^S-1-(?:[0-9]+-){1,14}[0-9]+$/u
 const MAX_JSON_BYTES = 64 * 1024
+const TRANSACTION_ID_PREFIX_CHARS = 12
 const READY_TIMEOUT_MS = 60_000
 const CONFIRMATION_TIMEOUT_MS = 120_000
 const POLL_MS = 100
@@ -191,6 +192,11 @@ function sameWindowsPath(left: string, right: string): boolean {
   return resolve(left).toLocaleLowerCase('en-US') === resolve(right).toLocaleLowerCase('en-US')
 }
 
+function transactionRoot(canonicalDirectory: string, transactionId: string): string {
+  const compactId = transactionId.replaceAll('-', '').slice(0, TRANSACTION_ID_PREFIX_CHARS)
+  return join(dirname(resolve(canonicalDirectory)), '.u', compactId)
+}
+
 function stableVersion(value: unknown): value is string {
   if (typeof value !== 'string') return false
   const parsed = parseSemVer(value)
@@ -282,8 +288,6 @@ export function parseWindowsUpdateRequest(value: unknown, requestPath: string, t
   }
   const request = value as unknown as WindowsUpdateRequest
   const mailbox = resolve(dirname(requestPath))
-  const canonicalParent = resolve(dirname(request.canonicalDirectory))
-  const transactionContainer = join(canonicalParent, `.${APP_ID}-update`)
   const managedAdmission = request.admission.kind === 'managed-manifest'
     && request.sourceCommit !== null
     && request.artifact.url !== null
@@ -298,7 +302,7 @@ export function parseWindowsUpdateRequest(value: unknown, requestPath: string, t
     || !sameWindowsPath(request.pendingPath, join(dirname(mailbox), 'pending.json'))
     || basename(request.currentExecutable).toLocaleLowerCase('en-US') !== 'e-mate.exe'
     || !sameWindowsPath(request.currentExecutable, join(resolve(request.canonicalDirectory), 'e-Mate.exe'))
-    || !sameWindowsPath(request.transactionRoot, join(transactionContainer, request.transactionId))
+    || !sameWindowsPath(request.transactionRoot, transactionRoot(request.canonicalDirectory, request.transactionId))
     || sameWindowsPath(request.transactionRoot, request.canonicalDirectory)
     || inside(resolve(request.canonicalDirectory), resolve(request.transactionRoot))
     || inside(resolve(request.transactionRoot), resolve(request.canonicalDirectory))
@@ -529,10 +533,10 @@ function assertCandidateJournal(
     || !parseIsoTimestamp(value.updatedAt)
     || Object.entries(commitIdentity(request)).some(([key, expected]) =>
       !sameCommitIdentityValue(key, value[key], expected, request))
-    || !sameWindowsPath(String(value.candidateDirectory), join(request.transactionRoot, 'candidate'))
-    || !sameWindowsPath(String(value.lastGoodDirectory), join(request.transactionRoot, 'last-good'))
-    || !sameWindowsPath(String(value.failedDirectory), join(request.transactionRoot, 'failed'))
-    || !sameWindowsPath(String(value.candidateExecutable), join(request.transactionRoot, 'candidate', 'e-Mate.exe'))) {
+    || !sameWindowsPath(String(value.candidateDirectory), join(request.transactionRoot, 'c'))
+    || !sameWindowsPath(String(value.lastGoodDirectory), join(request.transactionRoot, 'o'))
+    || !sameWindowsPath(String(value.failedDirectory), join(request.transactionRoot, 'f'))
+    || !sameWindowsPath(String(value.candidateExecutable), join(request.transactionRoot, 'c', 'e-Mate.exe'))) {
     throw new Error('Windows update candidate journal is invalid')
   }
 }
@@ -626,7 +630,7 @@ export async function scheduleWindowsUpdateInstallation(
     currentExecutable,
     currentExecutableSha256: await sha256File(currentExecutable),
     canonicalDirectory,
-    transactionRoot: join(dirname(canonicalDirectory), `.${APP_ID}-update`, transactionId),
+    transactionRoot: transactionRoot(canonicalDirectory, transactionId),
     mailboxPath,
     pendingPath,
     createdAt: new Date().toISOString(),
