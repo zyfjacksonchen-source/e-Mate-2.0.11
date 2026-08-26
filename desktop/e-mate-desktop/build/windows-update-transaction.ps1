@@ -222,6 +222,8 @@ function Assert-CommitIdentity($Document, $Request) {
 
 function Assert-MailboxAcl([string]$MailboxPath, [string]$OwnerSid) {
   $acl = Get-Acl -LiteralPath $MailboxPath
+  $actualOwnerSid = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+  Assert-True ($actualOwnerSid -eq $OwnerSid) 'update mailbox owner mismatch'
   Assert-True $acl.AreAccessRulesProtected 'update mailbox inherits ACLs'
   $allowed = @($OwnerSid, 'S-1-5-18', 'S-1-5-32-544')
   $sawOwner = $false
@@ -236,22 +238,13 @@ function Assert-MailboxAcl([string]$MailboxPath, [string]$OwnerSid) {
 }
 
 function Set-PrivateDirectoryAcl([string]$Path, [string]$OwnerSid) {
-  $owner = [Security.Principal.SecurityIdentifier]::new($OwnerSid)
-  $acl = [Security.AccessControl.DirectorySecurity]::new()
-  $acl.SetOwner($owner)
-  $acl.SetAccessRuleProtection($true, $false)
-  foreach ($sid in @($OwnerSid, 'S-1-5-18', 'S-1-5-32-544')) {
-    $identity = [Security.Principal.SecurityIdentifier]::new($sid)
-    $rule = [Security.AccessControl.FileSystemAccessRule]::new(
-      $identity,
-      [Security.AccessControl.FileSystemRights]::FullControl,
-      [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
-      [Security.AccessControl.PropagationFlags]::None,
-      [Security.AccessControl.AccessControlType]::Allow
-    )
-    [void]$acl.AddAccessRule($rule)
-  }
-  Set-Acl -LiteralPath $Path -AclObject $acl
+  & icacls.exe $Path `
+    '/inheritance:r' `
+    '/grant:r' `
+    "*${OwnerSid}:(OI)(CI)F" `
+    '*S-1-5-18:(OI)(CI)F' `
+    '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+  Assert-True ($LASTEXITCODE -eq 0) 'failed to secure update mailbox'
   Assert-MailboxAcl $Path $OwnerSid
 }
 
