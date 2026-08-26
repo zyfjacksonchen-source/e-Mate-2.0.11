@@ -38,6 +38,12 @@ jobs:
         with:
           node-version: '22.23.2'
 
+      - run: corepack enable
+
+      - name: Install the exact Desktop verifier closure
+        working-directory: desktop
+        run: yarn install --immutable
+
       - name: Accept only the exact attempt-1 protected-main CI producer
         env:
           GH_TOKEN: ${{ github.token }}
