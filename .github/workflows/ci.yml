@@ -751,7 +751,7 @@ jobs:
     timeout-minutes: 90
     env:
       ELECTRON_CACHE: ${{ github.workspace }}/.release-cache/electron
-      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.release-cache/electron-builder
+      ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/e-mate-electron-builder
     steps:
       - name: Start job timing
         id: timing
@@ -876,7 +876,7 @@ jobs:
     timeout-minutes: 90
     env:
       ELECTRON_CACHE: ${{ github.workspace }}/.release-cache/electron
-      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.release-cache/electron-builder
+      ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/e-mate-electron-builder
     steps:
       - name: Start job timing
         id: timing
