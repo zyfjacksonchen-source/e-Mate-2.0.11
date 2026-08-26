@@ -2772,3 +2772,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: GitHub run `32928852497` 在 `Verify Desktop bytes and resolve their CI producer run` 失败；未调用模型、未发布 R2/官网。
 - Remaining blockers: 修复合并主线并重跑完整协调器。
 - Next exact action: 运行窄测试、提交 PR、等待主线 CI 后以新源码重新协调发布。
+
+## 2026-08-26 · 2.0.13 Windows 2.0.12 原子更新版本规范化
+
+- Goal checkpoint: exact protected-main Windows candidate 在真实 2.0.12 覆盖更新中于安装器原生 `Inspect` 阶段 fail closed；本条只修该共享事务根因，不发布、不卸载重装、不改用户状态。
+- Frozen baseline / current HEAD: 独立分支 `fix/win-product-version-2013` 基于 source `9b96035819e691739a4599ffa3f69512112b796a` / CI `32926072469`；失败候选安装器为 `281339666` bytes、SHA-256 `e6b842f8a51c74b17945552c630f41971039771b4d39f4410b3a8da260efbf8e`。
+- Binding documents read: 根 `AGENTS.md`、`docs/target-contract.md`、最新完整 development log、Windows update transaction与既有合同测试。
+- Inspected native seam: 实机 2.0.12 `e-Mate.exe` 的 Windows `ProductVersion` 为 `2.0.12.0`；同候选内嵌 `Get-ManualInstallContext()` 只接受三段版本，原生 `Inspect` 确定性报 `installed version rejected`，因此静默路径返回1、交互路径在SHA确认前退出，原子交换尚未发生。
+- Experiment or why unnecessary: exact候选同源脚本在实机直接复现失败；修复脚本的原生 `SelfTest` 通过，且对同一安装态执行只读 `Inspect` 正确投影 `currentVersion=2.0.12`、`targetVersion=2.0.13` 和原候选SHA。无需注册表清理、第二安装器、卸载重装或私有回执伪造。
+- Decision and forbidden alternatives: 共享事务入口只把严格 `x.y.z.0` 规范化为 `x.y.z`；既有三段值原样保留，第四段非零、`00`、前导零、缺段和后缀继续 fail closed。版本比较、请求、日志和安装器UI仍只使用canonical三段值。
+- Changed scope: `desktop/e-mate-desktop/build/windows-update-transaction.ps1`、其既有合同测试和本append-only记录；未改Base/Profile/Harness、模型/搜索/账号、安装包、R2、Feed、官网或用户数据。
+- Verification commands and results: Windows原生 `-Operation SelfTest`通过；同一2.0.12安装态只读`-Operation Inspect`通过并返回canonical版本与exact SHA；`git diff --check`通过。
+- Immutable evidence / receipt: 2.0.12用户数据已在安装前做可恢复私有备份；失败候选未进入rename/swap，已安装文件仍为2.0.12。修复目前仅为源码与实机脚本验证，不是候选构建或安装通过。
+- Remaining blockers: 必须合入protected main、产生新的attempt-1 exact Windows安装器并重新执行2.0.12→2.0.13原子更新、启动、会话、导航、登录/模型/搜索隔离和回滚验收；旧 `9b960` 候选永久作废。
+- Next exact action: 提交最小修复供主线合入；只消费新protected-main CI的exact字节重跑Windows实机验收。
