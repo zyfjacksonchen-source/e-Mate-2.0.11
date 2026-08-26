@@ -1,36 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useState, type ComponentType } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ComponentType } from 'react'
 import { createPortal } from 'react-dom'
+import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
 import css from './home.module.css'
+import { collectInternalSubagentIds, isTopLevelProductSession } from './session-visibility.ts'
 import { newestSessionFirst } from './sidebar.tsx'
 import { formatTokenCount } from './token-format.ts'
 
-interface SessionRow {
-  id: string
-  displayTitle: string
-  parentId?: string
-  running: boolean
-  completed?: boolean
-  pendingInteraction?: unknown
-  blank: boolean
-  updatedAt: number
-  projectionValues?: {
-    tokenUsage?: {
-      uncachedInputTokens: number
-      outputTokens: number
-      cacheReadTokens: number
-      cacheWriteTokens: number
-    }
-  }
-}
-
-interface SessionState {
-  ids: string[]
-  byId: Record<string, SessionRow>
-  current?: string
-}
-
 interface Props {
-  useSessions: <T>(selector: (state: SessionState) => T) => T
+  useSessions: <T>(selector: (state: SessionListState) => T) => T
   openSession: (id: string) => void
   prepareSchedulePrompt: (prompt: string, sessionId?: string) => Promise<void>
   callSchedules: () => Promise<unknown>
@@ -128,9 +105,14 @@ export function HomeProjection({
   closeDetails,
   PanelIcon,
 }: Props) {
-  const current = useSessions(state => state.current)
-  const ids = useSessions(state => state.ids)
-  const byId = useSessions(state => state.byId)
+  const sessionSnapshot = useSessions(state => state)
+  const { byId, current } = sessionSnapshot
+  const internalSubagentIds = useMemo(() => collectInternalSubagentIds(sessionSnapshot), [sessionSnapshot])
+  const productSessions = useMemo(() => sessionSnapshot.ids
+    .map(id => byId[id])
+    .filter((row): row is SessionSummary => row !== undefined
+      && isTopLevelProductSession(row, internalSubagentIds)),
+  [byId, internalSubagentIds, sessionSnapshot.ids])
   const [pathname, setPathname] = useState(() => location.pathname)
   const [target, setTarget] = useState<Element | null>(null)
   const [scheduleBusy, setScheduleBusy] = useState<string | null>(null)
@@ -296,10 +278,8 @@ export function HomeProjection({
     )
   }
 
-  const sessions = ids.map(id => byId[id])
-    .filter((row): row is SessionRow => row !== undefined && row.parentId === undefined)
-  const visible = sessions.filter(row => !row.blank)
-  const waiting = sessions.filter(row => row.pendingInteraction !== undefined).length
+  const visible = productSessions.filter(row => !row.blank)
+  const waiting = productSessions.filter(row => row.pendingInteraction !== undefined).length
   const completed = visible.filter(row => row.completed === true).length
   const tokenUsage = visible.reduce((total, row) => {
     const usage = row.projectionValues?.tokenUsage

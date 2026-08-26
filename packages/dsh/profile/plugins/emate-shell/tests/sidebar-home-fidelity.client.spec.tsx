@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import React from 'react'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { Context } from '@deepseek-ai/cordis'
 import { readFileSync } from 'node:fs'
 import { createPortal } from 'react-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { SessionRuntime, type SessionId, type SessionListState, type SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
 import { HomeProjection } from '../src/client/home.tsx'
 import {
   attachWorkspaceFromRoute,
@@ -13,6 +15,11 @@ import {
   startSessionFromRoute,
 } from '../src/client/index.ts'
 import { SessionRouteProjection } from '../src/client/session-route.tsx'
+import {
+  collectInternalSubagentIds,
+  highlightedProductSessionId,
+  isTopLevelProductSession,
+} from '../src/client/session-visibility.ts'
 import { newestSessionFirst, SidebarRoot } from '../src/client/sidebar.tsx'
 
 afterEach(() => {
@@ -39,6 +46,88 @@ const useReadyWorkspaces = <T,>(selector: (state: { baselinesReady: boolean }) =
 const idleSessions = {
   list: { getSnapshot: () => ({ current: undefined }), subscribe: () => () => {} },
 }
+
+function nativeSessionState(overrides: Record<string, unknown>): SessionListState {
+  return {
+    ids: [], byId: {}, current: undefined, phase: 'ready',
+    subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
+    ...overrides,
+  } as SessionListState
+}
+
+describe('native Subagent top-level visibility', () => {
+  it('consumes the real client Session projection produced by Host session-added frames', async () => {
+    const sessions = new SessionRuntime(new Context(), {} as never, {
+      commands: {
+        list: () => Promise.resolve({ ok: true, value: [] }),
+        execute: () => Promise.resolve({ ok: true, value: undefined }),
+      },
+    } as never)
+    sessions.handleHostEnvelope({
+      rpcId: 'parent-added' as never,
+      payload: { type: 'host/session-added', sessionId: 'parent' as SessionId, blank: false },
+    })
+    sessions.handleHostEnvelope({
+      rpcId: 'child-added' as never,
+      payload: {
+        type: 'host/session-added', sessionId: 'child' as SessionId, blank: false,
+        parentSessionId: 'parent' as SessionId, origin: 'subagent',
+      },
+    })
+    await Promise.resolve()
+
+    const state = sessions.list.getSnapshot()
+    const internal = collectInternalSubagentIds(state)
+    expect(state.byId['child' as SessionId]).toMatchObject({ parentId: 'parent', origin: 'subagent' })
+    expect(state.ids.filter(id => isTopLevelProductSession(state.byId[id]!, internal))).toEqual(['parent'])
+  })
+
+  it('converges origin, lineage, catalog and current-address signals without hiding a root task', () => {
+    const root = { id: 'root', displayTitle: 'root', running: false, blank: false, updatedAt: 1 } as SessionSummary
+    const origin = { ...root, id: 'origin', origin: 'subagent' as const }
+    const lineage = { ...root, id: 'lineage', parentId: 'root' }
+    const catalog = { ...root, id: 'catalog' }
+    const addressed = { ...root, id: 'addressed' }
+    const state = nativeSessionState({
+      ids: [root.id, origin.id, lineage.id, catalog.id, addressed.id],
+      byId: { root, origin, lineage, catalog, addressed },
+      current: addressed.id,
+      subagentsByParent: {
+        [root.id]: {
+          entries: [{ kind: 'child', id: catalog.id, mode: 'one-shot', activity: 'inactive', hasChildren: false }],
+          parentAvailable: true, state: 'ready', error: null,
+        },
+      },
+      currentAddress: { parentSessionId: root.id, childSessionId: addressed.id, mode: 'one-shot' },
+    })
+
+    const internal = collectInternalSubagentIds(state)
+    expect([...internal].sort()).toEqual(['addressed', 'catalog', 'lineage', 'origin'])
+    expect(isTopLevelProductSession(root, internal)).toBe(true)
+    expect([origin, lineage, catalog, addressed].every(row => !isTopLevelProductSession(row, internal))).toBe(true)
+    expect(highlightedProductSessionId(state)).toBe(root.id)
+  })
+
+  it.each([1, 2, 4])('keeps the top-level count stable while %i children arrive and after state rebuild', (count) => {
+    const parent = { id: 'parent', displayTitle: 'parent', running: false, blank: false, updatedAt: 1 } as SessionSummary
+    const children = Array.from({ length: count }, (_, index) => ({
+      ...parent, id: `child-${String(index)}`, origin: 'subagent' as const, updatedAt: index + 2,
+    }))
+    const childOnly = nativeSessionState({
+      ids: children.map(row => row.id),
+      byId: Object.fromEntries(children.map(row => [row.id, row])),
+    })
+    const settled = nativeSessionState({
+      ids: [parent.id, ...children.map(row => row.id)],
+      byId: { [parent.id]: parent, ...Object.fromEntries(children.map(row => [row.id, row])) },
+    })
+
+    expect(childOnly.ids.filter(id => isTopLevelProductSession(childOnly.byId[id]!, collectInternalSubagentIds(childOnly)))).toEqual([])
+    for (const rebuilt of [settled, structuredClone(settled) as SessionListState]) {
+      expect(rebuilt.ids.filter(id => isTopLevelProductSession(rebuilt.byId[id]!, collectInternalSubagentIds(rebuilt)))).toEqual([parent.id])
+    }
+  })
+})
 
 describe('pinned e-Mate Sidebar and Home projection', () => {
   it('keeps Home visible when rc.7 reuses the same blank session for a generic new task', async () => {
@@ -257,21 +346,28 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
   })
 
   it('keeps the current Sidebar hierarchy while driving real session and workspace actions', async () => {
-    const sessions = {
-      ids: ['project-session', 'project-image-child', 'general-session', 'general-image-child'],
+    const sessions = nativeSessionState({
+      ids: ['project-session', 'project-image-child', 'general-session', 'general-image-child', 'general-catalog-child'],
       byId: {
         'project-session': { id: 'project-session', displayTitle: '项目任务', running: false, blank: false, updatedAt: 2 },
-        'project-image-child': { id: 'project-image-child', displayTitle: '一次性子代理记录', parentId: 'project-session', running: false, blank: false, updatedAt: 4 },
+        'project-image-child': { id: 'project-image-child', displayTitle: '一次性子代理记录', origin: 'subagent', running: false, blank: false, updatedAt: 4 },
         'general-session': { id: 'general-session', displayTitle: '通用任务', running: true, blank: false, updatedAt: 1 },
         'general-image-child': { id: 'general-image-child', displayTitle: '内部生图会话', parentId: 'general-session', running: false, blank: false, updatedAt: 3 },
+        'general-catalog-child': { id: 'general-catalog-child', displayTitle: 'This is one e-Mate image', running: false, blank: false, updatedAt: 5 },
       },
-      current: undefined,
-      phase: 'ready' as const,
-    }
+      current: 'project-image-child',
+      subagentsByParent: {
+        'general-session': {
+          entries: [{ kind: 'child', id: 'general-catalog-child', mode: 'one-shot', activity: 'running', hasChildren: false }],
+          parentAvailable: true, state: 'ready', error: null,
+        },
+      },
+      currentAddress: { parentSessionId: 'project-session', childSessionId: 'project-image-child', mode: 'one-shot' },
+    })
     const workspaces = {
       items: [
         { workspaceId: 'workspace-1', path: '/work/quarterly', title: '季度报告', sessionIds: ['project-session', 'project-image-child'] },
-        { workspaceId: 'workspace-general', path: '/home/test/.dsh/e-mate/general', title: '通用会话', sessionIds: ['general-session', 'general-image-child'] },
+        { workspaceId: 'workspace-general', path: '/home/test/.dsh/e-mate/general', title: '通用会话', sessionIds: ['general-session', 'general-image-child', 'general-catalog-child'] },
       ],
       archivedSessionIds: [],
       phase: 'ready' as const,
@@ -333,6 +429,11 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(screen.getByRole('region', { name: '会话' }).textContent).toContain('通用任务')
     expect(screen.queryByText('一次性子代理记录')).toBeNull()
     expect(screen.queryByText('内部生图会话')).toBeNull()
+    expect(screen.queryByText('This is one e-Mate image')).toBeNull()
+    expect(screen.getByRole('button', { name: '打开任务：项目任务' }).getAttribute('aria-current')).toBe('page')
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索会话' }), { target: { value: 'This is one e-Mate image' } })
+    expect(screen.getByText('没有匹配的会话')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '关闭搜索' }))
     fireEvent.click(screen.getByRole('button', { name: '新建任务' }))
     expect(startSession).toHaveBeenCalledWith()
     fireEvent.click(screen.getByRole('button', { name: '打开任务：通用任务' }))
@@ -386,13 +487,15 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
 
   it('batch-removes selected project and general sessions through the native archive action', async () => {
     const sessions = {
-      ids: ['project-session', 'general-session'],
+      ids: ['project-session', 'general-session', 'image-child'],
       byId: {
         'project-session': { id: 'project-session', displayTitle: '项目任务', running: false, blank: false, updatedAt: 2 },
         'general-session': { id: 'general-session', displayTitle: '通用任务', running: false, blank: false, updatedAt: 1 },
+        'image-child': { id: 'image-child', displayTitle: 'This is one e-Mate image', origin: 'subagent' as const, running: false, blank: false, updatedAt: 3 },
       },
       current: undefined,
       phase: 'ready' as const,
+      subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
     }
     const workspaces = {
       items: [
@@ -437,6 +540,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     fireEvent.click(screen.getByRole('button', { name: '批量删除' }))
     expect(screen.getByRole('checkbox', { name: '选择会话：项目任务' })).not.toBeNull()
     expect(screen.getByRole('checkbox', { name: '选择会话：通用任务' })).not.toBeNull()
+    expect(screen.queryByRole('checkbox', { name: '选择会话：This is one e-Mate image' })).toBeNull()
     expect(screen.queryByRole('button', { name: '打开任务：通用任务' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '全选' }))
     fireEvent.click(screen.getByRole('button', { name: '删除（2）' }))
@@ -460,8 +564,8 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     phase.append(overlay)
     document.body.append(phase)
     const openSession = vi.fn()
-    const state = {
-      ids: ['session-1', 'image-child'],
+    const state = nativeSessionState({
+      ids: ['session-1', 'image-child', 'catalog-child'],
       byId: {
         'session-1': {
           id: 'session-1',
@@ -475,15 +579,28 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
           },
         },
         'image-child': {
-          id: 'image-child', displayTitle: '一次性子代理记录', parentId: 'session-1', running: false,
+          id: 'image-child', displayTitle: '一次性子代理记录', origin: 'subagent', running: false,
           completed: true, blank: false, updatedAt: Date.now() + 1,
           projectionValues: {
             tokenUsage: { uncachedInputTokens: 1_000, outputTokens: 1_000, cacheReadTokens: 1_000, cacheWriteTokens: 1_000 },
           },
         },
+        'catalog-child': {
+          id: 'catalog-child', displayTitle: 'This is one e-Mate image', running: false,
+          completed: true, blank: false, updatedAt: Date.now() + 2,
+          projectionValues: {
+            tokenUsage: { uncachedInputTokens: 2_000, outputTokens: 2_000, cacheReadTokens: 2_000, cacheWriteTokens: 2_000 },
+          },
+        },
       },
       current: undefined,
-    }
+      subagentsByParent: {
+        'session-1': {
+          entries: [{ kind: 'child', id: 'catalog-child', mode: 'one-shot', activity: 'inactive', hasChildren: false }],
+          parentAvailable: true, state: 'ready', error: null,
+        },
+      },
+    })
 
     render(<HomeProjection
       {...homeToolbarProps}
@@ -498,6 +615,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(screen.getByRole('heading', { name: '和小芯一起开始工作吧' })).not.toBeNull()
     expect(screen.getByText('Token 消耗量').parentElement?.textContent).toContain('100')
     expect(screen.queryByText('一次性子代理记录')).toBeNull()
+    expect(screen.queryByText('This is one e-Mate image')).toBeNull()
     expect(screen.getByRole('heading', { name: '任务趋势（近 7 天）' })).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '切换任务导航' }))
     expect(homeToolbarProps.toggleSidebar).toHaveBeenCalled()
@@ -514,6 +632,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       },
       current: undefined,
       phase: 'ready' as const,
+      subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
     }
     const workspaces = {
       items: [{
@@ -575,7 +694,10 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       blank: false,
       updatedAt: id === 'newest' ? 100 : id.startsWith('same-') ? 90 : index,
     }]))
-    const sessions = { ids, byId, current: undefined, phase: 'ready' as const }
+    const sessions = {
+      ids, byId, current: undefined, phase: 'ready' as const,
+      subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
+    }
     const workspaces = {
       items: [{ workspaceId: 'workspace-history', path: '/work/history', title: '项目历史', sessionIds: ids }],
       archivedSessionIds: [],
@@ -671,7 +793,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       }],
       errors: [],
     } }))
-    const state = { ids: [], byId: {}, current: undefined }
+    const state = nativeSessionState({})
 
     render(<HomeProjection
       {...homeToolbarProps}

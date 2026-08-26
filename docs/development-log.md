@@ -2869,3 +2869,31 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 失败诊断绑定 Shell source-fix CI run `32990225194`；它不能作为候选或发布证据。当前无安装、上传、R2、Feed、desired-state 或官网写入。
 - Remaining blockers: 提交并通过独立 PR 全量 Base CI；合并后重基 Shell 修复并以新的 exact main 候选重建。首次完整 Profile bootstrap、双平台安装/更新和公开回读继续 OPEN。
 - Next exact action: 跑最窄分类器与发布合同，提交独立修复并等待受保护 PR CI；生产链保持关闭。
+
+## 2026-08-27 · 2.0.13 S32 原生子代理顶层投影 P0 二次定责
+
+- Goal checkpoint: 用户实测单个及并发图片子代理仍会以独立会话进入左侧列表；本切片只修顶层产品投影，不改 ImageGen、Subagent、Session 持久化或父任务入口。
+- Frozen baseline / current HEAD: authoritative `public-2011/main` 与独立分支起点均为 `4530b373a6652c2ae909e460112be985232ac02c`；Base `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`，Harness `0.1.0-rc.7` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606`，Desktop reference `6074088f5b660206e404b3591fab51fb99c69add`。
+- Binding documents read: 根 `AGENTS.md`、`target-contract.md`、`plugin-contracts.md`、S32/S35 与最新完整 development log。
+- Inspected native seam: pinned rc.7 child creation writes `parentSession` and `origin: 'subagent'`; Host `sessionListFields()` projects both, while client `SessionListState` additionally exposes `subagentsByParent` and `currentAddress`. e-Mate Shell Sidebar/Home currently define partial local rows and filter only `parentId === undefined`; project loops duplicate that condition.
+- Experiment or why unnecessary: exact source already deterministically proves the first presentation violation, and the installed screenshot supplies the user-visible escape. Creation Mode cannot replace the existing Shell winner or prove reconnect/restart identity, so the smallest permanent pure selector plus native-state integration regression is the first valid experiment; installed Profile identity and real 1/2/4 child checks remain mandatory afterward.
+- Decision and forbidden alternatives: add one pure classifier over the native client-runtime types and make Sidebar/Home consume it. Do not filter `This is one e-Mate image` or any title/prompt, hide with CSS/timers, delete/archive children, suppress persistence/catalog, modify ImageGen/Subagent creation or add a second store.
+- Changed scope: contract amendment only at this checkpoint; implementation not yet changed.
+- Verification commands and results: protected-main fetch matches local start; pinned Harness submodule checked out at exact Base commit and native source seams inspected. Product regression and installed verification are pending.
+- Immutable evidence / receipt: user screenshot proves a child title in the top-level list; no new candidate/Profile generation or production pointer exists.
+- Remaining blockers: implement the shared selector, cover origin-only/catalog-only/current-address/parentId/single/concurrent/search/batch/Home/highlight, run component/build/composition gates, then verify exact installed Profile identity and runtime behavior.
+- Next exact action: add the pure selector and replace every Sidebar/Home top-level consumer before running the focused component test.
+
+## 2026-08-27 · 2.0.13 S32 原生子代理顶层投影 P0 源码终态
+
+- Goal checkpoint: P0 的源码、共享分类器、原生 Host→Client 投影回归和 Shell 全组件回归已闭环；正式 Profile generation、安装态 1/2/4 子代理与重启/热更新证据仍保持 OPEN，未据源码测试冒充上线。
+- Frozen baseline / current HEAD: 实现最初基于 `4530b373a6652c2ae909e460112be985232ac02c`，现已重基到独立分类器修复后的 protected `main@724800e379df754b66b96bd58ecf7b04dd38463f`；Base `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`、Harness `0.1.0-rc.7@b2b1650b01f0ee88d81837a9b5c050f9f763f606` 与 Desktop reference `6074088f5b660206e404b3591fab51fb99c69add` 不变，产品 diff 未改 Harness/Desktop/Base、组件 inventory、锁或权限。
+- Binding documents read: 根 `AGENTS.md`、`target-contract.md`、`plugin-contracts.md`、`performance-and-acceptance.md`、S32/S35 与前一条定责记录。
+- Inspected native seam: rc.7 `SessionRuntime` 把真实 `host/session-added` 的 `origin`/`parentSessionId` 投影为 `SessionListState.byId.origin`/`parentId`；同一状态还保留 catalog 与当前 child address。Shell 不再维护缩水的本地 Session row 类型。
+- Experiment or why unnecessary: 先以真实编译后的 rc.7 `SessionRuntime` 投递 parent/child Host 帧，再把其原生 `SessionListState` 交给产品 selector；另以 1/2/4 child、child-first、state rebuild 覆盖并发、乱序与重建。未定义复制 Shell winner 的 Creation Mode 动态包。
+- Decision and forbidden alternatives: 唯一 `session-visibility.ts` 从 `origin`、`parentId`、`subagentsByParent.kind=child` 和 `currentAddress.childSessionId` 汇总 internal ids；Sidebar 项目/通用/搜索/批量删除与 Home 计数/Token/趋势/最近任务共同消费。current 为 child 时只高亮 parent。未按标题过滤、未 CSS/计时隐藏、未归档 child、未改 ImageGen/Subagent、未建第二 Store。
+- Changed scope: 产品改动仍只属于 `@e-mate/dsh-client-shell` 的 selector、Sidebar、Home、聚焦测试及四份约束文档；由于公网三目标尚为 Base v6、首次 v7 Profile bootstrap 未完成，合入的唯一分类器现将该发布型组件变化失败关闭到 `base`，而不是再尝试不可能的 v6→v7 组件增量组合。
+- Verification commands and results: pinned Harness Host/Client 直接构建 exit 0；聚焦 Sidebar/Home/Settings `19/19` 后修复空 `currentAddress` 与空 `current` 的同值边界；最终 Shell 全套 `9 files / 72 tests`；固定 pnpm `11.7.0` 的 `component-run check --component @e-mate/dsh-client-shell` 构建、runtime-import 校验与同一 `72/72` 全过；`git diff --check` 通过。
+- Immutable evidence / receipt: 本地 deterministic bundle `lib/client.js` 为 `282820` bytes / SHA-256 `9992724fc2af2f3a779afb64bacbc6c6d43a55bf198f1561d728fdcac9beb2a9`，入口 `index.js` 为 `2152` bytes / SHA-256 `84a45acf8b667f0ccdecdc53d17bfee5e109159a9219c4cde36513677780e789`；这些是开发证据，不是签名发布字节。
+- Remaining blockers: 重基后的 exact source PR/Base CI、首次三目标完整 Profile bootstrap/boot、隔离安装态派 1/2/4 子代理时顶层计数、父入口可达、搜索/批量/Home、连接重建、重启、Profile 激活/回滚及最终签名 generation identity 尚未完成。
+- Next exact action: 提交 source-fix PR；只消费 exact protected-main CI 产出的 Shell payload，在隔离 non-production Profile 上完成上述安装态矩阵后才允许进入正式 Profile 发布。

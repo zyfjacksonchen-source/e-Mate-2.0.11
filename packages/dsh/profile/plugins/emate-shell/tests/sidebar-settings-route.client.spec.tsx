@@ -7,6 +7,7 @@ import { SidebarRoot } from '../src/client/sidebar.tsx'
 
 const sessionState = {
   ids: [], byId: {}, current: undefined, phase: 'ready' as const,
+  subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
 }
 const workspaceState = {
   items: [], archivedSessionIds: [], phase: 'ready' as const,
