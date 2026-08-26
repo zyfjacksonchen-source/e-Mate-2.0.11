@@ -119,7 +119,7 @@
   !macroend
 
   !macro customUpdateInstallApply
-    SetOutPath "$PLUGINSDIR"
+    SetOutPath "$TEMP"
     StrCpy $INSTDIR "$emateUpdateCanonical"
     !insertmacro emateRunUpdateTransaction "Apply"
     ReadINIStr $emateUpdateAction "$emateUpdateOutput" "update" "action"
