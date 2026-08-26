@@ -532,7 +532,8 @@ test('workflow is build-only and uploads only the two external signer inputs', a
   assert.doesNotMatch(workflow, /secrets\.|aws |wrangler|r2-publish|desktop\/latest\.json/u)
   assert.match(desktopBuild, /e-mate-desktop-profile-build-receipt-\$\{\{ inputs\.source_sha \}\}/u)
   assert.match(desktopBuild, /stage-desktop-ci-artifact\.mjs verify/u)
-  assert.doesNotMatch(desktopBuild, /build:harness|pnpm test|yarn install|build:sdk|dist:win|dist:mac/u)
+  assert.match(desktopBuild, /working-directory: desktop\s+run: yarn install --immutable/u)
+  assert.doesNotMatch(desktopBuild, /build:harness|pnpm test|build:sdk|dist:win|dist:mac/u)
   assert.match(desktopBuild, /retention-days: 30/u)
 })
 

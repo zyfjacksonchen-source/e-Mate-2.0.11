@@ -2731,3 +2731,16 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: run `32918150868` 的 Windows 日志显示真实安装器验证成功后出现 `MODULE_NOT_FOUND` 与空 `--ci-run-id`；没有 admitted artifact、安装态或生产写入。
 - Remaining blockers: 新 PR 与新 protected-main attempt-1、性能/admission、Cloudflare、官网和实机验收仍 OPEN。
 - Next exact action: 提交干净 PR，合并后只认新的 protected-main source 与 attempt-1 字节。
+
+## 2026-08-26 · 2.0.13 Desktop publication verifier closure
+
+- Goal checkpoint: coordinator run `32922110287` 只读绑定 exact Desktop artifact 时，源码 verifier 因未安装锁定 `fflate` 依赖失败；没有生产写入。
+- Frozen baseline / current HEAD: protected main `db512b174d08b8b51395cd0fd308df0833862416`，成功 CI `32919912761`。
+- Binding documents read: 根 `AGENTS.md`、S35、Build-once 与 Desktop publication 合同。
+- Inspected native seam: `desktop-release.yml` checkout 后直接运行 `desktop-admission.mjs`，该源码沿 `profile-component.ts` 使用 Desktop Yarn closure，但 workflow 未物化该 closure。
+- Decision and forbidden alternatives: 在唯一 verifier consumer 复用 `corepack enable` 与 `yarn install --immutable`；不重建 Base/Profile/安装器，不 vendor 依赖，不放宽校验。
+- Changed scope: Desktop publication workflow、既有 release 合同测试与本记录。
+- Verification commands and results: release `16/16`、`git diff --check` 通过。
+- Immutable evidence / receipt: child run `32922141498` 明确为 `ERR_MODULE_NOT_FOUND: fflate`；R2、Feed、官网、desired state 均未写。
+- Remaining blockers: 修复 PR、new protected-main CI/coordinator、性能/admission、实机与生产发布。
+- Next exact action: 合入最小 verifier closure 后重新以新 exact main 字节启动 coordinator。
