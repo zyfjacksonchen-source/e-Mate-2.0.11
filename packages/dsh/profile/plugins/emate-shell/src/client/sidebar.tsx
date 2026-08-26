@@ -1,36 +1,20 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
+import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
 import css from './sidebar.module.css'
+import { collectInternalSubagentIds, highlightedProductSessionId, isTopLevelProductSession } from './session-visibility.ts'
 
-interface SessionRow {
-  id: string
-  displayTitle: string
-  parentId?: string
-  running: boolean
-  pendingInteraction?: unknown
-  completed?: boolean
-  blank: boolean
-  updatedAt: number
-}
-
-export function newestSessionFirst(left: Pick<SessionRow, 'id' | 'updatedAt'>, right: Pick<SessionRow, 'id' | 'updatedAt'>): number {
+export function newestSessionFirst(left: Pick<SessionSummary, 'id' | 'updatedAt'>, right: Pick<SessionSummary, 'id' | 'updatedAt'>): number {
   const leftTime = Number.isFinite(left.updatedAt) ? left.updatedAt : Number.NEGATIVE_INFINITY
   const rightTime = Number.isFinite(right.updatedAt) ? right.updatedAt : Number.NEGATIVE_INFINITY
   if (leftTime !== rightTime) return rightTime > leftTime ? 1 : -1
   return left.id < right.id ? -1 : left.id > right.id ? 1 : 0
 }
 
-interface SessionState {
-  ids: string[]
-  byId: Record<string, SessionRow>
-  current?: string
-  phase: 'pending' | 'ready'
-}
-
 interface WorkspaceRow {
   workspaceId: string
   path: string
   title: string
-  sessionIds: string[]
+  sessionIds: SessionSummary['id'][]
 }
 
 interface WorkspaceState {
@@ -50,7 +34,7 @@ interface Props {
   width: number
   renderSlot: (name: string, props: Record<string, unknown>) => ReactNode
   createPortal: (children: ReactNode, container: Element) => ReactNode
-  useSessions: <T>(selector: (state: SessionState) => T) => T
+  useSessions: <T>(selector: (state: SessionListState) => T) => T
   useWorkspaces: <T>(selector: (state: WorkspaceState) => T) => T
   NewChatIcon: Icon
   PanelIcon: Icon
@@ -110,10 +94,7 @@ export function SidebarRoot({
   const wide = !collapsed
   const root = useRef<HTMLElement>(null)
   const mobileOpen = useRef<HTMLButtonElement>(null)
-  const ids = useSessions(state => state.ids)
-  const byId = useSessions(state => state.byId)
-  const current = useSessions(state => state.current)
-  const sessionPhase = useSessions(state => state.phase)
+  const sessionSnapshot = useSessions(state => state)
   const workspaces = useWorkspaces(state => state.items)
   const archivedSessionIds = useWorkspaces(state => state.archivedSessionIds)
   const workspacePhase = useWorkspaces(state => state.phase)
@@ -124,7 +105,7 @@ export function SidebarRoot({
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [picking, setPicking] = useState(false)
-  const [renameTarget, setRenameTarget] = useState<SessionRow | null>(null)
+  const [renameTarget, setRenameTarget] = useState<SessionSummary | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [busySession, setBusySession] = useState<string | null>(null)
   const [batchMode, setBatchMode] = useState(false)
@@ -137,11 +118,16 @@ export function SidebarRoot({
 
   const archived = useMemo(() => new Set(archivedSessionIds), [archivedSessionIds])
   const projectWorkspaces = useMemo(() => workspaces.filter(workspace => !isGeneralWorkspace(workspace)), [workspaces])
-  const visibleRows = useMemo(() => ids
-    .map(id => byId[id])
-    .filter((row): row is SessionRow => row !== undefined && row.parentId === undefined && !archived.has(row.id))
+  const internalSubagentIds = useMemo(() => collectInternalSubagentIds(sessionSnapshot), [sessionSnapshot])
+  const visibleRows = useMemo(() => sessionSnapshot.ids
+    .map(id => sessionSnapshot.byId[id])
+    .filter((row): row is SessionSummary => row !== undefined
+      && isTopLevelProductSession(row, internalSubagentIds)
+      && !archived.has(row.id))
     .sort(newestSessionFirst),
-  [archived, byId, ids])
+  [archived, internalSubagentIds, sessionSnapshot])
+  const visibleById = useMemo(() => new Map(visibleRows.map(row => [row.id, row])), [visibleRows])
+  const highlightedSessionId = highlightedProductSessionId(sessionSnapshot)
   const accounted = useMemo(() => new Set(projectWorkspaces.flatMap(workspace => workspace.sessionIds)), [projectWorkspaces])
   const generalRows = visibleRows.filter(row => !accounted.has(row.id))
   const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN')
@@ -344,10 +330,10 @@ export function SidebarRoot({
     }
   }
 
-  const sessionRow = (row: SessionRow) => (
+  const sessionRow = (row: SessionSummary) => (
     <div className={css.taskEntry} key={row.id}>
       {batchMode ? (
-        <label className={`${css.taskRow} ${css.batchTaskRow} ${row.id === current ? css.current : ''}`}>
+        <label className={`${css.taskRow} ${css.batchTaskRow} ${row.id === highlightedSessionId ? css.current : ''}`}>
           <input
             type="checkbox"
             aria-label={`选择会话：${row.blank ? '新会话' : row.displayTitle}`}
@@ -366,11 +352,11 @@ export function SidebarRoot({
         </label>
       ) : <>
       <button
-        className={`${css.taskRow} ${row.id === current ? css.current : ''}`}
+        className={`${css.taskRow} ${row.id === highlightedSessionId ? css.current : ''}`}
         type="button"
         title={row.blank ? '新会话' : row.displayTitle}
         aria-label={`打开任务：${row.blank ? '新会话' : row.displayTitle}`}
-        aria-current={row.id === current ? 'page' : undefined}
+        aria-current={row.id === highlightedSessionId ? 'page' : undefined}
         disabled={busySession === row.id}
         onClick={() => { openSession(row.id) }}
       >
@@ -477,8 +463,8 @@ export function SidebarRoot({
                     ? <button className={css.projectEmpty} type="button" disabled={picking} onClick={() => { void addWorkspace() }}><FolderIcon size={16} /><span>添加项目文件夹</span></button>
                     : <div className={css.projectList}>{projectWorkspaces.map(workspace => {
                       const rows = workspace.sessionIds.flatMap(id => {
-                        const row = byId[id]
-                        return row === undefined || row.parentId !== undefined || archived.has(id) ? [] : [row]
+                        const row = visibleById.get(id)
+                        return row === undefined ? [] : [row]
                       }).sort(newestSessionFirst)
                       const open = expanded[workspace.workspaceId] !== false
                       const shown = showAll[workspace.workspaceId] ? rows : rows.slice(0, COLLAPSED_SESSION_LIMIT)
@@ -506,7 +492,7 @@ export function SidebarRoot({
                     </> : <button type="button" disabled={visibleRows.length === 0} onClick={() => { setSearchOpen(false); setQuery(''); setBatchMode(true); setBatchSelected(new Set()) }}>批量删除</button>}
                   </div>
                 </div>
-                {!sessionsCollapsed && (sessionPhase === 'pending'
+                {!sessionsCollapsed && (sessionSnapshot.phase === 'pending'
                   ? <p className={css.empty}>正在加载会话…</p>
                   : <div className={css.taskList}>{generalRows.length ? generalRows.map(sessionRow) : <p className={css.empty}>暂无会话</p>}</div>)}
               </section>
