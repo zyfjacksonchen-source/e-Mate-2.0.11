@@ -2758,3 +2758,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: child `32925199255` 证明全部精确下载与 receipt verify 成功后出现 `MODULE_NOT_FOUND: desktop/e-mate-desktop/package.json`；没有 performance admission、Cloudflare handoff、官网切换或公开回读。
 - Remaining blockers: 新 PR、protected-main attempt-1、coordinator、四模型性能、admission、实机与 Cloudflare/官网发布仍 OPEN。
 - Next exact action: 合入本最小闭环并只认新 protected-main source/attempt-1 字节，重新启动 coordinator。
+
+## 2026-08-26 · 2.0.13 S35 跨运行制品下载目录闭环
+
+- Goal checkpoint: 最终发布协调器 `32928224821` 的性能子链在任何模型调用或生产写入前 fail closed。
+- Frozen baseline / current HEAD: 受保护主线 `9b96035819e691739a4599ffa3f69512112b796a`；失败性能运行 `32928852497`。
+- Binding documents read: 仓库 `AGENTS.md`、`docs/target-contract.md`、`docs/performance-and-acceptance.md` 与当前 S35 发布合同。
+- Inspected native seam: `actions/download-artifact@v4` 使用精确 `artifact-ids` 跨运行下载时默认保留制品名目录，而性能与最终 admission 的既有消费者合同要求目标目录直接包含签名文件。
+- Experiment or why unnecessary: 本机 Runner 落盘证据显示三份正确文件完整位于唯一制品名子目录；无需放宽三文件门禁或复制字节。
+- Decision and forbidden alternatives: 所有跨运行、精确 artifact-id 下载统一启用原生 `merge-multiple: true`，让 action 直接写入既有权威目录；禁止递归查找、移动未知目录、接受额外文件或绕过完整性验证。
+- Changed scope: 仅 `desktop-performance.yml`、`desktop-admission.yml` 的九个下载步骤及一条 YAML 合同测试。
+- Verification commands and results: `node --test scripts/desktop-admission.test.mjs` 为 `8/8`，`git diff --check` 通过；受保护主线 CI 待回填。
+- Immutable evidence / receipt: GitHub run `32928852497` 在 `Verify Desktop bytes and resolve their CI producer run` 失败；未调用模型、未发布 R2/官网。
+- Remaining blockers: 修复合并主线并重跑完整协调器。
+- Next exact action: 运行窄测试、提交 PR、等待主线 CI 后以新源码重新协调发布。

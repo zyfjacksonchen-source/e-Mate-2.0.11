@@ -534,6 +534,12 @@ test('workflow is build-only and uploads only the two external signer inputs', a
   assert.match(desktopBuild, /e-mate-desktop-profile-build-receipt-\$\{\{ inputs\.source_sha \}\}/u)
   assert.match(desktopBuild, /stage-desktop-ci-artifact\.mjs verify/u)
   assert.match(desktopBuild, /working-directory: desktop\s+run: yarn install --immutable/u)
+  for (const consumer of [parsed, parse(performance)]) {
+    const downloads = consumer.jobs[Object.keys(consumer.jobs)[0]].steps
+      .filter(step => step.uses === 'actions/download-artifact@v4' && step.with?.['artifact-ids'])
+    assert.ok(downloads.length > 0)
+    assert.ok(downloads.every(step => step.with['merge-multiple'] === true))
+  }
   for (const consumer of [desktopBuild, performance, workflow]) {
     assert.match(consumer, /require\(process\.argv\[1\]\)\.version" \.\/desktop\/e-mate-desktop\/package\.json/u)
     assert.doesNotMatch(consumer, /require\(process\.argv\[1\]\)\.version" desktop\/e-mate-desktop\/package\.json/u)

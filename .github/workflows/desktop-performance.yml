@@ -144,6 +144,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ inputs.desktop_artifact_id }}
+          merge-multiple: true
           path: .performance/desktop
           github-token: ${{ github.token }}
           run-id: ${{ steps.provenance.outputs.desktop_run_id }}
@@ -262,6 +263,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.profile-build.outputs.artifact_id }}
+          merge-multiple: true
           path: .performance/profile-build
           github-token: ${{ github.token }}
           run-id: ${{ steps.candidate.outputs.profile_build_run_id }}
@@ -270,6 +272,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.profile-build.outputs.receipt_artifact_id }}
+          merge-multiple: true
           path: .performance/profile-build-receipt
           github-token: ${{ github.token }}
           run-id: ${{ steps.candidate.outputs.profile_build_run_id }}
@@ -278,6 +281,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ inputs.profile_artifact_id }}
+          merge-multiple: true
           path: .performance/profile-publication
           github-token: ${{ github.token }}
           run-id: ${{ inputs.profile_release_run_id }}
