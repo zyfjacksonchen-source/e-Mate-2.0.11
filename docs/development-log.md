@@ -2800,3 +2800,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 生产路由激活回执 `20260826T0530Z-image-edit-413/activation.receipt.json`，SHA-256 `407707d659cef6838043d6bfa0f2c6a6c5cd5f88659d446436e1ebab200fa8a6`；公开 `/e-mate/healthz` 回读 200。
 - Remaining blockers: 首页/侧栏顶层投影与 413 receipt 分类尚须合入 main、由同一源码构建 macOS/Windows 候选并完成安装/更新验收后才可随 2.0.13 发布；性能验收按用户明确决定跳过，不得标记 passed。
 - Next exact action: 提交本最小修复、合入受保护主线并只发布新 main exact 字节。
+
+## 2026-08-26 · 2.0.13 Windows 手动更新回执校验闭环
+
+- Goal checkpoint: 合入 ProductVersion 规范化后的 exact 2.0.13 候选在 Windows 2.0.12 实机通过只读 `Inspect`，但原生 `Bootstrap` 在写入 pending authority 前因 PowerShell 5 表达式优先级误拒绝手动安装固有的 `sourceCommit=null`；未进入 staging、rename 或安装。
+- Frozen baseline / current HEAD: 受保护主线 `6d38ea56594fb5684c6b3695ce8337a0f163b2c9`；候选 Setup `281340377` bytes、SHA-256 `aa3288adc6e8e3bee4c6d1e86ed2ad9600f544d69c68e995d25419cc01c72d4f`。
+- Binding documents read: 根 `AGENTS.md`、Windows 原子更新合同、S35 与上一条完整记录。
+- Inspected native seam: `Read-Request()` 将可空 `sourceCommit`、字符串类型和 SHA 形状混在一个未显式分组的 PowerShell 表达式中；Windows PowerShell 5.1 对 `null` 输入计算为 false，导致手动 admission 永远无法进入同一事务链。managed-manifest 的 40 位 source commit 边界不变。
+- Experiment or why unnecessary: 在同一 Windows PowerShell 5.1 上证明旧表达式对 `null` 为 false、显式分组后为 true；修复脚本原生 `SelfTest` 通过。没有修改回执、伪造 source commit、跳过校验或另建更新路径。
+- Decision and forbidden alternatives: 只给现有可空联合条件添加显式括号，并把手动 `null` 正例加入原生 SelfTest；继续由唯一 `Read-Request()` 同时校验手动与托管更新。
+- Changed scope: Windows update transaction 一处共享条件、原生 SelfTest 与本 append-only 记录；未改 Base/Profile/Harness、安装目录、用户数据、R2、Feed 或官网。
+- Verification commands and results: Windows PowerShell 5.1 旧/新表达式实测 `false/true`；`-Operation SelfTest` 通过；`git diff --check` 通过。
+- Immutable evidence / receipt: 实机更新前已关闭 e-Mate，并将 `.dsh/e-mate` 117 文件/30,980,229 bytes 与 Roaming `e-Mate` 5,563 非 junction 文件/201,697,831 bytes 复制到私有可恢复备份；失败 Bootstrap 未创建 pending authority。
+- Remaining blockers: 修复必须合入 protected main 并重建内嵌脚本的新 Setup，再完成 2.0.12→2.0.13 原地更新、启动、会话和回滚实测；当前 `aa3288…` 候选永久作废。
+- Next exact action: 提交最小 PR，等待新 exact main Windows artifact 后立即在同一安装态走原生更新链。

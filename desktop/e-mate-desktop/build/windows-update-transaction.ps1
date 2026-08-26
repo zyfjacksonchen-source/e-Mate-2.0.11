@@ -426,7 +426,7 @@ function Read-Request {
   try {
     Assert-True ([version]$request.targetVersion -gt [version]$request.currentVersion) 'target version is not newer'
   } catch { throw 'request version range rejected' }
-  Assert-True ($null -eq $request.sourceCommit -or $request.sourceCommit -is [string] -and $request.sourceCommit -cmatch '^[0-9a-f]{40}$') 'source commit rejected'
+  Assert-True (($null -eq $request.sourceCommit) -or (($request.sourceCommit -is [string]) -and ($request.sourceCommit -cmatch '^[0-9a-f]{40}$'))) 'source commit rejected'
   Assert-True ($request.baseContractId -match '^[A-Za-z0-9._-]{1,200}$') 'Base contract rejected'
   Assert-True (($request.scheduleProtocolFloor -is [int] -or $request.scheduleProtocolFloor -is [long]) -and [int64]$request.scheduleProtocolFloor -gt 0 -and [int64]$request.scheduleProtocolFloor -le [int]::MaxValue) 'Schedule floor rejected'
   Assert-True ($request.manifestIdentity -match '^[0-9a-f]{64}$') 'manifest identity rejected'
@@ -1200,6 +1200,8 @@ function Invoke-SelfTest {
   Assert-True ((Get-UtcIsoTimestamp) -cmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$') 'transaction timestamp is not canonical UTC ISO'
   Assert-True ((ConvertTo-CanonicalProductVersion '2.0.12') -ceq '2.0.12') 'canonical ProductVersion changed'
   Assert-True ((ConvertTo-CanonicalProductVersion '2.0.12.0') -ceq '2.0.12') 'Windows ProductVersion was not canonicalized'
+  $manualSourceCommit = $null
+  Assert-True (($null -eq $manualSourceCommit) -or (($manualSourceCommit -is [string]) -and ($manualSourceCommit -cmatch '^[0-9a-f]{40}$'))) 'manual source commit was rejected'
   foreach ($invalidVersion in @('2.0.12.1', '2.0.12.00', '02.0.12.0', '2.0', '2.0.12-beta', '')) {
     $rejected = $false
     try { ConvertTo-CanonicalProductVersion $invalidVersion | Out-Null } catch { $rejected = $true }
