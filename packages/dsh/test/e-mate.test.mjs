@@ -2691,6 +2691,17 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(requests.length, requestsBeforeRateLimit + 1)
     assert.equal(sessionEvents.at(-1).data.failure_code, 'http-429')
 
+    const requestsBeforeOversize = requests.length
+    nextFailureStatus = 413
+    await assert.rejects(
+      imagegen.execute({ prompt: 'Reject an oversized image request before provider submission.' }, execution()),
+      /receipt status failed/u,
+    )
+    assert.equal(requests.length, requestsBeforeOversize + 1)
+    assert.equal(sessionEvents.at(-1).data.status, 'failed')
+    assert.equal(sessionEvents.at(-1).data.billing_status, 'not-submitted')
+    assert.equal(sessionEvents.at(-1).data.failure_code, 'http-413')
+
     const requestsBeforeUntrustedReceipt = requests.length
     injectChildReceiptSecret = true
     await assert.rejects(

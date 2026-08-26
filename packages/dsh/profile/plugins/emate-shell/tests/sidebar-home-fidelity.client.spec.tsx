@@ -258,18 +258,20 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
 
   it('keeps the current Sidebar hierarchy while driving real session and workspace actions', async () => {
     const sessions = {
-      ids: ['project-session', 'general-session'],
+      ids: ['project-session', 'project-image-child', 'general-session', 'general-image-child'],
       byId: {
         'project-session': { id: 'project-session', displayTitle: '项目任务', running: false, blank: false, updatedAt: 2 },
+        'project-image-child': { id: 'project-image-child', displayTitle: '一次性子代理记录', parentId: 'project-session', running: false, blank: false, updatedAt: 4 },
         'general-session': { id: 'general-session', displayTitle: '通用任务', running: true, blank: false, updatedAt: 1 },
+        'general-image-child': { id: 'general-image-child', displayTitle: '内部生图会话', parentId: 'general-session', running: false, blank: false, updatedAt: 3 },
       },
       current: undefined,
       phase: 'ready' as const,
     }
     const workspaces = {
       items: [
-        { workspaceId: 'workspace-1', path: '/work/quarterly', title: '季度报告', sessionIds: ['project-session'] },
-        { workspaceId: 'workspace-general', path: '/home/test/.dsh/e-mate/general', title: '通用会话', sessionIds: ['general-session'] },
+        { workspaceId: 'workspace-1', path: '/work/quarterly', title: '季度报告', sessionIds: ['project-session', 'project-image-child'] },
+        { workspaceId: 'workspace-general', path: '/home/test/.dsh/e-mate/general', title: '通用会话', sessionIds: ['general-session', 'general-image-child'] },
       ],
       archivedSessionIds: [],
       phase: 'ready' as const,
@@ -329,6 +331,8 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(screen.getByRole('region', { name: '项目' }).textContent).not.toContain('通用会话')
     expect(screen.getByRole('region', { name: '项目' }).getAttribute('data-dsh-workspace-drop-target')).toBe('')
     expect(screen.getByRole('region', { name: '会话' }).textContent).toContain('通用任务')
+    expect(screen.queryByText('一次性子代理记录')).toBeNull()
+    expect(screen.queryByText('内部生图会话')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '新建任务' }))
     expect(startSession).toHaveBeenCalledWith()
     fireEvent.click(screen.getByRole('button', { name: '打开任务：通用任务' }))
@@ -457,7 +461,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     document.body.append(phase)
     const openSession = vi.fn()
     const state = {
-      ids: ['session-1'],
+      ids: ['session-1', 'image-child'],
       byId: {
         'session-1': {
           id: 'session-1',
@@ -468,6 +472,13 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
           updatedAt: Date.now(),
           projectionValues: {
             tokenUsage: { uncachedInputTokens: 10, outputTokens: 20, cacheReadTokens: 30, cacheWriteTokens: 40 },
+          },
+        },
+        'image-child': {
+          id: 'image-child', displayTitle: '一次性子代理记录', parentId: 'session-1', running: false,
+          completed: true, blank: false, updatedAt: Date.now() + 1,
+          projectionValues: {
+            tokenUsage: { uncachedInputTokens: 1_000, outputTokens: 1_000, cacheReadTokens: 1_000, cacheWriteTokens: 1_000 },
           },
         },
       },
@@ -486,6 +497,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(homeToolbarProps.closeDetails).toHaveBeenCalled()
     expect(screen.getByRole('heading', { name: '和小芯一起开始工作吧' })).not.toBeNull()
     expect(screen.getByText('Token 消耗量').parentElement?.textContent).toContain('100')
+    expect(screen.queryByText('一次性子代理记录')).toBeNull()
     expect(screen.getByRole('heading', { name: '任务趋势（近 7 天）' })).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '切换任务导航' }))
     expect(homeToolbarProps.toggleSidebar).toHaveBeenCalled()

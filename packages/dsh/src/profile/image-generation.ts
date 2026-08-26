@@ -237,6 +237,10 @@ function failureCode(error, submitted, aborted) {
   return submitted ? 'provider-outcome-unknown' : 'validation-failed'
 }
 
+function requestDefinitelyRejected(error) {
+  return /HTTP 413(?:\D|$)/u.test(error instanceof Error ? error.message : String(error))
+}
+
 function failedReceipt(
   callId,
   operation,
@@ -1347,6 +1351,8 @@ export async function apply(ctx, config = {}) {
           if (!alreadyRecorded) {
             const aborted = exec.signal.aborted
             const message = error instanceof Error ? error.message : String(error)
+            const definitelyRejected = providerRequestId === undefined && requestDefinitelyRejected(error)
+            const possiblySubmitted = submitted && !definitelyRejected
             const nativeCancellationCode = terminalJob?.status === 'killed'
               ? message === 'background job admission aborted' && terminalJob.detail === 'admission aborted'
                 ? 'admission-aborted'
@@ -1360,10 +1366,10 @@ export async function apply(ctx, config = {}) {
               refs,
               providerRequestId !== undefined
                 ? 'failed'
-                : nativeCancellationCode !== undefined || aborted ? 'cancelled' : submitted ? 'unknown' : 'failed',
-              submitted,
+                : nativeCancellationCode !== undefined || aborted ? 'cancelled' : possiblySubmitted ? 'unknown' : 'failed',
+              possiblySubmitted,
               providerRequestId === undefined
-                ? nativeCancellationCode ?? failureCode(error, submitted, aborted)
+                ? nativeCancellationCode ?? failureCode(error, possiblySubmitted, aborted)
                 : 'provider-result-uncommitted',
               parentSessionId,
               childSessionId,
