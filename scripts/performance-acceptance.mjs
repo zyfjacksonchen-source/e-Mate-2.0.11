@@ -250,7 +250,7 @@ export async function loadProfileAcceptanceAuthority(input) {
   }
 }
 
-async function runCollector(executable, planPath) {
+export async function runCollector(executable, planPath, environment = process.env) {
   await new Promise((resolveRun, rejectRun) => {
     const child = spawn(process.execPath, [executable, '--plan', planPath], {
       shell: false,
@@ -258,7 +258,8 @@ async function runCollector(executable, planPath) {
       env: Object.fromEntries([
         'APPDATA', 'ComSpec', 'DISPLAY', 'HOME', 'LANG', 'LC_ALL', 'LOCALAPPDATA', 'LOGNAME', 'PATH',
         'SHELL', 'SystemRoot', 'TEMP', 'TMP', 'TMPDIR', 'USER', 'USERPROFILE', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR',
-      ].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]])),
+        'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_SHA',
+      ].filter(key => environment[key] !== undefined).map(key => [key, environment[key]])),
     })
     child.once('error', rejectRun)
     child.once('exit', (code, signal) => code === 0 && signal === null

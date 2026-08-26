@@ -13,6 +13,7 @@ import {
   createPairSchedule,
   finalizeAcceptanceCapture,
   loadProfileAcceptanceAuthority,
+  runCollector,
 } from './performance-acceptance.mjs'
 
 const sourceCommit = 'e'.repeat(40)
@@ -81,6 +82,33 @@ test('requires the exact protected-main one-shot owner', () => {
       () => assertAcceptanceOwnerEnvironment({ ...ownerEnvironment, ...mutation }, sourceCommit),
       /exact protected-main one-shot workflow owner/u,
     )
+  }
+})
+
+test('passes only the required workflow ownership fields into the isolated collector', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'e-mate-performance-owner-env-'))
+  try {
+    const collector = join(root, 'collector.mjs')
+    const output = join(root, 'environment.json')
+    await writeFile(collector, `
+      import { writeFile } from 'node:fs/promises'
+      await writeFile(process.argv[3], JSON.stringify(process.env))
+    `)
+    await runCollector(collector, output, {
+      HOME: root,
+      PATH: process.env.PATH,
+      GITHUB_RUN_ID: '123',
+      GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_SHA: sourceCommit,
+      EMATE_PROFILE_SIGNING_PRIVATE_KEY: 'must-not-cross-the-probe-boundary',
+    })
+    const environment = JSON.parse(await readFile(output, 'utf8'))
+    assert.equal(environment.GITHUB_RUN_ID, '123')
+    assert.equal(environment.GITHUB_RUN_ATTEMPT, '1')
+    assert.equal(environment.GITHUB_SHA, sourceCommit)
+    assert.equal(environment.EMATE_PROFILE_SIGNING_PRIVATE_KEY, undefined)
+  } finally {
+    await rm(root, { recursive: true, force: true })
   }
 })
 

@@ -2925,3 +2925,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 首次失败 CI `33002121754` 永久保留为负例，不可作为候选或发布证据。
 - Remaining blockers: 修正后的 PR CI、受保护主干、新 exact-source Desktop/Profile、正式性能/admission、双平台安装/更新/回滚、Cloudflare 三入口与官网原子切换均保持 OPEN。
 - Next exact action: 更新同一 PR 并等待精确 head CI；通过后才合入受保护主干并生成一次新的候选集。
+
+## 2026-08-27 · 2.0.13 正式性能采集器所有权环境闭环
+
+- Goal checkpoint: exact-source Desktop/Profile 候选和安装态单/双子代理投影已验证后，正式四模型性能 run 在进入真实样本前确定性失败；本条只修 protected workflow owner 到隔离采集器的进程边界，不改产品运行时、模型路由、性能阈值或生产指针。
+- Frozen baseline / current HEAD: 独立修复分支基于 protected `public-2011/main@433fec4d734e681b87f20ef17fe79ed2220eefa9`；失败 performance run 为 `33008900166`，其 CI/Desktop/Profile 输入校验、下载和 aggregate 重算均成功，唯一失败步骤为 `Collect the exact installed-state production cohorts once`。
+- Binding documents read: 唯一主 Goal、根 `AGENTS.md`、`target-contract.md`、`plugin-contracts.md`、`performance-and-acceptance.md`、S35 与最新完整 development log。
+- Inspected native seam: owner 进程已用 `assertAcceptanceOwnerEnvironment()`验证并把 repository/ref/run/attempt/source 写入私有 plan；`runCollector()` 随后使用凭据隔离 allowlist 启动同一受保护源码的 probe，却遗漏 probe 自身 `assertProbePlan()` 必须再次核对的 `GITHUB_RUN_ID`、`GITHUB_RUN_ATTEMPT` 与 `GITHUB_SHA`，因此子进程在读取 runner-private 配置或安装字节前必然退出。专用只读 Usage exporter 的过期会话已通过既有 secret broker/OS keychain 路径刷新并单独验证成功，未把账号、密码或 Token 写入仓库、日志或 workflow 环境。
+- Experiment or why unnecessary: 失败 run 从 probe 启动到退出约 0.3 秒，且精确源码证明父进程删掉全部三项后子进程立即要求它们；不需要重新测模型或修改 installed app 才能确定根因。新增测试实际启动一个 Node 子进程并读取其环境，证明三项 owner 字段存在、签名密钥样例被隔离。
+- Decision and forbidden alternatives: 只在现有 allowlist 增加三项非敏感、已由父 owner 验证且与 plan 同值的 GitHub 身份；继续禁止 credential、signing secret、任意父环境和 shell 进入 probe。不得删除子进程 owner 复核、伪造 performance artifact、人工把失败 run 改为 passed，或复用旧 source 候选冒充修复后的 exact SHA。
+- Changed scope: `scripts/performance-acceptance.mjs` 的唯一 child-process environment allowlist、对应既有测试和本 append-only 记录；无 Desktop/Profile/Harness/enterprise 产品代码、锁文件、R2、Feed、desired state、官网或用户数据写入。
+- Verification commands and results: 固定 Node 24 的 `performance-acceptance.test.mjs` 为 `9/9`；完整 performance parity/acceptance/probe 聚焦套件为 `33/33`；`git diff --check` 通过。首次系统 `node` 不存在及干净 worktree 缺现有 `fflate` 时均未计为产品失败，复用仓库锁定 pnpm `11.7.0`/缓存安装既有依赖后只运行上述非重叠门禁。
+- Immutable evidence / receipt: `33008900166` 永久记录为 owner 环境缺失负例；当前只有源码测试证据，没有新的 protected-main SHA、Desktop/Profile 候选、performance admission 或生产发布回执。
+- Remaining blockers: 独立 PR/受保护主干 CI、新 exact-source Desktop/Profile 候选、重新运行一次性 performance owner、signed admission、双平台安装/更新/回滚、Cloudflare 三入口和官网原子切换均保持 OPEN。
+- Next exact action: 提交最小修复 PR；CI 全绿后只消费新的 protected-main attempt-1 字节，重新注册一次性性能 Runner 并从新 run 继续 admission→Cloudflare→官网链。
