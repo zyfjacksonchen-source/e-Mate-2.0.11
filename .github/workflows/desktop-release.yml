@@ -155,7 +155,7 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          version="$(node -p "require(process.argv[1]).version" desktop/e-mate-desktop/package.json)"
+          version="$(node -p "require(process.argv[1]).version" ./desktop/e-mate-desktop/package.json)"
           mkdir -p dist/desktop
           cp ".release-inputs/macos/e-Mate-$version-mac-universal.dmg" dist/desktop/
           cp ".release-inputs/windows/e-Mate-$version-win-x64-Setup.exe" dist/desktop/

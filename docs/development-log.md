@@ -2744,3 +2744,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: child run `32922141498` 明确为 `ERR_MODULE_NOT_FOUND: fflate`；R2、Feed、官网、desired state 均未写。
 - Remaining blockers: 修复 PR、new protected-main CI/coordinator、性能/admission、实机与生产发布。
 - Next exact action: 合入最小 verifier closure 后重新以新 exact main 字节启动 coordinator。
+
+## 2026-08-26 · 2.0.13 Desktop 发布消费者版本路径闭环
+
+- Goal checkpoint: exact protected-main CI `32923419344` 的 Base/Profile、Windows Setup 与 macOS Universal DMG 全部成功；coordinator `32925166608` 随后在 Desktop 子流程完成全部字节与回执校验后，仅因 Node 将裸 `desktop/.../package.json` 当包名解析而失败，生产未写入。
+- Frozen baseline / current HEAD: 失败发布 source `626f5a26751ca32f7a2b9ef3431e23dee4776f1b`；Desktop child `32925199255`。该 source 的发布交接作废，必须由新 exact main 重新闭合。
+- Binding documents read: 根 `AGENTS.md`、S35、Build-once、TTFT v2 与 Desktop publication 合同。
+- Inspected native seam: `desktop-release.yml`、`desktop-performance.yml`、`desktop-admission.yml` 三个发布消费者使用同一错误裸相对 argv；CI 正式 staging 已使用显式 `./`，绝对 npm manifest 路径不受影响。
+- Experiment or why unnecessary: 三个消费者只给既有 argv 增加 `./`，不新增 helper、版本输入、文件名推断或第二条发布路径；现有 release/admission 测试逐消费者锁定正反例。
+- Decision and forbidden alternatives: 在共同参数边界一次修全，禁止只修当前 child 后让 performance/admission 继续晚失败，也不复用失败 coordinator 的半成品或跳过回执校验。
+- Changed scope: 三个发布 workflow 的版本读取参数、既有合同测试和本 append-only 记录；未改产品、Base/Profile、安装器输入、模型链、R2、Feed、官网或用户数据。
+- Verification commands and results: release/admission `24/24`、`git diff --check` 通过；失败 coordinator 与仍无必要继续的 Profile child 已请求取消，未发生生产写入。
+- Immutable evidence / receipt: child `32925199255` 证明全部精确下载与 receipt verify 成功后出现 `MODULE_NOT_FOUND: desktop/e-mate-desktop/package.json`；没有 performance admission、Cloudflare handoff、官网切换或公开回读。
+- Remaining blockers: 新 PR、protected-main attempt-1、coordinator、四模型性能、admission、实机与 Cloudflare/官网发布仍 OPEN。
+- Next exact action: 合入本最小闭环并只认新 protected-main source/attempt-1 字节，重新启动 coordinator。

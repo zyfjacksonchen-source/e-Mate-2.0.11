@@ -500,6 +500,7 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
 test('workflow is build-only and uploads only the two external signer inputs', async () => {
   const workflow = await readFile('.github/workflows/desktop-admission.yml', 'utf8')
   const desktopBuild = await readFile('.github/workflows/desktop-release.yml', 'utf8')
+  const performance = await readFile('.github/workflows/desktop-performance.yml', 'utf8')
   const { parse } = createRequire(resolve('packages/dsh/package.json'))('yaml')
   const parsed = parse(workflow)
   const ci = parse(await readFile('.github/workflows/ci.yml', 'utf8'))
@@ -533,6 +534,10 @@ test('workflow is build-only and uploads only the two external signer inputs', a
   assert.match(desktopBuild, /e-mate-desktop-profile-build-receipt-\$\{\{ inputs\.source_sha \}\}/u)
   assert.match(desktopBuild, /stage-desktop-ci-artifact\.mjs verify/u)
   assert.match(desktopBuild, /working-directory: desktop\s+run: yarn install --immutable/u)
+  for (const consumer of [desktopBuild, performance, workflow]) {
+    assert.match(consumer, /require\(process\.argv\[1\]\)\.version" \.\/desktop\/e-mate-desktop\/package\.json/u)
+    assert.doesNotMatch(consumer, /require\(process\.argv\[1\]\)\.version" desktop\/e-mate-desktop\/package\.json/u)
+  }
   assert.doesNotMatch(desktopBuild, /build:harness|pnpm test|build:sdk|dist:win|dist:mac/u)
   assert.match(desktopBuild, /retention-days: 30/u)
 })

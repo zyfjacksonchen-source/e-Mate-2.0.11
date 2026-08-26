@@ -301,7 +301,7 @@ jobs:
           STAGE_DIRECTORY: ${{ steps.stage.outputs.directory }}
         run: |
           set -euo pipefail
-          version="$(node -p "require(process.argv[1]).version" desktop/e-mate-desktop/package.json)"
+          version="$(node -p "require(process.argv[1]).version" ./desktop/e-mate-desktop/package.json)"
           node scripts/desktop-admission.mjs profile-aggregate \
             --commit "$GITHUB_SHA" \
             --ci-run-id "$CI_RUN_ID" \
