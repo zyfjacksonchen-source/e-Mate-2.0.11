@@ -35,7 +35,6 @@ export interface DesktopReleaseManifestOptions {
 export interface DesktopReleaseAdmissionOptions {
   readonly candidate: string
   readonly profileComponentAggregate: string
-  readonly performance: string
   readonly githubArtifactProvenance: string
   readonly output: string
 }
@@ -48,7 +47,7 @@ interface ArtifactRecord {
   readonly build_run_id: string
 }
 
-/** Create one deterministic performance-pending candidate over both native packages. */
+/** Create one deterministic admission-pending candidate over both native packages. */
 export async function createDesktopArtifactCandidate(options: DesktopReleaseManifestOptions): Promise<void> {
   if (!SOURCE_COMMIT.test(options.sourceCommit)) throw new Error('desktop release source commit is invalid')
   for (const commit of [options.macSourceCommit, options.windowsSourceCommit]) {
@@ -63,9 +62,9 @@ export async function createDesktopArtifactCandidate(options: DesktopReleaseMani
     artifact(options.windowsArtifact, `e-Mate-${DESKTOP_RELEASE_VERSION}-win-x64-Setup.exe`, prefix, options.windowsSourceCommit, options.windowsBuildRunId),
   ])
   await atomicJson(options.output, {
-    schema_version: 1,
+    schema_version: 2,
     document_type: 'emate.desktop-artifact-candidate',
-    release_status: 'performance-pending',
+    release_status: 'admission-pending',
     version: DESKTOP_RELEASE_VERSION,
     source_commit: options.sourceCommit,
     schedule_protocol_floor: baseContract.schedule_protocol_floor,
@@ -73,14 +72,14 @@ export async function createDesktopArtifactCandidate(options: DesktopReleaseMani
   })
 }
 
-/** Form the exact unsigned 11-field input accepted only by the external signer. */
+/** Form the exact unsigned 10-field input accepted only by the external signer. */
 export async function admitDesktopReleaseManifest(options: DesktopReleaseAdmissionOptions): Promise<void> {
   const candidate = await jsonFile(options.candidate)
   if (!hasExactKeys(candidate, [
     'schema_version', 'document_type', 'release_status', 'version', 'source_commit',
     'schedule_protocol_floor', 'artifacts',
-  ]) || candidate.schema_version !== 1 || candidate.document_type !== 'emate.desktop-artifact-candidate'
-    || candidate.release_status !== 'performance-pending' || candidate.version !== DESKTOP_RELEASE_VERSION
+  ]) || candidate.schema_version !== 2 || candidate.document_type !== 'emate.desktop-artifact-candidate'
+    || candidate.release_status !== 'admission-pending' || candidate.version !== DESKTOP_RELEASE_VERSION
     || typeof candidate.source_commit !== 'string' || !SOURCE_COMMIT.test(candidate.source_commit)
     || candidate.schedule_protocol_floor !== baseContract.schedule_protocol_floor) {
     throw new Error('desktop artifact candidate identity is invalid')
@@ -94,7 +93,6 @@ export async function admitDesktopReleaseManifest(options: DesktopReleaseAdmissi
     base_contract_id: baseContract.id,
     schedule_protocol_floor: candidate.schedule_protocol_floor,
     profile_component_aggregate: await jsonFile(options.profileComponentAggregate),
-    performance: await jsonFile(options.performance),
     github_artifact_provenance: await jsonFile(options.githubArtifactProvenance),
     artifacts: candidate.artifacts,
   }
@@ -183,7 +181,6 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
     await admitDesktopReleaseManifest({
       candidate: argument('--candidate'),
       profileComponentAggregate: argument('--profile-aggregate'),
-      performance: argument('--performance'),
       githubArtifactProvenance: argument('--github-provenance'),
       output: argument('--out'),
     })

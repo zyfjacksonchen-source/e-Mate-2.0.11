@@ -103,11 +103,11 @@ export function emitState(options) {
     artifact_bytes: Number(options[`${name}-bytes`]),
   })
   const required = ['source', 'version', 'mode', 'ci-run',
-    ...['profile', 'desktop', 'performance', 'admission'].flatMap(name => [`${name}-run`, `${name}-artifact`, `${name}-digest`, `${name}-bytes`]),
+    ...['profile', 'desktop', 'admission'].flatMap(name => [`${name}-run`, `${name}-artifact`, `${name}-digest`, `${name}-bytes`]),
     ...['macos', 'windows'].flatMap(name => [`${name}-artifact`, `${name}-digest`, `${name}-bytes`])]
   if (required.some(key => !options[key])) throw new Error('release state is incomplete')
   const state = {
-    schema_version: 2,
+    schema_version: 3,
     document_type: 'emate.release-state',
     source_sha: options.source,
     version: options.version,
@@ -117,18 +117,17 @@ export function emitState(options) {
       ci: { status: 'accepted', run_id: options['ci-run'] },
       profile: { status: 'accepted', run_id: options['profile-run'], ...artifact('profile') },
       desktop: { status: 'accepted', run_id: options['desktop-run'], ...artifact('desktop') },
-      performance: { status: 'accepted', run_id: options['performance-run'], ...artifact('performance') },
       admission: { status: 'accepted', run_id: options['admission-run'], ...artifact('admission') },
       publication: { status: 'pending-cloudflare-plugin', macos: artifact('macos'), windows: artifact('windows') },
     },
   }
-  const identities = [state.stages.profile, state.stages.desktop, state.stages.performance, state.stages.admission,
+  const identities = [state.stages.profile, state.stages.desktop, state.stages.admission,
     state.stages.publication.macos, state.stages.publication.windows]
   if (!SHA.test(state.source_sha) || state.version !== process.env.EMATE_EXPECTED_VERSION || state.release_mode !== 'base'
     || !POSITIVE_ID.test(state.stages.ci.run_id)
     || identities.some(value => !POSITIVE_ID.test(value.artifact_id) || !SHA256_DIGEST.test(value.artifact_digest)
       || !Number.isSafeInteger(value.artifact_bytes) || value.artifact_bytes <= 0)
-    || [state.stages.profile, state.stages.desktop, state.stages.performance, state.stages.admission]
+    || [state.stages.profile, state.stages.desktop, state.stages.admission]
       .some(value => !POSITIVE_ID.test(value.run_id))) {
     throw new Error('release state identity is invalid')
   }

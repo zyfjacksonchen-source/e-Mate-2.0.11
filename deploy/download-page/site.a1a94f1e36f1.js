@@ -6,7 +6,7 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/;
 const BASE_CONTRACT_ID = /^e-mate-desktop-profile-v[1-9][0-9]*-dsh-[0-9a-f]{12}$/;
 const RUN_ID = /^[1-9][0-9]*$/;
-const MANIFEST_SIGNATURE_CONTEXT = new TextEncoder().encode("e-mate-desktop-release-manifest-v1\0");
+const MANIFEST_SIGNATURE_CONTEXT = new TextEncoder().encode("e-mate-desktop-release-manifest-v2\0");
 const TRUSTED_MANIFEST_KEY = Object.freeze({
   id: "e0a81164526dcbcd",
   spki: "MCowBQYDK2VwAyEA0+3XBSNHP2aAp7jg++srGAjEpIICRypfzX5WWykO4oM=",
@@ -39,9 +39,9 @@ export function normalizeDownloadIndex(raw) {
   const manifest = object(raw, "桌面发布清单");
   exactKeys(manifest, [
     "schema_version", "document_type", "release_status", "version", "source_commit", "base_contract_id",
-    "schedule_protocol_floor", "profile_component_aggregate", "performance", "github_artifact_provenance", "artifacts", "signature",
+    "schedule_protocol_floor", "profile_component_aggregate", "github_artifact_provenance", "artifacts", "signature",
   ], "桌面发布清单");
-  if (manifest.schema_version !== 1 || manifest.document_type !== "emate.desktop-release-manifest"
+  if (manifest.schema_version !== 2 || manifest.document_type !== "emate.desktop-release-manifest"
     || manifest.release_status !== "admitted" || manifest.version !== VERSION
     || typeof manifest.source_commit !== "string" || !SOURCE_COMMIT.test(manifest.source_commit)
     || typeof manifest.base_contract_id !== "string" || !BASE_CONTRACT_ID.test(manifest.base_contract_id)
@@ -49,7 +49,6 @@ export function normalizeDownloadIndex(raw) {
     throw new Error("桌面发布清单身份无效");
   }
   validateProfileComponentAggregateSummary(manifest.profile_component_aggregate);
-  validatePerformanceAdmissionSummary(manifest.performance);
   validateGithubArtifactProvenance(manifest.github_artifact_provenance, manifest.source_commit);
   validateManifestSignatureShape(manifest.signature);
   const artifacts = object(manifest.artifacts, "桌面制品");
@@ -139,19 +138,9 @@ function validateProfileComponentAggregateSummary(raw) {
   });
 }
 
-function validatePerformanceAdmissionSummary(raw) {
-  const value = object(raw, "性能准入");
-  exactKeys(value, ["performance_run_id", "admission_sha256", "signature_key_id", "verifier"], "性能准入");
-  if (typeof value.performance_run_id !== "string" || typeof value.admission_sha256 !== "string"
-    || !SHA256.test(value.admission_sha256) || typeof value.signature_key_id !== "string") {
-    throw new Error("性能准入身份无效");
-  }
-  object(value.verifier, "性能准入验证器");
-}
-
 function validateGithubArtifactProvenance(raw, sourceCommit) {
   const value = object(raw, "GitHub 制品来源");
-  const roles = ["desktop_candidate", "performance_admission"];
+  const roles = ["desktop_candidate"];
   exactKeys(value, ["schema_version", "document_type", "source_commit", "artifacts"], "GitHub 制品来源");
   if (value.schema_version !== 1 || value.document_type !== "emate.github-artifact-provenance"
     || value.source_commit !== sourceCommit || !Array.isArray(value.artifacts) || value.artifacts.length !== roles.length
@@ -161,9 +150,7 @@ function validateGithubArtifactProvenance(raw, sourceCommit) {
   value.artifacts.forEach((rawArtifact, index) => {
     const artifact = object(rawArtifact, "GitHub 制品来源项");
     const role = roles[index];
-    const name = role === "desktop_candidate"
-      ? `e-mate-desktop-release-${sourceCommit}`
-      : `e-mate-performance-admission-${sourceCommit}-attempt-1`;
+    const name = `e-mate-desktop-release-${sourceCommit}`;
     exactKeys(artifact, ["role", "name", "artifact_id", "digest", "run_id", "run_attempt"], "GitHub 制品来源项");
     if (artifact.role !== role || artifact.name !== name || typeof artifact.artifact_id !== "string" || !RUN_ID.test(artifact.artifact_id)
       || typeof artifact.digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(artifact.digest)

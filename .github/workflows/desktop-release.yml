@@ -161,7 +161,7 @@ jobs:
           cp ".release-inputs/windows/e-Mate-$version-win-x64-Setup.exe" dist/desktop/
           echo "value=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Generate performance-pending Desktop artifact candidate
+      - name: Generate admission-pending Desktop artifact candidate
         env:
           CI_RUN_ID: ${{ inputs.ci_run_id }}
           SOURCE_SHA: ${{ inputs.source_sha }}

@@ -469,8 +469,8 @@ function candidateArtifacts(value, sourceCommit) {
   if (!exactKeys(value, [
     'schema_version', 'document_type', 'release_status', 'version', 'source_commit',
     'schedule_protocol_floor', 'artifacts',
-  ]) || value.schema_version !== 1 || value.document_type !== 'emate.desktop-artifact-candidate'
-    || value.release_status !== 'performance-pending' || value.source_commit !== sourceCommit
+  ]) || value.schema_version !== 2 || value.document_type !== 'emate.desktop-artifact-candidate'
+    || value.release_status !== 'admission-pending' || value.source_commit !== sourceCommit
     || !record(value.artifacts)) throw new Error('Desktop candidate is invalid')
   for (const platform of ['darwin', 'win32']) {
     const artifact = value.artifacts[platform]
@@ -731,12 +731,11 @@ async function metadata(directory, name) {
   return (await boundedJson(join(resolve(directory), name), 4 * 1024 * 1024)).value
 }
 
-/** Validate downloaded GitHub metadata and emit the updater's existing two-row provenance. */
+/** Validate downloaded GitHub metadata and emit the updater's release provenance. */
 export async function createGithubArtifactProvenance(options) {
   if (!SHA40.test(options.sourceCommit) || !RUN_ID.test(options.ciRunId)
     || !RUN_ID.test(options.desktopRunId) || !RUN_ID.test(options.profileRunId)
-    || !RUN_ID.test(options.performanceRunId) || !RUN_ID.test(options.desktopArtifactId)
-    || !RUN_ID.test(options.profileArtifactId) || !RUN_ID.test(options.performanceArtifactId)) {
+    || !RUN_ID.test(options.desktopArtifactId) || !RUN_ID.test(options.profileArtifactId)) {
     throw new Error('GitHub admission identifiers are invalid')
   }
   const { artifacts: candidateArtifact } = await verifyDesktopCandidateBundle(options.candidate, options.sourceCommit)
@@ -756,10 +755,6 @@ export async function createGithubArtifactProvenance(options) {
     id: options.profileRunId, path: '.github/workflows/profile-release.yml', event: 'workflow_dispatch',
     sourceCommit: options.sourceCommit, label: 'Profile',
   })
-  const performanceRun = githubRun(await metadata(options.metadata, 'performance-run.json'), {
-    id: options.performanceRunId, path: '.github/workflows/desktop-performance.yml', event: 'workflow_dispatch',
-    sourceCommit: options.sourceCommit, label: 'performance',
-  })
   successfulJob(await metadata(options.metadata, 'ci-jobs.json'), 'CI admission', 'CI')
   successfulJob(await metadata(options.metadata, 'ci-jobs.json'), 'Node 24 / target contracts and unit tests', 'CI')
   successfulJob(await metadata(options.metadata, 'ci-jobs.json'), 'Windows x64 / unsigned desktop installer', 'CI')
@@ -769,7 +764,6 @@ export async function createGithubArtifactProvenance(options) {
   successfulJob(profileJobs, 'Validate accepted CI evidence', 'Profile')
   for (const target of TARGETS) successfulJob(profileJobs, `Bootstrap complete Profile generation / ${target}`, 'Profile')
   successfulJob(profileJobs, 'Prepare signed native Cloudflare publication bundle', 'Profile')
-  successfulJob(await metadata(options.metadata, 'performance-jobs.json'), 'Performance admission', 'performance')
   const mainRef = await metadata(options.metadata, 'main-ref.json')
   if (mainRef?.object?.sha !== options.sourceCommit) throw new Error('GitHub main branch head drifted')
 
@@ -806,10 +800,6 @@ export async function createGithubArtifactProvenance(options) {
     if (artifactIds.has(String(value.id))) throw new Error('GitHub CI build artifacts share an identity')
     artifactIds.add(String(value.id))
   }
-  const performance = githubArtifact(await metadata(options.metadata, 'performance-artifact.json'), {
-    id: options.performanceArtifactId, name: `e-mate-performance-admission-${options.sourceCommit}-attempt-1`,
-    runId: options.performanceRunId, sourceCommit: options.sourceCommit, label: 'performance admission',
-  })
   const provenance = {
     schema_version: 1,
     document_type: 'emate.github-artifact-provenance',
@@ -818,10 +808,6 @@ export async function createGithubArtifactProvenance(options) {
       {
         role: 'desktop_candidate', name: desktop.name, artifact_id: String(desktop.id), digest: desktop.digest,
         run_id: String(desktopRun.id), run_attempt: desktopRun.run_attempt,
-      },
-      {
-        role: 'performance_admission', name: performance.name, artifact_id: String(performance.id),
-        digest: performance.digest, run_id: String(performanceRun.id), run_attempt: performanceRun.run_attempt,
       },
     ],
   }
@@ -839,7 +825,7 @@ async function main() {
   const command = process.argv[2]
   const { values } = parseArgs({ args: process.argv.slice(3), options: Object.fromEntries([
     'base-contract', 'candidate', 'ci-run-id', 'commit', 'desktop-artifact-id', 'desktop-run-id', 'inventory',
-    'metadata', 'out', 'performance-artifact-id', 'performance-bundle', 'performance-run-id', 'profile',
+    'metadata', 'out', 'performance-bundle', 'profile',
     'profile-aggregate', 'profile-artifact-id', 'profile-receipt', 'profile-release-bundle', 'profile-run-id',
     'release-version', 'verifier-source', 'performance-authorities-out',
   ].map(name => [name, { type: 'string' }])) })
@@ -869,9 +855,8 @@ async function main() {
     await createGithubArtifactProvenance({
       sourceCommit: option(values, 'commit'), candidate: option(values, 'candidate'), metadata: option(values, 'metadata'),
       ciRunId: option(values, 'ci-run-id'), desktopRunId: option(values, 'desktop-run-id'),
-      profileRunId: option(values, 'profile-run-id'), performanceRunId: option(values, 'performance-run-id'),
-      desktopArtifactId: option(values, 'desktop-artifact-id'), profileArtifactId: option(values, 'profile-artifact-id'),
-      performanceArtifactId: option(values, 'performance-artifact-id'), output: option(values, 'out'),
+      profileRunId: option(values, 'profile-run-id'), desktopArtifactId: option(values, 'desktop-artifact-id'),
+      profileArtifactId: option(values, 'profile-artifact-id'), output: option(values, 'out'),
     })
   } else {
     throw new Error('desktop admission command must be profile-build-receipt, profile-aggregate, performance-summary, or github-provenance')

@@ -188,8 +188,8 @@ jobs:
           if (!exact(candidate, [
             'schema_version', 'document_type', 'release_status', 'version', 'source_commit',
             'schedule_protocol_floor', 'artifacts',
-          ]) || candidate.schema_version !== 1 || candidate.document_type !== 'emate.desktop-artifact-candidate'
-            || candidate.release_status !== 'performance-pending' || candidate.version !== version
+          ]) || candidate.schema_version !== 2 || candidate.document_type !== 'emate.desktop-artifact-candidate'
+            || candidate.release_status !== 'admission-pending' || candidate.version !== version
             || candidate.source_commit !== source || candidate.schedule_protocol_floor !== base.schedule_protocol_floor
             || !exact(candidate.artifacts, ['darwin', 'win32'])) {
             throw new Error('Desktop candidate identity is invalid')
@@ -628,7 +628,7 @@ jobs:
 
       - name: Sign only the exact protected evidence and release artifacts
         id: admit
-        uses: zyfjacksonchen-source/e-mate-desktop-publication/performance@4193d2ae0a87327f161ce4a5b69bf60aee1ab052
+        uses: zyfjacksonchen-source/e-mate-desktop-publication/performance@5e254e06905d7d930bc27117692d70d92456e8e7
         env:
           EMATE_GITHUB_PROVENANCE_TOKEN: ${{ github.token }}
           EMATE_DESKTOP_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.EMATE_PROFILE_SIGNING_PRIVATE_KEY }}

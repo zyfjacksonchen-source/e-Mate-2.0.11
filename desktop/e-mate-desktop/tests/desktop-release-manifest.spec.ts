@@ -22,7 +22,7 @@ describe('desktop release manifest', () => {
     expect(DESKTOP_RELEASE_VERSION).toBe(desktopManifest.version)
   })
 
-  it('binds both immutable R2 artifacts to a performance-pending candidate', async () => {
+  it('binds both immutable R2 artifacts to an admission-pending candidate', async () => {
     const root = await mkdtemp(join(tmpdir(), 'e-mate-desktop-release-'))
     roots.push(root)
     const artifacts = join(root, 'artifacts')
@@ -49,9 +49,9 @@ describe('desktop release manifest', () => {
 
     const manifest = JSON.parse(await readFile(output, 'utf8'))
     expect(manifest).toEqual({
-      schema_version: 1,
+      schema_version: 2,
       document_type: 'emate.desktop-artifact-candidate',
-      release_status: 'performance-pending',
+      release_status: 'admission-pending',
       version: '2.0.13',
       source_commit: commit,
       schedule_protocol_floor: 1,
@@ -104,7 +104,7 @@ describe('desktop release manifest', () => {
     })).rejects.toThrow('unexpected desktop artifact name')
   })
 
-  it('is the only producer of the external signer\'s unsigned 11-field input', async () => {
+  it('is the only producer of the external signer\'s unsigned 10-field input', async () => {
     const root = await releaseFixture()
     const candidate = join(root, 'desktop-candidate.json')
     const output = join(root, 'latest.json')
@@ -114,7 +114,7 @@ describe('desktop release manifest', () => {
     await admitDesktopReleaseManifest({ candidate, ...inputs, output })
 
     const manifest = JSON.parse(await readFile(output, 'utf8'))
-    expect(Object.keys(manifest)).toHaveLength(11)
+    expect(Object.keys(manifest)).toHaveLength(10)
     expect(validateUnsignedAdmittedDesktopReleaseManifest(manifest)).toBe(true)
   })
 
@@ -138,15 +138,15 @@ describe('desktop release manifest', () => {
     await expect(readFile(output)).rejects.toThrow()
   })
 
-  it('rejects an unsigned input that cannot be represented by canonical JSON', async () => {
+  it('rejects an unsigned input with unbound provenance fields', async () => {
     const root = await releaseFixture()
     const candidate = join(root, 'desktop-candidate.json')
     const output = join(root, 'latest.json')
     const commit = 'a'.repeat(40)
     const inputs = await admissionInputs(root, commit)
-    const performance = JSON.parse(await readFile(inputs.performance, 'utf8'))
-    performance.verifier = { threshold: 0.95 }
-    await writeFile(inputs.performance, JSON.stringify(performance))
+    const provenance = JSON.parse(await readFile(inputs.githubArtifactProvenance, 'utf8'))
+    provenance.artifacts[0].note = 'unbound'
+    await writeFile(inputs.githubArtifactProvenance, JSON.stringify(provenance))
 
     await expect(admitDesktopReleaseManifest({ candidate, ...inputs, output }))
       .rejects.toThrow('admitted release manifest is invalid')
@@ -176,7 +176,6 @@ async function releaseFixture(): Promise<string> {
 
 async function admissionInputs(root: string, sourceCommit: string) {
   const profileComponentAggregate = join(root, 'profile-component-aggregate.json')
-  const performance = join(root, 'performance.json')
   const githubArtifactProvenance = join(root, 'github-provenance.json')
   await writeFile(profileComponentAggregate, JSON.stringify({
     aggregate_sha256: '1'.repeat(64),
@@ -188,20 +187,13 @@ async function admissionInputs(root: string, sourceCommit: string) {
       component_aggregate_sha256: '6'.repeat(64),
     })),
   }))
-  await writeFile(performance, JSON.stringify({
-    performance_run_id: 'performance-run-id',
-    admission_sha256: '4'.repeat(64),
-    signature_key_id: '0123456789abcdef',
-    verifier: {},
-  }))
   await writeFile(githubArtifactProvenance, JSON.stringify({
     schema_version: 1,
     document_type: 'emate.github-artifact-provenance',
     source_commit: sourceCommit,
     artifacts: [
       { role: 'desktop_candidate', name: `e-mate-desktop-release-${sourceCommit}`, artifact_id: '11', digest: `sha256:${'7'.repeat(64)}`, run_id: '123', run_attempt: 1 },
-      { role: 'performance_admission', name: `e-mate-performance-admission-${sourceCommit}-attempt-1`, artifact_id: '12', digest: `sha256:${'8'.repeat(64)}`, run_id: '124', run_attempt: 1 },
     ],
   }))
-  return { profileComponentAggregate, performance, githubArtifactProvenance }
+  return { profileComponentAggregate, githubArtifactProvenance }
 }
