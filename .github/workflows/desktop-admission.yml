@@ -112,6 +112,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ inputs.desktop_artifact_id }}
+          merge-multiple: true
           path: .admission/desktop
           github-token: ${{ github.token }}
           run-id: ${{ inputs.desktop_run_id }}
@@ -149,6 +150,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.ci-build.outputs.artifact_id }}
+          merge-multiple: true
           path: .admission/profile-build
           github-token: ${{ github.token }}
           run-id: ${{ inputs.ci_run_id }}
@@ -157,6 +159,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.ci-build.outputs.receipt_artifact_id }}
+          merge-multiple: true
           path: .admission/profile-build-receipt
           github-token: ${{ github.token }}
           run-id: ${{ inputs.ci_run_id }}
@@ -165,6 +168,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ inputs.profile_artifact_id }}
+          merge-multiple: true
           path: .admission/profile-publication
           github-token: ${{ github.token }}
           run-id: ${{ inputs.profile_release_run_id }}
@@ -173,6 +177,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ inputs.performance_artifact_id }}
+          merge-multiple: true
           path: .admission/performance
           github-token: ${{ github.token }}
           run-id: ${{ inputs.performance_workflow_run_id }}
