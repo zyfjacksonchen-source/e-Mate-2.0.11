@@ -2786,3 +2786,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 2.0.12用户数据已在安装前做可恢复私有备份；失败候选未进入rename/swap，已安装文件仍为2.0.12。修复目前仅为源码与实机脚本验证，不是候选构建或安装通过。
 - Remaining blockers: 必须合入protected main、产生新的attempt-1 exact Windows安装器并重新执行2.0.12→2.0.13原子更新、启动、会话、导航、登录/模型/搜索隔离和回滚验收；旧 `9b960` 候选永久作废。
 - Next exact action: 提交最小修复供主线合入；只消费新protected-main CI的exact字节重跑Windows实机验收。
+
+## 2026-08-26 · 2.0.13 S32 改图 413 与子代理顶层投影生产事故闭环
+
+- Goal checkpoint: 用户改图连续返回 `receipt status unknown`，且原生图片子代理 Session 被 e-Mate 自定义首页/侧栏误投影为顶层会话；本条只恢复 2.0.13 可用性，S32 完整并发与交互迭代留给 2.0.14。
+- Frozen baseline / current HEAD: 修复分支基于受保护主线 `d4444475e4dfb77ecba3c9919d1153a4e08ef576`；正式发布仍须使用本修复合入后的 exact main 字节。
+- Binding documents read: 根 `AGENTS.md`、`docs/target-contract.md`、S32/S35 与最新完整 development log。
+- Inspected native seam: 图片任务继续由 rc.7 原生 parent/child Session、Job、附件与 ImageGen receipt 链拥有；e-Mate 只负责顶层 Session 投影。生产链显示 1,439,016-byte PNG 在外层 Nginx 默认 1 MiB 限制处被 HTTP 413 拒绝，未到达允许 50 MiB 的 Web 层及允许 5 MiB/图的 Gateway；旧 receipt 因已开始本地提交阶段而误记 `unknown`。
+- Experiment or why unnecessary: 外层 `/e-mate/` 路由把原生 `client_max_body_size` 对齐到 50 MiB 后，沿同一父会话、同一原图只调用一次 `imagegen`；候选图成功返回并由用户语义确认闭环，没有 413、unknown 或自动重试。子 Session 保留完整原生记录，只从首页、项目和通用会话的顶层投影排除。
+- Decision and forbidden alternatives: 不删除子 Session、不禁用子代理、不新增图片运行时、重试器或第二会话表；只在首次可靠知道请求未提交的 HTTP 413 边界记录 `failed/not-submitted/http-413`，其他不可证明的 provider 结果继续 fail closed 为 unknown。
+- Changed scope: `emate-shell` 首页/侧栏投影及回归、共享 ImageGen receipt 分类及回归、本 append-only 记录；外层生产路由热修复独立留有可回滚激活回执。
+- Verification commands and results: Sidebar/Home fidelity `16/16`；ImageGen targeted test `1/1`；Harness 与受影响组件 build 通过；`git diff --check` 通过；安装态真实改图一次成功，源图 SHA-256 `ee08298fb9a0919ab3eaf0de81373b2902e32b14d4a76b88a4b57d5a7e7068e3`，候选 SHA-256 `0aadb886f0f6f2deb86f68bcf164fe543540196f0876da8f109882b92b141ddf`。
+- Immutable evidence / receipt: 生产路由激活回执 `20260826T0530Z-image-edit-413/activation.receipt.json`，SHA-256 `407707d659cef6838043d6bfa0f2c6a6c5cd5f88659d446436e1ebab200fa8a6`；公开 `/e-mate/healthz` 回读 200。
+- Remaining blockers: 首页/侧栏顶层投影与 413 receipt 分类尚须合入 main、由同一源码构建 macOS/Windows 候选并完成安装/更新验收后才可随 2.0.13 发布；性能验收按用户明确决定跳过，不得标记 passed。
+- Next exact action: 提交本最小修复、合入受保护主线并只发布新 main exact 字节。

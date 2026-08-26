@@ -4,6 +4,7 @@ import css from './sidebar.module.css'
 interface SessionRow {
   id: string
   displayTitle: string
+  parentId?: string
   running: boolean
   pendingInteraction?: unknown
   completed?: boolean
@@ -138,7 +139,7 @@ export function SidebarRoot({
   const projectWorkspaces = useMemo(() => workspaces.filter(workspace => !isGeneralWorkspace(workspace)), [workspaces])
   const visibleRows = useMemo(() => ids
     .map(id => byId[id])
-    .filter((row): row is SessionRow => row !== undefined && !archived.has(row.id))
+    .filter((row): row is SessionRow => row !== undefined && row.parentId === undefined && !archived.has(row.id))
     .sort(newestSessionFirst),
   [archived, byId, ids])
   const accounted = useMemo(() => new Set(projectWorkspaces.flatMap(workspace => workspace.sessionIds)), [projectWorkspaces])
@@ -477,7 +478,7 @@ export function SidebarRoot({
                     : <div className={css.projectList}>{projectWorkspaces.map(workspace => {
                       const rows = workspace.sessionIds.flatMap(id => {
                         const row = byId[id]
-                        return row === undefined || archived.has(id) ? [] : [row]
+                        return row === undefined || row.parentId !== undefined || archived.has(id) ? [] : [row]
                       }).sort(newestSessionFirst)
                       const open = expanded[workspace.workspaceId] !== false
                       const shown = showAll[workspace.workspaceId] ? rows : rows.slice(0, COLLAPSED_SESSION_LIMIT)

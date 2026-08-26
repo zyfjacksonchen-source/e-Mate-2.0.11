@@ -7,6 +7,7 @@ import { formatTokenCount } from './token-format.ts'
 interface SessionRow {
   id: string
   displayTitle: string
+  parentId?: string
   running: boolean
   completed?: boolean
   pendingInteraction?: unknown
@@ -295,7 +296,8 @@ export function HomeProjection({
     )
   }
 
-  const sessions = ids.map(id => byId[id]).filter((row): row is SessionRow => row !== undefined)
+  const sessions = ids.map(id => byId[id])
+    .filter((row): row is SessionRow => row !== undefined && row.parentId === undefined)
   const visible = sessions.filter(row => !row.blank)
   const waiting = sessions.filter(row => row.pendingInteraction !== undefined).length
   const completed = visible.filter(row => row.completed === true).length
