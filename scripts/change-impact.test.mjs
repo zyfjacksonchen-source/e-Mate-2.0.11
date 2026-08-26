@@ -18,11 +18,11 @@ import {
 const root = fileURLToPath(new URL('..', import.meta.url))
 
 function classify(...paths) {
-  return classifyChangedPaths(paths, { root })
+  return classifyChangedPaths(paths, { root, acceptedProfileCompatible: true })
 }
 
 function classifyWith(options, ...paths) {
-  return classifyChangedPaths(paths, { root, ...options })
+  return classifyChangedPaths(paths, { root, acceptedProfileCompatible: true, ...options })
 }
 
 describe('repository release boundary', () => {
@@ -349,6 +349,13 @@ describe('repository release boundary', () => {
       '@e-mate/dsh-plugin-memory-evolve',
       '@e-mate/dsh-plugin-office-skills',
     ])
+  })
+
+  it('requires the Base lane until the accepted Profile matches the candidate Base', () => {
+    const path = 'packages/dsh/profile/plugins/emate-shell/src/client/sidebar.tsx'
+    assert.equal(classifyChangedPaths([path], { root }).lane, 'base')
+    assert.equal(classifyChangedPaths([path], { root, acceptedProfileCompatible: false }).lane, 'base')
+    assert.equal(classifyChangedPaths([path], { root, acceptedProfileCompatible: true }).lane, 'plugin-only')
   })
 
   it('keeps the Skill Hub Host, Agent tools, and UI in one hot component lane', () => {

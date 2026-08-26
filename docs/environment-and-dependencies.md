@@ -44,7 +44,7 @@ Vision uses the fixed Desktop CPython 3.12.14 ABI but owns its target-specific P
 
 `scripts/change-impact.mjs` is the fail-closed lane authority:
 
-- A compatible component source/test/dependency-lock change selects Plugin-only. CI builds/tests only the changed component, merges it with the immutable accepted set for all three targets, then boots the Host and Web Loader without building an installer.
+- A compatible component source/test/dependency-lock change selects Plugin-only only after the candidate Base already has a compatible accepted desired state. CI then builds/tests only the changed component, merges it with the immutable accepted set for all three targets, and boots the Host and Web Loader without building an installer. Before that first complete Profile bootstrap, a publishable component change selects Base so no v7 payload is composed against a v6 parent; a test-only component change still runs only its owner gate and emits no bytes.
 - Harness/Desktop ABI, permissions, updater, Electron/native helper, shared Profile input, root/Desktop lock, packaging/signing or incompatible contract changes select Base. Base CI builds the installers and runs all accepted platform components against the new Base SDK on their native target matrix.
 - Unknown or incomplete provenance selects Base. Workflow-local path lists and manual labels cannot downgrade it.
 

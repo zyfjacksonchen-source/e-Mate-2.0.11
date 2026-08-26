@@ -4,6 +4,11 @@ import { execFileSync } from 'node:child_process'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  parseProfileReleaseEnvelope,
+  sameProfileReleaseTarget,
+  selectProfileRelease,
+} from '../desktop/e-mate-desktop/src/profile-release.ts'
 
 export const BASE_CONTRACT_PATH = 'desktop/e-mate-desktop/base-contract.json'
 export const ACCEPTED_PREDECESSOR = '6a7f4b9d59a1d8970345638946fb6564e2f5f93e'
@@ -14,6 +19,8 @@ export const PRODUCT_UI_REFERENCE = Object.freeze({
 })
 const SHELL_COMPONENT_ROOT = 'packages/dsh/profile/plugins/emate-shell'
 const COMPONENT_INVENTORY_PATH = 'packages/dsh/profile/component-inventory.json'
+const PROFILE_CURRENT_SNAPSHOT_PATH = 'artifacts/release/profile-current-snapshot.json'
+const MAX_CURRENT_PROFILE_BYTES = 1024 * 1024
 const STABLE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u
 const PACKAGE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
 const BASE_RUNTIME_PACKAGE = /^(?:@deepseek-ai\/[a-z0-9][a-z0-9._-]*|@e-mate\/desktop\/vision-toolkit|react(?:-dom)?)$/u
@@ -120,6 +127,27 @@ const RELEASE_VERIFIER_PREFIXES = [
 
 function record(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function acceptedProfileIsCompatible(root, base) {
+  try {
+    const snapshot = JSON.parse(readFileSync(join(root, PROFILE_CURRENT_SNAPSHOT_PATH), 'utf8'))
+    if (!record(snapshot.targets)) return false
+    for (const name of PLATFORM_TARGETS) {
+      const entry = snapshot.targets[name]
+      if (!record(entry) || entry.status !== 'present' || typeof entry.content_base64 !== 'string') return false
+      const bytes = Buffer.from(entry.content_base64, 'base64')
+      if (bytes.byteLength === 0 || bytes.byteLength > MAX_CURRENT_PROFILE_BYTES
+        || bytes.toString('base64') !== entry.content_base64) return false
+      const release = parseProfileReleaseEnvelope(bytes, base, MAX_CURRENT_PROFILE_BYTES)
+      const [platform, arch] = name.split('-')
+      if (release === undefined || !sameProfileReleaseTarget(release.payload.target, { platform, arch })
+        || selectProfileRelease(release.payload, base, 0) === 'base-required') return false
+    }
+    return true
+  } catch {
+    return false
+  }
 }
 
 function parsePlatformTargets(value) {
@@ -723,8 +751,12 @@ export function classifyChangedPaths(paths, options = {}) {
   const portablePublish = publishComponents.length > 0
     && componentJobs.filter(job => job.publish).every(job => job.target === 'portable')
   const hasComponentWork = kinds.has('component') || kinds.has('component-test')
+  const acceptedProfileCompatible = typeof options.acceptedProfileCompatible === 'boolean'
+    ? options.acceptedProfileCompatible
+    : acceptedProfileIsCompatible(root, boundary.baseContract)
+  const requiresProfileBootstrap = publishComponents.length > 0 && !acceptedProfileCompatible
   let lane
-  if (!boundary.valid || kinds.has('base') || hasComponentWork && kinds.has('enterprise')) lane = 'base'
+  if (!boundary.valid || kinds.has('base') || hasComponentWork && kinds.has('enterprise') || requiresProfileBootstrap) lane = 'base'
   else if (hasComponentWork) lane = 'plugin-only'
   else if (kinds.has('enterprise')) lane = 'enterprise-only'
   else if (kinds.has('verification')) lane = 'verification-only'
