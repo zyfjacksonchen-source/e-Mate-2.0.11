@@ -538,7 +538,7 @@ test('download site stages exact bytes and a closed release-bound website handof
     sourceCommit: SOURCE_COMMIT,
     releaseStatePath,
     websitePublicOrigin: 'https://downloads.e-mate.example/releases/',
-    expectedActiveTarget: 'versions/2.0.12',
+    expectedActiveTarget: '/srv/ecorex-agent-download/releases/site-emate-nexus-f65dbdc',
     expectedActiveIndex: `636:${'a'.repeat(64)}`,
   })
   assert.deepEqual(Object.keys(plan), [
@@ -554,10 +554,11 @@ test('download site stages exact bytes and a closed release-bound website handof
   assert.match(plan.release_state.sha256, /^[0-9a-f]{64}$/u)
   assert.equal(plan.desktop_publication_predecessor.action_commit, 'de2868c574098c356ce0b88c02d6c3afd29d47be')
   assert.equal(plan.desktop_publication_predecessor.artifact_name, `e-mate-desktop-cloudflare-handoff-${SOURCE_COMMIT}`)
-  assert.equal(plan.publication_contract.version_directory, `versions/${SOURCE_COMMIT}`)
-  assert.equal(plan.publication_contract.active_symlink, 'active')
-  assert.equal(plan.publication_contract.expected_active_relative_target, 'versions/2.0.12')
-  assert.deepEqual(plan.publication_contract.expected_active_index, { bytes: 636, sha256: 'a'.repeat(64) })
+  assert.equal(plan.publication_contract.server_root, '/srv/ecorex-agent-download')
+  assert.equal(plan.publication_contract.version_directory, `releases/site-emate-${VERSION}-${SOURCE_COMMIT}`)
+  assert.equal(plan.publication_contract.current_symlink, 'current')
+  assert.equal(plan.publication_contract.expected_current_target, '/srv/ecorex-agent-download/releases/site-emate-nexus-f65dbdc')
+  assert.deepEqual(plan.publication_contract.expected_current_index, { bytes: 636, sha256: 'a'.repeat(64) })
   assert.equal(plan.publication_contract.require_cloudflare_public_readback_first, true)
   assert.equal(plan.publication_contract.server_writes_performed, false)
   assert.equal(plan.publication_contract.r2_writes_performed, false)
@@ -585,7 +586,7 @@ test('download site stages exact bytes and a closed release-bound website handof
 
   const base = { outputDirectory: output, planPath, sourceCommit: SOURCE_COMMIT, releaseStatePath }
   assert.throws(() => stageDownloadPage({ ...base, websitePublicOrigin: 'http://example.test', expectedActiveTarget: 'absent', expectedActiveIndex: 'absent' }), /HTTPS/u)
-  assert.throws(() => stageDownloadPage({ ...base, websitePublicOrigin: 'https://example.test', expectedActiveTarget: '../active', expectedActiveIndex: 'absent' }), /active target/u)
+  assert.throws(() => stageDownloadPage({ ...base, websitePublicOrigin: 'https://example.test', expectedActiveTarget: '../active', expectedActiveIndex: 'absent' }), /current target/u)
   assert.throws(() => stageDownloadPage({ ...base, websitePublicOrigin: 'https://example.test', expectedActiveTarget: 'absent', expectedActiveIndex: `1:${DIGEST}` }), /both be absent/u)
   const driftedStatePath = join(root, 'drifted-release-state.json')
   const driftedState = JSON.parse(readFileSync(releaseStatePath, 'utf8'))

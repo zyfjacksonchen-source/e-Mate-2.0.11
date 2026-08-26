@@ -173,8 +173,9 @@ export function stageDownloadPage({
 }) {
   if (!SOURCE_COMMIT.test(sourceCommit ?? '')) throw new Error('download page requires an exact source commit')
   if (typeof releaseStatePath !== 'string') throw new Error('download page requires the admitted release state')
-  if (expectedActiveTarget !== 'absent' && !/^versions\/[A-Za-z0-9._-]+$/u.test(expectedActiveTarget ?? '')) {
-    throw new Error('website active target must be absent or one safe versions/<id> path')
+  if (expectedActiveTarget !== 'absent'
+    && !/^(?:\/srv\/ecorex-agent-download\/)?releases\/[A-Za-z0-9._-]+$/u.test(expectedActiveTarget ?? '')) {
+    throw new Error('website current target must be absent or one safe releases/<id> path')
   }
   const predecessorIndex = exactIdentity(expectedActiveIndex, 'website active index')
   if ((expectedActiveTarget === 'absent') !== (predecessorIndex === null)) {
@@ -221,12 +222,13 @@ export function stageDownloadPage({
     publication_contract: {
       target: 'website-server',
       authority: 'website-server-owner',
-      strategy: 'versioned-relative-symlink',
-      version_directory: `versions/${sourceCommit}`,
-      active_symlink: 'active',
-      candidate_relative_target: `versions/${sourceCommit}`,
-      expected_active_relative_target: expectedActiveTarget === 'absent' ? null : expectedActiveTarget,
-      expected_active_index: predecessorIndex,
+      strategy: 'versioned-current-symlink',
+      server_root: '/srv/ecorex-agent-download',
+      version_directory: `releases/site-emate-${desktopVersion}-${sourceCommit}`,
+      current_symlink: 'current',
+      candidate_relative_target: `releases/site-emate-${desktopVersion}-${sourceCommit}`,
+      expected_current_target: expectedActiveTarget === 'absent' ? null : expectedActiveTarget,
+      expected_current_index: predecessorIndex,
       preserve_unrelated_content: true,
       switch_symlink_last: true,
       require_cloudflare_public_readback_first: true,
@@ -237,7 +239,7 @@ export function stageDownloadPage({
     },
     public_readback: {
       origin,
-      active_index_url: new URL('index.html', origin).href,
+      current_index_url: new URL('index.html', origin).href,
       requirements: ['https-200', 'no-redirect', 'content-type', 'content-length', 'sha256', 'installer-links-admitted'],
       files: stagedFiles.map(file => ({ ...file, url: new URL(file.relative_path, origin).href })),
     },
@@ -262,7 +264,7 @@ function main() {
   if (values.out === undefined || values.plan === undefined || values.commit === undefined
     || values['release-state'] === undefined || values['public-origin'] === undefined
     || values['expected-active-target'] === undefined || values['expected-active-index'] === undefined) {
-    throw new Error('usage: render-download-page.mjs --out <directory> --plan <path> --commit <sha> --release-state <path> --public-origin <https-url> --expected-active-target <absent|versions/id> --expected-active-index <absent|bytes:sha256>')
+    throw new Error('usage: render-download-page.mjs --out <directory> --plan <path> --commit <sha> --release-state <path> --public-origin <https-url> --expected-active-target <absent|releases/id> --expected-active-index <absent|bytes:sha256>')
   }
   stageDownloadPage({
     outputDirectory: values.out,

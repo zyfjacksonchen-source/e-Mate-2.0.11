@@ -2689,3 +2689,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 外部 protected-main `de2868c574098c356ce0b88c02d6c3afd29d47be`；本机 broker权限目录0700、可执行0700、state/preload0600与专用Keychain项。仍没有 exact candidate DMG/EXE、production performance run、签名 admission、Cloudflare写入、官网切换或双平台安装回执。
 - Remaining blockers: PR与protected-main attempt-1、正式四模型性能采集、签名admission、Cloudflare/Profile/Desktop发布、公网回读、macOS/Windows安装更新回滚仍须按顺序完成。
 - Next exact action: 提交并推送唯一source SHA，等待PR CI通过后合入protected main；只消费该main attempt-1产生的同一字节继续实机与发布。
+
+## 2026-08-26 · 2.0.13 正式 CI 图标工具与官网真实 owner 校正
+
+- Goal checkpoint: PR CI 首次真实执行 macOS `package:dir` 后暴露 electron-builder 图标工具的模块作用域冲突；官网发布前驱只读核验同时证明服务器唯一在线切换点仍是 `current`，不是计划中尚不存在的 `active`。本条修复这两个正式发布阻断，不提前发布。
+- Frozen baseline / current HEAD: PR #59 候选起点 `cc889290c66fa3481c7540c53cfca17c1c9ea916`；失败 CI run `32914225143`；官网公开入口当前 index 为 `636` bytes、SHA-256 `02ea7f5f44ef41390c41901b3f385754bc333f19be4a9aa0efe582890a7a252c`，与服务器 `current` 指向内容逐字节一致。
+- Binding documents read: 根 `AGENTS.md`、S35、最新完整日志、CI Build-once 合同、release coordinator 与下载页 handoff owner。
+- Inspected native seam: electron-builder `icons@1.1.0` 下载到根 `type=module` 作用域内，CommonJS `icon-tool.js` 因 `require` 不可用失败；官网 Nginx 当前由 `/srv/ecorex-agent-download/current` 服务，既有前驱位于同一根的 `releases/`，服务器没有 `active` 软链。
+- Experiment or why unnecessary: CI 失败日志精确定位图标转换步骤；缓存移出仓库模块作用域后保留同一 actions/cache key 与跨平台共享做法。官网通过授权 SSH 只读 symlink/index 和公网 HTTPS 回读交叉核验，没有写服务器、R2、Feed 或 desired state。
+- Decision and forbidden alternatives: 两个平台共用的 electron-builder 工具缓存固定到 workspace 父级，避免按 macOS 单步改工具源码或关闭图标生成。官网 handoff 改为对真实 `current` 做 exact predecessor CAS，候选写入 `releases/site-emate-2.0.13-<source>`，最后相对切换 `current`；拒绝伪报 `active=absent`、覆盖旧槽位或增加第二软链发布路径。
+- Changed scope: CI 两个平台工具缓存边界、官网 handoff schema/描述及既有合同测试；未改产品运行时、图标资产、模型链、Desktop/Profile 字节、R2、Feed、desired state、官网或用户数据。
+- Verification commands and results: change-impact `24/24`；release/coordinator `20/20`；`git diff --check` 通过。PR 新候选仍须由真实 macOS/Windows CI 证明构建修复。
+- Immutable evidence / receipt: 只有失败 run `32914225143`、源码修复、只读官网前驱与公网 index 对账；没有候选安装器、安装态、生产写入或公开指针变化。
+- Remaining blockers: 新 exact PR CI、protected-main attempt-1、四模型性能、admission、Cloudflare 发布、公网回读和实机安装/更新/回滚仍保持 OPEN。
+- Next exact action: 推送本校正后的唯一候选，PR CI 全绿后合入 protected main；只消费 main attempt-1 字节继续实机与生产发布。

@@ -17,15 +17,15 @@ on:
         type: choice
         options: [base]
       website_public_origin:
-        description: Exact HTTPS origin served through the website active symlink.
+        description: Exact HTTPS origin served through the website current symlink.
         required: true
         type: string
       website_expected_active_target:
-        description: Literal absent, or the website owner's fresh relative active target versions/<id>.
+        description: Literal absent, or the website owner's fresh exact current target under releases/.
         required: true
         type: string
       website_expected_active_index:
-        description: Literal absent, or the fresh public active index identity as <bytes>:<sha256>.
+        description: Literal absent, or the fresh public current index identity as <bytes>:<sha256>.
         required: true
         type: string
 
