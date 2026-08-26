@@ -23,6 +23,7 @@ const SHA40 = /^[0-9a-f]{40}$/u
 const SHA256 = /^[0-9a-f]{64}$/u
 const RUN_ID = /^[1-9][0-9]*$/u
 const PROFILE_TREE_CONTEXT = Buffer.from('e-mate-staged-profile-tree-v1\0', 'utf8')
+const PROFILE_PUBLICATION_CONTEXT = Buffer.from('e-mate-profile-publication-tree-v1\0', 'utf8')
 const PROFILE_COMPONENT_CONTEXT = Buffer.from('e-mate-profile-component-aggregate-v1\0', 'utf8')
 const PROFILE_AGGREGATE_CONTEXT = Buffer.from('e-mate-profile-aggregate-v1\0', 'utf8')
 const PERFORMANCE_SIGNATURE_CONTEXT = Buffer.from('e-mate-performance-admission-v1\0', 'utf8')
@@ -133,6 +134,10 @@ async function treeEntries(root) {
     throw new Error('admission tree exceeds the accepted file or byte boundary')
   }
   return { entries, bytes }
+}
+
+export async function profilePublicationTreeSha256(root) {
+  return canonicalDigest(PROFILE_PUBLICATION_CONTEXT, (await treeEntries(root)).entries)
 }
 
 async function atomicJson(path, value) {
@@ -287,6 +292,7 @@ export async function createProfileComponentAggregate(options) {
   }
 
   const targets = []
+  const performanceTargets = []
   const consumedObjects = new Set()
   for (let index = 0; index < TARGETS.length; index += 1) {
     const target = TARGETS[index]
@@ -330,6 +336,7 @@ export async function createProfileComponentAggregate(options) {
     }
     consumedObjects.add(immutableRelease.item.url)
 
+    let clientBundleSha256
     for (const reference of release.payload.components) {
       const inventoryComponent = inventoryContract.byId.get(reference.id)
       const expectedTarget = inventoryComponent?.kind === 'platform-profile'
@@ -350,6 +357,11 @@ export async function createProfileComponentAggregate(options) {
       }
       const manifest = parseProfileComponentManifest(await readFile(manifestObject.path), reference, base)
       if (manifest === undefined) throw new Error(`Profile component manifest is invalid: ${target}/${reference.id}`)
+      if (reference.id === '@e-mate/dsh-client-shell') {
+        const client = manifest.files.filter(file => file.path === 'lib/client.js')
+        if (client.length !== 1) throw new Error(`Profile client bundle is missing: ${target}`)
+        clientBundleSha256 = client[0].sha256
+      }
       consumedObjects.add(manifestObject.item.url)
       for (const file of manifest.files) {
         const object = objects.get(componentFileUrl(reference, file.path))
@@ -359,14 +371,24 @@ export async function createProfileComponentAggregate(options) {
         consumedObjects.add(object.item.url)
       }
     }
+    const componentAggregateSha256 = canonicalDigest(PROFILE_COMPONENT_CONTEXT, {
+      target,
+      components: release.payload.components,
+    })
     targets.push({
       target,
       profile_generation: activation.generation,
-      component_aggregate_sha256: canonicalDigest(PROFILE_COMPONENT_CONTEXT, {
-        target,
-        components: release.payload.components,
-      }),
+      component_aggregate_sha256: componentAggregateSha256,
     })
+    if (options.performanceOutput !== undefined) {
+      if (clientBundleSha256 === undefined) throw new Error(`Profile client bundle authority is missing: ${target}`)
+      performanceTargets.push({
+        target,
+        profile_generation: activation.generation,
+        composition_sha256: componentAggregateSha256,
+        client_bundle_sha256: clientBundleSha256,
+      })
+    }
   }
 
   if (consumedObjects.size !== objects.size) {
@@ -392,6 +414,17 @@ export async function createProfileComponentAggregate(options) {
     ...unsigned,
   }
   await atomicJson(options.output, aggregate)
+  if (options.performanceOutput !== undefined) {
+    await atomicJson(options.performanceOutput, {
+      schema_version: 1,
+      document_type: 'emate.profile-performance-authorities',
+      source_commit: options.sourceCommit,
+      base_contract_id: base.id,
+      publication_tree_sha256: canonicalDigest(PROFILE_PUBLICATION_CONTEXT, bundleTree.entries),
+      profile_component_aggregate_sha256: aggregate.aggregate_sha256,
+      targets: performanceTargets,
+    })
+  }
   return aggregate
 }
 
@@ -707,10 +740,10 @@ export async function createGithubArtifactProvenance(options) {
     throw new Error('GitHub admission identifiers are invalid')
   }
   const { artifacts: candidateArtifact } = await verifyDesktopCandidateBundle(options.candidate, options.sourceCommit)
-  if (candidateArtifact.darwin.build_run_id !== options.desktopRunId) {
-    throw new Error('Desktop candidate is not owned by the selected Desktop run')
+  if (candidateArtifact.darwin.build_run_id !== options.ciRunId
+    || candidateArtifact.win32.build_run_id !== options.ciRunId) {
+    throw new Error('Desktop candidate installers are not owned by the selected CI run')
   }
-  const profileBuildRunId = candidateArtifact.win32.build_run_id
   const ciRun = githubRun(await metadata(options.metadata, 'ci-run.json'), {
     id: options.ciRunId, path: '.github/workflows/ci.yml', event: 'push',
     sourceCommit: options.sourceCommit, label: 'CI',
@@ -727,22 +760,16 @@ export async function createGithubArtifactProvenance(options) {
     id: options.performanceRunId, path: '.github/workflows/desktop-performance.yml', event: 'workflow_dispatch',
     sourceCommit: options.sourceCommit, label: 'performance',
   })
-  githubRun(await metadata(options.metadata, 'profile-build-run.json'), {
-    id: profileBuildRunId, path: '.github/workflows/desktop-release.yml', event: 'workflow_dispatch',
-    sourceCommit: options.sourceCommit, label: 'Profile build',
-  })
   successfulJob(await metadata(options.metadata, 'ci-jobs.json'), 'CI admission', 'CI')
-  successfulJob(await metadata(options.metadata, 'desktop-jobs.json'), 'Build unsigned macOS universal disk image', 'Desktop')
-  successfulJob(await metadata(options.metadata, 'desktop-jobs.json'), 'Bind native artifacts to the release manifest', 'Desktop')
+  successfulJob(await metadata(options.metadata, 'ci-jobs.json'), 'Node 24 / target contracts and unit tests', 'CI')
+  successfulJob(await metadata(options.metadata, 'ci-jobs.json'), 'Windows x64 / unsigned desktop installer', 'CI')
+  successfulJob(await metadata(options.metadata, 'ci-jobs.json'), 'macOS universal / unsigned desktop disk image', 'CI')
+  successfulJob(await metadata(options.metadata, 'desktop-jobs.json'), 'Bind exact protected-main CI artifacts to the release manifest', 'Desktop')
   const profileJobs = await metadata(options.metadata, 'profile-jobs.json')
   successfulJob(profileJobs, 'Validate accepted CI evidence', 'Profile')
   for (const target of TARGETS) successfulJob(profileJobs, `Bootstrap complete Profile generation / ${target}`, 'Profile')
   successfulJob(profileJobs, 'Prepare signed native Cloudflare publication bundle', 'Profile')
   successfulJob(await metadata(options.metadata, 'performance-jobs.json'), 'Performance admission', 'performance')
-  const profileBuildJobs = await metadata(options.metadata, 'profile-build-jobs.json')
-  successfulJob(profileBuildJobs, 'Build and verify the e-Mate profile', 'Profile build')
-  successfulJob(profileBuildJobs, 'Build unsigned Windows x64 installer', 'Profile build')
-
   const mainRef = await metadata(options.metadata, 'main-ref.json')
   if (mainRef?.object?.sha !== options.sourceCommit) throw new Error('GitHub main branch head drifted')
 
@@ -760,20 +787,24 @@ export async function createGithubArtifactProvenance(options) {
     id: options.profileArtifactId, name: `e-mate-profile-native-cloudflare-publication-${options.sourceCommit}`,
     runId: options.profileRunId, sourceCommit: options.sourceCommit, label: 'Profile publication',
   })
-  const profileBuildArtifact = await metadata(options.metadata, 'profile-build-artifact.json')
-  const profileBuildReceiptArtifact = await metadata(options.metadata, 'profile-build-receipt-artifact.json')
+  const ciOwnedArtifacts = [
+    [await metadata(options.metadata, 'base-sdk-artifact.json'), `e-mate-base-sdk-${options.sourceCommit}`, 'Base SDK'],
+    [await metadata(options.metadata, 'profile-build-artifact.json'), `e-mate-desktop-profile-${options.sourceCommit}`, 'Profile build'],
+    [await metadata(options.metadata, 'profile-build-receipt-artifact.json'), `e-mate-desktop-profile-build-receipt-${options.sourceCommit}`, 'Profile build receipt'],
+    [await metadata(options.metadata, 'windows-ci-artifact.json'), `e-mate-desktop-windows-${options.sourceCommit}`, 'Windows CI installer'],
+    [await metadata(options.metadata, 'macos-ci-artifact.json'), `e-mate-desktop-macos-${options.sourceCommit}`, 'macOS CI installer'],
+  ]
+  const artifactIds = new Set()
   for (const [value, name, label] of [
-    [profileBuildArtifact, `e-mate-desktop-profile-${options.sourceCommit}`, 'Profile build'],
-    [profileBuildReceiptArtifact, `e-mate-desktop-profile-build-receipt-${options.sourceCommit}`, 'Profile build receipt'],
+    ...ciOwnedArtifacts,
   ]) {
     if (!record(value) || !RUN_ID.test(String(value.id))) throw new Error(`GitHub ${label} artifact ID is invalid`)
     githubArtifact(value, {
-      id: String(value.id), name, runId: profileBuildRunId,
+      id: String(value.id), name, runId: options.ciRunId,
       sourceCommit: options.sourceCommit, label,
     })
-  }
-  if (String(profileBuildArtifact.id) === String(profileBuildReceiptArtifact.id)) {
-    throw new Error('GitHub Profile build artifacts share an identity')
+    if (artifactIds.has(String(value.id))) throw new Error('GitHub CI build artifacts share an identity')
+    artifactIds.add(String(value.id))
   }
   const performance = githubArtifact(await metadata(options.metadata, 'performance-artifact.json'), {
     id: options.performanceArtifactId, name: `e-mate-performance-admission-${options.sourceCommit}-attempt-1`,
@@ -795,7 +826,7 @@ export async function createGithubArtifactProvenance(options) {
     ],
   }
   await atomicJson(options.output, provenance)
-  return { provenance, profileBuildRunId, ciRun, profileRun }
+  return { provenance, ciRun, profileRun }
 }
 
 function option(values, name) {
@@ -810,7 +841,7 @@ async function main() {
     'base-contract', 'candidate', 'ci-run-id', 'commit', 'desktop-artifact-id', 'desktop-run-id', 'inventory',
     'metadata', 'out', 'performance-artifact-id', 'performance-bundle', 'performance-run-id', 'profile',
     'profile-aggregate', 'profile-artifact-id', 'profile-receipt', 'profile-release-bundle', 'profile-run-id',
-    'release-version', 'verifier-source',
+    'release-version', 'verifier-source', 'performance-authorities-out',
   ].map(name => [name, { type: 'string' }])) })
   if (command === 'profile-build-receipt') {
     await createProfileBuildReceipt({
@@ -824,6 +855,8 @@ async function main() {
       profile: option(values, 'profile'), inventory: option(values, 'inventory'),
       profileReceipt: option(values, 'profile-receipt'), publicationBundle: option(values, 'profile-release-bundle'),
       baseContract: option(values, 'base-contract'), output: option(values, 'out'),
+      ...(values['performance-authorities-out'] === undefined
+        ? {} : { performanceOutput: option(values, 'performance-authorities-out') }),
     })
   } else if (command === 'performance-summary') {
     await createPerformanceSummary({

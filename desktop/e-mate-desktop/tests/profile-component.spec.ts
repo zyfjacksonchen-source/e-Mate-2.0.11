@@ -128,6 +128,27 @@ describe('Profile component materialization', () => {
     expect(parseProfileComponentManifest(Buffer.from(JSON.stringify(manifest)), reference, base)).toBeUndefined()
   })
 
+  it('accepts a missing schedule floor only through an explicit legacy floor-0 Base view', () => {
+    const { reference, objects } = fixture()
+    const manifest = JSON.parse(objects.get(reference.manifest_url)!.toString())
+    const legacyBase: ProfileBaseContract = {
+      ...base,
+      id: 'e-mate-desktop-profile-v6-dsh-2bc16230975f',
+      schedule_protocol_floor: 0,
+      harness_commit: '2bc16230975f6cf02aa1b283b1f86de44007b059',
+    }
+    manifest.base_contracts = [legacyBase.id]
+    manifest.harness_contract.commit = legacyBase.harness_commit
+    delete manifest.schedule_protocol_floor
+    const bytes = Buffer.from(JSON.stringify(manifest))
+
+    expect(parseProfileComponentManifest(bytes, reference, legacyBase)?.schedule_protocol_floor).toBe(0)
+    expect(parseProfileComponentManifest(bytes, reference, { ...legacyBase, schedule_protocol_floor: 1 })).toBeUndefined()
+    expect(parseProfileComponentManifest(bytes, reference, { ...legacyBase, id: 'e-mate-desktop-profile-v5' })).toBeUndefined()
+    delete manifest.total_bytes
+    expect(parseProfileComponentManifest(Buffer.from(JSON.stringify(manifest)), reference, legacyBase)).toBeUndefined()
+  })
+
   it('rejects native binaries and wheels in portable components and outside a platform closure', async () => {
     const elf = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00])
     const portableRoot = await mkdtemp(join(tmpdir(), 'e-mate-portable-native-'))

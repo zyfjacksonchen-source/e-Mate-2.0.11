@@ -20,6 +20,7 @@ import { releasePrefix, releaseSource } from './release-source.mjs'
 import { stageDownloadPage, validateDownloadPage } from './render-download-page.mjs'
 import { prepareHarnessBaseImports } from './component-base-imports.mjs'
 import { stageDesktopProfileArtifact } from './stage-desktop-profile-artifact.mjs'
+import { stageDesktopCiArtifact, verifyDesktopCiArtifact } from './stage-desktop-ci-artifact.mjs'
 import {
   admitDesktopReleaseManifest,
   createDesktopArtifactCandidate,
@@ -36,6 +37,53 @@ const HARNESS_COMMIT = 'b2b1650b01f0ee88d81837a9b5c050f9f763f606'
 const DIGEST = '0'.repeat(64)
 const R2_FIXTURE_PUBLIC_ORIGIN = 'https://downloads.e-mate.example'
 const SOURCE_COMMIT = '70ff2ce2e340682f4aad2be27e4ec8f1d74ee913'
+
+test('Desktop CI staging closes the platform file set and verifies exact installer bytes', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'e-mate-desktop-ci-artifact-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const source = join(root, 'source')
+  const output = join(root, 'output')
+  await mkdir(source, { recursive: true })
+  const installer = Buffer.alloc(512)
+  installer.write('koly')
+  await writeFile(join(source, `e-Mate-${VERSION}-mac-universal.dmg`), installer)
+  const baseContract = { id: 'e-mate-base', harness_commit: HARNESS_COMMIT }
+  await stageDesktopCiArtifact({
+    platform: 'darwin', sourceCommit: SOURCE_COMMIT, ciRunId: '123', baseContract,
+    source, output, version: VERSION,
+  })
+  const verified = await verifyDesktopCiArtifact({
+    platform: 'darwin', sourceCommit: SOURCE_COMMIT, ciRunId: '123', baseContract, directory: output,
+  })
+  assert.equal(verified.runtime.installer.sha256, createHash('sha256').update(installer).digest('hex'))
+  await writeFile(join(output, 'unexpected.app'), 'no')
+  await assert.rejects(() => verifyDesktopCiArtifact({
+    platform: 'darwin', sourceCommit: SOURCE_COMMIT, ciRunId: '123', baseContract, directory: output,
+  }), /unexpected file/u)
+
+  const windowsSource = join(root, 'windows-source')
+  const windowsOutput = join(root, 'windows-output')
+  await mkdir(windowsSource, { recursive: true })
+  const executable = Buffer.alloc(128)
+  executable.write('MZ')
+  executable.writeUInt32LE(64, 0x3c)
+  executable.write('PE\0\0', 64, 'binary')
+  await writeFile(join(windowsSource, `e-Mate-${VERSION}-win-x64-Setup.exe`), executable)
+  await stageDesktopCiArtifact({
+    platform: 'win32', sourceCommit: SOURCE_COMMIT, ciRunId: '123', baseContract,
+    source: windowsSource, output: windowsOutput, version: VERSION,
+  })
+  await verifyDesktopCiArtifact({
+    platform: 'win32', sourceCommit: SOURCE_COMMIT, ciRunId: '123', baseContract, directory: windowsOutput,
+  })
+  const linkedSource = join(root, 'linked-source')
+  await mkdir(linkedSource, { recursive: true })
+  await symlink(join(windowsSource, `e-Mate-${VERSION}-win-x64-Setup.exe`), join(linkedSource, `e-Mate-${VERSION}-win-x64-Setup.exe`))
+  await assert.rejects(() => stageDesktopCiArtifact({
+    platform: 'win32', sourceCommit: SOURCE_COMMIT, ciRunId: '123', baseContract,
+    source: linkedSource, output: join(root, 'linked-output'), version: VERSION,
+  }), /regular file/u)
+})
 
 async function file(root, relative, content = '') {
   const path = join(root, ...relative.split('/'))
@@ -365,7 +413,6 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.deepEqual(ci.jobs['desktop-macos'].needs, ['impact', 'source'])
   for (const [workflow, producer, consumers] of [
     [ci, 'source', ['desktop-windows', 'desktop-macos']],
-    [desktopRelease, 'profile', ['windows', 'macos']],
   ]) {
     const stage = workflow.jobs[producer].steps.find(step => step.name === 'Stage the exact built e-Mate profile without development links')
     assert.equal(stage.run, 'node scripts/stage-desktop-profile-artifact.mjs')
@@ -388,9 +435,6 @@ test('GitHub release packs once and validates the same tarball on three platform
       )
     }
   }
-  const desktopBaseBuild = desktopRelease.jobs.profile.steps.find(step => String(step.run).includes('pnpm build:harness')).run
-  assert.match(desktopBaseBuild, /yarn build:sdk/u)
-  assert.match(desktopBaseBuild, /base-sdk\.mjs emit/u)
   assert.deepEqual(
     release.jobs['clean-install'].strategy.matrix.include.map(item => [item.platform, item.runner]),
     [['darwin-arm64', 'macos-15'], ['darwin-x64', 'macos-15-intel'], ['win32-x64', 'windows-2025']],
@@ -398,12 +442,9 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.deepEqual(Object.keys(release.jobs), ['pack', 'clean-install', 'evidence'])
   assert.equal(release.jobs['clean-install'].needs, 'pack')
   assert.equal(release.jobs.evidence.needs, 'pack')
-  const website = release.jobs.evidence.steps.find(step => step.name === 'Stage the immutable candidate download site')
-  assert.equal(website.run, 'node scripts/render-download-page.mjs --commit "$GITHUB_SHA" --out dist/download-page --plan dist/website-publication-plan.json')
+  assert.equal(release.jobs.evidence.steps.find(step => step.name === 'Stage the immutable candidate download site'), undefined)
   const releaseCandidate = release.jobs.evidence.steps.find(step => step.uses === 'actions/upload-artifact@v4')
-  assert.match(releaseCandidate.with.path, /^\s*dist\/download-page\s*$/mu)
-  assert.match(releaseCandidate.with.path, /dist\/website-publication-plan\.json/u)
-  assert.doesNotMatch(releaseCandidate.with.path, /dist\/download-page\/index\.html/u)
+  assert.doesNotMatch(releaseCandidate.with.path, /download-page|website-publication-plan/u)
   const cleanInstall = release.jobs['clean-install'].steps.find(step => step.name === 'Install tarballs with npm and run setup checks')
   assert.equal((cleanInstall.run.match(/node "\$cli" setup$/gmu) ?? []).length, 2)
   assert.ok(cleanInstall.run.includes('version="$(node -p "require(process.argv[1]).version" "$npm_root/@e-mate/dsh/package.json")"'))
@@ -425,19 +466,21 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.equal(desktopRelease.jobs.r2, undefined)
   assert.equal(desktopRelease.on.workflow_dispatch.inputs.publish, undefined)
   assert.equal(desktopRelease.on.workflow_dispatch.inputs.release_run_id, undefined)
-  assert.equal(desktopRelease.on.workflow_dispatch.inputs.reuse_run_id.default, '')
-  assert.match(desktopRelease.jobs.reuse.steps[0].run, /Build and verify the e-Mate profile/u)
-  assert.match(desktopRelease.jobs.reuse.steps[0].run, /Build unsigned Windows x64 installer/u)
-  assert.match(desktopRelease.jobs.reuse.steps[0].run, /test "\$source_sha" = "\$GITHUB_SHA"/u)
-  assert.match(desktopRelease.jobs.macos.if, /needs\.reuse\.result == 'success'/u)
-  for (const [job, name] of [['windows', 'e-mate-desktop-windows-'], ['macos', 'e-mate-desktop-macos-']]) {
-    const upload = desktopRelease.jobs[job].steps.find(step => step.uses === 'actions/upload-artifact@v4'
-      && String(step.with.name).startsWith(name))
-    assert.equal(upload.with['compression-level'], 0)
-    assert.equal(upload.with['retention-days'], 30)
+  assert.deepEqual(Object.keys(desktopRelease.on.workflow_dispatch.inputs), ['ci_run_id', 'source_sha'])
+  assert.deepEqual(Object.keys(desktopRelease.jobs), ['manifest'])
+  assert.match(desktopReleaseSource, /GITHUB_REF_PROTECTED:-/u)
+  assert.match(desktopReleaseSource, /\.run_attempt/u)
+  assert.match(desktopReleaseSource, /e-mate-desktop-windows-\$SOURCE_SHA/u)
+  assert.match(desktopReleaseSource, /e-mate-desktop-macos-\$SOURCE_SHA/u)
+  assert.match(desktopReleaseSource, /base-sdk\.mjs verify/u)
+  assert.match(desktopReleaseSource, /stage-desktop-ci-artifact\.mjs verify/u)
+  assert.doesNotMatch(desktopReleaseSource, /build:harness|pnpm test|yarn install|build:sdk|dist:win|dist:mac/u)
+  const upload = desktopRelease.jobs.manifest.steps.find(step => step.uses === 'actions/upload-artifact@v4')
+  assert.equal(upload.with['compression-level'], 0)
+  assert.equal(upload.with['retention-days'], 30)
+  for (const download of desktopRelease.jobs.manifest.steps.filter(step => step.uses === 'actions/download-artifact@v4')) {
+    assert.equal(download.with['run-id'], '${{ inputs.ci_run_id }}')
   }
-  assert.equal(desktopRelease.jobs.macos.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], "${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}")
-  assert.equal(desktopRelease.jobs.manifest.steps.find(step => step.uses === 'actions/download-artifact@v4').with['run-id'], "${{ inputs.reuse_run_id != '' && inputs.reuse_run_id || github.run_id }}")
   const candidateStep = desktopRelease.jobs.manifest.steps.find(step => step.name === 'Generate performance-pending Desktop artifact candidate')
   assert.match(candidateStep.run, /desktop-release-manifest\.ts candidate/u)
   assert.match(candidateStep.run, /--mac-commit/u)
@@ -452,7 +495,7 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.match(desktopManifestSource, /profile_component_aggregate/u)
   assert.match(desktopManifestSource, /github_artifact_provenance/u)
   assert.doesNotMatch(desktopManifestSource, /const VERSION = '\d+\.\d+\.\d+'/u)
-  for (const job of ['windows', 'macos', 'manifest']) {
+  for (const job of ['manifest']) {
     const step = desktopRelease.jobs[job].steps.find(item => item.id === 'version')
     assert.match(step.run, /node -p "require\(process\.argv\[1\]\)\.version"/u)
     assert.doesNotMatch(step.run, /node -p \\"require/u)
@@ -462,39 +505,66 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.match(readFileSync('.gitattributes', 'utf8'), /^\* text=auto eol=lf$/mu)
 })
 
-test('download site stages exact bytes and a closed non-published server plan', async t => {
+test('download site stages exact bytes and a closed release-bound website handoff', async t => {
   const root = mkdtempSync(join(tmpdir(), 'e-mate-download-site-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const output = join(root, 'download-page')
   await file(output, 'stale-template.html', 'stale')
   const planPath = join(root, 'website-publication-plan.json')
+  const releaseStatePath = join(root, 'release-state.json')
+  await writeFile(releaseStatePath, `${JSON.stringify({
+    schema_version: 2,
+    document_type: 'emate.release-state',
+    source_sha: SOURCE_COMMIT,
+    version: VERSION,
+    release_mode: 'base',
+    status: 'admitted-awaiting-cloudflare-plugin',
+    stages: {
+      ci: { status: 'accepted', run_id: '1' },
+      profile: { status: 'accepted', run_id: '2', artifact_id: '3', artifact_digest: `sha256:${'3'.repeat(64)}`, artifact_bytes: 3 },
+      desktop: { status: 'accepted', run_id: '4', artifact_id: '5', artifact_digest: `sha256:${'5'.repeat(64)}`, artifact_bytes: 5 },
+      performance: { status: 'accepted', run_id: '6', artifact_id: '7', artifact_digest: `sha256:${'7'.repeat(64)}`, artifact_bytes: 7 },
+      admission: { status: 'accepted', run_id: '8', artifact_id: '9', artifact_digest: `sha256:${'9'.repeat(64)}`, artifact_bytes: 9 },
+      publication: {
+        status: 'pending-cloudflare-plugin',
+        macos: { artifact_id: '10', artifact_digest: `sha256:${'a'.repeat(64)}`, artifact_bytes: 10 },
+        windows: { artifact_id: '11', artifact_digest: `sha256:${'b'.repeat(64)}`, artifact_bytes: 11 },
+      },
+    },
+  }, null, 2)}\n`)
   const plan = stageDownloadPage({
     outputDirectory: output,
     planPath,
     sourceCommit: SOURCE_COMMIT,
+    releaseStatePath,
+    websitePublicOrigin: 'https://downloads.e-mate.example/releases/',
+    expectedActiveTarget: '/srv/ecorex-agent-download/releases/site-emate-nexus-f65dbdc',
+    expectedActiveIndex: `636:${'a'.repeat(64)}`,
   })
   assert.deepEqual(Object.keys(plan), [
-    'schema_version', 'document_type', 'status', 'source_commit', 'staged_directory', 'publication_contract', 'files',
+    'schema_version', 'document_type', 'status', 'source_commit', 'version', 'staged_directory', 'release_state',
+    'desktop_publication_predecessor', 'publication_contract', 'public_readback',
   ])
-  assert.deepEqual(Object.keys(plan.publication_contract), [
-    'target', 'strategy', 'preserve_unrelated_content', 'switch_symlink_last', 'server_writes_performed',
-    'r2_writes_performed', 'published', 'live_verified',
-  ])
-  assert.equal(plan.status, 'prepared')
+  assert.equal(plan.schema_version, 2)
+  assert.equal(plan.status, 'ready-for-website-publication-owner')
   assert.equal(plan.source_commit, SOURCE_COMMIT)
+  assert.equal(plan.version, VERSION)
   assert.equal(plan.staged_directory, 'download-page')
-  assert.deepEqual(plan.publication_contract, {
-    target: 'website-server',
-    strategy: 'versioned-relative-symlink',
-    preserve_unrelated_content: true,
-    switch_symlink_last: true,
-    server_writes_performed: false,
-    r2_writes_performed: false,
-    published: false,
-    live_verified: false,
-  })
+  assert.equal(plan.release_state.artifact_name, `e-mate-release-state-${SOURCE_COMMIT}`)
+  assert.match(plan.release_state.sha256, /^[0-9a-f]{64}$/u)
+  assert.equal(plan.desktop_publication_predecessor.action_commit, 'de2868c574098c356ce0b88c02d6c3afd29d47be')
+  assert.equal(plan.desktop_publication_predecessor.artifact_name, `e-mate-desktop-cloudflare-handoff-${SOURCE_COMMIT}`)
+  assert.equal(plan.publication_contract.server_root, '/srv/ecorex-agent-download')
+  assert.equal(plan.publication_contract.version_directory, `releases/site-emate-${VERSION}-${SOURCE_COMMIT}`)
+  assert.equal(plan.publication_contract.current_symlink, 'current')
+  assert.equal(plan.publication_contract.expected_current_target, '/srv/ecorex-agent-download/releases/site-emate-nexus-f65dbdc')
+  assert.deepEqual(plan.publication_contract.expected_current_index, { bytes: 636, sha256: 'a'.repeat(64) })
+  assert.equal(plan.publication_contract.require_cloudflare_public_readback_first, true)
+  assert.equal(plan.publication_contract.server_writes_performed, false)
+  assert.equal(plan.publication_contract.r2_writes_performed, false)
   assert.equal(existsSync(join(output, 'stale-template.html')), false)
-  assert.deepEqual(plan.files.map(entry => entry.relative_path), [
+  assert.equal(plan.public_readback.origin, 'https://downloads.e-mate.example/releases/')
+  assert.deepEqual(plan.public_readback.files.map(entry => entry.relative_path), [
     'assets/e-mate-hero-decor.d7f99a88447b.png',
     'assets/emate-desktop-workspace.622f3434f88c.jpg',
     'assets/emate-download-icon.5014add964e1.svg',
@@ -508,11 +578,27 @@ test('download site stages exact bytes and a closed non-published server plan', 
     'site.865115b8aa11.js',
     'styles.c2f7dccc8398.css',
   ])
-  for (const entry of plan.files) {
-    assert.deepEqual(Object.keys(entry), ['relative_path', 'bytes', 'sha256', 'content_type'])
+  for (const entry of plan.public_readback.files) {
+    assert.deepEqual(Object.keys(entry), ['relative_path', 'bytes', 'sha256', 'content_type', 'url'])
     assert.ok(readFileSync(join('deploy/download-page', entry.relative_path)).equals(readFileSync(join(output, entry.relative_path))))
   }
   assert.deepEqual(JSON.parse(readFileSync(planPath, 'utf8')), plan)
+
+  const base = { outputDirectory: output, planPath, sourceCommit: SOURCE_COMMIT, releaseStatePath }
+  assert.throws(() => stageDownloadPage({ ...base, websitePublicOrigin: 'http://example.test', expectedActiveTarget: 'absent', expectedActiveIndex: 'absent' }), /HTTPS/u)
+  assert.throws(() => stageDownloadPage({ ...base, websitePublicOrigin: 'https://example.test', expectedActiveTarget: '../active', expectedActiveIndex: 'absent' }), /current target/u)
+  assert.throws(() => stageDownloadPage({ ...base, websitePublicOrigin: 'https://example.test', expectedActiveTarget: 'absent', expectedActiveIndex: `1:${DIGEST}` }), /both be absent/u)
+  const driftedStatePath = join(root, 'drifted-release-state.json')
+  const driftedState = JSON.parse(readFileSync(releaseStatePath, 'utf8'))
+  driftedState.stages.ci.extra = true
+  await writeFile(driftedStatePath, JSON.stringify(driftedState))
+  assert.throws(() => stageDownloadPage({
+    ...base,
+    releaseStatePath: driftedStatePath,
+    websitePublicOrigin: 'https://example.test',
+    expectedActiveTarget: 'absent',
+    expectedActiveIndex: 'absent',
+  }), /not the exact admitted source/u)
 })
 
 test('one admitted producer feeds the updater, legacy 2.0.12, and 2.0.13 download site', async t => {

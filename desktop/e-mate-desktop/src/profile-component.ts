@@ -140,17 +140,23 @@ export function parseProfileComponentManifest(
   try {
     value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
   } catch { return }
-  if (!record(value) || !exactKeys(value, [
+  const keys = [
     'schema_version', 'id', 'slug', 'version', 'kind', 'target', 'source_commit', 'base_contracts',
     'schedule_protocol_floor',
     'base_imports', 'authority_contract', 'harness_contract', 'package_entry', 'dsh', 'total_bytes', 'files',
-  ]) || value.schema_version !== 1
+  ]
+  const legacy = record(value) && base.schedule_protocol_floor === 0
+    && base.id === 'e-mate-desktop-profile-v6-dsh-2bc16230975f'
+    && base.harness_commit === '2bc16230975f6cf02aa1b283b1f86de44007b059'
+    && exactKeys(value, keys.filter(key => key !== 'schedule_protocol_floor'))
+  if (!record(value) || (base.schedule_protocol_floor === 0 ? !legacy : !exactKeys(value, keys))
+    || value.schema_version !== 1
     || value.id !== reference.id || value.slug !== componentSlug(reference.id)
     || value.version !== reference.version || !STABLE_VERSION.test(value.version as string)
     || value.kind !== reference.kind || value.source_commit !== reference.manifest_source_commit
     || typeof value.source_commit !== 'string' || !SHA40.test(value.source_commit)
     || !sortedUniqueStrings(value.base_contracts) || !value.base_contracts.includes(base.id)
-    || value.schedule_protocol_floor !== base.schedule_protocol_floor
+    || (legacy ? 0 : value.schedule_protocol_floor) !== base.schedule_protocol_floor
     || !sortedUniqueStrings(value.base_imports, true)
     || value.base_imports.some(name => !Object.hasOwn(base.runtime_imports, name))
     || parseAuthorityContract(value.authority_contract) === undefined

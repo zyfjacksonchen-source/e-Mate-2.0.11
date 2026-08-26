@@ -265,7 +265,12 @@ export function markProfileGenerationFailed(statePath: string, generationId: Pro
 
 /** Content identity of a signed desired-state payload, independent of JSON whitespace. */
 export function profileGenerationId(payload: ProfileReleasePayload): string {
-  return createHash('sha256').update(canonicalProfileJson(payload)).digest('hex')
+  let identity: unknown = payload
+  if (payload.schedule_protocol_floor === 0) {
+    const { schedule_protocol_floor: _legacyFloor, ...legacy } = payload
+    identity = legacy
+  }
+  return createHash('sha256').update(canonicalProfileJson(identity)).digest('hex')
 }
 
 /** A desired state must describe the complete independently updatable runtime set. */

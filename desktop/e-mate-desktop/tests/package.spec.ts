@@ -362,12 +362,13 @@ describe('published package surface', () => {
     expect(manifest.devDependencies?.['@electron/asar']).toBe('3.4.1')
   })
 
-  it('keeps publishable macOS bytes isolated from the CI-only smoke output', () => {
+  it('keeps publishable macOS bytes owned by protected-main CI without a release rebuild', () => {
     const workflow = readFileSync(new URL('../../.github/workflows/desktop-release.yml', packageRoot), 'utf8')
     const signerPatch = readFileSync(new URL('../.yarn/patches/@electron-osx-sign-npm-1.3.3-sequential-walk.patch', packageRoot), 'utf8')
 
-    expect(workflow).toContain('yarn dist:mac-unsigned-release')
-    expect(workflow).toContain('dist/mac-unsigned-release/e-Mate-')
+    expect(workflow).toContain('e-mate-desktop-macos-${{ inputs.source_sha }}')
+    expect(workflow).toContain('stage-desktop-ci-artifact.mjs verify')
+    expect(workflow).not.toContain('yarn dist:mac-unsigned-release')
     expect(workflow).not.toContain('dist:mac-smoke')
     expect(workflow).not.toContain('/mac-smoke/')
     expect(workspaceManifest.resolutions?.['@electron/osx-sign@npm:1.3.3'])

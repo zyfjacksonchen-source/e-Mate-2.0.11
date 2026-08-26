@@ -2470,3 +2470,236 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 当前仍只有源码与无密钥测试，外部 action 保持 `eca005391708dc6ac3057a8702995e2475cdaaf2`；没有真实 Provider、安装态、admission、上传或生产写入。
 - Remaining blockers: 四模型真实 source-partitioned evidence、签名 leaf/outer admission 与安装/更新/回滚门禁仍全部 OPEN；本字段修订使旧 production evidence 必然作废。
 - Next exact action: 提交本修订交主代理移植；只有合并后的 protected verifier 可用于新生产采集。
+
+## 2026-08-26 · 2.0.13 TTFT v2 acceptance-only 生产采集 owner
+
+- Goal checkpoint: 四模型 verifier/aggregate 已闭合但仓库仍只能消费 runner 预置 evidence，缺少一个明确 one-shot owner；本条只接通受保护 performance workflow、外部真实 authority probe 与现有 assembler/verifier，不调用模型、不采集或发布。
+- Frozen baseline / current HEAD: 独立 worktree `feat/2.0.13-native-perf-producer` 从 protected main exact `eb372d715c9355fcca16fdc61c615867490e34f1` 创建；Base/Harness/Desktop reference 保持 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606` / `6074088f5b660206e404b3591fab51fb99c69add`，baseline Harness 为 `2bc16230975f6cf02aa1b283b1f86de44007b059`。
+- Binding documents read: 完整读取根 `AGENTS.md`、`target-contract.md`、`performance-and-acceptance.md`、`slices/2.0.13.md`、上一条完整日志和 ponytail skill；追踪 `performance-parity.mjs`、`desktop-performance.yml`、ApiProxy/Session、audit outbox、enterprise identity/model-gateway UsageStore 与 Electron renderer seam。
+- Inspected native seam: DSH Session 持有 native event、`request/header`、usage 和 Tool 生命周期；客户端 audit outbox只持脱敏 usage/策略绑定，真实 Provider invocation/response authority 位于 enterprise model-gateway UsageStore；首个可见文本 paint 只由安装态 renderer probe拥有。因此仓库运行时无法诚实自产全部 authority，安全边界是受控外部 acceptance probe写既有17 source artifacts，仓库继续用唯一 assembler/verifier完成语义验收。
+- Experiment or why unnecessary: 未向 Desktop/Host/adapter加入 listener 或 header hook；新增纯 CLI 合同测试证明只有 exact protected-main workflow owner可启动、每模型固定30个唯一 pair且三场景各10、AB/BA均衡、四模型 roster与双 Harness pin不漂移、源目录只能是一份 manifest加17个文件。真实 probe/模型/安装态未运行，因此没有 production pass。
+- Decision and forbidden alternatives: `performance:acceptance` 在 attempt-1 protected-main workflow中生成四个唯一 run id和闭合计划，以无 shell方式调用绝对路径且 SHA-256 锁定的 runner probe；随后要求 exact Session、request、Provider ledger、renderer paint、installed/Profile/lease receipts，逐模型复用现有 assembler/verifier并在复制后复验。scratch 保留17 sources+manifest并用于装配；final handoff只保留 evidence+20 referenced files，四模型加protected verifier精确85文件，解决“manifest必须保留”与workflow exact 85的层级矛盾。禁止常驻采集、第二事件/存储/传输、普通模型Tool、fixture重标、手写JSON和从客户端伪造Provider/paint权威。
+- Changed scope: 新增 `scripts/performance-acceptance.mjs`及一个窄合同测试；仅导出现有 verifier 的 pins/path/scenario常量，接入根 package command和既有 performance workflow；更新三份绑定合同并append本记录。未改 Desktop/Profile/Harness、Session/API/LLM hot path、模型header/路由、企业服务、签名/R2/Feed/desired state或用户数据。
+- Verification commands and results: bundled Node `--check scripts/performance-acceptance.mjs`通过；合并后的 `test:performance:parity` 为17/17（其中producer合同7项，包含冻结2.0.12/candidate安装身份正反例及四模型17→21→exact 85的mock assembly/copy/reverify）；`desktop-admission.test.mjs`为8/8；`test:impact`为35 passed / 5 Harness-toolchain skips / 0 failed；`git diff --check`通过。没有把合同fixture视为生产证据，protected CI仍须在合并后运行。
+- Immutable evidence / receipt: 当前只有 exact-base源码diff与无密钥合同测试；没有读取凭据、调用付费模型、dispatch workflow、安装候选、生成真实 `performance_run_id`、签名、上传或生产写入。
+- Remaining blockers: self-hosted runner必须提供外部 hash-pinned probe，实际驱动exact安装态2.0.12与candidate、读取native Session/request、真实renderer paint及model-gateway UsageStore/enterprise receipts，并通过受保护环境配置 `EMATE_PERFORMANCE_COLLECTOR(_SHA256)`；该外部 authority hook尚未在本地存在或运行，故四模型production evidence、admission和发布继续OPEN。
+- Next exact action: 主代理复核本最小owner提交并合入protected main；runner owner安装/审查probe后才可手工dispatch performance workflow，任何authority缺失保持fail closed。
+
+## 2026-08-26 · 2.0.13 TTFT v2 Profile 安装权威绑定修订
+
+- Goal checkpoint: 主复核发现首版 acceptance owner 只把 Profile publication root 交给 probe，终态仅要求候选 `profile_generation` 非空，未将 installed runtime 绑定到三目标 signed Profile publication；本条只关闭该 fail-closed 缺口，不采集模型、不发布。
+- Frozen baseline / current HEAD: 修订基于独立提交 `c859ca9b19d29e9e470ffc75c508f0474eb87b18`；源码基线仍为 protected main exact `eb372d715c9355fcca16fdc61c615867490e34f1`，2.0.12 三目标 package/Profile generation 冻结值不变。
+- Binding documents read: 复核根 `AGENTS.md`、ponytail skill、`target-contract.md`、`performance-and-acceptance.md`、`slices/2.0.13.md`、上一条完整记录、既有 `desktop-admission` Profile aggregate parser、Profile release/component manifest consumer及 performance owner直接调用者。
+- Inspected native seam: `createProfileComponentAggregate()` 已完整验签三目标 desired state，并校验 inventory、Profile build receipt、immutable/active release一致性、全部 component manifest/file closure及无多余文件；现有四字段 aggregate不能新增客户端 digest，否则会破坏 updater与外部签名 schema。Shell component manifest 已由 signed desired state固定，`lib/client.js` 文件条目提供所需真实摘要。
+- Experiment or why unnecessary: 沿同一既有解析循环生成 acceptance-only派生 receipt，不新增 Profile格式、线上 aggregate或运行时事件；receipt绑定 publication tree、既有 aggregate、三目标 generation/component aggregate和 Shell client bundle SHA。owner 在启动 probe 前和装配 handoff 前重验 root/receipt/aggregate，并用目标行校验两条 candidate installed receipt。
+- Decision and forbidden alternatives: `composition_sha256` 对应既有 target `component_aggregate_sha256`，`client_bundle_sha256` 对应 signed Shell manifest 的唯一 `lib/client.js`；baseline继续只匹配冻结三目标 generation/package。禁止相信 probe自填 generation/digest、猜测 publication文件名、扩展线上 aggregate、兼容缺字段 evidence或把 receipt当成发布签名。
+- Changed scope: 最小修改既有 admission parser/测试、acceptance owner/测试和 performance workflow参数，修订两份绑定合同并append本记录；未改 Desktop/Profile updater schema、普通聊天/runtime hot path、模型header/路由、外部 signer、R2/Feed/desired state或用户数据。
+- Verification commands and results: bundled Node `--check`通过；合并后的 `test:performance:parity` 为 `18/18`，`desktop-admission.test.mjs` 为 `8/8`，覆盖 signed desired state派生、publication root漂移、错误 target/generation/composition/client digest及四模型17→21→exact 85装配；`test:impact` 为 `35 passed / 5 Harness-toolchain skips / 0 failed`，`git diff --check`通过。
+- Immutable evidence / receipt: 当前只有源码diff和无密钥合同fixture；未读取凭据、调用模型、dispatch workflow、安装候选、签名、上传或改生产状态。
+- Remaining blockers: 受保护 self-hosted runner仍必须提供已审查且SHA锁定的外部 probe，从真实 installed 2.0.12/candidate和 enterprise UsageStore取得 renderer/provider/lease authority；本修订只保证错误Profile无法进入aggregate，不能替代真实采集。
+- Next exact action: 主代理复核追加提交并合入 protected main；只允许合并后workflow重新派生Profile receipt并启动一次真实采集，旧 owner输出继续作废。
+
+## 2026-08-26 · 2.0.13 TTFT v2 原生 Tool handoff 权威收敛
+
+- Goal checkpoint: 外部生产 probe 开始实现后，独立只读审查发现 schema 要求的 Tool call→body start 在冻结 2.0.12 没有同口径生产 authority；本条删除不可实施的单边指标，只保留用户原始工具衔接门禁所需的 Tool result→第二次 request，不采集模型、不构建或发布。
+- Frozen baseline / current HEAD: 修订基于 acceptance owner `cf678e019708bbb6706fc236bebdde7673265410`；2.0.12 Harness 仍为 `2bc16230975f6cf02aa1b283b1f86de44007b059`，候选/Base Harness 仍为 `b2b1650b01f0ee88d81837a9b5c050f9f763f606`。
+- Binding documents read: 完整复核根 `AGENTS.md`、`target-contract.md`、`performance-and-acceptance.md`、`slices/2.0.13.md`、上一条完整日志与 ponytail skill；未从聊天记忆或 fixture 推断生产 seam。
+- Inspected native seam: 两版 DSH 都只把 `tool/call`、`tool/result` 和后续 request/header/Provider attempt 持久化；真实 body start 只在 ToolRuntime 私有 `dispatchToolBody()` 内。创造模式只有模型 Tool 入口，会改变被测工具头和 Session；给基线临时安装新 Profile 又会改变冻结 generation/composition；候选单边 listener 或新 loopback RPC 均不可比较。
+- Experiment or why unnecessary: 未尝试污染真实安装态。现有 fixture 内可直接读取 Tool body 的时间不具备安装态 authority；审查同时确认 `tool/result.time` 与同一 Session 后续 request 顺序是两臂共有的原生证据，因此不需要第二事件、listener、RPC、Profile component 或跨进程时钟相减。
+- Decision and forbidden alternatives: `read-only-tool` 的生产硬字段只保留 `tool_result_to_next_request_ms`，继续按 p95 `+25ms` 且 `+5%` 双门验证；普通场景仍禁止用 0 占位。禁止合成 Tool start、从 Tool 参数/正文推断、候选单边埋点、模型驱动创造模式预热或放宽 Provider 两次 attempt/重复执行门禁。
+- Changed scope: 最小修改唯一 assembler/verifier、既有两份窄测试和两份 TTFT 合同；删除 fixture 的无用 Tool-start Map。未改 Desktop/Profile/Harness、普通聊天 header/路由、Provider、Session/runtime 热路径、workflow、R2/Feed/desired state 或用户数据。
+- Verification commands and results: bundled Node `--check scripts/performance-parity.mjs` 通过；`pnpm run test:performance:parity` 为 `18/18`；`node --test scripts/desktop-admission.test.mjs` 为 `8/8`；`git diff --check` 通过。
+- Immutable evidence / receipt: 当前只有源码 diff、可运行合同测试与两版 native seam 审查结论；没有真实 Provider、安装态、`performance_run_id`、签名、上传或生产写入。
+- Remaining blockers: hash-pinned 外部 probe 仍须完成其余 17 个原生/Renderer/Provider/installed/enterprise authority source 的真实采集；四模型、候选安装、更新/回滚与公开发布全部保持 OPEN。
+- Next exact action: 提交本合同修订并与外部 probe runtime 合并到 protected-main 候选；通过 exact attempt-1 CI 后才允许真实采集，任何缺失 authority 继续 fail closed。
+
+## 2026-08-26 · 2.0.13 TTFT v2 Profile authority 临时文件隔离
+
+- Goal checkpoint: 独立终审发现 performance workflow 把 acceptance-only Profile authority receipt 写入只允许唯一 aggregate 的 stage 根，必然触发随后 exact-one 与 exact-file-count 门禁；本条只修复工作流文件边界。
+- Frozen baseline / current HEAD: 基于 native Tool handoff 收敛提交 `9d8f869368ed11c2c5a65c811a1631b49e442da1`；候选、Profile、Harness、安装态和生产状态未变。
+- Binding documents read: 根 `AGENTS.md`、`docs/performance-and-acceptance.md`、`docs/slices/2.0.13.md`、上一条完整记录及 workflow 的 stage copy/count/cleanup 直接调用链。
+- Inspected native seam: `profile-component-aggregate.json` 是 stage 根唯一允许文件；`profile-performance-authorities.json` 只在 aggregate 生成与 one-shot collector 间传递，无需进入上传目录。
+- Experiment or why unnecessary: 直接以现有 workflow 合同测试锁定 authority receipt 不再位于 `STAGE_DIRECTORY`，无需新增目录协议、artifact 或运行时逻辑。
+- Decision and forbidden alternatives: authority receipt 固定写入 runner 私有临时根并在 `always()` 清理；stage 继续只持 aggregate。禁止放宽 exact-one/exact-count 门禁或把 authority receipt混入公开 evidence。
+- Changed scope: 仅修改 `.github/workflows/desktop-performance.yml` 与既有 `scripts/performance-acceptance.test.mjs`，未改采集 schema、assembler/verifier、Desktop/Profile/Harness、模型链或发布状态。
+- Verification commands and results: 使用工作区 bundled Node/Pnpm 运行 `pnpm run test:performance:parity` 为 `18/18`，`node --test scripts/desktop-admission.test.mjs` 为 `8/8`，`git diff --check` 通过；不以窄测替代 protected CI 或生产采集。
+- Immutable evidence / receipt: 当前只有未发布源码 diff；无真实模型调用、安装、签名、上传或生产写入。
+- Remaining blockers: 真实外部 probe、四模型 production evidence、签名 admission、安装/更新/回滚及 P0+TQ13 实机验收仍全部 OPEN。
+- Next exact action: 运行 performance parity、desktop admission 与 diff check，提交后与外部 probe runtime 合并，只有 exact protected-main attempt-1 CI 可启动真实采集。
+
+## 2026-08-26 · 2.0.13 TTFT v2 external probe 源码 provenance 与失败关闭骨架
+
+- Goal checkpoint: 在 acceptance one-shot owner 已绑定 runner collector hash 但仓库没有该 hash 对应源码的情况下，补入受版本控制的 Node 24 probe 实体，并关闭 protected-main source bytes、runner 安装副本与受保护配置 digest 的同一性；不运行模型、不读取凭据、不安装、dispatch、推送或发布。
+- Frozen baseline / current HEAD: 独立 worktree `codex/external-perf-probe-impl` 从 `feat/2.0.13-native-perf-producer` exact `cf678e019708bbb6706fc236bebdde7673265410` 创建，包含 one-shot owner `c859ca9b19d29e9e470ffc75c508f0474eb87b18` 和 Profile authority 修订；Base/Harness/Profile 身份未改。
+- Binding documents read: 完整读取根 `AGENTS.md`、`target-contract.md`、`plugin-contracts.md`、`performance-and-acceptance.md`、`slices/2.0.13.md`、上一条完整日志和 ponytail skill；追踪 owner/workflow、assembler/verifier、pinned DSH `complex-history.perf.ts` 双 rAF、release-health 隔离启动和 Analytics `/v1/usage/events`。
+- Inspected native seam: 安装态 renderer 可通过 pre-bootstrap CDP 在同一 `performance.now()` 时钟观测 send/chunk/text/paint；enterprise usage API有分页 ledger，但当前 pinned Desktop/DSH 未向外部 Node 暴露可与其 exact join 的原生 durable/live Session/request/Tool read-only authority。缺该 authority 时，外部 probe 无法诚实产生17个生产 source artifacts。
+- Experiment or why unnecessary: 新增纯标准库 probe/测试，正反例覆盖同钟双 rAF、Usage extra/missing/ambiguous exact join、域分离 hash、offline-valid-cache 边界、owner-only config、无正文/密钥字段与 source/installed digest 漂移。没有启动 Desktop、Provider 或外部服务。
+- Decision and forbidden alternatives: owner 现在同时计算 protected-main source 与 runner copy digest，并要求二者等于配置 SHA；私有 plan记录 source/installed digest。probe只允许固定 OS 保护路径中的 keychain/local-secret-broker引用，不能从 workflow env/plan取得凭据。因原生 Session authority 缺失，main 在 preflight 后明确非零退出；禁止用 DOM正文、时间窗口猜测、私有日志或 fixture 冒充 production pass。
+- Changed scope: 新增 `scripts/performance-acceptance-probe.mjs`和一个窄测试；修改既有 owner/测试、performance workflow、根测试命令和两份性能绑定文档并 append 本记录。未改 Desktop/DSH/Profile/Session/API/LLM热路径、事件/存储/协议/Tool/header、模型路由、R2/Feed/desired state或用户数据。
+- Verification commands and results: bundled Node `v24.19.0 --test scripts/performance-acceptance-probe.test.mjs` 为 `5/5`；两个新增/修改脚本 `node --check` 通过；`git diff --check` 通过。完整 `performance-acceptance.test.mjs` 在该独立 worktree 因禁止安装且缺现有 devDependency `fflate` 未运行，不能记为通过。
+- Immutable evidence / receipt: 只有源码 diff 和无密钥合同测试；没有 collector 安装副本、runner config、Session/Provider/paint source、真实 `performance_run_id`、安装态或 production evidence。
+- Remaining blockers: 需要在 pinned DSH 已有 Session authority 上提供最小 runner-private read-only exporter，返回当前唯一 Session 的 request/header、Tool start/result和provider关联ID，且必须有受审源码/runner scope；随后 probe 才能实现 exact 2.0.12→2.0.13 隔离启动、30×4真实采集、17源文件关闭与完整测试。当前生产性能门保持 OPEN。
+- Next exact action: 主代理复核并移植本提交；先决定由 DSH 原生 Session export seam 还是既有 runner-private joined exporter承担只读关联，禁止在 Desktop hot path新增 listener。接口落地后补全 probe runtime并在 protected runner安装同字节副本，再进行首次真实采集。
+
+## 2026-08-26 · 2.0.13 TTFT v2 installed Darwin probe orchestration
+
+- Goal checkpoint: 将外部 probe 的无条件失败骨架收敛为受保护 checkout 自执行、真实 macOS安装/CDP preflight与严格证据派生；不读取凭据、不运行模型、不dispatch、推送、合并或发布。
+- Frozen baseline / current HEAD: 独立分支 `codex/external-perf-probe-orchestration` 基于 probe skeleton `f937c5ad3425e9d20353efb55924865cd0fa9c2a`；2.0.12 source/Base/package/Profile与 candidate Harness/Desktop reference pin未改。
+- Binding documents read: 根 `AGENTS.md`、target/plugin/performance合同、S27–S35切片、上一条完整日志及 ponytail skill。
+- Inspected native seam: 安装态Host固定loopback、HTTP RPC与字符串 `/api/events.mux`；renderer已有稳定 composer/streaming data anchors；Provider Analytics仅暴露REQUEST/USAGE共同task/trace/model/provider键，不暴露native→provider直接外键；Tool body-start在冻结基线不可观测。
+- Experiment or why unnecessary: 复用HTTP/WS/CDP、Session event/header、完整Usage分页集合差、现有安装/Profile收据，不改DSH/Desktop。Darwin测试以注入的系统命令边界验证冻结receipt、候选DMG复制及清理；没有用fixture冒充production。
+- Decision and forbidden alternatives: collector固定为当前protected checkout并绑定workflow run/attempt；所有ID hash带run scope；provider/native attempt共享`request_id_sha256`；Tool仅保留`tool_result_to_next_request_ms`。runner broker固定为同owner canonical 0700 executable、无shell、bounded JSON stdin/stdout；禁止第二collector、body-start hook、时间窗join、正文扫描和普通header增量。
+- Changed scope: 修改performance probe/owner/workflow/verifier及既有测试与两份性能合同；未改产品runtime、Session/API、模型路由/header、Base/Profile、R2/Feed或用户数据。
+- Verification commands and results: bundled Node probe tests `9/9`，parity tests `10/10`；三个修改脚本`node --check`与`git diff --check`通过。acceptance owner测试因该独立worktree缺既有devDependency `fflate`未启动，明确不记为通过。
+- Immutable evidence / receipt: 只有源码diff与无密钥测试；没有真实runner config、安装态启动回执、Provider evidence、performance_run_id或production pass。
+- Remaining blockers: runner须创建精确owner-only config、冻结2.0.12 app/installed-runtime receipt与两个私有broker；真实4×30×3采集仍须在protected self-hosted runner执行并由17源文件/85文件handoff终验。任一字段缺失按样本失败关闭。
+- Next exact action: 提交本独立分支供主代理移植；合入protected main后注册ephemeral runner并只运行一次真实performance workflow，失败不得复用旧evidence。
+
+## 2026-08-26 · 2.0.13 TTFT v2 四模型真实采集循环闭合
+
+- Goal checkpoint: 在 installed Darwin lane 已能验证并启动两代真实应用但仍未执行样本的基础上，补齐四模型、每模型 30 组、每组 3 path 的实际 AB/BA 采集编排与 exact 17 source artifacts；本地只做无模型窄测试，不运行 Provider、安装或 workflow。
+- Frozen baseline / current HEAD: 独立分支 `codex/external-perf-probe-orchestration` 从提交 `2f96f384bc793363ce6f605d8403fa968c94c661` 继续；冻结 2.0.12 source/Base/package/Profile、候选 Base/Harness/Desktop reference 与四模型 roster 未改。
+- Binding documents read: 复核根 `AGENTS.md`、ponytail skill、`target-contract.md`、`performance-and-acceptance.md`、`slices/2.0.13.md`、上一条完整日志、现有 Session route/RPC、renderer DOM/mux、Usage ledger 与 owner/verifier 合同。
+- Inspected native seam: 使用现有 `session.create`、`session.rename`、`session.selectModel`、`session.prompt`、`session.history` 与 `/chat/<sessionId>` route projection；发送只经安装态 composer 的 trusted CDP click，文本首 chunk 只按目标 Session/turn/step 的真实 mux frame 识别。Provider 继续由 runner-private Usage broker 的完整 before/after ID 集合差与排他账号单飞配对；offline 只由同一 acceptance-only preload 控制认证端点，模型 gateway 保持可用。
+- Experiment or why unnecessary: 新增无密钥正反例覆盖实际 AB/BA path 顺序、旧错误 bundle id 拒绝与真实 `net.ecoremedia.e-mate` receipt；既有测试继续覆盖 mux 字符串协议、run-scoped hash、Usage 多/少/外来/PENDING、Tool 唯一可观测边界、offline valid-cache、broker 权限和 DMG 清理。没有为测试调用模型或伪造 production evidence。
+- Decision and forbidden alternatives: 每个样本使用唯一 native Session；每模型/path 只真实构造一次 20-turn 固定历史，再复用原生 `session.fork` 为 10 个 history 样本产生各自完整原生日志，避免约 2,400 次无信息重复调用。read-only-tool 只要求原生 `get_goal` 一次；每次通过原生 chat route 精确绑定本次 Session，不以“出现任意聊天框”判定。三 path 按 plan 的 AB/BA 顺序逐项隔离启动/退出，样本写入各 path 的 1..30 ordinal，最后原子关闭 manifest 加 17 source files。禁止第二产品接口、DOM正文扫描、普通 header、时间窗 Usage join、body-start 伪计时、旧 bundle id、缺字段降级或 fixture 重标。
+- Changed scope: 只修改既有 `scripts/performance-acceptance-probe.mjs`、其窄测试并 append 本记录；未改 Desktop/DSH/Profile/Session协议、模型路由/header、企业服务、Base、R2/Feed/desired state 或用户数据。
+- Verification commands and results: bundled Node 对 probe `--check` 通过；probe 与 parity 聚焦测试合计 `20/20`；`git diff --check` 通过。完整 acceptance owner 测试仍因该独立 worktree 未安装既有 devDependency `fflate` 而未启动，不记为通过。
+- Immutable evidence / receipt: 当前只有源码 diff 与无密钥测试；没有真实 runner config/broker、四模型调用、17 个 production source files、performance admission、上传或生产写入。
+- Remaining blockers: 合入 protected main 后，ephemeral self-hosted runner 必须提供 owner-only frozen baseline receipt、安装根、两个 broker 与 acceptance-only preload，并实际跑完四模型 360 个 path sample；任一模型、Session、Usage、paint、offline cache、安装或 artifact 字段缺失即整次失败关闭。
+- Next exact action: 提交本第二阶段最小 diff 交主代理复核；只允许 exact protected-main attempt-1 workflow 在真实 runner 运行，禁止本地开发链触及生产发布或复用旧 evidence。
+## 2026-08-26 · 2.0.13 Build-once Desktop release ownership
+
+- Goal checkpoint: 将受保护 main CI 的 Base SDK、共享 Desktop、Profile、Windows EXE 与 macOS DMG 固定为唯一构建字节；后续 Desktop/Profile/performance/admission 只下载、重验、绑定，不重建或发布。
+- Frozen baseline / current HEAD: 独立 worktree `codex/build-once-release` 从 `feat/2.0.13-native-perf-producer@62a77b62628d01c53befc5970bf5a7c9d048c475` 创建；未读取或修改生产 R2、Feed、desired state、签名或安装态。
+- Binding documents read: 完整读取根 `AGENTS.md`、`target-contract.md`、上一条 development log 与用户提供的 CI/发行优化合同；冲突时以 Build once → Verify many → Sign exact bytes → Publish without rebuild 为准。
+- Inspected native seam: `ci.yml` 已产出 Base SDK、staged Profile、Windows/macOS artifacts；旧 `desktop-release.yml` 又完整安装 Harness/Desktop toolchain、重跑测试、重建 SDK/Profile/EXE/DMG，且 Admission/Performance 把 Profile 与 Windows bytes 错归到 Desktop release run。现有 Base SDK manifest 已闭合哈希 shared Desktop `lib`，无需第二 shared receipt。
+- Experiment or why unnecessary: 该变更只涉及 GitHub artifact/provenance release plane，Creation Mode 不能表示。新增同一 strict staging/verify helper，以 installer、可选真实 blockmap、runtime receipt 和 artifact receipt 的 closed fileset验证 source、CI run、Base、Harness、bytes、SHA-256及 PE/UDIF；未新增构建或传输路径。
+- Decision and forbidden alternatives: Desktop release 只接受 exact repository/protected main/source/attempt-1/success CI admission，并消费 source-specific Base/Profile/Profile receipt/Windows/macOS artifacts；candidate 的两端 `build_run_id` 均保持原 CI run。禁止 release rerun Harness/tests/Yarn SDK/electron-builder，禁止 mac-smoke、cache authority、重标旧 bytes、伪造 blockmap或第二 shared truth。
+- Changed scope: 修改 Desktop release、Profile release source acceptance、Performance/Admission artifact owner接线、唯一 CI platform receipt helper及其合同测试；未修改 `ci.yml`、change-impact 分类器、performance probe、产品 runtime、Base/Profile/Harness bytes或生产发布面。
+- Verification commands and results: `pnpm run test:release` 24/24；`pnpm run test:impact` 35 passed / 5 environment-skipped / 0 failed；`git diff --check` 通过。CI staging workflow需在合并本 helper 后调用其 `stage` 命令，才形成完整 protected-main生产链。
+- Immutable evidence / receipt: 当前只有 source-fixed commit 前 diff与本地无密钥 fixture；没有 GitHub protected-main artifact、签名 admission、候选安装、上传或生产指针变化。
+- Remaining blockers: CI PR必须使用本 helper生成 source-specific formal EXE/DMG artifacts和 Profile build receipt；合并后以 exact main run 验证真实 artifacts，再继续 Performance、Admission、签名、Cloudflare发布及安装/更新/回滚。
+- Next exact action: 提交本切片供主代理按依赖顺序合入；CI 先调用唯一 stage owner，再运行 exact protected-main CI 和无重建 Desktop release。
+
+## 2026-08-26 · 2.0.13 CI PR1 低风险瘦身与 Build-once 入口
+
+- Goal checkpoint: 按仓库既有 CI 效率合同先移除平台流水线浪费，并让 protected-main 只上传可直接进入后续验收的正式字节；本条不运行安装器、不触发 workflow、签名、R2、Feed 或 desired state。
+- Frozen baseline / current HEAD: 独立干净 worktree `codex/ci-pr1-slim` 从 `public-2011/feat/2.0.13-native-perf-producer` exact `f0fbb9017321053f5f0aad41832ba80e09a43f03` 创建；Base/Harness/Desktop reference 保持 `e-mate-desktop-profile-v7-dsh-b2b1650b01f0` / `b2b1650b01f0ee88d81837a9b5c050f9f763f606` / `6074088f5b660206e404b3591fab51fb99c69add`。
+- Binding documents read: 完整读取根 `AGENTS.md`、`docs/target-contract.md`、上一条完整开发记录和 ponytail skill；复核 `ci.yml`、正式 macOS/Windows package/verifier、Profile build receipt owner、Enterprise 直接依赖及既有 impact workflow test。
+- Inspected native seam: `dist:win` 和 `dist:mac-unsigned-release` 已分别持有最终安装器及 packaged runtime 验证；`desktop-admission.mjs profile-build-receipt` 已是 Profile 字节收据 owner；Enterprise 只从固定 ECoreX gitlink读取 `tokens.css` 与 `emate-logo.png`，无需递归初始化全部 submodule。
+- Experiment or why unnecessary: CI/release plane 不能由 Creation Mode 表示，故不创建动态插件。以 workflow contract test验证 PR 只走 `package:dir`、protected-main 才走 formal dist、每个平台 Profile 只验证一次、缓存键覆盖版本/lock/patch/installer输入、Enterprise shallow sparse checkout和四个 job timing summary。
+- Decision and forbidden alternatives: 平台产物只允许通过唯一共享 `stage-desktop-ci-artifact.mjs` strict stage 后上传，文件集为正式 DMG/EXE、真实存在时的 blockmap、`desktop-runtime-verification.json` 与 `desktop-artifact-receipt.json`，`compression-level: 0`；禁止 mac-smoke、`.app`、unpacked tree、Python closure、`node_modules` 或 wildcard build directory进入 artifact。普通 PR 不产发行物，protected-main artifact 以 exact head SHA 命名；缓存不作为发布证据。
+- Changed scope: 仅修改 `.github/workflows/ci.yml`、既有 `scripts/change-impact.test.mjs` 和本记录；新增 Profile build receipt artifact、Enterprise 两文件 sparse checkout、Electron/electron-builder OS cache、四个 job timing summary，并删除两平台重复 `verify:profile`。未改性能 probe、DSH/Desktop runtime、Profile内容、模型链、企业产品代码或生产状态。
+- Verification commands and results: bundled Node 运行 `node --test scripts/change-impact.test.mjs` 为 `22/22`；Ruby YAML parser通过；`git diff --check`通过。未运行 formal DMG/EXE，因此本条只记 source-fixed。
+- Immutable evidence / receipt: 当前只有源码 diff 与 workflow contract test；无 GitHub run id、platform artifact id/bytes/SHA、安装态、签名或公开写入。
+- Remaining blockers: 唯一 strict staging helper及其 symlink/格式/forbidden-tree 负例由并行 Build-once owner提交，主代理必须先合入该 exact helper再移植本 workflow；随后 protected-main attempt-1 必须真实生成并回读两平台 closed artifact。任何缺失文件或 provenance 均保持失败关闭。
+- Next exact action: 提交本最小 CI diff；主代理按依赖顺序合入共享 staging owner与本提交，运行 protected CI，并将真实 artifact IDs/文件清单/bytes/SHA交给后续 Desktop release 直接消费，禁止重建。
+## 2026-08-26 · 2.0.13 PR2 影响维度与 PR 快速链
+
+- Goal checkpoint: 在 build-once 合同已固定后，把普通 PR 的应用目录 smoke 与正式 DMG/NSIS 分发构建从同一影响权威派生；本条不构建候选、不安装、不调用模型、不签名或发布。
+- Frozen baseline / current HEAD: 独立 worktree `codex/pr2-impact-fastchain` 从 `feat/2.0.13-native-perf-producer` exact `f0fbb9017321053f5f0aad41832ba80e09a43f03` 创建；Base/Harness/Desktop reference 未改，性能 probe 文件未触碰。
+- Binding documents read: 完整读取根 `AGENTS.md`、`target-contract.md`、`plugin-contracts.md`、`performance-and-acceptance.md`、上一条完整日志和 ponytail skill；追踪唯一 change-impact、CI matrix、Base SDK/Profile artifact 与正式 macOS/Windows package owner。
+- Inspected native seam: `scripts/change-impact.mjs` 已是 coarse lane、组件 inventory、平台 target/runner 和 CI matrix 的唯一权威；CI 已有原生 `package:dir`、正式 `dist:mac-unsigned-release`/`dist:win` 与 admission owner，因此无需第二分类器、路径表或构建协议。
+- Experiment or why unnecessary: 该变更属于 Git diff/CI/release plane，Creation Mode 不能表示 GitHub matrix、原生 runner 或 installer provenance。使用现有 Node 标准库表驱动测试直接覆盖普通 PR、protected main、受保护 release-candidate、macOS/Windows/updater、enterprise、release verifier、未知/非法路径和双 native component 聚合。
+- Decision and forbidden alternatives: classifier 现在闭合输出 `shared_runtime/profile/macos_runtime/macos_packaging/windows_runtime/windows_packaging/enterprise/release_verifier` 与 `ci.app_smoke/distribution`。普通 runtime PR 只跑 `package:dir`；packaging/updater、protected-main affected Base 或 protected release-candidate 才跑唯一正式 DMG/NSIS。未知路径全维度 fail closed。native component 只在新增的 CI matrix 按 target 聚合；既有 `component_jobs[].component/publish` 逐组件 release 消费合同保持不变。禁止 YAML 复制 path 规则、生成或上传 mac-smoke 作为 release 字节、重复 checkout/install 或从 cache冒充 artifact。
+- Changed scope: 仅修改唯一 impact classifier、既有 impact 合同测试、`ci.yml` 和 append 本记录；未修改 performance probe、Desktop/Profile/Harness 产品运行时、模型 header/路由、企业服务、R2/Feed/desired state 或用户数据。
+- Verification commands and results: bundled Node 24 `--check scripts/change-impact.mjs` 通过；`change-impact.test.mjs` 为 `24/24`；与 `component-release.test.mjs` 合跑为 `33 passed / 4 intentional Harness-toolchain skips / 0 failed`；Ruby YAML parse 与 `git diff --check` 通过。完整四文件 impact 命令在本独立 worktree因未安装 `fflate` 无法启动两个 Profile consumer，未记为通过且没有安装依赖掩盖环境缺口。
+- Immutable evidence / receipt: 当前只有 source-fixed diff和本地无密钥合同测试；没有 CI run、DMG、EXE、Profile generation、安装态或 production receipt。
+- Remaining blockers: 主代理须与 PR1 artifact staging 最小合并并由 protected PR CI 验证 GitHub expression/matrix；只有 protected main exact SHA 的正式 distribution artifacts可供后续 release复用。
+- Next exact action: 主代理复核并移植本提交；PR1 staging包裹同一正式输出而不重建，随后运行 exact protected CI，失败只修受影响 stage。
+## 2026-08-26 · 2.0.13 TTFT v2 安装态 Profile 真实性绑定
+
+- Goal checkpoint: 终审发现 Darwin probe 为每次启动创建空 `userData`，实际会使用 bundled Profile，但 installed receipt 仍写入冻结/候选 generation；本条只关闭安装态 Profile 假绑定，不调用模型、不安装正式候选、不 dispatch、推送或发布。
+- Frozen baseline / current HEAD: 独立分支 `codex/perf-profile-install-truth` 基于 producer exact `62a77b62628d01c53befc5970bf5a7c9d048c475`；冻结 2.0.12 source/Base/package/Profile generation 与候选 Base/Harness/Desktop reference 未改。
+- Binding documents read: 完整复核根 `AGENTS.md`、ponytail skill、`target-contract.md`、`performance-and-acceptance.md`、最新完整日志、Darwin probe、Profile generation/component/release 原生实现、DSH Profile 安装 receipt 与 performance workflow。
+- Inspected native seam: Desktop 唯一 Profile authority 位于隔离 `userData/profile-generations/{state.json,store/}`；`loadProfileGeneration()` 已验签 release、完整组件 inventory、manifest、文件集/摘要/权限与平台目标，`assembleProfileGeneration()` 已提供同一离线物化路径；DSH 最终安装 generation 由 `DSH_HOME/profiles/e-mate/.e-mate-install.json` 记录，无需第二 schema、事件、存储或协议。
+- Experiment or why unnecessary: 复用上述原生 loader/assembler。基线只接受 owner-only installation root 下预置的 v6 Base、inventory、非 bundled state 与 content-addressed store，并只复制签名 release 引用的闭包；候选将已下载、已验收 publication bundle 映射成禁止联网的 fetch-compatible request。测试覆盖正确闭包复制、symlink 拒绝、运行态 bundled 回退和 DSH receipt generation 漂移；未读取真实用户 Home 或联网补字节。
+- Decision and forbidden alternatives: 每次启动前把已验证模板复制到新 `userData`，启动后必须回读 state 且 `active=last_known_good=expected`，再次完整验证物理 generation，再核对 DSH receipt 的 generation、Harness 与 DSH home；任何缺文件、签名/manifest/摘要漂移、symlink/逃逸、bundled 回退或 receipt 不一致均失败关闭。禁止相信 plan/installed receipt 的声明值、读取实时用户 Profile、从 R2补下载、降级 bundled 或复制未引用的旧 generation。
+- Changed scope: 只修改现有 performance probe/窄测试、性能合同并 append 本记录；未改 Desktop/DSH/Profile updater、普通聊天/模型 hot path、header/路由、企业服务、Base、R2/Feed/desired state 或用户数据。
+- Verification commands and results: bundled Node `v24.19.0` 对 probe `--check` 通过；probe、acceptance owner 与 parity 三组聚焦测试合计 `30/30`，change-impact 合同测试 `22/22`；`git diff --check` 通过。测试仅证明合同/本地文件边界，不记为真实四模型 production pass。
+- Immutable evidence / receipt: 当前只有 exact-base 源码 diff 与无密钥测试；没有读取凭据、真实用户 Profile、调用模型、生成 production `performance_run_id`、签名、上传或生产写入。
+- Remaining blockers: runner owner 仍须在 installation root 单独预置精确 2.0.12 `base-contract.json`、`component-inventory.json`、state/store 与既有 app/runtime receipt；protected attempt-1 仍须实际物化候选 publication、启动两臂并完成四模型采集。任一预置或运行态 authority 缺失保持 OPEN。
+- Next exact action: 主代理复核并合并本提交；随后仅在 exact protected-main attempt-1 runner 做真实安装态 Profile preflight 和四模型采集，失败不得复用旧 evidence。
+## 2026-08-26 · 2.0.13 PR2 合并后发布边界修复
+
+- Goal checkpoint: 修复 PR1/PR2 合并后普通 PR 误产正式安装器、protected-main Base 单端漏产及聚合组件发布消费者仍校验旧 job 名的根因；不触碰 release coordinator、产品运行时或生产状态。
+- Frozen baseline / current HEAD: 独立干净 worktree `codex/pr2-impact-contract-fix` 从 `feat/2.0.13-native-perf-producer` exact `e05ff397d2fc3d2c7a6fbb5a657a3e0077c184e9` 创建。
+- Binding documents read: 完整读取根 `AGENTS.md`、当前 change-impact/CI/Profile release 合同、最新完整日志与 ponytail skill；以“普通 PR 不产发行物、protected-main Base 同 SHA 双平台一次构建、旧消费者稳定名称不漂移”为准。
+- Inspected native seam: 唯一根因位于 `ciPlan()` 的 formal 判定、CI 两个稳定 job 名和 Profile release 对聚合 CI matrix 的消费；公开逐组件 `component_jobs` schema 无需修改。
+- Decision and forbidden alternatives: `formal = releaseCandidate || (protectedMain && lane === base)`，formal 时双平台 app-smoke/distribution 同时开启；普通 PR 只按影响维度跑 `package:dir` 且 distribution 全 false；plugin-only main 不建安装器。CI 恢复两平台旧稳定名称，Profile release 只从 `ci_component_jobs` 去重 target 校验聚合 job。禁止 PR 正式字节、单端 Base freeze、复制路径分类或修改 coordinator。
+- Changed scope: 仅修改 change-impact 计划、既有 CI/Profile workflow、合同测试并 append 本记录；未修改 release coordinator、Desktop/DSH/Profile bytes、性能 probe、R2/Feed/desired state 或用户数据。
+- Verification commands and results: bundled Node 24 `--check scripts/change-impact.mjs` 通过；change-impact 与 component-release 合跑 `33 passed / 4 intentional Harness-toolchain skips / 0 failed`；两份 workflow Ruby YAML parse 和 `git diff --check` 通过。干净 worktree 未安装依赖，完整 `test:impact` 的两个 Profile consumer 未启动且不记为通过。
+- Immutable evidence / receipt: 只有 source-fixed diff 与无密钥合同测试；没有 CI run、DMG、EXE、签名、安装或生产写入。
+- Remaining blockers: 主代理需先与并行 coordinator source-SHA 修复做无冲突合并，再由 exact protected-main attempt-1 CI 真实证明双平台 artifacts、聚合 plugin-only Profile release 与 downstream job-name接受。
+- Next exact action: 提交本独立修复供主代理移植；不推送、不 dispatch、不发布。
+
+## 2026-08-26 · 2.0.13 TTFT v2 冻结 v6 Profile 历史合同兼容
+
+- Goal checkpoint: 真实 runner 预置完成后，原生 loader 证明冻结 v6 Base、release 与 component manifests 均早于 `schedule_protocol_floor`，现有 v7 parser 会在读取真实 d876 generation 前失败；本条只兼容该精确历史字节，不修改冻结文件、不调用模型、不 dispatch、推送或发布。
+- Frozen baseline / current HEAD: 独立分支 `codex/perf-v6-profile-compat` 基于 producer exact `cb737381de20e41439c2a388e2a1a6abfc55ee11`；冻结 v6 Base id/Harness/Profile generation 为 `e-mate-desktop-profile-v6-dsh-2bc16230975f` / `2bc16230975f6cf02aa1b283b1f86de44007b059` / `d8769641262169a3b53369030a236f573e71499c22893d279e0a0c42df20ac93`。
+- Binding documents read: 完整复核根 `AGENTS.md`、ponytail skill、`target-contract.md`、`performance-and-acceptance.md`、最新完整日志、Profile Base/release/component/generation parser 与 probe 的 baseline prepare 调用链。
+- Inspected native seam: v7 `loadProfileBaseContract()` 要求正整数 floor；冻结 v6 Base 文件、签名 release 与15个 materialized component manifests均完全缺少该字段。release parser已有“缺字段→0”历史表示，但 generation id仍错误地把合成的0写入 hash，component parser也拒绝缺字段，因此只修 Base loader不足以验证真实 store。
+- Experiment or why unnecessary: probe 只对 byte-exact v6 fixture（1598 bytes，SHA-256 `964a26f282345a46cd919e0dd3fe1caf9270d4cf732b2c2ab81b1dc168a6a990`）及精确 Base/Harness/Desktop reference创建内存 floor-0 视图；普通 Base parser保持原样。原生 component parser仅在收到该不可由普通 parser产生的 floor-0 view时接受“恰好只缺 floor”的旧 manifest；generation id在 floor=0时按原始无字段 payload计算。
+- Decision and forbidden alternatives: 不改写或重签 v6 文件，不允许任意旧 Base、显式 floor=0 Base、缺其他字段的 manifest或现代 Base缺 floor；兼容只用于验收 probe 的冻结 predecessor，候选和产品更新继续使用严格 v7合同。
+- Changed scope: 最小修改 probe baseline Base loader、原生 component/generation的历史语义、已有三组窄测试，新增一份 byte-exact v6 Base测试 fixture并更新性能合同；未改 Desktop启动、普通Profile updater、模型链、R2/Feed/desired state或用户数据。
+- Verification commands and results: byte-exact fixture正例与缺其他字段反例通过；Profile component/generation/release Vitest `20/20`，probe/acceptance/parity Node测试 `31/31`，probe `--check` 与 `git diff --check`通过。另以 owner-provisioned安装根实际运行原生 `loadProfileGeneration()`及完整 `installVerifiedProfileTemplate()`，d876 generation、15个组件、floor 0均通过且临时复制已清理。
+- Immutable evidence / receipt: 当前只有源码 diff、byte-exact历史fixture、本机 owner-provisioned只读 store验证输出；没有读取用户live Profile、凭据或正文，没有真实模型调用、production `performance_run_id`、上传或生产写入。
+- Remaining blockers: protected attempt-1 runner仍须以同一冻结字节执行完整两臂启动和四模型采集；本修复只关闭 v6 native load 阻断，不把本地 store验证记为 production performance pass。
+- Next exact action: 主代理复核提交并合入 producer；随后重跑 exact runner preflight，任何 Base/store字节或 generation差异继续失败关闭。
+
+## 2026-08-26 · 2.0.13 S35 Build-once publication closure and frozen-v6 performance compatibility
+
+- Goal checkpoint: 唯一主 Goal `01a02e48-f61f-7352-bc86-b5ec8771d46c` 保持 active；本记录只关闭正式 CI 恢复前的两个源码阻断，不宣称发布完成。
+- Frozen baseline / current HEAD: frozen 2.0.12 Base v6 / Profile `d8769641262169a3b53369030a236f573e71499c22893d279e0a0c42df20ac93`；producer 起点 `cb737381de20e41439c2a388e2a1a6abfc55ee11`，外部 publication protected-main 合入 SHA `9fa786244ed80e2202cc0907d6fd3d276a9e4d2f`。
+- Binding documents read: 根 `AGENTS.md`、`docs/target-contract.md`、`docs/slices/2.0.13.md`、`docs/performance-and-acceptance.md` 与上一条完整日志。
+- Inspected native seam: performance probe 仍使用原生 Base/Profile parser 与 `loadProfileGeneration()`；仅 byte-exact 冻结 v6 Base 产生内存 floor-0 兼容视图并保持原 generation identity。Desktop publication 仍由仓库外 fixed-SHA action 验证 protected-main Build-once 平台闭包并生成 Cloudflare plugin handoff。
+- Experiment or why unnecessary: 真实 owner-provisioned v6 store 已通过原生 generation load 与 template install；外部 action 以无密钥闭包 fixture 覆盖 installer、runtime receipt、artifact receipt、可选 blockmap、额外文件、摘要漂移和压缩漂移。未运行生产模型、上传或激活。
+- Decision and forbidden alternatives: 不改冻结合同、不放宽普通 parser、不重写历史 generation、不让 Desktop release 重建安装包。publication action 只接受 exact main CI owner/run/bytes，只有 installer 进入发布计划；receipt/blockmap/mac-smoke/额外文件均不得公开。
+- Changed scope: probe 的精确 v6 兼容视图与测试 fixture；外部 publication verifier 两文件；主仓两个 workflow fixed pin、对应合同测试与本切片合同。未改模型头、路由、流式链、R2、Feed、desired state、官网或用户数据。
+- Verification commands and results: `pnpm run test:impact` 37 pass/5 intentional skip；`pnpm run test:release` 24/24；release coordinator 3/3；performance parity/probe 31/31；Desktop admission 8/8；外部 action Node 24 `node --test` 66/66；workflow YAML 与 `git diff --check` 通过。
+- Immutable evidence / receipt: 外部 protected-main merge `9fa786244ed80e2202cc0907d6fd3d276a9e4d2f`；producer 源码测试与本机 owner-provisioned store验证。没有 production `performance_run_id`、签名 admission、候选安装、Cloudflare 写入或公开指针变化。
+- Remaining blockers: Cloudflare 大文件 plugin bridge、私有生产证据 broker、官网可执行 handoff 与 exact protected-main attempt-1 全链仍须通过；双平台安装/更新/回滚与公网回读仍 OPEN。
+- Next exact action: 合入本记录与 fixed pin，推送同一 source SHA，运行 PR CI；只有通过后合并 protected main 并以 attempt-1 artifacts 启动 coordinator 和 one-shot production performance runner。
+
+## 2026-08-26 · 2.0.13 官网原子发布交接闭环
+
+- Goal checkpoint: 发布终审发现旧 `website-publication-plan.json` 只有文件清单和说明文字，未绑定 coordinator release-state、Desktop/Cloudflare 前驱、官网 active 前驱或公开回读；本条只补可执行交接，不部署或写生产。
+- Frozen baseline / current HEAD: 独立分支 `codex/website-publication-handoff` 基于 producer exact `cb737381de20e41439c2a388e2a1a6abfc55ee11`；外部 Desktop publication action 固定为 `zyfjacksonchen-source/e-mate-desktop-publication@de2868c574098c356ce0b88c02d6c3afd29d47be`。
+- Binding documents read: 完整读取根 `AGENTS.md`、`target-contract.md`、最新 development log、ponytail skill及现有 release coordinator、Desktop publication action、下载页 staging owner。
+- Inspected native seam: coordinator 已解析 exact attempt-1 CI及 Profile/Desktop/performance/admission artifacts，但 release-state只留ID且未产官网交接；旧 npm release workflow生成的官网计划不在受保护 Desktop协调链内，不能作为2.0.13发布权威。
+- Experiment or why unnecessary: release-state v2复用现有 artifact resolver输出，将ID、GitHub archive digest和bytes闭合；同一 state job用既有下载页stager生成无网络、无写入 handoff，无需第二发布器、SSH脚本或Cloudflare凭据。
+- Decision and forbidden alternatives: coordinator要求官网owner fresh提供 HTTPS origin、`active`相对软链目标及当前index bytes/SHA；候选固定写入 `versions/<source SHA>`，先完成 exact Desktop Cloudflare handoff和公开回读，最后才由官网owner切换 `active`。计划逐文件固定URL/content type/bytes/SHA并声明所有生产写和live verification均为false。旧npm carrier不再输出可误认成正式官网计划。
+- Changed scope: 仅修改 release coordinator、下载页stager、旧carrier工件清单及其窄测试；未改产品runtime、Desktop/Profile/Harness bytes、模型链、R2/Feed/desired state、官网或用户数据。
+- Verification commands and results: website handoff定向测试 `1/1`、coordinator测试 `4/4`、两份workflow YAML解析、两个脚本`node --check`及`git diff --check`通过。完整旧 release suite另有与本diff无关的缺失 `yaml` devDependency环境阻断，未记为通过。
+- Immutable evidence / receipt: 当前只有源码diff与无密钥fixture；没有workflow run、Cloudflare/官网写入、pointer切换或公开回读收据。
+- Remaining blockers: 合入protected main后必须用官网owner fresh前驱派发 exact attempt-1 coordinator；Cloudflare插件先发布并公开回读同一admitted Desktop bytes，官网owner再按计划落版本目录、CAS切active并逐文件公开回读，任一身份漂移保持发布关闭。
+- Next exact action: 提交本独立修复供主代理立即移植；禁止从本地worktree直接上传、切软链或改生产。
+
+## 2026-08-26 · 2.0.13 正式 CI 前发布依赖收口
+
+- Goal checkpoint: 只关闭正式 attempt-1 前的发布依赖与私有 runner 预检，不把本机辅助验证、fixture 或外部源码合入误报为上线。
+- Frozen baseline / current HEAD: 冻结 v6 Profile generation `d8769641262169a3b53369030a236f573e71499c22893d279e0a0c42df20ac93`；外部 Desktop publication protected-main 最终 fixed SHA `de2868c574098c356ce0b88c02d6c3afd29d47be`。
+- Binding documents read: 根 `AGENTS.md`、S35 合同、TTFT v2 合同、Build-once CI 合同及最新完整日志。
+- Inspected native seam: Cloudflare plugin handoff 的平台 artifact 是 exact 3/4-entry Stored ZIP；大对象桥验证完整 archive 与 installer 摘要，经随机 temp 全读回后 create-only 晋升并只清理本次 temp。性能 probe 的审计证据直接读取 loopback-only `/emate.audit/audit.status`，broker 不得自报 audit hash。
+- Experiment or why unnecessary: 外部 action/Worker 全量无密钥测试 `88/88`；主仓 impact `37 pass/5 intentional skip`、release `24/24`、coordinator `4/4`、performance `32/32`、YAML/脚本/diff均通过。本机私有 usage broker 用授权 Analytics 只读分页接口得到4条脱敏匹配事件；offline-control 通过原生 refresh 恢复仍在有效期内的企业/模型缓存，带 `{}` 输入的独立 status 复跑 exit 0，且无 audit 字段。未调用模型、未写账本/R2/官网。
+- Decision and forbidden alternatives: 生产 R2 仍只由连接的 Cloudflare plugin执行；GitHub/本地不得持有R2写权限。大文件 Worker一次一对象、短寿命、无指针写/任意删除；官网由独立 owner在Cloudflare公开回读后切 active。Analytics 会话过期必须重新原生刷新，不能复用空输出或过期缓存。
+- Changed scope: fixed publication pin、真实多文件大对象桥、原生 audit status证据、官网可执行 handoff及其合同测试；本机 broker/keychain只属于 owner-only runner状态，不入仓、不入artifact。
+- Verification commands and results: `pnpm run test:impact` 37/42通过且5项为明确Harness-toolchain skip；`pnpm run test:release` 24/24；coordinator 4/4；performance 32/32；external publication 88/88；两份workflow YAML、两个脚本check与diff check通过。
+- Immutable evidence / receipt: 外部 protected-main `de2868c574098c356ce0b88c02d6c3afd29d47be`；本机 broker权限目录0700、可执行0700、state/preload0600与专用Keychain项。仍没有 exact candidate DMG/EXE、production performance run、签名 admission、Cloudflare写入、官网切换或双平台安装回执。
+- Remaining blockers: PR与protected-main attempt-1、正式四模型性能采集、签名admission、Cloudflare/Profile/Desktop发布、公网回读、macOS/Windows安装更新回滚仍须按顺序完成。
+- Next exact action: 提交并推送唯一source SHA，等待PR CI通过后合入protected main；只消费该main attempt-1产生的同一字节继续实机与发布。
+
+## 2026-08-26 · 2.0.13 正式 CI 图标工具与官网真实 owner 校正
+
+- Goal checkpoint: PR CI 首次真实执行 macOS `package:dir` 后暴露 electron-builder 图标工具的模块作用域冲突；官网发布前驱只读核验同时证明服务器唯一在线切换点仍是 `current`，不是计划中尚不存在的 `active`。本条修复这两个正式发布阻断，不提前发布。
+- Frozen baseline / current HEAD: PR #59 候选起点 `cc889290c66fa3481c7540c53cfca17c1c9ea916`；失败 CI run `32914225143`；官网公开入口当前 index 为 `636` bytes、SHA-256 `02ea7f5f44ef41390c41901b3f385754bc333f19be4a9aa0efe582890a7a252c`，与服务器 `current` 指向内容逐字节一致。
+- Binding documents read: 根 `AGENTS.md`、S35、最新完整日志、CI Build-once 合同、release coordinator 与下载页 handoff owner。
+- Inspected native seam: electron-builder `icons@1.1.0` 下载到根 `type=module` 作用域内，CommonJS `icon-tool.js` 因 `require` 不可用失败；官网 Nginx 当前由 `/srv/ecorex-agent-download/current` 服务，既有前驱位于同一根的 `releases/`，服务器没有 `active` 软链。
+- Experiment or why unnecessary: CI 失败日志精确定位图标转换步骤；缓存移出仓库模块作用域后保留同一 actions/cache key 与跨平台共享做法。官网通过授权 SSH 只读 symlink/index 和公网 HTTPS 回读交叉核验，没有写服务器、R2、Feed 或 desired state。
+- Decision and forbidden alternatives: 两个平台共用的 electron-builder 工具缓存固定到 workspace 父级，避免按 macOS 单步改工具源码或关闭图标生成。官网 handoff 改为对真实 `current` 做 exact predecessor CAS，候选写入 `releases/site-emate-2.0.13-<source>`，最后相对切换 `current`；拒绝伪报 `active=absent`、覆盖旧槽位或增加第二软链发布路径。
+- Changed scope: CI 两个平台工具缓存边界、官网 handoff schema/描述及既有合同测试；未改产品运行时、图标资产、模型链、Desktop/Profile 字节、R2、Feed、desired state、官网或用户数据。
+- Verification commands and results: change-impact `24/24`；release/coordinator `20/20`；`git diff --check` 通过。PR 新候选仍须由真实 macOS/Windows CI 证明构建修复。
+- Immutable evidence / receipt: 只有失败 run `32914225143`、源码修复、只读官网前驱与公网 index 对账；没有候选安装器、安装态、生产写入或公开指针变化。
+- Remaining blockers: 新 exact PR CI、protected-main attempt-1、四模型性能、admission、Cloudflare 发布、公网回读和实机安装/更新/回滚仍保持 OPEN。
+- Next exact action: 推送本校正后的唯一候选，PR CI 全绿后合入 protected main；只消费 main attempt-1 字节继续实机与生产发布。
