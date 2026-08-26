@@ -475,7 +475,7 @@ function Assert-InstallerContext($Request) {
 function Assert-OriginalCurrent($Request) {
   $current = Assert-RealFile $Request.currentExecutable
   Assert-True ((Get-Sha256 $current.FullName) -ceq $Request.currentExecutableSha256) 'current executable hash mismatch'
-  $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($current.FullName).ProductVersion
+  $version = ConvertTo-CanonicalProductVersion ([Diagnostics.FileVersionInfo]::GetVersionInfo($current.FullName).ProductVersion)
   Assert-True ($version -ceq $Request.currentVersion) 'current executable version mismatch'
 }
 
@@ -483,7 +483,7 @@ function Assert-ExecutableIdentity([string]$Path, [string]$Hash, [string]$Versio
   if ($script:SelfTesting) { return }
   $file = Assert-RealFile $Path
   Assert-True ((Get-Sha256 $file.FullName) -ceq $Hash) 'transaction executable hash mismatch'
-  $actualVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($file.FullName).ProductVersion
+  $actualVersion = ConvertTo-CanonicalProductVersion ([Diagnostics.FileVersionInfo]::GetVersionInfo($file.FullName).ProductVersion)
   Assert-True ($actualVersion -ceq $Version) 'transaction executable version mismatch'
 }
 
@@ -996,7 +996,7 @@ function Invoke-Prepare {
 
 function Assert-Candidate($Journal, $Request) {
   $candidate = Assert-RealFile $Journal.candidateExecutable
-  $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($candidate.FullName).ProductVersion
+  $version = ConvertTo-CanonicalProductVersion ([Diagnostics.FileVersionInfo]::GetVersionInfo($candidate.FullName).ProductVersion)
   Assert-True ($version -ceq $Request.targetVersion) 'candidate executable version mismatch'
   $Journal.candidateExecutableSha256 = Get-Sha256 $candidate.FullName
 }

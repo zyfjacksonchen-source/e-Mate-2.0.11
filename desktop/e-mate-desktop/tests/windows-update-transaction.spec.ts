@@ -108,7 +108,7 @@ describe('pinned assisted-NSIS atomic update seam', () => {
     )
     expect(normalize).toContain("\\.0$')")
     expect(normalize).toContain("throw 'installed version rejected'")
-    expect(coordinator).toContain("ConvertTo-CanonicalProductVersion ([Diagnostics.FileVersionInfo]::GetVersionInfo($current.FullName).ProductVersion)")
+    expect(coordinator.match(/ConvertTo-CanonicalProductVersion \(\[Diagnostics\.FileVersionInfo\]::GetVersionInfo\([^\r\n]+\)\.ProductVersion\)/gu)).toHaveLength(4)
     expect(coordinator).toContain("ConvertTo-CanonicalProductVersion '2.0.12.0') -ceq '2.0.12'")
     expect(coordinator).toContain("@('2.0.12.1', '2.0.12.00', '02.0.12.0', '2.0', '2.0.12-beta', '')")
   })
