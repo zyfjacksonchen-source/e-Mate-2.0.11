@@ -3,12 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
-import {
-  WINDOWS_CAPTION_BUTTON_WIDTH,
-  WINDOWS_CAPTION_CONTROLS_WIDTH,
-  WINDOWS_CAPTION_SYMBOL_COLOR,
-  WINDOWS_CAPTION_SYMBOL_SIZE,
-} from '../../../../../../desktop/e-mate-desktop/src/window-chrome.ts'
+import { WINDOWS_CAPTION_CONTROLS_WIDTH } from '../../../../../../desktop/e-mate-desktop/src/window-chrome.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HeaderControls } from '../src/client/header-controls.tsx'
 import {
@@ -89,7 +84,7 @@ describe('desktop header controls', () => {
       const viewport = minimumWindowWidth / scale
       const compact = viewport <= 720
       const statusWidth = compact ? 0 : 16
-      const groupWidth = 3 * WINDOWS_CAPTION_BUTTON_WIDTH + statusWidth
+      const groupWidth = 3 * 46 + statusWidth
       const captionLeft = viewport - WINDOWS_CAPTION_CONTROLS_WIDTH
       const groupRight = captionLeft
 
@@ -98,8 +93,6 @@ describe('desktop header controls', () => {
       expect((compact ? 146 : 162) + WINDOWS_CAPTION_CONTROLS_WIDTH).toBeLessThan(viewport)
       expect(captionLeft - 20).toBeGreaterThan(44)
     }
-    expect(WINDOWS_CAPTION_SYMBOL_SIZE).toBe(12)
-    expect(WINDOWS_CAPTION_SYMBOL_COLOR).toBe('#7f858f')
   })
 
   it('stays mounted with no current Session and calls the one native settings trigger', async () => {

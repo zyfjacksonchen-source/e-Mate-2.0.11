@@ -27,7 +27,7 @@ const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/u
 const POSITIVE_ID = /^[1-9][0-9]*$/u
 const PUBLICATION_ACTION = Object.freeze({
   repository: 'zyfjacksonchen-source/e-mate-desktop-publication',
-  commit: 'de2868c574098c356ce0b88c02d6c3afd29d47be',
+  commit: '4193d2ae0a87327f161ce4a5b69bf60aee1ab052',
 })
 const CONTENT_TYPES = Object.freeze({
   '.css': 'text/css; charset=utf-8',
