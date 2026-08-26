@@ -2,8 +2,8 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { createReadStream } from 'node:fs'
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises'
+import { constants as fsConstants, createReadStream } from 'node:fs'
+import { cp, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises'
 import { arch, homedir, hostname } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -56,6 +56,7 @@ const PROFILE_STATE_KEYS = Object.freeze(['active', 'last_known_good', 'schema_v
 const LOOPBACK_ORIGIN = 'http://127.0.0.1:3080'
 const BROKER_ACTIONS = new Set(['usage-snapshot', 'auth-available', 'auth-unavailable', 'status'])
 const MAX_BROKER_BYTES = 1024 * 1024
+const MAX_PRIVATE_LOG_BYTES = 64 * 1024
 const PATHS = Object.freeze(['baseline', 'emate_online', 'emate_enterprise_unavailable_valid_cache'])
 const PROMPTS = Object.freeze({
   seed: index => `Context warmup ${String(index)}. Reply with exactly OK.`,
@@ -224,6 +225,43 @@ export async function acquireSingleRunLock(configPath = CONFIG_PATHS[process.pla
     released = true
     await rmdir(path)
   }
+}
+
+export async function releaseRuntimeLane(lane, releaseLock) {
+  let cleanupFailure
+  try { await lane?.cleanup() } catch (cause) { cleanupFailure = cause }
+  try {
+    await releaseLock()
+  } catch (cause) {
+    if (cleanupFailure !== undefined) {
+      throw new AggregateError([cleanupFailure, cause], 'performance runtime and owner lock cleanup failed')
+    }
+    throw cause
+  }
+  if (cleanupFailure !== undefined) throw cleanupFailure
+}
+
+export async function writePrivateFailureLog(configPath, error) {
+  if (configPath === undefined || !isAbsolute(configPath)) {
+    throw new Error('private performance log requires the protected config path')
+  }
+  const configInfo = await lstat(configPath)
+  const path = resolve(dirname(configPath), 'performance-probe.private.log')
+  const flags = fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_WRONLY | (fsConstants.O_NOFOLLOW ?? 0)
+  const handle = await open(path, flags, 0o600)
+  try {
+    const info = await handle.stat()
+    if (!info.isFile() || info.uid !== configInfo.uid) {
+      throw new Error('private performance log must be owner-matched and regular')
+    }
+    await handle.chmod(0o600)
+    const detail = error instanceof Error ? error.stack ?? error.message : String(error)
+    const entry = Buffer.from(`${new Date().toISOString()} ${detail}\n`, 'utf8')
+    await handle.writeFile(entry.subarray(0, MAX_PRIVATE_LOG_BYTES))
+  } finally {
+    await handle.close()
+  }
+  return path
 }
 
 export function assertProbePlan(plan, installedSourceSha256, environment = process.env) {
@@ -1728,13 +1766,13 @@ async function main() {
     lane.node_options_preload = await resolveAcceptancePreload(configPath, offlineStatus?.preload_path)
     await collectPlan(plan, config, configPath, lane)
   } finally {
-    await lane?.cleanup()
-    await releaseLock()
+    await releaseRuntimeLane(lane, releaseLock)
   }
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === import.meta.filename) {
-  await main().catch(() => {
+  await main().catch(async error => {
+    await writePrivateFailureLog(CONFIG_PATHS[process.platform], error).catch(() => {})
     process.stderr.write('performance acceptance probe failed; inspect the runner-owned private log\n')
     process.exitCode = 1
   })

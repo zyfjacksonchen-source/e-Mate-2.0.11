@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { chmod, cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -20,9 +20,11 @@ import {
   ownedExecutionSchedule,
   parseMuxAssistantTextDelta,
   prepareDarwinRuntimeLane,
+  releaseRuntimeLane,
   runRunnerBroker,
   strictJoinUsageAttempts,
   verifyRuntimeProfileBinding,
+  writePrivateFailureLog,
 } from './performance-acceptance-probe.mjs'
 import { loadProfileBaseContract } from '../desktop/e-mate-desktop/src/profile-release.ts'
 
@@ -239,6 +241,23 @@ test('accepts only canonical owner-only runner config with references, never cre
   await chmod(path, 0o644)
   await assert.rejects(loadRunnerPrivateConfig(path), /owner-only/u)
   assert.throws(() => assertNoPrivatePayload({ prompt: 'private' }), /not allowed/u)
+})
+
+test('always releases the one-shot owner lock and records only an owner-private failure', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'e-mate-performance-cleanup-')))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const configPath = join(root, 'performance-probe.json')
+  await writeFile(configPath, '{}\n', { mode: 0o600 })
+  let released = false
+  await assert.rejects(releaseRuntimeLane({
+    cleanup: async () => { throw new Error('runtime cleanup failed') },
+  }, async () => { released = true }), /runtime cleanup failed/u)
+  assert.equal(released, true)
+  const logPath = await writePrivateFailureLog(configPath, new Error('diagnostic failure'))
+  const info = await lstat(logPath)
+  assert.equal(info.isFile(), true)
+  assert.equal(info.mode & 0o077, 0)
+  assert.match(await readFile(logPath, 'utf8'), /diagnostic failure/u)
 })
 
 test('prepares exact frozen and candidate macOS application bytes with read-only DMG cleanup', async t => {
