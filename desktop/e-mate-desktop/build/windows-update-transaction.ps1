@@ -17,6 +17,7 @@ $ErrorActionPreference = 'Stop'
 
 $script:AppId = 'net.ecoremedia.e-mate'
 $script:ProductExecutable = 'e-Mate.exe'
+$script:TransactionIdPrefixChars = 12
 $script:MaxJsonBytes = 65536
 $script:PollMilliseconds = 100
 $script:ReadyTimeoutSeconds = 120
@@ -126,6 +127,12 @@ function ConvertTo-CanonicalProductVersion([string]$Value) {
     return "$($Matches[1]).$($Matches[2]).$($Matches[3])"
   }
   throw 'installed version rejected'
+}
+
+function Get-TransactionRoot([string]$CanonicalDirectory, [string]$TransactionId) {
+  Assert-True ($TransactionId -match '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') 'transaction id rejected'
+  $compactId = $TransactionId.Replace('-', '').Substring(0, $script:TransactionIdPrefixChars)
+  return Join-Path (Join-Path (Split-Path -Parent (Get-FullPath $CanonicalDirectory)) '.u') $compactId
 }
 
 function Move-DirectoryDurable([string]$From, [string]$To) {
@@ -346,6 +353,8 @@ function Invoke-Bootstrap {
   [IO.Directory]::CreateDirectory($mailboxPath) | Out-Null
   Set-PrivateDirectoryAcl $mailboxPath $ownerSid
   $requestFile = Join-Path $mailboxPath 'request.json'
+  $transactionRoot = Get-TransactionRoot $context.canonical $transactionId
+  Assert-True (-not (Test-Path -LiteralPath $transactionRoot)) 'transaction root collision'
   $request = [ordered]@{
     schemaVersion = 1
     documentType = 'emate.windows-update-request'
@@ -366,7 +375,7 @@ function Invoke-Bootstrap {
     currentExecutable = $context.current.FullName
     currentExecutableSha256 = Get-Sha256 $context.current.FullName
     canonicalDirectory = $context.canonical
-    transactionRoot = Join-Path (Join-Path (Split-Path -Parent $context.canonical) ".$script:AppId-update") $transactionId
+    transactionRoot = $transactionRoot
     mailboxPath = $mailboxPath
     pendingPath = $pendingPath
     createdAt = Get-UtcIsoTimestamp
@@ -440,9 +449,8 @@ function Read-Request {
   Assert-True (Test-SamePath $request.mailboxPath $mailbox) 'mailbox path mismatch'
   Assert-True (Test-SamePath $request.pendingPath (Join-Path (Split-Path -Parent $mailbox) 'pending.json')) 'pending path mismatch'
   $canonical = Get-FullPath $request.canonicalDirectory
-  $container = Join-Path (Split-Path -Parent $canonical) ".$script:AppId-update"
   $root = Get-FullPath $request.transactionRoot
-  Assert-True (Test-SamePath $root (Join-Path $container $request.transactionId)) 'transaction root is not transaction-scoped'
+  Assert-True (Test-SamePath $root (Get-TransactionRoot $canonical $request.transactionId)) 'transaction root is not transaction-scoped'
   Assert-True ([StringComparer]::OrdinalIgnoreCase.Equals(
     [IO.Path]::GetPathRoot($root), [IO.Path]::GetPathRoot($canonical)
   )) 'transaction root is not same-volume'
@@ -489,7 +497,7 @@ function Assert-ExecutableIdentity([string]$Path, [string]$Hash, [string]$Versio
 
 function New-Journal($Request) {
   $root = Get-FullPath $Request.transactionRoot
-  $candidate = Join-Path $root 'candidate'
+  $candidate = Join-Path $root 'c'
   return [ordered]@{
     schemaVersion = 1
     documentType = 'emate.windows-update-journal'
@@ -508,8 +516,8 @@ function New-Journal($Request) {
     canonicalDirectory = (Get-FullPath $Request.canonicalDirectory)
     transactionRoot = $root
     candidateDirectory = $candidate
-    lastGoodDirectory = (Join-Path $root 'last-good')
-    failedDirectory = (Join-Path $root 'failed')
+    lastGoodDirectory = (Join-Path $root 'o')
+    failedDirectory = (Join-Path $root 'f')
     candidateExecutable = (Join-Path $candidate $script:ProductExecutable)
     candidateExecutableSha256 = $null
     updatedAt = Get-UtcIsoTimestamp
@@ -535,9 +543,9 @@ function Assert-JournalIdentity($Journal, $Request) {
   Assert-True ($Journal.installMode -ceq $InstallMode) 'journal install mode rejected'
   Assert-True (Test-SamePath $Journal.canonicalDirectory $Request.canonicalDirectory) 'journal canonical path rejected'
   Assert-True (Test-SamePath $Journal.transactionRoot $Request.transactionRoot) 'journal root rejected'
-  Assert-True (Test-SamePath $Journal.candidateDirectory (Join-Path $Request.transactionRoot 'candidate')) 'journal candidate path rejected'
-  Assert-True (Test-SamePath $Journal.lastGoodDirectory (Join-Path $Request.transactionRoot 'last-good')) 'journal last-good path rejected'
-  Assert-True (Test-SamePath $Journal.failedDirectory (Join-Path $Request.transactionRoot 'failed')) 'journal failed path rejected'
+  Assert-True (Test-SamePath $Journal.candidateDirectory (Join-Path $Request.transactionRoot 'c')) 'journal candidate path rejected'
+  Assert-True (Test-SamePath $Journal.lastGoodDirectory (Join-Path $Request.transactionRoot 'o')) 'journal last-good path rejected'
+  Assert-True (Test-SamePath $Journal.failedDirectory (Join-Path $Request.transactionRoot 'f')) 'journal failed path rejected'
   Assert-True (Test-SamePath $Journal.candidateExecutable (Join-Path $Journal.candidateDirectory $script:ProductExecutable)) 'journal candidate executable rejected'
   Assert-True (@(
     'staging', 'staged', 'ready', 'canonical-to-last-good-pending', 'canonical-at-last-good',
@@ -1166,8 +1174,8 @@ function Invoke-Monitor {
 function New-SelfTestTree {
   $root = Join-Path ([IO.Path]::GetTempPath()) ('emate-update-selftest-' + [Guid]::NewGuid().ToString('D'))
   $canonical = Join-Path $root 'e-Mate'
-  $transaction = Join-Path (Join-Path $root '.net.ecoremedia.e-mate-update') ([Guid]::NewGuid().ToString('D'))
-  $candidate = Join-Path $transaction 'candidate'
+  $transaction = Get-TransactionRoot $canonical ([Guid]::NewGuid().ToString('D'))
+  $candidate = Join-Path $transaction 'c'
   [IO.Directory]::CreateDirectory($canonical) | Out-Null
   [IO.Directory]::CreateDirectory($candidate) | Out-Null
   [IO.File]::WriteAllText((Join-Path $canonical 'identity'), 'old')
@@ -1177,8 +1185,8 @@ function New-SelfTestTree {
     canonicalDirectory = $canonical
     transactionRoot = $transaction
     candidateDirectory = $candidate
-    lastGoodDirectory = (Join-Path $transaction 'last-good')
-    failedDirectory = (Join-Path $transaction 'failed')
+    lastGoodDirectory = (Join-Path $transaction 'o')
+    failedDirectory = (Join-Path $transaction 'f')
     candidateExecutableSha256 = ('a' * 64)
     updatedAt = Get-UtcIsoTimestamp
   }
@@ -1200,6 +1208,9 @@ function Invoke-SelfTest {
   Assert-True ((Get-UtcIsoTimestamp) -cmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$') 'transaction timestamp is not canonical UTC ISO'
   Assert-True ((ConvertTo-CanonicalProductVersion '2.0.12') -ceq '2.0.12') 'canonical ProductVersion changed'
   Assert-True ((ConvertTo-CanonicalProductVersion '2.0.12.0') -ceq '2.0.12') 'Windows ProductVersion was not canonicalized'
+  $pathBudgetCanonical = Join-Path ([IO.Path]::GetTempPath()) 'e-Mate'
+  $pathBudgetCandidate = Join-Path (Get-TransactionRoot $pathBudgetCanonical ([Guid]::NewGuid().ToString('D'))) 'c'
+  Assert-True (($pathBudgetCandidate.Length - $pathBudgetCanonical.Length) -le 11) 'candidate path budget exceeded'
   $manualSourceCommit = $null
   Assert-True (($null -eq $manualSourceCommit) -or (($manualSourceCommit -is [string]) -and ($manualSourceCommit -cmatch '^[0-9a-f]{40}$'))) 'manual source commit was rejected'
   foreach ($invalidVersion in @('2.0.12.1', '2.0.12.00', '02.0.12.0', '2.0', '2.0.12-beta', '')) {

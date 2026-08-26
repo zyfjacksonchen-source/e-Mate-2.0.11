@@ -2828,3 +2828,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 原 2.0.12 安装 exe SHA-256 仍为 `70e17703a946fe94c4f80b468b61c70e4419cca2cf1580cc14e0dfe803935b47`；事务根与 journal 均未创建。
 - Remaining blockers: 合入 protected main、重新构建 Windows Setup，并完整跑通 Prepare→stage→Apply→Monitor→commit 与用户数据保留。
 - Next exact action: 提交第二个最小 PR；旧候选不安装，只消费覆盖全部四处读取的新主线字节。
+
+## 2026-08-26 · 2.0.13 Windows 原子更新候选路径预算闭环
+
+- Goal checkpoint: exact main `f0c974f8fecca1a6ab82451f0e29515502f3be7a` 候选在 2.0.12 实机进入原生事务后停在 `staging`；旧 canonical 未重命名，安装进程在确认阶段与文件数稳定后于安全边界终止。
+- Frozen baseline / current HEAD: CI `32942577622` / Windows artifact `9597355204`；Setup `281340342` bytes、SHA-256 `92c630bcb447af13ee0d44bf572b6530613b7bdce7df698ff872215cc015183c`，该字节作废。
+- Binding documents read: 根 `AGENTS.md` 的共享根因/最小修复准则、Windows 原子更新合同、S35 与上一条完整记录。
+- Inspected native seam: 正式 2.0.12 安装树最长绝对路径为 242 字符；旧事务根 `Programs/.net.ecoremedia.e-mate-update/<uuid>/candidate` 比 canonical 增长 70 字符，同一相对文件达到 312。NSIS 在 354 文件/396,413,570 bytes 后稳定停止，未进入 `Apply`；候选没有 `resources/python-runtime`，而旧安装树有 29,845 文件。
+- Experiment or why unnecessary: 磁盘尚余 61.57 GB；Setup 无子进程、无可见窗口、CPU/I/O 与候选文件数持续不变，排除空间不足、健康 ACK 等后续阶段。旧 canonical SHA-256 始终为 `70e17703a946fe94c4f80b468b61c70e4419cca2cf1580cc14e0dfe803935b47`。
+- Decision and forbidden alternatives: 保留同一事务、journal、原子 rename 与回滚；只把事务根压缩为 canonical 同父目录下 `.u/<12-hex>`，候选/旧版/失败目录分别为 `c/o/f`。候选根相对 canonical 最多增加 11 字符；前缀碰撞在 Bootstrap 写 authority 前 fail closed。禁止开启全局 LongPaths、缩短包内第三方路径、直接覆盖 canonical 或另建安装器。
+- Changed scope: Windows transaction 路径派生与 journal path guards、原生路径预算 SelfTest、既有合同测试和本记录；未改用户数据、应用内容、R2、Feed 或官网。
+- Verification commands and results: staging 终止后 Setup exit `-1`、安装版本仍 `2.0.12.0`、`.dsh/e-mate` 仍为 117 文件/30,980,229 bytes；新源码的 Windows SelfTest 与 CI 待回填。
+- Immutable evidence / receipt: 失败事务保留 pending/request/journal 与不完整 candidate 供审计；更新前私有备份仍可恢复。
+- Remaining blockers: 合入 protected main、重建最终 Setup，并从干净 pending 状态重新跑通完整事务。
+- Next exact action: 提交最小路径预算 PR；新 CI 字节到达后归档失败 staging，再执行唯一最终实机更新。
