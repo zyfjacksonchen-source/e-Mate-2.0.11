@@ -120,6 +120,14 @@ function Get-Sha256([string]$Path) {
   return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function ConvertTo-CanonicalProductVersion([string]$Value) {
+  if ($Value -cmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { return $Value }
+  if ($Value -cmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.0$') {
+    return "$($Matches[1]).$($Matches[2]).$($Matches[3])"
+  }
+  throw 'installed version rejected'
+}
+
 function Move-DirectoryDurable([string]$From, [string]$To) {
   Assert-RealDirectory $From | Out-Null
   Assert-True (-not (Test-Path -LiteralPath $To)) "rename destination exists: $To"
@@ -274,8 +282,7 @@ function Get-ManualInstallContext {
   $installer = Assert-RealFile $InstallerPath
   $canonical = Get-FullPath $InstallDirectory
   $current = Assert-RealFile (Join-Path $canonical $script:ProductExecutable)
-  $currentVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($current.FullName).ProductVersion
-  Assert-True ($currentVersion -cmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') 'installed version rejected'
+  $currentVersion = ConvertTo-CanonicalProductVersion ([Diagnostics.FileVersionInfo]::GetVersionInfo($current.FullName).ProductVersion)
   Assert-True ([version]$TargetVersion -gt [version]$currentVersion) 'manual installer is not newer than the installed version'
   $base = Read-BoundedJson $BaseContractPath
   Assert-True ($base.id -is [string] -and $base.id -cmatch '^[A-Za-z0-9._-]{1,200}$') 'manual Base contract rejected'
@@ -1191,6 +1198,13 @@ function Assert-NewCanonical($Tree) {
 function Invoke-SelfTest {
   $script:SelfTesting = $true
   Assert-True ((Get-UtcIsoTimestamp) -cmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$') 'transaction timestamp is not canonical UTC ISO'
+  Assert-True ((ConvertTo-CanonicalProductVersion '2.0.12') -ceq '2.0.12') 'canonical ProductVersion changed'
+  Assert-True ((ConvertTo-CanonicalProductVersion '2.0.12.0') -ceq '2.0.12') 'Windows ProductVersion was not canonicalized'
+  foreach ($invalidVersion in @('2.0.12.1', '2.0.12.00', '02.0.12.0', '2.0', '2.0.12-beta', '')) {
+    $rejected = $false
+    try { ConvertTo-CanonicalProductVersion $invalidVersion | Out-Null } catch { $rejected = $true }
+    Assert-True $rejected "invalid ProductVersion was accepted: $invalidVersion"
+  }
   $removalRoot = Join-Path ([IO.Path]::GetTempPath()) ('emate-update-removal-selftest-' + [Guid]::NewGuid().ToString('D'))
   [IO.Directory]::CreateDirectory($removalRoot) | Out-Null
   try {

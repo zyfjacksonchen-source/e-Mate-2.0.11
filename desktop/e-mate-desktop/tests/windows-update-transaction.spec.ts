@@ -100,6 +100,19 @@ describe('pinned assisted-NSIS atomic update seam', () => {
     expect(coordinator).toContain('Write-ManualShutdown $request')
   })
 
+  it('canonicalizes only the zero fourth field emitted by real Windows ProductVersion metadata', () => {
+    const coordinator = source('build/windows-update-transaction.ps1')
+    const normalize = coordinator.slice(
+      coordinator.indexOf('function ConvertTo-CanonicalProductVersion'),
+      coordinator.indexOf('function Move-DirectoryDurable'),
+    )
+    expect(normalize).toContain("\\.0$')")
+    expect(normalize).toContain("throw 'installed version rejected'")
+    expect(coordinator).toContain("ConvertTo-CanonicalProductVersion ([Diagnostics.FileVersionInfo]::GetVersionInfo($current.FullName).ProductVersion)")
+    expect(coordinator).toContain("ConvertTo-CanonicalProductVersion '2.0.12.0') -ceq '2.0.12'")
+    expect(coordinator).toContain("@('2.0.12.1', '2.0.12.00', '02.0.12.0', '2.0', '2.0.12-beta', '')")
+  })
+
   it('stages before READY and journals both forward renames plus both rollback renames', () => {
     const coordinator = source('build/windows-update-transaction.ps1')
     const phases = [
