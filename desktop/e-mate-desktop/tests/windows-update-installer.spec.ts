@@ -102,7 +102,7 @@ function candidateJournal(
   candidateExecutableSha256: string,
   phase = 'candidate-at-canonical',
 ): Record<string, unknown> {
-  const candidateDirectory = join(request.transactionRoot, 'candidate')
+  const candidateDirectory = join(request.transactionRoot, 'c')
   return {
     schemaVersion: 1,
     documentType: 'emate.windows-update-journal',
@@ -121,8 +121,8 @@ function candidateJournal(
     canonicalDirectory: request.canonicalDirectory,
     transactionRoot: request.transactionRoot,
     candidateDirectory,
-    lastGoodDirectory: join(request.transactionRoot, 'last-good'),
-    failedDirectory: join(request.transactionRoot, 'failed'),
+    lastGoodDirectory: join(request.transactionRoot, 'o'),
+    failedDirectory: join(request.transactionRoot, 'f'),
     candidateExecutable: join(candidateDirectory, 'e-Mate.exe'),
     candidateExecutableSha256,
     updatedAt: new Date().toISOString(),
@@ -297,8 +297,8 @@ describe('Windows Base update private handshake', () => {
     }))
 
     expect(first.request.transactionRoot).not.toBe(second.request.transactionRoot)
-    expect(first.request.transactionRoot).toContain(first.request.transactionId)
-    expect(second.request.transactionRoot).toContain(second.request.transactionId)
+    expect(first.request.transactionRoot).toContain(first.request.transactionId.replaceAll('-', '').slice(0, 12))
+    expect(second.request.transactionRoot).toContain(second.request.transactionId.replaceAll('-', '').slice(0, 12))
     expect(recoverStaleWindowsUpdatePending(dirname(first.request.pendingPath), adapter(undefined, () => false))).toBe(true)
     expect(readFileSync(second.request.pendingPath, 'utf8')).toContain(second.request.transactionId)
     expect(readFileSync(join(second.request.mailboxPath, 'request.json'), 'utf8')).toContain(second.request.token)

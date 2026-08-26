@@ -196,7 +196,10 @@ describe('pinned assisted-NSIS atomic update seam', () => {
   it('isolates physical directories and recovery ownership by transaction id', () => {
     const coordinator = source('build/windows-update-transaction.ps1')
     const runtime = source('src/windows-update-installer.ts')
-    expect(runtime).toContain("`.${APP_ID}-update`, transactionId")
+    expect(runtime).toContain("return join(dirname(resolve(canonicalDirectory)), '.u', compactId)")
+    expect(runtime).toContain("join(request.transactionRoot, 'c', 'e-Mate.exe')")
+    expect(runtime).toContain("join(request.transactionRoot, 'o')")
+    expect(runtime).toContain("join(request.transactionRoot, 'f')")
     expect(coordinator).toContain('"e-MateUpdateRecovery-$($Request.transactionId)"')
     expect(coordinator).toContain('"Registry::HKEY_USERS\\$($Request.ownerSid)\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce"')
     expect(coordinator).toContain("if ($InstallMode -ceq 'all') { '/allusers' } else { '/currentuser' }")
