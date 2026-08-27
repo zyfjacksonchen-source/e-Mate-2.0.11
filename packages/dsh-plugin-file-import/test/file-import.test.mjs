@@ -6,7 +6,7 @@ import test from 'node:test'
 import { apply, importIntoWorkspace } from '../lib/index.js'
 import { allowedMediaType, appendImportedMentions, CHANNEL, fileDropRoute, MAX_FILES } from '../lib/contract.js'
 
-async function mounted(workspace) {
+async function mounted(workspace, archivedSessionIds = []) {
   let handler
   let options
   apply({
@@ -17,7 +17,7 @@ async function mounted(workspace) {
       options = nextOptions
       return () => {}
     } } },
-    workspaceRegistry: { list: () => [{ path: workspace, sessionIds: ['session-1'] }] },
+    workspaceRegistry: { archivedSessionIds, list: () => [{ path: workspace, sessionIds: ['session-1'] }] },
   })
   return { handler, options }
 }
@@ -61,6 +61,19 @@ test('fails closed for unknown sessions, scripts, installers, malformed bytes an
   assert.equal((await handler('import', { session_id: 'session-1', files: Array.from({ length: MAX_FILES + 1 }, (_, index) => encoded(`${index}.txt`)) }, signal)).ok, false)
 })
 
+test('rejects archived sessions and restores imported files after Host restart', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'emate-file-import-restart-'))
+  const archived = await mounted(workspace, ['session-1'])
+  assert.equal((await archived.handler('import', { session_id: 'session-1', files: [encoded('archived.pdf')] }, new AbortController().signal)).ok, false)
+
+  const first = await mounted(workspace)
+  const imported = await first.handler('import', { session_id: 'session-1', files: [encoded('durable.pdf')] }, new AbortController().signal)
+  assert.equal(imported.ok, true)
+  const restarted = await mounted(workspace)
+  assert.equal(await readFile(join(workspace, imported.value.files[0].relative_path), 'utf8'), 'content')
+  assert.equal((await restarted.handler('import', { session_id: 'session-1', files: [encoded('after-restart.pdf')] }, new AbortController().signal)).ok, true)
+})
+
 test('rejects a symlinked managed directory', { skip: process.platform === 'win32' }, async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'emate-file-import-link-'))
   const outside = await mkdtemp(join(tmpdir(), 'emate-file-import-outside-'))
@@ -96,6 +109,10 @@ test('keeps the client contract on target draft mentions and an explicit safe al
   assert.match(client, /inputTriggers\.registerSource\(source\)/u)
   assert.match(client, /e-mate:file-picker-requested/u)
   assert.match(client, /window\.dispatchEvent\(new Event\('dragend'\)\)/u)
+  assert.match(client, /dropImages\(images\)/u)
+  assert.match(client, /importFiles\(ordinary\)/u)
+  assert.match(client, /const owner = useRef\(sessionId\)/u)
+  assert.match(client, /if \(owner\.current !== requestSession\) return/u)
   assert.doesNotMatch(client, /new WebSocket|createStore|ctx\.router|fetch\(/u)
 })
 
