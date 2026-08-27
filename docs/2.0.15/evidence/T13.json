@@ -1,0 +1,215 @@
+{
+  "schema_version": 1,
+  "document_type": "emate.2.0.15.ticket-evidence",
+  "ticket": "T13",
+  "manifest_id": "e-mate-critical-path-smoke-v1",
+  "bindings": {
+    "message-mode.component": [
+      {
+        "id": "t13-shell-build",
+        "type": "command",
+        "cwd": "packages/dsh/profile/plugins/emate-shell",
+        "command": "$NODE",
+        "args": [
+          "../../../../../upstream/deepseek-harness/node_modules/tsdown/dist/run.mjs",
+          "--no-write",
+          "--dts"
+        ],
+        "timeout_ms": 30000
+      },
+      {
+        "id": "t13-shell-navigation",
+        "type": "command",
+        "cwd": "packages/dsh/profile/plugins/emate-shell",
+        "command": "$NODE",
+        "args": [
+          "../../../../../upstream/deepseek-harness/node_modules/vitest/vitest.mjs",
+          "run",
+          "tests/sidebar-home-fidelity.client.spec.tsx",
+          "tests/sidebar-settings-route.client.spec.tsx",
+          "tests/composer-205.client.spec.tsx",
+          "tests/composer-mentions.client.spec.tsx",
+          "tests/header-controls.client.spec.tsx"
+        ],
+        "timeout_ms": 30000
+      },
+      {
+        "id": "t13-desktop-controls",
+        "type": "command",
+        "cwd": "desktop/e-mate-desktop",
+        "command": "$NODE",
+        "args": [
+          "../../upstream/deepseek-harness/node_modules/vitest/vitest.mjs",
+          "run",
+          "tests/window-options.spec.ts",
+          "tests/theme-presenter.spec.ts",
+          "tests/electron-runtime.spec.ts",
+          "tests/updates.spec.ts"
+        ],
+        "timeout_ms": 30000
+      }
+    ]
+  },
+  "title": "主界面导航、唯一原生引用入口与 Desktop Header/Settings 控件",
+  "status": "SOURCE_AND_COMPONENT_PASSED_COMPLETE_PROFILE_OPEN_T18",
+  "baseline": {
+    "task_start_commit": "23fd997faf2570d4f88ee6f389ddd5633b524e16",
+    "code_commit": "c07d4618280bf5a69563800c046605be93722696",
+    "branch": "feat/2.0.15-T13-ui-navigation",
+    "clean_start": true,
+    "base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0",
+    "harness_base_commit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606",
+    "harness_local_commit": "820fee0df4f46b15d4cc07f56ccfcae43549d769",
+    "genui_upstream_commit": "0e756efb7671e6b8413dde3d8e199c68fa89cbeb",
+    "base_contract_modified": false,
+    "component_inventory_modified": false
+  },
+  "truth_stage": {
+    "source": "passed",
+    "component_fixture": "passed",
+    "complete_profile_app_directory": "OPEN_T18",
+    "installed": "OPEN_T18",
+    "real_share_service": "OPEN_T18",
+    "real_update_service": "OPEN_T18",
+    "candidate": "not_created",
+    "release": "not_created",
+    "public_production": "unchanged"
+  },
+  "development_loop": {
+    "creation_mode": "not_available_in_this_task_context_no_cordis_inspect_or_dynamic_package_tools_exposed",
+    "substitute": "direct source/component regression against the exact pinned local Harness owners and D015 Desktop carrier",
+    "dynamic_package_entered_release": false,
+    "dependency_installed": false
+  },
+  "entry_inventory": {
+    "new_task": "Sidebar primary action -> existing Workspace connect/blank reuse -> native Session route",
+    "search": "Sidebar local projection over the native visible Session list; no Router or search store added",
+    "schedules": "Sidebar /schedules -> T06 management projection -> native schedule Tools",
+    "capabilities": "Sidebar /capabilities and Composer /capabilities?category=collaboration -> retained T07/T16 capability owners",
+    "projects_workspace": "Sidebar project rows and native Workspace directory-picker/create/connect seams",
+    "sessions": "Sidebar /chat/:encoded-id -> existing SessionRouteProjection and sessions.open",
+    "account_status": "Footer only -> existing identity AccountControl; no visible Settings duplicate",
+    "header": "exact current nonblank top-level Session Share; D015 update state/manual trigger; Theme; one Settings action"
+  },
+  "native_contract": {
+    "sidebar_order": [
+      "新任务",
+      "搜索",
+      "定时任务",
+      "能力中心",
+      "项目/Workspace",
+      "会话",
+      "账户/状态 Footer"
+    ],
+    "share_gate": "native current Session equals the exact encoded /chat route, is top-level, and is nonblank",
+    "updater": "Header and Settings read the same context-isolated DesktopUpdateBridge get/subscribe/cancel projection; runInteractiveUpdate reaches the existing runManualCheck/manualTask fence through the owning Renderer IPC carrier and returns no durable result",
+    "theme_titlebar": "resolved light/dark theme drives the Renderer caption token; nativeTheme and its updated event drive the same Windows advanced titleBarOverlay colors; listeners are removed on failed mount and release",
+    "mentions": {
+      "visible_launchers": 1,
+      "owner": "pinned InputTriggerService and its per-Session controller",
+      "sources": [
+        "T16 File Import @文件",
+        "T15 Computer Use @电脑操控",
+        "Goals projection",
+        "session-owned todos Plan projection",
+        "T06 Schedule @定时任务",
+        "pinned skills.list Skill references"
+      ],
+      "visible_slash_menu": false,
+      "legacy_typed_slash_compatibility_preserved": true,
+      "second_draft_popup_registry_or_input_lifecycle_added": false
+    },
+    "d013_native_composer_frame_host_preserved": true,
+    "d014_home_route_owner_preserved": true,
+    "t11_home_content_changed": false,
+    "t12_message_or_gallery_owner_changed": false,
+    "t16_product_plugin_changed": false,
+    "native_macos_frame_or_traffic_lights_changed": false
+  },
+  "accessibility_and_layout": {
+    "icon_tooltips_and_aria_labels": "passed component assertions",
+    "keyboard_order_and_focus_ring": "DOM order and focus-visible contracts passed",
+    "busy_disabled_error": "new task, project picker, mention and updater paths passed",
+    "narrow_sidebar_and_minimum_window": "collapsed rail and 900px at 100/125/150 percent calculations passed",
+    "light_dark_system": "Desktop Presenter and native Windows caption tests passed",
+    "installed_visual_acceptance": "OPEN_T18"
+  },
+  "verification": [
+    {
+      "command": "focused Desktop Vitest: updates, electron-runtime, window-options, theme-presenter",
+      "result": "PASS: 4 files, 100 tests; D015 sender validation, shared manualTask fence, mount/release cleanup, progress/cancel/error, light/dark/system titlebar included"
+    },
+    {
+      "command": "Shell Vitest tests/*.spec.tsx against one pinned prepared dependency graph",
+      "result": "PASS: 16 files, 97 tests; T08 Share, T11 Home, T12 message/gallery, D013 Composer and T13 navigation included"
+    },
+    {
+      "command": "Shell tsdown --no-write --dts",
+      "result": "PASS: Host and Client bundles plus declarations compiled without writing generated product paths"
+    },
+    {
+      "command": "Desktop tsc main/client/tests-client plus tests --skipLibCheck",
+      "result": "PASS: changed source and tests typechecked; the borrowed no-install dependency tree's strict tests config alone retained two external rc.7 declaration-merging errors, so no clean full-install typecheck is claimed"
+    },
+    {
+      "command": "tsdown emitted /private/tmp/emate-t13-shell-emitted/index.js and client.js, then verifyComponentRuntimeImports",
+      "result": "PASS: emitted imports exactly [@deepseek-ai/dsh-client-runtime, @deepseek-ai/dsh-client-ui-attachment, @deepseek-ai/dsh-client-ui-primitives, react, react-dom]"
+    },
+    {
+      "command": "node scripts/smoke/run.mjs --layer component --case CP-13 --extension docs/2.0.15/evidence/T13.json --require-complete",
+      "result": "PASS: committed extension 44204c834b708751417fd392410e8d5e119fdcf3 completed CP-13 in 4988 ms with zero pending"
+    },
+    {
+      "command": "node scripts/component-release.mjs inventory",
+      "result": "EXPECTED_STRICT_FAILURE_D006: upstream/deepseek-harness: Git submodule commit does not match the Base contract; desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    }
+  ],
+  "d006": {
+    "status": "OPEN_STRICT_T18_BLOCKER_PRESERVED",
+    "failures": [
+      "upstream/deepseek-harness: Git submodule commit does not match the Base contract",
+      "desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union"
+    ],
+    "base_contract_or_validator_modified": false,
+    "bypass_added": false,
+    "owner": "T18 successor Base identity, advertised Harness reachability and retained-component ABI rebind"
+  },
+  "owner_scope": {
+    "outside_allowed_paths_modified": false,
+    "base_version_package_lock_workflow_status_or_development_log_modified": false,
+    "dependency_added": false,
+    "submodule_source_or_gitlink_modified": false,
+    "second_router_store_transport_updater_renderer_or_composer_added": false,
+    "installation_performed": false,
+    "production_write_performed": false
+  },
+  "handoffs": [
+    {
+      "owner": "T18",
+      "paths": [
+        "successor Base contract/inventory freeze",
+        "complete composed Profile app-directory",
+        "installed macOS and Windows candidates"
+      ],
+      "predicate": "close both exact D006 errors, compose the complete Profile, then run final navigation, real Share/update service, restart, accessibility, titlebar and installed-byte acceptance"
+    }
+  ],
+  "open_acceptance": [
+    "T18 complete Profile app-directory boot and live final UI proof; source/component tests are not substituted",
+    "T18 installed macOS and Windows narrow Sidebar, minimum window, Chinese/English length, light/dark/system and native frame acceptance",
+    "T18 real shareable Session create/list/revoke and nonshareable denial through the installed app",
+    "T18 real manual updater check/progress/cancel/error/restart projection from both Header and Settings",
+    "T18 final File/Computer Use/Goal/Plan/Schedule/Skill native @ roster with no visible slash affordance",
+    "T18 candidate, installed-byte, update/rollback and public-production receipts",
+    "T18 advertised remote reachability for Harness 820fee0df4f46b15d4cc07f56ccfcae43549d769 and both D006 predicates"
+  ],
+  "installed_receipts": [],
+  "candidate_created": false,
+  "publish_performed": false,
+  "production_writes": [],
+  "release_claimed": false
+}
