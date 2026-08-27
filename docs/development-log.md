@@ -3151,3 +3151,11 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Evidence ceiling: 这只证明 source/component 层。严格 inventory 仍精确保留 D006 两条 blocker；`820fee0df4…` 当前通过本地任务仓补齐到 release 工作树，但没有 advertised `origin/*` 可达证明，不能冒充 clean-checkout、installed、RC 或 released。
 - User input boundary: 用户已声明独立图片反馈工作簿为旧版作废材料；T17 不读取或映射其内容，只保留“已排除”的来源身份回执，并从唯一有效功能反馈导出重新生成 backlog。
 - Next exact action: 同步并恢复原 T16 可见任务；并行恢复 T17，仅使用有效功能反馈导出。T16 合入后再创建 T13。
+
+## 2026-08-27 · 2.0.15 T17 有效功能反馈只读归并
+
+- Goal checkpoint: T17 在同一可见任务 `01a04376-18e2-7a63-9c79-934597ccae80` 仅使用 `VwnSnZLbANDI` 的有效功能反馈导出完成只读归并，release 提交为 `b6fa6f2`；没有业务代码、源表、外部文档、Base、版本或发布写入。
+- User invalidation boundary: 用户明确宣布独立图片反馈工作簿为旧版作废材料。T17 没有重新打开或解析它，只在 evidence 的 `discarded_inputs` 记录文件名、已知 SHA、`user_declared_obsolete_old_version` 和 `content_excluded=true`；backlog 不含其行、字段、媒体、计数、分类、root、映射或结论。
+- Verification: 有效表 SHA 精确匹配；20 条 raw feedback ID 全部唯一，分类 P0 8 / P1 5 / P2 1 / DUPLICATE 4 / NEEDS_EVIDENCE 2 合计 20；16 个 canonical ID 唯一且每条 raw 都有有效反向映射；禁止字符串 `IMAGE-` 不存在，JSON、`git show --check` 与 clean tree 通过。
+- Evidence ceiling: 这是 read-only intake，不是产品修复。所有 P0 仍按各自 T05–T16 source/component、app-directory、installed、真实账户/provider、exact-byte 或 update/rollback 回执裁决；D006 与正式发布仍归 T18。
+- Next exact action: 等待 T16 产品组件闭环并独立复验；T16 合入后创建 T13 最终 Shell/导航集成任务。
