@@ -2995,3 +2995,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: `33026280155` 的唯一错误为 `ReferenceError: Cannot access 'GithubClient' before initialization`；Cloudflare plugin 只读前驱仍为 emergency legacy `948:1d70004c…19c4`，signed pointer 仍 absent，官网仍为 `636:02ea7f…252c`。
 - Remaining blockers: 主仓 pin PR 与新 protected-main exact source；从该 source 重新生成 CI/Profile/Desktop/admission/handoff，完成 Cloudflare immutable/CAS/public readback、三目标 desired state、官网和双平台安装更新回滚。
 - Next exact action: 运行主仓最窄 release 合同，提交并合入 pin 修复；只消费新 protected-main attempt-1 字节继续正式发布。
+
+## 2026-08-27 · 2.0.13 GitHub Actions 发布授权边界修复
+
+- Goal checkpoint: Desktop publication run `33029167412` 在任何 Cloudflare/R2 写入前失败关闭；性能回执已取消且不是本次阻断来源。
+- Frozen baseline / current HEAD: 失败 run 使用主仓 protected main `007f57041c8a4721f49b4c8582e73221547f139d` 与外部 action `bfe869505196f3124192f6e0c219014c94365639`；外部最小修复 PR `#8` 已合入 `0026c0364623ea123ab0930a136f4d225c95f298`。
+- Binding documents read: 根 `AGENTS.md`、`target-contract.md`、S35 无性能回执发布合同、上一条入口初始化修复记录与外部 publication action 权限合同。
+- Inspected native seam: 外部 action 用 workflow `GITHUB_TOKEN` 调用 branch-protection REST；该接口要求仓库 Administration(read)，而现有发布 job 只有 Actions/Contents/Metadata read。保护分支上下文本身已由 `GITHUB_REF_PROTECTED=true`、精确 `main` HEAD、attempt-1 CI/job/artifact provenance 共同约束。
+- Experiment or why unnecessary: 删除无法由最小工作流令牌满足的重复 REST 检查，并把外部测试中的 unprotected 负例改为原生 `refProtected=false`；外部 Node 24 全套 `83/83` 通过，未增加 PAT、secret、权限或第二发布路径。
+- Decision and forbidden alternatives: 主仓唯一 production publication action 固定到 `0026c0364623ea123ab0930a136f4d225c95f298`；继续保留现有受保护上下文、精确源码、attempt-1、CI/job/artifact 字节 provenance 和 CAS 公网回读。不得为读取 branch protection 增加管理员 PAT、扩大令牌、跳过 protected-main 或手工签名。性能 workflow 仅保留可选诊断且同步固定同一 reviewed action SHA，不进入 release admission。
+- Changed scope: 外部 action 删除重复 GitHub API 权限依赖；主仓仅更新现有 Desktop publication/可选 performance action pin、官网 handoff identity、S35 合同、绑定测试和本 append-only 记录。未改产品运行时、Profile、Harness、安装包输入、用户数据或生产对象。
+- Verification commands and results: 外部 Node 24 `83/83`、`git diff --check` 已通过；主仓 Node 24 release/admission/coordinator 定向合同 `28/28`、`git diff --check` 通过。首次本地运行因隔离 worktree 未安装 `fflate/yaml` 依赖而在模块加载阶段退出，按锁文件离线安装后原命令全绿，没有改锁文件或产品输入。
+- Immutable evidence / receipt: 失败 run `33029167412` 的错误为 GitHub API `HTTP 403`，且没有 Cloudflare/R2 写入；外部修复 protected-main SHA 为 `0026c0364623ea123ab0930a136f4d225c95f298`。
+- Remaining blockers: 主仓 pin PR 与 protected-main attempt-1 CI；从新精确 source 生成或按既有 change-impact 合同复用已验收 immutable artifacts；完成签名 handoff、Cloudflare immutable/CAS/public readback、官网切换和双平台安装更新回滚。
+- Next exact action: 运行主仓最窄发布合同并合入 pin 修复；随后只使用受保护主线原生协调器继续 2.0.13 正式发布，不重新引入性能回执。
