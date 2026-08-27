@@ -3168,3 +3168,12 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Independent verification: Better Sidebar build、Host `3/3`、deferred client race `1/1`；File Import `7/7`、GenUI `1/1`、Glass `1/1`、MCP `5/5`、Memory `5/5`、Office `5/5`。七组件 emitted imports 精确匹配各自既有 `base_imports`；初始化 root 已声明的 GenUI submodule 后，committed T16 extension 重放 CP-13 为 `142 ms / 0 pending`；inventory 精确保留 D006 两条 strict red。
 - Evidence ceiling: `docs/2.0.15/evidence/T16.json` 只提升 source/component 层。Complete Profile app-directory、installed macOS/Windows、真实 MCP provider、真实 Office application host、candidate/public、final Harness advertised reachability 与 successor Base rebind 仍归 T18。
 - Next exact action: 从当前 release tip 创建 T13 独立 worktree/可见任务，消费 T06/T07/T08/T09/T11/T12/T15/T16 handoff，完成最后的原生 `@`、Settings、导航和 titlebar 集成。
+
+## 2026-08-27 · 2.0.15 T13 最终 Shell 集成派发
+
+- Goal checkpoint: T13 已按 Shell 高冲突顺序在 T16 合入后创建为用户可见的独立任务 `01a043d2-7aad-7491-bfe1-f8d109d4183d`；T00 继续只做状态、审查、纠偏、独立复验和合并，不代写产品实现。
+- Frozen baseline / current HEAD: 独立 worktree `/Users/mac/e-mate/worktrees/emate-2.0.15-T13`、分支 `feat/2.0.15-T13-ui-navigation` 固定起点 `25e90d11bee5ce6d0df84a8384de2ece844f9fe2`；本地 Harness `820fee0df4f46b15d4cc07f56ccfcae43549d769` 与 GenUI `0e756efb7671e6b8413dde3d8e199c68fa89cbeb` 均已按 root gitlink 展开且 clean。
+- Binding handoffs: T13 只接管 `DECISIONS.md` 的静态路径和已经顺序转交的 Shell/Header/Desktop integration seam，消费 T06 Schedule、T07 Skill Hub、T08 Share、T09 updater、T11 native Composer Host、T12 message/gallery、T15 native attachment/capability 与 T16 Glass/GenUI contracts。
+- Decision and forbidden alternatives: 保持一个原生 Session/Workspace/Router/InputTrigger/Goal/Todo/Updater/Composer；不得新增 Mention registry、第二 Store/Renderer/Composer、DOM mover或可见 slash 菜单，不改 Home 内容、消息模式、产品插件、Base/version/lock/workflow。
+- Evidence ceiling: 本任务先做 source/component 和可重复 smoke；完整 Profile app-directory、installed 双平台、真实服务、candidate/public 仍由 T18 裁决。D006 两条 strict blocker 必须保持可见，不能因 T13 集成被隐藏或弱化。
+- Next exact action: 等待该可见任务形成最小提交和 `T13.json`，由 T00 回读源码与测试、独立复验并在通过后合入；随后才创建最后的 T18。
