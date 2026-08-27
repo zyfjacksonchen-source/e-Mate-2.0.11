@@ -1,8 +1,3 @@
 # Match the pinned DeepSeek Harness checkout: byte-level release gates see the
 # same canonical text on every CI runner.
 * text=auto eol=lf
-
-# Preserve wheel metadata and license texts byte-for-byte; their upstream
-# whitespace and RECORD hashes are part of the vendored Python distributions.
-packages/dsh-plugin-xin-assistant/runtime/vendor/** -text -whitespace
-packages/dsh-plugin-xin-assistant/runtime/vendor-native/** -text -whitespace

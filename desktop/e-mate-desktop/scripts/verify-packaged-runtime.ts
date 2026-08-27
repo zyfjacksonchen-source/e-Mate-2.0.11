@@ -97,6 +97,11 @@ export const REQUIRED_UNPACKED_RUNTIME_ENTRIES = [
   'node_modules/pnpm/bin/pnpm.mjs',
 ] as const
 
+/** Retired packages that must never re-enter a future Desktop payload. */
+export const RETIRED_UNPACKED_RUNTIME_ENTRIES = [
+  'node_modules/@e-mate/dsh-plugin-xin-assistant',
+] as const
+
 /** Prebuilt Node-API modules required when the Windows package skips native source rebuilds. */
 export const REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES = [
   'node_modules/node-pty/prebuilds/win32-x64/conpty.node',
@@ -338,6 +343,13 @@ export function verifyPackagedRuntime(
   if (missing.length > 0) {
     throw new Error(
       `@e-mate/desktop: packaged runtime at ${unpackedRoot} is missing required physical entries: ${missing.join(', ')}`,
+    )
+  }
+  const retired = RETIRED_UNPACKED_RUNTIME_ENTRIES
+    .filter(entry => exists(join(unpackedRoot, entry)))
+  if (retired.length > 0) {
+    throw new Error(
+      `@e-mate/desktop: packaged runtime at ${unpackedRoot} contains retired physical entries: ${retired.join(', ')}`,
     )
   }
   const resourcesRoot = resolvePackagedResourcesRoot(context)

@@ -161,39 +161,6 @@
           "native_paths": ["runtime/wheels/win32-x64"]
         }
       ]
-    },
-    {
-      "id": "@e-mate/dsh-plugin-xin-assistant",
-      "root": "packages/dsh-plugin-xin-assistant",
-      "kind": "platform-profile",
-      "desktop": "blocked",
-      "cli": false,
-      "targets": [
-        {
-          "platform": "darwin",
-          "arch": "arm64",
-          "runtime_abi": "cpython-3.12",
-          "minimum_os": "13.0",
-          "signing": { "scheme": "adhoc", "identity": "adhoc" },
-          "native_paths": ["runtime/vendor-native/darwin-arm64"]
-        },
-        {
-          "platform": "darwin",
-          "arch": "x64",
-          "runtime_abi": "cpython-3.12",
-          "minimum_os": "13.0",
-          "signing": { "scheme": "adhoc", "identity": "adhoc" },
-          "native_paths": ["runtime/vendor-native/darwin-x64"]
-        },
-        {
-          "platform": "win32",
-          "arch": "x64",
-          "runtime_abi": "cpython-3.12",
-          "minimum_os": "10.0",
-          "signing": { "scheme": "unsigned", "identity": "none" },
-          "native_paths": ["runtime/vendor-native/win32-x64"]
-        }
-      ]
     }
   ]
 }
