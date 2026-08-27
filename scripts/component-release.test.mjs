@@ -334,10 +334,7 @@ describe('component payload closure', () => {
     const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
     const host = readFileSync(join(root, 'src/index.ts'), 'utf8')
     assert.equal(manifest.exports['./web-search'], undefined)
-    assert.deepEqual(manifest.eMate.component.base_imports, [
-      '@deepseek-ai/dsh-llm',
-      '@deepseek-ai/dsh-tools',
-    ])
+    assert.deepEqual(manifest.eMate.component.base_imports, ['@deepseek-ai/dsh-tools'])
     assert.deepEqual(manifest.eMate.component.authority_contract, {
       effects: [],
       guards: ['read-only', 'session-scope'],
