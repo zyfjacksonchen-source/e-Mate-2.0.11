@@ -22,6 +22,10 @@ A ticket may edit only its active scope below. Directory entries include descend
 
 Each ticket writes only `docs/2.0.15/evidence/Txx.json`. Mock/fixture evidence may prove a narrow contract but cannot produce `INSTALLED_E2E_PASSED`. Only exact installed bytes and real service/account receipts may advance that state. Only T18 may write production state.
 
+### D006 — C16 retirement requires a new Base contract identity
+
+`@deepseek-ai/dsh-launch-environment` remains in the immutable v7 Base contract but no retained component imports it after T04. Do not weaken the union validator or silently mutate v7. T18 must create an honestly versioned successor Base contract and rebind every retained component before RC admission; until then the strict inventory failure is a release blocker, not a T04 regression.
+
 ## Exclusive static scopes
 
 | Ticket | Exact owned paths while active |

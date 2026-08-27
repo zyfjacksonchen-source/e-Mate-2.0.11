@@ -14,6 +14,7 @@ Status vocabulary: `TODO / INVESTIGATED / CODE_COMPLETE / NARROW_TEST_PASSED / I
 | Release/worktree topology | `NARROW_TEST_PASSED` | release and T00 worktrees exist; later worktrees are created only at dispatch |
 | Production predecessor | `INVESTIGATED` | public production remains 2.0.13; 2.0.14 source/candidate is not called released |
 | 2.0.14 Profile release input | `BLOCKED` | checked-in current snapshot is stale; run `33050840728` failed before publication |
+| Post-xin Base ABI union | `BLOCKED` | retired C16 was the sole owner of `@deepseek-ai/dsh-launch-environment`; the v7 Base contract still declares it, so strict inventory validation correctly fails until T18 creates and rebinds an honest successor contract |
 | Tencent backlog | `BLOCKED` | requires XLSX/CSV/full copied table/readable snapshot |
 | Formal platform/service authorities | `BLOCKED` | real accounts, Worker access, Apple/signing policy and accepted Intel/x64 runner receipts are ticket-local gates |
 
@@ -29,7 +30,7 @@ The effective concurrency cap is `min(6, available executor slots)`. The current
 | T01 | CI/build/release fast lanes | 5.6 sol max / xhigh | `feat/2.0.15-T01-ci-fast-lanes` | T00 | `worktrees/emate-2.0.15-T01` | `TODO` | `docs/2.0.15/evidence/T01.json` |
 | T02 | Regression wall and smoke harness | 5.6 sol max / xhigh | `feat/2.0.15-T02-regression-wall` | T00 | `worktrees/emate-2.0.15-T02` | `TODO` | `docs/2.0.15/evidence/T02.json` |
 | T03 | System/component audit | 5.6 sol max / high | `feat/2.0.15-T03-system-audit` | T00 | `worktrees/emate-2.0.15-T03` | `MERGED` | `d5c5ea24b36010cb3f497356ed955219fb40decc`; `docs/2.0.15/evidence/T03.json` |
-| T04 | Remove xin-assistant | 5.6 sol / high | `feat/2.0.15-T04-remove-xin-assistant` | T03 inventory snapshot | `worktrees/emate-2.0.15-T04` | `TODO` | `docs/2.0.15/evidence/T04.json` |
+| T04 | Remove xin-assistant | 5.6 sol / high | `feat/2.0.15-T04-remove-xin-assistant` | T03 inventory snapshot | `worktrees/emate-2.0.15-T04` | `MERGED` | `116dadb3cbe10ca9aab719821f17acddb40fcc2e`; `docs/2.0.15/evidence/T04.json` |
 | T05 | Native Tool visibility/routing | 5.6 sol max / xhigh | `feat/2.0.15-T05-tool-routing` | T00; Wave-1 owner contracts | `worktrees/emate-2.0.15-T05` | `TODO` | `docs/2.0.15/evidence/T05.json` |
 | T06 | Native Schedule closure | 5.6 sol max / xhigh | `feat/2.0.15-T06-schedules-e2e` | T02 harness; T05 visibility | `worktrees/emate-2.0.15-T06` | `TODO` | `docs/2.0.15/evidence/T06.json` |
 | T07 | Skill Hub closure | 5.6 sol max / xhigh | `feat/2.0.15-T07-skillhub-e2e` | T02 harness; T05 visibility | `worktrees/emate-2.0.15-T07` | `TODO` | `docs/2.0.15/evidence/T07.json` |
