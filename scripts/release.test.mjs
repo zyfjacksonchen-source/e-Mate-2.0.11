@@ -552,7 +552,7 @@ test('download site stages exact bytes and a closed release-bound website handof
   assert.equal(plan.staged_directory, 'download-page')
   assert.equal(plan.release_state.artifact_name, `e-mate-release-state-${SOURCE_COMMIT}`)
   assert.match(plan.release_state.sha256, /^[0-9a-f]{64}$/u)
-  assert.equal(plan.desktop_publication_predecessor.action_commit, '5e254e06905d7d930bc27117692d70d92456e8e7')
+  assert.equal(plan.desktop_publication_predecessor.action_commit, 'bfe869505196f3124192f6e0c219014c94365639')
   assert.equal(plan.desktop_publication_predecessor.artifact_name, `e-mate-desktop-cloudflare-handoff-${SOURCE_COMMIT}`)
   assert.equal(plan.publication_contract.server_root, '/srv/ecorex-agent-download')
   assert.equal(plan.publication_contract.version_directory, `releases/site-emate-${VERSION}-${SOURCE_COMMIT}`)
