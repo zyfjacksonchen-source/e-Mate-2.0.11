@@ -33,6 +33,7 @@ function inside(root: string, candidate: string): boolean {
 
 async function projectRoot(ctx: any, sessionId: unknown): Promise<{ kind: 'general' | 'project'; root: string } | null> {
   if (typeof sessionId !== 'string' || sessionId.length < 1 || sessionId.length > 256) return null
+  if (ctx.workspaceRegistry.archivedSessionIds.includes(sessionId)) return null
   const workspace = (ctx.workspaceRegistry.list() as Workspace[])
     .find(candidate => candidate.sessionIds.includes(sessionId))
   if (workspace === undefined) return null

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 
@@ -39,15 +39,18 @@ function parseListing(value: unknown): Listing {
 }
 
 function ProjectFiles({ sessionId, callSidebar }: ConvViewProps & Injected) {
+  const request = useRef(0)
   const [path, setPath] = useState('')
   const [listing, setListing] = useState<Listing | null>(null)
   const [preview, setPreview] = useState<{ path: string; content: string } | null>(null)
   const [status, setStatus] = useState('正在读取项目文件…')
 
   const load = useCallback(async (nextPath: string) => {
+    const current = ++request.current
     setStatus('正在读取项目文件…')
     setPreview(null)
     const result = await callSidebar('list', { session_id: sessionId, path: nextPath })
+    if (current !== request.current) return
     if (!result.ok) throw new Error(result.error?.message ?? '项目文件读取失败。')
     setListing(parseListing(result.value))
     setPath(nextPath)
@@ -55,16 +58,17 @@ function ProjectFiles({ sessionId, callSidebar }: ConvViewProps & Injected) {
   }, [callSidebar, sessionId])
 
   useEffect(() => {
-    let active = true
-    void load('').catch(error => { if (active) setStatus(error instanceof Error ? error.message : '项目文件读取失败。') })
-    return () => { active = false }
+    void load('').catch(error => { setStatus(error instanceof Error ? error.message : '项目文件读取失败。') })
+    return () => { request.current += 1 }
   }, [load])
 
   const open = async (entry: Entry) => {
     const next = path === '' ? entry.name : `${path}/${entry.name}`
     if (entry.kind === 'directory') return await load(next)
+    const current = ++request.current
     setStatus('正在读取文件…')
     const result = await callSidebar('read', { session_id: sessionId, path: next })
+    if (current !== request.current) return
     if (!result.ok) throw new Error(result.error?.message ?? '文件读取失败。')
     const value = result.value as { schema_version?: unknown; kind?: unknown; path?: unknown; content?: unknown }
     if (value?.schema_version !== 1 || value.kind !== 'file' || typeof value.path !== 'string' || typeof value.content !== 'string') throw new Error('文件内容无效。')
