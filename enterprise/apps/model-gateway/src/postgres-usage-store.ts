@@ -1,5 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
+import {
+  projectUsageActivity,
+  type UsageActivity,
+  type UsageActivityLedgerDay,
+  type UsageActivityQuery,
+} from './activity-contract.ts';
 import { TASK_SCENARIOS } from '@e-mate/monitoring-contract';
 import {
   InvocationAdmissionError,
@@ -254,6 +260,54 @@ export class PostgresUsageStore implements UsageStore {
       weekStartedAt: row.week_started_at.toISOString(),
       calculatedAt: row.calculated_at.toISOString(),
     };
+  }
+
+  async accountUsageActivity(
+    principal: ModelGatewayPrincipal,
+    query: UsageActivityQuery
+  ): Promise<UsageActivity> {
+    const tenantId = identifier(principal.tenantId, 'tenant id');
+    const userId = identifier(principal.userId, 'user id');
+    const result = await this.#pool.query<{
+      date: string | null;
+      input_tokens: string | null;
+      output_tokens: string | null;
+      cache_read_tokens: string | null;
+      cache_write_tokens: string | null;
+      calculated_at: Date;
+    }>(
+      `
+      WITH activity AS (
+        SELECT (recorded_at AT TIME ZONE $3)::date::text AS date,
+               sum(input_tokens)::text AS input_tokens,
+               sum(output_tokens)::text AS output_tokens,
+               sum(cache_read_tokens)::text AS cache_read_tokens,
+               sum(cache_write_tokens)::text AS cache_write_tokens
+          FROM e_mate_model_usage_attempt
+         WHERE tenant_id = $1 AND user_id = $2
+           AND recorded_at >= ($4::date::timestamp AT TIME ZONE $3)
+           AND recorded_at < (($5::date + 1)::timestamp AT TIME ZONE $3)
+         GROUP BY (recorded_at AT TIME ZONE $3)::date
+      ), calculated AS (
+        SELECT clock_timestamp() AS calculated_at
+      )
+      SELECT activity.*, calculated.calculated_at
+        FROM calculated
+        LEFT JOIN activity ON true
+       ORDER BY activity.date
+      `,
+      [tenantId, userId, query.timezone, query.startDate, query.endDate]
+    );
+    const calculatedAt = result.rows[0]?.calculated_at;
+    if (!(calculatedAt instanceof Date)) throw new Error('Usage activity projection is unavailable');
+    const rows: UsageActivityLedgerDay[] = result.rows.flatMap(row => row.date === null ? [] : [{
+      date: row.date,
+      inputTokens: row.input_tokens as string,
+      outputTokens: row.output_tokens as string,
+      cacheReadTokens: row.cache_read_tokens as string,
+      cacheWriteTokens: row.cache_write_tokens as string,
+    }]);
+    return projectUsageActivity(query, rows, calculatedAt);
   }
 
   async #lockQuota(client: PoolClient, tenantId: string): Promise<LockedQuota> {

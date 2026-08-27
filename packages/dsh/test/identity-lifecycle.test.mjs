@@ -367,6 +367,7 @@ test('late refresh and runtime policy responses cannot revive credentials after 
   const policyProvider = createEnterpriseIdentityProvider(options(mapCredentials(policyValues), async input => {
     const path = new URL(input).pathname
     if (path.endsWith('/v1/runtime-models')) {
+      assert.equal(new URL(input).searchParams.get('client_version'), '2.0.14')
       markPolicyStarted()
       await policyGate
       return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
@@ -463,6 +464,139 @@ test('identity RPC returns only legal redacted rc.7 logout envelopes', async () 
   assert.doesNotMatch(warnings.join('\n'), /private|HTTP|Users|secret-value/u)
 })
 
+test('identity activity RPC validates the range, maps exact private-free buckets and types unavailability', async () => {
+  const values = new Map([[SESSION_REF, stored()]])
+  let unavailable = false
+  const requests = []
+  const provider = createEnterpriseIdentityProvider(options(mapCredentials(values), async input => {
+    const url = new URL(input)
+    requests.push(url)
+    if (unavailable) {
+      return new Response(JSON.stringify({ error: { code: 'USAGE_ACTIVITY_UNAVAILABLE' } }), {
+        status: 503,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    return new Response(JSON.stringify({
+      schemaVersion: 1,
+      timezone: 'Asia/Shanghai',
+      startDate: '2024-02-29',
+      endDate: '2024-03-01',
+      days: [
+        {
+          date: '2024-02-29',
+          total: '9007199254741005',
+          input: '9007199254740993',
+          output: '7',
+          cacheRead: '3',
+          cacheWrite: '2',
+        },
+        { date: '2024-03-01', total: '0', input: '0', output: '0', cacheRead: '0', cacheWrite: '0' },
+      ],
+      periodTotal: '9007199254741005',
+      calculatedAt: '2024-03-02T00:00:00.000Z',
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
+  let handler
+  applyIdentity({
+    connection: { rpc: { handle: (_channel, candidate) => {
+      handler = candidate
+      return async () => {}
+    } } },
+    provide: () => {},
+    effect: effect => effect(),
+    logger: { warn: () => {} },
+  }, { providerLegalName: '亦芯测试主体', identityProvider: provider })
+
+  const result = await handler('identity.usage.activity', {
+    timezone: 'Asia/Shanghai', start_date: '2024-02-29', end_date: '2024-03-01',
+  })
+  assert.deepEqual(result, {
+    ok: true,
+    value: {
+      schema_version: 1,
+      timezone: 'Asia/Shanghai',
+      start_date: '2024-02-29',
+      end_date: '2024-03-01',
+      days: [
+        {
+          date: '2024-02-29',
+          total: '9007199254741005',
+          input: '9007199254740993',
+          output: '7',
+          cache_read: '3',
+          cache_write: '2',
+        },
+        { date: '2024-03-01', total: '0', input: '0', output: '0', cache_read: '0', cache_write: '0' },
+      ],
+      period_total: '9007199254741005',
+      calculated_at: '2024-03-02T00:00:00.000Z',
+    },
+  })
+  assert.equal(requests[0].pathname.endsWith('/v1/usage/activity'), true)
+  assert.deepEqual([...requests[0].searchParams], [
+    ['timezone', 'Asia/Shanghai'],
+    ['start_date', '2024-02-29'],
+    ['end_date', '2024-03-01'],
+  ])
+  assert.doesNotMatch(JSON.stringify(result), /account|subject|prompt|session|title|file|tool|plugin|content/i)
+
+  for (const payload of [
+    { timezone: 'UTC+8', start_date: '2024-02-29', end_date: '2024-03-01' },
+    { timezone: 'UTC', start_date: '2023-01-01', end_date: '2024-01-02' },
+  ]) {
+    assert.equal((await handler('identity.usage.activity', payload)).error.code, 'bad-request')
+  }
+  assert.equal(requests.length, 1)
+
+  unavailable = true
+  assert.deepEqual(await handler('identity.usage.activity', {
+    timezone: 'Asia/Shanghai', start_date: '2024-02-29', end_date: '2024-03-01',
+  }), {
+    ok: false,
+    error: {
+      code: 'unavailable',
+      message: 'Token 使用数据暂时不可用，请稍后重试。',
+      details: { reason: 'usage-service-unavailable' },
+    },
+  })
+})
+
+test('image input contract trusts exact model metadata and preserves native attachments unless text-only is confirmed', async () => {
+  const { modelImageInputContract } = await loadModelPolicySource()
+  const durable = Object.freeze({
+    type: 'image',
+    attachment: Object.freeze({ attachmentId: 'att-1', mediaType: 'image/png', bytes: 3 }),
+  })
+  const before = structuredClone(durable)
+  assert.deepEqual(modelImageInputContract({
+    provider: 'enterprise', id: 'plain-name', inputModalities: ['text', 'image'],
+  }, 'enterprise', 'plain-name'), {
+    schema_version: 1,
+    capability: 'image-capable',
+    request_boundary: 'preserve-native',
+  })
+  assert.deepEqual(modelImageInputContract({
+    provider: 'enterprise', id: 'vision-in-name', inputModalities: ['text'],
+  }, 'enterprise', 'vision-in-name'), {
+    schema_version: 1,
+    capability: 'text-only',
+    request_boundary: 'convert-at-request-boundary',
+  })
+  for (const metadata of [
+    { provider: 'enterprise', id: 'unknown' },
+    { provider: 'other', id: 'unknown', inputModalities: ['text'] },
+    { provider: 'enterprise', id: 'unknown', inputModalities: ['text', 'audio'] },
+  ]) {
+    assert.deepEqual(modelImageInputContract(metadata, 'enterprise', 'unknown'), {
+      schema_version: 1,
+      capability: 'unknown',
+      request_boundary: 'preserve-native',
+    })
+  }
+  assert.deepEqual(durable, before, 'capability resolution must never rewrite durable image blocks')
+})
+
 test('identity credential generation fences a late runtime projection without permanently dropping models', async () => {
   const { createService } = await loadModelPolicySource()
   const credentials = new Map()
@@ -517,6 +651,7 @@ test('identity credential generation fences a late runtime projection without pe
       upstreamApiKey: 'runtime-search-key-redacted-for-test',
     },
   }
+  let runtimeOffline = false
   const ctx = {
     emateIdentity: {
       state: async () => ({
@@ -524,7 +659,10 @@ test('identity credential generation fences a late runtime projection without pe
         workspace_unlocked: true,
         account_subject: policy.account_subject,
       }),
-      modelRuntimePolicy: async () => structuredClone(runtime),
+      modelRuntimePolicy: async () => {
+        if (runtimeOffline) throw new Error('simulated offline runtime policy')
+        return structuredClone(runtime)
+      },
       localAccountSubject: () => policy.account_subject,
     },
     credentials: {
@@ -548,6 +686,13 @@ test('identity credential generation fences a late runtime projection without pe
         settings.set(name, structuredClone(value))
         settingRevisions.set(name, revision + 1)
       },
+    },
+    llm: {
+      resolveModelInfo: async (provider, model) => ({
+        provider,
+        id: model,
+        inputModalities: ['text', 'image'],
+      }),
     },
     on: (event, handler) => {
       handlers.set(event, handler)
@@ -580,4 +725,33 @@ test('identity credential generation fences a late runtime projection without pe
   assert.equal((await service.refresh({ force: true })).revision, 1)
   assert.equal(credentials.get('E_MATE_MODEL_KEY_GPT'), runtime.models[0].upstreamApiKey)
   assert.equal(credentials.get('E_MATE_SEARCH_KEY_DEEPSEEK'), runtime.searchCredentialGrant.upstreamApiKey)
+  assert.deepEqual(settings.get('llm-pi-ai').providers['e-mate-enterprise'].models[0].input, ['text', 'image'])
+  assert.deepEqual(await service.imageInputContract('e-mate-enterprise', 'gpt-5.6-luna'), {
+    schema_version: 1,
+    capability: 'image-capable',
+    request_boundary: 'preserve-native',
+  })
+
+  runtime.policy.revision = 2
+  runtime.searchCredentialGrant = {
+    schemaVersion: 1,
+    status: 'denied',
+    purpose: 'web-search',
+    provider: 'deepseek-official',
+    credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+  }
+  await service.refresh({ force: true })
+  assert.equal(credentials.has('E_MATE_SEARCH_KEY_DEEPSEEK'), false)
+  assert.equal(credentials.get('E_MATE_MODEL_KEY_GPT'), runtime.models[0].upstreamApiKey)
+  assert.equal(projectionRecords.get('active').search_status, 'denied')
+
+  runtime.policy.revision = 3
+  runtime.searchCredentialGrant.status = 'unavailable'
+  await service.refresh({ force: true })
+  assert.equal(credentials.has('E_MATE_SEARCH_KEY_DEEPSEEK'), false)
+  assert.equal(projectionRecords.get('active').search_status, 'unavailable')
+  runtimeOffline = true
+  assert.equal((await service.refresh({ force: true })).revision, 3)
+  assert.equal(credentials.has('E_MATE_SEARCH_KEY_DEEPSEEK'), false)
+  assert.equal(credentials.get('E_MATE_MODEL_KEY_GPT'), runtime.models[0].upstreamApiKey)
 })
