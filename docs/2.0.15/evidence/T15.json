@@ -163,7 +163,7 @@
     },
     {
       "command": "node scripts/component-release.mjs inventory",
-      "result": "EXPECTED_STRICT_FAILURE_D006_ONLY: desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union; the independent real emitted-import verifier passed first, and inventory reported no additional error"
+      "result": "EXPECTED_STRICT_FAILURE_D006: upstream/deepseek-harness: Git submodule commit does not match the Base contract; desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union"
     },
     {
       "command": "node scripts/smoke/run.mjs --layer component --case CP-03 --extension docs/2.0.15/evidence/T15.json --require-complete",
@@ -176,10 +176,13 @@
   ],
   "d006": {
     "status": "OPEN_STRICT_T18_BLOCKER_PRESERVED",
-    "failure": "runtime imports must equal the component-declared Base ABI union",
+    "failures": [
+      "upstream/deepseek-harness: Git submodule commit does not match the Base contract",
+      "desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union"
+    ],
     "base_contract_or_validator_modified": false,
     "bypass_added": false,
-    "owner": "T18 new Base identity/rebind"
+    "owner": "T18 successor Base identity and all retained component rebind"
   },
   "consultation_gate": {
     "decision": "D009",
@@ -204,7 +207,7 @@
     "T18 target-specific CPython 3.12 wheel ABI/hash/lazy-first-use/OCR positives and missing-wheel/wrong-arch negatives",
     "T18 installed macOS and Windows native paste/drop/upload five-PNG acceptance and visible UI readback",
     "T18 candidate, installed-byte and public-production receipts",
-    "D006 new Base identity and rebind"
+    "D006 T18 successor Base must bind Harness 2ca0b68b420ba11a80fc5fac800f889008cd42af and the final retained-component ABI union"
   ],
   "installed_receipts": [],
   "candidate_created": false,
