@@ -3142,3 +3142,12 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: `docs/2.0.15/evidence/T15.json` 诚实记录 source/component 层。`component-release inventory` 当前精确返回 D006 的两条严格消息：Harness gitlink 未被 v7 绑定，以及 v7 runtime imports 不等于 retained-component union；T18 successor Base 必须同时关闭二者。`2ca0b68b42…` 已通过本地对象同步到 release 工作树，但当前没有 advertised `origin/*` ref 包含它，因此这不是干净外部 checkout 回执。
 - Remaining blockers: T18 必须先证明全新 checkout 可获取精确 Harness gitlink；complete Profile app-directory、目标 CPython 3.12 wheel/runtime、双平台 installed paste/drop/upload、macOS TCC、真实 connector/account、candidate/public receipts 均仍 OPEN；D006 仍是 RC blocker。
 - Next exact action: 先完成 T11 D012 semantic frame host，再放行 T16；T13 只在 T11/T15/T16 handoff 后创建，T18 最后生成 successor Base 与正式 RC。
+
+## 2026-08-27 · 2.0.15 T11 原生 Composer Host 纠偏合入
+
+- Goal checkpoint: T11 在同一可见任务 `01a0436a-de49-7ad1-a576-b4198616aa5e` 完成第二种源码修复；总控拒绝了以 Home 文档扫描建立 Host 的第一种方案，只合入删除负尺寸补丁与最终原生 Owner 方案，release 提交为 `37da362`、`dbabee2`。
+- Frozen baseline / current Harness: pinned Harness 从 T15 `2ca0b68b420ba11a80fc5fac800f889008cd42af` 前进到本地后代 `820fee0df4f46b15d4cc07f56ccfcae43549d769`。`ConversationRoot` 的原生 `composerStack` 直接发出 `data-emate-composer-frame-host`；Home 不再扫描后写入/删除该属性，也不新增 wrapper、mover、Composer、Store 或输入生命周期。
+- Verification: 总控独立检查两个 root diff 与 upstream diff；native skeleton `18/18`、ui-conversation typecheck、Shell `15 files / 93 tests`、CP-11/CP-12 `3150 ms / 0 pending`、`git diff --check` 和 clean tree 均通过。重复失败会诊门禁 D009 未触发，因为第二种 native-owner 修复已通过同名验收。
+- Evidence ceiling: 这只证明 source/component 层。严格 inventory 仍精确保留 D006 两条 blocker；`820fee0df4…` 当前通过本地任务仓补齐到 release 工作树，但没有 advertised `origin/*` 可达证明，不能冒充 clean-checkout、installed、RC 或 released。
+- User input boundary: 用户已声明独立图片反馈工作簿为旧版作废材料；T17 不读取或映射其内容，只保留“已排除”的来源身份回执，并从唯一有效功能反馈导出重新生成 backlog。
+- Next exact action: 同步并恢复原 T16 可见任务；并行恢复 T17，仅使用有效功能反馈导出。T16 合入后再创建 T13。

@@ -24,7 +24,7 @@ Each ticket writes only `docs/2.0.15/evidence/Txx.json`. Mock/fixture evidence m
 
 ### D006 — All stale v7 bindings require a new Base contract identity
 
-`@deepseek-ai/dsh-launch-environment` remains in the immutable v7 Base contract but no retained component imports it after T04. T15 also moves the pinned local Harness gitlink to `2ca0b68b420ba11a80fc5fac800f889008cd42af` for the sole registration-bound `llm/wire` seam, while v7 honestly remains bound to its old Harness. Do not weaken either validator or silently mutate v7. T18 must create an honestly versioned successor Base contract that binds the final Harness and retained-component ABI union, then rebind every retained component before RC admission; until then both strict inventory messages are one D006 release blocker, not T04/T15 regressions.
+`@deepseek-ai/dsh-launch-environment` remains in the immutable v7 Base contract but no retained component imports it after T04. T15 moved the pinned local Harness gitlink to `2ca0b68b420ba11a80fc5fac800f889008cd42af` for the sole registration-bound `llm/wire` seam, and T11 advanced its native Composer-owner descendant to the final local gitlink `820fee0df4f46b15d4cc07f56ccfcae43549d769`; v7 honestly remains bound to its old Harness. Do not weaken either validator or silently mutate v7. T18 must create an honestly versioned successor Base contract that binds the final Harness and retained-component ABI union, then rebind every retained component before RC admission; until then both strict inventory messages are one D006 release blocker, not T04/T11/T15 regressions.
 
 ### D007 — Incremental issue work reuses current native owners
 
@@ -57,6 +57,8 @@ The repair must remove the negative-size contract and expose the semantic host w
 ### D013 — The native Composer owner emits the semantic frame host
 
 T11 corrective `103833c…` is not integration-ready: it derives the frame host by reusing Home's document query and mutating the found node, so the attribute is still a scan-owned projection rather than the real native boundary required by the target contract. T11 receives an exact second-source lease on `upstream/deepseek-harness/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.tsx`, its narrow `packages/client/ui-conversation/tests/skeleton.client.spec.tsx` assertion, and the root `upstream/deepseek-harness` gitlink. The new Harness commit must descend from T15 `2ca0b68b420ba11a80fc5fac800f889008cd42af`; the native `composerStack` itself emits `data-emate-composer-frame-host`, while T11 removes its attribute mutation and Glass Composer only consumes the stable boundary. Do not add another wrapper, query, MutationObserver, DOM mover, slot, composer or input lifecycle. T18 binds the resulting Harness commit in the successor Base.
+
+The accepted second repair is local Harness `820fee0df4f46b15d4cc07f56ccfcae43549d769`, merged at root commits `37da362` and `dbabee2`. Independent checks prove the native skeleton owner, full Shell suite and CP-11/CP-12 with zero pending. Its advertised-remote reachability and successor Base binding remain T18 gates rather than being inferred from this local integration.
 
 ## Exclusive static scopes
 
