@@ -30,8 +30,9 @@ import { ComposerConnectors } from './composer-connectors.tsx'
 import { HomeProjection } from './home.tsx'
 import { HeaderControls } from './header-controls.tsx'
 import { IdentityGate } from './identity.tsx'
-import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImagesDefinition } from './image-gallery.tsx'
+import { ToolImageGallery, toolImagesDefinition } from './image-gallery.tsx'
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
+import { registerMessageModeSettings } from './message-mode-settings.tsx'
 import { registerScheduleTrigger } from './schedules-page.tsx'
 import { isGeneralWorkspace, SidebarRoot } from './sidebar.tsx'
 import { SessionRouteProjection } from './session-route.tsx'
@@ -46,7 +47,7 @@ import { ThinkingStatusBranding } from './thinking-status.tsx'
 
 export const inject = [
   'slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'conversationEvents', 'theme',
-  'sessionLogDownload', 'inputTriggers',
+  'sessionLogDownload', 'inputTriggers', 'remote', 'settingsScope',
 ]
 
 export function registerSessionShare(ctx: any): void {
@@ -345,7 +346,8 @@ export async function prepareSchedulePromptFromRoute(
 }
 
 export function apply(ctx: any): void {
-  registerActivityFold(ctx)
+  const messageMode = registerMessageModeSettings(ctx)
+  registerActivityFold(ctx, messageMode)
   registerComputerUseTrigger(ctx)
   registerScheduleTrigger(ctx)
   registerManagedPresetSurfaces(ctx)
@@ -372,11 +374,6 @@ export function apply(ctx: any): void {
     id: 'e-mate-thinking-status',
     order: -190,
   }, ThinkingStatusBranding))
-  ctx.conversationEvents.register(imageDisclosureDefinition)
-  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
-    name: 'conversation.chat.node',
-    key: 'e-mate-image-disclosure',
-  }, ImageDisclosure))
   ctx.conversationEvents.register(toolImagesDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',

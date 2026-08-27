@@ -14,6 +14,10 @@
   display: none;
 }
 
+.results {
+  min-width: 0;
+}
+
 .names {
   display: flex;
   flex-wrap: wrap;
@@ -32,6 +36,14 @@
   background: var(--dsw-alias-interactive-bg-hover);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.names > span[data-status='review-required'] {
+  color: var(--dsw-alias-state-warning-primary, #9a6700);
+}
+
+.names > span[data-status='failed'] {
+  color: var(--dsw-alias-state-error-primary, #c23b32);
 }
 
 :global([data-emate-image-gallery][hidden]) {
