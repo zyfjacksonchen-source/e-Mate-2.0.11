@@ -170,6 +170,7 @@
   margin-bottom: 8px;
 }
 
+.searchAction,
 .scheduleAction,
 .primaryActions :global(button[aria-label='能力中心']) {
   width: calc(100% - 16px);
@@ -187,6 +188,8 @@
   cursor: pointer;
 }
 
+.searchAction:hover,
+.searchAction:focus-visible,
 .scheduleAction:hover,
 .scheduleAction:focus-visible,
 .scheduleAction[aria-current='page'] {
@@ -488,70 +491,6 @@
   display: none !important;
 }
 
-.utilities {
-  min-height: 36px;
-  padding: 2px 6px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.utilities > button,
-.footer .utilities :global(button[data-emate-settings-trigger]) {
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
-  min-height: 32px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  display: inline-grid;
-  place-items: center;
-  color: var(--emate-ink);
-  background: transparent;
-  cursor: pointer;
-}
-
-.utilities > button:hover,
-.utilities > button:focus-visible,
-.footer .utilities :global(button[data-emate-settings-trigger]:hover),
-.footer .utilities :global(button[data-emate-settings-trigger]:focus-visible) {
-  border-color: var(--emate-rule);
-  background: var(--emate-hover);
-}
-
-.runtimeStatus {
-  width: 8px;
-  height: 8px;
-  margin: 0 8px;
-  border-radius: 999px;
-  background: var(--emate-brand);
-}
-
-.footer :global(button[data-emate-settings-trigger]) {
-  width: 100%;
-  min-height: 32px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--emate-ink);
-  background: transparent;
-  font: inherit;
-  font-size: 13px;
-  line-height: 20px;
-  cursor: pointer;
-}
-
-@media (hover: hover) {
-  .footer :global(button[data-emate-settings-trigger]:hover) {
-    border-color: var(--emate-rule);
-    background: var(--emate-hover);
-  }
-}
-
 .footer > :global(button),
 .footer > :global(div) {
   flex: none;
@@ -711,20 +650,29 @@
   justify-content: center;
 }
 
-.collapsed .primaryActions,
 .collapsed .taskNav {
   display: none;
+}
+
+.collapsed .primaryActions {
+  width: 36px;
+  margin-top: 4px;
+}
+
+.collapsed .searchAction,
+.collapsed .scheduleAction,
+.collapsed .primaryActions :global(button[aria-label='能力中心']) {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  margin: 0;
+  padding: 0;
+  justify-content: center;
 }
 
 .collapsed .footer {
   margin-top: auto;
   padding: 0;
-}
-
-.collapsed .utilities {
-  justify-content: center;
-  flex-direction: column;
-  padding-bottom: 8px;
 }
 
 @media (max-width: 767px) {

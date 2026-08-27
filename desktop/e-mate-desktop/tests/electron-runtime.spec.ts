@@ -128,8 +128,13 @@ const electron = vi.hoisted(() => {
     copyImageAt: vi.fn(),
     send: vi.fn(),
   }
-  const ipcMain = { on: vi.fn(), off: vi.fn() }
-  const nativeTheme = { themeSource: 'system' }
+  const ipcMain = { on: vi.fn(), off: vi.fn(), handle: vi.fn(), removeHandler: vi.fn() }
+  const nativeTheme = {
+    themeSource: 'system',
+    shouldUseDarkColors: false,
+    on: vi.fn(),
+    off: vi.fn(),
+  }
   const systemPreferences = {
     isTrustedAccessibilityClient: vi.fn(() => false),
   }
@@ -157,6 +162,7 @@ const electron = vi.hoisted(() => {
     readonly destroy = vi.fn()
     readonly loadURL = loadURL
     readonly removeMenu = vi.fn()
+    readonly setTitleBarOverlay = vi.fn()
   }
 
   class Tray {
@@ -302,6 +308,7 @@ describe('Electron compatibility runtime', () => {
     electron.shell.openPath.mockResolvedValue('')
     electron.systemPreferences.isTrustedAccessibilityClient.mockReturnValue(false)
     electron.nativeTheme.themeSource = 'system'
+    electron.nativeTheme.shouldUseDarkColors = false
   })
 
   afterEach(() => {
@@ -428,15 +435,19 @@ describe('Electron compatibility runtime', () => {
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
     const cancel = vi.fn(() => true)
+    const runInteractiveUpdate = vi.fn(async () => {})
     runtime.updates.publishState({ stage: 'checking', updateKind: 'base' })
     runtime.updates.setCancelHandler(cancel)
+    runtime.updates.setInteractiveUpdateHandler(runInteractiveUpdate)
     const release = runtime.schedule(spec)
 
     await runtime.mountScheduled()
     const read = electron.ipcMain.on.mock.calls.find(([channel]) => channel === 'emate:desktop-update-state-read')?.[1]
     const requestCancel = electron.ipcMain.on.mock.calls.find(([channel]) => channel === 'emate:desktop-update-cancel')?.[1]
+    const requestUpdate = electron.ipcMain.handle.mock.calls.find(([channel]) => channel === 'emate:desktop-update-run-interactive')?.[1]
     expect(read).toEqual(expect.any(Function))
     expect(requestCancel).toEqual(expect.any(Function))
+    expect(requestUpdate).toEqual(expect.any(Function))
     const readEvent = { sender: electron.webContents, returnValue: undefined as unknown }
     read(readEvent)
     expect(readEvent.returnValue).toEqual({ stage: 'checking', updateKind: 'base' })
@@ -450,10 +461,26 @@ describe('Electron compatibility runtime', () => {
     requestCancel(cancelEvent)
     expect(cancelEvent.returnValue).toBe(true)
     expect(cancel).toHaveBeenCalledOnce()
+    await expect(requestUpdate({ sender: electron.webContents })).resolves.toBeUndefined()
+    expect(runInteractiveUpdate).toHaveBeenCalledOnce()
+    await expect(requestUpdate({ sender: {} })).rejects.toThrow('update request did not originate from owning Renderer')
 
     await release()
     expect(electron.ipcMain.off).toHaveBeenCalledWith('emate:desktop-update-state-read', read)
     expect(electron.ipcMain.off).toHaveBeenCalledWith('emate:desktop-update-cancel', requestCancel)
+    expect(electron.ipcMain.removeHandler).toHaveBeenCalledWith('emate:desktop-update-run-interactive')
+  })
+
+  it('removes the Renderer update carrier when window mounting fails', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    electron.loadURL.mockRejectedValueOnce(new Error('renderer unavailable'))
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const release = runtime.schedule(spec)
+
+    await expect(runtime.mountScheduled()).rejects.toThrow('renderer unavailable')
+    expect(electron.ipcMain.removeHandler).toHaveBeenCalledWith('emate:desktop-update-run-interactive')
+    await expect(release()).rejects.toThrow('renderer unavailable')
   })
 
   it('keeps the compatibility frame synchronized with the e-Mate theme', async () => {
@@ -1431,6 +1458,31 @@ describe('Electron compatibility runtime', () => {
     expect(electron.nativeTheme.themeSource).toBe('light')
     runtime.setThemeSource('dark')
     expect(electron.nativeTheme.themeSource).toBe('light')
+  })
+
+  it('keeps the native Windows caption symbols legible across light, dark, and system changes', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    electron.nativeTheme.shouldUseDarkColors = true
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const release = runtime.schedule({ ...spec, mode: 'advanced', readThemeSource: () => 'system' })
+
+    await runtime.mountScheduled()
+    expect((electron.browserWindowOptions[0] as any).titleBarOverlay.symbolColor).toBe('#f5f5f5')
+    electron.nativeTheme.shouldUseDarkColors = false
+    runtime.setThemeSource('light')
+    expect(electron.browserWindows[0]?.setTitleBarOverlay).toHaveBeenLastCalledWith(expect.objectContaining({
+      symbolColor: '#2f3337',
+    }))
+    electron.nativeTheme.shouldUseDarkColors = true
+    const updated = electron.nativeTheme.on.mock.calls.find(([event]) => event === 'updated')?.[1]
+    expect(updated).toEqual(expect.any(Function))
+    updated()
+    expect(electron.browserWindows[0]?.setTitleBarOverlay).toHaveBeenLastCalledWith(expect.objectContaining({
+      symbolColor: '#f5f5f5',
+    }))
+    await release()
+    expect(electron.nativeTheme.off).toHaveBeenCalledWith('updated', updated)
   })
 
   it('restores the preceding native appearance when advanced loading fails', async () => {

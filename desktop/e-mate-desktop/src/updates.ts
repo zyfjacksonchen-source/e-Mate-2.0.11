@@ -97,6 +97,7 @@ export function apply(ctx: Context, config: Config): void {
     publishState?: (state: DesktopUpdateState) => void
     readPublishedState?: () => DesktopUpdateState | undefined
     setCancelHandler?: (handler: (() => boolean) | undefined) => void
+    setInteractiveUpdateHandler?: (handler: (() => Promise<void>) | undefined) => void
   }
   const profileAdapter = adapter.profile
   let interactiveUpdate: (() => Promise<InteractiveUpdateResult>) | undefined
@@ -598,6 +599,7 @@ export function apply(ctx: Context, config: Config): void {
       return task
     }
     interactiveUpdate = runManualCheck
+    presentationAdapter.setInteractiveUpdateHandler?.(async () => { await runManualCheck() })
 
     const runBackgroundCheck = async (): Promise<void> => {
       if (inFlight !== undefined || profileInFlight !== undefined || disposed) return
@@ -665,6 +667,7 @@ export function apply(ctx: Context, config: Config): void {
       subscribeUpdateState = () => () => {}
       cancelInteractiveUpdate = () => false
       presentationAdapter.setCancelHandler?.(undefined)
+      presentationAdapter.setInteractiveUpdateHandler?.(undefined)
       registration.dispose()
       // Native dialogs are not cancellable. Await only file state and the abortable version request.
       const pending: Promise<unknown>[] = [stateReady]

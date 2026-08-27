@@ -168,6 +168,7 @@ interface Harness {
   readonly refresh: ReturnType<typeof vi.fn>
   readonly registrationDispose: ReturnType<typeof vi.fn>
   runInteractiveUpdate(): Promise<InteractiveUpdateResult>
+  runRendererUpdate(): Promise<void>
   getUpdateState(): unknown
   subscribeUpdateState(listener: (state: any) => void): () => void
   cancelInteractiveUpdate(): boolean
@@ -202,6 +203,7 @@ async function createHarness(options: {
   const downloadAndOpen = vi.fn(options.downloadAndOpen ?? (async () => {}))
   let tray: DesktopTrayItem | undefined
   let disposer: (() => void | Promise<void>) | undefined
+  let rendererUpdate: (() => Promise<void>) | undefined
   const runtime = {
     updates: {
       isPackaged: options.packaged ?? true,
@@ -216,6 +218,7 @@ async function createHarness(options: {
       confirmDownload,
       showManualCheckResult,
       downloadAndOpen,
+      setInteractiveUpdateHandler: (handler: (() => Promise<void>) | undefined) => { rendererUpdate = handler },
       notify: options.notify ?? ((notification: DesktopNotification) => { notifications.push(notification) }),
     },
     registerTrayItem: (item: DesktopTrayItem) => {
@@ -246,6 +249,10 @@ async function createHarness(options: {
     refresh,
     registrationDispose,
     runInteractiveUpdate: () => ctx.desktopUpdates.runInteractiveUpdate(),
+    runRendererUpdate: async () => {
+      if (rendererUpdate === undefined) throw new Error('Renderer updater is not registered.')
+      await rendererUpdate()
+    },
     getUpdateState: () => ctx.desktopUpdates.getState(),
     subscribeUpdateState: listener => ctx.desktopUpdates.subscribe(listener),
     cancelInteractiveUpdate: () => ctx.desktopUpdates.cancelInteractiveUpdate(),
@@ -258,6 +265,26 @@ afterEach(() => {
 })
 
 describe('desktop update Host plugin', () => {
+  it('routes Renderer checks through the existing manualTask fence and removes the carrier on dispose', async () => {
+    let finish!: () => void
+    const checked = new Promise<Response>(resolve => { finish = () => { resolve(versionResponse('2.0.0')) } })
+    const request = vi.fn(async () => await checked)
+    const harness = await createHarness({ packaged: false, request })
+
+    const renderer = harness.runRendererUpdate()
+    const agent = harness.runInteractiveUpdate()
+    await vi.waitFor(() => { expect(request).toHaveBeenCalledOnce() })
+    finish()
+    await expect(Promise.all([renderer, agent])).resolves.toEqual([
+      undefined,
+      { status: 'up-to-date', installedVersion: '2.0.0', latestVersion: '2.0.0' },
+    ])
+    expect(harness.showManualCheckResult).toHaveBeenCalledOnce()
+
+    await harness.dispose()
+    await expect(harness.runRendererUpdate()).rejects.toThrow('Renderer updater is not registered.')
+  })
+
   it('uses the signed component updater first for a natural-language/manual request', async () => {
     const release = {
       status: 'update-available',

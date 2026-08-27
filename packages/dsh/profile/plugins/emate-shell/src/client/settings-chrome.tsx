@@ -1,4 +1,6 @@
 import { useEffect, useRef, type ComponentType } from 'react'
+import type { DesktopUpdateBridge } from '../../../../../../../desktop/e-mate-desktop/src/update-presentation.ts'
+import { UpdateControl } from './header-controls.tsx'
 import css from './settings-chrome.module.css'
 
 const SETTINGS_PATH = '/settings'
@@ -114,7 +116,10 @@ export function SettingsCloseLabel() {
   return <span data-emate-settings-close="">关闭设置</span>
 }
 
-export function SettingsChrome() {
+export function SettingsChrome({ updates, UpdateIcon }: {
+  updates?: DesktopUpdateBridge
+  UpdateIcon?: ComponentType<{ size?: number }>
+} = {}) {
   const heading = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const dialog = heading.current?.closest('[role="dialog"]')
@@ -129,8 +134,12 @@ export function SettingsChrome() {
   }, [])
   return (
     <div ref={heading} className={css.heading} data-emate-settings-header="" data-emate-settings-content="">
-      <h1>设置</h1>
-      <p>管理个人资料、常规设置、知识和记忆。</p>
+      <div><h1>设置</h1>
+        <p>管理个人资料、常规设置、知识和记忆。</p>
+      </div>
+      {updates !== undefined && UpdateIcon !== undefined
+        ? <UpdateControl updates={updates} UpdateIcon={UpdateIcon} compact={false} />
+        : null}
     </div>
   )
 }

@@ -4,8 +4,10 @@ import { readFileSync } from 'node:fs'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { WINDOWS_CAPTION_CONTROLS_WIDTH } from '../../../../../../desktop/e-mate-desktop/src/window-chrome.ts'
+import type { DesktopUpdateBridge, DesktopUpdateState } from '../../../../../../desktop/e-mate-desktop/src/update-presentation.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HeaderControls } from '../src/client/header-controls.tsx'
+import { SettingsChrome } from '../src/client/settings-chrome.tsx'
 import {
   registerHeaderControls,
   registerManagedPresetSurfaces,
@@ -13,6 +15,21 @@ import {
 } from '../src/client/index.ts'
 
 const Icon = () => <svg />
+
+function updateBridge(initial?: DesktopUpdateState) {
+  let state = initial
+  const listeners = new Set<(state: DesktopUpdateState) => void>()
+  const bridge: DesktopUpdateBridge = {
+    runInteractiveUpdate: vi.fn(async () => {}),
+    getState: () => state,
+    subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
+    cancel: vi.fn(() => true),
+  }
+  return {
+    bridge,
+    publish(next: DesktopUpdateState) { state = next; listeners.forEach(listener => { listener(next) }) },
+  }
+}
 
 afterEach(() => {
   cleanup()
@@ -24,33 +41,108 @@ describe('desktop header controls', () => {
   it('renders status, theme, and native settings as one root-frame control', () => {
     const toggleTheme = vi.fn()
     const openSettings = vi.fn()
+    const updates = updateBridge()
+    history.replaceState(null, '', '/chat/session-1')
 
     render(<HeaderControls
       getThemeScheme={() => 'dark'}
       subscribeTheme={() => () => {}}
       toggleTheme={toggleTheme}
       openSettings={openSettings}
-      useSessions={selector => selector({ current: 'blank-session' })}
+      useSessions={selector => selector({
+        current: 'session-1', ids: ['session-1'],
+        byId: { 'session-1': { id: 'session-1', blank: false } },
+        subagentsByParent: {}, currentAddress: undefined,
+      } as never)}
+      updates={updates.bridge}
       callShare={vi.fn()}
       useSessionLogDownload={selector => selector({ bySession: {} })}
       requestDownload={vi.fn()}
       dismissDownload={vi.fn()}
       LightIcon={Icon}
       DarkIcon={Icon}
+      UpdateIcon={Icon}
       SettingsIcon={Icon}
     />)
 
     const controls = screen.getByLabelText('应用工具')
     expect([...controls.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual([
       '分享当前任务',
+      '检查更新',
       '切换到明亮模式',
       '打开设置',
     ])
-    expect(screen.getByRole('status', { name: '运行时已连接' })).toBeTruthy()
+    expect([...controls.querySelectorAll('button')].every(button => button.title === button.getAttribute('aria-label'))).toBe(true)
+    expect(screen.queryByRole('status', { name: '运行时已连接' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '检查更新' }))
+    expect(updates.bridge.runInteractiveUpdate).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: '切换到明亮模式' }))
     expect(toggleTheme).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: '打开设置' }))
     expect(openSettings).toHaveBeenCalledOnce()
+  })
+
+  it('projects one updater state into Header and Settings with progress, cancellation, and trigger errors', async () => {
+    const updates = updateBridge()
+    render(<>
+      <HeaderControls
+        getThemeScheme={() => 'light'} subscribeTheme={() => () => {}} toggleTheme={() => {}} openSettings={() => {}}
+        useSessions={selector => selector({ current: undefined, ids: [], byId: {}, subagentsByParent: {}, currentAddress: undefined } as never)}
+        updates={updates.bridge}
+        callShare={vi.fn()} useSessionLogDownload={selector => selector({ bySession: {} })}
+        requestDownload={vi.fn()} dismissDownload={vi.fn()}
+        LightIcon={Icon} DarkIcon={Icon} UpdateIcon={Icon} SettingsIcon={Icon}
+      />
+      <SettingsChrome updates={updates.bridge} UpdateIcon={Icon} />
+    </>)
+
+    expect(screen.queryByRole('button', { name: '分享当前任务' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: '检查更新' })).toHaveLength(2)
+    act(() => { updates.publish({ stage: 'downloading', version: '2.0.15', bytes: 25, total: 100 }) })
+    expect(screen.getAllByRole('button', { name: '取消更新（25%）' })).toHaveLength(2)
+    fireEvent.click(screen.getAllByRole('button', { name: '取消更新（25%）' })[0]!)
+    expect(updates.bridge.cancel).toHaveBeenCalledOnce()
+    act(() => { updates.publish({ stage: 'staging', version: '2.0.15' }) })
+    expect(screen.getAllByRole('button', { name: '准备更新中' }).every(button => (
+      button as HTMLButtonElement
+    ).disabled && button.getAttribute('aria-busy') === 'true')).toBe(true)
+
+    const failed = updateBridge()
+    vi.mocked(failed.bridge.runInteractiveUpdate).mockRejectedValueOnce(new Error('更新服务不可用'))
+    cleanup()
+    render(<HeaderControls
+      getThemeScheme={() => 'light'} subscribeTheme={() => () => {}} toggleTheme={() => {}} openSettings={() => {}}
+      useSessions={selector => selector({ current: undefined, ids: [], byId: {}, subagentsByParent: {}, currentAddress: undefined } as never)}
+      updates={failed.bridge}
+      callShare={vi.fn()} useSessionLogDownload={selector => selector({ bySession: {} })}
+      requestDownload={vi.fn()} dismissDownload={vi.fn()}
+      LightIcon={Icon} DarkIcon={Icon} UpdateIcon={Icon} SettingsIcon={Icon}
+    />)
+    fireEvent.click(screen.getByRole('button', { name: '检查更新' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('更新服务不可用')
+  })
+
+  it('offers Share only for the nonblank top-level Session owned by the current route', () => {
+    const props = {
+      getThemeScheme: () => 'light' as const, subscribeTheme: () => () => {}, toggleTheme: () => {}, openSettings: () => {},
+      callShare: vi.fn(), useSessionLogDownload: (selector: any) => selector({ bySession: {} }),
+      requestDownload: vi.fn(), dismissDownload: vi.fn(),
+      LightIcon: Icon, DarkIcon: Icon, UpdateIcon: Icon, SettingsIcon: Icon,
+    }
+    const state = {
+      current: 'session-1', ids: ['session-1'], byId: { 'session-1': { id: 'session-1', blank: false } },
+      subagentsByParent: {}, currentAddress: undefined,
+    }
+    history.replaceState(null, '', '/schedules')
+    const view = render(<HeaderControls {...props} useSessions={selector => selector(state as never)} />)
+    expect(view.queryByRole('button', { name: '分享当前任务' })).toBeNull()
+    history.replaceState(null, '', '/chat/session-1')
+    fireEvent.popState(window)
+    expect(view.getByRole('button', { name: '分享当前任务' })).not.toBeNull()
+    view.rerender(<HeaderControls {...props} useSessions={selector => selector({
+      ...state, byId: { 'session-1': { id: 'session-1', blank: true } },
+    } as never)} />)
+    expect(view.queryByRole('button', { name: '分享当前任务' })).toBeNull()
   })
 
   it('keeps share inside the one aligned root-frame group without positional offsets', () => {
@@ -59,10 +151,11 @@ describe('desktop header controls', () => {
     const settings = readFileSync('src/client/settings-chrome.module.css', 'utf8')
     expect(controls).toMatch(/position:\s*absolute[\s\S]*top:\s*12px[\s\S]*right:\s*calc\(24px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)[\s\S]*display:\s*inline-flex[\s\S]*gap:\s*8px[\s\S]*height:\s*32px[\s\S]*-webkit-app-region:\s*no-drag/u)
     expect(controls).toMatch(/conversation\.session\.header[\s\S]*padding-right:\s*calc\(176px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
-    expect(controls).toMatch(/@media \(max-width:\s*720px\)[\s\S]*right:\s*calc\(12px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)[\s\S]*padding-right:\s*calc\(136px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)[\s\S]*\.runtimeStatus\s*\{\s*display:\s*none;/u)
-    expect(controls).toMatch(/data-dsh-desktop-platform='win32'[\s\S]*top:\s*0;[\s\S]*right:\s*var\(--dsh-desktop-caption-safe-width, 0px\);[\s\S]*gap:\s*0;[\s\S]*color:\s*var\(--dsh-desktop-caption-symbol-color, #7f858f\);/u)
+    expect(controls).toMatch(/@media \(max-width:\s*720px\)[\s\S]*right:\s*calc\(12px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)[\s\S]*padding-right:\s*calc\(176px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
+    expect(controls).toMatch(/data-dsh-desktop-platform='win32'[\s\S]*top:\s*0;[\s\S]*right:\s*var\(--dsh-desktop-caption-safe-width, 0px\);[\s\S]*gap:\s*0;[\s\S]*color:\s*var\(--dsh-desktop-caption-symbol-color, #2f3337\);/u)
     expect(controls).toMatch(/data-dsh-desktop-platform='win32'[\s\S]*width:\s*var\(--dsh-desktop-caption-button-width, 46px\);[\s\S]*min-width:\s*var\(--dsh-desktop-caption-button-width, 46px\);[\s\S]*border-radius:\s*0;/u)
     expect(controls).toMatch(/data-dsh-desktop-platform='win32'[\s\S]*button svg[\s\S]*width:\s*var\(--dsh-desktop-caption-symbol-size, 12px\);[\s\S]*height:\s*var\(--dsh-desktop-caption-symbol-size, 12px\);/u)
+    expect(controls).toMatch(/data-dsh-desktop-platform='win32'[\s\S]*padding-right:\s*calc\(208px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
     expect(controls).toMatch(/\.controls > button:focus-visible[\s\S]*outline:\s*2px solid[\s\S]*outline-offset:\s*2px/u)
     expect(controls).not.toMatch(/@media[\s\S]*\.controls > button\s*\{[^}]*display:\s*none/u)
     expect(settings).toMatch(/padding:\s*16px calc\(20px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\) 16px 20px !important/u)
@@ -83,14 +176,13 @@ describe('desktop header controls', () => {
     for (const scale of [1, 1.25, 1.5]) {
       const viewport = minimumWindowWidth / scale
       const compact = viewport <= 720
-      const statusWidth = compact ? 0 : 16
-      const groupWidth = 3 * 46 + statusWidth
+      const groupWidth = 4 * 46
       const captionLeft = viewport - WINDOWS_CAPTION_CONTROLS_WIDTH
       const groupRight = captionLeft
 
       expect(groupRight).toBe(captionLeft)
       expect(groupRight - groupWidth - 4).toBeGreaterThanOrEqual(0)
-      expect((compact ? 146 : 162) + WINDOWS_CAPTION_CONTROLS_WIDTH).toBeLessThan(viewport)
+      expect((compact ? 192 : 208) + WINDOWS_CAPTION_CONTROLS_WIDTH).toBeLessThan(viewport)
       expect(captionLeft - 20).toBeGreaterThan(44)
     }
   })
@@ -127,7 +219,7 @@ describe('desktop header controls', () => {
     fireEvent.click(view.getByRole('button', { name: '打开设置' }))
     expect(openSettings).toHaveBeenCalledOnce()
     expect(view.container.querySelector('[data-emate-header-controls]')).not.toBeNull()
-    expect((view.getByRole('button', { name: '分享当前任务' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(view.queryByRole('button', { name: '分享当前任务' })).toBeNull()
     await runtime.dispose()
   })
 

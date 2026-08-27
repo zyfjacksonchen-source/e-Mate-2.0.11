@@ -8,6 +8,18 @@ import {
 } from './desktop-bootstrap-contract.ts'
 import { WINDOWS_TITLEBAR_HEIGHT } from './window-chrome.ts'
 
+export const WINDOWS_CAPTION_SYMBOL_LIGHT = '#2f3337'
+export const WINDOWS_CAPTION_SYMBOL_DARK = '#f5f5f5'
+
+/** Keep native caption controls legible over the transparent Mica title bar. */
+export function windowsTitleBarOverlay(dark: boolean) {
+  return {
+    color: '#00000000',
+    symbolColor: dark ? WINDOWS_CAPTION_SYMBOL_DARK : WINDOWS_CAPTION_SYMBOL_LIGHT,
+    height: WINDOWS_TITLEBAR_HEIGHT,
+  }
+}
+
 function rendererBootstrapArgument(
   spec: DesktopShellSpec,
   platform: DesktopPlatform,
@@ -70,6 +82,7 @@ export function advancedWindowOptions(
   platform: DesktopPlatform,
   preload: string,
   bootstrap: DesktopRendererBootstrap,
+  dark = false,
 ): BrowserWindowConstructorOptions {
   if (spec.mode !== 'advanced') {
     throw new Error(`@e-mate/desktop: unsupported advanced window mode ${spec.mode}`)
@@ -107,11 +120,7 @@ export function advancedWindowOptions(
       ...options,
       autoHideMenuBar: true,
       titleBarStyle: 'hidden',
-      titleBarOverlay: {
-        color: '#00000000',
-        symbolColor: '#7f858f',
-        height: WINDOWS_TITLEBAR_HEIGHT,
-      },
+      titleBarOverlay: windowsTitleBarOverlay(dark),
       backgroundColor: '#00000000',
       backgroundMaterial: 'mica',
       hasShadow: true,
@@ -135,8 +144,9 @@ export function desktopWindowOptions(
   platform: DesktopPlatform,
   preload: string,
   bootstrap: DesktopRendererBootstrap,
+  dark = false,
 ): BrowserWindowConstructorOptions {
   return spec.mode === 'compatibility'
     ? compatibilityWindowOptions(spec, icon, platform, preload, bootstrap)
-    : advancedWindowOptions(spec, icon, platform, preload, bootstrap)
+    : advancedWindowOptions(spec, icon, platform, preload, bootstrap, dark)
 }

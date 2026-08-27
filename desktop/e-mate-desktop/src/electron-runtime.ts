@@ -54,13 +54,14 @@ import { downloadDesktopUpdate } from './update-download.ts'
 import type { UpdateCheckResult } from './update-checker.ts'
 import {
   DESKTOP_UPDATE_CANCEL,
+  DESKTOP_UPDATE_RUN_INTERACTIVE,
   DESKTOP_UPDATE_STATE_CHANGED,
   DESKTOP_UPDATE_STATE_READ,
   formatUpdateBytes,
   profileUpdateCapabilitySummary,
   type DesktopUpdateState,
 } from './update-presentation.ts'
-import { desktopWindowOptions } from './window-options.ts'
+import { desktopWindowOptions, windowsTitleBarOverlay } from './window-options.ts'
 import {
   admittedWindowsUpdateIdentity,
   scheduleWindowsUpdateInstallation,
@@ -173,6 +174,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     publishState(state: DesktopUpdateState): void
     readPublishedState(): DesktopUpdateState | undefined
     setCancelHandler(handler: (() => boolean) | undefined): void
+    setInteractiveUpdateHandler(handler: (() => Promise<void>) | undefined): void
   } = {
     get isPackaged() { return app.isPackaged },
     get canDownload() { return app.isPackaged && (process.platform === 'darwin' || process.platform === 'win32') },
@@ -193,6 +195,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     publishState: state => { this.publishUpdateState(state) },
     readPublishedState: () => this.updateState,
     setCancelHandler: handler => { this.cancelUpdate = handler },
+    setInteractiveUpdateHandler: handler => { this.interactiveUpdate = handler },
     notify: notification => { this.showNotification(notification) },
   }
 
@@ -216,6 +219,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private profileGeneration = 'bundled'
   private updateState: DesktopUpdateState | undefined
   private cancelUpdate: (() => boolean) | undefined
+  private interactiveUpdate: (() => Promise<void>) | undefined
 
   constructor(
     private readonly restart: () => Promise<void>,
@@ -501,6 +505,13 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   setThemeSource(source: DesktopThemeSource): void {
     if (this.scheduled !== undefined && this.window !== undefined) {
       nativeTheme.themeSource = source
+      this.syncWindowsTitleBarOverlay()
+    }
+  }
+
+  private syncWindowsTitleBarOverlay(): void {
+    if (this.platform === 'win32' && this.scheduled?.mode === 'advanced' && this.window !== undefined) {
+      this.window.setTitleBarOverlay(windowsTitleBarOverlay(nativeTheme.shouldUseDarkColors))
     }
   }
 
@@ -949,6 +960,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       this.platform,
       desktopPreloadPath(),
       bootstrap,
+      nativeTheme.shouldUseDarkColors,
     ))
     window.accessibleTitle = spec.windowTitle
     if (this.platform === 'win32') window.removeMenu()
@@ -960,8 +972,16 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     const cancelUpdate = (event: Electron.IpcMainEvent): void => {
       event.returnValue = event.sender === window.webContents ? this.cancelUpdate?.() === true : false
     }
+    const runInteractiveUpdate = async (event: Electron.IpcMainInvokeEvent): Promise<void> => {
+      if (event.sender !== window.webContents) {
+        throw new Error('@e-mate/desktop: update request did not originate from owning Renderer')
+      }
+      if (this.interactiveUpdate === undefined) throw new Error('@e-mate/desktop: updater is not ready')
+      await this.interactiveUpdate()
+    }
     ipcMain.on(DESKTOP_UPDATE_STATE_READ, readUpdateState)
     ipcMain.on(DESKTOP_UPDATE_CANCEL, cancelUpdate)
+    ipcMain.handle(DESKTOP_UPDATE_RUN_INTERACTIVE, runInteractiveUpdate)
 
     const show = (): void => { this.show() }
     const close = (event: Electron.Event): void => {
@@ -1010,8 +1030,10 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       }
       if (targetOrigin !== origin) event.preventDefault()
     }
+    const syncWindowsTitleBarOverlay = (): void => { this.syncWindowsTitleBarOverlay() }
 
     app.on('activate', show)
+    if (this.platform === 'win32' && spec.mode === 'advanced') nativeTheme.on('updated', syncWindowsTitleBarOverlay)
     window.on('close', close)
     window.on('page-title-updated', preserveBlankTitle)
     window.webContents.on('context-menu', showContextMenu)
@@ -1044,7 +1066,9 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     } catch (cause) {
       ipcMain.off(DESKTOP_UPDATE_STATE_READ, readUpdateState)
       ipcMain.off(DESKTOP_UPDATE_CANCEL, cancelUpdate)
+      ipcMain.removeHandler(DESKTOP_UPDATE_RUN_INTERACTIVE)
       app.off('activate', show)
+      nativeTheme.off('updated', syncWindowsTitleBarOverlay)
       window.off('page-title-updated', preserveBlankTitle)
       window.webContents.off('context-menu', showContextMenu)
       tray?.off('click', show)
@@ -1066,7 +1090,9 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       released = true
       ipcMain.off(DESKTOP_UPDATE_STATE_READ, readUpdateState)
       ipcMain.off(DESKTOP_UPDATE_CANCEL, cancelUpdate)
+      ipcMain.removeHandler(DESKTOP_UPDATE_RUN_INTERACTIVE)
       app.off('activate', show)
+      nativeTheme.off('updated', syncWindowsTitleBarOverlay)
       window.off('close', close)
       window.off('page-title-updated', preserveBlankTitle)
       window.webContents.off('context-menu', showContextMenu)

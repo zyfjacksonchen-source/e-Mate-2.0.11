@@ -1,6 +1,9 @@
 import { createElement, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
+import type {
+  DesktopUpdateBridge,
+  DesktopUpdateBridgeWindow,
+} from '../../../../../../../desktop/e-mate-desktop/src/update-presentation.ts'
 import {
   IconArchiveOutline20,
   IconChevronDownOutline14,
@@ -27,6 +30,7 @@ import { AccountControl, AccountSettings } from './account.tsx'
 import { registerActivityFold } from './activity-fold.tsx'
 import './chat-chrome.module.css'
 import { ComposerConnectors } from './composer-connectors.tsx'
+import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from './composer-mentions.ts'
 import { HomeProjection } from './home.tsx'
 import { HeaderControls } from './header-controls.tsx'
 import { IdentityGate } from './identity.tsx'
@@ -49,6 +53,9 @@ export const inject = [
   'slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'conversationEvents', 'theme',
   'sessionLogDownload', 'inputTriggers', 'remote', 'settingsScope',
 ]
+
+const desktopUpdateBridge = (): DesktopUpdateBridge | undefined =>
+  (window as DesktopUpdateBridgeWindow).__EMATE_DESKTOP_UPDATES__
 
 export function registerSessionShare(ctx: any): void {
   ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
@@ -78,38 +85,14 @@ export function registerHeaderControls(ctx: any): void {
       hooks: { sessionLogDownload: ctx.sessionLogDownload.store },
       requestDownload: (sessionId: string) => ctx.sessionLogDownload.download(sessionId),
       dismissDownload: (sessionId: string) => { ctx.sessionLogDownload.dismiss(sessionId) },
+      updates: desktopUpdateBridge(),
       callShare: (endpoint: string, payload: unknown) => ctx.connection.rpc.call('/emate.share', endpoint, payload),
       LightIcon: IconLightOutline16,
       DarkIcon: IconDarkOutline16,
+      UpdateIcon: IconRefreshOutline16,
       SettingsIcon: IconSettingsOutline16,
     }),
   }, HeaderControls))
-}
-
-export function registerComputerUseTrigger(ctx: any): void {
-  const source: InputTriggerSource = {
-    trigger: '@',
-    name: '功能',
-    order: -20,
-    candidates(_session, { query }) {
-      const isMac = /Mac/u.test(navigator.userAgent) || /Mac/u.test(navigator.platform)
-      return Promise.resolve(isMac && '电脑操控'.includes(query)
-        ? [{ name: '电脑操控', description: '显式指定使用 dsh-computer-use 操作当前电脑' }]
-        : [])
-    },
-    lexicon() { return ['电脑操控'] },
-    onPick() {
-      return { insert: { source: '功能', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' } }
-    },
-    codec: {
-      clipboardText: () => '@电脑操控',
-      serialize: (_ref, signal) => {
-        signal.throwIfAborted()
-        return Promise.resolve('@电脑操控')
-      },
-    },
-  }
-  ctx.effect(() => ctx.inputTriggers.registerSource(source), 'e-mate-shell: @电脑操控 source')
 }
 
 function SkipTargetOnboarding({ complete }: { complete: () => void }) {
@@ -350,6 +333,7 @@ export function apply(ctx: any): void {
   registerActivityFold(ctx, messageMode)
   registerComputerUseTrigger(ctx)
   registerScheduleTrigger(ctx)
+  registerMentionSources(ctx)
   registerManagedPresetSurfaces(ctx)
   registerRouteScopedConversationHeader(ctx)
   ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
@@ -391,9 +375,17 @@ export function apply(ctx: any): void {
     name: 'conversation.input.right',
     id: 'e-mate-connectors',
     order: 20,
-    inject: () => ({
+    inject: (sessionId: string) => ({
       LinkIcon: IconLinkOutline16,
-      callConnections: () => ctx.connection.rpc.call('/emate.mcpManage', 'active', {}),
+      openConnections: () => {
+        const route = '/capabilities?category=collaboration'
+        if (`${location.pathname}${location.search}` === route) return
+        history.pushState(null, '', route)
+        dispatchEvent(new PopStateEvent('popstate'))
+      },
+      openMentions: (selection: { start: number; end: number }) => {
+        openMentionMenu(ctx, sessionId, selection)
+      },
     }),
   }, ComposerConnectors))
   ctx.effect(
@@ -435,14 +427,6 @@ export function apply(ctx: any): void {
         },
         archiveSession: async (id: string) => { await ctx.workspaces.archiveSession(id) },
         toggleSidebar: () => { ctx.layout.toggleSidebar() },
-        getThemeScheme: () => ctx.theme.getTheme().active.colorScheme,
-        subscribeTheme: (listener: () => void) => ctx.on('theme/change', listener),
-        toggleTheme: () => {
-          const scheme = ctx.theme.getTheme().active.colorScheme
-          ctx.theme.setTheme(scheme === 'dark' ? 'light' : 'dark')
-        },
-        LightIcon: IconLightOutline16,
-        DarkIcon: IconDarkOutline16,
       }),
     }, SidebarRoot),
     'emate-shell: sidebar slot',
@@ -502,6 +486,10 @@ export function apply(ctx: any): void {
     name: 'settings.action',
     id: 'e-mate-settings-header',
     order: -100,
+    inject: () => ({
+      updates: desktopUpdateBridge(),
+      UpdateIcon: IconRefreshOutline16,
+    }),
   }, SettingsChrome))
   ctx.slots.inject('settings.trigger', () => ctx.slots.register({
     name: 'settings.trigger',

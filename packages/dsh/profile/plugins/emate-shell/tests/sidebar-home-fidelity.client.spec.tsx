@@ -381,7 +381,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       collapsed={false}
       width={248}
       renderSlot={(name) => name === 'sidebar.primary.action'
-        ? <button type="button">能力中心</button>
+        ? <button type="button" aria-label="能力中心">能力中心</button>
         : name === 'sidebar.settings' ? <div data-slot="sidebar.settings"><button type="button" aria-hidden="true" tabIndex={-1} data-emate-settings-trigger="">打开设置</button></div>
           : name === 'sidebar.footer.action' ? <button type="button">用户中心</button> : null}
       createPortal={createPortal}
@@ -412,6 +412,11 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(screen.getByText('2.0.13')).not.toBeNull()
     expect(screen.getByRole('button', { name: '新建任务' }).textContent).toContain('新任务')
     expect(screen.getByRole('button', { name: '新建任务' }).getAttribute('aria-current')).toBe('page')
+    const sidebar = screen.getByRole('complementary', { name: '任务导航' })
+    expect([...sidebar.querySelectorAll('button')]
+      .map(button => button.getAttribute('aria-label'))
+      .filter(label => ['新建任务', '搜索会话', '定时任务', '能力中心'].includes(label ?? '')))
+      .toEqual(['新建任务', '搜索会话', '定时任务', '能力中心'])
     fireEvent.click(screen.getByRole('button', { name: '搜索会话' }))
     expect(screen.getByRole('textbox', { name: '搜索会话' }).getAttribute('type')).toBe('text')
     expect(screen.getAllByRole('button', { name: '关闭搜索' })).toHaveLength(1)
@@ -422,6 +427,8 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(screen.queryByRole('button', { name: '打开设置' })).toBeNull()
     expect(document.querySelector('[data-emate-settings-trigger]')).not.toBeNull()
     expect(document.querySelector<HTMLElement>('[data-emate-settings-owner]')?.hidden).toBe(false)
+    expect(document.querySelector('[data-emate-sidebar-footer] [data-emate-settings-trigger]')).toBeNull()
+    expect(document.querySelector('[data-emate-sidebar-footer]')?.textContent).toContain('用户中心')
     expect(sidebarCss).toMatch(/\.settingsOwner\s+:global\(button\[data-emate-settings-trigger\]\)[\s\S]*display:\s*none/u)
     expect(screen.getByRole('region', { name: '项目' }).textContent).toContain('季度报告')
     expect(screen.getByRole('region', { name: '项目' }).textContent).not.toContain('通用会话')
@@ -851,8 +858,8 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource)\s*\(/u)
     expect(styles).toMatch(/:global\(\[data-slot='conversation'\] > div\[data-phase\]\)\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;/u)
     expect(styles).toContain('--dsw-alias-button-info-fill: var(--emate-color-brand);')
-    expect(styles).toMatch(/button:first-child > svg\) \{\s*display: none;/u)
-    expect(styles).toMatch(/button:first-child::before\) \{\s*content: '\/';/u)
+    expect(styles).toMatch(/button:first-child\) \{\s*display: none !important;/u)
+    expect(styles).not.toContain("content: '/'")
     expect(home).not.toMatch(/Runtime Scheduler|由 Runtime|从 Runtime/u)
     expect(home).not.toContain('任务来自 DSH rc.7 原生 Schedule 事件')
   })

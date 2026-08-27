@@ -6,6 +6,8 @@ import {
   advancedWindowOptions,
   compatibilityWindowOptions,
   desktopWindowOptions,
+  WINDOWS_CAPTION_SYMBOL_DARK,
+  WINDOWS_CAPTION_SYMBOL_LIGHT,
 } from '../src/window-options.ts'
 import { WINDOWS_TITLEBAR_HEIGHT } from '../src/window-chrome.ts'
 
@@ -125,7 +127,7 @@ describe('compatibility BrowserWindow options', () => {
       titleBarStyle: 'hidden',
       titleBarOverlay: {
         color: '#00000000',
-        symbolColor: '#7f858f',
+        symbolColor: WINDOWS_CAPTION_SYMBOL_LIGHT,
         height: WINDOWS_TITLEBAR_HEIGHT,
       },
       backgroundMaterial: 'mica',
@@ -133,6 +135,16 @@ describe('compatibility BrowserWindow options', () => {
       roundedCorners: true,
       thickFrame: true,
     }))
+    expect(advancedWindowOptions(
+      { ...spec, mode: 'advanced' },
+      {} as NativeImage,
+      'win32',
+      preload,
+      { ...bootstrap, mode: 'advanced', platform: 'win32' },
+      true,
+    ).titleBarOverlay).toEqual({
+      color: '#00000000', symbolColor: WINDOWS_CAPTION_SYMBOL_DARK, height: WINDOWS_TITLEBAR_HEIGHT,
+    })
   })
 
   it('rejects advanced mode on Linux', () => {

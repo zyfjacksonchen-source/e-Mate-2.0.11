@@ -62,8 +62,10 @@ export const DESKTOP_UPDATE_BRIDGE = '__EMATE_DESKTOP_UPDATES__'
 export const DESKTOP_UPDATE_STATE_READ = 'emate:desktop-update-state-read'
 export const DESKTOP_UPDATE_STATE_CHANGED = 'emate:desktop-update-state-changed'
 export const DESKTOP_UPDATE_CANCEL = 'emate:desktop-update-cancel'
+export const DESKTOP_UPDATE_RUN_INTERACTIVE = 'emate:desktop-update-run-interactive'
 
 export interface DesktopUpdateBridge {
+  runInteractiveUpdate(): Promise<void>
   getState(): DesktopUpdateState | undefined
   subscribe(listener: (state: DesktopUpdateState) => void): () => void
   cancel(): boolean

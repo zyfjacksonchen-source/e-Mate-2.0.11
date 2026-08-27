@@ -112,20 +112,10 @@
 }
 
 :global([data-slot='conversation.composer.bar'] [data-composer-card] > div:last-child > div:first-child > button:first-child) {
-  width: 42px !important;
-  height: 32px !important;
-  background: transparent !important;
+  display: none !important;
 }
 
-:global([data-slot='conversation.composer.bar'] [data-composer-card] > div:last-child > div:first-child > button:first-child > svg) {
-  display: none;
-}
-
-:global([data-slot='conversation.composer.bar'] [data-composer-card] > div:last-child > div:first-child > button:first-child::before) {
-  content: '/';
-  font: 500 18px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
+:global([data-emate-composer-mentions]),
 :global([data-emate-composer-connectors]) {
   order: 20;
   min-height: 32px;
@@ -142,6 +132,8 @@
   cursor: pointer;
 }
 
+:global([data-emate-composer-mentions]:hover),
+:global([data-emate-composer-mentions]:focus-visible),
 :global([data-emate-composer-connectors]:hover),
 :global([data-emate-composer-connectors]:focus-visible) {
   border-color: var(--emate-color-rule);
@@ -210,6 +202,7 @@
     min-width: 0;
   }
 
+  :global([data-emate-composer-mentions]),
   :global([data-emate-composer-connectors]) {
     width: 32px;
     min-width: 32px;
