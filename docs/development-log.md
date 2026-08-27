@@ -3078,3 +3078,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: `docs/2.0.15/evidence/T01.json` 与 `T02.json` 记录实际命令、耗时、pending seams 和未达到阶段；D009 状态为 `not_invoked`。没有 protected-main CI、候选、installer、installed app、签名、R2/Feed 或公网写入。
 - Remaining blockers: D006 要求 T18 创建诚实的新 Base contract 身份并重绑 15 个 retained components；T05 及其后续依赖尚未实现；T17 仍等待真实腾讯文档导出；真实账号、服务、双平台安装、更新、回滚和公开字节回读仍 OPEN。
 - Next exact action: 从当前 release tip 创建唯一 T05 分支/worktree，先冻结 native Tool/Image/Search visibility 与 receipt contract；后续工单只按已记录依赖和 Shell 顺序放行。
+
+## 2026-08-27 · 2.0.15 T14 图标唯一 Owner 补充
+
+- Goal checkpoint: T14 在追踪正式 `build:sdk` 消费链时发现 `sync-emate-profile.mjs` 会在图标生成器之前无条件用旧 Shell mark 覆盖 `build/app-icon.png`；继续生成 C03 会在下一次构建漂回旧图标，因此先失败关闭。
+- Decision and forbidden alternatives: `desktop/e-mate-desktop/scripts/sync-emate-profile.mjs` 精确移交 T14，唯一允许改动是删除重复图标源写入；Profile 同步职责保持不变。禁止第二图标源、base64 嵌入、从派生图反向恢复或继续让 Profile mark 覆盖 Desktop 生产图标。
+- Truth stage: 这是 Owner/源码计划修订，不是 C03 资产、安装包、签名、Finder/Dock/Switcher/Settings 或发布回执；T14 必须在同一原任务中补失败回归、源码资产和证据后才能合入。
