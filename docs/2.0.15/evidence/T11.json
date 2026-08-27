@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "document_type": "emate.2.0.15.ticket-evidence",
+  "ticket": "T11",
+  "title": "空主页办公模板与设置个人资料/Token 热力图",
+  "status": "SOURCE_AND_COMPONENT_PASSED",
+  "baseline": {
+    "integration_commit": "2544fcd1fadde0bafd592815f882e2a439aed27e",
+    "branch": "feat/2.0.15-T11-home-settings",
+    "clean_start": true,
+    "base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0",
+    "harness_commit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606",
+    "public_production_version": "2.0.13"
+  },
+  "truth_stage": {
+    "source": "passed",
+    "component_fixture": "passed",
+    "app_directory": "not_run_requires_complete_profile_and_real_account",
+    "candidate": "not_created",
+    "installed": "OPEN_T18",
+    "release": "not_created",
+    "public_production": "unchanged_exact_2.0.13"
+  },
+  "root_cause": {
+    "home": "Home still computed and rendered local Session-derived task counts, Token totals, trends, success placeholders and recent Sessions even though the authoritative account usage day projection now exists and Sidebar already owns recent task navigation.",
+    "templates": "The Shell already owned native blank reuse through startSessionFromRoute and native draft state through conversation.input.for(scope).setDraft, but Home exposed no office-template projection over those owners.",
+    "usage": "AccountSettings showed the identity bootstrap and weekly quota but did not consume T10 identity.usage.activity, so it had no truthful daily, weekly, cumulative or 12-month activity presentation."
+  },
+  "resolution": {
+    "home": "Removed the old overview DOM and its local usage, success and recent-Session calculations; compressed the existing hero and mounted exactly twelve responsive office templates.",
+    "template_handoff": "prepareTemplateDraftFromRoute calls the existing startSessionFromRoute blank/Workspace resolution, obtains the native Session scope, writes one native Composer draft and lets the template component focus the resident textarea. It never submits or dispatches a message.",
+    "usage": "AccountSettings requests the exact T10 identity.usage.activity endpoint for an inclusive prior-year window of at most 366 dates, validates exact snake_case fields and canonical decimal strings with BigInt, reconciles every day and period total, and renders zero plus four activity levels with exact accessible tooltips.",
+    "presentation": "Daily, Monday-based weekly and cumulative summaries reuse the same validated day buckets; loading, invalid response, typed unavailable and retry states display no fabricated heatmap or zero-success fallback.",
+    "identity": "The enterprise display_name and weekly_token_limit remain bootstrap-owned. The existing user-selected avatar stays explicitly device-local and is not represented as an enterprise avatar."
+  },
+  "owner_contract": {
+    "session_owner": "pinned rc.7 Session/Workspace runtime",
+    "draft_owner": "native conversation.input.for(scope)",
+    "usage_owner": "T10 identity.usage.activity over the account usage-attempt ledger",
+    "automatic_send": false,
+    "second_session_or_workspace_path": false,
+    "second_composer_or_draft_store": false,
+    "second_usage_or_analytics_source": false,
+    "session_updated_at_inference": false,
+    "recent_session_copy": false,
+    "fake_success_rate_or_token_value": false
+  },
+  "activity_contract": {
+    "timezone": "browser-resolved IANA timezone with UTC fallback",
+    "range": "previous local anniversary plus one day through current local date; inclusive, 365 or 366 dates",
+    "count_encoding": "canonical unsigned decimal strings validated and aggregated with BigInt",
+    "levels": [0, 1, 2, 3, 4],
+    "tooltip_fields": ["date", "total", "input", "output", "cache_read", "cache_write"],
+    "modes": ["daily", "monday_based_weekly", "cumulative"],
+    "unavailable_policy": "truthful error plus explicit retry; no cells or fake zero totals"
+  },
+  "verification": [
+    {
+      "command": "pinned Harness pnpm install --frozen-lockfile --ignore-scripts; build:lib:host; build:lib:client",
+      "result": "PASS: exact rc.7 Host and Client libraries emitted for local component compilation"
+    },
+    {
+      "command": "packages/dsh/profile/plugins/emate-shell pnpm run build",
+      "result": "PASS: final Shell source compiled; lib/client.js 308.30 kB before release composition"
+    },
+    {
+      "command": "vitest run tests/*.spec.ts tests/*.spec.tsx --config vitest.config.ts",
+      "result": "PASS: 14 files, 85 tests on final source; includes three new T11 suites, native blank/new Session draft handoff, exact activity validation/aggregation/unavailable UI, and retained Shell regressions"
+    },
+    {
+      "command": "node scripts/smoke/run.mjs --layer component --case CP-11 --case CP-12 --extension <temporary-T11-extension> --require-complete",
+      "result": "PASS: CP-11 and CP-12, 6204 ms, zero pending; temporary extension invoked the ticket-owned focused suites and was not committed"
+    },
+    {
+      "command": "node scripts/smoke/run.mjs --layer component --case CP-12 --extension <temporary-T11-usage-extension> --require-complete",
+      "result": "PASS: final strict activity validator source, 3408 ms, zero pending"
+    },
+    {
+      "command": "node scripts/component-run.mjs check --component @e-mate/dsh-client-shell",
+      "result": "EXPECTED_STRICT_RED_BEFORE_COMPONENT_EXECUTION: desktop/e-mate-desktop/base-contract.json runtime imports must equal the component-declared Base ABI union; D006 preserved"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    }
+  ],
+  "smoke": {
+    "committed_extension": false,
+    "component_cases": {
+      "CP-11": "passed",
+      "CP-12": "passed"
+    },
+    "pending": 0,
+    "app_directory": "OPEN_T18_COMPLETE_PROFILE_AND_REAL_ACCOUNT",
+    "installed": "OPEN_T18"
+  },
+  "d006": {
+    "status": "OPEN_STRICT_T18_BLOCKER_PRESERVED",
+    "predicate": "runtime imports must equal the component-declared Base ABI union",
+    "base_contract_or_validator_modified": false,
+    "bypass_added": false,
+    "owner": "T18 new Base identity and rebind"
+  },
+  "scope_transfers": [
+    {
+      "paths": [
+        "packages/dsh/profile/plugins/emate-shell/src/client/home.tsx",
+        "packages/dsh/profile/plugins/emate-shell/src/client/index.ts"
+      ],
+      "reason": "DECISIONS sequential lease transferred T06 extraction/registration to T11 after T06 merged cleanly"
+    },
+    {
+      "path": "packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx",
+      "reason": "coordinator transferred only the two stale Home overview/recent expectations for replacement with T11 template/no-duplicate assertions"
+    },
+    {
+      "path": "packages/dsh/profile/plugins/emate-shell/tests/identity-settings-fidelity.client.spec.tsx",
+      "reason": "coordinator transferred only the avatar RPC-count baseline to include bootstrap plus T10 activity while proving avatar choice adds no request"
+    }
+  ],
+  "owner_scope": {
+    "outside_owned_or_transferred_paths_modified": false,
+    "home_and_index_sequential_lease_used": true,
+    "shared_test_edits_limited_to_transferred_expectations": true,
+    "base_desktop_enterprise_lock_or_package_modified": false,
+    "t10_contract_modified": false,
+    "production_write_performed": false
+  },
+  "modified_files": [
+    "packages/dsh/profile/plugins/emate-shell/src/client/account.tsx",
+    "packages/dsh/profile/plugins/emate-shell/src/client/account.module.css",
+    "packages/dsh/profile/plugins/emate-shell/src/client/home.tsx",
+    "packages/dsh/profile/plugins/emate-shell/src/client/home.module.css",
+    "packages/dsh/profile/plugins/emate-shell/src/client/index.ts",
+    "packages/dsh/profile/plugins/emate-shell/src/client/theme-tokens.css",
+    "packages/dsh/profile/plugins/emate-shell/src/client/quick-templates.tsx",
+    "packages/dsh/profile/plugins/emate-shell/src/client/quick-templates.module.css",
+    "packages/dsh/profile/plugins/emate-shell/src/client/usage-heatmap.tsx",
+    "packages/dsh/profile/plugins/emate-shell/src/client/usage-heatmap.module.css",
+    "packages/dsh/profile/plugins/emate-shell/tests/quick-templates.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/usage-heatmap.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/account-home.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/identity-settings-fidelity.client.spec.tsx",
+    "docs/2.0.15/evidence/T11.json"
+  ],
+  "open_acceptance": [
+    "T18 real Profile app-directory screenshot and Composer focus/edit persistence",
+    "T18 real-account daily/weekly/cumulative reconciliation and typed unavailable receipt",
+    "T18 macOS and Windows light/dark/minimum-window installed-byte acceptance",
+    "D006 new Base identity and retained-component rebind"
+  ],
+  "consultation_gate": {
+    "decision": "D009",
+    "status": "not_invoked",
+    "same_named_acceptance_red_after_two_materially_different_repairs": false
+  },
+  "installed_receipts": [],
+  "candidate_created": false,
+  "publish_performed": false,
+  "production_writes": [],
+  "release_claimed": false
+}

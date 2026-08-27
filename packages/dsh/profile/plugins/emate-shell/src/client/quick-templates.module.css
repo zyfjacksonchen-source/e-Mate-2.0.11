@@ -1,0 +1,73 @@
+.templates {
+  order: -10;
+  width: 100%;
+  display: grid;
+  gap: 12px;
+  color: var(--emate-color-ink);
+  font: 14px/20px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+.templates > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.templates h2,
+.templates p { margin: 0; }
+.templates h2 { font-size: 18px; line-height: 26px; }
+.templates header p,
+.templates header > span { color: var(--emate-color-muted); font-size: 12px; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.grid button {
+  min-width: 0;
+  min-height: 90px;
+  padding: 12px;
+  border: 1px solid var(--emate-color-rule);
+  border-radius: 14px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-content: start;
+  gap: 5px 10px;
+  color: var(--emate-color-ink);
+  background: color-mix(in srgb, var(--emate-color-surface) 94%, transparent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.grid button > span { color: var(--emate-color-brand); font-size: 11px; font-variant-numeric: tabular-nums; }
+.grid strong { font-size: 14px; line-height: 18px; }
+.grid small {
+  grid-column: 1 / -1;
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--emate-color-muted);
+  font-size: 12px;
+  line-height: 18px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.grid button:hover:not(:disabled),
+.grid button:focus-visible {
+  border-color: var(--emate-color-brand);
+  outline: none;
+  background: var(--emate-color-hover);
+}
+
+.grid button:disabled { cursor: wait; opacity: .62; }
+.error { color: oklch(0.514636 0.184396 27.456); }
+
+@media (max-width: 900px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 420px) { .grid { grid-template-columns: 1fr; } }
+@media (pointer: coarse) { .grid button { min-height: 104px; } }
+@media (forced-colors: active) { .grid button:focus-visible { outline: 2px solid Highlight; } }

@@ -1,26 +1,4 @@
-:global(body) {
-  --emate-color-canvas: oklch(0.966318 0.003973 106.474);
-  --emate-color-workspace: oklch(0.984548 0.002637 106.448);
-  --emate-color-surface: oklch(0.966318 0.003973 106.474);
-  --emate-color-hover: oklch(0.951016 0.005316 106.5);
-  --emate-color-raised: oklch(0.947728 0.006648 106.526);
-  --emate-color-ink: oklch(0.296426 0.00355 106.614);
-  --emate-color-muted: oklch(0.508991 0.006202 106.618);
-  --emate-color-rule: oklch(0.905018 0.008065 106.56);
-  --emate-color-brand: oklch(0.649203 0.180912 42.881);
-  --emate-color-brand-ink: oklch(0.205 0.018 55);
-}
-
-:global(body[data-ds-dark-theme]) {
-  --emate-color-canvas: oklch(0.296426 0.00355 106.614);
-  --emate-color-workspace: oklch(0.177638 0 0);
-  --emate-color-surface: oklch(0.243535 0 0);
-  --emate-color-hover: oklch(0.343524 0.005128 106.666);
-  --emate-color-raised: oklch(0.268618 0 0);
-  --emate-color-ink: oklch(0.981562 0.002639 106.448);
-  --emate-color-muted: oklch(0.780581 0.009753 106.623);
-  --emate-color-rule: oklch(0.344584 0 0);
-}
+@import './theme-tokens.css';
 
 :global([data-slot='conversation'] > div[data-phase]) {
   --dsw-static-deepseek-50: color-mix(in srgb, var(--emate-color-brand) 8%, var(--emate-color-workspace));
@@ -331,9 +309,9 @@
 
 .heroStage {
   position: relative;
-  width: min(72%, 540px);
+  width: min(56%, 420px);
   aspect-ratio: 1836 / 564;
-  margin: -24px auto 4px;
+  margin: -16px auto 0;
   overflow: hidden;
 }
 
@@ -363,189 +341,9 @@
 }
 
 .hero p {
-  margin: 5px 0 2px;
+  margin: 4px 0 0;
   color: var(--emate-color-muted);
   font-size: 14px;
-}
-
-.overview {
-  order: 20;
-  display: grid;
-  gap: 10px;
-  width: 100%;
-  color: var(--emate-color-ink);
-}
-
-.overview > header {
-  min-height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.overview h2,
-.overview h3,
-.overview p {
-  margin: 0;
-}
-
-.overview h2 {
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.overview > header span {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  overflow: hidden;
-  color: var(--emate-color-muted);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.overview > header i {
-  width: 8px;
-  height: 8px;
-  flex: none;
-  border-radius: 999px;
-  background: var(--emate-color-brand);
-}
-
-.metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.metrics article,
-.report,
-.report > section {
-  border: 1px solid var(--emate-color-rule);
-  background: color-mix(in srgb, var(--emate-color-surface) 92%, transparent);
-}
-
-.metrics article {
-  min-width: 0;
-  padding: 10px 14px;
-  border-radius: 12px;
-  display: grid;
-  gap: 1px;
-}
-
-.metrics small,
-.metrics span,
-.report small,
-.report p {
-  color: var(--emate-color-muted);
-}
-
-.metrics small,
-.metrics span {
-  overflow: hidden;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.metrics strong {
-  color: var(--emate-color-ink);
-  font-size: 24px;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.15;
-}
-
-.report {
-  padding: 10px;
-  border-radius: 16px;
-  display: grid;
-  grid-template-columns: 1.2fr 0.9fr 1fr;
-  gap: 10px;
-}
-
-.report > section {
-  min-width: 0;
-  padding: 10px 12px;
-  border-radius: 12px;
-  display: grid;
-  align-content: start;
-  gap: 7px;
-}
-
-.report p {
-  font-size: 12px;
-  line-height: 1.55;
-}
-
-.report h3 {
-  font-size: 13px;
-}
-
-.trend {
-  height: 58px;
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  align-items: end;
-  gap: 5px;
-}
-
-.trend > span {
-  height: 100%;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 4px;
-  text-align: center;
-}
-
-.trend i {
-  width: 100%;
-  min-height: 2px;
-  border-radius: 999px 999px 0 0;
-  background: var(--emate-color-brand);
-}
-
-.trend small {
-  font-size: 9px;
-}
-
-.recent {
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 6px;
-  list-style: none;
-}
-
-.recent button {
-  width: 100%;
-  min-width: 0;
-  padding: 2px 0;
-  border: 0;
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  color: inherit;
-  background: transparent;
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.recent button:hover,
-.recent button:focus-visible {
-  color: var(--emate-color-brand);
-}
-
-.recent span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .schedulesPage {

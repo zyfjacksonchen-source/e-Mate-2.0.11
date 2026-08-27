@@ -258,6 +258,16 @@ export async function startSessionFromRoute(ctx: any, workspaceId?: string): Pro
   }
 }
 
+/** Reuse Home's native blank/Workspace resolution, then write only the owning Composer draft. */
+export async function prepareTemplateDraftFromRoute(ctx: any, prompt: string): Promise<void> {
+  if (!await startSessionFromRoute(ctx)) return
+  const sessionId = ctx.sessions.list.getSnapshot().current
+  if (sessionId === undefined) throw new Error('new task unavailable')
+  const scope = ctx.sessions.scope(sessionId)
+  if (scope === undefined) throw new Error(`session "${sessionId}" is not addressable`)
+  ctx.conversation.input.for(scope).setDraft(prompt)
+}
+
 /** Change only the route; SessionRouteProjection remains the single current-Session owner. */
 export function openSessionFromRoute(id: string): void {
   const route = `/chat/${encodeURIComponent(id)}`
@@ -446,6 +456,7 @@ export function apply(ctx: any): void {
     order: -20,
     inject: () => ({
       openSession: openSessionFromRoute,
+      prepareTemplateDraft: (prompt: string) => prepareTemplateDraftFromRoute(ctx, prompt),
       prepareSchedulePrompt: (prompt: string, sessionId?: string) =>
         prepareSchedulePromptFromRoute(ctx, prompt, sessionId),
       callSchedules: () => ctx.connection.rpc.call('/emate.schedules', 'list', {}),

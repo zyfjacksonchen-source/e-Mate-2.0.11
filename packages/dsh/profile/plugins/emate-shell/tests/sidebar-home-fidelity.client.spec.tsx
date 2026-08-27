@@ -554,7 +554,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(openSession).not.toHaveBeenCalled()
   })
 
-  it('uses current e-Mate Home copy and projects durable token/session facts', async () => {
+  it('uses the compact e-Mate Home templates without local usage or recent-Session projections', async () => {
     const phase = document.createElement('main')
     phase.dataset.phase = 'hero'
     const overlay = document.createElement('div')
@@ -564,6 +564,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     phase.append(overlay)
     document.body.append(phase)
     const openSession = vi.fn()
+    const prepareTemplateDraft = vi.fn(async () => {})
     const state = nativeSessionState({
       ids: ['session-1', 'image-child', 'catalog-child'],
       byId: {
@@ -606,21 +607,25 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       {...homeToolbarProps}
       useSessions={selector => selector(state)}
       openSession={openSession}
+      prepareTemplateDraft={prepareTemplateDraft}
       prepareSchedulePrompt={async () => {}}
       callSchedules={async () => ({ ok: true, value: { schema_version: 1, items: [], errors: [] } })}
       scheduleIcons={{ create: Icon, refresh: Icon, edit: Icon, delete: Icon }}
     />)
-    await waitFor(() => { expect(screen.getByRole('heading', { name: '今日使用概览' })).not.toBeNull() })
+    await waitFor(() => { expect(screen.getByRole('heading', { name: '办公快速模板' })).not.toBeNull() })
     expect(homeToolbarProps.closeDetails).toHaveBeenCalled()
     expect(screen.getByRole('heading', { name: '和小芯一起开始工作吧' })).not.toBeNull()
-    expect(screen.getByText('Token 消耗量').parentElement?.textContent).toContain('100')
+    expect(screen.queryByRole('heading', { name: '今日使用概览' })).toBeNull()
+    expect(screen.queryByText('Token 消耗量')).toBeNull()
+    expect(screen.getAllByRole('button').filter(button => /^\d{2}/u.test(button.textContent ?? ''))).toHaveLength(12)
     expect(screen.queryByText('一次性子代理记录')).toBeNull()
     expect(screen.queryByText('This is one e-Mate image')).toBeNull()
-    expect(screen.getByRole('heading', { name: '任务趋势（近 7 天）' })).not.toBeNull()
+    expect(screen.queryByText('真实任务')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '切换任务导航' }))
     expect(homeToolbarProps.toggleSidebar).toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: /真实任务/u }))
-    expect(openSession).toHaveBeenCalledWith('session-1')
+    fireEvent.click(screen.getByRole('button', { name: /周报总结/u }))
+    await waitFor(() => { expect(prepareTemplateDraft).toHaveBeenCalledOnce() })
+    expect(openSession).not.toHaveBeenCalled()
   })
 
   it('keeps a non-current durable blank session without pinning a title that blocks target auto naming', async () => {
@@ -738,6 +743,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
         {...homeToolbarProps}
         useSessions={selector => selector(sessions)}
         openSession={openSession}
+        prepareTemplateDraft={async () => {}}
         prepareSchedulePrompt={async () => {}}
         callSchedules={async () => ({ ok: true, value: { schema_version: 1, items: [], completed: [], recent_runs: [], errors: [] } })}
         scheduleIcons={{ create: Icon, refresh: Icon, edit: Icon, delete: Icon }}
@@ -755,12 +761,9 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     fireEvent.click(within(project).getByRole('button', { name: '项目历史' }))
     expect(openSession).toHaveBeenLastCalledWith('newest')
 
-    await waitFor(() => { expect(screen.getByRole('heading', { name: '最近任务' })).not.toBeNull() })
-    const recent = screen.getByRole('heading', { name: '最近任务' }).parentElement!
-    expect(within(recent).getAllByRole('button').map(button => button.textContent)).toEqual([
-      expect.stringContaining('任务 newest'),
-      expect.stringContaining('任务 same-a'),
-    ])
+    await waitFor(() => { expect(screen.getByRole('heading', { name: '办公快速模板' })).not.toBeNull() })
+    expect(screen.queryByRole('heading', { name: '最近任务' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: /周报总结|会议纪要|工作计划|汇报大纲|数据分析|方案撰写|邮件起草|文档润色|表格整理|PPT 结构|项目复盘|头脑风暴/u })).toHaveLength(12)
   })
 
   it('keeps the session ordering comparator stable for equal ASCII ids', () => {

@@ -540,13 +540,14 @@ describe('e-Mate 2.0.13 identity and settings fidelity', () => {
     render(<AccountSettings callIdentity={callIdentity} />)
 
     const input = await screen.findByLabelText('选择头像图片')
+    await waitFor(() => { expect(callIdentity).toHaveBeenCalledTimes(2) })
     expect(screen.getByText('头像').closest('div')?.parentElement?.querySelectorAll('svg')).toHaveLength(2)
     fireEvent.change(input, { target: { files: [new File(['not-an-image'], 'avatar.gif', { type: 'image/gif' })] } })
     expect(await screen.findByText('请选择 PNG、JPEG 或 WebP 图片。')).toBeTruthy()
 
     fireEvent.change(input, { target: { files: [new File(['avatar'], 'avatar.png', { type: 'image/png' })] } })
     expect((await screen.findByRole('img', { name: '当前头像' })).getAttribute('src')).toMatch(/^data:image\/png;base64,/u)
-    expect(callIdentity).toHaveBeenCalledTimes(1)
+    expect(callIdentity).toHaveBeenCalledTimes(2)
 
     fireEvent.click(screen.getByRole('button', { name: '移除' }))
     expect(screen.queryByRole('img', { name: '当前头像' })).toBeNull()

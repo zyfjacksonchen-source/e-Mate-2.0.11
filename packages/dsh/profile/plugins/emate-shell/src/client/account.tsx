@@ -9,6 +9,7 @@ import {
 } from './identity.tsx'
 import css from './account.module.css'
 import { formatTokenCount } from './token-format.ts'
+import { UsageHeatmap } from './usage-heatmap.tsx'
 
 interface Props {
   callIdentity: (endpoint: string, payload: Record<string, unknown>) => Promise<RpcResult>
@@ -341,6 +342,7 @@ export function AccountSettings({ callIdentity }: Props) {
           ? `每周 Token 额度 ${state.weekly_token_limit === Number.MAX_SAFE_INTEGER ? '不限' : state.weekly_token_limit === undefined ? '—' : formatTokenCount(state.weekly_token_limit)}；${state.agreement_exempt ? '管理员无需签署用户协议。' : state.agreement_receipt_id ? '首次使用协议已归档。' : '尚无有效协议归档凭证。'}`
           : status ?? '请完成企业登录后再修改密码。'}
       </p>
+      {state?.authenticated ? <UsageHeatmap callIdentity={callIdentity} /> : null}
       {state?.authenticated ? (
         <form className={css.passwordForm} onSubmit={event => { void changePassword(event) }}>
           <label className={css.currentPassword}><span>当前密码</span><input type="password" autoComplete="current-password" minLength={8} maxLength={256} disabled={busy} value={currentPassword} onChange={event => { setCurrentPassword(event.target.value) }} /></label>

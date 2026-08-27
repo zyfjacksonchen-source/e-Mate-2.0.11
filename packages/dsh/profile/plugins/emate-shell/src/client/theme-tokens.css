@@ -1,0 +1,24 @@
+:root,
+body {
+  --emate-color-canvas: oklch(0.966318 0.003973 106.474);
+  --emate-color-workspace: oklch(0.984548 0.002637 106.448);
+  --emate-color-surface: oklch(0.966318 0.003973 106.474);
+  --emate-color-hover: oklch(0.951016 0.005316 106.5);
+  --emate-color-raised: oklch(0.947728 0.006648 106.526);
+  --emate-color-ink: oklch(0.296426 0.00355 106.614);
+  --emate-color-muted: oklch(0.508991 0.006202 106.618);
+  --emate-color-rule: oklch(0.905018 0.008065 106.56);
+  --emate-color-brand: oklch(0.649203 0.180912 42.881);
+  --emate-color-brand-ink: oklch(0.205 0.018 55);
+}
+
+body[data-ds-dark-theme] {
+  --emate-color-canvas: oklch(0.296426 0.00355 106.614);
+  --emate-color-workspace: oklch(0.177638 0 0);
+  --emate-color-surface: oklch(0.243535 0 0);
+  --emate-color-hover: oklch(0.343524 0.005128 106.666);
+  --emate-color-raised: oklch(0.268618 0 0);
+  --emate-color-ink: oklch(0.981562 0.002639 106.448);
+  --emate-color-muted: oklch(0.780581 0.009753 106.623);
+  --emate-color-rule: oklch(0.344584 0 0);
+}
