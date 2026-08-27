@@ -792,6 +792,18 @@ describe('repository release boundary', () => {
     assert.equal(classify('.github/workflows/profile-release.yml').lane, 'base')
   })
 
+  it('keeps both Profile composition jobs reachable through skipped ancestors', () => {
+    const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
+    assert.match(
+      workflow,
+      /profile-portable-composition:\n\s+name: Portable Profile generations\n\s+needs: \[impact, plugins\]\n\s+if: \$\{\{ always\(\) && needs\.impact\.result == 'success' && needs\.plugins\.result == 'success' && needs\.impact\.outputs\.compose_profile == 'true' && needs\.impact\.outputs\.publish_components_json != '\[\]' && needs\.impact\.outputs\.portable_publish == 'true' \}\}/u,
+    )
+    assert.match(
+      workflow,
+      /profile-composition:\n\s+name: Complete Profile generation \/ \$\{\{ matrix\.target \}\}\n\s+needs: \[impact, plugins\]\n\s+if: \$\{\{ always\(\) && needs\.impact\.result == 'success' && needs\.plugins\.result == 'success' && needs\.impact\.outputs\.compose_profile == 'true' && needs\.impact\.outputs\.publish_components_json != '\[\]' && needs\.impact\.outputs\.portable_publish != 'true' \}\}/u,
+    )
+  })
+
   it('makes the required CI admission consume one executable plan across PR, RC, and Audit lanes', () => {
     const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
     const audit = readFileSync(new URL('../.github/workflows/audit.yml', import.meta.url), 'utf8')
