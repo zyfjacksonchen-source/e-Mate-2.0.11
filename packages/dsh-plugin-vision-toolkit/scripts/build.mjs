@@ -17,6 +17,15 @@ function replaceExactlyOnce(value, before, after, label) {
   return value.replace(before, after)
 }
 
+function replaceSection(value, start, end, replacement, label) {
+  const from = value.indexOf(start)
+  const to = from < 0 ? -1 : value.indexOf(end, from + start.length)
+  if (from < 0 || to < 0 || value.indexOf(start, from + start.length) >= 0) {
+    throw new Error(`pinned dsh-vision-toolkit ${label} contract changed`)
+  }
+  return value.slice(0, from) + replacement + value.slice(to)
+}
+
 async function readPinnedText(path) {
   const value = await readFile(path, 'utf8')
   const normalized = value.replaceAll('\r\n', '\n')
@@ -57,7 +66,26 @@ const managerAfter = `    });
         await ctx.settings.replace(VISION_TOOLKIT_SETTINGS_NAMESPACE, config);
         managedReady = true;
     }
-    const manager = new VisionToolkitRuntimeManager(ctx);`
+    const manager = new VisionToolkitRuntimeManager(ctx);
+    let runtimePending;
+    const prepareRuntime = async () => {
+        if (manager.ready)
+            return manager.current();
+        runtimePending ??= manager.reconfigure(settings.get()).then(() => manager.current()).finally(() => { runtimePending = undefined; });
+        return runtimePending;
+    };
+    const lazyRuntime = new Proxy({}, {
+        get(_target, property) {
+            return async (...args) => {
+                const runtime = await prepareRuntime();
+                options.validateConfig?.(runtime.config);
+                const member = runtime[property];
+                if (typeof member !== 'function')
+                    throw new Error(\`dsh-vision-toolkit runtime member \${String(property)} is not callable\`);
+                return member.apply(runtime, args);
+            };
+        },
+    });`
 if (!index.includes(applyBefore) || !index.includes(validateBefore)
   || !index.includes(backendBefore) || !index.includes(managerBefore) || !index.includes(operationalBefore)) {
   throw new Error('pinned dsh-vision-toolkit apply contract changed')
@@ -69,6 +97,73 @@ index = index
   .replace(managerBefore, managerAfter)
   .replace(operationalBefore, operationalAfter)
   .replace(backendBefore, backendAfter)
+index = replaceExactlyOnce(
+  index,
+  `import { PastedImageBackend } from "./paste-images.js";`,
+  ``,
+  'legacy pasted-image backend import',
+)
+index = replaceExactlyOnce(
+  index,
+  `    const disposers = [];`,
+  `    const disposers = [];
+    const imageInputBridgeDisposer = options.installImageInputBridge?.(lazyRuntime);
+    if (imageInputBridgeDisposer !== undefined)
+        disposers.push(imageInputBridgeDisposer);`,
+  'image request-boundary disposer',
+)
+index = replaceExactlyOnce(
+  index,
+  `        if (!manager.ready || operationalDisposers !== undefined)
+            return;`,
+  `        if (operationalDisposers !== undefined)
+            return;`,
+  'lazy operational exposure',
+)
+index = replaceExactlyOnce(
+  index,
+  `            const info = manager.current().upstreamVersion;
+            ctx.logger.info('dsh-vision-toolkit %s ready (upstream %s @ %s, checkout %s)', PLUGIN_VERSION, info.version, info.commit, info.path);`,
+  `            if (manager.ready) {
+                const info = manager.current().upstreamVersion;
+                ctx.logger.info('dsh-vision-toolkit %s ready (upstream %s @ %s, checkout %s)', PLUGIN_VERSION, info.version, info.commit, info.path);
+            }
+            else {
+                ctx.logger.info('dsh-vision-toolkit %s loaded; runtime preparation is deferred until first use', PLUGIN_VERSION);
+            }`,
+  'lazy readiness logging',
+)
+index = replaceExactlyOnce(
+  index,
+  `    try {
+        await manager.initialize(settings.get());
+        ensureOperational();
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.logger.error('dsh-vision-toolkit %s: runtime not ready; the vision-tools skill, activation bootstrap, and Agent-scoped visual tools are NOT registered. Settings remain available for repair. %s', PLUGIN_VERSION, message);
+    }`,
+  `    if (options.managed !== true) {
+        try {
+            await manager.initialize(settings.get());
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            ctx.logger.error('dsh-vision-toolkit %s: runtime not ready; Settings remain available for repair. %s', PLUGIN_VERSION, message);
+        }
+    }
+    ensureOperational();`,
+  'managed lazy first use',
+)
+index = replaceExactlyOnce(
+  index,
+  `    const pastedImages = new PastedImageBackend(ctx, {
+        maxImageBytes: () => manager.status().activeConfig?.maxImageBytes ?? resolveConfig(settings.get()).maxImageBytes,
+    });
+    installVisionToolkitWeb(ctx, backend, artifacts, pastedImages);`,
+  `    installVisionToolkitWeb(ctx, backend, artifacts);`,
+  'native attachment first Web surface',
+)
 index = replaceExactlyOnce(
   index,
   `    disposers.push(settings.watch(async (next) => {
@@ -130,6 +225,61 @@ index = replaceExactlyOnce(
         deactivateOperational();`,
   'operational disposal',
 )
+index = replaceExactlyOnce(
+  index,
+  `        const currentRuntime = () => {
+            const runtime = manager.current();
+            if (options.managed === true)
+                options.validateConfig?.(runtime.config);
+            return runtime;
+        };`,
+  `        const currentRuntime = () => {
+            if (options.managed === true)
+                return lazyRuntime;
+            return manager.current();
+        };`,
+  'managed lazy runtime source',
+)
+index = replaceExactlyOnce(
+  index,
+  `    disposers.push(settings.watch(async (next) => {
+        if (options.managed === true) {
+            deactivateOperational();
+            manager.deactivate();
+        }
+        try {
+            await manager.reconfigure(next);
+            if (options.managed === true)
+                options.validateConfig?.(next);
+            ensureOperational();
+        }
+        catch (error) {
+            if (options.managed === true) {
+                deactivateOperational();
+                manager.deactivate();
+            }
+            const message = error instanceof Error ? error.message : String(error);
+            ctx.logger.error(options.managed === true
+                ? 'dsh-vision-toolkit: managed Settings generation refused; runtime remains unavailable. %s'
+                : 'dsh-vision-toolkit: keeping the previous runtime after a refused Settings generation. %s', message);
+        }
+    }));`,
+  `    disposers.push(settings.watch(async (next) => {
+        if (options.managed === true) {
+            manager.deactivate();
+            return;
+        }
+        try {
+            await manager.reconfigure(next);
+            ensureOperational();
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            ctx.logger.error('dsh-vision-toolkit: keeping the previous runtime after a refused Settings generation. %s', message);
+        }
+    }));`,
+  'managed lazy Settings generation',
+)
 await writeFile(upstreamIndex, index)
 
 const runtimeManagerPath = resolve(staged, 'runtime-manager.js')
@@ -182,6 +332,36 @@ await writeFile(runtimePath, runtime)
 
 const webPath = resolve(staged, 'web.js')
 let web = await readPinnedText(webPath)
+web = replaceExactlyOnce(
+  web,
+  `import { PASTE_IMAGES_ROUTE } from "./paste-images.js";`,
+  ``,
+  'legacy pasted-image Web import',
+)
+web = replaceExactlyOnce(
+  web,
+  `export function installVisionToolkitWeb(ctx, backend, artifacts, pastedImages) {`,
+  `export function installVisionToolkitWeb(ctx, backend, artifacts) {`,
+  'native attachment first Web signature',
+)
+web = replaceExactlyOnce(
+  web,
+  `            const disposePasteImages = webCtx.webServer.register({
+                kind: 'exact',
+                path: PASTE_IMAGES_ROUTE,
+                handler: (req, res) => pastedImages.handle(req, res),
+            });
+`,
+  ``,
+  'legacy pasted-image Web route',
+)
+web = replaceExactlyOnce(
+  web,
+  `                disposePasteImages();
+`,
+  ``,
+  'legacy pasted-image Web disposer',
+)
 const webTransforms = [
   [
     `    onRuntimeActivated;
@@ -390,6 +570,7 @@ export declare function apply(
     managed?: boolean
     validateConfig?(value: unknown): void
     assertWriteAllowed?(exec: { agent?: { session?: unknown } }): void
+    installImageInputBridge?(runtime: unknown): () => void
   },
 ): Promise<() => void>
 `)
@@ -433,6 +614,25 @@ await build({
 
 let client = (await readPinnedText(resolve(staged, 'client.js')))
   .replaceAll('@anionex/dsh-vision-toolkit', '@e-mate/dsh-plugin-vision-toolkit')
+client = replaceExactlyOnce(
+  client,
+  `    (0, paste_images_tsx_1.installPasteImages)(ctx);`,
+  ``,
+  'native attachment first Client',
+)
+client = replaceExactlyOnce(
+  client,
+  `const paste_images_tsx_1 = __load_("./paste-images.js");\n`,
+  ``,
+  'legacy pasted-image Client import',
+)
+client = replaceSection(
+  client,
+  `__modules["./paste-images.js"] = function(module, exports, require, __load_) {`,
+  `function __resolve(from, request) {`,
+  ``,
+  'legacy pasted-image Client module',
+)
 client = replaceExactlyOnce(
   client,
   '(0, jsx_runtime_1.jsx)("option", { value: "openai", children: "OpenAI Chat Completions" }), (0, jsx_runtime_1.jsx)("option", { value: "anthropic", children: "Anthropic Messages" })',

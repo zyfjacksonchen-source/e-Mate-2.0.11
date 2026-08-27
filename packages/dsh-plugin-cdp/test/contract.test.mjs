@@ -327,6 +327,7 @@ test('makes CDP the first browser path and reserves Computer Use for an explicit
     effect: callback => callback(),
   })
   assert.equal(harness.get().allowControl, true)
-  assert.match(prompts[0].text, /every webpage read or operation, use these CDP browser tools first/u)
+  assert.match(prompts[0].text, /only when the latest user request explicitly asks to read or operate a visible Chrome webpage/u)
+  assert.match(prompts[0].text, /Never use them for attachments, image generation, native apps, or non-page work/u)
   assert.match(prompts[0].text, /only when the user explicitly inserts @电脑操控/u)
 })
