@@ -89,7 +89,7 @@
     },
     {
       "command": "node scripts/smoke/run.mjs --layer component --case CP-06 --extension <temporary-T06-extension.json> --require-complete",
-      "result": "PASS: CP-06 Schedule create/list/delete/dispatch/restart, 1188 ms, zero pending seams"
+      "result": "PASS: CP-06 Schedule create/list/delete/dispatch/restart, 267 ms, zero pending seams"
     }
   ],
   "smoke_extension": {
@@ -97,7 +97,7 @@
     "binding": "schedule-restrict.component",
     "case": "CP-06",
     "status": "passed",
-    "duration_ms": 1188,
+    "duration_ms": 267,
     "pending": 0
   },
   "d006": {
