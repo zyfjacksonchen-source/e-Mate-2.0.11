@@ -56,21 +56,37 @@
     {
       "named_check": "does not report a tombstoned publication replay as published",
       "result_before_fix": "EXPECTED_RED: replay of the original publish request returned HTTP 201 after publication deletion"
+    },
+    {
+      "named_check": "restart repairs crashes after candidate activation, during rollback staging, and after recovery commit",
+      "result_before_fix": "EXPECTED_RED: a restart with active=new, backup=old and WAL phase=claimed stayed recovery-pending with ENOTEMPTY; the receipt still named the old Skill while the new bytes were active"
+    },
+    {
+      "named_check": "keeps arbitrary-size SemVer numeric and ASCII prerelease precedence exact",
+      "result_before_fix": "EXPECTED_RED: Number rounded numeric identifiers above MAX_SAFE_INTEGER and the Worker length-encoded alphanumeric identifiers, reversing z versus aa and a- versus a.1"
+    },
+    {
+      "named_check": "does not report a tombstoned version as published under a new request identity",
+      "result_before_fix": "EXPECTED_RED: a new client_request_id bypassed replay-only tombstone validation and returned HTTP 201 for an immutable deleted version"
+    },
+    {
+      "named_check": "legacy duplicate install request rows do not block schema deployment",
+      "result_before_fix": "EXPECTED_RED: CREATE UNIQUE INDEX failed when an existing D1 table contained duplicate account_ref/client_request_id history"
     }
   ],
   "root_cause": {
-    "client": "The existing shared SemVer parser sliced a prerelease token that no longer included the dash; exact version selection also searched only the bounded first detail page, and service/Host failures collapsed to free text.",
-    "worker": "Catalog cursors exposed raw slugs, detail and owned reads used fixed LIMIT 100 queries, model-session sid was validated but discarded, deflate output was fully materialized before its declared expansion size was checked, and a publish mutation receipt did not consult the immutable tombstone.",
-    "resolution": "The existing Skill Hub component and Worker paths now use signed filter-bound keyset cursors, exact immutable version reads, Session-mixed one-time credential hashes, bounded streaming inflate, tombstone-aware mutation replay, exact publisher receipts and typed failures. The native FileSystemSkillProvider, per-slug serial owner, DSH Jobs and persistent WAL remain the only local facts."
+    "client": "The shared SemVer parser first sliced the prerelease token incorrectly and then compared numeric identifiers through Number, losing arbitrary-size precedence. Install switching could leave active=new and backup=old while WAL still said claimed, and exception rollback deleted active before restoring backup, so either crash shape could strand the old receipt and local bytes in a permanent recovery-pending state. Exact version selection also searched only the bounded first detail page, and service/Host failures collapsed to free text.",
+    "worker": "Catalog cursors exposed raw slugs, detail and owned reads used fixed LIMIT 100 queries, model-session sid was validated but discarded, deflate output was fully materialized before its declared expansion size was checked, and tombstone rejection lived only inside same-request replay. The version key length-encoded alphanumeric prerelease identifiers and used a three-digit numeric length, while latest selection had no tie-break for equal precedence. A direct unique index was not deployable over legacy duplicate request rows.",
+    "resolution": "The existing shared lifecycle now stages every switched active tree back to candidate before restoring backup, and restart normalizes claimed, switched and completion-pending disk shapes before reconciliation. SemVer numeric comparison stays decimal-string exact; Worker sort keys use an eight-digit numeric length plus terminated ASCII-hex identifiers and a deterministic version tie-break. Tombstones fail closed before all publish receipt paths. Existing D1 history remains intact while one transactional conditional insert plus its changes receipt serializes request identity. Signed filter-bound keyset cursors, exact reads, Session-mixed credentials, bounded streaming inflate, typed failures and the single native provider/Job/WAL owner remain unchanged."
   },
   "contract_receipts": {
     "single_path": "browser or Agent -> /emate.skillHub or typed Tool -> existing component -> managed identity Worker -> existing per-slug WAL -> rc.7 FileSystemSkillProvider -> native Job receipt/inventory",
     "catalog_detail_version": "query/category/tag/source catalog and immutable version history use signed opaque keyset cursors; exact version has a dedicated GET route",
     "publication": "installed native Skills and exact session .e-mate/imports/*.zip identities are accepted; arbitrary host paths, links, hardlinks and changed bytes are rejected",
     "browser_boundary": "browser mutations remain Host RPC calls; Worker rejects Origin/Sec-Fetch bearer transport and emits no CORS grant",
-    "install_credentials": "install and completion token digests are mixed with the validated model-session sid ref; another Session cannot consume or complete them",
-    "mutation_identity": "publish/delete and install lifecycle receipts show exact slug, version, content digest and publisher; tombstoned publish replay is conflict, not a false 201",
-    "local_lifecycle": "install/update/downgrade/enable/disable/uninstall share one slug serializer and WAL; update downgrade is explicit; restart recovery reconciles before candidate activation",
+    "install_credentials": "install and completion token digests are mixed with the validated model-session sid ref; another Session cannot consume or complete them; request identity is admitted by one transactional conditional insert without requiring a destructive legacy-row migration",
+    "mutation_identity": "publish/delete and install lifecycle receipts show exact slug, version, content digest and publisher; every tombstoned slug/version publish is conflict regardless of client_request_id",
+    "local_lifecycle": "install/update/downgrade/enable/disable/uninstall share one slug serializer and WAL; update downgrade is explicit; restart recovery preserves old receipts and candidate bytes across switch and rollback crash shapes before reconciliation",
     "native_invocation": "an installed fixture Skill is loaded by the pinned rc.7 model-facing native skill Tool",
     "publication_delete_separation": "deleting a remote publication leaves the local installed Skill intact; local uninstall is a separate lifecycle mutation",
     "inventory_refresh": "Capability UI rereads receipt/provider inventory after completed, failed or killed native Job terminal state",
@@ -80,11 +96,11 @@
   "verification": [
     {
       "command": "node --check enterprise/apps/skill-hub-worker/src/index.js && node --test enterprise/apps/skill-hub-worker/tests/index.test.mjs",
-      "result": "PASS: 9 deterministic in-memory D1/R2 Worker tests"
+      "result": "PASS: 11 deterministic in-memory D1/R2 Worker tests, including cursor-bound SemVer order, legacy duplicate schema replay, transactional request identity and new-request tombstone rejection"
     },
     {
       "command": "pnpm --dir packages/dsh-plugin-skill-hub build && pnpm --dir packages/dsh-plugin-skill-hub test",
-      "result": "PASS: pinned rc.7 component build; 15 Node lifecycle tests and 7 UI tests"
+      "result": "PASS: pinned rc.7 component build; 17 Node lifecycle tests and 7 UI tests, including exact decimal SemVer and switch, rollback and committed-cleanup restart crash shapes"
     },
     {
       "command": "cd upstream/deepseek-harness && ./node_modules/.bin/tsc -b tsconfig.host.json && ./node_modules/.bin/tsdown --env.DSH_BUILD_FACE host && ./node_modules/.bin/tsc -b tsconfig.client.json",
@@ -92,7 +108,7 @@
     },
     {
       "command": "node scripts/smoke/run.mjs --layer component --case CP-07 --extension docs/2.0.15/evidence/T07.json --require-complete",
-      "result": "PASS: CP-07 skillhub.component, 4576 ms, zero pending seams"
+      "result": "PASS: CP-07 skillhub.component, 2917 ms, zero pending seams"
     },
     {
       "command": "Worker binding JSON/evidence JSON checks and git diff --check",
@@ -108,11 +124,12 @@
     "layer": "component",
     "binding": "skillhub.component",
     "status": "passed",
-    "duration_ms": 4576,
+    "duration_ms": 2917,
     "remaining": 0
   },
   "worker_configuration": {
     "status": "passed_local_configuration_contract",
+    "schema_upgrade": "legacy duplicate install intent rows remain intact; request identity is enforced by one transactional conditional insert and its changes receipt; no destructive migration or new unique index is required",
     "production_deploy_performed": false,
     "d1_or_r2_write_performed": false
   },
@@ -135,6 +152,8 @@
   "consultation_gate": {
     "decision": "D009",
     "status": "not_invoked",
+    "consultation_attempts": [],
+    "same_named_check_red_after_two_materially_different_repairs": false,
     "qualifying_materially_different_source_repairs": 1,
     "authority": "coordinator only"
   },

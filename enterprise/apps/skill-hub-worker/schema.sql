@@ -123,6 +123,3 @@ ON skill_hub_versions(slug, version_sort DESC);
 
 CREATE INDEX IF NOT EXISTS skill_hub_versions_author
 ON skill_hub_versions(author_ref, slug, version_sort DESC);
-
-CREATE UNIQUE INDEX IF NOT EXISTS skill_hub_install_intents_request
-ON skill_hub_install_intents(account_ref, client_request_id);

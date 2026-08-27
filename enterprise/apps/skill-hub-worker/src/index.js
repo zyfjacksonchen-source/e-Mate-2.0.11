@@ -468,13 +468,14 @@ function decodeBase64(value) {
   return payload
 }
 
-function versionSort(version) {
+export function versionSort(version) {
   const match = VERSION.exec(version)
   if (match === null) throw new HttpError(422, 'Skill version is invalid')
-  const numeric = value => `${String(value.length).padStart(3, '0')}${value}`
+  const numeric = value => `${String(value.length).padStart(8, '0')}${value}`
+  const lexical = value => `${[...value].map(character => character.charCodeAt(0).toString(16).padStart(2, '0')).join('')}00`
   const core = `${numeric(match[1])}.${numeric(match[2])}.${numeric(match[3])}`
   if (match[4] === undefined) return `${core}~`
-  return `${core}${match[4].split('.').map(part => /^\d+$/u.test(part) ? `.0${numeric(part)}` : `.1${numeric(part)}`).join('')}!`
+  return `${core}${match[4].split('.').map(part => /^\d+$/u.test(part) ? `.0${numeric(part)}` : `.1${lexical(part)}`).join('')}!`
 }
 
 function card(row) {
@@ -589,6 +590,8 @@ async function publish(request, env, config, fetchImplementation) {
   const payload = decodeBase64(value.bundle_base64)
   const inspected = await inspectSkillArchive(payload)
   if (inspected.name !== value.slug) throw new HttpError(422, 'Skill package name does not match the requested slug')
+  const tombstone = await first(env, 'SELECT 1 AS deleted FROM skill_hub_publication_tombstones WHERE slug=? AND version=?', [inspected.name, inspected.version])
+  if (tombstone !== null) throw new HttpError(409, 'Skill Hub publication version is permanently deleted')
   const replay = await first(env,
     'SELECT action,slug,version,package_sha256,status FROM skill_hub_mutation_requests WHERE account_ref=? AND client_request_id=?',
     [auth.author, value.client_request_id],
@@ -598,8 +601,7 @@ async function publish(request, env, config, fetchImplementation) {
       throw new HttpError(409, 'Skill Hub client request identity was reused')
     }
     const existing = await first(env, 'SELECT * FROM skill_hub_versions WHERE slug=? AND version=?', [inspected.name, inspected.version])
-    const tombstone = await first(env, 'SELECT 1 AS deleted FROM skill_hub_publication_tombstones WHERE slug=? AND version=?', [inspected.name, inspected.version])
-    if (existing === null || tombstone !== null) throw new HttpError(409, 'Skill Hub publication receipt is unavailable')
+    if (existing === null) throw new HttpError(409, 'Skill Hub publication receipt is unavailable')
     return json(card(existing), 201)
   }
   const owner = await first(env, 'SELECT author_ref FROM skill_hub_versions WHERE slug=? LIMIT 1', [inspected.name])
@@ -644,7 +646,7 @@ async function publish(request, env, config, fetchImplementation) {
         [auth.author, value.client_request_id, 'publish', inspected.name, inspected.version, inspected.packageSha256, 'published'],
       ),
       statement(env,
-        "UPDATE skill_hub_skills SET latest_version=(SELECT v.version FROM skill_hub_versions v WHERE v.slug=? AND NOT EXISTS (SELECT 1 FROM skill_hub_publication_tombstones t WHERE t.slug=v.slug AND t.version=v.version) ORDER BY v.version_sort DESC LIMIT 1),updated_at=CURRENT_TIMESTAMP WHERE slug=?",
+        "UPDATE skill_hub_skills SET latest_version=(SELECT v.version FROM skill_hub_versions v WHERE v.slug=? AND NOT EXISTS (SELECT 1 FROM skill_hub_publication_tombstones t WHERE t.slug=v.slug AND t.version=v.version) ORDER BY v.version_sort DESC,v.version DESC LIMIT 1),updated_at=CURRENT_TIMESTAMP WHERE slug=?",
         [inspected.name, inspected.name],
       ),
     ])
@@ -831,7 +833,7 @@ async function deletePublication(request, env, config, fetchImplementation, slug
         [auth.author, value.client_request_id, 'delete', slug, version, value.package_sha256, 'deleted'],
       ),
       statement(env,
-        "UPDATE skill_hub_skills SET latest_version=COALESCE((SELECT v.version FROM skill_hub_versions v WHERE v.slug=? AND NOT EXISTS (SELECT 1 FROM skill_hub_publication_tombstones t WHERE t.slug=v.slug AND t.version=v.version) ORDER BY v.version_sort DESC LIMIT 1),latest_version),updated_at=CURRENT_TIMESTAMP WHERE slug=?",
+        "UPDATE skill_hub_skills SET latest_version=COALESCE((SELECT v.version FROM skill_hub_versions v WHERE v.slug=? AND NOT EXISTS (SELECT 1 FROM skill_hub_publication_tombstones t WHERE t.slug=v.slug AND t.version=v.version) ORDER BY v.version_sort DESC,v.version DESC LIMIT 1),latest_version),updated_at=CURRENT_TIMESTAMP WHERE slug=?",
         [slug, slug],
       ),
     ])
@@ -870,16 +872,17 @@ async function createIntent(request, env, config, fetchImplementation, slug, ver
   const intentId = `intent_${crypto.randomUUID().replaceAll('-', '')}`
   const expiresAt = new Date(Date.now() + 5 * 60 * 1_000).toISOString()
   try {
-    await env.DB.batch([
+    const results = await env.DB.batch([
       statement(env,
-        'INSERT INTO skill_hub_install_intents(intent_id,account_ref,slug,version,package_sha256,client_request_id,install_token_sha256,completion_token_sha256,expires_at,status) VALUES (?,?,?,?,?,?,?,?,?,?)',
-        [intentId, auth.author, slug, version, value.package_sha256, value.client_request_id, tokenHash, null, expiresAt, 'created'],
+        'INSERT INTO skill_hub_install_intents(intent_id,account_ref,slug,version,package_sha256,client_request_id,install_token_sha256,completion_token_sha256,expires_at,status) SELECT ?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM skill_hub_install_intents WHERE account_ref=? AND client_request_id=?)',
+        [intentId, auth.author, slug, version, value.package_sha256, value.client_request_id, tokenHash, null, expiresAt, 'created', auth.author, value.client_request_id],
       ),
       statement(env,
-        'INSERT INTO skill_hub_install_logs(intent_id,account_ref,slug,version,package_sha256,status) VALUES (?,?,?,?,?,?)',
-        [intentId, auth.author, slug, version, value.package_sha256, 'created'],
+        'INSERT INTO skill_hub_install_logs(intent_id,account_ref,slug,version,package_sha256,status) SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM skill_hub_install_intents WHERE intent_id=?)',
+        [intentId, auth.author, slug, version, value.package_sha256, 'created', intentId],
       ),
     ])
+    if (Number(results[0]?.meta?.changes ?? 0) !== 1) throw new HttpError(409, 'Skill Hub install request identity conflicts')
   } catch {
     throw new HttpError(409, 'Skill Hub install request identity conflicts')
   }

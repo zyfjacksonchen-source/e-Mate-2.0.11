@@ -498,16 +498,42 @@ function moveBackInstall(paths, previousReceipt) {
   restoreReceipt(paths, previousReceipt)
 }
 
+function stageInstallRecovery(paths, previousReceipt) {
+  ensureRealDirectory(paths.candidateRoot, 'Skill Hub candidate root')
+  let active = existsReal(paths.active)
+  let candidate = existsReal(paths.candidate)
+  const backup = existsReal(paths.backup)
+  if (!candidate) {
+    if (!active) throw new Error('Skill Hub candidate is missing during recovery')
+    renameSync(paths.active, paths.candidate)
+    active = false
+    candidate = true
+  }
+  if (backup) {
+    if (active) throw new Error('Skill Hub active and backup paths collide during recovery')
+    renameSync(paths.backup, paths.active)
+    active = true
+  }
+  if (previousReceipt?.status === 'installed' ? !active : active || !candidate) {
+    throw new Error('Skill Hub previous installation state is inconsistent during recovery')
+  }
+  restoreReceipt(paths, previousReceipt)
+}
+
 export function compareSkillVersions(left, right) {
   const parseVersion = (value) => {
     const match = VERSION.exec(value)
     if (match === null) throw new Error('Skill version is invalid')
-    return { numbers: match.slice(1, 4).map(Number), prerelease: match[4]?.split('.') }
+    return { numbers: match.slice(1, 4), prerelease: match[4]?.split('.') }
   }
+  const compareNumeric = (one, two) => one.length === two.length
+    ? one === two ? 0 : one < two ? -1 : 1
+    : one.length < two.length ? -1 : 1
   const a = parseVersion(left)
   const b = parseVersion(right)
   for (let index = 0; index < 3; index += 1) {
-    if (a.numbers[index] !== b.numbers[index]) return a.numbers[index] < b.numbers[index] ? -1 : 1
+    const compared = compareNumeric(a.numbers[index], b.numbers[index])
+    if (compared !== 0) return compared
   }
   if (a.prerelease === undefined || b.prerelease === undefined) {
     return a.prerelease === b.prerelease ? 0 : a.prerelease === undefined ? 1 : -1
@@ -520,7 +546,7 @@ export function compareSkillVersions(left, right) {
     if (one === undefined || two === undefined) return one === undefined ? -1 : 1
     const oneNumeric = /^\d+$/u.test(one)
     const twoNumeric = /^\d+$/u.test(two)
-    if (oneNumeric && twoNumeric) return Number(one) < Number(two) ? -1 : 1
+    if (oneNumeric && twoNumeric) return compareNumeric(one, two)
     if (oneNumeric !== twoNumeric) return oneNumeric ? -1 : 1
     return one < two ? -1 : 1
   }
@@ -639,10 +665,8 @@ export function createSkillHubStore({ dshHome, validateCandidate, validateActive
       if (error instanceof SkillHubRecoveryPendingError) throw error
       try {
         if (switched) {
-          rmSync(paths.active, { recursive: true, force: true })
-          if (existsReal(paths.backup)) renameSync(paths.backup, paths.active)
-        }
-        restoreReceipt(paths, previousReceipt)
+          moveBackInstall(paths, previousReceipt)
+        } else restoreReceipt(paths, previousReceipt)
         invalidate()
       } catch (rollbackError) {
         writeWal(paths, { ...wal, phase: 'completion-pending', desired_completion: claimed ? 'failed' : null })
@@ -850,14 +874,15 @@ export function createSkillHubStore({ dshHome, validateCandidate, validateActive
           results.push({ slug, status: 'recovered' })
           continue
         }
-        if (wal.phase === 'switched') {
-          moveBackInstall(paths, wal.previous_receipt ?? undefined)
-          invalidate()
-          writeWal(paths, { ...wal, phase: 'completion-pending' })
-        } else if (wal.phase === 'prepared' && wal.completion_receipt === null) {
+        if (wal.phase === 'prepared' && wal.completion_receipt === null) {
           cleanupTransaction(paths)
           results.push({ slug, status: 'rolled-back' })
           continue
+        }
+        if (['claimed', 'switched', 'completion-pending'].includes(wal.phase)) {
+          stageInstallRecovery(paths, wal.previous_receipt ?? undefined)
+          invalidate()
+          writeWal(paths, { ...wal, phase: 'completion-pending' })
         }
         const pending = readWal(paths, slug)
         if (typeof pending.completion_receipt !== 'string' || typeof reconcile !== 'function') {
@@ -889,6 +914,7 @@ export function createSkillHubStore({ dshHome, validateCandidate, validateActive
         invalidate()
         await validateActive(paths.active, slug, signal)
         atomicJson(paths.receipt, pending.next_receipt)
+        writeWal(paths, { ...pending, phase: 'committed' })
         rmSync(paths.backup, { recursive: true, force: true })
         cleanupTransaction(paths)
         results.push({ slug, status: 'recovered' })

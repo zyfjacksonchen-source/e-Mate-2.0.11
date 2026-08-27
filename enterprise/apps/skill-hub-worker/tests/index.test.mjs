@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { deflateRawSync } from 'node:zlib'
 import test from 'node:test'
-import worker, { inspectSkillArchive } from '../src/index.js'
+import worker, { handleRequest, inspectSkillArchive, versionSort } from '../src/index.js'
 
 class D1Statement {
   constructor(database, sql, values = []) {
@@ -353,9 +353,23 @@ test('keeps slug ownership account-bound and restores the previous SemVer latest
   const one = await (await publish('1.0.0', 'publish:version-0001')).json()
   const prerelease = await (await publish('2.0.0-beta.1', 'publish:version-0002')).json()
   const two = await (await publish('2.0.0', 'publish:version-0003')).json()
+  const buildOne = await (await publish('2.0.0+build.1', 'publish:version-0004')).json()
+  const buildTwo = await (await publish('2.0.0+build.2', 'publish:version-0005')).json()
   const latest = await (await direct(env, '/ecorex-agent/client/skill-hub/v1/skills/versioned-skill')).json()
-  assert.equal(latest.skill.version, '2.0.0')
-  assert.deepEqual(latest.versions.map(card => card.version), ['2.0.0', '2.0.0-beta.1', '1.0.0'])
+  assert.equal(latest.skill.version, '2.0.0+build.2')
+  assert.deepEqual(latest.versions.map(card => card.version), [
+    '2.0.0+build.2', '2.0.0+build.1', '2.0.0', '2.0.0-beta.1', '1.0.0',
+  ])
+  await direct(env, '/ecorex-agent/client/skill-hub/v1/skills/versioned-skill/versions/2.0.0%2Bbuild.2', {
+    method: 'DELETE', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ package_sha256: buildTwo.package_sha256, client_request_id: 'delete:version-0005' }),
+  })
+  assert.equal((await (await direct(env, '/ecorex-agent/client/skill-hub/v1/skills/versioned-skill')).json()).skill.version, '2.0.0+build.1')
+  await direct(env, '/ecorex-agent/client/skill-hub/v1/skills/versioned-skill/versions/2.0.0%2Bbuild.1', {
+    method: 'DELETE', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ package_sha256: buildOne.package_sha256, client_request_id: 'delete:version-0004' }),
+  })
+  assert.equal((await (await direct(env, '/ecorex-agent/client/skill-hub/v1/skills/versioned-skill')).json()).skill.version, '2.0.0')
   const hijack = await publish('3.0.0', 'publish:hijack-0001', 'user-2')
   assert.equal(hijack.status, 409)
   const forbiddenDelete = await direct(env, '/ecorex-agent/client/skill-hub/v1/skills/versioned-skill/versions/2.0.0', {
@@ -393,6 +407,22 @@ test('uses opaque keyset cursors for catalog and version history', async () => {
   const wrongScope = await direct(env, `/ecorex-agent/client/skill-hub/v1/skills?query=changed&limit=1&cursor=${encodeURIComponent(firstCatalog.next_cursor)}`)
   assert.equal(wrongScope.status, 422)
 
+  await publish('semver-pages', '1.0.0-aa', 'publish:semver-0001')
+  await publish('semver-pages', '1.0.0-z', 'publish:semver-0002')
+  await publish('semver-pages', '1.0.0-9007199254740992', 'publish:semver-0003')
+  await publish('semver-pages', '1.0.0-9007199254740993', 'publish:semver-0004')
+  const semverCatalog = await (await direct(env, '/ecorex-agent/client/skill-hub/v1/skills?query=semver-pages&limit=1')).json()
+  assert.equal(semverCatalog.items[0].version, '1.0.0-z')
+  const semverFirst = await (await direct(env, '/ecorex-agent/client/skill-hub/v1/skills/semver-pages?limit=2')).json()
+  const semverSecond = await (await direct(env, `/ecorex-agent/client/skill-hub/v1/skills/semver-pages?limit=2&cursor=${encodeURIComponent(semverFirst.next_cursor)}`)).json()
+  assert.deepEqual([...semverFirst.versions, ...semverSecond.versions].map(item => item.version), [
+    '1.0.0-z',
+    '1.0.0-aa',
+    '1.0.0-9007199254740993',
+    '1.0.0-9007199254740992',
+  ])
+  assert.equal(semverFirst.skill.version, '1.0.0-z')
+
   const firstVersions = await (await direct(env, '/ecorex-agent/client/skill-hub/v1/skills/version-pages?limit=2')).json()
   assert.deepEqual(firstVersions.versions.map(item => item.version), ['2.0.0', '2.0.0-beta'])
   assert.equal(typeof firstVersions.next_cursor, 'string')
@@ -403,6 +433,11 @@ test('uses opaque keyset cursors for catalog and version history', async () => {
   assert.equal(secondVersions.next_cursor, null)
   const exactVersion = await (await direct(env, '/ecorex-agent/client/skill-hub/v1/skills/version-pages/versions/1.0.0')).json()
   assert.equal(exactVersion.version, '1.0.0')
+})
+
+test('keeps version sort keys exact beyond three-digit numeric identifier lengths', () => {
+  assert.ok(versionSort(`1.0.0-${'9'.repeat(1_000)}`) > versionSort(`1.0.0-${'9'.repeat(999)}`))
+  assert.ok(versionSort('1.0.0-a-') > versionSort('1.0.0-a.1'))
 })
 
 test('rejects browser bearer transport and binds one-time install credentials to the authenticated session', async () => {
@@ -455,6 +490,42 @@ test('rejects browser bearer transport and binds one-time install credentials to
   assert.equal(wrongCompletionSession.status, 409)
 })
 
+test('keeps legacy duplicate intent rows deployable while concurrent request identity stays unique', async () => {
+  const env = environment()
+  const insert = 'INSERT INTO skill_hub_install_intents(intent_id,account_ref,slug,version,package_sha256,client_request_id,install_token_sha256,completion_token_sha256,expires_at,status) VALUES (?,?,?,?,?,?,?,?,?,?)'
+  for (const suffix of ['one', 'two']) await env.DB.prepare(insert).bind(
+    `legacy_${suffix}`, 'legacy-account', 'legacy-skill', '1.0.0', 'a'.repeat(64), 'legacy:duplicate-request',
+    `${suffix}${'0'.repeat(64 - suffix.length)}`, null, '2026-08-27T00:00:00.000Z', 'created',
+  ).run()
+  env.DB.database.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'))
+  assert.equal(env.DB.database.prepare('SELECT COUNT(*) AS count FROM skill_hub_install_intents WHERE account_ref=? AND client_request_id=?')
+    .get('legacy-account', 'legacy:duplicate-request').count, 2)
+
+  const payload = skill('intent-race', '1.0.0')
+  const card = await (await direct(env, '/ecorex-agent/client/skill-hub/v1/skills', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: publicationBody(payload, 'intent-race', 'third_party', 'publish:intent-race-0001'),
+  })).json()
+  const options = {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ package_sha256: card.package_sha256, client_request_id: 'install:intent-race-0001' }),
+  }
+  const create = async () => {
+    try {
+      return await handleRequest(request('/ecorex-agent/client/skill-hub/v1/skills/intent-race/versions/1.0.0/install-intent', options), env, activeSession)
+    } catch (error) {
+      return { status: error.status }
+    }
+  }
+  const responses = await Promise.all([
+    create(),
+    create(),
+  ])
+  assert.deepEqual(responses.map(response => response.status).sort(), [200, 409])
+  assert.equal(env.DB.database.prepare('SELECT COUNT(*) AS count FROM skill_hub_install_intents WHERE client_request_id=?')
+    .get('install:intent-race-0001').count, 1)
+})
+
 test('does not report a tombstoned publication replay as published', async () => {
   const env = environment()
   const payload = skill('deleted-replay', '1.0.0')
@@ -472,6 +543,12 @@ test('does not report a tombstoned publication replay as published', async () =>
   })
   assert.equal(replay.status, 409)
   assert.equal((await replay.json()).error.code, 'conflict')
+  const newRequestReplay = await direct(env, '/ecorex-agent/client/skill-hub/v1/skills', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: publicationBody(payload, 'deleted-replay', 'third_party', 'publish:deleted-0002'),
+  })
+  assert.equal(newRequestReplay.status, 409)
+  assert.equal((await newRequestReplay.json()).error.code, 'conflict')
 })
 
 test('fails closed before storage for invalid identity and invalid archives', async () => {

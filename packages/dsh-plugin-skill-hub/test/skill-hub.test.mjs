@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
@@ -11,9 +11,10 @@ import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { strToU8, zipSync } from 'fflate'
+import { strToU8, unzipSync, zipSync } from 'fflate'
 import { apply, nativeCandidate } from '../lib/index.js'
 import {
+  compareSkillVersions,
   createSkillHubClient,
   createSkillHubStore,
   inspectSkillArchive,
@@ -267,6 +268,57 @@ test('a prerelease downgrade requires the explicit downgrade choice', async () =
     complete: async () => acceptedCompletion(),
   }), /explicit downgrade choice/u)
   assert.equal(claimed, false)
+})
+
+test('SemVer precedence keeps arbitrary-size numeric and ASCII prerelease identifiers exact', () => {
+  assert.equal(compareSkillVersions('9007199254740992.0.0', '9007199254740993.0.0'), -1)
+  assert.equal(compareSkillVersions('1.0.0-9007199254740992', '1.0.0-9007199254740993'), -1)
+  assert.equal(compareSkillVersions('1.0.0-z', '1.0.0-aa'), 1)
+  assert.equal(compareSkillVersions('1.0.0-alpha', '1.0.0-alpha.1'), -1)
+  assert.equal(compareSkillVersions('1.0.0-1', '1.0.0-alpha'), -1)
+  assert.equal(compareSkillVersions('1.0.0+one', '1.0.0+two'), 0)
+})
+
+test('restart repairs crashes after candidate activation, during rollback staging, and after recovery commit', async () => {
+  for (const phase of ['claimed', 'switched', 'committed']) {
+    const dshHome = temporaryHome()
+    const store = lifecycleStore(dshHome)
+    const first = skillArchive('switch-crash', '1.0.0')
+    const next = skillArchive('switch-crash', '2.0.0')
+    await install(store, first)
+
+    const transaction = join(dshHome, 'e-mate', 'skill-hub', 'transactions', 'switch-crash')
+    const candidate = join(transaction, 'candidate', 'switch-crash')
+    const active = join(dshHome, 'skills', 'switch-crash')
+    const backup = join(transaction, 'backup')
+    const receiptPath = join(dshHome, 'e-mate', 'migrations', 'skill-switch-crash.json')
+    const previousReceipt = JSON.parse(readFileSync(receiptPath, 'utf8'))
+    const nextReceipt = { ...previousReceipt, version: '2.0.0', package_sha256: next.card.package_sha256 }
+    mkdirSync(candidate, { recursive: true })
+    for (const [path, content] of Object.entries(unzipSync(next.payload))) writeFileSync(join(candidate, path), content)
+    writeFileSync(join(transaction, 'wal.json'), JSON.stringify({
+      schema_version: 1,
+      owner_pid: 999_999,
+      phase,
+      slug: 'switch-crash',
+      action: 'update',
+      previous_receipt: previousReceipt,
+      next_receipt: nextReceipt,
+      desired_completion: 'installed',
+      completion_receipt: 'completion-after-switch-crash',
+    }))
+    renameSync(active, backup)
+    renameSync(candidate, active)
+    if (phase === 'switched') renameSync(active, candidate)
+    if (phase === 'committed') writeFileSync(receiptPath, JSON.stringify(nextReceipt))
+
+    assert.deepEqual(await store.recover({ reconcile: async () => 'installed' }), [
+      { slug: 'switch-crash', status: 'recovered' },
+    ])
+    assert.match(readFileSync(join(active, 'SKILL.md'), 'utf8'), /2\.0\.0/u)
+    assert.equal(JSON.parse(readFileSync(receiptPath, 'utf8')).version, '2.0.0')
+    assert.equal(existsSync(transaction), false)
+  }
 })
 
 test('lost completion response preserves the old Skill and restart reconciliation commits the candidate', async () => {
