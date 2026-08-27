@@ -466,7 +466,7 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
       'Prepare signed native Cloudflare publication bundle',
     ]))
     await json(join(metadata, 'desktop-artifact.json'), artifact('201', `e-mate-desktop-release-${SOURCE}`, '102'))
-    await json(join(metadata, 'ci-artifact.json'), artifact('206', `e-mate-change-impact-${SOURCE}`, '100'))
+    await json(join(metadata, 'ci-artifact.json'), artifact('206', `e-mate-ci-plan-${SOURCE}`, '100'))
     await json(join(metadata, 'profile-publication-artifact.json'), artifact('202', `e-mate-profile-native-cloudflare-publication-${SOURCE}`, '103'))
     await json(join(metadata, 'base-sdk-artifact.json'), artifact('204', `e-mate-base-sdk-${SOURCE}`, '100'))
     await json(join(metadata, 'profile-build-artifact.json'), artifact('205', `e-mate-desktop-profile-${SOURCE}`, '100'))
@@ -509,8 +509,8 @@ test('workflow is build-only and uploads only the two external signer inputs', a
   assert.deepEqual(Object.keys(desktopRelease.jobs), ['manifest'])
   assert.ok(Object.values(desktopRelease.jobs).some(job => job.name === 'Bind exact protected-main CI artifacts to the release manifest'))
   assert.ok(Object.values(profileRelease.jobs).some(job => job.name === 'Validate accepted CI evidence'))
-  assert.ok(Object.values(profileRelease.jobs).some(job => job.name === 'Bootstrap complete Profile generation / ${{ matrix.target }}'))
   assert.ok(Object.values(profileRelease.jobs).some(job => job.name === 'Prepare signed native Cloudflare publication bundle'))
+  assert.deepEqual(Object.keys(profileRelease.jobs), ['validate', 'prepare-publication'])
   const upload = parsed.jobs.admission.steps.find(step => step.uses === 'actions/upload-artifact@v4')
   assert.equal(upload.with.name, 'e-mate-desktop-admission-${{ github.sha }}')
   assert.equal(upload.with.path.trim(), [

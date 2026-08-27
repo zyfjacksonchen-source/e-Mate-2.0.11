@@ -148,13 +148,12 @@ describe('repository release boundary', () => {
       harness_commit: '99f6f02fecdb7dff40c3fbc9470f5907c29f74ca',
       harness_version: '0.1.0-rc.7',
     })
-    assert.equal(boundary.components.length, 16)
     assert.equal(boundary.components.every(component => component.errors.length === 0), true)
     assert.deepEqual(boundary.components.flatMap(component => component.errors), [])
-    const blocked = JSON.parse(readFileSync(join(root, 'packages/dsh-plugin-xin-assistant/package.json'), 'utf8'))
-    assert.deepEqual(blocked.eMate.component.base_contracts, [boundary.baseContract.id])
-    assert.equal(blocked.eMate.harnessCommit, boundary.baseContract.harness_commit)
-    assert.equal(boundary.components.find(component => component.id === blocked.name)?.desktop, 'blocked')
+    const postT04 = boundary.components.filter(component => component.id !== '@e-mate/dsh-plugin-xin-assistant')
+    assert.equal(postT04.length, 15)
+    assert.equal(postT04.every(component => component.desktop !== 'blocked'), true)
+    assert.equal(postT04.some(component => component.root === 'packages/dsh-plugin-xin-assistant'), false)
     const retired = JSON.parse(readFileSync(join(root, 'packages/dsh-plugin-search-mcp/package.json'), 'utf8'))
     assert.deepEqual(retired.eMate.component.base_contracts, ['e-mate-desktop-profile-v6-dsh-2bc16230975f'])
     assert.equal(retired.eMate.harnessCommit, '2bc16230975f6cf02aa1b283b1f86de44007b059')
@@ -210,6 +209,34 @@ describe('repository release boundary', () => {
       execFileSync('git', ['add', '--', ...files], { cwd: checkout })
 
       assert.equal(existsSync(join(checkout, 'upstream/deepseek-harness/package.json')), false)
+      assert.equal(loadReleaseBoundary(checkout).valid, true)
+
+      const postT04Inventory = {
+        ...inventory,
+        components: inventory.components.filter(component => component.id !== '@e-mate/dsh-plugin-xin-assistant'),
+      }
+      writeFileSync(join(checkout, inventoryPath), `${JSON.stringify(postT04Inventory, null, 2)}\n`)
+      const postT04Boundary = loadReleaseBoundary(checkout)
+      assert.equal(postT04Boundary.components.length, 15)
+      assert.deepEqual(postT04Boundary.components.filter(component => component.desktop === 'blocked'), [])
+      assert.match(postT04Boundary.errors.join('\n'), /runtime imports must equal the component-declared Base ABI union/u)
+      assert.equal(postT04Boundary.baseContract.runtime_imports['@deepseek-ai/dsh-launch-environment'], '0.1.0-rc.7')
+
+      const retirement = classifyChangedPaths([
+        'packages/dsh-plugin-xin-assistant/src/index.ts',
+        inventoryPath,
+        'desktop/e-mate-desktop/scripts/verify-packaged-runtime.ts',
+      ], { root: checkout, acceptedProfileCompatible: true })
+      assert.equal(retirement.lane, 'base')
+      assert.equal(retirement.run_base, true)
+      assert.equal(retirement.run_plugins, false)
+      assert.deepEqual(retirement.publish_components, [])
+      const deletedXin = classifyChangedPaths([
+        'packages/dsh-plugin-xin-assistant/runtime/vendor-native/darwin-arm64/library.dylib',
+      ], { root: checkout, acceptedProfileCompatible: true })
+      assert.equal(deletedXin.lane, 'base')
+      assert.deepEqual(deletedXin.publish_components, [])
+      copyFileSync(join(root, inventoryPath), join(checkout, inventoryPath))
       assert.equal(loadReleaseBoundary(checkout).valid, true)
 
       const basePath = join(checkout, 'desktop/e-mate-desktop/base-contract.json')
@@ -351,9 +378,9 @@ describe('repository release boundary', () => {
     ])
   })
 
-  it('requires the Base lane until the accepted Profile matches the candidate Base', () => {
+  it('uses the refreshed public Profile snapshot and still fails closed on incompatibility', () => {
     const path = 'packages/dsh/profile/plugins/emate-shell/src/client/sidebar.tsx'
-    assert.equal(classifyChangedPaths([path], { root }).lane, 'base')
+    assert.equal(classifyChangedPaths([path], { root }).lane, 'plugin-only')
     assert.equal(classifyChangedPaths([path], { root, acceptedProfileCompatible: false }).lane, 'base')
     assert.equal(classifyChangedPaths([path], { root, acceptedProfileCompatible: true }).lane, 'plugin-only')
     assert.equal(classifyChangedPaths([
@@ -552,6 +579,18 @@ describe('repository release boundary', () => {
   })
 
   it('owns platform impact and the PR/release build plan without workflow path rules', () => {
+    const shell = classify('packages/dsh/profile/plugins/emate-shell/src/index.ts')
+    assert.equal(shell.ci_mode, 'pr-fast')
+    assert.equal(shell.run_components, true)
+    assert.equal(shell.compose_profile, false)
+    assert.deepEqual(shell.ci, {
+      app_smoke: { macos: true, windows: true },
+      distribution: { macos: false, windows: false },
+    })
+    const skillHub = classify('packages/dsh-plugin-skill-hub/src/index.ts')
+    assert.equal(skillHub.run_components, true)
+    assert.deepEqual(skillHub.ci.app_smoke, { macos: false, windows: false })
+
     const runtime = classify('desktop/e-mate-desktop/src/main.ts')
     assert.deepEqual(runtime.ci, {
       app_smoke: { macos: true, windows: true },
@@ -592,6 +631,10 @@ describe('repository release boundary', () => {
 
     const updater = classify('desktop/e-mate-desktop/src/update-checker.ts')
     assert.deepEqual(updater.ci.distribution, { macos: false, windows: false })
+    assert.deepEqual(classifyWith(
+      { protectedMain: true },
+      'desktop/e-mate-desktop/src/update-checker.ts',
+    ).ci.distribution, { macos: true, windows: true })
     assert.deepEqual(
       classify('desktop/e-mate-desktop/build/assistedMessages.yml').ci.distribution,
       { macos: false, windows: false },
@@ -614,6 +657,11 @@ describe('repository release boundary', () => {
       app_smoke: { macos: true, windows: true },
       distribution: { macos: true, windows: true },
     })
+    assert.equal(releaseCandidate.ci_mode, 'release-candidate')
+    assert.equal(releaseCandidate.compose_profile, true)
+    assert.equal(releaseCandidate.profile_bootstrap, false)
+    assert.equal(releaseCandidate.components.length, 15)
+    assert.equal(releaseCandidate.ci_component_jobs.every(job => job.target !== 'portable'), true)
     assert.equal(classifyWith(
       { releaseCandidate: true },
       'desktop/e-mate-desktop/src/main.ts',
@@ -628,6 +676,11 @@ describe('repository release boundary', () => {
       'scripts/change-impact.mjs', '--path', 'docs/development-log.md', '--release-candidate',
     ], { cwd: root, encoding: 'utf8' })
     assert.equal(unprotectedCli.status, 1)
+    const auditCli = spawnSync(process.execPath, [
+      'scripts/change-impact.mjs', '--audit',
+    ], { cwd: root, encoding: 'utf8' })
+    assert.equal(auditCli.status, 0, auditCli.stderr)
+    assert.equal(JSON.parse(auditCli.stdout).ci_mode, 'audit')
 
     const enterprise = classify('enterprise/apps/auth-gateway/src/index.ts')
     assert.equal(enterprise.enterprise, true)
@@ -691,112 +744,44 @@ describe('repository release boundary', () => {
     assert.equal(classify('.github/workflows/profile-release.yml').lane, 'base')
   })
 
-  it('makes the required CI admission consume only classifier outputs', () => {
+  it('makes the required CI admission consume one executable plan across PR, RC, and Audit lanes', () => {
     const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
-    assert.match(workflow, /impact:\n(?:.|\n)*?pnpm\/action-setup@v4(?:.|\n)*?pnpm install --frozen-lockfile --ignore-scripts(?:.|\n)*?Test the fail-closed classifier/u)
-    assert.match(workflow, /source:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_base == 'true'/u)
-    assert.match(workflow, /plugins:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_plugins == 'true'/u)
-    assert.match(workflow, /run_verification: \$\{\{ steps\.classify\.outputs\.run_verification \}\}/u)
-    assert.match(workflow, /include: \$\{\{ fromJSON\(needs\.impact\.outputs\.ci_component_jobs_json\) \}\}/u)
-    assert.match(workflow, /base-platform-components:\n(?:.|\n)*?needs: \[impact, source\](?:.|\n)*?include: \$\{\{ fromJSON\(needs\.impact\.outputs\.ci_base_platform_component_jobs_json\) \}\}/u)
-    assert.match(workflow, /name: Prepare the exact component Python runtime(?:.|\n)*?prepare-python-runtime\.mjs --target "\$TARGET"(?:.|\n)*?EMATE_BUILD_PYTHON: \$\{\{ steps\.component-python\.outputs\.python \}\}/u)
-    assert.doesNotMatch(workflow, /python-version: '3\.12\.14'/u)
-    assert.match(workflow, /name: Test the accepted platform component against the new Base\n\s+shell: bash[^]*?COMPONENTS_JSON: \$\{\{ toJSON\(matrix\.components\) \}\}[^]*?node scripts\/component-run\.mjs check --component "\$component"/u)
-    assert.match(workflow, /name: Export the exact accepted Base SDK run artifact(?:.|\n)*?name: e-mate-base-sdk-\$\{\{ needs\.impact\.outputs\.head_sha \}\}(?:.|\n)*?include-hidden-files: true(?:.|\n)*?retention-days: 30/u)
-    assert.match(workflow, /name: Build pinned DeepSeek Harness\n\s+run: pnpm build:harness/u)
-    assert.match(workflow, /runs-on: \$\{\{ matrix\.runner \}\}/u)
-    assert.match(workflow, /name: Build and test only the changed component\n\s+shell: bash[^]*?COMPONENTS_JSON: \$\{\{ toJSON\(matrix\.components\) \}\}[^]*?node scripts\/component-run\.mjs check --component "\$component"/u)
-    assert.match(workflow, /if: toJSON\(matrix\.publish_components\) != '\[\]'/u)
-    assert.match(workflow, /profile-portable-composition:\n(?:.|\n)*?name: Portable Profile generations(?:.|\n)*?needs: \[impact, plugins\](?:.|\n)*?portable_publish == 'true'(?:.|\n)*?runs-on: macos-15(?:.|\n)*?Compose every target and boot the portable graph once/u)
+    const audit = readFileSync(new URL('../.github/workflows/audit.yml', import.meta.url), 'utf8')
+    const packageManifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+    assert.match(workflow, /name: e-mate-ci-plan-\$\{\{ steps\.classify\.outputs\.head_sha \}\}[\s\S]*?path: ci-plan\.json/u)
+    for (const output of ['ci_mode', 'run_components', 'compose_profile', 'profile_bootstrap']) {
+      assert.ok(workflow.includes(`${output}: \${{ steps.classify.outputs.${output} }}`), output)
+    }
+    assert.match(workflow, /plugins:\n[\s\S]*?needs: \[impact, source, component-base-sdk\][\s\S]*?run_components == 'true'/u)
+    assert.match(workflow, /component-base-sdk:\n[\s\S]*?Build one recoverable Base SDK on cache miss[\s\S]*?node scripts\/component-run\.mjs check[\s\S]*?name: e-mate-base-sdk-/u)
+    assert.match(workflow, /plugins:\n[\s\S]*?Download the exact Base SDK produced for this run[\s\S]*?node scripts\/base-sdk\.mjs install/u)
+    assert.match(workflow, /source:\n[\s\S]*?pnpm test:harness-provenance[\s\S]*?Export already-built portable RC component payloads/u)
+    assert.match(workflow, /profile-portable-composition:\n[\s\S]*?compose_profile == 'true'[\s\S]*?Download the exact Base SDK produced for this run/u)
+    assert.match(workflow, /profile-composition:\n[\s\S]*?compose_profile == 'true'[\s\S]*?Download the exact Base SDK produced for this run/u)
     assert.equal(workflow.match(/--snapshot artifacts\/release\/profile-current-snapshot\.json\n\s+--materialize-current dist\/profile-current/gu)?.length, 2)
     assert.doesNotMatch(workflow, /curl[^]*desktop\/profile\/desired-state/u)
-    assert.match(workflow, /for target in darwin-arm64 darwin-x64 win32-x64;(?:.|\n)*?node scripts\/profile-release\.mjs(?:.|\n)*?pids\+=\("\$!"\)(?:.|\n)*?wait "\$pid"(?:.|\n)*?verify-profile-boot\.mjs(?:.|\n)*?--target darwin-arm64/u)
-    assert.match(workflow, /profile-composition:\n(?:.|\n)*?needs: \[impact, plugins\](?:.|\n)*?portable_publish != 'true'(?:.|\n)*?Compose and boot the complete candidate generation/u)
-    assert.match(workflow, /node scripts\/base-sdk\.mjs fingerprint/u)
-    assert.match(workflow, /node scripts\/profile-release\.mjs(?:.|\n)*?verify-profile-boot\.mjs/u)
-    assert.match(workflow, /if test "\$BASE_SHA" = 0000000000000000000000000000000000000000;(?:.|\n)*?ACCEPTED_PREDECESSOR/u)
-    assert.match(workflow, /name: e-mate-change-impact-\$\{\{ steps\.classify\.outputs\.head_sha \}\}/u)
-    assert.match(workflow, /enterprise:\n(?:.|\n)*?if: needs\.impact\.outputs\.run_enterprise == 'true'/u)
-    const enterpriseStart = workflow.indexOf('\n  enterprise:')
-    const enterpriseJob = workflow.slice(enterpriseStart, workflow.indexOf('\n  desktop-windows:', enterpriseStart))
-    assert.match(enterpriseJob, /fetch-depth: 1(?:.|\n)*?sparse-checkout: \|\n\s+enterprise\n\s+package\.json(?:.|\n)*?sparse-checkout-cone-mode: false(?:.|\n)*?submodules: false/u)
-    assert.match(enterpriseJob, /repository: zyfjacksonchen-source\/EcoreX(?:.|\n)*?ref: 564a6b6c1d43fb6831dd4a5cd8026e472f063311(?:.|\n)*?desktop\/src\/styles\/tokens\.css(?:.|\n)*?desktop\/src\/v1\/assets\/emate-logo\.png(?:.|\n)*?submodules: false/u)
-    assert.doesNotMatch(enterpriseJob, /submodules: recursive/u)
-    assert.match(workflow, /RUN_ENTERPRISE: \$\{\{ needs\.impact\.outputs\.run_enterprise \}\}(?:.|\n)*?case "\$RUN_ENTERPRISE" in\n\s+true\) test "\$ENTERPRISE" = success ;;\n\s+false\) test "\$ENTERPRISE" = skipped ;;/u)
-    assert.match(workflow, /admission:\n(?:.|\n)*?RUN_WINDOWS_APP_SMOKE:(?:.|\n)*?case "\$RUN_WINDOWS_APP_SMOKE" in\n\s+true\) test "\$WINDOWS" = success ;;\n\s+false\) test "\$WINDOWS" = skipped ;;/u)
-    assert.match(workflow, /case "\$RUN_MACOS_APP_SMOKE" in\n\s+true\) test "\$MACOS" = success ;;\n\s+false\) test "\$MACOS" = skipped ;;/u)
-    assert.match(workflow, /base\)(?:.|\n)*?test "\$BASE_PLATFORM_COMPONENTS" = success/u)
-    const sourceJob = workflow.slice(workflow.indexOf('  source:'), workflow.indexOf('\n  plugins:'))
-    assert.doesNotMatch(sourceJob, /enterprise\/pnpm-lock\.yaml|pnpm --dir enterprise|pnpm enterprise:/u)
-    for (const [jobName, nextJobName] of [
-      ['desktop-windows', 'desktop-macos'],
-      ['desktop-macos', 'admission'],
-    ]) {
-      const start = workflow.indexOf(`  ${jobName}:`)
-      const end = workflow.indexOf(`\n  ${nextJobName}:`, start + 3)
-      const job = workflow.slice(start, end < 0 ? undefined : end)
-      assert.match(job, /needs: \[impact, source\]/u)
-      assert.match(job, /name: e-mate-base-sdk-\$\{\{ needs\.impact\.outputs\.head_sha \}\}/u)
-      assert.match(job, /node scripts\/base-sdk\.mjs install --directory \.release-cache\/base-sdk/u)
-      assert.ok(
-        job.indexOf('base-sdk.mjs install') < job.indexOf('yarn install --immutable'),
-        `${jobName} must restore the accepted Base SDK before Yarn materializes Desktop`,
-      )
-      assert.match(job, /if: needs\.impact\.outputs\.run_verification == 'true'/u)
-      assert.match(job, /yarn verify:loader/u)
-      assert.equal(job.match(/yarn verify:profile/gu)?.length, 1)
-      const platform = jobName === 'desktop-windows' ? 'windows' : 'macos'
-      assert.match(job, new RegExp(`if: needs\\.impact\\.outputs\\.${platform}_distribution != 'true'[^]*?yarn package:dir`, 'u'))
-      assert.match(job, new RegExp(`if: needs\\.impact\\.outputs\\.${platform}_distribution == 'true'`, 'u'))
-      assert.match(job, /ELECTRON_CACHE: \$\{\{ github\.workspace \}\}\/\.release-cache\/electron/u)
-      assert.match(job, /ELECTRON_BUILDER_CACHE: \$\{\{ github\.workspace \}\}\/\.\.\/e-mate-electron-builder/u)
-      assert.match(job, /node -p 'require\(process\.argv\[1\]\)\.version' \.\/desktop\/e-mate-desktop\/package\.json/u)
-      assert.match(job, /key: desktop-tools-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-\$\{\{ hashFiles\('desktop\/package\.json', 'desktop\/yarn\.lock', 'desktop\/\.yarn\/patches\/\*\*'/u)
-      assert.match(job, /node scripts\/stage-desktop-ci-artifact\.mjs stage(?:.|\n)*?--source-commit "\$\{\{ needs\.impact\.outputs\.head_sha \}\}"(?:.|\n)*?--ci-run-id "\$\{\{ github\.run_id \}\}"(?:.|\n)*?--base-contract desktop\/e-mate-desktop\/base-contract\.json/u)
-      assert.match(job, /compression-level: 0/u)
-      assert.match(job, /GITHUB_STEP_SUMMARY/u)
+    assert.match(workflow, /profile_bootstrap != 'true'[\s\S]*?current_args=\(--bootstrap\)[\s\S]*?node scripts\/profile-release\.mjs/u)
+    assert.match(workflow, /Overlay only the exact changed shell bytes[\s\S]*?component-release\.mjs materialize[\s\S]*?scripts\/package-dir\.mjs/u)
+    assert.match(workflow, /Build and verify the formal unsigned Windows installer[\s\S]*?yarn dist:win/u)
+    assert.match(workflow, /Build and verify the formal unsigned universal disk image[\s\S]*?yarn dist:mac-unsigned-release/u)
+    assert.match(workflow, /admission:\n[\s\S]*?COMPOSE_PROFILE:[\s\S]*?case "\$LANE" in/u)
+    assert.doesNotMatch(workflow, /^\s+paths(?:-ignore)?:/mu)
+    assert.ok((workflow.match(/GITHUB_STEP_SUMMARY/gu)?.length ?? 0) >= 8)
+
+    assert.match(audit, /node scripts\/change-impact\.mjs --audit --github-output "\$GITHUB_OUTPUT" > ci-plan\.json/u)
+    assert.match(audit, /pnpm audit:full/u)
+    assert.match(audit, /yarn verify:licenses/u)
+    assert.doesNotMatch(audit, /profile-release\.yml|desktop-release\.yml|wrangler|r2-publish/u)
+    for (const script of ['test:fast', 'check:affected', 'smoke:app-dir', 'verify:rc', 'audit:full']) {
+      assert.equal(typeof packageManifest.scripts[script], 'string', script)
     }
-    assert.match(workflow, /name: e-mate-desktop-profile-build-receipt-\$\{\{ github\.sha \}\}/u)
-    assert.match(workflow, /desktop-windows:(?:.|\n)*?yarn dist:win/u)
-    assert.match(workflow, /desktop-macos:(?:.|\n)*?yarn dist:mac-unsigned-release/u)
-    const platformJobNames = [
-      'Windows x64 / unsigned desktop installer',
-      'macOS universal / unsigned desktop disk image',
-    ]
-    const releaseConsumers = [
-      readFileSync(new URL('../.github/workflows/desktop-release.yml', import.meta.url), 'utf8'),
-      readFileSync(new URL('../.github/workflows/profile-release.yml', import.meta.url), 'utf8'),
-      readFileSync(new URL('../.github/workflows/desktop-performance.yml', import.meta.url), 'utf8'),
-      readFileSync(new URL('./desktop-admission.mjs', import.meta.url), 'utf8'),
-    ]
-    for (const name of platformJobNames) {
-      assert.ok(workflow.includes(`name: ${name}`))
-      for (const consumer of releaseConsumers) assert.ok(consumer.includes(name))
-    }
-    assert.match(workflow, /name: e-mate-desktop-windows-\$\{\{ needs\.impact\.outputs\.head_sha \}\}/u)
-    assert.match(workflow, /name: e-mate-desktop-macos-\$\{\{ needs\.impact\.outputs\.head_sha \}\}/u)
-    assert.doesNotMatch(workflow, /yarn dist:mac-smoke|name: e-mate-(?:windows-x64|macos-universal)-unsigned/u)
 
     const coordinator = readFileSync(new URL('../.github/workflows/release-coordinator.yml', import.meta.url), 'utf8')
-    assert.match(coordinator, /--workflow desktop-release\.yml\n\s+--inputs '\{"ci_run_id":"\$\{\{ needs\.ci\.outputs\.run_id \}\}","source_sha":"\$\{\{ inputs\.source_sha \}\}"\}'/u)
-    assert.equal(workflow.match(/GITHUB_STEP_SUMMARY/gu)?.length, 4)
-    assert.doesNotMatch(workflow, /^\s+paths(?:-ignore)?:/mu)
-
-    for (const name of [
-      'Windows x64 / unsigned desktop installer',
-      'macOS universal / unsigned desktop disk image',
-    ]) {
-      assert.ok(workflow.includes(`name: ${name}`), name)
-      for (const path of [
-        '../.github/workflows/desktop-release.yml',
-        '../.github/workflows/desktop-performance.yml',
-        '../.github/workflows/profile-release.yml',
-        './desktop-admission.mjs',
-      ]) assert.ok(readFileSync(new URL(path, import.meta.url), 'utf8').includes(name), `${path}: ${name}`)
-    }
+    assert.match(coordinator, /name: e-mate-ci-plan-\$\{\{ inputs\.source_sha \}\}/u)
+    assert.match(coordinator, /"bootstrap":"\$\{\{ needs\.ci\.outputs\.profile_bootstrap \}\}"/u)
   })
 
-  it('prepares only an already admitted complete component generation for native Cloudflare publication', () => {
+  it('prepares publication only from already-built exact RC artifacts', () => {
     const workflow = readFileSync(new URL('../.github/workflows/profile-release.yml', import.meta.url), 'utf8')
     assert.match(workflow, /source_sha="\$\(jq -er \.head_sha <<<"\$run_json"\)"/u)
     assert.match(workflow, /test "\$\(jq -er \.conclusion <<<"\$run_json"\)" = success/u)
@@ -804,50 +789,20 @@ describe('repository release boundary', () => {
     assert.match(workflow, /test "\$\(jq -er \.run_attempt <<<"\$run_json"\)" = 1/u)
     assert.match(workflow, /test "\$\{GITHUB_REF_PROTECTED:-\}" = true/u)
     assert.match(workflow, /test "\$\(jq -er \.event <<<"\$run_json"\)" = push/u)
-    assert.match(workflow, /test "\$source_sha" = "\$GITHUB_SHA"/u)
-    assert.match(workflow, /git\/ref\/heads\/main/u)
-    assert.doesNotMatch(workflow, /pull_request\)|commits\/\$source_sha\/pulls|later_paths/u)
-    assert.match(workflow, /name: e-mate-change-impact-\$\{\{ steps\.run\.outputs\.source_sha \}\}/u)
+    assert.match(workflow, /name: e-mate-ci-plan-\$\{\{ steps\.run\.outputs\.source_sha \}\}/u)
+    assert.match(workflow, /test "\$\(jq -er \.ci_mode "\$plan"\)" = release-candidate/u)
+    assert.match(workflow, /test "\$\(jq -er \.profile_bootstrap "\$plan"\)" = "\$BOOTSTRAP"/u)
     assert.match(workflow, /job_succeeded 'CI admission'/u)
-    assert.match(workflow, /\.ci_component_jobs \| map\(\.target\) \| unique\[\] \| "Changed Profile components \/ \\\(.\)"/u)
-    assert.doesNotMatch(workflow, /\.component_jobs\[\].*Changed Profile component \/ \\\(.component\)/u)
-    assert.match(workflow, /if test "\$\(jq -er \.portable_publish "\$impact"\)" = true;(?:.|\n)*?job_succeeded 'Portable Profile generations'(?:.|\n)*?Complete Profile generation \/ \$target/u)
-    assert.doesNotMatch(workflow, /if test "\$BOOTSTRAP" = true; then[^]*?publish_components[^]*?= '\[\]'/u)
-    assert.match(workflow, /node scripts\/component-release\.mjs inventory > component-inventory\.json/u)
-    assert.match(workflow, /Bootstrap complete Profile generation \/ \$\{\{ matrix\.target \}\}/u)
-    assert.match(workflow, /node desktop\/e-mate-desktop\/scripts\/verify-profile-boot\.mjs/u)
-    assert.match(workflow, /prepare-python-runtime\.mjs --target "\$TARGET"/u)
-    assert.doesNotMatch(workflow, /python-version: '3\.12\.14'/u)
+    assert.match(workflow, /pattern: e-mate-component-\*-\$\{\{ needs\.validate\.outputs\.source_sha \}\}[\s\S]*?run-id: \$\{\{ inputs\.ci_run_id \}\}/u)
+    for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
+      assert.ok(workflow.includes(`name: e-mate-profile-candidate-${target}-\${{ needs.validate.outputs.source_sha }}`))
+    }
     assert.match(workflow, /node scripts\/publish-profile-r2\.mjs/u)
     assert.match(workflow, /--snapshot artifacts\/release\/profile-current-snapshot\.json/u)
     assert.match(workflow, /--bundle dist\/profile-publication/u)
-    assert.match(workflow, /e-mate-profile-native-cloudflare-publication-/u)
-    assert.match(workflow, /EXPECTED_CHANGED_COMPONENTS_JSON:/u)
-    assert.match(workflow, /changed_args\+=\(--changed "\$component"\)/u)
     assert.match(workflow, /EMATE_PROFILE_SIGNING_PRIVATE_KEY: \$\{\{ secrets\.EMATE_PROFILE_SIGNING_PRIVATE_KEY \}\}/u)
-    assert.match(workflow, /EMATE_ACCEPTED_CI_RUN_ID: \$\{\{ inputs\.ci_run_id \}\}/u)
-    assert.match(workflow, /EMATE_ACCEPTED_SOURCE_SHA: \$\{\{ needs\.validate\.outputs\.source_sha \}\}/u)
-    assert.match(workflow, /environment: r2-publish/u)
-    assert.doesNotMatch(workflow, /ECOREX_R2_ACCESS_KEY_ID|ECOREX_R2_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID/u)
-    assert.match(workflow, /name: Build and test the target component\n\s+shell: bash[^]*?node scripts\/component-run\.mjs check --component "\$COMPONENT"/u)
-    assert.doesNotMatch(workflow, /pnpm --dir upstream\/deepseek-harness run build/u)
-    assert.doesNotMatch(workflow, /yarn (?:build|dist:)/u)
-
-    const bootstrapComponents = workflow.slice(
-      workflow.indexOf('  bootstrap-components:'),
-      workflow.indexOf('  bootstrap-composition:'),
-    )
-    const bootstrapComposition = workflow.slice(
-      workflow.indexOf('  bootstrap-composition:'),
-      workflow.indexOf('  prepare-publication:'),
-    )
-    for (const job of [bootstrapComponents, bootstrapComposition]) {
-      assert.match(job, /name: Download the exact accepted Base SDK run artifact/u)
-      assert.match(job, /name: e-mate-base-sdk-\$\{\{ needs\.validate\.outputs\.source_sha \}\}/u)
-      assert.match(job, /github-token: \$\{\{ secrets\.GITHUB_TOKEN \}\}/u)
-      assert.match(job, /run-id: \$\{\{ inputs\.ci_run_id \}\}/u)
-      assert.doesNotMatch(job, /actions\/cache\/restore@v4|base-sdk\.mjs fingerprint|cache-hit/u)
-    }
+    assert.doesNotMatch(workflow, /bootstrap-plan:|bootstrap-components:|bootstrap-composition:/u)
+    assert.doesNotMatch(workflow, /component-run\.mjs|build:harness|yarn (?:build|dist:)|package:dir/u)
 
     const publisher = readFileSync(new URL('./publish-profile-r2.mjs', import.meta.url), 'utf8')
     assert.match(publisher, /GITHUB_WORKFLOW_REF !== `\$\{REPOSITORY\}\/\.github\/workflows\/profile-release\.yml@refs\/heads\/main`/u)
@@ -855,6 +810,7 @@ describe('repository release boundary', () => {
     assert.doesNotMatch(publisher, /\bfetch\s*\(/u)
 
     const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
+    assert.match(ci, /name: e-mate-component-source-portable-\$\{\{ needs\.impact\.outputs\.head_sha \}\}/u)
     const portableCandidateUpload = ci.match(/name: e-mate-profile-candidate-darwin-arm64-\$\{\{ needs\.impact\.outputs\.head_sha \}\}[^]*?retention-days: 7/u)?.[0]
     assert.ok(portableCandidateUpload)
     assert.doesNotMatch(portableCandidateUpload, /\/store(?:\s|$)/u)
