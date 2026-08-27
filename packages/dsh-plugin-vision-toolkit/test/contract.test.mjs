@@ -448,6 +448,11 @@ targetTest('managed Vision replaces a stale saved route before strict policy val
       },
     },
     logger: { info: () => {}, warn: () => {}, error: () => {} },
+    tools: { register: () => () => {} },
+    skills: { register: () => () => {} },
+    agents: { list: () => [] },
+    emateCapabilities: { register: () => () => {} },
+    on: () => () => {},
     inject: () => {},
   }
   const dispose = await applyPinned(ctx, managed, {
