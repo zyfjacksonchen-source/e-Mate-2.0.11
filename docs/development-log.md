@@ -3177,3 +3177,11 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Decision and forbidden alternatives: 保持一个原生 Session/Workspace/Router/InputTrigger/Goal/Todo/Updater/Composer；不得新增 Mention registry、第二 Store/Renderer/Composer、DOM mover或可见 slash 菜单，不改 Home 内容、消息模式、产品插件、Base/version/lock/workflow。
 - Evidence ceiling: 本任务先做 source/component 和可重复 smoke；完整 Profile app-directory、installed 双平台、真实服务、candidate/public 仍由 T18 裁决。D006 两条 strict blocker 必须保持可见，不能因 T13 集成被隐藏或弱化。
 - Next exact action: 等待该可见任务形成最小提交和 `T13.json`，由 T00 回读源码与测试、独立复验并在通过后合入；随后才创建最后的 T18。
+
+## 2026-08-27 · 2.0.15 T13 手动更新桥租约纠偏
+
+- Goal checkpoint: 同一 T13 可见任务完成只读入口盘点后按规则停止且保持零改动；外置工作包已完整读取，不再是 blocker。总控独立核对确认真正缺口是 T09 Host 已有 `desktopUpdates.runInteractiveUpdate()`，但现有 Renderer bridge 只提供 `getState/subscribe/cancel`。
+- Root cause: 直接在 Header/Settings 加“检查更新”会成为死按钮；从 Renderer 重跑 checker 会形成第二 updater。现有 `manualTask` 已拥有并发复用和完整事务，缺的是同一 context-isolated bridge 上的一条 typed 调用 carrier。
+- Decision and transferred scope: D015 把已合入且 clean 的 T09 `update-presentation.ts`、`preload.ts`、`updates.ts`、`tests/updates.spec.ts` 精确顺序转交 T13，并把既有 `electron-runtime.ts`/测试租约扩大到该 IPC carrier。只允许调用原 `runInteractiveUpdate()`、验证 owning Renderer sender、teardown 清理和复用原 in-flight fence；Header/Settings 仍只消费同一 `DesktopUpdateState`。
+- Forbidden alternatives: 不新增 updater、Store、持久结果、checker 调用、协议族或 manifest/download/install/rollback 逻辑；不把 source carrier 冒充 installed update/rollback。其余已证明缺口仍由 T13 原租约处理：Footer 重复 Settings、空白 Session Share、伪装可见 slash 和 connector route。
+- Next exact action: 将本 T00 决策 fast-forward 到 clean T13 分支并恢复原可见任务；T00 在提交后独立验证 sender isolation、handler cleanup、同一 in-flight updater、Header/Settings 同源状态和完整路由/可访问性回归。

@@ -64,6 +64,12 @@ The accepted second repair is local Harness `820fee0df4f46b15d4cc07f56ccfcae4354
 
 T16 keeps Glass Composer only as palette state and decoration on the D013 native `data-emate-composer-frame-host`; it no longer guesses `data-composer-card`, extends the frame with a negative bottom value, or owns a second Composer/input lifecycle. On pinned rc.7, GenUI's missing fence registry fails closed to its keyed native `render_ui` ToolView and does not start the upstream full-page DOM observer. T13 may consume these seams in final navigation/Shell integration but may not centralize their state or reintroduce a DOM mover, second renderer, Composer or chat event store. Complete Profile, installed visual/accessibility and real application-host proof remain T18.
 
+### D015 — T13 receives the missing typed manual-update carrier
+
+T13's source audit proved that T09's sole `desktopUpdates.runInteractiveUpdate()` owner and shared `DesktopUpdateState` projection exist, but the context-isolated Renderer bridge exports only `getState`, `subscribe` and `cancel`. A Header/Settings manual-check action cannot be live inside the original T13 lease without either a dead button or a second updater path. Because T09 is merged and clean, its exact sequential handoff to T13 is `desktop/e-mate-desktop/src/update-presentation.ts`, `src/preload.ts`, `src/updates.ts` and `tests/updates.spec.ts`; the already transferred `src/electron-runtime.ts` and `tests/electron-runtime.spec.ts` lease expands from theme/titlebar-only to this one typed IPC carrier.
+
+The carrier may only expose the existing interactive method through the existing context-isolated `__EMATE_DESKTOP_UPDATES__` bridge, validate the owning Renderer sender, remove the handler on teardown, and reuse the updater's existing `manualTask` in-flight fence. It must not return a second durable result projection, create another updater/state store/protocol, call `checkForStableUpdate` directly from the Renderer, or edit T09's manifest/download/install/rollback owners. Header and Settings observe the same `DesktopUpdateState`; source/component tests prove the carrier, while installed update/rollback remains T18.
+
 ## Exclusive static scopes
 
 | Ticket | Exact owned paths while active |
@@ -108,7 +114,8 @@ These files are never edited concurrently. A lease transfers only after the earl
 | `packages/dsh/profile/plugins/emate-shell/src/client/home.module.css` | T11 token/host styling → T13 visible `@` entry and final Shell integration |
 | `packages/dsh/profile/plugins/emate-shell/src/client/index.ts` | T06 registration → T11 registration → T12 registration → T13 final navigation integration |
 | `packages/dsh/profile/plugins/emate-shell/src/client/header-controls.tsx` and `header-controls.module.css` | T08 Share state → T13 final header layout |
-| `desktop/e-mate-desktop/src/electron-runtime.ts` and `desktop/e-mate-desktop/tests/electron-runtime.spec.ts` | T09 updater lifecycle → T13 theme/titlebar-only integration |
+| `desktop/e-mate-desktop/src/electron-runtime.ts` and `desktop/e-mate-desktop/tests/electron-runtime.spec.ts` | T09 updater lifecycle → T13 theme/titlebar plus D015 typed manual-update carrier only |
+| `desktop/e-mate-desktop/src/update-presentation.ts`; `desktop/e-mate-desktop/src/preload.ts`; `desktop/e-mate-desktop/src/updates.ts`; `desktop/e-mate-desktop/tests/updates.spec.ts` | T09 updater closure → T13 D015 typed manual-update carrier only |
 | `packages/dsh/test/e-mate.test.mjs` | T04 absence coverage → T05 routing coverage; later tickets use ticket-specific test files unless reassigned |
 | `package.json` | T01 scripts → T18 version-only freeze |
 | `desktop/e-mate-desktop/package.json` | T14 icon configuration → T18 version-only freeze; T09 must not edit it |
