@@ -3194,3 +3194,12 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Forbidden alternatives: 不新增 capability/permission/RPC/Settings/InputTrigger/Updater Owner，不用 UA 或本地化文本作最终事实，不卸载任何插件，不让 Windows 或 failed 状态插入可执行引用，不重写 T13 既有提交。旧版图片反馈工作簿继续整份排除且不读取。
 - Evidence ceiling: 这是第一次针对三个同名验收的源码纠偏，D009 未触发。T15 必须先合入；随后 T13 同步 release、提交 follow-up、重跑最窄回归与 committed CP-13。app-directory、installed、真实 TCC、双平台 UI、更新/回滚、successor Base 和 public 仍由 T18 裁决。
 - Next exact action: 恢复 T15 visible task 完成原生能力投影；T00 独立复验并合入后，再恢复 T13 修复 updater retry、Computer Use candidate state 和 stable Settings section boundary。
+
+## 2026-08-28 · 2.0.15 T13 稳定主操作与版本冻结边界补充
+
+- Goal checkpoint: T15 D016 修正仍在同一可见任务执行；T00 继续只做独立审查和精确租约，不代写产品实现，也未放行 T13 或 T18。
+- Additional root cause: T13 候选仍用本地化 `aria-label='能力中心'` 选择 T07 控件，且共享 hover/focus/current 样式未覆盖该控件；T07 控件本身没有 tooltip 和 route-selected 状态。可访问名称不得兼任稳定样式/路由 identity。
+- Decision and transferred scope: D017 只把已合入、clean 的 T07 `capabilities.tsx` 与对应 client test 顺序转交同一 T13 可见任务；Search/Schedule/Capability Center 共享一个稳定 primary-action data attribute，Capability Control 只接收 Sidebar slot 已有 route-active owner prop 并补 `title`/`aria-current`。禁止改 Hub 页面、RPC、registry、Jobs、catalog 或 Worker。
+- Version boundary: Sidebar 与 Aura 仍有两个用户可见 `2.0.13`。D018 把这两个 literal 及直接相关测试的版本标签留给最后 T18 version-only freeze；不新增 Renderer/Desktop 版本桥，也不改历史 predecessor/update fixtures 或已发布 2.0.13 回执。
+- Evidence ceiling: 这只是 Owner/租约裁决，没有 source/component、app-directory、installed、candidate 或 public 新回执。D009 未触发；D006 两条 strict blocker 继续保留。
+- Next exact action: 等待同一 T15 visible task 完成并由 T00 复验合入；随后将 release 同步到原 T13 分支，按 D016/D017 做 follow-up，T18 仍只在全部 P0 合入后创建。
