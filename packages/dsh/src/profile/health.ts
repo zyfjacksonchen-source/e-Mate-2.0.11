@@ -46,7 +46,7 @@ export function apply(ctx) {
       }
       const body = JSON.stringify({
         product: 'e-Mate',
-        version: '2.0.13',
+        version: '2.0.14',
         instance_id: process.env.EMATE_INSTANCE_ID ?? null,
         profile: 'e-mate',
         active_runs: [...activeByOwner.values()].reduce((sum, count) => sum + count, 0),

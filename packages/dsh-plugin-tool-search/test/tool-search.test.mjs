@@ -222,7 +222,7 @@ test('CJK image aliases find an edit but do not recall imagegen for diagnostics'
   assert.deepEqual(names(ctx, diagnosticAgent), [TOOL_SEARCH_NAME])
 })
 
-test('a real pinned spawn child follows the image leaf through tool_search to imagegen', async (t) => {
+test('a real pinned spawn child receives the first-party image tool without discovery', async (t) => {
   const ctx = new Context()
   t.after(async () => ctx.fiber.dispose())
   await mountAgentLoopTestDependencies(ctx)
@@ -240,21 +240,17 @@ test('a real pinned spawn child follows the image leaf through tool_search to im
     },
   }))
   ctx.tools.register(fixture('unrelated_write', 'Write unrelated data'))
-  await ctx.plugin(ToolSearch, { maxResults: 1, searchAliases: { imagegen: ['生图'] } })
+  await ctx.plugin(ToolSearch, { alwaysVisible: ['imagegen'], maxResults: 1 })
   const leafArgs = { prompt: 'Generate exactly one leaf image.' }
-  const leafPrompt = 'Call tool_search once with query "生图", then call imagegen exactly once.'
+  const leafPrompt = 'Call imagegen exactly once and do not call tool_search or any other tool.'
   ctx.llm.registerAdapter(['mock'], new ScriptedAdapter([
     (request) => {
-      assert.match(JSON.stringify(request.messages), /tool_search.*生图.*imagegen/u)
-      assert.deepEqual(request.tools.map(tool => tool.name), [TOOL_SEARCH_NAME])
-      return toolCallResponse('leaf-search', TOOL_SEARCH_NAME, { query: '生图' })
-    },
-    (request) => {
-      assert.deepEqual(request.tools.map(tool => tool.name).sort(), ['imagegen', TOOL_SEARCH_NAME])
+      assert.match(JSON.stringify(request.messages), /imagegen.*tool_search/u)
+      assert.deepEqual(request.tools.map(tool => tool.name), ['imagegen'])
       return toolCallResponse('leaf-image', 'imagegen', leafArgs)
     },
     request => {
-      assert.deepEqual(request.tools.map(tool => tool.name).sort(), ['imagegen', TOOL_SEARCH_NAME])
+      assert.deepEqual(request.tools.map(tool => tool.name), ['imagegen'])
       return textResponse('leaf complete')
     },
   ]))
@@ -272,11 +268,10 @@ test('a real pinned spawn child follows the image leaf through tool_search to im
   const result = await run.result
   assert.equal(result.stopReason, 'completed')
   assert.deepEqual(executed, [leafArgs])
-  assert.deepEqual(names(ctx, run.localAgent), ['imagegen', TOOL_SEARCH_NAME])
+  assert.deepEqual(names(ctx, run.localAgent), ['imagegen'])
   const searchCall = run.localAgent.session.events.find(event => event.type === 'tool/call'
     && event.data.name === TOOL_SEARCH_NAME)
-  assert.ok(searchCall)
-  assert.deepEqual(JSON.parse(searchCall.data.arguments), { query: '生图' })
+  assert.equal(searchCall, undefined)
   assert.equal(run.localAgent.session.events.some(event => event.type === 'tool-search/selection'), false)
   assert.equal((await execute(ctx, run.localAgent, 'unrelated_write', {})).isError, true)
   await run.dispose()

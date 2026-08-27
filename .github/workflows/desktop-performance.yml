@@ -628,7 +628,7 @@ jobs:
 
       - name: Sign only the exact protected evidence and release artifacts
         id: admit
-        uses: zyfjacksonchen-source/e-mate-desktop-publication/performance@0026c0364623ea123ab0930a136f4d225c95f298
+        uses: zyfjacksonchen-source/e-mate-desktop-publication/performance@cd7d223692b51e4e7a53db5759e1c2a9811febd0
         env:
           EMATE_GITHUB_PROVENANCE_TOKEN: ${{ github.token }}
           EMATE_DESKTOP_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.EMATE_PROFILE_SIGNING_PRIVATE_KEY }}

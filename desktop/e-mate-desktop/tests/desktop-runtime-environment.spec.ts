@@ -96,6 +96,9 @@ describe('desktop Host pnpm runtime', () => {
     expect(environment).toEqual({
       ...original,
       EMATE_DESKTOP_PNPM: installation.pnpmShimPath,
+      EMATE_DESKTOP_RUN_AS_NODE: "/Applications/DSH O'Brien.app/Contents/MacOS/e-Mate",
+      EMATE_DESKTOP_PNPM_ENTRY: "/Applications/DSH O'Brien.app/Contents/Resources/app.asar.unpacked/node_modules/pnpm/bin/pnpm.mjs",
+      EMATE_DESKTOP_CLEAR_ENV: installation.clearEnvironmentPath,
       PATH: `${installation.pathDir}:/usr/local/bin:/usr/bin:/bin`,
     })
     if (process.platform !== 'win32') {
@@ -214,6 +217,9 @@ describe('desktop Host pnpm runtime', () => {
     expect(environment).toEqual({
       Path: `${installation.pathDir};C:\\Windows\\System32;C:\\Windows`,
       EMATE_DESKTOP_PNPM: installation.pnpmShimPath,
+      EMATE_DESKTOP_RUN_AS_NODE: 'C:\\Program Files\\DSH 100% Desktop\\e-Mate.exe',
+      EMATE_DESKTOP_PNPM_ENTRY: 'C:\\Program Files\\e-Mate\\resources\\app.asar.unpacked\\node_modules\\pnpm\\bin\\pnpm.mjs',
+      EMATE_DESKTOP_CLEAR_ENV: installation.clearEnvironmentPath,
       KEEP: 'value',
     })
     expect(environment).not.toHaveProperty('ELECTRON_RUN_AS_NODE')

@@ -21,13 +21,13 @@ if (typeof desktopVersion !== 'string' || !/^\d+\.\d+\.\d+$/u.test(desktopVersio
   throw new Error('download page requires the stable Desktop package version')
 }
 const SOURCE_DIRECTORY = fileURLToPath(new URL('../deploy/download-page/', import.meta.url))
-const DESKTOP_SCRIPT = 'site.a1a94f1e36f1.js'
+const DESKTOP_SCRIPT = 'site.48e1d1764753.js'
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/u
 const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/u
 const POSITIVE_ID = /^[1-9][0-9]*$/u
 const PUBLICATION_ACTION = Object.freeze({
   repository: 'zyfjacksonchen-source/e-mate-desktop-publication',
-  commit: '0026c0364623ea123ab0930a136f4d225c95f298',
+  commit: 'cd7d223692b51e4e7a53db5759e1c2a9811febd0',
 })
 const CONTENT_TYPES = Object.freeze({
   '.css': 'text/css; charset=utf-8',

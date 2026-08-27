@@ -549,7 +549,7 @@ test('performance evidence and signing use their existing isolated environments'
   assert.equal(parsed.jobs.admission.environment, 'r2-publish')
   assert.equal(parsed.jobs.admission.needs, 'evidence')
   const signer = parsed.jobs.admission.steps.find(step => step.id === 'admit')
-  assert.equal(signer.uses, 'zyfjacksonchen-source/e-mate-desktop-publication/performance@0026c0364623ea123ab0930a136f4d225c95f298')
+  assert.equal(signer.uses, 'zyfjacksonchen-source/e-mate-desktop-publication/performance@cd7d223692b51e4e7a53db5759e1c2a9811febd0')
   assert.deepEqual([...workflow.matchAll(/secrets\.([A-Z0-9_]+)/gu)].map(match => match[1]).sort(), [
     'EMATE_PROFILE_SIGNING_KEY_ID', 'EMATE_PROFILE_SIGNING_PRIVATE_KEY',
   ])
@@ -585,7 +585,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   assert.equal(job.name, 'Desktop Cloudflare plugin handoff')
   assert.equal(job.environment, 'r2-publish')
   const invocation = job.steps.find(step => step.id === 'prepare')
-  assert.equal(invocation.uses, 'zyfjacksonchen-source/e-mate-desktop-publication@0026c0364623ea123ab0930a136f4d225c95f298')
+  assert.equal(invocation.uses, 'zyfjacksonchen-source/e-mate-desktop-publication@cd7d223692b51e4e7a53db5759e1c2a9811febd0')
   assert.deepEqual(invocation.with, {
     'source-sha': '${{ github.sha }}',
     'main-ci-run-id': '${{ inputs.main_ci_run_id }}',
@@ -602,7 +602,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   })
   assert.deepEqual(job.steps.filter(step => step.uses).map(step => step.uses), [
     'actions/setup-node@v6',
-    'zyfjacksonchen-source/e-mate-desktop-publication@0026c0364623ea123ab0930a136f4d225c95f298',
+    'zyfjacksonchen-source/e-mate-desktop-publication@cd7d223692b51e4e7a53db5759e1c2a9811febd0',
     'actions/upload-artifact@v4',
   ])
   const upload = job.steps.find(step => step.uses === 'actions/upload-artifact@v4')

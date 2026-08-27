@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-client-shell",
-  "version": "2.0.13",
+  "version": "2.0.14",
   "type": "module",
   "main": "index.js",
   "exports": {

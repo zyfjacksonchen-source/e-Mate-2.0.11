@@ -38,7 +38,7 @@ export async function syncEmatePluginBundles({ target = 'cli', destination } = {
     const slug = name.slice('@e-mate/dsh-plugin-'.length)
     const source = join(root, component.root)
     const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
-    if (manifest.name !== name || manifest.version !== '2.0.13' || manifest.license !== 'MIT') {
+    if (manifest.name !== name || manifest.version !== '2.0.14' || manifest.license !== 'MIT') {
       throw new Error(`${source} package identity is invalid`)
     }
     if (typeof manifest.main !== 'string') throw new Error(`${name} has no main entry`)
@@ -60,7 +60,7 @@ export async function syncEmatePluginBundles({ target = 'cli', destination } = {
   await writeFile(join(destination, 'registry.json'), `${JSON.stringify({
     schema_version: 1,
     product: 'e-Mate',
-    version: '2.0.13',
+    version: '2.0.14',
     harness_version: '0.1.0-rc.7',
     harness_commit: 'b2b1650b01f0ee88d81837a9b5c050f9f763f606',
     packages: receipts,

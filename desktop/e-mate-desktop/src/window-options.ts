@@ -2,7 +2,22 @@
 
 import type { BrowserWindowConstructorOptions, NativeImage } from 'electron'
 import type { DesktopPlatform, DesktopShellSpec } from './runtime.ts'
+import {
+  desktopRendererBootstrapArgument,
+  type DesktopRendererBootstrap,
+} from './desktop-bootstrap-contract.ts'
 import { WINDOWS_TITLEBAR_HEIGHT } from './window-chrome.ts'
+
+function rendererBootstrapArgument(
+  spec: DesktopShellSpec,
+  platform: DesktopPlatform,
+  bootstrap: DesktopRendererBootstrap,
+): string {
+  if (bootstrap.mode !== spec.mode || bootstrap.platform !== platform || bootstrap.windowKind !== 'main') {
+    throw new Error('@e-mate/desktop: Renderer bootstrap does not match its BrowserWindow')
+  }
+  return desktopRendererBootstrapArgument(bootstrap)
+}
 
 /**
  * Build a secure BrowserWindow while preserving the operating system frame.
@@ -16,6 +31,7 @@ export function compatibilityWindowOptions(
   icon: NativeImage,
   platform: DesktopPlatform,
   preload: string,
+  bootstrap: DesktopRendererBootstrap,
 ): BrowserWindowConstructorOptions {
   if (spec.mode !== 'compatibility') {
     throw new Error(`@e-mate/desktop: unsupported compatibility window mode ${spec.mode}`)
@@ -30,6 +46,7 @@ export function compatibilityWindowOptions(
     icon,
     webPreferences: {
       preload,
+      additionalArguments: [rendererBootstrapArgument(spec, platform, bootstrap)],
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -52,6 +69,7 @@ export function advancedWindowOptions(
   icon: NativeImage,
   platform: DesktopPlatform,
   preload: string,
+  bootstrap: DesktopRendererBootstrap,
 ): BrowserWindowConstructorOptions {
   if (spec.mode !== 'advanced') {
     throw new Error(`@e-mate/desktop: unsupported advanced window mode ${spec.mode}`)
@@ -66,6 +84,7 @@ export function advancedWindowOptions(
     icon,
     webPreferences: {
       preload,
+      additionalArguments: [rendererBootstrapArgument(spec, platform, bootstrap)],
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -115,8 +134,9 @@ export function desktopWindowOptions(
   icon: NativeImage,
   platform: DesktopPlatform,
   preload: string,
+  bootstrap: DesktopRendererBootstrap,
 ): BrowserWindowConstructorOptions {
   return spec.mode === 'compatibility'
-    ? compatibilityWindowOptions(spec, icon, platform, preload)
-    : advancedWindowOptions(spec, icon, platform, preload)
+    ? compatibilityWindowOptions(spec, icon, platform, preload, bootstrap)
+    : advancedWindowOptions(spec, icon, platform, preload, bootstrap)
 }

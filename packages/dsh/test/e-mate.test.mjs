@@ -176,32 +176,32 @@ test('version gates match the release contract', () => {
 test('online update target parsing rejects tags and downgrade ordering is SemVer-correct', () => {
   const requestId = '11111111-1111-4111-8111-111111111111'
   const sourceCommit = 'a'.repeat(40)
-  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.13/${sourceCommit}`
+  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.14/${sourceCommit}`
   const releaseSource = {
     schema_version: 1,
     product: 'e-Mate',
-    version: '2.0.13',
+    version: '2.0.14',
     package_name: '@e-mate/dsh',
     source_commit: sourceCommit,
     manifest_url: `${base}/release-manifest.json`,
-    tarball_url: `${base}/e-mate-dsh-2.0.13.tgz`,
+    tarball_url: `${base}/e-mate-dsh-2.0.14.tgz`,
   }
   const request = {
     schema_version: 1,
     request_id: requestId,
-    target: '2.0.13',
-    current_version: '2.0.13',
+    target: '2.0.14',
+    current_version: '2.0.14',
     release_source: releaseSource,
     previous_release_source: releaseSource,
   }
   assert.equal(normalizeUpdateTarget(), 'latest')
   assert.equal(normalizeUpdateTarget('latest'), 'latest')
-  assert.equal(normalizeUpdateTarget('2.0.13-rc.1'), '2.0.13-rc.1')
+  assert.equal(normalizeUpdateTarget('2.0.14-rc.1'), '2.0.14-rc.1')
   assert.throws(() => normalizeUpdateTarget('next'), /invalid update version/)
   assert.throws(() => normalizeUpdateTarget('2.0'), /invalid update version/)
-  assert.equal(validateStagedVersion('latest', '2.0.13'), '2.0.13')
-  assert.equal(validateStagedVersion('2.0.13', '2.0.13'), '2.0.13')
-  assert.throws(() => validateStagedVersion('2.0.13', '2.0.7'), /does not match requested version/)
+  assert.equal(validateStagedVersion('latest', '2.0.14'), '2.0.14')
+  assert.equal(validateStagedVersion('2.0.14', '2.0.14'), '2.0.14')
+  assert.throws(() => validateStagedVersion('2.0.14', '2.0.7'), /does not match requested version/)
   assert.throws(() => validateStagedVersion('latest', 'not-semver'), /version is invalid/)
   assert.equal(validateUpdateRequest(request, requestId), request)
   assert.throws(
@@ -217,7 +217,7 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   assert.throws(() => parsePackageIntegrity(JSON.stringify('sha256-invalid')), /integrity is invalid/)
   assert.equal(compareVersions('2.0.7', '2.0.7-rc.1'), 1)
   assert.equal(compareVersions('2.0.7-rc.1', '2.0.7-rc.2'), -1)
-  assert.equal(compareVersions('2.0.13', '2.0.7'), 1)
+  assert.equal(compareVersions('2.0.14', '2.0.7'), 1)
   assert.equal(globalPrefixForBinPath('/opt/e-mate/lib/node_modules/@e-mate/dsh/lib/bin.js', 'darwin'), '/opt/e-mate')
   assert.equal(
     globalPrefixForBinPath('C:\\Users\\e-mate\\AppData\\Roaming\\npm\\node_modules\\@e-mate\\dsh\\lib\\bin.js', 'win32'),
@@ -225,34 +225,34 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   )
   assert.throws(() => globalPrefixForBinPath('/repo/packages/dsh/lib/bin.js', 'darwin'), /global npm installation/u)
   assert.deepEqual(validateReleaseSource(releaseSource), releaseSource)
-  const desktopPrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.13/${sourceCommit}`
+  const desktopPrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.14/${sourceCommit}`
   assert.deepEqual(validateLatestReleasePointer({
     schema_version: 1,
-    version: '2.0.13',
+    version: '2.0.14',
     source_commit: sourceCommit,
     artifacts: {
       darwin: {
-        url: `${desktopPrefix}/e-Mate-2.0.13-mac-universal.dmg`,
+        url: `${desktopPrefix}/e-Mate-2.0.14-mac-universal.dmg`,
         bytes: 1,
         sha256: 'ab'.repeat(32),
       },
       win32: {
-        url: `${desktopPrefix}/e-Mate-2.0.13-win-x64-Setup.exe`,
+        url: `${desktopPrefix}/e-Mate-2.0.14-win-x64-Setup.exe`,
         bytes: 1,
         sha256: 'cd'.repeat(32),
       },
     },
   }), releaseSource)
-  assert.equal(compareVersions('2.0.13', '2.0.5'), 1)
+  assert.equal(compareVersions('2.0.14', '2.0.5'), 1)
   assert.throws(() => validateReleaseSource({ ...releaseSource, manifest_url: 'http://example.com/release-manifest.json' }), /URL is invalid/u)
   const sha512 = 'ab'.repeat(64)
   const artifactIntegrity = `sha512-${Buffer.from(sha512, 'hex').toString('base64')}`
   const artifact = {
-    name: '@e-mate/dsh', version: '2.0.13', kind: 'main', filename: 'e-mate-dsh-2.0.13.tgz',
+    name: '@e-mate/dsh', version: '2.0.14', kind: 'main', filename: 'e-mate-dsh-2.0.14.tgz',
     size: 207, sha256: 'cd'.repeat(32), sha512, integrity: artifactIntegrity,
   }
   const manifest = {
-    schema_version: 1, product: 'e-Mate', version: '2.0.13', source_commit: sourceCommit,
+    schema_version: 1, product: 'e-Mate', version: '2.0.14', source_commit: sourceCommit,
     packages: [artifact], download: { ...releaseSource, size: artifact.size, sha256: artifact.sha256, sha512, integrity: artifactIntegrity },
   }
   assert.equal(validateReleaseManifest(manifest, releaseSource).integrity, artifactIntegrity)
@@ -284,7 +284,7 @@ test('status projects only the latest bounded online-update receipt', async () =
       product: 'e-Mate',
       request_id: first,
       status: 'failed-before-change',
-      requested_version: '2.0.13',
+      requested_version: '2.0.14',
       previous_version: '2.0.7',
       error: 'must not reach status output',
       finished_at: '2026-08-15T01:00:00.000Z',
@@ -294,18 +294,18 @@ test('status projects only the latest bounded online-update receipt', async () =
       product: 'e-Mate',
       request_id: second,
       status: 'completed',
-      requested_version: '2.0.13',
+      requested_version: '2.0.14',
       previous_version: '2.0.7',
-      installed_version: '2.0.13',
+      installed_version: '2.0.14',
       error: 'must not reach status output',
       finished_at: '2026-08-15T02:00:00.000Z',
     }))
     const expected = {
       request_id: second,
       status: 'completed',
-      requested_version: '2.0.13',
+      requested_version: '2.0.14',
       previous_version: '2.0.7',
-      installed_version: '2.0.13',
+      installed_version: '2.0.14',
       finished_at: '2026-08-15T02:00:00.000Z',
     }
     assert.deepEqual(latestUpdateReceipt(dshHome), expected)
@@ -381,7 +381,7 @@ test('managed profile installation is idempotent', () => {
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
     ])
-    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.13'])))
+    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.14'])))
     const patch = readFileSync(join(first.profile, 'cordis.patch.yml'), 'utf8')
     installProfile(dshHome)
     assert.equal(readFileSync(join(first.profile, 'package.json'), 'utf8'), manifest)
@@ -541,7 +541,7 @@ test('managed profile installation is idempotent', () => {
       const pluginRoot = join(first.profile, 'node_modules', ...name.split('/'))
       const pluginManifest = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'))
       assert.equal(pluginManifest.name, name)
-      assert.equal(pluginManifest.version, '2.0.13')
+      assert.equal(pluginManifest.version, '2.0.14')
       assert.ok(readFileSync(join(pluginRoot, pluginManifest.main)).byteLength > 0)
       const pluginPatch = readFileSync(join(pluginRoot, pluginManifest.dsh.bundle.patch), 'utf8')
       assert.ok(pluginPatch.length >= 2)
@@ -3246,7 +3246,7 @@ test('enterprise identity provider maps target credentials and the production HT
           acceptanceId: 'acceptance-receipt-207',
           userId: 'user-207',
           acceptedAt: new Date(clock).toISOString(),
-          clientVersion: '2.0.13',
+          clientVersion: '2.0.14',
           locale: 'zh-CN',
         } : null,
       })
@@ -3258,7 +3258,7 @@ test('enterprise identity provider maps target credentials and the production HT
         acceptanceId: 'acceptance-receipt-207',
         userId: 'user-207',
         acceptedAt: new Date(clock).toISOString(),
-        clientVersion: '2.0.13',
+        clientVersion: '2.0.14',
         locale: 'zh-CN',
       })
     }
@@ -3295,7 +3295,7 @@ test('enterprise identity provider maps target credentials and the production HT
       })
     }
     if (url.pathname.endsWith('/v1/runtime-models')) {
-      assert.equal(url.search, '?client_version=2.0.13')
+      assert.equal(url.search, '?client_version=2.0.14')
       return json(runtimeResponse)
     }
     if (url.pathname.endsWith('/v1/authenticated-probe')

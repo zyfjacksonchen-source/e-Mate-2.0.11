@@ -6,6 +6,10 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import { applyAdvancedShell } from './advanced-shell.ts'
+import {
+  DESKTOP_BOOTSTRAP_BRIDGE,
+  type DesktopBootstrapWindow,
+} from '../desktop-bootstrap-contract.ts'
 import { startRendererBootReporter } from './boot-health.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
 import { installResourceContext } from './resource-context.ts'
@@ -32,7 +36,8 @@ export const inject = [
 
 /** Register desktop-owned client surfaces for the current BrowserWindow mode. @param ctx - browser Cordis context. */
 export function apply(ctx: ClientContext): void {
-  const environment = parseDesktopClientEnvironment(window.location.search, window.sessionStorage)
+  const bootstrap = (window as Window & DesktopBootstrapWindow)[DESKTOP_BOOTSTRAP_BRIDGE]
+  const environment = parseDesktopClientEnvironment(window.location.search, window.sessionStorage, bootstrap)
   ctx.effect(
     () => startRendererBootReporter(ctx.loader),
     '@e-mate/desktop: renderer boot health report',

@@ -1,4 +1,4 @@
-# e-Mate 2.0.13 target contract
+# e-Mate 2.0.14 target contract
 
 This file is the implementation source of truth. Development records may add evidence but may not weaken these obligations.
 
@@ -6,12 +6,12 @@ This file is the implementation source of truth. Development records may add evi
 
 - Product name: `e-Mate`
 - Repository: `zyfjacksonchen-source/e-Mate-2.0.11`
-- Desktop base candidate: `@e-mate/desktop@2.0.13`
-- Product Profile release: `2.0.13`
-- Accepted predecessor: the formally published e-Mate `2.0.12` Desktop manifest, three-target Profile desired state and installed receipts frozen in [`slices/2.0.13.md`](slices/2.0.13.md). The development source starts at `5fb9d595749ee9de4f8019ae4decce02ad3af541` / tree `20580c664c8f9f4eb130386f090c02c39ab1d413`; its publication identities remain distinct and must not be relabelled as this source commit.
-- Historical Git ancestry floor: accepted e-Mate 2.0.11 source `6a7f4b9d59a1d8970345638946fb6564e2f5f93e`. Every 2.0.13 release candidate must still descend from it; this source-integrity floor does not replace the installed 2.0.12 regression baseline above.
+- Desktop base candidate: `@e-mate/desktop@2.0.14`
+- Product Profile release: `2.0.14`
+- Accepted predecessor: the formally published e-Mate `2.0.13` Base v7, three-target Profile desired state, website and installed receipts frozen by [`slices/2.0.14.md`](slices/2.0.14.md). Its product source is `6f63b5238d5874a1973a5ce0c1c9f832d277c865`; the accepted docs-only closeout is `4474939fe186739a7745584c6589e55695302cb2`. Neither identity may be relabelled as this release source.
+- Historical Git ancestry floor: accepted e-Mate 2.0.11 source `6a7f4b9d59a1d8970345638946fb6564e2f5f93e`. Every 2.0.14 release candidate must still descend from it; this source-integrity floor does not replace the installed 2.0.13 regression baseline above.
 - Current candidate Base contract: `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`. Base v6 and earlier are intentionally incompatible because the accepted Harness source and Schedule protocol floor changed; a v6 installation must select the signed v7 Base before downloading any v7 Profile component. The candidate identity becomes releasable only when the generated Base contract, inventory, SDK, tests and installed receipt all agree.
-- The published 2.0.12 Base reads only `desktop/latest.json`, so the exact accepted 2.0.13 signed manifest is also the one-time v6→v7 bootstrap value at that legacy pointer. Publication writes the immutable manual manifest first, CAS-activates and publicly rereads the v7 signed pointer second, and CAS-activates the legacy pointer with those exact same bytes last. That final CAS accepts only the frozen 948-byte 2.0.12 predecessor or the immutable 948-byte emergency 2.0.13 predecessor with SHA-256 `1d70004c726e458525205dd370ebea595b3121ffd2afe49d7c65d646c4ac19c4`; emergency recovery additionally requires all later runtime behavior to be Profile-owned so same-version installed Bases remain equivalent. Base v7 and later read only the signed pointer, while the legacy pointer remains at 2.0.13 and never carries another release. A local/test build, different manifest, unsigned nearby artifact, arbitrary same-version predecessor or non-conditional overwrite is forbidden.
+- The published 2.0.12 Base reads only `desktop/latest.json`. Its frozen 2.0.13 value is exactly `2961` bytes / SHA-256 `d26b9ffb5f30531bc5de6c9f66aab47c3718248e2ff109d82cd3a763f0c02887`, but that target Helper cannot consume the predecessor's request. Therefore 2.0.14 is the one corrective bridge: after exact public 2.0.12→candidate and 2.0.13→candidate installation/rollback acceptance, publication writes immutable objects and the manual manifest, CAS-activates and publicly rereads `desktop/signed/latest.json`, then CAS-advances `desktop/latest.json` from only that frozen 2.0.13 identity to the exact same admitted 2.0.14 manifest bytes last. The legacy pointer then freezes at 2.0.14. A local/test build, different manifest, unsigned nearby artifact, arbitrary same-version predecessor, skipped public-predecessor test or non-conditional overwrite is forbidden.
 - Executable: `e-mate`
 - Harness source: `zyfjacksonchen-source/deepseek-harness@b2b1650b01f0ee88d81837a9b5c050f9f763f606` (upstream `deepseek-ai/deepseek-harness@99f6f02fecdb7dff40c3fbc9470f5907c29f74ca` plus the accepted bounded Session, Schedule, Job, Tool, model-directory, prompt, redundant-permission and attachment-overlay changes recorded below)
 - Harness source version: `0.1.0-rc.7`
@@ -130,6 +130,10 @@ At the pinned Harness commit, only `web_search` is active from the relevant buil
 CDP is the first and default path for every webpage read or operation. It uses the fixed loopback endpoint and Chrome's own remote-debugging security switch, contains no extension bridge, and ships its endpoint-bound browser-control setting enabled and revocable. Computer Use uses the pinned plugin's independent `allowAllApps` or exact per-application grants and its native interactive lease path, but its progressive Tools may be exposed or executed only when the latest direct user message carries the Shell's exact `@电脑操控` marker; the model cannot self-enable it and an earlier turn cannot authorize the next one. The e-Mate Full Access preset must not be mapped to either configured application access or an approval outcome. `find-skill` is discovery-only; all local and remote Skill mutations are owned by the Skill Hub transaction described below.
 
 ## Compatibility and delivery
+
+### 2.0.14 capability-routing and Desktop bootstrap hotfix
+
+2.0.14 is a single-purpose hotfix. The existing first-party `imagegen` and `image_pack` Tools are directly visible while long-tail Tools remain progressively disclosed; ImageGen leaf Agents keep the native `toolFilter` allowlist and call `imagegen` directly instead of discovering a Skill or browser path. The existing Find Skill component may invoke packaged pnpm only through Desktop-owned direct Electron-as-Node launch inputs, never by raw-spawning a `.cmd` or shell wrapper. Every e-Mate-owned Renderer reads its immutable Main/Preload bootstrap before URL or legacy session-storage fallbacks; external pages remain outside the desktop client graph. The macOS Helper selects the exact request envelope before validation: only predecessor 2.0.12 may use the exact 15-field legacy request and legacy swap/ACK/rollback path without a pending lease, while 2.0.13 and later remain on the bound request/pending/IPC path. Legacy target version is never hard-coded; request, staged bundle, running App and ACK must agree. These repairs do not authorize another capability router, launcher, Renderer store, Session, Agent, Tool registry, credential path, updater, or any unrelated 2.0.14 feature.
 
 ### Base and Profile component boundary
 

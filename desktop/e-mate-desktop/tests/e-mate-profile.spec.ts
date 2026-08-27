@@ -161,6 +161,8 @@ describe('e-Mate desktop profile', () => {
       config: expect.objectContaining({ fetch: false, searchTimeoutMs: 60000, searchMaxResults: 50 }),
     }))
     expect(rows.find(row => row.id === 'emate-tool-search')?.config?.alwaysVisible).toContain('web_search')
+    expect(rows.find(row => row.id === 'emate-tool-search')?.config?.alwaysVisible)
+      .toEqual(expect.arrayContaining(['imagegen', 'image_pack']))
     expect(rows.find(row => row.id === 'emate-file-import')).toEqual(expect.objectContaining({
       name: '@e-mate/dsh-plugin-file-import',
     }))

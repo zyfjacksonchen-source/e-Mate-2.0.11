@@ -1,6 +1,7 @@
 import type { NativeImage } from 'electron'
 import { describe, expect, it } from 'vitest'
 import type { DesktopShellSpec } from '../src/runtime.ts'
+import type { DesktopRendererBootstrap } from '../src/desktop-bootstrap-contract.ts'
 import {
   advancedWindowOptions,
   compatibilityWindowOptions,
@@ -29,11 +30,19 @@ const spec: DesktopShellSpec = {
 }
 
 const preload = '/tmp/preload.cjs'
+const bootstrap: DesktopRendererBootstrap = {
+  schemaVersion: 1,
+  mode: 'compatibility',
+  platform: 'darwin',
+  profileGeneration: 'bundled',
+  runtimeId: 'runtime-test',
+  windowKind: 'main',
+}
 
 describe('compatibility BrowserWindow options', () => {
   it('preserves the native frame and enables renderer isolation', () => {
     const icon = {} as NativeImage
-    const options = compatibilityWindowOptions(spec, icon, 'darwin', preload)
+    const options = compatibilityWindowOptions(spec, icon, 'darwin', preload, bootstrap)
 
     expect(options).toEqual(expect.objectContaining({
       title: '',
@@ -45,6 +54,7 @@ describe('compatibility BrowserWindow options', () => {
       icon,
       webPreferences: {
         preload,
+        additionalArguments: [expect.stringMatching(/^--e-mate-desktop-bootstrap=/u)],
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -68,7 +78,9 @@ describe('compatibility BrowserWindow options', () => {
   })
 
   it('uses the native Windows caption while hiding the application menu', () => {
-    const options = compatibilityWindowOptions(spec, {} as NativeImage, 'win32', preload)
+    const options = compatibilityWindowOptions(spec, {} as NativeImage, 'win32', preload, {
+      ...bootstrap, platform: 'win32',
+    })
 
     expect(options.title).toBe('e-Mate')
     expect(options.autoHideMenuBar).toBe(true)
@@ -80,12 +92,14 @@ describe('compatibility BrowserWindow options', () => {
       {} as NativeImage,
       'darwin',
       preload,
+      bootstrap,
     )).toThrow('unsupported compatibility window mode advanced')
   })
 
   it('uses hidden-inset transparent vibrancy on macOS advanced windows', () => {
     const advanced = { ...spec, mode: 'advanced' as const }
-    const options = advancedWindowOptions(advanced, {} as NativeImage, 'darwin', preload)
+    const advancedBootstrap = { ...bootstrap, mode: 'advanced' as const }
+    const options = advancedWindowOptions(advanced, {} as NativeImage, 'darwin', preload, advancedBootstrap)
 
     expect(options).toEqual(expect.objectContaining({
       titleBarStyle: 'hiddenInset',
@@ -95,7 +109,7 @@ describe('compatibility BrowserWindow options', () => {
       vibrancy: 'sidebar',
       visualEffectState: 'followWindow',
     }))
-    expect(desktopWindowOptions(advanced, {} as NativeImage, 'darwin', preload)).toEqual(options)
+    expect(desktopWindowOptions(advanced, {} as NativeImage, 'darwin', preload, advancedBootstrap)).toEqual(options)
   })
 
   it('uses native Windows controls, Mica, shadow, and rounded corners in advanced mode', () => {
@@ -104,6 +118,7 @@ describe('compatibility BrowserWindow options', () => {
       {} as NativeImage,
       'win32',
       preload,
+      { ...bootstrap, mode: 'advanced', platform: 'win32' },
     )
 
     expect(options).toEqual(expect.objectContaining({
@@ -126,6 +141,7 @@ describe('compatibility BrowserWindow options', () => {
       {} as NativeImage,
       'linux',
       preload,
+      { ...bootstrap, mode: 'advanced', platform: 'linux' },
     )).toThrow('supported on macOS and Windows')
   })
 })

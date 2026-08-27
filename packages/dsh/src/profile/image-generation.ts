@@ -1067,7 +1067,7 @@ function imageLeafPrompt(task, refs) {
   return [
     {
       type: 'text',
-      text: 'This is one e-Mate image leaf. Call tool_search once with query "生图", then call imagegen exactly once with the exact JSON arguments below. Do not retry, call any other tool, or claim success from prose; the parent reads only the durable image receipt.\n'
+      text: 'This is one e-Mate image leaf. Call imagegen exactly once with the exact JSON arguments below. Do not call tool_search, Skill, browser, CDP, or any other tool; do not retry or claim success from prose. The parent reads only the durable image receipt.\n'
         + JSON.stringify(argumentsValue),
     },
     ...refs.map(ref => ({ type: 'image', attachment: imageRef(ref) })),
