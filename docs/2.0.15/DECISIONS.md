@@ -54,6 +54,10 @@ The independent visible T11 audit proved that the merged Home still extends the 
 
 The repair must remove the negative-size contract and expose the semantic host without ancestor guessing or document scan, preserve the native Composer/input lifecycle, and make CP-11/CP-12 repeatable with zero pending. T16 remains paused because Glass Composer may consume only this real host; after the corrective commit merges, the listed Shell paths transfer back to T13 and T16 resumes without a Shell write lease.
 
+### D013 — The native Composer owner emits the semantic frame host
+
+T11 corrective `103833c…` is not integration-ready: it derives the frame host by reusing Home's document query and mutating the found node, so the attribute is still a scan-owned projection rather than the real native boundary required by the target contract. T11 receives an exact second-source lease on `upstream/deepseek-harness/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.tsx`, its narrow `packages/client/ui-conversation/tests/skeleton.client.spec.tsx` assertion, and the root `upstream/deepseek-harness` gitlink. The new Harness commit must descend from T15 `2ca0b68b420ba11a80fc5fac800f889008cd42af`; the native `composerStack` itself emits `data-emate-composer-frame-host`, while T11 removes its attribute mutation and Glass Composer only consumes the stable boundary. Do not add another wrapper, query, MutationObserver, DOM mover, slot, composer or input lifecycle. T18 binds the resulting Harness commit in the successor Base.
+
 ## Exclusive static scopes
 
 | Ticket | Exact owned paths while active |
