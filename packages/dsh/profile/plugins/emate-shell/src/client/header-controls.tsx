@@ -24,10 +24,10 @@ interface Props extends Omit<SessionShareActionProps, 'sessionId'> {
 }
 
 const IN_PROGRESS = new Set<DesktopUpdateState['stage']>([
-  'checking', 'available', 'confirming', 'downloading', 'verifying', 'staging',
+  'checking', 'confirming', 'downloading', 'verifying', 'staging',
   'waiting-shutdown', 'replacing', 'restarting', 'health-check', 'rolling-back',
 ])
-const CANCELLABLE = new Set<DesktopUpdateState['stage']>(['checking', 'available', 'downloading'])
+const CANCELLABLE = new Set<DesktopUpdateState['stage']>(['checking', 'downloading'])
 
 function progress(state: DesktopUpdateState | undefined): number | undefined {
   return state?.bytes !== undefined && state.total !== undefined && state.total > 0

@@ -80,6 +80,7 @@ interface Props {
 
 interface ControlProps {
   wide: boolean
+  active: boolean
   SkillIcon: ComponentType<{ size?: number }>
 }
 
@@ -192,9 +193,9 @@ function normal(value: string): string {
   return value.trim().toLocaleLowerCase('zh-CN')
 }
 
-export function CapabilityControl({ wide, SkillIcon }: ControlProps) {
+export function CapabilityControl({ wide, active, SkillIcon }: ControlProps) {
   return (
-    <button className={css.sidebarAction} data-wide={wide || undefined} type="button" aria-label="能力中心" onClick={() => { route('/capabilities') }}>
+    <button className={css.sidebarAction} data-emate-primary-action="" data-wide={wide || undefined} type="button" title="能力中心" aria-label="能力中心" aria-current={active ? 'page' : undefined} onClick={() => { route('/capabilities') }}>
       <SkillIcon size={18} />
       {wide && <span>能力中心</span>}
     </button>

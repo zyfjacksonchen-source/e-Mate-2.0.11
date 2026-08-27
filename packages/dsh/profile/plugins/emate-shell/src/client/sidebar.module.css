@@ -170,9 +170,7 @@
   margin-bottom: 8px;
 }
 
-.searchAction,
-.scheduleAction,
-.primaryActions :global(button[aria-label='能力中心']) {
+.primaryActions :global(button[data-emate-primary-action]) {
   width: calc(100% - 16px);
   min-height: 32px;
   margin: 0 8px;
@@ -188,11 +186,9 @@
   cursor: pointer;
 }
 
-.searchAction:hover,
-.searchAction:focus-visible,
-.scheduleAction:hover,
-.scheduleAction:focus-visible,
-.scheduleAction[aria-current='page'] {
+.primaryActions :global(button[data-emate-primary-action]:hover),
+.primaryActions :global(button[data-emate-primary-action]:focus-visible),
+.primaryActions :global(button[data-emate-primary-action][aria-current='page']) {
   color: var(--emate-ink);
   background: var(--emate-hover);
 }
@@ -659,9 +655,7 @@
   margin-top: 4px;
 }
 
-.collapsed .searchAction,
-.collapsed .scheduleAction,
-.collapsed .primaryActions :global(button[aria-label='能力中心']) {
+.collapsed .primaryActions :global(button[data-emate-primary-action]) {
   width: 36px;
   height: 36px;
   min-height: 36px;

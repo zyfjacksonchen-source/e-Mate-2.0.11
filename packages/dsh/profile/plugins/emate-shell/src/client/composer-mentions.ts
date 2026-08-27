@@ -36,6 +36,12 @@ interface SkillEntry {
   description: string
 }
 
+interface ComputerUseCapability {
+  state: 'ready' | 'setup-required' | 'blocked' | 'failed'
+  detail?: string
+  actions: readonly { id: string; label: string }[]
+}
+
 const xml = (value: string): string => value
   .replaceAll('&', '&amp;')
   .replaceAll('<', '&lt;')
@@ -63,21 +69,65 @@ async function skillsOf(ctx: any, sessionId: string, signal: AbortSignal): Promi
   return result.value.skills
 }
 
+async function computerUseOf(ctx: any, signal: AbortSignal): Promise<ComputerUseCapability | undefined> {
+  const result = await ctx.connection.rpc.call('/emate.capabilities', 'list', {}, signal)
+  if (!result?.ok) throw new Error(result?.error?.message ?? '无法读取 Computer Use 状态')
+  const item = result.value?.items?.find((candidate: any) => candidate?.id === 'computer-use')
+  if (item === undefined) return undefined
+  if (!['ready', 'setup-required', 'blocked', 'failed'].includes(item.state)
+    || !Array.isArray(item.actions)
+    || item.actions.some((action: any) => typeof action?.id !== 'string' || typeof action?.label !== 'string')) {
+    throw new Error('Computer Use 状态无效')
+  }
+  return item
+}
+
+const computerCandidate = (description: string, hint: string) => [{ name: '电脑操控', description, hint }]
+
 /** Keep explicit Computer Use on the same native @ registry as every other reference. */
 export function registerComputerUseTrigger(ctx: any): void {
   const source: InputTriggerSource = {
     trigger: '@',
     name: '功能',
     order: -20,
-    candidates(_session, { query }) {
-      const isMac = /Mac/u.test(navigator.userAgent) || /Mac/u.test(navigator.platform)
-      return Promise.resolve(isMac && '电脑操控'.includes(query)
-        ? [{ name: '电脑操控', description: '显式指定使用 dsh-computer-use 操作当前电脑' }]
-        : [])
+    async candidates(_session, { query, signal }) {
+      if (!'电脑操控'.includes(query)) return []
+      if (document.body.dataset.dshDesktopPlatform !== 'darwin') {
+        return computerCandidate(document.body.dataset.dshDesktopPlatform === 'win32'
+          ? 'Windows 暂不支持 Computer Use。'
+          : '当前桌面平台未提供 Computer Use。', '不可用')
+      }
+      try {
+        const capability = await computerUseOf(ctx, signal)
+        if (capability === undefined) return computerCandidate('Computer Use 能力未加载。', '不可用')
+        if (capability.state === 'ready') return computerCandidate(capability.detail ?? 'Computer Use 已就绪。', '可插入')
+        if (capability.state === 'setup-required' && capability.actions.length > 0) {
+          return computerCandidate(capability.detail ?? '需要在 macOS 系统设置中开启权限。', '打开系统设置')
+        }
+        return computerCandidate(capability.detail ?? 'Computer Use 当前不可用。', '不可用')
+      } catch (reason) {
+        signal.throwIfAborted()
+        return computerCandidate(reason instanceof Error ? reason.message : '无法读取 Computer Use 状态。', '不可用')
+      }
     },
     lexicon() { return ['电脑操控'] },
-    onPick() {
-      return { insert: { source: '功能', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' } }
+    onPick({ candidate }) {
+      if (document.body.dataset.dshDesktopPlatform !== 'darwin') return 'handled'
+      if (candidate.hint === '可插入') {
+        return { insert: { source: '功能', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' } }
+      }
+      if (candidate.hint === '打开系统设置') {
+        const signal = AbortSignal.timeout(10_000)
+        void computerUseOf(ctx, signal).then(async (capability) => {
+          const action = capability?.state === 'setup-required' ? capability.actions[0] : undefined
+          if (action === undefined) return
+          const result = await ctx.connection.rpc.call('/emate.capabilities', 'action', {
+            capability_id: 'computer-use', action_id: action.id, data: {},
+          }, signal)
+          if (!result?.ok) throw new Error(result?.error?.message ?? '无法打开 macOS 系统设置')
+        }).catch((reason) => { ctx.logger?.warn?.('Computer Use setup action failed', reason) })
+      }
+      return 'handled'
     },
     codec: {
       clipboardText: () => '@电脑操控',

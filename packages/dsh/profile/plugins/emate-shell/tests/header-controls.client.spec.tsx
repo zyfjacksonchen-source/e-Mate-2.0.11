@@ -98,6 +98,12 @@ describe('desktop header controls', () => {
 
     expect(screen.queryByRole('button', { name: '分享当前任务' })).toBeNull()
     expect(screen.getAllByRole('button', { name: '检查更新' })).toHaveLength(2)
+    act(() => { updates.publish({ stage: 'available', version: '2.0.15' }) })
+    const retry = screen.getAllByRole('button', { name: '再次检查更新（发现 2.0.15）' })
+    fireEvent.click(retry[0]!)
+    fireEvent.click(retry[1]!)
+    expect(updates.bridge.runInteractiveUpdate).toHaveBeenCalledTimes(2)
+    expect(updates.bridge.cancel).not.toHaveBeenCalled()
     act(() => { updates.publish({ stage: 'downloading', version: '2.0.15', bytes: 25, total: 100 }) })
     expect(screen.getAllByRole('button', { name: '取消更新（25%）' })).toHaveLength(2)
     fireEvent.click(screen.getAllByRole('button', { name: '取消更新（25%）' })[0]!)

@@ -2,7 +2,7 @@
 import React from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CapabilitiesPage } from '../src/client/capabilities.tsx'
+import { CapabilitiesPage, CapabilityControl } from '../src/client/capabilities.tsx'
 
 const SHA256 = 'a'.repeat(64)
 const Icon = () => <svg aria-hidden="true" />
@@ -73,6 +73,17 @@ function renderPage(callSkillHub = vi.fn(async (endpoint: string) => {
 }
 
 describe('capability center fidelity surface', () => {
+  it('uses stable primary-action identity with tooltip, selected state, and the existing route', () => {
+    history.replaceState(null, '', '/')
+    render(<CapabilityControl wide active SkillIcon={Icon} />)
+    const control = screen.getByRole('button', { name: '能力中心' })
+    expect(control.getAttribute('data-emate-primary-action')).toBe('')
+    expect(control.getAttribute('title')).toBe('能力中心')
+    expect(control.getAttribute('aria-current')).toBe('page')
+    fireEvent.click(control)
+    expect(location.pathname).toBe('/capabilities')
+  })
+
   it('uses the native main phase as a standalone page and preserves the complete Skill Hub surface', async () => {
     renderPage()
     const page = document.querySelector<HTMLElement>('[data-emate-capabilities]')

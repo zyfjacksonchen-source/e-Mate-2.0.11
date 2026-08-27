@@ -417,6 +417,7 @@ export function SidebarRoot({
         <div className={css.primaryActions}>
           <button
             className={css.searchAction}
+            data-emate-primary-action=""
             type="button"
             title="搜索会话"
             aria-label="搜索会话"
@@ -431,6 +432,7 @@ export function SidebarRoot({
           </button>
           <button
             className={css.scheduleAction}
+            data-emate-primary-action=""
             type="button"
             title="定时任务"
             aria-label="定时任务"
@@ -440,7 +442,7 @@ export function SidebarRoot({
             <ScheduleIcon size={18} />
             {wide && <span>定时任务</span>}
           </button>
-          {renderSlot('sidebar.primary.action', { wide })}
+          {renderSlot('sidebar.primary.action', { wide, active: pathname === '/capabilities' })}
         </div>
 
         {wide && searchOpen && (

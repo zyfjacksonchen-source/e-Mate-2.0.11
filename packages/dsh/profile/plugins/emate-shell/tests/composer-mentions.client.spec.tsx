@@ -1,9 +1,67 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
-import { openMentionMenu, registerMentionSources } from '../src/client/composer-mentions.ts'
+import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from '../src/client/composer-mentions.ts'
 
 describe('native e-Mate @ references', () => {
+  it('uses native Computer Use metadata for ready, setup, failed, and Windows candidates', async () => {
+    let item: any = {
+      id: 'computer-use', state: 'ready', detail: '原生 Computer Use 已就绪。', actions: [],
+    }
+    const call = vi.fn(async (_channel: string, endpoint: string) => endpoint === 'list'
+      ? { ok: true, value: { schema_version: 1, items: [item] } }
+      : { ok: true, value: { schema_version: 1 } })
+    const sources: InputTriggerSource[] = []
+    registerComputerUseTrigger({
+      effect(run: () => () => void) { return run() },
+      inputTriggers: { registerSource(source: InputTriggerSource) { sources.push(source); return () => {} } },
+      connection: { rpc: { call } },
+      logger: { warn: vi.fn() },
+    })
+    const source = sources[0]!
+    const signal = new AbortController().signal
+    const setupSignal = new AbortController().signal
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(setupSignal)
+    const session = { sessionId: 'session-1' as never }
+    const request = { query: '', position: 'inline' as const, signal }
+    const pick = (candidate: any) => source.onPick({
+      candidate, session, position: 'inline', via: 'menu', span: { start: 0, end: 1, draftRev: 1 },
+    })
+
+    document.body.dataset.dshDesktopPlatform = 'darwin'
+    const ready = (await source.candidates(session, request))[0]!
+    expect(ready).toMatchObject({ name: '电脑操控', description: '原生 Computer Use 已就绪。', hint: '可插入' })
+    expect(pick(ready)).toMatchObject({ insert: { ref: 'computer-use', label: '@电脑操控' } })
+
+    item = {
+      id: 'computer-use', state: 'setup-required', detail: '需要开启辅助功能。',
+      actions: [{ id: 'open-accessibility-settings', label: '打开辅助功能设置' }],
+    }
+    const setup = (await source.candidates(session, request))[0]!
+    expect(setup).toMatchObject({ description: '需要开启辅助功能。', hint: '打开系统设置' })
+    expect(pick(setup)).toBe('handled')
+    expect(timeout).toHaveBeenCalledWith(10_000)
+    await vi.waitFor(() => expect(call).toHaveBeenCalledWith('/emate.capabilities', 'action', {
+      capability_id: 'computer-use', action_id: 'open-accessibility-settings', data: {},
+    }, setupSignal))
+
+    item = { id: 'computer-use', state: 'failed', detail: 'provider failed', actions: [] }
+    const failed = (await source.candidates(session, request))[0]!
+    expect(failed).toMatchObject({ description: 'provider failed', hint: '不可用' })
+    const actionCalls = call.mock.calls.filter(([, endpoint]) => endpoint === 'action').length
+    expect(pick(failed)).toBe('handled')
+    expect(call.mock.calls.filter(([, endpoint]) => endpoint === 'action')).toHaveLength(actionCalls)
+
+    call.mockClear()
+    document.body.dataset.dshDesktopPlatform = 'win32'
+    const windows = (await source.candidates(session, request))[0]!
+    expect(windows).toMatchObject({ description: 'Windows 暂不支持 Computer Use。', hint: '不可用' })
+    expect(pick(windows)).toBe('handled')
+    expect(call).not.toHaveBeenCalled()
+    delete document.body.dataset.dshDesktopPlatform
+    timeout.mockRestore()
+  })
+
   it('reads Goal, todo_write Plan, and enabled Skills from their native Session owners and fails stale refs closed', async () => {
     let goal: any = { goal: { id: 'goal-1', revision: 3, objective: '交付季度报告', phase: 'active' } }
     let todos: any = [{ content: '整理数据', status: 'in_progress' }, { content: '复核结论', status: 'pending' }]
