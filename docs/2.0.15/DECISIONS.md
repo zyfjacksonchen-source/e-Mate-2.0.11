@@ -98,6 +98,12 @@ T00 accepts T01–T17 as merged product/component source evidence and independen
 
 T18 freezes one successor identity, `e-mate-desktop-profile-v8-dsh-4787caf39134`, over Harness `4787caf39134df190105b272da0dd2ba893d4d75`, the exact 15-retained-component ABI union and 19 managed `2.0.15` package manifests. Immutable Base v7, historical predecessor/update fixtures, published 2.0.13 receipts, website/public pointers and three Profile desired states are not rewritten. The original two D006 failures close only at the source-contract layer when the strict unmodified inventory validator exits zero. Build once, exact artifacts, complete three-target composition/boot, installed update/rollback, TCC, real services, signing and public readback remain OPEN until their own receipts exist.
 
+### D020 — T18 Phase 1b integrates the live mainline without relabelling the public predecessor
+
+Before Build once, T18 must merge `origin/main@90c3a1fae3124536bb62f5ee215c74fe510e5e63` with a real two-parent `--no-ff` merge. The accepted upstream P0 removes only the duplicate deep bundle validation before the legacy 2.0.12 Helper durable ready marker; the complete validation at the start of the swap remains mandatory. Both append-only development histories are retained. The current impact default remains Base because the public Profile is Base v7 while the frozen candidate is Base v8; explicit compatible and incompatible overrides remain covered.
+
+The adopted snapshot preserves origin/main's exact three public 2.0.13/Base v7 inner byte strings, byte counts, SHA-256 values and capture timestamp. Only its candidate-facing outer version, Base id and canonical body hash advance to 2.0.15/v8. This merge and source-gate repair do not create candidate bytes or advance installed, signing, desired-state, website or public truth.
+
 ## Exclusive static scopes
 
 | Ticket | Exact owned paths while active |
