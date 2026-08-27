@@ -48,6 +48,12 @@ T15 candidate `96da539…` is rejected for integration: recursively calling `ctx
 
 Before T15 can merge, its Vision component must also prove emitted imports with the real component verifier, remove any declaration not present in emitted code, and replace synthetic non-existent file blocks with a real native Attachment/File Import coexistence probe. Complete Profile app-directory and installed acceptance remain explicitly open until the successor Base exists; source/component evidence must not label those stages passed.
 
+### D012 — T11 semantic Composer host is reopened before T16
+
+The independent visible T11 audit proved that the merged Home still extends the Composer frame with `--emate-composer-frame-bottom: -28px`, while the target contract requires one real `data-emate-composer-frame-host` containing the native Composer and workspace hint. T11 is therefore reopened in its same visible task and branch after synchronizing the merged T12 tree. Its corrective lease is exact: `packages/dsh/profile/plugins/emate-shell/src/client/home.tsx`, `home.module.css`, only the Composer-frame assertions in `packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx`, and `docs/2.0.15/evidence/T11.json` as a committed CP-11/CP-12 smoke extension. No `client/index.ts`, T12 message/gallery, Glass Composer, Settings, Base, version or lock path transfers.
+
+The repair must remove the negative-size contract and expose the semantic host without ancestor guessing or document scan, preserve the native Composer/input lifecycle, and make CP-11/CP-12 repeatable with zero pending. T16 remains paused because Glass Composer may consume only this real host; after the corrective commit merges, the listed Shell paths transfer back to T13 and T16 resumes without a Shell write lease.
+
 ## Exclusive static scopes
 
 | Ticket | Exact owned paths while active |
@@ -79,6 +85,8 @@ T11 received two one-time, expectation-only test transfers after its real Home a
 T12 receives one minimal Host-settings transfer because the pinned native `settingsScope` can bind only a namespace registered by the Host: `packages/dsh/profile/plugins/emate-shell/src/index.ts`, plus only the `base_imports` entries required for that registration in `packages/dsh/profile/plugins/emate-shell/package.json`. The transfer is limited to registering the `e-mate.messageFlowMode` schema and may not change the package version, dependencies, lockfile, Web assets, other settings, or add a second persistence path. T18 still owns version freeze and the honest successor Base rebind.
 
 T15 may read the T16-owned File Import package to prove coexistence, but it writes cross-plugin coverage only under its own Vision test root or the T02 smoke roots. Any product edit to File Import requires a separately proven defect and an explicit scope transfer to T16.
+
+T11's D012 corrective lease additionally includes `packages/dsh/profile/plugins/emate-shell/src/client/home.tsx`, `packages/dsh/profile/plugins/emate-shell/src/client/home.module.css`, and only the semantic-frame assertions in `packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx`. This one-time lease ends when the corrective commit and committed CP-11/CP-12 extension are merged.
 
 ## Sequential leases for shared files
 
