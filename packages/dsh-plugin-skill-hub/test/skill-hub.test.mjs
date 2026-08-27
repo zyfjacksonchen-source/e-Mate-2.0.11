@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
@@ -11,12 +11,14 @@ import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { strToU8, zipSync } from 'fflate'
+import { strToU8, unzipSync, zipSync } from 'fflate'
 import { apply, nativeCandidate } from '../lib/index.js'
 import {
+  compareSkillVersions,
   createSkillHubClient,
   createSkillHubStore,
   inspectSkillArchive,
+  skillHubFailure,
   SkillHubRecoveryPendingError,
 } from '../lib/skill-hub.js'
 
@@ -124,6 +126,21 @@ test('catalog search omits empty optional filters but rejects a non-string curso
   await assert.rejects(hub.search({ cursor: 0 }), /Skill search filters are invalid/u)
 })
 
+test('keeps operation failures typed across service, transport, integrity, recovery, and native provider boundaries', async () => {
+  for (const [status, code] of [[401, 'auth'], [409, 'conflict'], [422, 'integrity']]) {
+    const hub = createSkillHubClient({
+      dshHome: temporaryHome(),
+      store: {},
+      request: async () => Response.json({ detail: code, error: { code, message: code } }, { status }),
+    })
+    await assert.rejects(hub.search(), error => error.code === code)
+  }
+  const offline = createSkillHubClient({ dshHome: temporaryHome(), store: {}, request: async () => { throw new Error('offline') } })
+  await assert.rejects(offline.search(), error => error.code === 'network')
+  assert.throws(() => inspectSkillArchive(Buffer.from('bad zip')), error => error.code === 'integrity')
+  assert.equal(skillHubFailure(new SkillHubRecoveryPendingError('pending')).code, 'recovery')
+})
+
 test('native rc.7 parser is the install commit gate', async () => {
   const dshHome = temporaryHome()
   const store = lifecycleStore(dshHome)
@@ -134,7 +151,7 @@ test('native rc.7 parser is the install commit gate', async () => {
     ...invalid,
     claim: async () => { claimed = true; return 'must-not-be-issued' },
     complete: async () => acceptedCompletion(),
-  }), /native DSH parser/)
+  }), error => error.code === 'native-provider' && /native DSH parser/u.test(error.message))
   assert.equal(claimed, false)
   assert.equal(existsSync(join(dshHome, 'skills', 'invalid-policy')), false)
   assert.equal(existsSync(join(dshHome, 'e-mate', 'skill-hub', 'transactions', 'invalid-policy')), false)
@@ -239,6 +256,71 @@ test('install cannot silently become update while exact same-version revalidatio
   assert.equal(claimed, false)
 })
 
+test('a prerelease downgrade requires the explicit downgrade choice', async () => {
+  const dshHome = temporaryHome()
+  const store = lifecycleStore(dshHome)
+  await install(store, skillArchive('prerelease-order', '1.0.0-beta'))
+  let claimed = false
+
+  await assert.rejects(store.update({
+    ...skillArchive('prerelease-order', '1.0.0-alpha'),
+    claim: async () => { claimed = true; return 'must-not-claim' },
+    complete: async () => acceptedCompletion(),
+  }), /explicit downgrade choice/u)
+  assert.equal(claimed, false)
+})
+
+test('SemVer precedence keeps arbitrary-size numeric and ASCII prerelease identifiers exact', () => {
+  assert.equal(compareSkillVersions('9007199254740992.0.0', '9007199254740993.0.0'), -1)
+  assert.equal(compareSkillVersions('1.0.0-9007199254740992', '1.0.0-9007199254740993'), -1)
+  assert.equal(compareSkillVersions('1.0.0-z', '1.0.0-aa'), 1)
+  assert.equal(compareSkillVersions('1.0.0-alpha', '1.0.0-alpha.1'), -1)
+  assert.equal(compareSkillVersions('1.0.0-1', '1.0.0-alpha'), -1)
+  assert.equal(compareSkillVersions('1.0.0+one', '1.0.0+two'), 0)
+})
+
+test('restart repairs crashes after candidate activation, during rollback staging, and after recovery commit', async () => {
+  for (const phase of ['claimed', 'switched', 'committed']) {
+    const dshHome = temporaryHome()
+    const store = lifecycleStore(dshHome)
+    const first = skillArchive('switch-crash', '1.0.0')
+    const next = skillArchive('switch-crash', '2.0.0')
+    await install(store, first)
+
+    const transaction = join(dshHome, 'e-mate', 'skill-hub', 'transactions', 'switch-crash')
+    const candidate = join(transaction, 'candidate', 'switch-crash')
+    const active = join(dshHome, 'skills', 'switch-crash')
+    const backup = join(transaction, 'backup')
+    const receiptPath = join(dshHome, 'e-mate', 'migrations', 'skill-switch-crash.json')
+    const previousReceipt = JSON.parse(readFileSync(receiptPath, 'utf8'))
+    const nextReceipt = { ...previousReceipt, version: '2.0.0', package_sha256: next.card.package_sha256 }
+    mkdirSync(candidate, { recursive: true })
+    for (const [path, content] of Object.entries(unzipSync(next.payload))) writeFileSync(join(candidate, path), content)
+    writeFileSync(join(transaction, 'wal.json'), JSON.stringify({
+      schema_version: 1,
+      owner_pid: 999_999,
+      phase,
+      slug: 'switch-crash',
+      action: 'update',
+      previous_receipt: previousReceipt,
+      next_receipt: nextReceipt,
+      desired_completion: 'installed',
+      completion_receipt: 'completion-after-switch-crash',
+    }))
+    renameSync(active, backup)
+    renameSync(candidate, active)
+    if (phase === 'switched') renameSync(active, candidate)
+    if (phase === 'committed') writeFileSync(receiptPath, JSON.stringify(nextReceipt))
+
+    assert.deepEqual(await store.recover({ reconcile: async () => 'installed' }), [
+      { slug: 'switch-crash', status: 'recovered' },
+    ])
+    assert.match(readFileSync(join(active, 'SKILL.md'), 'utf8'), /2\.0\.0/u)
+    assert.equal(JSON.parse(readFileSync(receiptPath, 'utf8')).version, '2.0.0')
+    assert.equal(existsSync(transaction), false)
+  }
+})
+
 test('lost completion response preserves the old Skill and restart reconciliation commits the candidate', async () => {
   const dshHome = temporaryHome()
   const store = lifecycleStore(dshHome)
@@ -258,6 +340,36 @@ test('lost completion response preserves the old Skill and restart reconciliatio
   ])
   assert.match(readFileSync(join(dshHome, 'skills', 'recoverable', 'SKILL.md'), 'utf8'), /2\.0\.0/)
   assert.equal((await store.inventory()).at(0).version, '2.0.0')
+})
+
+test('restart reconciliation refuses a terminal receipt for another immutable Skill identity', async () => {
+  const expected = {
+    slug: 'expected-skill',
+    version: '2.0.0',
+    package_sha256: 'a'.repeat(64),
+    uploader: { nickname: 'Expected', author_ref: `author_${'b'.repeat(24)}` },
+  }
+  const hub = createSkillHubClient({
+    dshHome: temporaryHome(),
+    store: {
+      inventory: async () => [],
+      async recover({ reconcile }) {
+        return [{ slug: expected.slug, status: await reconcile('completion-receipt', expected) }]
+      },
+    },
+    async request() {
+      return Response.json({
+        schema_version: 1,
+        status: 'installed',
+        intent_id: 'intent_wrong',
+        slug: 'another-skill',
+        version: expected.version,
+        package_sha256: expected.package_sha256,
+        uploader: expected.uploader,
+      })
+    },
+  })
+  assert.deepEqual(await hub.recover(), [{ slug: expected.slug, status: 'unknown' }])
 })
 
 test('publication confirmation can bind the exact immutable bytes before upload', async () => {
@@ -383,7 +495,7 @@ test('a lost delete response retries the exact owned publication with one stable
       if (requests.length === 1) throw new Error('delete response lost after commit')
       return Response.json({
         schema_version: 1, status: 'deleted',
-        slug: card.slug, version: card.version, package_sha256: card.package_sha256,
+        slug: card.slug, version: card.version, package_sha256: card.package_sha256, uploader: card.uploader,
       })
     },
   })
@@ -398,6 +510,7 @@ test('a lost delete response retries the exact owned publication with one stable
 
 test('Agent natural language surface registers the complete typed lifecycle and confirms exact publication bytes', async () => {
   const dshHome = temporaryHome()
+  await install(lifecycleStore(dshHome), skillArchive('shared-download', '5.0.0'))
   const skill = join(dshHome, 'skills', 'natural-share')
   mkdirSync(skill, { recursive: true })
   writeFileSync(join(skill, 'SKILL.md'), '---\nname: natural-share\ndescription: natural language publication\nversion: 2.3.4\n---\n\nShare.\n')
@@ -422,6 +535,9 @@ test('Agent natural language surface registers the complete typed lifecycle and 
     get: name => name === 'emateIdentity' ? { request: async (url, init = {}) => {
       if (url.pathname.endsWith('/skills/shared-download')) {
         return Response.json({ schema_version: 1, skill: downloadCard, versions: [downloadCard] })
+      }
+      if (url.pathname.endsWith('/skills/shared-download/versions/4.5.6') && init.method === undefined) {
+        return Response.json(downloadCard)
       }
       if (url.pathname.endsWith('/skills/shared-download/versions/4.5.6/package')) {
         return new Response(download.payload, { headers: { 'x-skill-content-sha256': download.card.package_sha256 } })
@@ -454,6 +570,7 @@ test('Agent natural language surface registers the complete typed lifecycle and 
           slug: 'natural-share',
           version: '2.3.4',
           package_sha256: body.package_sha256,
+          uploader: publishedRemoteCard.uploader,
         })
       }
       throw new Error('network mutation must start only inside the Job')
@@ -536,6 +653,12 @@ test('Agent natural language surface registers the complete typed lifecycle and 
   const result = JSON.parse(terminal.output)
   let responseStatus
   let responseBody
+  routes.at(0).handler({ method: 'HEAD', url: `/api/e-mate/skill-hub.download?id=${result.download_id}` }, {
+    writeHead(status) { responseStatus = status },
+    end(body) { responseBody = body },
+  })
+  assert.equal(responseStatus, 200)
+  assert.equal(responseBody, undefined)
   routes.at(0).handler({ method: 'GET', url: `/api/e-mate/skill-hub.download?id=${result.download_id}` }, {
     writeHead(status) { responseStatus = status },
     end(body) { responseBody = body },
@@ -566,13 +689,23 @@ test('Agent natural language surface registers the complete typed lifecycle and 
     slug: 'natural-share',
     version: '2.3.4',
     package_sha256: publishedCard.package_sha256,
+    uploader: publishedRemoteCard.uploader,
   })
+  assert.equal(existsSync(join(dshHome, 'skills', 'natural-share', 'SKILL.md')), true)
   const workspace = join(dshHome, 'workspace')
   const imports = join(workspace, '.e-mate', 'imports')
   mkdirSync(imports, { recursive: true })
   const artifact = skillArchive('artifact-share', '1.0.0')
   writeFileSync(join(imports, 'artifact-share.zip'), artifact.payload)
   symlinkSync('artifact-share.zip', join(imports, 'artifact-link.zip'))
+  await assert.rejects(publish.execute({
+    source: 'workspace-artifact',
+    identity: '/tmp/arbitrary-host-path.zip',
+    category: 'third_party',
+  }, {
+    agent: { id: 'agent-test', session: { header: { cwd: workspace } } },
+    signal: new AbortController().signal,
+  }), /artifact identity is invalid/u)
   await assert.rejects(publish.execute({
     source: 'workspace-artifact',
     identity: '.e-mate/imports/artifact-link.zip',
@@ -592,4 +725,20 @@ test('Agent natural language surface registers the complete typed lifecycle and 
   assert.match(questions.at(-1).detail, /当前会话产物 \.e-mate\/imports\/artifact-share\.zip/u)
   assert.equal((await jobs[3].run().done).status, 'completed')
   assert.deepEqual(remoteMutations.map(item => item.action), ['publish', 'delete', 'publish'])
+
+  const updateTool = tools.find(tool => tool.name === 'e_mate_skill_hub_update')
+  const updateExec = { agent: { id: 'agent-test' }, signal: new AbortController().signal }
+  await assert.rejects(
+    updateTool.execute({ slug: 'shared-download', version: '4.5.6' }, updateExec),
+    /set allow_downgrade only after the user explicitly chooses/u,
+  )
+  assert.deepEqual(await updateTool.execute({
+    slug: 'shared-download', version: '4.5.6', allow_downgrade: true,
+  }, updateExec), { job_id: 'job-5', status: 'running' })
+  assert.match(questions.at(-1).question, /降级 shared-download@4\.5\.6/u)
+  assert.match(questions.at(-1).detail, /当前版本: 5\.0\.0/u)
+  assert.match(questions.at(-1).detail, new RegExp(downloadCard.uploader.author_ref, 'u'))
+  const failedUpdate = await jobs[4].run().done
+  assert.equal(failedUpdate.status, 'failed')
+  assert.equal(JSON.parse(failedUpdate.output).error.code, 'network')
 })

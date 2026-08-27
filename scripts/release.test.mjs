@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -33,7 +33,7 @@ import {
   validateUnsignedAdmittedDesktopReleaseManifest,
 } from '../desktop/e-mate-desktop/src/update-checker.ts'
 
-const HARNESS_COMMIT = 'b2b1650b01f0ee88d81837a9b5c050f9f763f606'
+const HARNESS_COMMIT = '4787caf39134df190105b272da0dd2ba893d4d75'
 const DIGEST = '0'.repeat(64)
 const R2_FIXTURE_PUBLIC_ORIGIN = 'https://downloads.e-mate.example'
 const SOURCE_COMMIT = '70ff2ce2e340682f4aad2be27e4ec8f1d74ee913'
@@ -391,11 +391,12 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.equal(published.cpu, undefined)
   assert.ok(workspace.scripts.test.indexOf('component-run.mjs check') < workspace.scripts.test.indexOf('--filter @e-mate/dsh test'))
   const ciChecks = ci.jobs.source.steps.find(step => step.name === 'Check target pin and e-Mate behavior').run
-  assert.match(ciChecks, /^pnpm test$/mu)
+  assert.match(ciChecks, /^pnpm test:harness-provenance$/mu)
   assert.doesNotMatch(ciChecks, /--filter @e-mate\/dsh test/u)
   assert.deepEqual(Object.keys(ci.jobs), [
     'impact',
     'source',
+    'component-base-sdk',
     'plugins',
     'base-platform-components',
     'profile-portable-composition',
@@ -409,8 +410,8 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.equal(ci.jobs.source.steps.find(step => step.name === 'Build pinned DeepSeek Harness').run, 'pnpm build:harness')
   assert.equal(release.jobs.pack.steps.find(step => step.name === 'Build pinned DeepSeek Harness').run, 'pnpm build:harness')
   assert.deepEqual(ci.jobs['base-platform-components'].needs, ['impact', 'source'])
-  assert.deepEqual(ci.jobs['desktop-windows'].needs, ['impact', 'source'])
-  assert.deepEqual(ci.jobs['desktop-macos'].needs, ['impact', 'source'])
+  assert.deepEqual(ci.jobs['desktop-windows'].needs, ['impact', 'source', 'plugins', 'component-base-sdk'])
+  assert.deepEqual(ci.jobs['desktop-macos'].needs, ['impact', 'source', 'plugins', 'component-base-sdk'])
   for (const [workflow, producer, consumers] of [
     [ci, 'source', ['desktop-windows', 'desktop-macos']],
   ]) {
@@ -509,6 +510,7 @@ test('GitHub release packs once and validates the same tarball on three platform
 test('download site stages exact bytes and a closed release-bound website handoff', async t => {
   const root = mkdtempSync(join(tmpdir(), 'e-mate-download-site-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
+  const sourceDirectory = join(root, 'source')
   const output = join(root, 'download-page')
   await file(output, 'stale-template.html', 'stale')
   const planPath = join(root, 'website-publication-plan.json')
@@ -532,7 +534,7 @@ test('download site stages exact bytes and a closed release-bound website handof
       },
     },
   }, null, 2)}\n`)
-  const plan = stageDownloadPage({
+  const base = {
     outputDirectory: output,
     planPath,
     sourceCommit: SOURCE_COMMIT,
@@ -540,7 +542,14 @@ test('download site stages exact bytes and a closed release-bound website handof
     websitePublicOrigin: 'https://downloads.e-mate.example/releases/',
     expectedActiveTarget: '/srv/ecorex-agent-download/releases/site-emate-nexus-f65dbdc',
     expectedActiveIndex: `636:${'a'.repeat(64)}`,
-  })
+  }
+  assert.throws(() => stageDownloadPage(base), /desktop manifest contract is incomplete/u)
+  cpSync('deploy/download-page', sourceDirectory, { recursive: true })
+  for (const name of ['index.html', 'install-macos.html', 'site.48e1d1764753.js']) {
+    const path = join(sourceDirectory, name)
+    writeFileSync(path, readFileSync(path, 'utf8').replaceAll('2.0.14', VERSION))
+  }
+  const plan = stageDownloadPage({ ...base, sourceDirectory: realpathSync(sourceDirectory) })
   assert.deepEqual(Object.keys(plan), [
     'schema_version', 'document_type', 'status', 'source_commit', 'version', 'staged_directory', 'release_state',
     'desktop_publication_predecessor', 'publication_contract', 'public_readback',
@@ -580,11 +589,10 @@ test('download site stages exact bytes and a closed release-bound website handof
   ])
   for (const entry of plan.public_readback.files) {
     assert.deepEqual(Object.keys(entry), ['relative_path', 'bytes', 'sha256', 'content_type', 'url'])
-    assert.ok(readFileSync(join('deploy/download-page', entry.relative_path)).equals(readFileSync(join(output, entry.relative_path))))
+    assert.ok(readFileSync(join(sourceDirectory, entry.relative_path)).equals(readFileSync(join(output, entry.relative_path))))
   }
   assert.deepEqual(JSON.parse(readFileSync(planPath, 'utf8')), plan)
 
-  const base = { outputDirectory: output, planPath, sourceCommit: SOURCE_COMMIT, releaseStatePath }
   assert.throws(() => stageDownloadPage({ ...base, websitePublicOrigin: 'http://example.test', expectedActiveTarget: 'absent', expectedActiveIndex: 'absent' }), /HTTPS/u)
   assert.throws(() => stageDownloadPage({ ...base, websitePublicOrigin: 'https://example.test', expectedActiveTarget: '../active', expectedActiveIndex: 'absent' }), /current target/u)
   assert.throws(() => stageDownloadPage({ ...base, websitePublicOrigin: 'https://example.test', expectedActiveTarget: 'absent', expectedActiveIndex: `1:${DIGEST}` }), /both be absent/u)
@@ -601,16 +609,17 @@ test('download site stages exact bytes and a closed release-bound website handof
   }), /not the exact admitted source/u)
 })
 
-test('one admitted producer feeds both update protocols and the 2.0.14 download site', async t => {
+test('keeps the checked-in 2.0.14 page separate from the current update producer', async t => {
   const page = readFileSync('deploy/download-page/index.html', 'utf8')
   const macGuide = readFileSync('deploy/download-page/install-macos.html', 'utf8')
   const scriptName = 'site.48e1d1764753.js'
   const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
-  assert.equal(validateDownloadPage(page, macGuide, script), '2.0.14')
+  assert.equal(validateDownloadPage(page, macGuide, script, '2.0.14'), '2.0.14')
   assert.throws(
-    () => validateDownloadPage(page.replace('data-desktop-version="2.0.14"', 'data-desktop-version="2.0.13"'), macGuide, script),
+    () => validateDownloadPage(page.replace('data-desktop-version="2.0.14"', 'data-desktop-version="2.0.13"'), macGuide, script, '2.0.14'),
     /desktop manifest contract is incomplete/u,
   )
+  assert.throws(() => validateDownloadPage(page, macGuide, script, 'latest'), /stable SemVer/u)
   assert.equal(scriptName.split('.')[1], createHash('sha256').update(script).digest('hex').slice(0, 12))
   for (const platform of ['macos', 'windows']) assert.match(page, new RegExp(`data-platform="${platform}"`, 'u'))
   for (const artifact of ['darwin', 'win32']) assert.match(script, new RegExp(`artifacts\\.${artifact}`, 'u'))
@@ -656,12 +665,14 @@ test('one admitted producer feeds both update protocols and the 2.0.14 download 
     assert.match(page, new RegExp(`\\./assets/${asset.replaceAll('.', '\\.')}\\b`, 'u'))
   }
   assert.doesNotMatch(page, /__EMATE_RELEASE_SOURCE_COMMIT__|npm install|nodejs\.org|e-mate setup|e-mate launch/u)
-  const { normalizeDownloadIndex, verifyDownloadIndex } = await import(`../deploy/download-page/${scriptName}`)
   const root = mkdtempSync(join(tmpdir(), 'e-mate-public-manifest-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
+  const currentScript = join(root, 'site.mjs')
+  writeFileSync(currentScript, script.replaceAll('2.0.14', VERSION))
+  const { normalizeDownloadIndex, verifyDownloadIndex } = await import(pathToFileURL(currentScript).href)
   const commit = 'a'.repeat(40)
-  const macArtifact = join(root, `e-Mate-${publishedVersion}-mac-universal.dmg`)
-  const windowsArtifact = join(root, `e-Mate-${publishedVersion}-win-x64-Setup.exe`)
+  const macArtifact = join(root, `e-Mate-${VERSION}-mac-universal.dmg`)
+  const windowsArtifact = join(root, `e-Mate-${VERSION}-win-x64-Setup.exe`)
   await writeFile(macArtifact, 'mac')
   await writeFile(windowsArtifact, 'win')
   const candidate = join(root, 'desktop-candidate.json')
@@ -751,8 +762,8 @@ test('one admitted producer feeds both update protocols and the 2.0.14 download 
   richFutureManifest.version = '9.9.9'
   for (const platform of ['darwin', 'win32']) {
     richFutureManifest.artifacts[platform].url = richFutureManifest.artifacts[platform].url.replaceAll(
-      `v${publishedVersion}`, 'v9.9.9',
-    ).replaceAll(`e-Mate-${publishedVersion}-`, 'e-Mate-9.9.9-')
+      `v${VERSION}`, 'v9.9.9',
+    ).replaceAll(`e-Mate-${VERSION}-`, 'e-Mate-9.9.9-')
   }
   assert.equal(legacy2012(richFutureManifest), true)
   assert.equal(validateAdmittedDesktopReleaseManifest(richFutureManifest, trustedKeys), false)

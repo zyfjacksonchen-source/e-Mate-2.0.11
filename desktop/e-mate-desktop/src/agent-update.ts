@@ -28,11 +28,20 @@ export function apply(ctx: Context): void {
           status: { type: 'string', enum: ['up-to-date', 'base-required', 'declined', 'superseded', 'scheduled', 'failed'], required: true },
           installedVersion: { type: 'string' },
           latestVersion: { type: 'string' },
-          updateKind: { type: 'string', enum: ['components'] },
+          updateKind: { type: 'string', enum: ['base', 'components'] },
           componentGeneration: { type: 'string' },
           components: { type: 'array', items: { type: 'string' } },
           downloadBytes: { type: 'number' },
           requiredBaseContracts: { type: 'array', items: { type: 'string' } },
+          stage: { type: 'string', enum: ['checking', 'available', 'confirming', 'downloading', 'verifying', 'staging', 'waiting-shutdown', 'replacing', 'restarting', 'health-check', 'completed', 'rolling-back', 'rolled-back', 'failed'] },
+          version: { type: 'string' },
+          bytes: { type: 'number' },
+          total: { type: 'number' },
+          cached: { type: 'boolean' },
+          mandatory: { type: 'boolean' },
+          minimumSupportedVersion: { type: 'string' },
+          code: { type: 'string' },
+          diagnosticId: { type: 'string' },
         },
         additionalProperties: false,
       },
@@ -50,11 +59,12 @@ export function apply(ctx: Context): void {
               ? `已取消更新；当前仍为 e-Mate ${value.installedVersion}。`
               : value.status === 'superseded'
                 ? `发布版本已变化，请重新确认更新到 e-Mate ${value.latestVersion}。`
-                : 'e-Mate 更新未完成，原生通知已显示失败结果；请稍后重试。',
+                : `e-Mate 更新未完成，原生通知已显示失败结果；请稍后重试${value.diagnosticId === undefined ? '。' : `（诊断编号：${value.diagnosticId}）。`}`,
       }],
     },
     async execute() {
-      return ctx.desktopUpdates.runInteractiveUpdate()
+      const result = await ctx.desktopUpdates.runInteractiveUpdate()
+      return { ...result, ...ctx.desktopUpdates.getState() }
     },
   }))
 }

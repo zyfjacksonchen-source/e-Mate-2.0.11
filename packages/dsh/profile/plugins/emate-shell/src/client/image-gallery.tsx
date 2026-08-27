@@ -10,6 +10,11 @@ import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/
 import { ImageGallery } from '@deepseek-ai/dsh-client-ui-attachment'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { IconBrowseOutline16, IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  imageReceiptRole,
+  parseImageOutputReceipt,
+  type ImageGalleryItem,
+} from './image-gallery-contract.ts'
 import css from './image-gallery.module.css'
 
 interface ImageDisclosureData {
@@ -21,17 +26,14 @@ interface ImageDisclosureState extends ImageDisclosureData {
 }
 
 interface ToolImagesData {
-  images: readonly { attachment: ImageAttachmentRef }[]
+  items: readonly ImageGalleryItem[]
 }
 
 interface ToolImagesState extends ToolImagesData {
   sourceSeq: number
 }
 
-interface ImageOutputEventData {
-  readonly call_id: string
-  readonly content: readonly [{ readonly type: 'image'; readonly attachment: ImageAttachmentRef }]
-}
+type ImageOutputEventData = Record<string, unknown>
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
@@ -81,18 +83,29 @@ export const imageDisclosureDefinition: ConversationNodeDefinition<ImageDisclosu
   }),
 }
 
-function toolImages(event: Parameters<ConversationNodeDefinition<ToolImagesState>['match']>[0]): ToolImagesData['images'] {
+function nativeToolItems(
+  event: Parameters<ConversationNodeDefinition<ToolImagesState>['match']>[0],
+): ToolImagesData['items'] {
   if (event.type === 'emate/image-output') {
-    const data = event.data
-    return typeof data.call_id === 'string' && Array.isArray(data.content) && data.content.length === 1
-      && data.content[0]?.type === 'image' && typeof data.content[0].attachment?.attachmentId === 'string'
-      ? [{ attachment: data.content[0].attachment }]
-      : []
+    const item = parseImageOutputReceipt(event.data)
+    return item === null ? [] : [item]
   }
   if (event.type !== 'tool/result') return []
-  return event.data.message.content.flatMap(block => block.type === 'tool-result'
+  const attachments = event.data.message.content.flatMap(block => block.type === 'tool-result'
     ? block.content.filter(image => image.type === 'image').map(image => ({ attachment: image.attachment }))
     : [])
+  const seen = new Set<string>()
+  return attachments.flatMap(({ attachment }) => {
+    if (seen.has(attachment.attachmentId)) return []
+    seen.add(attachment.attachmentId)
+    return [{
+      callId: String(event.data.message.source.callId),
+      revision: 0,
+      status: 'completed' as const,
+      operation: 'unknown' as const,
+      attachment,
+    }]
+  })
 }
 
 export const toolImagesDefinition: ConversationNodeDefinition<ToolImagesState> = {
@@ -100,13 +113,14 @@ export const toolImagesDefinition: ConversationNodeDefinition<ToolImagesState> =
   target: 'chat',
   match: event => {
     if (event.type !== 'emate/image-output' && (event.type !== 'tool/result' || !isAppendSurfaceEvent(event))) return null
-    const images = toolImages(event)
-    if (images.length === 0) return null
-    const id = event.type === 'emate/image-output' ? event.data.call_id : event.data.message.id
-    return { id: `tool-images:${id}`, role: 'start' }
+    const items = nativeToolItems(event)
+    if (items.length === 0) return null
+    const item = items[0]!
+    const id = event.type === 'emate/image-output' ? item.callId : event.data.message.id
+    return { id: `tool-images:${id}`, role: event.type === 'emate/image-output' ? imageReceiptRole(item) : 'start' }
   },
-  start: (_context, match) => ({ images: toolImages(match.event), sourceSeq: match.event.seq }),
-  update: context => context.state,
+  start: (_context, match) => ({ items: nativeToolItems(match.event), sourceSeq: match.event.seq }),
+  update: (context, match) => ({ ...context.state, items: nativeToolItems(match.event) }),
   buildViewNode: context => context.state === undefined ? null : ({
     key: context.key,
     kind: 'e-mate-tool-images',
@@ -115,7 +129,7 @@ export const toolImagesDefinition: ConversationNodeDefinition<ToolImagesState> =
     anchorSeq: context.state.sourceSeq + 0.02,
     location: locationOf(context),
     visibility: 'visible',
-    data: { images: context.state.images },
+    data: { items: context.state.items },
   }),
 }
 
@@ -211,7 +225,23 @@ const imageLabels = {
 export function ToolImageGallery({ node, loadImage }: ChatNodeViewProps<'e-mate-tool-images'>) {
   const [expanded, setExpanded] = useState(true)
   const controlId = `e-mate-tool-images-${node.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
-  return <section className={css.toolImages} data-emate-tool-images="">
+  const legacyImages = (node.data as unknown as { images?: readonly { attachment: ImageAttachmentRef }[] }).images ?? []
+  const items = node.data.items ?? legacyImages.map(({ attachment }, index) => ({
+    callId: `${node.key}:${index}`,
+    revision: 0,
+    status: 'completed' as const,
+    operation: 'unknown' as const,
+    attachment,
+  }))
+  const images = items.flatMap(item => item.attachment === undefined ? [] : [{ attachment: item.attachment }])
+    .filter(({ attachment }, index, all) => all.findIndex(candidate =>
+      candidate.attachment.attachmentId === attachment.attachmentId) === index)
+  const reviewCount = items.filter(item => item.status === 'review-required').length
+  const failedCount = items.filter(item => item.status === 'failed').length
+  const summary = images.length > 0
+    ? `已查看 ${images.length} 张图像${reviewCount > 0 ? ` · ${reviewCount} 张待确认` : ''}`
+    : `图像任务失败${failedCount > 1 ? ` · ${failedCount} 项` : ''}`
+  return <section className={css.toolImages} data-emate-tool-images="" aria-label="图片结果">
     <button
       type="button"
       className={css.button}
@@ -220,15 +250,16 @@ export function ToolImageGallery({ node, loadImage }: ChatNodeViewProps<'e-mate-
       onClick={() => { setExpanded(value => !value) }}
     >
       <IconBrowseOutline16 className={css.icon} />
-      <strong>已查看 {node.data.images.length} 张图像</strong>
+      <strong>{summary}</strong>
       <IconChevronDownOutline14 className={css.chevron} />
     </button>
-    <div id={controlId} hidden={!expanded}>
-      <ImageGallery images={node.data.images} load={loadImage} align="start" labels={imageLabels} />
+    <div id={controlId} hidden={!expanded} className={css.results}>
+      {images.length > 0 && <ImageGallery images={images} load={loadImage} align="start" labels={imageLabels} />}
       <div className={css.names} aria-label="图片文件名">
-        {node.data.images.map(({ attachment }, index) => (
-          <span key={`${attachment.attachmentId}:${index}`} title={attachment.name ?? imageLabels.image}>
-            {attachment.name ?? `图片 ${index + 1}`}
+        {items.map((item, index) => (
+          <span key={`${item.callId}:${item.revision}:${index}`} data-status={item.status}>
+            {item.attachment?.name ?? (item.status === 'failed' ? '生成失败' : `图片 ${index + 1}`)}
+            {item.status === 'review-required' ? ' · 待确认' : item.status === 'failed' ? ' · 失败' : ''}
           </span>
         ))}
       </div>

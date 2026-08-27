@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { join } from 'node:path'
-import type { Context, FiberState } from '@deepseek-ai/cordis'
+import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
@@ -15,6 +15,7 @@ import type Schema from '@deepseek-ai/schemastery'
 import { readCollectedOutput } from './collected-output.ts'
 import { parseOAuthCallback } from './oauth-callback.ts'
 import { validatePluginInstall, validatePluginPackageName } from './plugin-source.ts'
+import { isMcpServerActive } from './status.ts'
 
 export { parseOAuthCallback } from './oauth-callback.ts'
 
@@ -52,8 +53,6 @@ const PROTECTED_PLUGIN_NAMES = new Set<string>([
   'dsh-file-viewer',
   'dsh-visualize',
 ])
-// FiberState is a const enum and has no runtime export from Cordis.
-const FIBER_ACTIVE = 2 as FiberState.ACTIVE
 type UserQuestionAgent = Parameters<Context['userQuestions']['ask']>[0]['agent']
 
 const serverSchema = z.object({
@@ -589,10 +588,7 @@ export function apply(ctx: Context, config: ConfigShape): void {
       || (spec.auth === 'bearer'
         ? (await ctx.credentials.describe(tokenRef(spec.name))).configured
         : await readOAuthState(ctx, spec.name).then(state => state.tokens?.access_token !== undefined, () => false))
-    const entry = entryIds.get(spec.name)
-    const active = entry !== undefined
-      && ctx.loader.resolve(entry).fiber?.state === FIBER_ACTIVE
-      && ctx.tools.schemas().some(tool => tool.name.startsWith(`mcp__${spec.name}__`))
+    const active = isMcpServerActive(ctx.loader, ctx.tools, entryIds.get(spec.name), spec.name)
     return {
       name: spec.name,
       transport: spec.transport,

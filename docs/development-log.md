@@ -3093,3 +3093,191 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: Cloudflare 插件返回三对象均为 `application/json`、`no-store`，generation 分别为 `8f13e65c…3822`、`569c5fe5…c72e`、`c363cee9…deaf`；Profile preparation 失败 run `33050840728` 的精确错误为 `Profile current desired-state snapshot is invalid`，PR CI `33053688484` 作为旧断言负例保留，二者均没有 publication artifact 或线上写入。
 - Remaining blockers: 本快照随 helper-ready 最小 PR 合入并通过 protected-main CI；新的 Profile preparation 必须从 refreshed snapshot 成功生成但仍不得先于双前驱/双平台安装态验收写生产。
 - Next exact action: 复核快照只含上述精确 2.0.13 公网字节，与 helper-ready 修复一并提交；新候选安装态全绿后再重跑唯一 coordinator。
+
+## 2026-08-27 · 2.0.15 Wave 1 与增量工单合并检查点
+
+- Goal checkpoint: T00 控制下的 T03/T04 已完成后，T01 CI Lane、T02 回归墙以及三份 2026-08-27 增量输入已并入 `release/2.0.15`；本条只记录源码、Owner、测试和依赖真相，不创建候选、安装态或发布回执。
+- Frozen baseline / current HEAD: canonical source 仍从 `origin/main@5f8c54db7b76276c14f1938c970df155f4e6fd80` 起步；本检查点产品提交为 `9b4d935`，公开生产仍是精确 2.0.13。Harness `b2b1650b01f0ee88d81837a9b5c050f9f763f606`、Desktop Base v7 和公开产品字节未改变。
+- Binding documents read: 根 `AGENTS.md`、ponytail skill、`docs/target-contract.md`、T00 的 BASELINE/STATUS/DECISIONS、T01/T02 工单，以及 SHA-256 为 `f43129bc…c152`、`ba3937d3…07a`、`79fb2379…dc6` 的三份增量输入。
+- Inspected native seam: T01 继续以唯一 `change-impact` classifier 组织 PR Fast / RC / Audit，并刷新精确公开 2.0.13 Base v7 desired-state snapshot；T02 以一个 Node manifest/runner 表达 component、app-dir、installed 三层。Vision 当前 paste capture 会阻断原生 Composer、复制到工作区并序列化绝对路径文本，P0 因而归 T15 原生 Attachment-first 输入边界，不归 OCR，也不新建与 Skill Hub 冲突的 T7。
+- Decision and forbidden alternatives: 图片 paste/drop/upload 先进入 Harness Attachment/CAS 和 durable image block；能力未知时保持 native，确认 text-only 只允许在 LLM wire 转换。T10 先冻结 model capability，T15 再实现；T02/T18 分别承担源码墙和安装态。禁止第二 Attachment store、路径文本、Skill/CDP fallback、DOM/模型名猜测和自动切模。D009 只在同一命名验收经过至少两次不同源码修复仍失败时启用应用内独立 ChatGPT Work 会诊；不得转网页版，结论仍须由原 Owner 本地复验。
+- Changed scope: T01 合并提交 `e7822c2` 与 post-T04 fixture 修复 `9b4d935`；T02 合并提交 `2c352cf`；目标合同/增量计划/Owner 决策提交 `a03cfab`，应用内会诊修订 `ea458a0`。没有版本号、Base contract、Profile inventory、产品发布或线上对象变化。
+- Verification commands and results: `check:target` 通过；T01 合并态指定回归 `5/5`、约 `20.386s`，发布拓扑 `3/3`；T02 runner 自测在合并树 `10/10`。T02 独立构建环境的 component wall 为 `40.999s`，app-dir CP-01 为 `50.519s` 且使用真实 Renderer ACK；installed 未运行。合并树重复 component wall 时因本地 worktree 尚无生成的 Harness `lib/` 测试输入停在 CP-02，未把该环境失败写成产品通过。`check:release-boundary` 继续以唯一 `runtime imports must equal the component-declared Base ABI union` 错误失败。
+- Immutable evidence / receipt: `docs/2.0.15/evidence/T01.json` 与 `T02.json` 记录实际命令、耗时、pending seams 和未达到阶段；D009 状态为 `not_invoked`。没有 protected-main CI、候选、installer、installed app、签名、R2/Feed 或公网写入。
+- Remaining blockers: D006 要求 T18 创建诚实的新 Base contract 身份并重绑 15 个 retained components；T05 及其后续依赖尚未实现；T17 仍等待真实腾讯文档导出；真实账号、服务、双平台安装、更新、回滚和公开字节回读仍 OPEN。
+- Next exact action: 从当前 release tip 创建唯一 T05 分支/worktree，先冻结 native Tool/Image/Search visibility 与 receipt contract；后续工单只按已记录依赖和 Shell 顺序放行。
+
+## 2026-08-27 · 2.0.15 T14 图标唯一 Owner 补充
+
+- Goal checkpoint: T14 在追踪正式 `build:sdk` 消费链时发现 `sync-emate-profile.mjs` 会在图标生成器之前无条件用旧 Shell mark 覆盖 `build/app-icon.png`；继续生成 C03 会在下一次构建漂回旧图标，因此先失败关闭。
+- Decision and forbidden alternatives: `desktop/e-mate-desktop/scripts/sync-emate-profile.mjs` 精确移交 T14，唯一允许改动是删除重复图标源写入；Profile 同步职责保持不变。禁止第二图标源、base64 嵌入、从派生图反向恢复或继续让 Profile mark 覆盖 Desktop 生产图标。
+- Truth stage: 这是 Owner/源码计划修订，不是 C03 资产、安装包、签名、Finder/Dock/Switcher/Settings 或发布回执；T14 必须在同一原任务中补失败回归、源码资产和证据后才能合入。
+
+## 2026-08-27 · 2.0.14 历史任务正式移交 2.0.15 总控
+
+- Goal checkpoint: 用户把 Codex 任务 `01a02e48-f61f-7352-bc86-b5ec8771d46c` 中的 2.0.14 改动、结论和剩余进度交由当前 2.0.15 总控接手；现有 T00–T18 继续执行，不另开平行 2.0.14 发布线。
+- Frozen baseline / current HEAD: 旧任务最后可读长回合为 interrupted，引用较早的 dirty 2.0.13 worktree，故只作历史上下文。仓库证据固定 2.0.14 实现为 `a4fd5170888513e30ea73a915c335fc8c87546f3` 与 `4bfe0c333348dceead6d7e7b4b4f5b1639468dc8`；后者 tree `992143d0f5fbbd15ade365ec6d36a3d8e88126f8` 与 protected `main@5f8c54db7b76276c14f1938c970df155f4e6fd80` 完全一致，也正是 2.0.15 的起始源码。
+- Binding documents read: 旧任务最近十个可读 turn、当前 `docs/slices/2.0.14.md`、`target-contract.md`、2.0.15 BASELINE/DECISIONS/STATUS 及 protected-main Git tree/diff。
+- Inspected native seam: 2.0.14 实际接受的四组修复是原生 Tool Search/ImageGen 可见性、Find Skill packaged pnpm 直启输入、Main/Preload Renderer bootstrap、以及精确 2.0.12 macOS envelope bridge；2.0.13+ bound updater 保持原路径。
+- Decision and forbidden alternatives: 不复制旧 dirty worktree、不重复 cherry-pick 同树提交、不把 Pet/Cowart/浏览器等旧宽范围设想冒充 2.0.14 完成项，也不让它们覆盖当前工单。T05/T09/T15 分别消费并扩展现有 owner；所有真实安装、旧版升级、Profile generation 与公网指针仍只由 T18 裁决。
+- Verification commands and results: `git rev-parse 4bfe0c3^{tree}` 与 `5f8c54d^{tree}` 均为 `992143d0f5fbbd15ade365ec6d36a3d8e88126f8`；当前 BASELINE 已记录 exact-source CI 成功、Desktop preparation 成功、Profile release/coordinator 失败和公网 2.0.14 manifest 404。
+- Immutable evidence / receipt: 2.0.14 没有完整 signed Profile publication、installed acceptance 或 public production receipt；公开 signed/legacy/desired-state 仍为精确 2.0.13。本次接管只写 2.0.15 总控文档，不触碰产品、旧任务工作树、生产对象或用户安装态。
+- Remaining blockers: T15 尚未执行；T18 必须重放公开前驱更新、Profile/新 Base、安装回滚和公网回读。2.0.14 的未发布状态不能因任务移交而提升。
+- Next exact action: 继续按依赖合并 T06/T07/T10，再放行 T11/T15；T18 最终以 2.0.15 exact bytes 关闭继承的安装与发布缺口。
+
+## 2026-08-27 · 2.0.15 T05/T06/T08/T09/T14 源码总线检查点
+
+- Goal checkpoint: 原生 Tool 路由、定时任务、在线分享、更新事务与 C03 生产图标五个独立 Owner 已按租约合入 `release/2.0.15`；本检查点只提升到 merged source/component evidence，不创建 RC、不安装、不发布。
+- Frozen baseline / current HEAD: 合入产品提交分别为 T05 `718765c`、T06 `c8764d0`（任务最终树 `dc0e3d5` 的产品文件完全相同，最终 CP-06 回执由 `7062700` 同步）、T08 `40d412a`、T09 `488f41d`、T14 `34999c4`；2.0.14 历史接管记录为 `6004658`。公开生产仍是精确 2.0.13。
+- Inspected native seam: T05 保持唯一 Tool Registry/Search；T06 复用 native Schedule event projection 与 Workspace/Session/Composer；T08 复用现有 Share Worker；T09 贯通唯一 updater typed state；T14 删除 Profile 同步对图标的重复覆盖并由单一 C03 源生成各平台资产。
+- Decision and forbidden alternatives: 不建第二 Tool registry、scheduler、share transport、updater 或图标源；T06 修改继续遵守 `schedule_create` 成功后再 `schedule_delete`。D006 Base ABI union 不弱化，仍由 T18 以新 Base identity 关闭。
+- Verification commands and results: T06 最终任务证据为 Schedule projection `1/1`、Shell `24/24`、T05 Schedule visibility `3/3`、CP-06 `267 ms / 0 pending`；协调总线独立重建 Harness Host/Client 后再次通过 Schedule `1/1`、Shell `24/24` 和 Shell build。T09 独立回归为 updater `292 passed / 1 existing skipped` 与四套 TypeScript 检查通过；T14 generator、图标测试 `5/5`、package consumer `1/1` 与原生 ICNS 提取通过。所有合入后 `git diff --check` 与租约范围通过。
+- Immutable evidence / receipt: `docs/2.0.15/evidence/T05.json`、`T06.json`、`T08.json`、`T09.json`、`T14.json` 只记录源码/组件真相；没有候选、安装字节、真实账号双端验收、签名、R2/Feed 或公网写入。
+- Remaining blockers: T07 与 T10 仍在执行；T11 等待 T06+T10，T15 等待 T10；T17 等待真实腾讯文档导出；T18 独占新 Base、RC、真实安装/更新/回滚和公网回读。
+- Next exact action: 先审查并合入 T07/T10；随后按高冲突顺序放行 T11，再依次推进 T12、T16、T13，并在 T10 后并行启动 T15。
+
+## 2026-08-27 · 2.0.15 T07/T10/T11 能力、数据与首页设置检查点
+
+- Goal checkpoint: T07 的 Skill Hub 发布、发现、安装、启停、卸载与重启恢复闭环，T10 的账户 Token 日桶、托管 Search grant 和模型图片能力合同，以及依赖它们的 T11 空首页、办公模板、账户与 Token 热力图已按唯一 Owner 合入 `release/2.0.15`；本条只提升源码与组件证据，不创建候选、安装态或发布回执。
+- Frozen baseline / current HEAD: T07 合入提交为 `1354df1`、`f7bbf5e`，T10 合入提交为 `2544fcd1fadde0bafd592815f882e2a439aed27e`，T11 合入提交为 `d56a8d6`；公开生产仍为精确 2.0.13，Base v7、Harness rc.7、Profile generation 和公网对象均未改变。
+- Inspected native seam: T10 继续使用既有 usage-attempt ledger、managed identity/Search lease 和原生 model metadata；T11 删除 Home 对 Session 本机 Token、成功率和最近任务的重复推断，十二个模板只复用既有 blank/Workspace/Session 与 `conversation.input` 草稿，AccountSettings 只消费 `identity.usage.activity` 的精确日桶。
+- Decision and forbidden alternatives: 不新增第二 analytics、Session、Workspace、Composer 或模板发送路径；模板只填草稿并聚焦，绝不自动发送。活动数据按 IANA timezone、连续 Gregorian 日期和 canonical decimal strings 验证，typed unavailable 不显示伪造零值。两处旧测试只转移与 T11 新事实直接冲突的 expectation，其他身份、Sidebar 和导航断言未转移。
+- Changed scope: T10 严格限于其 12 个 identity/model-policy/Gateway/analytics Owner 文件及 T10 evidence；T11 严格限于 Home/Account/token/template 租约、顺序转交的 `home.tsx`/client index、两段窄测试 expectation 与 T11 evidence。没有 Base、版本、锁文件、发布或生产写入。
+- Verification commands and results: T07 Worker `11/11`、组件 Node `17/17`、UI `7/7`，协调总线独立复跑 CP-07 为零 pending；T10 activity/Postgres `5/5`、Gateway focused `3/3`、identity lifecycle `10/10`、Gateway check 通过；T11 最终 Shell build 通过，协调总线在提交上独立复跑 `14 files / 85 tests` 全绿，CP-11/CP-12 为零 pending。D006 继续以 `runtime imports must equal the component-declared Base ABI union` 严格失败。
+- Immutable evidence / receipt: `docs/2.0.15/evidence/T07.json`、`T10.json` 与 `T11.json` 只记录源码/本地组件真相；没有真实双账号授权、公共 Worker/schema 回读、真实账户日桶对账、app-directory、installer、installed app、签名、R2/Feed 或公网回读。
+- Remaining blockers: T15 仍在执行；T12/T16/T13 尚未开始；T17 等待腾讯文档导出；T18 独占新 Base、真实账户、双平台安装更新回滚与发布。
+- Next exact action: 完成 T15 原生 Attachment-first/运行插件闭环；从已合入 T11 的 Shell seam 创建 T12，继续遵守 T11 → T12 → T16 → T13 顺序。
+
+## 2026-08-27 · 2.0.15 T12 消息双模式与类型化图库检查点
+
+- Goal checkpoint: T12 已在 T11 之后按 Shell 顺序租约合入 `release/2.0.15`；本条只提升源码与组件真相，不创建候选、安装态或发布回执。
+- Frozen baseline / current HEAD: T12 源提交 `a0a66c983fcd28af3a9cb27bffc66b8aa0f7e07a` 由总控合入为 `1176913`；公开生产仍是精确 2.0.13，Base v7、Harness rc.7、Profile generation 和公网对象均未改变。
+- Inspected native seam: Host 只注册原生 `e-mate.messageFlowMode` schema；Client 只消费 pinned `settingsScope`。`simple` 保留三个 priority `-1` fold shadows，`detailed` 仅释放它们并恢复 pinned priority-0 assistant-step/tool-call/context；Thinking branding 独立。T05 revision 2 receipt 创建 typed gallery node，revision 3 以同一 `call_id` 更新；native Tool-result 未隐藏或改写，旧 DOM gallery mover 不再注册。
+- Decision and forbidden alternatives: 不新增第二 settings、chat store、event conversion、detailed renderer 或 gallery owner；不通过 DOM 扫描/移动节点。app-directory、安装态、new Base、候选和 public 仍归 T18。
+- Verification commands and results: 可见独立任务 `01a0436a-de49-7ad1-a576-b3f8d73fb22e` 复核 Shell build、focused `3 files / 12 tests`、full Shell `15 files / 93 tests`、emitted imports 精确 5 项、CP-13 zero pending、D006 only strict red 与 clean tree。总控随后使用已提交 `T12.json` extension 重放 CP-13，`1812 ms / 0 pending`，并以 `git show --check` 验证提交洁净。
+- Immutable evidence / receipt: `docs/2.0.15/evidence/T12.json` 自身是 committed smoke extension；没有 complete Profile、installer、installed app、签名、R2/Feed 或公网写入。
+- Remaining blockers: T15 prepared-adapter/Attachment-first 仍在独立任务收口；T16 尚未执行；T17 已取得两份只读腾讯源表并开始导入；D006 必须由 T18 新 Base identity/rebind 关闭。
+- Next exact action: 从 `1176913` 创建 T16 独立 worktree/可见任务；T15 并行完成后，按 T16 → T13 → T18 顺序继续。
+
+## 2026-08-27 · 2.0.15 T15 原生图片输入与运行组件检查点
+
+- Goal checkpoint: T15 已在独立可见任务 `01a0436a-de49-7ad1-a576-b3df10972f5c` 完成，并由 T00 复验后作为一个不可拆分的三提交链合入 `release/2.0.15`；本条只提升源码与组件证据，不创建候选、安装态或发布回执。
+- Frozen baseline / current HEAD: 首段原生 Attachment/CDP/Find Skill 修复合入为 `8cd64e9`，registration-bound Harness/Vision 收口为 `f99cbdc`，证据纠正为 `f3ec2ca`；本地 Harness 提交为 `2ca0b68b420ba11a80fc5fac800f889008cd42af`。公开生产仍为精确 2.0.13，immutable Base v7 未修改。
+- Inspected native seam: paste/drop/upload 继续由 Harness Attachment/CAS 和 durable image block 唯一持有；image-capable 与 capability unknown 保留原请求和五个 native image blocks。确认 text-only 时，Vision 只在新的 Harness `llm/wire` waterfall 临时替换 messages；原 `llm/stream`、T10/invariant observers 和 prepared adapter registration 各只经过一次，HMR 重绑后仍调用 prepare 时捕获的 adapter。
+- Decision and forbidden alternatives: 不递归调用 `ctx.llm.stream`，不写 durable history，不序列化绝对路径，不切换模型，不新增 Attachment store，也不回退到 Find Skill/CDP。`llm/wire` 只允许 messages 变化；provider/model/signal/session/其余 envelope 漂移、throw 和 abort 均失败关闭。旧 v7 不被静默改写。
+- Changed scope: T15 Owner 内 CDP、Find Skill、Vision 与证据；经 D011 精确移交的 Harness `packages/llm/llm/src/index.ts`、窄测试和 root gitlink。Computer Use 无产品改动。没有 Base、版本、锁文件、发布或生产写入。
+- Verification commands and results: 可见任务回执为 Harness LLM `85/85`、Vision `4/4`、CDP `11/11`、Computer Use `2/2`、Find Skill `21/21`、CP-03 zero pending 与 emitted imports 精确 7 项。T00 独立重跑 LLM typecheck、`85/85`、CDP `11/11`、Computer Use `2/2`、Find Skill `21/21`；补齐 HEAD 已声明但工作树未展开的 GenUI submodule 后，使用已提交 `T15.json` 重放 CP-03 为 `2657 ms / 0 pending`。
+- Immutable evidence / receipt: `docs/2.0.15/evidence/T15.json` 诚实记录 source/component 层。`component-release inventory` 当前精确返回 D006 的两条严格消息：Harness gitlink 未被 v7 绑定，以及 v7 runtime imports 不等于 retained-component union；T18 successor Base 必须同时关闭二者。`2ca0b68b42…` 已通过本地对象同步到 release 工作树，但当前没有 advertised `origin/*` ref 包含它，因此这不是干净外部 checkout 回执。
+- Remaining blockers: T18 必须先证明全新 checkout 可获取精确 Harness gitlink；complete Profile app-directory、目标 CPython 3.12 wheel/runtime、双平台 installed paste/drop/upload、macOS TCC、真实 connector/account、candidate/public receipts 均仍 OPEN；D006 仍是 RC blocker。
+- Next exact action: 先完成 T11 D012 semantic frame host，再放行 T16；T13 只在 T11/T15/T16 handoff 后创建，T18 最后生成 successor Base 与正式 RC。
+
+## 2026-08-27 · 2.0.15 T11 原生 Composer Host 纠偏合入
+
+- Goal checkpoint: T11 在同一可见任务 `01a0436a-de49-7ad1-a576-b4198616aa5e` 完成第二种源码修复；总控拒绝了以 Home 文档扫描建立 Host 的第一种方案，只合入删除负尺寸补丁与最终原生 Owner 方案，release 提交为 `37da362`、`dbabee2`。
+- Frozen baseline / current Harness: pinned Harness 从 T15 `2ca0b68b420ba11a80fc5fac800f889008cd42af` 前进到本地后代 `820fee0df4f46b15d4cc07f56ccfcae43549d769`。`ConversationRoot` 的原生 `composerStack` 直接发出 `data-emate-composer-frame-host`；Home 不再扫描后写入/删除该属性，也不新增 wrapper、mover、Composer、Store 或输入生命周期。
+- Verification: 总控独立检查两个 root diff 与 upstream diff；native skeleton `18/18`、ui-conversation typecheck、Shell `15 files / 93 tests`、CP-11/CP-12 `3150 ms / 0 pending`、`git diff --check` 和 clean tree 均通过。重复失败会诊门禁 D009 未触发，因为第二种 native-owner 修复已通过同名验收。
+- Evidence ceiling: 这只证明 source/component 层。严格 inventory 仍精确保留 D006 两条 blocker；`820fee0df4…` 当前通过本地任务仓补齐到 release 工作树，但没有 advertised `origin/*` 可达证明，不能冒充 clean-checkout、installed、RC 或 released。
+- User input boundary: 用户已声明独立图片反馈工作簿为旧版作废材料；T17 不读取或映射其内容，只保留“已排除”的来源身份回执，并从唯一有效功能反馈导出重新生成 backlog。
+- Next exact action: 同步并恢复原 T16 可见任务；并行恢复 T17，仅使用有效功能反馈导出。T16 合入后再创建 T13。
+
+## 2026-08-27 · 2.0.15 T17 有效功能反馈只读归并
+
+- Goal checkpoint: T17 在同一可见任务 `01a04376-18e2-7a63-9c79-934597ccae80` 仅使用 `VwnSnZLbANDI` 的有效功能反馈导出完成只读归并，release 提交为 `b6fa6f2`；没有业务代码、源表、外部文档、Base、版本或发布写入。
+- User invalidation boundary: 用户明确宣布独立图片反馈工作簿为旧版作废材料。T17 没有重新打开或解析它，只在 evidence 的 `discarded_inputs` 记录文件名、已知 SHA、`user_declared_obsolete_old_version` 和 `content_excluded=true`；backlog 不含其行、字段、媒体、计数、分类、root、映射或结论。
+- Verification: 有效表 SHA 精确匹配；20 条 raw feedback ID 全部唯一，分类 P0 8 / P1 5 / P2 1 / DUPLICATE 4 / NEEDS_EVIDENCE 2 合计 20；16 个 canonical ID 唯一且每条 raw 都有有效反向映射；禁止字符串 `IMAGE-` 不存在，JSON、`git show --check` 与 clean tree 通过。
+- Evidence ceiling: 这是 read-only intake，不是产品修复。所有 P0 仍按各自 T05–T16 source/component、app-directory、installed、真实账户/provider、exact-byte 或 update/rollback 回执裁决；D006 与正式发布仍归 T18。
+- Next exact action: 等待 T16 产品组件闭环并独立复验；T16 合入后创建 T13 最终 Shell/导航集成任务。
+
+## 2026-08-27 · 2.0.15 T16 产品组件与原生渲染边界合入
+
+- Goal checkpoint: T16 在同一可见任务 `01a0437a-bff4-7db2-9387-9edbe2b01e1d` 完成七个 retained component 的独立 Owner 闭环，release 提交链为 `af1d659`、`a6ef185`、`ca7a1c0`、`648830d`、`ca8aafe`、`c2701fe`、`e4526b7`、`fd47b90`、`bca3321`。没有 Shell、Harness、inventory、Base、版本、锁文件或发布写入。
+- Native-owner decisions: Glass 明确 Keep，但只装饰 D013 原生 Composer Host；GenUI 在 rc.7 无 fence registry 时只保留 native `render_ui` ToolView，不启动全页 DOM 渲染双轨。Memory 增加用户确认且当前 scope 限定的删除；MCP 只有 native loader ACTIVE 且 server Tool 存在才报告 active；Office 在 Job 启动前已取消时不产出文件。
+- Session and file boundaries: Better Sidebar 与 File Import 拒绝 archived/unknown Session，并把异步结果绑定到请求发起 Session。总控拒绝第一版仅覆盖 stale success 的 Better Sidebar 回执；同一可见任务第二版用 native session key 隔离首帧，并在一个 request-token owner 同时 fence stale resolve/reject，真实 deferred jsdom 回归证明旧 listing/path/preview/status 和脱离 DOM 的旧行都不能进入新 Session。
+- Independent verification: Better Sidebar build、Host `3/3`、deferred client race `1/1`；File Import `7/7`、GenUI `1/1`、Glass `1/1`、MCP `5/5`、Memory `5/5`、Office `5/5`。七组件 emitted imports 精确匹配各自既有 `base_imports`；初始化 root 已声明的 GenUI submodule 后，committed T16 extension 重放 CP-13 为 `142 ms / 0 pending`；inventory 精确保留 D006 两条 strict red。
+- Evidence ceiling: `docs/2.0.15/evidence/T16.json` 只提升 source/component 层。Complete Profile app-directory、installed macOS/Windows、真实 MCP provider、真实 Office application host、candidate/public、final Harness advertised reachability 与 successor Base rebind 仍归 T18。
+- Next exact action: 从当前 release tip 创建 T13 独立 worktree/可见任务，消费 T06/T07/T08/T09/T11/T12/T15/T16 handoff，完成最后的原生 `@`、Settings、导航和 titlebar 集成。
+
+## 2026-08-27 · 2.0.15 T13 最终 Shell 集成派发
+
+- Goal checkpoint: T13 已按 Shell 高冲突顺序在 T16 合入后创建为用户可见的独立任务 `01a043d2-7aad-7491-bfe1-f8d109d4183d`；T00 继续只做状态、审查、纠偏、独立复验和合并，不代写产品实现。
+- Frozen baseline / current HEAD: 独立 worktree `/Users/mac/e-mate/worktrees/emate-2.0.15-T13`、分支 `feat/2.0.15-T13-ui-navigation` 固定起点 `25e90d11bee5ce6d0df84a8384de2ece844f9fe2`；本地 Harness `820fee0df4f46b15d4cc07f56ccfcae43549d769` 与 GenUI `0e756efb7671e6b8413dde3d8e199c68fa89cbeb` 均已按 root gitlink 展开且 clean。
+- Binding handoffs: T13 只接管 `DECISIONS.md` 的静态路径和已经顺序转交的 Shell/Header/Desktop integration seam，消费 T06 Schedule、T07 Skill Hub、T08 Share、T09 updater、T11 native Composer Host、T12 message/gallery、T15 native attachment/capability 与 T16 Glass/GenUI contracts。
+- Decision and forbidden alternatives: 保持一个原生 Session/Workspace/Router/InputTrigger/Goal/Todo/Updater/Composer；不得新增 Mention registry、第二 Store/Renderer/Composer、DOM mover或可见 slash 菜单，不改 Home 内容、消息模式、产品插件、Base/version/lock/workflow。
+- Evidence ceiling: 本任务先做 source/component 和可重复 smoke；完整 Profile app-directory、installed 双平台、真实服务、candidate/public 仍由 T18 裁决。D006 两条 strict blocker 必须保持可见，不能因 T13 集成被隐藏或弱化。
+- Next exact action: 等待该可见任务形成最小提交和 `T13.json`，由 T00 回读源码与测试、独立复验并在通过后合入；随后才创建最后的 T18。
+
+## 2026-08-27 · 2.0.15 T13 手动更新桥租约纠偏
+
+- Goal checkpoint: 同一 T13 可见任务完成只读入口盘点后按规则停止且保持零改动；外置工作包已完整读取，不再是 blocker。总控独立核对确认真正缺口是 T09 Host 已有 `desktopUpdates.runInteractiveUpdate()`，但现有 Renderer bridge 只提供 `getState/subscribe/cancel`。
+- Root cause: 直接在 Header/Settings 加“检查更新”会成为死按钮；从 Renderer 重跑 checker 会形成第二 updater。现有 `manualTask` 已拥有并发复用和完整事务，缺的是同一 context-isolated bridge 上的一条 typed 调用 carrier。
+- Decision and transferred scope: D015 把已合入且 clean 的 T09 `update-presentation.ts`、`preload.ts`、`updates.ts`、`tests/updates.spec.ts` 精确顺序转交 T13，并把既有 `electron-runtime.ts`/测试租约扩大到该 IPC carrier。只允许调用原 `runInteractiveUpdate()`、验证 owning Renderer sender、teardown 清理和复用原 in-flight fence；Header/Settings 仍只消费同一 `DesktopUpdateState`。
+- Forbidden alternatives: 不新增 updater、Store、持久结果、checker 调用、协议族或 manifest/download/install/rollback 逻辑；不把 source carrier 冒充 installed update/rollback。其余已证明缺口仍由 T13 原租约处理：Footer 重复 Settings、空白 Session Share、伪装可见 slash 和 connector route。
+- Next exact action: 将本 T00 决策 fast-forward 到 clean T13 分支并恢复原可见任务；T00 在提交后独立验证 sender isolation、handler cleanup、同一 in-flight updater、Header/Settings 同源状态和完整路由/可访问性回归。
+
+## 2026-08-28 · 2.0.15 T13 独立审查退回与 T15 能力状态补交
+
+- Goal checkpoint: T13 可见任务已形成 source/component 候选 `c07d461` 与 evidence `8c63a29`，但尚未合入。T00 逐调用链回读后拒绝当前候选，主任务不代写产品修复。
+- Root causes: 更新确认被拒绝后，唯一 updater 按合同保留稳定 `available`，而 Shell 把它同时列入 busy/cancellable，下一次点击只会调用不存在的取消事务；`@电脑操控` 仍读取 UA，未消费 T15 原生 `ComputerUseService` 的 helper/TCC 状态；Settings 仍以本地化标题和 MutationObserver 改名/隐藏，未按原生 `settings.section` id 收口 `models/plugins/agent-presets`。
+- Decision and leases: D016 先恢复原 T15 可见任务，只在 Computer Use adapter/test/evidence 内把既有 status/openPermissionSettings 投影到既有 `emateCapabilities`。合入后恢复原 T13 可见任务；除既有租约外，只转交原生 SettingsRoot nav 的稳定 section-id metadata、对应窄测、root Harness gitlink与 identity-settings 的 expectation-only regression。
+- Forbidden alternatives: 不新增 capability/permission/RPC/Settings/InputTrigger/Updater Owner，不用 UA 或本地化文本作最终事实，不卸载任何插件，不让 Windows 或 failed 状态插入可执行引用，不重写 T13 既有提交。旧版图片反馈工作簿继续整份排除且不读取。
+- Evidence ceiling: 这是第一次针对三个同名验收的源码纠偏，D009 未触发。T15 必须先合入；随后 T13 同步 release、提交 follow-up、重跑最窄回归与 committed CP-13。app-directory、installed、真实 TCC、双平台 UI、更新/回滚、successor Base 和 public 仍由 T18 裁决。
+- Next exact action: 恢复 T15 visible task 完成原生能力投影；T00 独立复验并合入后，再恢复 T13 修复 updater retry、Computer Use candidate state 和 stable Settings section boundary。
+
+## 2026-08-28 · 2.0.15 T13 稳定主操作与版本冻结边界补充
+
+- Goal checkpoint: T15 D016 修正仍在同一可见任务执行；T00 继续只做独立审查和精确租约，不代写产品实现，也未放行 T13 或 T18。
+- Additional root cause: T13 候选仍用本地化 `aria-label='能力中心'` 选择 T07 控件，且共享 hover/focus/current 样式未覆盖该控件；T07 控件本身没有 tooltip 和 route-selected 状态。可访问名称不得兼任稳定样式/路由 identity。
+- Decision and transferred scope: D017 只把已合入、clean 的 T07 `capabilities.tsx` 与对应 client test 顺序转交同一 T13 可见任务；Search/Schedule/Capability Center 共享一个稳定 primary-action data attribute，Capability Control 只接收 Sidebar slot 已有 route-active owner prop 并补 `title`/`aria-current`。禁止改 Hub 页面、RPC、registry、Jobs、catalog 或 Worker。
+- Version boundary: Sidebar 与 Aura 仍有两个用户可见 `2.0.13`。D018 把这两个 literal 及直接相关测试的版本标签留给最后 T18 version-only freeze；不新增 Renderer/Desktop 版本桥，也不改历史 predecessor/update fixtures 或已发布 2.0.13 回执。
+- Evidence ceiling: 这只是 Owner/租约裁决，没有 source/component、app-directory、installed、candidate 或 public 新回执。D009 未触发；D006 两条 strict blocker 继续保留。
+- Next exact action: 等待同一 T15 visible task 完成并由 T00 复验合入；随后将 release 同步到原 T13 分支，按 D016/D017 做 follow-up，T18 仍只在全部 P0 合入后创建。
+
+## 2026-08-28 · 2.0.15 T15 原生 Computer Use 能力投影合入
+
+- Goal checkpoint: D016 在原 T15 可见任务 `01a0436a-de49-7ad1-a576-b3df10972f5c` 完成，没有新建任务或子代理；单一修正提交由总控合入 release 为 `9f7d54f`。T15 回到 `MERGED`，T13 的 native capability 依赖已解锁。
+- Root cause and owner: 原 `ComputerUseService` 已拥有 helper/TCC 缓存状态与 `openPermissionSettings`，但组件没有向既有 `emateCapabilities` 投影，迫使 T13 候选读取 UA。修正只在 Computer Use build adapter 的唯一 fail-closed seam 注册一个 `computer-use` definition；没有新增服务、RPC、Store、permission model、helper、Tool、轮询器、依赖或 Windows executor。
+- State and action contract: list 只读取一次缓存 `status()`；helper/provider 就绪且 Accessibility/Screen Recording 均 granted 才是 ready。缺失权限只返回对应原生设置 action；provider failure/unavailable 返回 failed/blocked 且无 action id。既有 registry 在 invoke 前重新计算 status 并拒绝不在 `action_ids` 的操作，signal 原样传给原生设置 Owner，Cordis effect disposer 移除唯一 registration。
+- Independent verification: T00 逐行审查 `c55fe7900a` 后，以本地 runtime Node 重跑 build 和完整 package test为 `3/3`；真实 emitted imports 精确为 8 个声明项；T15 JSON、`git diff --check`、root/submodule clean 与提交检查通过。严格 inventory 仍且仅返回 `upstream/deepseek-harness: Git submodule commit does not match the Base contract` 和 `desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union`。
+- Evidence ceiling: `T15.json` 只提升 source/component 层。真实 macOS TCC deny/grant/revoke、installed Windows 不可用投影、complete Profile app-directory、successor Base、candidate/public 与 clean external fetch 仍归 T18；旧版作废图片反馈工作簿继续整份排除且未读取。
+- Next exact action: 将当前 release 合并到原 T13 分支，保留其既有提交，再恢复同一 T13 可见任务按 D016/D017 修正 updater retry、native Computer Use candidate、stable Settings IDs 和 stable primary-action contract。
+
+## 2026-08-28 · 2.0.15 T13 最终原生导航集成合入
+
+- Goal checkpoint: T13 在同一可见任务 `01a043d2-7aad-7491-bfe1-f8d109d4183d` 完成 D016/D017 纠偏、回归夹具对齐和 committed CP-13；T00 独立复验后将完整提交图 fast-forward 到 `release/2.0.15@0157ce5ad13880831b6e9230a7e521c3e6c80aa5`，没有重写、摘取或代写产品实现。
+- Native-owner result: updater `available` 回到稳定可重试且不可取消；Computer Use 只消费 `/emate.capabilities` 与 Desktop 稳定平台元数据，ready 才插入，setup-required 复用原生 action，failed/blocked/Windows 不可执行；Settings 只按 `models/plugins/agent-presets` 稳定 section id 隐藏而不卸载；Search/Schedule/Capability Center 共享稳定主操作 identity、tooltip、focus/current 状态。
+- Upstream and scope: 产品修复 `48b0479143bff18cfac10c8315af2a9c22aec294`，旧夹具对齐 `feb96b20017d2f127438df49b592c49c42748bf4`，最终 evidence `0157ce5ad13880831b6e9230a7e521c3e6c80aa5`；Harness 只新增 `SettingsRoot.tsx` 的既有 row-id metadata 与一个窄测，最终本地提交 `4787caf39134df190105b272da0dd2ba893d4d75`，GenUI 保持 `0e756efb7671e6b8413dde3d8e199c68fa89cbeb`。
+- Verification: Owner committed CP-13 为五个 binding 全 PASS、`7850 ms / 0 pending`；T00 用最终 evidence 独立重放为 `8168 ms / 0 pending`。完整临时构建的外部 runtime imports 精确等于 `[@deepseek-ai/dsh-client-runtime, @deepseek-ai/dsh-client-ui-attachment, @deepseek-ai/dsh-client-ui-primitives, react, react-dom]`；root/Harness/GenUI、JSON、diff check 均 clean。
+- Failures retained honestly: 第一次 CP 在旧 `composer-205` 夹具停下，因为夹具未提供 stable darwin 与 ready hint；最小测试修正后通过。其余 Settings 启动失败均由离线 package-local 映射不足引起，补齐已声明的 `ui-primitives` 闭包后通过；没有第二次产品源码修复，D009 会诊门禁未触发。
+- D006 and reachability: strict inventory 仍且仅返回 `upstream/deepseek-harness: Git submodule commit does not match the Base contract` 与 `desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union`。release 子模块首次从 advertised origin 获取 `4787caf391…` 返回 `not our ref`，随后只从已验收本机对象库补齐工作树；这不是 clean-checkout reachability 回执，仍归 T18。
+- Evidence ceiling: source/component 层通过；complete Profile app-directory、successor Base、真实 macOS TCC、Windows、Share/update 服务、candidate、installed exact bytes、update/rollback、签名与 public production 均未提升。用户宣布作废的旧版图片反馈工作簿继续只保留 identity exclusion，内容从未读取或映射。
+- Next exact action: 创建唯一最终 T18 可见任务，在 `release/2.0.15` 上完成 successor Base、可达 Harness、版本冻结、RC、双平台安装更新回滚和正式发布回执；没有精确回执不得宣称 2.0.15 已发布。
+
+## 2026-08-28 · 2.0.15 T18 Phase 1 源码冻结验收
+
+- Goal checkpoint: 唯一 T18 可见任务 `01a0447b-214f-7050-a85f-76b50ecffc8a` 完成 advertised Harness reachability 与 Phase 1 source freeze。冻结提交为 `c2e7365b71a10e4a54622a70a30b0ae9fe19df90`，T00 拒绝第一版过滤网站用例的回执后，同一任务追加 source-gate 修正 `7a6703c299c54ae4edb34cbf802e9af2ada3637e`；最终 T18 evidence tip 为 `bc688967cb297086032efeb929b99edd62e11662`。
+- Source truth: 当前唯一 Base 为 `e-mate-desktop-profile-v8-dsh-4787caf39134`，绑定 `0.1.0-rc.7@4787caf39134df190105b272da0dd2ba893d4d75`、Desktop reference `6074088f5b660206e404b3591fab51fb99c69add`、15 个 retained components、19 个 `2.0.15` managed manifests 与精确 17 项 runtime-import union。严格 inventory 从原两条 D006 变为 15 components / 19 jobs / 0 errors；validator 未放宽，v7 只保留为 predecessor 历史合同。
+- Advertised reachability: 仅新增远端分支 `release/e-mate-2.0.15-harness` 指向 `4787caf391…`。T18 branch/SHA clean probes 与 T00 独立 HTTPS clean probe 均无 alternates，并从旧 Base 精确取得 `2ca0b68b42…`、`820fee0df4…`、`4787caf391…` 三提交；没有 force push 或其他远端引用改写。
+- Source-gate correction: `deploy/download-page` 是未正式发布的 2.0.14 历史网站源码，不能冒充当前 2.0.15 页面；真实 candidate staging 又必须默认要求当前 Desktop 版本。共享 validator 现在允许历史审计显式提供稳定 expected version，但 `stageDownloadPage` 默认仍严格绑定 2.0.15。第一次修正因临时路径非 canonical 且 current producer 仍收到 2.0.14 artifact name 而保持 14/16；第二种修正把历史页面、当前 staging fixture 与 current producer 分离后完整 16/16，未触发 D009。
+- Independent verification: T00 逐行审查三路径修正并独立运行完整 `scripts/release.test.mjs` 为 16/16、冻结域 Harness/Base/component/profile/coordinator 为 53/53、`check:target` exit 0、`check:release-boundary` exact successor Base/0 errors、`component:inventory` 15/19/0 errors、全差异 `git diff --check` exit 0。`deploy/download-page` 与 `.github/workflows/release.yml` 相对纠偏起点零差异，root/Harness/GenUI 分别 clean 于 `bc688967cb…`、`4787caf391…`、`0e756efb76…`。
+- Evidence ceiling: 这只接受 source freeze。Build once、candidate/admission、三目标 composition/boot、macOS arm64/x64 与 Windows x64 fresh install、2.0.12/2.0.13 更新、失败健康回滚、CP-01..CP-15 complete Profile、真实 Skill Hub/Share/connectors、TCC/Computer Use、C03 installed 截图、exact artifacts/provenance、签名/adhoc、Feed/Profile desired state、官网/public readback和正式发布仍全部 `OPEN`。生产前驱继续是 2.0.13，2.0.14 从未被提升为正式发布。
+- User invalidation boundary: 作废的 `e-mate-image-feedback.xlsx` 继续只保留文件名、已知 SHA、`user_declared_obsolete_old_version` 与 `content_excluded=true`；T18 未打开、读取、摘要或映射其内容。
+- Next exact action: 在同一 T18 可见任务中，从 T00 接受后的精确 release HEAD 启动 protected source gate 与 Build once；只生成一次三目标 Profile/Base/Desktop exact candidate，先回传 immutable artifact identity 交 T00 审查，未获接受前不得安装、签名或写任何生产状态。
+
+## 2026-08-28 · 2.0.15 T18 Phase 1b 当前主线归并
+
+- Goal checkpoint: T00 接受 Phase 1 后发现 authoritative `origin/main` 已前进到 `90c3a1fae3124536bb62f5ee215c74fe510e5e63`。T18 从 clean `release/2.0.15@3f8694415099e236288809591ccbe19a9ce2af5b` 以真实 `--no-ff` merge `1135dd9e3fcd1304c16607df9978f37811054e99` 保留双方完整 ancestry，随后以 `19122980f119b64c4011bcd7255db2b1b699d0cb` 完成当前 snapshot/publication source gate 修正；没有 rebase、cherry-pick、rewrite、push 或 PR 操作。
+- Owner resolutions: 接收 upstream legacy mac Helper 在 deep bundle validation 前 durable ready 的一行 P0 修复及 source-order 回归，swap 前既有完整 validation 保持不变；`development-log.md` 保留双方全部 append-only 记录；impact 默认继续把公开 Base v7 前驱对当前 Base v8 候选判为 Base lane，并保留显式 compatible/incompatible 正负例。
+- Snapshot boundary: 采用 origin/main 捕获于 `2026-08-27T08:19:11.281Z` 的三份公开 2.0.13/Base v7 inner bytes，精确保持 `10579/ef845777…a462`、`10567/374318de…bd9d`、`10503/beef5d1d…b6c1` 与全部 `content_base64`。只把外层 candidate identity 机械改为 `2.0.15` / `e-mate-desktop-profile-v8-dsh-4787caf39134`，并由既有 canonical helper 得到 `snapshot_sha256=b1714ce20eabf4010d1719055fff1bf2705d3c7cbdfab2b85d22be8e09cf4787`；没有联网刷新或生产写入。
+- Source-gate correction: merge 后完整 `publish-profile-r2.test.mjs` 精确为 `2/3`，唯一失败是旧 fixture 同时触发 `base contract id must equal v8` 与 `Harness commit drifted`。第一种最小修正复用导出的 `BASE_CONTRACT_ID` / `HARNESS_COMMIT` 并让假 root、gitlink、Base 与 component 共同绑定当前 v8/4787caf 后达到 `3/3`，D009 未触发，validator 与 inner 前驱均未放宽或改写。
+- Verification: 完整 `test:impact` 为 `45/45`，完整 `release.test.mjs` 为 `16/16`，完整 mac updater suite 为 `93/93` 且包含 ready-before-validation 回归；`check:target`、`check:release-boundary`、`component:inventory`、changed JSON parse 与 `git diff --check` 均 exit 0，inventory 为 15 components / 19 jobs / 0 errors。
+- Evidence ceiling: 本轮只恢复当前主线 ancestry 与 source gate。Build once、candidate/admission、三目标 composition/boot、macOS/Windows fresh install、2.0.12/2.0.13 update、rollback、真实服务/TCC、exact artifacts、签名、R2/Feed/Profile desired state、官网/public readback与正式发布继续全部 OPEN；作废图片反馈工作簿仍只沿用 identity exclusion，未打开、读取、摘要或映射。
+- Next exact action: 停止并交 T00 独立审查 merge parents、snapshot inner/outer 分层与完整 source gates；未获 Build once 放行前不进入候选或发布阶段。
+
+## 2026-08-28 · 2.0.15 T18 Phase 1b 总控独立验收
+
+- Goal checkpoint: T00 已独立接受同一 T18 可见任务的 Phase 1b 源码候选 `7bd8994231c51501975f7ccc722c6dfcb9b93040`。本轮只落账总控验收，不修改产品、T18 evidence、候选、安装、签名或生产状态。
+- Ancestry and live baseline: merge `1135dd9e3fcd1304c16607df9978f37811054e99` 的两个父提交精确为 T00 已接受的 `3f8694415099e236288809591ccbe19a9ce2af5b` 与 live `origin/main@90c3a1fae3124536bb62f5ee215c74fe510e5e63`；远端 main 复查未再前进，远端 `release/2.0.15` 尚不存在。root、Harness `4787caf39134df190105b272da0dd2ba893d4d75` 与 GenUI `0e756efb7671e6b8413dde3d8e199c68fa89cbeb` 均 clean。
+- Snapshot and owner review: 三目标 `.targets` 与 `origin/main` 捕获的公开 2.0.13/Base v7 inner bytes 精确相等；外层 candidate identity 才是 2.0.15/Base v8。legacy mac helper 只删除 durable ready 前的重复 validation，swap 前完整 validation 仍存在且有顺序回归；impact 默认仍诚实反映当前公开 Base v7 对冻结候选 Base v8 的 Base lane。
+- Independent verification: T00 独立运行完整 impact `45/45`、release `16/16`、mac updater `93/93`；`check:target`、`check:release-boundary`、`component:inventory`、JSON 与全 Phase 1b `git diff --check` 均通过，inventory 为 15 components / 19 jobs / 0 errors。实际 Phase 1b 修改严格限于七个已记录路径。
+- Evidence ceiling: Build once、不可变 artifact identity、candidate/admission、三目标 composition/boot、双平台安装、升级/回滚、真实服务与 TCC、签名、R2/Feed/Profile desired state、官网/public readback和正式发布仍全部 OPEN。作废图片反馈工作簿仍只保留 identity exclusion，内容未打开、读取、摘要或映射。
+- Next exact action: 先再次读取 live `origin/main`；若仍为 `90c3a1f…`，只放行同一 T18 任务非强制推送唯一 release 分支、创建并通过一个受保护主线 PR，然后捕获 protected-main CI attempt-1 的唯一 Build once。该任务必须在 artifact identity 回传后停止，未获 T00 接受前不得安装、签名、调用发布协调器或写生产状态。

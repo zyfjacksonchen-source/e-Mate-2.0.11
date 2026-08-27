@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "ticket": "T03",
+  "title": "全插件、功能与架构系统审计",
+  "audit_status": "AUDIT_COMPLETE_NO_INSTALLED_CLOSURE",
+  "baseline": {
+    "commit": "b3773a72274b51032a39cc92d4b0b0db8dcd25ec",
+    "branch": "feat/2.0.15-T03-system-audit",
+    "clean_start": true,
+    "base_contract": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0",
+    "harness_commit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606"
+  },
+  "scope": {
+    "product_files_changed": 0,
+    "new_audit_files": [
+      "docs/2.0.15/AUDIT-COMPONENTS.md",
+      "docs/2.0.15/AUDIT-USER-FLOWS.md",
+      "docs/2.0.15/AUDIT-TECH-DEBT.md",
+      "docs/2.0.15/evidence/T03.json"
+    ],
+    "audit_script_created": false
+  },
+  "inventory": {
+    "expected_count": 16,
+    "audited_count": 16,
+    "component_ids": [
+      "C01",
+      "C02",
+      "C03",
+      "C04",
+      "C05",
+      "C06",
+      "C07",
+      "C08",
+      "C09",
+      "C10",
+      "C11",
+      "C12",
+      "C13",
+      "C14",
+      "C15",
+      "C16"
+    ],
+    "decisions": {
+      "keep": ["C01", "C02", "C03", "C04", "C05", "C06", "C07", "C08", "C09", "C10", "C11", "C12", "C13", "C15"],
+      "fix": ["C14"],
+      "merge": [],
+      "delete": ["C16"]
+    },
+    "installed_closure_claimed": false
+  },
+  "architecture": {
+    "expected_count": 10,
+    "audited_count": 10,
+    "area_ids": ["A01", "A02", "A03", "A04", "A05", "A06", "A07", "A08", "A09", "A10"]
+  },
+  "requirements": {
+    "mapped_count": 18,
+    "requirement_ids": ["UR01", "UR02", "UR03", "UR04", "UR05", "UR06", "UR07", "UR08", "UR09", "UR10", "UR11", "UR12", "UR13", "UR14", "UR15", "UR16", "UR17", "UR18"],
+    "all_have_unique_owner_and_ticket": true,
+    "blocked": [
+      {
+        "id": "UR17",
+        "status": "BLOCKED/NEEDS_INPUT",
+        "reason": "Tencent Docs content is not readable from the supplied workpack; no rows were inferred."
+      }
+    ]
+  },
+  "architecture_areas": [
+    "Shell",
+    "Identity",
+    "Share",
+    "Update",
+    "Profile generation",
+    "Session/Workspace/Tool/Schedule/Skill/Job",
+    "Tool registry/system prompt",
+    "Enterprise Worker/service"
+  ],
+  "priority_findings": {
+    "p0": ["TD-P0-01", "TD-P0-02", "TD-P0-03", "TD-P0-04", "TD-P0-05"],
+    "p1": ["TD-P1-01", "TD-P1-02", "TD-P1-03", "TD-P1-04", "TD-P1-05", "TD-P1-06", "TD-P1-07"]
+  },
+  "xin_assistant_delete_snapshot": {
+    "component_id": "C16",
+    "owner_ticket": "T04",
+    "tracked_files": 642,
+    "tracked_bytes": 58277640,
+    "python_or_stub_files": 497,
+    "vendor_native": {
+      "darwin-arm64": {"files": 156, "bytes": 22382672},
+      "darwin-x64": {"files": 156, "bytes": 22370738},
+      "win32-x64": {"files": 156, "bytes": 10360424}
+    },
+    "public_active_before_delete": false,
+    "historical_objects_mutated": false
+  },
+  "non_overlapping_batches": {
+    "T15": ["C04", "C05", "C07", "C15"],
+    "T16": ["C03", "C06", "C08", "C09", "C10", "C11", "C12"],
+    "excluded_from_both": {"C01": "T13", "C02": "T07", "C13": "T06", "C14": "T05", "C16": "T04"}
+  },
+  "truth_constraints": {
+    "source_or_fixture_is_functional_closure": false,
+    "release_claimed": false,
+    "publish_performed": false,
+    "installed_e2e_performed": false,
+    "existing_2_0_14_routing_and_updater_repairs": "NEEDS_EVIDENCE",
+    "public_version_observed_from_baseline": "2.0.13"
+  },
+  "verification": {
+    "inventory_count_check": "PASS_16_OF_16",
+    "requirement_owner_check": "PASS_18_OF_18",
+    "document_id_traceability_check": "PASS",
+    "allowed_path_check": "PASS_FOUR_NEW_AUDIT_FILES_ONLY",
+    "git_diff_check": "PASS"
+  }
+}

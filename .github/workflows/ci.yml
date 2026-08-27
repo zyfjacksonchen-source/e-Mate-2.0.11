@@ -29,8 +29,12 @@ jobs:
     timeout-minutes: 5
     outputs:
       lane: ${{ steps.classify.outputs.lane }}
+      ci_mode: ${{ steps.classify.outputs.ci_mode }}
       run_base: ${{ steps.classify.outputs.run_base }}
       run_plugins: ${{ steps.classify.outputs.run_plugins }}
+      run_components: ${{ steps.classify.outputs.run_components }}
+      compose_profile: ${{ steps.classify.outputs.compose_profile }}
+      profile_bootstrap: ${{ steps.classify.outputs.profile_bootstrap }}
       run_enterprise: ${{ steps.classify.outputs.run_enterprise }}
       run_verification: ${{ steps.classify.outputs.run_verification }}
       components_json: ${{ steps.classify.outputs.components_json }}
@@ -54,6 +58,10 @@ jobs:
       windows_distribution: ${{ steps.classify.outputs.windows_distribution }}
       head_sha: ${{ steps.classify.outputs.head_sha }}
     steps:
+      - name: Start job timing
+        id: timing
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -91,15 +99,23 @@ jobs:
             --base "$BASE_SHA" \
             --head "$HEAD_SHA" \
             "${context_args[@]}" \
-            --github-output "$GITHUB_OUTPUT" > change-impact.json
+            --github-output "$GITHUB_OUTPUT" > ci-plan.json
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: e-mate-change-impact-${{ steps.classify.outputs.head_sha }}
-          path: change-impact.json
+          name: e-mate-ci-plan-${{ steps.classify.outputs.head_sha }}
+          path: ci-plan.json
           if-no-files-found: error
           retention-days: 7
+
+      - name: Summarize lane timing
+        if: always()
+        env:
+          STARTED: ${{ steps.timing.outputs.started }}
+        run: |
+          elapsed=$(( $(date +%s) - STARTED ))
+          printf '### CI lane\n\n| Mode | Lane | Seconds | Result |\n|---|---|---:|---|\n| %s | %s | %s | %s |\n' "${{ steps.classify.outputs.ci_mode }}" "${{ steps.classify.outputs.lane }}" "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   source:
     name: Node 24 / target contracts and unit tests
@@ -114,6 +130,7 @@ jobs:
 
       - uses: actions/checkout@v6
         with:
+          ref: ${{ needs.impact.outputs.head_sha }}
           fetch-depth: 0
           persist-credentials: false
           submodules: recursive
@@ -141,10 +158,18 @@ jobs:
       - name: Check target pin and e-Mate behavior
         run: |
           pnpm check:target
-          pnpm test
+          pnpm test:harness-provenance
+          node --test scripts/create-chat-state-fixture.test.mjs
 
       - name: Check release carrier
+        if: needs.impact.outputs.ci_mode == 'release-candidate'
         run: pnpm test:release
+
+      - name: Build and test the accepted Profile component set once
+        run: node scripts/component-run.mjs check
+
+      - name: Test the complete assembled DSH Profile once
+        run: pnpm --filter @e-mate/dsh test
 
       - name: Resolve the immutable Base SDK cache key
         id: base-sdk-key
@@ -169,6 +194,30 @@ jobs:
       - name: Emit the immutable Base SDK
         if: steps.base-sdk.outputs.cache-hit != 'true'
         run: node scripts/base-sdk.mjs emit --directory .release-cache/base-sdk
+
+      - name: Export already-built portable RC component payloads
+        if: needs.impact.outputs.ci_mode == 'release-candidate'
+        env:
+          SOURCE_COMMIT: ${{ needs.impact.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/component-release.mjs inventory > component-inventory.json
+          while IFS= read -r component; do
+            slug="${component#@e-mate/}"
+            node scripts/component-release.mjs emit \
+              --component "$component" \
+              --source-commit "$SOURCE_COMMIT" \
+              --out "dist/components/$slug"
+          done < <(jq -r '.components[] | select(.desktop != "blocked" and .kind == "profile") | .id' component-inventory.json)
+
+      - name: Upload already-built portable RC components
+        if: needs.impact.outputs.ci_mode == 'release-candidate'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-component-source-portable-${{ needs.impact.outputs.head_sha }}
+          path: dist/components
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Verify the restored immutable Base SDK
         if: steps.base-sdk.outputs.cache-hit == 'true'
@@ -198,7 +247,7 @@ jobs:
         run: >-
           node scripts/desktop-admission.mjs
           profile-build-receipt
-          --commit "$GITHUB_SHA"
+          --commit "${{ needs.impact.outputs.head_sha }}"
           --profile .release-cache/profile-artifact
           --inventory packages/dsh/profile/component-inventory.json
           --base-contract desktop/e-mate-desktop/base-contract.json
@@ -207,7 +256,7 @@ jobs:
       - name: Export the exact built e-Mate profile for desktop jobs
         uses: actions/upload-artifact@v4
         with:
-          name: e-mate-desktop-profile-${{ github.sha }}
+          name: e-mate-desktop-profile-${{ needs.impact.outputs.head_sha }}
           path: |
             .release-cache/profile-artifact/dsh/profile
             .release-cache/profile-artifact/dsh-plugin-*/lib
@@ -217,7 +266,7 @@ jobs:
       - name: Export the Profile build receipt
         uses: actions/upload-artifact@v4
         with:
-          name: e-mate-desktop-profile-build-receipt-${{ github.sha }}
+          name: e-mate-desktop-profile-build-receipt-${{ needs.impact.outputs.head_sha }}
           path: .release-cache/profile-build-receipt/profile-build-receipt.json
           if-no-files-found: error
           retention-days: 30
@@ -231,12 +280,77 @@ jobs:
           STARTED: ${{ steps.timing.outputs.started }}
         run: |
           elapsed=$(( $(date +%s) - STARTED ))
-          printf '### CI timing\n\n| Job | Seconds | Result |\n|---|---:|---|\n| Source | %s | %s |\n' "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '### CI timing\n\n| Job | Seconds | Base SDK cache | Result |\n|---|---:|---|---|\n| Source | %s | %s | %s |\n' "$elapsed" "${{ steps.base-sdk.outputs.cache-hit || 'false' }}" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+
+  component-base-sdk:
+    name: Seed exact component Base SDK
+    needs: impact
+    if: needs.impact.outputs.run_components == 'true' && needs.impact.outputs.run_base != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Start job timing
+        id: timing
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.impact.outputs.head_sha }}
+          persist-credentials: false
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Resolve the immutable Base SDK cache key
+        id: base-sdk-key
+        run: echo "key=e-mate-base-sdk-$(node scripts/base-sdk.mjs fingerprint)" >> "$GITHUB_OUTPUT"
+      - name: Restore the immutable Base SDK cache
+        id: base-sdk
+        uses: actions/cache/restore@v4
+        with:
+          path: .release-cache/base-sdk
+          key: ${{ steps.base-sdk-key.outputs.key }}
+          enableCrossOsArchive: true
+      - name: Build one recoverable Base SDK on cache miss
+        if: steps.base-sdk.outputs.cache-hit != 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir upstream/deepseek-harness install --frozen-lockfile
+          pnpm build:harness
+          node scripts/component-run.mjs check
+          corepack enable
+          yarn --cwd desktop install --immutable
+          yarn --cwd desktop build:sdk
+          node scripts/base-sdk.mjs emit --directory .release-cache/base-sdk
+      - name: Verify the exact Base SDK
+        run: node scripts/base-sdk.mjs verify --directory .release-cache/base-sdk
+      - name: Save the immutable Base SDK cache
+        if: steps.base-sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .release-cache/base-sdk
+          key: ${{ steps.base-sdk-key.outputs.key }}
+          enableCrossOsArchive: true
+      - name: Export the exact Base SDK for this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-base-sdk-${{ needs.impact.outputs.head_sha }}
+          path: .release-cache/base-sdk
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+      - name: Summarize Base SDK timing
+        if: always()
+        env:
+          STARTED: ${{ steps.timing.outputs.started }}
+        run: |
+          elapsed=$(( $(date +%s) - STARTED ))
+          printf '### CI timing\n\n| Job | Seconds | Base SDK cache | Result |\n|---|---:|---|---|\n| Component SDK | %s | %s | %s |\n' "$elapsed" "${{ steps.base-sdk.outputs.cache-hit || 'false' }}" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   plugins:
     name: Changed Profile components / ${{ matrix.target }}
-    needs: impact
-    if: needs.impact.outputs.run_plugins == 'true'
+    needs: [impact, source, component-base-sdk]
+    if: ${{ always() && needs.impact.result == 'success' && needs.impact.outputs.run_components == 'true' && (needs.source.result == 'success' || needs.component-base-sdk.result == 'success') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -244,6 +358,11 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.impact.outputs.ci_component_jobs_json) }}
     steps:
+      - name: Start job timing
+        id: timing
+        shell: bash
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.impact.outputs.head_sha }}
@@ -263,14 +382,23 @@ jobs:
             packages/dsh/profile/plugins/emate-shell/pnpm-lock.yaml
             upstream/deepseek-harness/pnpm-lock.yaml
 
+      - name: Restore the exact component Python runtime
+        id: python-runtime
+        if: contains(matrix.components, '@e-mate/dsh-plugin-vision-toolkit')
+        uses: actions/cache@v4
+        with:
+          path: desktop/e-mate-desktop/build/python-runtime/${{ matrix.target }}
+          key: component-python-${{ matrix.target }}-${{ hashFiles('desktop/e-mate-desktop/scripts/prepare-python-runtime.mjs') }}
       - name: Prepare the exact component Python runtime
+        if: contains(matrix.components, '@e-mate/dsh-plugin-vision-toolkit') && steps.python-runtime.outputs.cache-hit != 'true'
+        run: node desktop/e-mate-desktop/scripts/prepare-python-runtime.mjs --target "${{ matrix.target }}"
+      - name: Resolve the exact component Python runtime
         id: component-python
         if: contains(matrix.components, '@e-mate/dsh-plugin-vision-toolkit')
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
         run: |
-          node desktop/e-mate-desktop/scripts/prepare-python-runtime.mjs --target "$TARGET"
           relative="desktop/e-mate-desktop/build/python-runtime/$TARGET/python/bin/python3"
           if [[ "$TARGET" == win32-x64 ]]; then relative="desktop/e-mate-desktop/build/python-runtime/$TARGET/python/python.exe"; fi
           node -e 'const fs=require("node:fs"),p=require("node:path").resolve(process.argv[1]);if(!fs.existsSync(p))throw new Error(`missing ${p}`);process.stdout.write(`python=${p}\n`)' "$relative" >> "$GITHUB_OUTPUT"
@@ -280,24 +408,11 @@ jobs:
           pnpm install --frozen-lockfile --ignore-scripts --filter @e-mate/dsh-workspace
           pnpm --dir upstream/deepseek-harness install --frozen-lockfile
 
-      - name: Resolve the accepted Base SDK cache key
-        id: base-sdk-key
-        shell: bash
-        run: echo "key=e-mate-base-sdk-$(node scripts/base-sdk.mjs fingerprint)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the accepted Base SDK
-        id: base-sdk
-        uses: actions/cache/restore@v4
+      - name: Download the exact Base SDK produced for this run
+        uses: actions/download-artifact@v4
         with:
+          name: e-mate-base-sdk-${{ needs.impact.outputs.head_sha }}
           path: .release-cache/base-sdk
-          key: ${{ steps.base-sdk-key.outputs.key }}
-          enableCrossOsArchive: true
-
-      - name: Refuse to rebuild a missing Base SDK in the plugin lane
-        if: steps.base-sdk.outputs.cache-hit != 'true'
-        run: |
-          echo 'The accepted Base SDK cache is unavailable; seed it through a Base lane. Plugin CI will not rebuild Harness.' >&2
-          exit 1
 
       - name: Restore and verify the accepted Base SDK
         run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
@@ -346,10 +461,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Summarize component timing
+        if: always()
+        shell: bash
+        env:
+          STARTED: ${{ steps.timing.outputs.started }}
+        run: |
+          elapsed=$(( $(date +%s) - STARTED ))
+          printf '### CI timing\n\n| Job | Target | Seconds | Python cache | Result |\n|---|---|---:|---|---|\n| Components | %s | %s | %s | %s |\n' "${{ matrix.target }}" "$elapsed" "${{ steps.python-runtime.outputs.cache-hit || 'n/a' }}" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+
   base-platform-components:
     name: Base compatibility / ${{ matrix.target }}
     needs: [impact, source]
-    if: needs.impact.outputs.run_base == 'true'
+    if: needs.impact.outputs.run_base == 'true' && needs.impact.outputs.compose_profile != 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -357,6 +481,11 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.impact.outputs.ci_base_platform_component_jobs_json) }}
     steps:
+      - name: Start job timing
+        id: timing
+        shell: bash
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.impact.outputs.head_sha }}
@@ -375,14 +504,23 @@ jobs:
             packages/dsh-plugin-*/pnpm-lock.yaml
             upstream/deepseek-harness/pnpm-lock.yaml
 
+      - name: Restore the exact component Python runtime
+        id: python-runtime
+        if: contains(matrix.components, '@e-mate/dsh-plugin-vision-toolkit')
+        uses: actions/cache@v4
+        with:
+          path: desktop/e-mate-desktop/build/python-runtime/${{ matrix.target }}
+          key: component-python-${{ matrix.target }}-${{ hashFiles('desktop/e-mate-desktop/scripts/prepare-python-runtime.mjs') }}
       - name: Prepare the exact component Python runtime
+        if: contains(matrix.components, '@e-mate/dsh-plugin-vision-toolkit') && steps.python-runtime.outputs.cache-hit != 'true'
+        run: node desktop/e-mate-desktop/scripts/prepare-python-runtime.mjs --target "${{ matrix.target }}"
+      - name: Resolve the exact component Python runtime
         id: component-python
         if: contains(matrix.components, '@e-mate/dsh-plugin-vision-toolkit')
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
         run: |
-          node desktop/e-mate-desktop/scripts/prepare-python-runtime.mjs --target "$TARGET"
           relative="desktop/e-mate-desktop/build/python-runtime/$TARGET/python/bin/python3"
           if [[ "$TARGET" == win32-x64 ]]; then relative="desktop/e-mate-desktop/build/python-runtime/$TARGET/python/python.exe"; fi
           node -e 'const fs=require("node:fs"),p=require("node:path").resolve(process.argv[1]);if(!fs.existsSync(p))throw new Error(`missing ${p}`);process.stdout.write(`python=${p}\n`)' "$relative" >> "$GITHUB_OUTPUT"
@@ -392,24 +530,11 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm --dir upstream/deepseek-harness install --frozen-lockfile
 
-      - name: Resolve the newly built Base SDK cache key
-        id: base-sdk-key
-        shell: bash
-        run: echo "key=e-mate-base-sdk-$(node scripts/base-sdk.mjs fingerprint)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the newly built Base SDK
-        id: base-sdk
-        uses: actions/cache/restore@v4
+      - name: Download the exact Base SDK produced by the source job
+        uses: actions/download-artifact@v4
         with:
+          name: e-mate-base-sdk-${{ needs.impact.outputs.head_sha }}
           path: .release-cache/base-sdk
-          key: ${{ steps.base-sdk-key.outputs.key }}
-          enableCrossOsArchive: true
-
-      - name: Require the Base SDK produced by the source job
-        if: steps.base-sdk.outputs.cache-hit != 'true'
-        run: |
-          echo 'The new Base SDK cache is unavailable; platform compatibility cannot use another Base.' >&2
-          exit 1
 
       - name: Restore and verify the new Base SDK
         run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
@@ -426,13 +551,26 @@ jobs:
             node scripts/component-run.mjs check --component "$component"
           done < <(node --input-type=module -e 'for (const id of JSON.parse(process.env.COMPONENTS_JSON)) console.log(id)')
 
+      - name: Summarize compatibility timing
+        if: always()
+        shell: bash
+        env:
+          STARTED: ${{ steps.timing.outputs.started }}
+        run: |
+          elapsed=$(( $(date +%s) - STARTED ))
+          printf '### CI timing\n\n| Job | Target | Seconds | Python cache | Result |\n|---|---|---:|---|---|\n| Base compatibility | %s | %s | %s | %s |\n' "${{ matrix.target }}" "$elapsed" "${{ steps.python-runtime.outputs.cache-hit || 'n/a' }}" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+
   profile-portable-composition:
     name: Portable Profile generations
     needs: [impact, plugins]
-    if: needs.impact.outputs.run_plugins == 'true' && needs.impact.outputs.publish_components_json != '[]' && needs.impact.outputs.portable_publish == 'true'
+    if: needs.impact.outputs.compose_profile == 'true' && needs.impact.outputs.publish_components_json != '[]' && needs.impact.outputs.portable_publish == 'true'
     runs-on: macos-15
     timeout-minutes: 20
     steps:
+      - name: Start job timing
+        id: timing
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.impact.outputs.head_sha }}
@@ -451,25 +589,11 @@ jobs:
       - name: Install the exact composition dependency
         run: pnpm install --frozen-lockfile --ignore-scripts --filter @e-mate/dsh-workspace
 
-      - name: Resolve the accepted Base SDK cache key
-        id: base-sdk-key
-        shell: bash
-        run: echo "key=e-mate-base-sdk-$(node scripts/base-sdk.mjs fingerprint)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the accepted Base SDK
-        id: base-sdk
-        uses: actions/cache/restore@v4
+      - name: Download the exact Base SDK produced for this run
+        uses: actions/download-artifact@v4
         with:
+          name: e-mate-base-sdk-${{ needs.impact.outputs.head_sha }}
           path: .release-cache/base-sdk
-          key: ${{ steps.base-sdk-key.outputs.key }}
-          enableCrossOsArchive: true
-
-      - name: Refuse to rebuild a missing Base SDK in the component lane
-        if: steps.base-sdk.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          echo 'The accepted Base SDK cache is unavailable; seed it through a Base lane. Profile composition will not rebuild Desktop or Harness.' >&2
-          exit 1
 
       - name: Restore and verify the accepted Base SDK
         run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
@@ -496,6 +620,7 @@ jobs:
         run: yarn install --immutable
 
       - name: Materialize the Cloudflare plugin desired-state snapshot
+        if: needs.impact.outputs.profile_bootstrap != 'true'
         run: >-
           node scripts/publish-profile-r2.mjs
           --snapshot artifacts/release/profile-current-snapshot.json
@@ -506,6 +631,7 @@ jobs:
         env:
           SOURCE_COMMIT: ${{ needs.impact.outputs.head_sha }}
           PUBLISH_COMPONENTS_JSON: ${{ needs.impact.outputs.publish_components_json }}
+          PROFILE_BOOTSTRAP: ${{ needs.impact.outputs.profile_bootstrap }}
         run: |
           set -euo pipefail
           changed_args=()
@@ -516,12 +642,14 @@ jobs:
           for target in darwin-arm64 darwin-x64 win32-x64; do
             (
               output="dist/profile-candidate/$target"
+              current_args=(--bootstrap)
+              if test "$PROFILE_BOOTSTRAP" != true; then current_args=(--current "dist/profile-current/$target.json"); fi
               node scripts/profile-release.mjs \
                 --target "$target" \
                 --artifact-root dist/components \
                 "${changed_args[@]}" \
                 --source-commit "$SOURCE_COMMIT" \
-                --current "dist/profile-current/$target.json" \
+                "${current_args[@]}" \
                 --out "$output"
             ) &
             pids+=("$!")
@@ -570,10 +698,18 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Summarize Profile composition timing
+        if: always()
+        env:
+          STARTED: ${{ steps.timing.outputs.started }}
+        run: |
+          elapsed=$(( $(date +%s) - STARTED ))
+          printf '### CI timing\n\n| Job | Seconds | Result |\n|---|---:|---|\n| Portable Profile | %s | %s |\n' "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+
   profile-composition:
     name: Complete Profile generation / ${{ matrix.target }}
     needs: [impact, plugins]
-    if: needs.impact.outputs.run_plugins == 'true' && needs.impact.outputs.publish_components_json != '[]' && needs.impact.outputs.portable_publish != 'true'
+    if: needs.impact.outputs.compose_profile == 'true' && needs.impact.outputs.publish_components_json != '[]' && needs.impact.outputs.portable_publish != 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -587,6 +723,11 @@ jobs:
           - target: win32-x64
             runner: windows-2025
     steps:
+      - name: Start job timing
+        id: timing
+        shell: bash
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.impact.outputs.head_sha }}
@@ -600,25 +741,11 @@ jobs:
 
       - run: corepack enable
 
-      - name: Resolve the accepted Base SDK cache key
-        id: base-sdk-key
-        shell: bash
-        run: echo "key=e-mate-base-sdk-$(node scripts/base-sdk.mjs fingerprint)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the accepted Base SDK
-        id: base-sdk
-        uses: actions/cache/restore@v4
+      - name: Download the exact Base SDK produced for this run
+        uses: actions/download-artifact@v4
         with:
+          name: e-mate-base-sdk-${{ needs.impact.outputs.head_sha }}
           path: .release-cache/base-sdk
-          key: ${{ steps.base-sdk-key.outputs.key }}
-          enableCrossOsArchive: true
-
-      - name: Refuse to rebuild a missing Base SDK in the component lane
-        if: steps.base-sdk.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          echo 'The accepted Base SDK cache is unavailable; seed it through a Base lane. Profile composition will not rebuild Desktop or Harness.' >&2
-          exit 1
 
       - name: Restore and verify the accepted Base SDK
         run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
@@ -645,6 +772,7 @@ jobs:
         run: yarn install --immutable
 
       - name: Materialize the Cloudflare plugin desired-state snapshot
+        if: needs.impact.outputs.profile_bootstrap != 'true'
         run: >-
           node scripts/publish-profile-r2.mjs
           --snapshot artifacts/release/profile-current-snapshot.json
@@ -656,6 +784,7 @@ jobs:
           TARGET: ${{ matrix.target }}
           SOURCE_COMMIT: ${{ needs.impact.outputs.head_sha }}
           PUBLISH_COMPONENTS_JSON: ${{ needs.impact.outputs.publish_components_json }}
+          PROFILE_BOOTSTRAP: ${{ needs.impact.outputs.profile_bootstrap }}
         run: |
           set -euo pipefail
           changed_args=()
@@ -663,12 +792,14 @@ jobs:
             changed_args+=(--changed "$component")
           done < <(node --input-type=module -e 'for (const id of JSON.parse(process.env.PUBLISH_COMPONENTS_JSON)) console.log(id)')
           output="dist/profile-candidate/$TARGET"
+          current_args=(--bootstrap)
+          if test "$PROFILE_BOOTSTRAP" != true; then current_args=(--current "dist/profile-current/$TARGET.json"); fi
           node scripts/profile-release.mjs \
             --target "$TARGET" \
             --artifact-root dist/components \
             "${changed_args[@]}" \
             --source-commit "$SOURCE_COMMIT" \
-            --current "dist/profile-current/$TARGET.json" \
+            "${current_args[@]}" \
             --out "$output"
           generation=$(node --input-type=module -e 'import { readFileSync } from "node:fs"; console.log(JSON.parse(readFileSync(process.argv[1], "utf8")).candidate_generation)' "$output/admission.json")
           node desktop/e-mate-desktop/scripts/verify-profile-boot.mjs \
@@ -687,6 +818,15 @@ jobs:
             dist/profile-candidate/${{ matrix.target }}/verification-base.json
           if-no-files-found: error
           retention-days: 7
+
+      - name: Summarize Profile composition timing
+        if: always()
+        shell: bash
+        env:
+          STARTED: ${{ steps.timing.outputs.started }}
+        run: |
+          elapsed=$(( $(date +%s) - STARTED ))
+          printf '### CI timing\n\n| Job | Target | Seconds | Result |\n|---|---|---:|---|\n| Profile composition | %s | %s | %s |\n' "${{ matrix.target }}" "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   enterprise:
     name: Enterprise contracts
@@ -745,8 +885,8 @@ jobs:
 
   desktop-windows:
     name: Windows x64 / unsigned desktop installer
-    needs: [impact, source]
-    if: needs.impact.outputs.windows_app_smoke == 'true'
+    needs: [impact, source, plugins, component-base-sdk]
+    if: ${{ always() && needs.impact.result == 'success' && needs.impact.outputs.windows_app_smoke == 'true' && (needs.source.result == 'success' || (needs.plugins.result == 'success' && needs.component-base-sdk.result == 'success')) }}
     runs-on: windows-2025
     timeout-minutes: 90
     env:
@@ -760,6 +900,7 @@ jobs:
 
       - uses: actions/checkout@v6
         with:
+          ref: ${{ needs.impact.outputs.head_sha }}
           fetch-depth: 0
           persist-credentials: false
           submodules: recursive
@@ -775,9 +916,10 @@ jobs:
       - run: corepack enable
 
       - name: Restore the profile built by the source gate
+        if: needs.source.result == 'success'
         uses: actions/download-artifact@v4
         with:
-          name: e-mate-desktop-profile-${{ github.sha }}
+          name: e-mate-desktop-profile-${{ needs.impact.outputs.head_sha }}
           path: packages
 
       - name: Restore the exact Base SDK built by the source gate
@@ -789,7 +931,32 @@ jobs:
       - name: Install and verify the exact Base SDK
         run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
 
+      - name: Restore the changed shell payload for component app smoke
+        if: needs.impact.outputs.run_base != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: e-mate-component-*-${{ needs.impact.outputs.head_sha }}
+          path: dist/components
+          merge-multiple: true
+
+      - name: Overlay only the exact changed shell bytes
+        if: needs.impact.outputs.run_base != 'true'
+        run: >-
+          node scripts/component-release.mjs materialize
+          --artifact dist/components/dsh-client-shell
+          --component @e-mate/dsh-client-shell
+          --source-commit "${{ needs.impact.outputs.head_sha }}"
+          --out desktop/e-mate-desktop/build/e-mate-profile/plugins/emate-shell
+
+      - name: Restore the exact offline Windows Vision wheelhouse
+        id: vision-wheels
+        uses: actions/cache@v4
+        with:
+          path: packages/dsh-plugin-vision-toolkit/runtime/wheels
+          key: vision-wheels-win32-x64-${{ hashFiles('packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py') }}
+
       - name: Prepare the exact offline Windows Vision runtime
+        if: steps.vision-wheels.outputs.cache-hit != 'true'
         run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets win32-x64
 
       - name: Resolve Yarn cache folder
@@ -815,9 +982,14 @@ jobs:
         run: yarn install --immutable
 
       - name: Build and verify the Windows app directory
-        if: needs.impact.outputs.windows_distribution != 'true'
+        if: needs.impact.outputs.windows_distribution != 'true' && needs.impact.outputs.run_base == 'true'
         working-directory: desktop
         run: yarn package:dir
+
+      - name: Package the changed shell over the accepted Base app directory
+        if: needs.impact.outputs.windows_distribution != 'true' && needs.impact.outputs.run_base != 'true'
+        working-directory: desktop/e-mate-desktop
+        run: node scripts/package-dir.mjs
 
       - name: Build and verify the formal unsigned Windows installer
         if: needs.impact.outputs.windows_distribution == 'true'
@@ -866,12 +1038,12 @@ jobs:
           STARTED: ${{ steps.timing.outputs.started }}
         run: |
           elapsed=$(( $(date +%s) - STARTED ))
-          printf '### CI timing\n\n| Job | Seconds | Result |\n|---|---:|---|\n| Windows desktop | %s | %s |\n' "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '### CI timing\n\n| Job | Seconds | Vision wheel cache | Result |\n|---|---:|---|---|\n| Windows desktop | %s | %s | %s |\n' "$elapsed" "${{ steps.vision-wheels.outputs.cache-hit || 'false' }}" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   desktop-macos:
     name: macOS universal / unsigned desktop disk image
-    needs: [impact, source]
-    if: needs.impact.outputs.macos_app_smoke == 'true'
+    needs: [impact, source, plugins, component-base-sdk]
+    if: ${{ always() && needs.impact.result == 'success' && needs.impact.outputs.macos_app_smoke == 'true' && (needs.source.result == 'success' || (needs.plugins.result == 'success' && needs.component-base-sdk.result == 'success')) }}
     runs-on: macos-15
     timeout-minutes: 90
     env:
@@ -884,6 +1056,7 @@ jobs:
 
       - uses: actions/checkout@v6
         with:
+          ref: ${{ needs.impact.outputs.head_sha }}
           fetch-depth: 0
           persist-credentials: false
           submodules: recursive
@@ -899,9 +1072,10 @@ jobs:
       - run: corepack enable
 
       - name: Restore the profile built by the source gate
+        if: needs.source.result == 'success'
         uses: actions/download-artifact@v4
         with:
-          name: e-mate-desktop-profile-${{ github.sha }}
+          name: e-mate-desktop-profile-${{ needs.impact.outputs.head_sha }}
           path: packages
 
       - name: Restore the exact Base SDK built by the source gate
@@ -913,7 +1087,32 @@ jobs:
       - name: Install and verify the exact Base SDK
         run: node scripts/base-sdk.mjs install --directory .release-cache/base-sdk
 
+      - name: Restore the changed shell payload for component app smoke
+        if: needs.impact.outputs.run_base != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: e-mate-component-*-${{ needs.impact.outputs.head_sha }}
+          path: dist/components
+          merge-multiple: true
+
+      - name: Overlay only the exact changed shell bytes
+        if: needs.impact.outputs.run_base != 'true'
+        run: >-
+          node scripts/component-release.mjs materialize
+          --artifact dist/components/dsh-client-shell
+          --component @e-mate/dsh-client-shell
+          --source-commit "${{ needs.impact.outputs.head_sha }}"
+          --out desktop/e-mate-desktop/build/e-mate-profile/plugins/emate-shell
+
+      - name: Restore the exact offline universal macOS Vision wheelhouse
+        id: vision-wheels
+        uses: actions/cache@v4
+        with:
+          path: packages/dsh-plugin-vision-toolkit/runtime/wheels
+          key: vision-wheels-macos-universal-${{ hashFiles('packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py') }}
+
       - name: Prepare the exact offline universal macOS Vision runtime
+        if: steps.vision-wheels.outputs.cache-hit != 'true'
         run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets darwin-arm64,darwin-x64
 
       - name: Resolve Yarn cache folder
@@ -938,9 +1137,14 @@ jobs:
         run: yarn install --immutable
 
       - name: Build and verify the macOS app directory
-        if: needs.impact.outputs.macos_distribution != 'true'
+        if: needs.impact.outputs.macos_distribution != 'true' && needs.impact.outputs.run_base == 'true'
         working-directory: desktop
         run: yarn package:dir
+
+      - name: Package the changed shell over the accepted Base app directory
+        if: needs.impact.outputs.macos_distribution != 'true' && needs.impact.outputs.run_base != 'true'
+        working-directory: desktop/e-mate-desktop
+        run: node scripts/package-dir.mjs
 
       - name: Build and verify the formal unsigned universal disk image
         if: needs.impact.outputs.macos_distribution == 'true'
@@ -987,20 +1191,28 @@ jobs:
           STARTED: ${{ steps.timing.outputs.started }}
         run: |
           elapsed=$(( $(date +%s) - STARTED ))
-          printf '### CI timing\n\n| Job | Seconds | Result |\n|---|---:|---|\n| macOS desktop | %s | %s |\n' "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '### CI timing\n\n| Job | Seconds | Vision wheel cache | Result |\n|---|---:|---|---|\n| macOS desktop | %s | %s | %s |\n' "$elapsed" "${{ steps.vision-wheels.outputs.cache-hit || 'false' }}" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   admission:
     name: CI admission
     if: always()
-    needs: [impact, source, plugins, base-platform-components, profile-portable-composition, profile-composition, enterprise, desktop-windows, desktop-macos]
+    needs: [impact, source, component-base-sdk, plugins, base-platform-components, profile-portable-composition, profile-composition, enterprise, desktop-windows, desktop-macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - name: Start job timing
+        id: timing
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - name: Admit exactly the classified lane
         env:
           LANE: ${{ needs.impact.outputs.lane }}
+          CI_MODE: ${{ needs.impact.outputs.ci_mode }}
+          RUN_COMPONENTS: ${{ needs.impact.outputs.run_components }}
+          COMPOSE_PROFILE: ${{ needs.impact.outputs.compose_profile }}
           IMPACT: ${{ needs.impact.result }}
           SOURCE: ${{ needs.source.result }}
+          COMPONENT_BASE_SDK: ${{ needs.component-base-sdk.result }}
           PLUGINS: ${{ needs.plugins.result }}
           BASE_PLATFORM_COMPONENTS: ${{ needs.base-platform-components.result }}
           PROFILE_PORTABLE: ${{ needs.profile-portable-composition.result }}
@@ -1016,6 +1228,11 @@ jobs:
         run: |
           set -euo pipefail
           test "$IMPACT" = success
+          if test "$RUN_COMPONENTS" = true && test "$SOURCE" = skipped; then
+            test "$COMPONENT_BASE_SDK" = success
+          else
+            test "$COMPONENT_BASE_SDK" = skipped
+          fi
           case "$RUN_ENTERPRISE" in
             true) test "$ENTERPRISE" = success ;;
             false) test "$ENTERPRISE" = skipped ;;
@@ -1034,14 +1251,21 @@ jobs:
           case "$LANE" in
             base)
               test "$SOURCE" = success
-              test "$BASE_PLATFORM_COMPONENTS" = success
-              test "$PLUGINS" = skipped
-              test "$PROFILE_PORTABLE" = skipped
-              test "$PROFILE" = skipped
+              if test "$COMPOSE_PROFILE" = true; then
+                test "$BASE_PLATFORM_COMPONENTS" = skipped
+                test "$PLUGINS" = success
+                test "$PROFILE_PORTABLE" = skipped
+                test "$PROFILE" = success
+              else
+                test "$BASE_PLATFORM_COMPONENTS" = success
+                test "$PLUGINS" = skipped
+                test "$PROFILE_PORTABLE" = skipped
+                test "$PROFILE" = skipped
+              fi
               ;;
             plugin-only)
               test "$PLUGINS" = success
-              if test "$PUBLISH_COMPONENTS" = '[]'; then
+              if test "$COMPOSE_PROFILE" != true || test "$PUBLISH_COMPONENTS" = '[]'; then
                 test "$PROFILE_PORTABLE" = skipped
                 test "$PROFILE" = skipped
               elif test "$PORTABLE_PUBLISH" = true; then
@@ -1070,3 +1294,11 @@ jobs:
               ;;
             *) exit 1 ;;
           esac
+
+      - name: Summarize admission timing
+        if: always()
+        env:
+          STARTED: ${{ steps.timing.outputs.started }}
+        run: |
+          elapsed=$(( $(date +%s) - STARTED ))
+          printf '### CI timing\n\n| Job | Mode | Seconds | Result |\n|---|---|---:|---|\n| Admission | %s | %s | %s |\n' "${{ needs.impact.outputs.ci_mode }}" "$elapsed" "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"

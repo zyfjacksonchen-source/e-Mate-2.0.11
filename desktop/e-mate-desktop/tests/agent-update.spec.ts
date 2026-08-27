@@ -11,8 +11,9 @@ describe('e-Mate Agent desktop update Tool', () => {
     }))
     const section = vi.fn()
     const register = vi.fn()
+    const getState = vi.fn(() => ({ stage: 'completed' as const, updateKind: 'base' as const }))
     const ctx = {
-      desktopUpdates: { runInteractiveUpdate },
+      desktopUpdates: { runInteractiveUpdate, getState },
       systemPrompt: { section },
       tools: { register },
     } as unknown as Context
@@ -41,8 +42,11 @@ describe('e-Mate Agent desktop update Tool', () => {
       status: 'up-to-date',
       installedVersion: '2.0.10',
       latestVersion: '2.0.10',
+      stage: 'completed',
+      updateKind: 'base',
     })
     expect(runInteractiveUpdate).toHaveBeenCalledOnce()
+    expect(getState).toHaveBeenCalledOnce()
 
     const cases = [
       {

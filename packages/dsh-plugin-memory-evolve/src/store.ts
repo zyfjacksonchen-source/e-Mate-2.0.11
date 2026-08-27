@@ -8,6 +8,7 @@ const MAX_TAGS = 16
 const MAX_TAG_CHARS = 64
 const MAX_IMPORT_ITEMS = 1_000
 const SHA256 = /^[0-9a-f]{64}$/u
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
 
 /** Durable project- or session-scoped memory record. */
 export interface MemoryRecord {
@@ -36,6 +37,7 @@ export interface MemoryCopyInput {
 export interface MemoryTable {
   entries(): IterableIterator<[string, MemoryRecord]>
   put(key: string, value: MemoryRecord): Promise<void>
+  delete(key: string): Promise<boolean>
 }
 
 export interface MemoryPublicRecord {
@@ -197,6 +199,14 @@ export class MemoryStore {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))
       .slice(0, limit(input.limit))
       .map(publicRecord)
+  }
+
+  /** Delete one record only when its durable identity belongs to the current scope. */
+  async delete(memoryId: unknown, execution: MemoryExecution): Promise<boolean> {
+    if (typeof memoryId !== 'string' || !UUID.test(memoryId)) throw new Error('memory id is invalid')
+    const scope = await this.resolveScope(execution)
+    const record = new Map(this.table.entries()).get(memoryId)
+    return record !== undefined && sameScope(record, scope) && await this.table.delete(memoryId)
   }
 
   /**

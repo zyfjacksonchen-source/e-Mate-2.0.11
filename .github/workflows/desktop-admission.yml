@@ -90,7 +90,7 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" > ".admission/metadata/$label-jobs.json"
           done
           ci_artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100")"
-          ci_artifact_id="$(jq -er --arg name "e-mate-change-impact-$GITHUB_SHA" \
+          ci_artifact_id="$(jq -er --arg name "e-mate-ci-plan-$GITHUB_SHA" \
             '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one CI impact artifact") end' <<<"$ci_artifacts")"
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ci_artifact_id" > .admission/metadata/ci-artifact.json
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$DESKTOP_ARTIFACT_ID" > .admission/metadata/desktop-artifact.json

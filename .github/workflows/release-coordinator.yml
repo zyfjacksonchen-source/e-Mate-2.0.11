@@ -48,6 +48,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       run_id: ${{ steps.ci.outputs.ci_run_id }}
+      profile_bootstrap: ${{ steps.plan.outputs.profile_bootstrap }}
       macos_artifact_id: ${{ steps.macos.outputs.artifact_id }}
       macos_artifact_digest: ${{ steps.macos.outputs.artifact_digest }}
       macos_artifact_bytes: ${{ steps.macos.outputs.artifact_bytes }}
@@ -74,6 +75,23 @@ jobs:
           test "${{ inputs.release_mode }}" = base
       - id: ci
         run: node scripts/release-coordinator.mjs resolve-ci --source "$EMATE_SOURCE"
+      - name: Download the executable CI plan
+        uses: actions/download-artifact@v4
+        with:
+          name: e-mate-ci-plan-${{ inputs.source_sha }}
+          path: accepted-ci-plan
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.ci.outputs.ci_run_id }}
+      - name: Accept only an exact RC plan
+        id: plan
+        run: |
+          set -euo pipefail
+          plan=accepted-ci-plan/ci-plan.json
+          test "$(jq -er .schema_version "$plan")" = 2
+          test "$(jq -er .document_type "$plan")" = emate.ci-plan
+          test "$(jq -er .ci_mode "$plan")" = release-candidate
+          test "$(jq -er .compose_profile "$plan")" = true
+          echo "profile_bootstrap=$(jq -r .profile_bootstrap "$plan")" >> "$GITHUB_OUTPUT"
       - id: macos
         run: node scripts/release-coordinator.mjs artifact --run-id "${{ steps.ci.outputs.ci_run_id }}" --name "e-mate-desktop-macos-$EMATE_SOURCE"
       - id: windows
@@ -97,7 +115,7 @@ jobs:
         run: >-
           node scripts/release-coordinator.mjs dispatch --source "$EMATE_SOURCE"
           --workflow profile-release.yml
-          --inputs '{"ci_run_id":"${{ needs.ci.outputs.run_id }}","bootstrap":"true"}'
+          --inputs '{"ci_run_id":"${{ needs.ci.outputs.run_id }}","bootstrap":"${{ needs.ci.outputs.profile_bootstrap }}"}'
       - id: artifact
         run: node scripts/release-coordinator.mjs artifact --run-id "${{ steps.run.outputs.run_id }}" --name "e-mate-profile-native-cloudflare-publication-$EMATE_SOURCE"
 

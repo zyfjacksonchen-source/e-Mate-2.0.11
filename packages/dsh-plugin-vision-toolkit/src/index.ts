@@ -4,11 +4,15 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { bundledPythonPath } from '@e-mate/desktop/vision-toolkit'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { apply as applyVisionToolkit } from '../.build/upstream-lib/index.js'
 
 export const name = '@e-mate/dsh-plugin-vision-toolkit'
 export const inject = [
   'tools',
+  'attachments',
   'credentials',
   'skills',
   'subprocess',
@@ -17,6 +21,7 @@ export const inject = [
   'agents',
   'sessions',
   'webServer',
+  'emateModelPolicy',
   'emateCapabilities',
 ]
 
@@ -33,9 +38,127 @@ type CapabilityRegistry = {
 
 type VisionContext = Context & {
   emateCapabilities: CapabilityRegistry
+  attachments: {
+    readImage(reference: NativeImageBlock['attachment'], signal?: AbortSignal): Promise<{ data: Uint8Array }>
+  }
+  emateModelPolicy: {
+    imageInputContract(provider: string, model: string): Promise<ImageInputContract>
+  }
 }
 
 type VisionToolExecution = { agent?: { session?: unknown } }
+
+type ImageInputContract = {
+  readonly capability: 'image-capable' | 'text-only' | 'unknown'
+  readonly request_boundary: 'preserve-native' | 'convert-at-request-boundary'
+}
+
+type NativeImageBlock = {
+  readonly type: 'image'
+  readonly attachment: {
+    readonly attachmentId: unknown
+    readonly mediaType: string
+  }
+}
+
+type ContentBlock = NativeImageBlock | {
+  readonly type: string
+  readonly text?: string
+  readonly content?: readonly ContentBlock[]
+  readonly [key: string]: unknown
+}
+
+type ModelMessage = {
+  readonly content: readonly ContentBlock[]
+  readonly [key: string]: unknown
+}
+
+export type ModelRequest = {
+  readonly provider: string
+  readonly model: string
+  readonly messages: readonly ModelMessage[]
+  readonly signal?: AbortSignal
+  readonly [key: string]: unknown
+}
+
+type LazyVisionRuntime = {
+  glance(
+    request: { images: string[] },
+    options: { signal?: AbortSignal; workspace: string },
+  ): Promise<{ answer: string }>
+}
+
+const IMAGE_EXTENSIONS: Readonly<Record<string, string>> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+}
+
+function hasImage(blocks: readonly ContentBlock[]): boolean {
+  return blocks.some(block => block.type === 'image'
+    || (block.type === 'tool-result' && Array.isArray(block.content) && hasImage(block.content)))
+}
+
+async function describeImage(
+  ctx: VisionContext,
+  runtime: LazyVisionRuntime,
+  block: NativeImageBlock,
+  signal?: AbortSignal,
+): Promise<ContentBlock> {
+  const extension = IMAGE_EXTENSIONS[block.attachment.mediaType]
+  if (extension === undefined) throw new Error(`Vision request bridge does not support ${block.attachment.mediaType}`)
+  const directory = await mkdtemp(join(tmpdir(), 'e-mate-vision-request-'))
+  try {
+    const stored = await ctx.attachments.readImage(block.attachment, signal)
+    const path = join(directory, `image${extension}`)
+    await writeFile(path, stored.data, { mode: 0o600 })
+    const result = await runtime.glance({ images: [path] }, { signal, workspace: directory })
+    const answer = result.answer.replaceAll(path, '[attached image]').replaceAll(directory, '[attachment workspace]').trim()
+    if (answer === '') throw new Error('Vision request bridge returned an empty image description')
+    return { type: 'text', text: `[Image description]\n${answer}` }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+}
+
+async function convertBlocks(
+  ctx: VisionContext,
+  runtime: LazyVisionRuntime,
+  blocks: readonly ContentBlock[],
+  signal?: AbortSignal,
+): Promise<ContentBlock[]> {
+  const converted: ContentBlock[] = []
+  for (const block of blocks) {
+    if (block.type === 'image') converted.push(await describeImage(ctx, runtime, block as NativeImageBlock, signal))
+    else if (block.type === 'tool-result' && Array.isArray(block.content) && hasImage(block.content)) {
+      converted.push({ ...block, content: await convertBlocks(ctx, runtime, block.content, signal) })
+    } else converted.push(block)
+  }
+  return converted
+}
+
+/** Keep durable image blocks native; only confirmed text-only calls receive descriptions. */
+export async function imageInputRequestBoundary(
+  ctx: VisionContext,
+  runtime: LazyVisionRuntime,
+  request: ModelRequest,
+): Promise<ModelRequest> {
+  if (!request.messages.some(message => hasImage(message.content))) return request
+  const contract = await ctx.emateModelPolicy.imageInputContract(request.provider, request.model)
+  if (contract.capability !== 'text-only' || contract.request_boundary !== 'convert-at-request-boundary') return request
+  return {
+    ...request,
+    messages: await Promise.all(request.messages.map(async message => hasImage(message.content)
+      ? { ...message, content: await convertBlocks(ctx, runtime, message.content, request.signal) }
+      : message)),
+  }
+}
+
+export function installImageInputRequestBoundary(ctx: VisionContext, runtime: LazyVisionRuntime): () => void {
+  return ctx.on('llm/wire', async (request: ModelRequest, next: () => Promise<ModelRequest>) =>
+    imageInputRequestBoundary(ctx, runtime, await next()) as never)
+}
 
 export type VisionConfig = {
   provider: {
@@ -165,6 +288,9 @@ export async function apply(ctx: VisionContext): Promise<() => void> {
   const initial = visionConfigFromModelSettings(ctx.settings.get(MODEL_SETTINGS_NAMESPACE)) ?? unconfigured()
   const disposeToolkit = await applyVisionToolkit(ctx, initial, {
     managed: true,
+    installImageInputBridge(runtime) {
+      return installImageInputRequestBoundary(ctx, runtime as LazyVisionRuntime)
+    },
     validateConfig(value) {
       const current = visionConfigFromModelSettings(ctx.settings.get(MODEL_SETTINGS_NAMESPACE)) ?? unconfigured()
       if (!same(value, current)) throw new Error('vision-toolkit settings must match the enterprise model policy')

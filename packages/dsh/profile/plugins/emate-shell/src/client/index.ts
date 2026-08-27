@@ -1,6 +1,9 @@
 import { createElement, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
+import type {
+  DesktopUpdateBridge,
+  DesktopUpdateBridgeWindow,
+} from '../../../../../../../desktop/e-mate-desktop/src/update-presentation.ts'
 import {
   IconArchiveOutline20,
   IconChevronDownOutline14,
@@ -27,11 +30,14 @@ import { AccountControl, AccountSettings } from './account.tsx'
 import { registerActivityFold } from './activity-fold.tsx'
 import './chat-chrome.module.css'
 import { ComposerConnectors } from './composer-connectors.tsx'
+import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from './composer-mentions.ts'
 import { HomeProjection } from './home.tsx'
 import { HeaderControls } from './header-controls.tsx'
 import { IdentityGate } from './identity.tsx'
-import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImagesDefinition } from './image-gallery.tsx'
+import { ToolImageGallery, toolImagesDefinition } from './image-gallery.tsx'
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
+import { registerMessageModeSettings } from './message-mode-settings.tsx'
+import { registerScheduleTrigger } from './schedules-page.tsx'
 import { isGeneralWorkspace, SidebarRoot } from './sidebar.tsx'
 import { SessionRouteProjection } from './session-route.tsx'
 import { HiddenSessionLogExport } from './session-share.tsx'
@@ -45,8 +51,11 @@ import { ThinkingStatusBranding } from './thinking-status.tsx'
 
 export const inject = [
   'slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'conversationEvents', 'theme',
-  'sessionLogDownload', 'inputTriggers',
+  'sessionLogDownload', 'inputTriggers', 'remote', 'settingsScope',
 ]
+
+const desktopUpdateBridge = (): DesktopUpdateBridge | undefined =>
+  (window as DesktopUpdateBridgeWindow).__EMATE_DESKTOP_UPDATES__
 
 export function registerSessionShare(ctx: any): void {
   ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
@@ -76,38 +85,14 @@ export function registerHeaderControls(ctx: any): void {
       hooks: { sessionLogDownload: ctx.sessionLogDownload.store },
       requestDownload: (sessionId: string) => ctx.sessionLogDownload.download(sessionId),
       dismissDownload: (sessionId: string) => { ctx.sessionLogDownload.dismiss(sessionId) },
+      updates: desktopUpdateBridge(),
       callShare: (endpoint: string, payload: unknown) => ctx.connection.rpc.call('/emate.share', endpoint, payload),
       LightIcon: IconLightOutline16,
       DarkIcon: IconDarkOutline16,
+      UpdateIcon: IconRefreshOutline16,
       SettingsIcon: IconSettingsOutline16,
     }),
   }, HeaderControls))
-}
-
-export function registerComputerUseTrigger(ctx: any): void {
-  const source: InputTriggerSource = {
-    trigger: '@',
-    name: '功能',
-    order: -20,
-    candidates(_session, { query }) {
-      const isMac = /Mac/u.test(navigator.userAgent) || /Mac/u.test(navigator.platform)
-      return Promise.resolve(isMac && '电脑操控'.includes(query)
-        ? [{ name: '电脑操控', description: '显式指定使用 dsh-computer-use 操作当前电脑' }]
-        : [])
-    },
-    lexicon() { return ['电脑操控'] },
-    onPick() {
-      return { insert: { source: '功能', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' } }
-    },
-    codec: {
-      clipboardText: () => '@电脑操控',
-      serialize: (_ref, signal) => {
-        signal.throwIfAborted()
-        return Promise.resolve('@电脑操控')
-      },
-    },
-  }
-  ctx.effect(() => ctx.inputTriggers.registerSource(source), 'e-mate-shell: @电脑操控 source')
 }
 
 function SkipTargetOnboarding({ complete }: { complete: () => void }) {
@@ -257,6 +242,16 @@ export async function startSessionFromRoute(ctx: any, workspaceId?: string): Pro
   }
 }
 
+/** Reuse Home's native blank/Workspace resolution, then write only the owning Composer draft. */
+export async function prepareTemplateDraftFromRoute(ctx: any, prompt: string): Promise<void> {
+  if (!await startSessionFromRoute(ctx)) return
+  const sessionId = ctx.sessions.list.getSnapshot().current
+  if (sessionId === undefined) throw new Error('new task unavailable')
+  const scope = ctx.sessions.scope(sessionId)
+  if (scope === undefined) throw new Error(`session "${sessionId}" is not addressable`)
+  ctx.conversation.input.for(scope).setDraft(prompt)
+}
+
 /** Change only the route; SessionRouteProjection remains the single current-Session owner. */
 export function openSessionFromRoute(id: string): void {
   const route = `/chat/${encodeURIComponent(id)}`
@@ -334,8 +329,11 @@ export async function prepareSchedulePromptFromRoute(
 }
 
 export function apply(ctx: any): void {
-  registerActivityFold(ctx)
+  const messageMode = registerMessageModeSettings(ctx)
+  registerActivityFold(ctx, messageMode)
   registerComputerUseTrigger(ctx)
+  registerScheduleTrigger(ctx)
+  registerMentionSources(ctx)
   registerManagedPresetSurfaces(ctx)
   registerRouteScopedConversationHeader(ctx)
   ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
@@ -360,11 +358,6 @@ export function apply(ctx: any): void {
     id: 'e-mate-thinking-status',
     order: -190,
   }, ThinkingStatusBranding))
-  ctx.conversationEvents.register(imageDisclosureDefinition)
-  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
-    name: 'conversation.chat.node',
-    key: 'e-mate-image-disclosure',
-  }, ImageDisclosure))
   ctx.conversationEvents.register(toolImagesDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',
@@ -382,9 +375,17 @@ export function apply(ctx: any): void {
     name: 'conversation.input.right',
     id: 'e-mate-connectors',
     order: 20,
-    inject: () => ({
+    inject: (sessionId: string) => ({
       LinkIcon: IconLinkOutline16,
-      callConnections: () => ctx.connection.rpc.call('/emate.mcpManage', 'active', {}),
+      openConnections: () => {
+        const route = '/capabilities?category=collaboration'
+        if (`${location.pathname}${location.search}` === route) return
+        history.pushState(null, '', route)
+        dispatchEvent(new PopStateEvent('popstate'))
+      },
+      openMentions: (selection: { start: number; end: number }) => {
+        openMentionMenu(ctx, sessionId, selection)
+      },
     }),
   }, ComposerConnectors))
   ctx.effect(
@@ -426,14 +427,6 @@ export function apply(ctx: any): void {
         },
         archiveSession: async (id: string) => { await ctx.workspaces.archiveSession(id) },
         toggleSidebar: () => { ctx.layout.toggleSidebar() },
-        getThemeScheme: () => ctx.theme.getTheme().active.colorScheme,
-        subscribeTheme: (listener: () => void) => ctx.on('theme/change', listener),
-        toggleTheme: () => {
-          const scheme = ctx.theme.getTheme().active.colorScheme
-          ctx.theme.setTheme(scheme === 'dark' ? 'light' : 'dark')
-        },
-        LightIcon: IconLightOutline16,
-        DarkIcon: IconDarkOutline16,
       }),
     }, SidebarRoot),
     'emate-shell: sidebar slot',
@@ -444,6 +437,7 @@ export function apply(ctx: any): void {
     order: -20,
     inject: () => ({
       openSession: openSessionFromRoute,
+      prepareTemplateDraft: (prompt: string) => prepareTemplateDraftFromRoute(ctx, prompt),
       prepareSchedulePrompt: (prompt: string, sessionId?: string) =>
         prepareSchedulePromptFromRoute(ctx, prompt, sessionId),
       callSchedules: () => ctx.connection.rpc.call('/emate.schedules', 'list', {}),
@@ -492,6 +486,10 @@ export function apply(ctx: any): void {
     name: 'settings.action',
     id: 'e-mate-settings-header',
     order: -100,
+    inject: () => ({
+      updates: desktopUpdateBridge(),
+      UpdateIcon: IconRefreshOutline16,
+    }),
   }, SettingsChrome))
   ctx.slots.inject('settings.trigger', () => ctx.slots.register({
     name: 'settings.trigger',

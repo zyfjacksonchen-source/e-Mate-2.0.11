@@ -1,5 +1,7 @@
 import { createElement, Fragment, useMemo, useSyncExternalStore, type ReactNode } from 'react'
+import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import { DisclosureRow } from '@deepseek-ai/dsh-client-ui-primitives'
+import { currentMessageFlowMode, type MessageFlowSettings } from './message-mode-settings.tsx'
 import css from './activity-fold.module.css'
 
 type ChatNode = {
@@ -233,13 +235,32 @@ function createProcessRenderer(ctx: any, kind: 'assistant-step' | 'tool-call' | 
 }
 
 /** Fold only DSH process nodes; assistant prose remains owned by its native renderer. */
-export function registerActivityFold(ctx: any): void {
-  for (const kind of ['assistant-step', 'tool-call', 'context'] as const) {
-    ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
-      name: 'conversation.chat.node',
-      key: kind,
-      priority: -1,
-      locale: 'conversation',
-    }, createProcessRenderer(ctx, kind)))
-  }
+export function registerActivityFold(ctx: any, scope: SettingsScope<MessageFlowSettings>): void {
+  ctx.slots.inject('conversation.chat.node', () => {
+    let disposeFold: (() => void) | undefined
+    const sync = () => {
+      const simple = currentMessageFlowMode(scope) === 'simple'
+      if (simple === (disposeFold !== undefined)) return
+      if (!simple) {
+        disposeFold?.()
+        disposeFold = undefined
+        return
+      }
+      const disposers = (['assistant-step', 'tool-call', 'context'] as const).map(kind => ctx.slots.register({
+        name: 'conversation.chat.node',
+        key: kind,
+        priority: -1,
+        locale: 'conversation',
+      }, createProcessRenderer(ctx, kind)))
+      disposeFold = () => {
+        for (const dispose of disposers) dispose()
+      }
+    }
+    const unsubscribe = scope.subscribe(sync)
+    sync()
+    return () => {
+      unsubscribe()
+      disposeFold?.()
+    }
+  })
 }

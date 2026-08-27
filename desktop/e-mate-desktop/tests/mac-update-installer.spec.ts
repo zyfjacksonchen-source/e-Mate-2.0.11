@@ -204,7 +204,7 @@ function legacyTransactionRequest(root: string) {
   const transactionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
   const token = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
   const canonicalRoot = realpathSync(root)
-  const state = join(canonicalRoot, 'updates', '2.0.14', `install-${transactionId}`)
+  const state = join(canonicalRoot, 'updates', '2.0.15', `install-${transactionId}`)
   mkdirSync(state, { recursive: true })
   const suffix = transactionId.slice(0, 8)
   const currentApp = '/Applications/e-Mate.app'
@@ -214,7 +214,7 @@ function legacyTransactionRequest(root: string) {
     environment: {
       EMATE_MAC_UPDATE_ACK_PATH: join(state, 'startup-ack.json'),
       EMATE_MAC_UPDATE_ACK_TOKEN: token,
-      EMATE_MAC_UPDATE_ACK_VERSION: '2.0.14',
+      EMATE_MAC_UPDATE_ACK_VERSION: '2.0.15',
     } satisfies NodeJS.ProcessEnv,
     request: {
       schemaVersion: 1,
@@ -222,10 +222,10 @@ function legacyTransactionRequest(root: string) {
       parentPid: 123,
       currentApp,
       currentVersion: '2.0.12',
-      targetVersion: '2.0.14',
-      stagedApp: `/Applications/.e-Mate-2.0.14-${suffix}.staged.app`,
+      targetVersion: '2.0.15',
+      stagedApp: `/Applications/.e-Mate-2.0.15-${suffix}.staged.app`,
       backupApp: `/Applications/.e-Mate-2.0.12-${suffix}.backup.app`,
-      failedApp: `/Applications/.e-Mate-2.0.14-${suffix}.failed.app`,
+      failedApp: `/Applications/.e-Mate-2.0.15-${suffix}.failed.app`,
       trashApp: join(homedir(), '.Trash', `e-Mate 2.0.12 Update Backup ${suffix}.app`),
       receiptPath: join(state, 'receipt.json'),
       helperReadyPath: join(state, 'helper-ready.json'),
@@ -415,6 +415,35 @@ describe('detached macOS update replacement', () => {
 
     expect(durableDirectory).toBeGreaterThanOrEqual(0)
     expect(helperSpawn).toBeGreaterThan(durableDirectory)
+  })
+
+  it('starts the detached transaction helper from the current installed Base', () => {
+    const source = readFileSync(new URL('../src/mac-update-installer.ts', import.meta.url), 'utf8')
+    const scheduler = source.slice(source.indexOf('export async function scheduleMacUpdateInstallation'))
+
+    expect(scheduler).toContain("helper = spawn(join(resolvedCurrent, 'Contents', 'MacOS', 'e-Mate')")
+    expect(scheduler).toContain('[options.helperModulePath, requestPath]')
+    expect(scheduler).not.toContain("helper = spawn(join(stagedApp, 'Contents', 'MacOS', 'e-Mate')")
+  })
+
+  it('shares one macOS path, permission, volume, and free-space preflight', () => {
+    const source = readFileSync(new URL('../src/mac-update-installer.ts', import.meta.url), 'utf8')
+    const validator = source.slice(
+      source.indexOf('function validateMacUpdatePreflight'),
+      source.indexOf('export function preflightMacUpdateInstallation'),
+    )
+    const scheduler = source.slice(source.indexOf('export async function scheduleMacUpdateInstallation'))
+
+    expect(validator).toContain('accessSync(userDataPath, constants.W_OK | constants.X_OK)')
+    expect(validator).toContain('accessSync(trashDirectory, constants.W_OK | constants.X_OK)')
+    expect(validator).toContain('accessSync(installDirectory, constants.W_OK | constants.X_OK)')
+    expect(validator).toContain("join('/Applications', 'e-Mate.app')")
+    expect(validator).toContain('statSync(trashDirectory).dev !== installDevice')
+    expect(validator).toContain('statfsSync')
+    expect(validator).toContain('const atomicSwapBytes = allocatedBytes(resolvedCurrent)')
+    expect(validator).toContain('downloadBytes + atomicSwapBytes')
+    expect(validator).toContain('[[userDataPath, downloadBytes], [installDirectory, atomicSwapBytes]]')
+    expect(scheduler).toContain('validateMacUpdatePreflight(options)')
   })
 
   it('atomically rejects a concurrent macOS update owner', () => {
@@ -638,7 +667,7 @@ describe('detached macOS update replacement', () => {
     ])
   })
 
-  it('upgrades an exact 2.0.12 request only after the 2.0.14 legacy acknowledgement is healthy', async () => {
+  it('upgrades an exact 2.0.12 request only after the 2.0.15 legacy acknowledgement is healthy', async () => {
     const root = mkdtempSync(join(tmpdir(), 'e-mate-legacy-swap-'))
     temporaryRoots.push(root)
     const update = legacyTransactionRequest(root).request as LegacyMacUpdateRequest
@@ -647,14 +676,14 @@ describe('detached macOS update replacement', () => {
     await performLegacyMacUpdateSwap(update, legacyAdapter(events, async () => { events.push('healthy') }))
 
     expect(events).toEqual([
-      `validate-target:${update.stagedApp}:2.0.14`,
+      `validate-target:${update.stagedApp}:2.0.15`,
       `validate-installed:${update.currentApp}:2.0.12`,
       `missing:${update.backupApp}`,
       `missing:${update.failedApp}`,
       `missing:${update.trashApp}`,
       `rename:${update.currentApp}:${update.backupApp}`,
       `rename:${update.stagedApp}:${update.currentApp}`,
-      `validate-target:${update.currentApp}:2.0.14`,
+      `validate-target:${update.currentApp}:2.0.15`,
       'receipt:installed-awaiting-health',
       `launch:${update.currentApp}:update`,
       'healthy',
@@ -663,7 +692,7 @@ describe('detached macOS update replacement', () => {
     ])
   })
 
-  it('restores 2.0.12 when the legacy 2.0.14 candidate never becomes healthy', async () => {
+  it('restores 2.0.12 when the legacy 2.0.15 candidate never becomes healthy', async () => {
     const root = mkdtempSync(join(tmpdir(), 'e-mate-legacy-swap-'))
     temporaryRoots.push(root)
     const update = legacyTransactionRequest(root).request as LegacyMacUpdateRequest
@@ -1120,7 +1149,7 @@ describe('detached macOS update replacement', () => {
 
     const acknowledgement = await writeMacUpdateStartupAck(
       root,
-      '2.0.14',
+      '2.0.15',
       legacy.environment,
       undefined,
       sender,
@@ -1128,8 +1157,8 @@ describe('detached macOS update replacement', () => {
 
     expect(acknowledgement).toEqual(expect.objectContaining({
       status: 'installed',
-      currentVersion: '2.0.14',
-      targetVersion: '2.0.14',
+      currentVersion: '2.0.15',
+      targetVersion: '2.0.15',
     }))
     expect(() => lstatSync(legacy.ackPath)).toThrow()
     expect(sender).not.toHaveBeenCalled()
@@ -1140,7 +1169,7 @@ describe('detached macOS update replacement', () => {
       schemaVersion: 1,
       status: 'healthy',
       token: legacy.request.ackToken,
-      version: '2.0.14',
+      version: '2.0.15',
       pid: process.pid,
       acknowledgedAt: expect.any(String),
     })
@@ -1171,7 +1200,7 @@ describe('detached macOS update replacement', () => {
     writeMacUpdateDurableJson(legacy.requestPath, requestValue)
     const sender = vi.fn(async () => async () => {})
 
-    await expect(writeMacUpdateStartupAck(root, '2.0.14', environment, undefined, sender))
+    await expect(writeMacUpdateStartupAck(root, '2.0.15', environment, undefined, sender))
       .rejects.toThrow(/macOS update startup acknowledgement environment is invalid|legacy macOS update request is invalid/u)
 
     expect(() => lstatSync(legacy.ackPath)).toThrow()
@@ -1183,7 +1212,7 @@ describe('detached macOS update replacement', () => {
     temporaryRoots.push(root)
     const legacy = legacyTransactionRequest(root)
     writeMacUpdateDurableJson(legacy.requestPath, legacy.request)
-    const acknowledgement = await writeMacUpdateStartupAck(root, '2.0.14', legacy.environment)
+    const acknowledgement = await writeMacUpdateStartupAck(root, '2.0.15', legacy.environment)
     writeMacUpdateDurableJson(legacy.requestPath, { ...legacy.request, parentPid: 456 })
 
     expect(acknowledgement).toBeDefined()
@@ -1197,7 +1226,7 @@ describe('detached macOS update replacement', () => {
     temporaryRoots.push(root)
     const legacy = legacyTransactionRequest(root)
     writeMacUpdateDurableJson(legacy.requestPath, legacy.request)
-    const acknowledgement = await writeMacUpdateStartupAck(root, '2.0.14', legacy.environment)
+    const acknowledgement = await writeMacUpdateStartupAck(root, '2.0.15', legacy.environment)
     const events: string[] = []
     const update = request()
 

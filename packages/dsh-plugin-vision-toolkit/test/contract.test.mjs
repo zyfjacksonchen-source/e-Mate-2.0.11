@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -11,6 +11,14 @@ const root = new URL('../', import.meta.url)
 const builtModules = new Map()
 const target = process.env.EMATE_COMPONENT_TARGET
 const targetTest = target === undefined ? test.skip : test
+
+function deepFreeze(value) {
+  if (value !== null && typeof value === 'object') {
+    for (const nested of Object.values(value)) deepFreeze(nested)
+    Object.freeze(value)
+  }
+  return value
+}
 
 async function loadBuiltModule(relative = 'lib/index.mjs') {
   if (builtModules.has(relative)) return builtModules.get(relative)
@@ -48,7 +56,8 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
     readFile(new URL('lib/client.js', root), 'utf8'),
   ])
   const pkg = JSON.parse(manifest)
-  assert.equal(pkg.version, '2.0.14')
+  const { componentFiles, verifyComponentRuntimeImports } = await import('../../../scripts/component-release.mjs')
+  assert.equal(pkg.version, '2.0.15')
   assert.equal(pkg.eMate.component.kind, 'platform-profile')
   assert.equal(pkg.dsh.visionToolkit.adapterState, 'managed')
   assert.equal(pkg.dsh.visionToolkit.upstreamCommit, 'bc9803d7d6300c864d17460ecbb33540b26638e0')
@@ -63,7 +72,6 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
       '@deepseek-ai/dsh-client-ui-conversation',
       '@deepseek-ai/dsh-client-ui-tool',
       '@deepseek-ai/dsh-client-ui-settings',
-      '@deepseek-ai/dsh-client-ui-input-trigger',
       '@deepseek-ai/dsh-client-locale',
     ],
     platform: 'web',
@@ -77,6 +85,10 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
     '@e-mate/desktop/vision-toolkit',
     'react',
   ])
+  assert.deepEqual(
+    verifyComponentRuntimeImports(componentFiles(fileURLToPath(root), pkg), pkg.eMate.component),
+    pkg.eMate.component.base_imports,
+  )
   assert.doesNotMatch(patch, /provider|credential|model|baseUrl/u)
   assert.match(source, /settings must match the enterprise model policy/u)
   assert.match(source, /sandboxPolicy\.resolve/u)
@@ -101,18 +113,153 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
     'vision_html_screenshot',
     'vision_dominant_colors',
     'tool.call.toolview',
-    'conversation.input.dock',
     'settings.section',
-    '/_dsh/vision-toolkit/paste-images',
   ]) assert.match(client, new RegExp(surface.replaceAll('.', '\\.')))
+  assert.doesNotMatch(client, /paste-images|Pasted image available at absolute path|stopImmediatePropagation/u)
+  assert.doesNotMatch(built, /PASTE_IMAGES_ROUTE|PastedImageBackend/u)
+  assert.doesNotMatch(source + built, /find_skill|tool_search|\bcdp\b/iu)
   assert.doesNotMatch(client, /@anionex\/dsh-vision-toolkit/u)
   assert.match(client, /disabled: !snapshot\.writable \|\| busy/u)
   assert.doesNotMatch(built, /from\s+["']saxes["']/u)
   assert.doesNotMatch(built, /__applyPinnedVisionToolkit|__VisionToolkitWebBackend/u)
-  assert.match(built, /managed Settings generation refused; runtime remains unavailable/u)
+  assert.match(built, /runtime preparation is deferred until first use/u)
   assert.match(built, /vision-toolkit settings must match the enterprise model policy/u)
   assert.equal(existsSync(new URL('runtime/requirements.lock', root)), true)
   assert.equal(existsSync(new URL('vendor/agent-vision-toolkit/UPSTREAM_MANIFEST.json', root)), true)
+})
+
+targetTest('Native Attachment First reloads five CAS images and keeps one prepared adapter dispatch', async () => {
+  const [{ imageInputRequestBoundary, installImageInputRequestBoundary }, { Context }, llmModule, attachmentModule] = await Promise.all([
+    loadBuiltModule(),
+    import(new URL('../../../upstream/deepseek-harness/vendor/cordis/lib/index.js', import.meta.url)),
+    import(new URL('../../../upstream/deepseek-harness/packages/llm/llm/lib/index.js', import.meta.url)),
+    import(new URL('../../../upstream/deepseek-harness/packages/attachment/attachment-local/lib/index.js', import.meta.url)),
+  ])
+  const { default: LlmRuntime, LlmAdapter, deepFreeze: freeze, isAgentLoopRequest, markAgentLoopRequest } = llmModule
+  const { default: LocalAttachmentStore } = attachmentModule
+  const state = await mkdtemp(join(tmpdir(), 'e-mate-native-attachments-'))
+  const windowsName = String.raw`C:\Users\61078\Desktop\流利说交付图片\海报-1.png`
+  const pngs = [
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==',
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWNg+M/wHwAEAQH/U7xMcQAAAABJRU5ErkJggg==',
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWNgYPj/HwADAgH/xCAAOgAAAABJRU5ErkJggg==',
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4/5/hPwAH/QL+hMPOIAAAAABJRU5ErkJggg==',
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4z/D/PwAG/gL+LiKCSgAAAABJRU5ErkJggg==',
+  ].map(value => Uint8Array.from(Buffer.from(value, 'base64')))
+  try {
+    const context = new Context()
+    await context.plugin(LlmRuntime)
+    const store = new LocalAttachmentStore(context, { dshHome: state })
+    const refs = await store.saveImages(pngs.map((data, index) => ({
+      data,
+      mediaType: 'image/png',
+      name: index === 0 ? windowsName : `poster-${index + 1}.png`,
+    })))
+    assert.equal(refs.length, 5)
+    assert.equal(new Set(refs.map(ref => ref.attachmentId)).size, 5)
+    assert.equal(refs[0].name, '海报-1.png')
+    const reloaded = new LocalAttachmentStore(new Context(), { dshHome: state })
+    const stored = await Promise.all(refs.map(ref => reloaded.readImage(ref)))
+    for (let index = 0; index < stored.length; index++) assert.deepEqual(stored[index].data, pngs[index])
+
+    const contracts = []
+    Object.assign(context, { emateModelPolicy: {
+      imageInputContract: async (provider, model) => {
+        contracts.push([provider, model])
+        const capability = model === 'text-only' ? 'text-only' : model === 'image-capable' ? 'image-capable' : 'unknown'
+        return {
+          capability,
+          request_boundary: capability === 'text-only' ? 'convert-at-request-boundary' : 'preserve-native',
+        }
+      },
+    } })
+    const runtimeCalls = []
+    const runtime = { glance: async ({ images }, { workspace }) => {
+      runtimeCalls.push({ images, workspace })
+      return { answer: `description-${runtimeCalls.length} ${images[0]}` }
+    } }
+    const messages = [{ role: 'user', source: { kind: 'user' }, content: [
+      { type: 'text', text: '请逐张读取这 5 张海报' },
+      ...refs.map(attachment => ({ type: 'image', attachment })),
+    ] }]
+    const capable = freeze({ provider: 'route', model: 'image-capable', messages })
+    const unknown = freeze({ ...capable, model: 'metadata-unknown' })
+    assert.equal(await imageInputRequestBoundary(context, runtime, capable), capable)
+    assert.equal(await imageInputRequestBoundary(context, runtime, unknown), unknown)
+    assert.equal(capable.messages[0].content.filter(block => block.type === 'image').length, 5)
+    assert.equal(unknown.messages[0].content.filter(block => block.type === 'image').length, 5)
+    assert.equal(runtimeCalls.length, 0)
+
+    let firstOptions
+    let firstCalls = 0
+    let secondCalls = 0
+    class Adapter extends LlmAdapter {
+      constructor(which) { super(); this.which = which }
+      async * stream(options) {
+        if (this.which === 'first') { firstCalls += 1; firstOptions = options } else secondCalls += 1
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      }
+    }
+    const disposeFirst = context.llm.registerAdapter(['route'], new Adapter('first'))
+    const prepared = await context.llm.prepareCall({ provider: 'route', model: 'text-only' })
+    installImageInputRequestBoundary(context, runtime)
+    let policyAdmissions = 0
+    context.on('llm/stream', (request, next) => {
+      policyAdmissions += 1
+      assert.equal(isAgentLoopRequest(request), true)
+      return next()
+    })
+    const request = markAgentLoopRequest(freeze({ ...prepared.config, sessionId: 'session-1', messages }))
+    const durableBefore = structuredClone(request)
+    disposeFirst()
+    context.llm.registerAdapter(['route'], new Adapter('second'))
+    for await (const _chunk of prepared.stream(request)) { /* drain */ }
+
+    assert.equal(policyAdmissions, 1)
+    assert.equal(firstCalls, 1)
+    assert.equal(secondCalls, 0)
+    assert.equal(firstOptions.messages[0].content.filter(block => block.type === 'image').length, 0)
+    assert.equal(firstOptions.messages[0].content.filter(block => block.type === 'text').length, 6)
+    assert.equal(Object.isFrozen(firstOptions), true)
+    assert.equal(Object.isFrozen(firstOptions.messages), true)
+    assert.equal(Object.isFrozen(firstOptions.messages[0].content), true)
+    assert.equal(runtimeCalls.length, 5)
+    assert.equal(JSON.stringify(firstOptions).includes(windowsName), false)
+    assert.equal(JSON.stringify(firstOptions).includes('Pasted image available at absolute path'), false)
+    assert.equal(runtimeCalls.some(call => JSON.stringify(firstOptions).includes(call.workspace)), false)
+    for (const call of runtimeCalls) await assert.rejects(stat(call.workspace), { code: 'ENOENT' })
+    assert.deepEqual(request, durableBefore)
+    assert.equal(Object.isFrozen(request), true)
+    assert.equal(Object.isFrozen(request.messages[0].content), true)
+    assert.equal(isAgentLoopRequest(request), true)
+    assert.deepEqual(contracts, [
+      ['route', 'image-capable'],
+      ['route', 'metadata-unknown'],
+      ['route', 'text-only'],
+    ])
+  } finally {
+    await rm(state, { recursive: true, force: true })
+  }
+})
+
+test('mixed PNG, PDF and DOCX follows the real native-drop and File Import mention owners', async () => {
+  const contract = await import(new URL('../dsh-plugin-file-import/src/contract.ts', root))
+  const client = await readFile(new URL('../dsh-plugin-file-import/src/client/index.tsx', root), 'utf8')
+  assert.equal(contract.fileDropRoute({
+    composerTarget: true,
+    directory: false,
+    normalizeImage: false,
+    ordinary: true,
+    workspaceTarget: false,
+  }), 'intake-all')
+  assert.equal(contract.allowedMediaType('海报.png'), undefined)
+  assert.equal(contract.allowedMediaType('资料.pdf'), 'application/pdf')
+  assert.equal(contract.allowedMediaType('文档.docx'), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+  assert.equal(contract.appendImportedMentions('请结合海报阅读', [
+    { relative_path: '.e-mate/imports/资料.pdf' },
+    { relative_path: '.e-mate/imports/文档.docx' },
+  ]), '请结合海报阅读 @.e-mate/imports/资料.pdf @.e-mate/imports/文档.docx ')
+  assert.match(client, /if \(images\.length > 0\) dropImages\(images\)[\s\S]*if \(ordinary\.length > 0\) void importFiles\(ordinary\)/u)
 })
 
 targetTest('Vision ships one signed offline CPython wheel closure for the selected target', async () => {
@@ -301,6 +448,11 @@ targetTest('managed Vision replaces a stale saved route before strict policy val
       },
     },
     logger: { info: () => {}, warn: () => {}, error: () => {} },
+    tools: { register: () => () => {} },
+    skills: { register: () => () => {} },
+    agents: { list: () => [] },
+    emateCapabilities: { register: () => () => {} },
+    on: () => () => {},
     inject: () => {},
   }
   const dispose = await applyPinned(ctx, managed, {

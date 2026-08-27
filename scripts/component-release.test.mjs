@@ -1,16 +1,19 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { BASE_CONTRACT_ID, componentJobsFor, loadReleaseBoundary, PRODUCT_UI_REFERENCE } from './change-impact.mjs'
 import {
   componentFiles,
   componentRuntimeImports,
   componentRuntimeParserAvailable,
   emitComponent,
+  materializeComponentArtifact,
   targetEntries,
   verifyComponentRuntimeImports,
 } from './component-release.mjs'
@@ -20,6 +23,53 @@ const repositoryRoot = fileURLToPath(new URL('..', import.meta.url))
 const releaseCache = join(repositoryRoot, '.release-cache')
 mkdirSync(releaseCache, { recursive: true })
 const releaseRoot = await mkdtemp(join(releaseCache, 'component-release-test-'))
+const FIXTURE_BASE_ID = BASE_CONTRACT_ID
+const HARNESS_COMMIT = '4787caf39134df190105b272da0dd2ba893d4d75'
+
+function createShellBoundaryFixture() {
+  const fixture = mkdtempSync(join(releaseRoot, 'shell-boundary-'))
+  const inventoryPath = 'packages/dsh/profile/component-inventory.json'
+  const shellRoot = 'packages/dsh/profile/plugins/emate-shell'
+  const shell = JSON.parse(readFileSync(join(repositoryRoot, shellRoot, 'package.json'), 'utf8'))
+  const currentBase = JSON.parse(readFileSync(join(repositoryRoot, 'desktop/e-mate-desktop/base-contract.json'), 'utf8'))
+  currentBase.id = FIXTURE_BASE_ID
+  currentBase.runtime_imports = Object.fromEntries(shell.eMate.component.base_imports.map(name => [
+    name,
+    currentBase.runtime_imports[name],
+  ]))
+  shell.eMate.component.base_contracts = [FIXTURE_BASE_ID]
+  const currentInventory = JSON.parse(readFileSync(join(repositoryRoot, inventoryPath), 'utf8'))
+  const inventory = {
+    ...currentInventory,
+    components: currentInventory.components.filter(component => component.id === shell.name),
+  }
+  const files = new Map([
+    ['desktop/e-mate-desktop/base-contract.json', `${JSON.stringify(currentBase, null, 2)}\n`],
+    ['desktop/e-mate-desktop/package.json', readFileSync(join(repositoryRoot, 'desktop/e-mate-desktop/package.json'))],
+    [inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`],
+    [`${shellRoot}/package.json`, `${JSON.stringify(shell, null, 2)}\n`],
+    [`${shellRoot}/pnpm-lock.yaml`, readFileSync(join(repositoryRoot, shellRoot, 'pnpm-lock.yaml'))],
+  ])
+  for (const [path, bytes] of files) {
+    const destination = join(fixture, path)
+    mkdirSync(dirname(destination), { recursive: true })
+    writeFileSync(destination, bytes)
+  }
+  execFileSync('git', ['init', '--quiet'], { cwd: fixture })
+  execFileSync('git', [
+    'update-index', '--add', '--cacheinfo',
+    `160000,${HARNESS_COMMIT},upstream/deepseek-harness`,
+  ], { cwd: fixture })
+  execFileSync('git', [
+    'update-index', '--add', '--cacheinfo',
+    `160000,${PRODUCT_UI_REFERENCE.commit},${PRODUCT_UI_REFERENCE.path}`,
+  ], { cwd: fixture })
+  execFileSync('git', ['add', '--', ...files.keys()], { cwd: fixture })
+  const boundary = loadReleaseBoundary(fixture)
+  assert.equal(boundary.valid, true, boundary.errors.join('\n'))
+  return { root: fixture, shell, baseContract: currentBase }
+}
+
 after(async () => {
   await Promise.all([
     rm(root, { recursive: true, force: true }),
@@ -28,15 +78,64 @@ after(async () => {
 })
 
 describe('component payload closure', () => {
-  it('exports the accepted Desktop bootstrap matrix from the shared inventory', () => {
-    const node = process.execPath
-    const inventory = JSON.parse(execFileSync(node, ['scripts/component-release.mjs', 'inventory'], {
+  it('materializes one exact portable payload without rebuilding the Base', () => {
+    const fixture = createShellBoundaryFixture()
+    const input = join(fixture.root, 'materialize-input')
+    const output = join(fixture.root, 'materialize-output')
+    const packageManifest = fixture.shell
+    const bytes = Buffer.from(`${JSON.stringify({ name: packageManifest.name, version: packageManifest.version, main: packageManifest.main })}\n`)
+    mkdirSync(join(input, 'files'), { recursive: true })
+    writeFileSync(join(input, 'files', 'package.json'), bytes)
+    writeFileSync(join(input, 'manifest.json'), `${JSON.stringify({
+      schema_version: 1,
+      id: '@e-mate/dsh-client-shell',
+      version: packageManifest.version,
+      kind: 'profile',
+      target: null,
+      source_commit: 'a'.repeat(40),
+      base_contracts: [fixture.baseContract.id],
+      schedule_protocol_floor: 1,
+      base_imports: packageManifest.eMate.component.base_imports,
+      authority_contract: packageManifest.eMate.component.authority_contract,
+      harness_contract: { version: '0.1.0-rc.7', commit: HARNESS_COMMIT },
+      package_entry: packageManifest.main,
+      total_bytes: bytes.byteLength,
+      files: [{ path: 'package.json', bytes: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex'), mode: '0644' }],
+    }, null, 2)}\n`)
+    const result = materializeComponentArtifact({
+      root: fixture.root,
+      input,
+      out: output,
+      id: '@e-mate/dsh-client-shell',
+      sourceCommit: 'a'.repeat(40),
+    })
+    assert.equal(result.files, 1)
+    assert.deepEqual(readFileSync(join(output, 'package.json')), bytes)
+    assert.throws(() => materializeComponentArtifact({
+      root: fixture.root,
+      input,
+      out: join(fixture.root, 'bad-output'),
+      id: '@e-mate/dsh-client-shell',
+      sourceCommit: 'b'.repeat(40),
+    }), /identity is invalid/u)
+  })
+
+  it('exports the accepted Desktop bootstrap matrix from the strict successor contract', () => {
+    const boundary = loadReleaseBoundary(repositoryRoot)
+    assert.equal(boundary.valid, true, boundary.errors.join('\n'))
+    assert.deepEqual(boundary.errors, [])
+    const inventoryCommand = spawnSync(process.execPath, ['scripts/component-release.mjs', 'inventory'], {
       cwd: repositoryRoot,
       encoding: 'utf8',
-    }))
-    const accepted = inventory.components.filter(component => component.desktop !== 'blocked')
-    assert.equal(inventory.base_contract_id, 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0')
-    assert.equal(inventory.schedule_protocol_floor, 1)
+    })
+    assert.equal(inventoryCommand.status, 0, inventoryCommand.stderr)
+    assert.equal(JSON.parse(inventoryCommand.stdout).base_contract_id, BASE_CONTRACT_ID)
+    const components = boundary.components
+    const accepted = components.filter(component => component.desktop !== 'blocked')
+    const componentJobs = componentJobsFor(boundary, accepted.map(component => component.id), accepted.map(component => component.id))
+    assert.equal(boundary.baseContract.id, BASE_CONTRACT_ID)
+    assert.equal(boundary.baseContract.schedule_protocol_floor, 1)
+    assert.equal(components.length, 15)
     assert.equal(accepted.length, 15)
     assert.deepEqual(accepted.map(component => component.id).sort(), [
       '@e-mate/dsh-client-shell',
@@ -56,17 +155,18 @@ describe('component payload closure', () => {
       '@e-mate/dsh-plugin-vision-toolkit',
     ].sort())
     assert.deepEqual(
-      inventory.components.filter(component => component.desktop === 'blocked').map(component => component.id),
-      ['@e-mate/dsh-plugin-xin-assistant'],
+      components.filter(component => component.desktop === 'blocked').map(component => component.id),
+      [],
     )
-    assert.equal(inventory.component_jobs.length, 19)
+    assert.equal(components.some(component => component.root === 'packages/dsh-plugin-xin-assistant'), false)
+    assert.equal(componentJobs.length, 19)
     assert.deepEqual(
-      [...new Set(inventory.component_jobs.map(job => job.component))].sort(),
+      [...new Set(componentJobs.map(job => job.component))].sort(),
       accepted.map(component => component.id).sort(),
     )
-    assert.equal(inventory.component_jobs.every(job => job.publish === true && typeof job.runner === 'string'), true)
+    assert.equal(componentJobs.every(job => job.publish === true && typeof job.runner === 'string'), true)
     assert.deepEqual(
-      inventory.components.filter(component => component.source_roots.length > 0).map(component => ({
+      components.filter(component => component.source_roots.length > 0).map(component => ({
         id: component.id,
         source_roots: component.source_roots,
       })),
@@ -229,26 +329,20 @@ describe('component payload closure', () => {
     assert.doesNotMatch(host, /setInterval|setTimeout|schedule_create|schedule_delete/u)
   })
 
-  it('keeps managed GPT web search in the accepted Tool Search hot component', () => {
+  it('keeps progressive disclosure in the accepted Tool Search hot component', () => {
     const root = join(repositoryRoot, 'packages/dsh-plugin-tool-search')
     const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
-    const host = readFileSync(join(root, 'src/web-search.ts'), 'utf8')
-    const patch = readFileSync(join(root, 'cordis.patch.yml'), 'utf8')
-    assert.equal(manifest.exports['./web-search'].default, './lib/web-search.mjs')
-    assert.deepEqual(manifest.eMate.component.base_imports, [
-      '@deepseek-ai/dsh-credentials',
-      '@deepseek-ai/dsh-llm',
-      '@deepseek-ai/dsh-tools',
-    ])
+    const host = readFileSync(join(root, 'src/index.ts'), 'utf8')
+    assert.equal(manifest.exports['./web-search'], undefined)
+    assert.deepEqual(manifest.eMate.component.base_imports, ['@deepseek-ai/dsh-tools'])
     assert.deepEqual(manifest.eMate.component.authority_contract, {
-      effects: ['credentials-read', 'network-remote'],
-      guards: ['enterprise-policy', 'fixed-endpoint', 'read-only', 'session-scope'],
+      effects: [],
+      guards: ['read-only', 'session-scope'],
     })
-    assert.match(host, /ctx\.get\('credentials'\)/u)
-    assert.match(host, /registerSearchProvider/u)
-    assert.match(patch, /searchProvider: gpt-responses/u)
-    assert.match(patch, /apiKeyEnv: E_MATE_SEARCH_KEY_DEEPSEEK/u)
-    assert.doesNotMatch(host, /defineTool|process\.env|^\s*apiKey\??:/mu)
+    assert.match(host, /name: TOOL_SEARCH_NAME/u)
+    assert.match(host, /agent\.ctx\.tools\.restrict/u)
+    assert.match(host, /defineTool/u)
+    assert.doesNotMatch(host, /credentials|registerSearchProvider|process\.env|^\s*apiKey\??:/mu)
   })
 
 

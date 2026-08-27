@@ -9,6 +9,14 @@ import {
 import { ConsentStoreError, type ConsentStore } from '@e-mate/consent-store';
 import { parseTaskEventInput, type TaskEventInput } from '@e-mate/monitoring-contract';
 import { chatCompletionsToResponsesStream, responsesToChatCompletionsRequest } from './chat-completions-adapter.ts';
+import {
+  parseUsageActivityQuery,
+  projectUsageActivity,
+  usageActivityDate,
+  type UsageActivity,
+  type UsageActivityLedgerDay,
+  type UsageActivityQuery,
+} from './activity-contract.ts';
 
 const maxRequestBytes = 4 * 1024 * 1024;
 const maxAuditRequestBytes = 512 * 1024;
@@ -67,7 +75,7 @@ const gptSearchCredentialRouteId = 'gpt-web-search';
 const gptSearchProviderId = 'gpt-responses';
 const gptSearchBaseUrl = 'http://43.135.183.53:8080/v1';
 const gptSearchModelId = 'gpt-5.6-luna';
-const runtimeModelsClientVersions = new Set(['2.0.12', '2.0.13']);
+const runtimeModelsClientVersions = new Set(['2.0.12', '2.0.13', '2.0.14', '2.0.15']);
 
 const runtimeApiMode = (route: ModelGatewayRoute): 'responses' | 'chat-completions' =>
   route.apiMode === 'chat-completions' ? 'chat-completions' : 'responses';
@@ -247,6 +255,7 @@ export class AuditTaskConflictError extends Error {}
 
 export type UsageStore = {
   currentAccountUsage(principal: ModelGatewayPrincipal): Promise<AccountUsage>;
+  accountUsageActivity(principal: ModelGatewayPrincipal, query: UsageActivityQuery): Promise<UsageActivity>;
   prepare(fact: InvocationFact): Promise<PreparedInvocation>;
   claimReconciliation(
     principal: ModelGatewayPrincipal,
@@ -282,7 +291,7 @@ type InvocationScope = Pick<InvocationFact, 'tenantId' | 'userId' | 'taskId' | '
 type InMemoryUsageEntry = {
   scope: InvocationScope;
   fact?: UsageFact;
-  attempts: Map<string, UsageFact>;
+  attempts: Map<string, { fact: UsageFact; occurredAt: number }>;
   invocations: Map<
     string,
     {
@@ -429,6 +438,34 @@ export class InMemoryUsageStore implements UsageStore {
     };
   }
 
+  async accountUsageActivity(
+    principal: ModelGatewayPrincipal,
+    query: UsageActivityQuery
+  ): Promise<UsageActivity> {
+    const buckets = new Map<string, [bigint, bigint, bigint, bigint]>();
+    for (const entry of this.#facts.values()) {
+      if (entry.scope.tenantId !== principal.tenantId || entry.scope.userId !== principal.userId) continue;
+      for (const { fact, occurredAt } of entry.attempts.values()) {
+        const date = usageActivityDate(occurredAt, query.timezone);
+        if (date < query.startDate || date > query.endDate) continue;
+        const current = buckets.get(date) ?? [0n, 0n, 0n, 0n];
+        current[0] += BigInt(fact.inputTokens);
+        current[1] += BigInt(fact.outputTokens);
+        current[2] += BigInt(fact.cacheReadTokens);
+        current[3] += BigInt(fact.cacheWriteTokens);
+        buckets.set(date, current);
+      }
+    }
+    const rows: UsageActivityLedgerDay[] = [...buckets].map(([date, values]) => ({
+      date,
+      inputTokens: values[0].toString(),
+      outputTokens: values[1].toString(),
+      cacheReadTokens: values[2].toString(),
+      cacheWriteTokens: values[3].toString(),
+    }));
+    return projectUsageActivity(query, rows, new Date(this.#tenantNow(principal.tenantId)));
+  }
+
   async prepare(value: InvocationFact): Promise<PreparedInvocation> {
     const fact = normalizeInvocationFact(value);
     const key = `${fact.tenantId}\0${fact.userId}\0${fact.taskId}`;
@@ -554,7 +591,7 @@ export class InMemoryUsageStore implements UsageStore {
     }
     if (invocation.state === 'COMPLETED') {
       const replay = entry.attempts.get(fact.providerResponseId);
-      if (!replay || !sameUsageFact(replay, fact)) {
+      if (!replay || !sameUsageFact(replay.fact, fact)) {
         throw new Error('Usage attempt idempotency conflict');
       }
       return;
@@ -674,7 +711,7 @@ export class InMemoryUsageStore implements UsageStore {
   #add(entry: InMemoryUsageEntry, fact: UsageFact, occurredAt = this.#tenantNow(fact.tenantId)): void {
     const replay = entry?.attempts.get(fact.providerResponseId);
     if (replay) {
-      if (!sameUsageFact(replay, fact)) {
+      if (!sameUsageFact(replay.fact, fact)) {
         throw new Error('Usage attempt idempotency conflict');
       }
       return;
@@ -714,7 +751,7 @@ export class InMemoryUsageStore implements UsageStore {
       cacheWriteTokens: totals[3] as number,
       costUsd: totalCost,
     };
-    entry.attempts.set(fact.providerResponseId, fact);
+    entry.attempts.set(fact.providerResponseId, { fact, occurredAt });
     this.#weeklyUsage.set(usageKey, nextUsage);
   }
 
@@ -746,7 +783,7 @@ export class InMemoryUsageStore implements UsageStore {
           !sameInvocationScope(entry.scope, record.fact) ||
           entry.finalized !== undefined && receipt === undefined ||
           [...entry.invocations.values()].some(({ state }) => state === 'PREPARED') ||
-          replay !== undefined && !sameUsageFact(replay, record.fact)
+          replay !== undefined && !sameUsageFact(replay.fact, record.fact)
         )
       ) {
         throw new AuditUsageConflictError('Audit usage fact conflicts with the existing ledger');
@@ -1815,7 +1852,33 @@ const consentProtectedPaths = new Set([
   '/v1/audit/usage',
   '/v1/audit/tasks',
   '/v1/usage/current',
+  '/v1/usage/activity',
 ]);
+
+function activityQuery(url: URL): UsageActivityQuery {
+  const entries = [...url.searchParams.entries()];
+  if (
+    entries.length !== 3 ||
+    new Set(entries.map(([key]) => key)).size !== 3 ||
+    entries.some(([key]) => !['timezone', 'start_date', 'end_date'].includes(key))
+  ) {
+    throw new HttpError(400, 'INVALID_USAGE_ACTIVITY_QUERY', 'Invalid usage activity query');
+  }
+  try {
+    return parseUsageActivityQuery({
+      timezone: url.searchParams.get('timezone'),
+      startDate: url.searchParams.get('start_date'),
+      endDate: url.searchParams.get('end_date'),
+    });
+  } catch {
+    throw new HttpError(400, 'INVALID_USAGE_ACTIVITY_QUERY', 'Invalid usage activity query');
+  }
+}
+
+function activityEtag(activity: UsageActivity): string {
+  const { calculatedAt: _calculatedAt, ...stable } = activity;
+  return `W/"${createHash('sha256').update(JSON.stringify(stable)).digest('base64url')}"`;
+}
 
 async function requireAcceptedConsent(store: ConsentStore | undefined, identity: ModelGatewayPrincipal): Promise<void> {
   if (identity.roles?.some((role) => role === 'TENANT_ADMIN' || role === 'AUDIT_ADMIN')) return;
@@ -1857,7 +1920,9 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
       if (url.hash || (
         url.pathname === '/v1/models' || url.pathname === '/v1/runtime-models'
           ? !validModelsQuery(url)
-          : Boolean(url.search)
+          : url.pathname === '/v1/usage/activity'
+            ? false
+            : Boolean(url.search)
       )) {
         throw new HttpError(400, 'INVALID_REQUEST', 'Query is not allowed');
       }
@@ -2038,6 +2103,24 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
         if (request.method !== 'GET') return method(response, 'GET');
         const usage = await options.usageStore.currentAccountUsage(identity);
         json(response, 200, { schemaVersion: 1, ...usage });
+        return;
+      }
+      if (url.pathname === '/v1/usage/activity') {
+        if (request.method !== 'GET') return method(response, 'GET');
+        const query = activityQuery(url);
+        let activity: UsageActivity;
+        try {
+          activity = await options.usageStore.accountUsageActivity(identity, query);
+        } catch {
+          throw new HttpError(503, 'USAGE_ACTIVITY_UNAVAILABLE', 'Usage activity temporarily unavailable');
+        }
+        const etag = activityEtag(activity);
+        if (request.headers['if-none-match'] === etag) {
+          response.writeHead(304, { 'cache-control': 'no-store', etag });
+          response.end();
+          return;
+        }
+        json(response, 200, activity, { etag });
         return;
       }
       if (url.pathname === '/v1/audit/usage') {

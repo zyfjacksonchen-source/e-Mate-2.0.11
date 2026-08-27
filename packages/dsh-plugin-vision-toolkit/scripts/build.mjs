@@ -6,15 +6,20 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const source = resolve(root, '../../upstream/plugins/dsh-vision-toolkit')
 const staged = resolve(root, '.build/upstream-lib')
-const requirementsTemplate = `pillow==12.3.0 --hash=sha256:4a94c6d980b59a49dff1caec3f3dec6aedce69c7a2a8321b96fa0eff00862627 --hash=sha256:9ef805f490216cd94a95e412779529bc9b6799b0c00291f9272a486ece1f54fa --hash=sha256:a2b55dd6b2a4c4b7d87ffa56bdb33fdc5fdb9a462173861a7bc097f17d91cb09
-numpy==2.4.6 --hash=sha256:3e8e51652ed0118325856cfe62fe1d6e47f3ce240a128643f36af6ffe6455d08 --hash=sha256:93632da93e6e1fed81279af07e2682e2b0842c7ffc89a7febb4248f2fad670ad --hash=sha256:d8e8286dd7cea7895157318d1b91cdacac64c479f3cbc8dce548331728484751
-vtracer==0.6.15 --hash=sha256:09ac4a5471c0301974aded9bbe51ded5908ef6c0058a2d07efca576955391e27 --hash=sha256:b0f08b66734e41872d4ac343ed6d08870b3235346def3e112e10b3b2443e619e --hash=sha256:f08d0552e9e5b421a948f87757ac5c83f69cf209f3f82fd9a7842b4b3b79969d
-`
 
 function replaceExactlyOnce(value, before, after, label) {
   const count = value.split(before).length - 1
   if (count !== 1) throw new Error(`pinned dsh-vision-toolkit ${label} contract changed`)
   return value.replace(before, after)
+}
+
+function replaceSection(value, start, end, replacement, label) {
+  const from = value.indexOf(start)
+  const to = from < 0 ? -1 : value.indexOf(end, from + start.length)
+  if (from < 0 || to < 0 || value.indexOf(start, from + start.length) >= 0) {
+    throw new Error(`pinned dsh-vision-toolkit ${label} contract changed`)
+  }
+  return value.slice(0, from) + replacement + value.slice(to)
 }
 
 async function readPinnedText(path) {
@@ -57,7 +62,26 @@ const managerAfter = `    });
         await ctx.settings.replace(VISION_TOOLKIT_SETTINGS_NAMESPACE, config);
         managedReady = true;
     }
-    const manager = new VisionToolkitRuntimeManager(ctx);`
+    const manager = new VisionToolkitRuntimeManager(ctx);
+    let runtimePending;
+    const prepareRuntime = async () => {
+        if (manager.ready)
+            return manager.current();
+        runtimePending ??= manager.reconfigure(settings.get()).then(() => manager.current()).finally(() => { runtimePending = undefined; });
+        return runtimePending;
+    };
+    const lazyRuntime = new Proxy({}, {
+        get(_target, property) {
+            return async (...args) => {
+                const runtime = await prepareRuntime();
+                options.validateConfig?.(runtime.config);
+                const member = runtime[property];
+                if (typeof member !== 'function')
+                    throw new Error(\`dsh-vision-toolkit runtime member \${String(property)} is not callable\`);
+                return member.apply(runtime, args);
+            };
+        },
+    });`
 if (!index.includes(applyBefore) || !index.includes(validateBefore)
   || !index.includes(backendBefore) || !index.includes(managerBefore) || !index.includes(operationalBefore)) {
   throw new Error('pinned dsh-vision-toolkit apply contract changed')
@@ -69,6 +93,73 @@ index = index
   .replace(managerBefore, managerAfter)
   .replace(operationalBefore, operationalAfter)
   .replace(backendBefore, backendAfter)
+index = replaceExactlyOnce(
+  index,
+  `import { PastedImageBackend } from "./paste-images.js";`,
+  ``,
+  'legacy pasted-image backend import',
+)
+index = replaceExactlyOnce(
+  index,
+  `    const disposers = [];`,
+  `    const disposers = [];
+    const imageInputBridgeDisposer = options.installImageInputBridge?.(lazyRuntime);
+    if (imageInputBridgeDisposer !== undefined)
+        disposers.push(imageInputBridgeDisposer);`,
+  'image request-boundary disposer',
+)
+index = replaceExactlyOnce(
+  index,
+  `        if (!manager.ready || operationalDisposers !== undefined)
+            return;`,
+  `        if (operationalDisposers !== undefined)
+            return;`,
+  'lazy operational exposure',
+)
+index = replaceExactlyOnce(
+  index,
+  `            const info = manager.current().upstreamVersion;
+            ctx.logger.info('dsh-vision-toolkit %s ready (upstream %s @ %s, checkout %s)', PLUGIN_VERSION, info.version, info.commit, info.path);`,
+  `            if (manager.ready) {
+                const info = manager.current().upstreamVersion;
+                ctx.logger.info('dsh-vision-toolkit %s ready (upstream %s @ %s, checkout %s)', PLUGIN_VERSION, info.version, info.commit, info.path);
+            }
+            else {
+                ctx.logger.info('dsh-vision-toolkit %s loaded; runtime preparation is deferred until first use', PLUGIN_VERSION);
+            }`,
+  'lazy readiness logging',
+)
+index = replaceExactlyOnce(
+  index,
+  `    try {
+        await manager.initialize(settings.get());
+        ensureOperational();
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.logger.error('dsh-vision-toolkit %s: runtime not ready; the vision-tools skill, activation bootstrap, and Agent-scoped visual tools are NOT registered. Settings remain available for repair. %s', PLUGIN_VERSION, message);
+    }`,
+  `    if (options.managed !== true) {
+        try {
+            await manager.initialize(settings.get());
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            ctx.logger.error('dsh-vision-toolkit %s: runtime not ready; Settings remain available for repair. %s', PLUGIN_VERSION, message);
+        }
+    }
+    ensureOperational();`,
+  'managed lazy first use',
+)
+index = replaceExactlyOnce(
+  index,
+  `    const pastedImages = new PastedImageBackend(ctx, {
+        maxImageBytes: () => manager.status().activeConfig?.maxImageBytes ?? resolveConfig(settings.get()).maxImageBytes,
+    });
+    installVisionToolkitWeb(ctx, backend, artifacts, pastedImages);`,
+  `    installVisionToolkitWeb(ctx, backend, artifacts);`,
+  'native attachment first Web surface',
+)
 index = replaceExactlyOnce(
   index,
   `    disposers.push(settings.watch(async (next) => {
@@ -130,6 +221,61 @@ index = replaceExactlyOnce(
         deactivateOperational();`,
   'operational disposal',
 )
+index = replaceExactlyOnce(
+  index,
+  `        const currentRuntime = () => {
+            const runtime = manager.current();
+            if (options.managed === true)
+                options.validateConfig?.(runtime.config);
+            return runtime;
+        };`,
+  `        const currentRuntime = () => {
+            if (options.managed === true)
+                return lazyRuntime;
+            return manager.current();
+        };`,
+  'managed lazy runtime source',
+)
+index = replaceExactlyOnce(
+  index,
+  `    disposers.push(settings.watch(async (next) => {
+        if (options.managed === true) {
+            deactivateOperational();
+            manager.deactivate();
+        }
+        try {
+            await manager.reconfigure(next);
+            if (options.managed === true)
+                options.validateConfig?.(next);
+            ensureOperational();
+        }
+        catch (error) {
+            if (options.managed === true) {
+                deactivateOperational();
+                manager.deactivate();
+            }
+            const message = error instanceof Error ? error.message : String(error);
+            ctx.logger.error(options.managed === true
+                ? 'dsh-vision-toolkit: managed Settings generation refused; runtime remains unavailable. %s'
+                : 'dsh-vision-toolkit: keeping the previous runtime after a refused Settings generation. %s', message);
+        }
+    }));`,
+  `    disposers.push(settings.watch(async (next) => {
+        if (options.managed === true) {
+            manager.deactivate();
+            return;
+        }
+        try {
+            await manager.reconfigure(next);
+            ensureOperational();
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            ctx.logger.error('dsh-vision-toolkit: keeping the previous runtime after a refused Settings generation. %s', message);
+        }
+    }));`,
+  'managed lazy Settings generation',
+)
 await writeFile(upstreamIndex, index)
 
 const runtimeManagerPath = resolve(staged, 'runtime-manager.js')
@@ -182,6 +328,36 @@ await writeFile(runtimePath, runtime)
 
 const webPath = resolve(staged, 'web.js')
 let web = await readPinnedText(webPath)
+web = replaceExactlyOnce(
+  web,
+  `import { PASTE_IMAGES_ROUTE } from "./paste-images.js";`,
+  ``,
+  'legacy pasted-image Web import',
+)
+web = replaceExactlyOnce(
+  web,
+  `export function installVisionToolkitWeb(ctx, backend, artifacts, pastedImages) {`,
+  `export function installVisionToolkitWeb(ctx, backend, artifacts) {`,
+  'native attachment first Web signature',
+)
+web = replaceExactlyOnce(
+  web,
+  `            const disposePasteImages = webCtx.webServer.register({
+                kind: 'exact',
+                path: PASTE_IMAGES_ROUTE,
+                handler: (req, res) => pastedImages.handle(req, res),
+            });
+`,
+  ``,
+  'legacy pasted-image Web route',
+)
+web = replaceExactlyOnce(
+  web,
+  `                disposePasteImages();
+`,
+  ``,
+  'legacy pasted-image Web disposer',
+)
 const webTransforms = [
   [
     `    onRuntimeActivated;
@@ -390,6 +566,7 @@ export declare function apply(
     managed?: boolean
     validateConfig?(value: unknown): void
     assertWriteAllowed?(exec: { agent?: { session?: unknown } }): void
+    installImageInputBridge?(runtime: unknown): () => void
   },
 ): Promise<() => void>
 `)
@@ -435,6 +612,25 @@ let client = (await readPinnedText(resolve(staged, 'client.js')))
   .replaceAll('@anionex/dsh-vision-toolkit', '@e-mate/dsh-plugin-vision-toolkit')
 client = replaceExactlyOnce(
   client,
+  `    (0, paste_images_tsx_1.installPasteImages)(ctx);`,
+  ``,
+  'native attachment first Client',
+)
+client = replaceExactlyOnce(
+  client,
+  `const paste_images_tsx_1 = __load_("./paste-images.js");\n`,
+  ``,
+  'legacy pasted-image Client import',
+)
+client = replaceSection(
+  client,
+  `__modules["./paste-images.js"] = function(module, exports, require, __load_) {`,
+  `function __resolve(from, request) {`,
+  ``,
+  'legacy pasted-image Client module',
+)
+client = replaceExactlyOnce(
+  client,
   '(0, jsx_runtime_1.jsx)("option", { value: "openai", children: "OpenAI Chat Completions" }), (0, jsx_runtime_1.jsx)("option", { value: "anthropic", children: "Anthropic Messages" })',
   '(0, jsx_runtime_1.jsx)("option", { value: "openai", children: "OpenAI Chat Completions" }), (0, jsx_runtime_1.jsx)("option", { value: "responses", children: "OpenAI Responses" }), (0, jsx_runtime_1.jsx)("option", { value: "anthropic", children: "Anthropic Messages" })',
   'Responses Client option',
@@ -458,9 +654,10 @@ for (const [before, after, expected] of clientTransforms) {
 client = client.replace(/\n\/\/# sourceMappingURL=client\.js\.map\s*$/u, '\n')
 await writeFile(resolve(root, 'lib/client.js'), client)
 
+const requirementsLock = await readFile(resolve(root, 'runtime/requirements.lock'))
 await rm(resolve(root, 'runtime'), { recursive: true, force: true })
 await cp(resolve(source, 'runtime'), resolve(root, 'runtime'), { recursive: true, force: true })
-await writeFile(resolve(root, 'runtime/requirements.lock'), requirementsTemplate)
+await writeFile(resolve(root, 'runtime/requirements.lock'), requirementsLock)
 await cp(resolve(source, 'vendor'), resolve(root, 'vendor'), { recursive: true, force: true })
 const target = process.env.EMATE_COMPONENT_TARGET
 if (target !== undefined) {

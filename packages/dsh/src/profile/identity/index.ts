@@ -25,10 +25,22 @@ const internalFailure = message => ({
   error: { code: 'internal', message, details: {} },
 })
 
+const usageUnavailable = () => ({
+  ok: false,
+  error: {
+    code: 'unavailable',
+    message: 'Token 使用数据暂时不可用，请稍后重试。',
+    details: { reason: 'usage-service-unavailable' },
+  },
+})
+
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 
 const ACCOUNT = /^[A-Za-z0-9][A-Za-z0-9._:@-]{2,127}$/u
 const VERIFICATION_CODE = /^[A-Za-z0-9]{4,12}$/u
+const ACTIVITY_DATE = /^[1-9][0-9]{3}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/u
+const USAGE_DECIMAL = /^(0|[1-9][0-9]{0,127})$/u
+const DAY_MS = 86_400_000
 
 function validRealName(value) {
   if (typeof value !== 'string') return false
@@ -150,6 +162,85 @@ function accountUsage(value, timezone) {
   }
 }
 
+function activityDateMs(value) {
+  if (typeof value !== 'string' || !ACTIVITY_DATE.test(value)) return undefined
+  const [year, month, day] = value.split('-').map(Number)
+  const result = Date.UTC(year, month - 1, day)
+  return new Date(result).toISOString().slice(0, 10) === value ? result : undefined
+}
+
+function activityQuery(value) {
+  if (!isRecord(value)
+    || Object.keys(value).sort().join(',') !== 'end_date,start_date,timezone'
+    || typeof value.timezone !== 'string'
+    || value.timezone.length < 1
+    || value.timezone.length > 64) return undefined
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: value.timezone })
+  } catch {
+    return undefined
+  }
+  const start = activityDateMs(value.start_date)
+  const end = activityDateMs(value.end_date)
+  if (start === undefined || end === undefined || end < start || (end - start) / DAY_MS + 1 > 366) return undefined
+  return { timezone: value.timezone, start_date: value.start_date, end_date: value.end_date }
+}
+
+function accountUsageActivity(value, query) {
+  if (!isRecord(value)
+    || Object.keys(value).sort().join(',') !== [
+      'calculated_at', 'days', 'end_date', 'period_total', 'schema_version', 'start_date', 'timezone',
+    ].sort().join(',')
+    || value.schema_version !== 1
+    || value.timezone !== query.timezone
+    || value.start_date !== query.start_date
+    || value.end_date !== query.end_date
+    || !Array.isArray(value.days)
+    || typeof value.period_total !== 'string'
+    || !USAGE_DECIMAL.test(value.period_total)
+    || typeof value.calculated_at !== 'string'
+    || !Number.isFinite(Date.parse(value.calculated_at))) {
+    throw new Error('e-Mate enterprise usage activity projection is invalid')
+  }
+  const start = activityDateMs(query.start_date)
+  const end = activityDateMs(query.end_date)
+  const expectedDates = []
+  for (let current = start; current <= end; current += DAY_MS) {
+    expectedDates.push(new Date(current).toISOString().slice(0, 10))
+  }
+  if (value.days.length !== expectedDates.length) {
+    throw new Error('e-Mate enterprise usage activity projection is incomplete')
+  }
+  const days = value.days.map((day, index) => {
+    if (!isRecord(day)
+      || Object.keys(day).sort().join(',') !== 'cache_read,cache_write,date,input,output,total'
+      || day.date !== expectedDates[index]
+      || [day.total, day.input, day.output, day.cache_read, day.cache_write]
+        .some(count => typeof count !== 'string' || !USAGE_DECIMAL.test(count))
+      || BigInt(day.total) !== BigInt(day.input) + BigInt(day.output) + BigInt(day.cache_read) + BigInt(day.cache_write)) {
+      throw new Error('e-Mate enterprise usage activity day is invalid')
+    }
+    return {
+      date: day.date,
+      total: day.total,
+      input: day.input,
+      output: day.output,
+      cache_read: day.cache_read,
+      cache_write: day.cache_write,
+    }
+  })
+  if (days.reduce((total, day) => total + BigInt(day.total), 0n) !== BigInt(value.period_total)) {
+    throw new Error('e-Mate enterprise usage activity total is invalid')
+  }
+  return {
+    schema_version: 1,
+    ...query,
+    days,
+    period_total: value.period_total,
+    calculated_at: new Date(Date.parse(value.calculated_at)).toISOString(),
+  }
+}
+
 function requireReceipt(value, operation) {
   if (!isRecord(value)
     || typeof value.receipt_id !== 'string'
@@ -231,6 +322,13 @@ export function apply(ctx, config = {}) {
       }
       return accountUsage(await config.identityProvider.usage(timezone), timezone)
     },
+    async usageActivity(query) {
+      const parsed = activityQuery(query)
+      if (parsed === undefined || typeof config.identityProvider?.usageActivity !== 'function') {
+        throw new Error('e-Mate enterprise usage activity projection is unavailable')
+      }
+      return accountUsageActivity(await config.identityProvider.usageActivity(parsed), parsed)
+    },
     async uploadAudit(records) {
       if (typeof config.identityProvider?.auditUpload !== 'function') {
         throw new Error('e-Mate enterprise audit transport is unavailable')
@@ -273,6 +371,17 @@ export function apply(ctx, config = {}) {
           throw new Error('e-Mate enterprise usage projection is unavailable')
         }
         return { ok: true, value: accountUsage(await config.identityProvider.usage(payload.timezone), payload.timezone) }
+      }
+      if (endpoint === 'identity.usage.activity') {
+        const query = activityQuery(payload)
+        if (query === undefined) return badRequest('identity.usage.activity payload is invalid')
+        if (typeof config.identityProvider?.usageActivity !== 'function') {
+          throw new Error('e-Mate enterprise usage activity projection is unavailable')
+        }
+        return {
+          ok: true,
+          value: accountUsageActivity(await config.identityProvider.usageActivity(query), query),
+        }
       }
       if (endpoint === 'verification.issue') {
         if (Object.keys(payload).sort().join(',') !== 'purpose'
@@ -449,7 +558,7 @@ export function apply(ctx, config = {}) {
           ctx.logger?.warn?.(
             `e-Mate enterprise identity ${endpoint} unavailable (${error.reason}${error.status === undefined ? '' : ` ${error.status}`})`,
           )
-          return internalFailure(error.message)
+          return endpoint === 'identity.usage.activity' ? usageUnavailable() : internalFailure(error.message)
         }
         ctx.logger?.warn?.(`e-Mate enterprise identity ${endpoint} failed (unexpected)`)
         return internalFailure('企业身份服务暂时不可用，请稍后重试。')

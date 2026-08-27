@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh-plugin-tool-search",
-  "version": "2.0.14",
-  "description": "DSH-native progressive tool disclosure and managed GPT web search for e-Mate",
+  "version": "2.0.15",
+  "description": "DSH-native progressive tool disclosure for e-Mate",
   "type": "module",
   "main": "lib/index.mjs",
   "types": "lib/index.d.mts",
@@ -9,10 +9,6 @@
     ".": {
       "types": "./lib/index.d.mts",
       "default": "./lib/index.mjs"
-    },
-    "./web-search": {
-      "types": "./lib/web-search.d.mts",
-      "default": "./lib/web-search.mjs"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
@@ -34,8 +30,6 @@
   },
   "engines": { "node": "^22.19.0 || >=24.0.0" },
   "peerDependencies": {
-    "@deepseek-ai/dsh-credentials": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-llm": "0.1.0-rc.7",
     "@deepseek-ai/dsh-tools": "0.1.0-rc.7"
   },
   "devDependencies": {
@@ -46,7 +40,6 @@
     "@deepseek-ai/dsh-attachment": "0.1.0-rc.7",
     "@deepseek-ai/dsh-brand": "0.1.0-rc.7",
     "@deepseek-ai/dsh-code-runtime": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-credentials": "0.1.0-rc.7",
     "@deepseek-ai/dsh-invariants": "0.1.0-rc.7",
     "@deepseek-ai/dsh-llm": "0.1.0-rc.7",
     "@deepseek-ai/dsh-scope": "0.1.0-rc.7",
@@ -73,17 +66,15 @@
       "id": "@e-mate/dsh-plugin-tool-search",
       "kind": "profile",
       "base_imports": [
-        "@deepseek-ai/dsh-credentials",
-        "@deepseek-ai/dsh-llm",
         "@deepseek-ai/dsh-tools"
       ],
       "authority_contract": {
-        "effects": ["credentials-read", "network-remote"],
-        "guards": ["enterprise-policy", "fixed-endpoint", "read-only", "session-scope"]
+        "effects": [],
+        "guards": ["read-only", "session-scope"]
       },
-      "base_contracts": ["e-mate-desktop-profile-v7-dsh-b2b1650b01f0"]
+      "base_contracts": ["e-mate-desktop-profile-v8-dsh-4787caf39134"]
     },
     "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606"
+    "harnessCommit": "4787caf39134df190105b272da0dd2ba893d4d75"
   }
 }

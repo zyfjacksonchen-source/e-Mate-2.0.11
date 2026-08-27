@@ -176,32 +176,32 @@ test('version gates match the release contract', () => {
 test('online update target parsing rejects tags and downgrade ordering is SemVer-correct', () => {
   const requestId = '11111111-1111-4111-8111-111111111111'
   const sourceCommit = 'a'.repeat(40)
-  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.14/${sourceCommit}`
+  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.15/${sourceCommit}`
   const releaseSource = {
     schema_version: 1,
     product: 'e-Mate',
-    version: '2.0.14',
+    version: '2.0.15',
     package_name: '@e-mate/dsh',
     source_commit: sourceCommit,
     manifest_url: `${base}/release-manifest.json`,
-    tarball_url: `${base}/e-mate-dsh-2.0.14.tgz`,
+    tarball_url: `${base}/e-mate-dsh-2.0.15.tgz`,
   }
   const request = {
     schema_version: 1,
     request_id: requestId,
-    target: '2.0.14',
-    current_version: '2.0.14',
+    target: '2.0.15',
+    current_version: '2.0.15',
     release_source: releaseSource,
     previous_release_source: releaseSource,
   }
   assert.equal(normalizeUpdateTarget(), 'latest')
   assert.equal(normalizeUpdateTarget('latest'), 'latest')
-  assert.equal(normalizeUpdateTarget('2.0.14-rc.1'), '2.0.14-rc.1')
+  assert.equal(normalizeUpdateTarget('2.0.15-rc.1'), '2.0.15-rc.1')
   assert.throws(() => normalizeUpdateTarget('next'), /invalid update version/)
   assert.throws(() => normalizeUpdateTarget('2.0'), /invalid update version/)
-  assert.equal(validateStagedVersion('latest', '2.0.14'), '2.0.14')
-  assert.equal(validateStagedVersion('2.0.14', '2.0.14'), '2.0.14')
-  assert.throws(() => validateStagedVersion('2.0.14', '2.0.7'), /does not match requested version/)
+  assert.equal(validateStagedVersion('latest', '2.0.15'), '2.0.15')
+  assert.equal(validateStagedVersion('2.0.15', '2.0.15'), '2.0.15')
+  assert.throws(() => validateStagedVersion('2.0.15', '2.0.7'), /does not match requested version/)
   assert.throws(() => validateStagedVersion('latest', 'not-semver'), /version is invalid/)
   assert.equal(validateUpdateRequest(request, requestId), request)
   assert.throws(
@@ -217,7 +217,7 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   assert.throws(() => parsePackageIntegrity(JSON.stringify('sha256-invalid')), /integrity is invalid/)
   assert.equal(compareVersions('2.0.7', '2.0.7-rc.1'), 1)
   assert.equal(compareVersions('2.0.7-rc.1', '2.0.7-rc.2'), -1)
-  assert.equal(compareVersions('2.0.14', '2.0.7'), 1)
+  assert.equal(compareVersions('2.0.15', '2.0.7'), 1)
   assert.equal(globalPrefixForBinPath('/opt/e-mate/lib/node_modules/@e-mate/dsh/lib/bin.js', 'darwin'), '/opt/e-mate')
   assert.equal(
     globalPrefixForBinPath('C:\\Users\\e-mate\\AppData\\Roaming\\npm\\node_modules\\@e-mate\\dsh\\lib\\bin.js', 'win32'),
@@ -225,34 +225,34 @@ test('online update target parsing rejects tags and downgrade ordering is SemVer
   )
   assert.throws(() => globalPrefixForBinPath('/repo/packages/dsh/lib/bin.js', 'darwin'), /global npm installation/u)
   assert.deepEqual(validateReleaseSource(releaseSource), releaseSource)
-  const desktopPrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.14/${sourceCommit}`
+  const desktopPrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.15/${sourceCommit}`
   assert.deepEqual(validateLatestReleasePointer({
     schema_version: 1,
-    version: '2.0.14',
+    version: '2.0.15',
     source_commit: sourceCommit,
     artifacts: {
       darwin: {
-        url: `${desktopPrefix}/e-Mate-2.0.14-mac-universal.dmg`,
+        url: `${desktopPrefix}/e-Mate-2.0.15-mac-universal.dmg`,
         bytes: 1,
         sha256: 'ab'.repeat(32),
       },
       win32: {
-        url: `${desktopPrefix}/e-Mate-2.0.14-win-x64-Setup.exe`,
+        url: `${desktopPrefix}/e-Mate-2.0.15-win-x64-Setup.exe`,
         bytes: 1,
         sha256: 'cd'.repeat(32),
       },
     },
   }), releaseSource)
-  assert.equal(compareVersions('2.0.14', '2.0.5'), 1)
+  assert.equal(compareVersions('2.0.15', '2.0.5'), 1)
   assert.throws(() => validateReleaseSource({ ...releaseSource, manifest_url: 'http://example.com/release-manifest.json' }), /URL is invalid/u)
   const sha512 = 'ab'.repeat(64)
   const artifactIntegrity = `sha512-${Buffer.from(sha512, 'hex').toString('base64')}`
   const artifact = {
-    name: '@e-mate/dsh', version: '2.0.14', kind: 'main', filename: 'e-mate-dsh-2.0.14.tgz',
+    name: '@e-mate/dsh', version: '2.0.15', kind: 'main', filename: 'e-mate-dsh-2.0.15.tgz',
     size: 207, sha256: 'cd'.repeat(32), sha512, integrity: artifactIntegrity,
   }
   const manifest = {
-    schema_version: 1, product: 'e-Mate', version: '2.0.14', source_commit: sourceCommit,
+    schema_version: 1, product: 'e-Mate', version: '2.0.15', source_commit: sourceCommit,
     packages: [artifact], download: { ...releaseSource, size: artifact.size, sha256: artifact.sha256, sha512, integrity: artifactIntegrity },
   }
   assert.equal(validateReleaseManifest(manifest, releaseSource).integrity, artifactIntegrity)
@@ -284,7 +284,7 @@ test('status projects only the latest bounded online-update receipt', async () =
       product: 'e-Mate',
       request_id: first,
       status: 'failed-before-change',
-      requested_version: '2.0.14',
+      requested_version: '2.0.15',
       previous_version: '2.0.7',
       error: 'must not reach status output',
       finished_at: '2026-08-15T01:00:00.000Z',
@@ -294,18 +294,18 @@ test('status projects only the latest bounded online-update receipt', async () =
       product: 'e-Mate',
       request_id: second,
       status: 'completed',
-      requested_version: '2.0.14',
+      requested_version: '2.0.15',
       previous_version: '2.0.7',
-      installed_version: '2.0.14',
+      installed_version: '2.0.15',
       error: 'must not reach status output',
       finished_at: '2026-08-15T02:00:00.000Z',
     }))
     const expected = {
       request_id: second,
       status: 'completed',
-      requested_version: '2.0.14',
+      requested_version: '2.0.15',
       previous_version: '2.0.7',
-      installed_version: '2.0.14',
+      installed_version: '2.0.15',
       finished_at: '2026-08-15T02:00:00.000Z',
     }
     assert.deepEqual(latestUpdateReceipt(dshHome), expected)
@@ -344,7 +344,7 @@ test('online updates admit only one live detached helper', () => {
 
 test('runtime resolves only the exact Harness source', () => {
   const runtime = resolveHarness()
-  assert.equal(HARNESS_COMMIT, 'b2b1650b01f0ee88d81837a9b5c050f9f763f606')
+  assert.equal(HARNESS_COMMIT, '4787caf39134df190105b272da0dd2ba893d4d75')
   assert.equal(runtime.version, HARNESS_VERSION)
   assert.equal(runtime.commit, HARNESS_COMMIT)
   assert.ok(['development-source', 'packaged-runtime'].includes(runtime.source))
@@ -381,7 +381,7 @@ test('managed profile installation is idempotent', () => {
     assert.deepEqual(profileManifest.dsh.profile.bundles, [
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...pluginPackages,
     ])
-    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.14'])))
+    assert.deepEqual(profileManifest.dependencies, Object.fromEntries(pluginPackages.map(name => [name, '2.0.15'])))
     const patch = readFileSync(join(first.profile, 'cordis.patch.yml'), 'utf8')
     installProfile(dshHome)
     assert.equal(readFileSync(join(first.profile, 'package.json'), 'utf8'), manifest)
@@ -541,7 +541,7 @@ test('managed profile installation is idempotent', () => {
       const pluginRoot = join(first.profile, 'node_modules', ...name.split('/'))
       const pluginManifest = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'))
       assert.equal(pluginManifest.name, name)
-      assert.equal(pluginManifest.version, '2.0.14')
+      assert.equal(pluginManifest.version, '2.0.15')
       assert.ok(readFileSync(join(pluginRoot, pluginManifest.main)).byteLength > 0)
       const pluginPatch = readFileSync(join(pluginRoot, pluginManifest.dsh.bundle.patch), 'utf8')
       assert.ok(pluginPatch.length >= 2)
@@ -614,7 +614,6 @@ test('managed profile installation is idempotent', () => {
     assert.match(client, /window\.__ModuleLoader__\.load\(\s*\{/)
     assert.match(client, /\bid:\s*["']@deepseek-ai\/dsh-client-ui-sidebar["']/)
     assert.match(client, /data-emate-home-hero/)
-    assert.match(client, /data-emate-home-overview/)
     assert.match(client, /data-chain-overlay-fallback/)
     assert.match(client, /ctx\.slots\.inject\(["']shell\.overlay["']/)
     assert.match(client, /welcome-notice/)
@@ -634,9 +633,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(client, /session\.logout/)
     assert.match(client, /session\.password/)
     assert.match(client, /\.inert\s*=\s*true/)
-    assert.match(client, /\/emate\.mcpManage/)
     assert.match(client, /外部连接/)
-    assert.match(client, /电脑操控/)
     const skillHubRoot = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-skill-hub')
     const skillHubClient = readFileSync(join(skillHubRoot, 'lib', 'client.js'), 'utf8')
     assert.match(skillHubClient, /e-mate-capabilities-entry/)
@@ -658,8 +655,9 @@ test('managed profile installation is idempotent', () => {
     assert.doesNotMatch(capabilities, /capability\.(?:id|title)\s*===|switch\s*\(\s*capability\.(?:id|title)/)
     assert.doesNotMatch(capabilities, /\b(?:fetch|WebSocket|EventSource)\s*\(/)
     const connectionsUi = readFileSync(new URL('../profile/plugins/emate-shell/src/client/composer-connectors.tsx', import.meta.url), 'utf8')
-    assert.match(connectionsUi, /已生效的外部连接/)
-    assert.match(connectionsUi, /查找并安装对应 Skill/)
+    assert.match(connectionsUi, /data-emate-composer-connectors/)
+    assert.match(connectionsUi, /openConnections/)
+    assert.match(connectionsUi, /打开外部连接能力中心/)
     assert.doesNotMatch(connectionsUi, /\b(?:fetch|WebSocket|EventSource)\s*\(/)
     const sessionRoute = readFileSync(new URL('../profile/plugins/emate-shell/src/client/session-route.tsx', import.meta.url), 'utf8')
     assert.match(sessionRoute, /state\.phase !== ['"]ready['"]/) // waits for the target list baseline
@@ -740,7 +738,7 @@ test('public share RPC publishes the native DSH Session ZIP and revokes the retu
       const url = String(input)
       requests.push({ url, init })
       if (url.endsWith('/healthz')) {
-        return Response.json({ schema_version: 1, ready: true })
+        return Response.json({ schema_version: 1, service: 'emate-share', version: 1, ready: true })
       }
       if (url.includes('/v1/shares?')) {
         assert.equal(new Headers(init.headers).get('authorization'), 'Bearer model-session-token-which-is-long-enough')
@@ -775,11 +773,12 @@ test('public share RPC publishes the native DSH Session ZIP and revokes the retu
   assert.deepEqual(registration.options, { authority: 'loopback' })
   assert.deepEqual(await registration.handler('status', {}), {
     ok: true,
-    value: { schema_version: 1, ready: true },
+    value: { schema_version: 1, stage: 'preparing', service_version: 1, ready: true },
   })
   assert.deepEqual(await registration.handler('create', { session_id: 'session-1' }), {
     ok: true,
     value: {
+      stage: 'created',
       schema_version: 1,
       share_id: shareId,
       public_url: `https://share.example/s/${shareId}`,
@@ -790,6 +789,7 @@ test('public share RPC publishes the native DSH Session ZIP and revokes the retu
   assert.deepEqual(await registration.handler('list', { session_id: 'session-1' }), {
     ok: true,
     value: {
+      stage: 'listing',
       schema_version: 1,
       shares: [{
         share_id: shareId,
@@ -798,9 +798,9 @@ test('public share RPC publishes the native DSH Session ZIP and revokes the retu
       }],
     },
   })
-  assert.deepEqual(await registration.handler('revoke', { share_id: shareId }), {
+  assert.deepEqual(await registration.handler('revoke', { share_id: shareId, session_id: 'session-1' }), {
     ok: true,
-    value: { schema_version: 1, revoked: true },
+    value: { schema_version: 1, stage: 'revoking', revoked: true },
   })
   assert.equal(requests.at(-1).url, `https://share.example/v1/shares/${shareId}`)
   assert.equal((await registration.handler('create', {})).error.code, 'bad-request')
@@ -1049,6 +1049,7 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-tool-search',
       '@e-mate/dsh-plugin-cdp',
+      '@e-mate/dsh-plugin-computer-use',
     ])
     const packages = [
       '@e-mate/dsh-plugin-better-sidebar',
@@ -1672,6 +1673,18 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.deepEqual(Object.keys(imagegen.parameters.properties), ['prompt', 'image_url'])
     assert.deepEqual(imagegen.parameters.required, ['prompt'])
     assert.match(imagegen.description, /Never pass a provider, model, output path, size, quality, timeout, or concurrency policy/u)
+    tools.delete('imagegen')
+    await assert.rejects(
+      imagegen.execute({ prompt: 'must fail before dispatch' }, {
+        agent,
+        callId: 'image-health-unavailable',
+        signal: new AbortController().signal,
+      }),
+      /current Agent tool scope/u,
+    )
+    assert.equal(sessionEvents.at(-1).data.failure_code, 'agent-tool-unavailable')
+    sessionEvents.length = 0
+    tools.set('imagegen', imagegen)
 
     const selected = await context.attachments.saveImage({
       data: inputBytes,
@@ -2878,7 +2891,8 @@ test('Agent operation guidance owns only the e-Mate persona', () => {
   assert.doesNotMatch(section.text, /e-mate update --json|e_mate_skill_hub_/)
   assert.match(section.text, /installed find-skill provider/u)
   assert.match(section.text, /use `mcp_manage`/u)
-  assert.match(section.text, /user-visible Chrome page exposed through the DSH CDP adapter/u)
+  assert.match(section.text, /latest direct request explicitly asks to read or operate a user-visible webpage/u)
+  assert.match(section.text, /never use Browser\/CDP as a fallback for `imagegen`, native `web_search`, attachment resolution/u)
   assert.match(section.text, /Do not invent a built-in connector or ask the user to paste secrets into chat/u)
 })
 
@@ -3246,7 +3260,7 @@ test('enterprise identity provider maps target credentials and the production HT
           acceptanceId: 'acceptance-receipt-207',
           userId: 'user-207',
           acceptedAt: new Date(clock).toISOString(),
-          clientVersion: '2.0.14',
+          clientVersion: '2.0.15',
           locale: 'zh-CN',
         } : null,
       })
@@ -3258,7 +3272,7 @@ test('enterprise identity provider maps target credentials and the production HT
         acceptanceId: 'acceptance-receipt-207',
         userId: 'user-207',
         acceptedAt: new Date(clock).toISOString(),
-        clientVersion: '2.0.14',
+        clientVersion: '2.0.15',
         locale: 'zh-CN',
       })
     }
@@ -3295,7 +3309,7 @@ test('enterprise identity provider maps target credentials and the production HT
       })
     }
     if (url.pathname.endsWith('/v1/runtime-models')) {
-      assert.equal(url.search, '?client_version=2.0.14')
+      assert.equal(url.search, '?client_version=2.0.15')
       return json(runtimeResponse)
     }
     if (url.pathname.endsWith('/v1/authenticated-probe')
@@ -4856,6 +4870,10 @@ test('health route reports real projected job activity and rejects writes', () =
 test('shell plugin serves branded Web resources without adding a transport', () => {
   const routes = new Map()
   const ctx = {
+    inject: (services, callback) => {
+      assert.deepEqual(services, ['settings'])
+      callback({ settings: { register: () => () => {} } })
+    },
     webServer: {
       register: route => {
         routes.set(route.path, route)

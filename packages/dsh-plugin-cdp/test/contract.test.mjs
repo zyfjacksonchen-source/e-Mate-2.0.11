@@ -67,7 +67,7 @@ test('ships no extension, browser binary, runtime downloader, or MCP subprocess'
   const manifest = JSON.parse(await readFile(`${root}/package.json`, 'utf8'))
   const source = await readFile(`${root}/src/index.ts`, 'utf8')
   assert.equal(manifest.name, '@e-mate/dsh-plugin-cdp')
-  assert.equal(manifest.eMate.harnessCommit, 'b2b1650b01f0ee88d81837a9b5c050f9f763f606')
+  assert.equal(manifest.eMate.harnessCommit, '4787caf39134df190105b272da0dd2ba893d4d75')
   assert.equal(manifest.files.includes('extension'), false)
   assert.doesNotMatch(source, /npx|playwright|puppeteer|chrome-devtools-mcp|child_process/iu)
   assert.match(source, /persistent isolated profile and loopback-only CDP endpoint/u)
@@ -327,6 +327,7 @@ test('makes CDP the first browser path and reserves Computer Use for an explicit
     effect: callback => callback(),
   })
   assert.equal(harness.get().allowControl, true)
-  assert.match(prompts[0].text, /every webpage read or operation, use these CDP browser tools first/u)
+  assert.match(prompts[0].text, /only when the latest user request explicitly asks to read or operate a visible Chrome webpage/u)
+  assert.match(prompts[0].text, /Never use them for attachments, image generation, native apps, or non-page work/u)
   assert.match(prompts[0].text, /only when the user explicitly inserts @电脑操控/u)
 })

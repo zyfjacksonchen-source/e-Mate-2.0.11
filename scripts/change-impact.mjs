@@ -9,8 +9,10 @@ import {
   sameProfileReleaseTarget,
   selectProfileRelease,
 } from '../desktop/e-mate-desktop/src/profile-release.ts'
+import { HARNESS_COMMIT } from './harness-provenance.mjs'
 
 export const BASE_CONTRACT_PATH = 'desktop/e-mate-desktop/base-contract.json'
+export const BASE_CONTRACT_ID = `e-mate-desktop-profile-v8-dsh-${HARNESS_COMMIT.slice(0, 12)}`
 export const ACCEPTED_PREDECESSOR = '6a7f4b9d59a1d8970345638946fb6564e2f5f93e'
 export const PRODUCT_UI_REFERENCE = Object.freeze({
   repository: 'zyfjacksonchen-source/ECoreX',
@@ -301,9 +303,7 @@ function validateBaseContract(value) {
     'harness_version', 'harness_commit', 'runtime_imports', 'profile_signing_keys',
   ])) errors.push('base contract fields are invalid')
   if (value.schema_version !== 1) errors.push('base contract schema_version must be 1')
-  if (typeof value.id !== 'string' || !/^e-mate-desktop-profile-v[1-9][0-9]*-dsh-[0-9a-f]{12}$/u.test(value.id)) {
-    errors.push('base contract id is invalid')
-  }
+  if (value.id !== BASE_CONTRACT_ID) errors.push(`base contract id must equal ${BASE_CONTRACT_ID}`)
   if (value.desktop_api !== 1) errors.push('base contract desktop_api must be 1')
   if (value.profile_format !== 1) errors.push('base contract profile_format must be 1')
   if (value.schedule_protocol_floor !== 1) errors.push('base contract schedule_protocol_floor must be 1')
@@ -316,7 +316,7 @@ function validateBaseContract(value) {
     errors.push('base contract Desktop rc.7 reference drifted')
   }
   if (value.harness_version !== '0.1.0-rc.7') errors.push('base contract Harness version drifted')
-  if (value.harness_commit !== 'b2b1650b01f0ee88d81837a9b5c050f9f763f606') {
+  if (value.harness_commit !== HARNESS_COMMIT) {
     errors.push('base contract Harness commit drifted')
   }
   const runtimeImports = record(value.runtime_imports) ? Object.entries(value.runtime_imports) : []
@@ -704,11 +704,12 @@ function ciPlan(lane, dimensions, options) {
   const releaseCandidate = options.releaseCandidate === true
   const base = lane === 'base'
   const formal = releaseCandidate || (options.protectedMain === true && base)
+  const shell = options.components?.includes('@e-mate/dsh-client-shell') === true
   const appSmoke = {
-    macos: formal || base && (
+    macos: shell || formal || base && (
       dimensions.shared_runtime || dimensions.profile || dimensions.macos_runtime || dimensions.macos_packaging
     ),
-    windows: formal || base && (
+    windows: shell || formal || base && (
       dimensions.shared_runtime || dimensions.profile || dimensions.windows_runtime || dimensions.windows_packaging
     ),
   }
@@ -735,21 +736,10 @@ export function classifyChangedPaths(paths, options = {}) {
   }
   const classifications = normalized.map(path => classifyPath(path, boundary))
   const kinds = new Set(classifications.map(item => item.kind))
-  const components = [...new Set(classifications.flatMap(item => item.component === undefined ? [] : [item.component]))].sort()
-  const publishComponents = [...new Set(classifications.flatMap(item => (
+  let components = [...new Set(classifications.flatMap(item => item.component === undefined ? [] : [item.component]))].sort()
+  let publishComponents = [...new Set(classifications.flatMap(item => (
     item.kind === 'component' && item.component !== undefined ? [item.component] : []
   )))].sort()
-  const componentJobs = componentJobsFor(boundary, components, publishComponents)
-  const ciComponentJobs = ciComponentJobsFor(boundary, components, publishComponents)
-  const basePlatformComponentJobs = basePlatformComponentJobsFor(boundary)
-  const ciBasePlatformComponentJobs = ciComponentJobsFor(
-    boundary,
-    boundary.components
-      .filter(component => component.desktop === 'platform-profile')
-      .map(component => component.id),
-  )
-  const portablePublish = publishComponents.length > 0
-    && componentJobs.filter(job => job.publish).every(job => job.target === 'portable')
   const hasComponentWork = kinds.has('component') || kinds.has('component-test')
   const acceptedProfileCompatible = typeof options.acceptedProfileCompatible === 'boolean'
     ? options.acceptedProfileCompatible
@@ -765,7 +755,31 @@ export function classifyChangedPaths(paths, options = {}) {
   if (options.releaseCandidate === true && options.protectedMain !== true) {
     return failureResult(normalized, 'release candidate mode requires protected main')
   }
+  if (options.audit === true && options.releaseCandidate === true) {
+    return failureResult(normalized, 'audit and release candidate modes are mutually exclusive')
+  }
   if (options.releaseCandidate === true) lane = 'base'
+  if (options.audit === true) lane = 'base'
+  const profileCandidate = options.audit !== true && (
+    options.releaseCandidate === true
+    || options.protectedMain === true && (lane === 'base' || publishComponents.length > 0)
+  )
+  if (profileCandidate && lane === 'base') {
+    components = boundary.components.filter(component => component.desktop !== 'blocked').map(component => component.id).sort()
+    publishComponents = [...components]
+  }
+  const componentJobs = componentJobsFor(boundary, components, publishComponents)
+  const ciComponentJobs = ciComponentJobsFor(boundary, components, publishComponents)
+    .filter(job => !(profileCandidate && lane === 'base' && job.target === 'portable'))
+  const basePlatformComponentJobs = basePlatformComponentJobsFor(boundary)
+  const ciBasePlatformComponentJobs = ciComponentJobsFor(
+    boundary,
+    boundary.components
+      .filter(component => component.desktop === 'platform-profile')
+      .map(component => component.id),
+  )
+  const portablePublish = publishComponents.length > 0
+    && componentJobs.filter(job => job.publish).every(job => job.target === 'portable')
   const dimensions = dimensionsFor(classifications, boundary)
   return result({
     lane,
@@ -780,7 +794,13 @@ export function classifyChangedPaths(paths, options = {}) {
     portablePublish,
     boundary,
     dimensions,
-    ci: ciPlan(lane, dimensions, options),
+    ciMode: options.audit === true ? 'audit' : profileCandidate ? 'release-candidate' : 'pr-fast',
+    runComponents: lane === 'plugin-only' || profileCandidate,
+    composeProfile: profileCandidate && publishComponents.length > 0,
+    profileBootstrap: profileCandidate && !acceptedProfileCompatible,
+    ci: options.audit === true
+      ? { app_smoke: { macos: false, windows: false }, distribution: { macos: false, windows: false } }
+      : ciPlan(lane, dimensions, { ...options, components }),
   })
 }
 
@@ -797,14 +817,23 @@ function result({
   portablePublish = false,
   boundary,
   dimensions = allDimensions(),
+  ciMode = 'pr-fast',
+  runComponents = false,
+  composeProfile = false,
+  profileBootstrap = false,
   ci = { app_smoke: { macos: true, windows: true }, distribution: { macos: false, windows: false } },
   error,
 }) {
   return {
-    schema_version: 1,
+    schema_version: 2,
+    document_type: 'emate.ci-plan',
     lane,
+    ci_mode: ciMode,
     run_base: lane === 'base',
     run_plugins: lane === 'plugin-only',
+    run_components: runComponents,
+    compose_profile: composeProfile,
+    profile_bootstrap: profileBootstrap,
     run_enterprise: dimensions.enterprise,
     run_verification: lane !== 'none',
     components,
@@ -841,6 +870,10 @@ function failureResult(paths, error) {
     basePlatformComponentJobs: [],
     ciBasePlatformComponentJobs: [],
     publishComponents: [],
+    ciMode: 'pr-fast',
+    runComponents: false,
+    composeProfile: false,
+    profileBootstrap: false,
     error,
   })
 }
@@ -876,6 +909,7 @@ function parseArguments(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const name = argv[index]
     if (name === '--check-contract') options.checkContract = true
+    else if (name === '--audit') options.audit = true
     else if (name === '--protected-main') options.protectedMain = true
     else if (name === '--release-candidate') options.releaseCandidate = true
     else if (['--base', '--head', '--paths-from', '--github-output', '--root'].includes(name)) {
@@ -896,8 +930,12 @@ function parseArguments(argv) {
 function writeGithubOutput(path, value) {
   appendFileSync(path, [
     `lane=${value.lane}`,
+    `ci_mode=${value.ci_mode}`,
     `run_base=${String(value.run_base)}`,
     `run_plugins=${String(value.run_plugins)}`,
+    `run_components=${String(value.run_components)}`,
+    `compose_profile=${String(value.compose_profile)}`,
+    `profile_bootstrap=${String(value.profile_bootstrap)}`,
     `run_enterprise=${String(value.run_enterprise)}`,
     `run_verification=${String(value.run_verification)}`,
     `components_json=${JSON.stringify(value.components)}`,
@@ -940,7 +978,7 @@ function main() {
     } else if (options.base !== undefined || options.head !== undefined) {
       if (options.base === undefined || options.head === undefined) throw new Error('--base and --head must be provided together')
       paths = changedPathsFromGit(root, options.base, options.head)
-    } else if (paths.length === 0) throw new Error('provide --base/--head, --paths-from, --path, or --check-contract')
+    } else if (paths.length === 0 && options.audit !== true) throw new Error('provide --base/--head, --paths-from, --path, --audit, or --check-contract')
   } catch (cause) {
     inputError = cause instanceof Error ? cause.message : String(cause)
   }
@@ -949,6 +987,7 @@ function main() {
       root,
       protectedMain: options.protectedMain,
       releaseCandidate: options.releaseCandidate,
+      audit: options.audit,
     })
     : failureResult(paths, inputError)
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)

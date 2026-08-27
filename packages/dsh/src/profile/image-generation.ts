@@ -231,6 +231,7 @@ function leafDescriptor(agent) {
 
 function failureCode(error, submitted, aborted) {
   if (aborted) return 'cancelled'
+  if (error?.code === 'agent-tool-unavailable') return 'agent-tool-unavailable'
   const message = error instanceof Error ? error.message : String(error)
   const status = /HTTP (\d{3})/u.exec(message)?.[1]
   if (status !== undefined) return `http-${status}`
@@ -1237,6 +1238,11 @@ export async function apply(ctx, config = {}) {
       let refs = []
       let task
       try {
+        if (!ctx.tools.schemas(exec.agent).some(schema => schema.name === 'imagegen')) {
+          const error = new Error('imagegen is unavailable in the current Agent tool scope')
+          ;(error as Error & { code: string }).code = 'agent-tool-unavailable'
+          throw error
+        }
         exec.signal.throwIfAborted()
         task = normalizeTask(args)
         task.attachmentIds = implicitEditImages(exec.agent, task)

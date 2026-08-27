@@ -381,7 +381,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       collapsed={false}
       width={248}
       renderSlot={(name) => name === 'sidebar.primary.action'
-        ? <button type="button">能力中心</button>
+        ? <button type="button" aria-label="能力中心">能力中心</button>
         : name === 'sidebar.settings' ? <div data-slot="sidebar.settings"><button type="button" aria-hidden="true" tabIndex={-1} data-emate-settings-trigger="">打开设置</button></div>
           : name === 'sidebar.footer.action' ? <button type="button">用户中心</button> : null}
       createPortal={createPortal}
@@ -409,9 +409,14 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       {...sidebarUtilityProps}
     />)
 
-    expect(screen.getByText('2.0.13')).not.toBeNull()
+    expect(screen.getByText('2.0.15')).not.toBeNull()
     expect(screen.getByRole('button', { name: '新建任务' }).textContent).toContain('新任务')
     expect(screen.getByRole('button', { name: '新建任务' }).getAttribute('aria-current')).toBe('page')
+    const sidebar = screen.getByRole('complementary', { name: '任务导航' })
+    expect([...sidebar.querySelectorAll('button')]
+      .map(button => button.getAttribute('aria-label'))
+      .filter(label => ['新建任务', '搜索会话', '定时任务', '能力中心'].includes(label ?? '')))
+      .toEqual(['新建任务', '搜索会话', '定时任务', '能力中心'])
     fireEvent.click(screen.getByRole('button', { name: '搜索会话' }))
     expect(screen.getByRole('textbox', { name: '搜索会话' }).getAttribute('type')).toBe('text')
     expect(screen.getAllByRole('button', { name: '关闭搜索' })).toHaveLength(1)
@@ -422,6 +427,8 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(screen.queryByRole('button', { name: '打开设置' })).toBeNull()
     expect(document.querySelector('[data-emate-settings-trigger]')).not.toBeNull()
     expect(document.querySelector<HTMLElement>('[data-emate-settings-owner]')?.hidden).toBe(false)
+    expect(document.querySelector('[data-emate-sidebar-footer] [data-emate-settings-trigger]')).toBeNull()
+    expect(document.querySelector('[data-emate-sidebar-footer]')?.textContent).toContain('用户中心')
     expect(sidebarCss).toMatch(/\.settingsOwner\s+:global\(button\[data-emate-settings-trigger\]\)[\s\S]*display:\s*none/u)
     expect(screen.getByRole('region', { name: '项目' }).textContent).toContain('季度报告')
     expect(screen.getByRole('region', { name: '项目' }).textContent).not.toContain('通用会话')
@@ -554,7 +561,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(openSession).not.toHaveBeenCalled()
   })
 
-  it('uses current e-Mate Home copy and projects durable token/session facts', async () => {
+  it('uses the compact e-Mate Home templates without local usage or recent-Session projections', async () => {
     const phase = document.createElement('main')
     phase.dataset.phase = 'hero'
     const overlay = document.createElement('div')
@@ -564,6 +571,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     phase.append(overlay)
     document.body.append(phase)
     const openSession = vi.fn()
+    const prepareTemplateDraft = vi.fn(async () => {})
     const state = nativeSessionState({
       ids: ['session-1', 'image-child', 'catalog-child'],
       byId: {
@@ -606,21 +614,25 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       {...homeToolbarProps}
       useSessions={selector => selector(state)}
       openSession={openSession}
+      prepareTemplateDraft={prepareTemplateDraft}
       prepareSchedulePrompt={async () => {}}
       callSchedules={async () => ({ ok: true, value: { schema_version: 1, items: [], errors: [] } })}
       scheduleIcons={{ create: Icon, refresh: Icon, edit: Icon, delete: Icon }}
     />)
-    await waitFor(() => { expect(screen.getByRole('heading', { name: '今日使用概览' })).not.toBeNull() })
+    await waitFor(() => { expect(screen.getByRole('heading', { name: '办公快速模板' })).not.toBeNull() })
     expect(homeToolbarProps.closeDetails).toHaveBeenCalled()
     expect(screen.getByRole('heading', { name: '和小芯一起开始工作吧' })).not.toBeNull()
-    expect(screen.getByText('Token 消耗量').parentElement?.textContent).toContain('100')
+    expect(screen.queryByRole('heading', { name: '今日使用概览' })).toBeNull()
+    expect(screen.queryByText('Token 消耗量')).toBeNull()
+    expect(screen.getAllByRole('button').filter(button => /^\d{2}/u.test(button.textContent ?? ''))).toHaveLength(12)
     expect(screen.queryByText('一次性子代理记录')).toBeNull()
     expect(screen.queryByText('This is one e-Mate image')).toBeNull()
-    expect(screen.getByRole('heading', { name: '任务趋势（近 7 天）' })).not.toBeNull()
+    expect(screen.queryByText('真实任务')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '切换任务导航' }))
     expect(homeToolbarProps.toggleSidebar).toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: /真实任务/u }))
-    expect(openSession).toHaveBeenCalledWith('session-1')
+    fireEvent.click(screen.getByRole('button', { name: /周报总结/u }))
+    await waitFor(() => { expect(prepareTemplateDraft).toHaveBeenCalledOnce() })
+    expect(openSession).not.toHaveBeenCalled()
   })
 
   it('keeps a non-current durable blank session without pinning a title that blocks target auto naming', async () => {
@@ -738,6 +750,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
         {...homeToolbarProps}
         useSessions={selector => selector(sessions)}
         openSession={openSession}
+        prepareTemplateDraft={async () => {}}
         prepareSchedulePrompt={async () => {}}
         callSchedules={async () => ({ ok: true, value: { schema_version: 1, items: [], completed: [], recent_runs: [], errors: [] } })}
         scheduleIcons={{ create: Icon, refresh: Icon, edit: Icon, delete: Icon }}
@@ -755,12 +768,9 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     fireEvent.click(within(project).getByRole('button', { name: '项目历史' }))
     expect(openSession).toHaveBeenLastCalledWith('newest')
 
-    await waitFor(() => { expect(screen.getByRole('heading', { name: '最近任务' })).not.toBeNull() })
-    const recent = screen.getByRole('heading', { name: '最近任务' }).parentElement!
-    expect(within(recent).getAllByRole('button').map(button => button.textContent)).toEqual([
-      expect.stringContaining('任务 newest'),
-      expect.stringContaining('任务 same-a'),
-    ])
+    await waitFor(() => { expect(screen.getByRole('heading', { name: '办公快速模板' })).not.toBeNull() })
+    expect(screen.queryByRole('heading', { name: '最近任务' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: /周报总结|会议纪要|工作计划|汇报大纲|数据分析|方案撰写|邮件起草|文档润色|表格整理|PPT 结构|项目复盘|头脑风暴/u })).toHaveLength(12)
   })
 
   it('keeps the session ordering comparator stable for equal ASCII ids', () => {
@@ -848,8 +858,8 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource)\s*\(/u)
     expect(styles).toMatch(/:global\(\[data-slot='conversation'\] > div\[data-phase\]\)\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;/u)
     expect(styles).toContain('--dsw-alias-button-info-fill: var(--emate-color-brand);')
-    expect(styles).toMatch(/button:first-child > svg\) \{\s*display: none;/u)
-    expect(styles).toMatch(/button:first-child::before\) \{\s*content: '\/';/u)
+    expect(styles).toMatch(/button:first-child\) \{\s*display: none !important;/u)
+    expect(styles).not.toContain("content: '/'")
     expect(home).not.toMatch(/Runtime Scheduler|由 Runtime|从 Runtime/u)
     expect(home).not.toContain('任务来自 DSH rc.7 原生 Schedule 事件')
   })

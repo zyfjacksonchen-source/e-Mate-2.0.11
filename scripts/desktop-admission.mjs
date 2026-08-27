@@ -774,7 +774,7 @@ export async function createGithubArtifactProvenance(options) {
   const ciArtifact = await metadata(options.metadata, 'ci-artifact.json')
   if (!record(ciArtifact) || !RUN_ID.test(String(ciArtifact.id))) throw new Error('GitHub CI artifact ID is invalid')
   githubArtifact(ciArtifact, {
-    id: String(ciArtifact.id), name: `e-mate-change-impact-${options.sourceCommit}`,
+    id: String(ciArtifact.id), name: `e-mate-ci-plan-${options.sourceCommit}`,
     runId: options.ciRunId, sourceCommit: options.sourceCommit, label: 'CI impact',
   })
   githubArtifact(await metadata(options.metadata, 'profile-publication-artifact.json'), {

@@ -42,6 +42,10 @@ function completePackageResolver(unpackedRoot: string): PackageResolver {
   return specifier => join(unpackedRoot, 'resolved', `${specifier.replaceAll('/', '-')}.js`)
 }
 
+function retiredXinPath(unpackedRoot: string): string {
+  return join(unpackedRoot, 'node_modules/@e-mate/dsh-plugin-xin-assistant')
+}
+
 describe('packaged desktop runtime verification', () => {
   it('tracks the Windows prebuilds shipped by the installed node-pty', () => {
     for (const entry of REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES) {
@@ -96,8 +100,9 @@ describe('packaged desktop runtime verification', () => {
     const list = vi.fn<ArchiveLister>(() => completeArchiveEntries(platform === 'win32' ? '\\' : '/'))
 
     const unpackedRoot = `${expectedPath}.unpacked`
-    const exists = vi.fn<FileProbe>(filename => platform !== 'darwin'
-      || !FORBIDDEN_MACOS_UNIVERSAL_ENTRIES.some(entry => filename === join(unpackedRoot, entry)))
+    const exists = vi.fn<FileProbe>(filename => filename !== retiredXinPath(unpackedRoot)
+      && (platform !== 'darwin'
+        || !FORBIDDEN_MACOS_UNIVERSAL_ENTRIES.some(entry => filename === join(unpackedRoot, entry))))
     const resolvePackage = vi.fn<PackageResolver>(completePackageResolver(unpackedRoot))
 
     verifyPackagedRuntime(context('/build', platform), list, exists, resolvePackage)
@@ -110,7 +115,7 @@ describe('packaged desktop runtime verification', () => {
       REQUIRED_UNPACKED_RUNTIME_ENTRIES.length
         + (platform === 'win32' ? REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES.length : 0)
         + (platform === 'darwin' ? FORBIDDEN_MACOS_UNIVERSAL_ENTRIES.length : 0)
-        + 1,
+        + 2,
     )
     expect(resolvePackage.mock.calls.map(([specifier]) => specifier))
       .toEqual(REQUIRED_UNPACKED_PACKAGE_SPECIFIERS)
@@ -129,12 +134,14 @@ describe('packaged desktop runtime verification', () => {
     expect(() => verifyPackagedRuntime(
       runtimeContext,
       () => completeArchiveEntries(),
-      filename => filename !== join(unpackedRoot, missing),
+      filename => filename !== join(unpackedRoot, missing)
+        && filename !== retiredXinPath(unpackedRoot),
       completePackageResolver(unpackedRoot),
     )).toThrow(`missing required physical entries: ${missing}`)
 
-    const exists = vi.fn<FileProbe>(filename => !FORBIDDEN_MACOS_UNIVERSAL_ENTRIES
-      .some(entry => filename === join(unpackedRoot, entry)))
+    const exists = vi.fn<FileProbe>(filename => filename !== retiredXinPath(unpackedRoot)
+      && !FORBIDDEN_MACOS_UNIVERSAL_ENTRIES
+        .some(entry => filename === join(unpackedRoot, entry)))
     verifyPackagedRuntime(
       runtimeContext,
       () => completeArchiveEntries(),
@@ -145,20 +152,22 @@ describe('packaged desktop runtime verification', () => {
       REQUIRED_UNPACKED_RUNTIME_ENTRIES.length
         + REQUIRED_MACOS_UNIVERSAL_ENTRIES.length
         + FORBIDDEN_MACOS_UNIVERSAL_ENTRIES.length
-        + 2,
+        + 3,
     )
   })
 
   it('requires both fixed Python bootstraps from a universal macOS package', () => {
     const runtimeContext = context('/build', 'darwin', 4)
     const resourcesRoot = resolvePackagedResourcesRoot(runtimeContext)
+    const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)
     const missing = REQUIRED_PYTHON_RUNTIME_ENTRIES['darwin-arm64']
 
     expect(() => verifyPackagedRuntime(
       runtimeContext,
       () => completeArchiveEntries(),
-      filename => filename !== join(resourcesRoot, missing),
-      completePackageResolver(resolvePackagedUnpackedRoot(runtimeContext)),
+      filename => filename !== join(resourcesRoot, missing)
+        && filename !== retiredXinPath(unpackedRoot),
+      completePackageResolver(unpackedRoot),
     )).toThrow(`missing Python runtime entries: ${missing}`)
   })
 
@@ -171,8 +180,9 @@ describe('packaged desktop runtime verification', () => {
       runtimeContext,
       () => completeArchiveEntries(),
       filename => filename === join(unpackedRoot, forbidden)
-        || !FORBIDDEN_MACOS_UNIVERSAL_ENTRIES
-          .some(entry => filename === join(unpackedRoot, entry)),
+        || (filename !== retiredXinPath(unpackedRoot)
+          && !FORBIDDEN_MACOS_UNIVERSAL_ENTRIES
+            .some(entry => filename === join(unpackedRoot, entry))),
       completePackageResolver(unpackedRoot),
     )).toThrow(`contains host-architecture build output: ${forbidden}`)
   })
@@ -212,9 +222,22 @@ describe('packaged desktop runtime verification', () => {
     expect(() => verifyPackagedRuntime(
       runtimeContext,
       () => completeArchiveEntries(),
-      filename => filename !== missingPath,
+      filename => filename !== missingPath
+        && filename !== retiredXinPath(unpackedRoot),
       completePackageResolver(unpackedRoot),
     )).toThrow(`missing required physical entries: ${missing}`)
+  })
+
+  it('rejects the retired xin-assistant package from app.asar.unpacked', () => {
+    const runtimeContext = context('/build', 'win32')
+    const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)
+
+    expect(() => verifyPackagedRuntime(
+      runtimeContext,
+      () => completeArchiveEntries(),
+      () => true,
+      completePackageResolver(unpackedRoot),
+    )).toThrow('contains retired physical entries: node_modules/@e-mate/dsh-plugin-xin-assistant')
   })
 
   it('fails loud when a required package export cannot resolve from app.asar.unpacked', () => {
@@ -230,7 +253,7 @@ describe('packaged desktop runtime verification', () => {
     expect(() => verifyPackagedRuntime(
       runtimeContext,
       () => completeArchiveEntries(),
-      () => true,
+      filename => filename !== retiredXinPath(unpackedRoot),
       resolvePackage,
     )).toThrow(
       `packaged runtime at ${unpackedRoot} cannot resolve required package export @e-mate/desktop/profiles`,
@@ -249,7 +272,7 @@ describe('packaged desktop runtime verification', () => {
     expect(() => verifyPackagedRuntime(
       runtimeContext,
       () => completeArchiveEntries(),
-      () => true,
+      filename => filename !== retiredXinPath(unpackedRoot),
       resolvePackage,
     )).toThrow(
       `required package export @deepseek-ai/dsh-base/package.json resolved outside ${unpackedRoot}: ${escapedPath}`,

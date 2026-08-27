@@ -38,7 +38,7 @@ afterEach(() => {
   history.replaceState(null, '', '/')
 })
 
-describe('e-Mate 2.0.13 identity and settings fidelity', () => {
+describe('e-Mate 2.0.15 identity and settings fidelity', () => {
   it('keeps the AURA login contract and current SettingsDialog copy', () => {
     const identity = readFileSync(join(process.cwd(), 'src/client/identity.module.css'), 'utf8')
     const identityView = readFileSync(join(process.cwd(), 'src/client/identity.tsx'), 'utf8')
@@ -97,32 +97,38 @@ describe('e-Mate 2.0.13 identity and settings fidelity', () => {
     view.unmount()
   })
 
-  it('renames target plugin chrome to the e-Mate capability center without replacing target settings', async () => {
+  it('does not rewrite native localized Settings content', () => {
     render(<div role="dialog"><button type="button">插件</button><p>DeepSeek 搜索提供方。</p><SettingsChrome /></div>)
-    expect(await screen.findByText('能力中心')).toBeTruthy()
-    expect(screen.getByText('e-Mate 搜索服务。')).toBeTruthy()
+    expect(screen.getByText('插件')).toBeTruthy()
+    expect(screen.getByText('DeepSeek 搜索提供方。')).toBeTruthy()
   })
 
-  it('hides managed preset and Vision navigation without removing their native registrations', async () => {
+  it('hides only stable engineering section ids without removing their native buttons or observing text', () => {
     render(<div role="dialog">
       <nav>
-        <button type="button">个人资料</button>
-        <button type="button">Agent 预设</button>
-        <button type="button">视觉工具</button>
+        <button type="button" data-settings-section-id="general">个人资料</button>
+        <button type="button" data-settings-section-id="models">模型</button>
+        <button type="button" data-settings-section-id="plugins">插件</button>
+        <button type="button" data-settings-section-id="agent-presets">Agent 预设</button>
+        <button type="button" data-settings-section-id="capabilities">能力中心</button>
       </nav>
       <SettingsChrome />
     </div>)
-    const profile = await screen.findByRole('button', { name: '个人资料' }) as HTMLButtonElement
+    const profile = screen.getByRole('button', { name: '个人资料' }) as HTMLButtonElement
+    const models = screen.getByText('模型').closest('button') as HTMLButtonElement
+    const plugins = screen.getByText('插件').closest('button') as HTMLButtonElement
     const presets = screen.getByText('Agent 预设').closest('button') as HTMLButtonElement
-    const vision = screen.getByText('视觉工具').closest('button') as HTMLButtonElement
+    const capabilities = screen.getByRole('button', { name: '能力中心' }) as HTMLButtonElement
     expect(profile.hidden).toBe(false)
-    expect(profile.style.display).toBe('')
+    expect(capabilities.hidden).toBe(false)
+    expect(models.hidden).toBe(true)
+    expect(plugins.hidden).toBe(true)
     expect(presets.hidden).toBe(true)
-    expect(presets.style.display).toBe('none')
-    expect(presets.getAttribute('aria-hidden')).toBe('true')
-    expect(vision.hidden).toBe(true)
-    expect(vision.style.display).toBe('none')
-    expect(vision.getAttribute('aria-hidden')).toBe('true')
+    expect(document.querySelectorAll('[data-settings-section-id]')).toHaveLength(5)
+    const source = readFileSync(join(process.cwd(), 'src/client/settings-chrome.tsx'), 'utf8')
+    expect(source).not.toContain('SETTINGS_BRAND_COPY')
+    expect(source).not.toContain('createTreeWalker')
+    expect(source).not.toContain('characterData')
   })
 
   it('ignores unrelated token mutations while retaining settings route synchronization', async () => {
@@ -540,13 +546,14 @@ describe('e-Mate 2.0.13 identity and settings fidelity', () => {
     render(<AccountSettings callIdentity={callIdentity} />)
 
     const input = await screen.findByLabelText('选择头像图片')
+    await waitFor(() => { expect(callIdentity).toHaveBeenCalledTimes(2) })
     expect(screen.getByText('头像').closest('div')?.parentElement?.querySelectorAll('svg')).toHaveLength(2)
     fireEvent.change(input, { target: { files: [new File(['not-an-image'], 'avatar.gif', { type: 'image/gif' })] } })
     expect(await screen.findByText('请选择 PNG、JPEG 或 WebP 图片。')).toBeTruthy()
 
     fireEvent.change(input, { target: { files: [new File(['avatar'], 'avatar.png', { type: 'image/png' })] } })
     expect((await screen.findByRole('img', { name: '当前头像' })).getAttribute('src')).toMatch(/^data:image\/png;base64,/u)
-    expect(callIdentity).toHaveBeenCalledTimes(1)
+    expect(callIdentity).toHaveBeenCalledTimes(2)
 
     fireEvent.click(screen.getByRole('button', { name: '移除' }))
     expect(screen.queryByRole('img', { name: '当前头像' })).toBeNull()

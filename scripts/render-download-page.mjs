@@ -38,10 +38,13 @@ const CONTENT_TYPES = Object.freeze({
   '.svg': 'image/svg+xml',
 })
 
-export function validateDownloadPage(index, macGuide, script) {
+export function validateDownloadPage(index, macGuide, script, expectedVersion = desktopVersion) {
+  if (typeof expectedVersion !== 'string' || !/^\d+\.\d+\.\d+$/u.test(expectedVersion)) {
+    throw new Error('download page expected version must be stable SemVer')
+  }
   const declared = [index, macGuide].map(page => /data-desktop-version="(\d+\.\d+\.\d+)"/u.exec(page)?.[1])
   declared.push(/const VERSION = "(\d+\.\d+\.\d+)";/u.exec(script)?.[1])
-  if (declared.some(version => version !== desktopVersion)
+  if (declared.some(version => version !== expectedVersion)
     || !index.includes(`./${DESKTOP_SCRIPT}`)
     || !macGuide.includes(`./${DESKTOP_SCRIPT}`)
     || !index.includes('data-platform-switch')
@@ -49,7 +52,7 @@ export function validateDownloadPage(index, macGuide, script) {
     || !script.includes('`${R2_ORIGIN}/desktop/manual/v${VERSION}/latest.json`')) {
     throw new Error('download page desktop manifest contract is incomplete')
   }
-  return desktopVersion
+  return expectedVersion
 }
 
 function contentType(path) {
