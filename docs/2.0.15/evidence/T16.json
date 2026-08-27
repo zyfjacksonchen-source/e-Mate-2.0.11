@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "document_type": "emate.2.0.15.ticket-evidence",
+  "ticket": "T16",
+  "manifest_id": "e-mate-critical-path-smoke-v1",
+  "bindings": {
+    "message-mode.component": [
+      {
+        "id": "t16-genui-build",
+        "type": "command",
+        "cwd": "packages/dsh-plugin-genui",
+        "command": "$NODE",
+        "args": ["scripts/build.mjs"],
+        "timeout_ms": 30000
+      },
+      {
+        "id": "t16-genui-native-toolview",
+        "type": "command",
+        "cwd": "packages/dsh-plugin-genui",
+        "command": "$NODE",
+        "args": ["--test", "test/package.test.mjs"],
+        "timeout_ms": 30000
+      }
+    ]
+  },
+  "title": "产品组件、GenUI 与 Glass Composer source/component 闭环",
+  "status": "SOURCE_AND_COMPONENT_PASSED_COMPLETE_PROFILE_OPEN_T18",
+  "baseline": {
+    "release_commit": "8f9e52a23b619e0a738716c7343d655f324a977a",
+    "branch": "feat/2.0.15-T16-product-components",
+    "clean_start": true,
+    "base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0",
+    "harness_base_commit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606",
+    "harness_local_commit": "820fee0df4f46b15d4cc07f56ccfcae43549d769",
+    "genui_upstream_commit": "0e756efb7671e6b8413dde3d8e199c68fa89cbeb",
+    "base_contract_modified": false,
+    "component_inventory_modified": false
+  },
+  "truth_stage": {
+    "source": "passed",
+    "component_fixture": "passed",
+    "complete_profile_app_directory": "OPEN_T18",
+    "installed": "OPEN_T18",
+    "real_mcp_service": "OPEN_T18",
+    "real_office_application_host": "OPEN_T18",
+    "candidate": "not_created",
+    "release": "not_created",
+    "public_production": "unchanged"
+  },
+  "development_loop": {
+    "creation_mode": "not_available_in_this_task_context_no_cordis_inspect_or_dynamic_package_tools_exposed",
+    "substitute": "direct source/component regression against the exact pinned local Harness and final native seams",
+    "dynamic_package_entered_release": false,
+    "dependency_installed": false
+  },
+  "components": {
+    "better_sidebar": {
+      "decision": "KEEP",
+      "entry_owner_result": "conversation.view project-files -> loopback /emate.betterSidebar -> native WorkspaceRegistry membership -> bounded realpath list/read projection",
+      "positive": "multi-workspace, two sessions in one workspace, restart read and UTF-8 file projection passed",
+      "negative": "archived session, unknown/subagent-only id, traversal and symlink escape fail closed",
+      "fix": "reject archived native sessions and fence stale client route results"
+    },
+    "file_import": {
+      "decision": "KEEP",
+      "entry_owner_result": "native composer picker/paste/drop -> images returned to native DSH drop/Attachment owner; ordinary allowlisted files -> /emate.fileImport -> atomic workspace publish -> native draft mentions",
+      "positive": "DOCX/PDF import, collision, file readback, restart and ordered mixed-owner contract passed",
+      "negative": "archived/unknown session, illegal type, malformed base64, oversize, symlink and partial publication cleanup fail closed",
+      "fix": "reject archived native sessions and prevent an old session import from projecting into a newly routed session",
+      "second_attachment_path_added": false
+    },
+    "genui": {
+      "decision": "KEEP",
+      "entry_owner_result": "render_ui Tool output -> keyed native tool.call.toolview -> GenUI component/failure boundary; native conversation transcript remains the event owner",
+      "positive": "native render_ui ToolView, panel dock and existing T12 simple/detailed renderer ownership compatibility passed",
+      "negative": "invalid metadata stays in the compact tool fallback and render errors stay inside data-genui-error",
+      "fix": "when pinned rc.7 has no fence registry, fail closed to native ToolView instead of starting the upstream full-page DOM renderer",
+      "assistant_event_store_added": false
+    },
+    "glass_composer": {
+      "decision": "KEEP",
+      "reason": "the component owns only palette settings, one conversation.input.right control and decoration; native ConversationRoot remains the sole Composer/input owner",
+      "entry_owner_result": "native input-right slot -> native settingsScope -> data-emate-glass-palette on native data-emate-composer-frame-host",
+      "positive": "palette persistence seam and stable native frame-host decoration passed",
+      "negative": "off, reduced-motion and forced-colors disable animation without hiding or replacing the native Composer",
+      "fix": "remove data-composer-card ancestor guessing and the retired negative composer-bottom contract",
+      "second_composer_added": false
+    },
+    "mcp_manage": {
+      "decision": "KEEP",
+      "entry_owner_result": "mcp_manage/RPC -> native Settings/Credentials/Loader/dsh-mcp-client -> native Tool schemas -> truthful status projection",
+      "positive": "catalog add/connect/list/remove source lifecycle, OAuth callback and active native fiber plus Tool schema passed",
+      "negative": "invalid catalog/OAuth callback, inactive fiber, absent Tool schema and disappearing loader entry fail closed",
+      "fix": "central active predicate catches loader failure and returns active=false; only ACTIVE plus a server Tool can be advertised"
+    },
+    "memory_evolve": {
+      "decision": "KEEP",
+      "entry_owner_result": "remember/search/delete Tools -> native user question -> Workspace-scoped storageDomain table -> Tool result",
+      "positive": "remember/search, cross-session project scope, store restart and confirmed same-scope delete passed",
+      "negative": "denied confirmation, foreign scope, unknown id and invalid input cannot disclose or delete a record",
+      "fix": "add one scoped storageDomain delete operation and a native-confirmed delete Tool",
+      "second_memory_store_added": false
+    },
+    "office_skills": {
+      "decision": "KEEP",
+      "entry_owner_result": "four bundled Skills -> office_write/office_read -> native Job -> Workspace/Sandbox -> atomic .e-mate/office artifact and Tool projection",
+      "positive": "real DOCX/XLSX/PPTX/PDF bytes passed direct round-trip and real Tool write/read artifact projection",
+      "negative": "read-only sandbox, pre-start cancellation, malformed OOXML/structured input, traversal, symlink and partial output cleanup fail closed",
+      "fix": "propagate an already-aborted Tool signal into the native Job controller before execution begins",
+      "second_office_store_added": false
+    }
+  },
+  "component_commits": [
+    { "component": "glass-composer", "sha": "264bde5e03", "subject": "fix(glass-composer): decorate native composer host" },
+    { "component": "genui", "sha": "4362eaec63", "subject": "fix(genui): fail closed to native toolview" },
+    { "component": "memory-evolve", "sha": "63964f3a3c", "subject": "feat(memory-evolve): add scoped confirmed delete" },
+    { "component": "mcp-manage", "sha": "60f6df81ba", "subject": "fix(mcp-manage): fail closed on inactive status" },
+    { "component": "better-sidebar", "sha": "727391bec4", "subject": "fix(better-sidebar): fence archived and stale sessions" },
+    { "component": "file-import", "sha": "1bd4208ca4", "subject": "fix(file-import): preserve session ownership" },
+    { "component": "office-skills", "sha": "4b697e7880", "subject": "fix(office-skills): honor pre-start cancellation" }
+  ],
+  "verification": [
+    {
+      "command": "narrow build plus node --test for all seven T16 components",
+      "result": "PASS: Better Sidebar 4, File Import 7, GenUI 1, Glass Composer 1, MCP Manage 5, Memory Evolve store 3, Office Skills 5; Office includes real four-format Tool artifacts and cancellation cleanup"
+    },
+    {
+      "command": "componentFiles plus verifyComponentRuntimeImports over all seven final emitted lib closures",
+      "result": "PASS: every emitted import set exactly equals its existing component base_imports declaration"
+    },
+    {
+      "command": "node scripts/smoke/run.mjs --layer component --case CP-13 --extension docs/2.0.15/evidence/T16.json --require-complete",
+      "result": "PASS: CP-13 completed with zero pending; the committed T16 extension rebuilt the pinned GenUI adapter and proved native render_ui ToolView plus fail-closed fallback without activity-node ownership"
+    },
+    {
+      "command": "node scripts/component-release.mjs inventory",
+      "result": "EXPECTED_STRICT_FAILURE_D006: upstream/deepseek-harness: Git submodule commit does not match the Base contract; desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    }
+  ],
+  "d006": {
+    "status": "OPEN_STRICT_T18_BLOCKER_PRESERVED",
+    "failures": [
+      "upstream/deepseek-harness: Git submodule commit does not match the Base contract",
+      "desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union"
+    ],
+    "base_contract_or_validator_modified": false,
+    "bypass_added": false,
+    "owner": "T18 successor Base identity, final advertised Harness reachability and retained-component ABI rebind"
+  },
+  "handoffs": [
+    {
+      "owner": "T18",
+      "paths": ["desktop/e-mate-desktop/base-contract.json", "T18-owned retained component Base/version freeze paths", "complete composed Profile and installed candidate paths"],
+      "predicate": "bind Harness 820fee0df4f46b15d4cc07f56ccfcae43549d769 only after advertised remote reachability; close both D006 messages; compose the complete Profile; run installed macOS/Windows and real service/application-host acceptance"
+    },
+    {
+      "owner": "T13/T18",
+      "paths": ["Shell final visual/navigation integration and installed UI evidence"],
+      "predicate": "consume the retained Glass native frame-host and GenUI native ToolView seams without adding a Composer, chat event store or renderer owner"
+    }
+  ],
+  "owner_scope": {
+    "outside_allowed_paths_modified": false,
+    "shell_harness_inventory_base_version_lock_workflow_modified": false,
+    "dependency_added": false,
+    "submodule_source_modified": false,
+    "installation_performed": false,
+    "production_write_performed": false
+  },
+  "open_acceptance": [
+    "T18 complete Profile app-directory boot, live interaction and restart projection for all seven retained components",
+    "T18 installed macOS and Windows Better Sidebar, File Import, GenUI and Glass visual/route/accessibility acceptance",
+    "T18 real MCP provider add/authorize/active/use/remove and denial/timeout receipts",
+    "T18 real DOCX/XLSX/PPTX/PDF open/edit/export/reopen through installed Office applications or declared platform hosts",
+    "T18 candidate, installed-byte, update/rollback and public-production receipts",
+    "T18 advertised remote reachability for final Harness 820fee0df4f46b15d4cc07f56ccfcae43549d769 and both D006 predicates"
+  ],
+  "installed_receipts": [],
+  "candidate_created": false,
+  "publish_performed": false,
+  "production_writes": [],
+  "release_claimed": false
+}
