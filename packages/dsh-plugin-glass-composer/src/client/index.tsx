@@ -34,11 +34,11 @@ export function GlassComposerControl({ scope }: { readonly scope: SettingsScope<
   const palette = isGlassPalette(snapshot.value?.palette) ? snapshot.value.palette : DEFAULT_GLASS_PALETTE
 
   useLayoutEffect(() => {
-    const card = control.current?.closest('[data-composer-card]')
-    if (!(card instanceof HTMLElement)) return undefined
-    card.dataset.emateGlassPalette = palette
+    const host = control.current?.closest('[data-emate-composer-frame-host]')
+    if (!(host instanceof HTMLElement)) return undefined
+    host.dataset.emateGlassPalette = palette
     return () => {
-      if (card.dataset.emateGlassPalette === palette) delete card.dataset.emateGlassPalette
+      if (host.dataset.emateGlassPalette === palette) delete host.dataset.emateGlassPalette
     }
   }, [palette])
 
