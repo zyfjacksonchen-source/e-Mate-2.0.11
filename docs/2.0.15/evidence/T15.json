@@ -53,6 +53,7 @@
     "frozen_request": "Real Agent Loop GenerateOptions are deep-frozen and process-locally marked. Recursively calling ctx.llm.stream with a converted clone re-entered llm/stream outside the PreparedLlmCall and lost its captured adapter registration, exact request identity and marker.",
     "vision_startup": "The managed Vision adapter initialized Python and wheels during plugin apply even when no Vision capability was used.",
     "cdp": "The native CDP owner already used visible installed Chrome, loopback-only CDP and first-use launch, but its prompt did not state the T05 latest-explicit-visible-page exclusion strongly enough.",
+    "computer_use_handoff": "D016 found that T15 had retained the native ComputerUseService status and permission actions but had not projected them through emateCapabilities, leaving T13 with no native helper/TCC metadata and a forbidden navigator.userAgent/platform inference.",
     "find_skill": "The 2.0.14 handoff already replaced shell-shim launch with direct packaged Electron-as-Node pnpm, but its regression exercised only --version rather than the named Feishu installation arguments that previously surfaced EINVAL."
   },
   "resolution": {
@@ -61,7 +62,7 @@
     "waterfall_order": "The bounded Harness change adds the sole llm/wire waterfall after the original llm/stream/T10/invariant path and immediately before the captured adapter dispatch. It may replace only messages, deep-freezes a converted request, preserves every envelope field by identity, keeps the PreparedLlmCall registration across HMR rebind, returns the original request object when no transform occurs, and fails closed on throw, abort or envelope drift. Vision now registers only this seam and never recursively calls ctx.llm.stream.",
     "lazy_runtime": "Managed apply registers tools, Skill and the request bridge against one lazy runtime proxy. The pinned offline-wheel manager prepares on the first actual runtime method call; a Settings generation invalidates a pending preparation before the next call. Non-managed upstream behavior remains eager.",
     "cdp": "The existing native prompt now limits CDP to the latest explicit request to read or operate a visible Chrome page and excludes attachments, image generation, native apps and non-page work. Existing loopback, first-use browser launch and native mutation approval remain unchanged.",
-    "computer_use": "No product source change was needed: the existing owner requires the latest direct user message to begin with @电脑操控, expires authorization before the next user request, retains native approval and the ad-hoc-signed universal macOS helper, and does not introduce a CDP or Skill fallback.",
+    "computer_use": "D016 source/component correction: the build adapter adds one fail-closed upstream Bundle seam that registers exactly one computer-use definition through the existing emateCapabilities effect lifecycle. Listing reads only cached ComputerUseService.status(); ready requires the helper plus granted Accessibility and Screen Recording, missing permissions expose only their matching openPermissionSettings action, and provider failure is failed/blocked with no executable action. The existing explicit-current-turn authority, native approval, universal macOS helper and Windows platform gate remain unchanged.",
     "find_skill": "No runtime source change was needed. The existing direct packaged pnpm route and exact persistent receipt owner were retained; the regression now executes the pinned lark-doc add arguments and asserts the Electron-as-Node argv that bypasses the shell-shim EINVAL path."
   },
   "native_attachment_first_contract": {
@@ -96,6 +97,7 @@
     "frozen_agent_request": "passed; recursively frozen messages are read without mutation",
     "wire_request": "passed; recursively frozen transient request with unchanged envelope and converted messages only",
     "emitted_runtime_imports": "passed; the real verifyComponentRuntimeImports result exactly equals the seven declared Base imports",
+    "computer_use_capability_projection": "passed at source/component layer; one lifecycle-bound capability, cached status only, exact TCC actions, failed/blocked non-executable and no added emitted runtime import",
     "skill_find_fallbacks": 0,
     "cdp_fallbacks": 0,
     "t10_policy_listener_calls": 1,
@@ -114,6 +116,11 @@
       "authorization_carryover": false,
       "platform": "macOS only",
       "permission": "native Accessibility/Screen Recording TCC through pinned helper",
+      "capability_registry": "one computer-use definition through the existing emateCapabilities list/action RPC",
+      "ready": "cached service ready plus accessibility=granted and screenRecording=granted",
+      "setup_required": "only missing Accessibility/Screen Recording actions call existing openPermissionSettings(kind, signal)",
+      "provider_failure": "failed or blocked with no action ids",
+      "status_probe_added": false,
       "standing_full_access_added": false
     },
     "find_skill": {
@@ -155,7 +162,11 @@
     },
     {
       "command": "pnpm --dir packages/dsh-plugin-computer-use run build && pnpm --dir packages/dsh-plugin-computer-use test",
-      "result": "PASS: 2 passed, 0 failed; immutable universal helper hash and ad-hoc signature checked on macOS"
+      "result": "PASS: 3 passed, 0 failed; immutable universal helper hash/ad-hoc signature, current-turn authority, one cached native capability projection, exact TCC action mapping, signal forwarding, provider failure and effect disposal checked"
+    },
+    {
+      "command": "verifyComponentRuntimeImports(componentFiles['@e-mate/dsh-plugin-computer-use'], actual emitted package closure)",
+      "result": "PASS: emitted imports remain exactly equal to the eight declared Base imports; D016 adds no external runtime import"
     },
     {
       "command": "pnpm --dir packages/dsh-plugin-find-skill run build && pnpm --dir packages/dsh-plugin-find-skill test",
@@ -204,6 +215,7 @@
     "T18 complete composed Profile app-directory boot and real interaction were not run in T15",
     "T18 real Feishu/Tencent connector authentication and operation receipts",
     "T18 real macOS Accessibility and Screen Recording TCC denial/grant/revoke acceptance",
+    "T18 installed Windows UI must use stable Desktop platform metadata to show Computer Use unavailable with a reason and no executable reference",
     "T18 target-specific CPython 3.12 wheel ABI/hash/lazy-first-use/OCR positives and missing-wheel/wrong-arch negatives",
     "T18 installed macOS and Windows native paste/drop/upload five-PNG acceptance and visible UI readback",
     "T18 candidate, installed-byte and public-production receipts",
