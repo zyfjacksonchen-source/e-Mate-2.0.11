@@ -2,6 +2,13 @@
 
 This file is the implementation source of truth. Development records may add evidence but may not weaken these obligations.
 
+## 2.0.15 execution overlay
+
+- The user-authorized next-version target is `2.0.15`, integrated on `release/2.0.15` from the clean current canonical `origin/main` source `5f8c54db7b76276c14f1938c970df155f4e6fd80`. The exact source/public-state split, ticket gates and evidence are recorded in [`docs/2.0.15/BASELINE.md`](2.0.15/BASELINE.md) and [`docs/2.0.15/STATUS.md`](2.0.15/STATUS.md).
+- The checked-in package identities remain `2.0.14` until T18. Public Desktop pointers and all three desired states still identify the accepted `2.0.13` production bytes. The 2.0.14 source and candidate receipts are inputs, not an installed or production-release claim; 2.0.15 work must preserve that distinction.
+- The 2.0.14 single-hotfix restrictions below remain the historical contract for 2.0.14. They do not prohibit the separately authorized 2.0.15 scope, but every existing native-owner, trust, compatibility, data, updater, publication and exact-byte invariant remains binding. No 2.0.15 ticket may create a second Session, Workspace, Tool registry, Skill store, Scheduler, Job bus, Share transcript, message model, Desktop shell or updater.
+- T00 is governance-only. Product implementation is partitioned across T01–T17 by the exact path leases in [`docs/2.0.15/DECISIONS.md`](2.0.15/DECISIONS.md). Only T18 may perform the final version bump, formal candidate, installed predecessor/update/rollback matrix or production publication, and only after every P0 gate has exact evidence.
+
 ## Identity and source pins
 
 - Product name: `e-Mate`
