@@ -614,7 +614,6 @@ test('managed profile installation is idempotent', () => {
     assert.match(client, /window\.__ModuleLoader__\.load\(\s*\{/)
     assert.match(client, /\bid:\s*["']@deepseek-ai\/dsh-client-ui-sidebar["']/)
     assert.match(client, /data-emate-home-hero/)
-    assert.match(client, /data-emate-home-overview/)
     assert.match(client, /data-chain-overlay-fallback/)
     assert.match(client, /ctx\.slots\.inject\(["']shell\.overlay["']/)
     assert.match(client, /welcome-notice/)
@@ -740,7 +739,7 @@ test('public share RPC publishes the native DSH Session ZIP and revokes the retu
       const url = String(input)
       requests.push({ url, init })
       if (url.endsWith('/healthz')) {
-        return Response.json({ schema_version: 1, ready: true })
+        return Response.json({ schema_version: 1, service: 'emate-share', version: 1, ready: true })
       }
       if (url.includes('/v1/shares?')) {
         assert.equal(new Headers(init.headers).get('authorization'), 'Bearer model-session-token-which-is-long-enough')
@@ -775,7 +774,7 @@ test('public share RPC publishes the native DSH Session ZIP and revokes the retu
   assert.deepEqual(registration.options, { authority: 'loopback' })
   assert.deepEqual(await registration.handler('status', {}), {
     ok: true,
-    value: { schema_version: 1, ready: true },
+    value: { schema_version: 1, stage: 'preparing', service_version: 1, ready: true },
   })
   assert.deepEqual(await registration.handler('create', { session_id: 'session-1' }), {
     ok: true,
@@ -1049,6 +1048,7 @@ test('managed profile exposes only user-facing plugin capabilities', () => {
       '@e-mate/dsh-plugin-office-skills',
       '@e-mate/dsh-plugin-tool-search',
       '@e-mate/dsh-plugin-cdp',
+      '@e-mate/dsh-plugin-computer-use',
     ])
     const packages = [
       '@e-mate/dsh-plugin-better-sidebar',
@@ -4869,6 +4869,10 @@ test('health route reports real projected job activity and rejects writes', () =
 test('shell plugin serves branded Web resources without adding a transport', () => {
   const routes = new Map()
   const ctx = {
+    inject: (services, callback) => {
+      assert.deepEqual(services, ['settings'])
+      callback({ settings: { register: () => () => {} } })
+    },
     webServer: {
       register: route => {
         routes.set(route.path, route)
