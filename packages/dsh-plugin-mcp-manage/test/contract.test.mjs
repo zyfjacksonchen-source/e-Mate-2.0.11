@@ -4,9 +4,11 @@ import test from 'node:test'
 import { readCollectedOutput } from '../lib/collected-output.mjs'
 import { parseOAuthCallback } from '../lib/oauth-callback.mjs'
 import { validatePluginInstall, validatePluginPackageName } from '../lib/plugin-source.mjs'
+import { isMcpServerActive } from '../lib/status.mjs'
 
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
+const statusSource = readFileSync(new URL('../src/status.ts', import.meta.url), 'utf8')
 const runtime = readFileSync(new URL('../lib/index.mjs', import.meta.url), 'utf8')
 
 test('MCP management keeps native DSH ownership and secrets out of settings', () => {
@@ -19,7 +21,8 @@ test('MCP management keeps native DSH ownership and secrets out of settings', ()
   assert.match(source, /ctx\.userQuestions\.ask/u)
   assert.match(source, /ctx\.userQuestions\.ask\(\{\s*agent,/u)
   assert.match(source, /exec\.signal, exec\.agent/u)
-  assert.match(source, /ctx\.tools\.schemas\(\)/u)
+  assert.match(source, /isMcpServerActive\(ctx\.loader, ctx\.tools/u)
+  assert.match(statusSource, /tools\.schemas\(\)/u)
   assert.match(source, /servers: previousServers/u)
   assert.match(source, /authority: 'loopback'/u)
   assert.match(source, /authorizeMcp/u)
@@ -57,6 +60,15 @@ test('MCP management keeps native DSH ownership and secrets out of settings', ()
   assert.match(source, /item\?\.active !== true/u)
   assert.doesNotMatch(source, /token:\s*z\./u)
   assert.doesNotMatch(source, /authorizationCode: \{ type:/u)
+})
+
+test('status is active only for a live native fiber with a registered server Tool', () => {
+  const tools = { schemas: () => [{ name: 'mcp__docs__read' }] }
+  assert.equal(isMcpServerActive({ resolve: () => ({ fiber: { state: 2 } }) }, tools, 'entry', 'docs'), true)
+  assert.equal(isMcpServerActive({ resolve: () => ({ fiber: { state: 1 } }) }, tools, 'entry', 'docs'), false)
+  assert.equal(isMcpServerActive({ resolve: () => ({ fiber: { state: 2 } }) }, { schemas: () => [] }, 'entry', 'docs'), false)
+  assert.equal(isMcpServerActive({ resolve: () => { throw new Error('entry disappeared') } }, tools, 'entry', 'docs'), false)
+  assert.equal(isMcpServerActive({ resolve: () => ({ fiber: { state: 2 } }) }, tools, undefined, 'docs'), false)
 })
 
 test('collected subprocess output rejects missing or truncated clipboard data', () => {
