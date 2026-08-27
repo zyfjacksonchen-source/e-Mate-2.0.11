@@ -4,11 +4,13 @@
   "ticket": "T18",
   "title": "2.0.15 Phase 1 source freeze",
   "status": "SOURCE_FREEZE_COMMITTED_CANDIDATE_INSTALLED_PUBLIC_OPEN",
-  "captured_at": "2026-08-27T19:19:07Z",
+  "captured_at": "2026-08-27T19:29:07Z",
   "baseline": {
     "branch": "release/2.0.15",
     "start_commit": "2f1183c3ea0b5da5e794a3d6daf1aa565b08a328",
-    "source_freeze_commit": "c2e7365b71a10e4a54622a70a30b0ae9fe19df90",
+    "initial_source_freeze_commit": "c2e7365b71a10e4a54622a70a30b0ae9fe19df90",
+    "initial_evidence_commit": "6a6444dd7b3dc49419ea8b366f40f8f3bc7c1e74",
+    "source_freeze_commit": "7a6703c299c54ae4edb34cbf802e9af2ada3637e",
     "clean_start": true,
     "harness_gitlink": "4787caf39134df190105b272da0dd2ba893d4d75",
     "harness_worktree": "4787caf39134df190105b272da0dd2ba893d4d75",
@@ -136,6 +138,18 @@
     "old_literal_matches": [],
     "historical_predecessor_update_public_fixtures_modified": false
   },
+  "website_version_boundary": {
+    "checked_in_source_path": "deploy/download-page",
+    "checked_in_source_version": "2.0.14",
+    "checked_in_source_modified": false,
+    "checked_in_source_published_as_2_0_15": false,
+    "historical_validation_expected_version": "2.0.14",
+    "candidate_staging_default_version": "2.0.15",
+    "historical_source_rejected_for_current_candidate": true,
+    "temporary_internally_consistent_2_0_15_fixture_accepted": true,
+    "version_drift_rejected": true,
+    "workflow_modified": false
+  },
   "verification": [
     {
       "command": "node --test scripts/harness-provenance.test.mjs scripts/change-impact.test.mjs scripts/component-release.test.mjs scripts/profile-release.test.mjs scripts/release-coordinator.test.mjs",
@@ -148,9 +162,9 @@
       "result": "PASS_FINAL: 39 passed, 0 failed"
     },
     {
-      "command": "node --test with positive release-source test-name selection scripts/release.test.mjs",
+      "command": "node --test scripts/release.test.mjs",
       "exit": 0,
-      "result": "PASS: 14 passed, 0 failed; unchanged website publication tests excluded from the source-freeze gate"
+      "result": "PASS_FINAL: 16 passed, 0 failed, 0 skipped; full unfiltered workflow source gate"
     },
     {
       "command": "vitest run the three D018 Shell suites",
@@ -215,9 +229,14 @@
       "reason": "missing locked dependencies remained external; these bytes were not used as emitted ABI or candidate evidence"
     },
     {
-      "attempt": "full scripts/release.test.mjs website cases",
-      "result": "OUTSIDE_SOURCE_FREEZE_GATE",
-      "reason": "the unchanged website source remains intentionally bound to unreleased 2.0.14 until a later exact candidate/publication phase"
+      "attempt": "source fix 1: explicit expected page version plus a temporary current-page staging fixture",
+      "result": "FAIL: 14 passed, 2 failed out of 16",
+      "reason": "the temporary source path was not canonical because /var differed from /private/var; the current producer test still supplied historical 2.0.14 artifact names and rejected e-Mate-2.0.14-mac-universal.dmg"
+    },
+    {
+      "attempt": "source fix 2: canonical temporary staging source plus separate current-version producer fixture",
+      "result": "PASS: 16 passed, 0 failed, 0 skipped",
+      "reason": "the full unfiltered release.test gate now proves historical 2.0.14 validation, rejection from 2.0.15 staging, valid temporary 2.0.15 handoff generation and fail-closed version drift"
     }
   ],
   "discarded_inputs": [
