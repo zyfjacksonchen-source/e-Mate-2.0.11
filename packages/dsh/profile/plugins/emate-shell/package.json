@@ -38,6 +38,8 @@
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-attachment",
         "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-settings",
+        "@deepseek-ai/schemastery",
         "react",
         "react-dom"
       ],
