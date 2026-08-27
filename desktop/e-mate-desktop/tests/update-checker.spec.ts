@@ -13,6 +13,7 @@ import {
 
 const SOURCE_COMMIT = 'a'.repeat(40)
 const MANIFEST_SIGNATURE_CONTEXT = Buffer.from('e-mate-desktop-release-manifest-v2\0', 'utf8')
+const MANIFEST_SIGNATURE_CONTEXT_V3 = Buffer.from('e-mate-desktop-release-manifest-v3\0', 'utf8')
 const { privateKey: manifestPrivateKey, publicKey: manifestPublicKey } = generateKeyPairSync('ed25519')
 const TRUSTED_MANIFEST_KEYS: readonly DesktopReleaseSigningKey[] = [{
   id: 'desktop-release-test-key',
@@ -162,6 +163,39 @@ describe('strict SemVer parsing', () => {
 })
 
 describe('public Desktop version check', () => {
+  it('accepts mandatory and minimum-supported policy only from a signed v3 manifest', async () => {
+    const { signature: _, ...v2 } = versionManifest('2.1.0')
+    const unsigned = {
+      ...v2,
+      schema_version: 3,
+      update_policy: {
+        mandatory: true,
+        minimum_supported_version: '2.0.5',
+      },
+    }
+    const manifest = signManifest(unsigned, MANIFEST_SIGNATURE_CONTEXT_V3)
+
+    await expect(checkForStableUpdate({
+      platform: 'darwin',
+      currentVersion: '2.0.0',
+      currentScheduleProtocolFloor: 1,
+      request: async () => Response.json(manifest),
+    })).resolves.toMatchObject({
+      status: 'update-available',
+      latestVersion: '2.1.0',
+      mandatory: true,
+      minimumSupportedVersion: '2.0.5',
+    })
+
+    ;(manifest.update_policy as Record<string, unknown>).mandatory = false
+    await expect(checkForStableUpdate({
+      platform: 'darwin',
+      currentVersion: '2.0.0',
+      currentScheduleProtocolFloor: 1,
+      request: async () => Response.json(manifest),
+    })).resolves.toBeNull()
+  })
+
   it('uses only the fixed no-cache version endpoint and reports a newer stable version', async () => {
     const controller = new AbortController()
     const calls: Array<{ url: string, init: RequestInit }> = []

@@ -34,7 +34,7 @@ test('find-skill is pinned and limits persistent installation to connector sourc
   const installer = await readFile(new URL('../lib/install.js', import.meta.url), 'utf8')
   const client = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   const runtime = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
-  assert.equal(pkg.version, '2.0.14')
+  assert.equal(pkg.version, '2.0.15')
   assert.equal(pkg.dsh.upstream.commit, '5a7f18b4535835a81de47c0cc2ca8ceb6e97a4e6')
   assert.match(patch, /cliCommand: 'pnpm dlx skills@1\.5\.22'/u)
   assert.match(patch, /registerFindTool: true/u)
@@ -550,7 +550,7 @@ test('bundled connector reconciliation restores an interrupted swap and never ov
   await assert.rejects(stat(join(globalSkillDir, '.connect-feishu-cli.e-mate-staging')), { code: 'ENOENT' })
 })
 
-test('find-skill launches packaged pnpm through direct Electron-as-Node inputs', async () => {
+test('Feishu install bypasses the shell shim EINVAL path through direct Electron-as-Node inputs', async () => {
   const builtCli = await readFile(new URL('../lib/cli.js', import.meta.url), 'utf8')
   assert.match(builtCli, /EMATE_DESKTOP_RUN_AS_NODE/u)
   assert.match(builtCli, /EMATE_DESKTOP_PNPM_ENTRY/u)
@@ -578,7 +578,7 @@ test('find-skill launches packaged pnpm through direct Electron-as-Node inputs',
     }
   } }
   try {
-    await runCli(subprocess, 'pnpm dlx skills@1.5.22', ['--version'], {
+    await runCli(subprocess, 'pnpm dlx skills@1.5.22', ['add', PERSISTENT_SOURCE, '--skill', 'lark-doc'], {
       cwd: '/tmp/e-mate', env: { HOME: '/tmp/e-mate' },
     })
   } finally {
@@ -592,7 +592,7 @@ test('find-skill launches packaged pnpm through direct Electron-as-Node inputs',
     '--import',
     'file:///tmp/e-mate/clear-env.mjs',
     '/Applications/e-Mate.app/Contents/Resources/app/node_modules/pnpm/bin/pnpm.mjs',
-    'dlx', 'skills@1.5.22', '--version',
+    'dlx', 'skills@1.5.22', 'add', PERSISTENT_SOURCE, '--skill', 'lark-doc',
   ])
   assert.deepEqual(spec.env, { HOME: '/tmp/e-mate', ELECTRON_RUN_AS_NODE: '1' })
 })

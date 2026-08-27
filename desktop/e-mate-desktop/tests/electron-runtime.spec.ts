@@ -31,7 +31,11 @@ const windowsUpdateAvailable = {
 
 const terminal = vi.hoisted(() => ({ open: vi.fn() }))
 const updater = vi.hoisted(() => ({ download: vi.fn() }))
-const macUpdater = vi.hoisted(() => ({ schedule: vi.fn(), markShutdownReady: vi.fn() }))
+const macUpdater = vi.hoisted(() => ({
+  preflight: vi.fn(),
+  schedule: vi.fn(),
+  markShutdownReady: vi.fn(),
+}))
 const windowsUpdater = vi.hoisted(() => ({ schedule: vi.fn(), markShutdownReady: vi.fn() }))
 const childProcess = vi.hoisted(() => {
   type Listener = (...args: unknown[]) => void
@@ -69,6 +73,7 @@ vi.mock('../src/update-download.ts', () => ({
 }))
 
 vi.mock('../src/mac-update-installer.ts', () => ({
+  preflightMacUpdateInstallation: macUpdater.preflight,
   scheduleMacUpdateInstallation: macUpdater.schedule,
 }))
 
@@ -121,8 +126,15 @@ const electron = vi.hoisted(() => {
     setWindowOpenHandler: vi.fn(),
     executeJavaScript: vi.fn(async (): Promise<unknown> => null),
     copyImageAt: vi.fn(),
+    send: vi.fn(),
   }
-  const nativeTheme = { themeSource: 'system' }
+  const ipcMain = { on: vi.fn(), off: vi.fn(), handle: vi.fn(), removeHandler: vi.fn() }
+  const nativeTheme = {
+    themeSource: 'system',
+    shouldUseDarkColors: false,
+    on: vi.fn(),
+    off: vi.fn(),
+  }
   const systemPreferences = {
     isTrustedAccessibilityClient: vi.fn(() => false),
   }
@@ -150,6 +162,7 @@ const electron = vi.hoisted(() => {
     readonly destroy = vi.fn()
     readonly loadURL = loadURL
     readonly removeMenu = vi.fn()
+    readonly setTitleBarOverlay = vi.fn()
   }
 
   class Tray {
@@ -203,6 +216,7 @@ const electron = vi.hoisted(() => {
     browserWindowOn,
     loadURL,
     dialog,
+    ipcMain,
     clipboard: { writeText: vi.fn() },
     Menu: {
       buildFromTemplate: vi.fn((template: unknown[]) => {
@@ -237,6 +251,7 @@ vi.mock('electron', () => ({
   BrowserWindow: electron.BrowserWindow,
   clipboard: electron.clipboard,
   dialog: electron.dialog,
+  ipcMain: electron.ipcMain,
   Menu: electron.Menu,
   nativeImage: electron.nativeImage,
   nativeTheme: electron.nativeTheme,
@@ -280,6 +295,7 @@ describe('Electron compatibility runtime', () => {
     childProcess.reset()
     vi.clearAllMocks()
     updater.download.mockReset()
+    macUpdater.preflight.mockReset()
     macUpdater.schedule.mockReset()
     macUpdater.schedule.mockResolvedValue({ markShutdownReady: macUpdater.markShutdownReady })
     windowsUpdater.schedule.mockReset()
@@ -292,6 +308,7 @@ describe('Electron compatibility runtime', () => {
     electron.shell.openPath.mockResolvedValue('')
     electron.systemPreferences.isTrustedAccessibilityClient.mockReturnValue(false)
     electron.nativeTheme.themeSource = 'system'
+    electron.nativeTheme.shouldUseDarkColors = false
   })
 
   afterEach(() => {
@@ -411,6 +428,59 @@ describe('Electron compatibility runtime', () => {
     expect(electron.browserWindowOff).toHaveBeenCalledWith('page-title-updated', titleListener)
     expect(electron.webContents.off).toHaveBeenCalledWith('context-menu', contextMenuListener)
     expect(electron.trays[0]?.off).toHaveBeenCalledWith('click', expect.any(Function))
+  })
+
+  it('carries the one updater state through the existing Main and Preload boundary', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const cancel = vi.fn(() => true)
+    const runInteractiveUpdate = vi.fn(async () => {})
+    runtime.updates.publishState({ stage: 'checking', updateKind: 'base' })
+    runtime.updates.setCancelHandler(cancel)
+    runtime.updates.setInteractiveUpdateHandler(runInteractiveUpdate)
+    const release = runtime.schedule(spec)
+
+    await runtime.mountScheduled()
+    const read = electron.ipcMain.on.mock.calls.find(([channel]) => channel === 'emate:desktop-update-state-read')?.[1]
+    const requestCancel = electron.ipcMain.on.mock.calls.find(([channel]) => channel === 'emate:desktop-update-cancel')?.[1]
+    const requestUpdate = electron.ipcMain.handle.mock.calls.find(([channel]) => channel === 'emate:desktop-update-run-interactive')?.[1]
+    expect(read).toEqual(expect.any(Function))
+    expect(requestCancel).toEqual(expect.any(Function))
+    expect(requestUpdate).toEqual(expect.any(Function))
+    const readEvent = { sender: electron.webContents, returnValue: undefined as unknown }
+    read(readEvent)
+    expect(readEvent.returnValue).toEqual({ stage: 'checking', updateKind: 'base' })
+
+    runtime.updates.publishState({ stage: 'downloading', bytes: 5, total: 10 })
+    expect(electron.webContents.send).toHaveBeenCalledWith(
+      'emate:desktop-update-state-changed',
+      { stage: 'downloading', bytes: 5, total: 10 },
+    )
+    const cancelEvent = { sender: electron.webContents, returnValue: undefined as unknown }
+    requestCancel(cancelEvent)
+    expect(cancelEvent.returnValue).toBe(true)
+    expect(cancel).toHaveBeenCalledOnce()
+    await expect(requestUpdate({ sender: electron.webContents })).resolves.toBeUndefined()
+    expect(runInteractiveUpdate).toHaveBeenCalledOnce()
+    await expect(requestUpdate({ sender: {} })).rejects.toThrow('update request did not originate from owning Renderer')
+
+    await release()
+    expect(electron.ipcMain.off).toHaveBeenCalledWith('emate:desktop-update-state-read', read)
+    expect(electron.ipcMain.off).toHaveBeenCalledWith('emate:desktop-update-cancel', requestCancel)
+    expect(electron.ipcMain.removeHandler).toHaveBeenCalledWith('emate:desktop-update-run-interactive')
+  })
+
+  it('removes the Renderer update carrier when window mounting fails', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    electron.loadURL.mockRejectedValueOnce(new Error('renderer unavailable'))
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const release = runtime.schedule(spec)
+
+    await expect(runtime.mountScheduled()).rejects.toThrow('renderer unavailable')
+    expect(electron.ipcMain.removeHandler).toHaveBeenCalledWith('emate:desktop-update-run-interactive')
+    await expect(release()).rejects.toThrow('renderer unavailable')
   })
 
   it('keeps the compatibility frame synchronized with the e-Mate theme', async () => {
@@ -662,7 +732,7 @@ describe('Electron compatibility runtime', () => {
         appExecutable: process.execPath,
         electronVersion: '43.4.0',
         profileName: 'desktop',
-        productVersion: '2.0.14',
+        productVersion: '2.0.15',
         profileDir: '/tmp/dsh-home/profiles/desktop',
         homeDir: '/tmp/dsh-home',
         spawn: expect.any(Function),
@@ -1124,7 +1194,10 @@ describe('Electron compatibility runtime', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const response = Response.json({ version: '2.1.0' })
     electron.net.fetch.mockResolvedValueOnce(response)
-    updater.download.mockResolvedValueOnce('/tmp/e-Mate-2.1.0-mac.dmg')
+    updater.download.mockImplementationOnce(async (options: { onProgress?: (value: unknown) => void }) => {
+      options.onProgress?.({ bytes: 512, total: 1024 })
+      return '/tmp/e-Mate-2.1.0-mac.dmg'
+    })
     const requestQuit = vi.fn()
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
@@ -1135,7 +1208,7 @@ describe('Electron compatibility runtime', () => {
     expect(runtime.updates).toMatchObject({
       isPackaged: false,
       canDownload: false,
-      currentVersion: '2.0.14',
+      currentVersion: '2.0.15',
       currentScheduleProtocolFloor: 0,
       trustedManifestKeys: [],
       statePath: join('/tmp/dsh-desktop-user-data', 'updates', 'state.json'),
@@ -1188,7 +1261,8 @@ describe('Electron compatibility runtime', () => {
       buttons: ['更新并重启', '稍后'],
     }))
     const controller = new AbortController()
-    await runtime.updates.downloadAndOpen(updateAvailable, controller.signal)
+    const updateStates: unknown[] = []
+    await runtime.updates.downloadAndOpen(updateAvailable, controller.signal, state => { updateStates.push(state) })
     expect(updater.download).toHaveBeenCalledWith({
       platform: 'darwin',
       version: '2.1.0',
@@ -1196,7 +1270,18 @@ describe('Electron compatibility runtime', () => {
       userDataPath: '/tmp/dsh-desktop-user-data',
       request: expect.any(Function),
       signal: controller.signal,
+      onProgress: expect.any(Function),
     })
+    expect(macUpdater.preflight).toHaveBeenCalledWith(expect.objectContaining({
+      targetVersion: '2.1.0',
+      currentExecutable: process.execPath,
+      userDataPath: '/tmp/dsh-desktop-user-data',
+      homeDirectory: '/tmp/dsh-home',
+      helperModulePath: expect.stringMatching(/mac-update-helper\.js$/u),
+      artifact: updateAvailable.artifact,
+    }))
+    expect(macUpdater.preflight.mock.invocationCallOrder[0])
+      .toBeLessThan(updater.download.mock.invocationCallOrder[0]!)
     expect(macUpdater.schedule).toHaveBeenCalledWith(expect.objectContaining({
       dmgPath: '/tmp/e-Mate-2.1.0-mac.dmg',
       targetVersion: '2.1.0',
@@ -1212,6 +1297,12 @@ describe('Electron compatibility runtime', () => {
       parentPid: process.pid,
       signal: controller.signal,
     }))
+    expect(updateStates).toEqual([
+      { stage: 'downloading', bytes: 512, total: 1024 },
+      { stage: 'verifying' },
+      { stage: 'staging' },
+      { stage: 'waiting-shutdown' },
+    ])
     expect(requestQuit).toHaveBeenCalledWith(0)
     expect(macUpdater.markShutdownReady).not.toHaveBeenCalled()
     runtime.commitPreparedUpdateShutdown()
@@ -1232,6 +1323,19 @@ describe('Electron compatibility runtime', () => {
     })
     expect(notification?.show).toHaveBeenCalledOnce()
     expect(notification?.once).not.toHaveBeenCalled()
+  })
+
+  it('fails macOS path and disk preflight before an installer request', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    macUpdater.preflight.mockImplementationOnce(() => { throw new Error('macOS update has insufficient free space') })
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    runtime.schedule(spec)
+
+    await expect(runtime.updates.downloadAndOpen(updateAvailable, new AbortController().signal))
+      .rejects.toThrow('insufficient free space')
+    expect(updater.download).not.toHaveBeenCalled()
+    expect(macUpdater.schedule).not.toHaveBeenCalled()
   })
 
   it('requires Windows Setup READY before requesting orderly exit', async () => {
@@ -1354,6 +1458,31 @@ describe('Electron compatibility runtime', () => {
     expect(electron.nativeTheme.themeSource).toBe('light')
     runtime.setThemeSource('dark')
     expect(electron.nativeTheme.themeSource).toBe('light')
+  })
+
+  it('keeps the native Windows caption symbols legible across light, dark, and system changes', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    electron.nativeTheme.shouldUseDarkColors = true
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const release = runtime.schedule({ ...spec, mode: 'advanced', readThemeSource: () => 'system' })
+
+    await runtime.mountScheduled()
+    expect((electron.browserWindowOptions[0] as any).titleBarOverlay.symbolColor).toBe('#f5f5f5')
+    electron.nativeTheme.shouldUseDarkColors = false
+    runtime.setThemeSource('light')
+    expect(electron.browserWindows[0]?.setTitleBarOverlay).toHaveBeenLastCalledWith(expect.objectContaining({
+      symbolColor: '#2f3337',
+    }))
+    electron.nativeTheme.shouldUseDarkColors = true
+    const updated = electron.nativeTheme.on.mock.calls.find(([event]) => event === 'updated')?.[1]
+    expect(updated).toEqual(expect.any(Function))
+    updated()
+    expect(electron.browserWindows[0]?.setTitleBarOverlay).toHaveBeenLastCalledWith(expect.objectContaining({
+      symbolColor: '#f5f5f5',
+    }))
+    await release()
+    expect(electron.nativeTheme.off).toHaveBeenCalledWith('updated', updated)
   })
 
   it('restores the preceding native appearance when advanced loading fails', async () => {

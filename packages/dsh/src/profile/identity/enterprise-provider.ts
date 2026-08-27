@@ -15,6 +15,7 @@ const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u
 const JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u
 const REFRESH_TOKEN = /^emate_rt_[A-Za-z0-9_-]{43}$/u
+const USAGE_DECIMAL = /^(0|[1-9][0-9]{0,127})$/u
 const CHAT_MODELS = [
   'gpt-5.6-luna',
   'gpt-5.6-sol',
@@ -383,6 +384,57 @@ function searchCredentialGrant(value: unknown): SearchCredentialGrant {
   return grant.status === 'granted'
     ? { ...base, status: 'granted', upstreamApiKey: grant.upstreamApiKey as string }
     : { ...base, status: grant.status }
+}
+
+function usageActivityProjection(value, query) {
+  if (!isRecord(value)
+    || !exact(value, [
+      'schemaVersion', 'timezone', 'startDate', 'endDate', 'days', 'periodTotal', 'calculatedAt',
+    ])
+    || value.schemaVersion !== 1
+    || value.timezone !== query.timezone
+    || value.startDate !== query.start_date
+    || value.endDate !== query.end_date
+    || !Array.isArray(value.days)
+    || value.days.length < 1
+    || value.days.length > 366
+    || typeof value.periodTotal !== 'string'
+    || !USAGE_DECIMAL.test(value.periodTotal)
+    || typeof value.calculatedAt !== 'string'
+    || !Number.isFinite(Date.parse(value.calculatedAt))) {
+    throw new Error('e-Mate enterprise usage activity is invalid')
+  }
+  const days = value.days.map(day => {
+    if (!isRecord(day)
+      || !exact(day, ['date', 'total', 'input', 'output', 'cacheRead', 'cacheWrite'])
+      || typeof day.date !== 'string'
+      || !/^\d{4}-\d{2}-\d{2}$/u.test(day.date)
+      || [day.total, day.input, day.output, day.cacheRead, day.cacheWrite]
+        .some(count => typeof count !== 'string' || !USAGE_DECIMAL.test(count))
+      || BigInt(day.total) !== BigInt(day.input) + BigInt(day.output) + BigInt(day.cacheRead) + BigInt(day.cacheWrite)) {
+      throw new Error('e-Mate enterprise usage activity day is invalid')
+    }
+    return {
+      date: day.date,
+      total: day.total,
+      input: day.input,
+      output: day.output,
+      cache_read: day.cacheRead,
+      cache_write: day.cacheWrite,
+    }
+  })
+  if (days.reduce((total, day) => total + BigInt(day.total), 0n) !== BigInt(value.periodTotal)) {
+    throw new Error('e-Mate enterprise usage activity total is invalid')
+  }
+  return {
+    schema_version: 1,
+    timezone: value.timezone,
+    start_date: value.startDate,
+    end_date: value.endDate,
+    days,
+    period_total: value.periodTotal,
+    calculated_at: new Date(Date.parse(value.calculatedAt)).toISOString(),
+  }
 }
 
 function session(value: unknown, expectedModelRoot: string): Session {
@@ -828,7 +880,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
     const response = await modelCall(
       value,
-      '/v1/runtime-models?client_version=2.0.14',
+      '/v1/runtime-models?client_version=2.0.15',
       { method: 'GET' },
       'runtime models',
     )
@@ -1006,7 +1058,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
           termsAccepted: true,
           policyRead: true,
           lawfulUseConfirmed: true,
-          clientVersion: '2.0.14',
+          clientVersion: '2.0.15',
           locale: 'zh-CN',
         }),
       }, 'consent acceptance'), status.policy)
@@ -1035,6 +1087,17 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
         week_started_at: timestamp(value.weekStartedAt, 'usage week start'),
         calculated_at: timestamp(value.calculatedAt, 'usage calculation time'),
       }
+    },
+    async usageActivity(query) {
+      const search = new URLSearchParams([
+        ['timezone', query.timezone],
+        ['start_date', query.start_date],
+        ['end_date', query.end_date],
+      ])
+      return usageActivityProjection(
+        await authorized(`/v1/usage/activity?${search}`, { method: 'GET' }, 'usage activity'),
+        query,
+      )
     },
     async auditUpload(records: unknown[]) {
       return authorized('/v1/audit/usage', {

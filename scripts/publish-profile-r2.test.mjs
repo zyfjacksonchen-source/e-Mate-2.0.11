@@ -11,8 +11,9 @@ import {
   parseProfileReleaseEnvelope,
   signProfileRelease,
 } from '../desktop/e-mate-desktop/src/profile-release.ts'
-import { PRODUCT_UI_REFERENCE } from './change-impact.mjs'
+import { BASE_CONTRACT_ID, PRODUCT_UI_REFERENCE } from './change-impact.mjs'
 import { emitComponent } from './component-release.mjs'
+import { HARNESS_COMMIT } from './harness-provenance.mjs'
 import { composeProfileReleaseCandidate } from './profile-release.mjs'
 import {
   createProfileCurrentSnapshot,
@@ -37,8 +38,9 @@ function rehashSnapshot(value) {
 
 test('checked-in desired state is the exact public 2.0.13 Base v7 snapshot', () => {
   const snapshot = JSON.parse(readFileSync('artifacts/release/profile-current-snapshot.json', 'utf8'))
-  assert.equal(snapshot.candidate_release_version, '2.0.14')
-  assert.equal(snapshot.candidate_base_contract_id, 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0')
+  const releaseVersion = JSON.parse(readFileSync('desktop/e-mate-desktop/package.json', 'utf8')).version
+  assert.equal(snapshot.candidate_release_version, releaseVersion)
+  assert.equal(snapshot.candidate_base_contract_id, BASE_CONTRACT_ID)
   assert.deepEqual(Object.keys(snapshot.targets).sort(), ['darwin-arm64', 'darwin-x64', 'win32-x64'])
   for (const [target, current] of Object.entries(snapshot.targets)) {
     const bytes = Buffer.from(current.content_base64, 'base64')
@@ -135,7 +137,8 @@ test('publication admits bootstrap and its direct successor before exposing acti
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   const privateKeyPem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
   const keyId = '0123456789abcdef'
-  const baseId = 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0'
+  const baseId = BASE_CONTRACT_ID
+  const releaseVersion = JSON.parse(readFileSync('desktop/e-mate-desktop/package.json', 'utf8')).version
   const componentId = '@e-mate/dsh-plugin-fixture'
   const sourceCommit = 'a'.repeat(40)
   mkdirSync(join(root, 'desktop/e-mate-desktop'), { recursive: true })
@@ -143,7 +146,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
   execFileSync('git', ['init', '--quiet'], { cwd: root })
   execFileSync('git', [
     'update-index', '--add', '--cacheinfo',
-    '160000,b2b1650b01f0ee88d81837a9b5c050f9f763f606,upstream/deepseek-harness',
+    `160000,${HARNESS_COMMIT},upstream/deepseek-harness`,
   ], { cwd: root })
   execFileSync('git', [
     'update-index', '--add', '--cacheinfo',
@@ -165,7 +168,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
       harness_version: '0.1.0-rc.7',
     },
     harness_version: '0.1.0-rc.7',
-    harness_commit: 'b2b1650b01f0ee88d81837a9b5c050f9f763f606',
+    harness_commit: HARNESS_COMMIT,
     runtime_imports: {},
     profile_signing_keys: [{
       id: keyId,
@@ -173,7 +176,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
       public_key_spki_der_base64: publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
     }],
   })
-  writeJson(join(root, 'desktop/e-mate-desktop/package.json'), { version: '2.0.12', dependencies: {} })
+  writeJson(join(root, 'desktop/e-mate-desktop/package.json'), { version: releaseVersion, dependencies: {} })
   writeJson(join(root, 'packages/dsh/profile/component-inventory.json'), { schema_version: 1, components: [{
     id: componentId,
     root: 'packages/dsh-plugin-fixture',
@@ -186,7 +189,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
   writeFileSync(join(componentRoot, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n")
   writeJson(join(componentRoot, 'package.json'), {
     name: componentId,
-    version: '2.0.12',
+    version: releaseVersion,
     type: 'module',
     main: 'lib/index.json',
     files: ['lib', 'cordis.patch.yml', 'pnpm-lock.yaml'],
@@ -194,7 +197,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
     eMate: {
       component: { schema_version: 1, id: componentId, kind: 'profile', base_imports: [], authority_contract: { effects: [], guards: [] }, base_contracts: [baseId] },
       harnessVersion: '0.1.0-rc.7',
-      harnessCommit: 'b2b1650b01f0ee88d81837a9b5c050f9f763f606',
+      harnessCommit: HARNESS_COMMIT,
     },
     license: 'MIT',
   })

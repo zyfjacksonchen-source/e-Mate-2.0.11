@@ -9,6 +9,24 @@ const cssSource = readFileSync(resolve('src/client/activity-fold.module.css'), '
 
 const location = (turn: number) => ({ kind: 'step', turn: { turn } })
 
+function modeScope(initial: unknown = 'simple') {
+  let snapshot = { status: 'ready', value: { messageFlowMode: initial }, writable: true }
+  const listeners = new Set<() => void>()
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    set: async () => {},
+    unset: async () => {},
+    publish(value: unknown) {
+      snapshot = { ...snapshot, value: { messageFlowMode: value } }
+      for (const listener of listeners) listener()
+    },
+  }
+}
+
 describe('Codex-like process fold', () => {
   it('keeps natural assistant messages native while folding Think, Tool and GenUI detail', () => {
     const nodes = new Map<string, any>([
@@ -76,14 +94,15 @@ describe('Codex-like process fold', () => {
       slots: {
         inject: (_name: string, callback: () => unknown) => callback(),
         register: (options: unknown, component: unknown) => {
-          entries.push({ options, component })
-          return () => {}
+          const entry = { options, component }
+          entries.push(entry)
+          return () => { entries.splice(entries.indexOf(entry), 1) }
         },
         entries: () => entries,
         entriesOfSlot: () => toolViews,
       },
     }
-    registerActivityFold(ctx)
+    registerActivityFold(ctx, modeScope() as never)
     const renderer = (key: string) => entries.find(entry =>
       entry.options.key === key && entry.options.priority === -1).component
     const Assistant = renderer('assistant-step')
@@ -119,6 +138,77 @@ describe('Codex-like process fold', () => {
     expect(screen.getByText('正在为你整理页面。')).toBeTruthy()
     expect(screen.getByText('页面已经整理完成。')).toBeTruthy()
     expect(screen.getByText('正在为你整理页面。').closest('[data-native-assistant]')?.querySelector('[data-variant="think"]')).toBeNull()
+  })
+
+  it('removes only the fold shadows when the persisted mode changes to detailed', () => {
+    const entries: any[] = (['assistant-step', 'tool-call', 'context'] as const).map(key => ({
+      options: { key, priority: 0 },
+      component: ({ node }: any) => <div data-native={key}>{node.key}</div>,
+    }))
+    const scope = modeScope('broken')
+    const ctx = {
+      slots: {
+        inject: (_name: string, callback: () => unknown) => callback(),
+        register: (options: unknown, component: unknown) => {
+          const entry = { options, component }
+          entries.push(entry)
+          return () => { entries.splice(entries.indexOf(entry), 1) }
+        },
+        entries: () => entries,
+        entriesOfSlot: () => [],
+      },
+    }
+
+    registerActivityFold(ctx, scope as never)
+    expect(entries.filter(entry => entry.options.priority === -1).map(entry => entry.options.key))
+      .toEqual(['assistant-step', 'tool-call', 'context'])
+
+    scope.publish('detailed')
+    expect(entries.filter(entry => entry.options.priority === -1)).toEqual([])
+    expect(entries.map(entry => entry.options.key)).toEqual(['assistant-step', 'tool-call', 'context'])
+
+    scope.publish('simple')
+    expect(entries.filter(entry => entry.options.priority === -1).map(entry => entry.options.key))
+      .toEqual(['assistant-step', 'tool-call', 'context'])
+  })
+
+  it('keeps one historical node sequence across restart, interrupt, multiple tools and mode switches', () => {
+    const nodes = [
+      { key: 'reasoning-text', kind: 'assistant-step', data: { status: 'running', blocks: [
+        { kind: 'reasoning', text: '分析中' }, { kind: 'text', text: '自然文本' },
+      ] } },
+      { key: 'tool-one', kind: 'tool-call', data: { root: { callId: 'call-1', name: 'render_ui' } } },
+      { key: 'tool-two', kind: 'tool-call', data: { root: { callId: 'call-2', name: 'bash', status: 'interrupted' } } },
+      { key: 'image', kind: 'e-mate-tool-images', data: { items: [{ callId: 'image-1' }] } },
+    ]
+    const original = structuredClone(nodes)
+    const entries: any[] = (['assistant-step', 'tool-call', 'context', 'e-mate-tool-images'] as const).map(key => ({
+      options: { key, priority: 0 },
+      component: ({ node }: any) => node,
+    }))
+    const scope = modeScope('detailed') // persisted value restored before this historical Session mounts
+    const ctx = {
+      slots: {
+        inject: (_name: string, callback: () => unknown) => callback(),
+        register: (options: unknown, component: unknown) => {
+          const entry = { options, component }
+          entries.push(entry)
+          return () => { entries.splice(entries.indexOf(entry), 1) }
+        },
+        entries: () => entries,
+        entriesOfSlot: () => [],
+      },
+    }
+
+    registerActivityFold(ctx, scope as never)
+    expect(entries.filter(entry => entry.options.priority === -1)).toEqual([])
+    expect(entries.find(entry => entry.options.key === 'e-mate-tool-images')?.options.priority).toBe(0)
+
+    scope.publish('simple')
+    scope.publish('detailed')
+    expect(entries.filter(entry => entry.options.priority === -1)).toEqual([])
+    expect(nodes).toEqual(original)
+    expect(nodes.map(node => node.key)).toEqual(['reasoning-text', 'tool-one', 'tool-two', 'image'])
   })
 
   it('never discloses injected context metadata, even when process detail is expanded', () => {

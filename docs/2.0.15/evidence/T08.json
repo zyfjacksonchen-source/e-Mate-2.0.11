@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "document_type": "emate.2.0.15.ticket-evidence",
+  "ticket": "T08",
+  "manifest_id": "e-mate-critical-path-smoke-v1",
+  "bindings": {
+    "share.component": [
+      {
+        "id": "share-worker-contract",
+        "type": "command",
+        "command": "node",
+        "args": ["--test", "enterprise/apps/share-worker/tests/index.test.mjs"],
+        "timeout_ms": 60000
+      },
+      {
+        "id": "share-host-contract",
+        "type": "command",
+        "command": "upstream/deepseek-harness/node_modules/.bin/tsx",
+        "args": ["--test", "enterprise/apps/share-worker/tests/host-contract.test.ts"],
+        "timeout_ms": 60000
+      },
+      {
+        "id": "share-ui-contract",
+        "type": "command",
+        "command": "../../../../../upstream/deepseek-harness/node_modules/.bin/vitest",
+        "args": ["run", "--config", "vitest.config.ts", "tests/session-share.client.spec.tsx"],
+        "cwd": "packages/dsh/profile/plugins/emate-shell",
+        "timeout_ms": 60000
+      }
+    ]
+  },
+  "baseline": {
+    "integration_commit": "f72db74c21f2341ffe3b9b54c466e93d532e7bf2",
+    "base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0",
+    "harness_commit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606",
+    "source_desktop_version": "2.0.14",
+    "target_version": "2.0.15",
+    "public_production_predecessor": "2.0.13",
+    "truth_stage": "source-and-fixture-only"
+  },
+  "reproduction": {
+    "unique_failure_stage": "status-health",
+    "first_failing_check": "versions health and binds revoke to the exact owner/session index",
+    "command": "node --test enterprise/apps/share-worker/tests/index.test.mjs",
+    "result": "failed-as-expected",
+    "duration_ms": 317.185,
+    "expected": {
+      "schema_version": 1,
+      "service": "emate-share",
+      "version": 1,
+      "ready": true
+    },
+    "actual_before_fix": {
+      "schema_version": 1,
+      "ready": true
+    }
+  },
+  "root_cause": {
+    "problem": "The existing Worker health response was not versioned as a named service, revoke authorized only the owner instead of the exact owner/session index, and the Host flattened provider and parsing failures into unstable free text.",
+    "resolution": "The existing /emate.share Host and Share Worker now use one schema-versioned staged result, validate the fixed public origin/path, bind revoke to owner plus session hash, clean an expired archive and its index together, and map trust-boundary failures to stable local code/message pairs.",
+    "single_path": "Share UI -> /emate.share -> managed model-session credential -> native Session ZIP -> Share Worker -> immutable R2 object/public URL -> owner/session index -> list -> revoke/expiry"
+  },
+  "stage_receipts": [
+    {
+      "stage": "status-health",
+      "status": "passed",
+      "receipt": "Worker returns exact schema_version=1, service=emate-share, version=1 and ready=true; Host exposes preparing/service_version=1."
+    },
+    {
+      "stage": "managed-identity",
+      "status": "passed-fixture",
+      "receipt": "Missing or rejected managed credential maps to failed/create/preparing/authentication-required and never reaches upload."
+    },
+    {
+      "stage": "native-session-zip",
+      "status": "passed-fixture",
+      "receipt": "The Host reuses apiProxy.downloads.sessionLog with application/zip and maps export failure to archive-unavailable without a second archive path."
+    },
+    {
+      "stage": "worker-create-public-open",
+      "status": "passed-fixture",
+      "receipt": "The Worker streams the ZIP into the existing object binding; unauthenticated public open and archive download are covered without logging body or credential data."
+    },
+    {
+      "stage": "public-url-validation",
+      "status": "passed-fixture",
+      "receipt": "Host accepts only the configured origin and exact /s/<share_id> path with no credentials, query or fragment."
+    },
+    {
+      "stage": "owner-session-index-restart-list",
+      "status": "passed-fixture",
+      "receipt": "List is reconstructed from the persisted owner/session index on a later stateless Worker request and excludes other owners and sessions."
+    },
+    {
+      "stage": "revoke-expiry",
+      "status": "passed-fixture",
+      "receipt": "Revoke requires exact owner plus session, returns an idempotent success after removal, and expiry returns 410 while deleting the matching archive/index pair."
+    },
+    {
+      "stage": "ui",
+      "status": "passed-fixture",
+      "receipt": "UI exposes preparing/uploading/created/listing/revoking/failed progress, copy, expiry, retry and revoke; local ZIP remains explicitly local-only."
+    }
+  ],
+  "focused_results": [
+    {
+      "purpose": "Worker create/list/public get/revoke/expiry/owner/session contract",
+      "command": "node --test enterprise/apps/share-worker/tests/index.test.mjs",
+      "status": "passed",
+      "tests_passed": 6,
+      "tests_failed": 0,
+      "duration_ms": 121.383
+    },
+    {
+      "purpose": "Host credential/native ZIP/provider/status/stage contract",
+      "command": "upstream/deepseek-harness/node_modules/.bin/tsx --test enterprise/apps/share-worker/tests/host-contract.test.ts",
+      "status": "passed",
+      "tests_passed": 3,
+      "tests_failed": 0,
+      "duration_ms": 233.783
+    },
+    {
+      "purpose": "Share UI progress/error/recovery/local-fallback contract",
+      "command": "../../../../../upstream/deepseek-harness/node_modules/.bin/vitest run --config vitest.config.ts tests/session-share.client.spec.tsx",
+      "cwd": "packages/dsh/profile/plugins/emate-shell",
+      "status": "passed",
+      "tests_passed": 8,
+      "tests_failed": 0,
+      "duration_ms": 2130
+    },
+    {
+      "purpose": "Share UI component build",
+      "command": "EMATE_COMPONENT_CHECK=1 ../../../../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+      "cwd": "packages/dsh/profile/plugins/emate-shell",
+      "status": "passed",
+      "duration_ms": 700,
+      "component_build_ms": 97
+    },
+    {
+      "purpose": "Consume the existing T02 CP-08 share.component seam without editing the shared smoke",
+      "command": "node scripts/smoke/run.mjs --layer component --case CP-08 --extension docs/2.0.15/evidence/T08.json --evidence <temporary-output>",
+      "status": "passed",
+      "cases_passed": 1,
+      "pending": 0,
+      "duration_ms": 2490
+    }
+  ],
+  "environment_notes": [
+    {
+      "status": "resolved",
+      "problem": "The first direct UI invocation used the repository root, while the existing test intentionally reads component-relative source paths.",
+      "resolution": "Run the same test from packages/dsh/profile/plugins/emate-shell; no product source change was made for this runner issue.",
+      "failed_duration_ms": 3340
+    },
+    {
+      "status": "known-unrelated-blocker",
+      "gate": "component runner",
+      "code": "D006",
+      "reason": "The shared component check reaches the pre-existing Base ABI union blocker before T08 checks. T08 does not own base-contract, target-contract or the retired launch-environment component."
+    }
+  ],
+  "security_and_scope": {
+    "renderer_direct_token_or_zip_upload": false,
+    "second_archive_store_or_transport": false,
+    "archive_or_token_logging": false,
+    "private_absolute_paths_in_evidence": false,
+    "raw_upstream_error_text_exposed": false,
+    "new_dependencies": false,
+    "t02_smoke_files_modified": false,
+    "header_or_t13_layout_modified": false,
+    "production_writes": [],
+    "deployments": []
+  },
+  "consultation_gate": {
+    "decision": "D009",
+    "status": "not_invoked",
+    "reason": "No same named acceptance check remained red after two materially different source repairs."
+  },
+  "remaining_real_gates": [
+    {
+      "owner": "T18",
+      "status": "not_run",
+      "gate": "exact installed 2.0.15 create -> unauthenticated public open -> application restart list -> revoke -> 404 and expiry -> 410",
+      "reason": "No frozen candidate, real account/service authority, installed receipt or permitted production Worker/R2 write exists in T08. Source fixtures are not installed or production evidence."
+    }
+  ],
+  "installed_receipts": [],
+  "production_writes": []
+}

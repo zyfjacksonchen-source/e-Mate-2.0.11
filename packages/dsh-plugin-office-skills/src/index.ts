@@ -222,7 +222,8 @@ function startJob<T>(ctx: OfficeContext, owner: AgentOwner | undefined, signal: 
     run() {
       const controller = new AbortController()
       const onAbort = () => controller.abort(signal.reason)
-      signal.addEventListener('abort', onAbort, { once: true })
+      if (signal.aborted) controller.abort(signal.reason)
+      else signal.addEventListener('abort', onAbort, { once: true })
       result = Promise.resolve().then(() => run(controller.signal)).finally(() => {
         signal.removeEventListener('abort', onAbort)
       })

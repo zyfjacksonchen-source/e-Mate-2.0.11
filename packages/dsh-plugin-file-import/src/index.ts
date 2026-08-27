@@ -102,6 +102,9 @@ function decodeFiles(payload: unknown): { sessionId: string; files: EncodedFile[
 }
 
 async function workspaceRoot(ctx: any, sessionId: string): Promise<string> {
+  if (ctx.workspaceRegistry.archivedSessionIds.includes(sessionId)) {
+    throw new ImportValidationError('当前会话已归档。')
+  }
   const workspace = (ctx.workspaceRegistry.list() as WorkspaceView[])
     .find(candidate => candidate.sessionIds.includes(sessionId))
   if (workspace === undefined) throw new ImportValidationError('当前会话没有绑定工作区。')

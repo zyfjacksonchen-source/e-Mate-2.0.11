@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-test('uses DSH settings and composer slots without a parallel browser lifecycle', async () => {
+test('keeps one native Composer owner and decorates its semantic frame host', async () => {
   const host = await readFile(resolve(root, 'src/index.ts'), 'utf8')
   const client = await readFile(resolve(root, 'src/client/index.tsx'), 'utf8')
   const css = await readFile(resolve(root, 'src/client/style.module.css'), 'utf8')
@@ -16,9 +16,11 @@ test('uses DSH settings and composer slots without a parallel browser lifecycle'
   assert.match(host, /settings\.register\(GLASS_NAMESPACE, GlassSettingsSchema\)/)
   assert.match(client, /settingsScope\.bind<GlassSettings>/)
   assert.match(client, /name: 'conversation\.input\.right'/)
-  assert.match(client, /closest\('\[data-composer-card\]'\)/)
-  assert.match(css, /inset:\s*-2px -2px var\(--emate-composer-frame-bottom, -2px\)/)
-  assert.match(css, /border-radius:\s*var\(--emate-composer-frame-radius, inherit\)/)
+  assert.match(client, /closest\('\[data-emate-composer-frame-host\]'\)/)
+  assert.match(css, /\[data-emate-composer-frame-host\]\[data-emate-glass-palette\]/)
+  assert.doesNotMatch(`${client}\n${css}`, /data-composer-card|emate-composer-frame-bottom/)
+  assert.match(css, /inset:\s*-2px/)
+  assert.match(css, /border-radius:\s*24px/)
   assert.match(css, /animation:\s*emate-glass-orbit 4s linear infinite/)
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/)
   assert.match(css, /@media \(forced-colors: active\)/)
@@ -26,5 +28,5 @@ test('uses DSH settings and composer slots without a parallel browser lifecycle'
   assert.match(emittedClient, /prefers-reduced-motion:reduce[\s\S]*animation:none/)
   assert.doesNotMatch(emittedClient, /animation:(?:6|12)s linear infinite/)
   assert.doesNotMatch(`${host}\n${client}\n${css}`, /MutationObserver|localStorage|tapIndex|backdrop-filter/)
-  assert.equal(manifest.eMate.harnessCommit, 'b2b1650b01f0ee88d81837a9b5c050f9f763f606')
+  assert.equal(manifest.eMate.harnessCommit, '4787caf39134df190105b272da0dd2ba893d4d75')
 })

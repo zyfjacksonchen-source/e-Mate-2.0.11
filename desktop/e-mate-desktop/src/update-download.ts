@@ -43,6 +43,14 @@ export interface DownloadDesktopUpdateOptions {
   readonly request: UpdateArtifactRequest
   /** Optional cancellation signal owned by the update coordinator. */
   readonly signal?: AbortSignal
+  /** Byte progress from the one updater transaction. */
+  readonly onProgress?: (progress: DesktopUpdateDownloadProgress) => void
+}
+
+export interface DesktopUpdateDownloadProgress {
+  readonly bytes: number
+  readonly total: number
+  readonly cached?: true
 }
 
 /** Typed failure from installer request, validation, or cancellation. */
@@ -101,6 +109,12 @@ export async function downloadDesktopUpdate(options: DownloadDesktopUpdateOption
   const userDataPath = validatedUserDataPath(options.userDataPath)
   const paths = await prepareDownloadPaths(userDataPath, platform, version)
   throwIfAborted(options.signal)
+  if (await reuseCompletedArtifact(paths.completed, artifact, platform)) {
+    reportProgress(options.onProgress, { bytes: artifact.bytes, total: artifact.bytes, cached: true })
+    return paths.completed
+  }
+  await unlinkIfPresent(paths.completed)
+  reportProgress(options.onProgress, { bytes: 0, total: artifact.bytes })
 
   let response: Response
   try {
@@ -129,7 +143,12 @@ export async function downloadDesktopUpdate(options: DownloadDesktopUpdateOption
 
   let failure: unknown
   try {
-    const received = await writeResponseBody(paths.temporary, response.body, options.signal)
+    const received = await writeResponseBody(
+      paths.temporary,
+      response.body,
+      options.signal,
+      bytes => { reportProgress(options.onProgress, { bytes, total: artifact.bytes }) },
+    )
     if (received.bytes !== artifact.bytes || received.sha256 !== artifact.sha256) {
       throw new UpdateDownloadError('integrity-mismatch', 'The update installer did not match its release manifest.')
     }
@@ -201,7 +220,6 @@ async function prepareDownloadPaths(
     if (!completedStat.isFile() || completedStat.isSymbolicLink()) {
       throw new UpdateDownloadError('invalid-options', 'The completed update path is not a regular file.')
     }
-    await unlink(completed)
   }
 
   return {
@@ -259,6 +277,7 @@ async function writeResponseBody(
   filename: string,
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal | undefined,
+  onProgress: (bytes: number) => void,
 ): Promise<{ readonly bytes: number; readonly sha256: string }> {
   const handle = await open(filename, 'wx', PRIVATE_FILE_MODE)
   const reader = body.getReader()
@@ -279,6 +298,7 @@ async function writeResponseBody(
       await writeAll(handle, chunk.value)
       digest.update(chunk.value)
       bytesWritten += chunk.value.byteLength
+      onProgress(bytesWritten)
     }
     if (bytesWritten === 0) {
       throw new UpdateDownloadError('empty-body', 'The update download service returned an empty body.')
@@ -292,6 +312,44 @@ async function writeResponseBody(
     reader.releaseLock()
     await handle.close()
   }
+}
+
+async function reuseCompletedArtifact(
+  filename: string,
+  artifact: DesktopReleaseArtifact,
+  platform: DesktopDownloadPlatform,
+): Promise<boolean> {
+  if (await lstatOptional(filename) === undefined) return false
+  const handle = await open(filename, 'r')
+  const digest = createHash('sha256')
+  let bytes = 0
+  try {
+    const buffer = Buffer.allocUnsafe(64 * 1024)
+    while (true) {
+      const result = await handle.read(buffer, 0, buffer.byteLength, null)
+      if (result.bytesRead === 0) break
+      bytes += result.bytesRead
+      if (bytes > artifact.bytes) return false
+      digest.update(buffer.subarray(0, result.bytesRead))
+    }
+  } finally {
+    await handle.close()
+  }
+  if (bytes !== artifact.bytes || digest.digest('hex') !== artifact.sha256) return false
+  try {
+    await validateArtifact(filename, platform)
+    return true
+  } catch (cause) {
+    if (cause instanceof UpdateDownloadError && cause.code === 'invalid-artifact') return false
+    throw cause
+  }
+}
+
+function reportProgress(
+  callback: DownloadDesktopUpdateOptions['onProgress'],
+  progress: DesktopUpdateDownloadProgress,
+): void {
+  try { callback?.(progress) } catch {}
 }
 
 async function writeAll(

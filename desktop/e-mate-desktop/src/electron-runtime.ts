@@ -5,6 +5,7 @@ import {
   BrowserWindow,
   clipboard,
   dialog,
+  ipcMain,
   Menu,
   nativeImage,
   nativeTheme,
@@ -30,7 +31,11 @@ import {
   type ProfileUpdateAvailable,
   type ProfileUpdateContext,
 } from './profile-update.ts'
-import { scheduleMacUpdateInstallation, type MacUpdateAppliedSender } from './mac-update-installer.ts'
+import {
+  preflightMacUpdateInstallation,
+  scheduleMacUpdateInstallation,
+  type MacUpdateAppliedSender,
+} from './mac-update-installer.ts'
 import type {
   DesktopNotification,
   DesktopPlatform,
@@ -47,8 +52,16 @@ import type { RendererBootReport } from './renderer-boot-contract.ts'
 import { prepareTrayIcon } from './tray-icons.ts'
 import { downloadDesktopUpdate } from './update-download.ts'
 import type { UpdateCheckResult } from './update-checker.ts'
-import { formatUpdateBytes, profileUpdateCapabilitySummary } from './update-presentation.ts'
-import { desktopWindowOptions } from './window-options.ts'
+import {
+  DESKTOP_UPDATE_CANCEL,
+  DESKTOP_UPDATE_RUN_INTERACTIVE,
+  DESKTOP_UPDATE_STATE_CHANGED,
+  DESKTOP_UPDATE_STATE_READ,
+  formatUpdateBytes,
+  profileUpdateCapabilitySummary,
+  type DesktopUpdateState,
+} from './update-presentation.ts'
+import { desktopWindowOptions, windowsTitleBarOverlay } from './window-options.ts'
 import {
   admittedWindowsUpdateIdentity,
   scheduleWindowsUpdateInstallation,
@@ -153,6 +166,15 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     currentScheduleProtocolFloor: number
     trustedManifestKeys: ProfileUpdateContext['base']['profile_signing_keys']
     profile: DesktopProfileUpdateAdapter | undefined
+    downloadAndOpen(
+      update: Extract<UpdateCheckResult, { status: 'update-available' }>,
+      signal: AbortSignal,
+      report?: (state: DesktopUpdateState) => void,
+    ): Promise<void>
+    publishState(state: DesktopUpdateState): void
+    readPublishedState(): DesktopUpdateState | undefined
+    setCancelHandler(handler: (() => boolean) | undefined): void
+    setInteractiveUpdateHandler(handler: (() => Promise<void>) | undefined): void
   } = {
     get isPackaged() { return app.isPackaged },
     get canDownload() { return app.isPackaged && (process.platform === 'darwin' || process.platform === 'win32') },
@@ -165,7 +187,15 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     profile: undefined,
     confirmDownload: version => this.confirmUpdateDownload(version),
     showManualCheckResult: result => this.showManualUpdateCheckResult(result),
-    downloadAndOpen: (update, signal) => this.downloadAndOpenUpdate(update, signal),
+    downloadAndOpen: (
+      update: Extract<UpdateCheckResult, { status: 'update-available' }>,
+      signal: AbortSignal,
+      report?: (state: DesktopUpdateState) => void,
+    ) => this.downloadAndOpenUpdate(update, signal, report),
+    publishState: state => { this.publishUpdateState(state) },
+    readPublishedState: () => this.updateState,
+    setCancelHandler: handler => { this.cancelUpdate = handler },
+    setInteractiveUpdateHandler: handler => { this.interactiveUpdate = handler },
     notify: notification => { this.showNotification(notification) },
   }
 
@@ -187,6 +217,9 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private rendererStartupCommitTask: Promise<void> | undefined
   private directoryPickTask: Promise<string | null> | undefined
   private profileGeneration = 'bundled'
+  private updateState: DesktopUpdateState | undefined
+  private cancelUpdate: (() => boolean) | undefined
+  private interactiveUpdate: (() => Promise<void>) | undefined
 
   constructor(
     private readonly restart: () => Promise<void>,
@@ -472,6 +505,13 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   setThemeSource(source: DesktopThemeSource): void {
     if (this.scheduled !== undefined && this.window !== undefined) {
       nativeTheme.themeSource = source
+      this.syncWindowsTitleBarOverlay()
+    }
+  }
+
+  private syncWindowsTitleBarOverlay(): void {
+    if (this.platform === 'win32' && this.scheduled?.mode === 'advanced' && this.window !== undefined) {
+      this.window.setTitleBarOverlay(windowsTitleBarOverlay(nativeTheme.shouldUseDarkColors))
     }
   }
 
@@ -639,9 +679,27 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private async downloadAndOpenUpdate(
     update: Extract<UpdateCheckResult, { status: 'update-available' }>,
     signal: AbortSignal,
+    report: (state: DesktopUpdateState) => void = () => {},
   ): Promise<void> {
     if (this.platform !== 'darwin' && this.platform !== 'win32') {
       throw new Error(`@e-mate/desktop: updates are unavailable on ${this.platform}`)
+    }
+    const helperModulePath = fileURLToPath(new URL('./mac-update-helper.js', import.meta.url))
+    const macSpec = this.platform === 'darwin' ? this.scheduled : undefined
+    if (this.platform === 'darwin') {
+      if (macSpec === undefined) throw new Error('@e-mate/desktop: no active shell can exit for update installation')
+      preflightMacUpdateInstallation({
+        targetVersion: update.latestVersion,
+        currentExecutable: process.execPath,
+        userDataPath: app.getPath('userData'),
+        homeDirectory: app.getPath('home'),
+        helperModulePath,
+        sourceCommit: update.sourceCommit,
+        baseContractId: update.baseContractId,
+        scheduleProtocolFloor: update.scheduleProtocolFloor,
+        manifestIdentity: update.manifestIdentity,
+        artifact: update.artifact,
+      })
     }
     const artifactPath = await downloadDesktopUpdate({
       platform: this.platform,
@@ -650,19 +708,24 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       userDataPath: app.getPath('userData'),
       request: (url, init) => net.fetch(url, init),
       signal,
+      onProgress: progress => {
+        report({ stage: 'downloading', bytes: progress.bytes, total: progress.total, ...(
+          progress.cached === true ? { cached: true as const } : {}
+        ) })
+      },
     })
     signal.throwIfAborted()
+    report({ stage: 'verifying' })
+    report({ stage: 'staging' })
 
     if (this.platform === 'darwin') {
-      const spec = this.scheduled
-      if (spec === undefined) throw new Error('@e-mate/desktop: no active shell can exit for update installation')
       const prepared = await scheduleMacUpdateInstallation({
         dmgPath: artifactPath,
         targetVersion: update.latestVersion,
         currentExecutable: process.execPath,
         userDataPath: app.getPath('userData'),
         homeDirectory: app.getPath('home'),
-        helperModulePath: fileURLToPath(new URL('./mac-update-helper.js', import.meta.url)),
+        helperModulePath,
         sourceCommit: update.sourceCommit,
         baseContractId: update.baseContractId,
         scheduleProtocolFloor: update.scheduleProtocolFloor,
@@ -672,12 +735,13 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         signal,
       })
       this.markPreparedUpdateShutdownReady = prepared.markShutdownReady
+      report({ stage: 'waiting-shutdown' })
       this.showNotification({
         title: '正在安装 e-Mate 更新',
         body: `e-Mate ${update.latestVersion} 将自动重新打开。`,
       })
       this.quitting = true
-      spec.requestQuit(0)
+      macSpec!.requestQuit(0)
       return
     }
 
@@ -700,12 +764,18 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       signal,
     })
     this.markPreparedUpdateShutdownReady = prepared.markShutdownReady
+    report({ stage: 'waiting-shutdown' })
     this.showNotification({
       title: '正在安装 e-Mate 更新',
       body: `e-Mate ${update.latestVersion} 将自动重新打开。`,
     })
     this.quitting = true
     spec.requestQuit(0)
+  }
+
+  private publishUpdateState(state: DesktopUpdateState): void {
+    this.updateState = state
+    this.window?.webContents.send(DESKTOP_UPDATE_STATE_CHANGED, state)
   }
 
   /** Keep native-terminal launch failures visible in a packaged GUI process. */
@@ -890,10 +960,28 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       this.platform,
       desktopPreloadPath(),
       bootstrap,
+      nativeTheme.shouldUseDarkColors,
     ))
     window.accessibleTitle = spec.windowTitle
     if (this.platform === 'win32') window.removeMenu()
     this.window = window
+
+    const readUpdateState = (event: Electron.IpcMainEvent): void => {
+      event.returnValue = event.sender === window.webContents ? this.updateState : undefined
+    }
+    const cancelUpdate = (event: Electron.IpcMainEvent): void => {
+      event.returnValue = event.sender === window.webContents ? this.cancelUpdate?.() === true : false
+    }
+    const runInteractiveUpdate = async (event: Electron.IpcMainInvokeEvent): Promise<void> => {
+      if (event.sender !== window.webContents) {
+        throw new Error('@e-mate/desktop: update request did not originate from owning Renderer')
+      }
+      if (this.interactiveUpdate === undefined) throw new Error('@e-mate/desktop: updater is not ready')
+      await this.interactiveUpdate()
+    }
+    ipcMain.on(DESKTOP_UPDATE_STATE_READ, readUpdateState)
+    ipcMain.on(DESKTOP_UPDATE_CANCEL, cancelUpdate)
+    ipcMain.handle(DESKTOP_UPDATE_RUN_INTERACTIVE, runInteractiveUpdate)
 
     const show = (): void => { this.show() }
     const close = (event: Electron.Event): void => {
@@ -942,8 +1030,10 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       }
       if (targetOrigin !== origin) event.preventDefault()
     }
+    const syncWindowsTitleBarOverlay = (): void => { this.syncWindowsTitleBarOverlay() }
 
     app.on('activate', show)
+    if (this.platform === 'win32' && spec.mode === 'advanced') nativeTheme.on('updated', syncWindowsTitleBarOverlay)
     window.on('close', close)
     window.on('page-title-updated', preserveBlankTitle)
     window.webContents.on('context-menu', showContextMenu)
@@ -974,7 +1064,11 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       tray.on('click', show)
       beforeInteractive?.()
     } catch (cause) {
+      ipcMain.off(DESKTOP_UPDATE_STATE_READ, readUpdateState)
+      ipcMain.off(DESKTOP_UPDATE_CANCEL, cancelUpdate)
+      ipcMain.removeHandler(DESKTOP_UPDATE_RUN_INTERACTIVE)
       app.off('activate', show)
+      nativeTheme.off('updated', syncWindowsTitleBarOverlay)
       window.off('page-title-updated', preserveBlankTitle)
       window.webContents.off('context-menu', showContextMenu)
       tray?.off('click', show)
@@ -994,7 +1088,11 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     return async () => {
       if (released) return
       released = true
+      ipcMain.off(DESKTOP_UPDATE_STATE_READ, readUpdateState)
+      ipcMain.off(DESKTOP_UPDATE_CANCEL, cancelUpdate)
+      ipcMain.removeHandler(DESKTOP_UPDATE_RUN_INTERACTIVE)
       app.off('activate', show)
+      nativeTheme.off('updated', syncWindowsTitleBarOverlay)
       window.off('close', close)
       window.off('page-title-updated', preserveBlankTitle)
       window.webContents.off('context-menu', showContextMenu)

@@ -11,6 +11,7 @@ import type {
 } from '../src/runtime.ts'
 import type { DesktopReleaseSigningKey, UpdateCheckResult } from '../src/update-checker.ts'
 import type { DesktopProfileUpdateAdapter, ProfileUpdateAvailable } from '../src/profile-update.ts'
+import { UpdateDownloadError } from '../src/update-download.ts'
 import { apply, Config, inject, type Config as UpdateConfig, type InteractiveUpdateResult } from '../src/updates.ts'
 
 const testConfig: UpdateConfig = {
@@ -26,6 +27,7 @@ const C_TO_B_PROMPT = '6dc1916effcc7915941805b471f2a06c5f5a8b290592417f4cfd0c1db
 
 const SOURCE_COMMIT = 'a'.repeat(40)
 const MANIFEST_SIGNATURE_CONTEXT = Buffer.from('e-mate-desktop-release-manifest-v2\0', 'utf8')
+const MANIFEST_SIGNATURE_CONTEXT_V3 = Buffer.from('e-mate-desktop-release-manifest-v3\0', 'utf8')
 const { privateKey: manifestPrivateKey, publicKey: manifestPublicKey } = generateKeyPairSync('ed25519')
 const TRUSTED_MANIFEST_KEYS: readonly DesktopReleaseSigningKey[] = [{
   id: 'desktop-release-test-key',
@@ -43,6 +45,15 @@ function versionResponse(
   const { signature: _, ...unsigned } = manifest
   mutate(unsigned)
   return Response.json(signManifest(unsigned))
+}
+
+function policyVersionResponse(version: string): Response {
+  const { signature: _, ...v2 } = versionManifest(version)
+  return Response.json(signManifest({
+    ...v2,
+    schema_version: 3,
+    update_policy: { mandatory: true, minimum_supported_version: '2.0.5' },
+  }, MANIFEST_SIGNATURE_CONTEXT_V3))
 }
 
 function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): Record<string, any> {
@@ -92,7 +103,10 @@ function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): 
   })
 }
 
-function signManifest(manifest: Record<string, any>): Record<string, any> {
+function signManifest(
+  manifest: Record<string, any>,
+  context: Buffer = MANIFEST_SIGNATURE_CONTEXT,
+): Record<string, any> {
   return {
     ...manifest,
     signature: {
@@ -100,7 +114,7 @@ function signManifest(manifest: Record<string, any>): Record<string, any> {
       key_id: TRUSTED_MANIFEST_KEYS[0]!.id,
       value: sign(
         null,
-        Buffer.concat([MANIFEST_SIGNATURE_CONTEXT, Buffer.from(canonicalJson(manifest), 'utf8')]),
+        Buffer.concat([context, Buffer.from(canonicalJson(manifest), 'utf8')]),
         manifestPrivateKey,
       ).toString('base64'),
     },
@@ -154,6 +168,10 @@ interface Harness {
   readonly refresh: ReturnType<typeof vi.fn>
   readonly registrationDispose: ReturnType<typeof vi.fn>
   runInteractiveUpdate(): Promise<InteractiveUpdateResult>
+  runRendererUpdate(): Promise<void>
+  getUpdateState(): unknown
+  subscribeUpdateState(listener: (state: any) => void): () => void
+  cancelInteractiveUpdate(): boolean
   dispose(): Promise<void>
 }
 
@@ -185,6 +203,7 @@ async function createHarness(options: {
   const downloadAndOpen = vi.fn(options.downloadAndOpen ?? (async () => {}))
   let tray: DesktopTrayItem | undefined
   let disposer: (() => void | Promise<void>) | undefined
+  let rendererUpdate: (() => Promise<void>) | undefined
   const runtime = {
     updates: {
       isPackaged: options.packaged ?? true,
@@ -199,6 +218,7 @@ async function createHarness(options: {
       confirmDownload,
       showManualCheckResult,
       downloadAndOpen,
+      setInteractiveUpdateHandler: (handler: (() => Promise<void>) | undefined) => { rendererUpdate = handler },
       notify: options.notify ?? ((notification: DesktopNotification) => { notifications.push(notification) }),
     },
     registerTrayItem: (item: DesktopTrayItem) => {
@@ -229,6 +249,13 @@ async function createHarness(options: {
     refresh,
     registrationDispose,
     runInteractiveUpdate: () => ctx.desktopUpdates.runInteractiveUpdate(),
+    runRendererUpdate: async () => {
+      if (rendererUpdate === undefined) throw new Error('Renderer updater is not registered.')
+      await rendererUpdate()
+    },
+    getUpdateState: () => ctx.desktopUpdates.getState(),
+    subscribeUpdateState: listener => ctx.desktopUpdates.subscribe(listener),
+    cancelInteractiveUpdate: () => ctx.desktopUpdates.cancelInteractiveUpdate(),
     dispose: async () => { await disposer?.() },
   }
 }
@@ -238,6 +265,26 @@ afterEach(() => {
 })
 
 describe('desktop update Host plugin', () => {
+  it('routes Renderer checks through the existing manualTask fence and removes the carrier on dispose', async () => {
+    let finish!: () => void
+    const checked = new Promise<Response>(resolve => { finish = () => { resolve(versionResponse('2.0.0')) } })
+    const request = vi.fn(async () => await checked)
+    const harness = await createHarness({ packaged: false, request })
+
+    const renderer = harness.runRendererUpdate()
+    const agent = harness.runInteractiveUpdate()
+    await vi.waitFor(() => { expect(request).toHaveBeenCalledOnce() })
+    finish()
+    await expect(Promise.all([renderer, agent])).resolves.toEqual([
+      undefined,
+      { status: 'up-to-date', installedVersion: '2.0.0', latestVersion: '2.0.0' },
+    ])
+    expect(harness.showManualCheckResult).toHaveBeenCalledOnce()
+
+    await harness.dispose()
+    await expect(harness.runRendererUpdate()).rejects.toThrow('Renderer updater is not registered.')
+  })
+
   it('uses the signed component updater first for a natural-language/manual request', async () => {
     const release = {
       status: 'update-available',
@@ -757,6 +804,193 @@ describe('desktop update Host plugin', () => {
     await vi.waitFor(() => { expect(harness.tray.label()).toBe('e-Mate 2.1.0 Available') })
     expect(harness.notifications).toEqual([])
     expect(harness.tray.label()).toBe('e-Mate 2.1.0 Available')
+  })
+
+  it('publishes one typed transaction state to every updater consumer', async () => {
+    const states: any[] = []
+    const harness = await createHarness({
+      packaged: false,
+      request: async () => policyVersionResponse('2.1.0'),
+      confirmDownload: async () => true,
+      downloadAndOpen: (async (_update: unknown, _signal: AbortSignal, report: (state: any) => void) => {
+        report({ stage: 'downloading', bytes: 512, total: 1024 })
+        report({ stage: 'downloading', bytes: 1024, total: 1024 })
+        report({ stage: 'verifying' })
+        report({ stage: 'staging' })
+        report({ stage: 'waiting-shutdown' })
+      }) as DesktopRuntime['updates']['downloadAndOpen'],
+    })
+    const unsubscribe = harness.subscribeUpdateState(state => { states.push(state) })
+
+    await expect(harness.runInteractiveUpdate()).resolves.toMatchObject({ status: 'scheduled' })
+    unsubscribe()
+
+    expect(states.map(state => state.stage)).toEqual(expect.arrayContaining([
+      'checking', 'available', 'confirming', 'downloading', 'verifying', 'staging',
+      'waiting-shutdown', 'restarting',
+    ]))
+    expect(states).toContainEqual(expect.objectContaining({ stage: 'downloading', bytes: 512, total: 1024 }))
+    for (const state of states.filter(state => ['available', 'confirming', 'downloading', 'verifying', 'staging', 'waiting-shutdown', 'restarting'].includes(state.stage))) {
+      expect(state).toEqual(expect.objectContaining({ mandatory: true, minimumSupportedVersion: '2.0.5' }))
+    }
+    expect(harness.getUpdateState()).toEqual(expect.objectContaining({ stage: 'restarting' }))
+  })
+
+  it('returns a declined policy-bearing update to a stable available snapshot', async () => {
+    const harness = await createHarness({
+      packaged: false,
+      request: async () => policyVersionResponse('2.1.0'),
+      confirmDownload: async () => false,
+    })
+
+    await expect(harness.runInteractiveUpdate()).resolves.toMatchObject({ status: 'declined' })
+    expect(harness.getUpdateState()).toEqual(expect.objectContaining({
+      stage: 'available',
+      mandatory: true,
+      minimumSupportedVersion: '2.0.5',
+    }))
+  })
+
+  it('publishes a stable completed snapshot after a manual up-to-date check', async () => {
+    const harness = await createHarness({ packaged: false, request: async () => versionResponse('2.0.0') })
+
+    await expect(harness.runInteractiveUpdate()).resolves.toMatchObject({ status: 'up-to-date' })
+    expect(harness.getUpdateState()).toEqual({ stage: 'completed', updateKind: 'base', version: '2.0.0' })
+  })
+
+  it('does not leave a no-update Profile check in checking', async () => {
+    const profile = {
+      check: vi.fn(async () => ({
+        status: 'up-to-date' as const,
+        currentGeneration: 'bundled',
+        currentSequence: 0,
+        releaseVersion: '2.0.15',
+        sequence: 1,
+      })),
+      confirm: vi.fn(),
+      install: vi.fn(),
+    } satisfies DesktopProfileUpdateAdapter
+    const harness = await createHarness({
+      packaged: false,
+      profile,
+      request: async () => versionResponse('2.0.0'),
+    })
+
+    await expect(harness.runInteractiveUpdate()).resolves.toMatchObject({ status: 'up-to-date' })
+    expect(harness.getUpdateState()).toEqual({ stage: 'completed', updateKind: 'base', version: '2.0.0' })
+    expect(harness.notifications).toEqual([])
+  })
+
+  it('publishes a typed check failure without notifying during a background network failure', async () => {
+    vi.useFakeTimers()
+    const harness = await createHarness({ request: async () => { throw new TypeError('offline') } })
+
+    await vi.advanceTimersByTimeAsync(testConfig.initialDelayMs)
+    await vi.waitFor(() => { expect(harness.getUpdateState()).toEqual(expect.objectContaining({
+      stage: 'failed',
+      code: 'check-failed',
+      diagnosticId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+    })) })
+    expect(harness.notifications).toEqual([])
+    expect(harness.showManualCheckResult).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['empty response', () => new Response('', { status: 200 })],
+    ['rejected signed policy', () => {
+      const { signature: _, ...manifest } = versionManifest('2.1.0')
+      return Response.json(signManifest({
+        ...manifest,
+        schema_version: 3,
+        update_policy: { mandatory: true, minimum_supported_version: '2.2.0' },
+      }, MANIFEST_SIGNATURE_CONTEXT_V3))
+    }],
+  ])('ends checking with a typed failure for an %s', async (_name, response) => {
+    const harness = await createHarness({ packaged: false, request: async () => response() })
+
+    await expect(harness.runInteractiveUpdate()).resolves.toMatchObject({ status: 'failed' })
+    expect(harness.getUpdateState()).toEqual(expect.objectContaining({
+      stage: 'failed',
+      code: 'check-failed',
+      diagnosticId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+    }))
+  })
+
+  it('keeps a failed confirmed recheck out of the checking state', async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(policyVersionResponse('2.1.0'))
+      .mockResolvedValueOnce(new Response('unavailable', { status: 503 }))
+    const harness = await createHarness({
+      packaged: false,
+      request,
+      confirmDownload: async () => true,
+    })
+
+    await expect(harness.runInteractiveUpdate()).resolves.toMatchObject({ status: 'failed' })
+    expect(harness.getUpdateState()).toEqual(expect.objectContaining({
+      stage: 'failed',
+      code: 'check-failed',
+      diagnosticId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      updateKind: 'base',
+      version: '2.1.0',
+      total: 1024,
+      mandatory: true,
+      minimumSupportedVersion: '2.0.5',
+    }))
+  })
+
+  it('cancels the one active transaction with a typed failure projection', async () => {
+    let signal: AbortSignal | undefined
+    const states: any[] = []
+    const harness = await createHarness({
+      packaged: false,
+      request: async () => policyVersionResponse('2.1.0'),
+      confirmDownload: async () => true,
+      downloadAndOpen: async (_update, nextSignal) => await new Promise<void>((_resolve, reject) => {
+        signal = nextSignal
+        nextSignal.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true })
+      }),
+    })
+    harness.subscribeUpdateState(state => { states.push(state) })
+    const pending = harness.runInteractiveUpdate()
+    await vi.waitFor(() => { expect(signal).toBeDefined() })
+
+    expect(harness.cancelInteractiveUpdate()).toBe(true)
+    await expect(pending).resolves.toMatchObject({ status: 'failed' })
+    expect(signal?.aborted).toBe(true)
+    expect(states.at(-1)).toEqual(expect.objectContaining({
+      stage: 'failed',
+      code: 'cancelled',
+      diagnosticId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      updateKind: 'base',
+      version: '2.1.0',
+      total: 1024,
+      mandatory: true,
+      minimumSupportedVersion: '2.0.5',
+    }))
+  })
+
+  it('preserves the downloader failure code and adds one diagnostic ID', async () => {
+    const states: any[] = []
+    const harness = await createHarness({
+      packaged: false,
+      request: async () => policyVersionResponse('2.1.0'),
+      confirmDownload: async () => true,
+      downloadAndOpen: async () => { throw new UpdateDownloadError('integrity-mismatch', 'fixture') },
+    })
+    harness.subscribeUpdateState(state => { states.push(state) })
+
+    await expect(harness.runInteractiveUpdate()).resolves.toMatchObject({ status: 'failed' })
+    expect(states.at(-1)).toEqual(expect.objectContaining({
+      stage: 'failed',
+      code: 'integrity-mismatch',
+      diagnosticId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      updateKind: 'base',
+      version: '2.1.0',
+      total: 1024,
+      mandatory: true,
+      minimumSupportedVersion: '2.0.5',
+    }))
   })
 
   it('treats a manual available-version selection as a fresh confirmation', async () => {

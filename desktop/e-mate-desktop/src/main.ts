@@ -199,6 +199,9 @@ async function start(): Promise<void> {
     rendererBootSettled = true
     resolveRendererBoot(report)
   }, macUpdateStartupProbation, processGenerationId)
+  if (windowsUpdateCandidate !== undefined || macUpdateStartupProbation) {
+    runtime.updates.publishState({ stage: 'health-check', updateKind: 'base', version: app.getVersion() })
+  }
   const finalExit = (code: number): void => { nativeExit.finish(code) }
   shutdown = createDesktopShutdown(
     async () => {
@@ -229,6 +232,7 @@ async function start(): Promise<void> {
       macUpdateStartupProbation = true
       macUpdateStartupProbeConflict = process.env.EMATE_RELEASE_HEALTH_PROBE === '1'
       runtime.beginRendererStartupProbation()
+      runtime.updates.publishState({ stage: 'health-check', updateKind: 'base', version: app.getVersion() })
     }
   }
   if (process.env.EMATE_RELEASE_HEALTH_PROBE === '1' && !macUpdateStartupProbeConflict) {
@@ -511,6 +515,9 @@ async function start(): Promise<void> {
       id: baseContract.id,
       scheduleProtocolFloor: baseContract.schedule_protocol_floor,
     })
+    if (windowsUpdateCandidate !== undefined) {
+      runtime.updates.publishState({ stage: 'completed', updateKind: 'base', version: app.getVersion() })
+    }
     markDesktopProfileHealthy(selectionStatePath, activeProfileName)
     if (!macUpdateStartupProbation) {
       markProfileGenerationHealthy(generationStatePath, profileGenerationStartup.generation_id)
@@ -551,6 +558,7 @@ async function start(): Promise<void> {
     if (macUpdateStartupAcknowledged) {
       try {
         if (installed !== undefined) {
+          runtime.updates.publishState({ stage: 'completed', updateKind: 'base', version: installed.targetVersion })
           runtime.updates.notify({
             title: 'e-Mate Update Complete',
             body: `e-Mate ${installed.targetVersion} was installed and reopened successfully.`,
@@ -558,11 +566,19 @@ async function start(): Promise<void> {
         } else {
           void readMacUpdateStartupResult(app.getPath('userData'), app.getVersion()).then((result) => {
             if (result?.status === 'rolled-back') {
+              runtime.updates.publishState({ stage: 'rolled-back', updateKind: 'base', version: result.targetVersion })
               runtime.updates.notify({
                 title: 'e-Mate Update Rolled Back',
                 body: `The update to ${result.targetVersion} failed; e-Mate ${result.currentVersion} was restored.`,
               })
             } else if (result?.status === 'failed') {
+              runtime.updates.publishState({
+                stage: 'failed',
+                updateKind: 'base',
+                version: result.targetVersion,
+                code: 'rollback-failed',
+                diagnosticId: randomUUID(),
+              })
               runtime.updates.notify({
                 title: 'e-Mate Update Failed',
                 body: `e-Mate could not finish the update to ${result.targetVersion}.`,
@@ -620,6 +636,15 @@ async function start(): Promise<void> {
     }
   } catch (cause) {
     runtime.stopRendererBootMonitoring()
+    if (windowsUpdateCandidate !== undefined || macUpdateStartupProbation) {
+      runtime.updates.publishState({
+        stage: 'failed',
+        updateKind: 'base',
+        version: app.getVersion(),
+        code: 'health-check-failed',
+        diagnosticId: randomUUID(),
+      })
+    }
     const failure = cause instanceof Error ? cause.stack ?? cause.message : String(cause)
     if (process.env.EMATE_RELEASE_HEALTH_PROBE === '1') {
       writeFileSync(join(app.getPath('userData'), '.release-health-failure'), failure.slice(0, 16 * 1024), {

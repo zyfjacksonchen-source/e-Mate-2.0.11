@@ -22,6 +22,15 @@ export {
   validateInvocationLimits,
 } from './server.ts';
 export { openPostgresUsageStore, PostgresUsageStore } from './postgres-usage-store.ts';
+export {
+  parseUsageActivityQuery,
+  projectUsageActivity,
+  usageActivityDate,
+  type UsageActivity,
+  type UsageActivityDay,
+  type UsageActivityLedgerDay,
+  type UsageActivityQuery,
+} from './activity-contract.ts';
 export { openPostgresTenantModelRoutePolicy, PostgresTenantModelRoutePolicy } from './tenant-model-route-policy.ts';
 export { createSessionTokenVerifier, type SessionTokenVerifierOptions } from './session-auth.ts';
 export { loadProductionConfiguration, startProductionModelGateway } from './production.ts';

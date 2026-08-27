@@ -15,6 +15,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statfsSync,
   statSync,
   writeFileSync,
 } from 'node:fs'
@@ -182,6 +183,32 @@ export interface ScheduleMacUpdateOptions {
   readonly signal?: AbortSignal
 }
 
+export type MacUpdatePreflightOptions = Omit<
+  ScheduleMacUpdateOptions,
+  'dmgPath' | 'parentPid' | 'signal'
+>
+
+export class MacUpdatePreflightError extends Error {
+  readonly code = 'mac-preflight-failed' as const
+
+  constructor(message: string, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause })
+    this.name = 'MacUpdatePreflightError'
+  }
+}
+
+interface ValidatedMacUpdatePreflight {
+  readonly targetVersion: string
+  readonly artifact: DesktopReleaseArtifact
+  readonly targetArch: 'arm64' | 'x64'
+  readonly userDataPath: string
+  readonly homeDirectory: string
+  readonly trashDirectory: string
+  readonly resolvedCurrent: string
+  readonly currentVersion: string
+  readonly installDirectory: string
+}
+
 export interface MacUpdateSwapAdapter {
   readonly rename: (from: string, to: string) => void
   readonly remove: (path: string) => void
@@ -286,6 +313,12 @@ function run(command: string, args: readonly string[]): string {
   if (result.error !== undefined) throw result.error
   if (result.status !== 0) throw new Error((result.stderr || result.stdout || `${command} exited ${String(result.status)}`).trim())
   return result.stdout
+}
+
+function allocatedBytes(path: string): bigint {
+  const match = /^(0|[1-9][0-9]*)\s/u.exec(run('/usr/bin/du', ['-sk', path]))
+  if (match === null) throw new Error('macOS update application size is unavailable')
+  return BigInt(match[1]!) * 1024n
 }
 
 function bundleMetadata(appPath: string): { id: string; version: string } {
@@ -1740,47 +1773,100 @@ async function waitForShutdownReady(request: MacUpdateRequest | LegacyMacUpdateR
   throw new Error('macOS update timed out waiting for Cordis shutdown')
 }
 
+function validateMacUpdatePreflight(options: MacUpdatePreflightOptions): ValidatedMacUpdatePreflight {
+  try {
+    if (process.platform !== 'darwin') throw new Error('macOS update installation is unavailable on this platform')
+    const targetVersion = stableVersion(options.targetVersion)
+    const artifact = validateDesktopReleaseArtifact('darwin', targetVersion, options.artifact)
+    const targetArch = process.arch
+    if (!SOURCE_COMMIT.test(options.sourceCommit) || !BASE_CONTRACT_ID.test(options.baseContractId)
+      || !Number.isSafeInteger(options.scheduleProtocolFloor) || options.scheduleProtocolFloor <= 0
+      || !MANIFEST_IDENTITY.test(options.manifestIdentity)
+      || (targetArch !== 'arm64' && targetArch !== 'x64')
+      || artifact === null || !new URL(artifact.url).pathname.includes(`/${options.sourceCommit}/`)) {
+      throw new Error('macOS update release identity is invalid')
+    }
+    const userDataPath = realDirectory(options.userDataPath)
+    accessSync(userDataPath, constants.W_OK | constants.X_OK)
+    const homeDirectory = realDirectory(options.homeDirectory)
+    const trashDirectory = realDirectory(join(homeDirectory, '.Trash'))
+    accessSync(trashDirectory, constants.W_OK | constants.X_OK)
+    const currentApp = macAppBundleFromExecutable(options.currentExecutable)
+    if (currentApp === undefined) throw new Error('macOS update requires a packaged application bundle')
+    const resolvedCurrent = realDirectory(currentApp)
+    const canonical = [join('/Applications', 'e-Mate.app'), join(homeDirectory, 'Applications', 'e-Mate.app')]
+      .some(path => {
+        try { return realpathSync(path) === resolvedCurrent } catch { return false }
+      })
+    if (!canonical) throw new Error('macOS update requires the canonical e-Mate.app install path')
+    const installDirectory = dirname(resolvedCurrent)
+    accessSync(installDirectory, constants.W_OK | constants.X_OK)
+    const currentVersion = bundleMetadata(resolvedCurrent).version
+    if ((compareSemVerVersions(targetVersion, currentVersion) ?? 0) <= 0) {
+      throw new Error('macOS update target must be newer than the installed version')
+    }
+    const installDevice = statSync(installDirectory).dev
+    if (statSync(trashDirectory).dev !== installDevice) {
+      throw new Error('macOS update backup Trash must be on the application volume')
+    }
+    const relativeHelper = relative(resolvedCurrent, options.helperModulePath)
+    if (!inside(resolvedCurrent, resolve(options.helperModulePath)) || basename(relativeHelper) !== 'mac-update-helper.js') {
+      throw new Error('macOS update helper is outside the installed application')
+    }
+    realFile(options.helperModulePath)
+    const downloadBytes = BigInt(artifact.bytes)
+    const atomicSwapBytes = allocatedBytes(resolvedCurrent)
+    const budgets: ReadonlyArray<readonly [string, bigint]> = statSync(userDataPath).dev === installDevice
+      ? [[userDataPath, downloadBytes + atomicSwapBytes]]
+      : [[userDataPath, downloadBytes], [installDirectory, atomicSwapBytes]]
+    for (const [directory, requiredBytes] of budgets) {
+      const filesystem = statfsSync(directory, { bigint: true })
+      if (filesystem.bavail * filesystem.bsize < requiredBytes) {
+        throw new Error('macOS update has insufficient free space')
+      }
+    }
+    return {
+      targetVersion,
+      artifact,
+      targetArch,
+      userDataPath,
+      homeDirectory,
+      trashDirectory,
+      resolvedCurrent,
+      currentVersion,
+      installDirectory,
+    }
+  } catch (cause) {
+    if (cause instanceof MacUpdatePreflightError) throw cause
+    throw new MacUpdatePreflightError(cause instanceof Error ? cause.message : String(cause), cause)
+  }
+}
+
+/** Fail closed on macOS path, permission, volume and minimum free-space checks before downloading. */
+export function preflightMacUpdateInstallation(options: MacUpdatePreflightOptions): void {
+  validateMacUpdatePreflight(options)
+}
+
 /** Validate and stage an update, then launch the detached replacement helper. */
 export async function scheduleMacUpdateInstallation(options: ScheduleMacUpdateOptions): Promise<PreparedMacUpdateInstallation> {
-  if (process.platform !== 'darwin') throw new Error('macOS update installation is unavailable on this platform')
   options.signal?.throwIfAborted()
-  const targetVersion = stableVersion(options.targetVersion)
-  const artifact = validateDesktopReleaseArtifact('darwin', targetVersion, options.artifact)
-  const targetArch = process.arch
-  if (!SOURCE_COMMIT.test(options.sourceCommit) || !BASE_CONTRACT_ID.test(options.baseContractId)
-    || !Number.isSafeInteger(options.scheduleProtocolFloor) || options.scheduleProtocolFloor <= 0
-    || !MANIFEST_IDENTITY.test(options.manifestIdentity)
-    || (targetArch !== 'arm64' && targetArch !== 'x64')
-    || artifact === null || !new URL(artifact.url).pathname.includes(`/${options.sourceCommit}/`)) {
-    throw new Error('macOS update release identity is invalid')
-  }
-  const userDataPath = realDirectory(options.userDataPath)
-  const homeDirectory = realDirectory(options.homeDirectory)
-  const trashDirectory = realDirectory(join(homeDirectory, '.Trash'))
-  accessSync(trashDirectory, constants.W_OK)
+  const preflight = validateMacUpdatePreflight(options)
+  const {
+    targetVersion,
+    artifact,
+    targetArch,
+    userDataPath,
+    trashDirectory,
+    resolvedCurrent,
+    currentVersion,
+    installDirectory,
+  } = preflight
   const dmgPath = realFile(options.dmgPath)
   if (!inside(join(userDataPath, 'updates', targetVersion), dmgPath)) throw new Error('macOS update disk image is outside the validated update cache')
-  const currentApp = macAppBundleFromExecutable(options.currentExecutable)
-  if (currentApp === undefined) throw new Error('macOS update requires a packaged application bundle')
-  const resolvedCurrent = realDirectory(currentApp)
-  const canonical = [join('/Applications', 'e-Mate.app'), join(homeDirectory, 'Applications', 'e-Mate.app')]
-    .some(path => {
-      try { return realpathSync(path) === resolvedCurrent } catch { return false }
-    })
-  if (!canonical) throw new Error('macOS update requires the canonical e-Mate.app install path')
-  accessSync(dirname(resolvedCurrent), constants.W_OK)
-  const currentVersion = bundleMetadata(resolvedCurrent).version
-  if ((compareSemVerVersions(targetVersion, currentVersion) ?? 0) <= 0) {
-    throw new Error('macOS update target must be newer than the installed version')
-  }
-  if (statSync(trashDirectory).dev !== statSync(dirname(resolvedCurrent)).dev) {
-    throw new Error('macOS update backup Trash must be on the application volume')
-  }
   const transactionId = randomUUID()
   const stateDirectory = join(userDataPath, 'updates', targetVersion, `install-${transactionId}`)
   createMacUpdateDurableDirectory(stateDirectory)
   const suffix = transactionId.slice(0, 8)
-  const installDirectory = dirname(resolvedCurrent)
   const stagedApp = join(installDirectory, `.e-Mate-${targetVersion}-${suffix}.staged.app`)
   const backupApp = join(installDirectory, `.e-Mate-${currentVersion}-${suffix}.backup.app`)
   const failedApp = join(installDirectory, `.e-Mate-${targetVersion}-${suffix}.failed.app`)
@@ -1844,13 +1930,8 @@ export async function scheduleMacUpdateInstallation(options: ScheduleMacUpdateOp
       rmSync(mountPoint, { recursive: true, force: true })
     }
     options.signal?.throwIfAborted()
-    const relativeHelper = relative(resolvedCurrent, options.helperModulePath)
-    if (!inside(resolvedCurrent, resolve(options.helperModulePath)) || basename(relativeHelper) !== 'mac-update-helper.js') {
-      throw new Error('macOS update helper is outside the installed application')
-    }
-    const stagedHelper = join(stagedApp, relativeHelper)
-    realFile(stagedHelper)
-    helper = spawn(join(stagedApp, 'Contents', 'MacOS', 'e-Mate'), [stagedHelper, requestPath], {
+    realFile(options.helperModulePath)
+    helper = spawn(join(resolvedCurrent, 'Contents', 'MacOS', 'e-Mate'), [options.helperModulePath, requestPath], {
       detached: true,
       stdio: 'ignore',
       env: { ...process.env, [RUN_AS_NODE]: '1' },
@@ -2157,7 +2238,6 @@ async function runLegacyMacUpdateHelper(request: LegacyMacUpdateRequest): Promis
   if (helperApp === undefined || realDirectory(helperApp) !== realDirectory(request.stagedApp)) {
     throw new Error('legacy macOS update helper is not running from the staged application')
   }
-  validateBundle(helperApp, request.targetVersion)
   let swapStarted = false
   try {
     writeMacUpdateDurableJson(request.helperReadyPath, {

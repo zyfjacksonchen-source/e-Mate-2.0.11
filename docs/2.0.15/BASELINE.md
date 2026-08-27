@@ -40,6 +40,20 @@ Consequences for 2.0.15:
 3. The 2.0.14 source changes must be audited as existing implementation. T05, T09 and T15 must not recreate them or treat source/CI success as installed closure.
 4. T18 must re-read public pointers immediately before freeze. It may not assume that this 2026-08-27 snapshot is still current.
 
+## 2.0.14 task handoff provenance
+
+The user transferred the changes, conclusions and remaining progress from Codex task `01a02e48-f61f-7352-bc86-b5ec8771d46c` (title `e-Mate 2.0.13-14`) to this 2.0.15 coordinator. That task is historical context, not a second source checkout: its last readable long turn was interrupted and referenced an older dirty 2.0.13 development worktree.
+
+The accepted 2.0.14 implementation is instead fixed by repository evidence:
+
+- `a4fd5170888513e30ea73a915c335fc8c87546f3` restored the existing capability-routing, packaged Find Skill launch and Main/Preload Renderer-bootstrap contracts;
+- `4bfe0c333348dceead6d7e7b4b4f5b1639468dc8` added the exact 2.0.12 macOS request-envelope bridge while preserving the 2.0.13-and-later bound updater path;
+- the tree of `4bfe0c3…` is byte-identical to the squashed protected-main source `5f8c54db7b76276c14f1938c970df155f4e6fd80` (`992143d0f5fbbd15ade365ec6d36a3d8e88126f8`). No old dirty worktree needs to be copied or cherry-picked.
+
+The handoff therefore maps to existing 2.0.15 owners rather than reopening a parallel 2.0.14 train: T05 audits and extends Tool/Image/Search routing, T09 owns updater transactions and compatibility, and T15 owns the remaining runtime/connector and native image-intake acceptance. The old task's broader Pet, Cowart, browser and other pre-scope proposals are not inherited as completed work and do not override the current T00–T18 work orders.
+
+The release conclusion remains unchanged: 2.0.14 source and CI/preparation evidence existed, but no complete Profile release, installed acceptance or public 2.0.14 pointer was produced. Public production remains the exact 2.0.13 receipts below until T18 verifies otherwise.
+
 ## Base, pins and inventory
 
 | Item | Current source fact |

@@ -16,6 +16,7 @@
 }
 
 .controls > button {
+  position: relative;
   width: 32px;
   height: 32px;
   min-width: 32px;
@@ -41,20 +42,70 @@
   outline-offset: 2px;
 }
 
-.runtimeStatus {
-  width: 8px;
-  height: 8px;
-  margin: 0 4px;
+.updateDot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
   border-radius: 999px;
-  flex: none;
-  background: var(--emate-color-brand, #ff6a1a);
+  background: var(--dsw-alias-label-tertiary);
+}
+
+.checking,
+.available,
+.confirming,
+.downloading,
+.verifying,
+.staging,
+.waiting-shutdown,
+.replacing,
+.restarting,
+.health-check,
+.rolling-back { background: var(--emate-color-brand, #ff6a1a); }
+.completed { background: #30a46c; }
+.failed,
+.rolled-back { background: var(--dsw-alias-state-error-primary); }
+
+.updateWide {
+  position: relative;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--dsw-alias-border-inverted);
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dsw-alias-label-primary);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.updateWide:hover,
+.updateWide:focus-visible { background: var(--dsw-alias-interactive-bg-hover); }
+.updateWide:focus-visible { outline: 2px solid var(--emate-color-brand, #ff6a1a); outline-offset: 2px; }
+.updateWide:disabled { cursor: wait; opacity: .55; }
+
+.updateError {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--dsw-alias-state-error-primary);
+  background: var(--dsw-specific-menu);
+  box-shadow: var(--dsw-shadow-lv3);
+  font-size: 12px;
 }
 
 :global(body[data-dsh-desktop-platform='win32']) .controls {
   top: 0;
   right: var(--dsh-desktop-caption-safe-width, 0px);
   gap: 0;
-  color: var(--dsh-desktop-caption-symbol-color, #7f858f);
+  color: var(--dsh-desktop-caption-symbol-color, #2f3337);
 }
 
 :global(body[data-dsh-desktop-platform='win32']) .controls > button {
@@ -70,7 +121,7 @@
 }
 
 :global(body[data-dsh-desktop-platform='win32']) [data-slot='conversation.session.header'] > header {
-  padding-right: calc(162px + var(--dsh-desktop-caption-safe-width, 0px));
+  padding-right: calc(208px + var(--dsh-desktop-caption-safe-width, 0px));
 }
 
 @media (max-width: 720px) {
@@ -79,16 +130,14 @@
   }
 
   :global([data-slot='conversation.session.header'] > header) {
-    padding-right: calc(136px + var(--dsh-desktop-caption-safe-width, 0px));
+    padding-right: calc(176px + var(--dsh-desktop-caption-safe-width, 0px));
   }
-
-  .runtimeStatus { display: none; }
 
   :global(body[data-dsh-desktop-platform='win32']) .controls {
     right: var(--dsh-desktop-caption-safe-width, 0px);
   }
 
   :global(body[data-dsh-desktop-platform='win32']) [data-slot='conversation.session.header'] > header {
-    padding-right: calc(146px + var(--dsh-desktop-caption-safe-width, 0px));
+    padding-right: calc(192px + var(--dsh-desktop-caption-safe-width, 0px));
   }
 }

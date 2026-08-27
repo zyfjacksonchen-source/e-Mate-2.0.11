@@ -4,6 +4,7 @@ export default {
     'collected-output': 'src/collected-output.ts',
     'oauth-callback': 'src/oauth-callback.ts',
     'plugin-source': 'src/plugin-source.ts',
+    status: 'src/status.ts',
   },
   outDir: 'lib',
   format: ['esm'],

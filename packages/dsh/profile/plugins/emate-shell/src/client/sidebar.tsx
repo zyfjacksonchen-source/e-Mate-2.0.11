@@ -55,11 +55,6 @@ interface Props {
   renameSession: (id: string, title: string) => Promise<void>
   archiveSession: (id: string) => Promise<void>
   toggleSidebar: () => void
-  getThemeScheme: () => 'light' | 'dark'
-  subscribeTheme: (listener: () => void) => () => void
-  toggleTheme: () => void
-  LightIcon: Icon
-  DarkIcon: Icon
 }
 
 const COLLAPSED_SESSION_LIMIT = 10
@@ -104,6 +99,7 @@ export function SidebarRoot({
   const [showAll, setShowAll] = useState<Record<string, boolean>>({})
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [creating, setCreating] = useState(false)
   const [picking, setPicking] = useState(false)
   const [renameTarget, setRenameTarget] = useState<SessionSummary | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
@@ -258,11 +254,15 @@ export function SidebarRoot({
   }
 
   const beginSession = async (workspaceId?: string) => {
+    if (creating) return
+    setCreating(true)
     setNotice(null)
     try {
       await (workspaceId === undefined ? startSession() : startSession(workspaceId))
     } catch {
       setNotice('新任务暂时无法创建，请重试。')
+    } finally {
+      setCreating(false)
     }
   }
 
@@ -379,11 +379,12 @@ export function SidebarRoot({
 
   const mobileLayer = createPortal(
     <>
-      {wide && <button className={css.scrim} type="button" aria-label="关闭任务导航" onClick={toggleSidebar} />}
+      {wide && <button className={css.scrim} type="button" title="关闭任务导航" aria-label="关闭任务导航" onClick={toggleSidebar} />}
       {collapsed && (
         <button
           className={css.mobileOpen}
           type="button"
+          title="打开任务导航"
           aria-label="打开任务导航"
           data-emate-mobile-open=""
           ref={mobileOpen}
@@ -401,27 +402,39 @@ export function SidebarRoot({
       <aside ref={root} className={`${css.root} ${collapsed ? css.collapsed : ''}`} style={wide ? { width } : undefined} aria-label="任务导航">
         <div className={css.brandRow}>
           {wide
-            ? <span className={css.brand}><img className={css.logo} src="/assets/e-mate/logo.png" alt="e-Mate" /><small className={css.version}>2.0.13</small></span>
-            : <button className={css.brand} type="button" aria-label="展开任务导航" onClick={toggleSidebar}><img className={css.mark} src="/assets/e-mate/xiaoxin-avatar.png" alt="" aria-hidden="true" /></button>}
-          {wide && (
-            <button className={css.iconButton} type="button" aria-label="搜索会话" aria-expanded={searchOpen} onClick={() => { setSearchOpen(value => !value) }}>
-              <SearchIcon size={16} />
-            </button>
-          )}
-          <button className={css.closeButton} type="button" aria-label={collapsed ? '展开任务导航' : '收起任务导航'} onClick={toggleSidebar}>
+            ? <span className={css.brand}><img className={css.logo} src="/assets/e-mate/logo.png" alt="e-Mate" /><small className={css.version}>2.0.15</small></span>
+            : <button className={css.brand} type="button" title="展开任务导航" aria-label="展开任务导航" onClick={toggleSidebar}><img className={css.mark} src="/assets/e-mate/xiaoxin-avatar.png" alt="" aria-hidden="true" /></button>}
+          <button className={css.closeButton} type="button" title={collapsed ? '展开任务导航' : '收起任务导航'} aria-label={collapsed ? '展开任务导航' : '收起任务导航'} onClick={toggleSidebar}>
             {wide ? <CloseIcon size={18} /> : <PanelIcon size={18} />}
           </button>
         </div>
 
-        <button className={css.newSession} type="button" aria-label="新建任务" aria-current={pathname === '/' ? 'page' : undefined} onClick={() => { void beginSession() }}>
+        <button className={css.newSession} type="button" title="新建任务" aria-label="新建任务" aria-busy={creating || undefined} disabled={creating} aria-current={pathname === '/' ? 'page' : undefined} onClick={() => { void beginSession() }}>
           <NewChatIcon size={18} />
           {wide && <span>新任务</span>}
         </button>
 
         <div className={css.primaryActions}>
           <button
-            className={css.scheduleAction}
+            className={css.searchAction}
+            data-emate-primary-action=""
             type="button"
+            title="搜索会话"
+            aria-label="搜索会话"
+            aria-expanded={searchOpen}
+            onClick={() => {
+              if (!wide) toggleSidebar()
+              setSearchOpen(value => !value)
+            }}
+          >
+            <SearchIcon size={18} />
+            {wide && <span>搜索</span>}
+          </button>
+          <button
+            className={css.scheduleAction}
+            data-emate-primary-action=""
+            type="button"
+            title="定时任务"
             aria-label="定时任务"
             aria-current={pathname === '/schedules' ? 'page' : undefined}
             onClick={openSchedules}
@@ -429,14 +442,14 @@ export function SidebarRoot({
             <ScheduleIcon size={18} />
             {wide && <span>定时任务</span>}
           </button>
-          {renderSlot('sidebar.primary.action', { wide })}
+          {renderSlot('sidebar.primary.action', { wide, active: pathname === '/capabilities' })}
         </div>
 
         {wide && searchOpen && (
           <label className={css.search}>
             <SearchIcon size={16} />
             <input autoFocus type="text" aria-label="搜索会话" placeholder="搜索会话" value={query} onChange={event => { setQuery(event.target.value) }} />
-            <button type="button" aria-label="关闭搜索" onClick={() => { setQuery(''); setSearchOpen(false) }}><CloseIcon size={16} /></button>
+            <button type="button" title="关闭搜索" aria-label="关闭搜索" onClick={() => { setQuery(''); setSearchOpen(false) }}><CloseIcon size={16} /></button>
           </label>
         )}
 
@@ -453,7 +466,7 @@ export function SidebarRoot({
                   <button className={css.sectionToggle} type="button" aria-expanded={!projectsCollapsed} onClick={() => { setProjectsCollapsed(value => !value) }}>
                     <ChevronIcon className={projectsCollapsed ? css.rotated : undefined} size={14} /><span>项目</span>
                   </button>
-                  <button className={css.iconButton} type="button" aria-label={picking ? '正在选择项目文件夹' : '添加项目文件夹'} disabled={picking} onClick={() => { void addWorkspace() }}>
+                  <button className={css.iconButton} type="button" title={picking ? '正在选择项目文件夹' : '添加项目文件夹'} aria-label={picking ? '正在选择项目文件夹' : '添加项目文件夹'} aria-busy={picking || undefined} disabled={picking} onClick={() => { void addWorkspace() }}>
                     <FolderIcon size={16} />
                   </button>
                 </div>
@@ -472,8 +485,8 @@ export function SidebarRoot({
                         <div className={css.projectGroup} key={workspace.workspaceId}>
                           <div className={css.projectRow}>
                             <button className={css.projectMain} type="button" title={`${workspace.title}\n${workspace.path}`} onClick={() => { rows[0] ? openSession(rows[0].id) : void beginSession(workspace.workspaceId) }}><FolderIcon size={16} /><span>{workspace.title}</span></button>
-                            <button className={css.iconButton} type="button" aria-label={open ? `折叠 ${workspace.title} 会话` : `展开 ${workspace.title} 会话`} onClick={() => { setExpanded(value => ({ ...value, [workspace.workspaceId]: !open })) }}><ChevronIcon className={!open ? css.rotated : undefined} size={14} /></button>
-                            <button className={css.iconButton} type="button" aria-label={`为 ${workspace.title} 创建新会话`} onClick={() => { void beginSession(workspace.workspaceId) }}><PlusIcon size={16} /></button>
+                            <button className={css.iconButton} type="button" title={open ? `折叠 ${workspace.title} 会话` : `展开 ${workspace.title} 会话`} aria-label={open ? `折叠 ${workspace.title} 会话` : `展开 ${workspace.title} 会话`} onClick={() => { setExpanded(value => ({ ...value, [workspace.workspaceId]: !open })) }}><ChevronIcon className={!open ? css.rotated : undefined} size={14} /></button>
+                            <button className={css.iconButton} type="button" title={`为 ${workspace.title} 创建新会话`} aria-label={`为 ${workspace.title} 创建新会话`} aria-busy={creating || undefined} disabled={creating} onClick={() => { void beginSession(workspace.workspaceId) }}><PlusIcon size={16} /></button>
                           </div>
                           {open && <div className={css.projectSessions}>{rows.length ? shown.map(sessionRow) : <button className={css.projectEmpty} type="button" onClick={() => { void beginSession(workspace.workspaceId) }}><PlusIcon size={16} /><span>新建项目会话</span></button>}{rows.length > COLLAPSED_SESSION_LIMIT && <button className={css.showMore} type="button" onClick={() => { setShowAll(value => ({ ...value, [workspace.workspaceId]: !value[workspace.workspaceId] })) }}>{showAll[workspace.workspaceId] ? '收起' : `查看更多（${rows.length - shown.length}）`}</button>}</div>}
                         </div>
@@ -501,8 +514,8 @@ export function SidebarRoot({
           {notice && <p className={css.notice} role="status">{notice}</p>}
         </nav>
 
-        <div className={css.footer}>
-          <div className={css.settingsOwner} data-emate-settings-owner="">{renderSlot('sidebar.settings', { wide: false })}</div>
+        <div className={css.settingsOwner} data-emate-settings-owner="">{renderSlot('sidebar.settings', { wide: false })}</div>
+        <div className={css.footer} data-emate-sidebar-footer="">
           {renderSlot('sidebar.footer.action', { wide })}
         </div>
 

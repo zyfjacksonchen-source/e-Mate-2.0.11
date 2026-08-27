@@ -54,12 +54,12 @@ The integration baseline remains the current `release/2.0.15` history. Public pr
 4. Preserve the high-conflict Shell chain: T06 handoff → T11 token/home host → T12 message/gallery → T16 GenUI/Glass handoff → T13 final `@`/Settings/navigation/titlebar integration. T07, T09 and T15 must hand off their exact seams before T13.
 5. T08 hands Header ownership to T13. T17 remains blocked on a real Tencent export. T18 is last.
 
-## Repeated-failure Web consultation
+## Repeated-failure in-app ChatGPT consultation
 
 - Trigger only when the same named acceptance check still fails after at least two materially different, source-backed repair attempts. Re-running the same patch or an unavailable external authority does not count.
 - The owning ticket pauses further speculative edits and prepares one sanitized context packet: governing target-contract clauses, exact owned paths, minimal relevant source and caller flow, failing command/output, observed versus expected behavior, attempts already made, and explicit forbidden changes.
-- Open the signed-in ChatGPT Web surface and select the exact `5.6 sol Pro` model/reasoning option shown by that UI. If that option is unavailable, record the limitation and do not silently substitute another model. Ask one focused root-cause and minimum-fix question with the full packet.
-- Treat the response as advisory evidence only. The original ticket retains ownership, applies only an in-scope minimum change, and must reproduce the result with the same local acceptance check. The consultation cannot authorize new paths, dependencies, architecture, merges, release claims or external writes.
+- Create a separate ChatGPT Work task inside the current ChatGPT/Codex application so the coordinator can wait on it and read its result back directly; do not open the browser/Web ChatGPT path. Ask one focused root-cause and minimum-fix question with the full packet. If the in-app UI exposes the exact `5.6 sol Pro` model/reasoning option, select it. The current task-creation interface cannot force a ChatGPT model, so if that exact option is not exposed, record the limitation and do not silently substitute another model or move the consultation to the Web.
+- Treat the response as advisory evidence only. The coordinator reads the separate in-app task directly, while the original ticket retains ownership, applies only an in-scope minimum change, and must reproduce the result with the same local acceptance check. The consultation cannot authorize new paths, dependencies, architecture, merges, release claims or external writes.
 - Never include credentials, tokens, private account/customer data, signing material or unrestricted logs. Record only a concise sanitized question/answer summary and the subsequent local verification in the ticket's existing evidence file; do not create a new permanent consultation artifact.
 
 ## Acceptance additions

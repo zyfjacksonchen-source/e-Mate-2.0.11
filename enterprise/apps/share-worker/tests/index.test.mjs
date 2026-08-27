@@ -147,7 +147,7 @@ test('creates, opens, downloads, and revokes one authenticated DSH archive', asy
 
   const revoked = await handleRequest(authorizedRequest(
     `https://share.example/v1/shares/${created.share.id}`,
-    { method: 'DELETE' },
+    { method: 'DELETE', headers: { 'x-emate-session-sha256': 'a'.repeat(64) } },
   ), env, activeSession)
   assert.deepEqual(await revoked.json(), { schema_version: 1, revoked: true })
   assert.equal((await handleRequest(new Request(created.share.public_url), env, activeSession)).status, 404)
@@ -155,22 +155,57 @@ test('creates, opens, downloads, and revokes one authenticated DSH archive', asy
 
 test('keeps revoke owner-only and accepts an already-removed share idempotently', async () => {
   const env = environment()
+  const session = 'b'.repeat(64)
   const created = await (await handleRequest(authorizedRequest('https://share.example/v1/shares', {
     method: 'POST',
     headers: {
       'content-type': 'application/zip',
-      'x-emate-session-sha256': 'b'.repeat(64),
+      'x-emate-session-sha256': session,
     },
     body: new Uint8Array([1]),
   }), env, activeSession)).json()
   const url = `https://share.example/v1/shares/${created.share.id}`
 
-  const denied = await handleRequest(authorizedRequest(url, { method: 'DELETE' }, 'user-2'), env, activeSession)
+  const revoke = { method: 'DELETE', headers: { 'x-emate-session-sha256': session } }
+  const denied = await handleRequest(authorizedRequest(url, revoke, 'user-2'), env, activeSession)
   assert.equal(denied.status, 403)
   assert.equal(env.SHARES.objects.size, 2)
 
-  assert.equal((await handleRequest(authorizedRequest(url, { method: 'DELETE' }), env, activeSession)).status, 200)
-  assert.equal((await handleRequest(authorizedRequest(url, { method: 'DELETE' }), env, activeSession)).status, 200)
+  assert.equal((await handleRequest(authorizedRequest(url, revoke), env, activeSession)).status, 200)
+  assert.equal((await handleRequest(authorizedRequest(url, revoke), env, activeSession)).status, 200)
+})
+
+test('versions health and binds revoke to the exact owner/session index', async () => {
+  const env = environment()
+  const health = await handleRequest(new Request('https://share.example/healthz'), env, activeSession)
+  assert.deepEqual(await health.json(), {
+    schema_version: 1,
+    service: 'emate-share',
+    version: 1,
+    ready: true,
+  })
+
+  const session = '1'.repeat(64)
+  const created = await (await handleRequest(authorizedRequest('https://share.example/v1/shares', {
+    method: 'POST',
+    headers: { 'content-type': 'application/zip', 'x-emate-session-sha256': session },
+    body: new Uint8Array([1]),
+  }), env, activeSession)).json()
+  const url = `https://share.example/v1/shares/${created.share.id}`
+
+  const denied = await handleRequest(authorizedRequest(url, {
+    method: 'DELETE',
+    headers: { 'x-emate-session-sha256': '2'.repeat(64) },
+  }), env, activeSession)
+  assert.equal(denied.status, 403)
+  assert.equal(env.SHARES.objects.size, 2)
+
+  const revoked = await handleRequest(authorizedRequest(url, {
+    method: 'DELETE',
+    headers: { 'x-emate-session-sha256': session },
+  }), env, activeSession)
+  assert.equal(revoked.status, 200)
+  assert.equal(env.SHARES.objects.size, 0)
 })
 
 test('fails closed for an invalid login and removes an archive beyond the configured limit', async () => {
@@ -229,4 +264,21 @@ test('paginates the exact owner/session index and never returns another principa
     `https://share.example/v1/shares?session_sha256=${session}`, {}, 'user-2',
   ), env, activeSession)).json()
   assert.deepEqual(anotherOwner.shares, [])
+})
+
+test('expires public reads with 410 and removes the matching owner/session index', async () => {
+  const env = environment()
+  const session = 'f'.repeat(64)
+  const created = await (await handleRequest(authorizedRequest('https://share.example/v1/shares', {
+    method: 'POST',
+    headers: { 'content-type': 'application/zip', 'x-emate-session-sha256': session },
+    body: new Uint8Array([1]),
+  }), env, activeSession)).json()
+  const archive = env.SHARES.objects.get(`shares/${created.share.id}.zip`)
+  archive.customMetadata.expires_at = new Date(Date.now() - 1_000).toISOString()
+
+  const expired = await handleRequest(new Request(created.share.public_url), env, activeSession)
+  assert.equal(expired.status, 410)
+  assert.deepEqual(await expired.json(), { schema_version: 1, error: { code: 'SHARE_EXPIRED' } })
+  assert.equal(env.SHARES.objects.size, 0)
 })

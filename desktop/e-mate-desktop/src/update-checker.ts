@@ -74,6 +74,10 @@ export type UpdateCheckResult = {
   readonly scheduleProtocolFloor: number
   readonly manifestIdentity: string
   readonly artifact: DesktopReleaseArtifact
+  /** Signed release policy; absent for the admitted v2 compatibility manifest. */
+  readonly mandatory?: boolean
+  /** Oldest installed Base admitted by the signed release policy. */
+  readonly minimumSupportedVersion?: string
 }
 
 const DESKTOP_RELEASE_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
@@ -83,7 +87,10 @@ const SOURCE_COMMIT_PATTERN = /^[0-9a-f]{40}$/u
 const BASE_CONTRACT_ID_PATTERN = /^e-mate-desktop-profile-v[1-9][0-9]*-dsh-[0-9a-f]{12}$/u
 const RUN_ID_PATTERN = /^[1-9][0-9]*$/u
 const RELEASE_TARGETS = ['darwin-arm64', 'darwin-x64', 'win32-x64'] as const
-const MANIFEST_SIGNATURE_CONTEXT = Buffer.from('e-mate-desktop-release-manifest-v2\0', 'utf8')
+const MANIFEST_SIGNATURE_CONTEXTS = {
+  2: Buffer.from('e-mate-desktop-release-manifest-v2\0', 'utf8'),
+  3: Buffer.from('e-mate-desktop-release-manifest-v3\0', 'utf8'),
+} as const
 
 const SEMVER_PATTERN =
   /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u
@@ -179,6 +186,11 @@ export async function checkForStableUpdate(
     scheduleProtocolFloor: latest.scheduleProtocolFloor,
     manifestIdentity: latest.manifestIdentity,
     artifact,
+    ...(latest.minimumSupportedVersion === undefined ? {} : {
+      mandatory: latest.mandatory
+        || compareParsedSemVer(current, latest.minimumSupportedVersion) < 0,
+      minimumSupportedVersion: latest.minimumSupportedVersion.version,
+    }),
   }
 }
 
@@ -223,6 +235,8 @@ interface ParsedDesktopReleaseManifest {
   readonly scheduleProtocolFloor: number
   readonly manifestIdentity: string
   readonly artifacts: Record<DesktopReleasePlatform, DesktopReleaseArtifact>
+  readonly mandatory?: boolean
+  readonly minimumSupportedVersion?: ParsedSemVer
 }
 
 function parseVersionResponse(
@@ -261,14 +275,16 @@ function parseAdmittedDesktopReleaseManifest(
   value: unknown,
   trustedKeys: readonly DesktopReleaseSigningKey[],
 ): ParsedDesktopReleaseManifest | null {
-  if (!hasExactKeys(value, [
+  if (!isRecord(value) || (value.schema_version !== 2 && value.schema_version !== 3)) return null
+  const keys = [
     'schema_version', 'document_type', 'release_status', 'version', 'source_commit', 'base_contract_id',
     'schedule_protocol_floor', 'profile_component_aggregate', 'github_artifact_provenance', 'artifacts',
-    'signature',
-  ]) || !isManifestSignature(value.signature)) return null
+    ...(value.schema_version === 3 ? ['update_policy'] : []), 'signature',
+  ]
+  if (!hasExactKeys(value, keys) || !isManifestSignature(value.signature)) return null
   const { signature, ...unsigned } = value
   const parsed = parseUnsignedAdmittedDesktopReleaseManifest(unsigned)
-  if (parsed === null || !verifyManifestSignature(unsigned, signature, trustedKeys)) return null
+  if (parsed === null || !verifyManifestSignature(unsigned, signature, trustedKeys, value.schema_version)) return null
   try {
     return {
       ...parsed,
@@ -280,10 +296,13 @@ function parseAdmittedDesktopReleaseManifest(
 }
 
 function parseUnsignedAdmittedDesktopReleaseManifest(value: unknown): ParsedDesktopReleaseManifest | null {
-  if (!hasExactKeys(value, [
+  if (!isRecord(value) || (value.schema_version !== 2 && value.schema_version !== 3)) return null
+  const keys = [
     'schema_version', 'document_type', 'release_status', 'version', 'source_commit', 'base_contract_id',
     'schedule_protocol_floor', 'profile_component_aggregate', 'github_artifact_provenance', 'artifacts',
-  ]) || value.schema_version !== 2 || value.document_type !== 'emate.desktop-release-manifest'
+    ...(value.schema_version === 3 ? ['update_policy'] : []),
+  ]
+  if (!hasExactKeys(value, keys) || value.document_type !== 'emate.desktop-release-manifest'
     || value.release_status !== 'admitted' || typeof value.version !== 'string'
     || typeof value.source_commit !== 'string' || !SOURCE_COMMIT_PATTERN.test(value.source_commit)
     || typeof value.base_contract_id !== 'string' || !BASE_CONTRACT_ID_PATTERN.test(value.base_contract_id)
@@ -291,6 +310,8 @@ function parseUnsignedAdmittedDesktopReleaseManifest(value: unknown): ParsedDesk
     || !hasExactKeys(value.artifacts, ['darwin', 'win32'])) return null
   const version = parseCanonicalStableVersion(value.version)
   if (version === null) return null
+  const policy = value.schema_version === 3 ? parseUpdatePolicy(value.update_policy, version) : undefined
+  if (value.schema_version === 3 && policy === undefined) return null
   if (!isProfileComponentAggregateSummary(value.profile_component_aggregate)
     || !isGithubArtifactProvenance(value.github_artifact_provenance, value.source_commit as string)) return null
   const darwin = parseManifestArtifact('darwin', version.version, value.source_commit as string, value.artifacts.darwin)
@@ -303,7 +324,20 @@ function parseUnsignedAdmittedDesktopReleaseManifest(value: unknown): ParsedDesk
     scheduleProtocolFloor: value.schedule_protocol_floor,
     manifestIdentity: '',
     artifacts: { darwin, win32 },
+    ...(policy === undefined ? {} : policy),
   }
+}
+
+function parseUpdatePolicy(
+  value: unknown,
+  releaseVersion: ParsedSemVer,
+): Pick<ParsedDesktopReleaseManifest, 'mandatory' | 'minimumSupportedVersion'> | undefined {
+  if (!hasExactKeys(value, ['mandatory', 'minimum_supported_version'])
+    || typeof value.mandatory !== 'boolean'
+    || typeof value.minimum_supported_version !== 'string') return
+  const minimumSupportedVersion = parseCanonicalStableVersion(value.minimum_supported_version)
+  if (minimumSupportedVersion === null || compareParsedSemVer(minimumSupportedVersion, releaseVersion) > 0) return
+  return { mandatory: value.mandatory, minimumSupportedVersion }
 }
 
 function isManifestSignature(value: unknown): value is {
@@ -321,6 +355,7 @@ function verifyManifestSignature(
   manifest: Record<string, unknown>,
   signature: { readonly algorithm: 'ed25519', readonly key_id: string, readonly value: string },
   trustedKeys: readonly DesktopReleaseSigningKey[],
+  schemaVersion: 2 | 3,
 ): boolean {
   const key = trustedKeys.find(candidate => candidate.id === signature.key_id && candidate.algorithm === 'ed25519')
   const signatureBytes = strictBase64(signature.value)
@@ -329,7 +364,7 @@ function verifyManifestSignature(
   try {
     return verify(
       null,
-      Buffer.concat([MANIFEST_SIGNATURE_CONTEXT, Buffer.from(canonicalJson(manifest), 'utf8')]),
+      Buffer.concat([MANIFEST_SIGNATURE_CONTEXTS[schemaVersion], Buffer.from(canonicalJson(manifest), 'utf8')]),
       createPublicKey({ key: publicKeyBytes, format: 'der', type: 'spki' }),
       signatureBytes,
     )

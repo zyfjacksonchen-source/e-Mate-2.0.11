@@ -1,0 +1,212 @@
+{
+  "schema_version": 1,
+  "manifest_id": "e-mate-critical-path-smoke-v1",
+  "bindings": {
+    "message-mode.component": [
+      {
+        "id": "message-mode-build",
+        "type": "command",
+        "cwd": "packages/dsh/profile/plugins/emate-shell",
+        "command": "$NODE",
+        "args": [
+          "../../../../../upstream/deepseek-harness/node_modules/tsdown/dist/run.mjs"
+        ],
+        "timeout_ms": 30000
+      },
+      {
+        "id": "message-mode-focused-tests",
+        "type": "command",
+        "cwd": "packages/dsh/profile/plugins/emate-shell",
+        "command": "$NODE",
+        "args": [
+          "../../../../../upstream/deepseek-harness/node_modules/vitest/vitest.mjs",
+          "run",
+          "tests/activity-fold.client.spec.tsx",
+          "tests/message-mode-settings.client.spec.tsx",
+          "tests/image-gallery.client.spec.tsx"
+        ],
+        "timeout_ms": 30000
+      }
+    ]
+  },
+  "document_type": "emate.2.0.15.ticket-evidence",
+  "ticket": "T12",
+  "title": "消息流简约/详细双模式与类型化图片画廊",
+  "status": "SOURCE_AND_COMPONENT_PASSED",
+  "baseline": {
+    "integration_commit": "6ee16a9312627cad774156d57b42396a2f62798e",
+    "branch": "feat/2.0.15-T12-message-modes",
+    "clean_start": true,
+    "base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0",
+    "harness_commit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606",
+    "desktop_reference_commit": "6074088f5b660206e404b3591fab51fb99c69add",
+    "public_production_version": "2.0.13"
+  },
+  "truth_stage": {
+    "source": "passed",
+    "component_fixture": "passed",
+    "app_directory": "not_run_requires_complete_profile",
+    "candidate": "not_created",
+    "installed": "OPEN_T18",
+    "release": "not_created",
+    "public_production": "unchanged_exact_2.0.13"
+  },
+  "root_cause": {
+    "message_mode": "The existing activity fold unconditionally shadowed the pinned priority-zero assistant-step, tool-call and context node renderers, so users could not select the pinned native detailed projection.",
+    "setting": "The Shell had the pinned client settingsScope seam but no Host-registered e-mate messageFlowMode schema, so there was no native persisted owner for the presentation policy.",
+    "image_revision": "Every durable image receipt previously matched as a start for one call-derived node id. A T05 revision-3 review update could therefore attempt a duplicate start instead of updating the existing gallery node.",
+    "duplicate_gallery_path": "The Shell also registered an assistant-message DOM gallery mover alongside the durable receipt/native Tool-result gallery. Removing that registration leaves one typed gallery node path and does not hide or rewrite the native Tool result."
+  },
+  "resolution": {
+    "native_setting": "The Host registers one inline Schemastery namespace e-mate with messageFlowMode. Missing and damaged values normalize to simple; detailed is the only other retained value. The client binds that namespace through the pinned settingsScope and mutates only its native field.",
+    "presentation_policy": "Simple dynamically registers the existing three priority-minus-one activity-fold shadows. Detailed disposes only those shadows, exposing the already-registered pinned priority-zero assistant-step, tool-call and context renderers directly. Live changes reuse the same chat store, events and node sequence.",
+    "branding": "ThinkingStatusBranding remains registered independently of the message mode.",
+    "typed_gallery": "The gallery parses the frozen T05 v2 receipt and its exact historical terminal form, treats revision 3 as an update to the same call-derived node, uses the native ImageGallery, deduplicates attachment ids within native Tool-result nodes and preserves the untouched Tool-result event/text.",
+    "single_gallery_owner": "The old assistant-message DOM mover is no longer registered in client index. Default simple remains the activity-fold policy; image gallery ownership is not used as a fallback for message folding."
+  },
+  "owner_contract": {
+    "settings_owner": "pinned Host settings namespace plus pinned client settingsScope",
+    "chat_store_owner": "pinned rc.7 conversation Session projection",
+    "detailed_renderers": [
+      "pinned assistant-step priority 0",
+      "pinned tool-call priority 0 and tool.call.toolview",
+      "pinned context priority 0"
+    ],
+    "second_settings_store": false,
+    "local_storage_used": false,
+    "second_chat_store": false,
+    "event_conversion_or_fabrication": false,
+    "detailed_renderer_added": false,
+    "native_tool_result_hidden_or_rewritten": false,
+    "thinking_branding_removed": false
+  },
+  "message_mode_contract": {
+    "namespace": "e-mate",
+    "field": "messageFlowMode",
+    "values": ["simple", "detailed"],
+    "default": "simple",
+    "damaged_value_fallback": "simple",
+    "restart_source": "Host-backed settingsScope snapshot",
+    "live_switch": "scope subscription disposes or restores only the three fold shadow registrations",
+    "node_order_or_content_changed": false
+  },
+  "image_contract": {
+    "source": "T05 emate/image-output schema_version 2 and native tool/result image blocks",
+    "legacy_source": "exact historical call_id plus one image content terminal receipt",
+    "running_receipt_visible": false,
+    "terminal_revision_role": "revision 2 starts one call node; revision 3 updates it",
+    "native_gallery": "@deepseek-ai/dsh-client-ui-attachment ImageGallery",
+    "dedupe_key": "attachmentId within one projected gallery node",
+    "image_intake_changed": false,
+    "attachment_store_changed": false,
+    "model_routing_changed": false,
+    "t15_path_changed": false
+  },
+  "regression_coverage": [
+    "default and damaged simple",
+    "persisted detailed restart snapshot and live simple/detailed switching",
+    "running reasoning plus natural text",
+    "multiple native Tool calls and interrupted Tool state",
+    "GenUI through pinned tool.call.toolview",
+    "context and historical Session node identity/order",
+    "ThinkingStatusBranding independent registration",
+    "T05 revision-2/revision-3 one-node update",
+    "failed and needs-review image states",
+    "native Tool-result attachment dedupe without Tool-result mutation",
+    "image node unaffected by message-mode shadows"
+  ],
+  "verification": [
+    {
+      "command": "pinned Harness pnpm install --frozen-lockfile --ignore-scripts; host/client tsc and tsdown",
+      "result": "PASS: exact rc.7 Host and Client libraries emitted for isolated Shell verification; the first normal install postinstall alone was blocked by lefthook in a shared git worktree, so dependency installation was repeated with scripts disabled"
+    },
+    {
+      "command": "packages/dsh/profile/plugins/emate-shell pnpm run build",
+      "result": "PASS: final Host and Client Shell source compiled; client bundle 314.07 kB"
+    },
+    {
+      "command": "vitest run tests/activity-fold.client.spec.tsx tests/message-mode-settings.client.spec.tsx tests/image-gallery.client.spec.tsx",
+      "result": "PASS: 3 files, 12 tests"
+    },
+    {
+      "command": "packages/dsh/profile/plugins/emate-shell pnpm test",
+      "result": "PASS: 15 files, 93 tests"
+    },
+    {
+      "command": "node scripts/smoke/run.mjs --layer component --case CP-13 --extension docs/2.0.15/evidence/T12.json --require-complete",
+      "result": "PASS: CP-13, 5473 ms, zero pending; the committed evidence extension invoked the final Shell build and three focused T12 suites"
+    },
+    {
+      "command": "componentFiles plus verifyComponentRuntimeImports on the final emitted Shell",
+      "result": "PASS: emitted runtime imports exactly equal the existing five-item Base declaration; settings and Schemastery are bundled by the existing Shell build, so no package base_import expansion remains"
+    },
+    {
+      "command": "node scripts/component-release.mjs inventory",
+      "result": "EXPECTED_STRICT_FAILURE_D006: desktop/e-mate-desktop/base-contract.json runtime imports must equal the component-declared Base ABI union; no second error or bypass"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    }
+  ],
+  "smoke": {
+    "committed_extension": true,
+    "extension_path": "docs/2.0.15/evidence/T12.json",
+    "cp13_duration_ms": 5473,
+    "component_cases": {
+      "CP-03": "passed-native-message-step_with_T10_T15_vision_seam_pending",
+      "CP-13": "passed"
+    },
+    "cp13_pending": 0,
+    "app_directory": "OPEN_T18_COMPLETE_PROFILE_LIVE_AND_RESTART_PROJECTION",
+    "installed": "OPEN_T18"
+  },
+  "d006": {
+    "status": "OPEN_STRICT_T18_BLOCKER_PRESERVED",
+    "predicate": "runtime imports must equal the component-declared Base ABI union",
+    "base_contract_runtime_validator_or_version_modified": false,
+    "bypass_added": false,
+    "owner": "T18 new Base identity and retained-component rebind"
+  },
+  "scope_transfers": [
+    {
+      "authority_commit": "c78d9d1f43b880e49c6a9783eebc17718e12f6cf",
+      "path": "packages/dsh/profile/plugins/emate-shell/src/index.ts",
+      "reason": "Coordinator granted only the inline native e-mate.messageFlowMode Host schema registration."
+    }
+  ],
+  "owner_scope": {
+    "outside_owned_or_transferred_paths_modified": false,
+    "client_index_sequential_lease_used": true,
+    "host_index_transfer_used": true,
+    "package_base_import_change_retained": false,
+    "base_desktop_runtime_validator_version_or_lock_modified": false,
+    "t05_or_t15_owner_paths_modified": false,
+    "production_write_performed": false
+  },
+  "modified_files": [
+    "packages/dsh/profile/plugins/emate-shell/src/index.ts",
+    "packages/dsh/profile/plugins/emate-shell/src/client/activity-fold.tsx",
+    "packages/dsh/profile/plugins/emate-shell/src/client/image-gallery.tsx",
+    "packages/dsh/profile/plugins/emate-shell/src/client/image-gallery.module.css",
+    "packages/dsh/profile/plugins/emate-shell/src/client/image-gallery-contract.ts",
+    "packages/dsh/profile/plugins/emate-shell/src/client/message-mode-settings.tsx",
+    "packages/dsh/profile/plugins/emate-shell/src/client/message-mode-settings.module.css",
+    "packages/dsh/profile/plugins/emate-shell/src/client/index.ts",
+    "packages/dsh/profile/plugins/emate-shell/tests/activity-fold.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/message-mode-settings.client.spec.tsx",
+    "docs/2.0.15/evidence/T12.json"
+  ],
+  "open_acceptance": [
+    "T18 complete Profile app-directory live turn and restart projection in both modes",
+    "T18 exact installed macOS and Windows bytes with running/interrupt/history/GenUI/image visual acceptance",
+    "T18 new Base contract identity and retained-component rebind after D006 clears",
+    "T18 candidate, install, update, rollback and public endpoint receipts"
+  ],
+  "installed_receipts": [],
+  "candidate_created": false,
+  "publish_performed": false,
+  "production_writes": [],
+  "release_claimed": false
+}

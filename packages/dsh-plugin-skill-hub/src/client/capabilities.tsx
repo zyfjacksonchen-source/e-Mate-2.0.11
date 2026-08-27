@@ -22,6 +22,7 @@ interface SkillCard {
 interface SkillDetail {
   skill: SkillCard
   versions: SkillCard[]
+  next_cursor: string | null
 }
 
 interface InstalledSkill {
@@ -33,6 +34,7 @@ interface InstalledSkill {
   invocation: { modelInvocable: boolean; userInvocable: boolean }
   ready: boolean
   recovery_pending: boolean
+  uploader?: { nickname: string; author_ref: string }
   error?: string
 }
 
@@ -78,6 +80,7 @@ interface Props {
 
 interface ControlProps {
   wide: boolean
+  active: boolean
   SkillIcon: ComponentType<{ size?: number }>
 }
 
@@ -190,9 +193,9 @@ function normal(value: string): string {
   return value.trim().toLocaleLowerCase('zh-CN')
 }
 
-export function CapabilityControl({ wide, SkillIcon }: ControlProps) {
+export function CapabilityControl({ wide, active, SkillIcon }: ControlProps) {
   return (
-    <button className={css.sidebarAction} data-wide={wide || undefined} type="button" aria-label="能力中心" onClick={() => { route('/capabilities') }}>
+    <button className={css.sidebarAction} data-emate-primary-action="" data-wide={wide || undefined} type="button" title="能力中心" aria-label="能力中心" aria-current={active ? 'page' : undefined} onClick={() => { route('/capabilities') }}>
       <SkillIcon size={18} />
       {wide && <span>能力中心</span>}
     </button>
@@ -470,13 +473,38 @@ export function CapabilitiesPage({
     setDetailLoading(true)
     setError(null)
     try {
-      const value = rpcValue(await callSkillHub('catalog.detail', { slug: card.slug }), 'Skill 详情读取失败。') as { skill?: unknown; versions?: unknown }
-      if (!value.skill || !Array.isArray(value.versions)) throw new Error('Skill 详情返回了无效数据。')
+      const value = rpcValue(await callSkillHub('catalog.detail', { slug: card.slug, limit: 24 }), 'Skill 详情读取失败。') as { skill?: unknown; versions?: unknown; next_cursor?: unknown }
+      if (!value.skill || !Array.isArray(value.versions) || (value.next_cursor != null && typeof value.next_cursor !== 'string')) throw new Error('Skill 详情返回了无效数据。')
+      value.next_cursor ??= null
       if (detailSlug.current === card.slug) setDetail(value as SkillDetail)
     } catch (detailError) {
       if (detailSlug.current === card.slug) setError(message(detailError))
     } finally {
       if (detailSlug.current === card.slug) setDetailLoading(false)
+    }
+  }
+
+  const loadMoreVersions = async () => {
+    if (selectedCard === null || detail?.next_cursor == null || detailLoading) return
+    const slug = selectedCard.slug
+    setDetailLoading(true)
+    setError(null)
+    try {
+      const value = rpcValue(await callSkillHub('catalog.detail', {
+        slug,
+        cursor: detail.next_cursor,
+        limit: 24,
+      }), 'Skill 版本历史读取失败。') as { versions?: unknown; next_cursor?: unknown }
+      if (!Array.isArray(value.versions) || (value.next_cursor != null && typeof value.next_cursor !== 'string')) throw new Error('Skill 版本历史返回了无效数据。')
+      if (detailSlug.current === slug) setDetail(previous => previous === null ? null : {
+        ...previous,
+        versions: [...previous.versions, ...value.versions as SkillCard[]],
+        next_cursor: (value.next_cursor as string | null | undefined) ?? null,
+      })
+    } catch (detailError) {
+      if (detailSlug.current === slug) setError(message(detailError))
+    } finally {
+      if (detailSlug.current === slug) setDetailLoading(false)
     }
   }
 
@@ -617,7 +645,7 @@ export function CapabilitiesPage({
             <div><dt>内容摘要</dt><dd><code>{selectedCard.package_sha256}</code></dd></div>
           </dl>
           {detailLoading ? <p className={css.detailLoading}>正在读取版本历史…</p> : null}
-          {detail && <div className={css.versions}><strong>版本历史</strong><ul>{detail.versions.map(version => <li key={version.version}><span>v{version.version}</span><code>{version.package_sha256.slice(0, 12)}…</code></li>)}</ul></div>}
+          {detail && <div className={css.versions}><strong>版本历史</strong><ul>{detail.versions.map(version => <li key={version.version}><span>v{version.version}</span><code>{version.package_sha256.slice(0, 12)}…</code></li>)}</ul>{detail.next_cursor && <button type="button" disabled={detailLoading} onClick={() => { void loadMoreVersions() }}>加载更多版本</button>}</div>}
           <p className={css.installNote}>e-Mate 会在当前设备创建绑定账号、版本和摘要的单次安装意图。</p>
           {job && <p className={css.dialogJob} role="status">{job.label} · {JOB_STATUS_LABELS[job.status] ?? job.status}</p>}
           <div className={css.dialogActions}>

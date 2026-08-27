@@ -301,6 +301,25 @@ function publicPolicy(policy) {
   return structuredClone(value)
 }
 
+export function modelImageInputContract(metadata, provider, model) {
+  let capability = 'unknown'
+  if (isRecord(metadata)
+    && metadata.provider === provider
+    && metadata.id === model
+    && Array.isArray(metadata.inputModalities)
+    && metadata.inputModalities.length > 0
+    && metadata.inputModalities.length <= 2
+    && new Set(metadata.inputModalities).size === metadata.inputModalities.length
+    && metadata.inputModalities.every(input => input === 'text' || input === 'image')) {
+    capability = metadata.inputModalities.includes('image') ? 'image-capable' : 'text-only'
+  }
+  return {
+    schema_version: 1,
+    capability,
+    request_boundary: capability === 'text-only' ? 'convert-at-request-boundary' : 'preserve-native',
+  }
+}
+
 export function validateModelPolicy(value, accountSubject, now = Date.now()) {
   const keys = [
     'account_subject', 'allowed_model_ids', 'default_chat_model_id', 'default_chat_reasoning_effort',
@@ -843,6 +862,16 @@ function createService(ctx, table, projectionTable, quota) {
       const policy = await activePolicy()
       if (!allowed(policy, model)) throw new Error(`Model "${model}" is not allowed by the current e-Mate policy.`)
       return publicPolicy(policy)
+    },
+    async imageInputContract(provider, model) {
+      try {
+        const metadata = typeof ctx.llm?.resolveModelInfo === 'function'
+          ? await ctx.llm.resolveModelInfo(provider, model)
+          : undefined
+        return modelImageInputContract(metadata, provider, model)
+      } catch {
+        return modelImageInputContract(undefined, provider, model)
+      }
     },
     markAuditDelivered: quota.markAuditDelivered,
   }

@@ -25,12 +25,13 @@ test('projects real native Schedule events without owning execution or storage',
   let route
   let inspectCount = 0
   let listFailure
+  let sessionPersistence
   apply({
     connection: { rpc: { handle: (channel, handler, options) => {
       route = { channel, handler, options }
       return () => {}
     } } },
-    sessionPersistence: {
+    sessionPersistence: sessionPersistence = {
       listSnapshots: async () => {
         if (listFailure !== undefined) throw listFailure
         return [
@@ -61,6 +62,16 @@ test('projects real native Schedule events without owning execution or storage',
             { type: 'schedule/change', seq: 5, time: 5, data: { version: 1, operation: 'create', schedule: {
               id: 'schedule-3', kind: 'at', prompt: '逾期提醒', scheduledAt: '2020-08-19T12:00:00.000Z',
             } } },
+            { type: 'schedule/change', seq: 6, time: 6, data: { version: 1, operation: 'create', schedule: {
+              id: 'schedule-4', kind: 'after', prompt: '检查交付', afterSeconds: 600,
+              scheduledAt: '2099-08-19T14:00:00.000Z',
+            } } },
+            { type: 'schedule/change', seq: 7, time: 7, data: { version: 1, operation: 'create', schedule: {
+              id: 'schedule-5', kind: 'at', prompt: '取消提醒', scheduledAt: '2099-08-20T12:00:00.000Z',
+            } } },
+            { type: 'schedule/change', seq: 8, time: 8, data: {
+              version: 1, operation: 'delete', id: 'schedule-5',
+            } },
           ],
         }
       },
@@ -78,6 +89,12 @@ test('projects real native Schedule events without owning execution or storage',
     state: 'scheduled', deliveryMode: 'session-local',
   })
   assert.equal(first.value.items.find(item => item.id === 'schedule-3').state, 'overdue')
+  assert.deepEqual(first.value.items.find(item => item.id === 'schedule-4'), {
+    session_id: 'session-1', session_title: '日报会话', id: 'schedule-4', kind: 'after',
+    prompt: '检查交付', afterSeconds: 600, scheduledAt: '2099-08-19T14:00:00.000Z',
+    state: 'scheduled', deliveryMode: 'session-local',
+  })
+  assert.equal(first.value.items.some(item => item.id === 'schedule-5'), false)
   assert.deepEqual(first.value.completed, [{
     session_id: 'session-1', session_title: '日报会话', id: 'schedule-2', kind: 'at',
     prompt: '提交周报', scheduledAt: '2026-08-19T12:00:00.000Z', state: 'completed',
@@ -102,6 +119,18 @@ test('projects real native Schedule events without owning execution or storage',
   const second = await route.handler('list', {})
   assert.deepEqual(second.value.errors, [{ session_id: 'session-bad', message: '该会话的定时任务日志无法读取。' }])
   assert.equal(inspectCount, 3)
+
+  apply({
+    connection: { rpc: { handle: (channel, handler, options) => {
+      route = { channel, handler, options }
+      return () => {}
+    } } },
+    sessionPersistence,
+    effect: callback => callback(),
+  })
+  const restarted = await route.handler('list', {})
+  assert.deepEqual(restarted.value, first.value)
+  assert.equal(inspectCount, 5)
 
   listFailure = new Error('private persistence path /Users/example/.dsh/session.jsonl')
   const internal = await route.handler('list', {})

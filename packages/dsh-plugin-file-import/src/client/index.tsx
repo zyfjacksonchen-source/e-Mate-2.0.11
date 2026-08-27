@@ -96,6 +96,8 @@ function errorRows(files: readonly File[], message: string): ImportRow[] {
 
 export function FileImportControl({ sessionId, input, inputActions, isLoopback, callImport }: FileImportProps) {
   const picker = useRef<HTMLInputElement>(null)
+  const owner = useRef(sessionId)
+  owner.current = sessionId
   const draft = useRef(input.draft)
   draft.current = input.draft
   const [rows, setRows] = useState<ImportRow[]>([])
@@ -103,6 +105,7 @@ export function FileImportControl({ sessionId, input, inputActions, isLoopback, 
   const disabled = busy || input.phase === 'adjudicating' || input.phase === 'submitting' || !isLoopback
 
   const importFiles = useCallback(async (files: readonly File[]) => {
+    const requestSession = sessionId
     if (files.length === 0) return
     if (!isLoopback) {
       setRows(current => [...current, ...errorRows(files, '本地文件导入仅支持当前电脑上的 e-Mate。')])
@@ -132,7 +135,9 @@ export function FileImportControl({ sessionId, input, inputActions, isLoopback, 
         media_type: allowedMediaType(file.name),
         bytes_base64: await base64Of(file),
       })))
+      if (owner.current !== requestSession) return
       const result = await callImport({ session_id: sessionId, files: encoded })
+      if (owner.current !== requestSession) return
       if (!result.ok) throw new Error(result.error?.message ?? '文件导入失败。')
       const imported = importedFiles(result.value)
       if (imported.length !== pending.length) throw new Error('文件导入响应数量不一致。')
@@ -145,12 +150,18 @@ export function FileImportControl({ sessionId, input, inputActions, isLoopback, 
         }
       }))
     } catch (error) {
+      if (owner.current !== requestSession) return
       const message = error instanceof Error ? error.message : '文件导入失败。'
       setRows(current => current.map(row => pending.some(item => item.id === row.id) ? { ...row, phase: 'error', message } : row))
     } finally {
-      setBusy(false)
+      if (owner.current === requestSession) setBusy(false)
     }
   }, [callImport, inputActions, isLoopback, sessionId])
+
+  useEffect(() => {
+    setRows([])
+    setBusy(false)
+  }, [sessionId])
 
   const intake = useCallback((files: readonly File[]) => {
     const images: File[] = []

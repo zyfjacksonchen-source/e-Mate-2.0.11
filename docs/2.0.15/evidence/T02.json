@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "document_type": "emate.2.0.15.ticket-evidence",
+  "ticket": "T02",
+  "baseline": {
+    "integration_commit": "b3773a72274b51032a39cc92d4b0b0db8dcd25ec",
+    "base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0",
+    "harness_commit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606",
+    "source_desktop_version": "2.0.14"
+  },
+  "root_cause": {
+    "problem": "Critical paths were split across package-specific tests and release health checks, so one command could not preserve case identity, truth layer, owner handoff and remaining installed work.",
+    "resolution": "A standard-library manifest runner now composes existing focused checks, requires exact structured probe facts, rejects mock app-dir/installed evidence, waits for a Renderer health acknowledgement and exposes stable owner extension seams."
+  },
+  "manifest": {
+    "id": "e-mate-critical-path-smoke-v1",
+    "path": "scripts/smoke/critical-paths.json",
+    "sha256": "b715d3406f502a265bcc5fb582751c6ace4d38e6633d035357c6e8188f3ac459",
+    "case_range": "CP-01..CP-15",
+    "layers": ["component", "app-dir", "installed"],
+    "extension_contract": "schema_version=1, matching manifest_id, named bindings to validated smoke steps"
+  },
+  "commands": [
+    {
+      "purpose": "runner self-check",
+      "command": "node --test tests/smoke/critical-path-runner.test.mjs"
+    },
+    {
+      "purpose": "component critical-path wall",
+      "command": "node scripts/smoke/run.mjs --layer component --evidence <output.json>"
+    },
+    {
+      "purpose": "unsigned complete Profile app-directory preparation",
+      "command": "yarn workspace @e-mate/desktop package:dir"
+    },
+    {
+      "purpose": "complete Profile app-directory startup",
+      "command": "node scripts/smoke/run.mjs --layer app-dir --case CP-01 --app-dir <unpacked-app> --evidence <output.json>"
+    }
+  ],
+  "results": {
+    "self_check": {
+      "status": "passed",
+      "tests_passed": 10,
+      "tests_failed": 0,
+      "duration_ms": 3623
+    },
+    "component": {
+      "status": "passed-with-pending",
+      "duration_ms": 40999,
+      "budget_ms": 60000,
+      "over_budget": false,
+      "passed_stages": [
+        "CP-01.renderer-health-contract",
+        "CP-02.native-session-route",
+        "CP-03.native-message-render",
+        "CP-04.tool-registry-mutation",
+        "CP-06.native-schedule-tools",
+        "CP-15.home-settings-route"
+      ],
+      "pending_owner_seams": 13
+    },
+    "app_dir": {
+      "status": "passed-with-pending",
+      "preparation": "unsigned unpacked app directory; no DMG or NSIS built",
+      "case": "CP-01",
+      "duration_ms": 50519,
+      "budget_ms": 180000,
+      "renderer_ack_ms": 49132,
+      "facts": {
+        "renderer_healthy": true,
+        "process_alive_only": false,
+        "mocked": false,
+        "version": "2.0.14"
+      },
+      "pending_owner_seam": "startup-clickable.app-dir"
+    },
+    "installed": {
+      "status": "not_run",
+      "owner": "T18",
+      "reason": "No exact 2.0.15 installed candidate, install receipt, real account/Provider authority or macOS/Windows acceptance bytes exist in T02."
+    }
+  },
+  "explicit_follow_up": {
+    "case": "CP-06",
+    "extension": "schedule-restrict.component",
+    "owners": ["T05", "T06"],
+    "regression": "schedules tools.restrict() must not receive unknown global Tool names"
+  },
+  "incremental_owner_seams": [
+    {
+      "work_order": "EM-VISION-INPUT-01",
+      "component_extension": "vision-input.component",
+      "app_dir_extension": "vision-input.app-dir",
+      "installed_extension": "vision-input.installed",
+      "contract_owner": "T10",
+      "implementation_owner": "T15",
+      "installed_owner": "T18",
+      "exact_counts": {
+        "native_attachments": 5,
+        "model_image_blocks": 5,
+        "absolute_path_markers": 0,
+        "skill_find_fallbacks": 0,
+        "cdp_fallbacks": 0,
+        "duplicates": 0
+      },
+      "installed_status": "not_run"
+    }
+  ],
+  "consultation_gate": {
+    "decision": "D009",
+    "status": "not_invoked",
+    "minimum_trigger": "the same named local acceptance check remains red after two materially different source-backed repair attempts",
+    "allowed_surface": "one separate ChatGPT Work task inside the current ChatGPT/Codex application; coordinator waits for and reads it directly",
+    "model_selection": "select exact 5.6 sol Pro only when exposed by the in-app UI; task creation cannot force it, so record the limitation without substitution",
+    "forbidden_surface": "browser or Web ChatGPT",
+    "authority": "sanitized advisory hypothesis only; original local check, Owner and path scope remain binding"
+  },
+  "remaining_real_stages": [
+    "Owning tickets bind Schedule, Skill Hub, Share, Updater, Image execution/input, native @, Search and UI Source/App-dir seams.",
+    "T18 freezes 2.0.15 bytes and runs exact installed candidate, real-account/Provider, macOS/Windows, screenshot, update/rollback and public-readback acceptance.",
+    "T18 proves visible AX-readable shell clickability; the Renderer acknowledgement alone does not prove it."
+  ],
+  "installed_receipts": [],
+  "production_writes": []
+}

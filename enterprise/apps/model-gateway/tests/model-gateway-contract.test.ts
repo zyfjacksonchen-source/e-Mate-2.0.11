@@ -1353,6 +1353,66 @@ test('accepts the pinned Harness pi-ai native session headers without a second t
   });
 });
 
+test('serves strict private-free usage activity with a weak ETag and typed unavailability', async () => {
+  const now = Date.parse('2024-02-29T12:00:00.000Z');
+  const usageStore = new InMemoryUsageStore(limits, () => now);
+  await usageStore.add({
+    tenantId: 'tenant-a',
+    userId: 'user-a',
+    taskId: 'activity-task',
+    traceId: 'activity-trace',
+    modelId: route.id,
+    providerId: route.providerId,
+    providerResponseId: 'activity-response',
+    inputTokens: 10,
+    outputTokens: 5,
+    cacheReadTokens: 2,
+    cacheWriteTokens: 1,
+    costUsd: 0,
+  });
+  await withGateway(async baseUrl => {
+    const path = '/v1/usage/activity?timezone=UTC&start_date=2024-02-29&end_date=2024-02-29';
+    const response = await fetch(`${baseUrl}${path}`, { headers: auth() });
+    assert.equal(response.status, 200);
+    const etag = response.headers.get('etag');
+    assert.match(etag ?? '', /^W\/".+"$/u);
+    const activity = await response.json() as Record<string, unknown>;
+    assert.deepEqual(Object.keys(activity).sort(), [
+      'calculatedAt', 'days', 'endDate', 'periodTotal', 'schemaVersion', 'startDate', 'timezone',
+    ]);
+    assert.equal(activity.periodTotal, '18');
+    assert.doesNotMatch(
+      JSON.stringify(activity),
+      /account|subject|prompt|session|title|file|tool|plugin|content/i,
+    );
+    assert.equal((await fetch(`${baseUrl}${path}`, {
+      headers: { ...auth(), 'if-none-match': etag as string },
+    })).status, 304);
+
+    for (const invalid of [
+      '/v1/usage/activity?timezone=UTC%2B8&start_date=2024-02-29&end_date=2024-02-29',
+      '/v1/usage/activity?timezone=UTC&start_date=2023-02-29&end_date=2023-02-29',
+      '/v1/usage/activity?timezone=UTC&start_date=2023-01-01&end_date=2024-01-02',
+      '/v1/usage/activity?timezone=UTC&start_date=2024-02-29&end_date=2024-02-29&user_id=user-b',
+    ]) {
+      const rejected = await fetch(`${baseUrl}${invalid}`, { headers: auth() });
+      assert.equal(rejected.status, 400);
+      assert.equal(
+        ((await rejected.json()) as { error: { code: string } }).error.code,
+        'INVALID_USAGE_ACTIVITY_QUERY',
+      );
+    }
+    assert.equal((await fetch(`${baseUrl}${path}`, { method: 'POST', headers: auth() })).status, 405);
+
+    usageStore.accountUsageActivity = async () => { throw new Error('private database detail'); };
+    const unavailable = await fetch(`${baseUrl}${path}`, { headers: auth() });
+    assert.equal(unavailable.status, 503);
+    assert.deepEqual(await unavailable.json(), {
+      error: { code: 'USAGE_ACTIVITY_UNAVAILABLE', message: 'Usage activity temporarily unavailable' },
+    });
+  }, undefined, undefined, undefined, limits, route, undefined, usageStore);
+});
+
 test('proxies only an authorized medium request and returns signed aggregate usage', async () => {
   await withGateway(async (baseUrl, upstreamRequests) => {
     const catalogResponse = await fetch(`${baseUrl}/v1/models`, {
@@ -2642,12 +2702,15 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         upstreamApiKey: searchKey,
       },
     });
-    const currentClientResponse = await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.13`, {
-      headers: auth(),
-    });
-    assert.equal(currentClientResponse.status, 200);
-    assert.deepEqual(await currentClientResponse.json(), releasedClientBody);
-    const unknownClientResponse = await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.14`, {
+    for (const clientVersion of ['2.0.13', '2.0.14', '2.0.15']) {
+      const currentClientResponse = await fetch(
+        `${baseUrl}/v1/runtime-models?client_version=${clientVersion}`,
+        { headers: auth() },
+      );
+      assert.equal(currentClientResponse.status, 200);
+      assert.deepEqual(await currentClientResponse.json(), releasedClientBody);
+    }
+    const unknownClientResponse = await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.16`, {
       headers: auth(),
     });
     assert.equal(unknownClientResponse.status, 400);
@@ -2657,8 +2720,8 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         message: 'Unsupported runtime models client version',
       },
     });
-    assert.equal(enabledCalls.get(searchCredentialRoute.id), 2);
-    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 2);
+    assert.equal(enabledCalls.get(searchCredentialRoute.id), 4);
+    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 4);
     assert.equal(keyCalls.includes(internalDeepSeekRoute.id), false);
     const catalogResponse = await (await fetch(`${baseUrl}/v1/models`, { headers: auth() })).json() as {
       models: Array<{ id: string }>;
@@ -2757,6 +2820,12 @@ test('keeps GPT runtime available while managed search is denied or unavailable'
         credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
       });
       assert.doesNotMatch(JSON.stringify(body), /search-secret-never-leak/u);
+      const activity = await fetch(
+        `http://127.0.0.1:${address.port}/v1/usage/activity?timezone=UTC&start_date=2024-02-29&end_date=2024-02-29`,
+        { headers: auth() },
+      );
+      assert.equal(activity.status, 200);
+      assert.equal(((await activity.json()) as { periodTotal: string }).periodTotal, '0');
     } finally {
       server.close();
       await once(server, 'close');

@@ -3,12 +3,12 @@ import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { ACCEPTED_PREDECESSOR, assertAcceptedPredecessor, PRODUCT_UI_REFERENCE } from './change-impact.mjs'
 import { assertHarnessSource, HARNESS_COMMIT } from './harness-provenance.mjs'
+import { VERSION as productVersion } from './release-source.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const repository = 'zyfjacksonchen-source/e-Mate-2.0.11'
 const repositoryUrl = `git+https://github.com/${repository}.git`
 const target = readFileSync(resolve(root, 'docs/target-contract.md'), 'utf8')
-const productVersion = '2.0.14'
 const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
 const desktopWorkspace = JSON.parse(readFileSync(resolve(root, 'desktop/package.json'), 'utf8'))
 const desktop = JSON.parse(readFileSync(resolve(root, 'desktop/e-mate-desktop/package.json'), 'utf8'))
