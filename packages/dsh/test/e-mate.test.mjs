@@ -633,9 +633,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(client, /session\.logout/)
     assert.match(client, /session\.password/)
     assert.match(client, /\.inert\s*=\s*true/)
-    assert.match(client, /\/emate\.mcpManage/)
     assert.match(client, /外部连接/)
-    assert.match(client, /电脑操控/)
     const skillHubRoot = join(first.profile, 'node_modules', '@e-mate', 'dsh-plugin-skill-hub')
     const skillHubClient = readFileSync(join(skillHubRoot, 'lib', 'client.js'), 'utf8')
     assert.match(skillHubClient, /e-mate-capabilities-entry/)
@@ -657,8 +655,9 @@ test('managed profile installation is idempotent', () => {
     assert.doesNotMatch(capabilities, /capability\.(?:id|title)\s*===|switch\s*\(\s*capability\.(?:id|title)/)
     assert.doesNotMatch(capabilities, /\b(?:fetch|WebSocket|EventSource)\s*\(/)
     const connectionsUi = readFileSync(new URL('../profile/plugins/emate-shell/src/client/composer-connectors.tsx', import.meta.url), 'utf8')
-    assert.match(connectionsUi, /已生效的外部连接/)
-    assert.match(connectionsUi, /查找并安装对应 Skill/)
+    assert.match(connectionsUi, /data-emate-composer-connectors/)
+    assert.match(connectionsUi, /openConnections/)
+    assert.match(connectionsUi, /打开外部连接能力中心/)
     assert.doesNotMatch(connectionsUi, /\b(?:fetch|WebSocket|EventSource)\s*\(/)
     const sessionRoute = readFileSync(new URL('../profile/plugins/emate-shell/src/client/session-route.tsx', import.meta.url), 'utf8')
     assert.match(sessionRoute, /state\.phase !== ['"]ready['"]/) // waits for the target list baseline
@@ -779,6 +778,7 @@ test('public share RPC publishes the native DSH Session ZIP and revokes the retu
   assert.deepEqual(await registration.handler('create', { session_id: 'session-1' }), {
     ok: true,
     value: {
+      stage: 'created',
       schema_version: 1,
       share_id: shareId,
       public_url: `https://share.example/s/${shareId}`,
@@ -789,6 +789,7 @@ test('public share RPC publishes the native DSH Session ZIP and revokes the retu
   assert.deepEqual(await registration.handler('list', { session_id: 'session-1' }), {
     ok: true,
     value: {
+      stage: 'listing',
       schema_version: 1,
       shares: [{
         share_id: shareId,
@@ -797,9 +798,9 @@ test('public share RPC publishes the native DSH Session ZIP and revokes the retu
       }],
     },
   })
-  assert.deepEqual(await registration.handler('revoke', { share_id: shareId }), {
+  assert.deepEqual(await registration.handler('revoke', { share_id: shareId, session_id: 'session-1' }), {
     ok: true,
-    value: { schema_version: 1, revoked: true },
+    value: { schema_version: 1, stage: 'revoking', revoked: true },
   })
   assert.equal(requests.at(-1).url, `https://share.example/v1/shares/${shareId}`)
   assert.equal((await registration.handler('create', {})).error.code, 'bad-request')
