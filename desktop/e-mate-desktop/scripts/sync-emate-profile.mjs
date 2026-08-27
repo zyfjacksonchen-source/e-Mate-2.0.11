@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import sharp from 'sharp'
 import { syncEmatePluginBundles } from '../../../scripts/sync-emate-plugin-bundles.mjs'
 
 const desktopRoot = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -64,22 +63,6 @@ if (registry.product !== 'e-Mate' || registry.version !== version
   || registry.harness_commit !== 'b2b1650b01f0ee88d81837a9b5c050f9f763f606') {
   throw new Error('sync-emate-profile: bundled e-Mate profile identity drifted')
 }
-
-const sourceBytes = await sharp(await readFile(mark), { failOn: 'warning' })
-  .resize({ width: 720, height: 720, fit: 'contain' })
-  .png()
-  .toBuffer()
-const roundedSurface = Buffer.from(`
-  <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024">
-    <rect x="32" y="32" width="960" height="960" rx="224" fill="#000000"/>
-  </svg>
-`)
-await sharp(roundedSurface, { failOn: 'warning' })
-  .composite([{ input: sourceBytes, left: 152, top: 152 }])
-  .toColourspace('rgb16')
-  .withIccProfile('srgb')
-  .png({ compressionLevel: 9, palette: false })
-  .toFile(join(desktopRoot, 'build', 'app-icon.png'))
 
 await writeFile(join(destination, 'desktop-source.json'), `${JSON.stringify({
   schema_version: 1,
