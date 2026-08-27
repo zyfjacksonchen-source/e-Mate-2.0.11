@@ -9,7 +9,10 @@ import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigge
 
 const Icon = () => <svg />
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  delete document.body.dataset.dshDesktopPlatform
+})
 
 describe('e-Mate 2.0.13 composer projection', () => {
   it('routes external connections into the existing collaboration capability surface', () => {
@@ -53,6 +56,7 @@ describe('e-Mate 2.0.13 composer projection', () => {
   })
 
   it('keeps a picked @电脑操控 reference visible in the native composer', () => {
+    document.body.dataset.dshDesktopPlatform = 'darwin'
     let registered: InputTriggerSource | undefined
     registerComputerUseTrigger({
       effect(run: () => () => void) { return run() },
@@ -64,7 +68,7 @@ describe('e-Mate 2.0.13 composer projection', () => {
       },
     })
     expect(registered?.onPick({
-      candidate: { name: '电脑操控' },
+      candidate: { name: '电脑操控', hint: '可插入' },
       session: { sessionId: 'session-1' as never },
       position: 'inline',
       via: 'menu',
