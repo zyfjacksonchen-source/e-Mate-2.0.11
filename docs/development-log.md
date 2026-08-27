@@ -3096,3 +3096,14 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 2.0.14 没有完整 signed Profile publication、installed acceptance 或 public production receipt；公开 signed/legacy/desired-state 仍为精确 2.0.13。本次接管只写 2.0.15 总控文档，不触碰产品、旧任务工作树、生产对象或用户安装态。
 - Remaining blockers: T15 尚未执行；T18 必须重放公开前驱更新、Profile/新 Base、安装回滚和公网回读。2.0.14 的未发布状态不能因任务移交而提升。
 - Next exact action: 继续按依赖合并 T06/T07/T10，再放行 T11/T15；T18 最终以 2.0.15 exact bytes 关闭继承的安装与发布缺口。
+
+## 2026-08-27 · 2.0.15 T05/T06/T08/T09/T14 源码总线检查点
+
+- Goal checkpoint: 原生 Tool 路由、定时任务、在线分享、更新事务与 C03 生产图标五个独立 Owner 已按租约合入 `release/2.0.15`；本检查点只提升到 merged source/component evidence，不创建 RC、不安装、不发布。
+- Frozen baseline / current HEAD: 合入产品提交分别为 T05 `718765c`、T06 `c8764d0`（任务最终树 `dc0e3d5` 的产品文件完全相同，最终 CP-06 回执由 `7062700` 同步）、T08 `40d412a`、T09 `488f41d`、T14 `34999c4`；2.0.14 历史接管记录为 `6004658`。公开生产仍是精确 2.0.13。
+- Inspected native seam: T05 保持唯一 Tool Registry/Search；T06 复用 native Schedule event projection 与 Workspace/Session/Composer；T08 复用现有 Share Worker；T09 贯通唯一 updater typed state；T14 删除 Profile 同步对图标的重复覆盖并由单一 C03 源生成各平台资产。
+- Decision and forbidden alternatives: 不建第二 Tool registry、scheduler、share transport、updater 或图标源；T06 修改继续遵守 `schedule_create` 成功后再 `schedule_delete`。D006 Base ABI union 不弱化，仍由 T18 以新 Base identity 关闭。
+- Verification commands and results: T06 最终任务证据为 Schedule projection `1/1`、Shell `24/24`、T05 Schedule visibility `3/3`、CP-06 `267 ms / 0 pending`；协调总线独立重建 Harness Host/Client 后再次通过 Schedule `1/1`、Shell `24/24` 和 Shell build。T09 独立回归为 updater `292 passed / 1 existing skipped` 与四套 TypeScript 检查通过；T14 generator、图标测试 `5/5`、package consumer `1/1` 与原生 ICNS 提取通过。所有合入后 `git diff --check` 与租约范围通过。
+- Immutable evidence / receipt: `docs/2.0.15/evidence/T05.json`、`T06.json`、`T08.json`、`T09.json`、`T14.json` 只记录源码/组件真相；没有候选、安装字节、真实账号双端验收、签名、R2/Feed 或公网写入。
+- Remaining blockers: T07 与 T10 仍在执行；T11 等待 T06+T10，T15 等待 T10；T17 等待真实腾讯文档导出；T18 独占新 Base、RC、真实安装/更新/回滚和公网回读。
+- Next exact action: 先审查并合入 T07/T10；随后按高冲突顺序放行 T11，再依次推进 T12、T16、T13，并在 T10 后并行启动 T15。
