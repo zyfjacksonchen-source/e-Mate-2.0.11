@@ -42,6 +42,12 @@ When the same named acceptance check remains red after at least two materially d
 
 Task `01a02e48-f61f-7352-bc86-b5ec8771d46c` is now owned by the 2.0.15 coordinator for conclusions and remaining work. Repository commit/tree evidence is authoritative: protected `main@5f8c54d…` has the exact same tree as the completed 2.0.14 branch tip `4bfe0c3…`. Do not copy its older dirty 2.0.13 worktree, revive an independent 2.0.14 release train, or reimplement its four accepted contracts. T05/T09/T15 consume those contracts under their current leases; installed/public closure remains T18. Broader ideas from the old task enter 2.0.15 only when an explicit current work order owns them.
 
+### D011 — Native image adaptation must remain inside the prepared adapter boundary
+
+T15 candidate `96da539…` is rejected for integration: recursively calling `ctx.llm.stream(wire)` after a text-only conversion discards the Agent Loop's captured `PreparedLlmCall` registration and may dispatch through a replacement adapter after HMR. T15 receives the minimal shared-owner repair in the pinned `upstream/deepseek-harness` checkout: only `packages/llm/llm/src/index.ts`, the narrow prepared-call regression under `packages/llm/llm/tests/`, and the root `upstream/deepseek-harness` gitlink. The native LLM owner must expose a registration-bound transient message transform after the original marked/frozen request has passed observers exactly once and before the captured adapter is called; it must reject provider/model/signal/session or other envelope drift. T15 then consumes that seam without a recursive LLM dispatch. No upstream version tag, remote push, Base contract, Desktop version, release object or production state may change here; T18 alone creates and binds the honest successor Base identity after component imports freeze.
+
+Before T15 can merge, its Vision component must also prove emitted imports with the real component verifier, remove any declaration not present in emitted code, and replace synthetic non-existent file blocks with a real native Attachment/File Import coexistence probe. Complete Profile app-directory and installed acceptance remain explicitly open until the successor Base exists; source/component evidence must not label those stages passed.
+
 ## Exclusive static scopes
 
 | Ticket | Exact owned paths while active |
