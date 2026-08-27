@@ -308,6 +308,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     const catalog = new Map(inheritedSchemas
       .filter(schema => restrictableNames.has(schema.name))
       .map(schema => [schema.name, catalogEntry(schema, resolved.searchAliases.get(schema.name) ?? [])]))
+    if (catalog.size > 0 && [...catalog.keys()].every(name => matchesAlwaysVisible(name, resolved))) return
     const eligibleNames = new Set(catalog.keys())
     const state: AgentState = {
       agent,

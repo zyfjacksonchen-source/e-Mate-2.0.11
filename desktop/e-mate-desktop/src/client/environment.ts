@@ -1,8 +1,15 @@
+import type {
+  DesktopBootstrapMode,
+  DesktopBootstrapPlatform,
+  DesktopRendererBootstrap,
+} from '../desktop-bootstrap-contract.ts'
+import { validateDesktopRendererBootstrap } from '../desktop-bootstrap-contract.ts'
+
 /** Desktop renderer modes accepted from the Electron-owned page URL. */
-export type DesktopClientMode = 'compatibility' | 'advanced'
+export type DesktopClientMode = DesktopBootstrapMode
 
 /** Host platforms whose native chrome has a desktop presentation. */
-export type DesktopClientPlatform = 'darwin' | 'win32' | 'linux'
+export type DesktopClientPlatform = DesktopBootstrapPlatform
 
 /** Validated renderer environment supplied by the Electron Host. */
 export interface DesktopClientEnvironment {
@@ -26,7 +33,12 @@ type EnvironmentStorage = Pick<Storage, 'getItem' | 'setItem'>
 export function parseDesktopClientEnvironment(
   search: string,
   storage?: EnvironmentStorage,
+  bootstrap?: DesktopRendererBootstrap,
 ): DesktopClientEnvironment {
+  if (bootstrap !== undefined) {
+    const native = validateDesktopRendererBootstrap(bootstrap)
+    return { mode: native.mode, platform: native.platform }
+  }
   const current = new URLSearchParams(search)
   const source = !current.has('dsh-desktop-mode') && !current.has('dsh-desktop-platform')
     ? storage?.getItem(SESSION_KEY) ?? search

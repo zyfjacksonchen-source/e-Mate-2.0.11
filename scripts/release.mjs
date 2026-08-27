@@ -13,7 +13,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import { PACKAGE_NAME, releaseSource } from './release-source.mjs'
 
-export const VERSION = '2.0.13'
+export const VERSION = '2.0.14'
 const HARNESS_VERSION = '0.1.0-rc.7'
 const HARNESS_COMMIT = 'b2b1650b01f0ee88d81837a9b5c050f9f763f606'
 const REPOSITORY = 'zyfjacksonchen-source/e-Mate-2.0.11'

@@ -19,6 +19,9 @@ const DEFAULT_PROFILE = 'DSH_DESKTOP_DEFAULT_PROFILE'
 const DSH_HOME = 'DSH_HOME'
 const PATH = 'PATH'
 const DESKTOP_PNPM = 'EMATE_DESKTOP_PNPM'
+const DESKTOP_RUN_AS_NODE = 'EMATE_DESKTOP_RUN_AS_NODE'
+const DESKTOP_PNPM_ENTRY = 'EMATE_DESKTOP_PNPM_ENTRY'
+const DESKTOP_CLEAR_ENV = 'EMATE_DESKTOP_CLEAR_ENV'
 const ELECTRON_HEADERS_URL = 'https://electronjs.org/headers'
 const DIRECTORY_MODE = 0o700
 const EXECUTABLE_FILE_MODE = 0o700
@@ -411,8 +414,15 @@ export function installDesktopPnpmRuntime(options: DesktopPnpmRuntimeOptions): D
     windows ? PRIVATE_FILE_MODE : EXECUTABLE_FILE_MODE,
   )
   const environment = options.environment ?? process.env
-  const previousDesktopPnpm = environment[DESKTOP_PNPM]
-  environment[DESKTOP_PNPM] = pnpmShimPath
+  const managedEnvironment = {
+    [DESKTOP_PNPM]: pnpmShimPath,
+    [DESKTOP_RUN_AS_NODE]: options.appExecutable,
+    [DESKTOP_PNPM_ENTRY]: options.pnpmBinPath,
+    [DESKTOP_CLEAR_ENV]: clearEnvironmentPath,
+  }
+  const previousManagedEnvironment = Object.fromEntries(Object.keys(managedEnvironment)
+    .map(name => [name, environment[name]]))
+  Object.assign(environment, managedEnvironment)
   const disposePath = installPathDirectory(environment, pathDir, options.platform)
 
   return {
@@ -423,9 +433,12 @@ export function installDesktopPnpmRuntime(options: DesktopPnpmRuntimeOptions): D
     clearEnvironmentPath,
     dispose: () => {
       disposePath()
-      if (environment[DESKTOP_PNPM] !== pnpmShimPath) return
-      if (previousDesktopPnpm === undefined) delete environment[DESKTOP_PNPM]
-      else environment[DESKTOP_PNPM] = previousDesktopPnpm
+      for (const [name, value] of Object.entries(managedEnvironment)) {
+        if (environment[name] !== value) continue
+        const previous = previousManagedEnvironment[name]
+        if (previous === undefined) delete environment[name]
+        else environment[name] = previous
+      }
     },
   }
 }

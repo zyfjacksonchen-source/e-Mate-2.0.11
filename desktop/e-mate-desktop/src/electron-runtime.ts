@@ -21,6 +21,7 @@ import { createRequire } from 'node:module'
 import { basename, isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
+import type { DesktopRendererBootstrap } from './desktop-bootstrap-contract.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
 import {
   checkProfileUpdate,
@@ -185,11 +186,13 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private openScheduleStartupLatch: (() => void | Promise<void>) | undefined
   private rendererStartupCommitTask: Promise<void> | undefined
   private directoryPickTask: Promise<string | null> | undefined
+  private profileGeneration = 'bundled'
 
   constructor(
     private readonly restart: () => Promise<void>,
     private readonly onRendererBoot: (report: RendererBootReport) => void = () => {},
     private rendererStartupProbation = false,
+    private readonly runtimeId = randomUUID(),
   ) {
     if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
       throw new Error(`@e-mate/desktop: unsupported Electron platform ${process.platform}`)
@@ -201,6 +204,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   configureProfileUpdates(context: Omit<ProfileUpdateContext, 'request'>): void {
     if (this.updates.profile !== undefined) throw new Error('@e-mate/desktop: Profile updater is already configured')
     this.updates.currentScheduleProtocolFloor = context.base.schedule_protocol_floor
+    this.profileGeneration = context.activeGenerationId
     this.updates.trustedManifestKeys = context.base.profile_signing_keys
     const configured: ProfileUpdateContext = {
       ...context,
@@ -872,7 +876,21 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (this.platform === 'darwin') app.dock?.setIcon(icon)
     const origin = new URL(spec.url).origin
     nativeTheme.themeSource = spec.readThemeSource()
-    const window = new BrowserWindow(desktopWindowOptions(spec, icon, this.platform, desktopPreloadPath()))
+    const bootstrap: DesktopRendererBootstrap = {
+      schemaVersion: 1,
+      mode: spec.mode,
+      platform: this.platform,
+      profileGeneration: this.profileGeneration,
+      runtimeId: this.runtimeId,
+      windowKind: 'main',
+    }
+    const window = new BrowserWindow(desktopWindowOptions(
+      spec,
+      icon,
+      this.platform,
+      desktopPreloadPath(),
+      bootstrap,
+    ))
     window.accessibleTitle = spec.windowTitle
     if (this.platform === 'win32') window.removeMenu()
     this.window = window

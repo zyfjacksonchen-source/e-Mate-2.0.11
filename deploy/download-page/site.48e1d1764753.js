@@ -1,5 +1,5 @@
 export const MAX_INDEX_BYTES = 64 * 1024;
-const VERSION = "2.0.13";
+const VERSION = "2.0.14";
 const R2_ORIGIN = "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev";
 const DESKTOP_MANIFEST_URL = `${R2_ORIGIN}/desktop/manual/v${VERSION}/latest.json`;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -54,8 +54,8 @@ export function normalizeDownloadIndex(raw) {
   const artifacts = object(manifest.artifacts, "桌面制品");
   exactKeys(artifacts, ["darwin", "win32"], "桌面制品");
   const downloads = [
-    releaseArtifact(artifacts.darwin, manifest.source_commit, "macos-universal", "e-Mate-2.0.13-mac-universal.dmg"),
-    releaseArtifact(artifacts.win32, manifest.source_commit, "windows-x64", "e-Mate-2.0.13-win-x64-Setup.exe"),
+    releaseArtifact(artifacts.darwin, manifest.source_commit, "macos-universal", "e-Mate-2.0.14-mac-universal.dmg"),
+    releaseArtifact(artifacts.win32, manifest.source_commit, "windows-x64", "e-Mate-2.0.14-win-x64-Setup.exe"),
   ];
   return Object.freeze({
     version: manifest.version,

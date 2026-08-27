@@ -219,7 +219,10 @@ try {
     { provider: 'mock', model: 'mock' },
   )
   const initialToolNames = new Set(ctx.tools.schemas(disclosureAgent).map(schema => schema.name))
-  if (!initialToolNames.has('tool_search') || initialToolNames.has('office_write')) {
+  if (!initialToolNames.has('tool_search')
+    || !initialToolNames.has('imagegen')
+    || !initialToolNames.has('image_pack')
+    || initialToolNames.has('office_write')) {
     throw new Error('assembled Profile did not apply progressive Tool disclosure')
   }
   const disclosure = await ctx.tools.execute({

@@ -23,6 +23,21 @@ describe('desktop client environment', () => {
       .toEqual({ mode: 'compatibility', platform: 'win32' })
   })
 
+  it('prefers the immutable Preload bootstrap over missing or malformed URL state', () => {
+    const bootstrap = {
+      schemaVersion: 1 as const,
+      mode: 'advanced' as const,
+      platform: 'win32' as const,
+      profileGeneration: 'generation-123',
+      runtimeId: 'runtime-123',
+      windowKind: 'main' as const,
+    }
+    expect(parseDesktopClientEnvironment('', undefined, bootstrap))
+      .toEqual({ mode: 'advanced', platform: 'win32' })
+    expect(parseDesktopClientEnvironment('?dsh-desktop-mode=glass', undefined, bootstrap))
+      .toEqual({ mode: 'advanced', platform: 'win32' })
+  })
+
   it.each([
     ['', 'dsh-desktop-mode'],
     ['?dsh-desktop-mode=glass&dsh-desktop-platform=darwin', 'dsh-desktop-mode'],

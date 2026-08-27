@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-vision-toolkit",
-  "version": "2.0.13",
+  "version": "2.0.14",
   "description": "Enterprise-policy adapter for the pinned DSH-native Vision Toolkit",
   "type": "module",
   "license": "MIT",

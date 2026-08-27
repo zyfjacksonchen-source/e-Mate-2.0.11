@@ -575,7 +575,7 @@ test('download site stages exact bytes and a closed release-bound website handof
     'assets/emate-platform-windows.dd86c8094b5a.png',
     'index.html',
     'install-macos.html',
-    'site.a1a94f1e36f1.js',
+    'site.48e1d1764753.js',
     'styles.c2f7dccc8398.css',
   ])
   for (const entry of plan.public_readback.files) {
@@ -601,14 +601,14 @@ test('download site stages exact bytes and a closed release-bound website handof
   }), /not the exact admitted source/u)
 })
 
-test('one admitted producer feeds the updater, legacy 2.0.12, and 2.0.13 download site', async t => {
+test('one admitted producer feeds the updater, legacy 2.0.13, and 2.0.14 download site', async t => {
   const page = readFileSync('deploy/download-page/index.html', 'utf8')
   const macGuide = readFileSync('deploy/download-page/install-macos.html', 'utf8')
-  const scriptName = 'site.a1a94f1e36f1.js'
+  const scriptName = 'site.48e1d1764753.js'
   const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
-  assert.equal(validateDownloadPage(page, macGuide, script), '2.0.13')
+  assert.equal(validateDownloadPage(page, macGuide, script), '2.0.14')
   assert.throws(
-    () => validateDownloadPage(page.replace('data-desktop-version="2.0.13"', 'data-desktop-version="2.0.12"'), macGuide, script),
+    () => validateDownloadPage(page.replace('data-desktop-version="2.0.14"', 'data-desktop-version="2.0.13"'), macGuide, script),
     /desktop manifest contract is incomplete/u,
   )
   assert.equal(scriptName.split('.')[1], createHash('sha256').update(script).digest('hex').slice(0, 12))
@@ -638,9 +638,9 @@ test('one admitted producer feeds the updater, legacy 2.0.12, and 2.0.13 downloa
   assert.match(page, /未签名/u)
   assert.match(page, /e-Mate 会校验、替换并自动重开/u)
   assert.match(page, /\/ecorex-agent\/admin\//u)
-  assert.match(page, /已安装 2\.0\.12 的用户可在应用内确认更新到 2\.0\.13/u)
-  assert.match(macGuide, /全新安装 2\.0\.13/u)
-  assert.match(macGuide, /已安装 2\.0\.12 的用户可在应用内确认更新/u)
+  assert.match(page, /已安装 2\.0\.13 的用户可在应用内确认更新到 2\.0\.14/u)
+  assert.match(macGuide, /全新安装 2\.0\.14/u)
+  assert.match(macGuide, /已安装 2\.0\.13 的用户可在应用内确认更新/u)
   assert.doesNotMatch(`${page}\n${macGuide}`, /@e-mate|dsh-plugin|dsh-pet|Cowart|Excalidraw/u)
   assert.match(macGuide, /\/usr\/bin\/arch -arm64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)
   assert.match(macGuide, /\/usr\/bin\/arch -x86_64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)

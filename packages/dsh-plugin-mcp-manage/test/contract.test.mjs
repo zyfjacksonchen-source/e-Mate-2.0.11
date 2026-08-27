@@ -10,7 +10,7 @@ const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
 const runtime = readFileSync(new URL('../lib/index.mjs', import.meta.url), 'utf8')
 
 test('MCP management keeps native DSH ownership and secrets out of settings', () => {
-  assert.equal(manifest.version, '2.0.13')
+  assert.equal(manifest.version, '2.0.14')
   assert.equal(manifest.eMate.runtime, '@deepseek-ai/dsh-mcp-client')
   assert.equal(manifest.eMate.mcpSdkVersion, '1.29.0')
   assert.match(source, /ctx\.loader\.(?:create|update)/u)

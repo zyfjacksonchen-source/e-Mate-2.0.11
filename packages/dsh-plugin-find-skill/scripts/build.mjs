@@ -67,8 +67,14 @@ const cliPath = join(root, 'lib/cli.js')
 let cli = await readFile(cliPath, 'utf8')
 const imports = `import { join } from 'node:path';`
 const command = `    const [command, ...fixed] = tokens;\n    const handle = subprocess.spawn({\n        argv: [command, ...fixed, ...args],`
-cli = replaceExactlyOnce(cli, imports, `import { isAbsolute, join } from 'node:path';\nimport { throwawayEnvironment } from "./emate-safety.js";`, 'CLI imports')
-cli = replaceExactlyOnce(cli, command, `    const [command, ...fixed] = tokens;\n    const managedPnpm = command === 'pnpm' ? process.env.EMATE_DESKTOP_PNPM : undefined;\n    if (managedPnpm !== undefined && !isAbsolute(managedPnpm))\n        throw new Error('EMATE_DESKTOP_PNPM must be an absolute path');\n    const executable = managedPnpm ?? command;\n    const handle = subprocess.spawn({\n        argv: [executable, ...fixed, ...args],`, 'CLI command')
+cli = replaceExactlyOnce(cli, imports, `import { isAbsolute, join } from 'node:path';\nimport { pathToFileURL } from 'node:url';\nimport { throwawayEnvironment } from "./emate-safety.js";`, 'CLI imports')
+cli = replaceExactlyOnce(cli, command, `    const [command, ...fixed] = tokens;\n    const managedPnpm = command === 'pnpm' ? {\n        executable: process.env.EMATE_DESKTOP_RUN_AS_NODE,\n        entry: process.env.EMATE_DESKTOP_PNPM_ENTRY,\n        clearEnvironment: process.env.EMATE_DESKTOP_CLEAR_ENV,\n    } : undefined;\n    if (managedPnpm !== undefined && Object.values(managedPnpm).some(value => typeof value !== 'string' || !isAbsolute(value)))\n        throw new Error('packaged pnpm direct launch inputs must be absolute paths');\n    const argv = managedPnpm === undefined\n        ? [command, ...fixed, ...args]\n        : [managedPnpm.executable, '--import', pathToFileURL(managedPnpm.clearEnvironment).href, managedPnpm.entry, ...fixed, ...args];\n    const handle = subprocess.spawn({\n        argv,`, 'CLI command')
+cli = replaceExactlyOnce(
+  cli,
+  `        env: options.env,`,
+  `        env: managedPnpm === undefined ? options.env : { ...options.env, ELECTRON_RUN_AS_NODE: '1' },`,
+  'CLI managed environment',
+)
 cli = replaceSection(
   cli,
   'function throwawayEnv(home) {',

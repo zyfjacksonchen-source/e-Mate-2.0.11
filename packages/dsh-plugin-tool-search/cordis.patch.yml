@@ -12,6 +12,8 @@
           - get_goal
           - glob
           - grep
+          - image_pack
+          - imagegen
           - pwsh
           - read
           - skill

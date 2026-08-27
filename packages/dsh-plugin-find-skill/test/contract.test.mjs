@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { parse } from 'yaml'
 import { apply } from '../lib/index.js'
+import { runCli } from '../lib/cli.js'
 import { installSkill, updateSkill } from '../lib/install.js'
 import { registerTools } from '../lib/tools.js'
 
@@ -33,7 +34,7 @@ test('find-skill is pinned and limits persistent installation to connector sourc
   const installer = await readFile(new URL('../lib/install.js', import.meta.url), 'utf8')
   const client = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   const runtime = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
-  assert.equal(pkg.version, '2.0.13')
+  assert.equal(pkg.version, '2.0.14')
   assert.equal(pkg.dsh.upstream.commit, '5a7f18b4535835a81de47c0cc2ca8ceb6e97a4e6')
   assert.match(patch, /cliCommand: 'pnpm dlx skills@1\.5\.22'/u)
   assert.match(patch, /registerFindTool: true/u)
@@ -310,7 +311,7 @@ test('pinned Skill bytes are verified before an existing device-global install i
     persistentSkillCandidates: [candidate],
     globalSkillRoot: join(scratch, 'global'),
     tempSkillRoot: join(scratch, 'fetches'),
-    cliCommand: 'pnpm dlx skills@1.5.22',
+    cliCommand: 'test-skills',
   }
   let notifications = 0
   const provider = { notifyChanged: () => { notifications += 1 } }
@@ -358,7 +359,7 @@ test('device-global Skill update preserves the old bundle on digest failure and 
     persistentSkillCandidates: [candidate],
     globalSkillRoot: globalRoot,
     tempSkillRoot: join(scratch, 'fetches'),
-    cliCommand: 'pnpm dlx skills@1.5.22',
+    cliCommand: 'test-skills',
   }
   let notifications = 0
   const provider = { notifyChanged: () => { notifications += 1 } }
@@ -439,7 +440,7 @@ test('a fetched receipt symlink is rejected before the existing Skill or externa
     persistentSkillCandidates: [candidate],
     globalSkillRoot: globalRoot,
     tempSkillRoot: join(scratch, 'fetches'),
-    cliCommand: 'pnpm dlx skills@1.5.22',
+    cliCommand: 'test-skills',
   }
 
   await assert.rejects(
@@ -549,11 +550,51 @@ test('bundled connector reconciliation restores an interrupted swap and never ov
   await assert.rejects(stat(join(globalSkillDir, '.connect-feishu-cli.e-mate-staging')), { code: 'ENOENT' })
 })
 
-test('find-skill uses the desktop-owned pnpm shim without relying on ambient PATH lookup', async () => {
+test('find-skill launches packaged pnpm through direct Electron-as-Node inputs', async () => {
   const builtCli = await readFile(new URL('../lib/cli.js', import.meta.url), 'utf8')
-  assert.match(builtCli, /command === 'pnpm' \? process\.env\.EMATE_DESKTOP_PNPM/u)
-  assert.match(builtCli, /!isAbsolute\(managedPnpm\)/u)
-  assert.match(builtCli, /argv: \[executable, \.\.\.fixed, \.\.\.args\]/u)
+  assert.match(builtCli, /EMATE_DESKTOP_RUN_AS_NODE/u)
+  assert.match(builtCli, /EMATE_DESKTOP_PNPM_ENTRY/u)
+  assert.match(builtCli, /EMATE_DESKTOP_CLEAR_ENV/u)
+  assert.match(builtCli, /ELECTRON_RUN_AS_NODE: '1'/u)
+  assert.doesNotMatch(builtCli, /EMATE_DESKTOP_PNPM\b/u)
+
+  const previous = Object.fromEntries([
+    'EMATE_DESKTOP_RUN_AS_NODE', 'EMATE_DESKTOP_PNPM_ENTRY', 'EMATE_DESKTOP_CLEAR_ENV',
+  ].map(name => [name, process.env[name]]))
+  Object.assign(process.env, {
+    EMATE_DESKTOP_RUN_AS_NODE: '/Applications/e-Mate.app/Contents/MacOS/e-Mate',
+    EMATE_DESKTOP_PNPM_ENTRY: '/Applications/e-Mate.app/Contents/Resources/app/node_modules/pnpm/bin/pnpm.mjs',
+    EMATE_DESKTOP_CLEAR_ENV: '/tmp/e-mate/clear-env.mjs',
+  })
+  let spec
+  const subprocess = { spawn(value) {
+    spec = value
+    return {
+      done: Promise.resolve({ exitCode: 0, signal: null }),
+      collected: {
+        stdout: { readFrom: () => ({ text: '' }) },
+        stderr: { readFrom: () => ({ text: '' }) },
+      },
+    }
+  } }
+  try {
+    await runCli(subprocess, 'pnpm dlx skills@1.5.22', ['--version'], {
+      cwd: '/tmp/e-mate', env: { HOME: '/tmp/e-mate' },
+    })
+  } finally {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  }
+  assert.deepEqual(spec.argv, [
+    '/Applications/e-Mate.app/Contents/MacOS/e-Mate',
+    '--import',
+    'file:///tmp/e-mate/clear-env.mjs',
+    '/Applications/e-Mate.app/Contents/Resources/app/node_modules/pnpm/bin/pnpm.mjs',
+    'dlx', 'skills@1.5.22', '--version',
+  ])
+  assert.deepEqual(spec.env, { HOME: '/tmp/e-mate', ELECTRON_RUN_AS_NODE: '1' })
 })
 
 test('find-skill CLI receives an isolated environment without host credentials', () => {

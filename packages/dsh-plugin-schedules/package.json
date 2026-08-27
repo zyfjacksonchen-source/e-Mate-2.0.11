@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-schedules",
-  "version": "2.0.13",
+  "version": "2.0.14",
   "description": "DSH-native schedule management projection for e-Mate.",
   "type": "module",
   "main": "lib/index.js",

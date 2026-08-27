@@ -334,6 +334,7 @@ describe('Electron compatibility runtime', () => {
       show: false,
       webPreferences: {
         preload: expect.stringMatching(/preload\.cjs$/),
+        additionalArguments: [expect.stringMatching(/^--e-mate-desktop-bootstrap=/u)],
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -661,7 +662,7 @@ describe('Electron compatibility runtime', () => {
         appExecutable: process.execPath,
         electronVersion: '43.4.0',
         profileName: 'desktop',
-        productVersion: '2.0.13',
+        productVersion: '2.0.14',
         profileDir: '/tmp/dsh-home/profiles/desktop',
         homeDir: '/tmp/dsh-home',
         spawn: expect.any(Function),
@@ -1134,7 +1135,7 @@ describe('Electron compatibility runtime', () => {
     expect(runtime.updates).toMatchObject({
       isPackaged: false,
       canDownload: false,
-      currentVersion: '2.0.13',
+      currentVersion: '2.0.14',
       currentScheduleProtocolFloor: 0,
       trustedManifestKeys: [],
       statePath: join('/tmp/dsh-desktop-user-data', 'updates', 'state.json'),

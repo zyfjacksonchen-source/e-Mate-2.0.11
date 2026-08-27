@@ -3023,3 +3023,31 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: protected CI 的 macOS artifact `9630468258`（GitHub archive `398978466` bytes / digest `003b02d4…d541`）包含正式 DMG `398564646` bytes / SHA-256 `b93c13a635f20ac539dc14df094b12f00308d3f1e3e7003432cb25adaa8363c6`；Windows artifact `9630137421`（GitHub archive `281345619` bytes / digest `c7a5df65…2a4f`）包含正式 EXE `281343997` bytes / SHA-256 `91a5e106945ffc76b32e47f445a039738420bd3ca0dde43cc79a92f30c1e5d23`。Desktop release artifact `9630509826`、Profile publication artifact `9630667382`、admission artifact `9630721509`、Cloudflare handoff artifact `9630819194` 均绑定 `6f63b523…`。`desktop/manual/v2.0.13/latest.json`、`desktop/signed/latest.json`、`desktop/latest.json` 均为 `2961` bytes / SHA-256 `d26b9ffb5f30531bc5de6c9f66aab47c3718248e2ff109d82cd3a763f0c02887`。active Profile 为 darwin-arm64 `10579` / `ef845777…a462` / generation `8f13e65c…3822`，darwin-x64 `10567` / `374318de…bd9d` / generation `569c5fe5…72e`，win32-x64 `10503` / `beef5d1d…b6c1` / generation `c363cee9…deaf`。
 - Remaining blockers: 2.0.13 最终事故发布范围没有剩余生产阻断项，真相阶段为 `production released`。已明确移交 2.0.14 的 OPEN 能力不是 2.0.13 发布缺口；本条没有把它们关闭。此前归档任务清理后当前线程已无可更新的原生 Goal 记录，因此不伪造第二 Goal 或完成回执。
 - Next exact action: 2.0.14 必须从 `public-2011/main@6f63b523…` 及本条公开回执重新锁定基线，使用 Profile/plugin-first 内环继续；后续版本只使用 signed pointer，永久不得再次改写 2.0.13 legacy bootstrap pointer。
+
+## 2026-08-27 · 2.0.14 单一能力路由与运行时契约热修启动
+
+- Goal checkpoint: 用户明确把 2.0.14 收窄为且仅为一组能力路由与运行时契约回归；本版本不接收 Goal、Canvas、Pet/C03、Better Sidebar、通用 Deliverables、审计分类、定时任务、视觉或其他迭代项。
+- Frozen baseline / current HEAD: 权威 `public-2011/main@4474939fe186739a7745584c6589e55695302cb2`，产品前驱字节仍来自 `6f63b5238d5874a1973a5ce0c1c9f832d277c865`；Base `e-mate-desktop-profile-v7-dsh-b2b1650b01f0`、Harness `0.1.0-rc.7@b2b1650b01f0ee88d81837a9b5c050f9f763f606`、Desktop reference `6074088f5b660206e404b3591fab51fb99c69add` 不变。独立分支 `fix/2.0.14-capability-contract-recovery` 起始无 diff。
+- Binding documents read: 根 `AGENTS.md`、`docs/target-contract.md`、2.0.13 production released 最新完整记录、用户提供的能力路由/launcher/Renderer 根因材料及本 S00 合同。
+- Inspected native seam: Tool Search 在每个 `agent/created` 使用 rc.7 `agent.ctx.tools.restrict()`；ImageGen 叶子已有原生 `toolFilter: {allow:['imagegen']}` 却被提示和测试强制先 `tool_search`。Find Skill 把 `EMATE_DESKTOP_PNPM` shell/`.cmd` shim 放入 `SubprocessRuntime.spawn(argv[0])`，而 Desktop 已有 Electron-as-Node + pnpm JS + clear-env 的直启事实。主窗口只把 mode/platform 写进 URL，client 以 query/sessionStorage 为权威；Preload 尚未提供 native bootstrap。
+- Experiment or why unnecessary: 插件 owner、失败断言和固定 rc.7 seam 已由当前源码与生成测试直接证明，且 launcher/Preload 属于 Base-only Electron 生命周期，Creation Mode 不能代表；因此不创建动态第二路径。永久实现只复用 rc.7 restriction/toolFilter、现有 Desktop runtime inputs 与现有 Preload。
+- Decision and forbidden alternatives: ImageGen 直接可见并让叶子直接调用；Find Skill 复用 Desktop 直启输入；Renderer 以 Main/Preload bootstrap 优先。禁止新增 capability lease 框架、意图关键词路由、飞书专用 EINVAL catch、第二进程运行时、第二 Renderer store、第二 Tool registry 或重写 Session/Agent。
+- Changed scope: 当前仅新增 `docs/slices/2.0.14.md`、补充 target contract 与本 append-only 启动记录；产品代码尚未修改。
+- Verification commands and results: 当前工作树、权威 remote、HEAD、Base contract、Harness/Desktop pins 与前驱发布回执已核对；产品回归待实现后执行。
+- Immutable evidence / receipt: 2.0.13 production exact bytes/pointers/desired states 保持前一条回执且未写入；2.0.14 尚无候选、安装或生产回执。
+- Remaining blockers: 三个 owner 的最小实现与定向测试、classifier、protected-main CI、双平台 exact-byte 安装/更新/回滚、signed pointer/desired states/官网公开回读。
+- Next exact action: 先补最低层失败测试，再在三个现有 owner 内完成最小实现，运行各自定向 gate 后只按实际 classifier 结果冻结。
+
+## 2026-08-27 · 2.0.14 单一热修实现冻结前检查点
+
+- Goal checkpoint: 唯一 Goal 仍只允许能力路由与运行时契约修复；本次 diff 未加入 Goal、Canvas、Pet/C03、Better Sidebar 功能、Deliverables、审计分类、Schedule、模型策略或视觉迭代。
+- Frozen baseline / current HEAD: 独立分支仍基于 `4474939fe186739a7745584c6589e55695302cb2`；接受的 2.0.13 产品前驱、Base、Harness 与 Desktop reference 不变，候选提交尚待生成。
+- Binding documents read: 根 `AGENTS.md`、`docs/target-contract.md`、`docs/slices/2.0.14.md` 与前一条启动记录。
+- Inspected native seam: ImageGen 继续使用 rc.7 `toolFilter`；Tool Search 只在受限视图还含延迟工具时挂载。Find Skill 继续使用原生 `SubprocessRuntime`，但 packaged pnpm 被解析成 Electron-as-Node 的直接 argv。Desktop 只为主 BrowserWindow 注入一份经校验的 Main→Preload bootstrap。
+- Experiment or why unnecessary: 没有增加 capability lease、第二 Tool registry、第二 subprocess、第二 Renderer store 或离线连接器分叉；现有 owner 的定向测试足以覆盖本次最小逻辑。连接器的网络与 OAuth 行为未改变，也不在本热修中伪称离线能力。
+- Decision and forbidden alternatives: `imagegen`/`image_pack` 作为现有一方工具直接可见；Image leaf 结构上只见 `imagegen`；Find Skill 不再 raw-spawn shell/`.cmd` shim；Renderer 原生 bootstrap 优先于 URL/sessionStorage fallback。禁止把错误改成 prompt 关键词判断或异常吞掉。
+- Changed scope: Tool Search、ImageGen leaf、Find Skill launcher、Desktop bootstrap 及其直接合同测试；其余组件仅随正式产品版本同步包身份，用户可见更新说明不展示内部组件名。
+- Verification commands and results: `check-target` 通过；release/change-impact/coordinator 共 `45/45`；Tool Search `19/19`；Find Skill `21/21`；DSH ImageGen 定向 `1/1`；Desktop typecheck 通过，五个直接测试文件 `83 passed / 1 skipped`，Profile boot verifier 通过；`git diff --check` 通过。正式 classifier 为 `lane=base`、合同有效，要求 macOS/Windows distribution；性能按用户明确决定不作为本热修发布门禁。
+- Immutable evidence / receipt: 本地仅形成源码与测试检查点，尚未产生可发布安装字节、安装态或公开回读；2.0.13 legacy pointer 未写入。
+- Remaining blockers: exact-main 合入与 attempt-1 CI、macOS/Windows 正式安装器的安装/更新/启动验收、Cloudflare 插件发布、signed pointer/desired states/官网准确字节回读。
+- Next exact action: 复核最终 diff 后提交 PR；合入 protected main 后只消费同一 attempt-1 构建字节完成双端验收和发布，不为文档或回执重建安装器。

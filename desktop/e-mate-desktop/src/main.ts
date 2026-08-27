@@ -198,7 +198,7 @@ async function start(): Promise<void> {
     if (rendererBootSettled) return
     rendererBootSettled = true
     resolveRendererBoot(report)
-  }, macUpdateStartupProbation)
+  }, macUpdateStartupProbation, processGenerationId)
   const finalExit = (code: number): void => { nativeExit.finish(code) }
   shutdown = createDesktopShutdown(
     async () => {

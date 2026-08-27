@@ -22,7 +22,7 @@ test('release state binds every artifact id, digest, and byte count', async t =>
   t.after(() => rm(root, { recursive: true, force: true }))
   const output = join(root, 'release-state.json')
   const options = {
-    source: 'a'.repeat(40), version: '2.0.13', mode: 'base', 'ci-run': '1', out: output,
+    source: 'a'.repeat(40), version: '2.0.14', mode: 'base', 'ci-run': '1', out: output,
     ...Object.fromEntries(['profile', 'desktop', 'admission', 'macos', 'windows'].flatMap((name, index) => [
       [`${name}-artifact`, String(index + 2)],
       [`${name}-digest`, `sha256:${String(index).repeat(64)}`],
@@ -31,7 +31,7 @@ test('release state binds every artifact id, digest, and byte count', async t =>
     ])),
   }
   const previous = process.env.EMATE_EXPECTED_VERSION
-  process.env.EMATE_EXPECTED_VERSION = '2.0.13'
+  process.env.EMATE_EXPECTED_VERSION = '2.0.14'
   t.after(() => previous === undefined ? delete process.env.EMATE_EXPECTED_VERSION : process.env.EMATE_EXPECTED_VERSION = previous)
   emitState(options)
   const state = JSON.parse(await readFile(output, 'utf8'))
