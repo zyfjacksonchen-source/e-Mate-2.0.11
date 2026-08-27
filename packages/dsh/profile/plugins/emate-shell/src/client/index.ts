@@ -32,6 +32,7 @@ import { HeaderControls } from './header-controls.tsx'
 import { IdentityGate } from './identity.tsx'
 import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImagesDefinition } from './image-gallery.tsx'
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
+import { registerScheduleTrigger } from './schedules-page.tsx'
 import { isGeneralWorkspace, SidebarRoot } from './sidebar.tsx'
 import { SessionRouteProjection } from './session-route.tsx'
 import { HiddenSessionLogExport } from './session-share.tsx'
@@ -336,6 +337,7 @@ export async function prepareSchedulePromptFromRoute(
 export function apply(ctx: any): void {
   registerActivityFold(ctx)
   registerComputerUseTrigger(ctx)
+  registerScheduleTrigger(ctx)
   registerManagedPresetSurfaces(ctx)
   registerRouteScopedConversationHeader(ctx)
   ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({

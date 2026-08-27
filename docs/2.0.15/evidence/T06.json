@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "document_type": "emate.2.0.15.ticket-evidence",
+  "ticket": "T06",
+  "title": "定时任务 native Schedule 全链闭环",
+  "status": "SOURCE_AND_COMPONENT_FIXTURE_PASSED",
+  "baseline": {
+    "integration_commit": "718765c351b8ebd63374ea6e0c94290a27805e6a",
+    "branch": "feat/2.0.15-T06-schedules-e2e",
+    "clean_start": true,
+    "base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0",
+    "harness_commit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606",
+    "public_production_version": "2.0.13"
+  },
+  "truth_stage": {
+    "source": "passed",
+    "component_fixture": "passed",
+    "app_directory": "not_run",
+    "candidate": "not_created",
+    "installed": "not_run",
+    "release": "not_run",
+    "public_production": "unchanged_exact_2.0.13"
+  },
+  "root_cause": {
+    "shell": "The Schedules route, projection parsing and prompt handoff were coupled to Home. The route had no native InputTrigger source of its own and did not visibly state the safe replacement ordering required for edits.",
+    "schedule_projection": "The existing read-only /emate.schedules projection already folded native Schedule events and required no second scheduler or write endpoint; its missing closure was focused restart, after-rule and cancellation coverage.",
+    "tool_visibility": "T05 was already present at the integration baseline and kept schedule_create, schedule_list and schedule_delete Agent-local in both Tool Search registration orders. T06 consumes that contract without reimplementing it."
+  },
+  "resolution": {
+    "extraction": "SchedulesPage now owns the previous route state, projection parsing, filtering, status and prompt UI. Home remains a thin route delegate; its non-Schedules behavior is unchanged.",
+    "native_handoff": "Create, edit and delete continue through the existing Workspace, Session and Composer path. No Workspace invokes the native directory picker and Workspace create/connect seam; cancellation stops before creation or navigation.",
+    "mutation_policy": "The management page remains read-only. Create requires confirmation before schedule_create; delete requires schedule_list verification and confirmation before schedule_delete; edit explicitly creates the replacement successfully before deleting the old Schedule.",
+    "input_trigger": "The Shell registers one native @定时任务 InputTrigger reference. It inserts Composer text only; Tool execution remains Agent-local and T05-owned visibility remains intact."
+  },
+  "native_schedule_contract": {
+    "native_owner": "pinned rc.7 Schedule",
+    "projection_channel": "/emate.schedules",
+    "projection_read_only": true,
+    "ui_writes_schedule_events": false,
+    "second_scheduler_created": false,
+    "second_executor_created": false,
+    "parallel_transport_or_session_created": false,
+    "parallel_event_store_or_tool_dispatch_created": false,
+    "timer_added": false,
+    "pause_resume_or_run_now_faked": false,
+    "replacement_order": "schedule_create success before schedule_delete",
+    "delivery_mode": "session-local"
+  },
+  "regression_coverage": [
+    "create prompt confirmation and native schedule_create handoff",
+    "native schedule_list projection",
+    "delete list verification, confirmation and native schedule_delete handoff",
+    "after, at and every rules",
+    "every dispatch advances the next occurrence",
+    "one-shot dispatch projects completed and recent runs",
+    "restart reproduces the projection from persisted events",
+    "delete event removes the cancelled Schedule",
+    "no Workspace uses native picker, create and connect",
+    "cancelled Workspace selection performs no creation or navigation",
+    "corrupt Session produces a partial read error without hiding valid Sessions",
+    "overdue, completed and recent-run UI projection",
+    "T05 Tool Search visibility in both registration orders",
+    "T02 CP-06 component smoke with zero pending seams"
+  ],
+  "verification": [
+    {
+      "command": "vitest run src/client/tests/schedules-page.client.spec.tsx --config vitest.config.ts (provisional path from the original dispatch prompt)",
+      "result": "EXPECTED_RED: the extracted schedules-page.tsx module did not exist yet; the same suite was moved to the DECISIONS.md owner path before final verification"
+    },
+    {
+      "command": "pnpm install --frozen-lockfile --ignore-scripts; pnpm run build:lib:host; pnpm run build:lib:client (pinned Harness)",
+      "result": "PASS: isolated workspace dependencies linked without lockfile changes; pinned Host and Client libraries built"
+    },
+    {
+      "command": "packages/dsh-plugin-schedules pinned tsdown build; node --test test/contracts.test.mjs",
+      "result": "PASS: 1 test; native create/delete/dispatch/restart projection, every/after/at, overdue/completed/recent runs, corrupt Session partial failure and no scheduler ownership"
+    },
+    {
+      "command": "packages/dsh/profile/plugins/emate-shell pinned tsdown build",
+      "result": "PASS: extracted Schedules page and native InputTrigger registration compiled"
+    },
+    {
+      "command": "vitest run tests/schedules-page.client.spec.tsx tests/sidebar-home-fidelity.client.spec.tsx --config vitest.config.ts",
+      "result": "PASS: 2 files, 24 tests; extracted page and existing Home/Sidebar behavior passed from the corrected tests/ owner path"
+    },
+    {
+      "command": "node --test --test-name-pattern='Schedule' test/tool-search.test.mjs",
+      "result": "PASS: 3 T05 tests; Schedule Tools remain Agent-local, restored request headers remain unrestricted, and both registration orders remain visible"
+    },
+    {
+      "command": "node scripts/smoke/run.mjs --layer component --case CP-06 --extension <temporary-T06-extension.json> --require-complete",
+      "result": "PASS: CP-06 Schedule create/list/delete/dispatch/restart, 1188 ms, zero pending seams"
+    }
+  ],
+  "smoke_extension": {
+    "committed_artifact": false,
+    "binding": "schedule-restrict.component",
+    "case": "CP-06",
+    "status": "passed",
+    "duration_ms": 1188,
+    "pending": 0
+  },
+  "d006": {
+    "status": "open_strict_blocker_preserved",
+    "known_failure": "Base ABI union mismatch",
+    "global_release_boundary_run_by_T06": false,
+    "validator_or_contract_modified": false,
+    "owner": "T18/Base identity owner"
+  },
+  "owner_scope": {
+    "outside_owner_paths_modified": false,
+    "home_tsx_change": "Schedules page extraction only",
+    "index_ts_change": "Schedule InputTrigger registration only",
+    "home_module_css_modified": false,
+    "package_or_lockfile_modified": false,
+    "t05_visibility_weakened": false,
+    "t02_smoke_modified": false,
+    "base_desktop_release_or_status_modified": false
+  },
+  "modified_files": [
+    "packages/dsh-plugin-schedules/test/contracts.test.mjs",
+    "packages/dsh/profile/plugins/emate-shell/src/client/home.tsx",
+    "packages/dsh/profile/plugins/emate-shell/src/client/index.ts",
+    "packages/dsh/profile/plugins/emate-shell/src/client/schedules-page.tsx",
+    "packages/dsh/profile/plugins/emate-shell/src/client/schedules-page.module.css",
+    "packages/dsh/profile/plugins/emate-shell/tests/schedules-page.client.spec.tsx",
+    "docs/2.0.15/evidence/T06.json"
+  ],
+  "unreached_stages": [
+    "real Profile app-directory click-through with a running Agent",
+    "candidate creation",
+    "macOS or Windows installed acceptance",
+    "restart and dispatch receipts from exact installed bytes",
+    "signing, installer, update or rollback",
+    "manifest, R2, Feed or public endpoint write/readback"
+  ],
+  "app_directory_receipts": [],
+  "installed_receipts": [],
+  "candidate_created": false,
+  "publish_performed": false,
+  "production_writes": [],
+  "release_claimed": false
+}
