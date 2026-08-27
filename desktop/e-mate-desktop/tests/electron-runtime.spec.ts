@@ -732,7 +732,7 @@ describe('Electron compatibility runtime', () => {
         appExecutable: process.execPath,
         electronVersion: '43.4.0',
         profileName: 'desktop',
-        productVersion: '2.0.14',
+        productVersion: '2.0.15',
         profileDir: '/tmp/dsh-home/profiles/desktop',
         homeDir: '/tmp/dsh-home',
         spawn: expect.any(Function),
@@ -1208,7 +1208,7 @@ describe('Electron compatibility runtime', () => {
     expect(runtime.updates).toMatchObject({
       isPackaged: false,
       canDownload: false,
-      currentVersion: '2.0.14',
+      currentVersion: '2.0.15',
       currentScheduleProtocolFloor: 0,
       trustedManifestKeys: [],
       statePath: join('/tmp/dsh-desktop-user-data', 'updates', 'state.json'),

@@ -9,6 +9,7 @@ import { baseSdkFingerprint } from './base-sdk.mjs'
 import {
   ACCEPTED_PREDECESSOR,
   assertAcceptedPredecessor,
+  BASE_CONTRACT_ID,
   classifyChangedPaths,
   harnessVersionsFromComponentLock,
   loadReleaseBoundary,
@@ -16,8 +17,27 @@ import {
 } from './change-impact.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
-const D006_ERROR = 'desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union'
-const FIXTURE_BASE_ID = 'e-mate-desktop-profile-v8-dsh-b2b1650b01f0'
+const FIXTURE_BASE_ID = BASE_CONTRACT_ID
+const HARNESS_COMMIT = '4787caf39134df190105b272da0dd2ba893d4d75'
+const RUNTIME_IMPORTS = [
+  '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-client-runtime',
+  '@deepseek-ai/dsh-client-ui-attachment',
+  '@deepseek-ai/dsh-client-ui-primitives',
+  '@deepseek-ai/dsh-credentials',
+  '@deepseek-ai/dsh-home-paths',
+  '@deepseek-ai/dsh-llm',
+  '@deepseek-ai/dsh-schedule',
+  '@deepseek-ai/dsh-settings',
+  '@deepseek-ai/dsh-skill',
+  '@deepseek-ai/dsh-skill-filesystem',
+  '@deepseek-ai/dsh-storage-domain',
+  '@deepseek-ai/dsh-tools',
+  '@deepseek-ai/schemastery',
+  '@e-mate/desktop/vision-toolkit',
+  'react',
+  'react-dom',
+]
 
 function createAdmittedBoundaryFixture() {
   const checkout = mkdtempSync(join(tmpdir(), 'e-mate-admitted-boundary-'))
@@ -51,7 +71,7 @@ function createAdmittedBoundaryFixture() {
   execFileSync('git', ['init', '--quiet'], { cwd: checkout })
   execFileSync('git', [
     'update-index', '--add', '--cacheinfo',
-    '160000,b2b1650b01f0ee88d81837a9b5c050f9f763f606,upstream/deepseek-harness',
+    `160000,${HARNESS_COMMIT},upstream/deepseek-harness`,
   ], { cwd: checkout })
   execFileSync('git', [
     'update-index', '--add', '--cacheinfo',
@@ -188,13 +208,15 @@ describe('repository release boundary', () => {
     assert.doesNotMatch(targetContract, /Startup never exceeds 15 seconds/u)
   })
 
-  it('keeps the checked-in post-T04 boundary blocked on the exact D006 ABI union', () => {
+  it('admits only the source-frozen successor Base and exact retained ABI union', () => {
     const boundary = loadReleaseBoundary(root)
-    assert.equal(boundary.valid, false)
-    assert.deepEqual(boundary.errors, [D006_ERROR])
-    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0')
+    assert.equal(boundary.valid, true, boundary.errors.join('\n'))
+    assert.deepEqual(boundary.errors, [])
+    assert.equal(boundary.baseContract.id, BASE_CONTRACT_ID)
+    assert.equal(boundary.baseContract.harness_commit, HARNESS_COMMIT)
     assert.equal(boundary.baseContract.schedule_protocol_floor, 1)
-    assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.14')
+    assert.deepEqual(Object.keys(boundary.baseContract.runtime_imports), RUNTIME_IMPORTS)
+    assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.15')
     assert.deepEqual(PRODUCT_UI_REFERENCE, {
       repository: 'zyfjacksonchen-source/ECoreX',
       path: 'upstream/e-mate-2.0.5',
@@ -210,6 +232,8 @@ describe('repository release boundary', () => {
     assert.equal(boundary.components.every(component => component.errors.length === 0), true)
     assert.deepEqual(boundary.components.flatMap(component => component.errors), [])
     assert.equal(boundary.components.length, 15)
+    assert.equal(boundary.components.every(component => component.version === '2.0.15'), true)
+    assert.equal(boundary.components.every(component => component.base_imports.every(name => RUNTIME_IMPORTS.includes(name))), true)
     assert.equal(boundary.components.every(component => component.desktop !== 'blocked'), true)
     assert.equal(boundary.components.some(component => component.root === 'packages/dsh-plugin-xin-assistant'), false)
     const retired = JSON.parse(readFileSync(join(root, 'packages/dsh-plugin-search-mcp/package.json'), 'utf8'))
@@ -395,11 +419,11 @@ describe('repository release boundary', () => {
     ])
   })
 
-  it('keeps the public snapshot input separate from the current D006 contract blocker', () => {
+  it('keeps the public predecessor snapshot separate from the valid successor contract', () => {
     const path = 'packages/dsh/profile/plugins/emate-shell/src/client/sidebar.tsx'
     const current = classifyChangedPaths([path], { root })
     assert.equal(current.lane, 'base')
-    assert.deepEqual(current.contract.errors, [D006_ERROR])
+    assert.deepEqual(current.contract.errors, [])
     assert.equal(classifyChangedPaths([path], { root: admittedRoot, acceptedProfileCompatible: false }).lane, 'base')
     assert.equal(classifyChangedPaths([path], { root: admittedRoot, acceptedProfileCompatible: true }).lane, 'plugin-only')
     assert.equal(classifyChangedPaths([
@@ -703,8 +727,8 @@ describe('repository release boundary', () => {
     const currentContract = spawnSync(process.execPath, [
       'scripts/change-impact.mjs', '--check-contract',
     ], { cwd: root, encoding: 'utf8' })
-    assert.equal(currentContract.status, 1)
-    assert.deepEqual(JSON.parse(currentContract.stdout).contract.errors, [D006_ERROR])
+    assert.equal(currentContract.status, 0, currentContract.stderr)
+    assert.deepEqual(JSON.parse(currentContract.stdout).contract.errors, [])
 
     const enterprise = classify('enterprise/apps/auth-gateway/src/index.ts')
     assert.equal(enterprise.enterprise, true)

@@ -34,7 +34,7 @@ test('find-skill is pinned and limits persistent installation to connector sourc
   const installer = await readFile(new URL('../lib/install.js', import.meta.url), 'utf8')
   const client = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   const runtime = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
-  assert.equal(pkg.version, '2.0.14')
+  assert.equal(pkg.version, '2.0.15')
   assert.equal(pkg.dsh.upstream.commit, '5a7f18b4535835a81de47c0cc2ca8ceb6e97a4e6')
   assert.match(patch, /cliCommand: 'pnpm dlx skills@1\.5\.22'/u)
   assert.match(patch, /registerFindTool: true/u)

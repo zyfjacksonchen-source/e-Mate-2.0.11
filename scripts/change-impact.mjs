@@ -9,8 +9,10 @@ import {
   sameProfileReleaseTarget,
   selectProfileRelease,
 } from '../desktop/e-mate-desktop/src/profile-release.ts'
+import { HARNESS_COMMIT } from './harness-provenance.mjs'
 
 export const BASE_CONTRACT_PATH = 'desktop/e-mate-desktop/base-contract.json'
+export const BASE_CONTRACT_ID = `e-mate-desktop-profile-v8-dsh-${HARNESS_COMMIT.slice(0, 12)}`
 export const ACCEPTED_PREDECESSOR = '6a7f4b9d59a1d8970345638946fb6564e2f5f93e'
 export const PRODUCT_UI_REFERENCE = Object.freeze({
   repository: 'zyfjacksonchen-source/ECoreX',
@@ -301,9 +303,7 @@ function validateBaseContract(value) {
     'harness_version', 'harness_commit', 'runtime_imports', 'profile_signing_keys',
   ])) errors.push('base contract fields are invalid')
   if (value.schema_version !== 1) errors.push('base contract schema_version must be 1')
-  if (typeof value.id !== 'string' || !/^e-mate-desktop-profile-v[1-9][0-9]*-dsh-[0-9a-f]{12}$/u.test(value.id)) {
-    errors.push('base contract id is invalid')
-  }
+  if (value.id !== BASE_CONTRACT_ID) errors.push(`base contract id must equal ${BASE_CONTRACT_ID}`)
   if (value.desktop_api !== 1) errors.push('base contract desktop_api must be 1')
   if (value.profile_format !== 1) errors.push('base contract profile_format must be 1')
   if (value.schedule_protocol_floor !== 1) errors.push('base contract schedule_protocol_floor must be 1')
@@ -316,7 +316,7 @@ function validateBaseContract(value) {
     errors.push('base contract Desktop rc.7 reference drifted')
   }
   if (value.harness_version !== '0.1.0-rc.7') errors.push('base contract Harness version drifted')
-  if (value.harness_commit !== 'b2b1650b01f0ee88d81837a9b5c050f9f763f606') {
+  if (value.harness_commit !== HARNESS_COMMIT) {
     errors.push('base contract Harness commit drifted')
   }
   const runtimeImports = record(value.runtime_imports) ? Object.entries(value.runtime_imports) : []

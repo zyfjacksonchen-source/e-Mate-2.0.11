@@ -402,7 +402,7 @@ export function SidebarRoot({
       <aside ref={root} className={`${css.root} ${collapsed ? css.collapsed : ''}`} style={wide ? { width } : undefined} aria-label="任务导航">
         <div className={css.brandRow}>
           {wide
-            ? <span className={css.brand}><img className={css.logo} src="/assets/e-mate/logo.png" alt="e-Mate" /><small className={css.version}>2.0.13</small></span>
+            ? <span className={css.brand}><img className={css.logo} src="/assets/e-mate/logo.png" alt="e-Mate" /><small className={css.version}>2.0.15</small></span>
             : <button className={css.brand} type="button" title="展开任务导航" aria-label="展开任务导航" onClick={toggleSidebar}><img className={css.mark} src="/assets/e-mate/xiaoxin-avatar.png" alt="" aria-hidden="true" /></button>}
           <button className={css.closeButton} type="button" title={collapsed ? '展开任务导航' : '收起任务导航'} aria-label={collapsed ? '展开任务导航' : '收起任务导航'} onClick={toggleSidebar}>
             {wide ? <CloseIcon size={18} /> : <PanelIcon size={18} />}

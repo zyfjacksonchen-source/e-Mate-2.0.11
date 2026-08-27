@@ -367,7 +367,7 @@ test('late refresh and runtime policy responses cannot revive credentials after 
   const policyProvider = createEnterpriseIdentityProvider(options(mapCredentials(policyValues), async input => {
     const path = new URL(input).pathname
     if (path.endsWith('/v1/runtime-models')) {
-      assert.equal(new URL(input).searchParams.get('client_version'), '2.0.14')
+      assert.equal(new URL(input).searchParams.get('client_version'), '2.0.15')
       markPolicyStarted()
       await policyGate
       return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })

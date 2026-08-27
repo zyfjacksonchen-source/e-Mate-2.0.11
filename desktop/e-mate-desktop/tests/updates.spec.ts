@@ -864,7 +864,7 @@ describe('desktop update Host plugin', () => {
         status: 'up-to-date' as const,
         currentGeneration: 'bundled',
         currentSequence: 0,
-        releaseVersion: '2.0.14',
+        releaseVersion: '2.0.15',
         sequence: 1,
       })),
       confirm: vi.fn(),

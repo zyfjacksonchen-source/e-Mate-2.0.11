@@ -57,7 +57,7 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
   ])
   const pkg = JSON.parse(manifest)
   const { componentFiles, verifyComponentRuntimeImports } = await import('../../../scripts/component-release.mjs')
-  assert.equal(pkg.version, '2.0.14')
+  assert.equal(pkg.version, '2.0.15')
   assert.equal(pkg.eMate.component.kind, 'platform-profile')
   assert.equal(pkg.dsh.visionToolkit.adapterState, 'managed')
   assert.equal(pkg.dsh.visionToolkit.upstreamCommit, 'bc9803d7d6300c864d17460ecbb33540b26638e0')

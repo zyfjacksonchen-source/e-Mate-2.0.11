@@ -19,7 +19,7 @@ test('computer-use adapter preserves the immutable universal helper only on macO
   const leases = await readFile(new URL('lib/leases.js', root), 'utf8')
   const upstreamLeases = await readFile(new URL('../../upstream/plugins/dsh-computer-use/lib/leases.js', root), 'utf8')
   const bundle = await readFile(new URL('lib/index.js', root), 'utf8')
-  assert.equal(pkg.version, '2.0.14')
+  assert.equal(pkg.version, '2.0.15')
   assert.equal(pkg.dsh.upstream.commit, '76bfe8607f61945c1cbb84e73976e601100c13a2')
   assert.equal(pkg.eMate.harnessVersion, '0.1.0-rc.7')
   assert.deepEqual(

@@ -11,11 +11,11 @@ import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
-import { PACKAGE_NAME, releaseSource } from './release-source.mjs'
+import { PACKAGE_NAME, releaseSource, VERSION } from './release-source.mjs'
 
-export const VERSION = '2.0.14'
+export { VERSION }
 const HARNESS_VERSION = '0.1.0-rc.7'
-const HARNESS_COMMIT = 'b2b1650b01f0ee88d81837a9b5c050f9f763f606'
+const HARNESS_COMMIT = '4787caf39134df190105b272da0dd2ba893d4d75'
 const REPOSITORY = 'zyfjacksonchen-source/e-Mate-2.0.11'
 const TAG = `e-mate-v${VERSION}`
 const SHA256 = /^[0-9a-f]{64}$/u
