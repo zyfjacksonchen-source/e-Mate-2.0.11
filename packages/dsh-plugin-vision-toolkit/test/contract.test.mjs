@@ -128,7 +128,7 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
   assert.equal(existsSync(new URL('vendor/agent-vision-toolkit/UPSTREAM_MANIFEST.json', root)), true)
 })
 
-test('Native Attachment First reloads five CAS images and keeps one prepared adapter dispatch', async () => {
+targetTest('Native Attachment First reloads five CAS images and keeps one prepared adapter dispatch', async () => {
   const [{ imageInputRequestBoundary, installImageInputRequestBoundary }, { Context }, llmModule, attachmentModule] = await Promise.all([
     loadBuiltModule(),
     import(new URL('../../../upstream/deepseek-harness/vendor/cordis/lib/index.js', import.meta.url)),
