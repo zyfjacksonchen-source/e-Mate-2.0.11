@@ -552,7 +552,7 @@ test('download site stages exact bytes and a closed release-bound website handof
   assert.equal(plan.staged_directory, 'download-page')
   assert.equal(plan.release_state.artifact_name, `e-mate-release-state-${SOURCE_COMMIT}`)
   assert.match(plan.release_state.sha256, /^[0-9a-f]{64}$/u)
-  assert.equal(plan.desktop_publication_predecessor.action_commit, '0026c0364623ea123ab0930a136f4d225c95f298')
+  assert.equal(plan.desktop_publication_predecessor.action_commit, 'cd7d223692b51e4e7a53db5759e1c2a9811febd0')
   assert.equal(plan.desktop_publication_predecessor.artifact_name, `e-mate-desktop-cloudflare-handoff-${SOURCE_COMMIT}`)
   assert.equal(plan.publication_contract.server_root, '/srv/ecorex-agent-download')
   assert.equal(plan.publication_contract.version_directory, `releases/site-emate-${VERSION}-${SOURCE_COMMIT}`)
@@ -601,7 +601,7 @@ test('download site stages exact bytes and a closed release-bound website handof
   }), /not the exact admitted source/u)
 })
 
-test('one admitted producer feeds the updater, legacy 2.0.13, and 2.0.14 download site', async t => {
+test('one admitted producer feeds both update protocols and the 2.0.14 download site', async t => {
   const page = readFileSync('deploy/download-page/index.html', 'utf8')
   const macGuide = readFileSync('deploy/download-page/install-macos.html', 'utf8')
   const scriptName = 'site.48e1d1764753.js'
@@ -638,9 +638,9 @@ test('one admitted producer feeds the updater, legacy 2.0.13, and 2.0.14 downloa
   assert.match(page, /未签名/u)
   assert.match(page, /e-Mate 会校验、替换并自动重开/u)
   assert.match(page, /\/ecorex-agent\/admin\//u)
-  assert.match(page, /已安装 2\.0\.13 的用户可在应用内确认更新到 2\.0\.14/u)
+  assert.match(page, /已安装 2\.0\.12 或 2\.0\.13 的用户可在应用内确认更新到 2\.0\.14/u)
   assert.match(macGuide, /全新安装 2\.0\.14/u)
-  assert.match(macGuide, /已安装 2\.0\.13 的用户可在应用内确认更新/u)
+  assert.match(macGuide, /已安装 2\.0\.12 或 2\.0\.13 的用户可在应用内确认更新/u)
   assert.doesNotMatch(`${page}\n${macGuide}`, /@e-mate|dsh-plugin|dsh-pet|Cowart|Excalidraw/u)
   assert.match(macGuide, /\/usr\/bin\/arch -arm64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)
   assert.match(macGuide, /\/usr\/bin\/arch -x86_64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)

@@ -2,7 +2,7 @@
 
 e-Mate 2.0.14 是基于固定 DeepSeek Harness `0.1.0-rc.7` 与 `deepseek-harness-desktop` 原生生命周期封装的桌面 Agent 工作区。Harness 继续拥有 Agent Loop、会话、事件、工具、审批、Jobs、插件与本地数据；e-Mate 只在这些原生扩展面上提供产品 Profile、企业鉴权、模型策略和异步脱敏审计。
 
-> 2.0.14 只修复图片能力路由、外部连接启动和桌面启动身份恢复，不包含其他产品迭代。官方下载页只指向已通过安装与公开回读的正式字节；实时记录见 [`docs/development-log.md`](docs/development-log.md)，不可越界项见 [`docs/target-contract.md`](docs/target-contract.md)。
+> 2.0.14 只修复图片能力路由、外部连接启动、桌面启动身份恢复和 macOS 跨版本更新，不包含其他产品迭代。官方下载页只指向已通过安装与公开回读的正式字节；实时记录见 [`docs/development-log.md`](docs/development-log.md)，不可越界项见 [`docs/target-contract.md`](docs/target-contract.md)。
 
 ## 下载与安装
 

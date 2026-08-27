@@ -3051,3 +3051,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 本地仅形成源码与测试检查点，尚未产生可发布安装字节、安装态或公开回读；2.0.13 legacy pointer 未写入。
 - Remaining blockers: exact-main 合入与 attempt-1 CI、macOS/Windows 正式安装器的安装/更新/启动验收、Cloudflare 插件发布、signed pointer/desired states/官网准确字节回读。
 - Next exact action: 复核最终 diff 后提交 PR；合入 protected main 后只消费同一 attempt-1 构建字节完成双端验收和发布，不为文档或回执重建安装器。
+
+## 2026-08-27 · 2.0.14 macOS 2.0.12 更新协议桥 scope amendment
+
+- Goal checkpoint: 用户在原单一热修上明确追加一项 P0：修复公开 macOS 2.0.12 无法在线更新的问题；版本仍只发布既定能力/运行时修复与本协议桥，不接收其他 2.0.14 功能。
+- Frozen baseline / current HEAD: 分支首个热修提交为 `a4fd5170888513e30ea73a915c335fc8c87546f3`；接受的 2.0.13 产品前驱仍是 `6f63b5238d5874a1973a5ce0c1c9f832d277c865`，公开 signed/legacy manifest 为 `2961` bytes / SHA-256 `d26b9ffb5f30531bc5de6c9f66aab47c3718248e2ff109d82cd3a763f0c02887`。
+- Binding documents read: 根 `AGENTS.md`、ponytail skill、本切片、target contract、上一条完整记录、用户提供的跨协议根因材料、公开 2.0.12 与最终 2.0.13 的实际 updater 源码及当前 publication workflow/action。
+- Inspected native seam: 2.0.12 生成精确 15 字段请求并启动目标 staged App 的 Helper；最终 2.0.13 Helper 第一行按 24 字段请求解析并要求 pending helper lease，因此在写 `helper-ready` 前失败。现有 legacy reader/ACK 位于候选启动阶段，无法覆盖更早的 Helper 入口。2.0.13 自身已生成 24 字段请求、pending owner 和绑定 IPC ACK，升级到 2.0.14 不经过旧分支。
+- Experiment or why unnecessary: 直接用两个已发布源码的精确 parser/entry 对照即可确定故障，不需要权限、quarantine 或网络猜测。未引入 Sparkle、第二 updater、协议伪 provenance、DMG detach/heartbeat/缓存等旁支改造。
+- Decision and forbidden alternatives: Helper 在最入口按精确字段集合选择协议。只有 `currentVersion=2.0.12` 可进入旧 15 字段分支；目标必须为更高稳定版本，并与请求目录、staged bundle、运行 App 和三字段 ACK 一致。旧分支复用旧 helper-ready/shutdown/swap/health/rollback语义且不要求 pending lease；现代分支逐字保持。因为 2.0.12 只读 `desktop/latest.json`，正式发布必须在两条真实前驱更新通过后，将该指针从唯一冻结 2.0.13 identity CAS 到与 signed pointer 完全相同的 2.0.14 bytes，不能继续冻结在不可用目标或无条件覆盖。
+- Changed scope: `mac-update-installer.ts` 的入口、旧协议校验/交换/ACK，直接测试与 mac package 测试清单；2.0.14 切片、target contract、用户说明、下载页和发布测试同步到真实双前驱更新。没有改变 Windows updater、现代 macOS 请求、Profile、Harness 或其他产品能力。
+- Verification commands and results: `tests/mac-update-installer.spec.ts` 为 `90/90` 通过（新增旧/现代 envelope、成功升级、ACK 失败回滚）；四套 Desktop TypeScript 检查通过；`check-target` 通过，release/change-impact/admission 共 `49/49` 通过。
+- Immutable evidence / receipt: 外部 publication action PR `#9` 已合入 reviewed SHA `cd7d223692b51e4e7a53db5759e1c2a9811febd0`，Node 24 全套 `83/83` 通过；它固定 2.0.14 制品并只接受上述 final 2.0.13 legacy identity。生产 R2、signed/legacy pointers、desired states、官网和安装态均未写入，2.0.13 公开 bytes 保持不变。
+- Remaining blockers: 主仓精确 pin 已更新但仍需复测并合入 protected main attempt-1；公开 2.0.12→候选和 2.0.13→候选的真实 macOS 安装/回滚；Windows正式安装态；最后按 immutable→signed→legacy→Profile→官网顺序公开回读。
+- Next exact action: 先让本地 bridge、现代路径和 release contracts 全部通过，再提交第二个候选；不得在真实前驱更新通过前推进任一生产指针。
