@@ -68,12 +68,6 @@ export function HomeProjection({
     return () => { observer.disconnect() }
   }, [current, show])
 
-  useLayoutEffect(() => {
-    if (target === null) return undefined
-    target.toggleAttribute('data-emate-composer-frame-host', true)
-    return () => { target.removeAttribute('data-emate-composer-frame-host') }
-  }, [target])
-
   if (schedules) return <SchedulesPage {...{ prepareSchedulePrompt, callSchedules, scheduleIcons, toggleSidebar, PanelIcon }} />
   if (!show || target === null) return null
 

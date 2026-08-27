@@ -41,6 +41,8 @@
     "clean_start": true,
     "base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0",
     "harness_commit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606",
+    "d013_upstream_base_commit": "2ca0b68b420ba11a80fc5fac800f889008cd42af",
+    "d013_upstream_local_commit": "820fee0df4f46b15d4cc07f56ccfcae43549d769",
     "public_production_version": "2.0.13"
   },
   "truth_stage": {
@@ -56,7 +58,8 @@
     "home": "Home still computed and rendered local Session-derived task counts, Token totals, trends, success placeholders and recent Sessions even though the authoritative account usage day projection now exists and Sidebar already owns recent task navigation.",
     "templates": "The Shell already owned native blank reuse through startSessionFromRoute and native draft state through conversation.input.for(scope).setDraft, but Home exposed no office-template projection over those owners.",
     "usage": "AccountSettings showed the identity bootstrap and weekly quota but did not consume T10 identity.usage.activity, so it had no truthful daily, weekly, cumulative or 12-month activity presentation.",
-    "composer_frame": "The merged Home extended Glass Composer below the native card with --emate-composer-frame-bottom: -28px instead of exposing the existing native composerStack as the one semantic owner shared by the Composer and workspace hint."
+    "composer_frame": "The merged Home extended Glass Composer below the native card with --emate-composer-frame-bottom: -28px instead of exposing the existing native composerStack as the one semantic owner shared by the Composer and workspace hint.",
+    "d012_first_source_attempt": "Corrective 103833c removed the negative extension but still established the Host by mutating Home's document-query result, so D013 rejected it as scan-owned rather than native-owned."
   },
   "resolution": {
     "home": "Removed the old overview DOM and its local usage, success and recent-Session calculations; compressed the existing hero and mounted exactly twelve responsive office templates.",
@@ -64,7 +67,7 @@
     "usage": "AccountSettings requests the exact T10 identity.usage.activity endpoint for an inclusive prior-year window of at most 366 dates, validates exact snake_case fields and canonical decimal strings with BigInt, reconciles every day and period total, and renders zero plus four activity levels with exact accessible tooltips.",
     "presentation": "Daily, Monday-based weekly and cumulative summaries reuse the same validated day buckets; loading, invalid response, typed unavailable and retry states display no fabricated heatmap or zero-success fallback.",
     "identity": "The enterprise display_name and weekly_token_limit remain bootstrap-owned. The existing user-selected avatar stays explicitly device-local and is not represented as an enterprise avatar.",
-    "composer_frame": "Home marks its existing exact native composerStack portal target as data-emate-composer-frame-host for the target lifetime. That one native container already owns conversation.composer.bar and conversation.hero.workspace; no DOM child is moved or duplicated, and the negative frame extension is removed."
+    "composer_frame": "The pinned native ConversationRoot composerStack directly emits data-emate-composer-frame-host and already contains conversation.hero.workspace plus the one resident conversation.composer.bar. Home no longer writes or removes the attribute; its existing content portal discovery does not establish Host ownership."
   },
   "owner_contract": {
     "session_owner": "pinned rc.7 Session/Workspace runtime",
@@ -75,8 +78,11 @@
     "second_composer_or_draft_store": false,
     "second_usage_or_analytics_source": false,
     "semantic_composer_frame_host": "data-emate-composer-frame-host",
+    "semantic_composer_frame_owner": "pinned native ConversationRoot composerStack",
     "negative_composer_frame_extension": false,
     "composer_dom_mover": false,
+    "home_attribute_mutation": false,
+    "document_scan_establishes_frame_host": false,
     "session_updated_at_inference": false,
     "recent_session_copy": false,
     "fake_success_rate_or_token_value": false
@@ -96,20 +102,28 @@
       "result": "PASS: exact rc.7 Host and Client libraries emitted for local component compilation"
     },
     {
-      "command": "packages/dsh/profile/plugins/emate-shell pnpm run build",
-      "result": "PASS: final Shell source compiled; lib/client.js 308.30 kB before release composition"
+      "command": "upstream/deepseek-harness vitest run packages/client/ui-conversation/tests/skeleton.client.spec.tsx; tsc -b packages/client/ui-conversation/tsconfig.json",
+      "result": "PASS: 18 native skeleton tests and the narrow ui-conversation TypeScript project; composerStack directly owns one semantic Host containing workspace and resident InputBar"
     },
     {
-      "command": "vitest run tests/*.spec.ts tests/*.spec.tsx --config vitest.config.ts",
-      "result": "PASS: 14 files, 85 tests on final source; includes three new T11 suites, native blank/new Session draft handoff, exact activity validation/aggregation/unavailable UI, and retained Shell regressions"
+      "command": "packages/dsh/profile/plugins/emate-shell pnpm run build",
+      "result": "PASS: final Shell source compiled; index.js 99.06 kB and lib/client.js 313.58 kB before release composition"
+    },
+    {
+      "command": "packages/dsh/profile/plugins/emate-shell pnpm test",
+      "result": "PASS: final merged Shell 15 files, 93 tests; T11 focused subset 4 files, 14 tests"
     },
     {
       "command": "node scripts/smoke/run.mjs --layer component --case CP-11 --case CP-12 --extension docs/2.0.15/evidence/T11.json --require-complete",
-      "result": "PASS: committed home-template.component and usage.component bindings; CP-11 and CP-12 passed with zero pending"
+      "result": "PASS: committed home-template.component and usage.component bindings; CP-11 and CP-12 passed in 3709 ms with zero pending"
     },
     {
-      "command": "node scripts/component-run.mjs check --component @e-mate/dsh-client-shell",
-      "result": "EXPECTED_STRICT_RED_BEFORE_COMPONENT_EXECUTION: desktop/e-mate-desktop/base-contract.json runtime imports must equal the component-declared Base ABI union; D006 preserved"
+      "command": "componentFiles plus verifyComponentRuntimeImports on the final emitted Shell",
+      "result": "PASS: emitted runtime imports exactly equal @deepseek-ai/dsh-client-runtime, @deepseek-ai/dsh-client-ui-attachment, @deepseek-ai/dsh-client-ui-primitives, react and react-dom"
+    },
+    {
+      "command": "node scripts/component-release.mjs inventory",
+      "result": "EXPECTED_STRICT_D006_ONLY: upstream/deepseek-harness gitlink does not match the Base contract; desktop/e-mate-desktop/base-contract.json runtime imports do not equal the component-declared Base ABI union; no third error or bypass"
     },
     {
       "command": "git diff --check",
@@ -128,7 +142,10 @@
   },
   "d006": {
     "status": "OPEN_STRICT_T18_BLOCKER_PRESERVED",
-    "predicate": "runtime imports must equal the component-declared Base ABI union",
+    "predicates": [
+      "upstream/deepseek-harness: Git submodule commit does not match the Base contract",
+      "desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union"
+    ],
     "base_contract_or_validator_modified": false,
     "bypass_added": false,
     "owner": "T18 new Base identity and rebind"
@@ -157,6 +174,14 @@
         "docs/2.0.15/evidence/T11.json"
       ],
       "reason": "D012 exact corrective lease for one real semantic Composer frame host and committed CP-11/CP-12 extension"
+    },
+    {
+      "paths": [
+        "upstream/deepseek-harness/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.tsx",
+        "upstream/deepseek-harness/packages/client/ui-conversation/tests/skeleton.client.spec.tsx",
+        "upstream/deepseek-harness"
+      ],
+      "reason": "D013 exact second-source lease moves semantic Host ownership from Home document mutation to the native Composer owner"
     }
   ],
   "owner_scope": {
@@ -164,6 +189,7 @@
     "home_and_index_sequential_lease_used": true,
     "shared_test_edits_limited_to_transferred_expectations": true,
     "d012_corrective_scope_only": true,
+    "d013_native_owner_scope_only": true,
     "base_desktop_enterprise_lock_or_package_modified": false,
     "t10_contract_modified": false,
     "production_write_performed": false
@@ -185,6 +211,7 @@
     "packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx",
     "packages/dsh/profile/plugins/emate-shell/tests/identity-settings-fidelity.client.spec.tsx",
     "packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx",
+    "upstream/deepseek-harness",
     "docs/2.0.15/evidence/T11.json"
   ],
   "open_acceptance": [
