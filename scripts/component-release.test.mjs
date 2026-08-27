@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { componentJobsFor, loadReleaseBoundary, PRODUCT_UI_REFERENCE } from './change-impact.mjs'
 import {
   componentFiles,
   componentRuntimeImports,
@@ -22,6 +23,53 @@ const repositoryRoot = fileURLToPath(new URL('..', import.meta.url))
 const releaseCache = join(repositoryRoot, '.release-cache')
 mkdirSync(releaseCache, { recursive: true })
 const releaseRoot = await mkdtemp(join(releaseCache, 'component-release-test-'))
+const D006_ERROR = 'desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union'
+const FIXTURE_BASE_ID = 'e-mate-desktop-profile-v8-dsh-b2b1650b01f0'
+
+function createShellBoundaryFixture() {
+  const fixture = mkdtempSync(join(releaseRoot, 'shell-boundary-'))
+  const inventoryPath = 'packages/dsh/profile/component-inventory.json'
+  const shellRoot = 'packages/dsh/profile/plugins/emate-shell'
+  const shell = JSON.parse(readFileSync(join(repositoryRoot, shellRoot, 'package.json'), 'utf8'))
+  const currentBase = JSON.parse(readFileSync(join(repositoryRoot, 'desktop/e-mate-desktop/base-contract.json'), 'utf8'))
+  currentBase.id = FIXTURE_BASE_ID
+  currentBase.runtime_imports = Object.fromEntries(shell.eMate.component.base_imports.map(name => [
+    name,
+    currentBase.runtime_imports[name],
+  ]))
+  shell.eMate.component.base_contracts = [FIXTURE_BASE_ID]
+  const currentInventory = JSON.parse(readFileSync(join(repositoryRoot, inventoryPath), 'utf8'))
+  const inventory = {
+    ...currentInventory,
+    components: currentInventory.components.filter(component => component.id === shell.name),
+  }
+  const files = new Map([
+    ['desktop/e-mate-desktop/base-contract.json', `${JSON.stringify(currentBase, null, 2)}\n`],
+    ['desktop/e-mate-desktop/package.json', readFileSync(join(repositoryRoot, 'desktop/e-mate-desktop/package.json'))],
+    [inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`],
+    [`${shellRoot}/package.json`, `${JSON.stringify(shell, null, 2)}\n`],
+    [`${shellRoot}/pnpm-lock.yaml`, readFileSync(join(repositoryRoot, shellRoot, 'pnpm-lock.yaml'))],
+  ])
+  for (const [path, bytes] of files) {
+    const destination = join(fixture, path)
+    mkdirSync(dirname(destination), { recursive: true })
+    writeFileSync(destination, bytes)
+  }
+  execFileSync('git', ['init', '--quiet'], { cwd: fixture })
+  execFileSync('git', [
+    'update-index', '--add', '--cacheinfo',
+    '160000,b2b1650b01f0ee88d81837a9b5c050f9f763f606,upstream/deepseek-harness',
+  ], { cwd: fixture })
+  execFileSync('git', [
+    'update-index', '--add', '--cacheinfo',
+    `160000,${PRODUCT_UI_REFERENCE.commit},${PRODUCT_UI_REFERENCE.path}`,
+  ], { cwd: fixture })
+  execFileSync('git', ['add', '--', ...files.keys()], { cwd: fixture })
+  const boundary = loadReleaseBoundary(fixture)
+  assert.equal(boundary.valid, true, boundary.errors.join('\n'))
+  return { root: fixture, shell, baseContract: currentBase }
+}
+
 after(async () => {
   await Promise.all([
     rm(root, { recursive: true, force: true }),
@@ -31,9 +79,10 @@ after(async () => {
 
 describe('component payload closure', () => {
   it('materializes one exact portable payload without rebuilding the Base', () => {
-    const input = join(releaseRoot, 'materialize-input')
-    const output = join(releaseRoot, 'materialize-output')
-    const packageManifest = JSON.parse(readFileSync(join(repositoryRoot, 'packages/dsh/profile/plugins/emate-shell/package.json'), 'utf8'))
+    const fixture = createShellBoundaryFixture()
+    const input = join(fixture.root, 'materialize-input')
+    const output = join(fixture.root, 'materialize-output')
+    const packageManifest = fixture.shell
     const bytes = Buffer.from(`${JSON.stringify({ name: packageManifest.name, version: packageManifest.version, main: packageManifest.main })}\n`)
     mkdirSync(join(input, 'files'), { recursive: true })
     writeFileSync(join(input, 'files', 'package.json'), bytes)
@@ -44,7 +93,7 @@ describe('component payload closure', () => {
       kind: 'profile',
       target: null,
       source_commit: 'a'.repeat(40),
-      base_contracts: ['e-mate-desktop-profile-v7-dsh-b2b1650b01f0'],
+      base_contracts: [fixture.baseContract.id],
       schedule_protocol_floor: 1,
       base_imports: packageManifest.eMate.component.base_imports,
       authority_contract: packageManifest.eMate.component.authority_contract,
@@ -54,7 +103,7 @@ describe('component payload closure', () => {
       files: [{ path: 'package.json', bytes: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex'), mode: '0644' }],
     }, null, 2)}\n`)
     const result = materializeComponentArtifact({
-      root: repositoryRoot,
+      root: fixture.root,
       input,
       out: output,
       id: '@e-mate/dsh-client-shell',
@@ -63,24 +112,29 @@ describe('component payload closure', () => {
     assert.equal(result.files, 1)
     assert.deepEqual(readFileSync(join(output, 'package.json')), bytes)
     assert.throws(() => materializeComponentArtifact({
-      root: repositoryRoot,
+      root: fixture.root,
       input,
-      out: join(releaseRoot, 'bad-output'),
+      out: join(fixture.root, 'bad-output'),
       id: '@e-mate/dsh-client-shell',
       sourceCommit: 'b'.repeat(40),
     }), /identity is invalid/u)
   })
 
-  it('exports the accepted Desktop bootstrap matrix from the shared inventory', () => {
-    const node = process.execPath
-    const inventory = JSON.parse(execFileSync(node, ['scripts/component-release.mjs', 'inventory'], {
+  it('exports the accepted Desktop bootstrap matrix only after the strict D006 blocker clears', () => {
+    const boundary = loadReleaseBoundary(repositoryRoot)
+    assert.equal(boundary.valid, false)
+    assert.deepEqual(boundary.errors, [D006_ERROR])
+    const inventoryCommand = spawnSync(process.execPath, ['scripts/component-release.mjs', 'inventory'], {
       cwd: repositoryRoot,
       encoding: 'utf8',
-    }))
-    const components = inventory.components.filter(component => component.id !== '@e-mate/dsh-plugin-xin-assistant')
+    })
+    assert.equal(inventoryCommand.status, 1)
+    assert.equal(inventoryCommand.stderr.trim(), `component-release: ${D006_ERROR}`)
+    const components = boundary.components
     const accepted = components.filter(component => component.desktop !== 'blocked')
-    assert.equal(inventory.base_contract_id, 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0')
-    assert.equal(inventory.schedule_protocol_floor, 1)
+    const componentJobs = componentJobsFor(boundary, accepted.map(component => component.id), accepted.map(component => component.id))
+    assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0')
+    assert.equal(boundary.baseContract.schedule_protocol_floor, 1)
     assert.equal(components.length, 15)
     assert.equal(accepted.length, 15)
     assert.deepEqual(accepted.map(component => component.id).sort(), [
@@ -105,12 +159,12 @@ describe('component payload closure', () => {
       [],
     )
     assert.equal(components.some(component => component.root === 'packages/dsh-plugin-xin-assistant'), false)
-    assert.equal(inventory.component_jobs.length, 19)
+    assert.equal(componentJobs.length, 19)
     assert.deepEqual(
-      [...new Set(inventory.component_jobs.map(job => job.component))].sort(),
+      [...new Set(componentJobs.map(job => job.component))].sort(),
       accepted.map(component => component.id).sort(),
     )
-    assert.equal(inventory.component_jobs.every(job => job.publish === true && typeof job.runner === 'string'), true)
+    assert.equal(componentJobs.every(job => job.publish === true && typeof job.runner === 'string'), true)
     assert.deepEqual(
       components.filter(component => component.source_roots.length > 0).map(component => ({
         id: component.id,

@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { describe, it } from 'node:test'
+import { after, describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { baseSdkFingerprint } from './base-sdk.mjs'
 import {
@@ -16,13 +16,71 @@ import {
 } from './change-impact.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
+const D006_ERROR = 'desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union'
+const FIXTURE_BASE_ID = 'e-mate-desktop-profile-v8-dsh-b2b1650b01f0'
+
+function createAdmittedBoundaryFixture() {
+  const checkout = mkdtempSync(join(tmpdir(), 'e-mate-admitted-boundary-'))
+  const inventoryPath = 'packages/dsh/profile/component-inventory.json'
+  const inventory = JSON.parse(readFileSync(join(root, inventoryPath), 'utf8'))
+  const files = [
+    'desktop/e-mate-desktop/base-contract.json',
+    'desktop/e-mate-desktop/package.json',
+    inventoryPath,
+    ...inventory.components.flatMap(component => [
+      `${component.root}/package.json`,
+      `${component.root}/pnpm-lock.yaml`,
+    ]),
+  ]
+  for (const file of files) {
+    const destination = join(checkout, file)
+    mkdirSync(dirname(destination), { recursive: true })
+    copyFileSync(join(root, file), destination)
+  }
+  const basePath = join(checkout, 'desktop/e-mate-desktop/base-contract.json')
+  const baseContract = JSON.parse(readFileSync(basePath, 'utf8'))
+  baseContract.id = FIXTURE_BASE_ID
+  delete baseContract.runtime_imports['@deepseek-ai/dsh-launch-environment']
+  writeFileSync(basePath, `${JSON.stringify(baseContract, null, 2)}\n`)
+  for (const component of inventory.components) {
+    const path = join(checkout, component.root, 'package.json')
+    const manifest = JSON.parse(readFileSync(path, 'utf8'))
+    manifest.eMate.component.base_contracts = [FIXTURE_BASE_ID]
+    writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`)
+  }
+  execFileSync('git', ['init', '--quiet'], { cwd: checkout })
+  execFileSync('git', [
+    'update-index', '--add', '--cacheinfo',
+    '160000,b2b1650b01f0ee88d81837a9b5c050f9f763f606,upstream/deepseek-harness',
+  ], { cwd: checkout })
+  execFileSync('git', [
+    'update-index', '--add', '--cacheinfo',
+    `160000,${PRODUCT_UI_REFERENCE.commit},${PRODUCT_UI_REFERENCE.path}`,
+  ], { cwd: checkout })
+  for (const component of inventory.components) {
+    const manifest = JSON.parse(readFileSync(join(checkout, component.root, 'package.json'), 'utf8'))
+    for (const sourceRoot of component.source_roots ?? []) {
+      execFileSync('git', [
+        'update-index', '--add', '--cacheinfo',
+        `160000,${manifest.dsh.upstream.commit},${sourceRoot}`,
+      ], { cwd: checkout })
+    }
+  }
+  execFileSync('git', ['add', '--', ...files], { cwd: checkout })
+  const boundary = loadReleaseBoundary(checkout)
+  assert.equal(boundary.valid, true, boundary.errors.join('\n'))
+  return checkout
+}
+
+const admittedRoot = createAdmittedBoundaryFixture()
+after(() => rmSync(admittedRoot, { recursive: true, force: true }))
 
 function classify(...paths) {
-  return classifyChangedPaths(paths, { root, acceptedProfileCompatible: true })
+  return classifyChangedPaths(paths, { root: admittedRoot, acceptedProfileCompatible: true })
 }
 
 function classifyWith(options, ...paths) {
-  return classifyChangedPaths(paths, { root, acceptedProfileCompatible: true, ...options })
+  return classifyChangedPaths(paths, { root: admittedRoot, acceptedProfileCompatible: true, ...options })
 }
 
 describe('repository release boundary', () => {
@@ -130,9 +188,10 @@ describe('repository release boundary', () => {
     assert.doesNotMatch(targetContract, /Startup never exceeds 15 seconds/u)
   })
 
-  it('accepts the checked-in base contract and every first-party component', () => {
+  it('keeps the checked-in post-T04 boundary blocked on the exact D006 ABI union', () => {
     const boundary = loadReleaseBoundary(root)
-    assert.equal(boundary.valid, true, boundary.errors.join('\n'))
+    assert.equal(boundary.valid, false)
+    assert.deepEqual(boundary.errors, [D006_ERROR])
     assert.equal(boundary.baseContract.id, 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0')
     assert.equal(boundary.baseContract.schedule_protocol_floor, 1)
     assert.equal(boundary.baseContract.runtime_imports['@e-mate/desktop/vision-toolkit'], '2.0.14')
@@ -150,10 +209,9 @@ describe('repository release boundary', () => {
     })
     assert.equal(boundary.components.every(component => component.errors.length === 0), true)
     assert.deepEqual(boundary.components.flatMap(component => component.errors), [])
-    const postT04 = boundary.components.filter(component => component.id !== '@e-mate/dsh-plugin-xin-assistant')
-    assert.equal(postT04.length, 15)
-    assert.equal(postT04.every(component => component.desktop !== 'blocked'), true)
-    assert.equal(postT04.some(component => component.root === 'packages/dsh-plugin-xin-assistant'), false)
+    assert.equal(boundary.components.length, 15)
+    assert.equal(boundary.components.every(component => component.desktop !== 'blocked'), true)
+    assert.equal(boundary.components.some(component => component.root === 'packages/dsh-plugin-xin-assistant'), false)
     const retired = JSON.parse(readFileSync(join(root, 'packages/dsh-plugin-search-mcp/package.json'), 'utf8'))
     assert.deepEqual(retired.eMate.component.base_contracts, ['e-mate-desktop-profile-v6-dsh-2bc16230975f'])
     assert.equal(retired.eMate.harnessCommit, '2bc16230975f6cf02aa1b283b1f86de44007b059')
@@ -170,57 +228,15 @@ describe('repository release boundary', () => {
   })
 
   it('pins the Harness and product UI gitlinks while keeping component changes on the accepted Base SDK key', () => {
-    const checkout = mkdtempSync(join(tmpdir(), 'e-mate-impact-checkout-'))
+    const checkout = createAdmittedBoundaryFixture()
     try {
       const inventoryPath = 'packages/dsh/profile/component-inventory.json'
-      const inventory = JSON.parse(readFileSync(join(root, inventoryPath), 'utf8'))
-      const files = [
-        'desktop/e-mate-desktop/base-contract.json',
-        'desktop/e-mate-desktop/package.json',
-        inventoryPath,
-        ...inventory.components.flatMap(component => [
-          `${component.root}/package.json`,
-          ...(component.desktop === 'blocked' ? [] : [`${component.root}/pnpm-lock.yaml`]),
-        ]),
-      ]
-      for (const file of files) {
-        const destination = join(checkout, file)
-        mkdirSync(dirname(destination), { recursive: true })
-        copyFileSync(join(root, file), destination)
-      }
-      execFileSync('git', ['init', '--quiet'], { cwd: checkout })
-      execFileSync('git', [
-        'update-index', '--add', '--cacheinfo',
-        '160000,b2b1650b01f0ee88d81837a9b5c050f9f763f606,upstream/deepseek-harness',
-      ], { cwd: checkout })
-      execFileSync('git', [
-        'update-index', '--add', '--cacheinfo',
-        `160000,${PRODUCT_UI_REFERENCE.commit},${PRODUCT_UI_REFERENCE.path}`,
-      ], { cwd: checkout })
-      for (const component of inventory.components) {
-        const manifest = JSON.parse(readFileSync(join(checkout, component.root, 'package.json'), 'utf8'))
-        for (const sourceRoot of component.source_roots ?? []) {
-          execFileSync('git', [
-            'update-index', '--add', '--cacheinfo',
-            `160000,${manifest.dsh.upstream.commit},${sourceRoot}`,
-          ], { cwd: checkout })
-        }
-      }
-      execFileSync('git', ['add', '--', ...files], { cwd: checkout })
-
       assert.equal(existsSync(join(checkout, 'upstream/deepseek-harness/package.json')), false)
-      assert.equal(loadReleaseBoundary(checkout).valid, true)
-
-      const postT04Inventory = {
-        ...inventory,
-        components: inventory.components.filter(component => component.id !== '@e-mate/dsh-plugin-xin-assistant'),
-      }
-      writeFileSync(join(checkout, inventoryPath), `${JSON.stringify(postT04Inventory, null, 2)}\n`)
-      const postT04Boundary = loadReleaseBoundary(checkout)
-      assert.equal(postT04Boundary.components.length, 15)
-      assert.deepEqual(postT04Boundary.components.filter(component => component.desktop === 'blocked'), [])
-      assert.match(postT04Boundary.errors.join('\n'), /runtime imports must equal the component-declared Base ABI union/u)
-      assert.equal(postT04Boundary.baseContract.runtime_imports['@deepseek-ai/dsh-launch-environment'], '0.1.0-rc.7')
+      const admittedBoundary = loadReleaseBoundary(checkout)
+      assert.equal(admittedBoundary.valid, true)
+      assert.equal(admittedBoundary.baseContract.id, FIXTURE_BASE_ID)
+      assert.equal(admittedBoundary.components.length, 15)
+      assert.deepEqual(admittedBoundary.components.filter(component => component.desktop === 'blocked'), [])
 
       const retirement = classifyChangedPaths([
         'packages/dsh-plugin-xin-assistant/src/index.ts',
@@ -236,40 +252,41 @@ describe('repository release boundary', () => {
       ], { root: checkout, acceptedProfileCompatible: true })
       assert.equal(deletedXin.lane, 'base')
       assert.deepEqual(deletedXin.publish_components, [])
-      copyFileSync(join(root, inventoryPath), join(checkout, inventoryPath))
-      assert.equal(loadReleaseBoundary(checkout).valid, true)
 
       const basePath = join(checkout, 'desktop/e-mate-desktop/base-contract.json')
+      const admittedBaseBytes = readFileSync(basePath)
       const baseContract = JSON.parse(readFileSync(basePath, 'utf8'))
       baseContract.runtime_imports.react = '18.3.2'
       writeFileSync(basePath, `${JSON.stringify(baseContract, null, 2)}\n`)
       assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /Base runtime import react must equal 18\.3\.2/u)
-      copyFileSync(join(root, 'desktop/e-mate-desktop/base-contract.json'), basePath)
+      writeFileSync(basePath, admittedBaseBytes)
 
       const missingFloor = JSON.parse(readFileSync(basePath, 'utf8'))
       delete missingFloor.schedule_protocol_floor
       writeFileSync(basePath, `${JSON.stringify(missingFloor, null, 2)}\n`)
       assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /base contract fields are invalid/u)
-      const invalidFloor = JSON.parse(readFileSync(join(root, 'desktop/e-mate-desktop/base-contract.json'), 'utf8'))
+      const invalidFloor = JSON.parse(admittedBaseBytes)
       invalidFloor.schedule_protocol_floor = 0
       writeFileSync(basePath, `${JSON.stringify(invalidFloor, null, 2)}\n`)
       assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /schedule_protocol_floor must be 1/u)
-      copyFileSync(join(root, 'desktop/e-mate-desktop/base-contract.json'), basePath)
+      writeFileSync(basePath, admittedBaseBytes)
 
       const memoryPath = join(checkout, 'packages/dsh-plugin-memory-evolve/package.json')
+      const admittedMemoryBytes = readFileSync(memoryPath)
       const memoryManifest = JSON.parse(readFileSync(memoryPath, 'utf8'))
       memoryManifest.eMate.component.base_imports = ['yaml']
       writeFileSync(memoryPath, `${JSON.stringify(memoryManifest, null, 2)}\n`)
       assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /outside the fixed Base runtime ABI/u)
-      copyFileSync(join(root, 'packages/dsh-plugin-memory-evolve/package.json'), memoryPath)
+      writeFileSync(memoryPath, admittedMemoryBytes)
 
       const authorityManifest = JSON.parse(readFileSync(memoryPath, 'utf8'))
       authorityManifest.eMate.component.authority_contract.effects = ['filesystem-root']
       writeFileSync(memoryPath, `${JSON.stringify(authorityManifest, null, 2)}\n`)
       assert.match(loadReleaseBoundary(checkout).errors.join('\n'), /authority contract is invalid/u)
-      copyFileSync(join(root, 'packages/dsh-plugin-memory-evolve/package.json'), memoryPath)
+      writeFileSync(memoryPath, admittedMemoryBytes)
 
       const memoryLockPath = join(checkout, 'packages/dsh-plugin-memory-evolve/pnpm-lock.yaml')
+      const admittedMemoryLockBytes = readFileSync(memoryLockPath)
       writeFileSync(memoryLockPath, [
         "lockfileVersion: '9.0'",
         'importers:',
@@ -284,7 +301,7 @@ describe('repository release boundary', () => {
         loadReleaseBoundary(checkout).errors.join('\n'),
         /must not reference a local or workspace dependency/u,
       )
-      copyFileSync(join(root, 'packages/dsh-plugin-memory-evolve/pnpm-lock.yaml'), memoryLockPath)
+      writeFileSync(memoryLockPath, admittedMemoryLockBytes)
 
       const acceptedBase = baseSdkFingerprint(checkout)
 
@@ -378,14 +395,16 @@ describe('repository release boundary', () => {
     ])
   })
 
-  it('uses the refreshed public Profile snapshot and still fails closed on incompatibility', () => {
+  it('keeps the public snapshot input separate from the current D006 contract blocker', () => {
     const path = 'packages/dsh/profile/plugins/emate-shell/src/client/sidebar.tsx'
-    assert.equal(classifyChangedPaths([path], { root }).lane, 'plugin-only')
-    assert.equal(classifyChangedPaths([path], { root, acceptedProfileCompatible: false }).lane, 'base')
-    assert.equal(classifyChangedPaths([path], { root, acceptedProfileCompatible: true }).lane, 'plugin-only')
+    const current = classifyChangedPaths([path], { root })
+    assert.equal(current.lane, 'base')
+    assert.deepEqual(current.contract.errors, [D006_ERROR])
+    assert.equal(classifyChangedPaths([path], { root: admittedRoot, acceptedProfileCompatible: false }).lane, 'base')
+    assert.equal(classifyChangedPaths([path], { root: admittedRoot, acceptedProfileCompatible: true }).lane, 'plugin-only')
     assert.equal(classifyChangedPaths([
       'packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx',
-    ], { root, acceptedProfileCompatible: false }).lane, 'plugin-only')
+    ], { root: admittedRoot, acceptedProfileCompatible: false }).lane, 'plugin-only')
   })
 
   it('keeps the Skill Hub Host, Agent tools, and UI in one hot component lane', () => {
@@ -668,19 +687,24 @@ describe('repository release boundary', () => {
     ).contract.valid, false)
     const protectedCli = spawnSync(process.execPath, [
       'scripts/change-impact.mjs', '--path', 'docs/development-log.md',
-      '--protected-main', '--release-candidate',
+      '--protected-main', '--release-candidate', '--root', admittedRoot,
     ], { cwd: root, encoding: 'utf8' })
     assert.equal(protectedCli.status, 0, protectedCli.stderr)
     assert.equal(JSON.parse(protectedCli.stdout).lane, 'base')
     const unprotectedCli = spawnSync(process.execPath, [
-      'scripts/change-impact.mjs', '--path', 'docs/development-log.md', '--release-candidate',
+      'scripts/change-impact.mjs', '--path', 'docs/development-log.md', '--release-candidate', '--root', admittedRoot,
     ], { cwd: root, encoding: 'utf8' })
     assert.equal(unprotectedCli.status, 1)
     const auditCli = spawnSync(process.execPath, [
-      'scripts/change-impact.mjs', '--audit',
+      'scripts/change-impact.mjs', '--audit', '--root', admittedRoot,
     ], { cwd: root, encoding: 'utf8' })
     assert.equal(auditCli.status, 0, auditCli.stderr)
     assert.equal(JSON.parse(auditCli.stdout).ci_mode, 'audit')
+    const currentContract = spawnSync(process.execPath, [
+      'scripts/change-impact.mjs', '--check-contract',
+    ], { cwd: root, encoding: 'utf8' })
+    assert.equal(currentContract.status, 1)
+    assert.deepEqual(JSON.parse(currentContract.stdout).contract.errors, [D006_ERROR])
 
     const enterprise = classify('enterprise/apps/auth-gateway/src/index.ts')
     assert.equal(enterprise.enterprise, true)

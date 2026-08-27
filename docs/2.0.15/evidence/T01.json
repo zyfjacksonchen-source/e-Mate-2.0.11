@@ -72,6 +72,37 @@
     "deleted_unknown_path": { "lane": "base", "publish_components": [], "deleted_manifest_read": false },
     "strict_external_blocker": "After xin removal the Base v7 runtime_imports union still contains @deepseek-ai/dsh-launch-environment; the validator rejects it and T18 owns the contract correction."
   },
+  "integration_repairs": [
+    {
+      "id": "post-t04-d006-positive-fixtures",
+      "merged_release_tip": "e7822c22281373401e84bef9902722699d7d6fdd",
+      "local_merge_commit": "76a1d2d1c990bde23bd5866bf3092bd12a807828",
+      "trigger": "The first post-T04 merge run of the five named T01 checks failed 4/5 because current-tree positive tests and component materialization attempted to admit the deliberately invalid D006 boundary.",
+      "root_cause": "T01 tests still treated the repository root as an admitted pre-T04 Base and the component inventory CLI as a positive path, even though T04 had removed xin and correctly left the immutable v7 runtime-import union blocked for T18.",
+      "repair": "Positive classifier and materialization behavior now runs only against isolated synthetic v8 fixture contracts whose retained component declarations exactly match their fixture ABI. The real repository boundary and inventory command are asserted to fail with the one exact D006 error.",
+      "production_validator_changed": false,
+      "current_contract_claimed_valid": false,
+      "xin_restored": false,
+      "inventory_or_base_contract_modified": false,
+      "d009_consultation": "NOT_TRIGGERED: first merged-state failure; current D009 revision ea458a0 remains below threshold.",
+      "modified_files": [
+        "docs/2.0.15/evidence/T01.json",
+        "scripts/change-impact.test.mjs",
+        "scripts/component-release.test.mjs"
+      ],
+      "verification": [
+        {
+          "command": "node --test --test-name-pattern='pins the Harness|owns platform impact|exports the accepted Desktop|materializes one exact|checked-in desired state' scripts/change-impact.test.mjs scripts/component-release.test.mjs scripts/publish-profile-r2.test.mjs",
+          "before": "EXPECTED_FAIL: 1 passed, 4 failed on the exact D006 runtime-import union blocker",
+          "after": "PASS: 5/5 in 27.273 seconds"
+        },
+        {
+          "command": "node scripts/change-impact.mjs --check-contract",
+          "expected": "EXIT 1: desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union"
+        }
+      ]
+    }
+  ],
   "modified_files": [
     ".github/workflows/audit.yml",
     ".github/workflows/ci.yml",
