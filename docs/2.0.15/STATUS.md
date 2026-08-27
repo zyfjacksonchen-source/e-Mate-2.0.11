@@ -8,16 +8,17 @@ Status vocabulary: `TODO / INVESTIGATED / CODE_COMPLETE / NARROW_TEST_PASSED / I
 | --- | --- | --- |
 | Workpack integrity | `NARROW_TEST_PASSED` | ZIP and every manifest entry verified |
 | Incremental work-order intake | `NARROW_TEST_PASSED` | all three 2026-08-27 inputs hash-recorded and reconciled against current source in `INCREMENTAL-WORK-ORDERS.md` |
-| Incremental target-contract delta | `NARROW_TEST_PASSED` | accepted Image generation/intake, InputTrigger, Search and UI clauses are merged; `check:target` passes, while `check:release-boundary` reaches only the separately recorded D006 Base ABI union blocker; no package version changes |
+| Incremental target-contract delta | `NARROW_TEST_PASSED` | accepted Image generation/intake, InputTrigger, Search and UI clauses are merged; `check:target` passes, while `check:release-boundary` reaches only the separately recorded D006 successor-Base blockers; no package version changes |
 | Canonical source | `NARROW_TEST_PASSED` | clean current `origin/main` = `5f8c54d…` |
 | Baseline difference | `NARROW_TEST_PASSED` | recorded in `BASELINE.md`; old SHA/path assertions are not silently reused |
 | 2.0.14 task handoff | `NARROW_TEST_PASSED` | transferred task read; accepted branch tip `4bfe0c3…` and protected `main@5f8c54d…` have the identical tree; source changes map to T05/T09/T15 while installed/public closure stays T18 |
-| Base/Harness/Desktop pins | `NARROW_TEST_PASSED` | current contract and gitlink agree |
+| Base/Harness/Desktop pins | `BLOCKED` | immutable v7 remains unchanged; T15 now pins local Harness `2ca0b68b42…`, so T18 must bind that gitlink in the honest successor Base before RC |
+| Harness source reachability | `BLOCKED` | `2ca0b68b42…` is locally available for integration, but no advertised `origin/*` ref currently contains it; T18 must prove a clean checkout can fetch the exact gitlink before RC |
 | Owner/path partition | `NARROW_TEST_PASSED` | fail-closed scopes and sequential leases in `DECISIONS.md` |
 | Release/worktree topology | `NARROW_TEST_PASSED` | release and T00 worktrees exist; later worktrees are created only at dispatch |
 | Production predecessor | `INVESTIGATED` | public production remains 2.0.13; 2.0.14 source/candidate is not called released |
 | 2.0.14 Profile release input | `NARROW_TEST_PASSED` | T01 refreshed the checked-in desired-state snapshot to the exact public 2.0.13 Base v7 bytes and locked the former failure as a regression; no Profile publication was performed |
-| Post-xin Base ABI union | `BLOCKED` | retired C16 was the sole owner of `@deepseek-ai/dsh-launch-environment`; the v7 Base contract still declares it, so strict inventory validation correctly fails until T18 creates and rebinds an honest successor contract |
+| Successor Base identity | `BLOCKED` | strict inventory now reports the two D006 predicates: v7 does not bind T15 Harness `2ca0b68b42…`, and its runtime-import set no longer equals the retained-component ABI union; T18 must create and rebind an honest successor contract |
 | Tencent backlog | `INVESTIGATED` | connected Tencent Docs read-only discovery resolved two source sheets: `VwnSnZLbANDI` (202x29) and `RnRJdixQpXKW` (200x27); T17 intake is running and no row is closed before evidence mapping |
 | Formal platform/service authorities | `BLOCKED` | real accounts, Worker access, Apple/signing policy and accepted Intel/x64 runner receipts are ticket-local gates |
 
@@ -44,7 +45,7 @@ The effective concurrency cap is `min(6, available executor slots)`. The current
 | T12 | Message modes and typed image gallery | 5.6 sol max / high | `feat/2.0.15-T12-message-modes` | T05 image receipt; T11 Shell seam | `worktrees/emate-2.0.15-T12` | `MERGED` | `1176913`; independent visible task `01a0436a-de49-7ad1-a576-b3f8d73fb22e`; `docs/2.0.15/evidence/T12.json` |
 | T13 | Native `@`, Settings, navigation and titlebar integration | 5.6 sol max / xhigh | `feat/2.0.15-T13-ui-navigation` | T06; T07; T08 header; T09 Desktop; T11; T12; T15; T16 handoffs | `worktrees/emate-2.0.15-T13` | `TODO` | `docs/2.0.15/evidence/T13.json` |
 | T14 | C03 production icon | 5.6 sol / high | `feat/2.0.15-T14-c03-icon` | T01 cache/input contract | `worktrees/emate-2.0.15-T14` | `MERGED` | `docs/2.0.15/evidence/T14.json` |
-| T15 | Runtime plugins/connectors, Computer Use availability and native image intake | 5.6 sol max / high | `feat/2.0.15-T15-runtime-components` | T03 audit; T05 routing; T10 model-capability contract | `worktrees/emate-2.0.15-T15` | `INVESTIGATED` | visible task `01a0436a-de49-7ad1-a576-b3df10972f5c` owns the rejected `96da539` follow-up and prepared-adapter seam `2ca0b68b42`; evidence pending correction |
+| T15 | Runtime plugins/connectors, Computer Use availability and native image intake | 5.6 sol max / high | `feat/2.0.15-T15-runtime-components` | T03 audit; T05 routing; T10 model-capability contract | `worktrees/emate-2.0.15-T15` | `MERGED` | release commits `8cd64e9`, `f99cbdc`, `f3ec2ca`; local upstream `2ca0b68b42`; visible task `01a0436a-de49-7ad1-a576-b3df10972f5c`; `docs/2.0.15/evidence/T15.json`; clean-fetch proof remains T18 |
 | T16 | Product plugins, GenUI and Glass Composer contract | 5.6 sol max / high | `feat/2.0.15-T16-product-components` | T03 audit; T05 routing; T11 host; T12 gallery contract | `worktrees/emate-2.0.15-T16` | `BLOCKED` | visible task `01a0437a-bff4-7db2-9387-9edbe2b01e1d` paused clean before edits until D012 semantic host merges |
 | T17 | Tencent backlog intake | 5.6 sol / medium | `feat/2.0.15-T17-tencent-backlog` | readable Tencent sheets; T03 audit | `worktrees/emate-2.0.15-T17` | `INVESTIGATED` | visible task `01a04376-18e2-7a63-9c79-934597ccae80`; read-only source ids `VwnSnZLbANDI`, `RnRJdixQpXKW`; evidence in progress |
 | T18 | Freeze/RC/release | 5.6 sol max / xhigh | `release/2.0.15` | every P0 `MERGED` + `INSTALLED_E2E_PASSED` | `worktrees/emate-2.0.15-release` | `BLOCKED` | `docs/2.0.15/evidence/T18.json` |

@@ -3130,3 +3130,15 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: `docs/2.0.15/evidence/T12.json` 自身是 committed smoke extension；没有 complete Profile、installer、installed app、签名、R2/Feed 或公网写入。
 - Remaining blockers: T15 prepared-adapter/Attachment-first 仍在独立任务收口；T16 尚未执行；T17 已取得两份只读腾讯源表并开始导入；D006 必须由 T18 新 Base identity/rebind 关闭。
 - Next exact action: 从 `1176913` 创建 T16 独立 worktree/可见任务；T15 并行完成后，按 T16 → T13 → T18 顺序继续。
+
+## 2026-08-27 · 2.0.15 T15 原生图片输入与运行组件检查点
+
+- Goal checkpoint: T15 已在独立可见任务 `01a0436a-de49-7ad1-a576-b3df10972f5c` 完成，并由 T00 复验后作为一个不可拆分的三提交链合入 `release/2.0.15`；本条只提升源码与组件证据，不创建候选、安装态或发布回执。
+- Frozen baseline / current HEAD: 首段原生 Attachment/CDP/Find Skill 修复合入为 `8cd64e9`，registration-bound Harness/Vision 收口为 `f99cbdc`，证据纠正为 `f3ec2ca`；本地 Harness 提交为 `2ca0b68b420ba11a80fc5fac800f889008cd42af`。公开生产仍为精确 2.0.13，immutable Base v7 未修改。
+- Inspected native seam: paste/drop/upload 继续由 Harness Attachment/CAS 和 durable image block 唯一持有；image-capable 与 capability unknown 保留原请求和五个 native image blocks。确认 text-only 时，Vision 只在新的 Harness `llm/wire` waterfall 临时替换 messages；原 `llm/stream`、T10/invariant observers 和 prepared adapter registration 各只经过一次，HMR 重绑后仍调用 prepare 时捕获的 adapter。
+- Decision and forbidden alternatives: 不递归调用 `ctx.llm.stream`，不写 durable history，不序列化绝对路径，不切换模型，不新增 Attachment store，也不回退到 Find Skill/CDP。`llm/wire` 只允许 messages 变化；provider/model/signal/session/其余 envelope 漂移、throw 和 abort 均失败关闭。旧 v7 不被静默改写。
+- Changed scope: T15 Owner 内 CDP、Find Skill、Vision 与证据；经 D011 精确移交的 Harness `packages/llm/llm/src/index.ts`、窄测试和 root gitlink。Computer Use 无产品改动。没有 Base、版本、锁文件、发布或生产写入。
+- Verification commands and results: 可见任务回执为 Harness LLM `85/85`、Vision `4/4`、CDP `11/11`、Computer Use `2/2`、Find Skill `21/21`、CP-03 zero pending 与 emitted imports 精确 7 项。T00 独立重跑 LLM typecheck、`85/85`、CDP `11/11`、Computer Use `2/2`、Find Skill `21/21`；补齐 HEAD 已声明但工作树未展开的 GenUI submodule 后，使用已提交 `T15.json` 重放 CP-03 为 `2657 ms / 0 pending`。
+- Immutable evidence / receipt: `docs/2.0.15/evidence/T15.json` 诚实记录 source/component 层。`component-release inventory` 当前精确返回 D006 的两条严格消息：Harness gitlink 未被 v7 绑定，以及 v7 runtime imports 不等于 retained-component union；T18 successor Base 必须同时关闭二者。`2ca0b68b42…` 已通过本地对象同步到 release 工作树，但当前没有 advertised `origin/*` ref 包含它，因此这不是干净外部 checkout 回执。
+- Remaining blockers: T18 必须先证明全新 checkout 可获取精确 Harness gitlink；complete Profile app-directory、目标 CPython 3.12 wheel/runtime、双平台 installed paste/drop/upload、macOS TCC、真实 connector/account、candidate/public receipts 均仍 OPEN；D006 仍是 RC blocker。
+- Next exact action: 先完成 T11 D012 semantic frame host，再放行 T16；T13 只在 T11/T15/T16 handoff 后创建，T18 最后生成 successor Base 与正式 RC。

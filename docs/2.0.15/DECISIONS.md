@@ -22,9 +22,9 @@ A ticket may edit only its active scope below. Directory entries include descend
 
 Each ticket writes only `docs/2.0.15/evidence/Txx.json`. Mock/fixture evidence may prove a narrow contract but cannot produce `INSTALLED_E2E_PASSED`. Only exact installed bytes and real service/account receipts may advance that state. Only T18 may write production state.
 
-### D006 — C16 retirement requires a new Base contract identity
+### D006 — All stale v7 bindings require a new Base contract identity
 
-`@deepseek-ai/dsh-launch-environment` remains in the immutable v7 Base contract but no retained component imports it after T04. Do not weaken the union validator or silently mutate v7. T18 must create an honestly versioned successor Base contract and rebind every retained component before RC admission; until then the strict inventory failure is a release blocker, not a T04 regression.
+`@deepseek-ai/dsh-launch-environment` remains in the immutable v7 Base contract but no retained component imports it after T04. T15 also moves the pinned local Harness gitlink to `2ca0b68b420ba11a80fc5fac800f889008cd42af` for the sole registration-bound `llm/wire` seam, while v7 honestly remains bound to its old Harness. Do not weaken either validator or silently mutate v7. T18 must create an honestly versioned successor Base contract that binds the final Harness and retained-component ABI union, then rebind every retained component before RC admission; until then both strict inventory messages are one D006 release blocker, not T04/T15 regressions.
 
 ### D007 — Incremental issue work reuses current native owners
 
