@@ -68,6 +68,8 @@ Task `01a02e48-f61f-7352-bc86-b5ec8771d46c` is now owned by the 2.0.15 coordinat
 
 Every ticket additionally owns only its distinct `docs/2.0.15/evidence/Txx.json`.
 
+T11 received two one-time, expectation-only test transfers after its real Home and activity projection made the pre-T11 assertions stale: only the Home overview/recent-session expectations in `packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx`, and only the avatar RPC-count baseline in `packages/dsh/profile/plugins/emate-shell/tests/identity-settings-fidelity.client.spec.tsx`. No Sidebar/navigation or other identity assertion transferred. After T11 merges, both files return to their later functional owner; T13 inherits the former for final navigation integration.
+
 T15 may read the T16-owned File Import package to prove coexistence, but it writes cross-plugin coverage only under its own Vision test root or the T02 smoke roots. Any product edit to File Import requires a separately proven defect and an explicit scope transfer to T16.
 
 ## Sequential leases for shared files

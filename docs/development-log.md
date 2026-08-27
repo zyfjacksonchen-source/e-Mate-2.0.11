@@ -3107,3 +3107,15 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: `docs/2.0.15/evidence/T05.json`、`T06.json`、`T08.json`、`T09.json`、`T14.json` 只记录源码/组件真相；没有候选、安装字节、真实账号双端验收、签名、R2/Feed 或公网写入。
 - Remaining blockers: T07 与 T10 仍在执行；T11 等待 T06+T10，T15 等待 T10；T17 等待真实腾讯文档导出；T18 独占新 Base、RC、真实安装/更新/回滚和公网回读。
 - Next exact action: 先审查并合入 T07/T10；随后按高冲突顺序放行 T11，再依次推进 T12、T16、T13，并在 T10 后并行启动 T15。
+
+## 2026-08-27 · 2.0.15 T07/T10/T11 能力、数据与首页设置检查点
+
+- Goal checkpoint: T07 的 Skill Hub 发布、发现、安装、启停、卸载与重启恢复闭环，T10 的账户 Token 日桶、托管 Search grant 和模型图片能力合同，以及依赖它们的 T11 空首页、办公模板、账户与 Token 热力图已按唯一 Owner 合入 `release/2.0.15`；本条只提升源码与组件证据，不创建候选、安装态或发布回执。
+- Frozen baseline / current HEAD: T07 合入提交为 `1354df1`、`f7bbf5e`，T10 合入提交为 `2544fcd1fadde0bafd592815f882e2a439aed27e`，T11 合入提交为 `d56a8d6`；公开生产仍为精确 2.0.13，Base v7、Harness rc.7、Profile generation 和公网对象均未改变。
+- Inspected native seam: T10 继续使用既有 usage-attempt ledger、managed identity/Search lease 和原生 model metadata；T11 删除 Home 对 Session 本机 Token、成功率和最近任务的重复推断，十二个模板只复用既有 blank/Workspace/Session 与 `conversation.input` 草稿，AccountSettings 只消费 `identity.usage.activity` 的精确日桶。
+- Decision and forbidden alternatives: 不新增第二 analytics、Session、Workspace、Composer 或模板发送路径；模板只填草稿并聚焦，绝不自动发送。活动数据按 IANA timezone、连续 Gregorian 日期和 canonical decimal strings 验证，typed unavailable 不显示伪造零值。两处旧测试只转移与 T11 新事实直接冲突的 expectation，其他身份、Sidebar 和导航断言未转移。
+- Changed scope: T10 严格限于其 12 个 identity/model-policy/Gateway/analytics Owner 文件及 T10 evidence；T11 严格限于 Home/Account/token/template 租约、顺序转交的 `home.tsx`/client index、两段窄测试 expectation 与 T11 evidence。没有 Base、版本、锁文件、发布或生产写入。
+- Verification commands and results: T07 Worker `11/11`、组件 Node `17/17`、UI `7/7`，协调总线独立复跑 CP-07 为零 pending；T10 activity/Postgres `5/5`、Gateway focused `3/3`、identity lifecycle `10/10`、Gateway check 通过；T11 最终 Shell build 通过，协调总线在提交上独立复跑 `14 files / 85 tests` 全绿，CP-11/CP-12 为零 pending。D006 继续以 `runtime imports must equal the component-declared Base ABI union` 严格失败。
+- Immutable evidence / receipt: `docs/2.0.15/evidence/T07.json`、`T10.json` 与 `T11.json` 只记录源码/本地组件真相；没有真实双账号授权、公共 Worker/schema 回读、真实账户日桶对账、app-directory、installer、installed app、签名、R2/Feed 或公网回读。
+- Remaining blockers: T15 仍在执行；T12/T16/T13 尚未开始；T17 等待腾讯文档导出；T18 独占新 Base、真实账户、双平台安装更新回滚与发布。
+- Next exact action: 完成 T15 原生 Attachment-first/运行插件闭环；从已合入 T11 的 Shell seam 创建 T12，继续遵守 T11 → T12 → T16 → T13 顺序。
