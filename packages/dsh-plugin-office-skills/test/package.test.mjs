@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -170,6 +170,13 @@ test('Tools stay inside the current workspace and never overwrite output', async
   )
   assert.equal(jobIndex, 0)
   sandboxMode = 'workspace-write'
+  const cancelled = new AbortController()
+  cancelled.abort(new Error('cancelled before start'))
+  await assert.rejects(
+    write.execute({ format: 'docx', filename: 'cancelled.docx', document }, { agent: owner, signal: cancelled.signal }),
+    /cancelled before start/u,
+  )
+  await assert.rejects(readFile(join(root, '.e-mate', 'office', 'cancelled.docx')))
   const first = await write.execute({ format: 'docx', filename: '交付.docx', document }, execution)
   sandboxMode = 'danger-full-access'
   const second = await write.execute({ format: 'docx', filename: '交付.docx', document }, execution)
@@ -177,6 +184,26 @@ test('Tools stay inside the current workspace and never overwrite output', async
   assert.equal(second.relative_path, '.e-mate/office/交付-2.docx')
   assert.ok((await readFile(join(root, first.relative_path))).byteLength > 500)
   assert.match(JSON.stringify((await read.execute({ path: first.relative_path }, execution)).document), /轻量 Office/u)
+
+  for (const [format, filename, content, expected] of [
+    ['xlsx', '数据.xlsx', { sheets: [{ name: '数据', rows: [['项目', '数量'], ['e-Mate', 16]] }] }, 'e-Mate'],
+    ['pptx', '演示.pptx', { slides: [{ title: 'T16', bullets: ['真实产物'] }] }, '真实产物'],
+    ['pdf', '报告.pdf', { title: 'T16 PDF', pages: [{ lines: ['真实 PDF 产物'] }] }, '真实 PDF 产物'],
+  ]) {
+    const artifact = await write.execute({ format, filename, document: content }, execution)
+    assert.equal(artifact.relative_path, `.e-mate/office/${filename}`)
+    assert.ok((await readFile(join(root, artifact.relative_path))).byteLength > 500)
+    const reopened = await read.execute({ path: artifact.relative_path }, execution)
+    assert.equal(reopened.format, format)
+    assert.match(JSON.stringify(reopened.document), new RegExp(expected, 'u'))
+  }
+
+  const beforeMalformed = await readdir(join(root, '.e-mate', 'office'))
+  await assert.rejects(
+    write.execute({ format: 'xlsx', filename: 'bad.xlsx', document: { sheets: [] } }, execution),
+    /XLSX sheets are invalid/u,
+  )
+  assert.deepEqual(await readdir(join(root, '.e-mate', 'office')), beforeMalformed)
 
   const outside = join(sandbox, 'outside.docx')
   await writeFile(outside, 'not an office file')
