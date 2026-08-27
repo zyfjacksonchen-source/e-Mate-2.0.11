@@ -30,6 +30,14 @@ Each ticket writes only `docs/2.0.15/evidence/Txx.json`. Mock/fixture evidence m
 
 The 2026-08-27 issue-fix documents are reconciled in `INCREMENTAL-WORK-ORDERS.md`. Their product failures and acceptance scenarios enter 2.0.15, but stale or conflicting implementation proposals do not override current source. In particular: one canonical `imagegen` execution path remains over native Agent/Job/Attachment/receipt owners; `imagen` is a discovery spelling rather than a second Tool; multi-image capacity is proven through the native 1/2/4 path rather than a private semaphore; native InputTrigger/Goal/Todo services remain the only `@`/goal/plan owners; and the accepted native DeepSeek managed-search lease is repaired and verified rather than replaced by retired Search-MCP or another Provider.
 
+### D008 — Composer image intake is Native Attachment First
+
+The Vision paste interceptor is the confirmed P0 owner defect: it suppresses the native Composer paste and persists model-visible absolute-path text. T15 will use a bounded, owner-compatible backport instead of wholesale adoption of later upstream `047324a`/`5e485fb`. Paste, drop and upload must converge on the pinned Harness Attachment/CAS and durable image `ContentBlock` path. The session-selected model and T10-owned catalog capability metadata decide only request-time adaptation: image-capable and unknown capability keep native images; a confirmed text-only model may derive descriptions at the LLM wire boundary without rewriting the stored message. Model-name, UI-label or DOM heuristics, automatic model switching, a second Attachment store, absolute-path serialization and Skill Find/CDP fallback are forbidden.
+
+### D009 — Repeated failures may use bounded ChatGPT Web consultation
+
+When the same named acceptance check remains red after at least two materially different source-backed repair attempts, the owning ticket may consult the signed-in ChatGPT Web surface using the exact `5.6 sol Pro` model/reasoning option exposed there. It supplies one sanitized, complete packet of contract, owned source/callers, failure output, expected behavior, prior attempts and prohibitions. The answer is an advisory hypothesis, never implementation or release evidence: the original Owner and path lease remain unchanged, no secret or private account/customer data is uploaded, and completion still requires the same local check to pass. If the requested Web option is unavailable, the ticket records that fact rather than silently substituting another model.
+
 ## Exclusive static scopes
 
 | Ticket | Exact owned paths while active |
@@ -55,6 +63,8 @@ The 2026-08-27 issue-fix documents are reconciled in `INCREMENTAL-WORK-ORDERS.md
 | T18 | `docs/2.0.15/RELEASE-NOTES.md`, `docs/2.0.15/evidence/T18.json`, and only the exact freeze-lease paths enumerated below; no workflow implementation and no product redesign |
 
 Every ticket additionally owns only its distinct `docs/2.0.15/evidence/Txx.json`.
+
+T15 may read the T16-owned File Import package to prove coexistence, but it writes cross-plugin coverage only under its own Vision test root or the T02 smoke roots. Any product edit to File Import requires a separately proven defect and an explicit scope transfer to T16.
 
 ## Sequential leases for shared files
 
@@ -86,5 +96,5 @@ These files are never edited concurrently. A lease transfers only after the earl
 - T06 must release `home.tsx` before T11. T11 must release the settings/index seam before T12. T12 must release it before T13.
 - T08 must release Header controls before T13.
 - T01 must release CI/package-script and icon-cache contracts before T09/T14.
-- T05 freezes image/search visibility and receipt contracts before T10/T12/T15. T11 freezes the Shell token and composer-host seam before T12/T16. T06/T07/T08/T09/T15/T16 hand their native projections and UI seams to T13; T13 must consume them through native InputTrigger/Goal/Todo/runtime APIs rather than centralizing their state.
+- T05 freezes image/search visibility and receipt contracts before T10/T12/T15. T10 freezes session-selected model capability metadata before T15 changes image intake. T11 freezes the Shell token and composer-host seam before T12/T16. T06/T07/T08/T09/T15/T16 hand their native projections and UI seams to T13; T13 must consume them through native InputTrigger/Goal/Todo/runtime APIs rather than centralizing their state.
 - T18 acquires version leases only after all product worktrees are clean and all P0 installed gates are satisfied.
