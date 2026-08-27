@@ -1,12 +1,12 @@
-# e-Mate 2.0.11 Skill Hub 与 DSH Skill 合同
+# e-Mate 2.0.15 Skill Hub 与 DSH Skill 合同
 
 ## 1. 一个市场、一个运行时、一个组件
 
-e-Mate 沿用 2.0.5 Skill Hub 的公开目录与不可变版本模型，不创建第二套市场、ZIP 格式或 Skill Store。2.0.11 的适配面只有一个可热更新 Profile 组件 `@e-mate/dsh-plugin-skill-hub`；Host 事务、Agent Tools、Harness Connection RPC 和界面必须以同一版本发布。
+e-Mate 沿用 2.0.5 Skill Hub 的公开目录与不可变版本模型，不创建第二套市场、ZIP 格式或 Skill Store。2.0.15 的适配面只有一个可热更新 Profile 组件 `@e-mate/dsh-plugin-skill-hub`；Host 事务、Agent Tools、Harness Connection RPC 和界面必须以同一版本发布。
 
 权威参考仍是：
 
-- 服务端注册表参考：固定 UI/历史服务源 `upstream/e-mate-2.0.5/ecorex/control_plane/skill_hub.py`，其 gitlink 必须保持 `564a6b6c1d43fb6831dd4a5cd8026e472f063311`；服务端后续候选必须在独立、远端可取回的服务来源发布，不能推进该 UI 基线 gitlink；
+- 服务端实现：`enterprise/apps/skill-hub-worker`；2.0.5 的固定 gitlink 只作历史 UI/合同参考，不作为当前 Worker 或生产部署证据；
 - 服务端投影：`upstream/e-mate-2.0.5/desktop/src/v1/api/skillHubRuntimeContract.ts`；
 - 用户流程：`upstream/e-mate-2.0.5/desktop/src/v1/components/SkillsWorkspace.tsx`；
 - 本地解析与调用：固定 rc.7 的 `@deepseek-ai/dsh-skill-filesystem`、`ctx.skills` 与 `@deepseek-ai/dsh-tool-skill`。
@@ -40,16 +40,17 @@ e-Mate 沿用 2.0.5 Skill Hub 的公开目录与不可变版本模型，不创�
 
 ## 3. 线上 API 合同
 
-- `GET /skills`：服务端处理 query/category/tag/source、1–100 条分页和 opaque cursor；客户端不得只取首页后本地假过滤。
-- `GET /skills/{slug}`：同一 slug 的详情和不可变版本历史。
+- `GET /skills`：服务端处理 query/category/tag/source、1–100 条 keyset 分页；`next_cursor` 是用 Worker author key 签名并绑定完整过滤条件的 opaque cursor，客户端不得解码、改写、跨查询复用或只取首页后本地假过滤。
+- `GET /skills/{slug}`：返回当前 latest 卡片和 1–100 条不可变版本历史，版本历史使用独立且绑定 slug 的签名 opaque cursor。
+- `GET /skills/{slug}/versions/{version}`：按精确不可变版本读取卡片，安装、更新、降级和下载不能依赖有限详情页中的本地查找。
 - `GET /skills/{slug}/versions/{version}/package`：目录卡片与 `X-Skill-Content-SHA256` 使用规范内容/CAS 摘要；客户端必须重新解析下载 ZIP 并计算同一内容摘要。ZIP 原始字节另算 `archive_sha256`，只用于本地下载凭证和发布确认，不能与内容摘要混用。
-- `GET /publications/mine`：无参数只列当前身份的活动发布；精确 slug/version 查询也可回读本人已 tombstone 的不可变版本，用于删除响应丢失后的同请求幂等重放，不向其他账号泄露记录。
+- `GET /publications/mine`：无参数或精确 slug/version 都只列当前身份的活动发布；tombstone 版本不再作为可删除目标返回。删除响应丢失由原始稳定 request ID 和服务端 mutation receipt 重放，不重新取得或猜测 owner digest。
 - `POST /skills`：发布当前用户选择且已通过原生 DSH parser 的声明式 Skill；服务端再次解析真实 slug/version，不信任客户端声明。一个 slug 的首版原子绑定发布者，后续版本必须属于同一账号，其他账号不能劫持 latest。
 - `DELETE /skills/{slug}/versions/{version}`：只为当前身份拥有且 SHA-256 完全相等的版本写删除终态，不覆盖或改写已发布字节。
-- 安装意图的 consume/complete 必须绑定身份、设备、slug、version 和 digest。相同 completion receipt 的相同终态必须幂等；`POST /install-intents/reconcile` 必须可区分 `claimed|installed|failed`，供客户端在响应丢失或重启后对账。
+- 安装意图的 consume/complete 必须绑定身份、登录 Session、slug、version 和 digest。安装与 completion token 的服务端摘要都混入不可逆 Session ref，原始 token 不进入数据库；另一个 Session 即使取得原始 token 也不能 consume/complete。intent、claim、complete、reconcile 回执都显示精确 version、content digest 和 publisher；相同 completion receipt 的相同终态必须幂等，`POST /install-intents/reconcile` 必须可区分 `claimed|installed|failed`，供客户端在响应丢失或重启后对账。
 - publish/delete 的 `client_request_id` 由动作和精确不可变目标确定性生成；ZIP 文件顺序/时间固定，原始 ZIP 摘要只参与用户确认，不进入远端幂等身份。响应丢失后重试必须复用同一 ID，服务端对相同请求返回同一终态，对 ID 复用于其他目标则拒绝。
 
-本地服务候选 `9704c5bc1a5006d56c3237cd76c0b0f14b722957` 已验证内容/CAS 摘要、幂等 complete/reconcile、owned-publication 回读、不可变 tombstone、幂等 publish/delete receipt、跨账号拒绝和 CAS 字节保留；但该提交当前只保存在本机服务分支 `agent/e-mate-2.0.11-skill-hub-service`，不在权威远端可取回引用中，也不属于父仓库的固定 UI gitlink。只有服务候选单独发布到权威远端、由服务部署链绑定并取得真实账号/公网回读收据后，才能作为生产证据；客户端 fixture 或本机 Git 对象不能冒充上线闭环。
+T07 只验证当前仓库 Worker、组件源码和内存 D1/R2 deterministic fixture：包括签名分页、精确版本读取、不可变发布/删除、跨账号拒绝、Session 绑定的一次性安装凭证、受限流式解压、CAS 字节复验和 typed failure。它没有部署或修改公网 Worker、D1/R2、真实账号或公开数据。公网 Worker 版本、远端 schema、两账号回读和 exact component generation 均为 `OPEN_T18`；本地 fixture 不能冒充生产闭环。
 
 ## 4. 本地生命周期事务
 
@@ -63,7 +64,7 @@ e-Mate 沿用 2.0.5 Skill Hub 的公开目录与不可变版本模型，不创�
 6. 重启扫描 WAL，向服务端 reconcile；只有远端确认为 installed 才重新激活候选，否则保持上代或继续 pending。
 7. disable/uninstall 先原子移入受管隔离目录，确认原生 provider 已不可见后提交；enable 反向切换并要求原生 provider 可见。
 
-远端 `publish/delete` 在发出请求前把稳定 request ID、精确 slug/version/content digest/category 及发布 ZIP 写入 `$DSH_HOME/e-mate/skill-hub/remote-mutations`。明确 4xx 会清理 WAL 并失败；断网、取消时响应未知、限流或 5xx 保留 `recovery-pending`。重启或同一自然语言动作重试时只重放该 WAL 中的原始字节和请求 ID，收到匹配终态收据后才清理；不会重新解释模型参数或把未知完成报告为成功。
+远端 `publish/delete` 在发出请求前把稳定 request ID、精确 slug/version/content digest、发布所需 category/ZIP 或删除所需 publisher 写入 `$DSH_HOME/e-mate/skill-hub/remote-mutations`。明确 4xx 会清理 WAL 并失败；断网、取消时响应未知、限流或 5xx 保留 `recovery-pending`。重启或同一自然语言动作重试时只重放该 WAL 中的原始字节和请求 ID，收到匹配终态收据后才清理；不会重新解释模型参数或把未知完成报告为成功。Worker 和 Host/Job 使用同一 typed failure 词表：`auth|network|conflict|integrity|recovery|native-provider`；RPC 失败与 Job 终态保留 code，不只剩自由文本。
 
 `install` 只允许首次安装或同版本同摘要幂等复核；已有不同版本必须明确调用 `update`。降级只有 `allow_downgrade=true` 且确认框显示目标旧版本时允许。一个失败事务不能回滚另一个已返回成功的较新事务。
 
@@ -71,7 +72,7 @@ e-Mate 沿用 2.0.5 Skill Hub 的公开目录与不可变版本模型，不创�
 
 ## 5. ZIP 与发布安全边界
 
-- 压缩包、条目数、单文件和总解压字节均有上限；拒绝路径穿越、绝对路径、重复规范路径、链接、设备文件、加密条目和嵌套归档。
+- 压缩包、条目数、单文件和总解压字节均有上限；deflate 按流读取并在超过 central-directory 声明或单文件预算时立即取消，不先把未知膨胀量完整装入内存；拒绝路径穿越、绝对路径、重复规范路径、链接、设备文件、加密条目和嵌套归档。
 - 根目录必须有唯一 `SKILL.md`，name 为 DSH 接受的 kebab-case，version 为不可变 SemVer；原生 DSH parser 的 invocation/readiness 结论优先。
 - 拒绝可执行位、native binary、安装脚本、package lifecycle 与伪装 Cordis 包。
 - 发布只接受已安装 Skill 的受管 slug，或当前会话 `.e-mate/imports` 下经 realpath/普通文件/硬链接/大小/TOCTOU 复验的 ZIP identity；Agent Tool 不接受模型提供的任意本机路径。
@@ -91,4 +92,4 @@ Skill Hub Host、Agent、RPC 和 UI 任一源文件变化，都必须由 change-
 3. 将新组件与签名 accepted-component-set 组装完整 Profile，执行 Host boot、Client Loader settle、Desktop restart/health/rollback；
 4. 只上传不可变的新组件字节，最后原子激活签名 desired state，并从公共端回读同一 generation/hash。
 
-生产关闭条件还包括：用户 A 发布，用户 B 不能发布同 slug 的新版本，且能分页搜索、查看同一摘要、下载、安装并经真实 `/skill`/Agent 调用；B 完成更新、禁用、重启、启用和卸载；A 删除自己发布的精确版本，而 B 无权删除；安装完成以及 publish/delete 响应丢失后重启均能幂等对账。缺少线上 API、真实账号、签名 generation、平台安装态或实际 Skill 调用任一证据，都只能记录为局部门禁通过，不能宣称 Skill Hub 已上线闭环。
+生产关闭条件全部保留为 `OPEN_T18`：用户 A 发布，用户 B 不能发布同 slug 的新版本，且能分页搜索、查看同一摘要、下载、安装并经真实 native `skill`/Agent 调用；B 完成更新、禁用、重启、启用和卸载；A 删除自己发布的精确版本，而 B 无权删除；安装完成以及 publish/delete 响应丢失后重启均能幂等对账；公网 Worker version/schema/readback 与 signed exact component generation 必须一致。严格 D006 仍是 v7 Base ABI union mismatch，只能由 T18 新 Base identity/rebind 解决，T07 不修改、放宽或绕过。缺少线上 API、真实账号、签名 generation、平台安装态或实际 Skill 调用任一证据，都只能记录为源码/fixture 门禁通过，不能宣称 Skill Hub 已上线闭环。

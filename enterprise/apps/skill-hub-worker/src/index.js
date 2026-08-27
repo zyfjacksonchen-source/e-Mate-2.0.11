@@ -33,9 +33,10 @@ for (let index = 0; index < CRC_TABLE.length; index += 1) {
 }
 
 class HttpError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code = status === 401 || status === 403 ? 'auth' : status === 409 ? 'conflict' : status >= 500 ? 'network' : 'bad-request') {
     super(message)
     this.status = status
+    this.code = code
   }
 }
 
@@ -86,7 +87,7 @@ function modelPrincipal(token) {
     || claims?.schemaVersion !== 1 || !IDENTIFIER.test(String(claims.tenantId ?? ''))
     || !IDENTIFIER.test(String(claims.sub ?? '')) || !IDENTIFIER.test(String(claims.sid ?? ''))
     || !Number.isSafeInteger(claims.exp) || claims.exp <= Math.floor(Date.now() / 1_000)) return undefined
-  return { tenantId: claims.tenantId, userId: claims.sub }
+  return { tenantId: claims.tenantId, userId: claims.sub, sessionId: claims.sid }
 }
 
 function configured(env) {
@@ -113,6 +114,16 @@ async function authorRef(env, principal) {
   return `author_${hex(new Uint8Array(signature)).slice(0, 24)}`
 }
 
+async function sessionRef(env, principal) {
+  const key = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(env.AUTHOR_KEY), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+  )
+  const signature = await crypto.subtle.sign(
+    'HMAC', key, new TextEncoder().encode(`${principal.tenantId}\0${principal.userId}\0${principal.sessionId}`),
+  )
+  return `session_${hex(new Uint8Array(signature)).slice(0, 24)}`
+}
+
 async function authenticate(request, env, config, fetchImplementation) {
   const match = BEARER.exec(request.headers.get('authorization') ?? '')
   if (match === null) throw new HttpError(401, 'e-Mate login is required')
@@ -136,7 +147,7 @@ async function authenticate(request, env, config, fetchImplementation) {
   }
   const principal = modelPrincipal(token)
   if (principal === undefined) throw new HttpError(401, 'e-Mate login is required')
-  return { principal, author: await authorRef(env, principal) }
+  return { principal, author: await authorRef(env, principal), session: await sessionRef(env, principal) }
 }
 
 async function readJson(request) {
@@ -169,7 +180,7 @@ function crc32(bytes) {
 }
 
 function archiveError(message) {
-  return new HttpError(422, `Skill archive rejected: ${message}`)
+  return new HttpError(422, `Skill archive rejected: ${message}`, 'integrity')
 }
 
 function validatePath(raw, directory) {
@@ -283,7 +294,26 @@ async function inflate(payload, record) {
   } else {
     try {
       const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
-      content = new Uint8Array(await new Response(stream).arrayBuffer())
+      const reader = stream.getReader()
+      const chunks = []
+      let total = 0
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          total += value.byteLength
+          if (total > record.expanded || total > MAX_FILE_BYTES) {
+            await reader.cancel()
+            throw archiveError('a deflated file exceeded its declared expansion budget')
+          }
+          chunks.push(value)
+        }
+      } finally {
+        reader.releaseLock()
+      }
+      content = new Uint8Array(total)
+      let offset = 0
+      for (const chunk of chunks) { content.set(chunk, offset); offset += chunk.byteLength }
     } catch {
       throw archiveError('a deflated file cannot be decompressed')
     }
@@ -496,6 +526,55 @@ function randomToken() {
   return btoa(binary).replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/u, '')
 }
 
+function credentialHash(token, session) {
+  return sha256(new TextEncoder().encode(`${token}\0${session}`))
+}
+
+function base64urlBytes(bytes) {
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '')
+}
+
+function decodeBase64urlBytes(value) {
+  if (!/^[A-Za-z0-9_-]+$/u.test(value)) throw new HttpError(422, 'Skill Hub cursor is invalid')
+  try {
+    const binary = atob(value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - value.length % 4) % 4))
+    return Uint8Array.from(binary, character => character.charCodeAt(0))
+  } catch {
+    throw new HttpError(422, 'Skill Hub cursor is invalid')
+  }
+}
+
+async function cursorKey(env, usage) {
+  return crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(env.AUTHOR_KEY), { name: 'HMAC', hash: 'SHA-256' }, false, [usage],
+  )
+}
+
+async function encodeCursor(env, value) {
+  const payload = new TextEncoder().encode(JSON.stringify(value))
+  const signature = await crypto.subtle.sign('HMAC', await cursorKey(env, 'sign'), payload)
+  return `${base64urlBytes(payload)}.${base64urlBytes(new Uint8Array(signature))}`
+}
+
+async function decodeCursor(env, value) {
+  const parts = value?.split('.') ?? []
+  if (parts.length !== 2) throw new HttpError(422, 'Skill Hub cursor is invalid')
+  const payload = decodeBase64urlBytes(parts[0])
+  const signature = decodeBase64urlBytes(parts[1])
+  if (!await crypto.subtle.verify('HMAC', await cursorKey(env, 'verify'), signature, payload)) {
+    throw new HttpError(422, 'Skill Hub cursor is invalid')
+  }
+  try {
+    const decoded = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(payload))
+    if (decoded === null || typeof decoded !== 'object' || Array.isArray(decoded)) throw new Error('invalid')
+    return decoded
+  } catch {
+    throw new HttpError(422, 'Skill Hub cursor is invalid')
+  }
+}
+
 function mutationMatches(row, action, slug, version, packageSha256) {
   return row !== null && row.action === action && row.slug === slug && row.version === version
     && row.package_sha256 === packageSha256 && row.status === (action === 'publish' ? 'published' : 'deleted')
@@ -519,7 +598,8 @@ async function publish(request, env, config, fetchImplementation) {
       throw new HttpError(409, 'Skill Hub client request identity was reused')
     }
     const existing = await first(env, 'SELECT * FROM skill_hub_versions WHERE slug=? AND version=?', [inspected.name, inspected.version])
-    if (existing === null) throw new HttpError(409, 'Skill Hub publication receipt is unavailable')
+    const tombstone = await first(env, 'SELECT 1 AS deleted FROM skill_hub_publication_tombstones WHERE slug=? AND version=?', [inspected.name, inspected.version])
+    if (existing === null || tombstone !== null) throw new HttpError(409, 'Skill Hub publication receipt is unavailable')
     return json(card(existing), 201)
   }
   const owner = await first(env, 'SELECT author_ref FROM skill_hub_versions WHERE slug=? LIMIT 1', [inspected.name])
@@ -546,7 +626,8 @@ async function publish(request, env, config, fetchImplementation) {
         archive_sha256: inspected.archiveSha256,
       },
     })
-  } else if (stored.size !== payload.byteLength || stored.customMetadata?.archive_sha256 !== inspected.archiveSha256) {
+  } else if (stored.size !== payload.byteLength || stored.customMetadata?.package_sha256 !== inspected.packageSha256
+    || stored.customMetadata?.archive_sha256 !== inspected.archiveSha256) {
     throw new HttpError(409, 'Skill Hub package storage identity conflicts')
   }
   try {
@@ -596,34 +677,79 @@ async function catalog(request, env, config, fetchImplementation, url) {
   if (query.length > 128 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100
     || (category !== null && !CATEGORIES.has(category))
     || (tag !== null && !SEARCH_TAG.test(tag)) || (source !== null && !SOURCE.test(source))
-    || (cursor !== null && !SKILL_NAME.test(cursor))) throw new HttpError(422, 'Skill Hub search filters are invalid')
+    || (cursor !== null && (cursor.length > 1024 || CONTROL.test(cursor)))) throw new HttpError(422, 'Skill Hub search filters are invalid')
+  const scope = { purpose: 'catalog', query: query.trim(), category, tag, source }
+  const decoded = cursor === null ? null : await decodeCursor(env, cursor)
+  if (decoded !== null && (!exact(decoded, ['purpose', 'query', 'category', 'tag', 'source', 'after'])
+    || Object.entries(scope).some(([key, value]) => decoded[key] !== value)
+    || !SKILL_NAME.test(decoded.after))) throw new HttpError(422, 'Skill Hub search filters are invalid')
   const clauses = [
     's.slug > ?',
     "(? = '' OR s.slug LIKE ? ESCAPE '\\' OR v.title LIKE ? ESCAPE '\\' OR v.summary LIKE ? ESCAPE '\\')",
   ]
   const escaped = query.trim().replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')
   const pattern = `%${escaped}%`
-  const values = [cursor ?? '', query.trim(), pattern, pattern, pattern]
+  const values = [decoded?.after ?? '', query.trim(), pattern, pattern, pattern]
   if (category !== null) { clauses.push('v.category=?'); values.push(category) }
   if (tag !== null) { clauses.push('instr(v.tags_json,?)>0'); values.push(JSON.stringify(tag)) }
   if (source !== null) { clauses.push('v.original_platform=?'); values.push(source) }
-  values.push(limit)
+  values.push(limit + 1)
   const rows = await all(env,
     `SELECT v.* FROM skill_hub_skills s JOIN skill_hub_versions v ON v.slug=s.slug AND v.version=s.latest_version WHERE NOT EXISTS (SELECT 1 FROM skill_hub_publication_tombstones t WHERE t.slug=v.slug AND t.version=v.version) AND ${clauses.join(' AND ')} ORDER BY s.slug LIMIT ?`,
     values,
   )
-  return json({ schema_version: 1, items: rows.map(card), next_cursor: rows.length === limit ? rows.at(-1).slug : null })
+  const page = rows.slice(0, limit)
+  return json({
+    schema_version: 1,
+    items: page.map(card),
+    next_cursor: rows.length > limit ? await encodeCursor(env, { ...scope, after: page.at(-1).slug }) : null,
+  })
 }
 
-async function detail(request, env, config, fetchImplementation, slug) {
+async function detail(request, env, config, fetchImplementation, slug, url) {
   await authenticate(request, env, config, fetchImplementation)
-  const rows = await all(env,
-    'SELECT v.* FROM skill_hub_versions v WHERE v.slug=? AND NOT EXISTS (SELECT 1 FROM skill_hub_publication_tombstones t WHERE t.slug=v.slug AND t.version=v.version) ORDER BY v.version_sort DESC LIMIT 100',
+  for (const key of url.searchParams.keys()) if (!['cursor', 'limit'].includes(key) || url.searchParams.getAll(key).length !== 1) {
+    throw new HttpError(422, 'Skill Hub version filters are invalid')
+  }
+  const limit = Number(url.searchParams.get('limit') ?? 24)
+  const cursor = url.searchParams.get('cursor')
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100
+    || (cursor !== null && (cursor.length > 1024 || CONTROL.test(cursor)))) throw new HttpError(422, 'Skill Hub version filters are invalid')
+  const decoded = cursor === null ? null : await decodeCursor(env, cursor)
+  if (decoded !== null && (!exact(decoded, ['purpose', 'slug', 'version_sort', 'version'])
+    || decoded.purpose !== 'versions' || decoded.slug !== slug
+    || typeof decoded.version_sort !== 'string' || !VERSION.test(decoded.version))) {
+    throw new HttpError(422, 'Skill Hub version filters are invalid')
+  }
+  const latest = await first(env,
+    'SELECT v.* FROM skill_hub_skills s JOIN skill_hub_versions v ON v.slug=s.slug AND v.version=s.latest_version WHERE s.slug=? AND NOT EXISTS (SELECT 1 FROM skill_hub_publication_tombstones t WHERE t.slug=v.slug AND t.version=v.version)',
     [slug],
   )
-  if (rows.length === 0) throw new HttpError(404, 'Skill was not found')
-  const versions = rows.map(card)
-  return json({ schema_version: 1, skill: versions[0], versions })
+  if (latest === null) throw new HttpError(404, 'Skill was not found')
+  const rows = await all(env,
+    `SELECT v.* FROM skill_hub_versions v WHERE v.slug=? AND NOT EXISTS (SELECT 1 FROM skill_hub_publication_tombstones t WHERE t.slug=v.slug AND t.version=v.version)
+      AND (? IS NULL OR v.version_sort < ? OR (v.version_sort = ? AND v.version < ?)) ORDER BY v.version_sort DESC,v.version DESC LIMIT ?`,
+    [slug, decoded?.version_sort ?? null, decoded?.version_sort ?? null, decoded?.version_sort ?? null, decoded?.version ?? '', limit + 1],
+  )
+  const page = rows.slice(0, limit)
+  return json({
+    schema_version: 1,
+    skill: card(latest),
+    versions: page.map(card),
+    next_cursor: rows.length > limit ? await encodeCursor(env, {
+      purpose: 'versions', slug, version_sort: page.at(-1).version_sort, version: page.at(-1).version,
+    }) : null,
+  })
+}
+
+async function exactVersion(request, env, config, fetchImplementation, slug, version) {
+  await authenticate(request, env, config, fetchImplementation)
+  const row = await first(env,
+    'SELECT v.* FROM skill_hub_versions v WHERE v.slug=? AND v.version=? AND NOT EXISTS (SELECT 1 FROM skill_hub_publication_tombstones t WHERE t.slug=v.slug AND t.version=v.version)',
+    [slug, version],
+  )
+  if (row === null) throw new HttpError(404, 'Skill version was not found')
+  return json(card(row))
 }
 
 async function owned(request, env, config, fetchImplementation, url) {
@@ -641,7 +767,10 @@ async function owned(request, env, config, fetchImplementation, url) {
       'SELECT v.* FROM skill_hub_versions v WHERE v.author_ref=? AND NOT EXISTS (SELECT 1 FROM skill_hub_publication_tombstones t WHERE t.slug=v.slug AND t.version=v.version) ORDER BY v.slug,v.version_sort DESC LIMIT 100',
       [auth.author],
     )
-    : await all(env, 'SELECT v.* FROM skill_hub_versions v WHERE v.author_ref=? AND v.slug=? AND v.version=? LIMIT 1', [auth.author, slug, version])
+    : await all(env,
+      'SELECT v.* FROM skill_hub_versions v WHERE v.author_ref=? AND v.slug=? AND v.version=? AND NOT EXISTS (SELECT 1 FROM skill_hub_publication_tombstones t WHERE t.slug=v.slug AND t.version=v.version) LIMIT 1',
+      [auth.author, slug, version],
+    )
   return json({ schema_version: 1, items: rows.map(card) })
 }
 
@@ -687,7 +816,7 @@ async function deletePublication(request, env, config, fetchImplementation, slug
   if (tombstone !== null) {
     if (replay !== null || (tombstone.author_ref === auth.author && tombstone.client_request_id === value.client_request_id
       && tombstone.package_sha256 === value.package_sha256)) {
-      return json({ schema_version: 1, status: 'deleted', slug, version, package_sha256: value.package_sha256 })
+      return json({ schema_version: 1, status: 'deleted', slug, version, package_sha256: value.package_sha256, uploader: card(row).uploader })
     }
     throw new HttpError(409, 'Skill Hub publication is already deleted')
   }
@@ -717,7 +846,7 @@ async function deletePublication(request, env, config, fetchImplementation, slug
       throw new HttpError(409, 'Skill Hub publication deletion conflicts with existing state')
     }
   }
-  return json({ schema_version: 1, status: 'deleted', slug, version, package_sha256: value.package_sha256 })
+  return json({ schema_version: 1, status: 'deleted', slug, version, package_sha256: value.package_sha256, uploader: card(row).uploader })
 }
 
 async function createIntent(request, env, config, fetchImplementation, slug, version) {
@@ -726,26 +855,44 @@ async function createIntent(request, env, config, fetchImplementation, slug, ver
   if (!exact(value, ['package_sha256', 'client_request_id']) || !SHA256.test(value.package_sha256)
     || !CLIENT_REQUEST_ID.test(value.client_request_id)) throw new HttpError(422, 'Skill Hub install intent is invalid')
   const skill = await first(env,
-    'SELECT v.package_sha256 FROM skill_hub_versions v WHERE v.slug=? AND v.version=? AND NOT EXISTS (SELECT 1 FROM skill_hub_publication_tombstones t WHERE t.slug=v.slug AND t.version=v.version)',
+    'SELECT v.* FROM skill_hub_versions v WHERE v.slug=? AND v.version=? AND NOT EXISTS (SELECT 1 FROM skill_hub_publication_tombstones t WHERE t.slug=v.slug AND t.version=v.version)',
     [slug, version],
   )
   if (skill === null) throw new HttpError(404, 'Skill was not found')
   if (skill.package_sha256 !== value.package_sha256) throw new HttpError(422, 'Skill Hub install intent is invalid')
+  const duplicate = await first(env,
+    'SELECT intent_id FROM skill_hub_install_intents WHERE account_ref=? AND client_request_id=?',
+    [auth.author, value.client_request_id],
+  )
+  if (duplicate !== null) throw new HttpError(409, 'Skill Hub install request identity was already used')
   const token = randomToken()
-  const tokenHash = await sha256(new TextEncoder().encode(token))
+  const tokenHash = await credentialHash(token, auth.session)
   const intentId = `intent_${crypto.randomUUID().replaceAll('-', '')}`
   const expiresAt = new Date(Date.now() + 5 * 60 * 1_000).toISOString()
-  await env.DB.batch([
-    statement(env,
-      'INSERT INTO skill_hub_install_intents(intent_id,account_ref,slug,version,package_sha256,client_request_id,install_token_sha256,completion_token_sha256,expires_at,status) VALUES (?,?,?,?,?,?,?,?,?,?)',
-      [intentId, auth.author, slug, version, value.package_sha256, value.client_request_id, tokenHash, null, expiresAt, 'created'],
-    ),
-    statement(env,
-      'INSERT INTO skill_hub_install_logs(intent_id,account_ref,slug,version,package_sha256,status) VALUES (?,?,?,?,?,?)',
-      [intentId, auth.author, slug, version, value.package_sha256, 'created'],
-    ),
-  ])
-  return json({ schema_version: 1, install_intent: token, intent_id: intentId, slug, version, package_sha256: value.package_sha256, expires_at: expiresAt })
+  try {
+    await env.DB.batch([
+      statement(env,
+        'INSERT INTO skill_hub_install_intents(intent_id,account_ref,slug,version,package_sha256,client_request_id,install_token_sha256,completion_token_sha256,expires_at,status) VALUES (?,?,?,?,?,?,?,?,?,?)',
+        [intentId, auth.author, slug, version, value.package_sha256, value.client_request_id, tokenHash, null, expiresAt, 'created'],
+      ),
+      statement(env,
+        'INSERT INTO skill_hub_install_logs(intent_id,account_ref,slug,version,package_sha256,status) VALUES (?,?,?,?,?,?)',
+        [intentId, auth.author, slug, version, value.package_sha256, 'created'],
+      ),
+    ])
+  } catch {
+    throw new HttpError(409, 'Skill Hub install request identity conflicts')
+  }
+  return json({
+    schema_version: 1,
+    install_intent: token,
+    intent_id: intentId,
+    slug,
+    version,
+    package_sha256: value.package_sha256,
+    uploader: card(skill).uploader,
+    expires_at: expiresAt,
+  })
 }
 
 async function consumeIntent(request, env, config, fetchImplementation) {
@@ -753,12 +900,12 @@ async function consumeIntent(request, env, config, fetchImplementation) {
   const value = await readJson(request)
   if (!exact(value, ['install_intent']) || typeof value.install_intent !== 'string'
     || value.install_intent.length !== 64) throw new HttpError(409, 'Skill Hub install intent is invalid')
-  const tokenHash = await sha256(new TextEncoder().encode(value.install_intent))
+  const tokenHash = await credentialHash(value.install_intent, auth.session)
   const intent = await first(env, 'SELECT * FROM skill_hub_install_intents WHERE install_token_sha256=?', [tokenHash])
   if (intent === null || intent.account_ref !== auth.author || intent.status !== 'created'
     || Date.parse(intent.expires_at) <= Date.now()) throw new HttpError(409, 'Skill Hub install intent cannot be consumed')
   const completion = randomToken()
-  const completionHash = await sha256(new TextEncoder().encode(completion))
+  const completionHash = await credentialHash(completion, auth.session)
   const results = await env.DB.batch([
     statement(env,
       "UPDATE skill_hub_install_intents SET status='claimed',claimed_at=CURRENT_TIMESTAMP,completion_token_sha256=? WHERE intent_id=? AND status='created'",
@@ -776,6 +923,7 @@ async function consumeIntent(request, env, config, fetchImplementation) {
     slug: intent.slug,
     version: intent.version,
     package_sha256: intent.package_sha256,
+    uploader: card(await first(env, 'SELECT * FROM skill_hub_versions WHERE slug=? AND version=?', [intent.slug, intent.version])).uploader,
     expires_at: intent.expires_at,
     completion_receipt: completion,
   })
@@ -789,12 +937,19 @@ async function completionIntent(request, env, config, fetchImplementation, recon
     || (!reconcileOnly && !['installed', 'failed'].includes(value.status))) {
     throw new HttpError(409, 'Skill Hub install completion is invalid')
   }
-  const tokenHash = await sha256(new TextEncoder().encode(value.completion_receipt))
+  const tokenHash = await credentialHash(value.completion_receipt, auth.session)
   const intent = await first(env, 'SELECT * FROM skill_hub_install_intents WHERE completion_token_sha256=?', [tokenHash])
   if (intent === null || intent.account_ref !== auth.author || !['claimed', 'installed', 'failed'].includes(intent.status)) {
     throw new HttpError(409, 'Skill Hub install completion is invalid')
   }
-  if (reconcileOnly) return json({ schema_version: 1, status: intent.status })
+  const identity = {
+    intent_id: intent.intent_id,
+    slug: intent.slug,
+    version: intent.version,
+    package_sha256: intent.package_sha256,
+    uploader: card(await first(env, 'SELECT * FROM skill_hub_versions WHERE slug=? AND version=?', [intent.slug, intent.version])).uploader,
+  }
+  if (reconcileOnly) return json({ schema_version: 1, status: intent.status, ...identity })
   if (intent.status !== value.status) {
     if (intent.status !== 'claimed') throw new HttpError(409, 'Skill Hub install completion is invalid')
     const results = await env.DB.batch([
@@ -809,7 +964,7 @@ async function completionIntent(request, env, config, fetchImplementation, recon
     ])
     if (Number(results[0]?.meta?.changes ?? 0) !== 1) throw new HttpError(409, 'Skill Hub install completion is invalid')
   }
-  return json({ schema_version: 1, status: value.status })
+  return json({ schema_version: 1, status: value.status, ...identity })
 }
 
 export async function handleRequest(request, env, fetchImplementation = fetch) {
@@ -821,6 +976,9 @@ export async function handleRequest(request, env, fetchImplementation = fetch) {
     return json({ schema_version: 1, ready: row?.ok === 1 })
   }
   if (!url.pathname.startsWith(`${BASE_PATH}/`) && url.pathname !== BASE_PATH) throw new HttpError(404, 'Not found')
+  if (request.headers.has('origin') || request.headers.has('sec-fetch-site') || request.headers.has('sec-fetch-mode')) {
+    throw new HttpError(403, 'Browser bearer transport is forbidden', 'auth')
+  }
   if (request.method === 'GET' && url.pathname === `${BASE_PATH}/skills`) return catalog(request, env, config, fetchImplementation, url)
   if (request.method === 'GET' && url.pathname === `${BASE_PATH}/publications/mine`) return owned(request, env, config, fetchImplementation, url)
   if (request.method === 'POST' && url.pathname === `${BASE_PATH}/skills` && url.search === '') return publish(request, env, config, fetchImplementation)
@@ -838,13 +996,17 @@ export async function handleRequest(request, env, fetchImplementation = fetch) {
       decodeSegment(intentMatch[1], SKILL_NAME, 'Skill slug'), decodeSegment(intentMatch[2], VERSION, 'Skill version'))
   }
   const versionMatch = new RegExp(`^${BASE_PATH}/skills/([^/]+)/versions/([^/]+)$`, 'u').exec(url.pathname)
+  if (request.method === 'GET' && url.search === '' && versionMatch !== null) {
+    return exactVersion(request, env, config, fetchImplementation,
+      decodeSegment(versionMatch[1], SKILL_NAME, 'Skill slug'), decodeSegment(versionMatch[2], VERSION, 'Skill version'))
+  }
   if (request.method === 'DELETE' && url.search === '' && versionMatch !== null) {
     return deletePublication(request, env, config, fetchImplementation,
       decodeSegment(versionMatch[1], SKILL_NAME, 'Skill slug'), decodeSegment(versionMatch[2], VERSION, 'Skill version'))
   }
   const detailMatch = new RegExp(`^${BASE_PATH}/skills/([^/]+)$`, 'u').exec(url.pathname)
-  if (request.method === 'GET' && url.search === '' && detailMatch !== null) {
-    return detail(request, env, config, fetchImplementation, decodeSegment(detailMatch[1], SKILL_NAME, 'Skill slug'))
+  if (request.method === 'GET' && detailMatch !== null) {
+    return detail(request, env, config, fetchImplementation, decodeSegment(detailMatch[1], SKILL_NAME, 'Skill slug'), url)
   }
   throw new HttpError(404, 'Not found')
 }
@@ -854,13 +1016,13 @@ export default {
     try {
       return await handleRequest(request, env)
     } catch (error) {
-      if (error instanceof HttpError) return json({ detail: error.message }, error.status)
+      if (error instanceof HttpError) return json({ detail: error.message, error: { code: error.code, message: error.message } }, error.status)
       console.error(JSON.stringify({
         message: 'Skill Hub request failed',
         method: request.method,
         error: error instanceof Error ? error.message : 'unknown error',
       }))
-      return json({ detail: 'Skill Hub service failed' }, 500)
+      return json({ detail: 'Skill Hub service failed', error: { code: 'network', message: 'Skill Hub service failed' } }, 500)
     }
   },
 }

@@ -52,7 +52,7 @@ function atomicJson(path, value) {
 }
 
 function archiveError(message) {
-  return new Error(`Skill archive rejected: ${message}`)
+  return new SkillHubOperationError('integrity', `Skill archive rejected: ${message}`)
 }
 
 function findEndOfCentralDirectory(payload) {
@@ -336,6 +336,21 @@ export class SkillHubRecoveryPendingError extends Error {
   }
 }
 
+export class SkillHubOperationError extends Error {
+  constructor(code, message, options) {
+    super(message, options)
+    this.name = 'SkillHubOperationError'
+    this.code = code
+  }
+}
+
+export function skillHubFailure(error) {
+  if (error instanceof SkillHubRecoveryPendingError) return { code: 'recovery', message: error.message }
+  if (error instanceof SkillHubOperationError) return { code: error.code, message: error.message }
+  if (error?.name === 'AbortError') return { code: 'cancelled', message: error.message || 'Skill Hub operation was cancelled' }
+  return { code: 'bad-request', message: error instanceof Error ? error.message : String(error) }
+}
+
 function skillPaths(dshHome, slug) {
   const state = join(dshHome, 'e-mate', 'skill-hub')
   const transactions = join(state, 'transactions')
@@ -367,7 +382,9 @@ function receiptOf(value, slug) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)
     || value.schema_version !== 1 || value.slug !== slug
     || !VERSION.test(value.version) || !SHA256.test(value.package_sha256)
-    || !RECEIPT_STATUSES.has(value.status)) {
+    || !RECEIPT_STATUSES.has(value.status)
+    || (value.uploader !== undefined && (typeof value.uploader !== 'object' || value.uploader === null
+      || typeof value.uploader.nickname !== 'string' || !/^author_[0-9a-f]{24}$/u.test(value.uploader.author_ref)))) {
     throw new Error(`Skill Hub receipt for ${slug} is invalid`)
   }
   return value
@@ -389,7 +406,7 @@ function restoreReceipt(paths, receipt) {
   else atomicJson(paths.receipt, receipt)
 }
 
-function nativeReceipt(slug, version, packageSha256, status, native, timestamp = new Date().toISOString()) {
+function nativeReceipt(slug, version, packageSha256, status, native, timestamp = new Date().toISOString(), uploader) {
   return {
     schema_version: 1,
     source: 'e-mate-skill-hub',
@@ -402,6 +419,7 @@ function nativeReceipt(slug, version, packageSha256, status, native, timestamp =
       model_invocable: native?.invocation?.modelInvocable === true,
       user_invocable: native?.invocation?.userInvocable === true,
     },
+    ...(uploader === undefined ? {} : { uploader }),
     updated_at: timestamp,
   }
 }
@@ -480,11 +498,11 @@ function moveBackInstall(paths, previousReceipt) {
   restoreReceipt(paths, previousReceipt)
 }
 
-function compareSemver(left, right) {
+export function compareSkillVersions(left, right) {
   const parseVersion = (value) => {
     const match = VERSION.exec(value)
     if (match === null) throw new Error('Skill version is invalid')
-    return { numbers: match.slice(1, 4).map(Number), prerelease: match[4]?.slice(1).split('.') }
+    return { numbers: match.slice(1, 4).map(Number), prerelease: match[4]?.split('.') }
   }
   const a = parseVersion(left)
   const b = parseVersion(right)
@@ -515,6 +533,7 @@ function operationResult(receipt, extra = {}) {
     version: receipt.version,
     package_sha256: receipt.package_sha256,
     status: receipt.status,
+    ...(receipt.uploader === undefined ? {} : { uploader: receipt.uploader }),
     ...extra,
   }
 }
@@ -553,12 +572,14 @@ export function createSkillHubStore({ dshHome, validateCandidate, validateActive
       && previousReceipt.version === card.version
       && previousReceipt.package_sha256 === card.package_sha256) {
       const native = await validateActive(paths.active, card.slug, signal)
-      return operationResult(nativeReceipt(card.slug, card.version, card.package_sha256, 'installed', native), { unchanged: true })
+      return operationResult(nativeReceipt(
+        card.slug, card.version, card.package_sha256, 'installed', native, undefined, previousReceipt.uploader ?? card.uploader,
+      ), { unchanged: true })
     }
     if (!requireExisting && previousReceipt?.status === 'installed') {
       throw new Error(`Skill ${card.slug} is already installed; use the explicit update action`)
     }
-    if (previousReceipt?.status === 'installed' && compareSemver(card.version, previousReceipt.version) < 0 && allowDowngrade !== true) {
+    if (previousReceipt?.status === 'installed' && compareSkillVersions(card.version, previousReceipt.version) < 0 && allowDowngrade !== true) {
       throw new Error(`Skill ${card.slug}@${card.version} is a downgrade; an explicit downgrade choice is required`)
     }
     const bundle = inspectSkillArchive(payload, {
@@ -578,7 +599,7 @@ export function createSkillHubStore({ dshHome, validateCandidate, validateActive
     try {
       extractCandidate(bundle, paths)
       const candidateNative = await validateCandidate(paths.candidateRoot, card.slug, signal)
-      const nextReceipt = nativeReceipt(card.slug, card.version, card.package_sha256, 'installed', candidateNative)
+      const nextReceipt = nativeReceipt(card.slug, card.version, card.package_sha256, 'installed', candidateNative, undefined, card.uploader)
       const completionReceipt = await claim()
       claimed = true
       wal = writeWal(paths, {
@@ -596,7 +617,7 @@ export function createSkillHubStore({ dshHome, validateCandidate, validateActive
       const activeNative = await validateActive(paths.active, card.slug, signal)
       wal = writeWal(paths, {
         ...wal,
-        next_receipt: nativeReceipt(card.slug, card.version, card.package_sha256, 'installed', activeNative),
+        next_receipt: nativeReceipt(card.slug, card.version, card.package_sha256, 'installed', activeNative, undefined, card.uploader),
       })
       const completion = await complete(completionReceipt, 'installed', signal)
       if (completion.state === 'unknown') {
@@ -647,7 +668,7 @@ export function createSkillHubStore({ dshHome, validateCandidate, validateActive
     if (previousReceipt?.status !== 'installed' || !existsReal(paths.active)) throw new Error(`Skill ${slug} is not enabled by Skill Hub`)
     if (existsReal(paths.disabled)) throw new Error(`Skill ${slug} disabled path already exists`)
     const native = await validateActive(paths.active, slug, signal)
-    const nextReceipt = nativeReceipt(slug, previousReceipt.version, previousReceipt.package_sha256, 'disabled', native)
+    const nextReceipt = nativeReceipt(slug, previousReceipt.version, previousReceipt.package_sha256, 'disabled', native, undefined, previousReceipt.uploader)
     let wal = openTransaction(paths, { slug, action: 'disable', previous_receipt: previousReceipt, next_receipt: nextReceipt })
     try {
       renameSync(paths.active, paths.disabled)
@@ -676,14 +697,14 @@ export function createSkillHubStore({ dshHome, validateCandidate, validateActive
     if (previousReceipt?.status !== 'disabled' || !existsReal(paths.disabled)) throw new Error(`Skill ${slug} is not disabled by Skill Hub`)
     if (existsReal(paths.active)) throw new Error(`Skill ${slug} active path is already occupied`)
     const native = await validateCandidate(paths.disabledRoot, slug, signal)
-    const nextReceipt = nativeReceipt(slug, previousReceipt.version, previousReceipt.package_sha256, 'installed', native)
+    const nextReceipt = nativeReceipt(slug, previousReceipt.version, previousReceipt.package_sha256, 'installed', native, undefined, previousReceipt.uploader)
     let wal = openTransaction(paths, { slug, action: 'enable', previous_receipt: previousReceipt, next_receipt: nextReceipt })
     try {
       renameSync(paths.disabled, paths.active)
       wal = writeWal(paths, { ...wal, phase: 'switched' })
       invalidate()
       const activeNative = await validateActive(paths.active, slug, signal)
-      const accepted = nativeReceipt(slug, previousReceipt.version, previousReceipt.package_sha256, 'installed', activeNative)
+      const accepted = nativeReceipt(slug, previousReceipt.version, previousReceipt.package_sha256, 'installed', activeNative, undefined, previousReceipt.uploader)
       atomicJson(paths.receipt, accepted)
       writeWal(paths, { ...wal, phase: 'committed', next_receipt: accepted })
       cleanupTransaction(paths)
@@ -759,6 +780,7 @@ export function createSkillHubStore({ dshHome, validateCandidate, validateActive
         },
         ready,
         ...(error === undefined ? {} : { error }),
+        ...(error === undefined ? {} : { error_code: 'native-provider' }),
         recovery_pending: existsSync(paths.transaction),
       })
     }
@@ -842,9 +864,11 @@ export function createSkillHubStore({ dshHome, validateCandidate, validateActive
           results.push({ slug, status: 'recovery-pending' })
           continue
         }
-        let remote = await reconcile(pending.completion_receipt, signal)
+        let remote = await reconcile(pending.completion_receipt, pending.next_receipt, signal)
         if (remote === 'claimed' && typeof complete === 'function') {
-          const completion = await complete(pending.completion_receipt, pending.desired_completion ?? 'installed', signal)
+          const completion = await complete(
+            pending.completion_receipt, pending.desired_completion ?? 'installed', signal, pending.next_receipt,
+          )
           remote = completion.state === 'accepted' ? pending.desired_completion : 'unknown'
         }
         if (remote === 'failed') {
@@ -973,7 +997,12 @@ async function responseJson(response, label) {
   }
   if (!response.ok) {
     const detail = typeof value?.detail === 'string' ? value.detail : `${label} failed with HTTP ${response.status}`
-    throw new Error(detail)
+    const code = ['auth', 'network', 'conflict', 'integrity', 'recovery', 'native-provider', 'bad-request'].includes(value?.error?.code)
+      ? value.error.code
+      : response.status === 401 || response.status === 403 ? 'auth'
+        : response.status === 409 ? 'conflict' : response.status === 422 ? 'integrity'
+          : response.status >= 500 ? 'network' : 'bad-request'
+    throw new SkillHubOperationError(code, detail)
   }
   return value
 }
@@ -984,9 +1013,12 @@ function encodeSegment(value, pattern, label) {
 }
 
 async function packageBytes(response, expectedSha256) {
-  if (!response.ok) throw new Error(`Skill package download failed with HTTP ${response.status}`)
+  if (!response.ok) throw new SkillHubOperationError(
+    response.status === 401 || response.status === 403 ? 'auth' : response.status === 409 ? 'conflict' : response.status >= 500 ? 'network' : 'bad-request',
+    `Skill package download failed with HTTP ${response.status}`,
+  )
   const declared = response.headers.get('x-skill-content-sha256')
-  if (declared !== expectedSha256) throw new Error('Skill package response digest is invalid')
+  if (declared !== expectedSha256) throw new SkillHubOperationError('integrity', 'Skill package response digest is invalid')
   return readBounded(response, MAX_ARCHIVE_BYTES, 'Skill package')
 }
 
@@ -1023,7 +1055,9 @@ function remoteMutationWal(value) {
     || (value.action === 'publish' && (
       !['third_party', 'content_creation', 'office_productivity'].includes(value.category)
       || !SHA256.test(value.archive_sha256)
-    ))) {
+    ))
+    || (value.action === 'delete' && (typeof value.uploader !== 'object' || value.uploader === null
+      || typeof value.uploader.nickname !== 'string' || !/^author_[0-9a-f]{24}$/u.test(value.uploader.author_ref)))) {
     throw new Error('Skill Hub remote mutation receipt is invalid')
   }
   return value
@@ -1150,11 +1184,18 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
   if (typeof request !== 'function') throw new Error('Skill Hub requires the authenticated identity transport')
   if (store === undefined) throw new Error('Skill Hub requires its native DSH lifecycle store')
   const base = hubBase(baseUrl)
-  const call = (path, init = {}) => request(new URL(`${base.pathname}${path}`, base.origin), {
-    ...init,
-    headers: { accept: 'application/json', ...init.headers },
-    redirect: 'error',
-  })
+  const call = async (path, init = {}) => {
+    try {
+      return await request(new URL(`${base.pathname}${path}`, base.origin), {
+        ...init,
+        headers: { accept: 'application/json', ...init.headers },
+        redirect: 'error',
+      })
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error
+      throw new SkillHubOperationError('network', 'Skill Hub network request failed', { cause: error })
+    }
+  }
   const remoteTails = new Map()
   const serialRemote = async (requestId, operation) => {
     const previous = remoteTails.get(requestId) ?? Promise.resolve()
@@ -1228,7 +1269,8 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
       }
       if (value.schema_version !== 1 || value.status !== 'deleted'
         || value.slug !== wal.slug || value.version !== wal.version
-        || value.package_sha256 !== wal.package_sha256) {
+        || value.package_sha256 !== wal.package_sha256
+        || value.uploader?.author_ref !== wal.uploader.author_ref) {
         throw new Error('Skill publication deletion receipt is invalid')
       }
       cleanupRemoteMutation(paths)
@@ -1274,22 +1316,41 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
     return results
   }
 
-  const detail = async (slug, signal) => {
-    const response = await call(`/skills/${encodeSegment(slug, SKILL_NAME, 'Skill slug')}`, { signal })
+  const detail = async (slug, options = {}, signal) => {
+    if (typeof options?.throwIfAborted === 'function') { signal = options; options = {} }
+    if (typeof options !== 'object' || options === null || Array.isArray(options)
+      || Object.keys(options).some(key => !['cursor', 'limit'].includes(key))
+      || (options.cursor !== undefined && (typeof options.cursor !== 'string' || options.cursor.length < 1 || Buffer.byteLength(options.cursor) > 512))
+      || (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > 100))) {
+      throw new Error('Skill detail filters are invalid')
+    }
+    const parameters = new URLSearchParams()
+    if (options.cursor !== undefined) parameters.set('cursor', options.cursor)
+    if (options.limit !== undefined) parameters.set('limit', String(options.limit))
+    const suffix = parameters.size === 0 ? '' : `?${parameters}`
+    const response = await call(`/skills/${encodeSegment(slug, SKILL_NAME, 'Skill slug')}${suffix}`, { signal })
     const value = await responseJson(response, 'Skill detail')
     if (value.schema_version !== 1 || !Array.isArray(value.versions)
-      || value.versions.length === 0 || value.versions.length > 100) throw new Error('Skill detail versions are invalid')
+      || value.versions.length > (options.limit ?? 24)
+      || (value.next_cursor != null && typeof value.next_cursor !== 'string')) throw new Error('Skill detail versions are invalid')
     const skill = skillCard(value.skill)
     const versions = value.versions.map(skillCard)
     if (skill.slug !== slug || versions.some(card => card.slug !== slug)) throw new Error('Skill detail slug is inconsistent')
-    return { schema_version: 1, skill, versions }
+    return { schema_version: 1, skill, versions, next_cursor: value.next_cursor ?? null }
+  }
+
+  const versionCard = async (slug, version, signal) => {
+    const response = await call(
+      `/skills/${encodeSegment(slug, SKILL_NAME, 'Skill slug')}/versions/${encodeSegment(version, VERSION, 'Skill version')}`,
+      { signal },
+    )
+    const selected = skillCard(await responseJson(response, 'Skill version'))
+    if (selected.slug !== slug || selected.version !== version) throw new Error('Skill version identity is inconsistent')
+    return selected
   }
 
   const select = async (slug, version, signal) => {
-    const value = await detail(slug, signal)
-    const selected = version === undefined ? value.skill : value.versions.find(card => card.version === version)
-    if (selected === undefined) throw new Error(`Skill ${slug}@${version} was not found`)
-    return selected
+    return version === undefined ? (await detail(slug, {}, signal)).skill : versionCard(slug, version, signal)
   }
 
   const download = async (slug, version, signal) => {
@@ -1305,7 +1366,7 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
     return { card, payload, archiveSha256: inspected.archiveSha256 }
   }
 
-  const complete = async (completionReceipt, status, signal) => {
+  const complete = async (completionReceipt, status, signal, expected) => {
     let response
     try {
       response = await call('/install-intents/complete', {
@@ -1319,14 +1380,19 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
     }
     try {
       const value = await responseJson(response, 'Skill install completion')
-      if (value.schema_version !== 1 || value.status !== status) throw new Error('Skill install completion receipt is invalid')
+      if (value.schema_version !== 1 || value.status !== status
+        || (expected !== undefined && (value.slug !== expected.slug || value.version !== expected.version
+          || value.package_sha256 !== expected.package_sha256
+          || (expected.uploader !== undefined && value.uploader?.author_ref !== expected.uploader.author_ref)))) {
+        throw new SkillHubOperationError('integrity', 'Skill install completion receipt is invalid')
+      }
       return { state: 'accepted', value }
     } catch (error) {
       return { state: response.ok ? 'unknown' : 'rejected', error }
     }
   }
 
-  const reconcile = async (completionReceipt, signal) => {
+  const reconcile = async (completionReceipt, expected, signal) => {
     let response
     try {
       response = await call('/install-intents/reconcile', {
@@ -1343,7 +1409,12 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
       return 'unknown'
     }
     const value = await responseJson(response, 'Skill install reconciliation')
-    return ['claimed', 'installed', 'failed'].includes(value.status) ? value.status : 'unknown'
+    if (!['claimed', 'installed', 'failed'].includes(value.status)
+      || !SKILL_NAME.test(value.slug) || !VERSION.test(value.version) || !SHA256.test(value.package_sha256)
+      || typeof value.uploader !== 'object' || !/^author_[0-9a-f]{24}$/u.test(value.uploader.author_ref)
+      || value.slug !== expected?.slug || value.version !== expected?.version || value.package_sha256 !== expected?.package_sha256
+      || (expected?.uploader !== undefined && value.uploader.author_ref !== expected.uploader.author_ref)) return 'unknown'
+    return value.status
   }
 
   const claim = async (card, signal) => {
@@ -1353,14 +1424,20 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ package_sha256: card.package_sha256, client_request_id: requestId('install') }),
     }), 'Skill install intent')
-    if (typeof intent.install_intent !== 'string') throw new Error('Skill install intent response is invalid')
+    if (typeof intent.install_intent !== 'string' || intent.slug !== card.slug || intent.version !== card.version
+      || intent.package_sha256 !== card.package_sha256 || intent.uploader?.author_ref !== card.uploader.author_ref) {
+      throw new SkillHubOperationError('integrity', 'Skill install intent response is invalid')
+    }
     const claimed = await responseJson(await call('/install-intents/consume', {
       method: 'POST',
       signal,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ install_intent: intent.install_intent }),
     }), 'Skill install claim')
-    if (typeof claimed.completion_receipt !== 'string') throw new Error('Skill install claim response is invalid')
+    if (typeof claimed.completion_receipt !== 'string' || claimed.slug !== card.slug || claimed.version !== card.version
+      || claimed.package_sha256 !== card.package_sha256 || claimed.uploader?.author_ref !== card.uploader.author_ref) {
+      throw new SkillHubOperationError('integrity', 'Skill install claim response is invalid')
+    }
     return claimed.completion_receipt
   }
 
@@ -1375,7 +1452,7 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
       signal,
       allowDowngrade: options.allowDowngrade === true,
       claim: () => claim(downloaded.card, signal),
-      complete,
+      complete: (receipt, status, completionSignal) => complete(receipt, status, completionSignal, downloaded.card),
     })
   }
 
@@ -1464,6 +1541,7 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
       return { items: value.items.map(skillCard), next_cursor: value.next_cursor }
     },
     detail,
+    version: versionCard,
     async download(slug, version, signal) {
       const { card, payload, archiveSha256 } = await download(slug, version, signal)
       const id = randomUUID()
@@ -1522,6 +1600,7 @@ export function createSkillHubClient({ request, dshHome, store, baseUrl = 'https
         slug: card.slug,
         version: card.version,
         package_sha256: card.package_sha256,
+        uploader: card.uploader,
       }, undefined, signal)
     },
   }

@@ -49,7 +49,7 @@ afterEach(() => {
 
 function renderPage(callSkillHub = vi.fn(async (endpoint: string) => {
   if (endpoint === 'catalog.search') return { ok: true, value: { items: [hubCard], next_cursor: null } }
-  if (endpoint === 'catalog.detail') return { ok: true, value: { schema_version: 1, skill: hubCard, versions: [hubCard] } }
+  if (endpoint === 'catalog.detail') return { ok: true, value: { schema_version: 1, skill: hubCard, versions: [hubCard], next_cursor: null } }
   if (endpoint === 'inventory.list') return { ok: true, value: { schema_version: 1, items: [installedSkill] } }
   if (endpoint === 'jobs.list') return { ok: true, value: { items: [] } }
   return { ok: true, value: { job_id: 'job-12345678', status: 'running' } }
@@ -128,6 +128,32 @@ describe('capability center fidelity surface', () => {
       slug: 'meeting-notes',
       version: '1.2.3',
     }))
+  })
+
+  it('pages immutable version history and refreshes inventory after a terminal Job', async () => {
+    const oldCard = { ...hubCard, version: '1.0.0', package_sha256: 'b'.repeat(64) }
+    const callSkillHub = vi.fn(async (endpoint: string, payload: Record<string, unknown>) => {
+      if (endpoint === 'catalog.search') return { ok: true, value: { items: [hubCard], next_cursor: null } }
+      if (endpoint === 'catalog.detail') return payload.cursor === undefined
+        ? { ok: true, value: { schema_version: 1, skill: hubCard, versions: [hubCard], next_cursor: 'opaque-version-cursor' } }
+        : { ok: true, value: { schema_version: 1, skill: hubCard, versions: [oldCard], next_cursor: null } }
+      if (endpoint === 'inventory.list') return { ok: true, value: { schema_version: 1, items: [installedSkill] } }
+      if (endpoint === 'jobs.list') return { ok: true, value: { items: [] } }
+      if (endpoint === 'jobs.read') return { ok: true, value: { status: 'completed', output: '{}' } }
+      return { ok: true, value: { job_id: 'job-terminal', status: 'running' } }
+    })
+    renderPage(callSkillHub)
+    fireEvent.click(await screen.findByRole('button', { name: '查看详情' }))
+    fireEvent.click(await screen.findByRole('button', { name: '加载更多版本' }))
+    expect(await screen.findByText('v1.0.0')).toBeTruthy()
+    expect(callSkillHub).toHaveBeenCalledWith('catalog.detail', {
+      slug: 'meeting-notes', cursor: 'opaque-version-cursor', limit: 24,
+    })
+    fireEvent.click(screen.getByLabelText('关闭 Skill 详情'))
+    fireEvent.click(screen.getByRole('tab', { name: /已安装/ }))
+    await screen.findByText('installed-skill')
+    fireEvent.click(screen.getByRole('button', { name: '禁用' }))
+    await waitFor(() => expect(callSkillHub.mock.calls.filter(([endpoint]) => endpoint === 'inventory.list').length).toBeGreaterThan(1), { timeout: 2_000 })
   })
 
   it('publishes the selected ZIP through the existing Skill Hub action', async () => {

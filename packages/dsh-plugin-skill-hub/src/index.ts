@@ -4,7 +4,14 @@ import { createHash } from 'node:crypto'
 import { lstatSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { createSkillHubClient, createSkillHubStore, SkillHubRecoveryPendingError } from './skill-hub.js'
+import {
+  compareSkillVersions,
+  createSkillHubClient,
+  createSkillHubStore,
+  skillHubFailure,
+  SkillHubOperationError,
+  SkillHubRecoveryPendingError,
+} from './skill-hub.js'
 
 export const name = 'emate-skill-hub'
 export const inject = ['tools', 'jobs', 'skills', 'userQuestions', 'systemPrompt', 'emateIdentity', 'connection', 'webServer']
@@ -39,6 +46,7 @@ function startJob(ctx, owner, signal, label, operation) {
           error => ({
             status: controller.signal.aborted && !(error instanceof SkillHubRecoveryPendingError) ? 'killed' : 'failed',
             detail: error instanceof Error ? error.message : String(error),
+            output: JSON.stringify({ schema_version: 1, error: skillHubFailure(error) }),
           }),
         )
       return { cancel: reason => controller.abort(reason), done }
@@ -165,6 +173,8 @@ export async function nativeCandidate(ctx, root, slug, signal) {
       throw new Error(`Skill ${slug} cannot be loaded by the native DSH provider`)
     }
     return definition
+  } catch (error) {
+    throw new SkillHubOperationError('native-provider', error instanceof Error ? error.message : String(error), { cause: error })
   } finally {
     lifecycle.abort(new Error('candidate validation complete'))
     await provider.dispose()
@@ -192,25 +202,33 @@ export async function apply(ctx, config = {}) {
     yield async () => { await activeProvider?.dispose() }
   }, 'emate.skillHub: native provider')
   const activeDefinition = async (path, slug, signal) => {
-    invalidateActive()
-    const definition = await ctx.skills.get(slug, { signal })
-    if (definition === undefined || definition.path === undefined
-      || resolve(definition.path) !== resolve(path, 'SKILL.md')
-      || definition.resourceBase?.kind !== 'directory'
-      || resolve(definition.resourceBase.path) !== resolve(path)) {
-      throw new Error(`Skill ${slug} is not active through the native DSH registry`)
+    try {
+      invalidateActive()
+      const definition = await ctx.skills.get(slug, { signal })
+      if (definition === undefined || definition.path === undefined
+        || resolve(definition.path) !== resolve(path, 'SKILL.md')
+        || definition.resourceBase?.kind !== 'directory'
+        || resolve(definition.resourceBase.path) !== resolve(path)) {
+        throw new Error(`Skill ${slug} is not active through the native DSH registry`)
+      }
+      return definition
+    } catch (error) {
+      throw new SkillHubOperationError('native-provider', error instanceof Error ? error.message : String(error), { cause: error })
     }
-    return definition
   }
   const store = createSkillHubStore({
     dshHome,
     validateCandidate: (root, slug, signal) => nativeCandidate(ctx, root, slug, signal),
     validateActive: activeDefinition,
     validateAbsent: async (path, slug, signal) => {
-      invalidateActive()
-      const definition = await ctx.skills.get(slug, { signal })
-      if (definition?.path !== undefined && resolve(definition.path) === resolve(path)) {
-        throw new Error(`Skill ${slug} remains visible through the native DSH registry`)
+      try {
+        invalidateActive()
+        const definition = await ctx.skills.get(slug, { signal })
+        if (definition?.path !== undefined && resolve(definition.path) === resolve(path)) {
+          throw new Error(`Skill ${slug} remains visible through the native DSH registry`)
+        }
+      } catch (error) {
+        throw new SkillHubOperationError('native-provider', error instanceof Error ? error.message : String(error), { cause: error })
       }
     },
     invalidate: invalidateActive,
@@ -321,9 +339,7 @@ export async function apply(ctx, config = {}) {
     },
   }), 'emate.skillHub: verified browser download')
 
-  ctx.effect(() => ctx.connection.rpc.handle(
-    SKILL_HUB_CHANNEL,
-    async (endpoint, payload, signal) => {
+  const skillHubRpc = async (endpoint, payload, signal) => {
       if (!isRecord(payload)) return badRequest('e-Mate Skill Hub payload must be an object')
       if (endpoint === 'catalog.search') {
         if (!exactKeys(payload, [], ['query', 'category', 'tag', 'source', 'cursor', 'limit'])) {
@@ -332,10 +348,12 @@ export async function apply(ctx, config = {}) {
         return { ok: true, value: await hub.search(payload, signal) }
       }
       if (endpoint === 'catalog.detail') {
-        if (!exactKeys(payload, ['slug']) || typeof payload.slug !== 'string') {
+        if (!exactKeys(payload, ['slug'], ['cursor', 'limit']) || typeof payload.slug !== 'string'
+          || (payload.cursor !== undefined && typeof payload.cursor !== 'string')
+          || (payload.limit !== undefined && typeof payload.limit !== 'number')) {
           return badRequest('catalog.detail payload is invalid')
         }
-        return { ok: true, value: await hub.detail(payload.slug) }
+        return { ok: true, value: await hub.detail(payload.slug, { cursor: payload.cursor, limit: payload.limit }, signal) }
       }
       if (endpoint === 'inventory.list') {
         if (!exactKeys(payload, [])) return badRequest('inventory.list payload is invalid')
@@ -402,6 +420,13 @@ export async function apply(ctx, config = {}) {
         return { ok: true, value: { result: ctx.jobs.kill(payload.job_id, undefined, 'cancelled by Skill Hub UI') } }
       }
       return badRequest('unknown e-Mate Skill Hub endpoint')
+  }
+  ctx.effect(() => ctx.connection.rpc.handle(
+    SKILL_HUB_CHANNEL,
+    async (...args) => {
+      try { return await skillHubRpc(...args) } catch (error) {
+        return { ok: false, error: { ...skillHubFailure(error), details: { issues: [] } } }
+      }
     },
     { authority: 'loopback' },
   ), 'emate.skillHub: target-native RPC channel')
@@ -427,9 +452,13 @@ export async function apply(ctx, config = {}) {
   ctx.tools.register(defineTool({
     name: 'e_mate_skill_hub_detail',
     description: 'Read one Skill Hub Skill and its immutable version history before choosing an action. Read-only.',
-    parameters: { slug: { type: 'string', required: true, description: 'Exact Skill Hub slug.' } },
+    parameters: {
+      slug: { type: 'string', required: true, description: 'Exact Skill Hub slug.' },
+      cursor: { type: 'string', description: 'Opaque next_cursor for immutable version history.' },
+      limit: { type: 'integer', description: 'Version page size from 1 to 100.' },
+    },
     output: jsonOutput,
-    execute: (args, exec) => hub.detail(args.slug, exec.signal),
+    execute: (args, exec) => hub.detail(args.slug, { cursor: args.cursor, limit: args.limit }, exec.signal),
     presentCall: args => ({ card: 'generic', title: 'Read Skill Hub detail', kind: 'read', rawInput: args.slug }),
   }))
   ctx.tools.register(defineTool({
@@ -442,12 +471,7 @@ export async function apply(ctx, config = {}) {
   }))
 
   const exactCard = async (args, signal) => {
-    const detail = await hub.detail(args.slug, signal)
-    const card = args.version === undefined
-      ? detail.skill
-      : detail.versions.find(candidate => candidate.version === args.version)
-    if (card === undefined) throw new Error(`Skill ${args.slug}@${args.version} was not found`)
-    return card
+    return args.version === undefined ? (await hub.detail(args.slug, signal)).skill : hub.version(args.slug, args.version, signal)
   }
   const ownedLocal = async (slug, signal) => {
     const item = (await hub.inventory(signal)).find(candidate => candidate.slug === slug)
@@ -490,14 +514,24 @@ export async function apply(ctx, config = {}) {
       output: jobOutput,
       async execute(args, exec) {
         const card = await exactCard(args, exec.signal)
+        let current
+        let downgrade = false
+        if (definition.action === 'update') {
+          current = await ownedLocal(card.slug, exec.signal)
+          downgrade = compareSkillVersions(card.version, current.version) < 0
+          if (downgrade && args.allow_downgrade !== true) {
+            throw new Error(`Skill ${card.slug}@${card.version} is lower than installed ${current.version}; set allow_downgrade only after the user explicitly chooses this downgrade`)
+          }
+        }
+        const actionLabel = downgrade ? '降级' : definition.action === 'download' ? '下载' : definition.action === 'install' ? '安装并启用' : '更新'
         return startMutation(exec, {
           label: `${definition.title}: ${card.slug}@${card.version}`,
           confirm: {
             id: `skill-hub-${definition.action}`,
             header: 'Skill Hub',
-            question: `是否${definition.action === 'download' ? '下载' : definition.action === 'install' ? '安装并启用' : '更新'} ${card.slug}@${card.version}？`,
-            detail: `SHA-256: ${card.package_sha256}\n发布者: ${card.uploader.nickname}`,
-            approve: definition.action === 'download' ? '下载' : definition.action === 'install' ? '安装' : '更新',
+            question: `是否${actionLabel} ${card.slug}@${card.version}？`,
+            detail: `${current === undefined ? '' : `当前版本: ${current.version}\n`}目标 SHA-256: ${card.package_sha256}\n发布者: ${card.uploader.nickname} (${card.uploader.author_ref})`,
+            approve: downgrade ? '降级' : definition.action === 'download' ? '下载' : definition.action === 'install' ? '安装' : '更新',
           },
           run: signal => definition.run(card, args, signal),
         })
@@ -524,7 +558,7 @@ export async function apply(ctx, config = {}) {
             id: `skill-hub-${definition.action}`,
             header: '本机 Skill',
             question: `是否${definition.label} ${item.slug}@${item.version}？`,
-            detail: `SHA-256: ${item.package_sha256}\n当前状态: ${item.status}`,
+            detail: `SHA-256: ${item.package_sha256}\n发布者: ${item.uploader?.nickname ?? '旧回执未记录'}${item.uploader?.author_ref === undefined ? '' : ` (${item.uploader.author_ref})`}\n当前状态: ${item.status}`,
             approve: definition.label,
           },
           run: signal => definition.run(item.slug, signal),
@@ -587,7 +621,7 @@ export async function apply(ctx, config = {}) {
         id: 'skill-hub-delete-publication',
         header: '删除已发布 Skill',
         question: `是否删除你发布的 ${args.slug}@${args.version}？`,
-        detail: `SHA-256: ${publication.package_sha256}\n该所有权和摘要来自当前登录账号的服务端回读；只删除服务端精确版本，不卸载本机 Skill。`,
+        detail: `SHA-256: ${publication.package_sha256}\n发布者: ${publication.uploader.nickname} (${publication.uploader.author_ref})\n该所有权和摘要来自当前登录账号的服务端回读；只删除服务端精确版本，不卸载本机 Skill。`,
         approve: '删除发布',
       })
       return startJob(ctx, exec.agent, exec.signal, `Delete published Skill: ${args.slug}@${args.version}`, signal => hub.deletePublication(publication, signal))
