@@ -3084,3 +3084,15 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Goal checkpoint: T14 在追踪正式 `build:sdk` 消费链时发现 `sync-emate-profile.mjs` 会在图标生成器之前无条件用旧 Shell mark 覆盖 `build/app-icon.png`；继续生成 C03 会在下一次构建漂回旧图标，因此先失败关闭。
 - Decision and forbidden alternatives: `desktop/e-mate-desktop/scripts/sync-emate-profile.mjs` 精确移交 T14，唯一允许改动是删除重复图标源写入；Profile 同步职责保持不变。禁止第二图标源、base64 嵌入、从派生图反向恢复或继续让 Profile mark 覆盖 Desktop 生产图标。
 - Truth stage: 这是 Owner/源码计划修订，不是 C03 资产、安装包、签名、Finder/Dock/Switcher/Settings 或发布回执；T14 必须在同一原任务中补失败回归、源码资产和证据后才能合入。
+
+## 2026-08-27 · 2.0.14 历史任务正式移交 2.0.15 总控
+
+- Goal checkpoint: 用户把 Codex 任务 `01a02e48-f61f-7352-bc86-b5ec8771d46c` 中的 2.0.14 改动、结论和剩余进度交由当前 2.0.15 总控接手；现有 T00–T18 继续执行，不另开平行 2.0.14 发布线。
+- Frozen baseline / current HEAD: 旧任务最后可读长回合为 interrupted，引用较早的 dirty 2.0.13 worktree，故只作历史上下文。仓库证据固定 2.0.14 实现为 `a4fd5170888513e30ea73a915c335fc8c87546f3` 与 `4bfe0c333348dceead6d7e7b4b4f5b1639468dc8`；后者 tree `992143d0f5fbbd15ade365ec6d36a3d8e88126f8` 与 protected `main@5f8c54db7b76276c14f1938c970df155f4e6fd80` 完全一致，也正是 2.0.15 的起始源码。
+- Binding documents read: 旧任务最近十个可读 turn、当前 `docs/slices/2.0.14.md`、`target-contract.md`、2.0.15 BASELINE/DECISIONS/STATUS 及 protected-main Git tree/diff。
+- Inspected native seam: 2.0.14 实际接受的四组修复是原生 Tool Search/ImageGen 可见性、Find Skill packaged pnpm 直启输入、Main/Preload Renderer bootstrap、以及精确 2.0.12 macOS envelope bridge；2.0.13+ bound updater 保持原路径。
+- Decision and forbidden alternatives: 不复制旧 dirty worktree、不重复 cherry-pick 同树提交、不把 Pet/Cowart/浏览器等旧宽范围设想冒充 2.0.14 完成项，也不让它们覆盖当前工单。T05/T09/T15 分别消费并扩展现有 owner；所有真实安装、旧版升级、Profile generation 与公网指针仍只由 T18 裁决。
+- Verification commands and results: `git rev-parse 4bfe0c3^{tree}` 与 `5f8c54d^{tree}` 均为 `992143d0f5fbbd15ade365ec6d36a3d8e88126f8`；当前 BASELINE 已记录 exact-source CI 成功、Desktop preparation 成功、Profile release/coordinator 失败和公网 2.0.14 manifest 404。
+- Immutable evidence / receipt: 2.0.14 没有完整 signed Profile publication、installed acceptance 或 public production receipt；公开 signed/legacy/desired-state 仍为精确 2.0.13。本次接管只写 2.0.15 总控文档，不触碰产品、旧任务工作树、生产对象或用户安装态。
+- Remaining blockers: T15 尚未执行；T18 必须重放公开前驱更新、Profile/新 Base、安装回滚和公网回读。2.0.14 的未发布状态不能因任务移交而提升。
+- Next exact action: 继续按依赖合并 T06/T07/T10，再放行 T11/T15；T18 最终以 2.0.15 exact bytes 关闭继承的安装与发布缺口。

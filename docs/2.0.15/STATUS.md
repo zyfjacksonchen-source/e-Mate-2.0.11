@@ -11,6 +11,7 @@ Status vocabulary: `TODO / INVESTIGATED / CODE_COMPLETE / NARROW_TEST_PASSED / I
 | Incremental target-contract delta | `NARROW_TEST_PASSED` | accepted Image generation/intake, InputTrigger, Search and UI clauses are merged; `check:target` passes, while `check:release-boundary` reaches only the separately recorded D006 Base ABI union blocker; no package version changes |
 | Canonical source | `NARROW_TEST_PASSED` | clean current `origin/main` = `5f8c54d…` |
 | Baseline difference | `NARROW_TEST_PASSED` | recorded in `BASELINE.md`; old SHA/path assertions are not silently reused |
+| 2.0.14 task handoff | `NARROW_TEST_PASSED` | transferred task read; accepted branch tip `4bfe0c3…` and protected `main@5f8c54d…` have the identical tree; source changes map to T05/T09/T15 while installed/public closure stays T18 |
 | Base/Harness/Desktop pins | `NARROW_TEST_PASSED` | current contract and gitlink agree |
 | Owner/path partition | `NARROW_TEST_PASSED` | fail-closed scopes and sequential leases in `DECISIONS.md` |
 | Release/worktree topology | `NARROW_TEST_PASSED` | release and T00 worktrees exist; later worktrees are created only at dispatch |

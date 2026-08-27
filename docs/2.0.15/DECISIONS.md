@@ -38,6 +38,10 @@ The Vision paste interceptor is the confirmed P0 owner defect: it suppresses the
 
 When the same named acceptance check remains red after at least two materially different source-backed repair attempts, the coordinator may create a separate ChatGPT Work task inside the current ChatGPT/Codex application, then wait for and read that task directly; browser/Web ChatGPT is not used. The consultation receives one sanitized, complete packet of contract, owned source/callers, failure output, expected behavior, prior attempts and prohibitions. If the in-app UI exposes the exact `5.6 sol Pro` model/reasoning option, select it; the current task-creation interface cannot force a ChatGPT model, so an unavailable option is recorded rather than silently substituted or moved to the Web. The answer is an advisory hypothesis, never implementation or release evidence: the original Owner and path lease remain unchanged, no secret or private account/customer data is uploaded, and completion still requires the same local check to pass.
 
+### D010 — The transferred 2.0.14 task is context, not another implementation branch
+
+Task `01a02e48-f61f-7352-bc86-b5ec8771d46c` is now owned by the 2.0.15 coordinator for conclusions and remaining work. Repository commit/tree evidence is authoritative: protected `main@5f8c54d…` has the exact same tree as the completed 2.0.14 branch tip `4bfe0c3…`. Do not copy its older dirty 2.0.13 worktree, revive an independent 2.0.14 release train, or reimplement its four accepted contracts. T05/T09/T15 consume those contracts under their current leases; installed/public closure remains T18. Broader ideas from the old task enter 2.0.15 only when an explicit current work order owns them.
+
 ## Exclusive static scopes
 
 | Ticket | Exact owned paths while active |
