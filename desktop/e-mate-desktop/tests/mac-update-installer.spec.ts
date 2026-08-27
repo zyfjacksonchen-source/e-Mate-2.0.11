@@ -417,6 +417,35 @@ describe('detached macOS update replacement', () => {
     expect(helperSpawn).toBeGreaterThan(durableDirectory)
   })
 
+  it('starts the detached transaction helper from the current installed Base', () => {
+    const source = readFileSync(new URL('../src/mac-update-installer.ts', import.meta.url), 'utf8')
+    const scheduler = source.slice(source.indexOf('export async function scheduleMacUpdateInstallation'))
+
+    expect(scheduler).toContain("helper = spawn(join(resolvedCurrent, 'Contents', 'MacOS', 'e-Mate')")
+    expect(scheduler).toContain('[options.helperModulePath, requestPath]')
+    expect(scheduler).not.toContain("helper = spawn(join(stagedApp, 'Contents', 'MacOS', 'e-Mate')")
+  })
+
+  it('shares one macOS path, permission, volume, and free-space preflight', () => {
+    const source = readFileSync(new URL('../src/mac-update-installer.ts', import.meta.url), 'utf8')
+    const validator = source.slice(
+      source.indexOf('function validateMacUpdatePreflight'),
+      source.indexOf('export function preflightMacUpdateInstallation'),
+    )
+    const scheduler = source.slice(source.indexOf('export async function scheduleMacUpdateInstallation'))
+
+    expect(validator).toContain('accessSync(userDataPath, constants.W_OK | constants.X_OK)')
+    expect(validator).toContain('accessSync(trashDirectory, constants.W_OK | constants.X_OK)')
+    expect(validator).toContain('accessSync(installDirectory, constants.W_OK | constants.X_OK)')
+    expect(validator).toContain("join('/Applications', 'e-Mate.app')")
+    expect(validator).toContain('statSync(trashDirectory).dev !== installDevice')
+    expect(validator).toContain('statfsSync')
+    expect(validator).toContain('const atomicSwapBytes = allocatedBytes(resolvedCurrent)')
+    expect(validator).toContain('downloadBytes + atomicSwapBytes')
+    expect(validator).toContain('[[userDataPath, downloadBytes], [installDirectory, atomicSwapBytes]]')
+    expect(scheduler).toContain('validateMacUpdatePreflight(options)')
+  })
+
   it('atomically rejects a concurrent macOS update owner', () => {
     const root = mkdtempSync(join(tmpdir(), 'e-mate-pending-owner-'))
     temporaryRoots.push(root)

@@ -31,7 +31,11 @@ const windowsUpdateAvailable = {
 
 const terminal = vi.hoisted(() => ({ open: vi.fn() }))
 const updater = vi.hoisted(() => ({ download: vi.fn() }))
-const macUpdater = vi.hoisted(() => ({ schedule: vi.fn(), markShutdownReady: vi.fn() }))
+const macUpdater = vi.hoisted(() => ({
+  preflight: vi.fn(),
+  schedule: vi.fn(),
+  markShutdownReady: vi.fn(),
+}))
 const windowsUpdater = vi.hoisted(() => ({ schedule: vi.fn(), markShutdownReady: vi.fn() }))
 const childProcess = vi.hoisted(() => {
   type Listener = (...args: unknown[]) => void
@@ -69,6 +73,7 @@ vi.mock('../src/update-download.ts', () => ({
 }))
 
 vi.mock('../src/mac-update-installer.ts', () => ({
+  preflightMacUpdateInstallation: macUpdater.preflight,
   scheduleMacUpdateInstallation: macUpdater.schedule,
 }))
 
@@ -121,7 +126,9 @@ const electron = vi.hoisted(() => {
     setWindowOpenHandler: vi.fn(),
     executeJavaScript: vi.fn(async (): Promise<unknown> => null),
     copyImageAt: vi.fn(),
+    send: vi.fn(),
   }
+  const ipcMain = { on: vi.fn(), off: vi.fn() }
   const nativeTheme = { themeSource: 'system' }
   const systemPreferences = {
     isTrustedAccessibilityClient: vi.fn(() => false),
@@ -203,6 +210,7 @@ const electron = vi.hoisted(() => {
     browserWindowOn,
     loadURL,
     dialog,
+    ipcMain,
     clipboard: { writeText: vi.fn() },
     Menu: {
       buildFromTemplate: vi.fn((template: unknown[]) => {
@@ -237,6 +245,7 @@ vi.mock('electron', () => ({
   BrowserWindow: electron.BrowserWindow,
   clipboard: electron.clipboard,
   dialog: electron.dialog,
+  ipcMain: electron.ipcMain,
   Menu: electron.Menu,
   nativeImage: electron.nativeImage,
   nativeTheme: electron.nativeTheme,
@@ -280,6 +289,7 @@ describe('Electron compatibility runtime', () => {
     childProcess.reset()
     vi.clearAllMocks()
     updater.download.mockReset()
+    macUpdater.preflight.mockReset()
     macUpdater.schedule.mockReset()
     macUpdater.schedule.mockResolvedValue({ markShutdownReady: macUpdater.markShutdownReady })
     windowsUpdater.schedule.mockReset()
@@ -411,6 +421,39 @@ describe('Electron compatibility runtime', () => {
     expect(electron.browserWindowOff).toHaveBeenCalledWith('page-title-updated', titleListener)
     expect(electron.webContents.off).toHaveBeenCalledWith('context-menu', contextMenuListener)
     expect(electron.trays[0]?.off).toHaveBeenCalledWith('click', expect.any(Function))
+  })
+
+  it('carries the one updater state through the existing Main and Preload boundary', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const cancel = vi.fn(() => true)
+    runtime.updates.publishState({ stage: 'checking', updateKind: 'base' })
+    runtime.updates.setCancelHandler(cancel)
+    const release = runtime.schedule(spec)
+
+    await runtime.mountScheduled()
+    const read = electron.ipcMain.on.mock.calls.find(([channel]) => channel === 'emate:desktop-update-state-read')?.[1]
+    const requestCancel = electron.ipcMain.on.mock.calls.find(([channel]) => channel === 'emate:desktop-update-cancel')?.[1]
+    expect(read).toEqual(expect.any(Function))
+    expect(requestCancel).toEqual(expect.any(Function))
+    const readEvent = { sender: electron.webContents, returnValue: undefined as unknown }
+    read(readEvent)
+    expect(readEvent.returnValue).toEqual({ stage: 'checking', updateKind: 'base' })
+
+    runtime.updates.publishState({ stage: 'downloading', bytes: 5, total: 10 })
+    expect(electron.webContents.send).toHaveBeenCalledWith(
+      'emate:desktop-update-state-changed',
+      { stage: 'downloading', bytes: 5, total: 10 },
+    )
+    const cancelEvent = { sender: electron.webContents, returnValue: undefined as unknown }
+    requestCancel(cancelEvent)
+    expect(cancelEvent.returnValue).toBe(true)
+    expect(cancel).toHaveBeenCalledOnce()
+
+    await release()
+    expect(electron.ipcMain.off).toHaveBeenCalledWith('emate:desktop-update-state-read', read)
+    expect(electron.ipcMain.off).toHaveBeenCalledWith('emate:desktop-update-cancel', requestCancel)
   })
 
   it('keeps the compatibility frame synchronized with the e-Mate theme', async () => {
@@ -1124,7 +1167,10 @@ describe('Electron compatibility runtime', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const response = Response.json({ version: '2.1.0' })
     electron.net.fetch.mockResolvedValueOnce(response)
-    updater.download.mockResolvedValueOnce('/tmp/e-Mate-2.1.0-mac.dmg')
+    updater.download.mockImplementationOnce(async (options: { onProgress?: (value: unknown) => void }) => {
+      options.onProgress?.({ bytes: 512, total: 1024 })
+      return '/tmp/e-Mate-2.1.0-mac.dmg'
+    })
     const requestQuit = vi.fn()
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
@@ -1188,7 +1234,8 @@ describe('Electron compatibility runtime', () => {
       buttons: ['更新并重启', '稍后'],
     }))
     const controller = new AbortController()
-    await runtime.updates.downloadAndOpen(updateAvailable, controller.signal)
+    const updateStates: unknown[] = []
+    await runtime.updates.downloadAndOpen(updateAvailable, controller.signal, state => { updateStates.push(state) })
     expect(updater.download).toHaveBeenCalledWith({
       platform: 'darwin',
       version: '2.1.0',
@@ -1196,7 +1243,18 @@ describe('Electron compatibility runtime', () => {
       userDataPath: '/tmp/dsh-desktop-user-data',
       request: expect.any(Function),
       signal: controller.signal,
+      onProgress: expect.any(Function),
     })
+    expect(macUpdater.preflight).toHaveBeenCalledWith(expect.objectContaining({
+      targetVersion: '2.1.0',
+      currentExecutable: process.execPath,
+      userDataPath: '/tmp/dsh-desktop-user-data',
+      homeDirectory: '/tmp/dsh-home',
+      helperModulePath: expect.stringMatching(/mac-update-helper\.js$/u),
+      artifact: updateAvailable.artifact,
+    }))
+    expect(macUpdater.preflight.mock.invocationCallOrder[0])
+      .toBeLessThan(updater.download.mock.invocationCallOrder[0]!)
     expect(macUpdater.schedule).toHaveBeenCalledWith(expect.objectContaining({
       dmgPath: '/tmp/e-Mate-2.1.0-mac.dmg',
       targetVersion: '2.1.0',
@@ -1212,6 +1270,12 @@ describe('Electron compatibility runtime', () => {
       parentPid: process.pid,
       signal: controller.signal,
     }))
+    expect(updateStates).toEqual([
+      { stage: 'downloading', bytes: 512, total: 1024 },
+      { stage: 'verifying' },
+      { stage: 'staging' },
+      { stage: 'waiting-shutdown' },
+    ])
     expect(requestQuit).toHaveBeenCalledWith(0)
     expect(macUpdater.markShutdownReady).not.toHaveBeenCalled()
     runtime.commitPreparedUpdateShutdown()
@@ -1232,6 +1296,19 @@ describe('Electron compatibility runtime', () => {
     })
     expect(notification?.show).toHaveBeenCalledOnce()
     expect(notification?.once).not.toHaveBeenCalled()
+  })
+
+  it('fails macOS path and disk preflight before an installer request', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    macUpdater.preflight.mockImplementationOnce(() => { throw new Error('macOS update has insufficient free space') })
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    runtime.schedule(spec)
+
+    await expect(runtime.updates.downloadAndOpen(updateAvailable, new AbortController().signal))
+      .rejects.toThrow('insufficient free space')
+    expect(updater.download).not.toHaveBeenCalled()
+    expect(macUpdater.schedule).not.toHaveBeenCalled()
   })
 
   it('requires Windows Setup READY before requesting orderly exit', async () => {

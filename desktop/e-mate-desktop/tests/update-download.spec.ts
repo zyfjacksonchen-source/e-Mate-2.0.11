@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   MAX_UPDATE_DOWNLOAD_BYTES,
   UpdateDownloadError,
@@ -99,6 +99,26 @@ afterEach(async () => {
 })
 
 describe('desktop update installer download', () => {
+  it('reuses a verified completed cache without another counted request', async () => {
+    const userDataPath = await temporaryUserData()
+    const request = vi.fn(async () => chunkedResponse([dmgArtifact()]))
+    const progress: unknown[] = []
+    const options = {
+      platform: 'darwin' as const,
+      version: '2.1.0',
+      userDataPath,
+      request,
+      onProgress: (value: unknown) => { progress.push(value) },
+    }
+
+    const first = await downloadDesktopUpdate(options)
+    const second = await downloadDesktopUpdate(options)
+
+    expect(second).toBe(first)
+    expect(request).toHaveBeenCalledOnce()
+    expect(progress).toContainEqual({ bytes: 1024, total: 1024, cached: true })
+  })
+
   it('streams a macOS DMG from only the fixed endpoint and atomically completes it', async () => {
     const userDataPath = await temporaryUserData()
     const artifact = dmgArtifact()

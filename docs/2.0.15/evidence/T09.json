@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "document_type": "emate.2.0.15.ticket-evidence",
+  "ticket": "T09",
+  "title": "唯一在线更新事务与可视进度",
+  "status": "LOCAL_SOURCE_TESTED_NOT_CANDIDATE",
+  "baseline": {
+    "integration_commit": "f72db74c21f2341ffe3b9b54c466e93d532e7bf2",
+    "branch": "feat/2.0.15-T09-updater",
+    "worktree": "/Users/mac/e-mate/worktrees/emate-2.0.15-T09",
+    "clean_start": true,
+    "source_desktop_version": "2.0.14",
+    "base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0",
+    "public_production_version": "2.0.13",
+    "public_version_verified_live_by_t09": false
+  },
+  "source_contract_replay": {
+    "v2_0_12": {
+      "source_commit": "0d0a2316727180679e6821741d4e76f94c09e101",
+      "request": "legacy-2.0.12 exact 15-field schemaVersion=1 envelope",
+      "helper_boundary": "published 2.0.12 still starts the target helper; current target entry retains the exact legacy branch and staged-app identity check"
+    },
+    "v2_0_13": {
+      "source_commit": "6f63b5238d5874a1973a5ce0c1c9f832d277c865",
+      "request": "bound-v1 exact 24-field schemaVersion=1 envelope",
+      "helper_boundary": "the modern bound envelope, startup ACK, commit confirmation and rollback identity remain exact"
+    },
+    "current": {
+      "source_version": "2.0.14",
+      "legacy_branch_preserved": true,
+      "modern_branch_preserved": true,
+      "windows_journal_ack_rollback_preserved": true
+    }
+  },
+  "root_causes": [
+    {
+      "id": "unsigned-policy-gap",
+      "finding": "The admitted Desktop manifest v2 had no signed mandatory or minimum-supported-version fields, so no runtime consumer could distinguish release policy from local configuration."
+    },
+    {
+      "id": "verified-cache-discarded",
+      "finding": "prepareDownloadPaths unlinked every completed artifact before checking its manifest size, SHA-256 and native container format, forcing a second counted request for identical verified bytes."
+    },
+    {
+      "id": "boolean-only-presentation",
+      "finding": "The one Cordis updater owned the transaction but exposed only an interactive result and tray booleans; Header, Settings and Agent Tool had no common typed subscription or cancellation projection."
+    },
+    {
+      "id": "target-owned-helper-launch",
+      "finding": "New macOS transactions staged the target bundle and then launched the helper executable and module from that target, making unpublished target code interpret the current updater's private request."
+    },
+    {
+      "id": "checking-without-terminal-projection",
+      "finding": "The shared state source published checking before Base and Profile checks but did not replace it for null, up-to-date or no-Profile-update results, including confirmed recheck failures."
+    },
+    {
+      "id": "macos-preflight-after-download",
+      "finding": "The macOS scheduler validated the canonical application, writable paths, Trash volume and helper boundary only after the complete DMG download, and did not gate the request on signed artifact bytes versus free space."
+    },
+    {
+      "id": "macos-preflight-permission-and-budget-gap",
+      "finding": "The first source repair checked directory W_OK without the X_OK search permission needed for create/rename, and compared each filesystem only with artifact.bytes instead of aggregating the cached package with the concurrently staged application on a shared volume."
+    },
+    {
+      "id": "failure-policy-projection-gap",
+      "finding": "publishFailure replaced the unique transaction snapshot with only stage/code/diagnosticId, so mandatory and minimum-supported policy disappeared from failure and cancellation surfaces."
+    }
+  ],
+  "implementation": {
+    "manifest_policy": "Admitted schema v3 adds exact update_policy keys under a distinct Ed25519 signature context; mandatory and minimum_supported_version are returned only after that complete signed envelope verifies. Admitted schema v2 remains exact and policy-free.",
+    "cache": "A completed cache is reused only after exact byte count, SHA-256 and DMG/PE validation; invalid cached bytes are removed before the existing atomic partial-file download path runs. Progress reports bytes, total and verified cache reuse.",
+    "single_state_source": "desktop-updates remains the sole transaction owner and publishes one DesktopUpdateState projection with checking, available, confirming, downloading, verifying, staging, waiting-shutdown, replacing, restarting, health-check, completed, rolling-back, rolled-back and failed stages.",
+    "projection_carriers": "The existing Electron runtime and context-isolated Preload boundary only cache/carry that Host projection; Header and Settings receive get/subscribe/cancel without a second store, and Agent Tool returns the same terminal projection and diagnostic ID.",
+    "typed_failures": "Cancellation and downloader HTTP, size, SHA, native-format, network and response-limit failures retain typed codes; other transaction stages map to typed failure codes and every terminal failure receives a UUID diagnostic ID.",
+    "check_terminal_projection": "Manual and background checks now replace checking with completed for up-to-date or no-update results, available for a declined confirmation, or failed/check-failed with a diagnostic ID for empty, rejected-policy and named check failures. Background network failures update the typed projection without creating a user notification.",
+    "state_policy_inheritance": "The signed mandatory and minimumSupportedVersion policy stays on available, confirming, downloading and subsequent Base transaction snapshots. Failure and cancellation inherit updateKind, version, total and policy from that same snapshot, so T13 consumers do not need a second policy store.",
+    "macos_download_preflight": "Before the network request, the current installed Base runs the scheduler's shared read-only validator for canonical app identity, user-data/install/Trash W_OK|X_OK access, same-volume backup, current helper containment and newer target version. Space is budgeted per filesystem: the cache volume requires artifact.bytes, the install/Trash volume requires at least the current installed app's native allocated size for the staged target, and a shared volume requires their sum.",
+    "macos_preflight_budget_ceiling": "The signed manifest does not provide an uncompressed application byte count, so pre-download staging space uses the current installed app's actual allocated size as a conservative lower bound, not a claim about the target bundle's exact expanded size. Exact expanded-size admission remains post-download/T18 evidence.",
+    "macos_post_download_validation": "DMG file/cache containment, downloaded byte/SHA/native-container checks, hdiutil verification and mount, bundle identity/version/architecture and code-signing validation necessarily remain after bytes are present. The staging copy fails closed on insufficient space, while exact target expanded-size admission remains an installed T18 check; T09 does not represent either as a pre-download proof.",
+    "macos_helper_owner": "Transactions initiated by the current source validate and launch the current installed Base executable and current helperModulePath. The target application is left to the existing bound startup health ACK.",
+    "windows": "No Windows transaction, journal, ACK, installer or rollback implementation was rewritten; the existing native transaction remains the only Windows path."
+  },
+  "state_contract": {
+    "stages": [
+      "checking",
+      "available",
+      "confirming",
+      "downloading",
+      "verifying",
+      "staging",
+      "waiting-shutdown",
+      "replacing",
+      "restarting",
+      "health-check",
+      "completed",
+      "rolling-back",
+      "rolled-back",
+      "failed"
+    ],
+    "download_fields": ["bytes", "total", "cached"],
+    "failure_fields": ["code", "diagnosticId"],
+    "signed_policy_fields": ["mandatory", "minimumSupportedVersion"],
+    "preload_bridge": "__EMATE_DESKTOP_UPDATES__",
+    "ui_layout_owner": "T13"
+  },
+  "red_regressions": {
+    "status": "captured-before-source-fix",
+    "named_cases": [
+      "accepts mandatory and minimum-supported policy only from a signed v3 manifest",
+      "reuses a verified completed cache without another counted request",
+      "starts the detached transaction helper from the current installed Base",
+      "publishes one typed transaction state to every updater consumer",
+      "preserves signed policy on confirming and downloading Base snapshots",
+      "ends up-to-date and no-update checks in a stable completed snapshot",
+      "publishes failed/check-failed with a diagnostic ID for named check failures without background notification",
+      "fails macOS path and disk preflight before an installer request",
+      "ends empty and rejected-policy checks outside checking",
+      "retains mandatory and minimum-supported policy on failure and cancellation",
+      "requires W_OK|X_OK and aggregates cache plus staged-app space on a shared macOS volume"
+    ],
+    "observed": "The original manifest, cache, state and helper assertions failed against the baseline. Coordinator follow-ups captured the non-terminal checking, policy continuity, preflight ordering, permission-mode and per-volume budget gaps; the final focused red run contained three failures for failure/cancel policy inheritance and the stricter macOS preflight contract, and the shared-source repairs made those assertions pass. The first borrowed-runner attempt could not collect updates.spec.ts because module resolution still originated outside this worktree; the final in-worktree dependency link collected and passed the regressions.",
+    "dependency_writes": false
+  },
+  "verification": [
+    {
+      "command": "vitest run tests/agent-update.spec.ts tests/electron-runtime.spec.ts tests/mac-update-installer.spec.ts tests/profile-update.spec.ts tests/update-checker.spec.ts tests/update-download.spec.ts tests/updates.spec.ts tests/windows-update-installer.spec.ts tests/windows-update-transaction.spec.ts tests/windows-volume-diagnostics.spec.ts",
+      "result": "PASS: 10 files; 292 passed, 1 existing skipped, 0 failed"
+    },
+    {
+      "command": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.tests.client.json --noEmit",
+      "result": "PASS: all four Desktop source/client/test projects"
+    },
+    {
+      "command": "git diff --check and exact T09 owner allowlist validation",
+      "result": "PASS"
+    }
+  ],
+  "test_environment": {
+    "dependency_source": "existing /Users/mac/e-mate/worktrees/emate-2.0.15-T02/desktop/e-mate-desktop/node_modules",
+    "use": "temporary read-only symlink in the T09 Desktop directory because global Yarn and local T09 dependencies were absent",
+    "installed_or_modified_dependencies": false,
+    "temporary_link_removed_before_commit": true,
+    "package_or_lock_modified": false
+  },
+  "modified_files": [
+    "desktop/e-mate-desktop/src/agent-update.ts",
+    "desktop/e-mate-desktop/src/electron-runtime.ts",
+    "desktop/e-mate-desktop/src/mac-update-installer.ts",
+    "desktop/e-mate-desktop/src/main.ts",
+    "desktop/e-mate-desktop/src/preload.ts",
+    "desktop/e-mate-desktop/src/update-checker.ts",
+    "desktop/e-mate-desktop/src/update-download.ts",
+    "desktop/e-mate-desktop/src/update-presentation.ts",
+    "desktop/e-mate-desktop/src/updates.ts",
+    "desktop/e-mate-desktop/tests/agent-update.spec.ts",
+    "desktop/e-mate-desktop/tests/electron-runtime.spec.ts",
+    "desktop/e-mate-desktop/tests/mac-update-installer.spec.ts",
+    "desktop/e-mate-desktop/tests/update-checker.spec.ts",
+    "desktop/e-mate-desktop/tests/update-download.spec.ts",
+    "desktop/e-mate-desktop/tests/updates.spec.ts",
+    "docs/2.0.15/evidence/T09.json"
+  ],
+  "handoffs": [
+    {
+      "owner": "T13",
+      "status": "READY_SOURCE_HANDOFF",
+      "scope": "Consume DesktopUpdateState through __EMATE_DESKTOP_UPDATES__ for Header and Settings layout; do not create another updater or state store."
+    },
+    {
+      "owner": "release coordinator",
+      "status": "OPEN",
+      "scope": "The signed manifest producer must emit and sign the admitted schema-v3 update_policy before mandatory policy can exist in production. No producer or public manifest was changed by T09."
+    },
+    {
+      "owner": "T18",
+      "status": "OPEN",
+      "scope": "Freeze exact 2.0.15 bytes and run real installed 2.0.12 and 2.0.13 to 2.0.15 updates, exercise pre-download free-space/path failures and post-download DMG/content failures on installed macOS, failed-health rollback, retained-data checks and macOS/Windows visible UI acceptance."
+    }
+  ],
+  "consultation_gate": {
+    "decision": "D009",
+    "status": "not_invoked",
+    "reason": "The coordinator reviews tightened distinct missing assertions before the final shared-source repair; there is no evidence that one named acceptance remained red after two materially different source fixes. All named focused checks are green."
+  },
+  "truth_stage": {
+    "source": "implemented and locally tested",
+    "t02_updater_installed_seam": "consumed without editing",
+    "real_predecessor_update": "OPEN_T18",
+    "failed_health_rollback": "OPEN_T18",
+    "cross_platform_ui": "OPEN_T18",
+    "desktop_candidate": "not created",
+    "packaged": false,
+    "signed": false,
+    "published": false,
+    "released": false
+  },
+  "production_writes": [],
+  "installed_receipts": []
+}

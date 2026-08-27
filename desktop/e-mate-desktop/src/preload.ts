@@ -1,11 +1,19 @@
 /** Minimal context-isolated bridge for resolving operating-system drag payloads. */
 
-import { contextBridge, webUtils } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import {
   DESKTOP_BOOTSTRAP_BRIDGE,
   parseDesktopRendererBootstrapArgument,
 } from './desktop-bootstrap-contract.ts'
 import { DESKTOP_FILE_PATH_BRIDGE } from './file-path-bridge-contract.ts'
+import {
+  DESKTOP_UPDATE_BRIDGE,
+  DESKTOP_UPDATE_CANCEL,
+  DESKTOP_UPDATE_STATE_CHANGED,
+  DESKTOP_UPDATE_STATE_READ,
+  type DesktopUpdateBridge,
+  type DesktopUpdateState,
+} from './update-presentation.ts'
 
 contextBridge.exposeInMainWorld(
   DESKTOP_BOOTSTRAP_BRIDGE,
@@ -18,3 +26,14 @@ contextBridge.exposeInMainWorld(DESKTOP_FILE_PATH_BRIDGE, {
     return webUtils.getPathForFile(file)
   },
 })
+
+const updates: DesktopUpdateBridge = {
+  getState: () => ipcRenderer.sendSync(DESKTOP_UPDATE_STATE_READ) as DesktopUpdateState | undefined,
+  subscribe(listener) {
+    const receive = (_event: Electron.IpcRendererEvent, state: DesktopUpdateState): void => { listener(state) }
+    ipcRenderer.on(DESKTOP_UPDATE_STATE_CHANGED, receive)
+    return () => { ipcRenderer.removeListener(DESKTOP_UPDATE_STATE_CHANGED, receive) }
+  },
+  cancel: () => ipcRenderer.sendSync(DESKTOP_UPDATE_CANCEL) === true,
+}
+contextBridge.exposeInMainWorld(DESKTOP_UPDATE_BRIDGE, updates)
