@@ -60,7 +60,7 @@ jobs:
 
       - name: Sign the exact admission and prepare the Cloudflare plugin handoff
         id: prepare
-        uses: zyfjacksonchen-source/e-mate-desktop-publication@bfe869505196f3124192f6e0c219014c94365639
+        uses: zyfjacksonchen-source/e-mate-desktop-publication@0026c0364623ea123ab0930a136f4d225c95f298
         env:
           EMATE_GITHUB_PROVENANCE_TOKEN: ${{ github.token }}
           EMATE_DESKTOP_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.EMATE_PROFILE_SIGNING_PRIVATE_KEY }}
