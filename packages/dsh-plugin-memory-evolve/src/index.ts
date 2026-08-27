@@ -129,6 +129,13 @@ function searchInput(value: unknown): { query?: unknown; limit?: unknown } {
   }
 }
 
+function deleteInput(value: unknown): string {
+  if (!isRecord(value) || Object.keys(value).length !== 1 || typeof value.memory_id !== 'string' || !UUID.test(value.memory_id)) {
+    throw new Error('e_mate_memory_delete arguments are invalid')
+  }
+  return value.memory_id
+}
+
 async function confirmRemember(
   ctx: MemoryPluginContext,
   input: MemoryRememberInput,
@@ -156,6 +163,27 @@ async function confirmRemember(
   }
 }
 
+async function confirmDelete(ctx: MemoryPluginContext, memoryId: string, execution: MemoryExecution): Promise<void> {
+  if (execution.agent === undefined) throw new Error('e-Mate memory requires an owning Agent session')
+  const answer = await ctx.userQuestions.ask({
+    agent: execution.agent as never,
+    signal: execution.signal,
+    questions: [{
+      id: 'e-mate-memory-delete',
+      header: '删除记忆',
+      question: '是否从当前项目或会话中删除这条记忆？',
+      detail: memoryId,
+      options: [
+        { label: '删除', description: '只删除当前项目或会话中匹配的记忆。' },
+        { label: '取消', description: '保留这条记忆。' },
+      ],
+    }],
+  })
+  if (answer.answers[0]?.selected.includes('删除') !== true) {
+    throw new Error('e-Mate memory delete was cancelled by the user')
+  }
+}
+
 /** Register project-isolated memory on Harness storage, Tool, and prompt seams. */
 export async function apply(ctx: MemoryPluginContext, config: MemoryConfig = {}): Promise<void> {
   if (config.sessionOnlyWorkspacePath !== undefined && !isAbsolute(config.sessionOnlyWorkspacePath)) {
@@ -174,6 +202,7 @@ export async function apply(ctx: MemoryPluginContext, config: MemoryConfig = {})
     order: 118,
     text: 'Use e_mate_memory_search to retrieve memory only when it helps the current task. Use '
       + 'e_mate_memory_remember only when the user explicitly asks to remember a verified fact or preference. '
+      + 'Use e_mate_memory_delete only when the user explicitly asks to delete a specific memory. '
       + 'The runtime binds every operation to the current project; an ungrouped conversation is session-only.',
   }), 'emate.memory-evolve: prompt guidance')
 
@@ -233,6 +262,37 @@ export async function apply(ctx: MemoryPluginContext, config: MemoryConfig = {})
       ? { card: 'generic', title: 'Search project memory', kind: 'read', rawInput: args.query }
       : undefined,
   }), 'emate.memory-evolve: search tool')
+
+  ctx.effect(() => ctx.tools.register({
+    name: 'e_mate_memory_delete',
+    description: 'Delete one user-confirmed memory only from the current e-Mate project or ungrouped session.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['memory_id'],
+      properties: { memory_id: { type: 'string', description: 'Exact memory_id returned by e_mate_memory_search.' } },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['deleted', 'memory_id'],
+        properties: { deleted: { type: 'boolean' }, memory_id: { type: 'string' } },
+      },
+      render: (_args: unknown, value: { deleted: boolean }) => [{
+        type: 'text',
+        text: value.deleted ? 'Memory deleted from this project or session.' : 'No matching memory exists in this project or session.',
+      }],
+    },
+    execute: async (args: unknown, execution: MemoryExecution) => {
+      const memoryId = deleteInput(args)
+      await confirmDelete(ctx, memoryId, execution)
+      return { deleted: await memory.delete(memoryId, execution), memory_id: memoryId }
+    },
+    presentCall: (args: unknown) => isRecord(args) && typeof args.memory_id === 'string'
+      ? { card: 'generic', title: 'Delete project memory', kind: 'write', rawInput: args.memory_id }
+      : undefined,
+  }), 'emate.memory-evolve: delete tool')
 }
 
 export { MemoryStore } from './store.ts'
