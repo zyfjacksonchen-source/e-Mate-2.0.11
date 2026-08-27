@@ -3185,3 +3185,30 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Decision and transferred scope: D015 把已合入且 clean 的 T09 `update-presentation.ts`、`preload.ts`、`updates.ts`、`tests/updates.spec.ts` 精确顺序转交 T13，并把既有 `electron-runtime.ts`/测试租约扩大到该 IPC carrier。只允许调用原 `runInteractiveUpdate()`、验证 owning Renderer sender、teardown 清理和复用原 in-flight fence；Header/Settings 仍只消费同一 `DesktopUpdateState`。
 - Forbidden alternatives: 不新增 updater、Store、持久结果、checker 调用、协议族或 manifest/download/install/rollback 逻辑；不把 source carrier 冒充 installed update/rollback。其余已证明缺口仍由 T13 原租约处理：Footer 重复 Settings、空白 Session Share、伪装可见 slash 和 connector route。
 - Next exact action: 将本 T00 决策 fast-forward 到 clean T13 分支并恢复原可见任务；T00 在提交后独立验证 sender isolation、handler cleanup、同一 in-flight updater、Header/Settings 同源状态和完整路由/可访问性回归。
+
+## 2026-08-28 · 2.0.15 T13 独立审查退回与 T15 能力状态补交
+
+- Goal checkpoint: T13 可见任务已形成 source/component 候选 `c07d461` 与 evidence `8c63a29`，但尚未合入。T00 逐调用链回读后拒绝当前候选，主任务不代写产品修复。
+- Root causes: 更新确认被拒绝后，唯一 updater 按合同保留稳定 `available`，而 Shell 把它同时列入 busy/cancellable，下一次点击只会调用不存在的取消事务；`@电脑操控` 仍读取 UA，未消费 T15 原生 `ComputerUseService` 的 helper/TCC 状态；Settings 仍以本地化标题和 MutationObserver 改名/隐藏，未按原生 `settings.section` id 收口 `models/plugins/agent-presets`。
+- Decision and leases: D016 先恢复原 T15 可见任务，只在 Computer Use adapter/test/evidence 内把既有 status/openPermissionSettings 投影到既有 `emateCapabilities`。合入后恢复原 T13 可见任务；除既有租约外，只转交原生 SettingsRoot nav 的稳定 section-id metadata、对应窄测、root Harness gitlink与 identity-settings 的 expectation-only regression。
+- Forbidden alternatives: 不新增 capability/permission/RPC/Settings/InputTrigger/Updater Owner，不用 UA 或本地化文本作最终事实，不卸载任何插件，不让 Windows 或 failed 状态插入可执行引用，不重写 T13 既有提交。旧版图片反馈工作簿继续整份排除且不读取。
+- Evidence ceiling: 这是第一次针对三个同名验收的源码纠偏，D009 未触发。T15 必须先合入；随后 T13 同步 release、提交 follow-up、重跑最窄回归与 committed CP-13。app-directory、installed、真实 TCC、双平台 UI、更新/回滚、successor Base 和 public 仍由 T18 裁决。
+- Next exact action: 恢复 T15 visible task 完成原生能力投影；T00 独立复验并合入后，再恢复 T13 修复 updater retry、Computer Use candidate state 和 stable Settings section boundary。
+
+## 2026-08-28 · 2.0.15 T13 稳定主操作与版本冻结边界补充
+
+- Goal checkpoint: T15 D016 修正仍在同一可见任务执行；T00 继续只做独立审查和精确租约，不代写产品实现，也未放行 T13 或 T18。
+- Additional root cause: T13 候选仍用本地化 `aria-label='能力中心'` 选择 T07 控件，且共享 hover/focus/current 样式未覆盖该控件；T07 控件本身没有 tooltip 和 route-selected 状态。可访问名称不得兼任稳定样式/路由 identity。
+- Decision and transferred scope: D017 只把已合入、clean 的 T07 `capabilities.tsx` 与对应 client test 顺序转交同一 T13 可见任务；Search/Schedule/Capability Center 共享一个稳定 primary-action data attribute，Capability Control 只接收 Sidebar slot 已有 route-active owner prop 并补 `title`/`aria-current`。禁止改 Hub 页面、RPC、registry、Jobs、catalog 或 Worker。
+- Version boundary: Sidebar 与 Aura 仍有两个用户可见 `2.0.13`。D018 把这两个 literal 及直接相关测试的版本标签留给最后 T18 version-only freeze；不新增 Renderer/Desktop 版本桥，也不改历史 predecessor/update fixtures 或已发布 2.0.13 回执。
+- Evidence ceiling: 这只是 Owner/租约裁决，没有 source/component、app-directory、installed、candidate 或 public 新回执。D009 未触发；D006 两条 strict blocker 继续保留。
+- Next exact action: 等待同一 T15 visible task 完成并由 T00 复验合入；随后将 release 同步到原 T13 分支，按 D016/D017 做 follow-up，T18 仍只在全部 P0 合入后创建。
+
+## 2026-08-28 · 2.0.15 T15 原生 Computer Use 能力投影合入
+
+- Goal checkpoint: D016 在原 T15 可见任务 `01a0436a-de49-7ad1-a576-b3df10972f5c` 完成，没有新建任务或子代理；单一修正提交由总控合入 release 为 `9f7d54f`。T15 回到 `MERGED`，T13 的 native capability 依赖已解锁。
+- Root cause and owner: 原 `ComputerUseService` 已拥有 helper/TCC 缓存状态与 `openPermissionSettings`，但组件没有向既有 `emateCapabilities` 投影，迫使 T13 候选读取 UA。修正只在 Computer Use build adapter 的唯一 fail-closed seam 注册一个 `computer-use` definition；没有新增服务、RPC、Store、permission model、helper、Tool、轮询器、依赖或 Windows executor。
+- State and action contract: list 只读取一次缓存 `status()`；helper/provider 就绪且 Accessibility/Screen Recording 均 granted 才是 ready。缺失权限只返回对应原生设置 action；provider failure/unavailable 返回 failed/blocked 且无 action id。既有 registry 在 invoke 前重新计算 status 并拒绝不在 `action_ids` 的操作，signal 原样传给原生设置 Owner，Cordis effect disposer 移除唯一 registration。
+- Independent verification: T00 逐行审查 `c55fe7900a` 后，以本地 runtime Node 重跑 build 和完整 package test为 `3/3`；真实 emitted imports 精确为 8 个声明项；T15 JSON、`git diff --check`、root/submodule clean 与提交检查通过。严格 inventory 仍且仅返回 `upstream/deepseek-harness: Git submodule commit does not match the Base contract` 和 `desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union`。
+- Evidence ceiling: `T15.json` 只提升 source/component 层。真实 macOS TCC deny/grant/revoke、installed Windows 不可用投影、complete Profile app-directory、successor Base、candidate/public 与 clean external fetch 仍归 T18；旧版作废图片反馈工作簿继续整份排除且未读取。
+- Next exact action: 将当前 release 合并到原 T13 分支，保留其既有提交，再恢复同一 T13 可见任务按 D016/D017 修正 updater retry、native Computer Use candidate、stable Settings IDs 和 stable primary-action contract。

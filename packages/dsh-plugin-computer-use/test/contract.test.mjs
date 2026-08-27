@@ -2,13 +2,16 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
+import { installComputerUseCapability } from '../lib/emate-capability.js'
 import { hasExplicitComputerUseRequest } from '../lib/emate-explicit.js'
 
 const root = new URL('../', import.meta.url)
 
 test('computer-use adapter preserves the immutable universal helper only on macOS', async () => {
   const pkg = JSON.parse(await readFile(new URL('package.json', root), 'utf8'))
+  const { componentFiles, verifyComponentRuntimeImports } = await import('../../../scripts/component-release.mjs')
   const patch = await readFile(new URL('cordis.patch.yml', root), 'utf8')
   const nativeBuilder = await readFile(new URL('scripts/build-native.mjs', root), 'utf8')
   const adapterBuilder = await readFile(new URL('scripts/build.mjs', root), 'utf8')
@@ -19,6 +22,10 @@ test('computer-use adapter preserves the immutable universal helper only on macO
   assert.equal(pkg.version, '2.0.14')
   assert.equal(pkg.dsh.upstream.commit, '76bfe8607f61945c1cbb84e73976e601100c13a2')
   assert.equal(pkg.eMate.harnessVersion, '0.1.0-rc.7')
+  assert.deepEqual(
+    verifyComponentRuntimeImports(componentFiles(fileURLToPath(root), pkg), pkg.eMate.component),
+    pkg.eMate.component.base_imports,
+  )
   assert.match(patch, /process\.platform !== 'darwin'/u)
   assert.doesNotMatch(patch, /allowAllApps:\s*true/u)
   if (process.platform === 'darwin') {
@@ -52,6 +59,72 @@ test('computer-use adapter preserves the immutable universal helper only on macO
   assert.match(bundle, /Use CDP browser tools first for webpage tasks/u)
   assert.match(bundle, /new URL\("\.\.\/native\/macos\/", import\.meta\.url\)/u)
   assert.match(bundle, /new URL\("\.\.\/scripts\/build-native\.mjs", import\.meta\.url\)/u)
+  assert.equal((bundle.match(/["']emateCapabilities["']/gu) ?? []).length, 1)
+  assert.match(bundle, /installComputerUseCapability\(ctx, this\)/u)
+})
+
+test('Computer Use projects cached native readiness and permission actions through one lifecycle effect', async () => {
+  const definitions = []
+  const effects = []
+  const permissionCalls = []
+  let statusCalls = 0
+  let snapshot = { ready: true, accessibility: 'granted', screenRecording: 'granted' }
+  const service = {
+    status() {
+      statusCalls += 1
+      return snapshot
+    },
+    async openPermissionSettings(kind, signal) {
+      permissionCalls.push([kind, signal])
+    },
+  }
+  const ctx = {
+    effect(install, label) {
+      const dispose = install()
+      effects.push({ dispose, label })
+      return dispose
+    },
+    emateCapabilities: {
+      register(definition) {
+        definitions.push(definition)
+        return () => definitions.splice(definitions.indexOf(definition), 1)
+      },
+    },
+  }
+
+  const dispose = installComputerUseCapability(ctx, service)
+  assert.deepEqual(effects.map(effect => effect.label), ['dsh-computer-use: e-Mate capability metadata'])
+  assert.deepEqual(definitions.map(definition => definition.id), ['computer-use'])
+  const capability = definitions[0]
+
+  assert.deepEqual(await capability.status(), {
+    state: 'ready', detail: '原生 helper、辅助功能和屏幕录制权限均已就绪。', action_ids: [],
+  })
+  assert.equal(statusCalls, 1, 'capability list reads only the cached service status once')
+
+  snapshot = { ready: true, accessibility: 'denied', screenRecording: 'not-determined' }
+  assert.deepEqual(await capability.status(), {
+    state: 'setup-required', detail: '需要在 macOS 系统设置中开启对应权限。',
+    action_ids: ['open-accessibility-settings', 'open-screen-recording-settings'],
+  })
+  const signal = new AbortController().signal
+  await capability.invoke('open-accessibility-settings', {}, signal)
+  await capability.invoke('open-screen-recording-settings', {}, signal)
+  assert.deepEqual(permissionCalls, [['accessibility', signal], ['screen-recording', signal]])
+
+  snapshot = { ready: false, accessibility: 'unavailable', screenRecording: 'unavailable', lastError: 'provider failed' }
+  assert.deepEqual(await capability.status(), { state: 'failed', detail: 'provider failed', action_ids: [] })
+  snapshot = { ready: false, accessibility: 'unavailable', screenRecording: 'unavailable' }
+  assert.deepEqual(await capability.status(), {
+    state: 'blocked', detail: 'Computer Use 原生 provider 尚未就绪。', action_ids: [],
+  })
+  snapshot = { ready: true, accessibility: 'unavailable', screenRecording: 'granted' }
+  assert.deepEqual(await capability.status(), {
+    state: 'blocked', detail: 'Computer Use 无法读取所需的 macOS 权限状态。', action_ids: [],
+  })
+
+  dispose()
+  assert.deepEqual(definitions, [])
 })
 
 test('Computer Use authorization expires before the next direct user request', () => {
