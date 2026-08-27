@@ -3185,3 +3185,12 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Decision and transferred scope: D015 把已合入且 clean 的 T09 `update-presentation.ts`、`preload.ts`、`updates.ts`、`tests/updates.spec.ts` 精确顺序转交 T13，并把既有 `electron-runtime.ts`/测试租约扩大到该 IPC carrier。只允许调用原 `runInteractiveUpdate()`、验证 owning Renderer sender、teardown 清理和复用原 in-flight fence；Header/Settings 仍只消费同一 `DesktopUpdateState`。
 - Forbidden alternatives: 不新增 updater、Store、持久结果、checker 调用、协议族或 manifest/download/install/rollback 逻辑；不把 source carrier 冒充 installed update/rollback。其余已证明缺口仍由 T13 原租约处理：Footer 重复 Settings、空白 Session Share、伪装可见 slash 和 connector route。
 - Next exact action: 将本 T00 决策 fast-forward 到 clean T13 分支并恢复原可见任务；T00 在提交后独立验证 sender isolation、handler cleanup、同一 in-flight updater、Header/Settings 同源状态和完整路由/可访问性回归。
+
+## 2026-08-28 · 2.0.15 T13 独立审查退回与 T15 能力状态补交
+
+- Goal checkpoint: T13 可见任务已形成 source/component 候选 `c07d461` 与 evidence `8c63a29`，但尚未合入。T00 逐调用链回读后拒绝当前候选，主任务不代写产品修复。
+- Root causes: 更新确认被拒绝后，唯一 updater 按合同保留稳定 `available`，而 Shell 把它同时列入 busy/cancellable，下一次点击只会调用不存在的取消事务；`@电脑操控` 仍读取 UA，未消费 T15 原生 `ComputerUseService` 的 helper/TCC 状态；Settings 仍以本地化标题和 MutationObserver 改名/隐藏，未按原生 `settings.section` id 收口 `models/plugins/agent-presets`。
+- Decision and leases: D016 先恢复原 T15 可见任务，只在 Computer Use adapter/test/evidence 内把既有 status/openPermissionSettings 投影到既有 `emateCapabilities`。合入后恢复原 T13 可见任务；除既有租约外，只转交原生 SettingsRoot nav 的稳定 section-id metadata、对应窄测、root Harness gitlink与 identity-settings 的 expectation-only regression。
+- Forbidden alternatives: 不新增 capability/permission/RPC/Settings/InputTrigger/Updater Owner，不用 UA 或本地化文本作最终事实，不卸载任何插件，不让 Windows 或 failed 状态插入可执行引用，不重写 T13 既有提交。旧版图片反馈工作簿继续整份排除且不读取。
+- Evidence ceiling: 这是第一次针对三个同名验收的源码纠偏，D009 未触发。T15 必须先合入；随后 T13 同步 release、提交 follow-up、重跑最窄回归与 committed CP-13。app-directory、installed、真实 TCC、双平台 UI、更新/回滚、successor Base 和 public 仍由 T18 裁决。
+- Next exact action: 恢复 T15 visible task 完成原生能力投影；T00 独立复验并合入后，再恢复 T13 修复 updater retry、Computer Use candidate state 和 stable Settings section boundary。
