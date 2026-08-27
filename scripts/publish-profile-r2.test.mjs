@@ -35,6 +35,21 @@ function rehashSnapshot(value) {
   }
 }
 
+test('checked-in desired state is the exact public 2.0.13 Base v7 snapshot', () => {
+  const snapshot = JSON.parse(readFileSync('artifacts/release/profile-current-snapshot.json', 'utf8'))
+  assert.equal(snapshot.candidate_release_version, '2.0.14')
+  assert.equal(snapshot.candidate_base_contract_id, 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0')
+  assert.deepEqual(Object.keys(snapshot.targets).sort(), ['darwin-arm64', 'darwin-x64', 'win32-x64'])
+  for (const [target, current] of Object.entries(snapshot.targets)) {
+    const bytes = Buffer.from(current.content_base64, 'base64')
+    assert.equal(bytes.byteLength, current.bytes, target)
+    assert.equal(createHash('sha256').update(bytes).digest('hex'), current.sha256, target)
+    const envelope = JSON.parse(bytes)
+    assert.equal(envelope.payload.release_version, '2.0.13', target)
+    assert.deepEqual(envelope.payload.base_contracts, ['e-mate-desktop-profile-v7-dsh-b2b1650b01f0'], target)
+  }
+})
+
 test('Cloudflare current snapshot is closed, bounded, canonical, and network-free', t => {
   const root = mkdtempSync(join(tmpdir(), 'e-mate-profile-current-snapshot-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))

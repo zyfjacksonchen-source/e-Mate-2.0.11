@@ -391,11 +391,12 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.equal(published.cpu, undefined)
   assert.ok(workspace.scripts.test.indexOf('component-run.mjs check') < workspace.scripts.test.indexOf('--filter @e-mate/dsh test'))
   const ciChecks = ci.jobs.source.steps.find(step => step.name === 'Check target pin and e-Mate behavior').run
-  assert.match(ciChecks, /^pnpm test$/mu)
+  assert.match(ciChecks, /^pnpm test:harness-provenance$/mu)
   assert.doesNotMatch(ciChecks, /--filter @e-mate\/dsh test/u)
   assert.deepEqual(Object.keys(ci.jobs), [
     'impact',
     'source',
+    'component-base-sdk',
     'plugins',
     'base-platform-components',
     'profile-portable-composition',
@@ -409,8 +410,8 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.equal(ci.jobs.source.steps.find(step => step.name === 'Build pinned DeepSeek Harness').run, 'pnpm build:harness')
   assert.equal(release.jobs.pack.steps.find(step => step.name === 'Build pinned DeepSeek Harness').run, 'pnpm build:harness')
   assert.deepEqual(ci.jobs['base-platform-components'].needs, ['impact', 'source'])
-  assert.deepEqual(ci.jobs['desktop-windows'].needs, ['impact', 'source'])
-  assert.deepEqual(ci.jobs['desktop-macos'].needs, ['impact', 'source'])
+  assert.deepEqual(ci.jobs['desktop-windows'].needs, ['impact', 'source', 'plugins', 'component-base-sdk'])
+  assert.deepEqual(ci.jobs['desktop-macos'].needs, ['impact', 'source', 'plugins', 'component-base-sdk'])
   for (const [workflow, producer, consumers] of [
     [ci, 'source', ['desktop-windows', 'desktop-macos']],
   ]) {

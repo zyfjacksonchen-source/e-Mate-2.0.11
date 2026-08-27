@@ -281,13 +281,72 @@ export function emitComponent(options) {
   }
 }
 
+/** Restore one already verified portable payload into an existing Base image without rebuilding it. */
+export function materializeComponentArtifact(options) {
+  const root = resolve(options.root)
+  const input = resolve(options.input)
+  const output = resolve(options.out)
+  const outputRelative = relative(root, output)
+  if (output === root || outputRelative === '' || outputRelative === '..' || outputRelative.startsWith(`..${sep}`)) {
+    throw new Error('component materialization output must be a repository child directory')
+  }
+  const { boundary, component } = selectComponent(root, options.id)
+  const componentPackage = readJson(join(root, component.root, 'package.json'))
+  const manifest = readJson(join(input, 'manifest.json'))
+  if (manifest.schema_version !== 1 || manifest.id !== component.id || manifest.kind !== 'profile'
+    || manifest.version !== component.version || manifest.target !== null || manifest.source_commit !== options.sourceCommit
+    || !manifest.base_contracts?.includes(boundary.baseContract.id)
+    || manifest.schedule_protocol_floor !== boundary.baseContract.schedule_protocol_floor
+    || JSON.stringify(manifest.base_imports) !== JSON.stringify(component.base_imports)
+    || JSON.stringify(manifest.authority_contract) !== JSON.stringify(component.authority_contract)
+    || manifest.harness_contract?.version !== boundary.baseContract.harness_version
+    || manifest.harness_contract?.commit !== boundary.baseContract.harness_commit
+    || manifest.package_entry !== componentPackage.main
+    || !Array.isArray(manifest.files) || manifest.files.length === 0) {
+    throw new Error('portable component artifact identity is invalid')
+  }
+  const allowedRoots = ['package.json', ...componentPackage.files]
+  const files = []
+  const seen = new Set()
+  let totalBytes = 0
+  for (const file of manifest.files) {
+    if (!safeRelativePath(file.path) || !allowedRoots.some(path => file.path === path || file.path.startsWith(`${path.replace(/\/$/u, '')}/`))
+      || seen.has(file.path) || !Number.isSafeInteger(file.bytes) || file.bytes < 0
+      || !/^[0-9a-f]{64}$/u.test(file.sha256) || !['0644', '0755'].includes(file.mode)) {
+      throw new Error('portable component artifact file is invalid')
+    }
+    seen.add(file.path)
+    const source = join(input, 'files', ...file.path.split('/'))
+    const metadata = lstatSync(source)
+    const bytes = readFileSync(source)
+    if (!metadata.isFile() || metadata.isSymbolicLink() || bytes.byteLength !== file.bytes || sha256(bytes) !== file.sha256) {
+      throw new Error(`portable component artifact bytes are invalid: ${file.path}`)
+    }
+    totalBytes += bytes.byteLength
+    files.push({ ...file, source })
+  }
+  if (totalBytes !== manifest.total_bytes) throw new Error('portable component artifact total bytes drifted')
+  const payloadPackage = JSON.parse(readFileSync(join(input, 'files', 'package.json'), 'utf8'))
+  if (payloadPackage.name !== component.id || payloadPackage.version !== component.version || payloadPackage.main !== componentPackage.main) {
+    throw new Error('portable component package identity is invalid')
+  }
+  rmSync(output, { recursive: true, force: true })
+  for (const file of files) {
+    const destination = join(output, ...file.path.split('/'))
+    mkdirSync(dirname(destination), { recursive: true })
+    copyFileSync(file.source, destination)
+    chmodSync(destination, file.mode === '0755' ? 0o755 : 0o644)
+  }
+  return { id: manifest.id, source_commit: manifest.source_commit, files: files.length, total_bytes: totalBytes, output }
+}
+
 function parseArguments(argv) {
   const command = argv[0]
-  if (!['emit', 'inventory'].includes(command)) throw new Error('command must be emit or inventory')
+  if (!['emit', 'inventory', 'materialize'].includes(command)) throw new Error('command must be emit, inventory, or materialize')
   const options = { command }
   for (let index = 1; index < argv.length; index += 1) {
     const name = argv[index]
-    if (!['--component', '--out', '--source-commit', '--root', '--target'].includes(name)) {
+    if (!['--artifact', '--component', '--out', '--source-commit', '--root', '--target'].includes(name)) {
       throw new Error(`unknown argument: ${String(name)}`)
     }
     const value = argv[index + 1]
@@ -331,6 +390,19 @@ function main() {
       })),
       component_jobs: componentJobsFor(boundary, accepted.map(component => component.id), accepted.map(component => component.id)),
     }, null, 2)}\n`)
+    return
+  }
+  if (options.command === 'materialize') {
+    if (options.artifact === undefined || options.component === undefined || options.out === undefined || options.sourcecommit === undefined) {
+      throw new Error('materialize requires --artifact, --component, --source-commit, and --out')
+    }
+    process.stdout.write(`${JSON.stringify(materializeComponentArtifact({
+      root,
+      input: options.artifact,
+      id: options.component,
+      sourceCommit: options.sourcecommit,
+      out: options.out,
+    }), null, 2)}\n`)
     return
   }
   if (options.component === undefined || options.out === undefined) {
