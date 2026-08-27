@@ -63,11 +63,3 @@ test('projects remain session-scoped across workspaces, archive, restart, and tr
   const restarted = mount([])
   assert.equal((await restarted('read', { path: 'alpha.txt', session_id: 'alpha-1' })).value.content, 'alpha')
 })
-
-test('client fences stale route results before projecting them', async () => {
-  const client = await readFile(resolve(root, 'src/client/index.tsx'), 'utf8')
-  assert.match(client, /const request = useRef\(0\)/u)
-  assert.match(client, /const current = \+\+request\.current/u)
-  assert.match(client, /if \(current !== request\.current\) return/u)
-  assert.match(client, /return \(\) => \{ request\.current \+= 1/u)
-})

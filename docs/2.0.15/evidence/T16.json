@@ -57,9 +57,9 @@
     "better_sidebar": {
       "decision": "KEEP",
       "entry_owner_result": "conversation.view project-files -> loopback /emate.betterSidebar -> native WorkspaceRegistry membership -> bounded realpath list/read projection",
-      "positive": "multi-workspace, two sessions in one workspace, restart read and UTF-8 file projection passed",
-      "negative": "archived session, unknown/subagent-only id, traversal and symlink escape fail closed",
-      "fix": "reject archived native sessions and fence stale client route results"
+      "positive": "multi-workspace, two sessions in one workspace, restart read, UTF-8 file projection, and a runnable deferred client route race passed",
+      "negative": "archived session, unknown/subagent-only id, traversal, symlink escape, stale success, stale rejected Promise, stale first-frame state and detached old rows fail closed",
+      "fix": "727391bec4 rejected archived sessions and covered stale successful results only; this second follow-up keys the existing view owner by native sessionId and fences both resolution and rejection at its one request-token boundary, closing rejected Promise and stale first-frame listing/path/preview/status projection without a second Store, Router or transport"
     },
     "file_import": {
       "decision": "KEEP",
@@ -123,6 +123,10 @@
     {
       "command": "narrow build plus node --test for all seven T16 components",
       "result": "PASS: Better Sidebar 4, File Import 7, GenUI 1, Glass Composer 1, MCP Manage 5, Memory Evolve store 3, Office Skills 5; Office includes real four-format Tool artifacts and cancellation cleanup"
+    },
+    {
+      "command": "Better Sidebar follow-up emitted build, 3 Host contracts and runnable jsdom client route-race regression",
+      "result": "PASS: held deferred old-session read success and list rejection across a route switch; rejected old listing/path/preview/status and detached-row operation, then accepted only the new-session result. Unchanged component tests were not redundantly rerun"
     },
     {
       "command": "componentFiles plus verifyComponentRuntimeImports over all seven final emitted lib closures",

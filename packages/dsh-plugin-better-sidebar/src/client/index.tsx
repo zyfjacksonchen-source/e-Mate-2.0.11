@@ -45,17 +45,27 @@ function ProjectFiles({ sessionId, callSidebar }: ConvViewProps & Injected) {
   const [preview, setPreview] = useState<{ path: string; content: string } | null>(null)
   const [status, setStatus] = useState('正在读取项目文件…')
 
-  const load = useCallback(async (nextPath: string) => {
+  const owned = useCallback(async <T,>(run: () => Promise<T>): Promise<T | undefined> => {
     const current = ++request.current
+    try {
+      const value = await run()
+      return current === request.current ? value : undefined
+    } catch (error) {
+      if (current === request.current) throw error
+      return undefined
+    }
+  }, [])
+
+  const load = useCallback(async (nextPath: string) => {
     setStatus('正在读取项目文件…')
     setPreview(null)
-    const result = await callSidebar('list', { session_id: sessionId, path: nextPath })
-    if (current !== request.current) return
+    const result = await owned(() => callSidebar('list', { session_id: sessionId, path: nextPath }))
+    if (result === undefined) return
     if (!result.ok) throw new Error(result.error?.message ?? '项目文件读取失败。')
     setListing(parseListing(result.value))
     setPath(nextPath)
     setStatus('')
-  }, [callSidebar, sessionId])
+  }, [callSidebar, owned, sessionId])
 
   useEffect(() => {
     void load('').catch(error => { setStatus(error instanceof Error ? error.message : '项目文件读取失败。') })
@@ -65,10 +75,9 @@ function ProjectFiles({ sessionId, callSidebar }: ConvViewProps & Injected) {
   const open = async (entry: Entry) => {
     const next = path === '' ? entry.name : `${path}/${entry.name}`
     if (entry.kind === 'directory') return await load(next)
-    const current = ++request.current
     setStatus('正在读取文件…')
-    const result = await callSidebar('read', { session_id: sessionId, path: next })
-    if (current !== request.current) return
+    const result = await owned(() => callSidebar('read', { session_id: sessionId, path: next }))
+    if (result === undefined) return
     if (!result.ok) throw new Error(result.error?.message ?? '文件读取失败。')
     const value = result.value as { schema_version?: unknown; kind?: unknown; path?: unknown; content?: unknown }
     if (value?.schema_version !== 1 || value.kind !== 'file' || typeof value.path !== 'string' || typeof value.content !== 'string') throw new Error('文件内容无效。')
@@ -103,6 +112,10 @@ function ProjectFiles({ sessionId, callSidebar }: ConvViewProps & Injected) {
   )
 }
 
+function SessionProjectFiles(props: ConvViewProps & Injected) {
+  return <ProjectFiles key={props.sessionId} {...props} />
+}
+
 export function apply(ctx: Context): void {
   ctx.slots.inject('conversation.view', () => ctx.slots.register({
     name: 'conversation.view',
@@ -113,5 +126,5 @@ export function apply(ctx: Context): void {
       callSidebar: (endpoint: string, payload: Record<string, unknown>) =>
         ctx.connection.rpc.call('/emate.betterSidebar', endpoint, payload),
     }),
-  }, ProjectFiles))
+  }, SessionProjectFiles))
 }
