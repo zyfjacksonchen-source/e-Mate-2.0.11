@@ -1,0 +1,268 @@
+{
+  "schema_version": 1,
+  "document_type": "emate.2.0.15.ticket-evidence",
+  "ticket": "T18",
+  "title": "2.0.15 Phase 1 source freeze",
+  "status": "SOURCE_FREEZE_COMMITTED_CANDIDATE_INSTALLED_PUBLIC_OPEN",
+  "captured_at": "2026-08-27T19:19:07Z",
+  "baseline": {
+    "branch": "release/2.0.15",
+    "start_commit": "2f1183c3ea0b5da5e794a3d6daf1aa565b08a328",
+    "source_freeze_commit": "c2e7365b71a10e4a54622a70a30b0ae9fe19df90",
+    "clean_start": true,
+    "harness_gitlink": "4787caf39134df190105b272da0dd2ba893d4d75",
+    "harness_worktree": "4787caf39134df190105b272da0dd2ba893d4d75",
+    "genui_gitlink": "0e756efb7671e6b8413dde3d8e199c68fa89cbeb",
+    "genui_worktree": "0e756efb7671e6b8413dde3d8e199c68fa89cbeb",
+    "desktop_reference_commit": "6074088f5b660206e404b3591fab51fb99c69add",
+    "public_production_version": "2.0.13",
+    "version_2_0_14_formally_released": false
+  },
+  "source_freeze": {
+    "product_version": "2.0.15",
+    "base_contract_id": "e-mate-desktop-profile-v8-dsh-4787caf39134",
+    "harness_version": "0.1.0-rc.7",
+    "harness_commit": "4787caf39134df190105b272da0dd2ba893d4d75",
+    "retained_component_count": 15,
+    "managed_manifest_count": 19,
+    "managed_manifest_versions": ["2.0.15"],
+    "component_base_contract_allowlist": ["e-mate-desktop-profile-v8-dsh-4787caf39134"],
+    "runtime_imports": [
+      "@deepseek-ai/cordis",
+      "@deepseek-ai/dsh-client-runtime",
+      "@deepseek-ai/dsh-client-ui-attachment",
+      "@deepseek-ai/dsh-client-ui-primitives",
+      "@deepseek-ai/dsh-credentials",
+      "@deepseek-ai/dsh-home-paths",
+      "@deepseek-ai/dsh-llm",
+      "@deepseek-ai/dsh-schedule",
+      "@deepseek-ai/dsh-settings",
+      "@deepseek-ai/dsh-skill",
+      "@deepseek-ai/dsh-skill-filesystem",
+      "@deepseek-ai/dsh-storage-domain",
+      "@deepseek-ai/dsh-tools",
+      "@deepseek-ai/schemastery",
+      "@e-mate/desktop/vision-toolkit",
+      "react",
+      "react-dom"
+    ],
+    "runtime_import_count": 17,
+    "removed_unconsumed_runtime_import": "@deepseek-ai/dsh-launch-environment",
+    "desktop_vision_toolkit_version": "2.0.15",
+    "immutable_predecessor_base": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0",
+    "parallel_v7_current_path_created": false,
+    "validator_weakened": false,
+    "lockfiles_modified": false
+  },
+  "advertised_reachability": {
+    "origin": "https://github.com/zyfjacksonchen-source/deepseek-harness.git",
+    "branch_ref": "refs/heads/release/e-mate-2.0.15-harness",
+    "branch_sha": "4787caf39134df190105b272da0dd2ba893d4d75",
+    "base_commit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606",
+    "new_commits": [
+      "2ca0b68b420ba11a80fc5fac800f889008cd42af",
+      "820fee0df4f46b15d4cc07f56ccfcae43549d769",
+      "4787caf39134df190105b272da0dd2ba893d4d75"
+    ],
+    "new_commit_count": 3,
+    "probes": [
+      {
+        "path": "/private/tmp/emate-t18-harness-branch.S9v2Kg",
+        "mode": "fresh empty repository branch fetch",
+        "fetch_head": "4787caf39134df190105b272da0dd2ba893d4d75",
+        "alternates": false,
+        "result": "PASS"
+      },
+      {
+        "path": "/private/tmp/emate-t18-harness-sha.IitC27",
+        "mode": "fresh empty repository direct 40-character SHA fetch",
+        "object_type": "commit",
+        "ancestor_count_to_base": 3,
+        "alternates": false,
+        "result": "PASS"
+      },
+      {
+        "path": "/private/tmp/emate-t00-harness-reachability.eWxOMQ",
+        "mode": "T00 independent fresh empty repository verification",
+        "fetch_head": "4787caf39134df190105b272da0dd2ba893d4d75",
+        "ancestor_count_to_base": 3,
+        "alternates": false,
+        "result": "PASS"
+      }
+    ],
+    "github_connector_exact_sha": "PASS_ACCEPTED_FROM_PRIOR_T18_RECEIPT_AND_T00_REVIEW",
+    "push_performed_in_source_freeze_phase": false
+  },
+  "d006": {
+    "initial_command": "pnpm run component:inventory",
+    "initial_exit": 1,
+    "initial_errors": [
+      "upstream/deepseek-harness: Git submodule commit does not match the Base contract",
+      "desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union"
+    ],
+    "final_command": "pnpm run component:inventory",
+    "final_exit": 0,
+    "final_errors": [],
+    "final_base_contract_id": "e-mate-desktop-profile-v8-dsh-4787caf39134",
+    "final_components": 15,
+    "final_component_jobs": 19,
+    "closure": "SOURCE_CONTRACT_ONLY"
+  },
+  "emitted_abi_provenance": {
+    "source": "T01-T17 committed component evidence plus T18 strict union regression",
+    "unchanged_component_behavior": true,
+    "t18_component_changes": "package version, Harness commit and sole Base allowlist only; Shell additionally changes two display literals without changing imports",
+    "prior_exact_emitted_checks": [
+      "T07 Skill Hub component build",
+      "T11 and T12 final Shell verifyComponentRuntimeImports",
+      "T15 CDP, Computer Use, Find Skill and Vision Toolkit emitted checks",
+      "T16 Better Sidebar, File Import, GenUI, Glass Composer, MCP Manage, Memory Evolve and Office Skills emitted checks",
+      "T05 Tool Search and T06 Schedules component checks"
+    ],
+    "current_union_regression": "PASS: strict Base keys equal the 15 retained declarations; verifier behavior is covered by scripts/component-release.test.mjs",
+    "full_component_rebuild_performed": false
+  },
+  "d018": {
+    "changed_current_product_literals": [
+      "packages/dsh/profile/plugins/emate-shell/src/client/sidebar.tsx",
+      "packages/dsh/profile/plugins/emate-shell/src/client/aura-field.tsx"
+    ],
+    "changed_direct_tests": [
+      "packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx",
+      "packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx",
+      "packages/dsh/profile/plugins/emate-shell/tests/identity-settings-fidelity.client.spec.tsx"
+    ],
+    "old_literal_scan_exit": 1,
+    "old_literal_matches": [],
+    "historical_predecessor_update_public_fixtures_modified": false
+  },
+  "verification": [
+    {
+      "command": "node --test scripts/harness-provenance.test.mjs scripts/change-impact.test.mjs scripts/component-release.test.mjs scripts/profile-release.test.mjs scripts/release-coordinator.test.mjs",
+      "exit": 0,
+      "result": "PASS: 53 passed, 0 failed"
+    },
+    {
+      "command": "node --test scripts/change-impact.test.mjs scripts/component-release.test.mjs",
+      "exit": 0,
+      "result": "PASS_FINAL: 39 passed, 0 failed"
+    },
+    {
+      "command": "node --test with positive release-source test-name selection scripts/release.test.mjs",
+      "exit": 0,
+      "result": "PASS: 14 passed, 0 failed; unchanged website publication tests excluded from the source-freeze gate"
+    },
+    {
+      "command": "vitest run the three D018 Shell suites",
+      "exit": 0,
+      "result": "PASS: 3 files, 44 tests"
+    },
+    {
+      "command": "vitest run desktop/e-mate-desktop/tests/mac-update-installer.spec.ts using a temporary no-import config",
+      "exit": 0,
+      "result": "PASS: 1 file, 92 tests"
+    },
+    {
+      "command": "pnpm run check:target",
+      "exit": 0,
+      "result": "PASS: e-Mate 2.0.15 pins verified"
+    },
+    {
+      "command": "pnpm run check:release-boundary",
+      "exit": 0,
+      "result": "PASS: contract valid, exact successor Base and zero errors"
+    },
+    {
+      "command": "node scripts/change-impact.mjs --base 2f1183c3ea0b5da5e794a3d6daf1aa565b08a328 --head c2e7365b71a10e4a54622a70a30b0ae9fe19df90 --protected-main",
+      "exit": 0,
+      "result": "PASS: release-candidate impact classification, Base lane, 15 components, 19 jobs, strict contract valid; no workflow dispatched"
+    },
+    {
+      "command": "managed manifest and component identity scans",
+      "exit": 0,
+      "result": "PASS: 19 manifests at 2.0.15; 15 components bind 4787caf39134 and only successor Base v8"
+    },
+    {
+      "command": "current freeze paths versus historical version scans",
+      "exit": 0,
+      "result": "PASS: 38 current non-test/non-doc freeze paths contain no 2.0.14; five D018 paths contain no 2.0.13; historical 2.0.13/2.0.14 evidence remains classified and untouched"
+    },
+    {
+      "command": "JSON.parse over every changed JSON document",
+      "exit": 0,
+      "result": "PASS"
+    },
+    {
+      "command": "git diff --check",
+      "exit": 0,
+      "result": "PASS"
+    }
+  ],
+  "environment_observations_not_source_failures": [
+    {
+      "attempt": "pnpm --filter @e-mate/dsh build",
+      "result": "STOPPED_BEFORE_COMPILE",
+      "reason": "unchanged sync step required an unbuilt Skill Hub lib; no install was permitted"
+    },
+    {
+      "attempt": "direct component and Desktop suites without their locked local dependency closures",
+      "result": "NOT_ADMISSION_EVIDENCE",
+      "reason": "unexpanded Computer Use and Find Skill gitlinks plus absent component/Desktop dependencies caused ENOENT or module resolution failures; no dependency install, source repair or validator bypass was performed"
+    },
+    {
+      "attempt": "unprepared Vision and MCP emitted builds",
+      "result": "DISCARDED_ENVIRONMENT_OUTPUT",
+      "reason": "missing locked dependencies remained external; these bytes were not used as emitted ABI or candidate evidence"
+    },
+    {
+      "attempt": "full scripts/release.test.mjs website cases",
+      "result": "OUTSIDE_SOURCE_FREEZE_GATE",
+      "reason": "the unchanged website source remains intentionally bound to unreleased 2.0.14 until a later exact candidate/publication phase"
+    }
+  ],
+  "discarded_inputs": [
+    {
+      "file_name": "e-mate-image-feedback.xlsx",
+      "sha256": "9e00c3aaa004ecb680ba73a1e76c5a9dbc5de87986dbe6c276c05ab7fd38198f",
+      "reason": "user_declared_obsolete_old_version",
+      "content_excluded": true,
+      "opened_read_summarized_or_mapped_by_t18": false
+    }
+  ],
+  "scope": {
+    "source_freeze_committed": true,
+    "candidate_created": false,
+    "build_once_performed": false,
+    "installer_built": false,
+    "install_performed": false,
+    "signing_performed": false,
+    "remote_push_performed_in_this_phase": false,
+    "r2_written": false,
+    "feed_written": false,
+    "profile_desired_state_written": false,
+    "website_written": false,
+    "github_release_created": false,
+    "release_claimed": false
+  },
+  "open_gates": {
+    "build_once_exact_candidate": "OPEN",
+    "three_target_composition_and_boot": "OPEN",
+    "macos_arm64_fresh_install": "OPEN",
+    "macos_x64_fresh_install": "OPEN",
+    "windows_x64_fresh_install": "OPEN",
+    "predecessor_2_0_12_update": "OPEN",
+    "predecessor_2_0_13_update": "OPEN",
+    "failed_health_rollback": "OPEN",
+    "cp_01_through_cp_15_complete_profile": "OPEN",
+    "real_skill_hub_share_connectors": "OPEN",
+    "tcc_and_computer_use": "OPEN",
+    "c03_installed_screenshot": "OPEN",
+    "artifact_bytes_sha_version_arch_provenance": "OPEN",
+    "signing_or_adhoc_truth": "OPEN",
+    "candidate_admission": "OPEN",
+    "installed_acceptance": "OPEN",
+    "feed_profile_desired_state": "OPEN",
+    "public_readback": "OPEN",
+    "formal_release": "OPEN"
+  }
+}

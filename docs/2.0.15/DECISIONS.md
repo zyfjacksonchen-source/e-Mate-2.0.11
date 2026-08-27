@@ -92,6 +92,12 @@ Because T07 is merged and clean, its exact sequential handoff to the same visibl
 
 The integrated source still contains two user-visible `2.0.13` literals in the Sidebar brand and Aura status, plus directly related Shell test labels/assertions. They are not T13 navigation behavior and must not be silently removed or converted into a new Renderer/Desktop version bridge. After every P0 merge, T18 receives a version-only lease on `packages/dsh/profile/plugins/emate-shell/src/client/sidebar.tsx`, `packages/dsh/profile/plugins/emate-shell/src/client/aura-field.tsx`, `packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx`, `packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx` and `packages/dsh/profile/plugins/emate-shell/tests/identity-settings-fidelity.client.spec.tsx`, solely to freeze those current-product labels at `2.0.15` together with the package/Base/component version bump. Historical predecessor fixtures, updater compatibility cases and published 2.0.13 receipts remain unchanged.
 
+### D019 — T18 source freeze is independent of candidate and installed acceptance
+
+T00 accepts T01–T17 as merged product/component source evidence and independently accepts the final Harness advertised-reachability receipt. Those two predicates transfer only T18's version/contract/source-freeze leases; they do not satisfy candidate, installed, service, platform, signing or release acceptance.
+
+T18 freezes one successor identity, `e-mate-desktop-profile-v8-dsh-4787caf39134`, over Harness `4787caf39134df190105b272da0dd2ba893d4d75`, the exact 15-retained-component ABI union and 19 managed `2.0.15` package manifests. Immutable Base v7, historical predecessor/update fixtures, published 2.0.13 receipts, website/public pointers and three Profile desired states are not rewritten. The original two D006 failures close only at the source-contract layer when the strict unmodified inventory validator exits zero. Build once, exact artifacts, complete three-target composition/boot, installed update/rollback, TCC, real services, signing and public readback remain OPEN until their own receipts exist.
+
 ## Exclusive static scopes
 
 | Ticket | Exact owned paths while active |
@@ -161,4 +167,4 @@ These files are never edited concurrently. A lease transfers only after the earl
 - T01 must release CI/package-script and icon-cache contracts before T09/T14.
 - T14 owns the sole Desktop icon source. `sync-emate-profile.mjs` may continue syncing Profile bytes but must not regenerate or overwrite `build/app-icon.png` from the Shell mark; no later ticket may restore that duplicate write.
 - T05 freezes image/search visibility and receipt contracts before T10/T12/T15. T10 freezes session-selected model capability metadata before T15 changes image intake. T11 freezes the Shell token and composer-host seam before T12/T16. T06/T07/T08/T09/T15/T16 hand their native projections and UI seams to T13; T13 must consume them through native InputTrigger/Goal/Todo/runtime APIs rather than centralizing their state.
-- T18 acquires version leases only after all product worktrees are clean and all P0 installed gates are satisfied.
+- T18 acquires version/contract/source-freeze leases only after T01–T17 product/component work is merged, the release worktree is clean, and the final Harness commit is advertised-reachable. Candidate, installed, service, platform, signing and public gates remain separate and OPEN until their exact receipts exist.
