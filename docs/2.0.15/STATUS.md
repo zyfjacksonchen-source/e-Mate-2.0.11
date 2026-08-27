@@ -18,7 +18,7 @@ Status vocabulary: `TODO / INVESTIGATED / CODE_COMPLETE / NARROW_TEST_PASSED / I
 | Production predecessor | `INVESTIGATED` | public production remains 2.0.13; 2.0.14 source/candidate is not called released |
 | 2.0.14 Profile release input | `NARROW_TEST_PASSED` | T01 refreshed the checked-in desired-state snapshot to the exact public 2.0.13 Base v7 bytes and locked the former failure as a regression; no Profile publication was performed |
 | Post-xin Base ABI union | `BLOCKED` | retired C16 was the sole owner of `@deepseek-ai/dsh-launch-environment`; the v7 Base contract still declares it, so strict inventory validation correctly fails until T18 creates and rebinds an honest successor contract |
-| Tencent backlog | `BLOCKED` | requires XLSX/CSV/full copied table/readable snapshot |
+| Tencent backlog | `INVESTIGATED` | connected Tencent Docs read-only discovery resolved two source sheets: `VwnSnZLbANDI` (202x29) and `RnRJdixQpXKW` (200x27); T17 intake is running and no row is closed before evidence mapping |
 | Formal platform/service authorities | `BLOCKED` | real accounts, Worker access, Apple/signing policy and accepted Intel/x64 runner receipts are ticket-local gates |
 
 The release-input and external-authority blockers do not authorize mock completion. They block the affected installed/RC/release statuses, not unrelated read-only audit or narrow source work.
@@ -41,12 +41,12 @@ The effective concurrency cap is `min(6, available executor slots)`. The current
 | T09 | Updater transaction/UX | 5.6 sol max / xhigh | `feat/2.0.15-T09-updater` | T01 artifact contract; T02 installed harness | `worktrees/emate-2.0.15-T09` | `MERGED` | `docs/2.0.15/evidence/T09.json` |
 | T10 | Token activity, managed-search grant and model-capability contract | 5.6 sol max / high | `feat/2.0.15-T10-usage-activity` | T00; T05 search contract | `worktrees/emate-2.0.15-T10` | `MERGED` | `2544fcd`; `docs/2.0.15/evidence/T10.json` |
 | T11 | Home/Account/Token heatmap and Shell token/host seam | 5.6 sol / high | `feat/2.0.15-T11-home-settings` | T06 extraction; T10 schema | `worktrees/emate-2.0.15-T11` | `MERGED` | `d56a8d6`; `docs/2.0.15/evidence/T11.json` |
-| T12 | Message modes and typed image gallery | 5.6 sol max / high | `feat/2.0.15-T12-message-modes` | T05 image receipt; T11 Shell seam | `worktrees/emate-2.0.15-T12` | `TODO` | `docs/2.0.15/evidence/T12.json` |
+| T12 | Message modes and typed image gallery | 5.6 sol max / high | `feat/2.0.15-T12-message-modes` | T05 image receipt; T11 Shell seam | `worktrees/emate-2.0.15-T12` | `MERGED` | `1176913`; independent visible task `01a0436a-de49-7ad1-a576-b3f8d73fb22e`; `docs/2.0.15/evidence/T12.json` |
 | T13 | Native `@`, Settings, navigation and titlebar integration | 5.6 sol max / xhigh | `feat/2.0.15-T13-ui-navigation` | T06; T07; T08 header; T09 Desktop; T11; T12; T15; T16 handoffs | `worktrees/emate-2.0.15-T13` | `TODO` | `docs/2.0.15/evidence/T13.json` |
 | T14 | C03 production icon | 5.6 sol / high | `feat/2.0.15-T14-c03-icon` | T01 cache/input contract | `worktrees/emate-2.0.15-T14` | `MERGED` | `docs/2.0.15/evidence/T14.json` |
-| T15 | Runtime plugins/connectors, Computer Use availability and native image intake | 5.6 sol max / high | `feat/2.0.15-T15-runtime-components` | T03 audit; T05 routing; T10 model-capability contract | `worktrees/emate-2.0.15-T15` | `INVESTIGATED` | `96da539` rejected: prepared-adapter boundary, emitted-import and native coexistence blockers; `docs/2.0.15/evidence/T15.json` pending correction |
+| T15 | Runtime plugins/connectors, Computer Use availability and native image intake | 5.6 sol max / high | `feat/2.0.15-T15-runtime-components` | T03 audit; T05 routing; T10 model-capability contract | `worktrees/emate-2.0.15-T15` | `INVESTIGATED` | visible task `01a0436a-de49-7ad1-a576-b3df10972f5c` owns the rejected `96da539` follow-up and prepared-adapter seam `2ca0b68b42`; evidence pending correction |
 | T16 | Product plugins, GenUI and Glass Composer contract | 5.6 sol max / high | `feat/2.0.15-T16-product-components` | T03 audit; T05 routing; T11 host; T12 gallery contract | `worktrees/emate-2.0.15-T16` | `TODO` | `docs/2.0.15/evidence/T16.json` |
-| T17 | Tencent backlog intake | 5.6 sol / medium | `feat/2.0.15-T17-tencent-backlog` | user export; T03 audit | `worktrees/emate-2.0.15-T17` | `BLOCKED` | `docs/2.0.15/evidence/T17.json` |
+| T17 | Tencent backlog intake | 5.6 sol / medium | `feat/2.0.15-T17-tencent-backlog` | readable Tencent sheets; T03 audit | `worktrees/emate-2.0.15-T17` | `INVESTIGATED` | visible task `01a04376-18e2-7a63-9c79-934597ccae80`; read-only source ids `VwnSnZLbANDI`, `RnRJdixQpXKW`; evidence in progress |
 | T18 | Freeze/RC/release | 5.6 sol max / xhigh | `release/2.0.15` | every P0 `MERGED` + `INSTALLED_E2E_PASSED` | `worktrees/emate-2.0.15-release` | `BLOCKED` | `docs/2.0.15/evidence/T18.json` |
 
 ## Dispatch and merge order

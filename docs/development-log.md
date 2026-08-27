@@ -3119,3 +3119,14 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: `docs/2.0.15/evidence/T07.json`、`T10.json` 与 `T11.json` 只记录源码/本地组件真相；没有真实双账号授权、公共 Worker/schema 回读、真实账户日桶对账、app-directory、installer、installed app、签名、R2/Feed 或公网回读。
 - Remaining blockers: T15 仍在执行；T12/T16/T13 尚未开始；T17 等待腾讯文档导出；T18 独占新 Base、真实账户、双平台安装更新回滚与发布。
 - Next exact action: 完成 T15 原生 Attachment-first/运行插件闭环；从已合入 T11 的 Shell seam 创建 T12，继续遵守 T11 → T12 → T16 → T13 顺序。
+
+## 2026-08-27 · 2.0.15 T12 消息双模式与类型化图库检查点
+
+- Goal checkpoint: T12 已在 T11 之后按 Shell 顺序租约合入 `release/2.0.15`；本条只提升源码与组件真相，不创建候选、安装态或发布回执。
+- Frozen baseline / current HEAD: T12 源提交 `a0a66c983fcd28af3a9cb27bffc66b8aa0f7e07a` 由总控合入为 `1176913`；公开生产仍是精确 2.0.13，Base v7、Harness rc.7、Profile generation 和公网对象均未改变。
+- Inspected native seam: Host 只注册原生 `e-mate.messageFlowMode` schema；Client 只消费 pinned `settingsScope`。`simple` 保留三个 priority `-1` fold shadows，`detailed` 仅释放它们并恢复 pinned priority-0 assistant-step/tool-call/context；Thinking branding 独立。T05 revision 2 receipt 创建 typed gallery node，revision 3 以同一 `call_id` 更新；native Tool-result 未隐藏或改写，旧 DOM gallery mover 不再注册。
+- Decision and forbidden alternatives: 不新增第二 settings、chat store、event conversion、detailed renderer 或 gallery owner；不通过 DOM 扫描/移动节点。app-directory、安装态、new Base、候选和 public 仍归 T18。
+- Verification commands and results: 可见独立任务 `01a0436a-de49-7ad1-a576-b3f8d73fb22e` 复核 Shell build、focused `3 files / 12 tests`、full Shell `15 files / 93 tests`、emitted imports 精确 5 项、CP-13 zero pending、D006 only strict red 与 clean tree。总控随后使用已提交 `T12.json` extension 重放 CP-13，`1812 ms / 0 pending`，并以 `git show --check` 验证提交洁净。
+- Immutable evidence / receipt: `docs/2.0.15/evidence/T12.json` 自身是 committed smoke extension；没有 complete Profile、installer、installed app、签名、R2/Feed 或公网写入。
+- Remaining blockers: T15 prepared-adapter/Attachment-first 仍在独立任务收口；T16 尚未执行；T17 已取得两份只读腾讯源表并开始导入；D006 必须由 T18 新 Base identity/rebind 关闭。
+- Next exact action: 从 `1176913` 创建 T16 独立 worktree/可见任务；T15 并行完成后，按 T16 → T13 → T18 顺序继续。
