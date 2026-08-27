@@ -353,7 +353,7 @@ describe('repository release boundary', () => {
 
   it('requires the Base lane until the accepted Profile matches the candidate Base', () => {
     const path = 'packages/dsh/profile/plugins/emate-shell/src/client/sidebar.tsx'
-    assert.equal(classifyChangedPaths([path], { root }).lane, 'base')
+    assert.equal(classifyChangedPaths([path], { root }).lane, 'plugin-only')
     assert.equal(classifyChangedPaths([path], { root, acceptedProfileCompatible: false }).lane, 'base')
     assert.equal(classifyChangedPaths([path], { root, acceptedProfileCompatible: true }).lane, 'plugin-only')
     assert.equal(classifyChangedPaths([

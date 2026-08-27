@@ -463,6 +463,18 @@ describe('detached macOS update replacement', () => {
     expect(() => readMacUpdateRequestEnvelope(legacy.requestPath)).toThrow('request envelope is invalid')
   })
 
+  it('acknowledges the 2.0.12 helper before full bundle validation', () => {
+    const source = readFileSync(new URL('../src/mac-update-installer.ts', import.meta.url), 'utf8')
+    const helper = source.indexOf('async function runLegacyMacUpdateHelper')
+    const ready = source.indexOf('writeMacUpdateDurableJson(request.helperReadyPath', helper)
+    const swap = source.indexOf('await performLegacyMacUpdateSwap(request)', ready)
+
+    expect(helper).toBeGreaterThanOrEqual(0)
+    expect(ready).toBeGreaterThan(helper)
+    expect(swap).toBeGreaterThan(ready)
+    expect(source.slice(helper, ready)).not.toContain('validateBundle(')
+  })
+
   it('keeps bound update requests on the modern protocol', () => {
     const root = mkdtempSync(join(tmpdir(), 'e-mate-bound-helper-request-'))
     temporaryRoots.push(root)

@@ -3065,3 +3065,31 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 外部 publication action PR `#9` 已合入 reviewed SHA `cd7d223692b51e4e7a53db5759e1c2a9811febd0`，Node 24 全套 `83/83` 通过；它固定 2.0.14 制品并只接受上述 final 2.0.13 legacy identity。生产 R2、signed/legacy pointers、desired states、官网和安装态均未写入，2.0.13 公开 bytes 保持不变。
 - Remaining blockers: 主仓精确 pin 已更新但仍需复测并合入 protected main attempt-1；公开 2.0.12→候选和 2.0.13→候选的真实 macOS 安装/回滚；Windows正式安装态；最后按 immutable→signed→legacy→Profile→官网顺序公开回读。
 - Next exact action: 先让本地 bridge、现代路径和 release contracts 全部通过，再提交第二个候选；不得在真实前驱更新通过前推进任一生产指针。
+
+## 2026-08-27 · 2.0.14 macOS 2.0.12 helper-ready 实机超时根因修复
+
+- Goal checkpoint: 首个 2.0.14 候选已完成受保护主线 attempt-1 构建，但在任何生产指针写入前，被精确 2.0.12 隔离安装态更新验收否决；本条只修旧协议握手时序，不改变现代 2.0.13 协议或其他产品能力。
+- Frozen baseline / current HEAD: 修复分支基于 authoritative `public-2011/main@5f8c54db7b76276c14f1938c970df155f4e6fd80`；被否决候选来自 CI `33048904190`，其 DMG 为 `398556894` bytes / SHA-256 `8eaa6d8feafb531c609985334a9ebea91af0c4887c34fddd2574a7f4631c04cf`，永久不得发布。
+- Binding documents read: 唯一主 Goal、根 `AGENTS.md`、ponytail skill、2.0.14 切片、target contract、上一条协议桥记录、精确 2.0.12 与当前 helper/swap 实现及真实隔离安装回执。
+- Inspected native seam: 精确 2.0.12 父进程只等待 `helper-ready` 10 秒；首个桥接实现却在写 ready 前对约 400MB staged App 执行完整 metadata、双架构 native closure 和 deep codesign 校验。完整安全校验已经是 `performLegacyMacUpdateSwap()` 的第一步，并早于任何 rename，因此 pre-ready 校验是重复工作而非安全边界。
+- Experiment or why unnecessary: 精确 2.0.12 App 通过其已发布 `app.asar/lib/mac-update-installer.js` 生成旧 15 字段请求并启动首个候选 Helper；候选正确识别 `legacy-2.0.12`，但父进程在 10 秒内未收到 ready，事务 `d2f5b760-57e3-4e65-a5af-0f83fa93c50d` 终止为 `failed-before-change`，旧 App 与用户 sentinel 均未损坏。源码与实机时序共同锁定重复深校验为唯一根因。
+- Decision and forbidden alternatives: 删除 ready 前的单次重复 `validateBundle()`；仍校验当前 Helper 确实从 exact staged App 运行，并在 shutdown/parent-exit 后、任何文件替换前执行既有完整 staged/current bundle 验证。禁止放宽 2.0.12 的 10 秒合同、跳过 swap 前安全校验、重用被否决 DMG、修改 app.asar 或以手工包冒充 protected-main 字节。
+- Changed scope: `desktop/e-mate-desktop/src/mac-update-installer.ts` 删除一行重复校验；同一测试文件新增一个时序回归，锁定旧 Helper 必须先 durable ACK、再进入完整 swap 校验；本 append-only 记录。无现代 updater、Windows、Profile、Harness、模型、R2、官网或用户数据变更。
+- Verification commands and results: Node 24 聚焦 `tests/mac-update-installer.spec.ts` 为 `91/91` 通过；现有旧协议 swap 成功/回滚测试继续证明完整 bundle 校验早于 rename。新的 protected-main 候选与双前驱安装态仍待完成。
+- Immutable evidence / receipt: 公开 2.0.12 DMG 为 `390527181` bytes / `d2cb459d2e8648213e0b38aa6e210c1a727937be77993b2493e2a7848d5d3b2e`；最终 2.0.13 DMG 为 `398564646` bytes / `b93c13a635f20ac539dc14df094b12f00308d3f1e3e7003432cb25adaa8363c6`。失败 coordinator `33050810288` 未通过 admission，生产 signed/legacy/Profile/官网指针均未改变。
+- Remaining blockers: 本最小修复 PR、protected-main attempt-1 新候选；精确 2.0.12→2.0.14 成功与故障回滚、精确 2.0.13→2.0.14 现代事务、Windows 2.0.13→2.0.14、Profile publication 故障根因及最终 Cloudflare/官网公开回读仍 OPEN。
+- Next exact action: 提交该两文件最小修复并通过受保护 CI；只下载新 exact DMG，依次完成 2.0.12 成功/回滚与 2.0.13 现代路径实测，任何一项失败都不得发布。
+
+## 2026-08-27 · 2.0.14 Profile 当前态快照刷新
+
+- Goal checkpoint: 首个 release coordinator 的 Profile 子任务在签名和任何 R2 写入前失败关闭；本条只让仓库的只读生产前驱快照与已经正式上线的 2.0.13 对齐，不改组件、组合算法或生产对象。
+- Frozen baseline / current HEAD: 失败 Profile run `33050840728` 绑定 `public-2011/main@5f8c54db7b76276c14f1938c970df155f4e6fd80`；仓库快照捕获于 2026-08-25，外层候选虽为 2.0.13/Base v7，三个内嵌 desired state 实际仍是 2.0.12/Base v6。
+- Binding documents read: 根 `AGENTS.md` 的 Cloudflare plugin-only R2 边界、Cloudflare platform skill、target contract、2.0.14 切片、Profile publisher/workflow 及 2.0.13 production released 精确回执。
+- Inspected native seam: `profile-release.yml` 和 CI 都只消费 `artifacts/release/profile-current-snapshot.json`；publisher 要求其 candidate release/base 与当前源码完全一致，并使用内嵌的三个生产字节做签名 successor/CAS 前驱。没有第二个动态读取或容错路径。
+- Experiment or why unnecessary: Cloudflare 插件只读列出 `desktop/profile/desired-state/` 三对象，得到 bytes/SHA-256 分别为 `10579/ef845777…a462`、`10567/374318de…bd9d`、`10503/beef5d1d…b6c1`；从同一公开 R2 origin 下载的字节逐项匹配这些插件元数据，且三份均为 2.0.13、sequence 1、source `6f63b523…`、Base v7、15 组件。
+- Decision and forbidden alternatives: 复用既有 `createProfileCurrentSnapshot()` 机械生成 candidate 2.0.14/Base v7 的闭合三目标快照；不让 CI 联网读生产、不绕过 exact identity、不把旧 2.0.12 bytes 伪装成当前态、不在本步骤写 R2。
+- Changed scope: 只机械刷新 `artifacts/release/profile-current-snapshot.json` 并追加本记录；无产品、Profile component、签名键、workflow、R2、desired state、官网或用户数据变更。
+- Verification commands and results: 新快照 `43255` bytes / SHA-256 body identity `bdbcd39f1e04e60118f4d93cb25e4c9b7d887c1d02c2a6ba9917069c8ecd51bc`；现有 materializer 成功输出三目标 `10579/10567/10503` bytes，Profile publication tests `2/2` 通过。PR #86 首次 CI 进一步证明旧 impact 测试把仓库快照“不兼容”写成隐含常量；默认断言改为当前真实的 `plugin-only`，显式 `acceptedProfileCompatible:false` 的 Base 负例保持不变。
+- Immutable evidence / receipt: Cloudflare 插件返回三对象均为 `application/json`、`no-store`，generation 分别为 `8f13e65c…3822`、`569c5fe5…c72e`、`c363cee9…deaf`；Profile preparation 失败 run `33050840728` 的精确错误为 `Profile current desired-state snapshot is invalid`，PR CI `33053688484` 作为旧断言负例保留，二者均没有 publication artifact 或线上写入。
+- Remaining blockers: 本快照随 helper-ready 最小 PR 合入并通过 protected-main CI；新的 Profile preparation 必须从 refreshed snapshot 成功生成但仍不得先于双前驱/双平台安装态验收写生产。
+- Next exact action: 复核快照只含上述精确 2.0.13 公网字节，与 helper-ready 修复一并提交；新候选安装态全绿后再重跑唯一 coordinator。

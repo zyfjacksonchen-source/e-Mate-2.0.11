@@ -2157,7 +2157,6 @@ async function runLegacyMacUpdateHelper(request: LegacyMacUpdateRequest): Promis
   if (helperApp === undefined || realDirectory(helperApp) !== realDirectory(request.stagedApp)) {
     throw new Error('legacy macOS update helper is not running from the staged application')
   }
-  validateBundle(helperApp, request.targetVersion)
   let swapStarted = false
   try {
     writeMacUpdateDurableJson(request.helperReadyPath, {
