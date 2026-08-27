@@ -8,14 +8,14 @@ Status vocabulary: `TODO / INVESTIGATED / CODE_COMPLETE / NARROW_TEST_PASSED / I
 | --- | --- | --- |
 | Workpack integrity | `NARROW_TEST_PASSED` | ZIP and every manifest entry verified |
 | Incremental work-order intake | `NARROW_TEST_PASSED` | all three 2026-08-27 inputs hash-recorded and reconciled against current source in `INCREMENTAL-WORK-ORDERS.md` |
-| Incremental target-contract delta | `CODE_COMPLETE` | accepted Image generation/intake, InputTrigger, Search and UI clauses are landed; `check:target` passes, while `check:release-boundary` reaches only the separately recorded D006 Base ABI union blocker; no package version changes |
+| Incremental target-contract delta | `NARROW_TEST_PASSED` | accepted Image generation/intake, InputTrigger, Search and UI clauses are merged; `check:target` passes, while `check:release-boundary` reaches only the separately recorded D006 Base ABI union blocker; no package version changes |
 | Canonical source | `NARROW_TEST_PASSED` | clean current `origin/main` = `5f8c54d…` |
 | Baseline difference | `NARROW_TEST_PASSED` | recorded in `BASELINE.md`; old SHA/path assertions are not silently reused |
 | Base/Harness/Desktop pins | `NARROW_TEST_PASSED` | current contract and gitlink agree |
 | Owner/path partition | `NARROW_TEST_PASSED` | fail-closed scopes and sequential leases in `DECISIONS.md` |
 | Release/worktree topology | `NARROW_TEST_PASSED` | release and T00 worktrees exist; later worktrees are created only at dispatch |
 | Production predecessor | `INVESTIGATED` | public production remains 2.0.13; 2.0.14 source/candidate is not called released |
-| 2.0.14 Profile release input | `BLOCKED` | checked-in current snapshot is stale; run `33050840728` failed before publication |
+| 2.0.14 Profile release input | `NARROW_TEST_PASSED` | T01 refreshed the checked-in desired-state snapshot to the exact public 2.0.13 Base v7 bytes and locked the former failure as a regression; no Profile publication was performed |
 | Post-xin Base ABI union | `BLOCKED` | retired C16 was the sole owner of `@deepseek-ai/dsh-launch-environment`; the v7 Base contract still declares it, so strict inventory validation correctly fails until T18 creates and rebinds an honest successor contract |
 | Tencent backlog | `BLOCKED` | requires XLSX/CSV/full copied table/readable snapshot |
 | Formal platform/service authorities | `BLOCKED` | real accounts, Worker access, Apple/signing policy and accepted Intel/x64 runner receipts are ticket-local gates |
@@ -29,8 +29,8 @@ The effective concurrency cap is `min(6, available executor slots)`. The current
 | ID | Topic | Model / effort | Branch | Dependencies | Planned worktree | State | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | T00 | Program control, baseline, status | 5.6 sol max / xhigh | `feat/2.0.15-T00-program-control` | none | `worktrees/emate-2.0.15-T00` | `MERGED` | `docs/2.0.15/evidence/T00.json` |
-| T01 | CI/build/release fast lanes | 5.6 sol max / xhigh | `feat/2.0.15-T01-ci-fast-lanes` | T00 | `worktrees/emate-2.0.15-T01` | `TODO` | `docs/2.0.15/evidence/T01.json` |
-| T02 | Regression wall and smoke harness | 5.6 sol max / xhigh | `feat/2.0.15-T02-regression-wall` | T00 | `worktrees/emate-2.0.15-T02` | `TODO` | `docs/2.0.15/evidence/T02.json` |
+| T01 | CI/build/release fast lanes | 5.6 sol max / xhigh | `feat/2.0.15-T01-ci-fast-lanes` | T00 | `worktrees/emate-2.0.15-T01` | `MERGED` | `e7822c22281373401e84bef9902722699d7d6fdd`; post-T04 fixture repair `9b4d935`; `docs/2.0.15/evidence/T01.json` |
+| T02 | Regression wall and smoke harness | 5.6 sol max / xhigh | `feat/2.0.15-T02-regression-wall` | T00 | `worktrees/emate-2.0.15-T02` | `MERGED` | `2c352cf`; `docs/2.0.15/evidence/T02.json` |
 | T03 | System/component audit | 5.6 sol max / high | `feat/2.0.15-T03-system-audit` | T00 | `worktrees/emate-2.0.15-T03` | `MERGED` | `d5c5ea24b36010cb3f497356ed955219fb40decc`; `docs/2.0.15/evidence/T03.json` |
 | T04 | Remove xin-assistant | 5.6 sol / high | `feat/2.0.15-T04-remove-xin-assistant` | T03 inventory snapshot | `worktrees/emate-2.0.15-T04` | `MERGED` | `116dadb3cbe10ca9aab719821f17acddb40fcc2e`; `docs/2.0.15/evidence/T04.json` |
 | T05 | Native Tool/Image/Search visibility and routing | 5.6 sol max / xhigh | `feat/2.0.15-T05-tool-routing` | T00; Wave-1 owner contracts; incremental contract delta | `worktrees/emate-2.0.15-T05` | `TODO` | `docs/2.0.15/evidence/T05.json` |

@@ -3065,3 +3065,16 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: 外部 publication action PR `#9` 已合入 reviewed SHA `cd7d223692b51e4e7a53db5759e1c2a9811febd0`，Node 24 全套 `83/83` 通过；它固定 2.0.14 制品并只接受上述 final 2.0.13 legacy identity。生产 R2、signed/legacy pointers、desired states、官网和安装态均未写入，2.0.13 公开 bytes 保持不变。
 - Remaining blockers: 主仓精确 pin 已更新但仍需复测并合入 protected main attempt-1；公开 2.0.12→候选和 2.0.13→候选的真实 macOS 安装/回滚；Windows正式安装态；最后按 immutable→signed→legacy→Profile→官网顺序公开回读。
 - Next exact action: 先让本地 bridge、现代路径和 release contracts 全部通过，再提交第二个候选；不得在真实前驱更新通过前推进任一生产指针。
+
+## 2026-08-27 · 2.0.15 Wave 1 与增量工单合并检查点
+
+- Goal checkpoint: T00 控制下的 T03/T04 已完成后，T01 CI Lane、T02 回归墙以及三份 2026-08-27 增量输入已并入 `release/2.0.15`；本条只记录源码、Owner、测试和依赖真相，不创建候选、安装态或发布回执。
+- Frozen baseline / current HEAD: canonical source 仍从 `origin/main@5f8c54db7b76276c14f1938c970df155f4e6fd80` 起步；本检查点产品提交为 `9b4d935`，公开生产仍是精确 2.0.13。Harness `b2b1650b01f0ee88d81837a9b5c050f9f763f606`、Desktop Base v7 和公开产品字节未改变。
+- Binding documents read: 根 `AGENTS.md`、ponytail skill、`docs/target-contract.md`、T00 的 BASELINE/STATUS/DECISIONS、T01/T02 工单，以及 SHA-256 为 `f43129bc…c152`、`ba3937d3…07a`、`79fb2379…dc6` 的三份增量输入。
+- Inspected native seam: T01 继续以唯一 `change-impact` classifier 组织 PR Fast / RC / Audit，并刷新精确公开 2.0.13 Base v7 desired-state snapshot；T02 以一个 Node manifest/runner 表达 component、app-dir、installed 三层。Vision 当前 paste capture 会阻断原生 Composer、复制到工作区并序列化绝对路径文本，P0 因而归 T15 原生 Attachment-first 输入边界，不归 OCR，也不新建与 Skill Hub 冲突的 T7。
+- Decision and forbidden alternatives: 图片 paste/drop/upload 先进入 Harness Attachment/CAS 和 durable image block；能力未知时保持 native，确认 text-only 只允许在 LLM wire 转换。T10 先冻结 model capability，T15 再实现；T02/T18 分别承担源码墙和安装态。禁止第二 Attachment store、路径文本、Skill/CDP fallback、DOM/模型名猜测和自动切模。D009 只在同一命名验收经过至少两次不同源码修复仍失败时启用应用内独立 ChatGPT Work 会诊；不得转网页版，结论仍须由原 Owner 本地复验。
+- Changed scope: T01 合并提交 `e7822c2` 与 post-T04 fixture 修复 `9b4d935`；T02 合并提交 `2c352cf`；目标合同/增量计划/Owner 决策提交 `a03cfab`，应用内会诊修订 `ea458a0`。没有版本号、Base contract、Profile inventory、产品发布或线上对象变化。
+- Verification commands and results: `check:target` 通过；T01 合并态指定回归 `5/5`、约 `20.386s`，发布拓扑 `3/3`；T02 runner 自测在合并树 `10/10`。T02 独立构建环境的 component wall 为 `40.999s`，app-dir CP-01 为 `50.519s` 且使用真实 Renderer ACK；installed 未运行。合并树重复 component wall 时因本地 worktree 尚无生成的 Harness `lib/` 测试输入停在 CP-02，未把该环境失败写成产品通过。`check:release-boundary` 继续以唯一 `runtime imports must equal the component-declared Base ABI union` 错误失败。
+- Immutable evidence / receipt: `docs/2.0.15/evidence/T01.json` 与 `T02.json` 记录实际命令、耗时、pending seams 和未达到阶段；D009 状态为 `not_invoked`。没有 protected-main CI、候选、installer、installed app、签名、R2/Feed 或公网写入。
+- Remaining blockers: D006 要求 T18 创建诚实的新 Base contract 身份并重绑 15 个 retained components；T05 及其后续依赖尚未实现；T17 仍等待真实腾讯文档导出；真实账号、服务、双平台安装、更新、回滚和公开字节回读仍 OPEN。
+- Next exact action: 从当前 release tip 创建唯一 T05 分支/worktree，先冻结 native Tool/Image/Search visibility 与 receipt contract；后续工单只按已记录依赖和 Shell 顺序放行。
