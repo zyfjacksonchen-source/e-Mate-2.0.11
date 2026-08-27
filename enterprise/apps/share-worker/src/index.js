@@ -17,7 +17,7 @@ function json(value, status = 200) {
 }
 
 function failure(status, code) {
-  return json({ error: { code } }, status)
+  return json({ schema_version: 1, error: { code } }, status)
 }
 
 function configured(env) {
@@ -188,6 +188,12 @@ async function liveObject(env, id, body) {
   if (object === null) return { response: failure(404, 'SHARE_NOT_FOUND') }
   if (expired(object)) {
     await env.SHARES.delete(key)
+    const owner = object.customMetadata?.owner_sha256
+    const sessionSha256 = object.customMetadata?.session_sha256
+    if (typeof owner === 'string' && SHA256.test(owner)
+      && typeof sessionSha256 === 'string' && SHA256.test(sessionSha256)) {
+      await env.SHARES.delete(ownerKey(owner, sessionSha256, id))
+    }
     return { response: failure(410, 'SHARE_EXPIRED') }
   }
   return { key, object }
@@ -261,15 +267,16 @@ async function listShares(request, env, config, fetchImplementation, sessionSha2
   })
 }
 
-async function revokeShare(request, env, config, fetchImplementation, id) {
+async function revokeShare(request, env, config, fetchImplementation, id, sessionSha256) {
   const auth = await authenticate(request, env, config.validationUrl, fetchImplementation)
   if (auth.response !== undefined) return auth.response
   const key = archiveKey(id)
   const object = await env.SHARES.head(key)
   if (object === null) return json({ schema_version: 1, revoked: true })
-  if (object.customMetadata?.owner_sha256 !== auth.owner) return failure(403, 'SHARE_OWNER_REQUIRED')
-  const sessionSha256 = object.customMetadata?.session_sha256
-  if (typeof sessionSha256 !== 'string' || !SHA256.test(sessionSha256)) return failure(500, 'INVALID_SHARE_METADATA')
+  if (object.customMetadata?.owner_sha256 !== auth.owner
+    || object.customMetadata?.session_sha256 !== sessionSha256) {
+    return failure(403, 'SHARE_OWNER_REQUIRED')
+  }
   await env.SHARES.delete(key)
   await env.SHARES.delete(ownerKey(auth.owner, sessionSha256, id))
   return json({ schema_version: 1, revoked: true })
@@ -306,7 +313,7 @@ export async function handleRequest(request, env, fetchImplementation = fetch) {
   const config = configured(env)
   const url = new URL(request.url)
   if (request.method === 'GET' && url.pathname === '/healthz' && url.search === '') {
-    return json({ schema_version: 1, ready: true })
+    return json({ schema_version: 1, service: 'emate-share', version: 1, ready: true })
   }
   if (request.method === 'POST' && url.pathname === '/v1/shares' && url.search === '') {
     return createShare(request, env, config, fetchImplementation)
@@ -320,7 +327,11 @@ export async function handleRequest(request, env, fetchImplementation = fetch) {
   }
   const revoke = /^\/v1\/shares\/([A-Za-z0-9_-]{32})$/u.exec(url.pathname)
   if (request.method === 'DELETE' && url.search === '' && revoke !== null && SHARE_ID.test(revoke[1])) {
-    return revokeShare(request, env, config, fetchImplementation, revoke[1])
+    const sessionSha256 = request.headers.get('x-emate-session-sha256')
+    if (sessionSha256 !== null && SHA256.test(sessionSha256)) {
+      return revokeShare(request, env, config, fetchImplementation, revoke[1], sessionSha256)
+    }
+    return failure(400, 'INVALID_SHARE_SESSION')
   }
   const shared = /^\/s\/([A-Za-z0-9_-]{32})(\/archive\.zip)?$/u.exec(url.pathname)
   if ((request.method === 'GET' || request.method === 'HEAD') && url.search === ''

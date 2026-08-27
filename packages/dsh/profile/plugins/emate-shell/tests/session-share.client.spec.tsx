@@ -13,17 +13,20 @@ afterEach(cleanup)
 describe('session share plugin', () => {
   it('creates, copies, and revokes a real online link through the Host RPC', async () => {
     const shareId = 'A'.repeat(32)
-    const callShare = vi.fn(async (endpoint: string) => endpoint === 'list'
-      ? { ok: true, value: { schema_version: 1, shares: [] } }
+    const callShare = vi.fn(async (endpoint: string) => endpoint === 'status'
+      ? { ok: true, value: { schema_version: 1, stage: 'preparing', service_version: 1, ready: true } }
+      : endpoint === 'list'
+      ? { ok: true, value: { schema_version: 1, stage: 'listing', shares: [] } }
       : endpoint === 'create' ? {
         ok: true,
         value: {
           schema_version: 1,
+          stage: 'created',
           share_id: shareId,
           public_url: `https://share.example/s/${shareId}`,
           expires_at: '2030-08-21T00:00:00.000Z',
         },
-      } : { ok: true, value: { schema_version: 1, revoked: true } })
+      } : { ok: true, value: { schema_version: 1, stage: 'revoking', revoked: true } })
     const writeText = vi.fn(async () => {})
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
     const requestDownload = vi.fn(async () => {})
@@ -47,7 +50,10 @@ describe('session share plugin', () => {
     expect(screen.getByRole('status').textContent).toBe('链接已复制。')
 
     fireEvent.click(screen.getByRole('button', { name: '撤销链接 1' }))
-    await waitFor(() => { expect(callShare).toHaveBeenCalledWith('revoke', { share_id: shareId }) })
+    await waitFor(() => { expect(callShare).toHaveBeenCalledWith('revoke', {
+      share_id: shareId,
+      session_id: 'session-207',
+    }) })
     expect((await screen.findByRole('status')).textContent).toBe('公开链接已撤销。')
     expect(screen.getByRole('button', { name: '创建公开链接' })).toBeTruthy()
   })
@@ -59,6 +65,7 @@ describe('session share plugin', () => {
         ok: true,
         value: {
           schema_version: 1,
+          stage: 'listing',
           shares: [{
             share_id: shareId,
             public_url: `https://share.example/s/${shareId}`,
@@ -66,7 +73,7 @@ describe('session share plugin', () => {
           }],
         },
       }
-      : { ok: true, value: { schema_version: 1, revoked: true } })
+      : { ok: true, value: { schema_version: 1, stage: 'revoking', revoked: true } })
     render(<SessionShareAction
       sessionId="session-restarted"
       callShare={callShare}
@@ -79,7 +86,10 @@ describe('session share plugin', () => {
     await screen.findByRole('link', { name: `https://share.example/s/${shareId}` })
     expect(callShare).toHaveBeenCalledWith('list', { session_id: 'session-restarted' })
     fireEvent.click(screen.getByRole('button', { name: '撤销链接 1' }))
-    await waitFor(() => { expect(callShare).toHaveBeenCalledWith('revoke', { share_id: shareId }) })
+    await waitFor(() => { expect(callShare).toHaveBeenCalledWith('revoke', {
+      share_id: shareId,
+      session_id: 'session-restarted',
+    }) })
     expect(await screen.findByRole('button', { name: '创建公开链接' })).toBeTruthy()
   })
 
@@ -87,12 +97,28 @@ describe('session share plugin', () => {
     const shareId = 'U'.repeat(32)
     let listCalls = 0
     const callShare = vi.fn(async (endpoint: string) => {
-      if (endpoint === 'create') return { ok: false, error: { message: '创建响应中断。' } }
+      if (endpoint === 'status') {
+        return { ok: true, value: { schema_version: 1, stage: 'preparing', service_version: 1, ready: true } }
+      }
+      if (endpoint === 'create') {
+        return {
+          ok: false,
+          error: {
+            schema_version: 1,
+            stage: 'failed',
+            operation: 'create',
+            failed_at: 'uploading',
+            code: 'request-timeout',
+            message: '在线分享请求超时，请稍后重试。',
+          },
+        }
+      }
       listCalls += 1
       return {
         ok: true,
         value: {
           schema_version: 1,
+          stage: 'listing',
           shares: listCalls === 1 ? [] : [{
             share_id: shareId,
             public_url: `https://share.example/s/${shareId}`,
@@ -113,6 +139,51 @@ describe('session share plugin', () => {
     fireEvent.click(await screen.findByRole('button', { name: '创建公开链接' }))
     await screen.findByRole('link', { name: `https://share.example/s/${shareId}` })
     expect(screen.getByRole('status').textContent).toBe('已从服务恢复公开链接。')
+  })
+
+  it('shows preparing/uploading progress and maps typed failures without exposing raw text', async () => {
+    let releaseStatus: (() => void) | undefined
+    let releaseCreate: (() => void) | undefined
+    const callShare = vi.fn((endpoint: string) => {
+      if (endpoint === 'status') return new Promise(resolve => {
+        releaseStatus = () => { resolve({
+          ok: true,
+          value: { schema_version: 1, stage: 'preparing', service_version: 1, ready: true },
+        }) }
+      })
+      if (endpoint === 'create') return new Promise(resolve => {
+        releaseCreate = () => { resolve({
+          ok: false,
+          error: {
+            schema_version: 1,
+            stage: 'failed',
+            operation: 'create',
+            failed_at: 'uploading',
+            code: 'archive-too-large',
+            message: 'raw upstream sensitive detail',
+          },
+        }) }
+      })
+      return Promise.resolve({ ok: true, value: { schema_version: 1, stage: 'listing', shares: [] } })
+    })
+    render(<SessionShareAction
+      sessionId="session-staged"
+      callShare={callShare}
+      useSessionLogDownload={selector => selector({ bySession: {} })}
+      requestDownload={vi.fn()}
+      dismissDownload={vi.fn()}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: '分享当前任务' }))
+    fireEvent.click(await screen.findByRole('button', { name: '创建公开链接' }))
+    expect(screen.getByText('正在检查在线分享服务…')).toBeTruthy()
+    releaseStatus?.()
+    expect(await screen.findByText('正在准备并上传任务归档…')).toBeTruthy()
+    releaseCreate?.()
+
+    expect((await screen.findByRole('alert')).textContent).toBe('任务归档超过在线分享大小限制，请改用本地导出。')
+    expect(screen.queryByText(/raw upstream|sensitive detail/u)).toBeNull()
+    expect(screen.getByRole('button', { name: '重试创建公开链接' })).toBeTruthy()
   })
 
   it('keeps native Session ZIP export as a separate local backup action', () => {
@@ -167,7 +238,7 @@ describe('session share plugin', () => {
     expect(manifest.dsh.client.inject).toContain('@deepseek-ai/dsh-session-log-export')
     expect(component).toContain("callShare('create', { session_id: requestedSession })")
     expect(component).toContain("callShare('list', { session_id: requestedSession })")
-    expect(component).toContain("callShare('revoke', { share_id: share.share_id })")
+    expect(component).toContain("callShare('revoke', {")
     expect(component).not.toMatch(/\b(?:fetch|WebSocket|EventSource|createSnapshotStore|defineStore)\s*\(/u)
   })
 

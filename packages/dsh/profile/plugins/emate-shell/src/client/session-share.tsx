@@ -33,6 +33,20 @@ interface ShareLink {
   readonly expires_at: string
 }
 
+type ShareStage = 'idle' | 'preparing' | 'uploading' | 'created' | 'listing' | 'revoking' | 'failed'
+
+const ERROR_MESSAGES: Record<string, string> = {
+  'bad-request': '在线分享请求无效，请刷新后重试。',
+  'authentication-required': '登录状态已失效，请重新登录后再试。',
+  'archive-unavailable': '无法准备当前任务归档，请先改用本地导出检查任务数据。',
+  'archive-too-large': '任务归档超过在线分享大小限制，请改用本地导出。',
+  'owner-required': '当前账号或任务无权管理这个公开链接。',
+  'request-timeout': '在线分享请求超时，请稍后重试。',
+  'service-unavailable': '在线分享服务暂时不可用，请稍后重试。',
+  'service-rejected': '在线分享服务拒绝了请求，请稍后重试。',
+  'invalid-response': '分享服务返回了无效响应。',
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -43,9 +57,21 @@ function responseValue(result: unknown): unknown {
   const envelope = record(result)
   if (envelope?.ok !== true) {
     const error = record(envelope?.error)
-    throw new Error(typeof error?.message === 'string' ? error.message : '在线分享请求失败。')
+    const message = error?.schema_version === 1 && error.stage === 'failed' && typeof error.code === 'string'
+      ? ERROR_MESSAGES[error.code]
+      : undefined
+    throw new Error(message ?? '在线分享请求失败。')
   }
   return envelope.value
+}
+
+function statusValue(result: unknown): boolean {
+  const value = record(responseValue(result))
+  if (value?.schema_version !== 1 || value.stage !== 'preparing' || value.service_version !== 1
+    || typeof value.ready !== 'boolean') {
+    throw new Error(ERROR_MESSAGES['invalid-response'])
+  }
+  return value.ready
 }
 
 function shareValue(value: unknown): ShareLink {
@@ -69,13 +95,14 @@ function shareValue(value: unknown): ShareLink {
 
 function shareLink(result: unknown): ShareLink {
   const value = record(responseValue(result))
-  if (value?.schema_version !== 1) throw new Error('分享服务返回了无效链接。')
+  if (value?.schema_version !== 1 || value.stage !== 'created') throw new Error('分享服务返回了无效链接。')
   return shareValue(value)
 }
 
 function shareLinks(result: unknown): ShareLink[] {
   const value = record(responseValue(result))
-  if (value?.schema_version !== 1 || !Array.isArray(value.shares) || value.shares.length > 50) {
+  if (value?.schema_version !== 1 || value.stage !== 'listing'
+    || !Array.isArray(value.shares) || value.shares.length > 50) {
     throw new Error('分享服务返回了无效链接列表。')
   }
   const shares = value.shares.map(shareValue)
@@ -94,64 +121,76 @@ export function SessionShareAction({
   const operation = useRef(0)
   const [open, setOpen] = useState(false)
   const [shares, setShares] = useState<ShareLink[]>([])
-  const [busy, setBusy] = useState<string | null>(null)
+  const [stage, setStage] = useState<ShareStage>('idle')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const pending = ['preparing', 'uploading', 'listing', 'revoking'].includes(stage)
 
   useEffect(() => {
     operation.current += 1
     currentSession.current = sessionId
     setOpen(false)
     setShares([])
-    setBusy(null)
+    setStage('idle')
     setError('')
     setNotice('')
   }, [sessionId])
 
   const refresh = async (requestedSession: string) => {
     const currentOperation = ++operation.current
-    setBusy('list')
+    setStage('listing')
     setError('')
     setNotice('')
     try {
       const listed = shareLinks(await callShare('list', { session_id: requestedSession }))
       if (operation.current !== currentOperation || currentSession.current !== requestedSession) return
       setShares(listed)
+      setStage(listed.length > 0 ? 'created' : 'idle')
     } catch (failure) {
       if (operation.current === currentOperation && currentSession.current === requestedSession) {
+        setStage('failed')
         setError(failure instanceof Error ? failure.message : '无法读取在线分享，请稍后重试。')
       }
-    } finally {
-      if (operation.current === currentOperation && currentSession.current === requestedSession) setBusy(null)
     }
   }
 
   const create = async () => {
-    if (busy !== null || sessionId === undefined) return
+    if (pending || sessionId === undefined) return
     const requestedSession = sessionId
     const currentOperation = ++operation.current
-    setBusy('create')
+    setStage('preparing')
     setError('')
     setNotice('')
     try {
+      if (!statusValue(await callShare('status', {}))) throw new Error(ERROR_MESSAGES['service-unavailable'])
+      if (operation.current !== currentOperation || currentSession.current !== requestedSession) return
+      setStage('uploading')
       const created = shareLink(await callShare('create', { session_id: requestedSession }))
       if (operation.current !== currentOperation || currentSession.current !== requestedSession) return
       setShares([created])
+      setStage('created')
       setNotice('公开链接已创建。')
     } catch (failure) {
       if (operation.current !== currentOperation || currentSession.current !== requestedSession) return
       const message = failure instanceof Error ? failure.message : '在线分享请求失败。'
       try {
+        setStage('listing')
         const recovered = shareLinks(await callShare('list', { session_id: requestedSession }))
         if (operation.current !== currentOperation || currentSession.current !== requestedSession) return
         setShares(recovered)
-        if (recovered.length > 0) setNotice('已从服务恢复公开链接。')
-        else setError(message)
+        if (recovered.length > 0) {
+          setStage('created')
+          setNotice('已从服务恢复公开链接。')
+        } else {
+          setStage('failed')
+          setError(message)
+        }
       } catch {
-        if (operation.current === currentOperation && currentSession.current === requestedSession) setError(message)
+        if (operation.current === currentOperation && currentSession.current === requestedSession) {
+          setStage('failed')
+          setError(message)
+        }
       }
-    } finally {
-      if (operation.current === currentOperation && currentSession.current === requestedSession) setBusy(null)
     }
   }
 
@@ -161,24 +200,30 @@ export function SessionShareAction({
   }
 
   const revoke = async (share: ShareLink) => {
-    if (busy !== null || sessionId === undefined) return
+    if (pending || sessionId === undefined) return
     const requestedSession = sessionId
     const currentOperation = ++operation.current
-    setBusy(`revoke:${share.share_id}`)
+    setStage('revoking')
     setError('')
     setNotice('')
     try {
-      const value = record(responseValue(await callShare('revoke', { share_id: share.share_id })))
-      if (value?.schema_version !== 1 || value.revoked !== true) throw new Error('分享服务返回了无效撤销结果。')
+      const value = record(responseValue(await callShare('revoke', {
+        share_id: share.share_id,
+        session_id: requestedSession,
+      })))
+      if (value?.schema_version !== 1 || value.stage !== 'revoking' || value.revoked !== true) {
+        throw new Error('分享服务返回了无效撤销结果。')
+      }
       if (operation.current !== currentOperation || currentSession.current !== requestedSession) return
-      setShares(current => current.filter(item => item.share_id !== share.share_id))
+      const remaining = shares.filter(item => item.share_id !== share.share_id)
+      setShares(remaining)
+      setStage(remaining.length > 0 ? 'created' : 'idle')
       setNotice('公开链接已撤销。')
     } catch (failure) {
       if (operation.current === currentOperation && currentSession.current === requestedSession) {
+        setStage('failed')
         setError(failure instanceof Error ? failure.message : '无法撤销在线分享。')
       }
-    } finally {
-      if (operation.current === currentOperation && currentSession.current === requestedSession) setBusy(null)
     }
   }
 
@@ -203,7 +248,7 @@ export function SessionShareAction({
       onClose={() => {
         operation.current += 1
         setOpen(false)
-        setBusy(null)
+        setStage('idle')
       }}
       title="分享任务"
       closeLabel="关闭分享"
@@ -213,8 +258,14 @@ export function SessionShareAction({
       <section className={css.online} aria-labelledby="session-share-title">
         <div>
           <strong id="session-share-title">在线公开链接</strong>
-          <span>{busy === 'list'
-            ? '正在读取当前任务的公开链接…'
+          <span>{stage === 'preparing'
+            ? '正在检查在线分享服务…'
+            : stage === 'uploading'
+              ? '正在准备并上传任务归档…'
+              : stage === 'listing'
+                ? '正在读取当前任务的公开链接…'
+                : stage === 'revoking'
+                  ? '正在撤销公开链接…'
             : shares.length === 0
               ? '链接默认保留 7 天，可随时撤销。'
               : `已找回 ${shares.length} 个可管理链接。`}</span>
@@ -241,24 +292,26 @@ export function SessionShareAction({
               type="button"
               className={css.danger}
               aria-label={`撤销链接 ${index + 1}`}
-              disabled={busy !== null}
-              aria-busy={busy === `revoke:${share.share_id}`}
+              disabled={pending}
+              aria-busy={stage === 'revoking'}
               onClick={() => { void revoke(share) }}
             >
               <IconTrashOutline16 size={16} />
-              {busy === `revoke:${share.share_id}` ? '正在撤销…' : '撤销链接'}
+              {stage === 'revoking' ? '正在撤销…' : '撤销链接'}
             </button>
           </div>
         </article>)}
-        {shares.length === 0 && busy !== 'list' && <button
+        {shares.length === 0 && stage !== 'listing' && <button
             type="button"
             className={css.primary}
-            disabled={busy !== null}
-            aria-busy={busy === 'create'}
+            disabled={pending}
+            aria-busy={stage === 'preparing' || stage === 'uploading'}
             onClick={() => { void create() }}
           >
             <IconShareOutline16 size={16} />
-            {busy === 'create' ? '正在创建…' : '创建公开链接'}
+            {stage === 'preparing' ? '正在检查服务…'
+              : stage === 'uploading' ? '正在创建…'
+                : stage === 'failed' ? '重试创建公开链接' : '创建公开链接'}
           </button>}
       </section>
       <section className={css.archive} aria-labelledby="session-archive-backup-title">
