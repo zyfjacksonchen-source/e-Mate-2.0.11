@@ -12,7 +12,6 @@ import { apply as applyVisionToolkit } from '../.build/upstream-lib/index.js'
 export const name = '@e-mate/dsh-plugin-vision-toolkit'
 export const inject = [
   'tools',
-  'llm',
   'attachments',
   'credentials',
   'skills',
@@ -44,9 +43,6 @@ type VisionContext = Context & {
   }
   emateModelPolicy: {
     imageInputContract(provider: string, model: string): Promise<ImageInputContract>
-  }
-  llm: {
-    stream(options: ModelRequest): AsyncIterable<unknown>
   }
 }
 
@@ -160,24 +156,8 @@ export async function imageInputRequestBoundary(
 }
 
 export function installImageInputRequestBoundary(ctx: VisionContext, runtime: LazyVisionRuntime): () => void {
-  const converted = new WeakSet<object>()
-  return ctx.on('llm/stream', async function* (request: ModelRequest, next: () => AsyncIterable<unknown>) {
-    if (converted.has(request)) {
-      yield* next()
-      return
-    }
-    const wire = await imageInputRequestBoundary(ctx, runtime, request)
-    if (wire === request) {
-      yield* next()
-      return
-    }
-    converted.add(wire)
-    try {
-      yield* ctx.llm.stream(wire)
-    } finally {
-      converted.delete(wire)
-    }
-  } as never, { prepend: true })
+  return ctx.on('llm/wire', async (request: ModelRequest, next: () => Promise<ModelRequest>) =>
+    imageInputRequestBoundary(ctx, runtime, await next()) as never)
 }
 
 export type VisionConfig = {

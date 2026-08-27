@@ -2,13 +2,33 @@
   "schema_version": 1,
   "document_type": "emate.2.0.15.ticket-evidence",
   "ticket": "T15",
+  "manifest_id": "e-mate-critical-path-smoke-v1",
+  "bindings": {
+    "vision-input.component": [
+      {
+        "id": "vision-build",
+        "type": "command",
+        "command": "$NODE",
+        "args": ["packages/dsh-plugin-vision-toolkit/scripts/build.mjs"],
+        "timeout_ms": 60000
+      },
+      {
+        "id": "vision-native-attachment-contract",
+        "type": "command",
+        "command": "$NODE",
+        "args": ["--test", "packages/dsh-plugin-vision-toolkit/test/contract.test.mjs"],
+        "timeout_ms": 60000
+      }
+    ]
+  },
   "title": "高风险运行插件、外部连接器与 Native Attachment First 闭环",
   "status": "SOURCE_AND_COMPONENT_TESTED_TARGET_RUNTIME_OPEN_T18",
   "baseline": {
     "integration_commit": "2544fcd1fadde0bafd592815f882e2a439aed27e",
     "branch": "feat/2.0.15-T15-runtime-components",
     "clean_start": true,
-    "harness_commit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606",
+    "harness_base_commit": "b2b1650b01f0ee88d81837a9b5c050f9f763f606",
+    "harness_local_commit": "2ca0b68b420ba11a80fc5fac800f889008cd42af",
     "computer_use_upstream": "76bfe8607f61945c1cbb84e73976e601100c13a2",
     "find_skill_upstream": "5a7f18b4535835a81de47c0cc2ca8ceb6e97a4e6",
     "vision_toolkit_upstream": "29850a83871d4b7a7cc13e251420c5a440e2f69e",
@@ -30,7 +50,7 @@
   "root_causes": {
     "native_attachment": "The pinned Vision client owned a second paste path: it prevented the native composer event, uploaded PNG bytes to a Vision-only HTTP route, and inserted an absolute filesystem-path marker as message text. Paste therefore bypassed the native Attachment/ImageBlock owner and could duplicate or lose multi-image inputs.",
     "text_only_boundary": "T10 exposed an authoritative tri-state image-input contract, but no runtime consumer converted native image blocks for confirmed text-only models at the ephemeral model request boundary.",
-    "frozen_request": "Real Agent Loop GenerateOptions are deep-frozen. The direct llm/stream routing example that mutates options covers only mutable one-shot calls, so mutating request.messages would fail the real Agent path. Cordis waterfall next() also accepts no replacement arguments.",
+    "frozen_request": "Real Agent Loop GenerateOptions are deep-frozen and process-locally marked. Recursively calling ctx.llm.stream with a converted clone re-entered llm/stream outside the PreparedLlmCall and lost its captured adapter registration, exact request identity and marker.",
     "vision_startup": "The managed Vision adapter initialized Python and wheels during plugin apply even when no Vision capability was used.",
     "cdp": "The native CDP owner already used visible installed Chrome, loopback-only CDP and first-use launch, but its prompt did not state the T05 latest-explicit-visible-page exclusion strongly enough.",
     "find_skill": "The 2.0.14 handoff already replaced shell-shim launch with direct packaged Electron-as-Node pnpm, but its regression exercised only --version rather than the named Feishu installation arguments that previously surfaced EINVAL."
@@ -38,7 +58,7 @@
   "resolution": {
     "native_attachment": "The Vision build adapter removes only the staged upstream installPasteImages registration, bundled paste module, Host paste backend and Vision-only HTTP route. The existing DSH composer and Attachment store remain the sole paste, drag/drop and upload owner; no upstream source or second Attachment store was changed or added.",
     "text_only_boundary": "Native image blocks remain unchanged for image-capable and metadata-unknown models. Only confirmed text-only plus convert-at-request-boundary calls read the existing Attachment store, describe temporary 0600 image files through the lazy Vision runtime, scrub the temporary path, and construct a transient wire request. The durable Session request and image blocks remain unchanged.",
-    "waterfall_order": "The bridge registers prepend, short-circuits the original waterfall only for a converted wire request, and marks that wire request in a WeakSet. Re-entry then delegates once through T10 and the native adapter. T10 quota arming remains valid because it is keyed by sessionId/provider/model, not request object identity. The component test proves one policy listener invocation and one downstream adapter invocation.",
+    "waterfall_order": "The bounded Harness change adds the sole llm/wire waterfall after the original llm/stream/T10/invariant path and immediately before the captured adapter dispatch. It may replace only messages, deep-freezes a converted request, preserves every envelope field by identity, keeps the PreparedLlmCall registration across HMR rebind, returns the original request object when no transform occurs, and fails closed on throw, abort or envelope drift. Vision now registers only this seam and never recursively calls ctx.llm.stream.",
     "lazy_runtime": "Managed apply registers tools, Skill and the request bridge against one lazy runtime proxy. The pinned offline-wheel manager prepares on the first actual runtime method call; a Settings generation invalidates a pending preparation before the next call. Non-managed upstream behavior remains eager.",
     "cdp": "The existing native prompt now limits CDP to the latest explicit request to read or operate a visible Chrome page and excludes attachments, image generation, native apps and non-page work. Existing loopback, first-use browser launch and native mutation approval remain unchanged.",
     "computer_use": "No product source change was needed: the existing owner requires the latest direct user message to begin with @电脑操控, expires authorization before the next user request, retains native approval and the ad-hoc-signed universal macOS helper, and does not introduce a CDP or Skill fallback.",
@@ -53,6 +73,8 @@
     "image_capable": "preserve exact request object and five native image blocks",
     "metadata_unknown": "preserve exact request object and five native image blocks",
     "confirmed_text_only": "convert five images only in transient wire messages; preserve durable native blocks",
+    "prepared_registration": "the adapter captured by prepareCall receives the converted wire request after HMR rebind",
+    "invalid_wire_envelope": "fail closed before adapter dispatch",
     "fallbacks": [],
     "automatic_model_switch": false,
     "model_name_heuristic": false,
@@ -70,8 +92,12 @@
     "text_plus_five_png": "passed",
     "confirmed_text_only": "passed; wire has one original text block plus five descriptions and zero image blocks; durable blocks unchanged",
     "windows_chinese_path": "passed; C:\\Users\\61078\\Desktop\\流利说交付图片\\海报-1.png is absent from wire messages",
-    "mixed_png_pdf_docx": "passed; one image is transiently described while PDF and DOCX blocks remain unchanged and ordered",
+    "mixed_png_pdf_docx": "passed; PNG stays with the native image-drop owner while PDF and DOCX keep the real File Import intake and ordered durable mentions",
     "frozen_agent_request": "passed; recursively frozen messages are read without mutation",
+    "wire_request": "passed; recursively frozen transient request with unchanged envelope and converted messages only",
+    "emitted_runtime_imports": "passed; the real verifyComponentRuntimeImports result exactly equals the seven declared Base imports",
+    "skill_find_fallbacks": 0,
+    "cdp_fallbacks": 0,
     "t10_policy_listener_calls": 1,
     "downstream_adapter_calls": 1
   },
@@ -104,12 +130,24 @@
   },
   "verification": [
     {
-      "command": "pnpm --dir packages/dsh-plugin-vision-toolkit run build",
+      "command": "node upstream/deepseek-harness/node_modules/typescript/bin/tsc -b upstream/deepseek-harness/packages/llm/llm/tsconfig.json",
+      "result": "PASS: bounded llm/wire source typechecked against the pinned Harness closure"
+    },
+    {
+      "command": "node upstream/deepseek-harness/node_modules/vitest/vitest.mjs run upstream/deepseek-harness/packages/llm/llm/tests/service.spec.ts",
+      "result": "PASS: 85 passed, 0 failed; same-object no-transform, frozen transformed messages, original marker, prepared registration across HMR, invalid envelope, throw and abort fail-closed cases included"
+    },
+    {
+      "command": "node packages/dsh-plugin-vision-toolkit/scripts/build.mjs",
       "result": "PASS: staged upstream adapter and component/test bundles built; generated requirements.lock drift was not retained"
     },
     {
-      "command": "pnpm --dir packages/dsh-plugin-vision-toolkit test",
-      "result": "PASS: 5 passed, 0 failed, 7 target-runtime tests skipped because EMATE_COMPONENT_TARGET and a target CPython 3.12 runtime were not supplied"
+      "command": "node --test packages/dsh-plugin-vision-toolkit/test/contract.test.mjs",
+      "result": "PASS: 4 passed, 0 failed, 7 target-runtime tests skipped because EMATE_COMPONENT_TARGET and a target CPython 3.12 runtime were not supplied; real LocalAttachmentStore/CAS, five PNGs, Chinese Windows filename, capable/unknown/text-only, durable history, File Import coexistence and exact emitted-import verification included"
+    },
+    {
+      "command": "verifyComponentRuntimeImports(componentFiles['@e-mate/dsh-plugin-vision-toolkit'], actual emitted package closure)",
+      "result": "PASS: emitted imports exactly equal @deepseek-ai/dsh-client-ui-primitives, @deepseek-ai/dsh-credentials, @deepseek-ai/dsh-settings, @deepseek-ai/dsh-tools, @deepseek-ai/schemastery, @e-mate/desktop/vision-toolkit and react"
     },
     {
       "command": "pnpm --dir packages/dsh-plugin-cdp run build && pnpm --dir packages/dsh-plugin-cdp test",
@@ -125,7 +163,11 @@
     },
     {
       "command": "node scripts/component-release.mjs inventory",
-      "result": "EXPECTED_STRICT_FAILURE_D006: desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union"
+      "result": "EXPECTED_STRICT_FAILURE_D006_ONLY: desktop/e-mate-desktop/base-contract.json: runtime imports must equal the component-declared Base ABI union; the independent real emitted-import verifier passed first, and inventory reported no additional error"
+    },
+    {
+      "command": "node scripts/smoke/run.mjs --layer component --case CP-03 --extension docs/2.0.15/evidence/T15.json --require-complete",
+      "result": "PASS: committed extension completed within the 60-second component budget with 0 pending; native message render, Vision build and native attachment contract all passed"
     },
     {
       "command": "git diff --check",
@@ -151,10 +193,12 @@
     "t16_file_import_modified": false,
     "base_desktop_version_release_or_lock_modified": false,
     "dependency_added": false,
-    "upstream_source_modified": false,
+    "upstream_source_modified": true,
+    "upstream_source_scope": ["packages/llm/llm/src/index.ts", "packages/llm/llm/tests/service.spec.ts"],
     "production_write_performed": false
   },
   "open_acceptance": [
+    "T18 complete composed Profile app-directory boot and real interaction were not run in T15",
     "T18 real Feishu/Tencent connector authentication and operation receipts",
     "T18 real macOS Accessibility and Screen Recording TCC denial/grant/revoke acceptance",
     "T18 target-specific CPython 3.12 wheel ABI/hash/lazy-first-use/OCR positives and missing-wheel/wrong-arch negatives",

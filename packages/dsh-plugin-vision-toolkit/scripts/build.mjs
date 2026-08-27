@@ -6,10 +6,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const source = resolve(root, '../../upstream/plugins/dsh-vision-toolkit')
 const staged = resolve(root, '.build/upstream-lib')
-const requirementsTemplate = `pillow==12.3.0 --hash=sha256:4a94c6d980b59a49dff1caec3f3dec6aedce69c7a2a8321b96fa0eff00862627 --hash=sha256:9ef805f490216cd94a95e412779529bc9b6799b0c00291f9272a486ece1f54fa --hash=sha256:a2b55dd6b2a4c4b7d87ffa56bdb33fdc5fdb9a462173861a7bc097f17d91cb09
-numpy==2.4.6 --hash=sha256:3e8e51652ed0118325856cfe62fe1d6e47f3ce240a128643f36af6ffe6455d08 --hash=sha256:93632da93e6e1fed81279af07e2682e2b0842c7ffc89a7febb4248f2fad670ad --hash=sha256:d8e8286dd7cea7895157318d1b91cdacac64c479f3cbc8dce548331728484751
-vtracer==0.6.15 --hash=sha256:09ac4a5471c0301974aded9bbe51ded5908ef6c0058a2d07efca576955391e27 --hash=sha256:b0f08b66734e41872d4ac343ed6d08870b3235346def3e112e10b3b2443e619e --hash=sha256:f08d0552e9e5b421a948f87757ac5c83f69cf209f3f82fd9a7842b4b3b79969d
-`
 
 function replaceExactlyOnce(value, before, after, label) {
   const count = value.split(before).length - 1
@@ -658,9 +654,10 @@ for (const [before, after, expected] of clientTransforms) {
 client = client.replace(/\n\/\/# sourceMappingURL=client\.js\.map\s*$/u, '\n')
 await writeFile(resolve(root, 'lib/client.js'), client)
 
+const requirementsLock = await readFile(resolve(root, 'runtime/requirements.lock'))
 await rm(resolve(root, 'runtime'), { recursive: true, force: true })
 await cp(resolve(source, 'runtime'), resolve(root, 'runtime'), { recursive: true, force: true })
-await writeFile(resolve(root, 'runtime/requirements.lock'), requirementsTemplate)
+await writeFile(resolve(root, 'runtime/requirements.lock'), requirementsLock)
 await cp(resolve(source, 'vendor'), resolve(root, 'vendor'), { recursive: true, force: true })
 const target = process.env.EMATE_COMPONENT_TARGET
 if (target !== undefined) {
