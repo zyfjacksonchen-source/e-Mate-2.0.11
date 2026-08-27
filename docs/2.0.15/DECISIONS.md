@@ -60,6 +60,10 @@ T11 corrective `103833c…` is not integration-ready: it derives the frame host 
 
 The accepted second repair is local Harness `820fee0df4f46b15d4cc07f56ccfcae43549d769`, merged at root commits `37da362` and `dbabee2`. Independent checks prove the native skeleton owner, full Shell suite and CP-11/CP-12 with zero pending. Its advertised-remote reachability and successor Base binding remain T18 gates rather than being inferred from this local integration.
 
+### D014 — Glass stays decoration-only and GenUI stays on native ToolView
+
+T16 keeps Glass Composer only as palette state and decoration on the D013 native `data-emate-composer-frame-host`; it no longer guesses `data-composer-card`, extends the frame with a negative bottom value, or owns a second Composer/input lifecycle. On pinned rc.7, GenUI's missing fence registry fails closed to its keyed native `render_ui` ToolView and does not start the upstream full-page DOM observer. T13 may consume these seams in final navigation/Shell integration but may not centralize their state or reintroduce a DOM mover, second renderer, Composer or chat event store. Complete Profile, installed visual/accessibility and real application-host proof remain T18.
+
 ## Exclusive static scopes
 
 | Ticket | Exact owned paths while active |

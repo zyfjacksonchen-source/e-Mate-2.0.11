@@ -3159,3 +3159,12 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Verification: 有效表 SHA 精确匹配；20 条 raw feedback ID 全部唯一，分类 P0 8 / P1 5 / P2 1 / DUPLICATE 4 / NEEDS_EVIDENCE 2 合计 20；16 个 canonical ID 唯一且每条 raw 都有有效反向映射；禁止字符串 `IMAGE-` 不存在，JSON、`git show --check` 与 clean tree 通过。
 - Evidence ceiling: 这是 read-only intake，不是产品修复。所有 P0 仍按各自 T05–T16 source/component、app-directory、installed、真实账户/provider、exact-byte 或 update/rollback 回执裁决；D006 与正式发布仍归 T18。
 - Next exact action: 等待 T16 产品组件闭环并独立复验；T16 合入后创建 T13 最终 Shell/导航集成任务。
+
+## 2026-08-27 · 2.0.15 T16 产品组件与原生渲染边界合入
+
+- Goal checkpoint: T16 在同一可见任务 `01a0437a-bff4-7db2-9387-9edbe2b01e1d` 完成七个 retained component 的独立 Owner 闭环，release 提交链为 `af1d659`、`a6ef185`、`ca7a1c0`、`648830d`、`ca8aafe`、`c2701fe`、`e4526b7`、`fd47b90`、`bca3321`。没有 Shell、Harness、inventory、Base、版本、锁文件或发布写入。
+- Native-owner decisions: Glass 明确 Keep，但只装饰 D013 原生 Composer Host；GenUI 在 rc.7 无 fence registry 时只保留 native `render_ui` ToolView，不启动全页 DOM 渲染双轨。Memory 增加用户确认且当前 scope 限定的删除；MCP 只有 native loader ACTIVE 且 server Tool 存在才报告 active；Office 在 Job 启动前已取消时不产出文件。
+- Session and file boundaries: Better Sidebar 与 File Import 拒绝 archived/unknown Session，并把异步结果绑定到请求发起 Session。总控拒绝第一版仅覆盖 stale success 的 Better Sidebar 回执；同一可见任务第二版用 native session key 隔离首帧，并在一个 request-token owner 同时 fence stale resolve/reject，真实 deferred jsdom 回归证明旧 listing/path/preview/status 和脱离 DOM 的旧行都不能进入新 Session。
+- Independent verification: Better Sidebar build、Host `3/3`、deferred client race `1/1`；File Import `7/7`、GenUI `1/1`、Glass `1/1`、MCP `5/5`、Memory `5/5`、Office `5/5`。七组件 emitted imports 精确匹配各自既有 `base_imports`；初始化 root 已声明的 GenUI submodule 后，committed T16 extension 重放 CP-13 为 `142 ms / 0 pending`；inventory 精确保留 D006 两条 strict red。
+- Evidence ceiling: `docs/2.0.15/evidence/T16.json` 只提升 source/component 层。Complete Profile app-directory、installed macOS/Windows、真实 MCP provider、真实 Office application host、candidate/public、final Harness advertised reachability 与 successor Base rebind 仍归 T18。
+- Next exact action: 从当前 release tip 创建 T13 独立 worktree/可见任务，消费 T06/T07/T08/T09/T11/T12/T15/T16 handoff，完成最后的原生 `@`、Settings、导航和 titlebar 集成。
