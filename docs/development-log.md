@@ -3272,3 +3272,12 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Verification: 完整 `test:impact` 为 `45/45`，完整 `release.test.mjs` 为 `16/16`，完整 mac updater suite 为 `93/93` 且包含 ready-before-validation 回归；`check:target`、`check:release-boundary`、`component:inventory`、changed JSON parse 与 `git diff --check` 均 exit 0，inventory 为 15 components / 19 jobs / 0 errors。
 - Evidence ceiling: 本轮只恢复当前主线 ancestry 与 source gate。Build once、candidate/admission、三目标 composition/boot、macOS/Windows fresh install、2.0.12/2.0.13 update、rollback、真实服务/TCC、exact artifacts、签名、R2/Feed/Profile desired state、官网/public readback与正式发布继续全部 OPEN；作废图片反馈工作簿仍只沿用 identity exclusion，未打开、读取、摘要或映射。
 - Next exact action: 停止并交 T00 独立审查 merge parents、snapshot inner/outer 分层与完整 source gates；未获 Build once 放行前不进入候选或发布阶段。
+
+## 2026-08-28 · 2.0.15 T18 Phase 1b 总控独立验收
+
+- Goal checkpoint: T00 已独立接受同一 T18 可见任务的 Phase 1b 源码候选 `7bd8994231c51501975f7ccc722c6dfcb9b93040`。本轮只落账总控验收，不修改产品、T18 evidence、候选、安装、签名或生产状态。
+- Ancestry and live baseline: merge `1135dd9e3fcd1304c16607df9978f37811054e99` 的两个父提交精确为 T00 已接受的 `3f8694415099e236288809591ccbe19a9ce2af5b` 与 live `origin/main@90c3a1fae3124536bb62f5ee215c74fe510e5e63`；远端 main 复查未再前进，远端 `release/2.0.15` 尚不存在。root、Harness `4787caf39134df190105b272da0dd2ba893d4d75` 与 GenUI `0e756efb7671e6b8413dde3d8e199c68fa89cbeb` 均 clean。
+- Snapshot and owner review: 三目标 `.targets` 与 `origin/main` 捕获的公开 2.0.13/Base v7 inner bytes 精确相等；外层 candidate identity 才是 2.0.15/Base v8。legacy mac helper 只删除 durable ready 前的重复 validation，swap 前完整 validation 仍存在且有顺序回归；impact 默认仍诚实反映当前公开 Base v7 对冻结候选 Base v8 的 Base lane。
+- Independent verification: T00 独立运行完整 impact `45/45`、release `16/16`、mac updater `93/93`；`check:target`、`check:release-boundary`、`component:inventory`、JSON 与全 Phase 1b `git diff --check` 均通过，inventory 为 15 components / 19 jobs / 0 errors。实际 Phase 1b 修改严格限于七个已记录路径。
+- Evidence ceiling: Build once、不可变 artifact identity、candidate/admission、三目标 composition/boot、双平台安装、升级/回滚、真实服务与 TCC、签名、R2/Feed/Profile desired state、官网/public readback和正式发布仍全部 OPEN。作废图片反馈工作簿仍只保留 identity exclusion，内容未打开、读取、摘要或映射。
+- Next exact action: 先再次读取 live `origin/main`；若仍为 `90c3a1f…`，只放行同一 T18 任务非强制推送唯一 release 分支、创建并通过一个受保护主线 PR，然后捕获 protected-main CI attempt-1 的唯一 Build once。该任务必须在 artifact identity 回传后停止，未获 T00 接受前不得安装、签名、调用发布协调器或写生产状态。
