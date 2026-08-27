@@ -2981,3 +2981,17 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Immutable evidence / receipt: `33022710106` 永久保留为前置合同负例，没有产生候选或生产写入。
 - Remaining blockers: 更新 PR head、通过新 attempt-1 CI、合入 protected main 后再启动正式候选链。
 - Next exact action: 提交本测试纠错到同一 PR 并等待新 head 的前置合同与完整 Base CI。
+
+## 2026-08-27 · 2.0.13 外部发布入口初始化顺序修复
+
+- Goal checkpoint: 无性能回执的 protected-main `17c66f1cb9f970d0c2b01e3583416ae772deabde` 已完成 attempt-1 CI、Profile、Desktop、admission 和 release-state；首次 Desktop 签名交接在任何 Cloudflare/R2 写入前失败关闭。
+- Frozen baseline / current HEAD: 失败 publication run `33026280155` 固定调用外部 action `5e254e06905d7d930bc27117692d70d92456e8e7`；外部修复 PR `#7` 已 squash 合入 protected main `bfe869505196f3124192f6e0c219014c94365639`。
+- Binding documents read: 根 `AGENTS.md`、S35 无性能回执修订、Cloudflare plugin 与外部 publication action 固定权限合同。
+- Inspected native seam: `src/main.mjs` 在 `export class GithubClient` 声明求值前执行 `await main()`，入口第一次构造该 class 时触发 JavaScript 暂时性死区；测试只 import 模块，未执行 CLI 入口，因而没有覆盖生产调用顺序。
+- Experiment or why unnecessary: 仅把既有 CLI invocation 移到文件末尾，并新增真实 Node 子进程正反例，证明入口先完成 class 初始化、随后才因缺少正式绑定按预期失败；未改 manifest、签名、GitHub provenance、R2 计划或性能可选诊断。
+- Decision and forbidden alternatives: 固定外部 action 新 protected-main SHA 并让主仓现有签名/可选性能 workflow、官网 handoff identity 和合同测试共同引用；不复用失败 action、不中途手工签名、不修改 GitHub artifact 或直接写生产指针。
+- Changed scope: 外部 action 两个文件；主仓只更新固定 action SHA、S35、官网 predecessor identity、绑定测试和本 append-only 记录。
+- Verification commands and results: 外部 Node 24 全套 `83/83`、`git diff --check`；主仓定向 release/admission/coordinator 检查待提交前执行。
+- Immutable evidence / receipt: `33026280155` 的唯一错误为 `ReferenceError: Cannot access 'GithubClient' before initialization`；Cloudflare plugin 只读前驱仍为 emergency legacy `948:1d70004c…19c4`，signed pointer 仍 absent，官网仍为 `636:02ea7f…252c`。
+- Remaining blockers: 主仓 pin PR 与新 protected-main exact source；从该 source 重新生成 CI/Profile/Desktop/admission/handoff，完成 Cloudflare immutable/CAS/public readback、三目标 desired state、官网和双平台安装更新回滚。
+- Next exact action: 运行主仓最窄 release 合同，提交并合入 pin 修复；只消费新 protected-main attempt-1 字节继续正式发布。
