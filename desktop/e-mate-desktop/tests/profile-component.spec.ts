@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   materializeProfileComponent,
@@ -113,6 +114,17 @@ afterEach(async () => {
 })
 
 describe('Profile component materialization', () => {
+  it('keeps the future component inventory at 15 without xin-assistant', async () => {
+    const inventory = JSON.parse(await readFile(
+      fileURLToPath(new URL('../../../packages/dsh/profile/component-inventory.json', import.meta.url)),
+      'utf8',
+    )) as { components: Array<{ id: string }> }
+
+    expect(inventory.components).toHaveLength(15)
+    expect(inventory.components.map(component => component.id))
+      .not.toContain('@e-mate/dsh-plugin-xin-assistant')
+  })
+
   it('accepts only the signed component authority vocabulary', () => {
     const { reference, objects } = fixture()
     const manifestBytes = objects.get(reference.manifest_url)!
