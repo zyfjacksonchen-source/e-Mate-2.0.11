@@ -80,6 +80,7 @@
   "baseline": {
     "task_start_commit": "23fd997faf2570d4f88ee6f389ddd5633b524e16",
     "code_commit": "48b0479143bff18cfac10c8315af2a9c22aec294",
+    "test_fixture_alignment_commit": "feb96b20017d2f127438df49b592c49c42748bf4",
     "integration_merge_commit": "674368da63d3631fb45056c7b965bfad3a0a1c08",
     "branch": "feat/2.0.15-T13-ui-navigation",
     "clean_start": true,
@@ -181,6 +182,10 @@
       "result": "PASS: 1 file, 3 tests; ready/setup/failed/Windows metadata, non-executable failure states and shared AbortSignal.timeout(10_000) action signal included"
     },
     {
+      "command": "Shell composer-205.client.spec.tsx plus composer-mentions.client.spec.tsx after fixture alignment feb96b2001",
+      "result": "PASS: 2 files, 9 tests; the legacy composer-205 fixture now supplies stable darwin platform state and the ready hint returned by candidates(), without relaxing the product rejection of candidates that lack native state"
+    },
+    {
       "command": "Shell sidebar-settings-route.client.spec.tsx",
       "result": "PASS: 1 file, 2 tests; Settings route isolation preserved"
     },
@@ -214,15 +219,15 @@
     },
     {
       "command": "corrective-turn Desktop Vitest: updates, electron-runtime, window-options, theme-presenter",
-      "result": "NOT_RUN: offline config loader stopped before 0 tests with Cannot find module 'vitest/config'; Desktop product files were not modified by 48b0479 and no new Desktop pass is claimed"
+      "result": "EARLIER_FAILED_ATTEMPT: offline config loader stopped before 0 tests with Cannot find module 'vitest/config'; Desktop product files were not modified by 48b0479, and this historical attempt is retained separately from the later passing committed CP-13 Desktop binding"
     },
     {
       "command": "node scripts/smoke/run.mjs --layer component --case CP-13 --extension docs/2.0.15/evidence/T13.json --require-complete",
-      "result": "PENDING_COMMITTED_EXTENSION_RUN"
+      "result": "PASS_COMMITTED_EXTENSION_INPUT: extension file input commit 85e675d7495ad0d3139c1407ba033b468d84afc9; execution tree HEAD feb96b20017d2f127438df49b592c49c42748bf4; t13-shell-build, t13-shell-navigation, t13-upstream-settings-metadata, t13-capability-primary-action and t13-desktop-controls all PASS; the runner did not expose internal file/test counts and none are inferred; pending 0; duration_ms 7850; exit 0; temporary offline symlinks were verification-only, no dependency installation occurred, all mappings were moved to /private/tmp/emate-t13-cp13-quarantine-HJAV3ucL, and root/Harness/GenUI were clean before this evidence commit"
     },
     {
       "command": "ancestor c07d461 emitted import verification",
-      "result": "ANCESTOR_PASS_ONLY: emitted imports were exactly [@deepseek-ai/dsh-client-runtime, @deepseek-ai/dsh-client-ui-attachment, @deepseek-ai/dsh-client-ui-primitives, react, react-dom]; the committed corrective extension still requires its own CP-13 run"
+      "result": "ANCESTOR_PASS_ONLY: emitted imports were exactly [@deepseek-ai/dsh-client-runtime, @deepseek-ai/dsh-client-ui-attachment, @deepseek-ai/dsh-client-ui-primitives, react, react-dom]; the final committed CP-13 run passed, while this emitted-import receipt remains ancestor-only"
     },
     {
       "command": "node scripts/component-release.mjs inventory",
