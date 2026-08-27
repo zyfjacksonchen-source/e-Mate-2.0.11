@@ -1672,6 +1672,18 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.deepEqual(Object.keys(imagegen.parameters.properties), ['prompt', 'image_url'])
     assert.deepEqual(imagegen.parameters.required, ['prompt'])
     assert.match(imagegen.description, /Never pass a provider, model, output path, size, quality, timeout, or concurrency policy/u)
+    tools.delete('imagegen')
+    await assert.rejects(
+      imagegen.execute({ prompt: 'must fail before dispatch' }, {
+        agent,
+        callId: 'image-health-unavailable',
+        signal: new AbortController().signal,
+      }),
+      /current Agent tool scope/u,
+    )
+    assert.equal(sessionEvents.at(-1).data.failure_code, 'agent-tool-unavailable')
+    sessionEvents.length = 0
+    tools.set('imagegen', imagegen)
 
     const selected = await context.attachments.saveImage({
       data: inputBytes,
@@ -2878,7 +2890,8 @@ test('Agent operation guidance owns only the e-Mate persona', () => {
   assert.doesNotMatch(section.text, /e-mate update --json|e_mate_skill_hub_/)
   assert.match(section.text, /installed find-skill provider/u)
   assert.match(section.text, /use `mcp_manage`/u)
-  assert.match(section.text, /user-visible Chrome page exposed through the DSH CDP adapter/u)
+  assert.match(section.text, /latest direct request explicitly asks to read or operate a user-visible webpage/u)
+  assert.match(section.text, /never use Browser\/CDP as a fallback for `imagegen`, native `web_search`, attachment resolution/u)
   assert.match(section.text, /Do not invent a built-in connector or ask the user to paste secrets into chat/u)
 })
 

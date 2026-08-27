@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { Context, Service } from '@deepseek-ai/cordis'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -91,6 +92,20 @@ function names(ctx, agent) {
   return ctx.tools.schemas(agent).map(schema => schema.name).sort()
 }
 
+test('keeps one canonical imagegen alias target and the accepted native search route', () => {
+  const componentPatch = readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
+  const profilePatch = readFileSync(new URL('../../dsh/profile/cordis.patch.yml', import.meta.url), 'utf8')
+  assert.match(componentPatch, /^\s+- imagegen$/mu)
+  assert.match(componentPatch, /^\s+- web_search$/mu)
+  assert.doesNotMatch(componentPatch, /^\s+- imagen$/mu)
+  assert.doesNotMatch(componentPatch, /gpt-responses|allowInsecureHttp|43\.135\.183\.53|emate-web-search-gpt/u)
+  assert.match(profilePatch, /searchProvider: deepseek-official/u)
+  assert.match(profilePatch, /id: web-search-deepseek[\s\S]*disabled: false/u)
+  assert.match(profilePatch, /apiKeyEnv: E_MATE_SEARCH_KEY_DEEPSEEK/u)
+  assert.match(profilePatch, /baseURL: https:\/\/api\.deepseek\.com\/anthropic\/v1/u)
+  assert.match(profilePatch, /model: deepseek-v4-flash/u)
+})
+
 class PersistenceProbe extends Service {
   constructor(ctx) { super(ctx, 'sessionPersistence') }
 }
@@ -106,7 +121,7 @@ test('keeps pinned Schedule tools Agent-local and executes them through the nati
   await ctx.plugin(ToolSearch, { maxResults: 5 })
   const agent = createAgent(ctx, 'schedule-disclosure')
 
-  assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list', TOOL_SEARCH_NAME])
+  assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list'])
   const created = await execute(ctx, agent, 'schedule_create', { prompt: '生成日报', after_seconds: 3600 })
   assert.equal(created.isError, false)
   assert.equal(created.value.prompt, '生成日报')
@@ -115,7 +130,7 @@ test('keeps pinned Schedule tools Agent-local and executes them through the nati
   const deleted = await execute(ctx, agent, 'schedule_delete', { id: created.value.id })
   assert.deepEqual(deleted.value, { id: created.value.id, deleted: true })
   assert.deepEqual((await execute(ctx, agent, 'schedule_list', {})).value, [])
-  assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list', TOOL_SEARCH_NAME])
+  assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list'])
 })
 
 test('restores a Schedule request header without restricting Agent-local tool names', async (t) => {
@@ -140,7 +155,7 @@ test('restores a Schedule request header without restricting Agent-local tool na
 
   await ctx.plugin(ToolSearch, { maxResults: 5 })
 
-  assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list', TOOL_SEARCH_NAME])
+  assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list'])
   assert.deepEqual((await execute(ctx, agent, 'schedule_list', {})).value, [])
 })
 
@@ -155,7 +170,7 @@ test('keeps Schedule tools visible when Tool Search registers first', async (t) 
   await ctx.plugin(Schedule)
   const agent = createAgent(ctx, 'schedule-late-registration')
 
-  assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list', TOOL_SEARCH_NAME])
+  assert.deepEqual(names(ctx, agent), ['schedule_create', 'schedule_delete', 'schedule_list'])
   assert.deepEqual((await execute(ctx, agent, 'schedule_list', {})).value, [])
 })
 
@@ -174,6 +189,17 @@ test('discloses deferred native tools without replacing their execution path', a
   assert.deepEqual(names(ctx, agent), ['office_write', 'read_file', TOOL_SEARCH_NAME])
   assert.equal((await execute(ctx, agent, 'office_write', {})).isError, false)
   assert.equal(agent.session.events.some(event => event.type === 'tool-search/selection'), false)
+})
+
+test('keeps the rc.7 native web_search definition directly visible', async (t) => {
+  const { ctx } = await harness({ alwaysVisible: ['web_search'] })
+  t.after(async () => ctx.fiber.dispose())
+  ctx.tools.register(fixture('web_search', 'Search the public web'))
+  ctx.tools.register(fixture('long_tail_probe', 'Deferred external capability'))
+  const agent = createAgent(ctx, 'native-search')
+
+  assert.deepEqual(names(ctx, agent), [TOOL_SEARCH_NAME, 'web_search'])
+  assert.equal((await execute(ctx, agent, 'web_search', { query: 'e-Mate' })).isError, false)
 })
 
 test('uses bounded CJK aliases without changing the initial header or adding a plugin-owned query event', async (t) => {
@@ -342,8 +368,8 @@ test('same-named Agent-local tools stay outside the global catalog and restricti
   const right = await createLocal('local-right')
 
   for (const handle of [left, right]) {
-    assert.deepEqual(names(ctx, handle.agent), ['agent_status', TOOL_SEARCH_NAME])
-    assert.deepEqual((await execute(ctx, handle.agent, TOOL_SEARCH_NAME, { query: 'agent status' })).value.tools, [])
+    assert.deepEqual(names(ctx, handle.agent), ['agent_status'])
+    assert.equal((await execute(ctx, handle.agent, TOOL_SEARCH_NAME, { query: 'agent status' })).isError, true)
     assert.equal((await execute(ctx, handle.agent, 'agent_status', {})).isError, false)
   }
   await left.dispose()
@@ -367,6 +393,20 @@ test('keeps native tools usable when progressive restriction cannot be installed
   assert.deepEqual(names(ctx, handle.agent), ['native_probe'])
   assert.equal((await execute(ctx, handle.agent, 'native_probe', {})).isError, false)
   await handle.dispose()
+})
+
+test('an unknown-global tools/change race restores the native surface without blocking registration', async (t) => {
+  const { ctx } = await harness({}, false)
+  t.after(async () => ctx.fiber.dispose())
+  ctx.tools.register(fixture('native_probe', 'Native capability'))
+  const agent = createAgent(ctx, 'tools-change-failure')
+  await ctx.plugin(ToolSearch)
+  assert.deepEqual(names(ctx, agent), [TOOL_SEARCH_NAME])
+
+  agent.ctx.tools.restrict = () => { throw new Error('tools.restrict() names unknown global tool "late_probe"') }
+  assert.doesNotThrow(() => ctx.tools.register(fixture('late_probe', 'Late native capability')))
+  assert.deepEqual(names(ctx, agent), ['late_probe', 'native_probe'])
+  assert.equal((await execute(ctx, agent, 'late_probe', {})).isError, false)
 })
 
 test('rebuilds from the real inherited view and preserves selected eligible globals', async (t) => {
@@ -394,7 +434,7 @@ test('rebuild drops removed selections instead of reviving them after re-registr
   assert.deepEqual(names(ctx, agent), ['ephemeral_probe', TOOL_SEARCH_NAME])
 
   remove()
-  assert.deepEqual(names(ctx, agent), [TOOL_SEARCH_NAME])
+  assert.deepEqual(names(ctx, agent), [])
   ctx.tools.register(fixture('ephemeral_probe', 'Ephemeral capability restored'))
   assert.deepEqual(names(ctx, agent), [TOOL_SEARCH_NAME])
 })

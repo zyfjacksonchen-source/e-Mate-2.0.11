@@ -241,16 +241,30 @@ export function apply(ctx: Context, config: Config = {}): void {
       .sort(compareNames)
   }
 
+  function inheritedSchemas(agent: Agent): ToolSchema[] {
+    const liftProbe = mutateRegistry(() => agent.ctx.tools.restrict({ allow: [] }))
+    let localNames: Set<string>
+    try {
+      localNames = new Set(ctx.tools.schemas(agent).map(schema => schema.name))
+    } finally {
+      mutateRegistry(liftProbe)
+    }
+    return ctx.tools.schemas(agent).filter(schema => !localNames.has(schema.name))
+  }
+
   function refreshRestriction(state: AgentState): void {
-    const nextNames = desiredAllowedNames(state)
+    const desiredNames = desiredAllowedNames(state)
     if (state.liftRestriction !== undefined
-      && nextNames.length === state.allowedNames.length
-      && nextNames.every((name, index) => name === state.allowedNames[index])) return
-    const liftNext = mutateRegistry(() => state.agent.ctx.tools.restrict({ allow: nextNames }))
+      && desiredNames.length === state.allowedNames.length
+      && desiredNames.every((name, index) => name === state.allowedNames[index])) return
     const liftPrevious = state.liftRestriction
-    state.liftRestriction = liftNext
-    state.allowedNames = nextNames
+    state.liftRestriction = undefined
+    state.allowedNames = []
     if (liftPrevious !== undefined) mutateRegistry(liftPrevious)
+    const restrictableNames = new Set(inheritedSchemas(state.agent).map(schema => schema.name))
+    const nextNames = desiredNames.filter(name => restrictableNames.has(name))
+    state.liftRestriction = mutateRegistry(() => state.agent.ctx.tools.restrict({ allow: nextNames }))
+    state.allowedNames = nextNames
   }
 
   function search(
@@ -300,26 +314,25 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   function install(agent: Agent, previousSelection?: ReadonlySet<string>): void {
     if (states.has(agent)) return
-    const inheritedSchemas = ctx.tools.schemas(agent)
-    // Code/both modes own their own generated SDK disclosure. Do not layer a
-    // Native-only search transport over that presentation.
-    if (inheritedSchemas.some(schema => schema.name === 'run_code')) return
-    const restrictableNames = new Set(ctx.tools.schemas().map(schema => schema.name))
-    const catalog = new Map(inheritedSchemas
-      .filter(schema => restrictableNames.has(schema.name))
-      .map(schema => [schema.name, catalogEntry(schema, resolved.searchAliases.get(schema.name) ?? [])]))
-    if (catalog.size > 0 && [...catalog.keys()].every(name => matchesAlwaysVisible(name, resolved))) return
-    const eligibleNames = new Set(catalog.keys())
-    const state: AgentState = {
-      agent,
-      catalog,
-      selectedNames: previousSelection === undefined
-        ? restoreSelection(agent, eligibleNames, resolved)
-        : new Set([...previousSelection].filter(name => eligibleNames.has(name))),
-      allowedNames: [],
-    }
-    states.set(agent, state)
+    let state: AgentState | undefined
     try {
+      const visibleSchemas = ctx.tools.schemas(agent)
+      // Code/both modes own their own generated SDK disclosure. Do not layer a
+      // Native-only search transport over that presentation.
+      if (visibleSchemas.some(schema => schema.name === 'run_code')) return
+      const catalog = new Map(inheritedSchemas(agent)
+        .map(schema => [schema.name, catalogEntry(schema, resolved.searchAliases.get(schema.name) ?? [])]))
+      const eligibleNames = new Set(catalog.keys())
+      state = {
+        agent,
+        catalog,
+        selectedNames: previousSelection === undefined
+          ? restoreSelection(agent, eligibleNames, resolved)
+          : new Set([...previousSelection].filter(name => eligibleNames.has(name))),
+        allowedNames: [],
+      }
+      states.set(agent, state)
+      if (catalog.size === 0 || [...catalog.keys()].every(name => matchesAlwaysVisible(name, resolved))) return
       state.removeSearchTool = mutateRegistry(() => agent.ctx.tools.register(defineTool({
         name: TOOL_SEARCH_NAME,
         description: 'Search currently deferred tools by capability or exact name. Matching tools become available on the next model step.',
@@ -370,8 +383,8 @@ export function apply(ctx: Context, config: Config = {}): void {
       states.delete(agent)
       try {
         mutateRegistry(() => {
-          state.liftRestriction?.()
-          state.removeSearchTool?.()
+          state?.liftRestriction?.()
+          state?.removeSearchTool?.()
         })
       } catch {}
       ctx.logger.warn('e-Mate Tool Search unavailable; keeping the native Agent tool surface')

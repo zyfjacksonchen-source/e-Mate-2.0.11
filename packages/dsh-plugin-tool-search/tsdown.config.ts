@@ -1,5 +1,5 @@
 export default {
-  entry: ['src/index.ts', 'src/web-search.ts'],
+  entry: ['src/index.ts'],
   format: 'esm',
   dts: true,
   clean: true,
