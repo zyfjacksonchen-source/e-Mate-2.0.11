@@ -79,6 +79,7 @@ describe('e-Mate 2.0.13 composer projection', () => {
 
   it('uses the target input trigger and input-bar contracts without a parallel transport', async () => {
     const source = readFileSync('src/client/index.ts', 'utf8')
+    const home = readFileSync('src/client/home.tsx', 'utf8')
     const styles = readFileSync('src/client/home.module.css', 'utf8')
     expect(source).toContain("ctx.slots.inject('conversation.input.right'")
     expect(source).toContain("ctx.connection.rpc.call('/emate.mcpManage', 'active', {})")
@@ -87,7 +88,9 @@ describe('e-Mate 2.0.13 composer projection', () => {
     expect(source).not.toContain('<computer-use explicit="true">')
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource)\s*\(/u)
     await waitFor(() => expect(styles).toContain('[data-composer-card]'))
-    expect(styles).toMatch(/\[data-phase='hero'\][\s\S]*?\[data-composer-card\][\s\S]*?--emate-composer-frame-bottom:\s*-28px/u)
-    expect(styles).toMatch(/\[data-phase='hero'\][\s\S]*?\[data-composer-card\][\s\S]*?--emate-composer-frame-radius:\s*24px/u)
+    expect(home).toMatch(/target\.toggleAttribute\('data-emate-composer-frame-host', true\)/u)
+    expect(styles).toMatch(/\[data-emate-composer-frame-host\][\s\S]*?\[data-slot='conversation\.composer\.bar'\]/u)
+    expect(styles).toMatch(/\[data-emate-composer-frame-host\][\s\S]*?\[data-slot='conversation\.hero\.workspace'\]/u)
+    expect(styles).not.toContain('--emate-composer-frame-bottom')
   })
 })

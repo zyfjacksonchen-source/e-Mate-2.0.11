@@ -4,6 +4,37 @@
   "ticket": "T11",
   "title": "空主页办公模板与设置个人资料/Token 热力图",
   "status": "SOURCE_AND_COMPONENT_PASSED",
+  "manifest_id": "e-mate-critical-path-smoke-v1",
+  "bindings": {
+    "home-template.component": [
+      {
+        "id": "shell-build",
+        "type": "command",
+        "command": "pnpm",
+        "args": ["run", "build"],
+        "cwd": "packages/dsh/profile/plugins/emate-shell",
+        "timeout_ms": 60000
+      },
+      {
+        "id": "home-template-and-frame-contract",
+        "type": "command",
+        "command": "../../../../../upstream/deepseek-harness/node_modules/.bin/vitest",
+        "args": ["run", "--config", "vitest.config.ts", "tests/quick-templates.client.spec.tsx", "tests/composer-205.client.spec.tsx"],
+        "cwd": "packages/dsh/profile/plugins/emate-shell",
+        "timeout_ms": 60000
+      }
+    ],
+    "usage.component": [
+      {
+        "id": "usage-account-contract",
+        "type": "command",
+        "command": "../../../../../upstream/deepseek-harness/node_modules/.bin/vitest",
+        "args": ["run", "--config", "vitest.config.ts", "tests/usage-heatmap.client.spec.tsx", "tests/account-home.client.spec.tsx"],
+        "cwd": "packages/dsh/profile/plugins/emate-shell",
+        "timeout_ms": 60000
+      }
+    ]
+  },
   "baseline": {
     "integration_commit": "2544fcd1fadde0bafd592815f882e2a439aed27e",
     "branch": "feat/2.0.15-T11-home-settings",
@@ -24,14 +55,16 @@
   "root_cause": {
     "home": "Home still computed and rendered local Session-derived task counts, Token totals, trends, success placeholders and recent Sessions even though the authoritative account usage day projection now exists and Sidebar already owns recent task navigation.",
     "templates": "The Shell already owned native blank reuse through startSessionFromRoute and native draft state through conversation.input.for(scope).setDraft, but Home exposed no office-template projection over those owners.",
-    "usage": "AccountSettings showed the identity bootstrap and weekly quota but did not consume T10 identity.usage.activity, so it had no truthful daily, weekly, cumulative or 12-month activity presentation."
+    "usage": "AccountSettings showed the identity bootstrap and weekly quota but did not consume T10 identity.usage.activity, so it had no truthful daily, weekly, cumulative or 12-month activity presentation.",
+    "composer_frame": "The merged Home extended Glass Composer below the native card with --emate-composer-frame-bottom: -28px instead of exposing the existing native composerStack as the one semantic owner shared by the Composer and workspace hint."
   },
   "resolution": {
     "home": "Removed the old overview DOM and its local usage, success and recent-Session calculations; compressed the existing hero and mounted exactly twelve responsive office templates.",
     "template_handoff": "prepareTemplateDraftFromRoute calls the existing startSessionFromRoute blank/Workspace resolution, obtains the native Session scope, writes one native Composer draft and lets the template component focus the resident textarea. It never submits or dispatches a message.",
     "usage": "AccountSettings requests the exact T10 identity.usage.activity endpoint for an inclusive prior-year window of at most 366 dates, validates exact snake_case fields and canonical decimal strings with BigInt, reconciles every day and period total, and renders zero plus four activity levels with exact accessible tooltips.",
     "presentation": "Daily, Monday-based weekly and cumulative summaries reuse the same validated day buckets; loading, invalid response, typed unavailable and retry states display no fabricated heatmap or zero-success fallback.",
-    "identity": "The enterprise display_name and weekly_token_limit remain bootstrap-owned. The existing user-selected avatar stays explicitly device-local and is not represented as an enterprise avatar."
+    "identity": "The enterprise display_name and weekly_token_limit remain bootstrap-owned. The existing user-selected avatar stays explicitly device-local and is not represented as an enterprise avatar.",
+    "composer_frame": "Home marks its existing exact native composerStack portal target as data-emate-composer-frame-host for the target lifetime. That one native container already owns conversation.composer.bar and conversation.hero.workspace; no DOM child is moved or duplicated, and the negative frame extension is removed."
   },
   "owner_contract": {
     "session_owner": "pinned rc.7 Session/Workspace runtime",
@@ -41,6 +74,9 @@
     "second_session_or_workspace_path": false,
     "second_composer_or_draft_store": false,
     "second_usage_or_analytics_source": false,
+    "semantic_composer_frame_host": "data-emate-composer-frame-host",
+    "negative_composer_frame_extension": false,
+    "composer_dom_mover": false,
     "session_updated_at_inference": false,
     "recent_session_copy": false,
     "fake_success_rate_or_token_value": false
@@ -68,12 +104,8 @@
       "result": "PASS: 14 files, 85 tests on final source; includes three new T11 suites, native blank/new Session draft handoff, exact activity validation/aggregation/unavailable UI, and retained Shell regressions"
     },
     {
-      "command": "node scripts/smoke/run.mjs --layer component --case CP-11 --case CP-12 --extension <temporary-T11-extension> --require-complete",
-      "result": "PASS: CP-11 and CP-12, 6204 ms, zero pending; temporary extension invoked the ticket-owned focused suites and was not committed"
-    },
-    {
-      "command": "node scripts/smoke/run.mjs --layer component --case CP-12 --extension <temporary-T11-usage-extension> --require-complete",
-      "result": "PASS: final strict activity validator source, 3408 ms, zero pending"
+      "command": "node scripts/smoke/run.mjs --layer component --case CP-11 --case CP-12 --extension docs/2.0.15/evidence/T11.json --require-complete",
+      "result": "PASS: committed home-template.component and usage.component bindings; CP-11 and CP-12 passed with zero pending"
     },
     {
       "command": "node scripts/component-run.mjs check --component @e-mate/dsh-client-shell",
@@ -85,7 +117,7 @@
     }
   ],
   "smoke": {
-    "committed_extension": false,
+    "committed_extension": true,
     "component_cases": {
       "CP-11": "passed",
       "CP-12": "passed"
@@ -116,12 +148,22 @@
     {
       "path": "packages/dsh/profile/plugins/emate-shell/tests/identity-settings-fidelity.client.spec.tsx",
       "reason": "coordinator transferred only the avatar RPC-count baseline to include bootstrap plus T10 activity while proving avatar choice adds no request"
+    },
+    {
+      "paths": [
+        "packages/dsh/profile/plugins/emate-shell/src/client/home.tsx",
+        "packages/dsh/profile/plugins/emate-shell/src/client/home.module.css",
+        "packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx",
+        "docs/2.0.15/evidence/T11.json"
+      ],
+      "reason": "D012 exact corrective lease for one real semantic Composer frame host and committed CP-11/CP-12 extension"
     }
   ],
   "owner_scope": {
     "outside_owned_or_transferred_paths_modified": false,
     "home_and_index_sequential_lease_used": true,
     "shared_test_edits_limited_to_transferred_expectations": true,
+    "d012_corrective_scope_only": true,
     "base_desktop_enterprise_lock_or_package_modified": false,
     "t10_contract_modified": false,
     "production_write_performed": false
@@ -142,6 +184,7 @@
     "packages/dsh/profile/plugins/emate-shell/tests/account-home.client.spec.tsx",
     "packages/dsh/profile/plugins/emate-shell/tests/sidebar-home-fidelity.client.spec.tsx",
     "packages/dsh/profile/plugins/emate-shell/tests/identity-settings-fidelity.client.spec.tsx",
+    "packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx",
     "docs/2.0.15/evidence/T11.json"
   ],
   "open_acceptance": [
