@@ -16,6 +16,12 @@ on:
         required: true
         type: choice
         options: [base]
+      macos_publication_mode:
+        description: Exact macOS publication owner for every downstream release stage.
+        required: true
+        default: unsigned
+        type: choice
+        options: [unsigned, signed]
       website_public_origin:
         description: Exact HTTPS origin served through the website current symlink.
         required: true
@@ -73,6 +79,7 @@ jobs:
           test "$EMATE_SOURCE" = "$GITHUB_SHA"
           test "$EMATE_VERSION" = "$(node -p "require('./desktop/e-mate-desktop/package.json').version")"
           test "${{ inputs.release_mode }}" = base
+          test "${{ inputs.macos_publication_mode }}" = unsigned -o "${{ inputs.macos_publication_mode }}" = signed
       - id: ci
         run: node scripts/release-coordinator.mjs resolve-ci --source "$EMATE_SOURCE"
       - name: Download the executable CI plan
@@ -133,6 +140,7 @@ jobs:
   signer:
     name: Sign and notarize exact accepted macOS bytes
     needs: ci
+    if: inputs.macos_publication_mode == 'signed'
     runs-on: ubuntu-24.04
     outputs:
       run_id: ${{ steps.run.outputs.run_id }}
@@ -153,8 +161,9 @@ jobs:
         run: node scripts/release-coordinator.mjs artifact --run-id "${{ steps.run.outputs.run_id }}" --name "e-mate-desktop-macos-signed-$EMATE_SOURCE"
 
   desktop:
-    name: Bind exact signed macOS and CI Windows bytes
+    name: Bind exact selected macOS and CI Windows bytes
     needs: [ci, signer]
+    if: always() && needs.ci.result == 'success' && (inputs.macos_publication_mode == 'unsigned' || needs.signer.result == 'success')
     runs-on: ubuntu-24.04
     outputs:
       run_id: ${{ steps.run.outputs.run_id }}
@@ -167,16 +176,28 @@ jobs:
       - uses: actions/setup-node@v6
         with: { node-version: '24' }
       - id: run
-        run: >-
-          node scripts/release-coordinator.mjs dispatch --source "$EMATE_SOURCE"
-          --workflow desktop-release.yml
-          --inputs '{"ci_run_id":"${{ needs.ci.outputs.run_id }}","source_sha":"${{ inputs.source_sha }}","signer_run_id":"${{ needs.signer.outputs.run_id }}","signed_macos_artifact_id":"${{ needs.signer.outputs.artifact_id }}"}'
+        run: |
+          set -euo pipefail
+          if test "${{ inputs.macos_publication_mode }}" = unsigned; then
+            inputs="$(jq -nc \
+              --arg ci "${{ needs.ci.outputs.run_id }}" --arg source "${{ inputs.source_sha }}" \
+              --arg artifact "${{ needs.ci.outputs.macos_artifact_id }}" \
+              '{ci_run_id:$ci,source_sha:$source,macos_publication_mode:"unsigned",macos_unsigned_artifact_id:$artifact}')"
+          else
+            inputs="$(jq -nc \
+              --arg ci "${{ needs.ci.outputs.run_id }}" --arg source "${{ inputs.source_sha }}" \
+              --arg signer "${{ needs.signer.outputs.run_id }}" --arg artifact "${{ needs.signer.outputs.artifact_id }}" \
+              '{ci_run_id:$ci,source_sha:$source,macos_publication_mode:"signed",signer_run_id:$signer,signed_macos_artifact_id:$artifact}')"
+          fi
+          node scripts/release-coordinator.mjs dispatch --source "$EMATE_SOURCE" \
+            --workflow desktop-release.yml --inputs "$inputs"
       - id: artifact
         run: node scripts/release-coordinator.mjs artifact --run-id "${{ steps.run.outputs.run_id }}" --name "e-mate-desktop-release-$EMATE_SOURCE"
 
   admission:
     name: Admit exact release bytes
     needs: [ci, profile, signer, desktop]
+    if: always() && needs.ci.result == 'success' && needs.profile.result == 'success' && needs.desktop.result == 'success' && (inputs.macos_publication_mode == 'unsigned' || needs.signer.result == 'success')
     runs-on: ubuntu-24.04
     outputs:
       run_id: ${{ steps.run.outputs.run_id }}
@@ -189,16 +210,29 @@ jobs:
       - uses: actions/setup-node@v6
         with: { node-version: '24' }
       - id: run
-        run: >-
-          node scripts/release-coordinator.mjs dispatch --source "$EMATE_SOURCE"
-          --workflow desktop-admission.yml
-          --inputs '{"ci_run_id":"${{ needs.ci.outputs.run_id }}","desktop_run_id":"${{ needs.desktop.outputs.run_id }}","desktop_artifact_id":"${{ needs.desktop.outputs.artifact_id }}","signer_run_id":"${{ needs.signer.outputs.run_id }}","signed_macos_artifact_id":"${{ needs.signer.outputs.artifact_id }}","profile_release_run_id":"${{ needs.profile.outputs.run_id }}","profile_artifact_id":"${{ needs.profile.outputs.artifact_id }}"}'
+        run: |
+          set -euo pipefail
+          common="$(jq -nc \
+            --arg ci "${{ needs.ci.outputs.run_id }}" --arg desktop_run "${{ needs.desktop.outputs.run_id }}" \
+            --arg desktop_artifact "${{ needs.desktop.outputs.artifact_id }}" \
+            --arg profile_run "${{ needs.profile.outputs.run_id }}" --arg profile_artifact "${{ needs.profile.outputs.artifact_id }}" \
+            '{ci_run_id:$ci,desktop_run_id:$desktop_run,desktop_artifact_id:$desktop_artifact,profile_release_run_id:$profile_run,profile_artifact_id:$profile_artifact}')"
+          if test "${{ inputs.macos_publication_mode }}" = unsigned; then
+            inputs="$(jq -c --arg artifact "${{ needs.ci.outputs.macos_artifact_id }}" \
+              '. + {macos_publication_mode:"unsigned",macos_unsigned_artifact_id:$artifact}' <<<"$common")"
+          else
+            inputs="$(jq -c --arg signer "${{ needs.signer.outputs.run_id }}" --arg artifact "${{ needs.signer.outputs.artifact_id }}" \
+              '. + {macos_publication_mode:"signed",signer_run_id:$signer,signed_macos_artifact_id:$artifact}' <<<"$common")"
+          fi
+          node scripts/release-coordinator.mjs dispatch --source "$EMATE_SOURCE" \
+            --workflow desktop-admission.yml --inputs "$inputs"
       - id: artifact
         run: node scripts/release-coordinator.mjs artifact --run-id "${{ steps.run.outputs.run_id }}" --name "e-mate-desktop-admission-$EMATE_SOURCE"
 
   state:
     name: Freeze admitted release state
     needs: [ci, profile, signer, desktop, admission]
+    if: always() && needs.ci.result == 'success' && needs.profile.result == 'success' && needs.desktop.result == 'success' && needs.admission.result == 'success' && (inputs.macos_publication_mode == 'unsigned' || needs.signer.result == 'success')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -208,16 +242,37 @@ jobs:
       - name: Emit the Cloudflare-plugin handoff state
         env:
           EMATE_EXPECTED_VERSION: ${{ inputs.version }}
-        run: >-
-          node scripts/release-coordinator.mjs state
-          --source "$EMATE_SOURCE" --version "$EMATE_VERSION" --mode "${{ inputs.release_mode }}"
-          --ci-run "${{ needs.ci.outputs.run_id }}"
-          --profile-run "${{ needs.profile.outputs.run_id }}" --profile-artifact "${{ needs.profile.outputs.artifact_id }}" --profile-digest "${{ needs.profile.outputs.artifact_digest }}" --profile-bytes "${{ needs.profile.outputs.artifact_bytes }}"
-          --desktop-run "${{ needs.desktop.outputs.run_id }}" --desktop-artifact "${{ needs.desktop.outputs.artifact_id }}" --desktop-digest "${{ needs.desktop.outputs.artifact_digest }}" --desktop-bytes "${{ needs.desktop.outputs.artifact_bytes }}"
-          --admission-run "${{ needs.admission.outputs.run_id }}" --admission-artifact "${{ needs.admission.outputs.artifact_id }}" --admission-digest "${{ needs.admission.outputs.artifact_digest }}" --admission-bytes "${{ needs.admission.outputs.artifact_bytes }}"
-          --macos-artifact "${{ needs.signer.outputs.artifact_id }}" --macos-digest "${{ needs.signer.outputs.artifact_digest }}" --macos-bytes "${{ needs.signer.outputs.artifact_bytes }}"
-          --windows-artifact "${{ needs.ci.outputs.windows_artifact_id }}" --windows-digest "${{ needs.ci.outputs.windows_artifact_digest }}" --windows-bytes "${{ needs.ci.outputs.windows_artifact_bytes }}"
-          --out release-state.json
+          CI_MACOS_ARTIFACT: ${{ needs.ci.outputs.macos_artifact_id }}
+          CI_MACOS_DIGEST: ${{ needs.ci.outputs.macos_artifact_digest }}
+          CI_MACOS_BYTES: ${{ needs.ci.outputs.macos_artifact_bytes }}
+          SIGNED_MACOS_ARTIFACT: ${{ needs.signer.outputs.artifact_id }}
+          SIGNED_MACOS_DIGEST: ${{ needs.signer.outputs.artifact_digest }}
+          SIGNED_MACOS_BYTES: ${{ needs.signer.outputs.artifact_bytes }}
+        run: |
+          set -euo pipefail
+          if test "${{ inputs.macos_publication_mode }}" = unsigned; then
+            macos_run="${{ needs.ci.outputs.run_id }}"
+            macos_artifact="$CI_MACOS_ARTIFACT"
+            macos_digest="$CI_MACOS_DIGEST"
+            macos_bytes="$CI_MACOS_BYTES"
+          elif test "${{ inputs.macos_publication_mode }}" = signed; then
+            macos_run="${{ needs.signer.outputs.run_id }}"
+            macos_artifact="$SIGNED_MACOS_ARTIFACT"
+            macos_digest="$SIGNED_MACOS_DIGEST"
+            macos_bytes="$SIGNED_MACOS_BYTES"
+          else
+            exit 1
+          fi
+          node scripts/release-coordinator.mjs state \
+            --source "$EMATE_SOURCE" --version "$EMATE_VERSION" --mode "${{ inputs.release_mode }}" \
+            --macos-publication-mode "${{ inputs.macos_publication_mode }}" \
+            --ci-run "${{ needs.ci.outputs.run_id }}" \
+            --profile-run "${{ needs.profile.outputs.run_id }}" --profile-artifact "${{ needs.profile.outputs.artifact_id }}" --profile-digest "${{ needs.profile.outputs.artifact_digest }}" --profile-bytes "${{ needs.profile.outputs.artifact_bytes }}" \
+            --desktop-run "${{ needs.desktop.outputs.run_id }}" --desktop-artifact "${{ needs.desktop.outputs.artifact_id }}" --desktop-digest "${{ needs.desktop.outputs.artifact_digest }}" --desktop-bytes "${{ needs.desktop.outputs.artifact_bytes }}" \
+            --admission-run "${{ needs.admission.outputs.run_id }}" --admission-artifact "${{ needs.admission.outputs.artifact_id }}" --admission-digest "${{ needs.admission.outputs.artifact_digest }}" --admission-bytes "${{ needs.admission.outputs.artifact_bytes }}" \
+            --macos-run "$macos_run" --macos-artifact "$macos_artifact" --macos-digest "$macos_digest" --macos-bytes "$macos_bytes" \
+            --windows-run "${{ needs.ci.outputs.run_id }}" --windows-artifact "${{ needs.ci.outputs.windows_artifact_id }}" --windows-digest "${{ needs.ci.outputs.windows_artifact_digest }}" --windows-bytes "${{ needs.ci.outputs.windows_artifact_bytes }}" \
+            --out release-state.json
       - run: test "$(jq -r .status release-state.json)" = admitted-awaiting-cloudflare-plugin
       - name: Emit the closed website publication handoff
         env:

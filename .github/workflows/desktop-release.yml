@@ -11,13 +11,22 @@ on:
         description: Exact protected-main source SHA accepted by that CI run.
         required: true
         type: string
+      macos_publication_mode:
+        description: Exact macOS publication owner; unsigned uses formal CI and signed uses the isolated signer.
+        required: true
+        type: choice
+        options: [unsigned, signed]
       signer_run_id:
         description: Successful attempt-1 macOS signing run for the exact source.
-        required: true
+        required: false
         type: string
       signed_macos_artifact_id:
         description: Exact e-mate-desktop-macos-signed-<source SHA> artifact ID.
-        required: true
+        required: false
+        type: string
+      macos_unsigned_artifact_id:
+        description: Exact e-mate-desktop-macos-<source SHA> artifact ID; required only in unsigned mode.
+        required: false
         type: string
 
 permissions:
@@ -33,7 +42,7 @@ env:
 
 jobs:
   manifest:
-    name: Bind exact signed macOS and protected-main CI Windows bytes
+    name: ${{ inputs.macos_publication_mode == 'unsigned' && 'Bind exact protected-main CI unsigned desktop bytes' || 'Bind exact signed macOS and protected-main CI Windows bytes' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -58,8 +67,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CI_RUN_ID: ${{ inputs.ci_run_id }}
           SOURCE_SHA: ${{ inputs.source_sha }}
+          MACOS_PUBLICATION_MODE: ${{ inputs.macos_publication_mode }}
           SIGNER_RUN_ID: ${{ inputs.signer_run_id }}
           SIGNED_MACOS_ARTIFACT_ID: ${{ inputs.signed_macos_artifact_id }}
+          MACOS_UNSIGNED_ARTIFACT_ID: ${{ inputs.macos_unsigned_artifact_id }}
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = zyfjacksonchen-source/e-Mate-2.0.11
@@ -69,8 +80,19 @@ jobs:
           test "$GITHUB_RUN_ATTEMPT" = 1
           test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/desktop-release.yml@refs/heads/main"
           [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$SIGNER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$SIGNED_MACOS_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          case "$MACOS_PUBLICATION_MODE" in
+            unsigned)
+              [[ "$MACOS_UNSIGNED_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+              test -z "$SIGNER_RUN_ID"
+              test -z "$SIGNED_MACOS_ARTIFACT_ID"
+              ;;
+            signed)
+              [[ "$SIGNER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+              [[ "$SIGNED_MACOS_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+              test -z "$MACOS_UNSIGNED_ARTIFACT_ID"
+              ;;
+            *) exit 1 ;;
+          esac
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$GITHUB_SHA" = "$SOURCE_SHA"
@@ -79,9 +101,11 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > .release-inputs/evidence/run.json
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/jobs?per_page=100" > .release-inputs/evidence/jobs.json
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100" > .release-inputs/evidence/artifacts.json
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SIGNER_RUN_ID" > .release-inputs/evidence/signer-run.json
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SIGNER_RUN_ID/jobs?per_page=100" > .release-inputs/evidence/signer-jobs.json
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$SIGNED_MACOS_ARTIFACT_ID" > .release-inputs/evidence/signed-macos-artifact.json
+          if test "$MACOS_PUBLICATION_MODE" = signed; then
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SIGNER_RUN_ID" > .release-inputs/evidence/signer-run.json
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SIGNER_RUN_ID/jobs?per_page=100" > .release-inputs/evidence/signer-jobs.json
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$SIGNED_MACOS_ARTIFACT_ID" > .release-inputs/evidence/signed-macos-artifact.json
+          fi
           plan_artifact_id="$(jq -er --arg name "e-mate-ci-plan-$SOURCE_SHA" \
             '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one CI plan artifact") end' \
             .release-inputs/evidence/artifacts.json)"
@@ -89,8 +113,13 @@ jobs:
           macos_artifact_id="$(jq -er --arg name "e-mate-desktop-macos-$SOURCE_SHA" \
             '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one CI macOS artifact") end' \
             .release-inputs/evidence/artifacts.json)"
+          if test "$MACOS_PUBLICATION_MODE" = unsigned; then
+            test "$macos_artifact_id" = "$MACOS_UNSIGNED_ARTIFACT_ID"
+          fi
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$macos_artifact_id" > .release-inputs/evidence/macos-ci-artifact.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$macos_artifact_id/zip" > .release-inputs/evidence/macos-ci.zip
           echo "plan_artifact_id=$plan_artifact_id" >> "$GITHUB_OUTPUT"
+          echo "macos_artifact_id=$macos_artifact_id" >> "$GITHUB_OUTPUT"
 
       - name: Download the unique CI plan
         uses: actions/download-artifact@v4
@@ -147,12 +176,14 @@ jobs:
       - name: Download the exact accepted macOS installer artifact
         uses: actions/download-artifact@v4
         with:
-          name: e-mate-desktop-macos-${{ inputs.source_sha }}
+          artifact-ids: ${{ steps.evidence.outputs.macos_artifact_id }}
+          merge-multiple: true
           path: .release-inputs/macos
           github-token: ${{ github.token }}
           run-id: ${{ inputs.ci_run_id }}
 
       - name: Download the exact signed and notarized macOS handoff
+        if: inputs.macos_publication_mode == 'signed'
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ inputs.signed_macos_artifact_id }}
@@ -180,18 +211,32 @@ jobs:
             --platform win32 --source-commit "$SOURCE_SHA" --ci-run-id "$CI_RUN_ID" \
             --base-contract desktop/e-mate-desktop/base-contract.json --directory .release-inputs/windows
 
-      - name: Accept only the isolated signed macOS handoff
-        run: >-
-          node scripts/desktop-admission.mjs signed-macos
-          --commit "${{ inputs.source_sha }}"
-          --ci-run-id "${{ inputs.ci_run_id }}"
-          --signer-run-id "${{ inputs.signer_run_id }}"
-          --signer-artifact-id "${{ inputs.signed_macos_artifact_id }}"
-          --release-version "$(node -p "require(process.argv[1]).version" ./desktop/e-mate-desktop/package.json)"
-          --base-contract desktop/e-mate-desktop/base-contract.json
-          --metadata .release-inputs/evidence
-          --unsigned-macos .release-inputs/macos
-          --signed-macos .release-inputs/macos-signed
+      - name: Accept only the explicitly selected macOS handoff
+        env:
+          MACOS_PUBLICATION_MODE: ${{ inputs.macos_publication_mode }}
+        run: |
+          set -euo pipefail
+          args=(
+            macos-handoff
+            --macos-publication-mode "$MACOS_PUBLICATION_MODE"
+            --commit "${{ inputs.source_sha }}"
+            --ci-run-id "${{ inputs.ci_run_id }}"
+            --release-version "$(node -p "require(process.argv[1]).version" ./desktop/e-mate-desktop/package.json)"
+            --base-contract desktop/e-mate-desktop/base-contract.json
+            --metadata .release-inputs/evidence
+            --unsigned-macos .release-inputs/macos
+            --unsigned-macos-archive .release-inputs/evidence/macos-ci.zip
+          )
+          if test "$MACOS_PUBLICATION_MODE" = unsigned; then
+            args+=(--macos-unsigned-artifact-id "${{ inputs.macos_unsigned_artifact_id }}")
+          else
+            args+=(
+              --signer-run-id "${{ inputs.signer_run_id }}"
+              --signer-artifact-id "${{ inputs.signed_macos_artifact_id }}"
+              --signed-macos .release-inputs/macos-signed
+            )
+          fi
+          node scripts/desktop-admission.mjs "${args[@]}"
 
       - name: Stage only the exact accepted installer bytes
         id: version
@@ -199,7 +244,11 @@ jobs:
           set -euo pipefail
           version="$(node -p "require(process.argv[1]).version" ./desktop/e-mate-desktop/package.json)"
           mkdir -p dist/desktop
-          cp ".release-inputs/macos-signed/e-Mate-$version-mac-universal.dmg" dist/desktop/
+          if test "${{ inputs.macos_publication_mode }}" = unsigned; then
+            cp ".release-inputs/macos/e-Mate-$version-mac-universal.dmg" dist/desktop/
+          else
+            cp ".release-inputs/macos-signed/e-Mate-$version-mac-universal.dmg" dist/desktop/
+          fi
           cp ".release-inputs/windows/e-Mate-$version-win-x64-Setup.exe" dist/desktop/
           echo "value=$version" >> "$GITHUB_OUTPUT"
 
@@ -207,18 +256,23 @@ jobs:
         env:
           CI_RUN_ID: ${{ inputs.ci_run_id }}
           SIGNER_RUN_ID: ${{ inputs.signer_run_id }}
+          MACOS_PUBLICATION_MODE: ${{ inputs.macos_publication_mode }}
           SOURCE_SHA: ${{ inputs.source_sha }}
-        run: >-
-          node desktop/e-mate-desktop/scripts/desktop-release-manifest.ts
-          candidate
-          --mac dist/desktop/e-Mate-${{ steps.version.outputs.value }}-mac-universal.dmg
-          --win dist/desktop/e-Mate-${{ steps.version.outputs.value }}-win-x64-Setup.exe
-          --commit "$SOURCE_SHA"
-          --mac-commit "$SOURCE_SHA"
-          --win-commit "$SOURCE_SHA"
-          --mac-run "$SIGNER_RUN_ID"
-          --win-run "$CI_RUN_ID"
-          --out dist/desktop/desktop-candidate.json
+        run: |
+          set -euo pipefail
+          if test "$MACOS_PUBLICATION_MODE" = unsigned; then
+            mac_run="$CI_RUN_ID"
+          elif test "$MACOS_PUBLICATION_MODE" = signed; then
+            mac_run="$SIGNER_RUN_ID"
+          else
+            exit 1
+          fi
+          node desktop/e-mate-desktop/scripts/desktop-release-manifest.ts candidate \
+            --mac dist/desktop/e-Mate-${{ steps.version.outputs.value }}-mac-universal.dmg \
+            --win dist/desktop/e-Mate-${{ steps.version.outputs.value }}-win-x64-Setup.exe \
+            --commit "$SOURCE_SHA" --mac-commit "$SOURCE_SHA" --win-commit "$SOURCE_SHA" \
+            --mac-run "$mac_run" --win-run "$CI_RUN_ID" \
+            --out dist/desktop/desktop-candidate.json
 
       - uses: actions/upload-artifact@v4
         with:

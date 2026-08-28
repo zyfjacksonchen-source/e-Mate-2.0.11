@@ -5,6 +5,31 @@ import { pathToFileURL } from 'node:url'
 const SHA = /^[0-9a-f]{40}$/u
 const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/u
 const POSITIVE_ID = /^[1-9][0-9]*$/u
+const UNSIGNED = Object.freeze({
+  mode: 'unsigned', signed: false, notarized: false, description: 'Unsigned and not notarized.',
+})
+
+export function publicationMetadata(macosPublicationMode) {
+  if (macosPublicationMode === 'unsigned') {
+    return {
+      description: 'e-Mate 2.0.15 publishes unsigned macOS and Windows installers; macOS is not notarized.',
+      platforms: { darwin: UNSIGNED, win32: UNSIGNED },
+    }
+  }
+  if (macosPublicationMode === 'signed') {
+    return {
+      description: 'e-Mate 2.0.15 publishes a Developer ID signed and notarized macOS installer and an unsigned Windows installer.',
+      platforms: {
+        darwin: {
+          mode: 'signed', signed: true, notarized: true,
+          description: 'Developer ID signed and notarized.',
+        },
+        win32: UNSIGNED,
+      },
+    }
+  }
+  throw new Error('macOS publication mode must be exactly unsigned or signed')
+}
 
 export function parseArgs(argv) {
   const options = {}
@@ -90,20 +115,24 @@ function resolveArtifact(runId, name) {
 
 export function emitState(options) {
   const artifact = name => ({
+    run_id: options[`${name}-run`],
     artifact_id: options[`${name}-artifact`],
     artifact_digest: options[`${name}-digest`],
     artifact_bytes: Number(options[`${name}-bytes`]),
   })
-  const required = ['source', 'version', 'mode', 'ci-run',
+  const required = ['source', 'version', 'mode', 'macos-publication-mode', 'ci-run',
     ...['profile', 'desktop', 'admission'].flatMap(name => [`${name}-run`, `${name}-artifact`, `${name}-digest`, `${name}-bytes`]),
-    ...['macos', 'windows'].flatMap(name => [`${name}-artifact`, `${name}-digest`, `${name}-bytes`])]
+    ...['macos', 'windows'].flatMap(name => [`${name}-run`, `${name}-artifact`, `${name}-digest`, `${name}-bytes`])]
   if (required.some(key => !options[key])) throw new Error('release state is incomplete')
+  const publication = publicationMetadata(options['macos-publication-mode'])
   const state = {
-    schema_version: 3,
+    schema_version: 4,
     document_type: 'emate.release-state',
     source_sha: options.source,
     version: options.version,
     release_mode: options.mode,
+    macos_publication_mode: options['macos-publication-mode'],
+    publication_metadata: publication,
     status: 'admitted-awaiting-cloudflare-plugin',
     stages: {
       ci: { status: 'accepted', run_id: options['ci-run'] },
@@ -117,10 +146,13 @@ export function emitState(options) {
     state.stages.publication.macos, state.stages.publication.windows]
   if (!SHA.test(state.source_sha) || state.version !== process.env.EMATE_EXPECTED_VERSION || state.release_mode !== 'base'
     || !POSITIVE_ID.test(state.stages.ci.run_id)
-    || identities.some(value => !POSITIVE_ID.test(value.artifact_id) || !SHA256_DIGEST.test(value.artifact_digest)
+    || identities.some(value => !POSITIVE_ID.test(value.run_id ?? state.stages.ci.run_id)
+      || !POSITIVE_ID.test(value.artifact_id) || !SHA256_DIGEST.test(value.artifact_digest)
       || !Number.isSafeInteger(value.artifact_bytes) || value.artifact_bytes <= 0)
     || [state.stages.profile, state.stages.desktop, state.stages.admission]
-      .some(value => !POSITIVE_ID.test(value.run_id))) {
+      .some(value => !POSITIVE_ID.test(value.run_id))
+    || state.stages.publication.windows.run_id !== state.stages.ci.run_id
+    || (state.macos_publication_mode === 'unsigned') !== (state.stages.publication.macos.run_id === state.stages.ci.run_id)) {
     throw new Error('release state identity is invalid')
   }
   writeFileSync(options.out, `${JSON.stringify(state, null, 2)}\n`, { flag: 'wx' })

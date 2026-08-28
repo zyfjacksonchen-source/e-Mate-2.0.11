@@ -3,7 +3,7 @@ import test from 'node:test'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { emitState, exactArtifact, parseArgs } from './release-coordinator.mjs'
+import { emitState, exactArtifact, parseArgs, publicationMetadata } from './release-coordinator.mjs'
 
 test('parses only closed key-value arguments', () => {
   assert.deepEqual(parseArgs(['--source', 'a'.repeat(40), '--mode', 'base']), { source: 'a'.repeat(40), mode: 'base' })
@@ -22,7 +22,8 @@ test('release state binds every artifact id, digest, and byte count', async t =>
   t.after(() => rm(root, { recursive: true, force: true }))
   const output = join(root, 'release-state.json')
   const options = {
-    source: 'a'.repeat(40), version: '2.0.15', mode: 'base', 'ci-run': '1', out: output,
+    source: 'a'.repeat(40), version: '2.0.15', mode: 'base', 'macos-publication-mode': 'unsigned',
+    'ci-run': '1', 'macos-run': '1', 'windows-run': '1', out: output,
     ...Object.fromEntries(['profile', 'desktop', 'admission', 'macos', 'windows'].flatMap((name, index) => [
       [`${name}-artifact`, String(index + 2)],
       [`${name}-digest`, `sha256:${String(index).repeat(64)}`],
@@ -35,11 +36,15 @@ test('release state binds every artifact id, digest, and byte count', async t =>
   t.after(() => previous === undefined ? delete process.env.EMATE_EXPECTED_VERSION : process.env.EMATE_EXPECTED_VERSION = previous)
   emitState(options)
   const state = JSON.parse(await readFile(output, 'utf8'))
-  assert.equal(state.schema_version, 3)
+  assert.equal(state.schema_version, 4)
+  assert.equal(state.macos_publication_mode, 'unsigned')
+  assert.deepEqual(state.publication_metadata, publicationMetadata('unsigned'))
   assert.deepEqual(state.stages.publication.macos, {
-    artifact_id: '5', artifact_digest: `sha256:${'3'.repeat(64)}`, artifact_bytes: 13,
+    run_id: '1', artifact_id: '5', artifact_digest: `sha256:${'3'.repeat(64)}`, artifact_bytes: 13,
   })
   assert.throws(() => emitState({ ...options, out: join(root, 'bad.json'), 'desktop-digest': 'bad' }), /identity is invalid/u)
+  assert.throws(() => emitState({ ...options, out: join(root, 'mode.json'), 'macos-publication-mode': 'automatic' }), /exactly unsigned or signed/u)
+  assert.throws(() => emitState({ ...options, out: join(root, 'owner.json'), 'macos-run': '9' }), /identity is invalid/u)
 })
 
 test('coordinator emits one release-bound website handoff and performs no publication write', async () => {
@@ -54,6 +59,11 @@ test('coordinator emits one release-bound website handoff and performs no public
   assert.match(workflow, /website_expected_active_index/u)
   assert.match(workflow, /render-download-page\.mjs/u)
   assert.match(workflow, /--release-state release-state\.json/u)
+  assert.match(workflow, /macos_publication_mode/u)
+  assert.match(workflow, /inputs\.macos_publication_mode == 'signed'/u)
+  assert.match(workflow, /macos_publication_mode:"unsigned",macos_unsigned_artifact_id/u)
+  assert.match(workflow, /--macos-publication-mode/u)
+  assert.match(workflow, /--macos-run "\$macos_run"/u)
   assert.match(workflow, /e-mate-website-handoff-\$\{\{ inputs\.source_sha \}\}/u)
   assert.doesNotMatch(workflow, /desktop-publication\.yml|wrangler|r2\.cloudflarestorage/u)
   assert.doesNotMatch(workflow, /ssh |scp |rsync |ln -s|aws |curl .*-(?:X|T)/u)

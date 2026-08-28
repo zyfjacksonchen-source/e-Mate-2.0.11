@@ -11,13 +11,22 @@ on:
         description: Exact e-mate-desktop-admission-<source SHA> artifact ID.
         required: true
         type: string
+      macos_publication_mode:
+        description: Exact macOS publication contract.
+        required: true
+        type: choice
+        options: [unsigned, signed]
       macos_signer_run_id:
         description: Successful attempt-1 macOS signer run for this exact source commit.
-        required: true
+        required: false
         type: string
       macos_signed_artifact_id:
         description: Exact signed and notarized macOS Desktop artifact ID.
-        required: true
+        required: false
+        type: string
+      macos_unsigned_artifact_id:
+        description: Exact formal-CI unsigned macOS artifact ID.
+        required: false
         type: string
       windows_artifact_id:
         description: Exact compression-level-0 Windows staging artifact ID.
@@ -52,6 +61,11 @@ jobs:
           node-version: '24'
 
       - name: Accept only one protected-main workflow attempt
+        env:
+          MACOS_PUBLICATION_MODE: ${{ inputs.macos_publication_mode }}
+          MACOS_SIGNER_RUN_ID: ${{ inputs.macos_signer_run_id }}
+          MACOS_SIGNED_ARTIFACT_ID: ${{ inputs.macos_signed_artifact_id }}
+          MACOS_UNSIGNED_ARTIFACT_ID: ${{ inputs.macos_unsigned_artifact_id }}
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = zyfjacksonchen-source/e-Mate-2.0.11
@@ -61,19 +75,34 @@ jobs:
           test "$GITHUB_RUN_ATTEMPT" = 1
           test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/desktop-publication.yml@refs/heads/main"
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          case "$MACOS_PUBLICATION_MODE" in
+            unsigned)
+              [[ "$MACOS_UNSIGNED_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+              test -z "$MACOS_SIGNER_RUN_ID"
+              test -z "$MACOS_SIGNED_ARTIFACT_ID"
+              ;;
+            signed)
+              [[ "$MACOS_SIGNER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+              [[ "$MACOS_SIGNED_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+              test -z "$MACOS_UNSIGNED_ARTIFACT_ID"
+              ;;
+            *) exit 1 ;;
+          esac
 
       - name: Sign the exact admission and prepare the Cloudflare plugin handoff
         id: prepare
-        uses: zyfjacksonchen-source/e-mate-desktop-publication@1f46dbe1d34ac558cb2e91b52b2ab30f7eab6c4c
+        uses: zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123
         env:
           EMATE_GITHUB_PROVENANCE_TOKEN: ${{ github.token }}
           EMATE_DESKTOP_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.EMATE_PROFILE_SIGNING_PRIVATE_KEY }}
         with:
           source-sha: ${{ github.sha }}
           main-ci-run-id: ${{ inputs.main_ci_run_id }}
+          macos-publication-mode: ${{ inputs.macos_publication_mode }}
           admission-artifact-id: ${{ inputs.admission_artifact_id }}
-          macos-signer-run-id: ${{ inputs.macos_signer_run_id }}
-          macos-signed-artifact-id: ${{ inputs.macos_signed_artifact_id }}
+          macos-signer-run-id: ${{ inputs.macos_publication_mode == 'signed' && inputs.macos_signer_run_id || '' }}
+          macos-signed-artifact-id: ${{ inputs.macos_publication_mode == 'signed' && inputs.macos_signed_artifact_id || '' }}
+          macos-unsigned-artifact-id: ${{ inputs.macos_publication_mode == 'unsigned' && inputs.macos_unsigned_artifact_id || '' }}
           windows-artifact-id: ${{ inputs.windows_artifact_id }}
           expected-signed-current: ${{ inputs.expected_signed_current }}
           expected-legacy-current: ${{ inputs.expected_legacy_current }}
@@ -91,6 +120,36 @@ jobs:
           test -d "$ARTIFACT_PATH"
           test "$(find "$ARTIFACT_PATH" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort | paste -sd, -)" = "cloudflare-plugin-handoff.json,cloudflare-publication-plan.json,desktop-release-signed.json"
           test "$(find "$ARTIFACT_PATH" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 3
+          jq -e --arg mode "${{ inputs.macos_publication_mode }}" '
+            .schema_version == 4
+            and .github.macos_publication_mode == $mode
+            and .publication_metadata == (if $mode == "unsigned" then {
+              description: "e-Mate 2.0.15 publishes unsigned macOS and Windows installers; macOS is not notarized.",
+              platforms: {
+                darwin: { mode: "unsigned", signed: false, notarized: false, description: "Unsigned and not notarized." },
+                win32: { mode: "unsigned", signed: false, notarized: false, description: "Unsigned and not notarized." }
+              }
+            } else {
+              description: "e-Mate 2.0.15 publishes a Developer ID signed and notarized macOS installer and an unsigned Windows installer.",
+              platforms: {
+                darwin: { mode: "signed", signed: true, notarized: true, description: "Developer ID signed and notarized." },
+                win32: { mode: "unsigned", signed: false, notarized: false, description: "Unsigned and not notarized." }
+              }
+            } end)
+          ' "$ARTIFACT_PATH/cloudflare-publication-plan.json" >/dev/null
+          jq -e --slurpfile plan "$ARTIFACT_PATH/cloudflare-publication-plan.json" '
+            .schema_version == 4 and .publication_metadata == $plan[0].publication_metadata
+            and .github == $plan[0].github
+          ' "$ARTIFACT_PATH/cloudflare-plugin-handoff.json" >/dev/null
+          jq -e '
+            .schema_version == 2
+            and (has("publication_metadata") | not)
+            and (keys | sort) == ([
+              "schema_version", "document_type", "release_status", "version", "source_commit",
+              "base_contract_id", "schedule_protocol_floor", "profile_component_aggregate",
+              "github_artifact_provenance", "artifacts", "signature"
+            ] | sort)
+          ' "$ARTIFACT_PATH/desktop-release-signed.json" >/dev/null
 
       - uses: actions/upload-artifact@v4
         with:

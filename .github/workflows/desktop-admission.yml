@@ -15,13 +15,22 @@ on:
         description: Exact GitHub artifact ID for e-mate-desktop-release-<source SHA>.
         required: true
         type: string
+      macos_publication_mode:
+        description: Exact macOS publication owner; unsigned uses formal CI and signed uses the isolated signer.
+        required: true
+        type: choice
+        options: [unsigned, signed]
       signer_run_id:
         description: Successful attempt-1 macOS signing run for the exact source.
-        required: true
+        required: false
         type: string
       signed_macos_artifact_id:
         description: Exact GitHub artifact ID for e-mate-desktop-macos-signed-<source SHA>.
-        required: true
+        required: false
+        type: string
+      macos_unsigned_artifact_id:
+        description: Exact formal-CI macOS artifact ID; required only in unsigned mode.
+        required: false
         type: string
       profile_release_run_id:
         description: Successful bootstrap Profile release run containing all three signed desired states.
@@ -72,8 +81,10 @@ jobs:
           CI_RUN_ID: ${{ inputs.ci_run_id }}
           DESKTOP_RUN_ID: ${{ inputs.desktop_run_id }}
           DESKTOP_ARTIFACT_ID: ${{ inputs.desktop_artifact_id }}
+          MACOS_PUBLICATION_MODE: ${{ inputs.macos_publication_mode }}
           SIGNER_RUN_ID: ${{ inputs.signer_run_id }}
           SIGNED_MACOS_ARTIFACT_ID: ${{ inputs.signed_macos_artifact_id }}
+          MACOS_UNSIGNED_ARTIFACT_ID: ${{ inputs.macos_unsigned_artifact_id }}
           PROFILE_RUN_ID: ${{ inputs.profile_release_run_id }}
           PROFILE_ARTIFACT_ID: ${{ inputs.profile_artifact_id }}
         run: |
@@ -86,21 +97,34 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
           for value in "$CI_RUN_ID" "$DESKTOP_RUN_ID" "$DESKTOP_ARTIFACT_ID" "$PROFILE_RUN_ID" \
-            "$PROFILE_ARTIFACT_ID" "$SIGNER_RUN_ID" "$SIGNED_MACOS_ARTIFACT_ID"; do
+            "$PROFILE_ARTIFACT_ID"; do
             [[ "$value" =~ ^[1-9][0-9]*$ ]]
           done
+          case "$MACOS_PUBLICATION_MODE" in
+            unsigned)
+              [[ "$MACOS_UNSIGNED_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+              test -z "$SIGNER_RUN_ID"
+              test -z "$SIGNED_MACOS_ARTIFACT_ID"
+              ;;
+            signed)
+              [[ "$SIGNER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+              [[ "$SIGNED_MACOS_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+              test -z "$MACOS_UNSIGNED_ARTIFACT_ID"
+              ;;
+            *) exit 1 ;;
+          esac
           mkdir -p .admission/metadata
           gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" > .admission/metadata/main-ref.json
-          for pair in \
-            "ci:$CI_RUN_ID" \
-            "signer:$SIGNER_RUN_ID" \
-            "desktop:$DESKTOP_RUN_ID" \
-            "profile:$PROFILE_RUN_ID"; do
+          for pair in "ci:$CI_RUN_ID" "desktop:$DESKTOP_RUN_ID" "profile:$PROFILE_RUN_ID"; do
             label="${pair%%:*}"
             run_id="${pair#*:}"
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > ".admission/metadata/$label-run.json"
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" > ".admission/metadata/$label-jobs.json"
           done
+          if test "$MACOS_PUBLICATION_MODE" = signed; then
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SIGNER_RUN_ID" > .admission/metadata/signer-run.json
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SIGNER_RUN_ID/jobs?per_page=100" > .admission/metadata/signer-jobs.json
+          fi
           ci_artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100")"
           printf '%s\n' "$ci_artifacts" > .admission/metadata/ci-artifacts.json
           ci_artifact_id="$(jq -er --arg name "e-mate-ci-plan-$GITHUB_SHA" \
@@ -108,7 +132,9 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ci_artifact_id" > .admission/metadata/ci-artifact.json
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ci_artifact_id/zip" > .admission/metadata/ci-plan.zip
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$DESKTOP_ARTIFACT_ID" > .admission/metadata/desktop-artifact.json
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$SIGNED_MACOS_ARTIFACT_ID" > .admission/metadata/signed-macos-artifact.json
+          if test "$MACOS_PUBLICATION_MODE" = signed; then
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$SIGNED_MACOS_ARTIFACT_ID" > .admission/metadata/signed-macos-artifact.json
+          fi
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$PROFILE_ARTIFACT_ID" > .admission/metadata/profile-publication-artifact.json
           echo "ci_artifact_id=$ci_artifact_id" >> "$GITHUB_OUTPUT"
 
@@ -148,7 +174,11 @@ jobs:
           candidate=.admission/desktop/desktop-candidate.json
           test -f "$candidate"
           test "$(jq -er .artifacts.win32.build_run_id "$candidate")" = "$CI_RUN_ID"
-          test "$(jq -er .artifacts.darwin.build_run_id "$candidate")" = "${{ inputs.signer_run_id }}"
+          if test "${{ inputs.macos_publication_mode }}" = unsigned; then
+            test "$(jq -er .artifacts.darwin.build_run_id "$candidate")" = "$CI_RUN_ID"
+          else
+            test "$(jq -er .artifacts.darwin.build_run_id "$candidate")" = "${{ inputs.signer_run_id }}"
+          fi
           artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100")"
           artifact_id() {
             jq -er --arg name "$1" \
@@ -159,11 +189,15 @@ jobs:
           base_sdk_artifact_id="$(artifact_id "e-mate-base-sdk-$GITHUB_SHA")"
           windows_artifact_id="$(artifact_id "e-mate-desktop-windows-$GITHUB_SHA")"
           macos_artifact_id="$(artifact_id "e-mate-desktop-macos-$GITHUB_SHA")"
+          if test "${{ inputs.macos_publication_mode }}" = unsigned; then
+            test "$macos_artifact_id" = "${{ inputs.macos_unsigned_artifact_id }}"
+          fi
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$profile_artifact_id" > .admission/metadata/profile-build-artifact.json
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$receipt_artifact_id" > .admission/metadata/profile-build-receipt-artifact.json
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$base_sdk_artifact_id" > .admission/metadata/base-sdk-artifact.json
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$windows_artifact_id" > .admission/metadata/windows-ci-artifact.json
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$macos_artifact_id" > .admission/metadata/macos-ci-artifact.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$macos_artifact_id/zip" > .admission/metadata/macos-ci.zip
           echo "artifact_id=$profile_artifact_id" >> "$GITHUB_OUTPUT"
           echo "receipt_artifact_id=$receipt_artifact_id" >> "$GITHUB_OUTPUT"
           echo "macos_artifact_id=$macos_artifact_id" >> "$GITHUB_OUTPUT"
@@ -196,6 +230,7 @@ jobs:
           run-id: ${{ inputs.ci_run_id }}
 
       - name: Download the exact signed and notarized macOS handoff
+        if: inputs.macos_publication_mode == 'signed'
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ inputs.signed_macos_artifact_id }}
@@ -242,28 +277,40 @@ jobs:
           CI_RUN_ID: ${{ inputs.ci_run_id }}
           DESKTOP_RUN_ID: ${{ inputs.desktop_run_id }}
           DESKTOP_ARTIFACT_ID: ${{ inputs.desktop_artifact_id }}
+          MACOS_PUBLICATION_MODE: ${{ inputs.macos_publication_mode }}
           SIGNER_RUN_ID: ${{ inputs.signer_run_id }}
           SIGNED_MACOS_ARTIFACT_ID: ${{ inputs.signed_macos_artifact_id }}
           PROFILE_RUN_ID: ${{ inputs.profile_release_run_id }}
           PROFILE_ARTIFACT_ID: ${{ inputs.profile_artifact_id }}
-        run: >-
-          node scripts/desktop-admission.mjs
-          github-provenance
-          --commit "$GITHUB_SHA"
-          --candidate .admission/desktop/desktop-candidate.json
-          --metadata .admission/metadata
-          --ci-run-id "$CI_RUN_ID"
-          --desktop-run-id "$DESKTOP_RUN_ID"
-          --desktop-artifact-id "$DESKTOP_ARTIFACT_ID"
-          --signer-run-id "$SIGNER_RUN_ID"
-          --signer-artifact-id "$SIGNED_MACOS_ARTIFACT_ID"
-          --signed-macos .admission/macos-signed
-          --unsigned-macos .admission/macos-unsigned
-          --release-version "$(node -p "require(process.argv[1]).version" ./desktop/e-mate-desktop/package.json)"
-          --base-contract desktop/e-mate-desktop/base-contract.json
-          --profile-run-id "$PROFILE_RUN_ID"
-          --profile-artifact-id "$PROFILE_ARTIFACT_ID"
-          --out .admission/github-artifact-provenance.json
+        run: |
+          set -euo pipefail
+          args=(
+            github-provenance
+            --macos-publication-mode "$MACOS_PUBLICATION_MODE"
+            --commit "$GITHUB_SHA"
+            --candidate .admission/desktop/desktop-candidate.json
+            --metadata .admission/metadata
+            --ci-run-id "$CI_RUN_ID"
+            --desktop-run-id "$DESKTOP_RUN_ID"
+            --desktop-artifact-id "$DESKTOP_ARTIFACT_ID"
+            --unsigned-macos .admission/macos-unsigned
+            --unsigned-macos-archive .admission/metadata/macos-ci.zip
+            --release-version "$(node -p "require(process.argv[1]).version" ./desktop/e-mate-desktop/package.json)"
+            --base-contract desktop/e-mate-desktop/base-contract.json
+            --profile-run-id "$PROFILE_RUN_ID"
+            --profile-artifact-id "$PROFILE_ARTIFACT_ID"
+            --out .admission/github-artifact-provenance.json
+          )
+          if test "$MACOS_PUBLICATION_MODE" = unsigned; then
+            args+=(--macos-unsigned-artifact-id "${{ inputs.macos_unsigned_artifact_id }}")
+          else
+            args+=(
+              --signer-run-id "$SIGNER_RUN_ID"
+              --signer-artifact-id "$SIGNED_MACOS_ARTIFACT_ID"
+              --signed-macos .admission/macos-signed
+            )
+          fi
+          node scripts/desktop-admission.mjs "${args[@]}"
 
       - name: Form the exact unsigned 10-field Desktop manifest
         run: >-

@@ -1,5 +1,5 @@
 export const MAX_INDEX_BYTES = 64 * 1024;
-const VERSION = "2.0.14";
+const VERSION = "2.0.15";
 const R2_ORIGIN = "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev";
 const DESKTOP_MANIFEST_URL = `${R2_ORIGIN}/desktop/manual/v${VERSION}/latest.json`;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -54,15 +54,15 @@ export function normalizeDownloadIndex(raw) {
   const artifacts = object(manifest.artifacts, "桌面制品");
   exactKeys(artifacts, ["darwin", "win32"], "桌面制品");
   const downloads = [
-    releaseArtifact(artifacts.darwin, manifest.source_commit, "macos-universal", "e-Mate-2.0.14-mac-universal.dmg"),
-    releaseArtifact(artifacts.win32, manifest.source_commit, "windows-x64", "e-Mate-2.0.14-win-x64-Setup.exe"),
+    releaseArtifact(artifacts.darwin, manifest.source_commit, "macos-universal", "e-Mate-2.0.15-mac-universal.dmg"),
+    releaseArtifact(artifacts.win32, manifest.source_commit, "windows-x64", "e-Mate-2.0.15-win-x64-Setup.exe"),
   ];
   return Object.freeze({
     version: manifest.version,
     source_commit: manifest.source_commit,
     base_contract_id: manifest.base_contract_id,
     schedule_protocol_floor: manifest.schedule_protocol_floor,
-    distribution_mode: "adhoc-unsigned-release",
+    distribution_mode: "publication-metadata-bound",
     downloads: Object.freeze(downloads),
   });
 }
@@ -186,12 +186,40 @@ function releaseArtifact(raw, sourceCommit, targetId, fileName) {
   });
 }
 
-export function installationTrustCopy(index) {
-  if (index.distribution_mode !== "adhoc-unsigned-release") return null;
-  const windowsSigned = index.downloads.some((item) => item.target === "windows-x64" && item.authenticode?.status === "verified");
-  return windowsSigned
-    ? Object.freeze({ release: "Windows 已签名 · macOS 正式未签名（ad-hoc）", help: "Windows 安装包已验证数字签名；macOS 没有 Developer ID 签名或公证，请按图解只允许这一个 App。" })
-    : Object.freeze({ release: "正式未签名（ad-hoc）", help: "当前正式版没有 Developer ID 签名或公证，请按图解只允许这一个 App。" });
+export function installationTrustCopy(index, metadata) {
+  if (index.distribution_mode !== "publication-metadata-bound" || metadata.platforms.win32.mode !== "unsigned") return null;
+  return metadata.platforms.darwin.mode === "unsigned"
+    ? Object.freeze({
+        release: "macOS 与 Windows 均未签名",
+        help: "macOS 与 Windows 安装包均未签名；macOS 未公证。请先核对页面标注的 SHA-256。",
+      })
+    : Object.freeze({
+        release: "macOS 已签名并公证 · Windows 未签名",
+        help: "macOS 安装包已通过 Developer ID 签名和公证；Windows 安装包未签名。",
+      });
+}
+
+export function normalizePublicationMetadata(raw) {
+  const value = object(raw, "发布安全说明");
+  exactKeys(value, ["description", "platforms"], "发布安全说明");
+  const platforms = object(value.platforms, "平台安全说明");
+  exactKeys(platforms, ["darwin", "win32"], "平台安全说明");
+  for (const [platform, expected] of [["darwin", ["unsigned", "signed"]], ["win32", ["unsigned"]]]) {
+    const item = object(platforms[platform], `${platform} 安全说明`);
+    exactKeys(item, ["mode", "signed", "notarized", "description"], `${platform} 安全说明`);
+    if (!expected.includes(item.mode)
+      || item.signed !== (item.mode === "signed") || item.notarized !== (item.mode === "signed")
+      || item.description !== (item.mode === "signed" ? "Developer ID signed and notarized." : "Unsigned and not notarized.")) {
+      throw new Error(`${platform} 安全说明身份无效`);
+    }
+  }
+  return Object.freeze(value);
+}
+
+function readPublicationMetadata() {
+  const raw = document.querySelector("#emate-publication-metadata")?.textContent;
+  if (!raw) throw new Error("发布安全说明缺失");
+  return normalizePublicationMetadata(JSON.parse(raw));
 }
 
 export function downloadSources(index, target) {
@@ -302,11 +330,11 @@ function setPrimary(index, target) {
   detail.textContent = `已为你识别 ${download.label} · ${index.version}`;
 }
 
-function renderIndex(index, target) {
+function renderIndex(index, target, publicationMetadata) {
   const [major, minor] = index.version.split(".");
   const featureNav = document.querySelector("[data-feature-nav]");
   if (featureNav) featureNav.textContent = `${major}.${minor} 新功能`;
-  const trustCopy = installationTrustCopy(index);
+  const trustCopy = installationTrustCopy(index, publicationMetadata);
   const releaseLabel = document.querySelector("[data-release-label]");
   if (releaseLabel) releaseLabel.textContent = `当前版本 ${index.version}${trustCopy ? ` · ${trustCopy.release}` : ""}`;
   const firstLaunchHelp = document.querySelector("[data-first-launch-help]");
@@ -402,6 +430,8 @@ if (typeof document !== "undefined") {
     });
   });
   if (document.querySelector("[data-downloads]")) {
-    Promise.all([loadIndex(), detectTarget()]).then(([index, target]) => renderIndex(index, target)).catch(renderFailure);
+    Promise.all([loadIndex(), detectTarget()])
+      .then(([index, target]) => renderIndex(index, target, readPublicationMetadata()))
+      .catch(renderFailure);
   }
 }
