@@ -362,11 +362,17 @@ describe('published package surface', () => {
     expect(manifest.devDependencies?.['@electron/asar']).toBe('3.4.1')
   })
 
-  it('keeps publishable macOS bytes owned by protected-main CI without a release rebuild', () => {
+  it('keeps publishable macOS bytes owned by the selected immutable artifact without a release rebuild', () => {
     const workflow = readFileSync(new URL('../../.github/workflows/desktop-release.yml', packageRoot), 'utf8')
     const signerPatch = readFileSync(new URL('../.yarn/patches/@electron-osx-sign-npm-1.3.3-sequential-walk.patch', packageRoot), 'utf8')
 
-    expect(workflow).toContain('e-mate-desktop-macos-${{ inputs.source_sha }}')
+    expect(workflow).toContain('macos_artifact_id="$(jq -er --arg name "e-mate-desktop-macos-$SOURCE_SHA"')
+    expect(workflow).toContain('test "$macos_artifact_id" = "$MACOS_UNSIGNED_ARTIFACT_ID"')
+    expect(workflow).toContain('args+=(--macos-unsigned-artifact-id "${{ inputs.macos_unsigned_artifact_id }}")')
+    expect(workflow).toContain("if: inputs.macos_publication_mode == 'signed'")
+    expect(workflow).toContain('artifact-ids: ${{ inputs.signed_macos_artifact_id }}')
+    expect(workflow).toContain('run-id: ${{ inputs.signer_run_id }}')
+    expect(workflow).toContain('path: .release-inputs/macos-signed')
     expect(workflow).toContain('stage-desktop-ci-artifact.mjs verify')
     expect(workflow).not.toContain('yarn dist:mac-unsigned-release')
     expect(workflow).not.toContain('dist:mac-smoke')
