@@ -32,6 +32,52 @@
       "windows_journal_ack_rollback_preserved": true
     }
   },
+  "candidate4_followup_baseline": {
+    "protected_source": "650fbc2e0d0ef2d915ec8083822f29741c6ad0c8",
+    "branch_head_before_followup": "e57be83bf3f9cb280332e8188b7146dcf71e8ec4",
+    "integrated_t09_commit": "488f41d237f703d4bbfe7576e5a15d1365310adc",
+    "stable_patch_id_equal": true,
+    "origin_main_and_release_t09_allowlist_equal": true,
+    "local_safety_tag": "safety/t09-e57be83-before-main-650fbc2-20260828",
+    "migrated_without_hard_reset": true
+  },
+  "packaged_predecessor_candidate4_diagnostic": {
+    "status": "OPEN_BLOCKED_BY_UNSIGNED_CANDIDATE_TRUST",
+    "named_acceptance": "2.0.13 packaged predecessor -> exact 2.0.15 candidate #4 macOS update reaches helper-ready, then success/failed-health rollback",
+    "candidate": {
+      "source_commit": "650fbc2e0d0ef2d915ec8083822f29741c6ad0c8",
+      "dmg_bytes": 402511156,
+      "dmg_sha256": "d6b5166a09b69c6a0f1b083a728ce3288ffe505a27fbf3c73126351cf873c0cc",
+      "signing_identity": "adhoc",
+      "gatekeeper": "rejected"
+    },
+    "authoritative_attempt": {
+      "transaction_id": "6141316b-58db-4906-ade4-c23119c39da4",
+      "receipt_status": "failed-before-change",
+      "receipt_error": "macOS update timed out waiting for helper-ready",
+      "swap_started": false,
+      "installed_predecessor_unchanged": true
+    },
+    "isolated_reproduction": {
+      "source": "the exact candidate #4 DMG was mounted read-only and copied with the packaged scheduler's ditto --noqtn path into a new /private/tmp HOME",
+      "request": "bound-v1 exact 24-field envelope parsed under the isolated HOME",
+      "pending_owner": "the live helper PID exactly matched pending-mac-update.json",
+      "shutdown_ready_written": false,
+      "result": "the helper stayed alive for 12 seconds with no stdout, stderr, receipt or helper-ready marker",
+      "stack_sample": "183 of 184 main-thread samples remained in dyld before Node entered; physical footprint was 208 KiB",
+      "system_policy": [
+        "AMFI reported the staged e-Mate executable as adhoc signed and not valid because its certificate chain was unknown",
+        "AppleSystemPolicy reported that security policy would not allow the staged helper process"
+      ],
+      "diagnostic_process_terminated": true,
+      "diagnostic_state_removed": true
+    },
+    "classification": "This is not a HOME, request-envelope, pending-lease or candidate-JavaScript defect. The immutable packaged 2.0.13 scheduler executes the staged target Base, while macOS blocks candidate #4 before its Node entry because the candidate is ad-hoc signed and Gatekeeper-rejected. Current source already contains scheme A and starts the helper with the current installed Base; no second shared source repair can change the already-built candidate #4 or the published predecessor bytes.",
+    "source_scheme_b": "NOT_PRODUCED",
+    "t18_replay_prerequisite": "A Developer ID signed and notarized Desktop candidate admitted as new exact bytes is required for a production-equivalent packaged-predecessor replay. Re-signing, Gatekeeper bypass, security-policy disablement or a staged-app approval would change the trust premise and cannot prove candidate #4 release acceptance.",
+    "success_path": "OPEN_T18_NEW_TRUSTED_CANDIDATE",
+    "failed_health_rollback": "OPEN_T18_NEW_TRUSTED_CANDIDATE"
+  },
   "root_causes": [
     {
       "id": "unsigned-policy-gap",
@@ -135,6 +181,20 @@
       "result": "PASS"
     }
   ],
+  "candidate4_followup_verification": [
+    {
+      "command": "vitest run tests/mac-update-installer.spec.ts -t 'starts the detached transaction helper from the current installed Base'",
+      "result": "PASS: 1 passed, 92 skipped, 0 failed"
+    },
+    {
+      "command": "tsc -p tsconfig.json --noEmit",
+      "result": "PASS"
+    },
+    {
+      "command": "exact-DMG isolated helper launch with no shutdown-ready marker",
+      "result": "EXPECTED BLOCKER REPRODUCED: helper lease exact; Node not entered; AMFI and AppleSystemPolicy rejected the ad-hoc staged executable; no swap"
+    }
+  ],
   "test_environment": {
     "dependency_source": "existing /Users/mac/e-mate/worktrees/emate-2.0.15-T02/desktop/e-mate-desktop/node_modules",
     "use": "temporary read-only symlink in the T09 Desktop directory because global Yarn and local T09 dependencies were absent",
@@ -174,19 +234,19 @@
     {
       "owner": "T18",
       "status": "OPEN",
-      "scope": "Freeze exact 2.0.15 bytes and run real installed 2.0.12 and 2.0.13 to 2.0.15 updates, exercise pre-download free-space/path failures and post-download DMG/content failures on installed macOS, failed-health rollback, retained-data checks and macOS/Windows visible UI acceptance."
+      "scope": "Candidate #4 is ad-hoc signed and Gatekeeper-rejected, and the packaged 2.0.13 predecessor is blocked before the staged helper reaches Node. Admit new Developer ID signed and notarized exact bytes, then run real installed 2.0.12 and 2.0.13 updates, success and deliberate failed-health rollback, retained-data checks and visible UI acceptance. Candidate #4 remains OPEN and must not be represented as a successful installed update."
     }
   ],
   "consultation_gate": {
     "decision": "D009",
     "status": "not_invoked",
-    "reason": "The coordinator reviews tightened distinct missing assertions before the final shared-source repair; there is no evidence that one named acceptance remained red after two materially different source fixes. All named focused checks are green."
+    "reason": "Scheme A remains the current-installed-Base helper fix. The candidate #4 follow-up produced no scheme B because the exact packaged helper is blocked by macOS trust policy before candidate source executes; therefore there is no same named acceptance failure after two materially different source fixes."
   },
   "truth_stage": {
     "source": "implemented and locally tested",
     "t02_updater_installed_seam": "consumed without editing",
-    "real_predecessor_update": "OPEN_T18",
-    "failed_health_rollback": "OPEN_T18",
+    "real_predecessor_update": "OPEN_T18_CANDIDATE4_GATEKEEPER_REJECTED",
+    "failed_health_rollback": "OPEN_T18_NEW_TRUSTED_CANDIDATE_REQUIRED",
     "cross_platform_ui": "OPEN_T18",
     "desktop_candidate": "not created",
     "packaged": false,
