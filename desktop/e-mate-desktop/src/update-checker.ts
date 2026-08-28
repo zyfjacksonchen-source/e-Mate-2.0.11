@@ -182,8 +182,8 @@ export async function checkForStableUpdate(
   let body: string
   try {
     body = await readLimitedBody(response)
-  } catch {
-    return failedCheck('check-response-invalid')
+  } catch (cause) {
+    return failedCheck(options.signal?.aborted || isAbortError(cause) ? 'check-cancelled' : 'check-response-invalid')
   }
 
   const latest = parseVersionResponse(body, options.trustedManifestKeys)
