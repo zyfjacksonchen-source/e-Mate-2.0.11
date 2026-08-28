@@ -1,7 +1,7 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -881,23 +881,60 @@ describe('desktop update Host plugin', () => {
     expect(harness.notifications).toEqual([])
   })
 
-  it('publishes a typed check failure without notifying during a background network failure', async () => {
+  it('persists a typed background network diagnostic without surfacing UI', async () => {
     vi.useFakeTimers()
     const harness = await createHarness({ request: async () => { throw new TypeError('offline') } })
 
     await vi.advanceTimersByTimeAsync(testConfig.initialDelayMs)
     await vi.waitFor(() => { expect(harness.getUpdateState()).toEqual(expect.objectContaining({
       stage: 'failed',
-      code: 'check-failed',
+      code: 'check-network-failed',
       diagnosticId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      retryable: true,
+      failedFromStage: 'checking',
     })) })
+    const failure = harness.getUpdateState() as { diagnosticId: string }
+    await vi.waitFor(async () => {
+      expect(JSON.parse(await readFile(join(dirname(harness.statePath), 'last-diagnostic.json'), 'utf8'))).toEqual(expect.objectContaining({
+        schemaVersion: 1,
+        documentType: 'emate.desktop-update-diagnostic',
+        code: 'check-network-failed',
+        diagnosticId: failure.diagnosticId,
+        currentVersion: '2.0.0',
+        platform: 'darwin',
+        retryable: true,
+        failedFromStage: 'checking',
+      }))
+    })
     expect(harness.notifications).toEqual([])
     expect(harness.showManualCheckResult).not.toHaveBeenCalled()
   })
 
+  it('keeps the updater running when the diagnostic receipt cannot be written', async () => {
+    const request = vi.fn()
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce(versionResponse('2.0.0'))
+    const harness = await createHarness({
+      packaged: false,
+      request,
+    })
+    await mkdir(join(dirname(harness.statePath), 'last-diagnostic.json'), { recursive: true })
+
+    await expect(harness.runInteractiveUpdate()).resolves.toMatchObject({ status: 'failed' })
+    expect(harness.getUpdateState()).toEqual(expect.objectContaining({
+      stage: 'failed',
+      code: 'check-network-failed',
+      retryable: true,
+      failedFromStage: 'checking',
+    }))
+    await vi.waitFor(() => { expect(harness.warnings).toHaveLength(1) })
+    await expect(harness.runInteractiveUpdate()).resolves.toMatchObject({ status: 'up-to-date' })
+    expect(harness.getUpdateState()).toEqual({ stage: 'completed', updateKind: 'base', version: '2.0.0' })
+  })
+
   it.each([
-    ['empty response', () => new Response('', { status: 200 })],
-    ['rejected signed policy', () => {
+    ['empty response', 'check-response-invalid', () => new Response('', { status: 200 })],
+    ['rejected signed policy', 'check-manifest-invalid', () => {
       const { signature: _, ...manifest } = versionManifest('2.1.0')
       return Response.json(signManifest({
         ...manifest,
@@ -905,15 +942,18 @@ describe('desktop update Host plugin', () => {
         update_policy: { mandatory: true, minimum_supported_version: '2.2.0' },
       }, MANIFEST_SIGNATURE_CONTEXT_V3))
     }],
-  ])('ends checking with a typed failure for an %s', async (_name, response) => {
+  ])('ends checking with a typed failure for an %s', async (_name, code, response) => {
     const harness = await createHarness({ packaged: false, request: async () => response() })
 
     await expect(harness.runInteractiveUpdate()).resolves.toMatchObject({ status: 'failed' })
     expect(harness.getUpdateState()).toEqual(expect.objectContaining({
       stage: 'failed',
-      code: 'check-failed',
+      code,
       diagnosticId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      retryable: false,
+      failedFromStage: 'checking',
     }))
+    expect(harness.showManualCheckResult).toHaveBeenCalledWith({ status: 'failed', code, retryable: false })
   })
 
   it('keeps a failed confirmed recheck out of the checking state', async () => {
@@ -929,14 +969,27 @@ describe('desktop update Host plugin', () => {
     await expect(harness.runInteractiveUpdate()).resolves.toMatchObject({ status: 'failed' })
     expect(harness.getUpdateState()).toEqual(expect.objectContaining({
       stage: 'failed',
-      code: 'check-failed',
+      code: 'check-http-failed',
       diagnosticId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
       updateKind: 'base',
       version: '2.1.0',
       total: 1024,
       mandatory: true,
       minimumSupportedVersion: '2.0.5',
+      retryable: true,
+      failedFromStage: 'checking',
     }))
+    const failure = harness.getUpdateState() as { diagnosticId: string }
+    await vi.waitFor(async () => {
+      expect(JSON.parse(await readFile(join(dirname(harness.statePath), 'last-diagnostic.json'), 'utf8'))).toEqual(expect.objectContaining({
+        diagnosticId: failure.diagnosticId,
+        code: 'check-http-failed',
+        updateKind: 'base',
+        targetVersion: '2.1.0',
+        retryable: true,
+        failedFromStage: 'checking',
+      }))
+    })
   })
 
   it('cancels the one active transaction with a typed failure projection', async () => {
@@ -967,6 +1020,8 @@ describe('desktop update Host plugin', () => {
       total: 1024,
       mandatory: true,
       minimumSupportedVersion: '2.0.5',
+      retryable: false,
+      failedFromStage: 'downloading',
     }))
   })
 
@@ -990,6 +1045,8 @@ describe('desktop update Host plugin', () => {
       total: 1024,
       mandatory: true,
       minimumSupportedVersion: '2.0.5',
+      retryable: true,
+      failedFromStage: 'downloading',
     }))
   })
 
@@ -1131,9 +1188,15 @@ describe('desktop update Host plugin', () => {
     ['older version', async () => versionResponse('1.9.9'), {
       status: 'up-to-date', currentVersion: '2.0.0', latestVersion: '1.9.9',
     }],
-    ['invalid version', async () => versionResponse('v2.1.0'), null],
-    ['service unavailable', async () => new Response('unavailable', { status: 503 }), null],
-    ['network failure', async () => { throw new TypeError('offline') }, null],
+    ['invalid version', async () => versionResponse('v2.1.0'), {
+      status: 'failed', code: 'check-manifest-invalid', retryable: false,
+    }],
+    ['service unavailable', async () => new Response('unavailable', { status: 503 }), {
+      status: 'failed', code: 'check-http-failed', retryable: true, httpStatus: 503,
+    }],
+    ['network failure', async () => { throw new TypeError('offline') }, {
+      status: 'failed', code: 'check-network-failed', retryable: true,
+    }],
   ] as const)('reports a manual %s result without prompting or downloading', async (_case, request, expected) => {
     const harness = await createHarness({ packaged: false, request })
 
@@ -1301,9 +1364,42 @@ describe('desktop update Host plugin', () => {
 
     expect(signals[0]?.aborted).toBe(true)
     expect(harness.confirmDownload).not.toHaveBeenCalled()
-    expect(harness.showManualCheckResult).toHaveBeenCalledWith(null)
+    expect(harness.showManualCheckResult).toHaveBeenCalledWith({
+      status: 'failed', code: 'check-timeout', retryable: true,
+    })
     expect(harness.notifications).toEqual([])
     expect(harness.warnings).toEqual([])
     expect(harness.tray.label()).toBe('Check for Updates…')
+  })
+
+  it('maps a coordinator timeout while reading the response body', async () => {
+    vi.useFakeTimers()
+    const request = vi.fn((_url: string, init: RequestInit) => {
+      const signal = init.signal as AbortSignal
+      const body = new ReadableStream<Uint8Array>({
+        start(stream) {
+          signal.addEventListener('abort', () => {
+            stream.error(new DOMException('cancelled while reading', 'AbortError'))
+          }, { once: true })
+        },
+      })
+      return Promise.resolve(new Response(body))
+    })
+    const harness = await createHarness({ packaged: false, request })
+
+    const pending = harness.tray.invoke()
+    await vi.waitFor(() => { expect(request).toHaveBeenCalledOnce() })
+    await vi.advanceTimersByTimeAsync(testConfig.requestTimeoutMs)
+    await pending
+
+    expect(harness.showManualCheckResult).toHaveBeenCalledWith({
+      status: 'failed', code: 'check-timeout', retryable: true,
+    })
+    expect(harness.getUpdateState()).toEqual(expect.objectContaining({
+      stage: 'failed',
+      code: 'check-timeout',
+      retryable: true,
+      failedFromStage: 'checking',
+    }))
   })
 })

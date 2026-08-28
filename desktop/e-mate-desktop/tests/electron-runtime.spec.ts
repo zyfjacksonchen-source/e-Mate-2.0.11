@@ -1250,6 +1250,23 @@ describe('Electron compatibility runtime', () => {
       buttons: ['知道了'],
     }))
 
+    runtime.updates.publishState({
+      stage: 'failed',
+      updateKind: 'base',
+      code: 'check-signature-invalid',
+      diagnosticId: '0e4b9e6d-89b7-4b32-b8d4-d5fda86506bc',
+    })
+    await runtime.updates.showManualCheckResult({
+      status: 'failed',
+      code: 'check-signature-invalid',
+      retryable: false,
+    })
+    expect(electron.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
+      title: '无法检查更新',
+      message: '更新清单签名无法验证。',
+      detail: expect.stringContaining('0e4b9e6d-89b7-4b32-b8d4-d5fda86506bc'),
+    }))
+
     electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 1, checkboxChecked: false })
     await expect(runtime.updates.confirmDownload('2.1.0')).resolves.toBe(false)
     expect(updater.download).not.toHaveBeenCalled()

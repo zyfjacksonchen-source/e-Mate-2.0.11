@@ -4,15 +4,47 @@
   "ticket": "T09",
   "title": "唯一在线更新事务与可视进度",
   "status": "LOCAL_SOURCE_TESTED_NOT_CANDIDATE",
-  "baseline": {
+  "task_start_baseline": {
+    "classification": "HISTORICAL_TASK_START_NOT_CURRENT_SOURCE",
     "integration_commit": "f72db74c21f2341ffe3b9b54c466e93d532e7bf2",
     "branch": "feat/2.0.15-T09-updater",
     "worktree": "/Users/mac/e-mate/worktrees/emate-2.0.15-T09",
     "clean_start": true,
     "source_desktop_version": "2.0.14",
-    "base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0",
-    "public_production_version": "2.0.13",
-    "public_version_verified_live_by_t09": false
+    "base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0"
+  },
+  "protected_followup_baseline": {
+    "classification": "CURRENT_PROTECTED_SOURCE_FOR_T09_FOLLOWUP",
+    "protected_ref": "origin/main",
+    "protected_source": "650fbc2e0d0ef2d915ec8083822f29741c6ad0c8",
+    "desktop_package_version": "2.0.15",
+    "base_contract_id": "e-mate-desktop-profile-v8-dsh-4787caf39134",
+    "branch": "feat/2.0.15-T09-updater",
+    "worktree": "/Users/mac/e-mate/worktrees/emate-2.0.15-T09",
+    "relationship": "The follow-up branch was migrated cleanly onto this protected source before candidate #4 diagnosis and the typed check-failure repair. Historical f72/2.0.14/Base-v7 fields above are not current source facts."
+  },
+  "public_feed_live_read": {
+    "read_at": "2026-08-28T11:52:00+08:00",
+    "endpoint": "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/signed/latest.json",
+    "http_status": 200,
+    "content_length": 2961,
+    "cache_control": "no-store",
+    "redirected": false,
+    "body_sha256": "d26b9ffb5f30531bc5de6c9f66aab47c3718248e2ff109d82cd3a763f0c02887",
+    "schema_version": 2,
+    "release_status": "admitted",
+    "version": "2.0.13",
+    "source_commit": "6f63b5238d5874a1973a5ce0c1c9f832d277c865",
+    "key_id": "e0a81164526dcbcd",
+    "current_source_validator": "PASS against the installed Base trust root",
+    "interpretation": "Production still truthfully publishes exact 2.0.13. Activating 2.0.15 remains a T18 release action and is not a source-code fix."
+  },
+  "root_cause_reference": {
+    "path": "/Users/mac/.codex/attachments/88005cee-f7c3-4e73-b0a9-6e07ea4d1ca2/pasted-text.txt",
+    "bytes": 14160,
+    "sha256": "e2e42dde1462039a8461637261c90f7b345a919ef64c1e934283b18bd3b1ce23",
+    "classification": "REFERENCE_SOURCE_OF_CLAIMS_ONLY",
+    "confirmation_boundary": "Only claims independently matched against protected source, direct callers, focused tests, the live Feed and candidate #4 receipts are marked confirmed in this evidence."
   },
   "source_contract_replay": {
     "v2_0_12": {
@@ -31,6 +63,52 @@
       "modern_branch_preserved": true,
       "windows_journal_ack_rollback_preserved": true
     }
+  },
+  "candidate4_followup_baseline": {
+    "protected_source": "650fbc2e0d0ef2d915ec8083822f29741c6ad0c8",
+    "branch_head_before_followup": "e57be83bf3f9cb280332e8188b7146dcf71e8ec4",
+    "integrated_t09_commit": "488f41d237f703d4bbfe7576e5a15d1365310adc",
+    "stable_patch_id_equal": true,
+    "origin_main_and_release_t09_allowlist_equal": true,
+    "local_safety_tag": "safety/t09-e57be83-before-main-650fbc2-20260828",
+    "migrated_without_hard_reset": true
+  },
+  "packaged_predecessor_candidate4_diagnostic": {
+    "status": "OPEN_BLOCKED_BY_UNSIGNED_CANDIDATE_TRUST",
+    "named_acceptance": "2.0.13 packaged predecessor -> exact 2.0.15 candidate #4 macOS update reaches helper-ready, then success/failed-health rollback",
+    "candidate": {
+      "source_commit": "650fbc2e0d0ef2d915ec8083822f29741c6ad0c8",
+      "dmg_bytes": 402511156,
+      "dmg_sha256": "d6b5166a09b69c6a0f1b083a728ce3288ffe505a27fbf3c73126351cf873c0cc",
+      "signing_identity": "adhoc",
+      "gatekeeper": "rejected"
+    },
+    "authoritative_attempt": {
+      "transaction_id": "6141316b-58db-4906-ade4-c23119c39da4",
+      "receipt_status": "failed-before-change",
+      "receipt_error": "macOS update timed out waiting for helper-ready",
+      "swap_started": false,
+      "installed_predecessor_unchanged": true
+    },
+    "isolated_reproduction": {
+      "source": "the exact candidate #4 DMG was mounted read-only and copied with the packaged scheduler's ditto --noqtn path into a new /private/tmp HOME",
+      "request": "bound-v1 exact 24-field envelope parsed under the isolated HOME",
+      "pending_owner": "the live helper PID exactly matched pending-mac-update.json",
+      "shutdown_ready_written": false,
+      "result": "the helper stayed alive for 12 seconds with no stdout, stderr, receipt or helper-ready marker",
+      "stack_sample": "183 of 184 main-thread samples remained in dyld before Node entered; physical footprint was 208 KiB",
+      "system_policy": [
+        "AMFI reported the staged e-Mate executable as adhoc signed and not valid because its certificate chain was unknown",
+        "AppleSystemPolicy reported that security policy would not allow the staged helper process"
+      ],
+      "diagnostic_process_terminated": true,
+      "diagnostic_state_removed": true
+    },
+    "classification": "This is not a HOME, request-envelope, pending-lease or candidate-JavaScript defect. The immutable packaged 2.0.13 scheduler executes the staged target Base, while macOS blocks candidate #4 before its Node entry because the candidate is ad-hoc signed and Gatekeeper-rejected. Current source already contains scheme A and starts the helper with the current installed Base; no second shared source repair can change the already-built candidate #4 or the published predecessor bytes.",
+    "source_scheme_b": "NOT_PRODUCED",
+    "t18_replay_prerequisite": "A Developer ID signed and notarized Desktop candidate admitted as new exact bytes is required for a production-equivalent packaged-predecessor replay. Re-signing, Gatekeeper bypass, security-policy disablement or a staged-app approval would change the trust premise and cannot prove candidate #4 release acceptance.",
+    "success_path": "OPEN_T18_NEW_TRUSTED_CANDIDATE",
+    "failed_health_rollback": "OPEN_T18_NEW_TRUSTED_CANDIDATE"
   },
   "root_causes": [
     {
@@ -64,6 +142,14 @@
     {
       "id": "failure-policy-projection-gap",
       "finding": "publishFailure replaced the unique transaction snapshot with only stage/code/diagnosticId, so mandatory and minimum-supported policy disappeared from failure and cancellation surfaces."
+    },
+    {
+      "id": "check-failure-null-collapse",
+      "finding": "checkForStableUpdate collapsed request, HTTP, response, signed-manifest, signature, platform-artifact and protocol failures to null. Manual, tray, Agent and scheduled callers therefore could not distinguish no update from failure; the shared state degraded this further to generic check-failed and retained no local diagnostic."
+    },
+    {
+      "id": "body-read-abort-misclassification",
+      "finding": "After response headers arrived, an AbortError raised while reading the streamed response body was classified as check-response-invalid. That prevented startCheck from converting its own deadline cancellation into check-timeout and incorrectly made the failure non-retryable."
     }
   ],
   "implementation": {
@@ -71,7 +157,9 @@
     "cache": "A completed cache is reused only after exact byte count, SHA-256 and DMG/PE validation; invalid cached bytes are removed before the existing atomic partial-file download path runs. Progress reports bytes, total and verified cache reuse.",
     "single_state_source": "desktop-updates remains the sole transaction owner and publishes one DesktopUpdateState projection with checking, available, confirming, downloading, verifying, staging, waiting-shutdown, replacing, restarting, health-check, completed, rolling-back, rolled-back and failed stages.",
     "projection_carriers": "The existing Electron runtime and context-isolated Preload boundary only cache/carry that Host projection; Header and Settings receive get/subscribe/cancel without a second store, and Agent Tool returns the same terminal projection and diagnostic ID.",
-    "typed_failures": "Cancellation and downloader HTTP, size, SHA, native-format, network and response-limit failures retain typed codes; other transaction stages map to typed failure codes and every terminal failure receives a UUID diagnostic ID.",
+    "typed_failures": "checkForStableUpdate now returns one typed outcome for network, timeout/cancellation, HTTP, bounded-response, signed-manifest, signature, platform-artifact, protocol and local-config stages. AbortError is recognized both while awaiting response headers and while reading the response body, so direct cancellation stays check-cancelled and the single coordinator deadline maps it to check-timeout; non-abort malformed, oversized and invalid UTF-8 bodies remain check-response-invalid. The signature is verified before authenticated schema/artifact semantics are classified: post-sign mutation, missing/unknown/malformed signature and wrong signature context remain check-signature-invalid. Every terminal failure receives one UUID diagnostic ID, stable retryable value and the actual failedFromStage.",
+    "shared_failure_callers": "Manual checks, the tray command and the Agent Tool enter the same desktopUpdates service and consume the same code/diagnosticId projection and shared presentation copy. Scheduled checks publish and persist the same failure but intentionally do not open a dialog or notification.",
+    "diagnostic_receipt": "The existing updater atomically overwrites one private last-diagnostic.json receipt beside its state file. It contains schema/document identity, diagnosticId, code, retryable, failedFromStage, current platform/version and, when already known, updateKind/targetVersion/HTTP status. It never records the URL, response body, manifest key or credential. Receipt write failure is warned through the existing application logger and does not fail or stop the updater.",
     "check_terminal_projection": "Manual and background checks now replace checking with completed for up-to-date or no-update results, available for a declined confirmation, or failed/check-failed with a diagnostic ID for empty, rejected-policy and named check failures. Background network failures update the typed projection without creating a user notification.",
     "state_policy_inheritance": "The signed mandatory and minimumSupportedVersion policy stays on available, confirming, downloading and subsequent Base transaction snapshots. Failure and cancellation inherit updateKind, version, total and policy from that same snapshot, so T13 consumers do not need a second policy store.",
     "macos_download_preflight": "Before the network request, the current installed Base runs the scheduler's shared read-only validator for canonical app identity, user-data/install/Trash W_OK|X_OK access, same-volume backup, current helper containment and newer target version. Space is budgeted per filesystem: the cache volume requires artifact.bytes, the install/Trash volume requires at least the current installed app's native allocated size for the staged target, and a shared volume requires their sum.",
@@ -98,7 +186,7 @@
       "failed"
     ],
     "download_fields": ["bytes", "total", "cached"],
-    "failure_fields": ["code", "diagnosticId"],
+    "failure_fields": ["code", "diagnosticId", "retryable", "failedFromStage"],
     "signed_policy_fields": ["mandatory", "minimumSupportedVersion"],
     "preload_bridge": "__EMATE_DESKTOP_UPDATES__",
     "ui_layout_owner": "T13"
@@ -116,9 +204,16 @@
       "fails macOS path and disk preflight before an installer request",
       "ends empty and rejected-policy checks outside checking",
       "retains mandatory and minimum-supported policy on failure and cancellation",
-      "requires W_OK|X_OK and aggregates cache plus staged-app space on a shared macOS volume"
+      "requires W_OK|X_OK and aggregates cache plus staged-app space on a shared macOS volume",
+      "distinguishes malformed JSON from HTTP failures",
+      "fails closed at signature before classifying unauthenticated payload semantics",
+      "persists a typed background network diagnostic without surfacing UI",
+      "shares the signed-manifest failure copy and diagnostic ID across native and Agent projections",
+      "keeps the updater running when the diagnostic receipt cannot be written",
+      "preserves caller cancellation while reading a streamed response body",
+      "maps a coordinator timeout while reading the response body"
     ],
-    "observed": "The original manifest, cache, state and helper assertions failed against the baseline. Coordinator follow-ups captured the non-terminal checking, policy continuity, preflight ordering, permission-mode and per-volume budget gaps; the final focused red run contained three failures for failure/cancel policy inheritance and the stricter macOS preflight contract, and the shared-source repairs made those assertions pass. The first borrowed-runner attempt could not collect updates.spec.ts because module resolution still originated outside this worktree; the final in-worktree dependency link collected and passed the regressions.",
+    "observed": "The original manifest, cache, state and helper assertions failed against the baseline. Coordinator follow-ups captured the non-terminal checking, policy continuity, preflight ordering, permission-mode and per-volume budget gaps. For the new named diagnostic acceptance, the first focused run failed because malformed JSON still returned null, background network failure had no typed receipt, and Agent output remained generic. A trust-order review then corrected semantic fixtures to mutate unsigned payloads and re-sign them; post-sign mutation is asserted as signature-invalid. T00 then found the materially different response-body boundary: two named streaming regressions failed because body-read AbortError produced check-response-invalid/retryable=false and a coordinator timeout did not become check-timeout. The single shared catch-order fix made both streaming regressions pass without changing non-abort body validation.",
     "dependency_writes": false
   },
   "verification": [
@@ -135,6 +230,46 @@
       "result": "PASS"
     }
   ],
+  "candidate4_followup_verification": [
+    {
+      "command": "vitest run tests/mac-update-installer.spec.ts -t 'starts the detached transaction helper from the current installed Base'",
+      "result": "PASS: 1 passed, 92 skipped, 0 failed"
+    },
+    {
+      "command": "tsc -p tsconfig.json --noEmit",
+      "result": "PASS"
+    },
+    {
+      "command": "exact-DMG isolated helper launch with no shutdown-ready marker",
+      "result": "EXPECTED BLOCKER REPRODUCED: helper lease exact; Node not entered; AMFI and AppleSystemPolicy rejected the ad-hoc staged executable; no swap"
+    }
+  ],
+  "check_failure_followup_verification": [
+    {
+      "command": "vitest run tests/update-checker.spec.ts tests/updates.spec.ts tests/agent-update.spec.ts tests/electron-runtime.spec.ts",
+      "result": "PASS: 4 files; 154 passed, 0 failed"
+    },
+    {
+      "command": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.tests.client.json --noEmit",
+      "result": "PASS: all four Desktop source/client/test projects"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    }
+  ],
+  "t00_merge_review": {
+    "t09_focused_tests": "PASS: 4 files; 152 passed, 0 failed",
+    "desktop_typecheck": "PASS: all four Desktop source/client/test projects",
+    "shared_caller_release_manifest_test": {
+      "path": "desktop/e-mate-desktop/tests/desktop-release-manifest.spec.ts",
+      "baseline": "origin/main@650fbc2e0d0ef2d915ec8083822f29741c6ad0c8",
+      "result": "1 failed, 5 passed",
+      "cause": "The unchanged test fixture still hard-codes 2.0.13 macOS and Windows artifact filenames while the protected Desktop package is 2.0.15.",
+      "classification": "PRE_EXISTING_T18_RELEASE_TEST_STALENESS_NOT_T09_REGRESSION",
+      "t09_action": "No change: the test path is outside the T09 Owner allowlist and must not be repaired by this ticket."
+    }
+  },
   "test_environment": {
     "dependency_source": "existing /Users/mac/e-mate/worktrees/emate-2.0.15-T02/desktop/e-mate-desktop/node_modules",
     "use": "temporary read-only symlink in the T09 Desktop directory because global Yarn and local T09 dependencies were absent",
@@ -174,19 +309,25 @@
     {
       "owner": "T18",
       "status": "OPEN",
-      "scope": "Freeze exact 2.0.15 bytes and run real installed 2.0.12 and 2.0.13 to 2.0.15 updates, exercise pre-download free-space/path failures and post-download DMG/content failures on installed macOS, failed-health rollback, retained-data checks and macOS/Windows visible UI acceptance."
+      "scope": "Production Feed still admits exact 2.0.13. Candidate #4 passes ad-hoc deep codesign but is Gatekeeper-rejected, and the packaged 2.0.13 predecessor is blocked before the staged helper reaches Node. Admit new Developer ID signed and notarized exact bytes, activate them through the release gate, then run real installed 2.0.12 and 2.0.13 updates, success and deliberate failed-health rollback, retained-data checks and visible UI acceptance. Candidate #4 remains OPEN and must not be represented as a successful installed update."
+    },
+    {
+      "owner": "T18",
+      "status": "OPEN",
+      "scope": "Refresh desktop/e-mate-desktop/tests/desktop-release-manifest.spec.ts from its fixed 2.0.13 artifact filenames to the final frozen release identity. T00 observed 1 red/5 pass on unchanged origin/main; this is a pre-existing release-test staleness handoff outside T09 Owner scope, not a T09 regression."
     }
   ],
   "consultation_gate": {
     "decision": "D009",
     "status": "not_invoked",
-    "reason": "The coordinator reviews tightened distinct missing assertions before the final shared-source repair; there is no evidence that one named acceptance remained red after two materially different source fixes. All named focused checks are green."
+    "reason": "Scheme A remains the current-installed-Base helper fix. The candidate #4 follow-up produced no helper scheme B because the exact packaged helper is blocked by macOS trust policy before candidate source executes. For the separately named check-failure diagnostic acceptance, the second materially different source repair covered response-body AbortError and both direct-cancellation/coordinator-timeout regressions passed; there is no same named acceptance red after that repair, so D009 is not invoked."
   },
   "truth_stage": {
-    "source": "implemented and locally tested",
+    "source": "implemented and locally tested, including typed check diagnostics",
+    "public_feed": "LIVE_VERIFIED_EXACT_2.0.13_NOT_2.0.15",
     "t02_updater_installed_seam": "consumed without editing",
-    "real_predecessor_update": "OPEN_T18",
-    "failed_health_rollback": "OPEN_T18",
+    "real_predecessor_update": "OPEN_T18_CANDIDATE4_GATEKEEPER_REJECTED",
+    "failed_health_rollback": "OPEN_T18_NEW_TRUSTED_CANDIDATE_REQUIRED",
     "cross_platform_ui": "OPEN_T18",
     "desktop_candidate": "not created",
     "packaged": false,

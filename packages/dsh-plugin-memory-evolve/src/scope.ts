@@ -27,6 +27,16 @@ export interface MemoryScopeOptions {
   readonly sessionOnlyWorkspacePath?: string
 }
 
+export type MemoryScopeErrorCode = 'unavailable' | 'scope-invalid'
+
+/** Stable classification for recall without hiding scope or directory failures. */
+export class MemoryScopeError extends Error {
+  constructor(readonly code: MemoryScopeErrorCode, message: string) {
+    super(message)
+    this.name = 'MemoryScopeError'
+  }
+}
+
 /** Stable storage identity derived only from authoritative Harness state. */
 export type MemoryScope =
   | {
@@ -55,9 +65,10 @@ export async function resolveMemoryScope(
   execution: MemoryExecution,
   options: MemoryScopeOptions = {},
 ): Promise<MemoryScope> {
+  execution.signal?.throwIfAborted()
   const sessionId = execution.agent?.id
   if (typeof sessionId !== 'string' || sessionId.length === 0 || sessionId.length > 256) {
-    throw new Error('e-Mate memory requires a live Harness session')
+    throw new MemoryScopeError('scope-invalid', 'e-Mate memory requires a live Harness session')
   }
 
   const cwd = execution.agent?.session?.header?.cwd
@@ -65,18 +76,20 @@ export async function resolveMemoryScope(
     return { kind: 'session', key: `session:${sha256(sessionId)}`, sessionId }
   }
   if (typeof cwd !== 'string' || cwd.length === 0) {
-    throw new Error('e-Mate memory received an invalid session workspace')
+    throw new MemoryScopeError('scope-invalid', 'e-Mate memory received an invalid session workspace')
   }
 
   const workspace = await registry.resolveByPath(cwd)
   if (workspace === undefined) {
-    throw new Error('e-Mate memory cannot prove the session workspace binding')
+    throw new MemoryScopeError('scope-invalid', 'e-Mate memory cannot prove the session workspace binding')
   }
+  execution.signal?.throwIfAborted()
   if (await workspace.status() !== 'ok') {
-    throw new Error('the owning e-Mate project directory is unavailable')
+    throw new MemoryScopeError('unavailable', 'the owning e-Mate project directory is unavailable')
   }
+  execution.signal?.throwIfAborted()
   if (!workspace.sessionIds.some(candidate => String(candidate) === sessionId)) {
-    throw new Error('the e-Mate session is not bound to its owning project')
+    throw new MemoryScopeError('scope-invalid', 'the e-Mate session is not bound to its owning project')
   }
   if (options.sessionOnlyWorkspacePath !== undefined) {
     const sessionOnlyWorkspace = workspace.path === options.sessionOnlyWorkspacePath

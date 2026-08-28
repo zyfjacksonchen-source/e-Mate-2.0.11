@@ -11,7 +11,7 @@ afterEach(() => {
   history.replaceState(null, '', '/')
 })
 
-function context(current: string | undefined, blank: boolean) {
+function context(current: string | undefined, blank: boolean, workspaceId = 'general') {
   const setDraft = vi.fn()
   const connectWorkspace = vi.fn(async () => 'session-new')
   const state = {
@@ -22,7 +22,12 @@ function context(current: string | undefined, blank: boolean) {
     workspaces: {
       list: { getSnapshot: () => ({
         baselinesReady: true,
-        items: [{ workspaceId: 'general', title: '通用会话', path: '/tmp/e-mate/general', sessionIds: current === undefined ? [] : [current] }],
+        items: workspaceId === 'general'
+          ? [{ workspaceId: 'general', title: '通用会话', path: '/tmp/e-mate/general', sessionIds: current === undefined ? [] : [current] }]
+          : [
+              { workspaceId, title: '项目 A', path: '/work/project-a', sessionIds: current === undefined ? [] : [current] },
+              { workspaceId: 'general', title: '通用会话', path: '/tmp/e-mate/general', sessionIds: [] },
+            ],
       }) },
       connectWorkspace,
     },
@@ -54,8 +59,8 @@ describe('T11 office quick templates', () => {
     expect(document.querySelector('form')).toBeNull()
   })
 
-  it('reuses the current native blank Session and writes its Composer draft without creating or sending', async () => {
-    const { ctx, setDraft, connectWorkspace } = context('blank-session', true)
+  it('keeps an existing project Session while preparing a template draft without creating or sending', async () => {
+    const { ctx, setDraft, connectWorkspace } = context('project-session', false, 'project-a')
     await prepareTemplateDraftFromRoute(ctx, '整理会议纪要')
     expect(connectWorkspace).not.toHaveBeenCalled()
     expect(ctx.sessions.open).not.toHaveBeenCalled()

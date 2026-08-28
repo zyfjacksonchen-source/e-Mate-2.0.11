@@ -57,7 +57,20 @@ export interface UpdateCheckOptions {
   readonly request?: UpdateRequest
 }
 
-/** Successful comparison returned by the stable version service. */
+/** Stable failure stages returned without exposing untrusted response details. */
+export type UpdateCheckFailureCode =
+  | 'check-config-invalid'
+  | 'check-network-failed'
+  | 'check-timeout'
+  | 'check-cancelled'
+  | 'check-http-failed'
+  | 'check-response-invalid'
+  | 'check-manifest-invalid'
+  | 'check-signature-invalid'
+  | 'check-artifact-invalid'
+  | 'check-protocol-unsupported'
+
+/** Typed outcome returned by the stable version service. */
 export type UpdateCheckResult = {
   /** Whether the service reports a version newer than the installed application. */
   readonly status: 'up-to-date'
@@ -78,6 +91,11 @@ export type UpdateCheckResult = {
   readonly mandatory?: boolean
   /** Oldest installed Base admitted by the signed release policy. */
   readonly minimumSupportedVersion?: string
+} | {
+  readonly status: 'failed'
+  readonly code: UpdateCheckFailureCode
+  readonly retryable: boolean
+  readonly httpStatus?: number
 }
 
 const DESKTOP_RELEASE_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
@@ -134,13 +152,15 @@ export function compareSemVerVersions(left: string, right: string): number | nul
 /**
  * Check the fixed e-Mate version endpoint for a newer stable release.
  * @param options - installed version, caller-owned signal, and optional request adapter.
- * @returns a successful comparison, or null when any request or validation step fails.
+ * @returns a comparison or a typed failure stage.
  */
 export async function checkForStableUpdate(
   options: UpdateCheckOptions,
-): Promise<UpdateCheckResult | null> {
+): Promise<UpdateCheckResult> {
   const current = parseCanonicalStableVersion(options.currentVersion)
-  if (current === null || !isPositiveSafeInteger(options.currentScheduleProtocolFloor)) return null
+  if (current === null || !isPositiveSafeInteger(options.currentScheduleProtocolFloor)) {
+    return failedCheck('check-config-invalid')
+  }
 
   const init: RequestInit = {
     method: 'GET',
@@ -154,43 +174,67 @@ export async function checkForStableUpdate(
   let response: Response
   try {
     response = await request(DESKTOP_VERSION_ENDPOINT, init)
-  } catch {
-    return null
+  } catch (cause) {
+    return failedCheck(options.signal?.aborted || isAbortError(cause) ? 'check-cancelled' : 'check-network-failed')
   }
-  if (response.status !== 200) return null
+  if (response.status !== 200) return failedCheck('check-http-failed', response.status)
 
   let body: string
   try {
     body = await readLimitedBody(response)
-  } catch {
-    return null
+  } catch (cause) {
+    return failedCheck(options.signal?.aborted || isAbortError(cause) ? 'check-cancelled' : 'check-response-invalid')
   }
 
   const latest = parseVersionResponse(body, options.trustedManifestKeys)
-  if (latest === null || latest.scheduleProtocolFloor < options.currentScheduleProtocolFloor) return null
-  const comparison = compareParsedSemVer(latest.version, current)
+  if (latest.status === 'failed') return latest
+  if (latest.value.scheduleProtocolFloor < options.currentScheduleProtocolFloor) {
+    return failedCheck('check-protocol-unsupported')
+  }
+  const manifest = latest.value
+  const comparison = compareParsedSemVer(manifest.version, current)
   if (comparison <= 0) {
     return {
       status: 'up-to-date',
       currentVersion: current.version,
-      latestVersion: latest.version.version,
+      latestVersion: manifest.version.version,
     }
   }
-  const artifact = latest.artifacts[options.platform]
+  const artifact = manifest.artifacts[options.platform]
   return {
     status: 'update-available',
     currentVersion: current.version,
-    latestVersion: latest.version.version,
-    sourceCommit: latest.sourceCommit,
-    baseContractId: latest.baseContractId,
-    scheduleProtocolFloor: latest.scheduleProtocolFloor,
-    manifestIdentity: latest.manifestIdentity,
+    latestVersion: manifest.version.version,
+    sourceCommit: manifest.sourceCommit,
+    baseContractId: manifest.baseContractId,
+    scheduleProtocolFloor: manifest.scheduleProtocolFloor,
+    manifestIdentity: manifest.manifestIdentity,
     artifact,
-    ...(latest.minimumSupportedVersion === undefined ? {} : {
-      mandatory: latest.mandatory
-        || compareParsedSemVer(current, latest.minimumSupportedVersion) < 0,
-      minimumSupportedVersion: latest.minimumSupportedVersion.version,
+    ...(manifest.minimumSupportedVersion === undefined ? {} : {
+      mandatory: manifest.mandatory
+        || compareParsedSemVer(current, manifest.minimumSupportedVersion) < 0,
+      minimumSupportedVersion: manifest.minimumSupportedVersion.version,
     }),
+  }
+}
+
+/** Whether retrying the same check later can reasonably succeed without changing the installed Base. */
+export function isRetryableUpdateCheckFailure(code: UpdateCheckFailureCode): boolean {
+  return code === 'check-network-failed'
+    || code === 'check-timeout'
+    || code === 'check-cancelled'
+    || code === 'check-http-failed'
+}
+
+function failedCheck<C extends UpdateCheckFailureCode>(
+  code: C,
+  httpStatus?: number,
+): Extract<UpdateCheckResult, { status: 'failed' }> & { readonly code: C } {
+  return {
+    status: 'failed',
+    code,
+    retryable: isRetryableUpdateCheckFailure(code),
+    ...(httpStatus === undefined ? {} : { httpStatus }),
   }
 }
 
@@ -239,15 +283,27 @@ interface ParsedDesktopReleaseManifest {
   readonly minimumSupportedVersion?: ParsedSemVer
 }
 
+type ManifestFailureCode = Extract<UpdateCheckFailureCode,
+  'check-response-invalid' | 'check-manifest-invalid' | 'check-signature-invalid' | 'check-artifact-invalid'>
+
+type ManifestParseResult = {
+  readonly status: 'ok'
+  readonly value: ParsedDesktopReleaseManifest
+} | {
+  readonly status: 'failed'
+  readonly code: ManifestFailureCode
+  readonly retryable: boolean
+}
+
 function parseVersionResponse(
   body: string,
   trustedKeys: readonly DesktopReleaseSigningKey[],
-): ParsedDesktopReleaseManifest | null {
+): ManifestParseResult {
   let value: unknown
   try {
     value = JSON.parse(body)
   } catch {
-    return null
+    return failedCheck('check-response-invalid')
   }
   return parseAdmittedDesktopReleaseManifest(value, trustedKeys)
 }
@@ -257,12 +313,12 @@ export function validateAdmittedDesktopReleaseManifest(
   value: unknown,
   trustedKeys: readonly DesktopReleaseSigningKey[],
 ): boolean {
-  return parseAdmittedDesktopReleaseManifest(value, trustedKeys) !== null
+  return parseAdmittedDesktopReleaseManifest(value, trustedKeys).status === 'ok'
 }
 
 /** Check the unsigned rich payload accepted only at the external signer boundary. */
 export function validateUnsignedAdmittedDesktopReleaseManifest(value: unknown): boolean {
-  if (parseUnsignedAdmittedDesktopReleaseManifest(value) === null) return false
+  if (parseUnsignedAdmittedDesktopReleaseManifest(value).status === 'failed') return false
   try {
     canonicalJson(value)
     return true
@@ -274,57 +330,76 @@ export function validateUnsignedAdmittedDesktopReleaseManifest(value: unknown): 
 function parseAdmittedDesktopReleaseManifest(
   value: unknown,
   trustedKeys: readonly DesktopReleaseSigningKey[],
-): ParsedDesktopReleaseManifest | null {
-  if (!isRecord(value) || (value.schema_version !== 2 && value.schema_version !== 3)) return null
-  const keys = [
-    'schema_version', 'document_type', 'release_status', 'version', 'source_commit', 'base_contract_id',
-    'schedule_protocol_floor', 'profile_component_aggregate', 'github_artifact_provenance', 'artifacts',
-    ...(value.schema_version === 3 ? ['update_policy'] : []), 'signature',
-  ]
-  if (!hasExactKeys(value, keys) || !isManifestSignature(value.signature)) return null
+): ManifestParseResult {
+  if (!isRecord(value) || !isManifestSignature(value.signature)
+    || (value.schema_version !== 2 && value.schema_version !== 3)) {
+    return failedCheck('check-signature-invalid')
+  }
   const { signature, ...unsigned } = value
+  if (!verifyManifestSignature(unsigned, signature, trustedKeys, value.schema_version)) {
+    return failedCheck('check-signature-invalid')
+  }
   const parsed = parseUnsignedAdmittedDesktopReleaseManifest(unsigned)
-  if (parsed === null || !verifyManifestSignature(unsigned, signature, trustedKeys, value.schema_version)) return null
+  if (parsed.status === 'failed') return parsed
   try {
     return {
-      ...parsed,
-      manifestIdentity: createHash('sha256').update(canonicalJson(value)).digest('hex'),
+      status: 'ok',
+      value: {
+        ...parsed.value,
+        manifestIdentity: createHash('sha256').update(canonicalJson(value)).digest('hex'),
+      },
     }
   } catch {
-    return null
+    return failedCheck('check-manifest-invalid')
   }
 }
 
-function parseUnsignedAdmittedDesktopReleaseManifest(value: unknown): ParsedDesktopReleaseManifest | null {
-  if (!isRecord(value) || (value.schema_version !== 2 && value.schema_version !== 3)) return null
+function parseUnsignedAdmittedDesktopReleaseManifest(value: unknown): ManifestParseResult {
+  if (!isRecord(value) || (value.schema_version !== 2 && value.schema_version !== 3)) {
+    return failedCheck('check-manifest-invalid')
+  }
   const keys = [
     'schema_version', 'document_type', 'release_status', 'version', 'source_commit', 'base_contract_id',
     'schedule_protocol_floor', 'profile_component_aggregate', 'github_artifact_provenance', 'artifacts',
     ...(value.schema_version === 3 ? ['update_policy'] : []),
   ]
-  if (!hasExactKeys(value, keys) || value.document_type !== 'emate.desktop-release-manifest'
+  if (!hasExactKeys(value, keys)) {
+    return failedCheck('artifacts' in value ? 'check-manifest-invalid' : 'check-artifact-invalid')
+  }
+  if (value.document_type !== 'emate.desktop-release-manifest'
     || value.release_status !== 'admitted' || typeof value.version !== 'string'
     || typeof value.source_commit !== 'string' || !SOURCE_COMMIT_PATTERN.test(value.source_commit)
     || typeof value.base_contract_id !== 'string' || !BASE_CONTRACT_ID_PATTERN.test(value.base_contract_id)
-    || !isPositiveSafeInteger(value.schedule_protocol_floor)
-    || !hasExactKeys(value.artifacts, ['darwin', 'win32'])) return null
+    || !isPositiveSafeInteger(value.schedule_protocol_floor)) {
+    return failedCheck('check-manifest-invalid')
+  }
   const version = parseCanonicalStableVersion(value.version)
-  if (version === null) return null
+  if (version === null) return failedCheck('check-manifest-invalid')
   const policy = value.schema_version === 3 ? parseUpdatePolicy(value.update_policy, version) : undefined
-  if (value.schema_version === 3 && policy === undefined) return null
+  if (value.schema_version === 3 && policy === undefined) {
+    return failedCheck('check-manifest-invalid')
+  }
   if (!isProfileComponentAggregateSummary(value.profile_component_aggregate)
-    || !isGithubArtifactProvenance(value.github_artifact_provenance, value.source_commit as string)) return null
+    || !isGithubArtifactProvenance(value.github_artifact_provenance, value.source_commit as string)) {
+    return failedCheck('check-manifest-invalid')
+  }
+  if (!hasExactKeys(value.artifacts, ['darwin', 'win32'])) {
+    return failedCheck('check-artifact-invalid')
+  }
   const darwin = parseManifestArtifact('darwin', version.version, value.source_commit as string, value.artifacts.darwin)
   const win32 = parseManifestArtifact('win32', version.version, value.source_commit as string, value.artifacts.win32)
-  if (darwin === null || win32 === null) return null
+  if (darwin === null || win32 === null) return failedCheck('check-artifact-invalid')
   return {
-    version,
-    sourceCommit: value.source_commit as string,
-    baseContractId: value.base_contract_id,
-    scheduleProtocolFloor: value.schedule_protocol_floor,
-    manifestIdentity: '',
-    artifacts: { darwin, win32 },
-    ...(policy === undefined ? {} : policy),
+    status: 'ok',
+    value: {
+      version,
+      sourceCommit: value.source_commit as string,
+      baseContractId: value.base_contract_id,
+      scheduleProtocolFloor: value.schedule_protocol_floor,
+      manifestIdentity: '',
+      artifacts: { darwin, win32 },
+      ...(policy === undefined ? {} : policy),
+    },
   }
 }
 
@@ -537,4 +612,8 @@ function canonicalJson(value: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isAbortError(value: unknown): boolean {
+  return isRecord(value) && value.name === 'AbortError'
 }

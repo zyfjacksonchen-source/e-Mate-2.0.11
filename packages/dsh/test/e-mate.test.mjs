@@ -663,7 +663,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(sessionRoute, /state\.phase !== ['"]ready['"]/) // waits for the target list baseline
     assert.match(sessionRoute, /Object\.prototype\.hasOwnProperty\.call\(state\.byId, id\)/)
     assert.match(sessionRoute, /openSession\(id\)/)
-    assert.match(sessionRoute, /startHomeSession\(\)/)
+    assert.doesNotMatch(sessionRoute, /startHomeSession\(\)/)
     assert.doesNotMatch(sessionRoute, /clearSession\(\)/)
     assert.match(sessionRoute, /\/chat\/\$\{encodeURIComponent\(current\)\}/)
     assert.doesNotMatch(sessionRoute, /\b(?:fetch|WebSocket|EventSource|createSnapshotStore|defineStore)\b/)

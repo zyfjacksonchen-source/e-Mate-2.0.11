@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs'
 import { createPortal } from 'react-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionRuntime, type SessionId, type SessionListState, type SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import { SessionInputShell } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/facade.ts'
 import { HomeProjection } from '../src/client/home.tsx'
 import {
   attachWorkspaceFromRoute,
@@ -130,7 +131,142 @@ describe('native Subagent top-level visibility', () => {
 })
 
 describe('pinned e-Mate Sidebar and Home projection', () => {
-  it('keeps Home visible when rc.7 reuses the same blank session for a generic new task', async () => {
+  it('keeps a project blank Session through the real route projection and first prompt boundary', async () => {
+    history.replaceState(null, '', '/chat/source-session')
+    const source = 'source-session' as SessionId
+    const project = 'project-blank' as SessionId
+    const general = 'general-blank' as SessionId
+    const promptSessionIds: string[] = []
+    const replySessionIds: string[] = []
+    let promptAttempts = 0
+    let runtime!: SessionRuntime
+    const api = {
+      sessions: {
+        history: vi.fn(async () => ({ rpcId: 'history', result: { ok: true, value: { events: [], hasMore: false } } })),
+        prompt: vi.fn(async (request: { sessionId: SessionId }) => {
+          promptSessionIds.push(request.sessionId)
+          promptAttempts += 1
+          if (promptAttempts === 1) {
+            return { rpcId: 'prompt-failed', result: { ok: false, error: { code: 'internal', message: 'retry', details: {} } } }
+          }
+          const reply = {
+            rpcId: 'reply',
+            payload: {
+              type: 'session/event', sessionId: request.sessionId,
+              event: {
+                type: 'assistant/message', seq: 0, time: Date.now(), surfaceOp: 'append',
+                data: {
+                  turn: 1, step: 0,
+                  message: {
+                    id: 'assistant-reply', role: 'assistant',
+                    content: [{ type: 'text', text: 'done' }],
+                    source: { kind: 'model', provider: 'fake', model: 'fake' },
+                  },
+                },
+              },
+            },
+          }
+          replySessionIds.push(reply.payload.sessionId)
+          runtime.handleMuxEnvelope(reply as never)
+          return { rpcId: 'prompt-ok', result: { ok: true, value: { accepted: true } } }
+        }),
+      },
+    }
+    runtime = new SessionRuntime(new Context(), api as never, {
+      commands: {
+        list: () => Promise.resolve({ ok: true, value: [] }),
+        execute: () => Promise.resolve({ ok: true, value: undefined }),
+      },
+    } as never)
+    for (const [sessionId, blank, cwd] of [
+      [source, false, '/work/source'],
+      [project, true, '/work/project-a'],
+      [general, true, '/home/test/.dsh/e-mate/general'],
+    ] as const) {
+      runtime.handleHostEnvelope({
+        rpcId: `add-${sessionId}` as never,
+        payload: { type: 'host/session-added', sessionId, blank, cwd },
+      })
+    }
+    await Promise.resolve()
+    runtime.open(source)
+    const workspaces = {
+      baselinesReady: true,
+      items: [
+        { workspaceId: 'project-a', path: '/work/project-a', title: '项目 A', sessionIds: [project] },
+        { workspaceId: 'general', path: '/home/test/.dsh/e-mate/general', title: '通用会话', sessionIds: [general] },
+      ],
+    }
+    let createdSessionId: string | undefined
+    const connectWorkspace = vi.fn(async (workspaceId: string) => {
+      createdSessionId = workspaceId === 'project-a' ? project : general
+      return createdSessionId
+    })
+    const ctx = {
+      workspaces: { list: { getSnapshot: () => workspaces }, connectWorkspace },
+      sessions: runtime,
+    }
+
+    render(<SessionRouteProjection
+      useSessions={selector => React.useSyncExternalStore(
+        listener => runtime.list.subscribe(listener),
+        () => selector(runtime.list.getSnapshot()),
+      )}
+      useWorkspaces={useReadyWorkspaces}
+      getSessions={() => runtime.list.getSnapshot()}
+      openSession={id => { runtime.open(id as SessionId) }}
+    />)
+
+    await expect(startSessionFromRoute(ctx, 'project-a')).resolves.toBe(true)
+    await waitFor(() => {
+      expect(runtime.list.getSnapshot().current).toBe(project)
+      expect(location.pathname).toBe('/chat/project-blank')
+    })
+    await waitFor(() => { expect(runtime.binding(project)?.session.getSnapshot().openState).toBe('open') })
+
+    const composerSessionIds: string[] = []
+    let promptDone: Promise<unknown> = Promise.resolve()
+    const input = new SessionInputShell({
+      actx: runtime.scope(project) as never,
+      defaultSink: (text, _imageIds, mode) => {
+        const composerSessionId = runtime.list.getSnapshot().current
+        if (composerSessionId === undefined) throw new Error('composer lost its Session')
+        composerSessionIds.push(composerSessionId)
+        const session = runtime.binding(composerSessionId)?.session
+        if (session === undefined) throw new Error('composer Session is not addressable')
+        promptDone = session.prompt([{ type: 'text', text }], mode)
+      },
+    })
+    input.setDraft('first prompt')
+    input.submit()
+    await promptDone
+    expect(runtime.binding(project)?.session.getSnapshot().promptError).toMatchObject({ op: 'send' })
+    expect(runtime.list.getSnapshot().current).toBe(project)
+    expect(location.pathname).toBe('/chat/project-blank')
+    input.setDraft('retry prompt')
+    input.submit()
+    await promptDone
+
+    expect(connectWorkspace.mock.calls.map(([workspaceId]) => workspaceId)).toEqual(['project-a'])
+    expect({
+      createdSessionId,
+      composerSessionId: composerSessionIds.at(-1),
+      promptSessionId: promptSessionIds.at(-1),
+      replySessionId: replySessionIds.at(-1),
+    }).toEqual({
+      createdSessionId: 'project-blank',
+      composerSessionId: 'project-blank',
+      promptSessionId: 'project-blank',
+      replySessionId: 'project-blank',
+    })
+    expect(composerSessionIds).toEqual(['project-blank', 'project-blank'])
+    expect(promptSessionIds).toEqual(['project-blank', 'project-blank'])
+    expect(workspaces.items[0]?.sessionIds).toContain('project-blank')
+    expect(runtime.list.getSnapshot().byId[project]?.cwd).toBe('/work/project-a')
+    input.dispose()
+  })
+
+  it('keeps the stable chat route when the native owner reuses a general blank Session', async () => {
     history.replaceState(null, '', '/chat/existing-blank')
     const connectWorkspace = vi.fn(async () => 'existing-blank')
     const openSession = vi.fn()
@@ -152,13 +288,12 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       useWorkspaces={useReadyWorkspaces}
       getSessions={() => sessions}
       openSession={vi.fn()}
-      startHomeSession={() => { startSessionFromRoute(ctx) }}
     />)
-    startSessionFromRoute(ctx)
+    await startSessionFromRoute(ctx)
 
-    await waitFor(() => { expect(location.pathname).toBe('/') })
-    expect(connectWorkspace).not.toHaveBeenCalled()
-    expect(openSession).not.toHaveBeenCalled()
+    await waitFor(() => { expect(location.pathname).toBe('/chat/existing-blank') })
+    expect(connectWorkspace).toHaveBeenCalledWith('general')
+    expect(openSession).toHaveBeenCalledWith('existing-blank')
   })
 
   it('drops a late schedule handoff after the initiating route changes', async () => {
@@ -238,7 +373,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(open).toHaveBeenCalledTimes(1)
     expect(open).toHaveBeenCalledWith('session-b')
     expect(sessions.ids).toEqual(['source-session', 'session-b', 'session-a'])
-    expect(location.pathname).toBe('/')
+    expect(location.pathname).toBe('/chat/session-b')
   })
 
   it('drops a late project attachment and opens a row only through its route owner', async () => {
@@ -267,7 +402,6 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       useWorkspaces={useReadyWorkspaces}
       getSessions={() => sessions}
       openSession={open}
-      startHomeSession={() => {}}
     />)
 
     const attaching = attachWorkspaceFromRoute(ctx)
@@ -347,13 +481,14 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
 
   it('keeps the current Sidebar hierarchy while driving real session and workspace actions', async () => {
     const sessions = nativeSessionState({
-      ids: ['project-session', 'project-image-child', 'general-session', 'general-image-child', 'general-catalog-child'],
+      ids: ['project-session', 'project-image-child', 'general-session', 'general-image-child', 'general-catalog-child', 'unassigned-session'],
       byId: {
         'project-session': { id: 'project-session', displayTitle: '项目任务', running: false, blank: false, updatedAt: 2 },
         'project-image-child': { id: 'project-image-child', displayTitle: '一次性子代理记录', origin: 'subagent', running: false, blank: false, updatedAt: 4 },
         'general-session': { id: 'general-session', displayTitle: '通用任务', running: true, blank: false, updatedAt: 1 },
         'general-image-child': { id: 'general-image-child', displayTitle: '内部生图会话', parentId: 'general-session', running: false, blank: false, updatedAt: 3 },
         'general-catalog-child': { id: 'general-catalog-child', displayTitle: 'This is one e-Mate image', running: false, blank: false, updatedAt: 5 },
+        'unassigned-session': { id: 'unassigned-session', displayTitle: '待恢复任务', running: false, blank: false, updatedAt: 6 },
       },
       current: 'project-image-child',
       subagentsByParent: {
@@ -434,6 +569,8 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(screen.getByRole('region', { name: '项目' }).textContent).not.toContain('通用会话')
     expect(screen.getByRole('region', { name: '项目' }).getAttribute('data-dsh-workspace-drop-target')).toBe('')
     expect(screen.getByRole('region', { name: '会话' }).textContent).toContain('通用任务')
+    expect(screen.getByRole('region', { name: '未归属/待恢复' }).textContent).toContain('待恢复任务')
+    expect(screen.getByRole('region', { name: '会话' }).textContent).not.toContain('待恢复任务')
     expect(screen.queryByText('一次性子代理记录')).toBeNull()
     expect(screen.queryByText('内部生图会话')).toBeNull()
     expect(screen.queryByText('This is one e-Mate image')).toBeNull()
@@ -494,10 +631,11 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
 
   it('batch-removes selected project and general sessions through the native archive action', async () => {
     const sessions = {
-      ids: ['project-session', 'general-session', 'image-child'],
+      ids: ['project-session', 'general-session', 'unassigned-session', 'image-child'],
       byId: {
         'project-session': { id: 'project-session', displayTitle: '项目任务', running: false, blank: false, updatedAt: 2 },
         'general-session': { id: 'general-session', displayTitle: '通用任务', running: false, blank: false, updatedAt: 1 },
+        'unassigned-session': { id: 'unassigned-session', displayTitle: '待恢复任务', running: false, blank: false, updatedAt: 4 },
         'image-child': { id: 'image-child', displayTitle: 'This is one e-Mate image', origin: 'subagent' as const, running: false, blank: false, updatedAt: 3 },
       },
       current: undefined,
@@ -544,21 +682,66 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       {...sidebarUtilityProps}
     />)
 
+    expect(screen.getByRole('region', { name: '未归属/待恢复' }).textContent).toContain('待恢复任务')
     fireEvent.click(screen.getByRole('button', { name: '批量删除' }))
     expect(screen.getByRole('checkbox', { name: '选择会话：项目任务' })).not.toBeNull()
     expect(screen.getByRole('checkbox', { name: '选择会话：通用任务' })).not.toBeNull()
+    expect(screen.getByRole('checkbox', { name: '选择会话：待恢复任务' })).not.toBeNull()
     expect(screen.queryByRole('checkbox', { name: '选择会话：This is one e-Mate image' })).toBeNull()
     expect(screen.queryByRole('button', { name: '打开任务：通用任务' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '全选' }))
-    fireEvent.click(screen.getByRole('button', { name: '删除（2）' }))
-    expect(screen.getByRole('dialog', { name: '删除 2 个会话？' })).not.toBeNull()
-    expect(screen.getByRole('dialog', { name: '删除 2 个会话？' }).textContent).toContain('本地历史记录仍由 e-Mate 保留。')
-    expect(screen.getByRole('dialog', { name: '删除 2 个会话？' }).textContent).not.toContain('DSH')
+    fireEvent.click(screen.getByRole('button', { name: '删除（3）' }))
+    expect(screen.getByRole('dialog', { name: '删除 3 个会话？' })).not.toBeNull()
+    expect(screen.getByRole('dialog', { name: '删除 3 个会话？' }).textContent).toContain('本地历史记录仍由 e-Mate 保留。')
+    expect(screen.getByRole('dialog', { name: '删除 3 个会话？' }).textContent).not.toContain('DSH')
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
-    await waitFor(() => { expect(archiveSession).toHaveBeenCalledTimes(2) })
-    expect(archiveSession.mock.calls.map(([id]) => id).sort()).toEqual(['general-session', 'project-session'])
-    expect(screen.getByRole('status').textContent).toBe('已删除 2 个会话。')
+    await waitFor(() => { expect(archiveSession).toHaveBeenCalledTimes(3) })
+    expect(archiveSession.mock.calls.map(([id]) => id).sort()).toEqual(['general-session', 'project-session', 'unassigned-session'])
+    expect(screen.getByRole('status').textContent).toBe('已删除 3 个会话。')
     expect(openSession).not.toHaveBeenCalled()
+  })
+
+  it('waits for the native workspace baseline before classifying unassigned sessions', () => {
+    const sessions = nativeSessionState({
+      ids: ['pending-session'],
+      byId: {
+        'pending-session': { id: 'pending-session', displayTitle: '尚未归类任务', running: false, blank: false, updatedAt: 1 },
+      },
+    })
+    const workspaces = { items: [], archivedSessionIds: [], phase: 'pending' as const }
+
+    render(<SidebarRoot
+      collapsed={false}
+      width={248}
+      renderSlot={() => null}
+      createPortal={createPortal}
+      useSessions={selector => selector(sessions)}
+      useWorkspaces={selector => selector(workspaces)}
+      NewChatIcon={Icon}
+      PanelIcon={Icon}
+      SearchIcon={Icon}
+      ScheduleIcon={Icon}
+      ChevronIcon={Icon}
+      FolderIcon={Icon}
+      PlusIcon={Icon}
+      EllipsisIcon={Icon}
+      CopyIcon={Icon}
+      EditIcon={Icon}
+      ArchiveIcon={Icon}
+      CloseIcon={Icon}
+      startSession={() => {}}
+      openSchedules={() => {}}
+      openSession={() => {}}
+      pickWorkspace={async () => null}
+      renameSession={async () => {}}
+      archiveSession={async () => {}}
+      toggleSidebar={() => {}}
+      {...sidebarUtilityProps}
+    />)
+
+    expect(screen.getByText('正在加载项目…')).not.toBeNull()
+    expect(screen.queryByRole('region', { name: '未归属/待恢复' })).toBeNull()
+    expect(screen.queryByText('尚未归类任务')).toBeNull()
   })
 
   it('uses the compact e-Mate Home templates without local usage or recent-Session projections', async () => {
@@ -849,7 +1032,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(source).toMatch(/ctx\.conversation\.input\.for\(scope\)\.setDraft\(prompt\)/u)
     expect(source).toMatch(/ctx\.sessions\.open\(sessionId\)/u)
     expect(source).toMatch(/const workspaces = ctx\.workspaces\.list\.getSnapshot\(\)[\s\S]*?workspaces\.baselinesReady !== true[\s\S]*?workspaces\.items\.find\(isGeneralWorkspace\)/u)
-    expect(source).toMatch(/const sessionId = await ctx\.workspaces\.connectWorkspace\(target\)[\s\S]*?ctx\.sessions\.open\(sessionId\)[\s\S]*?history\.pushState\(null, '', '\/'\)[\s\S]*?dispatchEvent\(new PopStateEvent\('popstate'\)\)/u)
+    expect(source).toMatch(/const sessionId = await ctx\.workspaces\.connectWorkspace\(target\)[\s\S]*?ctx\.sessions\.open\(sessionId\)[\s\S]*?`\/chat\/\$\{encodeURIComponent\(sessionId\)\}`[\s\S]*?dispatchEvent\(new PopStateEvent\('popstate'\)\)/u)
     expect(source).not.toMatch(/ctx\.sessions\.create|randomUUID|host\/session-added/u)
     expect(source).toMatch(/ctx\.layout\.toggleSidebar\(\)/u)
     expect(source).toMatch(/ctx\.layout\.closeDetails\(\)/u)

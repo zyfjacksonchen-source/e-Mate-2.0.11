@@ -1,6 +1,7 @@
 /** User-facing Profile update copy derived without exposing internal identities. */
 
 import type { UpdateDownloadErrorCode } from './update-download.ts'
+import type { UpdateCheckFailureCode } from './update-checker.ts'
 
 export function profileUpdateCapabilitySummary(changedCount: number): string {
   return changedCount === 0
@@ -32,6 +33,7 @@ export type DesktopUpdateStage =
   | 'failed'
 
 export type DesktopUpdateFailureCode = Exclude<UpdateDownloadErrorCode, 'aborted'>
+  | Exclude<UpdateCheckFailureCode, 'check-cancelled'>
   | 'cancelled'
   | 'check-failed'
   | 'confirmation-failed'
@@ -44,6 +46,22 @@ export type DesktopUpdateFailureCode = Exclude<UpdateDownloadErrorCode, 'aborted
   | 'rollback-failed'
   | 'transaction-failed'
 
+/** Shared failure copy for native dialogs and the Agent projection. */
+export function desktopUpdateFailureSummary(code?: DesktopUpdateFailureCode): string {
+  switch (code) {
+    case 'check-config-invalid': return '当前应用的更新配置无效。'
+    case 'check-network-failed': return '无法连接 e-Mate 更新服务。'
+    case 'check-timeout': return '连接 e-Mate 更新服务超时。'
+    case 'check-http-failed': return 'e-Mate 更新服务暂时不可用。'
+    case 'check-response-invalid': return '更新服务响应无效。'
+    case 'check-manifest-invalid': return '更新清单格式无效。'
+    case 'check-signature-invalid': return '更新清单签名无法验证。'
+    case 'check-artifact-invalid': return '当前平台的更新安装包无效。'
+    case 'check-protocol-unsupported': return '当前应用无法安全使用此更新协议。'
+    default: return '暂时无法检查 e-Mate 更新。'
+  }
+}
+
 export interface DesktopUpdateState {
   readonly stage: DesktopUpdateStage
   readonly updateKind?: 'base' | 'components'
@@ -55,6 +73,8 @@ export interface DesktopUpdateState {
   readonly minimumSupportedVersion?: string
   readonly code?: DesktopUpdateFailureCode
   readonly diagnosticId?: string
+  readonly retryable?: boolean
+  readonly failedFromStage?: DesktopUpdateStage
 }
 
 /** Existing context-isolated Main/Preload carrier; it never owns updater state. */

@@ -563,7 +563,7 @@ jobs:
   profile-portable-composition:
     name: Portable Profile generations
     needs: [impact, plugins]
-    if: needs.impact.outputs.compose_profile == 'true' && needs.impact.outputs.publish_components_json != '[]' && needs.impact.outputs.portable_publish == 'true'
+    if: ${{ always() && needs.impact.result == 'success' && needs.plugins.result == 'success' && needs.impact.outputs.compose_profile == 'true' && needs.impact.outputs.publish_components_json != '[]' && needs.impact.outputs.portable_publish == 'true' }}
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -709,7 +709,7 @@ jobs:
   profile-composition:
     name: Complete Profile generation / ${{ matrix.target }}
     needs: [impact, plugins]
-    if: needs.impact.outputs.compose_profile == 'true' && needs.impact.outputs.publish_components_json != '[]' && needs.impact.outputs.portable_publish != 'true'
+    if: ${{ always() && needs.impact.result == 'success' && needs.plugins.result == 'success' && needs.impact.outputs.compose_profile == 'true' && needs.impact.outputs.publish_components_json != '[]' && needs.impact.outputs.portable_publish != 'true' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:

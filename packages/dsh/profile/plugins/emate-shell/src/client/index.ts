@@ -209,29 +209,20 @@ function captureRouteFence(ctx: any): RouteFence {
   }
 }
 
-/** Resolve through rc.7's native blank reuse, then let only the owning route generation open it. */
+/** Resolve through the native Workspace owner, then let only the owning route generation open it. */
 export async function startSessionFromRoute(ctx: any, workspaceId?: string): Promise<boolean> {
   const workspaces = ctx.workspaces.list.getSnapshot()
   if (workspaces.baselinesReady !== true) throw new Error('new task unavailable')
   const target = workspaceId ?? workspaces.items.find(isGeneralWorkspace)?.workspaceId
   if (target === undefined) throw new Error('new task unavailable')
-  const sessions = ctx.sessions.list.getSnapshot()
-  const current = sessions.current
-  const workspace = workspaces.items.find((item: any) => item.workspaceId === target)
-  if (current !== undefined && sessions.byId?.[current]?.blank === true && workspace?.sessionIds?.includes(current)) {
-    if (location.pathname !== '/') {
-      history.pushState(null, '', '/')
-      dispatchEvent(new PopStateEvent('popstate'))
-    }
-    return true
-  }
   const fence = captureRouteFence(ctx)
   try {
     const sessionId = await ctx.workspaces.connectWorkspace(target)
     if (!fence.current()) return false
     fence.dispose()
     ctx.sessions.open(sessionId)
-    if (location.pathname !== '/') history.pushState(null, '', '/')
+    const route = `/chat/${encodeURIComponent(sessionId)}`
+    if (location.pathname !== route) history.pushState(null, '', route)
     dispatchEvent(new PopStateEvent('popstate'))
     return true
   } catch (error: unknown) {
@@ -242,10 +233,13 @@ export async function startSessionFromRoute(ctx: any, workspaceId?: string): Pro
   }
 }
 
-/** Reuse Home's native blank/Workspace resolution, then write only the owning Composer draft. */
+/** Keep an existing Session owner; only a true no-Session Home action resolves general. */
 export async function prepareTemplateDraftFromRoute(ctx: any, prompt: string): Promise<void> {
-  if (!await startSessionFromRoute(ctx)) return
-  const sessionId = ctx.sessions.list.getSnapshot().current
+  let sessionId = ctx.sessions.list.getSnapshot().current
+  if (sessionId === undefined) {
+    if (!await startSessionFromRoute(ctx)) return
+    sessionId = ctx.sessions.list.getSnapshot().current
+  }
   if (sessionId === undefined) throw new Error('new task unavailable')
   const scope = ctx.sessions.scope(sessionId)
   if (scope === undefined) throw new Error(`session "${sessionId}" is not addressable`)
@@ -350,7 +344,6 @@ export function apply(ctx: any): void {
     inject: () => ({
       getSessions: () => ctx.sessions.list.getSnapshot(),
       openSession: (id: string) => { ctx.sessions.open(id) },
-      startHomeSession: () => startSession(),
     }),
   }, SessionRouteProjection))
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({

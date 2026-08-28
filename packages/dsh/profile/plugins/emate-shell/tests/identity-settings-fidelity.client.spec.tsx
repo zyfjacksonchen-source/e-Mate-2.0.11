@@ -249,7 +249,6 @@ describe('e-Mate 2.0.15 identity and settings fidelity', () => {
           useWorkspaces={useReadyWorkspaces}
           getSessions={() => latest.current}
           openSession={openSession}
-          startHomeSession={vi.fn()}
         />
       </>
     }
@@ -264,45 +263,45 @@ describe('e-Mate 2.0.15 identity and settings fidelity', () => {
     expect(location.pathname).toBe('/chat/performance-session')
   })
 
-  it('routes Home through the managed general-session action and keeps chat deep links exact', async () => {
-    const startHomeSession = vi.fn()
+  it('keeps a true no-Session Home inert and preserves exact chat deep links', async () => {
     const openSession = vi.fn()
-    const state = { phase: 'ready' as const, current: 'project', byId: { project: {}, other: {} } }
+    const state = { phase: 'ready' as const, current: undefined, byId: { other: {} } }
     const view = render(<SessionRouteProjection
       useSessions={selector => selector(state)}
       useWorkspaces={useReadyWorkspaces}
       getSessions={() => state}
       openSession={openSession}
-      startHomeSession={startHomeSession}
     />)
 
-    await waitFor(() => { expect(startHomeSession).toHaveBeenCalledOnce() })
+    expect(location.pathname).toBe('/')
+    expect(openSession).not.toHaveBeenCalled()
+
+    history.pushState(null, '', '/chat/missing')
+    act(() => { dispatchEvent(new PopStateEvent('popstate')) })
+    expect(location.pathname).toBe('/')
     expect(openSession).not.toHaveBeenCalled()
 
     history.pushState(null, '', '/chat/other')
     act(() => { dispatchEvent(new PopStateEvent('popstate')) })
     expect(openSession).toHaveBeenCalledWith('other')
-    expect(startHomeSession).toHaveBeenCalledOnce()
     view.unmount()
   })
 
-  it('waits for the native Workspace baseline before starting the managed Home session', async () => {
-    const startHomeSession = vi.fn()
-    const state = { phase: 'ready' as const, current: undefined, byId: {} }
+  it('waits for the native Workspace baseline before projecting the current Session route', async () => {
+    const state = { phase: 'ready' as const, current: 'project', byId: { project: {} } }
     let workspacesReady = false
     const route = () => <SessionRouteProjection
       useSessions={selector => selector(state)}
       useWorkspaces={selector => selector({ baselinesReady: workspacesReady })}
       getSessions={() => state}
       openSession={() => {}}
-      startHomeSession={startHomeSession}
     />
 
     const view = render(route())
-    expect(startHomeSession).not.toHaveBeenCalled()
+    expect(location.pathname).toBe('/')
     workspacesReady = true
     view.rerender(route())
-    await waitFor(() => { expect(startHomeSession).toHaveBeenCalledOnce() })
+    await waitFor(() => { expect(location.pathname).toBe('/chat/project') })
     view.unmount()
   })
 
@@ -321,7 +320,6 @@ describe('e-Mate 2.0.15 identity and settings fidelity', () => {
         useWorkspaces={useReadyWorkspaces}
         getSessions={() => state}
         openSession={() => {}}
-        startHomeSession={() => {}}
       />
     }
 
@@ -334,10 +332,9 @@ describe('e-Mate 2.0.15 identity and settings fidelity', () => {
     view.unmount()
   })
 
-  it('routes the same current Session only after its first prompt makes it non-blank', async () => {
+  it('keeps the same stable route before and after a blank Session sends its first prompt', async () => {
     history.replaceState(null, '', '/')
     let markSent!: () => void
-    const startHomeSession = vi.fn()
 
     function Runtime() {
       const [blank, setBlank] = React.useState(true)
@@ -352,15 +349,13 @@ describe('e-Mate 2.0.15 identity and settings fidelity', () => {
         useWorkspaces={useReadyWorkspaces}
         getSessions={() => state}
         openSession={() => {}}
-        startHomeSession={startHomeSession}
       />
     }
 
     const view = render(<Runtime />)
-    await waitFor(() => { expect(startHomeSession).toHaveBeenCalledOnce() })
-    expect(location.pathname).toBe('/')
-    act(markSent)
     await waitFor(() => { expect(location.pathname).toBe('/chat/session-1') })
+    act(markSent)
+    expect(location.pathname).toBe('/chat/session-1')
     view.unmount()
   })
 
@@ -379,7 +374,6 @@ describe('e-Mate 2.0.15 identity and settings fidelity', () => {
         useWorkspaces={useReadyWorkspaces}
         getSessions={() => state}
         openSession={() => {}}
-        startHomeSession={() => {}}
       />
     }
 

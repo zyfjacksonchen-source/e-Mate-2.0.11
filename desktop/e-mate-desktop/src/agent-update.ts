@@ -4,7 +4,12 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from './updates.ts'
-import { formatUpdateBytes, profileUpdateCapabilitySummary } from './update-presentation.ts'
+import {
+  desktopUpdateFailureSummary,
+  formatUpdateBytes,
+  profileUpdateCapabilitySummary,
+  type DesktopUpdateFailureCode,
+} from './update-presentation.ts'
 
 export const name = 'desktop-agent-update'
 export const inject = ['desktopUpdates', 'systemPrompt', 'tools']
@@ -42,6 +47,8 @@ export function apply(ctx: Context): void {
           minimumSupportedVersion: { type: 'string' },
           code: { type: 'string' },
           diagnosticId: { type: 'string' },
+          retryable: { type: 'boolean' },
+          failedFromStage: { type: 'string' },
         },
         additionalProperties: false,
       },
@@ -59,7 +66,7 @@ export function apply(ctx: Context): void {
               ? `已取消更新；当前仍为 e-Mate ${value.installedVersion}。`
               : value.status === 'superseded'
                 ? `发布版本已变化，请重新确认更新到 e-Mate ${value.latestVersion}。`
-                : `e-Mate 更新未完成，原生通知已显示失败结果；请稍后重试${value.diagnosticId === undefined ? '。' : `（诊断编号：${value.diagnosticId}）。`}`,
+                : `${desktopUpdateFailureSummary(value.code as DesktopUpdateFailureCode | undefined)}请稍后重试${value.diagnosticId === undefined ? '。' : `（诊断编号：${value.diagnosticId}）。`}`,
       }],
     },
     async execute() {

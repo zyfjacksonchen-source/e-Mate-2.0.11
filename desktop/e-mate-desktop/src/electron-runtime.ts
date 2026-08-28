@@ -57,6 +57,7 @@ import {
   DESKTOP_UPDATE_RUN_INTERACTIVE,
   DESKTOP_UPDATE_STATE_CHANGED,
   DESKTOP_UPDATE_STATE_READ,
+  desktopUpdateFailureSummary,
   formatUpdateBytes,
   profileUpdateCapabilitySummary,
   type DesktopUpdateState,
@@ -638,12 +639,16 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
 
   /** Report one user-triggered check without exposing network or response details. */
   private async showManualUpdateCheckResult(result: UpdateCheckResult | null): Promise<void> {
-    if (result === null) {
+    if (result === null || result.status === 'failed') {
+      const failure = this.updateState?.stage === 'failed' ? this.updateState : undefined
       await dialog.showMessageBox({
         type: 'warning',
         title: '无法检查更新',
-        message: '暂时无法检查 e-Mate 更新。',
-        detail: '请稍后再试。',
+        message: desktopUpdateFailureSummary(failure?.code
+          ?? (result?.code === 'check-cancelled' ? 'cancelled' : result?.code)),
+        detail: failure?.diagnosticId === undefined
+          ? '请稍后再试。'
+          : `请稍后再试。\n\n诊断编号：${failure.diagnosticId}`,
         buttons: ['知道了'],
         defaultId: 0,
         noLink: true,
