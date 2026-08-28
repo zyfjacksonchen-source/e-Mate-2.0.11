@@ -45,6 +45,7 @@ jobs:
         run: yarn install --immutable
 
       - name: Accept only the exact attempt-1 protected-main CI producer
+        id: evidence
         env:
           GH_TOKEN: ${{ github.token }}
           CI_RUN_ID: ${{ inputs.ci_run_id }}
@@ -62,32 +63,35 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$GITHUB_SHA" = "$SOURCE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
-          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID")"
-          test "$(jq -er .repository.full_name <<<"$run_json")" = "$GITHUB_REPOSITORY"
-          test "$(jq -er .path <<<"$run_json")" = .github/workflows/ci.yml
-          test "$(jq -er .event <<<"$run_json")" = push
-          test "$(jq -er .head_branch <<<"$run_json")" = main
-          test "$(jq -er .head_sha <<<"$run_json")" = "$SOURCE_SHA"
-          test "$(jq -er .status <<<"$run_json")" = completed
-          test "$(jq -er .conclusion <<<"$run_json")" = success
-          test "$(jq -er .run_attempt <<<"$run_json")" = 1
-          jobs_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/jobs?per_page=100")"
-          for name in \
-            'CI admission' \
-            'Node 24 / target contracts and unit tests' \
-            'Windows x64 / unsigned desktop installer' \
-            'macOS universal / unsigned desktop disk image'; do
-            test "$(jq -r --arg name "$name" '[.jobs[] | select(.name == $name and .conclusion == "success")] | length' <<<"$jobs_json")" = 1
-          done
-          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100")"
-          for name in \
-            "e-mate-base-sdk-$SOURCE_SHA" \
-            "e-mate-desktop-profile-$SOURCE_SHA" \
-            "e-mate-desktop-profile-build-receipt-$SOURCE_SHA" \
-            "e-mate-desktop-windows-$SOURCE_SHA" \
-            "e-mate-desktop-macos-$SOURCE_SHA"; do
-            test "$(jq -r --arg name "$name" '[.artifacts[] | select(.name == $name and .expired == false and (.digest | test("^sha256:[0-9a-f]{64}$")))] | length' <<<"$artifacts")" = 1
-          done
+          mkdir -p .release-inputs/evidence
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > .release-inputs/evidence/run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/jobs?per_page=100" > .release-inputs/evidence/jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100" > .release-inputs/evidence/artifacts.json
+          plan_artifact_id="$(jq -er --arg name "e-mate-ci-plan-$SOURCE_SHA" \
+            '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one CI plan artifact") end' \
+            .release-inputs/evidence/artifacts.json)"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$plan_artifact_id/zip" > .release-inputs/evidence/ci-plan.zip
+          echo "plan_artifact_id=$plan_artifact_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download the unique CI plan
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence.outputs.plan_artifact_id }}
+          merge-multiple: true
+          path: .release-inputs/evidence/plan
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.ci_run_id }}
+
+      - name: Verify the shared formal RC evidence contract
+        run: >-
+          node scripts/release-candidate.mjs verify
+          --source "${{ inputs.source_sha }}"
+          --run-id "${{ inputs.ci_run_id }}"
+          --run .release-inputs/evidence/run.json
+          --jobs .release-inputs/evidence/jobs.json
+          --artifacts .release-inputs/evidence/artifacts.json
+          --plan .release-inputs/evidence/plan/ci-plan.json
+          --plan-archive .release-inputs/evidence/ci-plan.zip
 
       - name: Download the exact accepted Base SDK
         uses: actions/download-artifact@v4

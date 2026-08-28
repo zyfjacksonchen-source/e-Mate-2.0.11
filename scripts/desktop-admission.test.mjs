@@ -15,12 +15,62 @@ import {
 } from './desktop-admission.mjs'
 import { profileGenerationId } from '../desktop/e-mate-desktop/src/profile-generation.ts'
 import { canonicalProfileJson, signProfileRelease } from '../desktop/e-mate-desktop/src/profile-release.ts'
+import { verifyReleaseCandidateEvidence } from './release-candidate.mjs'
 
 const SOURCE = 'a'.repeat(40)
 const ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
 const TARGETS = ['darwin-arm64', 'darwin-x64', 'win32-x64']
 const PERFORMANCE_CONTEXT = Buffer.from('e-mate-performance-admission-v1\0', 'utf8')
 const PERFORMANCE_AGGREGATE_CONTEXT = Buffer.from('e-mate-performance-aggregate-admission-v1\0', 'utf8')
+
+test('formal RC evidence accepts only the unique attempt-1 main dispatch and its complete plan', () => {
+  const runId = '100'
+  const plan = {
+    schema_version: 2, document_type: 'emate.ci-plan', ci_mode: 'release-candidate', lane: 'base',
+    run_base: true, run_components: true, compose_profile: true, run_verification: true,
+    portable_publish: false, profile_bootstrap: true,
+    components: ['portable', 'platform'], publish_components: ['portable', 'platform'],
+    ci_component_jobs: TARGETS.map(target => ({ target, components: ['platform'], publish_components: ['platform'] })),
+    contract: { valid: true, base_contract_id: 'base-v8', schedule_protocol_floor: 1, errors: [] },
+    ci: { distribution: { macos: true, windows: true } },
+  }
+  const artifactNames = [
+    `e-mate-ci-plan-${SOURCE}`, `e-mate-component-source-portable-${SOURCE}`, `e-mate-base-sdk-${SOURCE}`,
+    `e-mate-desktop-profile-${SOURCE}`, `e-mate-desktop-profile-build-receipt-${SOURCE}`,
+    ...TARGETS.map((target, index) => `e-mate-component-${index}-${target}-${SOURCE}`),
+    ...TARGETS.map(target => `e-mate-profile-candidate-${target}-${SOURCE}`),
+    `e-mate-desktop-windows-${SOURCE}`, `e-mate-desktop-macos-${SOURCE}`,
+  ]
+  const evidence = {
+    source: SOURCE, runId,
+    run: { id: 100, repository: { full_name: 'zyfjacksonchen-source/e-Mate-2.0.11' }, path: '.github/workflows/ci.yml', event: 'workflow_dispatch', head_branch: 'main', head_sha: SOURCE, status: 'completed', conclusion: 'success', run_attempt: 1 },
+    jobs: { jobs: [
+      'Release impact contract', 'Node 24 / target contracts and unit tests',
+      ...TARGETS.map(target => `Changed Profile components / ${target}`),
+      ...TARGETS.map(target => `Complete Profile generation / ${target}`),
+      'Windows x64 / unsigned desktop installer', 'macOS universal / unsigned desktop disk image', 'CI admission',
+    ].map(name => ({ name, conclusion: 'success' })) },
+    artifacts: { artifacts: artifactNames.map((name, index) => ({ id: index + 1, name, expired: false, size_in_bytes: 1, digest: `sha256:${String(index).padStart(64, '0')}`, workflow_run: { id: 100, head_sha: SOURCE } })) },
+    plan, planArchiveDigest: `sha256:${'0'.repeat(64)}`, planArchiveBytes: 1,
+  }
+  assert.equal(verifyReleaseCandidateEvidence(evidence).required_artifacts.length, 13)
+  for (const [label, mutate, message] of [
+    ['push', value => value.run.event = 'push', /attempt-1 main workflow_dispatch/u],
+    ['ordinary dispatch', value => value.plan.ci_mode = 'pr-fast', /ci-plan contract/u],
+    ['cancelled', value => value.run.conclusion = 'cancelled', /attempt-1 main workflow_dispatch/u],
+    ['rerun', value => value.run.run_attempt = 2, /attempt-1 main workflow_dispatch/u],
+    ['source drift', value => value.run.head_sha = 'b'.repeat(40), /attempt-1 main workflow_dispatch/u],
+    ['artifact source drift', value => value.artifacts.artifacts[0].workflow_run.head_sha = 'b'.repeat(40), /not unique and immutable/u],
+    ['digest drift', value => value.artifacts.artifacts[0].digest = `sha256:${'f'.repeat(64)}`, /archive bytes or digest drifted/u],
+    ['plan drift', value => value.plan.schema_version = 1, /ci-plan contract/u],
+    ['required job missing', value => value.jobs.jobs.pop(), /job is not uniquely successful/u],
+    ['required artifact missing', value => value.artifacts.artifacts.pop(), /artifact is not unique and immutable/u],
+  ]) {
+    const value = structuredClone(evidence)
+    mutate(value)
+    assert.throws(() => verifyReleaseCandidateEvidence(value), message, label)
+  }
+})
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
@@ -450,7 +500,7 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
     const desktop = await desktopCandidate(join(root, 'desktop'))
     const metadata = join(root, 'metadata')
     await json(join(metadata, 'main-ref.json'), { object: { sha: SOURCE } })
-    await json(join(metadata, 'ci-run.json'), run('100', '.github/workflows/ci.yml', 'push'))
+    await json(join(metadata, 'ci-run.json'), run('100', '.github/workflows/ci.yml', 'workflow_dispatch'))
     await json(join(metadata, 'desktop-run.json'), run('102', '.github/workflows/desktop-release.yml'))
     await json(join(metadata, 'profile-run.json'), run('103', '.github/workflows/profile-release.yml'))
     const ciJobNames = [
@@ -494,11 +544,11 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
       await assert.rejects(() => createGithubArtifactProvenance(options), new RegExp(`CI job is not uniquely successful: ${name}`, 'u'))
     }
     await json(join(metadata, 'ci-jobs.json'), jobs(ciJobNames))
-    const rerun = run('100', '.github/workflows/ci.yml', 'push')
+    const rerun = run('100', '.github/workflows/ci.yml', 'workflow_dispatch')
     rerun.run_attempt = 2
     await json(join(metadata, 'ci-run.json'), rerun)
     await assert.rejects(() => createGithubArtifactProvenance(options), /CI run provenance is invalid/u)
-    const invalid = run('100', '.github/workflows/ci.yml', 'push')
+    const invalid = run('100', '.github/workflows/ci.yml', 'workflow_dispatch')
     invalid.repository.full_name = 'zyfjacksonchen-source/e-Mate'
     await json(join(metadata, 'ci-run.json'), invalid)
     await assert.rejects(() => createGithubArtifactProvenance(options), /CI run provenance is invalid/u)
@@ -516,6 +566,17 @@ test('workflow is build-only and uploads only the two external signer inputs', a
   const ci = parse(await readFile('.github/workflows/ci.yml', 'utf8'))
   const desktopRelease = parse(desktopBuild)
   const profileRelease = parse(await readFile('.github/workflows/profile-release.yml', 'utf8'))
+  const coordinator = await readFile('.github/workflows/release-coordinator.yml', 'utf8')
+  const coordinatorSource = await readFile('scripts/release-coordinator.mjs', 'utf8')
+  for (const [path, source] of [
+    ['desktop-release.yml', desktopBuild], ['profile-release.yml', await readFile('.github/workflows/profile-release.yml', 'utf8')],
+    ['release-coordinator.yml', coordinator], ['desktop-admission.yml', workflow],
+  ]) {
+    assert.match(source, /release-candidate\.mjs verify/u, path)
+    assert.doesNotMatch(source, /\.event[^\n]*= push/u, path)
+  }
+  assert.match(coordinatorSource, /event=workflow_dispatch/u)
+  assert.doesNotMatch(coordinatorSource, /event=push/u)
   assert.deepEqual(Object.keys(parsed.jobs), ['admission'])
   assert.equal(parsed.jobs.admission.name, 'Desktop release admission')
   assert.ok(Object.values(ci.jobs).some(job => job.name === 'CI admission'))

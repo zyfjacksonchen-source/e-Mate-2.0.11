@@ -84,13 +84,24 @@ jobs:
           run-id: ${{ steps.ci.outputs.ci_run_id }}
       - name: Accept only an exact RC plan
         id: plan
+        env:
+          CI_RUN_ID: ${{ steps.ci.outputs.ci_run_id }}
         run: |
           set -euo pipefail
           plan=accepted-ci-plan/ci-plan.json
-          test "$(jq -er .schema_version "$plan")" = 2
-          test "$(jq -er .document_type "$plan")" = emate.ci-plan
-          test "$(jq -er .ci_mode "$plan")" = release-candidate
-          test "$(jq -er .compose_profile "$plan")" = true
+          mkdir -p accepted-ci-evidence
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > accepted-ci-evidence/run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/jobs?per_page=100" > accepted-ci-evidence/jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100" > accepted-ci-evidence/artifacts.json
+          plan_artifact_id="$(jq -er --arg name "e-mate-ci-plan-$EMATE_SOURCE" \
+            '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one CI plan artifact") end' \
+            accepted-ci-evidence/artifacts.json)"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$plan_artifact_id/zip" > accepted-ci-evidence/ci-plan.zip
+          node scripts/release-candidate.mjs verify \
+            --source "$EMATE_SOURCE" --run-id "$CI_RUN_ID" \
+            --run accepted-ci-evidence/run.json --jobs accepted-ci-evidence/jobs.json \
+            --artifacts accepted-ci-evidence/artifacts.json --plan "$plan" \
+            --plan-archive accepted-ci-evidence/ci-plan.zip
           echo "profile_bootstrap=$(jq -r .profile_bootstrap "$plan")" >> "$GITHUB_OUTPUT"
       - id: macos
         run: node scripts/release-coordinator.mjs artifact --run-id "${{ steps.ci.outputs.ci_run_id }}" --name "e-mate-desktop-macos-$EMATE_SOURCE"
