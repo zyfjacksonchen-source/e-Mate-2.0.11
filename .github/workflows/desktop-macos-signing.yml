@@ -1,0 +1,145 @@
+name: Sign and notarize accepted e-Mate macOS bytes
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact protected-main source accepted by the formal RC run.
+        required: true
+        type: string
+      ci_run_id:
+        description: Exact attempt-1 formal RC CI run.
+        required: true
+        type: string
+      macos_artifact_id:
+        description: Exact accepted CI macOS artifact ID.
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: e-mate-desktop-macos-signing-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    name: Sign and notarize exact accepted macOS bytes
+    runs-on: macos-14
+    timeout-minutes: 45
+    environment: macos-signing
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.2'
+
+      - run: corepack enable
+
+      - name: Install the exact locked Desktop signer closure
+        working-directory: desktop
+        run: corepack yarn install --immutable
+
+      - name: Bind the unique formal RC and exact macOS artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          MACOS_ARTIFACT_ID: ${{ inputs.macos_artifact_id }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = zyfjacksonchen-source/e-Mate-2.0.11
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          test "${GITHUB_REF_PROTECTED:-}" = true
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/desktop-macos-signing.yml@refs/heads/main"
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$MACOS_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
+
+          mkdir -p .signing/evidence .signing/input
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > .signing/evidence/run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/jobs?per_page=100" > .signing/evidence/jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100" > .signing/evidence/artifacts.json
+          plan_id="$(jq -er --arg name "e-mate-ci-plan-$SOURCE_SHA" \
+            '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one CI plan artifact") end' \
+            .signing/evidence/artifacts.json)"
+          test "$(jq -er --argjson id "$MACOS_ARTIFACT_ID" --arg name "e-mate-desktop-macos-$SOURCE_SHA" \
+            '[.artifacts[] | select(.id == $id and .name == $name and .expired == false)] | length' \
+            .signing/evidence/artifacts.json)" = 1
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$plan_id/zip" > .signing/evidence/ci-plan.zip
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$MACOS_ARTIFACT_ID" > .signing/evidence/macos-artifact.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$MACOS_ARTIFACT_ID/zip" > .signing/evidence/macos-artifact.zip
+          /usr/bin/unzip -q .signing/evidence/ci-plan.zip -d .signing/evidence/plan
+          /usr/bin/unzip -q .signing/evidence/macos-artifact.zip -d .signing/input
+
+      - name: Verify the shared formal RC evidence contract
+        run: >-
+          node scripts/release-candidate.mjs verify
+          --source "${{ inputs.source_sha }}"
+          --run-id "${{ inputs.ci_run_id }}"
+          --run .signing/evidence/run.json
+          --jobs .signing/evidence/jobs.json
+          --artifacts .signing/evidence/artifacts.json
+          --plan .signing/evidence/plan/ci-plan.json
+          --plan-archive .signing/evidence/ci-plan.zip
+
+      - name: Verify the internal macOS artifact and runtime receipts
+        run: >-
+          node scripts/stage-desktop-ci-artifact.mjs verify
+          --platform darwin
+          --source-commit "${{ inputs.source_sha }}"
+          --ci-run-id "${{ inputs.ci_run_id }}"
+          --base-contract desktop/e-mate-desktop/base-contract.json
+          --directory .signing/input
+
+      - name: Sign, notarize, staple, verify, and generate the exact handoff
+        working-directory: desktop
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_KEYCHAIN: ${{ secrets.APPLE_KEYCHAIN }}
+          APPLE_KEYCHAIN_PROFILE: ${{ secrets.APPLE_KEYCHAIN_PROFILE }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_KEYCHAIN: ${{ secrets.CSC_KEYCHAIN }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_NAME: ${{ secrets.CSC_NAME }}
+          MAC_CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: >-
+          corepack yarn node e-mate-desktop/scripts/sign-existing-mac-release.ts
+          --source-commit "${{ inputs.source_sha }}"
+          --ci-run-id "${{ inputs.ci_run_id }}"
+          --artifact-id "${{ inputs.macos_artifact_id }}"
+          --artifact-metadata ../.signing/evidence/macos-artifact.json
+          --artifact-archive ../.signing/evidence/macos-artifact.zip
+          --input ../.signing/input
+          --output ../dist/macos-signed
+          --base-contract e-mate-desktop/base-contract.json
+          --version 2.0.15
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-desktop-macos-signed-${{ inputs.source_sha }}
+          path: |
+            dist/macos-signed/e-Mate-2.0.15-mac-universal.dmg
+            dist/macos-signed/e-Mate-2.0.15-mac-universal.dmg.blockmap
+            dist/macos-signed/desktop-macos-signed-receipt.json
+            dist/macos-signed/desktop-macos-signed-verification.json
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 30

@@ -54,7 +54,7 @@ export interface MacReleaseVerificationOptions {
   /** Installed application name inside the mounted image. */
   readonly productName: string
   /** Signed/notarized Developer ID release or formal ad-hoc-signed unsigned release. */
-  readonly mode: 'signed-notarized' | 'unsigned-adhoc'
+  readonly mode: 'signed-notarized' | 'signed-notarized-dmg' | 'unsigned-adhoc'
   /** Return regular DMG files in the distribution directory. */
   readonly listDmgs: (distDir: string) => readonly string[]
   /** Create a private empty mount point. */
@@ -165,7 +165,11 @@ function defaultOptions(): MacReleaseVerificationOptions {
       ? join(packageRoot, 'dist', 'mac-release')
       : resolve(process.argv[2]),
     productName: 'e-Mate',
-    mode: process.argv.includes('--unsigned-adhoc') ? 'unsigned-adhoc' : 'signed-notarized',
+    mode: process.argv.includes('--unsigned-adhoc')
+      ? 'unsigned-adhoc'
+      : process.argv.includes('--signed-notarized-dmg')
+        ? 'signed-notarized-dmg'
+        : 'signed-notarized',
     listDmgs,
     makeMountPoint: () => mkdtempSync(join(tmpdir(), 'dsh-desktop-dmg-')),
     run,
@@ -211,9 +215,9 @@ export function verifyMacRelease(
     }
     options.verifyComputerUseHelper(unpackedRoot)
     options.run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath])
-    if (options.mode === 'signed-notarized') {
+    if (options.mode !== 'unsigned-adhoc') {
       options.run('spctl', ['--assess', '--type', 'execute', '--verbose=4', appPath])
-      options.run('xcrun', ['stapler', 'validate', appPath])
+      options.run('xcrun', ['stapler', 'validate', options.mode === 'signed-notarized-dmg' ? dmgPath : appPath])
     } else {
       options.launch(executablePath, ['arm64', 'x86_64'])
     }

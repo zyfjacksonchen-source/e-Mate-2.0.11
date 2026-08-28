@@ -131,6 +131,21 @@ describe('macOS release artifact verification', () => {
     ])
   })
 
+  it('validates the stapled notarized DMG for the isolated post-build signer', () => {
+    const harness = options({ mode: 'signed-notarized-dmg' })
+
+    verifyMacRelease(harness.value)
+
+    expect(harness.calls).toContainEqual({
+      command: 'xcrun',
+      args: ['stapler', 'validate', '/release/dist/e-Mate-2.0.0-universal.dmg'],
+    })
+    expect(harness.calls).toContainEqual({
+      command: 'spctl',
+      args: ['--assess', '--type', 'execute', '--verbose=4', join('/private/tmp/dsh-desktop-dmg-test', 'e-Mate.app')],
+    })
+  })
+
   it('rejects absent or ambiguous release images before mounting', () => {
     for (const dmgs of [[], ['/one.dmg', '/two.dmg']]) {
       const harness = options({ listDmgs: () => dmgs })
