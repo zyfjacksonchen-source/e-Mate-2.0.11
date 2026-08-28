@@ -124,8 +124,16 @@ export function SidebarRoot({
   [archived, internalSubagentIds, sessionSnapshot])
   const visibleById = useMemo(() => new Map(visibleRows.map(row => [row.id, row])), [visibleRows])
   const highlightedSessionId = highlightedProductSessionId(sessionSnapshot)
-  const accounted = useMemo(() => new Set(projectWorkspaces.flatMap(workspace => workspace.sessionIds)), [projectWorkspaces])
-  const generalRows = visibleRows.filter(row => !accounted.has(row.id))
+  const generalWorkspace = useMemo(() => workspaces.find(isGeneralWorkspace), [workspaces])
+  const assignedSessionIds = useMemo(() => new Set(workspaces.flatMap(workspace => workspace.sessionIds)), [workspaces])
+  const generalRows = useMemo(() => workspacePhase === 'ready'
+    ? (generalWorkspace?.sessionIds.flatMap(id => visibleById.get(id) ?? []).sort(newestSessionFirst) ?? [])
+    : [],
+  [generalWorkspace, visibleById, workspacePhase])
+  const unassignedRows = useMemo(() => workspacePhase === 'ready'
+    ? visibleRows.filter(row => !assignedSessionIds.has(row.id))
+    : [],
+  [assignedSessionIds, visibleRows, workspacePhase])
   const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN')
   const searchRows = normalizedQuery === ''
     ? []
@@ -493,6 +501,11 @@ export function SidebarRoot({
                       )
                     })}</div>)}
               </section>
+
+              {unassignedRows.length > 0 && <section className={css.sidebarSection} aria-label="未归属/待恢复">
+                <div className={css.navHeading}><strong>未归属/待恢复</strong><small>{unassignedRows.length}</small></div>
+                <div className={css.taskList}>{unassignedRows.map(sessionRow)}</div>
+              </section>}
 
               <section className={css.sidebarSection} aria-label="会话">
                 <div className={css.navHeading}>

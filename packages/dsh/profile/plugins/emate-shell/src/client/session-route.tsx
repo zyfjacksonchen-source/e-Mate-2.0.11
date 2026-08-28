@@ -15,7 +15,6 @@ interface Props {
   useWorkspaces: <T>(selector: (state: WorkspaceListState) => T) => T
   getSessions: () => SessionListState
   openSession: (id: string) => void
-  startHomeSession: () => void | Promise<unknown>
 }
 
 type PendingRoute = string | null
@@ -35,63 +34,48 @@ export function SessionRouteProjection({
   useWorkspaces,
   getSessions,
   openSession,
-  startHomeSession,
 }: Props) {
   const phase = useSessions(state => state.phase)
   const current = useSessions(state => state.current)
-  const currentBlank = useSessions(state => state.current === undefined ? undefined : state.byId[state.current]?.blank)
   const workspacesReady = useWorkspaces(state => state.baselinesReady)
   const initialized = useRef(false)
   const pending = useRef<PendingRoute>(null)
-
-  const ensureHomeSession = () => {
-    try {
-      void Promise.resolve(startHomeSession()).catch(() => {})
-    } catch {
-      // Home remains usable while the native session authority reports the failure.
-    }
-  }
 
   const applyLocation = () => {
     const state = getSessions()
     if (state.phase !== 'ready' || !workspacesReady) return
     if (location.pathname === '/') {
       pending.current = null
-      ensureHomeSession()
+      if (state.current !== undefined && Object.prototype.hasOwnProperty.call(state.byId, state.current)) {
+        history.replaceState(null, '', `/chat/${encodeURIComponent(state.current)}`)
+      }
       return
     }
     if (!location.pathname.startsWith('/chat')) return
     const id = chatId(location.pathname)
     if (id === null || !Object.prototype.hasOwnProperty.call(state.byId, id)) {
-      history.replaceState(null, '', '/')
+      const fallback = state.current === undefined || !Object.prototype.hasOwnProperty.call(state.byId, state.current)
+        ? '/'
+        : `/chat/${encodeURIComponent(state.current)}`
+      history.replaceState(null, '', fallback)
       pending.current = null
-      ensureHomeSession()
       return
     }
     pending.current = state.current === id ? null : id
-    if (state.current !== id) {
-      try {
-        openSession(id)
-      } catch {
-        history.replaceState(null, '', '/')
-        pending.current = null
-        ensureHomeSession()
-      }
-    }
+    if (state.current !== id) openSession(id)
   }
 
   useEffect(() => {
     const onPopState = () => { applyLocation() }
     addEventListener('popstate', onPopState)
     return () => { removeEventListener('popstate', onPopState) }
-  }, [getSessions, openSession, startHomeSession, workspacesReady])
+  }, [getSessions, openSession, workspacesReady])
 
   useEffect(() => {
     if (phase !== 'ready' || !workspacesReady) return
     if (!initialized.current) {
       initialized.current = true
       applyLocation()
-      return
     }
     if (pending.current !== null) {
       if (pending.current === current) {
@@ -100,14 +84,14 @@ export function SessionRouteProjection({
         return
       }
     }
-    const path = current === undefined || currentBlank === true ? '/' : `/chat/${encodeURIComponent(current)}`
+    const path = current === undefined ? '/' : `/chat/${encodeURIComponent(current)}`
     if (['/capabilities', '/settings', '/schedules'].includes(location.pathname)) return
     if (!['/', '/chat'].some(prefix => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`))) return
     if (location.pathname !== path) {
       history.pushState(null, '', path)
       dispatchEvent(new PopStateEvent('popstate'))
     }
-  }, [current, currentBlank, phase, workspacesReady])
+  }, [current, phase, workspacesReady])
 
   return null
 }
