@@ -8,7 +8,7 @@ import Storage from '../../../upstream/deepseek-harness/packages/storage/storage
 import { DomainFacility } from '../../../upstream/deepseek-harness/packages/storage/storage-domain/lib/index.js'
 import { JsonStorageBackend } from '../../../upstream/deepseek-harness/packages/storage/storage-json/lib/index.js'
 import WorkspaceRegistry from '../../../upstream/deepseek-harness/packages/workspace/workspace/lib/index.js'
-import { resolveMemoryScope } from '../lib/scope.js'
+import { MemoryScopeError, resolveMemoryScope } from '../lib/scope.js'
 
 const workspace = (id, path, sessionIds, status = 'ok') => ({
   id,
@@ -52,11 +52,24 @@ test('project keys are stable and never cross projects or ungrouped sessions', a
   assert.notEqual(ungrouped.key, general1.key)
   await assert.rejects(
     resolveMemoryScope(registry, execution('foreign', '/work/a')),
-    /not bound to its owning project/,
+    error => error instanceof MemoryScopeError
+      && error.code === 'scope-invalid'
+      && /not bound to its owning project/u.test(error.message),
   )
   await assert.rejects(
     resolveMemoryScope(registry, execution('unknown', '/work/missing')),
-    /cannot prove the session workspace binding/,
+    error => error instanceof MemoryScopeError
+      && error.code === 'scope-invalid'
+      && /cannot prove the session workspace binding/u.test(error.message),
+  )
+  await assert.rejects(
+    resolveMemoryScope(
+      { resolveByPath: async () => workspace('project-offline', '/offline', ['offline-1'], 'missing') },
+      execution('offline-1', '/offline'),
+    ),
+    error => error instanceof MemoryScopeError
+      && error.code === 'unavailable'
+      && /directory is unavailable/u.test(error.message),
   )
 })
 
