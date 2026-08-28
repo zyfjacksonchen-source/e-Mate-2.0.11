@@ -7,9 +7,14 @@ on:
         description: Successful protected-main CI run for this exact source commit.
         required: true
         type: string
+      macos_publication_mode:
+        description: Exact macOS candidate owner.
+        required: true
+        type: choice
+        options: [unsigned, signed]
       macos_signer_run_id:
         description: Successful attempt-1 macOS signer run for this exact source commit.
-        required: true
+        required: false
         type: string
       desktop_artifact_id:
         description: Exact three-file e-mate-desktop-release artifact measured by the performance rig.
@@ -61,6 +66,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CI_RUN_ID: ${{ inputs.main_ci_run_id }}
+          MACOS_PUBLICATION_MODE: ${{ inputs.macos_publication_mode }}
           MACOS_SIGNER_RUN_ID: ${{ inputs.macos_signer_run_id }}
           DESKTOP_ARTIFACT_ID: ${{ inputs.desktop_artifact_id }}
           PROFILE_RUN_ID: ${{ inputs.profile_release_run_id }}
@@ -75,9 +81,14 @@ jobs:
           test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/desktop-performance.yml@refs/heads/main"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
-          for value in "$CI_RUN_ID" "$MACOS_SIGNER_RUN_ID" "$DESKTOP_ARTIFACT_ID" "$PROFILE_RUN_ID" "$PROFILE_ARTIFACT_ID"; do
+          for value in "$CI_RUN_ID" "$DESKTOP_ARTIFACT_ID" "$PROFILE_RUN_ID" "$PROFILE_ARTIFACT_ID"; do
             [[ "$value" =~ ^[1-9][0-9]*$ ]]
           done
+          case "$MACOS_PUBLICATION_MODE" in
+            unsigned) test -z "$MACOS_SIGNER_RUN_ID" ;;
+            signed) [[ "$MACOS_SIGNER_RUN_ID" =~ ^[1-9][0-9]*$ ]] ;;
+            *) exit 1 ;;
+          esac
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$GITHUB_SHA"
 
           ci_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID")"
@@ -110,11 +121,14 @@ jobs:
           test "$(jq -er '.conclusion' <<<"$desktop_json")" = success
           test "$(jq -er '.run_attempt' <<<"$desktop_json")" = 1
           desktop_jobs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$desktop_run_id/jobs?per_page=100")"
-          for name in 'Bind exact signed macOS and protected-main CI Windows bytes'; do
-            jq -e --arg name "$name" \
-              '[.jobs[] | select(.name == $name and .status == "completed" and .conclusion == "success")] | length == 1' \
-              <<<"$desktop_jobs" >/dev/null
-          done
+          if test "$MACOS_PUBLICATION_MODE" = unsigned; then
+            desktop_job='Bind exact protected-main CI unsigned desktop bytes'
+          else
+            desktop_job='Bind exact signed macOS and protected-main CI Windows bytes'
+          fi
+          jq -e --arg name "$desktop_job" \
+            '[.jobs[] | select(.name == $name and .status == "completed" and .conclusion == "success")] | length == 1' \
+            <<<"$desktop_jobs" >/dev/null
 
           profile_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PROFILE_RUN_ID")"
           test "$(jq -er '.repository.full_name' <<<"$profile_json")" = "$GITHUB_REPOSITORY"
@@ -158,6 +172,7 @@ jobs:
         id: candidate
         env:
           CI_RUN_ID: ${{ inputs.main_ci_run_id }}
+          MACOS_PUBLICATION_MODE: ${{ inputs.macos_publication_mode }}
           MACOS_SIGNER_RUN_ID: ${{ inputs.macos_signer_run_id }}
         run: |
           set -euo pipefail
@@ -170,6 +185,7 @@ jobs:
           const root = resolve('.performance/desktop')
           const source = process.env.GITHUB_SHA
           const ciRunId = process.env.CI_RUN_ID
+          const macosPublicationMode = process.env.MACOS_PUBLICATION_MODE
           const macosSignerRunId = process.env.MACOS_SIGNER_RUN_ID
           const version = JSON.parse(await readFile('desktop/e-mate-desktop/package.json', 'utf8')).version
           const base = JSON.parse(await readFile('desktop/e-mate-desktop/base-contract.json', 'utf8'))
@@ -219,9 +235,12 @@ jobs:
               throw new Error(`Desktop candidate ${platform} bytes are invalid`)
             }
           }
-          if (candidate.artifacts.darwin.build_run_id !== macosSignerRunId
+          const macosBuildRunId = macosPublicationMode === 'unsigned'
+            ? ciRunId
+            : macosPublicationMode === 'signed' ? macosSignerRunId : undefined
+          if (candidate.artifacts.darwin.build_run_id !== macosBuildRunId
             || candidate.artifacts.win32.build_run_id !== ciRunId) {
-            throw new Error('Desktop candidate installers are not owned by the selected signer and CI runs')
+            throw new Error('Desktop candidate installers do not match the explicit macOS publication mode owners')
           }
           await appendFile(process.env.GITHUB_OUTPUT, `profile_build_run_id=${candidate.artifacts.win32.build_run_id}\n`)
           NODE
@@ -635,14 +654,15 @@ jobs:
 
       - name: Sign only the exact protected evidence and release artifacts
         id: admit
-        uses: zyfjacksonchen-source/e-mate-desktop-publication/performance@1f46dbe1d34ac558cb2e91b52b2ab30f7eab6c4c
+        uses: zyfjacksonchen-source/e-mate-desktop-publication/performance@e45c3b9d1bec366ab306203574d0a7a724d7f123
         env:
           EMATE_GITHUB_PROVENANCE_TOKEN: ${{ github.token }}
           EMATE_DESKTOP_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.EMATE_PROFILE_SIGNING_PRIVATE_KEY }}
         with:
           source-sha: ${{ github.sha }}
           main-ci-run-id: ${{ inputs.main_ci_run_id }}
-          macos-signer-run-id: ${{ inputs.macos_signer_run_id }}
+          macos-publication-mode: ${{ inputs.macos_publication_mode }}
+          macos-signer-run-id: ${{ inputs.macos_publication_mode == 'signed' && inputs.macos_signer_run_id || '' }}
           desktop-artifact-id: ${{ inputs.desktop_artifact_id }}
           profile-release-run-id: ${{ inputs.profile_release_run_id }}
           profile-artifact-id: ${{ inputs.profile_artifact_id }}

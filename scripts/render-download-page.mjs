@@ -21,13 +21,13 @@ if (typeof desktopVersion !== 'string' || !/^\d+\.\d+\.\d+$/u.test(desktopVersio
   throw new Error('download page requires the stable Desktop package version')
 }
 const SOURCE_DIRECTORY = fileURLToPath(new URL('../deploy/download-page/', import.meta.url))
-const DESKTOP_SCRIPT = 'site.48e1d1764753.js'
+const DESKTOP_SCRIPT = 'site.d9ba6145f056.js'
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/u
 const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/u
 const POSITIVE_ID = /^[1-9][0-9]*$/u
 const PUBLICATION_ACTION = Object.freeze({
   repository: 'zyfjacksonchen-source/e-mate-desktop-publication',
-  commit: 'cd7d223692b51e4e7a53db5759e1c2a9811febd0',
+  commit: 'e45c3b9d1bec366ab306203574d0a7a724d7f123',
 })
 const CONTENT_TYPES = Object.freeze({
   '.css': 'text/css; charset=utf-8',
@@ -141,20 +141,43 @@ function releaseState(path, sourceCommit) {
   }
   const identities = [state?.stages?.profile, state?.stages?.desktop, state?.stages?.admission,
     state?.stages?.publication?.macos, state?.stages?.publication?.windows]
-  if (keys(state) !== ['document_type', 'release_mode', 'schema_version', 'source_sha', 'stages', 'status', 'version'].sort().join(',')
-    || state.schema_version !== 3 || state.document_type !== 'emate.release-state'
+  const unsigned = {
+    mode: 'unsigned', signed: false, notarized: false, description: 'Unsigned and not notarized.',
+  }
+  const signed = {
+    mode: 'signed', signed: true, notarized: true, description: 'Developer ID signed and notarized.',
+  }
+  const mode = state?.macos_publication_mode
+  const expectedPublicationMetadata = mode === 'unsigned' ? {
+    description: 'e-Mate 2.0.15 publishes unsigned macOS and Windows installers; macOS is not notarized.',
+    platforms: { darwin: unsigned, win32: unsigned },
+  } : mode === 'signed' ? {
+    description: 'e-Mate 2.0.15 publishes a Developer ID signed and notarized macOS installer and an unsigned Windows installer.',
+    platforms: { darwin: signed, win32: unsigned },
+  } : null
+  if (keys(state) !== [
+    'document_type', 'macos_publication_mode', 'publication_metadata', 'release_mode',
+    'schema_version', 'source_sha', 'stages', 'status', 'version',
+  ].sort().join(',')
+    || state.schema_version !== 4 || state.document_type !== 'emate.release-state'
     || state.status !== 'admitted-awaiting-cloudflare-plugin' || state.release_mode !== 'base'
+    || expectedPublicationMetadata === null
+    || JSON.stringify(state.publication_metadata) !== JSON.stringify(expectedPublicationMetadata)
     || state.source_sha !== sourceCommit || state.version !== desktopVersion
     || keys(state.stages) !== Object.keys(stages).sort().join(',')
     || Object.entries(stages).some(([name, expected]) => keys(state.stages[name]) !== expected.sort().join(','))
-    || keys(state.stages.publication?.macos) !== ['artifact_bytes', 'artifact_digest', 'artifact_id'].join(',')
-    || keys(state.stages.publication?.windows) !== ['artifact_bytes', 'artifact_digest', 'artifact_id'].join(',')
+    || keys(state.stages.publication?.macos) !== ['artifact_bytes', 'artifact_digest', 'artifact_id', 'run_id'].join(',')
+    || keys(state.stages.publication?.windows) !== ['artifact_bytes', 'artifact_digest', 'artifact_id', 'run_id'].join(',')
     || Object.entries(state.stages).some(([name, stage]) => stage.status !== (name === 'publication' ? 'pending-cloudflare-plugin' : 'accepted'))
     || !POSITIVE_ID.test(state.stages.ci.run_id)
     || identities.some(value => !POSITIVE_ID.test(String(value?.artifact_id)) || !SHA256_DIGEST.test(value?.artifact_digest ?? '')
       || !Number.isSafeInteger(value?.artifact_bytes) || value.artifact_bytes <= 0)
     || [state.stages.profile, state.stages.desktop, state.stages.admission]
-      .some(value => !POSITIVE_ID.test(String(value.run_id)))) {
+      .some(value => !POSITIVE_ID.test(String(value.run_id)))
+    || !POSITIVE_ID.test(String(state.stages.publication.macos.run_id))
+    || !POSITIVE_ID.test(String(state.stages.publication.windows.run_id))
+    || (mode === 'unsigned') !== (state.stages.publication.macos.run_id === state.stages.ci.run_id)
+    || state.stages.publication.windows.run_id !== state.stages.ci.run_id) {
     throw new Error('website handoff release state is not the exact admitted source')
   }
   return {
@@ -197,22 +220,34 @@ export function stageDownloadPage({
     mkdirSync(dirname(destination), { recursive: true })
     copyFileSync(join(paths.source, ...file.relative_path.split('/')), destination)
   }
+  const metadataScript = `<script id="emate-publication-metadata" type="application/json">${JSON.stringify(admitted.value.publication_metadata).replaceAll('<', '\\u003c')}</script>`
+  for (const name of ['index.html', 'install-macos.html']) {
+    const path = join(paths.output, name)
+    const page = readFileSync(path, 'utf8')
+    if (!page.includes('</body>')) throw new Error(`download page cannot bind publication metadata: ${name}`)
+    writeFileSync(path, page.replace('</body>', `  ${metadataScript}\n  </body>`))
+  }
   const stagedFiles = inventory(paths.output)
-  if (JSON.stringify(stagedFiles) !== JSON.stringify(sourceFiles)) {
-    throw new Error('staged download page does not match its source bytes')
+  if (JSON.stringify(stagedFiles.map(file => file.relative_path)) !== JSON.stringify(sourceFiles.map(file => file.relative_path))
+    || stagedFiles.some(file => !file.relative_path.endsWith('.html')
+      && JSON.stringify(file) !== JSON.stringify(sourceFiles.find(source => source.relative_path === file.relative_path)))) {
+    throw new Error('staged download page differs outside the metadata-bound HTML')
   }
 
   const plan = {
-    schema_version: 2,
+    schema_version: 3,
     document_type: 'emate.website-publication-plan',
     status: 'ready-for-website-publication-owner',
     source_commit: sourceCommit,
     version: desktopVersion,
+    publication_metadata: admitted.value.publication_metadata,
     staged_directory: 'download-page',
     release_state: {
       artifact_name: `e-mate-release-state-${sourceCommit}`,
       ...admitted.identity,
       stages: admitted.value.stages,
+      macos_publication_mode: admitted.value.macos_publication_mode,
+      publication_metadata: admitted.value.publication_metadata,
     },
     desktop_publication_predecessor: {
       action_repository: PUBLICATION_ACTION.repository,

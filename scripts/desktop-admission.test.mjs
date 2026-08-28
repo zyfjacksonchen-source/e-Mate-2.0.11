@@ -7,6 +7,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import {
   createGithubArtifactProvenance,
+  verifyMacHandoff,
   verifySignedMacHandoff,
   PERFORMANCE_MODEL_LEAF_IDS,
   PERFORMANCE_MODEL_ROSTER,
@@ -508,12 +509,15 @@ async function signedMacHandoff(root, base) {
   const metadata = join(root, 'metadata')
   const dmgName = `e-Mate-${version}-mac-universal.dmg`
   const inputDmgPath = join(unsigned, dmgName)
+  const inputBlockmapPath = `${inputDmgPath}.blockmap`
   const runtimePath = join(unsigned, 'desktop-runtime-verification.json')
   const ciReceiptPath = join(unsigned, 'desktop-artifact-receipt.json')
   const inputDmgBytes = Buffer.alloc(1024)
   inputDmgBytes.write('koly', 512, 'ascii')
   await file(inputDmgPath, inputDmgBytes)
+  await file(inputBlockmapPath, 'unsigned-blockmap')
   const inputDmg = await identity(inputDmgPath)
+  const inputBlockmap = await identity(inputBlockmapPath)
   await json(runtimePath, {
     schema_version: 1, document_type: 'emate.desktop-runtime-verification', platform: 'darwin',
     source_commit: SOURCE, ci_run_id: '100', base_contract_id: base.id,
@@ -523,7 +527,7 @@ async function signedMacHandoff(root, base) {
   await json(ciReceiptPath, {
     schema_version: 1, document_type: 'emate.desktop-ci-artifact', platform: 'darwin',
     source_commit: SOURCE, ci_run_id: '100', base_contract_id: base.id,
-    files: [inputDmg, runtimeReceipt],
+    files: [inputDmg, inputBlockmap, runtimeReceipt].sort((left, right) => left.name.localeCompare(right.name)),
   })
   const ciReceipt = await identity(ciReceiptPath)
 
@@ -541,7 +545,7 @@ async function signedMacHandoff(root, base) {
     harness_commit: base.harness_commit,
     input: {
       artifact_id: '209', artifact_name: `e-mate-desktop-macos-${SOURCE}`,
-      artifact_api_digest: `sha256:${'9'.repeat(64)}`, artifact_archive_bytes: 209,
+      artifact_api_digest: '', artifact_archive_bytes: 0,
       desktop_artifact_receipt: ciReceipt, runtime_verification_receipt: runtimeReceipt,
       dmg: inputDmg, signing: 'adhoc',
     },
@@ -566,19 +570,57 @@ async function signedMacHandoff(root, base) {
   await json(join(metadata, 'signer-run.json'), run('101', '.github/workflows/desktop-macos-signing.yml'))
   await json(join(metadata, 'signer-jobs.json'), jobs(['Sign and notarize exact accepted macOS bytes']))
   await json(join(metadata, 'signed-macos-artifact.json'), artifact('210', `e-mate-desktop-macos-signed-${SOURCE}`, '101'))
+  const unsignedArchive = join(root, 'macos-ci.zip')
+  await file(unsignedArchive, 'exact unsigned macOS artifact archive')
+  const archive = await identity(unsignedArchive)
+  const receipt = JSON.parse(await readFile(receiptPath, 'utf8'))
+  receipt.input.artifact_api_digest = `sha256:${archive.sha256}`
+  receipt.input.artifact_archive_bytes = archive.bytes
+  await json(receiptPath, receipt)
   const ciArtifact = artifact('209', `e-mate-desktop-macos-${SOURCE}`, '100')
-  ciArtifact.digest = `sha256:${'9'.repeat(64)}`
-  ciArtifact.size_in_bytes = 209
+  ciArtifact.digest = `sha256:${archive.sha256}`
+  ciArtifact.size_in_bytes = archive.bytes
   await json(join(metadata, 'macos-ci-artifact.json'), ciArtifact)
   return {
-    version, signed, unsigned, metadata, receiptPath, verificationPath,
+    version, signed, unsigned, unsignedArchive, metadata, receiptPath, verificationPath,
     options: {
       sourceCommit: SOURCE, ciRunId: '100', signerRunId: '101', signerArtifactId: '210',
       releaseVersion: version, signedBundle: signed, unsignedBundle: unsigned,
-      metadata, baseContract: base.path,
+      unsignedArchive, metadata, baseContract: base.path,
     },
   }
 }
+
+test('macOS handoff selects exact unsigned CI bytes or the preserved signed owner with no fallback', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'desktop-admission-macos-mode-'))
+  try {
+    const profile = await profileFixture(join(root, 'profile-fixture'))
+    const fixture = await signedMacHandoff(root, { ...profile.base, path: profile.basePath })
+    for (const name of ['signer-run.json', 'signer-jobs.json', 'signed-macos-artifact.json']) {
+      await rm(join(fixture.metadata, name))
+    }
+    const unsigned = await verifyMacHandoff({
+      macosPublicationMode: 'unsigned', sourceCommit: SOURCE, ciRunId: '100',
+      unsignedArtifactId: '209', releaseVersion: fixture.version,
+      unsignedBundle: fixture.unsigned, unsignedArchive: fixture.unsignedArchive,
+      metadata: fixture.metadata, baseContract: profile.basePath,
+    })
+    assert.equal(unsigned.output.artifact_id, '209')
+    assert.equal(unsigned.output.dmg.sha256, (await identity(join(fixture.unsigned, `e-Mate-${fixture.version}-mac-universal.dmg`))).sha256)
+    await assert.rejects(() => verifyMacHandoff({
+      macosPublicationMode: 'unsigned', sourceCommit: SOURCE, ciRunId: '100', unsignedArtifactId: '209',
+      signerRunId: '101', releaseVersion: fixture.version, unsignedBundle: fixture.unsigned,
+      unsignedArchive: fixture.unsignedArchive, metadata: fixture.metadata, baseContract: profile.basePath,
+    }), /must not include signer inputs/u)
+    await assert.rejects(() => verifyMacHandoff({
+      macosPublicationMode: 'automatic', sourceCommit: SOURCE, ciRunId: '100', unsignedArtifactId: '209',
+      releaseVersion: fixture.version, unsignedBundle: fixture.unsigned,
+      unsignedArchive: fixture.unsignedArchive, metadata: fixture.metadata, baseContract: profile.basePath,
+    }), /exactly unsigned or signed/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 test('signed macOS handoff closes the signer, input, output, and verification identities', async () => {
   const root = await mkdtemp(join(tmpdir(), 'desktop-admission-signed-macos-'))
@@ -685,19 +727,57 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
     await json(join(metadata, 'profile-build-receipt-artifact.json'), artifact('207', `e-mate-desktop-profile-build-receipt-${SOURCE}`, '100'))
     await json(join(metadata, 'windows-ci-artifact.json'), artifact('208', `e-mate-desktop-windows-${SOURCE}`, '100'))
     const options = {
+      macosPublicationMode: 'signed',
       sourceCommit: SOURCE, candidate: desktop.path, metadata,
       ciRunId: '100', signerRunId: '101', desktopRunId: '102', profileRunId: '103',
       signerArtifactId: '210', desktopArtifactId: '201', profileArtifactId: '202',
       releaseVersion: signed.version, signedMacos: signed.signed, unsignedMacos: signed.unsigned,
+      unsignedMacosArchive: signed.unsignedArchive,
       baseContract: profile.basePath,
       output: join(root, 'github-artifact-provenance.json'),
     }
     const { provenance } = await createGithubArtifactProvenance(options)
     assert.deepEqual(provenance.artifacts.map(item => item.role), ['desktop_candidate'])
+
+    const signerMetadata = new Map()
+    for (const name of ['signer-run.json', 'signer-jobs.json', 'signed-macos-artifact.json']) {
+      const path = join(metadata, name)
+      signerMetadata.set(path, await readFile(path))
+      await rm(path)
+    }
+    const unsignedDesktop = await desktopCandidate(join(root, 'desktop-unsigned'), { darwinRunId: '100' })
+    const unsignedDmgPath = join(signed.unsigned, `e-Mate-${signed.version}-mac-universal.dmg`)
+    const unsignedDmg = await readFile(unsignedDmgPath)
+    await file(join(root, 'desktop-unsigned', `e-Mate-${signed.version}-mac-universal.dmg`), unsignedDmg)
+    unsignedDesktop.candidate.artifacts.darwin.bytes = unsignedDmg.byteLength
+    unsignedDesktop.candidate.artifacts.darwin.sha256 = sha256(unsignedDmg)
+    await json(unsignedDesktop.path, unsignedDesktop.candidate)
+    await json(join(metadata, 'desktop-jobs.json'), jobs(['Bind exact protected-main CI unsigned desktop bytes']))
+    const unsignedOptions = {
+      ...options,
+      macosPublicationMode: 'unsigned', candidate: unsignedDesktop.path,
+      signerRunId: undefined, signerArtifactId: undefined, signedMacos: undefined,
+      unsignedArtifactId: '209', output: join(root, 'github-artifact-provenance-unsigned.json'),
+    }
+    await createGithubArtifactProvenance(unsignedOptions)
+    await assert.rejects(() => createGithubArtifactProvenance({
+      ...unsignedOptions, signerRunId: '101',
+    }), /must not include signer inputs/u)
+    await file(signed.unsignedArchive, 'drifted archive')
+    await assert.rejects(() => createGithubArtifactProvenance(unsignedOptions), /archive bytes or digest drifted/u)
+    await file(signed.unsignedArchive, 'exact unsigned macOS artifact archive')
+    const [signerRunPath, signerRunBytes] = [...signerMetadata][0]
+    await file(signerRunPath, signerRunBytes)
+    await assert.rejects(() => createGithubArtifactProvenance(unsignedOptions), /must not include signer evidence/u)
+    for (const [path, bytes] of signerMetadata) await file(path, bytes)
+    await json(join(metadata, 'desktop-jobs.json'), jobs([
+      'Bind exact signed macOS and protected-main CI Windows bytes',
+    ]))
+
     const wrongOwner = structuredClone(desktop.candidate)
     wrongOwner.artifacts.darwin.build_run_id = '100'
     await json(desktop.path, wrongOwner)
-    await assert.rejects(() => createGithubArtifactProvenance(options), /selected signer and CI runs/u)
+    await assert.rejects(() => createGithubArtifactProvenance(options), /macOS publication mode owners/u)
     await json(desktop.path, desktop.candidate)
     for (const target of TARGETS) {
       const name = `Complete Profile generation / ${target}`
@@ -724,7 +804,7 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
   }
 })
 
-test('workflow admits only the signed macOS handoff and uploads the two external signer inputs', async () => {
+test('workflows select one strict unsigned or signed macOS owner without changing the updater manifest', async () => {
   const workflow = await readFile('.github/workflows/desktop-admission.yml', 'utf8')
   const desktopBuild = await readFile('.github/workflows/desktop-release.yml', 'utf8')
   const performance = await readFile('.github/workflows/desktop-performance.yml', 'utf8')
@@ -749,7 +829,8 @@ test('workflow admits only the signed macOS handoff and uploads the two external
   assert.equal(parsed.jobs.admission.name, 'Desktop release admission')
   assert.ok(Object.values(ci.jobs).some(job => job.name === 'CI admission'))
   assert.deepEqual(Object.keys(desktopRelease.jobs), ['manifest'])
-  assert.ok(Object.values(desktopRelease.jobs).some(job => job.name === 'Bind exact signed macOS and protected-main CI Windows bytes'))
+  assert.match(desktopBuild, /Bind exact protected-main CI unsigned desktop bytes/u)
+  assert.match(desktopBuild, /Bind exact signed macOS and protected-main CI Windows bytes/u)
   assert.ok(Object.values(profileRelease.jobs).some(job => job.name === 'Validate accepted CI evidence'))
   assert.ok(Object.values(profileRelease.jobs).some(job => job.name === 'Prepare signed native Cloudflare publication bundle'))
   assert.deepEqual(Object.keys(profileRelease.jobs), ['validate', 'prepare-publication'])
@@ -768,16 +849,20 @@ test('workflow admits only the signed macOS handoff and uploads the two external
   assert.doesNotMatch(workflow, /secrets\.|aws |wrangler|r2-publish|desktop\/latest\.json/u)
   assert.match(desktopBuild, /e-mate-desktop-profile-build-receipt-\$\{\{ inputs\.source_sha \}\}/u)
   assert.match(desktopBuild, /stage-desktop-ci-artifact\.mjs verify/u)
+  assert.match(desktopBuild, /macos_publication_mode/u)
+  assert.match(desktopBuild, /macos_unsigned_artifact_id/u)
   assert.match(desktopBuild, /signed_macos_artifact_id/u)
-  assert.match(desktopBuild, /--mac-run "\$SIGNER_RUN_ID"/u)
+  assert.match(desktopBuild, /--mac-run "\$mac_run"/u)
   assert.match(desktopBuild, /--win-run "\$CI_RUN_ID"/u)
   assert.match(desktopBuild, /cp "\.release-inputs\/macos-signed\/e-Mate-\$version-mac-universal\.dmg"/u)
-  assert.doesNotMatch(desktopBuild, /cp "\.release-inputs\/macos\/e-Mate-\$version-mac-universal\.dmg"/u)
-  assert.match(workflow, /--signer-run-id "\$SIGNER_RUN_ID"/u)
+  assert.match(desktopBuild, /cp "\.release-inputs\/macos\/e-Mate-\$version-mac-universal\.dmg"/u)
+  assert.match(workflow, /--macos-publication-mode "\$MACOS_PUBLICATION_MODE"/u)
+  assert.match(workflow, /--macos-unsigned-artifact-id/u)
   assert.match(workflow, /--signed-macos \.admission\/macos-signed/u)
   assert.match(coordinator, /--workflow desktop-macos-signing\.yml/u)
-  assert.match(coordinator, /--macos-artifact "\$\{\{ needs\.signer\.outputs\.artifact_id \}\}"/u)
-  assert.doesNotMatch(coordinator, /--macos-artifact "\$\{\{ needs\.ci\.outputs\.macos_artifact_id \}\}"/u)
+  assert.match(coordinator, /if: inputs\.macos_publication_mode == 'signed'/u)
+  assert.match(coordinator, /macos_publication_mode:"unsigned",macos_unsigned_artifact_id/u)
+  assert.match(coordinator, /macos_publication_mode:"signed",signer_run_id/u)
   assert.match(desktopBuild, /working-directory: desktop\s+run: yarn install --immutable/u)
   for (const consumer of [parsed, parse(performance)]) {
     const downloads = consumer.jobs[Object.keys(consumer.jobs)[0]].steps
@@ -797,22 +882,26 @@ test('performance evidence and signing use their existing isolated environments'
   const workflow = await readFile('.github/workflows/desktop-performance.yml', 'utf8')
   const { parse } = createRequire(resolve('packages/dsh/package.json'))('yaml')
   const parsed = parse(workflow)
-  assert.equal(parsed.on.workflow_dispatch.inputs.macos_signer_run_id.required, true)
+  assert.equal(parsed.on.workflow_dispatch.inputs.macos_publication_mode.required, true)
+  assert.deepEqual(parsed.on.workflow_dispatch.inputs.macos_publication_mode.options, ['unsigned', 'signed'])
+  assert.equal(parsed.on.workflow_dispatch.inputs.macos_signer_run_id.required, false)
   assert.equal(parsed.on.workflow_dispatch.inputs.macos_signer_run_id.type, 'string')
   assert.equal(parsed.jobs.evidence.environment, 'performance-admission')
   assert.equal(parsed.jobs.admission.environment, 'r2-publish')
   assert.equal(parsed.jobs.admission.needs, 'evidence')
   const signer = parsed.jobs.admission.steps.find(step => step.id === 'admit')
-  assert.equal(signer.uses, 'zyfjacksonchen-source/e-mate-desktop-publication/performance@1f46dbe1d34ac558cb2e91b52b2ab30f7eab6c4c')
-  assert.equal(signer.with['macos-signer-run-id'], '${{ inputs.macos_signer_run_id }}')
+  assert.equal(signer.uses, 'zyfjacksonchen-source/e-mate-desktop-publication/performance@e45c3b9d1bec366ab306203574d0a7a724d7f123')
+  assert.equal(signer.with['macos-publication-mode'], '${{ inputs.macos_publication_mode }}')
+  assert.equal(signer.with['macos-signer-run-id'], "${{ inputs.macos_publication_mode == 'signed' && inputs.macos_signer_run_id || '' }}")
   assert.deepEqual([...workflow.matchAll(/secrets\.([A-Z0-9_]+)/gu)].map(match => match[1]).sort(), [
     'EMATE_PROFILE_SIGNING_KEY_ID', 'EMATE_PROFILE_SIGNING_PRIVATE_KEY',
   ])
   assert.match(workflow, /test "\$\{GITHUB_REF_PROTECTED:-\}" = true/u)
   assert.match(workflow, /test "\$GITHUB_RUN_ATTEMPT" = 1/u)
   assert.match(workflow, /GITHUB_WORKFLOW_REF" = "\$GITHUB_REPOSITORY\/\.github\/workflows\/desktop-performance\.yml@refs\/heads\/main"/u)
+  assert.match(workflow, /Bind exact protected-main CI unsigned desktop bytes/u)
   assert.match(workflow, /Bind exact signed macOS and protected-main CI Windows bytes/u)
-  assert.match(workflow, /Desktop candidate installers are not owned by the selected signer and CI runs/u)
+  assert.match(workflow, /explicit macOS publication mode owners/u)
   assert.match(workflow, /CI_RUN_ID: \$\{\{ inputs\.main_ci_run_id \}\}/u)
   assert.match(workflow, /MACOS_SIGNER_RUN_ID: \$\{\{ inputs\.macos_signer_run_id \}\}/u)
   assert.doesNotMatch(workflow, /inputs\.ci_run_id/u)
@@ -835,23 +924,30 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   const parsed = parse(workflow)
   assert.deepEqual(Object.keys(parsed.on), ['workflow_dispatch'])
   assert.deepEqual(Object.keys(parsed.on.workflow_dispatch.inputs), [
-    'main_ci_run_id', 'admission_artifact_id', 'macos_signer_run_id', 'macos_signed_artifact_id',
+    'main_ci_run_id', 'admission_artifact_id', 'macos_publication_mode', 'macos_signer_run_id', 'macos_signed_artifact_id',
+    'macos_unsigned_artifact_id',
     'windows_artifact_id', 'expected_signed_current', 'expected_legacy_current',
   ])
-  assert.equal(Object.values(parsed.on.workflow_dispatch.inputs).every(input => input.required === true && input.type === 'string'), true)
+  assert.equal(parsed.on.workflow_dispatch.inputs.macos_publication_mode.required, true)
+  assert.deepEqual(parsed.on.workflow_dispatch.inputs.macos_publication_mode.options, ['unsigned', 'signed'])
+  for (const name of ['macos_signer_run_id', 'macos_signed_artifact_id', 'macos_unsigned_artifact_id']) {
+    assert.equal(parsed.on.workflow_dispatch.inputs[name].required, false)
+  }
   assert.deepEqual(Object.keys(parsed.jobs), ['handoff'])
   assert.deepEqual(parsed.permissions, { actions: 'read', contents: 'read' })
   const job = parsed.jobs.handoff
   assert.equal(job.name, 'Desktop Cloudflare plugin handoff')
   assert.equal(job.environment, 'r2-publish')
   const invocation = job.steps.find(step => step.id === 'prepare')
-  assert.equal(invocation.uses, 'zyfjacksonchen-source/e-mate-desktop-publication@1f46dbe1d34ac558cb2e91b52b2ab30f7eab6c4c')
+  assert.equal(invocation.uses, 'zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123')
   assert.deepEqual(invocation.with, {
     'source-sha': '${{ github.sha }}',
     'main-ci-run-id': '${{ inputs.main_ci_run_id }}',
+    'macos-publication-mode': '${{ inputs.macos_publication_mode }}',
     'admission-artifact-id': '${{ inputs.admission_artifact_id }}',
-    'macos-signer-run-id': '${{ inputs.macos_signer_run_id }}',
-    'macos-signed-artifact-id': '${{ inputs.macos_signed_artifact_id }}',
+    'macos-signer-run-id': "${{ inputs.macos_publication_mode == 'signed' && inputs.macos_signer_run_id || '' }}",
+    'macos-signed-artifact-id': "${{ inputs.macos_publication_mode == 'signed' && inputs.macos_signed_artifact_id || '' }}",
+    'macos-unsigned-artifact-id': "${{ inputs.macos_publication_mode == 'unsigned' && inputs.macos_unsigned_artifact_id || '' }}",
     'windows-artifact-id': '${{ inputs.windows_artifact_id }}',
     'expected-signed-current': '${{ inputs.expected_signed_current }}',
     'expected-legacy-current': '${{ inputs.expected_legacy_current }}',
@@ -863,7 +959,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   })
   assert.deepEqual(job.steps.filter(step => step.uses).map(step => step.uses), [
     'actions/setup-node@v6',
-    'zyfjacksonchen-source/e-mate-desktop-publication@1f46dbe1d34ac558cb2e91b52b2ab30f7eab6c4c',
+    'zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123',
     'actions/upload-artifact@v4',
   ])
   const upload = job.steps.find(step => step.uses === 'actions/upload-artifact@v4')
@@ -874,7 +970,8 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   assert.match(workflow, /desktop-publication\.yml@refs\/heads\/main/u)
   assert.match(workflow, /ready-for-cloudflare-plugin/u)
   assert.match(workflow, /cloudflare-plugin-handoff\.json,cloudflare-publication-plan\.json,desktop-release-signed\.json/u)
-  assert.doesNotMatch(workflow, /macos_artifact_id|macos-artifact-id|cd7d223692b51e4e7a53db5759e1c2a9811febd0/u)
+  assert.match(workflow, /macos-unsigned-artifact-id/u)
+  assert.doesNotMatch(workflow, /macos_artifact_id|macos-artifact-id|cd7d223692b51e4e7a53db5759e1c2a9811febd0|1f46dbe1d34ac558cb2e91b52b2ab30f7eab6c4c/u)
   assert.doesNotMatch(workflow, /\b(?:curl|wget|wrangler|aws)\b|api\.cloudflare\.com|\.r2\.cloudflarestorage\.com|pub-ada3f610c0234a76838f4e19fe2bb25e\.r2\.dev/iu)
   assert.doesNotMatch(workflow, /secrets\.(?:CLOUDFLARE|R2|AWS)/iu)
 })

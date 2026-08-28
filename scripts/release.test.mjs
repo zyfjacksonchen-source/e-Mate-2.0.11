@@ -468,13 +468,16 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.equal(desktopRelease.on.workflow_dispatch.inputs.publish, undefined)
   assert.equal(desktopRelease.on.workflow_dispatch.inputs.release_run_id, undefined)
   assert.deepEqual(Object.keys(desktopRelease.on.workflow_dispatch.inputs), [
-    'ci_run_id', 'source_sha', 'signer_run_id', 'signed_macos_artifact_id',
+    'ci_run_id', 'source_sha', 'macos_publication_mode', 'signer_run_id',
+    'signed_macos_artifact_id', 'macos_unsigned_artifact_id',
   ])
   assert.deepEqual(Object.keys(desktopRelease.jobs), ['manifest'])
   assert.match(desktopReleaseSource, /GITHUB_REF_PROTECTED:-/u)
   assert.match(desktopReleaseSource, /release-candidate\.mjs verify/u)
   assert.match(desktopReleaseSource, /e-mate-desktop-windows-\$\{\{ inputs\.source_sha \}\}/u)
-  assert.match(desktopReleaseSource, /e-mate-desktop-macos-\$\{\{ inputs\.source_sha \}\}/u)
+  assert.match(desktopReleaseSource, /e-mate-desktop-macos-\$SOURCE_SHA/u)
+  assert.match(desktopReleaseSource, /macos_publication_mode/u)
+  assert.match(desktopReleaseSource, /macos_unsigned_artifact_id/u)
   assert.match(desktopReleaseSource, /signed_macos_artifact_id/u)
   assert.match(desktopReleaseSource, /base-sdk\.mjs verify/u)
   assert.match(desktopReleaseSource, /stage-desktop-ci-artifact\.mjs verify/u)
@@ -491,7 +494,7 @@ test('GitHub release packs once and validates the same tarball on three platform
   const candidateStep = desktopRelease.jobs.manifest.steps.find(step => step.name === 'Generate admission-pending Desktop artifact candidate')
   assert.match(candidateStep.run, /desktop-release-manifest\.ts candidate/u)
   assert.match(candidateStep.run, /--mac-commit/u)
-  assert.match(candidateStep.run, /--mac-run "\$SIGNER_RUN_ID"/u)
+  assert.match(candidateStep.run, /--mac-run "\$mac_run"/u)
   assert.match(candidateStep.run, /--win-run/u)
   assert.match(candidateStep.run, /--out dist\/desktop\/desktop-candidate\.json/u)
   assert.doesNotMatch(candidateStep.run, /latest\.json/u)
@@ -522,11 +525,19 @@ test('download site stages exact bytes and a closed release-bound website handof
   const planPath = join(root, 'website-publication-plan.json')
   const releaseStatePath = join(root, 'release-state.json')
   await writeFile(releaseStatePath, `${JSON.stringify({
-    schema_version: 3,
+    schema_version: 4,
     document_type: 'emate.release-state',
     source_sha: SOURCE_COMMIT,
     version: VERSION,
     release_mode: 'base',
+    macos_publication_mode: 'unsigned',
+    publication_metadata: {
+      description: 'e-Mate 2.0.15 publishes unsigned macOS and Windows installers; macOS is not notarized.',
+      platforms: {
+        darwin: { mode: 'unsigned', signed: false, notarized: false, description: 'Unsigned and not notarized.' },
+        win32: { mode: 'unsigned', signed: false, notarized: false, description: 'Unsigned and not notarized.' },
+      },
+    },
     status: 'admitted-awaiting-cloudflare-plugin',
     stages: {
       ci: { status: 'accepted', run_id: '1' },
@@ -535,8 +546,8 @@ test('download site stages exact bytes and a closed release-bound website handof
       admission: { status: 'accepted', run_id: '8', artifact_id: '9', artifact_digest: `sha256:${'9'.repeat(64)}`, artifact_bytes: 9 },
       publication: {
         status: 'pending-cloudflare-plugin',
-        macos: { artifact_id: '10', artifact_digest: `sha256:${'a'.repeat(64)}`, artifact_bytes: 10 },
-        windows: { artifact_id: '11', artifact_digest: `sha256:${'b'.repeat(64)}`, artifact_bytes: 11 },
+        macos: { run_id: '1', artifact_id: '10', artifact_digest: `sha256:${'a'.repeat(64)}`, artifact_bytes: 10 },
+        windows: { run_id: '1', artifact_id: '11', artifact_digest: `sha256:${'b'.repeat(64)}`, artifact_bytes: 11 },
       },
     },
   }, null, 2)}\n`)
@@ -549,25 +560,22 @@ test('download site stages exact bytes and a closed release-bound website handof
     expectedActiveTarget: '/srv/ecorex-agent-download/releases/site-emate-nexus-f65dbdc',
     expectedActiveIndex: `636:${'a'.repeat(64)}`,
   }
-  assert.throws(() => stageDownloadPage(base), /desktop manifest contract is incomplete/u)
   cpSync('deploy/download-page', sourceDirectory, { recursive: true })
-  for (const name of ['index.html', 'install-macos.html', 'site.48e1d1764753.js']) {
-    const path = join(sourceDirectory, name)
-    writeFileSync(path, readFileSync(path, 'utf8').replaceAll('2.0.14', VERSION))
-  }
   const plan = stageDownloadPage({ ...base, sourceDirectory: realpathSync(sourceDirectory) })
   assert.deepEqual(Object.keys(plan), [
-    'schema_version', 'document_type', 'status', 'source_commit', 'version', 'staged_directory', 'release_state',
+    'schema_version', 'document_type', 'status', 'source_commit', 'version', 'publication_metadata', 'staged_directory', 'release_state',
     'desktop_publication_predecessor', 'publication_contract', 'public_readback',
   ])
-  assert.equal(plan.schema_version, 2)
+  assert.equal(plan.schema_version, 3)
   assert.equal(plan.status, 'ready-for-website-publication-owner')
   assert.equal(plan.source_commit, SOURCE_COMMIT)
   assert.equal(plan.version, VERSION)
   assert.equal(plan.staged_directory, 'download-page')
+  assert.equal(plan.publication_metadata.platforms.darwin.mode, 'unsigned')
+  assert.equal(plan.publication_metadata.platforms.win32.signed, false)
   assert.equal(plan.release_state.artifact_name, `e-mate-release-state-${SOURCE_COMMIT}`)
   assert.match(plan.release_state.sha256, /^[0-9a-f]{64}$/u)
-  assert.equal(plan.desktop_publication_predecessor.action_commit, 'cd7d223692b51e4e7a53db5759e1c2a9811febd0')
+  assert.equal(plan.desktop_publication_predecessor.action_commit, 'e45c3b9d1bec366ab306203574d0a7a724d7f123')
   assert.equal(plan.desktop_publication_predecessor.artifact_name, `e-mate-desktop-cloudflare-handoff-${SOURCE_COMMIT}`)
   assert.equal(plan.publication_contract.server_root, '/srv/ecorex-agent-download')
   assert.equal(plan.publication_contract.version_directory, `releases/site-emate-${VERSION}-${SOURCE_COMMIT}`)
@@ -590,13 +598,16 @@ test('download site stages exact bytes and a closed release-bound website handof
     'assets/emate-platform-windows.dd86c8094b5a.png',
     'index.html',
     'install-macos.html',
-    'site.48e1d1764753.js',
+    'site.d9ba6145f056.js',
     'styles.c2f7dccc8398.css',
   ])
   for (const entry of plan.public_readback.files) {
     assert.deepEqual(Object.keys(entry), ['relative_path', 'bytes', 'sha256', 'content_type', 'url'])
-    assert.ok(readFileSync(join(sourceDirectory, entry.relative_path)).equals(readFileSync(join(output, entry.relative_path))))
+    if (!entry.relative_path.endsWith('.html')) {
+      assert.ok(readFileSync(join(sourceDirectory, entry.relative_path)).equals(readFileSync(join(output, entry.relative_path))))
+    }
   }
+  assert.match(readFileSync(join(output, 'index.html'), 'utf8'), /"darwin":\{"mode":"unsigned","signed":false,"notarized":false/u)
   assert.deepEqual(JSON.parse(readFileSync(planPath, 'utf8')), plan)
 
   assert.throws(() => stageDownloadPage({ ...base, websitePublicOrigin: 'http://example.test', expectedActiveTarget: 'absent', expectedActiveIndex: 'absent' }), /HTTPS/u)
@@ -615,14 +626,14 @@ test('download site stages exact bytes and a closed release-bound website handof
   }), /not the exact admitted source/u)
 })
 
-test('keeps the checked-in 2.0.14 page separate from the current update producer', async t => {
+test('keeps the checked-in 2.0.15 page bound to the exact updater and unsigned publication warning', async t => {
   const page = readFileSync('deploy/download-page/index.html', 'utf8')
   const macGuide = readFileSync('deploy/download-page/install-macos.html', 'utf8')
-  const scriptName = 'site.48e1d1764753.js'
+  const scriptName = 'site.d9ba6145f056.js'
   const script = readFileSync(`deploy/download-page/${scriptName}`, 'utf8')
-  assert.equal(validateDownloadPage(page, macGuide, script, '2.0.14'), '2.0.14')
+  assert.equal(validateDownloadPage(page, macGuide, script, '2.0.15'), '2.0.15')
   assert.throws(
-    () => validateDownloadPage(page.replace('data-desktop-version="2.0.14"', 'data-desktop-version="2.0.13"'), macGuide, script, '2.0.14'),
+    () => validateDownloadPage(page.replace('data-desktop-version="2.0.15"', 'data-desktop-version="2.0.13"'), macGuide, script, '2.0.15'),
     /desktop manifest contract is incomplete/u,
   )
   assert.throws(() => validateDownloadPage(page, macGuide, script, 'latest'), /stable SemVer/u)
@@ -653,8 +664,8 @@ test('keeps the checked-in 2.0.14 page separate from the current update producer
   assert.match(page, /未签名/u)
   assert.match(page, /e-Mate 会校验、替换并自动重开/u)
   assert.match(page, /\/ecorex-agent\/admin\//u)
-  assert.match(page, /已安装 2\.0\.12 或 2\.0\.13 的用户可在应用内确认更新到 2\.0\.14/u)
-  assert.match(macGuide, /全新安装 2\.0\.14/u)
+  assert.match(page, /已安装 2\.0\.12 或 2\.0\.13 的用户可在应用内确认更新到 2\.0\.15/u)
+  assert.match(macGuide, /全新安装 2\.0\.15/u)
   assert.match(macGuide, /已安装 2\.0\.12 或 2\.0\.13 的用户可在应用内确认更新/u)
   assert.doesNotMatch(`${page}\n${macGuide}`, /@e-mate|dsh-plugin|dsh-pet|Cowart|Excalidraw/u)
   assert.match(macGuide, /\/usr\/bin\/arch -arm64 \/usr\/bin\/xattr -rd com\.apple\.quarantine/u)
@@ -674,8 +685,8 @@ test('keeps the checked-in 2.0.14 page separate from the current update producer
   const root = mkdtempSync(join(tmpdir(), 'e-mate-public-manifest-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const currentScript = join(root, 'site.mjs')
-  writeFileSync(currentScript, script.replaceAll('2.0.14', VERSION))
-  const { normalizeDownloadIndex, verifyDownloadIndex } = await import(pathToFileURL(currentScript).href)
+  writeFileSync(currentScript, script)
+  const { installationTrustCopy, normalizeDownloadIndex, normalizePublicationMetadata, verifyDownloadIndex } = await import(pathToFileURL(currentScript).href)
   const commit = 'a'.repeat(40)
   const macArtifact = join(root, `e-Mate-${VERSION}-mac-universal.dmg`)
   const windowsArtifact = join(root, `e-Mate-${VERSION}-win-x64-Setup.exe`)
@@ -756,6 +767,22 @@ test('keeps the checked-in 2.0.14 page separate from the current update producer
   assert.equal(normalized.base_contract_id, manifest.base_contract_id)
   assert.equal(normalized.schedule_protocol_floor, 1)
   assert.deepEqual(normalized.downloads.map(item => item.target), ['macos-universal', 'windows-x64'])
+  const publicationMetadata = normalizePublicationMetadata({
+    description: 'e-Mate 2.0.15 publishes unsigned macOS and Windows installers; macOS is not notarized.',
+    platforms: {
+      darwin: { mode: 'unsigned', signed: false, notarized: false, description: 'Unsigned and not notarized.' },
+      win32: { mode: 'unsigned', signed: false, notarized: false, description: 'Unsigned and not notarized.' },
+    },
+  })
+  assert.deepEqual(installationTrustCopy(normalized, publicationMetadata), {
+    release: 'macOS 与 Windows 均未签名',
+    help: 'macOS 与 Windows 安装包均未签名；macOS 未公证。请先核对页面标注的 SHA-256。',
+  })
+  assert.throws(() => normalizePublicationMetadata({
+    ...publicationMetadata,
+    platforms: { ...publicationMetadata.platforms, darwin: { ...publicationMetadata.platforms.darwin, signed: true } },
+  }), /安全说明身份无效/u)
+  assert.equal('publication_metadata' in signedManifest, false)
   // Frozen 2.0.12@9fbc70ad parses only version/artifacts and therefore ignores the admitted fields.
   const legacy2012 = value => value && typeof value === 'object'
     && typeof value.version === 'string' && /^\d+\.\d+\.\d+$/u.test(value.version)

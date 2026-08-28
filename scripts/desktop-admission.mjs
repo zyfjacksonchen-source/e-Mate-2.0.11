@@ -740,6 +740,66 @@ function measuredFile(value, actual, expectedName) {
     && value.bytes === actual?.bytes && value.sha256 === actual?.sha256 && SHA256.test(value.sha256 ?? '')
 }
 
+async function verifyArtifactArchive(path, artifact, label) {
+  const actual = await hashFile(path)
+  if (actual.bytes !== artifact.size_in_bytes || actual.sha256 !== artifact.digest.slice('sha256:'.length)) {
+    throw new Error(`${label} artifact archive bytes or digest drifted`)
+  }
+  return actual
+}
+
+async function rejectSignerMetadata(directory) {
+  for (const name of ['signer-run.json', 'signer-jobs.json', 'signed-macos-artifact.json']) {
+    try {
+      await lstat(join(resolve(directory), name))
+      throw new Error('unsigned macOS publication must not include signer evidence')
+    } catch (cause) {
+      if (cause instanceof Error && 'code' in cause && cause.code === 'ENOENT') continue
+      throw cause
+    }
+  }
+}
+
+/** Close the exact formal-CI four-file unsigned macOS staging artifact. */
+export async function verifyUnsignedMacHandoff(options) {
+  if (!SHA40.test(options.sourceCommit) || !RUN_ID.test(options.ciRunId)
+    || !RUN_ID.test(options.unsignedArtifactId)
+    || typeof options.releaseVersion !== 'string' || !/^\d+\.\d+\.\d+$/u.test(options.releaseVersion)) {
+    throw new Error('unsigned macOS handoff identifiers are invalid')
+  }
+  const base = loadProfileBaseContract(resolve(options.baseContract))
+  const verified = await verifyDesktopCiArtifact({
+    platform: 'darwin', sourceCommit: options.sourceCommit, ciRunId: options.ciRunId,
+    baseContract: base, directory: options.unsignedBundle,
+  })
+  const dmgName = `e-Mate-${options.releaseVersion}-mac-universal.dmg`
+  const blockmapName = `${dmgName}.blockmap`
+  const expected = [
+    'desktop-artifact-receipt.json', 'desktop-runtime-verification.json', dmgName, blockmapName,
+  ].sort()
+  const actual = (await treeEntries(options.unsignedBundle)).entries.map(entry => entry.path)
+  if (canonicalProfileJson(actual) !== canonicalProfileJson(expected)
+    || canonicalProfileJson(verified.receipt.files.map(file => file.name)) !== canonicalProfileJson([
+      'desktop-runtime-verification.json', dmgName, blockmapName,
+    ].sort())) {
+    throw new Error('unsigned macOS handoff file set is invalid')
+  }
+  const unsignedArtifact = githubArtifact(await metadata(options.metadata, 'macos-ci-artifact.json'), {
+    id: options.unsignedArtifactId, name: `e-mate-desktop-macos-${options.sourceCommit}`,
+    runId: options.ciRunId, sourceCommit: options.sourceCommit, label: 'unsigned macOS',
+  })
+  await verifyArtifactArchive(options.unsignedArchive, unsignedArtifact, 'unsigned macOS')
+  await rejectSignerMetadata(options.metadata)
+  return {
+    input: { artifact_id: String(unsignedArtifact.id), digest: unsignedArtifact.digest },
+    output: {
+      artifact_id: String(unsignedArtifact.id), digest: unsignedArtifact.digest,
+      dmg: { name: dmgName, ...(await hashFile(join(resolve(options.unsignedBundle), dmgName))) },
+      blockmap: { name: blockmapName, ...(await hashFile(join(resolve(options.unsignedBundle), blockmapName))) },
+    },
+  }
+}
+
 /** Close the accepted CI input, isolated signer run, and exact four-file signed macOS handoff. */
 export async function verifySignedMacHandoff(options) {
   if (!SHA40.test(options.sourceCommit) || !RUN_ID.test(options.ciRunId)
@@ -842,6 +902,7 @@ export async function verifySignedMacHandoff(options) {
     || inputArtifact.size_in_bytes !== receipt.input.artifact_archive_bytes) {
     throw new Error('signed macOS input artifact identity drifted')
   }
+  await verifyArtifactArchive(options.unsignedArchive, inputArtifact, 'signed macOS input')
   return {
     signerRun,
     input: { artifact_id: String(inputArtifact.id), digest: inputArtifact.digest, dmg: receipt.input.dmg },
@@ -852,29 +913,50 @@ export async function verifySignedMacHandoff(options) {
   }
 }
 
+/** Select exactly one macOS publication owner without an implicit fallback. */
+export async function verifyMacHandoff(options) {
+  if (options.macosPublicationMode === 'unsigned') {
+    if (options.signerRunId !== undefined || options.signerArtifactId !== undefined
+      || options.signedBundle !== undefined) {
+      throw new Error('unsigned macOS publication must not include signer inputs')
+    }
+    return verifyUnsignedMacHandoff(options)
+  }
+  if (options.macosPublicationMode === 'signed') {
+    if (options.unsignedArtifactId !== undefined) {
+      throw new Error('signed macOS publication must not include an unsigned final artifact input')
+    }
+    return verifySignedMacHandoff(options)
+  }
+  throw new Error('macOS publication mode must be exactly unsigned or signed')
+}
+
 /** Validate downloaded GitHub metadata and emit the updater's release provenance. */
 export async function createGithubArtifactProvenance(options) {
   if (!SHA40.test(options.sourceCommit) || !RUN_ID.test(options.ciRunId)
-    || !RUN_ID.test(options.signerRunId) || !RUN_ID.test(options.desktopRunId) || !RUN_ID.test(options.profileRunId)
-    || !RUN_ID.test(options.signerArtifactId) || !RUN_ID.test(options.desktopArtifactId)
+    || !RUN_ID.test(options.desktopRunId) || !RUN_ID.test(options.profileRunId)
+    || !RUN_ID.test(options.desktopArtifactId)
     || !RUN_ID.test(options.profileArtifactId)) {
     throw new Error('GitHub admission identifiers are invalid')
   }
+  const macosRunId = options.macosPublicationMode === 'unsigned' ? options.ciRunId : options.signerRunId
   const { artifacts: candidateArtifact } = await verifyDesktopCandidateBundle(options.candidate, options.sourceCommit)
-  if (candidateArtifact.darwin.build_run_id !== options.signerRunId
+  if (candidateArtifact.darwin.build_run_id !== macosRunId
     || candidateArtifact.win32.build_run_id !== options.ciRunId) {
-    throw new Error('Desktop candidate installers are not owned by the selected signer and CI runs')
+    throw new Error('Desktop candidate installers do not match the selected macOS publication mode owners')
   }
-  const signedMac = await verifySignedMacHandoff({
+  const mac = await verifyMacHandoff({
+    macosPublicationMode: options.macosPublicationMode,
     sourceCommit: options.sourceCommit, ciRunId: options.ciRunId,
     signerRunId: options.signerRunId, signerArtifactId: options.signerArtifactId,
+    unsignedArtifactId: options.unsignedArtifactId,
     releaseVersion: options.releaseVersion, signedBundle: options.signedMacos,
     unsignedBundle: options.unsignedMacos, metadata: options.metadata,
-    baseContract: options.baseContract,
+    unsignedArchive: options.unsignedMacosArchive, baseContract: options.baseContract,
   })
-  if (candidateArtifact.darwin.bytes !== signedMac.output.dmg.bytes
-    || candidateArtifact.darwin.sha256 !== signedMac.output.dmg.sha256) {
-    throw new Error('Desktop candidate macOS bytes differ from the signed handoff')
+  if (candidateArtifact.darwin.bytes !== mac.output.dmg.bytes
+    || candidateArtifact.darwin.sha256 !== mac.output.dmg.sha256) {
+    throw new Error('Desktop candidate macOS bytes differ from the selected handoff')
   }
   const ciRun = githubRun(await metadata(options.metadata, 'ci-run.json'), {
     id: options.ciRunId, path: '.github/workflows/ci.yml', event: 'workflow_dispatch',
@@ -895,7 +977,9 @@ export async function createGithubArtifactProvenance(options) {
   successfulJob(ciJobs, 'macOS universal / unsigned desktop disk image', 'CI')
   for (const target of TARGETS) successfulJob(ciJobs, `Complete Profile generation / ${target}`, 'CI')
   successfulJob(await metadata(options.metadata, 'desktop-jobs.json'),
-    'Bind exact signed macOS and protected-main CI Windows bytes', 'Desktop')
+    options.macosPublicationMode === 'unsigned'
+      ? 'Bind exact protected-main CI unsigned desktop bytes'
+      : 'Bind exact signed macOS and protected-main CI Windows bytes', 'Desktop')
   const profileJobs = await metadata(options.metadata, 'profile-jobs.json')
   successfulJob(profileJobs, 'Validate accepted CI evidence', 'Profile')
   successfulJob(profileJobs, 'Prepare signed native Cloudflare publication bundle', 'Profile')
@@ -956,12 +1040,18 @@ function option(values, name) {
   return value
 }
 
+function optionalOption(values, name) {
+  const value = values[name]
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
 async function main() {
   const command = process.argv[2]
   const { values } = parseArgs({ args: process.argv.slice(3), options: Object.fromEntries([
     'base-contract', 'candidate', 'ci-run-id', 'commit', 'desktop-artifact-id', 'desktop-run-id', 'inventory',
-    'metadata', 'out', 'performance-bundle', 'profile', 'release-version', 'signed-macos',
-    'signer-artifact-id', 'signer-run-id', 'unsigned-macos',
+    'macos-publication-mode', 'macos-unsigned-artifact-id', 'metadata', 'out', 'performance-bundle', 'profile',
+    'release-version', 'signed-macos', 'signer-artifact-id', 'signer-run-id', 'unsigned-macos',
+    'unsigned-macos-archive',
     'profile-aggregate', 'profile-artifact-id', 'profile-receipt', 'profile-release-bundle', 'profile-run-id',
     'verifier-source', 'performance-authorities-out',
   ].map(name => [name, { type: 'string' }])) })
@@ -989,25 +1079,31 @@ async function main() {
     })
   } else if (command === 'github-provenance') {
     await createGithubArtifactProvenance({
+      macosPublicationMode: option(values, 'macos-publication-mode'),
       sourceCommit: option(values, 'commit'), candidate: option(values, 'candidate'), metadata: option(values, 'metadata'),
       ciRunId: option(values, 'ci-run-id'), desktopRunId: option(values, 'desktop-run-id'),
-      signerRunId: option(values, 'signer-run-id'), signerArtifactId: option(values, 'signer-artifact-id'),
-      signedMacos: option(values, 'signed-macos'), unsignedMacos: option(values, 'unsigned-macos'),
+      signerRunId: optionalOption(values, 'signer-run-id'), signerArtifactId: optionalOption(values, 'signer-artifact-id'),
+      unsignedArtifactId: optionalOption(values, 'macos-unsigned-artifact-id'),
+      signedMacos: optionalOption(values, 'signed-macos'), unsignedMacos: option(values, 'unsigned-macos'),
+      unsignedMacosArchive: option(values, 'unsigned-macos-archive'),
       releaseVersion: option(values, 'release-version'), baseContract: option(values, 'base-contract'),
       profileRunId: option(values, 'profile-run-id'), desktopArtifactId: option(values, 'desktop-artifact-id'),
       profileArtifactId: option(values, 'profile-artifact-id'), output: option(values, 'out'),
     })
-  } else if (command === 'signed-macos') {
-    const result = await verifySignedMacHandoff({
+  } else if (command === 'macos-handoff') {
+    const result = await verifyMacHandoff({
+      macosPublicationMode: option(values, 'macos-publication-mode'),
       sourceCommit: option(values, 'commit'), ciRunId: option(values, 'ci-run-id'),
-      signerRunId: option(values, 'signer-run-id'), signerArtifactId: option(values, 'signer-artifact-id'),
-      signedBundle: option(values, 'signed-macos'), unsignedBundle: option(values, 'unsigned-macos'),
+      signerRunId: optionalOption(values, 'signer-run-id'), signerArtifactId: optionalOption(values, 'signer-artifact-id'),
+      unsignedArtifactId: optionalOption(values, 'macos-unsigned-artifact-id'),
+      signedBundle: optionalOption(values, 'signed-macos'), unsignedBundle: option(values, 'unsigned-macos'),
+      unsignedArchive: option(values, 'unsigned-macos-archive'),
       releaseVersion: option(values, 'release-version'), baseContract: option(values, 'base-contract'),
       metadata: option(values, 'metadata'),
     })
     process.stdout.write(`${JSON.stringify(result)}\n`)
   } else {
-    throw new Error('desktop admission command must be profile-build-receipt, profile-aggregate, performance-summary, signed-macos, or github-provenance')
+    throw new Error('desktop admission command must be profile-build-receipt, profile-aggregate, performance-summary, macos-handoff, or github-provenance')
   }
 }
 
