@@ -1371,4 +1371,35 @@ describe('desktop update Host plugin', () => {
     expect(harness.warnings).toEqual([])
     expect(harness.tray.label()).toBe('Check for Updates…')
   })
+
+  it('maps a coordinator timeout while reading the response body', async () => {
+    vi.useFakeTimers()
+    const request = vi.fn((_url: string, init: RequestInit) => {
+      const signal = init.signal as AbortSignal
+      const body = new ReadableStream<Uint8Array>({
+        start(stream) {
+          signal.addEventListener('abort', () => {
+            stream.error(new DOMException('cancelled while reading', 'AbortError'))
+          }, { once: true })
+        },
+      })
+      return Promise.resolve(new Response(body))
+    })
+    const harness = await createHarness({ packaged: false, request })
+
+    const pending = harness.tray.invoke()
+    await vi.waitFor(() => { expect(request).toHaveBeenCalledOnce() })
+    await vi.advanceTimersByTimeAsync(testConfig.requestTimeoutMs)
+    await pending
+
+    expect(harness.showManualCheckResult).toHaveBeenCalledWith({
+      status: 'failed', code: 'check-timeout', retryable: true,
+    })
+    expect(harness.getUpdateState()).toEqual(expect.objectContaining({
+      stage: 'failed',
+      code: 'check-timeout',
+      retryable: true,
+      failedFromStage: 'checking',
+    }))
+  })
 })

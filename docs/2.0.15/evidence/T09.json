@@ -146,6 +146,10 @@
     {
       "id": "check-failure-null-collapse",
       "finding": "checkForStableUpdate collapsed request, HTTP, response, signed-manifest, signature, platform-artifact and protocol failures to null. Manual, tray, Agent and scheduled callers therefore could not distinguish no update from failure; the shared state degraded this further to generic check-failed and retained no local diagnostic."
+    },
+    {
+      "id": "body-read-abort-misclassification",
+      "finding": "After response headers arrived, an AbortError raised while reading the streamed response body was classified as check-response-invalid. That prevented startCheck from converting its own deadline cancellation into check-timeout and incorrectly made the failure non-retryable."
     }
   ],
   "implementation": {
@@ -153,7 +157,7 @@
     "cache": "A completed cache is reused only after exact byte count, SHA-256 and DMG/PE validation; invalid cached bytes are removed before the existing atomic partial-file download path runs. Progress reports bytes, total and verified cache reuse.",
     "single_state_source": "desktop-updates remains the sole transaction owner and publishes one DesktopUpdateState projection with checking, available, confirming, downloading, verifying, staging, waiting-shutdown, replacing, restarting, health-check, completed, rolling-back, rolled-back and failed stages.",
     "projection_carriers": "The existing Electron runtime and context-isolated Preload boundary only cache/carry that Host projection; Header and Settings receive get/subscribe/cancel without a second store, and Agent Tool returns the same terminal projection and diagnostic ID.",
-    "typed_failures": "checkForStableUpdate now returns one typed outcome for network, timeout/cancellation, HTTP, bounded-response, signed-manifest, signature, platform-artifact, protocol and local-config stages. The signature is verified before authenticated schema/artifact semantics are classified: post-sign mutation, missing/unknown/malformed signature and wrong signature context remain check-signature-invalid. Every terminal failure receives one UUID diagnostic ID, stable retryable value and the actual failedFromStage.",
+    "typed_failures": "checkForStableUpdate now returns one typed outcome for network, timeout/cancellation, HTTP, bounded-response, signed-manifest, signature, platform-artifact, protocol and local-config stages. AbortError is recognized both while awaiting response headers and while reading the response body, so direct cancellation stays check-cancelled and the single coordinator deadline maps it to check-timeout; non-abort malformed, oversized and invalid UTF-8 bodies remain check-response-invalid. The signature is verified before authenticated schema/artifact semantics are classified: post-sign mutation, missing/unknown/malformed signature and wrong signature context remain check-signature-invalid. Every terminal failure receives one UUID diagnostic ID, stable retryable value and the actual failedFromStage.",
     "shared_failure_callers": "Manual checks, the tray command and the Agent Tool enter the same desktopUpdates service and consume the same code/diagnosticId projection and shared presentation copy. Scheduled checks publish and persist the same failure but intentionally do not open a dialog or notification.",
     "diagnostic_receipt": "The existing updater atomically overwrites one private last-diagnostic.json receipt beside its state file. It contains schema/document identity, diagnosticId, code, retryable, failedFromStage, current platform/version and, when already known, updateKind/targetVersion/HTTP status. It never records the URL, response body, manifest key or credential. Receipt write failure is warned through the existing application logger and does not fail or stop the updater.",
     "check_terminal_projection": "Manual and background checks now replace checking with completed for up-to-date or no-update results, available for a declined confirmation, or failed/check-failed with a diagnostic ID for empty, rejected-policy and named check failures. Background network failures update the typed projection without creating a user notification.",
@@ -205,9 +209,11 @@
       "fails closed at signature before classifying unauthenticated payload semantics",
       "persists a typed background network diagnostic without surfacing UI",
       "shares the signed-manifest failure copy and diagnostic ID across native and Agent projections",
-      "keeps the updater running when the diagnostic receipt cannot be written"
+      "keeps the updater running when the diagnostic receipt cannot be written",
+      "preserves caller cancellation while reading a streamed response body",
+      "maps a coordinator timeout while reading the response body"
     ],
-    "observed": "The original manifest, cache, state and helper assertions failed against the baseline. Coordinator follow-ups captured the non-terminal checking, policy continuity, preflight ordering, permission-mode and per-volume budget gaps. For the new named diagnostic acceptance, the first focused run failed because malformed JSON still returned null, background network failure had no typed receipt, and Agent output remained generic. A trust-order review then corrected semantic fixtures to mutate unsigned payloads and re-sign them; post-sign mutation is asserted as signature-invalid. The shared-source repair made all named assertions pass.",
+    "observed": "The original manifest, cache, state and helper assertions failed against the baseline. Coordinator follow-ups captured the non-terminal checking, policy continuity, preflight ordering, permission-mode and per-volume budget gaps. For the new named diagnostic acceptance, the first focused run failed because malformed JSON still returned null, background network failure had no typed receipt, and Agent output remained generic. A trust-order review then corrected semantic fixtures to mutate unsigned payloads and re-sign them; post-sign mutation is asserted as signature-invalid. T00 then found the materially different response-body boundary: two named streaming regressions failed because body-read AbortError produced check-response-invalid/retryable=false and a coordinator timeout did not become check-timeout. The single shared catch-order fix made both streaming regressions pass without changing non-abort body validation.",
     "dependency_writes": false
   },
   "verification": [
@@ -241,7 +247,7 @@
   "check_failure_followup_verification": [
     {
       "command": "vitest run tests/update-checker.spec.ts tests/updates.spec.ts tests/agent-update.spec.ts tests/electron-runtime.spec.ts",
-      "result": "PASS: 4 files; 152 passed, 0 failed"
+      "result": "PASS: 4 files; 154 passed, 0 failed"
     },
     {
       "command": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.tests.client.json --noEmit",
@@ -314,7 +320,7 @@
   "consultation_gate": {
     "decision": "D009",
     "status": "not_invoked",
-    "reason": "Scheme A remains the current-installed-Base helper fix. The candidate #4 follow-up produced no scheme B because the exact packaged helper is blocked by macOS trust policy before candidate source executes; therefore there is no same named acceptance failure after two materially different source fixes."
+    "reason": "Scheme A remains the current-installed-Base helper fix. The candidate #4 follow-up produced no helper scheme B because the exact packaged helper is blocked by macOS trust policy before candidate source executes. For the separately named check-failure diagnostic acceptance, the second materially different source repair covered response-body AbortError and both direct-cancellation/coordinator-timeout regressions passed; there is no same named acceptance red after that repair, so D009 is not invoked."
   },
   "truth_stage": {
     "source": "implemented and locally tested, including typed check diagnostics",

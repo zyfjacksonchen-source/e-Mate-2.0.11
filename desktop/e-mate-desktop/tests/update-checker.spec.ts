@@ -460,6 +460,27 @@ describe('public Desktop version check', () => {
     })).resolves.toEqual(expectedCheckFailure('check-cancelled'))
   })
 
+  it('preserves caller cancellation while reading a streamed response body', async () => {
+    const controller = new AbortController()
+    const body = new ReadableStream<Uint8Array>({
+      start(stream) {
+        controller.signal.addEventListener('abort', () => {
+          stream.error(new DOMException('cancelled while reading', 'AbortError'))
+        }, { once: true })
+      },
+    })
+    const pending = checkForStableUpdate({
+      platform: 'darwin',
+      currentVersion: '2.0.0',
+      currentScheduleProtocolFloor: 1,
+      signal: controller.signal,
+      request: async () => new Response(body),
+    })
+
+    controller.abort()
+    await expect(pending).resolves.toEqual(expectedCheckFailure('check-cancelled'))
+  })
+
   it('reports declared and streamed oversized responses as invalid', async () => {
     await expect(checkForStableUpdate({
       platform: 'darwin',
