@@ -531,6 +531,16 @@
             "height": 436,
             "visible_c03_icon": true
           },
+          "about": {
+            "status": "PASS",
+            "screenshot": "emate-about.png",
+            "bytes": 11885,
+            "sha256": "2ac0e0d9f4192c0c0b4e036d54893c6c90089739ede32075e9180ec2b7f13258",
+            "width": 284,
+            "height": 191,
+            "visible_c03_icon": true,
+            "ax_visible_version": "e-Mate 版本 2.0.15 (2.0.15)"
+          },
           "icon_identity": {
             "source_t14_path": "desktop/e-mate-desktop/build/icon.icns",
             "source_t14_sha256": "56432cae237293d65f53456bca62df287b3058f62d5bc36c78fdeefc11f196ef",
@@ -550,7 +560,130 @@
             "settings": "OPEN",
             "windows": "OPEN"
           },
-          "interpretation": "Finder Applications, Finder Get Info and the public DMG show the C03 icon. The source and packaged ICNS containers are not byte-identical: the 1024x1024 master pixels are identical while smaller slots show packaging resampling differences. Dock, App Switcher, Settings and Windows remain OPEN, so CP-14 is not complete."
+          "interpretation": "Finder Applications, Finder Get Info, the public DMG and About show the C03 icon. The source and packaged ICNS containers are not byte-identical: the 1024x1024 master pixels are identical while smaller slots show packaging resampling differences. Dock, App Switcher, Settings and Windows remain OPEN, so CP-14 is not complete."
+        },
+        "profile_generation_update": {
+          "status": "PARTIAL_PASS",
+          "evidence_root": "/private/tmp/emate-t18-profile-update.fMdYH7",
+          "scope": "Isolated Profile generation update only; the existing unsigned Desktop 2.0.13-to-2.0.15 automatic-update FAIL_OPEN result is unchanged.",
+          "public_desired_state": {
+            "status": "PASS",
+            "url": "https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/profile/desired-state/darwin-arm64.json",
+            "bytes": 10579,
+            "sha256": "6ade4b5b2ee5ec25bcbb0e9ae3adc6ecf13cbf57ae329215f55423229c024ed2",
+            "release_version": "2.0.15",
+            "sequence": 1,
+            "source_commit": "297b90df2426137edb398b023d8137a085ed8508",
+            "base_contract_id": "e-mate-desktop-profile-v8-dsh-4787caf39134",
+            "target": {
+              "platform": "darwin",
+              "arch": "arm64"
+            },
+            "component_count": 15,
+            "generation": "75c933939e9816c39f9a9bb8e818c85c3cff7b4b4d95d56da048bcbf2e58bc2c"
+          },
+          "isolation": {
+            "status": "PASS",
+            "user_data_dir": "/private/tmp/emate-t18-profile-update.fMdYH7/user-data",
+            "dsh_home": "/private/tmp/emate-t18-profile-update.fMdYH7/dsh-home",
+            "shared_profile_state_unchanged": {
+              "status": "PASS",
+              "path": "/Users/mac/Library/Application Support/e-Mate/profile-generations/state.json",
+              "before": {
+                "bytes": 81,
+                "mtime": 1787951588,
+                "sha256": "7d9b59fdcd73fb29fb53db4ded6d57b5c8f54b1a82156a9982aee43bbb7c63d4"
+              },
+              "after": {
+                "bytes": 81,
+                "mtime": 1787951588,
+                "sha256": "7d9b59fdcd73fb29fb53db4ded6d57b5c8f54b1a82156a9982aee43bbb7c63d4"
+              }
+            },
+            "candidate_app": {
+              "path": "/Applications/e-Mate-2.0.15-RC-297b90df.app",
+              "mtime_before_and_after": 1787932598,
+              "main_executable_sha256_before_and_after": "a88f028d5aff1dadf905f24f655dbcccff26ecc2c8ef55738598d7b4a818e61b"
+            },
+            "canonical_2_0_13_app": {
+              "path": "/Applications/e-Mate.app",
+              "mtime_before_and_after": 1787772876,
+              "main_executable_sha256_before_and_after": "3ef31147460954438012b9077579619e3c29e4ad51f151573be4654c28926532"
+            }
+          },
+          "update_prompt": {
+            "status": "PASS",
+            "screenshot": "profile-update-prompt.png",
+            "bytes": 23195,
+            "sha256": "1dc473d0a93bbb97a196d7763df5213c478cb9092709516dd750dd5be56956fd",
+            "width": 260,
+            "height": 289,
+            "visible_release": "2.0.15 generation 1",
+            "visible_components": 15,
+            "visible_download_size": "38.7 MiB",
+            "visible_guarantees": [
+              "verification",
+              "atomic activation after restart",
+              "automatic rollback on failure"
+            ]
+          },
+          "download_verify_and_stage": {
+            "status": "PASS",
+            "action": "更新并重启",
+            "downloaded_and_verified_components": 15,
+            "store_size": "40M",
+            "pending_generation_before_restart": "75c933939e9816c39f9a9bb8e818c85c3cff7b4b4d95d56da048bcbf2e58bc2c",
+            "original_process_exit_code": 0
+          },
+          "automatic_relaunch": {
+            "status": "FAIL_IN_ISOLATED_DIRECT_EXEC_TEST",
+            "new_process_observed": false,
+            "interpretation": "No automatic new process appeared after the isolated direct-exec update. This does not prove that the normal Finder-launched path always fails."
+          },
+          "manual_restart_validation": {
+            "status": "PASS",
+            "method": "Manual restart with the same isolated user-data-dir and DSH_HOME solely to validate the pending generation.",
+            "generation_state": {
+              "path": "/private/tmp/emate-t18-profile-update.fMdYH7/user-data/profile-generations/state.json",
+              "active": "75c933939e9816c39f9a9bb8e818c85c3cff7b4b4d95d56da048bcbf2e58bc2c",
+              "last_known_good": "75c933939e9816c39f9a9bb8e818c85c3cff7b4b4d95d56da048bcbf2e58bc2c",
+              "previous_known_good": "bundled"
+            },
+            "release_json": {
+              "path": "/private/tmp/emate-t18-profile-update.fMdYH7/user-data/profile-generations/store/generations/75c933939e9816c39f9a9bb8e818c85c3cff7b4b4d95d56da048bcbf2e58bc2c/release.json",
+              "bytes": 10579,
+              "sha256": "6ade4b5b2ee5ec25bcbb0e9ae3adc6ecf13cbf57ae329215f55423229c024ed2",
+              "release_version": "2.0.15",
+              "sequence": 1,
+              "source_commit": "297b90df2426137edb398b023d8137a085ed8508",
+              "base_contract_id": "e-mate-desktop-profile-v8-dsh-4787caf39134",
+              "target": {
+                "platform": "darwin",
+                "arch": "arm64"
+              },
+              "component_count": 15,
+              "matches_public_desired_state": true
+            },
+            "startup_health": "PASS",
+            "login_surface_visible": true,
+            "stable_pid_seconds": 66,
+            "screenshot": "profile-generation-active-login.png",
+            "screenshot_bytes": 88635,
+            "screenshot_sha256": "395f5d56da06c84135ea0e57c744b4cf8f8902f0ccb174f80fab46be0681cd69",
+            "screenshot_width": 1250,
+            "screenshot_height": 768
+          },
+          "result_split": {
+            "prompt": "PASS",
+            "download": "PASS",
+            "verify": "PASS",
+            "stage": "PASS",
+            "manual_restart_startup_health": "PASS",
+            "active_commit": "PASS",
+            "isolation": "PASS",
+            "automatic_relaunch": "FAIL_IN_THIS_ISOLATED_TEST",
+            "failure_rollback_injection": "OPEN"
+          }
         }
       },
       "windows": {
@@ -560,7 +693,19 @@
         "visible_window": "e-Mate 安装",
         "subsequent_remote_rounds": "CONTINUOUS_ZERO_OUTPUT",
         "installed_receipt": null,
-        "interpretation": "An opened installer window is not installation success."
+        "interpretation": "An opened installer window is not installation success.",
+        "remote_execution_channel": {
+          "status": "OPEN_REMOTE_EXECUTION_CHANNEL",
+          "only_allowed_channel": "Codex built-in Remote DESKTOP-KH19ARC",
+          "formal_acceptance_tasks": 1,
+          "recovery_tasks": 2,
+          "observed_terminal_state": "completed",
+          "assistant_messages": 0,
+          "tool_markers": 0,
+          "items": 0,
+          "click_or_install_evidence": false,
+          "user_disposition": "DEFERRED_WHILE_REMOTE_REMAINS_UNAVAILABLE"
+        }
       },
       "auth_required_smoke": {
         "status": "OPEN_AUTH_SESSION_NOT_PORTABLE",
@@ -611,14 +756,14 @@
     "three_target_composition_and_boot": "PASS",
     "macos_arm64_fresh_install": "PASS",
     "macos_x64_fresh_install": "OPEN",
-    "windows_x64_fresh_install": "OPEN_NOT_INSTALLED",
+    "windows_x64_fresh_install": "OPEN_REMOTE_EXECUTION_CHANNEL_NOT_INSTALLED",
     "predecessor_2_0_12_update": "OPEN",
     "predecessor_2_0_13_update": "FAIL_OPEN_UNSIGNED_HELPER_REJECTED_BY_AMFI_AND_APPLESYSTEMPOLICY",
     "failed_health_rollback": "OPEN_NOT_REACHED",
     "cp_01_through_cp_15_complete_profile": "PARTIAL_CP_01_PASS_REMAINDER_OPEN",
     "real_skill_hub_share_connectors": "OPEN_AUTH_REQUIRED",
     "tcc_and_computer_use": "OPEN",
-    "c03_installed_screenshot": "PARTIAL_MACOS_FINDER_GET_INFO_DMG_PASS_REMAINDER_OPEN",
+    "c03_installed_screenshot": "PARTIAL_MACOS_FINDER_GET_INFO_DMG_ABOUT_PASS_REMAINDER_OPEN",
     "artifact_bytes_sha_version_arch_provenance": "PASS",
     "signing_or_adhoc_truth": "PASS_UNSIGNED_ADHOC_NOT_NOTARIZED_SPCTL_REJECTED",
     "candidate_admission": "PASS",
