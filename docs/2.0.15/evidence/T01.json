@@ -160,6 +160,80 @@
         }
       ],
       "truth_ceiling": "Local source repair only. A corrective PR CI run, complete Profile candidates, installation/update/rollback, signing, R2/Feed/desired-state writes and public readback remain OPEN."
+    },
+    {
+      "id": "desktop-admission-profile-producer-ownership",
+      "source_fix": 1,
+      "failed_source": "d54574b716b7c18db8db8575721d52643eb39011",
+      "failed_desktop_admission": {
+        "run_id": 33131559051,
+        "attempt": 1,
+        "conclusion": "failure",
+        "job_id": 98722031295,
+        "named_acceptance": "Validate GitHub run, job, artifact, and branch provenance",
+        "signature": "desktop-admission: GitHub Profile job is not uniquely successful: Bootstrap complete Profile generation / darwin-arm64",
+        "preceding_profile_aggregate": "PASS: Recompute the Profile component aggregate from signed bytes",
+        "artifact_policy": "The failed Desktop admission is permanently invalid and was not rerun."
+      },
+      "producer_metadata": {
+        "ci": {
+          "run_id": 33125348396,
+          "attempt": 1,
+          "conclusion": "success",
+          "profile_generation_jobs": [
+            "Complete Profile generation / darwin-arm64",
+            "Complete Profile generation / darwin-x64",
+            "Complete Profile generation / win32-x64"
+          ]
+        },
+        "profile_prepare": {
+          "run_id": 33130624239,
+          "attempt": 1,
+          "conclusion": "success",
+          "jobs": [
+            "Validate accepted CI evidence",
+            "Prepare signed native Cloudflare publication bundle"
+          ],
+          "artifact_id": 9670106272,
+          "artifact_digest": "sha256:147990f2688d6d108d2c74a240886019c6c5ac85414de9b9c61406b90e9a0d7c"
+        }
+      },
+      "merge": {
+        "strategy": "git merge --no-ff origin/main",
+        "commit": "ac670464f78897fc5a5c603d33b0974ec5788083",
+        "parents": [
+          "046454ea1dd42629dbbebbf51daa6c1e4772bbca",
+          "d54574b716b7c18db8db8575721d52643eb39011"
+        ],
+        "tree_equal_to_protected_main": true
+      },
+      "root_cause": "Desktop admission assigned the three exact complete-Profile generation jobs to profile-jobs.json even though CI produces them. profile-release.yml only validates accepted CI evidence and prepares the signed publication bundle, so its real two-job metadata could never satisfy the misplaced checks; the positive fixture encoded both the obsolete jobs and the real two-job workflow assertion.",
+      "repair": "Read ci-jobs.json and profile-jobs.json once each. CI now owns the unchanged unique-success checks for source, both platform distributions, CI admission and all three Complete Profile generation targets; Profile retains unique-success checks for validation and signed-bundle preparation only.",
+      "unchanged_fail_closed_boundaries": [
+        "all three exact CI Profile targets remain mandatory and uniquely successful",
+        "missing, failed or duplicate CI target jobs are rejected",
+        "Profile validation and signed-bundle jobs remain mandatory and uniquely successful",
+        "run, artifact, source, attempt, branch, main-ref, digest and provenance validation are unchanged",
+        "no workflow, Profile implementation, Base, inventory, candidate or production state changed"
+      ],
+      "d009_consultation": "NOT_TRIGGERED: this is source fix 1 for the first failure of this named acceptance point.",
+      "modified_files": [
+        "docs/2.0.15/evidence/T01.json",
+        "scripts/desktop-admission.mjs",
+        "scripts/desktop-admission.test.mjs"
+      ],
+      "verification": [
+        {
+          "command": "node --test --test-name-pattern='GitHub provenance rejects the old repository and binds exact protected-main artifacts' scripts/desktop-admission.test.mjs",
+          "before": "EXPECTED_FAIL: 0/1 with the exact misplaced Profile job error",
+          "after": "PASS: 1/1 in 0.127 seconds; every CI target is also covered for missing, failed and duplicate metadata"
+        },
+        {
+          "command": "node --test scripts/desktop-admission.test.mjs",
+          "result": "PASS: 8/8 in 0.456 seconds"
+        }
+      ],
+      "candidate_truth": "Candidate #3 cannot be the final candidate because this source fix changes the admitted source after d54574b716b7c18db8db8575721d52643eb39011. No candidate, artifact or production state was repaired in place."
     }
   ],
   "modified_files": [
@@ -221,14 +295,14 @@
     "public desired-state and download readback"
   ],
   "remaining_risks": [
-    "Protected-main CI run 33121275604 attempt 1 failed permanently because both Profile jobs were skipped; the corrective source has not yet completed its own GitHub Actions run.",
-    "The T18 source freeze now resolves the earlier v7 @deepseek-ai/dsh-launch-environment ABI union blocker with the explicit v8 contract, but no complete Profile candidate has been generated from this corrective source.",
-    "No candidate, installer, installed application, signing operation, R2/Feed/public write, update, rollback or public post-write readback was performed."
+    "Protected-main candidate #3 CI and Profile prepare runs succeeded, but Desktop admission run 33131559051 attempt 1 failed permanently on the misplaced producer metadata check.",
+    "Candidate #3 cannot be final after this provenance source change, and the corrective source has not yet completed its own GitHub Actions run.",
+    "This T01 source fix created no replacement candidate or installer and performed no installation, signing, R2/Feed/public write, update, rollback or public post-write readback."
   ],
   "truth_stage": {
-    "source": "implemented and locally tested",
-    "ci_on_github": "run 33121275604 attempt 1 failed on protected main d0603b7; corrective source not yet run",
-    "desktop_candidate": "not created",
+    "source": "producer ownership source fix 1 implemented and locally tested",
+    "ci_on_github": "candidate #3 CI run 33125348396 and Profile prepare run 33130624239 succeeded on d54574b; Desktop admission run 33131559051 attempt 1 failed; current corrective source not yet run",
+    "desktop_candidate": "candidate #3 is invalid as a final candidate after the source change; replacement not created",
     "installed": "not tested",
     "published": "false",
     "released": "false"

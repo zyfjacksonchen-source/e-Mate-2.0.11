@@ -453,16 +453,17 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
     await json(join(metadata, 'ci-run.json'), run('100', '.github/workflows/ci.yml', 'push'))
     await json(join(metadata, 'desktop-run.json'), run('102', '.github/workflows/desktop-release.yml'))
     await json(join(metadata, 'profile-run.json'), run('103', '.github/workflows/profile-release.yml'))
-    await json(join(metadata, 'ci-jobs.json'), jobs([
+    const ciJobNames = [
       'CI admission', 'Node 24 / target contracts and unit tests',
       'Windows x64 / unsigned desktop installer', 'macOS universal / unsigned desktop disk image',
-    ]))
+      ...TARGETS.map(target => `Complete Profile generation / ${target}`),
+    ]
+    await json(join(metadata, 'ci-jobs.json'), jobs(ciJobNames))
     await json(join(metadata, 'desktop-jobs.json'), jobs([
       'Bind exact protected-main CI artifacts to the release manifest',
     ]))
     await json(join(metadata, 'profile-jobs.json'), jobs([
       'Validate accepted CI evidence',
-      ...TARGETS.map(target => `Bootstrap complete Profile generation / ${target}`),
       'Prepare signed native Cloudflare publication bundle',
     ]))
     await json(join(metadata, 'desktop-artifact.json'), artifact('201', `e-mate-desktop-release-${SOURCE}`, '102'))
@@ -481,6 +482,18 @@ test('GitHub provenance rejects the old repository and binds exact protected-mai
     }
     const { provenance } = await createGithubArtifactProvenance(options)
     assert.deepEqual(provenance.artifacts.map(item => item.role), ['desktop_candidate'])
+    for (const target of TARGETS) {
+      const name = `Complete Profile generation / ${target}`
+      await json(join(metadata, 'ci-jobs.json'), jobs(ciJobNames.filter(job => job !== name)))
+      await assert.rejects(() => createGithubArtifactProvenance(options), new RegExp(`CI job is not uniquely successful: ${name}`, 'u'))
+      const failed = jobs(ciJobNames)
+      failed.jobs.find(job => job.name === name).conclusion = 'failure'
+      await json(join(metadata, 'ci-jobs.json'), failed)
+      await assert.rejects(() => createGithubArtifactProvenance(options), new RegExp(`CI job is not uniquely successful: ${name}`, 'u'))
+      await json(join(metadata, 'ci-jobs.json'), { jobs: [...jobs(ciJobNames).jobs, { name, conclusion: 'success' }] })
+      await assert.rejects(() => createGithubArtifactProvenance(options), new RegExp(`CI job is not uniquely successful: ${name}`, 'u'))
+    }
+    await json(join(metadata, 'ci-jobs.json'), jobs(ciJobNames))
     const rerun = run('100', '.github/workflows/ci.yml', 'push')
     rerun.run_attempt = 2
     await json(join(metadata, 'ci-run.json'), rerun)
