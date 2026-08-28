@@ -2,9 +2,9 @@
   "schema_version": 1,
   "document_type": "emate.2.0.15.ticket-evidence",
   "ticket": "T18",
-  "title": "2.0.15 Phase 1 and Phase 1b source freeze",
-  "status": "SOURCE_FREEZE_PHASE_1B_COMMITTED_CANDIDATE_INSTALLED_PUBLIC_OPEN",
-  "captured_at": "2026-08-27T19:45:30Z",
+  "title": "2.0.15 source freeze, formal unsigned publication and partial installed closeout",
+  "status": "PARTIAL_OPEN_PUBLIC_RELEASE_PASS_INSTALLED_UPDATE_AUTH_INCOMPLETE",
+  "captured_at": "2026-08-28T21:02:09Z",
   "baseline": {
     "branch": "release/2.0.15",
     "start_commit": "2f1183c3ea0b5da5e794a3d6daf1aa565b08a328",
@@ -351,6 +351,181 @@
       "reason": "the full unfiltered release.test gate now proves historical 2.0.14 validation, rejection from 2.0.15 staging, valid temporary 2.0.15 handoff generation and fail-closed version drift"
     }
   ],
+  "formal_release_closeout": {
+    "overall_status": "PARTIAL_OPEN",
+    "truth_ceiling": "Protected source, formal CI, immutable artifacts, admission, unsigned public activation and website are PASS. This does not imply complete installed, predecessor-update, rollback, Windows or authenticated product acceptance.",
+    "source_and_ci": {
+      "status": "PASS",
+      "repository": "zyfjacksonchen-source/e-Mate-2.0.11",
+      "protected_source": "297b90df2426137edb398b023d8137a085ed8508",
+      "formal_ci_run_id": 33186414887,
+      "workflow": "CI",
+      "event": "workflow_dispatch",
+      "branch": "main",
+      "run_attempt": 1,
+      "conclusion": "success",
+      "ci_admission": "PASS"
+    },
+    "base_and_harness": {
+      "status": "PASS",
+      "base_contract_id": "e-mate-desktop-profile-v8-dsh-4787caf39134",
+      "harness_commit": "4787caf39134df190105b272da0dd2ba893d4d75",
+      "retained_components": 15,
+      "managed_manifests": 19
+    },
+    "downstream_admission": {
+      "status": "PASS",
+      "profile": {
+        "run_id": 33192023943,
+        "artifact_id": 9694174982,
+        "artifact_digest": "sha256:8dffcca0a4db48e2b557b78057685670ea0666013fb73681bcfb2a823756c5ee",
+        "artifact_bytes": 74756864
+      },
+      "desktop": {
+        "run_id": 33192030275,
+        "artifact_id": 9694187842,
+        "artifact_digest": "sha256:f918fd1fd1c5a4713b7bc90c93f9640b2517ae874b4d80003e3e9b39a6aa7ded",
+        "artifact_bytes": 686085812
+      },
+      "admission": {
+        "run_id": 33192202230,
+        "artifact_id": 9694248677,
+        "artifact_digest": "sha256:1a6ae71b5edcd61faace2b5456266cad6aa15d4a5537e830f12b1c174aa49a89",
+        "artifact_bytes": 2013
+      },
+      "all_runs": "workflow_dispatch/main/exact-source/attempt-1/success"
+    },
+    "artifacts": {
+      "status": "PASS",
+      "macos": {
+        "publication_mode": "unsigned",
+        "github_artifact_id": 9692991617,
+        "github_artifact_name": "e-mate-desktop-macos-297b90df2426137edb398b023d8137a085ed8508",
+        "github_archive_bytes": 402964392,
+        "github_archive_digest": "sha256:1a7f54efb061650672680e2914098849e8224aa042f515b5f6dbae1f51a6f9cd",
+        "payload_name": "e-Mate-2.0.15-mac-universal.dmg",
+        "payload_bytes": 402547931,
+        "payload_sha256": "6d79a359738c26a9be1d091614875ba426db5314c91f0e4afbe8b582b583ac3a",
+        "blockmap_bytes": 414486,
+        "blockmap_sha256": "34c3acfa0e6813c0a580d6bde3b40a0bbc4a2db4064ac0c30075b307f2d62ea6",
+        "signed": false,
+        "developer_id": false,
+        "notarized": false,
+        "stapled": false,
+        "spctl": "rejected"
+      },
+      "windows": {
+        "publication_mode": "unsigned",
+        "github_artifact_id": 9692456806,
+        "github_artifact_name": "e-mate-desktop-windows-297b90df2426137edb398b023d8137a085ed8508",
+        "github_archive_bytes": 283537961,
+        "github_archive_digest": "sha256:bdf71d115803b15df39751236b82d25cce8f4bb05731e589cbbacc491c38c5d2",
+        "payload_name": "e-Mate-2.0.15-win-x64-Setup.exe",
+        "payload_bytes": 283536339,
+        "payload_sha256": "6ba140bff70451e79dd8ceb8dbcbae86281999e34a696d92022f028f040f161d",
+        "signed": false,
+        "notarized": false
+      }
+    },
+    "public_activation": {
+      "status": "PASS",
+      "cloudflare_plan": {
+        "path": "/tmp/emate-cloudflare-handoff.9AMKuQ/files/cloudflare-publication-plan.json",
+        "sha256": "20b7c16e1422e257842febbb03bb5b7981b31e93629744e19796fb32f8e90295"
+      },
+      "manifest": {
+        "schema_version": 2,
+        "bytes": 2961,
+        "sha256": "838115146f74e18de0fc90e3dc586f6bd5eab706a0e6dcbc27e6ad5a79c642fb",
+        "version": "2.0.15",
+        "source_commit": "297b90df2426137edb398b023d8137a085ed8508",
+        "base_contract_id": "e-mate-desktop-profile-v8-dsh-4787caf39134"
+      },
+      "entry_points": {
+        "desktop/manual/v2.0.15/latest.json": "PASS_IMMUTABLE",
+        "desktop/signed/latest.json": "PASS_NO_STORE",
+        "desktop/latest.json": "PASS_NO_STORE"
+      },
+      "entry_point_readback_paths": {
+        "desktop/manual/v2.0.15/latest.json": "/private/tmp/emate-pointer-manual-readback.Dv1X6Z/body.json",
+        "desktop/signed/latest.json": "/private/tmp/emate-pointer-active-readback.VIWReE/body.json",
+        "desktop/latest.json": "/private/tmp/emate-pointer-legacy-readback.Ac2xsm/body.json"
+      },
+      "entry_point_body_identity_equal": true,
+      "macos_full_public_readback": {
+        "path": "/private/tmp/emate-mac-public-readback.FpAAVL/e-Mate-2.0.15-mac-universal.dmg",
+        "bytes": 402547931,
+        "sha256": "6d79a359738c26a9be1d091614875ba426db5314c91f0e4afbe8b582b583ac3a"
+      },
+      "windows_full_public_readback": {
+        "path": "/private/tmp/emate-win-public-readback.8PsdXD/e-Mate-2.0.15-win-x64-Setup.exe",
+        "bytes": 283536339,
+        "sha256": "6ba140bff70451e79dd8ceb8dbcbae86281999e34a696d92022f028f040f161d"
+      },
+      "profile_desired_state": "PASS_ACCEPTED_T00_PUBLICATION_RECEIPT"
+    },
+    "website": {
+      "status": "PASS",
+      "publication_plan_path": "/tmp/emate-release-coordinator.BnQsNI/website-handoff/website-publication-plan.json",
+      "publication_plan_sha256": "4920244414b7d378fdef769437bc6e4aa3ad562d2ead3010df7e3aeaa000d616",
+      "public_origin": "https://mvdcm.ecoremedia.net/ecorex-agent/",
+      "current_target": "/srv/ecorex-agent-download/releases/site-emate-2.0.15-297b90df2426137edb398b023d8137a085ed8508",
+      "file_set": "PASS_12_OF_12",
+      "http_status": 200,
+      "redirect_count": 0,
+      "content_types_bytes_and_sha256": "PASS_12_OF_12",
+      "index_bytes": 6098,
+      "index_sha256": "6ec65a43d8767a8b3e26b257cb42d7b88bc6cd276b326d50dbb5d529a074b816",
+      "installer_links": "PASS_EXACT_ADMITTED_IMMUTABLE_URLS",
+      "unsigned_copy": "PASS_MACOS_AND_WINDOWS_UNSIGNED_MACOS_NOT_NOTARIZED",
+      "evidence_root": "/private/tmp/emate-t18-website-charset.LbWdLW"
+    },
+    "installed_acceptance": {
+      "status": "PARTIAL_OPEN",
+      "macos": {
+        "candidate_install": "PASS",
+        "installed_app": "/Applications/e-Mate-2.0.15-RC-297b90df.app",
+        "architectures": ["arm64", "x86_64"],
+        "renderer_health": "PASS",
+        "cp_01": "PASS",
+        "visible_ax_clickable_shell": "PASS",
+        "canonical_2_0_13_unchanged": true,
+        "evidence_root": "/private/tmp/emate-t18-phase2-macos.bic4ce",
+        "automatic_update_from_2_0_13": {
+          "status": "FAIL_OPEN",
+          "helper_ready": "TIMEOUT",
+          "swap_started": false,
+          "reason": "The unsigned ad-hoc staged 2.0.15 helper was rejected before Node entry by AMFI and AppleSystemPolicy, so no successful automatic-update or failed-health rollback receipt exists.",
+          "evidence_authority": "T00 formal-release reconciliation in the same visible T18 task",
+          "related_owner_path": "docs/2.0.15/evidence/T09.json"
+        }
+      },
+      "windows": {
+        "phase_a_artifact_verification": "PASS",
+        "phase_b": "OPEN_NOT_INSTALLED",
+        "installer_pid": 452,
+        "visible_window": "e-Mate 安装",
+        "subsequent_remote_rounds": "CONTINUOUS_ZERO_OUTPUT",
+        "installed_receipt": null,
+        "interpretation": "An opened installer window is not installation success."
+      },
+      "auth_required_smoke": {
+        "status": "OPEN_AUTH_SESSION_NOT_PORTABLE",
+        "evidence_root": "/private/tmp/emate-t18-phase2b-auth.vAQeMg",
+        "credential_access_attempted": false
+      }
+    },
+    "remaining_open": [
+      "2.0.12 predecessor automatic update",
+      "2.0.13 predecessor automatic update success",
+      "failed-health atomic rollback",
+      "Windows x64 installed acceptance and uninstall/data-preservation",
+      "native Intel macOS x64 installed acceptance",
+      "CP-02 through CP-15 where not independently closed",
+      "authenticated real-account product smoke",
+      "remaining real services, TCC, Computer Use and C03 installed evidence"
+    ]
+  },
   "discarded_inputs": [
     {
       "file_name": "e-mate-image-feedback.xlsx",
@@ -362,38 +537,42 @@
   ],
   "scope": {
     "source_freeze_committed": true,
-    "candidate_created": false,
-    "build_once_performed": false,
-    "installer_built": false,
-    "install_performed": false,
+    "candidate_created": true,
+    "build_once_performed": true,
+    "installer_built": true,
+    "install_performed": true,
     "signing_performed": false,
+    "desktop_code_signing_performed": false,
+    "manifest_signing_performed": true,
     "remote_push_performed_in_this_phase": false,
-    "r2_written": false,
-    "feed_written": false,
-    "profile_desired_state_written": false,
-    "website_written": false,
+    "r2_written": true,
+    "feed_written": true,
+    "profile_desired_state_written": true,
+    "website_written": true,
     "github_release_created": false,
-    "release_claimed": false
+    "release_claimed": true,
+    "t18_complete": false
   },
   "open_gates": {
-    "build_once_exact_candidate": "OPEN",
-    "three_target_composition_and_boot": "OPEN",
-    "macos_arm64_fresh_install": "OPEN",
+    "build_once_exact_candidate": "PASS",
+    "three_target_composition_and_boot": "PASS",
+    "macos_arm64_fresh_install": "PASS",
     "macos_x64_fresh_install": "OPEN",
-    "windows_x64_fresh_install": "OPEN",
+    "windows_x64_fresh_install": "OPEN_NOT_INSTALLED",
     "predecessor_2_0_12_update": "OPEN",
-    "predecessor_2_0_13_update": "OPEN",
-    "failed_health_rollback": "OPEN",
-    "cp_01_through_cp_15_complete_profile": "OPEN",
-    "real_skill_hub_share_connectors": "OPEN",
+    "predecessor_2_0_13_update": "FAIL_OPEN_UNSIGNED_HELPER_REJECTED_BY_AMFI_AND_APPLESYSTEMPOLICY",
+    "failed_health_rollback": "OPEN_NOT_REACHED",
+    "cp_01_through_cp_15_complete_profile": "PARTIAL_CP_01_PASS_REMAINDER_OPEN",
+    "real_skill_hub_share_connectors": "OPEN_AUTH_REQUIRED",
     "tcc_and_computer_use": "OPEN",
     "c03_installed_screenshot": "OPEN",
-    "artifact_bytes_sha_version_arch_provenance": "OPEN",
-    "signing_or_adhoc_truth": "OPEN",
-    "candidate_admission": "OPEN",
-    "installed_acceptance": "OPEN",
-    "feed_profile_desired_state": "OPEN",
-    "public_readback": "OPEN",
-    "formal_release": "OPEN"
+    "artifact_bytes_sha_version_arch_provenance": "PASS",
+    "signing_or_adhoc_truth": "PASS_UNSIGNED_ADHOC_NOT_NOTARIZED_SPCTL_REJECTED",
+    "candidate_admission": "PASS",
+    "installed_acceptance": "PARTIAL_OPEN_MACOS_CP_01_PASS_WINDOWS_NOT_INSTALLED",
+    "feed_profile_desired_state": "PASS",
+    "public_readback": "PASS",
+    "formal_release": "PASS_PUBLIC_UNSIGNED_RELEASE_T18_OVERALL_PARTIAL_OPEN",
+    "auth_required_smoke": "OPEN_AUTH_SESSION_NOT_PORTABLE"
   }
 }
