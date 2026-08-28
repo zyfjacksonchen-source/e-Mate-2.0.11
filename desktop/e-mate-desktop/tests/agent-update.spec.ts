@@ -82,6 +82,18 @@ describe('e-Mate Agent desktop update Tool', () => {
         },
         expected: ['2.0.13', '更新应用版本', '当前仍保持 e-Mate 2.0.12'],
       },
+      {
+        value: {
+          status: 'failed',
+          installedVersion: '2.0.13',
+          stage: 'failed',
+          code: 'check-signature-invalid',
+          diagnosticId: '0e4b9e6d-89b7-4b32-b8d4-d5fda86506bc',
+          retryable: false,
+          failedFromStage: 'checking',
+        },
+        expected: ['更新清单签名无法验证', '0e4b9e6d-89b7-4b32-b8d4-d5fda86506bc'],
+      },
     ]
     for (const item of cases) {
       const visible = tool.output.render({}, item.value).map(block => block.text).join('\n')
