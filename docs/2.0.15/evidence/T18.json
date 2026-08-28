@@ -498,6 +498,59 @@
           "reason": "The unsigned ad-hoc staged 2.0.15 helper was rejected before Node entry by AMFI and AppleSystemPolicy, so no successful automatic-update or failed-health rollback receipt exists.",
           "evidence_authority": "T00 formal-release reconciliation in the same visible T18 task",
           "related_owner_path": "docs/2.0.15/evidence/T09.json"
+        },
+        "c03_icon_surfaces": {
+          "status": "PARTIAL_PASS",
+          "evidence_root": "/private/tmp/emate-t18-cp14-macos.nTAkGf",
+          "finder_applications": {
+            "status": "PASS",
+            "screenshot": "finder-applications-selected.png",
+            "bytes": 69499,
+            "sha256": "8ae9ffc07d16e079c294e1ffca29358efa3fef4ba1fff69ea23b7ec93ee63884",
+            "width": 920,
+            "height": 436,
+            "visible_c03_icon": true
+          },
+          "finder_get_info": {
+            "status": "PASS",
+            "screenshot": "finder-get-info.png",
+            "bytes": 40404,
+            "sha256": "f2dba3a9f24930e7501ab2b194fea9e22ba89fef613df6b59ba02a87ba8f3083",
+            "width": 265,
+            "height": 569,
+            "visible_c03_icon": true,
+            "visible_architecture": "Universal",
+            "visible_version": "2.0.15"
+          },
+          "public_dmg_finder": {
+            "status": "PASS",
+            "screenshot": "dmg-finder-rendered.png",
+            "bytes": 38735,
+            "sha256": "f5b3bcfd52d36271b931c08e257e254abf1ff8ab686c27c05377c25a68f8e56c",
+            "width": 920,
+            "height": 436,
+            "visible_c03_icon": true
+          },
+          "icon_identity": {
+            "source_t14_path": "desktop/e-mate-desktop/build/icon.icns",
+            "source_t14_sha256": "56432cae237293d65f53456bca62df287b3058f62d5bc36c78fdeefc11f196ef",
+            "public_dmg_icon_sha256": "11333a9fbf3613e8af449a7c2b5ec402814126a420e256cf64942e2d5e12a726",
+            "installed_path": "/Applications/e-Mate-2.0.15-RC-297b90df.app/Contents/Resources/icon.icns",
+            "installed_sha256": "11333a9fbf3613e8af449a7c2b5ec402814126a420e256cf64942e2d5e12a726",
+            "source_vs_packaged_icns_container_exact": false,
+            "master_1024_pixel_identity": true,
+            "small_size_slot_resampling_difference_observed": true,
+            "dmg_vs_installed_bytes_exact": true,
+            "installed_bundle_short_version": "2.0.15",
+            "installed_bundle_version": "2.0.15"
+          },
+          "remaining_surfaces": {
+            "dock": "OPEN",
+            "app_switcher": "OPEN",
+            "settings": "OPEN",
+            "windows": "OPEN"
+          },
+          "interpretation": "Finder Applications, Finder Get Info and the public DMG show the C03 icon. The source and packaged ICNS containers are not byte-identical: the 1024x1024 master pixels are identical while smaller slots show packaging resampling differences. Dock, App Switcher, Settings and Windows remain OPEN, so CP-14 is not complete."
         }
       },
       "windows": {
@@ -523,7 +576,7 @@
       "native Intel macOS x64 installed acceptance",
       "CP-02 through CP-15 where not independently closed",
       "authenticated real-account product smoke",
-      "remaining real services, TCC, Computer Use and C03 installed evidence"
+      "remaining real services, TCC, Computer Use, and C03 Dock/App Switcher/Settings/Windows installed surfaces; CP-14 remains incomplete"
     ]
   },
   "discarded_inputs": [
@@ -565,7 +618,7 @@
     "cp_01_through_cp_15_complete_profile": "PARTIAL_CP_01_PASS_REMAINDER_OPEN",
     "real_skill_hub_share_connectors": "OPEN_AUTH_REQUIRED",
     "tcc_and_computer_use": "OPEN",
-    "c03_installed_screenshot": "OPEN",
+    "c03_installed_screenshot": "PARTIAL_MACOS_FINDER_GET_INFO_DMG_PASS_REMAINDER_OPEN",
     "artifact_bytes_sha_version_arch_provenance": "PASS",
     "signing_or_adhoc_truth": "PASS_UNSIGNED_ADHOC_NOT_NOTARIZED_SPCTL_REJECTED",
     "candidate_admission": "PASS",
