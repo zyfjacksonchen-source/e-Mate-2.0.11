@@ -4,15 +4,24 @@
   "ticket": "T09",
   "title": "唯一在线更新事务与可视进度",
   "status": "LOCAL_SOURCE_TESTED_NOT_CANDIDATE",
-  "baseline": {
+  "task_start_baseline": {
+    "classification": "HISTORICAL_TASK_START_NOT_CURRENT_SOURCE",
     "integration_commit": "f72db74c21f2341ffe3b9b54c466e93d532e7bf2",
     "branch": "feat/2.0.15-T09-updater",
     "worktree": "/Users/mac/e-mate/worktrees/emate-2.0.15-T09",
     "clean_start": true,
     "source_desktop_version": "2.0.14",
-    "base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0",
-    "public_production_version": "2.0.13",
-    "public_version_verified_live_by_t09": true
+    "base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0"
+  },
+  "protected_followup_baseline": {
+    "classification": "CURRENT_PROTECTED_SOURCE_FOR_T09_FOLLOWUP",
+    "protected_ref": "origin/main",
+    "protected_source": "650fbc2e0d0ef2d915ec8083822f29741c6ad0c8",
+    "desktop_package_version": "2.0.15",
+    "base_contract_id": "e-mate-desktop-profile-v8-dsh-4787caf39134",
+    "branch": "feat/2.0.15-T09-updater",
+    "worktree": "/Users/mac/e-mate/worktrees/emate-2.0.15-T09",
+    "relationship": "The follow-up branch was migrated cleanly onto this protected source before candidate #4 diagnosis and the typed check-failure repair. Historical f72/2.0.14/Base-v7 fields above are not current source facts."
   },
   "public_feed_live_read": {
     "read_at": "2026-08-28T11:52:00+08:00",
@@ -243,6 +252,18 @@
       "result": "PASS"
     }
   ],
+  "t00_merge_review": {
+    "t09_focused_tests": "PASS: 4 files; 152 passed, 0 failed",
+    "desktop_typecheck": "PASS: all four Desktop source/client/test projects",
+    "shared_caller_release_manifest_test": {
+      "path": "desktop/e-mate-desktop/tests/desktop-release-manifest.spec.ts",
+      "baseline": "origin/main@650fbc2e0d0ef2d915ec8083822f29741c6ad0c8",
+      "result": "1 failed, 5 passed",
+      "cause": "The unchanged test fixture still hard-codes 2.0.13 macOS and Windows artifact filenames while the protected Desktop package is 2.0.15.",
+      "classification": "PRE_EXISTING_T18_RELEASE_TEST_STALENESS_NOT_T09_REGRESSION",
+      "t09_action": "No change: the test path is outside the T09 Owner allowlist and must not be repaired by this ticket."
+    }
+  },
   "test_environment": {
     "dependency_source": "existing /Users/mac/e-mate/worktrees/emate-2.0.15-T02/desktop/e-mate-desktop/node_modules",
     "use": "temporary read-only symlink in the T09 Desktop directory because global Yarn and local T09 dependencies were absent",
@@ -283,6 +304,11 @@
       "owner": "T18",
       "status": "OPEN",
       "scope": "Production Feed still admits exact 2.0.13. Candidate #4 passes ad-hoc deep codesign but is Gatekeeper-rejected, and the packaged 2.0.13 predecessor is blocked before the staged helper reaches Node. Admit new Developer ID signed and notarized exact bytes, activate them through the release gate, then run real installed 2.0.12 and 2.0.13 updates, success and deliberate failed-health rollback, retained-data checks and visible UI acceptance. Candidate #4 remains OPEN and must not be represented as a successful installed update."
+    },
+    {
+      "owner": "T18",
+      "status": "OPEN",
+      "scope": "Refresh desktop/e-mate-desktop/tests/desktop-release-manifest.spec.ts from its fixed 2.0.13 artifact filenames to the final frozen release identity. T00 observed 1 red/5 pass on unchanged origin/main; this is a pre-existing release-test staleness handoff outside T09 Owner scope, not a T09 regression."
     }
   ],
   "consultation_gate": {
