@@ -61,6 +61,7 @@ import {
 import { loadProfileBaseContract, profileReleaseTarget } from './profile-release.ts'
 import type { RendererBootReport } from './renderer-boot-contract.ts'
 import { resolveDesktopShellEnvironment } from './shell-environment.ts'
+import { desktopDefaultRelaunchArguments } from './relaunch-arguments.ts'
 import type { DesktopPnpmBootstrap } from './pnpm.ts'
 import { bundledPythonPath } from './vision-toolkit.ts'
 import {
@@ -180,7 +181,9 @@ async function start(): Promise<void> {
   const nativeExit = createDesktopExitCoordinator(
     {
       prepareToQuit: () => { runtime.prepareToQuit() },
-      relaunch: () => { app.relaunch() },
+      relaunch: args => {
+        app.relaunch({ args: [...(args ?? desktopDefaultRelaunchArguments())] })
+      },
       exit: code => { app.exit(code) },
     },
     () => { removeShutdownRequests?.() },
@@ -192,7 +195,7 @@ async function start(): Promise<void> {
     }
     if (restartRequested) return
     restartRequested = true
-    nativeExit.requestRelaunch()
+    nativeExit.requestRelaunch(desktopDefaultRelaunchArguments())
     await shutdown.request(0)
   }, (report) => {
     if (rendererBootSettled) return
@@ -223,7 +226,7 @@ async function start(): Promise<void> {
   if (process.platform === 'darwin' && !hasMacUpdateStartupAcknowledgement) {
     const recovery = recoverPendingMacUpdateStartup(app.getPath('userData'), app.getVersion(), process.execPath)
     if (recovery.relaunch) {
-      nativeExit.requestRelaunch()
+      nativeExit.requestRelaunch(desktopDefaultRelaunchArguments())
       await shutdown.request(0)
       return
     }
@@ -367,7 +370,7 @@ async function start(): Promise<void> {
       })
       if (choice.response === 1) {
         await installRecovery.requestRetry(recoveryClaim.transaction.transactionId)
-        nativeExit.requestRelaunch()
+        nativeExit.requestRelaunch(desktopDefaultRelaunchArguments())
         await shutdown.request(0)
         return
       }
@@ -673,7 +676,7 @@ async function start(): Promise<void> {
       try {
         markProfileGenerationFailed(profileGenerationStatePath, profileGenerationStartup.generation_id)
         if (!macUpdateStartupProbation) {
-          nativeExit.requestRelaunch()
+          nativeExit.requestRelaunch(desktopDefaultRelaunchArguments())
           exitCode = 0
           notifyProfileRecovery(runtime, 'Reopening the last-known-good component generation.')
         }
@@ -686,7 +689,7 @@ async function start(): Promise<void> {
       try {
         markDesktopProfileFailed(profileStatePath, profileStartup.profileName)
         if (retryLastKnownGood && !macUpdateStartupProbation) {
-          nativeExit.requestRelaunch()
+          nativeExit.requestRelaunch(desktopDefaultRelaunchArguments())
           exitCode = 0
           notifyProfileRecovery(
             runtime,

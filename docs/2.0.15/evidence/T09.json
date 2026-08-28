@@ -14,14 +14,14 @@
     "base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0"
   },
   "protected_followup_baseline": {
-    "classification": "CURRENT_PROTECTED_SOURCE_FOR_T09_FOLLOWUP",
+    "classification": "HISTORICAL_TYPED_FAILURE_FOLLOWUP_BASELINE_NOT_CURRENT_SOURCE",
     "protected_ref": "origin/main",
     "protected_source": "650fbc2e0d0ef2d915ec8083822f29741c6ad0c8",
     "desktop_package_version": "2.0.15",
     "base_contract_id": "e-mate-desktop-profile-v8-dsh-4787caf39134",
     "branch": "feat/2.0.15-T09-updater",
     "worktree": "/Users/mac/e-mate/worktrees/emate-2.0.15-T09",
-    "relationship": "The follow-up branch was migrated cleanly onto this protected source before candidate #4 diagnosis and the typed check-failure repair. Historical f72/2.0.14/Base-v7 fields above are not current source facts."
+    "relationship": "The typed-failure follow-up branch was migrated cleanly onto this protected source before candidate #4 diagnosis. It is retained as history and is not the current upstream-relaunch source baseline."
   },
   "public_feed_live_read": {
     "read_at": "2026-08-28T11:52:00+08:00",
@@ -37,7 +37,7 @@
     "source_commit": "6f63b5238d5874a1973a5ce0c1c9f832d277c865",
     "key_id": "e0a81164526dcbcd",
     "current_source_validator": "PASS against the installed Base trust root",
-    "interpretation": "Production still truthfully publishes exact 2.0.13. Activating 2.0.15 remains a T18 release action and is not a source-code fix."
+    "interpretation": "At this recorded read time production truthfully published exact 2.0.13. This historical read was not refreshed by the upstream-relaunch source follow-up and is not a current publication claim."
   },
   "root_cause_reference": {
     "path": "/Users/mac/.codex/attachments/88005cee-f7c3-4e73-b0a9-6e07ea4d1ca2/pasted-text.txt",
@@ -277,6 +277,106 @@
     "temporary_link_removed_before_commit": true,
     "package_or_lock_modified": false
   },
+  "upstream_relaunch_followup": {
+    "status": "LOCAL_SOURCE_TESTED_NOT_CANDIDATE",
+    "baseline": {
+      "protected_ref": "origin/main",
+      "protected_source": "11143702aa62b62e3c53f215c68f5008b72496ed",
+      "branch": "fix/2.0.15-T09-upstream-relaunch-d29bf7a",
+      "worktree": "/Users/mac/e-mate/worktrees/emate-2.0.15-T09",
+      "clean_before_branch_migration": true,
+      "migration": "Detached from the historical T09 branch, then created the new branch directly from the exact protected source without reset, replay or force update."
+    },
+    "upstream_repo": "https://github.com/anywhere-labs/dsh-desktop.git",
+    "upstream_commit": "d29bf7a965fc68bf09750bc329905ecb17afe48b",
+    "upstream_paths": [
+      "dsh-plugin-desktop/src/relaunch-arguments.ts",
+      "dsh-plugin-desktop/src/main.ts:417-449",
+      "dsh-plugin-desktop/src/shutdown.ts:12-54",
+      "dsh-plugin-desktop/tests/relaunch-arguments.spec.ts",
+      "dsh-plugin-desktop/tests/shutdown.spec.ts"
+    ],
+    "license": {
+      "spdx": "MIT",
+      "upstream_file": "/private/tmp/dsh-desktop-upstream.0ue07O/LICENSE",
+      "copyright": "Copyright (c) 2026 Anywhere Labs",
+      "local_preservation": "desktop/e-mate-desktop/LICENSE already preserves the Anywhere Labs MIT notice; no license file change was required."
+    },
+    "root_cause": "Every online-update and recovery restart already converged on the one Desktop exit coordinator, but the native adapter called app.relaunch() without the upstream explicit args contract. Electron therefore did not receive process.argv.slice(1), so an entrypoint and flags such as --user-data-dir could be lost after the orderly update restart.",
+    "caller_replay": [
+      "profileAdapter.install -> ElectronDesktopRuntime.requestRestart -> Main restart callback",
+      "macOS pending-update startup recovery relaunch",
+      "plugin install retry relaunch",
+      "Profile generation failed-health rollback relaunch",
+      "Desktop Profile failed-health rollback relaunch"
+    ],
+    "ported_contract": {
+      "ordinary_arguments": "desktopDefaultRelaunchArguments() returns process.argv.slice(1) exactly.",
+      "shutdown": "requestRelaunch accepts and retains an explicit readonly argument list; finish relaunches only for exit code 0 after the existing successful Cordis disposal path.",
+      "electron": "Main passes a cloned argument list to app.relaunch({ args }) before app.exit(0).",
+      "single_owner": "The existing ElectronDesktopRuntime restart callback remains the only online-update restart owner; signed manifest, Profile generation, Base installer and platform helpers are unchanged."
+    },
+    "bounded_port_differences": [
+      "e-Mate has no upstream recovery-mode argument marker, so only the ordinary upstream relaunch function was ported; no new marker or mode was invented.",
+      "Test fixtures use the e-Mate executable path and assert preservation of desktop-main.cjs plus --user-data-dir.",
+      "e-Mate's existing disposal, Base/Profile probation, health acknowledgement and rollback ordering were retained unchanged.",
+      "The upstream simplified installer-opening update path was not ported because e-Mate's signed manifest and atomic Profile/Base transactions remain the sole updater contract."
+    ],
+    "red_regressions": {
+      "result": "RED: relaunch-arguments.spec.ts could not resolve the absent helper; shutdown.spec.ts showed the explicit argument list was dropped while the seven pre-existing shutdown assertions passed.",
+      "named_cases": [
+        "preserves the entrypoint and explicit user-data directory",
+        "passes an explicit argument list to a successful relaunch"
+      ]
+    },
+    "verification": [
+      {
+        "command": "vitest run tests/relaunch-arguments.spec.ts tests/shutdown.spec.ts tests/electron-runtime.spec.ts tests/updates.spec.ts",
+        "result": "PASS: 4 files; 104 passed, 0 failed"
+      },
+      {
+        "command": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.tests.client.json --noEmit",
+        "result": "PASS: all four Desktop source/client/test projects"
+      },
+      {
+        "authority": "T00 independent validation",
+        "command": "PATH=/Users/mac/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH /Users/mac/e-mate/worktrees/emate-2.0.15-T15/desktop/e-mate-desktop/node_modules/.bin/vitest run --root /Users/mac/e-mate/worktrees/emate-2.0.15-T09/desktop/e-mate-desktop --config /Users/mac/e-mate/worktrees/emate-2.0.15-T15/desktop/e-mate-desktop/vitest.config.ts tests/relaunch-arguments.spec.ts tests/shutdown.spec.ts",
+        "result": "PASS: 2 files; 9 passed, 0 failed; 146 ms"
+      }
+    ],
+    "test_environment": {
+      "dependency_source": "/Users/mac/e-mate/worktrees/emate-2.0.15-T02/desktop/e-mate-desktop/node_modules",
+      "use": "Read-only package entries were mirrored through a /private/tmp directory and one temporary T09 node_modules symlink; both were removed after each command.",
+      "t00_independent_dependency_source": "/Users/mac/e-mate/worktrees/emate-2.0.15-T15/desktop/e-mate-desktop/node_modules",
+      "prior_t09_config_failure": {
+        "classification": "ENVIRONMENT_ONLY",
+        "cause": "The T09 worktree had no local Desktop node_modules, so its vitest.config.ts could not resolve vitest/config when invoked without an installed config owner.",
+        "product_regression": false,
+        "resolution": "T00 used the already-installed T15 Vitest binary and config while setting --root to the T09 Desktop source."
+      },
+      "installed_or_modified_dependencies": false,
+      "temporary_link_removed": true,
+      "package_or_lock_modified": false
+    },
+    "modified_files": [
+      "desktop/e-mate-desktop/src/relaunch-arguments.ts",
+      "desktop/e-mate-desktop/src/shutdown.ts",
+      "desktop/e-mate-desktop/src/main.ts",
+      "desktop/e-mate-desktop/tests/relaunch-arguments.spec.ts",
+      "desktop/e-mate-desktop/tests/shutdown.spec.ts",
+      "docs/2.0.15/evidence/T09.json"
+    ],
+    "remaining_t18_truth": {
+      "source": "PASS",
+      "candidate_with_this_change": "OPEN",
+      "installed_update_relaunch_preserves_entrypoint_and_user_data": "OPEN",
+      "failed_health_rollback_relaunch_preserves_entrypoint_and_user_data": "OPEN",
+      "packaged": false,
+      "signed": false,
+      "published": false,
+      "released": false
+    }
+  },
   "modified_files": [
     "desktop/e-mate-desktop/src/agent-update.ts",
     "desktop/e-mate-desktop/src/electron-runtime.ts",
@@ -323,8 +423,9 @@
     "reason": "Scheme A remains the current-installed-Base helper fix. The candidate #4 follow-up produced no helper scheme B because the exact packaged helper is blocked by macOS trust policy before candidate source executes. For the separately named check-failure diagnostic acceptance, the second materially different source repair covered response-body AbortError and both direct-cancellation/coordinator-timeout regressions passed; there is no same named acceptance red after that repair, so D009 is not invoked."
   },
   "truth_stage": {
+    "classification": "HISTORICAL_T09_CLOSEOUT_BEFORE_UPSTREAM_RELAUNCH_FOLLOWUP",
     "source": "implemented and locally tested, including typed check diagnostics",
-    "public_feed": "LIVE_VERIFIED_EXACT_2.0.13_NOT_2.0.15",
+    "public_feed": "HISTORICAL_2026_08_28_READ_NOT_REFRESHED_BY_THIS_SOURCE_FOLLOWUP",
     "t02_updater_installed_seam": "consumed without editing",
     "real_predecessor_update": "OPEN_T18_CANDIDATE4_GATEKEEPER_REJECTED",
     "failed_health_rollback": "OPEN_T18_NEW_TRUSTED_CANDIDATE_REQUIRED",

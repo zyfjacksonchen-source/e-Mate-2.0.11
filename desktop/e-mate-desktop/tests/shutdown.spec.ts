@@ -44,6 +44,23 @@ describe('application shutdown requests', () => {
     expect(native.exit).toHaveBeenCalledWith(1)
   })
 
+  it('passes an explicit argument list to a successful relaunch', () => {
+    const native = {
+      prepareToQuit: vi.fn(),
+      relaunch: vi.fn(),
+      exit: vi.fn(),
+    }
+    const coordinator = createDesktopExitCoordinator(native, () => {})
+
+    coordinator.requestRelaunch(['desktop-main.cjs', '--user-data-dir=/private/tmp/e-mate-user-data'])
+    coordinator.finish(0)
+
+    expect(native.relaunch).toHaveBeenCalledWith([
+      'desktop-main.cjs',
+      '--user-data-dir=/private/tmp/e-mate-user-data',
+    ])
+  })
+
   it('exits after graceful disposal and ignores later completions', async () => {
     const dispose = vi.fn(async () => {})
     const exit = vi.fn()
