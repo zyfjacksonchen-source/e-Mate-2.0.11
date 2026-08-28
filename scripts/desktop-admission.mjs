@@ -16,12 +16,15 @@ import {
   loadProfileBaseContract,
   parseProfileReleaseEnvelope,
 } from '../desktop/e-mate-desktop/src/profile-release.ts'
+import { verifyDesktopCiArtifact } from './stage-desktop-ci-artifact.mjs'
 
 const REPOSITORY = 'zyfjacksonchen-source/e-Mate-2.0.11'
 const TARGETS = ['darwin-arm64', 'darwin-x64', 'win32-x64']
 const SHA40 = /^[0-9a-f]{40}$/u
 const SHA256 = /^[0-9a-f]{64}$/u
 const RUN_ID = /^[1-9][0-9]*$/u
+const TEAM_ID = /^[A-Z0-9]{10}$/u
+const NOTARY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
 const PROFILE_TREE_CONTEXT = Buffer.from('e-mate-staged-profile-tree-v1\0', 'utf8')
 const PROFILE_PUBLICATION_CONTEXT = Buffer.from('e-mate-profile-publication-tree-v1\0', 'utf8')
 const PROFILE_COMPONENT_CONTEXT = Buffer.from('e-mate-profile-component-aggregate-v1\0', 'utf8')
@@ -721,6 +724,7 @@ function successfulJob(value, name, label) {
 function githubArtifact(value, expected) {
   if (!record(value) || String(value.id) !== expected.id || value.name !== expected.name
     || value.expired !== false || typeof value.digest !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(value.digest)
+    || !Number.isSafeInteger(value.size_in_bytes) || value.size_in_bytes <= 0
     || String(value.workflow_run?.id) !== expected.runId || value.workflow_run?.head_sha !== expected.sourceCommit) {
     throw new Error(`GitHub ${expected.label} artifact provenance is invalid`)
   }
@@ -731,17 +735,146 @@ async function metadata(directory, name) {
   return (await boundedJson(join(resolve(directory), name), 4 * 1024 * 1024)).value
 }
 
+function measuredFile(value, actual, expectedName) {
+  return exactKeys(value, ['name', 'bytes', 'sha256']) && value.name === expectedName
+    && value.bytes === actual?.bytes && value.sha256 === actual?.sha256 && SHA256.test(value.sha256 ?? '')
+}
+
+/** Close the accepted CI input, isolated signer run, and exact four-file signed macOS handoff. */
+export async function verifySignedMacHandoff(options) {
+  if (!SHA40.test(options.sourceCommit) || !RUN_ID.test(options.ciRunId)
+    || !RUN_ID.test(options.signerRunId) || !RUN_ID.test(options.signerArtifactId)
+    || typeof options.releaseVersion !== 'string' || !/^\d+\.\d+\.\d+$/u.test(options.releaseVersion)) {
+    throw new Error('signed macOS handoff identifiers are invalid')
+  }
+  const base = loadProfileBaseContract(resolve(options.baseContract))
+  await verifyDesktopCiArtifact({
+    platform: 'darwin', sourceCommit: options.sourceCommit, ciRunId: options.ciRunId,
+    baseContract: base, directory: options.unsignedBundle,
+  })
+  const dmgName = `e-Mate-${options.releaseVersion}-mac-universal.dmg`
+  const blockmapName = `${dmgName}.blockmap`
+  const receiptName = 'desktop-macos-signed-receipt.json'
+  const verificationName = 'desktop-macos-signed-verification.json'
+  const signedEntries = (await treeEntries(options.signedBundle)).entries
+  if (canonicalProfileJson(signedEntries.map(entry => entry.path)) !== canonicalProfileJson([
+    dmgName, blockmapName, receiptName, verificationName,
+  ].sort())) throw new Error('signed macOS handoff file set is invalid')
+  const signedFiles = new Map(signedEntries.map(entry => [entry.path, entry]))
+  const inputDmg = await hashFile(join(resolve(options.unsignedBundle), dmgName))
+  const inputCiReceipt = await hashFile(join(resolve(options.unsignedBundle), 'desktop-artifact-receipt.json'))
+  const inputRuntimeReceipt = await hashFile(join(resolve(options.unsignedBundle), 'desktop-runtime-verification.json'))
+  const receipt = (await boundedJson(join(resolve(options.signedBundle), receiptName), 1024 * 1024)).value
+  const verification = (await boundedJson(join(resolve(options.signedBundle), verificationName), 1024 * 1024)).value
+  if (!exactKeys(receipt, [
+    'schema_version', 'document_type', 'source_commit', 'ci_run_id', 'base_contract_id',
+    'harness_commit', 'input', 'output', 'developer_id', 'notarization',
+  ]) || receipt.schema_version !== 1 || receipt.document_type !== 'emate.desktop-macos-signed-release'
+    || receipt.source_commit !== options.sourceCommit || receipt.ci_run_id !== options.ciRunId
+    || receipt.base_contract_id !== base.id || receipt.harness_commit !== base.harness_commit
+    || !exactKeys(receipt.input, [
+      'artifact_id', 'artifact_name', 'artifact_api_digest', 'artifact_archive_bytes',
+      'desktop_artifact_receipt', 'runtime_verification_receipt', 'dmg', 'signing',
+    ]) || receipt.input.artifact_name !== `e-mate-desktop-macos-${options.sourceCommit}`
+    || !RUN_ID.test(receipt.input.artifact_id ?? '')
+    || !/^sha256:[0-9a-f]{64}$/u.test(receipt.input.artifact_api_digest ?? '')
+    || !Number.isSafeInteger(receipt.input.artifact_archive_bytes) || receipt.input.artifact_archive_bytes <= 0
+    || !measuredFile(receipt.input.desktop_artifact_receipt,
+      { name: 'desktop-artifact-receipt.json', ...inputCiReceipt }, 'desktop-artifact-receipt.json')
+    || !measuredFile(receipt.input.runtime_verification_receipt,
+      { name: 'desktop-runtime-verification.json', ...inputRuntimeReceipt }, 'desktop-runtime-verification.json')
+    || !measuredFile(receipt.input.dmg, { name: dmgName, ...inputDmg }, dmgName)
+    || receipt.input.signing !== 'adhoc') {
+    throw new Error('signed macOS receipt identity is invalid')
+  }
+  const outputDmg = signedFiles.get(dmgName)
+  const outputBlockmap = signedFiles.get(blockmapName)
+  if (!exactKeys(receipt.output, ['dmg', 'blockmap', 'signing', 'notarized'])
+    || !measuredFile(receipt.output.dmg, { name: dmgName, ...outputDmg }, dmgName)
+    || !measuredFile(receipt.output.blockmap, { name: blockmapName, ...outputBlockmap }, blockmapName)
+    || receipt.output.signing !== 'developer-id' || receipt.output.notarized !== true
+    || receipt.output.dmg.sha256 === receipt.input.dmg.sha256) {
+    throw new Error('signed macOS output identity is invalid')
+  }
+  const identityMatch = typeof receipt.developer_id?.identity === 'string'
+    ? /^Developer ID Application: .+ \(([A-Z0-9]{10})\)$/u.exec(receipt.developer_id.identity)
+    : null
+  if (!exactKeys(receipt.developer_id, ['identity', 'team_id', 'credential_source'])
+    || identityMatch === null || !TEAM_ID.test(receipt.developer_id.team_id ?? '')
+    || identityMatch[1] !== receipt.developer_id.team_id
+    || !['keychain', 'p12'].includes(receipt.developer_id.credential_source)
+    || !exactKeys(receipt.notarization, ['credential_source', 'submission_id', 'status'])
+    || !['api-key', 'apple-id', 'keychain-profile'].includes(receipt.notarization.credential_source)
+    || !NOTARY_ID.test(receipt.notarization.submission_id ?? '') || receipt.notarization.status !== 'Accepted') {
+    throw new Error('signed macOS Developer ID or notarization evidence is invalid')
+  }
+  const expectedChecks = {
+    codesign_app: 'passed', codesign_dmg: 'passed', gatekeeper_app: 'accepted',
+    gatekeeper_dmg: 'accepted', stapler_dmg: 'valid', verify_mac_release: 'passed',
+  }
+  if (!exactKeys(verification, [
+    'schema_version', 'document_type', 'source_commit', 'ci_run_id',
+    'input_dmg_sha256', 'output_dmg_sha256', 'checks',
+  ]) || verification.schema_version !== 1
+    || verification.document_type !== 'emate.desktop-macos-signed-verification'
+    || verification.source_commit !== options.sourceCommit || verification.ci_run_id !== options.ciRunId
+    || verification.input_dmg_sha256 !== receipt.input.dmg.sha256
+    || verification.output_dmg_sha256 !== receipt.output.dmg.sha256
+    || canonicalProfileJson(verification.checks) !== canonicalProfileJson(expectedChecks)) {
+    throw new Error('signed macOS verification is invalid')
+  }
+  const signerRun = githubRun(await metadata(options.metadata, 'signer-run.json'), {
+    id: options.signerRunId, path: '.github/workflows/desktop-macos-signing.yml', event: 'workflow_dispatch',
+    sourceCommit: options.sourceCommit, label: 'Signer',
+  })
+  successfulJob(await metadata(options.metadata, 'signer-jobs.json'),
+    'Sign and notarize exact accepted macOS bytes', 'Signer')
+  const signedArtifact = githubArtifact(await metadata(options.metadata, 'signed-macos-artifact.json'), {
+    id: options.signerArtifactId, name: `e-mate-desktop-macos-signed-${options.sourceCommit}`,
+    runId: options.signerRunId, sourceCommit: options.sourceCommit, label: 'signed macOS',
+  })
+  const inputArtifact = githubArtifact(await metadata(options.metadata, 'macos-ci-artifact.json'), {
+    id: receipt.input.artifact_id, name: receipt.input.artifact_name,
+    runId: options.ciRunId, sourceCommit: options.sourceCommit, label: 'unsigned macOS input',
+  })
+  if (String(signedArtifact.id) === String(inputArtifact.id)
+    || inputArtifact.digest !== receipt.input.artifact_api_digest
+    || inputArtifact.size_in_bytes !== receipt.input.artifact_archive_bytes) {
+    throw new Error('signed macOS input artifact identity drifted')
+  }
+  return {
+    signerRun,
+    input: { artifact_id: String(inputArtifact.id), digest: inputArtifact.digest, dmg: receipt.input.dmg },
+    output: {
+      artifact_id: String(signedArtifact.id), digest: signedArtifact.digest,
+      dmg: receipt.output.dmg, blockmap: receipt.output.blockmap,
+    },
+  }
+}
+
 /** Validate downloaded GitHub metadata and emit the updater's release provenance. */
 export async function createGithubArtifactProvenance(options) {
   if (!SHA40.test(options.sourceCommit) || !RUN_ID.test(options.ciRunId)
-    || !RUN_ID.test(options.desktopRunId) || !RUN_ID.test(options.profileRunId)
-    || !RUN_ID.test(options.desktopArtifactId) || !RUN_ID.test(options.profileArtifactId)) {
+    || !RUN_ID.test(options.signerRunId) || !RUN_ID.test(options.desktopRunId) || !RUN_ID.test(options.profileRunId)
+    || !RUN_ID.test(options.signerArtifactId) || !RUN_ID.test(options.desktopArtifactId)
+    || !RUN_ID.test(options.profileArtifactId)) {
     throw new Error('GitHub admission identifiers are invalid')
   }
   const { artifacts: candidateArtifact } = await verifyDesktopCandidateBundle(options.candidate, options.sourceCommit)
-  if (candidateArtifact.darwin.build_run_id !== options.ciRunId
+  if (candidateArtifact.darwin.build_run_id !== options.signerRunId
     || candidateArtifact.win32.build_run_id !== options.ciRunId) {
-    throw new Error('Desktop candidate installers are not owned by the selected CI run')
+    throw new Error('Desktop candidate installers are not owned by the selected signer and CI runs')
+  }
+  const signedMac = await verifySignedMacHandoff({
+    sourceCommit: options.sourceCommit, ciRunId: options.ciRunId,
+    signerRunId: options.signerRunId, signerArtifactId: options.signerArtifactId,
+    releaseVersion: options.releaseVersion, signedBundle: options.signedMacos,
+    unsignedBundle: options.unsignedMacos, metadata: options.metadata,
+    baseContract: options.baseContract,
+  })
+  if (candidateArtifact.darwin.bytes !== signedMac.output.dmg.bytes
+    || candidateArtifact.darwin.sha256 !== signedMac.output.dmg.sha256) {
+    throw new Error('Desktop candidate macOS bytes differ from the signed handoff')
   }
   const ciRun = githubRun(await metadata(options.metadata, 'ci-run.json'), {
     id: options.ciRunId, path: '.github/workflows/ci.yml', event: 'workflow_dispatch',
@@ -761,7 +894,8 @@ export async function createGithubArtifactProvenance(options) {
   successfulJob(ciJobs, 'Windows x64 / unsigned desktop installer', 'CI')
   successfulJob(ciJobs, 'macOS universal / unsigned desktop disk image', 'CI')
   for (const target of TARGETS) successfulJob(ciJobs, `Complete Profile generation / ${target}`, 'CI')
-  successfulJob(await metadata(options.metadata, 'desktop-jobs.json'), 'Bind exact protected-main CI artifacts to the release manifest', 'Desktop')
+  successfulJob(await metadata(options.metadata, 'desktop-jobs.json'),
+    'Bind exact signed macOS and protected-main CI Windows bytes', 'Desktop')
   const profileJobs = await metadata(options.metadata, 'profile-jobs.json')
   successfulJob(profileJobs, 'Validate accepted CI evidence', 'Profile')
   successfulJob(profileJobs, 'Prepare signed native Cloudflare publication bundle', 'Profile')
@@ -826,9 +960,10 @@ async function main() {
   const command = process.argv[2]
   const { values } = parseArgs({ args: process.argv.slice(3), options: Object.fromEntries([
     'base-contract', 'candidate', 'ci-run-id', 'commit', 'desktop-artifact-id', 'desktop-run-id', 'inventory',
-    'metadata', 'out', 'performance-bundle', 'profile',
+    'metadata', 'out', 'performance-bundle', 'profile', 'release-version', 'signed-macos',
+    'signer-artifact-id', 'signer-run-id', 'unsigned-macos',
     'profile-aggregate', 'profile-artifact-id', 'profile-receipt', 'profile-release-bundle', 'profile-run-id',
-    'release-version', 'verifier-source', 'performance-authorities-out',
+    'verifier-source', 'performance-authorities-out',
   ].map(name => [name, { type: 'string' }])) })
   if (command === 'profile-build-receipt') {
     await createProfileBuildReceipt({
@@ -856,11 +991,23 @@ async function main() {
     await createGithubArtifactProvenance({
       sourceCommit: option(values, 'commit'), candidate: option(values, 'candidate'), metadata: option(values, 'metadata'),
       ciRunId: option(values, 'ci-run-id'), desktopRunId: option(values, 'desktop-run-id'),
+      signerRunId: option(values, 'signer-run-id'), signerArtifactId: option(values, 'signer-artifact-id'),
+      signedMacos: option(values, 'signed-macos'), unsignedMacos: option(values, 'unsigned-macos'),
+      releaseVersion: option(values, 'release-version'), baseContract: option(values, 'base-contract'),
       profileRunId: option(values, 'profile-run-id'), desktopArtifactId: option(values, 'desktop-artifact-id'),
       profileArtifactId: option(values, 'profile-artifact-id'), output: option(values, 'out'),
     })
+  } else if (command === 'signed-macos') {
+    const result = await verifySignedMacHandoff({
+      sourceCommit: option(values, 'commit'), ciRunId: option(values, 'ci-run-id'),
+      signerRunId: option(values, 'signer-run-id'), signerArtifactId: option(values, 'signer-artifact-id'),
+      signedBundle: option(values, 'signed-macos'), unsignedBundle: option(values, 'unsigned-macos'),
+      releaseVersion: option(values, 'release-version'), baseContract: option(values, 'base-contract'),
+      metadata: option(values, 'metadata'),
+    })
+    process.stdout.write(`${JSON.stringify(result)}\n`)
   } else {
-    throw new Error('desktop admission command must be profile-build-receipt, profile-aggregate, performance-summary, or github-provenance')
+    throw new Error('desktop admission command must be profile-build-receipt, profile-aggregate, performance-summary, signed-macos, or github-provenance')
   }
 }
 

@@ -11,6 +11,14 @@ on:
         description: Exact protected-main source SHA accepted by that CI run.
         required: true
         type: string
+      signer_run_id:
+        description: Successful attempt-1 macOS signing run for the exact source.
+        required: true
+        type: string
+      signed_macos_artifact_id:
+        description: Exact e-mate-desktop-macos-signed-<source SHA> artifact ID.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -25,7 +33,7 @@ env:
 
 jobs:
   manifest:
-    name: Bind exact protected-main CI artifacts to the release manifest
+    name: Bind exact signed macOS and protected-main CI Windows bytes
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -50,6 +58,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CI_RUN_ID: ${{ inputs.ci_run_id }}
           SOURCE_SHA: ${{ inputs.source_sha }}
+          SIGNER_RUN_ID: ${{ inputs.signer_run_id }}
+          SIGNED_MACOS_ARTIFACT_ID: ${{ inputs.signed_macos_artifact_id }}
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = zyfjacksonchen-source/e-Mate-2.0.11
@@ -59,6 +69,8 @@ jobs:
           test "$GITHUB_RUN_ATTEMPT" = 1
           test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/desktop-release.yml@refs/heads/main"
           [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SIGNER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SIGNED_MACOS_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$GITHUB_SHA" = "$SOURCE_SHA"
@@ -67,10 +79,17 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > .release-inputs/evidence/run.json
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/jobs?per_page=100" > .release-inputs/evidence/jobs.json
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100" > .release-inputs/evidence/artifacts.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SIGNER_RUN_ID" > .release-inputs/evidence/signer-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SIGNER_RUN_ID/jobs?per_page=100" > .release-inputs/evidence/signer-jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$SIGNED_MACOS_ARTIFACT_ID" > .release-inputs/evidence/signed-macos-artifact.json
           plan_artifact_id="$(jq -er --arg name "e-mate-ci-plan-$SOURCE_SHA" \
             '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one CI plan artifact") end' \
             .release-inputs/evidence/artifacts.json)"
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$plan_artifact_id/zip" > .release-inputs/evidence/ci-plan.zip
+          macos_artifact_id="$(jq -er --arg name "e-mate-desktop-macos-$SOURCE_SHA" \
+            '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one CI macOS artifact") end' \
+            .release-inputs/evidence/artifacts.json)"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$macos_artifact_id" > .release-inputs/evidence/macos-ci-artifact.json
           echo "plan_artifact_id=$plan_artifact_id" >> "$GITHUB_OUTPUT"
 
       - name: Download the unique CI plan
@@ -133,6 +152,15 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.ci_run_id }}
 
+      - name: Download the exact signed and notarized macOS handoff
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.signed_macos_artifact_id }}
+          merge-multiple: true
+          path: .release-inputs/macos-signed
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.signer_run_id }}
+
       - name: Verify Base SDK, shared Desktop, Profile, and platform receipts
         env:
           CI_RUN_ID: ${{ inputs.ci_run_id }}
@@ -151,9 +179,19 @@ jobs:
           node scripts/stage-desktop-ci-artifact.mjs verify \
             --platform win32 --source-commit "$SOURCE_SHA" --ci-run-id "$CI_RUN_ID" \
             --base-contract desktop/e-mate-desktop/base-contract.json --directory .release-inputs/windows
-          node scripts/stage-desktop-ci-artifact.mjs verify \
-            --platform darwin --source-commit "$SOURCE_SHA" --ci-run-id "$CI_RUN_ID" \
-            --base-contract desktop/e-mate-desktop/base-contract.json --directory .release-inputs/macos
+
+      - name: Accept only the isolated signed macOS handoff
+        run: >-
+          node scripts/desktop-admission.mjs signed-macos
+          --commit "${{ inputs.source_sha }}"
+          --ci-run-id "${{ inputs.ci_run_id }}"
+          --signer-run-id "${{ inputs.signer_run_id }}"
+          --signer-artifact-id "${{ inputs.signed_macos_artifact_id }}"
+          --release-version "$(node -p "require(process.argv[1]).version" ./desktop/e-mate-desktop/package.json)"
+          --base-contract desktop/e-mate-desktop/base-contract.json
+          --metadata .release-inputs/evidence
+          --unsigned-macos .release-inputs/macos
+          --signed-macos .release-inputs/macos-signed
 
       - name: Stage only the exact CI-produced installer bytes
         id: version
@@ -161,13 +199,14 @@ jobs:
           set -euo pipefail
           version="$(node -p "require(process.argv[1]).version" ./desktop/e-mate-desktop/package.json)"
           mkdir -p dist/desktop
-          cp ".release-inputs/macos/e-Mate-$version-mac-universal.dmg" dist/desktop/
+          cp ".release-inputs/macos-signed/e-Mate-$version-mac-universal.dmg" dist/desktop/
           cp ".release-inputs/windows/e-Mate-$version-win-x64-Setup.exe" dist/desktop/
           echo "value=$version" >> "$GITHUB_OUTPUT"
 
       - name: Generate admission-pending Desktop artifact candidate
         env:
           CI_RUN_ID: ${{ inputs.ci_run_id }}
+          SIGNER_RUN_ID: ${{ inputs.signer_run_id }}
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: >-
           node desktop/e-mate-desktop/scripts/desktop-release-manifest.ts
@@ -177,7 +216,7 @@ jobs:
           --commit "$SOURCE_SHA"
           --mac-commit "$SOURCE_SHA"
           --win-commit "$SOURCE_SHA"
-          --mac-run "$CI_RUN_ID"
+          --mac-run "$SIGNER_RUN_ID"
           --win-run "$CI_RUN_ID"
           --out dist/desktop/desktop-candidate.json
 

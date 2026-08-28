@@ -467,12 +467,15 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.equal(desktopRelease.jobs.r2, undefined)
   assert.equal(desktopRelease.on.workflow_dispatch.inputs.publish, undefined)
   assert.equal(desktopRelease.on.workflow_dispatch.inputs.release_run_id, undefined)
-  assert.deepEqual(Object.keys(desktopRelease.on.workflow_dispatch.inputs), ['ci_run_id', 'source_sha'])
+  assert.deepEqual(Object.keys(desktopRelease.on.workflow_dispatch.inputs), [
+    'ci_run_id', 'source_sha', 'signer_run_id', 'signed_macos_artifact_id',
+  ])
   assert.deepEqual(Object.keys(desktopRelease.jobs), ['manifest'])
   assert.match(desktopReleaseSource, /GITHUB_REF_PROTECTED:-/u)
   assert.match(desktopReleaseSource, /release-candidate\.mjs verify/u)
   assert.match(desktopReleaseSource, /e-mate-desktop-windows-\$\{\{ inputs\.source_sha \}\}/u)
   assert.match(desktopReleaseSource, /e-mate-desktop-macos-\$\{\{ inputs\.source_sha \}\}/u)
+  assert.match(desktopReleaseSource, /signed_macos_artifact_id/u)
   assert.match(desktopReleaseSource, /base-sdk\.mjs verify/u)
   assert.match(desktopReleaseSource, /stage-desktop-ci-artifact\.mjs verify/u)
   assert.match(desktopReleaseSource, /working-directory: desktop(?:.|\n)*?yarn install --immutable/u)
@@ -481,11 +484,14 @@ test('GitHub release packs once and validates the same tarball on three platform
   assert.equal(upload.with['compression-level'], 0)
   assert.equal(upload.with['retention-days'], 30)
   for (const download of desktopRelease.jobs.manifest.steps.filter(step => step.uses === 'actions/download-artifact@v4')) {
-    assert.equal(download.with['run-id'], '${{ inputs.ci_run_id }}')
+    assert.equal(download.with['run-id'], download.name === 'Download the exact signed and notarized macOS handoff'
+      ? '${{ inputs.signer_run_id }}'
+      : '${{ inputs.ci_run_id }}')
   }
   const candidateStep = desktopRelease.jobs.manifest.steps.find(step => step.name === 'Generate admission-pending Desktop artifact candidate')
   assert.match(candidateStep.run, /desktop-release-manifest\.ts candidate/u)
   assert.match(candidateStep.run, /--mac-commit/u)
+  assert.match(candidateStep.run, /--mac-run "\$SIGNER_RUN_ID"/u)
   assert.match(candidateStep.run, /--win-run/u)
   assert.match(candidateStep.run, /--out dist\/desktop\/desktop-candidate\.json/u)
   assert.doesNotMatch(candidateStep.run, /latest\.json/u)
