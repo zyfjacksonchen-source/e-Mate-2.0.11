@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "document_type": "emate.2.0.15.ticket-evidence",
+  "ticket": "T20",
+  "title": "Rosetta credentials helper stdin EPIPE containment",
+  "status": "SOURCE_FIXED_REPACKAGE_AND_INSTALLED_OPEN",
+  "captured_at": "2026-08-28T23:17:25Z",
+  "baseline": {
+    "worktree": "/Users/mac/e-mate/worktrees/emate-2.0.15-T20-credentials-epipe",
+    "branch": "fix/2.0.15-T20-credentials-epipe",
+    "start_commit": "11143702aa62b62e3c53f215c68f5008b72496ed",
+    "origin_main_at_start": "11143702aa62b62e3c53f215c68f5008b72496ed",
+    "clean_start": true,
+    "base_contract_id": "e-mate-desktop-profile-v8-dsh-4787caf39134",
+    "harness_commit": "4787caf39134df190105b272da0dd2ba893d4d75"
+  },
+  "owner": {
+    "source_owner": "packages/dsh/src/profile/credentials-os.ts runCommand",
+    "allowed_paths": [
+      "packages/dsh/src/profile/credentials-os.ts",
+      "packages/dsh/test/e-mate.test.mjs",
+      "docs/2.0.15/evidence/T20.json"
+    ],
+    "changed_paths": [
+      "packages/dsh/src/profile/credentials-os.ts",
+      "packages/dsh/test/e-mate.test.mjs",
+      "docs/2.0.15/evidence/T20.json"
+    ],
+    "new_runner_or_dependency": false,
+    "desktop_updater_or_relaunch_changed": false
+  },
+  "installed_red": {
+    "authority": "T00 installed Rosetta receipt supplied to T20",
+    "environment": {
+      "os": "macOS 26.6",
+      "host_arch": "arm64",
+      "rosetta_installed": true,
+      "application_arch": "X86-64 (translated)",
+      "application_version": "2.0.15 Universal"
+    },
+    "screenshot": {
+      "path": "/private/tmp/emate-t18-rosetta-update.pJYXyI/x86_64-main-process-epipe.png",
+      "bytes": 43588,
+      "sha256": "dde83efb1161c148b22842187a73f92f11b7308c1dd75236172705b663b7eb5e",
+      "width": 520,
+      "height": 359
+    },
+    "visible_error": "Uncaught Exception: Error: write EPIPE",
+    "generated_stack": "profiles/e-mate/plugins/credentials-os.js:155:15 at child.stdin.end(input)",
+    "post_dialog_observation": "After dismissal, the application continued, completed the Profile update and automatically restarted.",
+    "separation": "The EPIPE is an independent credentials helper startup defect. It does not change or reopen T09 updater/relaunch ownership."
+  },
+  "source_root_cause": {
+    "source": "packages/dsh/src/profile/credentials-os.ts",
+    "runner": "runCommand",
+    "before": "Every invocation spawned stdin as a pipe, installed no child.stdin error listener, and immediately called child.stdin.end(input).",
+    "failure": "When a translated helper exited before buffered stdin completed, Node emitted EPIPE on child.stdin without a listener, escaping the runner Promise as an uncaught exception.",
+    "shared_boundary_repair": "Empty input now uses ignored stdin. Non-empty input alone uses a pipe whose one-shot error listener enters the existing settled fail path before end(input)."
+  },
+  "caller_audit": {
+    "empty_input": [
+      "macOS security find-generic-password",
+      "macOS security delete-generic-password",
+      "macOS security default-keychain backend probe"
+    ],
+    "nonempty_input": [
+      "macOS expect helper receives base64 credential bytes plus a newline for Keychain writes",
+      "Windows DPAPI protect and unprotect receive JSON on stdin",
+      "Windows DPAPI probe receives non-secret JSON on stdin"
+    ],
+    "secret_semantics": "Credential bytes remain stdin-only and are not written to plaintext files, arguments, evidence, logs or manifests."
+  },
+  "red": {
+    "method": "Node 24 direct source import with transform-types and a local .js-to-.ts resolver; one deterministic helper closes fd 0 while a 1 MiB input is buffered.",
+    "attempts": 1,
+    "exit": 1,
+    "result": "FAIL_EXPECTED: Unhandled 'error' event; Error: write EPIPE; code EPIPE; Node.js v24.19.0"
+  },
+  "implementation": {
+    "empty_input_stdio": "ignore",
+    "nonempty_input_stdio": "pipe",
+    "stdin_error_listener": "once",
+    "settled_guard_reused": true,
+    "spawn_error_preserved": true,
+    "nonzero_exit_preserved": true,
+    "stdout_limit_preserved": true,
+    "input_output_semantics_preserved": true
+  },
+  "verification": [
+    {
+      "name": "focused credentials runner regression",
+      "method": "Node 24 direct source import with transform-types and the local source resolver, executing the same assertions committed in packages/dsh/test/e-mate.test.mjs",
+      "exit": 0,
+      "result": "PASS: deterministic EPIPE before and during input, empty-input ignore, non-empty input/output, nonzero exit, spawn error and stdout boundary"
+    },
+    {
+      "name": "Rosetta source-only replay",
+      "exit": 1,
+      "result": "NOT_RUN_ENVIRONMENT: the available bundled Node executable is arm64-only and arch -x86_64 returned Bad CPU type; no installed application or shared Profile was started or modified"
+    },
+    {
+      "name": "packages/dsh direct build/typecheck",
+      "exit": null,
+      "result": "OPEN_ENVIRONMENT: not used as evidence because the target began without its locked local build closure and T00 prohibited dependency installation; no package, lock or tracked generated artifact changed"
+    }
+  ],
+  "truth_ceiling": {
+    "source_fixed": true,
+    "candidate_repackaged": false,
+    "installed_rosetta_retested": false,
+    "formal_2_0_15_claimed_fixed": false,
+    "remaining": [
+      "Repackage this source through the owning T18 candidate path.",
+      "Run the exact repackaged Universal bytes as X86-64 translated and prove startup without the native EPIPE dialog.",
+      "Keep all existing T18 installed, predecessor-update, rollback, Windows, authentication and public-release gaps unchanged until their own receipts exist."
+    ]
+  }
+}
