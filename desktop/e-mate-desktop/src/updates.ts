@@ -2,6 +2,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import { open } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import z from '@deepseek-ai/schemastery'
@@ -130,7 +131,7 @@ export function apply(ctx: Context, config: Config): void {
     let profileRequestController: AbortController | undefined
     let downloadController: AbortController | undefined
     let profileDownloadController: AbortController | undefined
-    let inFlight: Promise<UpdateCheckResult | null> | undefined
+    let inFlight: Promise<UpdateCheckResult> | undefined
     let profileInFlight: Promise<ProfileUpdateCheckResult | null> | undefined
     let manualTask: Promise<InteractiveUpdateResult> | undefined
     let downloadTask: Promise<InteractiveUpdateResult> | undefined
@@ -138,6 +139,8 @@ export function apply(ctx: Context, config: Config): void {
     let refreshTray = (): void => {}
     let updateState = presentationAdapter.readPublishedState?.()
     const updateStateListeners = new Set<(state: DesktopUpdateState) => void>()
+    const diagnosticPath = join(dirname(adapter.statePath), 'last-diagnostic.json')
+    let diagnosticMutationTail = Promise.resolve()
 
     const publishUpdateState = (next: DesktopUpdateState): void => {
       if (disposed) return
@@ -147,8 +150,17 @@ export function apply(ctx: Context, config: Config): void {
         try { listener(next) } catch {}
       }
     }
-    const publishFailure = (code: DesktopUpdateFailureCode): void => {
-      publishUpdateState({
+    const publishFailure = (
+      code: DesktopUpdateFailureCode,
+      details: { readonly httpStatus?: number, readonly retryable?: boolean } = {},
+    ): DesktopUpdateState => {
+      const failedFromStage = code.startsWith('check-')
+        ? 'checking'
+        : updateState?.stage === 'failed'
+          ? updateState.failedFromStage ?? 'checking'
+          : updateState?.stage ?? 'checking'
+      const retryable = details.retryable ?? code !== 'cancelled'
+      const failure: DesktopUpdateState = {
         stage: 'failed',
         ...(updateState?.updateKind === undefined ? {} : { updateKind: updateState.updateKind }),
         ...(updateState?.version === undefined ? {} : { version: updateState.version }),
@@ -159,7 +171,30 @@ export function apply(ctx: Context, config: Config): void {
           : { minimumSupportedVersion: updateState.minimumSupportedVersion }),
         code,
         diagnosticId: randomUUID(),
+        retryable,
+        failedFromStage,
+      }
+      publishUpdateState(failure)
+      const task = diagnosticMutationTail.then(async () => {
+        await writeFileAtomic(diagnosticPath, `${JSON.stringify({
+          schemaVersion: 1,
+          documentType: 'emate.desktop-update-diagnostic',
+          diagnosticId: failure.diagnosticId,
+          code,
+          currentVersion: adapter.currentVersion,
+          platform: adapter.platform ?? null,
+          retryable,
+          failedFromStage,
+          ...(failure.updateKind === undefined ? {} : { updateKind: failure.updateKind }),
+          ...(failure.version === undefined ? {} : { targetVersion: failure.version }),
+          ...(details.httpStatus === undefined ? {} : { httpStatus: details.httpStatus }),
+          recordedAt: new Date().toISOString(),
+        }, null, 2)}\n`, { mode: 0o600, dirMode: 0o700 })
       })
+      diagnosticMutationTail = task.catch(cause => {
+        ctx.logger.warn('@e-mate/desktop: could not persist update diagnostic', cause)
+      })
+      return failure
     }
     readUpdateState = () => updateState
     subscribeUpdateState = listener => {
@@ -228,7 +263,7 @@ export function apply(ctx: Context, config: Config): void {
       }
     })
 
-    const startCheck = (): Promise<UpdateCheckResult | null> => {
+    const startCheck = (): Promise<UpdateCheckResult> => {
       if (inFlight !== undefined) return inFlight
       checking = true
       const currentBase = updateState?.updateKind === 'base' ? updateState : undefined
@@ -247,10 +282,16 @@ export function apply(ctx: Context, config: Config): void {
       requestController = controller
 
       const task = (async () => {
-        requestTimer = setTimeout(() => { controller.abort() }, config.requestTimeoutMs)
+        let timedOut = false
+        requestTimer = setTimeout(() => {
+          timedOut = true
+          controller.abort()
+        }, config.requestTimeoutMs)
         try {
-          if (adapter.platform === undefined) return null
-          return await checkForStableUpdate({
+          if (adapter.platform === undefined) {
+            return { status: 'failed', code: 'check-config-invalid', retryable: false } as const
+          }
+          const result = await checkForStableUpdate({
             currentVersion: adapter.currentVersion,
             currentScheduleProtocolFloor: adapter.currentScheduleProtocolFloor,
             platform: adapter.platform,
@@ -258,8 +299,11 @@ export function apply(ctx: Context, config: Config): void {
             signal: controller.signal,
             request: adapter.request,
           })
+          return timedOut && result.status === 'failed' && result.code === 'check-cancelled'
+            ? { status: 'failed', code: 'check-timeout', retryable: true } as const
+            : result
         } catch {
-          return null
+          return { status: 'failed', code: 'check-network-failed', retryable: true } as const
         }
       })().finally(() => {
         if (requestTimer !== undefined) clearTimeout(requestTimer)
@@ -300,11 +344,17 @@ export function apply(ctx: Context, config: Config): void {
       return task
     }
 
-    const observeResult = (result: UpdateCheckResult | null): AvailableUpdate | undefined => {
+    const observeResult = (result: UpdateCheckResult): AvailableUpdate | undefined => {
       if (disposed) return undefined
-      if (result === null) {
+      if (result.status === 'failed') {
         availableUpdate = undefined
-        publishFailure('check-failed')
+        const code = result.code === 'check-cancelled' ? 'cancelled' : result.code
+        if (code !== 'cancelled' || updateState?.stage !== 'failed' || updateState.code !== 'cancelled') {
+          publishFailure(code, {
+            retryable: result.retryable,
+            ...(result.httpStatus === undefined ? {} : { httpStatus: result.httpStatus }),
+          })
+        }
         refreshTray()
         return undefined
       }
@@ -584,14 +634,14 @@ export function apply(ctx: Context, config: Config): void {
         if (update !== undefined) {
           return (await offerDownload(update, false)) ?? failed(update.latestVersion)
         }
-        await adapter.showManualCheckResult(checkedProfile === null && result?.status === 'up-to-date' ? null : result)
-        if (checkedProfile === null && result?.status === 'up-to-date') {
+        await adapter.showManualCheckResult(checkedProfile === null && result.status === 'up-to-date' ? null : result)
+        if (checkedProfile === null && result.status === 'up-to-date') {
           publishFailure('check-failed')
           return failed(result.latestVersion)
         }
-        return result?.status === 'up-to-date'
+        return result.status === 'up-to-date'
           ? { status: 'up-to-date', installedVersion: result.currentVersion, latestVersion: result.latestVersion }
-          : failed(result?.status === 'update-available' ? result.latestVersion : undefined)
+          : failed(result.status === 'update-available' ? result.latestVersion : undefined)
       })().catch(() => failed()).finally(() => {
         if (manualTask === task) manualTask = undefined
       })
@@ -621,7 +671,8 @@ export function apply(ctx: Context, config: Config): void {
           publishFailure('check-failed')
         }
       } catch {
-        // Scheduled checks never surface failures to the user or the application log.
+        // Scheduled checks stay silent in UI while retaining one local diagnostic receipt.
+        publishFailure('check-failed')
       }
     }
 
@@ -674,6 +725,7 @@ export function apply(ctx: Context, config: Config): void {
       if (inFlight !== undefined) pending.push(inFlight)
       if (profileInFlight !== undefined) pending.push(profileInFlight)
       pending.push(stateMutationTail)
+      pending.push(diagnosticMutationTail)
       await Promise.allSettled(pending)
     }
   }, '@e-mate/desktop: update polling, confirmation, and installer handoff')
