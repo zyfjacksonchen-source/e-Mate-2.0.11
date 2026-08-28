@@ -11,8 +11,12 @@ on:
         description: Exact e-mate-desktop-admission-<source SHA> artifact ID.
         required: true
         type: string
-      macos_artifact_id:
-        description: Exact compression-level-0 macOS staging artifact ID.
+      macos_signer_run_id:
+        description: Successful attempt-1 macOS signer run for this exact source commit.
+        required: true
+        type: string
+      macos_signed_artifact_id:
+        description: Exact signed and notarized macOS Desktop artifact ID.
         required: true
         type: string
       windows_artifact_id:
@@ -60,7 +64,7 @@ jobs:
 
       - name: Sign the exact admission and prepare the Cloudflare plugin handoff
         id: prepare
-        uses: zyfjacksonchen-source/e-mate-desktop-publication@cd7d223692b51e4e7a53db5759e1c2a9811febd0
+        uses: zyfjacksonchen-source/e-mate-desktop-publication@1f46dbe1d34ac558cb2e91b52b2ab30f7eab6c4c
         env:
           EMATE_GITHUB_PROVENANCE_TOKEN: ${{ github.token }}
           EMATE_DESKTOP_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.EMATE_PROFILE_SIGNING_PRIVATE_KEY }}
@@ -68,7 +72,8 @@ jobs:
           source-sha: ${{ github.sha }}
           main-ci-run-id: ${{ inputs.main_ci_run_id }}
           admission-artifact-id: ${{ inputs.admission_artifact_id }}
-          macos-artifact-id: ${{ inputs.macos_artifact_id }}
+          macos-signer-run-id: ${{ inputs.macos_signer_run_id }}
+          macos-signed-artifact-id: ${{ inputs.macos_signed_artifact_id }}
           windows-artifact-id: ${{ inputs.windows_artifact_id }}
           expected-signed-current: ${{ inputs.expected_signed_current }}
           expected-legacy-current: ${{ inputs.expected_legacy_current }}
