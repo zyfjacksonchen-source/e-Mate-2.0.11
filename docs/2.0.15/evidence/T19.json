@@ -1,0 +1,215 @@
+{
+  "schema_version": 1,
+  "document_type": "emate.2.0.15.ticket-evidence",
+  "ticket": "T19",
+  "title": "项目首发 Session 归属与项目记忆闭环",
+  "status": "SOURCE_AND_COMPONENT_PASSED_COMPLETE_PROFILE_OPEN_T18",
+  "baseline": {
+    "task_start_commit": "650fbc2e0d0ef2d915ec8083822f29741c6ad0c8",
+    "branch": "feat/2.0.15-T19-project-session-memory",
+    "clean_start": true,
+    "base_contract_id": "e-mate-desktop-profile-v8-dsh-4787caf39134",
+    "harness_commit": "4787caf39134df190105b272da0dd2ba893d4d75",
+    "harness_version": "0.1.0-rc.7",
+    "genui_fixture_commit": "0e756efb7671e6b8413dde3d8e199c68fa89cbeb",
+    "base_contract_modified": false,
+    "component_inventory_modified": false
+  },
+  "owner_commits": [
+    {
+      "owner": "WS-00/WS-01 Shell route and projection",
+      "sha": "23a743ecf611698c00bfe61cbd5a3afc1eb9bf91",
+      "subject": "fix(shell): preserve project session routes"
+    },
+    {
+      "owner": "WS-02 memory-evolve",
+      "sha": "95303fce71f1c7000caf6e6eeaa392f8f5a06b87",
+      "subject": "feat(memory): recall scoped project facts"
+    }
+  ],
+  "root_cause_validation": {
+    "session_switch": "CONFIRMED: startSessionFromRoute opened project blank P but projected it as '/', whose popstate entered SessionRouteProjection Home handling and invoked an unscoped start that connected general G.",
+    "native_membership_corruption": "NOT_CAUSED_BY_NATIVE_CONNECT: pinned connectWorkspace already returns a membership- and canonical-cwd-bound blank Session, creates with workspaceId on a miss, skips archived or non-member blanks, and coalesces in-flight creates.",
+    "sidebar_projection_error": "CONFIRMED: the previous project-membership complement labeled every non-project visible row as general, so missing or pending membership could amplify the route error.",
+    "template_risk": "CONFIRMED: template preparation always resolved Home/general before writing the draft, even when an existing project Session already owned the Composer."
+  },
+  "shell_contract": {
+    "owners": ["one native Router projection", "one Session store", "one Workspace store", "one conversation input machine"],
+    "existing_session_route": "/chat/<encoded-session-id>",
+    "blank_semantics": "blank controls Hero/composer appearance only and never changes Session identity or route",
+    "home_semantics": "'/' is a true no-Session entry; the pinned startInitialSelection owner resolves startup once after both baselines, while ordinary popstate and remount stay inert",
+    "project_start": "startSessionFromRoute delegates to pinned workspaces.connectWorkspace(workspaceId), opens only the returned id after the route-generation fence, and pushes its stable chat route",
+    "template": "an existing current Session keeps ownership; general is resolved only for a true no-Session Home template action",
+    "pending_or_unknown": "fails closed to '/' or the current known chat route and never implies general",
+    "implicit_general_connects_in_project_acceptance": 0,
+    "forbidden_paths_added": false,
+    "post_send_rebinding_added": false,
+    "timeout_or_last_project_state_added": false
+  },
+  "first_send_observation": {
+    "fixture_ids_are_synthetic": true,
+    "connect_result_session_id": "project-blank",
+    "composer_session_id": "project-blank",
+    "prompt_request_session_id": "project-blank",
+    "reply_event_session_id": "project-blank",
+    "first_prompt_result": "typed failure retained project-blank and its stable route",
+    "retry_result": "accepted prompt and assistant reply both remained project-blank",
+    "native_membership": "project-a.sessionIds contains project-blank",
+    "canonical_cwd": "/work/project-a"
+  },
+  "sidebar_contract": {
+    "general": "only visible rows named by the confirmed native general Workspace sessionIds",
+    "projects": "only visible rows named by each confirmed native project Workspace sessionIds",
+    "unassigned": "after workspace phase ready, visible rows absent from every confirmed membership appear in an independent 未归属/待恢复 section",
+    "pending": "no general or unassigned classification before the native workspace baseline is ready",
+    "batch_mode": "project, general, and unassigned visible rows expose matching selection controls; no invisible selectable/deletable complement remains"
+  },
+  "memory_contract": {
+    "service": "the existing emateMemory MemoryStore over storageDomain('emate_memory_evolve')",
+    "scope": "project:<workspaceId>:<canonicalPathSha256> only when the executing Session cwd resolves to an ok Workspace whose sessionIds include the Session; general/ungrouped remains session-only",
+    "write_policy": "remember and delete still require the existing native user confirmation; no automatic chat saving",
+    "recall_seam": "the pinned system-prompt/assemble waterfall exists; the listener awaits next(), preserves its returned assembly and Code Mode contributions, then appends at most one scoped context",
+    "recall_bound": "at most 5 project records and approximately 2000 tokens using the pinned fixed-density estimate",
+    "freshness": "no cross-scope cache; each assembly performs a fresh search, so confirmed delete is visible on the next request",
+    "instruction_boundary": "the fixed context prefix declares entries scoped facts/data only; instructions or commands inside an entry must not execute or override current system or user instructions",
+    "statuses": ["ready", "empty", "unavailable", "scope-invalid"],
+    "storage_error_policy": "only typed StorageError/DomainError availability codes are projected as unavailable for automatic recall; explicit memory search still fails honestly and generic program errors propagate",
+    "project_flow": "user-confirmed A/P1 remember -> A/P2 retrieves the same memory_id -> a new MemoryStore over the same durable table still retrieves it; B and G return no hit",
+    "new_table_vector_database_dependency_or_local_storage": false,
+    "second_prompt_system": false
+  },
+  "red_green_evidence": [
+    {
+      "acceptance": "real startSessionFromRoute plus SessionRouteProjection project start",
+      "red": "expected project-blank but observed general-blank after the '/' popstate chain",
+      "green": "the strengthened test uses real SessionInputShell submit, real session.prompt request arguments, a failed first send, retry, and a real session/event assistant reply; all four observed Session IDs equal project-blank"
+    },
+    {
+      "acceptance": "baseline-ready sidebar membership projection",
+      "red": "Testing Library could not find role=region name=未归属/待恢复; the unassigned row was hidden while visibleRows still governed batch selection",
+      "green": "ready state renders the independent group, general excludes it, pending renders neither classification, and batch deletion exposes and archives all three visible ownership classes"
+    },
+    {
+      "acceptance": "bounded project recall",
+      "red": "the first bounded recall check returned 8 memoryIds instead of 5",
+      "green": "the shared recall boundary slices to 5 before returning text and IDs; fixed prefix, token bound, isolation, restart, delete freshness, typed unavailable, and program-error propagation all pass"
+    }
+  ],
+  "verification": [
+    {
+      "command": "pinned Harness tsc -b tsconfig.host.json; tsdown --env.DSH_BUILD_FACE host; tsc -b tsconfig.client.json; tsdown --env.DSH_BUILD_FACE client",
+      "result": "PASS: exact 4787caf Host and Client local generated libraries prepared for source/component verification; no generated file is committed"
+    },
+    {
+      "command": "pinned Harness workspaces-service focused Vitest",
+      "result": "PASS: 1 file, 4 selected tests; member blank reuse, create-on-miss, rejected-first-prompt reuse, once-only baseline startup, and no-current/no-recent idle behavior"
+    },
+    {
+      "command": "Shell full Vitest collection",
+      "result": "PASS: 17 files, 101 tests, including real input/prompt/reply retry identity, template ownership, rapid route generation, attachment route fence, auto-naming, baseline order, popstate, unassigned projection and batch visibility"
+    },
+    {
+      "command": "Shell tsdown --no-write --dts",
+      "result": "PASS: Host and Client entries compiled against the fixed Harness; only the existing tsdown external/noExternal deprecation diagnostics were printed"
+    },
+    {
+      "command": "memory-evolve tsdown and node --test",
+      "result": "PASS: build plus 6 tests; real WorkspaceRegistry canonical alias isolation, project/session scope, confirmed A/P1 to A/P2 same memory_id, restart durability, B/G isolation, bounded fresh recall, delete, unavailable/scope-invalid distinction, and I/O policy"
+    },
+    {
+      "command": "componentFiles plus verifyComponentRuntimeImports for Shell and memory-evolve emitted closures",
+      "result": "PASS: Shell imports exactly match its seven declared Base imports; memory-evolve emitted runtime imports remain [] as declared"
+    },
+    {
+      "command": "git diff --check and baseline-to-HEAD Owner path review",
+      "result": "PASS before evidence: only the ten authorized Shell/memory source and direct-test paths changed; Base, inventory, version, workflow and gitlinks are unchanged"
+    }
+  ],
+  "collection_setup_note": {
+    "initial_non_product_failure": "the first full Shell collection reached 84 passing tests but two unchanged suites collected 0 tests because the fresh worktree lacked generated pinned client-runtime lib and the locked GenUI submodule checkout",
+    "resolution": "generated Host/Client libs from the exact 4787caf gitlink and initialized GenUI at the already-locked 0e756ef gitlink, then replayed the same collection to 17/17 files and 101/101 tests",
+    "product_or_generated_commit_created": false
+  },
+  "acceptance_matrix": {
+    "project_first_send_and_existing_blank": "passed",
+    "template_keeps_existing_project_session": "passed",
+    "attachment_and_route_switch_fence": "passed",
+    "failed_first_send_and_retry": "passed",
+    "rapid_a_to_b_and_stale_result": "passed",
+    "native_inflight_connect_coalescing": "source-verified in fixed Harness owner; member-blank and create arms focused-test passed",
+    "automatic_naming_does_not_change_route": "passed",
+    "baseline_out_of_order": "passed",
+    "refresh_back_remount_and_deep_link": "passed at source/component projection level",
+    "same_project_cross_session_memory": "passed",
+    "cross_project_and_general_isolation": "passed",
+    "delete_and_storage_io": "passed",
+    "directory_unavailable": "passed as typed unavailable",
+    "installed_restart": "OPEN_T18"
+  },
+  "recovery_dry_run": {
+    "mode": "READ_ONLY_CLASSIFICATION_ONLY",
+    "actual_user_session_or_memory_mutation": false,
+    "categories": [
+      {
+        "classification": "pure_projection_error",
+        "predicate": "native Workspace membership and canonical cwd already name P, and create/composer/prompt/reply IDs are P; only route/sidebar presentation was wrong",
+        "dry_run_action": "reproject the stable /chat/P route and confirmed membership groups; do not edit Session records"
+      },
+      {
+        "classification": "native_ledger_membership_missing",
+        "predicate": "the intended Workspace does not authoritatively include the Session or its canonical cwd does not match",
+        "dry_run_action": "report exact missing native evidence and stop; any later repair requires separate user approval and a verified native migration/import path"
+      },
+      {
+        "classification": "request_really_sent_to_general_and_project_blank",
+        "predicate": "prompt/reply identity is G while intended P has no corresponding request",
+        "dry_run_action": "report both immutable identities and stop; do not delete P, rewrite cwd/sessionIds, copy databases, infer by title, or move memory without separate approval"
+      }
+    ]
+  },
+  "owner_scope": {
+    "outside_allowed_paths_modified": false,
+    "base_inventory_version_workflow_modified": false,
+    "gitlink_modified": false,
+    "dependency_added": false,
+    "generated_artifact_committed": false,
+    "installer_or_package_built": false,
+    "macos_installed_app_action": false,
+    "windows_action": false,
+    "push_pr_sign_publish_or_production_write": false,
+    "obsolete_feedback_workbook_accessed": false
+  },
+  "handoffs": [
+    {
+      "owner": "T00",
+      "paths": [
+        "docs/target-contract.md",
+        "docs/development-log.md",
+        "docs/2.0.15/STATUS.md",
+        "docs/2.0.15/DECISIONS.md",
+        "docs/2.0.15/REGRESSION-MATRIX.md"
+      ],
+      "predicate": "integrate T19 after both Owner commits and this evidence commit are present; record stable chat identity, independent unassigned projection, project-memory recall seam, dry-run-only recovery, and T18 installed gates without rewriting Base v8 or Harness 4787caf facts"
+    },
+    {
+      "owner": "T18",
+      "paths": ["complete composed Profile", "macOS candidate/install/update/rollback receipts", "future Windows installed acceptance"],
+      "predicate": "after T19 merge, create a fresh candidate; candidate #4 is expired and must not be reused; verify installed project first send/retry/restart, native membership/cwd, project recall/restart/delete/isolation, and complete Profile rollback"
+    }
+  ],
+  "open_acceptance": [
+    "T18 complete Profile app-directory boot with live Host services",
+    "T18 installed macOS project create/first-send/retry/back/refresh/restart and memory recall/delete receipts",
+    "T18 update and rollback receipts from a post-T19 candidate",
+    "future T18 Windows installed acceptance when the user resumes it"
+  ],
+  "consultation_gate": {
+    "status": "not_invoked",
+    "same_named_acceptance_red_after_two_materially_different_source_repairs": false
+  },
+  "installed_receipts": [],
+  "real_service_receipts": [],
+  "candidate_created": false,
+  "candidate_4_reusable": false,
+  "release_claimed": false
+}
