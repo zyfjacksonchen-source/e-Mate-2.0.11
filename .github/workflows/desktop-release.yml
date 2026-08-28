@@ -193,7 +193,7 @@ jobs:
           --unsigned-macos .release-inputs/macos
           --signed-macos .release-inputs/macos-signed
 
-      - name: Stage only the exact CI-produced installer bytes
+      - name: Stage only the exact accepted installer bytes
         id: version
         run: |
           set -euo pipefail

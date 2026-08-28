@@ -7,6 +7,10 @@ on:
         description: Successful protected-main CI run for this exact source commit.
         required: true
         type: string
+      macos_signer_run_id:
+        description: Successful attempt-1 macOS signer run for this exact source commit.
+        required: true
+        type: string
       desktop_artifact_id:
         description: Exact three-file e-mate-desktop-release artifact measured by the performance rig.
         required: true
@@ -57,6 +61,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CI_RUN_ID: ${{ inputs.main_ci_run_id }}
+          MACOS_SIGNER_RUN_ID: ${{ inputs.macos_signer_run_id }}
           DESKTOP_ARTIFACT_ID: ${{ inputs.desktop_artifact_id }}
           PROFILE_RUN_ID: ${{ inputs.profile_release_run_id }}
           PROFILE_ARTIFACT_ID: ${{ inputs.profile_artifact_id }}
@@ -70,7 +75,7 @@ jobs:
           test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/desktop-performance.yml@refs/heads/main"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
-          for value in "$CI_RUN_ID" "$DESKTOP_ARTIFACT_ID" "$PROFILE_RUN_ID" "$PROFILE_ARTIFACT_ID"; do
+          for value in "$CI_RUN_ID" "$MACOS_SIGNER_RUN_ID" "$DESKTOP_ARTIFACT_ID" "$PROFILE_RUN_ID" "$PROFILE_ARTIFACT_ID"; do
             [[ "$value" =~ ^[1-9][0-9]*$ ]]
           done
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$GITHUB_SHA"
@@ -80,7 +85,7 @@ jobs:
           test "$(jq -er '.head_sha' <<<"$ci_json")" = "$GITHUB_SHA"
           test "$(jq -er '.head_branch' <<<"$ci_json")" = main
           test "$(jq -er '.path' <<<"$ci_json")" = .github/workflows/ci.yml
-          test "$(jq -er '.event' <<<"$ci_json")" = push
+          test "$(jq -er '.event' <<<"$ci_json")" = workflow_dispatch
           test "$(jq -er '.status' <<<"$ci_json")" = completed
           test "$(jq -er '.conclusion' <<<"$ci_json")" = success
           test "$(jq -er '.run_attempt' <<<"$ci_json")" = 1
@@ -105,7 +110,7 @@ jobs:
           test "$(jq -er '.conclusion' <<<"$desktop_json")" = success
           test "$(jq -er '.run_attempt' <<<"$desktop_json")" = 1
           desktop_jobs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$desktop_run_id/jobs?per_page=100")"
-          for name in 'Bind exact protected-main CI artifacts to the release manifest'; do
+          for name in 'Bind exact signed macOS and protected-main CI Windows bytes'; do
             jq -e --arg name "$name" \
               '[.jobs[] | select(.name == $name and .status == "completed" and .conclusion == "success")] | length == 1' \
               <<<"$desktop_jobs" >/dev/null
@@ -153,6 +158,7 @@ jobs:
         id: candidate
         env:
           CI_RUN_ID: ${{ inputs.main_ci_run_id }}
+          MACOS_SIGNER_RUN_ID: ${{ inputs.macos_signer_run_id }}
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
@@ -164,6 +170,7 @@ jobs:
           const root = resolve('.performance/desktop')
           const source = process.env.GITHUB_SHA
           const ciRunId = process.env.CI_RUN_ID
+          const macosSignerRunId = process.env.MACOS_SIGNER_RUN_ID
           const version = JSON.parse(await readFile('desktop/e-mate-desktop/package.json', 'utf8')).version
           const base = JSON.parse(await readFile('desktop/e-mate-desktop/base-contract.json', 'utf8'))
           const names = {
@@ -212,9 +219,9 @@ jobs:
               throw new Error(`Desktop candidate ${platform} bytes are invalid`)
             }
           }
-          if (candidate.artifacts.darwin.build_run_id !== ciRunId
+          if (candidate.artifacts.darwin.build_run_id !== macosSignerRunId
             || candidate.artifacts.win32.build_run_id !== ciRunId) {
-            throw new Error('Desktop candidate installers are not owned by the selected CI run')
+            throw new Error('Desktop candidate installers are not owned by the selected signer and CI runs')
           }
           await appendFile(process.env.GITHUB_OUTPUT, `profile_build_run_id=${candidate.artifacts.win32.build_run_id}\n`)
           NODE
@@ -232,7 +239,7 @@ jobs:
           test "$(jq -er '.head_sha' <<<"$run_json")" = "$GITHUB_SHA"
           test "$(jq -er '.head_branch' <<<"$run_json")" = main
           test "$(jq -er '.path' <<<"$run_json")" = .github/workflows/ci.yml
-          test "$(jq -er '.event' <<<"$run_json")" = push
+          test "$(jq -er '.event' <<<"$run_json")" = workflow_dispatch
           test "$(jq -er '.status' <<<"$run_json")" = completed
           test "$(jq -er '.conclusion' <<<"$run_json")" = success
           test "$(jq -er '.run_attempt' <<<"$run_json")" = 1
@@ -628,13 +635,14 @@ jobs:
 
       - name: Sign only the exact protected evidence and release artifacts
         id: admit
-        uses: zyfjacksonchen-source/e-mate-desktop-publication/performance@cd7d223692b51e4e7a53db5759e1c2a9811febd0
+        uses: zyfjacksonchen-source/e-mate-desktop-publication/performance@1f46dbe1d34ac558cb2e91b52b2ab30f7eab6c4c
         env:
           EMATE_GITHUB_PROVENANCE_TOKEN: ${{ github.token }}
           EMATE_DESKTOP_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.EMATE_PROFILE_SIGNING_PRIVATE_KEY }}
         with:
           source-sha: ${{ github.sha }}
           main-ci-run-id: ${{ inputs.main_ci_run_id }}
+          macos-signer-run-id: ${{ inputs.macos_signer_run_id }}
           desktop-artifact-id: ${{ inputs.desktop_artifact_id }}
           profile-release-run-id: ${{ inputs.profile_release_run_id }}
           profile-artifact-id: ${{ inputs.profile_artifact_id }}

@@ -797,20 +797,28 @@ test('performance evidence and signing use their existing isolated environments'
   const workflow = await readFile('.github/workflows/desktop-performance.yml', 'utf8')
   const { parse } = createRequire(resolve('packages/dsh/package.json'))('yaml')
   const parsed = parse(workflow)
+  assert.equal(parsed.on.workflow_dispatch.inputs.macos_signer_run_id.required, true)
+  assert.equal(parsed.on.workflow_dispatch.inputs.macos_signer_run_id.type, 'string')
   assert.equal(parsed.jobs.evidence.environment, 'performance-admission')
   assert.equal(parsed.jobs.admission.environment, 'r2-publish')
   assert.equal(parsed.jobs.admission.needs, 'evidence')
   const signer = parsed.jobs.admission.steps.find(step => step.id === 'admit')
-  assert.equal(signer.uses, 'zyfjacksonchen-source/e-mate-desktop-publication/performance@cd7d223692b51e4e7a53db5759e1c2a9811febd0')
+  assert.equal(signer.uses, 'zyfjacksonchen-source/e-mate-desktop-publication/performance@1f46dbe1d34ac558cb2e91b52b2ab30f7eab6c4c')
+  assert.equal(signer.with['macos-signer-run-id'], '${{ inputs.macos_signer_run_id }}')
   assert.deepEqual([...workflow.matchAll(/secrets\.([A-Z0-9_]+)/gu)].map(match => match[1]).sort(), [
     'EMATE_PROFILE_SIGNING_KEY_ID', 'EMATE_PROFILE_SIGNING_PRIVATE_KEY',
   ])
   assert.match(workflow, /test "\$\{GITHUB_REF_PROTECTED:-\}" = true/u)
   assert.match(workflow, /test "\$GITHUB_RUN_ATTEMPT" = 1/u)
   assert.match(workflow, /GITHUB_WORKFLOW_REF" = "\$GITHUB_REPOSITORY\/\.github\/workflows\/desktop-performance\.yml@refs\/heads\/main"/u)
-  assert.match(workflow, /Desktop candidate installers are not owned by the selected CI run/u)
+  assert.match(workflow, /Bind exact signed macOS and protected-main CI Windows bytes/u)
+  assert.match(workflow, /Desktop candidate installers are not owned by the selected signer and CI runs/u)
   assert.match(workflow, /CI_RUN_ID: \$\{\{ inputs\.main_ci_run_id \}\}/u)
+  assert.match(workflow, /MACOS_SIGNER_RUN_ID: \$\{\{ inputs\.macos_signer_run_id \}\}/u)
   assert.doesNotMatch(workflow, /inputs\.ci_run_id/u)
+  assert.equal([...workflow.matchAll(/\.event' <<<"\$(?:ci_json|run_json)"\)" = workflow_dispatch/gu)].length, 2)
+  assert.doesNotMatch(workflow, /\.event' <<<"\$(?:ci_json|run_json)"\)" = push/u)
+  assert.doesNotMatch(workflow, /cd7d223692b51e4e7a53db5759e1c2a9811febd0/u)
   assert.match(workflow, /test "\$\(jq -er '\.path' <<<"\$run_json"\)" = \.github\/workflows\/ci\.yml/u)
   assert.doesNotMatch(workflow, /Build and verify the e-Mate profile|Build unsigned macOS universal disk image/u)
   assert.match(workflow, /files\.length !== 92/u)
@@ -827,7 +835,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   const parsed = parse(workflow)
   assert.deepEqual(Object.keys(parsed.on), ['workflow_dispatch'])
   assert.deepEqual(Object.keys(parsed.on.workflow_dispatch.inputs), [
-    'main_ci_run_id', 'admission_artifact_id', 'macos_artifact_id',
+    'main_ci_run_id', 'admission_artifact_id', 'macos_signer_run_id', 'macos_signed_artifact_id',
     'windows_artifact_id', 'expected_signed_current', 'expected_legacy_current',
   ])
   assert.equal(Object.values(parsed.on.workflow_dispatch.inputs).every(input => input.required === true && input.type === 'string'), true)
@@ -837,12 +845,13 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   assert.equal(job.name, 'Desktop Cloudflare plugin handoff')
   assert.equal(job.environment, 'r2-publish')
   const invocation = job.steps.find(step => step.id === 'prepare')
-  assert.equal(invocation.uses, 'zyfjacksonchen-source/e-mate-desktop-publication@cd7d223692b51e4e7a53db5759e1c2a9811febd0')
+  assert.equal(invocation.uses, 'zyfjacksonchen-source/e-mate-desktop-publication@1f46dbe1d34ac558cb2e91b52b2ab30f7eab6c4c')
   assert.deepEqual(invocation.with, {
     'source-sha': '${{ github.sha }}',
     'main-ci-run-id': '${{ inputs.main_ci_run_id }}',
     'admission-artifact-id': '${{ inputs.admission_artifact_id }}',
-    'macos-artifact-id': '${{ inputs.macos_artifact_id }}',
+    'macos-signer-run-id': '${{ inputs.macos_signer_run_id }}',
+    'macos-signed-artifact-id': '${{ inputs.macos_signed_artifact_id }}',
     'windows-artifact-id': '${{ inputs.windows_artifact_id }}',
     'expected-signed-current': '${{ inputs.expected_signed_current }}',
     'expected-legacy-current': '${{ inputs.expected_legacy_current }}',
@@ -854,7 +863,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   })
   assert.deepEqual(job.steps.filter(step => step.uses).map(step => step.uses), [
     'actions/setup-node@v6',
-    'zyfjacksonchen-source/e-mate-desktop-publication@cd7d223692b51e4e7a53db5759e1c2a9811febd0',
+    'zyfjacksonchen-source/e-mate-desktop-publication@1f46dbe1d34ac558cb2e91b52b2ab30f7eab6c4c',
     'actions/upload-artifact@v4',
   ])
   const upload = job.steps.find(step => step.uses === 'actions/upload-artifact@v4')
@@ -865,6 +874,7 @@ test('Desktop publication workflow only emits the exact Cloudflare plugin handof
   assert.match(workflow, /desktop-publication\.yml@refs\/heads\/main/u)
   assert.match(workflow, /ready-for-cloudflare-plugin/u)
   assert.match(workflow, /cloudflare-plugin-handoff\.json,cloudflare-publication-plan\.json,desktop-release-signed\.json/u)
+  assert.doesNotMatch(workflow, /macos_artifact_id|macos-artifact-id|cd7d223692b51e4e7a53db5759e1c2a9811febd0/u)
   assert.doesNotMatch(workflow, /\b(?:curl|wget|wrangler|aws)\b|api\.cloudflare\.com|\.r2\.cloudflarestorage\.com|pub-ada3f610c0234a76838f4e19fe2bb25e\.r2\.dev/iu)
   assert.doesNotMatch(workflow, /secrets\.(?:CLOUDFLARE|R2|AWS)/iu)
 })

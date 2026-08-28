@@ -168,6 +168,12 @@ test('wires the one-shot producer before the existing exact-85 consumer', async 
   assert.match(workflow, /--profile-authorities "\$PERFORMANCE_AUTHORITIES"/u)
   assert.doesNotMatch(workflow, /\$STAGE_DIRECTORY\/profile-performance-authorities\.json/u)
   assert.doesNotMatch(workflow.slice(producer, consumer), /--fixture/u)
+  assert.match(workflow, /macos_signer_run_id:[\s\S]*?required: true[\s\S]*?type: string/u)
+  assert.match(workflow, /candidate\.artifacts\.darwin\.build_run_id !== macosSignerRunId/u)
+  assert.match(workflow, /candidate\.artifacts\.win32\.build_run_id !== ciRunId/u)
+  assert.match(workflow, /macos-signer-run-id: \$\{\{ inputs\.macos_signer_run_id \}\}/u)
+  assert.match(workflow, /e-mate-desktop-publication\/performance@1f46dbe1d34ac558cb2e91b52b2ab30f7eab6c4c/u)
+  assert.doesNotMatch(workflow, /e-mate-desktop-publication\/performance@cd7d223692b51e4e7a53db5759e1c2a9811febd0/u)
 })
 
 test('binds installed receipts to the frozen predecessor and exact Profile target', () => {
