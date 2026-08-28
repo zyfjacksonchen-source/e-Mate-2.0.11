@@ -14,7 +14,7 @@ export interface DesktopNativeExit {
   /** Mark the window close path as a final process exit. */
   prepareToQuit(): void
   /** Schedule a fresh Electron process using the current command line. */
-  relaunch(): void
+  relaunch(args?: readonly string[]): void
   /** End the current Electron process without another quit event. */
   exit(code: number): void
 }
@@ -22,7 +22,7 @@ export interface DesktopNativeExit {
 /** Final-exit state shared by ordinary quits and mode-change relaunches. */
 export interface DesktopExitCoordinator {
   /** Mark the next successful exit as a relaunch. */
-  requestRelaunch(): void
+  requestRelaunch(args?: readonly string[]): void
   /** Complete one native exit after Cordis teardown. */
   finish(code: number): void
 }
@@ -37,15 +37,17 @@ export function createDesktopExitCoordinator(
   native: DesktopNativeExit,
   beforeExit: () => void,
 ): DesktopExitCoordinator {
-  let relaunchRequested = false
+  let relaunchArguments: readonly string[] | false = false
   return {
-    requestRelaunch() {
-      relaunchRequested = true
+    requestRelaunch(args) {
+      relaunchArguments = args ?? []
     },
     finish(code) {
       beforeExit()
       native.prepareToQuit()
-      if (relaunchRequested && code === 0) native.relaunch()
+      if (relaunchArguments !== false && code === 0) {
+        native.relaunch(relaunchArguments.length === 0 ? undefined : relaunchArguments)
+      }
       native.exit(code)
     },
   }
