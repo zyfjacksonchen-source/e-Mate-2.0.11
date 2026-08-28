@@ -29,8 +29,8 @@ describe('desktop release manifest', () => {
     await mkdir(artifacts)
     const macBytes = Buffer.from('mac-dmg')
     const windowsBytes = Buffer.from('windows-exe')
-    const macArtifact = join(artifacts, 'e-Mate-2.0.13-mac-universal.dmg')
-    const windowsArtifact = join(artifacts, 'e-Mate-2.0.13-win-x64-Setup.exe')
+    const macArtifact = join(artifacts, `e-Mate-${DESKTOP_RELEASE_VERSION}-mac-universal.dmg`)
+    const windowsArtifact = join(artifacts, `e-Mate-${DESKTOP_RELEASE_VERSION}-win-x64-Setup.exe`)
     await writeFile(macArtifact, macBytes)
     await writeFile(windowsArtifact, windowsBytes)
     const output = join(root, 'release', 'desktop-candidate.json')
@@ -52,19 +52,19 @@ describe('desktop release manifest', () => {
       schema_version: 2,
       document_type: 'emate.desktop-artifact-candidate',
       release_status: 'admission-pending',
-      version: '2.0.13',
+      version: DESKTOP_RELEASE_VERSION,
       source_commit: commit,
       schedule_protocol_floor: 1,
       artifacts: {
         darwin: {
-          url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.13/${commit}/e-Mate-2.0.13-mac-universal.dmg`,
+          url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v${DESKTOP_RELEASE_VERSION}/${commit}/e-Mate-${DESKTOP_RELEASE_VERSION}-mac-universal.dmg`,
           bytes: macBytes.byteLength,
           sha256: createHash('sha256').update(macBytes).digest('hex'),
           build_source_commit: commit,
           build_run_id: '123',
         },
         win32: {
-          url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.13/${commit}/e-Mate-2.0.13-win-x64-Setup.exe`,
+          url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v${DESKTOP_RELEASE_VERSION}/${commit}/e-Mate-${DESKTOP_RELEASE_VERSION}-win-x64-Setup.exe`,
           bytes: windowsBytes.byteLength,
           sha256: createHash('sha256').update(windowsBytes).digest('hex'),
           build_source_commit: commit,
@@ -78,7 +78,7 @@ describe('desktop release manifest', () => {
     const root = await mkdtemp(join(tmpdir(), 'e-mate-desktop-release-'))
     roots.push(root)
     const macArtifact = join(root, 'latest.dmg')
-    const windowsArtifact = join(root, 'e-Mate-2.0.13-win-x64-Setup.exe')
+    const windowsArtifact = join(root, `e-Mate-${DESKTOP_RELEASE_VERSION}-win-x64-Setup.exe`)
     await writeFile(macArtifact, 'mac')
     await writeFile(windowsArtifact, 'win')
 
