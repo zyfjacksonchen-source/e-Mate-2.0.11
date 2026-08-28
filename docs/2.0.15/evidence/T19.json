@@ -18,12 +18,12 @@
   "owner_commits": [
     {
       "owner": "WS-00/WS-01 Shell route and projection",
-      "sha": "23a743ecf611698c00bfe61cbd5a3afc1eb9bf91",
+      "sha": "404dde71f1e0ed11f5fc67f9d48a7a5e6efb295a",
       "subject": "fix(shell): preserve project session routes"
     },
     {
       "owner": "WS-02 memory-evolve",
-      "sha": "95303fce71f1c7000caf6e6eeaa392f8f5a06b87",
+      "sha": "dbc33ad887d38f8ba3485139b548a532c5a7e86b",
       "subject": "feat(memory): recall scoped project facts"
     }
   ],
@@ -93,6 +93,11 @@
       "acceptance": "bounded project recall",
       "red": "the first bounded recall check returned 8 memoryIds instead of 5",
       "green": "the shared recall boundary slices to 5 before returning text and IDs; fixed prefix, token bound, isolation, restart, delete freshness, typed unavailable, and program-error propagation all pass"
+    },
+    {
+      "acceptance": "root package Session route source contract",
+      "red": "PR #92 Node 24 CI still required session-route.tsx to call startHomeSession(), contradicting the approved no-Session '/' contract",
+      "green": "the existing root contract now rejects both startHomeSession() and clearSession() calls while retaining its openSession(id) and stable /chat/<encoded-session-id> assertions"
     }
   ],
   "verification": [
@@ -117,6 +122,10 @@
       "result": "PASS: build plus 6 tests; real WorkspaceRegistry canonical alias isolation, project/session scope, confirmed A/P1 to A/P2 same memory_id, restart durability, B/G isolation, bounded fresh recall, delete, unavailable/scope-invalid distinction, and I/O policy"
     },
     {
+      "command": "pnpm --dir packages/dsh test",
+      "result": "PASS with local Node 24.19.0: package Node tests 55/55 and its Shell collection 16 files/100 tests; the root source contract verifies no startHomeSession()/clearSession() call and preserves openSession(id) plus the stable encoded chat route"
+    },
+    {
       "command": "componentFiles plus verifyComponentRuntimeImports for Shell and memory-evolve emitted closures",
       "result": "PASS: Shell imports exactly match its seven declared Base imports; memory-evolve emitted runtime imports remain [] as declared"
     },
@@ -128,6 +137,7 @@
   "collection_setup_note": {
     "initial_non_product_failure": "the first full Shell collection reached 84 passing tests but two unchanged suites collected 0 tests because the fresh worktree lacked generated pinned client-runtime lib and the locked GenUI submodule checkout",
     "resolution": "generated Host/Client libs from the exact 4787caf gitlink and initialized GenUI at the already-locked 0e756ef gitlink, then replayed the same collection to 17/17 files and 101/101 tests",
+    "root_package_replay": "the first local package replay stopped before tests on missing ignored component output; after preparing locked component outputs, the second reached 54/55 Node tests and exposed an uninitialized protected e-mate-2.0.5 asset gitlink; initializing its already-locked 564a6b6 commit allowed the unchanged command to pass 55/55 plus Shell 16/16 files and 100/100 tests",
     "product_or_generated_commit_created": false
   },
   "acceptance_matrix": {
@@ -176,7 +186,8 @@
     "installer_or_package_built": false,
     "macos_installed_app_action": false,
     "windows_action": false,
-    "push_pr_sign_publish_or_production_write": false,
+    "branch_pushed_and_pr_created": true,
+    "sign_publish_or_production_write": false,
     "obsolete_feedback_workbook_accessed": false
   },
   "handoffs": [
