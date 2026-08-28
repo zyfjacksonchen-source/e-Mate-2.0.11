@@ -40,6 +40,7 @@ import {
   CredentialStore,
   checkOsCredentialBackend,
   createOsCredentialBackend,
+  runCommand,
 } from '../profile/plugins/credentials-os.js'
 import { apply as applyImageGeneration } from '../profile/plugins/image-generation.js'
 import {
@@ -805,6 +806,27 @@ test('public share RPC publishes the native DSH Session ZIP and revokes the retu
   assert.equal(requests.at(-1).url, `https://share.example/v1/shares/${shareId}`)
   assert.equal((await registration.handler('create', {})).error.code, 'bad-request')
   assert.equal((await registration.handler('status', [])).error.code, 'bad-request')
+})
+
+test('credential helper runner contains stdin EPIPE and skips empty pipes', async () => {
+  const input = 'x'.repeat(1024 * 1024)
+  const closeBeforeRead = "require('node:fs').closeSync(0); setTimeout(() => {}, 50)"
+  const closeDuringRead = "process.stdin.once('data', () => { require('node:fs').closeSync(0); setTimeout(() => {}, 50) })"
+  await assert.rejects(runCommand(process.execPath, ['-e', closeBeforeRead], input), error => error?.code === 'EPIPE')
+  await assert.rejects(runCommand(process.execPath, ['-e', closeDuringRead], input), error => error?.code === 'EPIPE')
+
+  const empty = await runCommand(process.execPath, ['-e', "process.stdout.write(require('node:fs').fstatSync(0).isFIFO() ? 'pipe' : 'ignore')"])
+  assert.deepEqual(empty, { status: 0, stdout: 'ignore' })
+  assert.deepEqual(await runCommand(process.execPath, ['-e', 'process.stdin.pipe(process.stdout)'], 'test-input'), {
+    status: 0,
+    stdout: 'test-input',
+  })
+  assert.equal((await runCommand(process.execPath, ['-e', 'process.exit(7)'])).status, 7)
+  await assert.rejects(runCommand(join(tmpdir(), `missing-credential-helper-${process.pid}`), []), /could not be started/u)
+  await assert.rejects(
+    runCommand(process.execPath, ['-e', "process.stdout.write('x'.repeat(4 * 1024 * 1024 + 1))"]),
+    /output exceeded its boundary/u,
+  )
 })
 
 test('OS credential provider preserves target layering without exposing values through describe', async () => {

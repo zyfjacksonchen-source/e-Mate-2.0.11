@@ -107,10 +107,11 @@ interface ProviderConfig {
   backend?: CredentialBackend
 }
 
-function runCommand(file: string, args: readonly string[], input = ''): Promise<CommandResult> {
+export function runCommand(file: string, args: readonly string[], input = ''): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
+    const hasInput = input.length > 0
     const child = spawn(file, [...args], {
-      stdio: ['pipe', 'pipe', 'ignore'],
+      stdio: [hasInput ? 'pipe' : 'ignore', 'pipe', 'ignore'],
       windowsHide: true,
     })
     const chunks: Buffer[] = []
@@ -136,7 +137,10 @@ function runCommand(file: string, args: readonly string[], input = ''): Promise<
       settled = true
       resolve({ status: code ?? -1, stdout: Buffer.concat(chunks, length).toString('utf8') })
     })
-    child.stdin.end(input)
+    if (hasInput) {
+      child.stdin!.once('error', fail)
+      child.stdin!.end(input)
+    }
   })
 }
 
