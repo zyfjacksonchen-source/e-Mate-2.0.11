@@ -58,6 +58,7 @@ jobs:
             upstream/deepseek-harness/pnpm-lock.yaml
 
       - name: Accept only the exact protected main source
+        id: evidence
         env:
           GH_TOKEN: ${{ github.token }}
           CI_RUN_ID: ${{ inputs.ci_run_id }}
@@ -90,11 +91,31 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" > ".admission/metadata/$label-jobs.json"
           done
           ci_artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100")"
+          printf '%s\n' "$ci_artifacts" > .admission/metadata/ci-artifacts.json
           ci_artifact_id="$(jq -er --arg name "e-mate-ci-plan-$GITHUB_SHA" \
             '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one CI impact artifact") end' <<<"$ci_artifacts")"
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ci_artifact_id" > .admission/metadata/ci-artifact.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ci_artifact_id/zip" > .admission/metadata/ci-plan.zip
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$DESKTOP_ARTIFACT_ID" > .admission/metadata/desktop-artifact.json
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$PROFILE_ARTIFACT_ID" > .admission/metadata/profile-publication-artifact.json
+          echo "ci_artifact_id=$ci_artifact_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download the unique CI plan
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.evidence.outputs.ci_artifact_id }}
+          merge-multiple: true
+          path: .admission/ci-plan
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.ci_run_id }}
+
+      - name: Verify the shared formal RC evidence contract
+        run: >-
+          node scripts/release-candidate.mjs verify
+          --source "$GITHUB_SHA" --run-id "${{ inputs.ci_run_id }}"
+          --run .admission/metadata/ci-run.json --jobs .admission/metadata/ci-jobs.json
+          --artifacts .admission/metadata/ci-artifacts.json --plan .admission/ci-plan/ci-plan.json
+          --plan-archive .admission/metadata/ci-plan.zip
 
       - name: Download the exact Desktop candidate artifact
         uses: actions/download-artifact@v4

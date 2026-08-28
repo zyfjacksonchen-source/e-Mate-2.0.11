@@ -843,16 +843,16 @@ describe('repository release boundary', () => {
 
   it('prepares publication only from already-built exact RC artifacts', () => {
     const workflow = readFileSync(new URL('../.github/workflows/profile-release.yml', import.meta.url), 'utf8')
+    const verifier = readFileSync(new URL('./release-candidate.mjs', import.meta.url), 'utf8')
     assert.match(workflow, /source_sha="\$\(jq -er \.head_sha <<<"\$run_json"\)"/u)
-    assert.match(workflow, /test "\$\(jq -er \.conclusion <<<"\$run_json"\)" = success/u)
     assert.match(workflow, /test "\$GITHUB_RUN_ATTEMPT" = 1/u)
-    assert.match(workflow, /test "\$\(jq -er \.run_attempt <<<"\$run_json"\)" = 1/u)
     assert.match(workflow, /test "\$\{GITHUB_REF_PROTECTED:-\}" = true/u)
-    assert.match(workflow, /test "\$\(jq -er \.event <<<"\$run_json"\)" = push/u)
+    assert.match(workflow, /node scripts\/release-candidate\.mjs verify/u)
+    assert.match(verifier, /run\.conclusion !== 'success' \|\| run\.run_attempt !== 1/u)
+    assert.match(verifier, /uniqueSuccessfulJob/u)
     assert.match(workflow, /name: e-mate-ci-plan-\$\{\{ steps\.run\.outputs\.source_sha \}\}/u)
-    assert.match(workflow, /test "\$\(jq -er \.ci_mode "\$plan"\)" = release-candidate/u)
+    assert.doesNotMatch(workflow, /\.event[^\n]*= push/u)
     assert.match(workflow, /test "\$\(jq -er \.profile_bootstrap "\$plan"\)" = "\$BOOTSTRAP"/u)
-    assert.match(workflow, /job_succeeded 'CI admission'/u)
     assert.match(workflow, /pattern: e-mate-component-\*-\$\{\{ needs\.validate\.outputs\.source_sha \}\}[\s\S]*?run-id: \$\{\{ inputs\.ci_run_id \}\}/u)
     for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
       assert.ok(workflow.includes(`name: e-mate-profile-candidate-${target}-\${{ needs.validate.outputs.source_sha }}`))

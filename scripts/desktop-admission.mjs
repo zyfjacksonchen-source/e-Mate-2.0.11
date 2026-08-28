@@ -744,7 +744,7 @@ export async function createGithubArtifactProvenance(options) {
     throw new Error('Desktop candidate installers are not owned by the selected CI run')
   }
   const ciRun = githubRun(await metadata(options.metadata, 'ci-run.json'), {
-    id: options.ciRunId, path: '.github/workflows/ci.yml', event: 'push',
+    id: options.ciRunId, path: '.github/workflows/ci.yml', event: 'workflow_dispatch',
     sourceCommit: options.sourceCommit, label: 'CI',
   })
   const desktopRun = githubRun(await metadata(options.metadata, 'desktop-run.json'), {

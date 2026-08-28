@@ -50,20 +50,12 @@ function assertMainSource(source) {
   if (current !== source) throw new Error('protected main advanced during release coordination')
 }
 
-function runJobs(runId) {
-  return gh(['--method', 'GET', `repos/${repository()}/actions/runs/${runId}/jobs`, '-f', 'per_page=100']).jobs ?? []
-}
-
 async function resolveCi(source) {
   assertMainSource(source)
-  const runs = gh(['--method', 'GET', `repos/${repository()}/actions/workflows/ci.yml/runs`, '-f', 'branch=main', '-f', 'event=push', '-f', 'status=success', '-f', 'per_page=100']).workflow_runs ?? []
+  const runs = gh(['--method', 'GET', `repos/${repository()}/actions/workflows/ci.yml/runs`, '-f', 'branch=main', '-f', 'event=workflow_dispatch', '-f', 'status=success', '-f', 'per_page=100']).workflow_runs ?? []
   const matches = runs.filter(run => run.head_sha === source && run.run_attempt === 1 && run.conclusion === 'success')
-  if (matches.length !== 1) throw new Error('expected one successful attempt-1 protected-main CI run')
-  const run = matches[0]
-  if (!runJobs(run.id).some(job => job.name === 'CI admission' && job.conclusion === 'success')) {
-    throw new Error('protected-main CI admission did not succeed')
-  }
-  output({ ci_run_id: run.id })
+  if (matches.length !== 1) throw new Error('expected one formal RC run candidate for shared verification')
+  output({ ci_run_id: matches[0].id })
 }
 
 function workflowRuns(workflow) {

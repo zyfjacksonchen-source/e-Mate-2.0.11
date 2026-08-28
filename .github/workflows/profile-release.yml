@@ -58,18 +58,19 @@ jobs:
           test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/profile-release.yml@refs/heads/main"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID")"
+          mkdir -p dist/accepted-evidence
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > dist/accepted-evidence/run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/jobs?per_page=100" > dist/accepted-evidence/jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100" > dist/accepted-evidence/artifacts.json
+          run_json="$(cat dist/accepted-evidence/run.json)"
           source_sha="$(jq -er .head_sha <<<"$run_json")"
           [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
-          test "$(jq -er .repository.full_name <<<"$run_json")" = "$GITHUB_REPOSITORY"
-          test "$(jq -er .path <<<"$run_json")" = .github/workflows/ci.yml
-          test "$(jq -er .event <<<"$run_json")" = push
-          test "$(jq -er .head_branch <<<"$run_json")" = main
-          test "$(jq -er .status <<<"$run_json")" = completed
-          test "$(jq -er .conclusion <<<"$run_json")" = success
-          test "$(jq -er .run_attempt <<<"$run_json")" = 1
           test "$source_sha" = "$GITHUB_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$source_sha"
+          plan_artifact_id="$(jq -er --arg name "e-mate-ci-plan-$source_sha" \
+            '[.artifacts[] | select(.name == $name and .expired == false)] | if length == 1 then .[0].id else error("expected one CI plan artifact") end' \
+            dist/accepted-evidence/artifacts.json)"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$plan_artifact_id/zip" > dist/accepted-evidence/ci-plan.zip
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@v4
@@ -88,37 +89,16 @@ jobs:
         run: |
           set -euo pipefail
           plan=dist/accepted-plan/ci-plan.json
+          node scripts/release-candidate.mjs verify \
+            --source "${{ steps.run.outputs.source_sha }}" --run-id "$CI_RUN_ID" \
+            --run dist/accepted-evidence/run.json --jobs dist/accepted-evidence/jobs.json \
+            --artifacts dist/accepted-evidence/artifacts.json --plan "$plan" \
+            --plan-archive dist/accepted-evidence/ci-plan.zip
           base_id="$(jq -er .id desktop/e-mate-desktop/base-contract.json)"
           schedule_floor="$(jq -er .schedule_protocol_floor desktop/e-mate-desktop/base-contract.json)"
-          test "$(jq -er .schema_version "$plan")" = 2
-          test "$(jq -er .document_type "$plan")" = emate.ci-plan
-          test "$(jq -er .ci_mode "$plan")" = release-candidate
-          test "$(jq -er .compose_profile "$plan")" = true
           test "$(jq -er .profile_bootstrap "$plan")" = "$BOOTSTRAP"
-          test "$(jq -er .contract.valid "$plan")" = true
           test "$(jq -er .contract.base_contract_id "$plan")" = "$base_id"
           test "$(jq -er .contract.schedule_protocol_floor "$plan")" = "$schedule_floor"
-          test "$(jq -er '.publish_components | length > 0' "$plan")" = true
-          jobs_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/jobs?per_page=100")"
-          job_succeeded() {
-            jq -e --arg name "$1" '.jobs | any(.name == $name and .conclusion == "success")' <<<"$jobs_json" >/dev/null
-          }
-          job_succeeded 'CI admission'
-          if test "$(jq -er .run_base "$plan")" = true; then
-            job_succeeded 'Node 24 / target contracts and unit tests'
-            job_succeeded 'Windows x64 / unsigned desktop installer'
-            job_succeeded 'macOS universal / unsigned desktop disk image'
-          fi
-          while IFS= read -r name; do job_succeeded "$name"; done < <(
-            jq -r '.ci_component_jobs | map(.target) | unique[] | "Changed Profile components / \(.)"' "$plan"
-          )
-          if test "$(jq -er .portable_publish "$plan")" = true; then
-            job_succeeded 'Portable Profile generations'
-          else
-            for target in darwin-arm64 darwin-x64 win32-x64; do
-              job_succeeded "Complete Profile generation / $target"
-            done
-          fi
           echo "publish_components_json=$(jq -c .publish_components "$plan")" >> "$GITHUB_OUTPUT"
           echo "profile_bootstrap=$(jq -r .profile_bootstrap "$plan")" >> "$GITHUB_OUTPUT"
       - name: Summarize validation timing
