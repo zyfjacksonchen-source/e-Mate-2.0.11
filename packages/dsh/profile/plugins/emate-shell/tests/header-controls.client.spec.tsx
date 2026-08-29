@@ -96,6 +96,8 @@ describe('desktop header controls', () => {
     const controls = readFileSync('src/client/header-controls.module.css', 'utf8')
     expect(controls).toMatch(/\.controls\[data-emate-settings-route\][\s\S]*right:\s*calc\(72px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
     expect(controls).toMatch(/body\[data-dsh-desktop-platform='win32'\][\s\S]*\.controls\[data-emate-settings-route\]/u)
+    const settings = readFileSync('src/client/settings-chrome.module.css', 'utf8')
+    expect(settings).toContain('padding: 16px calc(20px + var(--dsh-desktop-caption-safe-width, 0px)) 16px max(20px, var(--dsh-desktop-caption-safe-left, 0px)) !important;')
   })
 
   it('projects one updater state into Header and Settings with progress, cancellation, and trigger errors', async () => {
@@ -199,7 +201,7 @@ describe('desktop header controls', () => {
     expect(controls).toMatch(/data-dsh-desktop-platform='win32'[\s\S]*padding-right:\s*calc\(116px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
     expect(controls).toMatch(/\.controls > button:focus-visible[\s\S]*outline:\s*2px solid[\s\S]*outline-offset:\s*2px/u)
     expect(controls).not.toMatch(/@media[\s\S]*\.controls > button\s*\{[^}]*display:\s*none/u)
-    expect(settings).toMatch(/padding:\s*16px calc\(20px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\) 16px 20px !important/u)
+    expect(settings).toMatch(/padding:\s*16px calc\(20px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\) 16px max\(20px, var\(--dsh-desktop-caption-safe-left, 0px\)\) !important/u)
     expect(settings).toMatch(/button:has\(\[data-emate-settings-close\]\)[\s\S]*width:\s*44px;[\s\S]*height:\s*44px;/u)
     expect(settings).toMatch(/data-emate-settings-close\]\):focus-visible[\s\S]*outline-offset:\s*-2px/u)
     expect(`${controls}\n${settings}`).not.toContain('138')

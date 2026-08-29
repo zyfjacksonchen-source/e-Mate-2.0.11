@@ -356,11 +356,16 @@ async function writePdf(value: PdfDocumentInput): Promise<Buffer> {
   pdf.setProducer('e-Mate 2.0.13')
   const segments = await fontSegments()
   const used = new Map<string, Awaited<ReturnType<PDFDocument['embedFont']>>>()
+  const outlines = new Map<string, ReturnType<typeof fontkit.create>>()
   const allText = [value.title ?? '', ...value.pages.flatMap(page => page.lines)]
   for (const character of allText.join('')) {
     const codePoint = character.codePointAt(0) as number
     const segment = segmentFor(segments, codePoint)
-    if (!used.has(segment.file)) used.set(segment.file, await pdf.embedFont(await readFile(segment.file), { subset: true }))
+    if (!used.has(segment.file)) {
+      const bytes = await readFile(segment.file)
+      used.set(segment.file, await pdf.embedFont(bytes, { subset: true }))
+      outlines.set(segment.file, fontkit.create(bytes))
+    }
   }
   const size = 12
   for (const source of value.pages) {
@@ -368,15 +373,47 @@ async function writePdf(value: PdfDocumentInput): Promise<Buffer> {
     let y = 800
     for (const line of source.lines) {
       let x = 48
+      let text = ''
+      let textWidth = 0
+      let textFont: Awaited<ReturnType<PDFDocument['embedFont']>> | undefined
+      let textOutline: ReturnType<typeof fontkit.create> | undefined
+      const drawText = () => {
+        if (textFont !== undefined && textOutline !== undefined && text !== '') {
+          page.drawText(text, { x, y, font: textFont, size, opacity: 0 })
+          const run = textOutline.layout(text)
+          let glyphX = x
+          for (let index = 0; index < run.glyphs.length; index += 1) {
+            const position = run.positions[index]
+            if (position === undefined) throw new Error('PDF font layout failed')
+            const scale = size / textOutline.unitsPerEm
+            page.drawSvgPath(run.glyphs[index]?.path.scale(1, -1).toSVG() ?? '', {
+              x: glyphX + position.xOffset * scale,
+              y: y + position.yOffset * scale,
+              scale,
+              color: rgb(0.08, 0.08, 0.08),
+            })
+            glyphX += position.xAdvance * scale
+          }
+        }
+        x += textWidth
+        text = ''
+        textWidth = 0
+      }
       for (const character of line) {
         const font = used.get(segmentFor(segments, character.codePointAt(0) as number).file)
         if (font === undefined) throw new Error('PDF font embedding failed')
         const width = font.widthOfTextAtSize(character, size)
-        if (x + width > 547) { x = 48; y -= 20 }
+        if (font !== textFont || x + textWidth + width > 547) {
+          drawText()
+          if (x + width > 547) { x = 48; y -= 20 }
+          textFont = font
+          textOutline = outlines.get(segmentFor(segments, character.codePointAt(0) as number).file)
+        }
         if (y < 48) throw new Error('PDF page contains too much text; split it into more pages')
-        page.drawText(character, { x, y, font, size, color: rgb(0.08, 0.08, 0.08) })
-        x += width
+        text += character
+        textWidth += width
       }
+      drawText()
       y -= 20
     }
   }

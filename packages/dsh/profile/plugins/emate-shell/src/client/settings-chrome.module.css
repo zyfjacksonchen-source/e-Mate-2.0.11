@@ -91,7 +91,7 @@
   z-index: 2;
   inset: 0 0 auto;
   height: 76px !important;
-  padding: 16px calc(20px + var(--dsh-desktop-caption-safe-width, 0px)) 16px 20px !important;
+  padding: 16px calc(20px + var(--dsh-desktop-caption-safe-width, 0px)) 16px max(20px, var(--dsh-desktop-caption-safe-left, 0px)) !important;
   border-bottom: 1px solid var(--emate-color-rule, oklch(0.905018 0.008065 106.56));
   box-sizing: border-box;
   align-items: center !important;

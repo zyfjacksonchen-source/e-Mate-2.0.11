@@ -48,10 +48,10 @@
         "effects": ["persistent-state"],
         "guards": ["native-user-question", "session-scope", "workspace-scope"]
       },
-      "base_contracts": ["e-mate-desktop-profile-v10-dsh-1d3824bcd340"]
+      "base_contracts": ["e-mate-desktop-profile-v10-dsh-fccd7d25b3f1"]
     },
     "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "1d3824bcd3400b3761a0ebdd956901752ddc962b"
+    "harnessCommit": "fccd7d25b3f19885e2778c128b57d7c8312b7344"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

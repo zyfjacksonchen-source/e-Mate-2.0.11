@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { inflateSync } from 'node:zlib'
 import JSZip from 'jszip'
 import {
   apply,
@@ -87,6 +89,33 @@ test('round-trips real DOCX, XLSX, PPTX, and Chinese PDF bytes', async () => {
     assert.ok(Buffer.isBuffer(buffer) && buffer.byteLength > 500, format)
     verify(await readOfficeBuffer(format, buffer))
   }
+})
+
+test('renders PDF text visibly and preserves ASCII punctuation', async t => {
+  const sandbox = await mkdtemp(join(tmpdir(), 'emate-office-pdf-'))
+  t.after(async () => await rm(sandbox, { recursive: true, force: true }))
+  const path = join(sandbox, 'render.pdf')
+  const buffer = await writeOfficeBuffer('pdf', { pages: [{ lines: ['PDF_TOOL_OK', '中文正文'] }] })
+  await writeFile(path, buffer)
+
+  assert.deepEqual(await readOfficeBuffer('pdf', buffer), { pages: [{ lines: ['PDF_TOOL_OK', '中文正文'] }] })
+  const streams = Array.from(buffer.toString('latin1').matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/gu), match => {
+    try { return inflateSync(Buffer.from(match[1], 'latin1')).toString('latin1') } catch { return match[1] }
+  }).join('\n')
+  assert.match(streams, /BT[\s\S]*Tj[\s\S]*ET/u, 'PDF semantic text stream is missing')
+  assert.match(streams, /\bm\b[\s\S]*\bf\b/u, 'PDF visible glyph paths are missing')
+  if (spawnSync('pdfinfo', ['-v'], { stdio: 'ignore' }).error || spawnSync('pdftoppm', ['-v'], { stdio: 'ignore' }).error) return
+
+  const info = execFileSync('pdfinfo', [path], { encoding: 'utf8' })
+  assert.match(info, /^Pages:\s+1$/mu)
+  assert.match(info, /^Page size:\s+595\.28 x 841\.89 pts \(A4\)$/mu)
+  const ppmPath = join(sandbox, 'render')
+  execFileSync('pdftoppm', ['-f', '1', '-l', '1', '-r', '144', '-singlefile', path, ppmPath])
+  const ppm = await readFile(`${ppmPath}.ppm`)
+  const header = /^P6\s+(?:#.*\s+)*\d+\s+\d+\s+255\s/u.exec(ppm.toString('latin1'))
+  assert.notEqual(header, null, 'Poppler returned an invalid PPM image')
+  const pixels = ppm.subarray(header[0].length)
+  assert.ok(pixels.some(value => value < 245), 'Poppler rendered a blank page')
 })
 
 test('OOXML readers reject archive bombs before unbounded XML parsing', async () => {

@@ -444,6 +444,19 @@ export async function runModelSmoke(options: {
     results.push(result);
     options.onResult?.(result);
   }
+  const searchRoute = options.routes.find(({ id }) => id === 'gpt-web-search');
+  if (searchRoute) {
+    const localId = randomId();
+    if (!evidencePattern.test(localId)) throw new ModelSmokeError('INVALID_CATALOG', searchRoute.id);
+    const result = await smokeInference(
+      searchRoute,
+      fetchImplementation,
+      AbortSignal.timeout(options.timeoutMs),
+      localId
+    );
+    results.push(result);
+    options.onResult?.(result);
+  }
   const checkedAt = (options.now ?? (() => new Date()))();
   if (!Number.isFinite(checkedAt.getTime())) throw new ModelSmokeError('INVALID_CATALOG');
   return {

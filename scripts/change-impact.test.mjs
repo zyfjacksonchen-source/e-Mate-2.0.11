@@ -18,7 +18,7 @@ import {
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const FIXTURE_BASE_ID = BASE_CONTRACT_ID
-const HARNESS_COMMIT = '1d3824bcd3400b3761a0ebdd956901752ddc962b'
+const HARNESS_COMMIT = 'fccd7d25b3f19885e2778c128b57d7c8312b7344'
 const SOURCE_PREDECESSOR_BASE_CONTRACT_ID = 'e-mate-desktop-profile-v9-dsh-b469c2b99a6c'
 const SOURCE_PREDECESSOR_HARNESS_COMMIT = 'b469c2b99a6c2f35c5e51eaf611f1941e095f90d'
 const PREDECESSOR_BASE_CONTRACT_ID = 'e-mate-desktop-profile-v8-dsh-4787caf39134'
