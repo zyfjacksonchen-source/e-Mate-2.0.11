@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from '../src/client/composer-mentions.ts'
 
 describe('native e-Mate @ references', () => {
+  it('waits for the native command Remote used by the Plan action', () => {
+    expect(readFileSync('src/client/index.ts', 'utf8'))
+      .toMatch(/export const inject = \[[^\]]*'remote\.commands'[^\]]*\]/u)
+  })
+
   it('keeps the naked @ roster ordered with Goal and Plan as native command actions', async () => {
     const sources: InputTriggerSource[] = []
     const listSkills = vi.fn(async () => ({ result: { ok: true, value: { skills: [] } } }))
@@ -11,6 +17,7 @@ describe('native e-Mate @ references', () => {
     let snapshot = { draft: '@', draftRev: 1, phase: 'plain' as const }
     const setDraft = vi.fn((draft: string) => { snapshot = { ...snapshot, draft, draftRev: snapshot.draftRev + 1 } })
     const notify = vi.fn()
+    const submit = vi.fn()
     const bail = vi.fn((_scope, event: string, request: any) => {
       if (event !== 'slash/input-consume-token' || request.guard.span.draftRev !== snapshot.draftRev) return undefined
       const { start, end } = request.guard.span
@@ -29,7 +36,7 @@ describe('native e-Mate @ references', () => {
         sessionOf: () => ({ track, onSpace }),
       },
       sessions: { binding, scope: () => scope },
-      conversation: { input: { for: () => ({ state: { getSnapshot: () => snapshot }, setDraft, notify }) } },
+      conversation: { input: { for: () => ({ state: { getSnapshot: () => snapshot }, setDraft, notify, actions: { submit } }) } },
       remote: { commands: { execute } },
       connection: {
         rpc: { call: vi.fn(async () => ({ ok: true, value: { schema_version: 1, items: [] } })) },
@@ -74,27 +81,44 @@ describe('native e-Mate @ references', () => {
     })
     expect(snapshot.draft).toBe('保留  草稿')
     expect(setDraft).not.toHaveBeenCalled()
+    expect(submit).not.toHaveBeenCalled()
     expect(plan.codec).toBeUndefined()
     expect(binding).not.toHaveBeenCalled()
 
-    snapshot = { draft: '不能覆盖 @ 原稿', draftRev: 5, phase: 'plain' }
+    // InputTriggerPick has no model gate: this is also the action path while
+    // ordinary message submission is blocked by an unavailable model.
+    snapshot = { draft: '@', draftRev: 5, phase: 'plain' }
+    execute.mockClear()
+    bail.mockClear()
+    const emptySpan = { start: 0, end: 1, draftRev: 5 }
+    expect(plan.onPick({
+      candidate: planAction, session, position: 'leading', via: 'menu', span: emptySpan,
+    })).toBe('handled')
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledWith('session-1', '/plan'))
+    expect(bail).toHaveBeenCalledWith(scope, 'slash/input-consume-token', {
+      guard: { kind: 'span', span: emptySpan },
+    })
+    expect(snapshot.draft).toBe('')
+    expect(submit).not.toHaveBeenCalled()
+
+    snapshot = { draft: '不能覆盖 @ 原稿', draftRev: 7, phase: 'plain' }
     setDraft.mockClear()
     notify.mockClear()
     expect(goal.onPick({
       candidate: goalAction, session, position: 'inline', via: 'menu',
-      span: { start: 5, end: 6, draftRev: 5 },
+      span: { start: 5, end: 6, draftRev: 7 },
     })).toBe('handled')
     expect(snapshot.draft).toBe('不能覆盖 @ 原稿')
     expect(setDraft).not.toHaveBeenCalled()
     expect(notify).toHaveBeenCalledWith('error', '请在空白输入框中使用 @目标，当前草稿已保留。')
 
-    snapshot = { draft: '失败也保留 @ 原稿', draftRev: 7, phase: 'plain' }
+    snapshot = { draft: '失败也保留 @ 原稿', draftRev: 9, phase: 'plain' }
     execute.mockResolvedValueOnce({ ok: true, value: { result: { kind: 'error', text: '计划模式不可用' } } })
     bail.mockClear()
     notify.mockClear()
     expect(plan.onPick({
       candidate: planAction, session, position: 'inline', via: 'menu',
-      span: { start: 6, end: 7, draftRev: 7 },
+      span: { start: 6, end: 7, draftRev: 9 },
     })).toBe('handled')
     await vi.waitFor(() => expect(notify).toHaveBeenCalledWith('error', '计划模式不可用'))
     expect(snapshot.draft).toBe('失败也保留 @ 原稿')
@@ -104,7 +128,7 @@ describe('native e-Mate @ references', () => {
     notify.mockClear()
     expect(plan.onPick({
       candidate: planAction, session, position: 'inline', via: 'menu',
-      span: { start: 6, end: 7, draftRev: 6 },
+      span: { start: 6, end: 7, draftRev: 8 },
     })).toBe('handled')
     expect(execute).not.toHaveBeenCalled()
     expect(notify).toHaveBeenCalledWith('error', '输入已变化，未开启计划模式。')

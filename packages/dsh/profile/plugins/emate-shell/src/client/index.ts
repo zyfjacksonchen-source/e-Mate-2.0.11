@@ -50,7 +50,7 @@ import { ThinkingStatusBranding } from './thinking-status.tsx'
 
 export const inject = [
   'slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'conversationEvents', 'theme',
-  'sessionLogDownload', 'inputTriggers', 'remote', 'settingsScope',
+  'sessionLogDownload', 'inputTriggers', 'remote', 'remote.commands', 'settingsScope',
 ]
 
 const desktopUpdateBridge = (): DesktopUpdateBridge | undefined =>
