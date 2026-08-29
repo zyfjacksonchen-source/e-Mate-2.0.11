@@ -124,7 +124,14 @@
       "changed_json_parse": "PASS_19_FILES",
       "manifest_runtime_consistency": "PASS_15_COMPONENTS_19_MANIFESTS_17_RUNTIME_IMPORTS",
       "git_diff_check": "PASS_EXIT_0",
-      "temporary_dependency_links": "REMOVED_BEFORE_COMMIT"
+      "temporary_dependency_links": "REMOVED_BEFORE_COMMIT",
+      "wrong_gitlink_negative_contract": "PASS_FAIL_CLOSED_REGRESSION",
+      "final_contract_source_gate": "PASS_62_TESTS_57_PASS_5_INTENTIONAL_IMPACT_LANE_TOOLCHAIN_SKIPS_0_FAIL",
+      "final_harness_provenance": "PASS_7_OF_7_AFTER_TEMPORARY_LINK_REMOVAL",
+      "final_check_target": "PASS_EXIT_0",
+      "final_check_release_boundary": "PASS_EXIT_0_V9_ZERO_ERRORS",
+      "final_component_inventory": "PASS_15_COMPONENTS_19_JOBS_0_ERRORS",
+      "current_owner_constant_corrections": "NONE_REQUIRED_ALL_GATES_GREEN"
     },
     "downstream_gates": {
       "candidate": "OPEN",

@@ -3297,3 +3297,9 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Historical boundary: `T18.json` 的顶层发布/安装状态、旧 v8 snapshot、formal public closeout、installed acceptance、predecessor/update receipts 全部恢复并保持原字节真相。新 v9 snapshot identity 只记录在 `t21_successor_base_source_binding.current_candidate_snapshot`，不能覆盖历史回执。
 - Candidate invalidation: formal RC run `33223689296` / source `955ddd36bfcdc29155cd7e5a11c96fdd93bc3c87` 因新增 installed P0 使 T21 成为必需产品输入而失效；T00 已请求取消，所有 artifacts 禁止消费或重标。v9 source binding 不等于候选。
 - Evidence ceiling: 只有 v9 source contract 可进入 T00 复核。新的 Build once、Profile composition、candidate、install、update、rollback、signing、desired state、public 与 website 全部 `OPEN`；旧 v8 public/installed truth 不回退也不提升。
+
+## 2026-08-29 · 2.0.15 T18 v9 final source-gate closeout
+
+- Contract GREEN: 当前 v9/b469 tree 的完整 change-impact、component/profile/publication/release 合同组合为 `62 tests / 57 pass / 5 intentional impact-lane Harness-toolchain skips / 0 fail`；wrong-gitlink negative contract 继续 fail closed。没有发现新的 current-owner v8/4787 常量，因此没有额外源码修正。
+- Final gates: 移除临时依赖映射后 Harness provenance `7/7`；`check:target` 与 `check:release-boundary` 均 exit 0，后者返回 v9/0 errors；inventory 为 `15 components / 19 jobs / 0 errors`。
+- Cleanup and ceiling: root 与 package-local 临时 `node_modules` symlink 均已由 trap 移除。此回执只补 source checks；失效 run `33223689296` 仍禁止消费，新的 candidate/build/install/update/rollback/public 门禁继续 `OPEN`。
