@@ -4,7 +4,11 @@ import { readFileSync } from 'node:fs'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { WINDOWS_CAPTION_CONTROLS_WIDTH } from '../../../../../../desktop/e-mate-desktop/src/window-chrome.ts'
-import type { DesktopUpdateBridge, DesktopUpdateState } from '../../../../../../desktop/e-mate-desktop/src/update-presentation.ts'
+import type {
+  DesktopUpdateBridge,
+  DesktopUpdateBridgeWindow,
+  DesktopUpdateState,
+} from '../../../../../../desktop/e-mate-desktop/src/update-presentation.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HeaderControls } from '../src/client/header-controls.tsx'
 import { SettingsChrome } from '../src/client/settings-chrome.tsx'
@@ -33,6 +37,7 @@ function updateBridge(initial?: DesktopUpdateState) {
 
 afterEach(() => {
   cleanup()
+  delete (window as DesktopUpdateBridgeWindow).__EMATE_DESKTOP_UPDATES__
   delete document.body.dataset.dshDesktopMode
   history.replaceState(null, '', '/')
 })
@@ -126,6 +131,36 @@ describe('desktop header controls', () => {
     render(<SettingsChrome updates={failed.bridge} UpdateIcon={Icon} />)
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }))
     expect((await screen.findByRole('alert')).textContent).toBe('更新服务不可用')
+  })
+
+  it('keeps the native Settings action when the context bridge clones update snapshots', async () => {
+    type RootProps = PropsRenderSlots<'settings.action'>
+    const Root = ({ renderSlot }: RootProps) => renderSlot('settings.action', {})
+    const runtime = await SlotTestRuntime.create()
+    await runtime.root.declare({
+      'settings.action': { kind: 'list', scope: 'root' },
+    } as never, Root as never)
+    const state: DesktopUpdateState = { stage: 'failed', retryable: true }
+    ;(window as DesktopUpdateBridgeWindow).__EMATE_DESKTOP_UPDATES__ = {
+      runInteractiveUpdate: vi.fn(async () => {}),
+      getState: () => ({ ...state }),
+      subscribe: () => () => {},
+      cancel: vi.fn(() => false),
+    }
+    runtime.slots.register({
+      name: 'settings.action',
+      id: 'e-mate-settings-header',
+      inject: () => ({
+        updates: (window as DesktopUpdateBridgeWindow).__EMATE_DESKTOP_UPDATES__,
+        UpdateIcon: Icon,
+      }),
+    } as never, SettingsChrome as never)
+
+    const view = runtime.renderRoot()
+
+    expect(view.getByRole('button', { name: '再次检查更新（更新失败，可重试）' })).not.toBeNull()
+    expect(view.container.querySelector('[data-slot-error="settings.action"]')).toBeNull()
+    await runtime.dispose()
   })
 
   it('offers Share only for the nonblank top-level Session owned by the current route', () => {
