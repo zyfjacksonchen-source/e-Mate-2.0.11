@@ -3,7 +3,7 @@ import React from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { COMPOSER_PLACEHOLDER, ComposerConnectors } from '../src/client/composer-connectors.tsx'
+import { COMPOSER_PLACEHOLDER, ComposerConnectors, ComposerMentions } from '../src/client/composer-connectors.tsx'
 import { registerComputerUseTrigger } from '../src/client/composer-mentions.ts'
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 
@@ -17,7 +17,7 @@ afterEach(() => {
 describe('e-Mate 2.0.15 composer projection', () => {
   it('routes external connections into the existing collaboration capability surface', () => {
     const openConnections = vi.fn()
-    render(<ComposerConnectors LinkIcon={Icon} openConnections={openConnections} openMentions={() => {}} />)
+    render(<ComposerConnectors LinkIcon={Icon} openConnections={openConnections} />)
     fireEvent.click(screen.getByRole('button', { name: '打开外部连接能力中心' }))
     expect(openConnections).toHaveBeenCalledOnce()
   })
@@ -25,7 +25,7 @@ describe('e-Mate 2.0.15 composer projection', () => {
   it('keeps the resident live Harness textarea placeholder', () => {
     render(<div data-composer-card="">
       <textarea defaultValue="" placeholder="描述你想要构建的内容" />
-      <ComposerConnectors LinkIcon={Icon} openConnections={() => {}} openMentions={() => {}} />
+      <ComposerMentions openMentions={() => {}} />
     </div>)
     expect(screen.getByPlaceholderText(COMPOSER_PLACEHOLDER)).toBeTruthy()
   })
@@ -33,7 +33,7 @@ describe('e-Mate 2.0.15 composer projection', () => {
   it('keeps the target blocker reason on a disabled textarea', () => {
     render(<div data-composer-card="">
       <textarea disabled placeholder="当前模型不可用，请先选择模型" />
-      <ComposerConnectors LinkIcon={Icon} openConnections={() => {}} openMentions={() => {}} />
+      <ComposerMentions openMentions={() => {}} />
     </div>)
     expect(screen.getByPlaceholderText('当前模型不可用，请先选择模型')).toBeTruthy()
   })
@@ -42,7 +42,7 @@ describe('e-Mate 2.0.15 composer projection', () => {
     const openMentions = vi.fn()
     render(<div data-composer-card="">
       <textarea defaultValue="请处理" />
-      <ComposerConnectors LinkIcon={Icon} openConnections={() => {}} openMentions={openMentions} />
+      <ComposerMentions openMentions={openMentions} />
     </div>)
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
     textarea.setSelectionRange(3, 3)
@@ -87,17 +87,27 @@ describe('e-Mate 2.0.15 composer projection', () => {
     const styles = readFileSync('src/client/home.module.css', 'utf8')
     const nativeRoot = readFileSync('../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.tsx', 'utf8')
     expect(source).toContain("ctx.slots.inject('conversation.input.right'")
+    expect(source).toContain("ctx.slots.inject('conversation.input.left'")
+    expect(source).toMatch(/id: 'e-mate-mentions',[\s\S]*?order: 11/u)
     expect(source).toContain("'/capabilities?category=collaboration'")
     const mentions = readFileSync('src/client/composer-mentions.ts', 'utf8')
     expect(mentions).toContain("name: '电脑操控'")
     expect(mentions).toContain("label: '@电脑操控'")
     expect(source).not.toContain('<computer-use explicit="true">')
+    expect(mentions).not.toMatch(/faceOf\('(?:goal|todos)'\)|kind: 'goal'|kind: 'plan'|<goal|<plan-item/u)
+    expect(mentions).toContain("execute(session.sessionId, '/plan')")
+    expect(mentions).toContain("'slash/input-consume-token'")
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource)\s*\(/u)
     await waitFor(() => expect(styles).toContain('[data-composer-card]'))
     expect(nativeRoot).toMatch(/className=\{clsx\(css\.composerStack[\s\S]*?data-emate-composer-frame-host=""/u)
     expect(home).not.toContain('data-emate-composer-frame-host')
     expect(styles).toMatch(/\[data-emate-composer-frame-host\][\s\S]*?\[data-slot='conversation\.composer\.bar'\]/u)
     expect(styles).toMatch(/\[data-emate-composer-frame-host\][\s\S]*?\[data-slot='conversation\.hero\.workspace'\]/u)
+    expect(styles).toMatch(/\[data-phase='active'\] \[data-emate-composer-frame-host\][\s\S]*?align-self:\s*center;[\s\S]*?width:\s*min\(calc\(var\(--dsh-composer-card-max-width\) \+ 2 \* var\(--dsh-composer-side-clearance\)\), 100%\)/u)
+    expect(styles).toMatch(/\[data-phase='hero'\] \[data-composer-seat\][\s\S]*?padding-bottom:\s*32px/u)
+    expect(styles).toMatch(/\[data-phase='hero'\] \[data-emate-composer-frame-host\][\s\S]*?padding-bottom:\s*0/u)
+    expect(styles).toMatch(/\[data-emate-composer-frame-host\][\s\S]*?\[data-composer-card\][\s\S]*?border-radius:\s*24px !important/u)
+    expect(styles).toMatch(/\[data-emate-composer-frame-host\]:has\(\[data-slot='conversation\.hero\.workspace'\]\)[\s\S]*?border-radius:\s*24px 24px 0 0 !important/u)
     expect(styles).not.toContain('--emate-composer-frame-bottom')
   })
 })
