@@ -18,7 +18,9 @@ import {
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const FIXTURE_BASE_ID = BASE_CONTRACT_ID
-const HARNESS_COMMIT = 'b469c2b99a6c2f35c5e51eaf611f1941e095f90d'
+const HARNESS_COMMIT = '1d3824bcd3400b3761a0ebdd956901752ddc962b'
+const SOURCE_PREDECESSOR_BASE_CONTRACT_ID = 'e-mate-desktop-profile-v9-dsh-b469c2b99a6c'
+const SOURCE_PREDECESSOR_HARNESS_COMMIT = 'b469c2b99a6c2f35c5e51eaf611f1941e095f90d'
 const PREDECESSOR_BASE_CONTRACT_ID = 'e-mate-desktop-profile-v8-dsh-4787caf39134'
 const PREDECESSOR_HARNESS_COMMIT = '4787caf39134df190105b272da0dd2ba893d4d75'
 const RUNTIME_IMPORTS = [
@@ -215,7 +217,7 @@ describe('repository release boundary', () => {
     const t18 = JSON.parse(readFileSync(join(root, 'docs/2.0.15/evidence/T18.json'), 'utf8'))
     assert.equal(boundary.valid, true, boundary.errors.join('\n'))
     assert.deepEqual(boundary.errors, [])
-    assert.equal(BASE_CONTRACT_ID, `e-mate-desktop-profile-v9-dsh-${HARNESS_COMMIT.slice(0, 12)}`)
+    assert.equal(BASE_CONTRACT_ID, `e-mate-desktop-profile-v10-dsh-${HARNESS_COMMIT.slice(0, 12)}`)
     assert.equal(boundary.baseContract.id, BASE_CONTRACT_ID)
     assert.equal(boundary.baseContract.harness_commit, HARNESS_COMMIT)
     assert.equal(boundary.baseContract.schedule_protocol_floor, 1)
@@ -244,6 +246,8 @@ describe('repository release boundary', () => {
     assert.equal(t18.formal_release_closeout.base_and_harness.harness_commit, PREDECESSOR_HARNESS_COMMIT)
     assert.equal(t18.t21_successor_base_source_binding.predecessor_base_contract_id, PREDECESSOR_BASE_CONTRACT_ID)
     assert.equal(t18.t21_successor_base_source_binding.predecessor_harness_commit, PREDECESSOR_HARNESS_COMMIT)
+    assert.equal(t18.session_draft_successor_base_source_binding.predecessor_base_contract_id, SOURCE_PREDECESSOR_BASE_CONTRACT_ID)
+    assert.equal(t18.session_draft_successor_base_source_binding.predecessor_harness_commit, SOURCE_PREDECESSOR_HARNESS_COMMIT)
     const retired = JSON.parse(readFileSync(join(root, 'packages/dsh-plugin-search-mcp/package.json'), 'utf8'))
     assert.deepEqual(retired.eMate.component.base_contracts, ['e-mate-desktop-profile-v6-dsh-2bc16230975f'])
     assert.equal(retired.eMate.harnessCommit, '2bc16230975f6cf02aa1b283b1f86de44007b059')

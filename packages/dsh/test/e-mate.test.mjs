@@ -347,7 +347,7 @@ test('online updates admit only one live detached helper', () => {
 
 test('runtime resolves only the exact Harness source', () => {
   const runtime = resolveHarness()
-  assert.equal(HARNESS_COMMIT, 'b469c2b99a6c2f35c5e51eaf611f1941e095f90d')
+  assert.equal(HARNESS_COMMIT, '1d3824bcd3400b3761a0ebdd956901752ddc962b')
   assert.equal(runtime.version, HARNESS_VERSION)
   assert.equal(runtime.commit, HARNESS_COMMIT)
   assert.ok(['development-source', 'packaged-runtime'].includes(runtime.source))
@@ -677,7 +677,7 @@ test('managed profile installation is idempotent', () => {
     assert.doesNotMatch(home, /\b(?:createPortal|querySelector|MutationObserver)\b/)
     assert.match(homeCss, /:global\(\[data-phase='hero'\] \[data-composer-seat\]\) \{\s*padding-bottom:\s*32px;/)
     assert.match(homeCss, /:global\(\[data-phase='hero'\] \[data-emate-composer-frame-host\]\) \{\s*padding-bottom:\s*0;/)
-    assert.match(homeCss, /:global\(\[data-phase='active'\] \[data-emate-composer-frame-host\]\) \{\s*align-self:\s*center;\s*width:\s*min\(calc\(var\(--dsh-composer-card-max-width\) \+ 2 \* var\(--dsh-composer-side-clearance\)\), 100%\);/)
+    assert.match(homeCss, /:global\(\[data-phase='active'\] \[data-emate-composer-frame-host\]\) \{\s*align-self:\s*center;\s*width:\s*min\(var\(--dsh-composer-card-max-width\), 100%\);/)
     assert.match(homeCss, /\[data-emate-composer-frame-host\] > :has\(> \[data-slot='conversation\.hero\.workspace'\]\)/)
     assert.match(homeCss, /:global\(\[data-emate-composer-frame-host\] \[data-slot='conversation\.composer\.bar'\] \[data-composer-card\]\) \{[\s\S]*?border-radius:\s*24px !important;/)
     assert.match(homeCss, /:global\(\[data-emate-composer-frame-host\]:has\(\[data-slot='conversation\.hero\.workspace'\]\) \[data-slot='conversation\.composer\.bar'\] \[data-composer-card\]\) \{\s*border-radius:\s*24px 24px 0 0 !important;/)

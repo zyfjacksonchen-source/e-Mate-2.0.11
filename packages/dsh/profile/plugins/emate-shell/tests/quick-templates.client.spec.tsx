@@ -63,9 +63,10 @@ describe('T21 quick start templates', () => {
     expect(screen.queryByText(/个模板/u)).toBeNull()
     const cards = screen.getAllByRole('button')
     expect(cards).toHaveLength(4)
-    expect(cards.map(card => card.querySelector('[data-emate-template-number]')?.textContent)).toEqual(['01', '02', '03', '04'])
+    expect(document.querySelector('[data-emate-template-number]')).toBeNull()
     expect(cards.every(card => card.querySelector('svg') !== null)).toBe(true)
     const css = readFileSync('src/client/quick-templates.module.css', 'utf8')
+    expect(css).not.toMatch(/\.number\s*\{/u)
     expect(css).toMatch(/\.grid button\s*\{[\s\S]*border:\s*1px solid var\(--emate-color-rule\);[\s\S]*background:[^;]*var\(--emate-color-surface\)/u)
     expect(css).toMatch(/\.grid button\s*\{[\s\S]*box-shadow:(?!\s*none)/u)
     for (const [index, [title, , draft]] of OFFICE_TEMPLATES.entries()) {

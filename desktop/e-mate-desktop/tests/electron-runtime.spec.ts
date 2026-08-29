@@ -542,7 +542,7 @@ describe('Electron compatibility runtime', () => {
     await release()
   })
 
-  it('single-flights one Windows chooser and opens a new generation after cancellation', async () => {
+  it('single-flights one Windows chooser and opens a new generation after cancellation or failure', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     let resolveDialog!: (result: { canceled: boolean; filePaths: string[] }) => void
     electron.dialog.showOpenDialog.mockReturnValue(
@@ -562,6 +562,12 @@ describe('Electron compatibility runtime', () => {
     electron.dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: ['C:\\Next'] })
     await expect(runtime.pickDirectory()).resolves.toBe('C:\\Next')
     expect(electron.dialog.showOpenDialog).toHaveBeenCalledTimes(2)
+
+    electron.dialog.showOpenDialog.mockRejectedValueOnce(new Error('dialog unavailable'))
+    await expect(runtime.pickDirectory()).rejects.toThrow('dialog unavailable')
+    electron.dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: ['C:\\Recovered'] })
+    await expect(runtime.pickDirectory()).resolves.toBe('C:\\Recovered')
+    expect(electron.dialog.showOpenDialog).toHaveBeenCalledTimes(4)
 
     await release()
   })

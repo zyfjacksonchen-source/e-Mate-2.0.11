@@ -24,7 +24,7 @@ const releaseCache = join(repositoryRoot, '.release-cache')
 mkdirSync(releaseCache, { recursive: true })
 const releaseRoot = await mkdtemp(join(releaseCache, 'component-release-test-'))
 const FIXTURE_BASE_ID = BASE_CONTRACT_ID
-const HARNESS_COMMIT = 'b469c2b99a6c2f35c5e51eaf611f1941e095f90d'
+const HARNESS_COMMIT = '1d3824bcd3400b3761a0ebdd956901752ddc962b'
 
 function createShellBoundaryFixture() {
   const fixture = mkdtempSync(join(releaseRoot, 'shell-boundary-'))

@@ -110,6 +110,7 @@ describe('e-Mate 2.0.15 identity and settings fidelity', () => {
         <button type="button" data-settings-section-id="models">模型</button>
         <button type="button" data-settings-section-id="plugins">插件</button>
         <button type="button" data-settings-section-id="agent-presets">Agent 预设</button>
+        <button type="button" data-settings-section-id="vision-toolkit">视觉工具</button>
         <button type="button" data-settings-section-id="capabilities">能力中心</button>
       </nav>
       <SettingsChrome />
@@ -118,13 +119,15 @@ describe('e-Mate 2.0.15 identity and settings fidelity', () => {
     const models = screen.getByText('模型').closest('button') as HTMLButtonElement
     const plugins = screen.getByText('插件').closest('button') as HTMLButtonElement
     const presets = screen.getByText('Agent 预设').closest('button') as HTMLButtonElement
+    const visionToolkit = screen.getByText('视觉工具').closest('button') as HTMLButtonElement
     const capabilities = screen.getByRole('button', { name: '能力中心' }) as HTMLButtonElement
     expect(profile.hidden).toBe(false)
     expect(capabilities.hidden).toBe(false)
     expect(models.hidden).toBe(true)
     expect(plugins.hidden).toBe(true)
     expect(presets.hidden).toBe(true)
-    expect(document.querySelectorAll('[data-settings-section-id]')).toHaveLength(5)
+    expect(visionToolkit.hidden).toBe(true)
+    expect(document.querySelectorAll('[data-settings-section-id]')).toHaveLength(6)
     const source = readFileSync(join(process.cwd(), 'src/client/settings-chrome.tsx'), 'utf8')
     expect(source).not.toContain('SETTINGS_BRAND_COPY')
     expect(source).not.toContain('createTreeWalker')

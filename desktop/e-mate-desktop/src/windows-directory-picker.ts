@@ -1,4 +1,4 @@
-/** Electron-backed Windows adapter for the native DSH directory-picker seam. */
+/** Electron-backed desktop adapter for the native DSH directory-picker seam. */
 
 import type { Context } from '@deepseek-ai/cordis'
 import {
@@ -7,7 +7,7 @@ import {
 } from '@deepseek-ai/dsh-host-directory-picker'
 import type {} from './runtime.ts'
 
-/** Native picker provider used only by the Windows desktop profile. */
+/** Native picker provider used by the macOS and Windows desktop profiles. */
 export class DesktopWindowsDirectoryPicker extends DirectoryPicker {
   static inject = ['desktopRuntime']
 
@@ -34,8 +34,8 @@ export class DesktopWindowsDirectoryPicker extends DirectoryPicker {
 
   constructor(ctx: Context) {
     super(ctx)
-    if (ctx.desktopRuntime.platform !== 'win32') {
-      throw new Error('@e-mate/desktop: Windows directory picker requires a win32 desktop runtime')
+    if (ctx.desktopRuntime.platform !== 'darwin' && ctx.desktopRuntime.platform !== 'win32') {
+      throw new Error('@e-mate/desktop: directory picker requires a darwin or win32 desktop runtime')
     }
   }
 
