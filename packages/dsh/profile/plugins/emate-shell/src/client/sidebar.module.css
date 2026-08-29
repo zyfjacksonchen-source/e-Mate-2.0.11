@@ -9,6 +9,15 @@
   --emate-muted: oklch(0.508991 0.006202 106.618);
   --emate-rule: oklch(0.905018 0.008065 106.56);
   --emate-danger: oklch(0.514636 0.184396 27.456);
+  --emate-color-canvas: var(--emate-canvas);
+  --emate-color-workspace: var(--emate-panel);
+  --emate-color-surface: var(--emate-panel);
+  --emate-color-hover: var(--emate-hover);
+  --emate-color-raised: var(--emate-raised);
+  --emate-color-ink: var(--emate-ink);
+  --emate-color-muted: var(--emate-muted);
+  --emate-color-rule: var(--emate-rule);
+  --emate-color-brand: var(--emate-brand);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -481,10 +490,6 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-}
-
-.settingsOwner :global(button[data-emate-settings-trigger]) {
-  display: none !important;
 }
 
 .footer > :global(button),

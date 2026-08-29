@@ -31,13 +31,12 @@ import { registerActivityFold } from './activity-fold.tsx'
 import './chat-chrome.module.css'
 import { ComposerConnectors } from './composer-connectors.tsx'
 import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from './composer-mentions.ts'
-import { HomeProjection } from './home.tsx'
+import { HomeProjection, SchedulesOverlayProjection } from './home.tsx'
 import { HeaderControls } from './header-controls.tsx'
 import { IdentityGate } from './identity.tsx'
 import { ToolImageGallery, toolImagesDefinition } from './image-gallery.tsx'
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
 import { registerMessageModeSettings } from './message-mode-settings.tsx'
-import { registerScheduleTrigger } from './schedules-page.tsx'
 import { isGeneralWorkspace, SidebarRoot } from './sidebar.tsx'
 import { SessionRouteProjection } from './session-route.tsx'
 import { HiddenSessionLogExport } from './session-share.tsx'
@@ -79,18 +78,12 @@ export function registerHeaderControls(ctx: any): void {
         const scheme = ctx.theme.getTheme().active.colorScheme
         ctx.theme.setTheme(scheme === 'dark' ? 'light' : 'dark')
       },
-      openSettings: () => {
-        document.querySelector<HTMLButtonElement>('[data-emate-settings-trigger]')?.click()
-      },
       hooks: { sessionLogDownload: ctx.sessionLogDownload.store },
       requestDownload: (sessionId: string) => ctx.sessionLogDownload.download(sessionId),
       dismissDownload: (sessionId: string) => { ctx.sessionLogDownload.dismiss(sessionId) },
-      updates: desktopUpdateBridge(),
       callShare: (endpoint: string, payload: unknown) => ctx.connection.rpc.call('/emate.share', endpoint, payload),
       LightIcon: IconLightOutline16,
       DarkIcon: IconDarkOutline16,
-      UpdateIcon: IconRefreshOutline16,
-      SettingsIcon: IconSettingsOutline16,
     }),
   }, HeaderControls))
 }
@@ -326,7 +319,6 @@ export function apply(ctx: any): void {
   const messageMode = registerMessageModeSettings(ctx)
   registerActivityFold(ctx, messageMode)
   registerComputerUseTrigger(ctx)
-  registerScheduleTrigger(ctx)
   registerMentionSources(ctx)
   registerManagedPresetSurfaces(ctx)
   registerRouteScopedConversationHeader(ctx)
@@ -424,17 +416,21 @@ export function apply(ctx: any): void {
     }, SidebarRoot),
     'emate-shell: sidebar slot',
   )
+  ctx.slots.inject('conversation.hero.content', () => ctx.slots.register({
+    name: 'conversation.hero.content',
+    id: 'e-mate-home',
+    inject: () => ({
+      prepareTemplateDraft: (prompt: string) => prepareTemplateDraftFromRoute(ctx, prompt),
+    }),
+  }, HomeProjection))
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay',
-    id: 'e-mate-home',
+    id: 'e-mate-schedules',
     order: -20,
     inject: () => ({
-      openSession: openSessionFromRoute,
-      prepareTemplateDraft: (prompt: string) => prepareTemplateDraftFromRoute(ctx, prompt),
       prepareSchedulePrompt: (prompt: string, sessionId?: string) =>
         prepareSchedulePromptFromRoute(ctx, prompt, sessionId),
       callSchedules: () => ctx.connection.rpc.call('/emate.schedules', 'list', {}),
-      closeDetails: () => { ctx.layout.closeDetails() },
       toggleSidebar: () => { ctx.layout.toggleSidebar() },
       PanelIcon: IconPanelLeftOutline16,
       scheduleIcons: {
@@ -444,7 +440,7 @@ export function apply(ctx: any): void {
         delete: IconTrashOutline16,
       },
     }),
-  }, HomeProjection))
+  }, SchedulesOverlayProjection))
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay',
     id: 'e-mate-identity-gate',
