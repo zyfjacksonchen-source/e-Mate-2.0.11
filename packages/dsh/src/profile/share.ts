@@ -205,7 +205,7 @@ export function apply(ctx: any, config: ShareConfig = {}): void {
       if (endpoint === 'status') {
         if (!exact(payload, [])) return badRequest('status')
         try {
-          const response = await request(`${root}/healthz`, {
+          const response = await request(`${root}/v2/healthz`, {
             method: 'GET',
             redirect: 'error',
             signal: AbortSignal.timeout(10_000),
@@ -290,7 +290,7 @@ export function apply(ctx: any, config: ShareConfig = {}): void {
           return badRequest('revoke')
         }
         try {
-          const response = await request(`${root}/v1/shares/${payload.share_id}`, {
+          const response = await request(`${root}/v2/shares/${payload.share_id}`, {
             method: 'DELETE',
             redirect: 'error',
             signal: AbortSignal.timeout(30_000),

@@ -107,6 +107,38 @@ const activeSession = async (url, init) => {
   return new Response(null, { status: 200 })
 }
 
+test('keeps the public 2.0.13 contract while exposing strict versioned health and revoke', async () => {
+  const env = environment()
+  assert.deepEqual(await (await handleRequest(
+    new Request('https://share.example/healthz'), env, activeSession,
+  )).json(), { schema_version: 1, ready: true })
+  assert.deepEqual(await (await handleRequest(
+    new Request('https://share.example/v2/healthz'), env, activeSession,
+  )).json(), {
+    schema_version: 1,
+    service: 'emate-share',
+    version: 1,
+    ready: true,
+  })
+
+  const session = '9'.repeat(64)
+  const created = await (await handleRequest(authorizedRequest('https://share.example/v1/shares', {
+    method: 'POST',
+    headers: { 'content-type': 'application/zip', 'x-emate-session-sha256': session },
+    body: new Uint8Array([1]),
+  }), env, activeSession)).json()
+  const strictUrl = `https://share.example/v2/shares/${created.share.id}`
+  assert.equal((await handleRequest(authorizedRequest(strictUrl, { method: 'DELETE' }), env, activeSession)).status, 400)
+  assert.equal((await handleRequest(authorizedRequest(strictUrl, {
+    method: 'DELETE',
+    headers: { 'x-emate-session-sha256': '8'.repeat(64) },
+  }), env, activeSession)).status, 403)
+  assert.equal((await handleRequest(authorizedRequest(strictUrl, {
+    method: 'DELETE',
+    headers: { 'x-emate-session-sha256': session },
+  }), env, activeSession)).status, 200)
+})
+
 test('creates, opens, downloads, and revokes one authenticated DSH archive', async () => {
   const env = environment()
   const create = await handleRequest(authorizedRequest('https://share.example/v1/shares', {
@@ -146,14 +178,14 @@ test('creates, opens, downloads, and revokes one authenticated DSH archive', asy
   assert.deepEqual(new Uint8Array(await archive.arrayBuffer()), new Uint8Array([80, 75, 3, 4]))
 
   const revoked = await handleRequest(authorizedRequest(
-    `https://share.example/v1/shares/${created.share.id}`,
+    `https://share.example/v2/shares/${created.share.id}`,
     { method: 'DELETE', headers: { 'x-emate-session-sha256': 'a'.repeat(64) } },
   ), env, activeSession)
   assert.deepEqual(await revoked.json(), { schema_version: 1, revoked: true })
   assert.equal((await handleRequest(new Request(created.share.public_url), env, activeSession)).status, 404)
 })
 
-test('keeps revoke owner-only and accepts an already-removed share idempotently', async () => {
+test('keeps legacy v1 revoke owner-only and accepts an already-removed share idempotently', async () => {
   const env = environment()
   const session = 'b'.repeat(64)
   const created = await (await handleRequest(authorizedRequest('https://share.example/v1/shares', {
@@ -166,7 +198,7 @@ test('keeps revoke owner-only and accepts an already-removed share idempotently'
   }), env, activeSession)).json()
   const url = `https://share.example/v1/shares/${created.share.id}`
 
-  const revoke = { method: 'DELETE', headers: { 'x-emate-session-sha256': session } }
+  const revoke = { method: 'DELETE' }
   const denied = await handleRequest(authorizedRequest(url, revoke, 'user-2'), env, activeSession)
   assert.equal(denied.status, 403)
   assert.equal(env.SHARES.objects.size, 2)
@@ -177,7 +209,7 @@ test('keeps revoke owner-only and accepts an already-removed share idempotently'
 
 test('versions health and binds revoke to the exact owner/session index', async () => {
   const env = environment()
-  const health = await handleRequest(new Request('https://share.example/healthz'), env, activeSession)
+  const health = await handleRequest(new Request('https://share.example/v2/healthz'), env, activeSession)
   assert.deepEqual(await health.json(), {
     schema_version: 1,
     service: 'emate-share',
@@ -191,7 +223,7 @@ test('versions health and binds revoke to the exact owner/session index', async 
     headers: { 'content-type': 'application/zip', 'x-emate-session-sha256': session },
     body: new Uint8Array([1]),
   }), env, activeSession)).json()
-  const url = `https://share.example/v1/shares/${created.share.id}`
+  const url = `https://share.example/v2/shares/${created.share.id}`
 
   const denied = await handleRequest(authorizedRequest(url, {
     method: 'DELETE',

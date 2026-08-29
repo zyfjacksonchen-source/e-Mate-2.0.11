@@ -8,6 +8,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apply as applyVisionToolkit } from '../.build/upstream-lib/index.js'
+import { withResolvedVisionGlanceImages } from './attachment-source.ts'
 
 export const name = '@e-mate/dsh-plugin-vision-toolkit'
 export const inject = [
@@ -297,6 +298,9 @@ export async function apply(ctx: VisionContext): Promise<() => void> {
     },
     assertWriteAllowed(exec) {
       assertArtifactWrite(ctx, exec)
+    },
+    resolveGlanceImages(images, exec, run) {
+      return withResolvedVisionGlanceImages(ctx, images, exec, run)
     },
   })
   type Status = Awaited<ReturnType<typeof runtimeStatus>>

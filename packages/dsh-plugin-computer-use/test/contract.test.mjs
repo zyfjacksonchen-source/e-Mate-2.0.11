@@ -68,7 +68,10 @@ test('Computer Use projects cached native readiness and permission actions throu
   const effects = []
   const permissionCalls = []
   let statusCalls = 0
-  let snapshot = { ready: true, accessibility: 'granted', screenRecording: 'granted' }
+  let snapshot = {
+    ready: true, accessibility: 'granted', screenRecording: 'granted',
+    applicationAccess: { allowAllApps: false, readGrants: 1, controlGrants: 1 },
+  }
   const service = {
     status() {
       statusCalls += 1
@@ -98,7 +101,7 @@ test('Computer Use projects cached native readiness and permission actions throu
   const capability = definitions[0]
 
   assert.deepEqual(await capability.status(), {
-    state: 'ready', detail: '原生 helper、辅助功能和屏幕录制权限均已就绪。', action_ids: [],
+    state: 'ready', detail: '原生 helper、macOS 权限和应用操作授权均已就绪。', action_ids: [],
   })
   assert.equal(statusCalls, 1, 'capability list reads only the cached service status once')
 
@@ -111,6 +114,14 @@ test('Computer Use projects cached native readiness and permission actions throu
   await capability.invoke('open-accessibility-settings', {}, signal)
   await capability.invoke('open-screen-recording-settings', {}, signal)
   assert.deepEqual(permissionCalls, [['accessibility', signal], ['screen-recording', signal]])
+
+  snapshot = {
+    ready: true, accessibility: 'granted', screenRecording: 'granted',
+    applicationAccess: { allowAllApps: false, readGrants: 0, controlGrants: 0 },
+  }
+  assert.deepEqual(await capability.status(), {
+    state: 'setup-required', detail: 'macOS 权限已就绪，但尚未在 Computer Use 设置中授权任何应用操作。', action_ids: [],
+  })
 
   snapshot = { ready: false, accessibility: 'unavailable', screenRecording: 'unavailable', lastError: 'provider failed' }
   assert.deepEqual(await capability.status(), { state: 'failed', detail: 'provider failed', action_ids: [] })

@@ -303,6 +303,7 @@ test('find-skill component builds prepare its exact pinned upstream workspace', 
 
 test('component builds verify emitted imports before accepting their tests', () => {
   const runner = readFileSync('scripts/component-run.mjs', 'utf8')
+  assert.match(runner, /for \(const component of components\) \{[\s\S]*?'install'[\s\S]*?prepareHarnessBaseImports\([\s\S]*?\n\}\n\nfor \(const component of components\) \{[\s\S]*?'run', 'build'/u)
   assert.match(runner, /'run', 'build'[\s\S]*?verifyComponentRuntimeImports\(entries, component, target\)[\s\S]*?'run', 'test'/u)
 })
 

@@ -50,7 +50,7 @@ import { ThinkingStatusBranding } from './thinking-status.tsx'
 
 export const inject = [
   'slots', 'layout', 'sessions', 'workspaces', 'connection', 'conversation', 'conversationEvents', 'theme',
-  'sessionLogDownload', 'inputTriggers', 'remote', 'settingsScope',
+  'sessionLogDownload', 'inputTriggers', 'remote', 'remote.commands', 'settingsScope',
 ]
 
 const desktopUpdateBridge = (): DesktopUpdateBridge | undefined =>
@@ -96,7 +96,7 @@ function SkipTargetOnboarding({ complete }: { complete: () => void }) {
 function HiddenSessionStats() { return null }
 function HiddenProductSurface() { return null }
 
-const STANDALONE_PRODUCT_ROUTES = new Set(['/schedules', '/capabilities'])
+const STANDALONE_PRODUCT_ROUTES = new Set(['/settings', '/schedules', '/capabilities'])
 
 function StandaloneProductSurface() {
   return createElement('div', {

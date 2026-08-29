@@ -2669,6 +2669,10 @@ test('delivers only the authenticated tenant runtime model routes without exposi
   try {
     assert.equal((await fetch(`${baseUrl}/v1/runtime-models`)).status, 401);
     assert.equal((await fetch(`${baseUrl}/v1/runtime-models?all=true`, { headers: auth() })).status, 400);
+    assert.equal((await fetch(`${baseUrl}/v1/runtime-models?client_version=`, { headers: auth() })).status, 400);
+    assert.equal((await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.15_rc1`, { headers: auth() })).status, 400);
+    assert.equal((await fetch(`${baseUrl}/v1/runtime-models?client_version=${'a'.repeat(65)}`, { headers: auth() })).status, 400);
+    assert.equal((await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.15&client_version=2.0.16`, { headers: auth() })).status, 400);
     assert.equal((await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.12&extra=true`, { headers: auth() })).status, 400);
     assert.equal((await fetch(`${baseUrl}/v1/runtime-models`, { method: 'POST', headers: auth() })).status, 405);
     const legacyResponse = await fetch(`${baseUrl}/v1/runtime-models`, { headers: auth() });
@@ -2702,7 +2706,7 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         upstreamApiKey: searchKey,
       },
     });
-    for (const clientVersion of ['2.0.13', '2.0.14', '2.0.15']) {
+    for (const clientVersion of ['2.0.11', '2.0.13', '2.0.14', '2.0.15', '2.0.16', '99.0.0', '2.1.0-rc.1']) {
       const currentClientResponse = await fetch(
         `${baseUrl}/v1/runtime-models?client_version=${clientVersion}`,
         { headers: auth() },
@@ -2710,18 +2714,8 @@ test('delivers only the authenticated tenant runtime model routes without exposi
       assert.equal(currentClientResponse.status, 200);
       assert.deepEqual(await currentClientResponse.json(), releasedClientBody);
     }
-    const unknownClientResponse = await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.16`, {
-      headers: auth(),
-    });
-    assert.equal(unknownClientResponse.status, 400);
-    assert.deepEqual(await unknownClientResponse.json(), {
-      error: {
-        code: 'UNSUPPORTED_CLIENT_VERSION',
-        message: 'Unsupported runtime models client version',
-      },
-    });
-    assert.equal(enabledCalls.get(searchCredentialRoute.id), 4);
-    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 4);
+    assert.equal(enabledCalls.get(searchCredentialRoute.id), 8);
+    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 8);
     assert.equal(keyCalls.includes(internalDeepSeekRoute.id), false);
     const catalogResponse = await (await fetch(`${baseUrl}/v1/models`, { headers: auth() })).json() as {
       models: Array<{ id: string }>;

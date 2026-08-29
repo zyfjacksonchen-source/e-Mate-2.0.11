@@ -205,7 +205,7 @@ index = replaceExactlyOnce(
                 options.validateConfig?.(runtime.config);
             return runtime;
         };
-        const exposure = new VisionToolExposure(ctx, () => createVisionTools(currentRuntime, value => artifacts.presentationMeta(value), lifecycle.signal, options.assertWriteAllowed));`,
+        const exposure = new VisionToolExposure(ctx, () => createVisionTools(currentRuntime, value => artifacts.presentationMeta(value), lifecycle.signal, options.assertWriteAllowed, options.resolveGlanceImages));`,
   'managed execution policy validation',
 )
 index = replaceExactlyOnce(
@@ -417,7 +417,7 @@ let tools = await readPinnedText(toolsPath)
 tools = replaceExactlyOnce(
   tools,
   'export function createVisionTools(source, projectPresentation = presentationIdentity, lifecycleSignal) {',
-  'export function createVisionTools(source, projectPresentation = presentationIdentity, lifecycleSignal, assertWriteAllowed) {',
+  'export function createVisionTools(source, projectPresentation = presentationIdentity, lifecycleSignal, assertWriteAllowed, resolveGlanceImages) {',
   'artifact write policy hook',
 )
 const requestBefore = `                const request = {
@@ -436,6 +436,16 @@ const requestAfter = `                const query = args.query?.trim();
                 };`
 if (!tools.includes(requestBefore)) throw new Error('pinned dsh-vision-toolkit glance contract changed')
 tools = tools.replace(requestBefore, requestAfter)
+tools = replaceExactlyOnce(
+  tools,
+  '                return runtimeFrom(source).glance(request, callOptions(exec, args.timeoutMs, lifecycleSignal));',
+  `                const runtime = runtimeFrom(source);
+                const options = callOptions(exec, args.timeoutMs, lifecycleSignal);
+                return resolveGlanceImages === undefined
+                    ? runtime.glance(request, options)
+                    : resolveGlanceImages(request.images, exec, images => runtime.glance({ ...request, images }, options));`,
+  'glance attachment resolver',
+)
 
 function guardTool(sourceText, toolName, conditional = false) {
   const marker = `            name: '${toolName}',`
@@ -567,6 +577,7 @@ export declare function apply(
     validateConfig?(value: unknown): void
     assertWriteAllowed?(exec: { agent?: { session?: unknown } }): void
     installImageInputBridge?(runtime: unknown): () => void
+    resolveGlanceImages?<T>(images: readonly string[], exec: { signal?: AbortSignal; agent?: { session?: unknown } }, run: (images: readonly string[]) => Promise<T>): Promise<T>
   },
 ): Promise<() => void>
 `)

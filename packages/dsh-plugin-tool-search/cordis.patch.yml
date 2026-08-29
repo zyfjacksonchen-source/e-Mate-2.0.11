@@ -9,6 +9,7 @@
           - browser_*
           - create_goal
           - edit
+          - e_mate_memory_*
           - get_goal
           - glob
           - grep

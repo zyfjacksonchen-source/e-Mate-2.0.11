@@ -812,7 +812,7 @@ test('public share RPC publishes the native DSH Session ZIP and revokes the retu
     ok: true,
     value: { schema_version: 1, stage: 'revoking', revoked: true },
   })
-  assert.equal(requests.at(-1).url, `https://share.example/v1/shares/${shareId}`)
+  assert.equal(requests.at(-1).url, `https://share.example/v2/shares/${shareId}`)
   assert.equal((await registration.handler('create', {})).error.code, 'bad-request')
   assert.equal((await registration.handler('status', [])).error.code, 'bad-request')
 })

@@ -59,6 +59,7 @@ test('Host keeps health/create/list/revoke on one versioned staged schema', asyn
     ok: true,
     value: { schema_version: 1, stage: 'preparing', service_version: 1, ready: true },
   })
+  assert.equal(requests[0]?.url, 'https://share.example/v2/healthz')
   assert.equal((await call('create', { session_id: 'session-1' }) as any).value.stage, 'created')
   assert.equal((await call('list', { session_id: 'session-1' }) as any).value.stage, 'listing')
   assert.deepEqual(await call('revoke', { share_id: SHARE_ID, session_id: 'session-1' }), {
@@ -66,6 +67,7 @@ test('Host keeps health/create/list/revoke on one versioned staged schema', asyn
     value: { schema_version: 1, stage: 'revoking', revoked: true },
   })
   const revoke = requests.at(-1)
+  assert.equal(revoke?.url, `https://share.example/v2/shares/${SHARE_ID}`)
   assert.equal(new Headers(revoke?.init.headers).get('x-emate-session-sha256'),
     '84097828fc31a8c8d29210df48901a85de7fd013f686b17be77d1be29cb7a98b')
 })

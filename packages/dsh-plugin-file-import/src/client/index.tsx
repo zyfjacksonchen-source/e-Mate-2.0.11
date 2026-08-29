@@ -16,6 +16,7 @@ import {
   WORKSPACE_DROP_TARGET,
   type ImportedFile,
 } from '../contract.ts'
+import { normalizedImage } from './image.ts'
 import css from './style.module.css'
 
 export const inject = ['slots', 'connection', 'inputTriggers']
@@ -50,10 +51,6 @@ function imageType(file: File): string | undefined {
   if (file.type !== '') return undefined
   const extension = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase()
   return IMAGE_MEDIA_BY_EXTENSION[extension]
-}
-
-function normalizedImage(file: File, mediaType: string): File {
-  return file.type === mediaType ? file : new File([file], file.name, { type: mediaType, lastModified: file.lastModified })
 }
 
 function dropImages(files: readonly File[]): void {
@@ -163,17 +160,19 @@ export function FileImportControl({ sessionId, input, inputActions, isLoopback, 
     setBusy(false)
   }, [sessionId])
 
-  const intake = useCallback((files: readonly File[]) => {
+  const intake = useCallback(async (files: readonly File[]) => {
+    const requestSession = sessionId
     const images: File[] = []
     const ordinary: File[] = []
     for (const file of files) {
       const mediaType = imageType(file)
       if (mediaType === undefined) ordinary.push(file)
-      else images.push(normalizedImage(file, mediaType))
+      else images.push(await normalizedImage(file, mediaType))
     }
+    if (owner.current !== requestSession) return
     if (images.length > 0) dropImages(images)
     if (ordinary.length > 0) void importFiles(ordinary)
-  }, [importFiles])
+  }, [importFiles, sessionId])
 
   useEffect(() => {
     const onDrop = (event: DragEvent): void => {
@@ -197,7 +196,7 @@ export function FileImportControl({ sessionId, input, inputActions, isLoopback, 
       // state that would otherwise be cleared by its blocked bubble listener.
       window.dispatchEvent(new Event('dragend'))
       const routedFiles = route === 'intake-all' ? files : files.filter(file => imageType(file) !== undefined)
-      if (routedFiles.length > 0) queueMicrotask(() => { intake(routedFiles) })
+      if (routedFiles.length > 0) queueMicrotask(() => { void intake(routedFiles) })
     }
     const onPaste = (event: ClipboardEvent): void => {
       if (!(event.target instanceof HTMLTextAreaElement) || event.clipboardData === null) return
@@ -211,7 +210,7 @@ export function FileImportControl({ sessionId, input, inputActions, isLoopback, 
       if (!ordinary && !normalizeImage) return
       event.preventDefault()
       event.stopImmediatePropagation()
-      intake(fallback)
+      void intake(fallback)
     }
     document.addEventListener('drop', onDrop, true)
     document.addEventListener('paste', onPaste, true)
@@ -233,7 +232,7 @@ export function FileImportControl({ sessionId, input, inputActions, isLoopback, 
   const choose = (event: ChangeEvent<HTMLInputElement>): void => {
     const files = Array.from(event.currentTarget.files ?? [])
     event.currentTarget.value = ''
-    intake(files)
+    void intake(files)
   }
 
   return <span className={css.root}>
