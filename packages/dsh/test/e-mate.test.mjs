@@ -677,7 +677,7 @@ test('managed profile installation is idempotent', () => {
     assert.doesNotMatch(home, /\b(?:createPortal|querySelector|MutationObserver)\b/)
     assert.match(homeCss, /:global\(\[data-phase='hero'\] \[data-composer-seat\]\) \{\s*padding-bottom:\s*32px;/)
     assert.match(homeCss, /:global\(\[data-phase='hero'\] \[data-emate-composer-frame-host\]\) \{\s*padding-bottom:\s*0;/)
-    assert.match(homeCss, /:global\(\[data-phase='active'\] \[data-emate-composer-frame-host\]\) \{\s*align-self:\s*center;\s*width:\s*min\(calc\(var\(--dsh-composer-card-max-width\) \+ 2 \* var\(--dsh-composer-side-clearance\)\), 100%\);/)
+    assert.match(homeCss, /:global\(\[data-phase='active'\] \[data-emate-composer-frame-host\]\) \{\s*align-self:\s*center;\s*width:\s*min\(var\(--dsh-composer-card-max-width\), 100%\);/)
     assert.match(homeCss, /\[data-emate-composer-frame-host\] > :has\(> \[data-slot='conversation\.hero\.workspace'\]\)/)
     assert.match(homeCss, /:global\(\[data-emate-composer-frame-host\] \[data-slot='conversation\.composer\.bar'\] \[data-composer-card\]\) \{[\s\S]*?border-radius:\s*24px !important;/)
     assert.match(homeCss, /:global\(\[data-emate-composer-frame-host\]:has\(\[data-slot='conversation\.hero\.workspace'\]\) \[data-slot='conversation\.composer\.bar'\] \[data-composer-card\]\) \{\s*border-radius:\s*24px 24px 0 0 !important;/)
