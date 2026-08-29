@@ -16,6 +16,7 @@
   ],
   "scripts": {
     "build:harness": "node scripts/harness-provenance.mjs build",
+    "flow": "node scripts/local-flow.mjs",
     "check:target": "node scripts/check-target.mjs",
     "check:release-boundary": "node scripts/change-impact.mjs --check-contract",
     "component:inventory": "node scripts/component-release.mjs inventory",
