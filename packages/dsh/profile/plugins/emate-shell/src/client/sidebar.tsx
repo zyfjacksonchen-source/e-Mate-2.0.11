@@ -111,7 +111,6 @@ export function SidebarRoot({
   const [batchBusy, setBatchBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [pathname, setPathname] = useState(() => location.pathname)
-  const desktop = document.body.dataset.dshDesktopMode === 'advanced'
 
   const archived = useMemo(() => new Set(archivedSessionIds), [archivedSessionIds])
   const projectWorkspaces = useMemo(() => workspaces.filter(workspace => !isGeneralWorkspace(workspace)), [workspaces])
@@ -148,90 +147,6 @@ export function SidebarRoot({
   }, [])
 
   useEffect(() => {
-    if (!collapsed || desktop) return undefined
-    let awaitingTarget = false
-    let identityBlocked = document.querySelector('[data-emate-identity-gate]') !== null
-    let retryFrame: number | undefined
-    let retryFrames = 0
-    const stopRetry = () => {
-      if (retryFrame !== undefined) cancelAnimationFrame(retryFrame)
-      retryFrame = undefined
-    }
-    const scheduleRetry = () => {
-      if (retryFrame !== undefined || retryFrames >= 120) return
-      retryFrame = requestAnimationFrame(() => {
-        retryFrame = undefined
-        retryFrames += 1
-        syncSettingsRoute(true)
-      })
-    }
-    const syncSettingsRoute = (verifyAwaiting = false) => {
-      if (location.pathname !== '/settings') {
-        awaitingTarget = false
-        retryFrames = 0
-        stopRetry()
-        return
-      }
-      const identityGate = document.querySelector('[data-emate-identity-gate]') !== null
-      if (identityGate) {
-        identityBlocked = true
-        stopRetry()
-        return
-      }
-      if (identityBlocked) {
-        identityBlocked = false
-        retryFrames = 0
-      }
-      const settingsOpen = [...document.querySelectorAll<HTMLElement>(
-        '[data-emate-settings-content], [data-emate-settings-trigger]',
-      )].some(element => element.getClientRects().length > 0)
-      if (settingsOpen) {
-        awaitingTarget = false
-        retryFrames = 0
-        stopRetry()
-        return
-      }
-      if (awaitingTarget) {
-        if (!verifyAwaiting) return
-        const pendingTrigger = mobileOpen.current
-        if (pendingTrigger === null || pendingTrigger.getClientRects().length === 0) return
-        awaitingTarget = false
-      }
-      const trigger = mobileOpen.current
-      if (trigger === null || trigger.getClientRects().length === 0) {
-        scheduleRetry()
-        return
-      }
-      awaitingTarget = true
-      stopRetry()
-      toggleSidebar()
-      scheduleRetry()
-    }
-    const restartForLayout = () => {
-      retryFrames = 0
-      syncSettingsRoute()
-    }
-    const routeMarkers = '[data-emate-identity-gate], [data-emate-settings-content], [data-emate-settings-trigger]'
-    const observer = new MutationObserver(records => {
-      const changed = records.some(record => [...record.addedNodes, ...record.removedNodes].some(node =>
-        node instanceof Element && (node.matches(routeMarkers) || node.querySelector(routeMarkers) !== null),
-      ))
-      if (changed) syncSettingsRoute()
-    })
-
-    observer.observe(document.body, { childList: true, subtree: true })
-    addEventListener('popstate', restartForLayout)
-    addEventListener('resize', restartForLayout)
-    syncSettingsRoute()
-    return () => {
-      stopRetry()
-      observer.disconnect()
-      removeEventListener('popstate', restartForLayout)
-      removeEventListener('resize', restartForLayout)
-    }
-  }, [collapsed, desktop, toggleSidebar])
-
-  useEffect(() => {
     const closeOutsideMenus = (event: PointerEvent) => {
       const target = event.target
       if (!(target instanceof Node)) return
@@ -242,6 +157,8 @@ export function SidebarRoot({
     document.addEventListener('pointerdown', closeOutsideMenus)
     return () => { document.removeEventListener('pointerdown', closeOutsideMenus) }
   }, [])
+
+  if (pathname === '/settings') return <>{renderSlot('sidebar.settings', { wide })}</>
 
   const addWorkspace = async () => {
     if (picking) return

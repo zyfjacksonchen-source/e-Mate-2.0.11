@@ -144,7 +144,7 @@ test('writes only catalog-bound redacted evidence after all five live routes pas
   assert.equal(serialized.includes('Reply with OK.') || serialized.includes('A solid orange square.'), false);
 });
 
-test('accepts only the managed GPT search credential route without proxying it as a model', async () => {
+test('smokes the managed GPT search credential route without proxying it as a model', async () => {
   const { fetchImplementation, requests } = mockFetch();
   const searchCredentialRoute: ModelSmokeRoute = {
     ...route(
@@ -165,9 +165,15 @@ test('accepts only the managed GPT search credential route without proxying it a
     randomId: randomId(),
   });
 
-  assert.equal(approval.results.length, 5);
-  assert.equal(requests.length, 5);
-  assert.equal(requests.some(({ url }) => url.includes('43.135.183.53')), false);
+  assert.equal(approval.results.length, 6);
+  assert.equal(requests.length, 6);
+  assert.equal(requests.filter(({ url }) => url.includes('43.135.183.53')).length, 1);
+  assert.deepEqual(approval.results.at(-1), {
+    routeId: 'gpt-web-search',
+    status: 'PASSED',
+    method: 'live-inference',
+    evidenceId: 'provider:request-response-6',
+  });
 
   for (const invalid of [
     { ...searchCredentialRoute, providerId: 'deepseek' },

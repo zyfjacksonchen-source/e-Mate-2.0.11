@@ -1,177 +1,182 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { act, cleanup, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { createPortal } from 'react-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SidebarRoot } from '../src/client/sidebar.tsx'
 
 const sessionState = {
-  ids: [], byId: {}, current: undefined, phase: 'ready' as const,
-  subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
+  ids: ['long-chat', 'file-chat'], current: 'long-chat', phase: 'ready' as const,
+  byId: {
+    'long-chat': { id: 'long-chat', blank: false, displayTitle: '带目录的长消息', updatedAt: 2, running: false },
+    'file-chat': { id: 'file-chat', blank: false, displayTitle: '文件页与子任务', updatedAt: 1, running: false },
+  },
+  subagentsByParent: { 'long-chat': { entries: [{ kind: 'child' as const, id: 'child-task' }] } },
+  jobsBySession: {}, currentAddress: undefined,
 }
-const workspaceState = {
-  items: [], archivedSessionIds: [], phase: 'ready' as const,
-}
+const workspaceState = { items: [], archivedSessionIds: [], phase: 'ready' as const }
+const Icon = () => <svg />
 
-function dataProps(Icon: () => React.JSX.Element) {
-  return {
-    useSessions: <T,>(selector: (state: typeof sessionState) => T) => selector(sessionState),
-    useWorkspaces: <T,>(selector: (state: typeof workspaceState) => T) => selector(workspaceState),
-    SearchIcon: Icon,
-    ScheduleIcon: Icon,
-    ChevronIcon: Icon,
-    FolderIcon: Icon,
-    PlusIcon: Icon,
-    EllipsisIcon: Icon,
-    CopyIcon: Icon,
-    EditIcon: Icon,
-    ArchiveIcon: Icon,
-    CloseIcon: Icon,
-    getThemeScheme: () => 'light' as const,
-    subscribeTheme: () => () => {},
-    toggleTheme: () => {},
-    LightIcon: Icon,
-    DarkIcon: Icon,
-    openSession: () => {},
-    openSchedules: () => {},
-    pickWorkspace: async () => null,
-    renameSession: async () => {},
-    archiveSession: async () => {},
-  }
-}
+const props = (toggleSidebar: () => void) => ({
+  useSessions: <T,>(selector: (state: typeof sessionState) => T) => selector(sessionState),
+  useWorkspaces: <T,>(selector: (state: typeof workspaceState) => T) => selector(workspaceState),
+  SearchIcon: Icon, ScheduleIcon: Icon, ChevronIcon: Icon, FolderIcon: Icon, PlusIcon: Icon,
+  EllipsisIcon: Icon, CopyIcon: Icon, EditIcon: Icon, ArchiveIcon: Icon, CloseIcon: Icon,
+  getThemeScheme: () => document.body.hasAttribute('data-ds-dark-theme') ? 'dark' as const : 'light' as const,
+  subscribeTheme: () => () => {}, toggleTheme: () => {}, LightIcon: Icon, DarkIcon: Icon,
+  openSession: () => {}, openSchedules: () => {}, pickWorkspace: async () => null,
+  renameSession: async () => {}, archiveSession: async () => {}, toggleSidebar,
+})
 
 afterEach(() => {
   cleanup()
-  document.querySelectorAll('[data-emate-identity-gate], [data-emate-settings-content], [data-emate-settings-trigger]')
-    .forEach(element => { element.remove() })
-  vi.unstubAllGlobals()
+  document.body.removeAttribute('data-ds-dark-theme')
   history.replaceState(null, '', '/')
 })
 
-describe('mobile settings route', () => {
-  it('runs from the mounted sidebar, waits for identity, rearms after target UI disappears, and stops off-route', async () => {
-    history.replaceState(null, '', '/settings')
-    const identityGate = document.createElement('main')
-    identityGate.dataset.emateIdentityGate = 'agreement'
-    document.body.append(identityGate)
-    const hiddenSettingsTrigger = document.createElement('button')
-    hiddenSettingsTrigger.dataset.emateSettingsTrigger = ''
-    vi.spyOn(hiddenSettingsTrigger, 'getClientRects').mockReturnValue({ length: 0 } as DOMRectList)
-    document.body.append(hiddenSettingsTrigger)
-    const hiddenSettingsContent = document.createElement('div')
-    hiddenSettingsContent.dataset.emateSettingsContent = ''
-    vi.spyOn(hiddenSettingsContent, 'getClientRects').mockReturnValue({ length: 0 } as DOMRectList)
-    document.body.append(hiddenSettingsContent)
-    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
-    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+describe('Settings route owns its navigation lifecycle', () => {
+  it.each(['light', 'dark'] as const)('unmounts chat navigation on direct, repeated, and restored %s Settings routes', (scheme) => {
+    if (scheme === 'dark') document.body.setAttribute('data-ds-dark-theme', '')
+    history.replaceState(null, '', '/chat/long-chat')
     const toggleSidebar = vi.fn()
-    const Icon = () => <svg />
+    const openSettings = vi.fn()
+    const view = render(<SidebarRoot
+      {...props(toggleSidebar)} collapsed={false} width={248}
+      renderSlot={(name) => name === 'sidebar.settings' ? <button type="button" onClick={openSettings}>设置</button> : null}
+      createPortal={createPortal} NewChatIcon={Icon} PanelIcon={Icon} startSession={() => {}} />)
 
-    render(<SidebarRoot
-      {...dataProps(Icon)}
-      collapsed
-      width={0}
-      renderSlot={() => null}
-      createPortal={createPortal}
-      NewChatIcon={Icon}
-      PanelIcon={Icon}
-      startSession={() => {}}
-      toggleSidebar={toggleSidebar}
-    />)
-    const mobileOpen = document.querySelector<HTMLButtonElement>('[data-emate-mobile-open]')
-    expect(mobileOpen).not.toBeNull()
-    vi.spyOn(mobileOpen!, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList)
-    const domClick = vi.spyOn(mobileOpen!, 'click')
+    expect(screen.getByRole('complementary', { name: '任务导航' })).not.toBeNull()
+    expect(screen.getByRole('navigation', { name: '会话与项目' })).not.toBeNull()
 
-    const documentQuery = vi.spyOn(document, 'querySelector')
-    const token = document.createElement('span')
-    document.body.append(token)
-    await act(async () => { await Promise.resolve() })
-    expect(documentQuery).not.toHaveBeenCalled()
-    documentQuery.mockRestore()
-    token.remove()
-
-    act(() => { dispatchEvent(new Event('resize')) })
+    act(() => {
+      history.pushState({ restored: true }, '', '/settings')
+      dispatchEvent(new PopStateEvent('popstate'))
+    })
+    expect(screen.queryByRole('complementary', { name: '任务导航' })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: '会话与项目' })).toBeNull()
+    expect(screen.queryByText('带目录的长消息')).toBeNull()
+    expect(screen.queryByText('文件页与子任务')).toBeNull()
+    expect(document.querySelector('[data-emate-mobile-open]')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '设置' }))
+    expect(openSettings).toHaveBeenCalledOnce()
     expect(toggleSidebar).not.toHaveBeenCalled()
-    identityGate.remove()
-    await waitFor(() => { expect(toggleSidebar).toHaveBeenCalledTimes(1) })
-    expect(domClick).not.toHaveBeenCalled()
 
-    const settingsContent = document.createElement('div')
-    settingsContent.dataset.emateSettingsContent = ''
-    vi.spyOn(settingsContent, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList)
-    document.body.append(settingsContent)
-    await act(async () => { await Promise.resolve() })
-    settingsContent.remove()
-    await waitFor(() => { expect(toggleSidebar).toHaveBeenCalledTimes(2) })
-    expect(domClick).not.toHaveBeenCalled()
+    act(() => {
+      history.replaceState(null, '', '/chat/long-chat')
+      dispatchEvent(new PopStateEvent('popstate'))
+    })
+    expect(screen.getByRole('navigation', { name: '会话与项目' })).not.toBeNull()
 
-    const settingsTrigger = document.createElement('button')
-    settingsTrigger.dataset.emateSettingsTrigger = ''
-    vi.spyOn(settingsTrigger, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList)
-    document.body.append(settingsTrigger)
-    await act(async () => { await Promise.resolve() })
-    settingsTrigger.remove()
-    await waitFor(() => { expect(toggleSidebar).toHaveBeenCalledTimes(3) })
-    expect(domClick).not.toHaveBeenCalled()
+    act(() => {
+      history.pushState(null, '', '/settings')
+      dispatchEvent(new PopStateEvent('popstate'))
+    })
+    expect(screen.queryByRole('navigation', { name: '会话与项目' })).toBeNull()
+    expect(toggleSidebar).not.toHaveBeenCalled()
+    view.unmount()
 
-    history.pushState(null, '', '/')
-    act(() => { dispatchEvent(new PopStateEvent('popstate')) })
-    act(() => { dispatchEvent(new Event('resize')) })
-    expect(toggleSidebar).toHaveBeenCalledTimes(3)
-    hiddenSettingsTrigger.remove()
-    hiddenSettingsContent.remove()
+    history.replaceState({ restored: true }, '', '/settings')
+    render(<SidebarRoot
+      {...props(toggleSidebar)} collapsed width={0}
+      renderSlot={(name) => name === 'sidebar.settings' ? <button type="button">设置</button> : null}
+      createPortal={createPortal} NewChatIcon={Icon} PanelIcon={Icon} startSession={() => {}} />)
+    expect(screen.queryByRole('navigation', { name: '会话与项目' })).toBeNull()
+    expect(document.querySelector('[data-emate-mobile-open]')).toBeNull()
+    expect(toggleSidebar).not.toHaveBeenCalled()
   })
 
-  it('rechecks a no-op target toggle on the next frame and stops after target UI becomes visible', async () => {
+  it('keeps chat navigation out of the accessibility tree after an update-status refresh remount', () => {
     history.replaceState(null, '', '/settings')
-    const hiddenSettingsContent = document.createElement('div')
-    hiddenSettingsContent.dataset.emateSettingsContent = ''
-    vi.spyOn(hiddenSettingsContent, 'getClientRects').mockReturnValue({ length: 0 } as DOMRectList)
-    document.body.append(hiddenSettingsContent)
-    const frames = new Map<number, FrameRequestCallback>()
-    let nextFrame = 0
-    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
-      nextFrame += 1
-      frames.set(nextFrame, callback)
-      return nextFrame
+    const toggleSidebar = vi.fn()
+
+    function SettingsShell() {
+      const [refresh, setRefresh] = React.useState(0)
+      return <>
+        <nav aria-label="设置分类">
+          <button type="button">个人资料</button>
+          <button type="button">通用设置</button>
+          <button type="button">电脑操作</button>
+          <button type="button">文件提及</button>
+        </nav>
+        <button type="button" onClick={() => { setRefresh(value => value + 1) }}>
+          再次检查更新（已更新至 2.0.15）
+        </button>
+        <SidebarRoot key={refresh}
+          {...props(toggleSidebar)} collapsed={false} width={248}
+          renderSlot={(name) => name === 'sidebar.settings' ? <button type="button">设置</button> : null}
+          createPortal={createPortal} NewChatIcon={Icon} PanelIcon={Icon} startSession={() => {}} />
+      </>
+    }
+
+    render(<SettingsShell />)
+    fireEvent.click(screen.getByRole('button', { name: '再次检查更新（已更新至 2.0.15）' }))
+
+    expect(location.pathname).toBe('/settings')
+    expect(screen.getByRole('navigation', { name: '设置分类' })).not.toBeNull()
+    for (const category of ['个人资料', '通用设置', '电脑操作', '文件提及']) {
+      expect(screen.getByRole('button', { name: category })).not.toBeNull()
+    }
+    expect(screen.queryByRole('complementary', { name: '任务导航' })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: '会话与项目' })).toBeNull()
+    expect(screen.queryByText('带目录的长消息')).toBeNull()
+    expect(screen.queryByText('文件页与子任务')).toBeNull()
+    expect(document.querySelector('[data-emate-mobile-open]')).toBeNull()
+    expect(toggleSidebar).not.toHaveBeenCalled()
+  })
+
+  it('keeps a populated recovery group collapsed across project, route, and window lifecycles', () => {
+    const orphanRows = Array.from({ length: 67 }, (_, index) => ({
+      id: `orphan-${String(index)}`, blank: false, displayTitle: `旧新会话 ${String(index + 1)}`, updatedAt: index, running: false,
     }))
-    vi.stubGlobal('cancelAnimationFrame', vi.fn((id: number) => { frames.delete(id) }))
-    const visibleSettingsContent = document.createElement('div')
-    visibleSettingsContent.dataset.emateSettingsContent = ''
-    vi.spyOn(visibleSettingsContent, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList)
-    const toggleSidebar = vi.fn(() => {
-      if (toggleSidebar.mock.calls.length === 2) document.body.append(visibleSettingsContent)
+    const sessions = {
+      ...sessionState,
+      ids: ['project-session', ...orphanRows.map(row => row.id)],
+      current: 'project-session',
+      byId: {
+        'project-session': { id: 'project-session', blank: false, displayTitle: '项目新会话', updatedAt: 100, running: false },
+        ...Object.fromEntries(orphanRows.map(row => [row.id, row])),
+      },
+    }
+    let workspaces = {
+      items: [{ workspaceId: 'project-1', path: '/work/project-1', title: '项目一', sessionIds: ['project-session'] }],
+      archivedSessionIds: [], phase: 'ready' as const,
+    }
+    const toggleSidebar = vi.fn()
+    const sidebar = () => <SidebarRoot
+      {...props(toggleSidebar)} collapsed={false} width={248}
+      useSessions={selector => selector(sessions)} useWorkspaces={selector => selector(workspaces)}
+      renderSlot={() => null} createPortal={createPortal} NewChatIcon={Icon} PanelIcon={Icon} startSession={() => {}} />
+    const expectCollapsed = () => {
+      const recovery = screen.getByRole('region', { name: '未归属/待恢复' })
+      expect(within(recovery).getByRole('button', { name: /未归属\/待恢复/u }).getAttribute('aria-expanded')).toBe('false')
+      expect(recovery.textContent).toContain('67')
+      expect(screen.queryByRole('button', { name: '打开任务：旧新会话 1' })).toBeNull()
+    }
+
+    history.replaceState(null, '', '/chat/project-session')
+    const view = render(sidebar())
+    expectCollapsed()
+
+    workspaces = { ...workspaces, items: [...workspaces.items, { workspaceId: 'project-2', path: '/work/project-2', title: '项目二', sessionIds: [] }] }
+    view.rerender(sidebar())
+    expectCollapsed()
+
+    act(() => {
+      history.pushState(null, '', '/settings')
+      dispatchEvent(new PopStateEvent('popstate'))
+      history.pushState(null, '', '/chat/project-session')
+      dispatchEvent(new PopStateEvent('popstate'))
     })
-    const Icon = () => <svg />
+    expectCollapsed()
 
-    render(<SidebarRoot
-      {...dataProps(Icon)}
-      collapsed
-      width={0}
-      renderSlot={() => null}
-      createPortal={createPortal}
-      NewChatIcon={Icon}
-      PanelIcon={Icon}
-      startSession={() => {}}
-      toggleSidebar={toggleSidebar}
-    />)
-    const mobileOpen = document.querySelector<HTMLButtonElement>('[data-emate-mobile-open]')
-    expect(mobileOpen).not.toBeNull()
-    vi.spyOn(mobileOpen!, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList)
+    view.unmount()
+    history.replaceState({ restored: true }, '', '/chat/project-session')
+    const restored = render(sidebar())
+    expectCollapsed()
 
-    const firstFrame = frames.values().next().value
-    expect(firstFrame).toBeTypeOf('function')
-    frames.clear()
-    act(() => { firstFrame!(0) })
-    expect(toggleSidebar).toHaveBeenCalledTimes(1)
-    const retryFrame = frames.values().next().value
-    expect(retryFrame).toBeTypeOf('function')
-    frames.clear()
-    act(() => { retryFrame!(16) })
-    expect(toggleSidebar).toHaveBeenCalledTimes(2)
-    await waitFor(() => { expect(frames.size).toBe(0) })
-    expect(toggleSidebar).toHaveBeenCalledTimes(2)
-
+    fireEvent.click(within(screen.getByRole('region', { name: '未归属/待恢复' })).getByRole('button', { name: /未归属\/待恢复/u }))
+    expect(screen.getByRole('button', { name: '打开任务：旧新会话 1' })).not.toBeNull()
+    restored.rerender(sidebar())
+    expect(screen.getByRole('button', { name: '打开任务：旧新会话 1' })).not.toBeNull()
   })
 })

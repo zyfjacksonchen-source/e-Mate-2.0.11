@@ -48,7 +48,7 @@ exposure = replaceExactlyOnce(
   exposure,
   `import { defineTool } from '@deepseek-ai/dsh-tools';`,
   `import { defineTool } from '@deepseek-ai/dsh-tools';
-import { hasExplicitComputerUseRequest } from './emate-explicit.js';`,
+import { desktopAutomationBypass, hasExplicitComputerUseRequest } from './emate-explicit.js';`,
   'explicit Computer Use request import',
 )
 exposure = replaceExactlyOnce(
@@ -76,7 +76,9 @@ exposure = replaceExactlyOnce(
                 if (exec.agent === undefined || hasExplicitComputerUseRequest(exec.agent.session))
                     return undefined;
                 const state = this.states.get(exec.agent);
-                if (state === undefined || !state.toolNames.includes(exec.name))
+                const blockedTool = state !== undefined && state.toolNames.includes(exec.name);
+                const blockedShell = exec.name === 'bash' && desktopAutomationBypass(exec.arguments);
+                if (!blockedTool && !blockedShell)
                     return undefined;
                 return 'Computer Use is available only when the current user request explicitly inserts @电脑操控. Use CDP browser tools first for webpage tasks.';
             }),
@@ -103,9 +105,7 @@ exposure = replaceExactlyOnce(
 )
 await writeFile(exposurePath, exposure)
 
-await writeFile(join(root, 'lib/emate-explicit.js'), `// Direct activation remains user-visible; the legacy marker is accepted only while replaying an older user turn.
-const LEGACY_MARKER = '<computer-use explicit="true">'
-const DIRECT_TRIGGER = /^\\s*@电脑操控(?:\\s|$)/u
+await writeFile(join(root, 'lib/emate-explicit.js'), `const COMPUTER_USE_MENTION = { source: '电脑操控', ref: 'computer-use' }
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -114,12 +114,23 @@ export function hasExplicitComputerUseRequest(session) {
   for (let index = session.events.length - 1; index >= 0; index -= 1) {
     const event = session.events[index]
     if (event.type !== 'user/message' || event.data.source.kind !== 'user') continue
-    return event.data.content.some(block => isRecord(block)
-      && block.type === 'text'
-      && typeof block.text === 'string'
-      && (DIRECT_TRIGGER.test(block.text) || block.text.includes(LEGACY_MARKER)))
+    const mentions = event.data.source.mentions
+    return Array.isArray(mentions) && mentions.some(mention => isRecord(mention)
+      && mention.source === COMPUTER_USE_MENTION.source
+      && mention.ref === COMPUTER_USE_MENTION.ref)
   }
   return false
+}
+
+const DIRECT_AUTOMATION = /(?:^|[;&|]\\s*)(?:(?:command|nohup|sudo|(?:\\/usr\\/bin\\/)?env)\\s+)*(?:\\/usr\\/bin\\/)?(?:open|osascript)(?:\\s|$)/u
+const SHELL_AUTOMATION = /(?:^|[;&|]\\s*)(?:(?:command|nohup|sudo|(?:\\/usr\\/bin\\/)?env)\\s+)*(?:\\/bin\\/)?(?:ba|z)?sh\\s+-c\\s+(["'])(.*?)\\1/u
+
+/** Known macOS desktop-control executables, including ordinary wrapper forms. */
+export function desktopAutomationBypass(args) {
+  if (!isRecord(args) || typeof args.command !== 'string') return false
+  if (DIRECT_AUTOMATION.test(args.command)) return true
+  const nested = SHELL_AUTOMATION.exec(args.command)
+  return nested !== null && DIRECT_AUTOMATION.test(nested[2])
 }
 `)
 
@@ -135,6 +146,8 @@ Use this capability only for a local macOS application UI that has no narrower,`
 This capability is enabled only when the current direct user request contains the
 e-Mate @电脑操控 trigger. Never enable or invoke it on the model's own initiative.
 For every webpage read or operation, use the CDP browser tools first.
+If a Computer Use Tool fails or its post-action state is not verified, report
+that failure or uncertainty; never claim the requested UI action succeeded.
 
 Use this capability only for a local macOS application UI that has no narrower,`,
   'Computer Use Skill selection rule',

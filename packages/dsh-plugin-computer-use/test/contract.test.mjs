@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { installComputerUseCapability } from '../lib/emate-capability.js'
-import { hasExplicitComputerUseRequest } from '../lib/emate-explicit.js'
+import { desktopAutomationBypass, hasExplicitComputerUseRequest } from '../lib/emate-explicit.js'
 
 const root = new URL('../', import.meta.url)
 
@@ -139,21 +139,36 @@ test('Computer Use projects cached native readiness and permission actions throu
 })
 
 test('Computer Use authorization expires before the next direct user request', () => {
-  const message = text => ({
+  const message = (text, mentions) => ({
     type: 'user/message',
-    data: { source: { kind: 'user' }, content: [{ type: 'text', text }] },
+    data: { source: { kind: 'user', ...(mentions === undefined ? {} : { mentions }) }, content: [{ type: 'text', text }] },
   })
+  const selected = [{ source: '电脑操控', ref: 'computer-use' }]
   assert.equal(hasExplicitComputerUseRequest({ events: [] }), false)
   assert.equal(hasExplicitComputerUseRequest({ events: [message('普通请求')] }), false)
-  assert.equal(hasExplicitComputerUseRequest({ events: [message('@电脑操控 读取当前应用')] }), true)
+  assert.equal(hasExplicitComputerUseRequest({ events: [message('@电脑操控 读取当前应用')] }), false)
   assert.equal(hasExplicitComputerUseRequest({ events: [message('请解释文本 @电脑操控 的含义')] }), false)
+  assert.equal(hasExplicitComputerUseRequest({ events: [message('@电脑操控 读取当前应用', selected)] }), true)
+  assert.equal(hasExplicitComputerUseRequest({ events: [message('引用历史 @电脑操控')] }), false)
   assert.equal(hasExplicitComputerUseRequest({
-    events: [message('<computer-use explicit="true">用户已显式指定使用电脑操控完成本次请求。</computer-use>')],
-  }), true)
+    events: [{ type: 'user/message', data: { source: { kind: 'plugin', mentions: selected }, content: [] } }],
+  }), false)
   assert.equal(hasExplicitComputerUseRequest({
     events: [
-      message('<computer-use explicit="true">用户已显式指定使用电脑操控完成本次请求。</computer-use>'),
+      message('@电脑操控 读取当前应用', selected),
       message('下一轮普通请求'),
     ],
   }), false)
+})
+
+test('desktop automation bypass guard is narrow', () => {
+  assert.equal(desktopAutomationBypass({ command: 'open -a Calculator' }), true)
+  assert.equal(desktopAutomationBypass({ command: '/usr/bin/osascript -e \'tell app "Calculator" to activate\'' }), true)
+  assert.equal(desktopAutomationBypass({ command: 'env open -a Calculator' }), true)
+  assert.equal(desktopAutomationBypass({ command: 'nohup open -a Calculator' }), true)
+  assert.equal(desktopAutomationBypass({ command: '/usr/bin/env osascript -e \'tell app "Calculator" to activate\'' }), true)
+  assert.equal(desktopAutomationBypass({ command: '/bin/sh -c "open -a Calculator"' }), true)
+  assert.equal(desktopAutomationBypass({ command: 'git status --short' }), false)
+  assert.equal(desktopAutomationBypass({ command: 'rg -n "open|osascript" src test' }), false)
+  assert.equal(desktopAutomationBypass({ command: 'echo open' }), false)
 })

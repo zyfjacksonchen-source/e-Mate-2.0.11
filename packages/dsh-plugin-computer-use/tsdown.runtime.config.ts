@@ -1,6 +1,8 @@
+import { createRequire } from 'node:module'
 import { join } from 'node:path'
 
 const root = import.meta.dirname
+const zod = createRequire(join(root, '../../upstream/deepseek-harness/packages/host/apiproxy/package.json')).resolve('zod')
 
 export default {
   entry: { index: join(root, 'lib/index.js') },
@@ -11,6 +13,7 @@ export default {
   fixedExtension: false,
   dts: false,
   clean: true,
+  alias: { zod },
   deps: {
     neverBundle: [/^@deepseek-ai\//],
     alwaysBundle: ['zod'],
