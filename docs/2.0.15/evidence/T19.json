@@ -218,6 +218,74 @@
     "status": "not_invoked",
     "same_named_acceptance_red_after_two_materially_different_source_repairs": false
   },
+  "t19r2_source_repair": {
+    "baseline": {
+      "root_start_commit": "6afa1367aa9afe5298c15a87225e3fea07d3b361",
+      "branch": "fix/2.0.15-T19R2-project-session-native",
+      "base_contract_id": "e-mate-desktop-profile-v9-dsh-b469c2b99a6c",
+      "harness_parent_commit": "b469c2b99a6c2f35c5e51eaf611f1941e095f90d",
+      "harness_repair_commit": "1d3824bcd3400b3761a0ebdd956901752ddc962b",
+      "harness_version": "0.1.0-rc.7"
+    },
+    "runtime_evidence": {
+      "sentry": "no callable Sentry tool; local installed-UI/static failures have no Sentry event evidence",
+      "creation_mode": "no callable Cordis Creation Mode inspector in this task; the pinned source seam and installed reproduction directly identified both owners"
+    },
+    "draft_isolation": {
+      "root_cause": "ui-conversation selectWorkspace copied the current SessionInputShell draft and imageIds into the different Session returned by connectWorkspace before sessions.open",
+      "explicit_handoff_marker_found": false,
+      "repair": "selectWorkspace now only awaits the native connectWorkspace owner and opens its returned Session; draft and attachments remain owned by their existing sessionId",
+      "cold_start": "the existing persisted chat-store regression rebuilds a fresh store and restores only the matching sessionId while a sibling session starts empty"
+    },
+    "project_picker": {
+      "root_cause": "the Desktop Profile replaced directory-picker-auto only on win32, leaving darwin on the upstream osascript auto backend even though ElectronDesktopRuntime already owns dialog.showOpenDialog",
+      "repair": "the existing @e-mate/desktop/windows-directory-picker provider and native client surface replace auto on darwin and win32; Linux keeps the upstream auto owner",
+      "lifecycle": "the provider returns success/cancel, propagates caller abort, and the existing Electron runtime single-flights concurrent dialogs and resets after cancel or exception"
+    },
+    "red_green": [
+      {
+        "acceptance": "DRAFT-ISOLATION-01",
+        "red": "1/15 failed: after a cross-session Workspace switch the source Session snapshot was draft='' and imageIds=[], proving the implicit move",
+        "green": "15/15 passed: A retains '@'/image-a, B retains its own draft/image-b, same-session navigation is unchanged, and fresh-store persistence remains sessionId-scoped"
+      },
+      {
+        "acceptance": "PROJECT-PICKER-01",
+        "red": "3/62 failed: darwin Profile left auto enabled and the existing Electron provider rejected darwin",
+        "green": "62/62 passed: darwin and win32 compose the one Electron provider/native surface, Linux keeps auto, and success/cancel/abort/concurrency/exception recovery reach terminal results"
+      }
+    ],
+    "verification": [
+      "Harness focused Vitest: 2 files, 15 tests passed",
+      "Harness pinned Host build, ui-conversation project-reference type build, and ui-conversation bundle passed; repository cleaner removed generated lib outputs",
+      "Desktop focused Vitest: 3 files, 62 tests passed",
+      "Desktop package typecheck passed",
+      "Harness and root git diff --check plus allowed-path review passed"
+    ],
+    "scope": {
+      "product_paths": [
+        "upstream/deepseek-harness/packages/client/ui-conversation/src/client/apply.ts",
+        "desktop/e-mate-desktop/src/profile.ts",
+        "desktop/e-mate-desktop/src/windows-directory-picker.ts"
+      ],
+      "direct_tests": [
+        "upstream/deepseek-harness/packages/client/ui-conversation/tests/apply-inject.client.spec.tsx",
+        "desktop/e-mate-desktop/tests/profile.spec.ts",
+        "desktop/e-mate-desktop/tests/windows-directory-picker.spec.ts",
+        "desktop/e-mate-desktop/tests/electron-runtime.spec.ts"
+      ],
+      "shell_or_new_transport_router_store_modified": false,
+      "dependency_lock_workflow_version_or_base_identity_modified": false,
+      "obsolete_feedback_workbook_accessed": false,
+      "push_pr_ci_distribution_install_publish": false
+    },
+    "open": [
+      "T00 independent source review",
+      "complete final Profile generation and app-directory verification",
+      "installed macOS project draft isolation and native picker success/cancel verification",
+      "installed update and rollback receipts",
+      "future Windows installed verification"
+    ]
+  },
   "installed_receipts": [],
   "real_service_receipts": [],
   "candidate_created": false,

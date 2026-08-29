@@ -159,8 +159,16 @@ describe('desktop profile composition', () => {
     }
     expect(rows.find(row => row.id === 'directory-picker')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-host-directory-picker-auto',
+      disabled: true,
     }))
-    expect(rows.find(row => row.id === 'directory-picker')?.disabled).toBeFalsy()
+    expect(rows).toContainEqual(expect.objectContaining({
+      id: 'desktop-windows-directory-picker',
+      name: '@e-mate/desktop/windows-directory-picker',
+    }))
+    expect(rows).toContainEqual(expect.objectContaining({
+      id: 'desktop-directory-picker-native-surface',
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-native',
+    }))
     expect(rows.map(row => row.id)).not.toContain('desktop-directory-picker-browse-host')
     expect(rows.map(row => row.id)).not.toContain('desktop-directory-picker-browse-surface')
     expect(rows.find(row => row.id === 'subprocess')).toEqual({
@@ -253,7 +261,15 @@ describe('desktop profile composition', () => {
   })
 
   it('keeps Linux on the supported compatibility fallback', () => {
-    expect(prepareDesktopProfile(undefined, temporaryHome(), 'linux').mode).toBe('compatibility')
+    const prepared = prepareDesktopProfile(undefined, temporaryHome(), 'linux')
+    const rows = composeEntries([prepared.patches])
+    expect(prepared.mode).toBe('compatibility')
+    expect(rows.find(row => row.id === 'directory-picker')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-host-directory-picker-auto',
+    }))
+    expect(rows.find(row => row.id === 'directory-picker')?.disabled).toBeFalsy()
+    expect(rows.map(row => row.id)).not.toContain('desktop-windows-directory-picker')
+    expect(rows.map(row => row.id)).not.toContain('desktop-directory-picker-native-surface')
   })
 
   it('rejects invalid settings roots, sections, modes, and YAML', () => {
