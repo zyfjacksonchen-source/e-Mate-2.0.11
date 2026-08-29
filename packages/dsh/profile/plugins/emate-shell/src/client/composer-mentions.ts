@@ -88,8 +88,8 @@ const computerCandidate = (description: string, hint: string) => [{ name: '电�
 export function registerComputerUseTrigger(ctx: any): void {
   const source: InputTriggerSource = {
     trigger: '@',
-    name: '功能',
-    order: -20,
+    name: '电脑操控',
+    order: -10,
     async candidates(_session, { query, signal }) {
       if (!'电脑操控'.includes(query)) return []
       if (document.body.dataset.dshDesktopPlatform !== 'darwin') {
@@ -114,7 +114,7 @@ export function registerComputerUseTrigger(ctx: any): void {
     onPick({ candidate }) {
       if (document.body.dataset.dshDesktopPlatform !== 'darwin') return 'handled'
       if (candidate.hint === '可插入') {
-        return { insert: { source: '功能', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' } }
+        return { insert: { source: '电脑操控', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' } }
       }
       if (candidate.hint === '打开系统设置') {
         const signal = AbortSignal.timeout(10_000)
@@ -152,13 +152,15 @@ export function registerMentionSources(ctx: any): void {
   const goal: InputTriggerSource = {
     trigger: '@',
     name: '目标',
-    order: -10,
+    order: -20,
     async candidates(session, { query, signal }) {
       signal.throwIfAborted()
       const snapshot = goalOf(ctx, session.sessionId)
-      return snapshot?.goal.objective.toLocaleLowerCase().includes(query.toLocaleLowerCase()) === true
-        ? [{ name: snapshot.goal.objective, description: `目标 · revision ${snapshot.goal.revision}` }]
-        : []
+      if (snapshot === undefined) {
+        return query === '' ? [{ name: '暂无目标', description: '请先创建目标后再引用' }] : []
+      }
+      return snapshot.goal.objective.toLocaleLowerCase().includes(query.toLocaleLowerCase())
+        ? [{ name: snapshot.goal.objective, description: `目标 · revision ${snapshot.goal.revision}` }] : []
     },
     onPick({ candidate, session }) {
       const current = goalOf(ctx, session.sessionId)?.goal
@@ -182,14 +184,16 @@ export function registerMentionSources(ctx: any): void {
   const plan: InputTriggerSource = {
     trigger: '@',
     name: '计划',
-    order: -9,
+    order: -19,
     async candidates(session, { query, signal }) {
       signal.throwIfAborted()
       const needle = query.toLocaleLowerCase()
-      return todosOf(ctx, session.sessionId).flatMap((item, index) => {
+      const items = todosOf(ctx, session.sessionId).flatMap((item, index) => {
         const name = `${index + 1}. ${item.content}`
         return name.toLocaleLowerCase().includes(needle) ? [{ name, description: item.status }] : []
       })
+      return items.length === 0 && query === ''
+        ? [{ name: '暂无计划', description: '请先创建计划后再引用' }] : items
     },
     onPick({ candidate, session }) {
       const index = Number.parseInt(candidate.name, 10) - 1
@@ -221,11 +225,19 @@ export function registerMentionSources(ctx: any): void {
     order: -8,
     async candidates(session, { query, signal }) {
       const needle = query.toLocaleLowerCase()
-      return (await skillsOf(ctx, session.sessionId, signal))
-        .filter(item => item.name.toLocaleLowerCase().includes(needle))
-        .map(item => ({ name: item.name, description: item.description }))
+      try {
+        const items = (await skillsOf(ctx, session.sessionId, signal))
+          .filter(item => item.name.toLocaleLowerCase().includes(needle))
+          .map(item => ({ name: item.name, description: item.description }))
+        return items.length === 0 && query === ''
+          ? [{ name: '暂无可用 Skill', description: '当前会话没有可引用的 Skill' }] : items
+      } catch {
+        signal.throwIfAborted()
+        return [{ name: 'Skill 暂时无法读取', description: '请稍后重试' }]
+      }
     },
     onPick({ candidate, session }) {
+      if (candidate.name === '暂无可用 Skill' || candidate.name === 'Skill 暂时无法读取') return undefined
       const ref: SkillReference = { kind: 'skill', sessionId: session.sessionId, name: candidate.name }
       return { insert: { source: 'Skill', ref: JSON.stringify(ref), label: `@${candidate.name}`, clipboardText: `/${candidate.name}` } }
     },

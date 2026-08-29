@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionRuntime, type SessionId, type SessionListState, type SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
 import { SessionInputShell } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/input/facade.ts'
-import { HomeProjection } from '../src/client/home.tsx'
+import { HomeProjection, SchedulesOverlayProjection } from '../src/client/home.tsx'
 import {
   attachWorkspaceFromRoute,
   openSessionFromRoute,
@@ -31,11 +31,6 @@ afterEach(() => {
 
 const Icon = () => <svg />
 const sidebarCss = readFileSync('src/client/sidebar.module.css', 'utf8')
-const homeToolbarProps = {
-  closeDetails: vi.fn(),
-  toggleSidebar: vi.fn(),
-  PanelIcon: Icon,
-}
 const sidebarUtilityProps = {
   getThemeScheme: () => 'light' as const,
   subscribeTheme: () => () => {},
@@ -510,6 +505,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     const startSession = vi.fn(async () => true)
     const openSession = vi.fn()
     const openSchedules = vi.fn()
+    const openSettings = vi.fn()
     const pickWorkspace = vi.fn(async (): Promise<string | null> => 'workspace-1')
 
     render(<SidebarRoot
@@ -517,7 +513,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       width={248}
       renderSlot={(name) => name === 'sidebar.primary.action'
         ? <button type="button" aria-label="能力中心">能力中心</button>
-        : name === 'sidebar.settings' ? <div data-slot="sidebar.settings"><button type="button" aria-hidden="true" tabIndex={-1} data-emate-settings-trigger="">打开设置</button></div>
+        : name === 'sidebar.settings' ? <button type="button" aria-label="打开设置" data-emate-settings-trigger="" onClick={openSettings}>设置</button>
           : name === 'sidebar.footer.action' ? <button type="button">用户中心</button> : null}
       createPortal={createPortal}
       useSessions={selector => selector(sessions)}
@@ -559,12 +555,13 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     expect(openSchedules).toHaveBeenCalledOnce()
     expect(screen.queryByRole('status', { name: '运行时已连接' })).toBeNull()
     expect(screen.queryByRole('button', { name: '切换到暗色模式' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '打开设置' })).toBeNull()
-    expect(document.querySelector('[data-emate-settings-trigger]')).not.toBeNull()
-    expect(document.querySelector<HTMLElement>('[data-emate-settings-owner]')?.hidden).toBe(false)
-    expect(document.querySelector('[data-emate-sidebar-footer] [data-emate-settings-trigger]')).toBeNull()
-    expect(document.querySelector('[data-emate-sidebar-footer]')?.textContent).toContain('用户中心')
-    expect(sidebarCss).toMatch(/\.settingsOwner\s+:global\(button\[data-emate-settings-trigger\]\)[\s\S]*display:\s*none/u)
+    const footer = document.querySelector('[data-emate-sidebar-footer]')!
+    expect([...footer.querySelectorAll('button')].map(button => button.textContent)).toEqual(['用户中心', '设置'])
+    expect(sidebarCss).toMatch(/\.root\s*\{[\s\S]*--emate-color-ink:\s*var\(--emate-ink\);/u)
+    expect(sidebarCss).toMatch(/body\[data-ds-dark-theme\][^}]*\.root\s*\{[\s\S]*--emate-ink:\s*oklch\(0\.981562/u)
+    fireEvent.click(screen.getByRole('button', { name: '打开设置' }))
+    expect(openSettings).toHaveBeenCalledOnce()
+    expect(sidebarCss).not.toContain('.settingsOwner')
     expect(screen.getByRole('region', { name: '项目' }).textContent).toContain('季度报告')
     expect(screen.getByRole('region', { name: '项目' }).textContent).not.toContain('通用会话')
     expect(screen.getByRole('region', { name: '项目' }).getAttribute('data-dsh-workspace-drop-target')).toBe('')
@@ -793,27 +790,16 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       },
     })
 
-    render(<HomeProjection
-      {...homeToolbarProps}
-      useSessions={selector => selector(state)}
-      openSession={openSession}
-      prepareTemplateDraft={prepareTemplateDraft}
-      prepareSchedulePrompt={async () => {}}
-      callSchedules={async () => ({ ok: true, value: { schema_version: 1, items: [], errors: [] } })}
-      scheduleIcons={{ create: Icon, refresh: Icon, edit: Icon, delete: Icon }}
-    />)
-    await waitFor(() => { expect(screen.getByRole('heading', { name: '办公快速模板' })).not.toBeNull() })
-    expect(homeToolbarProps.closeDetails).toHaveBeenCalled()
+    render(<HomeProjection prepareTemplateDraft={prepareTemplateDraft} />)
+    await waitFor(() => { expect(screen.getByRole('heading', { name: '快速开始' })).not.toBeNull() })
     expect(screen.getByRole('heading', { name: '和小芯一起开始工作吧' })).not.toBeNull()
     expect(screen.queryByRole('heading', { name: '今日使用概览' })).toBeNull()
     expect(screen.queryByText('Token 消耗量')).toBeNull()
-    expect(screen.getAllByRole('button').filter(button => /^\d{2}/u.test(button.textContent ?? ''))).toHaveLength(12)
+    expect(screen.getAllByRole('button')).toHaveLength(4)
     expect(screen.queryByText('一次性子代理记录')).toBeNull()
     expect(screen.queryByText('This is one e-Mate image')).toBeNull()
     expect(screen.queryByText('真实任务')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '切换任务导航' }))
-    expect(homeToolbarProps.toggleSidebar).toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: /周报总结/u }))
+    fireEvent.click(screen.getByRole('button', { name: /小红书笔记创作/u }))
     await waitFor(() => { expect(prepareTemplateDraft).toHaveBeenCalledOnce() })
     expect(openSession).not.toHaveBeenCalled()
   })
@@ -929,15 +915,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
         toggleSidebar={() => {}}
         {...sidebarUtilityProps}
       />
-      <HomeProjection
-        {...homeToolbarProps}
-        useSessions={selector => selector(sessions)}
-        openSession={openSession}
-        prepareTemplateDraft={async () => {}}
-        prepareSchedulePrompt={async () => {}}
-        callSchedules={async () => ({ ok: true, value: { schema_version: 1, items: [], completed: [], recent_runs: [], errors: [] } })}
-        scheduleIcons={{ create: Icon, refresh: Icon, edit: Icon, delete: Icon }}
-      />
+      <HomeProjection prepareTemplateDraft={async () => {}} />
     </>)
 
     const project = screen.getByRole('region', { name: '项目' })
@@ -951,9 +929,9 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
     fireEvent.click(within(project).getByRole('button', { name: '项目历史' }))
     expect(openSession).toHaveBeenLastCalledWith('newest')
 
-    await waitFor(() => { expect(screen.getByRole('heading', { name: '办公快速模板' })).not.toBeNull() })
+    await waitFor(() => { expect(screen.getByRole('heading', { name: '快速开始' })).not.toBeNull() })
     expect(screen.queryByRole('heading', { name: '最近任务' })).toBeNull()
-    expect(screen.getAllByRole('button', { name: /周报总结|会议纪要|工作计划|汇报大纲|数据分析|方案撰写|邮件起草|文档润色|表格整理|PPT 结构|项目复盘|头脑风暴/u })).toHaveLength(12)
+    expect(screen.getAllByRole('button', { name: /小红书笔记创作|计划方案撰写|快速外部连接|深度数据分析/u })).toHaveLength(4)
   })
 
   it('keeps the session ordering comparator stable for equal ASCII ids', () => {
@@ -986,14 +964,11 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       }],
       errors: [],
     } }))
-    const state = nativeSessionState({})
-
-    render(<HomeProjection
-      {...homeToolbarProps}
-      useSessions={selector => selector(state)}
-      openSession={() => {}}
+    render(<SchedulesOverlayProjection
       prepareSchedulePrompt={prepareSchedulePrompt}
       callSchedules={callSchedules}
+      toggleSidebar={() => {}}
+      PanelIcon={Icon}
       scheduleIcons={{ create: Icon, refresh: Icon, edit: Icon, delete: Icon }}
     />)
 

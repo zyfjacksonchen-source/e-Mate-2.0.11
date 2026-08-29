@@ -74,7 +74,7 @@ describe('e-Mate 2.0.15 composer projection', () => {
       via: 'menu',
       span: { start: 0, end: 5, draftRev: 1 },
     })).toEqual({
-      insert: { source: '功能', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' },
+      insert: { source: '电脑操控', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' },
     })
     const signal = new AbortController().signal
     expect(registered?.codec?.serialize('computer-use', signal)).resolves.toBe('@电脑操控')
@@ -89,7 +89,7 @@ describe('e-Mate 2.0.15 composer projection', () => {
     expect(source).toContain("ctx.slots.inject('conversation.input.right'")
     expect(source).toContain("'/capabilities?category=collaboration'")
     const mentions = readFileSync('src/client/composer-mentions.ts', 'utf8')
-    expect(mentions).toContain("name: '功能'")
+    expect(mentions).toContain("name: '电脑操控'")
     expect(mentions).toContain("label: '@电脑操控'")
     expect(source).not.toContain('<computer-use explicit="true">')
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource)\s*\(/u)

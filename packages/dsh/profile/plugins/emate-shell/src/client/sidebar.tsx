@@ -527,9 +527,9 @@ export function SidebarRoot({
           {notice && <p className={css.notice} role="status">{notice}</p>}
         </nav>
 
-        <div className={css.settingsOwner} data-emate-settings-owner="">{renderSlot('sidebar.settings', { wide: false })}</div>
         <div className={css.footer} data-emate-sidebar-footer="">
           {renderSlot('sidebar.footer.action', { wide })}
+          {renderSlot('sidebar.settings', { wide })}
         </div>
 
       </aside>

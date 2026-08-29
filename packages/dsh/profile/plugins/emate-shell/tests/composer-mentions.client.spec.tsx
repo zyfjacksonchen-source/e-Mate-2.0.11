@@ -4,6 +4,51 @@ import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigge
 import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from '../src/client/composer-mentions.ts'
 
 describe('native e-Mate @ references', () => {
+  it('keeps the naked @ roster ordered and makes empty or failed native owners inert', async () => {
+    const sources: InputTriggerSource[] = []
+    const listSkills = vi.fn(async () => ({ result: { ok: true, value: { skills: [] } } }))
+    const ctx = {
+      effect(run: () => () => void) { return run() },
+      inputTriggers: { registerSource(source: InputTriggerSource) { sources.push(source); return () => {} } },
+      sessions: {
+        binding: () => ({ session: { projections: { faceOf: (key: string) => ({ getSnapshot: () => key === 'goal' ? undefined : [] }) } } }),
+      },
+      connection: {
+        rpc: { call: vi.fn(async () => ({ ok: true, value: { schema_version: 1, items: [] } })) },
+        api: { skills: { list: listSkills } },
+      },
+      logger: { warn: vi.fn() },
+    }
+
+    registerComputerUseTrigger(ctx)
+    registerMentionSources(ctx)
+    const roster = [{ name: '文件', order: -30 }, ...sources]
+      .sort((left, right) => (left.order ?? 0) - (right.order ?? 0))
+      .map(source => source.name)
+    expect(roster).toEqual(['文件', '目标', '计划', '电脑操控', 'Skill'])
+
+    const signal = new AbortController().signal
+    const request = { query: '', position: 'inline' as const, signal }
+    const session = { sessionId: 'session-1' as never }
+    const goal = sources.find(source => source.name === '目标')!
+    const plan = sources.find(source => source.name === '计划')!
+    const skill = sources.find(source => source.name === 'Skill')!
+    const goalEmpty = (await goal.candidates(session, request))[0]!
+    const planEmpty = (await plan.candidates(session, request))[0]!
+    const skillEmpty = (await skill.candidates(session, request))[0]!
+    expect(goalEmpty).toEqual({ name: '暂无目标', description: '请先创建目标后再引用' })
+    expect(planEmpty).toEqual({ name: '暂无计划', description: '请先创建计划后再引用' })
+    expect(skillEmpty).toEqual({ name: '暂无可用 Skill', description: '当前会话没有可引用的 Skill' })
+    for (const [source, candidate] of [[goal, goalEmpty], [plan, planEmpty], [skill, skillEmpty]] as const) {
+      expect(source.onPick({ candidate, session, position: 'inline', via: 'menu', span: { start: 0, end: 1, draftRev: 1 } })).toBeUndefined()
+    }
+
+    listSkills.mockRejectedValueOnce(new Error('offline') as never)
+    await expect(skill.candidates(session, request)).resolves.toEqual([
+      { name: 'Skill 暂时无法读取', description: '请稍后重试' },
+    ])
+  })
+
   it('uses native Computer Use metadata for ready, setup, failed, and Windows candidates', async () => {
     let item: any = {
       id: 'computer-use', state: 'ready', detail: '原生 Computer Use 已就绪。', actions: [],
