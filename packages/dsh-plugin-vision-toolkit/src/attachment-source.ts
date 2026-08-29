@@ -1,6 +1,5 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 
 type ImageRef = {
   readonly attachmentId: string
@@ -23,6 +22,7 @@ type VisionExecution = {
     readonly session?: {
       deriveMessages?(): unknown
       readonly events?: readonly unknown[]
+      readonly header?: { readonly cwd?: unknown }
     }
   }
 }
@@ -92,6 +92,14 @@ function currentSessionImages(exec: VisionExecution): Map<string, ImageRef> {
   return refs
 }
 
+function currentWorkspace(exec: VisionExecution): string {
+  const cwd = exec.agent?.session?.header?.cwd
+  if (typeof cwd !== 'string' || !isAbsolute(cwd)) {
+    throw new VisionAttachmentError('vision_glance attachments require an absolute current Agent workspace')
+  }
+  return cwd
+}
+
 /** Stage exact current-session Attachment/CAS bytes only for one Vision call. */
 export async function withResolvedVisionGlanceImages<T>(
   ctx: AttachmentContext,
@@ -102,7 +110,19 @@ export async function withResolvedVisionGlanceImages<T>(
   if (!images.some(value => ATTACHMENT_ID.test(value))) return run(images)
   exec.signal?.throwIfAborted()
   const refs = currentSessionImages(exec)
-  const directory = await mkdtemp(join(tmpdir(), 'e-mate-vision-attachment-'))
+  for (const value of images) {
+    if (ATTACHMENT_ID.test(value) && !refs.has(value)) {
+      throw new VisionAttachmentError(`vision_glance attachment ${value} is not present in the current Agent session`)
+    }
+  }
+  let directory: string
+  try {
+    directory = await mkdtemp(join(currentWorkspace(exec), '.e-mate-vision-attachment-'))
+  } catch (error) {
+    if (exec.signal?.aborted === true) throw exec.signal.reason
+    if (error instanceof VisionAttachmentError) throw error
+    throw new VisionAttachmentError('vision_glance attachment workspace could not be prepared', { cause: error })
+  }
   try {
     const resolved: string[] = []
     for (const [index, value] of images.entries()) {
@@ -111,9 +131,7 @@ export async function withResolvedVisionGlanceImages<T>(
         continue
       }
       const ref = refs.get(value)
-      if (ref === undefined) {
-        throw new VisionAttachmentError(`vision_glance attachment ${value} is not present in the current Agent session`)
-      }
+      if (ref === undefined) throw new VisionAttachmentError(`vision_glance attachment ${value} is invalid`)
       let stored: { data: Uint8Array }
       try {
         stored = await ctx.attachments.readImage(ref, exec.signal)
@@ -122,7 +140,12 @@ export async function withResolvedVisionGlanceImages<T>(
         throw new VisionAttachmentError(`vision_glance attachment ${value} could not be read from CAS`, { cause: error })
       }
       const path = join(directory, `image-${index + 1}${EXTENSION[ref.mediaType]}`)
-      await writeFile(path, stored.data, { mode: 0o600, signal: exec.signal })
+      try {
+        await writeFile(path, stored.data, { mode: 0o600, signal: exec.signal })
+      } catch (error) {
+        if (exec.signal?.aborted === true) throw exec.signal.reason
+        throw new VisionAttachmentError(`vision_glance attachment ${value} could not be prepared in the Agent workspace`, { cause: error })
+      }
       resolved.push(path)
     }
     return await run(resolved)
