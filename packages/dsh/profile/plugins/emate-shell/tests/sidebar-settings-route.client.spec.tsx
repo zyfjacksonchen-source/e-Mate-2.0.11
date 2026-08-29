@@ -4,6 +4,10 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { createPortal } from 'react-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SidebarRoot } from '../src/client/sidebar.tsx'
+import { HeaderControls } from '../src/client/header-controls.tsx'
+import { SettingsChrome, SettingsCloseLabel, SettingsTrigger } from '../src/client/settings-chrome.tsx'
+
+vi.mock('../src/client/session-share.tsx', () => ({ SessionShareAction: () => null }))
 
 const sessionState = {
   ids: ['long-chat', 'file-chat'], current: 'long-chat', phase: 'ready' as const,
@@ -122,6 +126,62 @@ describe('Settings route owns its navigation lifecycle', () => {
     expect(screen.queryByText('文件页与子任务')).toBeNull()
     expect(document.querySelector('[data-emate-mobile-open]')).toBeNull()
     expect(toggleSidebar).not.toHaveBeenCalled()
+  })
+
+  it('keeps the native Settings owner stable through three theme projections', async () => {
+    history.replaceState(null, '', '/chat/long-chat')
+    const themeListeners = new Set<() => void>()
+    let scheme: 'light' | 'dark' = 'light'
+    const toggleTheme = () => {
+      scheme = scheme === 'light' ? 'dark' : 'light'
+      document.body.toggleAttribute('data-ds-dark-theme', scheme === 'dark')
+      themeListeners.forEach(listener => { listener() })
+    }
+    function SettingsHarness() {
+      const [open, setOpen] = React.useState(false)
+      return <>
+        <button type="button" onClick={() => { setOpen(true) }}><SettingsTrigger wide SettingsIcon={Icon} /></button>
+        <HeaderControls
+          getThemeScheme={() => scheme}
+          subscribeTheme={listener => { themeListeners.add(listener); return () => { themeListeners.delete(listener) } }}
+          toggleTheme={toggleTheme}
+          useSessions={selector => selector(sessionState)}
+          callShare={() => Promise.resolve({})} useSessionLogDownload={selector => selector({ bySession: {} })}
+          requestDownload={() => {}} dismissDownload={() => {}} LightIcon={Icon} DarkIcon={Icon}
+        />
+        {open && <div role="dialog" aria-modal="true">
+          <nav aria-label="设置导航"><button type="button">个人资料</button><button type="button">通用设置</button><button type="button">电脑操作</button><button type="button">文件提及</button></nav>
+          <SettingsChrome />
+          <button type="button" onClick={() => { setOpen(false) }}><SettingsCloseLabel /></button>
+        </div>}
+      </>
+    }
+
+    render(<SettingsHarness />)
+    fireEvent.click(screen.getByRole('button', { name: '设置' }))
+    await vi.waitFor(() => { expect(location.pathname).toBe('/settings') })
+    await vi.waitFor(() => { expect(screen.queryByRole('button', { name: '设置' })).toBeNull() })
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.click(screen.getByRole('button', { name: scheme === 'dark' ? '切换到明亮模式' : '切换到暗色模式' }))
+      expect(location.pathname).toBe('/settings')
+      expect(screen.getAllByRole('button', { name: scheme === 'dark' ? '切换到明亮模式' : '切换到暗色模式' })).toHaveLength(1)
+      expect(screen.getAllByRole('button', { name: '关闭设置' })).toHaveLength(1)
+      expect(screen.queryByLabelText('应用工具')).toBeNull()
+      expect(screen.queryByRole('complementary', { name: '任务导航' })).toBeNull()
+      expect(screen.queryByRole('button', { name: '设置' })).toBeNull()
+    }
+    expect(document.body.hasAttribute('data-ds-dark-theme')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '关闭设置' }))
+    await vi.waitFor(() => { expect(location.pathname).toBe('/chat/long-chat') })
+
+    act(() => {
+      history.replaceState(null, '', '/')
+      dispatchEvent(new PopStateEvent('popstate'))
+    })
+    fireEvent.click(screen.getByRole('button', { name: '设置' }))
+    await vi.waitFor(() => { expect(location.pathname).toBe('/settings') })
+    fireEvent.click(screen.getByRole('button', { name: '关闭设置' }))
+    await vi.waitFor(() => { expect(location.pathname).toBe('/') })
   })
 
   it('keeps a populated recovery group collapsed across project, route, and window lifecycles', () => {

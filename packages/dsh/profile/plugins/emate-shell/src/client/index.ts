@@ -28,6 +28,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AccountControl, AccountSettings } from './account.tsx'
 import { registerActivityFold } from './activity-fold.tsx'
+import './theme-tokens.css'
 import './chat-chrome.module.css'
 import { ComposerConnectors, ComposerMentions } from './composer-connectors.tsx'
 import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from './composer-mentions.ts'
@@ -138,6 +139,26 @@ export function registerRouteScopedConversationHeader(ctx: any): void {
           name: 'conversation.session.header',
           priority: -1,
         }, HiddenProductSurface)
+      } else {
+        const dispose = disposeShadow
+        disposeShadow = undefined
+        dispose?.()
+      }
+    }
+    addEventListener('popstate', sync)
+    sync()
+    return () => {
+      removeEventListener('popstate', sync)
+      disposeShadow?.()
+    }
+  })
+  ctx.slots.inject('details', () => {
+    let disposeShadow: (() => void) | undefined
+    const sync = () => {
+      const hide = STANDALONE_PRODUCT_ROUTES.has(location.pathname)
+      if (hide === (disposeShadow !== undefined)) return
+      if (hide) {
+        disposeShadow = ctx.slots.register({ name: 'details', priority: -1 }, HiddenProductSurface)
       } else {
         const dispose = disposeShadow
         disposeShadow = undefined

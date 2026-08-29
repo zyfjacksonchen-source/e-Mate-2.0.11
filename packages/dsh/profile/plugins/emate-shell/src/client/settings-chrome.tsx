@@ -32,9 +32,15 @@ export function SettingsTrigger({ wide, SettingsIcon }: TriggerProps) {
     trigger.dataset.emateSettingsTrigger = ''
 
     let open = document.querySelector(SETTINGS_CONTENT_SELECTOR) !== null
+    const projectTrigger = (panelOpen: boolean) => {
+      trigger.inert = panelOpen
+      if (panelOpen) trigger.setAttribute('aria-hidden', 'true')
+      else trigger.removeAttribute('aria-hidden')
+    }
     const syncPanel = () => {
       const shouldOpen = location.pathname === SETTINGS_PATH
       const isOpen = document.querySelector(SETTINGS_CONTENT_SELECTOR) !== null
+      projectTrigger(isOpen)
       if (shouldOpen && !isOpen) trigger.click()
       if (!shouldOpen && isOpen) {
         document.querySelector<HTMLElement>('[data-emate-settings-close]')?.closest('button')?.click()
@@ -47,6 +53,7 @@ export function SettingsTrigger({ wide, SettingsIcon }: TriggerProps) {
       ))
       if (!changed) return
       const isOpen = document.querySelector(SETTINGS_CONTENT_SELECTOR) !== null
+      projectTrigger(isOpen)
       if (isOpen === open) {
         syncPanel()
         return
@@ -69,6 +76,7 @@ export function SettingsTrigger({ wide, SettingsIcon }: TriggerProps) {
     return () => {
       observer.disconnect()
       removeEventListener('popstate', syncPanel)
+      projectTrigger(false)
       delete trigger.dataset.emateSettingsTrigger
     }
   }, [])
