@@ -38,7 +38,7 @@ afterEach(() => {
 })
 
 describe('desktop header controls', () => {
-  it('renders status, theme, and native settings as one root-frame control', () => {
+  it('renders only Share and theme as the root-frame controls', () => {
     const toggleTheme = vi.fn()
     const openSettings = vi.fn()
     const updates = updateBridge()
@@ -48,92 +48,92 @@ describe('desktop header controls', () => {
       getThemeScheme={() => 'dark'}
       subscribeTheme={() => () => {}}
       toggleTheme={toggleTheme}
-      openSettings={openSettings}
       useSessions={selector => selector({
         current: 'session-1', ids: ['session-1'],
         byId: { 'session-1': { id: 'session-1', blank: false } },
         subagentsByParent: {}, currentAddress: undefined,
       } as never)}
-      updates={updates.bridge}
       callShare={vi.fn()}
       useSessionLogDownload={selector => selector({ bySession: {} })}
       requestDownload={vi.fn()}
       dismissDownload={vi.fn()}
       LightIcon={Icon}
       DarkIcon={Icon}
-      UpdateIcon={Icon}
-      SettingsIcon={Icon}
     />)
 
     const controls = screen.getByLabelText('应用工具')
     expect([...controls.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual([
       '分享当前任务',
-      '检查更新',
       '切换到明亮模式',
-      '打开设置',
     ])
     expect([...controls.querySelectorAll('button')].every(button => button.title === button.getAttribute('aria-label'))).toBe(true)
     expect(screen.queryByRole('status', { name: '运行时已连接' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '检查更新' }))
-    expect(updates.bridge.runInteractiveUpdate).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: '检查更新' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '打开设置' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '切换到明亮模式' }))
     expect(toggleTheme).toHaveBeenCalledOnce()
-    fireEvent.click(screen.getByRole('button', { name: '打开设置' }))
-    expect(openSettings).toHaveBeenCalledOnce()
+    expect(updates.bridge.runInteractiveUpdate).not.toHaveBeenCalled()
+    expect(openSettings).not.toHaveBeenCalled()
+  })
+
+  it('keeps theme available and clear of the native Settings close control', () => {
+    history.replaceState(null, '', '/settings')
+    render(<HeaderControls
+      getThemeScheme={() => 'light'} subscribeTheme={() => () => {}} toggleTheme={() => {}}
+      useSessions={selector => selector({ current: undefined, ids: [], byId: {}, subagentsByParent: {}, currentAddress: undefined } as never)}
+      callShare={vi.fn()} useSessionLogDownload={selector => selector({ bySession: {} })}
+      requestDownload={vi.fn()} dismissDownload={vi.fn()}
+      LightIcon={Icon} DarkIcon={Icon}
+    />)
+
+    expect(screen.getByLabelText('应用工具').hasAttribute('data-emate-settings-route')).toBe(true)
+    expect(screen.getByRole('button', { name: '切换到暗色模式' })).not.toBeNull()
+    const controls = readFileSync('src/client/header-controls.module.css', 'utf8')
+    expect(controls).toMatch(/\.controls\[data-emate-settings-route\][\s\S]*right:\s*calc\(72px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
+    expect(controls).toMatch(/body\[data-dsh-desktop-platform='win32'\][\s\S]*\.controls\[data-emate-settings-route\]/u)
   })
 
   it('projects one updater state into Header and Settings with progress, cancellation, and trigger errors', async () => {
     const updates = updateBridge()
     render(<>
       <HeaderControls
-        getThemeScheme={() => 'light'} subscribeTheme={() => () => {}} toggleTheme={() => {}} openSettings={() => {}}
+        getThemeScheme={() => 'light'} subscribeTheme={() => () => {}} toggleTheme={() => {}}
         useSessions={selector => selector({ current: undefined, ids: [], byId: {}, subagentsByParent: {}, currentAddress: undefined } as never)}
-        updates={updates.bridge}
         callShare={vi.fn()} useSessionLogDownload={selector => selector({ bySession: {} })}
         requestDownload={vi.fn()} dismissDownload={vi.fn()}
-        LightIcon={Icon} DarkIcon={Icon} UpdateIcon={Icon} SettingsIcon={Icon}
+        LightIcon={Icon} DarkIcon={Icon}
       />
       <SettingsChrome updates={updates.bridge} UpdateIcon={Icon} />
     </>)
 
     expect(screen.queryByRole('button', { name: '分享当前任务' })).toBeNull()
-    expect(screen.getAllByRole('button', { name: '检查更新' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: '检查更新' })).toHaveLength(1)
     act(() => { updates.publish({ stage: 'available', version: '2.0.15' }) })
-    const retry = screen.getAllByRole('button', { name: '再次检查更新（发现 2.0.15）' })
-    fireEvent.click(retry[0]!)
-    fireEvent.click(retry[1]!)
-    expect(updates.bridge.runInteractiveUpdate).toHaveBeenCalledTimes(2)
+    const retry = screen.getByRole('button', { name: '再次检查更新（发现 2.0.15）' })
+    fireEvent.click(retry)
+    expect(updates.bridge.runInteractiveUpdate).toHaveBeenCalledOnce()
     expect(updates.bridge.cancel).not.toHaveBeenCalled()
     act(() => { updates.publish({ stage: 'downloading', version: '2.0.15', bytes: 25, total: 100 }) })
-    expect(screen.getAllByRole('button', { name: '取消更新（25%）' })).toHaveLength(2)
-    fireEvent.click(screen.getAllByRole('button', { name: '取消更新（25%）' })[0]!)
+    expect(screen.getAllByRole('button', { name: '取消更新（25%）' })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '取消更新（25%）' }))
     expect(updates.bridge.cancel).toHaveBeenCalledOnce()
     act(() => { updates.publish({ stage: 'staging', version: '2.0.15' }) })
-    expect(screen.getAllByRole('button', { name: '准备更新中' }).every(button => (
-      button as HTMLButtonElement
-    ).disabled && button.getAttribute('aria-busy') === 'true')).toBe(true)
+    expect((screen.getByRole('button', { name: '准备更新中' }) as HTMLButtonElement).disabled).toBe(true)
 
     const failed = updateBridge()
     vi.mocked(failed.bridge.runInteractiveUpdate).mockRejectedValueOnce(new Error('更新服务不可用'))
     cleanup()
-    render(<HeaderControls
-      getThemeScheme={() => 'light'} subscribeTheme={() => () => {}} toggleTheme={() => {}} openSettings={() => {}}
-      useSessions={selector => selector({ current: undefined, ids: [], byId: {}, subagentsByParent: {}, currentAddress: undefined } as never)}
-      updates={failed.bridge}
-      callShare={vi.fn()} useSessionLogDownload={selector => selector({ bySession: {} })}
-      requestDownload={vi.fn()} dismissDownload={vi.fn()}
-      LightIcon={Icon} DarkIcon={Icon} UpdateIcon={Icon} SettingsIcon={Icon}
-    />)
+    render(<SettingsChrome updates={failed.bridge} UpdateIcon={Icon} />)
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }))
     expect((await screen.findByRole('alert')).textContent).toBe('更新服务不可用')
   })
 
   it('offers Share only for the nonblank top-level Session owned by the current route', () => {
     const props = {
-      getThemeScheme: () => 'light' as const, subscribeTheme: () => () => {}, toggleTheme: () => {}, openSettings: () => {},
+      getThemeScheme: () => 'light' as const, subscribeTheme: () => () => {}, toggleTheme: () => {},
       callShare: vi.fn(), useSessionLogDownload: (selector: any) => selector({ bySession: {} }),
       requestDownload: vi.fn(), dismissDownload: vi.fn(),
-      LightIcon: Icon, DarkIcon: Icon, UpdateIcon: Icon, SettingsIcon: Icon,
+      LightIcon: Icon, DarkIcon: Icon,
     }
     const state = {
       current: 'session-1', ids: ['session-1'], byId: { 'session-1': { id: 'session-1', blank: false } },
@@ -156,12 +156,12 @@ describe('desktop header controls', () => {
     const share = readFileSync('src/client/session-share.module.css', 'utf8')
     const settings = readFileSync('src/client/settings-chrome.module.css', 'utf8')
     expect(controls).toMatch(/position:\s*absolute[\s\S]*top:\s*12px[\s\S]*right:\s*calc\(24px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)[\s\S]*display:\s*inline-flex[\s\S]*gap:\s*8px[\s\S]*height:\s*32px[\s\S]*-webkit-app-region:\s*no-drag/u)
-    expect(controls).toMatch(/conversation\.session\.header[\s\S]*padding-right:\s*calc\(176px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
-    expect(controls).toMatch(/@media \(max-width:\s*720px\)[\s\S]*right:\s*calc\(12px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)[\s\S]*padding-right:\s*calc\(176px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
+    expect(controls).toMatch(/conversation\.session\.header[\s\S]*padding-right:\s*calc\(112px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
+    expect(controls).toMatch(/@media \(max-width:\s*720px\)[\s\S]*right:\s*calc\(12px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)[\s\S]*padding-right:\s*calc\(104px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
     expect(controls).toMatch(/data-dsh-desktop-platform='win32'[\s\S]*top:\s*0;[\s\S]*right:\s*var\(--dsh-desktop-caption-safe-width, 0px\);[\s\S]*gap:\s*0;[\s\S]*color:\s*var\(--dsh-desktop-caption-symbol-color, #2f3337\);/u)
     expect(controls).toMatch(/data-dsh-desktop-platform='win32'[\s\S]*width:\s*var\(--dsh-desktop-caption-button-width, 46px\);[\s\S]*min-width:\s*var\(--dsh-desktop-caption-button-width, 46px\);[\s\S]*border-radius:\s*0;/u)
     expect(controls).toMatch(/data-dsh-desktop-platform='win32'[\s\S]*button svg[\s\S]*width:\s*var\(--dsh-desktop-caption-symbol-size, 12px\);[\s\S]*height:\s*var\(--dsh-desktop-caption-symbol-size, 12px\);/u)
-    expect(controls).toMatch(/data-dsh-desktop-platform='win32'[\s\S]*padding-right:\s*calc\(208px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
+    expect(controls).toMatch(/data-dsh-desktop-platform='win32'[\s\S]*padding-right:\s*calc\(116px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
     expect(controls).toMatch(/\.controls > button:focus-visible[\s\S]*outline:\s*2px solid[\s\S]*outline-offset:\s*2px/u)
     expect(controls).not.toMatch(/@media[\s\S]*\.controls > button\s*\{[^}]*display:\s*none/u)
     expect(settings).toMatch(/padding:\s*16px calc\(20px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\) 16px 20px !important/u)
@@ -182,18 +182,18 @@ describe('desktop header controls', () => {
     for (const scale of [1, 1.25, 1.5]) {
       const viewport = minimumWindowWidth / scale
       const compact = viewport <= 720
-      const groupWidth = 4 * 46
+      const groupWidth = 2 * 46
       const captionLeft = viewport - WINDOWS_CAPTION_CONTROLS_WIDTH
       const groupRight = captionLeft
 
       expect(groupRight).toBe(captionLeft)
       expect(groupRight - groupWidth - 4).toBeGreaterThanOrEqual(0)
-      expect((compact ? 192 : 208) + WINDOWS_CAPTION_CONTROLS_WIDTH).toBeLessThan(viewport)
+      expect((compact ? 108 : 116) + WINDOWS_CAPTION_CONTROLS_WIDTH).toBeLessThan(viewport)
       expect(captionLeft - 20).toBeGreaterThan(44)
     }
   })
 
-  it('stays mounted with no current Session and calls the one native settings trigger', async () => {
+  it('stays mounted with no current Session and exposes only the global theme control', async () => {
     type RootProps = PropsRenderSlots<'shell.overlay'>
     const Root = ({ renderSlot }: RootProps) => renderSlot('shell.overlay', {})
     const runtime = await SlotTestRuntime.create()
@@ -214,16 +214,11 @@ describe('desktop header controls', () => {
     const view = runtime.renderRoot()
     const headerEntry = runtime.slots.entries('shell.overlay')
       .find(entry => entry.options.id === 'e-mate-header-controls')
-    const hiddenSettingsTrigger = document.createElement('button')
-    hiddenSettingsTrigger.hidden = true
-    hiddenSettingsTrigger.dataset.emateSettingsTrigger = ''
-    const openSettings = vi.fn()
-    hiddenSettingsTrigger.addEventListener('click', openSettings)
-    view.container.append(hiddenSettingsTrigger)
     expect(headerEntry?.options.children).toBeUndefined()
     expect(runtime.sessions.list.getSnapshot().current).toBeUndefined()
-    fireEvent.click(view.getByRole('button', { name: '打开设置' }))
-    expect(openSettings).toHaveBeenCalledOnce()
+    expect(view.getByRole('button', { name: '切换到明亮模式' })).not.toBeNull()
+    expect(view.queryByRole('button', { name: '打开设置' })).toBeNull()
+    expect(view.queryByRole('button', { name: '检查更新' })).toBeNull()
     expect(view.container.querySelector('[data-emate-header-controls]')).not.toBeNull()
     expect(view.queryByRole('button', { name: '分享当前任务' })).toBeNull()
     await runtime.dispose()

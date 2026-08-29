@@ -1,16 +1,19 @@
 import { useLayoutEffect, useRef, useState, type ComponentType } from 'react'
 import css from './composer-connectors.module.css'
 
-interface Props {
+interface ConnectorsProps {
   LinkIcon: ComponentType<{ size?: number }>
   openConnections: () => void
+}
+
+interface MentionsProps {
   openMentions: (selection: { start: number; end: number }) => void
   input?: { phase: 'plain' | 'adjudicating' | 'claimed' | 'submitting' }
 }
 
 export const COMPOSER_PLACEHOLDER = '给小芯发送消息，支持粘贴图片或文件'
 
-export function ComposerConnectors({ LinkIcon, openConnections, openMentions, input }: Props) {
+export function ComposerMentions({ openMentions, input }: MentionsProps) {
   const control = useRef<HTMLButtonElement>(null)
   const [error, setError] = useState('')
   const busy = input?.phase === 'adjudicating' || input?.phase === 'submitting'
@@ -48,6 +51,12 @@ export function ComposerConnectors({ LinkIcon, openConnections, openMentions, in
         }
       }}
     ><span aria-hidden="true">@</span></button>
+    {error !== '' && <span className={css.error} role="alert">{error}</span>}
+  </div>
+}
+
+export function ComposerConnectors({ LinkIcon, openConnections }: ConnectorsProps) {
+  return <div className={css.root}>
     <button
       data-emate-composer-connectors=""
       type="button"
@@ -58,6 +67,5 @@ export function ComposerConnectors({ LinkIcon, openConnections, openMentions, in
       <LinkIcon size={14} />
       <span>外部连接</span>
     </button>
-    {error !== '' && <span className={css.error} role="alert">{error}</span>}
   </div>
 }

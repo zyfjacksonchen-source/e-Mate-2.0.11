@@ -1,34 +1,9 @@
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 
-interface GoalReference {
-  kind: 'goal'
-  sessionId: string
-  id: string
-  revision: number
-  objective: string
-}
-
-interface PlanReference {
-  kind: 'plan'
-  sessionId: string
-  index: number
-  content: string
-  status: string
-}
-
 interface SkillReference {
   kind: 'skill'
   sessionId: string
   name: string
-}
-
-interface GoalSnapshot {
-  goal: { id: string; revision: number; objective: string }
-}
-
-interface TodoItem {
-  content: string
-  status: 'pending' | 'in_progress' | 'completed'
 }
 
 interface SkillEntry {
@@ -40,26 +15,6 @@ interface ComputerUseCapability {
   state: 'ready' | 'setup-required' | 'blocked' | 'failed'
   detail?: string
   actions: readonly { id: string; label: string }[]
-}
-
-const xml = (value: string): string => value
-  .replaceAll('&', '&amp;')
-  .replaceAll('<', '&lt;')
-  .replaceAll('>', '&gt;')
-  .replaceAll('"', '&quot;')
-
-function binding(ctx: any, sessionId: string): any {
-  const value = ctx.sessions.binding(sessionId)
-  if (value === undefined) throw new Error('会话已不可用')
-  return value
-}
-
-function goalOf(ctx: any, sessionId: string): GoalSnapshot | undefined {
-  return binding(ctx, sessionId).session.projections.faceOf('goal').getSnapshot() ?? undefined
-}
-
-function todosOf(ctx: any, sessionId: string): readonly TodoItem[] {
-  return binding(ctx, sessionId).session.projections.faceOf('todos').getSnapshot() ?? []
 }
 
 async function skillsOf(ctx: any, sessionId: string, signal: AbortSignal): Promise<readonly SkillEntry[]> {
@@ -88,8 +43,8 @@ const computerCandidate = (description: string, hint: string) => [{ name: '电�
 export function registerComputerUseTrigger(ctx: any): void {
   const source: InputTriggerSource = {
     trigger: '@',
-    name: '功能',
-    order: -20,
+    name: '电脑操控',
+    order: -10,
     async candidates(_session, { query, signal }) {
       if (!'电脑操控'.includes(query)) return []
       if (document.body.dataset.dshDesktopPlatform !== 'darwin') {
@@ -114,7 +69,7 @@ export function registerComputerUseTrigger(ctx: any): void {
     onPick({ candidate }) {
       if (document.body.dataset.dshDesktopPlatform !== 'darwin') return 'handled'
       if (candidate.hint === '可插入') {
-        return { insert: { source: '功能', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' } }
+        return { insert: { source: '电脑操控', ref: 'computer-use', label: '@电脑操控', clipboardText: '@电脑操控' } }
       }
       if (candidate.hint === '打开系统设置') {
         const signal = AbortSignal.timeout(10_000)
@@ -147,71 +102,67 @@ function parseRef(ref: string, kind: string): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
-/** Add Goal, session-owned Plan, and Skill references to the native InputTrigger roster. */
+/** Add native Goal/Plan actions and Skill references to the InputTrigger roster. */
 export function registerMentionSources(ctx: any): void {
   const goal: InputTriggerSource = {
     trigger: '@',
     name: '目标',
-    order: -10,
-    async candidates(session, { query, signal }) {
+    order: -20,
+    async candidates(_session, { query, signal }) {
       signal.throwIfAborted()
-      const snapshot = goalOf(ctx, session.sessionId)
-      return snapshot?.goal.objective.toLocaleLowerCase().includes(query.toLocaleLowerCase()) === true
-        ? [{ name: snapshot.goal.objective, description: `目标 · revision ${snapshot.goal.revision}` }]
-        : []
+      return '目标'.includes(query) ? [{ name: '目标', description: '填写当前目标' }] : []
     },
-    onPick({ candidate, session }) {
-      const current = goalOf(ctx, session.sessionId)?.goal
-      if (current === undefined || current.objective !== candidate.name) return undefined
-      const ref: GoalReference = { kind: 'goal', sessionId: session.sessionId, ...current }
-      return { insert: { source: '目标', ref: JSON.stringify(ref), label: '@目标', clipboardText: `@目标 ${current.objective}` } }
-    },
-    codec: {
-      clipboardText: ref => `@目标 ${(parseRef(ref, 'goal') as unknown as GoalReference).objective}`,
-      async serialize(ref, signal) {
-        signal.throwIfAborted()
-        const saved = parseRef(ref, 'goal') as unknown as GoalReference
-        const current = goalOf(ctx, saved.sessionId)?.goal
-        if (current === undefined || current.id !== saved.id || current.revision !== saved.revision
-          || current.objective !== saved.objective) throw new Error('目标已更新，请重新选择')
-        return `<goal id="${xml(saved.id)}" revision="${saved.revision}">${xml(saved.objective)}</goal>`
-      },
+    onPick({ candidate, session, position, span }) {
+      if (candidate.name !== '目标') return undefined
+      const scope = ctx.sessions.scope(session.sessionId)
+      if (scope === undefined) return 'handled'
+      const input = ctx.conversation.input.for(scope)
+      const snapshot = input.state.getSnapshot()
+      if (position !== 'leading' || span.start !== 0 || span.end !== 1
+        || span.draftRev !== snapshot.draftRev || snapshot.draft !== '@') {
+        input.notify('error', '请在空白输入框中使用 @目标，当前草稿已保留。')
+        return 'handled'
+      }
+      input.setDraft('/goal')
+      const after = input.state.getSnapshot()
+      const triggers = ctx.inputTriggers.sessionOf(scope)
+      triggers.track('/goal', 5, { tier: after.phase === 'claimed' ? 'claimed' : 'plain' }, after.draftRev)
+      if (!triggers.onSpace()) input.notify('error', '目标入口暂不可用，已保留 /goal。')
+      return 'handled'
     },
   }
 
   const plan: InputTriggerSource = {
     trigger: '@',
     name: '计划',
-    order: -9,
-    async candidates(session, { query, signal }) {
+    order: -19,
+    async candidates(_session, { query, signal }) {
       signal.throwIfAborted()
-      const needle = query.toLocaleLowerCase()
-      return todosOf(ctx, session.sessionId).flatMap((item, index) => {
-        const name = `${index + 1}. ${item.content}`
-        return name.toLocaleLowerCase().includes(needle) ? [{ name, description: item.status }] : []
-      })
+      return '计划'.includes(query) ? [{ name: '计划', description: '开启计划模式' }] : []
     },
-    onPick({ candidate, session }) {
-      const index = Number.parseInt(candidate.name, 10) - 1
-      const current = todosOf(ctx, session.sessionId)[index]
-      if (current === undefined || candidate.name !== `${index + 1}. ${current.content}`) return undefined
-      const ref: PlanReference = { kind: 'plan', sessionId: session.sessionId, index, ...current }
-      return { insert: { source: '计划', ref: JSON.stringify(ref), label: `@计划 ${index + 1}`, clipboardText: candidate.name } }
-    },
-    codec: {
-      clipboardText: ref => {
-        const saved = parseRef(ref, 'plan') as unknown as PlanReference
-        return `${saved.index + 1}. ${saved.content}`
-      },
-      async serialize(ref, signal) {
-        signal.throwIfAborted()
-        const saved = parseRef(ref, 'plan') as unknown as PlanReference
-        const current = todosOf(ctx, saved.sessionId)[saved.index]
-        if (current === undefined || current.content !== saved.content || current.status !== saved.status) {
-          throw new Error('计划项已更新，请重新选择')
+    onPick({ candidate, session, span }) {
+      if (candidate.name !== '计划') return undefined
+      const scope = ctx.sessions.scope(session.sessionId)
+      if (scope === undefined) return 'handled'
+      const input = ctx.conversation.input.for(scope)
+      const snapshot = input.state.getSnapshot()
+      if (span.draftRev !== snapshot.draftRev || snapshot.draft.slice(span.start, span.end) !== '@') {
+        input.notify('error', '输入已变化，未开启计划模式。')
+        return 'handled'
+      }
+      void ctx.remote.commands.execute(session.sessionId, '/plan').then((result: any) => {
+        if (!result?.ok || result.value?.result?.kind !== 'success') {
+          const message = result?.ok ? result.value?.result?.text : result?.error?.message
+          input.notify('error', message || '无法开启计划模式，当前草稿已保留。')
+          return
         }
-        return `<plan-item index="${saved.index + 1}" status="${saved.status}">${xml(saved.content)}</plan-item>`
-      },
+        if (!scope.bail(scope, 'slash/input-consume-token', { guard: { kind: 'span', span } })) {
+          input.notify('info', '计划模式已开启；输入已变化，未移除 @。')
+        }
+      }).catch((reason: unknown) => {
+        input.notify('error', reason instanceof Error ? reason.message : '无法开启计划模式，当前草稿已保留。')
+      })
+      return 'handled'
     },
   }
 
@@ -221,11 +172,19 @@ export function registerMentionSources(ctx: any): void {
     order: -8,
     async candidates(session, { query, signal }) {
       const needle = query.toLocaleLowerCase()
-      return (await skillsOf(ctx, session.sessionId, signal))
-        .filter(item => item.name.toLocaleLowerCase().includes(needle))
-        .map(item => ({ name: item.name, description: item.description }))
+      try {
+        const items = (await skillsOf(ctx, session.sessionId, signal))
+          .filter(item => item.name.toLocaleLowerCase().includes(needle))
+          .map(item => ({ name: item.name, description: item.description }))
+        return items.length === 0 && query === ''
+          ? [{ name: '暂无可用 Skill', description: '当前会话没有可引用的 Skill' }] : items
+      } catch {
+        signal.throwIfAborted()
+        return [{ name: 'Skill 暂时无法读取', description: '请稍后重试' }]
+      }
     },
     onPick({ candidate, session }) {
+      if (candidate.name === '暂无可用 Skill' || candidate.name === 'Skill 暂时无法读取') return undefined
       const ref: SkillReference = { kind: 'skill', sessionId: session.sessionId, name: candidate.name }
       return { insert: { source: 'Skill', ref: JSON.stringify(ref), label: `@${candidate.name}`, clipboardText: `/${candidate.name}` } }
     },
