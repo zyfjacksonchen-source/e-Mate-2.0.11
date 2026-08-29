@@ -136,7 +136,7 @@ export function HeaderControls({
   return (
     <div
       className={css.controls}
-      aria-label="应用工具"
+      aria-label={pathname === '/settings' ? undefined : '应用工具'}
       data-emate-header-controls=""
       data-emate-settings-route={pathname === '/settings' ? '' : undefined}
     >
