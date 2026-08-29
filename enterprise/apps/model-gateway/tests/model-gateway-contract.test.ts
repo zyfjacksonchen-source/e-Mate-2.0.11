@@ -2624,7 +2624,7 @@ test('delivers only the authenticated tenant runtime model routes without exposi
     buttonLabel: 'GPT-5.6 Luna · 深度',
   };
   const tenantKey = 'tenant-specific-provider-key-123456789';
-  const searchKey = 'tenant-specific-search-key-123456789';
+  const gptSearchKey = 'tenant-specific-gpt-search-key-123456789';
   const internalDeepSeekKey = 'internal-deepseek-chat-key-never-leased';
   const internalDeepSeekRoute = {
     ...chatRoute,
@@ -2653,7 +2653,7 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         keyCalls.push(routeId);
         return routeId === luna.id
           ? tenantKey
-          : routeId === searchCredentialRoute.id ? searchKey : internalDeepSeekKey;
+          : routeId === searchCredentialRoute.id ? gptSearchKey : internalDeepSeekKey;
       },
     },
     usageStore: new InMemoryUsageStore(limits),
@@ -2703,7 +2703,7 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         purpose: 'web-search',
         provider: 'deepseek-official',
         credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
-        upstreamApiKey: searchKey,
+        upstreamApiKey: internalDeepSeekKey,
       },
     });
     for (const clientVersion of ['2.0.11', '2.0.13', '2.0.14', '2.0.15', '2.0.16', '99.0.0', '2.1.0-rc.1']) {
@@ -2714,9 +2714,9 @@ test('delivers only the authenticated tenant runtime model routes without exposi
       assert.equal(currentClientResponse.status, 200);
       assert.deepEqual(await currentClientResponse.json(), releasedClientBody);
     }
-    assert.equal(enabledCalls.get(searchCredentialRoute.id), 8);
-    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 8);
-    assert.equal(keyCalls.includes(internalDeepSeekRoute.id), false);
+    assert.equal(enabledCalls.get(internalDeepSeekRoute.id), 8);
+    assert.equal(keyCalls.filter((routeId) => routeId === internalDeepSeekRoute.id).length, 8);
+    assert.equal(keyCalls.includes(searchCredentialRoute.id), false);
     const catalogResponse = await (await fetch(`${baseUrl}/v1/models`, { headers: auth() })).json() as {
       models: Array<{ id: string }>;
     };
@@ -2756,15 +2756,15 @@ test('keeps GPT runtime available while managed search is denied or unavailable'
       grantStatus: 'unavailable',
     },
     {
-      routes: [luna, searchCredentialRoute],
+      routes: [luna, internalSearchLikeRoute],
       policy: {
-        isEnabled: async (_tenantId: string, routeId: string) => routeId !== searchCredentialRoute.id,
+        isEnabled: async (_tenantId: string, routeId: string) => routeId !== internalSearchLikeRoute.id,
         upstreamApiKey: async (_tenantId: string, routeId: string) => routeId === luna.id ? gptKey : searchSecret,
       },
       grantStatus: 'denied',
     },
     {
-      routes: [luna, searchCredentialRoute],
+      routes: [luna, internalSearchLikeRoute],
       policy: {
         isEnabled: async () => true,
         upstreamApiKey: async (_tenantId: string, routeId: string) => routeId === luna.id ? gptKey : null,
@@ -2772,7 +2772,7 @@ test('keeps GPT runtime available while managed search is denied or unavailable'
       grantStatus: 'unavailable',
     },
     {
-      routes: [luna, internalSearchLikeRoute],
+      routes: [luna, searchCredentialRoute],
       policy: {
         isEnabled: async () => true,
         upstreamApiKey: async (_tenantId: string, routeId: string) => routeId === luna.id ? gptKey : searchSecret,
