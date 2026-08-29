@@ -116,6 +116,12 @@ Formal RC run `33223689296` at source `955ddd36bfcdc29155cd7e5a11c96fdd93bc3c87`
 
 This invalidation is appended as a new truth layer. It does not rewrite the already published unsigned Base v8 bytes, their public and installed receipts, or any predecessor/update fixture. A new candidate may start only after T21 product source and this v9 binding share one accepted protected source; Build once, install, update, rollback, signing, desired state and public gates remain `OPEN` until then.
 
+### D023 — Session-draft isolation requires an immutable v10 source identity
+
+The accepted Harness advances by one commit from immutable v9 predecessor `b469c2b99a6c2f35c5e51eaf611f1941e095f90d` to advertised `1d3824bcd3400b3761a0ebdd956901752ddc962b`, solely for native `ui-conversation` session-draft and attachment isolation. T18 therefore creates `e-mate-desktop-profile-v10-dsh-1d3824bcd340` instead of rewriting v9. The Desktop reference, Profile signing root, 17-import ABI union, 15 retained components, 19 managed 2.0.15 manifests and strict validators remain unchanged.
+
+PR #105 run `33245046765` attempt 1 is permanent failed source evidence: it stopped before build because the new root gitlink was paired with v9/b469. It is not rerun, consumed or called Build once. This v10 fix closes only the current source-binding mismatch; candidate, Build once, installed, service, Windows and public truth remain `OPEN`, while v7/v8/v9 and all published/predecessor receipts remain immutable history.
+
 ## Exclusive static scopes
 
 | Ticket | Exact owned paths while active |

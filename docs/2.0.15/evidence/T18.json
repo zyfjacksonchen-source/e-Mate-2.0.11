@@ -227,6 +227,80 @@
       "website": "OPEN"
     }
   },
+  "session_draft_successor_base_source_binding": {
+    "status": "SOURCE_BINDING_FIX_1_LOCAL_PASS_PR_105_FRESH_CHECKS_REQUIRED",
+    "source_parent": "8dc5bc8b8c521268d74d187279006638da5176bc",
+    "source_branch": "release/2.0.15-final",
+    "product_version": "2.0.15",
+    "base_contract_id": "e-mate-desktop-profile-v10-dsh-1d3824bcd340",
+    "predecessor_base_contract_id": "e-mate-desktop-profile-v9-dsh-b469c2b99a6c",
+    "harness_version": "0.1.0-rc.7",
+    "harness_commit": "1d3824bcd3400b3761a0ebdd956901752ddc962b",
+    "predecessor_harness_commit": "b469c2b99a6c2f35c5e51eaf611f1941e095f90d",
+    "harness_parent": "b469c2b99a6c2f35c5e51eaf611f1941e095f90d",
+    "harness_descendant_commit_count": 1,
+    "harness_advertised_ref": "refs/heads/fix/2.0.15-session-draft-isolation",
+    "harness_change": "native ui-conversation session-draft and attachment isolation only",
+    "root_gitlink_bound": true,
+    "retained_component_count": 15,
+    "managed_manifest_count": 19,
+    "component_base_contract_allowlist": [
+      "e-mate-desktop-profile-v10-dsh-1d3824bcd340"
+    ],
+    "runtime_import_count": 17,
+    "runtime_imports_unchanged_from_v9": true,
+    "desktop_reference_unchanged": true,
+    "profile_signing_root_unchanged": true,
+    "validator_weakened": false,
+    "product_files_modified": false,
+    "historical_public_v8_receipts_modified": false,
+    "historical_v9_source_receipts_modified": false,
+    "profile_current_snapshot_outer_rebound": true,
+    "profile_current_snapshot_inner_bytes_modified": false,
+    "current_candidate_snapshot": {
+      "candidate_release_version": "2.0.15",
+      "candidate_base_contract_id": "e-mate-desktop-profile-v10-dsh-1d3824bcd340",
+      "snapshot_sha256": "d484a67323c8415c1c4de5a61204aea0cb0915076cf810605f0d4aa5588ba030"
+    },
+    "failed_source_gate": {
+      "pull_request": 105,
+      "run_id": 33245046765,
+      "attempt": 1,
+      "source_commit": "8dc5bc8b8c521268d74d187279006638da5176bc",
+      "stopped_before_build": true,
+      "artifacts_consumed": false,
+      "rerun_requested": false,
+      "root_cause": "root gitlink 1d3824bcd340 did not match immutable v9 Harness b469c2b99a6c"
+    },
+    "sentry_runtime_evidence": "UNAVAILABLE_NO_CALLABLE_SENTRY_TOOL_STATIC_SOURCE_GATE_FAILURE",
+    "source_checks": {
+      "change_impact_component_profile": "PASS_43_OF_43",
+      "release_contract": "PASS_16_OF_16",
+      "harness_provenance": "PASS_7_OF_7",
+      "profile_current_snapshot_publication_contract": "PASS_3_OF_3",
+      "check_target": "PASS_EXIT_0_AFTER_EXACT_PINNED_PRODUCT_UI_SUBMODULE_LOCAL_OBJECT_RECOVERY_NETWORK_SANDBOX_BLOCKED_REMOTE_FETCH",
+      "check_release_boundary": "PASS_EXIT_0_V10_ZERO_ERRORS",
+      "component_inventory": "PASS_15_COMPONENTS_19_JOBS_0_ERRORS",
+      "changed_json_parse": "PASS_19_FILES",
+      "git_diff_check": "PASS_EXIT_0",
+      "wrong_gitlink_negative_contract": "PASS_FAIL_CLOSED_REGRESSION",
+      "extra_component_emitted_lib_tests": "ENVIRONMENT_OPEN_MISSING_UNBUILT_LIB_NO_ASSERTION_FAILURE_NO_LOCAL_BUILD_REQUESTED"
+    },
+    "downstream_gates": {
+      "protected_pr_admission": "OPEN",
+      "build_once": "OPEN",
+      "candidate": "OPEN",
+      "three_target_profile": "OPEN",
+      "install": "OPEN",
+      "service": "OPEN",
+      "windows": "OPEN",
+      "update": "OPEN",
+      "rollback": "OPEN",
+      "profile_desired_state": "OPEN",
+      "public": "OPEN",
+      "website": "OPEN"
+    }
+  },
   "source_freeze": {
     "product_version": "2.0.15",
     "base_contract_id": "e-mate-desktop-profile-v8-dsh-4787caf39134",

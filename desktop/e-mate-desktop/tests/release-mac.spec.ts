@@ -174,8 +174,8 @@ describe('macOS release command boundary', () => {
 })
 
 const SIGNER_SOURCE = 'a'.repeat(40)
-const SIGNER_HARNESS = 'b469c2b99a6c2f35c5e51eaf611f1941e095f90d'
-const SIGNER_BASE = { id: 'e-mate-desktop-profile-v9-dsh-b469c2b99a6c', harness_commit: SIGNER_HARNESS }
+const SIGNER_HARNESS = '1d3824bcd3400b3761a0ebdd956901752ddc962b'
+const SIGNER_BASE = { id: 'e-mate-desktop-profile-v10-dsh-1d3824bcd340', harness_commit: SIGNER_HARNESS }
 const SIGNER_INPUT_SHA = '1'.repeat(64)
 const SIGNER_ARCHIVE_SHA = '2'.repeat(64)
 const SIGNER_DMG = 'e-Mate-2.0.15-mac-universal.dmg'
