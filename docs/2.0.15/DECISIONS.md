@@ -110,6 +110,12 @@ T21 advances the accepted Harness gitlink by exactly one commit, from `4787caf39
 
 This decision transfers only the existing T18 Base/gitlink/component/runtime-identity/source-test leases. It does not transfer T21 Shell product paths and does not authorize a validator exception, parallel Base, dependency change, candidate build, installation, signing, Profile activation or public write. Candidate, installed and public gates for v9 remain `OPEN`; the prior v8 public receipts remain historical evidence only.
 
+### D022 — The pre-T21 candidate is invalidated; v8 history remains immutable
+
+Formal RC run `33223689296` at source `955ddd36bfcdc29155cd7e5a11c96fdd93bc3c87` became invalid when installed P0 evidence made T21 a required product input. T00 requested cancellation and T18 must not consume, rebuild from, relabel or publish any artifact from that run. The v9/b469 binding closes only the current source contract; it is not itself a candidate.
+
+This invalidation is appended as a new truth layer. It does not rewrite the already published unsigned Base v8 bytes, their public and installed receipts, or any predecessor/update fixture. A new candidate may start only after T21 product source and this v9 binding share one accepted protected source; Build once, install, update, rollback, signing, desired state and public gates remain `OPEN` until then.
+
 ## Exclusive static scopes
 
 | Ticket | Exact owned paths while active |

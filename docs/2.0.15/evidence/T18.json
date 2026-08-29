@@ -2,9 +2,9 @@
   "schema_version": 1,
   "document_type": "emate.2.0.15.ticket-evidence",
   "ticket": "T18",
-  "title": "2.0.15 v9 successor Base source binding over the historical v8 public closeout",
-  "status": "PARTIAL_OPEN_V9_SOURCE_BOUND_V8_PUBLIC_HISTORY_DOWNSTREAM_OPEN",
-  "captured_at": "2026-08-29T04:12:43Z",
+  "title": "2.0.15 source freeze, formal unsigned publication and partial installed closeout",
+  "status": "PARTIAL_OPEN_PUBLIC_RELEASE_PASS_INSTALLED_UPDATE_AUTH_INCOMPLETE",
+  "captured_at": "2026-08-28T21:02:09Z",
   "baseline": {
     "branch": "release/2.0.15",
     "start_commit": "2f1183c3ea0b5da5e794a3d6daf1aa565b08a328",
@@ -60,8 +60,8 @@
     "capture_authority": "codex-cloudflare-plugin",
     "captured_at": "2026-08-27T08:19:11.281Z",
     "candidate_release_version": "2.0.15",
-    "candidate_base_contract_id": "e-mate-desktop-profile-v9-dsh-b469c2b99a6c",
-    "snapshot_sha256": "fd4e1a9a49e05e777bc37f89bedfd49bd5b1abd6f76977f47bf1dbf9a6d3212d",
+    "candidate_base_contract_id": "e-mate-desktop-profile-v8-dsh-4787caf39134",
+    "snapshot_sha256": "b1714ce20eabf4010d1719055fff1bf2705d3c7cbdfab2b85d22be8e09cf4787",
     "inner_release_version": "2.0.13",
     "inner_base_contract_id": "e-mate-desktop-profile-v7-dsh-b2b1650b01f0",
     "inner_content_base64_modified": false,
@@ -81,7 +81,7 @@
     }
   },
   "t21_successor_base_source_binding": {
-    "status": "SOURCE_BINDING_PASS_DOWNSTREAM_OPEN",
+    "status": "SOURCE_BINDING_PASS_CURRENT_CANDIDATE_INVALIDATED_DOWNSTREAM_OPEN",
     "source_baseline": "955ddd36bfcdc29155cd7e5a11c96fdd93bc3c87",
     "source_branch": "release/2.0.15-t21-base",
     "product_version": "2.0.15",
@@ -107,6 +107,11 @@
     "historical_public_v8_receipts_modified": false,
     "profile_current_snapshot_outer_rebound": true,
     "profile_current_snapshot_inner_bytes_modified": false,
+    "current_candidate_snapshot": {
+      "candidate_release_version": "2.0.15",
+      "candidate_base_contract_id": "e-mate-desktop-profile-v9-dsh-b469c2b99a6c",
+      "snapshot_sha256": "fd4e1a9a49e05e777bc37f89bedfd49bd5b1abd6f76977f47bf1dbf9a6d3212d"
+    },
     "source_checks": {
       "harness_ui_conversation_focused": "PASS_2_FILES_25_TESTS",
       "harness_provenance_after_temporary_links_removed": "PASS_7_OF_7",
@@ -132,6 +137,33 @@
       "profile_desired_state": "OPEN",
       "public": "OPEN",
       "website": "OPEN"
+    }
+  },
+  "current_candidate_invalidated": {
+    "status": "INVALIDATED_DO_NOT_CONSUME_OR_RELABEL",
+    "source_commit": "955ddd36bfcdc29155cd7e5a11c96fdd93bc3c87",
+    "formal_rc_run_id": 33223689296,
+    "cancellation_requested_by_t00": true,
+    "artifacts_consumed": false,
+    "reason": "T21 became a required product input after new installed P0 evidence",
+    "installed_p0_findings": [
+      "Capability Center has unintended gray top and right surfaces",
+      "Home and formal-chat Composer glow is materially misaligned and the chat frame loses its rounded corners",
+      "the @ entry placement and Goal/Plan semantics are incorrect"
+    ],
+    "v9_source_binding_commit": "7895269957db6ddfc8e4cb0beea7af7f6be3bcd9",
+    "v9_source_binding_is_candidate": false,
+    "historical_v8_public_and_installed_receipts_unchanged": true,
+    "candidate_build_install_public": "OPEN",
+    "truth_layer_checks": {
+      "historical_t18_exact_against_955ddd36": "PASS",
+      "change_impact": "PASS_26_OF_26",
+      "check_target": "PASS_EXIT_0",
+      "check_release_boundary": "PASS_EXIT_0",
+      "component_inventory": "PASS_15_COMPONENTS_19_JOBS_0_ERRORS",
+      "changed_json_parse": "PASS",
+      "git_diff_check": "PASS_EXIT_0",
+      "temporary_node_modules_links": "ABSENT"
     }
   },
   "source_freeze": {

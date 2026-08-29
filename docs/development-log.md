@@ -3290,3 +3290,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Verification: Harness `ui-conversation` focused tests `2 files / 25 tests`，移除全部 Harness 临时依赖链接后的 provenance `7/7`，完整 change-impact `26/26`，release contract `16/16`，component/profile release contracts `20/20`；`check:target`、`check:release-boundary` 均 exit 0，inventory 为 `15 components / 19 jobs / 0 errors`，19 个 changed JSON 全部可解析，manifest/runtime consistency 与 `git diff --check` 通过。
 - Evidence ceiling: 这只关闭 v9 source binding。Build once、三目标 Profile composition、candidate、install、update、rollback、signing、Profile desired state、public 与 website 对 v9 全部保持 `OPEN`；没有构建、安装、签名、push、发布或生产写入。作废 `e-mate-image-feedback.xlsx` 继续只保留 identity exclusion，内容未打开、读取、摘要或映射。
 - Next exact action: 停止交 T00 独立审查本 source-binding commit；只有 T21 产品提交与本 v9 绑定按保护规则共同进入新的 protected source 后，才可生成一个新的正式候选。
+
+## 2026-08-29 · 2.0.15 T18 v9 source truth and candidate invalidation split
+
+- Goal checkpoint: T21 Owner 的 advertised Harness ref `refs/heads/release/e-mate-2.0.15-t21-harness` 已由 T00 现场确认精确指向 `b469c2b99a6c2f35c5e51eaf611f1941e095f90d`；T18 的 v9 mechanical binding 保持单一 source owner，不改 T21 产品文件。
+- Historical boundary: `T18.json` 的顶层发布/安装状态、旧 v8 snapshot、formal public closeout、installed acceptance、predecessor/update receipts 全部恢复并保持原字节真相。新 v9 snapshot identity 只记录在 `t21_successor_base_source_binding.current_candidate_snapshot`，不能覆盖历史回执。
+- Candidate invalidation: formal RC run `33223689296` / source `955ddd36bfcdc29155cd7e5a11c96fdd93bc3c87` 因新增 installed P0 使 T21 成为必需产品输入而失效；T00 已请求取消，所有 artifacts 禁止消费或重标。v9 source binding 不等于候选。
+- Evidence ceiling: 只有 v9 source contract 可进入 T00 复核。新的 Build once、Profile composition、candidate、install、update、rollback、signing、desired state、public 与 website 全部 `OPEN`；旧 v8 public/installed truth 不回退也不提升。
