@@ -6,7 +6,7 @@ import css from './settings-chrome.module.css'
 const SETTINGS_PATH = '/settings'
 const SETTINGS_RETURN_KEY = 'eMateSettingsReturn'
 const SETTINGS_CONTENT_SELECTOR = '[data-emate-settings-content]'
-const HIDDEN_SETTINGS_SECTION_IDS = new Set(['models', 'plugins', 'agent-presets'])
+const HIDDEN_SETTINGS_SECTION_IDS = new Set(['models', 'plugins', 'agent-presets', 'vision-toolkit'])
 
 export function applySettingsSectionVisibility(root: ParentNode): void {
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-settings-section-id]')) {

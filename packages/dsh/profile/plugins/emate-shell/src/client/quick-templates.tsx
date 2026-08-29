@@ -49,7 +49,6 @@ export function QuickTemplates({ prepareDraft }: Props) {
             aria-busy={busy === name}
             onClick={() => { void choose(name, prompt) }}
           >
-            <span className={css.number} data-emate-template-number="" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
             <span className={css.icon} aria-hidden="true"><Icon size={22} /></span>
             <strong>{name}</strong>
             <small>{description}</small>

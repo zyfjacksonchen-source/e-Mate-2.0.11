@@ -59,7 +59,7 @@
 
 :global([data-phase='active'] [data-emate-composer-frame-host]) {
   align-self: center;
-  width: min(calc(var(--dsh-composer-card-max-width) + 2 * var(--dsh-composer-side-clearance)), 100%);
+  width: min(var(--dsh-composer-card-max-width), 100%);
 }
 
 .home {
@@ -97,8 +97,8 @@
 
 /* Final 2.0.5 Composer.tsx geometry, projected onto the resident Harness
    InputBar. The target still owns draft, attachments, submit and input state. */
-:global([data-slot='conversation.composer.bar'] > div) {
-  padding-inline: 0 !important;
+:global([data-emate-composer-frame-host] > [data-slot='conversation.composer.bar'] > div) {
+  padding: 0 !important;
 }
 
 :global([data-slot='conversation.composer.bar'] [data-composer-card]) {

@@ -95,6 +95,7 @@ export function SidebarRoot({
   const workspacePhase = useWorkspaces(state => state.phase)
   const [projectsCollapsed, setProjectsCollapsed] = useState(false)
   const [sessionsCollapsed, setSessionsCollapsed] = useState(false)
+  const [unassignedCollapsed, setUnassignedCollapsed] = useState(true)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [showAll, setShowAll] = useState<Record<string, boolean>>({})
   const [searchOpen, setSearchOpen] = useState(false)
@@ -502,11 +503,6 @@ export function SidebarRoot({
                     })}</div>)}
               </section>
 
-              {unassignedRows.length > 0 && <section className={css.sidebarSection} aria-label="未归属/待恢复">
-                <div className={css.navHeading}><strong>未归属/待恢复</strong><small>{unassignedRows.length}</small></div>
-                <div className={css.taskList}>{unassignedRows.map(sessionRow)}</div>
-              </section>}
-
               <section className={css.sidebarSection} aria-label="会话">
                 <div className={css.navHeading}>
                   <button className={css.sectionToggle} type="button" aria-expanded={!sessionsCollapsed} onClick={() => { setSessionsCollapsed(value => !value) }}><ChevronIcon className={sessionsCollapsed ? css.rotated : undefined} size={14} /><span>会话</span><small>{generalRows.length}</small></button>
@@ -522,6 +518,13 @@ export function SidebarRoot({
                   ? <p className={css.empty}>正在加载会话…</p>
                   : <div className={css.taskList}>{generalRows.length ? generalRows.map(sessionRow) : <p className={css.empty}>暂无会话</p>}</div>)}
               </section>
+
+              {unassignedRows.length > 0 && <section className={css.sidebarSection} aria-label="未归属/待恢复">
+                <div className={css.navHeading}>
+                  <button className={css.sectionToggle} type="button" aria-expanded={!unassignedCollapsed} onClick={() => { setUnassignedCollapsed(value => !value) }}><ChevronIcon className={unassignedCollapsed ? css.rotated : undefined} size={14} /><span>未归属/待恢复</span><small>{unassignedRows.length}</small></button>
+                </div>
+                {!unassignedCollapsed && <div className={css.taskList}>{unassignedRows.map(sessionRow)}</div>}
+              </section>}
             </>
           )}
           {notice && <p className={css.notice} role="status">{notice}</p>}
