@@ -49,6 +49,19 @@
   box-sizing: border-box;
 }
 
+:global([data-phase='hero'] [data-composer-seat]) {
+  padding-bottom: 32px;
+}
+
+:global([data-phase='hero'] [data-emate-composer-frame-host]) {
+  padding-bottom: 0;
+}
+
+:global([data-phase='active'] [data-emate-composer-frame-host]) {
+  align-self: center;
+  width: min(calc(var(--dsh-composer-card-max-width) + 2 * var(--dsh-composer-side-clearance)), 100%);
+}
+
 .home {
   width: min(1088px, 100%);
   padding: 16px 16px 4px;
@@ -100,6 +113,10 @@
 :global([data-emate-composer-frame-host] [data-slot='conversation.composer.bar'] [data-composer-card]) {
   --emate-composer-frame-radius: 24px;
   min-height: 112px;
+  border-radius: 24px !important;
+}
+
+:global([data-emate-composer-frame-host]:has([data-slot='conversation.hero.workspace']) [data-slot='conversation.composer.bar'] [data-composer-card]) {
   border-radius: 24px 24px 0 0 !important;
 }
 

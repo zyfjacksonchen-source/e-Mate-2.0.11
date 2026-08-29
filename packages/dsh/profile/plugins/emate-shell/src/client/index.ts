@@ -29,7 +29,7 @@ import {
 import { AccountControl, AccountSettings } from './account.tsx'
 import { registerActivityFold } from './activity-fold.tsx'
 import './chat-chrome.module.css'
-import { ComposerConnectors } from './composer-connectors.tsx'
+import { ComposerConnectors, ComposerMentions } from './composer-connectors.tsx'
 import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from './composer-mentions.ts'
 import { HomeProjection, SchedulesOverlayProjection } from './home.tsx'
 import { HeaderControls } from './header-controls.tsx'
@@ -356,6 +356,16 @@ export function apply(ctx: any): void {
   }, LegacyArtifacts))
   registerSessionShare(ctx)
   registerHeaderControls(ctx)
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
+    name: 'conversation.input.left',
+    id: 'e-mate-mentions',
+    order: 11,
+    inject: (sessionId: string) => ({
+      openMentions: (selection: { start: number; end: number }) => {
+        openMentionMenu(ctx, sessionId, selection)
+      },
+    }),
+  }, ComposerMentions))
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
     name: 'conversation.input.right',
     id: 'e-mate-connectors',
@@ -367,9 +377,6 @@ export function apply(ctx: any): void {
         if (`${location.pathname}${location.search}` === route) return
         history.pushState(null, '', route)
         dispatchEvent(new PopStateEvent('popstate'))
-      },
-      openMentions: (selection: { start: number; end: number }) => {
-        openMentionMenu(ctx, sessionId, selection)
       },
     }),
   }, ComposerConnectors))
