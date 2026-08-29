@@ -57,6 +57,9 @@ for (const component of components) {
     baseImports: component.base_imports,
     runtimeImports: boundary.baseContract.runtime_imports,
   })
+}
+
+for (const component of components) {
   run(['--dir', component.root, 'run', 'build'], command === 'check'
     ? { ...process.env, EMATE_COMPONENT_CHECK: '1' }
     : process.env)
