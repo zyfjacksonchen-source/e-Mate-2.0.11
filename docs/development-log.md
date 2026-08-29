@@ -3281,3 +3281,12 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Independent verification: T00 独立运行完整 impact `45/45`、release `16/16`、mac updater `93/93`；`check:target`、`check:release-boundary`、`component:inventory`、JSON 与全 Phase 1b `git diff --check` 均通过，inventory 为 15 components / 19 jobs / 0 errors。实际 Phase 1b 修改严格限于七个已记录路径。
 - Evidence ceiling: Build once、不可变 artifact identity、candidate/admission、三目标 composition/boot、双平台安装、升级/回滚、真实服务与 TCC、签名、R2/Feed/Profile desired state、官网/public readback和正式发布仍全部 OPEN。作废图片反馈工作簿仍只保留 identity exclusion，内容未打开、读取、摘要或映射。
 - Next exact action: 先再次读取 live `origin/main`；若仍为 `90c3a1f…`，只放行同一 T18 任务非强制推送唯一 release 分支、创建并通过一个受保护主线 PR，然后捕获 protected-main CI attempt-1 的唯一 Build once。该任务必须在 artifact identity 回传后停止，未获 T00 接受前不得安装、签名、调用发布协调器或写生产状态。
+
+## 2026-08-29 · 2.0.15 T18 / T21 successor Base source binding
+
+- Goal checkpoint: T21 将 root Harness gitlink 从 `4787caf39134df190105b272da0dd2ba893d4d75` 推进到其单提交后代 `b469c2b99a6c2f35c5e51eaf611f1941e095f90d`，因此 T18 在 protected source `955ddd36bfcdc29155cd7e5a11c96fdd93bc3c87` 上建立全新 `e-mate-desktop-profile-v9-dsh-b469c2b99a6c`；没有原地改写不可变 v8，也没有修改 T21 产品文件。
+- Contract result: root gitlink、Base contract、当前 Desktop/DSH/release constants 和 15 个 retained component manifests 全部绑定 v9/b469；19 个 managed manifests 继续是 `2.0.15`。Desktop reference `6074088f5b660206e404b3591fab51fb99c69add`、Profile Ed25519 signing root 和精确 17 项 retained-component ABI union 均未变化，strict validator 未放宽。
+- Historical boundary: 已发布 2.0.15/Base v8、2.0.13/Base v7、predecessor/update fixtures 与旧 candidate/public receipts 保持历史事实。`profile-current-snapshot.json` 只重绑定当前 outer candidate identity；三目标公开 2.0.13/Base v7 inner bytes 未改。
+- Verification: Harness `ui-conversation` focused tests `2 files / 25 tests`，移除全部 Harness 临时依赖链接后的 provenance `7/7`，完整 change-impact `26/26`，release contract `16/16`，component/profile release contracts `20/20`；`check:target`、`check:release-boundary` 均 exit 0，inventory 为 `15 components / 19 jobs / 0 errors`，19 个 changed JSON 全部可解析，manifest/runtime consistency 与 `git diff --check` 通过。
+- Evidence ceiling: 这只关闭 v9 source binding。Build once、三目标 Profile composition、candidate、install、update、rollback、signing、Profile desired state、public 与 website 对 v9 全部保持 `OPEN`；没有构建、安装、签名、push、发布或生产写入。作废 `e-mate-image-feedback.xlsx` 继续只保留 identity exclusion，内容未打开、读取、摘要或映射。
+- Next exact action: 停止交 T00 独立审查本 source-binding commit；只有 T21 产品提交与本 v9 绑定按保护规则共同进入新的 protected source 后，才可生成一个新的正式候选。

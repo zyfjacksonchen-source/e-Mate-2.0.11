@@ -15,7 +15,7 @@ import {
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const HARNESS_COMMIT = '4787caf39134df190105b272da0dd2ba893d4d75'
+export const HARNESS_COMMIT = 'b469c2b99a6c2f35c5e51eaf611f1941e095f90d'
 export const HARNESS_VERSION = '0.1.0-rc.7'
 
 const NATIVE_MODEL_REFRESH = 'ctx.remote.$on("credentials/updated", refresh);'

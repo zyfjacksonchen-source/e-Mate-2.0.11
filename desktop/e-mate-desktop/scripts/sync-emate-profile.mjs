@@ -60,7 +60,7 @@ for (const name of ecosystemPlugins) {
 
 const registry = JSON.parse(await readFile(join(destination, 'bundles', 'registry.json'), 'utf8'))
 if (registry.product !== 'e-Mate' || registry.version !== version
-  || registry.harness_commit !== '4787caf39134df190105b272da0dd2ba893d4d75') {
+  || registry.harness_commit !== 'b469c2b99a6c2f35c5e51eaf611f1941e095f90d') {
   throw new Error('sync-emate-profile: bundled e-Mate profile identity drifted')
 }
 

@@ -1,5 +1,5 @@
 e-Mate includes the DeepSeek Harness 0.1.0-rc.7 runtime assembled
-from downstream commit 4787caf39134df190105b272da0dd2ba893d4d75, based on upstream commit
+from downstream commit b469c2b99a6c2f35c5e51eaf611f1941e095f90d, based on upstream commit
 99f6f02fecdb7dff40c3fbc9470f5907c29f74ca, with the bounded downstream
 prompt and redundant-permission boundary fixes. Each redistributed Harness
 package keeps its own LICENSE file under runtime/harness/node_modules.
