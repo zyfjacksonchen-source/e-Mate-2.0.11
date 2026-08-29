@@ -173,6 +173,60 @@
       "temporary_node_modules_links": "ABSENT"
     }
   },
+  "t21_final_source_integration": {
+    "status": "SOURCE_INTEGRATION_PASS_RUNTIME_VISUAL_AND_DOWNSTREAM_OPEN",
+    "integration_branch": "release/2.0.15-t21-base",
+    "pre_integration_head": "c4db426aa6f864a048332fc12b476466621d9b01",
+    "t21_source_receipt": {
+      "pull_request": 103,
+      "source_head": "11fd7f87c584d24938658b945f572229e9bbdfa0",
+      "source_commits": [
+        "6296e30df28d274cd710353cca733924b2ad3482",
+        "11fd7f87c584d24938658b945f572229e9bbdfa0"
+      ]
+    },
+    "integrated_commits": [
+      "fe0bf68d62b40fe5301b8fb25c1a9eac58459eda",
+      "541eab8a7cb3823fd1078444c500a427159b3642"
+    ],
+    "integrated_parent_chain": [
+      "541eab8a7cb3823fd1078444c500a427159b3642",
+      "fe0bf68d62b40fe5301b8fb25c1a9eac58459eda",
+      "c4db426aa6f864a048332fc12b476466621d9b01"
+    ],
+    "t21_changed_paths_exact_against_source_head": true,
+    "base_contract_id": "e-mate-desktop-profile-v9-dsh-b469c2b99a6c",
+    "harness_commit": "b469c2b99a6c2f35c5e51eaf611f1941e095f90d",
+    "runtime_import_count": 17,
+    "product_version": "2.0.15",
+    "historical_v8_public_and_installed_receipts_unchanged": true,
+    "source_checks": {
+      "t21_focused_contracts": "PASS_18_OF_18_COMPOSER_10_CAPABILITY_CENTER_8",
+      "t21_affected_shell_contracts": "ENVIRONMENT_OPEN_PENDING_PROTECTED_PR_CI_MODULE_RESOLUTION_NO_ASSERTION_FAILURE",
+      "harness_ui_conversation_focused": "PASS_2_FILES_25_TESTS_WRAPPER_CLEANUP_ANOMALY_NOT_RECORDED_AS_EXIT_0",
+      "v9_contract_source_gate": "PASS_62_TESTS_57_PASS_5_INTENTIONAL_HARNESS_TOOLCHAIN_SKIPS_0_FAIL",
+      "harness_provenance": "PASS_9_OF_9_AFTER_ALL_TEMPORARY_LINKS_REMOVED",
+      "check_target": "PASS_EXIT_0",
+      "check_release_boundary": "PASS_EXIT_0_V9_ZERO_ERRORS",
+      "component_inventory": "PASS_15_COMPONENTS_19_JOBS_0_ERRORS",
+      "changed_json_parse": "PASS_19_FILES",
+      "git_diff_check": "PASS_EXIT_0",
+      "temporary_dependency_links": "REMOVED_BEFORE_EVIDENCE_COMMIT"
+    },
+    "protected_pr_admission": "PENDING_EXTERNAL_AT_COMMIT",
+    "runtime_visual_verification": "OPEN_REQUIRES_NEW_EXACT_CANDIDATE_INSTALLED_EVIDENCE",
+    "release_mode": "UNSIGNED_REQUIRED",
+    "downstream_gates": {
+      "build_once": "OPEN",
+      "candidate": "OPEN",
+      "install": "OPEN",
+      "update": "OPEN",
+      "rollback": "OPEN",
+      "profile_desired_state": "OPEN",
+      "public": "OPEN",
+      "website": "OPEN"
+    }
+  },
   "source_freeze": {
     "product_version": "2.0.15",
     "base_contract_id": "e-mate-desktop-profile-v8-dsh-4787caf39134",

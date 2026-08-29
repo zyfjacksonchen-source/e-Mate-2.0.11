@@ -3303,3 +3303,10 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Contract GREEN: 当前 v9/b469 tree 的完整 change-impact、component/profile/publication/release 合同组合为 `62 tests / 57 pass / 5 intentional impact-lane Harness-toolchain skips / 0 fail`；wrong-gitlink negative contract 继续 fail closed。没有发现新的 current-owner v8/4787 常量，因此没有额外源码修正。
 - Final gates: 移除临时依赖映射后 Harness provenance `7/7`；`check:target` 与 `check:release-boundary` 均 exit 0，后者返回 v9/0 errors；inventory 为 `15 components / 19 jobs / 0 errors`。
 - Cleanup and ceiling: root 与 package-local 临时 `node_modules` symlink 均已由 trap 移除。此回执只补 source checks；失效 run `33223689296` 仍禁止消费，新的 candidate/build/install/update/rollback/public 门禁继续 `OPEN`。
+
+## 2026-08-29 · 2.0.15 T18 / T21 final source integration
+
+- Integration ancestry: 从 v9 source-binding tip `c4db426aa6f864a048332fc12b476466621d9b01` 依次接入 T21 PR #103 的 `6296e30df28d274cd710353cca733924b2ad3482` 与 `11fd7f87c584d24938658b945f572229e9bbdfa0`，得到本地提交 `fe0bf68d62b40fe5301b8fb25c1a9eac58459eda` 与 `541eab8a7cb3823fd1078444c500a427159b3642`；22 个 T21 路径与 source head 逐字节一致，没有把 T18 Base Owner 文件塞回 PR #103。
+- Integrated contract: 当前树同时保持 `e-mate-desktop-profile-v9-dsh-b469c2b99a6c`、Harness `b469c2b99a6c2f35c5e51eaf611f1941e095f90d`、17 项 ABI 与 T21 首页、Composer、Header、Sidebar、Glass 和 Capability Center 产品修复；版本仍为 `2.0.15`，旧 v8 public/installed 回执未改。
+- Verification: T21 精确聚焦合同为 Composer `10/10` 加 Capability Center `8/8`；Harness 两个 ui-conversation 文件输出 `25/25`，但包装清理异常不冒充命令 exit 0。扩展 Shell 本地回归只停在未安装完整 workspace closure 的 module resolution，未出现断言失败，保持 `ENVIRONMENT_OPEN_PENDING_PROTECTED_PR_CI`。v9/source 合同为 `62 tests / 57 pass / 5 intentional Harness-toolchain skips / 0 fail`，Harness provenance 在全部临时映射移除后为 `9/9`；target、release boundary 与 inventory 均通过，inventory 为 `15 components / 19 jobs / 0 errors`。
+- Evidence ceiling: 本提交只记录 source integration。新的受保护 PR admission 在提交时仍待外部 CI；修复后的 installed 视觉、Build once、candidate、安装、更新、回滚、Profile desired state、public 与 website 均保持 `OPEN`，后续候选必须明确为 unsigned。
