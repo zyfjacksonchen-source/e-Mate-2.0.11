@@ -8,7 +8,7 @@ import { AccountControl, AccountSettings } from '../src/client/account.tsx'
 import { auraMorphProgress, auraPointCount } from '../src/client/aura-field.tsx'
 import { IdentityGate, type IdentityBootstrap, type RpcResult } from '../src/client/identity.tsx'
 import { SessionRouteProjection } from '../src/client/session-route.tsx'
-import { SettingsChrome, SettingsTrigger } from '../src/client/settings-chrome.tsx'
+import { SettingsChrome, SettingsCloseLabel, SettingsTrigger } from '../src/client/settings-chrome.tsx'
 
 const useReadyWorkspaces = <T,>(selector: (state: { baselinesReady: boolean }) => T) => selector({ baselinesReady: true })
 
@@ -152,6 +152,34 @@ describe('e-Mate 2.0.15 identity and settings fidelity', () => {
     expect(location.pathname).toBe('/settings')
     expect(documentQuery).toHaveBeenCalled()
     documentQuery.mockRestore()
+  })
+
+  it('returns from the native Settings close control to the chat route without browser Back', async () => {
+    const Icon = () => <svg />
+    function NativeSettingsHarness() {
+      const [open, setOpen] = React.useState(false)
+      return <>
+        <button type="button" onClick={() => { setOpen(true) }}><SettingsTrigger wide SettingsIcon={Icon} /></button>
+        {open && <div role="dialog" aria-modal="true">
+          <button type="button" onClick={() => { setOpen(false) }}><SettingsCloseLabel /></button>
+          <SettingsChrome />
+        </div>}
+      </>
+    }
+
+    history.replaceState(null, '', '/chat/session-21')
+    const browserBack = vi.spyOn(history, 'back').mockImplementation(() => {})
+    render(<NativeSettingsHarness />)
+
+    fireEvent.click(screen.getByRole('button', { name: '设置' }))
+    await waitFor(() => { expect(location.pathname).toBe('/settings') })
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '关闭设置' }))
+    await waitFor(() => {
+      expect(location.pathname).toBe('/chat/session-21')
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+    expect(browserBack).not.toHaveBeenCalled()
   })
 
   it('keeps registration, verification and pending approval on the target RPC seam', async () => {

@@ -1,20 +1,17 @@
 import { useState } from 'react'
+import {
+  IconChecklistOutline14, IconDataOutline16, IconEditOutline16, IconLinkOutline16,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './quick-templates.module.css'
 
 export const OFFICE_TEMPLATES = [
-  ['周报总结', '根据我提供的本周工作记录，整理一份重点清晰的周报，包含进展、结果、风险和下周计划。'],
-  ['会议纪要', '根据我提供的会议内容，整理会议纪要，列出结论、待办、负责人和截止时间。'],
-  ['工作计划', '根据我的目标，制定一份可执行的工作计划，按优先级列出步骤、交付物和时间节点。'],
-  ['汇报大纲', '根据我提供的背景和目标，生成一份结构清晰的工作汇报大纲。'],
-  ['数据分析', '分析我提供的数据，概括关键变化、异常、可能原因和可执行建议。'],
-  ['方案撰写', '根据我的需求，撰写一份完整方案，包含目标、现状、策略、执行步骤、风险和验收标准。'],
-  ['邮件起草', '根据我提供的收件人、目的和要点，起草一封专业、简洁、可直接发送的邮件。'],
-  ['文档润色', '在不改变事实和原意的前提下，润色我提供的文档，使表达更清晰、专业、自然。'],
-  ['表格整理', '根据我提供的信息，设计一份便于填写、筛选和汇总的表格结构。'],
-  ['PPT 结构', '根据我的主题和受众，规划一份逐页 PPT 结构，说明每页核心信息和建议素材。'],
-  ['项目复盘', '根据项目过程和结果，整理复盘，区分目标、结果、有效做法、问题根因和改进动作。'],
-  ['头脑风暴', '围绕我提供的问题提出多种可行思路，说明各自价值、限制和优先验证方式。'],
+  ['小红书笔记创作', '按主题、受众与素材，生成结构清晰、语气自然的小红书笔记草稿。', '请根据我提供的主题、目标人群、产品卖点和素材，撰写一篇小红书笔记。先确认缺失信息，再输出标题、正文、话题标签和配图建议。'],
+  ['计划方案撰写', '把目标与约束整理为步骤、时间节点、交付物和验收标准。', '请根据我的目标、背景和约束，撰写一份可执行的计划方案，包含目标、现状、步骤、时间安排、风险和验收标准。'],
+  ['快速外部连接', '根据当前任务，填入外部服务选择、连接与授权引导草稿。', '请帮我连接并使用外部服务完成任务。先询问我要连接的服务和目标，再通过已有外部连接能力继续。'],
+  ['深度数据分析', '识别关键趋势、异常与原因，形成可执行的分析结论和建议。', '请对我提供的数据进行深度分析，识别趋势、异常、关键驱动因素和风险，并给出结论、图表建议和可执行动作。'],
 ] as const
+
+const TEMPLATE_ICONS = [IconEditOutline16, IconChecklistOutline14, IconLinkOutline16, IconDataOutline16] as const
 
 interface Props {
   prepareDraft: (prompt: string) => void | Promise<void>
@@ -40,12 +37,11 @@ export function QuickTemplates({ prepareDraft }: Props) {
 
   return (
     <section className={css.templates} aria-labelledby="emate-quick-templates-title" data-emate-quick-templates="">
-      <header>
-        <div><h2 id="emate-quick-templates-title">办公快速模板</h2><p>选择后只会填入草稿，你可以继续编辑。</p></div>
-        <span>12 个模板</span>
-      </header>
+      <header><div><h2 id="emate-quick-templates-title">快速开始</h2><p>选择后只会填入草稿，你可以继续编辑。</p></div></header>
       <div className={css.grid}>
-        {OFFICE_TEMPLATES.map(([name, prompt], index) => (
+        {OFFICE_TEMPLATES.map(([name, description, prompt], index) => {
+          const Icon = TEMPLATE_ICONS[index]
+          return (
           <button
             key={name}
             type="button"
@@ -53,11 +49,13 @@ export function QuickTemplates({ prepareDraft }: Props) {
             aria-busy={busy === name}
             onClick={() => { void choose(name, prompt) }}
           >
-            <span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+            <span className={css.number} data-emate-template-number="" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+            <span className={css.icon} aria-hidden="true"><Icon size={22} /></span>
             <strong>{name}</strong>
-            <small>{prompt}</small>
+            <small>{description}</small>
           </button>
-        ))}
+          )
+        })}
       </div>
       {error ? <p className={css.error} role="alert">{error}</p> : null}
     </section>

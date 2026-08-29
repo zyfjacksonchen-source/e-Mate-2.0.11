@@ -30,8 +30,6 @@ export function SettingsTrigger({ wide, SettingsIcon }: TriggerProps) {
     const trigger = label.current?.closest('button')
     if (!(trigger instanceof HTMLButtonElement)) return undefined
     trigger.dataset.emateSettingsTrigger = ''
-    trigger.setAttribute('aria-hidden', 'true')
-    trigger.tabIndex = -1
 
     let open = document.querySelector(SETTINGS_CONTENT_SELECTOR) !== null
     const syncPanel = () => {
@@ -59,11 +57,9 @@ export function SettingsTrigger({ wide, SettingsIcon }: TriggerProps) {
         history.pushState({ [SETTINGS_RETURN_KEY]: returnPath }, '', SETTINGS_PATH)
         dispatchEvent(new PopStateEvent('popstate'))
       } else if (!isOpen && location.pathname === SETTINGS_PATH) {
-        if (typeof history.state?.[SETTINGS_RETURN_KEY] === 'string') history.back()
-        else {
-          history.replaceState(history.state, '', '/')
-          dispatchEvent(new PopStateEvent('popstate'))
-        }
+        const returnPath = history.state?.[SETTINGS_RETURN_KEY]
+        history.replaceState(null, '', typeof returnPath === 'string' ? returnPath : '/')
+        dispatchEvent(new PopStateEvent('popstate'))
       }
     })
 
@@ -74,8 +70,6 @@ export function SettingsTrigger({ wide, SettingsIcon }: TriggerProps) {
       observer.disconnect()
       removeEventListener('popstate', syncPanel)
       delete trigger.dataset.emateSettingsTrigger
-      trigger.removeAttribute('aria-hidden')
-      trigger.removeAttribute('tabindex')
     }
   }, [])
 

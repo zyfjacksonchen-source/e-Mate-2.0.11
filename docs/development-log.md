@@ -3281,3 +3281,32 @@ The text highlights AI hallucination and human verification, legal use, real-act
 - Independent verification: T00 独立运行完整 impact `45/45`、release `16/16`、mac updater `93/93`；`check:target`、`check:release-boundary`、`component:inventory`、JSON 与全 Phase 1b `git diff --check` 均通过，inventory 为 15 components / 19 jobs / 0 errors。实际 Phase 1b 修改严格限于七个已记录路径。
 - Evidence ceiling: Build once、不可变 artifact identity、candidate/admission、三目标 composition/boot、双平台安装、升级/回滚、真实服务与 TCC、签名、R2/Feed/Profile desired state、官网/public readback和正式发布仍全部 OPEN。作废图片反馈工作簿仍只保留 identity exclusion，内容未打开、读取、摘要或映射。
 - Next exact action: 先再次读取 live `origin/main`；若仍为 `90c3a1f…`，只放行同一 T18 任务非强制推送唯一 release 分支、创建并通过一个受保护主线 PR，然后捕获 protected-main CI attempt-1 的唯一 Build once。该任务必须在 artifact identity 回传后停止，未获 T00 接受前不得安装、签名、调用发布协调器或写生产状态。
+
+## 2026-08-29 · 2.0.15 T18 / T21 successor Base source binding
+
+- Goal checkpoint: T21 将 root Harness gitlink 从 `4787caf39134df190105b272da0dd2ba893d4d75` 推进到其单提交后代 `b469c2b99a6c2f35c5e51eaf611f1941e095f90d`，因此 T18 在 protected source `955ddd36bfcdc29155cd7e5a11c96fdd93bc3c87` 上建立全新 `e-mate-desktop-profile-v9-dsh-b469c2b99a6c`；没有原地改写不可变 v8，也没有修改 T21 产品文件。
+- Contract result: root gitlink、Base contract、当前 Desktop/DSH/release constants 和 15 个 retained component manifests 全部绑定 v9/b469；19 个 managed manifests 继续是 `2.0.15`。Desktop reference `6074088f5b660206e404b3591fab51fb99c69add`、Profile Ed25519 signing root 和精确 17 项 retained-component ABI union 均未变化，strict validator 未放宽。
+- Historical boundary: 已发布 2.0.15/Base v8、2.0.13/Base v7、predecessor/update fixtures 与旧 candidate/public receipts 保持历史事实。`profile-current-snapshot.json` 只重绑定当前 outer candidate identity；三目标公开 2.0.13/Base v7 inner bytes 未改。
+- Verification: Harness `ui-conversation` focused tests `2 files / 25 tests`，移除全部 Harness 临时依赖链接后的 provenance `7/7`，完整 change-impact `26/26`，release contract `16/16`，component/profile release contracts `20/20`；`check:target`、`check:release-boundary` 均 exit 0，inventory 为 `15 components / 19 jobs / 0 errors`，19 个 changed JSON 全部可解析，manifest/runtime consistency 与 `git diff --check` 通过。
+- Evidence ceiling: 这只关闭 v9 source binding。Build once、三目标 Profile composition、candidate、install、update、rollback、signing、Profile desired state、public 与 website 对 v9 全部保持 `OPEN`；没有构建、安装、签名、push、发布或生产写入。作废 `e-mate-image-feedback.xlsx` 继续只保留 identity exclusion，内容未打开、读取、摘要或映射。
+- Next exact action: 停止交 T00 独立审查本 source-binding commit；只有 T21 产品提交与本 v9 绑定按保护规则共同进入新的 protected source 后，才可生成一个新的正式候选。
+
+## 2026-08-29 · 2.0.15 T18 v9 source truth and candidate invalidation split
+
+- Goal checkpoint: T21 Owner 的 advertised Harness ref `refs/heads/release/e-mate-2.0.15-t21-harness` 已由 T00 现场确认精确指向 `b469c2b99a6c2f35c5e51eaf611f1941e095f90d`；T18 的 v9 mechanical binding 保持单一 source owner，不改 T21 产品文件。
+- Historical boundary: `T18.json` 的顶层发布/安装状态、旧 v8 snapshot、formal public closeout、installed acceptance、predecessor/update receipts 全部恢复并保持原字节真相。新 v9 snapshot identity 只记录在 `t21_successor_base_source_binding.current_candidate_snapshot`，不能覆盖历史回执。
+- Candidate invalidation: formal RC run `33223689296` / source `955ddd36bfcdc29155cd7e5a11c96fdd93bc3c87` 因新增 installed P0 使 T21 成为必需产品输入而失效；T00 已请求取消，所有 artifacts 禁止消费或重标。v9 source binding 不等于候选。
+- Evidence ceiling: 只有 v9 source contract 可进入 T00 复核。新的 Build once、Profile composition、candidate、install、update、rollback、signing、desired state、public 与 website 全部 `OPEN`；旧 v8 public/installed truth 不回退也不提升。
+
+## 2026-08-29 · 2.0.15 T18 v9 final source-gate closeout
+
+- Contract GREEN: 当前 v9/b469 tree 的完整 change-impact、component/profile/publication/release 合同组合为 `62 tests / 57 pass / 5 intentional impact-lane Harness-toolchain skips / 0 fail`；wrong-gitlink negative contract 继续 fail closed。没有发现新的 current-owner v8/4787 常量，因此没有额外源码修正。
+- Final gates: 移除临时依赖映射后 Harness provenance `7/7`；`check:target` 与 `check:release-boundary` 均 exit 0，后者返回 v9/0 errors；inventory 为 `15 components / 19 jobs / 0 errors`。
+- Cleanup and ceiling: root 与 package-local 临时 `node_modules` symlink 均已由 trap 移除。此回执只补 source checks；失效 run `33223689296` 仍禁止消费，新的 candidate/build/install/update/rollback/public 门禁继续 `OPEN`。
+
+## 2026-08-29 · 2.0.15 T18 / T21 final source integration
+
+- Integration ancestry: 从 v9 source-binding tip `c4db426aa6f864a048332fc12b476466621d9b01` 依次接入 T21 PR #103 的 `6296e30df28d274cd710353cca733924b2ad3482` 与 `11fd7f87c584d24938658b945f572229e9bbdfa0`，得到本地提交 `fe0bf68d62b40fe5301b8fb25c1a9eac58459eda` 与 `541eab8a7cb3823fd1078444c500a427159b3642`；22 个 T21 路径与 source head 逐字节一致，没有把 T18 Base Owner 文件塞回 PR #103。
+- Integrated contract: 当前树同时保持 `e-mate-desktop-profile-v9-dsh-b469c2b99a6c`、Harness `b469c2b99a6c2f35c5e51eaf611f1941e095f90d`、17 项 ABI 与 T21 首页、Composer、Header、Sidebar、Glass 和 Capability Center 产品修复；版本仍为 `2.0.15`，旧 v8 public/installed 回执未改。
+- Verification: T21 精确聚焦合同为 Composer `10/10` 加 Capability Center `8/8`；Harness 两个 ui-conversation 文件输出 `25/25`，但包装清理异常不冒充命令 exit 0。扩展 Shell 本地回归只停在未安装完整 workspace closure 的 module resolution，未出现断言失败，保持 `ENVIRONMENT_OPEN_PENDING_PROTECTED_PR_CI`。v9/source 合同为 `62 tests / 57 pass / 5 intentional Harness-toolchain skips / 0 fail`，Harness provenance 在全部临时映射移除后为 `9/9`；target、release boundary 与 inventory 均通过，inventory 为 `15 components / 19 jobs / 0 errors`。
+- Evidence ceiling: 本提交只记录 source integration。新的受保护 PR admission 在提交时仍待外部 CI；修复后的 installed 视觉、Build once、candidate、安装、更新、回滚、Profile desired state、public 与 website 均保持 `OPEN`，后续候选必须明确为 unsigned。

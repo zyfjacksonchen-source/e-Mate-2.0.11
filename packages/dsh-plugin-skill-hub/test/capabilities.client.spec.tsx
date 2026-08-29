@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react'
+import { readFileSync } from 'node:fs'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CapabilitiesPage, CapabilityControl } from '../src/client/capabilities.tsx'
@@ -95,6 +96,10 @@ describe('capability center fidelity surface', () => {
     expect(screen.getByRole('tab', { name: '发现' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: /已安装/ })).toBeTruthy()
     expect(screen.getByRole('tab', { name: '导入' })).toBeTruthy()
+
+    const styles = readFileSync('src/client/capabilities.module.css', 'utf8')
+    expect(styles).toMatch(/\.page\s*\{[\s\S]*?background:\s*var\(--workspace-surface\)/u)
+    expect(styles).toMatch(/\.workspace\s*\{[\s\S]*?width:\s*min\(1180px, calc\(100% - 8px\)\);[\s\S]*?height:\s*calc\(100% - 16px\);[\s\S]*?margin:\s*8px auto;[\s\S]*?border:\s*1px solid var\(--rule\);[\s\S]*?border-radius:\s*16px;[\s\S]*?background:\s*var\(--workspace-surface\)/u)
   })
 
   it('keeps dynamic capability categories and real capability actions live', async () => {

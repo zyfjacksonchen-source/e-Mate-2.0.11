@@ -12,15 +12,11 @@ type Icon = ComponentType<{ size?: number }>
 
 interface Props extends Omit<SessionShareActionProps, 'sessionId'> {
   useSessions: <T>(selector: (state: SessionListState) => T) => T
-  updates?: DesktopUpdateBridge
   getThemeScheme: () => 'light' | 'dark'
   subscribeTheme: (listener: () => void) => () => void
   toggleTheme: () => void
-  openSettings: () => void
   LightIcon: Icon
   DarkIcon: Icon
-  UpdateIcon: Icon
-  SettingsIcon: Icon
 }
 
 const IN_PROGRESS = new Set<DesktopUpdateState['stage']>([
@@ -114,19 +110,15 @@ const routeSnapshot = (): string => location.pathname
 /** e-Mate utilities projected once over DSH's complete root frame. */
 export function HeaderControls({
   useSessions,
-  updates,
   getThemeScheme,
   subscribeTheme,
   toggleTheme,
-  openSettings,
   callShare,
   useSessionLogDownload,
   requestDownload,
   dismissDownload,
   LightIcon,
   DarkIcon,
-  UpdateIcon,
-  SettingsIcon,
 }: Props) {
   const themeScheme = useSyncExternalStore(subscribeTheme, getThemeScheme, getThemeScheme)
   const pathname = useSyncExternalStore(routeSubscribe, routeSnapshot, routeSnapshot)
@@ -142,7 +134,12 @@ export function HeaderControls({
   const ThemeIcon = themeScheme === 'dark' ? DarkIcon : LightIcon
 
   return (
-    <div className={css.controls} aria-label="应用工具" data-emate-header-controls="">
+    <div
+      className={css.controls}
+      aria-label="应用工具"
+      data-emate-header-controls=""
+      data-emate-settings-route={pathname === '/settings' ? '' : undefined}
+    >
       {sessionId !== undefined && <SessionShareAction
         sessionId={sessionId}
         callShare={callShare}
@@ -150,12 +147,8 @@ export function HeaderControls({
         requestDownload={requestDownload}
         dismissDownload={dismissDownload}
       />}
-      {updates !== undefined && <UpdateControl updates={updates} UpdateIcon={UpdateIcon} />}
       <button type="button" title={themeScheme === 'dark' ? '切换到明亮模式' : '切换到暗色模式'} aria-label={themeScheme === 'dark' ? '切换到明亮模式' : '切换到暗色模式'} onClick={toggleTheme}>
         <ThemeIcon size={18} />
-      </button>
-      <button type="button" title="打开设置" aria-label="打开设置" onClick={openSettings}>
-        <SettingsIcon size={18} />
       </button>
     </div>
   )

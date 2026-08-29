@@ -33,7 +33,7 @@ import {
   validateUnsignedAdmittedDesktopReleaseManifest,
 } from '../desktop/e-mate-desktop/src/update-checker.ts'
 
-const HARNESS_COMMIT = '4787caf39134df190105b272da0dd2ba893d4d75'
+const HARNESS_COMMIT = 'b469c2b99a6c2f35c5e51eaf611f1941e095f90d'
 const DIGEST = '0'.repeat(64)
 const R2_FIXTURE_PUBLIC_ORIGIN = 'https://downloads.e-mate.example'
 const SOURCE_COMMIT = '70ff2ce2e340682f4aad2be27e4ec8f1d74ee913'

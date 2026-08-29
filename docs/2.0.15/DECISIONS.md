@@ -104,6 +104,18 @@ Before Build once, T18 must merge `origin/main@90c3a1fae3124536bb62f5ee215c74fe5
 
 The adopted snapshot preserves origin/main's exact three public 2.0.13/Base v7 inner byte strings, byte counts, SHA-256 values and capture timestamp. Only its candidate-facing outer version, Base id and canonical body hash advance to 2.0.15/v8. This merge and source-gate repair do not create candidate bytes or advance installed, signing, desired-state, website or public truth.
 
+### D021 — T21 requires a new immutable successor Base identity
+
+T21 advances the accepted Harness gitlink by exactly one commit, from `4787caf39134df190105b272da0dd2ba893d4d75` to advertised `b469c2b99a6c2f35c5e51eaf611f1941e095f90d`, solely for the native `ui-conversation` declarative hero slot. Base v8 remains the immutable identity of the already published unsigned 2.0.15 bytes and is never edited or relabelled. T18 therefore binds current source to `e-mate-desktop-profile-v9-dsh-b469c2b99a6c`, the unchanged Desktop reference/signing root, the same 17-import ABI union, 15 retained components and 19 managed 2.0.15 manifests.
+
+This decision transfers only the existing T18 Base/gitlink/component/runtime-identity/source-test leases. It does not transfer T21 Shell product paths and does not authorize a validator exception, parallel Base, dependency change, candidate build, installation, signing, Profile activation or public write. Candidate, installed and public gates for v9 remain `OPEN`; the prior v8 public receipts remain historical evidence only.
+
+### D022 — The pre-T21 candidate is invalidated; v8 history remains immutable
+
+Formal RC run `33223689296` at source `955ddd36bfcdc29155cd7e5a11c96fdd93bc3c87` became invalid when installed P0 evidence made T21 a required product input. T00 requested cancellation and T18 must not consume, rebuild from, relabel or publish any artifact from that run. The v9/b469 binding closes only the current source contract; it is not itself a candidate.
+
+This invalidation is appended as a new truth layer. It does not rewrite the already published unsigned Base v8 bytes, their public and installed receipts, or any predecessor/update fixture. A new candidate may start only after T21 product source and this v9 binding share one accepted protected source; Build once, install, update, rollback, signing, desired state and public gates remain `OPEN` until then.
+
 ## Exclusive static scopes
 
 | Ticket | Exact owned paths while active |

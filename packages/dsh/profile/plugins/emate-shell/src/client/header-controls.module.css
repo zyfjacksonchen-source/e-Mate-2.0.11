@@ -1,6 +1,6 @@
 .controls {
   position: absolute;
-  z-index: 1;
+  z-index: 30;
   top: 12px;
   right: calc(24px + var(--dsh-desktop-caption-safe-width, 0px));
   display: inline-flex;
@@ -12,7 +12,7 @@
 }
 
 :global([data-slot='conversation.session.header'] > header) {
-  padding-right: calc(176px + var(--dsh-desktop-caption-safe-width, 0px));
+  padding-right: calc(112px + var(--dsh-desktop-caption-safe-width, 0px));
 }
 
 .controls > button {
@@ -121,7 +121,7 @@
 }
 
 :global(body[data-dsh-desktop-platform='win32']) [data-slot='conversation.session.header'] > header {
-  padding-right: calc(208px + var(--dsh-desktop-caption-safe-width, 0px));
+  padding-right: calc(116px + var(--dsh-desktop-caption-safe-width, 0px));
 }
 
 @media (max-width: 720px) {
@@ -130,7 +130,7 @@
   }
 
   :global([data-slot='conversation.session.header'] > header) {
-    padding-right: calc(176px + var(--dsh-desktop-caption-safe-width, 0px));
+    padding-right: calc(104px + var(--dsh-desktop-caption-safe-width, 0px));
   }
 
   :global(body[data-dsh-desktop-platform='win32']) .controls {
@@ -138,6 +138,11 @@
   }
 
   :global(body[data-dsh-desktop-platform='win32']) [data-slot='conversation.session.header'] > header {
-    padding-right: calc(192px + var(--dsh-desktop-caption-safe-width, 0px));
+    padding-right: calc(108px + var(--dsh-desktop-caption-safe-width, 0px));
   }
+}
+
+.controls[data-emate-settings-route],
+:global(body[data-dsh-desktop-platform='win32']) .controls[data-emate-settings-route] {
+  right: calc(72px + var(--dsh-desktop-caption-safe-width, 0px));
 }
