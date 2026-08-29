@@ -278,10 +278,16 @@ describe('desktop header controls', () => {
     } as never, Root as never)
     await runtime.sessions.add({ id: 'session-1' })
     runtime.slots.register({ name: 'conversation.session.header' } as never, () => <header>旧会话标题</header>)
-    history.replaceState(null, '', '/schedules')
+    history.replaceState(null, '', '/settings')
     await runtime.mount({ inject: ['slots'], apply: registerRouteScopedConversationHeader })
     const view = runtime.renderRoot()
 
+    expect(view.queryByText('旧会话标题')).toBeNull()
+    act(() => {
+      history.pushState(null, '', '/schedules')
+      dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await runtime.flush()
     expect(view.queryByText('旧会话标题')).toBeNull()
     act(() => {
       history.pushState(null, '', '/capabilities')
@@ -299,20 +305,34 @@ describe('desktop header controls', () => {
   })
 
   it('replaces the resident conversation with one route-owned standalone surface', async () => {
-    type RootProps = PropsRenderSlots<'conversation'>
-    const Root = ({ renderSlot }: RootProps) => renderSlot('conversation', {})
+    type RootProps = PropsRenderSlots<'conversation' | 'shell.overlay'>
+    const Root = ({ renderSlot }: RootProps) => <>
+      {renderSlot('conversation', {})}
+      {renderSlot('shell.overlay', {})}
+    </>
     const runtime = await SlotTestRuntime.create()
     const closeDetails = vi.fn()
+    const openSettingsSection = vi.fn()
     runtime.provide('layout', { closeDetails } as never)
-    await runtime.root.declare({ conversation: { kind: 'single', scope: 'root' } } as never, Root as never)
+    await runtime.root.declare({
+      conversation: { kind: 'single', scope: 'root' },
+      'shell.overlay': { kind: 'list', scope: 'root' },
+    } as never, Root as never)
     runtime.slots.register({ name: 'conversation' } as never, () => <main>旧会话正文与输入框</main>)
-    history.replaceState(null, '', '/schedules')
+    runtime.slots.register({ name: 'shell.overlay', id: 'native-settings' } as never, () => (
+      <div role="dialog" aria-modal="true">
+        <nav aria-label="设置导航"><button type="button" onClick={openSettingsSection}>常规</button></nav>
+      </div>
+    ))
+    history.replaceState(null, '', '/settings')
     await runtime.mount({ inject: ['slots', 'layout'], apply: registerRouteScopedConversationHeader })
     const view = runtime.renderRoot()
 
     expect(view.queryByText('旧会话正文与输入框')).toBeNull()
     expect(view.container.querySelectorAll('[data-emate-product-surface]')).toHaveLength(1)
     expect(closeDetails).toHaveBeenCalledOnce()
+    fireEvent.click(view.getByRole('button', { name: '常规' }))
+    expect(openSettingsSection).toHaveBeenCalledOnce()
     act(() => {
       history.pushState(null, '', '/chat/session-1')
       dispatchEvent(new PopStateEvent('popstate'))
