@@ -273,12 +273,14 @@ async function revokeShare(request, env, config, fetchImplementation, id, sessio
   const key = archiveKey(id)
   const object = await env.SHARES.head(key)
   if (object === null) return json({ schema_version: 1, revoked: true })
+  const storedSession = object.customMetadata?.session_sha256
   if (object.customMetadata?.owner_sha256 !== auth.owner
-    || object.customMetadata?.session_sha256 !== sessionSha256) {
+    || typeof storedSession !== 'string' || !SHA256.test(storedSession)
+    || (sessionSha256 !== undefined && storedSession !== sessionSha256)) {
     return failure(403, 'SHARE_OWNER_REQUIRED')
   }
   await env.SHARES.delete(key)
-  await env.SHARES.delete(ownerKey(auth.owner, sessionSha256, id))
+  await env.SHARES.delete(ownerKey(auth.owner, storedSession, id))
   return json({ schema_version: 1, revoked: true })
 }
 
@@ -313,6 +315,9 @@ export async function handleRequest(request, env, fetchImplementation = fetch) {
   const config = configured(env)
   const url = new URL(request.url)
   if (request.method === 'GET' && url.pathname === '/healthz' && url.search === '') {
+    return json({ schema_version: 1, ready: true })
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/healthz' && url.search === '') {
     return json({ schema_version: 1, service: 'emate-share', version: 1, ready: true })
   }
   if (request.method === 'POST' && url.pathname === '/v1/shares' && url.search === '') {
@@ -325,11 +330,12 @@ export async function handleRequest(request, env, fetchImplementation = fetch) {
       return listShares(request, env, config, fetchImplementation, sessionSha256)
     }
   }
-  const revoke = /^\/v1\/shares\/([A-Za-z0-9_-]{32})$/u.exec(url.pathname)
-  if (request.method === 'DELETE' && url.search === '' && revoke !== null && SHARE_ID.test(revoke[1])) {
+  const revoke = /^\/v([12])\/shares\/([A-Za-z0-9_-]{32})$/u.exec(url.pathname)
+  if (request.method === 'DELETE' && url.search === '' && revoke !== null && SHARE_ID.test(revoke[2])) {
+    if (revoke[1] === '1') return revokeShare(request, env, config, fetchImplementation, revoke[2])
     const sessionSha256 = request.headers.get('x-emate-session-sha256')
     if (sessionSha256 !== null && SHA256.test(sessionSha256)) {
-      return revokeShare(request, env, config, fetchImplementation, revoke[1], sessionSha256)
+      return revokeShare(request, env, config, fetchImplementation, revoke[2], sessionSha256)
     }
     return failure(400, 'INVALID_SHARE_SESSION')
   }

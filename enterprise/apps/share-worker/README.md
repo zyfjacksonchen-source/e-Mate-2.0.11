@@ -21,5 +21,10 @@ pnpm dlx wrangler@4.124.0 r2 bucket lifecycle add emate-session-shares expire-se
 pnpm dlx wrangler@4.124.0 deploy --config enterprise/apps/share-worker/wrangler.jsonc
 ```
 
-After deployment, `GET https://emate-share.emate-zyfjacksonchen.workers.dev/healthz`
-must return `{"schema_version":1,"ready":true}` before Desktop activation.
+After deployment, legacy `GET /healthz` must keep returning
+`{"schema_version":1,"ready":true}`, while `GET /v2/healthz` must return
+`{"schema_version":1,"service":"emate-share","version":1,"ready":true}`.
+Verify both before Desktop activation so the public 2.0.13 client and the new
+session-bound revoke contract can coexist during rollout.
+Deploy this compatibility Worker before activating new Desktop bytes. On
+rollback, restore Desktop compatibility before rolling the Worker back.
