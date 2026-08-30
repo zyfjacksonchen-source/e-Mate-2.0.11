@@ -384,6 +384,8 @@ export function devChecks(plan, paths) {
   ].includes(path))
   if (localFlowOnly || paths.some(path => path.startsWith('scripts/local-flow'))) {
     addCheck(checks, 'node', ['--test', 'scripts/local-flow.test.mjs'])
+  }
+  if (localFlowOnly) {
     addCheck(checks, 'node', ['scripts/change-impact.mjs', '--check-contract'])
   } else if (plan.lane === 'docs-only' || plan.lane === 'none') {
     addCheck(checks, 'node', ['scripts/change-impact.mjs', '--check-contract'])
