@@ -12,12 +12,14 @@ import {
   buildPublicationRequest,
   buildRollbackRequest,
   devChecks,
+  importWindowsRemoteResult,
   selectCandidatePlatforms,
   validateCandidateSource,
   validatePublicationReceipt,
   validateRemoteHostname,
   verifyComputerUseReceipt,
   verifyLocalArtifact,
+  windowsRemoteRequest,
 } from './local-flow.mjs'
 
 const SHA = 'a'.repeat(40)
@@ -25,6 +27,7 @@ const MAC_SHA = 'b'.repeat(64)
 const WIN_SHA = 'c'.repeat(64)
 const MAC_BLOCKMAP_SHA = 'd'.repeat(64)
 const WIN_BLOCKMAP_SHA = 'e'.repeat(64)
+const RUN_ID = '20260830T000000Z-aaaaaaaaaaaa-abcdef'
 
 async function temporary() {
   return mkdtemp(join(tmpdir(), 'emate-local-flow-test-'))
@@ -67,6 +70,56 @@ async function artifactFixture(root, platform, { blockmap = false } = {}) {
     files,
   }, null, 2)}\n`)
   return { primary: { name, bytes: bytes.byteLength, sha256 }, files }
+}
+
+async function windowsRemoteFixture(root) {
+  const run = {
+    run_id: RUN_ID,
+    version: '2.0.15',
+    source_commit: SHA,
+    source_branch: 'release/2.0.15-final-integration-r5',
+  }
+  const request = windowsRemoteRequest(run)
+  const requestPath = join(root, 'request.json')
+  const requestBytes = Buffer.from(`${JSON.stringify(request, null, 2)}\n`)
+  await writeFile(requestPath, requestBytes)
+  run.platforms = { windows: {
+    status: 'awaiting-codex-remote',
+    source_commit: SHA,
+    request: 'windows-remote/request.json',
+    request_sha256: createHash('sha256').update(requestBytes).digest('hex'),
+  } }
+  const artifacts = join(root, 'returned', 'artifacts', 'windows')
+  const fixture = await artifactFixture(artifacts, 'windows')
+  const resultPath = join(root, 'returned', 'codex-remote-result.json')
+  const logBytes = Buffer.from('Windows build completed\n')
+  await writeFile(join(root, 'returned', 'windows.log'), logBytes)
+  const writeResult = async (files = fixture.files, extra = {}) => {
+    const receiptBytes = await readFile(join(artifacts, 'local-artifact-receipt.json'))
+    await writeFile(resultPath, `${JSON.stringify({
+      schema_version: 1,
+      document_type: 'emate.local-windows-codex-remote-result',
+      transport: 'codex-remote-handoff',
+      run_id: RUN_ID,
+      version: '2.0.15',
+      platform: 'windows',
+      host: 'DESKTOP-KH19ARC',
+      source_commit: SHA,
+      request_sha256: createHash('sha256').update(requestBytes).digest('hex'),
+      artifact_receipt: {
+        file: 'artifacts/windows/local-artifact-receipt.json',
+        sha256: createHash('sha256').update(receiptBytes).digest('hex'),
+      },
+      log: {
+        file: 'windows.log', bytes: logBytes.byteLength,
+        sha256: createHash('sha256').update(logBytes).digest('hex'),
+      },
+      files,
+      ...extra,
+    }, null, 2)}\n`)
+  }
+  await writeResult()
+  return { artifacts, fixture, request, requestPath, resultPath, returned: join(root, 'returned'), run, writeResult }
 }
 
 async function computerUseFixture(root, platform, artifactSha256) {
@@ -188,23 +241,87 @@ test('dev reuses the local classifier plan and selects the smallest local-flow c
   ])
 })
 
-test('native Windows routing accepts only the Codex SSH host identity', () => {
+test('native Windows routing accepts only the Codex Remote host identity', () => {
   assert.equal(validateRemoteHostname('DESKTOP-KH19ARC\r\n'), 'DESKTOP-KH19ARC')
   assert.throws(() => validateRemoteHostname('win-codex'), /must be DESKTOP-KH19ARC/u)
 })
 
-test('Windows PowerShell uses relative tar paths and both transfers force legacy scp protocol', async () => {
+test('Windows candidate uses one Codex Remote request/import seam without SSH transport', async () => {
   const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
-  assert.equal(source.match(/runLogged\('scp'/gu)?.length, 2)
-  assert.equal(source.match(/runLogged\('scp', \['-O',/gu)?.length, 2)
-  const start = source.indexOf('    const build = [', source.indexOf('async function windowsBuild'))
-  const projection = source.slice(start, source.indexOf("    ].join(';')", start))
-  assert.match(projection, /'Set-Location \$root'/u)
-  assert.match(projection, /"tar\.exe -xzf 'source\.tgz' -C 'source'"/u)
-  assert.match(projection, /--out '\.\.\\\\out'/u)
-  assert.match(projection, /"tar\.exe -czf 'result\.tgz' -C 'out' \."/u)
-  assert.doesNotMatch(projection, /remoteArchive|remoteResult|\$source|\$out/u)
-  assert.doesNotMatch(projection, /tar\.exe[^\n]*[A-Za-z]:[\\/]/u)
+  assert.doesNotMatch(source, /\bssh\b|\bscp\b|kh19arc/u)
+  assert.match(source, /emate\.local-windows-codex-remote-request/u)
+  assert.match(source, /emate\.local-windows-codex-remote-result/u)
+})
+
+test('Windows Codex Remote import binds source, host, receipt, artifact bytes, and pollution', async () => {
+  const root = await temporary()
+  try {
+    const remote = await windowsRemoteFixture(root)
+    const output = join(root, 'imported')
+    const imported = await importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath)
+    assert.deepEqual(imported.primary, remote.fixture.primary)
+
+    await remote.writeResult(remote.fixture.files, { host: 'OTHER-HOST' })
+    await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /must be DESKTOP-KH19ARC/u)
+    await remote.writeResult(remote.fixture.files, { schema_version: 2 })
+    await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /result receipt is invalid/u)
+    await remote.writeResult([{ ...remote.fixture.files[0], name: 'wrong.exe' }])
+    await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /result receipt is invalid/u)
+
+    await writeFile(join(remote.artifacts, remote.fixture.primary.name), Buffer.concat([pe(), Buffer.from('changed')]))
+    await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /drifted/u)
+
+    const polluted = Buffer.concat([pe(), Buffer.from('release-canary')])
+    const pollutedFiles = [{
+      name: remote.fixture.primary.name,
+      bytes: polluted.byteLength,
+      sha256: createHash('sha256').update(polluted).digest('hex'),
+    }]
+    await writeFile(join(remote.artifacts, remote.fixture.primary.name), polluted)
+    await writeFile(join(remote.artifacts, 'local-artifact-receipt.json'), `${JSON.stringify({
+      schema_version: 1,
+      document_type: 'emate.local-desktop-artifact',
+      platform: 'windows',
+      source_commit: SHA,
+      version: '2.0.15',
+      files: pollutedFiles,
+    }, null, 2)}\n`)
+    await remote.writeResult(pollutedFiles)
+    await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /canary marker/u)
+
+    await writeFile(remote.requestPath, `${JSON.stringify({ ...remote.request, source_commit: 'd'.repeat(40) })}\n`)
+    await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /request is invalid/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Windows Codex Remote import requires the exact awaiting request state', async () => {
+  const root = await temporary()
+  try {
+    const remote = await windowsRemoteFixture(root)
+    const awaiting = structuredClone(remote.run.platforms.windows)
+    const invalid = [
+      undefined,
+      { ...awaiting, status: 'pending' },
+      { ...awaiting, status: 'failed' },
+      { ...awaiting, status: 'building' },
+      { ...awaiting, source_commit: 'd'.repeat(40) },
+      { ...awaiting, request: 'windows-remote/other.json' },
+      { ...awaiting, request_sha256: 'e'.repeat(64) },
+      { ...awaiting, unexpected: true },
+    ]
+    for (const state of invalid) {
+      if (state === undefined) delete remote.run.platforms.windows
+      else remote.run.platforms.windows = state
+      await assert.rejects(
+        importWindowsRemoteResult(remote.returned, join(root, 'imported'), remote.run, remote.requestPath),
+        /exact awaiting request state/u,
+      )
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('direct-run guard canonicalizes a symlinked entry while imports stay inert', { skip: process.platform === 'win32' }, async () => {
@@ -474,7 +591,7 @@ test('platform build skips Harness dev hooks in clean submodule copies', async (
 
     const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
     const start = source.indexOf('async function platformBuild')
-    const projection = source.slice(start, source.indexOf('\n}\n\nfunction encodedPowerShell', start))
+    const projection = source.slice(start, source.indexOf('\n}\n\nasync function readWindowsRemoteRequest', start))
     assert.match(projection, /runPnpm\(\['--dir', 'upstream\/deepseek-harness', 'install', '--frozen-lockfile'\], \{ cwd: sourceRoot, log, env: \{ \.\.\.process\.env, CI: 'true' \} \}\)/u)
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -487,8 +604,8 @@ test('root package exposes one flow entry and the implementation has no GitHub, 
   const publicationWorkflow = await readFile(new URL('../.github/workflows/desktop-publication.yml', import.meta.url), 'utf8')
   const updater = await readFile(new URL('../desktop/e-mate-desktop/src/update-checker.ts', import.meta.url), 'utf8')
   assert.equal(packageJson.scripts.flow, 'node scripts/local-flow.mjs')
-  assert.doesNotMatch(source, /\bgh\b|\.github\/|\bwrangler\b|win-codex|\bUU\b/u)
-  assert.match(source, /'kh19arc'/u)
+  assert.doesNotMatch(source, /\bgh\b|\.github\/|\bwrangler\b|win-codex|\bUU\b|\bssh\b|\bscp\b|kh19arc/u)
+  assert.match(source, /transport: 'codex-remote-handoff'/u)
   assert.match(publicationWorkflow, /uses: zyfjacksonchen-source\/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123/u)
   assert.match(updater, /2: Buffer\.from\('e-mate-desktop-release-manifest-v2\\0', 'utf8'\)/u)
 })

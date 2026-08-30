@@ -9,7 +9,7 @@ import {
 import { hostname, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
-import { parseArgs } from 'node:util'
+import { isDeepStrictEqual, parseArgs } from 'node:util'
 import { classifyChangedPaths } from './change-impact.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
@@ -35,6 +35,10 @@ const INSTALLER_SECURITY = Object.freeze({
 const FULL_MATRIX = 'docs/2.0.15/REGRESSION-MATRIX.md'
 const FULL_MATRIX_SCOPE = 'full-installed-startup-update-product-and-built-in-tools'
 const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u
+const WINDOWS_REMOTE_HOST = 'DESKTOP-KH19ARC'
+const WINDOWS_REMOTE_REQUEST = 'emate.local-windows-codex-remote-request'
+const WINDOWS_REMOTE_RESULT = 'emate.local-windows-codex-remote-result'
+const WINDOWS_REMOTE_RESULT_FILE = 'codex-remote-result.json'
 const PLATFORMS = Object.freeze({
   macos: Object.freeze({
     artifact: `e-Mate-${VERSION}-mac-universal.dmg`,
@@ -134,8 +138,56 @@ function sourceIdentity(root = ROOT) {
 
 export function validateRemoteHostname(value) {
   const received = String(value).trim()
-  if (received !== 'DESKTOP-KH19ARC') throw new Error(`kh19arc hostname must be DESKTOP-KH19ARC; received ${received || '<empty>'}`)
+  if (received !== WINDOWS_REMOTE_HOST) throw new Error(`Codex Remote hostname must be ${WINDOWS_REMOTE_HOST}; received ${received || '<empty>'}`)
   return received
+}
+
+export function windowsRemoteRequest(run) {
+  if (!RUN_ID.test(run?.run_id ?? '') || run?.version !== VERSION || !SOURCE_SHA.test(run?.source_commit ?? '')
+    || typeof run?.source_branch !== 'string' || run.source_branch === '' || run.source_branch === 'HEAD') {
+    throw new Error('Windows Codex Remote request source is invalid')
+  }
+  return {
+    schema_version: 1,
+    document_type: WINDOWS_REMOTE_REQUEST,
+    transport: 'codex-remote-handoff',
+    run_id: run.run_id,
+    version: VERSION,
+    platform: 'windows',
+    source_commit: run.source_commit,
+    source_branch: run.source_branch,
+    source_status: 'committed-clean',
+    expected_host: WINDOWS_REMOTE_HOST,
+    expected_artifact: PLATFORMS.windows.artifact,
+    build: {
+      command: 'corepack.cmd',
+      arguments: [
+        'pnpm', 'run', 'flow', '--', '_platform-build', '--platform', 'windows',
+        '--out', '<return-directory>', '--source-commit', run.source_commit,
+        '--remote-request', '<request-file>',
+      ],
+    },
+    return: {
+      directory: '<return-directory>',
+      receipt: WINDOWS_REMOTE_RESULT_FILE,
+      artifacts: 'artifacts/windows',
+      log: 'windows.log',
+      import: {
+        command: 'corepack',
+        arguments: [
+          'pnpm', 'run', 'flow', '--', 'candidate', '--run', run.run_id,
+          '--windows-result', '<return-directory>',
+        ],
+      },
+    },
+  }
+}
+
+function validateWindowsRemoteRequest(value, run = value) {
+  let expected
+  try { expected = windowsRemoteRequest(run) } catch {}
+  if (expected === undefined || !isDeepStrictEqual(value, expected)) throw new Error('Windows Codex Remote request is invalid')
+  return value
 }
 
 function candidateState(run, platform) {
@@ -271,9 +323,10 @@ async function runLogged(command, args, { cwd, log, env = process.env }) {
     child.stderr.on('data', chunk => { output.write(redactLog(chunk.toString('utf8'))); process.stderr.write(chunk) })
     child.on('error', cause => { output.end(); rejectPromise(cause) })
     child.on('close', code => {
-      output.end()
-      if (code === 0) resolvePromise()
-      else rejectPromise(new Error(`${command} ${args.join(' ')} exited with ${String(code)}`))
+      output.end(() => {
+        if (code === 0) resolvePromise()
+        else rejectPromise(new Error(`${command} ${args.join(' ')} exited with ${String(code)}`))
+      })
     })
   })
 }
@@ -581,56 +634,117 @@ async function platformBuild(sourceRoot, platform, output, log) {
   await exportArtifact(sourceRoot, platform, output, git(['rev-parse', 'HEAD'], sourceRoot))
 }
 
-function encodedPowerShell(source) {
-  return Buffer.from(source, 'utf16le').toString('base64')
+async function readWindowsRemoteRequest(path, run) {
+  const metadata = await regularFile(path, 'Windows Codex Remote request')
+  if (metadata.size > 1024 * 1024) throw new Error('Windows Codex Remote request is too large')
+  const bytes = await readFile(path)
+  assertCleanArtifactBytes(bytes, 'Windows Codex Remote request')
+  const request = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+  return { bytes, request: validateWindowsRemoteRequest(request, run ?? request) }
 }
 
-async function capture(command, args, cwd = ROOT) {
-  return await new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
-    const stdout = []
-    const stderr = []
-    child.stdout.on('data', chunk => stdout.push(chunk))
-    child.stderr.on('data', chunk => stderr.push(chunk))
-    child.on('error', rejectPromise)
-    child.on('close', code => {
-      if (code === 0) resolvePromise(Buffer.concat(stdout).toString('utf8'))
-      else rejectPromise(new Error(Buffer.concat(stderr).toString('utf8').trim() || `${command} failed`))
-    })
-  })
+function windowsRemoteResult(request, verified, requestSha256, artifactReceiptSha256, host, log) {
+  if (!SHA256.test(requestSha256 ?? '') || !SHA256.test(artifactReceiptSha256 ?? '')) {
+    throw new Error('Windows Codex Remote result digest is invalid')
+  }
+  if (!exactKeys(log, ['file', 'bytes', 'sha256']) || log.file !== 'windows.log'
+    || !Number.isSafeInteger(log.bytes) || log.bytes <= 0 || !SHA256.test(log.sha256 ?? '')) {
+    throw new Error('Windows Codex Remote log receipt is invalid')
+  }
+  return {
+    schema_version: 1,
+    document_type: WINDOWS_REMOTE_RESULT,
+    transport: 'codex-remote-handoff',
+    run_id: request.run_id,
+    version: VERSION,
+    platform: 'windows',
+    host: validateRemoteHostname(host),
+    source_commit: request.source_commit,
+    request_sha256: requestSha256,
+    artifact_receipt: {
+      file: 'artifacts/windows/local-artifact-receipt.json',
+      sha256: artifactReceiptSha256,
+    },
+    log,
+    files: verified.receipt.files,
+  }
 }
 
-async function windowsBuild(sourceArchive, output, run, log, scratch) {
-  validateRemoteHostname(await capture('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', 'kh19arc', 'hostname']))
-  const temp = (await capture('ssh', ['kh19arc', 'powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodedPowerShell('[IO.Path]::GetTempPath()')])).trim()
-  if (!/^[A-Za-z]:\\[^\r\n]+\\$/u.test(temp)) throw new Error('kh19arc returned an invalid temporary directory')
-  const remoteRoot = `${temp}emate-t25\\${run.run_id}`
-  const remoteArchive = `${remoteRoot}\\source.tgz`
-  const remoteResult = `${remoteRoot}\\result.tgz`
-  const initialize = `$ErrorActionPreference='Stop';$root='${remoteRoot.replaceAll("'", "''")}';if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force};New-Item -ItemType Directory -Path $root|Out-Null`
-  const cleanup = `$root='${remoteRoot.replaceAll("'", "''")}';if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force}`
-  await runLogged('ssh', ['kh19arc', 'powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodedPowerShell(initialize)], { cwd: ROOT, log })
+async function windowsRemoteLog(directory) {
+  const path = join(directory, 'windows.log')
+  const metadata = await regularFile(path, 'Windows Codex Remote build log')
+  return { path, descriptor: { file: 'windows.log', bytes: metadata.size, sha256: await cleanDigest(path, 'Windows Codex Remote build log') } }
+}
+
+async function writeWindowsRemoteResult(directory, requestPath) {
+  const { bytes, request } = await readWindowsRemoteRequest(requestPath)
+  const artifacts = join(directory, 'artifacts', 'windows')
+  const verified = await verifyLocalArtifact(artifacts, 'windows', request.source_commit)
+  const receiptPath = join(artifacts, 'local-artifact-receipt.json')
+  const log = await windowsRemoteLog(directory)
+  await atomicJson(join(directory, WINDOWS_REMOTE_RESULT_FILE), windowsRemoteResult(
+    request, verified, digest(bytes), await fileDigest(receiptPath), hostname(), log.descriptor,
+  ))
+}
+
+async function prepareWindowsRemote(directory, run) {
+  const path = join(directory, 'windows-remote', 'request.json')
+  await atomicJson(path, windowsRemoteRequest(run))
+  run.platforms.windows = {
+    status: 'awaiting-codex-remote',
+    source_commit: run.source_commit,
+    request: relativePath(directory, path),
+    request_sha256: await fileDigest(path),
+  }
+}
+
+export async function importWindowsRemoteResult(resultDirectory, output, run, requestPath) {
+  const { bytes: requestBytes, request } = await readWindowsRemoteRequest(requestPath, run)
+  if (!isDeepStrictEqual(run.platforms?.windows, {
+    status: 'awaiting-codex-remote',
+    source_commit: run.source_commit,
+    request: 'windows-remote/request.json',
+    request_sha256: digest(requestBytes),
+  })) throw new Error('Windows Codex Remote import requires the exact awaiting request state')
+  const rootEntries = (await readdir(resultDirectory)).sort()
+  if (!isDeepStrictEqual(rootEntries, ['artifacts', WINDOWS_REMOTE_RESULT_FILE, 'windows.log'])) {
+    throw new Error('Windows Codex Remote result directory contains an unexpected entry')
+  }
+  const artifactRoot = join(resultDirectory, 'artifacts')
+  const artifactRootMetadata = await lstat(artifactRoot)
+  if (!artifactRootMetadata.isDirectory() || artifactRootMetadata.isSymbolicLink()
+    || !isDeepStrictEqual(await readdir(artifactRoot), ['windows'])) {
+    throw new Error('Windows Codex Remote artifact root is invalid')
+  }
+  const artifacts = join(artifactRoot, 'windows')
+  const artifactDirectory = await lstat(artifacts)
+  if (!artifactDirectory.isDirectory() || artifactDirectory.isSymbolicLink()) {
+    throw new Error('Windows Codex Remote artifact directory is invalid')
+  }
+  const verified = await verifyLocalArtifact(artifacts, 'windows', run.source_commit)
+  const artifactReceiptPath = join(artifacts, 'local-artifact-receipt.json')
+  const resultPath = join(resultDirectory, WINDOWS_REMOTE_RESULT_FILE)
+  const resultMetadata = await regularFile(resultPath, 'Windows Codex Remote result receipt')
+  if (resultMetadata.size > 1024 * 1024) throw new Error('Windows Codex Remote result receipt is too large')
+  const resultBytes = await readFile(resultPath)
+  assertCleanArtifactBytes(resultBytes, 'Windows Codex Remote result receipt')
+  const result = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(resultBytes))
+  const log = await windowsRemoteLog(resultDirectory)
+  const expected = windowsRemoteResult(
+    request, verified, digest(requestBytes), await fileDigest(artifactReceiptPath), result?.host, log.descriptor,
+  )
+  if (!isDeepStrictEqual(result, expected)) throw new Error('Windows Codex Remote result receipt is invalid')
+
+  const staging = `${output}.importing-${randomBytes(4).toString('hex')}`
   try {
-    await runLogged('scp', ['-O', sourceArchive, `kh19arc:${remoteArchive.replaceAll('\\', '/')}`], { cwd: ROOT, log })
-    const build = [
-      "$ErrorActionPreference='Stop'",
-      `$root='${remoteRoot.replaceAll("'", "''")}'`,
-      'Set-Location $root',
-      "New-Item -ItemType Directory -Path 'source'|Out-Null",
-      "tar.exe -xzf 'source.tgz' -C 'source'",
-      "Set-Location 'source'",
-      `corepack pnpm run flow -- _platform-build --platform windows --out '..\\out' --source-commit ${run.source_commit}`,
-      'Set-Location $root',
-      "tar.exe -czf 'result.tgz' -C 'out' .",
-    ].join(';')
-    await runLogged('ssh', ['kh19arc', 'powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodedPowerShell(build)], { cwd: ROOT, log })
-    const localResult = join(scratch, 'windows-result.tgz')
-    await runLogged('scp', ['-O', `kh19arc:${remoteResult.replaceAll('\\', '/')}`, localResult], { cwd: ROOT, log })
+    await mkdir(staging, { recursive: true })
+    for (const name of await readdir(artifacts)) await copyFile(join(artifacts, name), join(staging, name))
+    const imported = await verifyLocalArtifact(staging, 'windows', run.source_commit)
     await rm(output, { recursive: true, force: true })
-    await mkdir(output, { recursive: true })
-    await runLogged('tar', ['-xzf', localResult, '-C', output], { cwd: ROOT, log })
+    await rename(staging, output)
+    return { receipt: result, receipt_path: resultPath, log_path: log.path, primary: imported.primary }
   } finally {
-    await runLogged('ssh', ['kh19arc', 'powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodedPowerShell(cleanup)], { cwd: ROOT, log }).catch(() => {})
+    await rm(staging, { recursive: true, force: true })
   }
 }
 
@@ -648,6 +762,38 @@ async function candidate(values) {
     : await loadRun(values.run)
   const { directory, run } = loaded
   if (run.command !== 'candidate' || run.source_commit !== identity.source_commit) throw new Error('candidate retry must use the same clean source commit')
+  if (values.windowsResult !== undefined) {
+    if (['passed', 'reused'].includes(run.platforms?.windows?.status)) throw new Error('Windows candidate artifact is already immutable')
+    const artifacts = {}
+    for (const platform of ['macos']) {
+      if (['passed', 'reused'].includes(run.platforms?.[platform]?.status)) {
+        artifacts[platform] = (await verifyLocalArtifact(join(directory, 'artifacts', platform), platform, run.source_commit)).primary
+      }
+    }
+    const requestPath = join(directory, 'windows-remote', 'request.json')
+    const output = join(directory, 'artifacts', 'windows')
+    const imported = await importWindowsRemoteResult(resolve(values.windowsResult), output, run, requestPath)
+    const receiptPath = join(directory, 'windows-remote', 'result.json')
+    await copyFile(imported.receipt_path, receiptPath)
+    await copyFile(imported.log_path, join(directory, 'logs', 'windows.log'))
+    run.platforms.windows = {
+      status: 'passed',
+      source_commit: run.source_commit,
+      artifact: imported.primary,
+      codex_remote: {
+        host: imported.receipt.host,
+        request_sha256: imported.receipt.request_sha256,
+        receipt: relativePath(directory, receiptPath),
+        receipt_sha256: await fileDigest(receiptPath),
+      },
+    }
+    run.status = Object.values(run.platforms).every(item => ['passed', 'reused'].includes(item.status)) ? 'built' : 'partial'
+    await writeComputerUseTemplates(directory, run.source_commit, { ...artifacts, windows: imported.primary })
+    await saveRun(directory, run)
+    await writeChecksums(directory)
+    process.stdout.write(`${JSON.stringify({ run_id: run.run_id, source_commit: run.source_commit, platforms: run.platforms }, null, 2)}\n`)
+    return
+  }
   const selection = selectCandidatePlatforms(run, values.retry ?? 'all')
   for (const platform of selection.reuse) {
     await verifyLocalArtifact(join(directory, 'artifacts', platform), platform, run.source_commit)
@@ -661,32 +807,27 @@ async function candidate(values) {
   }
   const scratch = await mkdtemp(join(tmpdir(), 'emate-t25-'))
   const source = join(scratch, 'source')
-  const sourceArchive = join(scratch, 'source.tgz')
   const setupLog = join(directory, 'logs', 'candidate.log')
   const failures = []
   try {
-    await cleanSourceCopy(ROOT, source, identity, setupLog)
-    if (selection.build.includes('windows')) {
-      await runLogged('tar', ['-czf', sourceArchive, '-C', source, '.'], {
-        cwd: ROOT, log: setupLog, env: { ...process.env, COPYFILE_DISABLE: '1' },
-      })
-    }
+    if (selection.build.includes('macos')) await cleanSourceCopy(ROOT, source, identity, setupLog)
     for (const platform of selection.build) {
       const output = join(directory, 'artifacts', platform)
       const log = join(directory, 'logs', `${platform}.log`)
+      if (platform === 'windows') {
+        await prepareWindowsRemote(directory, run)
+        await saveRun(directory, run)
+        continue
+      }
       run.platforms[platform] = { status: 'building', source_commit: run.source_commit }
       await saveRun(directory, run)
       try {
-        if (platform === 'macos') {
-          const temporary = join(scratch, 'macos-out')
-          await runLogged(process.execPath, [join(source, 'scripts', 'local-flow.mjs'), '_platform-build', '--platform', 'macos', '--out', temporary, '--source-commit', run.source_commit], { cwd: source, log })
-          await mkdir(dirname(output), { recursive: true })
-          await rm(output, { recursive: true, force: true })
-          await mkdir(output)
-          for (const name of await readdir(temporary)) await copyFile(join(temporary, name), join(output, name))
-        } else {
-          await windowsBuild(sourceArchive, output, run, log, scratch)
-        }
+        const temporary = join(scratch, 'macos-out')
+        await runLogged(process.execPath, [join(source, 'scripts', 'local-flow.mjs'), '_platform-build', '--platform', 'macos', '--out', temporary, '--source-commit', run.source_commit], { cwd: source, log })
+        await mkdir(dirname(output), { recursive: true })
+        await rm(output, { recursive: true, force: true })
+        await mkdir(output)
+        for (const name of await readdir(temporary)) await copyFile(join(temporary, name), join(output, name))
         const verified = await verifyLocalArtifact(output, platform, run.source_commit)
         run.platforms[platform] = { status: 'passed', source_commit: run.source_commit, artifact: verified.primary }
       } catch (cause) {
@@ -1115,6 +1256,8 @@ function argumentsFor(argv) {
       platform: { type: 'string' },
       out: { type: 'string' },
       'source-commit': { type: 'string' },
+      'windows-result': { type: 'string' },
+      'remote-request': { type: 'string' },
       'dry-run': { type: 'boolean', default: false },
       'owner-receipt': { type: 'string' },
     },
@@ -1127,6 +1270,8 @@ function argumentsFor(argv) {
       dryRun: values['dry-run'],
       ownerReceipt: values['owner-receipt'],
       sourceCommit: values['source-commit'],
+      windowsResult: values['windows-result'],
+      remoteRequest: values['remote-request'],
     },
   }
 }
@@ -1137,25 +1282,33 @@ function validateCommandOptions(command, values) {
     throw new Error('flow command must be dev, candidate, verify, publish, or rollback')
   }
   if (command === 'dev' && (values.run !== undefined || values.retry !== undefined || values.dryRun
-    || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined)) {
+    || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
+    || values.windowsResult !== undefined || values.remoteRequest !== undefined)) {
     throw new Error('dev does not accept options')
   }
   if (command === 'candidate' && (values.dryRun || values.platform !== undefined || values.out !== undefined
-    || values.sourceCommit !== undefined || values.ownerReceipt !== undefined)) throw new Error('candidate accepts only --run and --retry')
+    || values.sourceCommit !== undefined || values.ownerReceipt !== undefined || values.remoteRequest !== undefined
+    || values.windowsResult !== undefined && (values.run === undefined || values.retry !== undefined))) {
+    throw new Error('candidate accepts --run/--retry or --run with --windows-result')
+  }
   if (command === 'verify' && (values.run === undefined || values.retry !== undefined || values.dryRun
-    || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined)) {
+    || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
+    || values.windowsResult !== undefined || values.remoteRequest !== undefined)) {
     throw new Error('verify requires only --run <id>')
   }
   if (command === 'publish' && (values.run === undefined || values.retry !== undefined
     || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined
+    || values.windowsResult !== undefined || values.remoteRequest !== undefined
     || values.dryRun && values.ownerReceipt !== undefined)) {
     throw new Error('publish requires --run <id> and accepts only --dry-run or --owner-receipt')
   }
   if (command === 'rollback' && (values.run === undefined || values.retry !== undefined
-    || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined)) {
+    || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
+    || values.windowsResult !== undefined || values.remoteRequest !== undefined)) {
     throw new Error('rollback requires --run <id> and optionally --dry-run')
   }
-  if (internal && (values.run !== undefined || values.retry !== undefined || values.dryRun || values.ownerReceipt !== undefined)) {
+  if (internal && (values.run !== undefined || values.retry !== undefined || values.dryRun || values.ownerReceipt !== undefined
+    || values.windowsResult !== undefined || values.remoteRequest !== undefined && values.platform !== 'windows')) {
     throw new Error('invalid internal platform build options')
   }
 }
@@ -1175,7 +1328,16 @@ async function main() {
     if (git(['rev-parse', 'HEAD']) !== values.sourceCommit || git(['status', '--porcelain=v1', '--untracked-files=all']) !== '') {
       throw new Error('internal platform build requires the exact clean source copy')
     }
-    await platformBuild(ROOT, values.platform, resolve(values.out), join(dirname(resolve(values.out)), `${values.platform}.log`))
+    const output = resolve(values.out)
+    if (values.remoteRequest === undefined) {
+      await platformBuild(ROOT, values.platform, output, join(dirname(output), `${values.platform}.log`))
+    } else {
+      const requestPath = resolve(values.remoteRequest)
+      const { request } = await readWindowsRemoteRequest(requestPath)
+      if (request.source_commit !== values.sourceCommit) throw new Error('Windows Codex Remote request source does not match the build')
+      await platformBuild(ROOT, 'windows', join(output, 'artifacts', 'windows'), join(output, 'windows.log'))
+      await writeWindowsRemoteResult(output, requestPath)
+    }
   }
 }
 
