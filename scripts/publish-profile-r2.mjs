@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 
 import { createHash, createPrivateKey, createPublicKey } from 'node:crypto'
-import { constants, copyFileSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import {
+  constants, copyFileSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync,
+} from 'node:fs'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseArgs } from 'node:util'
+import { isDeepStrictEqual, parseArgs } from 'node:util'
 import { loadReleaseBoundary } from './change-impact.mjs'
-import { scanComponentArtifacts } from './profile-release.mjs'
+import { createProfileComponentAggregate } from './desktop-admission.mjs'
+import { buildPublicationRequest, loadRun, sourceIdentity, verifyManifestInputLedger } from './local-flow.mjs'
+import { composeProfileReleaseCandidate, scanComponentArtifacts } from './profile-release.mjs'
 import {
   assertCompleteProfileRelease,
   profileGenerationId,
@@ -29,6 +33,7 @@ const MAX_CURRENT_BYTES = 1024 * 1024
 const MAX_CURRENT_SNAPSHOT_BYTES = 5 * 1024 * 1024
 const CURRENT_SNAPSHOT_DOCUMENT = 'emate.profile-current-desired-state-snapshot'
 const CURRENT_SNAPSHOT_AUTHORITY = 'codex-cloudflare-plugin'
+const LOCAL_RUN_ID = /^\d{8}T\d{6}Z-[0-9a-f]{12}-[0-9a-f]{6}$/u
 const SHA40 = /^[0-9a-f]{40}$/u
 const SHA256 = /^[0-9a-f]{64}$/u
 const STABLE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u
@@ -46,9 +51,17 @@ function record(value) {
 }
 
 function exactKeys(value, expected) {
+  if (!record(value)) return false
   const actual = Object.keys(value).sort()
   const wanted = [...expected].sort()
   return actual.length === wanted.length && actual.every((key, index) => key === wanted[index])
+}
+
+function descriptorFor(root, path) {
+  const name = relative(root, path).split(sep).join('/')
+  regularFile(path)
+  const bytes = readFileSync(path)
+  return { path: name, bytes: bytes.byteLength, sha256: sha256(bytes) }
 }
 
 function currentSnapshotIdentity(root) {
@@ -177,6 +190,77 @@ function regularFile(path) {
   return metadata
 }
 
+function signingCredentials(root, env) {
+  const privateKeyPem = env.EMATE_PROFILE_SIGNING_PRIVATE_KEY
+  if (typeof privateKeyPem !== 'string' || privateKeyPem === '') {
+    throw new Error('production Profile signing key is missing')
+  }
+  const baseRaw = JSON.parse(readFileSync(join(root, 'desktop/e-mate-desktop/base-contract.json'), 'utf8'))
+  const base = parseProfileBaseContract(baseRaw)
+  let publicKey
+  try {
+    publicKey = createPublicKey(createPrivateKey(privateKeyPem)).export({ format: 'der', type: 'spki' }).toString('base64')
+  } catch {
+    throw new Error('production Profile signing key is invalid')
+  }
+  const trusted = base?.profile_signing_keys.find(key => key.public_key_spki_der_base64 === publicKey)
+  const keyId = env.EMATE_PROFILE_SIGNING_KEY_ID || trusted?.id
+  if (base === undefined || trusted === undefined || keyId !== trusted.id) {
+    throw new Error('production Profile signing key is not trusted by the Desktop Base')
+  }
+  return { base, privateKeyPem, keyId }
+}
+
+async function loadLocalProfileInputs(options) {
+  const root = resolve(options.root)
+  const runRoot = resolve(options.runRoot)
+  const loaded = await loadRun(basename(runRoot), dirname(runRoot))
+  if (resolve(loaded.directory) !== runRoot) throw new Error('local Profile run root is invalid')
+  const run = loaded.run
+  const requestPath = resolve(options.request)
+  if (requestPath !== join(runRoot, 'publication', 'cloudflare-owner-request.json')) {
+    throw new Error('local Profile request is not the canonical run publication request')
+  }
+  const requestDescriptor = descriptorFor(runRoot, requestPath)
+  const request = JSON.parse(readFileSync(requestPath, 'utf8'))
+  if (!isDeepStrictEqual(request, buildPublicationRequest(run))) throw new Error('local Profile publication request is invalid')
+  if (run.publication?.status !== 'awaiting-existing-owner'
+    || run.publication.request_sha256 !== requestDescriptor.sha256) {
+    throw new Error('local Profile publication request descriptor drifted from its run')
+  }
+  await verifyManifestInputLedger(runRoot, run)
+  const releaseVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+  if (run.version !== releaseVersion) throw new Error('local Profile request version does not match the source')
+  if (sourceIdentity(root).source_commit !== run.source_commit) {
+    throw new Error('local Profile source is not the exact committed-clean ledger source')
+  }
+  const binding = run.manifest_inputs
+  const sourceBaseBytes = readFileSync(join(root, 'desktop/e-mate-desktop/base-contract.json'))
+  const sourceInventoryBytes = readFileSync(join(root, 'packages/dsh/profile/component-inventory.json'))
+  const boundBaseBytes = readFileSync(join(runRoot, ...binding.base_contract.path.split('/')))
+  const boundInventoryBytes = readFileSync(join(runRoot, ...binding.component_inventory.path.split('/')))
+  if (!boundBaseBytes.equals(sourceBaseBytes) || !boundInventoryBytes.equals(sourceInventoryBytes)) {
+    throw new Error('local Profile Base or inventory drifted from the source')
+  }
+  const boundary = loadReleaseBoundary(root)
+  if (!boundary.valid) throw new Error(boundary.errors.join('\n'))
+  const platformRoot = platform => join(runRoot, 'manifest-inputs', 'platforms', platform)
+
+  return {
+    runRoot,
+    request,
+    requestDescriptor,
+    binding,
+    macosRoot: platformRoot('macos'),
+    artifactRoots: [
+      join(platformRoot('macos'), 'unsigned-components'),
+      join(platformRoot('windows'), 'unsigned-components'),
+    ],
+    expectedChangedIds: boundary.components.filter(component => component.desktop !== 'blocked')
+      .map(component => component.id).sort(),
+  }
+}
+
 function contentType(path) {
   if (path.endsWith('.json')) return 'application/json'
   if (path.endsWith('.js') || path.endsWith('.mjs')) return 'text/javascript; charset=utf-8'
@@ -229,7 +313,7 @@ function componentObjects(artifact) {
   return [manifest, ...files]
 }
 
-function loadCandidate(directory, base, expectedIds, sourceCommit, privateKeyPem, keyId) {
+function loadCandidate(directory, base, expectedIds, sourceCommit, privateKeyPem, keyId, signatureKind) {
   const admission = JSON.parse(readFileSync(join(directory, 'admission.json'), 'utf8'))
   const payload = JSON.parse(readFileSync(join(directory, 'payload.json'), 'utf8'))
   assertCompleteProfileRelease(payload, expectedIds)
@@ -240,7 +324,8 @@ function loadCandidate(directory, base, expectedIds, sourceCommit, privateKeyPem
   if (verified === undefined || !TARGET_NAMES.includes(name)
     || payload.source_commit !== sourceCommit
     || admission?.schema_version !== 1 || admission.document_type !== 'emate.profile-generation-admission'
-    || admission.status !== 'verified' || admission.signature_kind !== 'ephemeral'
+    || admission.status !== 'verified' || admission.signature_kind !== signatureKind
+    || admission.signature_key_id !== (signatureKind === 'production' ? keyId : 'ci-ephemeral')
     || admission.source_commit !== sourceCommit || admission.candidate_generation !== generation
     || admission.base_contract_id !== base.id
     || admission.schedule_protocol_floor !== base.schedule_protocol_floor
@@ -251,6 +336,12 @@ function loadCandidate(directory, base, expectedIds, sourceCommit, privateKeyPem
     || admission.changed_components.some((id, index, values) => typeof id !== 'string'
       || index > 0 && values[index - 1] >= id)) {
     throw new Error(`Profile candidate admission is invalid: ${directory}`)
+  }
+  if (signatureKind === 'production') {
+    const stored = parseProfileReleaseEnvelope(readFileSync(join(directory, 'envelope.json')), base, MAX_CURRENT_BYTES)
+    if (stored === undefined || canonicalProfileJson(stored) !== canonicalProfileJson(envelope)) {
+      throw new Error(`production Profile candidate signature drifted: ${directory}`)
+    }
   }
   return { directory, admission, payload: verified.payload, envelope, generation, name }
 }
@@ -314,8 +405,10 @@ export function prepareProfilePublication(options) {
   const keyId = options.keyId ?? trusted?.id
   if (trusted === undefined || keyId !== trusted.id) throw new Error('Profile signing key is not trusted by the Desktop Base')
   const expectedIds = boundary.components.filter(component => component.desktop !== 'blocked').map(component => component.id).sort()
+  const signatureKind = options.candidateSignatureKind ?? 'ephemeral'
+  if (!['ephemeral', 'production'].includes(signatureKind)) throw new Error('Profile candidate signature kind is invalid')
   const candidates = options.candidateDirectories.map(directory => loadCandidate(
-    resolve(directory), base, expectedIds, options.sourceCommit, options.privateKeyPem, keyId,
+    resolve(directory), base, expectedIds, options.sourceCommit, options.privateKeyPem, keyId, signatureKind,
   )).sort((left, right) => left.name.localeCompare(right.name))
   if (canonicalProfileJson(candidates.map(candidate => candidate.name)) !== canonicalProfileJson([...TARGET_NAMES].sort())) {
     throw new Error('Profile publication must contain exactly one candidate for every Desktop target')
@@ -458,8 +551,15 @@ function copyPublicationItem(item, output, group) {
 
 export function writeProfilePublicationBundle(prepared, output, currentByTarget, provenance = {}) {
   const destination = resolve(output)
+  const local = provenance.mode === 'local-flow'
   const mainCommit = provenance.mainCommit ?? prepared.sourceCommit
-  if (!SHA40.test(mainCommit)) throw new Error('Profile publication main commit is invalid')
+  if (!local && !SHA40.test(mainCommit)) throw new Error('Profile publication main commit is invalid')
+  if (local && (!LOCAL_RUN_ID.test(provenance.runId ?? '') || !STABLE_VERSION.test(provenance.releaseVersion ?? '')
+    || !exactKeys(provenance, ['mode', 'runId', 'releaseVersion', 'request', 'ledger'])
+    || !exactKeys(provenance.request, ['path', 'bytes', 'sha256'])
+    || !exactKeys(provenance.ledger, ['path', 'bytes', 'sha256']))) {
+    throw new Error('local Profile publication provenance is invalid')
+  }
   mkdirSync(destination, { recursive: false })
   const immutableObjects = prepared.objects.map(item => copyPublicationItem(item, destination, 'immutable'))
   const activations = prepared.releases.map(release => ({
@@ -474,7 +574,23 @@ export function writeProfilePublicationBundle(prepared, output, currentByTarget,
     },
     object: copyPublicationItem(release.stable, destination, 'activation'),
   }))
-  const plan = {
+  const plan = local ? {
+    schema_version: 2,
+    document_type: 'emate.profile-native-cloudflare-publication-plan',
+    status: 'prepared',
+    source_commit: prepared.sourceCommit,
+    release_version: provenance.releaseVersion,
+    provenance: {
+      mode: 'local-flow',
+      run_id: provenance.runId,
+      request: provenance.request,
+      ledger: provenance.ledger,
+    },
+    base_contract_id: prepared.base.id,
+    schedule_protocol_floor: prepared.base.schedule_protocol_floor,
+    immutable_objects: immutableObjects,
+    activations,
+  } : {
     schema_version: 1,
     document_type: 'emate.profile-native-cloudflare-publication-plan',
     status: 'prepared',
@@ -511,6 +627,91 @@ export async function prepareSignedProfilePublication(options) {
   })
 }
 
+/** Prepare the production-signed Profile portion of one exact local-flow run without network access. */
+export async function prepareLocalSignedProfilePublication(options) {
+  const root = resolve(options.root ?? fileURLToPath(new URL('..', import.meta.url)))
+  const env = options.env ?? process.env
+  const signing = signingCredentials(root, env)
+  const inputs = await loadLocalProfileInputs({
+    root,
+    runRoot: options.runRoot,
+    request: options.request,
+  })
+  if (signing.base.id !== inputs.binding.base_contract.id
+    || signing.base.schedule_protocol_floor !== inputs.binding.base_contract.schedule_protocol_floor
+    || signing.base.harness_commit !== inputs.binding.base_contract.harness_commit
+    || !inputs.binding.base_contract.trusted_signing_key_ids.includes(signing.keyId)) {
+    throw new Error('production Profile signing identity drifted from the local ledger Base')
+  }
+  const { currentByTarget } = loadProfileCurrentSnapshot(
+    resolve(options.currentSnapshot),
+    currentSnapshotIdentity(root),
+  )
+  const output = resolve(options.output)
+  const rootRelative = relative(root, output)
+  const runRelative = relative(inputs.runRoot, output)
+  if (output === root || rootRelative === '..' || rootRelative.startsWith(`..${sep}`)
+    || output === inputs.runRoot || runRelative === '..' || runRelative.startsWith(`..${sep}`)) {
+    throw new Error('local Profile signing output must stay inside the source run')
+  }
+  mkdirSync(output, { recursive: false, mode: 0o700 })
+  const candidateDirectories = []
+  for (const target of TARGET_NAMES) {
+    const directory = join(output, 'candidates', target)
+    await composeProfileReleaseCandidate({
+      root,
+      target,
+      artifactRoots: inputs.artifactRoots,
+      changedIds: inputs.expectedChangedIds,
+      sourceCommit: inputs.request.source_commit,
+      output: directory,
+      privateKeyPem: signing.privateKeyPem,
+      keyId: signing.keyId,
+      request: async () => { throw new Error('local Profile preparation attempted network access') },
+    })
+    candidateDirectories.push(directory)
+  }
+  const prepared = prepareProfilePublication({
+    root,
+    candidateDirectories,
+    candidateSignatureKind: 'production',
+    artifactRoots: inputs.artifactRoots,
+    expectedChangedIds: inputs.expectedChangedIds,
+    sourceCommit: inputs.request.source_commit,
+    privateKeyPem: signing.privateKeyPem,
+    keyId: signing.keyId,
+    currentByTarget,
+    bootstrap: true,
+  })
+  const bundle = join(output, 'publication-bundle')
+  const plan = writeProfilePublicationBundle(prepared, bundle, currentByTarget, {
+    mode: 'local-flow',
+    runId: inputs.request.run_id,
+    releaseVersion: inputs.request.version,
+    request: inputs.requestDescriptor,
+    ledger: inputs.binding.ledger,
+  })
+  const aggregatePath = join(output, 'profile-component-aggregate.json')
+  const aggregate = await createProfileComponentAggregate({
+    sourceCommit: inputs.request.source_commit,
+    releaseVersion: inputs.request.version,
+    baseContract: join(inputs.macosRoot, 'base-contract.json'),
+    inventory: join(inputs.macosRoot, 'component-inventory.json'),
+    profileReceipt: join(inputs.macosRoot, 'profile-build-receipt.json'),
+    profile: join(inputs.macosRoot, 'profile-artifact'),
+    publicationBundle: bundle,
+    localRunRoot: inputs.runRoot,
+    output: aggregatePath,
+  })
+  return {
+    plan,
+    aggregate,
+    candidateDirectories,
+    bundle,
+    aggregatePath,
+  }
+}
+
 async function main() {
   const { values } = parseArgs({ options: {
     candidate: { type: 'string', multiple: true },
@@ -518,10 +719,36 @@ async function main() {
     changed: { type: 'string', multiple: true },
     bundle: { type: 'string' },
     snapshot: { type: 'string' },
+    'local-request': { type: 'string' },
+    'local-run-root': { type: 'string' },
+    'local-output': { type: 'string' },
     'materialize-current': { type: 'string' },
     bootstrap: { type: 'boolean', default: false },
   } })
   const root = fileURLToPath(new URL('..', import.meta.url))
+  const local = values['local-request'] !== undefined || values['local-run-root'] !== undefined || values['local-output'] !== undefined
+  if (local) {
+    if (values['local-request'] === undefined || values['local-run-root'] === undefined
+      || values['local-output'] === undefined || values.snapshot === undefined
+      || values.candidate !== undefined || values['artifact-root'] !== undefined || values.changed !== undefined
+      || values.bundle !== undefined || values['materialize-current'] !== undefined || values.bootstrap) {
+      throw new Error('usage: publish-profile-r2.mjs --local-request <file> --local-run-root <directory> --snapshot <file> --local-output <directory>')
+    }
+    const prepared = await prepareLocalSignedProfilePublication({
+      root,
+      request: resolve(values['local-request']),
+      runRoot: resolve(values['local-run-root']),
+      currentSnapshot: resolve(values.snapshot),
+      output: resolve(values['local-output']),
+    })
+    process.stdout.write(`${JSON.stringify({
+      status: prepared.plan.status,
+      run_id: prepared.plan.provenance.run_id,
+      activations: prepared.plan.activations.map(item => ({ target: item.target, generation: item.generation })),
+      aggregate_sha256: prepared.aggregate.aggregate_sha256,
+    })}\n`)
+    return
+  }
   if (values['materialize-current'] !== undefined) {
     if (values.snapshot === undefined || values.candidate !== undefined || values['artifact-root'] !== undefined
       || values.changed !== undefined || values.bundle !== undefined || values.bootstrap) {

@@ -23,12 +23,14 @@ const TARGETS = ['darwin-arm64', 'darwin-x64', 'win32-x64']
 const SHA40 = /^[0-9a-f]{40}$/u
 const SHA256 = /^[0-9a-f]{64}$/u
 const RUN_ID = /^[1-9][0-9]*$/u
+const LOCAL_RUN_ID = /^\d{8}T\d{6}Z-[0-9a-f]{12}-[0-9a-f]{6}$/u
 const TEAM_ID = /^[A-Z0-9]{10}$/u
 const NOTARY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
 const PROFILE_TREE_CONTEXT = Buffer.from('e-mate-staged-profile-tree-v1\0', 'utf8')
 const PROFILE_PUBLICATION_CONTEXT = Buffer.from('e-mate-profile-publication-tree-v1\0', 'utf8')
 const PROFILE_COMPONENT_CONTEXT = Buffer.from('e-mate-profile-component-aggregate-v1\0', 'utf8')
 const PROFILE_AGGREGATE_CONTEXT = Buffer.from('e-mate-profile-aggregate-v1\0', 'utf8')
+const LOCAL_PROFILE_AGGREGATE_CONTEXT = Buffer.from('e-mate-local-profile-aggregate-v2\0', 'utf8')
 const PERFORMANCE_SIGNATURE_CONTEXT = Buffer.from('e-mate-performance-admission-v1\0', 'utf8')
 const PERFORMANCE_AGGREGATE_SIGNATURE_CONTEXT = Buffer.from('e-mate-performance-aggregate-admission-v1\0', 'utf8')
 const MAX_JSON_BYTES = 64 * 1024 * 1024
@@ -234,9 +236,30 @@ function componentFileUrl(reference, path) {
   return new URL(`files/${path.split('/').map(encodeURIComponent).join('/')}`, new URL('.', reference.manifest_url)).href
 }
 
-/** Recompute the existing four-field Profile summary from actual signed Profile publication bytes. */
+async function localProfileProvenance(value, root) {
+  if (!exactKeys(value, ['mode', 'run_id', 'request', 'ledger']) || value.mode !== 'local-flow'
+    || !LOCAL_RUN_ID.test(value.run_id ?? '')) throw new Error('local Profile publication provenance is invalid')
+  const accepted = {}
+  for (const name of ['request', 'ledger']) {
+    const descriptor = value[name]
+    if (!exactKeys(descriptor, ['path', 'bytes', 'sha256']) || !safeArtifactPath(descriptor.path)
+      || !Number.isSafeInteger(descriptor.bytes) || descriptor.bytes <= 0 || !SHA256.test(descriptor.sha256 ?? '')) {
+      throw new Error(`local Profile publication ${name} descriptor is invalid`)
+    }
+    const actual = await hashFile(resolve(root, ...descriptor.path.split('/')))
+    if (actual.bytes !== descriptor.bytes || actual.sha256 !== descriptor.sha256) {
+      throw new Error(`local Profile publication ${name} drifted`)
+    }
+    accepted[name] = descriptor
+  }
+  return { mode: 'local-flow', run_id: value.run_id, ...accepted }
+}
+
+/** Recompute the Profile summary from actual signed Profile publication bytes. */
 export async function createProfileComponentAggregate(options) {
-  if (!SHA40.test(options.sourceCommit) || !RUN_ID.test(options.ciRunId) || !RUN_ID.test(options.profileRunId)) {
+  if (!SHA40.test(options.sourceCommit)
+    || options.localRunRoot === undefined && (!RUN_ID.test(options.ciRunId) || !RUN_ID.test(options.profileRunId))
+    || options.localRunRoot !== undefined && (options.ciRunId !== undefined || options.profileRunId !== undefined)) {
     throw new Error('Profile aggregate provenance is invalid')
   }
   const base = loadProfileBaseContract(resolve(options.baseContract))
@@ -265,14 +288,31 @@ export async function createProfileComponentAggregate(options) {
     return resolve(bundleRoot, ...item.path.split('/'))
   }
   const plan = planInput.value
-  if (!exactKeys(plan, [
-    'schema_version', 'document_type', 'status', 'source_commit', 'main_commit', 'accepted_ci_run_id',
-    'preparation_run_id', 'base_contract_id', 'schedule_protocol_floor', 'immutable_objects', 'activations',
-  ]) || plan.schema_version !== 1
-    || plan.document_type !== 'emate.profile-native-cloudflare-publication-plan' || plan.status !== 'prepared'
-    || plan.source_commit !== options.sourceCommit || plan.main_commit !== options.sourceCommit
-    || String(plan.accepted_ci_run_id) !== options.ciRunId || String(plan.preparation_run_id) !== options.profileRunId
-    || plan.base_contract_id !== base.id || plan.schedule_protocol_floor !== base.schedule_protocol_floor
+  let provenance
+  const legacyPlan = plan?.schema_version === 1 && options.localRunRoot === undefined
+  const localPlan = plan?.schema_version === 2 && options.localRunRoot !== undefined
+  if (legacyPlan) {
+    if (!exactKeys(plan, [
+      'schema_version', 'document_type', 'status', 'source_commit', 'main_commit', 'accepted_ci_run_id',
+      'preparation_run_id', 'base_contract_id', 'schedule_protocol_floor', 'immutable_objects', 'activations',
+    ]) || plan.main_commit !== options.sourceCommit || String(plan.accepted_ci_run_id) !== options.ciRunId
+      || String(plan.preparation_run_id) !== options.profileRunId) {
+      throw new Error('Profile publication plan provenance is invalid')
+    }
+  } else if (localPlan) {
+    if (!exactKeys(plan, [
+      'schema_version', 'document_type', 'status', 'source_commit', 'release_version', 'provenance',
+      'base_contract_id', 'schedule_protocol_floor', 'immutable_objects', 'activations',
+    ]) || plan.release_version !== options.releaseVersion) {
+      throw new Error('Profile publication plan provenance is invalid')
+    }
+    provenance = await localProfileProvenance(plan.provenance, resolve(options.localRunRoot))
+  } else {
+    throw new Error('Profile publication plan provenance is invalid')
+  }
+  if (plan.document_type !== 'emate.profile-native-cloudflare-publication-plan' || plan.status !== 'prepared'
+    || plan.source_commit !== options.sourceCommit || plan.base_contract_id !== base.id
+    || plan.schedule_protocol_floor !== base.schedule_protocol_floor
     || !Array.isArray(plan.immutable_objects) || !Array.isArray(plan.activations)
     || plan.activations.length !== TARGETS.length) {
     throw new Error('Profile publication plan provenance is invalid')
@@ -412,7 +452,22 @@ export async function createProfileComponentAggregate(options) {
     staged_profile_tree_sha256: receipt.staged_profile_tree_sha256,
     targets,
   }
-  const aggregate = {
+  const aggregate = localPlan ? {
+    schema_version: 2,
+    document_type: 'emate.profile-component-aggregate',
+    source_commit: options.sourceCommit,
+    release_version: options.releaseVersion,
+    base_contract_id: base.id,
+    provenance,
+    aggregate_sha256: canonicalDigest(LOCAL_PROFILE_AGGREGATE_CONTEXT, {
+      source_commit: options.sourceCommit,
+      release_version: options.releaseVersion,
+      base_contract_id: base.id,
+      provenance,
+      ...unsigned,
+    }),
+    ...unsigned,
+  } : {
     aggregate_sha256: canonicalDigest(PROFILE_AGGREGATE_CONTEXT, unsigned),
     ...unsigned,
   }
