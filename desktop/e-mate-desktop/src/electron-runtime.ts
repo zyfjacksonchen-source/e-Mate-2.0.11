@@ -950,9 +950,9 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     })
   }
 
-  private async resourcePath(window: BrowserWindow, sessionRoot: string, resource: Resource): Promise<string> {
+  private async resourcePath(window: BrowserWindow, spec: DesktopShellSpec, resource: Resource): Promise<string> {
     return resource.kind === 'file'
-      ? this.authorizedResourcePath(resource, sessionRoot)
+      ? this.authorizedResourcePath(resource, await this.authorizedSessionRoot(spec, resource.sessionId))
       : this.materializeImage(window, resource)
   }
 
@@ -962,7 +962,6 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     spec: DesktopShellSpec,
     resource: Resource,
   ): Promise<void> {
-    const sessionRoot = await this.authorizedSessionRoot(spec, resource.sessionId)
     if (action === 'copy-image') {
       if (resource.kind !== 'image') throw new Error('copy-image requires an image resource')
       const image = nativeImage.createFromBuffer((await this.readImageBytes(window, resource)).bytes)
@@ -970,7 +969,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       clipboard.writeImage(image)
       return
     }
-    const path = await this.resourcePath(window, sessionRoot, resource)
+    const path = await this.resourcePath(window, spec, resource)
     if (action === 'save-as') {
       const selected = await dialog.showSaveDialog({
         title: '另存为',

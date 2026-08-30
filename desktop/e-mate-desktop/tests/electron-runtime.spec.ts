@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -497,10 +497,11 @@ describe('Electron compatibility runtime', () => {
     })).rejects.toThrow('resource request did not originate from owning Renderer')
     await expect(runResource({ sender: electron.webContents }, { action: 'unknown' }))
       .rejects.toThrow('invalid resource request')
+    electron.webContents.executeJavaScript.mockResolvedValueOnce(`data:image/png;base64,${png.toString('base64')}`)
     await expect(runResource({ sender: electron.webContents }, {
       action: 'copy-image',
       resource: { kind: 'image', sessionId: 'missing', name: 'result.png', src: 'blob:result' },
-    })).rejects.toThrow('resource session is not active')
+    })).resolves.toBeUndefined()
     electron.webContents.executeJavaScript.mockResolvedValueOnce(`data:image/jpeg;base64,${png.toString('base64')}`)
     await expect(runResource({ sender: electron.webContents }, {
       action: 'copy-image',
@@ -604,7 +605,7 @@ describe('Electron compatibility runtime', () => {
     }
   })
 
-  it('materializes image bytes only for download or reveal actions', async () => {
+  it('keeps historical child image actions renderer-scoped and materializes only for download or reveal', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const root = mkdtempSync(join(tmpdir(), 'e-mate-image-resource-'))
     const originalGetPath = electron.app.getPath.getMockImplementation()
@@ -615,15 +616,20 @@ describe('Electron compatibility runtime', () => {
       const release = runtime.schedule({
         ...spec,
         resourceRoots: () => [root],
-        resourceSessionRoot: sessionId => sessionId === 'session-images' ? root : undefined,
+        resourceSessionRoot: () => undefined,
       })
       await runtime.mountScheduled()
       const runResource = electron.ipcMain.handle.mock.calls.find(([channel]) => channel === 'emate:desktop-resource-run')?.[1]
       const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
       const response = `data:image/png;base64,${bytes.toString('base64')}`
       const resource = {
-        kind: 'image', sessionId: 'session-images', name: 'result.png', src: 'blob:result',
+        kind: 'image', sessionId: 'disposed-child', name: 'result.png', src: 'blob:result',
       }
+
+      electron.webContents.executeJavaScript.mockResolvedValueOnce(response)
+      await runResource({ sender: electron.webContents }, { action: 'copy-image', resource })
+      expect(electron.clipboard.writeImage).toHaveBeenCalledOnce()
+      expect(existsSync(join(root, 'e-mate-resources'))).toBe(false)
 
       electron.webContents.executeJavaScript.mockResolvedValueOnce(response)
       await runResource({ sender: electron.webContents }, { action: 'reveal', resource })
