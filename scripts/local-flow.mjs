@@ -907,7 +907,11 @@ function expectedComputerUseScenarios(platform) {
 }
 
 function validateExternalAcceptance(acceptance, { platform, artifactSha256 }) {
-  const coverage = ['installation', 'startup', 'update', '2.0.15-fixes', 'built-in-tools', ...(platform === 'macos' ? ['computer-use'] : [])]
+  const coverage = [
+    'installation', 'startup', 'update-download-verify-atomic-replace-relaunch-health-commit',
+    'failed-health-rollback-relaunch-recovery',
+    '2.0.15-fixes', 'built-in-tools', ...(platform === 'macos' ? ['computer-use'] : []),
+  ]
   const computerUse = platform === 'macos'
     ? { status: 'passed', installed_artifact_sha256: artifactSha256 }
     : { status: 'not_applicable', disposition: 'allowed_unavailable', tested: false }

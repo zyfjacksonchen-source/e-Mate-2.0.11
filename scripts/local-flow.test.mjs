@@ -179,7 +179,11 @@ function acceptance(platform, artifactSha256) {
     host: platform === 'macos' ? 'T18-MAC' : 'DESKTOP-KH19ARC',
     tested_at: '2026-08-30T00:00:00.000Z',
     installed_artifact_sha256: artifactSha256,
-    coverage: ['installation', 'startup', 'update', '2.0.15-fixes', 'built-in-tools', ...(platform === 'macos' ? ['computer-use'] : [])],
+    coverage: [
+      'installation', 'startup', 'update-download-verify-atomic-replace-relaunch-health-commit',
+      'failed-health-rollback-relaunch-recovery',
+      '2.0.15-fixes', 'built-in-tools', ...(platform === 'macos' ? ['computer-use'] : []),
+    ],
     computer_use: platform === 'macos'
       ? { status: 'passed', installed_artifact_sha256: artifactSha256 }
       : { status: 'not_applicable', disposition: 'allowed_unavailable', tested: false },
@@ -437,7 +441,7 @@ test('pollution gate rejects canaries, credentials, and developer absolute paths
   assert.throws(() => assertCleanArtifactBytes(Buffer.from(`sk-${'x'.repeat(24)}`), 'fixture'), /API secret/u)
 })
 
-test('verify requires macOS Computer Use but accepts explicit Windows CU non-applicability inside its full installed matrix', async () => {
+test('verify requires update/relaunch, failed-health rollback, and macOS Computer Use in its full installed matrix', async () => {
   const root = await temporary()
   try {
     for (const [platform, artifactSha256] of [['macos', MAC_SHA], ['windows', WIN_SHA]]) {
@@ -470,9 +474,18 @@ test('verify requires macOS Computer Use but accepts explicit Windows CU non-app
     }), /invalid or incomplete/u)
     const incompleteWindows = await computerUseFixture(join(root, 'incomplete-windows'), 'windows', WIN_SHA)
     const incomplete = JSON.parse(await readFile(incompleteWindows, 'utf8'))
-    incomplete.external_acceptance.coverage = incomplete.external_acceptance.coverage.filter(item => item !== 'update')
+    incomplete.external_acceptance.coverage = incomplete.external_acceptance.coverage
+      .filter(item => item !== 'update-download-verify-atomic-replace-relaunch-health-commit')
     await writeFile(incompleteWindows, `${JSON.stringify(incomplete)}\n`)
     await assert.rejects(verifyComputerUseReceipt(incompleteWindows, {
+      platform: 'windows', sourceCommit: SHA, artifactSha256: WIN_SHA,
+    }), /full installed acceptance/u)
+    const noRollbackWindows = await computerUseFixture(join(root, 'no-rollback-windows'), 'windows', WIN_SHA)
+    const noRollback = JSON.parse(await readFile(noRollbackWindows, 'utf8'))
+    noRollback.external_acceptance.coverage = noRollback.external_acceptance.coverage
+      .filter(item => item !== 'failed-health-rollback-relaunch-recovery')
+    await writeFile(noRollbackWindows, `${JSON.stringify(noRollback)}\n`)
+    await assert.rejects(verifyComputerUseReceipt(noRollbackWindows, {
       platform: 'windows', sourceCommit: SHA, artifactSha256: WIN_SHA,
     }), /full installed acceptance/u)
     const mismatchedMatrixPath = await computerUseFixture(join(root, 'matrix-windows'), 'windows', WIN_SHA)
