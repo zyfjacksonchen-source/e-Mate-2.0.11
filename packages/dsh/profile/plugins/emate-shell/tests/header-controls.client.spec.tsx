@@ -109,8 +109,10 @@ describe('desktop header controls', () => {
     expect(controls).toMatch(/\.controls\[data-emate-settings-route\][\s\S]*right:\s*calc\(72px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
     expect(controls).toMatch(/body\[data-dsh-desktop-platform='win32'\][\s\S]*\.controls\[data-emate-settings-route\]/u)
     const settings = readFileSync('src/client/settings-chrome.module.css', 'utf8')
+    const account = readFileSync('src/client/account.module.css', 'utf8')
     const source = readFileSync('src/client/index.ts', 'utf8')
-    expect(source).toContain("import './theme-tokens.css'")
+    expect(source).toContain("import './theme-tokens.module.css'")
+    expect(account).not.toContain('theme-tokens')
     expect(settings).toContain('padding: 16px calc(20px + var(--dsh-desktop-caption-safe-width, 0px)) 16px max(20px, var(--dsh-desktop-caption-safe-left, 0px)) !important;')
   })
 

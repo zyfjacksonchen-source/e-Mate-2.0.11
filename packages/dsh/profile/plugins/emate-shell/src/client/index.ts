@@ -28,7 +28,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AccountControl, AccountSettings } from './account.tsx'
 import { registerActivityFold } from './activity-fold.tsx'
-import './theme-tokens.css'
+import './theme-tokens.module.css'
 import './chat-chrome.module.css'
 import { ComposerConnectors, ComposerMentions } from './composer-connectors.tsx'
 import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from './composer-mentions.ts'
