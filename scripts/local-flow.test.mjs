@@ -773,13 +773,26 @@ test('dev reuses the local classifier plan and selects the smallest local-flow c
     'scripts/local-flow.mjs', 'packages/dsh-client-shell/src/client/index.ts',
   ]), [
     { command: 'node', args: ['--test', 'scripts/local-flow.test.mjs'] },
+    {
+      command: 'pnpm',
+      args: ['--dir', 'upstream/deepseek-harness', 'install', '--frozen-lockfile'],
+      env: { CI: 'true' },
+    },
+    { command: 'pnpm', args: ['run', 'build:harness'] },
     { command: 'pnpm', args: ['run', 'test:fast'] },
   ])
   assert.deepEqual(devChecks({ lane: 'base' }, [
     'scripts/local-flow.mjs', 'scripts/local-flow.test.mjs',
-    'scripts/release.test.mjs', 'scripts/stage-desktop-profile-artifact.mjs',
+    'scripts/create-chat-state-fixture.test.mjs', 'scripts/release.test.mjs',
+    'scripts/stage-desktop-profile-artifact.mjs',
   ]), [
     { command: 'node', args: ['--test', 'scripts/local-flow.test.mjs', 'scripts/release.test.mjs'] },
+    {
+      command: 'pnpm',
+      args: ['--dir', 'upstream/deepseek-harness', 'install', '--frozen-lockfile'],
+      env: { CI: 'true' },
+    },
+    { command: 'pnpm', args: ['run', 'build:harness'] },
     { command: 'pnpm', args: ['run', 'test:fast'] },
   ])
   assert.deepEqual(devChecks({ lane: 'plugin-only', components: ['@e-mate/example'] }, ['packages/example/src/index.ts']), [

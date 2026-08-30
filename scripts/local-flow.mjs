@@ -1192,18 +1192,22 @@ function changedPaths() {
   return [...paths].sort()
 }
 
-function addCheck(checks, command, args) {
-  const key = JSON.stringify([command, args])
-  if (!checks.some(item => item.key === key)) checks.push({ key, command, args })
+function addCheck(checks, command, args, env) {
+  const key = JSON.stringify([command, args, env])
+  if (!checks.some(item => item.key === key)) checks.push({ key, command, args, ...(env === undefined ? {} : { env }) })
 }
 
 export function devChecks(plan, paths) {
   const checks = []
   const tests = [...new Set(paths.filter(path => path.startsWith('scripts/') && path.endsWith('.test.mjs')))].sort()
+  // This test imports emitted Harness libraries and test:fast already runs it after the Base prepare.
+  const earlyTests = plan.lane === 'base'
+    ? tests.filter(path => path !== 'scripts/create-chat-state-fixture.test.mjs')
+    : tests
   const localFlowOnly = paths.length > 0 && paths.every(path => [
     'package.json', 'scripts/local-flow.mjs', 'scripts/local-flow.test.mjs', 'docs/development-log.md',
   ].includes(path))
-  if (tests.length > 0) addCheck(checks, 'node', ['--test', ...tests])
+  if (earlyTests.length > 0) addCheck(checks, 'node', ['--test', ...earlyTests])
   if ((localFlowOnly || paths.some(path => path.startsWith('scripts/local-flow')))
     && !tests.includes('scripts/local-flow.test.mjs')) {
     addCheck(checks, 'node', ['--test', 'scripts/local-flow.test.mjs'])
@@ -1219,9 +1223,11 @@ export function devChecks(plan, paths) {
   } else if (plan.lane === 'verification-only') {
     if (tests.length === 0) addCheck(checks, 'node', ['scripts/change-impact.mjs', '--check-contract'])
   } else {
+    addCheck(checks, 'pnpm', ['--dir', 'upstream/deepseek-harness', 'install', '--frozen-lockfile'], { CI: 'true' })
+    addCheck(checks, 'pnpm', ['run', 'build:harness'])
     addCheck(checks, 'pnpm', ['run', 'test:fast'])
   }
-  return checks.map(({ command, args }) => ({ command, args }))
+  return checks.map(({ key: _key, ...check }) => check)
 }
 
 function affectedComputerUse(plan) {
@@ -1255,8 +1261,9 @@ async function dev() {
     const log = join(directory, 'logs', 'dev.log')
     try {
       for (const check of checks) {
-        if (check.command === 'pnpm') await runPnpm(check.args, { cwd: ROOT, log, env: pnpmCarrier.env })
-        else await runLogged(process.execPath, check.args, { cwd: ROOT, log, env: pnpmCarrier.env })
+        const env = check.env === undefined ? pnpmCarrier.env : { ...pnpmCarrier.env, ...check.env }
+        if (check.command === 'pnpm') await runPnpm(check.args, { cwd: ROOT, log, env })
+        else await runLogged(process.execPath, check.args, { cwd: ROOT, log, env })
       }
       run.status = 'passed'
     } catch (cause) {
