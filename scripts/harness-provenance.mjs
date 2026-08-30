@@ -14,6 +14,7 @@ import {
 } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { pinnedPnpmInvocation } from './package-manager.mjs'
 
 export const HARNESS_COMMIT = 'f97e3814fe677b35e2c0a4cdaec70c1fc1c8e1f4'
 export const HARNESS_VERSION = '0.1.0-rc.7'
@@ -346,8 +347,13 @@ export function verifyHarnessDesktopRuntime(root) {
 
 function build(root) {
   assertHarnessSource(root)
-  const result = spawnSync('pnpm', ['--dir', 'upstream/deepseek-harness', 'run', 'build'], {
+  const packageManager = readJson(join(root, 'package.json')).packageManager
+  const pnpmVersion = /^pnpm@([^+]+)$/u.exec(packageManager)?.[1]
+  if (pnpmVersion === undefined) throw new Error(`unsupported packageManager: ${String(packageManager)}`)
+  const invocation = pinnedPnpmInvocation(pnpmVersion, ['--dir', 'upstream/deepseek-harness', 'run', 'build'])
+  const result = spawnSync(invocation.command, invocation.args, {
     cwd: root,
+    env: invocation.env,
     stdio: 'inherit',
   })
   if (result.error !== undefined) throw result.error

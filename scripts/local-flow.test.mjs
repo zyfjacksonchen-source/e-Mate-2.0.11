@@ -22,6 +22,7 @@ import {
   verifyLocalArtifact,
   windowsRemoteRequest,
 } from './local-flow.mjs'
+import { pinnedYarnInvocation } from './package-manager.mjs'
 
 const SHA = 'a'.repeat(40)
 const MAC_SHA = 'b'.repeat(64)
@@ -696,16 +697,42 @@ test('publication receipt requires existing-owner manifest admission/signature a
   }, run, requestSha256), /legacy pointer receipt/u)
 })
 
-test('desktop builds start Corepack inside the pinned Yarn project on macOS and Windows', async () => {
+test('desktop builds reuse the inherited Corepack cache instead of a PATH shim', async () => {
   const rootPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const desktopPackage = JSON.parse(await readFile(new URL('../desktop/package.json', import.meta.url), 'utf8'))
   const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
   assert.equal(rootPackage.packageManager, 'pnpm@11.7.0')
   assert.equal(desktopPackage.packageManager, 'yarn@4.18.0')
-  assert.equal([...source.matchAll(/await runLogged\(process\.platform === 'win32' \? 'corepack\.cmd' : 'corepack', \['yarn'/gu)].length, 2)
-  assert.match(source, /\['yarn', 'install', '--immutable'\], \{ cwd: join\(sourceRoot, 'desktop'\), log \}/u)
-  assert.match(source, /\['yarn', PLATFORMS\[platform\]\.build\], \{ cwd: join\(sourceRoot, 'desktop'\), log \}/u)
+  assert.equal([...source.matchAll(/await runYarn\(/gu)].length, 2)
+  assert.match(source, /runYarn\(\['install', '--immutable'\], \{ cwd: join\(sourceRoot, 'desktop'\), log \}\)/u)
+  assert.match(source, /runYarn\(\[PLATFORMS\[platform\]\.build\], \{ cwd: join\(sourceRoot, 'desktop'\), log \}\)/u)
   assert.doesNotMatch(source, /\['yarn', '--cwd', 'desktop'/u)
+})
+
+test('runs exact Yarn from the inherited pnpm Corepack cache without corepack on PATH', async () => {
+  const root = await temporary()
+  const pnpmEntry = join(root, 'v1/pnpm/11.7.0/bin/pnpm.cjs')
+  const yarnEntry = join(root, 'v1/yarn/4.18.0/yarn.js')
+  const log = join(root, 'yarn-invocation.json')
+  try {
+    await mkdir(join(root, 'v1/pnpm/11.7.0/bin'), { recursive: true })
+    await mkdir(join(root, 'v1/yarn/4.18.0'), { recursive: true })
+    await writeFile(pnpmEntry, "process.stdout.write('11.7.0\\n')\n")
+    await writeFile(yarnEntry, [
+      "if (process.argv[2] === '--version') process.stdout.write('4.18.0\\n')",
+      "else require('node:fs').writeFileSync(process.env.T25_PM_LOG, JSON.stringify(process.argv.slice(2)))",
+    ].join('\n'))
+    const env = { PATH: '/usr/bin:/bin', npm_execpath: pnpmEntry, T25_PM_LOG: log }
+    const invocation = pinnedYarnInvocation('11.7.0', '4.18.0', ['install', '--immutable'], { env })
+    const result = spawnSync(invocation.command, invocation.args, { encoding: 'utf8', env: invocation.env })
+    assert.equal(result.status, 0, result.stderr)
+    assert.deepEqual(JSON.parse(await readFile(log, 'utf8')), ['install', '--immutable'])
+
+    await writeFile(yarnEntry, "process.stdout.write('4.17.0\\n')\n")
+    assert.throws(() => pinnedYarnInvocation('11.7.0', '4.18.0', [], { env }), /requires pinned yarn 4\.18\.0/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('platform build skips Harness dev hooks in clean submodule copies', async () => {
