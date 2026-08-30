@@ -345,19 +345,30 @@ export function verifyHarnessDesktopRuntime(root) {
   return actual
 }
 
+export function runHarnessBuildScripts(root, pnpmVersion, env = process.env) {
+  const commands = [
+    ['--dir', 'upstream/deepseek-harness', 'run', 'build:lib:host'],
+    ['--dir', 'upstream/deepseek-harness', 'run', 'build:lib:client'],
+    ['--dir', 'upstream/deepseek-harness', '--filter', '@deepseek-ai/dsh-web-frontend', 'run', 'build'],
+  ]
+  for (const args of commands) {
+    const invocation = pinnedPnpmInvocation(pnpmVersion, args, { env })
+    const result = spawnSync(invocation.command, invocation.args, {
+      cwd: root,
+      env: invocation.env,
+      stdio: 'inherit',
+    })
+    if (result.error !== undefined) throw result.error
+    if (result.status !== 0) throw new Error(`pinned Harness ${args.join(' ')} exited with ${String(result.status)}`)
+  }
+}
+
 function build(root) {
   assertHarnessSource(root)
   const packageManager = readJson(join(root, 'package.json')).packageManager
   const pnpmVersion = /^pnpm@([^+]+)$/u.exec(packageManager)?.[1]
   if (pnpmVersion === undefined) throw new Error(`unsupported packageManager: ${String(packageManager)}`)
-  const invocation = pinnedPnpmInvocation(pnpmVersion, ['--dir', 'upstream/deepseek-harness', 'run', 'build'])
-  const result = spawnSync(invocation.command, invocation.args, {
-    cwd: root,
-    env: invocation.env,
-    stdio: 'inherit',
-  })
-  if (result.error !== undefined) throw result.error
-  if (result.status !== 0) throw new Error(`pinned Harness build exited with ${String(result.status)}`)
+  runHarnessBuildScripts(root, pnpmVersion)
   writeHarnessBuildReceipt(root)
 }
 
