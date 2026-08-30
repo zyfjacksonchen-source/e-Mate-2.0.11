@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmod, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import test from 'node:test'
@@ -49,6 +49,14 @@ const POINTER_BEFORE = Object.freeze({
 
 async function temporary() {
   return mkdtemp(join(tmpdir(), 'emate-local-flow-test-'))
+}
+
+async function isolatedNodeDistribution(root) {
+  const node = join(root, 'bin', process.platform === 'win32' ? 'node.exe' : 'node')
+  await mkdir(join(root, 'bin'), { recursive: true })
+  await copyFile(process.execPath, node)
+  await chmod(node, 0o755)
+  return node
 }
 
 async function npmCarrierFixture(root, {
@@ -318,9 +326,10 @@ test('candidate rejects a missing Desktop npm collector carrier before creating 
   const entry = join(root, 'pnpm.cjs')
   const runRoot = fileURLToPath(new URL('../dist/local-runs', import.meta.url))
   try {
+    const node = await isolatedNodeDistribution(join(root, 'node-distribution'))
     await writeFile(entry, "process.stdout.write('11.7.0\\n')\n")
     const before = await readdir(runRoot).catch(() => [])
-    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./local-flow.mjs', import.meta.url)), 'candidate'], {
+    const result = spawnSync(node, [fileURLToPath(new URL('./local-flow.mjs', import.meta.url)), 'candidate'], {
       encoding: 'utf8',
       env: { ...process.env, COREPACK_ROOT: '', PATH: '/usr/bin:/bin', npm_execpath: entry },
     })
@@ -950,13 +959,15 @@ test('Desktop npm collector uses one run-scoped shim carried by the active Node'
   const root = await temporary()
   const log = join(root, 'npm-invocations.jsonl')
   try {
-    const fixture = await npmCarrierFixture(root)
+    const distribution = join(root, 'node-distribution')
+    const node = await isolatedNodeDistribution(distribution)
+    const fixture = await npmCarrierFixture(join(root, 'corepack-distribution'))
     const env = { ...process.env, COREPACK_ROOT: fixture.corepackRoot, PATH: '/usr/bin:/bin', T25_NPM_LOG: log }
-    const verified = await verifyNpmCollectorCarrier(root, { env })
+    const verified = await verifyNpmCollectorCarrier(root, { env, execPath: node, platform: 'darwin' })
     assert.equal(verified.version, '11.17.0')
     assert.equal(verified.cli, await realpath(fixture.cli))
 
-    const carrier = await prepareNpmCollectorCarrier(root, { env, platform: 'darwin' })
+    const carrier = await prepareNpmCollectorCarrier(root, { env, execPath: node, platform: 'darwin' })
     const shimRoot = carrier.env.PATH.split(delimiter)[0]
     try {
       const result = spawnSync('npm', NPM_COLLECTOR_ARGS, { cwd: root, encoding: 'utf8', env: carrier.env })
@@ -970,6 +981,10 @@ test('Desktop npm collector uses one run-scoped shim carried by the active Node'
       await carrier.cleanup()
     }
     await assert.rejects(readdir(shimRoot), { code: 'ENOENT' })
+
+    const colocated = await npmCarrierFixture(distribution)
+    const preferred = await verifyNpmCollectorCarrier(root, { env, execPath: node, platform: 'darwin' })
+    assert.equal(preferred.cli, await realpath(colocated.cli))
   } finally {
     await rm(root, { recursive: true, force: true })
   }
