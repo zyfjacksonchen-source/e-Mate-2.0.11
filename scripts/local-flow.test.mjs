@@ -17,16 +17,19 @@ import {
   buildRollbackRequest,
   candidateFailureDetails,
   devChecks,
+  importRollbackOwnerReceipt,
   importWindowsRemoteResult,
   markWindowsUnavailable,
   normalizeFlowArgv,
   prepareNpmCollectorCarrier,
   resolveNpmCollectorCli,
+  rollbackAction,
   runCandidateStages,
   selectWindowsNpmCommand,
   selectCandidatePlatforms,
   validateCandidateSource,
   validatePublicationReceipt,
+  validateRollbackReceipt,
   validateRemoteHostname,
   verifyComputerUseReceipt,
   verifyLocalArtifact,
@@ -251,6 +254,7 @@ function verifiedRun() {
   const macPrimary = { name: 'e-Mate-2.0.15-mac-universal.dmg', bytes: 10, sha256: MAC_SHA }
   const winPrimary = { name: 'e-Mate-2.0.15-win-x64-Setup.exe', bytes: 20, sha256: WIN_SHA }
   return {
+    run_id: RUN_ID,
     version: '2.0.15',
     source_commit: SHA,
     verification: {
@@ -265,6 +269,60 @@ function verifiedRun() {
       },
     },
   }
+}
+
+function publicationFixture(run, requestSha256 = '1'.repeat(64), { dryRun = true } = {}) {
+  const request = buildPublicationRequest(run, { dryRun })
+  const target = { bytes: 2961, sha256: '2'.repeat(64), etag: '2'.repeat(32) }
+  const pointer = (key, cas = 'passed') => ({
+    key,
+    before: POINTER_BEFORE,
+    after: target,
+    cas,
+    authenticated_readback: { status: 'passed', ...target },
+    public_full_byte_readback: { status: 'passed', bytes: target.bytes, sha256: target.sha256 },
+  })
+  return { request, target, receipt: {
+    schema_version: 1,
+    document_type: 'emate.local-cloudflare-owner-receipt',
+    operation: 'publish',
+    status: 'passed',
+    macos_publication_mode: 'unsigned',
+    installer_security: {
+      darwin: { code_signed: false, notarized: false },
+      win32: { code_signed: false, notarized: false },
+    },
+    version: run.version,
+    source_commit: run.source_commit,
+    request_sha256: requestSha256,
+    manifest_admission: {
+      owner: 'zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123',
+      status: 'passed',
+      macos_publication_mode: 'unsigned',
+      schema_version: 2,
+      document_type: 'emate.desktop-release-manifest',
+      release_status: 'admitted',
+      signing_context: 'e-mate-desktop-release-manifest-v2\0',
+      signature: {
+        algorithm: 'ed25519', key_id: 'desktop-release-key',
+        key_source: 'existing-base-profile_signing_keys', verification: 'passed',
+      },
+      signed_manifest: { file: 'desktop-release-signed.json', bytes: target.bytes, sha256: target.sha256 },
+      publication_plan: { file: 'cloudflare-publication-plan.json', sha256: '4'.repeat(64), status: 'ready-for-cloudflare-plugin' },
+      admission_receipt: { file: 'cloudflare-plugin-handoff.json', sha256: '5'.repeat(64), status: 'ready-for-cloudflare-plugin' },
+    },
+    immutable_objects: request.immutable_objects.map(object => ({
+      key: object.key, bytes: object.bytes, sha256: object.sha256,
+      write: 'created', authenticated_readback: 'passed', public_readback: 'passed',
+    })),
+    pointers: {
+      signed: pointer('desktop/signed/latest.json'),
+      legacy: pointer('desktop/latest.json'),
+      manual: pointer('desktop/manual/v2.0.15/latest.json'),
+    },
+    activation_order: ['signed', 'legacy', 'manual'],
+    deleted_objects: [],
+  } }
 }
 
 function macOnlyVerifiedRun() {
@@ -561,6 +619,39 @@ test('CLI normalizes exactly one leading pnpm delimiter before parsing', async (
   }
 })
 
+test('rollback accepts only a run-scoped owner receipt import or dry run', () => {
+  const script = fileURLToPath(new URL('./local-flow.mjs', import.meta.url))
+  const missingRun = '20991231T235959Z-aaaaaaaaaaaa-abcdef'
+  const accepted = spawnSync(process.execPath, [
+    script, 'rollback', '--run', missingRun, '--owner-receipt', 'owner.json',
+  ], { encoding: 'utf8' })
+  assert.equal(accepted.status, 1)
+  assert.doesNotMatch(accepted.stderr, /rollback requires/u)
+  assert.match(accepted.stderr, /ENOENT|no such file/iu)
+  const rejected = spawnSync(process.execPath, [
+    script, 'rollback', '--run', missingRun, '--dry-run', '--owner-receipt', 'owner.json',
+  ], { encoding: 'utf8' })
+  assert.equal(rejected.status, 1)
+  assert.match(rejected.stderr, /accepts only --dry-run or --owner-receipt/u)
+})
+
+test('rollback state is monotonic and only the exact awaiting run accepts an owner receipt', () => {
+  assert.equal(rollbackAction({}, {}), 'emit')
+  assert.equal(rollbackAction({}, { dryRun: true }), 'dry-run')
+  assert.equal(rollbackAction({ rollback: { status: 'dry-run' } }, {}), 'emit')
+  assert.throws(() => rollbackAction({ rollback: { status: 'unknown' } }, {}), /run state is invalid/u)
+  assert.throws(() => rollbackAction({}, { ownerReceipt: 'owner.json' }), /exact awaiting request state/u)
+  const awaiting = { rollback: { status: 'awaiting-existing-owner' } }
+  assert.equal(rollbackAction(awaiting, {}), 'resume-awaiting')
+  assert.equal(rollbackAction(awaiting, { ownerReceipt: 'owner.json' }), 'import')
+  assert.throws(() => rollbackAction(awaiting, { dryRun: true }), /cannot return to dry-run/u)
+  assert.throws(() => rollbackAction({ rollback: { status: 'passed' } }, {}), /already passed/u)
+  assert.throws(() => rollbackAction({ rollback: { status: 'passed' } }, { dryRun: true }), /already passed/u)
+  assert.throws(() => rollbackAction(
+    { rollback: { status: 'passed' } }, { ownerReceipt: 'owner.json' },
+  ), /already passed/u)
+})
+
 test('direct-run guard canonicalizes a symlinked entry while imports stay inert', { skip: process.platform === 'win32' }, async () => {
   const root = await temporary()
   try {
@@ -742,6 +833,22 @@ test('publish keeps installers immutable and makes all three release surfaces or
   assert.deepEqual(rollback.pointer_compare_and_swap.map(item => item.key), [
     'desktop/manual/v2.0.15/latest.json', 'desktop/latest.json', 'desktop/signed/latest.json',
   ])
+  assert.deepEqual(rollback.owner_receipt, {
+    schema_version: 1,
+    document_type: 'emate.local-cloudflare-owner-receipt',
+    operation: 'rollback',
+    status: 'passed',
+    authority: 'existing-desktop-manifest-admission-signing-owner+codex-cloudflare-plugin',
+    run_id: RUN_ID,
+    version: '2.0.15',
+    source_commit: SHA,
+    publication_request_sha256: 'from-publication/cloudflare-owner-request.json',
+    publication_receipt_sha256: 'from-publication/cloudflare-owner-receipt.json',
+    rollback_request_sha256: 'sha256-of-this-exact-request',
+    pointer_receipts: 'ordered-before-after-cas-authenticated-and-public-readback',
+    immutable_objects: 'retained',
+    deleted_objects: [],
+  })
   assert.deepEqual(rollback.immutable_objects.map(item => item.action), ['retain', 'retain', 'retain', 'retain'])
   assert.equal(rollback.immutable_objects.some(item => item.key === 'desktop/manual/v2.0.15/latest.json'), false)
   assert.deepEqual(rollback.delete_objects, [])
@@ -804,57 +911,7 @@ test('macOS-only waiver publishes immutable bytes without a schema-2 manifest or
 test('publication receipt requires exact ordered CAS completion and per-pointer full readbacks', () => {
   const run = verifiedRun()
   const requestSha256 = '1'.repeat(64)
-  const request = buildPublicationRequest(run, { dryRun: true })
-  const target = { bytes: 2961, sha256: '2'.repeat(64), etag: '2'.repeat(32) }
-  const pointer = (key, cas = 'passed') => ({
-    key,
-    before: POINTER_BEFORE,
-    after: target,
-    cas,
-    authenticated_readback: { status: 'passed', ...target },
-    public_full_byte_readback: { status: 'passed', bytes: target.bytes, sha256: target.sha256 },
-  })
-  const receipt = {
-    schema_version: 1,
-    document_type: 'emate.local-cloudflare-owner-receipt',
-    operation: 'publish',
-    status: 'passed',
-    macos_publication_mode: 'unsigned',
-    installer_security: {
-      darwin: { code_signed: false, notarized: false },
-      win32: { code_signed: false, notarized: false },
-    },
-    version: '2.0.15',
-    source_commit: SHA,
-    request_sha256: requestSha256,
-    manifest_admission: {
-      owner: 'zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123',
-      status: 'passed',
-      macos_publication_mode: 'unsigned',
-      schema_version: 2,
-      document_type: 'emate.desktop-release-manifest',
-      release_status: 'admitted',
-      signing_context: 'e-mate-desktop-release-manifest-v2\0',
-      signature: {
-        algorithm: 'ed25519', key_id: 'desktop-release-key',
-        key_source: 'existing-base-profile_signing_keys', verification: 'passed',
-      },
-      signed_manifest: { file: 'desktop-release-signed.json', bytes: target.bytes, sha256: target.sha256 },
-      publication_plan: { file: 'cloudflare-publication-plan.json', sha256: '4'.repeat(64), status: 'ready-for-cloudflare-plugin' },
-      admission_receipt: { file: 'cloudflare-plugin-handoff.json', sha256: '5'.repeat(64), status: 'ready-for-cloudflare-plugin' },
-    },
-    immutable_objects: request.immutable_objects.map(object => ({
-      key: object.key, bytes: object.bytes, sha256: object.sha256,
-      write: 'created', authenticated_readback: 'passed', public_readback: 'passed',
-    })),
-    pointers: {
-      signed: pointer('desktop/signed/latest.json'),
-      legacy: pointer('desktop/latest.json'),
-      manual: pointer('desktop/manual/v2.0.15/latest.json'),
-    },
-    activation_order: ['signed', 'legacy', 'manual'],
-    deleted_objects: [],
-  }
+  const { target, receipt } = publicationFixture(run, requestSha256)
   assert.equal(validatePublicationReceipt(receipt, run, requestSha256), receipt)
   assert.throws(() => validatePublicationReceipt({ ...receipt, immutable_objects: receipt.immutable_objects.slice(1) }, run, requestSha256), /object receipt set/u)
   assert.throws(() => validatePublicationReceipt({
@@ -938,6 +995,140 @@ test('publication receipt requires exact ordered CAS completion and per-pointer 
     assert.equal(item.public_full_byte_readback, 'required')
     assert.deepEqual(item.expected_current, target)
     assert.deepEqual(item.restore, POINTER_BEFORE)
+  }
+})
+
+test('rollback receipt is owner-bound, non-transferable, ordered, and closes the exact run', async () => {
+  const run = verifiedRun()
+  const publicationRequestSha256 = '1'.repeat(64)
+  const { receipt: publicationReceipt } = publicationFixture(run, publicationRequestSha256)
+  const publicationReceiptSha256 = '6'.repeat(64)
+  const rollbackRequestSha256 = '7'.repeat(64)
+  const rollbackRequest = buildRollbackRequest(run, publicationReceipt, {
+    publicationRequestSha256,
+    publicationReceiptSha256,
+  })
+  const rollbackPointer = (name, cas = 'passed') => {
+    const request = rollbackRequest.pointer_compare_and_swap.find(item => item.key === publicationReceipt.pointers[name].key)
+    return {
+      key: request.key,
+      before: request.expected_current,
+      after: request.restore,
+      cas,
+      authenticated_readback: { status: 'passed', ...request.restore },
+      public_full_byte_readback: { status: 'passed', bytes: request.restore.bytes, sha256: request.restore.sha256 },
+    }
+  }
+  const receipt = {
+    schema_version: 1,
+    document_type: 'emate.local-cloudflare-owner-receipt',
+    operation: 'rollback',
+    status: 'passed',
+    authority: 'existing-desktop-manifest-admission-signing-owner+codex-cloudflare-plugin',
+    run_id: RUN_ID,
+    version: '2.0.15',
+    source_commit: SHA,
+    publication_request_sha256: publicationRequestSha256,
+    publication_receipt_sha256: publicationReceiptSha256,
+    rollback_request_sha256: rollbackRequestSha256,
+    rollback_order: ['manual', 'legacy', 'signed'],
+    pointers: ['manual', 'legacy', 'signed'].map(name => rollbackPointer(name)),
+    immutable_objects: rollbackRequest.immutable_objects.map(object => ({ key: object.key, action: 'retained' })),
+    deleted_objects: [],
+  }
+  const identity = {
+    publicationRequestSha256,
+    publicationReceiptSha256,
+    rollbackRequestSha256,
+    publicationReceipt,
+    rollbackRequest,
+  }
+  assert.equal(validateRollbackReceipt(receipt, run, identity), receipt)
+
+  for (const invalid of [
+    { ...receipt, authority: 'another-owner' },
+    { ...receipt, run_id: '20260830T000000Z-aaaaaaaaaaaa-fedcba' },
+    { ...receipt, source_commit: 'd'.repeat(40) },
+    { ...receipt, version: '2.0.16' },
+    { ...receipt, publication_request_sha256: '8'.repeat(64) },
+    { ...receipt, publication_receipt_sha256: '8'.repeat(64) },
+    { ...receipt, rollback_request_sha256: '8'.repeat(64) },
+    { ...receipt, rollback_order: ['signed', 'legacy', 'manual'] },
+    { ...receipt, immutable_objects: receipt.immutable_objects.slice(1) },
+  ]) assert.throws(() => validateRollbackReceipt(invalid, run, identity), /rollback owner receipt/u)
+
+  assert.throws(() => validateRollbackReceipt({
+    ...receipt,
+    pointers: receipt.pointers.map((pointer, index) => index === 0 ? { ...pointer, before: POINTER_BEFORE } : pointer),
+  }, run, identity), /manual rollback pointer/u)
+  assert.throws(() => validateRollbackReceipt({
+    ...receipt,
+    pointers: receipt.pointers.map((pointer, index) => index === 1 ? {
+      ...pointer,
+      public_full_byte_readback: { ...pointer.public_full_byte_readback, sha256: '8'.repeat(64) },
+    } : pointer),
+  }, run, identity), /legacy rollback pointer/u)
+
+  const resumed = structuredClone(receipt)
+  resumed.pointers[0].cas = 'already-exact'
+  resumed.pointers[1].cas = 'already-exact'
+  assert.equal(validateRollbackReceipt(resumed, run, identity), resumed)
+  const outOfOrder = structuredClone(receipt)
+  outOfOrder.pointers[1].cas = 'already-exact'
+  assert.throws(() => validateRollbackReceipt(outOfOrder, run, identity), /ordered rollback recovery/u)
+
+  const root = await temporary()
+  try {
+    await mkdir(join(root, 'publication'), { recursive: true })
+    await mkdir(join(root, 'rollback'), { recursive: true })
+    const appliedPublicationRequest = buildPublicationRequest(run)
+    const publicationRequestBytes = Buffer.from(`${JSON.stringify(appliedPublicationRequest, null, 2)}\n`)
+    const actualPublicationRequestSha256 = createHash('sha256').update(publicationRequestBytes).digest('hex')
+    const appliedPublicationReceipt = {
+      ...publicationReceipt,
+      request_sha256: actualPublicationRequestSha256,
+    }
+    const publicationReceiptBytes = Buffer.from(`${JSON.stringify(appliedPublicationReceipt, null, 2)}\n`)
+    const actualPublicationReceiptSha256 = createHash('sha256').update(publicationReceiptBytes).digest('hex')
+    const appliedRollbackRequest = buildRollbackRequest(run, appliedPublicationReceipt, {
+      publicationRequestSha256: actualPublicationRequestSha256,
+      publicationReceiptSha256: actualPublicationReceiptSha256,
+    })
+    const rollbackRequestBytes = Buffer.from(`${JSON.stringify(appliedRollbackRequest, null, 2)}\n`)
+    const actualRollbackRequestSha256 = createHash('sha256').update(rollbackRequestBytes).digest('hex')
+    await writeFile(join(root, 'publication', 'cloudflare-owner-request.json'), publicationRequestBytes)
+    await writeFile(join(root, 'publication', 'cloudflare-owner-receipt.json'), publicationReceiptBytes)
+    await writeFile(join(root, 'rollback', 'cloudflare-owner-request.json'), rollbackRequestBytes)
+    const externalReceipt = {
+      ...receipt,
+      publication_request_sha256: actualPublicationRequestSha256,
+      publication_receipt_sha256: actualPublicationReceiptSha256,
+      rollback_request_sha256: actualRollbackRequestSha256,
+    }
+    const externalPath = join(root, 'owner-rollback-receipt.json')
+    await writeFile(externalPath, `${JSON.stringify(externalReceipt, null, 2)}\n`)
+    run.rollback = {
+      status: 'awaiting-existing-owner',
+      owner: receipt.authority,
+      delete_objects: 0,
+      request: 'rollback/cloudflare-owner-request.json',
+      request_sha256: actualRollbackRequestSha256,
+      publication_request_sha256: actualPublicationRequestSha256,
+      publication_receipt_sha256: actualPublicationReceiptSha256,
+    }
+    const terminal = await importRollbackOwnerReceipt(root, run, externalPath)
+    assert.equal(terminal.status, 'passed')
+    assert.equal(terminal.request_sha256, actualRollbackRequestSha256)
+    assert.equal(terminal.publication_receipt_sha256, actualPublicationReceiptSha256)
+    assert.deepEqual(terminal.rollback_order, ['manual', 'legacy', 'signed'])
+    assert.deepEqual(JSON.parse(await readFile(join(root, terminal.receipt), 'utf8')), externalReceipt)
+
+    const wrongRun = structuredClone(run)
+    wrongRun.rollback.request_sha256 = '8'.repeat(64)
+    await assert.rejects(importRollbackOwnerReceipt(root, wrongRun, externalPath), /exact awaiting request state/u)
+    await assert.rejects(importRollbackOwnerReceipt(root, run, join(root, 'missing.json')), { code: 'ENOENT' })
+  } finally {
+    await rm(root, { recursive: true, force: true })
   }
 })
 
