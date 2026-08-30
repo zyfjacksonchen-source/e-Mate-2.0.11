@@ -1199,10 +1199,13 @@ function addCheck(checks, command, args) {
 
 export function devChecks(plan, paths) {
   const checks = []
+  const tests = [...new Set(paths.filter(path => path.startsWith('scripts/') && path.endsWith('.test.mjs')))].sort()
   const localFlowOnly = paths.length > 0 && paths.every(path => [
     'package.json', 'scripts/local-flow.mjs', 'scripts/local-flow.test.mjs', 'docs/development-log.md',
   ].includes(path))
-  if (localFlowOnly || paths.some(path => path.startsWith('scripts/local-flow'))) {
+  if (tests.length > 0) addCheck(checks, 'node', ['--test', ...tests])
+  if ((localFlowOnly || paths.some(path => path.startsWith('scripts/local-flow')))
+    && !tests.includes('scripts/local-flow.test.mjs')) {
     addCheck(checks, 'node', ['--test', 'scripts/local-flow.test.mjs'])
   }
   if (localFlowOnly) {
@@ -1214,9 +1217,7 @@ export function devChecks(plan, paths) {
   } else if (plan.lane === 'enterprise-only') {
     addCheck(checks, 'pnpm', ['run', 'enterprise:test'])
   } else if (plan.lane === 'verification-only') {
-    const tests = paths.filter(path => path.startsWith('scripts/') && path.endsWith('.test.mjs'))
-    if (tests.length > 0) addCheck(checks, 'node', ['--test', ...tests])
-    else addCheck(checks, 'node', ['scripts/change-impact.mjs', '--check-contract'])
+    if (tests.length === 0) addCheck(checks, 'node', ['scripts/change-impact.mjs', '--check-contract'])
   } else {
     addCheck(checks, 'pnpm', ['run', 'test:fast'])
   }
