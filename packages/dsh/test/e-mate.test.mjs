@@ -511,7 +511,7 @@ test('managed profile installation is idempotent', () => {
     assert.doesNotMatch(patch, /emate-(?:office-ocr|browser-computer-use|memory|dream|learning)/)
     assert.match(patch, /id: emate-model-policy[\s\S]*\.\/plugins\/model-policy\.js[\s\S]*inject: \[apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity\]/)
     assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, emateModelPolicy, emateIdentity\]/)
-    assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*inject: \[tools, jobs, attachments, sandboxPolicy, subagents, emateIdentity, emateModelPolicy, emateCapabilities\][\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
+    assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*inject: \[tools, jobs, attachments, sandboxPolicy, agents, subagents, emateIdentity, emateModelPolicy, emateCapabilities\][\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
     assert.match(patch, /id: emate-legacy-migration[\s\S]*\.\/plugins\/legacy-migration\.js[\s\S]*inject: \[sessionPersistence, webServer\]/)
     assert.match(patch, /id: emate-schedule-import[\s\S]*\.\/plugins\/schedule-import\.js[\s\S]*inject: \[tools\]/)
     assert.ok(readFileSync(join(first.profile, 'plugins', 'agent-operations.js')).byteLength > 0)
@@ -1383,8 +1383,10 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const capabilities = []
     const cleanupWarnings = []
     const policyModels = []
+    const liveAgents = new Map()
     let sandboxMode = 'read-only'
     let preStep
+    let subagentEnd
     let modelPolicyGate
     let modelPolicyGateEntered
     const modelPolicy = { assertModel: async model => {
@@ -1584,6 +1586,11 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
           ? modelPolicy
           : name === 'subagents'
             ? subagents
+            : name === 'agents'
+              ? {
+                  get: id => liveAgents.get(String(id)),
+                  isOwnedBy: (id, parent) => liveAgents.get(String(id))?.session?.header?.parentSession === parent.id,
+                }
             : name === 'emateCapabilities'
               ? { register: definition => { capabilities.push(definition); return () => {} } }
               : name === 'userQuestions' && imageReviewAsk !== undefined
@@ -1595,8 +1602,9 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         return cleanup
       },
       on(name, listener) {
-        assert.equal(name, 'agent/pre-step')
-        preStep = listener
+        if (name === 'agent/pre-step') preStep = listener
+        else if (name === 'subagent/end') subagentEnd = listener
+        else assert.fail(`unexpected image-generation listener ${name}`)
         return () => {}
       },
     }
@@ -1607,6 +1615,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.deepEqual([...tools.keys()], ['imagegen', 'image_pack'])
     assert.deepEqual(controllers, ['emate-image'])
     assert.equal(typeof preStep, 'function')
+    assert.equal(typeof subagentEnd, 'function')
     assert.equal(capabilities.length, 1)
     assert.deepEqual(await capabilities[0].status(), {
       state: 'ready',
@@ -1642,6 +1651,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       },
     }
     context.agents.register(agent)
+    liveAgents.set(agent.id, agent)
     let callIndex = 0
     const execution = () => ({
       agent,
@@ -2840,6 +2850,107 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       description: tool.description,
       parameters: tool.parameters,
     }))), toolHeaderContract)
+
+    const providerRequestsBeforeProjection = requests.length
+    const imageLeafRunsBeforeProjection = childRuns.length
+    const outerChildren = []
+    const outerChild = (id, image, ordinal, includeReceipt = true) => {
+      const receipt = {
+        ...structuredClone(generated.receipt),
+        revision: 2,
+        call_id: `outer-image-call-${ordinal}`,
+        parent_session_id: id,
+        child_session_id: `outer-image-leaf-${ordinal}`,
+        job_id: `emate-image-outer-${ordinal}`,
+        provider_request_id: `image-response-outer-${ordinal}`,
+        client_request_id: `image-client-outer-${ordinal}`,
+        output: image,
+        content: [{ type: 'image', attachment: image }],
+      }
+      const child = {
+        id,
+        session: {
+          header: { id, parentSession: agent.id, cwd: temporary },
+          events: includeReceipt
+            ? [{ type: 'emate/image-output', data: receipt }]
+            : [{
+                type: 'assistant/message',
+                data: { message: { content: [{ type: 'text', text: `pretend image ${image.attachmentId}` }] } },
+              }],
+        },
+      }
+      liveAgents.set(id, child)
+      outerChildren.push(child)
+      return child
+    }
+    const projectionInfo = (child, stopReason = 'completed') => ({
+      runId: `outer-run-${child.id}`,
+      provider: 'spawn',
+      id: child.id,
+      local: true,
+      stopReason,
+    })
+    const first = outerChild('outer-image-a', generated.images[0].image, 1)
+    const secondCompleted = outerChild('outer-image-b', implicitEdit.images[0].image, 2)
+    const third = outerChild('outer-image-c', confirmedEdit.images[0].image, 3)
+    outerChild('outer-image-hanging', edited.images[0].image, 4)
+    subagentEnd(projectionInfo(third))
+    subagentEnd(projectionInfo(first))
+    subagentEnd(projectionInfo(secondCompleted))
+    const projectedReceipts = events => events.filter(event => event.type === 'emate/image-output'
+      && event.data?.call_id?.startsWith('subagent-image:'))
+    assert.deepEqual(
+      projectedReceipts(sessionEvents).map(event => event.data.output.attachmentId),
+      [confirmedEdit.images[0].image, generated.images[0].image, implicitEdit.images[0].image]
+        .map(image => image.attachmentId),
+    )
+    subagentEnd(projectionInfo(first))
+    subagentEnd(projectionInfo(first))
+    assert.equal(projectedReceipts(sessionEvents).length, 3)
+
+    const rejectedReviewReceipt = sessionEvents.find(event => event.data?.call_id === rejectedExecution.callId
+      && event.data?.revision === 2)?.data
+    assert.equal(rejectedReviewReceipt?.status, 'needs-review')
+    const rejected = outerChild('outer-image-rejected', fused.images[0].image, 5, false)
+    rejected.session.events = [rejectedReviewReceipt, rejectedReceipt].map(receipt => ({
+      type: 'emate/image-output',
+      data: {
+        ...structuredClone(receipt),
+        call_id: 'outer-image-call-rejected',
+        parent_session_id: rejected.id,
+        child_session_id: 'outer-image-leaf-rejected',
+      },
+    }))
+    subagentEnd(projectionInfo(rejected, 'error'))
+    assert.equal(projectedReceipts(sessionEvents).length, 3)
+
+    const failed = outerChild('outer-image-failed', fused.images[0].image, 6, false)
+    subagentEnd(projectionInfo(failed, 'error'))
+    assert.equal(projectedReceipts(sessionEvents).length, 3)
+    const retry = outerChild('outer-image-retry', fused.images[0].image, 7)
+    subagentEnd(projectionInfo(retry))
+    const cancelledAfterSuccess = outerChild('outer-image-cancelled', edited.images[0].image, 8)
+    subagentEnd(projectionInfo(cancelledAfterSuccess, 'aborted'))
+    assert.equal(projectedReceipts(sessionEvents).length, 5)
+    assert.equal(requests.length, providerRequestsBeforeProjection)
+    assert.equal(childRuns.length, imageLeafRunsBeforeProjection)
+
+    const reopenedEvents = structuredClone(sessionEvents)
+    const reopenedParent = {
+      ...agent,
+      session: {
+        ...agent.session,
+        events: reopenedEvents,
+        append(type, data, options) {
+          reopenedEvents.push({ type, data, ...options, seq: reopenedEvents.length, time: Date.now() })
+        },
+      },
+    }
+    liveAgents.set(agent.id, reopenedParent)
+    subagentEnd(projectionInfo(first))
+    assert.equal(projectedReceipts(reopenedEvents).length, 5)
+    liveAgents.set(agent.id, agent)
+    for (const child of outerChildren) liveAgents.delete(child.id)
 
     const serviceActiveParent = nativeParent('image-service-active-parent')
     const serviceWaitingParent = nativeParent('image-service-waiting-parent')
