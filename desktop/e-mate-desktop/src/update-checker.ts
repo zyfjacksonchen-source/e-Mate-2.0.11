@@ -104,10 +104,12 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/u
 const SOURCE_COMMIT_PATTERN = /^[0-9a-f]{40}$/u
 const BASE_CONTRACT_ID_PATTERN = /^e-mate-desktop-profile-v[1-9][0-9]*-dsh-[0-9a-f]{12}$/u
 const RUN_ID_PATTERN = /^[1-9][0-9]*$/u
+const LOCAL_FLOW_RUN_ID_PATTERN = /^\d{8}T\d{6}Z-[0-9a-f]{12}-[0-9a-f]{6}$/u
 const RELEASE_TARGETS = ['darwin-arm64', 'darwin-x64', 'win32-x64'] as const
 const MANIFEST_SIGNATURE_CONTEXTS = {
   2: Buffer.from('e-mate-desktop-release-manifest-v2\0', 'utf8'),
   3: Buffer.from('e-mate-desktop-release-manifest-v3\0', 'utf8'),
+  4: Buffer.from('e-mate-desktop-release-manifest-v4\0', 'utf8'),
 } as const
 
 const SEMVER_PATTERN =
@@ -332,7 +334,7 @@ function parseAdmittedDesktopReleaseManifest(
   trustedKeys: readonly DesktopReleaseSigningKey[],
 ): ManifestParseResult {
   if (!isRecord(value) || !isManifestSignature(value.signature)
-    || (value.schema_version !== 2 && value.schema_version !== 3)) {
+    || (value.schema_version !== 2 && value.schema_version !== 3 && value.schema_version !== 4)) {
     return failedCheck('check-signature-invalid')
   }
   const { signature, ...unsigned } = value
@@ -355,13 +357,17 @@ function parseAdmittedDesktopReleaseManifest(
 }
 
 function parseUnsignedAdmittedDesktopReleaseManifest(value: unknown): ManifestParseResult {
-  if (!isRecord(value) || (value.schema_version !== 2 && value.schema_version !== 3)) {
+  if (!isRecord(value)
+    || (value.schema_version !== 2 && value.schema_version !== 3 && value.schema_version !== 4)) {
     return failedCheck('check-manifest-invalid')
   }
+  const provenanceKey = value.schema_version === 4
+    ? 'local_publication_provenance'
+    : 'github_artifact_provenance'
   const keys = [
     'schema_version', 'document_type', 'release_status', 'version', 'source_commit', 'base_contract_id',
-    'schedule_protocol_floor', 'profile_component_aggregate', 'github_artifact_provenance', 'artifacts',
-    ...(value.schema_version === 3 ? ['update_policy'] : []),
+    'schedule_protocol_floor', 'profile_component_aggregate', provenanceKey, 'artifacts',
+    ...(value.schema_version === 2 ? [] : ['update_policy']),
   ]
   if (!hasExactKeys(value, keys)) {
     return failedCheck('artifacts' in value ? 'check-manifest-invalid' : 'check-artifact-invalid')
@@ -375,20 +381,30 @@ function parseUnsignedAdmittedDesktopReleaseManifest(value: unknown): ManifestPa
   }
   const version = parseCanonicalStableVersion(value.version)
   if (version === null) return failedCheck('check-manifest-invalid')
-  const policy = value.schema_version === 3 ? parseUpdatePolicy(value.update_policy, version) : undefined
-  if (value.schema_version === 3 && policy === undefined) {
+  const policy = value.schema_version === 2 ? undefined : parseUpdatePolicy(value.update_policy, version)
+  if (value.schema_version !== 2 && policy === undefined) {
     return failedCheck('check-manifest-invalid')
   }
-  if (!isProfileComponentAggregateSummary(value.profile_component_aggregate)
-    || !isGithubArtifactProvenance(value.github_artifact_provenance, value.source_commit as string)) {
+  if (!isProfileComponentAggregateSummary(value.profile_component_aggregate)) {
     return failedCheck('check-manifest-invalid')
   }
   if (!hasExactKeys(value.artifacts, ['darwin', 'win32'])) {
     return failedCheck('check-artifact-invalid')
   }
-  const darwin = parseManifestArtifact('darwin', version.version, value.source_commit as string, value.artifacts.darwin)
-  const win32 = parseManifestArtifact('win32', version.version, value.source_commit as string, value.artifacts.win32)
+  const local = value.schema_version === 4
+  const darwin = parseManifestArtifact('darwin', version.version, value.source_commit as string, value.artifacts.darwin, local)
+  const win32 = parseManifestArtifact('win32', version.version, value.source_commit as string, value.artifacts.win32, local)
   if (darwin === null || win32 === null) return failedCheck('check-artifact-invalid')
+  if (local ? !isLocalPublicationProvenance(value.local_publication_provenance, {
+    version: version.version,
+    sourceCommit: value.source_commit as string,
+    baseContractId: value.base_contract_id,
+    profileComponentAggregateSha256:
+      (value.profile_component_aggregate as Record<string, unknown>).aggregate_sha256 as string,
+    artifacts: { darwin, win32 },
+  }) : !isGithubArtifactProvenance(value.github_artifact_provenance, value.source_commit as string)) {
+    return failedCheck('check-manifest-invalid')
+  }
   return {
     status: 'ok',
     value: {
@@ -430,7 +446,7 @@ function verifyManifestSignature(
   manifest: Record<string, unknown>,
   signature: { readonly algorithm: 'ed25519', readonly key_id: string, readonly value: string },
   trustedKeys: readonly DesktopReleaseSigningKey[],
-  schemaVersion: 2 | 3,
+  schemaVersion: 2 | 3 | 4,
 ): boolean {
   const key = trustedKeys.find(candidate => candidate.id === signature.key_id && candidate.algorithm === 'ed25519')
   const signatureBytes = strictBase64(signature.value)
@@ -459,14 +475,51 @@ function parseManifestArtifact(
   version: string,
   sourceCommit: string,
   value: unknown,
+  local: boolean = false,
 ): DesktopReleaseArtifact | null {
-  if (!hasExactKeys(value, ['url', 'bytes', 'sha256', 'build_source_commit', 'build_run_id'])
-    || value.build_source_commit !== sourceCommit
-    || typeof value.build_run_id !== 'string' || !RUN_ID_PATTERN.test(value.build_run_id)) return null
+  if (local ? !hasExactKeys(value, ['url', 'bytes', 'sha256'])
+    : !hasExactKeys(value, ['url', 'bytes', 'sha256', 'build_source_commit', 'build_run_id'])
+      || value.build_source_commit !== sourceCommit
+      || typeof value.build_run_id !== 'string' || !RUN_ID_PATTERN.test(value.build_run_id)) return null
   const artifact = validateDesktopReleaseArtifact(platform, version, value)
   if (artifact === null) return null
   const releasePrefix = `${DESKTOP_RELEASE_PATH_PREFIX}${encodeURIComponent(version)}/`
   return new URL(artifact.url).pathname.slice(releasePrefix.length).split('/')[0] === sourceCommit ? artifact : null
+}
+
+function isLocalPublicationProvenance(
+  value: unknown,
+  expected: {
+    readonly version: string
+    readonly sourceCommit: string
+    readonly baseContractId: string
+    readonly profileComponentAggregateSha256: string
+    readonly artifacts: Record<DesktopReleasePlatform, DesktopReleaseArtifact>
+  },
+): boolean {
+  if (!hasExactKeys(value, [
+    'schema_version', 'document_type', 'run_id', 'publication_request_sha256',
+    'manifest_input_ledger_sha256', 'version', 'source_commit', 'base_contract_id',
+    'profile_component_aggregate_sha256', 'artifacts',
+  ]) || !hasExactKeys(value.artifacts, ['darwin', 'win32'])) return false
+  const artifacts = value.artifacts
+  return value.schema_version === 1
+    && value.document_type === 'emate.local-publication-provenance'
+    && typeof value.run_id === 'string' && LOCAL_FLOW_RUN_ID_PATTERN.test(value.run_id)
+    && typeof value.publication_request_sha256 === 'string' && SHA256_PATTERN.test(value.publication_request_sha256)
+    && typeof value.manifest_input_ledger_sha256 === 'string' && SHA256_PATTERN.test(value.manifest_input_ledger_sha256)
+    && value.version === expected.version
+    && value.source_commit === expected.sourceCommit
+    && value.base_contract_id === expected.baseContractId
+    && value.profile_component_aggregate_sha256 === expected.profileComponentAggregateSha256
+    && (['darwin', 'win32'] as const).every(platform => isBoundLocalPublicationArtifact(
+      artifacts[platform], expected.artifacts[platform],
+    ))
+}
+
+function isBoundLocalPublicationArtifact(value: unknown, expected: DesktopReleaseArtifact): boolean {
+  return hasExactKeys(value, ['url', 'bytes', 'sha256'])
+    && value.url === expected.url && value.bytes === expected.bytes && value.sha256 === expected.sha256
 }
 
 function isProfileComponentAggregateSummary(value: unknown): boolean {
