@@ -13,6 +13,8 @@ import {
   assertCleanArtifactBytes,
   blockWindowsRemote,
   blockedWindowsState,
+  buildActivationRequest,
+  buildCompatibilityAttestationRequest,
   buildPublicationRequest,
   buildReleaseTransactionPlan,
   buildRollbackRequest,
@@ -24,6 +26,7 @@ import {
   importWindowsRemoteResult,
   markWindowsUnavailable,
   normalizeFlowArgv,
+  publicationAction,
   prepareNpmCollectorCarrier,
   resolveNpmCollectorCli,
   rollbackAction,
@@ -31,6 +34,7 @@ import {
   selectWindowsNpmCommand,
   selectCandidatePlatforms,
   validateCandidateSource,
+  validateImmutablePublicationReceipt,
   validatePublicationReceipt,
   validateRollbackReceipt,
   validateRemoteHostname,
@@ -476,6 +480,74 @@ function publicationFixture(run, requestSha256 = '1'.repeat(64), { dryRun = true
   } }
 }
 
+function immutablePublicationFixture(run, requestSha256 = '1'.repeat(64), { dryRun = true } = {}) {
+  bindTransaction(run)
+  const request = buildPublicationRequest(run, { dryRun })
+  return { request, receipt: {
+    schema_version: 1,
+    document_type: 'emate.local-cloudflare-owner-receipt',
+    operation: 'publish-installers-immutable',
+    status: 'passed',
+    authority: 'codex-cloudflare-plugin',
+    release_scope: 'full-installers-immutable-only',
+    macos_publication_mode: 'unsigned',
+    installer_security: {
+      darwin: { code_signed: false, notarized: false },
+      win32: { code_signed: false, notarized: false },
+    },
+    distribution_origin: R2_ORIGIN,
+    run_id: run.run_id,
+    version: run.version,
+    source_commit: run.source_commit,
+    transaction_mode: run.release_transaction.mode,
+    request_sha256: requestSha256,
+    immutable_objects: request.immutable_objects.map(object => ({
+      platform: object.platform,
+      key: object.key,
+      url: object.url,
+      bytes: object.bytes,
+      sha256: object.sha256,
+      write: 'created',
+      authenticated_readback: { status: 'passed', bytes: object.bytes, sha256: object.sha256 },
+      public_full_byte_readback: {
+        status: 'passed', url: object.url, bytes: object.bytes, sha256: object.sha256,
+      },
+    })),
+    deleted_objects: [],
+  } }
+}
+
+function activationStageEvidence(run) {
+  return {
+    immutable_publication: {
+      status: 'passed',
+      request_sha256: '1'.repeat(64),
+      receipt_sha256: '2'.repeat(64),
+    },
+    compatibility_attestation: {
+      status: 'passed',
+      request_sha256: '3'.repeat(64),
+      repository: 'zyfjacksonchen-source/e-Mate-2.0.11',
+      workflow: '.github/workflows/desktop-compatibility-attestation.yml',
+      ref: 'refs/heads/main',
+      head_sha: run.source_commit,
+      run_id: '123',
+      run_attempt: 1,
+      artifact: {
+        role: 'desktop_candidate',
+        name: `e-mate-desktop-release-${run.source_commit}`,
+        artifact_id: '456',
+        digest: `sha256:${'4'.repeat(64)}`,
+        exact_files: [
+          'desktop-candidate.json',
+          `e-Mate-${run.version}-mac-universal.dmg`,
+          `e-Mate-${run.version}-win-x64-Setup.exe`,
+        ],
+      },
+    },
+  }
+}
+
 function macOnlyVerifiedRun() {
   const macPrimary = { name: 'e-Mate-2.0.15-mac-universal.dmg', bytes: 10, sha256: MAC_SHA }
   const windows = {
@@ -738,9 +810,14 @@ test('full publication binds exact local manifest inputs and fails closed on run
     const publishRun = bindTransaction(verifiedRun())
     publishRun.manifest_inputs = binding
     const request = buildPublicationRequest(publishRun, { dryRun: true })
-    assert.deepEqual(request.manifest_admission_and_signing.inputs, binding)
     assert.equal(request.distribution_origin, R2_ORIGIN)
-    assert.equal(request.manifest_admission_and_signing.profile_signing.status, 'awaiting-existing-owner')
+    assert.equal(request.operation, 'publish-installers-immutable')
+    assert.equal('manifest_admission_and_signing' in request, false)
+    const activation = buildActivationRequest(publishRun, {
+      dryRun: true,
+      stageEvidence: activationStageEvidence(publishRun),
+    })
+    assert.deepEqual(activation.manifest_admission_and_signing.inputs, binding)
 
     await writeFile(join(root, 'advanced-current-checkout.txt'), 'new unrelated source checkout state\n')
     assert.equal((await verifyManifestInputLedger(directory, run)).source_commit, SHA)
@@ -998,21 +1075,41 @@ test('verify requires update/relaunch, failed-health rollback, and macOS Compute
   }
 })
 
-test('same-version exception is explicit, three-key CAS, R2-only, and reversible', () => {
+test('same-version exception is frozen before immutable R2 publication and remains reversible', () => {
   const run = bindTransaction(verifiedRun())
   const publish = buildPublicationRequest(run, { dryRun: true })
   assert.equal(publish.mode, 'dry-run')
+  assert.equal(publish.operation, 'publish-installers-immutable')
+  assert.equal(publish.release_scope, 'full-installers-immutable-only')
   assert.equal(publish.distribution_origin, R2_ORIGIN)
-  assert.equal(publish.transaction_plan.mode, 'same-version-2.0.15-exception')
-  assert.equal(publish.transaction_plan.manual_reinstall_required_for_existing_2_0_15, true)
+  assert.equal(publish.transaction_mode, 'same-version-2.0.15-exception')
+  assert.equal(publish.manual_reinstall_required_for_existing_2_0_15, true)
   assert.equal(publish.macos_publication_mode, 'unsigned')
   assert.deepEqual(publish.installer_security, {
     darwin: { code_signed: false, notarized: false },
     win32: { code_signed: false, notarized: false },
   })
-  assert.match(publish.authority, /existing-desktop-manifest-admission-signing-owner/u)
+  assert.equal(publish.authority, 'codex-cloudflare-plugin')
   assert.doesNotMatch(JSON.stringify(publish), /macos_signer_run_id|macos_signed_artifact_id/u)
-  assert.deepEqual(publish.manifest_admission_and_signing.signed_manifest, {
+  assert.deepEqual(publish.immutable_objects.map(item => item.key), [
+    `desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-mac-universal.dmg`,
+    `desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-win-x64-Setup.exe`,
+  ])
+  assert.deepEqual(publish.completion, {
+    order: ['immutable-create-only-or-already-exact', 'authenticated-full-byte-readback', 'public-full-byte-readback'],
+    terminal_state: 'immutable-installers-verified',
+    next_request: 'schema-2-compatibility-attestation',
+  })
+  assert.doesNotMatch(JSON.stringify(publish), /desktop\/(?:manual|signed)\/|desktop\/latest\.json|desktop-release-signed|signature/iu)
+  assert.deepEqual(publish.delete_objects, [])
+  const activation = buildActivationRequest(run, { dryRun: true, stageEvidence: activationStageEvidence(run) })
+  assert.equal(activation.mode, 'dry-run')
+  assert.equal(activation.transaction_plan.mode, 'same-version-2.0.15-exception')
+  assert.equal(activation.transaction_plan.manual_reinstall_required_for_existing_2_0_15, true)
+  assert.deepEqual(activation.manifest_admission_and_signing.inputs, run.manifest_inputs)
+  assert.equal(activation.manifest_admission_and_signing.owner,
+    'zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123')
+  assert.deepEqual(activation.manifest_admission_and_signing.signed_manifest, {
     artifact_path: 'desktop-release-signed.json',
     schema_version: 2,
     document_type: 'emate.desktop-release-manifest',
@@ -1021,31 +1118,14 @@ test('same-version exception is explicit, three-key CAS, R2-only, and reversible
     signature: { algorithm: 'ed25519', key_source: 'existing-base-profile_signing_keys' },
     max_bytes: 16 * 1024,
   })
-  assert.equal(publish.manifest_admission_and_signing.owner,
-    'zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123')
-  assert.deepEqual(publish.manifest_admission_and_signing.inputs, run.manifest_inputs)
-  assert.deepEqual(publish.manifest_admission_and_signing.profile_signing, {
-    status: 'awaiting-existing-owner',
-    authority: 'existing-production-profile-signing-owner',
-    final_component_manifests: 'not-produced-by-local-flow',
-    final_profile_generation: 'not-produced-by-local-flow',
-    final_component_aggregate: 'not-produced-by-local-flow',
-  })
-  assert.equal(publish.manifest_admission_and_signing.client_compatible_provenance, 'open-existing-owner')
-  assert.deepEqual(publish.immutable_objects.map(item => item.key), [
-    `desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-mac-universal.dmg`,
-    `desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-mac-universal.dmg.blockmap`,
-    `desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-win-x64-Setup.exe`,
-    `desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-win-x64-Setup.exe.blockmap`,
-  ])
-  assert.deepEqual(publish.publication_and_activation.activation_order, ['manual', 'signed', 'legacy'])
-  assert.deepEqual(Object.keys(publish.publication_and_activation.pointers), ['manual', 'signed', 'legacy'])
+  assert.deepEqual(activation.publication_and_activation.activation_order, ['manual', 'signed', 'legacy'])
+  assert.deepEqual(Object.keys(activation.publication_and_activation.pointers), ['manual', 'signed', 'legacy'])
   for (const [name, key] of [
     ['manual', 'desktop/manual/v2.0.15/latest.json'],
     ['signed', 'desktop/signed/latest.json'],
     ['legacy', 'desktop/latest.json'],
   ]) {
-    assert.deepEqual(publish.publication_and_activation.pointers[name], {
+    assert.deepEqual(activation.publication_and_activation.pointers[name], {
       key,
       expected_current: POINTER_BEFORE,
       target: {
@@ -1059,7 +1139,7 @@ test('same-version exception is explicit, three-key CAS, R2-only, and reversible
       public_full_byte_readback: 'required',
     })
   }
-  assert.deepEqual(publish.publication_and_activation.recovery, {
+  assert.deepEqual(activation.publication_and_activation.recovery, {
     accepted_current_states: ['exact-before', 'exact-after'],
     already_exact: 'idempotent',
     stale_etag: 'fail-closed',
@@ -1067,10 +1147,12 @@ test('same-version exception is explicit, three-key CAS, R2-only, and reversible
     partial_activation: 'resume-ordered-prefix',
     crash_recovery: 'resume-same-request',
   })
-  assert.equal(publish.publication_and_activation.manual_manifest.write, 'compare-and-swap')
-  assert.doesNotMatch(JSON.stringify(publish), /d26b9ffb5f30531bc5de6c9f66aab47c3718248e2ff109d82cd3a763f0c02887/u)
-  assert.doesNotMatch(JSON.stringify(publish), /github\.com|github-actions|actions\/artifact/iu)
-  assert.deepEqual(publish.delete_objects, [])
+  assert.equal(activation.publication_and_activation.manual_manifest.write, 'compare-and-swap')
+  assert.deepEqual(activation.immutable_objects.map(object => object.action), ['require-already-exact', 'require-already-exact'])
+  assert.doesNotMatch(JSON.stringify(activation), /https:\/\/github\.com|actions\/artifact/iu)
+  const missingCarrier = structuredClone(activationStageEvidence(run))
+  delete missingCarrier.compatibility_attestation.artifact.artifact_id
+  assert.throws(() => buildActivationRequest(run, { stageEvidence: missingCarrier }), /compatibility carrier evidence/u)
   const rollback = buildRollbackRequest(run, undefined, { dryRun: true })
   assert.equal(rollback.mode, 'dry-run')
   assert.equal(rollback.distribution_origin, R2_ORIGIN)
@@ -1097,7 +1179,7 @@ test('same-version exception is explicit, three-key CAS, R2-only, and reversible
     manual_manifest: 'restored-by-cas',
     deleted_objects: [],
   })
-  assert.deepEqual(rollback.immutable_objects.map(item => item.action), ['retain', 'retain', 'retain', 'retain'])
+  assert.deepEqual(rollback.immutable_objects.map(item => item.action), ['retain', 'retain'])
   assert.equal(rollback.immutable_objects.some(item => item.key === 'desktop/manual/v2.0.15/latest.json'), false)
   assert.deepEqual(rollback.manual_manifest, { key: 'desktop/manual/v2.0.15/latest.json', action: 'restore-by-cas' })
   assert.deepEqual(rollback.delete_objects, [])
@@ -1105,6 +1187,106 @@ test('same-version exception is explicit, three-key CAS, R2-only, and reversible
   const noWindowsMatrix = structuredClone(run)
   delete noWindowsMatrix.verification.computer_use.windows
   assert.throws(() => buildPublicationRequest(noWindowsMatrix), /both external installed acceptance receipts/u)
+})
+
+test('full publication uploads immutable R2 installers before compatibility attestation or signing', () => {
+  const run = bindTransaction(verifiedRun())
+  const request = buildPublicationRequest(run, { dryRun: true })
+  assert.equal(request.operation, 'publish-installers-immutable')
+  assert.equal(request.release_scope, 'full-installers-immutable-only')
+  assert.deepEqual(request.immutable_objects.map(object => object.key), [
+    `desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-mac-universal.dmg`,
+    `desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-win-x64-Setup.exe`,
+  ])
+  assert.equal('manifest_admission_and_signing' in request, false)
+  assert.equal('publication_and_activation' in request, false)
+  assert.doesNotMatch(JSON.stringify(request), /desktop\/(?:manual|signed)\/|desktop\/latest\.json/iu)
+})
+
+test('immutable receipt unlocks one exact schema-2 compatibility carrier request', () => {
+  const run = verifiedRun()
+  const immutableRequestSha256 = '1'.repeat(64)
+  const immutableReceiptSha256 = '2'.repeat(64)
+  const { receipt } = immutablePublicationFixture(run, immutableRequestSha256)
+  assert.equal(validateImmutablePublicationReceipt(receipt, run, immutableRequestSha256), receipt)
+  const request = buildCompatibilityAttestationRequest(run, receipt, {
+    immutableRequestSha256,
+    immutableReceiptSha256,
+  })
+  assert.equal(request.control_plane, 'github-compatibility-attestation-carrier')
+  assert.deepEqual(request.data_plane, {
+    origin: R2_ORIGIN,
+    installer_download: 'cloudflare-r2-only',
+    online_update: 'cloudflare-r2-only',
+    rollback: 'cloudflare-r2-only',
+  })
+  assert.deepEqual(request.immutable_publication, {
+    status: 'passed',
+    request: { path: 'publication/immutable-owner-request.json', sha256: immutableRequestSha256 },
+    receipt: { path: 'publication/immutable-owner-receipt.json', sha256: immutableReceiptSha256 },
+  })
+  assert.deepEqual(request.workflow, {
+    repository: 'zyfjacksonchen-source/e-Mate-2.0.11',
+    path: '.github/workflows/desktop-compatibility-attestation.yml',
+    event: 'workflow_dispatch',
+    ref: 'refs/heads/main',
+    required_head: SHA,
+    required_run_attempt: 1,
+    artifact_name: `e-mate-desktop-release-${SHA}`,
+    exact_files: [
+      'desktop-candidate.json',
+      'e-Mate-2.0.15-mac-universal.dmg',
+      'e-Mate-2.0.15-win-x64-Setup.exe',
+    ],
+    semantics: {
+      role: 'compatibility-carrier-materialization',
+      legacy_build_run_id: 'actual-github-workflow-run-id',
+      github_built_or_tested_installer_bytes: false,
+      dispatch_performed_by_local_flow: false,
+    },
+  })
+  assert.deepEqual(Object.values(request.installers).map(installer => installer.url), [
+    `${R2_ORIGIN}/desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-mac-universal.dmg`,
+    `${R2_ORIGIN}/desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-win-x64-Setup.exe`,
+  ])
+  assert.deepEqual(Object.keys(request.inputs), [
+    'source_sha', 'version', 'macos_bytes', 'macos_sha256', 'windows_bytes', 'windows_sha256',
+  ])
+  assert.deepEqual(request.forbidden_actions, [
+    'build-installers', 'test-installers', 'sign-manifest', 'write-r2', 'activate-pointer', 'serve-user-downloads',
+  ])
+  assert.equal(request.provenance_requirements.run_attempt, 1)
+  assert.equal(request.provenance_requirements.artifact_id, 'required-from-github-api')
+  assert.equal(request.provenance_requirements.run_id, 'required-from-github-api')
+  const wrongOrigin = structuredClone(receipt)
+  wrongOrigin.immutable_objects[0].url = 'https://github.com/releases/file.dmg'
+  assert.throws(() => validateImmutablePublicationReceipt(wrongOrigin, run, immutableRequestSha256), /receipt is invalid/u)
+  const wrongReadback = structuredClone(receipt)
+  wrongReadback.immutable_objects[1].public_full_byte_readback.sha256 = '3'.repeat(64)
+  assert.throws(() => validateImmutablePublicationReceipt(wrongReadback, run, immutableRequestSha256), /receipt is invalid/u)
+  const incomplete = structuredClone(receipt)
+  incomplete.immutable_objects.pop()
+  assert.throws(() => validateImmutablePublicationReceipt(incomplete, run, immutableRequestSha256), /receipt set is invalid/u)
+  assert.throws(() => validateImmutablePublicationReceipt({ ...receipt, source_commit: '4'.repeat(40) }, run,
+    immutableRequestSha256), /owner receipt is invalid/u)
+  assert.throws(() => buildCompatibilityAttestationRequest(run, receipt, {
+    immutableRequestSha256: '3'.repeat(64), immutableReceiptSha256,
+  }), /receipt is invalid/u)
+})
+
+test('publication state advances monotonically and stops at the external signer handoff', () => {
+  assert.equal(publicationAction({}, {}), 'emit-immutable')
+  assert.equal(publicationAction({}, { dryRun: true }), 'dry-run')
+  assert.throws(() => publicationAction({}, { ownerReceipt: 'receipt.json' }), /exact awaiting request state/u)
+  const immutable = { publication: { status: 'awaiting-immutable-owner' } }
+  assert.equal(publicationAction(immutable, {}), 'resume-immutable')
+  assert.equal(publicationAction(immutable, { ownerReceipt: 'receipt.json' }), 'import-immutable')
+  assert.throws(() => publicationAction(immutable, { dryRun: true }), /cannot return to dry-run/u)
+  const compatibility = { publication: { status: 'awaiting-compatibility-attestation' } }
+  assert.equal(publicationAction(compatibility, {}), 'resume-compatibility')
+  assert.throws(() => publicationAction(compatibility, { ownerReceipt: 'receipt.json' }), /cannot accept another/u)
+  assert.throws(() => publicationAction({ publication: { status: 'awaiting-existing-owner' } }, {}), /state is invalid/u)
+  assert.throws(() => publicationAction({ publication: { status: 'passed' } }, {}), /already passed/u)
 })
 
 test('version-bound R2 transaction rejects implicit choice and binds the exact public predecessor', () => {
@@ -1142,10 +1324,20 @@ test('new-version transaction creates and retains manual bytes before shared sig
   const run = bindTransaction(verifiedRun('2.0.16'), 'new-version')
   const publish = buildPublicationRequest(run, { dryRun: true })
   assert.equal(publish.distribution_origin, R2_ORIGIN)
-  assert.equal(publish.transaction_plan.product_version, '2.0.16')
-  assert.deepEqual(publish.publication_and_activation.activation_order, ['manual', 'signed', 'legacy'])
-  assert.deepEqual(Object.keys(publish.publication_and_activation.pointers), ['signed', 'legacy'])
-  assert.deepEqual(publish.publication_and_activation.manual_manifest, {
+  assert.equal(publish.transaction_mode, 'new-version')
+  assert.equal(publish.operation, 'publish-installers-immutable')
+  assert.deepEqual(run.release_transaction.activation_order, ['manual', 'signed', 'legacy'])
+  assert.deepEqual(run.release_transaction.manual_manifest, {
+    key: 'desktop/manual/v2.0.16/latest.json',
+    write: 'create-only',
+    rollback: 'retain',
+  })
+  assert.equal(publish.immutable_objects.every(object => object.key.includes('/v2.0.16/')), true)
+  assert.doesNotMatch(JSON.stringify(publish), /desktop\/(?:manual|signed)\/|desktop\/latest\.json|github\.com/iu)
+  const activation = buildActivationRequest(run, { dryRun: true, stageEvidence: activationStageEvidence(run) })
+  assert.deepEqual(activation.publication_and_activation.activation_order, ['manual', 'signed', 'legacy'])
+  assert.deepEqual(Object.keys(activation.publication_and_activation.pointers), ['signed', 'legacy'])
+  assert.deepEqual(activation.publication_and_activation.manual_manifest, {
     key: 'desktop/manual/v2.0.16/latest.json',
     write: 'create-only',
     rollback: 'retain',
@@ -1159,8 +1351,8 @@ test('new-version transaction creates and retains manual bytes before shared sig
     authenticated_readback: 'required',
     public_full_byte_readback: 'required',
   })
-  assert.equal(publish.immutable_objects.every(object => object.key.includes('/v2.0.16/')), true)
-  assert.doesNotMatch(JSON.stringify(publish), /github\.com|github-actions|actions\/artifact/iu)
+  assert.deepEqual(activation.publication_and_activation.pointers.signed.expected_current, POINTER_BEFORE)
+  assert.deepEqual(activation.publication_and_activation.pointers.legacy.expected_current, POINTER_BEFORE)
 
   const requestSha256 = '1'.repeat(64)
   const { receipt } = publicationFixture(run, requestSha256)
@@ -1676,11 +1868,37 @@ test('root package exposes one flow entry and the implementation has no GitHub, 
   const publicationWorkflow = await readFile(new URL('../.github/workflows/desktop-publication.yml', import.meta.url), 'utf8')
   const updater = await readFile(new URL('../desktop/e-mate-desktop/src/update-checker.ts', import.meta.url), 'utf8')
   assert.equal(packageJson.scripts.flow, 'node scripts/local-flow.mjs')
-  assert.doesNotMatch(source, /\bgh\b|\.github\/|\bwrangler\b|win-codex|\bUU\b|\bssh\b|\bscp\b|kh19arc/u)
+  assert.doesNotMatch(source, /\bgh\b|\bwrangler\b|win-codex|\bUU\b|\bssh\b|\bscp\b|kh19arc/u)
+  assert.equal([...source.matchAll(/\.github\/workflows\//gu)].length, 1)
+  assert.match(source, /const COMPATIBILITY_WORKFLOW = '\.github\/workflows\/desktop-compatibility-attestation\.yml'/u)
   assert.match(source, /transport: 'codex-remote-handoff'/u)
   const publish = source.slice(source.indexOf('async function publish'), source.indexOf('\nasync function rollback'))
   assert.ok(publish.indexOf('await verifyManifestInputLedger(directory, run)') >= 0)
-  assert.ok(publish.indexOf('await verifyManifestInputLedger(directory, run)') < publish.indexOf('await atomicJson(path, request)'))
+  assert.ok(publish.indexOf('await verifyManifestInputLedger(directory, run)') < publish.indexOf('await atomicJson(immutableRequestPath, immutableRequest)'))
   assert.match(publicationWorkflow, /uses: zyfjacksonchen-source\/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123/u)
   assert.match(updater, /2: Buffer\.from\('e-mate-desktop-release-manifest-v2\\0', 'utf8'\)/u)
+})
+
+test('schema-2 compatibility workflow only materializes exact canonical R2 bytes', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/desktop-compatibility-attestation.yml', import.meta.url), 'utf8')
+  const inputs = workflow.slice(workflow.indexOf('    inputs:'), workflow.indexOf('\npermissions:'))
+  assert.deepEqual([...inputs.matchAll(/^      ([a-z0-9_]+):$/gmu)].map(match => match[1]), [
+    'source_sha', 'version', 'macos_bytes', 'macos_sha256', 'windows_bytes', 'windows_sha256',
+  ])
+  assert.match(workflow, /GITHUB_REF" = refs\/heads\/main/u)
+  assert.equal(workflow.includes('test "${GITHUB_REF_PROTECTED:-}" = true'), true)
+  assert.match(workflow, /GITHUB_RUN_ATTEMPT" = 1/u)
+  assert.match(workflow, /desktop-compatibility-attestation\.yml@refs\/heads\/main/u)
+  assert.match(workflow, /submodules: false/u)
+  assert.match(workflow, /https:\/\/pub-ada3f610c0234a76838f4e19fe2bb25e\.r2\.dev/u)
+  assert.equal([...workflow.matchAll(/--write-out '%\{http_code\}'/gu)].length, 2)
+  assert.equal([...workflow.matchAll(/\)" = 200/gu)].length, 2)
+  assert.match(workflow, /desktop-release-manifest\.ts candidate/u)
+  assert.match(workflow, /--mac-run "\$GITHUB_RUN_ID"[\s\S]*--win-run "\$GITHUB_RUN_ID"/u)
+  assert.match(workflow, /name: e-mate-desktop-release-\$\{\{ inputs\.source_sha \}\}/u)
+  assert.match(workflow, /path: compatibility-carrier/u)
+  assert.match(workflow, /desktop-candidate\.json,e-Mate-\$VERSION-mac-universal\.dmg,e-Mate-\$VERSION-win-x64-Setup\.exe/u)
+  assert.doesNotMatch(workflow, /curl[^\n]*--location|submodules: recursive|corepack|\bpnpm\b|\byarn\b|\bnpm\b|\bwrangler\b|cloudflarestorage|EMATE_[A-Z_]*KEY|environment:/iu)
+  assert.doesNotMatch(workflow, /write-r2|activate-pointer|desktop\/signed\/latest|desktop\/latest\.json|desktop\/manual\//iu)
+  assert.doesNotMatch(workflow, /^\s+(?:url|installer_url):/mu)
 })

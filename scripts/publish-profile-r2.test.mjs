@@ -19,10 +19,12 @@ import { HARNESS_COMMIT } from './harness-provenance.mjs'
 import { composeProfileReleaseCandidate } from './profile-release.mjs'
 import { createProfileBuildReceipt } from './desktop-admission.mjs'
 import {
+  awaitingImmutablePublicationState,
   buildPublicationRequest,
   buildReleaseTransactionPlan,
   createPlatformManifestInputReceipt,
   finalizeManifestInputLedger,
+  IMMUTABLE_REQUEST_PATH,
 } from './local-flow.mjs'
 import {
   createProfileCurrentSnapshot,
@@ -144,15 +146,12 @@ async function localSigningFixture({ root, sourceCommit, version, baseId, compon
   }
   await finalizeManifestInputLedger(runRoot, run)
   run.release_transaction = buildReleaseTransactionPlan(run, 'same-version-2.0.15-exception')
-  const requestPath = join(runRoot, 'publication', 'cloudflare-owner-request.json')
+  const requestPath = join(runRoot, IMMUTABLE_REQUEST_PATH)
   mkdirSync(join(runRoot, 'publication'), { recursive: true })
   const request = buildPublicationRequest(run)
   writeJson(requestPath, request)
   const requestDescriptor = fileDescriptor(runRoot, requestPath)
-  run.publication = {
-    status: 'awaiting-existing-owner', scope: 'full', request_sha256: requestDescriptor.sha256,
-    owner: request.authority, transaction_mode: run.release_transaction.mode,
-  }
+  run.publication = awaitingImmutablePublicationState(run, requestDescriptor.sha256)
   writeJson(join(runRoot, 'run.json'), run)
   const snapshotPath = join(runRoot, 'profile-current-snapshot.json')
   writeJson(snapshotPath, createProfileCurrentSnapshot({

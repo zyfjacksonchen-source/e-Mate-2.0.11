@@ -28,8 +28,14 @@ const SHA256 = /^[0-9a-f]{64}$/u
 const ETAG = /^[0-9a-f]{32}$/u
 const RUN_ID = /^\d{8}T\d{6}Z-[0-9a-f]{12}-[0-9a-f]{6}$/u
 const OWNER = 'existing-desktop-manifest-admission-signing-owner+codex-cloudflare-plugin'
+const CLOUDFLARE_OWNER = 'codex-cloudflare-plugin'
 const MANIFEST_OWNER = 'zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123'
 const MANIFEST_SIGNING_CONTEXT = 'e-mate-desktop-release-manifest-v2\0'
+const COMPATIBILITY_REPOSITORY = 'zyfjacksonchen-source/e-Mate-2.0.11'
+const COMPATIBILITY_WORKFLOW = '.github/workflows/desktop-compatibility-attestation.yml'
+export const IMMUTABLE_REQUEST_PATH = 'publication/immutable-owner-request.json'
+const IMMUTABLE_RECEIPT_PATH = 'publication/immutable-owner-receipt.json'
+const COMPATIBILITY_REQUEST_PATH = 'publication/compatibility-attestation-request.json'
 const MANIFEST_KEY_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u
 const CURRENT_PUBLIC_VERSION = '2.0.15'
 const CURRENT_PUBLIC_SOURCE_COMMIT = '297b90df2426137edb398b023d8137a085ed8508'
@@ -1944,6 +1950,16 @@ function objectRecords(run) {
   return records.sort((left, right) => left.platform.localeCompare(right.platform) || left.key.localeCompare(right.key))
 }
 
+function installerObjectRecords(run) {
+  if (publicationScope(run) !== 'full') return objectRecords(run)
+  const expected = new Set(['macos', 'windows'].map(platform => releaseArtifactName(platform, run.version)))
+  const records = objectRecords(run).filter(object => expected.has(basename(object.key)))
+  if (records.length !== 2 || new Set(records.map(object => object.platform)).size !== 2) {
+    throw new Error('full publication requires exactly the verified macOS and Windows installers')
+  }
+  return records.map(object => ({ ...object, url: `${R2_PUBLIC_ORIGIN}/${object.key}` }))
+}
+
 function verifiedComputerUse(run) {
   const evidence = run.verification?.computer_use
   const platforms = publicationScope(run) === 'full' ? ['macos', 'windows'] : ['macos']
@@ -2058,6 +2074,63 @@ export function buildPublicationRequest(run, { dryRun = false, versionChoice } =
     }
   }
   const transaction = releaseTransactionPlan(run, versionChoice)
+  return {
+    schema_version: 1,
+    document_type: 'emate.local-cloudflare-owner-request',
+    operation: 'publish-installers-immutable',
+    mode: dryRun ? 'dry-run' : 'apply',
+    status: 'ready-for-existing-owner',
+    authority: CLOUDFLARE_OWNER,
+    distribution_origin: R2_PUBLIC_ORIGIN,
+    release_scope: 'full-installers-immutable-only',
+    run_id: run.run_id,
+    version: run.version,
+    source_commit: run.source_commit,
+    transaction_mode: transaction.mode,
+    manual_reinstall_required_for_existing_2_0_15: transaction.manual_reinstall_required_for_existing_2_0_15,
+    rebuild: false,
+    macos_publication_mode: 'unsigned',
+    installer_security: INSTALLER_SECURITY,
+    immutable_objects: installerObjectRecords(run),
+    completion: {
+      order: [
+        'immutable-create-only-or-already-exact', 'authenticated-full-byte-readback', 'public-full-byte-readback',
+      ],
+      terminal_state: 'immutable-installers-verified',
+      next_request: 'schema-2-compatibility-attestation',
+    },
+    delete_objects: [],
+  }
+}
+
+function validActivationStageEvidence(value, run) {
+  const exactFiles = [
+    'desktop-candidate.json', releaseArtifactName('macos', run.version), releaseArtifactName('windows', run.version),
+  ]
+  const immutable = value?.immutable_publication
+  const compatibility = value?.compatibility_attestation
+  const artifact = compatibility?.artifact
+  return exactKeys(value, ['immutable_publication', 'compatibility_attestation'])
+    && exactKeys(immutable, ['status', 'request_sha256', 'receipt_sha256']) && immutable.status === 'passed'
+    && SHA256.test(immutable.request_sha256 ?? '') && SHA256.test(immutable.receipt_sha256 ?? '')
+    && exactKeys(compatibility, [
+      'status', 'request_sha256', 'repository', 'workflow', 'ref', 'head_sha', 'run_id', 'run_attempt', 'artifact',
+    ]) && compatibility.status === 'passed' && SHA256.test(compatibility.request_sha256 ?? '')
+    && compatibility.repository === COMPATIBILITY_REPOSITORY && compatibility.workflow === COMPATIBILITY_WORKFLOW
+    && compatibility.ref === 'refs/heads/main' && compatibility.head_sha === run.source_commit
+    && /^[1-9][0-9]*$/u.test(compatibility.run_id ?? '') && compatibility.run_attempt === 1
+    && exactKeys(artifact, ['role', 'name', 'artifact_id', 'digest', 'exact_files'])
+    && artifact.role === 'desktop_candidate' && artifact.name === `e-mate-desktop-release-${run.source_commit}`
+    && /^[1-9][0-9]*$/u.test(artifact.artifact_id ?? '') && /^sha256:[0-9a-f]{64}$/u.test(artifact.digest ?? '')
+    && isDeepStrictEqual(artifact.exact_files, exactFiles)
+}
+
+export function buildActivationRequest(run, { dryRun = false, versionChoice, stageEvidence } = {}) {
+  verifiedComputerUse(run)
+  const transaction = releaseTransactionPlan(run, versionChoice)
+  if (!validActivationStageEvidence(stageEvidence, run)) {
+    throw new Error('activation requires passed immutable publication and compatibility carrier evidence')
+  }
   const manifestInputs = manifestInputBinding(run)
   const pointerNames = transaction.mode === 'new-version' ? ['signed', 'legacy'] : [...transaction.activation_order]
   const pointers = Object.fromEntries(pointerNames.map(name => [name, {
@@ -2080,13 +2153,24 @@ export function buildPublicationRequest(run, { dryRun = false, versionChoice } =
     version: run.version,
     source_commit: run.source_commit,
     transaction_plan: transaction,
+    prior_stages: stageEvidence,
     rebuild: false,
     macos_publication_mode: 'unsigned',
     installer_security: INSTALLER_SECURITY,
-    immutable_objects: immutableObjects,
+    immutable_objects: installerObjectRecords(run).map(object => ({
+      platform: object.platform,
+      key: object.key,
+      url: object.url,
+      bytes: object.bytes,
+      sha256: object.sha256,
+      action: 'require-already-exact',
+      authenticated_readback: 'required',
+      public_full_byte_readback: 'required',
+    })),
     manifest_admission_and_signing: {
       owner: MANIFEST_OWNER,
       inputs: manifestInputs,
+      compatibility_attestation: stageEvidence.compatibility_attestation,
       profile_signing: {
         status: 'awaiting-existing-owner',
         authority: 'existing-production-profile-signing-owner',
@@ -2094,7 +2178,7 @@ export function buildPublicationRequest(run, { dryRun = false, versionChoice } =
         final_profile_generation: 'not-produced-by-local-flow',
         final_component_aggregate: 'not-produced-by-local-flow',
       },
-      client_compatible_provenance: 'open-existing-owner',
+      client_compatible_provenance: 'required-real-github-api-evidence',
       signed_manifest: {
         artifact_path: 'desktop-release-signed.json',
         schema_version: 2,
@@ -2110,7 +2194,7 @@ export function buildPublicationRequest(run, { dryRun = false, versionChoice } =
       },
     },
     publication_and_activation: {
-      current_public_pointer_readback: 'required-before-any-write',
+      current_public_pointer_readback: 'required-before-pointer-write',
       manual_manifest: {
         ...transaction.manual_manifest,
         expected_current: transaction.mode === 'new-version'
@@ -2124,8 +2208,8 @@ export function buildPublicationRequest(run, { dryRun = false, versionChoice } =
       activation_order: [...transaction.activation_order],
       recovery: { ...POINTER_RECOVERY, accepted_current_states: [...POINTER_RECOVERY.accepted_current_states] },
       order: [
-        'current-public-three-pointer-readbacks', 'existing-owner-admission-and-ed25519-manifest-signing',
-        'immutable-create-only', 'authenticated-readback', 'public-readback',
+        'immutable-publication-receipt-verified', 'compatibility-carrier-receipt-verified',
+        'existing-owner-admission-and-ed25519-manifest-signing', 'current-public-three-pointer-readbacks',
         transaction.mode === 'new-version' ? 'manual-manifest-create-only-and-readbacks' : 'manual-pointer-cas-and-readbacks',
         'signed-pointer-cas-and-readbacks', 'legacy-pointer-cas-and-readbacks',
       ],
@@ -2163,6 +2247,136 @@ function unsignedInstallerSecurity(value) {
   return exactKeys(value, ['darwin', 'win32'])
     && sameRecord(value.darwin, INSTALLER_SECURITY.darwin)
     && sameRecord(value.win32, INSTALLER_SECURITY.win32)
+}
+
+export function validateImmutablePublicationReceipt(receipt, run, requestSha256) {
+  const transaction = releaseTransactionPlan(run)
+  if (!exactKeys(receipt, [
+    'schema_version', 'document_type', 'operation', 'status', 'authority', 'release_scope',
+    'macos_publication_mode', 'installer_security', 'distribution_origin', 'run_id', 'version',
+    'source_commit', 'transaction_mode', 'request_sha256', 'immutable_objects', 'deleted_objects',
+  ]) || receipt.schema_version !== 1 || receipt.document_type !== 'emate.local-cloudflare-owner-receipt'
+    || receipt.operation !== 'publish-installers-immutable' || receipt.status !== 'passed'
+    || receipt.authority !== CLOUDFLARE_OWNER || receipt.release_scope !== 'full-installers-immutable-only'
+    || receipt.macos_publication_mode !== 'unsigned' || !unsignedInstallerSecurity(receipt.installer_security)
+    || receipt.distribution_origin !== R2_PUBLIC_ORIGIN || receipt.run_id !== run.run_id
+    || receipt.version !== run.version || receipt.source_commit !== run.source_commit
+    || receipt.transaction_mode !== transaction.mode || !SHA256.test(requestSha256 ?? '')
+    || receipt.request_sha256 !== requestSha256 || !Array.isArray(receipt.immutable_objects)
+    || !Array.isArray(receipt.deleted_objects) || receipt.deleted_objects.length !== 0) {
+    throw new Error('immutable installer publication owner receipt is invalid')
+  }
+  const expectedObjects = installerObjectRecords(run)
+  if (receipt.immutable_objects.length !== expectedObjects.length) {
+    throw new Error('immutable installer publication receipt set is invalid')
+  }
+  for (const expected of expectedObjects) {
+    const object = receipt.immutable_objects.find(item => item?.key === expected.key)
+    const authenticated = object?.authenticated_readback
+    const publicReadback = object?.public_full_byte_readback
+    if (!exactKeys(object, [
+      'platform', 'key', 'url', 'bytes', 'sha256', 'write', 'authenticated_readback', 'public_full_byte_readback',
+    ]) || object.platform !== expected.platform || object.key !== expected.key || object.url !== expected.url
+      || object.bytes !== expected.bytes || object.sha256 !== expected.sha256
+      || !['created', 'already-exact'].includes(object.write)
+      || !exactKeys(authenticated, ['status', 'bytes', 'sha256']) || authenticated.status !== 'passed'
+      || authenticated.bytes !== expected.bytes || authenticated.sha256 !== expected.sha256
+      || !exactKeys(publicReadback, ['status', 'url', 'bytes', 'sha256']) || publicReadback.status !== 'passed'
+      || publicReadback.url !== expected.url || publicReadback.bytes !== expected.bytes
+      || publicReadback.sha256 !== expected.sha256) {
+      throw new Error(`immutable installer publication receipt is invalid: ${expected.key}`)
+    }
+  }
+  return receipt
+}
+
+export function buildCompatibilityAttestationRequest(run, immutableReceipt, {
+  immutableRequestSha256,
+  immutableReceiptSha256,
+} = {}) {
+  if (!SHA256.test(immutableRequestSha256 ?? '') || !SHA256.test(immutableReceiptSha256 ?? '')) {
+    throw new Error('compatibility attestation requires exact immutable publication digests')
+  }
+  validateImmutablePublicationReceipt(immutableReceipt, run, immutableRequestSha256)
+  const transaction = releaseTransactionPlan(run)
+  const records = installerObjectRecords(run)
+  const darwin = records.find(record => record.platform === 'macos')
+  const win32 = records.find(record => record.platform === 'windows')
+  if (darwin === undefined || win32 === undefined) throw new Error('compatibility attestation installer set is invalid')
+  const artifactName = `e-mate-desktop-release-${run.source_commit}`
+  const exactFiles = ['desktop-candidate.json', basename(darwin.key), basename(win32.key)]
+  return {
+    schema_version: 1,
+    document_type: 'emate.local-desktop-compatibility-attestation-request',
+    status: 'ready-for-manual-dispatch',
+    purpose: 'accepted-2.0.13-schema-2-provenance',
+    control_plane: 'github-compatibility-attestation-carrier',
+    data_plane: {
+      origin: R2_PUBLIC_ORIGIN,
+      installer_download: 'cloudflare-r2-only',
+      online_update: 'cloudflare-r2-only',
+      rollback: 'cloudflare-r2-only',
+    },
+    run_id: run.run_id,
+    version: run.version,
+    source_commit: run.source_commit,
+    transaction_mode: transaction.mode,
+    manual_reinstall_required_for_existing_2_0_15: transaction.manual_reinstall_required_for_existing_2_0_15,
+    immutable_publication: {
+      status: 'passed',
+      request: { path: IMMUTABLE_REQUEST_PATH, sha256: immutableRequestSha256 },
+      receipt: { path: IMMUTABLE_RECEIPT_PATH, sha256: immutableReceiptSha256 },
+    },
+    workflow: {
+      repository: COMPATIBILITY_REPOSITORY,
+      path: COMPATIBILITY_WORKFLOW,
+      event: 'workflow_dispatch',
+      ref: 'refs/heads/main',
+      required_head: run.source_commit,
+      required_run_attempt: 1,
+      artifact_name: artifactName,
+      exact_files: exactFiles,
+      semantics: {
+        role: 'compatibility-carrier-materialization',
+        legacy_build_run_id: 'actual-github-workflow-run-id',
+        github_built_or_tested_installer_bytes: false,
+        dispatch_performed_by_local_flow: false,
+      },
+    },
+    inputs: {
+      source_sha: run.source_commit,
+      version: run.version,
+      macos_bytes: String(darwin.bytes),
+      macos_sha256: darwin.sha256,
+      windows_bytes: String(win32.bytes),
+      windows_sha256: win32.sha256,
+    },
+    installers: {
+      darwin: {
+        name: basename(darwin.key), url: darwin.url, bytes: darwin.bytes, sha256: darwin.sha256,
+        build_source_commit: run.source_commit,
+      },
+      win32: {
+        name: basename(win32.key), url: win32.url, bytes: win32.bytes, sha256: win32.sha256,
+        build_source_commit: run.source_commit,
+      },
+    },
+    provenance_requirements: {
+      schema_version: 1,
+      document_type: 'emate.github-artifact-provenance',
+      source_commit: run.source_commit,
+      role: 'desktop_candidate',
+      artifact_name: artifactName,
+      artifact_id: 'required-from-github-api',
+      archive_digest: 'required-from-github-api',
+      run_id: 'required-from-github-api',
+      run_attempt: 1,
+    },
+    next_owner: MANIFEST_OWNER,
+    forbidden_actions: [
+      'build-installers', 'test-installers', 'sign-manifest', 'write-r2', 'activate-pointer', 'serve-user-downloads',
+    ],
+  }
 }
 
 export function validatePublicationReceipt(receipt, run, requestSha256) {
@@ -2223,7 +2437,7 @@ export function validatePublicationReceipt(receipt, run, requestSha256) {
     || !Array.isArray(receipt.immutable_objects) || receipt.deleted_objects?.length !== 0) {
     throw new Error('Cloudflare publication owner receipt is invalid')
   }
-  const expectedObjects = objectRecords(run)
+  const expectedObjects = installerObjectRecords(run)
   if (receipt.immutable_objects.length !== expectedObjects.length) throw new Error('Cloudflare immutable object receipt set is invalid')
   for (const expected of expectedObjects) {
     const object = receipt.immutable_objects.find(item => item?.key === expected.key)
@@ -2344,7 +2558,7 @@ export function buildRollbackRequest(run, publicationReceipt, {
     rollback_order: [...transaction.rollback_order],
     pointer_compare_and_swap: pointers,
     recovery: { ...POINTER_RECOVERY, accepted_current_states: [...POINTER_RECOVERY.accepted_current_states] },
-    immutable_objects: objectRecords(run).map(object => ({ key: object.key, action: 'retain' })),
+    immutable_objects: installerObjectRecords(run).map(object => ({ key: object.key, action: 'retain' })),
     manual_manifest: {
       key: transaction.manual_manifest.key,
       action: transaction.mode === 'new-version' ? 'retain' : 'restore-by-cas',
@@ -2516,56 +2730,185 @@ export async function importRollbackOwnerReceipt(directory, run, ownerReceiptPat
   }
 }
 
+export function publicationAction(run, { dryRun = false, ownerReceipt } = {}) {
+  const status = run.publication?.status ?? 'not-requested'
+  if (![
+    'not-requested', 'dry-run', 'awaiting-immutable-owner',
+    'awaiting-compatibility-attestation', 'passed',
+  ].includes(status)) throw new Error('publication run state is invalid')
+  if (status === 'passed') throw new Error('publication is already passed for this run')
+  if (status === 'awaiting-compatibility-attestation') {
+    if (dryRun || ownerReceipt !== undefined) {
+      throw new Error('publication awaiting compatibility attestation cannot accept another immutable owner receipt')
+    }
+    return 'resume-compatibility'
+  }
+  if (status === 'awaiting-immutable-owner') {
+    if (dryRun) throw new Error('publication awaiting the existing owner cannot return to dry-run')
+    return ownerReceipt === undefined ? 'resume-immutable' : 'import-immutable'
+  }
+  if (ownerReceipt !== undefined) {
+    throw new Error('publication owner receipt import requires the exact awaiting request state')
+  }
+  return dryRun ? 'dry-run' : 'emit-immutable'
+}
+
+export function awaitingImmutablePublicationState(run, requestSha256) {
+  return {
+    status: 'awaiting-immutable-owner',
+    scope: 'full-installers-immutable-only',
+    owner: CLOUDFLARE_OWNER,
+    request: IMMUTABLE_REQUEST_PATH,
+    request_sha256: requestSha256,
+    transaction_mode: run.release_transaction.mode,
+  }
+}
+
+function awaitingCompatibilityAttestationState(run, {
+  immutableRequestSha256, immutableReceiptSha256, compatibilityRequestSha256,
+}) {
+  return {
+    status: 'awaiting-compatibility-attestation',
+    scope: 'full',
+    owner: 'github-compatibility-attestation-carrier',
+    immutable_request: IMMUTABLE_REQUEST_PATH,
+    immutable_request_sha256: immutableRequestSha256,
+    immutable_receipt: IMMUTABLE_RECEIPT_PATH,
+    immutable_receipt_sha256: immutableReceiptSha256,
+    request: COMPATIBILITY_REQUEST_PATH,
+    request_sha256: compatibilityRequestSha256,
+    transaction_mode: run.release_transaction.mode,
+  }
+}
+
+async function validateImmutablePublicationRequest(directory, request) {
+  const path = join(directory, IMMUTABLE_REQUEST_PATH)
+  if (!isDeepStrictEqual(await json(path), request)) throw new Error('immutable installer publication owner request is invalid')
+  const requestSha256 = await fileDigest(path)
+  return { path, requestSha256 }
+}
+
+async function validateAwaitingImmutablePublication(directory, run, request) {
+  const { path, requestSha256 } = await validateImmutablePublicationRequest(directory, request)
+  if (!isDeepStrictEqual(run.publication, awaitingImmutablePublicationState(run, requestSha256))) {
+    throw new Error('publication requires the exact awaiting immutable request state')
+  }
+  return { path, requestSha256 }
+}
+
+async function validateAwaitingCompatibilityAttestation(directory, run, immutableRequest) {
+  const { requestSha256: immutableRequestSha256 } = await validateImmutablePublicationRequest(directory, immutableRequest)
+  const immutableReceiptPath = join(directory, IMMUTABLE_RECEIPT_PATH)
+  const immutableReceipt = validateImmutablePublicationReceipt(
+    await json(immutableReceiptPath), run, immutableRequestSha256,
+  )
+  const immutableReceiptSha256 = await fileDigest(immutableReceiptPath)
+  const request = buildCompatibilityAttestationRequest(run, immutableReceipt, {
+    immutableRequestSha256,
+    immutableReceiptSha256,
+  })
+  const path = join(directory, COMPATIBILITY_REQUEST_PATH)
+  if (!isDeepStrictEqual(await json(path), request)) throw new Error('compatibility attestation request is invalid')
+  const requestSha256 = await fileDigest(path)
+  if (!isDeepStrictEqual(run.publication, awaitingCompatibilityAttestationState(run, {
+    immutableRequestSha256, immutableReceiptSha256, compatibilityRequestSha256: requestSha256,
+  }))) throw new Error('publication requires the exact awaiting compatibility request state')
+  return { path, requestSha256 }
+}
+
 async function publish(values) {
   const { directory, run } = await loadRun(values.run)
   assertVerificationMatches(run, await verifyRun(directory, run))
   const scope = publicationScope(run)
-  if (scope === 'full') {
-    await verifyManifestInputLedger(directory, run)
-    const transaction = releaseTransactionPlan(run, values.versionChoice)
-    if (run.release_transaction === undefined) run.release_transaction = transaction
-  } else if (values.versionChoice !== undefined || run.release_transaction !== undefined) {
-    throw new Error('macOS-only immutable publication cannot bind a shared-pointer version choice')
-  }
-  const request = buildPublicationRequest(run, { dryRun: values.dryRun })
-  const path = join(directory, 'publication', 'cloudflare-owner-request.json')
-  const status = run.publication?.status
-  if (!['not-requested', 'dry-run', 'awaiting-existing-owner', 'passed'].includes(status)) {
-    throw new Error('publication run state is invalid')
-  }
-  if (status === 'passed') throw new Error('publication is already passed for this run')
-  if (values.ownerReceipt !== undefined && status !== 'awaiting-existing-owner') {
-    throw new Error('publication owner receipt import requires the exact awaiting request state')
-  }
-  if (status === 'awaiting-existing-owner' && values.dryRun) {
-    throw new Error('publication awaiting the existing owner cannot return to dry-run')
-  }
-  if (status === 'awaiting-existing-owner') {
-    if (!isDeepStrictEqual(await json(path), request)) throw new Error('Cloudflare publication owner request is invalid')
-  } else {
-    await atomicJson(path, request)
-  }
-  const requestSha256 = await fileDigest(path)
-  if (status === 'awaiting-existing-owner' && run.publication.request_sha256 !== requestSha256) {
-    throw new Error('publication requires the exact awaiting request state')
-  }
-  if (values.ownerReceipt !== undefined) {
-    const receipt = validatePublicationReceipt(await json(resolve(values.ownerReceipt)), run, requestSha256)
-    await atomicJson(join(directory, 'publication', 'cloudflare-owner-receipt.json'), receipt)
-    run.publication = {
-      status: 'passed', scope: request.release_scope ?? 'full', request_sha256: requestSha256, owner: OWNER,
-      ...(run.release_transaction === undefined ? {} : { transaction_mode: run.release_transaction.mode }),
+  if (scope === 'macos-immutable-dmg-only') {
+    if (values.versionChoice !== undefined || run.release_transaction !== undefined) {
+      throw new Error('macOS-only immutable publication cannot bind a shared-pointer version choice')
     }
-  } else {
-    run.publication = {
-      status: values.dryRun ? 'dry-run' : 'awaiting-existing-owner', scope: request.release_scope ?? 'full',
-      request_sha256: requestSha256, owner: OWNER,
-      ...(run.release_transaction === undefined ? {} : { transaction_mode: run.release_transaction.mode }),
+    const request = buildPublicationRequest(run, { dryRun: values.dryRun })
+    const path = join(directory, 'publication', 'cloudflare-owner-request.json')
+    const status = run.publication?.status
+    if (!['not-requested', 'dry-run', 'awaiting-existing-owner', 'passed'].includes(status)) {
+      throw new Error('publication run state is invalid')
     }
+    if (status === 'passed') throw new Error('publication is already passed for this run')
+    if (values.ownerReceipt !== undefined && status !== 'awaiting-existing-owner') {
+      throw new Error('publication owner receipt import requires the exact awaiting request state')
+    }
+    if (status === 'awaiting-existing-owner' && values.dryRun) {
+      throw new Error('publication awaiting the existing owner cannot return to dry-run')
+    }
+    if (status === 'awaiting-existing-owner') {
+      if (!isDeepStrictEqual(await json(path), request)) throw new Error('Cloudflare publication owner request is invalid')
+    } else {
+      await atomicJson(path, request)
+    }
+    const requestSha256 = await fileDigest(path)
+    if (status === 'awaiting-existing-owner' && run.publication.request_sha256 !== requestSha256) {
+      throw new Error('publication requires the exact awaiting request state')
+    }
+    if (values.ownerReceipt !== undefined) {
+      const receipt = validatePublicationReceipt(await json(resolve(values.ownerReceipt)), run, requestSha256)
+      await atomicJson(join(directory, 'publication', 'cloudflare-owner-receipt.json'), receipt)
+      run.publication = {
+        status: 'passed', scope: request.release_scope, request_sha256: requestSha256, owner: OWNER,
+      }
+    } else {
+      run.publication = {
+        status: values.dryRun ? 'dry-run' : 'awaiting-existing-owner', scope: request.release_scope,
+        request_sha256: requestSha256, owner: OWNER,
+      }
+    }
+    await saveRun(directory, run)
+    await writeChecksums(directory)
+    process.stdout.write(`${JSON.stringify({ run_id: run.run_id, publication: run.publication, request: relativePath(directory, path) }, null, 2)}\n`)
+    return
+  }
+
+  await verifyManifestInputLedger(directory, run)
+  const transaction = releaseTransactionPlan(run, values.versionChoice)
+  if (run.release_transaction === undefined) run.release_transaction = transaction
+  const action = publicationAction(run, values)
+  const immutableRequest = buildPublicationRequest(run, { dryRun: action === 'dry-run' })
+  const immutableRequestPath = join(directory, IMMUTABLE_REQUEST_PATH)
+  let outputPath = immutableRequestPath
+  if (action === 'dry-run' || action === 'emit-immutable') {
+    await atomicJson(immutableRequestPath, immutableRequest)
+    const requestSha256 = await fileDigest(immutableRequestPath)
+    run.publication = action === 'dry-run'
+      ? { status: 'dry-run', scope: 'full-installers-immutable-only', owner: CLOUDFLARE_OWNER, request_sha256: requestSha256 }
+      : awaitingImmutablePublicationState(run, requestSha256)
+  } else if (action === 'resume-immutable') {
+    await validateAwaitingImmutablePublication(directory, run, immutableRequest)
+  } else if (action === 'import-immutable') {
+    const { requestSha256: immutableRequestSha256 } = await validateAwaitingImmutablePublication(
+      directory, run, immutableRequest,
+    )
+    const immutableReceipt = validateImmutablePublicationReceipt(
+      await json(resolve(values.ownerReceipt)), run, immutableRequestSha256,
+    )
+    const immutableReceiptPath = join(directory, IMMUTABLE_RECEIPT_PATH)
+    await atomicJson(immutableReceiptPath, immutableReceipt)
+    const immutableReceiptSha256 = await fileDigest(immutableReceiptPath)
+    const compatibilityRequest = buildCompatibilityAttestationRequest(run, immutableReceipt, {
+      immutableRequestSha256,
+      immutableReceiptSha256,
+    })
+    outputPath = join(directory, COMPATIBILITY_REQUEST_PATH)
+    await atomicJson(outputPath, compatibilityRequest)
+    run.publication = awaitingCompatibilityAttestationState(run, {
+      immutableRequestSha256,
+      immutableReceiptSha256,
+      compatibilityRequestSha256: await fileDigest(outputPath),
+    })
+  } else {
+    const resumed = await validateAwaitingCompatibilityAttestation(directory, run, immutableRequest)
+    outputPath = resumed.path
   }
   await saveRun(directory, run)
   await writeChecksums(directory)
-  process.stdout.write(`${JSON.stringify({ run_id: run.run_id, publication: run.publication, request: relativePath(directory, path) }, null, 2)}\n`)
+  process.stdout.write(`${JSON.stringify({
+    run_id: run.run_id, publication: run.publication, request: relativePath(directory, outputPath),
+  }, null, 2)}\n`)
 }
 
 async function rollback(values) {

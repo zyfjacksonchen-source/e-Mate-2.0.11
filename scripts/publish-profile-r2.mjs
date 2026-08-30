@@ -9,7 +9,14 @@ import { fileURLToPath } from 'node:url'
 import { isDeepStrictEqual, parseArgs } from 'node:util'
 import { loadReleaseBoundary } from './change-impact.mjs'
 import { createProfileComponentAggregate } from './desktop-admission.mjs'
-import { buildPublicationRequest, loadRun, sourceIdentity, verifyManifestInputLedger } from './local-flow.mjs'
+import {
+  awaitingImmutablePublicationState,
+  buildPublicationRequest,
+  IMMUTABLE_REQUEST_PATH,
+  loadRun,
+  sourceIdentity,
+  verifyManifestInputLedger,
+} from './local-flow.mjs'
 import { composeProfileReleaseCandidate, scanComponentArtifacts } from './profile-release.mjs'
 import {
   assertCompleteProfileRelease,
@@ -218,14 +225,13 @@ async function loadLocalProfileInputs(options) {
   if (resolve(loaded.directory) !== runRoot) throw new Error('local Profile run root is invalid')
   const run = loaded.run
   const requestPath = resolve(options.request)
-  if (requestPath !== join(runRoot, 'publication', 'cloudflare-owner-request.json')) {
+  if (requestPath !== join(runRoot, IMMUTABLE_REQUEST_PATH)) {
     throw new Error('local Profile request is not the canonical run publication request')
   }
   const requestDescriptor = descriptorFor(runRoot, requestPath)
   const request = JSON.parse(readFileSync(requestPath, 'utf8'))
   if (!isDeepStrictEqual(request, buildPublicationRequest(run))) throw new Error('local Profile publication request is invalid')
-  if (run.publication?.status !== 'awaiting-existing-owner'
-    || run.publication.request_sha256 !== requestDescriptor.sha256) {
+  if (!isDeepStrictEqual(run.publication, awaitingImmutablePublicationState(run, requestDescriptor.sha256))) {
     throw new Error('local Profile publication request descriptor drifted from its run')
   }
   await verifyManifestInputLedger(runRoot, run)
