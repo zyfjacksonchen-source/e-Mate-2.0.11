@@ -2,6 +2,25 @@
 
 Verified on 2026-08-27. This document separates repository source, candidate evidence and public production state. A later source change or public-pointer change requires a new readback before dispatch.
 
+## 2026-08-31 T00 re-audit overlay
+
+This overlay supersedes the older “current” labels below without rewriting their historical evidence:
+
+| Item | Re-audited fact |
+| --- | --- |
+| Clean integration anchor | `release/2.0.15-final-integration-r6@d80e56bb09f9181a8030c27ce569f986fb59f62f` |
+| Protected main readback | `origin/main@236aaa4f80598f07bf8f59848c217b9a60155d82` |
+| Current source Base | `e-mate-desktop-profile-v14-dsh-d19aae6da310` |
+| Current Harness gitlink | `d19aae6da3100e836867418c2cf73bdee8a0b1a8` |
+| Managed source versions | 19 packages at `2.0.15`; final release version not yet frozen |
+| Exact candidate at this anchor | none; older `d882457…` and earlier artifacts are historical and inadmissible |
+| Windows transport | SSH and Codex Remote reachable; Windows Computer Use is `ALLOWED_UNAVAILABLE / NOT_APPLICABLE` only |
+| Sentry evidence | plugin/rule installed, but auth/org/project variables absent; no runtime event evidence was available |
+
+The 2026-08-31 no-cache Cloudflare R2 readback found `desktop/signed/latest.json`, `desktop/latest.json`, and `desktop/manual/v2.0.15/latest.json` byte-identical at the previously published 2.0.15 manifest: 2,961 bytes, SHA-256 `838115146f74e18de0fc90e3dc586f6bd5eab706a0e6dcbc27e6ad5a79c642fb`, ETag `61df621671e90dc90ce457494e09b295`, source `297b90df2426137edb398b023d8137a085ed8508`. That is production history, not the current source.
+
+The existing updater and both native helpers reject `targetVersion <= currentVersion`. Therefore the sole final candidate remains blocked on an explicit version freeze: a higher version can close online update from the public 2.0.15, while another 2.0.15 requires already-installed 2.0.15 users to reinstall manually. No candidate, manifest, R2 write or release claim may precede that choice. The obsolete `e-mate-image-feedback.xlsx` remains content-excluded and is not an input to this baseline.
+
 ## Authority and workpack
 
 | Item | Verified fact |

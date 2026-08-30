@@ -12,6 +12,7 @@ const target = readFileSync(resolve(root, 'docs/target-contract.md'), 'utf8')
 const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
 const desktopWorkspace = JSON.parse(readFileSync(resolve(root, 'desktop/package.json'), 'utf8'))
 const desktop = JSON.parse(readFileSync(resolve(root, 'desktop/e-mate-desktop/package.json'), 'utf8'))
+const baseContract = JSON.parse(readFileSync(resolve(root, 'desktop/e-mate-desktop/base-contract.json'), 'utf8'))
 const release = JSON.parse(readFileSync(resolve(root, 'packages/dsh/package.json'), 'utf8'))
 const componentInventory = JSON.parse(readFileSync(
   resolve(root, 'packages/dsh/profile/component-inventory.json'),
@@ -81,6 +82,10 @@ for (const path of ['scripts/release.mjs', 'scripts/publish-r2.mjs', 'scripts/pu
 }
 if (!target.includes(ACCEPTED_PREDECESSOR)) throw new Error('accepted 2.0.11 predecessor is missing')
 if (!target.includes(HARNESS_COMMIT)) throw new Error('Harness source pin is missing')
+if (baseContract.harness_commit !== HARNESS_COMMIT) throw new Error('Base/Harness source pin drifted')
+if (!target.includes(`Current successor Base contract: \`${baseContract.id}\``)) {
+  throw new Error('current successor Base contract pin is missing')
+}
 if (!target.includes(PRODUCT_UI_REFERENCE.commit)) throw new Error('e-Mate shell source pin is missing')
 if (!target.includes('TypeScript/TSX')) throw new Error('TypeScript source contract is missing')
 if (!target.includes('019ff91c-47ca-7c11-93bd-863475181a18')) throw new Error('full e-Mate UI reference is missing')

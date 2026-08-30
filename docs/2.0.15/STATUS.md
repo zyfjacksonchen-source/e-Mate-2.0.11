@@ -2,6 +2,25 @@
 
 Status vocabulary: `TODO / INVESTIGATED / CODE_COMPLETE / NARROW_TEST_PASSED / INSTALLED_E2E_PASSED / MERGED / RC_PASSED / BLOCKED`. “基本完成” is not a status.
 
+## 2026-08-31 current override
+
+The tables below retain historical 2.0.15 evidence. The current release verdict is `BLOCKED / DO_NOT_PUBLISH` at clean source anchor `d80e56bb09f9181a8030c27ce569f986fb59f62f`:
+
+| Current gate | State | Exact boundary |
+| --- | --- | --- |
+| Source integration | `NARROW_TEST_PASSED` | clean v14/Harness `d19aae6…`; later accepted fixes still require integration |
+| Final product version | `BLOCKED` | public 2.0.15 cannot online-update to different 2.0.15 bytes; explicit 2.0.15/manual-reinstall or higher-version decision required |
+| Current candidate | `BLOCKED` | no candidate exists for `d80e56b…`; old d882 and earlier artifacts cannot be reused |
+| Glass Composer owner | `BLOCKED` | plugin still guessed the semantic host with `closest()`; dedicated root-cause Owner active |
+| Local rollback ledger | `BLOCKED` | request existed but the same run could not validate/import the existing R2 Owner terminal receipt; dedicated Owner active |
+| Usage Dashboard | `BLOCKED` | source T10R2 labels are correct, production static bundle still serves old labels; static-only activation pending |
+| Windows | `INVESTIGATED` | SSH and Codex Remote ready for the one final candidate; no exact candidate install receipt exists |
+| macOS/Windows installed matrix | `BLOCKED` | all product changes, built-in Tools, update, failed-health rollback and exact-byte receipts remain open |
+| Cloudflare R2 publication | `BLOCKED` | old public pointers are internally consistent; no current signed manifest, CAS activation, rollback or public readback exists |
+| Sentry | `INVESTIGATED` | global plugin/rule ready, credentials absent; no Sentry event evidence claimed |
+
+Further 2.0.15 implementation is dispatched to direct subagents with one ticket/branch/worktree/commit each; older user-visible task references below are historical. The sole supported operator path is local `corepack pnpm flow`; GitHub CI/artifacts are not the current test/build/release path. Installer download, online update and rollback use Cloudflare R2 exclusively.
+
 ## Program gates
 
 | Gate | State | Evidence / rule |

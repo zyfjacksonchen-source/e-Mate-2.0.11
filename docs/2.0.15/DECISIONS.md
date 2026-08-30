@@ -122,6 +122,14 @@ The accepted Harness advances by one commit from immutable v9 predecessor `b469c
 
 PR #105 run `33245046765` attempt 1 is permanent failed source evidence: it stopped before build because the new root gitlink was paired with v9/b469. It is not rerun, consumed or called Build once. This v10 fix closes only the current source-binding mismatch; candidate, Build once, installed, service, Windows and public truth remain `OPEN`, while v7/v8/v9 and all published/predecessor receipts remain immutable history.
 
+### D024 — Current governance and product contracts supersede stale workpack projections
+
+The 2026-08-31 T00 re-audit anchors current source at clean `d80e56bb09f9181a8030c27ce569f986fb59f62f`, Base `e-mate-desktop-profile-v14-dsh-d19aae6da310`, and Harness `d19aae6da3100e836867418c2cf73bdee8a0b1a8`. Older v8-v13 candidates, installed receipts, CI runs and public bytes remain immutable history and cannot satisfy the current source. Further work uses direct subagents, one ticket/branch/worktree/commit per Owner; the main task coordinates, reviews, integrates and judges evidence. The sole operator entry is local `corepack pnpm flow`, while installer/update/rollback bytes remain Cloudflare R2-owned.
+
+Current product semantics are fixed at their existing native owners: T10R2 locks one task scenario from trusted terminal runtime evidence and never infers from content/model metadata; Goal and Plan in the native `@` roster invoke `/goal` and `/plan` actions rather than inserting existing projections; T26 projects image/file terminal state onto the current native Turn by admissible `callId` and latest `revision`, including immediate successful child promotion. No second classifier, Mention registry, result store, Composer host or release path is authorized.
+
+The final release version is not inferred from the folder name. Public production already contains different 2.0.15 bytes and the updater rejects same-version targets. T18 must receive an explicit final-version decision before updating all governed versions/Base/manual-manifest identity and creating the sole candidate. A higher-version plan uses a create-only retained versioned manual object and CAS-advances shared signed then legacy pointers; a same-version exception must bind all three exact current pointer identities and disclose the manual-reinstall limitation. Both routes remain fail-closed until exact installed predecessor/update/rollback and public readback receipts exist.
+
 ## Exclusive static scopes
 
 | Ticket | Exact owned paths while active |
