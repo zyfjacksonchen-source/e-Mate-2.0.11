@@ -144,5 +144,6 @@
 
 .controls[data-emate-settings-route],
 :global(body[data-dsh-desktop-platform='win32']) .controls[data-emate-settings-route] {
+  top: 22px;
   right: calc(72px + var(--dsh-desktop-caption-safe-width, 0px));
 }
