@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
   CANDIDATE_FAILURE,
   COMPUTER_USE_SCENARIOS,
+  NPM_COLLECTOR_ARGS,
   assertCleanArtifactBytes,
   blockWindowsRemote,
   blockedWindowsState,
@@ -19,13 +20,17 @@ import {
   importWindowsRemoteResult,
   markWindowsUnavailable,
   normalizeFlowArgv,
+  prepareNpmCollectorCarrier,
+  resolveNpmCollectorCli,
   runCandidateStages,
+  selectWindowsNpmCommand,
   selectCandidatePlatforms,
   validateCandidateSource,
   validatePublicationReceipt,
   validateRemoteHostname,
   verifyComputerUseReceipt,
   verifyLocalArtifact,
+  verifyNpmCollectorCarrier,
   windowsRemoteRequest,
 } from './local-flow.mjs'
 import { pinnedYarnInvocation } from './package-manager.mjs'
@@ -39,6 +44,30 @@ const RUN_ID = '20260830T000000Z-aaaaaaaaaaaa-abcdef'
 
 async function temporary() {
   return mkdtemp(join(tmpdir(), 'emate-local-flow-test-'))
+}
+
+async function npmCarrierFixture(root) {
+  const corepackRoot = join(root, 'lib', 'node_modules', 'corepack')
+  const npmRoot = join(root, 'lib', 'node_modules', 'npm')
+  const cli = join(npmRoot, 'bin', 'npm-cli.js')
+  await mkdir(corepackRoot, { recursive: true })
+  await mkdir(join(npmRoot, 'bin'), { recursive: true })
+  await writeFile(join(npmRoot, 'package.json'), `${JSON.stringify({
+    name: 'npm',
+    version: '11.17.0',
+    bin: { npm: 'bin/npm-cli.js' },
+  })}\n`)
+  await writeFile(cli, [
+    '#!/usr/bin/env node',
+    "const fs = require('node:fs')",
+    'const args = process.argv.slice(2)',
+    "if (process.env.T25_NPM_LOG) fs.appendFileSync(process.env.T25_NPM_LOG, `${JSON.stringify({ args, execPath: fs.realpathSync(process.execPath) })}\\n`)",
+    "if (args[0] === '--version') process.stdout.write('11.17.0\\n')",
+    "else if (args[0] === 'list') process.stdout.write(`${JSON.stringify({ name: 'fixture', version: '1.0.0', dependencies: {} })}\\n`)",
+    'else process.exitCode = 2',
+  ].join('\n'))
+  await chmod(cli, 0o755)
+  return { cli, corepackRoot }
 }
 
 function pe() {
@@ -266,6 +295,25 @@ test('candidate rejects a fallback pnpm before creating a run', async () => {
     })
     assert.equal(result.status, 1)
     assert.match(result.stderr, /INVALID_TOOLCHAIN_BOOTSTRAP.*pinned-package-manager/u)
+    assert.deepEqual(await readdir(runRoot).catch(() => []), before)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('candidate rejects a missing Desktop npm collector carrier before creating a run', async () => {
+  const root = await temporary()
+  const entry = join(root, 'pnpm.cjs')
+  const runRoot = fileURLToPath(new URL('../dist/local-runs', import.meta.url))
+  try {
+    await writeFile(entry, "process.stdout.write('11.7.0\\n')\n")
+    const before = await readdir(runRoot).catch(() => [])
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./local-flow.mjs', import.meta.url)), 'candidate'], {
+      encoding: 'utf8',
+      env: { ...process.env, COREPACK_ROOT: '', PATH: '/usr/bin:/bin', npm_execpath: entry },
+    })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /INVALID_TOOLCHAIN_BOOTSTRAP.*desktop-npm-collector/u)
     assert.deepEqual(await readdir(runRoot).catch(() => []), before)
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -791,16 +839,83 @@ test('publication receipt requires existing-owner manifest admission/signature a
   }, run, requestSha256), /legacy pointer receipt/u)
 })
 
-test('desktop builds reuse the inherited Corepack cache instead of a PATH shim', async () => {
+test('Desktop Yarn builds reuse the inherited Corepack cache while npm gets the verified carrier', async () => {
   const rootPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const desktopPackage = JSON.parse(await readFile(new URL('../desktop/package.json', import.meta.url), 'utf8'))
   const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
   assert.equal(rootPackage.packageManager, 'pnpm@11.7.0')
   assert.equal(desktopPackage.packageManager, 'yarn@4.18.0')
   assert.equal([...source.matchAll(/run: \(\) => runYarn\(/gu)].length, 2)
-  assert.match(source, /runYarn\(\['install', '--immutable'\], \{ cwd: join\(sourceRoot, 'desktop'\), log \}\)/u)
-  assert.match(source, /runYarn\(\[PLATFORMS\[platform\]\.build\], \{ cwd: join\(sourceRoot, 'desktop'\), log \}\)/u)
+  assert.match(source, /prepareNpmCollectorCarrier\(join\(sourceRoot, 'desktop'\)\)/u)
+  assert.match(source, /runYarn\(\['install', '--immutable'\], \{ cwd: join\(sourceRoot, 'desktop'\), log, env: npmCollector\.env \}\)/u)
+  assert.match(source, /runYarn\(\[PLATFORMS\[platform\]\.build\], \{ cwd: join\(sourceRoot, 'desktop'\), log, env: npmCollector\.env \}\)/u)
+  assert.match(source, /\]\)\.finally\(\(\) => npmCollector\?\.cleanup\(\)\)/u)
   assert.doesNotMatch(source, /\['yarn', '--cwd', 'desktop'/u)
+})
+
+test('Desktop npm collector uses one run-scoped shim carried by the active Node', async () => {
+  const root = await temporary()
+  const log = join(root, 'npm-invocations.jsonl')
+  try {
+    const fixture = await npmCarrierFixture(root)
+    const env = { ...process.env, COREPACK_ROOT: fixture.corepackRoot, PATH: '/usr/bin:/bin', T25_NPM_LOG: log }
+    const verified = await verifyNpmCollectorCarrier(root, { env })
+    assert.equal(verified.version, '11.17.0')
+    assert.equal(verified.cli, await realpath(fixture.cli))
+
+    const carrier = await prepareNpmCollectorCarrier(root, { env, platform: 'darwin' })
+    const shimRoot = carrier.env.PATH.split(delimiter)[0]
+    try {
+      const result = spawnSync('npm', NPM_COLLECTOR_ARGS, { cwd: root, encoding: 'utf8', env: carrier.env })
+      assert.equal(result.status, 0, result.stderr)
+      assert.deepEqual(JSON.parse(result.stdout), { name: 'fixture', version: '1.0.0', dependencies: {} })
+      const invocations = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+      assert.equal(invocations.some(item => item.args[0] === '--version'), true)
+      assert.equal(invocations.some(item => JSON.stringify(item.args) === JSON.stringify(NPM_COLLECTOR_ARGS)), true)
+      assert.equal(invocations.every(item => item.execPath === verified.node), true)
+    } finally {
+      await carrier.cleanup()
+    }
+    await assert.rejects(readdir(shimRoot), { code: 'ENOENT' })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Desktop npm collector rejects wrappers and preserves the native Windows npm.cmd seam', async () => {
+  const root = await temporary()
+  try {
+    const wrapper = join(root, 'npm')
+    const fakeNode = join(root, 'runtime', 'bin', 'node')
+    await writeFile(wrapper, "#!/bin/sh\nexec /application-bundled/node /application-bundled/npm-cli.js \"$@\"\n")
+    await mkdir(join(root, 'runtime', 'bin'), { recursive: true })
+    await writeFile(fakeNode, '#!/bin/sh\nexit 1\n')
+    await chmod(wrapper, 0o755)
+    await chmod(fakeNode, 0o755)
+    await assert.rejects(resolveNpmCollectorCli([wrapper]), /verified npm CLI/u)
+    await assert.rejects(verifyNpmCollectorCarrier(root, {
+      env: { COREPACK_ROOT: '', PATH: root, npm_execpath: '' },
+      execPath: fakeNode,
+      platform: 'darwin',
+    }), /verified npm CLI/u)
+    assert.equal(
+      selectWindowsNpmCommand('C:\\Program Files\\nodejs\\npm.cmd\r\n', 'C:\\Program Files\\nodejs\\node.exe'),
+      'C:\\Program Files\\nodejs\\npm.cmd',
+    )
+    assert.throws(
+      () => selectWindowsNpmCommand('C:\\BundledApp\\npm.cmd\r\n', 'C:\\Program Files\\nodejs\\node.exe'),
+      /same Node distribution/u,
+    )
+    assert.throws(
+      () => selectWindowsNpmCommand(
+        'C:\\BundledApp\\npm.cmd\r\nC:\\Program Files\\nodejs\\npm.cmd\r\n',
+        'C:\\Program Files\\nodejs\\node.exe',
+      ),
+      /same Node distribution/u,
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('runs exact Yarn from the inherited pnpm Corepack cache without corepack on PATH', async () => {
