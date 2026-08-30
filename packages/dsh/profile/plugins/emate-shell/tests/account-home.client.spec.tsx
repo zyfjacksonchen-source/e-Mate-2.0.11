@@ -64,7 +64,7 @@ describe('T11 account and compact Home integration', () => {
     expect(source).not.toContain('querySelector')
     expect(source).not.toContain('MutationObserver')
     const homeCss = readFileSync('src/client/home.module.css', 'utf8')
-    expect(homeCss).not.toContain("@import './theme-tokens.css';")
+    expect(homeCss).not.toContain("@import './theme-tokens.module.css';")
     expect(homeCss).toMatch(/data-slot='conversation'[^}]*--emate-color-canvas:\s*oklch\(/u)
     expect(homeCss).toMatch(/body\[data-ds-dark-theme\][\s\S]*--emate-color-ink:\s*oklch\(0\.981562/u)
   })

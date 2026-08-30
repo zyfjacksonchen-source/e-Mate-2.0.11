@@ -1,5 +1,3 @@
-@import './theme-tokens.css';
-
 .account,
 .settings {
   --emate-brand: var(--emate-color-brand, oklch(0.649203 0.180912 42.881));
