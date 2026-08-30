@@ -1,5 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type FormEvent } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useMemo, useRef, useState, type ComponentType, type FormEvent } from 'react'
 import css from './capabilities.module.css'
 
 type HubCategory = 'third_party' | 'content_creation' | 'office_productivity'
@@ -241,7 +240,6 @@ export function CapabilitiesPage({
   const detailSlug = useRef<string | null>(null)
   const dismissedJobs = useRef(new Set<string>())
   const [open, setOpen] = useState(() => location.pathname === '/capabilities')
-  const [target, setTarget] = useState<Element | null>(null)
   const [tab, setTab] = useState<Tab>('discover')
   const [query, setQuery] = useState('')
   const [installedQuery, setInstalledQuery] = useState('')
@@ -293,18 +291,6 @@ export function CapabilitiesPage({
     addEventListener('keydown', close)
     return () => { removeEventListener('keydown', close) }
   }, [selectedCard])
-
-  useLayoutEffect(() => {
-    if (!open) {
-      setTarget(null)
-      return undefined
-    }
-    const findTarget = () => { setTarget(document.querySelector('[data-phase]')) }
-    findTarget()
-    const observer = new MutationObserver(findTarget)
-    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-phase'] })
-    return () => { observer.disconnect() }
-  }, [open])
 
   const loadCatalog = async (nextQuery = query, cursor?: string) => {
     if (loading) return
@@ -561,9 +547,9 @@ export function CapabilitiesPage({
   const installedBySlug = useMemo(() => new Map(installed.map(item => [item.slug, item])), [installed])
   const selectedAction = selectedCard === null ? null : catalogAction(selectedCard, inventoryState, installedBySlug.get(selectedCard.slug))
 
-  if (!open || target === null) return null
+  if (!open) return null
 
-  return createPortal(
+  return (
     <main className={css.page} data-emate-capabilities="">
       <section className={css.workspace} aria-label="能力中心">
         <header className={css.header}>
@@ -703,7 +689,6 @@ export function CapabilitiesPage({
           <button className={css.dialogClose} type="button" aria-label="关闭凭据配置" disabled={loading} onClick={() => { setCredentialValue(''); setCredentialAction(null) }}><CloseIcon size={16} /></button>
         </form>
       </div>}
-    </main>,
-    target,
+    </main>
   )
 }

@@ -2,8 +2,12 @@
 import React from 'react'
 import { readFileSync } from 'node:fs'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { SlotTestRuntime } from '../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
+import { apply as registerNativeLayout, inject as nativeLayoutInject } from '../../../upstream/deepseek-harness/packages/client/ui-layout/src/client/index.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { registerRouteScopedConversationHeader } from '../../dsh/profile/plugins/emate-shell/src/client/index.ts'
 import { CapabilitiesPage, CapabilityControl } from '../src/client/capabilities.tsx'
+import { apply as registerSkillHub, inject as skillHubInject } from '../src/client/index.tsx'
 
 const SHA256 = 'a'.repeat(64)
 const Icon = () => <svg aria-hidden="true" />
@@ -45,6 +49,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  document.body.removeAttribute('data-ds-dark-theme')
   history.replaceState(null, '', '/')
 })
 
@@ -59,7 +64,7 @@ function renderPage(callSkillHub = vi.fn(async (endpoint: string) => {
     ? { ok: true, value: { schema_version: 1, items: capabilityItems } }
     : { ok: true, value: { accepted: true } })
   const setCredential = vi.fn(async () => ({ ok: true, value: {} }))
-  render(<><div data-phase="hero" /><CapabilitiesPage
+  render(<><div data-phase="product" /><div data-shell-overlay=""><CapabilitiesPage
     callCapabilities={callCapabilities}
     callSkillHub={callSkillHub}
     setCredential={setCredential}
@@ -69,7 +74,7 @@ function renderPage(callSkillHub = vi.fn(async (endpoint: string) => {
     RefreshIcon={Icon}
     SkillIcon={Icon}
     capabilityIcons={{ browser: Icon, collaboration: Icon, image: Icon, office: Icon, ocr: Icon }}
-  /></>)
+  /></div></>)
   return { callCapabilities, callSkillHub, setCredential }
 }
 
@@ -85,13 +90,14 @@ describe('capability center fidelity surface', () => {
     expect(location.pathname).toBe('/capabilities')
   })
 
-  it('uses the native main phase as a standalone page and preserves the complete Skill Hub surface', async () => {
+  it('uses its registered overlay as the standalone page host and preserves the complete Skill Hub surface', async () => {
     renderPage()
     const page = document.querySelector<HTMLElement>('[data-emate-capabilities]')
     const hub = await screen.findByRole('region', { name: 'Skill Hub' })
     const builtins = screen.getByText('本机内置能力').closest('details')
+    const overlay = document.querySelector('[data-shell-overlay]')
 
-    expect(page?.parentElement?.hasAttribute('data-phase')).toBe(true)
+    expect(page?.parentElement).toBe(overlay)
     expect(hub.compareDocumentPosition(builtins!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole('tab', { name: '发现' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: /已安装/ })).toBeTruthy()
@@ -100,6 +106,76 @@ describe('capability center fidelity surface', () => {
     const styles = readFileSync('src/client/capabilities.module.css', 'utf8')
     expect(styles).toMatch(/\.page\s*\{[\s\S]*?background:\s*var\(--workspace-surface\)/u)
     expect(styles).toMatch(/\.workspace\s*\{[\s\S]*?width:\s*min\(1180px, calc\(100% - 8px\)\);[\s\S]*?height:\s*calc\(100% - 16px\);[\s\S]*?margin:\s*8px auto;[\s\S]*?border:\s*1px solid var\(--rule\);[\s\S]*?border-radius:\s*16px;[\s\S]*?background:\s*var\(--workspace-surface\)/u)
+  })
+
+  it('keeps one page in the real root overlay while route-owned phase nodes turn over', async () => {
+    const runtime = await SlotTestRuntime.create()
+    const snapshot = (colorScheme: 'light' | 'dark') => {
+      const active = { id: `${colorScheme}-test`, colorScheme, tokens: {} }
+      return { preference: colorScheme, active, themes: [active], revision: colorScheme === 'light' ? 1 : 2 }
+    }
+    runtime.provide('theme', { getTheme: () => snapshot('light') } as never)
+    runtime.provide('connection', {
+      rpc: { call: vi.fn(async (route: string, endpoint: string) => {
+        if (route === '/emate.capabilities') return { ok: true, value: { schema_version: 1, items: capabilityItems } }
+        if (endpoint === 'catalog.search') return { ok: true, value: { items: [hubCard], next_cursor: null } }
+        if (endpoint === 'inventory.list') return { ok: true, value: { schema_version: 1, items: [installedSkill] } }
+        if (endpoint === 'jobs.list') return { ok: true, value: { items: [] } }
+        return { ok: true, value: {} }
+      }) },
+      api: { credentials: { set: vi.fn(async () => ({ result: { ok: true, value: {} } })) } },
+    } as never)
+
+    try {
+      await runtime.mount({ inject: [...nativeLayoutInject], apply: registerNativeLayout })
+      runtime.slots.register({ name: 'conversation' } as never, () => <div data-phase="active" />)
+      const view = runtime.renderRoot()
+      await runtime.mount({ inject: ['slots', 'layout'], apply: registerRouteScopedConversationHeader })
+      await runtime.mount({ inject: [...skillHubInject], apply: registerSkillHub })
+      await runtime.flush()
+      const overlay = view.container.querySelector('[data-shell-overlay]')
+      const overlaySlot = overlay?.querySelector('[data-slot="shell.overlay"]')
+      const root = overlay?.parentElement
+      let phase = view.container.querySelector('[data-phase]')
+
+      await waitFor(() => expect(overlay?.querySelectorAll('[data-emate-capabilities]')).toHaveLength(1))
+      expect(phase?.getAttribute('data-phase')).toBe('product')
+      expect(view.container.querySelector('[data-emate-capabilities]')?.parentElement).toBe(overlaySlot)
+      expect(view.container.querySelectorAll('[data-emate-capabilities]')).toHaveLength(1)
+      for (let index = 0; index < 3; index += 1) {
+        if (index > 0) runtime.ctx.emit('theme/change', snapshot(index === 1 ? 'dark' : 'light') as never)
+        view.rerender(runtime.slots.renderSlot('root', {}))
+        expect(view.container.querySelector('[data-shell-overlay]')?.parentElement).toBe(root)
+        expect(view.container.querySelector('[data-shell-overlay]')).toBe(overlay)
+        expect(overlay?.querySelector('[data-slot="shell.overlay"]')).toBe(overlaySlot)
+        expect(document.body.hasAttribute('data-ds-dark-theme')).toBe(index === 1)
+        expect(overlaySlot?.querySelectorAll('[data-emate-capabilities]')).toHaveLength(1)
+        expect(view.container.querySelector('[data-emate-capabilities]')?.parentElement).toBe(overlaySlot)
+
+        history.pushState(null, '', `/chat/session-${index}`)
+        fireEvent.popState(window)
+        await runtime.flush()
+        expect(view.container.querySelectorAll('[data-emate-capabilities]')).toHaveLength(0)
+        const activePhase = view.container.querySelector('[data-phase]')
+        expect(activePhase).not.toBe(phase)
+        expect(activePhase?.getAttribute('data-phase')).toBe('active')
+        expect(view.container.querySelector('[data-emate-product-surface]')).toBeNull()
+        phase = activePhase
+
+        history.pushState(null, '', '/capabilities')
+        fireEvent.popState(window)
+        await runtime.flush()
+        await waitFor(() => expect(overlay?.querySelectorAll('[data-emate-capabilities]')).toHaveLength(1))
+        expect(view.container.querySelectorAll('[data-emate-capabilities]')).toHaveLength(1)
+        expect(view.container.querySelector('[data-emate-capabilities]')?.parentElement).toBe(overlaySlot)
+        expect(view.container.querySelector('[data-phase]')).not.toBe(phase)
+        phase = view.container.querySelector('[data-phase]')
+        expect(phase?.getAttribute('data-phase')).toBe('product')
+        expect(view.container.querySelectorAll('[data-emate-product-surface]')).toHaveLength(1)
+      }
+    } finally {
+      await runtime.dispose()
+    }
   })
 
   it('keeps dynamic capability categories and real capability actions live', async () => {
