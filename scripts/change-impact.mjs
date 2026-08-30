@@ -12,7 +12,7 @@ import {
 import { HARNESS_COMMIT } from './harness-provenance.mjs'
 
 export const BASE_CONTRACT_PATH = 'desktop/e-mate-desktop/base-contract.json'
-export const BASE_CONTRACT_ID = `e-mate-desktop-profile-v13-dsh-${HARNESS_COMMIT.slice(0, 12)}`
+export const BASE_CONTRACT_ID = `e-mate-desktop-profile-v14-dsh-${HARNESS_COMMIT.slice(0, 12)}`
 export const ACCEPTED_PREDECESSOR = '6a7f4b9d59a1d8970345638946fb6564e2f5f93e'
 export const PRODUCT_UI_REFERENCE = Object.freeze({
   repository: 'zyfjacksonchen-source/ECoreX',

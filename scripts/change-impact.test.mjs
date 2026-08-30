@@ -25,7 +25,6 @@ const PREDECESSOR_BASE_CONTRACT_ID = 'e-mate-desktop-profile-v8-dsh-4787caf39134
 const PREDECESSOR_HARNESS_COMMIT = '4787caf39134df190105b272da0dd2ba893d4d75'
 const RUNTIME_IMPORTS = [
   '@deepseek-ai/cordis',
-  '@deepseek-ai/dsh-client-runtime',
   '@deepseek-ai/dsh-client-ui-attachment',
   '@deepseek-ai/dsh-client-ui-primitives',
   '@deepseek-ai/dsh-credentials',
@@ -217,7 +216,7 @@ describe('repository release boundary', () => {
     const t18 = JSON.parse(readFileSync(join(root, 'docs/2.0.15/evidence/T18.json'), 'utf8'))
     assert.equal(boundary.valid, true, boundary.errors.join('\n'))
     assert.deepEqual(boundary.errors, [])
-    assert.equal(BASE_CONTRACT_ID, `e-mate-desktop-profile-v13-dsh-${HARNESS_COMMIT.slice(0, 12)}`)
+    assert.equal(BASE_CONTRACT_ID, `e-mate-desktop-profile-v14-dsh-${HARNESS_COMMIT.slice(0, 12)}`)
     assert.equal(boundary.baseContract.desktop_api, 2)
     assert.equal(boundary.baseContract.id, BASE_CONTRACT_ID)
     assert.equal(boundary.baseContract.harness_commit, HARNESS_COMMIT)
