@@ -12,7 +12,7 @@ import {
 import { HARNESS_COMMIT } from './harness-provenance.mjs'
 
 export const BASE_CONTRACT_PATH = 'desktop/e-mate-desktop/base-contract.json'
-export const BASE_CONTRACT_ID = `e-mate-desktop-profile-v10-dsh-${HARNESS_COMMIT.slice(0, 12)}`
+export const BASE_CONTRACT_ID = `e-mate-desktop-profile-v12-dsh-${HARNESS_COMMIT.slice(0, 12)}`
 export const ACCEPTED_PREDECESSOR = '6a7f4b9d59a1d8970345638946fb6564e2f5f93e'
 export const PRODUCT_UI_REFERENCE = Object.freeze({
   repository: 'zyfjacksonchen-source/ECoreX',
@@ -304,7 +304,7 @@ function validateBaseContract(value) {
   ])) errors.push('base contract fields are invalid')
   if (value.schema_version !== 1) errors.push('base contract schema_version must be 1')
   if (value.id !== BASE_CONTRACT_ID) errors.push(`base contract id must equal ${BASE_CONTRACT_ID}`)
-  if (value.desktop_api !== 1) errors.push('base contract desktop_api must be 1')
+  if (value.desktop_api !== 2) errors.push('base contract desktop_api must be 2')
   if (value.profile_format !== 1) errors.push('base contract profile_format must be 1')
   if (value.schedule_protocol_floor !== 1) errors.push('base contract schedule_protocol_floor must be 1')
   const reference = record(value.desktop_reference) ? value.desktop_reference : {}

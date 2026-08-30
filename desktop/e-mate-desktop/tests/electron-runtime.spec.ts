@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -106,7 +106,7 @@ const electron = vi.hoisted(() => {
     showErrorBox: vi.fn(),
     showMessageBox: vi.fn(async () => ({ response: 0, checkboxChecked: false })),
     showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })),
-    showSaveDialog: vi.fn(async () => ({ canceled: true })),
+    showSaveDialog: vi.fn(async (): Promise<{ canceled: boolean; filePath?: string }> => ({ canceled: true })),
   }
   const appIcon = {
     isEmpty: vi.fn(() => false),
@@ -200,7 +200,7 @@ const electron = vi.hoisted(() => {
   return {
     app: {
       dock: { setIcon: vi.fn() },
-      getPath: vi.fn((name: string) => name === 'home' ? '/tmp/dsh-home' : '/tmp/dsh-desktop-user-data'),
+      getPath: vi.fn((name: string): string => name === 'home' ? '/tmp/dsh-home' : '/tmp/dsh-desktop-user-data'),
       getVersion: vi.fn(() => '43.4.0'),
       isPackaged: false,
       on: vi.fn(),
@@ -217,7 +217,7 @@ const electron = vi.hoisted(() => {
     loadURL,
     dialog,
     ipcMain,
-    clipboard: { writeText: vi.fn() },
+    clipboard: { writeImage: vi.fn(), writeText: vi.fn() },
     Menu: {
       buildFromTemplate: vi.fn((template: unknown[]) => {
         menuTemplates.push(template)
@@ -229,7 +229,10 @@ const electron = vi.hoisted(() => {
     webContents,
     menuTemplates,
     menuPopups,
-    nativeImage: { createFromPath },
+    nativeImage: {
+      createFromBuffer: vi.fn(() => ({ isEmpty: () => false })),
+      createFromPath,
+    },
     nativeTheme,
     net: { fetch: vi.fn() },
     Notification,
@@ -277,7 +280,8 @@ const spec: DesktopShellSpec = {
     bluePath: '/tmp/tray-icon-blue.png',
   },
   readThemeSource: vi.fn(() => 'system' as const),
-  resourceRoots: () => ['/tmp/e-mate-workspace'],
+  resourceRoots: () => ['/tmp'],
+  resourceSessionRoot: sessionId => sessionId === 'session-1' ? '/tmp' : undefined,
   requestQuit: () => {},
   requestModeChange: vi.fn(async () => {}),
 }
@@ -417,6 +421,18 @@ describe('Electron compatibility runtime', () => {
       expect(electron.menuTemplates.at(-1)?.map(item => (item as { label?: string }).label).filter(Boolean))
         .toEqual(['另存为…', '复制路径', '复制文件内容', '打开方式', '在 Finder 中显示'])
     })
+    const menuCount = electron.menuTemplates.length
+    electron.webContents.executeJavaScript.mockResolvedValueOnce({ kind: 'handled' })
+    contextMenuListener({}, {
+      x: 40,
+      y: 80,
+      isEditable: false,
+      selectionText: '',
+      editFlags: { canCut: false, canCopy: false, canPaste: false },
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(electron.menuTemplates).toHaveLength(menuCount)
 
     const titleListener = electron.browserWindowOn.mock.calls.find(([event]) => event === 'page-title-updated')?.[1]
     expect(titleListener).toEqual(expect.any(Function))
@@ -445,9 +461,11 @@ describe('Electron compatibility runtime', () => {
     const read = electron.ipcMain.on.mock.calls.find(([channel]) => channel === 'emate:desktop-update-state-read')?.[1]
     const requestCancel = electron.ipcMain.on.mock.calls.find(([channel]) => channel === 'emate:desktop-update-cancel')?.[1]
     const requestUpdate = electron.ipcMain.handle.mock.calls.find(([channel]) => channel === 'emate:desktop-update-run-interactive')?.[1]
+    const runResource = electron.ipcMain.handle.mock.calls.find(([channel]) => channel === 'emate:desktop-resource-run')?.[1]
     expect(read).toEqual(expect.any(Function))
     expect(requestCancel).toEqual(expect.any(Function))
     expect(requestUpdate).toEqual(expect.any(Function))
+    expect(runResource).toEqual(expect.any(Function))
     const readEvent = { sender: electron.webContents, returnValue: undefined as unknown }
     read(readEvent)
     expect(readEvent.returnValue).toEqual({ stage: 'checking', updateKind: 'base' })
@@ -465,10 +483,40 @@ describe('Electron compatibility runtime', () => {
     expect(runInteractiveUpdate).toHaveBeenCalledOnce()
     await expect(requestUpdate({ sender: {} })).rejects.toThrow('update request did not originate from owning Renderer')
 
+    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+    electron.webContents.executeJavaScript.mockResolvedValueOnce(`data:image/png;base64,${png.toString('base64')}`)
+    await expect(runResource({ sender: electron.webContents }, {
+      action: 'copy-image',
+      resource: { kind: 'image', sessionId: 'session-1', name: 'result.png', src: 'blob:result' },
+    })).resolves.toBeUndefined()
+    expect(electron.nativeImage.createFromBuffer).toHaveBeenCalledWith(png)
+    expect(electron.clipboard.writeImage).toHaveBeenCalledOnce()
+    await expect(runResource({ sender: {} }, {
+      action: 'copy-image',
+      resource: { kind: 'image', sessionId: 'session-1', name: 'result.png', src: 'blob:result' },
+    })).rejects.toThrow('resource request did not originate from owning Renderer')
+    await expect(runResource({ sender: electron.webContents }, { action: 'unknown' }))
+      .rejects.toThrow('invalid resource request')
+    await expect(runResource({ sender: electron.webContents }, {
+      action: 'copy-image',
+      resource: { kind: 'image', sessionId: 'missing', name: 'result.png', src: 'blob:result' },
+    })).rejects.toThrow('resource session is not active')
+    electron.webContents.executeJavaScript.mockResolvedValueOnce(`data:image/jpeg;base64,${png.toString('base64')}`)
+    await expect(runResource({ sender: electron.webContents }, {
+      action: 'copy-image',
+      resource: { kind: 'image', sessionId: 'session-1', name: 'result.jpg', src: 'blob:result' },
+    })).rejects.toThrow('image type does not match its bytes')
+    electron.webContents.executeJavaScript.mockRejectedValueOnce(new Error('image-too-large'))
+    await expect(runResource({ sender: electron.webContents }, {
+      action: 'copy-image',
+      resource: { kind: 'image', sessionId: 'session-1', name: 'result.png', src: 'blob:result' },
+    })).rejects.toThrow('image-too-large')
+
     await release()
     expect(electron.ipcMain.off).toHaveBeenCalledWith('emate:desktop-update-state-read', read)
     expect(electron.ipcMain.off).toHaveBeenCalledWith('emate:desktop-update-cancel', requestCancel)
     expect(electron.ipcMain.removeHandler).toHaveBeenCalledWith('emate:desktop-update-run-interactive')
+    expect(electron.ipcMain.removeHandler).toHaveBeenCalledWith('emate:desktop-resource-run')
   })
 
   it('removes the Renderer update carrier when window mounting fails', async () => {
@@ -480,7 +528,119 @@ describe('Electron compatibility runtime', () => {
 
     await expect(runtime.mountScheduled()).rejects.toThrow('renderer unavailable')
     expect(electron.ipcMain.removeHandler).toHaveBeenCalledWith('emate:desktop-update-run-interactive')
+    expect(electron.ipcMain.removeHandler).toHaveBeenCalledWith('emate:desktop-resource-run')
     await expect(release()).rejects.toThrow('renderer unavailable')
+  })
+
+  it('fences every file action to the live session workspace and rejects path escape', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const root = mkdtempSync(join(tmpdir(), 'e-mate-resource-root-'))
+    const outside = mkdtempSync(join(tmpdir(), 'e-mate-resource-outside-'))
+    const source = join(root, '报告.txt')
+    const copied = join(root, '报告-copy.txt')
+    const outsideFile = join(outside, 'outside.txt')
+    const escape = join(root, 'escape.txt')
+    writeFileSync(source, 'artifact bytes')
+    writeFileSync(outsideFile, 'outside bytes')
+    symlinkSync(outsideFile, escape)
+    try {
+      const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+      const runtime = new ElectronDesktopRuntime(async () => {})
+      const release = runtime.schedule({
+        ...spec,
+        resourceRoots: () => [root],
+        resourceSessionRoot: sessionId => sessionId === 'session-files' ? root : undefined,
+      })
+      await runtime.mountScheduled()
+      const runResource = electron.ipcMain.handle.mock.calls.find(([channel]) => channel === 'emate:desktop-resource-run')?.[1]
+      const resource = { kind: 'file', sessionId: 'session-files', root, path: source }
+
+      await runResource({ sender: electron.webContents }, { action: 'copy-path', resource })
+      expect(electron.clipboard.writeText).toHaveBeenCalledWith(realpathSync(source))
+      await runResource({ sender: electron.webContents }, { action: 'reveal', resource })
+      expect(electron.shell.showItemInFolder).toHaveBeenCalledWith(realpathSync(source))
+
+      electron.dialog.showSaveDialog.mockResolvedValueOnce({ canceled: false, filePath: copied })
+      await runResource({ sender: electron.webContents }, { action: 'save-as', resource })
+      expect(readFileSync(copied, 'utf8')).toBe('artifact bytes')
+
+      electron.dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: ['/Applications/Preview.app'] })
+      const opening = runResource({ sender: electron.webContents }, { action: 'open-with', resource })
+      await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenCalledWith(
+        '/usr/bin/open', ['-a', '/Applications/Preview.app', '--', realpathSync(source)], expect.any(Object),
+      ) })
+      childProcess.emit('spawn')
+      await opening
+
+      const copying = runResource({ sender: electron.webContents }, { action: 'copy-file', resource })
+      await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenLastCalledWith(
+        '/usr/bin/osascript', expect.any(Array), expect.objectContaining({
+          env: expect.objectContaining({ E_MATE_COPY_PATH: realpathSync(source) }),
+        }),
+      ) })
+      childProcess.emit('spawn')
+      await copying
+
+      await expect(runResource({ sender: electron.webContents }, {
+        action: 'reveal', resource: { ...resource, sessionId: 'missing' },
+      })).rejects.toThrow('resource session is not active')
+      await expect(runResource({ sender: electron.webContents }, {
+        action: 'reveal', resource: { ...resource, root: outside, path: outsideFile },
+      })).rejects.toThrow('resource workspace does not match its session')
+      await expect(runResource({ sender: electron.webContents }, {
+        action: 'reveal', resource: { ...resource, path: escape },
+      })).rejects.toThrow('resource is not a regular workspace file')
+      await expect(runResource({ sender: electron.webContents }, {
+        action: 'reveal', resource: { ...resource, path: join(root, 'missing.txt') },
+      })).rejects.toThrow()
+      await expect(runResource({ sender: electron.webContents }, {
+        action: 'reveal', resource: { ...resource, path: root },
+      })).rejects.toThrow('resource is not a regular workspace file')
+
+      await release()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('materializes image bytes only for download or reveal actions', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const root = mkdtempSync(join(tmpdir(), 'e-mate-image-resource-'))
+    const originalGetPath = electron.app.getPath.getMockImplementation()
+    electron.app.getPath.mockImplementation(() => root)
+    try {
+      const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+      const runtime = new ElectronDesktopRuntime(async () => {})
+      const release = runtime.schedule({
+        ...spec,
+        resourceRoots: () => [root],
+        resourceSessionRoot: sessionId => sessionId === 'session-images' ? root : undefined,
+      })
+      await runtime.mountScheduled()
+      const runResource = electron.ipcMain.handle.mock.calls.find(([channel]) => channel === 'emate:desktop-resource-run')?.[1]
+      const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+      const response = `data:image/png;base64,${bytes.toString('base64')}`
+      const resource = {
+        kind: 'image', sessionId: 'session-images', name: 'result.png', src: 'blob:result',
+      }
+
+      electron.webContents.executeJavaScript.mockResolvedValueOnce(response)
+      await runResource({ sender: electron.webContents }, { action: 'reveal', resource })
+      const revealed = electron.shell.showItemInFolder.mock.calls.at(-1)?.[0]
+      expect(readFileSync(revealed)).toEqual(bytes)
+
+      const copy = join(root, 'downloaded.png')
+      electron.dialog.showSaveDialog.mockResolvedValueOnce({ canceled: false, filePath: copy })
+      electron.webContents.executeJavaScript.mockResolvedValueOnce(response)
+      await runResource({ sender: electron.webContents }, { action: 'save-as', resource })
+      expect(readFileSync(copy)).toEqual(bytes)
+
+      await release()
+    } finally {
+      electron.app.getPath.mockImplementation(originalGetPath!)
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('keeps the compatibility frame synchronized with the e-Mate theme', async () => {

@@ -1,15 +1,27 @@
-import { useLayoutEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { MutableRefObject, RefObject } from 'react'
 import type {
+  ChatConversationViewNode,
   ConversationLocation,
   ConversationNodeContext,
   ConversationNodeDefinition,
+  ConversationSnapshot,
 } from '@deepseek-ai/dsh-client-runtime/client'
-import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { ImageGallery } from '@deepseek-ai/dsh-client-ui-attachment'
-import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import { IconBrowseOutline16, IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { MessageImage } from '@deepseek-ai/dsh-client-ui-attachment'
+import type { ImageAttachmentLimits, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import {
+  IconChevronLeftOutline14,
+  IconChevronRightOutline14,
+  IconEllipsisOutline16,
+} from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  DESKTOP_RESOURCE_BRIDGE,
+  type DesktopResourceAction,
+  type DesktopResourceBridgeWindow,
+  type DesktopResourceRequest,
+} from '../../../../../../../desktop/e-mate-desktop/src/desktop-resource-bridge-contract.ts'
+import { normalizedAbsolute } from '../../../../../../../desktop/e-mate-desktop/src/client/resource-context.ts'
 import {
   imageReceiptRole,
   parseImageOutputReceipt,
@@ -17,20 +29,21 @@ import {
 } from './image-gallery-contract.ts'
 import css from './image-gallery.module.css'
 
-interface ImageDisclosureData {
-  imageCount: number
-}
-
-interface ImageDisclosureState extends ImageDisclosureData {
-  sourceSeq: number
-}
-
 interface ToolImagesData {
-  items: readonly ImageGalleryItem[]
+  readonly item: ImageGalleryItem
 }
 
 interface ToolImagesState extends ToolImagesData {
-  sourceSeq: number
+  readonly sourceSeq: number
+}
+
+interface ImageCallsTurnData {
+  readonly calls: readonly { readonly callId: string; readonly seq: number }[]
+  readonly delegations: readonly { readonly callId: string; readonly seq: number }[]
+}
+
+interface ImageCallsState extends ImageCallsTurnData {
+  readonly turn: number
 }
 
 type ImageOutputEventData = Record<string, unknown>
@@ -42,9 +55,16 @@ declare module '@deepseek-ai/dsh-session/types' {
   }
 }
 
+declare module '@deepseek-ai/dsh-client-runtime/client' {
+  interface ConversationTurnDataMap {
+    /** Ordered direct ImageGen and native subagent call identities for this engine-owned Turn. */
+    'e-mate-image-calls': ImageCallsTurnData
+  }
+}
+
 declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
   interface ChatNodeDataMap {
-    'e-mate-image-disclosure': ImageDisclosureData
+    /** Strict terminal ImageGen receipt; hidden and read only by the Turn tail. */
     'e-mate-tool-images': ToolImagesData
   }
 }
@@ -53,74 +73,29 @@ function locationOf(context: ConversationNodeContext): ConversationLocation {
   return context.start?.location ?? context.matches[0]?.location ?? { kind: 'unresolved' }
 }
 
-export const imageDisclosureDefinition: ConversationNodeDefinition<ImageDisclosureState> = {
-  kind: 'e-mate-image-disclosure',
-  target: 'chat',
-  match: event => {
-    if (event.type !== 'assistant/message' || !isAppendSurfaceEvent(event)) return null
-    const imageCount = event.data.message.content.filter(block => block.type === 'image').length
-    return imageCount === 0 ? null : { id: `assistant:${event.data.message.id}`, role: 'start' }
-  },
-  start: (_context, match) => {
-    if (match.event.type !== 'assistant/message') {
-      throw new Error('e-Mate image disclosure requires a durable assistant message')
-    }
-    return {
-      imageCount: match.event.data.message.content.filter(block => block.type === 'image').length,
-      sourceSeq: match.event.seq,
-    }
-  },
-  update: context => context.state,
-  buildViewNode: context => context.state === undefined ? null : ({
-    key: context.key,
-    kind: 'e-mate-image-disclosure',
-    id: context.id,
-    target: 'chat',
-    anchorSeq: context.state.sourceSeq + 0.02,
-    location: locationOf(context),
-    visibility: 'visible',
-    data: { imageCount: context.state.imageCount },
-  }),
+function receipt(event: Parameters<ConversationNodeDefinition<ToolImagesState>['match']>[0]): ImageGalleryItem | null {
+  return event.type === 'emate/image-output' ? parseImageOutputReceipt(event.data) : null
 }
 
-function nativeToolItems(
-  event: Parameters<ConversationNodeDefinition<ToolImagesState>['match']>[0],
-): ToolImagesData['items'] {
-  if (event.type === 'emate/image-output') {
-    const item = parseImageOutputReceipt(event.data)
-    return item === null ? [] : [item]
-  }
-  if (event.type !== 'tool/result') return []
-  const attachments = event.data.message.content.flatMap(block => block.type === 'tool-result'
-    ? block.content.filter(image => image.type === 'image').map(image => ({ attachment: image.attachment }))
-    : [])
-  const seen = new Set<string>()
-  return attachments.flatMap(({ attachment }) => {
-    if (seen.has(attachment.attachmentId)) return []
-    seen.add(attachment.attachmentId)
-    return [{
-      callId: String(event.data.message.source.callId),
-      revision: 0,
-      status: 'completed' as const,
-      operation: 'unknown' as const,
-      attachment,
-    }]
-  })
-}
-
+/** Persist only the strict receipt; presentation is owned by the completed Turn tail. */
 export const toolImagesDefinition: ConversationNodeDefinition<ToolImagesState> = {
   kind: 'e-mate-tool-images',
   target: 'chat',
   match: event => {
-    if (event.type !== 'emate/image-output' && (event.type !== 'tool/result' || !isAppendSurfaceEvent(event))) return null
-    const items = nativeToolItems(event)
-    if (items.length === 0) return null
-    const item = items[0]!
-    const id = event.type === 'emate/image-output' ? item.callId : event.data.message.id
-    return { id: `tool-images:${id}`, role: event.type === 'emate/image-output' ? imageReceiptRole(item) : 'start' }
+    const item = receipt(event)
+    return item === null ? null : { id: `tool-images:${item.callId}`, role: imageReceiptRole(item) }
   },
-  start: (_context, match) => ({ items: nativeToolItems(match.event), sourceSeq: match.event.seq }),
-  update: (context, match) => ({ ...context.state, items: nativeToolItems(match.event) }),
+  start: (_context, match) => {
+    const item = receipt(match.event)
+    if (item === null) throw new Error('e-Mate image receipt start requires a terminal receipt')
+    return { item, sourceSeq: match.event.seq }
+  },
+  update: (context, match) => {
+    const item = receipt(match.event)
+    return item === null || item.revision < context.state.item.revision
+      ? context.state
+      : { ...context.state, item }
+  },
   buildViewNode: context => context.state === undefined ? null : ({
     key: context.key,
     kind: 'e-mate-tool-images',
@@ -128,89 +103,119 @@ export const toolImagesDefinition: ConversationNodeDefinition<ToolImagesState> =
     target: 'chat',
     anchorSeq: context.state.sourceSeq + 0.02,
     location: locationOf(context),
-    visibility: 'visible',
-    data: { items: context.state.items },
+    visibility: 'hidden',
+    data: { item: context.state.item },
   }),
 }
 
-function previousAssistantRow(row: HTMLElement): HTMLElement | null {
-  let sibling = row.previousElementSibling as HTMLElement | null
-  for (let distance = 0; sibling !== null && distance < 4; distance += 1) {
-    if (sibling.dataset.chatFlowKind === 'assistant-step') return sibling
-    sibling = sibling.previousElementSibling as HTMLElement | null
-  }
-  return null
+/** Turn-local direct ImageGen and native subagent provenance; it publishes no presentation node. */
+export const imageCallsDefinition: ConversationNodeDefinition<ImageCallsState> = {
+  kind: 'e-mate-image-calls',
+  match: event => {
+    if (event.type === 'turn/start') return { id: String(event.data.turn), role: 'start' }
+    if (event.type === 'tool/call'
+      && (event.data.name === 'imagegen' || event.data.name === 'subagent' || event.data.name === 'subagent_fork')) {
+      return { id: String(event.data.turn), role: 'update' }
+    }
+    return null
+  },
+  start: (_context, match) => {
+    if (match.event.type !== 'turn/start') throw new Error('image call marker start requires turn/start')
+    return { turn: match.event.data.turn, calls: [], delegations: [] }
+  },
+  update: (context, match) => {
+    if (match.event.type !== 'tool/call'
+      || (match.event.data.name !== 'imagegen'
+        && match.event.data.name !== 'subagent'
+        && match.event.data.name !== 'subagent_fork')) return context.state
+    const callId = String(match.event.data.callId)
+    const key = match.event.data.name === 'imagegen' ? 'calls' : 'delegations'
+    return context.state[key].some(call => call.callId === callId)
+      ? context.state
+      : { ...context.state, [key]: [...context.state[key], { callId, seq: match.event.seq }] }
+  },
+  buildLocationData: (context, scope) => scope !== 'turn' || context.state === undefined
+    ? null
+    : {
+      kind: 'turn',
+      turn: context.state.turn,
+      key: 'e-mate-image-calls',
+      value: { calls: context.state.calls, delegations: context.state.delegations },
+    },
 }
 
-export function ImageDisclosure({ node }: ChatNodeViewProps<'e-mate-image-disclosure'>) {
-  const { imageCount } = node.data
-  const controlId = `e-mate-images-${node.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
-  const rootRef = useRef<HTMLDivElement>(null)
-  const galleriesRef = useRef<HTMLElement[]>([])
-  const [expanded, setExpanded] = useState(true)
-  const [portalHost, setPortalHost] = useState<HTMLElement | null>(null)
-  const [controls, setControls] = useState('')
+interface ProducedData {
+  readonly produced: readonly { readonly seq: number; readonly path: string }[]
+}
 
-  useLayoutEffect(() => {
-    const row = rootRef.current?.closest<HTMLElement>('[data-chat-flow-kind]')
-    if (row === undefined || row === null) return undefined
-    const sourceRow = previousAssistantRow(row)
-    if (sourceRow === null) return undefined
-    const galleries = [...sourceRow.querySelectorAll<HTMLElement>('[data-align="start"]')]
-      .filter(gallery => gallery.closest('[data-chat-flow-kind]') === sourceRow)
-    const first = galleries[0]
-    if (first === undefined || first.parentElement === null) return undefined
+export interface ArtifactTerminalMatch {
+  readonly callIds: readonly string[]
+  readonly paths: readonly string[]
+}
 
-    const previous = galleries.map((gallery, index) => ({
-      gallery,
-      hidden: gallery.hidden,
-      id: gallery.id,
-      nextId: gallery.id || `${controlId}-${index + 1}`,
-    }))
-    for (const item of previous) {
-      item.gallery.id = item.nextId
-      item.gallery.hidden = true
-      item.gallery.setAttribute('data-emate-image-gallery', '')
+/** Claim the one terminal only when this closing Turn owns images or files. */
+export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTerminalMatch | null {
+  if (owner.turn.status !== 'closed') return null
+  const imageData = owner.turn.data.get('e-mate-image-calls')
+  const candidates = (imageData?.calls ?? []).filter(call => call.seq <= owner.seq)
+  const nodes = owner.nodes ?? []
+  const settlementSenders = new Set<string>()
+  for (const node of nodes) {
+    if (node.kind !== 'context' || node.anchorSeq > owner.seq) continue
+    if ((node.location.kind !== 'turn' && node.location.kind !== 'step')
+      || node.location.turn.turn !== owner.turn.turn) continue
+    const source = (node.data as { readonly source?: unknown }).source
+    if (source === null || typeof source !== 'object' || Array.isArray(source)) continue
+    const settlement = source as Record<string, unknown>
+    if (settlement.kind === 'subagent-settled'
+      && typeof settlement.senderSessionId === 'string' && settlement.senderSessionId !== '') {
+      settlementSenders.add(settlement.senderSessionId)
     }
-    galleriesRef.current = galleries
-
-    const host = document.createElement('span')
-    host.className = css.host
-    host.setAttribute('data-emate-image-disclosure-host', '')
-    first.parentElement.insertBefore(host, first)
-    setControls(previous.map(item => item.nextId).join(' '))
-    setPortalHost(host)
-
-    return () => {
-      for (const item of previous) {
-        item.gallery.hidden = item.hidden
-        item.gallery.removeAttribute('data-emate-image-gallery')
-        if (item.gallery.id === item.nextId) item.gallery.id = item.id
+  }
+  const delegated = (imageData?.delegations ?? []).some(call => call.seq <= owner.seq)
+  if (delegated || settlementSenders.size > 0) {
+    for (const node of nodes) {
+      if (node.kind !== 'e-mate-tool-images' || node.visibility !== 'hidden' || node.anchorSeq > owner.seq) continue
+      if ((node.location.kind !== 'turn' && node.location.kind !== 'step')
+        || node.location.turn.turn !== owner.turn.turn) continue
+      const item = (node.data as ToolImagesData).item
+      if (/^subagent-image:[0-9a-f]{64}$/u.test(item.callId)
+        && item.childSessionId !== undefined
+        && (delegated || settlementSenders.has(item.childSessionId))) {
+        candidates.push({ callId: item.callId, seq: node.anchorSeq })
       }
-      galleriesRef.current = []
-      host.remove()
     }
-  }, [controlId])
+  }
+  const produced = (owner.turn.data as { get(key: string): unknown }).get('deliverables') as ProducedData | undefined
+  const paths: string[] = []
+  const seenPaths = new Set<string>()
+  for (const item of produced?.produced ?? []) {
+    if (item.seq > owner.seq || seenPaths.has(item.path)) continue
+    seenPaths.add(item.path)
+    paths.push(item.path)
+  }
+  const callIds = [...new Set(candidates
+    .sort((left, right) => left.seq - right.seq)
+    .map(call => call.callId))]
+  return callIds.length === 0 && paths.length === 0 ? null : { callIds, paths }
+}
 
-  useLayoutEffect(() => {
-    for (const gallery of galleriesRef.current) gallery.hidden = !expanded
-  }, [expanded])
-
-  return (
-    <div ref={rootRef} className={css.root} data-emate-image-disclosure="">
-      {portalHost !== null && controls !== '' && createPortal(<button
-        type="button"
-        className={css.button}
-        aria-expanded={expanded}
-        aria-controls={controls}
-        onClick={() => { setExpanded(value => !value) }}
-      >
-        <IconBrowseOutline16 className={css.icon} />
-        <strong>已查看 {imageCount} 张图像</strong>
-        <IconChevronDownOutline14 className={css.chevron} />
-      </button>, portalHost)}
-    </div>
-  )
+/** Read only hidden receipts named by the current Turn, latest revision wins. */
+export function terminalImageItems(
+  nodes: Iterable<ChatConversationViewNode>,
+  callIds: readonly string[],
+  turn: number,
+): readonly ImageGalleryItem[] {
+  const allowed = new Set(callIds)
+  const latest = new Map<string, ImageGalleryItem>()
+  for (const node of nodes) {
+    if (node.kind !== 'e-mate-tool-images' || node.visibility !== 'hidden') continue
+    if ((node.location.kind !== 'turn' && node.location.kind !== 'step') || node.location.turn.turn !== turn) continue
+    const item = (node.data as ToolImagesData).item
+    if (!allowed.has(item.callId) || (latest.get(item.callId)?.revision ?? -1) > item.revision) continue
+    latest.set(item.callId, item)
+  }
+  return callIds.flatMap(callId => latest.get(callId) ?? [])
 }
 
 const imageLabels = {
@@ -222,47 +227,302 @@ const imageLabels = {
   lightbox: { dialog: '原图预览', close: '关闭原图预览' },
 }
 
-export function ToolImageGallery({ node, loadImage }: ChatNodeViewProps<'e-mate-tool-images'>) {
-  const [expanded, setExpanded] = useState(true)
-  const controlId = `e-mate-tool-images-${node.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
-  const legacyImages = (node.data as unknown as { images?: readonly { attachment: ImageAttachmentRef }[] }).images ?? []
-  const items = node.data.items ?? legacyImages.map(({ attachment }, index) => ({
-    callId: `${node.key}:${index}`,
-    revision: 0,
-    status: 'completed' as const,
-    operation: 'unknown' as const,
-    attachment,
-  }))
-  const images = items.flatMap(item => item.attachment === undefined ? [] : [{ attachment: item.attachment }])
-    .filter(({ attachment }, index, all) => all.findIndex(candidate =>
-      candidate.attachment.attachmentId === attachment.attachmentId) === index)
-  const reviewCount = items.filter(item => item.status === 'review-required').length
-  const failedCount = items.filter(item => item.status === 'failed').length
-  const summary = images.length > 0
-    ? `已查看 ${images.length} 张图像${reviewCount > 0 ? ` · ${reviewCount} 张待确认` : ''}`
-    : `图像任务失败${failedCount > 1 ? ` · ${failedCount} 项` : ''}`
-  return <section className={css.toolImages} data-emate-tool-images="" aria-label="图片结果">
-    <button
+type MenuTarget =
+  | { readonly kind: 'image'; readonly item: ImageGalleryItem }
+  | { readonly kind: 'file'; readonly path: string }
+
+interface MenuState {
+  readonly target: MenuTarget
+  readonly left: number
+  readonly top: number
+}
+
+interface InputSnapshot {
+  readonly imageIds: readonly string[]
+  readonly phase: 'plain' | 'adjudicating' | 'claimed' | 'submitting'
+}
+
+interface ArtifactTerminalProps extends TurnTailOwnerProps {
+  readonly matched: ArtifactTerminalMatch
+  readonly sessionId: string
+  readonly useSession: <T>(selector: (snapshot: ConversationSnapshot) => T) => T
+  readonly useSessions: <T>(selector: (snapshot: { byId: Record<string, { cwd?: string } | undefined> }) => T) => T
+  readonly useInput: <T>(selector: (input: InputSnapshot) => T) => T
+  readonly useProjection: (key: 'imageLimits') => ImageAttachmentLimits | undefined
+  readonly loadImage: (attachment: ImageAttachmentRef) => Promise<string>
+  readonly addImageToDraft: (attachment: ImageAttachmentRef) => Promise<void>
+  readonly draftBytes: (ids: readonly string[]) => number
+  readonly notify: (level: 'info' | 'error', text: string) => void
+  readonly runResource: (request: DesktopResourceRequest) => Promise<void>
+}
+
+function fileName(path: string): string {
+  const at = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return at < 0 ? path : path.slice(at + 1)
+}
+
+function fileKind(name: string): string {
+  const extension = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).trim() : ''
+  return extension === '' ? '文件' : `${extension.toUpperCase()} 文件`
+}
+
+function admissionError(
+  item: ImageGalleryItem,
+  input: InputSnapshot,
+  limits: ImageAttachmentLimits | undefined,
+  existingBytes: number,
+): string | undefined {
+  const attachment = item.attachment
+  if (item.status === 'review-required') return '待确认图片不能添加到聊天。'
+  if (attachment === undefined) return '这张图片没有可用附件。'
+  if (input.phase === 'adjudicating' || input.phase === 'submitting') return '当前正在发送消息，请稍后再添加图片。'
+  if (limits === undefined) return '当前会话未启用图片附件。'
+  if (!limits.mediaTypes.includes(attachment.mediaType)) return '当前会话不支持这种图片格式。'
+  if (input.imageIds.length + 1 > limits.maxImagesPerMessage) return `最多可添加 ${limits.maxImagesPerMessage} 张图片。`
+  if (attachment.bytes > limits.maxImageBytes) return '这张图片超过单张附件大小上限。'
+  if (existingBytes + attachment.bytes > limits.maxMessageImageBytes) return '图片附件总大小超过当前消息上限。'
+  if (attachment.width * attachment.height > limits.maxImagePixels) return '这张图片的像素尺寸超过上限。'
+  return undefined
+}
+
+function Menu({ state, menuRef, buttonRefs, close, activate }: {
+  readonly state: MenuState
+  readonly menuRef: RefObject<HTMLDivElement | null>
+  readonly buttonRefs: MutableRefObject<Array<HTMLButtonElement | null>>
+  readonly close: () => void
+  readonly activate: (action: string) => void
+}) {
+  const image = state.target.kind === 'image'
+  const review = image && state.target.item.status === 'review-required'
+  const actions = image
+    ? [
+      ['add-image', '添加到聊天', review],
+      ['copy-image', '复制图像', false],
+      ['reveal', navigator.platform.includes('Win') ? '在资源管理器中显示' : '在 Finder 中显示', false],
+      ['save-as', '下载副本', false],
+    ] as const
+    : [
+      ['default-open', '在默认应用中打开', false],
+      ['open-with', '打开方式 > 选择应用…', false],
+      ['save-as', '另存为…', false],
+      ['copy-path', '复制路径', false],
+      ['copy-file', '复制文件内容', false],
+      ['reveal', navigator.platform.includes('Win') ? '在资源管理器中显示' : '在 Finder 中显示', false],
+    ] as const
+  const move = (from: number, offset: number): void => {
+    const enabled = buttonRefs.current.filter((button): button is HTMLButtonElement => button !== null && !button.disabled)
+    const at = Math.max(0, enabled.indexOf(buttonRefs.current[from]!))
+    enabled[(at + offset + enabled.length) % enabled.length]?.focus()
+  }
+  return <div
+    ref={menuRef}
+    className={css.menu}
+    role="menu"
+    aria-label={image ? '图片操作' : '文件操作'}
+    style={{ left: state.left, top: state.top }}
+    onKeyDown={event => {
+      const index = buttonRefs.current.indexOf(event.target as HTMLButtonElement)
+      if (event.key === 'Escape') { event.preventDefault(); close() }
+      else if (event.key === 'ArrowDown') { event.preventDefault(); move(index, 1) }
+      else if (event.key === 'ArrowUp') { event.preventDefault(); move(index, -1) }
+    }}
+  >
+    {actions.map(([action, label, disabled], index) => <button
+      key={action}
+      ref={button => { buttonRefs.current[index] = button }}
       type="button"
-      className={css.button}
-      aria-expanded={expanded}
-      aria-controls={controlId}
-      onClick={() => { setExpanded(value => !value) }}
-    >
-      <IconBrowseOutline16 className={css.icon} />
-      <strong>{summary}</strong>
-      <IconChevronDownOutline14 className={css.chevron} />
-    </button>
-    <div id={controlId} hidden={!expanded} className={css.results}>
-      {images.length > 0 && <ImageGallery images={images} load={loadImage} align="start" labels={imageLabels} />}
-      <div className={css.names} aria-label="图片文件名">
-        {items.map((item, index) => (
-          <span key={`${item.callId}:${item.revision}:${index}`} data-status={item.status}>
-            {item.attachment?.name ?? (item.status === 'failed' ? '生成失败' : `图片 ${index + 1}`)}
-            {item.status === 'review-required' ? ' · 待确认' : item.status === 'failed' ? ' · 失败' : ''}
-          </span>
-        ))}
+      role="menuitem"
+      disabled={disabled}
+      onClick={() => { activate(action) }}
+    >{label}</button>)}
+  </div>
+}
+
+function ImageTerminal({ items, loadImage, openMenu }: {
+  readonly items: readonly ImageGalleryItem[]
+  readonly loadImage: (attachment: ImageAttachmentRef) => Promise<string>
+  readonly openMenu: (target: MenuTarget, source: HTMLElement | { clientX: number; clientY: number }) => void
+}) {
+  const railRef = useRef<HTMLDivElement>(null)
+  const [canBack, setCanBack] = useState(false)
+  const [canForward, setCanForward] = useState(false)
+  const images = items.filter((item): item is ImageGalleryItem & { attachment: ImageAttachmentRef } => item.attachment !== undefined)
+  const sync = (): void => {
+    const rail = railRef.current
+    if (rail === null) return
+    setCanBack(rail.scrollLeft > 2)
+    setCanForward(rail.scrollLeft + rail.clientWidth < rail.scrollWidth - 2)
+  }
+  useLayoutEffect(sync, [images.length])
+  const step = (direction: -1 | 1): void => {
+    const rail = railRef.current
+    if (rail === null) return
+    rail.scrollBy({ left: direction * rail.clientWidth, behavior: 'smooth' })
+  }
+  if (items.length === 0) return null
+  return <section className={css.images} aria-label="图片结果">
+    {images.length > 0 && <div className={css.railWrap}>
+      <div ref={railRef} className={css.rail} onScroll={sync}>
+        {images.map(item => <div
+          key={`${item.callId}:${item.revision}`}
+          className={css.imageItem}
+          data-status={item.status}
+          onContextMenu={event => { event.preventDefault(); openMenu({ kind: 'image', item }, event) }}
+        >
+          <MessageImage attachment={item.attachment} load={loadImage} variant="tile" labels={imageLabels} />
+          {item.status === 'review-required' && <span className={css.status}>待确认</span>}
+          <button
+            type="button"
+            className={css.imageAction}
+            aria-label={`图片操作：${item.attachment.name ?? '图像'}`}
+            onClick={event => { openMenu({ kind: 'image', item }, event.currentTarget) }}
+          ><i aria-hidden="true" /><span>1</span></button>
+        </div>)}
       </div>
-    </div>
+      {images.length > 1 && <div className={css.arrows}>
+        <button type="button" aria-label="上一组图片" disabled={!canBack} onClick={() => { step(-1) }}>
+          <IconChevronLeftOutline14 />
+        </button>
+        <button type="button" aria-label="下一组图片" disabled={!canForward} onClick={() => { step(1) }}>
+          <IconChevronRightOutline14 />
+        </button>
+      </div>}
+    </div>}
+    {items.filter(item => item.status === 'failed').map(item => <div
+      key={`${item.callId}:${item.revision}`}
+      className={css.failure}
+      role="status"
+    >图片生成失败{item.failureCode === undefined ? '' : ` · ${item.failureCode}`}</div>)}
   </section>
+}
+
+function FileTerminal({ paths, openFile, openMenu }: {
+  readonly paths: readonly string[]
+  readonly openFile: (path: string) => void
+  readonly openMenu: (target: MenuTarget, source: HTMLElement | { clientX: number; clientY: number }) => void
+}) {
+  if (paths.length === 0) return null
+  const shown = paths.slice(0, 6)
+  const hidden = paths.length - shown.length
+  return <section className={css.files} aria-label="产物文件">
+    {shown.map((path, index) => {
+      const name = fileName(path)
+      const extension = fileKind(name)
+      return <div className={css.fileRow} key={`${path}:${index}`} onContextMenu={event => {
+        event.preventDefault()
+        openMenu({ kind: 'file', path }, event)
+      }}>
+        <button type="button" className={css.fileOpen} aria-label={`打开 ${name}`} onClick={() => { openFile(path) }}>
+          <span className={css.fileIcon} aria-hidden="true">{extension === '文件' ? 'FILE' : extension.slice(0, 4)}</span>
+          <span className={css.fileText}><strong>{name}</strong><small>{extension}</small></span>
+        </button>
+        <button
+          type="button"
+          className={css.fileMenu}
+          aria-label={`打开方式：${name}`}
+          onClick={event => { openMenu({ kind: 'file', path }, event.currentTarget) }}
+        ><span>打开方式</span><IconEllipsisOutline16 /></button>
+      </div>
+    })}
+    {hidden > 0 && <button type="button" className={css.moreFiles} onClick={() => { openFile('.') }}>
+      其余 {hidden} 项，在文件夹中查看
+    </button>}
+  </section>
+}
+
+/** The sole completed-Turn artifact renderer: hidden image receipts plus native deliverables. */
+export function ArtifactTerminal({
+  matched, sessionId, turn, useSession, useSessions, useInput, useProjection,
+  openFile, loadImage, addImageToDraft, draftBytes, notify, runResource,
+}: ArtifactTerminalProps) {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menuButtons = useRef<Array<HTMLButtonElement | null>>([])
+  const [menu, setMenu] = useState<MenuState | null>(null)
+  const snapshot = useSession(value => value)
+  const input = useInput(value => value)
+  const limits = useProjection('imageLimits')
+  const root = useSessions(value => value.byId[sessionId]?.cwd)
+  const items = useMemo(
+    () => terminalImageItems(snapshot.chat.nodes.values(), matched.callIds, turn.turn),
+    [matched.callIds, snapshot, turn.turn],
+  )
+  const existingBytes = draftBytes(input.imageIds)
+  const closeMenu = (): void => { setMenu(null); menuButtons.current = [] }
+
+  useEffect(() => {
+    if (menu === null) return
+    const outside = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) closeMenu()
+    }
+    window.addEventListener('pointerdown', outside)
+    return () => { window.removeEventListener('pointerdown', outside) }
+  }, [menu])
+
+  const openMenu = (target: MenuTarget, source: HTMLElement | { clientX: number; clientY: number }): void => {
+    const bounds = rootRef.current?.getBoundingClientRect()
+    if (bounds === undefined) return
+    const point = source instanceof HTMLElement
+      ? source.getBoundingClientRect()
+      : { left: source.clientX, bottom: source.clientY }
+    setMenu({
+      target,
+      left: Math.max(8, Math.min(point.left - bounds.left, bounds.width - 236)),
+      top: Math.max(8, point.bottom - bounds.top + 6),
+    })
+    queueMicrotask(() => { menuButtons.current.find(button => button !== null && !button.disabled)?.focus() })
+  }
+
+  const resource = (target: MenuTarget, action: DesktopResourceAction): Promise<void> => {
+    if (target.kind === 'image') {
+      const attachment = target.item.attachment
+      if (attachment === undefined) return Promise.reject(new Error('图片附件不可用'))
+      return loadImage(attachment).then(src => runResource({ action, resource: {
+        kind: 'image', sessionId, name: attachment.name ?? 'e-mate-image.png', src,
+      } }))
+    }
+    if (root === undefined) return Promise.reject(new Error('当前工作区不可用'))
+    const path = normalizedAbsolute(root, target.path)
+    if (path === undefined) return Promise.reject(new Error('文件路径不可用'))
+    return runResource({ action, resource: { kind: 'file', sessionId, root, path } })
+  }
+
+  const activate = (action: string): void => {
+    const target = menu?.target
+    closeMenu()
+    if (target === undefined) return
+    if (action === 'default-open' && target.kind === 'file') { openFile(target.path); return }
+    if (action === 'add-image' && target.kind === 'image') {
+      const error = admissionError(target.item, input, limits, existingBytes)
+      if (error !== undefined) { notify('error', error); return }
+      void addImageToDraft(target.item.attachment!).then(
+        () => { notify('info', '图片已添加到聊天草稿。') },
+        cause => { notify('error', cause instanceof Error ? cause.message : String(cause)) },
+      )
+      return
+    }
+    void resource(target, action as DesktopResourceAction).catch(() => {
+      notify('error', '系统文件操作失败，请确认资源仍存在且属于当前工作区。')
+    })
+  }
+
+  return <div ref={rootRef} className={css.terminal} data-emate-artifact-terminal="">
+    <ImageTerminal items={items} loadImage={loadImage} openMenu={openMenu} />
+    <FileTerminal paths={matched.paths} openFile={openFile} openMenu={openMenu} />
+    {menu !== null && <Menu
+      state={menu}
+      menuRef={menuRef}
+      buttonRefs={menuButtons}
+      close={closeMenu}
+      activate={activate}
+    />}
+  </div>
+}
+
+/** Resolve the preload bridge lazily so idle chat has zero IPC. */
+export function desktopResourceRun(request: DesktopResourceRequest): Promise<void> {
+  const bridge = (window as DesktopResourceBridgeWindow)[DESKTOP_RESOURCE_BRIDGE]
+  return bridge === undefined
+    ? Promise.reject(new Error('系统文件操作不可用，请使用桌面版 e-Mate。'))
+    : bridge.run(request)
 }

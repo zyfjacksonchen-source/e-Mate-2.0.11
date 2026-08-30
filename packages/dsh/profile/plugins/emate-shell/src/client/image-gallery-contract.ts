@@ -4,6 +4,7 @@ export type ImageGalleryStatus = 'completed' | 'review-required' | 'failed'
 
 export interface ImageGalleryItem {
   readonly callId: string
+  readonly childSessionId?: string
   readonly revision: number
   readonly status: ImageGalleryStatus
   readonly operation: 'generate' | 'edit' | 'fusion' | 'unknown'
@@ -59,6 +60,8 @@ export function parseImageOutputReceipt(value: unknown): ImageGalleryItem | null
     || value.schema_version !== 2
     || !Number.isSafeInteger(value.revision) || Number(value.revision) < 1 || Number(value.revision) > 3
     || typeof value.call_id !== 'string' || value.call_id === ''
+    || value.child_session_id !== undefined
+      && (typeof value.child_session_id !== 'string' || value.child_session_id === '')
     || !['generate', 'edit', 'fusion'].includes(String(value.operation))
     || !['running', 'completed', 'needs-review', 'failed', 'cancelled', 'unknown'].includes(String(value.status))
     || !['not-submitted', 'recorded', 'unknown'].includes(String(value.billing_status))
@@ -74,6 +77,7 @@ export function parseImageOutputReceipt(value: unknown): ImageGalleryItem | null
     : undefined
   return {
     callId: value.call_id,
+    ...(value.child_session_id === undefined ? {} : { childSessionId: value.child_session_id as string }),
     revision: Number(value.revision),
     status: status === 'completed' ? 'completed' : status === 'needs-review' ? 'review-required' : 'failed',
     operation: value.operation as ImageGalleryItem['operation'],

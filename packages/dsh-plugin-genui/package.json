@@ -47,10 +47,10 @@
         "react-dom"
       ],
       "authority_contract": { "effects": [], "guards": [] },
-      "base_contracts": ["e-mate-desktop-profile-v10-dsh-fccd7d25b3f1"]
+      "base_contracts": ["e-mate-desktop-profile-v12-dsh-f97e3814fe67"]
     },
     "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "fccd7d25b3f19885e2778c128b57d7c8312b7344"
+    "harnessCommit": "f97e3814fe677b35e2c0a4cdaec70c1fc1c8e1f4"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

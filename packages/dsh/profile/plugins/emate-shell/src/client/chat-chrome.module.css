@@ -143,10 +143,6 @@
   text-decoration: none;
 }
 
-:global([data-chat-flow-kind='e-mate-image-disclosure']) {
-  display: none;
-}
-
 /* Preserve the e-Mate equal-tile gallery while the target ImageGallery keeps
    ownership of image loading, authorization, retry and lightbox behavior. */
 :global([data-chat-flow-kind='assistant-step'] [data-align='start'] > [data-variant='single']),
