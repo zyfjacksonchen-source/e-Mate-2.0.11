@@ -41,14 +41,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.source_sha }}
           fetch-depth: 1
           submodules: false
           persist-credentials: false
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
 
@@ -121,7 +121,7 @@ jobs:
             "desktop-candidate.json,e-Mate-$VERSION-mac-universal.dmg,e-Mate-$VERSION-win-x64-Setup.exe"
           test "$(find compatibility-carrier -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 3
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e-mate-desktop-release-${{ inputs.source_sha }}
           path: compatibility-carrier

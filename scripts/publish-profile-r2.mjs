@@ -2,7 +2,7 @@
 
 import { createHash, createPrivateKey, createPublicKey } from 'node:crypto'
 import {
-  constants, copyFileSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync,
+  constants, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync,
 } from 'node:fs'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,7 +17,16 @@ import {
   sourceIdentity,
   verifyManifestInputLedger,
 } from './local-flow.mjs'
+import {
+  SIGNER_ACTION_OWNER,
+  SIGNER_ACTION_USES,
+  SIGNER_DISPATCH_REQUEST_PATH,
+  SIGNING_BUNDLE_PATH,
+  SIGNING_INPUT_RECEIPT_PATH,
+  SIGNING_INPUT_REQUEST_PATH,
+} from './signer-transport.mjs'
 import { composeProfileReleaseCandidate, scanComponentArtifacts } from './profile-release.mjs'
+import { R2_PUBLIC_ORIGIN } from './release-source.mjs'
 import {
   assertCompleteProfileRelease,
   profileGenerationId,
@@ -33,7 +42,7 @@ import {
 } from '../desktop/e-mate-desktop/src/profile-release.ts'
 
 const REPOSITORY = 'zyfjacksonchen-source/e-Mate-2.0.11'
-const ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
+const ORIGIN = R2_PUBLIC_ORIGIN
 const TARGET_NAMES = ['darwin-arm64', 'darwin-x64', 'win32-x64']
 const IMMUTABLE_CACHE = 'public,max-age=31536000,immutable'
 const MAX_CURRENT_BYTES = 1024 * 1024
@@ -69,6 +78,12 @@ function descriptorFor(root, path) {
   regularFile(path)
   const bytes = readFileSync(path)
   return { path: name, bytes: bytes.byteLength, sha256: sha256(bytes) }
+}
+
+function descriptorForResult(root, path) {
+  const descriptor = descriptorFor(root, path)
+  if (!descriptor.path.startsWith('profile-')) throw new Error('compact Profile result path is invalid')
+  return descriptor
 }
 
 function currentSnapshotIdentity(root) {
@@ -218,6 +233,52 @@ function signingCredentials(root, env) {
   return { base, privateKeyPem, keyId }
 }
 
+function localProfileRequestState(run, requestDescriptor, allowedStages) {
+  if (allowedStages === undefined) {
+    return isDeepStrictEqual(run.publication, awaitingImmutablePublicationState(run, requestDescriptor.sha256))
+  }
+  if (!Array.isArray(allowedStages) || !allowedStages.includes(run.publication?.status)) return false
+  const publication = run.publication
+  if (publication.status === 'awaiting-compatibility-attestation') {
+    return exactKeys(publication, [
+      'status', 'scope', 'owner', 'immutable_request', 'immutable_request_sha256', 'immutable_receipt',
+      'immutable_receipt_sha256', 'request', 'request_sha256', 'transaction_mode',
+    ]) && publication.scope === 'full' && publication.owner === 'github-compatibility-attestation-carrier'
+      && publication.immutable_request === IMMUTABLE_REQUEST_PATH
+      && publication.immutable_request_sha256 === requestDescriptor.sha256
+      && publication.immutable_receipt === 'publication/immutable-owner-receipt.json'
+      && SHA256.test(publication.immutable_receipt_sha256 ?? '')
+      && publication.request === 'publication/compatibility-attestation-request.json'
+      && SHA256.test(publication.request_sha256 ?? '')
+      && publication.transaction_mode === run.release_transaction?.mode
+  }
+  return publication.status === 'awaiting-protected-signer' && exactKeys(publication, [
+    'status', 'scope', 'owner', 'immutable_request', 'immutable_request_sha256', 'immutable_receipt',
+    'immutable_receipt_sha256', 'compatibility_request', 'compatibility_request_sha256',
+    'compatibility_receipt', 'compatibility_receipt_sha256', 'control_bundle', 'control_bundle_bytes',
+    'control_bundle_sha256', 'signing_input_request', 'signing_input_request_sha256',
+    'signing_input_receipt', 'signing_input_receipt_sha256', 'request', 'request_sha256', 'action',
+    'transaction_mode',
+  ]) && publication.scope === 'full' && publication.owner === SIGNER_ACTION_OWNER
+    && publication.immutable_request === IMMUTABLE_REQUEST_PATH
+    && publication.immutable_request_sha256 === requestDescriptor.sha256
+    && publication.immutable_receipt === 'publication/immutable-owner-receipt.json'
+    && publication.compatibility_request === 'publication/compatibility-attestation-request.json'
+    && publication.compatibility_receipt === 'publication/compatibility-attestation-receipt.json'
+    && publication.control_bundle === SIGNING_BUNDLE_PATH
+    && Number.isSafeInteger(publication.control_bundle_bytes) && publication.control_bundle_bytes > 0
+    && publication.signing_input_request === SIGNING_INPUT_REQUEST_PATH
+    && publication.signing_input_receipt === SIGNING_INPUT_RECEIPT_PATH
+    && publication.request === SIGNER_DISPATCH_REQUEST_PATH && publication.action === SIGNER_ACTION_USES
+    && [
+      publication.immutable_receipt_sha256, publication.compatibility_request_sha256,
+      publication.compatibility_receipt_sha256, publication.control_bundle_sha256,
+      publication.signing_input_request_sha256, publication.signing_input_receipt_sha256,
+      publication.request_sha256,
+    ].every(value => SHA256.test(value ?? ''))
+    && publication.transaction_mode === run.release_transaction?.mode
+}
+
 async function loadLocalProfileInputs(options) {
   const root = resolve(options.root)
   const runRoot = resolve(options.runRoot)
@@ -231,7 +292,7 @@ async function loadLocalProfileInputs(options) {
   const requestDescriptor = descriptorFor(runRoot, requestPath)
   const request = JSON.parse(readFileSync(requestPath, 'utf8'))
   if (!isDeepStrictEqual(request, buildPublicationRequest(run))) throw new Error('local Profile publication request is invalid')
-  if (!isDeepStrictEqual(run.publication, awaitingImmutablePublicationState(run, requestDescriptor.sha256))) {
+  if (!localProfileRequestState(run, requestDescriptor, options.allowedPublicationStages)) {
     throw new Error('local Profile publication request descriptor drifted from its run')
   }
   await verifyManifestInputLedger(runRoot, run)
@@ -642,6 +703,7 @@ export async function prepareLocalSignedProfilePublication(options) {
     root,
     runRoot: options.runRoot,
     request: options.request,
+    allowedPublicationStages: options.allowedPublicationStages,
   })
   if (signing.base.id !== inputs.binding.base_contract.id
     || signing.base.schedule_protocol_floor !== inputs.binding.base_contract.schedule_protocol_floor
@@ -654,10 +716,8 @@ export async function prepareLocalSignedProfilePublication(options) {
     currentSnapshotIdentity(root),
   )
   const output = resolve(options.output)
-  const rootRelative = relative(root, output)
   const runRelative = relative(inputs.runRoot, output)
-  if (output === root || rootRelative === '..' || rootRelative.startsWith(`..${sep}`)
-    || output === inputs.runRoot || runRelative === '..' || runRelative.startsWith(`..${sep}`)) {
+  if (output === inputs.runRoot || runRelative === '..' || runRelative.startsWith(`..${sep}`)) {
     throw new Error('local Profile signing output must stay inside the source run')
   }
   mkdirSync(output, { recursive: false, mode: 0o700 })
@@ -671,6 +731,7 @@ export async function prepareLocalSignedProfilePublication(options) {
       changedIds: inputs.expectedChangedIds,
       sourceCommit: inputs.request.source_commit,
       output: directory,
+      outputRoot: inputs.runRoot,
       privateKeyPem: signing.privateKeyPem,
       keyId: signing.keyId,
       request: async () => { throw new Error('local Profile preparation attempted network access') },
@@ -718,6 +779,247 @@ export async function prepareLocalSignedProfilePublication(options) {
   }
 }
 
+/** Project the T20R10 production output to signed metadata only; component payload stays in the local run. */
+export function writeCompactLocalProfileSignerResult(prepared, outputPath) {
+  const output = resolve(outputPath)
+  mkdirSync(join(output, 'profile-desired-state'), { recursive: true, mode: 0o700 })
+  const aggregatePath = join(output, 'profile-component-aggregate.json')
+  const planPath = join(output, 'profile-publication-plan.json')
+  copyFileSync(prepared.aggregatePath, aggregatePath, constants.COPYFILE_EXCL)
+  copyFileSync(join(prepared.bundle, 'publication-plan.json'), planPath, constants.COPYFILE_EXCL)
+  const desiredStates = prepared.plan.activations.map(activation => {
+    const candidate = prepared.candidateDirectories.find(directory => basename(directory) === activation.target)
+    if (candidate === undefined) throw new Error(`compact Profile result candidate is missing: ${activation.target}`)
+    const path = join(output, 'profile-desired-state', `${activation.target}.json`)
+    copyFileSync(join(candidate, 'production-envelope.json'), path, constants.COPYFILE_EXCL)
+    const immutable = prepared.plan.immutable_objects.filter(item => item.role === 'desired-state-immutable'
+      && item.bytes === activation.object.bytes && item.sha256 === activation.object.sha256)
+    const identity = descriptorForResult(output, path)
+    if (immutable.length !== 1 || identity.bytes !== activation.object.bytes || identity.sha256 !== activation.object.sha256) {
+      throw new Error(`compact Profile desired state binding is invalid: ${activation.target}`)
+    }
+    return {
+      target: activation.target,
+      generation: activation.generation,
+      path: identity.path,
+      bytes: identity.bytes,
+      sha256: identity.sha256,
+      immutable_key: immutable[0].key,
+      active_key: activation.object.key,
+    }
+  })
+  const receipt = {
+    schema_version: 1,
+    document_type: 'emate.local-compact-profile-signer-result',
+    status: 'ready-for-main-local-flow-activation',
+    source_commit: prepared.plan.source_commit,
+    release_version: prepared.plan.release_version,
+    run_id: prepared.plan.provenance.run_id,
+    provenance: prepared.plan.provenance,
+    component_payloads_in_result: false,
+    aggregate: {
+      ...descriptorForResult(output, aggregatePath),
+      aggregate_sha256: prepared.aggregate.aggregate_sha256,
+    },
+    publication_plan: descriptorForResult(output, planPath),
+    desired_states: desiredStates,
+    next_owner: 'main-local-flow-activation',
+  }
+  writeFileSync(join(output, 'profile-signer-result.json'), Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`), {
+    flag: 'wx', mode: 0o600,
+  })
+  return receipt
+}
+
+function exactCompactProfileReceipt(value, inputs) {
+  return exactKeys(value, [
+    'schema_version', 'document_type', 'status', 'source_commit', 'release_version', 'run_id', 'provenance',
+    'component_payloads_in_result', 'aggregate', 'publication_plan', 'desired_states', 'next_owner',
+  ]) && value.schema_version === 1 && value.document_type === 'emate.local-compact-profile-signer-result'
+    && value.status === 'ready-for-main-local-flow-activation'
+    && value.source_commit === inputs.request.source_commit && value.release_version === inputs.request.version
+    && value.run_id === inputs.request.run_id && value.component_payloads_in_result === false
+    && value.next_owner === 'main-local-flow-activation'
+    && canonicalProfileJson(value.provenance) === canonicalProfileJson({
+      mode: 'local-flow', run_id: inputs.request.run_id,
+      request: inputs.requestDescriptor, ledger: inputs.binding.ledger,
+    })
+    && exactKeys(value.aggregate, ['path', 'bytes', 'sha256', 'aggregate_sha256'])
+    && exactKeys(value.publication_plan, ['path', 'bytes', 'sha256'])
+    && Array.isArray(value.desired_states) && value.desired_states.length === TARGET_NAMES.length
+    && value.desired_states.every((item, index) => exactKeys(item, [
+      'target', 'generation', 'path', 'bytes', 'sha256', 'immutable_key', 'active_key',
+    ]) && item.target === TARGET_NAMES[index] && SHA256.test(item.generation ?? '')
+      && item.path === `profile-desired-state/${item.target}.json`
+      && item.immutable_key === `desktop/profile/releases/${item.generation}/${item.target}.json`
+      && item.active_key === `desktop/profile/desired-state/${item.target}.json`
+      && Number.isSafeInteger(item.bytes) && item.bytes > 0 && SHA256.test(item.sha256 ?? ''))
+}
+
+function safeCompactPath(value) {
+  return typeof value === 'string' && value !== '' && !value.startsWith('/') && !value.includes('\\')
+    && !value.includes('\0') && value.split('/').every(part => part !== '' && part !== '.' && part !== '..')
+}
+
+function compactPublicationObject(value, role) {
+  if (!exactKeys(value, [
+    'role', 'key', 'url', 'path', 'bytes', 'sha256', 'content_type', 'cache_control',
+  ]) || value.role !== role || !safeCompactPath(value.key) || !safeCompactPath(value.path)
+    || value.url !== `${ORIGIN}/${value.key}` || !Number.isSafeInteger(value.bytes) || value.bytes <= 0
+    || !SHA256.test(value.sha256 ?? '') || typeof value.content_type !== 'string' || value.content_type === ''
+    || typeof value.cache_control !== 'string' || value.cache_control === '') {
+    throw new Error(`compact Profile publication object is invalid: ${String(value?.path)}`)
+  }
+  return value
+}
+
+function validateCompactProfilePlan(plan, inputs) {
+  if (!exactKeys(plan, [
+    'schema_version', 'document_type', 'status', 'source_commit', 'release_version', 'provenance',
+    'base_contract_id', 'schedule_protocol_floor', 'immutable_objects', 'activations',
+  ]) || plan.schema_version !== 2 || plan.document_type !== 'emate.profile-native-cloudflare-publication-plan'
+    || plan.status !== 'prepared' || plan.source_commit !== inputs.request.source_commit
+    || plan.release_version !== inputs.request.version || !Array.isArray(plan.immutable_objects)
+    || !Array.isArray(plan.activations) || plan.activations.length !== TARGET_NAMES.length) {
+    throw new Error('compact Profile publication plan is invalid')
+  }
+  const paths = new Set()
+  const keys = new Set()
+  for (const item of plan.immutable_objects) {
+    compactPublicationObject(item, item?.role)
+    if (!['component', 'desired-state-immutable'].includes(item.role)
+      || paths.has(item.path) || keys.has(item.key)) throw new Error('compact Profile immutable object set is invalid')
+    paths.add(item.path)
+    keys.add(item.key)
+  }
+  for (const [index, activation] of plan.activations.entries()) {
+    if (!exactKeys(activation, [
+      'target', 'generation', 'sequence', 'parent_generation', 'changed_components', 'expected_current', 'object',
+    ]) || activation.target !== TARGET_NAMES[index] || !SHA256.test(activation.generation ?? '')
+      || !Array.isArray(activation.changed_components)) {
+      throw new Error(`compact Profile activation is invalid: ${String(activation?.target)}`)
+    }
+    compactPublicationObject(activation.object, 'desired-state-active')
+    if (paths.has(activation.object.path) || keys.has(activation.object.key)) {
+      throw new Error('compact Profile activation object set is invalid')
+    }
+    paths.add(activation.object.path)
+    keys.add(activation.object.key)
+  }
+  return plan
+}
+
+/** Rebuild the aggregate from local component bytes plus the three imported signed desired states. */
+export async function verifyCompactLocalProfileSignerResult(options) {
+  const root = resolve(options.root ?? fileURLToPath(new URL('..', import.meta.url)))
+  const inputs = await loadLocalProfileInputs({
+    root, runRoot: options.runRoot, request: options.request,
+    allowedPublicationStages: ['awaiting-protected-signer'],
+  })
+  const result = resolve(options.result)
+  const receipt = JSON.parse(readFileSync(join(result, 'profile-signer-result.json'), 'utf8'))
+  if (!exactCompactProfileReceipt(receipt, inputs)) throw new Error('compact Profile signer result receipt is invalid')
+  const acceptDescriptor = (descriptor, path) => {
+    const actual = descriptorFor(result, path)
+    if (canonicalProfileJson(actual) !== canonicalProfileJson(descriptor)) {
+      throw new Error(`compact Profile signer result bytes drifted: ${descriptor.path}`)
+    }
+    return path
+  }
+  const planPath = acceptDescriptor(receipt.publication_plan, join(result, 'profile-publication-plan.json'))
+  const aggregatePath = acceptDescriptor({
+    path: receipt.aggregate.path, bytes: receipt.aggregate.bytes, sha256: receipt.aggregate.sha256,
+  }, join(result, 'profile-component-aggregate.json'))
+  const plan = JSON.parse(readFileSync(planPath, 'utf8'))
+  if (canonicalProfileJson(plan.provenance) !== canonicalProfileJson(receipt.provenance)
+    || plan.source_commit !== inputs.request.source_commit || plan.release_version !== inputs.request.version) {
+    throw new Error('compact Profile publication plan provenance is invalid')
+  }
+  validateCompactProfilePlan(plan, inputs)
+  const base = parseProfileBaseContract(JSON.parse(readFileSync(join(inputs.macosRoot, 'base-contract.json'), 'utf8')))
+  if (base === undefined) throw new Error('compact Profile Base contract is invalid')
+  const components = new Map()
+  for (const artifact of scanComponentArtifacts(inputs.artifactRoots, base)) {
+    for (const object of componentObjects(artifact)) {
+      const previous = components.get(object.key)
+      if (previous !== undefined && (previous.size !== object.size || previous.sha256 !== object.sha256)) {
+        throw new Error(`compact Profile component object identity conflicts: ${object.key}`)
+      }
+      if (previous === undefined) components.set(object.key, object)
+    }
+  }
+  const staging = mkdtempSync(join(inputs.runRoot, '.profile-import-'))
+  try {
+    writeFileSync(join(staging, 'publication-plan.json'), readFileSync(planPath), { flag: 'wx' })
+    for (const item of plan.immutable_objects) {
+      let source
+      if (item.role === 'component') source = components.get(item.key)?.path
+      else if (item.role === 'desired-state-immutable') {
+        const state = receipt.desired_states.find(candidate => candidate.immutable_key === item.key)
+        if (state !== undefined) source = join(result, ...state.path.split('/'))
+      }
+      if (source === undefined) throw new Error(`compact Profile publication object source is missing: ${item.key}`)
+      const identity = descriptorFor(dirname(source), source)
+      if (identity.bytes !== item.bytes || identity.sha256 !== item.sha256) {
+        throw new Error(`compact Profile publication object drifted: ${item.key}`)
+      }
+      const destination = join(staging, ...item.path.split('/'))
+      mkdirSync(dirname(destination), { recursive: true })
+      copyFileSync(source, destination, constants.COPYFILE_EXCL)
+    }
+    for (const activation of plan.activations) {
+      const state = receipt.desired_states.find(item => item.target === activation.target)
+      if (state === undefined || state.active_key !== activation.object.key
+        || state.generation !== activation.generation || state.bytes !== activation.object.bytes
+        || state.sha256 !== activation.object.sha256) {
+        throw new Error(`compact Profile activation binding is invalid: ${activation.target}`)
+      }
+      const source = join(result, ...state.path.split('/'))
+      acceptDescriptor({ path: state.path, bytes: state.bytes, sha256: state.sha256 }, source)
+      const destination = join(staging, ...activation.object.path.split('/'))
+      mkdirSync(dirname(destination), { recursive: true })
+      copyFileSync(source, destination, constants.COPYFILE_EXCL)
+    }
+    const recomputedPath = join(inputs.runRoot, `.profile-aggregate-${process.pid}-${Date.now()}.json`)
+    try {
+      const recomputed = await createProfileComponentAggregate({
+        sourceCommit: inputs.request.source_commit, releaseVersion: inputs.request.version,
+        baseContract: join(inputs.macosRoot, 'base-contract.json'),
+        inventory: join(inputs.macosRoot, 'component-inventory.json'),
+        profileReceipt: join(inputs.macosRoot, 'profile-build-receipt.json'),
+        profile: join(inputs.macosRoot, 'profile-artifact'), publicationBundle: staging,
+        localRunRoot: inputs.runRoot, output: recomputedPath,
+      })
+      const importedAggregate = JSON.parse(readFileSync(aggregatePath, 'utf8'))
+      if (canonicalProfileJson(recomputed) !== canonicalProfileJson(importedAggregate)
+        || recomputed.aggregate_sha256 !== receipt.aggregate.aggregate_sha256) {
+        throw new Error('compact Profile component aggregate drifted from local product bytes')
+      }
+    } finally {
+      rmSync(recomputedPath, { force: true })
+    }
+  } finally {
+    rmSync(staging, { recursive: true, force: true })
+  }
+  return {
+    aggregate: receipt.aggregate,
+    plan: receipt.publication_plan,
+    immutable_objects: plan.immutable_objects.map(item => ({
+      ...item,
+      source_path: item.role === 'component'
+        ? relative(inputs.runRoot, components.get(item.key).path).split(sep).join('/')
+        : `publication/protected-signer-result/${receipt.desired_states.find(state => state.immutable_key === item.key).path}`,
+    })),
+    activations: plan.activations.map(activation => ({
+      ...activation,
+      object: {
+        ...activation.object,
+        source_path: `publication/protected-signer-result/${receipt.desired_states.find(state => state.target === activation.target).path}`,
+      },
+    })),
+  }
+}
+
 async function main() {
   const { values } = parseArgs({ options: {
     candidate: { type: 'string', multiple: true },
@@ -728,17 +1030,19 @@ async function main() {
     'local-request': { type: 'string' },
     'local-run-root': { type: 'string' },
     'local-output': { type: 'string' },
+    'local-compact-output': { type: 'string' },
     'materialize-current': { type: 'string' },
     bootstrap: { type: 'boolean', default: false },
   } })
   const root = fileURLToPath(new URL('..', import.meta.url))
-  const local = values['local-request'] !== undefined || values['local-run-root'] !== undefined || values['local-output'] !== undefined
+  const local = values['local-request'] !== undefined || values['local-run-root'] !== undefined
+    || values['local-output'] !== undefined || values['local-compact-output'] !== undefined
   if (local) {
     if (values['local-request'] === undefined || values['local-run-root'] === undefined
       || values['local-output'] === undefined || values.snapshot === undefined
       || values.candidate !== undefined || values['artifact-root'] !== undefined || values.changed !== undefined
       || values.bundle !== undefined || values['materialize-current'] !== undefined || values.bootstrap) {
-      throw new Error('usage: publish-profile-r2.mjs --local-request <file> --local-run-root <directory> --snapshot <file> --local-output <directory>')
+      throw new Error('usage: publish-profile-r2.mjs --local-request <file> --local-run-root <directory> --snapshot <file> --local-output <directory> [--local-compact-output <directory>]')
     }
     const prepared = await prepareLocalSignedProfilePublication({
       root,
@@ -746,18 +1050,24 @@ async function main() {
       runRoot: resolve(values['local-run-root']),
       currentSnapshot: resolve(values.snapshot),
       output: resolve(values['local-output']),
+      allowedPublicationStages: ['awaiting-compatibility-attestation'],
     })
+    if (values['local-compact-output'] !== undefined) {
+      writeCompactLocalProfileSignerResult(prepared, resolve(values['local-compact-output']))
+    }
     process.stdout.write(`${JSON.stringify({
       status: prepared.plan.status,
       run_id: prepared.plan.provenance.run_id,
       activations: prepared.plan.activations.map(item => ({ target: item.target, generation: item.generation })),
       aggregate_sha256: prepared.aggregate.aggregate_sha256,
+      compact_result: values['local-compact-output'] === undefined ? null : resolve(values['local-compact-output']),
     })}\n`)
     return
   }
   if (values['materialize-current'] !== undefined) {
     if (values.snapshot === undefined || values.candidate !== undefined || values['artifact-root'] !== undefined
-      || values.changed !== undefined || values.bundle !== undefined || values.bootstrap) {
+      || values.changed !== undefined || values.bundle !== undefined || values['local-compact-output'] !== undefined
+      || values.bootstrap) {
       throw new Error('usage: publish-profile-r2.mjs --snapshot <file> --materialize-current <directory>')
     }
     const currentByTarget = materializeProfileCurrentSnapshot(

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from 'node:child_process'
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, createPublicKey, randomBytes, verify as verifySignature } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
 import {
   copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, symlink, writeFile,
@@ -14,6 +14,27 @@ import { classifyChangedPaths } from './change-impact.mjs'
 import { pinnedPnpmInvocation, pinnedYarnInvocation } from './package-manager.mjs'
 import { R2_PUBLIC_ORIGIN } from './release-source.mjs'
 import { canonicalProfileJson } from '../desktop/e-mate-desktop/src/profile-release.ts'
+import { parseProfileBaseContract } from '../desktop/e-mate-desktop/src/profile-release.ts'
+import { createSigningControlBundle } from './signing-control-bundle.mjs'
+import {
+  COMPATIBILITY_RECEIPT_PATH,
+  PROFILE_SNAPSHOT_PATH,
+  SIGNER_ACTION_OWNER,
+  SIGNER_ACTION_USES,
+  SIGNER_DISPATCH_REQUEST_PATH,
+  SIGNER_RESULT_PATH,
+  SIGNER_RESULT_OWNER_RECEIPT_PATH,
+  SIGNING_BUNDLE_PATH,
+  SIGNING_INPUT_RECEIPT_PATH,
+  SIGNING_INPUT_REQUEST_PATH,
+  buildProtectedSignerDispatchRequest,
+  buildSigningInputOwnerRequest,
+  collectSigningControlFiles,
+  validateCompatibilityCarrierReceipt,
+  validateProtectedSignerResultDirectory,
+  validateProtectedSignerResultOwnerReceipt,
+  validateSigningInputOwnerReceipt,
+} from './signer-transport.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const RUN_ROOT = join(ROOT, 'dist', 'local-runs')
@@ -29,7 +50,7 @@ const ETAG = /^[0-9a-f]{32}$/u
 const RUN_ID = /^\d{8}T\d{6}Z-[0-9a-f]{12}-[0-9a-f]{6}$/u
 const OWNER = 'existing-desktop-manifest-admission-signing-owner+codex-cloudflare-plugin'
 const CLOUDFLARE_OWNER = 'codex-cloudflare-plugin'
-const MANIFEST_OWNER = 'zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123'
+const MANIFEST_OWNER = SIGNER_ACTION_OWNER
 const MANIFEST_SIGNING_CONTEXT = 'e-mate-desktop-release-manifest-v2\0'
 const COMPATIBILITY_REPOSITORY = 'zyfjacksonchen-source/e-Mate-2.0.11'
 const COMPATIBILITY_WORKFLOW = '.github/workflows/desktop-compatibility-attestation.yml'
@@ -2125,18 +2146,157 @@ function validActivationStageEvidence(value, run) {
     && isDeepStrictEqual(artifact.exact_files, exactFiles)
 }
 
-export function buildActivationRequest(run, { dryRun = false, versionChoice, stageEvidence } = {}) {
+function strictBase64(value) {
+  if (typeof value !== 'string' || value === '') return
+  const bytes = Buffer.from(value, 'base64')
+  if (bytes.toString('base64') !== value) return
+  return bytes
+}
+
+async function validateDesktopSignerResult(resultRoot, run) {
+  const runRoot = resolve(resultRoot, '..', '..')
+  const signedPath = join(resultRoot, 'desktop-release-signed.json')
+  const planPath = join(resultRoot, 'cloudflare-publication-plan.json')
+  const handoffPath = join(resultRoot, 'cloudflare-plugin-handoff.json')
+  const signedBytes = await readFile(signedPath)
+  const [signed, plan, handoff] = await Promise.all([json(signedPath), json(planPath), json(handoffPath)])
+  const signedDescriptor = await manifestFile(resultRoot, 'desktop-release-signed.json')
+  const planDescriptor = await manifestFile(resultRoot, 'cloudflare-publication-plan.json')
+  const handoffDescriptor = await manifestFile(resultRoot, 'cloudflare-plugin-handoff.json')
+  if (!exactKeys(handoff, [
+    'schema_version', 'document_type', 'status', 'owner', 'repository', 'source_commit', 'run_id', 'version',
+    'data_plane', 'inputs', 'compatibility_attestation', 'github_verification', 'profile_signing', 'files',
+    'production_state', 'next_owner',
+  ]) || handoff.schema_version !== 1 || handoff.document_type !== 'emate.local-schema2-signer-receipt'
+    || handoff.status !== 'passed' || handoff.owner !== SIGNER_ACTION_OWNER
+    || handoff.repository !== COMPATIBILITY_REPOSITORY || handoff.source_commit !== run.source_commit
+    || handoff.run_id !== run.run_id || handoff.version !== run.version
+    || !sameRecord(handoff.data_plane, {
+      origin: R2_PUBLIC_ORIGIN, installer_download: 'cloudflare-r2-only', online_update: 'cloudflare-r2-only',
+      rollback: 'cloudflare-r2-only', github_role: 'compatibility-attestation-carrier-only',
+      github_built_or_tested_installer_bytes: false,
+    }) || !sameRecord(handoff.production_state, {
+      r2_write_performed: false, public_readback_performed: false,
+      active_pointer_changed: false, legacy_pointer_changed: false,
+    }) || handoff.next_owner !== 'main-local-flow-activation'
+    || !exactKeys(handoff.files, ['signed_manifest', 'publication_plan'])
+    || !isDeepStrictEqual(handoff.files.signed_manifest, {
+      ...signedDescriptor,
+      schema_version: 2,
+      version: run.version,
+      base_contract_id: signed.base_contract_id,
+      schedule_protocol_floor: signed.schedule_protocol_floor,
+      signature_key_id: signed.signature?.key_id,
+      verification: 'passed',
+      identity_sha256: handoff.files.signed_manifest.identity_sha256,
+    }) || !isDeepStrictEqual(handoff.files.publication_plan, planDescriptor)) {
+    throw new Error('protected schema-2 Desktop signer handoff is invalid')
+  }
+  const profileAggregate = await manifestFile(resultRoot, 'profile-component-aggregate.json')
+  const compatibilityOwnerReceipt = await json(join(runRoot, COMPATIBILITY_RECEIPT_PATH))
+  const expectedInputs = {
+    immutable_request: await runDescriptor(runRoot, IMMUTABLE_REQUEST_PATH),
+    immutable_receipt: await runDescriptor(runRoot, IMMUTABLE_RECEIPT_PATH),
+    compatibility_request: await runDescriptor(runRoot, COMPATIBILITY_REQUEST_PATH),
+    profile_component_aggregate: {
+      path: 'profile-signing/profile-component-aggregate.json',
+      bytes: profileAggregate.bytes,
+      sha256: profileAggregate.sha256,
+    },
+  }
+  if (!isDeepStrictEqual(handoff.inputs, expectedInputs)) {
+    throw new Error('protected schema-2 signer input descriptors drifted')
+  }
+  const github = handoff.github_verification
+  if (github?.repository !== COMPATIBILITY_REPOSITORY
+    || !sameRecord(github.protected_main, { ref: 'refs/heads/main', head_sha: run.source_commit, verified_current: true })
+    || github.workflow?.path !== COMPATIBILITY_WORKFLOW || github.workflow.event !== 'workflow_dispatch'
+    || github.workflow.status !== 'completed' || github.workflow.conclusion !== 'success'
+    || github.workflow.run_id !== compatibilityOwnerReceipt.run.id || github.workflow.run_attempt !== 1
+    || !sameRecord(github.workflow.job, {
+      name: compatibilityOwnerReceipt.job.name, status: 'completed', conclusion: 'success', unique: true,
+    }) || github.artifact?.name !== compatibilityOwnerReceipt.artifact.name
+    || github.artifact.artifact_id !== compatibilityOwnerReceipt.artifact.artifact_id
+    || github.artifact.digest !== compatibilityOwnerReceipt.artifact.digest
+    || github.artifact.bytes !== compatibilityOwnerReceipt.artifact.bytes
+    || github.artifact.run_id !== compatibilityOwnerReceipt.run.id
+    || github.artifact.source_commit !== run.source_commit || github.artifact.expired !== false
+    || !isDeepStrictEqual(github.artifact.archive, compatibilityOwnerReceipt.artifact.archive)) {
+    throw new Error('protected schema-2 signer GitHub verification is invalid')
+  }
+  if (!exactKeys(signed, [
+    'schema_version', 'document_type', 'release_status', 'version', 'source_commit', 'base_contract_id',
+    'schedule_protocol_floor', 'profile_component_aggregate', 'github_artifact_provenance', 'artifacts', 'signature',
+  ]) || signed.schema_version !== 2 || signed.document_type !== 'emate.desktop-release-manifest'
+    || signed.release_status !== 'admitted' || signed.version !== run.version || signed.source_commit !== run.source_commit
+    || !exactKeys(signed.signature, ['algorithm', 'key_id', 'value']) || signed.signature.algorithm !== 'ed25519'
+    || signedBytes.byteLength > 16 * 1024 || JSON.stringify(signed).includes('github.com')) {
+    throw new Error('protected schema-2 Desktop signed manifest is invalid')
+  }
+  const base = parseProfileBaseContract(await json(join(ROOT, 'desktop/e-mate-desktop/base-contract.json')))
+  const key = base?.profile_signing_keys.find(candidate => candidate.id === signed.signature.key_id)
+  const publicKey = strictBase64(key?.public_key_spki_der_base64)
+  const signature = strictBase64(signed.signature.value)
+  const { signature: ignoredSignature, ...unsigned } = signed
+  if (base === undefined || key === undefined || publicKey === undefined || signature?.byteLength !== 64
+    || signed.base_contract_id !== base.id || signed.schedule_protocol_floor !== base.schedule_protocol_floor
+    || !verifySignature(null, Buffer.concat([
+      Buffer.from(MANIFEST_SIGNING_CONTEXT), Buffer.from(canonicalProfileJson(unsigned), 'utf8'),
+    ]), createPublicKey({ key: publicKey, format: 'der', type: 'spki' }), signature)) {
+    throw new Error('protected schema-2 Desktop signature is not Base-trusted')
+  }
+  const records = installerObjectRecords(run)
+  for (const [manifestPlatform, platform] of [['darwin', 'macos'], ['win32', 'windows']]) {
+    const artifact = signed.artifacts?.[manifestPlatform]
+    const expected = records.find(record => record.platform === platform)
+    if (!exactKeys(artifact, ['url', 'bytes', 'sha256', 'build_run_id']) || expected === undefined
+      || artifact.url !== expected.url || artifact.bytes !== expected.bytes || artifact.sha256 !== expected.sha256
+      || artifact.build_run_id !== handoff.compatibility_attestation?.run_id) {
+      throw new Error(`protected schema-2 Desktop ${manifestPlatform} artifact is invalid`)
+    }
+  }
+  const stageEvidence = {
+    immutable_publication: {
+      status: 'passed', request_sha256: handoff.inputs?.immutable_request?.sha256,
+      receipt_sha256: handoff.inputs?.immutable_receipt?.sha256,
+    },
+    compatibility_attestation: handoff.compatibility_attestation,
+  }
+  if (!validActivationStageEvidence(stageEvidence, run)
+    || plan.owner !== SIGNER_ACTION_OWNER || plan.status !== 'ready-for-main-local-flow-activation'
+    || plan.next_owner !== 'main-local-flow-activation'
+    || !isDeepStrictEqual(plan.compatibility_attestation, handoff.compatibility_attestation)
+    || !isDeepStrictEqual(plan.github_verification, handoff.github_verification)
+    || !isDeepStrictEqual(plan.profile_signing, handoff.profile_signing)
+    || !isDeepStrictEqual(plan.signed_manifest, handoff.files.signed_manifest)
+    || handoff.profile_signing?.status !== 'passed'
+    || handoff.profile_signing.signature_key_id !== signed.signature.key_id
+    || !isDeepStrictEqual(handoff.profile_signing.legacy_component_aggregate, signed.profile_component_aggregate)) {
+    throw new Error('protected schema-2 signer plan or provenance is invalid')
+  }
+  return { stageEvidence, signedDescriptor, planDescriptor, handoffDescriptor, handoff, plan, signed }
+}
+
+export function buildActivationRequest(run, {
+  dryRun = false, versionChoice, stageEvidence, signerResult,
+} = {}) {
   verifiedComputerUse(run)
   const transaction = releaseTransactionPlan(run, versionChoice)
   if (!validActivationStageEvidence(stageEvidence, run)) {
     throw new Error('activation requires passed immutable publication and compatibility carrier evidence')
   }
+  if (signerResult !== undefined && (!validManifestDescriptor(signerResult.receipt)
+    || !validManifestDescriptor(signerResult.owner_receipt))) {
+    throw new Error('activation requires exact signer result and GitHub API owner receipt descriptors')
+  }
   const manifestInputs = manifestInputBinding(run)
+  const signedManifestPath = signerResult?.desktop?.signed_manifest?.path ?? POINTER_TARGET.artifact_path
+  const pointerTarget = { ...POINTER_TARGET, artifact_path: signedManifestPath }
   const pointerNames = transaction.mode === 'new-version' ? ['signed', 'legacy'] : [...transaction.activation_order]
   const pointers = Object.fromEntries(pointerNames.map(name => [name, {
     key: transaction.current_public_pointers[name].key,
     expected_current: { ...transaction.current_public_pointers[name].identity },
-    target: { ...POINTER_TARGET },
+    target: { ...pointerTarget },
     compare_and_swap: 'required',
     authenticated_readback: 'required',
     public_full_byte_readback: 'required',
@@ -2171,28 +2331,62 @@ export function buildActivationRequest(run, { dryRun = false, versionChoice, sta
       owner: MANIFEST_OWNER,
       inputs: manifestInputs,
       compatibility_attestation: stageEvidence.compatibility_attestation,
-      profile_signing: {
+      profile_signing: signerResult === undefined ? {
         status: 'awaiting-existing-owner',
         authority: 'existing-production-profile-signing-owner',
         final_component_manifests: 'not-produced-by-local-flow',
         final_profile_generation: 'not-produced-by-local-flow',
         final_component_aggregate: 'not-produced-by-local-flow',
+      } : {
+        status: 'passed',
+        owner: SIGNER_ACTION_OWNER,
+        component_aggregate: signerResult.profile.aggregate,
+        publication_plan: signerResult.profile.plan,
+        signed_desired_states: signerResult.profile.activations.map(activation => ({
+          target: activation.target,
+          generation: activation.generation,
+          source_path: activation.object.source_path,
+          bytes: activation.object.bytes,
+          sha256: activation.object.sha256,
+        })),
       },
       client_compatible_provenance: 'required-real-github-api-evidence',
       signed_manifest: {
-        artifact_path: 'desktop-release-signed.json',
+        artifact_path: signedManifestPath,
         schema_version: 2,
         document_type: 'emate.desktop-release-manifest',
         release_status: 'admitted',
         signing_context: MANIFEST_SIGNING_CONTEXT,
         signature: { algorithm: 'ed25519', key_source: 'existing-base-profile_signing_keys' },
         max_bytes: 16 * 1024,
+        ...(signerResult === undefined ? {} : {
+          bytes: signerResult.desktop.signed_manifest.bytes,
+          sha256: signerResult.desktop.signed_manifest.sha256,
+        }),
       },
-      handoff: {
+      handoff: signerResult === undefined ? {
         status: 'ready-for-cloudflare-plugin',
         exact_files: ['desktop-release-signed.json', 'cloudflare-publication-plan.json', 'cloudflare-plugin-handoff.json'],
+      } : {
+        status: 'verified-local-import',
+        signer_result_receipt: signerResult.receipt,
+        signer_result_owner_receipt: signerResult.owner_receipt,
+        publication_plan: signerResult.desktop.publication_plan,
+        signer_handoff: signerResult.desktop.signer_handoff,
+        github_run_id: signerResult.github_run_id,
+        action: SIGNER_ACTION_USES,
       },
     },
+    ...(signerResult === undefined ? {} : {
+      profile_publication: {
+        status: 'ready-for-cloudflare-owner',
+        distribution_origin: R2_PUBLIC_ORIGIN,
+        component_payload_source: 'exact-local-run-only',
+        github_result_contains_component_payloads: false,
+        immutable_objects: signerResult.profile.immutable_objects,
+        activations: signerResult.profile.activations,
+      },
+    }),
     publication_and_activation: {
       current_public_pointer_readback: 'required-before-pointer-write',
       manual_manifest: {
@@ -2200,7 +2394,7 @@ export function buildActivationRequest(run, { dryRun = false, versionChoice, sta
         expected_current: transaction.mode === 'new-version'
           ? 'must-not-exist'
           : { ...transaction.current_public_pointers.manual.identity },
-        target: { ...POINTER_TARGET },
+        target: { ...pointerTarget },
         authenticated_readback: 'required',
         public_full_byte_readback: 'required',
       },
@@ -2379,7 +2573,46 @@ export function buildCompatibilityAttestationRequest(run, immutableReceipt, {
   }
 }
 
-export function validatePublicationReceipt(receipt, run, requestSha256) {
+function validateProfilePublicationReceipt(receipt, request) {
+  const expected = request.profile_publication
+  if (!exactKeys(receipt, ['status', 'aggregate_sha256', 'immutable_objects', 'activations'])
+    || receipt.status !== 'passed'
+    || receipt.aggregate_sha256 !== request.manifest_admission_and_signing.profile_signing.component_aggregate.aggregate_sha256
+    || !Array.isArray(receipt.immutable_objects) || receipt.immutable_objects.length !== expected.immutable_objects.length
+    || !Array.isArray(receipt.activations) || receipt.activations.length !== expected.activations.length) {
+    throw new Error('Profile Cloudflare publication receipt is invalid')
+  }
+  for (const item of expected.immutable_objects) {
+    const actual = receipt.immutable_objects.find(candidate => candidate?.key === item.key)
+    if (!exactKeys(actual, [
+      'key', 'bytes', 'sha256', 'write', 'authenticated_readback', 'public_full_byte_readback',
+    ]) || actual.bytes !== item.bytes || actual.sha256 !== item.sha256
+      || !['created', 'already-exact'].includes(actual.write)
+      || !sameRecord(actual.authenticated_readback, { status: 'passed', bytes: item.bytes, sha256: item.sha256 })
+      || !sameRecord(actual.public_full_byte_readback, {
+        status: 'passed', url: item.url, bytes: item.bytes, sha256: item.sha256,
+      })) throw new Error(`Profile immutable publication receipt is invalid: ${item.key}`)
+  }
+  for (const expectedActivation of expected.activations) {
+    const actual = receipt.activations.find(candidate => candidate?.target === expectedActivation.target)
+    const item = expectedActivation.object
+    const expectedCurrent = expectedActivation.expected_current
+    if (!exactKeys(actual, [
+      'target', 'key', 'expected_current', 'write', 'after', 'authenticated_readback', 'public_full_byte_readback',
+    ]) || actual.target !== expectedActivation.target || actual.key !== item.key
+      || !isDeepStrictEqual(actual.expected_current, expectedCurrent)
+      || !['passed', 'already-exact'].includes(actual.write)
+      || !exactKeys(actual.after, ['bytes', 'sha256', 'etag']) || actual.after.bytes !== item.bytes
+      || actual.after.sha256 !== item.sha256 || !ETAG.test(actual.after.etag ?? '')
+      || !sameRecord(actual.authenticated_readback, { status: 'passed', ...actual.after })
+      || !sameRecord(actual.public_full_byte_readback, {
+        status: 'passed', url: item.url, bytes: item.bytes, sha256: item.sha256,
+      })) throw new Error(`Profile activation receipt is invalid: ${expectedActivation.target}`)
+  }
+  return receipt
+}
+
+export function validatePublicationReceipt(receipt, run, requestSha256, request) {
   if (publicationScope(run) === 'macos-immutable-dmg-only') {
     if (!exactKeys(receipt, [
       'schema_version', 'document_type', 'operation', 'status', 'release_scope', 'windows',
@@ -2422,7 +2655,8 @@ export function validatePublicationReceipt(receipt, run, requestSha256) {
     'schema_version', 'document_type', 'operation', 'status', 'macos_publication_mode', 'installer_security',
     'distribution_origin', 'run_id', 'version', 'source_commit', 'transaction_mode', 'request_sha256',
     'current_public_pointers', 'manifest_admission', 'immutable_objects', 'pointers', 'activation_order',
-    ...(transaction.mode === 'new-version' ? ['manual_manifest'] : []), 'deleted_objects',
+    ...(transaction.mode === 'new-version' ? ['manual_manifest'] : []),
+    ...(request?.profile_publication === undefined ? [] : ['profile_publication']), 'deleted_objects',
   ]
   if (!exactKeys(receipt, receiptKeys)
     || receipt.schema_version !== 1 || receipt.document_type !== 'emate.local-cloudflare-owner-receipt'
@@ -2449,6 +2683,13 @@ export function validatePublicationReceipt(receipt, run, requestSha256) {
     }
   }
   const admission = receipt.manifest_admission
+  const importedSigner = request?.profile_publication !== undefined
+  const expectedPlanStatus = importedSigner
+    ? request.manifest_admission_and_signing.handoff.publication_plan.status
+    : 'ready-for-cloudflare-plugin'
+  const expectedHandoffStatus = importedSigner
+    ? request.manifest_admission_and_signing.handoff.signer_handoff.status
+    : 'ready-for-cloudflare-plugin'
   if (!exactKeys(admission, [
     'owner', 'status', 'macos_publication_mode', 'schema_version', 'document_type', 'release_status',
     'signing_context', 'signature', 'signed_manifest', 'publication_plan', 'admission_receipt',
@@ -2465,11 +2706,26 @@ export function validatePublicationReceipt(receipt, run, requestSha256) {
     || admission.signed_manifest.bytes > 16 * 1024 || !SHA256.test(admission.signed_manifest.sha256 ?? '')
     || !exactKeys(admission.publication_plan, ['file', 'sha256', 'status'])
     || admission.publication_plan.file !== 'cloudflare-publication-plan.json'
-    || !SHA256.test(admission.publication_plan.sha256 ?? '') || admission.publication_plan.status !== 'ready-for-cloudflare-plugin'
+    || !SHA256.test(admission.publication_plan.sha256 ?? '') || admission.publication_plan.status !== expectedPlanStatus
     || !exactKeys(admission.admission_receipt, ['file', 'sha256', 'status'])
     || admission.admission_receipt.file !== 'cloudflare-plugin-handoff.json'
-    || !SHA256.test(admission.admission_receipt.sha256 ?? '') || admission.admission_receipt.status !== 'ready-for-cloudflare-plugin') {
+    || !SHA256.test(admission.admission_receipt.sha256 ?? '') || admission.admission_receipt.status !== expectedHandoffStatus) {
     throw new Error('Desktop manifest admission/signature receipt is invalid')
+  }
+  if (request?.profile_publication !== undefined) {
+    const expectedSigned = request.manifest_admission_and_signing.signed_manifest
+    const expectedPlan = request.manifest_admission_and_signing.handoff.publication_plan
+    const expectedHandoff = request.manifest_admission_and_signing.handoff.signer_handoff
+    if (admission.signed_manifest.file !== basename(expectedSigned.artifact_path)
+      || admission.signed_manifest.bytes !== expectedSigned.bytes
+      || admission.signed_manifest.sha256 !== expectedSigned.sha256
+      || admission.publication_plan.file !== basename(expectedPlan.path)
+      || admission.publication_plan.sha256 !== expectedPlan.sha256
+      || admission.admission_receipt.file !== basename(expectedHandoff.path)
+      || admission.admission_receipt.sha256 !== expectedHandoff.sha256) {
+      throw new Error('Desktop manifest admission receipt drifted from imported signer bytes')
+    }
+    validateProfilePublicationReceipt(receipt.profile_publication, request)
   }
   let appliedDuringThisAttempt = false
   for (const name of transaction.activation_order) {
@@ -2590,6 +2846,7 @@ export function validateRollbackReceipt(receipt, run, {
   publicationRequestSha256,
   publicationReceiptSha256,
   rollbackRequestSha256,
+  publicationRequest,
   publicationReceipt,
   rollbackRequest,
 } = {}) {
@@ -2611,7 +2868,7 @@ export function validateRollbackReceipt(receipt, run, {
     || receipt.deleted_objects.length !== 0) {
     throw new Error('Cloudflare rollback owner receipt is invalid')
   }
-  const publication = validatePublicationReceipt(publicationReceipt, run, publicationRequestSha256)
+  const publication = validatePublicationReceipt(publicationReceipt, run, publicationRequestSha256, publicationRequest)
   const expectedRequest = buildRollbackRequest(run, publication, {
     publicationRequestSha256,
     publicationReceiptSha256,
@@ -2691,10 +2948,11 @@ function validateAwaitingRollbackRequest(run, rollbackRequest, expectedRequest, 
 export async function importRollbackOwnerReceipt(directory, run, ownerReceiptPath) {
   const publicationRequestPath = join(directory, 'publication', 'cloudflare-owner-request.json')
   const publicationReceiptPath = join(directory, 'publication', 'cloudflare-owner-receipt.json')
+  const publicationRequest = await json(publicationRequestPath)
   const publicationRequestSha256 = await fileDigest(publicationRequestPath)
   const publicationReceiptSha256 = await fileDigest(publicationReceiptPath)
   const publicationReceipt = validatePublicationReceipt(
-    await json(publicationReceiptPath), run, publicationRequestSha256,
+    await json(publicationReceiptPath), run, publicationRequestSha256, publicationRequest,
   )
   const rollbackRequestPath = join(directory, 'rollback', 'cloudflare-owner-request.json')
   const rollbackRequest = await json(rollbackRequestPath)
@@ -2710,6 +2968,7 @@ export async function importRollbackOwnerReceipt(directory, run, ownerReceiptPat
     publicationRequestSha256,
     publicationReceiptSha256,
     rollbackRequestSha256,
+    publicationRequest,
     publicationReceipt,
     rollbackRequest,
   })
@@ -2730,25 +2989,53 @@ export async function importRollbackOwnerReceipt(directory, run, ownerReceiptPat
   }
 }
 
-export function publicationAction(run, { dryRun = false, ownerReceipt } = {}) {
+export function publicationAction(run, {
+  dryRun = false, ownerReceipt, compatibilityReceipt, signerResult, signerResultOwnerReceipt,
+} = {}) {
   const status = run.publication?.status ?? 'not-requested'
   if (![
     'not-requested', 'dry-run', 'awaiting-immutable-owner',
-    'awaiting-compatibility-attestation', 'passed',
+    'awaiting-compatibility-attestation', 'awaiting-signing-input-owner',
+    'awaiting-protected-signer', 'awaiting-activation-owner', 'passed',
   ].includes(status)) throw new Error('publication run state is invalid')
   if (status === 'passed') throw new Error('publication is already passed for this run')
   if (status === 'awaiting-compatibility-attestation') {
-    if (dryRun || ownerReceipt !== undefined) {
-      throw new Error('publication awaiting compatibility attestation cannot accept another immutable owner receipt')
+    if (dryRun || ownerReceipt !== undefined || signerResult !== undefined || signerResultOwnerReceipt !== undefined) {
+      throw new Error('publication awaiting compatibility attestation accepts only its exact compatibility receipt')
     }
-    return 'resume-compatibility'
+    return compatibilityReceipt === undefined ? 'resume-compatibility' : 'import-compatibility'
+  }
+  if (status === 'awaiting-signing-input-owner') {
+    if (dryRun || compatibilityReceipt !== undefined || signerResult !== undefined || signerResultOwnerReceipt !== undefined) {
+      throw new Error('publication awaiting signing-input owner accepts only its exact owner receipt')
+    }
+    return ownerReceipt === undefined ? 'resume-signing-input' : 'import-signing-input'
+  }
+  if (status === 'awaiting-protected-signer') {
+    if (dryRun || ownerReceipt !== undefined || compatibilityReceipt !== undefined) {
+      throw new Error('publication awaiting protected signer accepts only its exact signer result')
+    }
+    if ((signerResult === undefined) !== (signerResultOwnerReceipt === undefined)) {
+      throw new Error('protected signer result and its GitHub API owner receipt must be imported together')
+    }
+    return signerResult === undefined ? 'resume-signer' : 'import-signer'
+  }
+  if (status === 'awaiting-activation-owner') {
+    if (dryRun || compatibilityReceipt !== undefined || signerResult !== undefined || signerResultOwnerReceipt !== undefined) {
+      throw new Error('publication awaiting activation owner accepts only its exact owner receipt')
+    }
+    return ownerReceipt === undefined ? 'resume-activation' : 'import-activation'
   }
   if (status === 'awaiting-immutable-owner') {
     if (dryRun) throw new Error('publication awaiting the existing owner cannot return to dry-run')
+    if (compatibilityReceipt !== undefined || signerResult !== undefined || signerResultOwnerReceipt !== undefined) {
+      throw new Error('publication awaiting the existing owner cannot change stages')
+    }
     return ownerReceipt === undefined ? 'resume-immutable' : 'import-immutable'
   }
-  if (ownerReceipt !== undefined) {
-    throw new Error('publication owner receipt import requires the exact awaiting request state')
+  if (ownerReceipt !== undefined || compatibilityReceipt !== undefined || signerResult !== undefined
+    || signerResultOwnerReceipt !== undefined) {
+    throw new Error('publication result import requires the exact awaiting request state')
   }
   return dryRun ? 'dry-run' : 'emit-immutable'
 }
@@ -2777,6 +3064,84 @@ function awaitingCompatibilityAttestationState(run, {
     immutable_receipt_sha256: immutableReceiptSha256,
     request: COMPATIBILITY_REQUEST_PATH,
     request_sha256: compatibilityRequestSha256,
+    transaction_mode: run.release_transaction.mode,
+  }
+}
+
+function awaitingSigningInputOwnerState(run, bindings) {
+  return {
+    status: 'awaiting-signing-input-owner',
+    scope: 'full',
+    owner: CLOUDFLARE_OWNER,
+    immutable_request: IMMUTABLE_REQUEST_PATH,
+    immutable_request_sha256: bindings.immutableRequestSha256,
+    immutable_receipt: IMMUTABLE_RECEIPT_PATH,
+    immutable_receipt_sha256: bindings.immutableReceiptSha256,
+    compatibility_request: COMPATIBILITY_REQUEST_PATH,
+    compatibility_request_sha256: bindings.compatibilityRequestSha256,
+    compatibility_receipt: COMPATIBILITY_RECEIPT_PATH,
+    compatibility_receipt_sha256: bindings.compatibilityReceiptSha256,
+    control_bundle: SIGNING_BUNDLE_PATH,
+    control_bundle_bytes: bindings.bundle.bytes,
+    control_bundle_sha256: bindings.bundle.sha256,
+    request: SIGNING_INPUT_REQUEST_PATH,
+    request_sha256: bindings.requestSha256,
+    transaction_mode: run.release_transaction.mode,
+  }
+}
+
+function awaitingProtectedSignerState(run, previous, bindings) {
+  return {
+    status: 'awaiting-protected-signer',
+    scope: 'full',
+    owner: SIGNER_ACTION_OWNER,
+    immutable_request: previous.immutable_request,
+    immutable_request_sha256: previous.immutable_request_sha256,
+    immutable_receipt: previous.immutable_receipt,
+    immutable_receipt_sha256: previous.immutable_receipt_sha256,
+    compatibility_request: previous.compatibility_request,
+    compatibility_request_sha256: previous.compatibility_request_sha256,
+    compatibility_receipt: previous.compatibility_receipt,
+    compatibility_receipt_sha256: previous.compatibility_receipt_sha256,
+    control_bundle: previous.control_bundle,
+    control_bundle_bytes: previous.control_bundle_bytes,
+    control_bundle_sha256: previous.control_bundle_sha256,
+    signing_input_request: previous.request,
+    signing_input_request_sha256: previous.request_sha256,
+    signing_input_receipt: SIGNING_INPUT_RECEIPT_PATH,
+    signing_input_receipt_sha256: bindings.receiptSha256,
+    request: SIGNER_DISPATCH_REQUEST_PATH,
+    request_sha256: bindings.requestSha256,
+    action: SIGNER_ACTION_USES,
+    transaction_mode: run.release_transaction.mode,
+  }
+}
+
+function awaitingActivationOwnerState(run, previous, bindings) {
+  return {
+    status: 'awaiting-activation-owner',
+    scope: 'full',
+    owner: OWNER,
+    immutable_request: previous.immutable_request,
+    immutable_request_sha256: previous.immutable_request_sha256,
+    immutable_receipt: previous.immutable_receipt,
+    immutable_receipt_sha256: previous.immutable_receipt_sha256,
+    compatibility_request: previous.compatibility_request,
+    compatibility_request_sha256: previous.compatibility_request_sha256,
+    compatibility_receipt: previous.compatibility_receipt,
+    compatibility_receipt_sha256: previous.compatibility_receipt_sha256,
+    signing_input_request: previous.signing_input_request,
+    signing_input_request_sha256: previous.signing_input_request_sha256,
+    signing_input_receipt: previous.signing_input_receipt,
+    signing_input_receipt_sha256: previous.signing_input_receipt_sha256,
+    signer_dispatch_request: previous.request,
+    signer_dispatch_request_sha256: previous.request_sha256,
+    signer_result: SIGNER_RESULT_PATH,
+    signer_result_receipt_sha256: bindings.signerResultReceiptSha256,
+    signer_result_owner_receipt: SIGNER_RESULT_OWNER_RECEIPT_PATH,
+    signer_result_owner_receipt_sha256: bindings.signerResultOwnerReceiptSha256,
+    request: 'publication/cloudflare-owner-request.json',
+    request_sha256: bindings.requestSha256,
     transaction_mode: run.release_transaction.mode,
   }
 }
@@ -2814,6 +3179,244 @@ async function validateAwaitingCompatibilityAttestation(directory, run, immutabl
     immutableRequestSha256, immutableReceiptSha256, compatibilityRequestSha256: requestSha256,
   }))) throw new Error('publication requires the exact awaiting compatibility request state')
   return { path, requestSha256 }
+}
+
+async function runDescriptor(directory, path) {
+  return manifestFile(directory, path, path)
+}
+
+async function compatibilityBindings(directory, run) {
+  const immutableRequest = buildPublicationRequest(run)
+  const { requestSha256: immutableRequestSha256 } = await validateImmutablePublicationRequest(directory, immutableRequest)
+  const immutableReceiptPath = join(directory, IMMUTABLE_RECEIPT_PATH)
+  const immutableReceipt = validateImmutablePublicationReceipt(
+    await json(immutableReceiptPath), run, immutableRequestSha256,
+  )
+  const immutableReceiptSha256 = await fileDigest(immutableReceiptPath)
+  const compatibilityRequest = buildCompatibilityAttestationRequest(run, immutableReceipt, {
+    immutableRequestSha256, immutableReceiptSha256,
+  })
+  const compatibilityRequestPath = join(directory, COMPATIBILITY_REQUEST_PATH)
+  if (!isDeepStrictEqual(await json(compatibilityRequestPath), compatibilityRequest)) {
+    throw new Error('compatibility attestation request is invalid')
+  }
+  const compatibilityRequestSha256 = await fileDigest(compatibilityRequestPath)
+  const compatibilityReceiptPath = join(directory, COMPATIBILITY_RECEIPT_PATH)
+  const compatibilityReceiptInput = await json(compatibilityReceiptPath)
+  const compatibilityReceipt = validateCompatibilityCarrierReceipt(
+    compatibilityReceiptInput, run, compatibilityRequest, compatibilityRequestSha256,
+  )
+  return {
+    immutableRequest,
+    compatibilityRequest,
+    compatibilityReceipt,
+    immutableRequestDescriptor: await runDescriptor(directory, IMMUTABLE_REQUEST_PATH),
+    immutableReceiptDescriptor: await runDescriptor(directory, IMMUTABLE_RECEIPT_PATH),
+    compatibilityRequestDescriptor: await runDescriptor(directory, COMPATIBILITY_REQUEST_PATH),
+    compatibilityReceiptDescriptor: await runDescriptor(directory, COMPATIBILITY_RECEIPT_PATH),
+  }
+}
+
+async function validateAwaitingSigningInputOwner(directory, run) {
+  const bindings = await compatibilityBindings(directory, run)
+  const bundle = await runDescriptor(directory, SIGNING_BUNDLE_PATH)
+  const request = buildSigningInputOwnerRequest(run, {
+    bundle,
+    compatibility: {
+      request: bindings.compatibilityRequestDescriptor,
+      receipt: bindings.compatibilityReceiptDescriptor,
+    },
+  })
+  const path = join(directory, SIGNING_INPUT_REQUEST_PATH)
+  if (!isDeepStrictEqual(await json(path), request)) throw new Error('protected signer control-object request is invalid')
+  const requestSha256 = await fileDigest(path)
+  if (!isDeepStrictEqual(run.publication, awaitingSigningInputOwnerState(run, {
+    immutableRequestSha256: bindings.immutableRequestDescriptor.sha256,
+    immutableReceiptSha256: bindings.immutableReceiptDescriptor.sha256,
+    compatibilityRequestSha256: bindings.compatibilityRequestDescriptor.sha256,
+    compatibilityReceiptSha256: bindings.compatibilityReceiptDescriptor.sha256,
+    bundle,
+    requestSha256,
+  }))) throw new Error('publication requires the exact awaiting signing-input request state')
+  return { ...bindings, bundle, request, path, requestSha256 }
+}
+
+async function validateAwaitingProtectedSigner(directory, run) {
+  const previous = { ...run.publication }
+  const signingInputRequestPath = join(directory, SIGNING_INPUT_REQUEST_PATH)
+  const signingInputRequest = await json(signingInputRequestPath)
+  const signingInputRequestSha256 = await fileDigest(signingInputRequestPath)
+  if (signingInputRequestSha256 !== previous.signing_input_request_sha256) {
+    throw new Error('protected signer control-object request descriptor drifted')
+  }
+  const signingInputReceiptPath = join(directory, SIGNING_INPUT_RECEIPT_PATH)
+  const signingInputReceipt = validateSigningInputOwnerReceipt(
+    await json(signingInputReceiptPath), signingInputRequest, signingInputRequestSha256,
+  )
+  const signingInputReceiptSha256 = await fileDigest(signingInputReceiptPath)
+  const compatibilityReceipt = await json(join(directory, COMPATIBILITY_RECEIPT_PATH))
+  const descriptors = {
+    immutable_request: await runDescriptor(directory, IMMUTABLE_REQUEST_PATH),
+    immutable_receipt: await runDescriptor(directory, IMMUTABLE_RECEIPT_PATH),
+    compatibility_request: await runDescriptor(directory, COMPATIBILITY_REQUEST_PATH),
+    compatibility_receipt: await runDescriptor(directory, COMPATIBILITY_RECEIPT_PATH),
+    signing_input_request: await runDescriptor(directory, SIGNING_INPUT_REQUEST_PATH),
+    signing_input_receipt: await runDescriptor(directory, SIGNING_INPUT_RECEIPT_PATH),
+  }
+  const request = buildProtectedSignerDispatchRequest(run, {
+    compatibilityReceipt, controlReceipt: signingInputReceipt, descriptors,
+  })
+  const path = join(directory, SIGNER_DISPATCH_REQUEST_PATH)
+  if (!isDeepStrictEqual(await json(path), request)) throw new Error('protected signer dispatch request is invalid')
+  const requestSha256 = await fileDigest(path)
+  const signingInputState = {
+    status: 'awaiting-signing-input-owner', scope: previous.scope, owner: CLOUDFLARE_OWNER,
+    immutable_request: previous.immutable_request,
+    immutable_request_sha256: previous.immutable_request_sha256,
+    immutable_receipt: previous.immutable_receipt,
+    immutable_receipt_sha256: previous.immutable_receipt_sha256,
+    compatibility_request: previous.compatibility_request,
+    compatibility_request_sha256: previous.compatibility_request_sha256,
+    compatibility_receipt: previous.compatibility_receipt,
+    compatibility_receipt_sha256: previous.compatibility_receipt_sha256,
+    control_bundle: previous.control_bundle,
+    control_bundle_bytes: previous.control_bundle_bytes,
+    control_bundle_sha256: previous.control_bundle_sha256,
+    request: previous.signing_input_request,
+    request_sha256: previous.signing_input_request_sha256,
+    transaction_mode: previous.transaction_mode,
+  }
+  if (!isDeepStrictEqual(previous, awaitingProtectedSignerState(run, signingInputState, {
+    receiptSha256: signingInputReceiptSha256, requestSha256,
+  }))) throw new Error('publication requires the exact awaiting protected-signer state')
+  return { request, path, requestSha256, signingInputReceipt, compatibilityReceipt, descriptors }
+}
+
+async function importProtectedSignerResult(directory, run, externalResult, externalOwnerReceipt) {
+  const previous = { ...run.publication }
+  const awaiting = await validateAwaitingProtectedSigner(directory, run)
+  const external = await validateProtectedSignerResultDirectory(
+    externalResult, run, awaiting.request, awaiting.requestSha256,
+  )
+  const externalResultReceipt = await manifestFile(external.root, 'signer-result-receipt.json')
+  const ownerReceipt = validateProtectedSignerResultOwnerReceipt(
+    await json(externalOwnerReceipt), run, awaiting.request, awaiting.requestSha256, externalResultReceipt,
+  )
+  if (ownerReceipt.run.id !== external.receipt.github_run_id
+    || ownerReceipt.artifact.name !== external.receipt.artifact_name) {
+    throw new Error('protected signer result and GitHub owner receipt provenance diverged')
+  }
+  const resultPath = join(directory, SIGNER_RESULT_PATH)
+  await copyTree(external.root, resultPath)
+  const imported = await validateProtectedSignerResultDirectory(
+    resultPath, run, awaiting.request, awaiting.requestSha256,
+  )
+  const ownerReceiptPath = join(directory, SIGNER_RESULT_OWNER_RECEIPT_PATH)
+  await atomicJson(ownerReceiptPath, ownerReceipt)
+  const desktop = await validateDesktopSignerResult(resultPath, run)
+  const { verifyCompactLocalProfileSignerResult } = await import('./publish-profile-r2.mjs')
+  const profile = await verifyCompactLocalProfileSignerResult({
+    root: ROOT,
+    runRoot: directory,
+    request: join(directory, IMMUTABLE_REQUEST_PATH),
+    result: resultPath,
+  })
+  const prefixed = descriptor => ({ ...descriptor, path: `${SIGNER_RESULT_PATH}/${descriptor.path}` })
+  const signerResult = {
+    receipt: prefixed(await runDescriptor(resultPath, 'signer-result-receipt.json')),
+    owner_receipt: await runDescriptor(directory, SIGNER_RESULT_OWNER_RECEIPT_PATH),
+    github_run_id: imported.receipt.github_run_id,
+    desktop: {
+      signed_manifest: prefixed(desktop.signedDescriptor),
+      publication_plan: { ...prefixed(desktop.planDescriptor), status: desktop.plan.status },
+      signer_handoff: { ...prefixed(desktop.handoffDescriptor), status: desktop.handoff.status },
+    },
+    profile: {
+      ...profile,
+      aggregate: prefixed(profile.aggregate),
+      plan: prefixed(profile.plan),
+    },
+  }
+  const request = buildActivationRequest(run, {
+    stageEvidence: desktop.stageEvidence,
+    signerResult,
+  })
+  const path = join(directory, 'publication', 'cloudflare-owner-request.json')
+  await atomicJson(path, request)
+  const requestSha256 = await fileDigest(path)
+  return {
+    path,
+    state: awaitingActivationOwnerState(run, previous, {
+      signerResultReceiptSha256: imported.receiptIdentity.sha256,
+      signerResultOwnerReceiptSha256: signerResult.owner_receipt.sha256,
+      requestSha256,
+    }),
+  }
+}
+
+async function validateAwaitingActivationOwner(directory, run) {
+  const state = run.publication
+  if (!exactKeys(state, [
+    'status', 'scope', 'owner', 'immutable_request', 'immutable_request_sha256', 'immutable_receipt',
+    'immutable_receipt_sha256', 'compatibility_request', 'compatibility_request_sha256',
+    'compatibility_receipt', 'compatibility_receipt_sha256', 'signing_input_request',
+    'signing_input_request_sha256', 'signing_input_receipt', 'signing_input_receipt_sha256',
+    'signer_dispatch_request', 'signer_dispatch_request_sha256', 'signer_result',
+    'signer_result_receipt_sha256', 'signer_result_owner_receipt', 'signer_result_owner_receipt_sha256',
+    'request', 'request_sha256', 'transaction_mode',
+  ]) || state.status !== 'awaiting-activation-owner' || state.scope !== 'full' || state.owner !== OWNER
+    || state.request !== 'publication/cloudflare-owner-request.json'
+    || state.signer_result !== SIGNER_RESULT_PATH || state.transaction_mode !== run.release_transaction.mode
+    || state.signer_result_owner_receipt !== SIGNER_RESULT_OWNER_RECEIPT_PATH
+    || ![state.immutable_request_sha256, state.immutable_receipt_sha256,
+      state.compatibility_request_sha256, state.compatibility_receipt_sha256,
+      state.signing_input_request_sha256, state.signing_input_receipt_sha256,
+      state.signer_dispatch_request_sha256, state.signer_result_receipt_sha256,
+      state.signer_result_owner_receipt_sha256, state.request_sha256]
+      .every(value => SHA256.test(value ?? ''))) {
+    throw new Error('publication requires the exact awaiting activation-owner state')
+  }
+  const path = join(directory, state.request)
+  const request = await json(path)
+  const requestSha256 = await fileDigest(path)
+  if (requestSha256 !== state.request_sha256 || request.run_id !== run.run_id
+    || request.source_commit !== run.source_commit || request.operation !== 'publish'
+    || request.distribution_origin !== R2_PUBLIC_ORIGIN
+    || request.manifest_admission_and_signing?.handoff?.signer_result_receipt?.sha256
+      !== state.signer_result_receipt_sha256
+    || request.manifest_admission_and_signing?.handoff?.signer_result_owner_receipt?.sha256
+      !== state.signer_result_owner_receipt_sha256
+    || await fileDigest(join(directory, state.signer_result_owner_receipt))
+      !== state.signer_result_owner_receipt_sha256) {
+    throw new Error('activation owner request drifted from its exact awaiting state')
+  }
+  return { path, request, requestSha256 }
+}
+
+async function importActivationOwnerReceipt(directory, run, externalReceipt) {
+  const awaiting = await validateAwaitingActivationOwner(directory, run)
+  const receipt = validatePublicationReceipt(
+    await json(externalReceipt), run, awaiting.requestSha256, awaiting.request,
+  )
+  const receiptPath = join(directory, 'publication', 'cloudflare-owner-receipt.json')
+  await atomicJson(receiptPath, receipt)
+  return {
+    path: awaiting.path,
+    state: {
+      status: 'passed',
+      scope: 'full',
+      owner: OWNER,
+      request: relativePath(directory, awaiting.path),
+      request_sha256: awaiting.requestSha256,
+      receipt: relativePath(directory, receiptPath),
+      receipt_sha256: await fileDigest(receiptPath),
+      signer_result: SIGNER_RESULT_PATH,
+      signer_result_receipt_sha256: run.publication.signer_result_receipt_sha256,
+      signer_result_owner_receipt: SIGNER_RESULT_OWNER_RECEIPT_PATH,
+      signer_result_owner_receipt_sha256: run.publication.signer_result_owner_receipt_sha256,
+      completed_at: now(),
+    },
+  }
 }
 
 async function publish(values) {
@@ -2900,9 +3503,110 @@ async function publish(values) {
       immutableReceiptSha256,
       compatibilityRequestSha256: await fileDigest(outputPath),
     })
-  } else {
+  } else if (action === 'resume-compatibility') {
     const resumed = await validateAwaitingCompatibilityAttestation(directory, run, immutableRequest)
     outputPath = resumed.path
+  } else if (action === 'import-compatibility') {
+    const resumed = await validateAwaitingCompatibilityAttestation(directory, run, immutableRequest)
+    const compatibilityRequest = await json(resumed.path)
+    const compatibilityReceipt = validateCompatibilityCarrierReceipt(
+      await json(resolve(values.compatibilityReceipt)), run, compatibilityRequest, resumed.requestSha256,
+    )
+    await atomicJson(join(directory, COMPATIBILITY_RECEIPT_PATH), compatibilityReceipt)
+    const bindings = await compatibilityBindings(directory, run)
+    const files = await collectSigningControlFiles(directory, run)
+    const snapshot = await runDescriptor(directory, PROFILE_SNAPSHOT_PATH)
+    const bundlePath = join(directory, SIGNING_BUNDLE_PATH)
+    const bundleResult = await createSigningControlBundle({
+      root: directory,
+      output: bundlePath,
+      files,
+      metadata: {
+        schema_version: 1,
+        document_type: 'emate.local-protected-signer-control-input',
+        run_id: run.run_id,
+        version: run.version,
+        source_commit: run.source_commit,
+        transaction_mode: run.release_transaction.mode,
+        predecessors: {
+          immutable_request: bindings.immutableRequestDescriptor,
+          immutable_receipt: bindings.immutableReceiptDescriptor,
+          compatibility_request: bindings.compatibilityRequestDescriptor,
+          compatibility_receipt: bindings.compatibilityReceiptDescriptor,
+          profile_current_snapshot: snapshot,
+        },
+        hydrated_installers: installerObjectRecords(run).map(object => ({
+          platform: object.platform, name: basename(object.key), key: object.key, url: object.url,
+          bytes: object.bytes, sha256: object.sha256,
+        })),
+        disclosure: 'public-control-input-containing-verified-future-public-product-bytes',
+      },
+    })
+    const bundle = { path: SIGNING_BUNDLE_PATH, bytes: bundleResult.bytes, sha256: bundleResult.sha256 }
+    const request = buildSigningInputOwnerRequest(run, {
+      bundle,
+      compatibility: {
+        request: bindings.compatibilityRequestDescriptor,
+        receipt: bindings.compatibilityReceiptDescriptor,
+      },
+    })
+    outputPath = join(directory, SIGNING_INPUT_REQUEST_PATH)
+    await atomicJson(outputPath, request)
+    run.publication = awaitingSigningInputOwnerState(run, {
+      immutableRequestSha256: bindings.immutableRequestDescriptor.sha256,
+      immutableReceiptSha256: bindings.immutableReceiptDescriptor.sha256,
+      compatibilityRequestSha256: bindings.compatibilityRequestDescriptor.sha256,
+      compatibilityReceiptSha256: bindings.compatibilityReceiptDescriptor.sha256,
+      bundle,
+      requestSha256: await fileDigest(outputPath),
+    })
+  } else if (action === 'resume-signing-input') {
+    const resumed = await validateAwaitingSigningInputOwner(directory, run)
+    outputPath = resumed.path
+  } else if (action === 'import-signing-input') {
+    const previous = { ...run.publication }
+    const awaiting = await validateAwaitingSigningInputOwner(directory, run)
+    const receipt = validateSigningInputOwnerReceipt(
+      await json(resolve(values.ownerReceipt)), awaiting.request, awaiting.requestSha256,
+    )
+    const receiptPath = join(directory, SIGNING_INPUT_RECEIPT_PATH)
+    await atomicJson(receiptPath, receipt)
+    const receiptSha256 = await fileDigest(receiptPath)
+    const descriptors = {
+      immutable_request: awaiting.immutableRequestDescriptor,
+      immutable_receipt: awaiting.immutableReceiptDescriptor,
+      compatibility_request: awaiting.compatibilityRequestDescriptor,
+      compatibility_receipt: awaiting.compatibilityReceiptDescriptor,
+      signing_input_request: await runDescriptor(directory, SIGNING_INPUT_REQUEST_PATH),
+      signing_input_receipt: await runDescriptor(directory, SIGNING_INPUT_RECEIPT_PATH),
+    }
+    const request = buildProtectedSignerDispatchRequest(run, {
+      compatibilityReceipt: awaiting.compatibilityReceipt,
+      controlReceipt: receipt,
+      descriptors,
+    })
+    outputPath = join(directory, SIGNER_DISPATCH_REQUEST_PATH)
+    await atomicJson(outputPath, request)
+    run.publication = awaitingProtectedSignerState(run, previous, {
+      receiptSha256,
+      requestSha256: await fileDigest(outputPath),
+    })
+  } else if (action === 'resume-signer') {
+    const resumed = await validateAwaitingProtectedSigner(directory, run)
+    outputPath = resumed.path
+  } else if (action === 'import-signer') {
+    const imported = await importProtectedSignerResult(
+      directory, run, resolve(values.signerResult), resolve(values.signerResultOwnerReceipt),
+    )
+    outputPath = imported.path
+    run.publication = imported.state
+  } else if (action === 'resume-activation') {
+    const resumed = await validateAwaitingActivationOwner(directory, run)
+    outputPath = resumed.path
+  } else if (action === 'import-activation') {
+    const completed = await importActivationOwnerReceipt(directory, run, resolve(values.ownerReceipt))
+    outputPath = completed.path
+    run.publication = completed.state
   }
   await saveRun(directory, run)
   await writeChecksums(directory)
@@ -2915,13 +3619,16 @@ async function rollback(values) {
   const { directory, run } = await loadRun(values.run)
   assertVerificationMatches(run, await verifyRun(directory, run))
   const action = rollbackAction(run, values)
-  let publicationReceipt, publicationRequestSha256, publicationReceiptSha256
+  let publicationReceipt, publicationRequest, publicationRequestSha256, publicationReceiptSha256
   const receiptPath = join(directory, 'publication', 'cloudflare-owner-receipt.json')
   if (!values.dryRun) {
-    const publicationRequest = join(directory, 'publication', 'cloudflare-owner-request.json')
-    publicationRequestSha256 = await fileDigest(publicationRequest)
+    const publicationRequestPath = join(directory, 'publication', 'cloudflare-owner-request.json')
+    publicationRequest = await json(publicationRequestPath)
+    publicationRequestSha256 = await fileDigest(publicationRequestPath)
     publicationReceiptSha256 = await fileDigest(receiptPath)
-    publicationReceipt = validatePublicationReceipt(await json(receiptPath), run, publicationRequestSha256)
+    publicationReceipt = validatePublicationReceipt(
+      await json(receiptPath), run, publicationRequestSha256, publicationRequest,
+    )
   }
   const request = buildRollbackRequest(run, publicationReceipt, {
     dryRun: values.dryRun,
@@ -2973,6 +3680,9 @@ function argumentsFor(argv) {
       'remote-request': { type: 'string' },
       'dry-run': { type: 'boolean', default: false },
       'owner-receipt': { type: 'string' },
+      'compatibility-receipt': { type: 'string' },
+      'signer-result': { type: 'string' },
+      'signer-result-owner-receipt': { type: 'string' },
       'version-choice': { type: 'string' },
     },
   })
@@ -2983,6 +3693,9 @@ function argumentsFor(argv) {
       ...values,
       dryRun: values['dry-run'],
       ownerReceipt: values['owner-receipt'],
+      compatibilityReceipt: values['compatibility-receipt'],
+      signerResult: values['signer-result'],
+      signerResultOwnerReceipt: values['signer-result-owner-receipt'],
       sourceCommit: values['source-commit'],
       manifestOut: values['manifest-out'],
       windowsResult: values['windows-result'],
@@ -2995,38 +3708,43 @@ function argumentsFor(argv) {
 
 function validateCommandOptions(command, values) {
   const internal = command === '_platform-build'
+  const publicationImportCount = [values.ownerReceipt, values.compatibilityReceipt, values.signerResult]
+    .filter(value => value !== undefined).length
+  const hasSignerResultOwnerReceipt = values.signerResultOwnerReceipt !== undefined
   if (!['dev', 'candidate', 'verify', 'publish', 'rollback'].includes(command) && !internal) {
     throw new Error('flow command must be dev, candidate, verify, publish, or rollback')
   }
   if (command === 'dev' && (values.run !== undefined || values.retry !== undefined || values.dryRun
-    || values.platform !== undefined || values.out !== undefined || values.manifestOut !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
+    || values.platform !== undefined || values.out !== undefined || values.manifestOut !== undefined || values.sourceCommit !== undefined || publicationImportCount > 0 || hasSignerResultOwnerReceipt
     || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined || values.versionChoice !== undefined)) {
     throw new Error('dev does not accept options')
   }
   if (command === 'candidate' && (values.dryRun || values.platform !== undefined || values.out !== undefined
-    || values.manifestOut !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined || values.remoteRequest !== undefined || values.versionChoice !== undefined
+    || values.manifestOut !== undefined || values.sourceCommit !== undefined || publicationImportCount > 0 || hasSignerResultOwnerReceipt || values.remoteRequest !== undefined || values.versionChoice !== undefined
     || values.windowsResult !== undefined && (values.run === undefined || values.retry !== undefined || values.windowsUnavailable)
     || values.windowsUnavailable && (values.run === undefined || values.retry !== undefined))) {
     throw new Error('candidate accepts --run/--retry, --run with --windows-result, or --run --windows-unavailable')
   }
   if (command === 'verify' && (values.run === undefined || values.retry !== undefined || values.dryRun
-    || values.platform !== undefined || values.out !== undefined || values.manifestOut !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
+    || values.platform !== undefined || values.out !== undefined || values.manifestOut !== undefined || values.sourceCommit !== undefined || publicationImportCount > 0 || hasSignerResultOwnerReceipt
     || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined || values.versionChoice !== undefined)) {
     throw new Error('verify requires only --run <id>')
   }
   if (command === 'publish' && (values.run === undefined || values.retry !== undefined
     || values.platform !== undefined || values.out !== undefined || values.manifestOut !== undefined || values.sourceCommit !== undefined
     || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined
-    || values.dryRun && values.ownerReceipt !== undefined)) {
-    throw new Error('publish requires --run <id> and accepts --version-choice, --dry-run, or --owner-receipt')
+    || publicationImportCount > 1 || (values.signerResult === undefined) !== !hasSignerResultOwnerReceipt
+    || values.dryRun && (publicationImportCount > 0 || hasSignerResultOwnerReceipt))) {
+    throw new Error('publish requires --run <id> and accepts one of --version-choice, --dry-run, --owner-receipt, --compatibility-receipt, or --signer-result')
   }
   if (command === 'rollback' && (values.run === undefined || values.retry !== undefined
     || values.platform !== undefined || values.out !== undefined || values.manifestOut !== undefined || values.sourceCommit !== undefined
     || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined || values.versionChoice !== undefined
+    || values.compatibilityReceipt !== undefined || values.signerResult !== undefined || hasSignerResultOwnerReceipt
     || values.dryRun && values.ownerReceipt !== undefined)) {
     throw new Error('rollback requires --run <id> and accepts only --dry-run or --owner-receipt')
   }
-  if (internal && (values.run !== undefined || values.retry !== undefined || values.dryRun || values.ownerReceipt !== undefined
+  if (internal && (values.run !== undefined || values.retry !== undefined || values.dryRun || publicationImportCount > 0 || hasSignerResultOwnerReceipt
     || values.windowsResult !== undefined || values.windowsUnavailable || values.versionChoice !== undefined
     || values.remoteRequest !== undefined && values.platform !== 'windows')) {
     throw new Error('invalid internal platform build options')

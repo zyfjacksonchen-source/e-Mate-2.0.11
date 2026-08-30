@@ -46,6 +46,23 @@ import {
 } from './local-flow.mjs'
 import { pinnedYarnInvocation } from './package-manager.mjs'
 import { canonicalProfileJson } from '../desktop/e-mate-desktop/src/profile-release.ts'
+import {
+  R2_ORIGIN as SIGNER_R2_ORIGIN,
+  SIGNER_ACTION_OWNER,
+  SIGNER_ACTION_USES,
+  SIGNER_DISPATCH_REQUEST_PATH,
+  SIGNER_RESULT_RECEIPT,
+  assembleProtectedSignerResult,
+  buildProtectedSignerDispatchRequest,
+  buildSigningInputOwnerRequest,
+  collectSigningControlFiles,
+  materializeProtectedSignerDispatchRequest,
+  validateProtectedSignerResultDirectory,
+  validateProtectedSignerResultOwnerReceipt,
+  validatePublicControlRun,
+  validateSigningInputOwnerReceipt,
+} from './signer-transport.mjs'
+import { createSigningControlBundle } from './signing-control-bundle.mjs'
 
 const SHA = 'a'.repeat(40)
 const MAC_SHA = 'b'.repeat(64)
@@ -411,6 +428,50 @@ function bindTransaction(run, mode = run.version === '2.0.15' ? 'same-version-2.
   return run
 }
 
+function protectedSignerRun() {
+  const run = verifiedRun()
+  Object.assign(run, {
+    schema_version: 1,
+    document_type: 'emate.local-flow-run',
+    command: 'candidate',
+    source_branch: 'release/2.0.15',
+    created_at: '2026-08-30T00:00:00.000Z',
+    updated_at: '2026-08-30T01:00:00.000Z',
+    status: 'built',
+    platforms: {
+      macos: { status: 'passed', source_commit: SHA, artifact: run.verification.artifacts.macos.primary },
+      windows: {
+        status: 'passed', source_commit: SHA, artifact: run.verification.artifacts.windows.primary,
+        codex_remote: {
+          host: 'DESKTOP-KH19ARC', request_sha256: '1'.repeat(64),
+          receipt: 'windows-remote/result.json', receipt_sha256: '2'.repeat(64),
+        },
+      },
+    },
+    rollback: { status: 'not-requested' },
+  })
+  run.verification.verified_at = '2026-08-30T00:30:00.000Z'
+  bindTransaction(run)
+  run.publication = {
+    status: 'awaiting-compatibility-attestation',
+    scope: 'full',
+    owner: 'github-compatibility-attestation-carrier',
+    immutable_request: 'publication/immutable-owner-request.json',
+    immutable_request_sha256: '3'.repeat(64),
+    immutable_receipt: 'publication/immutable-owner-receipt.json',
+    immutable_receipt_sha256: '4'.repeat(64),
+    request: 'publication/compatibility-attestation-request.json',
+    request_sha256: '5'.repeat(64),
+    transaction_mode: run.release_transaction.mode,
+  }
+  return run
+}
+
+async function fileDescriptor(root, path) {
+  const bytes = await readFile(join(root, ...path.split('/')))
+  return { path, bytes: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex') }
+}
+
 function publicationFixture(run, requestSha256 = '1'.repeat(64), { dryRun = true } = {}) {
   bindTransaction(run)
   const request = buildPublicationRequest(run, { dryRun })
@@ -448,7 +509,7 @@ function publicationFixture(run, requestSha256 = '1'.repeat(64), { dryRun = true
     request_sha256: requestSha256,
     current_public_pointers: currentPublicPointers,
     manifest_admission: {
-      owner: 'zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123',
+      owner: 'zyfjacksonchen-source/e-mate-desktop-publication@93c707e2b7d833db3df4ee0013455b905232e1f6',
       status: 'passed',
       macos_publication_mode: 'unsigned',
       schema_version: 2,
@@ -1108,7 +1169,7 @@ test('same-version exception is frozen before immutable R2 publication and remai
   assert.equal(activation.transaction_plan.manual_reinstall_required_for_existing_2_0_15, true)
   assert.deepEqual(activation.manifest_admission_and_signing.inputs, run.manifest_inputs)
   assert.equal(activation.manifest_admission_and_signing.owner,
-    'zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123')
+    'zyfjacksonchen-source/e-mate-desktop-publication@93c707e2b7d833db3df4ee0013455b905232e1f6')
   assert.deepEqual(activation.manifest_admission_and_signing.signed_manifest, {
     artifact_path: 'desktop-release-signed.json',
     schema_version: 2,
@@ -1284,9 +1345,289 @@ test('publication state advances monotonically and stops at the external signer 
   assert.throws(() => publicationAction(immutable, { dryRun: true }), /cannot return to dry-run/u)
   const compatibility = { publication: { status: 'awaiting-compatibility-attestation' } }
   assert.equal(publicationAction(compatibility, {}), 'resume-compatibility')
-  assert.throws(() => publicationAction(compatibility, { ownerReceipt: 'receipt.json' }), /cannot accept another/u)
+  assert.equal(publicationAction(compatibility, { compatibilityReceipt: 'receipt.json' }), 'import-compatibility')
+  assert.throws(() => publicationAction(compatibility, { ownerReceipt: 'receipt.json' }), /accepts only its exact/u)
+  const signingInput = { publication: { status: 'awaiting-signing-input-owner' } }
+  assert.equal(publicationAction(signingInput, {}), 'resume-signing-input')
+  assert.equal(publicationAction(signingInput, { ownerReceipt: 'receipt.json' }), 'import-signing-input')
+  const signer = { publication: { status: 'awaiting-protected-signer' } }
+  assert.equal(publicationAction(signer, {}), 'resume-signer')
+  assert.throws(() => publicationAction(signer, { signerResult: 'result' }), /imported together/u)
+  assert.equal(publicationAction(signer, {
+    signerResult: 'result', signerResultOwnerReceipt: 'owner-receipt.json',
+  }), 'import-signer')
+  const activation = { publication: { status: 'awaiting-activation-owner' } }
+  assert.equal(publicationAction(activation, {}), 'resume-activation')
+  assert.equal(publicationAction(activation, { ownerReceipt: 'receipt.json' }), 'import-activation')
   assert.throws(() => publicationAction({ publication: { status: 'awaiting-existing-owner' } }, {}), /state is invalid/u)
   assert.throws(() => publicationAction({ publication: { status: 'passed' } }, {}), /already passed/u)
+})
+
+test('protected signer public control input is closed-schema and host allowlisted', () => {
+  const run = protectedSignerRun()
+  assert.equal(validatePublicControlRun(run), run)
+  const unknown = structuredClone(run)
+  unknown.verification.artifacts.macos.primary.note = 'not allowed'
+  assert.throws(() => validatePublicControlRun(unknown), /unknown object shape/u)
+  const unknownHost = structuredClone(run)
+  unknownHost.platforms.windows.codex_remote.host = 'OTHER-HOST'
+  assert.throws(() => validatePublicControlRun(unknownHost), /unknown host/u)
+  const developerPath = structuredClone(run)
+  developerPath.source_branch = '/Users/alice/private'
+  assert.throws(() => validatePublicControlRun(developerPath), /sensitive text/u)
+  const error = structuredClone(run)
+  error.verification.error = 'hidden failure'
+  assert.throws(() => validatePublicControlRun(error), /unknown object shape|forbidden field/u)
+})
+
+test('protected signer packing binds the exact public-safe scan and rejects credential fields', async t => {
+  const root = await temporary()
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const run = protectedSignerRun()
+  const documents = {
+    'run.json': run,
+    'publication/immutable-owner-request.json': { safe: 'immutable-request' },
+    'publication/immutable-owner-receipt.json': { safe: 'immutable-receipt' },
+    'publication/compatibility-attestation-request.json': { safe: 'compatibility-request' },
+    'publication/compatibility-attestation-receipt.json': { safe: 'compatibility-receipt' },
+    'profile-current-snapshot.json': { safe: 'profile-snapshot' },
+    'manifest-inputs/public.json': { safe: '1234567890' },
+    'artifacts/macos/local-artifact-receipt.json': { files: [run.verification.artifacts.macos.primary] },
+    'artifacts/windows/local-artifact-receipt.json': { files: [run.verification.artifacts.windows.primary] },
+  }
+  for (const [path, value] of Object.entries(documents)) {
+    await mkdir(join(root, ...path.split('/').slice(0, -1)), { recursive: true })
+    await writeFile(join(root, ...path.split('/')), `${JSON.stringify(value)}\n`)
+  }
+  const approved = await collectSigningControlFiles(root, run)
+  const publicPath = join(root, 'manifest-inputs/public.json')
+  const original = await readFile(publicPath)
+  const drifted = Buffer.from(original.toString('utf8').replace('safe', 'evil'))
+  assert.equal(drifted.byteLength, original.byteLength)
+  await writeFile(publicPath, drifted)
+  await assert.rejects(createSigningControlBundle({
+    root,
+    output: join(root, 'drifted.emate'),
+    metadata: {
+      schema_version: 1,
+      document_type: 'emate.local-protected-signer-control-input',
+      run_id: run.run_id,
+      source_commit: run.source_commit,
+    },
+    files: approved,
+  }), /approved public-safe identity/u)
+  await writeFile(publicPath, '{"api_key":"abcdefghijklmnop"}\n')
+  await assert.rejects(collectSigningControlFiles(root, run), /sensitive material/u)
+})
+
+test('protected signer control request and receipt bind create-only canonical R2 bytes', () => {
+  const run = protectedSignerRun()
+  const bindings = {
+    bundle: { path: 'publication/protected-signer-control.emate', bytes: 123, sha256: '6'.repeat(64) },
+    compatibility: {
+      request: { path: 'publication/compatibility-attestation-request.json', bytes: 10, sha256: '7'.repeat(64) },
+      receipt: { path: 'publication/compatibility-attestation-receipt.json', bytes: 11, sha256: '8'.repeat(64) },
+    },
+  }
+  const request = buildSigningInputOwnerRequest(run, bindings)
+  assert.equal(request.control_object.key, `desktop/control/schema2-signing/${SHA}/${'6'.repeat(64)}.emate-signing-control`)
+  assert.equal(request.control_object.url, `${SIGNER_R2_ORIGIN}/${request.control_object.key}`)
+  const requestSha256 = '9'.repeat(64)
+  const receipt = {
+    schema_version: 1,
+    document_type: 'emate.local-cloudflare-owner-receipt',
+    operation: request.operation,
+    status: 'passed',
+    authority: request.authority,
+    distribution_origin: SIGNER_R2_ORIGIN,
+    run_id: run.run_id,
+    version: run.version,
+    source_commit: run.source_commit,
+    transaction_mode: run.release_transaction.mode,
+    request_sha256: requestSha256,
+    control_object: {
+      role: request.control_object.role,
+      key: request.control_object.key,
+      url: request.control_object.url,
+      bytes: request.control_object.bytes,
+      sha256: request.control_object.sha256,
+      write: 'created',
+      authenticated_readback: { status: 'passed', bytes: request.control_object.bytes, sha256: request.control_object.sha256 },
+      public_full_byte_readback: {
+        status: 'passed', url: request.control_object.url, http_status: 200,
+        bytes: request.control_object.bytes, sha256: request.control_object.sha256,
+      },
+    },
+    deleted_objects: [],
+  }
+  assert.equal(validateSigningInputOwnerReceipt(receipt, request, requestSha256), receipt)
+  const drift = structuredClone(receipt)
+  drift.control_object.public_full_byte_readback.sha256 = 'a'.repeat(64)
+  assert.throws(() => validateSigningInputOwnerReceipt(drift, request, requestSha256), /receipt is invalid/u)
+})
+
+test('workflow reconstructs the exact post-bundle dispatch request and binds both late descriptors', async () => {
+  const root = await temporary()
+  try {
+    const run = protectedSignerRun()
+    const documents = {
+      'run.json': run,
+      'publication/immutable-owner-request.json': { immutable: 'request' },
+      'publication/immutable-owner-receipt.json': { immutable: 'receipt' },
+      'publication/compatibility-attestation-request.json': { compatibility: 'request' },
+      'publication/compatibility-attestation-receipt.json': {
+        run: { id: '123' }, artifact: { artifact_id: '456' },
+      },
+    }
+    for (const [path, value] of Object.entries(documents)) {
+      await mkdir(join(root, ...path.split('/').slice(0, -1)), { recursive: true })
+      await writeFile(join(root, ...path.split('/')), `${JSON.stringify(value, null, 2)}\n`)
+    }
+    const descriptors = {
+      immutable_request: await fileDescriptor(root, 'publication/immutable-owner-request.json'),
+      immutable_receipt: await fileDescriptor(root, 'publication/immutable-owner-receipt.json'),
+      compatibility_request: await fileDescriptor(root, 'publication/compatibility-attestation-request.json'),
+      compatibility_receipt: await fileDescriptor(root, 'publication/compatibility-attestation-receipt.json'),
+      signing_input_request: { path: 'publication/signing-input-owner-request.json', bytes: 101, sha256: 'b'.repeat(64) },
+      signing_input_receipt: { path: 'publication/signing-input-owner-receipt.json', bytes: 102, sha256: 'c'.repeat(64) },
+    }
+    const control = {
+      key: `desktop/control/schema2-signing/${SHA}/${'d'.repeat(64)}.emate-signing-control`,
+      url: `${SIGNER_R2_ORIGIN}/desktop/control/schema2-signing/${SHA}/${'d'.repeat(64)}.emate-signing-control`,
+      bytes: 999,
+      sha256: 'd'.repeat(64),
+    }
+    const request = buildProtectedSignerDispatchRequest(run, {
+      compatibilityReceipt: documents['publication/compatibility-attestation-receipt.json'],
+      controlReceipt: { control_object: control },
+      descriptors,
+    })
+    assert.equal(request.inputs.signing_input_request_sha256, descriptors.signing_input_request.sha256)
+    assert.equal(request.inputs.signing_input_receipt_sha256, descriptors.signing_input_receipt.sha256)
+    assert.equal(request.expected_result.owner_receipt.required, true)
+    const bytes = Buffer.from(`${JSON.stringify(request, null, 2)}\n`)
+    const dispatchSha256 = createHash('sha256').update(bytes).digest('hex')
+    const inputs = {
+      source_sha: SHA, control_key: control.key, control_url: control.url,
+      control_bytes: control.bytes, control_sha256: control.sha256,
+      compatibility_run_id: '123', compatibility_artifact_id: '456',
+      signing_input_request_bytes: descriptors.signing_input_request.bytes,
+      signing_input_request_sha256: descriptors.signing_input_request.sha256,
+      signing_input_receipt_bytes: descriptors.signing_input_receipt.bytes,
+      signing_input_receipt_sha256: descriptors.signing_input_receipt.sha256,
+      dispatch_request_sha256: dispatchSha256,
+    }
+    assert.deepEqual(await materializeProtectedSignerDispatchRequest({ runRoot: root, inputs }), request)
+    assert.deepEqual(JSON.parse(await readFile(join(root, SIGNER_DISPATCH_REQUEST_PATH), 'utf8')), request)
+    await rm(join(root, SIGNER_DISPATCH_REQUEST_PATH))
+    await assert.rejects(() => materializeProtectedSignerDispatchRequest({
+      runRoot: root, inputs: { ...inputs, dispatch_request_sha256: 'e'.repeat(64) },
+    }), /digest drifted/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('compact signer result is exact-set and needs independent GitHub API owner provenance', async () => {
+  const root = await temporary()
+  try {
+    const run = protectedSignerRun()
+    const dispatch = {
+      workflow: { artifact_name: `e-mate-protected-schema2-signer-${SHA}` },
+      source_commit: SHA,
+      run_id: run.run_id,
+      action: { uses: SIGNER_ACTION_USES },
+      inputs: {
+        control_key: `desktop/control/schema2-signing/${SHA}/${'d'.repeat(64)}.emate-signing-control`,
+        control_bytes: '999', control_sha256: 'd'.repeat(64),
+        compatibility_run_id: '123', compatibility_artifact_id: '456',
+      },
+    }
+    const runRoot = join(root, 'run')
+    await mkdir(join(runRoot, 'publication'), { recursive: true })
+    const dispatchBytes = Buffer.from(`${JSON.stringify(dispatch, null, 2)}\n`)
+    const dispatchSha256 = createHash('sha256').update(dispatchBytes).digest('hex')
+    await writeFile(join(runRoot, SIGNER_DISPATCH_REQUEST_PATH), dispatchBytes)
+    const desktop = join(root, 'desktop')
+    const profile = join(root, 'profile')
+    const desktopFiles = ['cloudflare-plugin-handoff.json', 'cloudflare-publication-plan.json', 'desktop-release-signed.json']
+    const profileFiles = [
+      'profile-component-aggregate.json', 'profile-desired-state/darwin-arm64.json',
+      'profile-desired-state/darwin-x64.json', 'profile-desired-state/win32-x64.json',
+      'profile-publication-plan.json', 'profile-signer-result.json',
+    ]
+    for (const [directory, files] of [[desktop, desktopFiles], [profile, profileFiles]]) {
+      for (const path of files) {
+        await mkdir(join(directory, ...path.split('/').slice(0, -1)), { recursive: true })
+        await writeFile(join(directory, ...path.split('/')), `${path}\n`)
+      }
+    }
+    const output = join(root, 'result')
+    const result = await assembleProtectedSignerResult({
+      runRoot, desktop, profile, output,
+      env: {
+        GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'zyfjacksonchen-source/e-Mate-2.0.11',
+        GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main', GITHUB_REF_PROTECTED: 'true',
+        GITHUB_RUN_ATTEMPT: '1', GITHUB_WORKFLOW_REF: 'zyfjacksonchen-source/e-Mate-2.0.11/.github/workflows/desktop-publication.yml@refs/heads/main',
+        GITHUB_SHA: SHA, GITHUB_RUN_ID: '789',
+      },
+    })
+    const validated = await validateProtectedSignerResultDirectory(output, run, dispatch, dispatchSha256)
+    const resultReceipt = await fileDescriptor(output, SIGNER_RESULT_RECEIPT)
+    const exactFiles = [SIGNER_RESULT_RECEIPT, ...desktopFiles, ...profileFiles].sort()
+    const ownerReceipt = {
+      schema_version: 1,
+      document_type: 'emate.github-protected-signer-result-owner-receipt',
+      status: 'passed',
+      authority: 'github-api-verification-owner',
+      dispatch_request_sha256: dispatchSha256,
+      repository: 'zyfjacksonchen-source/e-Mate-2.0.11',
+      workflow: '.github/workflows/desktop-publication.yml',
+      ref: 'refs/heads/main',
+      head_sha: SHA,
+      run: { id: '789', attempt: 1, event: 'workflow_dispatch', status: 'completed', conclusion: 'success', head_sha: SHA },
+      job: { name: 'Produce protected schema-2 signer control result', status: 'completed', conclusion: 'success', unique: true },
+      artifact: {
+        role: 'protected_schema2_signer_result', name: dispatch.workflow.artifact_name,
+        artifact_id: '987', digest: `sha256:${'a'.repeat(64)}`, bytes: 1200, run_id: '789',
+        source_commit: SHA, expired: false,
+        archive: { bytes: 1200, sha256: 'a'.repeat(64), exact_files: exactFiles },
+      },
+      result: { receipt: resultReceipt, exact_files: exactFiles },
+      verification: { protected_main: 'passed', workflow: 'passed', job: 'passed', artifact: 'passed', archive: 'passed' },
+      production_state: { r2_write_performed: false, pointer_changed: false, user_download_exposed: false },
+      next_owner: 'main-local-flow-activation',
+    }
+    assert.equal(result.github_run_id, '789')
+    assert.equal(validated.receipt.artifact_name, dispatch.workflow.artifact_name)
+    assert.equal(validateProtectedSignerResultOwnerReceipt(
+      ownerReceipt, run, dispatch, dispatchSha256, resultReceipt,
+    ), ownerReceipt)
+    const expired = structuredClone(ownerReceipt)
+    expired.artifact.expired = true
+    assert.throws(() => validateProtectedSignerResultOwnerReceipt(
+      expired, run, dispatch, dispatchSha256, resultReceipt,
+    ), /owner receipt is invalid/u)
+    const digestDrift = structuredClone(ownerReceipt)
+    digestDrift.artifact.digest = `sha256:${'b'.repeat(64)}`
+    assert.throws(() => validateProtectedSignerResultOwnerReceipt(
+      digestDrift, run, dispatch, dispatchSha256, resultReceipt,
+    ), /owner receipt is invalid/u)
+    const bytesDrift = structuredClone(ownerReceipt)
+    bytesDrift.artifact.bytes += 1
+    assert.throws(() => validateProtectedSignerResultOwnerReceipt(
+      bytesDrift, run, dispatch, dispatchSha256, resultReceipt,
+    ), /owner receipt is invalid/u)
+    await writeFile(join(output, 'extra.json'), '{}\n')
+    await assert.rejects(() => validateProtectedSignerResultDirectory(output, run, dispatch, dispatchSha256), /file set/u)
+    await rm(join(output, 'extra.json'))
+    const signedPath = join(output, 'desktop-release-signed.json')
+    const original = await readFile(signedPath)
+    await writeFile(signedPath, Buffer.alloc(original.byteLength, 120))
+    await assert.rejects(() => validateProtectedSignerResultDirectory(output, run, dispatch, dispatchSha256), /bytes drifted/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('version-bound R2 transaction rejects implicit choice and binds the exact public predecessor', () => {
@@ -1550,6 +1891,106 @@ test('publication receipt requires exact ordered CAS completion and per-pointer 
     assert.deepEqual(item.expected_current, target)
     assert.deepEqual(item.restore, POINTER_BEFORE)
   }
+})
+
+test('final activation receipt preserves imported signer bytes and truthful E statuses', () => {
+  const run = bindTransaction(verifiedRun())
+  const requestSha256 = '1'.repeat(64)
+  const signerResult = {
+    receipt: { path: 'publication/protected-signer-result/signer-result-receipt.json', bytes: 100, sha256: '3'.repeat(64) },
+    owner_receipt: {
+      path: 'publication/protected-signer-result-owner-receipt.json', bytes: 101, sha256: 'a'.repeat(64),
+    },
+    github_run_id: '123',
+    desktop: {
+      signed_manifest: {
+        path: 'publication/protected-signer-result/desktop-release-signed.json', bytes: 2961, sha256: '2'.repeat(64),
+      },
+      publication_plan: {
+        path: 'publication/protected-signer-result/cloudflare-publication-plan.json', bytes: 200,
+        sha256: '4'.repeat(64), status: 'ready-for-main-local-flow-activation',
+      },
+      signer_handoff: {
+        path: 'publication/protected-signer-result/cloudflare-plugin-handoff.json', bytes: 300,
+        sha256: '5'.repeat(64), status: 'passed',
+      },
+    },
+    profile: {
+      aggregate: {
+        path: 'publication/protected-signer-result/profile-component-aggregate.json', bytes: 400,
+        sha256: '6'.repeat(64), aggregate_sha256: '7'.repeat(64),
+      },
+      plan: { path: 'publication/protected-signer-result/profile-publication-plan.json', bytes: 500, sha256: '8'.repeat(64) },
+      immutable_objects: [],
+      activations: [],
+    },
+  }
+  const request = buildActivationRequest(run, { stageEvidence: activationStageEvidence(run), signerResult })
+  const { receipt } = publicationFixture(run, requestSha256)
+  receipt.manifest_admission.signed_manifest = {
+    file: 'desktop-release-signed.json', bytes: signerResult.desktop.signed_manifest.bytes,
+    sha256: signerResult.desktop.signed_manifest.sha256,
+  }
+  receipt.manifest_admission.publication_plan = {
+    file: 'cloudflare-publication-plan.json', sha256: signerResult.desktop.publication_plan.sha256,
+    status: signerResult.desktop.publication_plan.status,
+  }
+  receipt.manifest_admission.admission_receipt = {
+    file: 'cloudflare-plugin-handoff.json', sha256: signerResult.desktop.signer_handoff.sha256,
+    status: signerResult.desktop.signer_handoff.status,
+  }
+  receipt.profile_publication = {
+    status: 'passed', aggregate_sha256: signerResult.profile.aggregate.aggregate_sha256,
+    immutable_objects: [], activations: [],
+  }
+  assert.equal(validatePublicationReceipt(receipt, run, requestSha256, request), receipt)
+  const sameLengthManifestDrift = structuredClone(receipt)
+  sameLengthManifestDrift.manifest_admission.signed_manifest.sha256 = '9'.repeat(64)
+  assert.throws(() => validatePublicationReceipt(
+    sameLengthManifestDrift, run, requestSha256, request,
+  ), /drifted from imported signer bytes/u)
+  const relabelledPlan = structuredClone(receipt)
+  relabelledPlan.manifest_admission.publication_plan.status = 'ready-for-cloudflare-plugin'
+  assert.throws(() => validatePublicationReceipt(
+    relabelledPlan, run, requestSha256, request,
+  ), /admission\/signature receipt/u)
+  assert.equal(request.manifest_admission_and_signing.signed_manifest.bytes, 2961)
+  assert.equal(request.manifest_admission_and_signing.signed_manifest.sha256, '2'.repeat(64))
+  assert.equal(request.manifest_admission_and_signing.handoff.publication_plan.status,
+    'ready-for-main-local-flow-activation')
+  assert.equal(request.manifest_admission_and_signing.handoff.signer_handoff.status, 'passed')
+  assert.equal([...request.immutable_objects, ...request.profile_publication.immutable_objects,
+    ...request.profile_publication.activations.map(item => item.object)]
+    .every(item => item.url.startsWith(`${R2_ORIGIN}/`)), true)
+  assert.doesNotMatch(JSON.stringify(request.profile_publication), /github\.com/u)
+  const publicationReceiptSha256 = 'b'.repeat(64)
+  const rollback = buildRollbackRequest(run, receipt, {
+    publicationRequestSha256: requestSha256, publicationReceiptSha256,
+  })
+  const rollbackRequestSha256 = 'c'.repeat(64)
+  const rollbackReceipt = {
+    schema_version: 1,
+    document_type: 'emate.local-cloudflare-owner-receipt',
+    operation: 'rollback', status: 'passed',
+    authority: 'existing-desktop-manifest-admission-signing-owner+codex-cloudflare-plugin',
+    run_id: run.run_id, version: run.version, source_commit: run.source_commit,
+    distribution_origin: R2_ORIGIN, transaction_mode: run.release_transaction.mode,
+    publication_request_sha256: requestSha256, publication_receipt_sha256: publicationReceiptSha256,
+    rollback_request_sha256: rollbackRequestSha256,
+    rollback_order: rollback.rollback_order,
+    pointers: rollback.pointer_compare_and_swap.map(pointer => ({
+      key: pointer.key, before: pointer.expected_current, after: pointer.restore, cas: 'passed',
+      authenticated_readback: { status: 'passed', ...pointer.restore },
+      public_full_byte_readback: { status: 'passed', bytes: pointer.restore.bytes, sha256: pointer.restore.sha256 },
+    })),
+    immutable_objects: rollback.immutable_objects.map(item => ({ key: item.key, action: 'retained' })),
+    manual_manifest: { key: rollback.manual_manifest.key, action: 'restored-by-cas' },
+    deleted_objects: [],
+  }
+  assert.equal(validateRollbackReceipt(rollbackReceipt, run, {
+    publicationRequestSha256: requestSha256, publicationReceiptSha256, rollbackRequestSha256,
+    publicationRequest: request, publicationReceipt: receipt, rollbackRequest: rollback,
+  }), rollbackReceipt)
 })
 
 test('rollback receipt is owner-bound, non-transferable, ordered, and closes the exact run', async () => {
@@ -1875,8 +2316,39 @@ test('root package exposes one flow entry and the implementation has no GitHub, 
   const publish = source.slice(source.indexOf('async function publish'), source.indexOf('\nasync function rollback'))
   assert.ok(publish.indexOf('await verifyManifestInputLedger(directory, run)') >= 0)
   assert.ok(publish.indexOf('await verifyManifestInputLedger(directory, run)') < publish.indexOf('await atomicJson(immutableRequestPath, immutableRequest)'))
-  assert.match(publicationWorkflow, /uses: zyfjacksonchen-source\/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123/u)
+  assert.match(publicationWorkflow, /uses: zyfjacksonchen-source\/e-mate-desktop-publication\/local-schema2@93c707e2b7d833db3df4ee0013455b905232e1f6/u)
   assert.match(updater, /2: Buffer\.from\('e-mate-desktop-release-manifest-v2\\0', 'utf8'\)/u)
+})
+
+test('protected schema-2 signer workflow only verifies, signs, and emits compact control evidence', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/desktop-publication.yml', import.meta.url), 'utf8')
+  const inputs = workflow.slice(workflow.indexOf('    inputs:'), workflow.indexOf('\npermissions:'))
+  assert.deepEqual([...inputs.matchAll(/^      ([a-z0-9_]+):$/gmu)].map(match => match[1]), [
+    'source_sha', 'control_key', 'control_bytes', 'control_sha256', 'compatibility_run_id',
+    'compatibility_artifact_id', 'signing_input_request_bytes', 'signing_input_request_sha256',
+    'signing_input_receipt_bytes', 'signing_input_receipt_sha256', 'dispatch_request_sha256',
+  ])
+  assert.match(workflow, /name: Produce protected schema-2 signer control result/u)
+  assert.match(workflow, /git switch -C main "\$GITHUB_SHA"/u)
+  assert.match(workflow, /git status --porcelain=v1 --untracked-files=all/u)
+  assert.match(workflow, /actions\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803/u)
+  assert.match(workflow, /actions\/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38/u)
+  assert.match(workflow, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/u)
+  assert.match(workflow, /e-mate-desktop-publication\/local-schema2@93c707e2b7d833db3df4ee0013455b905232e1f6/u)
+  assert.doesNotMatch(workflow, /uses: [^\n]+@v\d/u)
+  assert.equal([...workflow.matchAll(/--write-out '%\{http_code\}'/gu)].length, 2)
+  assert.equal([...workflow.matchAll(/--max-filesize/gu)].length, 2)
+  assert.doesNotMatch(workflow, /curl[^\n]*--location/u)
+  assert.match(workflow, /signer-transport\.mjs materialize-dispatch/u)
+  assert.match(workflow, /publish-profile-r2\.mjs[\s\S]*--local-compact-output/u)
+  assert.match(workflow, /signer-transport\.mjs assemble/u)
+  assert.match(workflow, /e-mate-protected-schema2-signer-\$\{\{ inputs\.source_sha \}\}/u)
+  assert.match(workflow, /profile-desired-state\/darwin-arm64\.json,[^\n]*profile-desired-state\/win32-x64\.json/u)
+  assert.doesNotMatch(workflow, /submodules: recursive|\bcorepack\b|\bpnpm\b|\byarn\b|\bnpm\b|\bwrangler\b|write-r2|activate-pointer/iu)
+  const jobEnv = workflow.slice(workflow.indexOf('    env:'), workflow.indexOf('    steps:'))
+  assert.doesNotMatch(jobEnv, /SIGNING_PRIVATE_KEY|SIGNING_KEY_ID/u)
+  assert.equal([...workflow.matchAll(/EMATE_PROFILE_SIGNING_PRIVATE_KEY:/gu)].length, 2)
+  assert.match(workflow, /R2_ORIGIN: https:\/\/pub-ada3f610c0234a76838f4e19fe2bb25e\.r2\.dev/u)
 })
 
 test('schema-2 compatibility workflow only materializes exact canonical R2 bytes', async () => {
@@ -1890,6 +2362,10 @@ test('schema-2 compatibility workflow only materializes exact canonical R2 bytes
   assert.match(workflow, /GITHUB_RUN_ATTEMPT" = 1/u)
   assert.match(workflow, /desktop-compatibility-attestation\.yml@refs\/heads\/main/u)
   assert.match(workflow, /submodules: false/u)
+  assert.match(workflow, /actions\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803/u)
+  assert.match(workflow, /actions\/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38/u)
+  assert.match(workflow, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/u)
+  assert.doesNotMatch(workflow, /uses: [^\n]+@v\d/u)
   assert.match(workflow, /https:\/\/pub-ada3f610c0234a76838f4e19fe2bb25e\.r2\.dev/u)
   assert.equal([...workflow.matchAll(/--write-out '%\{http_code\}'/gu)].length, 2)
   assert.equal([...workflow.matchAll(/\)" = 200/gu)].length, 2)
