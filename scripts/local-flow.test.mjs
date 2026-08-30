@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 import {
   COMPUTER_USE_SCENARIOS,
   assertCleanArtifactBytes,
@@ -191,10 +193,37 @@ test('native Windows routing accepts only the Codex SSH host identity', () => {
   assert.throws(() => validateRemoteHostname('win-codex'), /must be DESKTOP-KH19ARC/u)
 })
 
-test('Windows source and result transfers both force legacy scp protocol', async () => {
+test('Windows PowerShell uses relative tar paths and both transfers force legacy scp protocol', async () => {
   const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
   assert.equal(source.match(/runLogged\('scp'/gu)?.length, 2)
   assert.equal(source.match(/runLogged\('scp', \['-O',/gu)?.length, 2)
+  const start = source.indexOf('    const build = [', source.indexOf('async function windowsBuild'))
+  const projection = source.slice(start, source.indexOf("    ].join(';')", start))
+  assert.match(projection, /'Set-Location \$root'/u)
+  assert.match(projection, /"tar\.exe -xzf 'source\.tgz' -C 'source'"/u)
+  assert.match(projection, /--out '\.\.\\\\out'/u)
+  assert.match(projection, /"tar\.exe -czf 'result\.tgz' -C 'out' \."/u)
+  assert.doesNotMatch(projection, /remoteArchive|remoteResult|\$source|\$out/u)
+  assert.doesNotMatch(projection, /tar\.exe[^\n]*[A-Za-z]:[\\/]/u)
+})
+
+test('direct-run guard canonicalizes a symlinked entry while imports stay inert', { skip: process.platform === 'win32' }, async () => {
+  const root = await temporary()
+  try {
+    const script = fileURLToPath(new URL('./local-flow.mjs', import.meta.url))
+    const entry = join(root, 'local-flow.mjs')
+    await symlink(script, entry)
+    const direct = spawnSync(process.execPath, [entry, 'not-a-command'], { encoding: 'utf8' })
+    assert.equal(direct.status, 1)
+    assert.match(direct.stderr, /flow command must be/u)
+    const imported = spawnSync(process.execPath, [
+      '--input-type=module', '--eval', `await import(${JSON.stringify(new URL('./local-flow.mjs', import.meta.url).href)})`,
+    ], { encoding: 'utf8' })
+    assert.equal(imported.status, 0)
+    assert.equal(imported.stderr, '')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('local artifact receipts bind exact clean bytes and reject extra session or screenshot files', async () => {
@@ -416,6 +445,18 @@ test('publication receipt requires existing-owner manifest admission/signature a
     ...receipt,
     pointers: { ...receipt.pointers, legacy: { ...receipt.pointers.legacy, public_readback: 'failed' } },
   }, run, requestSha256), /legacy pointer receipt/u)
+})
+
+test('desktop builds start Corepack inside the pinned Yarn project on macOS and Windows', async () => {
+  const rootPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  const desktopPackage = JSON.parse(await readFile(new URL('../desktop/package.json', import.meta.url), 'utf8'))
+  const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
+  assert.equal(rootPackage.packageManager, 'pnpm@11.7.0')
+  assert.equal(desktopPackage.packageManager, 'yarn@4.18.0')
+  assert.equal([...source.matchAll(/await runLogged\(process\.platform === 'win32' \? 'corepack\.cmd' : 'corepack', \['yarn'/gu)].length, 2)
+  assert.match(source, /\['yarn', 'install', '--immutable'\], \{ cwd: join\(sourceRoot, 'desktop'\), log \}/u)
+  assert.match(source, /\['yarn', PLATFORMS\[platform\]\.build\], \{ cwd: join\(sourceRoot, 'desktop'\), log \}/u)
+  assert.doesNotMatch(source, /\['yarn', '--cwd', 'desktop'/u)
 })
 
 test('root package exposes one flow entry and the implementation has no GitHub, Wrangler, or win-codex path', async () => {
