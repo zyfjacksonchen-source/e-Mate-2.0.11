@@ -106,16 +106,15 @@ function record(value: unknown): Record<string, unknown> | null {
 }
 
 function validateCatalog(routes: readonly ModelSmokeRoute[]): Map<string, ModelSmokeRoute> {
-  const searchCredentialRoute = routes.find(({ id }) => id === 'gpt-web-search');
-  const callableRoutes = routes.filter(({ id }) => id !== 'gpt-web-search');
+  const searchCredentialRoute = routes.find(({ id }) => id === 'deepseek-web-search');
+  const callableRoutes = routes.filter(({ id }) => id !== 'deepseek-web-search');
   if (
     routes.length !== routeContracts.length + (searchCredentialRoute ? 1 : 0) ||
     (searchCredentialRoute !== undefined &&
-      (searchCredentialRoute.providerId !== 'gpt-responses' ||
-        searchCredentialRoute.apiMode !== 'responses' ||
-        searchCredentialRoute.upstreamBaseUrl !== 'http://43.135.183.53:8080/v1' ||
-        searchCredentialRoute.upstreamModelId !== 'gpt-5.6-luna' ||
-        searchCredentialRoute.allowInsecureHttpUpstream !== true ||
+      (searchCredentialRoute.providerId !== 'deepseek-official' ||
+        searchCredentialRoute.upstreamBaseUrl !== 'https://api.deepseek.com/anthropic/v1' ||
+        searchCredentialRoute.upstreamModelId !== 'deepseek-v4-flash' ||
+        searchCredentialRoute.allowInsecureHttpUpstream !== undefined ||
         searchCredentialRoute.upstreamApiKey.length < 20 ||
         /\s/.test(searchCredentialRoute.upstreamApiKey)))
   ) {
@@ -441,19 +440,6 @@ export async function runModelSmoke(options: {
         : smokeInference(route, fetchImplementation, AbortSignal.timeout(options.timeoutMs), localId);
     // eslint-disable-next-line no-await-in-loop
     const result = await smokeRequest;
-    results.push(result);
-    options.onResult?.(result);
-  }
-  const searchRoute = options.routes.find(({ id }) => id === 'gpt-web-search');
-  if (searchRoute) {
-    const localId = randomId();
-    if (!evidencePattern.test(localId)) throw new ModelSmokeError('INVALID_CATALOG', searchRoute.id);
-    const result = await smokeInference(
-      searchRoute,
-      fetchImplementation,
-      AbortSignal.timeout(options.timeoutMs),
-      localId
-    );
     results.push(result);
     options.onResult?.(result);
   }

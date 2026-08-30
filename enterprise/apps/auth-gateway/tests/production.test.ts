@@ -57,14 +57,14 @@ test('Auth model ids come only from the shared Model Gateway route catalog', () 
       routes: [
         { id: 'gemini-3.1-pro' },
         { id: 'gpt-5.6-luna' },
-        { id: 'gpt-web-search' },
+        { id: 'deepseek-web-search' },
         { id: 'gpt-image-2-pro' },
       ],
     }),
     ['gemini-3.1-pro', 'gpt-5.6-luna', 'gpt-image-2-pro']
   );
   assert.throws(() => modelRouteIdsFromCatalog({ routes: [] }), /route catalog/);
-  assert.throws(() => modelRouteIdsFromCatalog({ routes: [{ id: 'gpt-web-search' }] }), /route catalog/);
+  assert.throws(() => modelRouteIdsFromCatalog({ routes: [{ id: 'deepseek-web-search' }] }), /route catalog/);
   assert.throws(() => modelRouteIdsFromCatalog({ routes: [{ id: 'e-mate-faux' }] }), /route id/);
   assert.throws(
     () => modelRouteIdsFromCatalog({ routes: [{ id: 'gpt-5.6-sol' }, { id: 'gpt-5.6-sol' }] }),
