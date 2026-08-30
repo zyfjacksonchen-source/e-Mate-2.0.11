@@ -11,12 +11,15 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { isDeepStrictEqual, parseArgs } from 'node:util'
 import { classifyChangedPaths } from './change-impact.mjs'
+import { pinnedPnpmInvocation, pinnedYarnInvocation } from './package-manager.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const RUN_ROOT = join(ROOT, 'dist', 'local-runs')
 const PACKAGE = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'))
+const DESKTOP_PACKAGE = JSON.parse(await readFile(join(ROOT, 'desktop', 'package.json'), 'utf8'))
 const VERSION = PACKAGE.version
 const PNPM_VERSION = /^pnpm@([^+]+)$/u.exec(PACKAGE.packageManager)?.[1]
+const YARN_VERSION = /^yarn@([^+]+)$/u.exec(DESKTOP_PACKAGE.packageManager)?.[1]
 const SOURCE_SHA = /^[0-9a-f]{40}$/u
 const SHA256 = /^[0-9a-f]{64}$/u
 const RUN_ID = /^\d{8}T\d{6}Z-[0-9a-f]{12}-[0-9a-f]{6}$/u
@@ -368,26 +371,28 @@ function redactLog(value) {
     .replace(/(?:sk|rk|sess)-[A-Za-z0-9_-]{20,}/gu, '<redacted-secret>')
 }
 
-function pnpmInvocation(args) {
-  const npmExecPath = process.env.npm_execpath
-  if (npmExecPath === undefined || !npmExecPath.toLowerCase().includes('pnpm')) {
-    throw new Error('local flow must run through the pinned pnpm entry: pnpm flow <command>')
-  }
-  return { command: process.execPath, args: [npmExecPath, ...args] }
+function pnpmInvocation(args, env = process.env) {
+  if (PNPM_VERSION === undefined) throw new Error(`unsupported packageManager: ${String(PACKAGE.packageManager)}`)
+  return pinnedPnpmInvocation(PNPM_VERSION, args, { env })
 }
 
 function assertPinnedPnpm() {
-  const invocation = pnpmInvocation(['--version'])
-  const result = spawnSync(invocation.command, invocation.args, { encoding: 'utf8' })
-  if (result.error !== undefined) throw result.error
-  if (result.status !== 0 || PNPM_VERSION === undefined || result.stdout.trim() !== PNPM_VERSION) {
-    throw new Error(`candidate requires pinned pnpm ${String(PNPM_VERSION)}; received ${result.stdout.trim() || '<unavailable>'}`)
-  }
+  pnpmInvocation([])
 }
 
 async function runPnpm(args, options) {
-  const invocation = pnpmInvocation(args)
-  return runLogged(invocation.command, invocation.args, options)
+  const env = options.env ?? process.env
+  const invocation = pnpmInvocation(args, env)
+  return runLogged(invocation.command, invocation.args, { ...options, env })
+}
+
+async function runYarn(args, options) {
+  if (PNPM_VERSION === undefined || YARN_VERSION === undefined) {
+    throw new Error(`unsupported packageManager pair: ${String(PACKAGE.packageManager)}, ${String(DESKTOP_PACKAGE.packageManager)}`)
+  }
+  const env = options.env ?? process.env
+  const invocation = pinnedYarnInvocation(PNPM_VERSION, YARN_VERSION, args, { env })
+  return runLogged(invocation.command, invocation.args, { ...options, env })
 }
 
 function changedPaths() {
@@ -661,8 +666,8 @@ async function platformBuild(sourceRoot, platform, output, log) {
     '--root', 'packages/dsh-plugin-vision-toolkit',
     '--targets', platform === 'macos' ? 'darwin-arm64,darwin-x64' : 'win32-x64',
   ], { cwd: sourceRoot, log })
-  await runLogged(process.platform === 'win32' ? 'corepack.cmd' : 'corepack', ['yarn', 'install', '--immutable'], { cwd: join(sourceRoot, 'desktop'), log })
-  await runLogged(process.platform === 'win32' ? 'corepack.cmd' : 'corepack', ['yarn', PLATFORMS[platform].build], { cwd: join(sourceRoot, 'desktop'), log })
+  await runYarn(['install', '--immutable'], { cwd: join(sourceRoot, 'desktop'), log })
+  await runYarn([PLATFORMS[platform].build], { cwd: join(sourceRoot, 'desktop'), log })
   await exportArtifact(sourceRoot, platform, output, git(['rev-parse', 'HEAD'], sourceRoot))
 }
 

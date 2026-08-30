@@ -14,6 +14,7 @@ import {
   HARNESS_COMMIT,
   hashDirectory,
 } from './harness-provenance.mjs'
+import { pinnedPnpmInvocation } from './package-manager.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const harnessRoot = join(root, 'upstream', 'deepseek-harness')
@@ -26,6 +27,28 @@ test('pins one clean native model-directory refresh owner', () => {
     'packages/client/ui-model-selection/src/client/service.ts',
   ), 'utf8')
   assertExactOccurrence(source, "ctx.remote.$on('credentials/updated', refresh)", 'native model listener')
+})
+
+test('runs Harness build through the inherited exact pnpm entry without a PATH shim', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'e-mate-pinned-pnpm-'))
+  const entry = join(directory, 'v1/pnpm/11.7.0/bin/pnpm.cjs')
+  const log = join(directory, 'invocation.json')
+  try {
+    mkdirSync(join(directory, 'v1/pnpm/11.7.0/bin'), { recursive: true })
+    writeFileSync(entry, [
+      "if (process.argv[2] === '--version') process.stdout.write('11.7.0\\n')",
+      "else require('node:fs').writeFileSync(process.env.T25_PM_LOG, JSON.stringify(process.argv.slice(2)))",
+    ].join('\n'))
+    const env = { PATH: '/usr/bin:/bin', npm_execpath: entry, T25_PM_LOG: log }
+    const invocation = pinnedPnpmInvocation('11.7.0', ['--dir', 'upstream/deepseek-harness', 'run', 'build'], { env })
+    execFileSync(invocation.command, invocation.args, { env: invocation.env })
+    assert.deepEqual(JSON.parse(readFileSync(log, 'utf8')), ['--dir', 'upstream/deepseek-harness', 'run', 'build'])
+
+    writeFileSync(entry, "process.stdout.write('11.19.0\\n')\n")
+    assert.throws(() => pinnedPnpmInvocation('11.7.0', [], { env }), /requires pinned pnpm 11\.7\.0/u)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })
 
 test('keeps exactly the three overlays still missing from e13', () => {
