@@ -459,6 +459,28 @@ test('desktop builds start Corepack inside the pinned Yarn project on macOS and 
   assert.doesNotMatch(source, /\['yarn', '--cwd', 'desktop'/u)
 })
 
+test('platform build skips Harness dev hooks in clean submodule copies', async () => {
+  const root = await temporary()
+  try {
+    const common = join(root, '.git', 'modules', 'upstream', 'deepseek-harness')
+    const config = join(common, 'config')
+    await mkdir(common, { recursive: true })
+    const configured = spawnSync('git', [
+      'config', '--file', config, 'core.worktree', '../../../../upstream/deepseek-harness',
+    ], { encoding: 'utf8' })
+    assert.equal(configured.status, 0, configured.stderr)
+    const worktree = spawnSync('git', ['config', '--file', config, '--get', 'core.worktree'], { encoding: 'utf8' })
+    assert.equal(worktree.stdout.trim(), '../../../../upstream/deepseek-harness')
+
+    const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
+    const start = source.indexOf('async function platformBuild')
+    const projection = source.slice(start, source.indexOf('\n}\n\nfunction encodedPowerShell', start))
+    assert.match(projection, /runPnpm\(\['--dir', 'upstream\/deepseek-harness', 'install', '--frozen-lockfile'\], \{ cwd: sourceRoot, log, env: \{ \.\.\.process\.env, CI: 'true' \} \}\)/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('root package exposes one flow entry and the implementation has no GitHub, Wrangler, or win-codex path', async () => {
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
