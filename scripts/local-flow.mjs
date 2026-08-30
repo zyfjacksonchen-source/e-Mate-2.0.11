@@ -4,10 +4,10 @@ import { spawn, spawnSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
 import {
-  copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, writeFile,
+  copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, symlink, writeFile,
 } from 'node:fs/promises'
 import { hostname, tmpdir } from 'node:os'
-import { basename, dirname, join, relative, resolve, sep } from 'node:path'
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { isDeepStrictEqual, parseArgs } from 'node:util'
 import { classifyChangedPaths } from './change-impact.mjs'
@@ -20,6 +20,7 @@ const DESKTOP_PACKAGE = JSON.parse(await readFile(join(ROOT, 'desktop', 'package
 const VERSION = PACKAGE.version
 const PNPM_VERSION = /^pnpm@([^+]+)$/u.exec(PACKAGE.packageManager)?.[1]
 const YARN_VERSION = /^yarn@([^+]+)$/u.exec(DESKTOP_PACKAGE.packageManager)?.[1]
+const PACKAGE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
 const SOURCE_SHA = /^[0-9a-f]{40}$/u
 const SHA256 = /^[0-9a-f]{64}$/u
 const RUN_ID = /^\d{8}T\d{6}Z-[0-9a-f]{12}-[0-9a-f]{6}$/u
@@ -62,6 +63,9 @@ const PLATFORMS = Object.freeze({
     source: 'desktop/e-mate-desktop/dist',
   }),
 })
+export const NPM_COLLECTOR_ARGS = Object.freeze([
+  'list', '-a', '--include', 'prod', '--include', 'optional', '--omit', 'dev', '--json', '--long', '--silent', '--loglevel=error',
+])
 export const COMPUTER_USE_SCENARIOS = Object.freeze({
   macos: Object.freeze([
     'macos-permission-ready-current-turn',
@@ -201,6 +205,133 @@ async function json(path) {
   const bytes = await readFile(path)
   if (bytes.byteLength === 0 || bytes.byteLength > 1024 * 1024) throw new Error(`invalid JSON file size: ${basename(path)}`)
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+}
+
+export async function resolveNpmCollectorCli(candidates) {
+  for (const candidate of new Set(candidates)) {
+    if (typeof candidate !== 'string' || !isAbsolute(candidate)) continue
+    try {
+      const cli = await realpath(candidate)
+      const metadata = await lstat(cli)
+      if (!metadata.isFile() || metadata.size <= 0 || metadata.size > 1024 * 1024
+        || basename(cli) !== 'npm-cli.js' || basename(dirname(cli)) !== 'bin') continue
+      const npmRoot = dirname(dirname(cli))
+      if (basename(npmRoot) !== 'npm') continue
+      const packageJson = await json(join(npmRoot, 'package.json'))
+      if (packageJson?.name !== 'npm' || !PACKAGE_VERSION.test(packageJson.version ?? '')
+        || packageJson?.bin?.npm !== 'bin/npm-cli.js') continue
+      const prefix = await readFile(cli, { encoding: 'utf8' })
+      if (!prefix.startsWith('#!/usr/bin/env node\n')) continue
+      return { cli, version: packageJson.version }
+    } catch {
+      // Try the next already-installed standard npm layout.
+    }
+  }
+  throw new Error('verified npm CLI is unavailable; run flow through a Node/Corepack distribution that includes npm')
+}
+
+async function npmCollectorSource(env, execPath, platform) {
+  const node = await realpath(execPath).catch(() => { throw new Error('active standalone Node executable is unavailable') })
+  if (!(await lstat(node)).isFile()) throw new Error('active standalone Node executable is unavailable')
+  const candidates = [platform === 'win32'
+    ? join(dirname(node), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+    : join(dirname(dirname(node)), 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')]
+  if (platform !== 'win32' && typeof env.COREPACK_ROOT === 'string'
+    && env.COREPACK_ROOT !== '' && isAbsolute(env.COREPACK_ROOT)) {
+    const corepackRoot = await realpath(env.COREPACK_ROOT).catch(() => resolve(env.COREPACK_ROOT))
+    candidates.push(join(dirname(corepackRoot), 'npm', 'bin', 'npm-cli.js'))
+  }
+  return { node, ...await resolveNpmCollectorCli(candidates) }
+}
+
+async function verifyNpmCollectorCommand(command, prefix, expectedVersion, cwd, env) {
+  const cache = await mkdtemp(join(tmpdir(), 'emate-npm-probe-'))
+  const probeEnv = {
+    ...env,
+    NO_UPDATE_NOTIFIER: '1',
+    npm_config_audit: 'false',
+    npm_config_cache: cache,
+    npm_config_fund: 'false',
+    npm_config_update_notifier: 'false',
+  }
+  try {
+    const version = spawnSync(command, [...prefix, '--version'], {
+      cwd, encoding: 'utf8', env: probeEnv, maxBuffer: 16 * 1024 * 1024,
+    })
+    if (version.error !== undefined || version.status !== 0 || version.stdout.trim() !== expectedVersion) {
+      throw new Error(`npm collector must run npm ${expectedVersion} with the active standalone Node`)
+    }
+    const listing = spawnSync(command, [...prefix, ...NPM_COLLECTOR_ARGS], {
+      cwd, encoding: 'utf8', env: probeEnv, maxBuffer: 16 * 1024 * 1024,
+    })
+    if (listing.error !== undefined || ![0, 1].includes(listing.status)) {
+      throw new Error('npm collector carrier cannot execute the Electron Builder npm list contract')
+    }
+    const tree = JSON.parse(listing.stdout)
+    if (tree === null || typeof tree !== 'object' || Array.isArray(tree)) {
+      throw new Error('npm collector carrier returned an invalid dependency tree')
+    }
+  } catch (cause) {
+    if (cause instanceof SyntaxError) throw new Error('npm collector carrier returned non-JSON output', { cause })
+    throw cause
+  } finally {
+    await rm(cache, { recursive: true, force: true })
+  }
+}
+
+export function selectWindowsNpmCommand(output, execPath) {
+  const nodeDirectory = win32.dirname(win32.normalize(execPath)).toLowerCase()
+  const command = String(output).split(/\r?\n/u).map(value => value.trim()).find(Boolean)
+  const name = command === undefined ? '' : win32.basename(command).toLowerCase()
+  if (!['npm.cmd', 'npm.exe'].includes(name)
+    || win32.dirname(win32.normalize(command)).toLowerCase() !== nodeDirectory) {
+    throw new Error('Windows npm.cmd must come from the same Node distribution')
+  }
+  return command
+}
+
+export async function verifyNpmCollectorCarrier(cwd, {
+  env = process.env, execPath = process.execPath, platform = process.platform,
+} = {}) {
+  const source = await npmCollectorSource(env, execPath, platform)
+  await verifyNpmCollectorCommand(source.node, [source.cli], source.version, cwd, env)
+  if (platform === 'win32') {
+    const located = spawnSync('where.exe', ['npm'], { encoding: 'utf8', env })
+    if (located.error !== undefined || located.status !== 0) {
+      throw new Error('Windows npm.cmd is unavailable for the Electron Builder collector')
+    }
+    selectWindowsNpmCommand(located.stdout, source.node)
+  }
+  return source
+}
+
+export async function prepareNpmCollectorCarrier(cwd, options = {}) {
+  const env = options.env ?? process.env
+  const platform = options.platform ?? process.platform
+  const source = await verifyNpmCollectorCarrier(cwd, { ...options, env, platform })
+  if (platform === 'win32') return { ...source, env, cleanup: async () => {} }
+
+  const directory = await mkdtemp(join(tmpdir(), 'emate-npm-collector-'))
+  try {
+    const npm = join(directory, 'npm')
+    const node = join(directory, 'node')
+    await symlink(source.cli, npm)
+    await symlink(source.node, node)
+    if (await realpath(npm) !== source.cli || await realpath(node) !== source.node) {
+      throw new Error('npm collector shim target drifted')
+    }
+    const carrierEnv = { ...env, PATH: `${directory}${env.PATH ? `${delimiter}${env.PATH}` : ''}` }
+    await verifyNpmCollectorCommand(npm, [], source.version, cwd, carrierEnv)
+    return {
+      ...source,
+      directory,
+      env: carrierEnv,
+      cleanup: async () => rm(directory, { recursive: true, force: true }),
+    }
+  } catch (cause) {
+    await rm(directory, { recursive: true, force: true })
+    throw cause
+  }
 }
 
 function exactKeys(value, keys) {
@@ -487,6 +618,11 @@ async function candidatePreflight() {
   await runCandidateStages([
     { category: CANDIDATE_FAILURE.TOOLCHAIN, stage: 'pinned-package-manager', run: assertPinnedPnpm },
     {
+      category: CANDIDATE_FAILURE.TOOLCHAIN,
+      stage: 'desktop-npm-collector',
+      run: () => verifyNpmCollectorCarrier(join(ROOT, 'desktop')),
+    },
+    {
       category: CANDIDATE_FAILURE.SOURCE,
       stage: 'release-boundary',
       run: () => checkedSync(process.execPath, ['scripts/change-impact.mjs', '--check-contract']),
@@ -768,6 +904,7 @@ export async function verifyLocalArtifact(directory, platform, sourceCommit) {
 
 async function platformBuild(sourceRoot, platform, output, log) {
   const expectedPlatform = platform === 'macos' ? 'darwin' : 'win32'
+  let npmCollector
   await runCandidateStages([
     {
       category: CANDIDATE_FAILURE.TOOLCHAIN,
@@ -778,6 +915,11 @@ async function platformBuild(sourceRoot, platform, output, log) {
       },
     },
     { category: CANDIDATE_FAILURE.TOOLCHAIN, stage: 'pinned-package-manager', run: assertPinnedPnpm },
+    {
+      category: CANDIDATE_FAILURE.TOOLCHAIN,
+      stage: 'desktop-npm-collector',
+      run: async () => { npmCollector = await prepareNpmCollectorCarrier(join(sourceRoot, 'desktop')) },
+    },
     {
       category: CANDIDATE_FAILURE.SOURCE,
       stage: 'release-boundary',
@@ -822,19 +964,19 @@ async function platformBuild(sourceRoot, platform, output, log) {
     {
       category: CANDIDATE_FAILURE.PACKAGING,
       stage: 'desktop-install',
-      run: () => runYarn(['install', '--immutable'], { cwd: join(sourceRoot, 'desktop'), log }),
+      run: () => runYarn(['install', '--immutable'], { cwd: join(sourceRoot, 'desktop'), log, env: npmCollector.env }),
     },
     {
       category: CANDIDATE_FAILURE.PACKAGING,
       stage: 'desktop-package',
-      run: () => runYarn([PLATFORMS[platform].build], { cwd: join(sourceRoot, 'desktop'), log }),
+      run: () => runYarn([PLATFORMS[platform].build], { cwd: join(sourceRoot, 'desktop'), log, env: npmCollector.env }),
     },
     {
       category: CANDIDATE_FAILURE.PACKAGING,
       stage: 'artifact-export',
       run: () => exportArtifact(sourceRoot, platform, output, git(['rev-parse', 'HEAD'], sourceRoot)),
     },
-  ])
+  ]).finally(() => npmCollector?.cleanup())
 }
 
 async function readWindowsRemoteRequest(path, run) {
