@@ -2,6 +2,17 @@
 
 Read `docs/target-contract.md` and the latest entry in `docs/development-log.md` before changing code. A change that contradicts the target contract is invalid even when it makes a local test pass.
 
+## Authoritative local test, build, and release flow
+
+This section overrides every later rule that requires GitHub Actions, protected-main CI, or CI artifacts. Until the user explicitly changes the project flow again, e-Mate is tested, built, verified, published, and rolled back locally through the repository's single `pnpm flow` owner. GitHub CI is not a release lane, fallback, or acceptance oracle for this project.
+
+1. During development, run the narrow owning check or `pnpm flow dev`. Keep the main acceptance sweep running, record all failures, and route them to their existing Owner tasks. Do not rebuild an installer after each defect; batch the accepted fixes first.
+2. Freeze one exact committed, clean source SHA, then run `pnpm flow candidate` once. It builds the unsigned macOS and Windows installers and records their immutable bytes, sizes, hashes, manifests, and receipts. Rebuild only an invalidated platform stage, never an already accepted artifact.
+3. Build macOS locally. Build and test Windows on `DESKTOP-KH19ARC` through Codex Remote when the machines are not on the same LAN; do not require or silently fall back to SSH. Windows Computer Use may be recorded as `ALLOWED_UNAVAILABLE / NOT_APPLICABLE`, but Windows installation, startup, update, rollback, product changes, and built-in Tool calls remain required.
+4. Run `pnpm flow verify --run <run-id>` against those exact candidate bytes. Source checks, installed acceptance, update/relaunch, and rollback evidence are distinct; no source or fixture result may stand in for installed evidence.
+5. Run `pnpm flow publish --run <run-id>` to emit the bounded publication request, let the existing Cloudflare/CAS Owner execute it, then close the same run with `pnpm flow publish --run <run-id> --owner-receipt <path>`. Both commands must reuse the verified candidate bytes and must not rebuild them. Use `pnpm flow rollback --run <run-id>` for rollback. Do not dispatch, wait for, rerun, or merge a GitHub workflow as part of this path.
+6. Both platform installers are intentionally unsigned for this release. Keep credentials redacted and preserve exact source/candidate/installed/public truth boundaries. If a local-flow capability is missing, repair that single owner or stop with the exact gap; never substitute CI, SSH, a second publisher, or a parallel build path.
+
 ## First development rule: use native DSH Creation Mode first
 
 - Before consulting or changing DSH behavior, resolve `desktop/e-mate-desktop/base-contract.json` and the checked-in Harness/Desktop-reference gitlinks. Every native comparison, copied seam, test fixture, and compatibility claim must use that exact e-Mate Base-bound Harness version and commit (currently DSH `0.1.0-rc.7` at `b2b1650b01f0ee88d81837a9b5c050f9f763f606`, Desktop reference `6074088f5b660206e404b3591fab51fb99c69add`). A floating branch, latest tag, different RC, or unpinned checkout is not native evidence for this repository.
