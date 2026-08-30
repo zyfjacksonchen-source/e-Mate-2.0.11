@@ -28,10 +28,12 @@ import {
   normalizeFlowArgv,
   publicationAction,
   prepareNpmCollectorCarrier,
+  preparePnpmLifecycleCarrier,
   resolveNpmCollectorCli,
   rollbackAction,
   runCandidateStages,
   selectWindowsNpmCommand,
+  selectWindowsPnpmCommand,
   selectCandidatePlatforms,
   validateCandidateSource,
   validateImmutablePublicationReceipt,
@@ -42,6 +44,7 @@ import {
   verifyComputerUseReceipt,
   verifyLocalArtifact,
   verifyNpmCollectorCarrier,
+  windowsPnpmShim,
   windowsRemoteRequest,
 } from './local-flow.mjs'
 import { pinnedYarnInvocation } from './package-manager.mjs'
@@ -118,6 +121,25 @@ async function npmCarrierFixture(root, {
   ].join(eol))
   await chmod(cli, 0o755)
   return { cli, corepackRoot }
+}
+
+async function pnpmLifecycleFixture(root, version = '11.7.0') {
+  const entry = join(root, 'v1', 'pnpm', '11.7.0', 'bin', 'pnpm.cjs')
+  await mkdir(join(root, 'v1', 'pnpm', '11.7.0', 'bin'), { recursive: true })
+  await writeFile(entry, [
+    "const { spawnSync } = require('node:child_process')",
+    "const { readFileSync } = require('node:fs')",
+    'const args = process.argv.slice(2)',
+    `if (args[0] === '--version') process.stdout.write(${JSON.stringify(`${version}\n`)})`,
+    "else if (args[0] === 'run') {",
+    "  const script = JSON.parse(readFileSync('package.json', 'utf8')).scripts?.[args[1]]",
+    "  const result = spawnSync(script, { cwd: process.cwd(), encoding: 'utf8', env: process.env, shell: true })",
+    "  process.stdout.write(result.stdout ?? '')",
+    "  process.stderr.write(result.stderr ?? '')",
+    '  process.exitCode = result.status ?? 1',
+    '} else process.exitCode = 2',
+  ].join('\n'))
+  return entry
 }
 
 function pe() {
@@ -2137,11 +2159,59 @@ test('Desktop Yarn builds reuse the inherited Corepack cache while npm gets the 
   assert.equal(rootPackage.packageManager, 'pnpm@11.7.0')
   assert.equal(desktopPackage.packageManager, 'yarn@4.18.0')
   assert.equal([...source.matchAll(/run: \(\) => runYarn\(/gu)].length, 2)
-  assert.match(source, /prepareNpmCollectorCarrier\(join\(sourceRoot, 'desktop'\)\)/u)
+  assert.match(source, /preparePnpmLifecycleCarrier\(sourceRoot\)/u)
+  assert.match(source, /prepareNpmCollectorCarrier\(join\(sourceRoot, 'desktop'\), \{ env: buildEnv \}\)/u)
   assert.match(source, /runYarn\(\['install', '--immutable'\], \{ cwd: join\(sourceRoot, 'desktop'\), log, env: npmCollector\.env \}\)/u)
   assert.match(source, /runYarn\(\[PLATFORMS\[platform\]\.build\], \{ cwd: join\(sourceRoot, 'desktop'\), log, env: npmCollector\.env \}\)/u)
-  assert.match(source, /\]\)\.finally\(\(\) => npmCollector\?\.cleanup\(\)\)/u)
+  assert.match(source, /\]\)\.finally\(\(\) => Promise\.all\(\[npmCollector\?\.cleanup\(\), pnpmCarrier\?\.cleanup\(\)\]\)\)/u)
   assert.doesNotMatch(source, /\['yarn', '--cwd', 'desktop'/u)
+})
+
+test('pinned pnpm lifecycle carrier serves nested scripts without PATH pnpm and rejects drift', async () => {
+  const root = await temporary()
+  let carrier
+  try {
+    const node = await isolatedNodeDistribution(join(root, 'node-distribution'))
+    const entry = await pnpmLifecycleFixture(join(root, 'corepack-cache'))
+    await writeFile(join(root, 'package.json'), `${JSON.stringify({ scripts: { nested: 'pnpm --version' } })}\n`)
+    const env = { ...process.env, PATH: '/usr/bin:/bin', npm_execpath: entry }
+    carrier = await preparePnpmLifecycleCarrier(root, { env, execPath: node, platform: process.platform })
+    const shimRoot = carrier.env.PATH.split(delimiter)[0]
+
+    const nested = spawnSync(node, [entry, 'run', 'nested'], { cwd: root, encoding: 'utf8', env: carrier.env })
+    assert.equal(nested.status, 0, nested.stderr)
+    assert.equal(nested.stdout.trim(), '11.7.0')
+
+    await writeFile(entry, "process.stdout.write('11.7.0\\n')\n")
+    const drift = process.platform === 'win32'
+      ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', 'pnpm --version'], { cwd: root, encoding: 'utf8', env: carrier.env })
+      : spawnSync('pnpm', ['--version'], { cwd: root, encoding: 'utf8', env: carrier.env })
+    assert.equal(drift.status, 1)
+    assert.match(drift.stderr, /pinned pnpm entry drifted/u)
+
+    await carrier.cleanup()
+    carrier = undefined
+    await assert.rejects(readdir(shimRoot), { code: 'ENOENT' })
+
+    const wrong = await pnpmLifecycleFixture(join(root, 'wrong-corepack-cache'), '11.8.0')
+    await assert.rejects(preparePnpmLifecycleCarrier(root, {
+      env: { ...env, npm_execpath: wrong }, execPath: node, platform: process.platform,
+    }), /requires pinned pnpm 11\.7\.0/u)
+
+    assert.equal(
+      selectWindowsPnpmCommand('C:\\Temp\\emate-pnpm\\pnpm.cmd\r\n', 'C:\\Temp\\emate-pnpm'),
+      'C:\\Temp\\emate-pnpm\\pnpm.cmd',
+    )
+    assert.throws(
+      () => selectWindowsPnpmCommand('C:\\Program Files\\nodejs\\pnpm.cmd\r\n', 'C:\\Temp\\emate-pnpm'),
+      /run-scoped carrier/u,
+    )
+    assert.match(windowsPnpmShim('C:\\Program Files\\nodejs\\node.exe'), /"C:\\Program Files\\nodejs\\node\.exe" "%~dp0pnpm-carrier\.cjs" %\*/u)
+    assert.throws(() => windowsPnpmShim('C:\\unsafe&node.exe'), /safe absolute node\.exe/u)
+  } finally {
+    await carrier?.cleanup()
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('Desktop npm collector uses one run-scoped shim carried by the active Node', async () => {
@@ -2294,7 +2364,7 @@ test('platform build skips Harness dev hooks in clean submodule copies', async (
     const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
     const start = source.indexOf('async function platformBuild')
     const projection = source.slice(start, source.indexOf('\n}\n\nasync function readWindowsRemoteRequest', start))
-    assert.match(projection, /runPnpm\(\['--dir', 'upstream\/deepseek-harness', 'install', '--frozen-lockfile'\], \{\s*cwd: sourceRoot, log, env: \{ \.\.\.process\.env, CI: 'true' \},\s*\}\)/u)
+    assert.match(projection, /runPnpm\(\['--dir', 'upstream\/deepseek-harness', 'install', '--frozen-lockfile'\], \{\s*cwd: sourceRoot, log, env: \{ \.\.\.buildEnv, CI: 'true' \},\s*\}\)/u)
     const order = ['release-boundary', 'harness-host-client-web', 'component-emitted-abi', 'desktop-package']
       .map(stage => projection.indexOf(`stage: '${stage}'`))
     assert.equal(order.every((offset, index) => offset >= 0 && (index === 0 || offset > order[index - 1])), true)

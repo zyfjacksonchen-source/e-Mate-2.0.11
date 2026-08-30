@@ -267,6 +267,120 @@ async function json(path) {
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
 }
 
+async function pnpmLifecycleSource(env, execPath) {
+  if (PNPM_VERSION === undefined) throw new Error(`unsupported packageManager: ${String(PACKAGE.packageManager)}`)
+  const invocation = pinnedPnpmInvocation(PNPM_VERSION, [], { env, execPath })
+  const node = await realpath(execPath).catch(() => { throw new Error('active standalone Node executable is unavailable') })
+  const entry = await realpath(invocation.args[0]).catch(() => { throw new Error('inherited pinned pnpm entry is unavailable') })
+  const [nodeMetadata, entryMetadata] = await Promise.all([lstat(node), lstat(entry)])
+  if (!nodeMetadata.isFile()) throw new Error('active standalone Node executable is unavailable')
+  if (!entryMetadata.isFile() || entryMetadata.size <= 0 || entryMetadata.size > 16 * 1024 * 1024) {
+    throw new Error('inherited pinned pnpm entry is not a bounded regular file')
+  }
+  return { node, entry, bytes: entryMetadata.size, sha256: await fileDigest(entry) }
+}
+
+function pnpmCarrierModule(source) {
+  return [
+    '#!/usr/bin/env node',
+    "'use strict'",
+    "const { spawnSync } = require('node:child_process')",
+    "const { createHash } = require('node:crypto')",
+    "const { readFileSync, realpathSync, statSync } = require('node:fs')",
+    `const expected = ${JSON.stringify(source)}`,
+    'try {',
+    '  const node = realpathSync(process.execPath)',
+    '  const entry = realpathSync(expected.entry)',
+    '  const metadata = statSync(entry)',
+    "  const sha256 = createHash('sha256').update(readFileSync(entry)).digest('hex')",
+    '  if (node !== expected.node || entry !== expected.entry || !metadata.isFile()',
+    '    || metadata.size !== expected.bytes || sha256 !== expected.sha256) {',
+    "    throw new Error('pinned pnpm entry drifted')",
+    '  }',
+    '  const child = spawnSync(process.execPath, [entry, ...process.argv.slice(2)], {',
+    "    stdio: 'inherit',",
+    '    env: { ...process.env, npm_execpath: entry, npm_node_execpath: node },',
+    '  })',
+    '  if (child.error !== undefined) throw child.error',
+    "  if (!Number.isInteger(child.status)) throw new Error('pinned pnpm child did not return an exit status')",
+    '  process.exitCode = child.status',
+    '} catch (cause) {',
+    "  process.stderr.write(`pnpm lifecycle carrier: ${cause instanceof Error ? cause.message : String(cause)}\\n`)",
+    '  process.exitCode = 1',
+    '}',
+    '',
+  ].join('\n')
+}
+
+export function windowsPnpmShim(execPath) {
+  const node = win32.normalize(execPath)
+  if (!win32.isAbsolute(node) || win32.basename(node).toLowerCase() !== 'node.exe'
+    || /[%!"&|<>^\r\n]/u.test(node)) throw new Error('Windows pnpm carrier requires a safe absolute node.exe path')
+  return `@ECHO OFF\r\n"${node}" "%~dp0pnpm-carrier.cjs" %*\r\n`
+}
+
+export function selectWindowsPnpmCommand(output, directory) {
+  const command = String(output).split(/\r?\n/u).map(value => value.trim()).find(Boolean)
+  if (command === undefined || win32.basename(command).toLowerCase() !== 'pnpm.cmd'
+    || win32.dirname(win32.normalize(command)).toLowerCase() !== win32.normalize(directory).toLowerCase()) {
+    throw new Error('Windows pnpm.cmd must resolve to the run-scoped carrier')
+  }
+  return command
+}
+
+async function verifyPnpmLifecycleCommand(cwd, source, script, env, platform, directory) {
+  const direct = spawnSync(source.node, [script, '--version'], { cwd, encoding: 'utf8', env })
+  if (direct.error !== undefined || direct.status !== 0 || direct.stdout.trim() !== PNPM_VERSION) {
+    throw new Error(`pnpm lifecycle carrier must run pnpm ${String(PNPM_VERSION)} with the active standalone Node`)
+  }
+  const command = platform === 'win32'
+    ? spawnSync(env.ComSpec ?? env.COMSPEC ?? 'cmd.exe', ['/d', '/s', '/c', 'pnpm --version'], { cwd, encoding: 'utf8', env })
+    : spawnSync('pnpm', ['--version'], { cwd, encoding: 'utf8', env })
+  if (command.error !== undefined || command.status !== 0 || command.stdout.trim() !== PNPM_VERSION) {
+    throw new Error(`nested package scripts cannot resolve pinned pnpm ${String(PNPM_VERSION)}`)
+  }
+  if (platform === 'win32') {
+    const located = spawnSync('where.exe', ['pnpm'], { encoding: 'utf8', env })
+    if (located.error !== undefined || located.status !== 0) throw new Error('Windows run-scoped pnpm.cmd is unavailable')
+    selectWindowsPnpmCommand(located.stdout, directory)
+  }
+}
+
+export async function preparePnpmLifecycleCarrier(cwd, {
+  env = process.env, execPath = process.execPath, platform = process.platform,
+} = {}) {
+  const source = await pnpmLifecycleSource(env, execPath)
+  const directory = await mkdtemp(join(tmpdir(), 'emate-pnpm-lifecycle-'))
+  try {
+    const script = join(directory, platform === 'win32' ? 'pnpm-carrier.cjs' : 'pnpm')
+    await writeFile(script, pnpmCarrierModule(source), { flag: 'wx', mode: 0o700 })
+    if (platform === 'win32') {
+      await writeFile(join(directory, 'pnpm.cmd'), windowsPnpmShim(source.node), { flag: 'wx', mode: 0o700 })
+    } else {
+      const node = join(directory, 'node')
+      await symlink(source.node, node)
+      if (await realpath(node) !== source.node) throw new Error('pnpm lifecycle Node shim target drifted')
+    }
+    const carrierEnv = {
+      ...env,
+      PATH: `${directory}${env.PATH ? `${delimiter}${env.PATH}` : ''}`,
+      ...(platform === 'win32' && env.PATHEXT === undefined
+        ? { PATHEXT: '.COM;.EXE;.BAT;.CMD' }
+        : {}),
+    }
+    await verifyPnpmLifecycleCommand(cwd, source, script, carrierEnv, platform, directory)
+    return {
+      ...source,
+      directory,
+      env: carrierEnv,
+      cleanup: async () => rm(directory, { recursive: true, force: true }),
+    }
+  } catch (cause) {
+    await rm(directory, { recursive: true, force: true })
+    throw cause
+  }
+}
+
 export async function resolveNpmCollectorCli(candidates) {
   for (const candidate of new Set(candidates)) {
     if (typeof candidate !== 'string' || !isAbsolute(candidate)) continue
@@ -1022,10 +1136,6 @@ function pnpmInvocation(args, env = process.env) {
   return pinnedPnpmInvocation(PNPM_VERSION, args, { env })
 }
 
-function assertPinnedPnpm() {
-  pnpmInvocation([])
-}
-
 function checkedSync(command, args, cwd = ROOT) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
   if (result.error !== undefined) throw result.error
@@ -1035,7 +1145,11 @@ function checkedSync(command, args, cwd = ROOT) {
 async function candidatePreflight() {
   let identity
   await runCandidateStages([
-    { category: CANDIDATE_FAILURE.TOOLCHAIN, stage: 'pinned-package-manager', run: assertPinnedPnpm },
+    {
+      category: CANDIDATE_FAILURE.TOOLCHAIN,
+      stage: 'pinned-package-manager',
+      run: async () => (await preparePnpmLifecycleCarrier(ROOT)).cleanup(),
+    },
     {
       category: CANDIDATE_FAILURE.TOOLCHAIN,
       stage: 'desktop-npm-collector',
@@ -1132,25 +1246,30 @@ async function dev() {
   }
   const checks = devChecks(plan, paths)
   const scenarios = affectedComputerUse(plan)
-  const { directory, run } = await createRun('dev', identity, {
-    status: 'running', impact: plan, checks, affected_computer_use: scenarios,
-  })
-  const log = join(directory, 'logs', 'dev.log')
+  const pnpmCarrier = await preparePnpmLifecycleCarrier(ROOT)
   try {
-    for (const check of checks) {
-      if (check.command === 'pnpm') await runPnpm(check.args, { cwd: ROOT, log })
-      else await runLogged(process.execPath, check.args, { cwd: ROOT, log })
+    const { directory, run } = await createRun('dev', identity, {
+      status: 'running', impact: plan, checks, affected_computer_use: scenarios,
+    })
+    const log = join(directory, 'logs', 'dev.log')
+    try {
+      for (const check of checks) {
+        if (check.command === 'pnpm') await runPnpm(check.args, { cwd: ROOT, log, env: pnpmCarrier.env })
+        else await runLogged(process.execPath, check.args, { cwd: ROOT, log, env: pnpmCarrier.env })
+      }
+      run.status = 'passed'
+    } catch (cause) {
+      run.status = 'failed'
+      run.error = cause instanceof Error ? cause.message : String(cause)
+      throw cause
+    } finally {
+      await saveRun(directory, run)
+      await writeChecksums(directory)
     }
-    run.status = 'passed'
-  } catch (cause) {
-    run.status = 'failed'
-    run.error = cause instanceof Error ? cause.message : String(cause)
-    throw cause
+    process.stdout.write(`${JSON.stringify({ run_id: run.run_id, checks, computer_use: scenarios }, null, 2)}\n`)
   } finally {
-    await saveRun(directory, run)
-    await writeChecksums(directory)
+    await pnpmCarrier.cleanup()
   }
-  process.stdout.write(`${JSON.stringify({ run_id: run.run_id, checks, computer_use: scenarios }, null, 2)}\n`)
 }
 
 function submodules(root) {
@@ -1321,12 +1440,12 @@ export async function verifyLocalArtifact(directory, platform, sourceCommit) {
   return { receipt, primary }
 }
 
-async function capturePlatformManifestInputs(sourceRoot, platform, output, sourceCommit, log, npmVersion) {
+async function capturePlatformManifestInputs(sourceRoot, platform, output, sourceCommit, log, npmVersion, env) {
   const scratch = join(sourceRoot, '.release-cache', `local-flow-manifest-${platform}`)
   await rm(scratch, { recursive: true, force: true })
   await mkdir(scratch, { recursive: true })
   try {
-    await runLogged(process.execPath, ['scripts/stage-desktop-profile-artifact.mjs'], { cwd: sourceRoot, log })
+    await runLogged(process.execPath, ['scripts/stage-desktop-profile-artifact.mjs'], { cwd: sourceRoot, log, env })
     await copyFile(join(sourceRoot, 'desktop/e-mate-desktop/base-contract.json'), join(scratch, 'base-contract.json'))
     await copyFile(join(sourceRoot, 'packages/dsh/profile/component-inventory.json'), join(scratch, 'component-inventory.json'))
     await copyTree(join(sourceRoot, '.release-cache/profile-artifact'), join(scratch, 'profile-artifact'))
@@ -1337,7 +1456,7 @@ async function capturePlatformManifestInputs(sourceRoot, platform, output, sourc
       '--inventory', 'packages/dsh/profile/component-inventory.json',
       '--base-contract', 'desktop/e-mate-desktop/base-contract.json',
       '--out', relativePath(sourceRoot, join(scratch, 'profile-build-receipt.json')),
-    ], { cwd: sourceRoot, log })
+    ], { cwd: sourceRoot, log, env })
     const inventory = await json(join(scratch, 'component-inventory.json'))
     for (const job of platformComponentJobs(inventory, platform)) {
       const target = targetName(job.target)
@@ -1347,7 +1466,7 @@ async function capturePlatformManifestInputs(sourceRoot, platform, output, sourc
         ...(target === null ? [] : ['--target', target]),
         '--out', relativePath(sourceRoot, join(scratch, ...payloadRelative(job).split('/'))),
       ]
-      await runLogged(process.execPath, args, { cwd: sourceRoot, log })
+      await runLogged(process.execPath, args, { cwd: sourceRoot, log, env })
     }
     await createPlatformManifestInputReceipt(scratch, {
       platform,
@@ -1363,7 +1482,8 @@ async function capturePlatformManifestInputs(sourceRoot, platform, output, sourc
 
 async function platformBuild(sourceRoot, platform, output, manifestOutput, log) {
   const expectedPlatform = platform === 'macos' ? 'darwin' : 'win32'
-  let npmCollector
+  let pnpmCarrier, npmCollector
+  let buildEnv = process.env
   await runCandidateStages([
     {
       category: CANDIDATE_FAILURE.TOOLCHAIN,
@@ -1373,43 +1493,50 @@ async function platformBuild(sourceRoot, platform, output, manifestOutput, log) 
         if (platform === 'windows') validateRemoteHostname(hostname())
       },
     },
-    { category: CANDIDATE_FAILURE.TOOLCHAIN, stage: 'pinned-package-manager', run: assertPinnedPnpm },
+    {
+      category: CANDIDATE_FAILURE.TOOLCHAIN,
+      stage: 'pinned-package-manager',
+      run: async () => {
+        pnpmCarrier = await preparePnpmLifecycleCarrier(sourceRoot)
+        buildEnv = pnpmCarrier.env
+      },
+    },
     {
       category: CANDIDATE_FAILURE.TOOLCHAIN,
       stage: 'desktop-npm-collector',
-      run: async () => { npmCollector = await prepareNpmCollectorCarrier(join(sourceRoot, 'desktop')) },
+      run: async () => { npmCollector = await prepareNpmCollectorCarrier(join(sourceRoot, 'desktop'), { env: buildEnv }) },
     },
     {
       category: CANDIDATE_FAILURE.SOURCE,
       stage: 'release-boundary',
-      run: () => runLogged(process.execPath, ['scripts/change-impact.mjs', '--check-contract'], { cwd: sourceRoot, log }),
+      run: () => runLogged(process.execPath, ['scripts/change-impact.mjs', '--check-contract'], { cwd: sourceRoot, log, env: buildEnv }),
     },
     {
       category: CANDIDATE_FAILURE.TOOLCHAIN,
       stage: 'root-install',
-      run: () => runPnpm(['install', '--frozen-lockfile'], { cwd: sourceRoot, log }),
+      run: () => runPnpm(['install', '--frozen-lockfile'], { cwd: sourceRoot, log, env: buildEnv }),
     },
     {
       category: CANDIDATE_FAILURE.TOOLCHAIN,
       stage: 'harness-install',
       run: () => runPnpm(['--dir', 'upstream/deepseek-harness', 'install', '--frozen-lockfile'], {
-        cwd: sourceRoot, log, env: { ...process.env, CI: 'true' },
+        cwd: sourceRoot, log, env: { ...buildEnv, CI: 'true' },
       }),
     },
     {
       category: CANDIDATE_FAILURE.SOURCE,
       stage: 'harness-host-client-web',
-      run: () => runPnpm(['run', 'build:harness'], { cwd: sourceRoot, log }),
+      run: () => runPnpm(['run', 'build:harness'], { cwd: sourceRoot, log, env: buildEnv }),
     },
     {
       category: CANDIDATE_FAILURE.COMPONENT_ABI,
       stage: 'component-emitted-abi',
-      run: () => runLogged(process.execPath, ['scripts/component-run.mjs', 'build'], { cwd: sourceRoot, log }),
+      run: () => runLogged(process.execPath, ['scripts/component-run.mjs', 'build'], { cwd: sourceRoot, log, env: buildEnv }),
     },
     {
       category: CANDIDATE_FAILURE.SOURCE,
       stage: 'profile-build',
-      run: () => runPnpm(['--filter', '@e-mate/dsh', 'build'], { cwd: sourceRoot, log }),
+      run: () => runPnpm(['--filter', '@e-mate/dsh', 'build'], { cwd: sourceRoot, log, env: buildEnv }),
     },
     {
       category: CANDIDATE_FAILURE.PACKAGING,
@@ -1418,7 +1545,7 @@ async function platformBuild(sourceRoot, platform, output, manifestOutput, log) 
         'packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py',
         '--root', 'packages/dsh-plugin-vision-toolkit',
         '--targets', platform === 'macos' ? 'darwin-arm64,darwin-x64' : 'win32-x64',
-      ], { cwd: sourceRoot, log }),
+      ], { cwd: sourceRoot, log, env: buildEnv }),
     },
     {
       category: CANDIDATE_FAILURE.PACKAGING,
@@ -1429,7 +1556,7 @@ async function platformBuild(sourceRoot, platform, output, manifestOutput, log) 
       category: CANDIDATE_FAILURE.COMPONENT_ABI,
       stage: 'manifest-input-ledger',
       run: () => capturePlatformManifestInputs(
-        sourceRoot, platform, manifestOutput, git(['rev-parse', 'HEAD'], sourceRoot), log, npmCollector.version,
+        sourceRoot, platform, manifestOutput, git(['rev-parse', 'HEAD'], sourceRoot), log, npmCollector.version, buildEnv,
       ),
     },
     {
@@ -1442,7 +1569,7 @@ async function platformBuild(sourceRoot, platform, output, manifestOutput, log) 
       stage: 'artifact-export',
       run: () => exportArtifact(sourceRoot, platform, output, git(['rev-parse', 'HEAD'], sourceRoot)),
     },
-  ]).finally(() => npmCollector?.cleanup())
+  ]).finally(() => Promise.all([npmCollector?.cleanup(), pnpmCarrier?.cleanup()]))
 }
 
 async function readWindowsRemoteRequest(path, run) {
