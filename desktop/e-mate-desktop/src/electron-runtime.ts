@@ -64,6 +64,12 @@ import {
 } from './update-presentation.ts'
 import { desktopWindowOptions, windowsTitleBarOverlay } from './window-options.ts'
 import {
+  DESKTOP_RESOURCE_RUN,
+  parseDesktopResourceRequest,
+  type DesktopResource,
+  type DesktopResourceAction,
+} from './desktop-resource-bridge-contract.ts'
+import {
   admittedWindowsUpdateIdentity,
   scheduleWindowsUpdateInstallation,
 } from './windows-update-installer.ts'
@@ -105,10 +111,14 @@ const MAX_CONTEXT_IMAGE_BYTES = 32 * 1024 * 1024
 type ResourceContext =
   | { kind: 'file'; name: string; path: string; root: string; sessionId: string }
   | { kind: 'image'; name: string; src: string; sessionId: string }
+  | { kind: 'handled' }
+
+type Resource = Exclude<ResourceContext, { kind: 'handled' }> | DesktopResource
 
 function resourceContext(value: unknown): ResourceContext | undefined {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
   const item = value as Record<string, unknown>
+  if (item.kind === 'handled' && Object.keys(item).length === 1) return { kind: 'handled' }
   if (item.kind === 'file' && typeof item.name === 'string' && typeof item.path === 'string'
     && typeof item.root === 'string' && typeof item.sessionId === 'string') {
     return { kind: 'file', name: item.name, path: item.path, root: item.root, sessionId: item.sessionId }
@@ -128,6 +138,14 @@ function inside(root: string, candidate: string): boolean {
 function safeResourceName(name: string, fallback: string): string {
   const value = basename(name).normalize('NFC').replace(/[<>:"/\\|?*\u0000-\u001f]/gu, '_').trim()
   return value === '' || value === '.' || value === '..' ? fallback : value.slice(0, 180)
+}
+
+function imageMediaType(bytes: Buffer): string | undefined {
+  if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png'
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg'
+  if (bytes.subarray(0, 6).toString('ascii') === 'GIF87a' || bytes.subarray(0, 6).toString('ascii') === 'GIF89a') return 'image/gif'
+  if (bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp'
+  return undefined
 }
 
 /** Main-process deadline for one Renderer generation to settle its client Loader. */
@@ -816,19 +834,33 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     tray.setContextMenu(Menu.buildFromTemplate(template))
   }
 
-  private async authorizedResourcePath(spec: DesktopShellSpec, resource: Extract<ResourceContext, { kind: 'file' }>): Promise<string> {
+  private async authorizedSessionRoot(spec: DesktopShellSpec, sessionId: string): Promise<string> {
+    const sessionRoot = spec.resourceSessionRoot(sessionId)
+    if (sessionRoot === undefined) throw new Error('resource session is not active')
+    const root = await realpath(sessionRoot)
+    const allowedRoots = await Promise.all(spec.resourceRoots().map(async candidate => realpath(candidate).catch(() => undefined)))
+    if (!allowedRoots.includes(root)) throw new Error('resource session workspace is not authorized')
+    return root
+  }
+
+  private async authorizedResourcePath(
+    resource: Extract<Resource, { kind: 'file' }>,
+    sessionRoot: string,
+  ): Promise<string> {
     if (!isAbsolute(resource.path) || !isAbsolute(resource.root) || resource.path.includes('\0') || resource.root.includes('\0')) {
       throw new Error('invalid resource path')
     }
-    const allowedRoots = await Promise.all(spec.resourceRoots().map(async root => realpath(root).catch(() => undefined)))
     const root = await realpath(resource.root)
-    if (!allowedRoots.includes(root)) throw new Error('resource workspace is not authorized')
+    if (root !== sessionRoot) throw new Error('resource workspace does not match its session')
     const path = await realpath(resource.path)
     if (!inside(root, path) || !(await lstat(path)).isFile()) throw new Error('resource is not a regular workspace file')
     return path
   }
 
-  private async materializeImage(window: BrowserWindow, resource: Extract<ResourceContext, { kind: 'image' }>): Promise<string> {
+  private async readImageBytes(
+    window: BrowserWindow,
+    resource: Extract<Resource, { kind: 'image' }>,
+  ): Promise<{ bytes: Buffer; mediaType: string }> {
     const dataUrl = await window.webContents.executeJavaScript(`(async () => {
       const response = await fetch(${JSON.stringify(resource.src)});
       const blob = await response.blob();
@@ -848,7 +880,13 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (bytes.byteLength === 0 || bytes.byteLength > MAX_CONTEXT_IMAGE_BYTES || bytes.toString('base64') !== encoded) {
       throw new Error('invalid image bytes')
     }
-    const mediaType = match[1]!
+    const mediaType = imageMediaType(bytes)
+    if (mediaType === undefined || mediaType !== match[1]) throw new Error('image type does not match its bytes')
+    return { bytes, mediaType }
+  }
+
+  private async materializeImage(window: BrowserWindow, resource: Extract<Resource, { kind: 'image' }>): Promise<string> {
+    const { bytes, mediaType } = await this.readImageBytes(window, resource)
     const extension = mediaType === 'image/jpeg' ? '.jpg' : `.${mediaType.slice('image/'.length)}`
     const requested = safeResourceName(resource.name, `e-mate-image${extension}`)
     const name = /\.(?:png|jpe?g|webp|gif)$/iu.test(requested) ? requested : `${requested}${extension}`
@@ -912,26 +950,34 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     })
   }
 
-  private async resourcePath(
-    window: BrowserWindow,
-    spec: DesktopShellSpec,
-    resource: ResourceContext,
-  ): Promise<string> {
+  private async resourcePath(window: BrowserWindow, sessionRoot: string, resource: Resource): Promise<string> {
     return resource.kind === 'file'
-      ? this.authorizedResourcePath(spec, resource)
+      ? this.authorizedResourcePath(resource, sessionRoot)
       : this.materializeImage(window, resource)
   }
 
   private async runResourceAction(
-    action: 'save-as' | 'copy-path' | 'copy-file' | 'open-with' | 'reveal',
+    action: DesktopResourceAction,
     window: BrowserWindow,
     spec: DesktopShellSpec,
-    resource: ResourceContext,
+    resource: Resource,
   ): Promise<void> {
-    const path = await this.resourcePath(window, spec, resource)
+    const sessionRoot = await this.authorizedSessionRoot(spec, resource.sessionId)
+    if (action === 'copy-image') {
+      if (resource.kind !== 'image') throw new Error('copy-image requires an image resource')
+      const image = nativeImage.createFromBuffer((await this.readImageBytes(window, resource)).bytes)
+      if (image.isEmpty()) throw new Error('invalid image bitmap')
+      clipboard.writeImage(image)
+      return
+    }
+    const path = await this.resourcePath(window, sessionRoot, resource)
     if (action === 'save-as') {
       const selected = await dialog.showSaveDialog({
-        title: '另存为', defaultPath: join(app.getPath('downloads'), safeResourceName(resource.name, basename(path))),
+        title: '另存为',
+        defaultPath: join(
+          app.getPath('downloads'),
+          safeResourceName(resource.kind === 'image' ? resource.name : basename(resource.path), basename(path)),
+        ),
       })
       if (!selected.canceled && selected.filePath !== undefined) await copyFile(path, selected.filePath)
     } else if (action === 'copy-path') clipboard.writeText(path)
@@ -987,6 +1033,15 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     ipcMain.on(DESKTOP_UPDATE_STATE_READ, readUpdateState)
     ipcMain.on(DESKTOP_UPDATE_CANCEL, cancelUpdate)
     ipcMain.handle(DESKTOP_UPDATE_RUN_INTERACTIVE, runInteractiveUpdate)
+    const runDesktopResource = async (event: Electron.IpcMainInvokeEvent, value: unknown): Promise<void> => {
+      if (event.sender !== window.webContents) {
+        throw new Error('@e-mate/desktop: resource request did not originate from owning Renderer')
+      }
+      const request = parseDesktopResourceRequest(value)
+      if (request === undefined) throw new Error('@e-mate/desktop: invalid resource request')
+      await this.runResourceAction(request.action, window, spec, request.resource)
+    }
+    ipcMain.handle(DESKTOP_RESOURCE_RUN, runDesktopResource)
 
     const show = (): void => { this.show() }
     const close = (event: Electron.Event): void => {
@@ -998,6 +1053,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     const showContextMenu = (_event: Electron.Event, params: Electron.ContextMenuParams): void => {
       void (async () => {
         const resource = resourceContext(await window.webContents.executeJavaScript(RESOURCE_CONTEXT_SCRIPT))
+        if (resource?.kind === 'handled') return
         const template: Electron.MenuItemConstructorOptions[] = []
         if (resource?.kind === 'image') {
           template.push({ label: '复制', click: () => { window.webContents.copyImageAt(params.x, params.y) } }, { type: 'separator' })
@@ -1072,6 +1128,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       ipcMain.off(DESKTOP_UPDATE_STATE_READ, readUpdateState)
       ipcMain.off(DESKTOP_UPDATE_CANCEL, cancelUpdate)
       ipcMain.removeHandler(DESKTOP_UPDATE_RUN_INTERACTIVE)
+      ipcMain.removeHandler(DESKTOP_RESOURCE_RUN)
       app.off('activate', show)
       nativeTheme.off('updated', syncWindowsTitleBarOverlay)
       window.off('page-title-updated', preserveBlankTitle)
@@ -1096,6 +1153,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       ipcMain.off(DESKTOP_UPDATE_STATE_READ, readUpdateState)
       ipcMain.off(DESKTOP_UPDATE_CANCEL, cancelUpdate)
       ipcMain.removeHandler(DESKTOP_UPDATE_RUN_INTERACTIVE)
+      ipcMain.removeHandler(DESKTOP_RESOURCE_RUN)
       app.off('activate', show)
       nativeTheme.off('updated', syncWindowsTitleBarOverlay)
       window.off('close', close)

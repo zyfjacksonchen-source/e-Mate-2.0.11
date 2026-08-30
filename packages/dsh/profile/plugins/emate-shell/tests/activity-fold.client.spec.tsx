@@ -179,10 +179,9 @@ describe('Codex-like process fold', () => {
       ] } },
       { key: 'tool-one', kind: 'tool-call', data: { root: { callId: 'call-1', name: 'render_ui' } } },
       { key: 'tool-two', kind: 'tool-call', data: { root: { callId: 'call-2', name: 'bash', status: 'interrupted' } } },
-      { key: 'image', kind: 'e-mate-tool-images', data: { items: [{ callId: 'image-1' }] } },
     ]
     const original = structuredClone(nodes)
-    const entries: any[] = (['assistant-step', 'tool-call', 'context', 'e-mate-tool-images'] as const).map(key => ({
+    const entries: any[] = (['assistant-step', 'tool-call', 'context'] as const).map(key => ({
       options: { key, priority: 0 },
       component: ({ node }: any) => node,
     }))
@@ -202,13 +201,12 @@ describe('Codex-like process fold', () => {
 
     registerActivityFold(ctx, scope as never)
     expect(entries.filter(entry => entry.options.priority === -1)).toEqual([])
-    expect(entries.find(entry => entry.options.key === 'e-mate-tool-images')?.options.priority).toBe(0)
 
     scope.publish('simple')
     scope.publish('detailed')
     expect(entries.filter(entry => entry.options.priority === -1)).toEqual([])
     expect(nodes).toEqual(original)
-    expect(nodes.map(node => node.key)).toEqual(['reasoning-text', 'tool-one', 'tool-two', 'image'])
+    expect(nodes.map(node => node.key)).toEqual(['reasoning-text', 'tool-one', 'tool-two'])
   })
 
   it('never discloses injected context metadata, even when process detail is expanded', () => {

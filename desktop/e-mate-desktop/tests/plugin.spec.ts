@@ -95,6 +95,12 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
       replace: vi.fn(async () => {}),
     })),
   }
+  const workspaceRegistry = { list: () => [{ path: '/tmp/e-mate-workspace' }] }
+  const sessions = {
+    get: (sessionId: string) => sessionId === 'session-1'
+      ? { header: { cwd: '/tmp/e-mate-workspace' } }
+      : undefined,
+  }
   const ctx = {
     desktopRuntime: runtime,
     webServer: {
@@ -106,8 +112,15 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
       }),
     },
     settings,
+    sessions,
     logger: { warn: vi.fn(), error: vi.fn() },
-    get: vi.fn((key: unknown) => String(key) === 'desktopRuntime' ? runtime : () => {}),
+    get: vi.fn((key: unknown) => {
+      if (String(key) === 'desktopRuntime') return runtime
+      if (String(key) === 'workspaceRegistry') return workspaceRegistry
+      if (String(key) === 'appExit') return () => {}
+      if (String(key) === 'sessions') return sessions
+      return undefined
+    }),
     effect: vi.fn((register: () => unknown) => register()),
     on: vi.fn((event: string, listener: (namespace: unknown, next: unknown) => void) => {
       if (event === 'settings/updated') settingsUpdated = listener
@@ -183,6 +196,7 @@ describe('desktop Host plugin', () => {
     apply(harness.ctx, config)
 
     expect(inject).toContain('settings')
+    expect(inject).toContain('sessions')
     expect(inject).not.toContain('loader')
     expect(vi.mocked(harness.ctx.settings.register)).not.toHaveBeenCalled()
     expect(loaderAwait).not.toHaveBeenCalled()
@@ -197,6 +211,8 @@ describe('desktop Host plugin', () => {
     expect(harness.shell()?.trayIcons.templatePath.endsWith(join('build', 'tray-iconTemplate.png'))).toBe(true)
     expect(harness.shell()?.trayIcons.bluePath.endsWith(join('build', 'tray-icon-blue.png'))).toBe(true)
     expect(harness.shell()?.readThemeSource()).toBe('system')
+    expect(harness.shell()?.resourceSessionRoot('session-1')).toBe('/tmp/e-mate-workspace')
+    expect(harness.shell()?.resourceSessionRoot('missing')).toBeUndefined()
     harness.notifyTheme('dark')
     expect(harness.setThemeSource).toHaveBeenCalledWith('dark')
 
