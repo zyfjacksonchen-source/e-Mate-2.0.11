@@ -1703,7 +1703,11 @@ export function validatePublicationReceipt(receipt, run, requestSha256) {
   return receipt
 }
 
-export function buildRollbackRequest(run, publicationReceipt, { dryRun = false } = {}) {
+export function buildRollbackRequest(run, publicationReceipt, {
+  dryRun = false,
+  publicationRequestSha256,
+  publicationReceiptSha256,
+} = {}) {
   if (publicationScope(run) === 'macos-immutable-dmg-only') {
     throw new Error('macOS-only immutable publication has no shared pointer rollback')
   }
@@ -1737,7 +1741,160 @@ export function buildRollbackRequest(run, publicationReceipt, { dryRun = false }
     pointer_compare_and_swap: pointers,
     recovery: { ...POINTER_RECOVERY, accepted_current_states: [...POINTER_RECOVERY.accepted_current_states] },
     immutable_objects: objectRecords(run).map(object => ({ key: object.key, action: 'retain' })),
+    owner_receipt: {
+      schema_version: 1,
+      document_type: 'emate.local-cloudflare-owner-receipt',
+      operation: 'rollback',
+      status: 'passed',
+      authority: OWNER,
+      run_id: run.run_id ?? 'from-local-flow-run.run_id',
+      version: run.version,
+      source_commit: run.source_commit,
+      publication_request_sha256: publicationRequestSha256 ?? 'from-publication/cloudflare-owner-request.json',
+      publication_receipt_sha256: publicationReceiptSha256 ?? 'from-publication/cloudflare-owner-receipt.json',
+      rollback_request_sha256: 'sha256-of-this-exact-request',
+      pointer_receipts: 'ordered-before-after-cas-authenticated-and-public-readback',
+      immutable_objects: 'retained',
+      deleted_objects: [],
+    },
     delete_objects: [],
+  }
+}
+
+export function validateRollbackReceipt(receipt, run, {
+  publicationRequestSha256,
+  publicationReceiptSha256,
+  rollbackRequestSha256,
+  publicationReceipt,
+  rollbackRequest,
+} = {}) {
+  if (!exactKeys(receipt, [
+    'schema_version', 'document_type', 'operation', 'status', 'authority', 'run_id', 'version',
+    'source_commit', 'publication_request_sha256', 'publication_receipt_sha256',
+    'rollback_request_sha256', 'rollback_order', 'pointers', 'immutable_objects', 'deleted_objects',
+  ]) || receipt.schema_version !== 1 || receipt.document_type !== 'emate.local-cloudflare-owner-receipt'
+    || receipt.operation !== 'rollback' || receipt.status !== 'passed' || receipt.authority !== OWNER
+    || !RUN_ID.test(run?.run_id ?? '') || receipt.run_id !== run.run_id
+    || receipt.version !== run.version || receipt.source_commit !== run.source_commit
+    || !SHA256.test(publicationRequestSha256 ?? '') || receipt.publication_request_sha256 !== publicationRequestSha256
+    || !SHA256.test(publicationReceiptSha256 ?? '') || receipt.publication_receipt_sha256 !== publicationReceiptSha256
+    || !SHA256.test(rollbackRequestSha256 ?? '') || receipt.rollback_request_sha256 !== rollbackRequestSha256
+    || !Array.isArray(receipt.rollback_order) || !Array.isArray(receipt.pointers)
+    || !Array.isArray(receipt.immutable_objects) || !Array.isArray(receipt.deleted_objects)
+    || receipt.deleted_objects.length !== 0) {
+    throw new Error('Cloudflare rollback owner receipt is invalid')
+  }
+  const publication = validatePublicationReceipt(publicationReceipt, run, publicationRequestSha256)
+  const expectedRequest = buildRollbackRequest(run, publication, {
+    publicationRequestSha256,
+    publicationReceiptSha256,
+  })
+  if (!isDeepStrictEqual(rollbackRequest, expectedRequest)
+    || !isDeepStrictEqual(receipt.rollback_order, expectedRequest.rollback_order)
+    || receipt.pointers.length !== expectedRequest.pointer_compare_and_swap.length) {
+    throw new Error('Cloudflare rollback owner receipt is invalid')
+  }
+  const retained = expectedRequest.immutable_objects.map(object => ({ key: object.key, action: 'retained' }))
+  if (!isDeepStrictEqual(receipt.immutable_objects, retained)) throw new Error('Cloudflare rollback owner receipt is invalid')
+
+  let appliedDuringThisAttempt = false
+  for (const [index, expected] of expectedRequest.pointer_compare_and_swap.entries()) {
+    const name = expectedRequest.rollback_order[index] ?? `index-${index}`
+    const pointer = receipt.pointers[index]
+    const authenticated = pointer?.authenticated_readback
+    const publicReadback = pointer?.public_full_byte_readback
+    if (!exactKeys(pointer, [
+      'key', 'before', 'after', 'cas', 'authenticated_readback', 'public_full_byte_readback',
+    ]) || pointer.key !== expected.key
+      || !samePointerIdentity(pointer.before, expected.expected_current)
+      || !samePointerIdentity(pointer.after, expected.restore)
+      || !['passed', 'already-exact'].includes(pointer.cas)
+      || !exactKeys(authenticated, ['status', 'bytes', 'sha256', 'etag']) || authenticated.status !== 'passed'
+      || !samePointerIdentity({ bytes: authenticated.bytes, sha256: authenticated.sha256, etag: authenticated.etag }, pointer.after)
+      || !exactKeys(publicReadback, ['status', 'bytes', 'sha256']) || publicReadback.status !== 'passed'
+      || publicReadback.bytes !== pointer.after.bytes || publicReadback.sha256 !== pointer.after.sha256) {
+      throw new Error(`Cloudflare ${name} rollback pointer receipt is invalid`)
+    }
+    if (pointer.cas === 'passed') appliedDuringThisAttempt = true
+    else if (appliedDuringThisAttempt) throw new Error('Cloudflare ordered rollback recovery is invalid')
+  }
+  return receipt
+}
+
+function awaitingRollbackState({ publicationRequestSha256, publicationReceiptSha256, rollbackRequestSha256 }) {
+  return {
+    status: 'awaiting-existing-owner',
+    owner: OWNER,
+    delete_objects: 0,
+    request: 'rollback/cloudflare-owner-request.json',
+    request_sha256: rollbackRequestSha256,
+    publication_request_sha256: publicationRequestSha256,
+    publication_receipt_sha256: publicationReceiptSha256,
+  }
+}
+
+export function rollbackAction(run, { dryRun = false, ownerReceipt } = {}) {
+  const status = run.rollback?.status
+  if (run.rollback !== undefined && !['dry-run', 'awaiting-existing-owner', 'passed'].includes(status)) {
+    throw new Error('rollback run state is invalid')
+  }
+  if (status === 'passed') throw new Error('rollback is already passed for this run')
+  if (status === 'awaiting-existing-owner') {
+    if (dryRun) throw new Error('rollback awaiting the existing owner cannot return to dry-run')
+    return ownerReceipt === undefined ? 'resume-awaiting' : 'import'
+  }
+  if (ownerReceipt !== undefined) throw new Error('rollback owner receipt import requires the exact awaiting request state')
+  return dryRun ? 'dry-run' : 'emit'
+}
+
+function validateAwaitingRollbackRequest(run, rollbackRequest, expectedRequest, {
+  publicationRequestSha256, publicationReceiptSha256, rollbackRequestSha256,
+}) {
+  if (!isDeepStrictEqual(rollbackRequest, expectedRequest)) throw new Error('Cloudflare rollback owner request is invalid')
+  if (!isDeepStrictEqual(run.rollback, awaitingRollbackState({
+    publicationRequestSha256, publicationReceiptSha256, rollbackRequestSha256,
+  }))) throw new Error('rollback requires the exact awaiting request state')
+}
+
+export async function importRollbackOwnerReceipt(directory, run, ownerReceiptPath) {
+  const publicationRequestPath = join(directory, 'publication', 'cloudflare-owner-request.json')
+  const publicationReceiptPath = join(directory, 'publication', 'cloudflare-owner-receipt.json')
+  const publicationRequestSha256 = await fileDigest(publicationRequestPath)
+  const publicationReceiptSha256 = await fileDigest(publicationReceiptPath)
+  const publicationReceipt = validatePublicationReceipt(
+    await json(publicationReceiptPath), run, publicationRequestSha256,
+  )
+  const rollbackRequestPath = join(directory, 'rollback', 'cloudflare-owner-request.json')
+  const rollbackRequest = await json(rollbackRequestPath)
+  const expectedRequest = buildRollbackRequest(run, publicationReceipt, {
+    publicationRequestSha256,
+    publicationReceiptSha256,
+  })
+  const rollbackRequestSha256 = await fileDigest(rollbackRequestPath)
+  validateAwaitingRollbackRequest(run, rollbackRequest, expectedRequest, {
+    publicationRequestSha256, publicationReceiptSha256, rollbackRequestSha256,
+  })
+  const receipt = validateRollbackReceipt(await json(resolve(ownerReceiptPath)), run, {
+    publicationRequestSha256,
+    publicationReceiptSha256,
+    rollbackRequestSha256,
+    publicationReceipt,
+    rollbackRequest,
+  })
+  const receiptPath = join(directory, 'rollback', 'cloudflare-owner-receipt.json')
+  await atomicJson(receiptPath, receipt)
+  return {
+    status: 'passed',
+    owner: OWNER,
+    delete_objects: 0,
+    request: relativePath(directory, rollbackRequestPath),
+    request_sha256: rollbackRequestSha256,
+    publication_request_sha256: publicationRequestSha256,
+    publication_receipt_sha256: publicationReceiptSha256,
+    receipt: relativePath(directory, receiptPath),
+    receipt_sha256: await fileDigest(receiptPath),
+    rollback_order: [...rollbackRequest.rollback_order],
+    completed_at: now(),
   }
 }
 
@@ -1766,16 +1923,39 @@ async function publish(values) {
 async function rollback(values) {
   const { directory, run } = await loadRun(values.run)
   assertVerificationMatches(run, await verifyRun(directory, run))
-  let publicationReceipt
+  const action = rollbackAction(run, values)
+  let publicationReceipt, publicationRequestSha256, publicationReceiptSha256
   const receiptPath = join(directory, 'publication', 'cloudflare-owner-receipt.json')
   if (!values.dryRun) {
     const publicationRequest = join(directory, 'publication', 'cloudflare-owner-request.json')
-    publicationReceipt = validatePublicationReceipt(await json(receiptPath), run, await fileDigest(publicationRequest))
+    publicationRequestSha256 = await fileDigest(publicationRequest)
+    publicationReceiptSha256 = await fileDigest(receiptPath)
+    publicationReceipt = validatePublicationReceipt(await json(receiptPath), run, publicationRequestSha256)
   }
-  const request = buildRollbackRequest(run, publicationReceipt, { dryRun: values.dryRun })
+  const request = buildRollbackRequest(run, publicationReceipt, {
+    dryRun: values.dryRun,
+    publicationRequestSha256,
+    publicationReceiptSha256,
+  })
   const path = join(directory, 'rollback', 'cloudflare-owner-request.json')
-  await atomicJson(path, request)
-  run.rollback = { status: values.dryRun ? 'dry-run' : 'awaiting-existing-owner', owner: OWNER, delete_objects: 0 }
+  if (action === 'dry-run') {
+    await atomicJson(path, request)
+    run.rollback = { status: 'dry-run', owner: OWNER, delete_objects: 0 }
+  } else if (action === 'emit') {
+    await atomicJson(path, request)
+    run.rollback = awaitingRollbackState({
+      publicationRequestSha256,
+      publicationReceiptSha256,
+      rollbackRequestSha256: await fileDigest(path),
+    })
+  } else if (action === 'resume-awaiting') {
+    const rollbackRequestSha256 = await fileDigest(path)
+    validateAwaitingRollbackRequest(run, await json(path), request, {
+      publicationRequestSha256, publicationReceiptSha256, rollbackRequestSha256,
+    })
+  } else {
+    run.rollback = await importRollbackOwnerReceipt(directory, run, values.ownerReceipt)
+  }
   await saveRun(directory, run)
   await writeChecksums(directory)
   process.stdout.write(`${JSON.stringify({ run_id: run.run_id, rollback: run.rollback, request: relativePath(directory, path) }, null, 2)}\n`)
@@ -1846,9 +2026,10 @@ function validateCommandOptions(command, values) {
     throw new Error('publish requires --run <id> and accepts only --dry-run or --owner-receipt')
   }
   if (command === 'rollback' && (values.run === undefined || values.retry !== undefined
-    || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
-    || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined)) {
-    throw new Error('rollback requires --run <id> and optionally --dry-run')
+    || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined
+    || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined
+    || values.dryRun && values.ownerReceipt !== undefined)) {
+    throw new Error('rollback requires --run <id> and accepts only --dry-run or --owner-receipt')
   }
   if (internal && (values.run !== undefined || values.retry !== undefined || values.dryRun || values.ownerReceipt !== undefined
     || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined && values.platform !== 'windows')) {
