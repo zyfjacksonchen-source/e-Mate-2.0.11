@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useState, useSyncExternalStore } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -26,23 +26,13 @@ const PALETTE_ITEMS: readonly MenuEntry[] = [
 ]
 
 export function GlassComposerControl({ scope }: { readonly scope: SettingsScope<GlassSettings> }) {
-  const control = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
   const subscribe = useCallback((listener: () => void) => scope.subscribe(listener), [scope])
   const getSnapshot = useCallback(() => scope.getSnapshot(), [scope])
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
   const palette = isGlassPalette(snapshot.value?.palette) ? snapshot.value.palette : DEFAULT_GLASS_PALETTE
 
-  useLayoutEffect(() => {
-    const host = control.current?.closest('[data-emate-composer-frame-host]')
-    if (!(host instanceof HTMLElement)) return undefined
-    host.dataset.emateGlassPalette = palette
-    return () => {
-      if (host.dataset.emateGlassPalette === palette) delete host.dataset.emateGlassPalette
-    }
-  }, [palette])
-
-  return <span className={css.root} data-emate-glass-control="">
+  return <span className={css.root} data-emate-glass-control="" data-emate-glass-palette={palette}>
     <Menu
       portal
       compact
@@ -58,7 +48,6 @@ export function GlassComposerControl({ scope }: { readonly scope: SettingsScope<
         void scope.set(PALETTE_FIELD, id satisfies GlassPalette)
       }}
       anchor={<button
-        ref={control}
         type="button"
         className={css.button}
         aria-label="设置聊天框外沿动效"
