@@ -14,11 +14,28 @@ describe('native e-Mate @ references', () => {
     const sources: InputTriggerSource[] = []
     const listSkills = vi.fn(async () => ({ result: { ok: true, value: { skills: [] } } }))
     const execute = vi.fn(async (): Promise<any> => ({ ok: true, value: { result: { kind: 'success', text: 'Plan mode on.' } } }))
-    let snapshot = { draft: '@', draftRev: 1, phase: 'plain' as const }
+    let snapshot: { draft: string; draftRev: number; phase: 'plain' | 'claimed' } = {
+      draft: '@', draftRev: 1, phase: 'plain',
+    }
     const setDraft = vi.fn((draft: string) => { snapshot = { ...snapshot, draft, draftRev: snapshot.draftRev + 1 } })
     const notify = vi.fn()
     const submit = vi.fn()
+    const claim = {
+      token: '/goal ',
+      hint: '目标内容',
+      submit: vi.fn(async () => ({ kind: 'success' as const })),
+    }
     const bail = vi.fn((_scope, event: string, request: any) => {
+      if (event === 'slash/input-begin-command') {
+        if (request.span.draftRev !== snapshot.draftRev) return undefined
+        const { start, end } = request.span
+        snapshot = {
+          draft: snapshot.draft.slice(0, start) + request.claim.token + snapshot.draft.slice(end),
+          draftRev: snapshot.draftRev + 1,
+          phase: 'claimed',
+        }
+        return true
+      }
       if (event !== 'slash/input-consume-token' || request.guard.span.draftRev !== snapshot.draftRev) return undefined
       const { start, end } = request.guard.span
       if (snapshot.draft.slice(start, end) !== '@') return undefined
@@ -27,13 +44,14 @@ describe('native e-Mate @ references', () => {
     })
     const scope = { bail }
     const track = vi.fn()
-    const onSpace = vi.fn(() => true)
+    const onSpace = vi.fn(() => false)
+    const adjudicate = vi.fn(async () => ({ claim }))
     const binding = vi.fn(() => { throw new Error('Goal and Plan actions must not read projections') })
     const ctx = {
       effect(run: () => () => void) { return run() },
       inputTriggers: {
         registerSource(source: InputTriggerSource) { sources.push(source); return () => {} },
-        sessionOf: () => ({ track, onSpace }),
+        sessionOf: () => ({ track, onSpace, adjudicate }),
       },
       sessions: { binding, scope: () => scope },
       conversation: { input: { for: () => ({ state: { getSnapshot: () => snapshot }, setDraft, notify, actions: { submit } }) } },
@@ -66,9 +84,13 @@ describe('native e-Mate @ references', () => {
     expect(skillEmpty).toEqual({ name: '暂无可用 Skill', description: '当前会话没有可引用的 Skill' })
     const span = { start: 0, end: 1, draftRev: 1 }
     expect(goal.onPick({ candidate: goalAction, session, position: 'leading', via: 'menu', span })).toBe('handled')
-    expect(setDraft).toHaveBeenCalledWith('/goal')
-    expect(track).toHaveBeenCalledWith('/goal', 5, { tier: 'plain' }, 2)
-    expect(onSpace).toHaveBeenCalledOnce()
+    await vi.waitFor(() => expect(adjudicate).toHaveBeenCalledWith('/goal', expect.any(AbortSignal)))
+    expect(bail).toHaveBeenCalledWith(scope, 'slash/input-begin-command', { claim, span })
+    expect(snapshot).toEqual({ draft: '/goal ', draftRev: 2, phase: 'claimed' })
+    expect(setDraft).not.toHaveBeenCalled()
+    expect(track).not.toHaveBeenCalled()
+    expect(onSpace).not.toHaveBeenCalled()
+    expect(notify).not.toHaveBeenCalled()
     expect(goal.codec).toBeUndefined()
 
     snapshot = { draft: '保留 @ 草稿', draftRev: 3, phase: 'plain' }
