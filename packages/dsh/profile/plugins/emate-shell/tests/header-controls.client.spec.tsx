@@ -90,7 +90,7 @@ describe('desktop header controls', () => {
       listeners.forEach(listener => { listener() })
     }
     history.replaceState(null, '', '/settings')
-    render(<><HeaderControls
+    const view = render(<><HeaderControls
       getThemeScheme={() => scheme} subscribeTheme={listener => { listeners.add(listener); return () => { listeners.delete(listener) } }} toggleTheme={toggleTheme}
       useSessions={selector => selector({ current: undefined, ids: [], byId: {}, subagentsByParent: {}, currentAddress: undefined } as never)}
       callShare={vi.fn()} useSessionLogDownload={selector => selector({ bySession: {} })}
@@ -105,7 +105,18 @@ describe('desktop header controls', () => {
       expect(screen.getAllByRole('button', { name: '关闭设置' })).toHaveLength(1)
       expect(screen.queryByLabelText('应用工具')).toBeNull()
     }
+    view.unmount()
+    render(<><HeaderControls
+      getThemeScheme={() => scheme} subscribeTheme={listener => { listeners.add(listener); return () => { listeners.delete(listener) } }} toggleTheme={toggleTheme}
+      useSessions={selector => selector({ current: undefined, ids: [], byId: {}, subagentsByParent: {}, currentAddress: undefined } as never)}
+      callShare={vi.fn()} useSessionLogDownload={selector => selector({ bySession: {} })}
+      requestDownload={vi.fn()} dismissDownload={vi.fn()}
+      LightIcon={Icon} DarkIcon={Icon}
+    /><button type="button">关闭设置</button></>)
+    expect(screen.getAllByRole('button', { name: scheme === 'dark' ? '切换到明亮模式' : '切换到暗色模式' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: '关闭设置' })).toHaveLength(1)
     const controls = readFileSync('src/client/header-controls.module.css', 'utf8')
+    expect(controls).toMatch(/\.controls\[data-emate-settings-route\],[\s\S]*top:\s*22px;/u)
     expect(controls).toMatch(/\.controls\[data-emate-settings-route\][\s\S]*right:\s*calc\(72px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
     expect(controls).toMatch(/body\[data-dsh-desktop-platform='win32'\][\s\S]*\.controls\[data-emate-settings-route\]/u)
     const settings = readFileSync('src/client/settings-chrome.module.css', 'utf8')
