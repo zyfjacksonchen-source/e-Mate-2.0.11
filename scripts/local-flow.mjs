@@ -12,6 +12,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url'
 import { isDeepStrictEqual, parseArgs } from 'node:util'
 import { classifyChangedPaths } from './change-impact.mjs'
 import { pinnedPnpmInvocation, pinnedYarnInvocation } from './package-manager.mjs'
+import { R2_PUBLIC_ORIGIN } from './release-source.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const RUN_ROOT = join(ROOT, 'dist', 'local-runs')
@@ -29,18 +30,19 @@ const OWNER = 'existing-desktop-manifest-admission-signing-owner+codex-cloudflar
 const MANIFEST_OWNER = 'zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123'
 const MANIFEST_SIGNING_CONTEXT = 'e-mate-desktop-release-manifest-v2\0'
 const MANIFEST_KEY_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u
+const CURRENT_PUBLIC_VERSION = '2.0.15'
+const CURRENT_PUBLIC_SOURCE_COMMIT = '297b90df2426137edb398b023d8137a085ed8508'
 const POINTER_PREDECESSOR = Object.freeze({
   bytes: 2961,
   sha256: '838115146f74e18de0fc90e3dc586f6bd5eab706a0e6dcbc27e6ad5a79c642fb',
   etag: '61df621671e90dc90ce457494e09b295',
 })
-const POINTERS = Object.freeze({
+const CURRENT_PUBLIC_POINTERS = Object.freeze({
   signed: Object.freeze({ key: 'desktop/signed/latest.json' }),
   legacy: Object.freeze({ key: 'desktop/latest.json' }),
-  manual: Object.freeze({ key: `desktop/manual/v${VERSION}/latest.json` }),
+  manual: Object.freeze({ key: `desktop/manual/v${CURRENT_PUBLIC_VERSION}/latest.json` }),
 })
-const POINTER_ACTIVATION_ORDER = Object.freeze(['signed', 'legacy', 'manual'])
-const POINTER_ROLLBACK_ORDER = Object.freeze([...POINTER_ACTIVATION_ORDER].reverse())
+const TRANSACTION_MODES = Object.freeze(['new-version', 'same-version-2.0.15-exception'])
 const POINTER_TARGET = Object.freeze({
   artifact_path: 'desktop-release-signed.json',
   bytes: 'from-manifest-admission.signed_manifest.bytes',
@@ -1438,6 +1440,10 @@ function publicationScope(run) {
   return 'macos-immutable-dmg-only'
 }
 
+function releaseArtifactName(platform, version) {
+  return platform === 'macos' ? `e-Mate-${version}-mac-universal.dmg` : `e-Mate-${version}-win-x64-Setup.exe`
+}
+
 function objectRecords(run) {
   const artifacts = run.verification?.artifacts
   const scope = publicationScope(run)
@@ -1445,12 +1451,12 @@ function objectRecords(run) {
   if (!exactKeys(artifacts, platforms)) throw new Error(`verified candidate must contain ${platforms.join(' and ')} platform artifacts`)
   const records = []
   for (const [platform, bundle] of Object.entries(artifacts)) {
-    const config = PLATFORMS[platform]
+    const artifactName = releaseArtifactName(platform, run.version)
     if (!exactKeys(bundle, ['primary', 'files']) || !exactKeys(bundle.primary, ['name', 'bytes', 'sha256'])
       || !Array.isArray(bundle.files) || ![1, 2].includes(bundle.files.length)) {
       throw new Error(`${platform} verified artifact set is invalid`)
     }
-    const expectedNames = [config.artifact, ...(bundle.files.some(file => file?.name === `${config.artifact}.blockmap`) ? [`${config.artifact}.blockmap`] : [])].sort()
+    const expectedNames = [artifactName, ...(bundle.files.some(file => file?.name === `${artifactName}.blockmap`) ? [`${artifactName}.blockmap`] : [])].sort()
     if (JSON.stringify(bundle.files.map(file => file?.name).sort()) !== JSON.stringify(expectedNames)) {
       throw new Error(`${platform} verified artifact file set is invalid`)
     }
@@ -1459,7 +1465,7 @@ function objectRecords(run) {
         || !Number.isSafeInteger(artifact.bytes) || artifact.bytes <= 0 || !SHA256.test(artifact.sha256 ?? '')) {
         throw new Error(`${platform} verified artifact descriptor is invalid`)
       }
-      if (scope === 'full' || artifact.name === config.artifact) {
+      if (scope === 'full' || artifact.name === artifactName) {
         records.push({
           platform,
           artifact_path: `artifacts/${platform}/${artifact.name}`,
@@ -1470,7 +1476,7 @@ function objectRecords(run) {
         })
       }
     }
-    const primary = bundle.files.find(file => file.name === config.artifact)
+    const primary = bundle.files.find(file => file.name === artifactName)
     if (JSON.stringify(bundle.primary) !== JSON.stringify(primary)) throw new Error(`${platform} primary artifact binding is invalid`)
   }
   return records.sort((left, right) => left.platform.localeCompare(right.platform) || left.key.localeCompare(right.key))
@@ -1491,11 +1497,71 @@ function verifiedComputerUse(run) {
   return evidence
 }
 
-export function buildPublicationRequest(run, { dryRun = false } = {}) {
+function numericVersion(version) {
+  if (!PACKAGE_VERSION.test(version ?? '')) throw new Error('release transaction product version is invalid')
+  return version.split('-', 1)[0].split('.').map(Number)
+}
+
+function compareVersions(left, right) {
+  const leftParts = numericVersion(left)
+  const rightParts = numericVersion(right)
+  for (let index = 0; index < 3; index += 1) {
+    if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index]
+  }
+  return 0
+}
+
+export function buildReleaseTransactionPlan(run, versionChoice) {
+  if (!RUN_ID.test(run?.run_id ?? '') || !SOURCE_SHA.test(run?.source_commit ?? '')) {
+    throw new Error('release transaction run identity is invalid')
+  }
+  if (!TRANSACTION_MODES.includes(versionChoice)) throw new Error('release transaction requires an explicit version choice')
+  const nextVersion = compareVersions(run.version, CURRENT_PUBLIC_VERSION) > 0
+  if (versionChoice === 'new-version' ? !nextVersion : run.version !== CURRENT_PUBLIC_VERSION) {
+    throw new Error('release transaction version choice does not match the frozen product version')
+  }
+  const sameVersion = versionChoice === 'same-version-2.0.15-exception'
+  return {
+    schema_version: 1,
+    mode: versionChoice,
+    distribution_origin: R2_PUBLIC_ORIGIN,
+    run_id: run.run_id,
+    product_version: run.version,
+    source_commit: run.source_commit,
+    current_public_version: CURRENT_PUBLIC_VERSION,
+    current_public_source_commit: CURRENT_PUBLIC_SOURCE_COMMIT,
+    current_public_pointers: Object.fromEntries(Object.entries(CURRENT_PUBLIC_POINTERS).map(([name, pointer]) => [name, {
+      key: pointer.key,
+      identity: { ...POINTER_PREDECESSOR },
+    }])),
+    manual_manifest: {
+      key: sameVersion ? CURRENT_PUBLIC_POINTERS.manual.key : `desktop/manual/v${run.version}/latest.json`,
+      write: sameVersion ? 'compare-and-swap' : 'create-only',
+      rollback: sameVersion ? 'restore-by-cas' : 'retain',
+    },
+    activation_order: ['manual', 'signed', 'legacy'],
+    rollback_order: sameVersion ? ['legacy', 'signed', 'manual'] : ['legacy', 'signed'],
+    manual_reinstall_required_for_existing_2_0_15: sameVersion,
+  }
+}
+
+function releaseTransactionPlan(run, versionChoice) {
+  const choice = versionChoice ?? run.release_transaction?.mode
+  const expected = buildReleaseTransactionPlan(run, choice)
+  if (run.release_transaction !== undefined && !isDeepStrictEqual(run.release_transaction, expected)) {
+    throw new Error('release transaction plan drifted from the frozen run')
+  }
+  return expected
+}
+
+export function buildPublicationRequest(run, { dryRun = false, versionChoice } = {}) {
   const scope = publicationScope(run)
   verifiedComputerUse(run)
   const immutableObjects = objectRecords(run)
   if (scope === 'macos-immutable-dmg-only') {
+    if (versionChoice !== undefined || run.release_transaction !== undefined) {
+      throw new Error('macOS-only immutable publication cannot bind a shared-pointer version choice')
+    }
     return {
       schema_version: 1,
       document_type: 'emate.local-cloudflare-owner-request',
@@ -1503,6 +1569,7 @@ export function buildPublicationRequest(run, { dryRun = false } = {}) {
       mode: dryRun ? 'dry-run' : 'apply',
       status: 'ready-for-existing-owner',
       authority: OWNER,
+      distribution_origin: R2_PUBLIC_ORIGIN,
       release_scope: scope,
       version: run.version,
       source_commit: run.source_commit,
@@ -1528,6 +1595,16 @@ export function buildPublicationRequest(run, { dryRun = false } = {}) {
       delete_objects: [],
     }
   }
+  const transaction = releaseTransactionPlan(run, versionChoice)
+  const pointerNames = transaction.mode === 'new-version' ? ['signed', 'legacy'] : [...transaction.activation_order]
+  const pointers = Object.fromEntries(pointerNames.map(name => [name, {
+    key: transaction.current_public_pointers[name].key,
+    expected_current: { ...transaction.current_public_pointers[name].identity },
+    target: { ...POINTER_TARGET },
+    compare_and_swap: 'required',
+    authenticated_readback: 'required',
+    public_full_byte_readback: 'required',
+  }]))
   return {
     schema_version: 1,
     document_type: 'emate.local-cloudflare-owner-request',
@@ -1535,8 +1612,11 @@ export function buildPublicationRequest(run, { dryRun = false } = {}) {
     mode: dryRun ? 'dry-run' : 'apply',
     status: 'ready-for-existing-owner',
     authority: OWNER,
+    distribution_origin: R2_PUBLIC_ORIGIN,
+    run_id: run.run_id,
     version: run.version,
     source_commit: run.source_commit,
+    transaction_plan: transaction,
     rebuild: false,
     macos_publication_mode: 'unsigned',
     installer_security: INSTALLER_SECURITY,
@@ -1558,19 +1638,24 @@ export function buildPublicationRequest(run, { dryRun = false } = {}) {
       },
     },
     publication_and_activation: {
-      pointers: Object.fromEntries(POINTER_ACTIVATION_ORDER.map(name => [name, {
-        key: POINTERS[name].key,
-        expected_current: { ...POINTER_PREDECESSOR },
+      current_public_pointer_readback: 'required-before-any-write',
+      manual_manifest: {
+        ...transaction.manual_manifest,
+        expected_current: transaction.mode === 'new-version'
+          ? 'must-not-exist'
+          : { ...transaction.current_public_pointers.manual.identity },
         target: { ...POINTER_TARGET },
-        compare_and_swap: 'required',
         authenticated_readback: 'required',
         public_full_byte_readback: 'required',
-      }])),
-      activation_order: [...POINTER_ACTIVATION_ORDER],
+      },
+      pointers,
+      activation_order: [...transaction.activation_order],
       recovery: { ...POINTER_RECOVERY, accepted_current_states: [...POINTER_RECOVERY.accepted_current_states] },
       order: [
-        'existing-owner-admission-and-ed25519-manifest-signing', 'immutable-create-only', 'authenticated-readback', 'public-readback',
-        'signed-pointer-cas-and-readbacks', 'legacy-pointer-cas-and-readbacks', 'manual-pointer-cas-and-readbacks',
+        'current-public-three-pointer-readbacks', 'existing-owner-admission-and-ed25519-manifest-signing',
+        'immutable-create-only', 'authenticated-readback', 'public-readback',
+        transaction.mode === 'new-version' ? 'manual-manifest-create-only-and-readbacks' : 'manual-pointer-cas-and-readbacks',
+        'signed-pointer-cas-and-readbacks', 'legacy-pointer-cas-and-readbacks',
       ],
     },
     delete_objects: [],
@@ -1587,6 +1672,21 @@ function samePointerIdentity(value, expected) {
     && value.sha256 === expected.sha256 && value.etag === expected.etag
 }
 
+function validCurrentPublicReadbacks(value, transaction) {
+  if (!exactKeys(value, Object.keys(transaction.current_public_pointers))) return false
+  return Object.entries(transaction.current_public_pointers).every(([name, expected]) => {
+    const pointer = value[name]
+    const authenticated = pointer?.authenticated_readback
+    const publicReadback = pointer?.public_full_byte_readback
+    return exactKeys(pointer, ['key', 'authenticated_readback', 'public_full_byte_readback'])
+      && pointer.key === expected.key
+      && exactKeys(authenticated, ['status', 'bytes', 'sha256', 'etag']) && authenticated.status === 'passed'
+      && samePointerIdentity({ bytes: authenticated.bytes, sha256: authenticated.sha256, etag: authenticated.etag }, expected.identity)
+      && exactKeys(publicReadback, ['status', 'bytes', 'sha256']) && publicReadback.status === 'passed'
+      && publicReadback.bytes === expected.identity.bytes && publicReadback.sha256 === expected.identity.sha256
+  })
+}
+
 function unsignedInstallerSecurity(value) {
   return exactKeys(value, ['darwin', 'win32'])
     && sameRecord(value.darwin, INSTALLER_SECURITY.darwin)
@@ -1597,11 +1697,12 @@ export function validatePublicationReceipt(receipt, run, requestSha256) {
   if (publicationScope(run) === 'macos-immutable-dmg-only') {
     if (!exactKeys(receipt, [
       'schema_version', 'document_type', 'operation', 'status', 'release_scope', 'windows',
-      'macos_publication_mode', 'installer_security', 'version', 'source_commit', 'request_sha256',
+      'macos_publication_mode', 'installer_security', 'distribution_origin', 'version', 'source_commit', 'request_sha256',
       'immutable_objects', 'shared_update_surfaces', 'deleted_objects',
     ]) || receipt.schema_version !== 1 || receipt.document_type !== 'emate.local-cloudflare-owner-receipt'
       || receipt.operation !== 'publish-macos-immutable' || receipt.status !== 'passed'
       || receipt.release_scope !== 'macos-immutable-dmg-only'
+      || receipt.distribution_origin !== R2_PUBLIC_ORIGIN
       || !isDeepStrictEqual(receipt.windows, run.verification.windows)
       || receipt.macos_publication_mode !== 'unsigned'
       || !exactKeys(receipt.installer_security, ['darwin'])
@@ -1629,18 +1730,24 @@ export function validatePublicationReceipt(receipt, run, requestSha256) {
     }
     return receipt
   }
-  if (!exactKeys(receipt, [
+  const transaction = releaseTransactionPlan(run)
+  const pointerNames = transaction.mode === 'new-version' ? ['signed', 'legacy'] : [...transaction.activation_order]
+  const receiptKeys = [
     'schema_version', 'document_type', 'operation', 'status', 'macos_publication_mode', 'installer_security',
-    'version', 'source_commit', 'request_sha256', 'manifest_admission', 'immutable_objects',
-    'pointers', 'activation_order', 'deleted_objects',
-  ])
+    'distribution_origin', 'run_id', 'version', 'source_commit', 'transaction_mode', 'request_sha256',
+    'current_public_pointers', 'manifest_admission', 'immutable_objects', 'pointers', 'activation_order',
+    ...(transaction.mode === 'new-version' ? ['manual_manifest'] : []), 'deleted_objects',
+  ]
+  if (!exactKeys(receipt, receiptKeys)
     || receipt.schema_version !== 1 || receipt.document_type !== 'emate.local-cloudflare-owner-receipt'
     || receipt.operation !== 'publish' || receipt.status !== 'passed' || receipt.macos_publication_mode !== 'unsigned'
     || !unsignedInstallerSecurity(receipt.installer_security)
-    || receipt.version !== run.version || receipt.source_commit !== run.source_commit
+    || receipt.distribution_origin !== R2_PUBLIC_ORIGIN || receipt.run_id !== run.run_id
+    || receipt.version !== run.version || receipt.source_commit !== run.source_commit || receipt.transaction_mode !== transaction.mode
     || receipt.request_sha256 !== requestSha256 || !SHA256.test(requestSha256 ?? '')
-    || !exactKeys(receipt.pointers, POINTER_ACTIVATION_ORDER)
-    || !isDeepStrictEqual(receipt.activation_order, POINTER_ACTIVATION_ORDER)
+    || !validCurrentPublicReadbacks(receipt.current_public_pointers, transaction)
+    || !exactKeys(receipt.pointers, pointerNames)
+    || !isDeepStrictEqual(receipt.activation_order, transaction.activation_order)
     || !Array.isArray(receipt.immutable_objects) || receipt.deleted_objects?.length !== 0) {
     throw new Error('Cloudflare publication owner receipt is invalid')
   }
@@ -1679,14 +1786,32 @@ export function validatePublicationReceipt(receipt, run, requestSha256) {
     throw new Error('Desktop manifest admission/signature receipt is invalid')
   }
   let appliedDuringThisAttempt = false
-  for (const name of POINTER_ACTIVATION_ORDER) {
+  for (const name of transaction.activation_order) {
+    if (name === 'manual' && transaction.mode === 'new-version') {
+      const manual = receipt.manual_manifest
+      const authenticated = manual?.authenticated_readback
+      const publicReadback = manual?.public_full_byte_readback
+      if (!exactKeys(manual, ['key', 'write', 'after', 'authenticated_readback', 'public_full_byte_readback'])
+        || manual.key !== transaction.manual_manifest.key || !['created', 'already-exact'].includes(manual.write)
+        || !validPointerIdentity(manual.after) || manual.after.bytes !== admission.signed_manifest.bytes
+        || manual.after.sha256 !== admission.signed_manifest.sha256
+        || !exactKeys(authenticated, ['status', 'bytes', 'sha256', 'etag']) || authenticated.status !== 'passed'
+        || !samePointerIdentity({ bytes: authenticated.bytes, sha256: authenticated.sha256, etag: authenticated.etag }, manual.after)
+        || !exactKeys(publicReadback, ['status', 'bytes', 'sha256']) || publicReadback.status !== 'passed'
+        || publicReadback.bytes !== manual.after.bytes || publicReadback.sha256 !== manual.after.sha256) {
+        throw new Error('Cloudflare manual manifest receipt is invalid')
+      }
+      if (manual.write === 'created') appliedDuringThisAttempt = true
+      else if (appliedDuringThisAttempt) throw new Error('Cloudflare ordered pointer recovery is invalid')
+      continue
+    }
     const pointer = receipt.pointers[name]
     const authenticated = pointer?.authenticated_readback
     const publicReadback = pointer?.public_full_byte_readback
     if (!exactKeys(pointer, [
       'key', 'before', 'after', 'cas', 'authenticated_readback', 'public_full_byte_readback',
-    ]) || pointer.key !== POINTERS[name].key
-      || !samePointerIdentity(pointer.before, POINTER_PREDECESSOR) || !validPointerIdentity(pointer.after)
+    ]) || pointer.key !== transaction.current_public_pointers[name].key
+      || !samePointerIdentity(pointer.before, transaction.current_public_pointers[name].identity) || !validPointerIdentity(pointer.after)
       || pointer.after.bytes !== admission.signed_manifest.bytes
       || pointer.after.sha256 !== admission.signed_manifest.sha256
       || !['passed', 'already-exact'].includes(pointer.cas)
@@ -1712,9 +1837,10 @@ export function buildRollbackRequest(run, publicationReceipt, {
     throw new Error('macOS-only immutable publication has no shared pointer rollback')
   }
   verifiedComputerUse(run)
+  const transaction = releaseTransactionPlan(run)
   if (!dryRun && publicationReceipt === undefined) throw new Error('rollback requires the existing Cloudflare owner publication receipt')
-  const pointers = POINTER_ROLLBACK_ORDER.map(name => ({
-    key: POINTERS[name].key,
+  const pointers = transaction.rollback_order.map(name => ({
+    key: transaction.current_public_pointers[name].key,
     expected_current: publicationReceipt === undefined
       ? {
         bytes: `from-publication-owner-receipt.pointers.${name}.after.bytes`,
@@ -1722,7 +1848,9 @@ export function buildRollbackRequest(run, publicationReceipt, {
         etag: `from-publication-owner-receipt.pointers.${name}.after.etag`,
       }
       : publicationReceipt.pointers[name].after,
-    restore: publicationReceipt === undefined ? { ...POINTER_PREDECESSOR } : publicationReceipt.pointers[name].before,
+    restore: publicationReceipt === undefined
+      ? { ...transaction.current_public_pointers[name].identity }
+      : publicationReceipt.pointers[name].before,
     compare_and_swap: 'required',
     authenticated_readback: 'required',
     public_full_byte_readback: 'required',
@@ -1734,27 +1862,38 @@ export function buildRollbackRequest(run, publicationReceipt, {
     mode: dryRun ? 'dry-run' : 'apply',
     status: 'ready-for-existing-owner',
     authority: OWNER,
+    distribution_origin: R2_PUBLIC_ORIGIN,
+    run_id: run.run_id,
     version: run.version,
     source_commit: run.source_commit,
+    transaction_mode: transaction.mode,
+    transaction_plan: transaction,
     rebuild: false,
-    rollback_order: [...POINTER_ROLLBACK_ORDER],
+    rollback_order: [...transaction.rollback_order],
     pointer_compare_and_swap: pointers,
     recovery: { ...POINTER_RECOVERY, accepted_current_states: [...POINTER_RECOVERY.accepted_current_states] },
     immutable_objects: objectRecords(run).map(object => ({ key: object.key, action: 'retain' })),
+    manual_manifest: {
+      key: transaction.manual_manifest.key,
+      action: transaction.mode === 'new-version' ? 'retain' : 'restore-by-cas',
+    },
     owner_receipt: {
       schema_version: 1,
       document_type: 'emate.local-cloudflare-owner-receipt',
       operation: 'rollback',
       status: 'passed',
       authority: OWNER,
+      distribution_origin: R2_PUBLIC_ORIGIN,
       run_id: run.run_id ?? 'from-local-flow-run.run_id',
       version: run.version,
       source_commit: run.source_commit,
+      transaction_mode: transaction.mode,
       publication_request_sha256: publicationRequestSha256 ?? 'from-publication/cloudflare-owner-request.json',
       publication_receipt_sha256: publicationReceiptSha256 ?? 'from-publication/cloudflare-owner-receipt.json',
       rollback_request_sha256: 'sha256-of-this-exact-request',
       pointer_receipts: 'ordered-before-after-cas-authenticated-and-public-readback',
       immutable_objects: 'retained',
+      manual_manifest: transaction.mode === 'new-version' ? 'retained' : 'restored-by-cas',
       deleted_objects: [],
     },
     delete_objects: [],
@@ -1770,12 +1909,14 @@ export function validateRollbackReceipt(receipt, run, {
 } = {}) {
   if (!exactKeys(receipt, [
     'schema_version', 'document_type', 'operation', 'status', 'authority', 'run_id', 'version',
-    'source_commit', 'publication_request_sha256', 'publication_receipt_sha256',
+    'source_commit', 'distribution_origin', 'transaction_mode', 'publication_request_sha256', 'publication_receipt_sha256',
     'rollback_request_sha256', 'rollback_order', 'pointers', 'immutable_objects', 'deleted_objects',
+    'manual_manifest',
   ]) || receipt.schema_version !== 1 || receipt.document_type !== 'emate.local-cloudflare-owner-receipt'
     || receipt.operation !== 'rollback' || receipt.status !== 'passed' || receipt.authority !== OWNER
     || !RUN_ID.test(run?.run_id ?? '') || receipt.run_id !== run.run_id
     || receipt.version !== run.version || receipt.source_commit !== run.source_commit
+    || receipt.distribution_origin !== R2_PUBLIC_ORIGIN
     || !SHA256.test(publicationRequestSha256 ?? '') || receipt.publication_request_sha256 !== publicationRequestSha256
     || !SHA256.test(publicationReceiptSha256 ?? '') || receipt.publication_receipt_sha256 !== publicationReceiptSha256
     || !SHA256.test(rollbackRequestSha256 ?? '') || receipt.rollback_request_sha256 !== rollbackRequestSha256
@@ -1791,6 +1932,11 @@ export function validateRollbackReceipt(receipt, run, {
   })
   if (!isDeepStrictEqual(rollbackRequest, expectedRequest)
     || !isDeepStrictEqual(receipt.rollback_order, expectedRequest.rollback_order)
+    || receipt.transaction_mode !== expectedRequest.transaction_mode
+    || !isDeepStrictEqual(receipt.manual_manifest, {
+      key: expectedRequest.manual_manifest.key,
+      action: expectedRequest.manual_manifest.action === 'retain' ? 'retained' : 'restored-by-cas',
+    })
     || receipt.pointers.length !== expectedRequest.pointer_compare_and_swap.length) {
     throw new Error('Cloudflare rollback owner receipt is invalid')
   }
@@ -1901,18 +2047,47 @@ export async function importRollbackOwnerReceipt(directory, run, ownerReceiptPat
 async function publish(values) {
   const { directory, run } = await loadRun(values.run)
   assertVerificationMatches(run, await verifyRun(directory, run))
+  const scope = publicationScope(run)
+  if (scope === 'full') {
+    const transaction = releaseTransactionPlan(run, values.versionChoice)
+    if (run.release_transaction === undefined) run.release_transaction = transaction
+  } else if (values.versionChoice !== undefined || run.release_transaction !== undefined) {
+    throw new Error('macOS-only immutable publication cannot bind a shared-pointer version choice')
+  }
   const request = buildPublicationRequest(run, { dryRun: values.dryRun })
   const path = join(directory, 'publication', 'cloudflare-owner-request.json')
-  await atomicJson(path, request)
+  const status = run.publication?.status
+  if (!['not-requested', 'dry-run', 'awaiting-existing-owner', 'passed'].includes(status)) {
+    throw new Error('publication run state is invalid')
+  }
+  if (status === 'passed') throw new Error('publication is already passed for this run')
+  if (values.ownerReceipt !== undefined && status !== 'awaiting-existing-owner') {
+    throw new Error('publication owner receipt import requires the exact awaiting request state')
+  }
+  if (status === 'awaiting-existing-owner' && values.dryRun) {
+    throw new Error('publication awaiting the existing owner cannot return to dry-run')
+  }
+  if (status === 'awaiting-existing-owner') {
+    if (!isDeepStrictEqual(await json(path), request)) throw new Error('Cloudflare publication owner request is invalid')
+  } else {
+    await atomicJson(path, request)
+  }
   const requestSha256 = await fileDigest(path)
+  if (status === 'awaiting-existing-owner' && run.publication.request_sha256 !== requestSha256) {
+    throw new Error('publication requires the exact awaiting request state')
+  }
   if (values.ownerReceipt !== undefined) {
     const receipt = validatePublicationReceipt(await json(resolve(values.ownerReceipt)), run, requestSha256)
     await atomicJson(join(directory, 'publication', 'cloudflare-owner-receipt.json'), receipt)
-    run.publication = { status: 'passed', scope: request.release_scope ?? 'full', request_sha256: requestSha256, owner: OWNER }
+    run.publication = {
+      status: 'passed', scope: request.release_scope ?? 'full', request_sha256: requestSha256, owner: OWNER,
+      ...(run.release_transaction === undefined ? {} : { transaction_mode: run.release_transaction.mode }),
+    }
   } else {
     run.publication = {
       status: values.dryRun ? 'dry-run' : 'awaiting-existing-owner', scope: request.release_scope ?? 'full',
       request_sha256: requestSha256, owner: OWNER,
+      ...(run.release_transaction === undefined ? {} : { transaction_mode: run.release_transaction.mode }),
     }
   }
   await saveRun(directory, run)
@@ -1981,6 +2156,7 @@ function argumentsFor(argv) {
       'remote-request': { type: 'string' },
       'dry-run': { type: 'boolean', default: false },
       'owner-receipt': { type: 'string' },
+      'version-choice': { type: 'string' },
     },
   })
   if (positionals.length !== 1) throw new Error('usage: pnpm flow <dev|candidate|verify|publish|rollback> [options]')
@@ -1994,6 +2170,7 @@ function argumentsFor(argv) {
       windowsResult: values['windows-result'],
       windowsUnavailable: values['windows-unavailable'],
       remoteRequest: values['remote-request'],
+      versionChoice: values['version-choice'],
     },
   }
 }
@@ -2005,34 +2182,35 @@ function validateCommandOptions(command, values) {
   }
   if (command === 'dev' && (values.run !== undefined || values.retry !== undefined || values.dryRun
     || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
-    || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined)) {
+    || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined || values.versionChoice !== undefined)) {
     throw new Error('dev does not accept options')
   }
   if (command === 'candidate' && (values.dryRun || values.platform !== undefined || values.out !== undefined
-    || values.sourceCommit !== undefined || values.ownerReceipt !== undefined || values.remoteRequest !== undefined
+    || values.sourceCommit !== undefined || values.ownerReceipt !== undefined || values.remoteRequest !== undefined || values.versionChoice !== undefined
     || values.windowsResult !== undefined && (values.run === undefined || values.retry !== undefined || values.windowsUnavailable)
     || values.windowsUnavailable && (values.run === undefined || values.retry !== undefined))) {
     throw new Error('candidate accepts --run/--retry, --run with --windows-result, or --run --windows-unavailable')
   }
   if (command === 'verify' && (values.run === undefined || values.retry !== undefined || values.dryRun
     || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
-    || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined)) {
+    || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined || values.versionChoice !== undefined)) {
     throw new Error('verify requires only --run <id>')
   }
   if (command === 'publish' && (values.run === undefined || values.retry !== undefined
     || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined
     || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined
     || values.dryRun && values.ownerReceipt !== undefined)) {
-    throw new Error('publish requires --run <id> and accepts only --dry-run or --owner-receipt')
+    throw new Error('publish requires --run <id> and accepts --version-choice, --dry-run, or --owner-receipt')
   }
   if (command === 'rollback' && (values.run === undefined || values.retry !== undefined
     || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined
-    || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined
+    || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined || values.versionChoice !== undefined
     || values.dryRun && values.ownerReceipt !== undefined)) {
     throw new Error('rollback requires --run <id> and accepts only --dry-run or --owner-receipt')
   }
   if (internal && (values.run !== undefined || values.retry !== undefined || values.dryRun || values.ownerReceipt !== undefined
-    || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined && values.platform !== 'windows')) {
+    || values.windowsResult !== undefined || values.windowsUnavailable || values.versionChoice !== undefined
+    || values.remoteRequest !== undefined && values.platform !== 'windows')) {
     throw new Error('invalid internal platform build options')
   }
 }

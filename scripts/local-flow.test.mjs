@@ -14,6 +14,7 @@ import {
   blockWindowsRemote,
   blockedWindowsState,
   buildPublicationRequest,
+  buildReleaseTransactionPlan,
   buildRollbackRequest,
   candidateFailureDetails,
   devChecks,
@@ -43,6 +44,7 @@ const MAC_SHA = 'b'.repeat(64)
 const WIN_SHA = 'c'.repeat(64)
 const MAC_BLOCKMAP_SHA = 'd'.repeat(64)
 const WIN_BLOCKMAP_SHA = 'e'.repeat(64)
+const R2_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
 const RUN_ID = '20260830T000000Z-aaaaaaaaaaaa-abcdef'
 const POINTER_BEFORE = Object.freeze({
   bytes: 2961,
@@ -250,12 +252,12 @@ function acceptance(platform, artifactSha256) {
   }
 }
 
-function verifiedRun() {
-  const macPrimary = { name: 'e-Mate-2.0.15-mac-universal.dmg', bytes: 10, sha256: MAC_SHA }
-  const winPrimary = { name: 'e-Mate-2.0.15-win-x64-Setup.exe', bytes: 20, sha256: WIN_SHA }
+function verifiedRun(version = '2.0.15') {
+  const macPrimary = { name: `e-Mate-${version}-mac-universal.dmg`, bytes: 10, sha256: MAC_SHA }
+  const winPrimary = { name: `e-Mate-${version}-win-x64-Setup.exe`, bytes: 20, sha256: WIN_SHA }
   return {
     run_id: RUN_ID,
-    version: '2.0.15',
+    version,
     source_commit: SHA,
     verification: {
       status: 'passed',
@@ -271,8 +273,15 @@ function verifiedRun() {
   }
 }
 
+function bindTransaction(run, mode = run.version === '2.0.15' ? 'same-version-2.0.15-exception' : 'new-version') {
+  run.release_transaction = buildReleaseTransactionPlan(run, mode)
+  return run
+}
+
 function publicationFixture(run, requestSha256 = '1'.repeat(64), { dryRun = true } = {}) {
+  bindTransaction(run)
   const request = buildPublicationRequest(run, { dryRun })
+  const transaction = run.release_transaction
   const target = { bytes: 2961, sha256: '2'.repeat(64), etag: '2'.repeat(32) }
   const pointer = (key, cas = 'passed') => ({
     key,
@@ -282,6 +291,12 @@ function publicationFixture(run, requestSha256 = '1'.repeat(64), { dryRun = true
     authenticated_readback: { status: 'passed', ...target },
     public_full_byte_readback: { status: 'passed', bytes: target.bytes, sha256: target.sha256 },
   })
+  const currentPublicPointers = Object.fromEntries(Object.entries(transaction.current_public_pointers).map(([name, current]) => [name, {
+    key: current.key,
+    authenticated_readback: { status: 'passed', ...current.identity },
+    public_full_byte_readback: { status: 'passed', bytes: current.identity.bytes, sha256: current.identity.sha256 },
+  }]))
+  const pointerNames = transaction.mode === 'new-version' ? ['signed', 'legacy'] : transaction.activation_order
   return { request, target, receipt: {
     schema_version: 1,
     document_type: 'emate.local-cloudflare-owner-receipt',
@@ -292,9 +307,13 @@ function publicationFixture(run, requestSha256 = '1'.repeat(64), { dryRun = true
       darwin: { code_signed: false, notarized: false },
       win32: { code_signed: false, notarized: false },
     },
+    distribution_origin: R2_ORIGIN,
+    run_id: run.run_id,
     version: run.version,
     source_commit: run.source_commit,
+    transaction_mode: transaction.mode,
     request_sha256: requestSha256,
+    current_public_pointers: currentPublicPointers,
     manifest_admission: {
       owner: 'zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123',
       status: 'passed',
@@ -315,12 +334,15 @@ function publicationFixture(run, requestSha256 = '1'.repeat(64), { dryRun = true
       key: object.key, bytes: object.bytes, sha256: object.sha256,
       write: 'created', authenticated_readback: 'passed', public_readback: 'passed',
     })),
-    pointers: {
-      signed: pointer('desktop/signed/latest.json'),
-      legacy: pointer('desktop/latest.json'),
-      manual: pointer('desktop/manual/v2.0.15/latest.json'),
-    },
-    activation_order: ['signed', 'legacy', 'manual'],
+    pointers: Object.fromEntries(pointerNames.map(name => [name, pointer(transaction.current_public_pointers[name].key)])),
+    activation_order: [...transaction.activation_order],
+    ...(transaction.mode === 'new-version' ? { manual_manifest: {
+      key: transaction.manual_manifest.key,
+      write: 'created',
+      after: target,
+      authenticated_readback: { status: 'passed', ...target },
+      public_full_byte_readback: { status: 'passed', bytes: target.bytes, sha256: target.sha256 },
+    } } : {}),
     deleted_objects: [],
   } }
 }
@@ -767,10 +789,13 @@ test('verify requires update/relaunch, failed-health rollback, and macOS Compute
   }
 })
 
-test('publish keeps installers immutable and makes all three release surfaces ordered CAS pointers', () => {
-  const run = verifiedRun()
+test('same-version exception is explicit, three-key CAS, R2-only, and reversible', () => {
+  const run = bindTransaction(verifiedRun())
   const publish = buildPublicationRequest(run, { dryRun: true })
   assert.equal(publish.mode, 'dry-run')
+  assert.equal(publish.distribution_origin, R2_ORIGIN)
+  assert.equal(publish.transaction_plan.mode, 'same-version-2.0.15-exception')
+  assert.equal(publish.transaction_plan.manual_reinstall_required_for_existing_2_0_15, true)
   assert.equal(publish.macos_publication_mode, 'unsigned')
   assert.deepEqual(publish.installer_security, {
     darwin: { code_signed: false, notarized: false },
@@ -795,12 +820,12 @@ test('publish keeps installers immutable and makes all three release surfaces or
     `desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-win-x64-Setup.exe`,
     `desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-win-x64-Setup.exe.blockmap`,
   ])
-  assert.deepEqual(publish.publication_and_activation.activation_order, ['signed', 'legacy', 'manual'])
-  assert.deepEqual(Object.keys(publish.publication_and_activation.pointers), ['signed', 'legacy', 'manual'])
+  assert.deepEqual(publish.publication_and_activation.activation_order, ['manual', 'signed', 'legacy'])
+  assert.deepEqual(Object.keys(publish.publication_and_activation.pointers), ['manual', 'signed', 'legacy'])
   for (const [name, key] of [
+    ['manual', 'desktop/manual/v2.0.15/latest.json'],
     ['signed', 'desktop/signed/latest.json'],
     ['legacy', 'desktop/latest.json'],
-    ['manual', 'desktop/manual/v2.0.15/latest.json'],
   ]) {
     assert.deepEqual(publish.publication_and_activation.pointers[name], {
       key,
@@ -824,14 +849,16 @@ test('publish keeps installers immutable and makes all three release surfaces or
     partial_activation: 'resume-ordered-prefix',
     crash_recovery: 'resume-same-request',
   })
-  assert.doesNotMatch(JSON.stringify(publish), /manual-signed-manifest-create-only/u)
+  assert.equal(publish.publication_and_activation.manual_manifest.write, 'compare-and-swap')
   assert.doesNotMatch(JSON.stringify(publish), /d26b9ffb5f30531bc5de6c9f66aab47c3718248e2ff109d82cd3a763f0c02887/u)
+  assert.doesNotMatch(JSON.stringify(publish), /github\.com|github-actions|actions\/artifact/iu)
   assert.deepEqual(publish.delete_objects, [])
   const rollback = buildRollbackRequest(run, undefined, { dryRun: true })
   assert.equal(rollback.mode, 'dry-run')
-  assert.deepEqual(rollback.rollback_order, ['manual', 'legacy', 'signed'])
+  assert.equal(rollback.distribution_origin, R2_ORIGIN)
+  assert.deepEqual(rollback.rollback_order, ['legacy', 'signed', 'manual'])
   assert.deepEqual(rollback.pointer_compare_and_swap.map(item => item.key), [
-    'desktop/manual/v2.0.15/latest.json', 'desktop/latest.json', 'desktop/signed/latest.json',
+    'desktop/latest.json', 'desktop/signed/latest.json', 'desktop/manual/v2.0.15/latest.json',
   ])
   assert.deepEqual(rollback.owner_receipt, {
     schema_version: 1,
@@ -839,18 +866,22 @@ test('publish keeps installers immutable and makes all three release surfaces or
     operation: 'rollback',
     status: 'passed',
     authority: 'existing-desktop-manifest-admission-signing-owner+codex-cloudflare-plugin',
+    distribution_origin: R2_ORIGIN,
     run_id: RUN_ID,
     version: '2.0.15',
     source_commit: SHA,
+    transaction_mode: 'same-version-2.0.15-exception',
     publication_request_sha256: 'from-publication/cloudflare-owner-request.json',
     publication_receipt_sha256: 'from-publication/cloudflare-owner-receipt.json',
     rollback_request_sha256: 'sha256-of-this-exact-request',
     pointer_receipts: 'ordered-before-after-cas-authenticated-and-public-readback',
     immutable_objects: 'retained',
+    manual_manifest: 'restored-by-cas',
     deleted_objects: [],
   })
   assert.deepEqual(rollback.immutable_objects.map(item => item.action), ['retain', 'retain', 'retain', 'retain'])
   assert.equal(rollback.immutable_objects.some(item => item.key === 'desktop/manual/v2.0.15/latest.json'), false)
+  assert.deepEqual(rollback.manual_manifest, { key: 'desktop/manual/v2.0.15/latest.json', action: 'restore-by-cas' })
   assert.deepEqual(rollback.delete_objects, [])
   assert.throws(() => buildRollbackRequest(run), /publication receipt/u)
   const noWindowsMatrix = structuredClone(run)
@@ -858,10 +889,121 @@ test('publish keeps installers immutable and makes all three release surfaces or
   assert.throws(() => buildPublicationRequest(noWindowsMatrix), /both external installed acceptance receipts/u)
 })
 
+test('version-bound R2 transaction rejects implicit choice and binds the exact public predecessor', () => {
+  const sameVersionRun = verifiedRun()
+  assert.throws(() => buildReleaseTransactionPlan(sameVersionRun), /explicit version choice/u)
+  assert.throws(() => buildPublicationRequest(sameVersionRun), /explicit version choice/u)
+
+  const replacement = buildReleaseTransactionPlan(sameVersionRun, 'same-version-2.0.15-exception')
+  assert.equal(replacement.mode, 'same-version-2.0.15-exception')
+  assert.equal(replacement.manual_reinstall_required_for_existing_2_0_15, true)
+  assert.deepEqual(Object.values(replacement.current_public_pointers).map(pointer => pointer.identity), [
+    POINTER_BEFORE, POINTER_BEFORE, POINTER_BEFORE,
+  ])
+  assert.deepEqual(replacement.activation_order, ['manual', 'signed', 'legacy'])
+  assert.deepEqual(replacement.rollback_order, ['legacy', 'signed', 'manual'])
+
+  const nextVersionRun = verifiedRun('2.0.16')
+  const nextVersion = buildReleaseTransactionPlan(nextVersionRun, 'new-version')
+  assert.equal(nextVersion.mode, 'new-version')
+  assert.equal(nextVersion.manual_reinstall_required_for_existing_2_0_15, false)
+  assert.equal(nextVersion.manual_manifest.key, 'desktop/manual/v2.0.16/latest.json')
+  assert.equal(nextVersion.manual_manifest.write, 'create-only')
+  assert.deepEqual(nextVersion.activation_order, ['manual', 'signed', 'legacy'])
+  assert.deepEqual(nextVersion.rollback_order, ['legacy', 'signed'])
+
+  assert.throws(() => buildReleaseTransactionPlan(sameVersionRun, 'new-version'), /version choice/u)
+  assert.throws(() => buildReleaseTransactionPlan(nextVersionRun, 'same-version-2.0.15-exception'), /version choice/u)
+
+  const drifted = bindTransaction(verifiedRun())
+  drifted.release_transaction.current_public_pointers.legacy.identity.etag = '8'.repeat(32)
+  assert.throws(() => buildPublicationRequest(drifted), /transaction plan drifted/u)
+})
+
+test('new-version transaction creates and retains manual bytes before shared signed then legacy CAS', () => {
+  const run = bindTransaction(verifiedRun('2.0.16'), 'new-version')
+  const publish = buildPublicationRequest(run, { dryRun: true })
+  assert.equal(publish.distribution_origin, R2_ORIGIN)
+  assert.equal(publish.transaction_plan.product_version, '2.0.16')
+  assert.deepEqual(publish.publication_and_activation.activation_order, ['manual', 'signed', 'legacy'])
+  assert.deepEqual(Object.keys(publish.publication_and_activation.pointers), ['signed', 'legacy'])
+  assert.deepEqual(publish.publication_and_activation.manual_manifest, {
+    key: 'desktop/manual/v2.0.16/latest.json',
+    write: 'create-only',
+    rollback: 'retain',
+    expected_current: 'must-not-exist',
+    target: {
+      artifact_path: 'desktop-release-signed.json',
+      bytes: 'from-manifest-admission.signed_manifest.bytes',
+      sha256: 'from-manifest-admission.signed_manifest.sha256',
+      etag: 'from-conditional-write-result.etag',
+    },
+    authenticated_readback: 'required',
+    public_full_byte_readback: 'required',
+  })
+  assert.equal(publish.immutable_objects.every(object => object.key.includes('/v2.0.16/')), true)
+  assert.doesNotMatch(JSON.stringify(publish), /github\.com|github-actions|actions\/artifact/iu)
+
+  const requestSha256 = '1'.repeat(64)
+  const { receipt } = publicationFixture(run, requestSha256)
+  assert.equal(validatePublicationReceipt(receipt, run, requestSha256), receipt)
+  assert.throws(() => validatePublicationReceipt({ ...receipt, distribution_origin: 'https://github.com/releases' }, run, requestSha256), /publication owner receipt/u)
+  const staleCurrent = structuredClone(receipt)
+  staleCurrent.current_public_pointers.manual.authenticated_readback.etag = '8'.repeat(32)
+  assert.throws(() => validatePublicationReceipt(staleCurrent, run, requestSha256), /publication owner receipt/u)
+  const publicationReceiptSha256 = '6'.repeat(64)
+  const rollbackRequestSha256 = '7'.repeat(64)
+  const rollback = buildRollbackRequest(run, receipt, {
+    publicationRequestSha256: requestSha256,
+    publicationReceiptSha256,
+  })
+  assert.deepEqual(rollback.rollback_order, ['legacy', 'signed'])
+  assert.deepEqual(rollback.pointer_compare_and_swap.map(pointer => pointer.key), [
+    'desktop/latest.json', 'desktop/signed/latest.json',
+  ])
+  assert.deepEqual(rollback.manual_manifest, { key: 'desktop/manual/v2.0.16/latest.json', action: 'retain' })
+  assert.equal(rollback.delete_objects.length, 0)
+  const rollbackReceipt = {
+    schema_version: 1,
+    document_type: 'emate.local-cloudflare-owner-receipt',
+    operation: 'rollback',
+    status: 'passed',
+    authority: 'existing-desktop-manifest-admission-signing-owner+codex-cloudflare-plugin',
+    distribution_origin: R2_ORIGIN,
+    run_id: RUN_ID,
+    version: '2.0.16',
+    source_commit: SHA,
+    transaction_mode: 'new-version',
+    publication_request_sha256: requestSha256,
+    publication_receipt_sha256: publicationReceiptSha256,
+    rollback_request_sha256: rollbackRequestSha256,
+    rollback_order: ['legacy', 'signed'],
+    pointers: rollback.pointer_compare_and_swap.map(pointer => ({
+      key: pointer.key,
+      before: pointer.expected_current,
+      after: pointer.restore,
+      cas: 'passed',
+      authenticated_readback: { status: 'passed', ...pointer.restore },
+      public_full_byte_readback: { status: 'passed', bytes: pointer.restore.bytes, sha256: pointer.restore.sha256 },
+    })),
+    immutable_objects: rollback.immutable_objects.map(object => ({ key: object.key, action: 'retained' })),
+    manual_manifest: { key: 'desktop/manual/v2.0.16/latest.json', action: 'retained' },
+    deleted_objects: [],
+  }
+  assert.equal(validateRollbackReceipt(rollbackReceipt, run, {
+    publicationRequestSha256: requestSha256,
+    publicationReceiptSha256,
+    rollbackRequestSha256,
+    publicationReceipt: receipt,
+    rollbackRequest: rollback,
+  }), rollbackReceipt)
+})
+
 test('macOS-only waiver publishes immutable bytes without a schema-2 manifest or shared pointer mutation', () => {
   const run = macOnlyVerifiedRun()
   const publish = buildPublicationRequest(run, { dryRun: true })
   assert.equal(publish.operation, 'publish-macos-immutable')
+  assert.equal(publish.distribution_origin, R2_ORIGIN)
   assert.equal(publish.release_scope, 'macos-immutable-dmg-only')
   assert.deepEqual(publish.windows, run.verification.windows)
   assert.deepEqual(publish.installer_security, { darwin: { code_signed: false, notarized: false } })
@@ -888,6 +1030,7 @@ test('macOS-only waiver publishes immutable bytes without a schema-2 manifest or
     status: 'passed',
     release_scope: 'macos-immutable-dmg-only',
     windows: run.verification.windows,
+    distribution_origin: R2_ORIGIN,
     macos_publication_mode: 'unsigned',
     installer_security: { darwin: { code_signed: false, notarized: false } },
     version: '2.0.15',
@@ -972,12 +1115,12 @@ test('publication receipt requires exact ordered CAS completion and per-pointer 
   }, run, requestSha256), /publication owner receipt/u)
 
   const crashRecovery = structuredClone(receipt)
+  crashRecovery.pointers.manual.cas = 'already-exact'
   crashRecovery.pointers.signed.cas = 'already-exact'
-  crashRecovery.pointers.legacy.cas = 'already-exact'
   assert.equal(validatePublicationReceipt(crashRecovery, run, requestSha256), crashRecovery)
 
   const alreadyExact = structuredClone(crashRecovery)
-  alreadyExact.pointers.manual.cas = 'already-exact'
+  alreadyExact.pointers.legacy.cas = 'already-exact'
   assert.equal(validatePublicationReceipt(alreadyExact, run, requestSha256), alreadyExact)
 
   const outOfOrderPartial = structuredClone(receipt)
@@ -985,9 +1128,9 @@ test('publication receipt requires exact ordered CAS completion and per-pointer 
   assert.throws(() => validatePublicationReceipt(outOfOrderPartial, run, requestSha256), /ordered pointer recovery/u)
 
   const rollback = buildRollbackRequest(run, receipt)
-  assert.deepEqual(rollback.rollback_order, ['manual', 'legacy', 'signed'])
+  assert.deepEqual(rollback.rollback_order, ['legacy', 'signed', 'manual'])
   assert.deepEqual(rollback.pointer_compare_and_swap.map(item => item.key), [
-    'desktop/manual/v2.0.15/latest.json', 'desktop/latest.json', 'desktop/signed/latest.json',
+    'desktop/latest.json', 'desktop/signed/latest.json', 'desktop/manual/v2.0.15/latest.json',
   ])
   for (const item of rollback.pointer_compare_and_swap) {
     assert.equal(item.compare_and_swap, 'required')
@@ -1025,15 +1168,18 @@ test('rollback receipt is owner-bound, non-transferable, ordered, and closes the
     operation: 'rollback',
     status: 'passed',
     authority: 'existing-desktop-manifest-admission-signing-owner+codex-cloudflare-plugin',
+    distribution_origin: R2_ORIGIN,
     run_id: RUN_ID,
     version: '2.0.15',
     source_commit: SHA,
+    transaction_mode: 'same-version-2.0.15-exception',
     publication_request_sha256: publicationRequestSha256,
     publication_receipt_sha256: publicationReceiptSha256,
     rollback_request_sha256: rollbackRequestSha256,
-    rollback_order: ['manual', 'legacy', 'signed'],
-    pointers: ['manual', 'legacy', 'signed'].map(name => rollbackPointer(name)),
+    rollback_order: ['legacy', 'signed', 'manual'],
+    pointers: ['legacy', 'signed', 'manual'].map(name => rollbackPointer(name)),
     immutable_objects: rollbackRequest.immutable_objects.map(object => ({ key: object.key, action: 'retained' })),
+    manual_manifest: { key: 'desktop/manual/v2.0.15/latest.json', action: 'restored-by-cas' },
     deleted_objects: [],
   }
   const identity = {
@@ -1053,21 +1199,21 @@ test('rollback receipt is owner-bound, non-transferable, ordered, and closes the
     { ...receipt, publication_request_sha256: '8'.repeat(64) },
     { ...receipt, publication_receipt_sha256: '8'.repeat(64) },
     { ...receipt, rollback_request_sha256: '8'.repeat(64) },
-    { ...receipt, rollback_order: ['signed', 'legacy', 'manual'] },
+    { ...receipt, rollback_order: ['manual', 'signed', 'legacy'] },
     { ...receipt, immutable_objects: receipt.immutable_objects.slice(1) },
   ]) assert.throws(() => validateRollbackReceipt(invalid, run, identity), /rollback owner receipt/u)
 
   assert.throws(() => validateRollbackReceipt({
     ...receipt,
     pointers: receipt.pointers.map((pointer, index) => index === 0 ? { ...pointer, before: POINTER_BEFORE } : pointer),
-  }, run, identity), /manual rollback pointer/u)
+  }, run, identity), /legacy rollback pointer/u)
   assert.throws(() => validateRollbackReceipt({
     ...receipt,
     pointers: receipt.pointers.map((pointer, index) => index === 1 ? {
       ...pointer,
       public_full_byte_readback: { ...pointer.public_full_byte_readback, sha256: '8'.repeat(64) },
     } : pointer),
-  }, run, identity), /legacy rollback pointer/u)
+  }, run, identity), /signed rollback pointer/u)
 
   const resumed = structuredClone(receipt)
   resumed.pointers[0].cas = 'already-exact'
@@ -1120,7 +1266,7 @@ test('rollback receipt is owner-bound, non-transferable, ordered, and closes the
     assert.equal(terminal.status, 'passed')
     assert.equal(terminal.request_sha256, actualRollbackRequestSha256)
     assert.equal(terminal.publication_receipt_sha256, actualPublicationReceiptSha256)
-    assert.deepEqual(terminal.rollback_order, ['manual', 'legacy', 'signed'])
+    assert.deepEqual(terminal.rollback_order, ['legacy', 'signed', 'manual'])
     assert.deepEqual(JSON.parse(await readFile(join(root, terminal.receipt), 'utf8')), externalReceipt)
 
     const wrongRun = structuredClone(run)
