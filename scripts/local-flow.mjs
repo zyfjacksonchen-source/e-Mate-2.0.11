@@ -221,7 +221,7 @@ export async function resolveNpmCollectorCli(candidates) {
       if (packageJson?.name !== 'npm' || !PACKAGE_VERSION.test(packageJson.version ?? '')
         || packageJson?.bin?.npm !== 'bin/npm-cli.js') continue
       const prefix = await readFile(cli, { encoding: 'utf8' })
-      if (!prefix.startsWith('#!/usr/bin/env node\n')) continue
+      if (!prefix.startsWith('#!/usr/bin/env node\n') && !prefix.startsWith('#!/usr/bin/env node\r\n')) continue
       return { cli, version: packageJson.version }
     } catch {
       // Try the next already-installed standard npm layout.

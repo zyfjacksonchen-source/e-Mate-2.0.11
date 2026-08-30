@@ -46,26 +46,33 @@ async function temporary() {
   return mkdtemp(join(tmpdir(), 'emate-local-flow-test-'))
 }
 
-async function npmCarrierFixture(root) {
+async function npmCarrierFixture(root, {
+  cliName = 'npm-cli.js',
+  eol = '\n',
+  listOutput = JSON.stringify({ name: 'fixture', version: '1.0.0', dependencies: {} }),
+  manifest = {},
+  shebang = '#!/usr/bin/env node',
+} = {}) {
   const corepackRoot = join(root, 'lib', 'node_modules', 'corepack')
   const npmRoot = join(root, 'lib', 'node_modules', 'npm')
-  const cli = join(npmRoot, 'bin', 'npm-cli.js')
+  const cli = join(npmRoot, 'bin', cliName)
   await mkdir(corepackRoot, { recursive: true })
   await mkdir(join(npmRoot, 'bin'), { recursive: true })
   await writeFile(join(npmRoot, 'package.json'), `${JSON.stringify({
     name: 'npm',
     version: '11.17.0',
     bin: { npm: 'bin/npm-cli.js' },
+    ...manifest,
   })}\n`)
   await writeFile(cli, [
-    '#!/usr/bin/env node',
+    shebang,
     "const fs = require('node:fs')",
     'const args = process.argv.slice(2)',
     "if (process.env.T25_NPM_LOG) fs.appendFileSync(process.env.T25_NPM_LOG, `${JSON.stringify({ args, execPath: fs.realpathSync(process.execPath) })}\\n`)",
     "if (args[0] === '--version') process.stdout.write('11.17.0\\n')",
-    "else if (args[0] === 'list') process.stdout.write(`${JSON.stringify({ name: 'fixture', version: '1.0.0', dependencies: {} })}\\n`)",
+    `else if (args[0] === 'list') process.stdout.write(${JSON.stringify(`${listOutput}\n`)})`,
     'else process.exitCode = 2',
-  ].join('\n'))
+  ].join(eol))
   await chmod(cli, 0o755)
   return { cli, corepackRoot }
 }
@@ -877,6 +884,43 @@ test('Desktop npm collector uses one run-scoped shim carried by the active Node'
       await carrier.cleanup()
     }
     await assert.rejects(readdir(shimRoot), { code: 'ENOENT' })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Desktop npm collector accepts only exact LF or CRLF Node shebangs and preserves carrier rejection gates', async () => {
+  const root = await temporary()
+  try {
+    const lf = await npmCarrierFixture(join(root, 'lf'))
+    const crlf = await npmCarrierFixture(join(root, 'crlf'), { eol: '\r\n', manifest: { version: '11.12.1' } })
+    assert.equal((await resolveNpmCollectorCli([lf.cli])).cli, await realpath(lf.cli))
+    assert.deepEqual(await resolveNpmCollectorCli([crlf.cli]), { cli: await realpath(crlf.cli), version: '11.12.1' })
+
+    const rejected = [
+      await npmCarrierFixture(join(root, 'interpreter'), { shebang: '#!/usr/bin/node' }),
+      await npmCarrierFixture(join(root, 'no-newline'), { eol: '' }),
+      await npmCarrierFixture(join(root, 'wrapper'), { shebang: '#!/bin/sh' }),
+      await npmCarrierFixture(join(root, 'manifest-name'), { manifest: { name: 'not-npm' } }),
+      await npmCarrierFixture(join(root, 'manifest-bin'), { manifest: { bin: { npm: 'bin/wrapper.js' } } }),
+      await npmCarrierFixture(join(root, 'manifest-version'), { manifest: { version: '11' } }),
+      await npmCarrierFixture(join(root, 'path'), { cliName: 'wrapper.js' }),
+    ]
+    for (const fixture of rejected) {
+      await assert.rejects(resolveNpmCollectorCli([fixture.cli]), /verified npm CLI/u)
+    }
+
+    const invalid = join(root, 'invalid-output')
+    const fixture = await npmCarrierFixture(invalid, { eol: '\r\n', listOutput: 'not-json' })
+    const node = join(invalid, 'bin', 'node')
+    await mkdir(join(invalid, 'bin'), { recursive: true })
+    await writeFile(node, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$@"\n`)
+    await chmod(node, 0o755)
+    await assert.rejects(verifyNpmCollectorCarrier(root, {
+      env: { ...process.env, COREPACK_ROOT: fixture.corepackRoot, PATH: '/usr/bin:/bin' },
+      execPath: node,
+      platform: 'darwin',
+    }), /non-JSON output/u)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
