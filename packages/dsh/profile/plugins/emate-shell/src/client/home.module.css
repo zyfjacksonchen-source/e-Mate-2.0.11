@@ -38,6 +38,12 @@
   --emate-color-rule: oklch(0.344584 0 0);
 }
 
+:global([data-emate-composer-frame-host]) {
+  --emate-composer-frame-radius: 24px;
+  position: relative;
+  border-radius: var(--emate-composer-frame-radius);
+}
+
 :global([data-phase='hero']) {
   --dsh-chat-content-width: 1056px !important;
 }
@@ -84,7 +90,7 @@
   min-height: 38px;
   margin-top: -12px;
   padding: 6px 14px 10px;
-  border-radius: 0 0 24px 24px;
+  border-radius: 0 0 var(--emate-composer-frame-radius) var(--emate-composer-frame-radius);
   box-sizing: border-box;
   background: var(--emate-color-raised);
   overflow: hidden;
@@ -111,13 +117,12 @@
 }
 
 :global([data-emate-composer-frame-host] [data-slot='conversation.composer.bar'] [data-composer-card]) {
-  --emate-composer-frame-radius: 24px;
   min-height: 112px;
-  border-radius: 24px !important;
+  border-radius: var(--emate-composer-frame-radius) !important;
 }
 
 :global([data-emate-composer-frame-host]:has([data-slot='conversation.hero.workspace']) [data-slot='conversation.composer.bar'] [data-composer-card]) {
-  border-radius: 24px 24px 0 0 !important;
+  border-radius: var(--emate-composer-frame-radius) var(--emate-composer-frame-radius) 0 0 !important;
 }
 
 :global([data-slot='conversation.composer.bar'] [data-input-mirror]) {
