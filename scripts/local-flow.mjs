@@ -207,6 +207,36 @@ export function selectCandidatePlatforms(run, retry = 'all') {
   return { build, reuse }
 }
 
+function validateWindowsUnavailable(value, sourceCommit) {
+  if (!exactKeys(value, [
+    'status', 'verification', 'source_commit', 'tested', 'reason', 'request', 'request_sha256',
+  ]) || value.status !== 'REMOTE_UNAVAILABLE' || value.verification !== 'UNVERIFIED'
+    || value.source_commit !== sourceCommit || value.tested !== false
+    || value.reason !== 'windows-remote-unavailable'
+    || value.request !== 'windows-remote/request.json' || !SHA256.test(value.request_sha256 ?? '')) {
+    throw new Error('Windows must remain REMOTE_UNAVAILABLE/UNVERIFIED')
+  }
+  return value
+}
+
+export function markWindowsUnavailable(run) {
+  const current = run.platforms?.windows
+  if (!exactKeys(current, ['status', 'source_commit', 'request', 'request_sha256'])
+    || current.status !== 'awaiting-codex-remote' || current.source_commit !== run.source_commit
+    || current.request !== 'windows-remote/request.json' || !SHA256.test(current.request_sha256 ?? '')) {
+    throw new Error('Windows unavailable waiver requires the exact awaiting request state')
+  }
+  return {
+    status: 'REMOTE_UNAVAILABLE',
+    verification: 'UNVERIFIED',
+    source_commit: run.source_commit,
+    tested: false,
+    reason: 'windows-remote-unavailable',
+    request: current.request,
+    request_sha256: current.request_sha256,
+  }
+}
+
 function runId(sourceCommit) {
   return `${now().replaceAll(/[-:]/gu, '').replace(/\.\d{3}Z$/u, 'Z')}-${sourceCommit.slice(0, 12)}-${randomBytes(3).toString('hex')}`
 }
@@ -764,6 +794,24 @@ async function candidate(values) {
     : await loadRun(values.run)
   const { directory, run } = loaded
   if (run.command !== 'candidate' || run.source_commit !== identity.source_commit) throw new Error('candidate retry must use the same clean source commit')
+  if (values.windowsUnavailable) {
+    if (!['passed', 'reused'].includes(run.platforms?.macos?.status)) {
+      throw new Error('Windows unavailable waiver requires an immutable macOS candidate')
+    }
+    const macos = await verifyLocalArtifact(join(directory, 'artifacts', 'macos'), 'macos', run.source_commit)
+    const windows = markWindowsUnavailable(run)
+    const requestPath = join(directory, windows.request)
+    const { bytes } = await readWindowsRemoteRequest(requestPath, run)
+    if (digest(bytes) !== windows.request_sha256) throw new Error('Windows unavailable waiver request drifted')
+    run.platforms.windows = windows
+    run.status = 'built-macos-only'
+    run.verification = { status: 'pending' }
+    await writeComputerUseTemplates(directory, run.source_commit, { macos: macos.primary })
+    await saveRun(directory, run)
+    await writeChecksums(directory)
+    process.stdout.write(`${JSON.stringify({ run_id: run.run_id, source_commit: run.source_commit, platforms: run.platforms }, null, 2)}\n`)
+    return
+  }
   if (values.windowsResult !== undefined) {
     if (['passed', 'reused'].includes(run.platforms?.windows?.status)) throw new Error('Windows candidate artifact is already immutable')
     const artifacts = {}
@@ -937,10 +985,22 @@ export async function verifyComputerUseReceipt(path, { platform, sourceCommit, a
 }
 
 async function verifyRun(directory, run) {
-  if (run.command !== 'candidate' || run.status !== 'built') throw new Error('verify requires one complete candidate run')
+  if (run.command !== 'candidate' || !['built', 'built-macos-only'].includes(run.status)) {
+    throw new Error('verify requires one complete candidate run')
+  }
+  let windows
+  if (run.status === 'built-macos-only') {
+    if (!['passed', 'reused'].includes(run.platforms?.macos?.status)
+      || run.platforms.macos.source_commit !== run.source_commit) {
+      throw new Error('macOS-only verify requires the accepted macOS candidate state')
+    }
+    windows = validateWindowsUnavailable(run.platforms?.windows, run.source_commit)
+    const { bytes } = await readWindowsRemoteRequest(join(directory, windows.request), run)
+    if (digest(bytes) !== windows.request_sha256) throw new Error('Windows unavailable waiver request drifted')
+  }
   const artifacts = {}
   const computerUse = {}
-  for (const platform of Object.keys(PLATFORMS)) {
+  for (const platform of windows === undefined ? Object.keys(PLATFORMS) : ['macos']) {
     const verified = await verifyLocalArtifact(join(directory, 'artifacts', platform), platform, run.source_commit)
     const receipt = await verifyComputerUseReceipt(join(directory, 'computer-use', platform, 'result.json'), {
       platform, sourceCommit: run.source_commit, artifactSha256: verified.primary.sha256,
@@ -948,24 +1008,31 @@ async function verifyRun(directory, run) {
     artifacts[platform] = verified
     computerUse[platform] = receipt.external_acceptance
   }
-  return { artifacts, computerUse }
+  return { artifacts, computerUse, windows }
 }
 
-function verificationEvidence({ artifacts, computerUse }) {
-  return {
+function verificationEvidence({ artifacts, computerUse, windows }) {
+  const evidence = {
     artifacts: Object.fromEntries(Object.entries(artifacts).map(([platform, value]) => [platform, {
       primary: value.primary,
       files: value.receipt.files,
     }])),
     computer_use: computerUse,
   }
+  if (windows !== undefined) evidence.windows = windows
+  return evidence
+}
+
+function verificationStatus(verified) {
+  return verified.windows === undefined ? 'passed' : 'passed-macos-only'
 }
 
 function assertVerificationMatches(run, verified) {
   const current = verificationEvidence(verified)
-  if (run.verification?.status !== 'passed'
+  if (run.verification?.status !== verificationStatus(verified)
     || JSON.stringify(run.verification.artifacts) !== JSON.stringify(current.artifacts)
-    || JSON.stringify(run.verification.computer_use) !== JSON.stringify(current.computer_use)) {
+    || JSON.stringify(run.verification.computer_use) !== JSON.stringify(current.computer_use)
+    || JSON.stringify(run.verification.windows) !== JSON.stringify(current.windows)) {
     throw new Error('publish requires an unchanged passed verify run; rerun verify')
   }
 }
@@ -975,7 +1042,7 @@ async function verifyCommand(values) {
   try {
     const verified = await verifyRun(directory, run)
     run.verification = {
-      status: 'passed', verified_at: now(),
+      status: verificationStatus(verified), verified_at: now(),
       ...verificationEvidence(verified),
     }
   } catch (cause) {
@@ -988,9 +1055,21 @@ async function verifyCommand(values) {
   process.stdout.write(`${JSON.stringify({ run_id: run.run_id, verification: run.verification }, null, 2)}\n`)
 }
 
+function publicationScope(run) {
+  if (run.verification?.status === 'passed') return 'full'
+  if (run.verification?.status !== 'passed-macos-only') throw new Error('publish requires a passed verify run')
+  const windows = validateWindowsUnavailable(run.verification.windows, run.source_commit)
+  if (!isDeepStrictEqual(windows, validateWindowsUnavailable(run.platforms?.windows, run.source_commit))) {
+    throw new Error('Windows unavailable verification drifted from the candidate')
+  }
+  return 'macos-immutable-dmg-only'
+}
+
 function objectRecords(run) {
   const artifacts = run.verification?.artifacts
-  if (!exactKeys(artifacts, ['macos', 'windows'])) throw new Error('verified candidate must contain both platform artifacts')
+  const scope = publicationScope(run)
+  const platforms = scope === 'full' ? ['macos', 'windows'] : ['macos']
+  if (!exactKeys(artifacts, platforms)) throw new Error(`verified candidate must contain ${platforms.join(' and ')} platform artifacts`)
   const records = []
   for (const [platform, bundle] of Object.entries(artifacts)) {
     const config = PLATFORMS[platform]
@@ -1007,14 +1086,16 @@ function objectRecords(run) {
         || !Number.isSafeInteger(artifact.bytes) || artifact.bytes <= 0 || !SHA256.test(artifact.sha256 ?? '')) {
         throw new Error(`${platform} verified artifact descriptor is invalid`)
       }
-      records.push({
-        platform,
-        artifact_path: `artifacts/${platform}/${artifact.name}`,
-        key: `desktop/releases/v${run.version}/${run.source_commit}/${artifact.name}`,
-        bytes: artifact.bytes,
-        sha256: artifact.sha256,
-        write: 'create-only',
-      })
+      if (scope === 'full' || artifact.name === config.artifact) {
+        records.push({
+          platform,
+          artifact_path: `artifacts/${platform}/${artifact.name}`,
+          key: `desktop/releases/v${run.version}/${run.source_commit}/${artifact.name}`,
+          bytes: artifact.bytes,
+          sha256: artifact.sha256,
+          write: 'create-only',
+        })
+      }
     }
     const primary = bundle.files.find(file => file.name === config.artifact)
     if (JSON.stringify(bundle.primary) !== JSON.stringify(primary)) throw new Error(`${platform} primary artifact binding is invalid`)
@@ -1024,8 +1105,11 @@ function objectRecords(run) {
 
 function verifiedComputerUse(run) {
   const evidence = run.verification?.computer_use
-  if (!exactKeys(evidence, ['macos', 'windows'])) throw new Error('publish requires both external installed acceptance receipts')
-  for (const platform of Object.keys(PLATFORMS)) {
+  const platforms = publicationScope(run) === 'full' ? ['macos', 'windows'] : ['macos']
+  if (!exactKeys(evidence, platforms)) {
+    throw new Error(`publish requires ${platforms.length === 2 ? 'both' : 'macOS'} external installed acceptance receipts`)
+  }
+  for (const platform of platforms) {
     validateExternalAcceptance(evidence[platform], {
       platform,
       artifactSha256: run.verification.artifacts[platform].primary.sha256,
@@ -1035,9 +1119,42 @@ function verifiedComputerUse(run) {
 }
 
 export function buildPublicationRequest(run, { dryRun = false } = {}) {
-  if (run.verification?.status !== 'passed') throw new Error('publish requires a passed verify run')
+  const scope = publicationScope(run)
   verifiedComputerUse(run)
   const immutableObjects = objectRecords(run)
+  if (scope === 'macos-immutable-dmg-only') {
+    return {
+      schema_version: 1,
+      document_type: 'emate.local-cloudflare-owner-request',
+      operation: 'publish-macos-immutable',
+      mode: dryRun ? 'dry-run' : 'apply',
+      status: 'ready-for-existing-owner',
+      authority: OWNER,
+      release_scope: scope,
+      version: run.version,
+      source_commit: run.source_commit,
+      rebuild: false,
+      windows: run.verification.windows,
+      macos_publication_mode: 'unsigned',
+      installer_security: { darwin: INSTALLER_SECURITY.darwin },
+      immutable_objects: immutableObjects,
+      publication_and_activation: {
+        immutable_public_download: {
+          object_keys: immutableObjects.map(object => object.key),
+          authenticated_readback: 'required',
+          public_readback: 'required',
+        },
+        shared_update_surfaces: {
+          manual_manifest: 'unchanged',
+          signed_pointer: 'unchanged',
+          legacy_pointer: 'unchanged',
+        },
+        reason: 'schema-v2-requires-darwin-and-win32',
+        order: ['immutable-create-only', 'authenticated-readback', 'public-readback'],
+      },
+      delete_objects: [],
+    }
+  }
   return {
     schema_version: 1,
     document_type: 'emate.local-cloudflare-owner-request',
@@ -1112,6 +1229,41 @@ function unsignedInstallerSecurity(value) {
 }
 
 export function validatePublicationReceipt(receipt, run, requestSha256) {
+  if (publicationScope(run) === 'macos-immutable-dmg-only') {
+    if (!exactKeys(receipt, [
+      'schema_version', 'document_type', 'operation', 'status', 'release_scope', 'windows',
+      'macos_publication_mode', 'installer_security', 'version', 'source_commit', 'request_sha256',
+      'immutable_objects', 'shared_update_surfaces', 'deleted_objects',
+    ]) || receipt.schema_version !== 1 || receipt.document_type !== 'emate.local-cloudflare-owner-receipt'
+      || receipt.operation !== 'publish-macos-immutable' || receipt.status !== 'passed'
+      || receipt.release_scope !== 'macos-immutable-dmg-only'
+      || !isDeepStrictEqual(receipt.windows, run.verification.windows)
+      || receipt.macos_publication_mode !== 'unsigned'
+      || !exactKeys(receipt.installer_security, ['darwin'])
+      || !sameRecord(receipt.installer_security.darwin, INSTALLER_SECURITY.darwin)
+      || receipt.version !== run.version || receipt.source_commit !== run.source_commit
+      || receipt.request_sha256 !== requestSha256 || !SHA256.test(requestSha256 ?? '')
+      || !Array.isArray(receipt.immutable_objects) || receipt.deleted_objects?.length !== 0
+      || !sameRecord(receipt.shared_update_surfaces, {
+        manual_manifest: 'unchanged', signed_pointer: 'unchanged', legacy_pointer: 'unchanged',
+      })) {
+      throw new Error('macOS-only publication owner receipt is invalid')
+    }
+    const expectedObjects = objectRecords(run)
+    if (receipt.immutable_objects.length !== expectedObjects.length) {
+      throw new Error('macOS-only publication immutable object receipt set is invalid')
+    }
+    for (const expected of expectedObjects) {
+      const object = receipt.immutable_objects.find(item => item?.key === expected.key)
+      if (!exactKeys(object, ['key', 'bytes', 'sha256', 'write', 'authenticated_readback', 'public_readback'])
+        || object.bytes !== expected.bytes || object.sha256 !== expected.sha256
+        || !['created', 'already-exact'].includes(object.write)
+        || object.authenticated_readback !== 'passed' || object.public_readback !== 'passed') {
+        throw new Error(`macOS-only publication immutable object receipt is invalid: ${expected.key}`)
+      }
+    }
+    return receipt
+  }
   if (!exactKeys(receipt, [
     'schema_version', 'document_type', 'operation', 'status', 'macos_publication_mode', 'installer_security',
     'version', 'source_commit', 'request_sha256', 'manifest_admission', 'immutable_objects',
@@ -1178,7 +1330,9 @@ export function validatePublicationReceipt(receipt, run, requestSha256) {
 }
 
 export function buildRollbackRequest(run, publicationReceipt, { dryRun = false } = {}) {
-  if (run.verification?.status !== 'passed') throw new Error('rollback requires a verified candidate run')
+  if (publicationScope(run) === 'macos-immutable-dmg-only') {
+    throw new Error('macOS-only immutable publication has no shared pointer rollback')
+  }
   verifiedComputerUse(run)
   if (!dryRun && publicationReceipt === undefined) throw new Error('rollback requires the existing Cloudflare owner publication receipt')
   const pointers = publicationReceipt === undefined
@@ -1220,9 +1374,12 @@ async function publish(values) {
   if (values.ownerReceipt !== undefined) {
     const receipt = validatePublicationReceipt(await json(resolve(values.ownerReceipt)), run, requestSha256)
     await atomicJson(join(directory, 'publication', 'cloudflare-owner-receipt.json'), receipt)
-    run.publication = { status: 'passed', request_sha256: requestSha256, owner: OWNER }
+    run.publication = { status: 'passed', scope: request.release_scope ?? 'full', request_sha256: requestSha256, owner: OWNER }
   } else {
-    run.publication = { status: values.dryRun ? 'dry-run' : 'awaiting-existing-owner', request_sha256: requestSha256, owner: OWNER }
+    run.publication = {
+      status: values.dryRun ? 'dry-run' : 'awaiting-existing-owner', scope: request.release_scope ?? 'full',
+      request_sha256: requestSha256, owner: OWNER,
+    }
   }
   await saveRun(directory, run)
   await writeChecksums(directory)
@@ -1259,6 +1416,7 @@ function argumentsFor(argv) {
       out: { type: 'string' },
       'source-commit': { type: 'string' },
       'windows-result': { type: 'string' },
+      'windows-unavailable': { type: 'boolean', default: false },
       'remote-request': { type: 'string' },
       'dry-run': { type: 'boolean', default: false },
       'owner-receipt': { type: 'string' },
@@ -1273,6 +1431,7 @@ function argumentsFor(argv) {
       ownerReceipt: values['owner-receipt'],
       sourceCommit: values['source-commit'],
       windowsResult: values['windows-result'],
+      windowsUnavailable: values['windows-unavailable'],
       remoteRequest: values['remote-request'],
     },
   }
@@ -1285,32 +1444,33 @@ function validateCommandOptions(command, values) {
   }
   if (command === 'dev' && (values.run !== undefined || values.retry !== undefined || values.dryRun
     || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
-    || values.windowsResult !== undefined || values.remoteRequest !== undefined)) {
+    || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined)) {
     throw new Error('dev does not accept options')
   }
   if (command === 'candidate' && (values.dryRun || values.platform !== undefined || values.out !== undefined
     || values.sourceCommit !== undefined || values.ownerReceipt !== undefined || values.remoteRequest !== undefined
-    || values.windowsResult !== undefined && (values.run === undefined || values.retry !== undefined))) {
-    throw new Error('candidate accepts --run/--retry or --run with --windows-result')
+    || values.windowsResult !== undefined && (values.run === undefined || values.retry !== undefined || values.windowsUnavailable)
+    || values.windowsUnavailable && (values.run === undefined || values.retry !== undefined))) {
+    throw new Error('candidate accepts --run/--retry, --run with --windows-result, or --run --windows-unavailable')
   }
   if (command === 'verify' && (values.run === undefined || values.retry !== undefined || values.dryRun
     || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
-    || values.windowsResult !== undefined || values.remoteRequest !== undefined)) {
+    || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined)) {
     throw new Error('verify requires only --run <id>')
   }
   if (command === 'publish' && (values.run === undefined || values.retry !== undefined
     || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined
-    || values.windowsResult !== undefined || values.remoteRequest !== undefined
+    || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined
     || values.dryRun && values.ownerReceipt !== undefined)) {
     throw new Error('publish requires --run <id> and accepts only --dry-run or --owner-receipt')
   }
   if (command === 'rollback' && (values.run === undefined || values.retry !== undefined
     || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
-    || values.windowsResult !== undefined || values.remoteRequest !== undefined)) {
+    || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined)) {
     throw new Error('rollback requires --run <id> and optionally --dry-run')
   }
   if (internal && (values.run !== undefined || values.retry !== undefined || values.dryRun || values.ownerReceipt !== undefined
-    || values.windowsResult !== undefined || values.remoteRequest !== undefined && values.platform !== 'windows')) {
+    || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined && values.platform !== 'windows')) {
     throw new Error('invalid internal platform build options')
   }
 }
