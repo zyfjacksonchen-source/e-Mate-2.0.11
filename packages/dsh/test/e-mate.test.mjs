@@ -1415,6 +1415,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const liveAgents = new Map()
     let sandboxMode = 'read-only'
     let preStep
+    let subagentStart
     let subagentEnd
     let modelPolicyGate
     let modelPolicyGateEntered
@@ -1632,6 +1633,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       },
       on(name, listener) {
         if (name === 'agent/pre-step') preStep = listener
+        else if (name === 'subagent/start') subagentStart = listener
         else if (name === 'subagent/end') subagentEnd = listener
         else assert.fail(`unexpected image-generation listener ${name}`)
         return () => {}
@@ -1644,6 +1646,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.deepEqual([...tools.keys()], ['imagegen', 'image_pack'])
     assert.deepEqual(controllers, ['emate-image'])
     assert.equal(typeof preStep, 'function')
+    assert.equal(typeof subagentStart, 'function')
     assert.equal(typeof subagentEnd, 'function')
     assert.equal(capabilities.length, 1)
     assert.deepEqual(await capabilities[0].status(), {
@@ -2919,10 +2922,15 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       local: true,
       stopReason,
     })
+    const projectionStart = (child) => {
+      const { stopReason: _stopReason, ...info } = projectionInfo(child)
+      subagentStart(info)
+    }
     const first = outerChild('outer-image-a', generated.images[0].image, 1)
     const secondCompleted = outerChild('outer-image-b', implicitEdit.images[0].image, 2)
     const third = outerChild('outer-image-c', confirmedEdit.images[0].image, 3)
-    outerChild('outer-image-hanging', edited.images[0].image, 4)
+    const hanging = outerChild('outer-image-hanging', edited.images[0].image, 4)
+    for (const child of [first, secondCompleted, third, hanging]) projectionStart(child)
     subagentEnd(projectionInfo(third))
     subagentEnd(projectionInfo(first))
     subagentEnd(projectionInfo(secondCompleted))
@@ -2950,15 +2958,19 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         child_session_id: 'outer-image-leaf-rejected',
       },
     }))
+    projectionStart(rejected)
     subagentEnd(projectionInfo(rejected, 'error'))
     assert.equal(projectedReceipts(sessionEvents).length, 3)
 
     const failed = outerChild('outer-image-failed', fused.images[0].image, 6, false)
+    projectionStart(failed)
     subagentEnd(projectionInfo(failed, 'error'))
     assert.equal(projectedReceipts(sessionEvents).length, 3)
     const retry = outerChild('outer-image-retry', fused.images[0].image, 7)
+    projectionStart(retry)
     subagentEnd(projectionInfo(retry))
     const cancelledAfterSuccess = outerChild('outer-image-cancelled', edited.images[0].image, 8)
+    projectionStart(cancelledAfterSuccess)
     subagentEnd(projectionInfo(cancelledAfterSuccess, 'aborted'))
     assert.equal(projectedReceipts(sessionEvents).length, 5)
     assert.equal(requests.length, providerRequestsBeforeProjection)
@@ -2980,6 +2992,106 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(projectedReceipts(reopenedEvents).length, 5)
     liveAgents.set(agent.id, agent)
     for (const child of outerChildren) liveAgents.delete(child.id)
+
+    const nestedDirect = (id, parent, receipts) => {
+      const events = [{
+        type: 'subagent/descriptor',
+        data: { version: 2, mode: 'continuable', provider: 'spawn', label: id },
+      }]
+      const child = {
+        id,
+        session: {
+          header: { id, parentSession: parent.id, cwd: temporary },
+          events,
+          append(type, data, options) {
+            events.push({ type, data, ...options, seq: events.length, time: Date.now() })
+          },
+        },
+      }
+      liveAgents.set(id, child)
+      projectionStart(child)
+      events.push(...receipts.map(data => ({ type: 'emate/image-output', data })))
+      return child
+    }
+    const nestedReceipt = (base, directId, leafId, callId, revision = 2) => ({
+      ...structuredClone(base),
+      revision,
+      call_id: callId,
+      parent_session_id: directId,
+      child_session_id: leafId,
+    })
+    const completedDirect = nestedDirect('outer-image-nested-completed', agent, [
+      nestedReceipt(
+        generated.receipt,
+        'outer-image-nested-completed',
+        'e-mate:image-leaf:completed',
+        'nested-completed-call',
+      ),
+      {
+        ...nestedReceipt(
+          generated.receipt,
+          'outer-image-nested-completed',
+          'e-mate:image-leaf:pending',
+          'nested-pending-call',
+        ),
+        status: 'running',
+      },
+    ])
+    const reviewDirect = nestedDirect('outer-image-nested-review', agent, [
+      nestedReceipt(
+        rejectedReviewReceipt,
+        'outer-image-nested-review',
+        'e-mate:image-leaf:review',
+        'nested-review-call',
+      ),
+      nestedReceipt(
+        rejectedReceipt,
+        'outer-image-nested-review',
+        'e-mate:image-leaf:failed',
+        'nested-failed-call',
+        3,
+      ),
+    ])
+    const beforeNested = projectedReceipts(sessionEvents).length
+    liveAgents.delete(completedDirect.id)
+    liveAgents.delete(reviewDirect.id)
+    subagentEnd(projectionInfo(reviewDirect))
+    subagentEnd(projectionInfo(completedDirect))
+    const nestedProjected = projectedReceipts(sessionEvents).slice(beforeNested)
+    assert.deepEqual(nestedProjected.map(event => event.data.status), ['needs-review', 'completed'])
+    assert.deepEqual(nestedProjected.map(event => event.data.output.attachmentId), [
+      rejectedReviewReceipt.output.attachmentId,
+      generated.receipt.output.attachmentId,
+    ])
+    subagentEnd(projectionInfo(reviewDirect))
+    subagentEnd(projectionInfo(completedDirect))
+    assert.equal(projectedReceipts(sessionEvents).length, beforeNested + 2)
+
+    const isolatedParentEvents = []
+    const isolatedParent = {
+      id: 'isolated-image-parent',
+      session: {
+        header: { id: 'isolated-image-parent', cwd: temporary },
+        events: isolatedParentEvents,
+        append(type, data, options) {
+          isolatedParentEvents.push({ type, data, ...options, seq: isolatedParentEvents.length, time: Date.now() })
+        },
+      },
+    }
+    liveAgents.set(isolatedParent.id, isolatedParent)
+    const isolatedDirect = nestedDirect('outer-image-nested-isolated', isolatedParent, [
+      nestedReceipt(
+        generated.receipt,
+        'outer-image-nested-isolated',
+        'e-mate:image-leaf:isolated',
+        'nested-isolated-call',
+      ),
+    ])
+    liveAgents.delete(isolatedDirect.id)
+    subagentEnd(projectionInfo(isolatedDirect))
+    assert.equal(projectedReceipts(sessionEvents).length, beforeNested + 2)
+    assert.equal(projectedReceipts(isolatedParentEvents).length, 1)
+    liveAgents.delete(isolatedParent.id)
 
     const serviceActiveParent = nativeParent('image-service-active-parent')
     const serviceWaitingParent = nativeParent('image-service-waiting-parent')
