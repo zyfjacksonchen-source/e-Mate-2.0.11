@@ -384,7 +384,7 @@ export function validateCandidateSource({ branch, head, status }) {
   return { branch, source_commit: head }
 }
 
-function sourceIdentity(root = ROOT) {
+export function sourceIdentity(root = ROOT) {
   return validateCandidateSource({
     branch: git(['symbolic-ref', '--quiet', '--short', 'HEAD'], root),
     head: git(['rev-parse', 'HEAD'], root),
@@ -574,9 +574,9 @@ async function saveRun(directory, run) {
   await atomicJson(join(directory, 'run.json'), run)
 }
 
-async function loadRun(id) {
+export async function loadRun(id, root = RUN_ROOT) {
   if (!RUN_ID.test(id ?? '')) throw new Error('invalid --run id')
-  const directory = join(RUN_ROOT, id)
+  const directory = join(root, id)
   const run = await json(join(directory, 'run.json'))
   if (run.run_id !== id || run.version !== VERSION || !SOURCE_SHA.test(run.source_commit ?? '')) throw new Error('local flow run identity is invalid')
   return { directory, run }
