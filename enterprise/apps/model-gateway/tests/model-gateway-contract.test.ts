@@ -65,20 +65,14 @@ const chatRoute: ModelGatewayRoute = {
   input: ['text'],
 };
 const searchCredentialRoute: ModelGatewayRoute = {
-  ...route,
-  id: 'gpt-web-search',
-  apiMode: 'responses',
-  upstreamModelId: 'gpt-5.6-luna',
-  upstreamBaseUrl: 'http://43.135.183.53:8080/v1',
-  allowInsecureHttpUpstream: true,
+  ...chatRoute,
+  id: 'deepseek-web-search',
+  upstreamModelId: 'deepseek-v4-flash',
+  upstreamBaseUrl: 'https://api.deepseek.com/anthropic/v1',
   upstreamApiKey: 'search-route-bootstrap-key-that-is-never-leased',
-  providerId: 'gpt-responses',
-  label: 'GPT Web Search Credential',
-  buttonLabel: 'GPT Web Search Credential',
-  provider: 'Managed GPT Responses',
-  providerMark: 'G',
-  reasoning: false,
-  input: ['text'],
+  providerId: 'deepseek-official',
+  label: 'DeepSeek Web Search Credential',
+  buttonLabel: 'DeepSeek Web Search Credential',
 };
 const limits = {
   tenantRequestsPerMinute: 1_000,
@@ -2624,7 +2618,7 @@ test('delivers only the authenticated tenant runtime model routes without exposi
     buttonLabel: 'GPT-5.6 Luna · 深度',
   };
   const tenantKey = 'tenant-specific-provider-key-123456789';
-  const gptSearchKey = 'tenant-specific-gpt-search-key-123456789';
+  const searchKey = 'tenant-specific-search-key-123456789';
   const internalDeepSeekKey = 'internal-deepseek-chat-key-never-leased';
   const internalDeepSeekRoute = {
     ...chatRoute,
@@ -2653,7 +2647,7 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         keyCalls.push(routeId);
         return routeId === luna.id
           ? tenantKey
-          : routeId === searchCredentialRoute.id ? gptSearchKey : internalDeepSeekKey;
+          : routeId === searchCredentialRoute.id ? searchKey : internalDeepSeekKey;
       },
     },
     usageStore: new InMemoryUsageStore(limits),
@@ -2703,7 +2697,7 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         purpose: 'web-search',
         provider: 'deepseek-official',
         credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
-        upstreamApiKey: internalDeepSeekKey,
+        upstreamApiKey: searchKey,
       },
     });
     for (const clientVersion of ['2.0.11', '2.0.13', '2.0.14', '2.0.15', '2.0.16', '99.0.0', '2.1.0-rc.1']) {
@@ -2714,9 +2708,9 @@ test('delivers only the authenticated tenant runtime model routes without exposi
       assert.equal(currentClientResponse.status, 200);
       assert.deepEqual(await currentClientResponse.json(), releasedClientBody);
     }
-    assert.equal(enabledCalls.get(internalDeepSeekRoute.id), 8);
-    assert.equal(keyCalls.filter((routeId) => routeId === internalDeepSeekRoute.id).length, 8);
-    assert.equal(keyCalls.includes(searchCredentialRoute.id), false);
+    assert.equal(enabledCalls.get(searchCredentialRoute.id), 8);
+    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 8);
+    assert.equal(keyCalls.includes(internalDeepSeekRoute.id), false);
     const catalogResponse = await (await fetch(`${baseUrl}/v1/models`, { headers: auth() })).json() as {
       models: Array<{ id: string }>;
     };
@@ -2724,6 +2718,69 @@ test('delivers only the authenticated tenant runtime model routes without exposi
     const catalog = JSON.stringify(catalogResponse);
     assert.doesNotMatch(catalog, /provider-key|provider\.example/u);
     assert.doesNotMatch(catalog, /search-key|internal-deepseek-chat-key|deepseek/u);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
+test('fails closed instead of leasing an internal-proxy chat key to native DeepSeek search', async () => {
+  const luna = {
+    ...route,
+    id: 'gpt-5.6-luna',
+    upstreamModelId: 'gpt-5.6-luna',
+    label: 'GPT-5.6 Luna',
+    buttonLabel: 'GPT-5.6 Luna · 深度',
+  };
+  const proxyKey = 'internal-deepseek-proxy-key-never-leased';
+  const internalProxyRoute = {
+    ...chatRoute,
+    upstreamModelId: 'deepseek-v4-flash',
+    upstreamBaseUrl: 'https://deepseek-provider.ecorex.internal:18443/v1',
+  };
+  const identity = { tenantId: 'tenant-a', userId: 'user-a', modelIds: [luna.id] };
+  const consentStore = new InMemoryConsentStore(consentPolicy);
+  await consentStore.accept(identity, consentInput);
+  let proxyKeyReads = 0;
+  const server = createModelGatewayServer({
+    routes: [luna, internalProxyRoute],
+    authenticate: async (token) => token === sessionToken ? identity : null,
+    consentStore,
+    tenantModelRoutePolicy: {
+      isEnabled: async () => true,
+      upstreamApiKey: async (_tenantId, routeId) => {
+        if (routeId === internalProxyRoute.id) {
+          proxyKeyReads += 1;
+          return proxyKey;
+        }
+        return 'tenant-gpt-key-value-123456789';
+      },
+    },
+    usageStore: new InMemoryUsageStore(limits),
+    usageKeyId: 'usage-2026',
+    usagePrivateKey: privateKey,
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert(address && typeof address === 'object');
+
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/v1/runtime-models?client_version=2.0.15`,
+      { headers: auth() },
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json() as { searchCredentialGrant: Record<string, unknown> };
+    assert.deepEqual(body.searchCredentialGrant, {
+      schemaVersion: 1,
+      status: 'unavailable',
+      purpose: 'web-search',
+      provider: 'deepseek-official',
+      credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+    });
+    assert.equal(proxyKeyReads, 0);
+    assert.doesNotMatch(JSON.stringify(body), /internal-deepseek-proxy-key/u);
   } finally {
     server.close();
     await once(server, 'close');
@@ -2756,15 +2813,15 @@ test('keeps GPT runtime available while managed search is denied or unavailable'
       grantStatus: 'unavailable',
     },
     {
-      routes: [luna, internalSearchLikeRoute],
+      routes: [luna, searchCredentialRoute],
       policy: {
-        isEnabled: async (_tenantId: string, routeId: string) => routeId !== internalSearchLikeRoute.id,
+        isEnabled: async (_tenantId: string, routeId: string) => routeId !== searchCredentialRoute.id,
         upstreamApiKey: async (_tenantId: string, routeId: string) => routeId === luna.id ? gptKey : searchSecret,
       },
       grantStatus: 'denied',
     },
     {
-      routes: [luna, internalSearchLikeRoute],
+      routes: [luna, searchCredentialRoute],
       policy: {
         isEnabled: async () => true,
         upstreamApiKey: async (_tenantId: string, routeId: string) => routeId === luna.id ? gptKey : null,
@@ -2772,7 +2829,7 @@ test('keeps GPT runtime available while managed search is denied or unavailable'
       grantStatus: 'unavailable',
     },
     {
-      routes: [luna, searchCredentialRoute],
+      routes: [luna, internalSearchLikeRoute],
       policy: {
         isEnabled: async () => true,
         upstreamApiKey: async (_tenantId: string, routeId: string) => routeId === luna.id ? gptKey : searchSecret,

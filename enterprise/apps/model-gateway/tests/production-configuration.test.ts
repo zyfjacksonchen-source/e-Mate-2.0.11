@@ -119,21 +119,21 @@ test('production route schema accepts only the literal HTTP opt-in and a secret-
   }
 });
 
-test('production search credential route binds the managed GPT endpoint to its own secret file', () => {
+test('production search credential route binds the official endpoint to its own secret file', () => {
   const directory = mkdtempSync(join(tmpdir(), 'e-mate-gateway-search-route-'));
   const file = join(directory, 'gateway.json');
   const searchCredentialRoute = productionRoute({
-    id: 'gpt-web-search',
-    apiMode: 'responses',
-    upstreamModelId: 'gpt-5.6-luna',
-    upstreamBaseUrl: 'http://43.135.183.53:8080/v1',
-    allowInsecureHttpUpstream: true,
-    upstreamApiKeyFile: '/run/secrets/gpt-web-search-api-key',
-    providerId: 'gpt-responses',
-    label: 'GPT Web Search Credential',
-    buttonLabel: 'GPT Web Search Credential',
-    provider: 'Managed GPT Responses',
-    providerMark: 'G',
+    id: 'deepseek-web-search',
+    apiMode: 'chat-completions',
+    upstreamModelId: 'deepseek-v4-flash',
+    upstreamBaseUrl: 'https://api.deepseek.com/anthropic/v1',
+    allowInsecureHttpUpstream: undefined,
+    upstreamApiKeyFile: '/run/secrets/deepseek-web-search-api-key',
+    providerId: 'deepseek-official',
+    label: 'DeepSeek Web Search Credential',
+    buttonLabel: 'DeepSeek Web Search Credential',
+    provider: 'DeepSeek',
+    providerMark: 'D',
     reasoning: false,
     input: ['text'],
   });
