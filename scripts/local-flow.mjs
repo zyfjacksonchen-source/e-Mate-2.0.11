@@ -35,6 +35,14 @@ const INSTALLER_SECURITY = Object.freeze({
   darwin: Object.freeze({ code_signed: false, notarized: false }),
   win32: Object.freeze({ code_signed: false, notarized: false }),
 })
+export const CANDIDATE_FAILURE = Object.freeze({
+  TOOLCHAIN: 'INVALID_TOOLCHAIN_BOOTSTRAP',
+  SOURCE: 'SOURCE_GATE_FAILED',
+  COMPONENT_ABI: 'COMPONENT_ABI_GATE_FAILED',
+  PACKAGING: 'PACKAGING_FAILED',
+})
+const CANDIDATE_FAILURES = new Set(Object.values(CANDIDATE_FAILURE))
+const FAILURE_MARKER = 'emate.local-flow-failure:'
 const FULL_MATRIX = 'docs/2.0.15/REGRESSION-MATRIX.md'
 const FULL_MATRIX_SCOPE = 'full-installed-startup-update-product-and-built-in-tools'
 const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u
@@ -72,6 +80,87 @@ const POLLUTION = [
   { label: 'AWS access key', ascii: /AKIA[0-9A-Z]{16}/u },
   { label: 'API secret', ascii: /(?:sk|rk|sess)-[A-Za-z0-9_-]{20,}/u },
 ]
+
+class CandidateStageError extends Error {
+  constructor(category, stage, cause) {
+    const message = redactLog(cause instanceof Error ? cause.message : String(cause))
+    super(`${category}:${stage}: ${message}`, { cause })
+    this.name = 'CandidateStageError'
+    this.category = category
+    this.stage = stage
+    this.originalMessage = message
+  }
+}
+
+export function candidateFailureDetails(cause) {
+  if (!(cause instanceof CandidateStageError)) return null
+  return { category: cause.category, stage: cause.stage, error: cause.originalMessage }
+}
+
+export async function runCandidateStages(stages) {
+  for (const stage of stages) {
+    if (!CANDIDATE_FAILURES.has(stage.category) || typeof stage.stage !== 'string' || stage.stage === '' || typeof stage.run !== 'function') {
+      throw new Error('candidate stage is invalid')
+    }
+    try {
+      await stage.run()
+    } catch (cause) {
+      if (cause instanceof CandidateStageError) throw cause
+      throw new CandidateStageError(stage.category, stage.stage, cause)
+    }
+  }
+}
+
+function candidateFailureFromOutput(output) {
+  const marker = output.lastIndexOf(FAILURE_MARKER)
+  if (marker < 0) return null
+  const line = output.slice(marker + FAILURE_MARKER.length).split('\n', 1)[0]
+  try {
+    const failure = JSON.parse(line)
+    if (!CANDIDATE_FAILURES.has(failure?.category) || typeof failure?.stage !== 'string' || failure.stage === ''
+      || typeof failure?.error !== 'string') return null
+    return failure
+  } catch {
+    return null
+  }
+}
+
+function failureOrDefault(cause, stage = 'platform-build') {
+  return candidateFailureDetails(cause) ?? {
+    category: CANDIDATE_FAILURE.SOURCE,
+    stage,
+    error: redactLog(cause instanceof Error ? cause.message : String(cause)),
+  }
+}
+
+function failedPlatformState(sourceCommit, failure) {
+  return {
+    status: 'failed',
+    source_commit: sourceCommit,
+    error: `${failure.category}:${failure.stage}: ${failure.error}`,
+    failure: {
+      category: failure.category,
+      stage: failure.stage,
+      verified_product_bytes: false,
+    },
+  }
+}
+
+export function blockedWindowsState(sourceCommit, failure) {
+  if (!SOURCE_SHA.test(sourceCommit ?? '') || !CANDIDATE_FAILURES.has(failure?.category)
+    || typeof failure?.stage !== 'string' || failure.stage === '') throw new Error('blocked Windows state is invalid')
+  return {
+    status: 'blocked',
+    source_commit: sourceCommit,
+    reason: 'macos-candidate-has-no-verified-product-bytes',
+    request_valid: false,
+    failure: {
+      category: failure.category,
+      stage: failure.stage,
+      verified_product_bytes: false,
+    },
+  }
+}
 
 function git(args, cwd = ROOT, options = {}) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, ...options })
@@ -349,16 +438,23 @@ async function writeChecksums(directory) {
 async function runLogged(command, args, { cwd, log, env = process.env }) {
   await mkdir(dirname(log), { recursive: true })
   const output = createWriteStream(log, { flags: 'a', mode: 0o600 })
+  let tail = ''
+  const record = chunk => { tail = `${tail}${redactLog(chunk.toString('utf8'))}`.slice(-32 * 1024) }
   output.write(`$ ${redactLog([command, ...args].join(' '))}\n`)
   return await new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
-    child.stdout.on('data', chunk => { output.write(redactLog(chunk.toString('utf8'))); process.stdout.write(chunk) })
-    child.stderr.on('data', chunk => { output.write(redactLog(chunk.toString('utf8'))); process.stderr.write(chunk) })
+    child.stdout.on('data', chunk => { record(chunk); output.write(redactLog(chunk.toString('utf8'))); process.stdout.write(chunk) })
+    child.stderr.on('data', chunk => { record(chunk); output.write(redactLog(chunk.toString('utf8'))); process.stderr.write(chunk) })
     child.on('error', cause => { output.end(); rejectPromise(cause) })
     child.on('close', code => {
       output.end(() => {
         if (code === 0) resolvePromise()
-        else rejectPromise(new Error(`${command} ${args.join(' ')} exited with ${String(code)}`))
+        else {
+          const failure = candidateFailureFromOutput(tail)
+          rejectPromise(failure === null
+            ? new Error(`${command} ${args.join(' ')} exited with ${String(code)}`)
+            : new CandidateStageError(failure.category, failure.stage, new Error(failure.error)))
+        }
       })
     })
   })
@@ -378,6 +474,26 @@ function pnpmInvocation(args, env = process.env) {
 
 function assertPinnedPnpm() {
   pnpmInvocation([])
+}
+
+function checkedSync(command, args, cwd = ROOT) {
+  const result = spawnSync(command, args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+  if (result.error !== undefined) throw result.error
+  if (result.status !== 0) throw new Error(result.stderr.trim() || `${command} ${args.join(' ')} exited with ${String(result.status)}`)
+}
+
+async function candidatePreflight() {
+  let identity
+  await runCandidateStages([
+    { category: CANDIDATE_FAILURE.TOOLCHAIN, stage: 'pinned-package-manager', run: assertPinnedPnpm },
+    {
+      category: CANDIDATE_FAILURE.SOURCE,
+      stage: 'release-boundary',
+      run: () => checkedSync(process.execPath, ['scripts/change-impact.mjs', '--check-contract']),
+    },
+    { category: CANDIDATE_FAILURE.SOURCE, stage: 'clean-source-identity', run: () => { identity = sourceIdentity() } },
+  ])
+  return identity
 }
 
 async function runPnpm(args, options) {
@@ -652,23 +768,73 @@ export async function verifyLocalArtifact(directory, platform, sourceCommit) {
 
 async function platformBuild(sourceRoot, platform, output, log) {
   const expectedPlatform = platform === 'macos' ? 'darwin' : 'win32'
-  if (process.platform !== expectedPlatform) throw new Error(`${platform} candidate must build on native ${expectedPlatform}`)
-  if (platform === 'windows') validateRemoteHostname(hostname())
-  assertPinnedPnpm()
-  await runPnpm(['install', '--frozen-lockfile'], { cwd: sourceRoot, log })
-  await runPnpm(['--dir', 'upstream/deepseek-harness', 'install', '--frozen-lockfile'], { cwd: sourceRoot, log, env: { ...process.env, CI: 'true' } })
-  await runPnpm(['run', 'build:harness'], { cwd: sourceRoot, log })
-  await runPnpm(['run', 'check:release-boundary'], { cwd: sourceRoot, log })
-  await runLogged(process.execPath, ['scripts/component-run.mjs', 'build'], { cwd: sourceRoot, log })
-  await runPnpm(['--filter', '@e-mate/dsh', 'build'], { cwd: sourceRoot, log })
-  await runLogged(platform === 'macos' ? 'python3' : 'python', [
-    'packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py',
-    '--root', 'packages/dsh-plugin-vision-toolkit',
-    '--targets', platform === 'macos' ? 'darwin-arm64,darwin-x64' : 'win32-x64',
-  ], { cwd: sourceRoot, log })
-  await runYarn(['install', '--immutable'], { cwd: join(sourceRoot, 'desktop'), log })
-  await runYarn([PLATFORMS[platform].build], { cwd: join(sourceRoot, 'desktop'), log })
-  await exportArtifact(sourceRoot, platform, output, git(['rev-parse', 'HEAD'], sourceRoot))
+  await runCandidateStages([
+    {
+      category: CANDIDATE_FAILURE.TOOLCHAIN,
+      stage: 'native-platform',
+      run: () => {
+        if (process.platform !== expectedPlatform) throw new Error(`${platform} candidate must build on native ${expectedPlatform}`)
+        if (platform === 'windows') validateRemoteHostname(hostname())
+      },
+    },
+    { category: CANDIDATE_FAILURE.TOOLCHAIN, stage: 'pinned-package-manager', run: assertPinnedPnpm },
+    {
+      category: CANDIDATE_FAILURE.SOURCE,
+      stage: 'release-boundary',
+      run: () => runLogged(process.execPath, ['scripts/change-impact.mjs', '--check-contract'], { cwd: sourceRoot, log }),
+    },
+    {
+      category: CANDIDATE_FAILURE.TOOLCHAIN,
+      stage: 'root-install',
+      run: () => runPnpm(['install', '--frozen-lockfile'], { cwd: sourceRoot, log }),
+    },
+    {
+      category: CANDIDATE_FAILURE.TOOLCHAIN,
+      stage: 'harness-install',
+      run: () => runPnpm(['--dir', 'upstream/deepseek-harness', 'install', '--frozen-lockfile'], {
+        cwd: sourceRoot, log, env: { ...process.env, CI: 'true' },
+      }),
+    },
+    {
+      category: CANDIDATE_FAILURE.SOURCE,
+      stage: 'harness-host-client-web',
+      run: () => runPnpm(['run', 'build:harness'], { cwd: sourceRoot, log }),
+    },
+    {
+      category: CANDIDATE_FAILURE.COMPONENT_ABI,
+      stage: 'component-emitted-abi',
+      run: () => runLogged(process.execPath, ['scripts/component-run.mjs', 'build'], { cwd: sourceRoot, log }),
+    },
+    {
+      category: CANDIDATE_FAILURE.SOURCE,
+      stage: 'profile-build',
+      run: () => runPnpm(['--filter', '@e-mate/dsh', 'build'], { cwd: sourceRoot, log }),
+    },
+    {
+      category: CANDIDATE_FAILURE.PACKAGING,
+      stage: 'native-runtime-inputs',
+      run: () => runLogged(platform === 'macos' ? 'python3' : 'python', [
+        'packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py',
+        '--root', 'packages/dsh-plugin-vision-toolkit',
+        '--targets', platform === 'macos' ? 'darwin-arm64,darwin-x64' : 'win32-x64',
+      ], { cwd: sourceRoot, log }),
+    },
+    {
+      category: CANDIDATE_FAILURE.PACKAGING,
+      stage: 'desktop-install',
+      run: () => runYarn(['install', '--immutable'], { cwd: join(sourceRoot, 'desktop'), log }),
+    },
+    {
+      category: CANDIDATE_FAILURE.PACKAGING,
+      stage: 'desktop-package',
+      run: () => runYarn([PLATFORMS[platform].build], { cwd: join(sourceRoot, 'desktop'), log }),
+    },
+    {
+      category: CANDIDATE_FAILURE.PACKAGING,
+      stage: 'artifact-export',
+      run: () => exportArtifact(sourceRoot, platform, output, git(['rev-parse', 'HEAD'], sourceRoot)),
+    },
+  ])
 }
 
 async function readWindowsRemoteRequest(path, run) {
@@ -735,6 +901,13 @@ async function prepareWindowsRemote(directory, run) {
   }
 }
 
+export async function blockWindowsRemote(directory, run, failure) {
+  if (['passed', 'reused'].includes(run.platforms?.windows?.status)) return
+  await rm(join(directory, 'windows-remote'), { recursive: true, force: true })
+  await rm(join(directory, 'artifacts', 'windows'), { recursive: true, force: true })
+  run.platforms.windows = blockedWindowsState(run.source_commit, failure)
+}
+
 export async function importWindowsRemoteResult(resultDirectory, output, run, requestPath) {
   const { bytes: requestBytes, request } = await readWindowsRemoteRequest(requestPath, run)
   if (!isDeepStrictEqual(run.platforms?.windows, {
@@ -786,7 +959,7 @@ export async function importWindowsRemoteResult(resultDirectory, output, run, re
 }
 
 async function candidate(values) {
-  const identity = sourceIdentity()
+  const identity = await candidatePreflight()
   if (values.run === undefined && values.retry !== undefined && values.retry !== 'all') {
     throw new Error('a new candidate must attempt both platforms; --retry selects a failed platform only with --run')
   }
@@ -864,16 +1037,41 @@ async function candidate(values) {
   const source = join(scratch, 'source')
   const setupLog = join(directory, 'logs', 'candidate.log')
   const failures = []
+  let sourceReady = !selection.build.includes('macos')
   try {
-    if (selection.build.includes('macos')) await cleanSourceCopy(ROOT, source, identity, setupLog)
+    if (selection.build.includes('macos')) {
+      try {
+        await runCandidateStages([{
+          category: CANDIDATE_FAILURE.SOURCE,
+          stage: 'clean-source-copy',
+          run: () => cleanSourceCopy(ROOT, source, identity, setupLog),
+        }])
+        sourceReady = true
+      } catch (cause) {
+        const failure = failureOrDefault(cause, 'clean-source-copy')
+        run.platforms.macos = failedPlatformState(run.source_commit, failure)
+        await blockWindowsRemote(directory, run, failure)
+        failures.push(new Error(`macos: ${run.platforms.macos.error}`))
+      }
+    }
     for (const platform of selection.build) {
       const output = join(directory, 'artifacts', platform)
       const log = join(directory, 'logs', `${platform}.log`)
       if (platform === 'windows') {
+        if (!['passed', 'reused'].includes(run.platforms?.macos?.status)) {
+          const failure = run.platforms?.macos?.failure === undefined
+            ? { category: CANDIDATE_FAILURE.SOURCE, stage: 'macos-candidate', error: 'macOS candidate has no verified product bytes' }
+            : { ...run.platforms.macos.failure, error: run.platforms.macos.error }
+          await blockWindowsRemote(directory, run, failure)
+          if (failures.length === 0) failures.push(new Error('windows: no verified macOS product bytes; no Remote request emitted'))
+          await saveRun(directory, run)
+          continue
+        }
         await prepareWindowsRemote(directory, run)
         await saveRun(directory, run)
         continue
       }
+      if (!sourceReady) continue
       run.platforms[platform] = { status: 'building', source_commit: run.source_commit }
       await saveRun(directory, run)
       try {
@@ -886,9 +1084,10 @@ async function candidate(values) {
         const verified = await verifyLocalArtifact(output, platform, run.source_commit)
         run.platforms[platform] = { status: 'passed', source_commit: run.source_commit, artifact: verified.primary }
       } catch (cause) {
-        const message = cause instanceof Error ? cause.message : String(cause)
-        run.platforms[platform] = { status: 'failed', source_commit: run.source_commit, error: message }
-        failures.push(new Error(`${platform}: ${message}`))
+        const failure = failureOrDefault(cause)
+        run.platforms[platform] = failedPlatformState(run.source_commit, failure)
+        await blockWindowsRemote(directory, run, failure)
+        failures.push(new Error(`${platform}: ${run.platforms[platform].error}`))
       }
       await saveRun(directory, run)
     }
@@ -1516,6 +1715,8 @@ if (process.argv[1] !== undefined && await realpath(process.argv[1]) === await r
   try {
     await main()
   } catch (cause) {
+    const failure = candidateFailureDetails(cause)
+    if (failure !== null) process.stderr.write(`${FAILURE_MARKER}${JSON.stringify(failure)}\n`)
     process.stderr.write(`local-flow: ${cause instanceof Error ? cause.message : String(cause)}\n`)
     if (cause instanceof AggregateError) for (const error of cause.errors) process.stderr.write(`- ${error instanceof Error ? error.message : String(error)}\n`)
     process.exitCode = 1

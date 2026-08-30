@@ -1,19 +1,24 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
+  CANDIDATE_FAILURE,
   COMPUTER_USE_SCENARIOS,
   assertCleanArtifactBytes,
+  blockWindowsRemote,
+  blockedWindowsState,
   buildPublicationRequest,
   buildRollbackRequest,
+  candidateFailureDetails,
   devChecks,
   importWindowsRemoteResult,
   markWindowsUnavailable,
+  runCandidateStages,
   selectCandidatePlatforms,
   validateCandidateSource,
   validatePublicationReceipt,
@@ -247,6 +252,25 @@ test('candidate source accepts only one clean committed branch identity', () => 
   assert.throws(() => validateCandidateSource({ branch: 'HEAD', head: SHA, status: '' }), /named local branch/u)
 })
 
+test('candidate rejects a fallback pnpm before creating a run', async () => {
+  const root = await temporary()
+  const entry = join(root, 'pnpm.cjs')
+  const runRoot = fileURLToPath(new URL('../dist/local-runs', import.meta.url))
+  try {
+    await writeFile(entry, "process.stdout.write('11.19.0\\n')\n")
+    const before = await readdir(runRoot).catch(() => [])
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./local-flow.mjs', import.meta.url)), 'candidate'], {
+      encoding: 'utf8',
+      env: { ...process.env, npm_execpath: entry },
+    })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /INVALID_TOOLCHAIN_BOOTSTRAP.*pinned-package-manager/u)
+    assert.deepEqual(await readdir(runRoot).catch(() => []), before)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('candidate retries only the failed side and reuses an unchanged passed side', () => {
   const run = {
     source_commit: SHA,
@@ -259,6 +283,49 @@ test('candidate retries only the failed side and reuses an unchanged passed side
   assert.deepEqual(selectCandidatePlatforms(run, 'windows'), { build: ['windows'], reuse: [] })
   run.platforms.macos.source_commit = 'd'.repeat(40)
   assert.deepEqual(selectCandidatePlatforms(run), { build: ['macos', 'windows'], reuse: [] })
+})
+
+test('candidate preflight classifies the first deterministic failure and never enters packaging', async () => {
+  const trace = []
+  await assert.rejects(runCandidateStages([
+    { category: CANDIDATE_FAILURE.TOOLCHAIN, stage: 'pinned-package-manager', run: async () => trace.push('toolchain') },
+    { category: CANDIDATE_FAILURE.SOURCE, stage: 'release-boundary', run: async () => trace.push('contract') },
+    {
+      category: CANDIDATE_FAILURE.SOURCE,
+      stage: 'harness-client-typecheck',
+      run: async () => { trace.push('client-typecheck'); throw new Error('TS18048') },
+    },
+    { category: CANDIDATE_FAILURE.COMPONENT_ABI, stage: 'component-emitted-abi', run: async () => trace.push('component') },
+    { category: CANDIDATE_FAILURE.PACKAGING, stage: 'desktop-package', run: async () => trace.push('packaging') },
+  ]), error => {
+    assert.deepEqual(candidateFailureDetails(error), {
+      category: 'SOURCE_GATE_FAILED', stage: 'harness-client-typecheck', error: 'TS18048',
+    })
+    return true
+  })
+  assert.deepEqual(trace, ['toolchain', 'contract', 'client-typecheck'])
+})
+
+test('a failed macOS source gate removes and invalidates the Windows request', async () => {
+  const root = await temporary()
+  const failure = {
+    category: CANDIDATE_FAILURE.COMPONENT_ABI,
+    stage: 'component-emitted-abi',
+    error: 'stale Base ABI',
+  }
+  const run = { source_commit: SHA, platforms: { windows: { status: 'awaiting-codex-remote' } } }
+  try {
+    await mkdir(join(root, 'windows-remote'), { recursive: true })
+    await mkdir(join(root, 'artifacts', 'windows'), { recursive: true })
+    await writeFile(join(root, 'windows-remote', 'request.json'), '{}')
+    await writeFile(join(root, 'artifacts', 'windows', 'candidate.exe'), 'not-product-bytes')
+    await blockWindowsRemote(root, run, failure)
+    await assert.rejects(readFile(join(root, 'windows-remote', 'request.json')), { code: 'ENOENT' })
+    await assert.rejects(readFile(join(root, 'artifacts', 'windows', 'candidate.exe')), { code: 'ENOENT' })
+    assert.deepEqual(run.platforms.windows, blockedWindowsState(SHA, failure))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('dev reuses the local classifier plan and selects the smallest local-flow check', () => {
@@ -703,7 +770,7 @@ test('desktop builds reuse the inherited Corepack cache instead of a PATH shim',
   const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
   assert.equal(rootPackage.packageManager, 'pnpm@11.7.0')
   assert.equal(desktopPackage.packageManager, 'yarn@4.18.0')
-  assert.equal([...source.matchAll(/await runYarn\(/gu)].length, 2)
+  assert.equal([...source.matchAll(/run: \(\) => runYarn\(/gu)].length, 2)
   assert.match(source, /runYarn\(\['install', '--immutable'\], \{ cwd: join\(sourceRoot, 'desktop'\), log \}\)/u)
   assert.match(source, /runYarn\(\[PLATFORMS\[platform\]\.build\], \{ cwd: join\(sourceRoot, 'desktop'\), log \}\)/u)
   assert.doesNotMatch(source, /\['yarn', '--cwd', 'desktop'/u)
@@ -751,7 +818,10 @@ test('platform build skips Harness dev hooks in clean submodule copies', async (
     const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
     const start = source.indexOf('async function platformBuild')
     const projection = source.slice(start, source.indexOf('\n}\n\nasync function readWindowsRemoteRequest', start))
-    assert.match(projection, /runPnpm\(\['--dir', 'upstream\/deepseek-harness', 'install', '--frozen-lockfile'\], \{ cwd: sourceRoot, log, env: \{ \.\.\.process\.env, CI: 'true' \} \}\)/u)
+    assert.match(projection, /runPnpm\(\['--dir', 'upstream\/deepseek-harness', 'install', '--frozen-lockfile'\], \{\s*cwd: sourceRoot, log, env: \{ \.\.\.process\.env, CI: 'true' \},\s*\}\)/u)
+    const order = ['release-boundary', 'harness-host-client-web', 'component-emitted-abi', 'desktop-package']
+      .map(stage => projection.indexOf(`stage: '${stage}'`))
+    assert.equal(order.every((offset, index) => offset >= 0 && (index === 0 || offset > order[index - 1])), true)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

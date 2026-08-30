@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 function verifiedEntry(name, version, entry, env, execPath) {
   if (!existsSync(entry)) throw new Error(`pinned ${name} ${version} entry is missing`)
   const result = spawnSync(execPath, [entry, '--version'], { encoding: 'utf8', env })
+  if (result.error?.code === 'ENOENT') throw new Error(`cannot verify pinned ${name}: active Node executable is unavailable`, { cause: result.error })
   if (result.error !== undefined) throw result.error
   if (result.status !== 0 || result.stdout.trim() !== version) {
     throw new Error(`requires pinned ${name} ${version}; received ${result.stdout.trim() || '<unavailable>'}`)
