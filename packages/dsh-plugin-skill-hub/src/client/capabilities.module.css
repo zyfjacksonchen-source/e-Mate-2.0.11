@@ -23,6 +23,7 @@
   position: absolute;
   z-index: 1;
   inset: 0;
+  inset-inline-start: var(--dsh-desktop-sidebar-width, 0px);
   min-width: 0;
   overflow: hidden;
   color: var(--ink);
@@ -417,7 +418,7 @@
 }
 
 @media (max-width: 767px) {
-  .page { left: 0 !important; }
+  .page { inset-inline-start: 0 !important; }
   .workspace { width: 100%; height: 100%; margin: 0; padding: 64px 16px 32px; border: 0; border-radius: 0; }
 }
 
