@@ -6,6 +6,7 @@ import {
   checkForStableUpdate as checkForStableUpdateRaw,
   compareSemVerVersions,
   parseSemVer,
+  validateUnsignedAdmittedDesktopReleaseManifest,
   type DesktopReleaseSigningKey,
   type UpdateCheckOptions,
   type UpdateRequest,
@@ -14,6 +15,8 @@ import {
 const SOURCE_COMMIT = 'a'.repeat(40)
 const MANIFEST_SIGNATURE_CONTEXT = Buffer.from('e-mate-desktop-release-manifest-v2\0', 'utf8')
 const MANIFEST_SIGNATURE_CONTEXT_V3 = Buffer.from('e-mate-desktop-release-manifest-v3\0', 'utf8')
+const MANIFEST_SIGNATURE_CONTEXT_V4 = Buffer.from('e-mate-desktop-release-manifest-v4\0', 'utf8')
+const LOCAL_RUN_ID = `20260831T120000Z-${'b'.repeat(12)}-${'c'.repeat(6)}`
 const { privateKey: manifestPrivateKey, publicKey: manifestPublicKey } = generateKeyPairSync('ed25519')
 const TRUSTED_MANIFEST_KEYS: readonly DesktopReleaseSigningKey[] = [{
   id: 'desktop-release-test-key',
@@ -138,6 +141,47 @@ function githubArtifactProvenance() {
   }
 }
 
+function localVersionManifest(version = '2.1.0'): Record<string, unknown> {
+  const artifacts = {
+    darwin: releaseArtifact(version, 'darwin'),
+    win32: releaseArtifact(version, 'win32'),
+  }
+  const unsigned = {
+    schema_version: 4,
+    document_type: 'emate.desktop-release-manifest',
+    release_status: 'admitted',
+    version,
+    source_commit: SOURCE_COMMIT,
+    base_contract_id: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
+    schedule_protocol_floor: 1,
+    profile_component_aggregate: profileComponentAggregateSummary(),
+    local_publication_provenance: {
+      schema_version: 1,
+      document_type: 'emate.local-publication-provenance',
+      run_id: LOCAL_RUN_ID,
+      publication_request_sha256: '7'.repeat(64),
+      manifest_input_ledger_sha256: '8'.repeat(64),
+      version,
+      source_commit: SOURCE_COMMIT,
+      base_contract_id: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
+      profile_component_aggregate_sha256: '1'.repeat(64),
+      artifacts: {
+        darwin: { ...artifacts.darwin },
+        win32: { ...artifacts.win32 },
+      },
+    },
+    artifacts,
+    update_policy: { mandatory: false, minimum_supported_version: '2.0.13' },
+  }
+  return signManifest(unsigned, MANIFEST_SIGNATURE_CONTEXT_V4)
+}
+
+function signedLocalMutation(mutate: (manifest: Record<string, any>) => void): Record<string, unknown> {
+  const { signature: _, ...unsigned } = localVersionManifest()
+  mutate(unsigned)
+  return signManifest(unsigned, MANIFEST_SIGNATURE_CONTEXT_V4)
+}
+
 describe('strict SemVer parsing', () => {
   it('accepts a three-part version, optional lowercase v, prerelease, and build metadata', () => {
     expect(parseSemVer('v2.10.3-alpha.1+mac.arm64')).toEqual({
@@ -178,6 +222,74 @@ describe('strict SemVer parsing', () => {
 })
 
 describe('public Desktop version check', () => {
+  it('accepts a signed v4 manifest bound to one local publication request and immutable R2 artifacts', async () => {
+    const manifest = localVersionManifest()
+    const { signature: _, ...unsigned } = manifest
+    expect(validateUnsignedAdmittedDesktopReleaseManifest(unsigned)).toBe(true)
+
+    await expect(checkForStableUpdate({
+      platform: 'win32',
+      currentVersion: '2.0.15',
+      currentScheduleProtocolFloor: 1,
+      request: async () => Response.json(manifest),
+    })).resolves.toMatchObject({
+      status: 'update-available',
+      latestVersion: '2.1.0',
+      sourceCommit: SOURCE_COMMIT,
+      baseContractId: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
+      artifact: releaseArtifact('2.1.0', 'win32'),
+      mandatory: false,
+      minimumSupportedVersion: '2.0.13',
+    })
+  })
+
+  it.each([
+    ['run identity', (manifest: Record<string, any>) => { manifest.local_publication_provenance.run_id = '123' }],
+    ['publication request', (manifest: Record<string, any>) => { manifest.local_publication_provenance.publication_request_sha256 = 'x'.repeat(64) }],
+    ['manifest input ledger', (manifest: Record<string, any>) => { manifest.local_publication_provenance.manifest_input_ledger_sha256 = 'x'.repeat(64) }],
+    ['version', (manifest: Record<string, any>) => { manifest.local_publication_provenance.version = '2.1.1' }],
+    ['source', (manifest: Record<string, any>) => { manifest.local_publication_provenance.source_commit = 'b'.repeat(40) }],
+    ['Base', (manifest: Record<string, any>) => { manifest.local_publication_provenance.base_contract_id = 'e-mate-desktop-profile-v8-dsh-b2b1650b01f0' }],
+    ['Profile aggregate', (manifest: Record<string, any>) => { manifest.local_publication_provenance.profile_component_aggregate_sha256 = '9'.repeat(64) }],
+    ['macOS artifact bytes', (manifest: Record<string, any>) => { manifest.local_publication_provenance.artifacts.darwin.bytes += 1 }],
+    ['Windows artifact URL', (manifest: Record<string, any>) => { manifest.local_publication_provenance.artifacts.win32.url = 'https://example.com/update.exe' }],
+    ['developer path', (manifest: Record<string, any>) => { manifest.local_publication_provenance.path = '/tmp/local-run' }],
+    ['prompt content', (manifest: Record<string, any>) => { manifest.local_publication_provenance.prompt = 'private content' }],
+    ['GitHub identity', (manifest: Record<string, any>) => { manifest.local_publication_provenance.github_run_id = '123' }],
+    ['GitHub provenance', (manifest: Record<string, any>) => { manifest.github_artifact_provenance = githubArtifactProvenance() }],
+  ])('rejects re-signed v4 local provenance with unbound %s', async (_label, mutate) => {
+    await expect(checkForStableUpdate({
+      platform: 'darwin',
+      currentVersion: '2.0.15',
+      currentScheduleProtocolFloor: 1,
+      request: async () => Response.json(signedLocalMutation(mutate)),
+    })).resolves.toEqual(expectedCheckFailure('check-manifest-invalid'))
+  })
+
+  it('rejects a re-signed v4 artifact even when provenance agrees on a non-R2 URL', async () => {
+    const manifest = signedLocalMutation(value => {
+      value.artifacts.win32.url = 'https://example.com/update.exe'
+      value.local_publication_provenance.artifacts.win32.url = value.artifacts.win32.url
+    })
+    await expect(checkForStableUpdate({
+      platform: 'win32',
+      currentVersion: '2.0.15',
+      currentScheduleProtocolFloor: 1,
+      request: async () => Response.json(manifest),
+    })).resolves.toEqual(expectedCheckFailure('check-artifact-invalid'))
+  })
+
+  it('uses a signature context independent from schema v3', async () => {
+    const { signature: _, ...unsigned } = localVersionManifest()
+    const wrongContext = signManifest(unsigned, MANIFEST_SIGNATURE_CONTEXT_V3)
+    await expect(checkForStableUpdate({
+      platform: 'darwin',
+      currentVersion: '2.0.15',
+      currentScheduleProtocolFloor: 1,
+      request: async () => Response.json(wrongContext),
+    })).resolves.toEqual(expectedCheckFailure('check-signature-invalid'))
+  })
+
   it('accepts mandatory and minimum-supported policy only from a signed v3 manifest', async () => {
     const { signature: _, ...v2 } = versionManifest('2.1.0')
     const unsigned = {
