@@ -349,6 +349,10 @@ test('desktop profile artifacts contain built bytes without development links', 
     await file(packagesRoot, 'dsh/profile/component-inventory.json', JSON.stringify({
       schema_version: 1,
       components: [{
+        id: '@e-mate/dsh-client-shell',
+        root: 'packages/dsh/profile/plugins/emate-shell',
+        desktop: 'hot-profile',
+      }, {
         id: '@e-mate/dsh-plugin-example',
         root: 'packages/dsh-plugin-example',
         desktop: 'hot-profile',
@@ -358,7 +362,12 @@ test('desktop profile artifacts contain built bytes without development links', 
         desktop: 'blocked',
       }],
     }))
+    await file(packagesRoot, 'dsh/profile/plugins/emate-shell/package.json', JSON.stringify({
+      name: '@e-mate/dsh-client-shell',
+      files: ['lib'],
+    }))
     await file(packagesRoot, 'dsh/profile/plugins/emate-shell/lib/client.js', 'export {}\n')
+    await file(packagesRoot, 'dsh/profile/plugins/emate-shell/tests/private-path.spec.js', "'/Users/private/report.pdf'\n")
     await file(packagesRoot, 'dsh-plugin-example/lib/index.js', 'export {}\n')
     await file(packagesRoot, 'dsh-plugin-example/lib/node_modules/hidden.js', 'throw new Error()\n')
     await file(packagesRoot, 'dsh-plugin-retired/lib/index.js', 'throw new Error()\n')
@@ -369,6 +378,9 @@ test('desktop profile artifacts contain built bytes without development links', 
     const receipt = await stageDesktopProfileArtifact({ packagesRoot, destination })
     assert.equal(receipt.componentCount, 1)
     assert.ok(existsSync(join(destination, 'dsh/profile/cordis.patch.yml')))
+    assert.ok(existsSync(join(destination, 'dsh/profile/plugins/emate-shell/package.json')))
+    assert.ok(existsSync(join(destination, 'dsh/profile/plugins/emate-shell/lib/client.js')))
+    assert.ok(!existsSync(join(destination, 'dsh/profile/plugins/emate-shell/tests')))
     assert.ok(existsSync(join(destination, 'dsh-plugin-example/lib/index.js')))
     assert.ok(!existsSync(join(destination, 'dsh/profile/plugins/emate-shell/node_modules')))
     assert.ok(!existsSync(join(destination, 'dsh-plugin-example/lib/node_modules')))
