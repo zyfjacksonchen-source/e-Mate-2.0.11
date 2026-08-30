@@ -2306,6 +2306,7 @@ test('platform build skips Harness dev hooks in clean submodule copies', async (
 test('root package exposes one flow entry and the implementation has no GitHub, Wrangler, or win-codex path', async () => {
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
+  const ciWorkflow = await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
   const publicationWorkflow = await readFile(new URL('../.github/workflows/desktop-publication.yml', import.meta.url), 'utf8')
   const updater = await readFile(new URL('../desktop/e-mate-desktop/src/update-checker.ts', import.meta.url), 'utf8')
   assert.equal(packageJson.scripts.flow, 'node scripts/local-flow.mjs')
@@ -2313,6 +2314,8 @@ test('root package exposes one flow entry and the implementation has no GitHub, 
   assert.equal([...source.matchAll(/\.github\/workflows\//gu)].length, 1)
   assert.match(source, /const COMPATIBILITY_WORKFLOW = '\.github\/workflows\/desktop-compatibility-attestation\.yml'/u)
   assert.match(source, /transport: 'codex-remote-handoff'/u)
+  assert.match(ciWorkflow, /^on:\n\s+workflow_dispatch:/mu)
+  assert.doesNotMatch(ciWorkflow, /^\s+(?:pull_request|push):/mu)
   const publish = source.slice(source.indexOf('async function publish'), source.indexOf('\nasync function rollback'))
   assert.ok(publish.indexOf('await verifyManifestInputLedger(directory, run)') >= 0)
   assert.ok(publish.indexOf('await verifyManifestInputLedger(directory, run)') < publish.indexOf('await atomicJson(immutableRequestPath, immutableRequest)'))
