@@ -566,7 +566,7 @@ async function platformBuild(sourceRoot, platform, output, log) {
   if (platform === 'windows') validateRemoteHostname(hostname())
   assertPinnedPnpm()
   await runPnpm(['install', '--frozen-lockfile'], { cwd: sourceRoot, log })
-  await runPnpm(['--dir', 'upstream/deepseek-harness', 'install', '--frozen-lockfile'], { cwd: sourceRoot, log })
+  await runPnpm(['--dir', 'upstream/deepseek-harness', 'install', '--frozen-lockfile'], { cwd: sourceRoot, log, env: { ...process.env, CI: 'true' } })
   await runPnpm(['run', 'build:harness'], { cwd: sourceRoot, log })
   await runPnpm(['run', 'check:release-boundary'], { cwd: sourceRoot, log })
   await runLogged(process.execPath, ['scripts/component-run.mjs', 'build'], { cwd: sourceRoot, log })
