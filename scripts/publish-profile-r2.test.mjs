@@ -157,7 +157,7 @@ test('publication admits bootstrap and its direct successor before exposing acti
   writeJson(join(root, 'desktop/e-mate-desktop/base-contract.json'), {
     schema_version: 1,
     id: baseId,
-    desktop_api: 1,
+    desktop_api: 2,
     profile_format: 1,
     schedule_protocol_floor: 1,
     desktop_reference: {
