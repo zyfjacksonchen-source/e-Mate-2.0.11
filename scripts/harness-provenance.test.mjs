@@ -47,6 +47,7 @@ test('runs manager-free Harness build scripts in order through inherited pnpm an
     const env = { PATH: '/usr/bin:/bin', npm_execpath: entry, T25_PM_LOG: log }
     const expected = [
       ['--dir', 'upstream/deepseek-harness', 'run', 'build:lib:host'],
+      ['--dir', 'upstream/deepseek-harness', 'exec', 'tsc', '-b', 'tsconfig.client.json'],
       ['--dir', 'upstream/deepseek-harness', 'run', 'build:lib:client'],
       ['--dir', 'upstream/deepseek-harness', '--filter', '@deepseek-ai/dsh-web-frontend', 'run', 'build'],
     ]
@@ -56,13 +57,17 @@ test('runs manager-free Harness build scripts in order through inherited pnpm an
 
     writeFileSync(log, '')
     assert.throws(
-      () => runHarnessBuildScripts(directory, '11.7.0', { ...env, T25_FAIL_SCRIPT: 'build:lib:client' }),
-      /build:lib:client exited with 7/u,
+      () => runHarnessBuildScripts(directory, '11.7.0', { ...env, T25_FAIL_SCRIPT: 'tsconfig.client.json' }),
+      /tsconfig.client.json exited with 7/u,
     )
     assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse), expected.slice(0, 2))
 
     writeFileSync(entry, "process.stdout.write('11.19.0\\n')\n")
     assert.throws(() => pinnedPnpmInvocation('11.7.0', [], { env }), /requires pinned pnpm 11\.7\.0/u)
+    assert.throws(
+      () => pinnedPnpmInvocation('11.7.0', [], { env, execPath: join(directory, 'missing-node') }),
+      /active Node executable is unavailable/u,
+    )
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }

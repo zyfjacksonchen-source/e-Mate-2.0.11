@@ -347,7 +347,9 @@ export function verifyHarnessDesktopRuntime(root) {
 
 export function runHarnessBuildScripts(root, pnpmVersion, env = process.env) {
   const commands = [
+    // Host tsdown owns the generated remote declarations consumed by the Client graph.
     ['--dir', 'upstream/deepseek-harness', 'run', 'build:lib:host'],
+    ['--dir', 'upstream/deepseek-harness', 'exec', 'tsc', '-b', 'tsconfig.client.json'],
     ['--dir', 'upstream/deepseek-harness', 'run', 'build:lib:client'],
     ['--dir', 'upstream/deepseek-harness', '--filter', '@deepseek-ai/dsh-web-frontend', 'run', 'build'],
   ]
