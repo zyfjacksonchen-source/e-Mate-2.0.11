@@ -13,6 +13,7 @@ import {
   buildRollbackRequest,
   devChecks,
   importWindowsRemoteResult,
+  markWindowsUnavailable,
   selectCandidatePlatforms,
   validateCandidateSource,
   validatePublicationReceipt,
@@ -206,6 +207,32 @@ function verifiedRun() {
   }
 }
 
+function macOnlyVerifiedRun() {
+  const macPrimary = { name: 'e-Mate-2.0.15-mac-universal.dmg', bytes: 10, sha256: MAC_SHA }
+  const windows = {
+    status: 'REMOTE_UNAVAILABLE',
+    verification: 'UNVERIFIED',
+    source_commit: SHA,
+    tested: false,
+    reason: 'windows-remote-unavailable',
+    request: 'windows-remote/request.json',
+    request_sha256: '1'.repeat(64),
+  }
+  return {
+    version: '2.0.15',
+    source_commit: SHA,
+    platforms: { windows },
+    verification: {
+      status: 'passed-macos-only',
+      artifacts: {
+        macos: { primary: macPrimary, files: [macPrimary, { name: `${macPrimary.name}.blockmap`, bytes: 11, sha256: MAC_BLOCKMAP_SHA }] },
+      },
+      computer_use: { macos: acceptance('macos', MAC_SHA) },
+      windows,
+    },
+  }
+}
+
 test('candidate source accepts only one clean committed branch identity', () => {
   assert.deepEqual(validateCandidateSource({ branch: 'feat/local', head: SHA, status: '' }), {
     branch: 'feat/local', source_commit: SHA,
@@ -327,6 +354,42 @@ test('Windows Codex Remote import requires the exact awaiting request state', as
     }
   } finally {
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Windows unavailable waiver accepts only the exact awaiting Remote request and remains unverified', () => {
+  const awaiting = {
+    status: 'awaiting-codex-remote',
+    source_commit: SHA,
+    request: 'windows-remote/request.json',
+    request_sha256: '1'.repeat(64),
+  }
+  assert.deepEqual(markWindowsUnavailable({ source_commit: SHA, platforms: { windows: awaiting } }), {
+    status: 'REMOTE_UNAVAILABLE',
+    verification: 'UNVERIFIED',
+    source_commit: SHA,
+    tested: false,
+    reason: 'windows-remote-unavailable',
+    request: 'windows-remote/request.json',
+    request_sha256: '1'.repeat(64),
+  })
+  for (const state of [undefined, { ...awaiting, status: 'failed' }, { ...awaiting, status: 'building' }, {
+    ...awaiting, source_commit: 'd'.repeat(40),
+  }, { ...awaiting, unexpected: true }]) {
+    assert.throws(() => markWindowsUnavailable({ source_commit: SHA, platforms: { windows: state } }), /exact awaiting request/u)
+  }
+})
+
+test('Windows unavailable CLI flag is run-scoped and mutually exclusive with retry or result import', async () => {
+  const script = fileURLToPath(new URL('./local-flow.mjs', import.meta.url))
+  for (const args of [
+    ['candidate', '--windows-unavailable'],
+    ['candidate', '--run', RUN_ID, '--windows-unavailable', '--retry', 'windows'],
+    ['candidate', '--run', RUN_ID, '--windows-unavailable', '--windows-result', 'returned'],
+  ]) {
+    const result = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /candidate accepts/u)
   }
 })
 
@@ -482,6 +545,56 @@ test('publish keeps installers unsigned while reusing the existing schema-2 mani
   const noWindowsMatrix = structuredClone(run)
   delete noWindowsMatrix.verification.computer_use.windows
   assert.throws(() => buildPublicationRequest(noWindowsMatrix), /both external installed acceptance receipts/u)
+})
+
+test('macOS-only waiver publishes immutable bytes without a schema-2 manifest or shared pointer mutation', () => {
+  const run = macOnlyVerifiedRun()
+  const publish = buildPublicationRequest(run, { dryRun: true })
+  assert.equal(publish.operation, 'publish-macos-immutable')
+  assert.equal(publish.release_scope, 'macos-immutable-dmg-only')
+  assert.deepEqual(publish.windows, run.verification.windows)
+  assert.deepEqual(publish.installer_security, { darwin: { code_signed: false, notarized: false } })
+  assert.equal(publish.immutable_objects.length, 1)
+  assert.equal(publish.immutable_objects.every(item => item.platform === 'macos'), true)
+  assert.equal(publish.immutable_objects[0].key.endsWith('.dmg'), true)
+  assert.equal('manifest_admission_and_signing' in publish, false)
+  assert.doesNotMatch(JSON.stringify(publish), /desktop\/(?:manual|signed)\/|desktop\/latest\.json/u)
+  assert.deepEqual(publish.publication_and_activation.shared_update_surfaces, {
+    manual_manifest: 'unchanged',
+    signed_pointer: 'unchanged',
+    legacy_pointer: 'unchanged',
+  })
+  assert.throws(() => buildRollbackRequest(run, undefined, { dryRun: true }), /no shared pointer rollback/u)
+  const forged = structuredClone(run)
+  forged.platforms.windows.tested = true
+  assert.throws(() => buildPublicationRequest(forged), /REMOTE_UNAVAILABLE\/UNVERIFIED/u)
+
+  const requestSha256 = '2'.repeat(64)
+  const receipt = {
+    schema_version: 1,
+    document_type: 'emate.local-cloudflare-owner-receipt',
+    operation: 'publish-macos-immutable',
+    status: 'passed',
+    release_scope: 'macos-immutable-dmg-only',
+    windows: run.verification.windows,
+    macos_publication_mode: 'unsigned',
+    installer_security: { darwin: { code_signed: false, notarized: false } },
+    version: '2.0.15',
+    source_commit: SHA,
+    request_sha256: requestSha256,
+    immutable_objects: publish.immutable_objects.map(object => ({
+      key: object.key, bytes: object.bytes, sha256: object.sha256,
+      write: 'created', authenticated_readback: 'passed', public_readback: 'passed',
+    })),
+    shared_update_surfaces: {
+      manual_manifest: 'unchanged', signed_pointer: 'unchanged', legacy_pointer: 'unchanged',
+    },
+    deleted_objects: [],
+  }
+  assert.equal(validatePublicationReceipt(receipt, run, requestSha256), receipt)
+  assert.throws(() => validatePublicationReceipt({
+    ...receipt, shared_update_surfaces: { ...receipt.shared_update_surfaces, legacy_pointer: 'passed' },
+  }, run, requestSha256), /macOS-only publication owner receipt/u)
 })
 
 test('publication receipt requires existing-owner manifest admission/signature and identical manual/signed/legacy bytes', () => {
