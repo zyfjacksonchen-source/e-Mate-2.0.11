@@ -775,6 +775,13 @@ test('dev reuses the local classifier plan and selects the smallest local-flow c
     { command: 'node', args: ['--test', 'scripts/local-flow.test.mjs'] },
     { command: 'pnpm', args: ['run', 'test:fast'] },
   ])
+  assert.deepEqual(devChecks({ lane: 'base' }, [
+    'scripts/local-flow.mjs', 'scripts/local-flow.test.mjs',
+    'scripts/release.test.mjs', 'scripts/stage-desktop-profile-artifact.mjs',
+  ]), [
+    { command: 'node', args: ['--test', 'scripts/local-flow.test.mjs', 'scripts/release.test.mjs'] },
+    { command: 'pnpm', args: ['run', 'test:fast'] },
+  ])
   assert.deepEqual(devChecks({ lane: 'plugin-only', components: ['@e-mate/example'] }, ['packages/example/src/index.ts']), [
     { command: 'node', args: ['scripts/component-run.mjs', 'check', '--component', '@e-mate/example'] },
   ])
