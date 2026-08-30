@@ -69,8 +69,7 @@
         "@deepseek-ai/dsh-client-ui-primitives",
         "@deepseek-ai/dsh-skill-filesystem",
         "@deepseek-ai/dsh-tools",
-        "react",
-        "react-dom"
+        "react"
       ],
       "authority_contract": {
         "effects": ["filesystem-read", "filesystem-write", "network-remote", "persistent-state", "skill-lifecycle"],
