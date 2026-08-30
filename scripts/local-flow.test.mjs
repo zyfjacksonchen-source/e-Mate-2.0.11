@@ -18,6 +18,7 @@ import {
   devChecks,
   importWindowsRemoteResult,
   markWindowsUnavailable,
+  normalizeFlowArgv,
   runCandidateStages,
   selectCandidatePlatforms,
   validateCandidateSource,
@@ -462,6 +463,32 @@ test('Windows unavailable CLI flag is run-scoped and mutually exclusive with ret
     const result = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' })
     assert.equal(result.status, 1)
     assert.match(result.stderr, /candidate accepts/u)
+  }
+})
+
+test('CLI normalizes exactly one leading pnpm delimiter before parsing', async () => {
+  const direct = ['_platform-build', '--platform', 'windows']
+  assert.deepEqual(normalizeFlowArgv(direct), direct)
+  assert.deepEqual(normalizeFlowArgv(['--', ...direct]), direct)
+  assert.deepEqual(normalizeFlowArgv(['--', '--', ...direct]), ['--', '--', ...direct])
+  assert.deepEqual(normalizeFlowArgv(['not-a-command']), ['not-a-command'])
+
+  const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
+  assert.match(source, /args: normalizeFlowArgv\(argv\)/u)
+
+  const script = fileURLToPath(new URL('./local-flow.mjs', import.meta.url))
+  for (const args of [['_platform-build'], ['--', '_platform-build']]) {
+    const result = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /invalid internal platform build arguments/u)
+  }
+  for (const [args, expected] of [
+    [['--', '--', '_platform-build'], /usage: pnpm flow/u],
+    [['--', 'not-a-command'], /flow command must be/u],
+  ]) {
+    const result = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, expected)
   }
 })
 

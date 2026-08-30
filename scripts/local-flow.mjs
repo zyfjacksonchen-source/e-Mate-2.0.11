@@ -1612,9 +1612,13 @@ async function rollback(values) {
   process.stdout.write(`${JSON.stringify({ run_id: run.run_id, rollback: run.rollback, request: relativePath(directory, path) }, null, 2)}\n`)
 }
 
+export function normalizeFlowArgv(argv) {
+  return argv[0] === '--' && argv[1] !== '--' ? argv.slice(1) : argv
+}
+
 function argumentsFor(argv) {
   const { positionals, values } = parseArgs({
-    args: argv,
+    args: normalizeFlowArgv(argv),
     allowPositionals: true,
     strict: true,
     options: {
