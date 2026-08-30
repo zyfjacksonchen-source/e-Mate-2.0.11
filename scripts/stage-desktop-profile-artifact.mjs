@@ -1,19 +1,32 @@
-import { cp, lstat, mkdir, readFile, rm } from 'node:fs/promises'
+import { chmod, copyFile, cp, lstat, mkdir, readFile, rm } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { componentFiles } from './component-release.mjs'
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 
-async function copyProductTree(source, destination) {
+async function copyProductTree(source, destination, excluded = []) {
   await cp(source, destination, {
     recursive: true,
     force: true,
     dereference: false,
     filter: async path => {
-      if (relative(source, path).split(sep).includes('node_modules')) return false
+      const name = relative(source, path).split(sep).join('/')
+      if (name.split('/').includes('node_modules')
+        || excluded.some(root => name === root || name.startsWith(`${root}/`))) return false
       return !(await lstat(path)).isSymbolicLink()
     },
   })
+}
+
+async function copyComponentPackage(source, destination) {
+  const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
+  for (const entry of componentFiles(source, manifest)) {
+    const output = join(destination, ...entry.path.split('/'))
+    await mkdir(dirname(output), { recursive: true })
+    await copyFile(entry.source, output)
+    await chmod(output, entry.executable ? 0o755 : 0o644)
+  }
 }
 
 export async function stageDesktopProfileArtifact({
@@ -22,17 +35,30 @@ export async function stageDesktopProfileArtifact({
 } = {}) {
   await rm(destination, { recursive: true, force: true })
   await mkdir(destination, { recursive: true })
-  await copyProductTree(
-    join(packagesRoot, 'dsh', 'profile'),
-    join(destination, 'dsh', 'profile'),
-  )
-
+  const profileSource = join(packagesRoot, 'dsh', 'profile')
   const inventory = JSON.parse(await readFile(
-    join(packagesRoot, 'dsh', 'profile', 'component-inventory.json'),
+    join(profileSource, 'component-inventory.json'),
     'utf8',
   ))
   if (inventory.schema_version !== 1 || !Array.isArray(inventory.components)) {
     throw new Error('profile artifact component inventory is invalid')
+  }
+  const profileComponents = inventory.components.filter(component =>
+    typeof component.root === 'string' && component.root.startsWith('packages/dsh/profile/'))
+  if (profileComponents.some(component => !/^packages\/dsh\/profile\/plugins\/[a-z0-9-]+$/u.test(component.root))) {
+    throw new Error('profile artifact local component root is invalid')
+  }
+  await copyProductTree(
+    profileSource,
+    join(destination, 'dsh', 'profile'),
+    profileComponents.map(component => component.root.slice('packages/dsh/profile/'.length)),
+  )
+  for (const component of profileComponents.filter(component => component.desktop !== 'blocked')) {
+    const directory = component.root.slice('packages/'.length)
+    await copyComponentPackage(
+      join(packagesRoot, directory),
+      join(destination, 'dsh', 'profile', component.root.slice('packages/dsh/profile/'.length)),
+    )
   }
   const components = inventory.components.filter(component =>
     /^@e-mate\/dsh-plugin-[a-z0-9-]+$/u.test(component.id)
