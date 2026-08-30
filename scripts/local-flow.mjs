@@ -23,6 +23,7 @@ const YARN_VERSION = /^yarn@([^+]+)$/u.exec(DESKTOP_PACKAGE.packageManager)?.[1]
 const PACKAGE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
 const SOURCE_SHA = /^[0-9a-f]{40}$/u
 const SHA256 = /^[0-9a-f]{64}$/u
+const ETAG = /^[0-9a-f]{32}$/u
 const RUN_ID = /^\d{8}T\d{6}Z-[0-9a-f]{12}-[0-9a-f]{6}$/u
 const OWNER = 'existing-desktop-manifest-admission-signing-owner+codex-cloudflare-plugin'
 const MANIFEST_OWNER = 'zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123'
@@ -30,7 +31,29 @@ const MANIFEST_SIGNING_CONTEXT = 'e-mate-desktop-release-manifest-v2\0'
 const MANIFEST_KEY_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u
 const POINTER_PREDECESSOR = Object.freeze({
   bytes: 2961,
-  sha256: 'd26b9ffb5f30531bc5de6c9f66aab47c3718248e2ff109d82cd3a763f0c02887',
+  sha256: '838115146f74e18de0fc90e3dc586f6bd5eab706a0e6dcbc27e6ad5a79c642fb',
+  etag: '61df621671e90dc90ce457494e09b295',
+})
+const POINTERS = Object.freeze({
+  signed: Object.freeze({ key: 'desktop/signed/latest.json' }),
+  legacy: Object.freeze({ key: 'desktop/latest.json' }),
+  manual: Object.freeze({ key: `desktop/manual/v${VERSION}/latest.json` }),
+})
+const POINTER_ACTIVATION_ORDER = Object.freeze(['signed', 'legacy', 'manual'])
+const POINTER_ROLLBACK_ORDER = Object.freeze([...POINTER_ACTIVATION_ORDER].reverse())
+const POINTER_TARGET = Object.freeze({
+  artifact_path: 'desktop-release-signed.json',
+  bytes: 'from-manifest-admission.signed_manifest.bytes',
+  sha256: 'from-manifest-admission.signed_manifest.sha256',
+  etag: 'from-conditional-write-result.etag',
+})
+const POINTER_RECOVERY = Object.freeze({
+  accepted_current_states: Object.freeze(['exact-before', 'exact-after']),
+  already_exact: 'idempotent',
+  stale_etag: 'fail-closed',
+  foreign_state: 'fail-closed',
+  partial_activation: 'resume-ordered-prefix',
+  crash_recovery: 'resume-same-request',
 })
 const INSTALLER_SECURITY = Object.freeze({
   darwin: Object.freeze({ code_signed: false, notarized: false }),
@@ -1535,28 +1558,19 @@ export function buildPublicationRequest(run, { dryRun = false } = {}) {
       },
     },
     publication_and_activation: {
-      manual_manifest: {
-        key: `desktop/manual/v${run.version}/latest.json`,
-        artifact_path: 'desktop-release-signed.json',
-        write: 'create-only',
-        immutable_object_keys: immutableObjects.map(object => object.key),
+      pointers: Object.fromEntries(POINTER_ACTIVATION_ORDER.map(name => [name, {
+        key: POINTERS[name].key,
+        expected_current: { ...POINTER_PREDECESSOR },
+        target: { ...POINTER_TARGET },
+        compare_and_swap: 'required',
         authenticated_readback: 'required',
-        public_readback: 'required',
-      },
-      pointers: {
-        signed: {
-          key: 'desktop/signed/latest.json', expected_current: { ...POINTER_PREDECESSOR },
-          compare_and_swap: 'required', body: 'exact-signed-manifest-bytes',
-        },
-        legacy: {
-          key: 'desktop/latest.json', expected_current: { ...POINTER_PREDECESSOR },
-          compare_and_swap: 'required', body: 'exact-signed-manifest-bytes', execution_order: 'last',
-        },
-      },
+        public_full_byte_readback: 'required',
+      }])),
+      activation_order: [...POINTER_ACTIVATION_ORDER],
+      recovery: { ...POINTER_RECOVERY, accepted_current_states: [...POINTER_RECOVERY.accepted_current_states] },
       order: [
         'existing-owner-admission-and-ed25519-manifest-signing', 'immutable-create-only', 'authenticated-readback', 'public-readback',
-        'manual-signed-manifest-create-only', 'manual-manifest-signature-and-public-readback', 'signed-pointer-cas',
-        'signed-pointer-public-readback', 'legacy-pointer-cas', 'legacy-pointer-public-readback',
+        'signed-pointer-cas-and-readbacks', 'legacy-pointer-cas-and-readbacks', 'manual-pointer-cas-and-readbacks',
       ],
     },
     delete_objects: [],
@@ -1564,12 +1578,13 @@ export function buildPublicationRequest(run, { dryRun = false } = {}) {
 }
 
 function validPointerIdentity(value) {
-  return exactKeys(value, ['bytes', 'sha256']) && Number.isSafeInteger(value.bytes)
-    && value.bytes > 0 && SHA256.test(value.sha256 ?? '')
+  return exactKeys(value, ['bytes', 'sha256', 'etag']) && Number.isSafeInteger(value.bytes)
+    && value.bytes > 0 && SHA256.test(value.sha256 ?? '') && ETAG.test(value.etag ?? '')
 }
 
 function samePointerIdentity(value, expected) {
-  return validPointerIdentity(value) && value.bytes === expected.bytes && value.sha256 === expected.sha256
+  return validPointerIdentity(value) && value.bytes === expected.bytes
+    && value.sha256 === expected.sha256 && value.etag === expected.etag
 }
 
 function unsignedInstallerSecurity(value) {
@@ -1617,13 +1632,15 @@ export function validatePublicationReceipt(receipt, run, requestSha256) {
   if (!exactKeys(receipt, [
     'schema_version', 'document_type', 'operation', 'status', 'macos_publication_mode', 'installer_security',
     'version', 'source_commit', 'request_sha256', 'manifest_admission', 'immutable_objects',
-    'manual_manifest', 'pointers', 'deleted_objects',
+    'pointers', 'activation_order', 'deleted_objects',
   ])
     || receipt.schema_version !== 1 || receipt.document_type !== 'emate.local-cloudflare-owner-receipt'
     || receipt.operation !== 'publish' || receipt.status !== 'passed' || receipt.macos_publication_mode !== 'unsigned'
     || !unsignedInstallerSecurity(receipt.installer_security)
     || receipt.version !== run.version || receipt.source_commit !== run.source_commit
-    || receipt.request_sha256 !== requestSha256 || !SHA256.test(requestSha256 ?? '') || !exactKeys(receipt.pointers, ['signed', 'legacy'])
+    || receipt.request_sha256 !== requestSha256 || !SHA256.test(requestSha256 ?? '')
+    || !exactKeys(receipt.pointers, POINTER_ACTIVATION_ORDER)
+    || !isDeepStrictEqual(receipt.activation_order, POINTER_ACTIVATION_ORDER)
     || !Array.isArray(receipt.immutable_objects) || receipt.deleted_objects?.length !== 0) {
     throw new Error('Cloudflare publication owner receipt is invalid')
   }
@@ -1638,14 +1655,6 @@ export function validatePublicationReceipt(receipt, run, requestSha256) {
       throw new Error(`Cloudflare immutable object receipt is invalid: ${expected.key}`)
     }
   }
-  const manifest = receipt.manual_manifest
-  const manualKey = `desktop/manual/v${run.version}/latest.json`
-  if (!exactKeys(manifest, ['key', 'bytes', 'sha256', 'write', 'authenticated_readback', 'public_readback'])
-    || manifest.key !== manualKey || !Number.isSafeInteger(manifest.bytes) || manifest.bytes <= 0
-    || !SHA256.test(manifest.sha256 ?? '') || !['created', 'already-exact'].includes(manifest.write)
-    || manifest.authenticated_readback !== 'passed' || manifest.public_readback !== 'passed') {
-    throw new Error('Cloudflare manual manifest receipt is invalid')
-  }
   const admission = receipt.manifest_admission
   if (!exactKeys(admission, [
     'owner', 'status', 'macos_publication_mode', 'schema_version', 'document_type', 'release_status',
@@ -1659,8 +1668,8 @@ export function validatePublicationReceipt(receipt, run, requestSha256) {
     || admission.signature.key_source !== 'existing-base-profile_signing_keys' || admission.signature.verification !== 'passed'
     || !exactKeys(admission.signed_manifest, ['file', 'bytes', 'sha256'])
     || admission.signed_manifest.file !== 'desktop-release-signed.json'
-    || admission.signed_manifest.bytes !== manifest.bytes || admission.signed_manifest.bytes > 16 * 1024
-    || admission.signed_manifest.sha256 !== manifest.sha256
+    || !Number.isSafeInteger(admission.signed_manifest.bytes) || admission.signed_manifest.bytes <= 0
+    || admission.signed_manifest.bytes > 16 * 1024 || !SHA256.test(admission.signed_manifest.sha256 ?? '')
     || !exactKeys(admission.publication_plan, ['file', 'sha256', 'status'])
     || admission.publication_plan.file !== 'cloudflare-publication-plan.json'
     || !SHA256.test(admission.publication_plan.sha256 ?? '') || admission.publication_plan.status !== 'ready-for-cloudflare-plugin'
@@ -1669,12 +1678,27 @@ export function validatePublicationReceipt(receipt, run, requestSha256) {
     || !SHA256.test(admission.admission_receipt.sha256 ?? '') || admission.admission_receipt.status !== 'ready-for-cloudflare-plugin') {
     throw new Error('Desktop manifest admission/signature receipt is invalid')
   }
-  for (const [name, key] of [['signed', 'desktop/signed/latest.json'], ['legacy', 'desktop/latest.json']]) {
+  let appliedDuringThisAttempt = false
+  for (const name of POINTER_ACTIVATION_ORDER) {
     const pointer = receipt.pointers[name]
-    if (!exactKeys(pointer, ['key', 'before', 'after', 'cas', 'public_readback']) || pointer.key !== key
+    const authenticated = pointer?.authenticated_readback
+    const publicReadback = pointer?.public_full_byte_readback
+    if (!exactKeys(pointer, [
+      'key', 'before', 'after', 'cas', 'authenticated_readback', 'public_full_byte_readback',
+    ]) || pointer.key !== POINTERS[name].key
       || !samePointerIdentity(pointer.before, POINTER_PREDECESSOR) || !validPointerIdentity(pointer.after)
-      || pointer.after.bytes !== manifest.bytes || pointer.after.sha256 !== manifest.sha256
-      || pointer.cas !== 'passed' || pointer.public_readback !== 'passed') throw new Error(`Cloudflare ${name} pointer receipt is invalid`)
+      || pointer.after.bytes !== admission.signed_manifest.bytes
+      || pointer.after.sha256 !== admission.signed_manifest.sha256
+      || !['passed', 'already-exact'].includes(pointer.cas)
+      || !exactKeys(authenticated, ['status', 'bytes', 'sha256', 'etag']) || authenticated.status !== 'passed'
+      || authenticated.bytes !== pointer.after.bytes || authenticated.sha256 !== pointer.after.sha256
+      || authenticated.etag !== pointer.after.etag
+      || !exactKeys(publicReadback, ['status', 'bytes', 'sha256']) || publicReadback.status !== 'passed'
+      || publicReadback.bytes !== pointer.after.bytes || publicReadback.sha256 !== pointer.after.sha256) {
+      throw new Error(`Cloudflare ${name} pointer receipt is invalid`)
+    }
+    if (pointer.cas === 'passed') appliedDuringThisAttempt = true
+    else if (appliedDuringThisAttempt) throw new Error('Cloudflare ordered pointer recovery is invalid')
   }
   return receipt
 }
@@ -1685,16 +1709,20 @@ export function buildRollbackRequest(run, publicationReceipt, { dryRun = false }
   }
   verifiedComputerUse(run)
   if (!dryRun && publicationReceipt === undefined) throw new Error('rollback requires the existing Cloudflare owner publication receipt')
-  const pointers = publicationReceipt === undefined
-    ? [
-      { key: 'desktop/signed/latest.json', expected_current: 'from-publication-owner-receipt.after', restore: { ...POINTER_PREDECESSOR } },
-      { key: 'desktop/latest.json', expected_current: 'from-publication-owner-receipt.after', restore: { ...POINTER_PREDECESSOR } },
-    ]
-    : ['signed', 'legacy'].map(name => ({
-      key: publicationReceipt.pointers[name].key,
-      expected_current: publicationReceipt.pointers[name].after,
-      restore: publicationReceipt.pointers[name].before,
-    }))
+  const pointers = POINTER_ROLLBACK_ORDER.map(name => ({
+    key: POINTERS[name].key,
+    expected_current: publicationReceipt === undefined
+      ? {
+        bytes: `from-publication-owner-receipt.pointers.${name}.after.bytes`,
+        sha256: `from-publication-owner-receipt.pointers.${name}.after.sha256`,
+        etag: `from-publication-owner-receipt.pointers.${name}.after.etag`,
+      }
+      : publicationReceipt.pointers[name].after,
+    restore: publicationReceipt === undefined ? { ...POINTER_PREDECESSOR } : publicationReceipt.pointers[name].before,
+    compare_and_swap: 'required',
+    authenticated_readback: 'required',
+    public_full_byte_readback: 'required',
+  }))
   return {
     schema_version: 1,
     document_type: 'emate.local-cloudflare-owner-request',
@@ -1705,11 +1733,10 @@ export function buildRollbackRequest(run, publicationReceipt, { dryRun = false }
     version: run.version,
     source_commit: run.source_commit,
     rebuild: false,
+    rollback_order: [...POINTER_ROLLBACK_ORDER],
     pointer_compare_and_swap: pointers,
-    immutable_objects: [
-      ...objectRecords(run).map(object => ({ key: object.key, action: 'retain' })),
-      { key: `desktop/manual/v${run.version}/latest.json`, action: 'retain' },
-    ],
+    recovery: { ...POINTER_RECOVERY, accepted_current_states: [...POINTER_RECOVERY.accepted_current_states] },
+    immutable_objects: objectRecords(run).map(object => ({ key: object.key, action: 'retain' })),
     delete_objects: [],
   }
 }
