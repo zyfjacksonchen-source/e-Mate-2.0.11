@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash, generateKeyPairSync } from 'node:crypto'
 import {
-  copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
+  copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
@@ -33,8 +33,18 @@ import {
   parseProfileCurrentSnapshot,
   prepareLocalSignedProfilePublication,
   prepareProfilePublication,
+  verifyCompactLocalProfileSignerResult,
+  writeCompactLocalProfileSignerResult,
   writeProfilePublicationBundle,
 } from './publish-profile-r2.mjs'
+import {
+  SIGNER_ACTION_OWNER,
+  SIGNER_ACTION_USES,
+  SIGNER_DISPATCH_REQUEST_PATH,
+  SIGNING_BUNDLE_PATH,
+  SIGNING_INPUT_RECEIPT_PATH,
+  SIGNING_INPUT_REQUEST_PATH,
+} from './signer-transport.mjs'
 
 test('local Profile preparation fails closed without the production signing key', async t => {
   const root = mkdtempSync(join(tmpdir(), 'e-mate-profile-no-key-'))
@@ -107,9 +117,9 @@ function artifactFixture(root, platform, sourceCommit, version) {
   return { primary: file, files: [file] }
 }
 
-async function localSigningFixture({ root, sourceCommit, version, baseId, componentId }) {
+async function localSigningFixture({ root, runParent, sourceCommit, version, baseId, componentId }) {
   const runId = `20260831T120000Z-${sourceCommit.slice(0, 12)}-abcdef`
-  const runRoot = join(root, 'dist/local-runs', runId)
+  const runRoot = join(runParent, runId)
   for (const platform of ['macos', 'windows']) {
     const platformRoot = join(runRoot, 'manifest-inputs', 'platforms', platform)
     const profile = join(platformRoot, 'profile-artifact')
@@ -352,7 +362,20 @@ test('publication admits bootstrap and its direct successor before exposing acti
   execFileSync('git', ['update-index', '--skip-worktree', 'upstream/deepseek-harness', PRODUCT_UI_REFERENCE.path], { cwd: root })
   const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
 
-  const local = await localSigningFixture({ root, sourceCommit, version: releaseVersion, baseId, keyId, componentId })
+  const stagedLocal = await localSigningFixture({
+    root, runParent: join(root, 'dist/local-runs'), sourceCommit, version: releaseVersion, baseId, keyId, componentId,
+  })
+  const runParent = mkdtempSync(join(tmpdir(), 'e-mate-external-local-run-'))
+  t.after(() => rmSync(runParent, { recursive: true, force: true }))
+  const runRoot = join(runParent, stagedLocal.runId)
+  renameSync(stagedLocal.runRoot, runRoot)
+  const local = {
+    ...stagedLocal,
+    runRoot,
+    requestPath: join(runRoot, IMMUTABLE_REQUEST_PATH),
+    snapshotPath: join(runRoot, 'profile-current-snapshot.json'),
+    ledgerPath: join(runRoot, 'manifest-inputs/manifest-inputs.json'),
+  }
   const signing = { EMATE_PROFILE_SIGNING_PRIVATE_KEY: privateKeyPem, EMATE_PROFILE_SIGNING_KEY_ID: keyId }
   const originalRequest = readFileSync(local.requestPath)
   const originalLedger = readFileSync(local.ledgerPath)
@@ -410,6 +433,73 @@ test('publication admits bootstrap and its direct successor before exposing acti
     const admission = JSON.parse(readFileSync(join(directory, 'admission.json'), 'utf8'))
     assert.deepEqual([admission.signature_kind, admission.signature_key_id], ['production', keyId])
   }
+  const requestDescriptor = fileDescriptor(local.runRoot, local.requestPath)
+  local.run.publication = {
+    status: 'awaiting-protected-signer', scope: 'full', owner: SIGNER_ACTION_OWNER,
+    immutable_request: IMMUTABLE_REQUEST_PATH, immutable_request_sha256: requestDescriptor.sha256,
+    immutable_receipt: 'publication/immutable-owner-receipt.json', immutable_receipt_sha256: '1'.repeat(64),
+    compatibility_request: 'publication/compatibility-attestation-request.json',
+    compatibility_request_sha256: '2'.repeat(64),
+    compatibility_receipt: 'publication/compatibility-attestation-receipt.json',
+    compatibility_receipt_sha256: '3'.repeat(64),
+    control_bundle: SIGNING_BUNDLE_PATH, control_bundle_bytes: 100, control_bundle_sha256: '4'.repeat(64),
+    signing_input_request: SIGNING_INPUT_REQUEST_PATH, signing_input_request_sha256: '5'.repeat(64),
+    signing_input_receipt: SIGNING_INPUT_RECEIPT_PATH, signing_input_receipt_sha256: '6'.repeat(64),
+    request: SIGNER_DISPATCH_REQUEST_PATH, request_sha256: '7'.repeat(64), action: SIGNER_ACTION_USES,
+    transaction_mode: local.run.release_transaction.mode,
+  }
+  writeJson(join(local.runRoot, 'run.json'), local.run)
+  const compact = join(local.runRoot, 'profile-compact')
+  const compactReceipt = writeCompactLocalProfileSignerResult(localResult, compact)
+  assert.equal(compactReceipt.component_payloads_in_result, false)
+  assert.deepEqual(readdirSync(compact).sort(), [
+    'profile-component-aggregate.json', 'profile-desired-state', 'profile-publication-plan.json',
+    'profile-signer-result.json',
+  ])
+  const imported = await verifyCompactLocalProfileSignerResult({
+    root, runRoot: local.runRoot, request: local.requestPath, result: compact,
+  })
+  assert.equal(imported.immutable_objects.every(item => item.url.startsWith('https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/')), true)
+  assert.equal(imported.activations.every(item => item.object.url.startsWith('https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/')), true)
+  assert.equal(readdirSync(local.runRoot).some(name => name.startsWith('.profile-import-')
+    || name.startsWith('.profile-aggregate-')), false)
+
+  const planPath = join(compact, 'profile-publication-plan.json')
+  const receiptPath = join(compact, 'profile-signer-result.json')
+  const originalPlan = readFileSync(planPath)
+  const originalCompactReceipt = readFileSync(receiptPath)
+  const traversal = JSON.parse(originalPlan.toString('utf8'))
+  traversal.immutable_objects[0].path = '../escaped.json'
+  writeJson(planPath, traversal)
+  const traversalReceipt = JSON.parse(originalCompactReceipt.toString('utf8'))
+  traversalReceipt.publication_plan = fileDescriptor(compact, planPath)
+  writeJson(receiptPath, traversalReceipt)
+  await assert.rejects(verifyCompactLocalProfileSignerResult({
+    root, runRoot: local.runRoot, request: local.requestPath, result: compact,
+  }), /publication object is invalid/u)
+  assert.throws(() => lstatSync(join(local.runRoot, 'escaped.json')), /ENOENT/u)
+  writeFileSync(planPath, originalPlan)
+  writeFileSync(receiptPath, originalCompactReceipt)
+  const githubPlan = JSON.parse(originalPlan.toString('utf8'))
+  githubPlan.immutable_objects[0].url = 'https://github.com/example/component.json'
+  writeJson(planPath, githubPlan)
+  const githubReceipt = JSON.parse(originalCompactReceipt.toString('utf8'))
+  githubReceipt.publication_plan = fileDescriptor(compact, planPath)
+  writeJson(receiptPath, githubReceipt)
+  await assert.rejects(verifyCompactLocalProfileSignerResult({
+    root, runRoot: local.runRoot, request: local.requestPath, result: compact,
+  }), /publication object is invalid/u)
+  writeFileSync(planPath, originalPlan)
+  writeFileSync(receiptPath, originalCompactReceipt)
+  const desiredState = join(compact, 'profile-desired-state/darwin-arm64.json')
+  const desiredBytes = readFileSync(desiredState)
+  writeFileSync(desiredState, Buffer.alloc(desiredBytes.byteLength, 120))
+  await assert.rejects(verifyCompactLocalProfileSignerResult({
+    root, runRoot: local.runRoot, request: local.requestPath, result: compact,
+  }), /drifted/u)
+  writeFileSync(desiredState, desiredBytes)
+  assert.equal(readdirSync(local.runRoot).some(name => name.startsWith('.profile-import-')
+    || name.startsWith('.profile-aggregate-')), false)
   const artifact = join(root, 'dist/components/fixture')
   emitComponent({ root, id: componentId, out: artifact, sourceCommit })
   const candidates = []

@@ -237,10 +237,11 @@ export async function composeProfileReleaseCandidate(options) {
   }
   const sourceCommit = options.sourceCommit
   if (!SHA40.test(sourceCommit)) throw new Error('Profile release source commit is invalid')
+  const outputRoot = resolve(options.outputRoot ?? root)
   const output = resolve(options.output)
-  const outputRelative = relative(root, output)
-  if (output === root || outputRelative === '' || outputRelative === '..' || outputRelative.startsWith(`..${sep}`)) {
-    throw new Error('Profile release output must stay inside the repository')
+  const outputRelative = relative(outputRoot, output)
+  if (output === outputRoot || outputRelative === '' || outputRelative === '..' || outputRelative.startsWith(`..${sep}`)) {
+    throw new Error('Profile release output must stay inside its trusted output root')
   }
   const artifacts = scanComponentArtifacts(options.artifactRoots, base)
   const changed = exactChangedArtifacts(artifacts, target, changedIds)
