@@ -41,6 +41,11 @@ const WIN_SHA = 'c'.repeat(64)
 const MAC_BLOCKMAP_SHA = 'd'.repeat(64)
 const WIN_BLOCKMAP_SHA = 'e'.repeat(64)
 const RUN_ID = '20260830T000000Z-aaaaaaaaaaaa-abcdef'
+const POINTER_BEFORE = Object.freeze({
+  bytes: 2961,
+  sha256: '838115146f74e18de0fc90e3dc586f6bd5eab706a0e6dcbc27e6ad5a79c642fb',
+  etag: '61df621671e90dc90ce457494e09b295',
+})
 
 async function temporary() {
   return mkdtemp(join(tmpdir(), 'emate-local-flow-test-'))
@@ -662,7 +667,7 @@ test('verify requires update/relaunch, failed-health rollback, and macOS Compute
   }
 })
 
-test('publish keeps installers unsigned while reusing the existing schema-2 manifest signer and exact predecessor CAS', () => {
+test('publish keeps installers immutable and makes all three release surfaces ordered CAS pointers', () => {
   const run = verifiedRun()
   const publish = buildPublicationRequest(run, { dryRun: true })
   assert.equal(publish.mode, 'dry-run')
@@ -690,19 +695,46 @@ test('publish keeps installers unsigned while reusing the existing schema-2 mani
     `desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-win-x64-Setup.exe`,
     `desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-win-x64-Setup.exe.blockmap`,
   ])
-  assert.deepEqual(publish.publication_and_activation.manual_manifest.immutable_object_keys,
-    publish.immutable_objects.map(item => item.key))
-  assert.deepEqual(publish.publication_and_activation.pointers.signed.expected_current, {
-    bytes: 2961, sha256: 'd26b9ffb5f30531bc5de6c9f66aab47c3718248e2ff109d82cd3a763f0c02887',
+  assert.deepEqual(publish.publication_and_activation.activation_order, ['signed', 'legacy', 'manual'])
+  assert.deepEqual(Object.keys(publish.publication_and_activation.pointers), ['signed', 'legacy', 'manual'])
+  for (const [name, key] of [
+    ['signed', 'desktop/signed/latest.json'],
+    ['legacy', 'desktop/latest.json'],
+    ['manual', 'desktop/manual/v2.0.15/latest.json'],
+  ]) {
+    assert.deepEqual(publish.publication_and_activation.pointers[name], {
+      key,
+      expected_current: POINTER_BEFORE,
+      target: {
+        artifact_path: 'desktop-release-signed.json',
+        bytes: 'from-manifest-admission.signed_manifest.bytes',
+        sha256: 'from-manifest-admission.signed_manifest.sha256',
+        etag: 'from-conditional-write-result.etag',
+      },
+      compare_and_swap: 'required',
+      authenticated_readback: 'required',
+      public_full_byte_readback: 'required',
+    })
+  }
+  assert.deepEqual(publish.publication_and_activation.recovery, {
+    accepted_current_states: ['exact-before', 'exact-after'],
+    already_exact: 'idempotent',
+    stale_etag: 'fail-closed',
+    foreign_state: 'fail-closed',
+    partial_activation: 'resume-ordered-prefix',
+    crash_recovery: 'resume-same-request',
   })
-  assert.deepEqual(publish.publication_and_activation.pointers.legacy.expected_current,
-    publish.publication_and_activation.pointers.signed.expected_current)
-  assert.equal(publish.publication_and_activation.pointers.legacy.execution_order, 'last')
+  assert.doesNotMatch(JSON.stringify(publish), /manual-signed-manifest-create-only/u)
+  assert.doesNotMatch(JSON.stringify(publish), /d26b9ffb5f30531bc5de6c9f66aab47c3718248e2ff109d82cd3a763f0c02887/u)
   assert.deepEqual(publish.delete_objects, [])
   const rollback = buildRollbackRequest(run, undefined, { dryRun: true })
   assert.equal(rollback.mode, 'dry-run')
-  assert.deepEqual(rollback.immutable_objects.map(item => item.action), ['retain', 'retain', 'retain', 'retain', 'retain'])
-  assert.equal(rollback.immutable_objects.at(-1).key, 'desktop/manual/v2.0.15/latest.json')
+  assert.deepEqual(rollback.rollback_order, ['manual', 'legacy', 'signed'])
+  assert.deepEqual(rollback.pointer_compare_and_swap.map(item => item.key), [
+    'desktop/manual/v2.0.15/latest.json', 'desktop/latest.json', 'desktop/signed/latest.json',
+  ])
+  assert.deepEqual(rollback.immutable_objects.map(item => item.action), ['retain', 'retain', 'retain', 'retain'])
+  assert.equal(rollback.immutable_objects.some(item => item.key === 'desktop/manual/v2.0.15/latest.json'), false)
   assert.deepEqual(rollback.delete_objects, [])
   assert.throws(() => buildRollbackRequest(run), /publication receipt/u)
   const noWindowsMatrix = structuredClone(run)
@@ -760,14 +792,19 @@ test('macOS-only waiver publishes immutable bytes without a schema-2 manifest or
   }, run, requestSha256), /macOS-only publication owner receipt/u)
 })
 
-test('publication receipt requires existing-owner manifest admission/signature and identical manual/signed/legacy bytes', () => {
+test('publication receipt requires exact ordered CAS completion and per-pointer full readbacks', () => {
   const run = verifiedRun()
   const requestSha256 = '1'.repeat(64)
   const request = buildPublicationRequest(run, { dryRun: true })
-  const manual = {
-    key: 'desktop/manual/v2.0.15/latest.json', bytes: 2961, sha256: '2'.repeat(64),
-    write: 'created', authenticated_readback: 'passed', public_readback: 'passed',
-  }
+  const target = { bytes: 2961, sha256: '2'.repeat(64), etag: '2'.repeat(32) }
+  const pointer = (key, cas = 'passed') => ({
+    key,
+    before: POINTER_BEFORE,
+    after: target,
+    cas,
+    authenticated_readback: { status: 'passed', ...target },
+    public_full_byte_readback: { status: 'passed', bytes: target.bytes, sha256: target.sha256 },
+  })
   const receipt = {
     schema_version: 1,
     document_type: 'emate.local-cloudflare-owner-receipt',
@@ -793,7 +830,7 @@ test('publication receipt requires existing-owner manifest admission/signature a
         algorithm: 'ed25519', key_id: 'desktop-release-key',
         key_source: 'existing-base-profile_signing_keys', verification: 'passed',
       },
-      signed_manifest: { file: 'desktop-release-signed.json', bytes: manual.bytes, sha256: manual.sha256 },
+      signed_manifest: { file: 'desktop-release-signed.json', bytes: target.bytes, sha256: target.sha256 },
       publication_plan: { file: 'cloudflare-publication-plan.json', sha256: '4'.repeat(64), status: 'ready-for-cloudflare-plugin' },
       admission_receipt: { file: 'cloudflare-plugin-handoff.json', sha256: '5'.repeat(64), status: 'ready-for-cloudflare-plugin' },
     },
@@ -801,16 +838,16 @@ test('publication receipt requires existing-owner manifest admission/signature a
       key: object.key, bytes: object.bytes, sha256: object.sha256,
       write: 'created', authenticated_readback: 'passed', public_readback: 'passed',
     })),
-    manual_manifest: manual,
     pointers: {
-      signed: { key: 'desktop/signed/latest.json', before: { bytes: 2961, sha256: 'd26b9ffb5f30531bc5de6c9f66aab47c3718248e2ff109d82cd3a763f0c02887' }, after: { bytes: manual.bytes, sha256: manual.sha256 }, cas: 'passed', public_readback: 'passed' },
-      legacy: { key: 'desktop/latest.json', before: { bytes: 2961, sha256: 'd26b9ffb5f30531bc5de6c9f66aab47c3718248e2ff109d82cd3a763f0c02887' }, after: { bytes: manual.bytes, sha256: manual.sha256 }, cas: 'passed', public_readback: 'passed' },
+      signed: pointer('desktop/signed/latest.json'),
+      legacy: pointer('desktop/latest.json'),
+      manual: pointer('desktop/manual/v2.0.15/latest.json'),
     },
+    activation_order: ['signed', 'legacy', 'manual'],
     deleted_objects: [],
   }
   assert.equal(validatePublicationReceipt(receipt, run, requestSha256), receipt)
   assert.throws(() => validatePublicationReceipt({ ...receipt, immutable_objects: receipt.immutable_objects.slice(1) }, run, requestSha256), /object receipt set/u)
-  assert.throws(() => validatePublicationReceipt({ ...receipt, manual_manifest: { ...manual, public_readback: 'failed' } }, run, requestSha256), /manual manifest receipt/u)
   assert.throws(() => validatePublicationReceipt({
     ...receipt,
     manifest_admission: {
@@ -837,13 +874,62 @@ test('publication receipt requires existing-owner manifest admission/signature a
     ...receipt,
     pointers: {
       ...receipt.pointers,
-      signed: { ...receipt.pointers.signed, before: { bytes: 2961, sha256: '3'.repeat(64) } },
+      signed: { ...receipt.pointers.signed, before: { ...POINTER_BEFORE, sha256: '3'.repeat(64) } },
     },
   }, run, requestSha256), /signed pointer receipt/u)
   assert.throws(() => validatePublicationReceipt({
-    ...receipt,
-    pointers: { ...receipt.pointers, legacy: { ...receipt.pointers.legacy, public_readback: 'failed' } },
+    ...receipt, pointers: {
+      ...receipt.pointers,
+      signed: { ...receipt.pointers.signed, before: { ...POINTER_BEFORE, etag: '3'.repeat(32) } },
+    },
+  }, run, requestSha256), /signed pointer receipt/u)
+  assert.throws(() => validatePublicationReceipt({
+    ...receipt, pointers: {
+      ...receipt.pointers,
+      legacy: {
+        ...receipt.pointers.legacy,
+        public_full_byte_readback: { ...receipt.pointers.legacy.public_full_byte_readback, sha256: '3'.repeat(64) },
+      },
+    },
   }, run, requestSha256), /legacy pointer receipt/u)
+  assert.throws(() => validatePublicationReceipt({
+    ...receipt, pointers: {
+      ...receipt.pointers,
+      manual: {
+        ...receipt.pointers.manual,
+        authenticated_readback: { ...receipt.pointers.manual.authenticated_readback, etag: '3'.repeat(32) },
+      },
+    },
+  }, run, requestSha256), /manual pointer receipt/u)
+  assert.throws(() => validatePublicationReceipt({
+    ...receipt, activation_order: ['manual', 'legacy', 'signed'],
+  }, run, requestSha256), /publication owner receipt/u)
+
+  const crashRecovery = structuredClone(receipt)
+  crashRecovery.pointers.signed.cas = 'already-exact'
+  crashRecovery.pointers.legacy.cas = 'already-exact'
+  assert.equal(validatePublicationReceipt(crashRecovery, run, requestSha256), crashRecovery)
+
+  const alreadyExact = structuredClone(crashRecovery)
+  alreadyExact.pointers.manual.cas = 'already-exact'
+  assert.equal(validatePublicationReceipt(alreadyExact, run, requestSha256), alreadyExact)
+
+  const outOfOrderPartial = structuredClone(receipt)
+  outOfOrderPartial.pointers.legacy.cas = 'already-exact'
+  assert.throws(() => validatePublicationReceipt(outOfOrderPartial, run, requestSha256), /ordered pointer recovery/u)
+
+  const rollback = buildRollbackRequest(run, receipt)
+  assert.deepEqual(rollback.rollback_order, ['manual', 'legacy', 'signed'])
+  assert.deepEqual(rollback.pointer_compare_and_swap.map(item => item.key), [
+    'desktop/manual/v2.0.15/latest.json', 'desktop/latest.json', 'desktop/signed/latest.json',
+  ])
+  for (const item of rollback.pointer_compare_and_swap) {
+    assert.equal(item.compare_and_swap, 'required')
+    assert.equal(item.authenticated_readback, 'required')
+    assert.equal(item.public_full_byte_readback, 'required')
+    assert.deepEqual(item.expected_current, target)
+    assert.deepEqual(item.restore, POINTER_BEFORE)
+  }
 })
 
 test('Desktop Yarn builds reuse the inherited Corepack cache while npm gets the verified carrier', async () => {
