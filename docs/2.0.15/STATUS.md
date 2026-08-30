@@ -4,16 +4,16 @@ Status vocabulary: `TODO / INVESTIGATED / CODE_COMPLETE / NARROW_TEST_PASSED / I
 
 ## 2026-08-31 current override
 
-The tables below retain historical 2.0.15 evidence. The current release verdict is `BLOCKED / DO_NOT_PUBLISH` at clean source anchor `d80e56bb09f9181a8030c27ce569f986fb59f62f`:
+The tables below retain historical 2.0.15 evidence. The current release verdict remains `BLOCKED / DO_NOT_PUBLISH`; accepted product/process integration now runs through `fedcaed39b68c93261eae8680eddfac8f02cacf9`, but no final source or candidate is frozen:
 
 | Current gate | State | Exact boundary |
 | --- | --- | --- |
-| Source integration | `NARROW_TEST_PASSED` | clean v14/Harness `d19aae6…`; later accepted fixes still require integration |
+| Source integration | `NARROW_TEST_PASSED` | clean v14/Harness `d19aae6…`; T00R2 governance, T16R8 Glass and T20R4 rollback receipt are integrated |
 | Final product version | `BLOCKED` | public 2.0.15 cannot online-update to different 2.0.15 bytes; explicit 2.0.15/manual-reinstall or higher-version decision required |
-| Current candidate | `BLOCKED` | no candidate exists for `d80e56b…`; old d882 and earlier artifacts cannot be reused |
-| Glass Composer owner | `BLOCKED` | plugin still guessed the semantic host with `closest()`; dedicated root-cause Owner active |
-| Local rollback ledger | `BLOCKED` | request existed but the same run could not validate/import the existing R2 Owner terminal receipt; dedicated Owner active |
-| Usage Dashboard | `BLOCKED` | source T10R2 labels are correct, production static bundle still serves old labels; static-only activation pending |
+| Current candidate | `BLOCKED` | no candidate exists for the current integrated source; old d882 and earlier artifacts cannot be reused |
+| Glass Composer owner | `NARROW_TEST_PASSED` | `9bb93d6618`: no ancestor guess; Glass build/contract `1/1`, Shell build/composer `6/6`, Chromium hero/active light/dark geometry pass; installed candidate still open |
+| Local rollback ledger | `NARROW_TEST_PASSED` | `fedcaed39b`: exact R2 Owner receipt import closes the same run, cross-run/source/version/request and ordered-recovery negatives fail; local-flow `31/31`; real production rollback open |
+| Usage Dashboard | `NARROW_TEST_PASSED` | production `current` now points to `usage-2.0.15-task-scenarios-d80e56b-544cbfe0a6d9`; both public domains return exact JS SHA `544cbfe0…046a` and all five T10R2 labels; backend and R2 untouched |
 | Windows | `INVESTIGATED` | SSH and Codex Remote ready for the one final candidate; no exact candidate install receipt exists |
 | macOS/Windows installed matrix | `BLOCKED` | all product changes, built-in Tools, update, failed-health rollback and exact-byte receipts remain open |
 | Cloudflare R2 publication | `BLOCKED` | old public pointers are internally consistent; no current signed manifest, CAS activation, rollback or public readback exists |
