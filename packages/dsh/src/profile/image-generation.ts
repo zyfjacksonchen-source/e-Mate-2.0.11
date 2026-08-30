@@ -1113,13 +1113,27 @@ function childProjectionCallId(childSessionId, receipt) {
   ]))}`
 }
 
-function projectSettledChildImages(agents, info) {
-  if (info?.local !== true || typeof info.id !== 'string') return
+function observeChildImageProjection(agents, runs, info) {
+  if (info?.local !== true || typeof info.id !== 'string' || typeof info.runId !== 'string') return
   const child = agents.get(info.id)
   const parentSessionId = child?.session?.header?.parentSession
   if (child?.session?.header?.id !== info.id || typeof parentSessionId !== 'string') return
   const parent = agents.get(parentSessionId)
-  if (parent === undefined || !agents.isOwnedBy(info.id, parent)) return
+  if (parent?.session?.header?.id !== parentSessionId || !agents.isOwnedBy(info.id, parent)) return
+  runs.set(info.runId, { child, parent })
+}
+
+function projectSettledChildImages(agents, runs, info) {
+  if (info?.local !== true || typeof info.id !== 'string' || typeof info.runId !== 'string') return
+  const observed = runs.get(info.runId)
+  if (observed !== undefined && observed.child?.session?.header?.id !== info.id) return
+  runs.delete(info.runId)
+  const child = observed?.child ?? agents.get(info.id)
+  const parentSessionId = child?.session?.header?.parentSession
+  if (child?.session?.header?.id !== info.id || typeof parentSessionId !== 'string') return
+  const parent = observed?.parent ?? agents.get(parentSessionId)
+  if (parent?.session?.header?.id !== parentSessionId || agents.get(parentSessionId) !== parent
+    || observed === undefined && !agents.isOwnedBy(info.id, parent)) return
   const receipts = new Map()
   for (const event of child.session.events) {
     if (event?.type !== 'emate/image-output'
@@ -1228,7 +1242,9 @@ export async function apply(ctx, config = {}) {
   if (subagents === undefined) throw new Error('managed image generation requires the native DSH subagent runtime')
   const agents = ctx.get('agents')
   if (agents === undefined) throw new Error('managed image generation requires the native DSH Agent registry')
-  ctx.on('subagent/end', info => projectSettledChildImages(agents, info))
+  const childImageRuns = new Map()
+  ctx.on('subagent/start', info => observeChildImageProjection(agents, childImageRuns, info))
+  ctx.on('subagent/end', info => projectSettledChildImages(agents, childImageRuns, info))
   const client = createImageClient({
     request: identity.request.bind(identity),
     root,
