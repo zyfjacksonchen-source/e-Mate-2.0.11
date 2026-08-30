@@ -17,7 +17,9 @@ import {
   buildReleaseTransactionPlan,
   buildRollbackRequest,
   candidateFailureDetails,
+  createPlatformManifestInputReceipt,
   devChecks,
+  finalizeManifestInputLedger,
   importRollbackOwnerReceipt,
   importWindowsRemoteResult,
   markWindowsUnavailable,
@@ -32,12 +34,14 @@ import {
   validatePublicationReceipt,
   validateRollbackReceipt,
   validateRemoteHostname,
+  verifyManifestInputLedger,
   verifyComputerUseReceipt,
   verifyLocalArtifact,
   verifyNpmCollectorCarrier,
   windowsRemoteRequest,
 } from './local-flow.mjs'
 import { pinnedYarnInvocation } from './package-manager.mjs'
+import { canonicalProfileJson } from '../desktop/e-mate-desktop/src/profile-release.ts'
 
 const SHA = 'a'.repeat(40)
 const MAC_SHA = 'b'.repeat(64)
@@ -134,6 +138,88 @@ async function artifactFixture(root, platform, { blockmap = false } = {}) {
   return { primary: { name, bytes: bytes.byteLength, sha256 }, files }
 }
 
+async function manifestPlatformFixture(root, platform) {
+  const targets = [
+    { platform: 'darwin', arch: 'arm64', runtime_abi: 'fixture', minimum_os: '14.0', signing: { scheme: 'adhoc', identity: 'adhoc' }, native_paths: ['native/macos'] },
+    { platform: 'darwin', arch: 'x64', runtime_abi: 'fixture', minimum_os: '14.0', signing: { scheme: 'adhoc', identity: 'adhoc' }, native_paths: ['native/macos'] },
+    { platform: 'win32', arch: 'x64', runtime_abi: 'none', minimum_os: '10.0', signing: { scheme: 'unsigned', identity: 'none' }, native_paths: [] },
+  ]
+  const inventory = {
+    schema_version: 1,
+    components: [
+      { id: '@e-mate/dsh-plugin-portable', root: 'packages/dsh-plugin-portable', kind: 'profile', desktop: 'hot-profile' },
+      { id: '@e-mate/dsh-plugin-native', root: 'packages/dsh-plugin-native', kind: 'platform-profile', desktop: 'platform-profile', targets },
+    ],
+  }
+  const base = {
+    schema_version: 1,
+    id: 'e-mate-desktop-profile-fixture',
+    schedule_protocol_floor: 1,
+    harness_commit: '1'.repeat(40),
+    profile_signing_keys: [{
+      id: 'fixture-key', algorithm: 'ed25519',
+      public_key_spki_der_base64: 'MCowBQYDK2VwAyEA0+3XBSNHP2aAp7jg++srGAjEpIICRypfzX5WWykO4oM=',
+    }],
+  }
+  const jsonBytes = value => Buffer.from(`${JSON.stringify(value, null, 2)}\n`)
+  const inventoryBytes = jsonBytes(inventory)
+  await mkdir(join(root, 'profile-artifact', 'dsh', 'profile'), { recursive: true })
+  await mkdir(join(root, 'profile-artifact', 'dsh-plugin-portable', 'lib'), { recursive: true })
+  await writeFile(join(root, 'base-contract.json'), jsonBytes(base))
+  await writeFile(join(root, 'component-inventory.json'), inventoryBytes)
+  await writeFile(join(root, 'profile-artifact', 'dsh', 'profile', 'component-inventory.json'), inventoryBytes)
+  await writeFile(join(root, 'profile-artifact', 'dsh-plugin-portable', 'lib', 'index.js'), 'export {}\n')
+  const profileFiles = [
+    ['dsh/profile/component-inventory.json', inventoryBytes],
+    ['dsh-plugin-portable/lib/index.js', Buffer.from('export {}\n')],
+  ].map(([path, bytes]) => ({ path, bytes: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex') }))
+    .sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
+  const profileTreeSha256 = createHash('sha256')
+    .update(Buffer.from('e-mate-staged-profile-tree-v1\0', 'utf8'))
+    .update(canonicalProfileJson(profileFiles))
+    .digest('hex')
+  await writeFile(join(root, 'profile-build-receipt.json'), jsonBytes({
+    schema_version: 1,
+    document_type: 'emate.desktop-profile-build-receipt',
+    source_commit: SHA,
+    base_contract_id: base.id,
+    inventory_sha256: createHash('sha256').update(inventoryBytes).digest('hex'),
+    staged_profile_tree_sha256: profileTreeSha256,
+    file_count: profileFiles.length,
+    total_bytes: profileFiles.reduce((sum, file) => sum + file.bytes, 0),
+  }))
+  const jobs = platform === 'macos'
+    ? [{ component: inventory.components[0], target: null }, { component: inventory.components[1], target: targets[0] }, { component: inventory.components[1], target: targets[1] }]
+    : [{ component: inventory.components[1], target: targets[2] }]
+  for (const job of jobs) {
+    const slug = job.component.id.replace('@e-mate/', '')
+    const target = job.target === null ? null : `${job.target.platform}-${job.target.arch}`
+    const payload = join(root, 'unsigned-components', slug, ...(target === null ? [] : [target]))
+    const packageBytes = jsonBytes({ name: job.component.id, version: '2.0.15', main: 'lib/index.js' })
+    await mkdir(join(payload, 'files'), { recursive: true })
+    await writeFile(join(payload, 'files', 'package.json'), packageBytes)
+    await writeFile(join(payload, 'manifest.json'), jsonBytes({
+      schema_version: 1,
+      id: job.component.id,
+      kind: job.component.kind,
+      target: job.target,
+      source_commit: SHA,
+      base_contracts: [base.id],
+      schedule_protocol_floor: 1,
+      total_bytes: packageBytes.byteLength,
+      files: [{
+        path: 'package.json', bytes: packageBytes.byteLength,
+        sha256: createHash('sha256').update(packageBytes).digest('hex'), mode: '0644',
+      }],
+    }))
+  }
+  await createPlatformManifestInputReceipt(root, {
+    platform,
+    sourceCommit: SHA,
+    toolchain: { node: process.versions.node, pnpm: '11.7.0', yarn: '4.18.0', npm: '11.17.0' },
+  })
+}
+
 async function windowsRemoteFixture(root) {
   const run = {
     run_id: RUN_ID,
@@ -153,11 +239,14 @@ async function windowsRemoteFixture(root) {
   } }
   const artifacts = join(root, 'returned', 'artifacts', 'windows')
   const fixture = await artifactFixture(artifacts, 'windows')
+  const manifestRoot = join(root, 'returned', 'manifest-inputs', 'windows')
+  await manifestPlatformFixture(manifestRoot, 'windows')
   const resultPath = join(root, 'returned', 'codex-remote-result.json')
   const logBytes = Buffer.from('Windows build completed\n')
   await writeFile(join(root, 'returned', 'windows.log'), logBytes)
   const writeResult = async (files = fixture.files, extra = {}) => {
     const receiptBytes = await readFile(join(artifacts, 'local-artifact-receipt.json'))
+    const manifestReceiptBytes = await readFile(join(manifestRoot, 'platform-inputs.json'))
     await writeFile(resultPath, `${JSON.stringify({
       schema_version: 1,
       document_type: 'emate.local-windows-codex-remote-result',
@@ -171,6 +260,11 @@ async function windowsRemoteFixture(root) {
       artifact_receipt: {
         file: 'artifacts/windows/local-artifact-receipt.json',
         sha256: createHash('sha256').update(receiptBytes).digest('hex'),
+      },
+      manifest_input_receipt: {
+        file: 'manifest-inputs/windows/platform-inputs.json',
+        bytes: manifestReceiptBytes.byteLength,
+        sha256: createHash('sha256').update(manifestReceiptBytes).digest('hex'),
       },
       log: {
         file: 'windows.log', bytes: logBytes.byteLength,
@@ -252,6 +346,40 @@ function acceptance(platform, artifactSha256) {
   }
 }
 
+function manifestInputsFixture() {
+  const descriptor = (path, sha256 = '9'.repeat(64)) => ({ path, bytes: 10, sha256 })
+  return {
+    schema_version: 1,
+    document_type: 'emate.local-manifest-input-binding',
+    status: 'complete-unsigned-inputs',
+    ledger: descriptor('manifest-inputs/manifest-inputs.json'),
+    base_contract: {
+      ...descriptor('manifest-inputs/platforms/macos/base-contract.json'),
+      id: 'e-mate-desktop-profile-v14-dsh-d19aae6da310',
+      schedule_protocol_floor: 1,
+      harness_commit: '1'.repeat(40),
+      trusted_signing_key_ids: ['e0a81164526dcbcd'],
+    },
+    component_inventory: descriptor('manifest-inputs/platforms/macos/component-inventory.json'),
+    profile_build_receipts: {
+      macos: descriptor('manifest-inputs/platforms/macos/profile-build-receipt.json'),
+      windows: descriptor('manifest-inputs/platforms/windows/profile-build-receipt.json'),
+    },
+    platform_receipts: {
+      macos: descriptor('manifest-inputs/platforms/macos/platform-inputs.json'),
+      windows: descriptor('manifest-inputs/platforms/windows/platform-inputs.json'),
+    },
+    artifact_receipts: {
+      macos: descriptor('artifacts/macos/local-artifact-receipt.json'),
+      windows: descriptor('artifacts/windows/local-artifact-receipt.json'),
+    },
+    local_candidate_provenance: descriptor('manifest-inputs/local-candidate-provenance.json'),
+    profile_signing: 'awaiting-existing-owner',
+    client_compatible_provenance: 'open-existing-owner',
+    targets: ['darwin-arm64', 'darwin-x64', 'win32-x64'],
+  }
+}
+
 function verifiedRun(version = '2.0.15') {
   const macPrimary = { name: `e-Mate-${version}-mac-universal.dmg`, bytes: 10, sha256: MAC_SHA }
   const winPrimary = { name: `e-Mate-${version}-win-x64-Setup.exe`, bytes: 20, sha256: WIN_SHA }
@@ -259,6 +387,7 @@ function verifiedRun(version = '2.0.15') {
     run_id: RUN_ID,
     version,
     source_commit: SHA,
+    manifest_inputs: manifestInputsFixture(),
     verification: {
       status: 'passed',
       artifacts: {
@@ -516,6 +645,15 @@ test('Windows Codex Remote import binds source, host, receipt, artifact bytes, a
     const imported = await importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath)
     assert.deepEqual(imported.primary, remote.fixture.primary)
 
+    const payload = join(remote.returned, 'manifest-inputs', 'windows', 'unsigned-components', 'dsh-plugin-native', 'win32-x64', 'manifest.json')
+    const payloadBytes = await readFile(payload)
+    await rm(payload)
+    await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /ENOENT|no such file/u)
+    await writeFile(payload, payloadBytes)
+    await writeFile(payload, Buffer.concat([payloadBytes, Buffer.from('\n')]))
+    await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /manifest input receipt is invalid/u)
+    await writeFile(payload, payloadBytes)
+
     await remote.writeResult(remote.fixture.files, { host: 'OTHER-HOST' })
     await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /must be DESKTOP-KH19ARC/u)
     await remote.writeResult(remote.fixture.files, { schema_version: 2 })
@@ -574,6 +712,77 @@ test('Windows Codex Remote import requires the exact awaiting request state', as
         /exact awaiting request state/u,
       )
     }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('full publication binds exact local manifest inputs and fails closed on run, file, or path drift', async () => {
+  const root = await temporary()
+  const directory = join(root, 'run')
+  const run = { run_id: RUN_ID, version: '2.0.15', source_commit: SHA }
+  try {
+    await artifactFixture(join(directory, 'artifacts', 'macos'), 'macos')
+    await artifactFixture(join(directory, 'artifacts', 'windows'), 'windows')
+    await manifestPlatformFixture(join(directory, 'manifest-inputs', 'platforms', 'macos'), 'macos')
+    await manifestPlatformFixture(join(directory, 'manifest-inputs', 'platforms', 'windows'), 'windows')
+    const binding = await finalizeManifestInputLedger(directory, run)
+    const ledger = await verifyManifestInputLedger(directory, run)
+    assert.equal(binding.profile_signing, 'awaiting-existing-owner')
+    assert.equal(binding.client_compatible_provenance, 'open-existing-owner')
+    assert.deepEqual(binding.targets, ['darwin-arm64', 'darwin-x64', 'win32-x64'])
+    assert.equal(ledger.files.every(file => file.path && file.bytes > 0 && /^[0-9a-f]{64}$/u.test(file.sha256)), true)
+    const provenance = await readFile(join(directory, binding.local_candidate_provenance.path), 'utf8')
+    assert.doesNotMatch(provenance, /github|artifact_id|build_run_id|ci_run_id|profile_run_id|\/Users\/|[A-Za-z]:\\Users\\|BEGIN [A-Z ]*PRIVATE KEY|(?:sk|rk|sess)-[A-Za-z0-9_-]{20,}/iu)
+
+    const publishRun = bindTransaction(verifiedRun())
+    publishRun.manifest_inputs = binding
+    const request = buildPublicationRequest(publishRun, { dryRun: true })
+    assert.deepEqual(request.manifest_admission_and_signing.inputs, binding)
+    assert.equal(request.distribution_origin, R2_ORIGIN)
+    assert.equal(request.manifest_admission_and_signing.profile_signing.status, 'awaiting-existing-owner')
+
+    await writeFile(join(root, 'advanced-current-checkout.txt'), 'new unrelated source checkout state\n')
+    assert.equal((await verifyManifestInputLedger(directory, run)).source_commit, SHA)
+
+    const basePath = join(directory, binding.base_contract.path)
+    const baseBytes = await readFile(basePath)
+    await writeFile(basePath, Buffer.concat([baseBytes, Buffer.from('\n')]))
+    await assert.rejects(verifyManifestInputLedger(directory, run), /drift|invalid/u)
+    await writeFile(basePath, baseBytes)
+
+    const platformReceiptPath = join(directory, binding.platform_receipts.windows.path)
+    const platformReceiptBytes = await readFile(platformReceiptPath)
+    await writeFile(platformReceiptPath, Buffer.concat([platformReceiptBytes, Buffer.from('\n')]))
+    await assert.rejects(verifyManifestInputLedger(directory, run), /ledger|receipt|provenance/u)
+    await writeFile(platformReceiptPath, platformReceiptBytes)
+
+    const extra = join(directory, 'manifest-inputs', 'unexpected.txt')
+    await writeFile(extra, 'unexpected\n')
+    await assert.rejects(verifyManifestInputLedger(directory, run), /ledger is invalid/u)
+    await rm(extra)
+
+    const escape = join(directory, 'manifest-inputs', 'escape')
+    await symlink(join(root, 'advanced-current-checkout.txt'), escape)
+    await assert.rejects(verifyManifestInputLedger(directory, run), /contains a symlink/u)
+    await rm(escape)
+
+    await assert.rejects(verifyManifestInputLedger(directory, { ...run, run_id: '20260830T000000Z-bbbbbbbbbbbb-abcdef' }), /provenance|ledger/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('local manifest inputs reject same-size staged Profile content drift', async () => {
+  const root = await temporary()
+  try {
+    await manifestPlatformFixture(root, 'macos')
+    await writeFile(join(root, 'profile-artifact', 'dsh-plugin-portable', 'lib', 'index.js'), 'export{ }\n')
+    await assert.rejects(createPlatformManifestInputReceipt(root, {
+      platform: 'macos',
+      sourceCommit: SHA,
+      toolchain: { node: process.versions.node, pnpm: '11.7.0', yarn: '4.18.0', npm: '11.17.0' },
+    }), /Profile build receipt does not match its exact staged tree/u)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -814,6 +1023,15 @@ test('same-version exception is explicit, three-key CAS, R2-only, and reversible
   })
   assert.equal(publish.manifest_admission_and_signing.owner,
     'zyfjacksonchen-source/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123')
+  assert.deepEqual(publish.manifest_admission_and_signing.inputs, run.manifest_inputs)
+  assert.deepEqual(publish.manifest_admission_and_signing.profile_signing, {
+    status: 'awaiting-existing-owner',
+    authority: 'existing-production-profile-signing-owner',
+    final_component_manifests: 'not-produced-by-local-flow',
+    final_profile_generation: 'not-produced-by-local-flow',
+    final_component_aggregate: 'not-produced-by-local-flow',
+  })
+  assert.equal(publish.manifest_admission_and_signing.client_compatible_provenance, 'open-existing-owner')
   assert.deepEqual(publish.immutable_objects.map(item => item.key), [
     `desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-mac-universal.dmg`,
     `desktop/releases/v2.0.15/${SHA}/e-Mate-2.0.15-mac-universal.dmg.blockmap`,
@@ -1001,6 +1219,7 @@ test('new-version transaction creates and retains manual bytes before shared sig
 
 test('macOS-only waiver publishes immutable bytes without a schema-2 manifest or shared pointer mutation', () => {
   const run = macOnlyVerifiedRun()
+  assert.equal('manifest_inputs' in run, false)
   const publish = buildPublicationRequest(run, { dryRun: true })
   assert.equal(publish.operation, 'publish-macos-immutable')
   assert.equal(publish.distribution_origin, R2_ORIGIN)
@@ -1459,6 +1678,9 @@ test('root package exposes one flow entry and the implementation has no GitHub, 
   assert.equal(packageJson.scripts.flow, 'node scripts/local-flow.mjs')
   assert.doesNotMatch(source, /\bgh\b|\.github\/|\bwrangler\b|win-codex|\bUU\b|\bssh\b|\bscp\b|kh19arc/u)
   assert.match(source, /transport: 'codex-remote-handoff'/u)
+  const publish = source.slice(source.indexOf('async function publish'), source.indexOf('\nasync function rollback'))
+  assert.ok(publish.indexOf('await verifyManifestInputLedger(directory, run)') >= 0)
+  assert.ok(publish.indexOf('await verifyManifestInputLedger(directory, run)') < publish.indexOf('await atomicJson(path, request)'))
   assert.match(publicationWorkflow, /uses: zyfjacksonchen-source\/e-mate-desktop-publication@e45c3b9d1bec366ab306203574d0a7a724d7f123/u)
   assert.match(updater, /2: Buffer\.from\('e-mate-desktop-release-manifest-v2\\0', 'utf8'\)/u)
 })

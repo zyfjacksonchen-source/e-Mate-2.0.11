@@ -13,6 +13,7 @@ import { isDeepStrictEqual, parseArgs } from 'node:util'
 import { classifyChangedPaths } from './change-impact.mjs'
 import { pinnedPnpmInvocation, pinnedYarnInvocation } from './package-manager.mjs'
 import { R2_PUBLIC_ORIGIN } from './release-source.mjs'
+import { canonicalProfileJson } from '../desktop/e-mate-desktop/src/profile-release.ts'
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const RUN_ROOT = join(ROOT, 'dist', 'local-runs')
@@ -76,6 +77,13 @@ const WINDOWS_REMOTE_HOST = 'DESKTOP-KH19ARC'
 const WINDOWS_REMOTE_REQUEST = 'emate.local-windows-codex-remote-request'
 const WINDOWS_REMOTE_RESULT = 'emate.local-windows-codex-remote-result'
 const WINDOWS_REMOTE_RESULT_FILE = 'codex-remote-result.json'
+const MANIFEST_PLATFORM_INPUTS = 'emate.local-manifest-platform-inputs'
+const MANIFEST_INPUT_LEDGER = 'emate.local-manifest-input-ledger'
+const MANIFEST_INPUT_BINDING = 'emate.local-manifest-input-binding'
+const LOCAL_CANDIDATE_PROVENANCE = 'emate.local-candidate-provenance'
+const MANIFEST_TREE_CONTEXT = Buffer.from('e-mate-local-manifest-input-tree-v1\0', 'utf8')
+const PROFILE_TREE_CONTEXT = Buffer.from('e-mate-staged-profile-tree-v1\0', 'utf8')
+const PROFILE_TARGETS = Object.freeze(['darwin-arm64', 'darwin-x64', 'win32-x64'])
 const PLATFORMS = Object.freeze({
   macos: Object.freeze({
     artifact: `e-Mate-${VERSION}-mac-universal.dmg`,
@@ -412,6 +420,7 @@ export function windowsRemoteRequest(run) {
       arguments: [
         'pnpm', 'run', 'flow', '--', '_platform-build', '--platform', 'windows',
         '--out', '<return-directory>', '--source-commit', run.source_commit,
+        '--manifest-out', '<return-directory>/manifest-inputs/windows',
         '--remote-request', '<request-file>',
       ],
     },
@@ -419,6 +428,7 @@ export function windowsRemoteRequest(run) {
       directory: '<return-directory>',
       receipt: WINDOWS_REMOTE_RESULT_FILE,
       artifacts: 'artifacts/windows',
+      manifest_inputs: 'manifest-inputs/windows',
       log: 'windows.log',
       import: {
         command: 'corepack',
@@ -589,6 +599,363 @@ async function writeChecksums(directory) {
   const rows = []
   for (const path of files) rows.push(`${await fileDigest(path)}  ${relativePath(directory, path)}`)
   await writeFile(join(directory, 'SHA256SUMS'), `${rows.join('\n')}${rows.length === 0 ? '' : '\n'}`, { mode: 0o600 })
+}
+
+function safeManifestPath(value) {
+  return typeof value === 'string' && value !== '' && !isAbsolute(value) && !value.includes('\\')
+    && value === value.normalize('NFC') && value.split('/').every(part => part !== '' && part !== '.' && part !== '..')
+}
+
+async function manifestFile(root, path, label = path) {
+  if (!safeManifestPath(path)) throw new Error(`manifest input path is invalid: ${String(path)}`)
+  const absolute = join(root, ...path.split('/'))
+  const metadata = await lstat(absolute)
+  if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`${label} must be a regular file`)
+  return { path, bytes: metadata.size, sha256: await cleanDigest(absolute, label) }
+}
+
+async function manifestTree(root, excluded = new Set()) {
+  const entries = []
+  for (const path of await allFiles(root)) {
+    const name = relativePath(root, path)
+    if (!excluded.has(name)) entries.push(await manifestFile(root, name))
+  }
+  entries.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
+  const totalBytes = entries.reduce((sum, entry) => sum + entry.bytes, 0)
+  return {
+    entries,
+    file_count: entries.length,
+    total_bytes: totalBytes,
+    sha256: digest(Buffer.concat([MANIFEST_TREE_CONTEXT, Buffer.from(JSON.stringify(entries))])),
+  }
+}
+
+async function copyTree(source, destination) {
+  const files = await allFiles(source)
+  await rm(destination, { recursive: true, force: true })
+  await mkdir(destination, { recursive: true })
+  for (const path of files) {
+    const name = relativePath(source, path)
+    const output = join(destination, ...name.split('/'))
+    await mkdir(dirname(output), { recursive: true })
+    await copyFile(path, output)
+  }
+}
+
+function profileBase(value) {
+  const keys = value?.profile_signing_keys
+  if (value?.schema_version !== 1 || typeof value.id !== 'string' || value.id === ''
+    || !Number.isSafeInteger(value.schedule_protocol_floor) || value.schedule_protocol_floor < 1
+    || !SOURCE_SHA.test(value.harness_commit ?? '') || !Array.isArray(keys) || keys.length === 0
+    || keys.some(key => !exactKeys(key, ['id', 'algorithm', 'public_key_spki_der_base64'])
+      || !MANIFEST_KEY_ID.test(key.id ?? '') || key.algorithm !== 'ed25519'
+      || typeof key.public_key_spki_der_base64 !== 'string' || key.public_key_spki_der_base64 === '')) {
+    throw new Error('local manifest Base contract is invalid')
+  }
+  return {
+    id: value.id,
+    schedule_protocol_floor: value.schedule_protocol_floor,
+    harness_commit: value.harness_commit,
+    trusted_signing_key_ids: keys.map(key => key.id),
+  }
+}
+
+function manifestInventory(value) {
+  if (value?.schema_version !== 1 || !Array.isArray(value.components)) throw new Error('local manifest component inventory is invalid')
+  const accepted = value.components.filter(component => component?.desktop !== 'blocked')
+  if (accepted.length === 0 || accepted.some(component => typeof component.id !== 'string'
+    || !['profile', 'platform-profile'].includes(component.kind)
+    || component.kind === 'platform-profile' && (!Array.isArray(component.targets)
+      || !isDeepStrictEqual(component.targets.map(target => `${target.platform}-${target.arch}`), PROFILE_TARGETS)))) {
+    throw new Error('local manifest component inventory accepted set is invalid')
+  }
+  return accepted
+}
+
+function componentSlug(id) {
+  const slug = id.replace(/^@e-mate\//u, '')
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug)) throw new Error(`local manifest component id is invalid: ${id}`)
+  return slug
+}
+
+function platformComponentJobs(inventory, platform) {
+  const targetNames = platform === 'macos' ? PROFILE_TARGETS.slice(0, 2) : PROFILE_TARGETS.slice(2)
+  return manifestInventory(inventory).flatMap(component => {
+    if (component.kind === 'profile') return platform === 'macos' ? [{ component, target: null }] : []
+    return targetNames.map(target => ({
+      component,
+      target: component.targets.find(candidate => `${candidate.platform}-${candidate.arch}` === target),
+    }))
+  })
+}
+
+function targetName(target) {
+  return target === null ? null : `${target.platform}-${target.arch}`
+}
+
+function payloadRelative(job) {
+  const root = `unsigned-components/${componentSlug(job.component.id)}`
+  return job.target === null ? root : `${root}/${targetName(job.target)}`
+}
+
+async function unsignedComponentPayload(root, job, sourceCommit) {
+  const payload = payloadRelative(job)
+  const manifestPath = `${payload}/manifest.json`
+  const manifest = await json(join(root, ...manifestPath.split('/')))
+  if (manifest?.schema_version !== 1 || manifest.id !== job.component.id || manifest.kind !== job.component.kind
+    || manifest.source_commit !== sourceCommit || !isDeepStrictEqual(manifest.target, job.target)) {
+    throw new Error(`unsigned component payload is invalid: ${job.component.id}/${String(targetName(job.target))}`)
+  }
+  return { id: job.component.id, target: targetName(job.target), manifest: await manifestFile(root, manifestPath) }
+}
+
+function validToolchain(value) {
+  return exactKeys(value, ['node', 'pnpm', 'yarn', 'npm'])
+    && /^\d+\.\d+\.\d+$/u.test(value.node ?? '') && value.pnpm === PNPM_VERSION
+    && value.yarn === YARN_VERSION && PACKAGE_VERSION.test(value.npm ?? '')
+}
+
+async function platformManifestEvidence(directory, platform, sourceCommit, toolchain) {
+  if (!['macos', 'windows'].includes(platform) || !SOURCE_SHA.test(sourceCommit ?? '') || !validToolchain(toolchain)) {
+    throw new Error('local manifest platform identity is invalid')
+  }
+  const baseBytes = await readFile(join(directory, 'base-contract.json'))
+  const inventoryBytes = await readFile(join(directory, 'component-inventory.json'))
+  const base = profileBase(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(baseBytes)))
+  const inventory = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(inventoryBytes))
+  const jobs = platformComponentJobs(inventory, platform)
+  const payloads = []
+  for (const job of jobs) payloads.push(await unsignedComponentPayload(directory, job, sourceCommit))
+  const profileReceipt = await json(join(directory, 'profile-build-receipt.json'))
+  const profileTree = await manifestTree(join(directory, 'profile-artifact'))
+  const stagedInventoryBytes = await readFile(join(directory, 'profile-artifact', 'dsh', 'profile', 'component-inventory.json'))
+  if (!exactKeys(profileReceipt, [
+    'schema_version', 'document_type', 'source_commit', 'base_contract_id', 'inventory_sha256',
+    'staged_profile_tree_sha256', 'file_count', 'total_bytes',
+  ]) || profileReceipt.schema_version !== 1 || profileReceipt.document_type !== 'emate.desktop-profile-build-receipt'
+    || profileReceipt.source_commit !== sourceCommit || profileReceipt.base_contract_id !== base.id
+    || !inventoryBytes.equals(stagedInventoryBytes) || profileReceipt.inventory_sha256 !== digest(inventoryBytes)
+    || !SHA256.test(profileReceipt.staged_profile_tree_sha256 ?? '')
+    || profileReceipt.staged_profile_tree_sha256 !== digest(Buffer.concat([
+      PROFILE_TREE_CONTEXT, Buffer.from(canonicalProfileJson(profileTree.entries), 'utf8'),
+    ]))
+    || profileReceipt.file_count !== profileTree.file_count || profileReceipt.total_bytes !== profileTree.total_bytes) {
+    throw new Error(`${platform} Profile build receipt does not match its exact staged tree`)
+  }
+  const tree = await manifestTree(directory, new Set(['platform-inputs.json']))
+  return {
+    schema_version: 1,
+    document_type: MANIFEST_PLATFORM_INPUTS,
+    platform,
+    version: VERSION,
+    source_commit: sourceCommit,
+    source_status: 'committed-clean',
+    targets: platform === 'macos' ? PROFILE_TARGETS.slice(0, 2) : PROFILE_TARGETS.slice(2),
+    toolchain,
+    base_contract: { ...await manifestFile(directory, 'base-contract.json'), ...base },
+    component_inventory: await manifestFile(directory, 'component-inventory.json'),
+    profile_build_receipt: await manifestFile(directory, 'profile-build-receipt.json'),
+    profile_artifact: {
+      root: 'profile-artifact', file_count: profileTree.file_count,
+      total_bytes: profileTree.total_bytes, sha256: profileReceipt.staged_profile_tree_sha256,
+    },
+    unsigned_component_payloads: payloads,
+    profile_signing: 'awaiting-existing-owner',
+    tree: { file_count: tree.file_count, total_bytes: tree.total_bytes, sha256: tree.sha256 },
+  }
+}
+
+export async function createPlatformManifestInputReceipt(directory, { platform, sourceCommit, toolchain }) {
+  const receipt = await platformManifestEvidence(directory, platform, sourceCommit, toolchain)
+  await atomicJson(join(directory, 'platform-inputs.json'), receipt)
+  return receipt
+}
+
+async function verifyPlatformManifestInputs(directory, platform, sourceCommit) {
+  const receipt = await json(join(directory, 'platform-inputs.json'))
+  const expected = await platformManifestEvidence(directory, platform, sourceCommit, receipt?.toolchain)
+  if (!isDeepStrictEqual(receipt, expected)) throw new Error(`${platform} manifest input receipt is invalid`)
+  return { receipt, descriptor: await manifestFile(directory, 'platform-inputs.json') }
+}
+
+function validManifestDescriptor(value) {
+  return exactKeys(value, ['path', 'bytes', 'sha256']) && safeManifestPath(value.path)
+    && Number.isSafeInteger(value.bytes) && value.bytes > 0 && SHA256.test(value.sha256 ?? '')
+}
+
+function manifestInputBinding(run) {
+  const value = run?.manifest_inputs
+  if (!exactKeys(value, [
+    'schema_version', 'document_type', 'status', 'ledger', 'base_contract', 'component_inventory',
+    'profile_build_receipts', 'platform_receipts', 'artifact_receipts', 'local_candidate_provenance',
+    'profile_signing', 'client_compatible_provenance', 'targets',
+  ]) || value.schema_version !== 1 || value.document_type !== MANIFEST_INPUT_BINDING
+    || value.status !== 'complete-unsigned-inputs' || !validManifestDescriptor(value.ledger)
+    || !exactKeys(value.base_contract, [
+      'path', 'bytes', 'sha256', 'id', 'schedule_protocol_floor', 'harness_commit', 'trusted_signing_key_ids',
+    ]) || !validManifestDescriptor({ path: value.base_contract.path, bytes: value.base_contract.bytes, sha256: value.base_contract.sha256 })
+    || typeof value.base_contract.id !== 'string' || value.base_contract.id === ''
+    || !Number.isSafeInteger(value.base_contract.schedule_protocol_floor) || value.base_contract.schedule_protocol_floor < 1
+    || !SOURCE_SHA.test(value.base_contract.harness_commit ?? '')
+    || !Array.isArray(value.base_contract.trusted_signing_key_ids) || value.base_contract.trusted_signing_key_ids.length === 0
+    || value.base_contract.trusted_signing_key_ids.some(id => !MANIFEST_KEY_ID.test(id))
+    || !validManifestDescriptor(value.component_inventory)
+    || !exactKeys(value.profile_build_receipts, Object.keys(PLATFORMS))
+    || !exactKeys(value.platform_receipts, Object.keys(PLATFORMS))
+    || !exactKeys(value.artifact_receipts, Object.keys(PLATFORMS))
+    || !Object.values(value.profile_build_receipts).every(validManifestDescriptor)
+    || !Object.values(value.platform_receipts).every(validManifestDescriptor)
+    || !Object.values(value.artifact_receipts).every(validManifestDescriptor)
+    || !validManifestDescriptor(value.local_candidate_provenance)
+    || value.profile_signing !== 'awaiting-existing-owner'
+    || value.client_compatible_provenance !== 'open-existing-owner'
+    || !isDeepStrictEqual(value.targets, PROFILE_TARGETS)) throw new Error('full publication manifest inputs are incomplete')
+  return value
+}
+
+function prefixedDescriptor(prefix, descriptor) {
+  return { ...descriptor, path: `${prefix}/${descriptor.path}` }
+}
+
+function localCandidateProvenance(run, platforms, artifacts) {
+  return {
+    schema_version: 1,
+    document_type: LOCAL_CANDIDATE_PROVENANCE,
+    provenance_mode: 'local-clean-source-native-build-receipts',
+    run_id: run.run_id,
+    version: run.version,
+    source_commit: run.source_commit,
+    source_status: 'committed-clean',
+    distribution_origin: R2_PUBLIC_ORIGIN,
+    toolchains: Object.fromEntries(Object.entries(platforms).map(([name, value]) => [name, value.receipt.toolchain])),
+    artifact_receipts: artifacts,
+    manifest_input_receipts: Object.fromEntries(Object.entries(platforms).map(([name, value]) => [name, value.descriptor])),
+    profile_signing: 'awaiting-existing-owner',
+    client_compatible_provenance: 'open-existing-owner',
+  }
+}
+
+export async function finalizeManifestInputLedger(directory, run) {
+  if (!RUN_ID.test(run?.run_id ?? '') || run.version !== VERSION || !SOURCE_SHA.test(run.source_commit ?? '')) {
+    throw new Error('manifest input run identity is invalid')
+  }
+  const root = join(directory, 'manifest-inputs')
+  const platforms = Object.fromEntries(await Promise.all(Object.keys(PLATFORMS).map(async platform => [
+    platform,
+    await verifyPlatformManifestInputs(join(root, 'platforms', platform), platform, run.source_commit),
+  ])))
+  if (platforms.macos.receipt.base_contract.sha256 !== platforms.windows.receipt.base_contract.sha256
+    || platforms.macos.receipt.component_inventory.sha256 !== platforms.windows.receipt.component_inventory.sha256) {
+    throw new Error('native manifest input Base or inventory drifted across platforms')
+  }
+  const artifacts = {}
+  for (const platform of Object.keys(PLATFORMS)) {
+    await verifyLocalArtifact(join(directory, 'artifacts', platform), platform, run.source_commit)
+    const path = `artifacts/${platform}/local-artifact-receipt.json`
+    artifacts[platform] = await manifestFile(directory, path)
+  }
+  const provenance = localCandidateProvenance(run, platforms, artifacts)
+  if (/\/(?:Users|home)\/|[A-Za-z]:\\Users\\/u.test(JSON.stringify(provenance))) {
+    throw new Error('local candidate provenance contains a developer path')
+  }
+  await atomicJson(join(root, 'local-candidate-provenance.json'), provenance)
+  const tree = await manifestTree(root, new Set(['manifest-inputs.json']))
+  const ledger = {
+    schema_version: 1,
+    document_type: MANIFEST_INPUT_LEDGER,
+    run_id: run.run_id,
+    version: run.version,
+    source_commit: run.source_commit,
+    source_status: 'committed-clean',
+    distribution_origin: R2_PUBLIC_ORIGIN,
+    profile_signing: 'awaiting-existing-owner',
+    client_compatible_provenance: 'open-existing-owner',
+    targets: [...PROFILE_TARGETS],
+    base_contract: platforms.macos.receipt.base_contract,
+    component_inventory: platforms.macos.receipt.component_inventory,
+    platform_receipts: Object.fromEntries(Object.entries(platforms).map(([name, value]) => [name, value.descriptor])),
+    artifact_receipts: artifacts,
+    local_candidate_provenance: await manifestFile(root, 'local-candidate-provenance.json'),
+    files: tree.entries,
+  }
+  await atomicJson(join(root, 'manifest-inputs.json'), ledger)
+  const binding = {
+    schema_version: 1,
+    document_type: MANIFEST_INPUT_BINDING,
+    status: 'complete-unsigned-inputs',
+    ledger: await manifestFile(directory, 'manifest-inputs/manifest-inputs.json'),
+    base_contract: { ...ledger.base_contract, path: `manifest-inputs/platforms/macos/${ledger.base_contract.path}` },
+    component_inventory: prefixedDescriptor('manifest-inputs/platforms/macos', ledger.component_inventory),
+    profile_build_receipts: Object.fromEntries(Object.entries(platforms).map(([name, value]) => [
+      name, prefixedDescriptor(`manifest-inputs/platforms/${name}`, value.receipt.profile_build_receipt),
+    ])),
+    platform_receipts: Object.fromEntries(Object.entries(platforms).map(([name, value]) => [
+      name, prefixedDescriptor(`manifest-inputs/platforms/${name}`, value.descriptor),
+    ])),
+    artifact_receipts: artifacts,
+    local_candidate_provenance: prefixedDescriptor('manifest-inputs', ledger.local_candidate_provenance),
+    profile_signing: ledger.profile_signing,
+    client_compatible_provenance: ledger.client_compatible_provenance,
+    targets: [...ledger.targets],
+  }
+  run.manifest_inputs = binding
+  await verifyManifestInputLedger(directory, run)
+  return binding
+}
+
+export async function verifyManifestInputLedger(directory, run) {
+  const binding = manifestInputBinding(run)
+  const ledgerFile = await manifestFile(directory, binding.ledger.path)
+  if (!isDeepStrictEqual(ledgerFile, binding.ledger)) throw new Error('manifest input ledger drifted from run binding')
+  const ledger = await json(join(directory, ...binding.ledger.path.split('/')))
+  const root = join(directory, 'manifest-inputs')
+  const platforms = Object.fromEntries(await Promise.all(Object.keys(PLATFORMS).map(async platform => [
+    platform,
+    await verifyPlatformManifestInputs(join(root, 'platforms', platform), platform, run.source_commit),
+  ])))
+  const artifacts = {}
+  for (const platform of Object.keys(PLATFORMS)) {
+    await verifyLocalArtifact(join(directory, 'artifacts', platform), platform, run.source_commit)
+    artifacts[platform] = await manifestFile(directory, `artifacts/${platform}/local-artifact-receipt.json`)
+  }
+  const provenancePath = join(root, 'local-candidate-provenance.json')
+  const provenance = await json(provenancePath)
+  if (!isDeepStrictEqual(provenance, localCandidateProvenance(run, platforms, artifacts))) {
+    throw new Error('local candidate provenance is invalid')
+  }
+  const tree = await manifestTree(root, new Set(['manifest-inputs.json']))
+  const expected = {
+    schema_version: 1,
+    document_type: MANIFEST_INPUT_LEDGER,
+    run_id: run.run_id,
+    version: run.version,
+    source_commit: run.source_commit,
+    source_status: 'committed-clean',
+    distribution_origin: R2_PUBLIC_ORIGIN,
+    profile_signing: 'awaiting-existing-owner',
+    client_compatible_provenance: 'open-existing-owner',
+    targets: [...PROFILE_TARGETS],
+    base_contract: platforms.macos.receipt.base_contract,
+    component_inventory: platforms.macos.receipt.component_inventory,
+    platform_receipts: Object.fromEntries(Object.entries(platforms).map(([name, value]) => [name, value.descriptor])),
+    artifact_receipts: artifacts,
+    local_candidate_provenance: await manifestFile(root, 'local-candidate-provenance.json'),
+    files: tree.entries,
+  }
+  if (!isDeepStrictEqual(ledger, expected)
+    || !isDeepStrictEqual(binding.base_contract, { ...expected.base_contract, path: `manifest-inputs/platforms/macos/${expected.base_contract.path}` })
+    || !isDeepStrictEqual(binding.component_inventory, prefixedDescriptor('manifest-inputs/platforms/macos', expected.component_inventory))
+    || !isDeepStrictEqual(binding.profile_build_receipts, Object.fromEntries(Object.entries(platforms).map(([name, value]) => [
+      name, prefixedDescriptor(`manifest-inputs/platforms/${name}`, value.receipt.profile_build_receipt),
+    ])))
+    || !isDeepStrictEqual(binding.platform_receipts, Object.fromEntries(Object.entries(platforms).map(([name, value]) => [
+      name, prefixedDescriptor(`manifest-inputs/platforms/${name}`, value.descriptor),
+    ])))
+    || !isDeepStrictEqual(binding.artifact_receipts, artifacts)
+    || !isDeepStrictEqual(binding.local_candidate_provenance, prefixedDescriptor('manifest-inputs', expected.local_candidate_provenance))) {
+    throw new Error('manifest input ledger is invalid')
+  }
+  return ledger
 }
 
 async function runLogged(command, args, { cwd, log, env = process.env }) {
@@ -927,7 +1294,47 @@ export async function verifyLocalArtifact(directory, platform, sourceCommit) {
   return { receipt, primary }
 }
 
-async function platformBuild(sourceRoot, platform, output, log) {
+async function capturePlatformManifestInputs(sourceRoot, platform, output, sourceCommit, log, npmVersion) {
+  const scratch = join(sourceRoot, '.release-cache', `local-flow-manifest-${platform}`)
+  await rm(scratch, { recursive: true, force: true })
+  await mkdir(scratch, { recursive: true })
+  try {
+    await runLogged(process.execPath, ['scripts/stage-desktop-profile-artifact.mjs'], { cwd: sourceRoot, log })
+    await copyFile(join(sourceRoot, 'desktop/e-mate-desktop/base-contract.json'), join(scratch, 'base-contract.json'))
+    await copyFile(join(sourceRoot, 'packages/dsh/profile/component-inventory.json'), join(scratch, 'component-inventory.json'))
+    await copyTree(join(sourceRoot, '.release-cache/profile-artifact'), join(scratch, 'profile-artifact'))
+    await runLogged(process.execPath, [
+      'scripts/desktop-admission.mjs', 'profile-build-receipt',
+      '--commit', sourceCommit,
+      '--profile', '.release-cache/profile-artifact',
+      '--inventory', 'packages/dsh/profile/component-inventory.json',
+      '--base-contract', 'desktop/e-mate-desktop/base-contract.json',
+      '--out', relativePath(sourceRoot, join(scratch, 'profile-build-receipt.json')),
+    ], { cwd: sourceRoot, log })
+    const inventory = await json(join(scratch, 'component-inventory.json'))
+    for (const job of platformComponentJobs(inventory, platform)) {
+      const target = targetName(job.target)
+      const args = [
+        'scripts/component-release.mjs', 'emit', '--component', job.component.id,
+        '--source-commit', sourceCommit,
+        ...(target === null ? [] : ['--target', target]),
+        '--out', relativePath(sourceRoot, join(scratch, ...payloadRelative(job).split('/'))),
+      ]
+      await runLogged(process.execPath, args, { cwd: sourceRoot, log })
+    }
+    await createPlatformManifestInputReceipt(scratch, {
+      platform,
+      sourceCommit,
+      toolchain: { node: process.versions.node, pnpm: PNPM_VERSION, yarn: YARN_VERSION, npm: npmVersion },
+    })
+    await copyTree(scratch, output)
+    await verifyPlatformManifestInputs(output, platform, sourceCommit)
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
+}
+
+async function platformBuild(sourceRoot, platform, output, manifestOutput, log) {
   const expectedPlatform = platform === 'macos' ? 'darwin' : 'win32'
   let npmCollector
   await runCandidateStages([
@@ -992,6 +1399,13 @@ async function platformBuild(sourceRoot, platform, output, log) {
       run: () => runYarn(['install', '--immutable'], { cwd: join(sourceRoot, 'desktop'), log, env: npmCollector.env }),
     },
     {
+      category: CANDIDATE_FAILURE.COMPONENT_ABI,
+      stage: 'manifest-input-ledger',
+      run: () => capturePlatformManifestInputs(
+        sourceRoot, platform, manifestOutput, git(['rev-parse', 'HEAD'], sourceRoot), log, npmCollector.version,
+      ),
+    },
+    {
       category: CANDIDATE_FAILURE.PACKAGING,
       stage: 'desktop-package',
       run: () => runYarn([PLATFORMS[platform].build], { cwd: join(sourceRoot, 'desktop'), log, env: npmCollector.env }),
@@ -1013,7 +1427,7 @@ async function readWindowsRemoteRequest(path, run) {
   return { bytes, request: validateWindowsRemoteRequest(request, run ?? request) }
 }
 
-function windowsRemoteResult(request, verified, requestSha256, artifactReceiptSha256, host, log) {
+function windowsRemoteResult(request, verified, requestSha256, artifactReceiptSha256, manifestReceipt, host, log) {
   if (!SHA256.test(requestSha256 ?? '') || !SHA256.test(artifactReceiptSha256 ?? '')) {
     throw new Error('Windows Codex Remote result digest is invalid')
   }
@@ -1021,6 +1435,10 @@ function windowsRemoteResult(request, verified, requestSha256, artifactReceiptSh
     || !Number.isSafeInteger(log.bytes) || log.bytes <= 0 || !SHA256.test(log.sha256 ?? '')) {
     throw new Error('Windows Codex Remote log receipt is invalid')
   }
+  if (!exactKeys(manifestReceipt, ['file', 'bytes', 'sha256'])
+    || manifestReceipt.file !== 'manifest-inputs/windows/platform-inputs.json'
+    || !Number.isSafeInteger(manifestReceipt.bytes) || manifestReceipt.bytes <= 0
+    || !SHA256.test(manifestReceipt.sha256 ?? '')) throw new Error('Windows manifest input receipt is invalid')
   return {
     schema_version: 1,
     document_type: WINDOWS_REMOTE_RESULT,
@@ -1035,6 +1453,7 @@ function windowsRemoteResult(request, verified, requestSha256, artifactReceiptSh
       file: 'artifacts/windows/local-artifact-receipt.json',
       sha256: artifactReceiptSha256,
     },
+    manifest_input_receipt: manifestReceipt,
     log,
     files: verified.receipt.files,
   }
@@ -1051,9 +1470,14 @@ async function writeWindowsRemoteResult(directory, requestPath) {
   const artifacts = join(directory, 'artifacts', 'windows')
   const verified = await verifyLocalArtifact(artifacts, 'windows', request.source_commit)
   const receiptPath = join(artifacts, 'local-artifact-receipt.json')
+  const manifest = await verifyPlatformManifestInputs(join(directory, 'manifest-inputs', 'windows'), 'windows', request.source_commit)
   const log = await windowsRemoteLog(directory)
   await atomicJson(join(directory, WINDOWS_REMOTE_RESULT_FILE), windowsRemoteResult(
-    request, verified, digest(bytes), await fileDigest(receiptPath), hostname(), log.descriptor,
+    request, verified, digest(bytes), await fileDigest(receiptPath), {
+      file: 'manifest-inputs/windows/platform-inputs.json',
+      bytes: manifest.descriptor.bytes,
+      sha256: manifest.descriptor.sha256,
+    }, hostname(), log.descriptor,
   ))
 }
 
@@ -1072,10 +1496,12 @@ export async function blockWindowsRemote(directory, run, failure) {
   if (['passed', 'reused'].includes(run.platforms?.windows?.status)) return
   await rm(join(directory, 'windows-remote'), { recursive: true, force: true })
   await rm(join(directory, 'artifacts', 'windows'), { recursive: true, force: true })
+  await rm(join(directory, 'manifest-inputs', 'platforms', 'windows'), { recursive: true, force: true })
+  delete run.manifest_inputs
   run.platforms.windows = blockedWindowsState(run.source_commit, failure)
 }
 
-export async function importWindowsRemoteResult(resultDirectory, output, run, requestPath) {
+export async function importWindowsRemoteResult(resultDirectory, output, run, requestPath, manifestDestination = `${output}-manifest-inputs`) {
   const { bytes: requestBytes, request } = await readWindowsRemoteRequest(requestPath, run)
   if (!isDeepStrictEqual(run.platforms?.windows, {
     status: 'awaiting-codex-remote',
@@ -1084,7 +1510,7 @@ export async function importWindowsRemoteResult(resultDirectory, output, run, re
     request_sha256: digest(requestBytes),
   })) throw new Error('Windows Codex Remote import requires the exact awaiting request state')
   const rootEntries = (await readdir(resultDirectory)).sort()
-  if (!isDeepStrictEqual(rootEntries, ['artifacts', WINDOWS_REMOTE_RESULT_FILE, 'windows.log'])) {
+  if (!isDeepStrictEqual(rootEntries, ['artifacts', WINDOWS_REMOTE_RESULT_FILE, 'manifest-inputs', 'windows.log'])) {
     throw new Error('Windows Codex Remote result directory contains an unexpected entry')
   }
   const artifactRoot = join(resultDirectory, 'artifacts')
@@ -1099,6 +1525,13 @@ export async function importWindowsRemoteResult(resultDirectory, output, run, re
     throw new Error('Windows Codex Remote artifact directory is invalid')
   }
   const verified = await verifyLocalArtifact(artifacts, 'windows', run.source_commit)
+  const manifestRoot = join(resultDirectory, 'manifest-inputs')
+  const manifestRootMetadata = await lstat(manifestRoot)
+  if (!manifestRootMetadata.isDirectory() || manifestRootMetadata.isSymbolicLink()
+    || !isDeepStrictEqual(await readdir(manifestRoot), ['windows'])) {
+    throw new Error('Windows Codex Remote manifest input root is invalid')
+  }
+  const manifest = await verifyPlatformManifestInputs(join(manifestRoot, 'windows'), 'windows', run.source_commit)
   const artifactReceiptPath = join(artifacts, 'local-artifact-receipt.json')
   const resultPath = join(resultDirectory, WINDOWS_REMOTE_RESULT_FILE)
   const resultMetadata = await regularFile(resultPath, 'Windows Codex Remote result receipt')
@@ -1108,20 +1541,32 @@ export async function importWindowsRemoteResult(resultDirectory, output, run, re
   const result = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(resultBytes))
   const log = await windowsRemoteLog(resultDirectory)
   const expected = windowsRemoteResult(
-    request, verified, digest(requestBytes), await fileDigest(artifactReceiptPath), result?.host, log.descriptor,
+    request, verified, digest(requestBytes), await fileDigest(artifactReceiptPath), {
+      file: 'manifest-inputs/windows/platform-inputs.json',
+      bytes: manifest.descriptor.bytes,
+      sha256: manifest.descriptor.sha256,
+    }, result?.host, log.descriptor,
   )
   if (!isDeepStrictEqual(result, expected)) throw new Error('Windows Codex Remote result receipt is invalid')
 
   const staging = `${output}.importing-${randomBytes(4).toString('hex')}`
+  const manifestOutput = resolve(manifestDestination)
+  const manifestStaging = `${manifestOutput}.importing-${randomBytes(4).toString('hex')}`
   try {
     await mkdir(staging, { recursive: true })
     for (const name of await readdir(artifacts)) await copyFile(join(artifacts, name), join(staging, name))
     const imported = await verifyLocalArtifact(staging, 'windows', run.source_commit)
+    await copyTree(join(manifestRoot, 'windows'), manifestStaging)
+    await verifyPlatformManifestInputs(manifestStaging, 'windows', run.source_commit)
     await rm(output, { recursive: true, force: true })
     await rename(staging, output)
+    await rm(manifestOutput, { recursive: true, force: true })
+    await mkdir(dirname(manifestOutput), { recursive: true })
+    await rename(manifestStaging, manifestOutput)
     return { receipt: result, receipt_path: resultPath, log_path: log.path, primary: imported.primary }
   } finally {
     await rm(staging, { recursive: true, force: true })
+    await rm(manifestStaging, { recursive: true, force: true })
   }
 }
 
@@ -1144,12 +1589,14 @@ async function candidate(values) {
       throw new Error('Windows unavailable waiver requires an immutable macOS candidate')
     }
     const macos = await verifyLocalArtifact(join(directory, 'artifacts', 'macos'), 'macos', run.source_commit)
+    await verifyPlatformManifestInputs(join(directory, 'manifest-inputs', 'platforms', 'macos'), 'macos', run.source_commit)
     const windows = markWindowsUnavailable(run)
     const requestPath = join(directory, windows.request)
     const { bytes } = await readWindowsRemoteRequest(requestPath, run)
     if (digest(bytes) !== windows.request_sha256) throw new Error('Windows unavailable waiver request drifted')
     run.platforms.windows = windows
     run.status = 'built-macos-only'
+    delete run.manifest_inputs
     run.verification = { status: 'pending' }
     await writeComputerUseTemplates(directory, run.source_commit, { macos: macos.primary })
     await saveRun(directory, run)
@@ -1167,7 +1614,10 @@ async function candidate(values) {
     }
     const requestPath = join(directory, 'windows-remote', 'request.json')
     const output = join(directory, 'artifacts', 'windows')
-    const imported = await importWindowsRemoteResult(resolve(values.windowsResult), output, run, requestPath)
+    const imported = await importWindowsRemoteResult(
+      resolve(values.windowsResult), output, run, requestPath,
+      join(directory, 'manifest-inputs', 'platforms', 'windows'),
+    )
     const receiptPath = join(directory, 'windows-remote', 'result.json')
     await copyFile(imported.receipt_path, receiptPath)
     await copyFile(imported.log_path, join(directory, 'logs', 'windows.log'))
@@ -1183,6 +1633,7 @@ async function candidate(values) {
       },
     }
     run.status = Object.values(run.platforms).every(item => ['passed', 'reused'].includes(item.status)) ? 'built' : 'partial'
+    if (run.status === 'built') await finalizeManifestInputLedger(directory, run)
     await writeComputerUseTemplates(directory, run.source_commit, { ...artifacts, windows: imported.primary })
     await saveRun(directory, run)
     await writeChecksums(directory)
@@ -1192,10 +1643,12 @@ async function candidate(values) {
   const selection = selectCandidatePlatforms(run, values.retry ?? 'all')
   for (const platform of selection.reuse) {
     await verifyLocalArtifact(join(directory, 'artifacts', platform), platform, run.source_commit)
+    await verifyPlatformManifestInputs(join(directory, 'manifest-inputs', 'platforms', platform), platform, run.source_commit)
     run.platforms[platform].status = 'reused'
   }
   if (selection.build.length === 0) {
     run.status = Object.values(run.platforms).every(item => ['passed', 'reused'].includes(item.status)) ? 'built' : 'partial'
+    if (run.status === 'built') await finalizeManifestInputLedger(directory, run)
     await saveRun(directory, run)
     await writeChecksums(directory)
     return
@@ -1224,6 +1677,8 @@ async function candidate(values) {
     for (const platform of selection.build) {
       const output = join(directory, 'artifacts', platform)
       const log = join(directory, 'logs', `${platform}.log`)
+      await rm(join(directory, 'manifest-inputs', 'platforms', platform), { recursive: true, force: true })
+      delete run.manifest_inputs
       if (platform === 'windows') {
         if (!['passed', 'reused'].includes(run.platforms?.macos?.status)) {
           const failure = run.platforms?.macos?.failure === undefined
@@ -1243,12 +1698,18 @@ async function candidate(values) {
       await saveRun(directory, run)
       try {
         const temporary = join(scratch, 'macos-out')
-        await runLogged(process.execPath, [join(source, 'scripts', 'local-flow.mjs'), '_platform-build', '--platform', 'macos', '--out', temporary, '--source-commit', run.source_commit], { cwd: source, log })
+        const manifestTemporary = join(scratch, 'macos-manifest-inputs')
+        await runLogged(process.execPath, [
+          join(source, 'scripts', 'local-flow.mjs'), '_platform-build', '--platform', 'macos',
+          '--out', temporary, '--manifest-out', manifestTemporary, '--source-commit', run.source_commit,
+        ], { cwd: source, log })
         await mkdir(dirname(output), { recursive: true })
         await rm(output, { recursive: true, force: true })
         await mkdir(output)
         for (const name of await readdir(temporary)) await copyFile(join(temporary, name), join(output, name))
+        await copyTree(manifestTemporary, join(directory, 'manifest-inputs', 'platforms', 'macos'))
         const verified = await verifyLocalArtifact(output, platform, run.source_commit)
+        await verifyPlatformManifestInputs(join(directory, 'manifest-inputs', 'platforms', 'macos'), 'macos', run.source_commit)
         run.platforms[platform] = { status: 'passed', source_commit: run.source_commit, artifact: verified.primary }
       } catch (cause) {
         const failure = failureOrDefault(cause)
@@ -1259,6 +1720,7 @@ async function candidate(values) {
       await saveRun(directory, run)
     }
     run.status = Object.values(run.platforms).every(item => ['passed', 'reused'].includes(item.status)) ? 'built' : 'partial'
+    if (run.status === 'built') await finalizeManifestInputLedger(directory, run)
     await writeComputerUseTemplates(directory, run.source_commit, Object.fromEntries(await Promise.all(Object.keys(PLATFORMS).map(async platform => {
       try { return [platform, (await verifyLocalArtifact(join(directory, 'artifacts', platform), platform, run.source_commit)).primary] } catch { return [platform, undefined] }
     }))))
@@ -1596,6 +2058,7 @@ export function buildPublicationRequest(run, { dryRun = false, versionChoice } =
     }
   }
   const transaction = releaseTransactionPlan(run, versionChoice)
+  const manifestInputs = manifestInputBinding(run)
   const pointerNames = transaction.mode === 'new-version' ? ['signed', 'legacy'] : [...transaction.activation_order]
   const pointers = Object.fromEntries(pointerNames.map(name => [name, {
     key: transaction.current_public_pointers[name].key,
@@ -1623,6 +2086,15 @@ export function buildPublicationRequest(run, { dryRun = false, versionChoice } =
     immutable_objects: immutableObjects,
     manifest_admission_and_signing: {
       owner: MANIFEST_OWNER,
+      inputs: manifestInputs,
+      profile_signing: {
+        status: 'awaiting-existing-owner',
+        authority: 'existing-production-profile-signing-owner',
+        final_component_manifests: 'not-produced-by-local-flow',
+        final_profile_generation: 'not-produced-by-local-flow',
+        final_component_aggregate: 'not-produced-by-local-flow',
+      },
+      client_compatible_provenance: 'open-existing-owner',
       signed_manifest: {
         artifact_path: 'desktop-release-signed.json',
         schema_version: 2,
@@ -2049,6 +2521,7 @@ async function publish(values) {
   assertVerificationMatches(run, await verifyRun(directory, run))
   const scope = publicationScope(run)
   if (scope === 'full') {
+    await verifyManifestInputLedger(directory, run)
     const transaction = releaseTransactionPlan(run, values.versionChoice)
     if (run.release_transaction === undefined) run.release_transaction = transaction
   } else if (values.versionChoice !== undefined || run.release_transaction !== undefined) {
@@ -2151,6 +2624,7 @@ function argumentsFor(argv) {
       platform: { type: 'string' },
       out: { type: 'string' },
       'source-commit': { type: 'string' },
+      'manifest-out': { type: 'string' },
       'windows-result': { type: 'string' },
       'windows-unavailable': { type: 'boolean', default: false },
       'remote-request': { type: 'string' },
@@ -2167,6 +2641,7 @@ function argumentsFor(argv) {
       dryRun: values['dry-run'],
       ownerReceipt: values['owner-receipt'],
       sourceCommit: values['source-commit'],
+      manifestOut: values['manifest-out'],
       windowsResult: values['windows-result'],
       windowsUnavailable: values['windows-unavailable'],
       remoteRequest: values['remote-request'],
@@ -2181,29 +2656,29 @@ function validateCommandOptions(command, values) {
     throw new Error('flow command must be dev, candidate, verify, publish, or rollback')
   }
   if (command === 'dev' && (values.run !== undefined || values.retry !== undefined || values.dryRun
-    || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
+    || values.platform !== undefined || values.out !== undefined || values.manifestOut !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
     || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined || values.versionChoice !== undefined)) {
     throw new Error('dev does not accept options')
   }
   if (command === 'candidate' && (values.dryRun || values.platform !== undefined || values.out !== undefined
-    || values.sourceCommit !== undefined || values.ownerReceipt !== undefined || values.remoteRequest !== undefined || values.versionChoice !== undefined
+    || values.manifestOut !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined || values.remoteRequest !== undefined || values.versionChoice !== undefined
     || values.windowsResult !== undefined && (values.run === undefined || values.retry !== undefined || values.windowsUnavailable)
     || values.windowsUnavailable && (values.run === undefined || values.retry !== undefined))) {
     throw new Error('candidate accepts --run/--retry, --run with --windows-result, or --run --windows-unavailable')
   }
   if (command === 'verify' && (values.run === undefined || values.retry !== undefined || values.dryRun
-    || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
+    || values.platform !== undefined || values.out !== undefined || values.manifestOut !== undefined || values.sourceCommit !== undefined || values.ownerReceipt !== undefined
     || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined || values.versionChoice !== undefined)) {
     throw new Error('verify requires only --run <id>')
   }
   if (command === 'publish' && (values.run === undefined || values.retry !== undefined
-    || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined
+    || values.platform !== undefined || values.out !== undefined || values.manifestOut !== undefined || values.sourceCommit !== undefined
     || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined
     || values.dryRun && values.ownerReceipt !== undefined)) {
     throw new Error('publish requires --run <id> and accepts --version-choice, --dry-run, or --owner-receipt')
   }
   if (command === 'rollback' && (values.run === undefined || values.retry !== undefined
-    || values.platform !== undefined || values.out !== undefined || values.sourceCommit !== undefined
+    || values.platform !== undefined || values.out !== undefined || values.manifestOut !== undefined || values.sourceCommit !== undefined
     || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined || values.versionChoice !== undefined
     || values.dryRun && values.ownerReceipt !== undefined)) {
     throw new Error('rollback requires --run <id> and accepts only --dry-run or --owner-receipt')
@@ -2224,20 +2699,22 @@ async function main() {
   else if (command === 'publish') await publish(values)
   else if (command === 'rollback') await rollback(values)
   else if (command === '_platform-build') {
-    if (!['macos', 'windows'].includes(values.platform) || values.out === undefined || !SOURCE_SHA.test(values.sourceCommit ?? '')) {
+    if (!['macos', 'windows'].includes(values.platform) || values.out === undefined || values.manifestOut === undefined
+      || !SOURCE_SHA.test(values.sourceCommit ?? '')) {
       throw new Error('invalid internal platform build arguments')
     }
     if (git(['rev-parse', 'HEAD']) !== values.sourceCommit || git(['status', '--porcelain=v1', '--untracked-files=all']) !== '') {
       throw new Error('internal platform build requires the exact clean source copy')
     }
     const output = resolve(values.out)
+    const manifestOutput = resolve(values.manifestOut)
     if (values.remoteRequest === undefined) {
-      await platformBuild(ROOT, values.platform, output, join(dirname(output), `${values.platform}.log`))
+      await platformBuild(ROOT, values.platform, output, manifestOutput, join(dirname(output), `${values.platform}.log`))
     } else {
       const requestPath = resolve(values.remoteRequest)
       const { request } = await readWindowsRemoteRequest(requestPath)
       if (request.source_commit !== values.sourceCommit) throw new Error('Windows Codex Remote request source does not match the build')
-      await platformBuild(ROOT, 'windows', join(output, 'artifacts', 'windows'), join(output, 'windows.log'))
+      await platformBuild(ROOT, 'windows', join(output, 'artifacts', 'windows'), manifestOutput, join(output, 'windows.log'))
       await writeWindowsRemoteResult(output, requestPath)
     }
   }
