@@ -33,7 +33,7 @@ export const VERSION = '2.0.15'
 export const PROFILE = 'e-mate'
 export const DEFAULT_PORT = 3080
 export const HARNESS_VERSION = '0.1.0-rc.7'
-export const HARNESS_COMMIT = 'fccd7d25b3f19885e2778c128b57d7c8312b7344'
+export const HARNESS_COMMIT = 'd19aae6da3100e836867418c2cf73bdee8a0b1a8'
 const packageRoot = resolve(import.meta.dirname, '..')
 const componentInventory = JSON.parse(
   readFileSync(join(packageRoot, 'profile', 'component-inventory.json'), 'utf8'),
@@ -429,7 +429,7 @@ function profileCheck(paths) {
       && byId.get('emate-model-policy')?.name === './plugins/model-policy.js'
       && byId.get('emate-audit')?.name === './plugins/audit.js'
       && JSON.stringify(byId.get('emate-audit')?.inject) === JSON.stringify([
-        'connection', 'sessionPersistence', 'storageDomain', 'timer', 'emateModelPolicy', 'emateIdentity',
+        'connection', 'sessionPersistence', 'storageDomain', 'timer', 'tools', 'emateModelPolicy', 'emateIdentity',
       ])
       && byId.get('emate-schedule-import')?.name === './plugins/schedule-import.js'
       && byId.get('emate-legacy-migration')?.name === './plugins/legacy-migration.js'

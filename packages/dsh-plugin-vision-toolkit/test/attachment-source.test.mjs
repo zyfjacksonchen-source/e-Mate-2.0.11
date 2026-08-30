@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
-import { readFile, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { isAbsolute, join, relative } from 'node:path'
 import test from 'node:test'
 import { withResolvedVisionGlanceImages } from '../src/attachment-source.ts'
 
@@ -14,6 +16,7 @@ const attachment = {
 }
 
 test('vision_glance resolves only an exact current-session image attachment', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'e-mate-vision-workspace-'))
   const reads = []
   let stagedPath
   const signal = new AbortController().signal
@@ -23,7 +26,7 @@ test('vision_glance resolves only an exact current-session image attachment', as
   } } }
   const exec = {
     signal,
-    agent: { session: {
+    agent: { session: { header: { cwd: workspace },
       deriveMessages: () => [],
       events: [{ type: 'emate/image-output', data: { output: attachment, content: [{ type: 'image', attachment }] } }],
     } },
@@ -31,6 +34,8 @@ test('vision_glance resolves only an exact current-session image attachment', as
 
   const result = await withResolvedVisionGlanceImages(ctx, [attachmentId], exec, async images => {
     stagedPath = images[0]
+    assert.equal(isAbsolute(stagedPath), true)
+    assert.equal(relative(workspace, stagedPath).startsWith('..'), false)
     assert.deepEqual(await readFile(stagedPath), Buffer.from([1, 2, 3, 4]))
     return 'ok'
   })
@@ -38,6 +43,7 @@ test('vision_glance resolves only an exact current-session image attachment', as
   assert.equal(result, 'ok')
   assert.deepEqual(reads, [[attachment, signal]])
   await assert.rejects(stat(stagedPath), { code: 'ENOENT' })
+  await rm(workspace, { recursive: true, force: true })
 })
 
 test('vision_glance rejects an attachment id outside the current Agent session', async () => {
@@ -46,6 +52,15 @@ test('vision_glance rejects an attachment id outside the current Agent session',
     withResolvedVisionGlanceImages({ attachments: { readImage: async () => assert.fail('must not read') } }, [attachmentId], exec, async () => {}),
     error => error?.name === 'VisionToolkitError' && error?.code === 'input'
       && /not present in the current Agent session/u.test(error.message),
+  )
+})
+
+test('vision_glance fails typed before reading when the Agent workspace is unavailable', async () => {
+  const exec = { agent: { session: { deriveMessages: () => [{ content: [{ type: 'image', attachment }] }] } } }
+  await assert.rejects(
+    withResolvedVisionGlanceImages({ attachments: { readImage: async () => assert.fail('must not read') } }, [attachmentId], exec, async () => {}),
+    error => error?.name === 'VisionToolkitError' && error?.code === 'input'
+      && /absolute current Agent workspace/u.test(error.message),
   )
 })
 

@@ -36,6 +36,10 @@ export function installResourceContext(sessions: SessionListSource): () => void 
     Reflect.deleteProperty(globalThis, RESOURCE_KEY)
     const target = event.target
     if (!(target instanceof Element)) return
+    if (target.closest('[data-emate-artifact-terminal]') !== null) {
+      Reflect.set(globalThis, RESOURCE_KEY, { kind: 'handled' })
+      return
+    }
     const snapshot = sessions.list.getSnapshot()
     const sessionId = snapshot.current
     if (typeof sessionId !== 'string') return

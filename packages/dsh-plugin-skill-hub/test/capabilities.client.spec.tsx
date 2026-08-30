@@ -146,6 +146,46 @@ describe('capability center fidelity surface', () => {
     }))
   })
 
+  it('fails closed until receipt inventory is ready and when it cannot be read', async () => {
+    const installedHubCard = { ...installedSkill, slug: hubCard.slug, version: hubCard.version }
+    let resolveInventory!: (value: { ok: true; value: { schema_version: number; items: typeof installedHubCard[] } }) => void
+    const inventory = new Promise<{ ok: true; value: { schema_version: number; items: typeof installedHubCard[] } }>(resolve => { resolveInventory = resolve })
+    const callSkillHub = vi.fn(async (endpoint: string) => {
+      if (endpoint === 'catalog.search') return { ok: true, value: { items: [hubCard], next_cursor: null } }
+      if (endpoint === 'catalog.detail') return { ok: true, value: { schema_version: 1, skill: hubCard, versions: [hubCard], next_cursor: null } }
+      if (endpoint === 'inventory.list') return inventory
+      if (endpoint === 'jobs.list') return { ok: true, value: { items: [] } }
+      return { ok: true, value: { job_id: 'job-12345678', status: 'running' } }
+    })
+
+    renderPage(callSkillHub)
+
+    expect((await screen.findByRole('button', { name: '正在核对安装状态' })).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '查看详情' }))
+    expect(await screen.findByRole('dialog', { name: '会议纪要' })).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: '正在核对安装状态' }).every(button => button.hasAttribute('disabled'))).toBe(true)
+
+    resolveInventory({ ok: true, value: { schema_version: 1, items: [installedHubCard] } })
+    expect(await screen.findByRole('tab', { name: '已安装 1' })).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: '已安装并启用' }).every(button => button.hasAttribute('disabled'))).toBe(true)
+
+    cleanup()
+    const failedCall = vi.fn(async (endpoint: string) => {
+      if (endpoint === 'catalog.search') return { ok: true, value: { items: [hubCard], next_cursor: null } }
+      if (endpoint === 'catalog.detail') return { ok: true, value: { schema_version: 1, skill: hubCard, versions: [hubCard], next_cursor: null } }
+      if (endpoint === 'inventory.list') return { ok: false, error: { message: '本机 Skill 清单暂时无法读取。' } }
+      if (endpoint === 'jobs.list') return { ok: true, value: { items: [] } }
+      return { ok: true, value: { job_id: 'job-12345678', status: 'running' } }
+    })
+    renderPage(failedCall)
+
+    expect((await screen.findByRole('button', { name: '安装状态读取失败' })).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('alert').textContent).toContain('本机 Skill 清单暂时无法读取。')
+    fireEvent.click(screen.getByRole('button', { name: '查看详情' }))
+    expect(await screen.findByRole('dialog', { name: '会议纪要' })).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: '安装状态读取失败' }).every(button => button.hasAttribute('disabled'))).toBe(true)
+  })
+
   it('pages immutable version history and refreshes inventory after a terminal Job', async () => {
     const oldCard = { ...hubCard, version: '1.0.0', package_sha256: 'b'.repeat(64) }
     const callSkillHub = vi.fn(async (endpoint: string, payload: Record<string, unknown>) => {

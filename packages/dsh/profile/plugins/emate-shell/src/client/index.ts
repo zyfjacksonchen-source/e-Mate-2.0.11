@@ -28,13 +28,20 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AccountControl, AccountSettings } from './account.tsx'
 import { registerActivityFold } from './activity-fold.tsx'
+import './theme-tokens.module.css'
 import './chat-chrome.module.css'
 import { ComposerConnectors, ComposerMentions } from './composer-connectors.tsx'
 import { openMentionMenu, registerComputerUseTrigger, registerMentionSources } from './composer-mentions.ts'
 import { HomeProjection, SchedulesOverlayProjection } from './home.tsx'
 import { HeaderControls } from './header-controls.tsx'
 import { IdentityGate } from './identity.tsx'
-import { ToolImageGallery, toolImagesDefinition } from './image-gallery.tsx'
+import {
+  ArtifactTerminal,
+  desktopResourceRun,
+  imageCallsDefinition,
+  selectArtifactTerminal,
+  toolImagesDefinition,
+} from './image-gallery.tsx'
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
 import { registerMessageModeSettings } from './message-mode-settings.tsx'
 import { isGeneralWorkspace, SidebarRoot } from './sidebar.tsx'
@@ -138,6 +145,26 @@ export function registerRouteScopedConversationHeader(ctx: any): void {
           name: 'conversation.session.header',
           priority: -1,
         }, HiddenProductSurface)
+      } else {
+        const dispose = disposeShadow
+        disposeShadow = undefined
+        dispose?.()
+      }
+    }
+    addEventListener('popstate', sync)
+    sync()
+    return () => {
+      removeEventListener('popstate', sync)
+      disposeShadow?.()
+    }
+  })
+  ctx.slots.inject('details', () => {
+    let disposeShadow: (() => void) | undefined
+    const sync = () => {
+      const hide = STANDALONE_PRODUCT_ROUTES.has(location.pathname)
+      if (hide === (disposeShadow !== undefined)) return
+      if (hide) {
+        disposeShadow = ctx.slots.register({ name: 'details', priority: -1 }, HiddenProductSurface)
       } else {
         const dispose = disposeShadow
         disposeShadow = undefined
@@ -343,11 +370,47 @@ export function apply(ctx: any): void {
     id: 'e-mate-thinking-status',
     order: -190,
   }, ThinkingStatusBranding))
+  ctx.conversationEvents.register(imageCallsDefinition)
   ctx.conversationEvents.register(toolImagesDefinition)
-  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
-    name: 'conversation.chat.node',
-    key: 'e-mate-tool-images',
-  }, ToolImageGallery))
+  ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
+    name: 'conversation.chat.turnTail',
+    priority: -1,
+    select: selectArtifactTerminal,
+    inject: (sessionId: string) => ({
+      loadImage: (attachment: any) => ctx.conversation.resolveImage(sessionId, attachment),
+      addImageToDraft: async (attachment: any) => {
+        const session = ctx.sessions.binding(sessionId)?.session
+        if (session === undefined) throw new Error('当前会话不可用，未添加图片。')
+        const result = await session.readAttachment(attachment.attachmentId)
+        if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+        const stored = result.value.attachment
+        const bytes = Uint8Array.from(result.value.data)
+        if (stored.attachmentId !== attachment.attachmentId
+          || stored.mediaType !== attachment.mediaType || bytes.byteLength !== attachment.bytes) {
+          throw new Error('图片附件校验失败，未添加到聊天。')
+        }
+        const images = ctx.conversation.createDraftImages([
+          new File([bytes.buffer], attachment.name ?? 'e-mate-image.png', { type: attachment.mediaType }),
+        ])
+        try {
+          const scope = ctx.sessions.scope(sessionId)
+          if (scope === undefined || !ctx.conversation.input.for(scope).addImages(images.map((image: any) => image.id))) {
+            throw new Error('当前正在发送消息，请稍后再添加图片。')
+          }
+        } catch (error) {
+          ctx.conversation.releaseDraftImages(images)
+          throw error
+        }
+      },
+      draftBytes: (ids: readonly string[]) => ctx.conversation.draftImages(ids)
+        .reduce((sum: number, image: any) => sum + image.file.size, 0),
+      notify: (level: 'info' | 'error', text: string) => {
+        const scope = ctx.sessions.scope(sessionId)
+        if (scope !== undefined) ctx.conversation.input.for(scope).notify(level, text)
+      },
+      runResource: desktopResourceRun,
+    }),
+  }, ArtifactTerminal))
   ctx.conversationEvents.register(legacyArtifactDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',

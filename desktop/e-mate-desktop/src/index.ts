@@ -5,6 +5,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import {
   THEME_SETTINGS_NAMESPACE,
   type ThemeSettings,
@@ -22,7 +23,7 @@ export const name = 'desktop-shell'
 
 /** Services required before the shell can register its renderer generation. */
 /** Services required by the desktop shell; `desktopRuntime` is probed, not required. */
-export const inject = ['webServer', 'webRuntime', 'appExit', 'settings', 'workspaceRegistry']
+export const inject = ['webServer', 'webRuntime', 'appExit', 'settings', 'workspaceRegistry', 'sessions']
 
 /** Standard settings namespace shared by tray and configuration surfaces. */
 export const DESKTOP_SETTINGS_NAMESPACE = settingsNamespace('dsh-desktop')
@@ -149,6 +150,7 @@ export function apply(ctx: Context, config: Config): void {
         return theme.preference
       },
       resourceRoots: () => workspaceRegistry.list().map(workspace => workspace.path),
+      resourceSessionRoot: sessionId => ctx.sessions.get(sessionId as SessionId)?.header.cwd,
       requestQuit: appExit,
       requestModeChange: async () => {
         throw new Error(`@e-mate/desktop: shell mode is fixed to ${config.mode}`)

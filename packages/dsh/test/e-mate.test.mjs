@@ -79,6 +79,35 @@ import {
 
 const fileDigest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
 
+function writeAuditRuntimeBinding(temporary) {
+  const harness = resolveHarness()
+  const toolsModule = resolveHarnessModule(harness, 'packages/core/tools', '@deepseek-ai/dsh-tools')
+  const storageDomainModule = resolveHarnessModule(
+    harness,
+    'packages/storage/storage-domain',
+    '@deepseek-ai/dsh-storage-domain',
+  )
+  const zodModule = realpathSync(new URL(
+    '../../../upstream/deepseek-harness/packages/storage/storage-domain/node_modules/zod/index.js',
+    import.meta.url,
+  ))
+  const bindingPath = join(temporary, 'runtime-binding.json')
+  writeFileSync(bindingPath, JSON.stringify({
+    schema_version: 1,
+    product: 'e-Mate',
+    version: VERSION,
+    dsh_home: join(temporary, 'dsh-home'),
+    harness_commit: HARNESS_COMMIT,
+    tools_module: toolsModule,
+    tools_module_sha256: fileDigest(toolsModule),
+    storage_domain_module: storageDomainModule,
+    storage_domain_module_sha256: fileDigest(storageDomainModule),
+    zod_module: zodModule,
+    zod_module_sha256: fileDigest(zodModule),
+  }))
+  return bindingPath
+}
+
 test('resolved Harness modules use source builds and file URLs for Windows ESM imports', () => {
   const source = readFileSync(new URL('../src/e-mate.ts', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /import\(harnessRequire\.resolve\(/)
@@ -338,7 +367,7 @@ test('online updates admit only one live detached helper', () => {
 
 test('runtime resolves only the exact Harness source', () => {
   const runtime = resolveHarness()
-  assert.equal(HARNESS_COMMIT, 'fccd7d25b3f19885e2778c128b57d7c8312b7344')
+  assert.equal(HARNESS_COMMIT, 'd19aae6da3100e836867418c2cf73bdee8a0b1a8')
   assert.equal(runtime.version, HARNESS_VERSION)
   assert.equal(runtime.commit, HARNESS_COMMIT)
   assert.ok(['development-source', 'packaged-runtime'].includes(runtime.source))
@@ -494,7 +523,7 @@ test('managed profile installation is idempotent', () => {
     assert.equal(patchById.get('emate-share').config.rootUrl, 'https://emate-share.emate-zyfjacksonchen.workers.dev')
     assert.equal(patchById.get('emate-audit').name, './plugins/audit.js')
     assert.deepEqual(patchById.get('emate-audit').inject, [
-      'connection', 'sessionPersistence', 'storageDomain', 'timer', 'emateModelPolicy', 'emateIdentity',
+      'connection', 'sessionPersistence', 'storageDomain', 'timer', 'tools', 'emateModelPolicy', 'emateIdentity',
     ])
     assert.equal(patchById.get('emate-agent-operations').name, './plugins/agent-operations.js')
     assert.deepEqual(patchById.get('emate-agent-operations').inject, ['systemPrompt'])
@@ -510,8 +539,8 @@ test('managed profile installation is idempotent', () => {
     assert.doesNotMatch(patch, /emate-skill-hub-agent|plugins\/skill-hub-agent\.js/)
     assert.doesNotMatch(patch, /emate-(?:office-ocr|browser-computer-use|memory|dream|learning)/)
     assert.match(patch, /id: emate-model-policy[\s\S]*\.\/plugins\/model-policy\.js[\s\S]*inject: \[apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity\]/)
-    assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, emateModelPolicy, emateIdentity\]/)
-    assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*inject: \[tools, jobs, attachments, sandboxPolicy, subagents, emateIdentity, emateModelPolicy, emateCapabilities\][\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
+    assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, tools, emateModelPolicy, emateIdentity\]/)
+    assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*inject: \[tools, jobs, attachments, sandboxPolicy, agents, subagents, emateIdentity, emateModelPolicy, emateCapabilities\][\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
     assert.match(patch, /id: emate-legacy-migration[\s\S]*\.\/plugins\/legacy-migration\.js[\s\S]*inject: \[sessionPersistence, webServer\]/)
     assert.match(patch, /id: emate-schedule-import[\s\S]*\.\/plugins\/schedule-import\.js[\s\S]*inject: \[tools\]/)
     assert.ok(readFileSync(join(first.profile, 'plugins', 'agent-operations.js')).byteLength > 0)
@@ -1383,8 +1412,10 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const capabilities = []
     const cleanupWarnings = []
     const policyModels = []
+    const liveAgents = new Map()
     let sandboxMode = 'read-only'
     let preStep
+    let subagentEnd
     let modelPolicyGate
     let modelPolicyGateEntered
     const modelPolicy = { assertModel: async model => {
@@ -1584,6 +1615,11 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
           ? modelPolicy
           : name === 'subagents'
             ? subagents
+            : name === 'agents'
+              ? {
+                  get: id => liveAgents.get(String(id)),
+                  isOwnedBy: (id, parent) => liveAgents.get(String(id))?.session?.header?.parentSession === parent.id,
+                }
             : name === 'emateCapabilities'
               ? { register: definition => { capabilities.push(definition); return () => {} } }
               : name === 'userQuestions' && imageReviewAsk !== undefined
@@ -1595,8 +1631,9 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         return cleanup
       },
       on(name, listener) {
-        assert.equal(name, 'agent/pre-step')
-        preStep = listener
+        if (name === 'agent/pre-step') preStep = listener
+        else if (name === 'subagent/end') subagentEnd = listener
+        else assert.fail(`unexpected image-generation listener ${name}`)
         return () => {}
       },
     }
@@ -1607,6 +1644,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.deepEqual([...tools.keys()], ['imagegen', 'image_pack'])
     assert.deepEqual(controllers, ['emate-image'])
     assert.equal(typeof preStep, 'function')
+    assert.equal(typeof subagentEnd, 'function')
     assert.equal(capabilities.length, 1)
     assert.deepEqual(await capabilities[0].status(), {
       state: 'ready',
@@ -1642,6 +1680,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       },
     }
     context.agents.register(agent)
+    liveAgents.set(agent.id, agent)
     let callIndex = 0
     const execution = () => ({
       agent,
@@ -2840,6 +2879,107 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       description: tool.description,
       parameters: tool.parameters,
     }))), toolHeaderContract)
+
+    const providerRequestsBeforeProjection = requests.length
+    const imageLeafRunsBeforeProjection = childRuns.length
+    const outerChildren = []
+    const outerChild = (id, image, ordinal, includeReceipt = true) => {
+      const receipt = {
+        ...structuredClone(generated.receipt),
+        revision: 2,
+        call_id: `outer-image-call-${ordinal}`,
+        parent_session_id: id,
+        child_session_id: `outer-image-leaf-${ordinal}`,
+        job_id: `emate-image-outer-${ordinal}`,
+        provider_request_id: `image-response-outer-${ordinal}`,
+        client_request_id: `image-client-outer-${ordinal}`,
+        output: image,
+        content: [{ type: 'image', attachment: image }],
+      }
+      const child = {
+        id,
+        session: {
+          header: { id, parentSession: agent.id, cwd: temporary },
+          events: includeReceipt
+            ? [{ type: 'emate/image-output', data: receipt }]
+            : [{
+                type: 'assistant/message',
+                data: { message: { content: [{ type: 'text', text: `pretend image ${image.attachmentId}` }] } },
+              }],
+        },
+      }
+      liveAgents.set(id, child)
+      outerChildren.push(child)
+      return child
+    }
+    const projectionInfo = (child, stopReason = 'completed') => ({
+      runId: `outer-run-${child.id}`,
+      provider: 'spawn',
+      id: child.id,
+      local: true,
+      stopReason,
+    })
+    const first = outerChild('outer-image-a', generated.images[0].image, 1)
+    const secondCompleted = outerChild('outer-image-b', implicitEdit.images[0].image, 2)
+    const third = outerChild('outer-image-c', confirmedEdit.images[0].image, 3)
+    outerChild('outer-image-hanging', edited.images[0].image, 4)
+    subagentEnd(projectionInfo(third))
+    subagentEnd(projectionInfo(first))
+    subagentEnd(projectionInfo(secondCompleted))
+    const projectedReceipts = events => events.filter(event => event.type === 'emate/image-output'
+      && event.data?.call_id?.startsWith('subagent-image:'))
+    assert.deepEqual(
+      projectedReceipts(sessionEvents).map(event => event.data.output.attachmentId),
+      [confirmedEdit.images[0].image, generated.images[0].image, implicitEdit.images[0].image]
+        .map(image => image.attachmentId),
+    )
+    subagentEnd(projectionInfo(first))
+    subagentEnd(projectionInfo(first))
+    assert.equal(projectedReceipts(sessionEvents).length, 3)
+
+    const rejectedReviewReceipt = sessionEvents.find(event => event.data?.call_id === rejectedExecution.callId
+      && event.data?.revision === 2)?.data
+    assert.equal(rejectedReviewReceipt?.status, 'needs-review')
+    const rejected = outerChild('outer-image-rejected', fused.images[0].image, 5, false)
+    rejected.session.events = [rejectedReviewReceipt, rejectedReceipt].map(receipt => ({
+      type: 'emate/image-output',
+      data: {
+        ...structuredClone(receipt),
+        call_id: 'outer-image-call-rejected',
+        parent_session_id: rejected.id,
+        child_session_id: 'outer-image-leaf-rejected',
+      },
+    }))
+    subagentEnd(projectionInfo(rejected, 'error'))
+    assert.equal(projectedReceipts(sessionEvents).length, 3)
+
+    const failed = outerChild('outer-image-failed', fused.images[0].image, 6, false)
+    subagentEnd(projectionInfo(failed, 'error'))
+    assert.equal(projectedReceipts(sessionEvents).length, 3)
+    const retry = outerChild('outer-image-retry', fused.images[0].image, 7)
+    subagentEnd(projectionInfo(retry))
+    const cancelledAfterSuccess = outerChild('outer-image-cancelled', edited.images[0].image, 8)
+    subagentEnd(projectionInfo(cancelledAfterSuccess, 'aborted'))
+    assert.equal(projectedReceipts(sessionEvents).length, 5)
+    assert.equal(requests.length, providerRequestsBeforeProjection)
+    assert.equal(childRuns.length, imageLeafRunsBeforeProjection)
+
+    const reopenedEvents = structuredClone(sessionEvents)
+    const reopenedParent = {
+      ...agent,
+      session: {
+        ...agent.session,
+        events: reopenedEvents,
+        append(type, data, options) {
+          reopenedEvents.push({ type, data, ...options, seq: reopenedEvents.length, time: Date.now() })
+        },
+      },
+    }
+    liveAgents.set(agent.id, reopenedParent)
+    subagentEnd(projectionInfo(first))
+    assert.equal(projectedReceipts(reopenedEvents).length, 5)
+    liveAgents.set(agent.id, agent)
+    for (const child of outerChildren) liveAgents.delete(child.id)
 
     const serviceActiveParent = nativeParent('image-service-active-parent')
     const serviceWaitingParent = nativeParent('image-service-waiting-parent')
@@ -4524,6 +4664,10 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
   let rpc
   let interval
   let uploadAvailable = false
+  let notifyAuditContextStarted
+  let releaseAuditContext
+  const auditContextStarted = new Promise(resolve => { notifyAuditContextStarted = resolve })
+  const auditContextGate = new Promise(resolve => { releaseAuditContext = resolve })
   const provider = {
     async upload(facts) {
       uploads.push(structuredClone(facts))
@@ -4563,7 +4707,7 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
   })
   let openedDomains = 0
   try {
-    const paths = installProfile(join(temporary, 'dsh-home'))
+    const bindingPath = writeAuditRuntimeBinding(temporary)
     await applyAudit({
       connection: { rpc: { handle: (channel, handler, options) => {
         rpc = { channel, handler, options }
@@ -4575,6 +4719,8 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
       emateModelPolicy: {
         auditContext: async model => {
           assert.equal(model, 'gpt-5.6-luna')
+          notifyAuditContextStarted()
+          await auditContextGate
           return {
             account_subject_sha256: 'a'.repeat(64),
             policy_revision: 3,
@@ -4605,7 +4751,7 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
       },
       logger: { warn: () => {} },
     }, {
-      bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json'),
+      bindingPath,
       auditProvider: provider,
       taskAuditProvider: taskProvider,
       flushIntervalMs: 30_000,
@@ -4619,9 +4765,18 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
     handlers.get('session/event')({ id: 'audit-session-1' }, {
       type: 'turn/start', seq: 0, time: startedAt, data: { turn: 1 },
     })
-    const request = await handlers.get('agent/request')({
+    let requestDone = false
+    const requestPromise = handlers.get('agent/request')({
       agent: { id: 'audit-session-1' }, turn: 1, step: 1,
     }, async () => ({ provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' }))
+    void requestPromise.then(
+      () => { requestDone = true },
+      () => { requestDone = true },
+    )
+    await auditContextStarted
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(requestDone, true)
+    const request = await requestPromise
     assert.deepEqual(request, { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' })
     const event = {
       type: 'assistant/message',
@@ -4640,6 +4795,11 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
       },
     }
     handlers.get('session/event')({ id: 'audit-session-1' }, event)
+    await audit.drain('audit-session-1')
+    assert.equal(tables.outbox.size, 0)
+    releaseAuditContext()
+    await new Promise(resolve => setImmediate(resolve))
+    await audit.drain('audit-session-1')
     handlers.get('session/event')({ id: 'audit-session-1' }, {
       type: 'tool/call', seq: 9, time: startedAt + 2,
       data: { turn: 1, step: 1, callId: 'private-call-id', name: 'private-tool-name', arguments: '{"secret":true}' },
@@ -4652,7 +4812,8 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
       type: 'turn/end', seq: 11, time: startedAt + 4,
       data: { turn: 1, reason: { kind: 'completed' } },
     })
-    await handlers.get('session/flush')()
+    assert.equal(handlers.get('session/flush')({ id: 'audit-session-1' }), undefined)
+    await audit.drain('audit-session-1')
     assert.equal(tables.bindings.size, 1)
     assert.equal(tables.outbox.size, 1)
     assert.equal(taskTables.bindings.size, 1)
@@ -4671,7 +4832,7 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
     assert.equal(JSON.stringify(stored).includes('audit-session-1'), false)
     assert.equal(JSON.stringify(stored).includes('must never enter audit payload'), false)
     handlers.get('session/event')({ id: 'audit-session-1' }, event)
-    await handlers.get('session/flush')()
+    await audit.drain('audit-session-1')
     assert.equal(tables.outbox.size, 1)
 
     const deferred = await audit.flush({ force: true })
@@ -4684,6 +4845,7 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
       audit.flush({ force: true }),
       audit.flush({ force: true }),
     ])
+    await audit.drain()
     assert.deepEqual(sameFlight, delivered)
     assert.equal(delivered.delivered_now, 1)
     assert.equal(delivered.delivered, 1)
@@ -4697,7 +4859,7 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
     assert.equal('content' in uploads[1][0].payload, false)
     assert.deepEqual(uploads[1][0], uploads[0][0])
     handlers.get('session/event')({ id: 'audit-session-1' }, structuredClone(event))
-    await handlers.get('session/flush')()
+    await audit.drain('audit-session-1')
     assert.equal((await audit.flush({ force: true })).delivered_now, 0)
     assert.equal(uploads.length, 2)
     const status = await rpc.handler('audit.status', {})
@@ -4714,6 +4876,587 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
     assert.equal(taskFact.payload.type, 'CANCELLED')
     assert.equal(JSON.stringify(taskFact).includes('audit-session-1'), false)
   } finally {
+    releaseAuditContext()
+    for (const cleanup of cleanups.reverse()) await cleanup()
+    rmSync(temporary, { recursive: true, force: true })
+  }
+})
+
+test('audit locks terminal scenarios from trusted local outcomes', async () => {
+  const temporary = mkdtempSync(join(tmpdir(), 'e-mate-audit-scenarios-'))
+  const taskTables = { bindings: new Map(), outbox: new Map() }
+  const usageTables = { bindings: new Map(), outbox: new Map() }
+  const handlers = new Map()
+  const cleanups = []
+  let audit
+  const domain = source => ({
+    table: name => ({
+      entries: () => source[name].entries(),
+      put: async (key, value) => { source[name].set(key, structuredClone(value)) },
+    }),
+    close: async () => {},
+  })
+  let openedDomains = 0
+  try {
+    const bindingPath = writeAuditRuntimeBinding(temporary)
+    await applyAudit({
+      connection: { rpc: { handle: () => () => {} } },
+      sessionPersistence: { list: async () => [], readFrom: async () => ({ events: [] }) },
+      storageDomain: { open: async () => domain(openedDomains++ === 0 ? usageTables : taskTables) },
+      tools: {
+        provenance(name, agent) {
+          if (agent.id === 'audit-provenance-error') throw new Error('private provenance failure')
+          if (name === 'office_write' && agent.id === 'audit-private-office') {
+            return { moduleSpecifier: './private/office.js', pluginName: 'private-office' }
+          }
+          if (name === 'office_read') {
+            return {
+              moduleSpecifier: './node_modules/@e-mate/dsh-plugin-office-skills/lib/index.js',
+              pluginName: 'emate-office-skills',
+            }
+          }
+          if (name === 'office_write') {
+            return { moduleSpecifier: '@e-mate/dsh-plugin-office-skills', pluginName: 'emate-office-skills' }
+          }
+          if (name === 'imagegen') {
+            return { moduleSpecifier: './plugins/image-generation.js', pluginName: 'emate-image-generation' }
+          }
+          if (name === 'web_search') {
+            return { moduleSpecifier: '@deepseek-ai/dsh-tool-web', pluginName: 'tool-web' }
+          }
+        },
+      },
+      emateIdentity: { localAccountSubject: () => 'tenant-207:user-207' },
+      emateModelPolicy: { markAuditDelivered: async () => {} },
+      provide: (_name, value) => { audit = value },
+      effect(effect) {
+        const cleanup = effect()
+        if (typeof cleanup === 'function') cleanups.push(cleanup)
+        return cleanup
+      },
+      on: (event, handler) => {
+        handlers.set(event, handler)
+        return () => { handlers.delete(event) }
+      },
+      interval: () => () => {},
+      logger: { warn: () => {} },
+    }, {
+      bindingPath,
+      auditProvider: {},
+      taskAuditProvider: {},
+      flushIntervalMs: 30_000,
+    })
+    await new Promise(resolve => setImmediate(resolve))
+
+    const run = (sessionId, time, {
+      model = 'gpt-5.6-luna',
+      reason = 'completed',
+      terminalEvidence,
+    } = {}) => {
+      const agent = { id: sessionId }
+      handlers.get('session/event')(agent, {
+        type: 'turn/start', seq: 0, time, data: { turn: 1 },
+      })
+      handlers.get('session/event')(agent, {
+        type: 'assistant/message', seq: 1, time: time + 1,
+        data: {
+          turn: 1,
+          step: 1,
+          message: {
+            content: [{ type: 'text', text: `private-response:${sessionId}` }],
+            source: { kind: 'model', provider: 'e-mate-enterprise', model },
+          },
+        },
+      })
+      terminalEvidence?.(agent, time)
+      handlers.get('session/event')(agent, {
+        type: 'turn/end', seq: 4, time: time + 4,
+        data: { turn: 1, reason: { kind: reason } },
+      })
+    }
+
+    const settleTool = (agent, time, name, isError = false) => {
+      handlers.get('session/event')(agent, {
+        type: 'tool/call', seq: 2, time: time + 2,
+        data: {
+          turn: 1,
+          step: 1,
+          callId: `private-call:${agent.id}`,
+          name,
+          arguments: '{"path":"/private/customer.docx","prompt":"secret"}',
+        },
+      })
+      handlers.get('tools/result')({
+        name,
+        callId: `private-call:${agent.id}`,
+        arguments: { path: '/private/customer.docx' },
+        agent,
+      }, {
+        isError,
+        content: [{ type: 'text', text: 'private tool result' }],
+        ...(isError ? { error: { name: 'Error', code: 'PRIVATE_FAILURE' } } : { value: null }),
+      })
+    }
+
+    const startedAt = Date.now()
+    run('audit-content', startedAt)
+    run('audit-office', startedAt + 100, {
+      terminalEvidence: (agent, time) => { settleTool(agent, time, 'office_write') },
+    })
+    const imageReceipt = status => (agent, time) => {
+      handlers.get('session/event')(agent, {
+        type: 'emate/image-output', seq: 2, time: time + 2,
+        data: {
+          schema_version: 2,
+          call_id: `private-image-call:${agent.id}`,
+          parent_session_id: agent.id,
+          status,
+          output: { attachmentId: 'sha256:private-attachment', fileName: 'private-image.png' },
+        },
+      })
+    }
+    run('audit-image', startedAt + 200, { terminalEvidence: imageReceipt('completed') })
+    run('audit-search', startedAt + 300, {
+      terminalEvidence: (agent, time) => { settleTool(agent, time, 'web_search') },
+    })
+    run('audit-private-office', startedAt + 400, {
+      terminalEvidence: (agent, time) => { settleTool(agent, time, 'office_write') },
+    })
+    run('audit-unknown', startedAt + 500, {
+      terminalEvidence: (agent, time) => { settleTool(agent, time, 'private_tool') },
+    })
+    run('audit-provenance-error', startedAt + 600, {
+      terminalEvidence: (agent, time) => { settleTool(agent, time, 'office_write') },
+    })
+    run('audit-conflict', startedAt + 700, {
+      terminalEvidence: (agent, time) => {
+        settleTool(agent, time, 'office_read')
+        imageReceipt('completed')(agent, time)
+      },
+    })
+    run('audit-office-cancelled', startedAt + 800, {
+      reason: 'aborted',
+      terminalEvidence: (agent, time) => { settleTool(agent, time, 'office_write', true) },
+    })
+    run('audit-image-cancelled', startedAt + 900, {
+      reason: 'interrupted',
+      terminalEvidence: imageReceipt('failed'),
+    })
+    run('audit-model-name-only', startedAt + 1_000, { model: 'gpt-image-2-pro' })
+    run('audit-imagegen-tool', startedAt + 1_100, {
+      terminalEvidence: (agent, time) => { settleTool(agent, time, 'imagegen', true) },
+    })
+    run('audit-document-with-search', startedAt + 1_200, {
+      terminalEvidence: (agent, time) => {
+        settleTool(agent, time, 'web_search')
+        settleTool(agent, time, 'office_read')
+      },
+    })
+    run('audit-document-with-run-code', startedAt + 1_250, {
+      terminalEvidence: (agent, time) => {
+        settleTool(agent, time, 'office_read')
+        settleTool(agent, time, 'run_code')
+      },
+    })
+    const abandonedAgent = { id: 'audit-abandoned' }
+    handlers.get('session/event')(abandonedAgent, {
+      type: 'turn/start', seq: 0, time: startedAt + 1_300, data: { turn: 1 },
+    })
+    settleTool(abandonedAgent, startedAt + 1_300, 'office_write')
+    handlers.get('agent/disposed')({ agent: abandonedAgent })
+    await audit.drain()
+
+    const taskRecords = [...taskTables.outbox.values()]
+    assert.deepEqual(taskRecords
+      .filter(record => record.payload.type === 'RECEIVED')
+      .sort((left, right) => left.payload.occurredAt.localeCompare(right.payload.occurredAt))
+      .map(record => record.payload.scenario), [
+      'CONTENT_CREATION',
+      'DOCUMENT_EDITING',
+      'ASSET_PRODUCTION',
+      'SEARCH_QUERY',
+      'GENERAL',
+      'GENERAL',
+      'GENERAL',
+      'GENERAL',
+      'DOCUMENT_EDITING',
+      'ASSET_PRODUCTION',
+      'CONTENT_CREATION',
+      'ASSET_PRODUCTION',
+      'DOCUMENT_EDITING',
+      'GENERAL',
+      'GENERAL',
+    ])
+    const scenariosByTask = Map.groupBy(taskRecords, record => record.payload.taskId)
+    assert.ok([...scenariosByTask.values()].every(records => new Set(
+      records.map(record => record.payload.scenario),
+    ).size === 1))
+    const serialized = JSON.stringify({ bindings: [...taskTables.bindings.values()], taskRecords })
+    for (const privateValue of [
+      'private-response',
+      'private_tool',
+      'office_write',
+      'web_search',
+      'PRIVATE_FAILURE',
+      '/private/customer.docx',
+      'private-image.png',
+      'private-attachment',
+      'private-call',
+    ]) assert.equal(serialized.includes(privateValue), false)
+    assert.ok([...taskTables.bindings.values()].every(binding => binding.locked_scenario !== undefined))
+  } finally {
+    for (const cleanup of cleanups.reverse()) await cleanup()
+    rmSync(temporary, { recursive: true, force: true })
+  }
+})
+
+test('audit replays persisted scenario candidates without reclassifying historical GENERAL', async () => {
+  const temporary = mkdtempSync(join(tmpdir(), 'e-mate-audit-replay-'))
+  const bindingPath = writeAuditRuntimeBinding(temporary)
+  const usageTables = { bindings: new Map(), outbox: new Map() }
+  const taskTables = { bindings: new Map(), outbox: new Map() }
+  const allCleanups = []
+  const events = sessionId => [
+    { type: 'turn/start', seq: 0, time: 1_800_000_000_000, data: { turn: 1 } },
+    {
+      type: 'assistant/message', seq: 1, time: 1_800_000_000_001,
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          content: [{ type: 'text', text: `private-replay:${sessionId}` }],
+          source: { kind: 'model', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+        },
+      },
+    },
+    {
+      type: 'tool/call', seq: 2, time: 1_800_000_000_002,
+      data: { turn: 1, step: 1, callId: 'private-replay-call', name: 'office_read', arguments: '{}' },
+    },
+    { type: 'turn/end', seq: 3, time: 1_800_000_000_003, data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  const start = async (sessionPersistence) => {
+    const handlers = new Map()
+    const cleanups = []
+    let audit
+    let openedDomains = 0
+    const domain = source => ({
+      table: name => ({
+        entries: () => source[name].entries(),
+        put: async (key, value) => { source[name].set(key, structuredClone(value)) },
+      }),
+      close: async () => {},
+    })
+    await applyAudit({
+      connection: { rpc: { handle: () => () => {} } },
+      sessionPersistence,
+      storageDomain: { open: async () => domain(openedDomains++ === 0 ? usageTables : taskTables) },
+      tools: {
+        provenance: name => name === 'office_read'
+          ? { moduleSpecifier: '@e-mate/dsh-plugin-office-skills', pluginName: 'emate-office-skills' }
+          : undefined,
+      },
+      emateIdentity: { localAccountSubject: () => 'tenant-207:replay-user' },
+      emateModelPolicy: { markAuditDelivered: async () => {} },
+      provide: (_name, value) => { audit = value },
+      effect(effect) {
+        const cleanup = effect()
+        if (typeof cleanup === 'function') cleanups.push(cleanup)
+        return cleanup
+      },
+      on: (event, handler) => {
+        handlers.set(event, handler)
+        return () => { handlers.delete(event) }
+      },
+      interval: () => () => {},
+      logger: { warn: () => {} },
+    }, { bindingPath, auditProvider: {}, taskAuditProvider: {}, flushIntervalMs: 30_000 })
+    allCleanups.push(...cleanups)
+    return { audit, handlers }
+  }
+
+  try {
+    const first = await start({ list: async () => [], readFrom: async () => ({ events: [] }) })
+    await new Promise(resolve => setImmediate(resolve))
+    const liveEvents = events('audit-replay')
+    for (const event of liveEvents.slice(0, 3)) {
+      first.handlers.get('session/event')({ id: 'audit-replay' }, event)
+    }
+    first.handlers.get('tools/result')({
+      name: 'office_read', callId: 'private-replay-call', agent: { id: 'audit-replay' },
+    }, { isError: false, content: [{ type: 'text', text: 'private-result' }], value: null })
+    await first.audit.drain('audit-replay')
+    assert.equal(taskTables.outbox.size, 0)
+    assert.deepEqual([...taskTables.bindings.values()][0].scenario_candidates, [
+      'CONTENT_CREATION',
+      'DOCUMENT_EDITING',
+    ])
+
+    const historicalSession = 'audit-historical-general'
+    const historicalBinding = {
+      schema_version: 1,
+      account_subject_sha256: 'a'.repeat(64),
+      created_at: new Date(1_800_000_000_000).toISOString(),
+      scenario_candidates: ['DOCUMENT_EDITING'],
+      locked_scenario: 'DOCUMENT_EDITING',
+    }
+    taskTables.bindings.set(
+      `${createHash('sha256').update(historicalSession).digest('hex')}:1`,
+      historicalBinding,
+    )
+    const historicalFact = createTaskAuditFact(
+      historicalSession,
+      events(historicalSession)[0],
+      'RECEIVED',
+      historicalBinding,
+      1,
+      'GENERAL',
+    )
+    const historicalDelivered = {
+      ...historicalFact,
+      status: 'delivered',
+      receipt_id: 'task-receipt:historical',
+      delivered_at: new Date(1_800_000_000_100).toISOString(),
+    }
+    taskTables.outbox.set(historicalDelivered.event_id, historicalDelivered)
+    const historicalBefore = JSON.stringify(historicalDelivered)
+    const crashSession = 'audit-crash-open'
+    const crashBinding = {
+      schema_version: 1,
+      account_subject_sha256: 'c'.repeat(64),
+      created_at: new Date(1_800_000_000_000).toISOString(),
+    }
+    taskTables.bindings.set(
+      `${createHash('sha256').update(crashSession).digest('hex')}:1`,
+      crashBinding,
+    )
+    const crashTaskId = createTaskAuditFact(
+      crashSession,
+      events(crashSession)[0],
+      'RECEIVED',
+      crashBinding,
+      1,
+      'GENERAL',
+    ).payload.taskId
+    const replayTaskId = createTaskAuditFact(
+      'audit-replay',
+      events('audit-replay')[0],
+      'RECEIVED',
+      crashBinding,
+      1,
+      'GENERAL',
+    ).payload.taskId
+
+    let readCount = 0
+    let replayed
+    const replayStarted = new Promise(resolve => { replayed = resolve })
+    const restarted = await start({
+      list: async () => [{ id: 'audit-replay' }, { id: historicalSession }, { id: crashSession }],
+      readFrom: async (sessionId) => {
+        readCount += 1
+        if (readCount === 3) replayed()
+        return { events: sessionId === crashSession ? events(sessionId).slice(0, 3) : events(sessionId) }
+      },
+    })
+    await replayStarted
+    await new Promise(resolve => setImmediate(resolve))
+    await restarted.audit.drain()
+
+    const replayRecords = [...taskTables.outbox.values()]
+    const replayTask = replayRecords.filter(record => record.payload.taskId === replayTaskId)
+    assert.ok(replayTask.length > 0)
+    assert.ok(replayTask.every(record => record.payload.scenario === 'DOCUMENT_EDITING'))
+    const historicalTask = replayRecords.filter(record => record.payload.taskId === historicalFact.payload.taskId)
+    assert.ok(historicalTask.every(record => record.payload.scenario === 'GENERAL'))
+    const crashTask = replayRecords.filter(record => record.payload.taskId === crashTaskId)
+    assert.deepEqual(crashTask.map(record => record.payload.type), [
+      'RECEIVED',
+      'FIRST_RESPONSE',
+      'TOOL_EXECUTION',
+    ])
+    assert.ok(crashTask.every(record => record.payload.scenario === 'GENERAL'))
+    assert.equal(JSON.stringify(taskTables.outbox.get(historicalDelivered.event_id)), historicalBefore)
+    const sizeAfterReplay = taskTables.outbox.size
+
+    const replayedAgain = await start({
+      list: async () => [{ id: 'audit-replay' }, { id: historicalSession }, { id: crashSession }],
+      readFrom: async sessionId => ({
+        events: sessionId === crashSession ? events(sessionId).slice(0, 3) : events(sessionId),
+      }),
+    })
+    await new Promise(resolve => setImmediate(resolve))
+    await replayedAgain.audit.drain()
+    assert.equal(taskTables.outbox.size, sizeAfterReplay)
+    assert.equal(JSON.stringify(replayRecords).includes('private-replay'), false)
+  } finally {
+    for (const cleanup of allCleanups.reverse()) await cleanup()
+    rmSync(temporary, { recursive: true, force: true })
+  }
+})
+
+test('audit isolates slow session writes and quarantines malformed task records', async () => {
+  const temporary = mkdtempSync(join(tmpdir(), 'e-mate-audit-isolation-'))
+  const bindingPath = writeAuditRuntimeBinding(temporary)
+  const usageTables = { bindings: new Map(), outbox: new Map() }
+  const taskTables = { bindings: new Map(), outbox: new Map() }
+  const cleanups = []
+  const handlers = new Map()
+  const uploads = []
+  let audit
+  let releaseSlowWrite
+  const slowWrite = new Promise(resolve => { releaseSlowWrite = resolve })
+  let releaseUpload
+  let notifyUploadHang
+  const uploadGate = new Promise(resolve => { releaseUpload = resolve })
+  const uploadHung = new Promise(resolve => { notifyUploadHang = resolve })
+  let hangUpload = false
+  let rejectedTaskId
+  const slowPrefix = createHash('sha256').update('audit-slow-a').digest('hex')
+  const preloadBinding = { schema_version: 1, account_subject_sha256: 'b'.repeat(64) }
+  const preloadFact = createTaskAuditFact('audit-preload', {
+    type: 'turn/end', seq: 1, time: 1_700_000_100_000, data: { turn: 1, reason: { kind: 'completed' } },
+  }, 'COMPLETED', preloadBinding, 1, 'GENERAL')
+  taskTables.outbox.set(preloadFact.event_id, preloadFact)
+  taskTables.outbox.set(`taskevent_${'f'.repeat(64)}`, {
+    schema_version: 1,
+    event_id: `taskevent_${'f'.repeat(64)}`,
+    account_subject_sha256: 'b'.repeat(64),
+    payload: { content: 'private malformed record' },
+    payload_sha256: 'c'.repeat(64),
+    source_seq: 2,
+    status: 'pending',
+    attempt_count: 0,
+    next_attempt_at: new Date(1_700_000_100_000).toISOString(),
+  })
+  let uploadAttempted
+  const attempted = new Promise(resolve => { uploadAttempted = resolve })
+  let openedDomains = 0
+  const domain = (source, task) => ({
+    table: name => ({
+      entries: () => source[name].entries(),
+      put: async (key, value) => {
+        if (task && name === 'bindings' && key.startsWith(slowPrefix)) await slowWrite
+        if (task && name === 'outbox' && value.payload?.taskId === rejectedTaskId) {
+          throw new Error('simulated task audit write failure')
+        }
+        source[name].set(key, structuredClone(value))
+      },
+    }),
+    close: async () => {},
+  })
+  try {
+    await applyAudit({
+      connection: { rpc: { handle: () => () => {} } },
+      sessionPersistence: { list: async () => [], readFrom: async () => ({ events: [] }) },
+      storageDomain: { open: async () => openedDomains++ === 0
+        ? domain(usageTables, false)
+        : domain(taskTables, true) },
+      tools: { provenance: () => undefined },
+      emateIdentity: { localAccountSubject: () => 'tenant-207:isolation-user' },
+      emateModelPolicy: { markAuditDelivered: async () => {} },
+      provide: (_name, value) => { audit = value },
+      effect(effect) {
+        const cleanup = effect()
+        if (typeof cleanup === 'function') cleanups.push(cleanup)
+        return cleanup
+      },
+      on: (event, handler) => {
+        handlers.set(event, handler)
+        return () => { handlers.delete(event) }
+      },
+      interval: () => () => {},
+      logger: { warn: () => {} },
+    }, {
+      bindingPath,
+      auditProvider: {},
+      taskAuditProvider: {
+        upload: async (records) => {
+          uploads.push(structuredClone(records))
+          uploadAttempted()
+          if (hangUpload) {
+            notifyUploadHang()
+            await uploadGate
+          }
+          return {
+            schema_version: 1,
+            receipts: records.map(record => ({
+              event_id: record.event_id,
+              payload_sha256: record.payload_sha256,
+              receipt_id: `task-receipt:${record.event_id.slice(-16)}`,
+              accepted_at: new Date().toISOString(),
+            })),
+          }
+        },
+      },
+      flushIntervalMs: 30_000,
+    })
+    await attempted
+    await audit.flush({ force: true })
+    await audit.drain()
+    assert.equal(uploads.length, 1)
+    assert.deepEqual(uploads[0].map(record => record.event_id), [preloadFact.event_id])
+    assert.equal(taskTables.outbox.get(preloadFact.event_id).status, 'delivered')
+    assert.equal(taskTables.outbox.get(`taskevent_${'f'.repeat(64)}`).status, 'pending')
+
+    const run = (sessionId, time) => {
+      const session = { id: sessionId }
+      handlers.get('session/event')(session, { type: 'turn/start', seq: 0, time, data: { turn: 1 } })
+      handlers.get('session/event')(session, {
+        type: 'assistant/message', seq: 1, time: time + 1,
+        data: {
+          turn: 1,
+          step: 1,
+          message: { source: { kind: 'model', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' } },
+        },
+      })
+      handlers.get('session/event')(session, {
+        type: 'turn/end', seq: 2, time: time + 2, data: { turn: 1, reason: { kind: 'completed' } },
+      })
+    }
+    const now = Date.now()
+    run('audit-slow-a', now)
+    run('audit-fast-b', now + 100)
+    assert.equal(handlers.get('session/flush')({ id: 'audit-slow-a' }), undefined)
+    await audit.drain('audit-fast-b')
+    const binding = { schema_version: 1, account_subject_sha256: 'd'.repeat(64) }
+    const fastTaskId = createTaskAuditFact('audit-fast-b', {
+      type: 'turn/start', seq: 0, time: now + 100, data: { turn: 1 },
+    }, 'RECEIVED', binding).payload.taskId
+    const slowTaskId = createTaskAuditFact('audit-slow-a', {
+      type: 'turn/start', seq: 0, time: now, data: { turn: 1 },
+    }, 'RECEIVED', binding).payload.taskId
+    assert.equal([...taskTables.outbox.values()].filter(record => record.payload?.taskId === fastTaskId).length, 3)
+    assert.equal([...taskTables.outbox.values()].filter(record => record.payload?.taskId === slowTaskId).length, 0)
+    releaseSlowWrite()
+    await audit.drain('audit-slow-a')
+    assert.equal([...taskTables.outbox.values()].filter(record => record.payload?.taskId === slowTaskId).length, 3)
+
+    const rejectedTime = now + 150
+    rejectedTaskId = createTaskAuditFact('audit-write-failure', {
+      type: 'turn/start', seq: 0, time: rejectedTime, data: { turn: 1 },
+    }, 'RECEIVED', binding).payload.taskId
+    run('audit-write-failure', rejectedTime)
+    await audit.drain('audit-write-failure')
+    assert.equal([...taskTables.outbox.values()].filter(record => record.payload?.taskId === rejectedTaskId).length, 0)
+    run('audit-fast-after-failure', now + 175)
+    await audit.drain('audit-fast-after-failure')
+    assert.equal([...taskTables.outbox.values()].filter(record => record.payload?.occurredAt
+      === new Date(now + 175).toISOString()).length, 1)
+
+    hangUpload = true
+    const hangingFlush = audit.flush({ force: true })
+    await uploadHung
+    run('audit-fast-c', now + 200)
+    await audit.drain('audit-fast-c')
+    const fastTaskCId = createTaskAuditFact('audit-fast-c', {
+      type: 'turn/start', seq: 0, time: now + 200, data: { turn: 1 },
+    }, 'RECEIVED', binding).payload.taskId
+    assert.equal([...taskTables.outbox.values()].filter(record => record.payload?.taskId === fastTaskCId).length, 3)
+    releaseUpload()
+    await hangingFlush
+  } finally {
+    releaseSlowWrite()
+    releaseUpload()
     for (const cleanup of cleanups.reverse()) await cleanup()
     rmSync(temporary, { recursive: true, force: true })
   }
@@ -4721,7 +5464,7 @@ test('audit records only real Harness usage and deduplicates reconnect replay an
 
 test('audit startup flushes a persisted outbox through the Host identity transport', async () => {
   const temporary = mkdtempSync(join(tmpdir(), 'e-mate-audit-backfill-'))
-  const paths = installProfile(join(temporary, 'dsh-home'))
+  const bindingPath = writeAuditRuntimeBinding(temporary)
   const tables = { bindings: new Map(), outbox: new Map() }
   const taskTables = { bindings: new Map(), outbox: new Map() }
   const cleanups = []
@@ -4796,16 +5539,18 @@ test('audit startup flushes a persisted outbox through the Host identity transpo
       interval: () => () => {},
       logger: { warn: () => {} },
     }, {
-      bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json'),
+      bindingPath,
       flushIntervalMs: 30_000,
     })
 
     await attempted
-    await new Promise(resolve => setImmediate(resolve))
+    await audit.flush({ force: true })
+    await audit.drain()
     assert.equal(audit.status().pending, 1)
     assert.equal(tables.outbox.get(pending.fact_id).attempt_count, 1)
     uploadAvailable = true
     const delivered = await audit.flush({ force: true })
+    await audit.drain()
     assert.equal(delivered.delivered_now, 1)
     assert.equal(tables.outbox.get(pending.fact_id).status, 'delivered')
     assert.equal(deliveredFacts.length, 1)

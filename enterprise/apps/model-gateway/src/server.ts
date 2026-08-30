@@ -75,6 +75,7 @@ const gptSearchCredentialRouteId = 'gpt-web-search';
 const gptSearchProviderId = 'gpt-responses';
 const gptSearchBaseUrl = 'http://43.135.183.53:8080/v1';
 const gptSearchModelId = 'gpt-5.6-luna';
+const deepSeekSearchCredentialRouteId = 'deepseek';
 
 const runtimeApiMode = (route: ModelGatewayRoute): 'responses' | 'chat-completions' =>
   route.apiMode === 'chat-completions' ? 'chat-completions' : 'responses';
@@ -1009,15 +1010,11 @@ function principalAllowsRoute(identity: ModelGatewayPrincipal, routeId: string):
   return routeId !== gptSearchCredentialRouteId && identity.modelIds.includes(routeId);
 }
 
-function managedGptSearchCredentialRoute(
+function managedDeepSeekSearchCredentialRoute(
   routes: Map<string, ModelGatewayRoute>
 ): ModelGatewayRoute | undefined {
-  const route = routes.get(gptSearchCredentialRouteId);
-  return route?.providerId === gptSearchProviderId &&
-    route.apiMode === 'responses' &&
-    route.allowInsecureHttpUpstream === true &&
-    route.upstreamBaseUrl === gptSearchBaseUrl &&
-    route.upstreamModelId === gptSearchModelId
+  const route = routes.get(deepSeekSearchCredentialRouteId);
+  return route?.providerId === 'deepseek' && route.apiMode === 'chat-completions'
     ? route
     : undefined;
 }
@@ -2022,7 +2019,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
         let searchGrantStatus: 'granted' | 'denied' | 'unavailable' = 'unavailable';
         let searchApiKey: string | undefined;
         if (searchGrantRequested) {
-          const searchRoute = managedGptSearchCredentialRoute(routes);
+          const searchRoute = managedDeepSeekSearchCredentialRoute(routes);
           if (searchRoute && options.tenantModelRoutePolicy?.upstreamApiKey) {
             let enabled: boolean | undefined;
             try {
@@ -2086,8 +2083,8 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
             schemaVersion: 1,
             status: searchGrantStatus,
             purpose: 'web-search',
-            // Base-v6 wire identifiers stay stable; the reserved Gateway route
-            // below owns the concrete GPT Responses provider and secret file.
+            // Base-v6 wire identifiers stay stable; the native provider must
+            // receive the matching DeepSeek route credential.
             provider: 'deepseek-official',
             credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
             ...(searchGrantStatus === 'granted' ? { upstreamApiKey: searchApiKey } : {}),

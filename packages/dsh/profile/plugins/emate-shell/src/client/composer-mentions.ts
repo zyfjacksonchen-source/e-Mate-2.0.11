@@ -123,11 +123,18 @@ export function registerMentionSources(ctx: any): void {
         input.notify('error', '请在空白输入框中使用 @目标，当前草稿已保留。')
         return 'handled'
       }
-      input.setDraft('/goal')
-      const after = input.state.getSnapshot()
       const triggers = ctx.inputTriggers.sessionOf(scope)
-      triggers.track('/goal', 5, { tier: after.phase === 'claimed' ? 'claimed' : 'plain' }, after.draftRev)
-      if (!triggers.onSpace()) input.notify('error', '目标入口暂不可用，已保留 /goal。')
+      void triggers.adjudicate('/goal', AbortSignal.timeout(10_000)).then((outcome: any) => {
+        if (outcome === undefined || outcome === 'handled' || !('claim' in outcome)) {
+          input.notify('error', '目标入口暂不可用，当前草稿已保留。')
+          return
+        }
+        if (scope.bail(scope, 'slash/input-begin-command', { claim: outcome.claim, span }) !== true) {
+          input.notify('info', '目标入口已就绪；输入已变化，未替换 @。')
+        }
+      }).catch((reason: unknown) => {
+        input.notify('error', reason instanceof Error ? reason.message : '目标入口暂不可用，当前草稿已保留。')
+      })
       return 'handled'
     },
   }

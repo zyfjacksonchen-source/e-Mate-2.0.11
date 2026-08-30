@@ -28,5 +28,5 @@ test('keeps one native Composer owner and decorates its semantic frame host', as
   assert.match(emittedClient, /prefers-reduced-motion:reduce[\s\S]*animation:none/)
   assert.doesNotMatch(emittedClient, /animation:(?:6|12)s linear infinite/)
   assert.doesNotMatch(`${host}\n${client}\n${css}`, /MutationObserver|localStorage|tapIndex|backdrop-filter/)
-  assert.equal(manifest.eMate.harnessCommit, 'fccd7d25b3f19885e2778c128b57d7c8312b7344')
+  assert.equal(manifest.eMate.harnessCommit, 'd19aae6da3100e836867418c2cf73bdee8a0b1a8')
 })

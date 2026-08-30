@@ -26,7 +26,8 @@ const spec: DesktopShellSpec = {
     bluePath: '/tmp/tray-icon-blue.png',
   },
   readThemeSource: () => 'system',
-  resourceRoots: () => ['/tmp/e-mate-workspace'],
+  resourceRoots: () => ['/tmp'],
+  resourceSessionRoot: sessionId => sessionId === 'session-1' ? '/tmp' : undefined,
   requestQuit: () => {},
   requestModeChange: async () => {},
 }

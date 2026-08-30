@@ -5,7 +5,7 @@ import { zipSync } from 'fflate'
 import { loadTargetLlm, loadTargetTools } from './target-runtime.js'
 
 export const name = 'emate-image-generation'
-export const inject = ['tools', 'jobs', 'attachments', 'sandboxPolicy', 'subagents', 'emateIdentity', 'emateModelPolicy', 'emateCapabilities']
+export const inject = ['tools', 'jobs', 'attachments', 'sandboxPolicy', 'agents', 'subagents', 'emateIdentity', 'emateModelPolicy', 'emateCapabilities']
 
 interface ImageOutputEventData {
   readonly schema_version: 2
@@ -1098,6 +1098,51 @@ function parentReceipt(receipt, callId, parentSessionId, childSessionId, revisio
   }
 }
 
+function validSettledChildReceipt(value, childSessionId) {
+  return isRecord(value)
+    && [2, 3].includes(value.revision)
+    && typeof value.child_session_id === 'string'
+    && Array.isArray(value.sources)
+    && validChildReceipt({ ...value, revision: 1 }, value.sources, childSessionId, value.child_session_id)
+}
+
+function childProjectionCallId(childSessionId, receipt) {
+  return `subagent-image:${sha256Text(JSON.stringify([
+    childSessionId,
+    receipt.call_id,
+  ]))}`
+}
+
+function projectSettledChildImages(agents, info) {
+  if (info?.local !== true || typeof info.id !== 'string') return
+  const child = agents.get(info.id)
+  const parentSessionId = child?.session?.header?.parentSession
+  if (child?.session?.header?.id !== info.id || typeof parentSessionId !== 'string') return
+  const parent = agents.get(parentSessionId)
+  if (parent === undefined || !agents.isOwnedBy(info.id, parent)) return
+  const receipts = new Map()
+  for (const event of child.session.events) {
+    if (event?.type !== 'emate/image-output'
+      || !validSettledChildReceipt(event.data, info.id)) continue
+    const callId = childProjectionCallId(info.id, event.data)
+    const current = receipts.get(callId)
+    if (current === undefined || event.data.revision >= current.revision) receipts.set(callId, event.data)
+  }
+  for (const [callId, receipt] of receipts) {
+    if (!['completed', 'needs-review'].includes(receipt.status)) continue
+    if (parent.session.events.some(event => event?.type === 'emate/image-output'
+      && event.data?.schema_version === IMAGE_RECEIPT_VERSION
+      && event.data?.call_id === callId)) continue
+    appendImageReceipt(parent, parentReceipt(
+      receipt,
+      callId,
+      parentSessionId,
+      info.id,
+      receipt.revision,
+    ))
+  }
+}
+
 function finalParentRevision(agent, callId) {
   return agent.session.events.some(event => event?.type === 'emate/image-output'
     && event.data?.call_id === String(callId)
@@ -1181,6 +1226,9 @@ export async function apply(ctx, config = {}) {
   if (modelPolicy === undefined) throw new Error('managed image generation requires emateModelPolicy')
   const subagents = ctx.get('subagents')
   if (subagents === undefined) throw new Error('managed image generation requires the native DSH subagent runtime')
+  const agents = ctx.get('agents')
+  if (agents === undefined) throw new Error('managed image generation requires the native DSH Agent registry')
+  ctx.on('subagent/end', info => projectSettledChildImages(agents, info))
   const client = createImageClient({
     request: identity.request.bind(identity),
     root,

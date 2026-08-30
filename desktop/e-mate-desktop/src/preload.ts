@@ -7,6 +7,11 @@ import {
 } from './desktop-bootstrap-contract.ts'
 import { DESKTOP_FILE_PATH_BRIDGE } from './file-path-bridge-contract.ts'
 import {
+  DESKTOP_RESOURCE_BRIDGE,
+  DESKTOP_RESOURCE_RUN,
+  type DesktopResourceBridge,
+} from './desktop-resource-bridge-contract.ts'
+import {
   DESKTOP_UPDATE_BRIDGE,
   DESKTOP_UPDATE_CANCEL,
   DESKTOP_UPDATE_RUN_INTERACTIVE,
@@ -27,6 +32,11 @@ contextBridge.exposeInMainWorld(DESKTOP_FILE_PATH_BRIDGE, {
     return webUtils.getPathForFile(file)
   },
 })
+
+const resources: DesktopResourceBridge = {
+  run: async request => { await ipcRenderer.invoke(DESKTOP_RESOURCE_RUN, request) },
+}
+contextBridge.exposeInMainWorld(DESKTOP_RESOURCE_BRIDGE, resources)
 
 const updates: DesktopUpdateBridge = {
   runInteractiveUpdate: async () => { await ipcRenderer.invoke(DESKTOP_UPDATE_RUN_INTERACTIVE) },

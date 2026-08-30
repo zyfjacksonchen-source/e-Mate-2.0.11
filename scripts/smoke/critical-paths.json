@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "id": "e-mate-critical-path-smoke-v1",
-  "base_contract_id": "e-mate-desktop-profile-v10-dsh-fccd7d25b3f1",
-  "harness_commit": "fccd7d25b3f19885e2778c128b57d7c8312b7344",
+  "base_contract_id": "e-mate-desktop-profile-v14-dsh-d19aae6da310",
+  "harness_commit": "d19aae6da3100e836867418c2cf73bdee8a0b1a8",
   "layers": {
     "component": { "budget_ms": 60000 },
     "app-dir": { "budget_ms": 180000 },

@@ -14,8 +14,9 @@ import {
 } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { pinnedPnpmInvocation } from './package-manager.mjs'
 
-export const HARNESS_COMMIT = 'fccd7d25b3f19885e2778c128b57d7c8312b7344'
+export const HARNESS_COMMIT = 'd19aae6da3100e836867418c2cf73bdee8a0b1a8'
 export const HARNESS_VERSION = '0.1.0-rc.7'
 
 const NATIVE_MODEL_REFRESH = 'ctx.remote.$on("credentials/updated", refresh);'
@@ -344,14 +345,30 @@ export function verifyHarnessDesktopRuntime(root) {
   return actual
 }
 
+export function runHarnessBuildScripts(root, pnpmVersion, env = process.env) {
+  const commands = [
+    ['--dir', 'upstream/deepseek-harness', 'run', 'build:lib:host'],
+    ['--dir', 'upstream/deepseek-harness', 'run', 'build:lib:client'],
+    ['--dir', 'upstream/deepseek-harness', '--filter', '@deepseek-ai/dsh-web-frontend', 'run', 'build'],
+  ]
+  for (const args of commands) {
+    const invocation = pinnedPnpmInvocation(pnpmVersion, args, { env })
+    const result = spawnSync(invocation.command, invocation.args, {
+      cwd: root,
+      env: invocation.env,
+      stdio: 'inherit',
+    })
+    if (result.error !== undefined) throw result.error
+    if (result.status !== 0) throw new Error(`pinned Harness ${args.join(' ')} exited with ${String(result.status)}`)
+  }
+}
+
 function build(root) {
   assertHarnessSource(root)
-  const result = spawnSync('pnpm', ['--dir', 'upstream/deepseek-harness', 'run', 'build'], {
-    cwd: root,
-    stdio: 'inherit',
-  })
-  if (result.error !== undefined) throw result.error
-  if (result.status !== 0) throw new Error(`pinned Harness build exited with ${String(result.status)}`)
+  const packageManager = readJson(join(root, 'package.json')).packageManager
+  const pnpmVersion = /^pnpm@([^+]+)$/u.exec(packageManager)?.[1]
+  if (pnpmVersion === undefined) throw new Error(`unsupported packageManager: ${String(packageManager)}`)
+  runHarnessBuildScripts(root, pnpmVersion)
   writeHarnessBuildReceipt(root)
 }
 

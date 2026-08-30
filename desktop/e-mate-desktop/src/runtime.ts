@@ -144,6 +144,8 @@ export interface DesktopShellSpec extends DesktopWindowConfig {
   readThemeSource(): DesktopThemeSource
   /** Current Host-authorized workspace roots for native resource actions. */
   resourceRoots(): readonly string[]
+  /** Resolve one live Host session to its immutable workspace root. */
+  resourceSessionRoot(sessionId: string): string | undefined
   /** Request Cordis teardown followed by native application exit. */
   requestQuit(code: number): void
   /** Persist another mode through the registered desktop settings scope. */

@@ -979,7 +979,7 @@ export async function handleRequest(request, env, fetchImplementation = fetch) {
     return json({ schema_version: 1, ready: row?.ok === 1 })
   }
   if (!url.pathname.startsWith(`${BASE_PATH}/`) && url.pathname !== BASE_PATH) throw new HttpError(404, 'Not found')
-  if (request.headers.has('origin') || request.headers.has('sec-fetch-site') || request.headers.has('sec-fetch-mode')) {
+  if (request.headers.has('origin') || request.headers.has('sec-fetch-site')) {
     throw new HttpError(403, 'Browser bearer transport is forbidden', 'auth')
   }
   if (request.method === 'GET' && url.pathname === `${BASE_PATH}/skills`) return catalog(request, env, config, fetchImplementation, url)

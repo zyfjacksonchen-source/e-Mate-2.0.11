@@ -82,21 +82,48 @@ describe('desktop header controls', () => {
   })
 
   it('keeps theme available and clear of the native Settings close control', () => {
+    let scheme: 'light' | 'dark' = 'light'
+    const listeners = new Set<() => void>()
+    const toggleTheme = () => {
+      scheme = scheme === 'light' ? 'dark' : 'light'
+      document.body.toggleAttribute('data-ds-dark-theme', scheme === 'dark')
+      listeners.forEach(listener => { listener() })
+    }
     history.replaceState(null, '', '/settings')
-    render(<HeaderControls
-      getThemeScheme={() => 'light'} subscribeTheme={() => () => {}} toggleTheme={() => {}}
+    const view = render(<><HeaderControls
+      getThemeScheme={() => scheme} subscribeTheme={listener => { listeners.add(listener); return () => { listeners.delete(listener) } }} toggleTheme={toggleTheme}
       useSessions={selector => selector({ current: undefined, ids: [], byId: {}, subagentsByParent: {}, currentAddress: undefined } as never)}
       callShare={vi.fn()} useSessionLogDownload={selector => selector({ bySession: {} })}
       requestDownload={vi.fn()} dismissDownload={vi.fn()}
       LightIcon={Icon} DarkIcon={Icon}
-    />)
+    /><button type="button">关闭设置</button></>)
 
-    expect(screen.getByLabelText('应用工具').hasAttribute('data-emate-settings-route')).toBe(true)
-    expect(screen.getByRole('button', { name: '切换到暗色模式' })).not.toBeNull()
+    expect(screen.queryByLabelText('应用工具')).toBeNull()
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.click(screen.getByRole('button', { name: scheme === 'dark' ? '切换到明亮模式' : '切换到暗色模式' }))
+      expect(screen.getAllByRole('button', { name: scheme === 'dark' ? '切换到明亮模式' : '切换到暗色模式' })).toHaveLength(1)
+      expect(screen.getAllByRole('button', { name: '关闭设置' })).toHaveLength(1)
+      expect(screen.queryByLabelText('应用工具')).toBeNull()
+    }
+    view.unmount()
+    render(<><HeaderControls
+      getThemeScheme={() => scheme} subscribeTheme={listener => { listeners.add(listener); return () => { listeners.delete(listener) } }} toggleTheme={toggleTheme}
+      useSessions={selector => selector({ current: undefined, ids: [], byId: {}, subagentsByParent: {}, currentAddress: undefined } as never)}
+      callShare={vi.fn()} useSessionLogDownload={selector => selector({ bySession: {} })}
+      requestDownload={vi.fn()} dismissDownload={vi.fn()}
+      LightIcon={Icon} DarkIcon={Icon}
+    /><button type="button">关闭设置</button></>)
+    expect(screen.getAllByRole('button', { name: scheme === 'dark' ? '切换到明亮模式' : '切换到暗色模式' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: '关闭设置' })).toHaveLength(1)
     const controls = readFileSync('src/client/header-controls.module.css', 'utf8')
+    expect(controls).toMatch(/\.controls\[data-emate-settings-route\],[\s\S]*top:\s*22px;/u)
     expect(controls).toMatch(/\.controls\[data-emate-settings-route\][\s\S]*right:\s*calc\(72px \+ var\(--dsh-desktop-caption-safe-width, 0px\)\)/u)
     expect(controls).toMatch(/body\[data-dsh-desktop-platform='win32'\][\s\S]*\.controls\[data-emate-settings-route\]/u)
     const settings = readFileSync('src/client/settings-chrome.module.css', 'utf8')
+    const account = readFileSync('src/client/account.module.css', 'utf8')
+    const source = readFileSync('src/client/index.ts', 'utf8')
+    expect(source).toContain("import './theme-tokens.module.css'")
+    expect(account).not.toContain('theme-tokens')
     expect(settings).toContain('padding: 16px calc(20px + var(--dsh-desktop-caption-safe-width, 0px)) 16px max(20px, var(--dsh-desktop-caption-safe-left, 0px)) !important;')
   })
 
@@ -307,9 +334,10 @@ describe('desktop header controls', () => {
   })
 
   it('replaces the resident conversation with one route-owned standalone surface', async () => {
-    type RootProps = PropsRenderSlots<'conversation' | 'shell.overlay'>
+    type RootProps = PropsRenderSlots<'conversation' | 'details' | 'shell.overlay'>
     const Root = ({ renderSlot }: RootProps) => <>
       {renderSlot('conversation', {})}
+      {renderSlot('details', {})}
       {renderSlot('shell.overlay', {})}
     </>
     const runtime = await SlotTestRuntime.create()
@@ -318,9 +346,11 @@ describe('desktop header controls', () => {
     runtime.provide('layout', { closeDetails } as never)
     await runtime.root.declare({
       conversation: { kind: 'single', scope: 'root' },
+      details: { kind: 'single', scope: 'root' },
       'shell.overlay': { kind: 'list', scope: 'root' },
     } as never, Root as never)
     runtime.slots.register({ name: 'conversation' } as never, () => <main>旧会话正文与输入框</main>)
+    runtime.slots.register({ name: 'details' } as never, () => <aside>详情<button type="button">关闭详情</button></aside>)
     runtime.slots.register({ name: 'shell.overlay', id: 'native-settings' } as never, () => (
       <div role="dialog" aria-modal="true">
         <nav aria-label="设置导航"><button type="button" onClick={openSettingsSection}>常规</button></nav>
@@ -331,6 +361,8 @@ describe('desktop header controls', () => {
     const view = runtime.renderRoot()
 
     expect(view.queryByText('旧会话正文与输入框')).toBeNull()
+    expect(view.queryByText('详情')).toBeNull()
+    expect(view.queryByRole('button', { name: '关闭详情' })).toBeNull()
     expect(view.container.querySelectorAll('[data-emate-product-surface]')).toHaveLength(1)
     expect(closeDetails).toHaveBeenCalledOnce()
     fireEvent.click(view.getByRole('button', { name: '常规' }))
@@ -341,6 +373,7 @@ describe('desktop header controls', () => {
     })
     await runtime.flush()
     expect(view.queryByText('旧会话正文与输入框')).not.toBeNull()
+    expect(view.queryByText('详情')).not.toBeNull()
     expect(view.container.querySelector('[data-emate-product-surface]')).toBeNull()
     await runtime.dispose()
   })

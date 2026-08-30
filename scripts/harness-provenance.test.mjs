@@ -13,7 +13,9 @@ import {
   findDesktopHarnessPackages,
   HARNESS_COMMIT,
   hashDirectory,
+  runHarnessBuildScripts,
 } from './harness-provenance.mjs'
+import { pinnedPnpmInvocation } from './package-manager.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const harnessRoot = join(root, 'upstream', 'deepseek-harness')
@@ -26,6 +28,44 @@ test('pins one clean native model-directory refresh owner', () => {
     'packages/client/ui-model-selection/src/client/service.ts',
   ), 'utf8')
   assertExactOccurrence(source, "ctx.remote.$on('credentials/updated', refresh)", 'native model listener')
+})
+
+test('runs manager-free Harness build scripts in order through inherited pnpm and fails fast', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'e-mate-pinned-pnpm-'))
+  const entry = join(directory, 'v1/pnpm/11.7.0/bin/pnpm.cjs')
+  const log = join(directory, 'invocation.json')
+  try {
+    mkdirSync(join(directory, 'v1/pnpm/11.7.0/bin'), { recursive: true })
+    writeFileSync(entry, [
+      "if (process.argv[2] === '--version') process.stdout.write('11.7.0\\n')",
+      'else {',
+      "  const args = process.argv.slice(2)",
+      "  require('node:fs').appendFileSync(process.env.T25_PM_LOG, `${JSON.stringify(args)}\\n`)",
+      "  if (args.at(-1) === process.env.T25_FAIL_SCRIPT) process.exit(7)",
+      '}',
+    ].join('\n'))
+    const env = { PATH: '/usr/bin:/bin', npm_execpath: entry, T25_PM_LOG: log }
+    const expected = [
+      ['--dir', 'upstream/deepseek-harness', 'run', 'build:lib:host'],
+      ['--dir', 'upstream/deepseek-harness', 'run', 'build:lib:client'],
+      ['--dir', 'upstream/deepseek-harness', '--filter', '@deepseek-ai/dsh-web-frontend', 'run', 'build'],
+    ]
+    runHarnessBuildScripts(directory, '11.7.0', env)
+    assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse), expected)
+    assert.equal(expected.flat().includes('npm'), false)
+
+    writeFileSync(log, '')
+    assert.throws(
+      () => runHarnessBuildScripts(directory, '11.7.0', { ...env, T25_FAIL_SCRIPT: 'build:lib:client' }),
+      /build:lib:client exited with 7/u,
+    )
+    assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse), expected.slice(0, 2))
+
+    writeFileSync(entry, "process.stdout.write('11.19.0\\n')\n")
+    assert.throws(() => pinnedPnpmInvocation('11.7.0', [], { env }), /requires pinned pnpm 11\.7\.0/u)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })
 
 test('keeps exactly the three overlays still missing from e13', () => {

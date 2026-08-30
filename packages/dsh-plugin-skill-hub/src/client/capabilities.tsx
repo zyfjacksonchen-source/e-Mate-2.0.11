@@ -85,12 +85,20 @@ interface ControlProps {
 }
 
 type Tab = 'discover' | 'installed' | 'upload'
+type InventoryState = 'loading' | 'ready' | 'failed'
 type JobState = {
   id: string
   label: string
   status: string
   detail?: string
   download?: { href: string; filename: string }
+}
+type CatalogAction = {
+  label: string
+  disabled: boolean
+  endpoint?: 'skills.install' | 'skills.enable'
+  payload?: Record<string, unknown>
+  jobLabel?: string
 }
 
 const CAPABILITY_STATE_LABELS: Record<BuiltinCapability['state'], string> = {
@@ -193,6 +201,23 @@ function normal(value: string): string {
   return value.trim().toLocaleLowerCase('zh-CN')
 }
 
+function catalogAction(card: SkillCard, inventoryState: InventoryState, local?: InstalledSkill): CatalogAction {
+  if (inventoryState === 'loading') return { label: '正在核对安装状态', disabled: true }
+  if (inventoryState === 'failed') return { label: '安装状态读取失败', disabled: true }
+  if (local?.recovery_pending) return { label: '等待恢复', disabled: true }
+  if (local?.status === 'installed') return { label: local.ready ? '已安装并启用' : '已安装（需修复）', disabled: true }
+  if (local?.status === 'disabled') {
+    return { label: '启用', disabled: false, endpoint: 'skills.enable', payload: { slug: card.slug }, jobLabel: `启用 ${card.slug}` }
+  }
+  return {
+    label: '安装并启用',
+    disabled: false,
+    endpoint: 'skills.install',
+    payload: { slug: card.slug, version: card.version },
+    jobLabel: `安装 ${card.slug}@${card.version}`,
+  }
+}
+
 export function CapabilityControl({ wide, active, SkillIcon }: ControlProps) {
   return (
     <button className={css.sidebarAction} data-emate-primary-action="" data-wide={wide || undefined} type="button" title="能力中心" aria-label="能力中心" aria-current={active ? 'page' : undefined} onClick={() => { route('/capabilities') }}>
@@ -224,6 +249,7 @@ export function CapabilitiesPage({
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [builtins, setBuiltins] = useState<BuiltinCapability[]>([])
   const [installed, setInstalled] = useState<InstalledSkill[]>([])
+  const [inventoryState, setInventoryState] = useState<InventoryState>('loading')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [job, setJob] = useState<JobState | null>(null)
@@ -310,23 +336,29 @@ export function CapabilitiesPage({
     }
   }
 
-  const loadInstalled = async () => {
-    setLoading(true)
+  const loadInstalled = async (showLoading = true) => {
+    if (showLoading) setLoading(true)
+    setInventoryState('loading')
     setError(null)
     try {
       const value = rpcValue(await callSkillHub('inventory.list', {}), '已安装 Skill 读取失败。') as { schema_version?: unknown; items?: unknown }
       if (value.schema_version !== 1 || !Array.isArray(value.items)) throw new Error('Skill Hub 本机清单无效。')
       setInstalled(value.items as InstalledSkill[])
+      setInventoryState('ready')
     } catch (loadError) {
+      setInventoryState('failed')
       setError(message(loadError))
     } finally {
-      setLoading(false)
+      if (showLoading) setLoading(false)
     }
   }
 
   useEffect(() => {
     if (!open) return
-    if (tab === 'discover' && items.length === 0) void loadCatalog('')
+    if (tab === 'discover') {
+      if (items.length === 0) void loadCatalog('')
+      void loadInstalled(false)
+    }
     if (tab === 'installed') void loadInstalled()
   }, [open, tab])
 
@@ -526,6 +558,8 @@ export function CapabilitiesPage({
     const needle = normal(installedQuery)
     return installed.filter(item => !needle || normal(`${item.slug} ${item.description}`).includes(needle))
   }, [installed, installedQuery])
+  const installedBySlug = useMemo(() => new Map(installed.map(item => [item.slug, item])), [installed])
+  const selectedAction = selectedCard === null ? null : catalogAction(selectedCard, inventoryState, installedBySlug.get(selectedCard.slug))
 
   if (!open || target === null) return null
 
@@ -535,7 +569,7 @@ export function CapabilitiesPage({
         <header className={css.header}>
           <div><h1>能力中心</h1><p>发现、安装并管理 e-Mate 的办公能力。</p></div>
           <div className={css.headerActions}>
-            <button type="button" aria-label={loading ? '正在刷新能力' : '刷新能力'} disabled={loading} onClick={() => { if (tab === 'installed') void loadInstalled(); else void loadCatalog() }}><RefreshIcon size={16} /></button>
+            <button type="button" aria-label={loading ? '正在刷新能力' : '刷新能力'} disabled={loading} onClick={() => { if (tab === 'installed') void loadInstalled(); else { void loadCatalog(); void loadInstalled(false) } }}><RefreshIcon size={16} /></button>
           </div>
         </header>
 
@@ -561,8 +595,9 @@ export function CapabilitiesPage({
               {loading && items.length === 0 ? <p className={css.empty}>正在读取 e-Mate Skill Hub…</p> : null}
               {!loading && visibleItems.length === 0 ? <p className={css.empty}>没有匹配的 Skill。</p> : null}
               <div className={css.hubGrid}>
-                {visibleItems.map(card => (
-                  <article className={css.hubCard} key={`${card.slug}:${card.version}`}>
+                {visibleItems.map(card => {
+                  const action = catalogAction(card, inventoryState, installedBySlug.get(card.slug))
+                  return <article className={css.hubCard} key={`${card.slug}:${card.version}`}>
                     <div className={css.hubCardHead}><span className={css.hubAvatar}><SkillIcon size={20} /></span><span><strong>{card.title}</strong><small>{card.slug}</small></span></div>
                     <p>{card.summary}</p>
                     <div className={css.tags}>{card.tags.map(tag => <span key={tag}>{tag}</span>)}</div>
@@ -570,11 +605,11 @@ export function CapabilitiesPage({
                       <span>v{card.version} · {HUB_CATEGORY_LABELS[card.category]} · {card.uploader.nickname}</span>
                       <div className={css.hubActions}>
                         <button type="button" disabled={detailLoading && selectedCard?.slug === card.slug} onClick={() => { void openDetail(card) }}>{detailLoading && selectedCard?.slug === card.slug ? '读取中' : '查看详情'}</button>
-                        <button className={css.primary} type="button" disabled={['missing_runtime', 'unsupported'].includes(card.readiness) || (job !== null && ['running', 'stopping'].includes(job.status))} onClick={() => { void startJob('skills.install', { slug: card.slug, version: card.version }, `安装 ${card.slug}@${card.version}`) }}>安装并启用</button>
+                        <button className={css.primary} type="button" disabled={action.disabled || ['missing_runtime', 'unsupported'].includes(card.readiness) || (job !== null && ['running', 'stopping'].includes(job.status))} onClick={() => { if (action.endpoint) void startJob(action.endpoint, action.payload!, action.jobLabel!) }}>{action.label}</button>
                       </div>
                     </footer>
                   </article>
-                ))}
+                })}
               </div>
               {nextCursor && <button className={css.uploadAction} type="button" disabled={loading} onClick={() => { void loadCatalog(query, nextCursor) }}>加载更多</button>}
             </section>
@@ -650,7 +685,7 @@ export function CapabilitiesPage({
           {job && <p className={css.dialogJob} role="status">{job.label} · {JOB_STATUS_LABELS[job.status] ?? job.status}</p>}
           <div className={css.dialogActions}>
             <button type="button" disabled={job !== null && ['running', 'stopping'].includes(job.status)} onClick={() => { void startJob('skills.download', { slug: selectedCard.slug, version: selectedCard.version }, `下载 ${selectedCard.slug}@${selectedCard.version}`) }}><DownloadIcon size={16} />下载 ZIP</button>
-            <button className={css.primary} type="button" disabled={['missing_runtime', 'unsupported'].includes(selectedCard.readiness) || (job !== null && ['running', 'stopping'].includes(job.status))} onClick={() => { void startJob('skills.install', { slug: selectedCard.slug, version: selectedCard.version }, `安装 ${selectedCard.slug}@${selectedCard.version}`) }}>安装并启用</button>
+            <button className={css.primary} type="button" disabled={selectedAction!.disabled || ['missing_runtime', 'unsupported'].includes(selectedCard.readiness) || (job !== null && ['running', 'stopping'].includes(job.status))} onClick={() => { if (selectedAction!.endpoint) void startJob(selectedAction!.endpoint, selectedAction!.payload!, selectedAction!.jobLabel!) }}>{selectedAction!.label}</button>
           </div>
           <button className={css.dialogClose} type="button" aria-label="关闭 Skill 详情" onClick={closeDetail}><CloseIcon size={16} /></button>
         </section>

@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { AssistantMarkdown } from '../../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/chat/AssistantMarkdown.tsx'
 import { installDomFenceRenderer } from '../../../../../../upstream/plugins/dsh-genui/src/client/dom-fence.tsx'
-import { ImageDisclosure, imageDisclosureDefinition, ToolImageGallery, toolImagesDefinition } from '../src/client/image-gallery.tsx'
+import { toolImagesDefinition } from '../src/client/image-gallery.tsx'
 import { ThinkingStatusBranding } from '../src/client/thinking-status.tsx'
 
 vi.mock('@deepseek-ai/dsh-client-runtime/client', () => ({
@@ -63,7 +63,6 @@ describe('target conversation fidelity contract', () => {
     expect(chatCss).toContain('[data-produced-files-row] > button[title]')
     expect(chatCss).toContain('Beautiful UI Tool Chips icon geometry (MIT)')
     expect(activityFold).toContain("'assistant-step' | 'tool-call' | 'context'")
-    expect(chatCss).toContain("[data-chat-flow-kind='e-mate-image-disclosure']")
     expect(chatCss).toContain("[data-sample='bash'] + div > button")
     expect(chatCss).toMatch(/\[data-slot='conversation'\] \[aria-expanded\]:focus-visible[^}]*outline: none;[^}]*box-shadow: none;/u)
     expect(homeCss).toContain('--dsw-static-deepseek-500: var(--emate-color-brand);')
@@ -111,74 +110,40 @@ describe('target conversation fidelity contract', () => {
     expect(genuiClient).not.toContain('conversation.chat.node')
   })
 
-  it('styles the target produced-file buttons without registering a competing turn-tail chain entry', () => {
-    expect(source).not.toContain("ctx.slots.inject('conversation.chat.turnTail'")
-    expect(source).not.toContain('e-mate-artifact-capsules')
-    expect(chatCss).toContain('[data-produced-files-row] > button[title]')
+  it('owns one pure priority -1 turn-tail terminal without DOM relocation', () => {
+    expect(source).toContain("ctx.slots.inject('conversation.chat.turnTail'")
+    expect(source).toMatch(/name: 'conversation\.chat\.turnTail',[\s\S]*?priority: -1/u)
+    expect(gallery).not.toContain('querySelector')
+    expect(gallery).not.toContain('createPortal')
+    expect(gallery).not.toContain('MutationObserver')
   })
 
-  it('shows the target ImageGallery by default without replacing its DOM or lightbox', () => {
-    const event = {
-      type: 'assistant/message', seq: 5, time: 5, surfaceOp: 'append',
-      data: { message: { id: 'assistant-1', content: [
-        { type: 'text', text: 'result' },
-        { type: 'image', attachment: { attachmentId: 'one' } },
-        { type: 'image', attachment: { attachmentId: 'two' } },
-      ] } },
-    }
-    expect(imageDisclosureDefinition.match(event as never)).toEqual({ id: 'assistant:assistant-1', role: 'start' })
-
-    const view = render(<div data-chat-flow="">
-      <div data-chat-flow-kind="assistant-step">
-        <div data-align="start"><button type="button">first image</button></div>
-      </div>
-      <div data-chat-flow-kind="e-mate-image-disclosure">
-        <ImageDisclosure node={{ key: 'image:test', data: { imageCount: 2 } } as never} />
-      </div>
-    </div>)
-    const targetGallery = view.container.querySelector<HTMLElement>('[data-align="start"]')!
-    const original = targetGallery
-    const button = screen.getByRole('button', { name: '已查看 2 张图像' })
-    expect(targetGallery.hidden).toBe(false)
-    expect(button.getAttribute('aria-controls')).toBe(targetGallery.id)
-    expect(button.getAttribute('aria-expanded')).toBe('true')
-
-    fireEvent.click(button)
-    expect(targetGallery).toBe(original)
-    expect(targetGallery.hidden).toBe(true)
-    expect(button.getAttribute('aria-expanded')).toBe('false')
-
-    cleanup()
-    expect(targetGallery.hidden).toBe(false)
-    expect(targetGallery.id).toBe('')
+  it('keeps native MessageImage loading, retry and lightbox without relocating its DOM', () => {
     expect(targetImages).toContain('export function ImageGallery')
     expect(targetImages).toContain('<MessageImage')
     expect(targetImages).toContain('<ImageLightbox')
     expect(targetLightbox).toContain('role="dialog"')
-    expect(gallery).toContain("querySelectorAll<HTMLElement>('[data-align=\"start\"]')")
-    expect(galleryCss).toContain('[data-emate-image-gallery][hidden]')
+    expect(gallery).toContain('<MessageImage')
+    expect(gallery).toContain("visibility: 'hidden'")
+    expect(galleryCss).toContain('scroll-snap-type: x mandatory')
   })
 
-  it('projects durable custom image events through the target ImageGallery without model-visible image input', () => {
+  it('stores a durable custom image event as a hidden terminal receipt', () => {
     const attachment = {
-      attachmentId: 'sha256:one', mediaType: 'image/png', bytes: 10, width: 1, height: 1, name: 'e-Mate-image.png',
+      attachmentId: `sha256:${'a'.repeat(64)}`, mediaType: 'image/png', bytes: 10, width: 1, height: 1, name: 'e-Mate-image.png',
     }
     const event = {
       type: 'emate/image-output', seq: 8, time: 8,
       data: { call_id: 'call-1', content: [{ type: 'image', attachment }] },
     }
     expect(toolImagesDefinition.match(event as never)).toEqual({ id: 'tool-images:call-1', role: 'start' })
-
-    render(<ToolImageGallery node={{ key: 'tool-images:test', data: { images: [{ attachment }] } } as never} loadImage={vi.fn()} />)
-    const button = screen.getByRole('button', { name: '已查看 1 张图像' })
-    const gallery = screen.getByText('1 images')
-    expect(gallery.parentElement?.hidden).toBe(false)
-    expect(gallery.hasAttribute('data-target-image-gallery')).toBe(true)
-    expect(button.getAttribute('aria-expanded')).toBe('true')
-    fireEvent.click(button)
-    expect(gallery.parentElement?.hidden).toBe(true)
-    expect(button.getAttribute('aria-expanded')).toBe('false')
-    expect(screen.getByText('e-Mate-image.png')).toBeTruthy()
+    const state = toolImagesDefinition.start({} as never, { event } as never, {} as never)
+    const node = toolImagesDefinition.buildViewNode?.({
+      key: 'receipt:1', id: 'tool-images:call-1', kind: 'e-mate-tool-images', state,
+      start: { event, location: { kind: 'unresolved' } }, matches: [], current: new Map(),
+    } as never, 'chat') as { visibility?: string; data?: { item?: { attachment?: unknown } } }
+    expect(node.visibility).toBe('hidden')
+    expect(node.data?.item?.attachment).toEqual(attachment)
   })
 
   it('brands only target running statuses without rescanning the document during token streaming', async () => {
