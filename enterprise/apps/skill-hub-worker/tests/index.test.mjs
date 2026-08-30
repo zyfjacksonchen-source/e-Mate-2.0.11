@@ -447,12 +447,21 @@ test('rejects browser bearer transport and binds one-time install credentials to
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: publicationBody(payload, 'session-bound', 'third_party', 'publish:session-0001'),
   })).json()
+  const host = await direct(env, '/ecorex-agent/client/skill-hub/v1/skills?query=&limit=1', {
+    headers: { 'sec-fetch-mode': 'cors' },
+  })
+  assert.equal(host.status, 200)
+  assert.deepEqual((await host.json()).items, [card])
   const browser = await direct(env, '/ecorex-agent/client/skill-hub/v1/skills?query=&limit=1', {
     headers: { origin: 'https://renderer.invalid', 'sec-fetch-mode': 'cors' },
   })
   assert.equal(browser.status, 403)
   assert.equal((await browser.clone().json()).error.code, 'auth')
   assert.equal(browser.headers.get('access-control-allow-origin'), null)
+  const browserMetadata = await direct(env, '/ecorex-agent/client/skill-hub/v1/skills?query=&limit=1', {
+    headers: { 'sec-fetch-mode': 'cors', 'sec-fetch-site': 'cross-site' },
+  })
+  assert.equal(browserMetadata.status, 403)
 
   const firstSession = '01234567-89ab-4def-8123-456789abcdef'
   const secondSession = '11234567-89ab-4def-8123-456789abcdef'
