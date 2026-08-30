@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
 import {
-  copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, writeFile,
+  copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, writeFile,
 } from 'node:fs/promises'
 import { hostname, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
@@ -576,8 +576,8 @@ async function platformBuild(sourceRoot, platform, output, log) {
     '--root', 'packages/dsh-plugin-vision-toolkit',
     '--targets', platform === 'macos' ? 'darwin-arm64,darwin-x64' : 'win32-x64',
   ], { cwd: sourceRoot, log })
-  await runLogged(process.platform === 'win32' ? 'corepack.cmd' : 'corepack', ['yarn', '--cwd', 'desktop', 'install', '--immutable'], { cwd: sourceRoot, log })
-  await runLogged(process.platform === 'win32' ? 'corepack.cmd' : 'corepack', ['yarn', '--cwd', 'desktop', PLATFORMS[platform].build], { cwd: sourceRoot, log })
+  await runLogged(process.platform === 'win32' ? 'corepack.cmd' : 'corepack', ['yarn', 'install', '--immutable'], { cwd: join(sourceRoot, 'desktop'), log })
+  await runLogged(process.platform === 'win32' ? 'corepack.cmd' : 'corepack', ['yarn', PLATFORMS[platform].build], { cwd: join(sourceRoot, 'desktop'), log })
   await exportArtifact(sourceRoot, platform, output, git(['rev-parse', 'HEAD'], sourceRoot))
 }
 
@@ -615,13 +615,13 @@ async function windowsBuild(sourceArchive, output, run, log, scratch) {
     const build = [
       "$ErrorActionPreference='Stop'",
       `$root='${remoteRoot.replaceAll("'", "''")}'`,
-      "$source=Join-Path $root 'source'",
-      "$out=Join-Path $root 'out'",
-      'New-Item -ItemType Directory -Path $source|Out-Null',
-      `tar.exe -xzf '${remoteArchive.replaceAll("'", "''")}' -C $source`,
-      'Set-Location $source',
-      `corepack pnpm run flow -- _platform-build --platform windows --out $out --source-commit ${run.source_commit}`,
-      `tar.exe -czf '${remoteResult.replaceAll("'", "''")}' -C $out .`,
+      'Set-Location $root',
+      "New-Item -ItemType Directory -Path 'source'|Out-Null",
+      "tar.exe -xzf 'source.tgz' -C 'source'",
+      "Set-Location 'source'",
+      `corepack pnpm run flow -- _platform-build --platform windows --out '..\\out' --source-commit ${run.source_commit}`,
+      'Set-Location $root',
+      "tar.exe -czf 'result.tgz' -C 'out' .",
     ].join(';')
     await runLogged('ssh', ['kh19arc', 'powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodedPowerShell(build)], { cwd: ROOT, log })
     const localResult = join(scratch, 'windows-result.tgz')
@@ -1179,7 +1179,7 @@ async function main() {
   }
 }
 
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] !== undefined && await realpath(process.argv[1]) === await realpath(fileURLToPath(import.meta.url))) {
   try {
     await main()
   } catch (cause) {
