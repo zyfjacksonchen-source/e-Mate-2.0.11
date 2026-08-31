@@ -32,6 +32,7 @@ import {
   resolveNpmCollectorCli,
   rollbackAction,
   runCandidateStages,
+  selectPythonCommand,
   selectWindowsNpmCommand,
   selectWindowsPnpmCommand,
   selectCandidatePlatforms,
@@ -2402,6 +2403,62 @@ test('Desktop npm collector rejects wrappers and preserves the native Windows np
   }
 })
 
+test('Python selector bypasses WindowsApps aliases and rejects a missing interpreter', () => {
+  const exact = 'C:\\Program Files\\Python312\\python.exe'
+  const exactEnv = { EMATE_BUILD_PYTHON: exact }
+  const exactCalls = []
+  assert.deepEqual(selectPythonCommand({
+    platform: 'win32',
+    env: exactEnv,
+    execute: (command, args, options) => {
+      exactCalls.push([command, args, options.env])
+      return { status: 0, stdout: 'Python 3.12.14\n', stderr: '' }
+    },
+  }), { command: exact, prefix: [] })
+  assert.deepEqual(exactCalls, [[exact, ['--version'], exactEnv]])
+
+  const invalidCalls = []
+  assert.throws(() => selectPythonCommand({
+    platform: 'win32',
+    env: { EMATE_BUILD_PYTHON: 'C:\\missing\\python.exe' },
+    execute: command => {
+      invalidCalls.push(command)
+      return { error: new Error('ENOENT'), status: null, stdout: '', stderr: '' }
+    },
+  }), /EMATE_BUILD_PYTHON/u)
+  assert.deepEqual(invalidCalls, ['C:\\missing\\python.exe'])
+  assert.throws(() => selectPythonCommand({
+    platform: 'win32', env: { EMATE_BUILD_PYTHON: ' ' }, execute: () => assert.fail('must not spawn'),
+  }), /EMATE_BUILD_PYTHON/u)
+
+  const calls = []
+  const selected = selectPythonCommand({
+    platform: 'win32',
+    execute: (command, args) => {
+      calls.push([command, args])
+      return command === 'py'
+        ? { status: 0, stdout: 'Python 3.12.14\n', stderr: '' }
+        : { status: 9009, stdout: '', stderr: 'Python was not found; Microsoft Store' }
+    },
+  })
+  assert.deepEqual(selected, { command: 'py', prefix: ['-3'] })
+  assert.deepEqual(calls, [['py', ['-3', '--version']]])
+
+  assert.deepEqual(selectPythonCommand({
+    platform: 'win32',
+    execute: command => command === 'py'
+      ? { error: new Error('ENOENT'), status: null, stdout: '', stderr: '' }
+      : { status: 0, stdout: '', stderr: 'Python 3.12.14\n' },
+  }), { command: 'python', prefix: [] })
+
+  assert.throws(() => selectPythonCommand({
+    platform: 'win32',
+    execute: command => command === 'py'
+      ? { error: new Error('ENOENT'), status: null, stdout: '', stderr: '' }
+      : { status: 9009, stdout: '', stderr: 'Python was not found; Microsoft Store' },
+  }), /Python 3 executable is unavailable/u)
+})
+
 test('runs exact Yarn from the inherited pnpm Corepack cache without corepack on PATH', async () => {
   const root = await temporary()
   const pnpmEntry = join(root, 'v1/pnpm/11.7.0/bin/pnpm.cjs')
@@ -2447,6 +2504,7 @@ test('platform build skips Harness dev hooks in clean submodule copies', async (
     assert.match(projection, /stage: 'root-install',\s*run: \(\) => runPnpm\(\['install', '--frozen-lockfile'\]/u)
     assert.match(projection, /runPnpm\(\['--dir', 'upstream\/deepseek-harness', 'install', '--frozen-lockfile'\], \{\s*cwd: sourceRoot, log, env: \{ \.\.\.buildEnv, CI: 'true' \},\s*\}\)/u)
     assert.match(projection, /stage: 'profile-build',\s*run: \(\) => runPnpm\(\['--config\.shell-emulator=true', '--filter', '@e-mate\/dsh', 'build'\]/u)
+    assert.match(projection, /const python = selectPythonCommand\(\{ platform: expectedPlatform, env: buildEnv \}\)[\s\S]*?runLogged\(python\.command, \[\s*\.\.\.python\.prefix,/u)
     const order = ['release-boundary', 'harness-host-client-web', 'component-emitted-abi', 'desktop-package']
       .map(stage => projection.indexOf(`stage: '${stage}'`))
     assert.equal(order.every((offset, index) => offset >= 0 && (index === 0 || offset > order[index - 1])), true)
