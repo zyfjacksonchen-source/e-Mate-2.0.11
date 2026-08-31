@@ -2376,7 +2376,10 @@ test('Desktop npm collector rejects wrappers and preserves the native Windows np
       platform: 'darwin',
     }), /verified npm CLI/u)
     assert.equal(
-      selectWindowsNpmCommand('C:\\Program Files\\nodejs\\npm.cmd\r\n', 'C:\\Program Files\\nodejs\\node.exe'),
+      selectWindowsNpmCommand(
+        'C:\\Program Files\\nodejs\\npm\r\nC:\\Program Files\\nodejs\\npm.cmd\r\n',
+        'C:\\Program Files\\nodejs\\node.exe',
+      ),
       'C:\\Program Files\\nodejs\\npm.cmd',
     )
     assert.throws(
@@ -2388,6 +2391,10 @@ test('Desktop npm collector rejects wrappers and preserves the native Windows np
         'C:\\BundledApp\\npm.cmd\r\nC:\\Program Files\\nodejs\\npm.cmd\r\n',
         'C:\\Program Files\\nodejs\\node.exe',
       ),
+      /same Node distribution/u,
+    )
+    assert.throws(
+      () => selectWindowsNpmCommand('C:\\Program Files\\nodejs\\npm\r\n', 'C:\\Program Files\\nodejs\\node.exe'),
       /same Node distribution/u,
     )
   } finally {

@@ -464,10 +464,10 @@ async function verifyNpmCollectorCommand(command, prefix, expectedVersion, cwd, 
 
 export function selectWindowsNpmCommand(output, execPath) {
   const nodeDirectory = win32.dirname(win32.normalize(execPath)).toLowerCase()
-  const command = String(output).split(/\r?\n/u).map(value => value.trim()).find(Boolean)
-  const name = command === undefined ? '' : win32.basename(command).toLowerCase()
-  if (!['npm.cmd', 'npm.exe'].includes(name)
-    || win32.dirname(win32.normalize(command)).toLowerCase() !== nodeDirectory) {
+  const command = String(output).split(/\r?\n/u).map(value => value.trim()).find(value => (
+    ['npm.cmd', 'npm.exe'].includes(win32.basename(value).toLowerCase())
+  ))
+  if (command === undefined || win32.dirname(win32.normalize(command)).toLowerCase() !== nodeDirectory) {
     throw new Error('Windows npm.cmd must come from the same Node distribution')
   }
   return command
