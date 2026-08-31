@@ -296,6 +296,13 @@ test('component builds reject a pnpm version different from the repository contr
   }
 })
 
+test('component package scripts use pnpm portable shell at the shared lifecycle boundary', () => {
+  const runner = readFileSync('scripts/component-run.mjs', 'utf8')
+  assert.match(runner, /run\(\['--dir', component\.root, 'install'/u)
+  assert.match(runner, /run\(\['--config\.shell-emulator=true', '--dir', component\.root, 'run', 'build'/u)
+  assert.match(runner, /run\(\['--config\.shell-emulator=true', '--dir', component\.root, 'run', 'test'/u)
+})
+
 test('find-skill component builds prepare its exact pinned upstream workspace', () => {
   const runner = readFileSync('scripts/component-run.mjs', 'utf8')
   assert.match(runner, /component\.id === '@e-mate\/dsh-plugin-find-skill'[\s\S]*?--dir', 'upstream\/plugins\/dsh-find-skill', 'install', '--frozen-lockfile', '--ignore-scripts'/u)

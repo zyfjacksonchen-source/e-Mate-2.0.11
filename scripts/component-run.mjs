@@ -60,7 +60,7 @@ for (const component of components) {
 }
 
 for (const component of components) {
-  run(['--dir', component.root, 'run', 'build'], command === 'check'
+  run(['--config.shell-emulator=true', '--dir', component.root, 'run', 'build'], command === 'check'
     ? { ...process.env, EMATE_COMPONENT_CHECK: '1' }
     : process.env)
   const manifest = JSON.parse(readFileSync(resolve(component.root, 'package.json'), 'utf8'))
@@ -74,5 +74,5 @@ for (const component of components) {
     throw new Error(`unsupported component target: ${requestedTarget}`)
   }
   for (const target of targets) verifyComponentRuntimeImports(entries, component, target)
-  if (command === 'check') run(['--dir', component.root, 'run', 'test'])
+  if (command === 'check') run(['--config.shell-emulator=true', '--dir', component.root, 'run', 'test'])
 }
