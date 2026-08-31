@@ -258,7 +258,7 @@ export function validatePublicControlRun(run) {
     ['platforms.windows', ['status', 'source_commit', 'artifact', 'codex_remote']],
     ['platforms.macos.artifact', ['name', 'bytes', 'sha256']],
     ['platforms.windows.artifact', ['name', 'bytes', 'sha256']],
-    ['platforms.windows.codex_remote', ['host', 'request_sha256', 'receipt', 'receipt_sha256']],
+    ['platforms.windows.codex_remote', ['transport', 'host', 'request_sha256', 'receipt', 'receipt_sha256']],
     ['verification', ['status', 'verified_at', 'artifacts', 'computer_use']],
     ['verification.artifacts', ['macos', 'windows']],
     ['verification.artifacts.macos', ['primary', 'files']],
@@ -324,9 +324,9 @@ export function validatePublicControlRun(run) {
     ['rollback', ['status']],
   ])
   const allowedHosts = new Map([
-    ['platforms.windows.codex_remote.host', 'DESKTOP-KH19ARC'],
-    ['verification.computer_use.macos.host', 'T18-MAC'],
-    ['verification.computer_use.windows.host', 'DESKTOP-KH19ARC'],
+    ['platforms.windows.codex_remote.host', ['LAPTOP-ADQ973JN', 'DESKTOP-KH19ARC']],
+    ['verification.computer_use.macos.host', ['T18-MAC']],
+    ['verification.computer_use.windows.host', ['LAPTOP-ADQ973JN', 'DESKTOP-KH19ARC']],
   ])
   const visit = (value, path = '') => {
     if (Array.isArray(value)) return value.forEach(item => visit(item, `${path}[]`))
@@ -347,7 +347,7 @@ export function validatePublicControlRun(run) {
         throw new Error(`protected signer public control run contains a forbidden field: ${childPath}`)
       }
       if (key === 'host') {
-        if (allowedHosts.get(childPath) !== child) {
+        if (!allowedHosts.get(childPath)?.includes(child)) {
           throw new Error(`protected signer public control run contains an unknown host: ${childPath}`)
         }
       }
@@ -355,6 +355,11 @@ export function validatePublicControlRun(run) {
     }
   }
   visit(run)
+  const windowsBuild = run.platforms.windows.codex_remote
+  if (!((windowsBuild.transport === 'ssh' && windowsBuild.host === 'LAPTOP-ADQ973JN')
+    || (windowsBuild.transport === 'codex-remote-handoff' && windowsBuild.host === 'DESKTOP-KH19ARC'))) {
+    throw new Error('protected signer public control run contains an unknown Windows host/transport pair')
+  }
   const transaction = run.release_transaction
   const reader = transaction.reader_attestation
   const candidate = run.verification.artifacts.macos.primary

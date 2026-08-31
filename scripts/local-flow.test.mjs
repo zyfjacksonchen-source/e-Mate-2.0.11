@@ -293,11 +293,11 @@ async function windowsRemoteFixture(root) {
     await writeFile(resultPath, `${JSON.stringify({
       schema_version: 1,
       document_type: 'emate.local-windows-codex-remote-result',
-      transport: 'codex-remote-handoff',
+      transport: 'ssh',
       run_id: RUN_ID,
       version: '2.0.15',
       platform: 'windows',
-      host: 'DESKTOP-KH19ARC',
+      host: 'LAPTOP-ADQ973JN',
       source_commit: SHA,
       request_sha256: createHash('sha256').update(requestBytes).digest('hex'),
       artifact_receipt: {
@@ -465,7 +465,7 @@ function protectedSignerRun() {
       windows: {
         status: 'passed', source_commit: SHA, artifact: run.verification.artifacts.windows.primary,
         codex_remote: {
-          host: 'DESKTOP-KH19ARC', request_sha256: '1'.repeat(64),
+          transport: 'ssh', host: 'LAPTOP-ADQ973JN', request_sha256: '1'.repeat(64),
           receipt: 'windows-remote/result.json', receipt_sha256: '2'.repeat(64),
         },
       },
@@ -800,14 +800,27 @@ test('dev reuses the local classifier plan and selects the smallest local-flow c
   ])
 })
 
-test('native Windows routing accepts only the Codex Remote host identity', () => {
-  assert.equal(validateRemoteHostname('DESKTOP-KH19ARC\r\n'), 'DESKTOP-KH19ARC')
-  assert.throws(() => validateRemoteHostname('win-codex'), /must be DESKTOP-KH19ARC/u)
+test('native Windows routing accepts only request-authorized host identities', () => {
+  const request = windowsRemoteRequest({
+    run_id: RUN_ID, version: '2.0.15', source_commit: SHA, source_branch: 'release/2.0.15',
+  })
+  assert.equal(validateRemoteHostname('LAPTOP-ADQ973JN\r\n', request), 'LAPTOP-ADQ973JN')
+  assert.equal(validateRemoteHostname('DESKTOP-KH19ARC', request), 'DESKTOP-KH19ARC')
+  assert.throws(() => validateRemoteHostname('win-codex', request), /not authorized/u)
+  assert.throws(() => validateRemoteHostname('OTHER-HOST', request), /not authorized/u)
 })
 
-test('Windows candidate uses one Codex Remote request/import seam without SSH transport', async () => {
+test('Windows candidate keeps one request/import seam with SSH-first and Codex Remote fallback', async () => {
   const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
-  assert.doesNotMatch(source, /\bssh\b|\bscp\b|kh19arc/u)
+  const request = windowsRemoteRequest({
+    run_id: RUN_ID, version: '2.0.15', source_commit: SHA, source_branch: 'release/2.0.15',
+  })
+  assert.deepEqual(request.transport, { preferred: 'ssh', fallback: 'codex-remote-handoff' })
+  assert.deepEqual(request.authorized_hosts, [
+    { transport: 'ssh', alias: 'win-codex', hostname: 'LAPTOP-ADQ973JN' },
+    { transport: 'codex-remote-handoff', hostname: 'DESKTOP-KH19ARC' },
+  ])
+  assert.doesNotMatch(source, /runLogged\(['"](?:ssh|scp)['"]/u)
   assert.match(source, /emate\.local-windows-codex-remote-request/u)
   assert.match(source, /emate\.local-windows-codex-remote-result/u)
 })
@@ -830,7 +843,11 @@ test('Windows Codex Remote import binds source, host, receipt, artifact bytes, a
     await writeFile(payload, payloadBytes)
 
     await remote.writeResult(remote.fixture.files, { host: 'OTHER-HOST' })
-    await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /must be DESKTOP-KH19ARC/u)
+    await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /not authorized/u)
+    await remote.writeResult(remote.fixture.files, { transport: 'codex-remote-handoff' })
+    await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /result receipt is invalid/u)
+    await remote.writeResult(remote.fixture.files, { transport: 'codex-remote-handoff', host: 'DESKTOP-KH19ARC' })
+    assert.deepEqual((await importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath)).primary, remote.fixture.primary)
     await remote.writeResult(remote.fixture.files, { schema_version: 2 })
     await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /result receipt is invalid/u)
     await remote.writeResult([{ ...remote.fixture.files[0], name: 'wrong.exe' }])
@@ -857,6 +874,11 @@ test('Windows Codex Remote import binds source, host, receipt, artifact bytes, a
     await remote.writeResult(pollutedFiles)
     await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /canary marker/u)
 
+    await writeFile(remote.requestPath, `${JSON.stringify({
+      ...remote.request,
+      authorized_hosts: [...remote.request.authorized_hosts, { transport: 'ssh', hostname: 'OTHER-HOST' }],
+    })}\n`)
+    await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /request is invalid/u)
     await writeFile(remote.requestPath, `${JSON.stringify({ ...remote.request, source_commit: 'd'.repeat(40) })}\n`)
     await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /request is invalid/u)
   } finally {
@@ -1413,6 +1435,15 @@ test('protected signer public control input is closed-schema and host allowliste
   const unknownHost = structuredClone(run)
   unknownHost.platforms.windows.codex_remote.host = 'OTHER-HOST'
   assert.throws(() => validatePublicControlRun(unknownHost), /unknown host/u)
+  const fallbackHost = structuredClone(run)
+  fallbackHost.platforms.windows.codex_remote = {
+    ...fallbackHost.platforms.windows.codex_remote,
+    transport: 'codex-remote-handoff', host: 'DESKTOP-KH19ARC',
+  }
+  assert.equal(validatePublicControlRun(fallbackHost), fallbackHost)
+  const mismatchedTransport = structuredClone(run)
+  mismatchedTransport.platforms.windows.codex_remote.transport = 'codex-remote-handoff'
+  assert.throws(() => validatePublicControlRun(mismatchedTransport), /unknown host|transport/u)
   const developerPath = structuredClone(run)
   developerPath.source_branch = '/Users/alice/private'
   assert.throws(() => validatePublicControlRun(developerPath), /sensitive text/u)
@@ -2415,17 +2446,17 @@ test('platform build skips Harness dev hooks in clean submodule copies', async (
   }
 })
 
-test('root package exposes one flow entry and the implementation has no GitHub, Wrangler, or win-codex path', async () => {
+test('root package exposes one flow entry and keeps SSH as request transport, not a second build owner', async () => {
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
   const ciWorkflow = await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
   const publicationWorkflow = await readFile(new URL('../.github/workflows/desktop-publication.yml', import.meta.url), 'utf8')
   const updater = await readFile(new URL('../desktop/e-mate-desktop/src/update-checker.ts', import.meta.url), 'utf8')
   assert.equal(packageJson.scripts.flow, 'node scripts/local-flow.mjs')
-  assert.doesNotMatch(source, /\bgh\b|\bwrangler\b|win-codex|\bUU\b|\bssh\b|\bscp\b|kh19arc/u)
+  assert.doesNotMatch(source, /\bgh\b|\bwrangler\b|\bUU\b|runLogged\(['"](?:ssh|scp)['"]/u)
   assert.equal([...source.matchAll(/\.github\/workflows\//gu)].length, 1)
   assert.match(source, /const COMPATIBILITY_WORKFLOW = '\.github\/workflows\/desktop-compatibility-attestation\.yml'/u)
-  assert.match(source, /transport: 'codex-remote-handoff'/u)
+  assert.match(source, /preferred: 'ssh', fallback: 'codex-remote-handoff'/u)
   assert.match(ciWorkflow, /^on:\n\s+workflow_dispatch:/mu)
   assert.doesNotMatch(ciWorkflow, /^\s+(?:pull_request|push):/mu)
   const publish = source.slice(source.indexOf('async function publish'), source.indexOf('\nasync function rollback'))
