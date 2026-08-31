@@ -272,7 +272,8 @@ export function validatePublicControlRun(run) {
       'scope', 'stage', 'status', 'host', 'tested_at', 'source_commit', 'candidate_artifact', 'receipt',
     ]],
     ['verification.installed_acceptance.windows', [
-      'scope', 'stage', 'status', 'host', 'tested_at', 'source_commit', 'candidate_artifact', 'receipt',
+      'scope', 'stage', 'status', 'host', 'transport', 'transport_alias',
+      'tested_at', 'source_commit', 'candidate_artifact', 'receipt',
     ]],
     ['verification.installed_acceptance.macos.candidate_artifact', ['name', 'bytes', 'sha256']],
     ['verification.installed_acceptance.windows.candidate_artifact', ['name', 'bytes', 'sha256']],
@@ -322,9 +323,9 @@ export function validatePublicControlRun(run) {
     ['rollback', ['status']],
   ])
   const allowedHosts = new Map([
-    ['platforms.windows.codex_remote.host', ['LAPTOP-ADQ973JN', 'DESKTOP-KH19ARC']],
+    ['platforms.windows.codex_remote.host', ['172_16_48_13']],
     ['verification.installed_acceptance.macos.host', ['T18-MAC']],
-    ['verification.installed_acceptance.windows.host', ['LAPTOP-ADQ973JN', 'DESKTOP-KH19ARC']],
+    ['verification.installed_acceptance.windows.host', ['172_16_48_13']],
   ])
   const visit = (value, path = '') => {
     if (Array.isArray(value)) return value.forEach(item => visit(item, `${path}[]`))
@@ -354,9 +355,12 @@ export function validatePublicControlRun(run) {
   }
   visit(run)
   const windowsBuild = run.platforms.windows.codex_remote
-  if (!((windowsBuild.transport === 'ssh' && windowsBuild.host === 'LAPTOP-ADQ973JN')
-    || (windowsBuild.transport === 'codex-remote-handoff' && windowsBuild.host === 'DESKTOP-KH19ARC'))) {
+  if (windowsBuild.transport !== 'ssh' || windowsBuild.host !== '172_16_48_13') {
     throw new Error('protected signer public control run contains an unknown Windows host/transport pair')
+  }
+  const windowsAcceptance = run.verification.installed_acceptance.windows
+  if (windowsAcceptance.transport !== 'ssh' || windowsAcceptance.transport_alias !== 'win-test-server') {
+    throw new Error('protected signer public control run contains an unknown Windows acceptance route')
   }
   const transaction = run.release_transaction
   const reader = transaction.reader_attestation
