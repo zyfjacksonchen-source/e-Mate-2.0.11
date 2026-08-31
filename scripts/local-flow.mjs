@@ -105,7 +105,11 @@ const FAILURE_MARKER = 'emate.local-flow-failure:'
 const FULL_MATRIX = 'docs/2.0.15/REGRESSION-MATRIX.md'
 const FULL_MATRIX_SCOPE = 'full-installed-startup-update-product-and-built-in-tools'
 const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u
-const WINDOWS_REMOTE_HOST = 'DESKTOP-KH19ARC'
+const WINDOWS_BUILD_TRANSPORT = Object.freeze({ preferred: 'ssh', fallback: 'codex-remote-handoff' })
+const WINDOWS_BUILD_HOSTS = Object.freeze([
+  Object.freeze({ transport: 'ssh', alias: 'win-codex', hostname: 'LAPTOP-ADQ973JN' }),
+  Object.freeze({ transport: 'codex-remote-handoff', hostname: 'DESKTOP-KH19ARC' }),
+])
 const WINDOWS_REMOTE_REQUEST = 'emate.local-windows-codex-remote-request'
 const WINDOWS_REMOTE_RESULT = 'emate.local-windows-codex-remote-result'
 const WINDOWS_REMOTE_RESULT_FILE = 'codex-remote-result.json'
@@ -538,10 +542,15 @@ export function sourceIdentity(root = ROOT) {
   })
 }
 
-export function validateRemoteHostname(value) {
+function windowsBuildRoute(value, request) {
   const received = String(value).trim()
-  if (received !== WINDOWS_REMOTE_HOST) throw new Error(`Codex Remote hostname must be ${WINDOWS_REMOTE_HOST}; received ${received || '<empty>'}`)
-  return received
+  const route = request?.authorized_hosts?.find(candidate => candidate?.hostname === received)
+  if (route === undefined) throw new Error(`Windows build hostname is not authorized by the request: ${received || '<empty>'}`)
+  return { host: received, transport: route.transport }
+}
+
+export function validateRemoteHostname(value, request) {
+  return windowsBuildRoute(value, request).host
 }
 
 export function windowsRemoteRequest(run) {
@@ -552,14 +561,14 @@ export function windowsRemoteRequest(run) {
   return {
     schema_version: 1,
     document_type: WINDOWS_REMOTE_REQUEST,
-    transport: 'codex-remote-handoff',
+    transport: WINDOWS_BUILD_TRANSPORT,
+    authorized_hosts: WINDOWS_BUILD_HOSTS,
     run_id: run.run_id,
     version: VERSION,
     platform: 'windows',
     source_commit: run.source_commit,
     source_branch: run.source_branch,
     source_status: 'committed-clean',
-    expected_host: WINDOWS_REMOTE_HOST,
     expected_artifact: PLATFORMS.windows.artifact,
     build: {
       command: 'corepack.cmd',
@@ -1493,7 +1502,7 @@ async function capturePlatformManifestInputs(sourceRoot, platform, output, sourc
   }
 }
 
-async function platformBuild(sourceRoot, platform, output, manifestOutput, log) {
+async function platformBuild(sourceRoot, platform, output, manifestOutput, log, remoteRequest) {
   const expectedPlatform = platform === 'macos' ? 'darwin' : 'win32'
   let pnpmCarrier, npmCollector
   let buildEnv = process.env
@@ -1503,7 +1512,7 @@ async function platformBuild(sourceRoot, platform, output, manifestOutput, log) 
       stage: 'native-platform',
       run: () => {
         if (process.platform !== expectedPlatform) throw new Error(`${platform} candidate must build on native ${expectedPlatform}`)
-        if (platform === 'windows') validateRemoteHostname(hostname())
+        if (platform === 'windows') validateRemoteHostname(hostname(), remoteRequest)
       },
     },
     {
@@ -1606,14 +1615,15 @@ function windowsRemoteResult(request, verified, requestSha256, artifactReceiptSh
     || manifestReceipt.file !== 'manifest-inputs/windows/platform-inputs.json'
     || !Number.isSafeInteger(manifestReceipt.bytes) || manifestReceipt.bytes <= 0
     || !SHA256.test(manifestReceipt.sha256 ?? '')) throw new Error('Windows manifest input receipt is invalid')
+  const route = windowsBuildRoute(host, request)
   return {
     schema_version: 1,
     document_type: WINDOWS_REMOTE_RESULT,
-    transport: 'codex-remote-handoff',
+    transport: route.transport,
     run_id: request.run_id,
     version: VERSION,
     platform: 'windows',
-    host: validateRemoteHostname(host),
+    host: route.host,
     source_commit: request.source_commit,
     request_sha256: requestSha256,
     artifact_receipt: {
@@ -1793,6 +1803,7 @@ async function candidate(values) {
       source_commit: run.source_commit,
       artifact: imported.primary,
       codex_remote: {
+        transport: imported.receipt.transport,
         host: imported.receipt.host,
         request_sha256: imported.receipt.request_sha256,
         receipt: relativePath(directory, receiptPath),
@@ -1921,7 +1932,7 @@ function validateExternalAcceptance(acceptance, { platform, artifactSha256 }) {
   ]) || !['T18', 'T22'].includes(acceptance.task) || !THREAD_ID.test(acceptance.thread_id ?? '')
     || acceptance.matrix !== FULL_MATRIX || acceptance.scope !== FULL_MATRIX_SCOPE || acceptance.status !== 'passed'
     || typeof acceptance.host !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(acceptance.host)
-    || (platform === 'windows' && acceptance.host !== 'DESKTOP-KH19ARC')
+    || (platform === 'windows' && !WINDOWS_BUILD_HOSTS.some(route => route.hostname === acceptance.host))
     || typeof acceptance.tested_at !== 'string' || Number.isNaN(Date.parse(acceptance.tested_at))
     || new Date(acceptance.tested_at).toISOString() !== acceptance.tested_at
     || acceptance.installed_artifact_sha256 !== artifactSha256
@@ -3973,7 +3984,7 @@ async function main() {
       const requestPath = resolve(values.remoteRequest)
       const { request } = await readWindowsRemoteRequest(requestPath)
       if (request.source_commit !== values.sourceCommit) throw new Error('Windows Codex Remote request source does not match the build')
-      await platformBuild(ROOT, 'windows', join(output, 'artifacts', 'windows'), manifestOutput, join(output, 'windows.log'))
+      await platformBuild(ROOT, 'windows', join(output, 'artifacts', 'windows'), manifestOutput, join(output, 'windows.log'), request)
       await writeWindowsRemoteResult(output, requestPath)
     }
   }
