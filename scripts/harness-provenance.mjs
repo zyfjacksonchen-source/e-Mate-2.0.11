@@ -16,7 +16,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { pinnedPnpmInvocation } from './package-manager.mjs'
 
-export const HARNESS_COMMIT = 'd19aae6da3100e836867418c2cf73bdee8a0b1a8'
+export const HARNESS_COMMIT = '32728743c28911bcd4279f79fe9c43ee7aacfb6d'
 export const HARNESS_VERSION = '0.1.0-rc.7'
 
 const NATIVE_MODEL_REFRESH = 'ctx.remote.$on("credentials/updated", refresh);'

@@ -8,7 +8,7 @@ The tables below retain historical 2.0.15 evidence. The current release verdict 
 
 | Current gate | State | Exact boundary |
 | --- | --- | --- |
-| Source integration | `NARROW_TEST_PASSED` | clean v14/Harness `d19aae6…`; T00R2 governance, T16R8 Glass and T20R4 rollback receipt are integrated |
+| Source integration | `NARROW_TEST_PASSED` | Base v15/Harness `32728743c289…`; T25R17 removes physical CSS paths from shared client bundles without changing runtime ABI |
 | Final product version | `BLOCKED` | public 2.0.15 cannot online-update to different 2.0.15 bytes; explicit 2.0.15/manual-reinstall or higher-version decision required |
 | Current candidate | `BLOCKED` | no candidate exists for the current integrated source; old d882 and earlier artifacts cannot be reused |
 | Glass Composer owner | `NARROW_TEST_PASSED` | `9bb93d6618`: no ancestor guess; Glass build/contract `1/1`, Shell build/composer `6/6`, Chromium hero/active light/dark geometry pass; installed candidate still open |

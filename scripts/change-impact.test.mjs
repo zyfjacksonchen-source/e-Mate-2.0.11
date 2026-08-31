@@ -18,7 +18,7 @@ import {
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const FIXTURE_BASE_ID = BASE_CONTRACT_ID
-const HARNESS_COMMIT = 'd19aae6da3100e836867418c2cf73bdee8a0b1a8'
+const HARNESS_COMMIT = '32728743c28911bcd4279f79fe9c43ee7aacfb6d'
 const SOURCE_PREDECESSOR_BASE_CONTRACT_ID = 'e-mate-desktop-profile-v9-dsh-b469c2b99a6c'
 const SOURCE_PREDECESSOR_HARNESS_COMMIT = 'b469c2b99a6c2f35c5e51eaf611f1941e095f90d'
 const PREDECESSOR_BASE_CONTRACT_ID = 'e-mate-desktop-profile-v8-dsh-4787caf39134'
@@ -216,7 +216,7 @@ describe('repository release boundary', () => {
     const t18 = JSON.parse(readFileSync(join(root, 'docs/2.0.15/evidence/T18.json'), 'utf8'))
     assert.equal(boundary.valid, true, boundary.errors.join('\n'))
     assert.deepEqual(boundary.errors, [])
-    assert.equal(BASE_CONTRACT_ID, `e-mate-desktop-profile-v14-dsh-${HARNESS_COMMIT.slice(0, 12)}`)
+    assert.equal(BASE_CONTRACT_ID, `e-mate-desktop-profile-v15-dsh-${HARNESS_COMMIT.slice(0, 12)}`)
     assert.equal(boundary.baseContract.desktop_api, 2)
     assert.equal(boundary.baseContract.id, BASE_CONTRACT_ID)
     assert.equal(boundary.baseContract.harness_commit, HARNESS_COMMIT)

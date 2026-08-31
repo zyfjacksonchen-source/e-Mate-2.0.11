@@ -23,13 +23,13 @@ function fixture() {
   roots.push(root)
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   const keyId = '0123456789abcdef'
-  const baseId = 'e-mate-desktop-profile-v14-dsh-d19aae6da310'
+  const baseId = 'e-mate-desktop-profile-v15-dsh-32728743c289'
   mkdirSync(join(root, 'desktop/e-mate-desktop'), { recursive: true })
   mkdirSync(join(root, 'packages/dsh/profile'), { recursive: true })
   execFileSync('git', ['init', '--quiet'], { cwd: root })
   execFileSync('git', [
     'update-index', '--add', '--cacheinfo',
-    '160000,d19aae6da3100e836867418c2cf73bdee8a0b1a8,upstream/deepseek-harness',
+    '160000,32728743c28911bcd4279f79fe9c43ee7aacfb6d,upstream/deepseek-harness',
   ], { cwd: root })
   execFileSync('git', [
     'update-index', '--add', '--cacheinfo',
@@ -49,7 +49,7 @@ function fixture() {
       harness_version: '0.1.0-rc.7',
     },
     harness_version: '0.1.0-rc.7',
-    harness_commit: 'd19aae6da3100e836867418c2cf73bdee8a0b1a8',
+    harness_commit: '32728743c28911bcd4279f79fe9c43ee7aacfb6d',
     runtime_imports: {},
     profile_signing_keys: [{
       id: keyId,
@@ -75,7 +75,7 @@ function fixture() {
       eMate: {
         component: { schema_version: 1, id, kind: 'profile', base_imports: [], authority_contract: { effects: [], guards: [] }, base_contracts: [baseId] },
         harnessVersion: '0.1.0-rc.7',
-        harnessCommit: 'd19aae6da3100e836867418c2cf73bdee8a0b1a8',
+        harnessCommit: '32728743c28911bcd4279f79fe9c43ee7aacfb6d',
       },
       license: 'MIT',
     })
