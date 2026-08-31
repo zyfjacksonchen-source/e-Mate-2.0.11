@@ -4,12 +4,17 @@ import { createHash } from 'node:crypto'
 import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 import { spawnSync } from 'node:child_process'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
 const RELEASE = '20260814'
 const PYTHON_VERSION = '3.12.14'
+const DOWNLOAD_ATTEMPTS = 3
+const TRANSIENT_DOWNLOAD_CODES = new Set([
+  'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETDOWN', 'ENETUNREACH', 'ENOTFOUND', 'ETIMEDOUT',
+  'ERR_STREAM_PREMATURE_CLOSE', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET',
+])
 const ASSETS = {
   'darwin-arm64': {
     target: 'aarch64-apple-darwin',
@@ -44,12 +49,21 @@ function receipt(target, asset) {
   return JSON.stringify({ release: RELEASE, python: PYTHON_VERSION, target, sha256: asset.sha256 })
 }
 
-async function download(url, destination) {
-  const response = await fetch(url, { redirect: 'follow' })
-  if (!response.ok || response.body === null) {
-    throw new Error(`Python runtime download failed with HTTP ${response.status}`)
+export async function download(url, destination, request = fetch) {
+  for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await request(url, { redirect: 'follow' })
+      if (!response.ok || response.body === null) {
+        throw new Error(`Python runtime download failed with HTTP ${response.status}`)
+      }
+      await pipeline(response.body, createWriteStream(destination, { flags: 'wx', mode: 0o600 }))
+      return
+    } catch (cause) {
+      rmSync(destination, { force: true })
+      const code = cause?.code ?? cause?.cause?.code
+      if (attempt === DOWNLOAD_ATTEMPTS || !TRANSIENT_DOWNLOAD_CODES.has(code)) throw cause
+    }
   }
-  await pipeline(response.body, createWriteStream(destination, { flags: 'wx', mode: 0o600 }))
 }
 
 function sha256(filename) {
@@ -95,13 +109,16 @@ async function prepare(target) {
   }
 }
 
-const { values } = parseArgs({
-  options: { target: { type: 'string', multiple: true } },
-})
-const hostTargets = targetsForHost()
-const targets = values.target ?? hostTargets
-if (targets.length === 0 || new Set(targets).size !== targets.length
-  || targets.some(target => !hostTargets.includes(target))) {
-  throw new Error(`e-Mate Python runtime target is unsupported on ${process.platform}-${process.arch}`)
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const { values } = parseArgs({
+    args: process.argv.slice(2),
+    options: { target: { type: 'string', multiple: true } },
+  })
+  const hostTargets = targetsForHost()
+  const targets = values.target ?? hostTargets
+  if (targets.length === 0 || new Set(targets).size !== targets.length
+    || targets.some(target => !hostTargets.includes(target))) {
+    throw new Error(`e-Mate Python runtime target is unsupported on ${process.platform}-${process.arch}`)
+  }
+  for (const target of targets) await prepare(target)
 }
-for (const target of targets) await prepare(target)
