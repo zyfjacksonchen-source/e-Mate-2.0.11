@@ -28,6 +28,8 @@ import {
   publicationAction,
   prepareNpmCollectorCarrier,
   preparePnpmLifecycleCarrier,
+  redactLog,
+  recoverWindowsArtifactExport,
   resolveNpmCollectorCli,
   rollbackAction,
   runCandidateStages,
@@ -36,10 +38,12 @@ import {
   selectWindowsPnpmCommand,
   selectCandidatePlatforms,
   validateCandidateSource,
+  validateControlPlaneContinuation,
   validateImmutablePublicationReceipt,
   validatePublicationReceipt,
   validateRollbackReceipt,
   validateRemoteHostname,
+  validateWindowsRecoveryCarrierEvidence,
   verifyManifestInputLedger,
   verifyInstalledAcceptanceReceipt,
   verifyLocalArtifact,
@@ -333,12 +337,136 @@ async function windowsRemoteFixture(root) {
   return { artifacts, fixture, request, requestPath, resultPath, returned: join(root, 'returned'), run, writeResult }
 }
 
+const WINDOWS_RECOVERY_EOL_PATHS = [
+  'packages/dsh-plugin-computer-use/LICENSE',
+  'packages/dsh-plugin-computer-use/docs/interaction-policy.i18n.yaml',
+  'packages/dsh-plugin-computer-use/docs/interaction-policy.md',
+  'packages/dsh-plugin-computer-use/docs/interaction-policy.zh.md',
+  'packages/dsh-plugin-computer-use/scripts/build-native.mjs',
+  'packages/dsh-plugin-find-skill/LICENSE',
+  'packages/dsh-plugin-genui/LICENSE',
+  'packages/dsh-plugin-genui/SKILL.md',
+  'packages/dsh-plugin-office-skills/assets/pdf2json/LICENSE',
+]
+const WINDOWS_RECOVERY_REQUIREMENTS = 'packages/dsh-plugin-vision-toolkit/runtime/requirements.lock'
+const WINDOWS_RECOVERY_HARNESS = 'desktop/e-mate-desktop/build/harness-runtime-provenance.json'
+const WINDOWS_RECOVERY_ARTIFACT = 'desktop/e-mate-desktop/dist/e-Mate-2.0.15-win-x64-Setup.exe'
+const CONTROL_SHA = 'f'.repeat(40)
+
+async function recoveryFileDescriptor(path, file) {
+  const bytes = await readFile(path)
+  return { file, bytes: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex') }
+}
+
+async function windowsArtifactExportRecoveryFixture(root) {
+  const failedRoot = join(root, 'failed-source')
+  const output = join(root, 'returned')
+  const manifestOutput = join(output, 'manifest-inputs', 'windows')
+  const requestPath = join(root, 'request.json')
+  const run = {
+    run_id: RUN_ID,
+    version: '2.0.15',
+    source_commit: SHA,
+    source_branch: 'release/2.0.15-final-integration-r5',
+  }
+  const request = windowsRemoteRequest(run)
+  const requestBytes = Buffer.from(`${JSON.stringify(request, null, 2)}\n`)
+  await mkdir(dirname(requestPath), { recursive: true })
+  await writeFile(requestPath, requestBytes)
+  run.platforms = { windows: {
+    status: 'awaiting-codex-remote',
+    source_commit: SHA,
+    request: 'windows-remote/request.json',
+    request_sha256: createHash('sha256').update(requestBytes).digest('hex'),
+  } }
+
+  await manifestPlatformFixture(manifestOutput, 'windows')
+  const requirementsBytes = Buffer.from('fixture==1.0 --hash=sha256:fixture\n')
+  const manifestRequirements = join(
+    manifestOutput, 'unsigned-components', 'dsh-plugin-vision-toolkit', 'win32-x64', 'files', 'runtime', 'requirements.lock',
+  )
+  const failedRequirements = join(failedRoot, ...WINDOWS_RECOVERY_REQUIREMENTS.split('/'))
+  await mkdir(dirname(manifestRequirements), { recursive: true })
+  await mkdir(dirname(failedRequirements), { recursive: true })
+  await writeFile(manifestRequirements, requirementsBytes)
+  await writeFile(failedRequirements, requirementsBytes)
+  await createPlatformManifestInputReceipt(manifestOutput, {
+    platform: 'windows', sourceCommit: SHA,
+    toolchain: { node: process.versions.node, pnpm: '11.7.0', yarn: '4.18.0', npm: '11.17.0' },
+  })
+
+  const artifactPath = join(failedRoot, ...WINDOWS_RECOVERY_ARTIFACT.split('/'))
+  await mkdir(dirname(artifactPath), { recursive: true })
+  await writeFile(artifactPath, pe())
+  const harnessPath = join(failedRoot, ...WINDOWS_RECOVERY_HARNESS.split('/'))
+  await mkdir(dirname(harnessPath), { recursive: true })
+  await writeFile(harnessPath, '{"schema_version":1}\n')
+  const logPath = join(output, 'windows.log')
+  const logBytes = Buffer.from('build completed\nemate.local-flow-failure:{"category":"PACKAGING_FAILED","stage":"artifact-export","error":"forbidden API secret"}\n')
+  await writeFile(logPath, logBytes)
+
+  const submodules = [{ path: 'upstream/deepseek-harness', commit: '1'.repeat(40) }]
+  const productSource = { source_commit: SHA, status: 'committed-clean', submodules }
+  const carrier = {
+    source_commit: SHA,
+    root_status: [
+      ...WINDOWS_RECOVERY_EOL_PATHS.map(path => ` M ${path}`),
+      ` M ${WINDOWS_RECOVERY_REQUIREMENTS}`,
+      `?? ${WINDOWS_RECOVERY_HARNESS}`,
+    ].sort(),
+    line_ending_only: WINDOWS_RECOVERY_EOL_PATHS,
+    requirements_lock: await recoveryFileDescriptor(failedRequirements, WINDOWS_RECOVERY_REQUIREMENTS),
+    harness_runtime_provenance: await recoveryFileDescriptor(harnessPath, WINDOWS_RECOVERY_HARNESS),
+    submodules,
+  }
+  const controlPlane = { source_commit: CONTROL_SHA, changed_paths: ['scripts/local-flow.mjs'] }
+  const recoveryPath = join(output, 'artifact-export-recovery.json')
+  const manifestReceipt = await recoveryFileDescriptor(join(manifestOutput, 'platform-inputs.json'), 'manifest-inputs/windows/platform-inputs.json')
+  const artifact = await recoveryFileDescriptor(artifactPath, WINDOWS_RECOVERY_ARTIFACT)
+  const log = await recoveryFileDescriptor(logPath, 'windows.log')
+  const recovery = {
+    schema_version: 1,
+    document_type: 'emate.local-windows-artifact-export-recovery',
+    mode: 'artifact-export-only',
+    run_id: RUN_ID,
+    version: '2.0.15',
+    platform: 'windows',
+    host: 'LAPTOP-ADQ973JN',
+    transport: 'ssh',
+    source_commit: SHA,
+    product_source: productSource,
+    carrier,
+    control_plane: controlPlane,
+    request_sha256: createHash('sha256').update(requestBytes).digest('hex'),
+    original_failure: { category: 'PACKAGING_FAILED', stage: 'artifact-export', log },
+    manifest_input_receipt: manifestReceipt,
+    artifact,
+  }
+  await writeFile(recoveryPath, `${JSON.stringify(recovery, null, 2)}\n`)
+  const execute = () => recoverWindowsArtifactExport({
+    failedRoot,
+    cleanSourceRoot: join(root, 'clean-source-not-read-by-fixture'),
+    output,
+    manifestOutput,
+    requestPath,
+    controlPlane,
+    host: 'LAPTOP-ADQ973JN',
+    productSourceEvidence: productSource,
+    carrierEvidence: carrier,
+  })
+  return {
+    artifactPath, carrier, controlPlane, execute, failedRoot, manifestOutput, output,
+    productSource, recovery, recoveryPath, requestPath, run,
+  }
+}
+
 function acceptance(platform, candidateArtifact, version = '2.0.15', sourceCommit = SHA) {
   return {
     scope: 'version-bound-installed-startup-and-update-readiness',
     stage: version === '2.0.15' ? 'same-version-replacement' : 'new-version-update',
     status: 'passed',
-    host: platform === 'macos' ? 'T18-MAC' : 'DESKTOP-KH19ARC',
+    host: platform === 'macos' ? 'T18-MAC' : '172_16_48_13',
+    ...(platform === 'windows' ? { transport: 'ssh', transport_alias: 'win-test-server' } : {}),
     tested_at: '2026-08-30T00:00:00.000Z',
     source_commit: sourceCommit,
     candidate_artifact: candidateArtifact,
@@ -360,10 +488,16 @@ function installedApplication(platform, candidateArtifact, version, sourceCommit
     ? { ...common, application_path: '/Applications/e-Mate.app' }
     : {
       ...common,
-      installation_directory: 'C:\\Program Files\\e-Mate',
+      previous_version: future ? '2.0.15' : '2.0.13',
+      previous_application_path: 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\e-Mate\\e-Mate.exe',
+      previous_desktop_shortcut_target: 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\e-Mate\\e-Mate.exe',
+      previous_start_menu_shortcut_target: 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\e-Mate\\e-Mate.exe',
+      installation_directory: 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\e-Mate',
       reused_existing_installation_directory: true,
       desktop_shortcuts: 1,
+      desktop_shortcut_target: 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\e-Mate\\e-Mate.exe',
       start_menu_shortcuts: 1,
+      start_menu_shortcut_target: 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\e-Mate\\e-Mate.exe',
     }
 }
 
@@ -947,6 +1081,114 @@ test('Windows Codex Remote import binds source, host, receipt, artifact bytes, a
   }
 })
 
+test('Windows artifact-export recovery reuses exact product bytes without invoking a builder', async () => {
+  const root = await temporary()
+  try {
+    const fixture = await windowsArtifactExportRecoveryFixture(root)
+    assert.doesNotMatch(
+      recoverWindowsArtifactExport.toString(),
+      /\b(?:platformBuild|runPnpm|runYarn|runLogged)\b/u,
+    )
+    const recovered = await fixture.execute()
+    assert.equal(recovered.summary.mode, 'artifact-export-only')
+    assert.equal(recovered.summary.controller_source_commit, CONTROL_SHA)
+    assert.deepEqual((await readdir(fixture.output)).sort(), [
+      'artifact-export-recovery.json', 'artifacts', 'codex-remote-result.json', 'manifest-inputs', 'windows.log',
+    ])
+    const result = JSON.parse(await readFile(join(fixture.output, 'codex-remote-result.json'), 'utf8'))
+    assert.deepEqual(result.recovery, recovered.summary)
+
+    const imported = await importWindowsRemoteResult(
+      fixture.output, join(root, 'imported'), fixture.run, fixture.requestPath,
+      join(root, 'imported-manifest'), fixture.controlPlane,
+    )
+    assert.equal(imported.primary.sha256, fixture.recovery.artifact.sha256)
+    assert.equal(imported.recovery_path, fixture.recoveryPath)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Windows artifact-export recovery fails closed on every bound trust input', async () => {
+  const cases = [
+    ['product source', fixture => { fixture.productSource.status = 'dirty' }, /clean source evidence/u],
+    ['carrier residue', fixture => { fixture.carrier.root_status.push('?? unexpected.txt') }, /carrier evidence/u],
+    ['source receipt', fixture => { fixture.recovery.source_commit = 'b'.repeat(40) }, /recovery receipt is invalid/u],
+    ['request receipt', fixture => { fixture.recovery.request_sha256 = 'b'.repeat(64) }, /recovery receipt is invalid/u],
+    ['request file', async fixture => {
+      const request = JSON.parse(await readFile(fixture.requestPath, 'utf8'))
+      request.authorized_hosts.push({ transport: 'ssh', alias: 'other', hostname: 'OTHER-HOST' })
+      await writeFile(fixture.requestPath, `${JSON.stringify(request, null, 2)}\n`)
+    }, /request is invalid/u],
+    ['artifact bytes', async fixture => { await writeFile(fixture.artifactPath, Buffer.concat([pe(), Buffer.from('drift')])) }, /recovery receipt is invalid/u],
+    ['artifact path', fixture => { fixture.recovery.artifact.file = 'other.exe' }, /recovery receipt is invalid/u],
+    ['manifest receipt', fixture => { fixture.recovery.manifest_input_receipt.sha256 = 'b'.repeat(64) }, /recovery receipt is invalid/u],
+    ['manifest bytes', async fixture => {
+      await writeFile(join(fixture.manifestOutput, 'component-inventory.json'), '{}\n')
+    }, /manifest/u],
+    ['build host', fixture => { fixture.recovery.host = 'DESKTOP-KH19ARC' }, /recovery receipt is invalid/u],
+    ['control path', fixture => { fixture.recovery.control_plane.changed_paths = ['packages/dsh/src/index.ts'] }, /control-plane continuation is invalid/u],
+    ['unknown field', fixture => { fixture.recovery.unexpected = true }, /recovery receipt is invalid/u],
+  ]
+  for (const [label, mutate, expected] of cases) {
+    const root = await temporary()
+    try {
+      const fixture = await windowsArtifactExportRecoveryFixture(root)
+      await mutate(fixture)
+      await writeFile(fixture.recoveryPath, `${JSON.stringify(fixture.recovery, null, 2)}\n`)
+      await assert.rejects(fixture.execute(), expected, label)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }
+
+  const root = await temporary()
+  try {
+    const fixture = await windowsArtifactExportRecoveryFixture(root)
+    const bytes = Buffer.from('emate.local-flow-failure:{"category":"SOURCE_FAILED","stage":"source","error":"first"}\n'
+      + 'emate.local-flow-failure:{"category":"PACKAGING_FAILED","stage":"artifact-export","error":"later"}\n')
+    await writeFile(join(fixture.output, 'windows.log'), bytes)
+    fixture.recovery.original_failure.log = await recoveryFileDescriptor(join(fixture.output, 'windows.log'), 'windows.log')
+    await writeFile(fixture.recoveryPath, `${JSON.stringify(fixture.recovery, null, 2)}\n`)
+    await assert.rejects(fixture.execute(), /requires the original first PACKAGING_FAILED:artifact-export/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Windows artifact-export recovery admits only a strict descendant control-plane path set', () => {
+  const value = { source_commit: CONTROL_SHA, changed_paths: ['AGENTS.md', 'scripts/local-flow.mjs'] }
+  assert.deepEqual(validateControlPlaneContinuation(value, { sourceCommit: SHA, ancestor: true }), value)
+  for (const [candidate, ancestor] of [
+    [{ source_commit: SHA, changed_paths: ['scripts/local-flow.mjs'] }, true],
+    [{ source_commit: CONTROL_SHA, changed_paths: [] }, true],
+    [{ source_commit: CONTROL_SHA, changed_paths: ['packages/dsh/src/index.ts'] }, true],
+    [{ source_commit: CONTROL_SHA, changed_paths: ['scripts/local-flow.mjs', 'AGENTS.md'] }, true],
+    [{ source_commit: CONTROL_SHA, changed_paths: ['scripts/local-flow.mjs'] }, false],
+  ]) assert.throws(
+    () => validateControlPlaneContinuation(candidate, { sourceCommit: SHA, ancestor }),
+    /control-plane continuation is invalid/u,
+  )
+
+  const carrier = {
+    source_commit: SHA,
+    root_status: [
+      ...WINDOWS_RECOVERY_EOL_PATHS.map(path => ` M ${path}`),
+      ` M ${WINDOWS_RECOVERY_REQUIREMENTS}`,
+      `?? ${WINDOWS_RECOVERY_HARNESS}`,
+    ].sort(),
+    line_ending_only: WINDOWS_RECOVERY_EOL_PATHS,
+    requirements_lock: { file: WINDOWS_RECOVERY_REQUIREMENTS, bytes: 1, sha256: 'b'.repeat(64) },
+    harness_runtime_provenance: { file: WINDOWS_RECOVERY_HARNESS, bytes: 1, sha256: 'c'.repeat(64) },
+    submodules: [{ path: 'upstream/deepseek-harness', commit: '1'.repeat(40) }],
+  }
+  assert.deepEqual(validateWindowsRecoveryCarrierEvidence(carrier, SHA), carrier)
+  assert.throws(
+    () => validateWindowsRecoveryCarrierEvidence({ ...carrier, root_status: [...carrier.root_status, '?? unexpected'] }, SHA),
+    /carrier evidence is invalid/u,
+  )
+})
+
 test('Windows Codex Remote import requires the exact awaiting request state', async () => {
   const root = await temporary()
   try {
@@ -1184,10 +1426,45 @@ test('local artifact receipts bind exact clean bytes and reject extra session or
 
 test('pollution gate rejects canaries, credentials, and developer absolute paths', () => {
   assert.doesNotThrow(() => assertCleanArtifactBytes(Buffer.from('ordinary packaged bytes'), 'fixture'))
+  assert.doesNotThrow(() => assertCleanArtifactBytes(Buffer.from('micromark-extension-gfm-autolink-literal'), 'fixture'))
+  assert.doesNotThrow(() => assertCleanArtifactBytes(Buffer.from('sk-quotedxx-stringxx-symbolx'), 'fixture'))
   assert.throws(() => assertCleanArtifactBytes(Buffer.from('release-canary'), 'fixture'), /canary marker/u)
   assert.throws(() => assertCleanArtifactBytes(Buffer.from('/Users/alice/project/private.json'), 'fixture'), /developer path/u)
   assert.throws(() => assertCleanArtifactBytes(Buffer.from('-----BEGIN PRIVATE KEY-----'), 'fixture'), /private key/u)
-  assert.throws(() => assertCleanArtifactBytes(Buffer.from(`sk-${'x'.repeat(24)}`), 'fixture'), /API secret/u)
+  for (const secret of [
+    `sk-${'x'.repeat(24)}`,
+    `{"token":"rk-${'y'.repeat(24)}"}`,
+    ` sess-${'z'.repeat(24)}`,
+    `sk-proj-${'p'.repeat(24)}`,
+  ]) assert.throws(() => assertCleanArtifactBytes(Buffer.from(secret), 'fixture'), /API secret/u)
+  assert.doesNotThrow(() => assertCleanArtifactBytes(Buffer.from(`ask-${'x'.repeat(24)}`), 'fixture'))
+  assert.equal(redactLog(`{"token":"sk-proj-${'p'.repeat(24)}"}`), '{"token":"<redacted-secret>"}')
+  assert.equal(redactLog(`ask-${'x'.repeat(24)}`), 'a<redacted-secret>')
+  assert.equal(redactLog('sk-quotedxx-stringxx-symbolx'), '<redacted-secret>')
+})
+
+test('artifact pollution scanner carries a real secret across stream chunks', async () => {
+  const root = await temporary()
+  try {
+    const name = 'e-Mate-2.0.15-win-x64-Setup.exe'
+    const bytes = Buffer.alloc(65_536 + 128, 0x2e)
+    pe().copy(bytes)
+    Buffer.from(` sk-${'x'.repeat(24)}`).copy(bytes, 65_530)
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    await mkdir(root, { recursive: true })
+    await writeFile(join(root, name), bytes)
+    await writeFile(join(root, 'local-artifact-receipt.json'), `${JSON.stringify({
+      schema_version: 1,
+      document_type: 'emate.local-desktop-artifact',
+      platform: 'windows',
+      source_commit: SHA,
+      version: '2.0.15',
+      files: [{ name, bytes: bytes.byteLength, sha256 }],
+    }, null, 2)}\n`)
+    await assert.rejects(verifyLocalArtifact(root, 'windows', SHA), /API secret/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('installed acceptance templates preserve unreferenced legacy evidence', async () => {
@@ -1223,6 +1500,40 @@ test('installed acceptance is version-bound and requires real higher-version lan
     assert.equal((await verifyInstalledAcceptanceReceipt(current, {
       platform: 'macos', sourceCommit: frozenSource, version: '2.0.15', candidateArtifact: frozenMac,
     })).status, 'passed')
+
+    const frozenWindows = {
+      name: 'e-Mate-2.0.15-win-x64-Setup.exe', bytes: 283536339,
+      sha256: '6ba140bff70451e79dd8ceb8dbcbae86281999e34a696d92022f028f040f161d',
+    }
+    const windows = await installedAcceptanceFixture(
+      join(root, 'current-windows'), 'windows', frozenWindows, { sourceCommit: frozenSource },
+    )
+    assert.equal((await verifyInstalledAcceptanceReceipt(windows, {
+      platform: 'windows', sourceCommit: frozenSource, version: '2.0.15', candidateArtifact: frozenWindows,
+    })).status, 'passed')
+
+    const wrongHost = JSON.parse(await readFile(windows, 'utf8'))
+    wrongHost.external_acceptance.host = 'LAPTOP-ADQ973JN'
+    await writeFile(windows, `${JSON.stringify(wrongHost, null, 2)}\n`)
+    await assert.rejects(verifyInstalledAcceptanceReceipt(windows, {
+      platform: 'windows', sourceCommit: frozenSource, version: '2.0.15', candidateArtifact: frozenWindows,
+    }), /installed acceptance summary is invalid/u)
+
+    for (const [name, mutate] of [
+      ['previous-version', installation => { installation.previous_version = '2.0.15' }],
+      ['previous-path', installation => { installation.previous_application_path = 'C:\\Other\\e-Mate.exe' }],
+      ['previous-shortcut', installation => { installation.previous_desktop_shortcut_target = 'C:\\Other\\e-Mate.exe' }],
+      ['final-directory', installation => { installation.installation_directory = 'C:\\Other' }],
+      ['final-shortcut', installation => { installation.start_menu_shortcut_target = 'C:\\Other\\e-Mate.exe' }],
+    ]) {
+      const path = await installedAcceptanceFixture(
+        join(root, `windows-${name}`), 'windows', frozenWindows, { sourceCommit: frozenSource },
+      )
+      await rewriteExternalAcceptance(path, external => mutate(external.installation))
+      await assert.rejects(verifyInstalledAcceptanceReceipt(path, {
+        platform: 'windows', sourceCommit: frozenSource, version: '2.0.15', candidateArtifact: frozenWindows,
+      }), /one installation directory and one shortcut set/u)
+    }
 
     await rewriteExternalAcceptance(current, external => {
       external.update_download = updateDownload('macos', frozenMac, '2.0.16', frozenSource)

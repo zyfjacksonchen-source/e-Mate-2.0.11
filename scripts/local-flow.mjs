@@ -11,6 +11,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep,
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { isDeepStrictEqual, parseArgs } from 'node:util'
 import { classifyChangedPaths } from './change-impact.mjs'
+import { verifyHarnessDesktopRuntime } from './harness-provenance.mjs'
 import { pinnedPnpmInvocation, pinnedYarnInvocation } from './package-manager.mjs'
 import { R2_PUBLIC_ORIGIN } from './release-source.mjs'
 import { canonicalProfileJson } from '../desktop/e-mate-desktop/src/profile-release.ts'
@@ -125,9 +126,13 @@ const WINDOWS_BUILD_HOSTS = Object.freeze([
   Object.freeze({ transport: 'ssh', alias: 'win-codex', hostname: 'LAPTOP-ADQ973JN' }),
   Object.freeze({ transport: 'codex-remote-handoff', hostname: 'DESKTOP-KH19ARC' }),
 ])
+const WINDOWS_ACCEPTANCE_ROUTE = Object.freeze({ transport: 'ssh', alias: 'win-test-server', hostname: '172_16_48_13' })
+const WINDOWS_ACCEPTANCE_DIRECTORY = String.raw`C:\Users\Administrator\AppData\Local\Programs\e-Mate`
 const WINDOWS_REMOTE_REQUEST = 'emate.local-windows-codex-remote-request'
 const WINDOWS_REMOTE_RESULT = 'emate.local-windows-codex-remote-result'
 const WINDOWS_REMOTE_RESULT_FILE = 'codex-remote-result.json'
+const WINDOWS_ARTIFACT_EXPORT_RECOVERY = 'emate.local-windows-artifact-export-recovery'
+const WINDOWS_ARTIFACT_EXPORT_RECOVERY_FILE = 'artifact-export-recovery.json'
 const MANIFEST_PLATFORM_INPUTS = 'emate.local-manifest-platform-inputs'
 const MANIFEST_INPUT_LEDGER = 'emate.local-manifest-input-ledger'
 const MANIFEST_INPUT_BINDING = 'emate.local-manifest-input-binding'
@@ -135,6 +140,27 @@ const LOCAL_CANDIDATE_PROVENANCE = 'emate.local-candidate-provenance'
 const MANIFEST_TREE_CONTEXT = Buffer.from('e-mate-local-manifest-input-tree-v1\0', 'utf8')
 const PROFILE_TREE_CONTEXT = Buffer.from('e-mate-staged-profile-tree-v1\0', 'utf8')
 const PROFILE_TARGETS = Object.freeze(['darwin-arm64', 'darwin-x64', 'win32-x64'])
+const RELEASE_CONTROL_PATHS = Object.freeze([
+  'AGENTS.md',
+  'scripts/local-flow.mjs',
+  'scripts/local-flow.test.mjs',
+  'scripts/publish-profile-r2.test.mjs',
+  'scripts/signer-transport.mjs',
+])
+const WINDOWS_RECOVERY_EOL_PATHS = Object.freeze([
+  'packages/dsh-plugin-computer-use/LICENSE',
+  'packages/dsh-plugin-computer-use/docs/interaction-policy.i18n.yaml',
+  'packages/dsh-plugin-computer-use/docs/interaction-policy.md',
+  'packages/dsh-plugin-computer-use/docs/interaction-policy.zh.md',
+  'packages/dsh-plugin-computer-use/scripts/build-native.mjs',
+  'packages/dsh-plugin-find-skill/LICENSE',
+  'packages/dsh-plugin-genui/LICENSE',
+  'packages/dsh-plugin-genui/SKILL.md',
+  'packages/dsh-plugin-office-skills/assets/pdf2json/LICENSE',
+])
+const WINDOWS_RECOVERY_REQUIREMENTS = 'packages/dsh-plugin-vision-toolkit/runtime/requirements.lock'
+const WINDOWS_RECOVERY_MANIFEST_REQUIREMENTS = 'unsigned-components/dsh-plugin-vision-toolkit/win32-x64/files/runtime/requirements.lock'
+const WINDOWS_RECOVERY_HARNESS_PROVENANCE = 'desktop/e-mate-desktop/build/harness-runtime-provenance.json'
 const PLATFORMS = Object.freeze({
   macos: Object.freeze({
     artifact: `e-Mate-${VERSION}-mac-universal.dmg`,
@@ -159,6 +185,10 @@ export const COMPUTER_USE_SCENARIOS = Object.freeze({
     'windows-native-runtime-unavailable',
   ]),
 })
+const API_SECRET_LEFT_BOUNDARY = String.raw`(?<![A-Za-z0-9])`
+const API_SECRET_PATTERN = `${API_SECRET_LEFT_BOUNDARY}(?:sk-(?:proj-)?|rk-|sess-)[A-Za-z0-9_]{20,}`
+const API_SECRET = new RegExp(API_SECRET_PATTERN, 'u')
+const REDACTED_SECRETS = /(?:sk|rk|sess)-[A-Za-z0-9_-]{20,}/gu
 const POLLUTION = [
   { label: 'canary marker', ascii: /(?:emate|release|build)[-_ ]canary|canary[-_ ](?:marker|build|channel)/iu },
   { label: 'macOS developer path', ascii: /\/Users\/[A-Za-z0-9._-]+\//u, utf16: /\/\0U\0s\0e\0r\0s\0\/\0/iu },
@@ -166,7 +196,7 @@ const POLLUTION = [
   { label: 'Windows developer path', ascii: /[A-Za-z]:\\Users\\/iu, utf16: /:\0\\\0U\0s\0e\0r\0s\0\\\0/iu },
   { label: 'private key', ascii: /-----BEGIN [A-Z ]*PRIVATE KEY-----/u },
   { label: 'AWS access key', ascii: /AKIA[0-9A-Z]{16}/u },
-  { label: 'API secret', ascii: /(?:sk|rk|sess)-[A-Za-z0-9_-]{20,}/u },
+  { label: 'API secret', ascii: API_SECRET },
 ]
 
 class CandidateStageError extends Error {
@@ -223,8 +253,7 @@ export function selectPythonCommand({
   throw new Error('Python 3 executable is unavailable')
 }
 
-function candidateFailureFromOutput(output) {
-  const marker = output.lastIndexOf(FAILURE_MARKER)
+function candidateFailureAt(output, marker) {
   if (marker < 0) return null
   const line = output.slice(marker + FAILURE_MARKER.length).split('\n', 1)[0]
   try {
@@ -235,6 +264,14 @@ function candidateFailureFromOutput(output) {
   } catch {
     return null
   }
+}
+
+function candidateFailureFromOutput(output) {
+  return candidateFailureAt(output, output.lastIndexOf(FAILURE_MARKER))
+}
+
+function firstCandidateFailureFromOutput(output) {
+  return candidateFailureAt(output, output.indexOf(FAILURE_MARKER))
 }
 
 function failureOrDefault(cause, stage = 'platform-build') {
@@ -578,6 +615,28 @@ export function sourceIdentity(root = ROOT) {
     branch: git(['symbolic-ref', '--quiet', '--short', 'HEAD'], root),
     head: git(['rev-parse', 'HEAD'], root),
     status: git(['status', '--porcelain=v1', '--untracked-files=all'], root),
+  })
+}
+
+export function validateControlPlaneContinuation(value, { sourceCommit, ancestor }) {
+  const paths = value?.changed_paths
+  if (!exactKeys(value, ['source_commit', 'changed_paths']) || !SOURCE_SHA.test(sourceCommit ?? '')
+    || !SOURCE_SHA.test(value.source_commit ?? '') || value.source_commit === sourceCommit || ancestor !== true
+    || !Array.isArray(paths) || paths.length === 0
+    || !isDeepStrictEqual(paths, [...new Set(paths)].sort())
+    || paths.some(path => !RELEASE_CONTROL_PATHS.includes(path))) {
+    throw new Error('release control-plane continuation is invalid')
+  }
+  return value
+}
+
+function controlPlaneContinuation(sourceCommit, identity, root = ROOT) {
+  const ancestry = spawnSync('git', ['merge-base', '--is-ancestor', sourceCommit, identity.source_commit], { cwd: root })
+  if (ancestry.error !== undefined) throw ancestry.error
+  const changed = gitZero(['diff', '--name-only', '-z', sourceCommit, identity.source_commit, '--'], root)
+    .split('\0').filter(Boolean).sort()
+  return validateControlPlaneContinuation({ source_commit: identity.source_commit, changed_paths: changed }, {
+    sourceCommit, ancestor: ancestry.status === 0,
   })
 }
 
@@ -1166,11 +1225,11 @@ async function runLogged(command, args, { cwd, log, env = process.env }) {
   })
 }
 
-function redactLog(value) {
+export function redactLog(value) {
   return String(value)
     .replace(/\/Users\/[^/\s]+/gu, '<local-user>')
     .replace(/[A-Za-z]:\\Users\\[^\\\s]+/giu, '<local-user>')
-    .replace(/(?:sk|rk|sess)-[A-Za-z0-9_-]{20,}/gu, '<redacted-secret>')
+    .replace(REDACTED_SECRETS, '<redacted-secret>')
 }
 
 function pnpmInvocation(args, env = process.env) {
@@ -1432,10 +1491,9 @@ async function artifactDescriptor(path, platform) {
   return { name: basename(path), bytes: metadata.size, sha256: await cleanDigest(path, `${platform} artifact`) }
 }
 
-async function exportArtifact(sourceRoot, platform, output, sourceCommit) {
+async function exportArtifactFrom(source, platform, output, sourceCommit, primary = undefined) {
   const config = PLATFORMS[platform]
-  const source = join(sourceRoot, ...config.source.split('/'), config.artifact)
-  const descriptor = await artifactDescriptor(source, platform)
+  const descriptor = primary ?? await artifactDescriptor(source, platform)
   await rm(output, { recursive: true, force: true })
   await mkdir(output, { recursive: true })
   await copyFile(source, join(output, config.artifact))
@@ -1452,14 +1510,21 @@ async function exportArtifact(sourceRoot, platform, output, sourceCommit) {
     files.push({ name: basename(blockmap), bytes: blockmapMetadata.size, sha256: await cleanDigest(blockmap, `${platform} blockmap`) })
   }
   files.sort((left, right) => left.name.localeCompare(right.name))
-  await atomicJson(join(output, 'local-artifact-receipt.json'), {
+  const receipt = {
     schema_version: 1,
     document_type: 'emate.local-desktop-artifact',
     platform,
     source_commit: sourceCommit,
     version: VERSION,
     files,
-  })
+  }
+  await atomicJson(join(output, 'local-artifact-receipt.json'), receipt)
+  return { receipt, primary: descriptor }
+}
+
+async function exportArtifact(sourceRoot, platform, output, sourceCommit) {
+  const config = PLATFORMS[platform]
+  return exportArtifactFrom(join(sourceRoot, ...config.source.split('/'), config.artifact), platform, output, sourceCommit)
 }
 
 export async function verifyLocalArtifact(directory, platform, sourceCommit) {
@@ -1635,7 +1700,7 @@ async function readWindowsRemoteRequest(path, run) {
   return { bytes, request: validateWindowsRemoteRequest(request, run ?? request) }
 }
 
-function windowsRemoteResult(request, verified, requestSha256, artifactReceiptSha256, manifestReceipt, host, log) {
+function windowsRemoteResult(request, verified, requestSha256, artifactReceiptSha256, manifestReceipt, host, log, recovery) {
   if (!SHA256.test(requestSha256 ?? '') || !SHA256.test(artifactReceiptSha256 ?? '')) {
     throw new Error('Windows Codex Remote result digest is invalid')
   }
@@ -1665,6 +1730,7 @@ function windowsRemoteResult(request, verified, requestSha256, artifactReceiptSh
     manifest_input_receipt: manifestReceipt,
     log,
     files: verified.receipt.files,
+    ...(recovery === undefined ? {} : { recovery }),
   }
 }
 
@@ -1674,10 +1740,183 @@ async function windowsRemoteLog(directory) {
   return { path, descriptor: { file: 'windows.log', bytes: metadata.size, sha256: await cleanDigest(path, 'Windows Codex Remote build log') } }
 }
 
-async function writeWindowsRemoteResult(directory, requestPath) {
+function gitQuiet(args, cwd) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' })
+  if (result.error !== undefined) throw result.error
+  if (![0, 1].includes(result.status)) throw new Error(result.stderr.trim() || `git ${args.join(' ')} failed`)
+  return result.status === 0
+}
+
+function recoverySubmodules(root) {
+  return submodules(root).map(module => {
+    const directory = join(root, module.path)
+    if (git(['rev-parse', 'HEAD'], directory) !== module.commit
+      || git(['status', '--porcelain=v1', '--untracked-files=all'], directory) !== '') {
+      throw new Error(`Windows artifact-export recovery submodule drifted: ${module.path}`)
+    }
+    return { path: module.path, commit: module.commit }
+  })
+}
+
+function recoveryDescriptor(value, label) {
+  if (!exactKeys(value, ['file', 'bytes', 'sha256']) || typeof value.file !== 'string' || value.file === ''
+    || !Number.isSafeInteger(value.bytes) || value.bytes <= 0 || !SHA256.test(value.sha256 ?? '')) {
+    throw new Error(`Windows artifact-export recovery ${label} descriptor is invalid`)
+  }
+  return value
+}
+
+export function validateWindowsRecoveryCarrierEvidence(value, sourceCommit) {
+  const expectedStatus = [
+    ...WINDOWS_RECOVERY_EOL_PATHS.map(path => ` M ${path}`),
+    ` M ${WINDOWS_RECOVERY_REQUIREMENTS}`,
+    `?? ${WINDOWS_RECOVERY_HARNESS_PROVENANCE}`,
+  ].sort()
+  if (!exactKeys(value, [
+    'source_commit', 'root_status', 'line_ending_only', 'requirements_lock', 'harness_runtime_provenance', 'submodules',
+  ]) || value.source_commit !== sourceCommit || !isDeepStrictEqual(value.root_status, expectedStatus)
+    || !isDeepStrictEqual(value.line_ending_only, WINDOWS_RECOVERY_EOL_PATHS)
+    || !Array.isArray(value.submodules) || value.submodules.length === 0
+    || value.submodules.some(module => !exactKeys(module, ['path', 'commit'])
+      || typeof module.path !== 'string' || module.path === '' || !SOURCE_SHA.test(module.commit ?? ''))) {
+    throw new Error('Windows artifact-export recovery carrier evidence is invalid')
+  }
+  const requirements = recoveryDescriptor(value.requirements_lock, 'requirements lock')
+  const provenance = recoveryDescriptor(value.harness_runtime_provenance, 'Harness provenance')
+  if (requirements.file !== WINDOWS_RECOVERY_REQUIREMENTS
+    || provenance.file !== WINDOWS_RECOVERY_HARNESS_PROVENANCE) {
+    throw new Error('Windows artifact-export recovery carrier path drifted')
+  }
+  return value
+}
+
+function validateRecoveryProductSource(value, sourceCommit) {
+  if (!exactKeys(value, ['source_commit', 'status', 'submodules']) || value.source_commit !== sourceCommit
+    || value.status !== 'committed-clean' || !Array.isArray(value.submodules) || value.submodules.length === 0
+    || value.submodules.some(module => !exactKeys(module, ['path', 'commit'])
+      || typeof module.path !== 'string' || module.path === '' || !SOURCE_SHA.test(module.commit ?? ''))) {
+    throw new Error('Windows artifact-export recovery clean source evidence is invalid')
+  }
+  return value
+}
+
+function verifyRecoveryProductSource(root, sourceCommit) {
+  const identity = sourceIdentity(root)
+  if (identity.source_commit !== sourceCommit) throw new Error('Windows artifact-export recovery clean source drifted')
+  return validateRecoveryProductSource({
+    source_commit: sourceCommit, status: 'committed-clean', submodules: recoverySubmodules(root),
+  }, sourceCommit)
+}
+
+async function inspectWindowsRecoveryCarrier(root, sourceCommit, manifestOutput) {
+  if (git(['rev-parse', 'HEAD'], root) !== sourceCommit) throw new Error('Windows artifact-export recovery carrier source drifted')
+  const status = gitZero(['status', '--porcelain=v1', '--untracked-files=all', '--ignore-submodules=none'], root)
+    .split(/\r?\n/u).filter(Boolean).sort()
+  for (const path of WINDOWS_RECOVERY_EOL_PATHS) {
+    if (!gitQuiet(['diff', '--ignore-cr-at-eol', '--quiet', '--', path], root)
+      || !gitQuiet(['diff', '--cached', '--quiet', '--', path], root)) {
+      throw new Error(`Windows artifact-export recovery residue is not line-ending-only: ${path}`)
+    }
+  }
+  if (gitQuiet(['diff', '--quiet', '--', WINDOWS_RECOVERY_REQUIREMENTS], root)
+    || !gitQuiet(['diff', '--cached', '--quiet', '--', WINDOWS_RECOVERY_REQUIREMENTS], root)) {
+    throw new Error('Windows artifact-export recovery requirements residue is invalid')
+  }
+  const requirementsPath = join(root, ...WINDOWS_RECOVERY_REQUIREMENTS.split('/'))
+  const manifestRequirementsPath = join(manifestOutput, ...WINDOWS_RECOVERY_MANIFEST_REQUIREMENTS.split('/'))
+  const requirements = await readFile(requirementsPath)
+  if (!requirements.equals(await readFile(manifestRequirementsPath))) {
+    throw new Error('Windows artifact-export recovery requirements are not bound by the platform manifest')
+  }
+  verifyHarnessDesktopRuntime(root)
+  const provenancePath = join(root, ...WINDOWS_RECOVERY_HARNESS_PROVENANCE.split('/'))
+  const [requirementsMetadata, provenanceMetadata] = await Promise.all([
+    regularFile(requirementsPath, 'Windows recovery requirements lock'),
+    regularFile(provenancePath, 'Windows recovery Harness provenance'),
+  ])
+  return validateWindowsRecoveryCarrierEvidence({
+    source_commit: sourceCommit,
+    root_status: status,
+    line_ending_only: WINDOWS_RECOVERY_EOL_PATHS,
+    requirements_lock: {
+      file: WINDOWS_RECOVERY_REQUIREMENTS,
+      bytes: requirementsMetadata.size,
+      sha256: digest(requirements),
+    },
+    harness_runtime_provenance: {
+      file: WINDOWS_RECOVERY_HARNESS_PROVENANCE,
+      bytes: provenanceMetadata.size,
+      sha256: await fileDigest(provenancePath),
+    },
+    submodules: recoverySubmodules(root),
+  }, sourceCommit)
+}
+
+async function readWindowsArtifactExportRecovery(directory, {
+  requestBytes, request, productSource, carrier, artifact, manifestReceipt, log, host, controlPlane,
+}) {
+  const path = join(directory, WINDOWS_ARTIFACT_EXPORT_RECOVERY_FILE)
+  const metadata = await regularFile(path, 'Windows artifact-export recovery receipt')
+  if (metadata.size > 1024 * 1024) throw new Error('Windows artifact-export recovery receipt is too large')
+  const bytes = await readFile(path)
+  assertCleanArtifactBytes(bytes, 'Windows artifact-export recovery receipt')
+  const receipt = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+  const route = windowsBuildRoute(host, request)
+  const acceptedProductSource = validateRecoveryProductSource(productSource ?? receipt?.product_source, request.source_commit)
+  const acceptedCarrier = validateWindowsRecoveryCarrierEvidence(carrier ?? receipt?.carrier, request.source_commit)
+  const acceptedControlPlane = validateControlPlaneContinuation(controlPlane, {
+    sourceCommit: request.source_commit, ancestor: true,
+  })
+  if (!isDeepStrictEqual(acceptedProductSource.submodules, acceptedCarrier.submodules)) {
+    throw new Error('Windows artifact-export recovery carrier submodules drifted from the clean source')
+  }
+  if (log.descriptor.bytes > 64 * 1024 * 1024) throw new Error('Windows artifact-export recovery log is too large')
+  const failure = firstCandidateFailureFromOutput(await readFile(log.path, 'utf8'))
+  if (failure?.category !== CANDIDATE_FAILURE.PACKAGING || failure.stage !== 'artifact-export') {
+    throw new Error('Windows artifact-export recovery requires the original first PACKAGING_FAILED:artifact-export')
+  }
+  const expected = {
+    schema_version: 1,
+    document_type: WINDOWS_ARTIFACT_EXPORT_RECOVERY,
+    mode: 'artifact-export-only',
+    run_id: request.run_id,
+    version: VERSION,
+    platform: 'windows',
+    host: route.host,
+    transport: route.transport,
+    source_commit: request.source_commit,
+    product_source: acceptedProductSource,
+    carrier: acceptedCarrier,
+    control_plane: acceptedControlPlane,
+    request_sha256: digest(requestBytes),
+    original_failure: {
+      category: CANDIDATE_FAILURE.PACKAGING,
+      stage: 'artifact-export',
+      log: log.descriptor,
+    },
+    manifest_input_receipt: manifestReceipt,
+    artifact: {
+      file: `${PLATFORMS.windows.source}/${PLATFORMS.windows.artifact}`,
+      bytes: artifact.bytes,
+      sha256: artifact.sha256,
+    },
+  }
+  if (!isDeepStrictEqual(receipt, expected)) throw new Error('Windows artifact-export recovery receipt is invalid')
+  return {
+    receipt,
+    summary: {
+      mode: receipt.mode,
+      controller_source_commit: acceptedControlPlane.source_commit,
+      changed_paths: acceptedControlPlane.changed_paths,
+      receipt: { file: WINDOWS_ARTIFACT_EXPORT_RECOVERY_FILE, sha256: digest(bytes) },
+    },
+  }
+}
+
+async function writeWindowsRemoteResult(directory, requestPath, recovery, host = hostname(), suppliedVerified) {
   const { bytes, request } = await readWindowsRemoteRequest(requestPath)
   const artifacts = join(directory, 'artifacts', 'windows')
-  const verified = await verifyLocalArtifact(artifacts, 'windows', request.source_commit)
+  const verified = suppliedVerified ?? await verifyLocalArtifact(artifacts, 'windows', request.source_commit)
   const receiptPath = join(artifacts, 'local-artifact-receipt.json')
   const manifest = await verifyPlatformManifestInputs(join(directory, 'manifest-inputs', 'windows'), 'windows', request.source_commit)
   const log = await windowsRemoteLog(directory)
@@ -1686,8 +1925,48 @@ async function writeWindowsRemoteResult(directory, requestPath) {
       file: 'manifest-inputs/windows/platform-inputs.json',
       bytes: manifest.descriptor.bytes,
       sha256: manifest.descriptor.sha256,
-    }, hostname(), log.descriptor,
+    }, host, log.descriptor, recovery,
   ))
+}
+
+export async function recoverWindowsArtifactExport({
+  failedRoot, cleanSourceRoot, output, manifestOutput, requestPath, controlPlane, host = hostname(),
+  productSourceEvidence, carrierEvidence,
+}) {
+  const expectedManifest = join(resolve(output), 'manifest-inputs', 'windows')
+  if (resolve(manifestOutput) !== expectedManifest) throw new Error('Windows artifact-export recovery manifest path drifted')
+  const entries = (await readdir(output)).sort()
+  if (!isDeepStrictEqual(entries, [WINDOWS_ARTIFACT_EXPORT_RECOVERY_FILE, 'manifest-inputs', 'windows.log'])) {
+    throw new Error('Windows artifact-export recovery input directory contains an unexpected entry')
+  }
+  const { bytes: requestBytes, request } = await readWindowsRemoteRequest(requestPath)
+  const productSource = productSourceEvidence === undefined
+    ? verifyRecoveryProductSource(cleanSourceRoot, request.source_commit)
+    : validateRecoveryProductSource(productSourceEvidence, request.source_commit)
+  validateRemoteHostname(host, request)
+  const manifest = await verifyPlatformManifestInputs(expectedManifest, 'windows', request.source_commit)
+  const manifestReceipt = {
+    file: 'manifest-inputs/windows/platform-inputs.json',
+    bytes: manifest.descriptor.bytes,
+    sha256: manifest.descriptor.sha256,
+  }
+  const carrier = carrierEvidence === undefined
+    ? await inspectWindowsRecoveryCarrier(failedRoot, request.source_commit, expectedManifest)
+    : validateWindowsRecoveryCarrierEvidence(carrierEvidence, request.source_commit)
+  if (!isDeepStrictEqual(carrier.submodules, productSource.submodules)) {
+    throw new Error('Windows artifact-export recovery carrier submodules drifted from the clean source')
+  }
+  const log = await windowsRemoteLog(output)
+  const source = join(failedRoot, ...PLATFORMS.windows.source.split('/'), PLATFORMS.windows.artifact)
+  const artifact = await artifactDescriptor(source, 'windows')
+  const recovery = await readWindowsArtifactExportRecovery(output, {
+    requestBytes, request, productSource, carrier, artifact, manifestReceipt, log, host, controlPlane,
+  })
+  const verified = await exportArtifactFrom(
+    source, 'windows', join(output, 'artifacts', 'windows'), request.source_commit, artifact,
+  )
+  await writeWindowsRemoteResult(output, requestPath, recovery.summary, host, verified)
+  return recovery
 }
 
 async function prepareWindowsRemote(directory, run) {
@@ -1710,7 +1989,9 @@ export async function blockWindowsRemote(directory, run, failure) {
   run.platforms.windows = blockedWindowsState(run.source_commit, failure)
 }
 
-export async function importWindowsRemoteResult(resultDirectory, output, run, requestPath, manifestDestination = `${output}-manifest-inputs`) {
+export async function importWindowsRemoteResult(
+  resultDirectory, output, run, requestPath, manifestDestination = `${output}-manifest-inputs`, controlPlane,
+) {
   const { bytes: requestBytes, request } = await readWindowsRemoteRequest(requestPath, run)
   if (!isDeepStrictEqual(run.platforms?.windows, {
     status: 'awaiting-codex-remote',
@@ -1719,9 +2000,15 @@ export async function importWindowsRemoteResult(resultDirectory, output, run, re
     request_sha256: digest(requestBytes),
   })) throw new Error('Windows Codex Remote import requires the exact awaiting request state')
   const rootEntries = (await readdir(resultDirectory)).sort()
-  if (!isDeepStrictEqual(rootEntries, ['artifacts', WINDOWS_REMOTE_RESULT_FILE, 'manifest-inputs', 'windows.log'])) {
+  const recovered = rootEntries.includes(WINDOWS_ARTIFACT_EXPORT_RECOVERY_FILE)
+  const expectedEntries = [
+    ...(recovered ? [WINDOWS_ARTIFACT_EXPORT_RECOVERY_FILE] : []),
+    'artifacts', WINDOWS_REMOTE_RESULT_FILE, 'manifest-inputs', 'windows.log',
+  ].sort()
+  if (!isDeepStrictEqual(rootEntries, expectedEntries)) {
     throw new Error('Windows Codex Remote result directory contains an unexpected entry')
   }
+  if (recovered !== (controlPlane !== undefined)) throw new Error('Windows Codex Remote recovery control plane is missing or unexpected')
   const artifactRoot = join(resultDirectory, 'artifacts')
   const artifactRootMetadata = await lstat(artifactRoot)
   if (!artifactRootMetadata.isDirectory() || artifactRootMetadata.isSymbolicLink()
@@ -1749,12 +2036,19 @@ export async function importWindowsRemoteResult(resultDirectory, output, run, re
   assertCleanArtifactBytes(resultBytes, 'Windows Codex Remote result receipt')
   const result = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(resultBytes))
   const log = await windowsRemoteLog(resultDirectory)
+  const recovery = recovered ? await readWindowsArtifactExportRecovery(resultDirectory, {
+    requestBytes, request, artifact: verified.primary, manifestReceipt: {
+      file: 'manifest-inputs/windows/platform-inputs.json',
+      bytes: manifest.descriptor.bytes,
+      sha256: manifest.descriptor.sha256,
+    }, log, host: result?.host, controlPlane,
+  }) : undefined
   const expected = windowsRemoteResult(
     request, verified, digest(requestBytes), await fileDigest(artifactReceiptPath), {
       file: 'manifest-inputs/windows/platform-inputs.json',
       bytes: manifest.descriptor.bytes,
       sha256: manifest.descriptor.sha256,
-    }, result?.host, log.descriptor,
+    }, result?.host, log.descriptor, recovery?.summary,
   )
   if (!isDeepStrictEqual(result, expected)) throw new Error('Windows Codex Remote result receipt is invalid')
 
@@ -1772,7 +2066,13 @@ export async function importWindowsRemoteResult(resultDirectory, output, run, re
     await rm(manifestOutput, { recursive: true, force: true })
     await mkdir(dirname(manifestOutput), { recursive: true })
     await rename(manifestStaging, manifestOutput)
-    return { receipt: result, receipt_path: resultPath, log_path: log.path, primary: imported.primary }
+    return {
+      receipt: result,
+      receipt_path: resultPath,
+      log_path: log.path,
+      ...(recovered ? { recovery_path: join(resultDirectory, WINDOWS_ARTIFACT_EXPORT_RECOVERY_FILE) } : {}),
+      primary: imported.primary,
+    }
   } finally {
     await rm(staging, { recursive: true, force: true })
     await rm(manifestStaging, { recursive: true, force: true })
@@ -1792,7 +2092,12 @@ async function candidate(values) {
     })
     : await loadRun(values.run)
   const { directory, run } = loaded
-  if (run.command !== 'candidate' || run.source_commit !== identity.source_commit) throw new Error('candidate retry must use the same clean source commit')
+  if (run.command !== 'candidate') throw new Error('candidate retry must use one candidate run')
+  let continuation
+  if (run.source_commit !== identity.source_commit) {
+    if (values.windowsResult === undefined) throw new Error('candidate retry must use the same clean source commit')
+    continuation = controlPlaneContinuation(run.source_commit, identity)
+  }
   if (values.windowsUnavailable) {
     if (!['passed', 'reused'].includes(run.platforms?.macos?.status)) {
       throw new Error('Windows unavailable waiver requires an immutable macOS candidate')
@@ -1826,9 +2131,13 @@ async function candidate(values) {
     const imported = await importWindowsRemoteResult(
       resolve(values.windowsResult), output, run, requestPath,
       join(directory, 'manifest-inputs', 'platforms', 'windows'),
+      continuation,
     )
     const receiptPath = join(directory, 'windows-remote', 'result.json')
     await copyFile(imported.receipt_path, receiptPath)
+    if (imported.recovery_path !== undefined) {
+      await copyFile(imported.recovery_path, join(directory, 'windows-remote', WINDOWS_ARTIFACT_EXPORT_RECOVERY_FILE))
+    }
     await copyFile(imported.log_path, join(directory, 'logs', 'windows.log'))
     run.platforms.windows = {
       status: 'passed',
@@ -1957,11 +2266,18 @@ function validCandidateArtifact(value, platform, version) {
 
 function validateAcceptanceSummary(acceptance, { platform, sourceCommit, version, candidateArtifact }) {
   const stage = installedAcceptanceStage(version)
-  if (!exactKeys(acceptance, [
-    'scope', 'stage', 'status', 'host', 'tested_at', 'source_commit', 'candidate_artifact', 'receipt',
-  ]) || acceptance.scope !== INSTALLED_ACCEPTANCE_SCOPE || acceptance.stage !== stage || acceptance.status !== 'passed'
+  const keys = [
+    'scope', 'stage', 'status', 'host',
+    ...(platform === 'windows' ? ['transport', 'transport_alias'] : []),
+    'tested_at', 'source_commit', 'candidate_artifact', 'receipt',
+  ]
+  if (!exactKeys(acceptance, keys) || acceptance.scope !== INSTALLED_ACCEPTANCE_SCOPE
+    || acceptance.stage !== stage || acceptance.status !== 'passed'
     || typeof acceptance.host !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(acceptance.host)
-    || (platform === 'macos' ? acceptance.host !== 'T18-MAC' : !WINDOWS_BUILD_HOSTS.some(route => route.hostname === acceptance.host))
+    || (platform === 'macos' ? acceptance.host !== 'T18-MAC'
+      : acceptance.host !== WINDOWS_ACCEPTANCE_ROUTE.hostname
+        || acceptance.transport !== WINDOWS_ACCEPTANCE_ROUTE.transport
+        || acceptance.transport_alias !== WINDOWS_ACCEPTANCE_ROUTE.alias)
     || typeof acceptance.tested_at !== 'string' || Number.isNaN(Date.parse(acceptance.tested_at))
     || new Date(acceptance.tested_at).toISOString() !== acceptance.tested_at
     || acceptance.source_commit !== sourceCommit
@@ -1984,7 +2300,12 @@ function validateInstalledApplication(installation, { platform, sourceCommit, st
   ]
   const platformKeys = platform === 'macos'
     ? ['application_path']
-    : ['installation_directory', 'reused_existing_installation_directory', 'desktop_shortcuts', 'start_menu_shortcuts']
+    : [
+      'previous_version', 'previous_application_path',
+      'previous_desktop_shortcut_target', 'previous_start_menu_shortcut_target',
+      'installation_directory', 'reused_existing_installation_directory',
+      'desktop_shortcuts', 'desktop_shortcut_target', 'start_menu_shortcuts', 'start_menu_shortcut_target',
+    ]
   if (!exactKeys(installation, [...common, ...platformKeys]) || installation.status !== 'passed'
     || installation.version !== CURRENT_PUBLIC_VERSION
     || installation.source_commit !== installedSource || !isDeepStrictEqual(installation.artifact, artifact)
@@ -1993,10 +2314,20 @@ function validateInstalledApplication(installation, { platform, sourceCommit, st
   }
   if (platform === 'macos') {
     if (installation.application_path !== '/Applications/e-Mate.app') throw new Error('macOS must use the single canonical application path')
-  } else if (!win32.isAbsolute(installation.installation_directory)
-    || installation.reused_existing_installation_directory !== true
-    || installation.desktop_shortcuts !== 1 || installation.start_menu_shortcuts !== 1) {
-    throw new Error('Windows must reuse one installation directory and one shortcut set')
+  } else {
+    const previousVersion = current ? '2.0.13' : CURRENT_PUBLIC_VERSION
+    const executable = win32.normalize(win32.join(installation.installation_directory ?? '', 'e-Mate.exe')).toLowerCase()
+    if (installation.previous_version !== previousVersion
+      || installation.installation_directory !== WINDOWS_ACCEPTANCE_DIRECTORY
+      || win32.normalize(installation.previous_application_path ?? '').toLowerCase() !== executable
+      || win32.normalize(installation.previous_desktop_shortcut_target ?? '').toLowerCase() !== executable
+      || win32.normalize(installation.previous_start_menu_shortcut_target ?? '').toLowerCase() !== executable
+      || installation.reused_existing_installation_directory !== true
+      || installation.desktop_shortcuts !== 1 || installation.start_menu_shortcuts !== 1
+      || win32.normalize(installation.desktop_shortcut_target ?? '').toLowerCase() !== executable
+      || win32.normalize(installation.start_menu_shortcut_target ?? '').toLowerCase() !== executable) {
+      throw new Error('Windows must replace the real predecessor in one installation directory and one shortcut set')
+    }
   }
 }
 
@@ -2058,12 +2389,16 @@ export async function verifyInstalledAcceptanceReceipt(path, {
   assertCleanArtifactBytes(bytes, `${platform} external installed acceptance receipt`)
   if (digest(bytes) !== acceptance.receipt.sha256) throw new Error(`${platform} external installed acceptance receipt drifted`)
   const external = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
-  if (!exactKeys(external, [
+  const externalKeys = [
     'schema_version', 'document_type', 'platform', 'scope', 'stage', 'status', 'host', 'tested_at',
+    ...(platform === 'windows' ? ['transport', 'transport_alias'] : []),
     'source_commit', 'candidate_artifact', 'installation', 'update_download', 'manual_migration',
-  ]) || external.schema_version !== 1 || external.document_type !== 'emate.external-installed-update-acceptance'
+  ]
+  if (!exactKeys(external, externalKeys) || external.schema_version !== 1 || external.document_type !== 'emate.external-installed-update-acceptance'
     || external.platform !== platform || external.scope !== acceptance.scope || external.stage !== acceptance.stage
     || external.status !== acceptance.status || external.host !== acceptance.host || external.tested_at !== acceptance.tested_at
+    || platform === 'windows' && (external.transport !== acceptance.transport
+      || external.transport_alias !== acceptance.transport_alias)
     || external.source_commit !== sourceCommit || !isDeepStrictEqual(external.candidate_artifact, candidateArtifact)
     || !isDeepStrictEqual(external.manual_migration, MANUAL_MIGRATION)) {
     throw new Error(`${platform} external installed acceptance receipt content is invalid`)
@@ -3971,6 +4306,8 @@ function argumentsFor(argv) {
       'windows-result': { type: 'string' },
       'windows-unavailable': { type: 'boolean', default: false },
       'remote-request': { type: 'string' },
+      'artifact-export-recovery': { type: 'string' },
+      'recovery-source': { type: 'string' },
       'dry-run': { type: 'boolean', default: false },
       'owner-receipt': { type: 'string' },
       'compatibility-receipt': { type: 'string' },
@@ -3994,6 +4331,8 @@ function argumentsFor(argv) {
       windowsResult: values['windows-result'],
       windowsUnavailable: values['windows-unavailable'],
       remoteRequest: values['remote-request'],
+      artifactExportRecovery: values['artifact-export-recovery'],
+      recoverySource: values['recovery-source'],
       versionChoice: values['version-choice'],
     },
   }
@@ -4001,12 +4340,14 @@ function argumentsFor(argv) {
 
 function validateCommandOptions(command, values) {
   const internal = command === '_platform-build'
+  const recovery = values.artifactExportRecovery !== undefined || values.recoverySource !== undefined
   const publicationImportCount = [values.ownerReceipt, values.compatibilityReceipt, values.signerResult]
     .filter(value => value !== undefined).length
   const hasSignerResultOwnerReceipt = values.signerResultOwnerReceipt !== undefined
   if (!['dev', 'candidate', 'verify', 'publish', 'rollback'].includes(command) && !internal) {
     throw new Error('flow command must be dev, candidate, verify, publish, or rollback')
   }
+  if (!internal && recovery) throw new Error('artifact-export recovery is an internal Windows flow only')
   if (command === 'dev' && (values.run !== undefined || values.retry !== undefined || values.dryRun
     || values.platform !== undefined || values.out !== undefined || values.manifestOut !== undefined || values.sourceCommit !== undefined || publicationImportCount > 0 || hasSignerResultOwnerReceipt
     || values.windowsResult !== undefined || values.windowsUnavailable || values.remoteRequest !== undefined || values.versionChoice !== undefined)) {
@@ -4042,6 +4383,10 @@ function validateCommandOptions(command, values) {
     || values.remoteRequest !== undefined && values.platform !== 'windows')) {
     throw new Error('invalid internal platform build options')
   }
+  if (internal && recovery && (values.platform !== 'windows' || values.remoteRequest === undefined
+    || values.artifactExportRecovery === undefined || values.recoverySource === undefined)) {
+    throw new Error('artifact-export recovery requires the exact Windows failed and clean source roots')
+  }
 }
 
 async function main() {
@@ -4057,19 +4402,31 @@ async function main() {
       || !SOURCE_SHA.test(values.sourceCommit ?? '')) {
       throw new Error('invalid internal platform build arguments')
     }
-    if (git(['rev-parse', 'HEAD']) !== values.sourceCommit || git(['status', '--porcelain=v1', '--untracked-files=all']) !== '') {
-      throw new Error('internal platform build requires the exact clean source copy')
-    }
     const output = resolve(values.out)
     const manifestOutput = resolve(values.manifestOut)
-    if (values.remoteRequest === undefined) {
-      await platformBuild(ROOT, values.platform, output, manifestOutput, join(dirname(output), `${values.platform}.log`))
+    if (values.artifactExportRecovery !== undefined) {
+      const controller = sourceIdentity(ROOT)
+      await recoverWindowsArtifactExport({
+        failedRoot: resolve(values.artifactExportRecovery),
+        cleanSourceRoot: resolve(values.recoverySource),
+        output,
+        manifestOutput,
+        requestPath: resolve(values.remoteRequest),
+        controlPlane: controlPlaneContinuation(values.sourceCommit, controller),
+      })
     } else {
-      const requestPath = resolve(values.remoteRequest)
-      const { request } = await readWindowsRemoteRequest(requestPath)
-      if (request.source_commit !== values.sourceCommit) throw new Error('Windows Codex Remote request source does not match the build')
-      await platformBuild(ROOT, 'windows', join(output, 'artifacts', 'windows'), manifestOutput, join(output, 'windows.log'), request)
-      await writeWindowsRemoteResult(output, requestPath)
+      if (git(['rev-parse', 'HEAD']) !== values.sourceCommit || git(['status', '--porcelain=v1', '--untracked-files=all']) !== '') {
+        throw new Error('internal platform build requires the exact clean source copy')
+      }
+      if (values.remoteRequest === undefined) {
+        await platformBuild(ROOT, values.platform, output, manifestOutput, join(dirname(output), `${values.platform}.log`))
+      } else {
+        const requestPath = resolve(values.remoteRequest)
+        const { request } = await readWindowsRemoteRequest(requestPath)
+        if (request.source_commit !== values.sourceCommit) throw new Error('Windows Codex Remote request source does not match the build')
+        await platformBuild(ROOT, 'windows', join(output, 'artifacts', 'windows'), manifestOutput, join(output, 'windows.log'), request)
+        await writeWindowsRemoteResult(output, requestPath)
+      }
     }
   }
 }
