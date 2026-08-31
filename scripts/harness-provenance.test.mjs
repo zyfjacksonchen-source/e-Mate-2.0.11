@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, relative, resolve } from 'node:path'
+import { join, relative, resolve, sep } from 'node:path'
 import test from 'node:test'
 
 import {
@@ -173,7 +173,7 @@ test('discovers root and nested physical Desktop Harness packages', () => {
       '@deepseek-ai/dsh-session-persistence',
     )
     assert.deepEqual(
-      findDesktopHarnessPackages(directory).map(value => relative(directory, value.path)),
+      findDesktopHarnessPackages(directory).map(value => relative(directory, value.path).split(sep).join('/')),
       ['@deepseek-ai/dsh-session', 'holder/node_modules/@deepseek-ai/dsh-session-persistence'],
     )
   } finally {
