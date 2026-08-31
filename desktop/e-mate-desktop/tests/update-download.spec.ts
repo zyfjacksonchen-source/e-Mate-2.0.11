@@ -141,6 +141,12 @@ describe('desktop update installer download', () => {
     expect(calls[0]?.url).toBe(releaseArtifact('darwin', '2.1.0').url)
     expect(calls[0]?.init).toMatchObject({ method: 'GET', cache: 'no-store', redirect: 'error' })
     await expectNoPartialFiles(userDataPath, '2.1.0')
+
+    const source = await readFile(new URL('../src/update-download.ts', import.meta.url), 'utf8')
+    const completed = source.indexOf('await rename(paths.temporary, paths.completed)')
+    expect(completed).toBeGreaterThan(0)
+    expect(source.indexOf('await reuseCompletedArtifact(paths.completed, artifact, platform)', completed))
+      .toBeGreaterThan(completed)
   })
 
   it('keeps only the newest requested installer cache while preserving update state', async () => {

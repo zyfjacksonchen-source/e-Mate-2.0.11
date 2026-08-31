@@ -432,12 +432,25 @@ describe('detached macOS update replacement', () => {
       source.indexOf('function validateMacUpdatePreflight'),
       source.indexOf('export function preflightMacUpdateInstallation'),
     )
+    const requestValidator = source.slice(
+      source.indexOf('function validateRequest'),
+      source.indexOf('export function readMacUpdateRequest'),
+    )
+    const legacyRequestValidator = source.slice(
+      source.indexOf('function validateLegacyMacUpdateRequest'),
+      source.indexOf('export function readLegacyMacUpdateRequest'),
+    )
     const scheduler = source.slice(source.indexOf('export async function scheduleMacUpdateInstallation'))
 
     expect(validator).toContain('accessSync(userDataPath, constants.W_OK | constants.X_OK)')
     expect(validator).toContain('accessSync(trashDirectory, constants.W_OK | constants.X_OK)')
     expect(validator).toContain('accessSync(installDirectory, constants.W_OK | constants.X_OK)')
     expect(validator).toContain("join('/Applications', 'e-Mate.app')")
+    expect(validator).not.toContain("join(homeDirectory, 'Applications', 'e-Mate.app')")
+    expect(requestValidator).toContain("resolve(request.currentApp) !== join('/Applications', 'e-Mate.app')")
+    expect(requestValidator).not.toContain("join(homedir(), 'Applications', 'e-Mate.app')")
+    expect(legacyRequestValidator).toContain("resolve(request.currentApp) !== join('/Applications', 'e-Mate.app')")
+    expect(legacyRequestValidator).not.toContain("join(homedir(), 'Applications', 'e-Mate.app')")
     expect(validator).toContain('statSync(trashDirectory).dev !== installDevice')
     expect(validator).toContain('statfsSync')
     expect(validator).toContain('const atomicSwapBytes = allocatedBytes(resolvedCurrent)')
@@ -642,7 +655,7 @@ describe('detached macOS update replacement', () => {
     expect(readFileSync(referent, 'utf8')).toBe('referent')
   })
 
-  it('moves the validated old app to Trash only after the new app reports healthy', async () => {
+  it('deletes the validated old app only after the new app reports healthy', async () => {
     const events: string[] = []
     const update = request()
 
@@ -663,7 +676,7 @@ describe('detached macOS update replacement', () => {
       `installed-base:${update.transactionId}`,
       `confirm:${update.transactionId}`,
       'receipt:completed',
-      `rename:${update.backupApp}:${update.trashApp}`,
+      `remove:${update.backupApp}`,
     ])
   })
 
@@ -687,7 +700,7 @@ describe('detached macOS update replacement', () => {
       'receipt:installed-awaiting-health',
       `launch:${update.currentApp}:update`,
       'healthy',
-      `rename:${update.backupApp}:${update.trashApp}`,
+      `remove:${update.backupApp}`,
       'receipt:completed',
     ])
   })
@@ -726,8 +739,8 @@ describe('detached macOS update replacement', () => {
     expect(events.indexOf('pending:confirmation-armed')).toBeLessThan(events.indexOf(`confirm:${update.transactionId}`))
     expect(events.indexOf(`confirm:${update.transactionId}`)).toBeLessThan(events.indexOf('pending:commit-ready'))
     expect(events.indexOf('pending:commit-ready')).toBeLessThan(events.indexOf('receipt:completed'))
-    expect(events.indexOf('receipt:completed')).toBeLessThan(events.indexOf(`rename:${update.backupApp}:${update.trashApp}`))
-    expect(events.indexOf(`rename:${update.backupApp}:${update.trashApp}`)).toBeLessThan(events.indexOf('pending:clear'))
+    expect(events.indexOf('receipt:completed')).toBeLessThan(events.indexOf(`remove:${update.backupApp}`))
+    expect(events.indexOf(`remove:${update.backupApp}`)).toBeLessThan(events.indexOf('pending:clear'))
   })
 
   it('rolls back when the ack rename is readable but its parent fsync fails', async () => {
@@ -1123,10 +1136,6 @@ describe('detached macOS update replacement', () => {
     const base = adapter(events, async () => { events.push('healthy') })
     const operations: MacUpdateSwapAdapter = {
       ...base,
-      rename: (from, to) => {
-        events.push(`rename:${from}:${to}`)
-        if (from === update.backupApp && to === update.trashApp) throw new Error('Trash unavailable')
-      },
       remove: path => {
         events.push(`remove:${path}`)
         if (path === update.backupApp) throw new Error('cleanup blocked')
@@ -1432,11 +1441,11 @@ describe('detached macOS update replacement', () => {
 
     expect(events).toContain('receipt:committed-unknown')
     expect(events).toContain('receipt:completed')
-    expect(events).toContain(`rename:${update.backupApp}:${update.trashApp}`)
+    expect(events).toContain(`remove:${update.backupApp}`)
     expect(events).toContain('finalize')
     expect(JSON.parse(readFileSync(update.receiptPath, 'utf8')).status).toBe('completed')
     expect(() => lstatSync(pendingPath)).toThrow()
-    expect(present).toEqual(new Set([update.currentApp, update.trashApp]))
+    expect(present).toEqual(new Set([update.currentApp]))
   })
 
   it('finishes backup cleanup after a detached helper crashes with a durable completed receipt', () => {
@@ -1476,10 +1485,10 @@ describe('detached macOS update replacement', () => {
     )).toEqual({ status: 'committed', relaunch: false })
     expect(events).toEqual([
       `validate:${update.currentApp}:${update.targetVersion}`,
-      `rename:${update.backupApp}:${update.trashApp}`,
+      `remove:${update.backupApp}`,
       'finalize',
     ])
-    expect(present).toEqual(new Set([update.currentApp, update.trashApp]))
+    expect(present).toEqual(new Set([update.currentApp]))
   })
 
   it.each([

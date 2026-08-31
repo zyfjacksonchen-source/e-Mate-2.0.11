@@ -28,6 +28,9 @@ describe('pinned assisted-NSIS atomic update seam', () => {
     const prepare = installed.indexOf('!insertmacro customUpdateInstallPrepare')
     const apply = installed.indexOf('!insertmacro customUpdateInstallApply')
     const extraction = installed.indexOf('!insertmacro installApplicationFiles')
+    const registry = installed.indexOf('!insertmacro registryAddInstallInfo')
+    const startMenu = installed.indexOf('!insertmacro addStartMenuLink')
+    const desktop = installed.indexOf('!insertmacro addDesktopLink')
     expect(patch).toContain('!ifmacrodef customUpdateInstallShouldRun')
     expect(installed.slice(installed.indexOf('!ifmacrodef customUpdateInstallShouldRun'), prepare))
       .toContain('$R7 == "true"')
@@ -40,9 +43,13 @@ describe('pinned assisted-NSIS atomic update seam', () => {
     expect(prepare).toBeGreaterThan(installed.lastIndexOf('!insertmacro CHECK_APP_RUNNING'))
     expect(prepare).toBeLessThan(installed.indexOf('!insertmacro uninstallOldVersion SHELL_CONTEXT'))
     expect(apply).toBeGreaterThan(extraction)
+    expect(apply).toBeLessThan(registry)
+    expect(apply).toBeLessThan(startMenu)
+    expect(apply).toBeLessThan(desktop)
     expect(installed.match(/!insertmacro installApplicationFiles/gu)).toHaveLength(1)
     expect(installed.match(/!insertmacro registryAddInstallInfo/gu)).toHaveLength(1)
     expect(installed.match(/!insertmacro addStartMenuLink/gu)).toHaveLength(1)
+    expect(installed.match(/!insertmacro addDesktopLink/gu)).toHaveLength(1)
   })
 
   it('leaves fresh/manual install and builder-owned uninstaller generation on the upstream path', () => {
