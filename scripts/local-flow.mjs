@@ -1558,7 +1558,7 @@ async function platformBuild(sourceRoot, platform, output, manifestOutput, log, 
     {
       category: CANDIDATE_FAILURE.SOURCE,
       stage: 'profile-build',
-      run: () => runPnpm(['--filter', '@e-mate/dsh', 'build'], { cwd: sourceRoot, log, env: buildEnv }),
+      run: () => runPnpm(['--config.shell-emulator=true', '--filter', '@e-mate/dsh', 'build'], { cwd: sourceRoot, log, env: buildEnv }),
     },
     {
       category: CANDIDATE_FAILURE.PACKAGING,
