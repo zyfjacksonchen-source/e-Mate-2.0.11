@@ -184,6 +184,30 @@ export async function runCandidateStages(stages) {
   }
 }
 
+export function selectPythonCommand({
+  platform = process.platform, env = process.env, execute = spawnSync,
+} = {}) {
+  const probe = candidate => {
+    const result = execute(candidate.command, [...candidate.prefix, '--version'], { encoding: 'utf8', env })
+    const version = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim()
+    return result.error === undefined && result.status === 0 && /^Python 3(?:\.|\s|$)/u.test(version)
+  }
+  const configured = env.EMATE_BUILD_PYTHON
+  if (configured !== undefined) {
+    if (typeof configured !== 'string' || configured === '' || configured.trim() !== configured) {
+      throw new Error('EMATE_BUILD_PYTHON must be a non-empty exact command')
+    }
+    const candidate = { command: configured, prefix: [] }
+    if (probe(candidate)) return candidate
+    throw new Error('EMATE_BUILD_PYTHON must execute Python 3')
+  }
+  const candidates = platform === 'win32'
+    ? [{ command: 'py', prefix: ['-3'] }, { command: 'python', prefix: [] }]
+    : [{ command: 'python3', prefix: [] }]
+  for (const candidate of candidates) if (probe(candidate)) return candidate
+  throw new Error('Python 3 executable is unavailable')
+}
+
 function candidateFailureFromOutput(output) {
   const marker = output.lastIndexOf(FAILURE_MARKER)
   if (marker < 0) return null
@@ -1563,11 +1587,15 @@ async function platformBuild(sourceRoot, platform, output, manifestOutput, log, 
     {
       category: CANDIDATE_FAILURE.PACKAGING,
       stage: 'native-runtime-inputs',
-      run: () => runLogged(platform === 'macos' ? 'python3' : 'python', [
-        'packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py',
-        '--root', 'packages/dsh-plugin-vision-toolkit',
-        '--targets', platform === 'macos' ? 'darwin-arm64,darwin-x64' : 'win32-x64',
-      ], { cwd: sourceRoot, log, env: buildEnv }),
+      run: () => {
+        const python = selectPythonCommand({ platform: expectedPlatform, env: buildEnv })
+        return runLogged(python.command, [
+          ...python.prefix,
+          'packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py',
+          '--root', 'packages/dsh-plugin-vision-toolkit',
+          '--targets', platform === 'macos' ? 'darwin-arm64,darwin-x64' : 'win32-x64',
+        ], { cwd: sourceRoot, log, env: buildEnv })
+      },
     },
     {
       category: CANDIDATE_FAILURE.PACKAGING,
