@@ -147,7 +147,7 @@ async function pack(directory, expected, mutate = manifest => manifest) {
   }))
 
   const archive = join(directory, filename(expected.name))
-  execFileSync('tar', ['-czf', archive, '-C', stage, 'package'])
+  execFileSync('tar', ['-czf', filename(expected.name), '-C', stage, 'package'], { cwd: directory })
   return archive
 }
 
@@ -156,6 +156,13 @@ async function fixture(mutateMain) {
   await pack(root, RELEASE_PACKAGES[0], mutateMain)
   return root
 }
+
+test('release tar verifier keeps archive drive letters out of tar arguments', () => {
+  const releaseScript = readFileSync(new URL('./release.mjs', import.meta.url), 'utf8')
+  assert.match(releaseScript, /function runTar\(path, args\) \{\s*const archive = resolve\(path\)\s*return run\('tar', \[args\[0\], basename\(archive\), \.\.\.args\.slice\(1\)\], \{ cwd: dirname\(archive\) \}\)\s*\}/u)
+  assert.equal([...releaseScript.matchAll(/\brunTar\(/gu)].length, 5)
+  assert.equal([...releaseScript.matchAll(/\brun\('tar'/gu)].length, 1)
+})
 
 test('release evidence requires the one bundled package and emits hashes plus SPDX', async () => {
   const root = await fixture()
@@ -249,7 +256,7 @@ test('release verification rejects temporary Harness build bytes', async () => {
   try {
     const stage = join(root, 'main-all-all')
     await file(join(stage, 'package'), 'runtime/.harness-build-stale/leak.txt', 'temporary build bytes')
-    execFileSync('tar', ['-czf', join(root, filename('@e-mate/dsh')), '-C', stage, 'package'])
+    execFileSync('tar', ['-czf', filename('@e-mate/dsh'), '-C', stage, 'package'], { cwd: root })
     assert.throws(() => verifyRelease(root), /temporary Harness build directory/u)
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -263,7 +270,7 @@ test('release verification rejects a Harness runtime built with different Base a
     const manifestPath = join(stage, 'package', 'runtime', 'source-manifest.json')
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
     await writeFile(manifestPath, JSON.stringify({ ...manifest, adapters_sha256: 'f'.repeat(64) }))
-    execFileSync('tar', ['-czf', join(root, filename('@e-mate/dsh')), '-C', stage, 'package'])
+    execFileSync('tar', ['-czf', filename('@e-mate/dsh'), '-C', stage, 'package'], { cwd: root })
     assert.throws(() => verifyRelease(root), /wrong DeepSeek Harness closure/u)
   } finally {
     rmSync(root, { recursive: true, force: true })

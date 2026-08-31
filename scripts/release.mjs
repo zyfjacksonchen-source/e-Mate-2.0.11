@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
@@ -110,8 +110,13 @@ function tarballName(name) {
   return `${unscoped}-${VERSION}.tgz`
 }
 
+function runTar(path, args) {
+  const archive = resolve(path)
+  return run('tar', [args[0], basename(archive), ...args.slice(1)], { cwd: dirname(archive) })
+}
+
 function tarEntries(path) {
-  const entries = run('tar', ['-tzf', path]).split(/\r?\n/u).filter(Boolean)
+  const entries = runTar(path, ['-tzf']).split(/\r?\n/u).filter(Boolean)
   if (entries.length === 0) throw new Error(`${path} is empty`)
   for (const entry of entries) {
     const normalized = entry.replaceAll('\\', '/')
@@ -119,7 +124,7 @@ function tarEntries(path) {
       throw new Error(`${path} contains unsafe entry ${entry}`)
     }
   }
-  const verbose = run('tar', ['-tvzf', path]).split(/\r?\n/u).filter(Boolean)
+  const verbose = runTar(path, ['-tvzf']).split(/\r?\n/u).filter(Boolean)
   if (verbose.some(line => line[0] !== '-' && line[0] !== 'd')) {
     throw new Error(`${path} contains a link or unsupported tar entry`)
   }
@@ -127,7 +132,7 @@ function tarEntries(path) {
 }
 
 function tarText(path, entry) {
-  return run('tar', ['-xOzf', path, entry])
+  return runTar(path, ['-xOzf', entry])
 }
 
 function tarJson(path, entry) {
@@ -279,7 +284,7 @@ function walkPackageJson(root, directory = root, output = []) {
 async function packedComponents(main, components) {
   const scratch = await mkdtemp(join(tmpdir(), 'e-mate-release-main-'))
   try {
-    run('tar', ['-xzf', main.path, '-C', scratch])
+    runTar(main.path, ['-xzf', '-C', scratch])
     const roots = [
       join(scratch, 'package', 'runtime', 'harness'),
       join(scratch, 'package', 'profile', 'bundles'),
