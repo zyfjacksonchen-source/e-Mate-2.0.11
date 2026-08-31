@@ -90,14 +90,19 @@ jobs:
         run: yarn install --immutable
 
       - name: Build and verify the formal unsigned Windows installer
-        working-directory: desktop
-        run: yarn dist:win
-
-      - name: Verify the source Loader and Profile owners
         working-directory: desktop/e-mate-desktop
+        shell: pwsh
         run: |
-          yarn verify:loader
-          yarn verify:profile
+          yarn run build
+          foreach ($name in @('CSC_IDENTITY_AUTO_DISCOVERY', 'CSC_KEY_PASSWORD', 'CSC_LINK', 'CSC_NAME', 'WIN_CSC_KEY_PASSWORD', 'WIN_CSC_LINK')) {
+            Remove-Item "Env:$name" -ErrorAction SilentlyContinue
+          }
+          $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
+          $builder = (node -p "require.resolve('electron-builder/cli.js')").Trim()
+          node $builder --win nsis --x64 --publish never --config.win.signExecutable=false --config.npmRebuild=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/verify-win-installer.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Stage only the verified formal Windows bytes
         shell: pwsh
