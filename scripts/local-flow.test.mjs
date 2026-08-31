@@ -3,12 +3,11 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmod, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
   CANDIDATE_FAILURE,
-  COMPUTER_USE_SCENARIOS,
   NPM_COLLECTOR_ARGS,
   assertCleanArtifactBytes,
   blockWindowsRemote,
@@ -42,9 +41,10 @@ import {
   validateRollbackReceipt,
   validateRemoteHostname,
   verifyManifestInputLedger,
-  verifyComputerUseReceipt,
+  verifyInstalledAcceptanceReceipt,
   verifyLocalArtifact,
   verifyNpmCollectorCarrier,
+  writeInstalledAcceptanceTemplates,
   windowsPnpmShim,
   windowsRemoteRequest,
 } from './local-flow.mjs'
@@ -75,6 +75,17 @@ const MAC_BLOCKMAP_SHA = 'd'.repeat(64)
 const WIN_BLOCKMAP_SHA = 'e'.repeat(64)
 const R2_ORIGIN = 'https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev'
 const RUN_ID = '20260830T000000Z-aaaaaaaaaaaa-abcdef'
+const PUBLIC_SOURCE = '297b90df2426137edb398b023d8137a085ed8508'
+const PUBLIC_INSTALLERS = Object.freeze({
+  macos: Object.freeze({
+    name: 'e-Mate-2.0.15-mac-universal.dmg', bytes: 402547931,
+    sha256: '6d79a359738c26a9be1d091614875ba426db5314c91f0e4afbe8b582b583ac3a',
+  }),
+  windows: Object.freeze({
+    name: 'e-Mate-2.0.15-win-x64-Setup.exe', bytes: 283536339,
+    sha256: '6ba140bff70451e79dd8ceb8dbcbae86281999e34a696d92022f028f040f161d',
+  }),
+})
 const POINTER_BEFORE = Object.freeze({
   bytes: 2961,
   sha256: '838115146f74e18de0fc90e3dc586f6bd5eab706a0e6dcbc27e6ad5a79c642fb',
@@ -322,71 +333,120 @@ async function windowsRemoteFixture(root) {
   return { artifacts, fixture, request, requestPath, resultPath, returned: join(root, 'returned'), run, writeResult }
 }
 
-async function computerUseFixture(root, platform, artifactSha256) {
-  const screenshotRoot = join(root, 'screenshots')
-  await mkdir(screenshotRoot, { recursive: true })
-  const screenshot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
-  const sha256 = createHash('sha256').update(screenshot).digest('hex')
-  if (platform === 'macos') await writeFile(join(screenshotRoot, `${platform}.png`), screenshot)
-  const externalAcceptance = acceptance(platform, artifactSha256)
-  const matrixFile = externalAcceptance.matrix_receipt.file
-  const matrixBytes = Buffer.from(`${JSON.stringify({
+function acceptance(platform, candidateArtifact, version = '2.0.15', sourceCommit = SHA) {
+  return {
+    scope: 'version-bound-installed-startup-and-update-readiness',
+    stage: version === '2.0.15' ? 'same-version-replacement' : 'new-version-update',
+    status: 'passed',
+    host: platform === 'macos' ? 'T18-MAC' : 'DESKTOP-KH19ARC',
+    tested_at: '2026-08-30T00:00:00.000Z',
+    source_commit: sourceCommit,
+    candidate_artifact: candidateArtifact,
+    receipt: { file: 'installed-update-acceptance.json', sha256: 'f'.repeat(64) },
+  }
+}
+
+function installedApplication(platform, candidateArtifact, version, sourceCommit) {
+  const future = version !== '2.0.15'
+  const common = {
+    status: 'passed',
+    version: '2.0.15',
+    source_commit: future ? PUBLIC_SOURCE : sourceCommit,
+    artifact: future ? PUBLIC_INSTALLERS[platform] : candidateArtifact,
+    startup_health: 'passed',
+    visible_installations: 1,
+  }
+  return platform === 'macos'
+    ? { ...common, application_path: '/Applications/e-Mate.app' }
+    : {
+      ...common,
+      installation_directory: 'C:\\Program Files\\e-Mate',
+      reused_existing_installation_directory: true,
+      desktop_shortcuts: 1,
+      start_menu_shortcuts: 1,
+    }
+}
+
+function updateDownload(platform, candidateArtifact, version, sourceCommit) {
+  if (version === '2.0.15') return { status: 'not_applicable', reason: 'no-real-signed-strictly-higher-version' }
+  const installer = {
+    url: `${R2_ORIGIN}/desktop/releases/v${version}/${sourceCommit}/${candidateArtifact.name}`,
+    bytes: candidateArtifact.bytes,
+    sha256: candidateArtifact.sha256,
+  }
+  const manifest = {
+    schema_version: 2,
+    version,
+    source_commit: sourceCommit,
+    signing_context: 'e-mate-desktop-release-manifest-v2\0',
+    signature_verified: true,
+    manifest_sha256: '1'.repeat(64),
+    installer,
+  }
+  return {
+    status: 'passed',
+    trigger: 'settings',
+    owner: 'desktopUpdates.runInteractiveUpdate',
+    from_version: '2.0.15',
+    to_version: version,
+    manifest_url: `${R2_ORIGIN}/desktop/signed/latest.json`,
+    manifest_before: manifest,
+    manifest_after: structuredClone(manifest),
+    landed_installer: {
+      path: platform === 'macos'
+        ? `/private/tmp/${candidateArtifact.name}`
+        : `C:\\Users\\Administrator\\Downloads\\${candidateArtifact.name}`,
+      bytes: candidateArtifact.bytes,
+      sha256: candidateArtifact.sha256,
+      format: platform === 'macos' ? 'dmg-koly' : 'pe-mz+pe',
+    },
+  }
+}
+
+async function installedAcceptanceFixture(root, platform, candidateArtifact, {
+  version = '2.0.15', sourceCommit = SHA,
+} = {}) {
+  await mkdir(root, { recursive: true })
+  const summary = acceptance(platform, candidateArtifact, version, sourceCommit)
+  const external = {
     schema_version: 1,
-    document_type: 'emate.external-installed-matrix-receipt',
-    task: externalAcceptance.task,
-    thread_id: externalAcceptance.thread_id,
+    document_type: 'emate.external-installed-update-acceptance',
     platform,
-    scope: externalAcceptance.scope,
-    status: externalAcceptance.status,
-    host: externalAcceptance.host,
-    tested_at: externalAcceptance.tested_at,
-    installed_artifact_sha256: artifactSha256,
-    coverage: externalAcceptance.coverage,
-    computer_use: externalAcceptance.computer_use,
-  })}\n`)
-  await writeFile(join(root, matrixFile), matrixBytes)
+    ...Object.fromEntries(Object.entries(summary).filter(([key]) => key !== 'receipt')),
+    installation: installedApplication(platform, candidateArtifact, version, sourceCommit),
+    update_download: updateDownload(platform, candidateArtifact, version, sourceCommit),
+    manual_migration: {
+      '2.0.13': 'official-cloudflare-r2-manual-download',
+      'same-version-2.0.15': 'official-cloudflare-r2-manual-download',
+    },
+  }
+  const externalBytes = Buffer.from(`${JSON.stringify(external, null, 2)}\n`)
+  await writeFile(join(root, summary.receipt.file), externalBytes)
+  summary.receipt.sha256 = createHash('sha256').update(externalBytes).digest('hex')
   const receipt = {
     schema_version: 1,
-    document_type: 'emate.local-computer-use-receipt',
+    document_type: 'emate.local-installed-update-acceptance',
     platform,
     status: 'passed',
-    data_policy: 'synthetic-test-data-only',
-    source_commit: SHA,
-    artifact_sha256: artifactSha256,
-    scenarios: platform === 'windows'
-      ? [{ id: 'windows-native-runtime-unavailable', status: 'not_applicable', disposition: 'allowed_unavailable' }]
-      : COMPUTER_USE_SCENARIOS[platform].map(id => ({ id, status: 'passed' })),
-    screenshots: platform === 'macos' ? [{ file: `${platform}.png`, sha256 }] : [],
-    external_acceptance: {
-      ...externalAcceptance,
-      matrix_receipt: { file: matrixFile, sha256: createHash('sha256').update(matrixBytes).digest('hex') },
-    },
+    source_commit: sourceCommit,
+    candidate_artifact: candidateArtifact,
+    external_acceptance: summary,
   }
   const path = join(root, 'result.json')
   await writeFile(path, `${JSON.stringify(receipt, null, 2)}\n`)
   return path
 }
 
-function acceptance(platform, artifactSha256) {
-  const task = platform === 'macos' ? 'T18' : 'T22'
-  return {
-    task,
-    thread_id: platform === 'macos' ? '01a0447b-214f-7050-a85f-76b50ecffc8a' : '01a00000-0000-7000-8000-000000000022',
-    matrix: 'docs/2.0.15/REGRESSION-MATRIX.md',
-    scope: 'full-installed-startup-update-product-and-built-in-tools',
-    status: 'passed',
-    host: platform === 'macos' ? 'T18-MAC' : 'DESKTOP-KH19ARC',
-    tested_at: '2026-08-30T00:00:00.000Z',
-    installed_artifact_sha256: artifactSha256,
-    coverage: [
-      'installation', 'startup', 'update-download-verify-atomic-replace-relaunch-health-commit',
-      'failed-health-rollback-relaunch-recovery',
-      '2.0.15-fixes', 'built-in-tools', ...(platform === 'macos' ? ['computer-use'] : []),
-    ],
-    computer_use: platform === 'macos'
-      ? { status: 'passed', installed_artifact_sha256: artifactSha256 }
-      : { status: 'not_applicable', disposition: 'allowed_unavailable', tested: false },
-    matrix_receipt: { file: `${task.toLowerCase()}-full-matrix.json`, sha256: 'f'.repeat(64) },
+async function rewriteExternalAcceptance(path, updateReceipt, { rebind = true } = {}) {
+  const receipt = JSON.parse(await readFile(path, 'utf8'))
+  const externalPath = join(dirname(path), receipt.external_acceptance.receipt.file)
+  const external = JSON.parse(await readFile(externalPath, 'utf8'))
+  updateReceipt(external)
+  const bytes = Buffer.from(`${JSON.stringify(external, null, 2)}\n`)
+  await writeFile(externalPath, bytes)
+  if (rebind) {
+    receipt.external_acceptance.receipt.sha256 = createHash('sha256').update(bytes).digest('hex')
+    await writeFile(path, `${JSON.stringify(receipt, null, 2)}\n`)
   }
 }
 
@@ -438,9 +498,9 @@ function verifiedRun(version = '2.0.15') {
         macos: { primary: macPrimary, files: [macPrimary, { name: `${macPrimary.name}.blockmap`, bytes: 11, sha256: MAC_BLOCKMAP_SHA }] },
         windows: { primary: winPrimary, files: [winPrimary, { name: `${winPrimary.name}.blockmap`, bytes: 21, sha256: WIN_BLOCKMAP_SHA }] },
       },
-      computer_use: {
-        macos: acceptance('macos', MAC_SHA),
-        windows: acceptance('windows', WIN_SHA),
+      installed_acceptance: {
+        macos: acceptance('macos', macPrimary, version),
+        windows: acceptance('windows', winPrimary, version),
       },
     },
   }
@@ -652,7 +712,7 @@ function macOnlyVerifiedRun() {
       artifacts: {
         macos: { primary: macPrimary, files: [macPrimary, { name: `${macPrimary.name}.blockmap`, bytes: 11, sha256: MAC_BLOCKMAP_SHA }] },
       },
-      computer_use: { macos: acceptance('macos', MAC_SHA) },
+      installed_acceptance: { macos: acceptance('macos', macPrimary) },
       windows,
     },
   }
@@ -1130,72 +1190,75 @@ test('pollution gate rejects canaries, credentials, and developer absolute paths
   assert.throws(() => assertCleanArtifactBytes(Buffer.from(`sk-${'x'.repeat(24)}`), 'fixture'), /API secret/u)
 })
 
-test('verify requires update/relaunch, failed-health rollback, and macOS Computer Use in its full installed matrix', async () => {
+test('installed acceptance templates preserve unreferenced legacy evidence', async () => {
+  const root = await temporary()
+  const legacy = join(root, 'computer-use', 'macos', 'screenshots', 'installed.png')
+  const candidateArtifact = { name: 'e-Mate-2.0.15-mac-universal.dmg', bytes: 10, sha256: MAC_SHA }
+  try {
+    await mkdir(dirname(legacy), { recursive: true })
+    await writeFile(legacy, 'legacy-real-evidence')
+    await writeInstalledAcceptanceTemplates(root, SHA, { macos: candidateArtifact })
+    assert.equal(await readFile(legacy, 'utf8'), 'legacy-real-evidence')
+    assert.equal(JSON.parse(await readFile(join(root, 'installed-acceptance', 'macos', 'result.json'), 'utf8')).status, 'pending')
+
+    const current = await installedAcceptanceFixture(join(root, 'installed-acceptance', 'macos'), 'macos', candidateArtifact)
+    assert.equal((await verifyInstalledAcceptanceReceipt(current, {
+      platform: 'macos', sourceCommit: SHA, version: '2.0.15', candidateArtifact,
+    })).status, 'passed')
+    assert.equal(await readFile(legacy, 'utf8'), 'legacy-real-evidence')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('installed acceptance is version-bound and requires real higher-version landed bytes only when they exist', async () => {
   const root = await temporary()
   try {
-    for (const [platform, artifactSha256] of [['macos', MAC_SHA], ['windows', WIN_SHA]]) {
-      const path = await computerUseFixture(join(root, platform), platform, artifactSha256)
-      const receipt = await verifyComputerUseReceipt(path, { platform, sourceCommit: SHA, artifactSha256 })
-      assert.equal(receipt.status, 'passed')
-      if (platform === 'windows') {
-        assert.deepEqual(receipt.scenarios, [{
-          id: 'windows-native-runtime-unavailable', status: 'not_applicable', disposition: 'allowed_unavailable',
-        }])
-        assert.equal(receipt.screenshots.length, 0)
-      }
+    const frozenSource = '588c80ccbee572077f47c0ad3a904c8c00cfa004'
+    const frozenMac = {
+      name: 'e-Mate-2.0.15-mac-universal.dmg', bytes: 401189831,
+      sha256: '2923251685c49219fe3b66ab09a2b2fb5fe1bc7d4fd79a57aa539601984f46b2',
     }
-    const bad = await computerUseFixture(join(root, 'bad'), 'windows', WIN_SHA)
-    await assert.rejects(verifyComputerUseReceipt(bad, {
-      platform: 'windows', sourceCommit: 'd'.repeat(40), artifactSha256: WIN_SHA,
+    const current = await installedAcceptanceFixture(join(root, 'current'), 'macos', frozenMac, { sourceCommit: frozenSource })
+    assert.equal((await verifyInstalledAcceptanceReceipt(current, {
+      platform: 'macos', sourceCommit: frozenSource, version: '2.0.15', candidateArtifact: frozenMac,
+    })).status, 'passed')
+
+    await rewriteExternalAcceptance(current, external => {
+      external.update_download = updateDownload('macos', frozenMac, '2.0.16', frozenSource)
+    })
+    await assert.rejects(verifyInstalledAcceptanceReceipt(current, {
+      platform: 'macos', sourceCommit: frozenSource, version: '2.0.15', candidateArtifact: frozenMac,
+    }), /cannot claim a future online update/u)
+
+    for (const [platform, sha256, bytes] of [['macos', MAC_SHA, 10], ['windows', WIN_SHA, 20]]) {
+      const candidateArtifact = {
+        name: platform === 'macos' ? 'e-Mate-2.0.16-mac-universal.dmg' : 'e-Mate-2.0.16-win-x64-Setup.exe',
+        bytes,
+        sha256,
+      }
+      const path = await installedAcceptanceFixture(join(root, `future-${platform}`), platform, candidateArtifact, { version: '2.0.16' })
+      assert.equal((await verifyInstalledAcceptanceReceipt(path, {
+        platform, sourceCommit: SHA, version: '2.0.16', candidateArtifact,
+      })).status, 'passed')
+      await rewriteExternalAcceptance(path, external => { external.update_download.manifest_after.manifest_sha256 = '2'.repeat(64) })
+      await assert.rejects(verifyInstalledAcceptanceReceipt(path, {
+        platform, sourceCommit: SHA, version: '2.0.16', candidateArtifact,
+      }), /native updater download receipt/u)
+    }
+
+    const drift = await installedAcceptanceFixture(join(root, 'drift'), 'macos', frozenMac, { sourceCommit: frozenSource })
+    await rewriteExternalAcceptance(drift, external => { external.installation.visible_installations = 2 }, { rebind: false })
+    await assert.rejects(verifyInstalledAcceptanceReceipt(drift, {
+      platform: 'macos', sourceCommit: frozenSource, version: '2.0.15', candidateArtifact: frozenMac,
+    }), /receipt drifted/u)
+
+    const legacy = JSON.parse(await readFile(drift, 'utf8'))
+    legacy.computer_use = { status: 'passed' }
+    await writeFile(drift, `${JSON.stringify(legacy)}\n`)
+    await assert.rejects(verifyInstalledAcceptanceReceipt(drift, {
+      platform: 'macos', sourceCommit: frozenSource, version: '2.0.15', candidateArtifact: frozenMac,
     }), /invalid or incomplete/u)
-    const blocked = JSON.parse(await readFile(bad, 'utf8'))
-    blocked.status = 'blocked'
-    blocked.external_acceptance = null
-    await writeFile(bad, `${JSON.stringify(blocked)}\n`)
-    await assert.rejects(verifyComputerUseReceipt(bad, {
-      platform: 'windows', sourceCommit: SHA, artifactSha256: WIN_SHA,
-    }), /BLOCKED and cannot satisfy verify/u)
-    blocked.status = 'passed'
-    blocked.scenarios[0].status = 'passed'
-    await writeFile(bad, `${JSON.stringify(blocked)}\n`)
-    await assert.rejects(verifyComputerUseReceipt(bad, {
-      platform: 'windows', sourceCommit: SHA, artifactSha256: WIN_SHA,
-    }), /invalid or incomplete/u)
-    const incompleteWindows = await computerUseFixture(join(root, 'incomplete-windows'), 'windows', WIN_SHA)
-    const incomplete = JSON.parse(await readFile(incompleteWindows, 'utf8'))
-    incomplete.external_acceptance.coverage = incomplete.external_acceptance.coverage
-      .filter(item => item !== 'update-download-verify-atomic-replace-relaunch-health-commit')
-    await writeFile(incompleteWindows, `${JSON.stringify(incomplete)}\n`)
-    await assert.rejects(verifyComputerUseReceipt(incompleteWindows, {
-      platform: 'windows', sourceCommit: SHA, artifactSha256: WIN_SHA,
-    }), /full installed acceptance/u)
-    const noRollbackWindows = await computerUseFixture(join(root, 'no-rollback-windows'), 'windows', WIN_SHA)
-    const noRollback = JSON.parse(await readFile(noRollbackWindows, 'utf8'))
-    noRollback.external_acceptance.coverage = noRollback.external_acceptance.coverage
-      .filter(item => item !== 'failed-health-rollback-relaunch-recovery')
-    await writeFile(noRollbackWindows, `${JSON.stringify(noRollback)}\n`)
-    await assert.rejects(verifyComputerUseReceipt(noRollbackWindows, {
-      platform: 'windows', sourceCommit: SHA, artifactSha256: WIN_SHA,
-    }), /full installed acceptance/u)
-    const mismatchedMatrixPath = await computerUseFixture(join(root, 'matrix-windows'), 'windows', WIN_SHA)
-    const matrixBound = JSON.parse(await readFile(mismatchedMatrixPath, 'utf8'))
-    const externalMatrixPath = join(root, 'matrix-windows', matrixBound.external_acceptance.matrix_receipt.file)
-    const externalMatrix = JSON.parse(await readFile(externalMatrixPath, 'utf8'))
-    externalMatrix.computer_use.tested = true
-    const externalMatrixBytes = Buffer.from(`${JSON.stringify(externalMatrix)}\n`)
-    await writeFile(externalMatrixPath, externalMatrixBytes)
-    matrixBound.external_acceptance.matrix_receipt.sha256 = createHash('sha256').update(externalMatrixBytes).digest('hex')
-    await writeFile(mismatchedMatrixPath, `${JSON.stringify(matrixBound)}\n`)
-    await assert.rejects(verifyComputerUseReceipt(mismatchedMatrixPath, {
-      platform: 'windows', sourceCommit: SHA, artifactSha256: WIN_SHA,
-    }), /receipt content is invalid/u)
-    const incompleteMac = await computerUseFixture(join(root, 'incomplete-mac'), 'macos', MAC_SHA)
-    const macReceipt = JSON.parse(await readFile(incompleteMac, 'utf8'))
-    macReceipt.external_acceptance.computer_use.status = 'not_applicable'
-    await writeFile(incompleteMac, `${JSON.stringify(macReceipt)}\n`)
-    await assert.rejects(verifyComputerUseReceipt(incompleteMac, {
-      platform: 'macos', sourceCommit: SHA, artifactSha256: MAC_SHA,
-    }), /full installed acceptance/u)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -1309,9 +1372,9 @@ test('same-version exception is frozen before immutable R2 publication and remai
   assert.deepEqual(rollback.manual_manifest, { key: 'desktop/manual/v2.0.15/latest.json', action: 'restore-by-cas' })
   assert.deepEqual(rollback.delete_objects, [])
   assert.throws(() => buildRollbackRequest(run), /publication receipt/u)
-  const noWindowsMatrix = structuredClone(run)
-  delete noWindowsMatrix.verification.computer_use.windows
-  assert.throws(() => buildPublicationRequest(noWindowsMatrix), /both external installed acceptance receipts/u)
+  const noWindowsAcceptance = structuredClone(run)
+  delete noWindowsAcceptance.verification.installed_acceptance.windows
+  assert.throws(() => buildPublicationRequest(noWindowsAcceptance), /both external installed acceptance receipts/u)
 })
 
 test('full publication uploads immutable R2 installers before compatibility attestation or signing', () => {

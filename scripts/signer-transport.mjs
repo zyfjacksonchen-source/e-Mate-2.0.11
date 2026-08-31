@@ -259,7 +259,7 @@ export function validatePublicControlRun(run) {
     ['platforms.macos.artifact', ['name', 'bytes', 'sha256']],
     ['platforms.windows.artifact', ['name', 'bytes', 'sha256']],
     ['platforms.windows.codex_remote', ['transport', 'host', 'request_sha256', 'receipt', 'receipt_sha256']],
-    ['verification', ['status', 'verified_at', 'artifacts', 'computer_use']],
+    ['verification', ['status', 'verified_at', 'artifacts', 'installed_acceptance']],
     ['verification.artifacts', ['macos', 'windows']],
     ['verification.artifacts.macos', ['primary', 'files']],
     ['verification.artifacts.windows', ['primary', 'files']],
@@ -267,19 +267,17 @@ export function validatePublicControlRun(run) {
     ['verification.artifacts.windows.primary', ['name', 'bytes', 'sha256']],
     ['verification.artifacts.macos.files[]', ['name', 'bytes', 'sha256']],
     ['verification.artifacts.windows.files[]', ['name', 'bytes', 'sha256']],
-    ['verification.computer_use', ['macos', 'windows']],
-    ['verification.computer_use.macos', [
-      'task', 'thread_id', 'matrix', 'scope', 'status', 'host', 'tested_at', 'installed_artifact_sha256',
-      'coverage', 'computer_use', 'matrix_receipt',
+    ['verification.installed_acceptance', ['macos', 'windows']],
+    ['verification.installed_acceptance.macos', [
+      'scope', 'stage', 'status', 'host', 'tested_at', 'source_commit', 'candidate_artifact', 'receipt',
     ]],
-    ['verification.computer_use.windows', [
-      'task', 'thread_id', 'matrix', 'scope', 'status', 'host', 'tested_at', 'installed_artifact_sha256',
-      'coverage', 'computer_use', 'matrix_receipt',
+    ['verification.installed_acceptance.windows', [
+      'scope', 'stage', 'status', 'host', 'tested_at', 'source_commit', 'candidate_artifact', 'receipt',
     ]],
-    ['verification.computer_use.macos.computer_use', ['status', 'installed_artifact_sha256']],
-    ['verification.computer_use.windows.computer_use', ['status', 'disposition', 'tested']],
-    ['verification.computer_use.macos.matrix_receipt', ['file', 'sha256']],
-    ['verification.computer_use.windows.matrix_receipt', ['file', 'sha256']],
+    ['verification.installed_acceptance.macos.candidate_artifact', ['name', 'bytes', 'sha256']],
+    ['verification.installed_acceptance.windows.candidate_artifact', ['name', 'bytes', 'sha256']],
+    ['verification.installed_acceptance.macos.receipt', ['file', 'sha256']],
+    ['verification.installed_acceptance.windows.receipt', ['file', 'sha256']],
     ['manifest_inputs', [
       'schema_version', 'document_type', 'status', 'ledger', 'base_contract', 'component_inventory',
       'profile_build_receipts', 'platform_receipts', 'artifact_receipts', 'local_candidate_provenance',
@@ -325,8 +323,8 @@ export function validatePublicControlRun(run) {
   ])
   const allowedHosts = new Map([
     ['platforms.windows.codex_remote.host', ['LAPTOP-ADQ973JN', 'DESKTOP-KH19ARC']],
-    ['verification.computer_use.macos.host', ['T18-MAC']],
-    ['verification.computer_use.windows.host', ['LAPTOP-ADQ973JN', 'DESKTOP-KH19ARC']],
+    ['verification.installed_acceptance.macos.host', ['T18-MAC']],
+    ['verification.installed_acceptance.windows.host', ['LAPTOP-ADQ973JN', 'DESKTOP-KH19ARC']],
   ])
   const visit = (value, path = '') => {
     if (Array.isArray(value)) return value.forEach(item => visit(item, `${path}[]`))

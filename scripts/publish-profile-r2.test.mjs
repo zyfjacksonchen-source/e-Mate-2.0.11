@@ -25,6 +25,7 @@ import {
   createPlatformManifestInputReceipt,
   finalizeManifestInputLedger,
   IMMUTABLE_REQUEST_PATH,
+  verifyInstalledAcceptanceReceipt,
 } from './local-flow.mjs'
 import {
   createProfileCurrentSnapshot,
@@ -81,27 +82,64 @@ function artifactBytes(platform) {
   return bytes
 }
 
-function installedAcceptance(platform, artifactSha256) {
-  const task = platform === 'macos' ? 'T18' : 'T22'
-  return {
-    task,
-    thread_id: platform === 'macos' ? '01a0447b-214f-7050-a85f-76b50ecffc8a' : '01a00000-0000-7000-8000-000000000022',
-    matrix: 'docs/2.0.15/REGRESSION-MATRIX.md',
-    scope: 'full-installed-startup-update-product-and-built-in-tools',
+function installedAcceptance(root, platform, candidateArtifact, sourceCommit) {
+  const external = {
+    schema_version: 1,
+    document_type: 'emate.external-installed-update-acceptance',
+    platform,
+    scope: 'version-bound-installed-startup-and-update-readiness',
+    stage: 'same-version-replacement',
     status: 'passed',
     host: platform === 'macos' ? 'T18-MAC' : 'DESKTOP-KH19ARC',
     tested_at: '2026-08-31T04:00:00.000Z',
-    installed_artifact_sha256: artifactSha256,
-    coverage: [
-      'installation', 'startup', 'update-download-verify-atomic-replace-relaunch-health-commit',
-      'failed-health-rollback-relaunch-recovery', '2.0.15-fixes', 'built-in-tools',
-      ...(platform === 'macos' ? ['computer-use'] : []),
-    ],
-    computer_use: platform === 'macos'
-      ? { status: 'passed', installed_artifact_sha256: artifactSha256 }
-      : { status: 'not_applicable', disposition: 'allowed_unavailable', tested: false },
-    matrix_receipt: { file: `${task.toLowerCase()}-full-matrix.json`, sha256: 'f'.repeat(64) },
+    source_commit: sourceCommit,
+    candidate_artifact: candidateArtifact,
+    installation: {
+      status: 'passed',
+      version: '2.0.15',
+      source_commit: sourceCommit,
+      artifact: candidateArtifact,
+      startup_health: 'passed',
+      visible_installations: 1,
+      ...(platform === 'macos'
+        ? { application_path: '/Applications/e-Mate.app' }
+        : {
+          installation_directory: 'C:\\Program Files\\e-Mate',
+          reused_existing_installation_directory: true,
+          desktop_shortcuts: 1,
+          start_menu_shortcuts: 1,
+        }),
+    },
+    update_download: { status: 'not_applicable', reason: 'no-real-signed-strictly-higher-version' },
+    manual_migration: {
+      '2.0.13': 'official-cloudflare-r2-manual-download',
+      'same-version-2.0.15': 'official-cloudflare-r2-manual-download',
+    },
   }
+  const directory = join(root, 'installed-acceptance', platform)
+  const externalPath = join(directory, 'installed-update-acceptance.json')
+  mkdirSync(directory, { recursive: true })
+  writeJson(externalPath, external)
+  const summary = {
+    scope: external.scope,
+    stage: external.stage,
+    status: external.status,
+    host: external.host,
+    tested_at: external.tested_at,
+    source_commit: external.source_commit,
+    candidate_artifact: external.candidate_artifact,
+    receipt: { file: 'installed-update-acceptance.json', sha256: fileDescriptor(root, externalPath).sha256 },
+  }
+  writeJson(join(directory, 'result.json'), {
+    schema_version: 1,
+    document_type: 'emate.local-installed-update-acceptance',
+    platform,
+    status: 'passed',
+    source_commit: sourceCommit,
+    candidate_artifact: candidateArtifact,
+    external_acceptance: summary,
+  })
+  return summary
 }
 
 function artifactFixture(root, platform, sourceCommit, version) {
@@ -145,13 +183,19 @@ async function localSigningFixture({ root, runParent, sourceCommit, version, bas
   const artifacts = Object.fromEntries(['macos', 'windows'].map(platform => [
     platform, artifactFixture(join(runRoot, 'artifacts', platform), platform, sourceCommit, version),
   ]))
+  const acceptance = Object.fromEntries(['macos', 'windows'].map(platform => [
+    platform, installedAcceptance(runRoot, platform, artifacts[platform].primary, sourceCommit),
+  ]))
+  for (const platform of ['macos', 'windows']) {
+    await verifyInstalledAcceptanceReceipt(join(runRoot, 'installed-acceptance', platform, 'result.json'), {
+      platform, sourceCommit, version, candidateArtifact: artifacts[platform].primary,
+    })
+  }
   const run = {
     run_id: runId, version, source_commit: sourceCommit,
     verification: {
       status: 'passed', artifacts,
-      computer_use: Object.fromEntries(['macos', 'windows'].map(platform => [
-        platform, installedAcceptance(platform, artifacts[platform].primary.sha256),
-      ])),
+      installed_acceptance: acceptance,
     },
   }
   await finalizeManifestInputLedger(runRoot, run)

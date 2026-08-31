@@ -70,10 +70,22 @@ const CURRENT_PUBLIC_POINTERS = Object.freeze({
   legacy: Object.freeze({ key: 'desktop/latest.json' }),
   manual: Object.freeze({ key: `desktop/manual/v${CURRENT_PUBLIC_VERSION}/latest.json` }),
 })
+const CURRENT_PUBLIC_INSTALLERS = Object.freeze({
+  macos: Object.freeze({
+    name: 'e-Mate-2.0.15-mac-universal.dmg',
+    bytes: 402547931,
+    sha256: '6d79a359738c26a9be1d091614875ba426db5314c91f0e4afbe8b582b583ac3a',
+  }),
+  windows: Object.freeze({
+    name: 'e-Mate-2.0.15-win-x64-Setup.exe',
+    bytes: 283536339,
+    sha256: '6ba140bff70451e79dd8ceb8dbcbae86281999e34a696d92022f028f040f161d',
+  }),
+})
 const CURRENT_PUBLIC_READER_INSTALLER = Object.freeze({
-  url: `${R2_PUBLIC_ORIGIN}/desktop/releases/v2.0.15/297b90df2426137edb398b023d8137a085ed8508/e-Mate-2.0.15-mac-universal.dmg`,
-  bytes: 402547931,
-  sha256: '6d79a359738c26a9be1d091614875ba426db5314c91f0e4afbe8b582b583ac3a',
+  url: `${R2_PUBLIC_ORIGIN}/desktop/releases/v${CURRENT_PUBLIC_VERSION}/${CURRENT_PUBLIC_SOURCE_COMMIT}/${CURRENT_PUBLIC_INSTALLERS.macos.name}`,
+  bytes: CURRENT_PUBLIC_INSTALLERS.macos.bytes,
+  sha256: CURRENT_PUBLIC_INSTALLERS.macos.sha256,
 })
 const TRANSACTION_MODES = Object.freeze(['new-version', 'same-version-2.0.15-exception'])
 const POINTER_TARGET = Object.freeze({
@@ -102,9 +114,12 @@ export const CANDIDATE_FAILURE = Object.freeze({
 })
 const CANDIDATE_FAILURES = new Set(Object.values(CANDIDATE_FAILURE))
 const FAILURE_MARKER = 'emate.local-flow-failure:'
-const FULL_MATRIX = 'docs/2.0.15/REGRESSION-MATRIX.md'
-const FULL_MATRIX_SCOPE = 'full-installed-startup-update-product-and-built-in-tools'
-const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u
+const INSTALLED_ACCEPTANCE_SCOPE = 'version-bound-installed-startup-and-update-readiness'
+const INSTALLED_ACCEPTANCE_STAGES = Object.freeze({ current: 'same-version-replacement', future: 'new-version-update' })
+const MANUAL_MIGRATION = Object.freeze({
+  '2.0.13': 'official-cloudflare-r2-manual-download',
+  'same-version-2.0.15': 'official-cloudflare-r2-manual-download',
+})
 const WINDOWS_BUILD_TRANSPORT = Object.freeze({ preferred: 'ssh', fallback: 'codex-remote-handoff' })
 const WINDOWS_BUILD_HOSTS = Object.freeze([
   Object.freeze({ transport: 'ssh', alias: 'win-codex', hostname: 'LAPTOP-ADQ973JN' }),
@@ -688,39 +703,28 @@ async function regularFile(path, label = basename(path)) {
   return metadata
 }
 
-function pendingComputerUse(platform, sourceCommit, artifactSha256 = null) {
+function pendingInstalledAcceptance(platform, sourceCommit, candidateArtifact = null) {
   return {
     schema_version: 1,
-    document_type: 'emate.local-computer-use-receipt',
+    document_type: 'emate.local-installed-update-acceptance',
     platform,
     status: 'pending',
-    data_policy: 'synthetic-test-data-only',
     source_commit: sourceCommit,
-    artifact_sha256: artifactSha256,
-    scenarios: platform === 'windows'
-      ? [{ id: 'windows-native-runtime-unavailable', status: 'not_applicable', disposition: 'allowed_unavailable' }]
-      : COMPUTER_USE_SCENARIOS[platform].map(id => ({ id, status: 'pending' })),
-    screenshots: [],
+    candidate_artifact: candidateArtifact,
     external_acceptance: null,
   }
 }
 
-async function writeComputerUseTemplates(directory, sourceCommit, artifacts = {}) {
-  await atomicJson(join(directory, 'computer-use', 'scenarios.json'), {
-    schema_version: 1,
-    document_type: 'emate.local-computer-use-scenarios',
-    data_policy: 'synthetic-test-data-only',
-    source_commit: sourceCommit,
-    platforms: COMPUTER_USE_SCENARIOS,
-  })
+export async function writeInstalledAcceptanceTemplates(directory, sourceCommit, artifacts = {}) {
   for (const platform of Object.keys(PLATFORMS)) {
-    const root = join(directory, 'computer-use', platform)
-    await mkdir(join(root, 'screenshots'), { recursive: true })
+    const root = join(directory, 'installed-acceptance', platform)
+    await mkdir(root, { recursive: true })
     const path = join(root, 'result.json')
     let current
     try { current = await json(path) } catch {}
-    if (current?.status === 'passed') continue
-    await atomicJson(path, pendingComputerUse(platform, sourceCommit, artifacts[platform]?.sha256 ?? null))
+    if (current?.status === 'passed' && current.source_commit === sourceCommit
+      && isDeepStrictEqual(current.candidate_artifact, artifacts[platform] ?? null)) continue
+    await atomicJson(path, pendingInstalledAcceptance(platform, sourceCommit, artifacts[platform] ?? null))
   }
 }
 
@@ -730,7 +734,7 @@ async function createRun(command, identity, extra = {}) {
   const directory = join(RUN_ROOT, id)
   await mkdir(directory)
   await mkdir(join(directory, 'logs'), { recursive: true })
-  await writeComputerUseTemplates(directory, identity.source_commit)
+  await writeInstalledAcceptanceTemplates(directory, identity.source_commit)
   const run = {
     schema_version: 1,
     document_type: 'emate.local-flow-run',
@@ -1803,7 +1807,7 @@ async function candidate(values) {
     run.status = 'built-macos-only'
     delete run.manifest_inputs
     run.verification = { status: 'pending' }
-    await writeComputerUseTemplates(directory, run.source_commit, { macos: macos.primary })
+    await writeInstalledAcceptanceTemplates(directory, run.source_commit, { macos: macos.primary })
     await saveRun(directory, run)
     await writeChecksums(directory)
     process.stdout.write(`${JSON.stringify({ run_id: run.run_id, source_commit: run.source_commit, platforms: run.platforms }, null, 2)}\n`)
@@ -1840,7 +1844,7 @@ async function candidate(values) {
     }
     run.status = Object.values(run.platforms).every(item => ['passed', 'reused'].includes(item.status)) ? 'built' : 'partial'
     if (run.status === 'built') await finalizeManifestInputLedger(directory, run)
-    await writeComputerUseTemplates(directory, run.source_commit, { ...artifacts, windows: imported.primary })
+    await writeInstalledAcceptanceTemplates(directory, run.source_commit, { ...artifacts, windows: imported.primary })
     await saveRun(directory, run)
     await writeChecksums(directory)
     process.stdout.write(`${JSON.stringify({ run_id: run.run_id, source_commit: run.source_commit, platforms: run.platforms }, null, 2)}\n`)
@@ -1927,7 +1931,7 @@ async function candidate(values) {
     }
     run.status = Object.values(run.platforms).every(item => ['passed', 'reused'].includes(item.status)) ? 'built' : 'partial'
     if (run.status === 'built') await finalizeManifestInputLedger(directory, run)
-    await writeComputerUseTemplates(directory, run.source_commit, Object.fromEntries(await Promise.all(Object.keys(PLATFORMS).map(async platform => {
+    await writeInstalledAcceptanceTemplates(directory, run.source_commit, Object.fromEntries(await Promise.all(Object.keys(PLATFORMS).map(async platform => {
       try { return [platform, (await verifyLocalArtifact(join(directory, 'artifacts', platform), platform, run.source_commit)).primary] } catch { return [platform, undefined] }
     }))))
     if (failures.length > 0) throw new AggregateError(failures, 'one or more candidate platforms failed')
@@ -1939,91 +1943,137 @@ async function candidate(values) {
   process.stdout.write(`${JSON.stringify({ run_id: run.run_id, source_commit: run.source_commit, platforms: run.platforms }, null, 2)}\n`)
 }
 
-function expectedComputerUseScenarios(platform) {
-  return platform === 'windows'
-    ? [{ id: 'windows-native-runtime-unavailable', status: 'not_applicable', disposition: 'allowed_unavailable' }]
-    : COMPUTER_USE_SCENARIOS[platform].map(id => ({ id, status: 'passed' }))
+function installedAcceptanceStage(version) {
+  const comparison = compareVersions(version, CURRENT_PUBLIC_VERSION)
+  if (comparison < 0) throw new Error('installed acceptance cannot target an older version')
+  return comparison === 0 ? INSTALLED_ACCEPTANCE_STAGES.current : INSTALLED_ACCEPTANCE_STAGES.future
 }
 
-function validateExternalAcceptance(acceptance, { platform, artifactSha256 }) {
-  const coverage = [
-    'installation', 'startup', 'update-download-verify-atomic-replace-relaunch-health-commit',
-    'failed-health-rollback-relaunch-recovery',
-    '2.0.15-fixes', 'built-in-tools', ...(platform === 'macos' ? ['computer-use'] : []),
-  ]
-  const computerUse = platform === 'macos'
-    ? { status: 'passed', installed_artifact_sha256: artifactSha256 }
-    : { status: 'not_applicable', disposition: 'allowed_unavailable', tested: false }
+function validCandidateArtifact(value, platform, version) {
+  return exactKeys(value, ['name', 'bytes', 'sha256'])
+    && value.name === releaseArtifactName(platform, version)
+    && Number.isSafeInteger(value.bytes) && value.bytes > 0 && SHA256.test(value.sha256 ?? '')
+}
+
+function validateAcceptanceSummary(acceptance, { platform, sourceCommit, version, candidateArtifact }) {
+  const stage = installedAcceptanceStage(version)
   if (!exactKeys(acceptance, [
-    'task', 'thread_id', 'matrix', 'scope', 'status', 'host', 'tested_at', 'installed_artifact_sha256',
-    'coverage', 'computer_use', 'matrix_receipt',
-  ]) || !['T18', 'T22'].includes(acceptance.task) || !THREAD_ID.test(acceptance.thread_id ?? '')
-    || acceptance.matrix !== FULL_MATRIX || acceptance.scope !== FULL_MATRIX_SCOPE || acceptance.status !== 'passed'
+    'scope', 'stage', 'status', 'host', 'tested_at', 'source_commit', 'candidate_artifact', 'receipt',
+  ]) || acceptance.scope !== INSTALLED_ACCEPTANCE_SCOPE || acceptance.stage !== stage || acceptance.status !== 'passed'
     || typeof acceptance.host !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(acceptance.host)
-    || (platform === 'windows' && !WINDOWS_BUILD_HOSTS.some(route => route.hostname === acceptance.host))
+    || (platform === 'macos' ? acceptance.host !== 'T18-MAC' : !WINDOWS_BUILD_HOSTS.some(route => route.hostname === acceptance.host))
     || typeof acceptance.tested_at !== 'string' || Number.isNaN(Date.parse(acceptance.tested_at))
     || new Date(acceptance.tested_at).toISOString() !== acceptance.tested_at
-    || acceptance.installed_artifact_sha256 !== artifactSha256
-    || JSON.stringify(acceptance.coverage) !== JSON.stringify(coverage)
-    || !sameRecord(acceptance.computer_use, computerUse)
-    || !exactKeys(acceptance.matrix_receipt, ['file', 'sha256'])
-    || basename(acceptance.matrix_receipt.file ?? '') !== acceptance.matrix_receipt.file
-    || !acceptance.matrix_receipt.file.startsWith(`${acceptance.task.toLowerCase()}-`)
-    || !/^[a-z0-9][a-z0-9._-]*\.json$/u.test(acceptance.matrix_receipt.file)
-    || !SHA256.test(acceptance.matrix_receipt.sha256 ?? '')) {
-    throw new Error(`${platform} requires passed external T18/T22 full installed acceptance bound to the installed artifact`)
+    || acceptance.source_commit !== sourceCommit
+    || !validCandidateArtifact(acceptance.candidate_artifact, platform, version)
+    || !isDeepStrictEqual(acceptance.candidate_artifact, candidateArtifact)
+    || !exactKeys(acceptance.receipt, ['file', 'sha256'])
+    || acceptance.receipt.file !== 'installed-update-acceptance.json'
+    || !SHA256.test(acceptance.receipt.sha256 ?? '')) {
+    throw new Error(`${platform} installed acceptance summary is invalid`)
   }
   return acceptance
 }
 
-export async function verifyComputerUseReceipt(path, { platform, sourceCommit, artifactSha256 }) {
+function validateInstalledApplication(installation, { platform, sourceCommit, stage, candidateArtifact }) {
+  const current = stage === INSTALLED_ACCEPTANCE_STAGES.current
+  const artifact = current ? candidateArtifact : CURRENT_PUBLIC_INSTALLERS[platform]
+  const installedSource = current ? sourceCommit : CURRENT_PUBLIC_SOURCE_COMMIT
+  const common = [
+    'status', 'version', 'source_commit', 'artifact', 'startup_health', 'visible_installations',
+  ]
+  const platformKeys = platform === 'macos'
+    ? ['application_path']
+    : ['installation_directory', 'reused_existing_installation_directory', 'desktop_shortcuts', 'start_menu_shortcuts']
+  if (!exactKeys(installation, [...common, ...platformKeys]) || installation.status !== 'passed'
+    || installation.version !== CURRENT_PUBLIC_VERSION
+    || installation.source_commit !== installedSource || !isDeepStrictEqual(installation.artifact, artifact)
+    || installation.startup_health !== 'passed' || installation.visible_installations !== 1) {
+    throw new Error(`${platform} installed application receipt is invalid`)
+  }
+  if (platform === 'macos') {
+    if (installation.application_path !== '/Applications/e-Mate.app') throw new Error('macOS must use the single canonical application path')
+  } else if (!win32.isAbsolute(installation.installation_directory)
+    || installation.reused_existing_installation_directory !== true
+    || installation.desktop_shortcuts !== 1 || installation.start_menu_shortcuts !== 1) {
+    throw new Error('Windows must reuse one installation directory and one shortcut set')
+  }
+}
+
+function validateUpdateDownload(update, { platform, sourceCommit, version, stage, candidateArtifact }) {
+  if (stage === INSTALLED_ACCEPTANCE_STAGES.current) {
+    if (!isDeepStrictEqual(update, {
+      status: 'not_applicable', reason: 'no-real-signed-strictly-higher-version',
+    })) throw new Error('same-version replacement cannot claim a future online update')
+    return
+  }
+  const installerUrl = `${R2_PUBLIC_ORIGIN}/desktop/releases/v${version}/${sourceCommit}/${candidateArtifact.name}`
+  const manifest = update?.manifest_before
+  const expectedInstaller = { url: installerUrl, bytes: candidateArtifact.bytes, sha256: candidateArtifact.sha256 }
+  if (!exactKeys(update, [
+    'status', 'trigger', 'owner', 'from_version', 'to_version', 'manifest_url',
+    'manifest_before', 'manifest_after', 'landed_installer',
+  ]) || update.status !== 'passed' || !['settings', 'e_mate_desktop_update'].includes(update.trigger)
+    || update.owner !== 'desktopUpdates.runInteractiveUpdate'
+    || update.from_version !== CURRENT_PUBLIC_VERSION || update.to_version !== version
+    || compareVersions(update.to_version, update.from_version) <= 0
+    || update.manifest_url !== `${R2_PUBLIC_ORIGIN}/desktop/signed/latest.json`
+    || !exactKeys(manifest, [
+      'schema_version', 'version', 'source_commit', 'signing_context', 'signature_verified', 'manifest_sha256', 'installer',
+    ]) || manifest.schema_version !== 2 || manifest.version !== version || manifest.source_commit !== sourceCommit
+    || manifest.signing_context !== MANIFEST_SIGNING_CONTEXT || manifest.signature_verified !== true
+    || !SHA256.test(manifest.manifest_sha256 ?? '') || !isDeepStrictEqual(manifest.installer, expectedInstaller)
+    || !isDeepStrictEqual(update.manifest_after, manifest)
+    || !exactKeys(update.landed_installer, ['path', 'bytes', 'sha256', 'format'])
+    || (platform === 'macos' ? !isAbsolute(update.landed_installer.path) : !win32.isAbsolute(update.landed_installer.path))
+    || (platform === 'macos' ? basename(update.landed_installer.path) : win32.basename(update.landed_installer.path)) !== candidateArtifact.name
+    || update.landed_installer.bytes !== candidateArtifact.bytes
+    || update.landed_installer.sha256 !== candidateArtifact.sha256
+    || update.landed_installer.format !== (platform === 'macos' ? 'dmg-koly' : 'pe-mz+pe')) {
+    throw new Error(`${platform} real native updater download receipt is invalid`)
+  }
+}
+
+export async function verifyInstalledAcceptanceReceipt(path, {
+  platform, sourceCommit, version, candidateArtifact,
+}) {
+  if (!(platform in PLATFORMS) || !SOURCE_SHA.test(sourceCommit ?? '')) throw new Error('installed acceptance identity is invalid')
   const receipt = await json(path)
-  if (receipt?.status === 'blocked') throw new Error(`${platform} Computer Use receipt is BLOCKED and cannot satisfy verify`)
-  if (!exactKeys(receipt, ['schema_version', 'document_type', 'platform', 'status', 'data_policy', 'source_commit', 'artifact_sha256', 'scenarios', 'screenshots', 'external_acceptance'])
-    || receipt.schema_version !== 1 || receipt.document_type !== 'emate.local-computer-use-receipt'
-    || receipt.platform !== platform || receipt.status !== 'passed' || receipt.data_policy !== 'synthetic-test-data-only'
-    || receipt.source_commit !== sourceCommit || receipt.artifact_sha256 !== artifactSha256
-    || !Array.isArray(receipt.scenarios)
-    || receipt.scenarios.length !== expectedComputerUseScenarios(platform).length
-    || !receipt.scenarios.every((scenario, index) => sameRecord(scenario, expectedComputerUseScenarios(platform)[index]))
-    || !Array.isArray(receipt.screenshots) || (platform === 'macos' && receipt.screenshots.length === 0)) {
-    throw new Error(`${platform} Computer Use receipt is invalid or incomplete`)
+  if (receipt?.status === 'blocked') throw new Error(`${platform} installed acceptance is BLOCKED`)
+  if (!exactKeys(receipt, [
+    'schema_version', 'document_type', 'platform', 'status', 'source_commit', 'candidate_artifact', 'external_acceptance',
+  ]) || receipt.schema_version !== 1 || receipt.document_type !== 'emate.local-installed-update-acceptance'
+    || receipt.platform !== platform || receipt.status !== 'passed' || receipt.source_commit !== sourceCommit
+    || !validCandidateArtifact(candidateArtifact, platform, version)
+    || !isDeepStrictEqual(receipt.candidate_artifact, candidateArtifact)) {
+    throw new Error(`${platform} installed acceptance receipt is invalid or incomplete`)
   }
-  const acceptance = validateExternalAcceptance(receipt.external_acceptance, { platform, artifactSha256 })
-  const matrixPath = join(dirname(path), acceptance.matrix_receipt.file)
-  const matrixMetadata = await regularFile(matrixPath, `${platform} external full-matrix receipt`)
-  if (matrixMetadata.size > 1024 * 1024) throw new Error(`${platform} external full-matrix receipt is too large`)
-  const matrixBytes = await readFile(matrixPath)
-  assertCleanArtifactBytes(matrixBytes, `${platform} external full-matrix receipt`)
-  if (digest(matrixBytes) !== acceptance.matrix_receipt.sha256) throw new Error(`${platform} external full-matrix receipt drifted`)
-  const matrix = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(matrixBytes))
-  if (!exactKeys(matrix, [
-    'schema_version', 'document_type', 'task', 'thread_id', 'platform', 'scope', 'status', 'host',
-    'tested_at', 'installed_artifact_sha256', 'coverage', 'computer_use',
-  ]) || matrix.schema_version !== 1 || matrix.document_type !== 'emate.external-installed-matrix-receipt'
-    || matrix.task !== acceptance.task || matrix.thread_id !== acceptance.thread_id || matrix.platform !== platform
-    || matrix.scope !== acceptance.scope || matrix.status !== acceptance.status || matrix.host !== acceptance.host
-    || matrix.tested_at !== acceptance.tested_at || matrix.installed_artifact_sha256 !== artifactSha256
-    || JSON.stringify(matrix.coverage) !== JSON.stringify(acceptance.coverage)
-    || !sameRecord(matrix.computer_use, acceptance.computer_use)) {
-    throw new Error(`${platform} external full-matrix receipt content is invalid`)
+  const acceptance = validateAcceptanceSummary(receipt.external_acceptance, {
+    platform, sourceCommit, version, candidateArtifact,
+  })
+  const externalPath = join(dirname(path), acceptance.receipt.file)
+  const metadata = await regularFile(externalPath, `${platform} external installed acceptance receipt`)
+  if (metadata.size > 1024 * 1024) throw new Error(`${platform} external installed acceptance receipt is too large`)
+  const bytes = await readFile(externalPath)
+  assertCleanArtifactBytes(bytes, `${platform} external installed acceptance receipt`)
+  if (digest(bytes) !== acceptance.receipt.sha256) throw new Error(`${platform} external installed acceptance receipt drifted`)
+  const external = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+  if (!exactKeys(external, [
+    'schema_version', 'document_type', 'platform', 'scope', 'stage', 'status', 'host', 'tested_at',
+    'source_commit', 'candidate_artifact', 'installation', 'update_download', 'manual_migration',
+  ]) || external.schema_version !== 1 || external.document_type !== 'emate.external-installed-update-acceptance'
+    || external.platform !== platform || external.scope !== acceptance.scope || external.stage !== acceptance.stage
+    || external.status !== acceptance.status || external.host !== acceptance.host || external.tested_at !== acceptance.tested_at
+    || external.source_commit !== sourceCommit || !isDeepStrictEqual(external.candidate_artifact, candidateArtifact)
+    || !isDeepStrictEqual(external.manual_migration, MANUAL_MIGRATION)) {
+    throw new Error(`${platform} external installed acceptance receipt content is invalid`)
   }
-  const screenshotRoot = join(dirname(path), 'screenshots')
-  for (const screenshot of receipt.screenshots) {
-    if (!exactKeys(screenshot, ['file', 'sha256']) || basename(screenshot.file ?? '') !== screenshot.file
-      || !/^[a-z0-9][a-z0-9._-]*\.png$/u.test(screenshot.file) || !SHA256.test(screenshot.sha256 ?? '')) {
-      throw new Error(`${platform} Computer Use screenshot receipt is invalid`)
-    }
-    const bytes = await readFile(join(screenshotRoot, screenshot.file))
-    await regularFile(join(screenshotRoot, screenshot.file))
-    if (bytes.byteLength < 33 || !bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))
-      || bytes.subarray(12, 16).toString('ascii') !== 'IHDR' || digest(bytes) !== screenshot.sha256) {
-      throw new Error(`${platform} Computer Use screenshot drifted: ${screenshot.file}`)
-    }
-  }
-  const actual = (await readdir(screenshotRoot)).sort()
-  const expected = receipt.screenshots.map(item => item.file).sort()
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${platform} Computer Use screenshot directory contains an unexpected file`)
+  validateInstalledApplication(external.installation, {
+    platform, sourceCommit, stage: acceptance.stage, candidateArtifact,
+  })
+  validateUpdateDownload(external.update_download, {
+    platform, sourceCommit, version, stage: acceptance.stage, candidateArtifact,
+  })
   return receipt
 }
 
@@ -2042,25 +2092,31 @@ async function verifyRun(directory, run) {
     if (digest(bytes) !== windows.request_sha256) throw new Error('Windows unavailable waiver request drifted')
   }
   const artifacts = {}
-  const computerUse = {}
-  for (const platform of windows === undefined ? Object.keys(PLATFORMS) : ['macos']) {
-    const verified = await verifyLocalArtifact(join(directory, 'artifacts', platform), platform, run.source_commit)
-    const receipt = await verifyComputerUseReceipt(join(directory, 'computer-use', platform, 'result.json'), {
-      platform, sourceCommit: run.source_commit, artifactSha256: verified.primary.sha256,
-    })
-    artifacts[platform] = verified
-    computerUse[platform] = receipt.external_acceptance
+  const installedAcceptance = {}
+  const platforms = windows === undefined ? Object.keys(PLATFORMS) : ['macos']
+  for (const platform of platforms) {
+    artifacts[platform] = await verifyLocalArtifact(join(directory, 'artifacts', platform), platform, run.source_commit)
   }
-  return { artifacts, computerUse, windows }
+  await writeInstalledAcceptanceTemplates(directory, run.source_commit, Object.fromEntries(
+    Object.entries(artifacts).map(([platform, verified]) => [platform, verified.primary]),
+  ))
+  for (const platform of platforms) {
+    const verified = artifacts[platform]
+    const receipt = await verifyInstalledAcceptanceReceipt(join(directory, 'installed-acceptance', platform, 'result.json'), {
+      platform, sourceCommit: run.source_commit, version: run.version, candidateArtifact: verified.primary,
+    })
+    installedAcceptance[platform] = receipt.external_acceptance
+  }
+  return { artifacts, installedAcceptance, windows }
 }
 
-function verificationEvidence({ artifacts, computerUse, windows }) {
+function verificationEvidence({ artifacts, installedAcceptance, windows }) {
   const evidence = {
     artifacts: Object.fromEntries(Object.entries(artifacts).map(([platform, value]) => [platform, {
       primary: value.primary,
       files: value.receipt.files,
     }])),
-    computer_use: computerUse,
+    installed_acceptance: installedAcceptance,
   }
   if (windows !== undefined) evidence.windows = windows
   return evidence
@@ -2074,7 +2130,7 @@ function assertVerificationMatches(run, verified) {
   const current = verificationEvidence(verified)
   if (run.verification?.status !== verificationStatus(verified)
     || JSON.stringify(run.verification.artifacts) !== JSON.stringify(current.artifacts)
-    || JSON.stringify(run.verification.computer_use) !== JSON.stringify(current.computer_use)
+    || JSON.stringify(run.verification.installed_acceptance) !== JSON.stringify(current.installed_acceptance)
     || JSON.stringify(run.verification.windows) !== JSON.stringify(current.windows)) {
     throw new Error('publish requires an unchanged passed verify run; rerun verify')
   }
@@ -2160,16 +2216,16 @@ function installerObjectRecords(run) {
   return records.map(object => ({ ...object, url: `${R2_PUBLIC_ORIGIN}/${object.key}` }))
 }
 
-function verifiedComputerUse(run) {
-  const evidence = run.verification?.computer_use
+function verifiedInstalledAcceptance(run) {
+  const evidence = run.verification?.installed_acceptance
   const platforms = publicationScope(run) === 'full' ? ['macos', 'windows'] : ['macos']
   if (!exactKeys(evidence, platforms)) {
     throw new Error(`publish requires ${platforms.length === 2 ? 'both' : 'macOS'} external installed acceptance receipts`)
   }
   for (const platform of platforms) {
-    validateExternalAcceptance(evidence[platform], {
-      platform,
-      artifactSha256: run.verification.artifacts[platform].primary.sha256,
+    validateAcceptanceSummary(evidence[platform], {
+      platform, sourceCommit: run.source_commit, version: run.version,
+      candidateArtifact: run.verification.artifacts[platform].primary,
     })
   }
   return evidence
@@ -2259,7 +2315,7 @@ function releaseTransactionPlan(run, versionChoice) {
 
 export function buildPublicationRequest(run, { dryRun = false, versionChoice } = {}) {
   const scope = publicationScope(run)
-  verifiedComputerUse(run)
+  verifiedInstalledAcceptance(run)
   const immutableObjects = objectRecords(run)
   if (scope === 'macos-immutable-dmg-only') {
     if (versionChoice !== undefined || run.release_transaction !== undefined) {
@@ -2509,7 +2565,7 @@ async function validateDesktopSignerResult(resultRoot, run) {
 export function buildActivationRequest(run, {
   dryRun = false, versionChoice, stageEvidence, signerResult,
 } = {}) {
-  verifiedComputerUse(run)
+  verifiedInstalledAcceptance(run)
   const transaction = releaseTransactionPlan(run, versionChoice)
   if (!validActivationStageEvidence(stageEvidence, run)) {
     throw new Error('activation requires passed immutable publication and compatibility carrier evidence')
@@ -3013,7 +3069,7 @@ export function buildRollbackRequest(run, publicationReceipt, {
   if (publicationScope(run) === 'macos-immutable-dmg-only') {
     throw new Error('macOS-only immutable publication has no shared pointer rollback')
   }
-  verifiedComputerUse(run)
+  verifiedInstalledAcceptance(run)
   const transaction = releaseTransactionPlan(run)
   if (!dryRun && publicationReceipt === undefined) throw new Error('rollback requires the existing Cloudflare owner publication receipt')
   const pointers = transaction.rollback_order.map(name => ({
