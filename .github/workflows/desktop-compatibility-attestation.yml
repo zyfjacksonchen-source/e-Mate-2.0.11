@@ -1,4 +1,4 @@
-name: Materialize e-Mate schema-2 compatibility carrier
+name: Materialize e-Mate schema-2 candidate provenance carrier
 
 on:
   workflow_dispatch:
@@ -37,7 +37,7 @@ concurrency:
 
 jobs:
   carrier:
-    name: Materialize exact R2 bytes for the accepted 2.0.13 schema-2 parser
+    name: Materialize exact R2 candidate bytes for schema-2 signing provenance
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -102,7 +102,7 @@ jobs:
           test "$(stat -c '%s' "compatibility-carrier/$win")" = "$WINDOWS_BYTES"
           test "$(sha256sum "compatibility-carrier/$win" | cut -d' ' -f1)" = "$WINDOWS_SHA256"
 
-      - name: Materialize the legacy schema-2 candidate with the actual carrier run ID
+      - name: Materialize the schema-2 candidate with the actual carrier run ID
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           VERSION: ${{ inputs.version }}

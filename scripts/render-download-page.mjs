@@ -49,6 +49,10 @@ export function validateDownloadPage(index, macGuide, script, expectedVersion = 
     || !macGuide.includes(`./${DESKTOP_SCRIPT}`)
     || !index.includes('data-platform-switch')
     || !index.includes('data-downloads')
+    || !index.includes('2.0.13 和既有同版本旧 2.0.15 需从本页手动下载安装替换')
+    || !macGuide.includes('2.0.13 和既有同版本旧 2.0.15 需在本页下载后手动替换')
+    || index.includes('2.0.13 的用户可在应用内确认更新')
+    || macGuide.includes('2.0.13 的用户可在应用内确认更新')
     || !script.includes('`${R2_ORIGIN}/desktop/manual/v${VERSION}/latest.json`')) {
     throw new Error('download page desktop manifest contract is incomplete')
   }

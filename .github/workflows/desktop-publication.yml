@@ -170,6 +170,7 @@ jobs:
           set -euo pipefail
           RUN_ROOT="$RUN_ROOT" R2_ORIGIN="$R2_ORIGIN" node --input-type=module <<'NODE'
           import { readFileSync, writeFileSync } from 'node:fs'
+          import { isDeepStrictEqual } from 'node:util'
           const root = process.env.RUN_ROOT
           const manifest = JSON.parse(readFileSync(`${root}/signing-control-manifest.json`, 'utf8'))
           const run = JSON.parse(readFileSync(`${root}/run.json`, 'utf8'))
@@ -177,12 +178,26 @@ jobs:
           const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
             && Object.keys(value).sort().join() === [...keys].sort().join()
           const keys = ['schema_version', 'document_type', 'run_id', 'version', 'source_commit', 'transaction_mode',
-            'predecessors', 'hydrated_installers', 'disclosure']
+            'reader_attestation', 'predecessors', 'hydrated_installers', 'disclosure']
           if (!exact(metadata, keys) || metadata.schema_version !== 1
             || metadata.document_type !== 'emate.local-protected-signer-control-input'
             || metadata.run_id !== run.run_id || metadata.version !== run.version
             || metadata.source_commit !== run.source_commit || !Array.isArray(metadata.hydrated_installers)
             || metadata.hydrated_installers.length !== 2) throw new Error('signing control hydration metadata is invalid')
+          const reader = metadata.reader_attestation
+          if (!exact(reader, ['source_mode', 'current_version', 'expected_status', 'installer'])
+            || !['candidate', 'public-predecessor'].includes(reader.source_mode)
+            || !/^\d+\.\d+\.\d+$/.test(reader.current_version)
+            || !['up-to-date', 'update-available'].includes(reader.expected_status)
+            || !exact(reader.installer, ['url', 'bytes', 'sha256'])
+            || !reader.installer.url.startsWith(`${process.env.R2_ORIGIN}/desktop/releases/`)
+            || !Number.isSafeInteger(reader.installer.bytes) || reader.installer.bytes <= 0
+            || !/^[0-9a-f]{64}$/.test(reader.installer.sha256)) {
+            throw new Error('signing control Reader attestation metadata is invalid')
+          }
+          if (!isDeepStrictEqual(reader, run.release_transaction?.reader_attestation)) {
+            throw new Error('signing control Reader attestation drifted from the frozen transaction')
+          }
           const names = {
             macos: `e-Mate-${run.version}-mac-universal.dmg`,
             windows: `e-Mate-${run.version}-win-x64-Setup.exe`,
@@ -199,6 +214,9 @@ jobs:
             lines.push([platform, item.name, item.url, item.bytes, item.sha256].join('\t'))
           }
           writeFileSync(`${root}/hydrate-installers.tsv`, `${lines.join('\n')}\n`, { flag: 'wx', mode: 0o600 })
+          writeFileSync(`${root}/reader-attestation.tsv`, [reader.source_mode, reader.current_version,
+            reader.expected_status, reader.installer.url, reader.installer.bytes, reader.installer.sha256].join('\t') + '\n',
+          { flag: 'wx', mode: 0o600 })
           NODE
           while IFS=$'\t' read -r platform name url bytes sha; do
             destination="$RUN_ROOT/artifacts/$platform/$name"
@@ -245,6 +263,42 @@ jobs:
           compatibility-artifact-id: ${{ inputs.compatibility_artifact_id }}
           signing-key-id: ${{ secrets.EMATE_PROFILE_SIGNING_KEY_ID }}
 
+      - name: Verify the final manifest with the actual bundled 2.0.15+ Reader
+        env:
+          DESKTOP_RESULT: ${{ steps.desktop.outputs.artifact-path }}
+        run: |
+          set -euo pipefail
+          IFS=$'\t' read -r source_mode current_version expected_status installer_url installer_bytes installer_sha256 \
+            < "$RUN_ROOT/reader-attestation.tsv"
+          if test "$source_mode" = candidate; then
+            reader_dmg="$RUN_ROOT/artifacts/macos/e-Mate-$(node -p "require('$RUN_ROOT/run.json').version")-mac-universal.dmg"
+          else
+            reader_dmg="$RUNNER_TEMP/public-predecessor-reader.dmg"
+            test "$(curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-filesize "$installer_bytes" --write-out '%{http_code}' \
+              "$installer_url" --output "$reader_dmg")" = 200
+          fi
+          test "$(stat -c '%s' "$reader_dmg")" = "$installer_bytes"
+          test "$(sha256sum "$reader_dmg" | cut -d' ' -f1)" = "$installer_sha256"
+          command -v 7z
+          reader_root="$RUNNER_TEMP/bundled-update-reader"
+          mkdir "$reader_root"
+          7z x -y -o"$reader_root" "$reader_dmg" >/dev/null
+          mapfile -d '' readers < <(find "$reader_root" -type f \
+            -path '*/e-Mate.app/Contents/Resources/app.asar.unpacked/lib/update-checker.js' -print0)
+          test "${#readers[@]}" = 1
+          node scripts/verify-desktop-update-reader.mjs \
+            --reader "${readers[0]}" \
+            --manifest "$DESKTOP_RESULT/desktop-release-signed.json" \
+            --base-contract desktop/e-mate-desktop/base-contract.json \
+            --source-mode "$source_mode" \
+            --current-version "$current_version" \
+            --expected-status "$expected_status" \
+            --installer-url "$installer_url" \
+            --installer-bytes "$installer_bytes" \
+            --installer-sha256 "$installer_sha256" \
+            --output "$DESKTOP_RESULT/desktop-update-reader-attestation.json"
+          rm "$RUN_ROOT/reader-attestation.tsv"
+
       - name: Assemble the compact local-import-only signer result
         env:
           DESKTOP_RESULT: ${{ steps.desktop.outputs.artifact-path }}
@@ -257,8 +311,8 @@ jobs:
             --profile "$RUNNER_TEMP/profile-compact" \
             --output "$RUNNER_TEMP/protected-signer-result"
           test "$(find "$RUNNER_TEMP/protected-signer-result" -type f -printf '%P\n' | LC_ALL=C sort | paste -sd, -)" = \
-            "cloudflare-plugin-handoff.json,cloudflare-publication-plan.json,desktop-release-signed.json,profile-component-aggregate.json,profile-desired-state/darwin-arm64.json,profile-desired-state/darwin-x64.json,profile-desired-state/win32-x64.json,profile-publication-plan.json,profile-signer-result.json,signer-result-receipt.json"
-          test "$(find "$RUNNER_TEMP/protected-signer-result" -type f | wc -l | tr -d ' ')" = 10
+            "cloudflare-plugin-handoff.json,cloudflare-publication-plan.json,desktop-release-signed.json,desktop-update-reader-attestation.json,profile-component-aggregate.json,profile-desired-state/darwin-arm64.json,profile-desired-state/darwin-x64.json,profile-desired-state/win32-x64.json,profile-publication-plan.json,profile-signer-result.json,signer-result-receipt.json"
+          test "$(find "$RUNNER_TEMP/protected-signer-result" -type f | wc -l | tr -d ' ')" = 11
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

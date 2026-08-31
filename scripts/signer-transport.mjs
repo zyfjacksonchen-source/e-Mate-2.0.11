@@ -43,6 +43,7 @@ const PROFILE_RESULT_FILES = [
 ]
 const DESKTOP_RESULT_FILES = [
   'cloudflare-plugin-handoff.json', 'cloudflare-publication-plan.json', 'desktop-release-signed.json',
+  'desktop-update-reader-attestation.json',
 ]
 
 function record(value) {
@@ -144,7 +145,7 @@ export function validateCompatibilityCarrierReceipt(receipt, run, request, reque
     || receipt.run.event !== 'workflow_dispatch' || receipt.run.status !== 'completed'
     || receipt.run.conclusion !== 'success' || receipt.run.head_sha !== run.source_commit
     || !exactKeys(receipt.job, ['name', 'status', 'conclusion', 'unique'])
-    || receipt.job.name !== 'Materialize exact R2 bytes for the accepted 2.0.13 schema-2 parser'
+    || receipt.job.name !== 'Materialize exact R2 candidate bytes for schema-2 signing provenance'
     || receipt.job.status !== 'completed' || receipt.job.conclusion !== 'success' || receipt.job.unique !== true
     || !exactKeys(artifact, [
       'role', 'name', 'artifact_id', 'digest', 'bytes', 'run_id', 'source_commit', 'expired', 'archive',
@@ -242,7 +243,7 @@ export function validatePublicControlRun(run) {
     || run.platforms.windows.source_commit !== run.source_commit
     || run.rollback?.status !== 'not-requested'
     || run.publication?.status !== 'awaiting-compatibility-attestation'
-    || run.publication.scope !== 'full' || run.publication.owner !== 'github-compatibility-attestation-carrier'
+    || run.publication.scope !== 'full' || run.publication.owner !== 'github-candidate-provenance-carrier'
     || run.publication.immutable_request !== 'publication/immutable-owner-request.json'
     || run.publication.immutable_receipt !== 'publication/immutable-owner-receipt.json'
     || run.publication.request !== 'publication/compatibility-attestation-request.json'
@@ -302,7 +303,8 @@ export function validatePublicControlRun(run) {
     ['release_transaction', [
       'schema_version', 'mode', 'distribution_origin', 'run_id', 'product_version', 'source_commit',
       'current_public_version', 'current_public_source_commit', 'current_public_pointers', 'manual_manifest',
-      'activation_order', 'rollback_order', 'manual_reinstall_required_for_existing_2_0_15',
+      'legacy_pointer', 'reader_attestation', 'activation_order', 'rollback_order',
+      'manual_reinstall_required_for_existing_2_0_15',
     ]],
     ['release_transaction.current_public_pointers', ['signed', 'legacy', 'manual']],
     ['release_transaction.current_public_pointers.signed', ['key', 'identity']],
@@ -312,6 +314,9 @@ export function validatePublicControlRun(run) {
     ['release_transaction.current_public_pointers.legacy.identity', ['bytes', 'sha256', 'etag']],
     ['release_transaction.current_public_pointers.manual.identity', ['bytes', 'sha256', 'etag']],
     ['release_transaction.manual_manifest', ['key', 'write', 'rollback']],
+    ['release_transaction.legacy_pointer', ['key', 'action', 'reason']],
+    ['release_transaction.reader_attestation', ['source_mode', 'current_version', 'expected_status', 'installer']],
+    ['release_transaction.reader_attestation.installer', ['url', 'bytes', 'sha256']],
     ['publication', [
       'status', 'scope', 'owner', 'immutable_request', 'immutable_request_sha256', 'immutable_receipt',
       'immutable_receipt_sha256', 'request', 'request_sha256', 'transaction_mode',
@@ -350,6 +355,24 @@ export function validatePublicControlRun(run) {
     }
   }
   visit(run)
+  const transaction = run.release_transaction
+  const reader = transaction.reader_attestation
+  const candidate = run.verification.artifacts.macos.primary
+  if (!isDeepStrictEqual(transaction.legacy_pointer, {
+    key: 'desktop/latest.json', action: 'unchanged', reason: 'pre-2.0.15-manual-replacement-only',
+  }) || !isDeepStrictEqual(transaction.activation_order, ['manual', 'signed'])
+    || !isDeepStrictEqual(transaction.rollback_order,
+      transaction.mode === 'new-version' ? ['signed'] : ['signed', 'manual'])
+    || reader.source_mode !== (transaction.mode === 'new-version' ? 'public-predecessor' : 'candidate')
+    || reader.current_version !== (transaction.mode === 'new-version' ? transaction.current_public_version : run.version)
+    || reader.expected_status !== (transaction.mode === 'new-version' ? 'update-available' : 'up-to-date')
+    || typeof reader.installer.url !== 'string' || !reader.installer.url.startsWith(`${R2_ORIGIN}/desktop/releases/`)
+    || !Number.isSafeInteger(reader.installer.bytes) || reader.installer.bytes <= 0
+    || !SHA256.test(reader.installer.sha256 ?? '')
+    || transaction.mode !== 'new-version' && (reader.installer.bytes !== candidate.bytes
+      || reader.installer.sha256 !== candidate.sha256)) {
+    throw new Error('protected signer update transaction is invalid')
+  }
   return run
 }
 

@@ -70,6 +70,11 @@ const CURRENT_PUBLIC_POINTERS = Object.freeze({
   legacy: Object.freeze({ key: 'desktop/latest.json' }),
   manual: Object.freeze({ key: `desktop/manual/v${CURRENT_PUBLIC_VERSION}/latest.json` }),
 })
+const CURRENT_PUBLIC_READER_INSTALLER = Object.freeze({
+  url: `${R2_PUBLIC_ORIGIN}/desktop/releases/v2.0.15/297b90df2426137edb398b023d8137a085ed8508/e-Mate-2.0.15-mac-universal.dmg`,
+  bytes: 402547931,
+  sha256: '6d79a359738c26a9be1d091614875ba426db5314c91f0e4afbe8b582b583ac3a',
+})
 const TRANSACTION_MODES = Object.freeze(['new-version', 'same-version-2.0.15-exception'])
 const POINTER_TARGET = Object.freeze({
   artifact_path: 'desktop-release-signed.json',
@@ -2155,6 +2160,11 @@ export function buildReleaseTransactionPlan(run, versionChoice) {
     throw new Error('release transaction version choice does not match the frozen product version')
   }
   const sameVersion = versionChoice === 'same-version-2.0.15-exception'
+  const candidateMac = run.verification?.artifacts?.macos?.primary
+  if (sameVersion && (!Number.isSafeInteger(candidateMac?.bytes) || candidateMac.bytes <= 0
+    || !SHA256.test(candidateMac.sha256 ?? ''))) {
+    throw new Error('current replacement Reader attestation requires the exact candidate macOS installer')
+  }
   return {
     schema_version: 1,
     mode: versionChoice,
@@ -2173,8 +2183,28 @@ export function buildReleaseTransactionPlan(run, versionChoice) {
       write: sameVersion ? 'compare-and-swap' : 'create-only',
       rollback: sameVersion ? 'restore-by-cas' : 'retain',
     },
-    activation_order: ['manual', 'signed', 'legacy'],
-    rollback_order: sameVersion ? ['legacy', 'signed', 'manual'] : ['legacy', 'signed'],
+    legacy_pointer: {
+      key: CURRENT_PUBLIC_POINTERS.legacy.key,
+      action: 'unchanged',
+      reason: 'pre-2.0.15-manual-replacement-only',
+    },
+    reader_attestation: sameVersion ? {
+      source_mode: 'candidate',
+      current_version: run.version,
+      expected_status: 'up-to-date',
+      installer: {
+        url: `${R2_PUBLIC_ORIGIN}/desktop/releases/v${run.version}/${run.source_commit}/e-Mate-${run.version}-mac-universal.dmg`,
+        bytes: candidateMac.bytes,
+        sha256: candidateMac.sha256,
+      },
+    } : {
+      source_mode: 'public-predecessor',
+      current_version: CURRENT_PUBLIC_VERSION,
+      expected_status: 'update-available',
+      installer: { ...CURRENT_PUBLIC_READER_INSTALLER },
+    },
+    activation_order: ['manual', 'signed'],
+    rollback_order: sameVersion ? ['signed', 'manual'] : ['signed'],
     manual_reinstall_required_for_existing_2_0_15: sameVersion,
   }
 }
@@ -2293,11 +2323,15 @@ async function validateDesktopSignerResult(resultRoot, run) {
   const signedPath = join(resultRoot, 'desktop-release-signed.json')
   const planPath = join(resultRoot, 'cloudflare-publication-plan.json')
   const handoffPath = join(resultRoot, 'cloudflare-plugin-handoff.json')
+  const readerPath = join(resultRoot, 'desktop-update-reader-attestation.json')
   const signedBytes = await readFile(signedPath)
-  const [signed, plan, handoff] = await Promise.all([json(signedPath), json(planPath), json(handoffPath)])
+  const [signed, plan, handoff, reader] = await Promise.all([
+    json(signedPath), json(planPath), json(handoffPath), json(readerPath),
+  ])
   const signedDescriptor = await manifestFile(resultRoot, 'desktop-release-signed.json')
   const planDescriptor = await manifestFile(resultRoot, 'cloudflare-publication-plan.json')
   const handoffDescriptor = await manifestFile(resultRoot, 'cloudflare-plugin-handoff.json')
+  const readerDescriptor = await manifestFile(resultRoot, 'desktop-update-reader-attestation.json')
   if (!exactKeys(handoff, [
     'schema_version', 'document_type', 'status', 'owner', 'repository', 'source_commit', 'run_id', 'version',
     'data_plane', 'inputs', 'compatibility_attestation', 'github_verification', 'profile_signing', 'files',
@@ -2390,6 +2424,25 @@ async function validateDesktopSignerResult(resultRoot, run) {
       throw new Error(`protected schema-2 Desktop ${manifestPlatform} artifact is invalid`)
     }
   }
+  const transaction = releaseTransactionPlan(run)
+  const readerPlan = transaction.reader_attestation
+  if (!exactKeys(reader, ['schema_version', 'document_type', 'status', 'endpoint', 'reader', 'manifest', 'outcome'])
+    || reader.schema_version !== 1 || reader.document_type !== 'emate.desktop-update-reader-attestation'
+    || reader.status !== 'passed' || reader.endpoint !== `${R2_PUBLIC_ORIGIN}/desktop/signed/latest.json`
+    || !exactKeys(reader.reader, ['source_mode', 'current_version', 'installer', 'module'])
+    || reader.reader.source_mode !== readerPlan.source_mode || reader.reader.current_version !== readerPlan.current_version
+    || !isDeepStrictEqual(reader.reader.installer, readerPlan.installer)
+    || !exactKeys(reader.reader.module, ['bytes', 'sha256']) || !Number.isSafeInteger(reader.reader.module.bytes)
+    || reader.reader.module.bytes <= 0 || !SHA256.test(reader.reader.module.sha256 ?? '')
+    || !exactKeys(reader.manifest, ['schema_version', 'version', 'source_commit', 'bytes', 'sha256', 'signing_context'])
+    || reader.manifest.schema_version !== 2 || reader.manifest.version !== signed.version
+    || reader.manifest.source_commit !== signed.source_commit || reader.manifest.bytes !== signedDescriptor.bytes
+    || reader.manifest.sha256 !== signedDescriptor.sha256 || reader.manifest.signing_context !== MANIFEST_SIGNING_CONTEXT
+    || !isDeepStrictEqual(reader.outcome, {
+      status: readerPlan.expected_status, current_version: readerPlan.current_version, latest_version: signed.version,
+    })) {
+    throw new Error('protected schema-2 bundled Reader attestation is invalid')
+  }
   const stageEvidence = {
     immutable_publication: {
       status: 'passed', request_sha256: handoff.inputs?.immutable_request?.sha256,
@@ -2409,7 +2462,9 @@ async function validateDesktopSignerResult(resultRoot, run) {
     || !isDeepStrictEqual(handoff.profile_signing.legacy_component_aggregate, signed.profile_component_aggregate)) {
     throw new Error('protected schema-2 signer plan or provenance is invalid')
   }
-  return { stageEvidence, signedDescriptor, planDescriptor, handoffDescriptor, handoff, plan, signed }
+  return {
+    stageEvidence, signedDescriptor, planDescriptor, handoffDescriptor, readerDescriptor, handoff, plan, signed,
+  }
 }
 
 export function buildActivationRequest(run, {
@@ -2421,13 +2476,14 @@ export function buildActivationRequest(run, {
     throw new Error('activation requires passed immutable publication and compatibility carrier evidence')
   }
   if (signerResult !== undefined && (!validManifestDescriptor(signerResult.receipt)
-    || !validManifestDescriptor(signerResult.owner_receipt))) {
-    throw new Error('activation requires exact signer result and GitHub API owner receipt descriptors')
+    || !validManifestDescriptor(signerResult.owner_receipt)
+    || !validManifestDescriptor(signerResult.desktop?.update_reader_attestation))) {
+    throw new Error('activation requires exact signer result, bundled Reader, and GitHub API owner receipt descriptors')
   }
   const manifestInputs = manifestInputBinding(run)
   const signedManifestPath = signerResult?.desktop?.signed_manifest?.path ?? POINTER_TARGET.artifact_path
   const pointerTarget = { ...POINTER_TARGET, artifact_path: signedManifestPath }
-  const pointerNames = transaction.mode === 'new-version' ? ['signed', 'legacy'] : [...transaction.activation_order]
+  const pointerNames = transaction.mode === 'new-version' ? ['signed'] : ['manual', 'signed']
   const pointers = Object.fromEntries(pointerNames.map(name => [name, {
     key: transaction.current_public_pointers[name].key,
     expected_current: { ...transaction.current_public_pointers[name].identity },
@@ -2501,13 +2557,17 @@ export function buildActivationRequest(run, {
       },
       handoff: signerResult === undefined ? {
         status: 'ready-for-cloudflare-plugin',
-        exact_files: ['desktop-release-signed.json', 'cloudflare-publication-plan.json', 'cloudflare-plugin-handoff.json'],
+        exact_files: [
+          'desktop-release-signed.json', 'desktop-update-reader-attestation.json',
+          'cloudflare-publication-plan.json', 'cloudflare-plugin-handoff.json',
+        ],
       } : {
         status: 'verified-local-import',
         signer_result_receipt: signerResult.receipt,
         signer_result_owner_receipt: signerResult.owner_receipt,
         publication_plan: signerResult.desktop.publication_plan,
         signer_handoff: signerResult.desktop.signer_handoff,
+        update_reader_attestation: signerResult.desktop.update_reader_attestation,
         github_run_id: signerResult.github_run_id,
         action: SIGNER_ACTION_USES,
       },
@@ -2534,13 +2594,14 @@ export function buildActivationRequest(run, {
         public_full_byte_readback: 'required',
       },
       pointers,
+      legacy_pointer: { ...transaction.legacy_pointer },
       activation_order: [...transaction.activation_order],
       recovery: { ...POINTER_RECOVERY, accepted_current_states: [...POINTER_RECOVERY.accepted_current_states] },
       order: [
         'immutable-publication-receipt-verified', 'compatibility-carrier-receipt-verified',
-        'existing-owner-admission-and-ed25519-manifest-signing', 'current-public-three-pointer-readbacks',
+        'existing-owner-admission-ed25519-signing-and-bundled-reader-attestation', 'current-public-three-pointer-readbacks',
         transaction.mode === 'new-version' ? 'manual-manifest-create-only-and-readbacks' : 'manual-pointer-cas-and-readbacks',
-        'signed-pointer-cas-and-readbacks', 'legacy-pointer-cas-and-readbacks',
+        'signed-pointer-cas-and-readbacks', 'legacy-pointer-verified-unchanged',
       ],
     },
     delete_objects: [],
@@ -2638,8 +2699,8 @@ export function buildCompatibilityAttestationRequest(run, immutableReceipt, {
     schema_version: 1,
     document_type: 'emate.local-desktop-compatibility-attestation-request',
     status: 'ready-for-manual-dispatch',
-    purpose: 'accepted-2.0.13-schema-2-provenance',
-    control_plane: 'github-compatibility-attestation-carrier',
+    purpose: 'schema-2-desktop-candidate-provenance',
+    control_plane: 'github-candidate-provenance-carrier',
     data_plane: {
       origin: R2_PUBLIC_ORIGIN,
       installer_download: 'cloudflare-r2-only',
@@ -2666,7 +2727,7 @@ export function buildCompatibilityAttestationRequest(run, immutableReceipt, {
       artifact_name: artifactName,
       exact_files: exactFiles,
       semantics: {
-        role: 'compatibility-carrier-materialization',
+        role: 'candidate-provenance-materialization',
         legacy_build_run_id: 'actual-github-workflow-run-id',
         github_built_or_tested_installer_bytes: false,
         dispatch_performed_by_local_flow: false,
@@ -2785,7 +2846,7 @@ export function validatePublicationReceipt(receipt, run, requestSha256, request)
     return receipt
   }
   const transaction = releaseTransactionPlan(run)
-  const pointerNames = transaction.mode === 'new-version' ? ['signed', 'legacy'] : [...transaction.activation_order]
+  const pointerNames = transaction.mode === 'new-version' ? ['signed'] : ['manual', 'signed']
   const receiptKeys = [
     'schema_version', 'document_type', 'operation', 'status', 'macos_publication_mode', 'installer_security',
     'distribution_origin', 'run_id', 'version', 'source_commit', 'transaction_mode', 'request_sha256',
@@ -3192,7 +3253,7 @@ function awaitingCompatibilityAttestationState(run, {
   return {
     status: 'awaiting-compatibility-attestation',
     scope: 'full',
-    owner: 'github-compatibility-attestation-carrier',
+    owner: 'github-candidate-provenance-carrier',
     immutable_request: IMMUTABLE_REQUEST_PATH,
     immutable_request_sha256: immutableRequestSha256,
     immutable_receipt: IMMUTABLE_RECEIPT_PATH,
@@ -3465,6 +3526,7 @@ async function importProtectedSignerResult(directory, run, externalResult, exter
       signed_manifest: prefixed(desktop.signedDescriptor),
       publication_plan: { ...prefixed(desktop.planDescriptor), status: desktop.plan.status },
       signer_handoff: { ...prefixed(desktop.handoffDescriptor), status: desktop.handoff.status },
+      update_reader_attestation: prefixed(desktop.readerDescriptor),
     },
     profile: {
       ...profile,
@@ -3663,6 +3725,7 @@ async function publish(values) {
         version: run.version,
         source_commit: run.source_commit,
         transaction_mode: run.release_transaction.mode,
+        reader_attestation: run.release_transaction.reader_attestation,
         predecessors: {
           immutable_request: bindings.immutableRequestDescriptor,
           immutable_receipt: bindings.immutableReceiptDescriptor,
