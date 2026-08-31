@@ -31,6 +31,7 @@ const windowsUpdateAvailable = {
 
 const terminal = vi.hoisted(() => ({ open: vi.fn() }))
 const updater = vi.hoisted(() => ({ download: vi.fn() }))
+const releaseChecker = vi.hoisted(() => ({ check: vi.fn() }))
 const macUpdater = vi.hoisted(() => ({
   preflight: vi.fn(),
   schedule: vi.fn(),
@@ -70,6 +71,11 @@ vi.mock('../src/desktop-terminal.ts', async (importOriginal) => ({
 
 vi.mock('../src/update-download.ts', () => ({
   downloadDesktopUpdate: updater.download,
+}))
+
+vi.mock('../src/update-checker.ts', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/update-checker.ts')>(),
+  checkForStableUpdate: releaseChecker.check,
 }))
 
 vi.mock('../src/mac-update-installer.ts', () => ({
@@ -299,6 +305,8 @@ describe('Electron compatibility runtime', () => {
     childProcess.reset()
     vi.clearAllMocks()
     updater.download.mockReset()
+    releaseChecker.check.mockReset()
+    releaseChecker.check.mockResolvedValue(updateAvailable)
     macUpdater.preflight.mockReset()
     macUpdater.schedule.mockReset()
     macUpdater.schedule.mockResolvedValue({ markShutdownReady: macUpdater.markShutdownReady })
@@ -1471,6 +1479,18 @@ describe('Electron compatibility runtime', () => {
     }))
     expect(macUpdater.preflight.mock.invocationCallOrder[0])
       .toBeLessThan(updater.download.mock.invocationCallOrder[0]!)
+    expect(releaseChecker.check).toHaveBeenCalledWith({
+      currentVersion: updateAvailable.currentVersion,
+      currentScheduleProtocolFloor: 1,
+      platform: 'darwin',
+      trustedManifestKeys: [expect.objectContaining({ id: 'release-key' })],
+      signal: controller.signal,
+      request: expect.any(Function),
+    })
+    expect(updater.download.mock.invocationCallOrder[0])
+      .toBeLessThan(releaseChecker.check.mock.invocationCallOrder[0]!)
+    expect(releaseChecker.check.mock.invocationCallOrder[0])
+      .toBeLessThan(macUpdater.schedule.mock.invocationCallOrder[0]!)
     expect(macUpdater.schedule).toHaveBeenCalledWith(expect.objectContaining({
       dmgPath: '/tmp/e-Mate-2.1.0-mac.dmg',
       targetVersion: '2.1.0',
@@ -1512,6 +1532,24 @@ describe('Electron compatibility runtime', () => {
     })
     expect(notification?.show).toHaveBeenCalledOnce()
     expect(notification?.once).not.toHaveBeenCalled()
+  })
+
+  it('rejects installer handoff when the signed manifest changes after download', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    updater.download.mockResolvedValueOnce('/tmp/e-Mate-2.1.0-mac.dmg')
+    releaseChecker.check.mockResolvedValueOnce({
+      ...updateAvailable,
+      manifestIdentity: 'c'.repeat(64),
+    })
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    runtime.schedule(spec)
+
+    await expect(runtime.updates.downloadAndOpen(updateAvailable, new AbortController().signal))
+      .rejects.toThrow('signed update changed after download')
+    expect(updater.download).toHaveBeenCalledOnce()
+    expect(releaseChecker.check).toHaveBeenCalledOnce()
+    expect(macUpdater.schedule).not.toHaveBeenCalled()
   })
 
   it('fails macOS path and disk preflight before an installer request', async () => {

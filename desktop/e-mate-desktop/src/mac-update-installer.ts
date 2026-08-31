@@ -700,8 +700,7 @@ function validateRequest(value: unknown, requestPath: string): MacUpdateRequest 
   }
   const appParent = dirname(resolve(request.currentApp))
   const suffix = request.transactionId.slice(0, 8)
-  if (![join('/Applications', 'e-Mate.app'), join(homedir(), 'Applications', 'e-Mate.app')]
-    .includes(resolve(request.currentApp))
+  if (resolve(request.currentApp) !== join('/Applications', 'e-Mate.app')
     || resolve(request.stagedApp) !== join(appParent, `.e-Mate-${request.targetVersion}-${suffix}.staged.app`)
     || resolve(request.backupApp) !== join(appParent, `.e-Mate-${request.currentVersion}-${suffix}.backup.app`)
     || resolve(request.failedApp) !== join(appParent, `.e-Mate-${request.targetVersion}-${suffix}.failed.app`)) {
@@ -755,8 +754,7 @@ function validateLegacyMacUpdateRequest(value: unknown, requestPath: string): Le
     || resolve(request.helperReadyPath) !== join(root, 'helper-ready.json')
     || resolve(request.shutdownReadyPath) !== join(root, 'shutdown-ready.json')
     || resolve(request.ackPath) !== join(root, 'startup-ack.json')
-    || ![join('/Applications', 'e-Mate.app'), join(homedir(), 'Applications', 'e-Mate.app')]
-      .includes(resolve(request.currentApp))
+    || resolve(request.currentApp) !== join('/Applications', 'e-Mate.app')
     || resolve(request.stagedApp) !== join(appParent, `.e-Mate-${request.targetVersion}-${suffix}.staged.app`)
     || resolve(request.backupApp) !== join(appParent, `.e-Mate-${LEGACY_UPDATE_PREDECESSOR}-${suffix}.backup.app`)
     || resolve(request.failedApp) !== join(appParent, `.e-Mate-${request.targetVersion}-${suffix}.failed.app`)
@@ -1171,14 +1169,10 @@ export function recoverPendingMacUpdateStartup(
     assertMacUpdateInstalledBaseReceipt(request)
     if (adapter.existsDirectory(request.backupApp)) {
       try {
-        adapter.rename(request.backupApp, request.trashApp)
+        adapter.remove(request.backupApp)
       } catch (cleanupCause) {
-        try {
-          adapter.remove(request.backupApp)
-        } catch (removeCause) {
-          adapter.writeReceipt(request, 'completed-cleanup-failed', new AggregateError([cleanupCause, removeCause]))
-          return { status: 'committed', relaunch: false }
-        }
+        adapter.writeReceipt(request, 'completed-cleanup-failed', cleanupCause)
+        return { status: 'committed', relaunch: false }
       }
     }
     adapter.finalizeTransaction(request)
@@ -1251,14 +1245,10 @@ export function resumePendingMacUpdateStartup(
       completed = true
       assertMacUpdateInstalledBaseReceipt(current.request)
       try {
-        adapter.rename(current.request.backupApp, current.request.trashApp)
+        adapter.remove(current.request.backupApp)
       } catch (cleanupCause) {
-        try {
-          adapter.remove(current.request.backupApp)
-        } catch (removeCause) {
-          adapter.writeReceipt(current.request, 'completed-cleanup-failed', new AggregateError([cleanupCause, removeCause]))
-          return
-        }
+        adapter.writeReceipt(current.request, 'completed-cleanup-failed', cleanupCause)
+        return
       }
       adapter.finalizeTransaction(current.request)
     } catch (cause) {
@@ -1639,14 +1629,10 @@ export async function performLegacyMacUpdateSwap(
     throw cause
   }
   try {
-    adapter.rename(request.backupApp, request.trashApp)
+    adapter.remove(request.backupApp)
   } catch (cleanupCause) {
-    try {
-      adapter.remove(request.backupApp)
-    } catch (removeCause) {
-      try { adapter.writeReceipt(request, 'completed-cleanup-failed', new AggregateError([cleanupCause, removeCause])) } catch {}
-      return
-    }
+    try { adapter.writeReceipt(request, 'completed-cleanup-failed', cleanupCause) } catch {}
+    return
   }
   try { adapter.writeReceipt(request, 'completed') } catch {}
 }
@@ -1711,16 +1697,11 @@ export async function performMacUpdateSwap(
     return
   }
   try {
-    adapter.rename(request.backupApp, request.trashApp)
+    adapter.remove(request.backupApp)
     adapter.finalizeTransaction?.(request)
   } catch (cleanupCause) {
-    try {
-      adapter.remove(request.backupApp)
-      adapter.finalizeTransaction?.(request)
-    } catch (removeCause) {
-      try { adapter.writeReceipt(request, 'completed-cleanup-failed', new AggregateError([cleanupCause, removeCause])) } catch {}
-      return
-    }
+    try { adapter.writeReceipt(request, 'completed-cleanup-failed', cleanupCause) } catch {}
+    return
   }
 }
 
@@ -1794,10 +1775,8 @@ function validateMacUpdatePreflight(options: MacUpdatePreflightOptions): Validat
     const currentApp = macAppBundleFromExecutable(options.currentExecutable)
     if (currentApp === undefined) throw new Error('macOS update requires a packaged application bundle')
     const resolvedCurrent = realDirectory(currentApp)
-    const canonical = [join('/Applications', 'e-Mate.app'), join(homeDirectory, 'Applications', 'e-Mate.app')]
-      .some(path => {
-        try { return realpathSync(path) === resolvedCurrent } catch { return false }
-      })
+    let canonical = false
+    try { canonical = realpathSync(join('/Applications', 'e-Mate.app')) === resolvedCurrent } catch {}
     if (!canonical) throw new Error('macOS update requires the canonical e-Mate.app install path')
     const installDirectory = dirname(resolvedCurrent)
     accessSync(installDirectory, constants.W_OK | constants.X_OK)

@@ -156,6 +156,10 @@ export async function downloadDesktopUpdate(options: DownloadDesktopUpdateOption
     await validateArtifact(paths.temporary, platform)
     throwIfAborted(options.signal)
     await rename(paths.temporary, paths.completed)
+    if (!await reuseCompletedArtifact(paths.completed, artifact, platform)) {
+      await unlinkIfPresent(paths.completed)
+      throw new UpdateDownloadError('integrity-mismatch', 'The landed update installer did not match its release manifest.')
+    }
     return paths.completed
   } catch (cause) {
     failure = options.signal?.aborted === true || isAbortFailure(cause) ? aborted(cause) : cause

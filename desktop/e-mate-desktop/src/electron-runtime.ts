@@ -51,7 +51,7 @@ import type {
 import type { RendererBootReport } from './renderer-boot-contract.ts'
 import { prepareTrayIcon } from './tray-icons.ts'
 import { downloadDesktopUpdate } from './update-download.ts'
-import type { UpdateCheckResult } from './update-checker.ts'
+import { checkForStableUpdate, type UpdateCheckResult } from './update-checker.ts'
 import {
   DESKTOP_UPDATE_CANCEL,
   DESKTOP_UPDATE_RUN_INTERACTIVE,
@@ -739,6 +739,17 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     })
     signal.throwIfAborted()
     report({ stage: 'verifying' })
+    const verified = await checkForStableUpdate({
+      currentVersion: update.currentVersion,
+      currentScheduleProtocolFloor: this.updates.currentScheduleProtocolFloor,
+      platform: this.platform,
+      trustedManifestKeys: this.updates.trustedManifestKeys,
+      signal,
+      request: this.updates.request,
+    })
+    if (verified.status !== 'update-available' || verified.manifestIdentity !== update.manifestIdentity) {
+      throw new Error('@e-mate/desktop: signed update changed after download')
+    }
     report({ stage: 'staging' })
 
     if (this.platform === 'darwin') {

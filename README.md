@@ -1,8 +1,8 @@
 # e-Mate
 
-e-Mate 2.0.14 是基于固定 DeepSeek Harness `0.1.0-rc.7` 与 `deepseek-harness-desktop` 原生生命周期封装的桌面 Agent 工作区。Harness 继续拥有 Agent Loop、会话、事件、工具、审批、Jobs、插件与本地数据；e-Mate 只在这些原生扩展面上提供产品 Profile、企业鉴权、模型策略和异步脱敏审计。
+e-Mate 2.0.15 是基于固定 DeepSeek Harness `0.1.0-rc.7` 与 `deepseek-harness-desktop` 原生生命周期封装的桌面 Agent 工作区。Harness 继续拥有 Agent Loop、会话、事件、工具、审批、Jobs、插件与本地数据；e-Mate 只在这些原生扩展面上提供产品 Profile、企业鉴权、模型策略和异步脱敏审计。
 
-> 2.0.14 只修复图片能力路由、外部连接启动、桌面启动身份恢复和 macOS 跨版本更新，不包含其他产品迭代。官方下载页只指向已通过安装与公开回读的正式字节；实时记录见 [`docs/development-log.md`](docs/development-log.md)，不可越界项见 [`docs/target-contract.md`](docs/target-contract.md)。
+> 2.0.15 的实时记录见 [`docs/development-log.md`](docs/development-log.md)，不可越界项见 [`docs/target-contract.md`](docs/target-contract.md)。官方下载页只指向已通过安装与公开回读的正式字节。
 
 ## 下载与安装
 
@@ -10,23 +10,23 @@ e-Mate 2.0.14 是基于固定 DeepSeek Harness `0.1.0-rc.7` 与 `deepseek-harnes
 
 - macOS 13+，Universal（Apple 芯片与 Intel Mac）。
 - Windows 10/11 x64。
-- Linux 不属于 2.0.14 正式支持范围。
+- Linux 不属于 2.0.15 正式支持范围。
 
-用户不需要安装 Node.js、npm、pnpm、Python、Electron、Xcode、MSVC 或 Rust。2.0.14 的正式 macOS 和 Windows 包均为未签名发布；只应使用官方下载页展示的不可变 R2 地址并核对 SHA-256。macOS 首次安装按下载页的“未签名安装图解”将 e-Mate 拖入“应用程序”，再通过 Control 点按选择“打开”；页面同时提供只针对 `/Applications/e-Mate.app` 的备用命令。应用不会关闭 Gatekeeper，也不会伪装 Developer ID 或公证状态。
+用户不需要安装 Node.js、npm、pnpm、Python、Electron、Xcode、MSVC 或 Rust。2.0.15 的正式 macOS 和 Windows 包均为未签名发布；只应使用官方下载页展示的不可变 R2 地址并核对 SHA-256。macOS 首次安装按下载页的“未签名安装图解”将 e-Mate 拖入“应用程序”，再通过 Control 点按选择“打开”；页面同时提供只针对 `/Applications/e-Mate.app` 的备用命令。应用不会关闭 Gatekeeper，也不会伪装 Developer ID 或公证状态。
 
 浏览器自动化由 `@e-mate/dsh-plugin-cdp` 连接用户已有 Chrome。它不安装扩展，不需要 `chrome://extensions`、开发者模式或“加载已解压”；首次使用只需按 Chrome 自身安全要求开启远程调试，并选择明确的本机 CDP 目标。
 
 ## 更新方式
 
-安装 2.0.14 Base 后，用户可直接对 Agent 说“检查更新”或“更新 e-Mate”。自然语言只调用类型化的 `e_mate_desktop_update` Tool，并委托同一个 Desktop 更新服务：
+安装 2.0.15 后，用户可在设置页手动检查更新，也可直接对 Agent 说“检查更新”或“更新 e-Mate”。设置页复用现有原生桥接，Agent 自然语言只调用类型化的 `e_mate_desktop_update` Tool；两者最终进入同一个 `desktopUpdates.runInteractiveUpdate` 服务。在线更新只接受严格高于当前版本的稳定 SemVer（2.0.16+）：
 
-1. 验证签名的当前平台 desired state 与 Base/Harness 兼容合同；
-2. 在原生确认框展示版本、发布代、用户能力摘要和下载字节；
-3. 只下载缺失的内容寻址更新文件；
-4. 组装完整 inactive Profile generation，原子切换并重启；
-5. Renderer 健康后提交，失败自动恢复上一 generation。
+1. 验证 canonical Cloudflare R2 上的签名 schema-2 清单、目标版本和当前平台安装包；
+2. 在原生确认框展示版本与下载字节，并下载清单绑定的真实安装包；
+3. 安装包落盘后重新校验字节数、SHA-256、签名清单和清单身份；
+4. macOS 原位替换 `/Applications/e-Mate.app`，Windows 原位替换现有安装目录，并从同一路径重启；
+5. 健康提交后删除事务内部的旧版回滚备份，只保留一个应用和一套桌面/开始菜单快捷方式；失败则由同一事务恢复旧版。
 
-普通插件源码或依赖变化不重建 DMG/EXE，也不重测无关组件。Harness/Desktop API、权限、原生 helper、更新器、共享依赖、签名或不兼容 ABI 变化才进入 Base lane。rc.7-only 插件不会混装到 rc.6 Base；客户端在下载前返回 `base-required`。
+2.0.13 和已有同版本旧 2.0.15 使用官方下载页手动迁移；客户端不会为同版本不同字节伪造在线更新。兼容的 Profile 增量仍由同一个更新服务按签名 generation 合同处理，不会创建第二个 updater、Feed 或安装路径。
 
 ## 插件与权限边界
 
@@ -39,18 +39,15 @@ e-Mate 2.0.14 是基于固定 DeepSeek Harness `0.1.0-rc.7` 与 `deepseek-harnes
 
 ## 开发与发布
 
-开发环境使用 Node 24.x 与精确 `pnpm@11.7.0`：
+仓库唯一的本地测试、构建、验收和发布入口是独立 Node 24.x 承载的精确 `pnpm@11.7.0`：
 
 ```bash
-corepack enable
-corepack prepare pnpm@11.7.0 --activate
-pnpm install --frozen-lockfile
-pnpm check:target
-pnpm check:release-boundary
-pnpm test
-pnpm test:release
+corepack pnpm flow dev
+corepack pnpm flow candidate
+corepack pnpm flow verify --run <run-id>
+corepack pnpm flow publish --run <run-id>
 ```
 
-`packages/dsh/profile/component-inventory.json` 是 CLI、Desktop、分类器、组合器与发布器共用的唯一组件清单。每个 accepted 组件拥有独立 frozen lock 和签名运行闭包；Plugin-only CI 恢复已接受的 Base SDK，只构建变化组件，再与完整 accepted set 在三个目标上组合验证。Base CI 才构建 Desktop 安装器，并额外对所有平台组件运行原生兼容矩阵。
+开发期先运行变更 Owner 的聚焦检查或 `flow dev`。冻结一个精确、干净的提交后只运行一次 `flow candidate`；同一 run 复用原始 macOS/Windows 字节继续 `verify` 和 `publish`，不得因单个修复反复重建。Windows 构建只执行 candidate 请求中给出的同一条 `_platform-build` 命令；传输优先 `win-codex` SSH，只有该线路不可用时才使用已授权 Codex Remote。
 
-发布严格复用已通过 exact-main CI 的原字节：先 create-only 上传并公开回读 commit-scoped immutable 安装器/组件和版本专属 signed manifest，最后才 CAS 激活各目标 desired state 与 Base v7 的 `desktop/signed/latest.json`；旧 `desktop/latest.json` 永久冻结在已发布的 2.0.13 兼容值。`mac-smoke`、本地候选和失败构建永远不能进入 R2 或官网下载页。
+安装器下载、在线更新、回滚和发布数据面只使用 canonical Cloudflare R2。`flow publish` 复用 candidate 的原始字节，完成不可变对象上传与完整公开回读后，才通过既有 schema-2 签名 Owner 和 CAS 激活 `desktop/signed/latest.json`；`desktop/latest.json` 保持不变。GitHub CI、裸 `pnpm`、直接执行 `scripts/local-flow.mjs`、第二个发布器和重建后的替代字节都不是发布路径。
