@@ -28,6 +28,7 @@ import {
   publicationAction,
   prepareNpmCollectorCarrier,
   preparePnpmLifecycleCarrier,
+  redactLog,
   resolveNpmCollectorCli,
   rollbackAction,
   runCandidateStages,
@@ -36,8 +37,10 @@ import {
   selectWindowsPnpmCommand,
   selectCandidatePlatforms,
   validateCandidateSource,
+  validateControlPlaneContinuation,
   validateImmutablePublicationReceipt,
   validatePublicationReceipt,
+  validateProductSourceEvidence,
   validateRollbackReceipt,
   validateRemoteHostname,
   verifyManifestInputLedger,
@@ -275,14 +278,14 @@ async function manifestPlatformFixture(root, platform) {
   })
 }
 
-async function windowsRemoteFixture(root) {
+async function windowsRemoteFixture(root, context) {
   const run = {
     run_id: RUN_ID,
     version: '2.0.15',
     source_commit: SHA,
     source_branch: 'release/2.0.15-final-integration-r5',
   }
-  const request = windowsRemoteRequest(run)
+  const request = windowsRemoteRequest(run, context)
   const requestPath = join(root, 'request.json')
   const requestBytes = Buffer.from(`${JSON.stringify(request, null, 2)}\n`)
   await writeFile(requestPath, requestBytes)
@@ -309,7 +312,7 @@ async function windowsRemoteFixture(root) {
       run_id: RUN_ID,
       version: '2.0.15',
       platform: 'windows',
-      host: 'LAPTOP-ADQ973JN',
+      host: '172_16_48_13',
       source_commit: SHA,
       request_sha256: createHash('sha256').update(requestBytes).digest('hex'),
       artifact_receipt: {
@@ -333,12 +336,21 @@ async function windowsRemoteFixture(root) {
   return { artifacts, fixture, request, requestPath, resultPath, returned: join(root, 'returned'), run, writeResult }
 }
 
+const CONTROL_SHA = 'f'.repeat(40)
+const CONTROL_PLANE = Object.freeze({ source_commit: CONTROL_SHA, changed_paths: ['scripts/local-flow.mjs'] })
+const PRODUCT_SOURCE = Object.freeze({
+  source_commit: SHA,
+  status: 'committed-clean',
+  submodules: [Object.freeze({ path: 'upstream/deepseek-harness', commit: '1'.repeat(40) })],
+})
+
 function acceptance(platform, candidateArtifact, version = '2.0.15', sourceCommit = SHA) {
   return {
     scope: 'version-bound-installed-startup-and-update-readiness',
     stage: version === '2.0.15' ? 'same-version-replacement' : 'new-version-update',
     status: 'passed',
-    host: platform === 'macos' ? 'T18-MAC' : 'DESKTOP-KH19ARC',
+    host: platform === 'macos' ? 'T18-MAC' : '172_16_48_13',
+    ...(platform === 'windows' ? { transport: 'ssh', transport_alias: 'win-test-server' } : {}),
     tested_at: '2026-08-30T00:00:00.000Z',
     source_commit: sourceCommit,
     candidate_artifact: candidateArtifact,
@@ -360,10 +372,16 @@ function installedApplication(platform, candidateArtifact, version, sourceCommit
     ? { ...common, application_path: '/Applications/e-Mate.app' }
     : {
       ...common,
-      installation_directory: 'C:\\Program Files\\e-Mate',
+      previous_version: future ? '2.0.15' : '2.0.13',
+      previous_application_path: 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\e-Mate\\e-Mate.exe',
+      previous_desktop_shortcut_target: 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\e-Mate\\e-Mate.exe',
+      previous_start_menu_shortcut_target: 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\e-Mate\\e-Mate.exe',
+      installation_directory: 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\e-Mate',
       reused_existing_installation_directory: true,
       desktop_shortcuts: 1,
+      desktop_shortcut_target: 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\e-Mate\\e-Mate.exe',
       start_menu_shortcuts: 1,
+      start_menu_shortcut_target: 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\e-Mate\\e-Mate.exe',
     }
 }
 
@@ -526,7 +544,7 @@ function protectedSignerRun() {
       windows: {
         status: 'passed', source_commit: SHA, artifact: run.verification.artifacts.windows.primary,
         codex_remote: {
-          transport: 'ssh', host: 'LAPTOP-ADQ973JN', request_sha256: '1'.repeat(64),
+          transport: 'ssh', host: '172_16_48_13', request_sha256: '1'.repeat(64),
           receipt: 'windows-remote/result.json', receipt_sha256: '2'.repeat(64),
         },
       },
@@ -865,25 +883,33 @@ test('native Windows routing accepts only request-authorized host identities', (
   const request = windowsRemoteRequest({
     run_id: RUN_ID, version: '2.0.15', source_commit: SHA, source_branch: 'release/2.0.15',
   })
-  assert.equal(validateRemoteHostname('LAPTOP-ADQ973JN\r\n', request), 'LAPTOP-ADQ973JN')
-  assert.equal(validateRemoteHostname('DESKTOP-KH19ARC', request), 'DESKTOP-KH19ARC')
-  assert.throws(() => validateRemoteHostname('win-codex', request), /not authorized/u)
+  assert.equal(validateRemoteHostname('172_16_48_13\r\n', request), '172_16_48_13')
   assert.throws(() => validateRemoteHostname('OTHER-HOST', request), /not authorized/u)
 })
 
-test('Windows candidate keeps one request/import seam with SSH-first and Codex Remote fallback', async () => {
+test('Windows candidate uses one win-test-server SSH request and one frozen-product build owner', async () => {
   const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
-  const request = windowsRemoteRequest({
+  const run = {
     run_id: RUN_ID, version: '2.0.15', source_commit: SHA, source_branch: 'release/2.0.15',
-  })
-  assert.deepEqual(request.transport, { preferred: 'ssh', fallback: 'codex-remote-handoff' })
+  }
+  const request = windowsRemoteRequest(run)
+  assert.deepEqual(request.transport, { required: 'ssh' })
   assert.deepEqual(request.authorized_hosts, [
-    { transport: 'ssh', alias: 'win-codex', hostname: 'LAPTOP-ADQ973JN' },
-    { transport: 'codex-remote-handoff', hostname: 'DESKTOP-KH19ARC' },
+    { transport: 'ssh', alias: 'win-test-server', hostname: '172_16_48_13' },
   ])
+  const controlled = windowsRemoteRequest(run, { controlPlane: CONTROL_PLANE, productSource: PRODUCT_SOURCE })
+  assert.deepEqual(controlled.control_plane, CONTROL_PLANE)
+  assert.deepEqual(controlled.product_source, PRODUCT_SOURCE)
+  assert.deepEqual(controlled.build.arguments.slice(-2), ['--product-source', '<product-source-directory>'])
   assert.doesNotMatch(source, /runLogged\(['"](?:ssh|scp)['"]/u)
+  assert.doesNotMatch(source, /artifact-export-recovery/u)
   assert.match(source, /emate\.local-windows-codex-remote-request/u)
   assert.match(source, /emate\.local-windows-codex-remote-result/u)
+  const internal = source.slice(source.indexOf("else if (command === '_platform-build')"))
+  assert.equal([...internal.matchAll(/await platformBuild\(/gu)].length, 1)
+  assert.match(internal, /sourceRoot = resolve\(values\.productSource\)[\s\S]*?await platformBuild\(\s*sourceRoot/u)
+  const candidate = source.slice(source.indexOf('async function candidate'), source.indexOf('\nfunction installedAcceptanceStage'))
+  assert.match(candidate, /buildContext !== undefined[\s\S]*?verifyLocalArtifact\(join\(directory, 'artifacts', 'macos'\)[\s\S]*?prepareWindowsRemote\(directory, run, buildContext\)/u)
 })
 
 test('Windows Codex Remote import binds source, host, receipt, artifact bytes, and pollution', async () => {
@@ -905,10 +931,11 @@ test('Windows Codex Remote import binds source, host, receipt, artifact bytes, a
 
     await remote.writeResult(remote.fixture.files, { host: 'OTHER-HOST' })
     await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /not authorized/u)
-    await remote.writeResult(remote.fixture.files, { transport: 'codex-remote-handoff' })
+    await remote.writeResult(remote.fixture.files, { transport: 'other-transport' })
     await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /result receipt is invalid/u)
-    await remote.writeResult(remote.fixture.files, { transport: 'codex-remote-handoff', host: 'DESKTOP-KH19ARC' })
-    assert.deepEqual((await importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath)).primary, remote.fixture.primary)
+    await remote.writeResult(remote.fixture.files, { host: 'OTHER-HOST' })
+    await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /not authorized/u)
+    await remote.writeResult()
     await remote.writeResult(remote.fixture.files, { schema_version: 2 })
     await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /result receipt is invalid/u)
     await remote.writeResult([{ ...remote.fixture.files[0], name: 'wrong.exe' }])
@@ -942,6 +969,52 @@ test('Windows Codex Remote import binds source, host, receipt, artifact bytes, a
     await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /request is invalid/u)
     await writeFile(remote.requestPath, `${JSON.stringify({ ...remote.request, source_commit: 'd'.repeat(40) })}\n`)
     await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /request is invalid/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('frozen-product Windows build admits only a strict control-plane descendant and exact product source', () => {
+  const value = { source_commit: CONTROL_SHA, changed_paths: ['AGENTS.md', 'scripts/local-flow.mjs'] }
+  assert.deepEqual(validateControlPlaneContinuation(value, { sourceCommit: SHA, ancestor: true }), value)
+  for (const [candidate, ancestor] of [
+    [{ source_commit: SHA, changed_paths: ['scripts/local-flow.mjs'] }, true],
+    [{ source_commit: CONTROL_SHA, changed_paths: [] }, true],
+    [{ source_commit: CONTROL_SHA, changed_paths: ['packages/dsh/src/index.ts'] }, true],
+    [{ source_commit: CONTROL_SHA, changed_paths: ['scripts/local-flow.mjs', 'AGENTS.md'] }, true],
+    [{ source_commit: CONTROL_SHA, changed_paths: ['scripts/local-flow.mjs'] }, false],
+  ]) assert.throws(
+    () => validateControlPlaneContinuation(candidate, { sourceCommit: SHA, ancestor }),
+    /control-plane continuation is invalid/u,
+  )
+  assert.deepEqual(validateProductSourceEvidence(PRODUCT_SOURCE, SHA), PRODUCT_SOURCE)
+  for (const product of [
+    { ...PRODUCT_SOURCE, source_commit: 'b'.repeat(40) },
+    { ...PRODUCT_SOURCE, status: 'dirty' },
+    { ...PRODUCT_SOURCE, submodules: [] },
+    { ...PRODUCT_SOURCE, submodules: [{ path: '../escape', commit: '1'.repeat(40) }] },
+    { ...PRODUCT_SOURCE, submodules: [...PRODUCT_SOURCE.submodules, ...PRODUCT_SOURCE.submodules] },
+    { ...PRODUCT_SOURCE, unexpected: true },
+  ]) assert.throws(() => validateProductSourceEvidence(product, SHA), /product source evidence is invalid/u)
+})
+
+test('frozen-product Windows result import preserves the exact controller and product source binding', async () => {
+  const root = await temporary()
+  const context = { controlPlane: CONTROL_PLANE, productSource: PRODUCT_SOURCE }
+  try {
+    const remote = await windowsRemoteFixture(root, context)
+    await assert.rejects(
+      importWindowsRemoteResult(remote.returned, join(root, 'missing-context'), remote.run, remote.requestPath),
+      /control context drifted/u,
+    )
+    const imported = await importWindowsRemoteResult(
+      remote.returned, join(root, 'imported'), remote.run, remote.requestPath, join(root, 'manifest'), context,
+    )
+    assert.deepEqual(imported.primary, remote.fixture.primary)
+    await assert.rejects(importWindowsRemoteResult(
+      remote.returned, join(root, 'drifted'), remote.run, remote.requestPath, join(root, 'manifest-drifted'),
+      { ...context, productSource: { ...PRODUCT_SOURCE, source_commit: 'b'.repeat(40) } },
+    ), /product source evidence is invalid/u)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -1184,10 +1257,45 @@ test('local artifact receipts bind exact clean bytes and reject extra session or
 
 test('pollution gate rejects canaries, credentials, and developer absolute paths', () => {
   assert.doesNotThrow(() => assertCleanArtifactBytes(Buffer.from('ordinary packaged bytes'), 'fixture'))
+  assert.doesNotThrow(() => assertCleanArtifactBytes(Buffer.from('micromark-extension-gfm-autolink-literal'), 'fixture'))
+  assert.doesNotThrow(() => assertCleanArtifactBytes(Buffer.from('sk-quotedxx-stringxx-symbolx'), 'fixture'))
   assert.throws(() => assertCleanArtifactBytes(Buffer.from('release-canary'), 'fixture'), /canary marker/u)
   assert.throws(() => assertCleanArtifactBytes(Buffer.from('/Users/alice/project/private.json'), 'fixture'), /developer path/u)
   assert.throws(() => assertCleanArtifactBytes(Buffer.from('-----BEGIN PRIVATE KEY-----'), 'fixture'), /private key/u)
-  assert.throws(() => assertCleanArtifactBytes(Buffer.from(`sk-${'x'.repeat(24)}`), 'fixture'), /API secret/u)
+  for (const secret of [
+    `sk-${'x'.repeat(24)}`,
+    `{"token":"rk-${'y'.repeat(24)}"}`,
+    ` sess-${'z'.repeat(24)}`,
+    `sk-proj-${'p'.repeat(24)}`,
+  ]) assert.throws(() => assertCleanArtifactBytes(Buffer.from(secret), 'fixture'), /API secret/u)
+  assert.doesNotThrow(() => assertCleanArtifactBytes(Buffer.from(`ask-${'x'.repeat(24)}`), 'fixture'))
+  assert.equal(redactLog(`{"token":"sk-proj-${'p'.repeat(24)}"}`), '{"token":"<redacted-secret>"}')
+  assert.equal(redactLog(`ask-${'x'.repeat(24)}`), 'a<redacted-secret>')
+  assert.equal(redactLog('sk-quotedxx-stringxx-symbolx'), '<redacted-secret>')
+})
+
+test('artifact pollution scanner carries a real secret across stream chunks', async () => {
+  const root = await temporary()
+  try {
+    const name = 'e-Mate-2.0.15-win-x64-Setup.exe'
+    const bytes = Buffer.alloc(65_536 + 128, 0x2e)
+    pe().copy(bytes)
+    Buffer.from(` sk-${'x'.repeat(24)}`).copy(bytes, 65_530)
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    await mkdir(root, { recursive: true })
+    await writeFile(join(root, name), bytes)
+    await writeFile(join(root, 'local-artifact-receipt.json'), `${JSON.stringify({
+      schema_version: 1,
+      document_type: 'emate.local-desktop-artifact',
+      platform: 'windows',
+      source_commit: SHA,
+      version: '2.0.15',
+      files: [{ name, bytes: bytes.byteLength, sha256 }],
+    }, null, 2)}\n`)
+    await assert.rejects(verifyLocalArtifact(root, 'windows', SHA), /API secret/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('installed acceptance templates preserve unreferenced legacy evidence', async () => {
@@ -1223,6 +1331,40 @@ test('installed acceptance is version-bound and requires real higher-version lan
     assert.equal((await verifyInstalledAcceptanceReceipt(current, {
       platform: 'macos', sourceCommit: frozenSource, version: '2.0.15', candidateArtifact: frozenMac,
     })).status, 'passed')
+
+    const frozenWindows = {
+      name: 'e-Mate-2.0.15-win-x64-Setup.exe', bytes: 283536339,
+      sha256: '6ba140bff70451e79dd8ceb8dbcbae86281999e34a696d92022f028f040f161d',
+    }
+    const windows = await installedAcceptanceFixture(
+      join(root, 'current-windows'), 'windows', frozenWindows, { sourceCommit: frozenSource },
+    )
+    assert.equal((await verifyInstalledAcceptanceReceipt(windows, {
+      platform: 'windows', sourceCommit: frozenSource, version: '2.0.15', candidateArtifact: frozenWindows,
+    })).status, 'passed')
+
+    const wrongHost = JSON.parse(await readFile(windows, 'utf8'))
+    wrongHost.external_acceptance.host = 'OTHER-HOST'
+    await writeFile(windows, `${JSON.stringify(wrongHost, null, 2)}\n`)
+    await assert.rejects(verifyInstalledAcceptanceReceipt(windows, {
+      platform: 'windows', sourceCommit: frozenSource, version: '2.0.15', candidateArtifact: frozenWindows,
+    }), /installed acceptance summary is invalid/u)
+
+    for (const [name, mutate] of [
+      ['previous-version', installation => { installation.previous_version = '2.0.15' }],
+      ['previous-path', installation => { installation.previous_application_path = 'C:\\Other\\e-Mate.exe' }],
+      ['previous-shortcut', installation => { installation.previous_desktop_shortcut_target = 'C:\\Other\\e-Mate.exe' }],
+      ['final-directory', installation => { installation.installation_directory = 'C:\\Other' }],
+      ['final-shortcut', installation => { installation.start_menu_shortcut_target = 'C:\\Other\\e-Mate.exe' }],
+    ]) {
+      const path = await installedAcceptanceFixture(
+        join(root, `windows-${name}`), 'windows', frozenWindows, { sourceCommit: frozenSource },
+      )
+      await rewriteExternalAcceptance(path, external => mutate(external.installation))
+      await assert.rejects(verifyInstalledAcceptanceReceipt(path, {
+        platform: 'windows', sourceCommit: frozenSource, version: '2.0.15', candidateArtifact: frozenWindows,
+      }), /one installation directory and one shortcut set/u)
+    }
 
     await rewriteExternalAcceptance(current, external => {
       external.update_download = updateDownload('macos', frozenMac, '2.0.16', frozenSource)
@@ -1499,14 +1641,8 @@ test('protected signer public control input is closed-schema and host allowliste
   const unknownHost = structuredClone(run)
   unknownHost.platforms.windows.codex_remote.host = 'OTHER-HOST'
   assert.throws(() => validatePublicControlRun(unknownHost), /unknown host/u)
-  const fallbackHost = structuredClone(run)
-  fallbackHost.platforms.windows.codex_remote = {
-    ...fallbackHost.platforms.windows.codex_remote,
-    transport: 'codex-remote-handoff', host: 'DESKTOP-KH19ARC',
-  }
-  assert.equal(validatePublicControlRun(fallbackHost), fallbackHost)
   const mismatchedTransport = structuredClone(run)
-  mismatchedTransport.platforms.windows.codex_remote.transport = 'codex-remote-handoff'
+  mismatchedTransport.platforms.windows.codex_remote.transport = 'other-transport'
   assert.throws(() => validatePublicControlRun(mismatchedTransport), /unknown host|transport/u)
   const developerPath = structuredClone(run)
   developerPath.source_branch = '/Users/alice/private'
@@ -2586,7 +2722,8 @@ test('root package exposes one flow entry and keeps SSH as request transport, no
   assert.doesNotMatch(source, /\bgh\b|\bwrangler\b|\bUU\b|runLogged\(['"](?:ssh|scp)['"]/u)
   assert.equal([...source.matchAll(/\.github\/workflows\//gu)].length, 1)
   assert.match(source, /const COMPATIBILITY_WORKFLOW = '\.github\/workflows\/desktop-compatibility-attestation\.yml'/u)
-  assert.match(source, /preferred: 'ssh', fallback: 'codex-remote-handoff'/u)
+  assert.match(source, /const WINDOWS_BUILD_TRANSPORT = Object\.freeze\(\{ required: 'ssh' \}\)/u)
+  assert.match(ciWorkflow, /runs-on: windows-2025[\s\S]*?yarn dist:win/u)
   assert.match(ciWorkflow, /^on:\n\s+workflow_dispatch:/mu)
   assert.doesNotMatch(ciWorkflow, /^\s+(?:pull_request|push):/mu)
   const publish = source.slice(source.indexOf('async function publish'), source.indexOf('\nasync function rollback'))
