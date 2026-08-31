@@ -2444,7 +2444,9 @@ test('platform build skips Harness dev hooks in clean submodule copies', async (
     const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
     const start = source.indexOf('async function platformBuild')
     const projection = source.slice(start, source.indexOf('\n}\n\nasync function readWindowsRemoteRequest', start))
+    assert.match(projection, /stage: 'root-install',\s*run: \(\) => runPnpm\(\['install', '--frozen-lockfile'\]/u)
     assert.match(projection, /runPnpm\(\['--dir', 'upstream\/deepseek-harness', 'install', '--frozen-lockfile'\], \{\s*cwd: sourceRoot, log, env: \{ \.\.\.buildEnv, CI: 'true' \},\s*\}\)/u)
+    assert.match(projection, /stage: 'profile-build',\s*run: \(\) => runPnpm\(\['--config\.shell-emulator=true', '--filter', '@e-mate\/dsh', 'build'\]/u)
     const order = ['release-boundary', 'harness-host-client-web', 'component-emitted-abi', 'desktop-package']
       .map(stage => projection.indexOf(`stage: '${stage}'`))
     assert.equal(order.every((offset, index) => offset >= 0 && (index === 0 || offset > order[index - 1])), true)
