@@ -20,6 +20,69 @@ env:
   DSH_TELEMETRY_DISABLED: '1'
 
 jobs:
+  fallback-windows-588:
+    name: Windows x64 / exact 2.0.15 fallback
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_candidate && github.ref == 'refs/heads/build/2.0.15-windows-588' }}
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      PRODUCT_SOURCE_COMMIT: 588c80ccbee572077f47c0ad3a904c8c00cfa004
+      ELECTRON_CACHE: ${{ github.workspace }}/.release-cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/../e-mate-electron-builder
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 588c80ccbee572077f47c0ad3a904c8c00cfa004
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.15.0'
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - run: corepack enable
+
+      - name: Expose the runner's existing Git POSIX tools
+        shell: pwsh
+        run: |
+          $gitUsrBin = Join-Path $env:ProgramFiles 'Git\usr\bin'
+          if (-not (Test-Path -LiteralPath (Join-Path $gitUsrBin 'rm.exe'))) { throw 'Git rm.exe is unavailable' }
+          $gitUsrBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Restore Electron and electron-builder tool downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ELECTRON_CACHE }}
+            ${{ env.ELECTRON_BUILDER_CACHE }}
+          key: desktop-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/package.json', 'desktop/yarn.lock', 'desktop/.yarn/patches/**', 'desktop/e-mate-desktop/package.json', 'desktop/e-mate-desktop/scripts/package-dir.mjs', 'desktop/e-mate-desktop/scripts/package-win.ts', 'desktop/e-mate-desktop/scripts/verify-win-installer.ts', 'desktop/e-mate-desktop/build/app-icon.png') }}
+
+      - name: Build the exact frozen Windows candidate
+        shell: pwsh
+        run: >-
+          corepack pnpm run flow -- _platform-build
+          --platform windows
+          --out .release-cache/fallback/artifacts/windows
+          --source-commit $env:PRODUCT_SOURCE_COMMIT
+          --manifest-out .release-cache/fallback/manifest-inputs/windows
+
+      - name: Stage the build log with the fallback evidence
+        shell: pwsh
+        run: Move-Item -LiteralPath .release-cache/fallback/artifacts/windows.log -Destination .release-cache/fallback/windows.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e-mate-desktop-windows-fallback-588c80ccbee572077f47c0ad3a904c8c00cfa004
+          path: .release-cache/fallback
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 30
+
   impact:
     name: Release impact contract
     runs-on: ubuntu-24.04
