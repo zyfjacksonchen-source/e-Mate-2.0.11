@@ -10,8 +10,8 @@ This overlay supersedes the older “current” labels below without rewriting t
 | --- | --- |
 | Clean integration anchor | `release/2.0.15-final-integration-r6@d80e56bb09f9181a8030c27ce569f986fb59f62f` |
 | Protected main readback | `origin/main@236aaa4f80598f07bf8f59848c217b9a60155d82` |
-| Current source Base | `e-mate-desktop-profile-v14-dsh-d19aae6da310` |
-| Current Harness gitlink | `d19aae6da3100e836867418c2cf73bdee8a0b1a8` |
+| Current source Base | `e-mate-desktop-profile-v15-dsh-32728743c289` |
+| Current Harness gitlink | `32728743c28911bcd4279f79fe9c43ee7aacfb6d` |
 | Managed source versions | 19 packages at `2.0.15`; final release version not yet frozen |
 | Exact candidate at this anchor | none; older `d882457…` and earlier artifacts are historical and inadmissible |
 | Windows transport | SSH and Codex Remote reachable; Windows Computer Use is `ALLOWED_UNAVAILABLE / NOT_APPLICABLE` only |

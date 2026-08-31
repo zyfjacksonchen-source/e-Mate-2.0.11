@@ -367,7 +367,7 @@ test('online updates admit only one live detached helper', () => {
 
 test('runtime resolves only the exact Harness source', () => {
   const runtime = resolveHarness()
-  assert.equal(HARNESS_COMMIT, 'd19aae6da3100e836867418c2cf73bdee8a0b1a8')
+  assert.equal(HARNESS_COMMIT, '32728743c28911bcd4279f79fe9c43ee7aacfb6d')
   assert.equal(runtime.version, HARNESS_VERSION)
   assert.equal(runtime.commit, HARNESS_COMMIT)
   assert.ok(['development-source', 'packaged-runtime'].includes(runtime.source))

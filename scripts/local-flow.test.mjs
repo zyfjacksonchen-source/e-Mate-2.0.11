@@ -399,7 +399,7 @@ function manifestInputsFixture() {
     ledger: descriptor('manifest-inputs/manifest-inputs.json'),
     base_contract: {
       ...descriptor('manifest-inputs/platforms/macos/base-contract.json'),
-      id: 'e-mate-desktop-profile-v14-dsh-d19aae6da310',
+      id: 'e-mate-desktop-profile-v15-dsh-32728743c289',
       schedule_protocol_floor: 1,
       harness_commit: '1'.repeat(40),
       trusted_signing_key_ids: ['e0a81164526dcbcd'],
