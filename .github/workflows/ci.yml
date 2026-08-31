@@ -62,23 +62,53 @@ jobs:
             ${{ env.ELECTRON_BUILDER_CACHE }}
           key: desktop-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/package.json', 'desktop/yarn.lock', 'desktop/.yarn/patches/**', 'desktop/e-mate-desktop/package.json', 'desktop/e-mate-desktop/scripts/package-dir.mjs', 'desktop/e-mate-desktop/scripts/package-win.ts', 'desktop/e-mate-desktop/scripts/verify-win-installer.ts', 'desktop/e-mate-desktop/build/app-icon.png') }}
 
-      - name: Build the exact frozen Windows candidate
+      - name: Verify the exact frozen product checkout
         shell: pwsh
-        run: >-
-          corepack pnpm run flow -- _platform-build
-          --platform windows
-          --out .release-cache/fallback/artifacts/windows
-          --source-commit $env:PRODUCT_SOURCE_COMMIT
-          --manifest-out .release-cache/fallback/manifest-inputs/windows
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:PRODUCT_SOURCE_COMMIT) { throw 'Product source commit drifted' }
+          if (git status --porcelain=v1 --untracked-files=all) { throw 'Product source checkout is dirty' }
 
-      - name: Stage the build log with the fallback evidence
+      - name: Install the exact root and Harness closures
         shell: pwsh
-        run: Move-Item -LiteralPath .release-cache/fallback/artifacts/windows.log -Destination .release-cache/fallback/windows.log
+        run: |
+          corepack pnpm install --frozen-lockfile
+          $env:CI = 'true'
+          corepack pnpm --dir upstream/deepseek-harness install --frozen-lockfile
+
+      - name: Build Harness, retained components, and Profile
+        shell: pwsh
+        run: |
+          corepack pnpm run build:harness
+          corepack pnpm exec node scripts/component-run.mjs build
+          corepack pnpm --config.shell-emulator=true --filter @e-mate/dsh build
+
+      - name: Prepare the exact offline Windows Vision runtime
+        run: python packages/dsh-plugin-vision-toolkit/scripts/prepare-wheels.py --root packages/dsh-plugin-vision-toolkit --targets win32-x64
+
+      - name: Install the exact desktop closure
+        working-directory: desktop
+        run: yarn install --immutable
+
+      - name: Build and verify the formal unsigned Windows installer
+        working-directory: desktop
+        run: yarn dist:win
+
+      - name: Verify the source Loader and Profile owners
+        working-directory: desktop/e-mate-desktop
+        run: |
+          yarn verify:loader
+          yarn verify:profile
+
+      - name: Stage only the verified formal Windows bytes
+        shell: pwsh
+        run: |
+          $version = node -p "require('./desktop/e-mate-desktop/package.json').version"
+          node scripts/stage-desktop-ci-artifact.mjs stage --platform win32 --source-commit $env:PRODUCT_SOURCE_COMMIT --ci-run-id $env:GITHUB_RUN_ID --base-contract desktop/e-mate-desktop/base-contract.json --source desktop/e-mate-desktop/dist --out .release-cache/fallback/artifacts/windows --version $version
 
       - uses: actions/upload-artifact@v4
         with:
           name: e-mate-desktop-windows-fallback-588c80ccbee572077f47c0ad3a904c8c00cfa004
-          path: .release-cache/fallback
+          path: .release-cache/fallback/artifacts/windows
           compression-level: 0
           if-no-files-found: error
           retention-days: 30
