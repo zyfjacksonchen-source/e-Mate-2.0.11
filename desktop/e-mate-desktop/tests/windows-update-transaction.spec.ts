@@ -111,16 +111,23 @@ describe('pinned assisted-NSIS atomic update seam', () => {
     expect(coordinator).toContain('Write-ManualShutdown $request')
   })
 
-  it('secures the current-user update mailbox without privileged owner or SACL writes', () => {
+  it('sets the current-user owner before protecting the update mailbox ACL', () => {
     const coordinator = source('build/windows-update-transaction.ps1')
     const secureDirectory = coordinator.slice(
       coordinator.indexOf('function Set-PrivateDirectoryAcl'),
       coordinator.indexOf('function Get-InstallerAdmission'),
     )
-    expect(secureDirectory).toContain('& icacls.exe $Path')
+    const setOwner = secureDirectory.indexOf("'/setowner'")
+    const protectAcl = secureDirectory.indexOf("'/inheritance:r'")
+    const verifyAcl = secureDirectory.indexOf('Assert-MailboxAcl $Path $OwnerSid')
+    expect(secureDirectory.match(/& icacls\.exe \$Path/gu)).toHaveLength(2)
+    expect(secureDirectory).toContain('"*${OwnerSid}"')
+    expect(secureDirectory).toContain("'failed to set update mailbox owner'")
+    expect(setOwner).toBeGreaterThan(0)
+    expect(setOwner).toBeLessThan(protectAcl)
+    expect(protectAcl).toBeLessThan(verifyAcl)
     expect(secureDirectory).toContain("'/inheritance:r'")
     expect(secureDirectory).toContain("'/grant:r'")
-    expect(secureDirectory).toContain('Assert-MailboxAcl $Path $OwnerSid')
     expect(coordinator).toContain('$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value')
     expect(secureDirectory).not.toContain('Set-Acl')
     expect(secureDirectory).not.toContain('.SetOwner(')

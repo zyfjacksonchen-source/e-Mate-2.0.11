@@ -238,6 +238,8 @@ function Assert-MailboxAcl([string]$MailboxPath, [string]$OwnerSid) {
 }
 
 function Set-PrivateDirectoryAcl([string]$Path, [string]$OwnerSid) {
+  & icacls.exe $Path '/setowner' "*${OwnerSid}" | Out-Null
+  Assert-True ($LASTEXITCODE -eq 0) 'failed to set update mailbox owner'
   & icacls.exe $Path `
     '/inheritance:r' `
     '/grant:r' `
