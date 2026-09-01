@@ -1260,7 +1260,7 @@ async function runPnpm(args, options) {
 }
 
 export function desktopPackageEnvironment(platform, env) {
-  return platform === 'windows' ? { ...env, NODE_OPTIONS: '--max-old-space-size=256' } : env
+  return platform === 'windows' ? { ...env, NODE_OPTIONS: '--max-old-space-size=1024' } : env
 }
 
 async function runYarn(args, options) {

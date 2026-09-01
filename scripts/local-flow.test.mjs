@@ -802,7 +802,7 @@ test('candidate retries only the failed side and reuses an unchanged passed side
 test('Windows desktop packaging bounds only its child Node heap', () => {
   const inherited = { PATH: 'C:/tools', NODE_OPTIONS: '--require=C:/foreign.cjs' }
   assert.deepEqual(desktopPackageEnvironment('windows', inherited), {
-    PATH: 'C:/tools', NODE_OPTIONS: '--max-old-space-size=256',
+    PATH: 'C:/tools', NODE_OPTIONS: '--max-old-space-size=1024',
   })
   assert.strictEqual(desktopPackageEnvironment('macos', inherited), inherited)
   assert.equal(inherited.NODE_OPTIONS, '--require=C:/foreign.cjs')
