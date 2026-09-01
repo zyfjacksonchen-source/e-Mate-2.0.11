@@ -374,16 +374,18 @@ describe('Electron compatibility runtime', () => {
   })
 
   it('fences every file action to the live session workspace and rejects path escape', async () => {
+    const hostPlatform = process.platform
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const root = mkdtempSync(join(tmpdir(), 'e-mate-resource-root-'))
     const outside = mkdtempSync(join(tmpdir(), 'e-mate-resource-outside-'))
     const source = join(root, '报告.txt')
     const copied = join(root, '报告-copy.txt')
     const outsideFile = join(outside, 'outside.txt')
-    const escape = join(root, 'escape.txt')
+    const escape = join(root, 'escape')
+    const escapedFile = join(escape, 'outside.txt')
     writeFileSync(source, 'artifact bytes')
     writeFileSync(outsideFile, 'outside bytes')
-    symlinkSync(outsideFile, escape)
+    symlinkSync(outside, escape, hostPlatform === 'win32' ? 'junction' : 'dir')
     try {
       const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
       const runtime = new ElectronDesktopRuntime(async () => {})
@@ -429,7 +431,7 @@ describe('Electron compatibility runtime', () => {
         action: 'reveal', resource: { ...resource, root: outside, path: outsideFile },
       })).rejects.toThrow('resource workspace does not match its session')
       await expect(runResource({ sender: electron.webContents }, {
-        action: 'reveal', resource: { ...resource, path: escape },
+        action: 'reveal', resource: { ...resource, path: escapedFile },
       })).rejects.toThrow('resource is not a regular workspace file')
       await expect(runResource({ sender: electron.webContents }, {
         action: 'reveal', resource: { ...resource, path: join(root, 'missing.txt') },
