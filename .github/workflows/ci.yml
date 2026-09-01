@@ -20,19 +20,19 @@ env:
   DSH_TELEMETRY_DISABLED: '1'
 
 jobs:
-  fallback-windows-588:
+  fallback-windows-2e9eb12e:
     name: Windows x64 / exact 2.0.15 fallback
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_candidate && github.ref == 'refs/heads/build/2.0.15-windows-588' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_candidate && github.ref == 'refs/heads/build/2.0.15-windows-2e9eb12e' }}
     runs-on: windows-2025
     timeout-minutes: 90
     env:
-      PRODUCT_SOURCE_COMMIT: 588c80ccbee572077f47c0ad3a904c8c00cfa004
+      PRODUCT_SOURCE_COMMIT: 2e9eb12e00c615e712de1e5f31aafd67fa6a4d7c
       ELECTRON_CACHE: ${{ github.workspace }}/.release-cache/electron
       ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/../e-mate-electron-builder
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: 588c80ccbee572077f47c0ad3a904c8c00cfa004
+          ref: 2e9eb12e00c615e712de1e5f31aafd67fa6a4d7c
           fetch-depth: 0
           persist-credentials: false
           submodules: recursive
@@ -112,7 +112,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: e-mate-desktop-windows-fallback-588c80ccbee572077f47c0ad3a904c8c00cfa004
+          name: e-mate-desktop-windows-fallback-2e9eb12e00c615e712de1e5f31aafd67fa6a4d7c
           path: .release-cache/fallback/artifacts/windows
           compression-level: 0
           if-no-files-found: error
