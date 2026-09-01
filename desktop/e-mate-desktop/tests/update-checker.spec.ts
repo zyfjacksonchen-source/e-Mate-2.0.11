@@ -1,185 +1,23 @@
-import { generateKeyPairSync, sign } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  DESKTOP_CURRENT_VERSION_HEADER,
   DESKTOP_VERSION_ENDPOINT,
   MAX_VERSION_RESPONSE_BYTES,
-  checkForStableUpdate as checkForStableUpdateRaw,
+  checkForStableUpdate,
   compareSemVerVersions,
+  desktopVersionRequestHeaders,
   parseSemVer,
-  validateUnsignedAdmittedDesktopReleaseManifest,
-  type DesktopReleaseSigningKey,
-  type UpdateCheckOptions,
   type UpdateRequest,
 } from '../src/update-checker.ts'
+import {
+  assertDesktopInstallationId,
+  DESKTOP_INSTALLATION_ID_HEADER,
+} from '../src/desktop-installation-id.ts'
 
-const SOURCE_COMMIT = 'a'.repeat(40)
-const MANIFEST_SIGNATURE_CONTEXT = Buffer.from('e-mate-desktop-release-manifest-v2\0', 'utf8')
-const MANIFEST_SIGNATURE_CONTEXT_V3 = Buffer.from('e-mate-desktop-release-manifest-v3\0', 'utf8')
-const MANIFEST_SIGNATURE_CONTEXT_V4 = Buffer.from('e-mate-desktop-release-manifest-v4\0', 'utf8')
-const LOCAL_RUN_ID = `20260831T120000Z-${'b'.repeat(12)}-${'c'.repeat(6)}`
-const { privateKey: manifestPrivateKey, publicKey: manifestPublicKey } = generateKeyPairSync('ed25519')
-const TRUSTED_MANIFEST_KEYS: readonly DesktopReleaseSigningKey[] = [{
-  id: 'desktop-release-test-key',
-  algorithm: 'ed25519',
-  public_key_spki_der_base64: manifestPublicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
-}]
+const INSTALLATION_ID = assertDesktopInstallationId('01234567-89ab-4cde-8f01-23456789abcd')
 
-function checkForStableUpdate(
-  options: Omit<UpdateCheckOptions, 'trustedManifestKeys'> & Pick<Partial<UpdateCheckOptions>, 'trustedManifestKeys'>,
-) {
-  return checkForStableUpdateRaw({
-    ...options,
-    trustedManifestKeys: options.trustedManifestKeys ?? TRUSTED_MANIFEST_KEYS,
-  })
-}
-
-function versionResponse(version: unknown, scheduleProtocolFloor: unknown = 1, init: ResponseInit = {}): Response {
-  return Response.json(versionManifest(version, scheduleProtocolFloor), init)
-}
-
-function versionManifest(version: unknown, scheduleProtocolFloor: unknown = 1): Record<string, unknown> {
-  const release = typeof version === 'string' ? version : 'invalid'
-  return signManifest({
-    schema_version: 2,
-    document_type: 'emate.desktop-release-manifest',
-    release_status: 'admitted',
-    version,
-    source_commit: SOURCE_COMMIT,
-    base_contract_id: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
-    schedule_protocol_floor: scheduleProtocolFloor,
-    profile_component_aggregate: profileComponentAggregateSummary(),
-    github_artifact_provenance: githubArtifactProvenance(),
-    artifacts: {
-      darwin: manifestArtifact(release, 'darwin'),
-      win32: manifestArtifact(release, 'win32'),
-    },
-  })
-}
-
-function signManifest(
-  manifest: Record<string, unknown>,
-  context: Buffer = MANIFEST_SIGNATURE_CONTEXT,
-): Record<string, unknown> {
-  const value = sign(
-    null,
-    Buffer.concat([context, Buffer.from(canonicalJson(manifest), 'utf8')]),
-    manifestPrivateKey,
-  ).toString('base64')
-  return {
-    ...manifest,
-    signature: { algorithm: 'ed25519', key_id: TRUSTED_MANIFEST_KEYS[0]!.id, value },
-  }
-}
-
-function signedMutation(mutate: (manifest: Record<string, any>) => void): Record<string, unknown> {
-  const { signature: _, ...unsigned } = versionManifest('2.1.0')
-  mutate(unsigned)
-  return signManifest(unsigned)
-}
-
-function expectedCheckFailure(code: string, httpStatus?: number) {
-  return {
-    status: 'failed',
-    code,
-    retryable: ['check-network-failed', 'check-timeout', 'check-cancelled', 'check-http-failed'].includes(code),
-    ...(httpStatus === undefined ? {} : { httpStatus }),
-  }
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value)
-  if (typeof value === 'number') return String(value)
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
-  const record = value as Record<string, unknown>
-  return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`
-}
-
-function releaseArtifact(version: string, platform: 'darwin' | 'win32') {
-  return {
-    url: `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v${encodeURIComponent(version)}/${SOURCE_COMMIT}/e-Mate-${version}-${platform === 'darwin' ? 'mac-universal.dmg' : 'win-x64-Setup.exe'}`,
-    bytes: 1024,
-    sha256: '0'.repeat(64),
-  }
-}
-
-function manifestArtifact(version: string, platform: 'darwin' | 'win32') {
-  return {
-    ...releaseArtifact(version, platform),
-    build_source_commit: SOURCE_COMMIT,
-    build_run_id: platform === 'darwin' ? '123' : '456',
-  }
-}
-
-function profileComponentAggregateSummary() {
-  return {
-    aggregate_sha256: '1'.repeat(64),
-    inventory_sha256: '2'.repeat(64),
-    staged_profile_tree_sha256: '3'.repeat(64),
-    targets: ['darwin-arm64', 'darwin-x64', 'win32-x64'].map(target => ({
-      target,
-      profile_generation: '5'.repeat(64),
-      component_aggregate_sha256: '6'.repeat(64),
-    })),
-  }
-}
-
-function githubArtifactProvenance() {
-  return {
-    schema_version: 1,
-    document_type: 'emate.github-artifact-provenance',
-    source_commit: SOURCE_COMMIT,
-    artifacts: [
-      {
-        role: 'desktop_candidate',
-        name: `e-mate-desktop-release-${SOURCE_COMMIT}`,
-        artifact_id: '11',
-        digest: `sha256:${'7'.repeat(64)}`,
-        run_id: '123',
-        run_attempt: 1,
-      },
-    ],
-  }
-}
-
-function localVersionManifest(version = '2.1.0'): Record<string, unknown> {
-  const artifacts = {
-    darwin: releaseArtifact(version, 'darwin'),
-    win32: releaseArtifact(version, 'win32'),
-  }
-  const unsigned = {
-    schema_version: 4,
-    document_type: 'emate.desktop-release-manifest',
-    release_status: 'admitted',
-    version,
-    source_commit: SOURCE_COMMIT,
-    base_contract_id: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
-    schedule_protocol_floor: 1,
-    profile_component_aggregate: profileComponentAggregateSummary(),
-    local_publication_provenance: {
-      schema_version: 1,
-      document_type: 'emate.local-publication-provenance',
-      run_id: LOCAL_RUN_ID,
-      publication_request_sha256: '7'.repeat(64),
-      manifest_input_ledger_sha256: '8'.repeat(64),
-      version,
-      source_commit: SOURCE_COMMIT,
-      base_contract_id: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
-      profile_component_aggregate_sha256: '1'.repeat(64),
-      artifacts: {
-        darwin: { ...artifacts.darwin },
-        win32: { ...artifacts.win32 },
-      },
-    },
-    artifacts,
-    update_policy: { mandatory: false, minimum_supported_version: '2.0.13' },
-  }
-  return signManifest(unsigned, MANIFEST_SIGNATURE_CONTEXT_V4)
-}
-
-function signedLocalMutation(mutate: (manifest: Record<string, any>) => void): Record<string, unknown> {
-  const { signature: _, ...unsigned } = localVersionManifest()
-  mutate(unsigned)
-  return signManifest(unsigned, MANIFEST_SIGNATURE_CONTEXT_V4)
+function versionResponse(version: unknown, init: ResponseInit = {}): Response {
+  return Response.json({ version }, init)
 }
 
 describe('strict SemVer parsing', () => {
@@ -211,7 +49,7 @@ describe('strict SemVer parsing', () => {
   })
 
   it('compares strict versions without numeric overflow', () => {
-    expect(compareSemVerVersions('2.1.0', '2.0.10')).toBeGreaterThan(0)
+    expect(compareSemVerVersions('2.1.0', '2.0.9')).toBeGreaterThan(0)
     expect(compareSemVerVersions('2.0.0-rc.1', '2.0.0')).toBeLessThan(0)
     expect(compareSemVerVersions('2.0', '2.0.0')).toBeNull()
     expect(compareSemVerVersions(
@@ -222,107 +60,6 @@ describe('strict SemVer parsing', () => {
 })
 
 describe('public Desktop version check', () => {
-  it('accepts a signed v4 manifest bound to one local publication request and immutable R2 artifacts', async () => {
-    const manifest = localVersionManifest()
-    const { signature: _, ...unsigned } = manifest
-    expect(validateUnsignedAdmittedDesktopReleaseManifest(unsigned)).toBe(true)
-
-    await expect(checkForStableUpdate({
-      platform: 'win32',
-      currentVersion: '2.0.15',
-      currentScheduleProtocolFloor: 1,
-      request: async () => Response.json(manifest),
-    })).resolves.toMatchObject({
-      status: 'update-available',
-      latestVersion: '2.1.0',
-      sourceCommit: SOURCE_COMMIT,
-      baseContractId: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
-      artifact: releaseArtifact('2.1.0', 'win32'),
-      mandatory: false,
-      minimumSupportedVersion: '2.0.13',
-    })
-  })
-
-  it.each([
-    ['run identity', (manifest: Record<string, any>) => { manifest.local_publication_provenance.run_id = '123' }],
-    ['publication request', (manifest: Record<string, any>) => { manifest.local_publication_provenance.publication_request_sha256 = 'x'.repeat(64) }],
-    ['manifest input ledger', (manifest: Record<string, any>) => { manifest.local_publication_provenance.manifest_input_ledger_sha256 = 'x'.repeat(64) }],
-    ['version', (manifest: Record<string, any>) => { manifest.local_publication_provenance.version = '2.1.1' }],
-    ['source', (manifest: Record<string, any>) => { manifest.local_publication_provenance.source_commit = 'b'.repeat(40) }],
-    ['Base', (manifest: Record<string, any>) => { manifest.local_publication_provenance.base_contract_id = 'e-mate-desktop-profile-v8-dsh-b2b1650b01f0' }],
-    ['Profile aggregate', (manifest: Record<string, any>) => { manifest.local_publication_provenance.profile_component_aggregate_sha256 = '9'.repeat(64) }],
-    ['macOS artifact bytes', (manifest: Record<string, any>) => { manifest.local_publication_provenance.artifacts.darwin.bytes += 1 }],
-    ['Windows artifact URL', (manifest: Record<string, any>) => { manifest.local_publication_provenance.artifacts.win32.url = 'https://example.com/update.exe' }],
-    ['developer path', (manifest: Record<string, any>) => { manifest.local_publication_provenance.path = '/tmp/local-run' }],
-    ['prompt content', (manifest: Record<string, any>) => { manifest.local_publication_provenance.prompt = 'private content' }],
-    ['GitHub identity', (manifest: Record<string, any>) => { manifest.local_publication_provenance.github_run_id = '123' }],
-    ['GitHub provenance', (manifest: Record<string, any>) => { manifest.github_artifact_provenance = githubArtifactProvenance() }],
-  ])('rejects re-signed v4 local provenance with unbound %s', async (_label, mutate) => {
-    await expect(checkForStableUpdate({
-      platform: 'darwin',
-      currentVersion: '2.0.15',
-      currentScheduleProtocolFloor: 1,
-      request: async () => Response.json(signedLocalMutation(mutate)),
-    })).resolves.toEqual(expectedCheckFailure('check-manifest-invalid'))
-  })
-
-  it('rejects a re-signed v4 artifact even when provenance agrees on a non-R2 URL', async () => {
-    const manifest = signedLocalMutation(value => {
-      value.artifacts.win32.url = 'https://example.com/update.exe'
-      value.local_publication_provenance.artifacts.win32.url = value.artifacts.win32.url
-    })
-    await expect(checkForStableUpdate({
-      platform: 'win32',
-      currentVersion: '2.0.15',
-      currentScheduleProtocolFloor: 1,
-      request: async () => Response.json(manifest),
-    })).resolves.toEqual(expectedCheckFailure('check-artifact-invalid'))
-  })
-
-  it('uses a signature context independent from schema v3', async () => {
-    const { signature: _, ...unsigned } = localVersionManifest()
-    const wrongContext = signManifest(unsigned, MANIFEST_SIGNATURE_CONTEXT_V3)
-    await expect(checkForStableUpdate({
-      platform: 'darwin',
-      currentVersion: '2.0.15',
-      currentScheduleProtocolFloor: 1,
-      request: async () => Response.json(wrongContext),
-    })).resolves.toEqual(expectedCheckFailure('check-signature-invalid'))
-  })
-
-  it('accepts mandatory and minimum-supported policy only from a signed v3 manifest', async () => {
-    const { signature: _, ...v2 } = versionManifest('2.1.0')
-    const unsigned = {
-      ...v2,
-      schema_version: 3,
-      update_policy: {
-        mandatory: true,
-        minimum_supported_version: '2.0.5',
-      },
-    }
-    const manifest = signManifest(unsigned, MANIFEST_SIGNATURE_CONTEXT_V3)
-
-    await expect(checkForStableUpdate({
-      platform: 'darwin',
-      currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
-      request: async () => Response.json(manifest),
-    })).resolves.toMatchObject({
-      status: 'update-available',
-      latestVersion: '2.1.0',
-      mandatory: true,
-      minimumSupportedVersion: '2.0.5',
-    })
-
-    ;(manifest.update_policy as Record<string, unknown>).mandatory = false
-    await expect(checkForStableUpdate({
-      platform: 'darwin',
-      currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
-      request: async () => Response.json(manifest),
-    })).resolves.toEqual(expectedCheckFailure('check-signature-invalid'))
-  })
-
   it('uses only the fixed no-cache version endpoint and reports a newer stable version', async () => {
     const controller = new AbortController()
     const calls: Array<{ url: string, init: RequestInit }> = []
@@ -332,26 +69,18 @@ describe('public Desktop version check', () => {
     }
 
     await expect(checkForStableUpdate({
-      platform: 'darwin',
       currentVersion: '2.9.9',
-      currentScheduleProtocolFloor: 1,
+      installationId: INSTALLATION_ID,
       signal: controller.signal,
       request,
     })).resolves.toEqual({
       status: 'update-available',
       currentVersion: '2.9.9',
       latestVersion: '2.10.0',
-      sourceCommit: SOURCE_COMMIT,
-      baseContractId: 'e-mate-desktop-profile-v7-dsh-b2b1650b01f0',
-      scheduleProtocolFloor: 1,
-      manifestIdentity: expect.stringMatching(/^[0-9a-f]{64}$/u),
-      artifact: releaseArtifact('2.10.0', 'darwin'),
     })
 
     expect(calls).toHaveLength(1)
     expect(calls[0]?.url).toBe(DESKTOP_VERSION_ENDPOINT)
-    expect(calls[0]?.url).toBe('https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/signed/latest.json')
-    expect(calls[0]?.url).not.toBe('https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/latest.json')
     expect(calls[0]?.url).not.toContain('/api/downloads/')
     expect(calls[0]?.init).toMatchObject({
       method: 'GET',
@@ -361,84 +90,44 @@ describe('public Desktop version check', () => {
     })
     const headers = new Headers(calls[0]?.init.headers)
     expect(headers.get('accept')).toBe('application/json')
+    expect(headers.get(DESKTOP_CURRENT_VERSION_HEADER)).toBe('2.9.9')
+    expect(headers.get(DESKTOP_INSTALLATION_ID_HEADER)).toBe(INSTALLATION_ID)
     expect(headers.has('if-none-match')).toBe(false)
     expect(headers.has('x-github-api-version')).toBe(false)
   })
 
-  it('uses one canonical identity independent of JSON whitespace and key order', async () => {
-    const manifest = versionManifest('2.1.0')
-    const reversed = Object.fromEntries(Object.entries(manifest).reverse())
-    const check = (body: string) => checkForStableUpdate({
-      platform: 'darwin',
-      currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
-      request: async () => new Response(body, { headers: { 'content-type': 'application/json' } }),
+  it('builds a bounded version-check header set and rejects malformed identities', () => {
+    expect(desktopVersionRequestHeaders(INSTALLATION_ID)).toEqual({
+      Accept: 'application/json',
+      [DESKTOP_INSTALLATION_ID_HEADER]: INSTALLATION_ID,
     })
-
-    const normal = await check(JSON.stringify(manifest))
-    const reordered = await check(JSON.stringify(reversed, null, 2))
-    expect(normal).toMatchObject({ status: 'update-available' })
-    expect(reordered).toMatchObject({ status: 'update-available' })
-    expect((normal as Extract<typeof normal, { status: 'update-available' }>).manifestIdentity)
-      .toBe((reordered as Extract<typeof reordered, { status: 'update-available' }>).manifestIdentity)
+    expect(desktopVersionRequestHeaders(INSTALLATION_ID, '2.9.9')).toEqual({
+      Accept: 'application/json',
+      [DESKTOP_CURRENT_VERSION_HEADER]: '2.9.9',
+      [DESKTOP_INSTALLATION_ID_HEADER]: INSTALLATION_ID,
+    })
+    expect(desktopVersionRequestHeaders()).toEqual({ Accept: 'application/json' })
+    expect(() => desktopVersionRequestHeaders(undefined, '2.9.0-rc.1')).toThrow('canonical stable SemVer')
+    expect(() => desktopVersionRequestHeaders('not-a-uuid')).toThrow('canonical lowercase UUID v4')
   })
 
-  it.each([
-    ['missing signature', () => {
-      const { signature: _, ...unsigned } = versionManifest('2.1.0')
-      return unsigned
-    }],
-    ['unknown key', () => {
-      const manifest = versionManifest('2.1.0') as Record<string, any>
-      manifest.signature.key_id = 'unknown-key'
-      return manifest
-    }],
-    ['malformed signature', () => {
-      const manifest = versionManifest('2.1.0') as Record<string, any>
-      manifest.signature.value = 'not base64'
-      return manifest
-    }],
-    ['signature field drift', () => {
-      const manifest = versionManifest('2.1.0') as Record<string, any>
-      manifest.signature.note = 'unexpected'
-      return manifest
-    }],
-    ['mutated signed body', () => {
-      const manifest = versionManifest('2.1.0') as Record<string, any>
-      manifest.artifacts.win32.sha256 = '9'.repeat(64)
-      return manifest
-    }],
-    ['wrong signature context', () => {
-      const { signature: _, ...unsigned } = versionManifest('2.1.0')
-      return signManifest(unsigned, Buffer.from('other-release-context\0', 'utf8'))
-    }],
-  ])('fails closed for a manifest with %s', async (_case, fixture) => {
+  it('skips the fixed endpoint when an invalid installation identity reaches the checker', async () => {
+    const request = vi.fn(async () => versionResponse('2.1.0'))
     await expect(checkForStableUpdate({
-      platform: 'darwin',
       currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
-      request: async () => Response.json(fixture()),
-    })).resolves.toEqual(expectedCheckFailure('check-signature-invalid'))
-  })
-
-  it('fails closed when the installed Base supplies no matching trust root', async () => {
-    await expect(checkForStableUpdate({
-      platform: 'darwin',
-      currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
-      trustedManifestKeys: [],
-      request: async () => versionResponse('2.1.0'),
-    })).resolves.toEqual(expectedCheckFailure('check-signature-invalid'))
+      installationId: 'not-a-uuid' as never,
+      request,
+    })).resolves.toBeNull()
+    expect(request).not.toHaveBeenCalled()
   })
 
   it.each([
     ['2.0.0', '2.0.0'],
     ['2.0.1', '2.0.0'],
+    ['2.0.0+installed', '2.0.0+release'],
   ])('reports no update for installed %s and service %s', async (currentVersion, latestVersion) => {
     await expect(checkForStableUpdate({
-      platform: 'darwin',
       currentVersion,
-      currentScheduleProtocolFloor: 1,
       request: async () => versionResponse(latestVersion),
     })).resolves.toEqual({
       status: 'up-to-date',
@@ -447,223 +136,74 @@ describe('public Desktop version check', () => {
     })
   })
 
-  it('never turns a correctly signed lower version into a rollback install', async () => {
-    await expect(checkForStableUpdate({
-      platform: 'win32',
-      currentVersion: '2.0.13',
-      currentScheduleProtocolFloor: 1,
-      request: async () => versionResponse('2.0.12'),
-    })).resolves.toEqual({
-      status: 'up-to-date',
-      currentVersion: '2.0.13',
-      latestVersion: '2.0.12',
-    })
-  })
-
   it('compares service versions without overflowing JavaScript numbers', async () => {
     await expect(checkForStableUpdate({
-      platform: 'darwin',
       currentVersion: '9007199254740992.0.0',
-      currentScheduleProtocolFloor: 1,
       request: async () => versionResponse('10000000000000000.0.0'),
     })).resolves.toMatchObject({ status: 'update-available' })
   })
 
   it.each([
-    ['missing artifacts', 'check-artifact-invalid', (manifest: Record<string, unknown>) => { delete manifest.artifacts }],
-    ['wrong origin', 'check-artifact-invalid', (manifest: Record<string, any>) => { manifest.artifacts.darwin.url = 'https://example.com/update.dmg' }],
-    ['non-canonical default port', 'check-artifact-invalid', (manifest: Record<string, any>) => { manifest.artifacts.darwin.url = manifest.artifacts.darwin.url.replace('.r2.dev/', '.r2.dev:443/') }],
-    ['disguised platform suffix', 'check-artifact-invalid', (manifest: Record<string, any>) => { manifest.artifacts.darwin.url = manifest.artifacts.darwin.url.replace('.dmg', '.exe.dmg') }],
-    ['invalid digest', 'check-artifact-invalid', (manifest: Record<string, any>) => { manifest.artifacts.darwin.sha256 = 'ABC' }],
-    ['invalid Base contract id', 'check-manifest-invalid', (manifest: Record<string, any>) => { manifest.base_contract_id = 'v7' }],
-    ['coerced Profile digest', 'check-manifest-invalid', (manifest: Record<string, any>) => { manifest.profile_component_aggregate.aggregate_sha256 = ['1'.repeat(64)] }],
-    ['duplicate candidate provenance', 'check-manifest-invalid', (manifest: Record<string, any>) => {
-      manifest.github_artifact_provenance.artifacts.push({ ...manifest.github_artifact_provenance.artifacts[0] })
-    }],
-    ['candidate rerun provenance', 'check-manifest-invalid', (manifest: Record<string, any>) => {
-      manifest.github_artifact_provenance.artifacts[0].run_attempt = 2
-    }],
-  ])('reports the signed-manifest stage for %s', async (_label, code, mutate) => {
-    const manifest = signedMutation(mutate as (value: Record<string, any>) => void)
+    ['leading v', { version: 'v2.1.0' }],
+    ['prerelease', { version: '2.1.0-rc.1' }],
+    ['invalid SemVer', { version: '2.01.0' }],
+    ['missing version', {}],
+    ['non-string version', { version: 2 }],
+    ['array response', ['2.1.0']],
+  ])('silently ignores a service response with %s', async (_case, value) => {
     await expect(checkForStableUpdate({
-      platform: 'darwin',
       currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
-      request: async () => Response.json(manifest),
-    })).resolves.toEqual(expectedCheckFailure(code as string))
+      request: async () => Response.json(value),
+    })).resolves.toBeNull()
   })
 
-  it.each([
-    ['leading v', () => signedMutation(manifest => { manifest.version = 'v2.1.0' }), 'check-manifest-invalid'],
-    ['prerelease', () => signedMutation(manifest => { manifest.version = '2.1.0-rc.1' }), 'check-manifest-invalid'],
-    ['invalid SemVer', () => signedMutation(manifest => { manifest.version = '2.01.0' }), 'check-manifest-invalid'],
-    ['missing version', () => signedMutation(manifest => { delete manifest.version }), 'check-manifest-invalid'],
-    ['non-string version', () => signedMutation(manifest => { manifest.version = 2 }), 'check-manifest-invalid'],
-    ['unsigned array response', () => ['2.1.0'], 'check-signature-invalid'],
-  ])('reports a typed failure instead of treating %s as no update', async (_case, fixture, code) => {
+  it('silently ignores malformed JSON and non-200 statuses', async () => {
     await expect(checkForStableUpdate({
-      platform: 'darwin',
       currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
-      request: async () => Response.json(fixture()),
-    })).resolves.toEqual(expectedCheckFailure(code as string))
-  })
-
-  it.each([
-    ['admission-pending candidate', () => signedMutation(manifest => {
-      manifest.document_type = 'emate.desktop-artifact-candidate'
-      manifest.release_status = 'admission-pending'
-    }), 'check-manifest-invalid'],
-    ['legacy public schema', () => {
-      const value = versionManifest('2.1.0')
-      return { version: value.version, schedule_protocol_floor: value.schedule_protocol_floor, artifacts: value.artifacts }
-    }, 'check-signature-invalid'],
-    ['top-level field drift', () => signedMutation(manifest => { manifest.channel = 'stable' }), 'check-manifest-invalid'],
-    ['platform artifact mismatch', () => signedMutation(manifest => {
-      const artifacts = manifest.artifacts as Record<string, unknown>
-      manifest.artifacts = { darwin: artifacts.win32, win32: artifacts.darwin }
-    }), 'check-artifact-invalid'],
-  ])('reports an authenticated manifest failure for %s', async (_case, fixture, code) => {
-    await expect(checkForStableUpdate({
-      platform: 'darwin',
-      currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
-      request: async () => Response.json(fixture()),
-    })).resolves.toEqual(expectedCheckFailure(code as string))
-  })
-
-  it('distinguishes malformed JSON from HTTP failures', async () => {
-    await expect(checkForStableUpdate({
-      platform: 'darwin',
-      currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
       request: async () => new Response('{'),
-    })).resolves.toEqual(expectedCheckFailure('check-response-invalid'))
+    })).resolves.toBeNull()
     await expect(checkForStableUpdate({
-      platform: 'darwin',
       currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
       request: async () => new Response('unavailable', { status: 503 }),
-    })).resolves.toEqual(expectedCheckFailure('check-http-failed', 503))
+    })).resolves.toBeNull()
     await expect(checkForStableUpdate({
-      platform: 'darwin',
       currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
       request: async () => new Response(null, { status: 304 }),
-    })).resolves.toEqual(expectedCheckFailure('check-http-failed', 304))
+    })).resolves.toBeNull()
   })
 
-  it('distinguishes network failure from caller cancellation', async () => {
+  it('silently ignores network failure and caller cancellation', async () => {
     await expect(checkForStableUpdate({
-      platform: 'darwin',
       currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
       request: async () => { throw new TypeError('offline') },
-    })).resolves.toEqual(expectedCheckFailure('check-network-failed'))
+    })).resolves.toBeNull()
 
     const controller = new AbortController()
     controller.abort()
     await expect(checkForStableUpdate({
-      platform: 'darwin',
       currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
       signal: controller.signal,
       request: async () => { throw new DOMException('cancelled', 'AbortError') },
-    })).resolves.toEqual(expectedCheckFailure('check-cancelled'))
+    })).resolves.toBeNull()
   })
 
-  it('preserves caller cancellation while reading a streamed response body', async () => {
-    const controller = new AbortController()
-    const body = new ReadableStream<Uint8Array>({
-      start(stream) {
-        controller.signal.addEventListener('abort', () => {
-          stream.error(new DOMException('cancelled while reading', 'AbortError'))
-        }, { once: true })
-      },
-    })
-    const pending = checkForStableUpdate({
-      platform: 'darwin',
-      currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
-      signal: controller.signal,
-      request: async () => new Response(body),
-    })
-
-    controller.abort()
-    await expect(pending).resolves.toEqual(expectedCheckFailure('check-cancelled'))
-  })
-
-  it('reports declared and streamed oversized responses as invalid', async () => {
+  it('silently ignores declared and streamed oversized responses', async () => {
     await expect(checkForStableUpdate({
-      platform: 'darwin',
       currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
       request: async () => new Response('{}', {
         headers: { 'content-length': String(MAX_VERSION_RESPONSE_BYTES + 1) },
       }),
-    })).resolves.toEqual(expectedCheckFailure('check-response-invalid'))
+    })).resolves.toBeNull()
     await expect(checkForStableUpdate({
-      platform: 'darwin',
       currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
       request: async () => new Response('x'.repeat(MAX_VERSION_RESPONSE_BYTES + 1)),
-    })).resolves.toEqual(expectedCheckFailure('check-response-invalid'))
+    })).resolves.toBeNull()
   })
 
   it.each(['2.0', 'v2.0.0', '2.0.0-rc.1'])('skips invalid installed version %s before requesting', async currentVersion => {
     const request = vi.fn(async () => versionResponse('2.1.0'))
 
-    await expect(checkForStableUpdate({
-      platform: 'darwin',
-      currentVersion,
-      currentScheduleProtocolFloor: 1,
-      request,
-    })).resolves.toEqual(expectedCheckFailure('check-config-invalid'))
+    await expect(checkForStableUpdate({ currentVersion, request })).resolves.toBeNull()
     expect(request).not.toHaveBeenCalled()
-  })
-
-  it('rejects a missing latest Schedule protocol floor', async () => {
-    const manifest = signedMutation(value => { delete value.schedule_protocol_floor })
-    await expect(checkForStableUpdate({
-      platform: 'darwin',
-      currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
-      request: async () => Response.json(manifest),
-    })).resolves.toEqual(expectedCheckFailure('check-manifest-invalid'))
-  })
-
-  it.each([
-    [0, 'check-manifest-invalid'],
-    [1.5, 'check-signature-invalid'],
-    ['1', 'check-manifest-invalid'],
-  ])('rejects invalid latest Schedule protocol floor %s', async (scheduleProtocolFloor, code) => {
-    await expect(checkForStableUpdate({
-      platform: 'darwin',
-      currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 1,
-      request: async () => versionResponse('2.1.0', scheduleProtocolFloor),
-    })).resolves.toEqual(expectedCheckFailure(code as string))
-  })
-
-  it('rejects a higher version below the installed Schedule protocol floor', async () => {
-    await expect(checkForStableUpdate({
-      platform: 'darwin',
-      currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 2,
-      request: async () => versionResponse('99.0.0', 1),
-    })).resolves.toEqual(expectedCheckFailure('check-protocol-unsupported'))
-  })
-
-  it('accepts a higher version at the installed Schedule protocol floor', async () => {
-    await expect(checkForStableUpdate({
-      platform: 'darwin',
-      currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: 2,
-      request: async () => versionResponse('2.1.0', 2),
-    })).resolves.toMatchObject({
-      status: 'update-available',
-      latestVersion: '2.1.0',
-      scheduleProtocolFloor: 2,
-    })
   })
 })

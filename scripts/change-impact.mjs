@@ -75,9 +75,7 @@ export function harnessVersionsFromComponentLock(lock) {
 }
 
 const BASE_PATHS = [
-  '.github/workflows/desktop-release.yml',
   '.github/workflows/ci.yml',
-  '.github/workflows/profile-release.yml',
   '.github/workflows/release.yml',
   '.gitmodules',
   'package.json',
@@ -100,10 +98,8 @@ const VERIFICATION_PATHS = new Set([
   '.gitignore',
   'AGENTS.md',
   'docs/target-contract.md',
-  'scripts/change-impact.test.mjs',
   'scripts/component-release.test.mjs',
   'scripts/profile-release.test.mjs',
-  'scripts/publish-profile-r2.test.mjs',
 ])
 const IMPACT_DIMENSIONS = [
   'shared_runtime',
@@ -660,7 +656,7 @@ function dimensionsFor(classifications, boundary) {
         mark('shared_runtime', 'profile')
         continue
       }
-      if (/\/src\/(?:agent-update|install-recovery|installation-cleanup|profile-update|update-|updates\.)/u.test(path)) {
+      if (/\/src\/(?:agent-update|install-recovery|update-|updates\.)/u.test(path)) {
         mark('shared_runtime', 'macos_packaging', 'windows_packaging')
         continue
       }
@@ -668,11 +664,11 @@ function dimensionsFor(classifications, boundary) {
         mark('windows_runtime', 'windows_packaging')
         continue
       }
-      if (/\/(?:scripts\/(?:generate-mac-app-icon|mac-universal|package-mac|release-mac|release-preflight|verify-mac)|src\/(?:mac-universal-inventory|mac-update-helper|mac-update-installer))\b/iu.test(path)) {
+      if (/\/(?:scripts\/(?:generate-mac-app-icon|mac-universal|package-mac|release-preflight|verify-mac)|src\/mac-universal-inventory)\b/iu.test(path)) {
         mark('macos_runtime', 'macos_packaging')
         continue
       }
-      if (/\/(?:build\/|scripts\/(?:desktop-release-manifest|generate-tray-icons|package-dir|prepare-python-runtime|verify-licenses|verify-packaged-runtime)|vendor\/)/u.test(path)) {
+      if (/\/(?:build\/|scripts\/(?:generate-tray-icons|package-dir|prepare-python-runtime|verify-licenses|verify-packaged-runtime)|vendor\/)/u.test(path)) {
         mark('shared_runtime', 'macos_packaging', 'windows_packaging')
         continue
       }

@@ -1,5 +1,3 @@
-import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { DESKTOP_INSTALLER_QUIT_FLAG } from '../src/desktop-installer-quit.ts'
@@ -30,32 +28,22 @@ describe('Windows assisted NSIS handoff', () => {
     expect(fallback).toBeGreaterThan(wait)
   })
 
-  it('keeps useZip extraction on the one canonical install directory', () => {
-    const workspaceRequire = createRequire(new URL('package.json', packageRoot))
-    const appBuilderManifest = workspaceRequire.resolve('app-builder-lib/package.json')
-    const templates = join(dirname(appBuilderManifest), 'templates', 'nsis')
-    const extraction = readFileSync(join(templates, 'include', 'extractAppPackage.nsh'), 'utf8')
-    const installSection = readFileSync(join(templates, 'installSection.nsh'), 'utf8')
-    const patch = source('patches/app-builder-lib@26.15.3.patch', workspaceRoot)
+  it('uses the upstream assisted installer configuration', () => {
+    const patch = source('patches/app-builder-lib@26.15.7.patch', workspaceRoot)
     const manifest = JSON.parse(source('package.json')) as {
       scripts?: Record<string, string>
-      build?: { nsis?: { useZip?: boolean } }
+      build?: { toolsets?: { nsis?: string }, nsis?: { include?: string, useZip?: boolean } }
     }
 
-    expect(manifest.build?.nsis?.useZip).toBe(true)
-    expect(extraction).toContain('nsisunz::Unzip "$PLUGINSDIR\\app-$packageArch.zip" "$INSTDIR"')
-    expect(installSection).toContain('SetOutPath $INSTDIR')
-    expect(installSection).toContain('!insertmacro uninstallOldVersion SHELL_CONTEXT')
-    expect(installSection.match(/!insertmacro installApplicationFiles/gu)).toHaveLength(1)
-    expect(installSection.match(/!insertmacro addStartMenuLink \$keepShortcuts/gu)).toHaveLength(1)
-    expect(installSection.match(/!insertmacro addDesktopLink \$keepShortcuts/gu)).toHaveLength(1)
-    expect(installSection).not.toContain('customUpdateInstallShouldRun')
+    expect(manifest.build?.toolsets?.nsis).toBe('1.2.1')
+    expect(manifest.build?.nsis?.include).toBe('installer.nsh')
+    expect(manifest.build?.nsis?.useZip).toBe(false)
     expect(patch).toContain('ManifestLongPathAware true')
     expect(patch.match(/\[System\.IO\.Path\]::GetFileName\(\$\$_\.Path\) -ieq '\$\{_FILE\}'/gu))
       .toHaveLength(2)
     expect(patch).not.toContain('templates/nsis/installSection.nsh')
-    expect(patch).not.toContain('extractUsing7za')
-    expect(patch).not.toContain('handleUninstallResult')
+    expect(patch).toContain('templates/nsis/include/extractAppPackage.nsh')
+    expect(patch).toContain('templates/nsis/include/installUtil.nsh')
   })
 
   it('removes the private transaction from every active Windows handoff owner', () => {
@@ -63,7 +51,7 @@ describe('Windows assisted NSIS handoff', () => {
       source('src/electron-runtime.ts'),
       source('src/main.ts'),
       source('build/installer.nsh'),
-      source('patches/app-builder-lib@26.15.3.patch', workspaceRoot),
+      source('patches/app-builder-lib@26.15.7.patch', workspaceRoot),
       source('package.json'),
     ].join('\n')
 

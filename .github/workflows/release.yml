@@ -50,12 +50,10 @@ jobs:
 
       - name: Build and test
         run: |
-          pnpm check:target
           pnpm test
           pnpm enterprise:check
           pnpm enterprise:test
           pnpm enterprise:build
-          node --test scripts/release.test.mjs
 
       - name: Pack the release tarball
         run: |

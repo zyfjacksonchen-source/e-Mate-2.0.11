@@ -18,25 +18,15 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { copyFile, lstat, mkdir, realpath, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { basename, isAbsolute, join, relative, sep } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
 import type { DesktopRendererBootstrap } from './desktop-bootstrap-contract.ts'
+import { DESKTOP_UPDATE_RUN_INTERACTIVE } from './desktop-update-trigger-contract.ts'
+import type { DesktopInstallationId } from './desktop-installation-id.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
-import {
-  checkProfileUpdate,
-  installProfileUpdate,
-  type DesktopProfileUpdateAdapter,
-  type ProfileUpdateAvailable,
-  type ProfileUpdateContext,
-} from './profile-update.ts'
-import {
-  preflightMacUpdateInstallation,
-  scheduleMacUpdateInstallation,
-  type MacUpdateAppliedSender,
-} from './mac-update-installer.ts'
 import type {
+  DesktopLocale,
   DesktopNotification,
   DesktopPlatform,
   DesktopRuntime,
@@ -50,18 +40,15 @@ import type {
 } from './runtime.ts'
 import type { RendererBootReport } from './renderer-boot-contract.ts'
 import { prepareTrayIcon } from './tray-icons.ts'
-import { downloadDesktopUpdate } from './update-download.ts'
-import { checkForStableUpdate, type UpdateCheckResult } from './update-checker.ts'
 import {
-  DESKTOP_UPDATE_CANCEL,
-  DESKTOP_UPDATE_RUN_INTERACTIVE,
-  DESKTOP_UPDATE_STATE_CHANGED,
-  DESKTOP_UPDATE_STATE_READ,
-  desktopUpdateFailureSummary,
-  formatUpdateBytes,
-  profileUpdateCapabilitySummary,
-  type DesktopUpdateState,
-} from './update-presentation.ts'
+  desktopUpdateFilename,
+  downloadDesktopUpdate,
+  pendingDesktopUpdateArtifact,
+  recordDesktopUpdateArtifact,
+  resolveDesktopUpdateArtifact,
+  type DesktopUpdateArtifact,
+} from './update-download.ts'
+import type { UpdateCheckResult } from './update-checker.ts'
 import { desktopWindowOptions, windowsTitleBarOverlay } from './window-options.ts'
 import {
   DESKTOP_RESOURCE_RUN,
@@ -150,69 +137,11 @@ export const RENDERER_BOOT_TIMEOUT_MS = 30_000
 /** Failure class used by startup recovery to distinguish a hung Renderer. */
 export type RendererBootFailureReason = 'renderer-failed' | 'renderer-timeout'
 
-interface ScheduleDeliveryAdmission {
-  readonly isOpen: boolean
-  open(): void
-}
-
-type ScheduleDeliveryAdmissionConstructor = new (open: boolean) => ScheduleDeliveryAdmission
-
-/** Load one closed native Schedule admission from the selected Profile Base. */
-export async function loadClosedScheduleDeliveryAdmission(
-  profileBaseUrl: string,
-): Promise<ScheduleDeliveryAdmission> {
-  const entry = createRequire(profileBaseUrl).resolve('@deepseek-ai/dsh-schedule')
-  const schedule = await import(pathToFileURL(entry).href) as Record<string, unknown>
-  const Admission = schedule.ScheduleDeliveryAdmission
-  if (typeof Admission !== 'function') {
-    throw new Error('@e-mate/desktop: selected Base Schedule package has no delivery admission')
-  }
-  const admission = new (Admission as ScheduleDeliveryAdmissionConstructor)(false)
-  if (admission.isOpen !== false || typeof admission.open !== 'function') {
-    throw new Error('@e-mate/desktop: selected Base Schedule delivery admission is invalid')
-  }
-  return admission
-}
-
 /** Native adapter used by the e-Mate launcher and owned by its Cordis shell plugin. */
 export class ElectronDesktopRuntime implements DesktopRuntime {
   readonly platform: DesktopPlatform
-  readonly updates: DesktopUpdateAdapter & {
-    currentScheduleProtocolFloor: number
-    trustedManifestKeys: ProfileUpdateContext['base']['profile_signing_keys']
-    profile: DesktopProfileUpdateAdapter | undefined
-    downloadAndOpen(
-      update: Extract<UpdateCheckResult, { status: 'update-available' }>,
-      signal: AbortSignal,
-      report?: (state: DesktopUpdateState) => void,
-    ): Promise<void>
-    publishState(state: DesktopUpdateState): void
-    readPublishedState(): DesktopUpdateState | undefined
-    setCancelHandler(handler: (() => boolean) | undefined): void
-    setInteractiveUpdateHandler(handler: (() => Promise<void>) | undefined): void
-  } = {
-    get isPackaged() { return app.isPackaged },
-    get canDownload() { return app.isPackaged && (process.platform === 'darwin' || process.platform === 'win32') },
-    get platform() { return process.platform === 'darwin' || process.platform === 'win32' ? process.platform : undefined },
-    get currentVersion() { return PRODUCT_VERSION },
-    currentScheduleProtocolFloor: 0,
-    trustedManifestKeys: [],
-    get statePath() { return join(app.getPath('userData'), 'updates', 'state.json') },
-    request: (url, init) => net.fetch(url, init),
-    profile: undefined,
-    confirmDownload: version => this.confirmUpdateDownload(version),
-    showManualCheckResult: result => this.showManualUpdateCheckResult(result),
-    downloadAndOpen: (
-      update: Extract<UpdateCheckResult, { status: 'update-available' }>,
-      signal: AbortSignal,
-      report?: (state: DesktopUpdateState) => void,
-    ) => this.downloadAndOpenUpdate(update, signal, report),
-    publishState: state => { this.publishUpdateState(state) },
-    readPublishedState: () => this.updateState,
-    setCancelHandler: handler => { this.cancelUpdate = handler },
-    setInteractiveUpdateHandler: handler => { this.interactiveUpdate = handler },
-    notify: notification => { this.showNotification(notification) },
-  }
+  get locale(): DesktopLocale { return app.getLocale().toLowerCase().startsWith('zh') ? 'zh' : 'en' }
+  readonly updates: DesktopUpdateAdapter
 
   private window: BrowserWindow | undefined
   private tray: Tray | undefined
@@ -227,50 +156,32 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private rendererHealthy = false
   private rendererBootTimer: NodeJS.Timeout | undefined
   private bootFailureReason: RendererBootFailureReason | undefined
-  private markPreparedUpdateShutdownReady: (() => void) | undefined
-  private openScheduleStartupLatch: (() => void | Promise<void>) | undefined
-  private rendererStartupCommitTask: Promise<void> | undefined
   private directoryPickTask: Promise<string | null> | undefined
   private profileGeneration = 'bundled'
-  private updateState: DesktopUpdateState | undefined
-  private cancelUpdate: (() => boolean) | undefined
   private interactiveUpdate: (() => Promise<void>) | undefined
 
   constructor(
     private readonly restart: () => Promise<void>,
     private readonly onRendererBoot: (report: RendererBootReport) => void = () => {},
-    private rendererStartupProbation = false,
     private readonly runtimeId = randomUUID(),
+    installationId?: DesktopInstallationId,
   ) {
     if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
       throw new Error(`@e-mate/desktop: unsupported Electron platform ${process.platform}`)
     }
     this.platform = process.platform
-  }
-
-  /** Bind the signed component updater to the generation selected for this process. */
-  configureProfileUpdates(context: Omit<ProfileUpdateContext, 'request'>): void {
-    if (this.updates.profile !== undefined) throw new Error('@e-mate/desktop: Profile updater is already configured')
-    this.updates.currentScheduleProtocolFloor = context.base.schedule_protocol_floor
-    this.profileGeneration = context.activeGenerationId
-    this.updates.trustedManifestKeys = context.base.profile_signing_keys
-    const configured: ProfileUpdateContext = {
-      ...context,
+    this.updates = {
+      get isPackaged() { return app.isPackaged },
+      get canDownload() { return app.isPackaged && (process.platform === 'darwin' || process.platform === 'win32') },
+      get currentVersion() { return PRODUCT_VERSION },
+      get statePath() { return join(app.getPath('userData'), 'updates', 'state.json') },
+      ...(installationId === undefined ? {} : { installationId }),
       request: (url, init) => net.fetch(url, init),
-    }
-    this.updates.profile = {
-      check: signal => checkProfileUpdate(configured, signal),
-      confirm: update => this.confirmProfileUpdate(update),
-      install: async (update, signal) => {
-        await installProfileUpdate(configured, update, signal)
-        this.showNotification({
-          title: '正在安装 e-Mate 更新',
-          body: `e-Mate ${update.releaseVersion} 已完成校验，将重新启动并在启动检查通过后生效。`,
-        })
-        void this.requestRestart().catch((cause: unknown) => {
-          process.stderr.write(`@e-mate/desktop: failed to restart after component update: ${cause instanceof Error ? cause.message : String(cause)}\n`)
-        })
-      },
+      confirmDownload: version => this.confirmUpdateDownload(version),
+      showManualCheckResult: result => this.showManualUpdateCheckResult(result),
+      downloadAndOpen: (version, signal) => this.downloadAndOpenUpdate(version, signal),
+      notify: notification => { this.showNotification(notification) },
+      setInteractiveUpdateHandler: handler => { this.interactiveUpdate = handler },
     }
   }
 
@@ -295,14 +206,6 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       )
     }, timeoutMs)
     this.rendererBootTimer.unref()
-  }
-
-  /** Put a recovered, potentially-applied macOS candidate back on the existing startup probation path. */
-  beginRendererStartupProbation(): void {
-    if (this.rendererHealthy || this.rendererStartupProbation) {
-      throw new Error('@e-mate/desktop: renderer startup probation cannot be started now')
-    }
-    this.rendererStartupProbation = true
   }
 
   /** Stop a pending deadline while startup is being torn down for another failure. */
@@ -352,62 +255,12 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
 
   /** @inheritdoc */
   show(): void {
-    if (!this.rendererHealthy || this.rendererStartupProbation) return
+    if (!this.rendererHealthy) return
     const window = this.window
     if (window === undefined || window.isDestroyed()) return
     if (window.isMinimized()) window.restore()
     if (!window.isVisible()) window.show()
     window.focus()
-  }
-
-  /** Commit one healthy probation launch only after its durable acknowledgement succeeds. */
-  async commitRendererStartup(
-    commit: () => void | MacUpdateAppliedSender | Promise<void | MacUpdateAppliedSender>,
-  ): Promise<void> {
-    if (!this.rendererStartupProbation) return
-    this.rendererStartupCommitTask ??= this.commitRendererStartupOnce(commit)
-    await this.rendererStartupCommitTask
-  }
-
-  private async commitRendererStartupOnce(
-    commit: () => void | MacUpdateAppliedSender | Promise<void | MacUpdateAppliedSender>,
-  ): Promise<void> {
-    if (!this.rendererHealthy) throw new Error('@e-mate/desktop: renderer startup is not healthy')
-    const openScheduleStartupLatch = this.openScheduleStartupLatch
-    if (openScheduleStartupLatch === undefined) {
-      throw new Error('@e-mate/desktop: macOS update Schedule startup latch is not configured')
-    }
-    const window = this.window
-    if (window === undefined || window.isDestroyed()) {
-      throw new Error('@e-mate/desktop: macOS update window is unavailable')
-    }
-    const applied = await commit()
-    if (this.window !== window || window.isDestroyed()) {
-      throw new Error('@e-mate/desktop: macOS update window became unavailable during commit')
-    }
-    this.rendererStartupProbation = false
-    try {
-      this.show()
-      if (this.window !== window || window.isDestroyed() || !window.isVisible()) {
-        throw new Error('@e-mate/desktop: macOS update window did not become visible')
-      }
-    } catch (cause) {
-      this.rendererStartupProbation = true
-      if (!window.isDestroyed()) window.hide()
-      throw cause
-    }
-    // The Schedule latch is one-way. After invoking it, failure must stay forward-only.
-    await openScheduleStartupLatch()
-    if (typeof applied === 'function') await applied()
-  }
-
-  /** Bind the Base-owned Schedule controller before a probation renderer can be committed. */
-  configureScheduleStartupLatch(open: () => void | Promise<void>): void {
-    if (this.openScheduleStartupLatch === open) return
-    if (this.openScheduleStartupLatch !== undefined) {
-      throw new Error('@e-mate/desktop: Schedule startup latch is already configured')
-    }
-    this.openScheduleStartupLatch = open
   }
 
   /** @inheritdoc */
@@ -547,14 +400,6 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     this.reportRendererBoot({ status: 'failed', plugins: [], error })
   }
 
-  /** Allow the detached updater to replace the app only after Cordis disposed cleanly. */
-  commitPreparedUpdateShutdown(): void {
-    const markReady = this.markPreparedUpdateShutdownReady
-    if (markReady === undefined) return
-    this.markPreparedUpdateShutdownReady = undefined
-    markReady()
-  }
-
   private async showRendererBootRecovery(report: Extract<RendererBootReport, { status: 'failed' }>): Promise<void> {
     const plugins = report.plugins.length === 0
       ? 'Unknown client plugin'
@@ -626,24 +471,10 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       type: 'info',
       title: '发现 e-Mate 更新',
       message: `e-Mate ${version} 已可更新。`,
-      detail: '将自动下载并校验安装包，安装完成后重新打开 e-Mate。',
-      buttons: ['更新并重启', '稍后'],
-      defaultId: 1,
-      cancelId: 1,
-      noLink: true,
-    })
-    return result.response === 0
-  }
-
-  /** Show the signed update summary before any payload is downloaded. */
-  private async confirmProfileUpdate(update: ProfileUpdateAvailable): Promise<boolean> {
-    const capabilitySummary = profileUpdateCapabilitySummary(update.changedComponents.length)
-    const result = await dialog.showMessageBox({
-      type: 'info',
-      title: '发现 e-Mate 更新',
-      message: `e-Mate ${update.releaseVersion} 第 ${update.sequence} 代已可更新。`,
-      detail: `${capabilitySummary}\n\n下载大小：${formatUpdateBytes(update.downloadBytes)}\n更新包将先完成校验，再原子切换并重启；仅在启动健康检查通过后生效，失败将自动回滚。`,
-      buttons: ['更新并重启', '稍后'],
+      detail: this.platform === 'darwin'
+        ? '将下载安装包并打开磁盘映像，由你手动退出旧版后覆盖安装。'
+        : '将自动下载并校验安装包，安装完成后重新打开 e-Mate。',
+      buttons: [this.platform === 'darwin' ? '下载更新' : '更新并重启', '稍后'],
       defaultId: 1,
       cancelId: 1,
       noLink: true,
@@ -653,16 +484,12 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
 
   /** Report one user-triggered check without exposing network or response details. */
   private async showManualUpdateCheckResult(result: UpdateCheckResult | null): Promise<void> {
-    if (result === null || result.status === 'failed') {
-      const failure = this.updateState?.stage === 'failed' ? this.updateState : undefined
+    if (result === null) {
       await dialog.showMessageBox({
         type: 'warning',
         title: '无法检查更新',
-        message: desktopUpdateFailureSummary(failure?.code
-          ?? (result?.code === 'check-cancelled' ? 'cancelled' : result?.code)),
-        detail: failure?.diagnosticId === undefined
-          ? '请稍后再试。'
-          : `请稍后再试。\n\n诊断编号：${failure.diagnosticId}`,
+        message: '暂时无法连接更新服务。',
+        detail: '请稍后再试。',
         buttons: ['知道了'],
         defaultId: 0,
         noLink: true,
@@ -696,96 +523,95 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
 
   /** Download a confirmed installer and hand it to the native installation flow. */
   private async downloadAndOpenUpdate(
-    update: Extract<UpdateCheckResult, { status: 'update-available' }>,
+    version: string,
     signal: AbortSignal,
-    report: (state: DesktopUpdateState) => void = () => {},
   ): Promise<void> {
     if (this.platform !== 'darwin' && this.platform !== 'win32') {
       throw new Error(`@e-mate/desktop: updates are unavailable on ${this.platform}`)
     }
-    const helperModulePath = fileURLToPath(new URL('./mac-update-helper.js', import.meta.url))
-    const macSpec = this.platform === 'darwin' ? this.scheduled : undefined
-    if (this.platform === 'darwin') {
-      if (macSpec === undefined) throw new Error('@e-mate/desktop: no active shell can exit for update installation')
-      preflightMacUpdateInstallation({
-        targetVersion: update.latestVersion,
-        currentExecutable: process.execPath,
-        userDataPath: app.getPath('userData'),
-        homeDirectory: app.getPath('home'),
-        helperModulePath,
-        sourceCommit: update.sourceCommit,
-        baseContractId: update.baseContractId,
-        scheduleProtocolFloor: update.scheduleProtocolFloor,
-        manifestIdentity: update.manifestIdentity,
-        artifact: update.artifact,
-      })
-    }
+    const destinationPath = await this.chooseUpdateDestination(version)
+    if (destinationPath === undefined) return
+    signal.throwIfAborted()
     const artifactPath = await downloadDesktopUpdate({
       platform: this.platform,
-      version: update.latestVersion,
-      artifact: update.artifact,
-      userDataPath: app.getPath('userData'),
+      version,
+      destinationPath,
       request: (url, init) => net.fetch(url, init),
       signal,
-      onProgress: progress => {
-        report({ stage: 'downloading', bytes: progress.bytes, total: progress.total, ...(
-          progress.cached === true ? { cached: true as const } : {}
-        ) })
-      },
     })
     signal.throwIfAborted()
-    report({ stage: 'verifying' })
-    const verified = await checkForStableUpdate({
-      currentVersion: update.currentVersion,
-      currentScheduleProtocolFloor: this.updates.currentScheduleProtocolFloor,
-      platform: this.platform,
-      trustedManifestKeys: this.updates.trustedManifestKeys,
-      signal,
-      request: this.updates.request,
-    })
-    if (verified.status !== 'update-available' || verified.manifestIdentity !== update.manifestIdentity) {
-      throw new Error('@e-mate/desktop: signed update changed after download')
+    const artifact: DesktopUpdateArtifact = { platform: this.platform, version, path: artifactPath }
+    try {
+      await recordDesktopUpdateArtifact(app.getPath('userData'), artifact)
+    } catch (cause) {
+      process.stderr.write(`@e-mate/desktop: failed to remember update installer: ${cause instanceof Error ? cause.message : String(cause)}\n`)
     }
-    report({ stage: 'staging' })
 
     if (this.platform === 'darwin') {
-      const prepared = await scheduleMacUpdateInstallation({
-        dmgPath: artifactPath,
-        targetVersion: update.latestVersion,
-        currentExecutable: process.execPath,
-        userDataPath: app.getPath('userData'),
-        homeDirectory: app.getPath('home'),
-        helperModulePath,
-        sourceCommit: update.sourceCommit,
-        baseContractId: update.baseContractId,
-        scheduleProtocolFloor: update.scheduleProtocolFloor,
-        manifestIdentity: update.manifestIdentity,
-        artifact: update.artifact,
-        parentPid: process.pid,
-        signal,
+      const openError = await shell.openPath(artifactPath)
+      if (openError !== '') throw new Error(`@e-mate/desktop: failed to open update disk image: ${openError}`)
+      signal.throwIfAborted()
+      await dialog.showMessageBox({
+        type: 'info',
+        title: 'e-Mate 更新已下载',
+        message: `e-Mate ${version} 已准备好安装。`,
+        detail: '当前 e-Mate 未使用 Apple Developer ID 签名。请在打开的磁盘映像中退出旧版后覆盖 e-Mate；若 macOS 拦截，请按官网的未签名安装说明操作。',
+        buttons: ['知道了'],
+        defaultId: 0,
+        noLink: true,
       })
-      this.markPreparedUpdateShutdownReady = prepared.markShutdownReady
-      report({ stage: 'waiting-shutdown' })
-      this.showNotification({
-        title: '正在安装 e-Mate 更新',
-        body: `e-Mate ${update.latestVersion} 将自动重新打开。`,
-      })
-      this.quitting = true
-      macSpec!.requestQuit(0)
       return
     }
 
+    const result = await dialog.showMessageBox({
+      type: 'info',
+      title: 'e-Mate 更新已下载',
+      message: `e-Mate ${version} 已准备好安装。`,
+      detail: '现在退出 e-Mate 并启动安装程序吗？Windows 可能显示未知发布者提示。',
+      buttons: ['退出并安装', '稍后'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    })
+    if (result.response !== 0) return
     const spec = this.scheduled
     if (spec === undefined) throw new Error('@e-mate/desktop: no active shell can exit for update installation')
     signal.throwIfAborted()
     await this.launchWindowsUpdateInstaller(artifactPath)
-    report({ stage: 'waiting-shutdown' })
-    this.showNotification({
-      title: '正在安装 e-Mate 更新',
-      body: `e-Mate ${update.latestVersion} 将自动重新打开。`,
-    })
     this.quitting = true
     spec.requestQuit(0)
+  }
+
+  private async chooseUpdateDestination(version: string): Promise<string | undefined> {
+    if (this.platform !== 'darwin' && this.platform !== 'win32') return undefined
+    const filename = desktopUpdateFilename(this.platform, version)
+    const extension = this.platform === 'darwin' ? 'dmg' : 'exe'
+    const result = await dialog.showSaveDialog({
+      title: '保存 e-Mate 安装包',
+      defaultPath: join(app.getPath('downloads'), filename),
+      buttonLabel: '保存并下载',
+      filters: [{ name: this.platform === 'darwin' ? '磁盘映像' : 'Windows 安装程序', extensions: [extension] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation', 'dontAddToRecent'],
+    })
+    return result.canceled ? undefined : result.filePath
+  }
+
+  private async performUpdateArtifactCleanup(): Promise<void> {
+    if (this.platform !== 'darwin' && this.platform !== 'win32') return
+    const userDataPath = app.getPath('userData')
+    const artifact = await pendingDesktopUpdateArtifact(userDataPath, PRODUCT_VERSION, this.platform)
+    if (artifact === undefined) return
+    const result = await dialog.showMessageBox({
+      type: 'question',
+      title: '清理 e-Mate 安装包',
+      message: `e-Mate ${artifact.version} 已安装。`,
+      detail: `是否删除安装包？\n${artifact.path}`,
+      buttons: ['删除', '保留'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    })
+    await resolveDesktopUpdateArtifact(userDataPath, artifact, result.response === 0)
   }
 
   /** Start the downloaded NSIS installer before releasing the current process. */
@@ -814,11 +640,6 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         resolve()
       })
     })
-  }
-
-  private publishUpdateState(state: DesktopUpdateState): void {
-    this.updateState = state
-    this.window?.webContents.send(DESKTOP_UPDATE_STATE_CHANGED, state)
   }
 
   /** Keep native-terminal launch failures visible in a packaged GUI process. */
@@ -1036,12 +857,6 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (this.platform === 'win32') window.removeMenu()
     this.window = window
 
-    const readUpdateState = (event: Electron.IpcMainEvent): void => {
-      event.returnValue = event.sender === window.webContents ? this.updateState : undefined
-    }
-    const cancelUpdate = (event: Electron.IpcMainEvent): void => {
-      event.returnValue = event.sender === window.webContents ? this.cancelUpdate?.() === true : false
-    }
     const runInteractiveUpdate = async (event: Electron.IpcMainInvokeEvent): Promise<void> => {
       if (event.sender !== window.webContents) {
         throw new Error('@e-mate/desktop: update request did not originate from owning Renderer')
@@ -1049,9 +864,8 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       if (this.interactiveUpdate === undefined) throw new Error('@e-mate/desktop: updater is not ready')
       await this.interactiveUpdate()
     }
-    ipcMain.on(DESKTOP_UPDATE_STATE_READ, readUpdateState)
-    ipcMain.on(DESKTOP_UPDATE_CANCEL, cancelUpdate)
     ipcMain.handle(DESKTOP_UPDATE_RUN_INTERACTIVE, runInteractiveUpdate)
+
     const runDesktopResource = async (event: Electron.IpcMainInvokeEvent, value: unknown): Promise<void> => {
       if (event.sender !== window.webContents) {
         throw new Error('@e-mate/desktop: resource request did not originate from owning Renderer')
@@ -1143,9 +957,10 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       this.rebuildTrayMenu()
       tray.on('click', show)
       beforeInteractive?.()
+      void this.performUpdateArtifactCleanup().catch((cause: unknown) => {
+        process.stderr.write(`@e-mate/desktop: failed to offer update installer cleanup: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+      })
     } catch (cause) {
-      ipcMain.off(DESKTOP_UPDATE_STATE_READ, readUpdateState)
-      ipcMain.off(DESKTOP_UPDATE_CANCEL, cancelUpdate)
       ipcMain.removeHandler(DESKTOP_UPDATE_RUN_INTERACTIVE)
       ipcMain.removeHandler(DESKTOP_RESOURCE_RUN)
       app.off('activate', show)
@@ -1169,8 +984,6 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     return async () => {
       if (released) return
       released = true
-      ipcMain.off(DESKTOP_UPDATE_STATE_READ, readUpdateState)
-      ipcMain.off(DESKTOP_UPDATE_CANCEL, cancelUpdate)
       ipcMain.removeHandler(DESKTOP_UPDATE_RUN_INTERACTIVE)
       ipcMain.removeHandler(DESKTOP_RESOURCE_RUN)
       app.off('activate', show)

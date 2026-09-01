@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, type ComponentType } from 'react'
-import type { DesktopUpdateBridge } from '../../../../../../../desktop/e-mate-desktop/src/update-presentation.ts'
+import { useEffect, useRef, type ComponentType } from 'react'
+import type { DesktopUpdateTriggerBridge } from '../../../../../../../desktop/e-mate-desktop/src/desktop-update-trigger-contract.ts'
 import { UpdateControl } from './header-controls.tsx'
 import css from './settings-chrome.module.css'
 
@@ -98,27 +98,10 @@ export function SettingsCloseLabel() {
 }
 
 export function SettingsChrome({ updates, UpdateIcon }: {
-  updates?: DesktopUpdateBridge
+  updates?: DesktopUpdateTriggerBridge
   UpdateIcon?: ComponentType<{ size?: number }>
 } = {}) {
   const heading = useRef<HTMLDivElement>(null)
-  const rendererUpdates = useMemo<DesktopUpdateBridge | undefined>(() => {
-    if (updates === undefined) return undefined
-    let state = updates.getState()
-    return {
-      runInteractiveUpdate: () => updates.runInteractiveUpdate(),
-      getState: () => state,
-      subscribe: listener => {
-        const unsubscribe = updates.subscribe(next => {
-          state = next
-          listener(next)
-        })
-        state = updates.getState()
-        return unsubscribe
-      },
-      cancel: () => updates.cancel(),
-    }
-  }, [updates])
   useEffect(() => {
     const dialog = heading.current?.closest('[role="dialog"]')
     if (dialog === null || dialog === undefined) return undefined
@@ -130,8 +113,8 @@ export function SettingsChrome({ updates, UpdateIcon }: {
       <div><h1>设置</h1>
         <p>管理个人资料、常规设置、知识和记忆。</p>
       </div>
-      {rendererUpdates !== undefined && UpdateIcon !== undefined
-        ? <UpdateControl updates={rendererUpdates} UpdateIcon={UpdateIcon} compact={false} />
+      {updates !== undefined && UpdateIcon !== undefined
+        ? <UpdateControl updates={updates} UpdateIcon={UpdateIcon} compact={false} />
         : null}
     </div>
   )

@@ -6,7 +6,7 @@ e-Mate 2.0.15 是基于固定 DeepSeek Harness `0.1.0-rc.7` 与 `deepseek-harnes
 
 ## 下载与安装
 
-正式激活后从 [e-Mate 官方下载页](https://dl.ecoremedia.net/e-mate/update/) 获取由版本专属签名清单绑定、并展示精确 SHA-256 的安装包：
+正式激活后从 [e-Mate 官方下载页](https://dl.ecoremedia.net/e-mate/update/) 获取安装包：
 
 - macOS 13+，Universal（Apple 芯片与 Intel Mac）。
 - Windows 10/11 x64。
@@ -18,15 +18,9 @@ e-Mate 2.0.15 是基于固定 DeepSeek Harness `0.1.0-rc.7` 与 `deepseek-harnes
 
 ## 更新方式
 
-安装 2.0.15 后，用户可在设置页手动检查更新，也可直接对 Agent 说“检查更新”或“更新 e-Mate”。设置页复用现有原生桥接，Agent 自然语言只调用类型化的 `e_mate_desktop_update` Tool；两者最终进入同一个 `desktopUpdates.runInteractiveUpdate` 服务。在线更新只接受严格高于当前版本的稳定 SemVer（2.0.16+）：
+安装后，用户可点击托盘“检查更新”，也可直接对 Agent 说“检查更新”或“更新 e-Mate”。自然语言入口只调用 `desktopUpdates.runInteractiveUpdate()`，与后台和托盘共用 dsh-desktop 的同一个 lifecycle，不持有 URL、下载、安装、替换或回滚逻辑。
 
-1. 验证 canonical Cloudflare R2 上的签名 schema-2 清单、目标版本和当前平台安装包；
-2. 在原生确认框展示版本与下载字节，并下载清单绑定的真实安装包；
-3. 安装包落盘后重新校验字节数、SHA-256、签名清单和清单身份；
-4. macOS 原位替换 `/Applications/e-Mate.app`，Windows 原位替换现有安装目录，并从同一路径重启；
-5. 健康提交后删除事务内部的旧版回滚备份，只保留一个应用和一套桌面/开始菜单快捷方式；失败则由同一事务恢复旧版。
-
-2.0.13 和已有同版本旧 2.0.15 使用官方下载页手动迁移；客户端不会为同版本不同字节伪造在线更新。兼容的 Profile 增量仍由同一个更新服务按签名 generation 合同处理，不会创建第二个 updater、Feed 或安装路径。
+原生 lifecycle 只接受严格更高的稳定版本。用户确认后，macOS 下载并打开未签名 DMG，由用户覆盖安装；Windows 启动同一个 assisted NSIS 安装器完成全新安装或覆盖安装，并有序退出当前应用。2.0.13 和已有同版本旧 2.0.15 仍从官方下载页手动迁移，客户端不会为同版本不同字节伪造在线更新。
 
 ## 插件与权限边界
 
@@ -39,15 +33,12 @@ e-Mate 2.0.15 是基于固定 DeepSeek Harness `0.1.0-rc.7` 与 `deepseek-harnes
 
 ## 开发与发布
 
-仓库唯一的本地测试、构建、验收和发布入口是独立 Node 24.x 承载的精确 `pnpm@11.7.0`：
+Harness 输入继续使用 Node 24.x 与精确 `pnpm@11.7.0`。桌面封装只使用 dsh-desktop 的 Yarn workspace 命令：
 
 ```bash
-corepack pnpm flow dev
-corepack pnpm flow candidate
-corepack pnpm flow verify --run <run-id>
-corepack pnpm flow publish --run <run-id>
+corepack yarn --cwd desktop install --immutable
+corepack yarn --cwd desktop dist:mac
+corepack yarn --cwd desktop dist:win
 ```
 
-开发期先运行变更 Owner 的聚焦检查或 `flow dev`。冻结一个精确、干净的提交后只运行一次 `flow candidate`；同一 run 复用原始 macOS/Windows 字节继续 `verify` 和 `publish`，不得因单个修复反复重建。Windows 构建只执行 candidate 请求中给出的同一条 `_platform-build` 命令；传输优先 `win-codex` SSH，只有该线路不可用时才使用已授权 Codex Remote。
-
-安装器下载、在线更新、回滚和发布数据面只使用 canonical Cloudflare R2。`flow publish` 复用 candidate 的原始字节，完成不可变对象上传与完整公开回读后，才通过既有 schema-2 签名 Owner 和 CAS 激活 `desktop/signed/latest.json`；`desktop/latest.json` 保持不变。GitHub CI、裸 `pnpm`、直接执行 `scripts/local-flow.mjs`、第二个发布器和重建后的替代字节都不是发布路径。
+macOS 在本机原生构建，Windows 只在已登录的 Codex Remote Windows 机器上原生构建，不经 SSH。两个安装包完成安装、覆盖和启动验收后，按 dsh-desktop 固定版本端点与固定平台下载端点发布；版本对象最后激活。仓库不再保留 schema-2、Profile 热更新、二次签名或另一套 Desktop 发布器。

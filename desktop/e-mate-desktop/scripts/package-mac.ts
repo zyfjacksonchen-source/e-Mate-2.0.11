@@ -1,4 +1,4 @@
-/** Build an unsigned macOS DMG smoke artifact on a native macOS host. */
+/** Build the unsigned e-Mate macOS DMG with dsh-desktop's native packager. */
 
 import { spawnSync } from 'node:child_process'
 import { rmSync } from 'node:fs'
@@ -62,7 +62,7 @@ function defaultOptions(): MacSmokePackageOptions {
   const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
   const workspaceRoot = resolve(desktopRoot, '..')
   const require = createRequire(import.meta.url)
-  const outputDir = resolve(desktopRoot, 'dist', 'mac-smoke')
+  const outputDir = resolve(desktopRoot, 'dist', 'mac-release')
   return {
     env: process.env,
     platform: process.platform,
@@ -107,13 +107,17 @@ export function packageMacSmoke(options: MacSmokePackageOptions = defaultOptions
   }
 
   const cleanEnvironment = withoutMacReleaseSecrets(options.env)
-  options.log('Building an unsigned macOS DMG smoke; signing and notarization are release-only steps.')
-  options.run(
-    'corepack',
-    ['yarn', 'workspace', '@e-mate/desktop', 'check:mac-package'],
-    options.workspaceRoot,
-    cleanEnvironment,
-  )
+  options.log('Building the unsigned e-Mate macOS DMG with the dsh-desktop package flow.')
+  if (options.env.DSH_PACKAGE_CHECK_ALREADY_RAN !== '1') {
+    options.run(
+      'corepack',
+      ['yarn', 'workspace', '@e-mate/desktop', 'check:mac-package'],
+      options.workspaceRoot,
+      cleanEnvironment,
+    )
+  } else {
+    options.log('Skipping the macOS package preflight; the package gate already passed.')
+  }
   options.resetOutput()
   options.prepareRuntime()
   options.run(

@@ -33,7 +33,7 @@ function options(calls: CommandCall[], logs: string[] = []): MacSmokePackageOpti
     nodeVersion: '22.23.2',
     workspaceRoot: '/repo',
     desktopRoot: '/repo/@e-mate/desktop',
-    outputDir: '/repo/@e-mate/desktop/dist/mac-smoke',
+    outputDir: '/repo/@e-mate/desktop/dist/mac-release',
     resetOutput: () => undefined,
     prepareRuntime: () => undefined,
     builderCli: '/repo/node_modules/electron-builder/cli.js',
@@ -71,7 +71,7 @@ describe('macOS DMG smoke packaging', () => {
         'never',
         '--config.mac.notarize=false',
         '--config.npmRebuild=false',
-        '--config.directories.output=/repo/@e-mate/desktop/dist/mac-smoke',
+        '--config.directories.output=/repo/@e-mate/desktop/dist/mac-release',
       ],
       cwd: '/repo/@e-mate/desktop',
       env: {
@@ -84,13 +84,13 @@ describe('macOS DMG smoke packaging', () => {
       command: '/usr/local/bin/node',
       args: [
         '/repo/@e-mate/desktop/scripts/verify-mac-smoke.ts',
-        '/repo/@e-mate/desktop/dist/mac-smoke',
+        '/repo/@e-mate/desktop/dist/mac-release',
       ],
       cwd: '/repo/@e-mate/desktop',
       env: { PATH: '/usr/bin:/bin', SAFE_VALUE: 'kept' },
     })
     expect(logs).toEqual([
-      'Building an unsigned macOS DMG smoke; signing and notarization are release-only steps.',
+      'Building the unsigned e-Mate macOS DMG with the dsh-desktop package flow.',
     ])
   })
 

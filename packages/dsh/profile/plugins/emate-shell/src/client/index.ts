@@ -1,9 +1,9 @@
 import { createElement, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type {
-  DesktopUpdateBridge,
-  DesktopUpdateBridgeWindow,
-} from '../../../../../../../desktop/e-mate-desktop/src/update-presentation.ts'
+  DesktopUpdateTriggerBridge,
+  DesktopUpdateTriggerBridgeWindow,
+} from '../../../../../../../desktop/e-mate-desktop/src/desktop-update-trigger-contract.ts'
 import {
   IconArchiveOutline20,
   IconChevronDownOutline14,
@@ -60,8 +60,8 @@ export const inject = [
   'sessionLogDownload', 'inputTriggers', 'remote', 'remote.commands', 'settingsScope',
 ]
 
-const desktopUpdateBridge = (): DesktopUpdateBridge | undefined =>
-  (window as DesktopUpdateBridgeWindow).__EMATE_DESKTOP_UPDATES__
+const desktopUpdateBridge = (): DesktopUpdateTriggerBridge | undefined =>
+  (window as DesktopUpdateTriggerBridgeWindow).__EMATE_DESKTOP_UPDATES__
 
 export function registerSessionShare(ctx: any): void {
   ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({

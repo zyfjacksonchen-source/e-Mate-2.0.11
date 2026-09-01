@@ -1,6 +1,6 @@
 /** e-Mate executable: minimal Electron bootstrap around the Host Cordis root. */
 
-import { app, dialog, shell } from 'electron'
+import { app, dialog } from 'electron'
 import type { Context } from '@deepseek-ai/cordis'
 import { randomUUID } from 'node:crypto'
 import { existsSync, writeFileSync } from 'node:fs'
@@ -17,11 +17,12 @@ import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
 import { isDesktopInstallerQuitRequest } from './desktop-installer-quit.ts'
+import { getOrCreateDesktopInstallationId } from './desktop-installation-id.ts'
 import {
   installDesktopDshRuntime,
   installDesktopPnpmRuntime,
 } from './desktop-runtime-environment.ts'
-import { ElectronDesktopRuntime, loadClosedScheduleDeliveryAdmission } from './electron-runtime.ts'
+import { ElectronDesktopRuntime } from './electron-runtime.ts'
 import { installProfilePackageResolver } from './module-resolution.ts'
 import {
   desktopInstallRecoveryStatePath,
@@ -43,14 +44,6 @@ import {
   emateProfileComponentSources,
   installEmateDesktopProfile,
 } from './e-mate-profile.ts'
-import { cleanupObsoleteMacApplications } from './installation-cleanup.ts'
-import {
-  readMacUpdateStartupResult,
-  recoverPendingMacUpdateStartup,
-  resumePendingMacUpdateStartup,
-  writeMacUpdateStartupAck,
-  type MacUpdateAppliedSender,
-} from './mac-update-installer.ts'
 import { prepareDesktopProfile, type SkippedOptionalEntry } from './profile.ts'
 import {
   BUNDLED_PROFILE_GENERATION,
@@ -154,8 +147,6 @@ async function start(): Promise<void> {
   let profileGenerationStartup: ResolvedProfileGenerationStartup | undefined
   let profileGenerationStatePath: string | undefined
   let profileGenerationCommitted = false
-  let generationWasUnconfirmed = false
-  let macUpdateStartupAcknowledged = false
   const processGenerationId = randomUUID()
   let installRecovery: DesktopInstallRecoveryStore | undefined
   let verifyingInstall: DesktopInstallRecoveryTransaction | undefined
@@ -170,12 +161,6 @@ async function start(): Promise<void> {
   const rendererBoot = new Promise<RendererBootReport>((resolve) => {
     resolveRendererBoot = resolve
   })
-  const hasMacUpdateStartupAcknowledgement = Object.keys(process.env)
-    .some(name => name.startsWith('EMATE_MAC_UPDATE_ACK_'))
-  let macUpdateStartupProbeConflict = hasMacUpdateStartupAcknowledgement
-    && process.env.EMATE_RELEASE_HEALTH_PROBE === '1'
-  let macUpdateStartupProbation = process.platform === 'darwin' && hasMacUpdateStartupAcknowledgement
-  let macUpdateForwardResume = false
   const nativeExit = createDesktopExitCoordinator(
     {
       prepareToQuit: () => { runtime.prepareToQuit() },
@@ -187,6 +172,7 @@ async function start(): Promise<void> {
     () => { removeShutdownRequests?.() },
   )
   let restartRequested = false
+  const installationId = await getOrCreateDesktopInstallationId(app.getPath('userData'))
   runtime = new ElectronDesktopRuntime(async () => {
     if (shutdown === undefined) {
       throw new Error('@e-mate/desktop: shutdown coordinator is not ready')
@@ -199,10 +185,7 @@ async function start(): Promise<void> {
     if (rendererBootSettled) return
     rendererBootSettled = true
     resolveRendererBoot(report)
-  }, macUpdateStartupProbation, processGenerationId)
-  if (macUpdateStartupProbation) {
-    runtime.updates.publishState({ stage: 'health-check', updateKind: 'base', version: app.getVersion() })
-  }
+  }, processGenerationId, installationId)
   const finalExit = (code: number): void => { nativeExit.finish(code) }
   shutdown = createDesktopShutdown(
     async () => {
@@ -212,7 +195,6 @@ async function start(): Promise<void> {
         disposeDshRuntime?.()
         disposePnpmRuntime?.()
       }
-      runtime.commitPreparedUpdateShutdown()
     },
     finalExit,
   )
@@ -227,22 +209,7 @@ async function start(): Promise<void> {
     runtime.show()
   })
   await app.whenReady()
-  if (process.platform === 'darwin' && !hasMacUpdateStartupAcknowledgement) {
-    const recovery = recoverPendingMacUpdateStartup(app.getPath('userData'), app.getVersion(), process.execPath)
-    if (recovery.relaunch) {
-      nativeExit.requestRelaunch(desktopDefaultRelaunchArguments())
-      await shutdown.request(0)
-      return
-    }
-    if (recovery.status === 'forward-resume') {
-      macUpdateForwardResume = true
-      macUpdateStartupProbation = true
-      macUpdateStartupProbeConflict = process.env.EMATE_RELEASE_HEALTH_PROBE === '1'
-      runtime.beginRendererStartupProbation()
-      runtime.updates.publishState({ stage: 'health-check', updateKind: 'base', version: app.getVersion() })
-    }
-  }
-  if (process.env.EMATE_RELEASE_HEALTH_PROBE === '1' && !macUpdateStartupProbeConflict) {
+  if (process.env.EMATE_RELEASE_HEALTH_PROBE === '1') {
     writeFileSync(join(app.getPath('userData'), '.release-native-ready-ack'), app.getVersion(), {
       encoding: 'utf8',
       flag: 'wx',
@@ -282,9 +249,6 @@ async function start(): Promise<void> {
   })
 
   try {
-    if (macUpdateStartupProbeConflict) {
-      throw new Error(`${BIN_NAME}: a macOS update startup cannot run as a release health probe`)
-    }
     const currentVersion = app.getVersion()
     if (app.isPackaged && currentVersion !== EMATE_DESKTOP_PROFILE_VERSION) {
       throw new Error(`${BIN_NAME}: packaged application version ${currentVersion} does not match profile version ${EMATE_DESKTOP_PROFILE_VERSION}`)
@@ -321,18 +285,6 @@ async function start(): Promise<void> {
       base: baseContract,
       expected_component_ids: EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
       target: componentTarget,
-    })
-    generationWasUnconfirmed = profileGenerationStartup.state.active !== profileGenerationStartup.state.last_known_good
-    runtime.configureProfileUpdates({
-      base: baseContract,
-      target: componentTarget,
-      expectedComponentIds: EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
-      generationRoot,
-      generationStatePath,
-      activeGenerationId: profileGenerationStartup.generation_id,
-      ...(profileGenerationStartup.generation === undefined
-        ? {}
-        : { activeRelease: profileGenerationStartup.generation.release }),
     })
     const deferredProfileCleanup = new Set<string>()
     const activeProfileGeneration = profileGenerationStartup.generation === undefined ? undefined : {
@@ -436,12 +388,6 @@ async function start(): Promise<void> {
       installRecoveryStatePath,
       generationId: processGenerationId,
     }
-    const scheduleDeliveryAdmission = macUpdateStartupProbation
-      ? await loadClosedScheduleDeliveryAdmission(prepared.bareModuleBaseUrl)
-      : undefined
-    if (scheduleDeliveryAdmission !== undefined) {
-      runtime.configureScheduleStartupLatch(() => { scheduleDeliveryAdmission.open() })
-    }
     const releasePackageResolver = installProfilePackageResolver(
       prepared.bareModuleBaseUrl,
       emateProfileComponentSources(activeProfileGeneration),
@@ -452,9 +398,6 @@ async function start(): Promise<void> {
       prepared.rootConfig,
       prepared.patches,
       async (hostCtx) => {
-        if (scheduleDeliveryAdmission !== undefined) {
-          hostCtx.provide('scheduleDeliveryAdmission', scheduleDeliveryAdmission)
-        }
         hostCtx.effect(
           () => releasePnpmRuntime,
           '@e-mate/desktop: packaged pnpm runtime PATH',
@@ -519,81 +462,8 @@ async function start(): Promise<void> {
       }
     }
     markDesktopProfileHealthy(selectionStatePath, activeProfileName)
-    if (!macUpdateStartupProbation) {
-      markProfileGenerationHealthy(generationStatePath, profileGenerationStartup.generation_id)
-      profileGenerationCommitted = true
-    }
-    let installed: Awaited<ReturnType<typeof writeMacUpdateStartupAck>>
-    try {
-      const acknowledge = async (): Promise<MacUpdateAppliedSender | undefined> => {
-        installed = macUpdateForwardResume
-          ? resumePendingMacUpdateStartup(app.getPath('userData'), app.getVersion(), process.execPath)
-          : await writeMacUpdateStartupAck(app.getPath('userData'), app.getVersion())
-        macUpdateStartupAcknowledged = true
-        return installed?.commitApplied
-      }
-      if (macUpdateStartupProbation) {
-        await runtime.commitRendererStartup(acknowledge)
-        if (!macUpdateStartupAcknowledged) throw new Error(`${BIN_NAME}: macOS update startup acknowledgement was not committed`)
-        if (!generationWasUnconfirmed) {
-          profileGenerationCommitted = true
-        } else {
-          try {
-            markProfileGenerationHealthy(generationStatePath, profileGenerationStartup.generation_id)
-            profileGenerationCommitted = true
-          } catch (cause) {
-            const detail = (cause instanceof Error ? cause.message : String(cause)).slice(0, 4096)
-            process.stderr.write(`${BIN_NAME}: failed to promote Profile generation after macOS update commit: ${detail}\n`)
-          }
-        }
-      } else {
-        await acknowledge()
-      }
-    } catch (cause) {
-      if (macUpdateStartupProbation) throw cause
-      process.stderr.write(
-        `${BIN_NAME}: failed to acknowledge macOS update startup: ${cause instanceof Error ? cause.message : String(cause)}\n`,
-      )
-    }
-    if (macUpdateStartupAcknowledged) {
-      try {
-        if (installed !== undefined) {
-          runtime.updates.publishState({ stage: 'completed', updateKind: 'base', version: installed.targetVersion })
-          runtime.updates.notify({
-            title: 'e-Mate Update Complete',
-            body: `e-Mate ${installed.targetVersion} was installed and reopened successfully.`,
-          })
-        } else {
-          void readMacUpdateStartupResult(app.getPath('userData'), app.getVersion()).then((result) => {
-            if (result?.status === 'rolled-back') {
-              runtime.updates.publishState({ stage: 'rolled-back', updateKind: 'base', version: result.targetVersion })
-              runtime.updates.notify({
-                title: 'e-Mate Update Rolled Back',
-                body: `The update to ${result.targetVersion} failed; e-Mate ${result.currentVersion} was restored.`,
-              })
-            } else if (result?.status === 'failed') {
-              runtime.updates.publishState({
-                stage: 'failed',
-                updateKind: 'base',
-                version: result.targetVersion,
-                code: 'rollback-failed',
-                diagnosticId: randomUUID(),
-              })
-              runtime.updates.notify({
-                title: 'e-Mate Update Failed',
-                body: `e-Mate could not finish the update to ${result.targetVersion}.`,
-              })
-            }
-          }).catch((cause: unknown) => {
-            process.stderr.write(`${BIN_NAME}: failed to read macOS update result: ${cause instanceof Error ? cause.message : String(cause)}\n`)
-          })
-        }
-      } catch (cause) {
-        process.stderr.write(
-          `${BIN_NAME}: failed to report macOS update startup: ${cause instanceof Error ? cause.message : String(cause)}\n`,
-        )
-      }
-    }
+    markProfileGenerationHealthy(generationStatePath, profileGenerationStartup.generation_id)
+    profileGenerationCommitted = true
     if (process.env.EMATE_RELEASE_HEALTH_PROBE === '1') {
       writeFileSync(join(app.getPath('userData'), '.release-health-ack'), app.getVersion(), {
         encoding: 'utf8',
@@ -608,21 +478,6 @@ async function start(): Promise<void> {
         process.stderr.write(`${BIN_NAME}: stale managed profile cleanup deferred for bounded retry\n`)
       }
     }
-    const cleanup = app.isPackaged
-      ? await cleanupObsoleteMacApplications({
-          platform: process.platform,
-          currentExecutable: process.execPath,
-          currentVersion,
-          homeDirectory: app.getPath('home'),
-          trash: path => shell.trashItem(path),
-        }).catch((cause: unknown) => {
-          process.stderr.write(`${BIN_NAME}: obsolete application cleanup failed: ${cause instanceof Error ? cause.message : String(cause)}\n`)
-          return { removed: [], failed: [] }
-        })
-      : { removed: [], failed: [] }
-    for (const path of cleanup.failed) {
-      process.stderr.write(`${BIN_NAME}: failed to move obsolete application to Trash: ${path}\n`)
-    }
     notifySkippedOptionalEntries(runtime, prepared.skippedOptionalEntries)
     notifyWindowsVolumeConcerns(runtime, windowsVolumeConcerns)
     if (profileStartup.rolledBackFrom !== undefined) {
@@ -636,15 +491,6 @@ async function start(): Promise<void> {
     }
   } catch (cause) {
     runtime.stopRendererBootMonitoring()
-    if (macUpdateStartupProbation) {
-      runtime.updates.publishState({
-        stage: 'failed',
-        updateKind: 'base',
-        version: app.getVersion(),
-        code: 'health-check-failed',
-        diagnosticId: randomUUID(),
-      })
-    }
     const failure = cause instanceof Error ? cause.stack ?? cause.message : String(cause)
     if (process.env.EMATE_RELEASE_HEALTH_PROBE === '1') {
       writeFileSync(join(app.getPath('userData'), '.release-health-failure'), failure.slice(0, 16 * 1024), {
@@ -667,16 +513,12 @@ async function start(): Promise<void> {
     let exitCode = 1
     if (!profileGenerationCommitted && profileGenerationStartup !== undefined
       && profileGenerationStatePath !== undefined
-      && profileGenerationStartup.generation_id !== BUNDLED_PROFILE_GENERATION
-      && (!macUpdateStartupProbation
-        || (generationWasUnconfirmed && !macUpdateStartupAcknowledged))) {
+      && profileGenerationStartup.generation_id !== BUNDLED_PROFILE_GENERATION) {
       try {
         markProfileGenerationFailed(profileGenerationStatePath, profileGenerationStartup.generation_id)
-        if (!macUpdateStartupProbation) {
-          nativeExit.requestRelaunch(desktopDefaultRelaunchArguments())
-          exitCode = 0
-          notifyProfileRecovery(runtime, 'Reopening the last-known-good component generation.')
-        }
+        nativeExit.requestRelaunch(desktopDefaultRelaunchArguments())
+        exitCode = 0
+        notifyProfileRecovery(runtime, 'Reopening the last-known-good component generation.')
       } catch (stateCause) {
         process.stderr.write(`${BIN_NAME}: failed to roll back Profile generation state: ${stateCause instanceof Error ? stateCause.message : String(stateCause)}\n`)
       }
@@ -685,7 +527,7 @@ async function start(): Promise<void> {
       const retryLastKnownGood = profileStartup.profileName !== profileStartup.state.lastKnownGood
       try {
         markDesktopProfileFailed(profileStatePath, profileStartup.profileName)
-        if (retryLastKnownGood && !macUpdateStartupProbation) {
+        if (retryLastKnownGood) {
           nativeExit.requestRelaunch(desktopDefaultRelaunchArguments())
           exitCode = 0
           notifyProfileRecovery(
@@ -701,4 +543,9 @@ async function start(): Promise<void> {
   }
 }
 
-void start()
+void start().catch((cause: unknown) => {
+  const detail = cause instanceof Error ? cause.stack ?? cause.message : String(cause)
+  process.stderr.write(`${BIN_NAME}: fatal launcher failure: ${detail}\n`)
+  if (app.isReady()) dialog.showErrorBox('e-Mate 无法启动', '启动状态无法安全初始化，请检查应用数据目录权限后重试。')
+  app.exit(1)
+})

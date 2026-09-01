@@ -1,12 +1,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { RendererBootReport } from './renderer-boot-contract.ts'
-import type { DesktopProfileUpdateAdapter } from './profile-update.ts'
 import type {
-  DesktopReleasePlatform,
-  DesktopReleaseSigningKey,
   UpdateCheckResult,
   UpdateRequest,
 } from './update-checker.ts'
+import type { DesktopInstallationId } from './desktop-installation-id.ts'
 
 /** Electron platforms supported by the e-Mate native adapter. */
 export type DesktopPlatform = 'darwin' | 'win32' | 'linux'
@@ -16,6 +14,9 @@ export type DesktopShellMode = 'compatibility' | 'advanced'
 
 /** Electron appearance source used by native frame and material rendering. */
 export type DesktopThemeSource = 'system' | 'light' | 'dark'
+
+/** Locales used by the native update lifecycle. */
+export type DesktopLocale = 'zh' | 'en'
 
 /** Window values resolved from the desktop-shell Cordis row. */
 export interface DesktopWindowConfig {
@@ -94,28 +95,24 @@ export interface DesktopUpdateAdapter {
   readonly isPackaged: boolean
   /** Whether this platform has a fixed installer download endpoint. */
   readonly canDownload: boolean
-  /** Release lane used to select an immutable installer, when supported. */
-  readonly platform: DesktopReleasePlatform | undefined
   /** Installed desktop product version. */
   readonly currentVersion: string
-  /** Schedule protocol floor loaded from the packaged Base contract. */
-  readonly currentScheduleProtocolFloor: number
-  /** Desktop manifest keys loaded from the packaged Base contract. */
-  readonly trustedManifestKeys: readonly DesktopReleaseSigningKey[]
-  /** Private file used for update-prompt history. */
+  /** Private file used to suppress repeated background update announcements. */
   readonly statePath: string
+  /** Pseudonymous installation UUID attached only to the fixed version endpoint. */
+  readonly installationId?: DesktopInstallationId
   /** Request adapter backed by Electron's native network session. */
   readonly request: UpdateRequest
-  /** Signed component-generation updater configured by the native launcher. */
-  readonly profile?: DesktopProfileUpdateAdapter | undefined
   /** Ask whether one strictly newer version may be downloaded. */
   confirmDownload(version: string): Promise<boolean>
   /** Present the outcome of a user-triggered version check. */
   showManualCheckResult(result: UpdateCheckResult | null): Promise<void>
   /** Download and hand one confirmed update to the platform installer. */
-  downloadAndOpen(update: Extract<UpdateCheckResult, { status: 'update-available' }>, signal: AbortSignal): Promise<void>
+  downloadAndOpen(version: string, signal: AbortSignal): Promise<void>
   /** Present a native status notification without blocking the Host tree. */
   notify(notification: DesktopNotification): void
+  /** Bind Renderer surfaces to this lifecycle without creating another updater. */
+  setInteractiveUpdateHandler?(handler: (() => Promise<void>) | undefined): void
 }
 
 /** Profile identity needed to open the packaged DSH command environment. */
@@ -156,6 +153,9 @@ export interface DesktopShellSpec extends DesktopWindowConfig {
 export interface DesktopRuntime {
   /** Current Electron platform. */
   readonly platform: DesktopPlatform
+
+  /** Locale currently used for native update copy. */
+  readonly locale: DesktopLocale
 
   /** Native network, update-download, and notification adapter. */
   readonly updates: DesktopUpdateAdapter

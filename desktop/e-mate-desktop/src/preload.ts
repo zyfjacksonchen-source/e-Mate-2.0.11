@@ -7,19 +7,15 @@ import {
 } from './desktop-bootstrap-contract.ts'
 import { DESKTOP_FILE_PATH_BRIDGE } from './file-path-bridge-contract.ts'
 import {
+  DESKTOP_UPDATE_RUN_INTERACTIVE,
+  DESKTOP_UPDATE_TRIGGER_BRIDGE,
+  type DesktopUpdateTriggerBridge,
+} from './desktop-update-trigger-contract.ts'
+import {
   DESKTOP_RESOURCE_BRIDGE,
   DESKTOP_RESOURCE_RUN,
   type DesktopResourceBridge,
 } from './desktop-resource-bridge-contract.ts'
-import {
-  DESKTOP_UPDATE_BRIDGE,
-  DESKTOP_UPDATE_CANCEL,
-  DESKTOP_UPDATE_RUN_INTERACTIVE,
-  DESKTOP_UPDATE_STATE_CHANGED,
-  DESKTOP_UPDATE_STATE_READ,
-  type DesktopUpdateBridge,
-  type DesktopUpdateState,
-} from './update-presentation.ts'
 
 contextBridge.exposeInMainWorld(
   DESKTOP_BOOTSTRAP_BRIDGE,
@@ -38,14 +34,7 @@ const resources: DesktopResourceBridge = {
 }
 contextBridge.exposeInMainWorld(DESKTOP_RESOURCE_BRIDGE, resources)
 
-const updates: DesktopUpdateBridge = {
+const updates: DesktopUpdateTriggerBridge = {
   runInteractiveUpdate: async () => { await ipcRenderer.invoke(DESKTOP_UPDATE_RUN_INTERACTIVE) },
-  getState: () => ipcRenderer.sendSync(DESKTOP_UPDATE_STATE_READ) as DesktopUpdateState | undefined,
-  subscribe(listener) {
-    const receive = (_event: Electron.IpcRendererEvent, state: DesktopUpdateState): void => { listener(state) }
-    ipcRenderer.on(DESKTOP_UPDATE_STATE_CHANGED, receive)
-    return () => { ipcRenderer.removeListener(DESKTOP_UPDATE_STATE_CHANGED, receive) }
-  },
-  cancel: () => ipcRenderer.sendSync(DESKTOP_UPDATE_CANCEL) === true,
 }
-contextBridge.exposeInMainWorld(DESKTOP_UPDATE_BRIDGE, updates)
+contextBridge.exposeInMainWorld(DESKTOP_UPDATE_TRIGGER_BRIDGE, updates)

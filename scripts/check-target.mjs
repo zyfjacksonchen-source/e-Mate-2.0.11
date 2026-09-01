@@ -75,7 +75,7 @@ for (const path of [
   const value = JSON.parse(readFileSync(resolve(root, path), 'utf8'))
   if (value.repository?.url !== repositoryUrl) throw new Error(`repository package metadata drifted: ${path}`)
 }
-for (const path of ['scripts/release.mjs', 'scripts/publish-r2.mjs', 'scripts/publish-profile-r2.mjs']) {
+for (const path of ['scripts/release.mjs', 'scripts/publish-r2.mjs']) {
   if (!readFileSync(resolve(root, path), 'utf8').includes(`const REPOSITORY = '${repository}'`)) {
     throw new Error(`repository release authority drifted: ${path}`)
   }
