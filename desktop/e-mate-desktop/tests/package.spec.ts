@@ -480,6 +480,7 @@ describe('published package surface', () => {
     const electronBuilderRequire = createRequire(electronBuilderManifest)
     const appBuilderManifest = electronBuilderRequire.resolve('app-builder-lib/package.json')
     const installedCodeSign = readFileSync(join(dirname(appBuilderManifest), 'out/codeSign/macCodeSign.js'), 'utf8')
+    const installedPlatformPackager = readFileSync(join(dirname(appBuilderManifest), 'out/platformPackager.js'), 'utf8')
     const installedInstaller = readFileSync(join(dirname(appBuilderManifest), 'templates/nsis/installer.nsi'), 'utf8')
     const installedProcessScope = readFileSync(
       join(dirname(appBuilderManifest), 'templates/nsis/include/allowOnlyOneInstallerInstance.nsh'),
@@ -502,6 +503,12 @@ describe('published package surface', () => {
     expect(patch).toContain('"-k", keychainPassword, keychainFile')
     expect(installedCodeSign).toContain('importCerts(keychainFile, certPaths, cscPasswords, keychainPassword)')
     expect(installedCodeSign).toContain('"-k", keychainPassword, keychainFile')
+    expect(patch).toContain('builder_util_runtime_1.retry)(flip')
+    expect(patch).toContain('retries: 3')
+    expect(patch).toContain('error.code === "UNKNOWN"')
+    expect(installedPlatformPackager).toContain('builder_util_runtime_1.retry)(flip')
+    expect(installedPlatformPackager).toContain('retries: 3')
+    expect(installedPlatformPackager).toContain('error.code === "UNKNOWN"')
     expect(patch).toContain('ManifestLongPathAware true')
     expect(installedInstaller).toContain('ManifestLongPathAware true')
     expect(installedProcessScope.match(/\[System\.IO\.Path\]::GetFileName\(\$\$_\.Path\) -ieq '\$\{_FILE\}'/gu))

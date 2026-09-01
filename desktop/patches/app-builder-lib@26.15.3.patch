@@ -45,3 +45,30 @@ diff --git a/templates/nsis/include/allowOnlyOneInstallerInstance.nsh b/template
    ${else}
      !ifdef INSTALL_MODE_PER_ALL_USERS
        nsExec::Exec `taskkill /IM "${_FILE}" /FI "PID ne $pid"`
+diff --git a/out/platformPackager.js b/out/platformPackager.js
+--- a/out/platformPackager.js
++++ b/out/platformPackager.js
+@@ -317,7 +317,22 @@ class PlatformPackager {
+         const executableName = this instanceof index_1.LinuxPackager ? this.executableName : this.appInfo.productFilename;
+         const electronBinaryPath = path.join(appOutDir, `${executableName}${ext}`);
+         builder_util_1.log.info({ electronPath: builder_util_1.log.filePath(electronBinaryPath) }, "executing @electron/fuses");
+         const { flipFuses } = await (0, dynamicImport_1.dynamicImport)("@electron/fuses");
+-        return flipFuses(electronBinaryPath, fuses);
++        const flip = () => flipFuses(electronBinaryPath, fuses);
++        if (electronPlatformName !== "win32") {
++            return flip();
++        }
++        const resolvedElectronBinaryPath = path.resolve(electronBinaryPath).toLowerCase();
++        return (0, builder_util_runtime_1.retry)(flip, {
++            retries: 3,
++            interval: 1000,
++            backoff: 1000,
++            shouldRetry: error => error != null &&
++                typeof error === "object" &&
++                error.code === "UNKNOWN" &&
++                error.syscall === "open" &&
++                typeof error.path === "string" &&
++                path.resolve(error.path).toLowerCase() === resolvedElectronBinaryPath,
++        });
+     }
+     async doSignAfterPack(outDir, appOutDir, platformName, arch, platformSpecificBuildOptions, targets) {
