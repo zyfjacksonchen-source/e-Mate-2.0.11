@@ -28,6 +28,32 @@ index 2f5d5cf1240c5219217498f1f1a0530deab435a6..821e1d1c9b97dce3fd8e847132508384
 +++ b/templates/nsis/installer.nsi
 @@ -28,0 +29 @@
 +ManifestLongPathAware true
+diff --git a/out/platformPackager.js b/out/platformPackager.js
+--- a/out/platformPackager.js
++++ b/out/platformPackager.js
+@@ -318,6 +318,21 @@ class PlatformPackager {
+         const electronBinaryPath = path.join(appOutDir, `${executableName}${ext}`);
+         builder_util_1.log.info({ electronPath: builder_util_1.log.filePath(electronBinaryPath) }, "executing @electron/fuses");
+         const { flipFuses } = await (0, dynamicImport_1.dynamicImport)("@electron/fuses");
+-        return flipFuses(electronBinaryPath, fuses);
++        const flip = () => flipFuses(electronBinaryPath, fuses);
++        if (electronPlatformName !== "win32") {
++            return flip();
++        }
++        const resolvedElectronBinaryPath = path.resolve(electronBinaryPath).toLowerCase();
++        return (0, builder_util_runtime_1.retry)(flip, {
++            retries: 3,
++            interval: 1000,
++            backoff: 1000,
++            shouldRetry: error => error != null &&
++                typeof error === "object" &&
++                error.code === "UNKNOWN" &&
++                error.syscall === "open" &&
++                typeof error.path === "string" &&
++                path.resolve(error.path).toLowerCase() === resolvedElectronBinaryPath,
++        });
+     }
+     async doSignAfterPack(outDir, appOutDir, platformName, arch, platformSpecificBuildOptions, targets) {
 diff --git a/templates/nsis/include/allowOnlyOneInstallerInstance.nsh b/templates/nsis/include/allowOnlyOneInstallerInstance.nsh
 index b32bafafac67d1e2ba6d867fb97865f67766a17e..77b621c83ccbd51392f292c989fbb249c76aa243 100644
 --- a/templates/nsis/include/allowOnlyOneInstallerInstance.nsh
