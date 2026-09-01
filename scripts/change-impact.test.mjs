@@ -676,6 +676,10 @@ describe('repository release boundary', () => {
       app_smoke: { macos: false, windows: true },
       distribution: { macos: false, windows: false },
     })
+    const windowsInstaller = classify('desktop/e-mate-desktop/src/desktop-installer-quit.ts')
+    assert.equal(windowsInstaller.shared_runtime, false)
+    assert.equal(windowsInstaller.windows_runtime, true)
+    assert.equal(windowsInstaller.windows_packaging, true)
     assert.deepEqual(classifyWith(
       { protectedMain: true },
       'desktop/e-mate-desktop/src/windows-directory-picker.ts',

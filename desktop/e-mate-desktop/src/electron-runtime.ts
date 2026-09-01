@@ -69,10 +69,6 @@ import {
   type DesktopResource,
   type DesktopResourceAction,
 } from './desktop-resource-bridge-contract.ts'
-import {
-  admittedWindowsUpdateIdentity,
-  scheduleWindowsUpdateInstallation,
-} from './windows-update-installer.ts'
 
 /** Return the presentation mode opposite the active generation. */
 export function nextDesktopShellMode(mode: DesktopShellSpec['mode']): DesktopShellSpec['mode'] {
@@ -782,22 +778,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     const spec = this.scheduled
     if (spec === undefined) throw new Error('@e-mate/desktop: no active shell can exit for update installation')
     signal.throwIfAborted()
-    const identity = admittedWindowsUpdateIdentity(update)
-    const prepared = await scheduleWindowsUpdateInstallation({
-      installerPath: artifactPath,
-      currentExecutable: process.execPath,
-      userDataPath: app.getPath('userData'),
-      currentVersion: update.currentVersion,
-      targetVersion: update.latestVersion,
-      sourceCommit: identity.sourceCommit,
-      baseContractId: identity.baseContractId,
-      scheduleProtocolFloor: identity.scheduleProtocolFloor,
-      manifestIdentity: identity.manifestIdentity,
-      artifact: update.artifact,
-      parentPid: process.pid,
-      signal,
-    })
-    this.markPreparedUpdateShutdownReady = prepared.markShutdownReady
+    await this.launchWindowsUpdateInstaller(artifactPath)
     report({ stage: 'waiting-shutdown' })
     this.showNotification({
       title: '正在安装 e-Mate 更新',
@@ -805,6 +786,34 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     })
     this.quitting = true
     spec.requestQuit(0)
+  }
+
+  /** Start the downloaded NSIS installer before releasing the current process. */
+  private async launchWindowsUpdateInstaller(installerPath: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      let child: ReturnType<typeof spawn>
+      try {
+        child = spawn(installerPath, ['--updated', '--force-run'], {
+          detached: true,
+          stdio: 'ignore',
+          shell: false,
+          windowsHide: true,
+        })
+      } catch (cause) {
+        reject(cause)
+        return
+      }
+      const fail = (cause: Error): void => { reject(cause) }
+      child.once('error', fail)
+      child.once('spawn', () => {
+        child.off('error', fail)
+        child.once('error', cause => {
+          process.stderr.write(`@e-mate/desktop: update installer failed after launch: ${cause.message}\n`)
+        })
+        child.unref()
+        resolve()
+      })
+    })
   }
 
   private publishUpdateState(state: DesktopUpdateState): void {

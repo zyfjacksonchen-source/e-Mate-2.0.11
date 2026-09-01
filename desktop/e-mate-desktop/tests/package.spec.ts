@@ -330,12 +330,13 @@ describe('published package surface', () => {
     expect(manifest.scripts?.['check:win-package']).toContain('tests/update-checker.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/update-download.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-directory-picker.spec.ts')
-    expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-update-installer.spec.ts')
-    expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-update-transaction.spec.ts')
-    expect(manifest.scripts?.['check:win-package']).toContain('yarn run test:windows-update-transaction')
+    expect(manifest.scripts?.['check:win-package']).toContain('tests/desktop-installer-quit.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).toContain('tests/installer-nsh.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).not.toContain('windows-update-installer')
+    expect(manifest.scripts?.['check:win-package']).not.toContain('windows-update-transaction')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-volume-diagnostics.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run verify:closure')
-    expect(manifest.scripts?.['test:windows-update-transaction']).toContain('-Operation SelfTest')
+    expect(manifest.scripts?.['test:windows-update-transaction']).toBeUndefined()
     expect(manifest.scripts?.['verify:cli']).toBe('node scripts/verify-cli-runtime.mjs')
     expect(manifest.scripts?.check).toContain('yarn run verify:cli')
     expect(workspaceManifest.scripts?.['dist:mac']).toBe('yarn workspace @e-mate/desktop dist:mac')
@@ -479,8 +480,17 @@ describe('published package surface', () => {
     const electronBuilderRequire = createRequire(electronBuilderManifest)
     const appBuilderManifest = electronBuilderRequire.resolve('app-builder-lib/package.json')
     const installedCodeSign = readFileSync(join(dirname(appBuilderManifest), 'out/codeSign/macCodeSign.js'), 'utf8')
+    const installedInstaller = readFileSync(join(dirname(appBuilderManifest), 'templates/nsis/installer.nsi'), 'utf8')
+    const installedProcessScope = readFileSync(
+      join(dirname(appBuilderManifest), 'templates/nsis/include/allowOnlyOneInstallerInstance.nsh'),
+      'utf8',
+    )
     const installedInstallSection = readFileSync(
       join(dirname(appBuilderManifest), 'templates/nsis/installSection.nsh'),
+      'utf8',
+    )
+    const installedExtraction = readFileSync(
+      join(dirname(appBuilderManifest), 'templates/nsis/include/extractAppPackage.nsh'),
       'utf8',
     )
 
@@ -492,18 +502,20 @@ describe('published package surface', () => {
     expect(patch).toContain('"-k", keychainPassword, keychainFile')
     expect(installedCodeSign).toContain('importCerts(keychainFile, certPaths, cscPasswords, keychainPassword)')
     expect(installedCodeSign).toContain('"-k", keychainPassword, keychainFile')
-    expect(patch).toContain('diff --git a/templates/nsis/installSection.nsh b/templates/nsis/installSection.nsh')
-    expect(installedInstallSection).toContain('!ifmacrodef customUpdateInstallShouldRun')
-    expect(installedInstallSection).toContain('$R7 == "true"')
-    expect(installedInstallSection).toContain('Goto appBuilderInstallSectionDone')
-    expect(installedInstallSection.indexOf('!insertmacro customUpdateInstallPrepare'))
-      .toBeGreaterThan(installedInstallSection.lastIndexOf('!insertmacro CHECK_APP_RUNNING'))
-    expect(installedInstallSection.indexOf('!insertmacro customUpdateInstallApply'))
-      .toBeGreaterThan(installedInstallSection.indexOf('!insertmacro installApplicationFiles'))
+    expect(patch).toContain('ManifestLongPathAware true')
+    expect(installedInstaller).toContain('ManifestLongPathAware true')
+    expect(installedProcessScope.match(/\[System\.IO\.Path\]::GetFileName\(\$\$_\.Path\) -ieq '\$\{_FILE\}'/gu))
+      .toHaveLength(2)
+    expect(patch).not.toContain('templates/nsis/installSection.nsh')
+    expect(patch).not.toContain('extractUsing7za')
+    expect(patch).not.toContain('handleUninstallResult')
+    expect(installedInstallSection).not.toContain('customUpdateInstallShouldRun')
     expect(installedInstallSection).toContain('!insertmacro uninstallOldVersion SHELL_CONTEXT')
+    expect(installedInstallSection).toContain('SetOutPath $INSTDIR')
     expect(installedInstallSection.match(/!insertmacro installApplicationFiles/gu)).toHaveLength(1)
     expect(installedInstallSection.match(/!insertmacro registryAddInstallInfo/gu)).toHaveLength(1)
     expect(installedInstallSection).toContain('!ifmacrodef customInstall')
+    expect(installedExtraction).toContain('nsisunz::Unzip "$PLUGINSDIR\\app-$packageArch.zip" "$INSTDIR"')
   })
 
   it('starts restricted Windows shells with a hidden console show state', () => {

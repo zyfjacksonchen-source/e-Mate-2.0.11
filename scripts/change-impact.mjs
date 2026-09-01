@@ -664,7 +664,7 @@ function dimensionsFor(classifications, boundary) {
         mark('shared_runtime', 'macos_packaging', 'windows_packaging')
         continue
       }
-      if (/\/(?:build\/(?:assistedMessages\.yml|installer\.nsh|windows-update-transaction)|scripts\/(?:package-win|verify-win-installer)|src\/windows-update-installer)\b/iu.test(path)) {
+      if (/\/(?:build\/(?:assistedMessages\.yml|installer\.nsh)|scripts\/(?:package-win|verify-win-installer)|src\/desktop-installer-quit)\b/iu.test(path)) {
         mark('windows_runtime', 'windows_packaging')
         continue
       }

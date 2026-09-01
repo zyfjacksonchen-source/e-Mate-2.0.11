@@ -37,7 +37,6 @@ const macUpdater = vi.hoisted(() => ({
   schedule: vi.fn(),
   markShutdownReady: vi.fn(),
 }))
-const windowsUpdater = vi.hoisted(() => ({ schedule: vi.fn(), markShutdownReady: vi.fn() }))
 const childProcess = vi.hoisted(() => {
   type Listener = (...args: unknown[]) => void
   const listeners = new Map<string, Listener[]>()
@@ -81,16 +80,6 @@ vi.mock('../src/update-checker.ts', async importOriginal => ({
 vi.mock('../src/mac-update-installer.ts', () => ({
   preflightMacUpdateInstallation: macUpdater.preflight,
   scheduleMacUpdateInstallation: macUpdater.schedule,
-}))
-
-vi.mock('../src/windows-update-installer.ts', () => ({
-  admittedWindowsUpdateIdentity: (update: typeof windowsUpdateAvailable) => ({
-    sourceCommit: update.sourceCommit,
-    baseContractId: update.baseContractId,
-    scheduleProtocolFloor: update.scheduleProtocolFloor,
-    manifestIdentity: update.manifestIdentity,
-  }),
-  scheduleWindowsUpdateInstallation: windowsUpdater.schedule,
 }))
 
 vi.mock('node:child_process', async importOriginal => ({
@@ -310,8 +299,6 @@ describe('Electron compatibility runtime', () => {
     macUpdater.preflight.mockReset()
     macUpdater.schedule.mockReset()
     macUpdater.schedule.mockResolvedValue({ markShutdownReady: macUpdater.markShutdownReady })
-    windowsUpdater.schedule.mockReset()
-    windowsUpdater.schedule.mockResolvedValue({ markShutdownReady: windowsUpdater.markShutdownReady })
     electron.loadURL.mockReset()
     electron.loadURL.mockResolvedValue(undefined)
     electron.dialog.showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: false })
@@ -1565,44 +1552,54 @@ describe('Electron compatibility runtime', () => {
     expect(macUpdater.schedule).not.toHaveBeenCalled()
   })
 
-  it('requires Windows Setup READY before requesting orderly exit', async () => {
+  it('starts the verified Windows installer before requesting orderly exit', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     updater.download.mockResolvedValueOnce('C:\\Updates\\e-Mate-2.1.0-windows.exe')
+    releaseChecker.check.mockResolvedValueOnce(windowsUpdateAvailable)
     const requestQuit = vi.fn()
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
     runtime.schedule({ ...spec, requestQuit })
 
-    await runtime.updates.downloadAndOpen(windowsUpdateAvailable, new AbortController().signal)
-    expect(windowsUpdater.schedule).toHaveBeenCalledWith(expect.objectContaining({
-      installerPath: 'C:\\Updates\\e-Mate-2.1.0-windows.exe',
-      currentExecutable: process.execPath,
-      currentVersion: '2.0.10',
-      targetVersion: '2.1.0',
-      sourceCommit: windowsUpdateAvailable.sourceCommit,
-      baseContractId: windowsUpdateAvailable.baseContractId,
-      scheduleProtocolFloor: windowsUpdateAvailable.scheduleProtocolFloor,
-      manifestIdentity: windowsUpdateAvailable.manifestIdentity,
-      artifact: windowsUpdateAvailable.artifact,
-      parentPid: process.pid,
-    }))
+    const pending = runtime.updates.downloadAndOpen(windowsUpdateAvailable, new AbortController().signal)
+    await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenCalledOnce() })
+    expect(childProcess.spawn).toHaveBeenCalledWith(
+      'C:\\Updates\\e-Mate-2.1.0-windows.exe',
+      ['--updated', '--force-run'],
+      {
+        detached: true,
+        stdio: 'ignore',
+        shell: false,
+        windowsHide: true,
+      },
+    )
+    expect(updater.download.mock.invocationCallOrder[0])
+      .toBeLessThan(releaseChecker.check.mock.invocationCallOrder[0]!)
+    expect(releaseChecker.check.mock.invocationCallOrder[0])
+      .toBeLessThan(childProcess.spawn.mock.invocationCallOrder[0]!)
+    expect(requestQuit).not.toHaveBeenCalled()
+    childProcess.emit('spawn')
+    await pending
+
+    expect(childProcess.child.unref).toHaveBeenCalledOnce()
     expect(requestQuit).toHaveBeenCalledWith(0)
-    expect(windowsUpdater.markShutdownReady).not.toHaveBeenCalled()
-    runtime.commitPreparedUpdateShutdown()
-    expect(windowsUpdater.markShutdownReady).toHaveBeenCalledOnce()
   })
 
-  it('does not exit when Windows Setup fails before READY', async () => {
+  it('does not exit when the verified Windows installer fails to spawn', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     updater.download.mockResolvedValueOnce('C:\\Updates\\e-Mate-2.1.0-windows.exe')
+    releaseChecker.check.mockResolvedValueOnce(windowsUpdateAvailable)
     const requestQuit = vi.fn()
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
     runtime.schedule({ ...spec, requestQuit })
 
-    windowsUpdater.schedule.mockRejectedValueOnce(new Error('blocked before READY'))
-    await expect(runtime.updates.downloadAndOpen(windowsUpdateAvailable, new AbortController().signal))
-      .rejects.toThrow('blocked before READY')
+    const pending = runtime.updates.downloadAndOpen(windowsUpdateAvailable, new AbortController().signal)
+    await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenCalledOnce() })
+    childProcess.emit('error', new Error('blocked'))
+
+    await expect(pending).rejects.toThrow('blocked')
+    expect(childProcess.child.unref).not.toHaveBeenCalled()
     expect(requestQuit).not.toHaveBeenCalled()
   })
 
@@ -1614,7 +1611,10 @@ describe('Electron compatibility runtime', () => {
     runtime.schedule(spec)
     const dialogCalls = electron.dialog.showMessageBox.mock.calls.length
 
-    await runtime.updates.downloadAndOpen(windowsUpdateAvailable, new AbortController().signal)
+    const pending = runtime.updates.downloadAndOpen(windowsUpdateAvailable, new AbortController().signal)
+    await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenCalledOnce() })
+    childProcess.emit('spawn')
+    await pending
 
     expect(electron.dialog.showMessageBox).toHaveBeenCalledTimes(dialogCalls)
   })

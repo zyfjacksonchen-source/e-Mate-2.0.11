@@ -6069,7 +6069,7 @@ __metadata:
 
 "app-builder-lib@patch:app-builder-lib@npm%3A26.15.3#./patches/app-builder-lib@26.15.3.patch::locator=%40e-mate%2Fdesktop-workspace%40workspace%3A.":
   version: 26.15.3
-  resolution: "app-builder-lib@patch:app-builder-lib@npm%3A26.15.3#./patches/app-builder-lib@26.15.3.patch::version=26.15.3&hash=8a23be&locator=%40e-mate%2Fdesktop-workspace%40workspace%3A."
+  resolution: "app-builder-lib@patch:app-builder-lib@npm%3A26.15.3#./patches/app-builder-lib@26.15.3.patch::version=26.15.3&hash=eee6c1&locator=%40e-mate%2Fdesktop-workspace%40workspace%3A."
   dependencies:
     "@electron/asar": "npm:3.4.1"
     "@electron/fuses": "npm:^1.8.0"
@@ -6115,7 +6115,7 @@ __metadata:
   peerDependencies:
     dmg-builder: 26.15.3
     electron-builder-squirrel-windows: 26.15.3
-  checksum: 10c0/cca416cd06e1a5e651d5cb2df92fbc867dec95ac486b772a45388f22a40872b2ef4b80819b221bd7a4e43fdaab4da29b9b44a890070e5ed095cb31d1ea609304
+  checksum: 10c0/18663620f652ed1064a03dbce440909319377358ff987f9f77151341b1bb408270039c189f7c9b4b7a5150d75533fc354a0b730ae192eff8c7953d3ec244afaa
   languageName: node
   linkType: hard
 

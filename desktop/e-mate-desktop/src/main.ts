@@ -16,6 +16,7 @@ import {
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
+import { isDesktopInstallerQuitRequest } from './desktop-installer-quit.ts'
 import {
   installDesktopDshRuntime,
   installDesktopPnpmRuntime,
@@ -75,10 +76,6 @@ import {
   formatWindowsVolumeConcern,
   type WindowsVolumeConcern,
 } from './windows-volume-diagnostics.ts'
-import {
-  beginWindowsUpdateCandidateStartup,
-  completeWindowsUpdateCandidateStartup,
-} from './windows-update-installer.ts'
 
 const BIN_NAME = '@e-mate/desktop'
 const PRODUCT_NAME = 'e-Mate'
@@ -146,9 +143,10 @@ async function start(): Promise<void> {
     app.quit()
     return
   }
-  const windowsUpdateCandidate = await beginWindowsUpdateCandidateStartup({
-    currentVersion: app.getVersion(),
-  })
+  if (isDesktopInstallerQuitRequest(process.argv, process.platform)) {
+    app.quit()
+    return
+  }
 
   let current: Context | undefined
   let profileStartup: DesktopProfileStartup | undefined
@@ -202,7 +200,7 @@ async function start(): Promise<void> {
     rendererBootSettled = true
     resolveRendererBoot(report)
   }, macUpdateStartupProbation, processGenerationId)
-  if (windowsUpdateCandidate !== undefined || macUpdateStartupProbation) {
+  if (macUpdateStartupProbation) {
     runtime.updates.publishState({ stage: 'health-check', updateKind: 'base', version: app.getVersion() })
   }
   const finalExit = (code: number): void => { nativeExit.finish(code) }
@@ -221,7 +219,13 @@ async function start(): Promise<void> {
   const requestQuit = (code: number): void => { void shutdown.request(code) }
   removeShutdownRequests = installShutdownRequests(process, app, requestQuit)
 
-  app.on('second-instance', () => { runtime.show() })
+  app.on('second-instance', (_event, argv) => {
+    if (isDesktopInstallerQuitRequest(argv, process.platform)) {
+      requestQuit(0)
+      return
+    }
+    runtime.show()
+  })
   await app.whenReady()
   if (process.platform === 'darwin' && !hasMacUpdateStartupAcknowledgement) {
     const recovery = recoverPendingMacUpdateStartup(app.getPath('userData'), app.getVersion(), process.execPath)
@@ -514,13 +518,6 @@ async function start(): Promise<void> {
         rolledBackInstall = undefined
       }
     }
-    await completeWindowsUpdateCandidateStartup(windowsUpdateCandidate, {
-      id: baseContract.id,
-      scheduleProtocolFloor: baseContract.schedule_protocol_floor,
-    })
-    if (windowsUpdateCandidate !== undefined) {
-      runtime.updates.publishState({ stage: 'completed', updateKind: 'base', version: app.getVersion() })
-    }
     markDesktopProfileHealthy(selectionStatePath, activeProfileName)
     if (!macUpdateStartupProbation) {
       markProfileGenerationHealthy(generationStatePath, profileGenerationStartup.generation_id)
@@ -639,7 +636,7 @@ async function start(): Promise<void> {
     }
   } catch (cause) {
     runtime.stopRendererBootMonitoring()
-    if (windowsUpdateCandidate !== undefined || macUpdateStartupProbation) {
+    if (macUpdateStartupProbation) {
       runtime.updates.publishState({
         stage: 'failed',
         updateKind: 'base',
