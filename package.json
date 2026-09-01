@@ -23,7 +23,7 @@
     "smoke:app-dir": "pnpm --dir desktop package:dir",
     "verify:rc": "pnpm build:harness && pnpm run test:fast && node scripts/component-run.mjs check && pnpm --filter @e-mate/dsh test",
     "audit:full": "pnpm test",
-    "build": "node scripts/component-run.mjs build && pnpm --filter @e-mate/dsh build",
+    "build": "node scripts/component-run.mjs build && pnpm --config.shell-emulator=true --filter @e-mate/dsh build",
     "enterprise:check": "pnpm --dir enterprise check",
     "enterprise:test": "pnpm --dir enterprise test",
     "enterprise:build": "pnpm --dir enterprise build",
