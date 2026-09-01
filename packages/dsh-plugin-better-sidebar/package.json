@@ -17,7 +17,7 @@
     "cordis.patch.yml"
   ],
   "scripts": {
-    "build": "rm -rf lib && ../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && ../../upstream/deepseek-harness/node_modules/.bin/tsdown",
     "test": "node --test test/*.test.mjs && pnpm test:client",
     "test:client": "../../upstream/deepseek-harness/node_modules/.bin/vitest run --config vitest.config.ts",
     "check": "pnpm build && pnpm test"

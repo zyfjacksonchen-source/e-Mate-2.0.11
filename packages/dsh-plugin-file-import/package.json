@@ -19,7 +19,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "rm -rf lib && ../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && ../../upstream/deepseek-harness/node_modules/.bin/tsdown",
     "test": "node --test test/*.test.mjs",
     "check": "pnpm build && pnpm test"
   },

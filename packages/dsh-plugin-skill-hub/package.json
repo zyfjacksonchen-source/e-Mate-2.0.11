@@ -13,7 +13,7 @@
   },
   "files": ["lib", "pnpm-lock.yaml", "cordis.patch.yml", "README.md", "LICENSE"],
   "scripts": {
-    "build": "rm -rf lib && ../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && ../../upstream/deepseek-harness/node_modules/.bin/tsdown",
     "test": "node --test test/*.test.mjs && ../../upstream/deepseek-harness/node_modules/.bin/vitest run test/*.spec.tsx"
   },
   "peerDependencies": {
