@@ -1,10 +1,9 @@
-/** Headless smoke for the complete published DSH Web profile and renderer manifest. */
+/** Headless smoke for the complete bundled DSH Web profile and renderer manifest. */
 
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseArgs } from 'node:util'
 import { runInThisContext } from 'node:vm'
 import { boot } from '@deepseek-ai/dsh-app-boot'
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
@@ -17,39 +16,14 @@ import {
 import { installDesktopPnpmRuntime } from '../lib/desktop-runtime-environment.js'
 import {
   emateProfileComponentSources,
-  EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
   installEmateDesktopProfile,
 } from '../lib/e-mate-profile.js'
 import { installProfilePackageResolver } from '../lib/module-resolution.js'
 import { prepareDesktopProfile } from '../lib/profile.js'
-import { loadProfileGeneration } from '../src/profile-generation.ts'
-import { loadProfileBaseContract } from '../src/profile-release.ts'
+import { loadProfileBaseContract } from '../src/base-contract.ts'
 
 const BIN_NAME = '@e-mate/desktop-profile-smoke'
-const { values: generationOptions } = parseArgs({
-  options: {
-    store: { type: 'string' },
-    generation: { type: 'string' },
-    base: { type: 'string' },
-    target: { type: 'string' },
-  },
-})
-const generationArguments = [
-  generationOptions.store,
-  generationOptions.generation,
-  generationOptions.base,
-]
-if (generationArguments.some(value => value !== undefined)
-  && generationArguments.some(value => value === undefined)) {
-  throw new Error('generation smoke requires --store, --generation, --base, and --target together')
-}
-const selectedTarget = generationOptions.target === undefined
-  ? { platform: 'win32', arch: 'x64' }
-  : (() => {
-      const match = /^(darwin)-(arm64|x64)$|^(win32)-(x64)$/u.exec(generationOptions.target)
-      if (match === null) throw new Error(`unsupported generation smoke target: ${generationOptions.target}`)
-      return { platform: match[1] ?? match[3], arch: match[2] ?? match[4] }
-    })()
+const selectedTarget = { platform: 'win32', arch: 'x64' }
 const home = mkdtempSync(join(tmpdir(), 'dsh-desktop-profile-'))
 const previousDshHome = process.env.DSH_HOME
 process.env.DSH_HOME = home
@@ -65,22 +39,9 @@ try {
   // its fixed profile mode without exposing a mode selector.
   writeFileSync(join(home, 'settings.yaml'), 'dsh-desktop:\n  mode: compatibility\n')
   const selectedBase = loadProfileBaseContract(
-    generationOptions.base ?? fileURLToPath(new URL('../base-contract.json', import.meta.url)),
+    fileURLToPath(new URL('../base-contract.json', import.meta.url)),
   )
-  const selectedGeneration = generationOptions.store === undefined
-    ? undefined
-    : await loadProfileGeneration({
-        root: generationOptions.store,
-        id: generationOptions.generation,
-        base: selectedBase,
-        expected_component_ids: EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
-        target: selectedTarget,
-      })
-  const activeProfileGeneration = selectedGeneration === undefined ? undefined : {
-    id: selectedGeneration.id,
-    componentDirectories: selectedGeneration.component_directories,
-  }
-  const installedProfile = installEmateDesktopProfile(home, undefined, activeProfileGeneration)
+  const installedProfile = installEmateDesktopProfile(home)
   const retiredBrowser = /e-Mate 浏览器扩展未连接|chrome:\/\/extensions|load[- ]unpacked|加载已解压|ext-bridge-token|browser-extension|@e-mate\/dsh-plugin-browser(?:-panel)?|@yuxianglin\/dsh-bridge-browser/u
   for (const relative of readdirSync(installedProfile, { recursive: true })) {
     if (retiredBrowser.test(relative)) {
@@ -107,7 +68,7 @@ try {
   })
   releasePackageResolver = installProfilePackageResolver(
     prepared.bareModuleBaseUrl,
-    emateProfileComponentSources(activeProfileGeneration),
+    emateProfileComponentSources(),
     selectedBase.runtime_imports,
   )
   const runtime = {
@@ -116,8 +77,6 @@ try {
       isPackaged: false,
       canDownload: true,
       currentVersion: '2.0.0',
-      currentScheduleProtocolFloor: selectedBase.schedule_protocol_floor,
-      trustedManifestKeys: selectedBase.profile_signing_keys,
       statePath: join(home, 'update-state.json'),
       request: async () => { throw new Error('profile smoke must not perform update requests') },
       confirmDownload: async () => false,

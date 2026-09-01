@@ -342,7 +342,7 @@ describe('published package surface', () => {
     expect(manifest.build?.mac).toEqual(expect.objectContaining({
       hardenedRuntime: true,
       mergeASARs: false,
-      notarize: true,
+      notarize: false,
       target: ['dir'],
       x64ArchFiles: expect.stringContaining('node-pty/prebuilds/darwin-*'),
     }))
@@ -369,7 +369,16 @@ describe('published package surface', () => {
       'src/mac-update-helper.ts',
       'src/mac-update-installer.ts',
       '../../scripts/local-flow.mjs',
+      '../../scripts/base-sdk.mjs',
+      '../../scripts/change-impact.mjs',
+      '../../scripts/component-release.mjs',
+      '../../scripts/smoke',
+      '../../tests/smoke',
+      '../../upstream/e-mate-2.0.5',
+      '../../upstream/plugins/dsh-search-mcp',
+      '../../deploy/download-page/site.d9ba6145f056.js',
       '../../.github/workflows/desktop-release.yml',
+      '../../.github/workflows/audit.yml',
     ]
 
     for (const path of forbidden) expect(existsSync(new URL(path, packageRoot)), path).toBe(false)
@@ -381,8 +390,7 @@ describe('published package surface', () => {
     expect(preload).toContain('DESKTOP_UPDATE_RUN_INTERACTIVE')
     expect(main).toContain('getOrCreateDesktopInstallationId(app.getPath(\'userData\'))')
     expect(main).toMatch(/void start\(\)\.catch\(/u)
-    expect(workflow).toContain('yarn workspace @e-mate/desktop dist:mac')
-    expect(workflow).toContain('yarn workspace @e-mate/desktop dist:win')
+    expect(workflow).not.toMatch(/yarn workspace @e-mate\/desktop dist:(?:mac|win)/u)
     expect(workflow).not.toMatch(/schema-2|local-flow|dist:mac-unsigned-release/u)
   })
 

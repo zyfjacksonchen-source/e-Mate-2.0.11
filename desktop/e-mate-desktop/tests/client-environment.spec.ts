@@ -28,7 +28,7 @@ describe('desktop client environment', () => {
       schemaVersion: 1 as const,
       mode: 'advanced' as const,
       platform: 'win32' as const,
-      profileGeneration: 'generation-123',
+      profileGeneration: 'bundled' as const,
       runtimeId: 'runtime-123',
       windowKind: 'main' as const,
     }

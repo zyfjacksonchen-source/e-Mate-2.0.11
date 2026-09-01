@@ -157,7 +157,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private rendererBootTimer: NodeJS.Timeout | undefined
   private bootFailureReason: RendererBootFailureReason | undefined
   private directoryPickTask: Promise<string | null> | undefined
-  private profileGeneration = 'bundled'
+  private readonly profileGeneration = 'bundled' as const
   private interactiveUpdate: (() => Promise<void>) | undefined
 
   constructor(

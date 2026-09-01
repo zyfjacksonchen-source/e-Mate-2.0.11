@@ -17,18 +17,15 @@
   "scripts": {
     "build:harness": "node scripts/harness-provenance.mjs build",
     "chat:fixture": "node scripts/create-chat-state-fixture.mjs",
-    "test": "pnpm run test:harness-provenance && node --test scripts/create-chat-state-fixture.test.mjs && node scripts/component-run.mjs check && pnpm --filter @e-mate/dsh build && pnpm --filter @e-mate/dsh test",
+    "test": "pnpm run test:fast && node scripts/component-run.mjs check && pnpm --filter @e-mate/dsh build && pnpm --filter @e-mate/dsh test",
     "test:harness-provenance": "node --test scripts/harness-provenance.test.mjs scripts/harness-runtime-adapters.test.mjs",
-    "test:fast": "pnpm run test:harness-provenance && node --test scripts/create-chat-state-fixture.test.mjs",
+    "test:fast": "pnpm run test:harness-provenance && node --test scripts/create-chat-state-fixture.test.mjs deploy/download-page/site.test.mjs",
     "smoke:app-dir": "pnpm --dir desktop package:dir",
     "verify:rc": "pnpm build:harness && pnpm run test:fast && node scripts/component-run.mjs check && pnpm --filter @e-mate/dsh test",
     "audit:full": "pnpm test",
     "build": "node scripts/component-run.mjs build && pnpm --config.shell-emulator=true --filter @e-mate/dsh build",
     "enterprise:check": "pnpm --dir enterprise check",
     "enterprise:test": "pnpm --dir enterprise test",
-    "enterprise:build": "pnpm --dir enterprise build",
-    "pack:check": "pnpm --filter @e-mate/dsh pack --pack-destination dist/npm",
-    "release:evidence": "node scripts/release.mjs evidence --from dist/npm --out dist/release",
-    "release:publish": "node scripts/release.mjs publish --from dist/npm"
+    "enterprise:build": "pnpm --dir enterprise build"
   }
 }

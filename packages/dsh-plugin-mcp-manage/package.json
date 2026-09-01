@@ -7,12 +7,23 @@
   "main": "lib/index.mjs",
   "types": "lib/index.d.mts",
   "exports": {
-    ".": { "types": "./lib/index.d.mts", "default": "./lib/index.mjs" },
+    ".": {
+      "types": "./lib/index.d.mts",
+      "default": "./lib/index.mjs"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
-  "files": ["lib", "pnpm-lock.yaml", "cordis.patch.yml", "README.md", "LICENSE"],
-  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "files": [
+    "lib",
+    "pnpm-lock.yaml",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
   "scripts": {
     "build": "../../upstream/deepseek-harness/node_modules/.bin/tsdown",
     "test": "node --test test/contract.test.mjs"
@@ -21,28 +32,24 @@
     "@deepseek-ai/schemastery": "3.18.1",
     "@modelcontextprotocol/sdk": "1.29.0"
   },
-  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "eMate": {
-    "component": {
-      "schema_version": 1,
-      "id": "@e-mate/dsh-plugin-mcp-manage",
-      "kind": "profile",
-      "base_imports": [
-        "@deepseek-ai/dsh-credentials",
-        "@deepseek-ai/dsh-settings",
-        "@deepseek-ai/dsh-tools",
-        "@deepseek-ai/schemastery"
-      ],
-      "authority_contract": {
-        "effects": ["credentials-read", "credentials-write", "desktop-restart", "host-plugin-install", "network-remote", "persistent-state", "subprocess"],
-        "guards": ["atomic-receipt", "explicit-user-action", "fixed-catalog", "native-user-question"]
-      },
-      "base_contracts": ["e-mate-desktop-profile-v15-dsh-32728743c289"]
-    },
     "harnessVersion": "0.1.0-rc.7",
     "harnessCommit": "32728743c28911bcd4279f79fe9c43ee7aacfb6d",
     "runtime": "@deepseek-ai/dsh-mcp-client",
-    "mcpSdkVersion": "1.29.0"
+    "mcpSdkVersion": "1.29.0",
+    "baseImports": [
+      "@deepseek-ai/dsh-credentials",
+      "@deepseek-ai/dsh-settings",
+      "@deepseek-ai/dsh-tools",
+      "@deepseek-ai/schemastery"
+    ]
   },
-  "publishConfig": { "access": "public" }
+  "publishConfig": {
+    "access": "public"
+  }
 }

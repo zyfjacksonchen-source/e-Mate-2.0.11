@@ -1,4 +1,4 @@
-# e-Mate 2.0.7 legacy-data migration
+# Legacy-data migration
 
 This document defines the one-way, copy-on-write import from existing e-Mate, ECoreX, and CowAgent data into the pinned Harness runtime. The target database and event model are not reimplemented: imported conversations are written through Harness `SessionPersistence` into the same `$DSH_HOME/sessions` store used by new conversations.
 

@@ -4,9 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parseArgs } from 'node:util'
-import { loadReleaseBoundary } from './change-impact.mjs'
 import { prepareHarnessBaseImports } from './component-base-imports.mjs'
-import { componentFiles, verifyComponentRuntimeImports } from './component-release.mjs'
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -17,9 +15,14 @@ if (!['build', 'check'].includes(command) || positionals.length !== 1) {
   throw new Error('usage: node scripts/component-run.mjs <build|check> [--component <id>]')
 }
 
-const boundary = loadReleaseBoundary()
-if (!boundary.valid) throw new Error(boundary.errors.join('\n'))
-const components = boundary.components.filter(component => component.desktop !== 'blocked'
+const inventory = JSON.parse(readFileSync(new URL('../packages/dsh/profile/component-inventory.json', import.meta.url), 'utf8'))
+const baseContract = JSON.parse(readFileSync(new URL('../desktop/e-mate-desktop/base-contract.json', import.meta.url), 'utf8'))
+if (inventory.schema_version !== 1 || !Array.isArray(inventory.components)
+  || baseContract.harness_version !== '0.1.0-rc.7'
+  || baseContract.harness_commit !== '32728743c28911bcd4279f79fe9c43ee7aacfb6d') {
+  throw new Error('bundled Profile inventory or pinned Base contract is invalid')
+}
+const components = inventory.components.filter(component => component.desktop !== 'blocked'
   && (values.component === undefined || component.id === values.component))
 if (components.length === 0 || values.component !== undefined && components.length !== 1) {
   throw new Error(`unknown or blocked component: ${String(values.component)}`)
@@ -47,6 +50,12 @@ function run(args, env = process.env) {
 }
 
 for (const component of components) {
+  const manifest = JSON.parse(readFileSync(resolve(component.root, 'package.json'), 'utf8'))
+  if (manifest.name !== component.id || manifest.version !== '2.0.15'
+    || manifest.eMate?.harnessVersion !== '0.1.0-rc.7'
+    || !Array.isArray(manifest.eMate?.baseImports)) {
+    throw new Error(`bundled Profile package identity is invalid: ${component.id}`)
+  }
   run(['--dir', component.root, 'install', '--ignore-workspace', '--frozen-lockfile'])
   if (component.id === '@e-mate/dsh-plugin-find-skill') {
     run(['--dir', 'upstream/plugins/dsh-find-skill', 'install', '--frozen-lockfile', '--ignore-scripts'])
@@ -54,8 +63,8 @@ for (const component of components) {
   prepareHarnessBaseImports({
     componentRoot: resolve(component.root),
     harnessRoot: resolve('upstream/deepseek-harness'),
-    baseImports: component.base_imports,
-    runtimeImports: boundary.baseContract.runtime_imports,
+    baseImports: manifest.eMate.baseImports,
+    runtimeImports: baseContract.runtime_imports,
   })
 }
 
@@ -63,16 +72,5 @@ for (const component of components) {
   run(['--config.shell-emulator=true', '--dir', component.root, 'run', 'build'], command === 'check'
     ? { ...process.env, EMATE_COMPONENT_CHECK: '1' }
     : process.env)
-  const manifest = JSON.parse(readFileSync(resolve(component.root, 'package.json'), 'utf8'))
-  const entries = componentFiles(resolve(component.root), manifest)
-  const requestedTarget = process.env.EMATE_COMPONENT_TARGET
-  const targets = component.kind === 'platform-profile'
-    ? component.targets.filter(target => requestedTarget !== undefined
-      && `${target.platform}-${target.arch}` === requestedTarget)
-    : [null]
-  if (component.kind === 'platform-profile' && requestedTarget !== undefined && targets.length === 0) {
-    throw new Error(`unsupported component target: ${requestedTarget}`)
-  }
-  for (const target of targets) verifyComponentRuntimeImports(entries, component, target)
   if (command === 'check') run(['--config.shell-emulator=true', '--dir', component.root, 'run', 'test'])
 }

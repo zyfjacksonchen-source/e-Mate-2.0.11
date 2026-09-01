@@ -2,7 +2,7 @@ import { Alert, Button, Drawer, Empty, Input, Link, Select, Spin, Tag } from '@a
 import { ChartHistogram, ChartLine, CheckOne, Home, Refresh, UserBusiness } from '@icon-park/react';
 import { Fragment, type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { TaskEventType, TaskScenario, TenantUsageEvent } from '@e-mate/monitoring-contract';
-import eMateLogo from '../../../../upstream/e-mate-2.0.5/desktop/src/v1/assets/emate-logo.png';
+import eMateLogo from '../../../../packages/dsh/profile/plugins/emate-shell/assets/emate-logo.png';
 import {
   loadUsageDashboard,
   loadUsageEvents,

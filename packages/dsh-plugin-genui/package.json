@@ -37,20 +37,13 @@
     }
   },
   "eMate": {
-    "component": {
-      "schema_version": 1,
-      "id": "@e-mate/dsh-plugin-genui",
-      "kind": "profile",
-      "base_imports": [
-        "@deepseek-ai/dsh-client-ui-primitives",
-        "react",
-        "react-dom"
-      ],
-      "authority_contract": { "effects": [], "guards": [] },
-      "base_contracts": ["e-mate-desktop-profile-v15-dsh-32728743c289"]
-    },
     "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "32728743c28911bcd4279f79fe9c43ee7aacfb6d"
+    "harnessCommit": "32728743c28911bcd4279f79fe9c43ee7aacfb6d",
+    "baseImports": [
+      "@deepseek-ai/dsh-client-ui-primitives",
+      "react",
+      "react-dom"
+    ]
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

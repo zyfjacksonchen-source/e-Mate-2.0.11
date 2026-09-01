@@ -20,7 +20,6 @@ import {
   HARNESS_VERSION,
   VERSION,
   checkEnvironment,
-  latestUpdateReceipt,
   managedStatus,
   nodeVersionSupported,
   platformSupported,
@@ -63,20 +62,6 @@ import {
   describeAgreements,
   requiredAcknowledgements,
 } from '../profile/plugins/identity/agreements.js'
-import {
-  claimUpdateLock,
-  compareVersions,
-  globalPrefixForBinPath,
-  normalizeUpdateTarget,
-  parsePackageIntegrity,
-  releaseUpdateLock,
-  validateReleaseManifest,
-  validateReleaseSource,
-  validateLatestReleasePointer,
-  validateStagedVersion,
-  validateUpdateRequest,
-} from '../lib/update.js'
-
 const fileDigest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
 
 function writeAuditRuntimeBinding(temporary) {
@@ -191,177 +176,8 @@ test('version gates match the release contract', () => {
   assert.equal(platformSupported('win32', 'x64'), true)
   assert.equal(platformSupported('linux', 'x64'), false)
   const libFiles = readdirSync(new URL('../lib/', import.meta.url))
-  for (const stem of ['e-mate', 'legacy-migration', 'legacy-schedule', 'update']) {
+  for (const stem of ['e-mate', 'legacy-migration', 'legacy-schedule']) {
     assert.equal(libFiles.filter(name => name.startsWith(`${stem}-`) && name.endsWith('.js')).length, 1)
-  }
-})
-
-test('online update target parsing rejects tags and downgrade ordering is SemVer-correct', () => {
-  const requestId = '11111111-1111-4111-8111-111111111111'
-  const sourceCommit = 'a'.repeat(40)
-  const base = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/npm/candidates/v2.0.15/${sourceCommit}`
-  const releaseSource = {
-    schema_version: 1,
-    product: 'e-Mate',
-    version: '2.0.15',
-    package_name: '@e-mate/dsh',
-    source_commit: sourceCommit,
-    manifest_url: `${base}/release-manifest.json`,
-    tarball_url: `${base}/e-mate-dsh-2.0.15.tgz`,
-  }
-  const request = {
-    schema_version: 1,
-    request_id: requestId,
-    target: '2.0.15',
-    current_version: '2.0.15',
-    release_source: releaseSource,
-    previous_release_source: releaseSource,
-  }
-  assert.equal(normalizeUpdateTarget(), 'latest')
-  assert.equal(normalizeUpdateTarget('latest'), 'latest')
-  assert.equal(normalizeUpdateTarget('2.0.15-rc.1'), '2.0.15-rc.1')
-  assert.throws(() => normalizeUpdateTarget('next'), /invalid update version/)
-  assert.throws(() => normalizeUpdateTarget('2.0'), /invalid update version/)
-  assert.equal(validateStagedVersion('latest', '2.0.15'), '2.0.15')
-  assert.equal(validateStagedVersion('2.0.15', '2.0.15'), '2.0.15')
-  assert.throws(() => validateStagedVersion('2.0.15', '2.0.7'), /does not match requested version/)
-  assert.throws(() => validateStagedVersion('latest', 'not-semver'), /version is invalid/)
-  assert.equal(validateUpdateRequest(request, requestId), request)
-  assert.throws(
-    () => validateUpdateRequest({ ...request, target: 'file:/tmp/package.tgz' }, requestId),
-    /invalid update version/,
-  )
-  assert.throws(
-    () => validateUpdateRequest({ ...request, current_version: '2.0.7 --force' }, requestId),
-    /request version is invalid/,
-  )
-  const integrity = `sha512-${'A'.repeat(86)}==`
-  assert.equal(parsePackageIntegrity(JSON.stringify(integrity)), integrity)
-  assert.throws(() => parsePackageIntegrity(JSON.stringify('sha256-invalid')), /integrity is invalid/)
-  assert.equal(compareVersions('2.0.7', '2.0.7-rc.1'), 1)
-  assert.equal(compareVersions('2.0.7-rc.1', '2.0.7-rc.2'), -1)
-  assert.equal(compareVersions('2.0.15', '2.0.7'), 1)
-  assert.equal(globalPrefixForBinPath('/opt/e-mate/lib/node_modules/@e-mate/dsh/lib/bin.js', 'darwin'), '/opt/e-mate')
-  assert.equal(
-    globalPrefixForBinPath('C:\\Users\\e-mate\\AppData\\Roaming\\npm\\node_modules\\@e-mate\\dsh\\lib\\bin.js', 'win32'),
-    'C:\\Users\\e-mate\\AppData\\Roaming\\npm',
-  )
-  assert.throws(() => globalPrefixForBinPath('/repo/packages/dsh/lib/bin.js', 'darwin'), /global npm installation/u)
-  assert.deepEqual(validateReleaseSource(releaseSource), releaseSource)
-  const desktopPrefix = `https://pub-ada3f610c0234a76838f4e19fe2bb25e.r2.dev/desktop/releases/v2.0.15/${sourceCommit}`
-  assert.deepEqual(validateLatestReleasePointer({
-    schema_version: 1,
-    version: '2.0.15',
-    source_commit: sourceCommit,
-    artifacts: {
-      darwin: {
-        url: `${desktopPrefix}/e-Mate-2.0.15-mac-universal.dmg`,
-        bytes: 1,
-        sha256: 'ab'.repeat(32),
-      },
-      win32: {
-        url: `${desktopPrefix}/e-Mate-2.0.15-win-x64-Setup.exe`,
-        bytes: 1,
-        sha256: 'cd'.repeat(32),
-      },
-    },
-  }), releaseSource)
-  assert.equal(compareVersions('2.0.15', '2.0.5'), 1)
-  assert.throws(() => validateReleaseSource({ ...releaseSource, manifest_url: 'http://example.com/release-manifest.json' }), /URL is invalid/u)
-  const sha512 = 'ab'.repeat(64)
-  const artifactIntegrity = `sha512-${Buffer.from(sha512, 'hex').toString('base64')}`
-  const artifact = {
-    name: '@e-mate/dsh', version: '2.0.15', kind: 'main', filename: 'e-mate-dsh-2.0.15.tgz',
-    size: 207, sha256: 'cd'.repeat(32), sha512, integrity: artifactIntegrity,
-  }
-  const manifest = {
-    schema_version: 1, product: 'e-Mate', version: '2.0.15', source_commit: sourceCommit,
-    packages: [artifact], download: { ...releaseSource, size: artifact.size, sha256: artifact.sha256, sha512, integrity: artifactIntegrity },
-  }
-  assert.equal(validateReleaseManifest(manifest, releaseSource).integrity, artifactIntegrity)
-  assert.throws(() => validateReleaseManifest({ ...manifest, packages: [{ ...artifact, sha256: 'ef'.repeat(32) }] }, releaseSource), /integrity is invalid/u)
-  const updateSource = readFileSync(new URL('../src/update.ts', import.meta.url), 'utf8')
-  assert.doesNotMatch(updateSource, /--ignore-scripts/u, 'the staged npm package must retain its reviewed lifecycle contract')
-  assert.match(
-    updateSource,
-    /snapshotData\(paths\)\s+changed = true\s+runNpm\(\[\s*'install', '--global'/u,
-    'a partial global install must enter rollback',
-  )
-  assert.match(updateSource, /runNode\(\[binPath, '--version'\]/u)
-  assert.match(updateSource, /'launch', \.\.\.\(previousPort === undefined/u)
-  assert.doesNotMatch(updateSource, /npm package integrity|npm view|@e-mate\/dsh@\$\{/u)
-  assert.match(updateSource, /installed_source_url: staged\.tarball_url/u)
-  assert.match(updateSource, /paths\.previousPackage/u)
-  assert.doesNotMatch(updateSource, /rmSync\(dirname\(paths\.snapshot\)/u, 'data snapshots must retain the verified target and rollback tarballs')
-})
-
-test('status projects only the latest bounded online-update receipt', async () => {
-  const dshHome = mkdtempSync(join(tmpdir(), 'e-mate-update-status-'))
-  const directory = join(dshHome, 'e-mate', 'migrations')
-  mkdirSync(directory, { recursive: true })
-  const first = '11111111-1111-4111-8111-111111111111'
-  const second = '22222222-2222-4222-8222-222222222222'
-  try {
-    writeFileSync(join(directory, `online-update-${first}.json`), JSON.stringify({
-      schema_version: 1,
-      product: 'e-Mate',
-      request_id: first,
-      status: 'failed-before-change',
-      requested_version: '2.0.15',
-      previous_version: '2.0.7',
-      error: 'must not reach status output',
-      finished_at: '2026-08-15T01:00:00.000Z',
-    }))
-    writeFileSync(join(directory, `online-update-${second}.json`), JSON.stringify({
-      schema_version: 1,
-      product: 'e-Mate',
-      request_id: second,
-      status: 'completed',
-      requested_version: '2.0.15',
-      previous_version: '2.0.7',
-      installed_version: '2.0.15',
-      error: 'must not reach status output',
-      finished_at: '2026-08-15T02:00:00.000Z',
-    }))
-    const expected = {
-      request_id: second,
-      status: 'completed',
-      requested_version: '2.0.15',
-      previous_version: '2.0.7',
-      installed_version: '2.0.15',
-      finished_at: '2026-08-15T02:00:00.000Z',
-    }
-    assert.deepEqual(latestUpdateReceipt(dshHome), expected)
-    assert.deepEqual((await managedStatus(dshHome)).latest_update, expected)
-  } finally {
-    rmSync(dshHome, { recursive: true, force: true })
-  }
-})
-
-test('online updates admit only one live detached helper', () => {
-  const root = mkdtempSync(join(tmpdir(), 'e-mate-update-lock-'))
-  const lock = join(root, 'run', 'update.lock')
-  const first = '11111111-1111-4111-8111-111111111111'
-  const second = '22222222-2222-4222-8222-222222222222'
-  try {
-    assert.throws(
-      () => claimUpdateLock(lock, '11111111-1111-1111-1111-111111111111'),
-      /invalid online update lock identity/u,
-    )
-    claimUpdateLock(lock, first)
-    assert.throws(() => claimUpdateLock(lock, second), /already running/u)
-    releaseUpdateLock(lock, second)
-    assert.equal(existsSync(lock), true)
-    releaseUpdateLock(lock, first)
-    assert.equal(existsSync(lock), false)
-
-    mkdirSync(join(root, 'run'), { recursive: true })
-    writeFileSync(lock, JSON.stringify({ schema_version: 1, request_id: first, owner_pid: 2_147_483_647, state: 'running' }))
-    claimUpdateLock(lock, second)
-    assert.equal(JSON.parse(readFileSync(lock, 'utf8')).request_id, second)
-  } finally {
-    releaseUpdateLock(lock, second)
-    rmSync(root, { recursive: true, force: true })
   }
 })
 
@@ -670,7 +486,6 @@ test('managed profile installation is idempotent', () => {
     assert.match(client, /emate\/legacy-artifacts/)
     assert.match(client, /conversationEvents\.register/)
     assert.match(client, /legacy-artifact\.download/)
-    assert.match(client, /e-mate-image-disclosure/)
     assert.doesNotMatch(client, /e-mate-activity-group|data-emate-activity-header|e-mate-message-disclosure/)
     const capabilities = readFileSync(new URL('../../dsh-plugin-skill-hub/src/client/capabilities.tsx', import.meta.url), 'utf8')
     assert.match(capabilities, /icons\[capability\.icon_key\]/)
@@ -699,8 +514,8 @@ test('managed profile installation is idempotent', () => {
     assert.match(homeCss, /:global\(\[data-phase='hero'\] \[data-emate-composer-frame-host\]\) \{\s*padding-bottom:\s*0;/)
     assert.match(homeCss, /:global\(\[data-phase='active'\] \[data-emate-composer-frame-host\]\) \{\s*align-self:\s*center;\s*width:\s*min\(var\(--dsh-composer-card-max-width\), 100%\);/)
     assert.match(homeCss, /\[data-emate-composer-frame-host\] > :has\(> \[data-slot='conversation\.hero\.workspace'\]\)/)
-    assert.match(homeCss, /:global\(\[data-emate-composer-frame-host\] \[data-slot='conversation\.composer\.bar'\] \[data-composer-card\]\) \{[\s\S]*?border-radius:\s*24px !important;/)
-    assert.match(homeCss, /:global\(\[data-emate-composer-frame-host\]:has\(\[data-slot='conversation\.hero\.workspace'\]\) \[data-slot='conversation\.composer\.bar'\] \[data-composer-card\]\) \{\s*border-radius:\s*24px 24px 0 0 !important;/)
+    assert.match(homeCss, /:global\(\[data-emate-composer-frame-host\] \[data-slot='conversation\.composer\.bar'\] \[data-composer-card\]\) \{[\s\S]*?border-radius:\s*var\(--emate-composer-frame-radius\) !important;/)
+    assert.match(homeCss, /:global\(\[data-emate-composer-frame-host\]:has\(\[data-slot='conversation\.hero\.workspace'\]\) \[data-slot='conversation\.composer\.bar'\] \[data-composer-card\]\) \{\s*border-radius:\s*var\(--emate-composer-frame-radius\) var\(--emate-composer-frame-radius\) 0 0 !important;/)
     assert.match(homeCss, /min-height:\s*44px/)
     assert.doesNotMatch(homeCss, /> div > div:first-of-type/)
     const chatCss = readFileSync(new URL('../profile/plugins/emate-shell/src/client/chat-chrome.module.css', import.meta.url), 'utf8')
@@ -720,11 +535,10 @@ test('managed profile installation is idempotent', () => {
     assert.ok(catalogLoader.indexOf('setBuiltins(') < catalogLoader.indexOf("callSkillHub('catalog.search'"))
     assert.match(catalogLoader, /catch \(skillHubError\) \{\s*if \(cursor === undefined\) setItems\(\[\]\)\s*setError\(message\(skillHubError\)\)/)
     const imageGallery = readFileSync(new URL('../profile/plugins/emate-shell/src/client/image-gallery.tsx', import.meta.url), 'utf8')
-    assert.match(imageGallery, /kind: 'e-mate-image-disclosure'/)
-    assert.match(imageGallery, /event\.type !== 'assistant\/message'/)
-    assert.match(imageGallery, /isAppendSurfaceEvent\(event\)/)
-    assert.match(imageGallery, /querySelectorAll<HTMLElement>\('\[data-align="start"\]'\)/)
-    assert.match(imageGallery, /gallery\.hidden = !expanded/)
+    assert.match(imageGallery, /kind: 'e-mate-tool-images'/)
+    assert.match(imageGallery, /visibility: 'hidden'/)
+    assert.match(imageGallery, /selectArtifactTerminal\(owner: TurnTailOwnerProps\)/)
+    assert.match(imageGallery, /terminalImageItems\(/)
     assert.doesNotMatch(imageGallery, /\b(?:fetch|WebSocket|EventSource|setTimeout)\s*\(/)
     const legacyArtifactCss = readFileSync(new URL('../profile/plugins/emate-shell/src/client/legacy-artifacts.module.css', import.meta.url), 'utf8')
     assert.match(legacyArtifactCss, /flex-direction:\s*column/)
@@ -5840,21 +5654,5 @@ test('general conversations reuse a managed Harness workspace outside user proje
     assert.equal(renamed, '通用会话')
   } finally {
     rmSync(dshHome, { recursive: true, force: true })
-  }
-})
-
-test('shell assets are byte-identical to the pinned final e-Mate 2.0.5 UI', () => {
-  const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
-  for (const name of [
-    'e-mate-team-hero-transparent.png',
-    'emate-logo.png',
-    'emate-mark.png',
-    'xiaoxin-avatar.png',
-  ]) {
-    assert.equal(
-      digest(new URL(`../profile/plugins/emate-shell/assets/${name}`, import.meta.url)),
-      digest(new URL(`../../../upstream/e-mate-2.0.5/desktop/src/v1/assets/${name}`, import.meta.url)),
-      name,
-    )
   }
 })

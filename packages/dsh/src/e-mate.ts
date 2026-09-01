@@ -12,7 +12,6 @@ import {
   readdirSync,
   renameSync,
   rmSync,
-  lstatSync,
   writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -23,7 +22,6 @@ import { spawn, spawnSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parse as parseYaml } from 'yaml'
-import { normalizeUpdateTarget, runOnlineUpdateHelper, scheduleOnlineUpdate } from './update.js'
 import { migrateLegacySessions } from './legacy-migration.js'
 import { migrateLegacySchedules } from './legacy-schedule.js'
 import { checkOsCredentialBackend } from './profile/credentials-os.js'
@@ -57,9 +55,6 @@ const RETIRED_PROFILE_PACKAGES = new Set([
   'dsh-search-mcp',
 ])
 const OWNED_PROFILE_PACKAGES = new Set([...MANAGED_PROFILE_PACKAGES, ...RETIRED_PROFILE_PACKAGES])
-const UPDATE_RECEIPT_NAME = /^online-update-([0-9a-f]{8}-[0-9a-f-]{27})\.json$/iu
-const UPDATE_RECEIPT_STATUS = new Set(['completed', 'rolled-back', 'rollback-failed', 'failed-before-change'])
-
 const binPath = fileURLToPath(new URL('./bin.js', import.meta.url))
 export function resolveDshHome(environment = process.env) {
   return resolve(environment.DSH_HOME || join(homedir(), '.dsh'))
@@ -101,42 +96,6 @@ function readJson(path) {
 
 function emptyBundlePatch(patch) {
   return patch.split('\n').map(line => line.trim()).filter(line => line !== '' && !line.startsWith('#')).join('\n') === '[]'
-}
-
-export function latestUpdateReceipt(dshHome = resolveDshHome()) {
-  const directory = join(dshHome, 'e-mate', 'migrations')
-  let latest
-  try {
-    for (const filename of readdirSync(directory)) {
-      const match = UPDATE_RECEIPT_NAME.exec(filename)
-      if (match === null) continue
-      const path = join(directory, filename)
-      const metadata = lstatSync(path)
-      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size < 2 || metadata.size > 64 * 1024) continue
-      const receipt = readJson(path)
-      const finished = Date.parse(receipt?.finished_at)
-      if (receipt?.schema_version !== 1 || receipt.product !== PRODUCT || receipt.request_id !== match[1]
-        || !UPDATE_RECEIPT_STATUS.has(receipt.status) || !Number.isFinite(finished)
-        || typeof receipt.requested_version !== 'string' || typeof receipt.previous_version !== 'string'
-        || (receipt.installed_version !== undefined && typeof receipt.installed_version !== 'string')) continue
-      if (latest === undefined || finished > latest.finished) {
-        latest = {
-          finished,
-          value: {
-            request_id: receipt.request_id,
-            status: receipt.status,
-            requested_version: receipt.requested_version,
-            previous_version: receipt.previous_version,
-            ...(receipt.installed_version === undefined ? {} : { installed_version: receipt.installed_version }),
-            finished_at: receipt.finished_at,
-          },
-        }
-      }
-    }
-  } catch {
-    return undefined
-  }
-  return latest?.value
 }
 
 export function installProfile(dshHome = resolveDshHome()) {
@@ -553,12 +512,11 @@ async function fetchHealth(port) {
 export async function managedStatus(dshHome = resolveDshHome()) {
   const paths = managedPaths(dshHome)
   const state = readState(paths)
-  const latest_update = latestUpdateReceipt(dshHome)
-  if (state === undefined) return { running: false, healthy: false, product: PRODUCT, version: VERSION, latest_update }
+  if (state === undefined) return { running: false, healthy: false, product: PRODUCT, version: VERSION }
   const alive = pidAlive(state.pid)
   const health = alive ? await fetchHealth(state.port) : undefined
   const healthy = health?.instance_id === state.instance_id
-  return { ...state, running: alive, healthy, health, latest_update }
+  return { ...state, running: alive, healthy, health }
 }
 
 async function portAvailable(port) {
@@ -835,7 +793,6 @@ Usage:
   e-mate setup [--check] [--json]
   e-mate web [--port <port>]
   e-mate launch [--port <port>]
-  e-mate update [--version <version>] [--json]
   e-mate status
   e-mate stop
   e-mate --profile e-mate --dump-config
@@ -856,40 +813,6 @@ export async function main(args) {
   if (args[0] === 'launch') {
     const status = await launchManaged(args.slice(1))
     console.log(`${status.url} (PID ${status.pid}, instance ${status.instance_id})`)
-    return 0
-  }
-  if (args[0] === 'update') {
-    let target
-    let json = false
-    for (let index = 1; index < args.length; index += 1) {
-      if (args[index] === '--json') {
-        json = true
-      } else if (args[index] === '--version' && args[index + 1] !== undefined) {
-        if (target !== undefined) throw new Error('--version may be specified only once')
-        target = args[index + 1]
-        index += 1
-      } else {
-        throw new Error(`unknown update option ${JSON.stringify(args[index])}`)
-      }
-    }
-    const normalized = normalizeUpdateTarget(target)
-    const status = await managedStatus()
-    if (status.running && !status.healthy) throw new Error('managed instance is unhealthy; update made no changes')
-    if (status.health?.active_runs > 0) {
-      throw new Error(`online update refused: ${String(status.health.active_runs)} active run(s)`)
-    }
-    const scheduled = scheduleOnlineUpdate({
-      target: normalized,
-      dshHome: resolveDshHome(),
-      binPath,
-      currentVersion: VERSION,
-    })
-    console.log(json ? JSON.stringify(scheduled) : `e-Mate update ${scheduled.request_id} scheduled (${scheduled.target}).`)
-    return 0
-  }
-  if (args[0] === '__update-helper') {
-    if (args.length !== 2) throw new Error('invalid internal update invocation')
-    await runOnlineUpdateHelper({ requestId: args[1], dshHome: resolveDshHome(), binPath })
     return 0
   }
   if (args[0] === 'status') {

@@ -38,21 +38,13 @@ import {
 } from './profile-manager.ts'
 import {
   EMATE_DESKTOP_PROFILE_VERSION,
-  EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
   EMATE_PROFILE_NAME,
   cleanupEmateDesktopProfileArtifact,
   emateProfileComponentSources,
   installEmateDesktopProfile,
 } from './e-mate-profile.ts'
 import { prepareDesktopProfile, type SkippedOptionalEntry } from './profile.ts'
-import {
-  BUNDLED_PROFILE_GENERATION,
-  markProfileGenerationFailed,
-  markProfileGenerationHealthy,
-  resolveProfileGenerationStartup,
-  type ResolvedProfileGenerationStartup,
-} from './profile-generation.ts'
-import { loadProfileBaseContract, profileReleaseTarget } from './profile-release.ts'
+import { loadProfileBaseContract } from './base-contract.ts'
 import type { RendererBootReport } from './renderer-boot-contract.ts'
 import { resolveDesktopShellEnvironment } from './shell-environment.ts'
 import { desktopDefaultRelaunchArguments } from './relaunch-arguments.ts'
@@ -144,9 +136,6 @@ async function start(): Promise<void> {
   let current: Context | undefined
   let profileStartup: DesktopProfileStartup | undefined
   let profileStatePath: string | undefined
-  let profileGenerationStartup: ResolvedProfileGenerationStartup | undefined
-  let profileGenerationStatePath: string | undefined
-  let profileGenerationCommitted = false
   const processGenerationId = randomUUID()
   let installRecovery: DesktopInstallRecoveryStore | undefined
   let verifyingInstall: DesktopInstallRecoveryTransaction | undefined
@@ -274,27 +263,11 @@ async function start(): Promise<void> {
     const releasePnpmRuntime = (): void => { pnpmRuntime.dispose() }
     disposePnpmRuntime = releasePnpmRuntime
     const selectionStatePath = join(app.getPath('userData'), 'profile-selection', 'state.json')
-    const generationStatePath = join(app.getPath('userData'), 'profile-generations', 'state.json')
-    const generationRoot = join(app.getPath('userData'), 'profile-generations', 'store')
     const baseContract = loadProfileBaseContract(fileURLToPath(new URL('../base-contract.json', import.meta.url)))
-    const componentTarget = profileReleaseTarget()
-    profileGenerationStatePath = generationStatePath
-    profileGenerationStartup = await resolveProfileGenerationStartup({
-      state_path: generationStatePath,
-      root: generationRoot,
-      base: baseContract,
-      expected_component_ids: EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
-      target: componentTarget,
-    })
     const deferredProfileCleanup = new Set<string>()
-    const activeProfileGeneration = profileGenerationStartup.generation === undefined ? undefined : {
-      id: profileGenerationStartup.generation.id,
-      componentDirectories: profileGenerationStartup.generation.component_directories,
-    }
     installEmateDesktopProfile(
       homeDir,
       path => { deferredProfileCleanup.add(path) },
-      activeProfileGeneration,
     )
     profileStatePath = selectionStatePath
     profileStartup = beginDesktopProfileStartup(selectionStatePath, homeDir)
@@ -390,7 +363,7 @@ async function start(): Promise<void> {
     }
     const releasePackageResolver = installProfilePackageResolver(
       prepared.bareModuleBaseUrl,
-      emateProfileComponentSources(activeProfileGeneration),
+      emateProfileComponentSources(),
       baseContract.runtime_imports,
     )
     const ctx = await boot(
@@ -462,8 +435,6 @@ async function start(): Promise<void> {
       }
     }
     markDesktopProfileHealthy(selectionStatePath, activeProfileName)
-    markProfileGenerationHealthy(generationStatePath, profileGenerationStartup.generation_id)
-    profileGenerationCommitted = true
     if (process.env.EMATE_RELEASE_HEALTH_PROBE === '1') {
       writeFileSync(join(app.getPath('userData'), '.release-health-ack'), app.getVersion(), {
         encoding: 'utf8',
@@ -485,9 +456,6 @@ async function start(): Promise<void> {
         runtime,
         `Reopened last-known-good profile ${activeProfileName}.`,
       )
-    }
-    if (profileGenerationStartup.rolled_back_from.length > 0) {
-      notifyProfileRecovery(runtime, 'Reopened the last-known-good component generation.')
     }
   } catch (cause) {
     runtime.stopRendererBootMonitoring()
@@ -511,18 +479,6 @@ async function start(): Promise<void> {
     }
     process.stderr.write(`${BIN_NAME}: ${failure}\n`)
     let exitCode = 1
-    if (!profileGenerationCommitted && profileGenerationStartup !== undefined
-      && profileGenerationStatePath !== undefined
-      && profileGenerationStartup.generation_id !== BUNDLED_PROFILE_GENERATION) {
-      try {
-        markProfileGenerationFailed(profileGenerationStatePath, profileGenerationStartup.generation_id)
-        nativeExit.requestRelaunch(desktopDefaultRelaunchArguments())
-        exitCode = 0
-        notifyProfileRecovery(runtime, 'Reopening the last-known-good component generation.')
-      } catch (stateCause) {
-        process.stderr.write(`${BIN_NAME}: failed to roll back Profile generation state: ${stateCause instanceof Error ? stateCause.message : String(stateCause)}\n`)
-      }
-    }
     if (profileStartup !== undefined && profileStatePath !== undefined) {
       const retryLastKnownGood = profileStartup.profileName !== profileStartup.state.lastKnownGood
       try {

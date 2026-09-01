@@ -11,7 +11,7 @@ export interface DesktopRendererBootstrap {
   readonly schemaVersion: 1
   readonly mode: DesktopBootstrapMode
   readonly platform: DesktopBootstrapPlatform
-  readonly profileGeneration: string
+  readonly profileGeneration: 'bundled'
   readonly runtimeId: string
   readonly windowKind: DesktopWindowKind
 }
@@ -29,7 +29,7 @@ export function validateDesktopRendererBootstrap(value: unknown): DesktopRendere
   if (candidate.schemaVersion !== 1
     || !MODES.has(candidate.mode as DesktopBootstrapMode)
     || !PLATFORMS.has(candidate.platform as DesktopBootstrapPlatform)
-    || !IDENTIFIER.test(candidate.profileGeneration ?? '')
+    || candidate.profileGeneration !== 'bundled'
     || !IDENTIFIER.test(candidate.runtimeId ?? '')
     || candidate.windowKind !== 'main') {
     throw new Error('@e-mate/desktop: invalid Renderer bootstrap')

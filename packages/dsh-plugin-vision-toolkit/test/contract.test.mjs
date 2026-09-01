@@ -56,9 +56,7 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
     readFile(new URL('lib/client.js', root), 'utf8'),
   ])
   const pkg = JSON.parse(manifest)
-  const { componentFiles, verifyComponentRuntimeImports } = await import('../../../scripts/component-release.mjs')
   assert.equal(pkg.version, '2.0.15')
-  assert.equal(pkg.eMate.component.kind, 'platform-profile')
   assert.equal(pkg.dsh.visionToolkit.adapterState, 'managed')
   assert.equal(pkg.dsh.visionToolkit.upstreamCommit, 'bc9803d7d6300c864d17460ecbb33540b26638e0')
   assert.equal(pkg.dsh.upstream.commit, '29850a83871d4b7a7cc13e251420c5a440e2f69e')
@@ -76,7 +74,7 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
     ],
     platform: 'web',
   })
-  assert.deepEqual(pkg.eMate.component.base_imports, [
+  assert.deepEqual(pkg.eMate.baseImports, [
     '@deepseek-ai/dsh-client-ui-primitives',
     '@deepseek-ai/dsh-credentials',
     '@deepseek-ai/dsh-settings',
@@ -85,10 +83,6 @@ test('Vision Toolkit preserves the native Host and Client surfaces as one manage
     '@e-mate/desktop/vision-toolkit',
     'react',
   ])
-  assert.deepEqual(
-    verifyComponentRuntimeImports(componentFiles(fileURLToPath(root), pkg), pkg.eMate.component),
-    pkg.eMate.component.base_imports,
-  )
   assert.doesNotMatch(patch, /provider|credential|model|baseUrl/u)
   assert.match(source, /settings must match the enterprise model policy/u)
   assert.match(source, /sandboxPolicy\.resolve/u)

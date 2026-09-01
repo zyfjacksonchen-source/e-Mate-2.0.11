@@ -1,12 +1,6 @@
 [submodule "upstream/deepseek-harness"]
 	path = upstream/deepseek-harness
 	url = https://github.com/zyfjacksonchen-source/deepseek-harness.git
-[submodule "upstream/e-mate-2.0.5"]
-	path = upstream/e-mate-2.0.5
-	url = https://github.com/zyfjacksonchen-source/EcoreX.git
-[submodule "upstream/plugins/dsh-search-mcp"]
-	path = upstream/plugins/dsh-search-mcp
-	url = https://github.com/gxpppp/dsh-search-mcp.git
 [submodule "upstream/plugins/ego-lite"]
 	path = upstream/plugins/ego-lite
 	url = https://github.com/citrolabs/ego-lite.git

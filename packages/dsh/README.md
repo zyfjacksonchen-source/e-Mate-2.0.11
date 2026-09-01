@@ -1,3 +1,3 @@
-# e-Mate CLI
+# e-Mate DSH source package
 
-`@e-mate/dsh@2.0.13` provides the optional `e-mate` CLI for the same pinned Harness rc.7 Profile used by the desktop product. The supported end-user delivery is the Electron Desktop Base plus signed Profile components; this package must not be published until the repository release gates and development-log acceptance evidence pass.
+`@e-mate/dsh@2.0.15` builds the product Profile and runtime source consumed by `desktop/e-mate-desktop`. It is not a second end-user installer, updater, or release channel. User delivery is owned exclusively by the native Desktop package.

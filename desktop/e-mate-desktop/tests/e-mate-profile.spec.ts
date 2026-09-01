@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   EMATE_DESKTOP_PROFILE_VERSION,
   EMATE_MANAGED_PROFILE_CLEANUP_MAX_ATTEMPTS,
-  EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS,
+  EMATE_BUNDLED_PROFILE_COMPONENT_IDS,
   cleanupEmateDesktopProfileArtifact,
   installEmateDesktopProfile,
 } from '../src/e-mate-profile.ts'
@@ -42,7 +42,7 @@ describe('e-Mate desktop profile', () => {
     expect(manifest.dsh.profile.bundles).toEqual([
       '@deepseek-ai/dsh-base',
       '@deepseek-ai/dsh-web-app',
-      ...EMATE_UPDATEABLE_PROFILE_COMPONENT_IDS.filter(id => id.startsWith('@e-mate/dsh-plugin-')),
+      ...EMATE_BUNDLED_PROFILE_COMPONENT_IDS.filter(id => id.startsWith('@e-mate/dsh-plugin-')),
       '@kelearns/dsh-navigation-bar',
       'dsh-at-file',
       'dsh-file-viewer',

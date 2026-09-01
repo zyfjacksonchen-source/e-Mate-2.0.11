@@ -4,7 +4,7 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { builtinModules, registerHooks } from 'node:module'
 import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { isProfileBaseRuntimePackage } from './profile-release.ts'
+import { isProfileBaseRuntimePackage } from './base-contract.ts'
 
 const DESKTOP_ENTRY_URL = new URL('../lib/index.js', import.meta.url).href
 const DESKTOP_PACKAGE_NAME = '@e-mate/desktop'
@@ -36,19 +36,17 @@ export function isBaseProfileRuntimeSpecifier(
 function componentBaseImports(root: string, baseRuntimeImports: Readonly<Record<string, string>>): Set<string> {
   let value: unknown
   try { value = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) } catch {
-    throw new Error(`hot Profile component package contract is invalid: ${root}`)
+    throw new Error(`bundled Profile component package contract is invalid: ${root}`)
   }
-  const component = value !== null && typeof value === 'object' && !Array.isArray(value)
+  const eMate = value !== null && typeof value === 'object' && !Array.isArray(value)
     && 'eMate' in value && value.eMate !== null && typeof value.eMate === 'object' && !Array.isArray(value.eMate)
-    && 'component' in value.eMate && value.eMate.component !== null
-    && typeof value.eMate.component === 'object' && !Array.isArray(value.eMate.component)
-    ? value.eMate.component as Record<string, unknown>
+    ? value.eMate as Record<string, unknown>
     : undefined
-  const imports = component?.base_imports
+  const imports = eMate?.baseImports
   if (!Array.isArray(imports)
     || imports.some(name => typeof name !== 'string' || !Object.hasOwn(baseRuntimeImports, name))
     || imports.some((name, index) => index > 0 && imports[index - 1] >= name)) {
-    throw new Error(`hot Profile component Base imports are invalid: ${root}`)
+    throw new Error(`bundled Profile component Base imports are invalid: ${root}`)
   }
   return new Set(imports as string[])
 }
@@ -86,14 +84,14 @@ export function installProfilePackageResolver(
               return nextResolve(specifier, { ...context, parentURL })
             }
             if (BUILTIN_PACKAGES.has(specifier)) return nextResolve(specifier, context)
-            throw new Error(`hot Profile component undeclared runtime import is blocked: ${specifier}`)
+            throw new Error(`bundled Profile component undeclared runtime import is blocked: ${specifier}`)
           }
           if (specifier.startsWith('node:') && BUILTIN_PACKAGES.has(specifier.slice(5))) {
             return nextResolve(specifier, context)
           }
           const resolved = nextResolve(specifier, context)
           if (resolved.url.startsWith(component.prefix)) return resolved
-          throw new Error(`hot Profile component path escape is blocked: ${specifier}`)
+          throw new Error(`bundled Profile component path escape is blocked: ${specifier}`)
         }
       }
       if (fromLoader && isBareSpecifier(specifier)) {
