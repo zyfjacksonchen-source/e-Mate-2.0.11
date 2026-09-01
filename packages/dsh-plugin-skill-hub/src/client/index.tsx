@@ -11,6 +11,7 @@ import {
   IconSkillOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { CapabilitiesPage, CapabilityControl } from './capabilities.tsx'
+import { parseSkillHubRpcResult, skillHubClientFailure } from '../result.js'
 
 export const inject = ['slots', 'connection']
 
@@ -23,8 +24,13 @@ export function apply(ctx: any): void {
     inject: () => ({
       callCapabilities: (endpoint: string, payload: Record<string, unknown>) =>
         connection.rpc.call('/emate.capabilities', endpoint, payload),
-      callSkillHub: (endpoint: string, payload: Record<string, unknown>) =>
-        connection.rpc.call('/emate.skillHub', endpoint, payload),
+      callSkillHub: async (endpoint: string, payload: Record<string, unknown>) => {
+        try {
+          return parseSkillHubRpcResult(await connection.rpc.call('/emate.skillHub', endpoint, payload))
+        } catch {
+          return skillHubClientFailure('invalid-response')
+        }
+      },
       setCredential: async (ref: string, value: string) =>
         (await connection.api.credentials.set({ ref, value })).result,
       SearchIcon: IconSearchOutline16,

@@ -11,6 +11,8 @@ import {
 import { createHash, randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { unzipSync, zipSync } from 'fflate'
+import { skillHubError } from './result.js'
+export { parseSkillHubRpcResult, skillHubFailureResult, skillHubSuccess } from './result.js'
 
 const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024
 const MAX_FILE_BYTES = 2 * 1024 * 1024
@@ -345,10 +347,10 @@ export class SkillHubOperationError extends Error {
 }
 
 export function skillHubFailure(error) {
-  if (error instanceof SkillHubRecoveryPendingError) return { code: 'recovery', message: error.message }
-  if (error instanceof SkillHubOperationError) return { code: error.code, message: error.message }
-  if (error?.name === 'AbortError') return { code: 'cancelled', message: error.message || 'Skill Hub operation was cancelled' }
-  return { code: 'bad-request', message: error instanceof Error ? error.message : String(error) }
+  if (error instanceof SkillHubRecoveryPendingError) return skillHubError({ code: 'recovery' })
+  if (error instanceof SkillHubOperationError) return skillHubError(error)
+  if (error?.name === 'AbortError') return skillHubError({ code: 'cancelled' })
+  return skillHubError(error)
 }
 
 function skillPaths(dshHome, slug) {
