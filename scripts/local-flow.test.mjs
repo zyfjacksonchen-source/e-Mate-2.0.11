@@ -309,11 +309,11 @@ async function windowsRemoteFixture(root, context) {
     await writeFile(resultPath, `${JSON.stringify({
       schema_version: 1,
       document_type: 'emate.local-windows-codex-remote-result',
-      transport: 'ssh',
+      transport: 'remote-control',
       run_id: RUN_ID,
       version: '2.0.15',
       platform: 'windows',
-      host: '172_16_48_13',
+      host: 'LAPTOP-ADQ973JN',
       source_commit: SHA,
       request_sha256: createHash('sha256').update(requestBytes).digest('hex'),
       artifact_receipt: {
@@ -350,8 +350,8 @@ function acceptance(platform, candidateArtifact, version = '2.0.15', sourceCommi
     scope: 'version-bound-installed-startup-and-update-readiness',
     stage: version === '2.0.15' ? 'same-version-replacement' : 'new-version-update',
     status: 'passed',
-    host: platform === 'macos' ? 'T18-MAC' : '172_16_48_13',
-    ...(platform === 'windows' ? { transport: 'ssh', transport_alias: 'win-test-server' } : {}),
+    host: platform === 'macos' ? 'T18-MAC' : 'LAPTOP-ADQ973JN',
+    ...(platform === 'windows' ? { transport: 'remote-control', transport_alias: 'LAPTOP-ADQ973JN' } : {}),
     tested_at: '2026-08-30T00:00:00.000Z',
     source_commit: sourceCommit,
     candidate_artifact: candidateArtifact,
@@ -545,7 +545,7 @@ function protectedSignerRun() {
       windows: {
         status: 'passed', source_commit: SHA, artifact: run.verification.artifacts.windows.primary,
         codex_remote: {
-          transport: 'ssh', host: '172_16_48_13', request_sha256: '1'.repeat(64),
+          transport: 'remote-control', host: 'LAPTOP-ADQ973JN', request_sha256: '1'.repeat(64),
           receipt: 'windows-remote/result.json', receipt_sha256: '2'.repeat(64),
         },
       },
@@ -893,19 +893,19 @@ test('native Windows routing accepts only request-authorized host identities', (
   const request = windowsRemoteRequest({
     run_id: RUN_ID, version: '2.0.15', source_commit: SHA, source_branch: 'release/2.0.15',
   })
-  assert.equal(validateRemoteHostname('172_16_48_13\r\n', request), '172_16_48_13')
+  assert.equal(validateRemoteHostname('LAPTOP-ADQ973JN\r\n', request), 'LAPTOP-ADQ973JN')
   assert.throws(() => validateRemoteHostname('OTHER-HOST', request), /not authorized/u)
 })
 
-test('Windows candidate uses one win-test-server SSH request and one frozen-product build owner', async () => {
+test('Windows candidate uses one Codex Remote request and one frozen-product build owner', async () => {
   const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
   const run = {
     run_id: RUN_ID, version: '2.0.15', source_commit: SHA, source_branch: 'release/2.0.15',
   }
   const request = windowsRemoteRequest(run)
-  assert.deepEqual(request.transport, { required: 'ssh' })
+  assert.deepEqual(request.transport, { required: 'remote-control' })
   assert.deepEqual(request.authorized_hosts, [
-    { transport: 'ssh', alias: 'win-test-server', hostname: '172_16_48_13' },
+    { transport: 'remote-control', alias: 'LAPTOP-ADQ973JN', hostname: 'LAPTOP-ADQ973JN' },
   ])
   const controlled = windowsRemoteRequest(run, { controlPlane: CONTROL_PLANE, productSource: PRODUCT_SOURCE })
   assert.deepEqual(controlled.control_plane, CONTROL_PLANE)
@@ -974,7 +974,7 @@ test('Windows Codex Remote import binds source, host, receipt, artifact bytes, a
 
     await writeFile(remote.requestPath, `${JSON.stringify({
       ...remote.request,
-      authorized_hosts: [...remote.request.authorized_hosts, { transport: 'ssh', hostname: 'OTHER-HOST' }],
+      authorized_hosts: [...remote.request.authorized_hosts, { transport: 'remote-control', hostname: 'OTHER-HOST' }],
     })}\n`)
     await assert.rejects(importWindowsRemoteResult(remote.returned, output, remote.run, remote.requestPath), /request is invalid/u)
     await writeFile(remote.requestPath, `${JSON.stringify({ ...remote.request, source_commit: 'd'.repeat(40) })}\n`)
@@ -2722,7 +2722,7 @@ test('platform build skips Harness dev hooks in clean submodule copies', async (
   }
 })
 
-test('root package exposes one flow entry and keeps SSH as request transport, not a second build owner', async () => {
+test('root package exposes one flow entry and keeps Codex Remote as transport, not a second build owner', async () => {
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const source = await readFile(new URL('./local-flow.mjs', import.meta.url), 'utf8')
   const ciWorkflow = await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
@@ -2732,7 +2732,7 @@ test('root package exposes one flow entry and keeps SSH as request transport, no
   assert.doesNotMatch(source, /\bgh\b|\bwrangler\b|\bUU\b|runLogged\(['"](?:ssh|scp)['"]/u)
   assert.equal([...source.matchAll(/\.github\/workflows\//gu)].length, 1)
   assert.match(source, /const COMPATIBILITY_WORKFLOW = '\.github\/workflows\/desktop-compatibility-attestation\.yml'/u)
-  assert.match(source, /const WINDOWS_BUILD_TRANSPORT = Object\.freeze\(\{ required: 'ssh' \}\)/u)
+  assert.match(source, /const WINDOWS_BUILD_TRANSPORT = Object\.freeze\(\{ required: 'remote-control' \}\)/u)
   assert.match(ciWorkflow, /runs-on: windows-2025[\s\S]*?yarn dist:win/u)
   assert.match(ciWorkflow, /^on:\n\s+workflow_dispatch:/mu)
   assert.doesNotMatch(ciWorkflow, /^\s+(?:pull_request|push):/mu)

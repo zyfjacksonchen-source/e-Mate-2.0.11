@@ -120,8 +120,8 @@ const MANUAL_MIGRATION = Object.freeze({
   '2.0.13': 'official-cloudflare-r2-manual-download',
   'same-version-2.0.15': 'official-cloudflare-r2-manual-download',
 })
-const WINDOWS_BUILD_TRANSPORT = Object.freeze({ required: 'ssh' })
-const WINDOWS_ROUTE = Object.freeze({ transport: 'ssh', alias: 'win-test-server', hostname: '172_16_48_13' })
+const WINDOWS_BUILD_TRANSPORT = Object.freeze({ required: 'remote-control' })
+const WINDOWS_ROUTE = Object.freeze({ transport: 'remote-control', alias: 'LAPTOP-ADQ973JN', hostname: 'LAPTOP-ADQ973JN' })
 const WINDOWS_BUILD_HOSTS = Object.freeze([WINDOWS_ROUTE])
 const WINDOWS_ACCEPTANCE_ROUTE = WINDOWS_ROUTE
 const WINDOWS_ACCEPTANCE_DIRECTORY = String.raw`C:\Users\Administrator\AppData\Local\Programs\e-Mate`

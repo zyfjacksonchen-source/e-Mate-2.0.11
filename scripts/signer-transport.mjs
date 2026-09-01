@@ -323,9 +323,9 @@ export function validatePublicControlRun(run) {
     ['rollback', ['status']],
   ])
   const allowedHosts = new Map([
-    ['platforms.windows.codex_remote.host', ['172_16_48_13']],
+    ['platforms.windows.codex_remote.host', ['LAPTOP-ADQ973JN']],
     ['verification.installed_acceptance.macos.host', ['T18-MAC']],
-    ['verification.installed_acceptance.windows.host', ['172_16_48_13']],
+    ['verification.installed_acceptance.windows.host', ['LAPTOP-ADQ973JN']],
   ])
   const visit = (value, path = '') => {
     if (Array.isArray(value)) return value.forEach(item => visit(item, `${path}[]`))
@@ -355,11 +355,11 @@ export function validatePublicControlRun(run) {
   }
   visit(run)
   const windowsBuild = run.platforms.windows.codex_remote
-  if (windowsBuild.transport !== 'ssh' || windowsBuild.host !== '172_16_48_13') {
+  if (windowsBuild.transport !== 'remote-control' || windowsBuild.host !== 'LAPTOP-ADQ973JN') {
     throw new Error('protected signer public control run contains an unknown Windows host/transport pair')
   }
   const windowsAcceptance = run.verification.installed_acceptance.windows
-  if (windowsAcceptance.transport !== 'ssh' || windowsAcceptance.transport_alias !== 'win-test-server') {
+  if (windowsAcceptance.transport !== 'remote-control' || windowsAcceptance.transport_alias !== 'LAPTOP-ADQ973JN') {
     throw new Error('protected signer public control run contains an unknown Windows acceptance route')
   }
   const transaction = run.release_transaction
