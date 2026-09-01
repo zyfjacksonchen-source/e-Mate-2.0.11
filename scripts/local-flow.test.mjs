@@ -19,6 +19,7 @@ import {
   buildRollbackRequest,
   candidateFailureDetails,
   createPlatformManifestInputReceipt,
+  desktopPackageEnvironment,
   devChecks,
   finalizeManifestInputLedger,
   importRollbackOwnerReceipt,
@@ -796,6 +797,15 @@ test('candidate retries only the failed side and reuses an unchanged passed side
   assert.deepEqual(selectCandidatePlatforms(run, 'windows'), { build: ['windows'], reuse: [] })
   run.platforms.macos.source_commit = 'd'.repeat(40)
   assert.deepEqual(selectCandidatePlatforms(run), { build: ['macos', 'windows'], reuse: [] })
+})
+
+test('Windows desktop packaging bounds only its child Node heap', () => {
+  const inherited = { PATH: 'C:/tools', NODE_OPTIONS: '--require=C:/foreign.cjs' }
+  assert.deepEqual(desktopPackageEnvironment('windows', inherited), {
+    PATH: 'C:/tools', NODE_OPTIONS: '--max-old-space-size=256',
+  })
+  assert.strictEqual(desktopPackageEnvironment('macos', inherited), inherited)
+  assert.equal(inherited.NODE_OPTIONS, '--require=C:/foreign.cjs')
 })
 
 test('candidate preflight classifies the first deterministic failure and never enters packaging', async () => {
@@ -2435,7 +2445,7 @@ test('Desktop Yarn builds reuse the inherited Corepack cache while npm gets the 
   assert.match(source, /preparePnpmLifecycleCarrier\(sourceRoot\)/u)
   assert.match(source, /prepareNpmCollectorCarrier\(join\(sourceRoot, 'desktop'\), \{ env: buildEnv \}\)/u)
   assert.match(source, /runYarn\(\['install', '--immutable'\], \{ cwd: join\(sourceRoot, 'desktop'\), log, env: npmCollector\.env \}\)/u)
-  assert.match(source, /runYarn\(\[PLATFORMS\[platform\]\.build\], \{ cwd: join\(sourceRoot, 'desktop'\), log, env: npmCollector\.env \}\)/u)
+  assert.match(source, /runYarn\(\[PLATFORMS\[platform\]\.build\], \{\s*cwd: join\(sourceRoot, 'desktop'\), log, env: desktopPackageEnvironment\(platform, npmCollector\.env\),\s*\}\)/u)
   assert.match(source, /\]\)\.finally\(\(\) => Promise\.all\(\[npmCollector\?\.cleanup\(\), pnpmCarrier\?\.cleanup\(\)\]\)\)/u)
   assert.doesNotMatch(source, /\['yarn', '--cwd', 'desktop'/u)
 })

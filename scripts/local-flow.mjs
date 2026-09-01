@@ -1259,6 +1259,10 @@ async function runPnpm(args, options) {
   return runLogged(invocation.command, invocation.args, { ...options, env })
 }
 
+export function desktopPackageEnvironment(platform, env) {
+  return platform === 'windows' ? { ...env, NODE_OPTIONS: '--max-old-space-size=256' } : env
+}
+
 async function runYarn(args, options) {
   if (PNPM_VERSION === undefined || YARN_VERSION === undefined) {
     throw new Error(`unsupported packageManager pair: ${String(PACKAGE.packageManager)}, ${String(DESKTOP_PACKAGE.packageManager)}`)
@@ -1662,7 +1666,9 @@ async function platformBuild(sourceRoot, platform, output, manifestOutput, log, 
     {
       category: CANDIDATE_FAILURE.PACKAGING,
       stage: 'desktop-package',
-      run: () => runYarn([PLATFORMS[platform].build], { cwd: join(sourceRoot, 'desktop'), log, env: npmCollector.env }),
+      run: () => runYarn([PLATFORMS[platform].build], {
+        cwd: join(sourceRoot, 'desktop'), log, env: desktopPackageEnvironment(platform, npmCollector.env),
+      }),
     },
     {
       category: CANDIDATE_FAILURE.PACKAGING,
