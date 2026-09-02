@@ -31,7 +31,7 @@ import { apply as applyHealth } from '../profile/plugins/health.js'
 import { apply as applyShare, SHARE_CHANNEL } from '../profile/plugins/share.js'
 import { apply as applyGeneralWorkspace } from '../profile/plugins/general-workspace.js'
 import * as settingsDocumentBoundary from '../profile/plugins/settings-document-boundary.js'
-import { apply as applyAgentOperations } from '../src/profile/agent-operations.ts'
+import { apply as applyAgentOperations } from '../profile/plugins/agent-operations.js'
 import { apply as applyShell } from '../profile/plugins/emate-shell/index.js'
 import { apply as applyCapabilities, CAPABILITIES_CHANNEL } from '../profile/plugins/capabilities.js'
 import { apply as applyQrGeneration } from '../profile/plugins/qr-generation.js'
@@ -2417,20 +2417,23 @@ test('Agent operation guidance owns the e-Mate persona and native image batch po
   assert.match(section.text, /latest direct request explicitly asks to read or operate a user-visible webpage/u)
   assert.match(section.text, /never use Browser\/CDP as a fallback for `imagegen`, native `web_search`, attachment resolution/u)
   assert.match(section.text, /Do not invent a built-in connector or ask the user to paste secrets into chat/u)
-  assert.match(section.text, /exactly one new image or one edit, call `imagegen` directly in the current Agent/u)
-  assert.match(section.text, /Only when the user explicitly requests two or more mutually independent new images or independent edits/u)
+  assert.match(section.text, /exactly one new image or any image edit, call `imagegen` directly in the current Agent/u)
+  assert.match(section.text, /Run multiple edits serially in that Agent, one `imagegen` call per requested output/u)
+  assert.match(section.text, /never delegate an edit or promise that a parent-Session source image is available in another Session/u)
+  assert.match(section.text, /Only when the user explicitly requests two or more mutually independent new images/u)
   assert.match(section.text, /issue together, in one assistant step, one batch of at most four sibling native `subagent` calls, each explicitly setting `run_in_background: false`/u)
   assert.match(section.text, /wait until every call in the current foreground batch returns before issuing the next batch/u)
-  assert.match(section.text, /Each child prompt must be self-contained[\s\S]*generate or edit only its one image[\s\S]*call the existing `imagegen` exactly once[\s\S]*never delegate or call `subagent`/u)
+  assert.match(section.text, /Each child prompt must be self-contained[\s\S]*generate only its one new image[\s\S]*call the existing `imagegen` exactly once[\s\S]*never delegate or call `subagent`/u)
   assert.match(section.text, /never silently retry, switch models, or fall back[\s\S]*clearly report that image's success or failure/u)
-  assert.match(section.text, /Do not use background subagents, `report`, `send_message`, Jobs, a custom queue, a second orchestration path, or a new concurrency setting/u)
-  assert.match(section.text, /native AgentLoop's existing four-call limit is the only scheduler/u)
-  assert.match(section.text, /Every image remains owned by the native child Session and its Gallery/u)
+  assert.match(section.text, /parent Agent must not use background subagents, `job_\*`, background Jobs[\s\S]*to coordinate this batch/u)
+  assert.match(section.text, /does not restrict `imagegen`'s internal native Job owner/u)
+  assert.match(section.text, /native AgentLoop's existing four-call limit is the only batch scheduler/u)
+  assert.match(section.text, /Every batched image remains owned by the native child Session and its Gallery/u)
   assert.match(section.text, /summarize only the native subagent results in Tool-call order/u)
   assert.match(section.text, /never copy an attachment or receipt, project `child_session_id`, promise aggregation in the parent's Gallery, or call `image_pack` across Sessions/u)
   assert.match(section.text, /Report each failed image once; never automatically retry it, create a replacement image, switch models, fall back, or add a queue/u)
   assert.match(section.text, /does not change delegation policy for ordinary non-image tasks/u)
-  assert.doesNotMatch(section.text, /current child-session attachment ID|reduce only the next explicit batch|Make such edits directly in the current Agent/u)
+  assert.doesNotMatch(section.text, /new images or independent edits|generate or edit only its one image|Do not use background subagents[\s\S]*, Jobs,/u)
 })
 
 test('identity agreements are immutable, explicit, and use the target Connection RPC', async () => {
