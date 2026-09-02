@@ -7,6 +7,7 @@ import { COMPOSER_PLACEHOLDER, ComposerConnectors, ComposerMentions } from '../s
 import { registerComputerUseTrigger } from '../src/client/composer-mentions.ts'
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { PlanChip, type PlanChipProps } from '../../../../../../upstream/deepseek-harness/packages/client/ui-plan/src/client/PlanModeControl.tsx'
+import { FileImportControl } from '../../../../../dsh-plugin-file-import/src/client/index.tsx'
 
 const Icon = () => <svg />
 
@@ -17,9 +18,18 @@ function applyHomeStyles(): void {
   document.head.append(style)
 }
 
+function applyFileImportStyles(button: HTMLButtonElement): void {
+  const style = document.createElement('style')
+  style.dataset.emateFileImportTest = ''
+  style.textContent = readFileSync('../../../../dsh-plugin-file-import/src/client/style.module.css', 'utf8')
+    .replaceAll('.button', `.${button.className}`)
+  document.head.append(style)
+}
+
 afterEach(() => {
   cleanup()
   document.head.querySelector('[data-emate-home-test]')?.remove()
+  document.head.querySelector('[data-emate-file-import-test]')?.remove()
   delete document.body.dataset.dshDesktopPlatform
 })
 
@@ -109,16 +119,30 @@ describe('e-Mate 2.0.16 composer projection', () => {
   })
 
   it('matches the resident file control with a 32px launcher and 16px @ glyph at every width', () => {
-    render(<button type="button" data-emate-composer-mentions=""><span aria-hidden="true">@</span></button>)
+    render(<div data-composer-card="">
+      <textarea defaultValue="" />
+      <FileImportControl
+        sessionId="session-1"
+        input={{ draft: '', phase: 'plain' }}
+        inputActions={{ setDraft() {} }}
+        isLoopback
+        callImport={async () => ({ ok: true })}
+      />
+      <ComposerMentions openMentions={() => {}} />
+    </div>)
+    const fileButton = screen.getByRole('button', { name: '添加本地图片或文件' })
+    const mentionButton = screen.getByRole('button', { name: '插入引用' })
+    applyFileImportStyles(fileButton)
     applyHomeStyles()
-    const button = screen.getByRole('button')
-    const glyph = button.querySelector('span')!
-    const buttonStyle = getComputedStyle(button)
-    const glyphStyle = getComputedStyle(glyph)
+    const fileStyle = getComputedStyle(fileButton)
+    const mentionStyle = getComputedStyle(mentionButton)
+    const icon = fileButton.querySelector('svg')!
+    const glyphStyle = getComputedStyle(mentionButton.querySelector('span[aria-hidden="true"]')!)
+    const controlSize = (style: CSSStyleDeclaration) => [style.width, style.minWidth, style.minHeight, style.padding]
 
-    expect([buttonStyle.width, buttonStyle.minWidth, buttonStyle.minHeight]).toEqual(['32px', '32px', '32px'])
-    expect(buttonStyle.padding).toBe('0px')
-    expect(buttonStyle.justifyContent).toBe('center')
+    expect(controlSize(fileStyle)).toEqual(['32px', '32px', '32px', '0px'])
+    expect(controlSize(mentionStyle)).toEqual(controlSize(fileStyle))
+    expect([icon.getAttribute('width'), icon.getAttribute('height')]).toEqual(['16', '16'])
     expect([glyphStyle.fontSize, glyphStyle.lineHeight]).toEqual(['16px', '16px'])
   })
 
