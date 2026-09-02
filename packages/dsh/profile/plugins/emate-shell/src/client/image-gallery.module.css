@@ -282,14 +282,6 @@
   cursor: default;
 }
 
-.failure {
-  padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary, #c23b32) 35%, transparent);
-  border-radius: 12px;
-  color: var(--dsw-alias-state-error-primary, #c23b32);
-  font-size: 13px;
-}
-
 .files {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--dsw-alias-label-primary) 12%, transparent);

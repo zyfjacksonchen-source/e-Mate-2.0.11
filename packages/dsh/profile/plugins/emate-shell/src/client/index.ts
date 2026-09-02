@@ -25,6 +25,7 @@ import {
   IconSettingsOutline16,
   IconTrashOutline16,
   IconUserOutline16,
+  IconWarningOutline16,
   Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AccountControl, AccountSettings } from './account.tsx'
@@ -76,7 +77,9 @@ export function registerSessionShare(ctx: any): void {
   }, HiddenSessionLogExport))
 }
 
-function imageGalleryInjected(ctx: any, sessionId: string, imageAdded: () => void) {
+type GalleryNotice = (level: 'info' | 'error', text: string) => void
+
+function imageGalleryInjected(ctx: any, sessionId: string, notice: GalleryNotice) {
   const draftBytes = (ids: readonly string[]) => ctx.conversation.draftImages(ids)
     .reduce((sum: number, image: any) => sum + image.file.size, 0)
   return {
@@ -110,22 +113,19 @@ function imageGalleryInjected(ctx: any, sessionId: string, imageAdded: () => voi
         ctx.conversation.releaseDraftImages(images)
         throw error
       }
-      imageAdded()
+      notice('info', '图片已添加到聊天草稿。')
     },
     draftBytes,
-    notify: (level: 'info' | 'error', text: string) => {
-      const scope = ctx.sessions.scope(sessionId)
-      if (scope !== undefined) ctx.conversation.input.for(scope).notify(level, text)
-    },
+    notify: notice,
     runResource: desktopResourceRun,
   }
 }
 
 /** Reuse DSH's native overlay Toast; the slot disposer is the only transient lifecycle state. */
-export function createTransientGalleryNotice(ctx: any): (text: string) => void {
+export function createTransientGalleryNotice(ctx: any): GalleryNotice {
   let current: (() => void) | undefined
   let sequence = 0
-  return (text: string): void => {
+  return (level, text): void => {
     current?.()
     let dispose = (): void => {}
     const done = (): void => {
@@ -135,7 +135,11 @@ export function createTransientGalleryNotice(ctx: any): (text: string) => void {
     try {
       dispose = ctx.slots.register({
         name: 'shell.overlay', id: `e-mate-gallery-toast-${++sequence}`, order: 10,
-      }, () => createElement(Toast, { text, onDone: done }))
+      }, () => createElement(Toast, {
+        text,
+        icon: level === 'error' ? createElement(IconWarningOutline16) : undefined,
+        onDone: done,
+      }))
       current = dispose
     } catch {
       current = undefined
@@ -146,16 +150,14 @@ export function createTransientGalleryNotice(ctx: any): (text: string) => void {
 /** Add one native Session-scoped Gallery tab over the existing image receipt owner. */
 export function registerImageGallery(
   ctx: any,
-  showImageAdded: (text: string) => void = createTransientGalleryNotice(ctx),
+  notice: GalleryNotice = createTransientGalleryNotice(ctx),
 ): void {
   ctx.slots.inject('conversation.view', () => ctx.slots.register({
     name: 'conversation.view',
     id: 'e-mate-gallery',
     order: 20,
     label: '画廊',
-    inject: (sessionId: string) => imageGalleryInjected(ctx, sessionId, () => {
-      showImageAdded('图片已添加到聊天草稿。')
-    }),
+    inject: (sessionId: string) => imageGalleryInjected(ctx, sessionId, notice),
   }, ImageGalleryView))
 }
 
@@ -459,15 +461,13 @@ export function apply(ctx: any): void {
   }, ThinkingStatusBranding))
   ctx.conversationEvents.register(imageCallsDefinition)
   ctx.conversationEvents.register(toolImagesDefinition)
-  const showImageAdded = createTransientGalleryNotice(ctx)
-  registerImageGallery(ctx, showImageAdded)
+  const galleryNotice = createTransientGalleryNotice(ctx)
+  registerImageGallery(ctx, galleryNotice)
   ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
     name: 'conversation.chat.turnTail',
     priority: -1,
     select: selectArtifactTerminal,
-    inject: (sessionId: string) => imageGalleryInjected(ctx, sessionId, () => {
-      showImageAdded('图片已添加到聊天草稿。')
-    }),
+    inject: (sessionId: string) => imageGalleryInjected(ctx, sessionId, galleryNotice),
   }, ArtifactTerminal))
   ctx.conversationEvents.register(legacyArtifactDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({

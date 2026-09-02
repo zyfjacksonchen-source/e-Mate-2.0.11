@@ -593,7 +593,7 @@ function ImageTerminal({ items, loadImage, openMenu }: {
     if (rail === null) return
     rail.scrollBy({ left: direction * rail.clientWidth, behavior: 'smooth' })
   }
-  if (items.length === 0) return null
+  if (images.length === 0) return null
   return <section className={css.images} aria-label="图片结果">
     {images.length > 0 && <div className={css.railWrap}>
       <div ref={railRef} className={css.rail} onScroll={sync}>
@@ -622,11 +622,6 @@ function ImageTerminal({ items, loadImage, openMenu }: {
         </button>
       </div>}
     </div>}
-    {items.filter(item => item.status === 'failed').map(item => <div
-      key={`${item.callId}:${item.revision}`}
-      className={css.failure}
-      role="status"
-    >图片生成失败{item.failureCode === undefined ? '' : ` · ${item.failureCode}`}</div>)}
   </section>
 }
 
@@ -682,8 +677,18 @@ export function ArtifactTerminal({
     () => terminalImageItems(snapshot.chat.nodes.values(), matched.callIds, turn.turn, summary?.title ?? ''),
     [matched.callIds, snapshot, summary?.title, turn.turn],
   )
+  const seenFailures = useRef(new Set<string>())
   const existingBytes = draftBytes(input.imageIds)
   const closeMenu = (): void => { setMenu(null); menuButtons.current = [] }
+
+  useEffect(() => {
+    const failures = items.filter(item => item.status === 'failed' && !seenFailures.current.has(item.callId))
+    if (failures.length === 0) return
+    for (const item of failures) seenFailures.current.add(item.callId)
+    notify('error', failures.length === 1
+      ? '图片生成失败，可在画廊的「失败」筛选中查看详情。'
+      : `${failures.length} 张图片生成失败，可在画廊的「失败」筛选中查看详情。`)
+  }, [items, notify])
 
   useEffect(() => {
     if (menu === null) return
@@ -737,6 +742,8 @@ export function ArtifactTerminal({
       notify('error', '系统文件操作失败，请确认资源仍存在且属于当前工作区。')
     })
   }
+
+  if (!items.some(item => item.attachment !== undefined) && matched.paths.length === 0) return null
 
   return <div ref={rootRef} className={css.terminal} data-emate-artifact-terminal="">
     <ImageTerminal items={items} loadImage={loadImage} openMenu={openMenu} />

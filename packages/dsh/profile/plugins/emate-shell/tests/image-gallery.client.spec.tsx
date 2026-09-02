@@ -158,7 +158,7 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
     addImages,
     notify: vi.fn(),
   }
-  const imageAdded = vi.fn()
+  const notice = vi.fn()
   const ctx = {
     slots: {
       inject: (_name: string, install: () => void) => { install() },
@@ -188,7 +188,7 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
       releaseDraftImages,
     },
   }
-  registerImageGallery(ctx, imageAdded)
+  registerImageGallery(ctx, notice)
   return {
     injected,
     readAttachment,
@@ -196,7 +196,7 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
     createDraftImages: ctx.conversation.createDraftImages,
     releaseDraftImages,
     shell,
-    imageAdded,
+    notice,
     imageIds: () => imageIds,
     draftCount: () => drafts.size,
     resolveReads: () => {
@@ -240,14 +240,21 @@ describe('completed artifact terminal', () => {
         },
       }
 
-      createTransientGalleryNotice(ctx)('图片已添加到聊天草稿。')
+      const notice = createTransientGalleryNotice(ctx)
+      notice('info', '图片已添加到聊天草稿。')
       expect(screen.getByRole('alert').textContent).toBe('图片已添加到聊天草稿。')
+      expect(screen.getByRole('alert').querySelector('svg')).toBeNull()
       expect(composer.container.firstElementChild).toBe(composerNode)
       expect(composer.container.innerHTML).toBe(composerMarkup)
 
       act(() => { vi.advanceTimersByTime(4000) })
       expect(screen.queryByRole('alert')).toBeNull()
-      expect(dispose).toHaveBeenCalledOnce()
+      notice('error', '图片操作失败，请重试。')
+      expect(screen.getByRole('alert').textContent).toBe('图片操作失败，请重试。')
+      expect(screen.getByRole('alert').querySelector('svg')).not.toBeNull()
+      act(() => { vi.advanceTimersByTime(4000) })
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(dispose).toHaveBeenCalledTimes(2)
       expect(composer.container.firstElementChild).toBe(composerNode)
       expect(composer.container.innerHTML).toBe(composerMarkup)
     } finally {
@@ -408,6 +415,21 @@ describe('completed artifact terminal', () => {
     expect(props.notify).not.toHaveBeenCalled()
   })
 
+  it('routes Gallery resource failures through the transient notice callback', async () => {
+    const completed = parseImageOutputReceipt(receipt())!
+    const props = galleryProps('session-gallery', [hidden(completed)], {
+      runResource: vi.fn(async () => { throw new Error('/Users/private/result.png') }),
+    })
+    render(<ImageGalleryView {...props as never} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '复制图像：result.png' }))
+    await waitFor(() => {
+      expect(props.notify).toHaveBeenCalledWith('error', '图片操作失败，请确认图片仍可用。')
+    })
+    expect(props.notify).toHaveBeenCalledOnce()
+    expect(props.notify.mock.calls.flat().join(' ')).not.toContain('/Users')
+  })
+
   it.each([
     ['max image count', { ...limits, maxImagesPerMessage: 1 }],
     ['total image bytes', { ...limits, maxImagesPerMessage: 2, maxMessageImageBytes: attachment.bytes }],
@@ -430,13 +452,16 @@ describe('completed artifact terminal', () => {
     expect(harness.addImages).not.toHaveBeenCalled()
     harness.resolveReads()
 
-    await waitFor(() => { expect(harness.imageAdded).toHaveBeenCalledOnce() })
+    await waitFor(() => {
+      expect(harness.notice).toHaveBeenCalledWith('info', '图片已添加到聊天草稿。')
+      expect(harness.notice).toHaveBeenCalledWith('error', '图片未能添加到聊天，请重试。')
+    })
     expect(harness.addImages).toHaveBeenCalledTimes(1)
     expect(harness.createDraftImages).toHaveBeenCalledTimes(1)
     expect(harness.createDraftImages.mock.calls[0]?.[0]?.[0]?.name).toBe(name)
     expect(harness.imageIds()).toHaveLength(1)
-    expect(harness.shell.notify).toHaveBeenCalledTimes(1)
-    expect(harness.shell.notify).toHaveBeenCalledWith('error', '图片未能添加到聊天，请重试。')
+    expect(harness.notice).toHaveBeenCalledTimes(2)
+    expect(harness.shell.notify).not.toHaveBeenCalled()
   })
 
   it('releases a temporary draft image when the native synchronous commit refuses it', async () => {
@@ -451,7 +476,8 @@ describe('completed artifact terminal', () => {
     expect(harness.addImages).toHaveBeenCalledTimes(1)
     expect(harness.releaseDraftImages).toHaveBeenCalledWith(harness.createDraftImages.mock.results[0]?.value)
     expect(harness.draftCount()).toBe(0)
-    expect(harness.shell.notify).toHaveBeenCalledWith('error', '图片未能添加到聊天，请重试。')
+    expect(harness.notice).toHaveBeenCalledWith('error', '图片未能添加到聊天，请重试。')
+    expect(harness.shell.notify).not.toHaveBeenCalled()
   })
 
   it('publishes ImageGen call provenance and selects native files under one Turn tail', () => {
@@ -584,19 +610,32 @@ describe('completed artifact terminal', () => {
     expect(view.container.querySelectorAll('[role="menu"]')).toHaveLength(0)
   })
 
-  it('renders direct parent failures and cancellations without a success menu', () => {
-    for (const [status, failureCode] of [
-      ['failed', 'provider-result-uncommitted'],
-      ['cancelled', 'cancelled'],
-    ] as const) {
-      const failed = parseImageOutputReceipt(receipt({
-        status, content: [], output: undefined, failure_code: failureCode,
-      }))!
-      const failureView = render(<ArtifactTerminal {...terminalProps([hidden(failed)]) as never} />)
-      expect(screen.getByRole('status').textContent).toContain(failureCode)
-      expect(failureView.container.querySelector('[aria-label^="图片操作"]')).toBeNull()
-      cleanup()
-    }
+  it('removes failed and cancelled Turn rows and reports one transient aggregate only once', () => {
+    const failed = parseImageOutputReceipt(receipt({
+      call_id: 'failed-call', status: 'failed', content: [], output: undefined,
+      failure_code: 'provider-result-uncommitted',
+    }))!
+    const cancelled = parseImageOutputReceipt(receipt({
+      call_id: 'cancelled-call', status: 'cancelled', content: [], output: undefined,
+      failure_code: 'cancelled',
+    }))!
+    const props = terminalProps(
+      [hidden(failed, 'failed'), hidden(cancelled, 'cancelled')],
+      { callIds: ['failed-call', 'cancelled-call'], paths: [] },
+    )
+    const failureView = render(<ArtifactTerminal {...props as never} />)
+
+    expect(failureView.container.firstChild).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(failureView.container.querySelector('[aria-label^="图片操作"]')).toBeNull()
+    expect(props.notify).toHaveBeenCalledOnce()
+    expect(props.notify).toHaveBeenCalledWith(
+      'error',
+      '2 张图片生成失败，可在画廊的「失败」筛选中查看详情。',
+    )
+
+    failureView.rerender(<ArtifactTerminal {...props as never} />)
+    expect(props.notify).toHaveBeenCalledOnce()
   })
 
   it('fails closed for busy or full drafts', () => {
@@ -676,6 +715,7 @@ describe('completed artifact terminal', () => {
     expect(apply).toContain("ctx.slots.inject('conversation.view'")
     expect(apply).toContain('session.readAttachment(attachment.attachmentId)')
     expect(apply).not.toMatch(/\bfetch\s*\(/u)
+    expect(apply).not.toContain('ctx.conversation.input.for(scope).notify')
     expect(apply).toContain('releaseDraftImages(images)')
   })
 })
