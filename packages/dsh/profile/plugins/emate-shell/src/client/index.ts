@@ -83,11 +83,14 @@ function imageGalleryInjected(ctx: any, sessionId: string, notice: GalleryNotice
   const draftBytes = (ids: readonly string[]) => ctx.conversation.draftImages(ids)
     .reduce((sum: number, image: any) => sum + image.file.size, 0)
   return {
-    loadImage: (attachment: any) => ctx.conversation.resolveImage(sessionId, attachment),
-    addImageToDraft: async (attachment: any) => {
-      const session = ctx.sessions.binding(sessionId)?.session
-      if (session === undefined) throw new Error('当前会话不可用，未添加图片。')
-      const result = await session.readAttachment(attachment.attachmentId)
+    loadImage: (attachment: any, ownerSessionId = sessionId) =>
+      ctx.conversation.resolveImage(ownerSessionId, attachment),
+    addImageToDraft: async (attachment: any, ownerSessionId = sessionId) => {
+      const target = ctx.sessions.binding(sessionId)?.session
+      if (target === undefined) throw new Error('当前会话不可用，未添加图片。')
+      const owner = ownerSessionId === sessionId ? target : ctx.sessions.binding(ownerSessionId)?.session
+      if (owner === undefined) throw new Error('图片所属会话不可用，未添加图片。')
+      const result = await owner.readAttachment(attachment.attachmentId)
       if (!result.ok) throw new Error('图片附件读取失败，未添加到聊天。')
       const stored = result.value.attachment
       const bytes = Uint8Array.from(result.value.data)
@@ -99,7 +102,7 @@ function imageGalleryInjected(ctx: any, sessionId: string, notice: GalleryNotice
       if (scope === undefined) throw new Error('当前会话不可用，未添加图片。')
       const shell = ctx.conversation.input.for(scope)
       const input = shell.state.getSnapshot()
-      const limits = session.projections.faceOf('imageLimits').getSnapshot()
+      const limits = target.projections.faceOf('imageLimits').getSnapshot()
       const error = draftImageAdmissionError(attachment, input, limits, draftBytes(input.imageIds))
       if (error !== undefined) throw new Error(error)
       const images = ctx.conversation.createDraftImages([

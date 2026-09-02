@@ -6,6 +6,7 @@ import type {
   ConversationNodeContext,
   ConversationNodeDefinition,
   ConversationSnapshot,
+  SessionListState,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { MessageImage } from '@deepseek-ai/dsh-client-ui-attachment'
@@ -242,9 +243,10 @@ export function namedGalleryImageItems(
   const prepared = items.map(item => {
     if (item.attachment === undefined || item.createdAt === undefined) return { item }
     const operation = item.operation === 'generate' || item.operation === 'unknown' ? '生成' : '改图'
+    const source = item.source === undefined ? '' : `-子任务${String(item.source.ordinal).padStart(2, '0')}`
     return {
       item,
-      base: `${topic}-${operation}-${imageTimestamp(item.createdAt)}`,
+      base: `${topic}${source}-${operation}-${imageTimestamp(item.createdAt)}`,
       extension: imageExtension(item.attachment.mediaType),
     }
   })
@@ -286,6 +288,72 @@ export function galleryImageItems(
   return title === undefined ? items : namedGalleryImageItems(items, title)
 }
 
+const IMAGE_RECEIPTS_PROJECTION = 'eMateImageReceipts'
+
+interface ProjectedImageReceipt {
+  readonly seq: number
+  readonly createdAt: number
+  readonly receipt: Record<string, unknown>
+}
+
+function projectedImageReceipts(value: unknown): readonly ProjectedImageReceipt[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((row): row is ProjectedImageReceipt => row !== null && typeof row === 'object'
+    && Number.isSafeInteger((row as ProjectedImageReceipt).seq)
+    && Number.isFinite((row as ProjectedImageReceipt).createdAt)
+    && (row as ProjectedImageReceipt).receipt !== null
+    && typeof (row as ProjectedImageReceipt).receipt === 'object'
+    && !Array.isArray((row as ProjectedImageReceipt).receipt))
+}
+
+/** Project direct child receipts from rc.7's native Session list; child ownership stays unchanged. */
+export function childGalleryImageItems(
+  sessions: Pick<SessionListState, 'byId' | 'subagentsByParent'>,
+  parentSessionId: string,
+): readonly ImageGalleryItem[] {
+  const candidates: Array<{
+    readonly item: ImageGalleryItem
+    readonly seq: number
+    readonly ordinal: number
+  }> = []
+  const entries = sessions.subagentsByParent?.[parentSessionId]?.entries ?? []
+  for (const [index, entry] of entries.entries()) {
+    if (entry.kind !== 'child') continue
+    const summary = sessions.byId[entry.id]
+    const projection = (summary?.projectionValues as Readonly<Record<string, unknown>> | undefined)
+      ?.[IMAGE_RECEIPTS_PROJECTION]
+    const ordinal = index + 1
+    const label = entry.label?.trim() || summary?.displayTitle?.trim() || `子任务 ${ordinal}`
+    for (const row of projectedImageReceipts(projection)) {
+      if (row.receipt.parent_session_id !== entry.id || row.receipt.child_session_id !== undefined) continue
+      const item = parseImageOutputReceipt(row.receipt)
+      if (item === null) continue
+      candidates.push({
+        item: {
+          ...item,
+          createdAt: row.createdAt,
+          source: { kind: 'subagent', sessionId: entry.id, label, ordinal },
+        },
+        seq: row.seq,
+        ordinal,
+      })
+    }
+  }
+  const latest = new Map<string, typeof candidates[number]>()
+  for (const candidate of candidates) {
+    const key = `${candidate.item.source!.sessionId}\0${candidate.item.callId}`
+    const current = latest.get(key)
+    if (current !== undefined
+      && (current.item.revision > candidate.item.revision
+        || current.item.revision === candidate.item.revision && current.seq >= candidate.seq)) continue
+    latest.set(key, candidate)
+  }
+  return [...latest.values()]
+    .sort((left, right) => (left.item.createdAt ?? 0) - (right.item.createdAt ?? 0)
+      || left.seq - right.seq || left.ordinal - right.ordinal)
+    .map(value => value.item)
+}
+
 const imageLabels = {
   image: '图像',
   open: '查看原图',
@@ -314,11 +382,11 @@ interface ArtifactTerminalProps extends TurnTailOwnerProps {
   readonly matched: ArtifactTerminalMatch
   readonly sessionId: string
   readonly useSession: <T>(selector: (snapshot: ConversationSnapshot) => T) => T
-  readonly useSessions: <T>(selector: (snapshot: { byId: Record<string, { cwd?: string; title?: string } | undefined> }) => T) => T
+  readonly useSessions: <T>(selector: (snapshot: SessionListState) => T) => T
   readonly useInput: <T>(selector: (input: InputSnapshot) => T) => T
   readonly useProjection: (key: 'imageLimits') => ImageAttachmentLimits | undefined
-  readonly loadImage: (attachment: ImageAttachmentRef) => Promise<string>
-  readonly addImageToDraft: (attachment: ImageAttachmentRef) => Promise<void>
+  readonly loadImage: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<string>
+  readonly addImageToDraft: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<void>
   readonly draftBytes: (ids: readonly string[]) => number
   readonly notify: (level: 'info' | 'error', text: string) => void
   readonly runResource: (request: DesktopResourceRequest) => Promise<void>
@@ -327,11 +395,11 @@ interface ArtifactTerminalProps extends TurnTailOwnerProps {
 interface ImageGalleryViewProps {
   readonly sessionId: string
   readonly useSession: <T>(selector: (snapshot: ConversationSnapshot) => T) => T
-  readonly useSessions: <T>(selector: (snapshot: { byId: Record<string, { title?: string } | undefined> }) => T) => T
+  readonly useSessions: <T>(selector: (snapshot: SessionListState) => T) => T
   readonly useInput: <T>(selector: (input: InputSnapshot) => T) => T
   readonly useProjection: (key: 'imageLimits') => ImageAttachmentLimits | undefined
-  readonly loadImage: (attachment: ImageAttachmentRef) => Promise<string>
-  readonly addImageToDraft: (attachment: ImageAttachmentRef) => Promise<void>
+  readonly loadImage: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<string>
+  readonly addImageToDraft: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<void>
   readonly draftBytes: (ids: readonly string[]) => number
   readonly notify: (level: 'info' | 'error', text: string) => void
   readonly runResource: (request: DesktopResourceRequest) => Promise<void>
@@ -395,15 +463,23 @@ const galleryOperation = {
 
 const GALLERY_PAGE_SIZE = 24
 
+function galleryItemIdentity(item: ImageGalleryItem): string {
+  return `${item.source?.sessionId ?? 'self'}:${item.callId}`
+}
+
 /** Native conversation.view reader over the same durable receipts used by the Turn tail. */
 export function ImageGalleryView({
   sessionId, useSession, useSessions, useInput, useProjection, loadImage, addImageToDraft, draftBytes, notify, runResource,
 }: ImageGalleryViewProps) {
   const snapshot = useSession(value => value)
-  const title = useSessions(value => value.byId[sessionId]?.title)
+  const sessions = useSessions(value => value)
+  const title = sessions.byId[sessionId]?.title
   const input = useInput(value => value)
   const limits = useProjection('imageLimits')
-  const items = galleryImageItems(snapshot.chat.nodes.values(), title ?? '')
+  const items = namedGalleryImageItems([
+    ...childGalleryImageItems(sessions, sessionId),
+    ...galleryImageItems(snapshot.chat.nodes.values()),
+  ], title ?? '')
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<keyof typeof galleryStatus>('all')
   const [operation, setOperation] = useState<keyof typeof galleryOperation>('all')
@@ -413,6 +489,7 @@ export function ImageGalleryView({
     item.revision,
     item.status,
     item.attachment?.attachmentId ?? item.failureCode ?? '',
+    item.source?.sessionId ?? '',
   ].join(':')).join('|')
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const filtered = items.filter(item => {
@@ -423,6 +500,7 @@ export function ImageGalleryView({
       item.attachment?.name,
       item.callId,
       item.failureCode,
+      item.source?.label,
       galleryStatus[item.status],
       galleryOperation[item.operation],
     ].some(value => value?.toLocaleLowerCase().includes(normalizedQuery))
@@ -436,11 +514,12 @@ export function ImageGalleryView({
   const imageAction = (item: ImageGalleryItem, action: 'copy-image' | 'save-as'): void => {
     const attachment = item.attachment
     if (attachment === undefined) return
-    void loadImage(attachment).then(src => runResource({
+    const ownerSessionId = item.source?.sessionId ?? sessionId
+    void loadImage(attachment, ownerSessionId).then(src => runResource({
       action,
       resource: {
         kind: 'image',
-        sessionId,
+        sessionId: ownerSessionId,
         name: galleryAttachmentName(attachment),
         src,
       },
@@ -450,7 +529,12 @@ export function ImageGalleryView({
   const addToDraft = (item: ImageGalleryItem): void => {
     const error = admissionError(item, input, limits, existingBytes)
     if (error !== undefined) { notify('error', error); return }
-    void addImageToDraft(item.attachment!).catch(() => { notify('error', '图片未能添加到聊天，请重试。') })
+    const addition = item.source === undefined
+      ? addImageToDraft(item.attachment!)
+      : addImageToDraft(item.attachment!, item.source.sessionId)
+    void addition.catch(() => {
+      notify('error', '图片未能添加到聊天，请重试。')
+    })
   }
 
   return <section className={css.galleryView} aria-label="画廊">
@@ -481,20 +565,22 @@ export function ImageGalleryView({
           const attachment = item.attachment
           const label = attachment === undefined ? item.callId : galleryAttachmentName(attachment)
           const addError = admissionError(item, input, limits, existingBytes)
-          return <article key={`${item.callId}:${item.revision}`} className={css.galleryCard} aria-label={label}>
+          return <article key={`${galleryItemIdentity(item)}:${item.revision}`} className={css.galleryCard} aria-label={label}>
             {attachment === undefined
               ? <div className={css.galleryFailure} role="status">
                 <strong>{item.callId}</strong>
+                {item.source !== undefined && <span>来自子任务：{item.source.label}</span>}
                 <span>错误：{item.failureCode ?? 'unknown'}</span>
               </div>
               : <>
                 <div className={css.galleryPreview}>
-                  <MessageImage attachment={attachment} load={loadImage} variant="tile" labels={imageLabels} />
+                  <MessageImage attachment={attachment}
+                    load={value => loadImage(value, item.source?.sessionId)} variant="tile" labels={imageLabels} />
                   {item.status === 'review-required' && <span className={css.status}>待确认</span>}
                 </div>
                 <div className={css.galleryMeta}>
                   <strong title={label}>{label}</strong>
-                  <span>{galleryOperation[item.operation]} · {galleryStatus[item.status]}</span>
+                  <span>{item.source === undefined ? '' : `来自子任务：${item.source.label} · `}{galleryOperation[item.operation]} · {galleryStatus[item.status]}</span>
                 </div>
                 <div className={css.galleryActions}>
                   <button type="button" aria-label={`复制图像：${label}`} title="复制图像"
@@ -598,7 +684,7 @@ function ImageTerminal({ items, loadImage, openMenu }: {
     {images.length > 0 && <div className={css.railWrap}>
       <div ref={railRef} className={css.rail} onScroll={sync}>
         {images.map(item => <div
-          key={`${item.callId}:${item.revision}`}
+          key={`${galleryItemIdentity(item)}:${item.revision}`}
           className={css.imageItem}
           data-status={item.status}
           onContextMenu={event => { event.preventDefault(); openMenu({ kind: 'image', item }, event) }}

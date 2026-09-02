@@ -2,10 +2,13 @@ import { createHash, randomUUID } from 'node:crypto'
 import { link, lstat, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, sep } from 'node:path'
 import { zipSync } from 'fflate'
-import { loadTargetLlm, loadTargetTools } from './target-runtime.js'
+import { loadTargetLlm, loadTargetStorageDomain, loadTargetTools } from './target-runtime.js'
 
 export const name = 'emate-image-generation'
-export const inject = ['tools', 'jobs', 'attachments', 'sandboxPolicy', 'emateIdentity', 'emateModelPolicy', 'emateCapabilities']
+export const inject = [
+  'tools', 'jobs', 'attachments', 'sandboxPolicy', 'sessionProjections',
+  'emateIdentity', 'emateModelPolicy', 'emateCapabilities',
+]
 
 interface ImageOutputEventData {
   readonly schema_version: 2
@@ -68,6 +71,45 @@ const ATTACHMENT_ID = /^sha256:[0-9a-f]{64}$/u
 const SHA256 = /^[0-9a-f]{64}$/u
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
+const IMAGE_RECEIPTS_PROJECTION = 'eMateImageReceipts'
+const TERMINAL_IMAGE_STATUSES = new Set(['completed', 'needs-review', 'failed', 'cancelled', 'unknown'])
+
+/** Child-owned terminal receipts projected through rc.7's native Session projection feed. */
+export function imageReceiptsProjectionDefinition(z) {
+  const row = z.object({
+    seq: z.number().int().nonnegative(),
+    createdAt: z.number().finite(),
+    receipt: z.record(z.string(), z.unknown()),
+  }).strict()
+  return {
+    key: IMAGE_RECEIPTS_PROJECTION,
+    schema: z.array(row),
+    stateVersion: 1,
+    init: () => [],
+    apply(state, event) {
+      if (event.type !== 'emate/image-output' || !isRecord(event.data)) return state
+      const data = event.data
+      if (data.schema_version !== IMAGE_RECEIPT_VERSION
+        || typeof data.call_id !== 'string' || data.call_id === ''
+        || !Number.isSafeInteger(data.revision) || data.revision < 1
+        || !TERMINAL_IMAGE_STATUSES.has(String(data.status))) return state
+      const currentIndex = state.findIndex(item => item.receipt.call_id === data.call_id)
+      const current = state[currentIndex]
+      if (current !== undefined
+        && (Number(current.receipt.revision) > data.revision
+          || Number(current.receipt.revision) === data.revision && current.seq >= event.seq)) return state
+      const next = {
+        seq: event.seq,
+        createdAt: current?.createdAt ?? event.time,
+        receipt: data,
+      }
+      return currentIndex === -1
+        ? [...state, next]
+        : state.map((item, index) => index === currentIndex ? next : item)
+    },
+    view: state => [...state].sort((left, right) => left.createdAt - right.createdAt || left.seq - right.seq),
+  }
+}
 
 function sessionIdentity(agent) {
   const id = agent?.session?.header?.id ?? agent?.id
@@ -1165,10 +1207,12 @@ export async function apply(ctx, config = {}) {
     attachments: ctx.attachments,
   })
   const bindingPath = config.bindingPath ?? join(import.meta.dirname, 'runtime-binding.json')
-  const [{ defineTool }, { createUserMessage }] = await Promise.all([
+  const [{ defineTool }, { createUserMessage }, { z }] = await Promise.all([
     loadTargetTools(bindingPath),
     loadTargetLlm(bindingPath),
+    loadTargetStorageDomain(bindingPath),
   ])
+  ctx.sessionProjections.register(imageReceiptsProjectionDefinition(z))
   ctx.on('agent/pre-step', async ({ agent }, next) => {
     const decision = await next()
     if (decision.kind === 'reject') return decision

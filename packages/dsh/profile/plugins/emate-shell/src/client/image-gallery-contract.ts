@@ -11,6 +11,13 @@ export interface ImageGalleryItem {
   readonly createdAt?: number
   readonly attachment?: ImageAttachmentRef
   readonly failureCode?: string
+  /** Read-only presentation provenance; never written back into a receipt. */
+  readonly source?: {
+    readonly kind: 'subagent'
+    readonly sessionId: string
+    readonly label: string
+    readonly ordinal: number
+  }
 }
 
 const RECEIPT_KEYS = new Set([

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseImageOutputReceipt } from '../src/client/image-gallery-contract.ts'
 import {
   ArtifactTerminal,
+  childGalleryImageItems,
   galleryImageItems,
   ImageGalleryView,
   imageCallsDefinition,
@@ -127,7 +128,9 @@ function galleryProps(
   return {
     sessionId,
     useSession: (selector: (value: unknown) => unknown) => selector({ chat: { nodes: { values: () => nodes.values() } } }),
-    useSessions: (selector: (value: unknown) => unknown) => selector({ byId: { [sessionId]: {} } }),
+    useSessions: (selector: (value: unknown) => unknown) => selector({
+      byId: { [sessionId]: {} }, subagentsByParent: {},
+    }),
     useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
     useProjection: () => limits,
     loadImage: vi.fn(async () => 'blob:image'),
@@ -159,6 +162,10 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
     notify: vi.fn(),
   }
   const notice = vi.fn()
+  const binding = vi.fn(() => ({ session: {
+    readAttachment,
+    projections: { faceOf: () => ({ getSnapshot: () => imageLimits }) },
+  } }))
   const ctx = {
     slots: {
       inject: (_name: string, install: () => void) => { install() },
@@ -167,10 +174,7 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
       },
     },
     sessions: {
-      binding: () => ({ session: {
-        readAttachment,
-        projections: { faceOf: () => ({ getSnapshot: () => imageLimits }) },
-      } }),
+      binding,
       scope: () => ({}),
     },
     conversation: {
@@ -191,6 +195,7 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
   registerImageGallery(ctx, notice)
   return {
     injected,
+    binding,
     readAttachment,
     addImages,
     createDraftImages: ctx.conversation.createDraftImages,
@@ -339,6 +344,133 @@ describe('completed artifact terminal', () => {
     expect(screen.getByText('错误：provider-result-uncommitted')).toBeTruthy()
     expect(view.container.textContent).not.toContain('/Users')
     expect(screen.queryByRole('button', { name: /删除/u })).toBeNull()
+  })
+
+  it('streams direct child receipts into the parent Gallery by terminal completion order', async () => {
+    const parentId = 'parent-gallery'
+    const children = [
+      { id: 'child-a', label: '第一张' },
+      { id: 'child-b', label: '第二张' },
+      { id: 'child-review', label: '待确认改图' },
+      { id: 'child-failed', label: '失败图片' },
+    ]
+    const projected = (childId: string, data: Record<string, unknown>, seq: number, createdAt: number) => ({
+      childId,
+      row: { seq, createdAt, receipt: { ...data, parent_session_id: childId } },
+    })
+    const childReceipt = (childId: string, callId: string, name: string, suffix: string, overrides = {}) => receipt({
+      call_id: callId,
+      parent_session_id: childId,
+      content: [{ type: 'image', attachment: {
+        ...attachment,
+        attachmentId: `sha256:${suffix.repeat(64)}`,
+        name,
+      } }],
+      output: {
+        ...attachment,
+        attachmentId: `sha256:${suffix.repeat(64)}`,
+        name,
+      },
+      ...overrides,
+    })
+    const state = (rows: readonly ReturnType<typeof projected>[], running = true) => ({
+      byId: {
+        [parentId]: { title: '并发生图测试', displayTitle: '并发生图测试', running },
+        ...Object.fromEntries(children.map(child => [child.id, {
+          displayTitle: child.label,
+          projectionValues: {
+            eMateImageReceipts: rows.filter(row => row.childId === child.id).map(row => row.row),
+          },
+        }])),
+      },
+      subagentsByParent: {
+        [parentId]: {
+          entries: children.map(child => ({
+            kind: 'child', id: child.id, label: child.label, mode: 'one-shot', activity: 'inactive', hasChildren: false,
+          })),
+          state: 'ready', error: null, parentAvailable: true,
+        },
+      },
+    })
+    const first = projected('child-b', childReceipt('child-b', 'call-b', 'second.png', 'b'), 8, 100)
+    const second = projected('child-a', childReceipt('child-a', 'call-a', 'first.png', 'c'), 9, 200)
+    const review = projected('child-review', childReceipt(
+      'child-review', 'call-review', 'review.png', 'd', { revision: 3, operation: 'edit', status: 'needs-review' },
+    ), 10, 250)
+    const failed = projected('child-failed', receipt({
+      call_id: 'call-failed', parent_session_id: 'child-failed', status: 'failed', content: [], output: undefined,
+      failure_code: 'provider-result-uncommitted',
+    }), 11, 300)
+    const actions = {
+      loadImage: vi.fn(async () => 'blob:child-image'),
+      addImageToDraft: vi.fn(async () => {}),
+      runResource: vi.fn(async () => {}),
+    }
+    const props = (sessions: ReturnType<typeof state>, nodes: readonly unknown[] = []) => galleryProps(parentId, nodes, {
+      ...actions,
+      useSessions: (selector: (value: unknown) => unknown) => selector(sessions),
+    })
+
+    const view = render(<ImageGalleryView {...props(state([])) as never} />)
+    expect(screen.getByText('暂无图片结果')).toBeTruthy()
+
+    view.rerender(<ImageGalleryView {...props(state([first])) as never} />)
+    const firstCard = screen.getByRole('article', { name: /子任务02-生成/u })
+    expect(firstCard.textContent).toContain('来自子任务：第二张')
+    expect(screen.getAllByRole('article')).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: /复制图像：.*子任务02-生成/u }))
+    await waitFor(() => {
+      expect(actions.loadImage).toHaveBeenCalledWith(expect.objectContaining({ attachmentId: `sha256:${'b'.repeat(64)}` }), 'child-b')
+      expect(actions.runResource).toHaveBeenCalledWith(expect.objectContaining({
+        resource: expect.objectContaining({ kind: 'image', sessionId: 'child-b' }),
+      }))
+    })
+    fireEvent.click(screen.getByRole('button', { name: /添加到聊天：.*子任务02-生成/u }))
+    await waitFor(() => {
+      expect(actions.addImageToDraft).toHaveBeenCalledWith(
+        expect.objectContaining({ attachmentId: `sha256:${'b'.repeat(64)}` }), 'child-b',
+      )
+    })
+
+    view.rerender(<ImageGalleryView {...props(state([first, second])) as never} />)
+    expect(screen.getAllByRole('article').map(node => node.getAttribute('aria-label'))).toEqual([
+      expect.stringMatching(/子任务02-生成/u),
+      expect.stringMatching(/子任务01-生成/u),
+    ])
+    view.rerender(<ImageGalleryView {...props(state([first, second])) as never} />)
+    expect(screen.getAllByRole('article')).toHaveLength(2)
+
+    view.rerender(<ImageGalleryView {...props(state([first, second, review, failed], false)) as never} />)
+    expect(screen.getAllByRole('article')).toHaveLength(4)
+    expect(screen.getByRole('article', { name: /子任务03-改图/u }).textContent).toContain('待确认')
+    expect(screen.getByRole('article', { name: 'call-failed' }).textContent).toContain('来自子任务：失败图片')
+    expect(screen.getAllByRole('article').at(-1)?.getAttribute('aria-label')).toBe('call-failed')
+
+    const own = { ...parseImageOutputReceipt(receipt({
+      call_id: 'parent-own', parent_session_id: parentId,
+      content: [{ type: 'image', attachment: { ...attachment, name: 'parent-own.png' } }],
+    }))!, createdAt: 400 }
+    view.rerender(<ImageGalleryView {...props(state([first, second, review, failed], false), [hidden(own)]) as never} />)
+    expect(screen.getAllByRole('article')).toHaveLength(5)
+    expect(screen.getByRole('article', { name: /并发生图测试-生成/u })).toBeTruthy()
+
+    cleanup()
+    render(<ImageGalleryView {...props(state([first, second, review, failed], false)) as never} />)
+    expect(screen.getAllByRole('article')).toHaveLength(4)
+    expect(childGalleryImageItems(state([first, second, review, failed]) as never, parentId))
+      .toHaveLength(4)
+  })
+
+  it('reads a child-owned attachment into the parent draft without changing receipt ownership', async () => {
+    const harness = galleryAdmissionHarness(limits)
+    const adding = harness.injected.addImageToDraft(attachment, 'child-owner')
+    harness.resolveReads()
+    await adding
+
+    expect(harness.binding.mock.calls.map(call => call[0])).toEqual(['session-gallery', 'child-owner'])
+    expect(harness.addImages).toHaveBeenCalledOnce()
+    expect(harness.notice).toHaveBeenCalledWith('info', '图片已添加到聊天草稿。')
   })
 
   it('mounts at most 24 Gallery images per page and resets paging after every input or Session change', () => {
@@ -706,14 +838,18 @@ describe('completed artifact terminal', () => {
     const contract = readFileSync(resolve('src/client/image-gallery-contract.ts'), 'utf8')
     expect(source).not.toMatch(/querySelector|createPortal|MutationObserver|setInterval/u)
     expect(source).not.toMatch(/gpt-image|provider|prompt/u)
-    expect(source).not.toMatch(/child_session_id|childSessionId|subagent|delegations/u)
-    expect(contract).not.toMatch(/childSessionId|subagent|delegations/u)
-    expect(`${source}\n${contract}`).not.toMatch(/indexedDB|localStorage|sessionStorage|tombstone|\bfetch\s*\(/u)
+    expect(source).toContain('subagentsByParent')
+    expect(source.match(/child_session_id/gu)).toHaveLength(1)
+    expect(source).toContain('row.receipt.child_session_id !== undefined')
+    expect(source).not.toMatch(/child_session_id\s*:/u)
+    expect(contract).toContain("kind: 'subagent'")
+    expect(contract).not.toMatch(/childSessionId|delegations/u)
+    expect(`${source}\n${contract}`).not.toMatch(/indexedDB|localStorage|sessionStorage|tombstone|\bfetch\s*\(|WebSocket|EventSource|setTimeout|setInterval/u)
     expect(source).toContain('<MessageImage')
     expect(source).toContain("visibility: 'hidden'")
     const apply = readFileSync(resolve('src/client/index.ts'), 'utf8')
     expect(apply).toContain("ctx.slots.inject('conversation.view'")
-    expect(apply).toContain('session.readAttachment(attachment.attachmentId)')
+    expect(apply).toContain('owner.readAttachment(attachment.attachmentId)')
     expect(apply).not.toMatch(/\bfetch\s*\(/u)
     expect(apply).not.toContain('ctx.conversation.input.for(scope).notify')
     expect(apply).toContain('releaseDraftImages(images)')

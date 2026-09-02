@@ -356,7 +356,11 @@ test('managed profile installation is idempotent', () => {
     assert.doesNotMatch(patch, /emate-(?:office-ocr|browser-computer-use|memory|dream|learning)/)
     assert.match(patch, /id: emate-model-policy[\s\S]*\.\/plugins\/model-policy\.js[\s\S]*inject: \[apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity\]/)
     assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, tools, emateModelPolicy, emateIdentity\]/)
-    assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*inject: \[tools, jobs, attachments, sandboxPolicy, agents, subagents, emateIdentity, emateModelPolicy, emateCapabilities\][\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
+    assert.deepEqual(patchById.get('emate-image-generation').inject, [
+      'tools', 'jobs', 'attachments', 'sandboxPolicy', 'sessionProjections', 'agents', 'subagents',
+      'emateIdentity', 'emateModelPolicy', 'emateCapabilities',
+    ])
+    assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
     assert.match(patch, /id: emate-legacy-migration[\s\S]*\.\/plugins\/legacy-migration\.js[\s\S]*inject: \[sessionPersistence, webServer\]/)
     assert.match(patch, /id: emate-schedule-import[\s\S]*\.\/plugins\/schedule-import\.js[\s\S]*inject: \[tools\]/)
     assert.ok(readFileSync(join(first.profile, 'plugins', 'agent-operations.js')).byteLength > 0)
@@ -1084,6 +1088,11 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
   assert.equal(imageGenerationSource.match(/const IMAGE_MODEL = 'gpt-image-2-pro'/gu)?.length, 1)
   assert.equal(imageGenerationSource.match(/await request\(endpoint\(root, path\)/gu)?.length, 1)
   assert.doesNotMatch(imageGenerationSource, /['"]gpt-image-2['"]/u)
+  const projectionSource = imageGenerationSource.slice(
+    imageGenerationSource.indexOf('export function imageReceiptsProjectionDefinition'),
+    imageGenerationSource.indexOf('function sessionIdentity'),
+  )
+  assert.doesNotMatch(projectionSource, /ctx\.jobs|identity\.request|endpoint\(|IMAGE_MODEL|retry|fallback/u)
   const temporary = mkdtempSync(join(tmpdir(), 'e-mate-image-generation-'))
   const context = new Context()
   const cleanups = []
@@ -1094,6 +1103,15 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const harness = resolveHarness()
     const toolsModule = resolveHarnessModule(harness, 'packages/core/tools', '@deepseek-ai/dsh-tools')
     const llmModule = resolveHarnessModule(harness, 'packages/llm/llm', '@deepseek-ai/dsh-llm')
+    const storageDomainModule = resolveHarnessModule(
+      harness,
+      'packages/storage/storage-domain',
+      '@deepseek-ai/dsh-storage-domain',
+    )
+    const zodModule = realpathSync(new URL(
+      '../../../upstream/deepseek-harness/packages/storage/storage-domain/node_modules/zod/index.js',
+      import.meta.url,
+    ))
     const bindingPath = join(temporary, 'runtime-binding.json')
     writeFileSync(bindingPath, JSON.stringify({
       schema_version: 1,
@@ -1105,6 +1123,10 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       tools_module_sha256: createHash('sha256').update(readFileSync(toolsModule)).digest('hex'),
       llm_module: llmModule,
       llm_module_sha256: createHash('sha256').update(readFileSync(llmModule)).digest('hex'),
+      storage_domain_module: storageDomainModule,
+      storage_domain_module_sha256: fileDigest(storageDomainModule),
+      zod_module: zodModule,
+      zod_module_sha256: fileDigest(zodModule),
     }))
     await context.plugin(AgentRegistry)
     jobFiber = await context.plugin(LocalJobRegistry)
@@ -1225,6 +1247,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       },
     }
     const tools = new Map()
+    const imageProjectionDefinitions = []
     const jobs = []
     const waitedJobs = []
     context.jobs.onJobDone(snapshot => { jobTimeline.push(`settled:${snapshot.id}`) })
@@ -1290,6 +1313,12 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         kill: (id, owner, reason) => context.jobs.kill(id, owner, reason),
       },
       attachments: imageAttachments,
+      sessionProjections: {
+        register(definition) {
+          imageProjectionDefinitions.push(definition)
+          return () => {}
+        },
+      },
       sandboxPolicy: { resolve: () => ({ mode: sandboxMode, workspaceRoot: temporary }) },
       get(name) {
         requestedServices.push(name)
@@ -1317,6 +1346,60 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       rootUrl: 'https://model.example/e-mate/model-api/v1',
     })
     assert.deepEqual([...tools.keys()], ['imagegen', 'image_pack'])
+    assert.equal(imageProjectionDefinitions.length, 1)
+    const imageProjection = imageProjectionDefinitions[0]
+    assert.equal(imageProjection.key, 'eMateImageReceipts')
+    assert.equal(imageProjection.stateVersion, 1)
+    const projectionReceipt = (callId, status = 'completed', revision = 2) => ({
+      schema_version: 2,
+      revision,
+      call_id: callId,
+      operation: 'generate',
+      status,
+      billing_status: status === 'running' ? 'not-submitted' : 'recorded',
+      parent_session_id: 'projection-child',
+      sources: [],
+      content: ['completed', 'needs-review'].includes(status) ? [{ type: 'image', attachment: {
+        attachmentId: `sha256:${'1'.repeat(64)}`,
+        mediaType: 'image/png', bytes: 42, width: 2, height: 3, name: 'projected.png',
+      } }] : [],
+      verifier: { structural: 'attachment-cas-v1', semantic: 'not-required' },
+      verification: {
+        structural: status === 'completed' ? 'passed' : 'not-run',
+        source_output: status === 'completed' ? 'not-applicable' : 'unknown',
+        semantic: status === 'completed' ? 'not-applicable' : 'failed',
+      },
+      ...(status === 'failed' ? { failure_code: 'provider-result-uncommitted' } : {}),
+    })
+    const runningProjectionEvent = {
+      type: 'emate/image-output', seq: 1, time: 100, data: projectionReceipt('projected-a', 'running', 1),
+    }
+    const completedProjectionEvent = {
+      type: 'emate/image-output', seq: 2, time: 200, data: projectionReceipt('projected-a'),
+    }
+    const reviewProjectionEvent = {
+      type: 'emate/image-output', seq: 3, time: 300,
+      data: { ...projectionReceipt('projected-a', 'needs-review', 3), operation: 'edit' },
+    }
+    const failedProjectionEvent = {
+      type: 'emate/image-output', seq: 4, time: 250, data: projectionReceipt('projected-b', 'failed'),
+    }
+    const emptyProjection = imageProjection.init()
+    assert.strictEqual(imageProjection.apply(emptyProjection, runningProjectionEvent), emptyProjection)
+    const completedProjection = imageProjection.apply(emptyProjection, completedProjectionEvent)
+    assert.strictEqual(imageProjection.apply(completedProjection, completedProjectionEvent), completedProjection)
+    const reviewedProjection = imageProjection.apply(completedProjection, reviewProjectionEvent)
+    const finalProjection = imageProjection.apply(reviewedProjection, failedProjectionEvent)
+    assert.equal(finalProjection[0].createdAt, 200)
+    assert.deepEqual(imageProjection.view(finalProjection).map(row => row.receipt.call_id), [
+      'projected-a', 'projected-b',
+    ])
+    assert.doesNotThrow(() => imageProjection.schema.parse(imageProjection.view(finalProjection)))
+    const restoredProjection = [
+      runningProjectionEvent, completedProjectionEvent, reviewProjectionEvent, failedProjectionEvent,
+    ].reduce((state, entry) => imageProjection.apply(state, entry), imageProjection.init())
+    assert.deepEqual(imageProjection.view(restoredProjection), imageProjection.view(finalProjection))
+    assert.equal(requests.length, 0)
     assert.deepEqual(controllers, ['emate-image'])
     assert.equal(typeof preStep, 'function')
     assert.equal(requestedServices.includes('subagents'), false)
@@ -2526,8 +2609,10 @@ test('Agent operation guidance owns the e-Mate persona and native image batch po
   assert.match(section.text, /does not restrict `imagegen`'s internal native Job owner/u)
   assert.match(section.text, /native AgentLoop's existing four-call limit is the only batch scheduler/u)
   assert.match(section.text, /Every batched image remains owned by the native child Session and its Gallery/u)
+  assert.match(section.text, /parent Gallery may read direct-child terminal receipts only through the native read-only Session projection/u)
+  assert.match(section.text, /displaying each terminal receipt as it lands without waiting for the parent Turn/u)
   assert.match(section.text, /summarize only the native subagent results in Tool-call order/u)
-  assert.match(section.text, /never copy an attachment or receipt, project `child_session_id`, promise aggregation in the parent's Gallery, or call `image_pack` across Sessions/u)
+  assert.match(section.text, /never copy an attachment or receipt into the parent Session, write or synthesize `child_session_id`, or call `image_pack` across Sessions/u)
   assert.match(section.text, /Report each failed image once; never automatically retry it, create a replacement image, switch models, fall back, or add a queue/u)
   assert.match(section.text, /does not change delegation policy for ordinary non-image tasks/u)
   assert.doesNotMatch(section.text, /new images or independent edits|generate or edit only its one image|Do not use background subagents[\s\S]*, Jobs,/u)

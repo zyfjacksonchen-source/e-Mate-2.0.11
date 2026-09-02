@@ -115,7 +115,7 @@
       inject: [tools, jobs, attachments]
     - id: emate-image-generation
       name: ./plugins/image-generation.js
-      inject: [tools, jobs, attachments, sandboxPolicy, agents, subagents, emateIdentity, emateModelPolicy, emateCapabilities]
+      inject: [tools, jobs, attachments, sandboxPolicy, sessionProjections, agents, subagents, emateIdentity, emateModelPolicy, emateCapabilities]
       config:
         rootUrl: https://mvdcm.ecoremedia.net/e-mate/model-api/v1
 
