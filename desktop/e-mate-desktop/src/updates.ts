@@ -102,7 +102,9 @@ export function apply(ctx: Context, config: Config): void {
 
     const stateReady = (async () => {
       try {
-        state = parseState(await readState(adapter.statePath))
+        const loaded = parseState(await readState(adapter.statePath))
+        state = loaded.state
+        if (loaded.migrated && !disposed) await persistState()
       } catch (cause) {
         if (isEnoent(cause)) return
         state = EMPTY_STATE
@@ -269,17 +271,35 @@ export function apply(ctx: Context, config: Config): void {
   }, '@e-mate/desktop: update polling, confirmation, and installer handoff')
 }
 
-function parseState(text: string): UpdateStateV2 {
+function parseState(text: string): {
+  readonly state: UpdateStateV2
+  readonly migrated: boolean
+} {
   const value: unknown = JSON.parse(text)
+  if (isRecord(value) && value.version === 3) {
+    if ((value.lastNotifiedVersion !== undefined && !isStableVersion(value.lastNotifiedVersion))
+      || Object.keys(value).some(key => !['version', 'lastNotifiedVersion'].includes(key))) {
+      throw new Error('invalid v3 update state')
+    }
+    return {
+      state: value.lastNotifiedVersion === undefined
+        ? EMPTY_STATE
+        : { version: 2, lastPromptedVersion: value.lastNotifiedVersion as string },
+      migrated: true,
+    }
+  }
   if (!isRecord(value)
     || value.version !== 2
     || (value.lastPromptedVersion !== undefined && !isStableVersion(value.lastPromptedVersion))
     || Object.keys(value).some(key => !['version', 'lastPromptedVersion'].includes(key))) {
     throw new Error('invalid v2 update state')
   }
-  return value.lastPromptedVersion === undefined
-    ? EMPTY_STATE
-    : { version: 2, lastPromptedVersion: value.lastPromptedVersion as string }
+  return {
+    state: value.lastPromptedVersion === undefined
+      ? EMPTY_STATE
+      : { version: 2, lastPromptedVersion: value.lastPromptedVersion as string },
+    migrated: false,
+  }
 }
 
 async function readState(filename: string): Promise<string> {
