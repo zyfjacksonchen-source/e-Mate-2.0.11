@@ -264,15 +264,12 @@ function fileKind(name: string): string {
   return extension === '' ? '文件' : `${extension.toUpperCase()} 文件`
 }
 
-function admissionError(
-  item: ImageGalleryItem,
+export function draftImageAdmissionError(
+  attachment: ImageAttachmentRef,
   input: InputSnapshot,
   limits: ImageAttachmentLimits | undefined,
   existingBytes: number,
 ): string | undefined {
-  const attachment = item.attachment
-  if (item.status === 'review-required') return '待确认图片不能添加到聊天。'
-  if (attachment === undefined) return '这张图片没有可用附件。'
   if (input.phase === 'adjudicating' || input.phase === 'submitting') return '当前正在发送消息，请稍后再添加图片。'
   if (limits === undefined) return '当前会话未启用图片附件。'
   if (!limits.mediaTypes.includes(attachment.mediaType)) return '当前会话不支持这种图片格式。'
@@ -281,6 +278,17 @@ function admissionError(
   if (existingBytes + attachment.bytes > limits.maxMessageImageBytes) return '图片附件总大小超过当前消息上限。'
   if (attachment.width * attachment.height > limits.maxImagePixels) return '这张图片的像素尺寸超过上限。'
   return undefined
+}
+
+function admissionError(
+  item: ImageGalleryItem,
+  input: InputSnapshot,
+  limits: ImageAttachmentLimits | undefined,
+  existingBytes: number,
+): string | undefined {
+  if (item.status === 'review-required') return '待确认图片不能添加到聊天。'
+  if (item.attachment === undefined) return '这张图片没有可用附件。'
+  return draftImageAdmissionError(item.attachment, input, limits, existingBytes)
 }
 
 const galleryStatus = {

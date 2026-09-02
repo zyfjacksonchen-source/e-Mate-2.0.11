@@ -137,6 +137,72 @@ function galleryProps(
   }
 }
 
+function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true) {
+  const pendingReads: Array<(result: unknown) => void> = []
+  const drafts = new Map<string, { id: string; file: File }>()
+  let imageIds: readonly string[] = []
+  let injected: any
+  const readAttachment = vi.fn(() => new Promise(resolve => { pendingReads.push(resolve) }))
+  const addImages = vi.fn((ids: readonly string[]) => {
+    if (!acceptImages) return false
+    imageIds = [...imageIds, ...ids]
+    return true
+  })
+  const releaseDraftImages = vi.fn((images: readonly { id: string }[]) => {
+    for (const image of images) drafts.delete(image.id)
+  })
+  const shell = {
+    state: { getSnapshot: () => ({ imageIds, phase: 'plain' }) },
+    addImages,
+    notify: vi.fn(),
+  }
+  const ctx = {
+    slots: {
+      inject: (_name: string, install: () => void) => { install() },
+      register: (options: { inject: (sessionId: string) => unknown }) => {
+        injected = options.inject('session-gallery')
+      },
+    },
+    sessions: {
+      binding: () => ({ session: {
+        readAttachment,
+        projections: { faceOf: () => ({ getSnapshot: () => imageLimits }) },
+      } }),
+      scope: () => ({}),
+    },
+    conversation: {
+      resolveImage: vi.fn(async () => 'blob:image'),
+      input: { for: () => shell },
+      createDraftImages: vi.fn((files: readonly File[]) => files.map((file) => {
+        const draft = { id: `draft-${drafts.size + 1}`, file }
+        drafts.set(draft.id, draft)
+        return draft
+      })),
+      draftImages: (ids: readonly string[]) => ids.flatMap(id => {
+        const draft = drafts.get(id)
+        return draft === undefined ? [] : [draft]
+      }),
+      releaseDraftImages,
+    },
+  }
+  registerImageGallery(ctx)
+  return {
+    injected,
+    readAttachment,
+    addImages,
+    createDraftImages: ctx.conversation.createDraftImages,
+    releaseDraftImages,
+    shell,
+    imageIds: () => imageIds,
+    draftCount: () => drafts.size,
+    resolveReads: () => {
+      for (const resolveRead of pendingReads.splice(0)) {
+        resolveRead({ ok: true, value: { attachment, data: new Uint8Array(attachment.bytes) } })
+      }
+    },
+  }
+}
+
 describe('completed artifact terminal', () => {
   it('registers one native conversation.view Gallery Tab', async () => {
     const runtime = await SlotTestRuntime.create()
@@ -268,6 +334,44 @@ describe('completed artifact terminal', () => {
     fireEvent.click(screen.getByRole('button', { name: '添加到聊天：result.png' }))
     await waitFor(() => { expect(props.addImageToDraft).toHaveBeenCalledWith(attachment) })
     expect(props.notify).toHaveBeenCalledWith('info', '图片已添加到聊天草稿。')
+  })
+
+  it.each([
+    ['max image count', { ...limits, maxImagesPerMessage: 1 }],
+    ['total image bytes', { ...limits, maxImagesPerMessage: 2, maxMessageImageBytes: attachment.bytes }],
+  ])('atomically rechecks live %s after concurrent delayed reads', async (_name, imageLimits) => {
+    const completed = parseImageOutputReceipt(receipt())!
+    const harness = galleryAdmissionHarness(imageLimits)
+    render(<ImageGalleryView {...galleryProps('session-gallery', [hidden(completed)], harness.injected) as never} />)
+    const add = screen.getByRole('button', { name: '添加到聊天：result.png' })
+
+    fireEvent.click(add)
+    fireEvent.click(add)
+    expect(harness.readAttachment).toHaveBeenCalledTimes(2)
+    expect(harness.addImages).not.toHaveBeenCalled()
+    harness.resolveReads()
+
+    await waitFor(() => { expect(harness.shell.notify).toHaveBeenCalledTimes(2) })
+    expect(harness.addImages).toHaveBeenCalledTimes(1)
+    expect(harness.createDraftImages).toHaveBeenCalledTimes(1)
+    expect(harness.imageIds()).toHaveLength(1)
+    expect(harness.shell.notify).toHaveBeenCalledWith('info', '图片已添加到聊天草稿。')
+    expect(harness.shell.notify).toHaveBeenCalledWith('error', '图片未能添加到聊天，请重试。')
+  })
+
+  it('releases a temporary draft image when the native synchronous commit refuses it', async () => {
+    const completed = parseImageOutputReceipt(receipt())!
+    const harness = galleryAdmissionHarness({ ...limits, maxImagesPerMessage: 1 }, false)
+    render(<ImageGalleryView {...galleryProps('session-gallery', [hidden(completed)], harness.injected) as never} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '添加到聊天：result.png' }))
+    harness.resolveReads()
+
+    await waitFor(() => { expect(harness.releaseDraftImages).toHaveBeenCalledTimes(1) })
+    expect(harness.addImages).toHaveBeenCalledTimes(1)
+    expect(harness.releaseDraftImages).toHaveBeenCalledWith(harness.createDraftImages.mock.results[0]?.value)
+    expect(harness.draftCount()).toBe(0)
+    expect(harness.shell.notify).toHaveBeenCalledWith('error', '图片未能添加到聊天，请重试。')
   })
 
   it('publishes ImageGen call provenance and selects native files under one Turn tail', () => {
