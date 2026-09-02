@@ -727,7 +727,7 @@ describe('completed artifact terminal', () => {
       subagentsByParent: {
         [parentId]: { entries: [
           { kind: 'child', id: 'child-notice', label: '通知结果', mode: 'continuable' },
-          { kind: 'child', id: 'child-foreground', label: '前台结果', mode: 'one-shot' },
+          { kind: 'child', id: 'child-foreground', label: '前台结果', mode: 'continuable' },
           { kind: 'child', id: 'child-sibling', label: '乱序兄弟', mode: 'continuable' },
         ] },
       },

@@ -272,7 +272,7 @@ export function terminalChildImageItems(
     if (exact.has(childSessionId)) return true
     const createdAt = item.createdAt
     const remaining = labels.get(source.label) ?? 0
-    if (remaining === 0 || source.mode !== 'one-shot' || settledChildSessionIds.has(childSessionId)
+    if (remaining === 0 || settledChildSessionIds.has(childSessionId)
       || foregroundWindow === undefined || createdAt === undefined
       || createdAt < foregroundWindow.startTime || createdAt > foregroundWindow.endTime) return false
     labels.set(source.label, remaining - 1)
