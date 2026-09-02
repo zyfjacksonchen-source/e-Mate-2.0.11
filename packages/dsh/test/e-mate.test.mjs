@@ -651,12 +651,12 @@ test('public share RPC publishes the native DSH Session ZIP and revokes the retu
   assert.equal((await registration.handler('status', [])).error.code, 'bad-request')
 })
 
-test('credential helper runner contains stdin EPIPE and skips empty pipes', async () => {
+test('credential helper runner surfaces stdin closed-pipe errors and skips empty pipes', async () => {
   const input = 'x'.repeat(1024 * 1024)
   const closeBeforeRead = "require('node:fs').closeSync(0); setTimeout(() => {}, 50)"
   const closeDuringRead = "process.stdin.once('data', () => { require('node:fs').closeSync(0); setTimeout(() => {}, 50) })"
-  await assert.rejects(runCommand(process.execPath, ['-e', closeBeforeRead], input), error => error?.code === 'EPIPE')
-  await assert.rejects(runCommand(process.execPath, ['-e', closeDuringRead], input), error => error?.code === 'EPIPE')
+  await assert.rejects(runCommand(process.execPath, ['-e', closeBeforeRead], input), error => ['EPIPE', 'ENOTCONN'].includes(error?.code))
+  await assert.rejects(runCommand(process.execPath, ['-e', closeDuringRead], input), error => ['EPIPE', 'ENOTCONN'].includes(error?.code))
 
   const empty = await runCommand(process.execPath, ['-e', "process.stdout.write(require('node:fs').fstatSync(0).isFIFO() ? 'pipe' : 'ignore')"])
   assert.deepEqual(empty, { status: 0, stdout: 'ignore' })
