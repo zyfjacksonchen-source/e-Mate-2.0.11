@@ -7,6 +7,7 @@ import { loadTargetLlm, loadTargetStorageDomain, loadTargetTools } from './targe
 export const name = 'emate-image-generation'
 export const inject = [
   'tools', 'jobs', 'attachments', 'sandboxPolicy', 'sessionProjections',
+  'sessionProjectionCache', 'sessionPersistence',
   'emateIdentity', 'emateModelPolicy', 'emateCapabilities',
 ]
 
@@ -72,6 +73,7 @@ const SHA256 = /^[0-9a-f]{64}$/u
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 const IMAGE_RECEIPTS_PROJECTION = 'eMateImageReceipts'
+const COLD_READ_CONCURRENCY = 4
 const TERMINAL_IMAGE_STATUSES = new Set(['completed', 'needs-review', 'failed', 'cancelled', 'unknown'])
 
 /** Child-owned terminal receipts projected through rc.7's native Session projection feed. */
@@ -109,6 +111,25 @@ export function imageReceiptsProjectionDefinition(z) {
     },
     view: state => [...state].sort((left, right) => left.createdAt - right.createdAt || left.seq - right.seq),
   }
+}
+
+/** Backfill a newly introduced projection through rc.7's native cold-read ladder. */
+export async function hydrateImageReceiptProjections(ctx) {
+  const queue = (await ctx.sessionPersistence.list()).filter(header => header.origin === 'subagent')
+  await Promise.all(Array.from(
+    { length: Math.min(COLD_READ_CONCURRENCY, queue.length) },
+    async () => {
+      for (let header = queue.shift(); header !== undefined; header = queue.shift()) {
+        try {
+          const cached = ctx.sessionProjectionCache.cachedSnapshot(header)
+          if (Object.hasOwn(cached?.values ?? {}, IMAGE_RECEIPTS_PROJECTION)) continue
+          await ctx.sessionProjectionCache.coldSnapshot(header.id)
+        } catch (error) {
+          ctx.logger.warn(`e-Mate image projection hydration for "${header.id}" failed: ${String(error)}`)
+        }
+      }
+    },
+  ))
 }
 
 function sessionIdentity(agent) {
@@ -1213,6 +1234,7 @@ export async function apply(ctx, config = {}) {
     loadTargetStorageDomain(bindingPath),
   ])
   ctx.sessionProjections.register(imageReceiptsProjectionDefinition(z))
+  await hydrateImageReceiptProjections(ctx)
   ctx.on('agent/pre-step', async ({ agent }, next) => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
