@@ -8,7 +8,7 @@ This is the active repository contract. It supersedes historical release-train n
 - Product version: `2.0.16`
 - GitHub repository: `zyfjacksonchen-source/e-Mate-desktop`
 - DSH package baseline: `@deepseek-ai/dsh@0.1.0-rc.7`
-- Harness: `zyfjacksonchen-source/deepseek-harness@32728743c28911bcd4279f79fe9c43ee7aacfb6d`
+- Harness: `zyfjacksonchen-source/deepseek-harness@4da69d7c3522ee51de12822c917c503a124f7a7d`
 - Desktop reference: `anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add`
 
 All maintained application source is TypeScript/TSX. Generated JavaScript and packaged assets are build output, not a second implementation.

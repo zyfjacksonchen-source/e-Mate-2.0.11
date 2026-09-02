@@ -19,7 +19,7 @@ const inventory = JSON.parse(readFileSync(new URL('../packages/dsh/profile/compo
 const baseContract = JSON.parse(readFileSync(new URL('../desktop/e-mate-desktop/base-contract.json', import.meta.url), 'utf8'))
 if (inventory.schema_version !== 1 || !Array.isArray(inventory.components)
   || baseContract.harness_version !== '0.1.0-rc.7'
-  || baseContract.harness_commit !== '32728743c28911bcd4279f79fe9c43ee7aacfb6d') {
+  || baseContract.harness_commit !== '4da69d7c3522ee51de12822c917c503a124f7a7d') {
   throw new Error('bundled Profile inventory or pinned Base contract is invalid')
 }
 const components = inventory.components.filter(component => component.desktop !== 'blocked'

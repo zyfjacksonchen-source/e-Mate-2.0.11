@@ -13,7 +13,7 @@
 - Node 24.x.
 - Corepack with exact root `pnpm@11.7.0`.
 - Desktop Yarn project and immutable lock under `desktop/`.
-- Harness `0.1.0-rc.7@32728743c28911bcd4279f79fe9c43ee7aacfb6d`.
+- Harness `0.1.0-rc.7@4da69d7c3522ee51de12822c917c503a124f7a7d`.
 - Desktop reference `anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add`.
 
 Install and test the source with the existing pinned package managers. Build installers only through the Desktop workspace:

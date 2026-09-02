@@ -183,7 +183,7 @@ test('version gates match the release contract', () => {
 
 test('runtime resolves only the exact Harness source', () => {
   const runtime = resolveHarness()
-  assert.equal(HARNESS_COMMIT, '32728743c28911bcd4279f79fe9c43ee7aacfb6d')
+  assert.equal(HARNESS_COMMIT, '4da69d7c3522ee51de12822c917c503a124f7a7d')
   assert.equal(runtime.version, HARNESS_VERSION)
   assert.equal(runtime.commit, HARNESS_COMMIT)
   assert.ok(['development-source', 'packaged-runtime'].includes(runtime.source))

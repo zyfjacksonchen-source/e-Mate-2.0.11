@@ -4,7 +4,7 @@ import { parseProfileBaseContract } from '../src/base-contract.ts'
 function contract(): Record<string, unknown> {
   return {
     schema_version: 1,
-    id: 'e-mate-desktop-profile-v16-dsh-32728743c289',
+    id: 'e-mate-desktop-profile-v17-dsh-4da69d7c3522',
     desktop_reference: {
       repository: 'anywhere-labs/deepseek-harness-desktop',
       commit: '6074088f5b660206e404b3591fab51fb99c69add',
@@ -13,7 +13,7 @@ function contract(): Record<string, unknown> {
       harness_version: '0.1.0-rc.7',
     },
     harness_version: '0.1.0-rc.7',
-    harness_commit: '32728743c28911bcd4279f79fe9c43ee7aacfb6d',
+    harness_commit: '4da69d7c3522ee51de12822c917c503a124f7a7d',
     runtime_imports: {
       '@deepseek-ai/dsh-client-runtime': '0.1.0-rc.7',
       '@deepseek-ai/dsh-settings': '0.1.0-rc.7',
@@ -27,7 +27,7 @@ describe('Desktop Base contract', () => {
     expect(parseProfileBaseContract(contract())).toMatchObject({
       schema_version: 1,
       harness_version: '0.1.0-rc.7',
-      harness_commit: '32728743c28911bcd4279f79fe9c43ee7aacfb6d',
+      harness_commit: '4da69d7c3522ee51de12822c917c503a124f7a7d',
     })
   })
 

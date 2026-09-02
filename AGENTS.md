@@ -12,7 +12,7 @@ Subagents execute development only inside their assigned work order and write se
 
 ## Native baseline: return to the pinned owner
 
-1. Read `desktop/e-mate-desktop/base-contract.json` before changing runtime behavior. The only accepted Harness baseline is `@deepseek-ai/dsh@0.1.0-rc.7`, repository commit `32728743c28911bcd4279f79fe9c43ee7aacfb6d`. The only accepted Desktop reference is `anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add`.
+1. Read `desktop/e-mate-desktop/base-contract.json` before changing runtime behavior. The only accepted Harness baseline is `@deepseek-ai/dsh@0.1.0-rc.7`, repository commit `4da69d7c3522ee51de12822c917c503a124f7a7d`. The only accepted Desktop reference is `anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add`.
 2. Trace the complete rc.7 native path before adding code. Reuse its Agent Loop, Session, event projection, Tool, approval, Job, Skill, workspace, storage, settings, plugin, slot, and lifecycle owners. Fix a shared native defect at its owner when possible; keep an e-Mate adapter only for a real product-specific difference.
 3. Never infer native behavior from a floating branch, another release candidate, a newer DSH version, or a historical e-Mate implementation. Do not add parallel UI, stores, routers, transports, Host or Agent Loop paths, Tool registries, updaters, package managers, or fallbacks. Delete divergence and route callers back to the pinned native owner.
 
