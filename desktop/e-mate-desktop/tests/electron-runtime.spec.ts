@@ -530,6 +530,24 @@ describe('Electron compatibility runtime', () => {
     expect(electron.trays[0]?.off).toHaveBeenCalledWith('click', expect.any(Function))
   })
 
+  it('launches the assisted Windows update installer visibly', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const launchInstaller = Reflect.get(runtime, 'launchWindowsUpdateInstaller') as (path: string) => Promise<void>
+
+    const launched = launchInstaller.call(runtime, 'C:\\Downloads\\e-Mate-2.0.16-win-x64-Setup.exe')
+    expect(childProcess.spawn).toHaveBeenCalledWith(
+      'C:\\Downloads\\e-Mate-2.0.16-win-x64-Setup.exe',
+      ['--updated', '--force-run'],
+      { detached: true, stdio: 'ignore', shell: false, windowsHide: false },
+    )
+    childProcess.emit('spawn')
+    await launched
+
+    expect(childProcess.child.unref).toHaveBeenCalledOnce()
+  })
+
   it('opens one parented Windows folder chooser and returns its selected path', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     electron.dialog.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['C:\\Work'] })

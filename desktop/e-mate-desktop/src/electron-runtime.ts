@@ -623,7 +623,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
           detached: true,
           stdio: 'ignore',
           shell: false,
-          windowsHide: true,
+          windowsHide: false,
         })
       } catch (cause) {
         reject(cause)
