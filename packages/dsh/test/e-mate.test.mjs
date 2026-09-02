@@ -357,7 +357,8 @@ test('managed profile installation is idempotent', () => {
     assert.match(patch, /id: emate-model-policy[\s\S]*\.\/plugins\/model-policy\.js[\s\S]*inject: \[apiProxy, connection, credentials, settings, storageDomain, llm, emateIdentity\]/)
     assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, tools, emateModelPolicy, emateIdentity\]/)
     assert.deepEqual(patchById.get('emate-image-generation').inject, [
-      'tools', 'jobs', 'attachments', 'sandboxPolicy', 'sessionProjections', 'agents', 'subagents',
+      'tools', 'jobs', 'attachments', 'sandboxPolicy', 'sessionProjections',
+      'sessionProjectionCache', 'sessionPersistence', 'agents', 'subagents',
       'emateIdentity', 'emateModelPolicy', 'emateCapabilities',
     ])
     assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
@@ -1319,6 +1320,11 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
           return () => {}
         },
       },
+      sessionProjectionCache: {
+        cachedSnapshot: () => undefined,
+        coldSnapshot: async () => assert.fail('an empty Session list must not trigger a cold read'),
+      },
+      sessionPersistence: { list: async () => [] },
       sandboxPolicy: { resolve: () => ({ mode: sandboxMode, workspaceRoot: temporary }) },
       get(name) {
         requestedServices.push(name)
@@ -2615,7 +2621,7 @@ test('Agent operation guidance owns the e-Mate persona and native image batch po
   assert.match(section.text, /using readable image names plus success or failure/u)
   assert.match(section.text, /never display an attachment ID, hash, or `sha256:\.\.\.` as the image result/u)
   assert.match(section.text, /ArtifactTerminal renders the real images from child receipts/u)
-  assert.match(section.text, /never copy an attachment or receipt into the parent Session, write or synthesize `child_session_id`, or call `image_pack` across Sessions/u)
+  assert.match(section.text, /Never copy an attachment or receipt into the parent Session, write or synthesize `child_session_id`, or call `image_pack` across Sessions/u)
   assert.match(section.text, /Report each failed image once; never automatically retry it, create a replacement image, switch models, fall back, or add a queue/u)
   assert.match(section.text, /does not change delegation policy for ordinary non-image tasks/u)
   assert.doesNotMatch(section.text, /new images or independent edits|generate or edit only its one image|Do not use background subagents[\s\S]*, Jobs,/u)
