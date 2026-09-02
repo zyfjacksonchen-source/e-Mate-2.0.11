@@ -2388,11 +2388,23 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
   }
 })
 
-test('Agent operation guidance owns only the e-Mate persona', () => {
+test('Agent operation guidance owns the e-Mate persona and native image batch policy', () => {
   let section
   applyAgentOperations({
     systemPrompt: { section: value => { section = value } },
   })
+  const profilePatch = parseYaml(readFileSync(new URL('../profile/cordis.patch.yml', import.meta.url), 'utf8'))
+  const nativeRoot = new URL('../../../upstream/deepseek-harness/', import.meta.url)
+  const nativeBase = readFileSync(new URL('packages/bundle/base/cordis.patch.yml', nativeRoot), 'utf8')
+  const nativeTool = readFileSync(new URL('packages/subagent/tool-subagent/src/index.ts', nativeRoot), 'utf8')
+  const nativeScheduler = readFileSync(new URL('packages/core/agent-loop/src/tool-calls.ts', nativeRoot), 'utf8')
+  const nativeSpawn = readFileSync(new URL('packages/subagent/subagent-spawn-in-process/src/index.ts', nativeRoot), 'utf8')
+  assert.equal(profilePatch.find(row => row?.id === 'agent-loop').config.maxParallelToolCalls, 4)
+  assert.match(nativeBase, /toolName: subagent[\s\S]*backgroundMode: continuable/u)
+  assert.match(nativeTool, /isConcurrencySafe: \(\) => true/u)
+  assert.match(nativeTool, /if \(runSpec\.runInBackground\)[\s\S]*const run: SubagentRun = await ctx\.subagents\.start/u)
+  assert.match(nativeScheduler, /inFlight\.size < maxParallelToolCalls/u)
+  assert.match(nativeSpawn, /inheritsParentContext = false/u)
   assert.equal(section.name, 'emate:agent-operations')
   assert.equal(section.order, 180)
   assert.match(section.text, /我是小芯，你的 AI 办公助手/u)
@@ -2405,6 +2417,16 @@ test('Agent operation guidance owns only the e-Mate persona', () => {
   assert.match(section.text, /latest direct request explicitly asks to read or operate a user-visible webpage/u)
   assert.match(section.text, /never use Browser\/CDP as a fallback for `imagegen`, native `web_search`, attachment resolution/u)
   assert.match(section.text, /Do not invent a built-in connector or ask the user to paste secrets into chat/u)
+  assert.match(section.text, /exactly one new image or one edit, call `imagegen` directly in the current Agent/u)
+  assert.match(section.text, /multiple independent new images, issue at most four separate native `subagent` calls in one assistant step/u)
+  assert.match(section.text, /each with `run_in_background: false`/u)
+  assert.match(section.text, /if more remain, wait for that foreground batch and issue the next batch in a later assistant step/u)
+  assert.match(section.text, /exactly one image that says not to delegate, to call `imagegen` exactly once with no retry or fallback/u)
+  assert.match(section.text, /Summarize those returned texts in Tool-call order/u)
+  assert.match(section.text, /Do not use background subagents, `report`, `send_message`, Jobs, a custom queue, or a new concurrency setting to coordinate this batch/u)
+  assert.match(section.text, /native AgentLoop's existing four-call limit is the only scheduler/u)
+  assert.match(section.text, /never copy either into the parent Session or claim it appears in the parent's Gallery/u)
+  assert.match(section.text, /Fresh `subagent` children do not inherit parent conversation attachments/u)
 })
 
 test('identity agreements are immutable, explicit, and use the target Connection RPC', async () => {
