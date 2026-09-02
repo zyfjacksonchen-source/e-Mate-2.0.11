@@ -3204,6 +3204,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     close: async () => {},
   }
   let openedDomains = 0
+  let policyStorageSchema
   const calls = { selected: [], policy: 0 }
   const credentialValues = new Map()
   let llmSettings = {
@@ -3266,7 +3267,25 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     expires_at: new Date(now + 60 * 60_000).toISOString(),
     receipt_id: 'policy-receipt:test-207',
   })
-  records.set('active', validateModelPolicy(policy(), accountSubject, now))
+  const legacyPolicy = {
+    ...policy(),
+    allowed_model_ids: [
+      'deepseek', 'doubao-seed-2-0-pro-260215', 'gpt-5.6-luna',
+      'gpt-5.6-sol', 'gpt-image-2', 'gpt-image-2-pro',
+    ],
+    image_fallback_upstream_model_id: 'gpt-image-2',
+    issued_at: new Date(now - 60 * 60_000).toISOString(),
+    expires_at: new Date(now - 45 * 60_000).toISOString(),
+  }
+  const storedLegacyPolicy = value => ({
+    ...value,
+    policy_sha256: createHash('sha256').update(JSON.stringify(Object.fromEntries(
+      Object.keys(value).sort().map(key => [key, value[key]]),
+    ))).digest('hex'),
+  })
+  const legacyPolicyRecord = storedLegacyPolicy(legacyPolicy)
+  const legacyPolicySha256 = legacyPolicyRecord.policy_sha256
+  records.set('active', legacyPolicyRecord)
   const catalog = {
     groups: [{
       id: 'enterprise',
@@ -3354,7 +3373,14 @@ test('enterprise model switch keeps native history and survives a cached-policy 
           if (JSON.stringify(previous) !== JSON.stringify(value)) settingsRevisions.set(ns, revision + 1)
         },
       },
-      storageDomain: { open: async () => openedDomains++ === 0 ? domain : quotaDomain },
+      storageDomain: { open: async spec => {
+        if (openedDomains++ > 0) return quotaDomain
+        policyStorageSchema = spec.tables.active.valueSchema
+        for (const [key, value] of records) {
+          records.set(key, policyStorageSchema.parse(value))
+        }
+        return domain
+      } },
       emateIdentity: {
         localAccountSubject: () => accountSubject,
         state: async () => ({
@@ -3454,6 +3480,31 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     }
     const modelPolicyConfig = { bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json') }
     await applyModelPolicy(modelPolicyContext, modelPolicyConfig)
+
+    const migratedPolicy = records.get('active')
+    assert.deepEqual(migratedPolicy.allowed_model_ids, [
+      'deepseek', 'doubao-seed-2-0-pro-260215', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-image-2-pro',
+    ])
+    assert.equal('image_fallback_upstream_model_id' in migratedPolicy, false)
+    assert.notEqual(migratedPolicy.policy_sha256, legacyPolicySha256)
+    const { policy_sha256: migratedSha256, ...migratedPolicyValue } = migratedPolicy
+    assert.equal(migratedSha256, validateModelPolicy(
+      migratedPolicyValue, accountSubject, Date.parse(migratedPolicyValue.issued_at),
+    ).policy_sha256)
+    assert.throws(
+      () => policyStorageSchema.parse({ ...legacyPolicy, policy_sha256: '0'.repeat(64) }),
+      /legacy model policy is invalid/,
+    )
+    assert.throws(() => policyStorageSchema.parse(storedLegacyPolicy({
+      ...legacyPolicy,
+      allowed_model_ids: [
+        'deepseek', 'deepseek', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-image-2', 'gpt-image-2-pro',
+      ],
+    })), /legacy model policy is invalid/)
+    assert.throws(() => policyStorageSchema.parse(storedLegacyPolicy({
+      ...legacyPolicy,
+      allowed_model_ids: [...legacyPolicy.allowed_model_ids, 'deepseek'],
+    })))
 
     assert.equal(rpc.channel, MODEL_POLICY_CHANNEL)
     assert.deepEqual(rpc.options, { authority: 'loopback' })
@@ -3835,6 +3886,10 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     await assert.rejects(modelPolicy.refresh({ force: true }), /enterprise unavailable/)
     assert.throws(
       () => validateModelPolicy({ ...policy(), allowed_model_ids: ['gpt-5.6-luna', 'unknown'] }, accountSubject, now),
+      /policy is invalid/,
+    )
+    assert.throws(
+      () => validateModelPolicy(legacyPolicy, accountSubject, now),
       /policy is invalid/,
     )
   } finally {

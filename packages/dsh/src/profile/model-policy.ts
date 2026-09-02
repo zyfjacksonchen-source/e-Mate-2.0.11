@@ -965,7 +965,7 @@ export async function apply(ctx, config = {}) {
   const { defineDomain, domainTable, z } = await loadTargetStorageDomain(
     config.bindingPath ?? join(import.meta.dirname, 'runtime-binding.json'),
   )
-  const policyRecord = z.object({
+  const policyShape = {
     schema_version: z.literal(1),
     account_subject: z.string().regex(SUBJECT),
     revision: z.number().int().min(1),
@@ -977,6 +977,28 @@ export async function apply(ctx, config = {}) {
     expires_at: z.iso.datetime(),
     receipt_id: z.string().regex(RECEIPT),
     policy_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+  }
+  const policyRecord = z.object(policyShape).strict()
+  const migratedLegacyRecords = new WeakSet()
+  const legacyPolicyRecord = z.object({
+    ...policyShape,
+    allowed_model_ids: z.array(z.enum([...MANAGED_MODELS, 'gpt-image-2']))
+      .min(1).max(MANAGED_MODELS.size + 1),
+    image_fallback_upstream_model_id: z.literal('gpt-image-2'),
+  }).strict().transform(value => {
+    const { policy_sha256: expected, ...legacy } = value
+    if (!legacy.allowed_model_ids.includes('gpt-image-2')
+      || new Set(legacy.allowed_model_ids).size !== legacy.allowed_model_ids.length
+      || sha256(canonicalJson(legacy)) !== expected) {
+      throw new Error('e-Mate legacy model policy is invalid')
+    }
+    const { image_fallback_upstream_model_id: _fallback, ...current } = legacy
+    const migrated = validateModelPolicy({
+      ...current,
+      allowed_model_ids: [...new Set(current.allowed_model_ids.filter(model => MANAGED_MODELS.has(model)))],
+    }, current.account_subject, Date.parse(current.issued_at))
+    migratedLegacyRecords.add(migrated)
+    return migrated
   })
   const runtimeProjectionRecord = z.object({
     schema_version: z.literal(1),
@@ -993,9 +1015,14 @@ export async function apply(ctx, config = {}) {
   const domain = await ctx.storageDomain.open(defineDomain({
     name: 'emate_model_policy',
     version: 1,
-    tables: { active: domainTable(policyRecord), runtime_projection: domainTable(runtimeProjectionRecord) },
+    tables: { active: domainTable(z.union([policyRecord, legacyPolicyRecord])), runtime_projection: domainTable(runtimeProjectionRecord) },
   }))
   ctx.effect(() => () => domain.close(), 'emate.modelPolicy: close target storage domain')
+  const policyTable = domain.table('active')
+  const storedPolicy = policyTable.get('active')
+  if (storedPolicy !== undefined && migratedLegacyRecords.has(storedPolicy)) {
+    await policyTable.put('active', storedPolicy)
+  }
   const quotaSnapshot = z.object({
     schema_version: z.literal(1),
     account_subject: z.string().regex(SUBJECT),
@@ -1046,7 +1073,7 @@ export async function apply(ctx, config = {}) {
     quotaDomain.table('reservations'),
     quotaDomain.table('usage'),
   )
-  const service = createService(ctx, domain.table('active'), domain.table('runtime_projection'), quota)
+  const service = createService(ctx, policyTable, domain.table('runtime_projection'), quota)
   ctx.provide('emateModelPolicy', service)
   ctx.effect(() => installApiPolicy(ctx, service), 'emate.modelPolicy: target ApiProxy policy projection')
   ctx.on('agent/request', async (payload, next) => {
