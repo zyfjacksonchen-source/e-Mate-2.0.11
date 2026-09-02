@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh-plugin-better-sidebar",
-  "version": "2.0.15",
-  "description": "Project-scoped file sidebar for the pinned e-Mate 2.0.15 local runtime.",
+  "version": "2.0.16",
+  "description": "Project-scoped file sidebar for the pinned e-Mate 2.0.16 local runtime.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

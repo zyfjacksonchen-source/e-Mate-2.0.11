@@ -121,6 +121,7 @@ try {
       host.provide('webRuntime', {})
       host.provide('appExit', () => {})
       host.provide('workspaceRegistry', { list: () => [] })
+      host.provide('sessions', { get: () => undefined })
       host.provide('settings', {
         register() {
           return {

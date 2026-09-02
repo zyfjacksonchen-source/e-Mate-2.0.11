@@ -16,7 +16,6 @@ import {
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
-import { isDesktopInstallerQuitRequest } from './desktop-installer-quit.ts'
 import { getOrCreateDesktopInstallationId } from './desktop-installation-id.ts'
 import {
   installDesktopDshRuntime,
@@ -47,7 +46,6 @@ import { prepareDesktopProfile, type SkippedOptionalEntry } from './profile.ts'
 import { loadProfileBaseContract } from './base-contract.ts'
 import type { RendererBootReport } from './renderer-boot-contract.ts'
 import { resolveDesktopShellEnvironment } from './shell-environment.ts'
-import { desktopDefaultRelaunchArguments } from './relaunch-arguments.ts'
 import type { DesktopPnpmBootstrap } from './pnpm.ts'
 import { bundledPythonPath } from './vision-toolkit.ts'
 import {
@@ -128,11 +126,6 @@ async function start(): Promise<void> {
     app.quit()
     return
   }
-  if (isDesktopInstallerQuitRequest(process.argv, process.platform)) {
-    app.quit()
-    return
-  }
-
   let current: Context | undefined
   let profileStartup: DesktopProfileStartup | undefined
   let profileStatePath: string | undefined
@@ -153,9 +146,7 @@ async function start(): Promise<void> {
   const nativeExit = createDesktopExitCoordinator(
     {
       prepareToQuit: () => { runtime.prepareToQuit() },
-      relaunch: args => {
-        app.relaunch({ args: [...(args ?? desktopDefaultRelaunchArguments())] })
-      },
+      relaunch: () => { app.relaunch() },
       exit: code => { app.exit(code) },
     },
     () => { removeShutdownRequests?.() },
@@ -168,7 +159,7 @@ async function start(): Promise<void> {
     }
     if (restartRequested) return
     restartRequested = true
-    nativeExit.requestRelaunch(desktopDefaultRelaunchArguments())
+    nativeExit.requestRelaunch()
     await shutdown.request(0)
   }, (report) => {
     if (rendererBootSettled) return
@@ -190,13 +181,7 @@ async function start(): Promise<void> {
   const requestQuit = (code: number): void => { void shutdown.request(code) }
   removeShutdownRequests = installShutdownRequests(process, app, requestQuit)
 
-  app.on('second-instance', (_event, argv) => {
-    if (isDesktopInstallerQuitRequest(argv, process.platform)) {
-      requestQuit(0)
-      return
-    }
-    runtime.show()
-  })
+  app.on('second-instance', () => { runtime.show() })
   await app.whenReady()
   if (process.env.EMATE_RELEASE_HEALTH_PROBE === '1') {
     writeFileSync(join(app.getPath('userData'), '.release-native-ready-ack'), app.getVersion(), {
@@ -299,7 +284,7 @@ async function start(): Promise<void> {
       })
       if (choice.response === 1) {
         await installRecovery.requestRetry(recoveryClaim.transaction.transactionId)
-        nativeExit.requestRelaunch(desktopDefaultRelaunchArguments())
+        nativeExit.requestRelaunch()
         await shutdown.request(0)
         return
       }
@@ -484,7 +469,7 @@ async function start(): Promise<void> {
       try {
         markDesktopProfileFailed(profileStatePath, profileStartup.profileName)
         if (retryLastKnownGood) {
-          nativeExit.requestRelaunch(desktopDefaultRelaunchArguments())
+          nativeExit.requestRelaunch()
           exitCode = 0
           notifyProfileRecovery(
             runtime,

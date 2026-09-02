@@ -13,7 +13,7 @@ const CHAT_MODELS = new Map([
   ['deepseek', { reasoning_effort: 'max' }],
   ['doubao-seed-2-0-pro-260215', { reasoning_effort: 'medium' }],
 ])
-const IMAGE_MODELS = new Set(['gpt-image-2-pro', 'gpt-image-2'])
+const IMAGE_MODELS = new Set(['gpt-image-2-pro'])
 const MANAGED_MODELS = new Set([...CHAT_MODELS.keys(), ...IMAGE_MODELS])
 const SUBJECT = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/u
 const RECEIPT = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,255}$/u
@@ -323,7 +323,7 @@ export function modelImageInputContract(metadata, provider, model) {
 export function validateModelPolicy(value, accountSubject, now = Date.now()) {
   const keys = [
     'account_subject', 'allowed_model_ids', 'default_chat_model_id', 'default_chat_reasoning_effort',
-    'expires_at', 'image_fallback_upstream_model_id', 'image_primary_model_id', 'issued_at',
+    'expires_at', 'image_primary_model_id', 'issued_at',
     'receipt_id', 'revision', 'schema_version',
   ]
   if (!isRecord(value)
@@ -337,14 +337,12 @@ export function validateModelPolicy(value, accountSubject, now = Date.now()) {
     || !CHAT_MODELS.has(value.default_chat_model_id)
     || value.default_chat_reasoning_effort !== CHAT_MODELS.get(value.default_chat_model_id).reasoning_effort
     || value.image_primary_model_id !== 'gpt-image-2-pro'
-    || value.image_fallback_upstream_model_id !== 'gpt-image-2'
     || !Array.isArray(value.allowed_model_ids)
     || value.allowed_model_ids.length < 1
     || value.allowed_model_ids.length > MANAGED_MODELS.size
     || new Set(value.allowed_model_ids).size !== value.allowed_model_ids.length
     || value.allowed_model_ids.some(model => typeof model !== 'string' || !MANAGED_MODELS.has(model))
-    || !value.allowed_model_ids.includes(value.default_chat_model_id)
-    || value.allowed_model_ids.includes('gpt-image-2') && !value.allowed_model_ids.includes('gpt-image-2-pro')) {
+    || !value.allowed_model_ids.includes(value.default_chat_model_id)) {
     throw new Error('e-Mate enterprise model policy is invalid')
   }
   const issuedAt = Date.parse(value.issued_at)
@@ -364,7 +362,6 @@ export function validateModelPolicy(value, accountSubject, now = Date.now()) {
     default_chat_model_id: value.default_chat_model_id,
     default_chat_reasoning_effort: value.default_chat_reasoning_effort,
     image_primary_model_id: value.image_primary_model_id,
-    image_fallback_upstream_model_id: value.image_fallback_upstream_model_id,
     issued_at: new Date(issuedAt).toISOString(),
     expires_at: new Date(expiresAt).toISOString(),
     receipt_id: value.receipt_id,
@@ -976,7 +973,6 @@ export async function apply(ctx, config = {}) {
     default_chat_model_id: z.enum([...CHAT_MODELS.keys()]),
     default_chat_reasoning_effort: z.enum(['max', 'medium']),
     image_primary_model_id: z.literal('gpt-image-2-pro'),
-    image_fallback_upstream_model_id: z.literal('gpt-image-2'),
     issued_at: z.iso.datetime(),
     expires_at: z.iso.datetime(),
     receipt_id: z.string().regex(RECEIPT),

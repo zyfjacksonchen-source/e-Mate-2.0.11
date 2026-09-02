@@ -42,8 +42,7 @@ const imageRoute: ModelGatewayRoute = {
   ...route,
   id: 'gpt-image-2-pro',
   apiMode: 'images-generations',
-  upstreamModelId: 'provider-image-pro',
-  fallbackUpstreamModelId: 'provider-image-standard',
+  upstreamModelId: 'gpt-image-2-pro',
   label: '图片 Pro',
   buttonLabel: '图片 Pro',
   reasoning: false,
@@ -1758,36 +1757,23 @@ test('proxies Codex-like image edits through the same fixed Pro route and usage 
   );
 });
 
-test('falls back from image Pro only after a definite provider rejection', async () => {
-  let primaryBodyCancelled = false;
+test('surfaces a definite image provider rejection without a second upstream call', async () => {
   await withGateway(
     async (baseUrl, upstreamRequests) => {
       const generated = await imageRequest(baseUrl);
-      assert.equal(generated.status, 200);
-      assert.equal(upstreamRequests.length, 2);
-      const primaryRequest = upstreamRequests[0];
-      const fallbackRequest = upstreamRequests[1];
-      assert.ok(primaryRequest);
-      assert.ok(fallbackRequest);
-      assert.equal(((await primaryRequest.json()) as Record<string, unknown>).model, 'provider-image-pro');
-      assert.equal(((await fallbackRequest.json()) as Record<string, unknown>).model, 'provider-image-standard');
-      assert.notEqual(primaryRequest.headers.get('idempotency-key'), fallbackRequest.headers.get('idempotency-key'));
-      assert.equal(primaryBodyCancelled, true);
+      assert.equal(generated.status, 502);
+      assert.deepEqual(await generated.json(), {
+        error: {
+          code: 'UPSTREAM_REJECTED',
+          message: 'Image provider rejected the request',
+        },
+      });
+      assert.equal(upstreamRequests.length, 1);
+      const upstreamRequest = upstreamRequests[0];
+      assert.ok(upstreamRequest);
+      assert.equal(((await upstreamRequest.json()) as Record<string, unknown>).model, 'gpt-image-2-pro');
     },
-    (_request, index) =>
-      index === 1
-        ? new Response(
-            new ReadableStream({
-              cancel() {
-                primaryBodyCancelled = true;
-              },
-            }),
-            { status: 404 }
-          )
-        : Response.json({
-            data: [{ b64_json: 'aGVsbG8=' }],
-            usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
-          }),
+    () => new Response('provider rejected', { status: 404 }),
     undefined,
     undefined,
     limits,
@@ -2663,11 +2649,38 @@ test('delivers only the authenticated tenant runtime model routes without exposi
   try {
     assert.equal((await fetch(`${baseUrl}/v1/runtime-models`)).status, 401);
     assert.equal((await fetch(`${baseUrl}/v1/runtime-models?all=true`, { headers: auth() })).status, 400);
-    assert.equal((await fetch(`${baseUrl}/v1/runtime-models?client_version=`, { headers: auth() })).status, 400);
-    assert.equal((await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.15_rc1`, { headers: auth() })).status, 400);
-    assert.equal((await fetch(`${baseUrl}/v1/runtime-models?client_version=${'a'.repeat(65)}`, { headers: auth() })).status, 400);
-    assert.equal((await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.15&client_version=2.0.16`, { headers: auth() })).status, 400);
-    assert.equal((await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.12&extra=true`, { headers: auth() })).status, 400);
+    for (const query of [
+      'client_version=2.0.15&client_version=2.0.16',
+      'client_version=2.0.12&extra=true',
+    ]) {
+      const invalid = await fetch(`${baseUrl}/v1/runtime-models?${query}`, { headers: auth() });
+      assert.equal(invalid.status, 400);
+      assert.deepEqual(await invalid.json(), {
+        error: { code: 'INVALID_REQUEST', message: 'Query is not allowed' },
+      });
+    }
+    for (const clientVersion of [
+      '',
+      '2.0.11',
+      '2.0.17',
+      '99.0.0',
+      '2.1.0-rc.1',
+      '2.0.15_rc1',
+      'invalid',
+      'a'.repeat(65),
+    ]) {
+      const unsupported = await fetch(
+        `${baseUrl}/v1/runtime-models?client_version=${encodeURIComponent(clientVersion)}`,
+        { headers: auth() },
+      );
+      assert.equal(unsupported.status, 400);
+      assert.deepEqual(await unsupported.json(), {
+        error: {
+          code: 'UNSUPPORTED_CLIENT_VERSION',
+          message: 'Unsupported runtime models client version',
+        },
+      });
+    }
     assert.equal((await fetch(`${baseUrl}/v1/runtime-models`, { method: 'POST', headers: auth() })).status, 405);
     const legacyResponse = await fetch(`${baseUrl}/v1/runtime-models`, { headers: auth() });
     assert.equal(legacyResponse.status, 200);
@@ -2700,7 +2713,7 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         upstreamApiKey: searchKey,
       },
     });
-    for (const clientVersion of ['2.0.11', '2.0.13', '2.0.14', '2.0.15', '2.0.16', '99.0.0', '2.1.0-rc.1']) {
+    for (const clientVersion of ['2.0.13', '2.0.14', '2.0.15', '2.0.16']) {
       const currentClientResponse = await fetch(
         `${baseUrl}/v1/runtime-models?client_version=${clientVersion}`,
         { headers: auth() },
@@ -2708,8 +2721,8 @@ test('delivers only the authenticated tenant runtime model routes without exposi
       assert.equal(currentClientResponse.status, 200);
       assert.deepEqual(await currentClientResponse.json(), releasedClientBody);
     }
-    assert.equal(enabledCalls.get(searchCredentialRoute.id), 8);
-    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 8);
+    assert.equal(enabledCalls.get(searchCredentialRoute.id), 5);
+    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 5);
     assert.equal(keyCalls.includes(internalDeepSeekRoute.id), false);
     const catalogResponse = await (await fetch(`${baseUrl}/v1/models`, { headers: auth() })).json() as {
       models: Array<{ id: string }>;

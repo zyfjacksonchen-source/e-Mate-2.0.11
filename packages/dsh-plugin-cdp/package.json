@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-cdp",
-  "version": "2.0.15",
+  "version": "2.0.16",
   "description": "DSH-native Chrome DevTools Protocol adapter for e-Mate",
   "type": "module",
   "main": "lib/index.mjs",
@@ -31,7 +31,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate-2.0.11.git",
+    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate-desktop.git",
     "directory": "packages/dsh-plugin-cdp"
   },
   "engines": {

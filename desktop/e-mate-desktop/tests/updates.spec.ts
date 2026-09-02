@@ -29,7 +29,7 @@ describe('native desktop update owner', () => {
       updates: {
         isPackaged: true,
         canDownload: true,
-        currentVersion: '2.0.15',
+        currentVersion: '2.0.16',
         statePath: join(root, 'state.json'),
         request,
         confirmDownload,
@@ -52,9 +52,10 @@ describe('native desktop update owner', () => {
     } as unknown as Context
 
     apply(ctx, Config({ enabled: false } as never))
+    expect(rendererCheck).toBe(tray!.invoke)
     await expect(ctx.desktopUpdates.runInteractiveUpdate()).resolves.toEqual({
       status: 'handled',
-      installedVersion: '2.0.15',
+      installedVersion: '2.0.16',
     })
     await tray!.invoke()
     await rendererCheck!()

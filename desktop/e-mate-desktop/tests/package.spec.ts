@@ -284,7 +284,6 @@ describe('published package surface', () => {
       arch: ['x64'],
     }])
     expect(manifest.build?.nsis).toEqual({
-      include: 'installer.nsh',
       license: 'THIRD_PARTY_NOTICES.md',
       oneClick: false,
       perMachine: false,
@@ -294,9 +293,10 @@ describe('published package surface', () => {
       createStartMenuShortcut: true,
       differentialPackage: false,
       shortcutName: 'e-Mate',
-      useZip: false,
+      useZip: true,
       artifactName: 'e-Mate-${version}-win-${arch}-Setup.${ext}',
     })
+    expect((manifest.build as { toolsets?: unknown } | undefined)?.toolsets).toBeUndefined()
     expect(manifest.build?.linux).toBeUndefined()
   })
 
@@ -324,8 +324,9 @@ describe('published package surface', () => {
     expect(manifest.scripts?.['check:win-package']).toContain('tests/update-checker.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/update-download.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-directory-picker.spec.ts')
-    expect(manifest.scripts?.['check:win-package']).toContain('tests/desktop-installer-quit.spec.ts')
-    expect(manifest.scripts?.['check:win-package']).toContain('tests/installer-nsh.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).not.toContain('tests/desktop-installer-quit.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).not.toContain('tests/installer-nsh.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).not.toContain('test:app-builder-fuses')
     expect(manifest.scripts?.['check:win-package']).not.toContain('windows-update-installer')
     expect(manifest.scripts?.['check:win-package']).not.toContain('windows-update-transaction')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-volume-diagnostics.spec.ts')
@@ -368,6 +369,10 @@ describe('published package surface', () => {
       'src/profile-update.ts',
       'src/mac-update-helper.ts',
       'src/mac-update-installer.ts',
+      'src/update-lifecycle.ts',
+      'src/desktop-installer-quit.ts',
+      'src/relaunch-arguments.ts',
+      'build/installer.nsh',
       '../../scripts/local-flow.mjs',
       '../../scripts/base-sdk.mjs',
       '../../scripts/change-impact.mjs',
@@ -384,9 +389,10 @@ describe('published package surface', () => {
     for (const path of forbidden) expect(existsSync(new URL(path, packageRoot)), path).toBe(false)
     expect(agentUpdate.match(/runInteractiveUpdate\(\)/gu)).toHaveLength(1)
     expect(agentUpdate).not.toMatch(/\bfetch\b|https?:|node:fs|child_process|from ['"]electron['"]/u)
-    expect(updates).toContain('startDesktopUpdateLifecycle')
-    expect(updates).toContain('await lifecycle.checkNow()')
-    expect(updates).toContain('setInteractiveUpdateHandler?.(() => lifecycle!.checkNow())')
+    expect(updates).toContain('const runManualCheck = (): Promise<void> =>')
+    expect(updates).toContain('invoke: runManualCheck')
+    expect(updates).toContain('interactiveUpdate = runManualCheck')
+    expect(updates).toContain('setInteractiveUpdateHandler?.(runManualCheck)')
     expect(preload).toContain('DESKTOP_UPDATE_RUN_INTERACTIVE')
     expect(main).toContain('getOrCreateDesktopInstallationId(app.getPath(\'userData\'))')
     expect(main).toMatch(/void start\(\)\.catch\(/u)
@@ -481,7 +487,7 @@ describe('published package surface', () => {
     expect(lockfile).not.toContain('dsh-better-sidebar@')
   })
 
-  it('resolves electron-builder through the one pinned app-builder-lib patch chain', () => {
+  it('keeps the pinned app-builder patch free of local NSIS changes', () => {
     const patchResolution = 'patch:app-builder-lib@npm%3A26.15.7#./patches/app-builder-lib@26.15.7.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
     const patch = readFileSync(new URL('patches/app-builder-lib@26.15.7.patch', workspaceRoot), 'utf8')
@@ -490,19 +496,6 @@ describe('published package surface', () => {
     const electronBuilderRequire = createRequire(electronBuilderManifest)
     const appBuilderManifest = electronBuilderRequire.resolve('app-builder-lib/package.json')
     const installedCodeSign = readFileSync(join(dirname(appBuilderManifest), 'out/codeSign/macCodeSign.js'), 'utf8')
-    const installedInstaller = readFileSync(join(dirname(appBuilderManifest), 'templates/nsis/installer.nsi'), 'utf8')
-    const installedProcessScope = readFileSync(
-      join(dirname(appBuilderManifest), 'templates/nsis/include/allowOnlyOneInstallerInstance.nsh'),
-      'utf8',
-    )
-    const installedInstallSection = readFileSync(
-      join(dirname(appBuilderManifest), 'templates/nsis/installSection.nsh'),
-      'utf8',
-    )
-    const installedExtraction = readFileSync(
-      join(dirname(appBuilderManifest), 'templates/nsis/include/extractAppPackage.nsh'),
-      'utf8',
-    )
 
     expect(workspaceManifest.resolutions).toMatchObject({
       'app-builder-lib@npm:26.15.7': patchResolution,
@@ -512,22 +505,8 @@ describe('published package surface', () => {
     expect(patch).toContain('"-k", keychainPassword, keychainFile')
     expect(installedCodeSign).toContain('importCerts(keychainFile, certPaths, cscPasswords, keychainPassword)')
     expect(installedCodeSign).toContain('"-k", keychainPassword, keychainFile')
-    expect(patch).toContain('ManifestLongPathAware true')
-    expect(installedInstaller).toContain('ManifestLongPathAware true')
-    expect(installedProcessScope.match(/\[System\.IO\.Path\]::GetFileName\(\$\$_\.Path\) -ieq '\$\{_FILE\}'/gu))
-      .toHaveLength(2)
-    expect(patch).not.toContain('templates/nsis/installSection.nsh')
-    expect(patch).toContain('templates/nsis/include/extractAppPackage.nsh')
-    expect(patch).toContain('templates/nsis/include/installUtil.nsh')
-    expect(installedInstallSection).not.toContain('customUpdateInstallShouldRun')
-    expect(installedInstallSection).toContain('!insertmacro uninstallOldVersion SHELL_CONTEXT')
-    expect(installedInstallSection).toContain('SetOutPath $INSTDIR')
-    expect(installedInstallSection.match(/!insertmacro installApplicationFiles/gu)).toHaveLength(1)
-    expect(installedInstallSection.match(/!insertmacro registryAddInstallInfo/gu)).toHaveLength(1)
-    expect(installedInstallSection).toContain('!ifmacrodef customInstall')
-    expect(installedExtraction).toContain('nsisunz::Unzip "$PLUGINSDIR\\app-$packageArch.zip" "$INSTDIR"')
-    expect(installedExtraction).toContain('SetOutPath "$INSTDIR"')
-    expect(installedExtraction).toContain('Nsis7z::Extract "${FILE}"')
+    expect(patch).not.toContain('templates/nsis/')
+    expect(patch).not.toContain('out/platformPackager.js')
   })
 
   it('starts restricted Windows shells with a hidden console show state', () => {

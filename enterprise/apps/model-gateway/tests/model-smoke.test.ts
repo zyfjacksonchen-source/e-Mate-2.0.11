@@ -7,14 +7,12 @@ function route(
   id: string,
   apiMode: 'responses' | 'chat-completions' | 'images-generations',
   upstreamModelId: string,
-  upstreamBaseUrl: string,
-  fallbackUpstreamModelId?: string
+  upstreamBaseUrl: string
 ): ModelSmokeRoute {
   return {
     id,
     apiMode,
     upstreamModelId,
-    ...(fallbackUpstreamModelId ? { fallbackUpstreamModelId } : {}),
     upstreamBaseUrl,
     upstreamApiKey: secret,
     maxTokens: 65_536,
@@ -29,8 +27,7 @@ const routes = [
     'gpt-image-2-pro',
     'images-generations',
     'gpt-image-2-pro',
-    'https://image-provider.ecorex.internal:18443/v1',
-    'gpt-image-2'
+    'https://image-provider.ecorex.internal:18443/v1'
   ),
   route(
     'doubao-seed-2-0-pro-260215',
@@ -92,7 +89,7 @@ function imageResponse(id: string): Response {
   );
 }
 
-function mockFetch(options: { rejectCall?: number; rejectPrimaryImage?: boolean; omitChatRequestId?: boolean } = {}): {
+function mockFetch(options: { rejectCall?: number; rejectImage?: boolean; omitChatRequestId?: boolean } = {}): {
   fetchImplementation: typeof fetch;
   requests: Array<{ url: string; body: Record<string, unknown> }>;
 } {
@@ -103,7 +100,7 @@ function mockFetch(options: { rejectCall?: number; rejectPrimaryImage?: boolean;
     requests.push({ url, body });
     if (requests.length === options.rejectCall) return new Response(null, { status: 401 });
     if (url.endsWith('/images/generations')) {
-      if (options.rejectPrimaryImage && body.model === 'gpt-image-2-pro') return new Response(null, { status: 404 });
+      if (options.rejectImage) return new Response(null, { status: 404 });
       return imageResponse(`image-${requests.length}`);
     }
     return url.endsWith('/chat/completions')
@@ -204,29 +201,28 @@ test('does not label an adapter-generated chat id as provider evidence', async (
   );
 });
 
-test('uses the fixed protocols and approves a definite image fallback', async () => {
-  const { fetchImplementation, requests } = mockFetch({ rejectPrimaryImage: true });
-  const approval = await runModelSmoke({
-    routes,
-    catalogSha256: 'b'.repeat(64),
-    operator: 'release.operator',
-    timeoutMs: 10_000,
-    fetchImplementation,
-    randomId: randomId(),
-  });
+test('fails closed after one fixed Pro image request', async () => {
+  const { fetchImplementation, requests } = mockFetch({ rejectImage: true });
+  await assert.rejects(
+    runModelSmoke({
+      routes,
+      catalogSha256: 'b'.repeat(64),
+      operator: 'release.operator',
+      timeoutMs: 10_000,
+      fetchImplementation,
+      randomId: randomId(),
+    }),
+    (error: unknown) =>
+      error instanceof ModelSmokeError && error.code === 'UPSTREAM_REJECTED' && error.routeId === 'gpt-image-2-pro'
+  );
   assert.deepEqual(
     requests.map(({ url }) => url.slice(url.lastIndexOf('/') + 1)),
-    ['responses', 'responses', 'completions', 'generations', 'generations', 'completions']
+    ['responses', 'responses', 'completions', 'generations']
   );
   assert.deepEqual(
     requests.filter(({ url }) => url.endsWith('/images/generations')).map(({ body }) => body.model),
-    ['gpt-image-2-pro', 'gpt-image-2']
+    ['gpt-image-2-pro']
   );
-  assert.deepEqual(
-    requests.filter(({ url }) => url.endsWith('/chat/completions')).map(({ body }) => body.model),
-    ['deepseek-v4-flash', 'doubao-seed-2-0-pro-260215']
-  );
-  assert.match(approval.results.find(({ routeId }) => routeId === 'gpt-image-2-pro')?.evidenceId ?? '', /^fallback:provider:/);
 });
 
 test('fails closed without returning approval after any provider rejection', async () => {

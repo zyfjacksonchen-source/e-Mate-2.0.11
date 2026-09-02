@@ -4,7 +4,6 @@ export type ImageGalleryStatus = 'completed' | 'review-required' | 'failed'
 
 export interface ImageGalleryItem {
   readonly callId: string
-  readonly childSessionId?: string
   readonly revision: number
   readonly status: ImageGalleryStatus
   readonly operation: 'generate' | 'edit' | 'fusion' | 'unknown'
@@ -18,6 +17,7 @@ const RECEIPT_KEYS = new Set([
   'sources', 'status', 'verification', 'verifier',
 ])
 const ATTACHMENT_ID = /^sha256:[0-9a-f]{64}$/u
+const FAILURE_CODE = /^[a-z0-9][a-z0-9._-]{0,127}$/u
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -72,12 +72,12 @@ export function parseImageOutputReceipt(value: unknown): ImageGalleryItem | null
   const status = String(value.status)
   if (status === 'running') return null
   if ((status === 'completed' || status === 'needs-review') !== (images.length === 1)) return null
-  const failureCode = typeof value.failure_code === 'string' && value.failure_code !== ''
+  const failureCode = typeof value.failure_code === 'string' && FAILURE_CODE.test(value.failure_code)
     ? value.failure_code
     : undefined
+  if (value.failure_code !== undefined && failureCode === undefined) return null
   return {
     callId: value.call_id,
-    ...(value.child_session_id === undefined ? {} : { childSessionId: value.child_session_id as string }),
     revision: Number(value.revision),
     status: status === 'completed' ? 'completed' : status === 'needs-review' ? 'review-required' : 'failed',
     operation: value.operation as ImageGalleryItem['operation'],

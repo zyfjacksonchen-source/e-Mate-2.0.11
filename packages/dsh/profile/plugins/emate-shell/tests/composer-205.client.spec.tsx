@@ -6,15 +6,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { COMPOSER_PLACEHOLDER, ComposerConnectors, ComposerMentions } from '../src/client/composer-connectors.tsx'
 import { registerComputerUseTrigger } from '../src/client/composer-mentions.ts'
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
+import { PlanChip, type PlanChipProps } from '../../../../../../upstream/deepseek-harness/packages/client/ui-plan/src/client/PlanModeControl.tsx'
 
 const Icon = () => <svg />
 
+function applyHomeStyles(): void {
+  const style = document.createElement('style')
+  style.dataset.emateHomeTest = ''
+  style.textContent = readFileSync('src/client/home.module.css', 'utf8').replaceAll(':global(', ':is(')
+  document.head.append(style)
+}
+
 afterEach(() => {
   cleanup()
+  document.head.querySelector('[data-emate-home-test]')?.remove()
   delete document.body.dataset.dshDesktopPlatform
 })
 
-describe('e-Mate 2.0.15 composer projection', () => {
+describe('e-Mate 2.0.16 composer projection', () => {
   it('routes external connections into the existing collaboration capability surface', () => {
     const openConnections = vi.fn()
     render(<ComposerConnectors LinkIcon={Icon} openConnections={openConnections} />)
@@ -53,6 +62,64 @@ describe('e-Mate 2.0.15 composer projection', () => {
     const styles = readFileSync('src/client/home.module.css', 'utf8')
     expect(styles).not.toContain("content: '/'")
     expect(styles).toMatch(/button:first-child[\s\S]*display:\s*none !important/u)
+  })
+
+  it('keeps the rc.7 Plan and Goal surfaces visible while hiding only native permission and command controls', () => {
+    const exitPlanMode = vi.fn(() => new Promise<string | null>(() => {}))
+    const planProps = {
+      useProjection: () => ({ active: true, pending: false }),
+      locked: false,
+      exitPlanMode,
+      t: (key: string) => key === 'chip.on.aria' ? 'plan mode active' : key,
+    } as unknown as PlanChipProps
+    render(<div>
+      <div data-slot="conversation.input.dock"><div data-goal-bar data-testid="goal" /></div>
+      <div data-slot="conversation.composer.bar">
+        <div>
+          <div data-composer-card="">
+            <div data-input-area="" />
+            <div>
+              <div>
+                <button type="button" data-testid="command">Command</button>
+                <div data-testid="modes">
+                  <span data-testid="permission"><button type="button">Full access</button></span>
+                  <div data-slot="conversation.input.plan">
+                    <PlanChip {...planProps} />
+                  </div>
+                </div>
+                <button type="button" aria-label="添加本地图片或文件"><svg width="16" height="16" /></button>
+                <button type="button" data-emate-composer-mentions=""><span aria-hidden="true">@</span></button>
+              </div>
+              <div />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>)
+
+    applyHomeStyles()
+    expect(getComputedStyle(screen.getByTestId('command')).display).toBe('none')
+    expect(getComputedStyle(screen.getByTestId('permission')).display).toBe('none')
+    expect(getComputedStyle(screen.getByTestId('modes')).display).not.toBe('none')
+    const plan = screen.getByRole('button', { name: 'plan mode active' })
+    expect(getComputedStyle(plan).display).not.toBe('none')
+    fireEvent.click(plan)
+    expect(exitPlanMode).toHaveBeenCalledOnce()
+    expect(getComputedStyle(screen.getByTestId('goal')).display).not.toBe('none')
+  })
+
+  it('matches the resident file control with a 32px launcher and 16px @ glyph at every width', () => {
+    render(<button type="button" data-emate-composer-mentions=""><span aria-hidden="true">@</span></button>)
+    applyHomeStyles()
+    const button = screen.getByRole('button')
+    const glyph = button.querySelector('span')!
+    const buttonStyle = getComputedStyle(button)
+    const glyphStyle = getComputedStyle(glyph)
+
+    expect([buttonStyle.width, buttonStyle.minWidth, buttonStyle.minHeight]).toEqual(['32px', '32px', '32px'])
+    expect(buttonStyle.padding).toBe('0px')
+    expect(buttonStyle.justifyContent).toBe('center')
+    expect([glyphStyle.fontSize, glyphStyle.lineHeight]).toEqual(['16px', '16px'])
   })
 
   it('keeps a picked @电脑操控 reference visible in the native composer', () => {

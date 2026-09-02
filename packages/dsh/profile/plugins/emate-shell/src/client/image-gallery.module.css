@@ -7,6 +7,151 @@
   margin: 10px 0 4px;
 }
 
+.galleryView {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-width: 0;
+  height: 100%;
+  padding: 18px 24px 24px;
+  overflow: auto;
+}
+
+.galleryToolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 160px) minmax(120px, 160px);
+  gap: 10px;
+}
+
+.galleryToolbar input,
+.galleryToolbar select {
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-base, #fff);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.galleryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.galleryCard {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-label-primary) 12%, transparent);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base, #fff);
+}
+
+.galleryPreview {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.galleryPreview :global(button[data-variant='tile']) {
+  width: 100%;
+  height: 100%;
+}
+
+.galleryPreview :global(button[data-variant='tile'] img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.galleryMeta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px 10px 6px;
+}
+
+.galleryMeta strong {
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.galleryMeta span {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.galleryActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 6px 8px 8px;
+}
+
+.galleryActions button,
+.galleryPager button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.galleryActions button:hover,
+.galleryPager button:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.galleryActions button:disabled,
+.galleryPager button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.galleryFailure {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  min-height: 144px;
+  padding: 16px;
+  color: var(--dsw-alias-state-error-primary, #c23b32);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.galleryEmpty {
+  padding: 48px 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.galleryPager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 32px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
 .images,
 .railWrap,
 .rail {
@@ -292,6 +437,22 @@
 }
 
 @media (max-width: 640px) {
+  .galleryView {
+    padding: 14px;
+  }
+
+  .galleryToolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .galleryToolbar input {
+    grid-column: 1 / -1;
+  }
+
+  .galleryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .imageItem {
     flex-basis: 86%;
     border-radius: 22px;

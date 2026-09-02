@@ -103,7 +103,7 @@ describe('Settings route owns its navigation lifecycle', () => {
           <button type="button">文件提及</button>
         </nav>
         <button type="button" onClick={() => { setRefresh(value => value + 1) }}>
-          再次检查更新（已更新至 2.0.15）
+          再次检查更新（已更新至 2.0.16）
         </button>
         <SidebarRoot key={refresh}
           {...props(toggleSidebar)} collapsed={false} width={248}
@@ -113,7 +113,7 @@ describe('Settings route owns its navigation lifecycle', () => {
     }
 
     render(<SettingsShell />)
-    fireEvent.click(screen.getByRole('button', { name: '再次检查更新（已更新至 2.0.15）' }))
+    fireEvent.click(screen.getByRole('button', { name: '再次检查更新（已更新至 2.0.16）' }))
 
     expect(location.pathname).toBe('/settings')
     expect(screen.getByRole('navigation', { name: '设置分类' })).not.toBeNull()

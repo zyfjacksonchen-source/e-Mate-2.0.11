@@ -108,6 +108,12 @@ test('production route schema accepts only the literal HTTP opt-in and a secret-
     );
     assert.throws(() => loadProductionConfiguration(file), /Invalid Model Gateway production configuration/);
 
+    writeFileSync(
+      file,
+      JSON.stringify(configuration({ routes: [productionRoute({ fallbackUpstreamModelId: 'gpt-image-2' })] }))
+    );
+    assert.throws(() => loadProductionConfiguration(file), /Invalid Model Gateway production configuration/);
+
     const { upstreamApiKeyFile: _upstreamApiKeyFile, ...inlineKeyRoute } = productionRoute();
     writeFileSync(
       file,

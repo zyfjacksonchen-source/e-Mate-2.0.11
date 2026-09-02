@@ -34,7 +34,7 @@ const OAUTH_REFRESH_SKEW_MS = 5 * 60_000
 const OAUTH_RESPONSE_MAX = 1024 * 1024
 const PLUGIN_OUTPUT_MAX = 128 * 1024
 const PROTECTED_PLUGIN_PREFIXES = ['@deepseek-ai/', '@e-mate/']
-const UNSUPPORTED_MCP = '2.0.13 仅允许受审计 HTTPS MCP；旧本地或自定义连接已停用，可安全删除。'
+const UNSUPPORTED_MCP = '2.0.16 仅允许受审计 HTTPS MCP；旧本地或自定义连接已停用，可安全删除。'
 const AUDITED_PLUGIN_SOURCES = new Map([
   ['@xmanrui/dsh-im', 'github:zyfjacksonchen-source/dsh-im#f984f73dcd67692141d4e475c8fbe887e2ce7062'],
 ])
@@ -463,7 +463,7 @@ async function oauthProvider(
   let codeVerifier = ''
   const persist = () => writeOAuthState(ctx, spec.name, saved)
   const clientMetadata: OAuthClientMetadata = {
-    client_name: 'e-Mate 2.0.13',
+    client_name: 'e-Mate 2.0.16',
     redirect_uris: [redirectUrl],
     grant_types: ['authorization_code', 'refresh_token'],
     response_types: ['code'],
@@ -857,7 +857,7 @@ export function apply(ctx: Context, config: ConfigShape): void {
         }
       }
       const spec = MCP_CATALOG.get(args.name)
-      if (spec === undefined) throw new Error('该 MCP 不在 2.0.13 受审计 HTTPS catalog 中。')
+      if (spec === undefined) throw new Error('该 MCP 不在 2.0.16 受审计 HTTPS catalog 中。')
       validateServer(spec)
       if (current().servers.some(item => item.name === spec.name)) throw new Error(`MCP 连接已存在：${spec.name}`)
       if (!await confirmed(ctx, `安装 MCP 连接“${spec.name}”？`, JSON.stringify(spec, null, 2), exec.signal, exec.agent)) {

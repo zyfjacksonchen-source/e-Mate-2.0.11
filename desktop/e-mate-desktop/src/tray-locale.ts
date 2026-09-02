@@ -10,15 +10,15 @@ export type DesktopTrayLabelKey =
 
 const labels: Record<DesktopLocale, Record<DesktopTrayLabelKey, (value: string) => string>> = {
   en: {
-    checkForUpdates: () => 'Check for Updates...',
-    checkingForUpdates: () => 'Checking for Updates...',
-    downloadingUpdate: version => `Downloading e-Mate ${version}...`,
+    checkForUpdates: () => 'Check for Updates…',
+    checkingForUpdates: () => 'Checking for Updates…',
+    downloadingUpdate: version => `Downloading e-Mate ${version}…`,
     updateAvailable: version => `e-Mate ${version} Available`,
   },
   zh: {
-    checkForUpdates: () => '检查更新...',
-    checkingForUpdates: () => '正在检查更新...',
-    downloadingUpdate: version => `正在下载 e-Mate ${version}...`,
+    checkForUpdates: () => '检查更新…',
+    checkingForUpdates: () => '正在检查更新…',
+    downloadingUpdate: version => `正在下载 e-Mate ${version}…`,
     updateAvailable: version => `e-Mate ${version} 可用`,
   },
 }

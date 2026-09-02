@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh-plugin-memory-evolve",
-  "version": "2.0.15",
-  "description": "Project-isolated memory adapter for the pinned e-Mate 2.0.15 local runtime",
+  "version": "2.0.16",
+  "description": "Project-isolated memory adapter for the pinned e-Mate 2.0.16 local runtime",
   "type": "module",
   "license": "MIT",
   "publishConfig": {
@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate-2.0.11.git",
+    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate-desktop.git",
     "directory": "packages/dsh-plugin-memory-evolve"
   },
   "main": "lib/index.js",

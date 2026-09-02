@@ -73,6 +73,7 @@ try {
   )
   const runtime = {
     platform: selectedTarget.platform,
+    locale: 'en',
     updates: {
       isPackaged: false,
       canDownload: true,

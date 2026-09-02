@@ -353,7 +353,7 @@ async function writePdf(value: PdfDocumentInput): Promise<Buffer> {
   const pdf = await PDFDocument.create()
   pdf.registerFontkit(fontkit)
   if (value.title !== undefined) pdf.setTitle(value.title)
-  pdf.setProducer('e-Mate 2.0.13')
+  pdf.setProducer('e-Mate 2.0.16')
   const segments = await fontSegments()
   const used = new Map<string, Awaited<ReturnType<PDFDocument['embedFont']>>>()
   const outlines = new Map<string, ReturnType<typeof fontkit.create>>()

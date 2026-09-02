@@ -11,7 +11,7 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
 import { applyHarnessRuntimeAdapters } from './harness-runtime-adapters.mjs'
 import { HARNESS_COMMIT, HARNESS_VERSION, verifyHarnessBuildReceipt } from './harness-provenance.mjs'
 
-const PRODUCT_VERSION = '2.0.15'
+const PRODUCT_VERSION = '2.0.16'
 const PNPM_VERSION = '11.7.0'
 
 const root = resolve(import.meta.dirname, '..')

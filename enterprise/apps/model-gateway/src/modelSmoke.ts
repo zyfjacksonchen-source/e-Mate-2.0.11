@@ -7,7 +7,6 @@ export type ModelSmokeRoute = Pick<
   | 'id'
   | 'apiMode'
   | 'upstreamModelId'
-  | 'fallbackUpstreamModelId'
   | 'upstreamBaseUrl'
   | 'allowInsecureHttpUpstream'
   | 'upstreamApiKey'
@@ -38,7 +37,6 @@ type SmokeRouteContract = {
   upstreamModelId: string | RegExp;
   httpsBaseUrls: readonly string[];
   httpPathname?: string;
-  fallbackUpstreamModelId?: string;
 };
 
 const routeContracts: readonly SmokeRouteContract[] = [
@@ -66,7 +64,6 @@ const routeContracts: readonly SmokeRouteContract[] = [
     id: 'gpt-image-2-pro',
     apiMode: 'images-generations',
     upstreamModelId: 'gpt-image-2-pro',
-    fallbackUpstreamModelId: 'gpt-image-2',
     httpsBaseUrls: ['https://image-provider.ecorex.internal:18443/v1'],
     httpPathname: '/v1',
   },
@@ -82,7 +79,6 @@ const routeContracts: readonly SmokeRouteContract[] = [
 ];
 
 const evidencePattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,100}$/;
-const imageFallbackStatuses = new Set([400, 404, 415, 422]);
 
 export class ModelSmokeError extends Error {
   readonly code: 'INVALID_CATALOG' | 'UPSTREAM_UNAVAILABLE' | 'UPSTREAM_REJECTED' | 'INVALID_UPSTREAM_RESPONSE';
@@ -142,7 +138,6 @@ function validateCatalog(routes: readonly ModelSmokeRoute[]): Map<string, ModelS
     if (
       route.apiMode !== contract.apiMode ||
       !modelMatches ||
-      route.fallbackUpstreamModelId !== contract.fallbackUpstreamModelId ||
       !transportMatches ||
       !upstream.hostname ||
       upstream.username ||
@@ -163,16 +158,14 @@ function validateCatalog(routes: readonly ModelSmokeRoute[]): Map<string, ModelS
 function evidenceId(
   response: Response,
   providerResponseId: string | undefined,
-  localId: string,
-  fallback = false
+  localId: string
 ): string {
   const headerId = ['x-request-id', 'request-id', 'openai-request-id', 'x-tt-logid']
     .map((name) => response.headers.get(name))
     .find((value): value is string => Boolean(value && evidencePattern.test(value)));
   const providerId =
     headerId ?? (providerResponseId && evidencePattern.test(providerResponseId) ? providerResponseId : null);
-  const value = providerId ? `provider:${providerId}` : `local:${localId}`;
-  return fallback ? `fallback:${value}` : value;
+  return providerId ? `provider:${providerId}` : `local:${localId}`;
 }
 
 async function consumeResponsesStream(response: Response, routeId: string): Promise<string> {
@@ -341,51 +334,33 @@ async function smokeImage(
   signal: AbortSignal,
   localId: string
 ): Promise<ModelSmokeResult> {
-  const models = [route.upstreamModelId, route.fallbackUpstreamModelId].filter(
-    (model): model is string => model !== undefined
-  );
-  let response: Response | undefined;
-  let fallback = false;
-  for (const [index, model] of models.entries()) {
-    // The fallback must never race the primary image request and risk a duplicate charge.
-    // eslint-disable-next-line no-await-in-loop
-    response = await fetchUpstream(
-      route,
-      `${route.upstreamBaseUrl.replace(/\/$/, '')}/images/generations`,
-      {
-        method: 'POST',
-        headers: {
-          accept: 'application/json',
-          authorization: `Bearer ${route.upstreamApiKey}`,
-          'content-type': 'application/json',
-          'idempotency-key': index === 0 ? `smoke-${localId}` : `smoke-${localId}:fallback`,
-        },
-        body: JSON.stringify({
-          model,
-          prompt: 'A solid orange square.',
-          size: '1024x1024',
-          n: 1,
-          response_format: 'b64_json',
-        }),
-        redirect: 'error',
-        signal,
+  const response = await fetchUpstream(
+    route,
+    `${route.upstreamBaseUrl.replace(/\/$/, '')}/images/generations`,
+    {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        authorization: `Bearer ${route.upstreamApiKey}`,
+        'content-type': 'application/json',
+        'idempotency-key': `smoke-${localId}`,
       },
-      fetchImplementation
-    );
-    if (response.ok) {
-      fallback = index > 0;
-      break;
-    }
-    if (index === 0 && route.fallbackUpstreamModelId && imageFallbackStatuses.has(response.status)) {
-      // eslint-disable-next-line no-await-in-loop
-      await response.body?.cancel().catch(() => undefined);
-      continue;
-    }
-    // eslint-disable-next-line no-await-in-loop
+      body: JSON.stringify({
+        model: route.upstreamModelId,
+        prompt: 'A solid orange square.',
+        size: '1024x1024',
+        n: 1,
+        response_format: 'b64_json',
+      }),
+      redirect: 'error',
+      signal,
+    },
+    fetchImplementation
+  );
+  if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
     throw new ModelSmokeError('UPSTREAM_REJECTED', route.id);
   }
-  if (!response?.ok) throw new ModelSmokeError('UPSTREAM_REJECTED', route.id);
   const value = await readBoundedJson(response, route.id);
   try {
     parseImageGenerationResponse(value, `smoke-${localId}`);
@@ -397,12 +372,7 @@ async function smokeImage(
     routeId: route.id,
     status: 'PASSED',
     method: 'live-image-generation',
-    evidenceId: evidenceId(
-      response,
-      typeof providerResponseId === 'string' ? providerResponseId : undefined,
-      localId,
-      fallback
-    ),
+    evidenceId: evidenceId(response, typeof providerResponseId === 'string' ? providerResponseId : undefined, localId),
   };
 }
 

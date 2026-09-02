@@ -1,8 +1,8 @@
-# e-Mate 2.0.15 Skill Hub 与 DSH Skill 合同
+# e-Mate 2.0.16 Skill Hub 与 DSH Skill 合同
 
 ## 1. 一个市场、一个运行时、一个组件
 
-e-Mate 保留一个公开目录与不可变版本模型，不创建第二套市场、ZIP 格式或 Skill Store。2.0.15 的适配面只有一个随 Desktop 打包的 Profile 组件 `@e-mate/dsh-plugin-skill-hub`；Host 事务、Agent Tools、Harness Connection RPC 和界面必须以同一版本构建。
+e-Mate 保留一个公开目录与不可变版本模型，不创建第二套市场、ZIP 格式或 Skill Store。2.0.16 的适配面只有一个随 Desktop 打包的 Profile 组件 `@e-mate/dsh-plugin-skill-hub`；Host 事务、Agent Tools、Harness Connection RPC 和界面必须以同一版本构建。
 
 权威参考仍是：
 

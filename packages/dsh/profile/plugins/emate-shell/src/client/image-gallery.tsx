@@ -13,7 +13,10 @@ import type { ImageAttachmentLimits, ImageAttachmentRef } from '@deepseek-ai/dsh
 import {
   IconChevronLeftOutline14,
   IconChevronRightOutline14,
+  IconCopyOutline16,
+  IconDownloadOutline16,
   IconEllipsisOutline16,
+  IconPlusOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   DESKTOP_RESOURCE_BRIDGE,
@@ -39,7 +42,6 @@ interface ToolImagesState extends ToolImagesData {
 
 interface ImageCallsTurnData {
   readonly calls: readonly { readonly callId: string; readonly seq: number }[]
-  readonly delegations: readonly { readonly callId: string; readonly seq: number }[]
 }
 
 interface ImageCallsState extends ImageCallsTurnData {
@@ -57,7 +59,7 @@ declare module '@deepseek-ai/dsh-session/types' {
 
 declare module '@deepseek-ai/dsh-client-runtime/client' {
   interface ConversationTurnDataMap {
-    /** Ordered direct ImageGen and native subagent call identities for this engine-owned Turn. */
+    /** Ordered direct ImageGen call identities for this engine-owned Turn. */
     'e-mate-image-calls': ImageCallsTurnData
   }
 }
@@ -108,31 +110,26 @@ export const toolImagesDefinition: ConversationNodeDefinition<ToolImagesState> =
   }),
 }
 
-/** Turn-local direct ImageGen and native subagent provenance; it publishes no presentation node. */
+/** Turn-local direct ImageGen provenance; it publishes no presentation node. */
 export const imageCallsDefinition: ConversationNodeDefinition<ImageCallsState> = {
   kind: 'e-mate-image-calls',
   match: event => {
     if (event.type === 'turn/start') return { id: String(event.data.turn), role: 'start' }
-    if (event.type === 'tool/call'
-      && (event.data.name === 'imagegen' || event.data.name === 'subagent' || event.data.name === 'subagent_fork')) {
+    if (event.type === 'tool/call' && event.data.name === 'imagegen') {
       return { id: String(event.data.turn), role: 'update' }
     }
     return null
   },
   start: (_context, match) => {
     if (match.event.type !== 'turn/start') throw new Error('image call marker start requires turn/start')
-    return { turn: match.event.data.turn, calls: [], delegations: [] }
+    return { turn: match.event.data.turn, calls: [] }
   },
   update: (context, match) => {
-    if (match.event.type !== 'tool/call'
-      || (match.event.data.name !== 'imagegen'
-        && match.event.data.name !== 'subagent'
-        && match.event.data.name !== 'subagent_fork')) return context.state
+    if (match.event.type !== 'tool/call' || match.event.data.name !== 'imagegen') return context.state
     const callId = String(match.event.data.callId)
-    const key = match.event.data.name === 'imagegen' ? 'calls' : 'delegations'
-    return context.state[key].some(call => call.callId === callId)
+    return context.state.calls.some(call => call.callId === callId)
       ? context.state
-      : { ...context.state, [key]: [...context.state[key], { callId, seq: match.event.seq }] }
+      : { ...context.state, calls: [...context.state.calls, { callId, seq: match.event.seq }] }
   },
   buildLocationData: (context, scope) => scope !== 'turn' || context.state === undefined
     ? null
@@ -140,7 +137,7 @@ export const imageCallsDefinition: ConversationNodeDefinition<ImageCallsState> =
       kind: 'turn',
       turn: context.state.turn,
       key: 'e-mate-image-calls',
-      value: { calls: context.state.calls, delegations: context.state.delegations },
+      value: { calls: context.state.calls },
     },
 }
 
@@ -158,34 +155,6 @@ export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTermi
   if (owner.turn.status !== 'closed') return null
   const imageData = owner.turn.data.get('e-mate-image-calls')
   const candidates = (imageData?.calls ?? []).filter(call => call.seq <= owner.seq)
-  const nodes = owner.nodes ?? []
-  const settlementSenders = new Set<string>()
-  for (const node of nodes) {
-    if (node.kind !== 'context' || node.anchorSeq > owner.seq) continue
-    if ((node.location.kind !== 'turn' && node.location.kind !== 'step')
-      || node.location.turn.turn !== owner.turn.turn) continue
-    const source = (node.data as { readonly source?: unknown }).source
-    if (source === null || typeof source !== 'object' || Array.isArray(source)) continue
-    const settlement = source as Record<string, unknown>
-    if (settlement.kind === 'subagent-settled'
-      && typeof settlement.senderSessionId === 'string' && settlement.senderSessionId !== '') {
-      settlementSenders.add(settlement.senderSessionId)
-    }
-  }
-  const delegated = (imageData?.delegations ?? []).some(call => call.seq <= owner.seq)
-  if (delegated || settlementSenders.size > 0) {
-    for (const node of nodes) {
-      if (node.kind !== 'e-mate-tool-images' || node.visibility !== 'hidden' || node.anchorSeq > owner.seq) continue
-      if ((node.location.kind !== 'turn' && node.location.kind !== 'step')
-        || node.location.turn.turn !== owner.turn.turn) continue
-      const item = (node.data as ToolImagesData).item
-      if (/^subagent-image:[0-9a-f]{64}$/u.test(item.callId)
-        && item.childSessionId !== undefined
-        && (delegated || settlementSenders.has(item.childSessionId))) {
-        candidates.push({ callId: item.callId, seq: node.anchorSeq })
-      }
-    }
-  }
   const produced = (owner.turn.data as { get(key: string): unknown }).get('deliverables') as ProducedData | undefined
   const paths: string[] = []
   const seenPaths = new Set<string>()
@@ -216,6 +185,23 @@ export function terminalImageItems(
     latest.set(item.callId, item)
   }
   return callIds.flatMap(callId => latest.get(callId) ?? [])
+}
+
+/** Project the active Session's strict receipts into one latest-first Gallery list. */
+export function galleryImageItems(nodes: Iterable<ChatConversationViewNode>): readonly ImageGalleryItem[] {
+  const latest = new Map<string, { readonly item: ImageGalleryItem; readonly anchorSeq: number }>()
+  for (const node of nodes) {
+    if (node.kind !== 'e-mate-tool-images' || node.visibility !== 'hidden') continue
+    const item = (node.data as ToolImagesData).item
+    const current = latest.get(item.callId)
+    if (current !== undefined
+      && (current.item.revision > item.revision
+        || current.item.revision === item.revision && current.anchorSeq >= node.anchorSeq)) continue
+    latest.set(item.callId, { item, anchorSeq: node.anchorSeq })
+  }
+  return [...latest.values()]
+    .sort((left, right) => right.anchorSeq - left.anchorSeq)
+    .map(value => value.item)
 }
 
 const imageLabels = {
@@ -256,6 +242,18 @@ interface ArtifactTerminalProps extends TurnTailOwnerProps {
   readonly runResource: (request: DesktopResourceRequest) => Promise<void>
 }
 
+interface ImageGalleryViewProps {
+  readonly sessionId: string
+  readonly useSession: <T>(selector: (snapshot: ConversationSnapshot) => T) => T
+  readonly useInput: <T>(selector: (input: InputSnapshot) => T) => T
+  readonly useProjection: (key: 'imageLimits') => ImageAttachmentLimits | undefined
+  readonly loadImage: (attachment: ImageAttachmentRef) => Promise<string>
+  readonly addImageToDraft: (attachment: ImageAttachmentRef) => Promise<void>
+  readonly draftBytes: (ids: readonly string[]) => number
+  readonly notify: (level: 'info' | 'error', text: string) => void
+  readonly runResource: (request: DesktopResourceRequest) => Promise<void>
+}
+
 function fileName(path: string): string {
   const at = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
   return at < 0 ? path : path.slice(at + 1)
@@ -283,6 +281,149 @@ function admissionError(
   if (existingBytes + attachment.bytes > limits.maxMessageImageBytes) return '图片附件总大小超过当前消息上限。'
   if (attachment.width * attachment.height > limits.maxImagePixels) return '这张图片的像素尺寸超过上限。'
   return undefined
+}
+
+const galleryStatus = {
+  all: '全部状态',
+  completed: '已完成',
+  'review-required': '待确认',
+  failed: '失败',
+} as const
+
+const galleryOperation = {
+  all: '全部类型',
+  generate: '生成',
+  edit: '改图',
+  fusion: '融合',
+  unknown: '未知',
+} as const
+
+const GALLERY_PAGE_SIZE = 24
+
+/** Native conversation.view reader over the same durable receipts used by the Turn tail. */
+export function ImageGalleryView({
+  sessionId, useSession, useInput, useProjection, loadImage, addImageToDraft, draftBytes, notify, runResource,
+}: ImageGalleryViewProps) {
+  const snapshot = useSession(value => value)
+  const input = useInput(value => value)
+  const limits = useProjection('imageLimits')
+  const items = galleryImageItems(snapshot.chat.nodes.values())
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState<keyof typeof galleryStatus>('all')
+  const [operation, setOperation] = useState<keyof typeof galleryOperation>('all')
+  const [page, setPage] = useState(0)
+  const datasetKey = items.map(item => [
+    item.callId,
+    item.revision,
+    item.status,
+    item.attachment?.attachmentId ?? item.failureCode ?? '',
+  ].join(':')).join('|')
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const filtered = items.filter(item => {
+    if (status !== 'all' && item.status !== status) return false
+    if (operation !== 'all' && item.operation !== operation) return false
+    if (normalizedQuery === '') return true
+    return [
+      item.attachment?.name,
+      item.callId,
+      item.failureCode,
+      galleryStatus[item.status],
+      galleryOperation[item.operation],
+    ].some(value => value?.toLocaleLowerCase().includes(normalizedQuery))
+  })
+  const pages = Math.max(1, Math.ceil(filtered.length / GALLERY_PAGE_SIZE))
+  const shown = filtered.slice(page * GALLERY_PAGE_SIZE, (page + 1) * GALLERY_PAGE_SIZE)
+  const existingBytes = draftBytes(input.imageIds)
+
+  useEffect(() => { setPage(0) }, [sessionId, query, status, operation, datasetKey])
+
+  const imageAction = (item: ImageGalleryItem, action: 'copy-image' | 'save-as'): void => {
+    const attachment = item.attachment
+    if (attachment === undefined) return
+    void loadImage(attachment).then(src => runResource({
+      action,
+      resource: {
+        kind: 'image',
+        sessionId,
+        name: attachment.name ?? 'e-mate-image.png',
+        src,
+      },
+    })).catch(() => { notify('error', '图片操作失败，请确认图片仍可用。') })
+  }
+
+  const addToDraft = (item: ImageGalleryItem): void => {
+    const error = admissionError(item, input, limits, existingBytes)
+    if (error !== undefined) { notify('error', error); return }
+    void addImageToDraft(item.attachment!).then(
+      () => { notify('info', '图片已添加到聊天草稿。') },
+      () => { notify('error', '图片未能添加到聊天，请重试。') },
+    )
+  }
+
+  return <section className={css.galleryView} aria-label="画廊">
+    <div className={css.galleryToolbar}>
+      <input
+        type="search"
+        value={query}
+        placeholder="搜索文件名或结果编号"
+        onChange={event => { setQuery(event.currentTarget.value) }}
+      />
+      <select aria-label="筛选状态" value={status} onChange={event => {
+        setStatus(event.currentTarget.value as keyof typeof galleryStatus)
+      }}>
+        {Object.entries(galleryStatus).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      </select>
+      <select aria-label="筛选类型" value={operation} onChange={event => {
+        setOperation(event.currentTarget.value as keyof typeof galleryOperation)
+      }}>
+        {Object.entries(galleryOperation).filter(([value]) => value !== 'unknown')
+          .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      </select>
+    </div>
+
+    {shown.length === 0
+      ? <div className={css.galleryEmpty}>暂无图片结果</div>
+      : <div className={css.galleryGrid}>
+        {shown.map(item => {
+          const attachment = item.attachment
+          const label = attachment?.name ?? item.callId
+          const addError = admissionError(item, input, limits, existingBytes)
+          return <article key={`${item.callId}:${item.revision}`} className={css.galleryCard} aria-label={label}>
+            {attachment === undefined
+              ? <div className={css.galleryFailure} role="status">
+                <strong>{item.callId}</strong>
+                <span>错误：{item.failureCode ?? 'unknown'}</span>
+              </div>
+              : <>
+                <div className={css.galleryPreview}>
+                  <MessageImage attachment={attachment} load={loadImage} variant="tile" labels={imageLabels} />
+                  {item.status === 'review-required' && <span className={css.status}>待确认</span>}
+                </div>
+                <div className={css.galleryMeta}>
+                  <strong title={label}>{label}</strong>
+                  <span>{galleryOperation[item.operation]} · {galleryStatus[item.status]}</span>
+                </div>
+                <div className={css.galleryActions}>
+                  <button type="button" aria-label={`复制图像：${label}`} title="复制图像"
+                    onClick={() => { imageAction(item, 'copy-image') }}><IconCopyOutline16 /></button>
+                  <button type="button" aria-label={`下载副本：${label}`} title="下载副本"
+                    onClick={() => { imageAction(item, 'save-as') }}><IconDownloadOutline16 /></button>
+                  <button type="button" aria-label={`添加到聊天：${label}`} title={addError ?? '添加到聊天'}
+                    disabled={addError !== undefined} onClick={() => { addToDraft(item) }}><IconPlusOutline16 /></button>
+                </div>
+              </>}
+          </article>
+        })}
+      </div>}
+
+    {filtered.length > 0 && <div className={css.galleryPager}>
+      <button type="button" aria-label="画廊上一页" disabled={page === 0}
+        onClick={() => { setPage(value => Math.max(0, value - 1)) }}><IconChevronLeftOutline14 /></button>
+      <span>第 {page + 1} / {pages} 页</span>
+      <button type="button" aria-label="画廊下一页" disabled={page + 1 >= pages}
+        onClick={() => { setPage(value => Math.min(pages - 1, value + 1)) }}><IconChevronRightOutline14 /></button>
+    </div>}
+  </section>
 }
 
 function Menu({ state, menuRef, buttonRefs, close, activate }: {
@@ -497,7 +638,7 @@ export function ArtifactTerminal({
       if (error !== undefined) { notify('error', error); return }
       void addImageToDraft(target.item.attachment!).then(
         () => { notify('info', '图片已添加到聊天草稿。') },
-        cause => { notify('error', cause instanceof Error ? cause.message : String(cause)) },
+        () => { notify('error', '图片未能添加到聊天，请重试。') },
       )
       return
     }

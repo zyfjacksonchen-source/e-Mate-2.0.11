@@ -4,7 +4,7 @@ import { parseProfileBaseContract } from '../src/base-contract.ts'
 function contract(): Record<string, unknown> {
   return {
     schema_version: 1,
-    id: 'e-mate-desktop-profile-v15-dsh-32728743c289',
+    id: 'e-mate-desktop-profile-v16-dsh-32728743c289',
     desktop_reference: {
       repository: 'anywhere-labs/deepseek-harness-desktop',
       commit: '6074088f5b660206e404b3591fab51fb99c69add',

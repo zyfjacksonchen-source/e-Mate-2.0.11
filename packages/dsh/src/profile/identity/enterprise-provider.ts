@@ -650,9 +650,6 @@ function policyFor(value: StoredSession, runtime: readonly RuntimeModel[]) {
   const chat = CHAT_MODELS.find(id => managed.includes(id))
   if (chat === undefined) throw new Error('e-Mate enterprise policy contains no chat model')
   const allowed = new Set(managed)
-  if (allowed.has('gpt-image-2-pro')) {
-    allowed.add('gpt-image-2')
-  }
   return {
     schema_version: 1,
     account_subject: `${value.session.identity.tenantId}:${value.session.identity.userId}`,
@@ -661,7 +658,6 @@ function policyFor(value: StoredSession, runtime: readonly RuntimeModel[]) {
     default_chat_model_id: chat,
     default_chat_reasoning_effort: chat === 'gpt-5.6-luna' || chat === 'deepseek' ? 'max' : 'medium',
     image_primary_model_id: 'gpt-image-2-pro',
-    image_fallback_upstream_model_id: 'gpt-image-2',
     issued_at: value.received_at,
     expires_at: value.session.expiresAt,
     receipt_id: value.session.sessionId,
@@ -880,7 +876,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
     if (expectedRevision !== leaseRevision) throw new Error('e-Mate enterprise session mutation was superseded')
     const response = await modelCall(
       value,
-      '/v1/runtime-models?client_version=2.0.15',
+      '/v1/runtime-models?client_version=2.0.16',
       { method: 'GET' },
       'runtime models',
     )
@@ -1058,7 +1054,7 @@ export function createEnterpriseIdentityProvider(options: ProviderOptions) {
           termsAccepted: true,
           policyRead: true,
           lawfulUseConfirmed: true,
-          clientVersion: '2.0.15',
+          clientVersion: '2.0.16',
           locale: 'zh-CN',
         }),
       }, 'consent acceptance'), status.policy)

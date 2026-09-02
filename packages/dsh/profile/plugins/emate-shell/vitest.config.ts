@@ -22,6 +22,7 @@ const upstreamCordis = fileURLToPath(new URL(
 ))
 
 export default {
+  esbuild: { jsx: 'automatic' },
   resolve: {
     alias: {
       'react-dom': `${upstreamModules}.pnpm/node_modules/react-dom`,

@@ -4,7 +4,7 @@
 
 - macOS 13+ on Apple Silicon or Intel, delivered as one Universal DMG.
 - Windows 10/11 x64, delivered as one assisted NSIS installer.
-- Linux is not a 2.0.15 release target.
+- Linux is not a 2.0.16 release target.
 - Installers contain their runtime closure. Users do not install Node, npm, pnpm, Yarn, Python, Electron, Xcode, MSVC, or Rust.
 - Both installers are unsigned. The official download page publishes immutable URLs and SHA-256 values plus the macOS trust instructions.
 

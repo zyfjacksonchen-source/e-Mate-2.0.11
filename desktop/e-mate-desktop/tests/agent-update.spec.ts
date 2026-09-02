@@ -4,7 +4,7 @@ import { apply } from '../src/agent-update.ts'
 
 describe('e-Mate natural-language update trigger', () => {
   it('delegates to the one native lifecycle without owning update logic', async () => {
-    const result = { status: 'handled' as const, installedVersion: '2.0.15' }
+    const result = { status: 'handled' as const, installedVersion: '2.0.16' }
     const runInteractiveUpdate = vi.fn(async () => result)
     const section = vi.fn()
     const register = vi.fn()

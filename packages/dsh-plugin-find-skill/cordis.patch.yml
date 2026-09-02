@@ -67,21 +67,21 @@
         catalogSkills:
           - id: connect-feishu-cli
             name: 连接飞书 CLI
-            source: https://github.com/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.12-r1/skills/connect-feishu-cli
-            url: https://github.com/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.12-r1/skills/connect-feishu-cli
+            source: https://github.com/zyfjacksonchen-source/e-Mate-desktop/tree/skills-v2.0.12-r1/skills/connect-feishu-cli
+            url: https://github.com/zyfjacksonchen-source/e-Mate-desktop/tree/skills-v2.0.12-r1/skills/connect-feishu-cli
             keywords: [飞书, 飞书cli, feishu, feishu cli, lark]
           - id: connect-tencent-docs
             name: 连接腾讯文档
-            source: https://github.com/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.12-r1/skills/connect-tencent-docs
-            url: https://github.com/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.12-r1/skills/connect-tencent-docs
+            source: https://github.com/zyfjacksonchen-source/e-Mate-desktop/tree/skills-v2.0.12-r1/skills/connect-tencent-docs
+            url: https://github.com/zyfjacksonchen-source/e-Mate-desktop/tree/skills-v2.0.12-r1/skills/connect-tencent-docs
             keywords: [腾讯文档, 腾讯 docs, tencent docs, docs.qq.com]
           - id: connect-dingtalk
             name: 连接钉钉
-            source: https://github.com/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.12-r1/skills/connect-dingtalk
-            url: https://github.com/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.12-r1/skills/connect-dingtalk
+            source: https://github.com/zyfjacksonchen-source/e-Mate-desktop/tree/skills-v2.0.12-r1/skills/connect-dingtalk
+            url: https://github.com/zyfjacksonchen-source/e-Mate-desktop/tree/skills-v2.0.12-r1/skills/connect-dingtalk
             keywords: [钉钉, dingtalk, ding talk]
           - id: connect-wechat-bot
             name: 连接微信 Bot
-            source: https://github.com/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.12-r1/skills/connect-wechat-bot
-            url: https://github.com/zyfjacksonchen-source/e-Mate-2.0.11/tree/skills-v2.0.12-r1/skills/connect-wechat-bot
+            source: https://github.com/zyfjacksonchen-source/e-Mate-desktop/tree/skills-v2.0.12-r1/skills/connect-wechat-bot
+            url: https://github.com/zyfjacksonchen-source/e-Mate-desktop/tree/skills-v2.0.12-r1/skills/connect-wechat-bot
             keywords: [微信, 微信bot, 微信 bot, wechat, wechat bot]
