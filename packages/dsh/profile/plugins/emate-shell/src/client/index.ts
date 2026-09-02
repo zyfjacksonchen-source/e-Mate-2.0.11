@@ -45,6 +45,7 @@ import {
   ImageGalleryView,
   imageCallsDefinition,
   selectArtifactTerminal,
+  subagentSettledDefinition,
   toolImagesDefinition,
 } from './image-gallery.tsx'
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
@@ -463,6 +464,7 @@ export function apply(ctx: any): void {
     order: -190,
   }, ThinkingStatusBranding))
   ctx.conversationEvents.register(imageCallsDefinition)
+  ctx.conversationEvents.register(subagentSettledDefinition)
   ctx.conversationEvents.register(toolImagesDefinition)
   const galleryNotice = createTransientGalleryNotice(ctx)
   registerImageGallery(ctx, galleryNotice)

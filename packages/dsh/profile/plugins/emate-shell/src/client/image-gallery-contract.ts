@@ -17,6 +17,7 @@ export interface ImageGalleryItem {
     readonly sessionId: string
     readonly label: string
     readonly ordinal: number
+    readonly mode: 'one-shot' | 'continuable'
   }
 }
 

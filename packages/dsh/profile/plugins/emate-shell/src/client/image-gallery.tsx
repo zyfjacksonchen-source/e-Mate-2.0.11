@@ -43,10 +43,19 @@ interface ToolImagesState extends ToolImagesData {
 
 interface ImageCallsTurnData {
   readonly calls: readonly { readonly callId: string; readonly seq: number }[]
+  readonly foregroundSubagents: readonly { readonly seq: number; readonly label: string }[]
 }
 
 interface ImageCallsState extends ImageCallsTurnData {
   readonly turn: number
+}
+
+interface SubagentSettledData {
+  readonly sessionId: string
+}
+
+interface SubagentSettledState extends SubagentSettledData {
+  readonly sourceSeq: number
 }
 
 type ImageOutputEventData = Record<string, unknown>
@@ -69,6 +78,8 @@ declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
   interface ChatNodeDataMap {
     /** Strict terminal ImageGen receipt; hidden and read only by the Turn tail. */
     'e-mate-tool-images': ToolImagesData
+    /** Native background-child settlement identity, hidden and read only by its Turn tail. */
+    'e-mate-subagent-settled': SubagentSettledData
   }
 }
 
@@ -118,17 +129,34 @@ export const imageCallsDefinition: ConversationNodeDefinition<ImageCallsState> =
   kind: 'e-mate-image-calls',
   match: event => {
     if (event.type === 'turn/start') return { id: String(event.data.turn), role: 'start' }
-    if (event.type === 'tool/call' && event.data.name === 'imagegen') {
+    if (event.type === 'tool/call' && (event.data.name === 'imagegen' || event.data.name === 'subagent')) {
       return { id: String(event.data.turn), role: 'update' }
     }
     return null
   },
   start: (_context, match) => {
     if (match.event.type !== 'turn/start') throw new Error('image call marker start requires turn/start')
-    return { turn: match.event.data.turn, calls: [] }
+    return { turn: match.event.data.turn, calls: [], foregroundSubagents: [] }
   },
   update: (context, match) => {
-    if (match.event.type !== 'tool/call' || match.event.data.name !== 'imagegen') return context.state
+    if (match.event.type !== 'tool/call') return context.state
+    if (match.event.data.name === 'subagent') {
+      let args: unknown
+      try { args = JSON.parse(match.event.data.arguments) } catch { return context.state }
+      if (args === null || typeof args !== 'object' || Array.isArray(args)
+        || (args as { run_in_background?: unknown }).run_in_background !== false
+        || typeof (args as { description?: unknown }).description !== 'string'
+        || (args as { description: string }).description === ''
+        || context.state.foregroundSubagents.some(call => call.seq === match.event.seq)) return context.state
+      return {
+        ...context.state,
+        foregroundSubagents: [...context.state.foregroundSubagents, {
+          seq: match.event.seq,
+          label: (args as { description: string }).description,
+        }],
+      }
+    }
+    if (match.event.data.name !== 'imagegen') return context.state
     const callId = String(match.event.data.callId)
     return context.state.calls.some(call => call.callId === callId)
       ? context.state
@@ -140,8 +168,41 @@ export const imageCallsDefinition: ConversationNodeDefinition<ImageCallsState> =
       kind: 'turn',
       turn: context.state.turn,
       key: 'e-mate-image-calls',
-      value: { calls: context.state.calls },
+      value: { calls: context.state.calls, foregroundSubagents: context.state.foregroundSubagents },
     },
+}
+
+function settledSessionId(event: Parameters<ConversationNodeDefinition<SubagentSettledState>['match']>[0]): string | null {
+  if (event.type !== 'user/message') return null
+  const source = event.data.source as { readonly kind?: unknown; readonly senderSessionId?: unknown }
+  return source.kind === 'subagent-settled' && typeof source.senderSessionId === 'string' && source.senderSessionId !== ''
+    ? source.senderSessionId
+    : null
+}
+
+/** Keep native background settlement ownership attached to the exact receiving Turn. */
+export const subagentSettledDefinition: ConversationNodeDefinition<SubagentSettledState> = {
+  kind: 'e-mate-subagent-settled',
+  target: 'chat',
+  match: event => {
+    const sessionId = settledSessionId(event)
+    return sessionId === null ? null : { id: `${sessionId}:${event.seq}`, role: 'start' }
+  },
+  start: (_context, match) => {
+    const sessionId = settledSessionId(match.event)
+    if (sessionId === null) throw new Error('subagent settlement marker requires a native sender Session')
+    return { sessionId, sourceSeq: match.event.seq }
+  },
+  buildViewNode: context => context.state === undefined ? null : ({
+    key: context.key,
+    kind: 'e-mate-subagent-settled',
+    id: context.id,
+    target: 'chat',
+    anchorSeq: context.state.sourceSeq,
+    location: locationOf(context),
+    visibility: 'hidden',
+    data: { sessionId: context.state.sessionId },
+  }),
 }
 
 interface ProducedData {
@@ -151,6 +212,12 @@ interface ProducedData {
 export interface ArtifactTerminalMatch {
   readonly callIds: readonly string[]
   readonly paths: readonly string[]
+  readonly childSessionIds: readonly string[]
+  readonly foregroundWindow?: {
+    readonly startTime: number
+    readonly endTime: number
+    readonly labels: readonly string[]
+  }
 }
 
 /** Claim the one terminal only when this closing Turn owns images or files. */
@@ -169,7 +236,54 @@ export function selectArtifactTerminal(owner: TurnTailOwnerProps): ArtifactTermi
   const callIds = [...new Set(candidates
     .sort((left, right) => left.seq - right.seq)
     .map(call => call.callId))]
-  return callIds.length === 0 && paths.length === 0 ? null : { callIds, paths }
+  const childSessionIds = [...new Set((owner.nodes ?? []).flatMap(node => node.kind === 'e-mate-subagent-settled'
+    ? [(node.data as SubagentSettledData).sessionId]
+    : []))]
+  const foregroundLabels = (imageData?.foregroundSubagents ?? [])
+    .filter(call => call.seq <= owner.seq)
+    .sort((left, right) => left.seq - right.seq)
+    .map(call => call.label)
+  const foregroundWindow = foregroundLabels.length > 0 && owner.turn.start !== undefined && owner.turn.end !== undefined
+    ? { startTime: owner.turn.start.time, endTime: owner.turn.end.time, labels: foregroundLabels }
+    : undefined
+  return callIds.length === 0 && paths.length === 0 && childSessionIds.length === 0 && foregroundWindow === undefined
+    ? null
+    : { callIds, paths, childSessionIds, ...foregroundWindow === undefined ? {} : { foregroundWindow } }
+}
+
+/** Select only exact background notices or terminal foreground receipts inside this parent Turn. */
+export function terminalChildImageItems(
+  items: readonly ImageGalleryItem[],
+  childSessionIds: readonly string[],
+  foregroundWindow?: {
+    readonly startTime: number
+    readonly endTime: number
+    readonly labels: readonly string[]
+  },
+  settledChildSessionIds: ReadonlySet<string> = new Set(),
+): readonly ImageGalleryItem[] {
+  const exact = new Set(childSessionIds)
+  const labels = new Map<string, number>()
+  for (const label of foregroundWindow?.labels ?? []) labels.set(label, (labels.get(label) ?? 0) + 1)
+  return items.filter(item => {
+    const source = item.source
+    if (source === undefined) return false
+    const childSessionId = source.sessionId
+    if (exact.has(childSessionId)) return true
+    const createdAt = item.createdAt
+    const remaining = labels.get(source.label) ?? 0
+    if (remaining === 0 || source.mode !== 'one-shot' || settledChildSessionIds.has(childSessionId)
+      || foregroundWindow === undefined || createdAt === undefined
+      || createdAt < foregroundWindow.startTime || createdAt > foregroundWindow.endTime) return false
+    labels.set(source.label, remaining - 1)
+    return true
+  })
+}
+
+function settledChildSessions(nodes: Iterable<ChatConversationViewNode>): ReadonlySet<string> {
+  return new Set([...nodes].flatMap(node => node.kind === 'e-mate-subagent-settled'
+    ? [(node.data as SubagentSettledData).sessionId]
+    : []))
 }
 
 /** Read only hidden receipts named by the current Turn, latest revision wins. */
@@ -332,7 +446,7 @@ export function childGalleryImageItems(
         item: {
           ...item,
           createdAt: row.createdAt,
-          source: { kind: 'subagent', sessionId: entry.id, label, ordinal },
+          source: { kind: 'subagent', sessionId: entry.id, label, ordinal, mode: entry.mode },
         },
         seq: row.seq,
         ordinal,
@@ -660,7 +774,7 @@ function Menu({ state, menuRef, buttonRefs, close, activate }: {
 
 function ImageTerminal({ items, loadImage, openMenu }: {
   readonly items: readonly ImageGalleryItem[]
-  readonly loadImage: (attachment: ImageAttachmentRef) => Promise<string>
+  readonly loadImage: (attachment: ImageAttachmentRef, ownerSessionId?: string) => Promise<string>
   readonly openMenu: (target: MenuTarget, source: HTMLElement | { clientX: number; clientY: number }) => void
 }) {
   const railRef = useRef<HTMLDivElement>(null)
@@ -689,7 +803,8 @@ function ImageTerminal({ items, loadImage, openMenu }: {
           data-status={item.status}
           onContextMenu={event => { event.preventDefault(); openMenu({ kind: 'image', item }, event) }}
         >
-          <MessageImage attachment={item.attachment} load={loadImage} variant="tile" labels={imageLabels} />
+          <MessageImage attachment={item.attachment}
+            load={value => loadImage(value, item.source?.sessionId)} variant="tile" labels={imageLabels} />
           {item.status === 'review-required' && <span className={css.status}>待确认</span>}
           <button
             type="button"
@@ -757,11 +872,21 @@ export function ArtifactTerminal({
   const snapshot = useSession(value => value)
   const input = useInput(value => value)
   const limits = useProjection('imageLimits')
-  const summary = useSessions(value => value.byId[sessionId])
+  const sessions = useSessions(value => value)
+  const summary = sessions.byId[sessionId]
   const root = summary?.cwd
   const items = useMemo(
-    () => terminalImageItems(snapshot.chat.nodes.values(), matched.callIds, turn.turn, summary?.title ?? ''),
-    [matched.callIds, snapshot, summary?.title, turn.turn],
+    () => {
+      const nodes = [...snapshot.chat.nodes.values()]
+      return namedGalleryImageItems([
+        ...terminalImageItems(nodes, matched.callIds, turn.turn),
+        ...terminalChildImageItems(
+          childGalleryImageItems(sessions, sessionId), matched.childSessionIds, matched.foregroundWindow,
+          settledChildSessions(nodes),
+        ),
+      ], summary?.title ?? '')
+    },
+    [matched.callIds, matched.childSessionIds, matched.foregroundWindow, sessionId, sessions, snapshot, summary?.title, turn.turn],
   )
   const seenFailures = useRef(new Set<string>())
   const existingBytes = draftBytes(input.imageIds)
@@ -803,8 +928,9 @@ export function ArtifactTerminal({
     if (target.kind === 'image') {
       const attachment = target.item.attachment
       if (attachment === undefined) return Promise.reject(new Error('图片附件不可用'))
-      return loadImage(attachment).then(src => runResource({ action, resource: {
-        kind: 'image', sessionId, name: galleryAttachmentName(attachment), src,
+      const ownerSessionId = target.item.source?.sessionId ?? sessionId
+      return loadImage(attachment, ownerSessionId).then(src => runResource({ action, resource: {
+        kind: 'image', sessionId: ownerSessionId, name: galleryAttachmentName(attachment), src,
       } }))
     }
     if (root === undefined) return Promise.reject(new Error('当前工作区不可用'))
@@ -821,7 +947,8 @@ export function ArtifactTerminal({
     if (action === 'add-image' && target.kind === 'image') {
       const error = admissionError(target.item, input, limits, existingBytes)
       if (error !== undefined) { notify('error', error); return }
-      void addImageToDraft(target.item.attachment!).catch(() => { notify('error', '图片未能添加到聊天，请重试。') })
+      void addImageToDraft(target.item.attachment!, target.item.source?.sessionId)
+        .catch(() => { notify('error', '图片未能添加到聊天，请重试。') })
       return
     }
     void resource(target, action as DesktopResourceAction).catch(() => {

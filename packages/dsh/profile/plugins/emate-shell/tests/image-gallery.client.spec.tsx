@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useSyncExternalStore } from 'react'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseImageOutputReceipt } from '../src/client/image-gallery-contract.ts'
@@ -13,6 +14,8 @@ import {
   imageCallsDefinition,
   namedGalleryImageItems,
   selectArtifactTerminal,
+  subagentSettledDefinition,
+  terminalChildImageItems,
   terminalImageItems,
   toolImagesDefinition,
 } from '../src/client/image-gallery.tsx'
@@ -98,11 +101,11 @@ const limits = {
 
 function terminalProps(
   nodes: readonly unknown[],
-  matched = { callIds: ['call-image-1'], paths: [] as string[] },
+  matched = { callIds: ['call-image-1'], paths: [] as string[], childSessionIds: [] as string[] },
   overrides: Record<string, unknown> = {},
 ) {
   return {
-    matched,
+    matched: { childSessionIds: [], ...matched },
     sessionId: 'session-1',
     turn: turn({}),
     seq: 20,
@@ -117,6 +120,22 @@ function terminalProps(
     notify: vi.fn(),
     runResource: vi.fn(async () => {}),
     ...overrides,
+  }
+}
+
+function sessionListHarness(initial: unknown) {
+  let snapshot = initial
+  const listeners = new Set<() => void>()
+  return {
+    useSessions: <T,>(selector: (value: any) => T): T => useSyncExternalStore(
+      listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
+      () => selector(snapshot),
+      () => selector(snapshot),
+    ),
+    set(next: unknown): void {
+      snapshot = next
+      for (const listener of listeners) listener()
+    },
   }
 }
 
@@ -406,18 +425,21 @@ describe('completed artifact terminal', () => {
       addImageToDraft: vi.fn(async () => {}),
       runResource: vi.fn(async () => {}),
     }
-    const props = (sessions: ReturnType<typeof state>, nodes: readonly unknown[] = []) => galleryProps(parentId, nodes, {
+    const sessions = sessionListHarness(state([]))
+    const props = (nodes: readonly unknown[] = []) => galleryProps(parentId, nodes, {
       ...actions,
-      useSessions: (selector: (value: unknown) => unknown) => selector(sessions),
+      useSessions: sessions.useSessions,
     })
 
-    const view = render(<ImageGalleryView {...props(state([])) as never} />)
+    const view = render(<ImageGalleryView {...props() as never} />)
+    const mountedGallery = screen.getByRole('region', { name: '画廊' })
     expect(screen.getByText('暂无图片结果')).toBeTruthy()
 
-    view.rerender(<ImageGalleryView {...props(state([first])) as never} />)
+    act(() => { sessions.set(state([first])) })
     const firstCard = screen.getByRole('article', { name: /子任务02-生成/u })
     expect(firstCard.textContent).toContain('来自子任务：第二张')
     expect(screen.getAllByRole('article')).toHaveLength(1)
+    expect(screen.getByRole('region', { name: '画廊' })).toBe(mountedGallery)
 
     fireEvent.click(screen.getByRole('button', { name: /复制图像：.*子任务02-生成/u }))
     await waitFor(() => {
@@ -433,15 +455,15 @@ describe('completed artifact terminal', () => {
       )
     })
 
-    view.rerender(<ImageGalleryView {...props(state([first, second])) as never} />)
+    act(() => { sessions.set(state([first, second])) })
     expect(screen.getAllByRole('article').map(node => node.getAttribute('aria-label'))).toEqual([
       expect.stringMatching(/子任务02-生成/u),
       expect.stringMatching(/子任务01-生成/u),
     ])
-    view.rerender(<ImageGalleryView {...props(state([first, second])) as never} />)
+    act(() => { sessions.set(state([first, second])) })
     expect(screen.getAllByRole('article')).toHaveLength(2)
 
-    view.rerender(<ImageGalleryView {...props(state([first, second, review, failed], false)) as never} />)
+    act(() => { sessions.set(state([first, second, review, failed], false)) })
     expect(screen.getAllByRole('article')).toHaveLength(4)
     expect(screen.getByRole('article', { name: /子任务03-改图/u }).textContent).toContain('待确认')
     expect(screen.getByRole('article', { name: 'call-failed' }).textContent).toContain('来自子任务：失败图片')
@@ -451,12 +473,15 @@ describe('completed artifact terminal', () => {
       call_id: 'parent-own', parent_session_id: parentId,
       content: [{ type: 'image', attachment: { ...attachment, name: 'parent-own.png' } }],
     }))!, createdAt: 400 }
-    view.rerender(<ImageGalleryView {...props(state([first, second, review, failed], false), [hidden(own)]) as never} />)
+    view.rerender(<ImageGalleryView {...props([hidden(own)]) as never} />)
     expect(screen.getAllByRole('article')).toHaveLength(5)
     expect(screen.getByRole('article', { name: /并发生图测试-生成/u })).toBeTruthy()
 
     cleanup()
-    render(<ImageGalleryView {...props(state([first, second, review, failed], false)) as never} />)
+    const coldSessions = sessionListHarness(state([first, second, review, failed], false))
+    render(<ImageGalleryView {...galleryProps(parentId, [], {
+      ...actions, useSessions: coldSessions.useSessions,
+    }) as never} />)
     expect(screen.getAllByRole('article')).toHaveLength(4)
     expect(childGalleryImageItems(state([first, second, review, failed]) as never, parentId))
       .toHaveLength(4)
@@ -637,26 +662,146 @@ describe('completed artifact terminal', () => {
       nodes: [hidden(parseImageOutputReceipt(receipt())!)],
       seq: 20,
       openFile: vi.fn(),
-    } as never)).toEqual({ callIds: ['call-image-1'], paths: ['out/result.zip'] })
+    } as never)).toEqual({ callIds: ['call-image-1'], paths: ['out/result.zip'], childSessionIds: [] })
   })
 
-  it('ignores subagent calls and reads legacy child-session receipts without projecting child state', () => {
+  it('distinguishes explicit foreground subagents from background calls without reading child ids from text', () => {
     const start = { type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } }
-    const state = imageCallsDefinition.start({} as never, { event: start } as never, {} as never)
-    for (const [index, name] of ['subagent', 'subagent_fork'].entries()) {
-      const call = { type: 'tool/call', seq: index + 2, time: index + 2, data: {
-        turn: 1, step: 1, callId: `delegated-${index}`, name, arguments: '{}',
-      } }
-      expect(imageCallsDefinition.match(call as never)).toBeNull()
-      expect(imageCallsDefinition.update({ state } as never, { event: call } as never)).toBe(state)
-    }
-    expect(state).toEqual({ turn: 1, calls: [] })
+    const initial = imageCallsDefinition.start({} as never, { event: start } as never, {} as never)
+    const background = { type: 'tool/call', seq: 2, time: 2, data: {
+      turn: 1, step: 1, callId: 'background', name: 'subagent', arguments: '{"run_in_background":true}',
+    } }
+    const foreground = { type: 'tool/call', seq: 3, time: 3, data: {
+      turn: 1, step: 1, callId: 'foreground', name: 'subagent',
+      arguments: '{"description":"前台结果","run_in_background":false}',
+    } }
+    expect(imageCallsDefinition.match(background as never)).toMatchObject({ id: '1', role: 'update' })
+    expect(imageCallsDefinition.update({ state: initial } as never, { event: background } as never)).toBe(initial)
+    const state = imageCallsDefinition.update({ state: initial } as never, { event: foreground } as never)
+    expect(state).toEqual({ turn: 1, calls: [], foregroundSubagents: [{ seq: 3, label: '前台结果' }] })
+    expect(imageCallsDefinition.match({ ...foreground, data: { ...foreground.data, name: 'subagent_fork' } } as never))
+      .toBeNull()
     const legacy = parseImageOutputReceipt(receipt({ child_session_id: 'image-child' }))
     expect(legacy).toEqual(expect.objectContaining({ callId: 'call-image-1', status: 'completed' }))
     expect(legacy).not.toHaveProperty('childSessionId')
     expect(selectArtifactTerminal({
-      turn: turn({ 'e-mate-image-calls': state }), nodes: [], seq: 20, openFile: vi.fn(),
-    } as never)).toBeNull()
+      turn: {
+        ...turn({ 'e-mate-image-calls': state }),
+        start: { type: 'turn/start', seq: 1, time: 100, data: { turn: 1 } },
+        end: { type: 'turn/end', seq: 20, time: 200, data: { turn: 1, reason: { kind: 'completed' } } },
+      },
+      nodes: [], seq: 20, openFile: vi.fn(),
+    } as never)).toEqual({
+      callIds: [], paths: [], childSessionIds: [],
+      foregroundWindow: { startTime: 100, endTime: 200, labels: ['前台结果'] },
+    })
+  })
+
+  it('binds native background settlement notices to exact child-owned images and keeps foreground windows disjoint', async () => {
+    const parentId = 'parent-chat'
+    const makeChild = (sessionId: string, callId: string, name: string, createdAt: number, digit: string) => ({
+      seq: createdAt,
+      createdAt,
+      receipt: receipt({
+        call_id: callId,
+        parent_session_id: sessionId,
+        content: [{ type: 'image', attachment: {
+          ...attachment, attachmentId: `sha256:${digit.repeat(64)}`, name,
+        } }],
+        output: { ...attachment, attachmentId: `sha256:${digit.repeat(64)}`, name },
+      }),
+    })
+    const sessions = {
+      byId: {
+        [parentId]: { title: '并发卡片', cwd: '/work' },
+        'child-notice': { projectionValues: { eMateImageReceipts: [
+          makeChild('child-notice', 'notice-image', 'notice.png', 90, '1'),
+        ] } },
+        'child-foreground': { projectionValues: { eMateImageReceipts: [
+          makeChild('child-foreground', 'foreground-image', 'foreground.png', 150, '2'),
+        ] } },
+        'child-sibling': { projectionValues: { eMateImageReceipts: [
+          makeChild('child-sibling', 'sibling-image', 'sibling.png', 160, '3'),
+        ] } },
+      },
+      subagentsByParent: {
+        [parentId]: { entries: [
+          { kind: 'child', id: 'child-notice', label: '通知结果', mode: 'continuable' },
+          { kind: 'child', id: 'child-foreground', label: '前台结果', mode: 'one-shot' },
+          { kind: 'child', id: 'child-sibling', label: '乱序兄弟', mode: 'continuable' },
+        ] },
+      },
+    }
+    const noticeEvent = { type: 'user/message', seq: 30, time: 210, data: {
+      content: [], role: 'user', id: 'notice-message',
+      source: { kind: 'subagent-settled', form: 'notice', summary: 'done', senderSessionId: 'child-notice' },
+    } }
+    expect(subagentSettledDefinition.match(noticeEvent as never)).toEqual({
+      id: 'child-notice:30', role: 'start',
+    })
+    expect(subagentSettledDefinition.start({} as never, { event: noticeEvent } as never, {} as never))
+      .toEqual({ sessionId: 'child-notice', sourceSeq: 30 })
+
+    const settledNode = {
+      key: 'settled', kind: 'e-mate-subagent-settled', id: 'child-notice:30', target: 'chat', anchorSeq: 30,
+      location: { kind: 'turn', turn: turn({}, 2) }, visibility: 'hidden', data: { sessionId: 'child-notice' },
+    }
+    const backgroundMatch = selectArtifactTerminal({
+      turn: turn({ 'e-mate-image-calls': { calls: [], foregroundSubagents: [] } }, 2),
+      nodes: [settledNode], seq: 40, openFile: vi.fn(),
+    } as never)
+    expect(backgroundMatch).toEqual({ callIds: [], paths: [], childSessionIds: ['child-notice'] })
+    const childItems = childGalleryImageItems(sessions as never, parentId)
+    expect(terminalChildImageItems(childItems, backgroundMatch!.childSessionIds)).toMatchObject([
+      { callId: 'notice-image', source: { sessionId: 'child-notice' } },
+    ])
+
+    const foregroundMatch = {
+      callIds: [], paths: [], childSessionIds: [],
+      foregroundWindow: { startTime: 100, endTime: 170, labels: ['前台结果'] },
+    }
+    expect(terminalChildImageItems(
+      childItems, [], foregroundMatch.foregroundWindow, new Set(['child-sibling']),
+    )).toMatchObject([
+      { callId: 'foreground-image', source: { sessionId: 'child-foreground' } },
+    ])
+    const foreground = childItems.find(item => item.callId === 'foreground-image')!
+    const settledSibling = {
+      ...childItems.find(item => item.callId === 'sibling-image')!,
+      source: { ...foreground.source!, sessionId: 'child-sibling' },
+    }
+    expect(terminalChildImageItems(
+      [foreground, settledSibling], [], foregroundMatch.foregroundWindow, new Set(['child-sibling']),
+    ).map(item => item.callId)).toEqual(['foreground-image'])
+    const duplicates = Array.from({ length: 3 }, (_, index) => ({
+      ...foreground,
+      callId: `duplicate-${index + 1}`,
+      createdAt: 140 + index,
+      source: { ...foreground.source!, sessionId: `duplicate-child-${index + 1}` },
+    }))
+    expect(terminalChildImageItems(duplicates, [], {
+      ...foregroundMatch.foregroundWindow, labels: ['前台结果', '前台结果'],
+    }).map(item => item.callId)).toEqual(['duplicate-1', 'duplicate-2'])
+    expect(terminalChildImageItems(childItems, ['child-sibling'])).toMatchObject([
+      { callId: 'sibling-image', source: { sessionId: 'child-sibling' } },
+    ])
+
+    const props = terminalProps([], backgroundMatch!, {
+      sessionId: parentId,
+      useSessions: (selector: (value: unknown) => unknown) => selector(sessions),
+    })
+    const view = render(<ArtifactTerminal {...props as never} />)
+    expect(screen.getAllByRole('button', { name: /图片操作/u })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: /查看原图：.*子任务01-生成/u })).toBeTruthy()
+    expect(view.container.textContent).not.toContain('sha256:')
+    fireEvent.contextMenu(screen.getByRole('button', { name: /查看原图/u }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '下载副本' }))
+    await waitFor(() => {
+      expect(props.loadImage).toHaveBeenCalledWith(expect.objectContaining({ name: expect.stringMatching(/子任务01-生成/u) }), 'child-notice')
+      expect(props.runResource).toHaveBeenCalledWith(expect.objectContaining({
+        resource: expect.objectContaining({ sessionId: 'child-notice' }),
+      }))
+    })
   })
 
   it('keeps the newest strict receipt hidden and never joins another Turn call', () => {
