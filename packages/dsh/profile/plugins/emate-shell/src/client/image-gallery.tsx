@@ -947,7 +947,10 @@ export function ArtifactTerminal({
     if (action === 'add-image' && target.kind === 'image') {
       const error = admissionError(target.item, input, limits, existingBytes)
       if (error !== undefined) { notify('error', error); return }
-      void addImageToDraft(target.item.attachment!, target.item.source?.sessionId)
+      const ownerSessionId = target.item.source?.sessionId
+      void (ownerSessionId === undefined
+        ? addImageToDraft(target.item.attachment!)
+        : addImageToDraft(target.item.attachment!, ownerSessionId))
         .catch(() => { notify('error', '图片未能添加到聊天，请重试。') })
       return
     }
