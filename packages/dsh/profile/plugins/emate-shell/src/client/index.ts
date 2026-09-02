@@ -25,6 +25,7 @@ import {
   IconSettingsOutline16,
   IconTrashOutline16,
   IconUserOutline16,
+  Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AccountControl, AccountSettings } from './account.tsx'
 import { registerActivityFold } from './activity-fold.tsx'
@@ -39,6 +40,7 @@ import {
   ArtifactTerminal,
   desktopResourceRun,
   draftImageAdmissionError,
+  galleryAttachmentName,
   ImageGalleryView,
   imageCallsDefinition,
   selectArtifactTerminal,
@@ -74,7 +76,7 @@ export function registerSessionShare(ctx: any): void {
   }, HiddenSessionLogExport))
 }
 
-function imageGalleryInjected(ctx: any, sessionId: string) {
+function imageGalleryInjected(ctx: any, sessionId: string, imageAdded: () => void) {
   const draftBytes = (ids: readonly string[]) => ctx.conversation.draftImages(ids)
     .reduce((sum: number, image: any) => sum + image.file.size, 0)
   return {
@@ -98,7 +100,7 @@ function imageGalleryInjected(ctx: any, sessionId: string) {
       const error = draftImageAdmissionError(attachment, input, limits, draftBytes(input.imageIds))
       if (error !== undefined) throw new Error(error)
       const images = ctx.conversation.createDraftImages([
-        new File([bytes.buffer], attachment.name ?? 'e-mate-image.png', { type: attachment.mediaType }),
+        new File([bytes.buffer], galleryAttachmentName(attachment), { type: attachment.mediaType }),
       ])
       try {
         if (!shell.addImages(images.map((image: any) => image.id))) {
@@ -108,6 +110,7 @@ function imageGalleryInjected(ctx: any, sessionId: string) {
         ctx.conversation.releaseDraftImages(images)
         throw error
       }
+      imageAdded()
     },
     draftBytes,
     notify: (level: 'info' | 'error', text: string) => {
@@ -118,14 +121,41 @@ function imageGalleryInjected(ctx: any, sessionId: string) {
   }
 }
 
+/** Reuse DSH's native overlay Toast; the slot disposer is the only transient lifecycle state. */
+export function createTransientGalleryNotice(ctx: any): (text: string) => void {
+  let current: (() => void) | undefined
+  let sequence = 0
+  return (text: string): void => {
+    current?.()
+    let dispose = (): void => {}
+    const done = (): void => {
+      dispose()
+      if (current === dispose) current = undefined
+    }
+    try {
+      dispose = ctx.slots.register({
+        name: 'shell.overlay', id: `e-mate-gallery-toast-${++sequence}`, order: 10,
+      }, () => createElement(Toast, { text, onDone: done }))
+      current = dispose
+    } catch {
+      current = undefined
+    }
+  }
+}
+
 /** Add one native Session-scoped Gallery tab over the existing image receipt owner. */
-export function registerImageGallery(ctx: any): void {
+export function registerImageGallery(
+  ctx: any,
+  showImageAdded: (text: string) => void = createTransientGalleryNotice(ctx),
+): void {
   ctx.slots.inject('conversation.view', () => ctx.slots.register({
     name: 'conversation.view',
     id: 'e-mate-gallery',
     order: 20,
     label: '画廊',
-    inject: (sessionId: string) => imageGalleryInjected(ctx, sessionId),
+    inject: (sessionId: string) => imageGalleryInjected(ctx, sessionId, () => {
+      showImageAdded('图片已添加到聊天草稿。')
+    }),
   }, ImageGalleryView))
 }
 
@@ -429,12 +459,15 @@ export function apply(ctx: any): void {
   }, ThinkingStatusBranding))
   ctx.conversationEvents.register(imageCallsDefinition)
   ctx.conversationEvents.register(toolImagesDefinition)
-  registerImageGallery(ctx)
+  const showImageAdded = createTransientGalleryNotice(ctx)
+  registerImageGallery(ctx, showImageAdded)
   ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
     name: 'conversation.chat.turnTail',
     priority: -1,
     select: selectArtifactTerminal,
-    inject: (sessionId: string) => imageGalleryInjected(ctx, sessionId),
+    inject: (sessionId: string) => imageGalleryInjected(ctx, sessionId, () => {
+      showImageAdded('图片已添加到聊天草稿。')
+    }),
   }, ArtifactTerminal))
   ctx.conversationEvents.register(legacyArtifactDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({

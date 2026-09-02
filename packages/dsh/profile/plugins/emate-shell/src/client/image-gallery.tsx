@@ -76,7 +76,9 @@ function locationOf(context: ConversationNodeContext): ConversationLocation {
 }
 
 function receipt(event: Parameters<ConversationNodeDefinition<ToolImagesState>['match']>[0]): ImageGalleryItem | null {
-  return event.type === 'emate/image-output' ? parseImageOutputReceipt(event.data) : null
+  if (event.type !== 'emate/image-output') return null
+  const item = parseImageOutputReceipt(event.data)
+  return item === null ? null : { ...item, createdAt: event.time }
 }
 
 /** Persist only the strict receipt; presentation is owned by the completed Turn tail. */
@@ -96,7 +98,7 @@ export const toolImagesDefinition: ConversationNodeDefinition<ToolImagesState> =
     const item = receipt(match.event)
     return item === null || item.revision < context.state.item.revision
       ? context.state
-      : { ...context.state, item }
+      : { ...context.state, item: { ...item, createdAt: context.state.item.createdAt } }
   },
   buildViewNode: context => context.state === undefined ? null : ({
     key: context.key,
@@ -174,21 +176,100 @@ export function terminalImageItems(
   nodes: Iterable<ChatConversationViewNode>,
   callIds: readonly string[],
   turn: number,
+  title?: string,
 ): readonly ImageGalleryItem[] {
+  const allNodes = [...nodes]
+  const named = title === undefined
+    ? undefined
+    : new Map(galleryImageItems(allNodes, title).map(item => [item.callId, item]))
   const allowed = new Set(callIds)
   const latest = new Map<string, ImageGalleryItem>()
-  for (const node of nodes) {
+  for (const node of allNodes) {
     if (node.kind !== 'e-mate-tool-images' || node.visibility !== 'hidden') continue
     if ((node.location.kind !== 'turn' && node.location.kind !== 'step') || node.location.turn.turn !== turn) continue
     const item = (node.data as ToolImagesData).item
     if (!allowed.has(item.callId) || (latest.get(item.callId)?.revision ?? -1) > item.revision) continue
-    latest.set(item.callId, item)
+    latest.set(item.callId, named?.get(item.callId) ?? item)
   }
   return callIds.flatMap(callId => latest.get(callId) ?? [])
 }
 
+const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu
+const IMAGE_TOPIC_MAX_BYTES = 120
+
+function truncateUtf8(value: string, maximum: number): string {
+  const encoder = new TextEncoder()
+  let result = ''
+  let bytes = 0
+  for (const character of value) {
+    const size = encoder.encode(character).byteLength
+    if (bytes + size > maximum) break
+    result += character
+    bytes += size
+  }
+  return result
+}
+
+function safeImageTopic(value: string | undefined): string {
+  const cleaned = (value ?? '')
+    .normalize('NFKC')
+    .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]+/gu, '-')
+    .replace(/\s+/gu, ' ')
+    .replace(/-+/gu, '-')
+    .trim()
+    .replace(/^[ .-]+|[ .-]+$/gu, '')
+  const limited = truncateUtf8(cleaned, IMAGE_TOPIC_MAX_BYTES).replace(/[ .-]+$/gu, '')
+  return limited === '' || WINDOWS_RESERVED_NAME.test(limited) ? 'e-Mate-图片' : limited
+}
+
+function imageTimestamp(value: number): string {
+  const date = new Date(value)
+  const safe = Number.isFinite(date.getTime()) ? date : new Date(0)
+  const pad = (part: number): string => String(part).padStart(2, '0')
+  return `${safe.getFullYear()}${pad(safe.getMonth() + 1)}${pad(safe.getDate())}-${pad(safe.getHours())}${pad(safe.getMinutes())}${pad(safe.getSeconds())}`
+}
+
+function imageExtension(mediaType: string): string {
+  return mediaType === 'image/jpeg' ? 'jpg' : mediaType === 'image/webp' ? 'webp' : 'png'
+}
+
+/** Project one stable display name used by Gallery, download, preview, and draft attachment flows. */
+export function namedGalleryImageItems(
+  items: readonly ImageGalleryItem[],
+  title: string | undefined,
+): readonly ImageGalleryItem[] {
+  const topic = safeImageTopic(title)
+  const prepared = items.map(item => {
+    if (item.attachment === undefined || item.createdAt === undefined) return { item }
+    const operation = item.operation === 'generate' || item.operation === 'unknown' ? '生成' : '改图'
+    return {
+      item,
+      base: `${topic}-${operation}-${imageTimestamp(item.createdAt)}`,
+      extension: imageExtension(item.attachment.mediaType),
+    }
+  })
+  const totals = new Map<string, number>()
+  for (const entry of prepared) {
+    if (entry.base !== undefined) totals.set(entry.base, (totals.get(entry.base) ?? 0) + 1)
+  }
+  const seen = new Map<string, number>()
+  return prepared.map(entry => {
+    if (entry.base === undefined || entry.extension === undefined || entry.item.attachment === undefined) return entry.item
+    const index = (seen.get(entry.base) ?? 0) + 1
+    seen.set(entry.base, index)
+    const suffix = (totals.get(entry.base) ?? 0) > 1 ? `-${String(index).padStart(2, '0')}` : ''
+    return {
+      ...entry.item,
+      attachment: { ...entry.item.attachment, name: `${entry.base}${suffix}.${entry.extension}` },
+    }
+  })
+}
+
 /** Project the active Session's strict receipts into one latest-first Gallery list. */
-export function galleryImageItems(nodes: Iterable<ChatConversationViewNode>): readonly ImageGalleryItem[] {
+export function galleryImageItems(
+  nodes: Iterable<ChatConversationViewNode>,
+  title?: string,
+): readonly ImageGalleryItem[] {
   const latest = new Map<string, { readonly item: ImageGalleryItem; readonly anchorSeq: number }>()
   for (const node of nodes) {
     if (node.kind !== 'e-mate-tool-images' || node.visibility !== 'hidden') continue
@@ -199,9 +280,10 @@ export function galleryImageItems(nodes: Iterable<ChatConversationViewNode>): re
         || current.item.revision === item.revision && current.anchorSeq >= node.anchorSeq)) continue
     latest.set(item.callId, { item, anchorSeq: node.anchorSeq })
   }
-  return [...latest.values()]
+  const items = [...latest.values()]
     .sort((left, right) => right.anchorSeq - left.anchorSeq)
     .map(value => value.item)
+  return title === undefined ? items : namedGalleryImageItems(items, title)
 }
 
 const imageLabels = {
@@ -232,7 +314,7 @@ interface ArtifactTerminalProps extends TurnTailOwnerProps {
   readonly matched: ArtifactTerminalMatch
   readonly sessionId: string
   readonly useSession: <T>(selector: (snapshot: ConversationSnapshot) => T) => T
-  readonly useSessions: <T>(selector: (snapshot: { byId: Record<string, { cwd?: string } | undefined> }) => T) => T
+  readonly useSessions: <T>(selector: (snapshot: { byId: Record<string, { cwd?: string; title?: string } | undefined> }) => T) => T
   readonly useInput: <T>(selector: (input: InputSnapshot) => T) => T
   readonly useProjection: (key: 'imageLimits') => ImageAttachmentLimits | undefined
   readonly loadImage: (attachment: ImageAttachmentRef) => Promise<string>
@@ -245,6 +327,7 @@ interface ArtifactTerminalProps extends TurnTailOwnerProps {
 interface ImageGalleryViewProps {
   readonly sessionId: string
   readonly useSession: <T>(selector: (snapshot: ConversationSnapshot) => T) => T
+  readonly useSessions: <T>(selector: (snapshot: { byId: Record<string, { title?: string } | undefined> }) => T) => T
   readonly useInput: <T>(selector: (input: InputSnapshot) => T) => T
   readonly useProjection: (key: 'imageLimits') => ImageAttachmentLimits | undefined
   readonly loadImage: (attachment: ImageAttachmentRef) => Promise<string>
@@ -262,6 +345,10 @@ function fileName(path: string): string {
 function fileKind(name: string): string {
   const extension = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).trim() : ''
   return extension === '' ? '文件' : `${extension.toUpperCase()} 文件`
+}
+
+export function galleryAttachmentName(attachment: ImageAttachmentRef): string {
+  return attachment.name?.trim() || 'e-Mate-图片.png'
 }
 
 export function draftImageAdmissionError(
@@ -310,12 +397,13 @@ const GALLERY_PAGE_SIZE = 24
 
 /** Native conversation.view reader over the same durable receipts used by the Turn tail. */
 export function ImageGalleryView({
-  sessionId, useSession, useInput, useProjection, loadImage, addImageToDraft, draftBytes, notify, runResource,
+  sessionId, useSession, useSessions, useInput, useProjection, loadImage, addImageToDraft, draftBytes, notify, runResource,
 }: ImageGalleryViewProps) {
   const snapshot = useSession(value => value)
+  const title = useSessions(value => value.byId[sessionId]?.title)
   const input = useInput(value => value)
   const limits = useProjection('imageLimits')
-  const items = galleryImageItems(snapshot.chat.nodes.values())
+  const items = galleryImageItems(snapshot.chat.nodes.values(), title ?? '')
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<keyof typeof galleryStatus>('all')
   const [operation, setOperation] = useState<keyof typeof galleryOperation>('all')
@@ -353,7 +441,7 @@ export function ImageGalleryView({
       resource: {
         kind: 'image',
         sessionId,
-        name: attachment.name ?? 'e-mate-image.png',
+        name: galleryAttachmentName(attachment),
         src,
       },
     })).catch(() => { notify('error', '图片操作失败，请确认图片仍可用。') })
@@ -362,10 +450,7 @@ export function ImageGalleryView({
   const addToDraft = (item: ImageGalleryItem): void => {
     const error = admissionError(item, input, limits, existingBytes)
     if (error !== undefined) { notify('error', error); return }
-    void addImageToDraft(item.attachment!).then(
-      () => { notify('info', '图片已添加到聊天草稿。') },
-      () => { notify('error', '图片未能添加到聊天，请重试。') },
-    )
+    void addImageToDraft(item.attachment!).catch(() => { notify('error', '图片未能添加到聊天，请重试。') })
   }
 
   return <section className={css.galleryView} aria-label="画廊">
@@ -394,7 +479,7 @@ export function ImageGalleryView({
       : <div className={css.galleryGrid}>
         {shown.map(item => {
           const attachment = item.attachment
-          const label = attachment?.name ?? item.callId
+          const label = attachment === undefined ? item.callId : galleryAttachmentName(attachment)
           const addError = admissionError(item, input, limits, existingBytes)
           return <article key={`${item.callId}:${item.revision}`} className={css.galleryCard} aria-label={label}>
             {attachment === undefined
@@ -523,7 +608,7 @@ function ImageTerminal({ items, loadImage, openMenu }: {
           <button
             type="button"
             className={css.imageAction}
-            aria-label={`图片操作：${item.attachment.name ?? '图像'}`}
+            aria-label={`图片操作：${galleryAttachmentName(item.attachment)}`}
             onClick={event => { openMenu({ kind: 'image', item }, event.currentTarget) }}
           ><i aria-hidden="true" /><span>1</span></button>
         </div>)}
@@ -591,10 +676,11 @@ export function ArtifactTerminal({
   const snapshot = useSession(value => value)
   const input = useInput(value => value)
   const limits = useProjection('imageLimits')
-  const root = useSessions(value => value.byId[sessionId]?.cwd)
+  const summary = useSessions(value => value.byId[sessionId])
+  const root = summary?.cwd
   const items = useMemo(
-    () => terminalImageItems(snapshot.chat.nodes.values(), matched.callIds, turn.turn),
-    [matched.callIds, snapshot, turn.turn],
+    () => terminalImageItems(snapshot.chat.nodes.values(), matched.callIds, turn.turn, summary?.title ?? ''),
+    [matched.callIds, snapshot, summary?.title, turn.turn],
   )
   const existingBytes = draftBytes(input.imageIds)
   const closeMenu = (): void => { setMenu(null); menuButtons.current = [] }
@@ -627,7 +713,7 @@ export function ArtifactTerminal({
       const attachment = target.item.attachment
       if (attachment === undefined) return Promise.reject(new Error('图片附件不可用'))
       return loadImage(attachment).then(src => runResource({ action, resource: {
-        kind: 'image', sessionId, name: attachment.name ?? 'e-mate-image.png', src,
+        kind: 'image', sessionId, name: galleryAttachmentName(attachment), src,
       } }))
     }
     if (root === undefined) return Promise.reject(new Error('当前工作区不可用'))
@@ -644,10 +730,7 @@ export function ArtifactTerminal({
     if (action === 'add-image' && target.kind === 'image') {
       const error = admissionError(target.item, input, limits, existingBytes)
       if (error !== undefined) { notify('error', error); return }
-      void addImageToDraft(target.item.attachment!).then(
-        () => { notify('info', '图片已添加到聊天草稿。') },
-        () => { notify('error', '图片未能添加到聊天，请重试。') },
-      )
+      void addImageToDraft(target.item.attachment!).catch(() => { notify('error', '图片未能添加到聊天，请重试。') })
       return
     }
     void resource(target, action as DesktopResourceAction).catch(() => {

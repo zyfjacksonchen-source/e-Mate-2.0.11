@@ -7,6 +7,8 @@ export interface ImageGalleryItem {
   readonly revision: number
   readonly status: ImageGalleryStatus
   readonly operation: 'generate' | 'edit' | 'fusion' | 'unknown'
+  /** Original receipt event time keeps projected filenames stable across revisions. */
+  readonly createdAt?: number
   readonly attachment?: ImageAttachmentRef
   readonly failureCode?: string
 }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseImageOutputReceipt } from '../src/client/image-gallery-contract.ts'
@@ -10,11 +10,12 @@ import {
   galleryImageItems,
   ImageGalleryView,
   imageCallsDefinition,
+  namedGalleryImageItems,
   selectArtifactTerminal,
   terminalImageItems,
   toolImagesDefinition,
 } from '../src/client/image-gallery.tsx'
-import { registerImageGallery } from '../src/client/index.ts'
+import { createTransientGalleryNotice, registerImageGallery } from '../src/client/index.ts'
 
 vi.mock('@deepseek-ai/dsh-client-ui-attachment', () => ({
   MessageImage: ({ attachment, labels }: {
@@ -126,6 +127,7 @@ function galleryProps(
   return {
     sessionId,
     useSession: (selector: (value: unknown) => unknown) => selector({ chat: { nodes: { values: () => nodes.values() } } }),
+    useSessions: (selector: (value: unknown) => unknown) => selector({ byId: { [sessionId]: {} } }),
     useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
     useProjection: () => limits,
     loadImage: vi.fn(async () => 'blob:image'),
@@ -156,6 +158,7 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
     addImages,
     notify: vi.fn(),
   }
+  const imageAdded = vi.fn()
   const ctx = {
     slots: {
       inject: (_name: string, install: () => void) => { install() },
@@ -185,7 +188,7 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
       releaseDraftImages,
     },
   }
-  registerImageGallery(ctx)
+  registerImageGallery(ctx, imageAdded)
   return {
     injected,
     readAttachment,
@@ -193,6 +196,7 @@ function galleryAdmissionHarness(imageLimits: typeof limits, acceptImages = true
     createDraftImages: ctx.conversation.createDraftImages,
     releaseDraftImages,
     shell,
+    imageAdded,
     imageIds: () => imageIds,
     draftCount: () => drafts.size,
     resolveReads: () => {
@@ -217,6 +221,62 @@ describe('completed artifact terminal', () => {
     })
     expect(entries[0]?.component).toBe(ImageGalleryView)
     await runtime.dispose()
+  })
+
+  it('uses the native overlay Toast transiently without changing composer layout', () => {
+    vi.useFakeTimers()
+    try {
+      const composer = render(<div data-composer-card><textarea defaultValue="保留中的草稿" /></div>)
+      const composerNode = composer.container.firstElementChild
+      const composerMarkup = composer.container.innerHTML
+      let toastView: ReturnType<typeof render> | undefined
+      const dispose = vi.fn(() => { toastView?.unmount() })
+      const ctx = {
+        slots: {
+          register: vi.fn((_options: unknown, Component: () => JSX.Element) => {
+            toastView = render(<Component />)
+            return dispose
+          }),
+        },
+      }
+
+      createTransientGalleryNotice(ctx)('图片已添加到聊天草稿。')
+      expect(screen.getByRole('alert').textContent).toBe('图片已添加到聊天草稿。')
+      expect(composer.container.firstElementChild).toBe(composerNode)
+      expect(composer.container.innerHTML).toBe(composerMarkup)
+
+      act(() => { vi.advanceTimersByTime(4000) })
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(dispose).toHaveBeenCalledOnce()
+      expect(composer.container.firstElementChild).toBe(composerNode)
+      expect(composer.container.innerHTML).toBe(composerMarkup)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('projects readable portable names with edit, batch, and fallback handling', () => {
+    const createdAt = new Date(2026, 8, 2, 12, 34, 56).getTime()
+    const item = (callId: string, operation: 'generate' | 'edit' = 'generate') => ({
+      ...parseImageOutputReceipt(receipt({ call_id: callId, operation }))!,
+      createdAt,
+    })
+    const timestamp = '20260902-123456'
+
+    expect(namedGalleryImageItems([item('中文')], '武汉整装套餐/报价')[0]?.attachment?.name)
+      .toBe(`武汉整装套餐-报价-生成-${timestamp}.png`)
+    expect(namedGalleryImageItems([item('改图', 'edit')], '客厅改造')[0]?.attachment?.name)
+      .toBe(`客厅改造-改图-${timestamp}.png`)
+    expect(namedGalleryImageItems([item('批次一'), item('批次二')], '春季海报').map(value => value.attachment?.name))
+      .toEqual([`春季海报-生成-${timestamp}-01.png`, `春季海报-生成-${timestamp}-02.png`])
+    expect(namedGalleryImageItems([item('非法')], '装修<>:"/\\|?*\u0001方案. ')[0]?.attachment?.name)
+      .toBe(`装修-方案-生成-${timestamp}.png`)
+    expect(namedGalleryImageItems([item('保留名')], 'CON.')[0]?.attachment?.name)
+      .toBe(`e-Mate-图片-生成-${timestamp}.png`)
+    expect(namedGalleryImageItems([item('回退')], ' \u0001 ')[0]?.attachment?.name)
+      .toBe(`e-Mate-图片-生成-${timestamp}.png`)
+    expect(Buffer.byteLength(namedGalleryImageItems([item('限长')], '图'.repeat(200))[0]!.attachment!.name!, 'utf8'))
+      .toBeLessThanOrEqual(255)
   })
 
   it('deduplicates current-Session receipts by revision then anchor and ignores visible nodes', () => {
@@ -316,34 +376,53 @@ describe('completed artifact terminal', () => {
   })
 
   it('routes Gallery copy, download, and add-to-chat through the shared native owners', async () => {
-    const completed = parseImageOutputReceipt(receipt())!
-    const props = galleryProps('session-gallery', [hidden(completed)])
+    const createdAt = new Date(2026, 8, 2, 12, 34, 56).getTime()
+    const name = '武汉整装套餐-生成-20260902-123456.png'
+    const genericAttachment = { ...attachment, name: 'e-Mate-image.png' }
+    const completed = parseImageOutputReceipt(receipt({
+      content: [{ type: 'image', attachment: genericAttachment }],
+      output: genericAttachment,
+    }))!
+    const props = galleryProps('session-gallery', [hidden({ ...completed, createdAt })], {
+      useSessions: (selector: (value: unknown) => unknown) => selector({
+        byId: { 'session-gallery': { title: '武汉整装套餐' } },
+      }),
+    })
     render(<ImageGalleryView {...props as never} />)
     expect(props.loadImage).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: '复制图像：result.png' }))
+    expect(screen.getByRole('article', { name })).toBeTruthy()
+    expect(screen.getByRole('button', { name: `查看原图：${name}` })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: `复制图像：${name}` }))
     await waitFor(() => { expect(props.runResource).toHaveBeenCalledWith({
       action: 'copy-image',
-      resource: { kind: 'image', sessionId: 'session-gallery', name: 'result.png', src: 'blob:image' },
+      resource: { kind: 'image', sessionId: 'session-gallery', name, src: 'blob:image' },
     }) })
-    fireEvent.click(screen.getByRole('button', { name: '下载副本：result.png' }))
+    fireEvent.click(screen.getByRole('button', { name: `下载副本：${name}` }))
     await waitFor(() => { expect(props.runResource).toHaveBeenCalledWith({
       action: 'save-as',
-      resource: { kind: 'image', sessionId: 'session-gallery', name: 'result.png', src: 'blob:image' },
+      resource: { kind: 'image', sessionId: 'session-gallery', name, src: 'blob:image' },
     }) })
-    fireEvent.click(screen.getByRole('button', { name: '添加到聊天：result.png' }))
-    await waitFor(() => { expect(props.addImageToDraft).toHaveBeenCalledWith(attachment) })
-    expect(props.notify).toHaveBeenCalledWith('info', '图片已添加到聊天草稿。')
+    fireEvent.click(screen.getByRole('button', { name: `添加到聊天：${name}` }))
+    await waitFor(() => { expect(props.addImageToDraft).toHaveBeenCalledWith({ ...genericAttachment, name }) })
+    expect(props.notify).not.toHaveBeenCalled()
   })
 
   it.each([
     ['max image count', { ...limits, maxImagesPerMessage: 1 }],
     ['total image bytes', { ...limits, maxImagesPerMessage: 2, maxMessageImageBytes: attachment.bytes }],
   ])('atomically rechecks live %s after concurrent delayed reads', async (_name, imageLimits) => {
-    const completed = parseImageOutputReceipt(receipt())!
+    const createdAt = new Date(2026, 8, 2, 12, 34, 56).getTime()
+    const name = '武汉整装套餐-生成-20260902-123456.png'
+    const completed = { ...parseImageOutputReceipt(receipt())!, createdAt }
     const harness = galleryAdmissionHarness(imageLimits)
-    render(<ImageGalleryView {...galleryProps('session-gallery', [hidden(completed)], harness.injected) as never} />)
-    const add = screen.getByRole('button', { name: '添加到聊天：result.png' })
+    render(<ImageGalleryView {...galleryProps('session-gallery', [hidden(completed)], {
+      ...harness.injected,
+      useSessions: (selector: (value: unknown) => unknown) => selector({
+        byId: { 'session-gallery': { title: '武汉整装套餐' } },
+      }),
+    }) as never} />)
+    const add = screen.getByRole('button', { name: `添加到聊天：${name}` })
 
     fireEvent.click(add)
     fireEvent.click(add)
@@ -351,11 +430,12 @@ describe('completed artifact terminal', () => {
     expect(harness.addImages).not.toHaveBeenCalled()
     harness.resolveReads()
 
-    await waitFor(() => { expect(harness.shell.notify).toHaveBeenCalledTimes(2) })
+    await waitFor(() => { expect(harness.imageAdded).toHaveBeenCalledOnce() })
     expect(harness.addImages).toHaveBeenCalledTimes(1)
     expect(harness.createDraftImages).toHaveBeenCalledTimes(1)
+    expect(harness.createDraftImages.mock.calls[0]?.[0]?.[0]?.name).toBe(name)
     expect(harness.imageIds()).toHaveLength(1)
-    expect(harness.shell.notify).toHaveBeenCalledWith('info', '图片已添加到聊天草稿。')
+    expect(harness.shell.notify).toHaveBeenCalledTimes(1)
     expect(harness.shell.notify).toHaveBeenCalledWith('error', '图片未能添加到聊天，请重试。')
   })
 
@@ -428,6 +508,8 @@ describe('completed artifact terminal', () => {
     expect(toolImagesDefinition.match(review as never)).toEqual({ id: 'tool-images:call-image-1', role: 'update' })
     const started = toolImagesDefinition.start({} as never, { event: complete } as never, {} as never)
     const updated = toolImagesDefinition.update({ state: started } as never, { event: review } as never)
+    expect(started.item.createdAt).toBe(complete.time)
+    expect(updated.item.createdAt).toBe(complete.time)
     const other = parseImageOutputReceipt(receipt({ call_id: 'call-other' }))!
     const otherTurn = parseImageOutputReceipt(receipt({ revision: 99 }))!
     expect(terminalImageItems([
@@ -492,7 +574,7 @@ describe('completed artifact terminal', () => {
     fireEvent.click(screen.getByRole('button', { name: '图片操作：result.png' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '添加到聊天' }))
     await waitFor(() => { expect(props.addImageToDraft).toHaveBeenCalledWith(attachment) })
-    expect(props.notify).toHaveBeenCalledWith('info', '图片已添加到聊天草稿。')
+    expect(props.notify).not.toHaveBeenCalled()
 
     cleanup()
     const review = parseImageOutputReceipt(receipt({ revision: 3, status: 'needs-review' }))!
