@@ -1408,6 +1408,10 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(imagegen.isConcurrencySafe({}), false)
     assert.deepEqual(Object.keys(imagegen.parameters.properties), ['prompt', 'image_url'])
     assert.deepEqual(imagegen.parameters.required, ['prompt'])
+    assert.match(imagegen.description, /parent Agent must not call imagegen at all/u)
+    assert.match(imagegen.description, /must never emit multiple imagegen calls in one assistant message/u)
+    assert.match(imagegen.description, /at most four sibling native subagent calls with run_in_background: false/u)
+    assert.match(imagegen.description, /delegated child may call imagegen exactly once/u)
     assert.match(imagegen.description, /Never pass a provider, model, output path, size, quality, timeout, or concurrency policy/u)
     tools.delete('imagegen')
     await assert.rejects(
@@ -2007,6 +2011,97 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.deepEqual(requestScopes[0], { task: firstScope, trace: firstScope, session: firstScope, client: firstScope })
     assert.equal(new Set(requestScopes.map(scope => scope.task)).size, requestScopes.length)
 
+    let nativeBoundaryTurn = 100
+    const appendNativeAssistant = (parent, calls) => {
+      const turn = ++nativeBoundaryTurn
+      const step = 1
+      parent.session.append('turn/start', { turn })
+      parent.session.append('step/start', { turn, step })
+      parent.session.append('assistant/message', {
+        turn,
+        step,
+        message: {
+          id: `native-image-message-${turn}`,
+          role: 'assistant',
+          content: calls.map(call => ({
+            type: 'tool-call', id: call.id, name: 'imagegen',
+            arguments: call.rawArguments ?? JSON.stringify(call.args),
+          })),
+          source: { kind: 'model', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+        },
+      }, { surfaceOp: 'append' })
+      return { turn, step }
+    }
+    const executeNativeImageCall = (parent, position, call) => {
+      parent.session.append('tool/call', {
+        ...position, callId: call.id, name: 'imagegen',
+        arguments: call.rawArguments ?? JSON.stringify(call.args),
+      })
+      return imagegen.execute(call.args, {
+        agent: parent,
+        callId: call.id,
+        signal: new AbortController().signal,
+      })
+    }
+
+    const blockedBatchParent = nativeParent('image-native-batch-parent')
+    const blockedBatch = Array.from({ length: 4 }, (_, index) => ({
+      id: `native-batch-new-${index + 1}`,
+      args: { prompt: `Generate independent image ${index + 1}.` },
+    }))
+    const blockedPosition = appendNativeAssistant(blockedBatchParent, blockedBatch)
+    const requestsBeforeBlockedBatch = requests.length
+    const jobsBeforeBlockedBatch = jobs.length
+    const policiesBeforeBlockedBatch = policyModels.length
+    for (const call of blockedBatch) {
+      await assert.rejects(
+        executeNativeImageCall(blockedBatchParent, blockedPosition, call),
+        /parent image batch rejected before provider submission[\s\S]*four sibling native subagent calls[\s\S]*run_in_background: false/u,
+      )
+    }
+    assert.equal(requests.length, requestsBeforeBlockedBatch)
+    assert.equal(jobs.length, jobsBeforeBlockedBatch)
+    assert.equal(policyModels.length, policiesBeforeBlockedBatch)
+
+    const malformedBatchParent = nativeParent('image-native-malformed-batch-parent')
+    const malformedBatch = [
+      { id: 'native-malformed-valid', args: { prompt: 'Generate one valid image.' } },
+      { id: 'native-malformed-invalid', args: { prompt: 'unreachable' }, rawArguments: '{"prompt":' },
+    ]
+    const malformedPosition = appendNativeAssistant(malformedBatchParent, malformedBatch)
+    await assert.rejects(
+      executeNativeImageCall(malformedBatchParent, malformedPosition, malformedBatch[0]),
+      /cannot verify its owning native assistant\/message; refusing provider submission/u,
+    )
+    assert.equal(requests.length, requestsBeforeBlockedBatch)
+    assert.equal(jobs.length, jobsBeforeBlockedBatch)
+    assert.equal(policyModels.length, policiesBeforeBlockedBatch)
+
+    const allowedChild = nativeParent('image-native-single-child')
+    const singleCall = { id: 'native-single-new', args: { prompt: 'Generate one delegated child image.' } }
+    const singlePosition = appendNativeAssistant(allowedChild, [singleCall])
+    const singleResult = await executeNativeImageCall(allowedChild, singlePosition, singleCall)
+    assert.equal(requests.length, requestsBeforeBlockedBatch + 1)
+
+    const editCalls = [1, 2].map(index => ({
+      id: `native-edit-${index}`,
+      args: { prompt: `Modify the above image as variant ${index}.` },
+    }))
+    const editPosition = appendNativeAssistant(allowedChild, editCalls)
+    for (const call of editCalls) await executeNativeImageCall(allowedChild, editPosition, call)
+    assert.equal(requests.length, requestsBeforeBlockedBatch + 3)
+
+    const mixedCalls = [
+      { id: 'native-mixed-new', args: { prompt: 'Generate one new image in a mixed message.' } },
+      {
+        id: 'native-mixed-edit',
+        args: { prompt: 'Edit the existing image in a mixed message.', image_url: singleResult.images[0].image.attachmentId },
+      },
+    ]
+    const mixedPosition = appendNativeAssistant(allowedChild, mixedCalls)
+    for (const call of mixedCalls) await executeNativeImageCall(allowedChild, mixedPosition, call)
+    assert.equal(requests.length, requestsBeforeBlockedBatch + 5)
+
     const jobsBeforeStarterFailure = jobs.length
     const requestsBeforeStarterFailure = requests.length
     throwNextImageJobStarter = true
@@ -2420,8 +2515,10 @@ test('Agent operation guidance owns the e-Mate persona and native image batch po
   assert.match(section.text, /exactly one new image or any image edit, call `imagegen` directly in the current Agent/u)
   assert.match(section.text, /Run multiple edits serially in that Agent, one `imagegen` call per requested output/u)
   assert.match(section.text, /never delegate an edit or promise that a parent-Session source image is available in another Session/u)
-  assert.match(section.text, /Only when the user explicitly requests two or more mutually independent new images/u)
-  assert.match(section.text, /issue together, in one assistant step, one batch of at most four sibling native `subagent` calls, each explicitly setting `run_in_background: false`/u)
+  assert.match(section.text, /when the user requests two or more mutually independent new images, the parent Agent must not call `imagegen` at all/u)
+  assert.match(section.text, /must never emit multiple `imagegen` calls in one assistant message/u)
+  assert.match(section.text, /overrides wording such as "parallel\/concurrent imagegen"/u)
+  assert.match(section.text, /must instead issue together, in one assistant step, at most four sibling native `subagent` calls, each explicitly setting `run_in_background: false`/u)
   assert.match(section.text, /wait until every call in the current foreground batch returns before issuing the next batch/u)
   assert.match(section.text, /Each child prompt must be self-contained[\s\S]*generate only its one new image[\s\S]*call the existing `imagegen` exactly once[\s\S]*never delegate or call `subagent`/u)
   assert.match(section.text, /never silently retry, switch models, or fall back[\s\S]*clearly report that image's success or failure/u)

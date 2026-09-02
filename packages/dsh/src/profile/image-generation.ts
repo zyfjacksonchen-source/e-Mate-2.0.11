@@ -705,6 +705,45 @@ function attemptedImageOperation(args) {
   return Array.isArray(args.image_url) && args.image_url.length > 1 ? 'fusion' : 'edit'
 }
 
+const NATIVE_BATCH_ERROR = 'parent image batch rejected before provider submission: use at most four sibling native subagent calls with run_in_background: false; never call imagegen directly for two or more independent new images'
+const NATIVE_BATCH_SHAPE_ERROR = 'imagegen cannot verify its owning native assistant/message; refusing provider submission'
+
+function assertNativeImageBatchBoundary(agent, callId) {
+  const id = String(callId ?? '')
+  const events = [...agent?.session?.events ?? []]
+  const callEvents = events.filter(event => event?.type === 'tool/call' && String(event.data?.callId ?? '') === id)
+  // Direct plugin calls have no assistant batch; native AgentLoop dispatch always logs tool/call first.
+  if (callEvents.length === 0) return
+  if (callEvents.length !== 1) throw new Error(NATIVE_BATCH_SHAPE_ERROR)
+  const callEvent = callEvents[0]
+  const assistant = events.findLast(event => event?.type === 'assistant/message')
+  const content = assistant?.data?.message?.content
+  if (!Array.isArray(content)
+    || assistant.data.turn !== callEvent.data?.turn
+    || assistant.data.step !== callEvent.data?.step) throw new Error(NATIVE_BATCH_SHAPE_ERROR)
+  const ownerBlocks = content.filter(block => block?.type === 'tool-call' && String(block.id ?? '') === id)
+  if (ownerBlocks.length !== 1
+    || ownerBlocks[0].name !== 'imagegen'
+    || callEvent.data?.name !== 'imagegen'
+    || typeof ownerBlocks[0].arguments !== 'string'
+    || callEvent.data?.arguments !== ownerBlocks[0].arguments) throw new Error(NATIVE_BATCH_SHAPE_ERROR)
+
+  let newImages = 0
+  for (const block of content) {
+    if (block?.type !== 'tool-call' || block.name !== 'imagegen') continue
+    if (typeof block.arguments !== 'string') throw new Error(NATIVE_BATCH_SHAPE_ERROR)
+    let args
+    try {
+      args = JSON.parse(block.arguments)
+    } catch {
+      throw new Error(NATIVE_BATCH_SHAPE_ERROR)
+    }
+    const task = normalizeTask(args)
+    task.attachmentIds = implicitEditImages(agent, task)
+    if (task.attachmentIds.length === 0 && ++newImages >= 2) throw new Error(NATIVE_BATCH_ERROR)
+  }
+}
+
 function normalizePack(args) {
   if (!exactKeys(args, ['image_url']) || !Array.isArray(args.image_url)) {
     throw new Error('image_pack accepts only an image_url array')
@@ -1145,7 +1184,7 @@ export async function apply(ctx, config = {}) {
   ctx.effect(() => ctx.jobs.attachController('emate-image'), 'emate.image: target Job controller')
   ctx.tools.register(defineTool({
     name: 'imagegen',
-    description: 'Generate or edit one independent image through the fixed e-Mate gpt-image-2-pro route. For an edit, copy the exact sha256: value labeled as the current-session image attachment ID by a prior imagegen or job_output result into image_url; never pass its Job ID, request ID, or a URL. For multiple independent edits, make separate imagegen calls one at a time and pass exactly one source ID to each call. Pass multiple explicit IDs only for reference fusion into one output. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.',
+    description: 'Generate or edit exactly one image in this Agent through the fixed e-Mate gpt-image-2-pro route. HARD BATCH BOUNDARY: for two or more mutually independent new images, a parent Agent must not call imagegen at all and must never emit multiple imagegen calls in one assistant message, even when asked for parallel/concurrent imagegen; it must use at most four sibling native subagent calls with run_in_background: false. A delegated child may call imagegen exactly once for its one new image. For an edit, copy the exact sha256: value labeled as the current-session image attachment ID by a prior imagegen or job_output result into image_url; never pass its Job ID, request ID, or a URL. For multiple independent edits, make separate imagegen calls one at a time and pass exactly one source ID to each call. Pass multiple explicit IDs only for reference fusion into one output. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.',
     parameters: {
       prompt: { type: 'string', required: true, description: 'One image generation or edit instruction.' },
       image_url: {
@@ -1164,6 +1203,7 @@ export async function apply(ctx, config = {}) {
       let refs = []
       let task
       try {
+        assertNativeImageBatchBoundary(exec.agent, exec.callId)
         if (!ctx.tools.schemas(exec.agent).some(schema => schema.name === 'imagegen')) {
           const error = new Error('imagegen is unavailable in the current Agent tool scope')
           ;(error as Error & { code: string }).code = 'agent-tool-unavailable'
