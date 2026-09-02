@@ -462,10 +462,10 @@ async function reviewImageCandidate(
     '修改目标：',
     task.prompt,
     '',
-    '结构化差异证据：',
-    ...sources.map((source, index) => `- 源图 ${index + 1}：${source.attachmentId}（${source.width}×${source.height}）`),
-    `- 候选结果：${output.attachmentId}（${output.width}×${output.height}）`,
-    '- 系统只确认了源图与候选图的 SHA-256 不同；修改语义需要你对照图片确认。',
+    '图片对照信息：',
+    ...sources.map((source, index) => `- 源图 ${index + 1}：${source.name ?? '未命名图片'}（${source.width}×${source.height}）`),
+    `- 候选结果：${output.name ?? '改图候选'}（${output.width}×${output.height}）`,
+    '- 系统已确认候选文件与源文件不同；修改语义仍需你对照图片确认。',
   ].join('\n')
   try {
     const answer = await userQuestions.ask({
@@ -1084,12 +1084,16 @@ const imageOutput = {
       receipt: { type: 'json', required: true },
     },
   },
-  render: (_args, value) => [{
-    type: 'text',
-    text: value.status === 'completed'
-      ? `Generated 1 structurally verified image. Current-session image attachment ID for future image_url: ${value.images[0].image.attachmentId}`
-      : `The edited image was saved, but its requested visual or text change still needs human review. Current-session image attachment ID: ${value.images[0].image.attachmentId}`,
-  }],
+  render: (_args, value) => {
+    const image = value.images[0].image
+    const fileName = receiptImageName(image.name) ?? `e-Mate-image.${imageExtension(image.mediaType)}`
+    return [{
+      type: 'text',
+      text: value.status === 'completed'
+        ? `Image generation completed: 1 image (${fileName}).`
+        : `Image edit saved: 1 image (${fileName}) awaiting human confirmation.`,
+    }]
+  },
   presentationMeta: (_args, value) => {
     const image = value.images[0].image
     const locator = {

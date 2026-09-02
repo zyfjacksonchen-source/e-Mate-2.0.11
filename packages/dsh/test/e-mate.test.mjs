@@ -1564,7 +1564,12 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       }),
     })
     assert.equal(generatedContent.some(block => block.type === 'image'), false)
-    assert.equal(generatedContent.some(block => block.type === 'text' && block.text.includes(attachmentId)), true)
+    assert.deepEqual(generatedContent, [{
+      type: 'text',
+      text: 'Image generation completed: 1 image (e-Mate-image.png).',
+    }])
+    assert.doesNotMatch(JSON.stringify(generatedContent), /sha256:|attachment(?:Id| ID)/iu)
+    assert.equal(JSON.stringify(generatedContent).includes(attachmentId), false)
     assert.equal(sessionEvents.at(-1).data.schema_version, 2)
     assert.equal(sessionEvents.at(-1).data.call_id, 'image-call-1')
     assert.equal(sessionEvents.at(-1).data.operation, 'generate')
@@ -1731,6 +1736,13 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const textEdit = await imagegen.execute({ prompt: '把图片中的方林改成圣都。' }, execution())
     assert.equal(requests.at(-1).path, '/e-mate/model-api/v1/images/edits')
     assert.equal(textEdit.status, 'needs-review')
+    const pendingContent = imagegen.output.render({}, textEdit)
+    assert.deepEqual(pendingContent, [{
+      type: 'text',
+      text: 'Image edit saved: 1 image (e-Mate-image.png) awaiting human confirmation.',
+    }])
+    assert.doesNotMatch(JSON.stringify(pendingContent), /sha256:|attachment(?:Id| ID)/iu)
+    assert.equal(JSON.stringify(pendingContent).includes(textEdit.images[0].image.attachmentId), false)
     assert.deepEqual(textEdit.receipt.verification.text_replacement, {
       old_text_sha256: createHash('sha256').update('方林').digest('hex'),
       new_text_sha256: createHash('sha256').update('圣都').digest('hex'),
@@ -1798,7 +1810,12 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       assert.equal(question.intent.sources[0].attachmentId, attachmentId)
       assert.notEqual(question.intent.output.attachmentId, attachmentId)
       assert.match(question.detail, /只把标题中的旧名称改成新名称/u)
-      assert.match(question.detail, /系统只确认了源图与候选图的 SHA-256 不同/u)
+      assert.match(question.detail, /源图 1：e-Mate-image\.png（1×1）/u)
+      assert.match(question.detail, /候选结果：e-Mate-image\.png/u)
+      assert.match(question.detail, /系统已确认候选文件与源文件不同/u)
+      assert.doesNotMatch(question.detail, /sha256|attachmentId|哈希|hash/iu)
+      assert.equal(question.detail.includes(attachmentId), false)
+      assert.equal(question.detail.includes(question.intent.output.attachmentId), false)
       const pending = agent.session.events.findLast(event => event.type === 'emate/image-output'
         && event.data?.call_id === confirmedExecution.callId)
       assert.equal(pending.data.revision, 2)
