@@ -24,7 +24,7 @@ for (const row of manifest.rows) {
   assert.ok(typeof row.evidence === 'string' && row.evidence.length > 0, 'missing evidence: ' + row.id)
   assert.ok(typeof row.evidenceFile === 'string' && row.evidenceFile.length > 0, 'missing evidence file: ' + row.id)
   if (row.evidenceOwner === 'automated-test') {
-    assert.match(row.evidence, /\.(?:mjs|ts) :: .+/u, 'automated evidence needs exact path and test name: ' + row.id)
+    assert.match(row.evidence, /\.(?:mjs|tsx?) :: .+/u, 'automated evidence needs exact path and test name: ' + row.id)
     const delimiter = row.evidence.indexOf(' :: ')
     const evidencePath = row.evidence.slice(0, delimiter)
     const testName = row.evidence.slice(delimiter + 4)
@@ -57,4 +57,6 @@ for (const category of mandatory) assert.ok(categories.has(category), 'missing m
 assert.ok(manifest.rows.some(row => row.id === 'NEW-IMG-BATCH-001' && row.release === '2.0.17-new'))
 assert.ok(manifest.rows.some(row => row.id === 'NEW-WIN-CU-001' && row.release === '2.0.17-new'))
 assert.ok(manifest.rows.some(row => row.id === 'WIN-GAP-001' && row.release === '2.0.16-baseline'))
+assert.ok(manifest.rows.some(row => row.id === 'ATT-004' && row.release === '2.0.17-new'))
+assert.ok(manifest.rows.some(row => row.id === 'ATT-005' && row.release === '2.0.17-new'))
 console.log('validated ' + manifest.rows.length + ' regression inventory rows')

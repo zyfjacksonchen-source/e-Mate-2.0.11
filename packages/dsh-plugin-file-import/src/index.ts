@@ -8,6 +8,7 @@ import {
   MAX_FILE_BYTES,
   MAX_FILES,
   MAX_TOTAL_BYTES,
+  normalizedSafeFileName,
   type ImportedFile,
 } from './contract.ts'
 
@@ -19,6 +20,13 @@ interface WorkspaceView {
   readonly sessionIds: readonly string[]
 }
 
+interface WorkspaceContext {
+  readonly workspaceRegistry: {
+    readonly archivedSessionIds: readonly string[]
+    list(): readonly WorkspaceView[]
+  }
+}
+
 interface EncodedFile {
   readonly bytes: Buffer
   readonly displayName: string
@@ -26,14 +34,30 @@ interface EncodedFile {
   readonly storedName: string
 }
 
+interface ImportFileOperations {
+  readonly link: typeof link
+  readonly lstat: typeof lstat
+  readonly unlink: typeof unlink
+}
+
+const importFileOperations: ImportFileOperations = { link, lstat, unlink }
+
 export class ImportValidationError extends Error {}
 
 function badRequest(message: string) {
   return { ok: false, error: { code: 'bad-request', message, details: { issues: [] } } }
 }
 
-function unavailable() {
-  return { ok: false, error: { code: 'unavailable', message: '文件暂时无法导入当前工作区。', details: {} } }
+function internalError() {
+  return { ok: false, error: { code: 'internal', message: '文件暂时无法导入当前工作区。', details: {} } }
+}
+
+function diagnostic(value: unknown): { name: string; code: string } {
+  const safe = (input: unknown): string => typeof input === 'string' && /^[A-Za-z0-9_-]{1,32}$/u.test(input) ? input : 'unknown'
+  return {
+    name: safe(value instanceof Error ? value.name : typeof value),
+    code: safe(value !== null && typeof value === 'object' ? (value as { code?: unknown }).code : undefined),
+  }
 }
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
@@ -46,17 +70,8 @@ function inside(root: string, candidate: string): boolean {
 }
 
 function validatedDisplayName(value: unknown): string {
-  if (typeof value !== 'string') throw new ImportValidationError('文件名无效。')
-  const name = value.normalize('NFC')
-  if (name !== value || name === '' || name === '.' || name === '..' || name !== name.trim()
-    || name.startsWith('.') || Buffer.byteLength(name, 'utf8') > 160
-    || /[<>:"/\\|?*\u0000-\u001f]/u.test(name) || /[. ]$/u.test(name)) {
-    throw new ImportValidationError('文件名无效。')
-  }
-  const device = name.slice(0, name.indexOf('.') < 0 ? undefined : name.indexOf('.')).toUpperCase()
-  if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/u.test(device)) {
-    throw new ImportValidationError('文件名无效。')
-  }
+  const name = normalizedSafeFileName(value)
+  if (name === undefined) throw new ImportValidationError('文件名无效。')
   if (allowedMediaType(name) === undefined) throw new ImportValidationError('不支持此文件类型。')
   return name
 }
@@ -84,7 +99,8 @@ function decodeFiles(payload: unknown): { sessionId: string; files: EncodedFile[
     if (!exactKeys(item, ['bytes_base64', 'media_type', 'name'])
       || typeof item.bytes_base64 !== 'string'
       || item.bytes_base64.length > Math.ceil(MAX_FILE_BYTES / 3) * 4
-      || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(item.bytes_base64)
+      || item.bytes_base64.length % 4 !== 0
+      || !/^[A-Za-z0-9+/]*={0,2}$/u.test(item.bytes_base64)
       || typeof item.media_type !== 'string' || item.media_type.length > 127) {
       throw new ImportValidationError('导入文件无效。')
     }
@@ -101,12 +117,11 @@ function decodeFiles(payload: unknown): { sessionId: string; files: EncodedFile[
   return { sessionId: body.session_id, files }
 }
 
-async function workspaceRoot(ctx: any, sessionId: string): Promise<string> {
+async function workspaceRoot(ctx: WorkspaceContext, sessionId: string): Promise<string> {
   if (ctx.workspaceRegistry.archivedSessionIds.includes(sessionId)) {
     throw new ImportValidationError('当前会话已归档。')
   }
-  const workspace = (ctx.workspaceRegistry.list() as WorkspaceView[])
-    .find(candidate => candidate.sessionIds.includes(sessionId))
+  const workspace = ctx.workspaceRegistry.list().find(candidate => candidate.sessionIds.includes(sessionId))
   if (workspace === undefined) throw new ImportValidationError('当前会话没有绑定工作区。')
   const root = await realpath(workspace.path)
   if (!(await lstat(root)).isDirectory()) throw new ImportValidationError('当前工作区不可用。')
@@ -131,44 +146,105 @@ async function managedImports(root: string): Promise<string> {
 function collisionName(name: string, index: number): string {
   if (index === 1) return name
   const extension = extname(name)
-  return `${name.slice(0, name.length - extension.length)}-${index}${extension}`
+  const suffix = `-${index}${extension}`
+  const limit = 160 - Buffer.byteLength(suffix, 'utf8')
+  let stem = ''
+  for (const character of name.slice(0, name.length - extension.length)) {
+    if (Buffer.byteLength(stem + character, 'utf8') > limit) break
+    stem += character
+  }
+  return `${stem}${suffix}`
 }
 
-async function publishFile(directory: string, input: EncodedFile, signal?: AbortSignal): Promise<{ path: string; name: string }> {
+async function removeFile(path: string, operations: ImportFileOperations): Promise<void> {
+  try {
+    await operations.unlink(path)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+}
+
+function cleanupFailure(message: string, original: unknown, cleanup: unknown): AggregateError {
+  return new AggregateError([original, cleanup], message)
+}
+
+async function publishFile(
+  directory: string,
+  input: EncodedFile,
+  signal: AbortSignal | undefined,
+  operations: ImportFileOperations,
+): Promise<{ path: string; name: string }> {
   signal?.throwIfAborted()
   const temporary = join(directory, `.import-${randomUUID()}.tmp`)
   await writeFile(temporary, input.bytes, { flag: 'wx', flush: true, mode: 0o600, signal })
+  let saved: { path: string; name: string } | undefined
+  let failure: unknown
   try {
     for (let index = 1; index <= 999; index += 1) {
       signal?.throwIfAborted()
       const name = collisionName(input.storedName, index)
       const target = join(directory, name)
+      let linked = false
       try {
-        await link(temporary, target)
-        const info = await lstat(target)
-        if (!info.isFile() || info.isSymbolicLink()) {
-          await unlink(target).catch(() => {})
-          throw new ImportValidationError('导入结果不是普通文件。')
+        await operations.link(temporary, target)
+        linked = true
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue
+        throw error
+      }
+      try {
+        const info = await operations.lstat(target)
+        if (!info.isFile() || info.isSymbolicLink()) throw new ImportValidationError('导入结果不是普通文件。')
+        signal?.throwIfAborted()
+        saved = { path: target, name }
+        break
+      } catch (error) {
+        if (linked) {
+          try {
+            await removeFile(target, operations)
+          } catch (cleanup) {
+            throw cleanupFailure('导入目标清理失败。', error, cleanup)
+          }
         }
-        return { path: target, name }
-      } catch (error: unknown) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        throw error
       }
     }
-    throw new ImportValidationError('同名文件过多，无法安全导入。')
-  } finally {
-    await unlink(temporary).catch(() => {})
+    if (saved === undefined) throw new ImportValidationError('同名文件过多，无法安全导入。')
+  } catch (error) {
+    failure = error
   }
+
+  try {
+    await removeFile(temporary, operations)
+  } catch (cleanup) {
+    let combined: unknown = failure === undefined ? cleanup : cleanupFailure('导入临时文件清理失败。', failure, cleanup)
+    if (saved !== undefined) {
+      try {
+        await removeFile(saved.path, operations)
+      } catch (targetCleanup) {
+        combined = cleanupFailure('导入提交回滚失败。', combined, targetCleanup)
+      }
+    }
+    throw combined
+  }
+  if (failure !== undefined) throw failure
+  if (saved === undefined) throw new Error('import publication did not settle')
+  return saved
 }
 
-export async function importIntoWorkspace(root: string, files: readonly EncodedFile[], signal?: AbortSignal): Promise<ImportedFile[]> {
+export async function importIntoWorkspace(
+  root: string,
+  files: readonly EncodedFile[],
+  signal?: AbortSignal,
+  operations: ImportFileOperations = importFileOperations,
+): Promise<ImportedFile[]> {
   const directory = await managedImports(root)
   const published: string[] = []
   try {
     const result: ImportedFile[] = []
     for (const file of files) {
       if (await realpath(directory) !== directory) throw new ImportValidationError('工作区导入目录已变化。')
-      const saved = await publishFile(directory, file, signal)
+      const saved = await publishFile(directory, file, signal, operations)
       published.push(saved.path)
       result.push({
         bytes: file.bytes.byteLength,
@@ -180,7 +256,15 @@ export async function importIntoWorkspace(root: string, files: readonly EncodedF
     }
     return result
   } catch (error) {
-    await Promise.all(published.map(path => unlink(path).catch(() => {})))
+    const cleanupErrors: unknown[] = []
+    for (const path of published) {
+      try {
+        await removeFile(path, operations)
+      } catch (cleanup) {
+        cleanupErrors.push(cleanup)
+      }
+    }
+    if (cleanupErrors.length > 0) throw new AggregateError([error, ...cleanupErrors], '导入批次回滚失败。')
     throw error
   }
 }
@@ -196,7 +280,9 @@ export function apply(ctx: Context): void {
         const files = await importIntoWorkspace(root, request.files, signal)
         return { ok: true, value: { schema_version: 1, files } }
       } catch (error) {
-        return error instanceof ImportValidationError ? badRequest(error.message) : unavailable()
+        if (error instanceof ImportValidationError) return badRequest(error.message)
+        console.error('[emate-file-import] internal import failure', diagnostic(error))
+        return internalError()
       }
     },
     { authority: 'loopback' },

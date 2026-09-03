@@ -56,7 +56,7 @@
       "acceptance": [
         "所有后续 PR 能引用同一 baseline-lock.json。",
         "CI 拒绝浮动版本、未登记写集、跨 owner 写入以及 2.0.17 提前改版本。",
-        "Exactly 38 unique, resolvable and acyclic work orders are machine-checked with WIP <= 6.",
+        "Exactly 39 unique, resolvable and acyclic work orders are machine-checked with WIP <= 6.",
         "The rejected uploaded Desktop reference is absent from every active provenance field."
       ],
       "tests": [
@@ -817,6 +817,48 @@
       "risk": "中"
     },
     {
+      "id": "EM217-307",
+      "wave": "W3 Web 客户端",
+      "title": "统一普通文件导入失败与全类型安全边界",
+      "owner": "UI/shared-file-import",
+      "depends_on": [
+        "EM217-004",
+        "EM217-404"
+      ],
+      "branch": "feat/2.0.17/em217-307-universal-file-upload",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-307",
+      "write_set": [
+        "docs/2.0.17/check-plan.mjs",
+        "docs/2.0.17/execution-plan.md",
+        "docs/2.0.17/owners.md",
+        "docs/2.0.17/regression-inventory.md",
+        "docs/2.0.17/work-orders.json",
+        "tests/regression/2.0.17/inventory.json",
+        "tests/regression/2.0.17/inventory.test.mjs",
+        "packages/dsh-plugin-file-import/**"
+      ],
+      "implementation": [
+        "修复共享 file-import Host owner：预期输入校验继续返回带 issues 的 bad-request；所有意外异常返回 pinned rc.7 可解析的 internal 固定中文错误，并且服务端只记录有界通用错误类型/代码。",
+        "客户端严格解析 RpcResult 和成功文件字段，仅允许既知有界业务校验文案；internal、transport、Zod invalid_union、未知 code/字段与任意 Host 文案统一显示固定安全中文，不泄露 issue JSON、stack、绝对路径、原始文件名或字节。",
+        "普通文件始终由扩展名 allowlist 唯一决定 canonical MIME，不信任 Browser MIME，不按某一办公类型分叉路径或协议；NFC 规范化后继续执行隐藏名、设备名、跨平台字符和 160-byte 安全检查。",
+        "保留 native image draft/Attachment CAS、Workspace session membership、8 文件/单文件 16 MiB/总计 32 MiB、零字节、原子 link/collision/rollback、folder pass-through 与未知/脚本/可执行扩展拒绝。"
+      ],
+      "acceptance": [
+        "ALLOWED_MEDIA_BY_EXTENSION 当前每个普通类型都经过同一 Host import handler，保存字节相等、MIME canonical、stored name 安全且 draft 仅追加一个相对路径 mention；既有 native PNG/JPEG/GIF/WebP 路径不变。",
+        "NFC/分解中文名、空格/@ 碰撞、零字节、精确/超出单文件/数量/总量边界、malformed/noncanonical base64、MIME spoof、未知/可执行扩展、collision suffix、post-link abort/verification cleanup、temporary/target/batch cleanup failure surfacing 与 batch rollback 有真实行为测试。",
+        "捕获的 success、bad-request、internal RpcResult 在 pinned rc.7 serverResponseSchema runtime 可用时全部解析，旧 unavailable 失败；客户端 invalid_union/transport/任意 Host 文案只能得到固定安全中文。",
+        "picker cancel、Session switch、failure 后重选、mixed image+ordinary 和 folder pass-through 由最窄 client/pure fixture 覆盖；不新增 Store、Router、transport、Host 路径或 spreadsheet-specific endpoint/protocol。"
+      ],
+      "tests": [
+        "node --test packages/dsh-plugin-file-import/test/file-import.test.mjs packages/dsh-plugin-file-import/test/client-result.test.mjs packages/dsh-plugin-file-import/test/image-normalization.test.mjs",
+        "MAIN-AGENT-ONLY COMPONENT CHECK (requires installed pinned Harness workspace): workdir: upstream/deepseek-harness; corepack pnpm exec vitest run --config ../../packages/dsh/profile/plugins/emate-shell/vitest.config.ts ../../packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx",
+        "MAIN-AGENT-ONLY COMPONENT BUILD: corepack pnpm --filter @e-mate/dsh-plugin-file-import build",
+        "MAIN-AGENT-ONLY ASSEMBLED GUI: refresh the existing dsh web URL after rebuilding Web artifacts; exercise picker cancel/retry/session switch/mixed image+ordinary/folder pass-through and verify no raw error text"
+      ],
+      "rollback": "精确回滚共享 file-import 源码、测试与文档；删除失败导入产生的临时文件，保留已成功提交的 Workspace 文件和 native image Attachment CAS。",
+      "risk": "高"
+    },
+    {
       "id": "EM217-401",
       "wave": "W4 桌面原生对齐",
       "title": "锁定 pinned deepseek-harness-desktop 来源与执行顺序",
@@ -1101,6 +1143,7 @@
         "EM217-304",
         "EM217-305",
         "EM217-306",
+        "EM217-307",
         "EM217-402",
         "EM217-403",
         "EM217-404",

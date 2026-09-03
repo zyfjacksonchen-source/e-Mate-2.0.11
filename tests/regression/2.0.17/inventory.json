@@ -114,10 +114,10 @@
       "platforms": [
         "all"
       ],
-      "behavior": "File Import allowlists types/size, imports atomically into current workspace, rejects unsafe batches, and restores after Host restart.",
-      "preconditions": "Known live Session and fixture bytes.",
+      "behavior": "Every currently allowlisted ordinary extension uses one Host path with canonical extension-owned MIME, byte-equal atomic Workspace storage, safe NFC names, exact limits, collision handling, and batch rollback.",
+      "preconditions": "Known live Session and table-driven fixture bytes.",
       "evidenceOwner": "automated-test",
-      "evidence": "packages/dsh-plugin-file-import/test/file-import.test.mjs :: imports an allowlisted file atomically into the session workspace without exposing a host path",
+      "evidence": "packages/dsh-plugin-file-import/test/file-import.test.mjs :: imports every allowlisted ordinary extension through one canonical host path",
       "evidenceFile": "packages/dsh-plugin-file-import/test/file-import.test.mjs"
     },
     {
@@ -133,6 +133,34 @@
       "evidenceOwner": "automated-test",
       "evidence": "packages/dsh-plugin-file-import/test/image-normalization.test.mjs :: normalizes the T18 JPEG signature despite a png name and declaration",
       "evidenceFile": "packages/dsh-plugin-file-import/test/image-normalization.test.mjs"
+    },
+    {
+      "id": "ATT-004",
+      "category": "attachments-file-import",
+      "priority": "P0",
+      "release": "2.0.17-new",
+      "platforms": [
+        "all"
+      ],
+      "behavior": "Pinned rc.7-valid internal failures and all transport, parser, invalid_union, unknown-code, and arbitrary Host failures render only fixed safe copy; expected validation is allowlisted and bounded.",
+      "preconditions": "Captured custom RpcResult and thrown Zod-like fixtures.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-file-import/test/client-result.test.mjs :: maps transport and thrown Zod-like invalid_union values to fixed safe copy",
+      "evidenceFile": "packages/dsh-plugin-file-import/test/client-result.test.mjs"
+    },
+    {
+      "id": "ATT-005",
+      "category": "attachments-file-import",
+      "priority": "P1",
+      "release": "2.0.17-new",
+      "platforms": [
+        "web"
+      ],
+      "behavior": "Picker cancellation is a no-op, a failed import can be selected again, and a Session switch discards the stale result without mutating the new draft.",
+      "preconditions": "Installed Web component test dependencies.",
+      "evidenceOwner": "automated-test",
+      "evidence": "packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx :: drops an old in-flight result after switching sessions",
+      "evidenceFile": "packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx"
     },
     {
       "id": "CU-MAC-001",

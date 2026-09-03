@@ -67,6 +67,18 @@ export function allowedMediaType(name: string): string | undefined {
   return ALLOWED_MEDIA_BY_EXTENSION[extensionOf(name)]
 }
 
+/** Normalize and validate one cross-platform-safe filename. */
+export function normalizedSafeFileName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const name = value.normalize('NFC')
+  if (name === '' || name === '.' || name === '..' || name !== name.trim()
+    || name.startsWith('.') || new TextEncoder().encode(name).byteLength > 160
+    || /[<>:"/\\|?*\u0000-\u001f]/u.test(name) || /[. ]$/u.test(name)) return undefined
+  const dot = name.indexOf('.')
+  const device = name.slice(0, dot < 0 ? undefined : dot).toUpperCase()
+  return /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/u.test(device) ? undefined : name
+}
+
 export function appendImportedMentions(draft: string, files: readonly ImportedFile[]): string {
   const prefix = draft === '' || /\s$/u.test(draft) ? draft : `${draft} `
   return `${prefix}${files.map(file => `@${file.relative_path}`).join(' ')} `

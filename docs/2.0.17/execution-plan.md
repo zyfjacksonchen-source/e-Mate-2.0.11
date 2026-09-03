@@ -12,6 +12,10 @@ The main agent is sole integrator, builder, installer, releaser, and rollback ow
 
 EM217-002 固化已接受的 pinned-spawn：effect-scoped consume-once gate、model-hidden descriptor-label nonce、normalized args、spawn/shared CAS。child 只校验 descriptor mode/provider/nonce 与自身 Session parent；parent 在 link/flush/open 前要求 run.localAgent!==undefined 且 exact run.id=run.localAgent.id=claimed child。顺序必须为 parent created（含 effective concurrency）flush → child register/start → parent identity check → exact task link flush → open/provider；child Session flush → inspect one terminal receipt/Job → parent task-state flush → quiescent dispose/refill，任一 flush false/reject 均 fail closed。EM217-101 仅交付由 focused test 直接执行的 internal request normalizer/ID/schema，EM217-102 仅交付由 focused test 直接执行的 internal event reducer/projection；两者都不注册 model-visible Tool、不产生 public event、不修改 agent-operations/Tool Search/audit。EM217-103 是第一次原子公开激活：在 complete pinned-spawn gate、durable producer、可用 new-image execution/result 同时成立后，才在同一 ticket 注册 image_batch 并更新 agent-operations、既有 Tool Search visibility/aliases 和 canonical image-generation audit classification；禁止 disconnected registration、unused UI/state 或 placeholder endpoint。EM217-104 仅在同一 owner 内强化 live-child concurrency/refill/cancel。EM217-105 完整实现 parent CAS 与 exact Attachment refs/IDs gate、child receipt owner 不变、userQuestions 路由 parent、提问前 child revision 2 flush、回答后 revision 3 flush，且 review 全程占槽，之后才启用 source edit/fusion；parent userQuestions 不可用则 provider 前拒绝且不得永久 needs-review。EM217-106 只做 parent exact link → existing child projection，不扩展 child receipt metadata。EM217-107 永不自动恢复/重试 one-shot task：created/unlinked=interrupted/not-submitted，linked/nonterminal=unknown，只有 existing child terminal receipt 可在 provider POST=0 时 reacquire/project/finalize。`image_batch` 仍是 `@e-mate/dsh` 内唯一实现，不建第二 scheduler/store/RPC。
 
+## Shared file import
+
+EM217-307 由 `UI/shared-file-import` 所有，精确依赖 EM217-004 与 EM217-404，并在 EM217-501 前完成。当前 allowlist 中每个普通文件类型都走同一 extension-owned canonical MIME、session Workspace、atomic link/collision/rollback 和严格 RpcResult 路径；不得为 spreadsheet 或任一单独扩展新增 endpoint/protocol。预期校验保持 `bad-request`，意外 Host 异常使用 pinned rc.7 `internal` 固定安全文案；客户端仅呈现 allowlist 内的有界业务校验文案，其余失败均折叠为固定安全中文。Native images 继续使用既有 draft/Attachment CAS。
+
 ## Gateway boundary
 
 The current gateway already owns its idempotent journal, admission, and exactly-once usage. EM217-201/203/205 prove those owners and close only demonstrated gaps. EM217-202 allows only typed pre-provider-admission retry or proven receipt reacquisition. Unknown outcomes are never generically replayed. Every gateway request is one image; no `/images/batch` and no `n>1`.
@@ -42,4 +46,4 @@ Git tracks only small sanitized specifications, manifests, and assertions. Video
 
 ## Machine check
 
-Run `node docs/2.0.17/check-plan.mjs`, then `git diff --check`. The canonical 38 work orders and detailed acceptance/rollback data are in `work-orders.json`.
+Run `node docs/2.0.17/check-plan.mjs`, then `git diff --check`. The canonical 39 work orders and detailed acceptance/rollback data are in `work-orders.json`.

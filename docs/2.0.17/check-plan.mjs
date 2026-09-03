@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
 const here = new URL('.', import.meta.url)
-const [baselineText, ordersText, executionText, ownersText, adrText, batchSchemaText, batchResultSchemaText] = await Promise.all([
+const [baselineText, ordersText, executionText, ownersText, adrText, batchSchemaText, batchResultSchemaText, fileImportHostText] = await Promise.all([
   readFile(new URL('baseline-lock.json', here), 'utf8'),
   readFile(new URL('work-orders.json', here), 'utf8'),
   readFile(new URL('execution-plan.md', here), 'utf8'),
@@ -11,6 +11,7 @@ const [baselineText, ordersText, executionText, ownersText, adrText, batchSchema
   readFile(new URL('adr/ADR-0217-image-batch.md', here), 'utf8'),
   readFile(new URL('contracts/image-batch.schema.json', here), 'utf8'),
   readFile(new URL('contracts/image-batch-result.schema.json', here), 'utf8'),
+  readFile(new URL('../../packages/dsh-plugin-file-import/src/index.ts', here), 'utf8'),
 ])
 const baseline = JSON.parse(baselineText)
 const orders = JSON.parse(ordersText)
@@ -36,9 +37,9 @@ assert(!/(?:main|master|latest|HEAD)/.test(JSON.stringify([active, orders.baseli
 
 const tickets = orders.tickets
 const ids = tickets.map(ticket => ticket.id)
-const expectedIds = ['EM217-000', 'EM217-001', 'EM217-002', 'EM217-003', 'EM217-004', 'EM217-101', 'EM217-102', 'EM217-103', 'EM217-104', 'EM217-105', 'EM217-106', 'EM217-107', 'EM217-201', 'EM217-202', 'EM217-203', 'EM217-204', 'EM217-205', 'EM217-301', 'EM217-302', 'EM217-303', 'EM217-304', 'EM217-305', 'EM217-306', 'EM217-401', 'EM217-402', 'EM217-403', 'EM217-404', 'EM217-405', 'EM217-406', 'EM217-407', 'EM217-408', 'EM217-501', 'EM217-502', 'EM217-503', 'EM217-504', 'EM217-505', 'EM217-506', 'EM217-507']
-assert.equal(tickets.length, 38)
-assert.equal(new Set(ids).size, 38)
+const expectedIds = ['EM217-000', 'EM217-001', 'EM217-002', 'EM217-003', 'EM217-004', 'EM217-101', 'EM217-102', 'EM217-103', 'EM217-104', 'EM217-105', 'EM217-106', 'EM217-107', 'EM217-201', 'EM217-202', 'EM217-203', 'EM217-204', 'EM217-205', 'EM217-301', 'EM217-302', 'EM217-303', 'EM217-304', 'EM217-305', 'EM217-306', 'EM217-307', 'EM217-401', 'EM217-402', 'EM217-403', 'EM217-404', 'EM217-405', 'EM217-406', 'EM217-407', 'EM217-408', 'EM217-501', 'EM217-502', 'EM217-503', 'EM217-504', 'EM217-505', 'EM217-506', 'EM217-507']
+assert.equal(tickets.length, 39)
+assert.equal(new Set(ids).size, 39)
 assert.deepEqual([...ids].sort(), [...expectedIds].sort())
 const map = new Map(tickets.map(ticket => [ticket.id, ticket]))
 for (const ticket of tickets) {
@@ -61,6 +62,29 @@ for (const id of ids) visit(id)
 
 const t = id => map.get(id)
 const text = id => JSON.stringify(t(id))
+const fileImport = t('EM217-307')
+assert.equal(fileImport.owner, 'UI/shared-file-import')
+assert.deepEqual(fileImport.depends_on, ['EM217-004', 'EM217-404'])
+assert.equal(fileImport.branch, 'feat/2.0.17/em217-307-universal-file-upload')
+assert.equal(fileImport.worktree, '/Users/mac/e-mate/worktrees/em217-307')
+assert.deepEqual(fileImport.write_set, [
+  'docs/2.0.17/check-plan.mjs',
+  'docs/2.0.17/execution-plan.md',
+  'docs/2.0.17/owners.md',
+  'docs/2.0.17/regression-inventory.md',
+  'docs/2.0.17/work-orders.json',
+  'tests/regression/2.0.17/inventory.json',
+  'tests/regression/2.0.17/inventory.test.mjs',
+  'packages/dsh-plugin-file-import/**',
+])
+assert(t('EM217-501').depends_on.includes('EM217-307'))
+assert(fileImport.tests.includes('MAIN-AGENT-ONLY COMPONENT CHECK (requires installed pinned Harness workspace): workdir: upstream/deepseek-harness; corepack pnpm exec vitest run --config ../../packages/dsh/profile/plugins/emate-shell/vitest.config.ts ../../packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx'))
+assert(executionText.includes('The main agent is sole integrator'))
+for (const required of ['internal', 'bad-request', 'ALLOWED_MEDIA_BY_EXTENSION', 'NFC', '零字节', '16 MiB', '32 MiB', 'batch rollback', 'serverResponseSchema', 'invalid_union', 'native image']) {
+  assert(text('EM217-307').toLowerCase().includes(required.toLowerCase()), 'EM217-307 missing ' + required)
+}
+assert(text('EM217-307').includes('不新增 Store、Router、transport、Host 路径或 spreadsheet-specific endpoint/protocol'), 'EM217-307 must forbid spreadsheet-specific paths and protocols')
+assert(!/(?:xlsx|spreadsheet|表格)/iu.test(fileImportHostText), 'Host import path must not specialize spreadsheets')
 
 for (const [name, schema] of [['image-batch', batchSchema], ['image-batch-result', batchResultSchema]]) {
   assert.equal(schema.$schema, 'https://json-schema.org/draft/2020-12/schema', name + ' must use JSON Schema 2020-12')
@@ -269,4 +293,4 @@ assert(executionText.includes('workdir: desktop; corepack yarn check'))
 for (const command of ['workdir: desktop; corepack yarn check', 'workdir: desktop; corepack yarn dist:mac', 'workdir: desktop; corepack yarn dist:win']) {
   assert(ordersText.includes(command), 'work orders missing Desktop command: ' + command)
 }
-console.log('EM217 plan check passed: 38 tickets, exact pins, corrected native owners, acyclic dependencies, WIP <= 6, and gates OPEN.')
+console.log('EM217 plan check passed: 39 tickets, exact pins, corrected native owners, acyclic dependencies, WIP <= 6, and gates OPEN.')

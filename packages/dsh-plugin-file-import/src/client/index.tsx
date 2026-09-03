@@ -14,9 +14,9 @@ import {
   MAX_FILES,
   MAX_TOTAL_BYTES,
   WORKSPACE_DROP_TARGET,
-  type ImportedFile,
 } from '../contract.ts'
 import { normalizedImage } from './image.ts'
+import { parseImportResult, safeThrownImportMessage } from './result.ts'
 import css from './style.module.css'
 
 export const inject = ['slots', 'connection', 'inputTriggers']
@@ -27,7 +27,6 @@ const IMAGE_MEDIA_BY_EXTENSION: Readonly<Record<string, string>> = {
   gif: 'image/gif', jpeg: 'image/jpeg', jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
 }
 
-type RpcResult = { ok: boolean; value?: unknown; error?: { message?: string } }
 type ImportPhase = 'importing' | 'ready' | 'error'
 interface ImportRow {
   readonly id: string
@@ -43,7 +42,7 @@ interface FileImportProps {
   readonly input: { readonly draft: string; readonly phase: string }
   readonly inputActions: { setDraft(text: string): void }
   readonly isLoopback: boolean
-  readonly callImport: (payload: Record<string, unknown>) => Promise<RpcResult>
+  readonly callImport: (payload: Record<string, unknown>) => Promise<unknown>
 }
 
 function imageType(file: File): string | undefined {
@@ -66,23 +65,6 @@ async function base64Of(file: File): Promise<string> {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
   }
   return btoa(binary)
-}
-
-function importedFiles(value: unknown): ImportedFile[] {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('文件导入响应无效。')
-  const body = value as Record<string, unknown>
-  if (body.schema_version !== 1 || !Array.isArray(body.files)) throw new Error('文件导入响应无效。')
-  return body.files.map((entry): ImportedFile => {
-    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('文件导入响应无效。')
-    const file = entry as Record<string, unknown>
-    if (!Number.isSafeInteger(file.bytes) || typeof file.display_name !== 'string'
-      || typeof file.media_type !== 'string' || typeof file.relative_path !== 'string'
-      || !/^\.e-mate\/imports\/[^/@\s]+$/u.test(file.relative_path)
-      || typeof file.stored_name !== 'string' || file.relative_path !== `.e-mate/imports/${file.stored_name}`) {
-      throw new Error('文件导入响应无效。')
-    }
-    return file as unknown as ImportedFile
-  })
 }
 
 function errorRows(files: readonly File[], message: string): ImportRow[] {
@@ -133,11 +115,15 @@ export function FileImportControl({ sessionId, input, inputActions, isLoopback, 
         bytes_base64: await base64Of(file),
       })))
       if (owner.current !== requestSession) return
-      const result = await callImport({ session_id: sessionId, files: encoded })
+      const result = parseImportResult(await callImport({ session_id: sessionId, files: encoded }))
       if (owner.current !== requestSession) return
-      if (!result.ok) throw new Error(result.error?.message ?? '文件导入失败。')
-      const imported = importedFiles(result.value)
-      if (imported.length !== pending.length) throw new Error('文件导入响应数量不一致。')
+      if (!result.ok) {
+        setRows(current => current.map(row => pending.some(item => item.id === row.id)
+          ? { ...row, phase: 'error', message: result.message } : row))
+        return
+      }
+      const imported = result.files
+      if (imported.length !== pending.length) throw new Error('response count mismatch')
       inputActions.setDraft(appendImportedMentions(draft.current, imported))
       setRows(current => current.map(row => {
         const index = pending.findIndex(item => item.id === row.id)
@@ -148,7 +134,7 @@ export function FileImportControl({ sessionId, input, inputActions, isLoopback, 
       }))
     } catch (error) {
       if (owner.current !== requestSession) return
-      const message = error instanceof Error ? error.message : '文件导入失败。'
+      const message = safeThrownImportMessage(error)
       setRows(current => current.map(row => pending.some(item => item.id === row.id) ? { ...row, phase: 'error', message } : row))
     } finally {
       if (owner.current === requestSession) setBusy(false)
