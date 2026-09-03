@@ -260,6 +260,86 @@ test(
 );
 
 test(
+  'real PostgreSQL rolls back a conflicting pending invocation without another row or quota charge',
+  { skip: databaseUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set' },
+  async () => {
+    const suffix = randomUUID();
+    const tenantId = `invocation-conflict-${suffix}`;
+    const userId = `user-${suffix}`;
+    const taskId = `task-${suffix}`;
+    const database = pool();
+    const store = new PostgresUsageStore(database, limits);
+    const invocation: InvocationFact = {
+      tenantId,
+      userId,
+      taskId,
+      traceId: `trace-${suffix}`,
+      modelId: 'gpt-image-2-pro',
+      providerId: 'custom-gpt',
+      requestDigest: 'A'.repeat(43),
+      routeFingerprint: 'R'.repeat(43),
+    };
+    const snapshot = async () => {
+      const [invocations, quota] = await Promise.all([
+        database.query<{
+          invocation_id: string;
+          request_digest: string;
+          status: string;
+        }>(
+          `SELECT invocation_id, request_digest, status
+             FROM e_mate_model_invocation
+            WHERE tenant_id = $1 AND user_id = $2 AND task_id = $3
+            ORDER BY invocation_id`,
+          [tenantId, userId, taskId]
+        ),
+        database.query<{ tokens: string }>(
+          'SELECT tokens::text AS tokens FROM e_mate_model_quota_state WHERE tenant_id = $1',
+          [tenantId]
+        ),
+      ]);
+      return { invocations: invocations.rows, quota: quota.rows };
+    };
+
+    try {
+      await store.initialize();
+      await createActiveTestUsers(database, [{ tenantId, userId }]);
+      const prepared = await store.prepare(invocation);
+      assert.equal(prepared.status, 'STARTED');
+      const beforeConflict = await snapshot();
+      assert.deepEqual(beforeConflict.invocations, [{
+        invocation_id: prepared.invocationId,
+        request_digest: invocation.requestDigest,
+        status: 'PREPARED',
+      }]);
+      assert.equal(beforeConflict.quota.length, 1);
+
+      await assert.rejects(
+        store.prepare({ ...invocation, requestDigest: 'B'.repeat(43) }),
+        /request digest changed/
+      );
+      assert.deepEqual(await snapshot(), beforeConflict);
+
+      const exactReplay = await store.prepare(invocation);
+      assert.equal(exactReplay.status, 'PENDING');
+      assert.equal(exactReplay.invocationId, prepared.invocationId);
+      assert.deepEqual(await snapshot(), beforeConflict);
+      assert.equal((await database.query<{ usable: number }>('SELECT 1 AS usable')).rows[0]?.usable, 1);
+    } finally {
+      await database
+        .query('DELETE FROM e_mate_model_usage_task WHERE tenant_id = $1', [tenantId])
+        .catch(() => undefined);
+      await database
+        .query('DELETE FROM e_mate_model_quota_state WHERE tenant_id = $1', [tenantId])
+        .catch(() => undefined);
+      await database
+        .query('DELETE FROM e_mate_tenant_user WHERE tenant_id = $1 AND user_id = $2', [tenantId, userId])
+        .catch(() => undefined);
+      await database.end().catch(() => undefined);
+    }
+  }
+);
+
+test(
   'real PostgreSQL atomically aggregates and freezes gateway usage attempts',
   { skip: databaseUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set' },
   async () => {

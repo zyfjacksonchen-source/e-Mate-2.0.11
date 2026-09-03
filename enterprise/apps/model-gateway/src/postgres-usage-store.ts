@@ -9,6 +9,7 @@ import {
 import { TASK_SCENARIOS } from '@e-mate/monitoring-contract';
 import {
   InvocationAdmissionError,
+  InvocationRequestConflictError,
   AuditTaskConflictError,
   AuditUsageConflictError,
   validateInvocationLimits,
@@ -660,6 +661,9 @@ export class PostgresUsageStore implements UsageStore {
         [fact.tenantId, fact.userId, fact.taskId]
       );
       if (pending.rows[0]) {
+        if (pending.rows[0].request_digest !== fact.requestDigest) {
+          throw new InvocationRequestConflictError('Invocation request digest changed');
+        }
         await client.query('COMMIT');
         return {
           status: 'PENDING',

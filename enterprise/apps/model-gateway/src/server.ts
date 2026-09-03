@@ -160,6 +160,8 @@ export type InvocationLimits = {
   invocationLeaseMs: number;
 };
 
+export class InvocationRequestConflictError extends Error {}
+
 export class InvocationAdmissionError extends Error {
   readonly code: 'TENANT_REQUEST_RATE_LIMITED' | 'TENANT_CONCURRENCY_LIMITED' | 'USER_TOKEN_LIMIT_REACHED';
   readonly retryAfterMs: number;
@@ -476,6 +478,9 @@ export class InMemoryUsageStore implements UsageStore {
       ? [...entry.invocations.entries()].find(([, invocation]) => invocation.state === 'PREPARED')
       : undefined;
     if (pending) {
+      if (pending[1].fact.requestDigest !== fact.requestDigest) {
+        throw new InvocationRequestConflictError('Invocation request digest changed');
+      }
       return { status: 'PENDING', invocationId: pending[0] };
     }
     const completed = entry
@@ -2644,6 +2649,15 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           );
           response.end();
         }
+        return;
+      }
+      if (error instanceof InvocationRequestConflictError) {
+        json(response, 409, {
+          error: {
+            code: 'INVOCATION_REQUEST_CONFLICT',
+            message: 'The task identity is already bound to a different request',
+          },
+        });
         return;
       }
       if (error instanceof InvocationAdmissionError) {
