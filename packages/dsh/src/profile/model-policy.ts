@@ -13,7 +13,7 @@ const CHAT_MODELS = new Map([
   ['deepseek', { reasoning_effort: 'max' }],
   ['doubao-seed-2-0-pro-260215', { reasoning_effort: 'medium' }],
 ])
-const IMAGE_MODELS = new Set(['gpt-image-2-pro', 'gpt-image-2'])
+const IMAGE_MODELS = new Set(['gpt-image-2-pro'])
 const MANAGED_MODELS = new Set([...CHAT_MODELS.keys(), ...IMAGE_MODELS])
 const SUBJECT = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/u
 const RECEIPT = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,255}$/u
@@ -323,7 +323,7 @@ export function modelImageInputContract(metadata, provider, model) {
 export function validateModelPolicy(value, accountSubject, now = Date.now()) {
   const keys = [
     'account_subject', 'allowed_model_ids', 'default_chat_model_id', 'default_chat_reasoning_effort',
-    'expires_at', 'image_fallback_upstream_model_id', 'image_primary_model_id', 'issued_at',
+    'expires_at', 'image_primary_model_id', 'issued_at',
     'receipt_id', 'revision', 'schema_version',
   ]
   if (!isRecord(value)
@@ -337,14 +337,12 @@ export function validateModelPolicy(value, accountSubject, now = Date.now()) {
     || !CHAT_MODELS.has(value.default_chat_model_id)
     || value.default_chat_reasoning_effort !== CHAT_MODELS.get(value.default_chat_model_id).reasoning_effort
     || value.image_primary_model_id !== 'gpt-image-2-pro'
-    || value.image_fallback_upstream_model_id !== 'gpt-image-2'
     || !Array.isArray(value.allowed_model_ids)
     || value.allowed_model_ids.length < 1
     || value.allowed_model_ids.length > MANAGED_MODELS.size
     || new Set(value.allowed_model_ids).size !== value.allowed_model_ids.length
     || value.allowed_model_ids.some(model => typeof model !== 'string' || !MANAGED_MODELS.has(model))
-    || !value.allowed_model_ids.includes(value.default_chat_model_id)
-    || value.allowed_model_ids.includes('gpt-image-2') && !value.allowed_model_ids.includes('gpt-image-2-pro')) {
+    || !value.allowed_model_ids.includes(value.default_chat_model_id)) {
     throw new Error('e-Mate enterprise model policy is invalid')
   }
   const issuedAt = Date.parse(value.issued_at)
@@ -364,7 +362,6 @@ export function validateModelPolicy(value, accountSubject, now = Date.now()) {
     default_chat_model_id: value.default_chat_model_id,
     default_chat_reasoning_effort: value.default_chat_reasoning_effort,
     image_primary_model_id: value.image_primary_model_id,
-    image_fallback_upstream_model_id: value.image_fallback_upstream_model_id,
     issued_at: new Date(issuedAt).toISOString(),
     expires_at: new Date(expiresAt).toISOString(),
     receipt_id: value.receipt_id,
@@ -968,7 +965,7 @@ export async function apply(ctx, config = {}) {
   const { defineDomain, domainTable, z } = await loadTargetStorageDomain(
     config.bindingPath ?? join(import.meta.dirname, 'runtime-binding.json'),
   )
-  const policyRecord = z.object({
+  const policyShape = {
     schema_version: z.literal(1),
     account_subject: z.string().regex(SUBJECT),
     revision: z.number().int().min(1),
@@ -976,11 +973,32 @@ export async function apply(ctx, config = {}) {
     default_chat_model_id: z.enum([...CHAT_MODELS.keys()]),
     default_chat_reasoning_effort: z.enum(['max', 'medium']),
     image_primary_model_id: z.literal('gpt-image-2-pro'),
-    image_fallback_upstream_model_id: z.literal('gpt-image-2'),
     issued_at: z.iso.datetime(),
     expires_at: z.iso.datetime(),
     receipt_id: z.string().regex(RECEIPT),
     policy_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+  }
+  const policyRecord = z.object(policyShape).strict()
+  const migratedLegacyRecords = new WeakSet()
+  const legacyPolicyRecord = z.object({
+    ...policyShape,
+    allowed_model_ids: z.array(z.enum([...MANAGED_MODELS, 'gpt-image-2']))
+      .min(1).max(MANAGED_MODELS.size + 1),
+    image_fallback_upstream_model_id: z.literal('gpt-image-2'),
+  }).strict().transform(value => {
+    const { policy_sha256: expected, ...legacy } = value
+    if (!legacy.allowed_model_ids.includes('gpt-image-2')
+      || new Set(legacy.allowed_model_ids).size !== legacy.allowed_model_ids.length
+      || sha256(canonicalJson(legacy)) !== expected) {
+      throw new Error('e-Mate legacy model policy is invalid')
+    }
+    const { image_fallback_upstream_model_id: _fallback, ...current } = legacy
+    const migrated = validateModelPolicy({
+      ...current,
+      allowed_model_ids: [...new Set(current.allowed_model_ids.filter(model => MANAGED_MODELS.has(model)))],
+    }, current.account_subject, Date.parse(current.issued_at))
+    migratedLegacyRecords.add(migrated)
+    return migrated
   })
   const runtimeProjectionRecord = z.object({
     schema_version: z.literal(1),
@@ -997,9 +1015,14 @@ export async function apply(ctx, config = {}) {
   const domain = await ctx.storageDomain.open(defineDomain({
     name: 'emate_model_policy',
     version: 1,
-    tables: { active: domainTable(policyRecord), runtime_projection: domainTable(runtimeProjectionRecord) },
+    tables: { active: domainTable(z.union([policyRecord, legacyPolicyRecord])), runtime_projection: domainTable(runtimeProjectionRecord) },
   }))
   ctx.effect(() => () => domain.close(), 'emate.modelPolicy: close target storage domain')
+  const policyTable = domain.table('active')
+  const storedPolicy = policyTable.get('active')
+  if (storedPolicy !== undefined && migratedLegacyRecords.has(storedPolicy)) {
+    await policyTable.put('active', storedPolicy)
+  }
   const quotaSnapshot = z.object({
     schema_version: z.literal(1),
     account_subject: z.string().regex(SUBJECT),
@@ -1050,7 +1073,7 @@ export async function apply(ctx, config = {}) {
     quotaDomain.table('reservations'),
     quotaDomain.table('usage'),
   )
-  const service = createService(ctx, domain.table('active'), domain.table('runtime_projection'), quota)
+  const service = createService(ctx, policyTable, domain.table('runtime_projection'), quota)
   ctx.provide('emateModelPolicy', service)
   ctx.effect(() => installApiPolicy(ctx, service), 'emate.modelPolicy: target ApiProxy policy projection')
   ctx.on('agent/request', async (payload, next) => {

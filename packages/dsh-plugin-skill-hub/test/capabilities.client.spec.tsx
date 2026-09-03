@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerRouteScopedConversationHeader } from '../../dsh/profile/plugins/emate-shell/src/client/index.ts'
 import { CapabilitiesPage, CapabilityControl } from '../src/client/capabilities.tsx'
 import { apply as registerSkillHub, inject as skillHubInject } from '../src/client/index.tsx'
+import { skillHubSuccess } from '../src/result.ts'
 
 const SHA256 = 'a'.repeat(64)
 const Icon = () => <svg aria-hidden="true" />
@@ -118,10 +119,10 @@ describe('capability center fidelity surface', () => {
     runtime.provide('connection', {
       rpc: { call: vi.fn(async (route: string, endpoint: string) => {
         if (route === '/emate.capabilities') return { ok: true, value: { schema_version: 1, items: capabilityItems } }
-        if (endpoint === 'catalog.search') return { ok: true, value: { items: [hubCard], next_cursor: null } }
-        if (endpoint === 'inventory.list') return { ok: true, value: { schema_version: 1, items: [installedSkill] } }
-        if (endpoint === 'jobs.list') return { ok: true, value: { items: [] } }
-        return { ok: true, value: {} }
+        if (endpoint === 'catalog.search') return { ok: true, value: skillHubSuccess({ items: [hubCard], next_cursor: null }) }
+        if (endpoint === 'inventory.list') return { ok: true, value: skillHubSuccess({ schema_version: 1, items: [installedSkill] }) }
+        if (endpoint === 'jobs.list') return { ok: true, value: skillHubSuccess({ items: [] }) }
+        return { ok: true, value: skillHubSuccess({}) }
       }) },
       api: { credentials: { set: vi.fn(async () => ({ result: { ok: true, value: {} } })) } },
     } as never)

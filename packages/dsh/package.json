@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh",
-  "version": "2.0.15",
-  "description": "e-Mate 2.0.15 local browser runtime and lifecycle CLI",
+  "version": "2.0.16",
+  "description": "e-Mate 2.0.16 local browser runtime and lifecycle CLI",
   "type": "module",
   "license": "MIT",
   "publishConfig": {
@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate-2.0.11.git",
+    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate-desktop.git",
     "directory": "packages/dsh"
   },
   "bin": {
@@ -31,10 +31,9 @@
     "win32"
   ],
   "scripts": {
-    "build": "node ../../scripts/clean-emate-build.mjs && node ../../scripts/sync-emate-plugin-bundles.mjs && ../../upstream/deepseek-harness/node_modules/.bin/tsdown && node ../../scripts/release-source.mjs --out lib/release-source.json && cd profile/plugins/emate-shell && ../../../../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "build": "node ../../scripts/clean-emate-build.mjs && node ../../scripts/sync-emate-plugin-bundles.mjs && ../../upstream/deepseek-harness/node_modules/.bin/tsdown && cd profile/plugins/emate-shell && ../../../../../upstream/deepseek-harness/node_modules/.bin/tsdown",
     "test": "pnpm run build && node --test && pnpm --dir profile/plugins/emate-shell test",
-    "prepack": "pnpm run build && node ../../scripts/build-harness-runtime.mjs",
-    "pack:check": "pnpm pack --pack-destination ../../dist/npm"
+    "prepack": "pnpm run build && node ../../scripts/build-harness-runtime.mjs"
   },
   "dependencies": {
     "fflate": "0.8.3",

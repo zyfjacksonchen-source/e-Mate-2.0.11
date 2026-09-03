@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-tool-search",
-  "version": "2.0.15",
+  "version": "2.0.16",
   "description": "DSH-native progressive tool disclosure for e-Mate",
   "type": "module",
   "main": "lib/index.mjs",
@@ -22,13 +22,17 @@
     "LICENSE"
   ],
   "license": "MIT",
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate-2.0.11.git",
+    "url": "git+https://github.com/zyfjacksonchen-source/e-Mate-desktop.git",
     "directory": "packages/dsh-plugin-tool-search"
   },
-  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": "0.1.0-rc.7"
   },
@@ -58,23 +62,15 @@
     "prepack": "pnpm run build"
   },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" }
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   },
   "eMate": {
-    "component": {
-      "schema_version": 1,
-      "id": "@e-mate/dsh-plugin-tool-search",
-      "kind": "profile",
-      "base_imports": [
-        "@deepseek-ai/dsh-tools"
-      ],
-      "authority_contract": {
-        "effects": [],
-        "guards": ["read-only", "session-scope"]
-      },
-      "base_contracts": ["e-mate-desktop-profile-v15-dsh-32728743c289"]
-    },
     "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "32728743c28911bcd4279f79fe9c43ee7aacfb6d"
+    "harnessCommit": "4da69d7c3522ee51de12822c917c503a124f7a7d",
+    "baseImports": [
+      "@deepseek-ai/dsh-tools"
+    ]
   }
 }

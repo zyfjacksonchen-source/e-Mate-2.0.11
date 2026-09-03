@@ -1,12 +1,26 @@
-/** Build an unsigned macOS DMG smoke artifact on a native macOS host. */
+/** Build the unsigned e-Mate macOS DMG with dsh-desktop's native packager. */
 
 import { spawnSync } from 'node:child_process'
 import { rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { withoutMacReleaseSecrets } from './release-preflight.ts'
 import { prepareInstalledMacUniversalRuntime } from './mac-universal.ts'
+
+const SIGNING_ENVIRONMENT_VARIABLES = [
+  'APPLE_API_ISSUER', 'APPLE_API_KEY', 'APPLE_API_KEY_ID',
+  'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_ID', 'APPLE_KEYCHAIN',
+  'APPLE_KEYCHAIN_PROFILE', 'APPLE_TEAM_ID', 'CSC_IDENTITY_AUTO_DISCOVERY',
+  'CSC_FOR_PULL_REQUEST', 'CSC_INSTALLER_KEY_PASSWORD', 'CSC_INSTALLER_LINK',
+  'CSC_KEYCHAIN', 'CSC_KEY_PASSWORD', 'CSC_LINK', 'CSC_NAME', 'MACOS_SIGN_IDENTITY',
+  'MAC_CERT_P12_BASE64',
+] as const
+
+function withoutSigningEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const sanitized = { ...env }
+  for (const name of SIGNING_ENVIRONMENT_VARIABLES) delete sanitized[name]
+  return sanitized
+}
 
 /** Injectable native macOS packaging boundary used by focused tests. */
 export interface MacSmokePackageOptions {
@@ -62,7 +76,7 @@ function defaultOptions(): MacSmokePackageOptions {
   const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
   const workspaceRoot = resolve(desktopRoot, '..')
   const require = createRequire(import.meta.url)
-  const outputDir = resolve(desktopRoot, 'dist', 'mac-smoke')
+  const outputDir = resolve(desktopRoot, 'dist', 'mac-release')
   return {
     env: process.env,
     platform: process.platform,
@@ -82,12 +96,7 @@ function defaultOptions(): MacSmokePackageOptions {
 }
 
 /**
- * Run the headless release gates and package one unsigned macOS DMG smoke.
- *
- * The signed and notarized release stays a manual step on a credentialed
- * machine; this smoke exists so macOS packaging regressions fail in CI before
- * a manual release. The universal target exercises both Intel and Apple
- * Silicon packaging in one artifact.
+ * Run the release gates and package one unsigned universal macOS DMG.
  * @param options - Injectable process and command boundaries.
  */
 export function packageMacSmoke(options: MacSmokePackageOptions = defaultOptions()): void {
@@ -106,14 +115,18 @@ export function packageMacSmoke(options: MacSmokePackageOptions = defaultOptions
     )
   }
 
-  const cleanEnvironment = withoutMacReleaseSecrets(options.env)
-  options.log('Building an unsigned macOS DMG smoke; signing and notarization are release-only steps.')
-  options.run(
-    'corepack',
-    ['yarn', 'workspace', '@e-mate/desktop', 'check:mac-package'],
-    options.workspaceRoot,
-    cleanEnvironment,
-  )
+  const cleanEnvironment = withoutSigningEnvironment(options.env)
+  options.log('Building the unsigned e-Mate macOS DMG with the dsh-desktop package flow.')
+  if (options.env.DSH_PACKAGE_CHECK_ALREADY_RAN !== '1') {
+    options.run(
+      'corepack',
+      ['yarn', 'workspace', '@e-mate/desktop', 'check:mac-package'],
+      options.workspaceRoot,
+      cleanEnvironment,
+    )
+  } else {
+    options.log('Skipping the macOS package preflight; the package gate already passed.')
+  }
   options.resetOutput()
   options.prepareRuntime()
   options.run(

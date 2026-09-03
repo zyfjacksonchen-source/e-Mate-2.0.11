@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, readFileSync, readdirSync, symlinkSync } from 'node:fs'
+import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 const ignoredDirectories = new Set(['.git', 'build', 'dist', 'lib', 'node_modules'])
@@ -37,27 +37,18 @@ function harnessPackages(harnessRoot) {
   return packages
 }
 
-function verifyPackage(path, name, expectedVersion) {
-  const manifest = JSON.parse(readFileSync(join(path, 'package.json'), 'utf8'))
-  if (manifest.name !== name || manifest.version !== expectedVersion) {
-    throw new Error(`Base import ${name} must resolve to ${expectedVersion}`)
-  }
-}
-
 /** Provide component tests the exact pinned Harness packages that production resolves from Base. */
 export function prepareHarnessBaseImports({ componentRoot, harnessRoot, baseImports, runtimeImports }) {
   const packages = harnessPackages(harnessRoot)
   for (const name of baseImports.filter(candidate => candidate.startsWith('@deepseek-ai/'))) {
     const expectedVersion = runtimeImports[name]
     if (typeof expectedVersion !== 'string') throw new Error(`undeclared Base runtime import: ${name}`)
-    const target = join(componentRoot, 'node_modules', ...name.split('/'))
-    if (entryExists(target)) {
-      verifyPackage(target, name, expectedVersion)
-      continue
-    }
     const source = packages.get(name)
     if (source === undefined) throw new Error(`pinned Harness package is unavailable for Base import: ${name}`)
     if (source.version !== expectedVersion) throw new Error(`pinned Harness ${name} must equal ${expectedVersion}`)
+    const target = join(componentRoot, 'node_modules', ...name.split('/'))
+    if (entryExists(target) && realpathSync(target) === realpathSync(source.root)) continue
+    rmSync(target, { recursive: true, force: true })
     mkdirSync(dirname(target), { recursive: true })
     symlinkSync(source.root, target, process.platform === 'win32' ? 'junction' : 'dir')
   }

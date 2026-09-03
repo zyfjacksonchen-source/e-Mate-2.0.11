@@ -5,10 +5,9 @@ import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { WINDOWS_CAPTION_CONTROLS_WIDTH } from '../../../../../../desktop/e-mate-desktop/src/window-chrome.ts'
 import type {
-  DesktopUpdateBridge,
-  DesktopUpdateBridgeWindow,
-  DesktopUpdateState,
-} from '../../../../../../desktop/e-mate-desktop/src/update-presentation.ts'
+  DesktopUpdateTriggerBridge,
+  DesktopUpdateTriggerBridgeWindow,
+} from '../../../../../../desktop/e-mate-desktop/src/desktop-update-trigger-contract.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HeaderControls } from '../src/client/header-controls.tsx'
 import { SettingsChrome } from '../src/client/settings-chrome.tsx'
@@ -20,24 +19,15 @@ import {
 
 const Icon = () => <svg />
 
-function updateBridge(initial?: DesktopUpdateState) {
-  let state = initial
-  const listeners = new Set<(state: DesktopUpdateState) => void>()
-  const bridge: DesktopUpdateBridge = {
-    runInteractiveUpdate: vi.fn(async () => {}),
-    getState: () => state,
-    subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
-    cancel: vi.fn(() => true),
-  }
+function updateBridge(): DesktopUpdateTriggerBridge {
   return {
-    bridge,
-    publish(next: DesktopUpdateState) { state = next; listeners.forEach(listener => { listener(next) }) },
+    runInteractiveUpdate: vi.fn(async () => {}),
   }
 }
 
 afterEach(() => {
   cleanup()
-  delete (window as DesktopUpdateBridgeWindow).__EMATE_DESKTOP_UPDATES__
+  delete (window as DesktopUpdateTriggerBridgeWindow).__EMATE_DESKTOP_UPDATES__
   delete document.body.dataset.dshDesktopMode
   history.replaceState(null, '', '/')
 })
@@ -77,7 +67,7 @@ describe('desktop header controls', () => {
     expect(screen.queryByRole('button', { name: '打开设置' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '切换到明亮模式' }))
     expect(toggleTheme).toHaveBeenCalledOnce()
-    expect(updates.bridge.runInteractiveUpdate).not.toHaveBeenCalled()
+    expect(updates.runInteractiveUpdate).not.toHaveBeenCalled()
     expect(openSettings).not.toHaveBeenCalled()
   })
 
@@ -127,7 +117,7 @@ describe('desktop header controls', () => {
     expect(settings).toContain('padding: 16px calc(20px + var(--dsh-desktop-caption-safe-width, 0px)) 16px max(20px, var(--dsh-desktop-caption-safe-left, 0px)) !important;')
   })
 
-  it('projects one updater state into Header and Settings with progress, cancellation, and trigger errors', async () => {
+  it('triggers the native updater from Settings and keeps trigger errors visible', async () => {
     const updates = updateBridge()
     render(<>
       <HeaderControls
@@ -137,57 +127,44 @@ describe('desktop header controls', () => {
         requestDownload={vi.fn()} dismissDownload={vi.fn()}
         LightIcon={Icon} DarkIcon={Icon}
       />
-      <SettingsChrome updates={updates.bridge} UpdateIcon={Icon} />
+      <SettingsChrome updates={updates} UpdateIcon={Icon} />
     </>)
 
     expect(screen.queryByRole('button', { name: '分享当前任务' })).toBeNull()
     expect(screen.getAllByRole('button', { name: '检查更新' })).toHaveLength(1)
-    act(() => { updates.publish({ stage: 'available', version: '2.0.15' }) })
-    const retry = screen.getByRole('button', { name: '再次检查更新（发现 2.0.15）' })
-    fireEvent.click(retry)
-    expect(updates.bridge.runInteractiveUpdate).toHaveBeenCalledOnce()
-    expect(updates.bridge.cancel).not.toHaveBeenCalled()
-    act(() => { updates.publish({ stage: 'downloading', version: '2.0.15', bytes: 25, total: 100 }) })
-    expect(screen.getAllByRole('button', { name: '取消更新（25%）' })).toHaveLength(1)
-    fireEvent.click(screen.getByRole('button', { name: '取消更新（25%）' }))
-    expect(updates.bridge.cancel).toHaveBeenCalledOnce()
-    act(() => { updates.publish({ stage: 'staging', version: '2.0.15' }) })
-    expect((screen.getByRole('button', { name: '准备更新中' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '检查更新' }))
+    expect(updates.runInteractiveUpdate).toHaveBeenCalledOnce()
 
     const failed = updateBridge()
-    vi.mocked(failed.bridge.runInteractiveUpdate).mockRejectedValueOnce(new Error('更新服务不可用'))
+    vi.mocked(failed.runInteractiveUpdate).mockRejectedValueOnce(new Error('更新服务不可用'))
     cleanup()
-    render(<SettingsChrome updates={failed.bridge} UpdateIcon={Icon} />)
+    render(<SettingsChrome updates={failed} UpdateIcon={Icon} />)
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }))
     expect((await screen.findByRole('alert')).textContent).toBe('更新服务不可用')
   })
 
-  it('keeps the native Settings action when the context bridge clones update snapshots', async () => {
+  it('keeps the native Settings action when the context bridge exposes one trigger', async () => {
     type RootProps = PropsRenderSlots<'settings.action'>
     const Root = ({ renderSlot }: RootProps) => renderSlot('settings.action', {})
     const runtime = await SlotTestRuntime.create()
     await runtime.root.declare({
       'settings.action': { kind: 'list', scope: 'root' },
     } as never, Root as never)
-    const state: DesktopUpdateState = { stage: 'failed', retryable: true }
-    ;(window as DesktopUpdateBridgeWindow).__EMATE_DESKTOP_UPDATES__ = {
+    ;(window as DesktopUpdateTriggerBridgeWindow).__EMATE_DESKTOP_UPDATES__ = {
       runInteractiveUpdate: vi.fn(async () => {}),
-      getState: () => ({ ...state }),
-      subscribe: () => () => {},
-      cancel: vi.fn(() => false),
     }
     runtime.slots.register({
       name: 'settings.action',
       id: 'e-mate-settings-header',
       inject: () => ({
-        updates: (window as DesktopUpdateBridgeWindow).__EMATE_DESKTOP_UPDATES__,
+        updates: (window as DesktopUpdateTriggerBridgeWindow).__EMATE_DESKTOP_UPDATES__,
         UpdateIcon: Icon,
       }),
     } as never, SettingsChrome as never)
 
     const view = runtime.renderRoot()
 
-    expect(view.getByRole('button', { name: '再次检查更新（更新失败，可重试）' })).not.toBeNull()
+    expect(view.getByRole('button', { name: '检查更新' })).not.toBeNull()
     expect(view.container.querySelector('[data-slot-error="settings.action"]')).toBeNull()
     await runtime.dispose()
   })

@@ -106,6 +106,27 @@ async function loadModelPolicySource() {
   return import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)
 }
 
+async function loadEnterpriseProviderSource() {
+  const source = readFileSync(new URL('../src/profile/identity/enterprise-provider.ts', import.meta.url), 'utf8')
+    .replace(
+      `import {
+  agreementBundleSha256,
+  agreementDocuments,
+} from './agreements.js'`,
+      "const agreementBundleSha256 = ''\nconst agreementDocuments = []",
+    )
+    .replace(
+      "import { LOGGED_OUT_CREDENTIAL } from '../credentials-os.js'",
+      `const LOGGED_OUT_CREDENTIAL = '${LOGGED_OUT_CREDENTIAL}'`,
+    )
+    .replace('function policyFor(value: StoredSession, runtime: readonly RuntimeModel[])',
+      'export function policyFor(value: StoredSession, runtime: readonly RuntimeModel[])')
+  const compiled = transpileModule(source, {
+    compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 },
+  }).outputText
+  return import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)
+}
+
 test('remembered lease load is retryable and refresh retries reuse one opaque request id', async () => {
   let failProjection = true
   let clock = NOW
@@ -367,7 +388,7 @@ test('late refresh and runtime policy responses cannot revive credentials after 
   const policyProvider = createEnterpriseIdentityProvider(options(mapCredentials(policyValues), async input => {
     const path = new URL(input).pathname
     if (path.endsWith('/v1/runtime-models')) {
-      assert.equal(new URL(input).searchParams.get('client_version'), '2.0.15')
+      assert.equal(new URL(input).searchParams.get('client_version'), '2.0.16')
       markPolicyStarted()
       await policyGate
       return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
@@ -597,6 +618,42 @@ test('image input contract trusts exact model metadata and preserves native atta
   assert.deepEqual(durable, before, 'capability resolution must never rewrite durable image blocks')
 })
 
+test('client and enterprise identity image policies expose only gpt-image-2-pro without fallback', async () => {
+  const { validateModelPolicy } = await loadModelPolicySource()
+  const { policyFor } = await loadEnterpriseProviderSource()
+  const accountSubject = 'tenant-test:user-a'
+  const rawPolicy = {
+    schema_version: 1,
+    account_subject: accountSubject,
+    revision: 1,
+    allowed_model_ids: ['gpt-5.6-luna', 'gpt-image-2-pro'],
+    default_chat_model_id: 'gpt-5.6-luna',
+    default_chat_reasoning_effort: 'max',
+    image_primary_model_id: 'gpt-image-2-pro',
+    issued_at: new Date(NOW - 60_000).toISOString(),
+    expires_at: new Date(NOW + 3_600_000).toISOString(),
+    receipt_id: 'policy-receipt:test-user',
+  }
+  const policy = validateModelPolicy(rawPolicy, accountSubject, NOW)
+  assert.deepEqual(policy.allowed_model_ids.filter(id => id.startsWith('gpt-image-')), ['gpt-image-2-pro'])
+  assert.equal('image_fallback_upstream_model_id' in policy, false)
+  assert.throws(() => validateModelPolicy({
+    ...rawPolicy,
+    allowed_model_ids: [...rawPolicy.allowed_model_ids, 'gpt-image-2'],
+  }, accountSubject, NOW), /policy is invalid/u)
+  assert.throws(() => validateModelPolicy({
+    ...rawPolicy,
+    image_fallback_upstream_model_id: 'gpt-image-2',
+  }, accountSubject, NOW), /policy is invalid/u)
+
+  const remembered = JSON.parse(stored())
+  remembered.session.modelGateway.allowedModelIds = ['gpt-5.6-luna', 'gpt-image-2-pro', 'gpt-image-2']
+  const identityPolicy = policyFor(remembered, [{ id: 'gpt-5.6-luna' }])
+  assert.deepEqual(identityPolicy.allowed_model_ids, ['gpt-5.6-luna', 'gpt-image-2-pro'])
+  assert.deepEqual(identityPolicy.allowed_model_ids.filter(id => id.startsWith('gpt-image-')), ['gpt-image-2-pro'])
+  assert.equal('image_fallback_upstream_model_id' in identityPolicy, false)
+})
+
 test('identity credential generation fences a late runtime projection without permanently dropping models', async () => {
   const { createService } = await loadModelPolicySource()
   const credentials = new Map()
@@ -618,11 +675,10 @@ test('identity credential generation fences a late runtime projection without pe
     schema_version: 1,
     account_subject: 'account:test-user',
     revision: 1,
-    allowed_model_ids: ['gpt-5.6-luna', 'gpt-image-2-pro', 'gpt-image-2'],
+    allowed_model_ids: ['gpt-5.6-luna', 'gpt-image-2-pro'],
     default_chat_model_id: 'gpt-5.6-luna',
     default_chat_reasoning_effort: 'max',
     image_primary_model_id: 'gpt-image-2-pro',
-    image_fallback_upstream_model_id: 'gpt-image-2',
     issued_at: new Date(now - 1_000).toISOString(),
     expires_at: new Date(now + 3_600_000).toISOString(),
     receipt_id: 'policy-receipt:test-user',

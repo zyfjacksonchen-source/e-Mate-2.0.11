@@ -40,7 +40,6 @@ export type ModelGatewayRoute = {
   id: string;
   apiMode?: 'responses' | 'chat-completions' | 'images-generations';
   upstreamModelId: string;
-  fallbackUpstreamModelId?: string;
   upstreamBaseUrl: string;
   allowInsecureHttpUpstream?: true;
   upstreamApiKey: string;
@@ -70,6 +69,7 @@ const managedCodexModelIds = new Set([
   'deepseek',
   'doubao-seed-2-0-pro-260215',
 ]);
+const runtimeModelsClientVersions = new Set(['2.0.12', '2.0.13', '2.0.14', '2.0.15', '2.0.16']);
 
 const deepSeekSearchCredentialRouteId = 'deepseek-web-search';
 const deepSeekSearchProviderId = 'deepseek-official';
@@ -1440,7 +1440,7 @@ function validModelsQuery(url: URL): boolean {
   return (
     entries.length === 1 &&
     entries[0]?.[0] === 'client_version' &&
-    /^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$/.test(entries[0][1])
+    (url.pathname === '/v1/runtime-models' || /^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$/.test(entries[0][1]))
   );
 }
 
@@ -1462,7 +1462,6 @@ function validateRoute(route: ModelGatewayRoute): void {
       route.apiMode !== 'chat-completions' &&
       route.apiMode !== 'images-generations') ||
     !identifierPattern.test(route.upstreamModelId) ||
-    (route.fallbackUpstreamModelId !== undefined && !identifierPattern.test(route.fallbackUpstreamModelId)) ||
     !identifierPattern.test(route.providerId) ||
     (route.id === deepSeekSearchCredentialRouteId &&
       (route.providerId !== deepSeekSearchProviderId ||
@@ -1498,9 +1497,11 @@ function validateRoute(route: ModelGatewayRoute): void {
     (route.remoteCompactionV2 === true &&
       (route.id !== 'gpt-5.6-sol' || route.apiMode === 'chat-completions' || route.apiMode === 'images-generations')) ||
     (route.apiMode === 'images-generations' &&
-      (route.reasoning !== false || route.input.length !== 1 || route.input[0] !== 'text')) ||
-    (route.fallbackUpstreamModelId !== undefined &&
-      (route.apiMode !== 'images-generations' || route.fallbackUpstreamModelId === route.upstreamModelId))
+      (route.id !== 'gpt-image-2-pro' ||
+        route.upstreamModelId !== 'gpt-image-2-pro' ||
+        route.reasoning !== false ||
+        route.input.length !== 1 ||
+        route.input[0] !== 'text'))
   ) {
     throw new Error(`Invalid Model Gateway route: ${route.id}`);
   }
@@ -1513,7 +1514,6 @@ function fingerprintRoute(route: ModelGatewayRoute): string {
         id: route.id,
         apiMode: route.apiMode ?? 'responses',
         upstreamModelId: route.upstreamModelId,
-        fallbackUpstreamModelId: route.fallbackUpstreamModelId,
         upstreamBaseUrl: route.upstreamBaseUrl.replace(/\/$/, ''),
         allowInsecureHttpUpstream: route.allowInsecureHttpUpstream === true,
         providerId: route.providerId,
@@ -1836,7 +1836,6 @@ async function modelRouteUpstreamApiKey(
 }
 
 const definitelyRejectedStatuses = new Set([400, 401, 403, 404, 413, 415, 422, 429]);
-const imageFallbackStatuses = new Set([400, 404, 415, 422]);
 const consentProtectedPaths = new Set([
   '/v1/models',
   '/v1/runtime-models',
@@ -1980,7 +1979,6 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
             upstreamBaseUrl: _upstreamBaseUrl,
             allowInsecureHttpUpstream: _allowInsecureHttpUpstream,
             upstreamModelId: _upstreamModelId,
-            fallbackUpstreamModelId: _fallbackUpstreamModelId,
             providerId: _providerId,
             remoteCompactionV2,
             ...route
@@ -2014,6 +2012,9 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
       if (url.pathname === '/v1/runtime-models') {
         if (request.method !== 'GET') return method(response, 'GET');
         const clientVersion = url.searchParams.get('client_version');
+        if (clientVersion !== null && !runtimeModelsClientVersions.has(clientVersion)) {
+          throw new HttpError(400, 'UNSUPPORTED_CLIENT_VERSION', 'Unsupported runtime models client version');
+        }
         const searchGrantRequested = clientVersion !== null;
         let searchGrantStatus: 'granted' | 'denied' | 'unavailable' = 'unavailable';
         let searchApiKey: string | undefined;
@@ -2505,17 +2506,16 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           throw new HttpError(400, 'INVALID_MODEL_REQUEST', `Invalid image ${edit ? 'edit' : 'generation'} request`);
         }
         const upstreamApiKey = await modelRouteUpstreamApiKey(options.tenantModelRoutePolicy, identity.tenantId, route);
-        const generationBody = (model: string): string =>
-          JSON.stringify({
-            model,
-            prompt: body.prompt,
-            ...(body.size === undefined ? {} : { size: body.size }),
-            n: 1,
-            response_format: 'b64_json',
-          });
-        const editForm = (model: string): FormData => {
+        const generationBody = JSON.stringify({
+          model: route.upstreamModelId,
+          prompt: body.prompt,
+          ...(body.size === undefined ? {} : { size: body.size }),
+          n: 1,
+          response_format: 'b64_json',
+        });
+        const editForm = (): FormData => {
           const form = new FormData();
-          form.set('model', model);
+          form.set('model', route.upstreamModelId);
           form.set('prompt', body.prompt as string);
           form.set('n', '1');
           form.set('response_format', 'b64_json');
@@ -2535,7 +2535,7 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
           .update(
             edit
               ? JSON.stringify({ model: route.upstreamModelId, prompt: body.prompt, operation: 'edit' })
-              : generationBody(route.upstreamModelId)
+              : generationBody
           );
         for (const image of editBody?.images ?? []) {
           requestDigest
@@ -2573,47 +2573,35 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
         request.once('aborted', () => clientAbort.abort());
         response.once('close', () => clientAbort.abort());
         const signal = AbortSignal.any([AbortSignal.timeout(timeoutMs), clientAbort.signal]);
-        const upstreamModels = [route.upstreamModelId, route.fallbackUpstreamModelId].filter(
-          (model): model is string => model !== undefined
-        );
-        let upstream: Response | undefined;
-        for (const [index, upstreamModel] of upstreamModels.entries()) {
-          try {
-            upstream = await gatewayFetch(`${route.upstreamBaseUrl.replace(/\/$/, '')}/images/${edit ? 'edits' : 'generations'}`, {
-              method: 'POST',
-              headers: {
-                accept: 'application/json',
-                authorization: `Bearer ${upstreamApiKey}`,
-                ...(edit ? {} : { 'content-type': 'application/json' }),
-                'idempotency-key': index === 0 ? prepared.invocationId : `${prepared.invocationId}:fallback`,
-              },
-              body: edit ? editForm(upstreamModel) : generationBody(upstreamModel),
-              redirect: 'error',
-              signal,
-            });
-          } catch (error) {
-            throw new HttpError(
-              error instanceof DOMException && error.name === 'TimeoutError' ? 504 : 502,
-              error instanceof DOMException && error.name === 'TimeoutError'
-                ? 'UPSTREAM_TIMEOUT'
-                : 'UPSTREAM_UNAVAILABLE',
-              'Image provider temporarily unavailable'
-            );
-          }
-          if (upstream.ok) break;
-          if (index === 0 && route.fallbackUpstreamModelId && imageFallbackStatuses.has(upstream.status)) {
-            if (upstream.body) {
-              // eslint-disable-next-line no-await-in-loop
-              await upstream.body.cancel().catch(() => undefined);
-            }
-            continue;
-          }
+        let upstream: Response;
+        try {
+          upstream = await gatewayFetch(`${route.upstreamBaseUrl.replace(/\/$/, '')}/images/${edit ? 'edits' : 'generations'}`, {
+            method: 'POST',
+            headers: {
+              accept: 'application/json',
+              authorization: `Bearer ${upstreamApiKey}`,
+              ...(edit ? {} : { 'content-type': 'application/json' }),
+              'idempotency-key': prepared.invocationId,
+            },
+            body: edit ? editForm() : generationBody,
+            redirect: 'error',
+            signal,
+          });
+        } catch (error) {
+          throw new HttpError(
+            error instanceof DOMException && error.name === 'TimeoutError' ? 504 : 502,
+            error instanceof DOMException && error.name === 'TimeoutError'
+              ? 'UPSTREAM_TIMEOUT'
+              : 'UPSTREAM_UNAVAILABLE',
+            'Image provider temporarily unavailable'
+          );
+        }
+        if (!upstream.ok) {
           if (definitelyRejectedStatuses.has(upstream.status)) {
             await options.usageStore.reject(identity, taskId, prepared.invocationId);
           }
           throw new HttpError(502, 'UPSTREAM_REJECTED', 'Image provider rejected the request');
         }
-        if (!upstream?.ok) throw new HttpError(502, 'UPSTREAM_REJECTED', 'Image provider rejected the request');
         if (!(upstream.headers.get('content-type') ?? '').includes('application/json')) {
           throw new HttpError(502, 'UPSTREAM_REJECTED', 'Image provider rejected the request');
         }

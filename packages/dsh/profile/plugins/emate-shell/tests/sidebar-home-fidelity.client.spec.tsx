@@ -540,7 +540,7 @@ describe('pinned e-Mate Sidebar and Home projection', () => {
       {...sidebarUtilityProps}
     />)
 
-    expect(screen.getByText('2.0.15')).not.toBeNull()
+    expect(screen.getByText('2.0.16')).not.toBeNull()
     expect(screen.getByRole('button', { name: '新建任务' }).textContent).toContain('新任务')
     expect(screen.getByRole('button', { name: '新建任务' }).getAttribute('aria-current')).toBe('page')
     const sidebar = screen.getByRole('complementary', { name: '任务导航' })

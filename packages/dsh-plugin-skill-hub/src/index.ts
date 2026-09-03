@@ -12,6 +12,7 @@ import {
   SkillHubOperationError,
   SkillHubRecoveryPendingError,
 } from './skill-hub.js'
+import { skillHubFailureResult, skillHubSuccess } from './result.js'
 
 export const name = 'emate-skill-hub'
 export const inject = ['tools', 'jobs', 'skills', 'userQuestions', 'systemPrompt', 'emateIdentity', 'connection', 'webServer']
@@ -45,7 +46,7 @@ function startJob(ctx, owner, signal, label, operation) {
           value => ({ status: 'completed', detail: label, output: JSON.stringify(value) }),
           error => ({
             status: controller.signal.aborted && !(error instanceof SkillHubRecoveryPendingError) ? 'killed' : 'failed',
-            detail: error instanceof Error ? error.message : String(error),
+            detail: skillHubFailure(error).message,
             output: JSON.stringify({ schema_version: 1, error: skillHubFailure(error) }),
           }),
         )
@@ -424,8 +425,11 @@ export async function apply(ctx, config = {}) {
   ctx.effect(() => ctx.connection.rpc.handle(
     SKILL_HUB_CHANNEL,
     async (...args) => {
-      try { return await skillHubRpc(...args) } catch (error) {
-        return { ok: false, error: { ...skillHubFailure(error), details: { issues: [] } } }
+      try {
+        const result = await skillHubRpc(...args)
+        return { ok: true, value: result.ok ? skillHubSuccess(result.value) : skillHubFailureResult(result.error) }
+      } catch (error) {
+        return { ok: true, value: skillHubFailureResult(error) }
       }
     },
     { authority: 'loopback' },

@@ -1,20 +1,20 @@
-# e-Mate 2.0.15 Skill Hub 与 DSH Skill 合同
+# e-Mate 2.0.16 Skill Hub 与 DSH Skill 合同
 
 ## 1. 一个市场、一个运行时、一个组件
 
-e-Mate 沿用 2.0.5 Skill Hub 的公开目录与不可变版本模型，不创建第二套市场、ZIP 格式或 Skill Store。2.0.15 的适配面只有一个可热更新 Profile 组件 `@e-mate/dsh-plugin-skill-hub`；Host 事务、Agent Tools、Harness Connection RPC 和界面必须以同一版本发布。
+e-Mate 保留一个公开目录与不可变版本模型，不创建第二套市场、ZIP 格式或 Skill Store。2.0.16 的适配面只有一个随 Desktop 打包的 Profile 组件 `@e-mate/dsh-plugin-skill-hub`；Host 事务、Agent Tools、Harness Connection RPC 和界面必须以同一版本构建。
 
 权威参考仍是：
 
-- 服务端实现：`enterprise/apps/skill-hub-worker`；2.0.5 的固定 gitlink 只作历史 UI/合同参考，不作为当前 Worker 或生产部署证据；
-- 服务端投影：`upstream/e-mate-2.0.5/desktop/src/v1/api/skillHubRuntimeContract.ts`；
-- 用户流程：`upstream/e-mate-2.0.5/desktop/src/v1/components/SkillsWorkspace.tsx`；
+- 服务端实现：`enterprise/apps/skill-hub-worker`；
+- Host、Agent 与客户端投影：`packages/dsh-plugin-skill-hub`；
+- 用户流程：当前 Profile 的原生 Harness Connection、Job、Skill provider 与客户端 slot；
 - 本地解析与调用：固定 rc.7 的 `@deepseek-ai/dsh-skill-filesystem`、`ctx.skills` 与 `@deepseek-ai/dsh-tool-skill`。
 
 | 对象 | 运行方式 | 安装位置 | 发布边界 |
 |---|---|---|---|
 | Skill Hub ZIP | DSH Skill provider 与 `skill` Tool | `$DSH_HOME/skills/<slug>/` | Markdown 指令及相对资源；不能携带 Cordis JS 或原生可执行文件 |
-| Cordis 插件 | DSH Profile/Cordis guard | 签名 Profile generation | 独立组件 ABI、权限与发布门禁 |
+| Cordis 插件 | DSH Profile/Cordis guard | Desktop 内置 Profile | 独立组件 ABI、权限与构建验证 |
 | Desktop Base | deepseek-harness-desktop rc.7 封装 | 应用安装目录 | 只提供稳定系统、窗口、更新和 Profile seam |
 
 ## 2. 同一条用户链路
@@ -83,13 +83,8 @@ T07 只验证当前仓库 Worker、组件源码和内存 D1/R2 deterministic fix
 
 Skill Hub 是用户主动使用的产品能力，不属于管理端的 `emate.identity`、`emate.modelPolicy` 或 `emate.audit` 控制面。管理端只提供鉴权并可接收脱敏结果审计；不得静默安装、启停、升级、卸载、删除发布或把 ZIP 推送到设备。控制面或审计不可用不能删除已接受的本地 Skill，也不能把 receipt 当成工具授权。
 
-## 7. 发布与验收门禁
+## 7. 构建与验收
 
-Skill Hub Host、Agent、RPC 和 UI 任一源文件变化，都必须由 change-impact 归类为同一个 portable plugin-only 组件。其发布不重建安装器，但必须：
+Skill Hub Host、Agent、RPC 和 UI 作为同一个 Desktop 内置 Profile 组件构建。变更必须验证固定 rc.7 ABI、原生 parser/provider、Agent Tool/Job、并发、取消、崩溃恢复、界面 remount 和一次性下载行为，并随完整 Desktop Profile 通过启动检查。
 
-1. 用已接受 Base SDK 构建组件并验证 exact rc.7 peer ABI；
-2. 运行原生 parser/provider、Agent Tool/Job、并发、取消、崩溃/重启恢复、界面 remount 和一次性下载行为测试；
-3. 将新组件与签名 accepted-component-set 组装完整 Profile，执行 Host boot、Client Loader settle、Desktop restart/health/rollback；
-4. 只上传不可变的新组件字节，最后原子激活签名 desired state，并从公共端回读同一 generation/hash。
-
-生产关闭条件全部保留为 `OPEN_T18`：用户 A 发布，用户 B 不能发布同 slug 的新版本，且能分页搜索、查看同一摘要、下载、安装并经真实 native `skill`/Agent 调用；B 完成更新、禁用、重启、启用和卸载；A 删除自己发布的精确版本，而 B 无权删除；安装完成以及 publish/delete 响应丢失后重启均能幂等对账；公网 Worker version/schema/readback 与 signed exact component generation 必须一致。严格 D006 仍是 v7 Base ABI union mismatch，只能由 T18 新 Base identity/rebind 解决，T07 不修改、放宽或绕过。缺少线上 API、真实账号、签名 generation、平台安装态或实际 Skill 调用任一证据，都只能记录为源码/fixture 门禁通过，不能宣称 Skill Hub 已上线闭环。
+线上关闭仍需真实账号证明发布者所有权、跨用户搜索和安装、原生 `skill`/Agent 调用、更新、禁用、重启、启用、卸载及 owned-publication 删除。源码或 fixture 通过不能替代线上和安装态证据。

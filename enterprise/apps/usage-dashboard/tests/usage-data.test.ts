@@ -499,8 +499,10 @@ test('reuses the original labels where task events map without guessing', () => 
 
 test('reuses canonical tokens and lets a valid saved theme override the system theme', () => {
   const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  const tokens = readFileSync(new URL('../src/tokens.css', import.meta.url), 'utf8');
   const main = readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8');
-  assert.match(styles, /upstream\/e-mate-2\.0\.5\/desktop\/src\/styles\/tokens\.css/);
+  assert.match(styles, /@import '\.\/tokens\.css'/);
+  assert.match(tokens, /--color-canvas:/);
   assert.match(styles, /grid-template-columns: var\(--layout-sidebar-width\)/);
   assert.match(styles, /\.sidebar nav a > span:last-child/);
   assert.doesNotMatch(styles, /\.sidebar nav a span\s*\{/);

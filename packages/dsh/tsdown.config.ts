@@ -13,7 +13,6 @@ export default [
     entry: {
       bin: 'src/bin.ts',
       'e-mate': 'src/e-mate.ts',
-      update: 'src/update.ts',
       'legacy-migration': 'src/legacy-migration.ts',
       'legacy-schedule': 'src/legacy-schedule.ts',
     },

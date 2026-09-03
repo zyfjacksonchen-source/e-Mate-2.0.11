@@ -24,8 +24,6 @@ export default defineConfig([
       'update-download': 'src/update-download.ts',
       updates: 'src/updates.ts',
       'agent-update': 'src/agent-update.ts',
-      'mac-update-installer': 'src/mac-update-installer.ts',
-      'mac-update-helper': 'src/mac-update-helper.ts',
       'vision-toolkit': 'src/vision-toolkit.ts',
       'windows-directory-picker': 'src/windows-directory-picker.ts',
       'windows-pwsh-sandbox': 'src/windows-pwsh-sandbox.ts',

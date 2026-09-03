@@ -1,9 +1,9 @@
 import { createElement, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type {
-  DesktopUpdateBridge,
-  DesktopUpdateBridgeWindow,
-} from '../../../../../../../desktop/e-mate-desktop/src/update-presentation.ts'
+  DesktopUpdateTriggerBridge,
+  DesktopUpdateTriggerBridgeWindow,
+} from '../../../../../../../desktop/e-mate-desktop/src/desktop-update-trigger-contract.ts'
 import {
   IconArchiveOutline20,
   IconChevronDownOutline14,
@@ -25,6 +25,8 @@ import {
   IconSettingsOutline16,
   IconTrashOutline16,
   IconUserOutline16,
+  IconWarningOutline16,
+  Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AccountControl, AccountSettings } from './account.tsx'
 import { registerActivityFold } from './activity-fold.tsx'
@@ -38,8 +40,12 @@ import { IdentityGate } from './identity.tsx'
 import {
   ArtifactTerminal,
   desktopResourceRun,
+  draftImageAdmissionError,
+  galleryAttachmentName,
+  ImageGalleryView,
   imageCallsDefinition,
   selectArtifactTerminal,
+  subagentSettledDefinition,
   toolImagesDefinition,
 } from './image-gallery.tsx'
 import { LegacyArtifacts, legacyArtifactDefinition } from './legacy-artifacts.tsx'
@@ -60,8 +66,8 @@ export const inject = [
   'sessionLogDownload', 'inputTriggers', 'remote', 'remote.commands', 'settingsScope',
 ]
 
-const desktopUpdateBridge = (): DesktopUpdateBridge | undefined =>
-  (window as DesktopUpdateBridgeWindow).__EMATE_DESKTOP_UPDATES__
+const desktopUpdateBridge = (): DesktopUpdateTriggerBridge | undefined =>
+  (window as DesktopUpdateTriggerBridgeWindow).__EMATE_DESKTOP_UPDATES__
 
 export function registerSessionShare(ctx: any): void {
   ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
@@ -70,6 +76,93 @@ export function registerSessionShare(ctx: any): void {
     order: -20,
     priority: -1,
   }, HiddenSessionLogExport))
+}
+
+type GalleryNotice = (level: 'info' | 'error', text: string) => void
+
+function imageGalleryInjected(ctx: any, sessionId: string, notice: GalleryNotice) {
+  const draftBytes = (ids: readonly string[]) => ctx.conversation.draftImages(ids)
+    .reduce((sum: number, image: any) => sum + image.file.size, 0)
+  return {
+    loadImage: (attachment: any, ownerSessionId = sessionId) =>
+      ctx.conversation.resolveImage(ownerSessionId, attachment),
+    addImageToDraft: async (attachment: any, ownerSessionId = sessionId) => {
+      const target = ctx.sessions.binding(sessionId)?.session
+      if (target === undefined) throw new Error('当前会话不可用，未添加图片。')
+      const owner = ownerSessionId === sessionId ? target : ctx.sessions.binding(ownerSessionId)?.session
+      if (owner === undefined) throw new Error('图片所属会话不可用，未添加图片。')
+      const result = await owner.readAttachment(attachment.attachmentId)
+      if (!result.ok) throw new Error('图片附件读取失败，未添加到聊天。')
+      const stored = result.value.attachment
+      const bytes = Uint8Array.from(result.value.data)
+      if (stored.attachmentId !== attachment.attachmentId
+        || stored.mediaType !== attachment.mediaType || bytes.byteLength !== attachment.bytes) {
+        throw new Error('图片附件校验失败，未添加到聊天。')
+      }
+      const scope = ctx.sessions.scope(sessionId)
+      if (scope === undefined) throw new Error('当前会话不可用，未添加图片。')
+      const shell = ctx.conversation.input.for(scope)
+      const input = shell.state.getSnapshot()
+      const limits = target.projections.faceOf('imageLimits').getSnapshot()
+      const error = draftImageAdmissionError(attachment, input, limits, draftBytes(input.imageIds))
+      if (error !== undefined) throw new Error(error)
+      const images = ctx.conversation.createDraftImages([
+        new File([bytes.buffer], galleryAttachmentName(attachment), { type: attachment.mediaType }),
+      ])
+      try {
+        if (!shell.addImages(images.map((image: any) => image.id))) {
+          throw new Error('当前正在发送消息，请稍后再添加图片。')
+        }
+      } catch (error) {
+        ctx.conversation.releaseDraftImages(images)
+        throw error
+      }
+      notice('info', '图片已添加到聊天草稿。')
+    },
+    draftBytes,
+    notify: notice,
+    runResource: desktopResourceRun,
+  }
+}
+
+/** Reuse DSH's native overlay Toast; the slot disposer is the only transient lifecycle state. */
+export function createTransientGalleryNotice(ctx: any): GalleryNotice {
+  let current: (() => void) | undefined
+  let sequence = 0
+  return (level, text): void => {
+    current?.()
+    let dispose = (): void => {}
+    const done = (): void => {
+      dispose()
+      if (current === dispose) current = undefined
+    }
+    try {
+      dispose = ctx.slots.register({
+        name: 'shell.overlay', id: `e-mate-gallery-toast-${++sequence}`, order: 10,
+      }, () => createElement(Toast, {
+        text,
+        icon: level === 'error' ? createElement(IconWarningOutline16) : undefined,
+        onDone: done,
+      }))
+      current = dispose
+    } catch {
+      current = undefined
+    }
+  }
+}
+
+/** Add one native Session-scoped Gallery tab over the existing image receipt owner. */
+export function registerImageGallery(
+  ctx: any,
+  notice: GalleryNotice = createTransientGalleryNotice(ctx),
+): void {
+  ctx.slots.inject('conversation.view', () => ctx.slots.register({
+    name: 'conversation.view',
+    id: 'e-mate-gallery',
+    order: 20,
+    label: '画廊',
+    inject: (sessionId: string) => imageGalleryInjected(ctx, sessionId, notice),
+  }, ImageGalleryView))
 }
 
 /** Mount e-Mate utilities once in DSH's native frame-wide overlay seat. */
@@ -371,45 +464,15 @@ export function apply(ctx: any): void {
     order: -190,
   }, ThinkingStatusBranding))
   ctx.conversationEvents.register(imageCallsDefinition)
+  ctx.conversationEvents.register(subagentSettledDefinition)
   ctx.conversationEvents.register(toolImagesDefinition)
+  const galleryNotice = createTransientGalleryNotice(ctx)
+  registerImageGallery(ctx, galleryNotice)
   ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
     name: 'conversation.chat.turnTail',
     priority: -1,
     select: selectArtifactTerminal,
-    inject: (sessionId: string) => ({
-      loadImage: (attachment: any) => ctx.conversation.resolveImage(sessionId, attachment),
-      addImageToDraft: async (attachment: any) => {
-        const session = ctx.sessions.binding(sessionId)?.session
-        if (session === undefined) throw new Error('当前会话不可用，未添加图片。')
-        const result = await session.readAttachment(attachment.attachmentId)
-        if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
-        const stored = result.value.attachment
-        const bytes = Uint8Array.from(result.value.data)
-        if (stored.attachmentId !== attachment.attachmentId
-          || stored.mediaType !== attachment.mediaType || bytes.byteLength !== attachment.bytes) {
-          throw new Error('图片附件校验失败，未添加到聊天。')
-        }
-        const images = ctx.conversation.createDraftImages([
-          new File([bytes.buffer], attachment.name ?? 'e-mate-image.png', { type: attachment.mediaType }),
-        ])
-        try {
-          const scope = ctx.sessions.scope(sessionId)
-          if (scope === undefined || !ctx.conversation.input.for(scope).addImages(images.map((image: any) => image.id))) {
-            throw new Error('当前正在发送消息，请稍后再添加图片。')
-          }
-        } catch (error) {
-          ctx.conversation.releaseDraftImages(images)
-          throw error
-        }
-      },
-      draftBytes: (ids: readonly string[]) => ctx.conversation.draftImages(ids)
-        .reduce((sum: number, image: any) => sum + image.file.size, 0),
-      notify: (level: 'info' | 'error', text: string) => {
-        const scope = ctx.sessions.scope(sessionId)
-        if (scope !== undefined) ctx.conversation.input.for(scope).notify(level, text)
-      },
-      runResource: desktopResourceRun,
-    }),
+    inject: (sessionId: string) => imageGalleryInjected(ctx, sessionId, galleryNotice),
   }, ArtifactTerminal))
   ctx.conversationEvents.register(legacyArtifactDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({

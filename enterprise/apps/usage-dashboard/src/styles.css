@@ -1,5 +1,5 @@
 /* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app */
-@import '../../../../upstream/e-mate-2.0.5/desktop/src/styles/tokens.css';
+@import './tokens.css';
 
 :root {
   color: var(--color-ink);

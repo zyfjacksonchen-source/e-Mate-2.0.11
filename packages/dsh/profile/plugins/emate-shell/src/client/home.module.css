@@ -149,10 +149,13 @@
   box-sizing: border-box;
 }
 
-/* The standard preset and full-access policy stay Host-owned defaults; their
-   mode controls are intentionally absent from the user-facing 2.0.5 bar. */
-:global([data-slot='conversation.hero.agentPreset']),
-:global([data-slot='conversation.composer.bar'] [data-composer-card] > div:last-child > div:first-child > div:first-of-type) {
+/* The standard preset and full-access policy stay Host-owned defaults. Keep
+   the sibling rc.7 conversation.input.plan seat visible. */
+:global([data-slot='conversation.hero.agentPreset']) {
+  display: none !important;
+}
+
+:global([data-slot='conversation.composer.bar'] [data-composer-card] > div:last-child > div:first-child > div:has(> [data-slot='conversation.input.plan']) > :not([data-slot='conversation.input.plan'])) {
   display: none !important;
 }
 
@@ -184,6 +187,18 @@
   border-color: var(--emate-color-rule);
   color: var(--emate-color-ink);
   background: var(--emate-color-hover);
+}
+
+:global([data-emate-composer-mentions]) {
+  width: 32px;
+  min-width: 32px;
+  padding: 0;
+  justify-content: center;
+}
+
+:global([data-emate-composer-mentions] > span[aria-hidden='true']) {
+  font-size: 16px;
+  line-height: 16px;
 }
 
 :global([data-slot='conversation.composer.bar'] [data-slot='conversation.input.model'] button) {

@@ -1,0 +1,265 @@
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench · theme: Codex DNA + e-Mate brand · designed-as-app */
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
+:root {
+  color-scheme: light dark;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  --font-code: ui-monospace, "SFMono-Regular", "SF Mono", "Cascadia Mono", "Segoe UI Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-display: var(--font-ui);
+  --font-body: var(--font-ui);
+  --font-mono: var(--font-code);
+  --font-sans: var(--font-body);
+
+  --text-caption-size: 12px;
+  --text-caption-line: 16px;
+  --text-ui-size: 13px;
+  --text-ui-line: 20px;
+  --text-body-size: 14px;
+  --text-body-line: 22px;
+  --text-title-size: 15px;
+  --text-title-line: 20px;
+  --text-heading-size: 20px;
+  --text-heading-line: 28px;
+  --font-size-ui: var(--text-ui-size);
+  --font-size-code: var(--text-caption-size);
+
+  --icon-size-xs: 12px;
+  --icon-size-sm: 14px;
+  --icon-size: 16px;
+  --icon-size-lg: 20px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  --radius-none: 0;
+  --radius-compact: 8px;
+  --radius-control: 10px;
+  --radius-card: 12px;
+  --radius-panel: 16px;
+  --radius-dialog: 18px;
+  --radius-workbench: 24px;
+  --radius-pill: 999px;
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 240ms;
+  --duration-progress: 1200ms;
+  --motion-fast: var(--duration-fast);
+  --motion-base: var(--duration-base);
+  --motion-slow: var(--duration-slow);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-standard: var(--ease-out);
+
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-popover: 20;
+  --z-modal: 30;
+  --z-toast: 40;
+  --z-critical: 50;
+
+  --target-desktop: 32px;
+  --target-touch: 44px;
+  --chat-track-width: 820px;
+  --chat-body-width: 720px;
+  --chat-user-max-width: 620px;
+  --chat-track-pad-x: 20px;
+  --chat-track-pad-top: 24px;
+  --chat-track-pad-bottom: 40px;
+  --chat-turn-gap: 20px;
+  --chat-block-gap: 8px;
+  --chat-avatar-size: 24px;
+  --chat-tool-row-height: 32px;
+  --chat-jump-size: 32px;
+  --chat-follow-threshold: 72px;
+  --chat-reasoning-max-height: 200px;
+  --chat-motion-fast: 160ms;
+  --chat-motion-block: 180ms;
+  --chat-motion-fold: 280ms;
+  --chat-ease-fold: cubic-bezier(0.33, 1, 0.68, 1);
+  --workspace-inset: 10px;
+  --layout-sidebar-width: 248px;
+  --artifact-action-rail-width: 132px;
+  --focus-primary-ring: 0 0 0 2px var(--color-brand-ink);
+  --focus-subtle-ring: 0 0 0 1px var(--color-brand-strong);
+  --focus-subtle-inset-ring: inset 0 0 0 1px var(--color-brand-strong);
+  --control-idle-border: transparent;
+  --control-idle-surface: transparent;
+  --control-hover-border: var(--color-rule);
+  --control-hover-surface: var(--color-raised);
+  --color-model-icon-surface: oklch(1 0 0);
+  --color-link: var(--color-accent-strong);
+
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --theme-contrast: 45;
+  --color-canvas: oklch(0.966318 0.003973 106.474);
+  --color-workspace-surface: oklch(0.984548 0.002637 106.448);
+  --color-surface: oklch(0.966318 0.003973 106.474);
+  --color-raised: oklch(0.947728 0.006648 106.526);
+  --color-hover: oklch(0.951016 0.005316 106.5);
+  --color-session-emphasis: oklch(0.94007 0 0);
+  --color-selected: var(--color-session-emphasis);
+  --color-composer-surface: var(--color-workspace-surface);
+  --color-overlay-surface: oklch(1 0 0);
+
+  --color-ink: oklch(0.296426 0.00355 106.614);
+  --color-ink-muted: oklch(0.508991 0.006202 106.618);
+  --color-ink-subtle: oklch(0.508991 0.006202 106.618);
+  --color-ink-disabled: oklch(0.62 0.008 258);
+  --color-rule: oklch(0.905018 0.008065 106.56);
+  --color-rule-strong: oklch(0.812058 0.009659 106.613);
+
+  --color-accent: oklch(0.682034 0.173444 251.11);
+  --color-accent-strong: oklch(0.528649 0.173447 254.975);
+  --color-accent-soft: oklch(0.93 0.04 251);
+  --color-accent-ink: oklch(0.177638 0 0);
+  --color-focus: oklch(0.528649 0.173447 254.975);
+
+  --color-brand: oklch(0.649203 0.180912 42.881);
+  --color-brand-strong: oklch(0.649203 0.180912 42.881);
+  --color-brand-soft: oklch(0.964789 0.019493 50.157);
+  --color-brand-ink: oklch(0.205 0.018 55);
+
+  --color-info: oklch(0.528649 0.173447 254.975);
+  --color-success: oklch(0.49 0.145 148);
+  --color-warning: oklch(0.48 0.13 75);
+  --color-danger: oklch(0.514636 0.184396 27.456);
+  --color-diff-added: oklch(0.621162 0.179736 148.011);
+  --color-diff-removed: oklch(0.514636 0.184396 27.456);
+  --color-skill: oklch(0.595965 0.236371 296.846);
+  --color-overlay: oklch(0.12 0.006 258 / 0.34);
+
+  --elevation-popover: 0 14px 36px oklch(0.22 0.01 258 / 0.14);
+  --elevation-dialog: 0 24px 72px oklch(0.2 0.01 258 / 0.2);
+  --elevation-toast: 0 12px 32px oklch(0.22 0.01 258 / 0.16);
+
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: oklch(0.921906 0 0);
+  --scrollbar-thumb-hover: oklch(0.62 0.01 258);
+
+}
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --theme-contrast: 60;
+  --color-canvas: oklch(0.296426 0.00355 106.614);
+  --color-workspace-surface: oklch(0.177638 0 0);
+  --color-surface: oklch(0.243535 0 0);
+  --color-raised: oklch(0.268618 0 0);
+  --color-hover: oklch(0.343524 0.005128 106.666);
+  --color-session-emphasis: oklch(0.268618 0 0);
+  --color-selected: var(--color-session-emphasis);
+  --color-composer-surface: var(--color-session-emphasis);
+  --color-overlay-surface: oklch(0.23 0.004 258);
+
+  --color-ink: oklch(0.981562 0.002639 106.448);
+  --color-ink-muted: oklch(0.780581 0.009753 106.623);
+  --color-ink-subtle: oklch(0.780581 0.009753 106.623);
+  --color-ink-disabled: oklch(0.5 0.008 258);
+  --color-rule: oklch(0.344584 0 0);
+  --color-rule-strong: oklch(0.400311 0.006577 106.693);
+
+  --color-accent: oklch(0.528649 0.173447 254.975);
+  --color-accent-strong: oklch(0.682034 0.173444 251.11);
+  --color-accent-soft: oklch(0.28 0.08 255);
+  --color-accent-ink: oklch(0.991069 0 0);
+  --color-focus: oklch(0.682034 0.173444 251.11);
+
+  --color-brand: oklch(0.649203 0.180912 42.881);
+  --color-brand-strong: oklch(0.649203 0.180912 42.881);
+  --color-brand-soft: oklch(0.322501 0.052774 42.667);
+  --color-brand-ink: oklch(0.19 0.02 52);
+
+  --color-info: oklch(0.682034 0.173444 251.11);
+  --color-success: oklch(0.68 0.17 148);
+  --color-warning: oklch(0.82 0.14 80);
+  --color-danger: oklch(0.72 0.18 28);
+  --color-diff-added: oklch(0.621162 0.179736 148.011);
+  --color-diff-removed: oklch(0.589896 0.213434 27.671);
+  --color-skill: oklch(0.672497 0.21074 302.22);
+  --color-overlay: oklch(0.08 0.004 258 / 0.62);
+
+  --elevation-popover: 0 16px 42px oklch(0.06 0.004 258 / 0.46);
+  --elevation-dialog: 0 28px 80px oklch(0.05 0.004 258 / 0.58);
+  --elevation-toast: 0 14px 36px oklch(0.06 0.004 258 / 0.5);
+
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: var(--color-session-emphasis);
+  --scrollbar-thumb-hover: oklch(0.53 0.012 258);
+
+}
+
+@media (forced-colors: active) {
+  :root,
+  :root[data-theme="light"],
+  :root[data-theme="dark"] {
+    --color-canvas: Canvas;
+    --color-workspace-surface: Canvas;
+    --color-surface: Canvas;
+    --color-raised: Canvas;
+    --color-hover: Highlight;
+    --color-session-emphasis: Highlight;
+    --color-selected: Highlight;
+    --color-composer-surface: Canvas;
+    --color-overlay-surface: Canvas;
+    --color-model-icon-surface: Canvas;
+    --color-ink: CanvasText;
+    --color-ink-muted: CanvasText;
+    --color-ink-subtle: CanvasText;
+    --color-ink-disabled: GrayText;
+    --color-rule: ButtonBorder;
+    --color-rule-strong: CanvasText;
+    --color-accent: Highlight;
+    --color-accent-strong: Highlight;
+    --color-accent-soft: Canvas;
+    --color-accent-ink: HighlightText;
+    --color-brand: Highlight;
+    --color-brand-strong: Highlight;
+    --color-brand-soft: Canvas;
+    --color-brand-ink: HighlightText;
+    --color-focus: Highlight;
+    --color-info: CanvasText;
+    --color-success: CanvasText;
+    --color-warning: CanvasText;
+    --color-danger: CanvasText;
+    --color-diff-added: CanvasText;
+    --color-diff-removed: CanvasText;
+    --color-skill: CanvasText;
+    --color-overlay: Canvas;
+    --elevation-popover: none;
+    --elevation-dialog: none;
+    --elevation-toast: none;
+    --scrollbar-track: Canvas;
+    --scrollbar-thumb: CanvasText;
+    --scrollbar-thumb-hover: Highlight;
+    --focus-primary-ring: 0 0 0 2px HighlightText;
+    --focus-subtle-ring: 0 0 0 1px Highlight;
+    --focus-subtle-inset-ring: inset 0 0 0 1px Highlight;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+    --duration-progress: 2000ms;
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+  }
+}

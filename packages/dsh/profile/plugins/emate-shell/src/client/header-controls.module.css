@@ -42,31 +42,6 @@
   outline-offset: 2px;
 }
 
-.updateDot {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--dsw-alias-label-tertiary);
-}
-
-.checking,
-.available,
-.confirming,
-.downloading,
-.verifying,
-.staging,
-.waiting-shutdown,
-.replacing,
-.restarting,
-.health-check,
-.rolling-back { background: var(--emate-color-brand, #ff6a1a); }
-.completed { background: #30a46c; }
-.failed,
-.rolled-back { background: var(--dsw-alias-state-error-primary); }
-
 .updateWide {
   position: relative;
   min-height: 36px;

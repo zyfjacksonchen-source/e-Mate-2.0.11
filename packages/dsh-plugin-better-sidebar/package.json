@@ -1,7 +1,7 @@
 {
   "name": "@e-mate/dsh-plugin-better-sidebar",
-  "version": "2.0.15",
-  "description": "Project-scoped file sidebar for the pinned e-Mate 2.0.15 local runtime.",
+  "version": "2.0.16",
+  "description": "Project-scoped file sidebar for the pinned e-Mate 2.0.16 local runtime.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -17,7 +17,7 @@
     "cordis.patch.yml"
   ],
   "scripts": {
-    "build": "rm -rf lib && ../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && ../../upstream/deepseek-harness/node_modules/.bin/tsdown",
     "test": "node --test test/*.test.mjs && pnpm test:client",
     "test:client": "../../upstream/deepseek-harness/node_modules/.bin/vitest run --config vitest.config.ts",
     "check": "pnpm build && pnpm test"
@@ -36,20 +36,17 @@
     }
   },
   "eMate": {
-    "component": {
-      "schema_version": 1,
-      "id": "@e-mate/dsh-plugin-better-sidebar",
-      "kind": "profile",
-      "base_imports": ["react"],
-      "authority_contract": {
-        "effects": ["filesystem-read"],
-        "guards": ["session-scope", "workspace-scope"]
-      },
-      "base_contracts": ["e-mate-desktop-profile-v15-dsh-32728743c289"]
-    },
     "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "32728743c28911bcd4279f79fe9c43ee7aacfb6d",
-    "excludedUpstreamFeatures": ["terminal", "node-pty", "standalone-websocket", "standalone-http-api"]
+    "harnessCommit": "4da69d7c3522ee51de12822c917c503a124f7a7d",
+    "excludedUpstreamFeatures": [
+      "terminal",
+      "node-pty",
+      "standalone-websocket",
+      "standalone-http-api"
+    ],
+    "baseImports": [
+      "react"
+    ]
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-client-shell",
-  "version": "2.0.15",
+  "version": "2.0.16",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -30,23 +30,16 @@
     }
   },
   "eMate": {
-    "component": {
-      "schema_version": 1,
-      "id": "@e-mate/dsh-client-shell",
-      "kind": "profile",
-      "base_imports": [
-        "@deepseek-ai/dsh-client-ui-attachment",
-        "@deepseek-ai/dsh-client-ui-primitives",
-        "@deepseek-ai/dsh-settings",
-        "@deepseek-ai/schemastery",
-        "react",
-        "react-dom"
-      ],
-      "authority_contract": { "effects": [], "guards": [] },
-      "base_contracts": ["e-mate-desktop-profile-v15-dsh-32728743c289"]
-    },
     "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "32728743c28911bcd4279f79fe9c43ee7aacfb6d"
+    "harnessCommit": "4da69d7c3522ee51de12822c917c503a124f7a7d",
+    "baseImports": [
+      "@deepseek-ai/dsh-client-ui-attachment",
+      "@deepseek-ai/dsh-client-ui-primitives",
+      "@deepseek-ai/dsh-settings",
+      "@deepseek-ai/schemastery",
+      "react",
+      "react-dom"
+    ]
   },
   "scripts": {
     "build": "../../../../../upstream/deepseek-harness/node_modules/.bin/tsdown",

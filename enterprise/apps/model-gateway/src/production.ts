@@ -525,7 +525,6 @@ function route(value: unknown): ProductionConfiguration['routes'][number] {
       'id',
       ...(input.apiMode === undefined ? [] : ['apiMode']),
       'upstreamModelId',
-      ...(input.fallbackUpstreamModelId === undefined ? [] : ['fallbackUpstreamModelId']),
       'upstreamBaseUrl',
       ...(input.allowInsecureHttpUpstream === undefined ? [] : ['allowInsecureHttpUpstream']),
       'upstreamApiKeyFile',
@@ -565,9 +564,6 @@ function route(value: unknown): ProductionConfiguration['routes'][number] {
       ? {}
       : { apiMode: input.apiMode as 'responses' | 'chat-completions' | 'images-generations' }),
     upstreamModelId: text(input.upstreamModelId, 'upstream model id', 128),
-    ...(input.fallbackUpstreamModelId === undefined
-      ? {}
-      : { fallbackUpstreamModelId: text(input.fallbackUpstreamModelId, 'fallback upstream model id', 128) }),
     upstreamBaseUrl: text(input.upstreamBaseUrl, 'upstream URL', 2_048),
     ...(input.allowInsecureHttpUpstream === true ? { allowInsecureHttpUpstream: true as const } : {}),
     upstreamApiKeyFile: text(input.upstreamApiKeyFile, 'API key file', 4_096),

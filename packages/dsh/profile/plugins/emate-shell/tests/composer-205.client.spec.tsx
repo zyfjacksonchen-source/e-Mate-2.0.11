@@ -6,15 +6,34 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { COMPOSER_PLACEHOLDER, ComposerConnectors, ComposerMentions } from '../src/client/composer-connectors.tsx'
 import { registerComputerUseTrigger } from '../src/client/composer-mentions.ts'
 import type { InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
+import { PlanChip, type PlanChipProps } from '../../../../../../upstream/deepseek-harness/packages/client/ui-plan/src/client/PlanModeControl.tsx'
+import { FileImportControl } from '../../../../../dsh-plugin-file-import/src/client/index.tsx'
 
 const Icon = () => <svg />
 
+function applyHomeStyles(): void {
+  const style = document.createElement('style')
+  style.dataset.emateHomeTest = ''
+  style.textContent = readFileSync('src/client/home.module.css', 'utf8').replaceAll(':global(', ':is(')
+  document.head.append(style)
+}
+
+function applyFileImportStyles(button: HTMLButtonElement): void {
+  const style = document.createElement('style')
+  style.dataset.emateFileImportTest = ''
+  style.textContent = readFileSync('../../../../dsh-plugin-file-import/src/client/style.module.css', 'utf8')
+    .replaceAll('.button', `.${button.className}`)
+  document.head.append(style)
+}
+
 afterEach(() => {
   cleanup()
+  document.head.querySelector('[data-emate-home-test]')?.remove()
+  document.head.querySelector('[data-emate-file-import-test]')?.remove()
   delete document.body.dataset.dshDesktopPlatform
 })
 
-describe('e-Mate 2.0.15 composer projection', () => {
+describe('e-Mate 2.0.16 composer projection', () => {
   it('routes external connections into the existing collaboration capability surface', () => {
     const openConnections = vi.fn()
     render(<ComposerConnectors LinkIcon={Icon} openConnections={openConnections} />)
@@ -53,6 +72,78 @@ describe('e-Mate 2.0.15 composer projection', () => {
     const styles = readFileSync('src/client/home.module.css', 'utf8')
     expect(styles).not.toContain("content: '/'")
     expect(styles).toMatch(/button:first-child[\s\S]*display:\s*none !important/u)
+  })
+
+  it('keeps the rc.7 Plan and Goal surfaces visible while hiding only native permission and command controls', () => {
+    const exitPlanMode = vi.fn(() => new Promise<string | null>(() => {}))
+    const planProps = {
+      useProjection: () => ({ active: true, pending: false }),
+      locked: false,
+      exitPlanMode,
+      t: (key: string) => key === 'chip.on.aria' ? 'plan mode active' : key,
+    } as unknown as PlanChipProps
+    render(<div>
+      <div data-slot="conversation.input.dock"><div data-goal-bar data-testid="goal" /></div>
+      <div data-slot="conversation.composer.bar">
+        <div>
+          <div data-composer-card="">
+            <div data-input-area="" />
+            <div>
+              <div>
+                <button type="button" data-testid="command">Command</button>
+                <div data-testid="modes">
+                  <span data-testid="permission"><button type="button">Full access</button></span>
+                  <div data-slot="conversation.input.plan">
+                    <PlanChip {...planProps} />
+                  </div>
+                </div>
+                <button type="button" aria-label="添加本地图片或文件"><svg width="16" height="16" /></button>
+                <button type="button" data-emate-composer-mentions=""><span aria-hidden="true">@</span></button>
+              </div>
+              <div />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>)
+
+    applyHomeStyles()
+    expect(getComputedStyle(screen.getByTestId('command')).display).toBe('none')
+    expect(getComputedStyle(screen.getByTestId('permission')).display).toBe('none')
+    expect(getComputedStyle(screen.getByTestId('modes')).display).not.toBe('none')
+    const plan = screen.getByRole('button', { name: 'plan mode active' })
+    expect(getComputedStyle(plan).display).not.toBe('none')
+    fireEvent.click(plan)
+    expect(exitPlanMode).toHaveBeenCalledOnce()
+    expect(getComputedStyle(screen.getByTestId('goal')).display).not.toBe('none')
+  })
+
+  it('matches the resident file control with a 32px launcher and 16px @ glyph at every width', () => {
+    render(<div data-composer-card="">
+      <textarea defaultValue="" />
+      <FileImportControl
+        sessionId="session-1"
+        input={{ draft: '', phase: 'plain' }}
+        inputActions={{ setDraft() {} }}
+        isLoopback
+        callImport={async () => ({ ok: true })}
+      />
+      <ComposerMentions openMentions={() => {}} />
+    </div>)
+    const fileButton = screen.getByRole('button', { name: '添加本地图片或文件' })
+    const mentionButton = screen.getByRole('button', { name: '插入引用' })
+    applyFileImportStyles(fileButton)
+    applyHomeStyles()
+    const fileStyle = getComputedStyle(fileButton)
+    const mentionStyle = getComputedStyle(mentionButton)
+    const icon = fileButton.querySelector('svg')!
+    const glyphStyle = getComputedStyle(mentionButton.querySelector('span[aria-hidden="true"]')!)
+    const controlSize = (style: CSSStyleDeclaration) => [style.width, style.minWidth, style.minHeight, style.padding]
+
+    expect(controlSize(fileStyle)).toEqual(['32px', '32px', '32px', '0px'])
+    expect(controlSize(mentionStyle)).toEqual(controlSize(fileStyle))
+    expect([icon.getAttribute('width'), icon.getAttribute('height')]).toEqual(['16', '16'])
+    expect([glyphStyle.fontSize, glyphStyle.lineHeight]).toEqual(['16px', '16px'])
   })
 
   it('keeps a picked @电脑操控 reference visible in the native composer', () => {

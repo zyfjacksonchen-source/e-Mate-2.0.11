@@ -18,7 +18,9 @@ import {
   createSkillHubClient,
   createSkillHubStore,
   inspectSkillArchive,
+  parseSkillHubRpcResult,
   skillHubFailure,
+  skillHubSuccess,
   SkillHubRecoveryPendingError,
 } from '../lib/skill-hub.js'
 
@@ -124,6 +126,31 @@ test('catalog search omits empty optional filters but rejects a non-string curso
   assert.equal(requests[0].searchParams.get('limit'), '20')
 
   await assert.rejects(hub.search({ cursor: 0 }), /Skill search filters are invalid/u)
+})
+
+test('shared result parser rejects the installed bad payload and unknown discriminators while preserving a normal installed list', () => {
+  const installed = { schema_version: 1, items: [{ slug: 'installed-skill', status: 'installed', ready: true }] }
+  assert.deepEqual(
+    parseSkillHubRpcResult({ ok: true, value: skillHubSuccess(installed) }),
+    { ok: true, value: installed },
+  )
+
+  const installedBadPayload = {
+    ok: false,
+    error: { code: 'network', message: 'raw upstream failure', details: { issues: [] } },
+  }
+  const badPayload = parseSkillHubRpcResult(installedBadPayload)
+  assert.equal(badPayload.ok, false)
+  assert.equal(badPayload.error.code, 'invalid-response')
+  assert.doesNotMatch(badPayload.error.message, /raw upstream|invalid_union|Invalid input/u)
+
+  const unknown = parseSkillHubRpcResult({
+    ok: true,
+    value: { schema_version: 1, status: 'future-result', diagnostic: 'ZodError: invalid_union Invalid input' },
+  })
+  assert.equal(unknown.ok, false)
+  assert.equal(unknown.error.code, 'invalid-response')
+  assert.doesNotMatch(unknown.error.message, /ZodError|invalid_union|Invalid input/u)
 })
 
 test('keeps operation failures typed across service, transport, integrity, recovery, and native provider boundaries', async () => {
@@ -531,6 +558,7 @@ test('Agent natural language surface registers the complete typed lifecycle and 
     installation_status: 'not_installed', readiness: 'ready',
   }
   let provider
+  let skillHubRpcHandler
   const ctx = {
     get: name => name === 'emateIdentity' ? { request: async (url, init = {}) => {
       if (url.pathname.endsWith('/skills/shared-download')) {
@@ -602,12 +630,19 @@ test('Agent natural language surface registers the complete typed lifecycle and 
       },
     },
     systemPrompt: { section(value) { prompts.push(value); return () => {} } },
-    connection: { rpc: { handle: () => () => {} } },
+    connection: { rpc: { handle(_channel, handler) { skillHubRpcHandler = handler; return () => {} } } },
     webServer: { register(value) { routes.push(value); return () => {} } },
     tools: { register(value) { tools.push(value) } },
     effect(callback) { return callback() },
   }
   await apply(ctx, { dshHome, baseUrl: 'https://emate-skill-hub.emate-zyfjacksonchen.workers.dev/ecorex-agent/client/skill-hub/v1' })
+
+  const failedCatalog = await skillHubRpcHandler('catalog.search', { query: '', limit: 24 }, new AbortController().signal)
+  assert.equal(failedCatalog.ok, true)
+  assert.equal(failedCatalog.value.schema_version, 1)
+  assert.equal(failedCatalog.value.status, 'failure')
+  assert.equal(failedCatalog.value.error.code, 'network')
+  assert.doesNotMatch(failedCatalog.value.error.message, /network mutation|fetch failed|invalid_union|Invalid input/u)
 
   assert.deepEqual(tools.map(tool => tool.name).sort(), [
     'e_mate_skill_hub_delete_publication',

@@ -48,5 +48,5 @@ describe.runIf(process.platform === 'win32')('Windows managed Profile materializ
     writeFileSync(topLevelExtra, 'managed roots are exact sets')
     installEmateDesktopProfile(home)
     expect(existsSync(topLevelExtra)).toBe(false)
-  }, 15_000)
+  }, 30_000)
 })

@@ -24,7 +24,7 @@ import type {
   AdminConsentQuery,
   TenantUser,
 } from '@e-mate/admin-contract';
-import eMateLogo from '../../../../upstream/e-mate-2.0.5/desktop/src/v1/assets/emate-logo.png';
+import eMateLogo from '../../../../packages/dsh/profile/plugins/emate-shell/assets/emate-logo.png';
 import {
   AdminApiError,
   ADMIN_MODEL_SESSION_KEY,

@@ -1,6 +1,6 @@
 {
   "name": "@e-mate/dsh-plugin-file-import",
-  "version": "2.0.15",
+  "version": "2.0.16",
   "description": "Session-bound local file import for the e-Mate DSH composer.",
   "type": "module",
   "main": "lib/index.js",
@@ -19,12 +19,14 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "rm -rf lib && ../../upstream/deepseek-harness/node_modules/.bin/tsdown",
+    "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && ../../upstream/deepseek-harness/node_modules/.bin/tsdown",
     "test": "node --test test/*.test.mjs",
     "check": "pnpm build && pnpm test"
   },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-connection",
@@ -37,28 +39,26 @@
     }
   },
   "eMate": {
-    "component": {
-      "schema_version": 1,
-      "id": "@e-mate/dsh-plugin-file-import",
-      "kind": "profile",
-      "base_imports": ["@deepseek-ai/dsh-client-ui-primitives", "react"],
-      "authority_contract": {
-        "effects": ["filesystem-read", "filesystem-write", "network-loopback"],
-        "guards": ["atomic-receipt", "explicit-user-action", "session-scope", "workspace-scope"]
-      },
-      "base_contracts": ["e-mate-desktop-profile-v15-dsh-32728743c289"]
-    },
     "harnessVersion": "0.1.0-rc.7",
-    "harnessCommit": "32728743c28911bcd4279f79fe9c43ee7aacfb6d",
+    "harnessCommit": "4da69d7c3522ee51de12822c917c503a124f7a7d",
     "excludedFeatures": [
       "independent-store",
       "independent-router",
       "independent-chat-transport",
       "arbitrary-host-path"
+    ],
+    "baseImports": [
+      "@deepseek-ai/dsh-client-ui-primitives",
+      "react"
     ]
   },
-  "engines": { "node": "^22.19.0 || >=24.0.0" },
-  "os": ["darwin", "win32"],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "os": [
+    "darwin",
+    "win32"
+  ],
   "license": "MIT",
   "private": true
 }

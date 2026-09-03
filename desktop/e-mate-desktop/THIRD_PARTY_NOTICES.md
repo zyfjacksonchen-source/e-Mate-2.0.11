@@ -378,7 +378,6 @@ the package names, versions, and licenses for transparency.
 | diff | 9.0.0 | BSD-3-Clause |
 | dsh-at-file | 0.6.2 | MIT |
 | dsh-file-viewer | 0.1.0 | MIT |
-| dsh-search-mcp | 0.1.0 | MIT |
 | dsh-visualize | 0.1.0 | MIT |
 | dunder-proto | 1.0.1 | MIT |
 | ecdsa-sig-formatter | 1.0.11 | Apache-2.0 |

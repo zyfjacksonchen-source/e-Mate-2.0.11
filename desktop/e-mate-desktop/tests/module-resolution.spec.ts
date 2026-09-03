@@ -9,7 +9,7 @@ import { isBaseProfileRuntimeSpecifier } from '../src/module-resolution.ts'
 
 const execFileAsync = promisify(execFile)
 
-describe('hot Profile component runtime boundary', () => {
+describe('bundled Profile component runtime boundary', () => {
   it('exposes only the exact Base ABI imports declared by that component', () => {
     const imports = new Set(['@deepseek-ai/dsh-tools', '@e-mate/desktop/vision-toolkit', 'react'])
     expect(isBaseProfileRuntimeSpecifier('@deepseek-ai/dsh-tools', imports)).toBe(true)
@@ -35,7 +35,7 @@ describe('hot Profile component runtime boundary', () => {
     const runner = join(temporary, 'runner.mjs')
     await mkdir(root)
     await writeFile(join(root, 'package.json'), JSON.stringify({
-      eMate: { component: { base_imports: [] } },
+      eMate: { baseImports: [] },
     }))
     await writeFile(join(root, 'builtin.mjs'), "export const value = typeof (await import('fs')).readFile === 'function'\n")
     await writeFile(join(root, 'inside.mjs'), 'export const value = true\n')
@@ -60,9 +60,9 @@ const blocked = async (file, message) => {
 try {
   assert.equal((await import(pathToFileURL(root + '/builtin.mjs').href)).value, true)
   assert.equal((await import(pathToFileURL(root + '/relative.mjs').href)).value, true)
-  await blocked(root + '/blocked.mjs', 'hot Profile component undeclared runtime import is blocked: @e-mate/desktop/updates')
-  await blocked(root + '/sibling-escape.mjs', 'hot Profile component path escape is blocked: ../sibling.mjs')
-  await blocked(root + '/file-escape.mjs', 'hot Profile component path escape is blocked: file:')
+  await blocked(root + '/blocked.mjs', 'bundled Profile component undeclared runtime import is blocked: @e-mate/desktop/updates')
+  await blocked(root + '/sibling-escape.mjs', 'bundled Profile component path escape is blocked: ../sibling.mjs')
+  await blocked(root + '/file-escape.mjs', 'bundled Profile component path escape is blocked: file:')
 } finally { dispose() }
 `)
     try {

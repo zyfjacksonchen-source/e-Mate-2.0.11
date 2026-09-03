@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { installComputerUseCapability } from '../lib/emate-capability.js'
 import { desktopAutomationBypass, hasExplicitComputerUseRequest } from '../lib/emate-explicit.js'
@@ -11,7 +10,6 @@ const root = new URL('../', import.meta.url)
 
 test('computer-use adapter preserves the immutable universal helper only on macOS', async () => {
   const pkg = JSON.parse(await readFile(new URL('package.json', root), 'utf8'))
-  const { componentFiles, verifyComponentRuntimeImports } = await import('../../../scripts/component-release.mjs')
   const patch = await readFile(new URL('cordis.patch.yml', root), 'utf8')
   const nativeBuilder = await readFile(new URL('scripts/build-native.mjs', root), 'utf8')
   const adapterBuilder = await readFile(new URL('scripts/build.mjs', root), 'utf8')
@@ -19,13 +17,9 @@ test('computer-use adapter preserves the immutable universal helper only on macO
   const leases = await readFile(new URL('lib/leases.js', root), 'utf8')
   const upstreamLeases = await readFile(new URL('../../upstream/plugins/dsh-computer-use/lib/leases.js', root), 'utf8')
   const bundle = await readFile(new URL('lib/index.js', root), 'utf8')
-  assert.equal(pkg.version, '2.0.15')
+  assert.equal(pkg.version, '2.0.16')
   assert.equal(pkg.dsh.upstream.commit, '76bfe8607f61945c1cbb84e73976e601100c13a2')
   assert.equal(pkg.eMate.harnessVersion, '0.1.0-rc.7')
-  assert.deepEqual(
-    verifyComponentRuntimeImports(componentFiles(fileURLToPath(root), pkg), pkg.eMate.component),
-    pkg.eMate.component.base_imports,
-  )
   assert.match(patch, /process\.platform !== 'darwin'/u)
   assert.doesNotMatch(patch, /allowAllApps:\s*true/u)
   if (process.platform === 'darwin') {

@@ -1,8 +1,6 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
-import { Session } from '@deepseek-ai/dsh-session'
-import { PersistenceCoordinator } from '@deepseek-ai/dsh-session-persistence'
 import sharp from 'sharp'
 import { describe, expect, it } from 'vitest'
 
@@ -158,8 +156,6 @@ describe('published package surface', () => {
     expect(config).toContain("profiles: 'src/profiles.ts'")
     expect(config).toContain("terminal: 'src/terminal.ts'")
     expect(config).toContain("'update-download': 'src/update-download.ts'")
-    expect(config).toContain("'mac-update-helper': 'src/mac-update-helper.ts'")
-    expect(config).toContain("'mac-update-installer': 'src/mac-update-installer.ts'")
     expect(config).toContain("updates: 'src/updates.ts'")
     expect(config).toContain("'agent-update': 'src/agent-update.ts'")
     expect(config).toContain("entry: { preload: 'src/preload.ts' }")
@@ -187,7 +183,6 @@ describe('published package surface', () => {
     const nativeReadyAck = main.indexOf("'.release-native-ready-ack'")
     const releaseAck = main.indexOf("'.release-health-ack'")
     const profileCleanup = main.indexOf('for (const path of deferredProfileCleanup)')
-    const cleanup = main.indexOf('const cleanup = app.isPackaged')
 
     expect(recover).toBeGreaterThanOrEqual(0)
     expect(applyRecovered).toBeGreaterThan(recover)
@@ -206,8 +201,6 @@ describe('published package surface', () => {
     expect(releaseAck).toBeGreaterThan(rendererHealth)
     expect(releaseAck).toBeLessThan(profileCleanup)
     expect(profileCleanup).toBeGreaterThan(mount)
-    expect(cleanup).toBeGreaterThan(profileCleanup)
-    expect(cleanup).toBeGreaterThan(mount)
     expect(main).toContain("'@e-mate/desktop: packaged pnpm runtime PATH'")
     expect(main).toContain("'@e-mate/desktop: packaged dsh runtime PATH'")
     expect(main).toContain("process.env.EMATE_RELEASE_HEALTH_PROBE === '1'")
@@ -303,10 +296,11 @@ describe('published package surface', () => {
       useZip: true,
       artifactName: 'e-Mate-${version}-win-${arch}-Setup.${ext}',
     })
+    expect((manifest.build as { toolsets?: unknown } | undefined)?.toolsets).toBeUndefined()
     expect(manifest.build?.linux).toBeUndefined()
   })
 
-  it('separates unsigned smoke packaging from the signed macOS release', () => {
+  it('uses the one native unsigned macOS packaging path', () => {
     const packageDir = readFileSync(new URL('scripts/package-dir.mjs', packageRoot), 'utf8')
 
     expect(manifest.scripts?.['build:sdk']).toContain('node scripts/sync-emate-profile.mjs')
@@ -316,9 +310,9 @@ describe('published package surface', () => {
     expect(packageDir).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")
     expect(packageDir).toContain("import { prepareInstalledMacUniversalRuntime } from './mac-universal.ts'")
     expect(packageDir).toContain("if (process.platform === 'darwin') prepareInstalledMacUniversalRuntime(packageRoot)")
-    expect(manifest.scripts?.['dist:mac']).toBe('node scripts/release-mac.ts')
-    expect(manifest.scripts?.['dist:mac-unsigned-release']).toBe('node scripts/package-mac-unsigned-release.ts')
-    expect(manifest.scripts?.['dist:mac-smoke']).toBe('node scripts/package-mac.ts')
+    expect(manifest.scripts?.['dist:mac']).toBe('node scripts/package-mac.ts')
+    expect(manifest.scripts?.['dist:mac-unsigned-release']).toBeUndefined()
+    expect(manifest.scripts?.['dist:mac-smoke']).toBeUndefined()
     expect(manifest.scripts?.['dist:win']).toBe('node scripts/package-win.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run build')
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run typecheck')
@@ -330,26 +324,26 @@ describe('published package surface', () => {
     expect(manifest.scripts?.['check:win-package']).toContain('tests/update-checker.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/update-download.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-directory-picker.spec.ts')
-    expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-update-installer.spec.ts')
-    expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-update-transaction.spec.ts')
-    expect(manifest.scripts?.['check:win-package']).toContain('yarn run test:windows-update-transaction')
+    expect(manifest.scripts?.['check:win-package']).not.toContain('tests/desktop-installer-quit.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).not.toContain('tests/installer-nsh.spec.ts')
+    expect(manifest.scripts?.['check:win-package']).not.toContain('test:app-builder-fuses')
+    expect(manifest.scripts?.['check:win-package']).not.toContain('windows-update-installer')
+    expect(manifest.scripts?.['check:win-package']).not.toContain('windows-update-transaction')
     expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-volume-diagnostics.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run verify:closure')
-    expect(manifest.scripts?.['test:windows-update-transaction']).toContain('-Operation SelfTest')
+    expect(manifest.scripts?.['test:windows-update-transaction']).toBeUndefined()
     expect(manifest.scripts?.['verify:cli']).toBe('node scripts/verify-cli-runtime.mjs')
     expect(manifest.scripts?.check).toContain('yarn run verify:cli')
     expect(workspaceManifest.scripts?.['dist:mac']).toBe('yarn workspace @e-mate/desktop dist:mac')
-    expect(workspaceManifest.scripts?.['dist:mac-unsigned-release'])
-      .toBe('yarn workspace @e-mate/desktop dist:mac-unsigned-release')
-    expect(workspaceManifest.scripts?.['dist:mac-smoke'])
-      .toBe('yarn workspace @e-mate/desktop dist:mac-smoke')
+    expect(workspaceManifest.scripts?.['dist:mac-unsigned-release']).toBeUndefined()
+    expect(workspaceManifest.scripts?.['dist:mac-smoke']).toBeUndefined()
     expect(workspaceManifest.scripts?.['dist:win'])
       .toBe('yarn workspace @e-mate/desktop dist:win')
     expect(manifest.build?.afterPack).toBe('./scripts/verify-packaged-runtime.ts')
     expect(manifest.build?.mac).toEqual(expect.objectContaining({
       hardenedRuntime: true,
       mergeASARs: false,
-      notarize: true,
+      notarize: false,
       target: ['dir'],
       x64ArchFiles: expect.stringContaining('node-pty/prebuilds/darwin-*'),
     }))
@@ -362,25 +356,48 @@ describe('published package surface', () => {
     expect(manifest.devDependencies?.['@electron/asar']).toBe('3.4.1')
   })
 
-  it('keeps publishable macOS bytes owned by the selected immutable artifact without a release rebuild', () => {
-    const workflow = readFileSync(new URL('../../.github/workflows/desktop-release.yml', packageRoot), 'utf8')
-    const signerPatch = readFileSync(new URL('../.yarn/patches/@electron-osx-sign-npm-1.3.3-sequential-walk.patch', packageRoot), 'utf8')
+  it('keeps dsh-desktop as the only package and update owner', () => {
+    const agentUpdate = readFileSync(new URL('src/agent-update.ts', packageRoot), 'utf8')
+    const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
+    const preload = readFileSync(new URL('src/preload.ts', packageRoot), 'utf8')
+    const updates = readFileSync(new URL('src/updates.ts', packageRoot), 'utf8')
+    const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', packageRoot), 'utf8')
+    const forbidden = [
+      'scripts/package-mac-unsigned-release.ts',
+      'scripts/sign-existing-mac-release.ts',
+      'scripts/desktop-release-manifest.ts',
+      'src/profile-update.ts',
+      'src/mac-update-helper.ts',
+      'src/mac-update-installer.ts',
+      'src/update-lifecycle.ts',
+      'src/desktop-installer-quit.ts',
+      'src/relaunch-arguments.ts',
+      'build/installer.nsh',
+      '../../scripts/local-flow.mjs',
+      '../../scripts/base-sdk.mjs',
+      '../../scripts/change-impact.mjs',
+      '../../scripts/component-release.mjs',
+      '../../scripts/smoke',
+      '../../tests/smoke',
+      '../../upstream/e-mate-2.0.5',
+      '../../upstream/plugins/dsh-search-mcp',
+      '../../deploy/download-page/site.d9ba6145f056.js',
+      '../../.github/workflows/desktop-release.yml',
+      '../../.github/workflows/audit.yml',
+    ]
 
-    expect(workflow).toContain('macos_artifact_id="$(jq -er --arg name "e-mate-desktop-macos-$SOURCE_SHA"')
-    expect(workflow).toContain('test "$macos_artifact_id" = "$MACOS_UNSIGNED_ARTIFACT_ID"')
-    expect(workflow).toContain('args+=(--macos-unsigned-artifact-id "${{ inputs.macos_unsigned_artifact_id }}")')
-    expect(workflow).toContain("if: inputs.macos_publication_mode == 'signed'")
-    expect(workflow).toContain('artifact-ids: ${{ inputs.signed_macos_artifact_id }}')
-    expect(workflow).toContain('run-id: ${{ inputs.signer_run_id }}')
-    expect(workflow).toContain('path: .release-inputs/macos-signed')
-    expect(workflow).toContain('stage-desktop-ci-artifact.mjs verify')
-    expect(workflow).not.toContain('yarn dist:mac-unsigned-release')
-    expect(workflow).not.toContain('dist:mac-smoke')
-    expect(workflow).not.toContain('/mac-smoke/')
-    expect(workspaceManifest.resolutions?.['@electron/osx-sign@npm:1.3.3'])
-      .toContain('@electron-osx-sign-npm-1.3.3-sequential-walk.patch')
-    expect(signerPatch).toContain('for (const child of children)')
-    expect(signerPatch).toContain('-        return await Promise.all(children.map(async (child) => {')
+    for (const path of forbidden) expect(existsSync(new URL(path, packageRoot)), path).toBe(false)
+    expect(agentUpdate.match(/runInteractiveUpdate\(\)/gu)).toHaveLength(1)
+    expect(agentUpdate).not.toMatch(/\bfetch\b|https?:|node:fs|child_process|from ['"]electron['"]/u)
+    expect(updates).toContain('const runManualCheck = (): Promise<void> =>')
+    expect(updates).toContain('invoke: runManualCheck')
+    expect(updates).toContain('interactiveUpdate = runManualCheck')
+    expect(updates).toContain('setInteractiveUpdateHandler?.(runManualCheck)')
+    expect(preload).toContain('DESKTOP_UPDATE_RUN_INTERACTIVE')
+    expect(main).toContain('getOrCreateDesktopInstallationId(app.getPath(\'userData\'))')
+    expect(main).toMatch(/void start\(\)\.catch\(/u)
+    expect(workflow).not.toMatch(/yarn workspace @e-mate\/desktop dist:(?:mac|win)/u)
+    expect(workflow).not.toMatch(/schema-2|local-flow|dist:mac-unsigned-release/u)
   })
 
   it('keeps one fixed e-Mate orange tray source for generated native assets', () => {
@@ -470,40 +487,26 @@ describe('published package surface', () => {
     expect(lockfile).not.toContain('dsh-better-sidebar@')
   })
 
-  it('resolves electron-builder through the one pinned app-builder-lib patch chain', () => {
-    const patchResolution = 'patch:app-builder-lib@npm%3A26.15.3#./patches/app-builder-lib@26.15.3.patch'
+  it('keeps the pinned app-builder patch free of local NSIS changes', () => {
+    const patchResolution = 'patch:app-builder-lib@npm%3A26.15.7#./patches/app-builder-lib@26.15.7.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
-    const patch = readFileSync(new URL('patches/app-builder-lib@26.15.3.patch', workspaceRoot), 'utf8')
+    const patch = readFileSync(new URL('patches/app-builder-lib@26.15.7.patch', workspaceRoot), 'utf8')
     const workspaceRequire = createRequire(new URL('package.json', packageRoot))
     const electronBuilderManifest = workspaceRequire.resolve('electron-builder/package.json')
     const electronBuilderRequire = createRequire(electronBuilderManifest)
     const appBuilderManifest = electronBuilderRequire.resolve('app-builder-lib/package.json')
     const installedCodeSign = readFileSync(join(dirname(appBuilderManifest), 'out/codeSign/macCodeSign.js'), 'utf8')
-    const installedInstallSection = readFileSync(
-      join(dirname(appBuilderManifest), 'templates/nsis/installSection.nsh'),
-      'utf8',
-    )
 
     expect(workspaceManifest.resolutions).toMatchObject({
-      'app-builder-lib@npm:26.15.3': patchResolution,
+      'app-builder-lib@npm:26.15.7': patchResolution,
     })
-    expect(lockfile).toContain('app-builder-lib@patch:app-builder-lib@npm%3A26.15.3#./patches/app-builder-lib@26.15.3.patch')
+    expect(lockfile).toContain('app-builder-lib@patch:app-builder-lib@npm%3A26.15.7#./patches/app-builder-lib@26.15.7.patch')
     expect(patch).toContain('importCerts(keychainFile, certPaths, cscPasswords, keychainPassword)')
     expect(patch).toContain('"-k", keychainPassword, keychainFile')
     expect(installedCodeSign).toContain('importCerts(keychainFile, certPaths, cscPasswords, keychainPassword)')
     expect(installedCodeSign).toContain('"-k", keychainPassword, keychainFile')
-    expect(patch).toContain('diff --git a/templates/nsis/installSection.nsh b/templates/nsis/installSection.nsh')
-    expect(installedInstallSection).toContain('!ifmacrodef customUpdateInstallShouldRun')
-    expect(installedInstallSection).toContain('$R7 == "true"')
-    expect(installedInstallSection).toContain('Goto appBuilderInstallSectionDone')
-    expect(installedInstallSection.indexOf('!insertmacro customUpdateInstallPrepare'))
-      .toBeGreaterThan(installedInstallSection.lastIndexOf('!insertmacro CHECK_APP_RUNNING'))
-    expect(installedInstallSection.indexOf('!insertmacro customUpdateInstallApply'))
-      .toBeGreaterThan(installedInstallSection.indexOf('!insertmacro installApplicationFiles'))
-    expect(installedInstallSection).toContain('!insertmacro uninstallOldVersion SHELL_CONTEXT')
-    expect(installedInstallSection.match(/!insertmacro installApplicationFiles/gu)).toHaveLength(1)
-    expect(installedInstallSection.match(/!insertmacro registryAddInstallInfo/gu)).toHaveLength(1)
-    expect(installedInstallSection).toContain('!ifmacrodef customInstall')
+    expect(patch).not.toContain('templates/nsis/')
+    expect(patch).not.toContain('out/platformPackager.js')
   })
 
   it('starts restricted Windows shells with a hidden console show state', () => {
@@ -535,24 +538,6 @@ describe('published package surface', () => {
     expect(installedRuntime).not.toContain('134217728')
   })
 
-  it('ignores redundant shell escalation metadata under the current policy', () => {
-    const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
-    const workspaceRequire = createRequire(new URL('package.json', packageRoot))
-
-    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-tool-bash@npm:^0.1.0-rc.7'])
-      .toBe('npm:0.1.0-rc.7')
-    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-tool-pwsh@npm:^0.1.0-rc.7'])
-      .toBe('npm:0.1.0-rc.7')
-    expect(lockfile).not.toContain('@deepseek-ai/dsh-tool-bash@patch:')
-    expect(lockfile).not.toContain('@deepseek-ai/dsh-tool-pwsh@patch:')
-    for (const packageName of ['@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tool-pwsh']) {
-      const packageManifest = workspaceRequire.resolve(`${packageName}/package.json`)
-      const installed = readFileSync(join(dirname(packageManifest), 'lib/index.js'), 'utf8')
-      expect(installed).toContain('const redundantEscalation =')
-      expect(installed).toContain('if (!redundantEscalation) validateEscalationArgs(')
-    }
-  })
-
   it('ignores redundant filesystem escalation metadata under the current policy', () => {
     const fsPatch = 'patch:@deepseek-ai/dsh-tool-fs@npm%3A0.1.0-rc.7#~/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.0-rc.7-redundant-escalation.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
@@ -569,38 +554,4 @@ describe('published package surface', () => {
     expect(installed).toContain('args.justification === void 0 || redundantEscalation')
   })
 
-  it('packages the native Session envelope and fail-closed reader without overlays', () => {
-    const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
-
-    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-session@npm:^0.1.0-rc.7'])
-      .toBe('npm:0.1.0-rc.7')
-    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-session-persistence@npm:^0.1.0-rc.7'])
-      .toBe('npm:0.1.0-rc.7')
-    expect(lockfile).not.toContain('@deepseek-ai/dsh-session@patch:')
-    expect(lockfile).not.toContain('@deepseek-ai/dsh-session-persistence@patch:')
-
-    const session = Session.create('session-desktop-package-test' as never)
-    const append = session.append as unknown as (
-      type: string,
-      data: unknown,
-      options: { ignorable: true },
-    ) => { ignorable?: true }
-    expect(append.call(session, 'emate/image-output', { attachmentId: 'image-1' }, { ignorable: true }))
-      .toMatchObject({ ignorable: true })
-
-    type EventValidator = {
-      backend: { locate: () => undefined }
-      assertEventsSupported(meta: { id: string }, events: readonly { type: string; seq: number; ignorable?: true }[]): void
-    }
-    const validator = Object.create(PersistenceCoordinator.prototype) as EventValidator
-    validator.backend = { locate: () => undefined }
-    expect(() => validator.assertEventsSupported(
-      { id: 'session-desktop-package-test' },
-      [{ type: 'emate/image-output', seq: 105, ignorable: true }],
-    )).not.toThrow()
-    expect(() => validator.assertEventsSupported(
-      { id: 'session-desktop-package-test' },
-      [{ type: 'emate/image-output', seq: 106 }],
-    )).toThrow(/emate\/image-output/u)
-  })
 })
