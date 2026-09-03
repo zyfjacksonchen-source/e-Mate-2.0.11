@@ -16,7 +16,7 @@ const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled', 'unknown', 
 const SUBMISSION_STATUSES = new Set(['not-submitted', 'submitted', 'unknown'])
 const RECEIPT_STATUSES = new Set(['completed', 'needs-review', 'failed', 'cancelled', 'unknown'])
 const TRANSITIONS = new Set([
-  'queued:running', 'queued:failed', 'queued:cancelled', 'queued:interrupted',
+  'queued:running', 'queued:failed', 'queued:cancelled', 'queued:unknown', 'queued:interrupted',
   'running:needs-review', 'running:completed', 'running:failed', 'running:cancelled', 'running:unknown',
   'needs-review:completed', 'needs-review:failed', 'needs-review:cancelled', 'needs-review:unknown',
 ])
@@ -312,6 +312,9 @@ export function reduceImageBatchEvent(state: ImageBatchReducerState | undefined,
       if (current.state !== 'queued' || current.child_session_id !== undefined) fail('task-linked requires one unlinked queued task')
     } else {
       if (!TRANSITIONS.has(`${current.state}:${next.state}`)) fail('illegal task state transition')
+      if (current.state === 'queued' && next.state === 'unknown' && current.child_session_id === undefined) {
+        fail('queued to unknown requires an existing child link')
+      }
       if (current.child_session_id !== next.child_session_id) fail('task-state must preserve the exact child link')
       if (current.job_id !== undefined && current.job_id !== next.job_id) fail('task-state must preserve the exact job link')
       if (current.receipt !== undefined) {

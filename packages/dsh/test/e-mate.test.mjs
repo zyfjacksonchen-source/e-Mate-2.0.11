@@ -13,6 +13,7 @@ import AgentRegistry, { Inbox } from '../../../upstream/deepseek-harness/package
 import { Session, SessionId, SESSION_FORMAT_VERSION } from '../../../upstream/deepseek-harness/packages/core/session/lib/index.js'
 import { LocalAttachmentStore } from '../../../upstream/deepseek-harness/packages/attachment/attachment-local/lib/index.js'
 import LocalJobRegistry from '../../../upstream/deepseek-harness/packages/jobs/jobs-local/lib/index.js'
+import { validateJsonSchemaValue } from '../../../upstream/deepseek-harness/packages/core/tools/lib/index.js'
 import { FileSettingsProvider } from '../../../upstream/deepseek-harness/packages/settings/settings-file/lib/index.js'
 
 import {
@@ -374,7 +375,7 @@ test('managed profile installation is idempotent', () => {
     assert.match(patch, /id: emate-audit[\s\S]*\.\/plugins\/audit\.js[\s\S]*inject: \[connection, sessionPersistence, storageDomain, timer, tools, emateModelPolicy, emateIdentity\]/)
     assert.deepEqual(patchById.get('emate-image-generation').inject, [
       'tools', 'jobs', 'attachments', 'sandboxPolicy', 'sessionProjections',
-      'sessionProjectionCache', 'sessionPersistence', 'agents', 'subagents',
+      'sessionProjectionCache', 'sessionPersistence', 'sessions', 'agents', 'subagents',
       'emateIdentity', 'emateModelPolicy', 'emateCapabilities',
     ])
     assert.match(patch, /id: emate-image-generation[\s\S]*\.\/plugins\/image-generation\.js[\s\S]*rootUrl: https:\/\/mvdcm\.ecoremedia\.net\/e-mate\/model-api\/v1/)
@@ -1385,8 +1386,9 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       bindingPath,
       rootUrl: 'https://model.example/e-mate/model-api/v1',
     })
-    assert.deepEqual([...tools.keys()], ['imagegen', 'image_pack'])
-    assert.equal(imageProjectionDefinitions.length, 1)
+    assert.deepEqual([...tools.keys()], ['imagegen', 'image_batch', 'image_pack'])
+    assert.equal(imageProjectionDefinitions.length, 2)
+    assert.equal(imageProjectionDefinitions[1].key, 'eMateImageBatches')
     const imageProjection = imageProjectionDefinitions[0]
     assert.equal(imageProjection.key, 'eMateImageReceipts')
     assert.equal(imageProjection.stateVersion, 1)
@@ -1527,14 +1529,51 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       .findLast(event => event.type === 'emate/image-output'
         && event.data?.call_id === callId
         && event.data?.status !== 'running')?.data
+    const imageBatch = tools.get('image_batch')
+    assert.equal(imageBatch.isConcurrencySafe({}), false)
+    assert.equal(imageBatch.timeoutMs, 5_000_000)
+    assert.equal(imageBatch.output.presentationMeta, undefined)
+    const batchReceipt = status => ({ owner_session_id: 'child-1', call_id: 'call-1', revision: 2, event_seq: 4, status })
+    const batchTask = (ordinal, state, extra = {}) => ({
+      task_id: 'task-' + ordinal, ordinal, revision: 3, state,
+      submission_status: state === 'completed' ? 'submitted' : state === 'cancelled' ? 'unknown' : state === 'unknown' ? 'unknown' : 'not-submitted',
+      prompt_sha256: 'a'.repeat(64), image_url: [],
+      ...(state === 'completed' ? { child_session_id: 'child-1', job_id: 'emate-image-1', receipt: batchReceipt('completed') } : {}),
+      ...(state === 'completed' ? {} : { failure_code: state === 'unknown' ? 'provider-outcome-unknown' : state }),
+      ...extra,
+    })
+    const attachment = { attachmentId: 'sha256:' + 'b'.repeat(64), mediaType: 'image/png', bytes: 8, width: 1, height: 1, name: 'kept.png' }
+    const terminalId = 'sha256:' + 'c'.repeat(64)
+    const batchId = 'sha256:' + 'd'.repeat(64)
+    const completedTasks = [batchTask(1, 'completed'), batchTask(2, 'completed')]
+    const completedImages = completedTasks.map(task => ({ task_id: task.task_id, ordinal: task.ordinal,
+      child_session_id: task.child_session_id, receipt: task.receipt, attachment }))
+    const representative = [
+      { schema_version: 1, batch_id: batchId, status: 'completed', tasks: completedTasks,
+        images: completedImages, failures: [], terminal_event_id: terminalId },
+      { schema_version: 1, batch_id: batchId, status: 'partial', tasks: [completedTasks[0], batchTask(2, 'failed')],
+        images: [completedImages[0]], failures: [{ task_id: 'task-2', ordinal: 2, state: 'failed', failure_code: 'validation-failed' }], terminal_event_id: terminalId },
+      ...['failed', 'cancelled', 'unknown'].map(state => ({ schema_version: 1, batch_id: batchId,
+        status: state === 'cancelled' ? 'cancelled' : 'failed', tasks: [batchTask(1, state), batchTask(2, state)], images: [],
+        failures: [1, 2].map(ordinal => ({ task_id: 'task-' + ordinal, ordinal, state, failure_code: state === 'unknown' ? 'provider-outcome-unknown' : state })), terminal_event_id: terminalId })),
+    ]
+    for (const value of representative) assert.deepEqual(validateJsonSchemaValue(imageBatch.output.schema, value), [])
+    const malformed = [
+      { ...representative[0], extra: true },
+      (({ batch_id: _missing, ...value }) => value)(representative[0]),
+      { ...representative[0], images: [{ ...completedImages[0], attachment: { ...attachment, width: undefined } }] },
+      { ...representative[0], images: [{ ...completedImages[0], receipt: { ...completedImages[0].receipt, status: 'needs-review' } }] },
+    ]
+    for (const value of malformed) assert.notDeepEqual(validateJsonSchemaValue(imageBatch.output.schema, value), [])
+    const batchText = imageBatch.output.render({}, { status: 'partial', images: [{ attachment: { name: 'kept.png' } }], failures: [{}] })[0].text
+    assert.match(batchText, /partial.*kept\.png.*1 failures/u)
+    assert.doesNotMatch(batchText, /sha256:|child-|emate-image-/u)
     const imagegen = tools.get('imagegen')
     assert.equal(imagegen.isConcurrencySafe({}), false)
     assert.deepEqual(Object.keys(imagegen.parameters.properties), ['prompt', 'image_url'])
     assert.deepEqual(imagegen.parameters.required, ['prompt'])
-    assert.match(imagegen.description, /parent Agent must not call imagegen at all/u)
-    assert.match(imagegen.description, /must never emit multiple imagegen calls in one assistant message/u)
-    assert.match(imagegen.description, /at most four sibling native subagent calls with run_in_background: false/u)
-    assert.match(imagegen.description, /delegated child may call imagegen exactly once/u)
+    assert.match(imagegen.description, /use image_batch once and do not call imagegen directly/u)
+    assert.match(imagegen.description, /native image_batch child may call imagegen exactly once/u)
     assert.match(imagegen.description, /Never pass a provider, model, output path, size, quality, timeout, or concurrency policy/u)
     tools.delete('imagegen')
     await assert.rejects(
@@ -2720,6 +2759,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
 test('Agent operation guidance owns the e-Mate persona and native image batch policy', () => {
   let section
   applyAgentOperations({
+    get: name => name === 'tools' ? { schemas: () => [{ name: 'image_batch' }] } : undefined,
     systemPrompt: { section: value => { section = value } },
   })
   const profilePatch = parseYaml(readFileSync(new URL('../profile/cordis.patch.yml', import.meta.url), 'utf8'))
@@ -2747,29 +2787,12 @@ test('Agent operation guidance owns the e-Mate persona and native image batch po
   assert.match(section.text, /never use Browser\/CDP as a fallback for `imagegen`, native `web_search`, attachment resolution/u)
   assert.match(section.text, /Do not invent a built-in connector or ask the user to paste secrets into chat/u)
   assert.match(section.text, /exactly one new image or any image edit, call `imagegen` directly in the current Agent/u)
-  assert.match(section.text, /Run multiple edits serially in that Agent, one `imagegen` call per requested output/u)
-  assert.match(section.text, /never delegate an edit or promise that a parent-Session source image is available in another Session/u)
-  assert.match(section.text, /when the user requests two or more mutually independent new images, the parent Agent must not call `imagegen` at all/u)
-  assert.match(section.text, /must never emit multiple `imagegen` calls in one assistant message/u)
-  assert.match(section.text, /overrides wording such as "parallel\/concurrent imagegen"/u)
-  assert.match(section.text, /must instead issue together, in one assistant step, at most four sibling native `subagent` calls, each explicitly setting `run_in_background: false`/u)
-  assert.match(section.text, /wait until every call in the current foreground batch returns before issuing the next batch/u)
-  assert.match(section.text, /Each child prompt must be self-contained[\s\S]*generate only its one new image[\s\S]*call the existing `imagegen` exactly once[\s\S]*never delegate or call `subagent`/u)
-  assert.match(section.text, /never silently retry, switch models, or fall back[\s\S]*clearly report that image's success or failure/u)
-  assert.match(section.text, /parent Agent must not use background subagents, `job_\*`, background Jobs[\s\S]*to coordinate this batch/u)
-  assert.match(section.text, /does not restrict `imagegen`'s internal native Job owner/u)
-  assert.match(section.text, /native AgentLoop's existing four-call limit is the only batch scheduler/u)
-  assert.match(section.text, /Every batched image remains owned by the native child Session and its Gallery/u)
-  assert.match(section.text, /parent Gallery may read direct-child terminal receipts only through the native read-only Session projection/u)
-  assert.match(section.text, /displaying each terminal receipt as it lands without waiting for the parent Turn/u)
-  assert.match(section.text, /summarize only the native subagent results in Tool-call order/u)
-  assert.match(section.text, /using readable image names plus success or failure/u)
-  assert.match(section.text, /never display an attachment ID, hash, or `sha256:\.\.\.` as the image result/u)
-  assert.match(section.text, /ArtifactTerminal renders the real images from child receipts/u)
-  assert.match(section.text, /Never copy an attachment or receipt into the parent Session, write or synthesize `child_session_id`, or call `image_pack` across Sessions/u)
-  assert.match(section.text, /Report each failed image once; never automatically retry it, create a replacement image, switch models, fall back, or add a queue/u)
-  assert.match(section.text, /does not change delegation policy for ordinary non-image tasks/u)
-  assert.doesNotMatch(section.text, /new images or independent edits|generate or edit only its one image|Do not use background subagents[\s\S]*, Jobs,/u)
+  assert.match(section.text, /two or more mutually independent new images, call .*image_batch.* exactly once/u)
+  assert.match(section.text, /Do not delegate the batch, emit sibling subagent waves, call .*imagegen.* separately/u)
+  assert.match(section.text, /Batch source\/edit tasks remain unavailable/u)
+  assert.match(section.text, /Successful images remain valid when sibling tasks fail/u)
+  assert.match(section.text, /Never display attachment IDs, hashes, receipt pointers, child Session IDs, Job IDs/u)
+  assert.doesNotMatch(section.text, /run_in_background|at most four sibling native|native AgentLoop's existing four-call limit/u)
 })
 
 test('identity agreements are immutable, explicit, and use the target Connection RPC', async () => {
@@ -4687,7 +4710,7 @@ test('audit locks terminal scenarios from trusted local outcomes', async () => {
           if (name === 'office_write') {
             return { moduleSpecifier: '@e-mate/dsh-plugin-office-skills', pluginName: 'emate-office-skills' }
           }
-          if (name === 'imagegen') {
+          if (name === 'imagegen' || name === 'image_batch') {
             return { moduleSpecifier: './plugins/image-generation.js', pluginName: 'emate-image-generation' }
           }
           if (name === 'web_search') {
@@ -4815,6 +4838,9 @@ test('audit locks terminal scenarios from trusted local outcomes', async () => {
     run('audit-imagegen-tool', startedAt + 1_100, {
       terminalEvidence: (agent, time) => { settleTool(agent, time, 'imagegen', true) },
     })
+    run('audit-image-batch-tool', startedAt + 1_150, {
+      terminalEvidence: (agent, time) => { settleTool(agent, time, 'image_batch', true) },
+    })
     run('audit-document-with-search', startedAt + 1_200, {
       terminalEvidence: (agent, time) => {
         settleTool(agent, time, 'web_search')
@@ -4851,6 +4877,7 @@ test('audit locks terminal scenarios from trusted local outcomes', async () => {
       'DOCUMENT_EDITING',
       'ASSET_PRODUCTION',
       'CONTENT_CREATION',
+      'ASSET_PRODUCTION',
       'ASSET_PRODUCTION',
       'DOCUMENT_EDITING',
       'GENERAL',

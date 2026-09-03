@@ -4,11 +4,14 @@ import { isAbsolute, join, relative, sep } from 'node:path'
 import { setTimeout as wait } from 'node:timers/promises'
 import { zipSync } from 'fflate'
 import { loadTargetLlm, loadTargetStorageDomain, loadTargetTools } from './target-runtime.js'
+import { imageBatchParameters, imageBatchResultSchema } from './image-batch.ts'
+import { imageBatchProjectionDefinition } from './image-batch-events.ts'
+import { createNativeImageTaskRuntime } from './native-image-task-runner.ts'
 
 export const name = 'emate-image-generation'
 export const inject = [
   'tools', 'jobs', 'attachments', 'sandboxPolicy', 'sessionProjections',
-  'sessionProjectionCache', 'sessionPersistence',
+  'sessionProjectionCache', 'sessionPersistence', 'sessions', 'subagents',
   'emateIdentity', 'emateModelPolicy', 'emateCapabilities',
 ]
 
@@ -76,6 +79,7 @@ const MAX_ADMISSION_ERROR_BYTES = 16 * 1024
 const MIN_GATEWAY_RETRY_AFTER_MS = 1_000
 const MAX_GATEWAY_RETRY_AFTER_MS = 3_600_000
 const MAX_EDIT_MULTIPART_BYTES = MAX_EDIT_IMAGES * MAX_EDIT_IMAGE_BYTES + MAX_PROMPT_CHARS * 4 + 256 * 1024
+const IMAGE_BATCH_TIMEOUT_MS = IMAGE_TIMEOUT_MS * 8 + 120_000
 const ATTACHMENT_ID = /^sha256:[0-9a-f]{64}$/u
 const SHA256 = /^[0-9a-f]{64}$/u
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
@@ -818,7 +822,7 @@ function attemptedImageOperation(args) {
   return Array.isArray(args.image_url) && args.image_url.length > 1 ? 'fusion' : 'edit'
 }
 
-const NATIVE_BATCH_ERROR = 'parent image batch rejected before provider submission: use at most four sibling native subagent calls with run_in_background: false; never call imagegen directly for two or more independent new images'
+const NATIVE_BATCH_ERROR = 'parent image batch rejected before provider submission: use image_batch once; never call imagegen directly for two or more independent new images'
 const NATIVE_BATCH_SHAPE_ERROR = 'imagegen cannot verify its owning native assistant/message; refusing provider submission'
 
 function assertNativeImageBatchBoundary(agent, callId) {
@@ -981,16 +985,18 @@ function detectedImage(data) {
   throw new Error('e-Mate image result is not PNG, JPEG, or WebP')
 }
 
-function requestScope(exec) {
+function requestScope(exec, deterministicTaskId) {
   const sessionId = String(exec.agent?.session?.header?.id ?? exec.agent?.id ?? '')
   const callId = String(exec.callId ?? '')
   if (sessionId.length === 0 || callId.length === 0) throw new Error('image generation requires a stable e-Mate Tool scope')
-  const id = createHash('sha256').update(sessionId).update('\0').update(callId).digest('hex').slice(0, 32)
+  const id = deterministicTaskId === undefined
+    ? createHash('sha256').update(sessionId).update('\0').update(callId).digest('hex').slice(0, 32)
+    : deterministicTaskId.slice('sha256:'.length)
   const clientRequestId = `image-${id}`
   return {
     clientRequestId,
     headers: {
-      'x-e-mate-task-id': clientRequestId,
+      'x-e-mate-task-id': deterministicTaskId ?? clientRequestId,
       'x-e-mate-trace-id': clientRequestId,
       session_id: clientRequestId,
       'x-client-request-id': clientRequestId,
@@ -1319,6 +1325,8 @@ export async function apply(ctx, config = {}) {
     loadTargetStorageDomain(bindingPath),
   ])
   ctx.sessionProjections.register(imageReceiptsProjectionDefinition(z))
+  ctx.sessionProjections.register(imageBatchProjectionDefinition(z))
+  const nativeImageTasks = createNativeImageTaskRuntime(ctx)
   await hydrateImageReceiptProjections(ctx)
   ctx.on('agent/pre-step', async ({ agent }, next) => {
     const decision = await next()
@@ -1335,7 +1343,7 @@ export async function apply(ctx, config = {}) {
   ctx.effect(() => ctx.jobs.attachController('emate-image'), 'emate.image: target Job controller')
   ctx.tools.register(defineTool({
     name: 'imagegen',
-    description: 'Generate or edit exactly one image in this Agent through the fixed e-Mate gpt-image-2-pro route. HARD BATCH BOUNDARY: for two or more mutually independent new images, a parent Agent must not call imagegen at all and must never emit multiple imagegen calls in one assistant message, even when asked for parallel/concurrent imagegen; it must use at most four sibling native subagent calls with run_in_background: false. A delegated child may call imagegen exactly once for its one new image. For an edit, copy the exact sha256: value labeled as the current-session image attachment ID by a prior imagegen or job_output result into image_url; never pass its Job ID, request ID, or a URL. For multiple independent edits, make separate imagegen calls one at a time and pass exactly one source ID to each call. Pass multiple explicit IDs only for reference fusion into one output. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.',
+    description: 'Generate or edit exactly one image in this Agent through the fixed e-Mate gpt-image-2-pro route. For two or more mutually independent new images, use image_batch once and do not call imagegen directly. A native image_batch child may call imagegen exactly once with its exact admitted arguments. For an edit, copy the exact sha256: current-session image attachment ID into image_url; never pass a Job ID, request ID, or URL. Pass multiple explicit IDs only for reference fusion into one output. Never pass a provider, model, output path, size, quality, timeout, or concurrency policy.',
     parameters: {
       prompt: { type: 'string', required: true, description: 'One image generation or edit instruction.' },
       image_url: {
@@ -1349,6 +1357,7 @@ export async function apply(ctx, config = {}) {
     timeoutMs: IMAGE_TIMEOUT_MS,
     async execute(args, exec) {
       assertFreshParentCall(exec.agent, exec.callId)
+      const batchClaim = await nativeImageTasks.claim(exec.agent, args)
       const parentSessionId = sessionIdentity(exec.agent)
       let operation = attemptedImageOperation(args)
       let refs = []
@@ -1362,7 +1371,7 @@ export async function apply(ctx, config = {}) {
         }
         exec.signal.throwIfAborted()
         task = normalizeTask(args)
-        task.attachmentIds = implicitEditImages(exec.agent, task)
+        task.attachmentIds = batchClaim === undefined ? implicitEditImages(exec.agent, task) : task.attachmentIds
         operation = imageOperation(task.attachmentIds)
         refs = task.attachmentIds.map(id => sessionImage(exec.agent, id))
       } catch (error) {
@@ -1391,7 +1400,7 @@ export async function apply(ctx, config = {}) {
       try {
         await modelPolicy.assertModel(IMAGE_MODEL)
         exec.signal.throwIfAborted()
-        const scope = requestScope(exec)
+        const scope = requestScope(exec, batchClaim?.taskId)
         clientRequestId = scope.clientRequestId
         started = startImageJob(ctx, exec.agent, exec.signal, async (signal) => {
           const value = await client.execute(
@@ -1498,6 +1507,26 @@ export async function apply(ctx, config = {}) {
       kind: 'write',
       rawInput: args.prompt,
     }),
+  }))
+  const imageBatchOutput = {
+    schema: imageBatchResultSchema(),
+    render: (_args, value) => {
+      const names = value.images.map(item => item.attachment.name ?? 'e-Mate image').join(', ')
+      return [{ type: 'text', text: 'Image batch ' + value.status + ': '
+        + value.images.length + ' images' + (names === '' ? '' : ' (' + names + ')')
+        + ', ' + value.failures.length + ' failures.' }]
+    },
+  }
+  ctx.tools.register(defineTool({
+    name: 'image_batch',
+    description: 'Generate 2 to 8 mutually independent new images as one durable local batch. Each task has one non-empty prompt of at most 20,000 characters and produces exactly one image. Optional concurrency is 1 to 4 and defaults to 3. Use imagegen instead for one image or for any edit/reference task. Do not pass source image IDs until batch editing is enabled.',
+    parameters: imageBatchParameters(),
+    output: imageBatchOutput,
+    isConcurrencySafe: () => false,
+    timeoutMs: IMAGE_BATCH_TIMEOUT_MS,
+    execute: (args, exec) => nativeImageTasks.execute(args, exec),
+    presentCall: args => ({ card: 'generic', title: 'Generate image batch', kind: 'write',
+      rawInput: Array.isArray(args?.tasks) ? String(args.tasks.length) + ' images' : 'image batch' }),
   }))
   ctx.tools.register(defineTool({
     name: 'image_pack',

@@ -241,6 +241,24 @@ test('reducer permits every ADR transition and rejects regressions, repeats, and
   rejects(() => appendTask(state, 'task-state', { ...state.tasks[0], revision: 99, state: 'running', receipt: undefined }))
 })
 
+test('queued unknown requires a durable child link and preserves ambiguous submission', () => {
+  let linkedState = append(undefined, created())
+  linkedState = appendTask(linkedState, 'task-linked', linked(linkedState.tasks[0]))
+  linkedState = appendTask(linkedState, 'task-state', {
+    ...linkedState.tasks[0], revision: linkedState.tasks[0].revision + 1,
+    state: 'unknown', submission_status: 'unknown', failure_code: 'provider-outcome-unknown', updated_at: TIME,
+  })
+  assert.equal(linkedState.tasks[0].state, 'unknown')
+  assert.equal(linkedState.tasks[0].submission_status, 'unknown')
+  assert.equal(linkedState.tasks[0].child_session_id, 'child-1')
+
+  const unlinked = append(undefined, created())
+  rejects(() => appendTask(unlinked, 'task-state', {
+    ...unlinked.tasks[0], revision: 2, state: 'unknown', submission_status: 'unknown',
+    failure_code: 'provider-outcome-unknown', updated_at: TIME,
+  }))
+})
+
 test('exact duplicate events are idempotent while same-ID conflicts are corruption', () => {
   const first = append(undefined, created())
   assert.equal(append(first, clone(created())), first)

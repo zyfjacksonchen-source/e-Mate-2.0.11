@@ -14,6 +14,7 @@
           - glob
           - grep
           - image_pack
+          - image_batch
           - imagegen
           - pwsh
           - read
@@ -27,6 +28,12 @@
         maxResults: 5
         maxQueryChars: 512
         searchAliases:
+          image_batch:
+            - 批量生图
+            - 多图生成
+            - 生成多张图片
+            - 一组配图
+            - 批量图片创作
           imagegen:
             - 生图
             - 改图

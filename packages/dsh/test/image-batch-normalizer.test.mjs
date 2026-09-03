@@ -14,6 +14,7 @@ const {
   imageBatchId,
   imageBatchParameters,
   imageBatchPromptSha256,
+  imageBatchResultSchema,
   imageBatchTaskId,
   normalizeImageBatchRequest,
 } = batch
@@ -44,7 +45,7 @@ test('module import is pure and exposes only the internal contract', () => {
   assert.deepEqual(listenersAfter, listenersBefore)
   assert.deepEqual(Object.keys(batch).sort(), [
     'imageBatchEventId', 'imageBatchId', 'imageBatchParameters', 'imageBatchPromptSha256',
-    'imageBatchTaskId', 'normalizeImageBatchRequest',
+    'imageBatchResultSchema', 'imageBatchTaskId', 'normalizeImageBatchRequest',
   ])
 })
 
@@ -156,19 +157,108 @@ test('IDs are deterministic, domain-distinct, parent-bounded, and ordinal-sensit
   for (const value of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '1']) rejects(() => imageBatchEventId('session', 'call', value))
 })
 
-test('internal schema mapping is strict, complete, fresh, and non-registering', () => {
+test('public parameter mapping is fresh, exact, and uses only pinned rc.7 author keys', () => {
   const first = imageBatchParameters()
   const second = imageBatchParameters()
   assert.notEqual(first, second)
   assert.deepEqual(Object.keys(first).sort(), ['concurrency', 'tasks'])
   assert.equal(first.tasks.required, true)
-  assert.equal(first.tasks.minItems, 2)
-  assert.equal(first.tasks.maxItems, 8)
+  assert.equal(first.tasks.type, 'array')
   assert.equal(first.tasks.items.additionalProperties, false)
   assert.deepEqual(Object.keys(first.tasks.items.properties).sort(), ['image_url', 'prompt'])
-  assert.equal(first.tasks.items.properties.image_url.oneOf[1].minItems, 0)
-  assert.equal(first.tasks.items.properties.image_url.oneOf[1].maxItems, 16)
-  assert.deepEqual(first.concurrency, { type: 'integer', minimum: 1, maximum: 4, default: 3 })
-  first.tasks.minItems = 99
-  assert.equal(second.tasks.minItems, 2)
+  assert.deepEqual(first.tasks.items.properties.prompt.type, 'string')
+  assert.equal(first.tasks.items.properties.prompt.required, true)
+  assert.deepEqual(first.tasks.items.properties.image_url.oneOf.map(node => node.type), ['string', 'array'])
+  assert.equal(first.tasks.items.properties.image_url.oneOf[1].items.type, 'string')
+  assert.equal(first.concurrency.type, 'integer')
+  assert.equal(first.concurrency.required, undefined)
+
+  const admitted = new Set(['type', 'properties', 'additionalProperties', 'items', 'oneOf', 'enum', 'const', 'required', 'description'])
+  const visit = node => {
+    for (const key of Object.keys(node)) assert(admitted.has(key), 'unsupported parameter key: ' + key)
+    if (node.type === 'object') {
+      assert.equal(node.additionalProperties, false)
+      for (const child of Object.values(node.properties)) visit(child)
+    }
+    if (node.type === 'array') visit(node.items)
+    for (const branch of node.oneOf ?? []) visit(branch)
+  }
+  visit({ type: 'object', additionalProperties: false, properties: first })
+  first.tasks.items.properties.prompt.type = 'integer'
+  assert.equal(second.tasks.items.properties.prompt.type, 'string')
+})
+
+test('normalizer enforces every bound omitted from the public parameter schema before effects', () => {
+  for (const value of [request(1), request(9), { ...request(2), concurrency: 0 }, { ...request(2), concurrency: 5 }]) {
+    rejects(() => normalizeImageBatchRequest(value))
+  }
+  rejects(() => normalizeImageBatchRequest({ tasks: [{ prompt: '' }, task()] }))
+  rejects(() => normalizeImageBatchRequest({ tasks: [{ prompt: 'x'.repeat(20_001) }, task()] }))
+  rejects(() => normalizeImageBatchRequest({ tasks: [{ prompt: 'bad', image_url: 'not-an-attachment' }, task()] }))
+  rejects(() => normalizeImageBatchRequest({ tasks: [{ prompt: 'bad', image_url: Array.from({ length: 17 }, (_, index) => 'sha256:' + index.toString(16).padStart(64, '0')) }, task()] }))
+  const normalized = normalizeImageBatchRequest({ tasks: [{ prompt: 'a', image_url: [A, A, B] }, task()] })
+  assert.equal(normalized.concurrency, 3)
+  assert.deepEqual(normalized.tasks[0].attachmentIds, [A, B])
+})
+
+test('result schema is fresh, fully nested, exact, and uses only pinned rc.7 keywords', () => {
+  const first = imageBatchResultSchema()
+  const second = imageBatchResultSchema()
+  assert.notEqual(first, second)
+  assert.equal(first.type, 'object')
+  assert.equal(first.additionalProperties, false)
+  assert.deepEqual(Object.keys(first.properties).sort(), [
+    'batch_id', 'failures', 'images', 'schema_version', 'status', 'tasks', 'terminal_event_id',
+  ])
+  assert.deepEqual(first.properties.schema_version, { type: 'integer', required: true, const: 1 })
+  assert.deepEqual(first.properties.status.enum, ['completed', 'partial', 'failed', 'cancelled'])
+
+  const allowed = new Set(['type', 'properties', 'additionalProperties', 'items', 'oneOf', 'enum', 'const', 'required'])
+  const visit = node => {
+    assert.equal(typeof node, 'object')
+    assert.equal(node.type === 'json', false)
+    for (const key of Object.keys(node)) assert(allowed.has(key), 'unsupported schema key: ' + key)
+    if (node.type === 'object') {
+      assert.equal(node.additionalProperties, false)
+      assert.equal(typeof node.properties, 'object')
+      for (const child of Object.values(node.properties)) visit(child)
+    }
+    if (node.type === 'array') {
+      assert.equal(typeof node.items, 'object')
+      visit(node.items)
+    }
+    for (const branch of node.oneOf ?? []) visit(branch)
+  }
+  visit(first)
+
+  const task = first.properties.tasks.items
+  assert.deepEqual(Object.keys(task.properties).sort(), [
+    'child_session_id', 'failure_code', 'image_url', 'job_id', 'ordinal', 'prompt_sha256',
+    'receipt', 'revision', 'state', 'submission_status', 'task_id', 'updated_at',
+  ])
+  assert.deepEqual(task.properties.state.enum, ['completed', 'failed', 'cancelled', 'unknown', 'interrupted'])
+  assert.deepEqual(task.properties.submission_status.enum, ['not-submitted', 'submitted', 'unknown'])
+  assert.equal(task.properties.receipt.required, undefined)
+  assert.equal(task.properties.image_url.items.type, 'string')
+
+  const image = first.properties.images.items
+  assert.deepEqual(Object.keys(image.properties).sort(), ['attachment', 'child_session_id', 'ordinal', 'receipt', 'task_id'])
+  assert.equal(image.properties.receipt.required, true)
+  assert.deepEqual(image.properties.receipt.properties.status.enum, ['completed'])
+  assert.equal(image.properties.child_session_id.required, true)
+  assert.equal(image.properties.attachment.required, true)
+  assert.deepEqual(Object.keys(image.properties.attachment.properties).sort(), [
+    'attachmentId', 'bytes', 'height', 'mediaType', 'name', 'width',
+  ])
+  assert.deepEqual(image.properties.attachment.properties.mediaType.enum, ['image/png', 'image/jpeg', 'image/webp'])
+
+  const failure = first.properties.failures.items
+  assert.deepEqual(Object.keys(failure.properties).sort(), [
+    'child_session_id', 'failure_code', 'job_id', 'ordinal', 'receipt', 'state', 'task_id',
+  ])
+  assert.deepEqual(failure.properties.state.enum, ['failed', 'cancelled', 'unknown', 'interrupted'])
+  assert.deepEqual(task.properties.receipt.properties.status.enum, ['completed', 'failed', 'cancelled', 'unknown'])
+  assert.deepEqual(failure.properties.receipt.properties.status.enum, ['completed', 'failed', 'cancelled', 'unknown'])
+  first.properties.tasks.items.properties.task_id.type = 'number'
+  assert.equal(second.properties.tasks.items.properties.task_id.type, 'string')
 })

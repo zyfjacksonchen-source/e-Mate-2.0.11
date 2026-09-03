@@ -133,24 +133,98 @@ export function normalizeImageBatchRequest(value: unknown): NormalizedImageBatch
   return Object.freeze({ tasks: Object.freeze(tasks), concurrency: concurrency as number })
 }
 
-/** Internal defineTool parameter mapping for later activation; this module never registers it. */
+/**
+ * Fresh public parameter mapping using only the pinned rc.7 defineTool subset.
+ * normalizeImageBatchRequest enforces all omitted lengths, patterns, bounds, defaults, and deduplication before effects.
+ */
 export function imageBatchParameters() {
   return {
     tasks: {
-      type: 'array', required: true, minItems: MIN_TASKS, maxItems: MAX_TASKS,
+      type: 'array', required: true,
+      description: 'Two to eight ordered independent new-image tasks.',
       items: {
         type: 'object', additionalProperties: false,
         properties: {
-          prompt: { type: 'string', required: true, minLength: 1, maxLength: MAX_PROMPT_CHARS },
+          prompt: { type: 'string', required: true, description: 'One non-empty image instruction of at most 20,000 characters.' },
           image_url: {
+            description: 'Optional exact sha256 attachment ID or ordered list of at most 16 IDs; EM217-103 accepts only omitted or empty lists.',
             oneOf: [
-              { type: 'string', pattern: ATTACHMENT_ID.source },
-              { type: 'array', minItems: 0, maxItems: MAX_IMAGE_URLS, items: { type: 'string', pattern: ATTACHMENT_ID.source } },
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } },
             ],
           },
         },
       },
     },
-    concurrency: { type: 'integer', minimum: 1, maximum: MAX_CONCURRENCY, default: DEFAULT_CONCURRENCY },
+    concurrency: { type: 'integer', description: 'Optional worker concurrency from 1 to 4; defaults to 3 when omitted.' },
+  }
+}
+
+/**
+ * Fresh exact Tool-output mapping for the public image_batch result.
+ * Pinned rc.7 Tool schemas cannot express regex, numeric, or collection bounds;
+ * the native runner therefore remains the mandatory validator for those constraints.
+ */
+export function imageBatchResultSchema() {
+  const receipt = (statuses = ['completed', 'failed', 'cancelled', 'unknown']) => ({
+    type: 'object', additionalProperties: false,
+    properties: {
+      owner_session_id: { type: 'string', required: true },
+      call_id: { type: 'string', required: true },
+      revision: { type: 'integer', required: true },
+      event_seq: { type: 'integer', required: true },
+      status: { type: 'string', required: true, enum: statuses },
+    },
+  })
+  const task = () => ({
+    type: 'object', additionalProperties: false,
+    properties: {
+      task_id: { type: 'string', required: true }, ordinal: { type: 'integer', required: true },
+      revision: { type: 'integer', required: true },
+      state: { type: 'string', required: true, enum: ['completed', 'failed', 'cancelled', 'unknown', 'interrupted'] },
+      submission_status: { type: 'string', required: true, enum: ['not-submitted', 'submitted', 'unknown'] },
+      prompt_sha256: { type: 'string', required: true },
+      image_url: { type: 'array', required: true, items: { type: 'string' } },
+      child_session_id: { type: 'string' }, job_id: { type: 'string' }, receipt: receipt(),
+      failure_code: { type: 'string' }, updated_at: { type: 'string' },
+    },
+  })
+  const attachment = () => ({
+    type: 'object', additionalProperties: false,
+    properties: {
+      attachmentId: { type: 'string', required: true },
+      mediaType: { type: 'string', required: true, enum: ['image/png', 'image/jpeg', 'image/webp'] },
+      bytes: { type: 'integer', required: true }, width: { type: 'integer', required: true },
+      height: { type: 'integer', required: true }, name: { type: 'string' },
+    },
+  })
+  const image = () => ({
+    type: 'object', additionalProperties: false,
+    properties: {
+      task_id: { type: 'string', required: true }, ordinal: { type: 'integer', required: true },
+      child_session_id: { type: 'string', required: true }, receipt: { ...receipt(['completed']), required: true },
+      attachment: { ...attachment(), required: true },
+    },
+  })
+  const failure = () => ({
+    type: 'object', additionalProperties: false,
+    properties: {
+      task_id: { type: 'string', required: true }, ordinal: { type: 'integer', required: true },
+      state: { type: 'string', required: true, enum: ['failed', 'cancelled', 'unknown', 'interrupted'] },
+      failure_code: { type: 'string', required: true }, child_session_id: { type: 'string' },
+      job_id: { type: 'string' }, receipt: receipt(),
+    },
+  })
+  return {
+    type: 'object', additionalProperties: false,
+    properties: {
+      schema_version: { type: 'integer', required: true, const: 1 },
+      batch_id: { type: 'string', required: true },
+      status: { type: 'string', required: true, enum: ['completed', 'partial', 'failed', 'cancelled'] },
+      tasks: { type: 'array', required: true, items: task() },
+      images: { type: 'array', required: true, items: image() },
+      failures: { type: 'array', required: true, items: failure() },
+      terminal_event_id: { type: 'string', required: true },
+    },
   }
 }

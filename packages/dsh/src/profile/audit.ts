@@ -41,6 +41,11 @@ const TRUSTED_TOOL_SCENARIOS = new Map([
     pluginName: 'emate-image-generation',
     scenario: 'ASSET_PRODUCTION',
   }],
+  ['image_batch', {
+    moduleSpecifiers: new Set(['./plugins/image-generation.js']),
+    pluginName: 'emate-image-generation',
+    scenario: 'ASSET_PRODUCTION',
+  }],
   ['web_search', {
     moduleSpecifiers: new Set(['@deepseek-ai/dsh-tool-web']),
     pluginName: 'tool-web',

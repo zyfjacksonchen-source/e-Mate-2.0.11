@@ -96,6 +96,8 @@ test('keeps one canonical imagegen alias target and the accepted native search r
   const componentPatch = readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
   const profilePatch = readFileSync(new URL('../../dsh/profile/cordis.patch.yml', import.meta.url), 'utf8')
   assert.match(componentPatch, /^\s+- imagegen$/mu)
+  assert.match(componentPatch, /^\s+- image_batch$/mu)
+  assert.match(componentPatch, /image_batch:[\s\S]*批量生图[\s\S]*生成多张图片/u)
   assert.match(componentPatch, /^\s+- web_search$/mu)
   assert.doesNotMatch(componentPatch, /^\s+- imagen$/mu)
   assert.doesNotMatch(componentPatch, /gpt-responses|allowInsecureHttp|43\.135\.183\.53|emate-web-search-gpt/u)
@@ -206,6 +208,7 @@ test('uses bounded CJK aliases without changing the initial header or adding a p
   const config = {
     maxResults: 1,
     searchAliases: {
+      image_batch: ['批量生图', '多图生成', '生成多张图片', '一组配图'],
       imagegen: ['生图', '生成封面', '内页图片', '把图片中', '图片编辑'],
     },
   }
@@ -213,6 +216,7 @@ test('uses bounded CJK aliases without changing the initial header or adding a p
   t.after(async () => ctx.fiber.dispose())
   const { ctx: baselineCtx } = await harness({ maxResults: 1 })
   t.after(async () => baselineCtx.fiber.dispose())
+  ctx.tools.register(fixture('image_batch', 'Generate several independent new images'))
   ctx.tools.register(fixture('imagegen', 'Generate or edit one image'))
   ctx.tools.register(fixture('image_metadata', 'Inspect image metadata and error logs'))
   baselineCtx.tools.register(fixture('imagegen', 'Generate or edit one image'))
@@ -223,11 +227,11 @@ test('uses bounded CJK aliases without changing the initial header or adding a p
 
   assert.deepEqual(names(ctx, agent), [TOOL_SEARCH_NAME])
   assert.equal(initialHeader, JSON.stringify(baselineCtx.tools.schemas(baselineAgent)))
-  assert.equal(initialHeader.includes('imagegen'), false)
-  assert.equal(initialHeader.includes('生成封面'), false)
-  const generation = await execute(ctx, agent, TOOL_SEARCH_NAME, { query: '生成封面和六张内页图片' })
-  assert.deepEqual(generation.value.tools, [{ name: 'imagegen', status: 'loaded' }])
-  assert.equal(agent.session.events.some(event => JSON.stringify(event).includes('生成封面和六张内页图片')), false)
+  assert.equal(initialHeader.includes('image_batch'), false)
+  assert.equal(initialHeader.includes('批量生图'), false)
+  const generation = await execute(ctx, agent, TOOL_SEARCH_NAME, { query: '批量生图六张' })
+  assert.deepEqual(generation.value.tools, [{ name: 'image_batch', status: 'loaded' }])
+  assert.equal(agent.session.events.some(event => JSON.stringify(event).includes('批量生图六张')), false)
 })
 
 test('CJK image aliases find an edit but do not recall imagegen for diagnostics', async (t) => {
