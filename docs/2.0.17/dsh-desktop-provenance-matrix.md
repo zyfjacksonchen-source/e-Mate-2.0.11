@@ -6,7 +6,7 @@ This matrix admits exactly one Desktop source: `anywhere-labs/deepseek-harness-d
 
 The target inspected here is EM217-000 commit `4b2703a60b82fbb663737d38ec6acf3047b7667d`, whose locked e-Mate source baseline is `f876f01d8280e4ab20fe83b88c36c7fe7a662135`. Desktop remains the single Electron lifecycle, resource, renderer-health, package, and update owner.
 
-Supervisor-provided baseline evidence is recorded, not rerun: `corepack yarn --cwd desktop check` reported **45 passed files + 1 skipped; 404 passed tests + 4 skipped; exit 0**. This is **source-baseline-only** evidence. It is not evidence for this documentation diff, a candidate build, installer bytes, installation, or public production.
+Supervisor-provided baseline evidence is recorded, not rerun: `workdir: desktop; corepack yarn check` reported **45 passed files + 1 skipped; 404 passed tests + 4 skipped; exit 0**. This is **source-baseline-only** evidence. It is not evidence for this documentation diff, a candidate build, installer bytes, installation, or public production.
 
 ## Source matrix
 
@@ -28,10 +28,22 @@ Supervisor-provided baseline evidence is recorded, not rerun: `corepack yarn --c
 
 ## Exact 402–406 disposition
 
-- **EM217-402:** backport only the four safe shell behaviors to `desktop/e-mate-desktop/src/electron-runtime.ts` and `desktop/e-mate-desktop/tests/electron-runtime.spec.ts`. Focused command: `corepack yarn --cwd desktop workspace @e-mate/desktop vitest run tests/electron-runtime.spec.ts`; full check is main-agent-only: `corepack yarn --cwd desktop check`.
+- **EM217-402:** backport only the four safe shell behaviors to `desktop/e-mate-desktop/src/electron-runtime.ts` and `desktop/e-mate-desktop/tests/electron-runtime.spec.ts`. Focused command: `workdir: desktop; corepack yarn workspace @e-mate/desktop vitest run tests/electron-runtime.spec.ts`; full check is main-agent-only: `workdir: desktop; corepack yarn check`.
 - **EM217-403:** no-code close against `desktop/e-mate-desktop/src/electron-runtime.ts`, `desktop/e-mate-desktop/src/window-options.ts`, `desktop/e-mate-desktop/tests/electron-runtime.spec.ts`, and `desktop/e-mate-desktop/tests/window-options.spec.ts`.
-- **EM217-404:** safe-backport only the pinned app-boot rc.7 patch, its exact/caret resolution bindings, regenerated `desktop/yarn.lock`, and profile/package assertions at the exact paths above. Focused command: `corepack yarn --cwd desktop workspace @e-mate/desktop vitest run tests/profile.spec.ts tests/package.spec.ts`; full check is main-agent-only: `corepack yarn --cwd desktop check`. All other Host/Cordis lifecycle rows remain no-code.
+- **EM217-404:** safe-backport only the pinned app-boot rc.7 patch, its exact/caret resolution bindings, regenerated `desktop/yarn.lock`, and profile/package assertions at the exact paths above. Focused command: `workdir: desktop; corepack yarn workspace @e-mate/desktop vitest run tests/profile.spec.ts tests/package.spec.ts`; full check is main-agent-only: `workdir: desktop; corepack yarn check`. All other Host/Cordis lifecycle rows remain no-code.
 - **EM217-405:** no-code close against the full bridge/resource/renderer-health paths above.
 - **EM217-406:** no-code close against the full Profile/pnpm paths above.
 
 No row authorizes a blind copy, rebase, rc.7 version change, marketplace/Fabric import, mode UI, crash framework, second loader, second transport, second updater, or second Desktop owner.
+
+## EM217-401 approval and execution lock
+
+Approved at base `eeea6b3596a09e1b2af6588f8fc4753a9cedf086` for one Desktop owner (`DESK`) and this exact serial order: **EM217-402 → EM217-403 → EM217-404 → EM217-405 → EM217-406**. The audited `6074088f5b660206e404b3591fab51fb99c69add` blobs above remain the exclusive source provenance.
+
+- **EM217-402 — safe-backport:** write only `desktop/e-mate-desktop/src/electron-runtime.ts` and `desktop/e-mate-desktop/tests/electron-runtime.spec.ts`, limited to iframe main-frame signatures, the generation-owned zoom listener, `render-process-gone`, and `did-fail-load`. Run `workdir: desktop; corepack yarn workspace @e-mate/desktop vitest run tests/electron-runtime.spec.ts`.
+- **EM217-403 — no-code:** empty write set.
+- **EM217-404 — safe-backport:** write only `desktop/patches/dsh-app-boot@0.1.0-rc.7.patch`, `desktop/package.json`, `desktop/yarn.lock`, `desktop/e-mate-desktop/tests/profile.spec.ts`, and `desktop/e-mate-desktop/tests/package.spec.ts`. Run `workdir: desktop; corepack yarn workspace @e-mate/desktop vitest run tests/profile.spec.ts tests/package.spec.ts`.
+- **EM217-405 — no-code:** empty write set.
+- **EM217-406 — no-code:** empty write set.
+
+The only full check is main-agent-only: `workdir: desktop; corepack yarn check`. Its already supplied baseline result remains source-baseline evidence only; EM217-401 did not rerun it, and it is not documentation-diff or candidate evidence. Class extraction is not authorized: focused red evidence may only stop the affected work order for main-agent review and a new lock; it does not expand this write set. Unlisted files or behavior, placeholders, blind copy/rebase, version changes, and additional Desktop owners are rejected.
