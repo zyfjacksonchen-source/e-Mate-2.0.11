@@ -90,6 +90,28 @@ export function desktopPreloadPath(moduleUrl: string = import.meta.url): string 
 const PRODUCT_VERSION = desktopProductVersion()
 const RESOURCE_CONTEXT_SCRIPT = `Reflect.get(globalThis, '__EMATE_DESKTOP_RESOURCE__') ?? null`
 const MAX_CONTEXT_IMAGE_BYTES = 32 * 1024 * 1024
+const MIN_ZOOM_LEVEL = -4
+const MAX_ZOOM_LEVEL = 4
+
+function clampedZoomLevel(level: number): number {
+  return Math.min(MAX_ZOOM_LEVEL, Math.max(MIN_ZOOM_LEVEL, level))
+}
+
+function zoomShortcut(input: Electron.Input): 'in' | 'out' | 'reset' | undefined {
+  if (input.type !== 'keyDown' || input.alt || (!input.control && !input.meta)) return undefined
+  if (input.key === '+' || input.key === '=') return 'in'
+  if (input.key === '-' || input.key === '_') return 'out'
+  if (input.key === '0') return 'reset'
+  return undefined
+}
+
+function boundedDiagnostic(value: string): string {
+  return value.replace(/[\r\n]+/gu, ' ').slice(0, 1_000)
+}
+
+function formatExitCode(exitCode: number): string {
+  return exitCode < 0 ? `${String(exitCode)} / 0x${(exitCode >>> 0).toString(16)}` : String(exitCode)
+}
 
 type ResourceContext =
   | { kind: 'file'; name: string; path: string; root: string; sessionId: string }
@@ -915,7 +937,19 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         process.stderr.write(`@e-mate/desktop: failed to build context menu: ${cause instanceof Error ? cause.message : String(cause)}\n`)
       })
     }
-    const navigate = (event: Electron.Event<{ url: string }>): void => {
+    const handleZoomShortcut = (event: Electron.Event, input: Electron.Input): void => {
+      const action = zoomShortcut(input)
+      if (action === undefined) return
+      event.preventDefault()
+      if (action === 'reset') {
+        window.webContents.setZoomLevel(0)
+        return
+      }
+      const step = action === 'in' ? 1 : -1
+      window.webContents.setZoomLevel(clampedZoomLevel(window.webContents.getZoomLevel() + step))
+    }
+    const navigate = (event: Electron.Event<Electron.WebContentsWillFrameNavigateEventParams>): void => {
+      if (!event.isMainFrame) return
       let targetOrigin: string | undefined
       try {
         targetOrigin = new URL(event.url).origin
@@ -924,6 +958,44 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       }
       if (targetOrigin !== origin) event.preventDefault()
     }
+    const redirect = (
+      event: Electron.Event,
+      url: string,
+      _isInPlace: boolean,
+      isMainFrame: boolean,
+    ): void => {
+      if (!isMainFrame) return
+      let targetOrigin: string | undefined
+      try {
+        targetOrigin = new URL(url).origin
+      } catch {
+        targetOrigin = undefined
+      }
+      if (targetOrigin !== origin) event.preventDefault()
+    }
+    const rendererGone = (_event: Electron.Event, details: Electron.RenderProcessGoneDetails): void => {
+      const detail = boundedDiagnostic(
+        `renderer process gone (reason: ${details.reason}, exitCode: ${formatExitCode(details.exitCode)})`,
+      )
+      process.stderr.write(`@e-mate/desktop: ${detail}\n`)
+      this.failRendererBoot('renderer-failed', detail)
+    }
+    const loadFailed = (
+      _event: Electron.Event,
+      errorCode: number,
+      errorDescription: string,
+      _validatedUrl: string,
+      isMainFrame: boolean,
+    ): void => {
+      const description = boundedDiagnostic(errorDescription)
+      process.stderr.write(`@e-mate/desktop: renderer failed to load (${String(errorCode)}: ${description})\n`)
+      if (isMainFrame && errorCode !== -3) {
+        this.failRendererBoot(
+          'renderer-failed',
+          `renderer main frame failed to load (${String(errorCode)}: ${description})`,
+        )
+      }
+    }
     const syncWindowsTitleBarOverlay = (): void => { this.syncWindowsTitleBarOverlay() }
 
     app.on('activate', show)
@@ -931,8 +1003,11 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     window.on('close', close)
     window.on('page-title-updated', preserveBlankTitle)
     window.webContents.on('context-menu', showContextMenu)
+    window.webContents.on('before-input-event', handleZoomShortcut)
     window.webContents.on('will-frame-navigate', navigate)
-    window.webContents.on('will-redirect', navigate)
+    window.webContents.on('will-redirect', redirect)
+    window.webContents.on('render-process-gone', rendererGone)
+    window.webContents.on('did-fail-load', loadFailed)
     window.webContents.setWindowOpenHandler(({ url }) => {
       try {
         const target = new URL(url)
@@ -963,10 +1038,18 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     } catch (cause) {
       ipcMain.removeHandler(DESKTOP_UPDATE_RUN_INTERACTIVE)
       ipcMain.removeHandler(DESKTOP_RESOURCE_RUN)
+      this.stopRendererBootMonitoring()
       app.off('activate', show)
       nativeTheme.off('updated', syncWindowsTitleBarOverlay)
+      window.off('close', close)
       window.off('page-title-updated', preserveBlankTitle)
+      window.off('ready-to-show', show)
       window.webContents.off('context-menu', showContextMenu)
+      window.webContents.off('before-input-event', handleZoomShortcut)
+      window.webContents.off('will-frame-navigate', navigate)
+      window.webContents.off('will-redirect', redirect)
+      window.webContents.off('render-process-gone', rendererGone)
+      window.webContents.off('did-fail-load', loadFailed)
       tray?.off('click', show)
       tray?.destroy()
       window.destroy()
@@ -990,9 +1073,13 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       nativeTheme.off('updated', syncWindowsTitleBarOverlay)
       window.off('close', close)
       window.off('page-title-updated', preserveBlankTitle)
+      window.off('ready-to-show', show)
       window.webContents.off('context-menu', showContextMenu)
+      window.webContents.off('before-input-event', handleZoomShortcut)
       window.webContents.off('will-frame-navigate', navigate)
-      window.webContents.off('will-redirect', navigate)
+      window.webContents.off('will-redirect', redirect)
+      window.webContents.off('render-process-gone', rendererGone)
+      window.webContents.off('did-fail-load', loadFailed)
       mountedTray.off('click', show)
       mountedTray.destroy()
       if (!window.isDestroyed()) window.destroy()

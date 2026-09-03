@@ -76,6 +76,8 @@ const electron = vi.hoisted(() => {
     setWindowOpenHandler: vi.fn(),
     executeJavaScript: vi.fn(async (): Promise<unknown> => null),
     copyImageAt: vi.fn(),
+    getZoomLevel: vi.fn(() => 0),
+    setZoomLevel: vi.fn(),
     send: vi.fn(),
   }
   const ipcMain = { on: vi.fn(), off: vi.fn(), handle: vi.fn(), removeHandler: vi.fn() }
@@ -933,6 +935,144 @@ describe('Electron compatibility runtime', () => {
     expect(runtime.rendererBootFailureReason).toBeUndefined()
     expect(onRendererBoot).toHaveBeenCalledOnce()
     expect(onRendererBoot).toHaveBeenCalledWith({ status: 'healthy' })
+  })
+
+  it('guards only main-frame cross-origin and malformed navigation with split Electron signatures', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+
+    const navigate = electron.webContents.on.mock.calls.find(([event]) => event === 'will-frame-navigate')?.[1]
+    const redirect = electron.webContents.on.mock.calls.find(([event]) => event === 'will-redirect')?.[1]
+    expect(navigate).toEqual(expect.any(Function))
+    expect(redirect).toEqual(expect.any(Function))
+
+    for (const event of [
+      { url: 'https://example.com/plugin', isMainFrame: false, preventDefault: vi.fn() },
+      { url: 'not a URL', isMainFrame: false, preventDefault: vi.fn() },
+      { url: `${spec.url}client`, isMainFrame: true, preventDefault: vi.fn() },
+    ]) {
+      navigate(event)
+      expect(event.preventDefault).not.toHaveBeenCalled()
+    }
+    for (const url of ['https://example.com/', 'not a URL']) {
+      const event = { preventDefault: vi.fn() }
+      navigate({ url, isMainFrame: true, preventDefault: event.preventDefault })
+      expect(event.preventDefault).toHaveBeenCalledOnce()
+    }
+
+    const iframeRedirect = { preventDefault: vi.fn() }
+    redirect(iframeRedirect, 'https://example.com/plugin', false, false)
+    expect(iframeRedirect.preventDefault).not.toHaveBeenCalled()
+    const mainRedirect = { preventDefault: vi.fn() }
+    redirect(mainRedirect, 'https://example.com/', false, true)
+    expect(mainRedirect.preventDefault).toHaveBeenCalledOnce()
+
+    const openHandler = electron.webContents.setWindowOpenHandler.mock.calls[0]?.[0]
+    expect(openHandler({ url: 'https://example.com/docs' })).toEqual({ action: 'deny' })
+    expect(openHandler({ url: 'javascript:alert(1)' })).toEqual({ action: 'deny' })
+    await release()
+    expect(electron.webContents.off).toHaveBeenCalledWith('will-frame-navigate', navigate)
+    expect(electron.webContents.off).toHaveBeenCalledWith('will-redirect', redirect)
+  })
+
+  it('owns clamped native zoom shortcuts for exactly one generation', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+    const zoom = electron.webContents.on.mock.calls.find(([event]) => event === 'before-input-event')?.[1]
+    expect(zoom).toEqual(expect.any(Function))
+
+    electron.webContents.getZoomLevel.mockReturnValueOnce(4).mockReturnValueOnce(-4)
+    for (const [key, expected] of [['=', 4], ['-', -4], ['0', 0]] as const) {
+      const event = { preventDefault: vi.fn() }
+      zoom(event, { type: 'keyDown', control: true, key })
+      expect(event.preventDefault).toHaveBeenCalledOnce()
+      expect(electron.webContents.setZoomLevel).toHaveBeenLastCalledWith(expected)
+    }
+    const ignored = { preventDefault: vi.fn() }
+    zoom(ignored, { type: 'keyUp', meta: true, key: '+' })
+    zoom(ignored, { type: 'keyDown', alt: true, meta: true, key: '+' })
+    expect(ignored.preventDefault).not.toHaveBeenCalled()
+
+    await release()
+    await release()
+    expect(electron.webContents.off).toHaveBeenCalledWith('before-input-event', zoom)
+  })
+
+  it('fails pending health once on renderer loss but not after healthy boot', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    electron.dialog.showMessageBox.mockResolvedValue({ response: 2, checkboxChecked: false })
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const pendingBoot = vi.fn()
+    const runtime = new ElectronDesktopRuntime(async () => {}, pendingBoot)
+    const release = runtime.schedule(spec)
+    runtime.beginRendererBootMonitoring()
+    await runtime.mountScheduled()
+    const gone = electron.webContents.on.mock.calls.find(([event]) => event === 'render-process-gone')?.[1]
+
+    gone({}, { reason: 'crashed', exitCode: 9 })
+    gone({}, { reason: 'crashed', exitCode: 9 })
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('renderer process gone (reason: crashed, exitCode: 9)'))
+    expect(pendingBoot).toHaveBeenCalledOnce()
+    expect(runtime.rendererBootFailureReason).toBe('renderer-failed')
+    await release()
+    expect(electron.webContents.off).toHaveBeenCalledWith('render-process-gone', gone)
+
+    vi.clearAllMocks()
+    const healthyBoot = vi.fn()
+    const healthyRuntime = new ElectronDesktopRuntime(async () => {}, healthyBoot)
+    const healthyRelease = healthyRuntime.schedule(spec)
+    healthyRuntime.beginRendererBootMonitoring()
+    await healthyRuntime.mountScheduled()
+    healthyRuntime.reportRendererBoot({ status: 'healthy' })
+    const postHealthGone = electron.webContents.on.mock.calls.find(([event]) => event === 'render-process-gone')?.[1]
+    postHealthGone({}, { reason: 'crashed', exitCode: 9 })
+    expect(healthyBoot).toHaveBeenCalledOnce()
+    expect(healthyBoot).toHaveBeenCalledWith({ status: 'healthy' })
+    expect(healthyRuntime.rendererBootFailureReason).toBeUndefined()
+    await healthyRelease()
+  })
+
+  it('fails pending health only for non-cancelled main-frame load failure and cleans failed mounts', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    electron.dialog.showMessageBox.mockResolvedValue({ response: 2, checkboxChecked: false })
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const onRendererBoot = vi.fn()
+    const runtime = new ElectronDesktopRuntime(async () => {}, onRendererBoot)
+    const release = runtime.schedule(spec)
+    runtime.beginRendererBootMonitoring()
+    await runtime.mountScheduled()
+    const failed = electron.webContents.on.mock.calls.find(([event]) => event === 'did-fail-load')?.[1]
+
+    failed({}, -105, 'NAME_NOT_RESOLVED', `${spec.url}asset`, false)
+    failed({}, -3, 'ERR_ABORTED', spec.url, true)
+    expect(onRendererBoot).not.toHaveBeenCalled()
+    failed({}, -102, 'CONNECTION_REFUSED', spec.url, true)
+    expect(onRendererBoot).toHaveBeenCalledOnce()
+    expect(onRendererBoot).toHaveBeenCalledWith({
+      status: 'failed', plugins: [], error: 'renderer main frame failed to load (-102: CONNECTION_REFUSED)',
+    })
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('renderer failed to load (-105: NAME_NOT_RESOLVED)'))
+    await release()
+    expect(electron.webContents.off).toHaveBeenCalledWith('did-fail-load', failed)
+
+    vi.clearAllMocks()
+    electron.loadURL.mockRejectedValueOnce(new Error('renderer unavailable'))
+    const failedRuntime = new ElectronDesktopRuntime(async () => {})
+    const failedRelease = failedRuntime.schedule(spec)
+    await expect(failedRuntime.mountScheduled()).rejects.toThrow('renderer unavailable')
+    for (const event of ['before-input-event', 'will-frame-navigate', 'will-redirect', 'render-process-gone', 'did-fail-load']) {
+      const listener = electron.webContents.on.mock.calls.find(([name]) => name === event)?.[1]
+      expect(electron.webContents.off).toHaveBeenCalledWith(event, listener)
+    }
+    await expect(failedRelease()).rejects.toThrow('renderer unavailable')
   })
 
   it('opens the active profile terminal from plugin recovery', async () => {
