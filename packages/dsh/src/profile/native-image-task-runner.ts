@@ -384,19 +384,31 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
             || reviews[0].receipt.call_id !== parsed[0]?.receipt.call_id || reviewEvents[0].seq >= finalEvents[0]?.seq)) {
           throw new Error('native image child review receipt sequence is invalid')
         }
-        const completed = parsed.find(item => item.receipt.status === 'completed' && item.receipt.output !== undefined && item.receipt.job_id !== undefined)
-        if (completed !== undefined) {
+        const expectedFinalRevision = reviewEvents.length === 1 ? 3 : 2
+        const expectedClientRequestId = `image-${gate.taskId.slice('sha256:'.length)}`
+        const authorizedCallId = isRecord(calls[0]?.data) && typeof calls[0].data.callId === 'string'
+          ? calls[0].data.callId : undefined
+        const completedCandidates = parsed.filter(item => item.receipt.status === 'completed'
+          && item.receipt.output !== undefined && item.receipt.job_id !== undefined
+          && item.receipt.call_id === authorizedCallId
+          && item.receipt.client_request_id === expectedClientRequestId
+          && item.receipt.revision === expectedFinalRevision
+          && item.pointer.event_seq > (calls[0]?.seq ?? Number.MAX_SAFE_INTEGER))
+        if (completedCandidates.length > 0) {
+          const completed = completedCandidates[0]
           const job = ctx.jobs.get(completed.receipt.job_id!, run.localAgent)
           if (job.kind === 'emate-image' && job.ownerSession === gate.claimedChildId && job.status === 'completed') {
             proven = { pointer: completed.pointer, attachment: completed.receipt.output!, jobId: completed.receipt.job_id! }
             images.set(task.ordinal, proven.attachment)
           }
         }
-        if (calls.length !== 1 || finalEvents.length !== 1 || !isRecord(calls[0].data)
-          || typeof calls[0].data.callId !== 'string') throw new Error('native image child must contain exactly one imagegen call and terminal receipt')
+        if (calls.length !== 1 || finalEvents.length !== 1 || authorizedCallId === undefined
+          || parsed[0]?.receipt.revision !== expectedFinalRevision) {
+          throw new Error('native image child must contain exactly one legal imagegen call and terminal receipt')
+        }
         terminalReceipt = parsed[0].receipt; terminalPointer = parsed[0].pointer
-        const expectedClientRequestId = `image-${gate.taskId.slice('sha256:'.length)}`
-        if (terminalReceipt.call_id !== calls[0].data.callId
+        if (terminalPointer.event_seq <= calls[0].seq
+          || terminalReceipt.call_id !== calls[0].data.callId
           || terminalReceipt.client_request_id !== expectedClientRequestId) {
           throw new Error('native image child receipt call correlation is invalid')
         }

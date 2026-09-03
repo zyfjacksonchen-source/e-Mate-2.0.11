@@ -236,6 +236,16 @@ assert(receipt106.includes('receipt 与 child projection 保持完全不变'))
 assert(receipt106.includes('parent task link → existing child projection'))
 assert(!receipt106.includes('receipt 增加 batch_id'))
 assert(!t('EM217-106').write_set.some(path => path.includes('image-generation.ts')), 'EM217-106 must not claim receipt metadata work')
+for (const required of ['exact child owner', 'authorized imagegen call_id', 'deterministic client_request_id', 'native Job', 'foreign/late/duplicate receipt']) {
+  assert(receipt106.includes(required), 'EM217-106 missing exact receipt correlation rule: ' + required)
+}
+assert.deepEqual(t('EM217-106').write_set, [
+  'packages/dsh/src/profile/native-image-task-runner.ts',
+  'packages/dsh/test/*receipt*',
+  'packages/dsh/test/native-image-task-runner.test.mjs',
+  'docs/2.0.17/work-orders.json',
+  'docs/2.0.17/check-plan.mjs',
+])
 const source105 = text('EM217-105')
 for (const required of ['shared CAS', 'Attachment refs', 'normalized IDs', 'userQuestions 路由到 parent', 'revision 2', 'revision 3', 'adjudication 全程占用并发槽', 'provider 前拒绝', '不得留下永久 needs-review', 'cleanup flush', 'image-review-persistence', 'provider_request_id', 'recorded billing']) {
   assert(source105.includes(required), 'EM217-105 missing source route rule: ' + required)

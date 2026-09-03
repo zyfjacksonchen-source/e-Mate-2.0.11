@@ -3,14 +3,14 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { createNativeImageTaskRuntime } from '../src/profile/native-image-task-runner.ts'
 
-const image = ordinal => ({ attachmentId: 'sha256:' + String(ordinal).padStart(64, '0'), mediaType: 'image/png', bytes: 8, width: 1, height: 1, name: 'image-' + ordinal + '.png' })
+const image = ordinal => ({ attachmentId: 'sha256:' + String(ordinal).padStart(64, '0'), mediaType: 'image/png', bytes: 8, width: 1, height: 1, name: 'same-image.png' })
 
 function session(id, meta = {}) {
   const events = []
   return { header: { id, ...meta }, events, append(type, data, options) { events.push({ seq: events.length, time: Date.now(), type, data, options }) } }
 }
 
-function harness({ flush = async () => true, mutateRun, outcome = 'completed', callCount = 1, parentSessionId = 'parent', onStart, onDispose, descriptorTransform, claimArgs, deadlineMs = 2_000, sourceRefs, sourceReviewAvailable = sourceRefs !== undefined } = {}) {
+function harness({ flush = async () => true, mutateRun, outcome = 'completed', callCount = 1, parentSessionId = 'parent', onStart, onDispose, descriptorTransform, claimArgs, deadlineMs = 2_000, sourceRefs, sourceReviewAvailable = sourceRefs !== undefined, receiptMutate, extraReceipt } = {}) {
   const disposers = []
   const parentSession = session(parentSessionId)
   const parent = { id: parentSessionId, session: parentSession }
@@ -110,14 +110,16 @@ function harness({ flush = async () => true, mutateRun, outcome = 'completed', c
             operation, status: 'needs-review', billing_status: 'recorded', parent_session_id: child.id,
             client_request_id: 'image-' + scope.taskId.slice('sha256:'.length), sources,
             content: [{ type: 'image', attachment: output }], job_id: jobId, output, verifier: {}, verification: {} })
-          childSession.append('emate/image-output', { schema_version: 2,
+          const finalReceipt = { schema_version: 2,
             revision: selected === 'invalid-revision' ? 4 : sources.length > 0 ? 3 : 2, call_id: callId,
             operation: selected === 'invalid-operation' ? (operation === 'generate' ? 'edit' : 'generate') : operation,
             status: selected === 'bad-status' ? { value: 'completed' } : selected === 'review-rejected' ? 'failed' : 'completed',
             billing_status: 'recorded', parent_session_id: child.id,
             client_request_id: 'image-' + scope.taskId.slice('sha256:'.length), sources: selected === 'invalid-sources' ? [image(99)] : sources,
             content: selected === 'review-rejected' ? [] : [{ type: 'image', attachment: output }], job_id: jobId,
-            output, ...(selected === 'review-rejected' ? { failure_code: 'user-rejected' } : {}), verifier: {}, verification: {} })
+            output, ...(selected === 'review-rejected' ? { failure_code: 'user-rejected' } : {}), verifier: {}, verification: {} }
+          childSession.append('emate/image-output', receiptMutate === undefined ? finalReceipt : receiptMutate(finalReceipt, ordinal))
+          if (extraReceipt !== undefined) childSession.append('emate/image-output', extraReceipt(finalReceipt, ordinal))
           return { stopReason: 'completed', output: [] }
         })()
         const run = { id: child.id, localAgent: child, result,
@@ -405,6 +407,85 @@ test('partial result retains successful image and child pointer beside failure',
   assert.equal(result.failures.length, 1)
   assert.equal(result.images[0].ordinal, 1)
   assert.equal(result.failures[0].ordinal, 2)
+})
+
+test('foreign receipt identities never become proven images', async t => {
+  for (const [name, receiptMutate] of [
+    ['call', receipt => ({ ...receipt, call_id: 'foreign-call' })],
+    ['client', receipt => ({ ...receipt, client_request_id: 'image-foreign' })],
+    ['owner', receipt => ({ ...receipt, parent_session_id: 'foreign-child' })],
+  ]) await t.test(name, async () => {
+    const h = harness({ callCount: 2, receiptMutate })
+    const result = await h.runtime.execute({ tasks: [{ prompt: 'same' }, { prompt: 'same' }], concurrency: 2 },
+      { agent: h.parent, callId: 'foreign-' + name, signal: new AbortController().signal })
+    assert.equal(result.status, 'failed')
+    assert.equal(result.images.length, 0)
+    assert.equal(result.failures.length, 2)
+  })
+})
+
+test('illegal completed final revisions are never preserved after later contract failure', async t => {
+  await t.test('new-image revision one', async () => {
+    const h = harness({ callCount: 2, receiptMutate: receipt => ({ ...receipt, revision: 1 }) })
+    const result = await h.runtime.execute({ tasks: [{ prompt: 'same' }, { prompt: 'same' }], concurrency: 2 },
+      { agent: h.parent, callId: 'revision-one', signal: new AbortController().signal })
+    assert.equal(result.status, 'failed')
+    assert.equal(result.images.length, 0)
+  })
+  await t.test('review final repeats revision two', async () => {
+    const source = image(21)
+    const h = harness({ callCount: 2, sourceRefs: new Map([[source.attachmentId, source]]),
+      receiptMutate: receipt => ({ ...receipt, revision: 2 }) })
+    const result = await h.runtime.execute({ tasks: [
+      { prompt: 'same', image_url: source.attachmentId }, { prompt: 'same', image_url: source.attachmentId },
+    ], concurrency: 2 }, { agent: h.parent, callId: 'review-revision-two', signal: new AbortController().signal })
+    assert.equal(result.status, 'failed')
+    assert.equal(result.images.length, 0)
+  })
+})
+
+test('legal revision two and reviewed revision three survive one later call failure exactly once', async t => {
+  await t.test('revision two', async () => {
+    const h = harness({ callCount: 2 })
+    const result = await h.runtime.execute({ tasks: [{ prompt: 'same' }, { prompt: 'same' }], concurrency: 2 },
+      { agent: h.parent, callId: 'legal-two', signal: new AbortController().signal })
+    assert.equal(result.status, 'partial')
+    assert.deepEqual(result.images.map(item => item.ordinal), [1, 2])
+    assert.deepEqual(result.failures.map(item => item.ordinal), [1, 2])
+  })
+  await t.test('reviewed revision three', async () => {
+    const source = image(22)
+    const h = harness({ callCount: 2, sourceRefs: new Map([[source.attachmentId, source]]) })
+    const result = await h.runtime.execute({ tasks: [
+      { prompt: 'same', image_url: source.attachmentId }, { prompt: 'same', image_url: source.attachmentId },
+    ], concurrency: 2 }, { agent: h.parent, callId: 'legal-three', signal: new AbortController().signal })
+    assert.equal(result.status, 'partial')
+    assert.deepEqual(result.images.map(item => item.ordinal), [1, 2])
+    assert.deepEqual(result.failures.map(item => item.ordinal), [1, 2])
+  })
+})
+
+test('duplicate or foreign late receipt cannot replace first exact completed evidence', async () => {
+  const h = harness({ callCount: 2, extraReceipt: (receipt, ordinal) => ({
+    ...receipt, call_id: 'foreign-' + ordinal, client_request_id: 'image-foreign-' + ordinal,
+    output: { ...receipt.output, attachmentId: 'sha256:' + 'f'.repeat(64) },
+    content: [{ type: 'image', attachment: { ...receipt.output, attachmentId: 'sha256:' + 'f'.repeat(64) } }],
+  }) })
+  const result = await h.runtime.execute({ tasks: [{ prompt: 'same' }, { prompt: 'same' }], concurrency: 2 },
+    { agent: h.parent, callId: 'late-foreign', signal: new AbortController().signal })
+  assert.equal(result.status, 'partial')
+  assert.equal(result.images.length, 2)
+  assert.equal(result.failures.length, 2)
+  assert.deepEqual(result.images.map(item => item.attachment.attachmentId), [image(1).attachmentId, image(2).attachmentId])
+})
+
+test('four completed and one failed returns partial with exactly four images', async () => {
+  const h = harness({ outcome: ordinal => ordinal === 5 ? 'pre-job-failed' : 'completed' })
+  const result = await h.runtime.execute({ tasks: Array.from({ length: 5 }, (_, index) => ({ prompt: 'same name ' + index })), concurrency: 4 },
+    { agent: h.parent, callId: 'four-plus-one', signal: new AbortController().signal })
+  assert.equal(result.status, 'partial')
+  assert.deepEqual(result.images.map(item => item.ordinal), [1, 2, 3, 4])
+  assert.deepEqual(result.failures.map(item => item.ordinal), [5])
 })
 
 test('wrong, zero, multiple, sibling, continuable, and remote children cannot authorize another provider call', async t => {

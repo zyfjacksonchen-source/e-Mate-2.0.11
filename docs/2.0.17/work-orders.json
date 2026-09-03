@@ -408,14 +408,18 @@
       "branch": "feat/2.0.17/em217-106-terminal-receipts",
       "worktree": "/Users/mac/e-mate/worktrees/em217-106",
       "write_set": [
-        "packages/dsh/src/profile/image-batch.ts",
-        "packages/dsh/test/**receipt*"
+        "packages/dsh/src/profile/native-image-task-runner.ts",
+        "packages/dsh/test/*receipt*",
+        "packages/dsh/test/native-image-task-runner.test.mjs",
+        "docs/2.0.17/work-orders.json",
+        "docs/2.0.17/check-plan.mjs"
       ],
       "implementation": [
         "child emate/image-output receipt 与 child projection 保持完全不变且归 child owner；不得加入 batch_id/task_id/ordinal/child_session_id。",
         "parent task-linked/task snapshot 事件保存 exact child_session_id、task_id、ordinal；精确 join 为 parent task link → existing child projection。",
         "禁止描述、label 或时间窗关联；needs-review 仅作受 durable revision-3 adjudication 支持的瞬时状态，首期 new-image batch 不产生永久 needs-review。",
-        "全部 task 合法终态后写唯一 parent terminal；child result 必须先 durability flush。"
+        "全部 task 合法终态后写唯一 parent terminal；child result 必须先 durability flush。",
+        "runner 仅把 exact child owner + 首个 authorized imagegen call_id + deterministic client_request_id + native Job 同时匹配的 completed receipt 视为 proven image；foreign/late/duplicate receipt 不得替换或跨链。"
       ],
       "acceptance": [
         "测试证明 child receipt schema/metadata 未变且不含 batch/task/ordinal/child_session_id。",
