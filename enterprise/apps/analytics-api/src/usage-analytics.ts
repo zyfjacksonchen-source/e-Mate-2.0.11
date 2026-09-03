@@ -21,7 +21,7 @@ export type UsageAnalyticsQuery = {
   bucket: UsageBucket;
   userIds?: string[];
   modelId?: string;
-  scenario?: TaskScenario;
+  scenarios?: TaskScenario[];
 };
 
 export type UsageAnalyticsResult = {
@@ -189,7 +189,13 @@ function validateQuery(query: UsageAnalyticsQuery): UsageAnalyticsQuery {
   ) {
     throw new Error('Invalid usage user filter');
   }
-  if (query.scenario !== undefined && !taskScenarios.has(query.scenario)) {
+  const scenarios = query.scenarios ?? [];
+  if (
+    !Array.isArray(scenarios) ||
+    scenarios.length > TASK_SCENARIOS.length ||
+    new Set(scenarios).size !== scenarios.length ||
+    scenarios.some((scenario) => !taskScenarios.has(scenario))
+  ) {
     throw new Error('Invalid usage scenario filter');
   }
   return {
@@ -199,7 +205,7 @@ function validateQuery(query: UsageAnalyticsQuery): UsageAnalyticsQuery {
     bucket: query.bucket,
     ...(userIds.length ? { userIds: userIds.map((userId) => identifier(userId, 'usage user id')) } : {}),
     ...(query.modelId ? { modelId: identifier(query.modelId, 'usage model id') } : {}),
-    ...(query.scenario ? { scenario: query.scenario } : {}),
+    ...(scenarios.length ? { scenarios: [...scenarios] } : {}),
   };
 }
 
@@ -261,7 +267,7 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
       query.timezone,
       query.userIds ?? [],
       query.modelId ?? null,
-      query.scenario ?? null,
+      query.scenarios ?? [],
     ];
     const grouped = await this.#pool.query<AggregateRow>(
       `
@@ -286,12 +292,12 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
            AND (cardinality($6::text[]) = 0 OR user_id = ANY($6::text[]))
            AND ($7::text IS NULL OR model_id = $7)
            AND (
-             $8::text IS NULL OR EXISTS (
+             cardinality($8::text[]) = 0 OR EXISTS (
                SELECT 1
                  FROM e_mate_task_fact AS task_fact
                 WHERE task_fact.tenant_id = e_mate_model_invocation.tenant_id
                   AND task_fact.task_id = e_mate_model_invocation.task_id
-                  AND task_fact.scenario = $8
+                  AND task_fact.scenario = ANY($8::text[])
              )
            )
          GROUP BY user_id, model_id, bucket_start
@@ -321,12 +327,12 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
            AND (cardinality($6::text[]) = 0 OR user_id = ANY($6::text[]))
            AND ($7::text IS NULL OR model_id = $7)
            AND (
-             $8::text IS NULL OR EXISTS (
+             cardinality($8::text[]) = 0 OR EXISTS (
                SELECT 1
                  FROM e_mate_task_fact AS task_fact
                 WHERE task_fact.tenant_id = e_mate_model_usage_attempt.tenant_id
                   AND task_fact.task_id = e_mate_model_usage_attempt.task_id
-                  AND task_fact.scenario = $8
+                  AND task_fact.scenario = ANY($8::text[])
              )
            )
          GROUP BY user_id, model_id, bucket_start
@@ -382,12 +388,12 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
            AND (cardinality($4::text[]) = 0 OR user_id = ANY($4::text[]))
            AND ($5::text IS NULL OR model_id = $5)
            AND (
-             $6::text IS NULL OR EXISTS (
+             cardinality($6::text[]) = 0 OR EXISTS (
                SELECT 1
                  FROM e_mate_task_fact AS task_fact
                 WHERE task_fact.tenant_id = e_mate_model_invocation.tenant_id
                   AND task_fact.task_id = e_mate_model_invocation.task_id
-                  AND task_fact.scenario = $6
+                  AND task_fact.scenario = ANY($6::text[])
              )
            )
       ),
@@ -400,12 +406,12 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
            AND (cardinality($4::text[]) = 0 OR user_id = ANY($4::text[]))
            AND ($5::text IS NULL OR model_id = $5)
            AND (
-             $6::text IS NULL OR EXISTS (
+             cardinality($6::text[]) = 0 OR EXISTS (
                SELECT 1
                  FROM e_mate_task_fact AS task_fact
                 WHERE task_fact.tenant_id = e_mate_model_usage_attempt.tenant_id
                   AND task_fact.task_id = e_mate_model_usage_attempt.task_id
-                  AND task_fact.scenario = $6
+                  AND task_fact.scenario = ANY($6::text[])
              )
            )
       ),
@@ -463,12 +469,12 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
            AND (cardinality($4::text[]) = 0 OR invocation.user_id = ANY($4::text[]))
            AND ($5::text IS NULL OR invocation.model_id = $5)
            AND (
-             $6::text IS NULL OR EXISTS (
+             cardinality($6::text[]) = 0 OR EXISTS (
                SELECT 1
                  FROM e_mate_task_fact AS task_fact
                 WHERE task_fact.tenant_id = invocation.tenant_id
                   AND task_fact.task_id = invocation.task_id
-                  AND task_fact.scenario = $6
+                  AND task_fact.scenario = ANY($6::text[])
              )
            )
            AND attempt.provider_response_id IS NULL
@@ -488,12 +494,12 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
            AND (cardinality($4::text[]) = 0 OR attempt.user_id = ANY($4::text[]))
            AND ($5::text IS NULL OR attempt.model_id = $5)
            AND (
-             $6::text IS NULL OR EXISTS (
+             cardinality($6::text[]) = 0 OR EXISTS (
                SELECT 1
                  FROM e_mate_task_fact AS task_fact
                 WHERE task_fact.tenant_id = attempt.tenant_id
                   AND task_fact.task_id = attempt.task_id
-                  AND task_fact.scenario = $6
+                  AND task_fact.scenario = ANY($6::text[])
              )
            )
            AND invocation.invocation_id IS NULL
@@ -507,7 +513,7 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
         FROM distinct_tasks, task_mismatches, completed_without_usage,
              usage_without_invocation
     `,
-      [tenantId, query.from, query.to, query.userIds ?? [], query.modelId ?? null, query.scenario ?? null]
+      [tenantId, query.from, query.to, query.userIds ?? [], query.modelId ?? null, query.scenarios ?? []]
     );
     const check = reconciled.rows[0];
     if (!check) throw new Error('Usage reconciliation was unavailable');
@@ -605,7 +611,7 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
          AND events.event_at < $3::timestamptz
          AND (cardinality($4::text[]) = 0 OR events.user_id = ANY($4::text[]))
          AND ($5::text IS NULL OR events.model_id = $5)
-         AND ($6::text IS NULL OR task_fact.scenario = $6)
+         AND (cardinality($6::text[]) = 0 OR task_fact.scenario = ANY($6::text[]))
          AND (
            $7::timestamptz IS NULL OR
             (events.event_at, events.event_kind, events.event_id,
@@ -622,7 +628,7 @@ export class PostgresUsageAnalyticsReader implements UsageAnalyticsReader {
         query.to,
         query.userIds ?? [],
         query.modelId ?? null,
-        query.scenario ?? null,
+        query.scenarios ?? [],
         cursorAt,
         cursorKind,
         cursorId,

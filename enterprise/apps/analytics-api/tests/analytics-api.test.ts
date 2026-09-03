@@ -365,7 +365,7 @@ async function withServer<T>(
             traceId: 'trace-1',
             modelId: query.modelId ?? 'gpt-5.6-sol',
             providerId: 'openai',
-            scenario: query.scenario ?? null,
+            scenario: query.scenarios?.[1] ?? query.scenarios?.[0] ?? null,
             inputTokens: '7',
             outputTokens: '3',
             cacheReadTokens: '2',
@@ -807,7 +807,8 @@ test('usage metrics are tenant-bound, exact and independently reconcilable', asy
       (await fetch(`${baseUrl}/v1/usage/summary?${query}`, { headers: auth('employee', false) })).status,
       403
     );
-    const summary = await fetch(`${baseUrl}/v1/usage/summary?${query}&scenario=CONTENT_CREATION`, {
+    const scenarios = 'scenario=SEARCH_QUERY&scenario=CONTENT_CREATION';
+    const summary = await fetch(`${baseUrl}/v1/usage/summary?${query}&${scenarios}`, {
       headers: auth('auditor', false),
     });
     assert.equal(summary.status, 200);
@@ -833,12 +834,12 @@ test('usage metrics are tenant-bound, exact and independently reconcilable', asy
       zeroCostUsageEvents: '0',
       unpricedUsageEvents: '0',
     });
-    const reconciliation = await fetch(`${baseUrl}/v1/usage/reconciliation?${query}&scenario=CONTENT_CREATION`, {
+    const reconciliation = await fetch(`${baseUrl}/v1/usage/reconciliation?${query}&${scenarios}`, {
       headers: auth('admin', false),
     });
     assert.equal(reconciliation.status, 200);
     assert.equal(((await reconciliation.json()) as { state: string }).state, 'MATCHED');
-    const events = await fetch(`${baseUrl}/v1/usage/events?${query}&scenario=CONTENT_CREATION&limit=1`, {
+    const events = await fetch(`${baseUrl}/v1/usage/events?${query}&${scenarios}&limit=1`, {
       headers: auth('auditor', false),
     });
     assert.equal(events.status, 200);
@@ -885,7 +886,8 @@ test('usage metrics are tenant-bound, exact and independently reconcilable', asy
       query.replace('Asia%2FShanghai', 'Mars%2FOlympus'),
       query.replace('2026-07-27T00%3A00%3A00.000Z', '2026-07-27T08%3A00%3A00%2B08%3A00'),
       `${query}&scenario=UNKNOWN`,
-      `${query}&scenario=GENERAL&scenario=SEARCH_QUERY`,
+      `${query}&scenario=GENERAL&scenario=GENERAL`,
+      `${query}&scenario=GENERAL&scenario=CONTENT_CREATION&scenario=DOCUMENT_EDITING&scenario=SYSTEM_MAINTENANCE&scenario=ASSET_PRODUCTION&scenario=DATA_PROCESSING&scenario=SEARCH_QUERY&scenario=GENERAL`,
     ];
     const invalidStatuses = await Promise.all(
       invalidQueries.map(async (invalid) => {

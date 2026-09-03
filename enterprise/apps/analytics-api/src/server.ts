@@ -293,7 +293,7 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
   ]);
   if (
     [...url.searchParams.keys()].some((key) => !allowed.has(key)) ||
-    ['from', 'to', 'timezone', 'bucket', 'modelId', 'scenario', ...(events ? ['cursor', 'limit'] : [])]
+    ['from', 'to', 'timezone', 'bucket', 'modelId', ...(events ? ['cursor', 'limit'] : [])]
       .some((key) => url.searchParams.getAll(key).length > 1)
   ) {
     throw new HttpError(400, 'INVALID_USAGE_QUERY', 'Invalid usage query');
@@ -304,7 +304,7 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
   const bucket = url.searchParams.get('bucket') ?? 'DAY';
   const userIds = url.searchParams.getAll('userId');
   const modelId = url.searchParams.get('modelId');
-  const scenario = url.searchParams.get('scenario');
+  const scenarios = url.searchParams.getAll('scenario');
   if (
     !from ||
     !to ||
@@ -318,7 +318,9 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
     new Set(userIds).size !== userIds.length ||
     userIds.some((userId) => !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId)) ||
     (modelId !== null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(modelId)) ||
-    (scenario !== null && !taskScenarios.has(scenario))
+    scenarios.length > TASK_SCENARIOS.length ||
+    new Set(scenarios).size !== scenarios.length ||
+    scenarios.some((scenario) => !taskScenarios.has(scenario))
   ) {
     throw new HttpError(400, 'INVALID_USAGE_QUERY', 'Invalid usage query');
   }
@@ -341,7 +343,7 @@ function usageQuery(url: URL, events = false): UsageAnalyticsQuery {
     bucket: bucket as UsageAnalyticsQuery['bucket'],
     ...(userIds.length ? { userIds } : {}),
     ...(modelId ? { modelId } : {}),
-    ...(scenario ? { scenario: scenario as UsageAnalyticsQuery['scenario'] } : {}),
+    ...(scenarios.length ? { scenarios: scenarios as UsageAnalyticsQuery['scenarios'] } : {}),
   };
 }
 
@@ -351,7 +353,7 @@ function taskEventQuery(url: URL): TaskEventQuery {
     [...url.searchParams.keys()].some((key) => !allowed.has(key)) ||
     ['from', 'to'].some((key) => url.searchParams.getAll(key).length !== 1) ||
     url.searchParams.getAll('timezone').length > 1 ||
-    url.searchParams.getAll('scenario').length > 1 ||
+    url.searchParams.getAll('scenario').length > TASK_SCENARIOS.length ||
     url.searchParams.getAll('userId').length > 100
   ) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
@@ -360,7 +362,7 @@ function taskEventQuery(url: URL): TaskEventQuery {
   const to = url.searchParams.get('to');
   const timezone = url.searchParams.get('timezone') ?? 'UTC';
   const userIds = url.searchParams.getAll('userId');
-  const scenario = url.searchParams.get('scenario');
+  const scenarios = url.searchParams.getAll('scenario');
   if (
     !from ||
     !to ||
@@ -371,7 +373,8 @@ function taskEventQuery(url: URL): TaskEventQuery {
     /\p{Cc}/u.test(timezone) ||
     new Set(userIds).size !== userIds.length ||
     userIds.some((userId) => !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(userId)) ||
-    (scenario !== null && !taskScenarios.has(scenario))
+    new Set(scenarios).size !== scenarios.length ||
+    scenarios.some((scenario) => !taskScenarios.has(scenario))
   ) {
     throw new HttpError(400, 'INVALID_TASK_QUERY', 'Invalid task query');
   }
@@ -391,7 +394,7 @@ function taskEventQuery(url: URL): TaskEventQuery {
     to,
     timezone,
     ...(userIds.length ? { userIds } : {}),
-    ...(scenario ? { scenario: scenario as TaskEventQuery['scenario'] } : {}),
+    ...(scenarios.length ? { scenarios: scenarios as TaskEventQuery['scenarios'] } : {}),
   };
 }
 

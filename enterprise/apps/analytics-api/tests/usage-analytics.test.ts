@@ -77,7 +77,7 @@ test('usage reader sums exact grouped facts and exposes ledger mismatches', asyn
     to: '2026-07-27T00:00:00.000Z',
     timezone: 'Asia/Shanghai',
     bucket: 'DAY',
-    scenario: 'CONTENT_CREATION',
+    scenarios: ['CONTENT_CREATION', 'SEARCH_QUERY'],
   });
 
   assert.equal(result.projection.summary.totalTokens, '9007199254741008');
@@ -106,7 +106,7 @@ test('usage reader sums exact grouped facts and exposes ledger mismatches', asyn
     'Asia/Shanghai',
     [],
     null,
-    'CONTENT_CREATION',
+    ['CONTENT_CREATION', 'SEARCH_QUERY'],
   ]);
   assert.equal(statements[0]?.match(/GREATEST\(/g)?.length, 2);
   assert.equal(statements[0]?.match(/\$2::timestamptz/g)?.length, 4);
@@ -116,10 +116,10 @@ test('usage reader sums exact grouped facts and exposes ledger mismatches', asyn
     '2026-07-27T00:00:00.000Z',
     [],
     null,
-    'CONTENT_CREATION',
+    ['CONTENT_CREATION', 'SEARCH_QUERY'],
   ]);
-  assert.match(statements[0] ?? '', /task_fact\.scenario = \$8/g);
-  assert.match(statements[1] ?? '', /task_fact\.scenario = \$6/g);
+  assert.match(statements[0] ?? '', /cardinality\(\$8::text\[\]\) = 0[\s\S]*task_fact\.scenario = ANY\(\$8::text\[\]\)/);
+  assert.match(statements[1] ?? '', /cardinality\(\$6::text\[\]\) = 0[\s\S]*task_fact\.scenario = ANY\(\$6::text\[\]\)/);
   assert.match(statements[1] ?? '', /left\(audit_invocation\.invocation_id, 13\) = 'auditreceipt_'/);
   assert.match(statements[1] ?? '', /task\.status <> 'FINALIZED'/);
   assert.doesNotMatch(statements[1] ?? '', /\$[78]\b/);
@@ -156,7 +156,17 @@ test('usage reader rejects ambiguous ranges and timezones before querying', asyn
       to: '2026-07-26T00:00:00.000Z',
       timezone: 'UTC',
       bucket: 'DAY',
-      scenario: 'UNKNOWN' as 'CONTENT_CREATION',
+      scenarios: ['UNKNOWN' as 'CONTENT_CREATION'],
+    }),
+    /Invalid usage scenario filter/
+  );
+  await assert.rejects(
+    reader.read(principal, {
+      from: '2026-07-25T00:00:00.000Z',
+      to: '2026-07-26T00:00:00.000Z',
+      timezone: 'UTC',
+      bucket: 'DAY',
+      scenarios: ['GENERAL', 'GENERAL'],
     }),
     /Invalid usage scenario filter/
   );
@@ -207,7 +217,12 @@ test('usage event drill-down is ordered, exact and cursor-bounded', async () => 
             cost_usd: null,
           },
       ];
-      return { rows: input[5] ? rows.filter(({ scenario }) => scenario === input[5]) : rows };
+      const scenarios = input[5] as string[];
+      return {
+        rows: rows.filter(
+          ({ scenario }) => !scenarios.length || (scenario !== null && scenarios.includes(scenario))
+        ),
+      };
     },
   } as unknown as Pool;
   const reader = new PostgresUsageAnalyticsReader(pool);
@@ -239,11 +254,11 @@ test('usage event drill-down is ordered, exact and cursor-bounded', async () => 
     '2026-07-26T00:00:00.000Z',
     ['user-1', 'user-2'],
     null,
-    null,
+    [],
   ]);
   assert.equal(parameters[11], 2);
   assert.match(statement, /LEFT JOIN e_mate_task_fact AS task_fact/);
-  assert.match(statement, /\$6::text IS NULL OR task_fact\.scenario = \$6/);
+  assert.match(statement, /cardinality\(\$6::text\[\]\) = 0 OR task_fact\.scenario = ANY\(\$6::text\[\]\)/);
   assert.match(statement, /ORDER BY events\.event_at, events\.event_kind, events\.event_id/);
 
   const filtered = await reader.events(
@@ -253,12 +268,12 @@ test('usage event drill-down is ordered, exact and cursor-bounded', async () => 
       to: '2026-07-26T00:00:00.000Z',
       timezone: 'UTC',
       bucket: 'DAY',
-      scenario: 'CONTENT_CREATION',
+      scenarios: ['SEARCH_QUERY', 'CONTENT_CREATION'],
     },
     null,
     2
   );
-  assert.equal(parameters[5], 'CONTENT_CREATION');
+  assert.deepEqual(parameters[5], ['SEARCH_QUERY', 'CONTENT_CREATION']);
   assert.equal(filtered.events.length, 1);
   assert.equal(filtered.events[0]?.scenario, 'CONTENT_CREATION');
 });

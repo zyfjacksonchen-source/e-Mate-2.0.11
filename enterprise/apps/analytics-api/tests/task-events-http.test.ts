@@ -40,7 +40,7 @@ class FakeTaskEvents implements TaskEventStore {
       ([key, task]) =>
         key.startsWith(`${principal.tenantId}\0`) &&
         (!query.userIds?.length || query.userIds.includes(task.userId)) &&
-        (!query.scenario || task.scenario === query.scenario)
+        (!query.scenarios?.length || query.scenarios.includes(task.scenario))
     );
     const count = (status: string): string => String(tasks.filter(([, task]) => task.status === status).length);
     const scenarioCount = (scenario: TaskEventInput['scenario']): string =>
@@ -51,7 +51,7 @@ class FakeTaskEvents implements TaskEventStore {
           ([key, stored]) =>
             key.startsWith(`${principal.tenantId}\0`) &&
             (!query.userIds?.length || query.userIds.includes(stored.userId)) &&
-            (!query.scenario || stored.event.scenario === query.scenario) &&
+            (!query.scenarios?.length || query.scenarios.includes(stored.event.scenario)) &&
             stored.event.type === type
         ).length
       );
@@ -79,7 +79,7 @@ class FakeTaskEvents implements TaskEventStore {
           ([key, stored]) =>
             key.startsWith(`${principal.tenantId}\0`) &&
             (!query.userIds?.length || query.userIds.includes(stored.userId)) &&
-            (!query.scenario || stored.event.scenario === query.scenario)
+            (!query.scenarios?.length || query.scenarios.includes(stored.event.scenario))
         )
         .map(([, stored]) => stored.userId))]
         .sort()
@@ -89,7 +89,7 @@ class FakeTaskEvents implements TaskEventStore {
             ([key, stored]) =>
               key.startsWith(`${principal.tenantId}\0`) &&
               (!query.userIds?.length || query.userIds.includes(stored.userId)) &&
-              (!query.scenario || stored.event.scenario === query.scenario) &&
+              (!query.scenarios?.length || query.scenarios.includes(stored.event.scenario)) &&
               stored.userId === userId
           ).length),
         })),
@@ -171,9 +171,12 @@ test('task summary is role-gated and tenant-isolated', async () => {
     assert.deepEqual(((await filtered.json()) as TenantTaskSummary).userEventCounts, [
       { userId: 'user-1', eventCount: '1' },
     ]);
-    const scenarioFiltered = await fetch(`${baseUrl}/v1/tasks/summary?${query}&scenario=CONTENT_CREATION`, {
-      headers: auth('auditor'),
-    });
+    const scenarioFiltered = await fetch(
+      `${baseUrl}/v1/tasks/summary?${query}&scenario=SEARCH_QUERY&scenario=CONTENT_CREATION`,
+      {
+        headers: auth('auditor'),
+      }
+    );
     assert.equal(((await scenarioFiltered.json()) as TenantTaskSummary).summary.receivedTasks, '1');
     const emptyScenario = await fetch(`${baseUrl}/v1/tasks/summary?${query}&scenario=SEARCH_QUERY`, {
       headers: auth('auditor'),
@@ -200,9 +203,18 @@ test('task summary is role-gated and tenant-isolated', async () => {
     );
     assert.equal(
       (
-        await fetch(`${baseUrl}/v1/tasks/summary?${query}&scenario=GENERAL&scenario=SEARCH_QUERY`, {
+        await fetch(`${baseUrl}/v1/tasks/summary?${query}&scenario=GENERAL&scenario=GENERAL`, {
           headers: auth('auditor'),
         })
+      ).status,
+      400
+    );
+    assert.equal(
+      (
+        await fetch(
+          `${baseUrl}/v1/tasks/summary?${query}&scenario=GENERAL&scenario=CONTENT_CREATION&scenario=DOCUMENT_EDITING&scenario=SYSTEM_MAINTENANCE&scenario=ASSET_PRODUCTION&scenario=DATA_PROCESSING&scenario=SEARCH_QUERY&scenario=GENERAL`,
+          { headers: auth('auditor') }
+        )
       ).status,
       400
     );
