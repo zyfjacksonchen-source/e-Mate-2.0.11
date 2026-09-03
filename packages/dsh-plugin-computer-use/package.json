@@ -40,7 +40,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test test/contract.test.mjs"
+    "test": "node --experimental-strip-types --test test/contract.test.mjs test/capability-status.test.mjs test/windows-source.test.mjs"
   },
   "dependencies": {
     "zod": "4.4.3"
