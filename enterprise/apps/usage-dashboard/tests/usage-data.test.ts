@@ -232,13 +232,15 @@ test('adds event pagination only to event queries and preserves configured query
     timezone: 'Asia/Shanghai',
     bucket: 'DAY' as const,
     userIds: ['user-1', 'user-2'],
-    scenario: 'CONTENT_CREATION' as const,
+    scenarios: ['CONTENT_CREATION', 'DOCUMENT_EDITING'] as const,
   };
   assert.equal(new URLSearchParams(usageQueryString(query)).has('limit'), false);
   assert.deepEqual(new URLSearchParams(usageQueryString(query)).getAll('userId'), ['user-1', 'user-2']);
-  assert.equal(new URLSearchParams(usageQueryString(query)).get('scenario'), 'CONTENT_CREATION');
+  assert.deepEqual(new URLSearchParams(usageQueryString(query)).getAll('scenario'), [
+    'CONTENT_CREATION', 'DOCUMENT_EDITING',
+  ]);
   assert.deepEqual([...new URLSearchParams(taskQueryString(query)).keys()], [
-    'from', 'to', 'timezone', 'userId', 'userId', 'scenario',
+    'from', 'to', 'timezone', 'userId', 'userId', 'scenario', 'scenario',
   ]);
   assert.equal(new URLSearchParams(taskQueryString(query)).get('timezone'), 'Asia/Shanghai');
   assert.deepEqual(new URLSearchParams(taskQueryString(query)).getAll('userId'), ['user-1', 'user-2']);
@@ -249,7 +251,7 @@ test('adds event pagination only to event queries and preserves configured query
       '2026-07-02T12:00:00.000Z',
       'Asia/Shanghai',
       ['user-1'],
-      'CONTENT_CREATION'
+      ['CONTENT_CREATION', 'DOCUMENT_EDITING']
     ),
     {
       from: '2026-07-01T00:00:00.000Z',
@@ -257,7 +259,7 @@ test('adds event pagination only to event queries and preserves configured query
       timezone: 'Asia/Shanghai',
       bucket: 'DAY',
       userIds: ['user-1'],
-      scenario: 'CONTENT_CREATION',
+      scenarios: ['CONTENT_CREATION', 'DOCUMENT_EDITING'],
     }
   );
   assert.equal(
@@ -430,6 +432,8 @@ test('projects real token, user, quota, model, and reconciliation facts', () => 
   assert.match(source, /type='date'/);
   assert.doesNotMatch(source, /datetime-local/);
   assert.match(source, /mode='multiple'/);
+  assert.match(source, /value=\{selectedScenarios\}/);
+  assert.match(source, /setSelectedScenarios\(\(value \?\? \[\]\) as TaskScenario\[\]\)/);
   assert.match(source, /queryForDay/);
   assert.match(source, /usageUserTrend/);
   assert.match(source, /scenarioBuckets/);

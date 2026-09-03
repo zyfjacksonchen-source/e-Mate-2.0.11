@@ -145,7 +145,7 @@ export function App() {
   const [customTo, setCustomTo] = useState(() => localDate(new Date()));
   const [rangeError, setRangeError] = useState<string | null>(null);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-  const [selectedScenario, setSelectedScenario] = useState<TaskScenario | undefined>();
+  const [selectedScenarios, setSelectedScenarios] = useState<TaskScenario[]>([]);
   const [knownUsers, setKnownUsers] = useState<Array<{ userId: string; displayName: string }>>([]);
   const [chartMetric, setChartMetric] = useState<ChartMetric>('activity');
   const [usageColumns, setUsageColumns] = useState<UsageColumn[]>(() => [...usageColumnKeys]);
@@ -201,7 +201,7 @@ export function App() {
     const query = {
       ...range,
       ...(selectedUserIds.length ? { userIds: selectedUserIds } : {}),
-      ...(selectedScenario ? { scenario: selectedScenario } : {}),
+      ...(selectedScenarios.length ? { scenarios: selectedScenarios } : {}),
     };
     setDashboard({ kind: 'loading' });
     void loadUsageDashboard(token, query, controller.signal)
@@ -233,14 +233,14 @@ export function App() {
             setToken('');
             setKnownUsers([]);
             setSelectedUserIds([]);
-            setSelectedScenario(undefined);
+            setSelectedScenarios([]);
             setTokenError(copy.authFailed);
           }
         }
         setDashboard({ kind: 'error', status });
       });
     return () => controller.abort();
-  }, [copy.authFailed, range.bucket, range.from, range.timezone, range.to, reloadKey, selectedScenario, selectedUserIds, token]);
+  }, [copy.authFailed, range.bucket, range.from, range.timezone, range.to, reloadKey, selectedScenarios, selectedUserIds, token]);
 
   useEffect(() => {
     if (!token || !selectedDayQuery) {
@@ -320,7 +320,7 @@ export function App() {
         sessionStorage.setItem(REFRESH_TOKEN_SESSION_KEY, session.refreshToken);
         setKnownUsers([]);
         setSelectedUserIds([]);
-        setSelectedScenario(undefined);
+        setSelectedScenarios([]);
         setToken(session.accessToken);
         setPassword('');
       })
@@ -336,7 +336,7 @@ export function App() {
     setToken('');
     setKnownUsers([]);
     setSelectedUserIds([]);
-    setSelectedScenario(undefined);
+    setSelectedScenarios([]);
     if (!refreshToken) return;
     void logoutUsageAccount(
       {
@@ -611,7 +611,7 @@ export function App() {
         timezone: projection.timezone,
         bucket: projection.bucket,
         ...(scopedUserIds.length ? { userIds: scopedUserIds } : {}),
-        ...(selectedScenario ? { scenario: selectedScenario } : {}),
+        ...(selectedScenarios.length ? { scenarios: selectedScenarios } : {}),
       } satisfies UsageQuery)
     : null;
   const eventQuery = selectedDayQuery ?? fullRangeEventQuery;
@@ -627,7 +627,7 @@ export function App() {
       projection.to,
       projection.timezone,
       scopedUserIds,
-      selectedScenario
+      selectedScenarios
     ));
   };
   const loadEventPage = (cursor: string | null, existing: TenantUsageEvent[]) => {
@@ -742,9 +742,11 @@ export function App() {
       link.href = url;
       const from = localDate(new Date(fullRangeEventQuery.from));
       const to = localDate(new Date(Date.parse(fullRangeEventQuery.to) - 1));
-      const scenario = fullRangeEventQuery.scenario
-        ? `-${fullRangeEventQuery.scenario.toLowerCase().replaceAll('_', '-')}`
-        : '';
+      const scenario = fullRangeEventQuery.scenarios?.length === 1
+        ? `-${fullRangeEventQuery.scenarios[0].toLowerCase().replaceAll('_', '-')}`
+        : fullRangeEventQuery.scenarios?.length
+          ? `-${fullRangeEventQuery.scenarios.length}-scenarios`
+          : '';
       link.download = `e-Mate-audit-${from}_to_${to}${scenario}.xlsx`;
       document.body.append(link);
       link.click();
@@ -950,13 +952,15 @@ export function App() {
           <div className='scenario-filter filter-field'>
             <span>{copy.scenarioFilter}</span>
             <Select
-              value={selectedScenario}
+              mode='multiple'
+              value={selectedScenarios}
               placeholder={copy.allScenarios}
               allowClear
+              maxTagCount={1}
               onChange={(value) => {
                 resetEvents();
                 resetDayDetail();
-                setSelectedScenario((value || undefined) as TaskScenario | undefined);
+                setSelectedScenarios((value ?? []) as TaskScenario[]);
               }}
               aria-label={copy.scenarioFilter}
             >

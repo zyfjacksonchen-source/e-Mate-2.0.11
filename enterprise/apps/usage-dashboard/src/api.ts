@@ -18,7 +18,7 @@ export type UsageQuery = {
   timezone: string;
   bucket: UsageBucket;
   userIds?: string[];
-  scenario?: TaskScenario;
+  scenarios?: readonly TaskScenario[];
 };
 
 export type UsageDashboardData = {
@@ -154,7 +154,7 @@ export function queryForDay(
   overallTo: string,
   timezone: string,
   userIds: string[] = [],
-  scenario?: TaskScenario
+  scenarios: readonly TaskScenario[] = []
 ): UsageQuery {
   const from = new Date(bucketStart);
   const end = Math.min(from.getTime() + 86_400_000, Date.parse(overallTo));
@@ -167,7 +167,7 @@ export function queryForDay(
     timezone,
     bucket: 'DAY',
     ...(userIds.length ? { userIds: [...userIds] } : {}),
-    ...(scenario ? { scenario } : {}),
+    ...(scenarios.length ? { scenarios: [...scenarios] } : {}),
   };
 }
 
@@ -179,7 +179,7 @@ export function usageQueryString(query: UsageQuery, events = false, cursor: stri
     bucket: query.bucket,
   });
   for (const userId of query.userIds ?? []) parameters.append('userId', userId);
-  if (query.scenario) parameters.set('scenario', query.scenario);
+  for (const scenario of query.scenarios ?? []) parameters.append('scenario', scenario);
   if (events) {
     if (cursor) parameters.set('cursor', cursor);
     parameters.set('limit', '200');
@@ -190,7 +190,7 @@ export function usageQueryString(query: UsageQuery, events = false, cursor: stri
 export function taskQueryString(query: UsageQuery): string {
   const parameters = new URLSearchParams({ from: query.from, to: query.to, timezone: query.timezone });
   for (const userId of query.userIds ?? []) parameters.append('userId', userId);
-  if (query.scenario) parameters.set('scenario', query.scenario);
+  for (const scenario of query.scenarios ?? []) parameters.append('scenario', scenario);
   return parameters.toString();
 }
 
