@@ -112,19 +112,22 @@
       "write_set": [
         "docs/2.0.17/adr/ADR-0217-image-batch.md",
         "docs/2.0.17/contracts/image-batch.schema.json",
-        "docs/2.0.17/contracts/image-batch-result.schema.json"
+        "docs/2.0.17/contracts/image-batch-result.schema.json",
+        "docs/2.0.17/work-orders.json",
+        "docs/2.0.17/execution-plan.md",
+        "docs/2.0.17/check-plan.mjs"
       ],
       "implementation": [
         "保留 imagegen 为单图原子工具；image_batch 是 @e-mate/dsh 内唯一多图入口并复用 native Subagent/Job/Session/projection/Attachment CAS。",
-        "ADR 固化已接受的 pinned-spawn：effect-scoped gate registry；随机不可猜 nonce 只放 native one-shot subagent descriptor label；deterministic batch/task IDs 只用于 durable join。",
-        "对子任务做 normalized args comparison；gate 在验证前 consume-once。禁止 prompt 文本 marker 权威、module global gate、remote provider。",
+        "ADR 固化已接受的 pinned-spawn：nonce lookup map 与独立 effect-owned active gate set；随机不可猜 nonce 只放 native one-shot subagent descriptor label；deterministic batch/task/event IDs 只用于 durable join。",
+        "验证前 atomic claim 立即从 lookup 删除 nonce，但 claimed gate 保留在 active set 并由 parent/child refs 持有至 settlement；HMR/effect dispose abort 全部 active gate（含已 claim waiter/in-flight），仅 final cleanup 从 active set 删除。禁止 prompt marker、module global gate、remote provider。",
         "通过 native SessionStore durability checkpoint 严格顺序：parent created event → ctx.sessions.flush(parent.session) → parent task-linked snapshot → flush → open/provider submission；任一 flush 返回 false 或 reject 即 fail closed。child terminal/result 先 flush，再写 parent terminal，再 flush，最后 dispose/refill。",
         "必须使用 spawn/localAgent 和 shared Attachment CAS；new-image batches 是首期完整范围。",
         "batch edits/fusion 明确阻断，直到存在 durable parent-owned revision-3 review/adjudication route；不得用永久 needs-review 代替。"
       ],
       "acceptance": [
-        "ADR/Schema 表达 queued/running/全部终态、顺序、child Session、Job、receipt 引用和时间戳，旧版本可忽略新事件。",
-        "pinned-spawn nonce/gate/normalized-args/consume-once 与每个 durability checkpoint 均有失败测试。",
+        "ADR/Schema 表达 created effective concurrency、严格拆分的 task-linked/task-state、queued/running/全部终态、顺序、child Session、Job、pointer-only receipt 引用和时间戳，旧版本可忽略新事件。",
+        "pinned-spawn nonce lookup atomic claim、effect-owned active set disposal、normalized args 与每个 durability checkpoint 均有失败测试；claim 不丢失 disposal ownership。",
         "created/link 未持久化时零 provider submission；child 未 flush 时零 parent terminal。",
         "无 DOM 扫描、第二存储/调度器/RPC、模型降级、未幂等自动重试或 prompt marker 权威。",
         "首期只支持 new-image batch；edit/fusion 在 revision-3 durable review/adjudication 前 fail closed。"
@@ -161,7 +164,7 @@
         "Harness 阻断项转独立 RFC，不混入 2.0.17。"
       ],
       "tests": [
-        "corepack yarn --cwd desktop check"
+        "workdir: desktop; corepack yarn check"
       ],
       "rollback": "撤销矩阵与规划文档；不改产品代码。",
       "risk": "低"
@@ -199,7 +202,7 @@
     {
       "id": "EM217-101",
       "wave": "W1 图像运行时",
-      "title": "实现 image_batch 公共工具契约与任务规范化",
+      "title": "实现内部 image_batch 请求规范化、ID 与 schema",
       "owner": "IMG",
       "depends_on": [
         "EM217-002"
@@ -208,33 +211,24 @@
       "worktree": "/Users/mac/e-mate/worktrees/em217-101",
       "write_set": [
         "packages/dsh/src/profile/image-batch.ts",
-        "packages/dsh/src/profile/image-generation.ts（仅共享类型/注册点）",
-        "packages/dsh/src/profile/agent-operations.ts",
-        "packages/dsh/src/profile/audit.ts",
-        "packages/dsh/test/e-mate.test.mjs",
-        "packages/dsh/test/**image-batch*",
-        "packages/dsh-plugin-tool-search/cordis.patch.yml",
-        "packages/dsh-plugin-tool-search/test/tool-search.test.mjs"
+        "packages/dsh/test/image-batch-normalizer.test.mjs"
       ],
       "implementation": [
-        "batch task 输入严格镜像当前 imagegen：必填 prompt，加可选且有序的 image_url Attachment ID 列表；拒绝空任务、重复 ordinal、未知字段和越界并发。",
+        "batch task raw 输入严格镜像当前 imagegen：必填 prompt，加可选 scalar 或 0..16 有序 image_url Attachment ID 数组；数组允许 [] 与重复 ID；任务数组顺序定义 ordinal，未知字段和越界并发被拒绝。",
         "不得接受或宣称 size/aspect/quality/model 输入；固定 model/quality/size 仍由现有 provider policy 决定。",
-        "仅支持 new-image batch；edit/fusion 在 durable parent-owned revision-3 review/adjudication route 前 fail closed。",
-        "通过现有 agent-operations 注册，通过现有 audit.ts 映射到 canonical image-generation first-party plugin/scenario，并通过现有 Tool Search cordis.patch.yml 使 image_batch 可见/可搜索。不得创建第二 Tool Search、第二 registry，或在中央聊天 UI 硬编码。",
-        "结果只含 batch/task/attachment/receipt 引用，不复制图片字节；单图 imagegen 合同不变。"
+        "只实现并直接测试内部 request normalizer、length-prefixed SHA-256 batch/task/event ID helper 和 schema mapping；parent/child 都在 digest/comparison 前把 omitted/scalar/array 规范成 first-occurrence ordered unique ID list，[] 为 new-image，operation 从 normalized refs 重算且 batch 禁止 implicit history inference。",
+        "不得注册 Tool、修改 agent-operations/audit/Tool Search、暴露 model-visible schema 或产生 parent events/provider 请求；内部模块在 EM217-103 前不可由模型调用。",
+        "不得留下未测试导出、unused UI/state、placeholder endpoint 或 disconnected image_batch registration；单图 imagegen 合同不变。"
       ],
       "acceptance": [
-        "2/4/5/8 图仅接受 prompt 与可选有序 image_url Attachment IDs；size/aspect/quality/model 和其他未知字段被拒绝。",
-        "Tool Search 可发现 image_batch，audit 使用同一 canonical image-generation first-party plugin/scenario。",
-        "单图 imagegen 不变；无中央聊天 UI 硬编码、第二 registry、第二 Tool Search 或第二图片存储。",
-        "每个 gateway 调用仍只生成一张图。"
+        "2/4/5/8 task normalizer 单测覆盖 prompt、omitted/scalar/empty/duplicate ordered image_url、first-occurrence dedupe、[] new-image、operation recompute、no implicit history inference、ordinal、ID、默认/最大并发以及未知/越界字段；size/aspect/quality/model 被拒绝。",
+        "focused test 直接导入并执行每个新增内部 helper；无仅靠 source scan 的占位测试。",
+        "Tool schemas/agent-operations/audit/Tool Search 均无 image_batch；无 UI/state/endpoint/事件/provider 副作用。"
       ],
       "tests": [
-        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
-        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test",
-        "node --test packages/dsh-plugin-tool-search/test/tool-search.test.mjs"
+        "node --test packages/dsh/test/image-batch-normalizer.test.mjs"
       ],
-      "rollback": "移除 image_batch 注册并恢复旧规则；不改变 imagegen 数据。",
+      "rollback": "删除未公开的内部 normalizer/ID/schema helper 及其 focused test；不改变 imagegen 数据。",
       "risk": "中"
     },
     {
@@ -250,32 +244,32 @@
       "write_set": [
         "packages/dsh/src/profile/image-batch.ts",
         "packages/dsh/src/profile/image-batch-events.ts",
-        "packages/dsh/test/**image-batch*"
+        "packages/dsh/test/image-batch-events.test.mjs"
       ],
       "implementation": [
-        "写入 created、task-linked、task-state、terminal 事件；事件带 schema=1。",
-        "投影同时包含 queued/running/terminal，而不是只投影终态。",
+        "实现并直接测试 created、task-linked、task-state、terminal schema-1 事件 reducer 与 parent projection definition；本工单不注册 public producer，也不向 Session append 事件。",
+        "内部投影同时包含 queued/running/terminal，而不是只投影终态；直到 EM217-103 原子激活前不可由 model-visible Tool 触达。",
         "状态转移采用白名单；禁止 completed 回退 running、终态重复写和 task 跨 batch。",
         "父 Session 只保存控制平面与引用，图片事实仍归 child Session。"
       ],
       "acceptance": [
         "事件重放可确定性重建同一 projection。",
         "随机乱序/重复事件不会产生第二终态或丢失已成功图片。",
-        "投影能在 parent turn 尚未 closed 时读取。",
+        "focused test 直接导入 reducer/projection 并覆盖 parent turn 尚未 closed 时的读取语义；无 unused producer/UI/state/placeholder endpoint。",
+        "agent-operations/audit/Tool Search/image-generation 注册点均不修改，且不存在公开 image_batch Tool 或 Session event producer。",
         "Implementation remains in the single @e-mate/dsh owner and reuses native Subagent/Jobs/Sessions/projections/Attachment CAS/conversation slots; no second scheduler, store, RPC, or image byte owner.",
         "Every gateway call requests exactly one image."
       ],
       "tests": [
-        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
-        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+        "node --test packages/dsh/test/image-batch-events.test.mjs"
       ],
-      "rollback": "新事件可被忽略；撤销工具注册即可，不删除已写事件。",
+      "rollback": "删除尚未公开的 reducer/projection 与 focused test；本工单没有写入事件或注册 Tool。",
       "risk": "高"
     },
     {
       "id": "EM217-103",
       "wave": "W1 图像运行时",
-      "title": "接入 pinned DSH 原生 Subagent 与 Job 生命周期",
+      "title": "原子激活可用的 pinned-spawn new-image image_batch",
       "owner": "IMG",
       "depends_on": [
         "EM217-102",
@@ -285,26 +279,38 @@
       "worktree": "/Users/mac/e-mate/worktrees/em217-103",
       "write_set": [
         "packages/dsh/src/profile/image-batch.ts",
+        "packages/dsh/src/profile/image-batch-events.ts",
         "packages/dsh/src/profile/native-image-task-runner.ts",
-        "packages/dsh/test/**native-image-task*"
+        "packages/dsh/src/profile/image-generation.ts",
+        "packages/dsh/src/profile/agent-operations.ts",
+        "packages/dsh/src/profile/audit.ts",
+        "packages/dsh/test/e-mate.test.mjs",
+        "packages/dsh/test/**native-image-task*",
+        "packages/dsh/test/**image-batch*",
+        "packages/dsh-plugin-tool-search/cordis.patch.yml",
+        "packages/dsh-plugin-tool-search/test/tool-search.test.mjs"
       ],
       "implementation": [
-        "使用 pinned rc.7 spawn/localAgent、native Job、child Session 和 shared Attachment CAS；每项一个 one-shot child。",
-        "effect-scoped gate registry 生成随机不可猜 nonce，仅写 descriptor label；deterministic batch/task IDs 仅 durable join。禁止 prompt marker、module global、remote provider。",
-        "gate consume-once 后才做 normalized args comparison；任何 nonce/args/owner 不匹配均拒绝且不可重试复用。",
-        "通过 native SessionStore durability checkpoint 严格执行 parent created flush、task-linked flush 后才 open/provider submission；ctx.sessions.flush(parent.session) false/reject 时 fail closed。child result flush 后才允许 parent terminal flush；随后 dispose 才释放 worker slot。"
+        "使用 pinned rc.7 spawn、native Job、child Session 和 shared Attachment CAS；每项一个 one-shot child。child 只验证 descriptor mode/provider/nonce 与自身 Session parent；parent 在 link/flush/open 前要求 run.localAgent!==undefined 且 run.id、run.localAgent.id 与 claimed child 精确一致。",
+        "effect-owned active gate set 与 nonce lookup map 分离；随机不可猜 nonce 仅写 descriptor label，deterministic batch/task IDs 仅 durable join。禁止 prompt marker、module global、remote provider。",
+        "parent 与 child 在 digest/comparison 前都把 image_url scalar/array 规范成 first-occurrence ordered unique ID list；explicit [] 重算为 new-image 且禁止 implicit history inference。atomic claim 在 normalized args comparison 前从 lookup 删除 nonce；claimed gate 继续留在 active set 至 result/cancel/error settlement。",
+        "通过 native SessionStore durability checkpoint 严格执行 parent created flush、task-linked flush 后才 open/provider submission；ctx.sessions.flush(parent.session) false/reject 时 fail closed。child result flush 后才允许 parent terminal flush；随后 dispose 才释放 worker slot。",
+        "在本工单同一原子变更中完成可用 new-image execution/result 和 durable event producer，然后才注册 model-visible image_batch，并更新 agent-operations、现有 Tool Search visibility/aliases 与 audit canonical image-generation classification；禁止 disconnected registration。"
       ],
       "acceptance": [
-        "Session/Job/task 一一对应，使用 localAgent 与 shared CAS，无 daemon/独立队列/renderer IPC。",
+        "Session/Job/task 一一对应；parent 证明 run.localAgent!==undefined 和 exact run.id/run.localAgent.id/claimed child，child 证明 descriptor/session parent/provider/mode/nonce；使用 shared CAS，无 daemon/独立队列/renderer IPC。",
         "未完成 created/link durability checkpoint 时 upstream submission=0；child 未 flush 时 parent terminal=0。",
-        "gate effect-scoped、nonce one-shot、consume-before-validation；无 module global、prompt marker 或 remote provider。",
-        "取消/失败完整释放 effect、Job、child 和 gate。"
+        "nonce lookup atomic-claim-before-validation 且 claimed gate 留在 effect-owned active set 至 final cleanup；无 module global、prompt marker、remote provider 或 disposal ownership 丢失。",
+        "取消/失败/HMR/effect dispose abort 全部 active gate（含 claimed waiter/in-flight），停止新 admission/refill，settle 并 quiescent dispose active work，surface persistence failure；final cleanup 才移除 active set，且不得永久 hang。",
+        "首次公开时 2/4/5/8 new-image 请求端到端可执行并返回 durable projection result；Tool Search/aliases/audit 与注册同步，source task 仍在 child/provider 前 fail closed 到 EM217-105。",
+        "101/102 内部 helper 与 reducer 由其 focused tests 直接执行；激活不引入 unused UI/state、placeholder endpoint、第二 owner 或未连接 payload。"
       ],
       "tests": [
         "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
-        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test",
+        "node --test packages/dsh-plugin-tool-search/test/tool-search.test.mjs"
       ],
-      "rollback": "删除 adapter 与工具入口；已完成 child receipt 保留，未完成 Job 由原生取消。",
+      "rollback": "原子撤销 image_batch 注册、aliases/audit 更新、producer 与 runner；已完成 child receipt 保留，未完成 Job 由原生取消。",
       "risk": "高"
     },
     {
@@ -327,12 +333,14 @@
         "使用极小的本地 live-child worker bound：默认 3、硬上限 4；现有 gateway admission 是最终授权者，但不发送也不拥有本地 scheduling hint。",
         "5–8 图仅在 child result inspection 完成、child flush 成功、parent terminal/task-state flush 成功且 child dispose 完成后 refill。",
         "live child（含正在终结但未 dispose）永不超过 bound；结果按 ordinal 排列。",
-        "取消后不启动 queued 项；已提交项按原生 Job 结果记 cancelled/unknown。"
+        "取消后不启动 queued 项；已提交项按原生 Job 结果记 cancelled/unknown。",
+        "只加固 EM217-103 已激活实现的 live-child concurrency/refill/cancel；不移动 Tool/Session/Job/CAS/Tool Search/audit 所有权，不增加注册点或协议。"
       ],
       "acceptance": [
         "任一时刻 live children <= configured bound <= 4；无 gateway hint 或动态并发协议。",
         "第 5 项只在前一 child inspect+flush、parent flush、dispose 后补位，无饥饿或重复提交。",
-        "gateway admission 仍可拒绝单项，但不驱动本地 worker 调度；partial 成功项全部保留。"
+        "gateway admission 仍可拒绝单项，但不驱动本地 worker 调度；partial 成功项全部保留。",
+        "public Tool、durable event producer、receipt、CAS、Tool Search aliases 与 audit owner 均保持 EM217-103 形态；无 disconnected state/UI/endpoint。"
       ],
       "tests": [
         "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
@@ -358,14 +366,18 @@
       ],
       "implementation": [
         "沿用 EM217-002 已接受 pinned-spawn：exact prompt 只在 typed normalized args 中比较，随机 nonce 只在 one-shot descriptor label；prompt 文本不是 gate marker。",
-        "effect-scoped gate consume-once before validation；禁止 module global、remote provider、child 改写、模型/质量/尺寸降级。",
-        "输入仅为 prompt 与可选有序 image_url Attachment IDs；固定 model/quality/size 由 provider policy 保持。",
-        "首期只覆盖 new-image batch；edit/fusion 等待 durable parent-owned revision-3 review/adjudication route。"
+        "validation 前 atomic claim 从 nonce lookup 删除；claimed gate 仍在 effect-owned active set 至 settlement/final cleanup。禁止 module global、remote provider、child 改写、模型/质量/尺寸降级。",
+        "raw 输入仅为 prompt 与可选 scalar/0..16 image_url IDs（允许 []/duplicates）；parent/child 在 digest/comparison 前同样 first-occurrence dedupe，persisted list 保持 ordered unique。固定 model/quality/size 由 provider policy 保持。",
+        "EM217-101 至 EM217-104 只启用 normalized image list 为空的 new-image（omitted 与 explicit []）；batch 禁止 implicit history inference。本工单必须先完成 source-task route 才能启用 non-empty image list：parent 通过 shared CAS 校验 normalized ordered Attachment IDs，并可在 native child message 中携带这些 Attachment refs；gate 校验同一 normalized IDs。",
+        "imagegen receipt 仍归 child；userQuestions 路由到 parent，child revision 2 必须在提问前 flush，回答后 revision 3 必须 append+flush；live child 在 adjudication 全程占用并发槽。",
+        "parent userQuestions 不可用时 source task 必须在 provider 前拒绝；不得留下永久 needs-review，禁止 child 改写、module global、remote provider 或模型/质量/尺寸降级。"
       ],
       "acceptance": [
         "父 task 与实际 imagegen normalized args 完全一致；prompt 不作为授权 marker 且日志不记录原文。",
-        "ordered image_url Attachment IDs 一致；不接收 size/aspect/quality/model 字段。",
-        "one-shot gate 不可复用；无 module global 或 remote provider。"
+        "raw []/duplicates 合法且 parent/child normalized ordered first-occurrence unique image_url IDs 一致；operation 由 normalized refs 重算，无 implicit history inference；不接收 size/aspect/quality/model 字段。",
+        "one-shot gate 不可复用；无 module global 或 remote provider。",
+        "source task 只有在 parent CAS 校验、exact Attachment refs/IDs gate、parent userQuestions 路由与 child revision 2/3 flush 全部可用时才进入 provider；否则 provider submission=0。",
+        "needs-review 必须是 image-bearing 瞬时状态，live child 持续占槽并最终 durable completed/failed/cancelled/unknown；不得永久停留。"
       ],
       "tests": [
         "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
@@ -388,7 +400,6 @@
       "worktree": "/Users/mac/e-mate/worktrees/em217-106",
       "write_set": [
         "packages/dsh/src/profile/image-batch.ts",
-        "packages/dsh/src/profile/image-generation.ts（receipt 元数据扩展）",
         "packages/dsh/test/**receipt*"
       ],
       "implementation": [
@@ -400,13 +411,13 @@
       "acceptance": [
         "测试证明 child receipt schema/metadata 未变且不含 batch/task/ordinal/child_session_id。",
         "同名、乱序、晚到、重建均按 parent exact link 加载 existing child projection，不串图。",
-        "四成功一失败为 partial 且保留四图；terminal 唯一。"
+        "四成功一失败为 partial 且保留四图；terminal 唯一。已成功首图后第二调用被 gate 阻断或 post-image contract failure 时，该 task 可为 failed，但首图在 images 恰好一次、该 task 在 failures 恰好一次，batch 为 partial。"
       ],
       "tests": [
         "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
         "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
       ],
-      "rollback": "旧 receipt 字段保持可读；新增字段为向后兼容。",
+      "rollback": "撤销 parent exact-link 汇总；child receipt 与其 metadata 从未改变并继续只读。",
       "risk": "高"
     },
     {
@@ -427,12 +438,12 @@
       ],
       "implementation": [
         "工具最终结果由 durable projection 生成，不从内存数组拼接。",
-        "重启后从 parent events、child Session receipts 和 native Jobs 恢复；仅对证明确未提交的 queued task 重新启动。",
-        "provider outcome unknown 不自动重发；等待幂等 receipt reacquire 或标 unknown。",
+        "重启后从 parent events、child Session receipts 和 native Jobs 恢复；created/unlinked 一律标 interrupted/not-submitted，linked/nonterminal 一律标 unknown，绝不自动恢复、重试或重新启动 one-shot task。",
+        "已有 linked child terminal 可通过 native Session/Job 重新取得并投影/完成 parent，且 provider POST=0；unknown 仅在读取到已存在 proven receipt 时收敛，否则保持 unknown，直到显式新 Tool call。",
         "旧会话继续使用现有 Gallery 只读关联逻辑，新批次不再走 legacy label/time fallback。"
       ],
       "acceptance": [
-        "在 queued、running、provider-finished/attachment-before-event 三个切点模拟崩溃后无重复图、无丢图。",
+        "在 created/unlinked、linked/nonterminal、provider-finished/attachment-before-parent-event 三个切点模拟崩溃：分别得到 interrupted/not-submitted、unknown、或从 existing child terminal receipt 无 POST 地完成；绝无自动重启/重试。",
         "工具结果 images/failures/tasks 与 UI projection 一致。",
         "Implementation remains in the single @e-mate/dsh owner and reuses native Subagent/Jobs/Sessions/projections/Attachment CAS/conversation slots; no second scheduler, store, RPC, or image byte owner.",
         "Every gateway call requests exactly one image."
@@ -830,7 +841,7 @@
       ],
       "tests": [
         "node docs/2.0.17/check-plan.mjs",
-        "corepack yarn --cwd desktop check"
+        "workdir: desktop; corepack yarn check"
       ],
       "rollback": "撤销文档；不触碰代码。",
       "risk": "低"
@@ -859,7 +870,7 @@
         "旧 generation 的回调不能修改新 generation。"
       ],
       "tests": [
-        "corepack yarn --cwd desktop check"
+        "workdir: desktop; corepack yarn check"
       ],
       "rollback": "按 provenance 记录的单提交精确回滚。",
       "risk": "高"
@@ -888,7 +899,7 @@
         "平台分支有唯一 owner，代码来源可追溯。"
       ],
       "tests": [
-        "corepack yarn --cwd desktop check"
+        "workdir: desktop; corepack yarn check"
       ],
       "rollback": "精确回滚此工单提交。",
       "risk": "中"
@@ -905,7 +916,9 @@
       "worktree": "/Users/mac/e-mate/worktrees/em217-404",
       "write_set": [
         "由 EM217-401 锁定的 Desktop/Profile 插件装配文件",
-        "对应 lifecycle 测试"
+        "对应 lifecycle 测试",
+        "scripts/harness-provenance.mjs",
+        "scripts/harness-provenance.test.mjs"
       ],
       "implementation": [
         "Desktop-only 插件使用 required inject；跨 DSH 插件使用嵌套 inject。",
@@ -914,10 +927,13 @@
       ],
       "acceptance": [
         "插件启停/切换 50 次无遗留 Job、计时器、socket、监听器。",
-        "缺服务时 fail-closed 并给明确错误，不读取私有 desktopRuntime。"
+        "缺服务时 fail-closed 并给明确错误，不读取私有 desktopRuntime。",
+        "唯一 Harness provenance owner scripts/harness-provenance.mjs 精确准入 @deepseek-ai/dsh-app-boot@npm:0.1.0-rc.7 overlay；其他版本、包或浮动引用继续 fail closed。",
+        "该精确 pinned overlay 是 Desktop full check 的必要端到端 owner，不是绕过；不得使用 COREPACK_ENABLE_PROJECT_SPEC=0 或放宽通用 provenance policy。"
       ],
       "tests": [
-        "corepack yarn --cwd desktop check"
+        "node --test scripts/harness-provenance.test.mjs",
+        "workdir: desktop; corepack yarn check"
       ],
       "rollback": "精确回滚此工单提交。",
       "risk": "高"
@@ -946,7 +962,7 @@
         "CSP、导航、外链、下载和权限回归通过。"
       ],
       "tests": [
-        "corepack yarn --cwd desktop check"
+        "workdir: desktop; corepack yarn check"
       ],
       "rollback": "精确回滚此工单提交。",
       "risk": "高"
@@ -976,7 +992,7 @@
         "无 raw pnpm 子进程从 renderer 或业务插件发起。"
       ],
       "tests": [
-        "corepack yarn --cwd desktop check"
+        "workdir: desktop; corepack yarn check"
       ],
       "rollback": "精确回滚此工单提交。",
       "risk": "高"
@@ -1018,7 +1034,7 @@
         "MAIN-AGENT-ONLY SOURCE-GATED (runs builds): corepack pnpm test",
         "corepack pnpm enterprise:check",
         "corepack pnpm enterprise:test",
-        "corepack yarn --cwd desktop check"
+        "workdir: desktop; corepack yarn check"
       ],
       "rollback": "单提交精确回滚到 2.0.16 合同；运行时代码不回退。",
       "risk": "中"
@@ -1063,7 +1079,7 @@
       "tests": [
         "node --test packages/dsh-plugin-computer-use/test/contract.test.mjs packages/dsh-plugin-computer-use/test/capability-status.test.mjs",
         "node --test packages/dsh/test/e-mate.test.mjs",
-        "corepack yarn --cwd desktop check"
+        "workdir: desktop; corepack yarn check"
       ],
       "rollback": "仅移除 Win32 primitive backend 与 pinned provenance gitlink；保留既有 component/backend/Profile row、native DSH owner 和 Darwin Anionex 实现。",
       "risk": "高",
@@ -1101,7 +1117,9 @@
         "tests/contracts/**"
       ],
       "implementation": [
-        "覆盖 2/4/5/8 图、乱序、重复事件、同名 prompt、取消、partial、needs-review、unknown、重启。",
+        "覆盖 2/4/5/8 图、created effective concurrency、strict task-linked/task-state、pointer-only receipt、camelCase ImageAttachmentRef、乱序、exact duplicate 幂等、conflicting duplicate 拒绝、同名 prompt、取消、image-bearing failed task/partial、needs-review、unknown、HMR、timeout 与重启。",
+        "覆盖 source-task 完整路由：parent CAS/Attachment refs、explicit IDs gate、parent userQuestions 不可用时 provider 前拒绝、child revision 2 提问前 flush、revision 3 回答后 flush、adjudication 全程占槽且无永久 needs-review。",
+        "覆盖恢复规则：created/unlinked=interrupted/not-submitted，linked/nonterminal=unknown，existing child terminal 可无 provider POST 地 reacquire/project/finalize；任何 one-shot task 都不得自动 resume/retry。",
         "生成随机合法/非法状态序列验证终态唯一、无丢图、无跨批串图。",
         "保留并更新现有 legacy Gallery 与 uncertain provider failure 测试。",
         "Run complete source verification for image runtime, UI, gateway, Desktop alignment, and native Windows Computer Use before any version change."
@@ -1116,7 +1134,7 @@
         "MAIN-AGENT-ONLY SOURCE-GATED (runs builds): corepack pnpm test",
         "corepack pnpm enterprise:check",
         "corepack pnpm enterprise:test",
-        "corepack yarn --cwd desktop check"
+        "workdir: desktop; corepack yarn check"
       ],
       "rollback": "仅测试变更；产品提交按首个失败工单回滚。",
       "risk": "中"
@@ -1223,7 +1241,7 @@
         "MAIN-AGENT-ONLY SOURCE PREREQUISITE: corepack pnpm run build:harness",
         "corepack pnpm run test:fast",
         "MAIN-AGENT-ONLY NON-PRODUCTION CURRENT-PHASE: corepack pnpm smoke:app-dir",
-        "HUMAN-CONFIRMATION-GATED PRODUCTION: corepack yarn --cwd desktop dist:mac; installed macOS Computer Use"
+        "HUMAN-CONFIRMATION-GATED PRODUCTION: workdir: desktop; corepack yarn dist:mac; installed macOS Computer Use"
       ],
       "rollback": "卸载候选并安装已锁定 2.0.16 产物；用户数据不清除。",
       "risk": "高",
@@ -1264,7 +1282,7 @@
         "Tracked evidence is a small sanitized manifest/assertion only; external immutable artifacts use URI plus SHA-256, with no secrets, prompt text, image bytes, logs, screenshots, videos, or installers committed."
       ],
       "tests": [
-        "HUMAN-CONFIRMATION-GATED PRODUCTION: corepack yarn --cwd desktop dist:win on signed-in Codex Remote Windows; installed Windows Computer Use"
+        "HUMAN-CONFIRMATION-GATED PRODUCTION: workdir: desktop; corepack yarn dist:win on signed-in Codex Remote Windows; installed Windows Computer Use"
       ],
       "rollback": "卸载候选并恢复已锁定 2.0.16 Windows 产物。",
       "risk": "高",

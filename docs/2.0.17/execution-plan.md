@@ -10,7 +10,7 @@ The main agent is sole integrator, builder, installer, releaser, and rollback ow
 
 ## Required W0 decision
 
-EM217-002 固化已接受的 pinned-spawn：effect-scoped one-shot gate、descriptor-label nonce、normalized args、spawn/localAgent/shared CAS。顺序必须为 parent created flush → task link flush → open/provider；child flush → parent terminal flush → dispose/refill，任一 `ctx.sessions.flush(parent.session)` false/reject 均 fail closed。首期只做 new-image batch；edit/fusion 等待 durable parent-owned revision-3 review/adjudication。`image_batch` 仍是 `@e-mate/dsh` 内唯一实现，不建第二 scheduler/store/RPC。现有 Tool Search 负责可发现性，现有 audit owner 负责 canonical image-generation 分类。
+EM217-002 固化已接受的 pinned-spawn：effect-scoped consume-once gate、model-hidden descriptor-label nonce、normalized args、spawn/shared CAS。child 只校验 descriptor mode/provider/nonce 与自身 Session parent；parent 在 link/flush/open 前要求 run.localAgent!==undefined 且 exact run.id=run.localAgent.id=claimed child。顺序必须为 parent created（含 effective concurrency）flush → child register/start → parent identity check → exact task link flush → open/provider；child Session flush → inspect one terminal receipt/Job → parent task-state flush → quiescent dispose/refill，任一 flush false/reject 均 fail closed。EM217-101 仅交付由 focused test 直接执行的 internal request normalizer/ID/schema，EM217-102 仅交付由 focused test 直接执行的 internal event reducer/projection；两者都不注册 model-visible Tool、不产生 public event、不修改 agent-operations/Tool Search/audit。EM217-103 是第一次原子公开激活：在 complete pinned-spawn gate、durable producer、可用 new-image execution/result 同时成立后，才在同一 ticket 注册 image_batch 并更新 agent-operations、既有 Tool Search visibility/aliases 和 canonical image-generation audit classification；禁止 disconnected registration、unused UI/state 或 placeholder endpoint。EM217-104 仅在同一 owner 内强化 live-child concurrency/refill/cancel。EM217-105 完整实现 parent CAS 与 exact Attachment refs/IDs gate、child receipt owner 不变、userQuestions 路由 parent、提问前 child revision 2 flush、回答后 revision 3 flush，且 review 全程占槽，之后才启用 source edit/fusion；parent userQuestions 不可用则 provider 前拒绝且不得永久 needs-review。EM217-106 只做 parent exact link → existing child projection，不扩展 child receipt metadata。EM217-107 永不自动恢复/重试 one-shot task：created/unlinked=interrupted/not-submitted，linked/nonterminal=unknown，只有 existing child terminal receipt 可在 provider POST=0 时 reacquire/project/finalize。`image_batch` 仍是 `@e-mate/dsh` 内唯一实现，不建第二 scheduler/store/RPC。
 
 ## Gateway boundary
 
@@ -22,7 +22,7 @@ EM217-408 只复用 pinned jing-hy MIT PowerShell/Win32 primitives，并接到�
 
 ## Verification and gates
 
-EM217-501 覆盖全部 source、UI、gateway、Desktop alignment 与 Windows plugin；EM217-407 位于完整 source verification 和 Desktop 对齐之后，GUI 再随后执行。环境证据表明：缺少 pinned Harness emitted lib 时 `test:fast` 会在断言前失败；主代理先执行仓库自有 `build:harness` 后，`test:fast` 为 12/12 green。依赖安装属于精确 Harness worktree 的环境准备，不写入产品命令。Source commands 按顺序为：
+EM217-501 覆盖全部 source、UI、gateway、Desktop alignment 与 Windows plugin；EM217-407 位于完整 source verification 和 Desktop 对齐之后，GUI 再随后执行。环境证据表明：缺少 pinned Harness emitted lib 时 `test:fast` 会在断言前失败；主代理先执行仓库自有 `build:harness` 后，`test:fast` 为 12/12 green。EM217-404 patch/package/lock 与 focused 38 tests 通过后，Desktop full check 对 `Desktop Harness overlay is not admitted: @deepseek-ai/dsh-app-boot@npm:0.1.0-rc.7` 正确 fail closed；唯一 owner `scripts/harness-provenance.mjs` 必须精确准入该 pinned overlay，并先通过 `scripts/harness-provenance.test.mjs` focused test，再运行 Desktop full check。该修复是必要的端到端 provenance owner，不是 bypass；`COREPACK_ENABLE_PROJECT_SPEC=0` 不是 canonical guidance。依赖安装属于精确 Harness worktree的环境准备，不写入产品命令。Source commands 按顺序为：
 
 - `MAIN-AGENT-ONLY SOURCE PREREQUISITE: corepack pnpm run build:harness`
 - `corepack pnpm run test:fast`
@@ -31,7 +31,8 @@ EM217-501 覆盖全部 source、UI、gateway、Desktop alignment 与 Windows plu
 - `corepack pnpm --filter @e-mate/dsh test`
 - `corepack pnpm enterprise:check`
 - `corepack pnpm enterprise:test`
-- `corepack yarn --cwd desktop check`
+- `node --test scripts/harness-provenance.test.mjs`
+- `workdir: desktop; corepack yarn check`
 
 Ticket-local tests 只写真实路径。当前仅允许主代理授权的非生产 app-directory/dev macOS Computer Use：EM217-504 只依赖 407+501。其 packaged/installed production 另需 502+503 且 **HUMAN-CONFIRMATION-GATED**；Windows installed evidence、生产 dist、rollback、public release 均保持 OPEN。
 

@@ -41,32 +41,38 @@
   },
   "supervisor_supplied_baseline_evidence": [
     {
+      "workdir": ".",
       "command": "corepack pnpm run build:harness",
       "exit_code": 0,
       "result": "passed"
     },
     {
+      "workdir": ".",
       "command": "corepack pnpm run test:fast",
       "exit_code": 0,
       "result": "12/12 passed"
     },
     {
+      "workdir": ".",
       "command": "corepack pnpm test",
       "exit_code": 0,
       "result": "passed"
     },
     {
-      "command": "corepack pnpm enterprise:check",
+      "workdir": "enterprise",
+      "command": "corepack pnpm check",
       "exit_code": 0,
       "result": "passed"
     },
     {
-      "command": "corepack pnpm enterprise:test",
+      "workdir": "enterprise",
+      "command": "corepack pnpm test",
       "exit_code": 0,
       "result": "passed"
     },
     {
-      "command": "corepack yarn --cwd desktop check",
+      "workdir": "desktop",
+      "command": "corepack yarn check",
       "exit_code": 0,
       "result": "404 passed, 4 skipped"
     }
