@@ -232,6 +232,45 @@ export class PostgresUsageStore implements UsageStore {
     return databaseNow;
   }
 
+  async activeModelIds(principal: ModelGatewayPrincipal, routeIdsInput: readonly string[]): Promise<string[]> {
+    const tenantId = identifier(principal.tenantId, 'tenant id');
+    const userId = identifier(principal.userId, 'user id');
+    if (
+      routeIdsInput.length < 1 ||
+      routeIdsInput.length > 20 ||
+      routeIdsInput.some((routeId) => !identifierPattern.test(routeId)) ||
+      new Set(routeIdsInput).size !== routeIdsInput.length
+    ) {
+      throw new Error('Invalid model route catalog');
+    }
+    const routeIds = [...routeIdsInput];
+    const result = await this.#pool.query<{ model_ids: string[] }>(
+      `SELECT ARRAY(
+         SELECT candidate.route_id
+           FROM unnest($3::text[]) WITH ORDINALITY AS candidate(route_id, position)
+          WHERE candidate.route_id = ANY(app_user.allowed_model_ids)
+          ORDER BY candidate.position
+       ) AS model_ids
+         FROM e_mate_tenant_user AS app_user
+        WHERE app_user.tenant_id = $1
+          AND app_user.user_id = $2
+          AND app_user.status = 'ACTIVE'`,
+      [tenantId, userId, routeIds]
+    );
+    const row = result.rows[0];
+    if (!row) return [];
+    const modelIds = row.model_ids;
+    if (
+      !Array.isArray(modelIds) ||
+      modelIds.length > routeIds.length ||
+      modelIds.some((routeId) => !routeIds.includes(routeId)) ||
+      new Set(modelIds).size !== modelIds.length
+    ) {
+      throw new Error('User model policy was unavailable');
+    }
+    return modelIds;
+  }
+
   async currentAccountUsage(principal: ModelGatewayPrincipal) {
     const tenantId = identifier(principal.tenantId, 'tenant id');
     const userId = identifier(principal.userId, 'user id');

@@ -1,8 +1,8 @@
 # EM217-206 enterprise model delivery and recovery contract
 
-Status: **PLANNING ONLY — ALL EM217-206 EVIDENCE OPEN**
+Status: **SOURCE IMPLEMENTATION IN PROGRESS — ALL EM217-206 EVIDENCE OPEN**
 
-This contract authorizes no implementation before EM217-205 completes. It changes no source, candidate, installed, production, packaging, version, or release gate. Missing fault, reconnect, gateway-startup, or installed evidence stays **OPEN**.
+EM217-205 and EM217-406 are integrated, so EM217-206 source implementation may proceed in its locked write set. This contract changes no candidate, installed, production, packaging, version, or release gate. Missing fault, reconnect, live-Postgres, gateway-startup, or installed evidence stays **OPEN**.
 
 ## Ownership and scope
 
@@ -45,7 +45,7 @@ EM217-206 closes direct-key bypass atomically across Gateway and Profile:
 
 - Runtime catalog responses expose Gateway-routed OpenAI-compatible provider metadata and reuse the existing short model-session credential reference. They do not return plaintext upstream provider keys or direct-provider authorization material.
 - `llm-pi-ai` continues through its existing OpenAI-compatible owner, pointed at the existing Gateway route; no second LLM router or transport is introduced.
-- Every enterprise invocation crosses Gateway authentication. Gateway performs the final per-request Postgres session, user, route enable/publication, and tenant route-key decision before provider submission.
+- Every enterprise invocation crosses Gateway authentication. For a signed model session, effective models are the ordered intersection of its signed model scope, the callable Gateway catalog, and the current Postgres user model list; live revocation/removal is immediate, while a newly granted model requires normal model-token refresh/reissue. Gateway then performs the final per-request route enable/publication and tenant route-key decision before provider submission. Client-credential/admin authentication remains unchanged.
 - Obsolete distributed upstream-key OS references are removed through the existing credential owner. They are never retained as an availability fallback.
 - Settings, storage-domain rows, catalog cache, logs, errors, and audit contain no access token, refresh token, model-session token, upstream key, or other model secret. Approved OS credential references remain the only durable client secret boundary.
 - Last-known-good catalog metadata is nonauthoritative. It may render bounded UX but cannot authorize or route a call past expiry, revocation, or a failed live Gateway check.
@@ -70,7 +70,7 @@ All evidence below is **OPEN** until the future authorized implementation and fo
 | Cold management blackhole/500 | Renderer health, Session list/open/history, Workspace, attachments, and local Tools remain usable; expired remembered state is not authenticated; enterprise provider POST = 0. |
 | Exact expiry boundary | `exp - 1` follows the valid lease contract; `exp` is rejected. Clock skew may protect future `iat/nbf` only and must not grant after `exp`. |
 | Session revoke or user disable | Next enterprise request fails before provider POST; local owners are unchanged; cached authenticated/routable state is withdrawn. |
-| User model-list change | Removed model is denied before provider POST; newly admitted model appears only after live revalidation. |
+| User model-list change | Removed model is denied before provider POST. A DB grant outside the signed token scope remains denied; a newly granted model appears only after normal model-token refresh/reissue. |
 | Route disable/unpublish then re-enable | Disable is effective on the next Gateway request with provider POST = 0; re-enable recovers without app or Gateway restart after live authorization. |
 | Tenant key A to B rotation | Next admitted Gateway request uses B; A is neither returned to nor retained by the Profile. |
 | Delayed refresh/catalog A versus logout/login B | A cannot write credentials, Settings, tables, marker, cache, or UI state after B. |

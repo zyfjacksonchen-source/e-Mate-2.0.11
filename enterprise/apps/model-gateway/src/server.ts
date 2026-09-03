@@ -2147,13 +2147,6 @@ export function createModelGatewayHandler(options: ModelGatewayOptions) {
                     id: route.id,
                     apiMode: runtimeApiMode(route),
                     upstreamModelId: route.upstreamModelId,
-                    upstreamBaseUrl: route.upstreamBaseUrl,
-                    ...(route.allowInsecureHttpUpstream === true ? { allowInsecureHttpUpstream: true } : {}),
-                    upstreamApiKey: await modelRouteUpstreamApiKey(
-                      options.tenantModelRoutePolicy,
-                      identity.tenantId,
-                      route
-                    ),
                     label: route.label,
                     input: route.input,
                     reasoning: route.reasoning,

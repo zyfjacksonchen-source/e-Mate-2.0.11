@@ -404,17 +404,20 @@ function modelUnavailable(request, provider, model, message = `Model "${model}" 
 const RUNTIME_REASONING = new Map([
   ['gpt-5.6-luna', { max: 'high' }],
   ['gpt-5.6-sol', { medium: 'medium' }],
-  ['deepseek-v4-flash', { max: 'max' }],
+  ['deepseek', { max: 'max' }],
   ['doubao-seed-2-0-pro-260215', { medium: 'medium' }],
 ])
-const RUNTIME_CREDENTIAL_REFS = new Set([
+const MODEL_SESSION_REF = 'E_MATE_MODEL_SESSION_TOKEN'
+const SEARCH_CREDENTIAL_REF = 'E_MATE_SEARCH_KEY_DEEPSEEK'
+const OBSOLETE_MODEL_CREDENTIAL_REFS = new Set([
   'E_MATE_MODEL_KEY_GPT',
   'E_MATE_MODEL_KEY_DEEPSEEK',
   'E_MATE_MODEL_KEY_DOUBAO',
-  'E_MATE_SEARCH_KEY_DEEPSEEK',
 ])
+const RUNTIME_CREDENTIAL_REFS = new Set([MODEL_SESSION_REF, SEARCH_CREDENTIAL_REF])
+const STORED_CREDENTIAL_REFS = new Set([...RUNTIME_CREDENTIAL_REFS, ...OBSOLETE_MODEL_CREDENTIAL_REFS])
+const PROJECTED_CREDENTIAL_REFS = new Set([...OBSOLETE_MODEL_CREDENTIAL_REFS, SEARCH_CREDENTIAL_REF])
 const IDENTITY_SESSION_REF = 'E_MATE_ENTERPRISE_SESSION'
-const SEARCH_CREDENTIAL_REF = 'E_MATE_SEARCH_KEY_DEEPSEEK'
 const SEARCH_GRANT_ERROR_CODE = 'E_MATE_SEARCH_GRANT_INVALID'
 const PROJECTION_SUPERSEDED = 'E_MATE_RUNTIME_PROJECTION_SUPERSEDED'
 const RUNTIME_PROJECTION_KEY = 'active'
@@ -522,23 +525,16 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant, isCurrent 
       || typeof model.api !== 'string'
       || typeof model.upstreamModelId !== 'string'
       || typeof model.upstreamBaseUrl !== 'string'
-      || typeof model.upstreamApiKey !== 'string'
       || typeof model.label !== 'string'
       || !Array.isArray(model.input)
       || !Number.isSafeInteger(model.contextWindow)
       || !Number.isSafeInteger(model.maxTokens)
-      || model.id === 'deepseek' && model.upstreamModelId !== 'deepseek-v4-flash'
-      || model.credentialRef === SEARCH_CREDENTIAL_REF && searchGrant.status !== 'granted'
-      || !RUNTIME_CREDENTIAL_REFS.has(model.credentialRef)
+      || model.id === 'deepseek' && model.upstreamModelId !== 'deepseek'
+      || model.credentialRef !== MODEL_SESSION_REF
       || !RUNTIME_REASONING.has(model.upstreamModelId)
-      || !['openai-responses', 'openai-completions'].includes(model.api)) {
+      || model.api !== 'openai-responses') {
       throw new Error('e-Mate runtime model projection is invalid')
     }
-    const credential = credentials.get(model.credentialRef)
-    if (credential !== undefined && credential !== model.upstreamApiKey) {
-      throw new Error('e-Mate runtime model routes sharing a credential reference disagree')
-    }
-    credentials.set(model.credentialRef, model.upstreamApiKey)
     const existing = providers[model.provider]
     if (existing !== undefined
       && (existing.api !== model.api
@@ -564,10 +560,16 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant, isCurrent 
     providers[model.provider] = provider
   }
 
-  const previousCredentials = new Map()
-  for (const ref of RUNTIME_CREDENTIAL_REFS) {
-    previousCredentials.set(ref, await ctx.credentials.resolve(ref))
+  const modelSession = await ctx.credentials.resolve(MODEL_SESSION_REF)
+  if (typeof modelSession?.value !== 'string'
+    || modelSession.value.length < 16
+    || modelSession.value.length > 16_384
+    || /\s/u.test(modelSession.value)) {
+    throw new Error('e-Mate model session credential is unavailable')
   }
+  const previousCredentials = new Map([
+    [SEARCH_CREDENTIAL_REF, await ctx.credentials.resolve(SEARCH_CREDENTIAL_REF)],
+  ])
   const current = async operation => {
     if (!isCurrent()) throw projectionSuperseded()
     const result = await operation()
@@ -576,6 +578,10 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant, isCurrent 
   }
   if (!isCurrent()) throw projectionSuperseded()
   const previousLlmSettings = structuredClone(ctx.settings.get('llm-pi-ai') ?? {})
+  const previousUsedObsoleteModelCredential = isRecord(previousLlmSettings.providers)
+    && Object.values(previousLlmSettings.providers).some(provider => isRecord(provider)
+      && typeof provider.apiKeyEnv === 'string'
+      && OBSOLETE_MODEL_CREDENTIAL_REFS.has(provider.apiKeyEnv))
   const previousDefaultModel = structuredClone(ctx.settings.get('agent-default-model') ?? {})
   const settingRevisions = new Map(ctx.settings.describe().map(({ ns, revision }) => [ns, revision]))
   const llmRevision = settingRevisions.get('llm-pi-ai')
@@ -608,7 +614,7 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant, isCurrent 
         projectedDefaultRevision = defaultRevision + 1
       })
     }
-    for (const ref of RUNTIME_CREDENTIAL_REFS) {
+    for (const ref of PROJECTED_CREDENTIAL_REFS) {
       if (!credentials.has(ref)) {
         try {
           await current(() => ctx.credentials.unset(ref))
@@ -627,7 +633,7 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant, isCurrent 
     if (!superseded) {
       for (const { ns, value, revision } of [
         { ns: 'agent-default-model', value: previousDefaultModel, revision: projectedDefaultRevision },
-        { ns: 'llm-pi-ai', value: previousLlmSettings, revision: projectedLlmRevision },
+        { ns: 'llm-pi-ai', value: previousLlmSettings, revision: previousUsedObsoleteModelCredential ? undefined : projectedLlmRevision },
       ]) {
         if (revision === undefined) continue
         try {
@@ -639,6 +645,18 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant, isCurrent 
             break
           }
         }
+      }
+    }
+    if (!superseded && previousUsedObsoleteModelCredential) {
+      try {
+        await current(() => ctx.settings.replace(
+          'llm-pi-ai',
+          { providers: {} },
+          projectedLlmRevision ?? llmRevision,
+        ))
+      } catch (rollbackError) {
+        rollbackFailures.push(rollbackError)
+        if (rollbackError?.code === PROJECTION_SUPERSEDED || !isCurrent()) superseded = true
       }
     }
     if (!superseded) {
@@ -656,9 +674,16 @@ async function projectRuntimeModels(ctx, models, policy, searchGrant, isCurrent 
         }
       }
     }
+    if (!superseded) {
+      await Promise.allSettled([...OBSOLETE_MODEL_CREDENTIAL_REFS]
+        .map(ref => ctx.credentials.set(ref, LOGGED_OUT_CREDENTIAL)))
+      const deleted = await Promise.allSettled([...OBSOLETE_MODEL_CREDENTIAL_REFS]
+        .map(ref => ctx.credentials.unset(ref)))
+      rollbackFailures.push(...deleted.filter(result => result.status === 'rejected').map(result => result.reason))
+    }
     if (superseded) {
-      await Promise.allSettled([...RUNTIME_CREDENTIAL_REFS].map(ref => ctx.credentials.set(ref, LOGGED_OUT_CREDENTIAL)))
-      const deleted = await Promise.allSettled([...RUNTIME_CREDENTIAL_REFS].map(ref => ctx.credentials.unset(ref)))
+      await Promise.allSettled([...PROJECTED_CREDENTIAL_REFS].map(ref => ctx.credentials.set(ref, LOGGED_OUT_CREDENTIAL)))
+      const deleted = await Promise.allSettled([...PROJECTED_CREDENTIAL_REFS].map(ref => ctx.credentials.unset(ref)))
       rollbackFailures.push(...deleted.filter(result => result.status === 'rejected').map(result => result.reason))
     }
     if (rollbackFailures.length > 0) {
@@ -734,27 +759,35 @@ function createService(ctx, table, projectionTable, quota) {
 
   const refresh = async ({ force = false } = {}) => {
     const state = await identityState()
-    const now = Date.now()
-    const current = validCached(state.account_subject, now)
-    if (!force && current !== undefined && now - lastRefresh < REFRESH_MS) return current
+    const requestStartedAt = Date.now()
+    const current = validCached(state.account_subject, requestStartedAt)
+    if (!force && current !== undefined && requestStartedAt - lastRefresh < REFRESH_MS) return current
     if (refreshing !== undefined) {
-      const result = await refreshing.promise
-      return result.account_subject === state.account_subject ? result : refresh({ force: true })
+      const inFlight = refreshing
+      try {
+        const result = await inFlight.promise
+        return result.account_subject === state.account_subject ? result : refresh({ force: true })
+      } catch (error) {
+        if (error?.code !== PROJECTION_SUPERSEDED) throw error
+        if (refreshing === inFlight) refreshing = undefined
+        return refresh({ force: true })
+      }
     }
+    const expectedIdentityGeneration = identityCredentialGeneration
+    const isCurrent = () => expectedIdentityGeneration === identityCredentialGeneration
     const promise = (async () => {
       try {
         const runtime = typeof ctx.emateIdentity.modelRuntimePolicy === 'function'
           ? await ctx.emateIdentity.modelRuntimePolicy()
           : { policy: await ctx.emateIdentity.modelPolicy() }
-        const expectedIdentityGeneration = identityCredentialGeneration
-        const isCurrent = () => expectedIdentityGeneration === identityCredentialGeneration
         const current = async operation => {
           if (!isCurrent()) throw projectionSuperseded()
           const result = await operation()
           if (!isCurrent()) throw projectionSuperseded()
           return result
         }
-        const policy = validateModelPolicy(runtime.policy, state.account_subject, now)
+        if (!isCurrent()) throw projectionSuperseded()
+        const policy = validateModelPolicy(runtime.policy, state.account_subject, Date.now())
         if (runtime.models !== undefined) {
           runtimeReady = false
           try {
@@ -779,15 +812,17 @@ function createService(ctx, table, projectionTable, quota) {
           runtimeReady = true
         }
         cached = policy
-        lastRefresh = now
+        lastRefresh = Date.now()
         return policy
       } catch (error) {
-        const fallback = validCached(state.account_subject, now)
+        if (error?.code === PROJECTION_SUPERSEDED) throw error
+        if (!isCurrent()) throw projectionSuperseded()
+        const fallback = validCached(state.account_subject, Date.now())
         if (isSearchGrantError(error)) {
           await degradeInvalidSearchGrant(fallback)
         }
         if (fallback !== undefined) {
-          lastRefresh = now
+          lastRefresh = Date.now()
           return fallback
         }
         throw error
@@ -1009,7 +1044,7 @@ export async function apply(ctx, config = {}) {
     search_status: z.enum(['granted', 'denied', 'unavailable']),
     llm_settings_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
     default_model_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
-    credential_refs: z.array(z.enum([...RUNTIME_CREDENTIAL_REFS])).max(RUNTIME_CREDENTIAL_REFS.size),
+    credential_refs: z.array(z.enum([...STORED_CREDENTIAL_REFS])).max(STORED_CREDENTIAL_REFS.size),
     projection_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
   })
   const domain = await ctx.storageDomain.open(defineDomain({

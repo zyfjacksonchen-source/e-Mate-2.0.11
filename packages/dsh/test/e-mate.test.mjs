@@ -120,17 +120,23 @@ test('Computer Use composes one cross-platform Profile row without a candidate p
   }
 })
 
-test('validated identity transitions restore the protected route before reloading one enterprise snapshot', () => {
+test('validated identity transitions restore only explicit enterprise routes while local routes stay available', () => {
   const source = readFileSync(new URL('../profile/plugins/emate-shell/src/client/identity.tsx', import.meta.url), 'utf8')
   const login = source.slice(source.indexOf('  const login = async'), source.indexOf('  const issueChallenge'))
   const acceptance = source.slice(source.indexOf('  const accept = async'), source.indexOf("  if (mode === 'unlocked') return null"))
-  for (const transition of [login, acceptance]) {
-    const validation = transition.indexOf('validBootstrap(result.value)')
-    const restore = transition.indexOf("history.replaceState(null, '', returnPath)")
-    const reload = transition.indexOf('location.reload()')
-    assert.ok(validation >= 0 && restore > validation && reload > restore)
-    assert.doesNotMatch(transition, /setState\(result\.value\)/)
-  }
+  const loginValidation = login.indexOf('validBootstrap(result.value)')
+  const loginRestore = login.indexOf("result.value.workspace_unlocked ? returnPath : '/agreement'")
+  const loginReload = login.indexOf('location.reload()')
+  assert.ok(loginValidation >= 0 && loginRestore > loginValidation && loginReload > loginRestore)
+  const acceptanceValidation = acceptance.indexOf('validBootstrap(result.value)')
+  const acceptanceRestore = acceptance.indexOf("history.replaceState(null, '', returnPath)")
+  const acceptanceReload = acceptance.indexOf('location.reload()')
+  assert.ok(acceptanceValidation >= 0 && acceptanceRestore > acceptanceValidation && acceptanceReload > acceptanceRestore)
+  assert.match(source, /routePath === '\/login'.*routePath === '\/register'.*routePath === '\/agreement'/u)
+  assert.match(source, /mode === 'unlocked' \|\| mode === 'local'/u)
+  assert.match(source, /if \(mode === 'unlocked' \|\| mode === 'local'\) return undefined/u)
+  assert.doesNotMatch(login, /setState\(result\.value\)/)
+  assert.doesNotMatch(acceptance, /setState\(result\.value\)/)
   assert.match(source, /addEventListener\('popstate', sync\)/)
   assert.match(source, /removeEventListener\('popstate', sync\)/)
 })
@@ -3205,9 +3211,6 @@ test('enterprise identity provider maps target credentials and the production HT
       id: 'gpt-5.6-luna',
       apiMode: 'responses',
       upstreamModelId: 'gpt-5.6-luna',
-      upstreamBaseUrl: 'http://provider.example:8080/v1',
-      allowInsecureHttpUpstream: true,
-      upstreamApiKey: 'runtime-provider-key-not-persisted-here',
       label: 'GPT-5.6 Luna · 最大推理',
       input: ['text', 'image'],
       reasoning: true,
@@ -3229,6 +3232,7 @@ test('enterprise identity provider maps target credentials and the production HT
   let taskAuditBody
   let transportAvailable = true
   let refreshRejected = false
+  let refreshRejectionCode = 'TOKEN_REUSED'
   const json = value => new Response(JSON.stringify(value), {
     status: 200,
     headers: { 'content-type': 'application/json' },
@@ -3277,7 +3281,7 @@ test('enterprise identity provider maps target credentials and the production HT
     if (url.pathname.endsWith('/v1/auth/password')) return json(session)
     if (url.pathname.endsWith('/v1/auth/refresh')) {
       if (refreshRejected) {
-        return new Response(JSON.stringify({ error: { code: 'TOKEN_REUSED' } }), {
+        return new Response(JSON.stringify({ error: { code: refreshRejectionCode } }), {
           status: 401,
           headers: { 'content-type': 'application/json' },
         })
@@ -3433,8 +3437,9 @@ test('enterprise identity provider maps target credentials and the production HT
   assert.equal('image_fallback_upstream_model_id' in modelPolicy, false)
   const runtimePolicy = await provider.modelRuntimePolicy()
   assert.equal(runtimePolicy.models[0].provider, 'e-mate-enterprise')
-  assert.equal(runtimePolicy.models[0].credentialRef, 'E_MATE_MODEL_KEY_GPT')
-  assert.equal(runtimePolicy.models[0].upstreamBaseUrl, 'http://provider.example:8080/v1')
+  assert.equal(runtimePolicy.models[0].credentialRef, MODEL_SESSION_REF)
+  assert.equal(runtimePolicy.models[0].upstreamBaseUrl, 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1')
+  assert.equal('upstreamApiKey' in runtimePolicy.models[0], false)
   assert.deepEqual(runtimePolicy.searchCredentialGrant, runtimePayload.searchCredentialGrant)
   assert.equal(runtimePolicy.policy.allowed_model_ids.includes('deepseek'), false)
   assert.equal(values.has('E_MATE_MODEL_KEY_GPT'), false)
@@ -3455,6 +3460,14 @@ test('enterprise identity provider maps target credentials and the production HT
     assert.equal((await provider.modelRuntimePolicy()).searchCredentialGrant.status, status)
   }
   for (const invalid of [
+    {
+      ...runtimePayload,
+      models: [{
+        ...runtimePayload.models[0],
+        upstreamBaseUrl: 'https://provider.example/v1',
+        upstreamApiKey: 'legacy-direct-provider-key-must-be-rejected',
+      }],
+    },
     { ...runtimePayload, unexpected: true },
     { ...runtimePayload, searchCredentialGrant: { ...runtimePayload.searchCredentialGrant, credentialRef: 'UNMANAGED_KEY' } },
     { ...runtimePayload, searchCredentialGrant: { ...runtimePayload.searchCredentialGrant, status: 'denied' } },
@@ -3462,7 +3475,7 @@ test('enterprise identity provider maps target credentials and the production HT
   ]) {
     runtimeResponse = invalid
     await assert.rejects(provider.modelRuntimePolicy(), error => {
-      assert.match(error.message, /runtime models are invalid|search credential grant is invalid/u)
+      assert.match(error.message, /runtime model(?:s)? (?:are|is) invalid|search credential grant is invalid/u)
       if (/search credential grant is invalid/u.test(error.message)) {
         assert.equal(error.code, 'E_MATE_SEARCH_GRANT_INVALID')
       }
@@ -3568,14 +3581,28 @@ test('enterprise identity provider maps target credentials and the production HT
   transportAvailable = false
   provider = createEnterpriseIdentityProvider(providerOptions)
   const offlineWorkspace = await provider.bootstrap()
-  assert.equal(offlineWorkspace.authenticated, true)
-  assert.equal(offlineWorkspace.workspace_unlocked, true)
+  assert.equal(offlineWorkspace.authenticated, false)
+  assert.equal(offlineWorkspace.workspace_unlocked, false)
   await assert.rejects(provider.modelPolicy(), /企业身份服务暂时不可用/)
   assert.equal(values.has('E_MATE_ENTERPRISE_SESSION'), true)
   transportAvailable = true
+  clock = Date.parse(JSON.parse(values.get('E_MATE_ENTERPRISE_SESSION')).session.expiresAt)
   refreshRejected = true
-  await assert.rejects(provider.bootstrap(), /登录刷新凭据已失效/)
-  assert.equal(values.has('E_MATE_ENTERPRISE_SESSION'), false)
+  refreshRejectionCode = 'TOKEN_REUSED'
+  const refreshRequestsBeforeTerminal = requests.filter(request => request.path.endsWith('/v1/auth/refresh')).length
+  await assert.rejects(provider.bootstrap(), error => {
+    assert.equal(error.code, refreshRejectionCode)
+    assert.match(error.message, /登录刷新凭据已失效/u)
+    return true
+  })
+  assert.equal(
+    requests.filter(request => request.path.endsWith('/v1/auth/refresh')).length,
+    refreshRequestsBeforeTerminal + 1,
+  )
+  for (const ref of ['E_MATE_ENTERPRISE_SESSION', MODEL_SESSION_REF, 'E_MATE_MODEL_KEY_GPT', 'E_MATE_MODEL_KEY_DEEPSEEK', 'E_MATE_MODEL_KEY_DOUBAO']) {
+    assert.equal(values.has(ref), false)
+  }
+  assert.deepEqual(await provider.bootstrap(), { authenticated: false, workspace_unlocked: false })
   refreshRejected = false
   await provider.login({ identifier: 'test.user', password: 'secret-value', remember_login: true })
   values.set('E_MATE_MODEL_KEY_GPT', 'runtime-provider-key-not-persisted-here')
@@ -3769,6 +3796,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
   let projectedSearchKey = 'deepseek-key-redacted-for-test-123'
   let projectedDeepseekChatKey = 'deepseek-chat-key-redacted-for-test-123'
   credentialValues.set('E_MATE_MODEL_KEY_GPT', 'legacy-gpt-key-redacted-for-test-000')
+  credentialValues.set(MODEL_SESSION_REF, 'model.payload.signature')
   const session = {
     current: { provider: 'e-mate-enterprise', model: 'gpt-5.6-luna', reasoningEffort: 'max' },
     messages: [
@@ -3826,7 +3854,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
       models: [
         { id: 'gpt-5.6-luna', name: 'e-Mate Chat' },
         { id: 'gpt-5.6-sol', name: 'e-Mate Sol' },
-        { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Pro' },
+        { id: 'deepseek', name: 'DeepSeek V4 Pro' },
       ],
     }],
     failures: [],
@@ -3945,11 +3973,10 @@ test('enterprise model switch keeps native history and survives a cached-policy 
               {
                 id: 'gpt-5.6-luna',
                 provider: 'e-mate-enterprise',
-                credentialRef: 'E_MATE_MODEL_KEY_GPT',
+                credentialRef: MODEL_SESSION_REF,
                 api: 'openai-responses',
                 upstreamModelId: 'gpt-5.6-luna',
-                upstreamBaseUrl: projectedGptBaseUrl,
-                upstreamApiKey: projectedGptKey,
+                upstreamBaseUrl: 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1',
                 label: 'GPT-5.6 Luna · 最大推理',
                 input: ['text', 'image'],
                 contextWindow: 1_050_000,
@@ -3958,11 +3985,10 @@ test('enterprise model switch keeps native history and survives a cached-policy 
               {
                 id: 'gpt-5.6-sol',
                 provider: 'e-mate-enterprise',
-                credentialRef: 'E_MATE_MODEL_KEY_GPT',
+                credentialRef: MODEL_SESSION_REF,
                 api: 'openai-responses',
                 upstreamModelId: 'gpt-5.6-sol',
-                upstreamBaseUrl: projectedGptBaseUrl,
-                upstreamApiKey: projectedGptKey,
+                upstreamBaseUrl: 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1',
                 label: 'GPT-5.6 Sol · 中等推理',
                 input: ['text', 'image'],
                 contextWindow: 1_050_000,
@@ -3971,11 +3997,10 @@ test('enterprise model switch keeps native history and survives a cached-policy 
               ...(deepseekChatAllowed ? [{
                 id: 'deepseek',
                 provider: 'e-mate-enterprise-deepseek',
-                credentialRef: 'E_MATE_MODEL_KEY_DEEPSEEK',
-                api: 'openai-completions',
-                upstreamModelId: 'deepseek-v4-flash',
-                upstreamBaseUrl: 'https://api.deepseek.com/v1',
-                upstreamApiKey: projectedDeepseekChatKey,
+                credentialRef: MODEL_SESSION_REF,
+                api: 'openai-responses',
+                upstreamModelId: 'deepseek',
+                upstreamBaseUrl: 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1',
                 label: 'DeepSeek V4 Pro · 最大推理',
                 input: ['text'],
                 contextWindow: 131_072,
@@ -4054,18 +4079,19 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     assert.match(records.get('active').policy_sha256, /^[0-9a-f]{64}$/)
     assert.equal(projectionRecords.get('active').search_status, 'granted')
     assert.doesNotMatch(JSON.stringify(projectionRecords.get('active')), /redacted-for-test/u)
-    assert.equal(credentialValues.get('E_MATE_MODEL_KEY_GPT'), 'production-key-redacted-for-test-123')
-    assert.equal(credentialValues.get('E_MATE_MODEL_KEY_DEEPSEEK'), projectedDeepseekChatKey)
+    assert.equal(credentialValues.has('E_MATE_MODEL_KEY_GPT'), false)
+    assert.equal(credentialValues.has('E_MATE_MODEL_KEY_DEEPSEEK'), false)
+    assert.equal(credentialValues.get(MODEL_SESSION_REF), 'model.payload.signature')
     assert.equal(credentialValues.get('E_MATE_SEARCH_KEY_DEEPSEEK'), projectedSearchKey)
-    assert.equal(llmSettings.providers['e-mate-enterprise'].baseURL, 'http://provider.example:8080/v1')
-    assert.equal(llmSettings.providers['e-mate-enterprise'].apiKeyEnv, 'E_MATE_MODEL_KEY_GPT')
+    assert.equal(llmSettings.providers['e-mate-enterprise'].baseURL, 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1')
+    assert.equal(llmSettings.providers['e-mate-enterprise'].apiKeyEnv, MODEL_SESSION_REF)
     assert.deepEqual(
       llmSettings.providers['e-mate-enterprise'].models.map(model => model.id),
       ['gpt-5.6-luna', 'gpt-5.6-sol'],
     )
     assert.deepEqual(
       llmSettings.providers['e-mate-enterprise-deepseek'].models.map(model => model.id),
-      ['deepseek-v4-flash'],
+      ['deepseek'],
     )
     assert.deepEqual(
       llmSettings.providers['e-mate-enterprise'].models.map(model => model.name),
@@ -4077,7 +4103,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
       reasoningEffort: 'max',
     })
     assert.doesNotMatch(JSON.stringify(llmSettings), /redacted-for-test/u)
-    assert.doesNotMatch(JSON.stringify(llmSettings), /model-api/u)
+    assert.doesNotMatch(JSON.stringify(llmSettings), /runtime-provider-key/u)
     assert.equal((await rpc.handler('unknown', {})).error.code, 'bad-request')
 
     const nextGenerationSettings = structuredClone(llmSettings)
@@ -4105,7 +4131,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     settingsRevisions.set('agent-default-model', settingsRevisions.get('agent-default-model') + 1)
     modelPolicyHandlers.get('credentials/updated')('E_MATE_ENTERPRISE_SESSION')
     releaseSupersededWrite()
-    assert.equal((await supersededProjection).revision, 7)
+    await assert.rejects(supersededProjection, /superseded/u)
     assert.deepEqual(llmSettings, nextGenerationSettings)
     assert.deepEqual(defaultModelSettings, nextGenerationDefault)
     for (const ref of [
@@ -4147,7 +4173,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
       started: markCredentialStarted,
       release: new Promise(resolve => { releaseDelayedCredential = resolve }),
     }
-    rejectedCredentialWrite = { ref: 'E_MATE_MODEL_KEY_GPT', value: projectedGptKey }
+    rejectedCredentialWrite = { ref: 'E_MATE_SEARCH_KEY_DEEPSEEK', value: projectedSearchKey }
     const orderedFailure = modelPolicy.refresh({ force: true })
     await credentialStarted
     assert.equal(credentialWriteRejected, false)
@@ -4176,12 +4202,12 @@ test('enterprise model switch keeps native history and survives a cached-policy 
 
     const models = await apiProxy.sessions.models({ rpcId: 'models-1', payload: { sessionId: 'session-1' } })
     assert.deepEqual(models.result.value.groups[0].models.map(model => model.id), [
-      'gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek-v4-flash',
+      'gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek',
     ])
     assert.equal(models.result.value.routable, true)
     const settingsModels = await apiProxy.llm.models({ rpcId: 'models-2', payload: {} })
     assert.deepEqual(settingsModels.result.value.groups[0].models.map(model => model.id), [
-      'gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek-v4-flash',
+      'gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek',
     ])
     const allowed = await apiProxy.sessions.selectModel({
       rpcId: 'select-1', payload: { sessionId: 'session-1', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
@@ -4211,8 +4237,8 @@ test('enterprise model switch keeps native history and survives a cached-policy 
       /not allowed/,
     )
     assert.deepEqual(
-      await requestPolicy({}, async () => ({ provider: 'e-mate-enterprise-deepseek', model: 'deepseek-v4-flash' })),
-      { provider: 'e-mate-enterprise-deepseek', model: 'deepseek-v4-flash' },
+      await requestPolicy({}, async () => ({ provider: 'e-mate-enterprise-deepseek', model: 'deepseek' })),
+      { provider: 'e-mate-enterprise-deepseek', model: 'deepseek' },
     )
     deepseekChatAllowed = false
     await modelPolicy.refresh({ force: true })
@@ -4230,7 +4256,7 @@ test('enterprise model switch keeps native history and survives a cached-policy 
       ['gpt-5.6-luna', 'gpt-5.6-sol'],
     )
     await assert.rejects(
-      requestPolicy({}, async () => ({ provider: 'e-mate-enterprise-deepseek', model: 'deepseek-v4-flash' })),
+      requestPolicy({}, async () => ({ provider: 'e-mate-enterprise-deepseek', model: 'deepseek' })),
       /not allowed/u,
     )
     searchGrantStatus = 'denied'

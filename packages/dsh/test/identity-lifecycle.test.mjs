@@ -2,23 +2,10 @@ import assert from 'node:assert/strict'
 import { generateKeyPairSync } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import {
-  ModuleKind,
-  ScriptTarget,
-  transpileModule,
-} from '../../../upstream/deepseek-harness/node_modules/typescript/lib/typescript.js'
-
-import {
-  CredentialStore,
-  LOGGED_OUT_CREDENTIAL,
-} from '../profile/plugins/credentials-os.js'
-import {
-  apply as applyIdentity,
-  createEnterpriseIdentityProvider,
-  MODEL_SESSION_REF,
-} from '../profile/plugins/identity/index.js'
+import { stripTypeScriptTypes } from 'node:module'
 
 const SESSION_REF = 'E_MATE_ENTERPRISE_SESSION'
+const MODEL_SESSION_REF = 'E_MATE_MODEL_SESSION_TOKEN'
 const MANAGED_REFS = [
   SESSION_REF,
   MODEL_SESSION_REF,
@@ -100,9 +87,7 @@ async function loadModelPolicySource() {
     )
     .replace('function createService(ctx, table, projectionTable, quota)',
       'export function createService(ctx, table, projectionTable, quota)')
-  const compiled = transpileModule(source, {
-    compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 },
-  }).outputText
+  const compiled = stripTypeScriptTypes(source, { mode: 'transform' })
   return import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)
 }
 
@@ -121,11 +106,38 @@ async function loadEnterpriseProviderSource() {
     )
     .replace('function policyFor(value: StoredSession, runtime: readonly RuntimeModel[])',
       'export function policyFor(value: StoredSession, runtime: readonly RuntimeModel[])')
-  const compiled = transpileModule(source, {
-    compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 },
-  }).outputText
+  const compiled = stripTypeScriptTypes(source, { mode: 'transform' })
   return import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)
 }
+
+async function loadCredentialsSource() {
+  const source = readFileSync(new URL('../src/profile/credentials-os.ts', import.meta.url), 'utf8')
+    .replace(
+      "import { loadTargetCredentials } from './target-runtime.js'",
+      "const loadTargetCredentials = () => { throw new Error('unused in lifecycle test') }",
+    )
+  const compiled = stripTypeScriptTypes(source, { mode: 'transform' })
+  return import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)
+}
+
+async function loadIdentitySource() {
+  const source = readFileSync(new URL('../src/profile/identity/index.ts', import.meta.url), 'utf8')
+    .replace(
+      /import \{[\s\S]*?\} from '\.\/agreements\.js'/u,
+      "const agreementBundleSha256 = ''; const requiredAcknowledgements = []; const describeAgreements = () => ({ ready: true, bundle_sha256: '', required_acknowledgements: [], acknowledgements: [], documents: [] })",
+    )
+    .replace(
+      /import \{[\s\S]*?\} from '\.\/enterprise-provider\.js'/u,
+      "class IdentityServiceUnavailable extends Error { static [Symbol.hasInstance](value) { return value?.constructor?.name === 'IdentityServiceUnavailable' } }; const createEnterpriseIdentityProvider = () => { throw new Error('unused in lifecycle test') }; const loginRejectionMessage = () => undefined; const registrationRejectionMessage = () => undefined",
+    )
+    .replace(/export \{[^}]+\} from '\.\/enterprise-provider\.js'/u, '')
+  const compiled = stripTypeScriptTypes(source, { mode: 'transform' })
+  return import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)
+}
+
+const { CredentialStore, LOGGED_OUT_CREDENTIAL } = await loadCredentialsSource()
+const { createEnterpriseIdentityProvider } = await loadEnterpriseProviderSource()
+const { apply: applyIdentity } = await loadIdentitySource()
 
 test('remembered lease load is retryable and refresh retries reuse one opaque request id', async () => {
   let failProjection = true
@@ -170,6 +182,73 @@ test('remembered lease load is retryable and refresh retries reuse one opaque re
   assert.equal(new Set(refreshIds).size, 1)
   assert.match(refreshIds[0], /^refresh-v1-[A-Za-z0-9_-]{43}$/u)
   assert.equal(JSON.parse(values.get(SESSION_REF)).session.sessionId, 'session-b')
+})
+
+test('expired remembered identity stays locally available but cannot claim enterprise authentication', async () => {
+  const { createEnterpriseIdentityProvider: createProvider } = await loadEnterpriseProviderSource()
+  const values = new Map([[SESSION_REF, stored()]])
+  const provider = createProvider(options(mapCredentials(values), async () => { throw new Error('control plane offline') }, () => NOW + 3_600_001))
+  assert.deepEqual(await provider.bootstrap(), { authenticated: false, workspace_unlocked: false })
+  await assert.rejects(provider.modelRuntimePolicy(), /暂时不可用/u)
+  assert.equal(values.has(SESSION_REF), true, 'nonauthoritative remembered metadata may remain refreshable')
+})
+
+test('a valid model lease reaches the live Gateway during control outage but not at expiry', async () => {
+  const { createEnterpriseIdentityProvider: createProvider } = await loadEnterpriseProviderSource()
+  let clock = NOW
+  const remembered = JSON.parse(stored())
+  remembered.session.modelGateway.expiresAt = new Date(NOW + 30_000).toISOString()
+  const values = new Map([[SESSION_REF, JSON.stringify(remembered)], [MODEL_SESSION_REF, 'model.payload.signature']])
+  let gatewayRequests = 0
+  const provider = createProvider(options(mapCredentials(values), async input => {
+    const path = new URL(input).pathname
+    if (path.endsWith('/v1/auth/refresh')) throw new Error('control plane offline')
+    assert.equal(path.endsWith('/v1/runtime-models'), true)
+    gatewayRequests += 1
+    return Response.json({
+      schemaVersion: 1,
+      models: [{
+        id: 'gpt-5.6-luna', apiMode: 'responses', upstreamModelId: 'gpt-5.6-luna',
+        label: 'GPT-5.6 Luna', input: ['text', 'image'], reasoning: true,
+        contextWindow: 1_050_000, maxTokens: 128_000,
+      }],
+      searchCredentialGrant: {
+        schemaVersion: 1, status: 'denied', purpose: 'web-search',
+        provider: 'deepseek-official', credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+      },
+    })
+  }, () => clock))
+
+  const live = await provider.modelRuntimePolicy()
+  assert.equal(live.models[0].credentialRef, MODEL_SESSION_REF)
+  assert.equal(live.models[0].upstreamBaseUrl, 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1')
+  assert.equal('upstreamApiKey' in live.models[0], false)
+  assert.equal(gatewayRequests, 1)
+
+  clock = NOW + 30_000
+  await assert.rejects(provider.modelRuntimePolicy(), /暂时不可用/u)
+  assert.equal(gatewayRequests, 1)
+})
+
+test('terminal refresh revocation clears every managed ref before access expiry', async () => {
+  const { createEnterpriseIdentityProvider: createProvider } = await loadEnterpriseProviderSource()
+  for (const code of ['INVALID_GRANT', 'SESSION_REVOKED', 'TOKEN_REUSED']) {
+    const remembered = JSON.parse(stored())
+    remembered.session.modelGateway.expiresAt = new Date(NOW + 30_000).toISOString()
+    const values = new Map(MANAGED_REFS.map(ref => [ref, ref === SESSION_REF ? JSON.stringify(remembered) : `managed-${ref}`]))
+    const provider = createProvider(options(mapCredentials(values), async input => {
+      assert.equal(new URL(input).pathname.endsWith('/v1/auth/refresh'), true)
+      return new Response(JSON.stringify({ error: { code } }), {
+        status: 401, headers: { 'content-type': 'application/json' },
+      })
+    }))
+    await assert.rejects(provider.bootstrap(), error => {
+      assert.equal(error.code, code)
+      return true
+    })
+    assert.equal(values.size, 0)
+    assert.deepEqual(await provider.bootstrap(), { authenticated: false, workspace_unlocked: false })
+  }
 })
 
 test('logout clears all six local refs before the network and only a valid receipt proves remote revocation', async () => {
@@ -656,20 +735,21 @@ test('client and enterprise identity image policies expose only gpt-image-2-pro 
 
 test('identity credential generation fences a late runtime projection without permanently dropping models', async () => {
   const { createService } = await loadModelPolicySource()
-  const credentials = new Map()
+  const credentials = new Map([[MODEL_SESSION_REF, 'model.payload.signature']])
   const policyRecords = new Map()
   const projectionRecords = new Map()
   const settings = new Map()
+  let failDefaultModelWrite = false
   const settingRevisions = new Map([
     ['llm-pi-ai', 0],
     ['agent-default-model', 0],
   ])
   const handlers = new Map()
-  let releaseSearch
-  let markSearchStarted
-  let delaySearch = true
-  const searchStarted = new Promise(resolve => { markSearchStarted = resolve })
-  const searchGate = new Promise(resolve => { releaseSearch = resolve })
+  let releaseCatalog
+  let markCatalogStarted
+  const catalogStarted = new Promise(resolve => { markCatalogStarted = resolve })
+  const catalogGate = new Promise(resolve => { releaseCatalog = resolve })
+  let catalogDelay = { started: markCatalogStarted, wait: catalogGate }
   const now = Date.now()
   const policy = {
     schema_version: 1,
@@ -688,11 +768,10 @@ test('identity credential generation fences a late runtime projection without pe
     models: [{
       id: 'gpt-5.6-luna',
       provider: 'e-mate-enterprise',
-      credentialRef: 'E_MATE_MODEL_KEY_GPT',
+      credentialRef: MODEL_SESSION_REF,
       api: 'openai-responses',
       upstreamModelId: 'gpt-5.6-luna',
-      upstreamBaseUrl: 'https://provider.example/v1',
-      upstreamApiKey: 'runtime-model-key-redacted-for-test',
+      upstreamBaseUrl: 'https://mvdcm.ecoremedia.net/e-mate/model-api/v1',
       label: 'GPT-5.6 Luna',
       input: ['text', 'image'],
       contextWindow: 1_050_000,
@@ -717,21 +796,20 @@ test('identity credential generation fences a late runtime projection without pe
       }),
       modelRuntimePolicy: async () => {
         if (runtimeOffline) throw new Error('simulated offline runtime policy')
-        return structuredClone(runtime)
+        const response = structuredClone(runtime)
+        const delay = catalogDelay
+        catalogDelay = undefined
+        if (delay !== undefined) {
+          delay.started()
+          await delay.wait
+        }
+        return response
       },
       localAccountSubject: () => policy.account_subject,
     },
     credentials: {
       resolve: async ref => credentials.has(ref) ? { value: credentials.get(ref), source: 'test' } : undefined,
-      set: async (ref, value) => {
-        if (delaySearch && ref === 'E_MATE_SEARCH_KEY_DEEPSEEK'
-          && value === runtime.searchCredentialGrant.upstreamApiKey) {
-          delaySearch = false
-          markSearchStarted()
-          await searchGate
-        }
-        credentials.set(ref, value)
-      },
+      set: async (ref, value) => { credentials.set(ref, value) },
       unset: async ref => { credentials.delete(ref) },
     },
     settings: {
@@ -739,6 +817,10 @@ test('identity credential generation fences a late runtime projection without pe
       describe: () => [...settingRevisions].map(([ns, revision]) => ({ ns, revision })),
       replace: async (name, value, revision) => {
         assert.equal(revision, settingRevisions.get(name))
+        if (name === 'agent-default-model' && failDefaultModelWrite) {
+          failDefaultModelWrite = false
+          throw new Error('simulated default model failure')
+        }
         settings.set(name, structuredClone(value))
         settingRevisions.set(name, revision + 1)
       },
@@ -770,16 +852,32 @@ test('identity credential generation fences a late runtime projection without pe
 
   const lateProjection = service.refresh({ force: true })
   const lateRejected = assert.rejects(lateProjection, /superseded/u)
-  await searchStarted
+  await catalogStarted
   handlers.get('credentials/updated')(SESSION_REF)
-  credentials.clear()
-  releaseSearch()
+  releaseCatalog()
   await lateRejected
   for (const ref of MANAGED_REFS.slice(2)) assert.equal(credentials.has(ref), false)
+  assert.equal(credentials.get(MODEL_SESSION_REF), 'model.payload.signature')
   assert.equal(projectionRecords.has('active'), false)
 
+  settings.set('llm-pi-ai', {
+    providers: { legacy: { apiKeyEnv: 'E_MATE_MODEL_KEY_GPT', baseURL: 'https://provider.example/v1' } },
+  })
+  for (const ref of ['E_MATE_MODEL_KEY_GPT', 'E_MATE_MODEL_KEY_DEEPSEEK', 'E_MATE_MODEL_KEY_DOUBAO']) {
+    credentials.set(ref, `obsolete-${ref}`)
+  }
+  failDefaultModelWrite = true
+  await assert.rejects(service.refresh({ force: true }), /default model failure/u)
+  assert.deepEqual(settings.get('llm-pi-ai'), { providers: {} })
+  for (const ref of ['E_MATE_MODEL_KEY_GPT', 'E_MATE_MODEL_KEY_DEEPSEEK', 'E_MATE_MODEL_KEY_DOUBAO']) {
+    assert.equal(credentials.has(ref), false)
+  }
+
   assert.equal((await service.refresh({ force: true })).revision, 1)
-  assert.equal(credentials.get('E_MATE_MODEL_KEY_GPT'), runtime.models[0].upstreamApiKey)
+  for (const ref of ['E_MATE_MODEL_KEY_GPT', 'E_MATE_MODEL_KEY_DEEPSEEK', 'E_MATE_MODEL_KEY_DOUBAO']) {
+    assert.equal(credentials.has(ref), false)
+  }
+  assert.equal(credentials.get(MODEL_SESSION_REF), 'model.payload.signature')
   assert.equal(credentials.get('E_MATE_SEARCH_KEY_DEEPSEEK'), runtime.searchCredentialGrant.upstreamApiKey)
   assert.deepEqual(settings.get('llm-pi-ai').providers['e-mate-enterprise'].models[0].input, ['text', 'image'])
   assert.deepEqual(await service.imageInputContract('e-mate-enterprise', 'gpt-5.6-luna'), {
@@ -798,7 +896,7 @@ test('identity credential generation fences a late runtime projection without pe
   }
   await service.refresh({ force: true })
   assert.equal(credentials.has('E_MATE_SEARCH_KEY_DEEPSEEK'), false)
-  assert.equal(credentials.get('E_MATE_MODEL_KEY_GPT'), runtime.models[0].upstreamApiKey)
+  assert.equal(credentials.has('E_MATE_MODEL_KEY_GPT'), false)
   assert.equal(projectionRecords.get('active').search_status, 'denied')
 
   runtime.policy.revision = 3
@@ -809,5 +907,55 @@ test('identity credential generation fences a late runtime projection without pe
   runtimeOffline = true
   assert.equal((await service.refresh({ force: true })).revision, 3)
   assert.equal(credentials.has('E_MATE_SEARCH_KEY_DEEPSEEK'), false)
-  assert.equal(credentials.get('E_MATE_MODEL_KEY_GPT'), runtime.models[0].upstreamApiKey)
+  assert.equal(credentials.has('E_MATE_MODEL_KEY_GPT'), false)
+  runtimeOffline = false
+
+  let releaseSupersededCatalog
+  let markSupersededCatalogStarted
+  const supersededCatalogStarted = new Promise(resolve => { markSupersededCatalogStarted = resolve })
+  catalogDelay = {
+    started: markSupersededCatalogStarted,
+    wait: new Promise(resolve => { releaseSupersededCatalog = resolve }),
+  }
+  const staleA = service.refresh({ force: true })
+  await supersededCatalogStarted
+  policy.account_subject = 'account:next-user'
+  policy.revision = 4
+  policy.receipt_id = 'policy-receipt:next-user'
+  handlers.get('credentials/updated')(SESSION_REF)
+  const freshB = service.refresh({ force: true })
+  releaseSupersededCatalog()
+  await assert.rejects(staleA, /superseded/u)
+  const b = await freshB
+  assert.equal(b.account_subject, 'account:next-user')
+  assert.equal(policyRecords.get('active').account_subject, 'account:next-user')
+
+  const originalNow = Date.now
+  let clock = now
+  Date.now = () => clock
+  try {
+    policy.revision = 5
+    policy.issued_at = new Date(clock - 1_000).toISOString()
+    policy.expires_at = new Date(clock + 1_000).toISOString()
+    await service.refresh({ force: true })
+    assert.equal(policyRecords.get('active').revision, 5)
+
+    let releaseExpiringCatalog
+    let markExpiringCatalogStarted
+    const expiringCatalogStarted = new Promise(resolve => { markExpiringCatalogStarted = resolve })
+    catalogDelay = {
+      started: markExpiringCatalogStarted,
+      wait: new Promise(resolve => { releaseExpiringCatalog = resolve }),
+    }
+    policy.revision = 6
+    const expiring = service.refresh({ force: true })
+    await expiringCatalogStarted
+    clock += 1_000
+    releaseExpiringCatalog()
+    await assert.rejects(expiring, /lifetime is invalid/u)
+    assert.equal(policyRecords.get('active').revision, 5)
+    assert.equal(projectionRecords.get('active').policy_revision, 5)
+  } finally {
+    Date.now = originalNow
+  }
 })

@@ -56,6 +56,8 @@ async function createActiveTestUsers(
       ALTER TABLE e_mate_tenant_user
         ADD COLUMN IF NOT EXISTS token_limit bigint;
       ALTER TABLE e_mate_tenant_user
+        ADD COLUMN IF NOT EXISTS allowed_model_ids text[] NOT NULL DEFAULT ARRAY[]::text[];
+      ALTER TABLE e_mate_tenant_user
         DROP CONSTRAINT IF EXISTS e_mate_tenant_user_status_check;
       ALTER TABLE e_mate_tenant_user
         ADD CONSTRAINT e_mate_tenant_user_status_check
@@ -89,6 +91,82 @@ async function createActiveTestUsers(
     )
   );
 }
+
+test('activeModelIds preserves signed order, returns empty for no active row, and rejects invalid/failing DB reads', async () => {
+  let response: { rows: Array<{ model_ids: unknown }> } | Error = { rows: [{ model_ids: ['gpt-5.6-sol'] }] };
+  const calls: unknown[][] = [];
+  const store = new PostgresUsageStore({
+    query: async (_statement: string, parameters: unknown[]) => {
+      calls.push(parameters);
+      if (response instanceof Error) throw response;
+      return response;
+    },
+  } as never, limits);
+  const principal = { tenantId: 'tenant-a', userId: 'user-a', modelIds: ['gpt-5.6-luna', 'gpt-5.6-sol'] };
+
+  assert.deepEqual(await store.activeModelIds(principal, ['gpt-5.6-luna', 'gpt-5.6-sol']), ['gpt-5.6-sol']);
+  assert.deepEqual(calls, [['tenant-a', 'user-a', ['gpt-5.6-luna', 'gpt-5.6-sol']]]);
+  response = { rows: [] };
+  assert.deepEqual(await store.activeModelIds(principal, ['gpt-5.6-luna']), []);
+  response = { rows: [{ model_ids: ['outside-signed-scope'] }] };
+  await assert.rejects(store.activeModelIds(principal, ['gpt-5.6-luna']), /User model policy was unavailable/);
+  response = { rows: [{ model_ids: ['gpt-5.6-luna', 'gpt-5.6-luna'] }] };
+  await assert.rejects(store.activeModelIds(principal, ['gpt-5.6-luna']), /User model policy was unavailable/);
+  response = new Error('database unavailable');
+  await assert.rejects(store.activeModelIds(principal, ['gpt-5.6-luna']), /database unavailable/);
+});
+
+test(
+  'real PostgreSQL applies active model-list changes to fresh reads without expanding caller scope',
+  { skip: databaseUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set' },
+  async () => {
+    const suffix = randomUUID();
+    const tenantId = `model-scope-${suffix}`;
+    const userId = `user-${suffix}`;
+    const database = pool();
+    const principal: ModelGatewayPrincipal = {
+      tenantId, userId, modelIds: ['gpt-5.6-luna', 'gpt-5.6-sol'],
+    };
+    try {
+      await createActiveTestUsers(database, [{ tenantId, userId }]);
+      await database.query(
+        'UPDATE e_mate_tenant_user SET allowed_model_ids = $3 WHERE tenant_id = $1 AND user_id = $2',
+        [tenantId, userId, ['gpt-5.6-luna', 'gpt-5.6-sol']]
+      );
+      const store = new PostgresUsageStore(database, limits);
+      assert.deepEqual(
+        await store.activeModelIds(principal, ['gpt-5.6-sol', 'gpt-5.6-luna']),
+        ['gpt-5.6-sol', 'gpt-5.6-luna']
+      );
+
+      await database.query(
+        'UPDATE e_mate_tenant_user SET allowed_model_ids = $3 WHERE tenant_id = $1 AND user_id = $2',
+        [tenantId, userId, ['gpt-5.6-sol']]
+      );
+      assert.deepEqual(await store.activeModelIds(principal, ['gpt-5.6-luna', 'gpt-5.6-sol']), ['gpt-5.6-sol']);
+      await database.query(
+        "UPDATE e_mate_tenant_user SET status = 'SUSPENDED' WHERE tenant_id = $1 AND user_id = $2",
+        [tenantId, userId]
+      );
+      assert.deepEqual(await store.activeModelIds(principal, ['gpt-5.6-sol']), []);
+      await database.query('DELETE FROM e_mate_tenant_user WHERE tenant_id = $1 AND user_id = $2', [tenantId, userId]);
+      assert.deepEqual(await store.activeModelIds(principal, ['gpt-5.6-sol']), []);
+
+      await createActiveTestUsers(database, [{ tenantId, userId }]);
+      await database.query(
+        'UPDATE e_mate_tenant_user SET allowed_model_ids = $3 WHERE tenant_id = $1 AND user_id = $2',
+        [tenantId, userId, ['gpt-5.6-luna']]
+      );
+      const freshStore = new PostgresUsageStore(database, limits);
+      assert.deepEqual(await freshStore.activeModelIds(
+        principal, ['gpt-5.6-sol', 'gpt-5.6-luna']
+      ), ['gpt-5.6-luna']);
+    } finally {
+      await database.query('DELETE FROM e_mate_tenant_user WHERE tenant_id = $1 AND user_id = $2', [tenantId, userId]).catch(() => undefined);
+      await database.end().catch(() => undefined);
+    }
+  }
+);
 
 test(
   'real PostgreSQL accepts the task scenario contract while freezing each task classification',

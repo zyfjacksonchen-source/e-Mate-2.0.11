@@ -124,7 +124,7 @@ function parseClaims(value: Record<string, unknown>, policy: SessionTokenPolicy)
     (value.nbf as number) > now + skew ||
     Math.abs((value.nbf as number) - (value.iat as number)) > skew ||
     (value.nbf as number) >= (value.exp as number) ||
-    (value.exp as number) <= now - skew ||
+    (value.exp as number) <= now ||
     (value.exp as number) <= (value.iat as number) ||
     (value.exp as number) - (value.iat as number) > maximumLifetime
   ) {

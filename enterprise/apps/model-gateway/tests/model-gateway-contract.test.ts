@@ -164,6 +164,7 @@ test('production authentication rejects a signed session immediately after its s
   const authenticate = createProductionAuthenticator(
     async (token) => (token === sessionToken ? signedPrincipal : null),
     policy,
+    { activeModelIds: async (principal: ModelGatewayPrincipal) => principal.modelIds } as never,
     [route.id]
   );
 
@@ -185,6 +186,37 @@ test('production authentication rejects a signed session immediately after its s
   );
 });
 
+test('production authentication intersects signed scope with live user models and callable routes', async () => {
+  let signedModelIds = ['gpt-5.6-luna'];
+  let liveModelIds = ['gpt-5.6-luna', 'gpt-5.6-sol'];
+  const scopes: string[][] = [];
+  const authenticate = createProductionAuthenticator(
+    async () => ({
+      tenantId: 'tenant-a', userId: 'user-a', modelIds: [...signedModelIds], sessionId: 'session-1',
+    }),
+    { isUserSessionActive: async () => true } as never,
+    { activeModelIds: async (_principal: ModelGatewayPrincipal, routeIds: readonly string[]) => {
+      scopes.push([...routeIds]);
+      return routeIds.filter((routeId) => liveModelIds.includes(routeId));
+    } } as never,
+    ['gpt-5.6-luna', 'gpt-5.6-sol']
+  );
+
+  assert.deepEqual((await authenticate(sessionToken))?.modelIds, ['gpt-5.6-luna']);
+  liveModelIds = ['gpt-5.6-sol'];
+  assert.equal(await authenticate(sessionToken), null);
+  signedModelIds = ['gpt-5.6-luna', 'gpt-5.6-sol'];
+  assert.deepEqual((await authenticate(sessionToken))?.modelIds, ['gpt-5.6-sol']);
+  liveModelIds = [];
+  assert.equal(await authenticate(sessionToken), null);
+  assert.deepEqual(scopes, [
+    ['gpt-5.6-luna'],
+    ['gpt-5.6-luna'],
+    ['gpt-5.6-luna', 'gpt-5.6-sol'],
+    ['gpt-5.6-luna', 'gpt-5.6-sol'],
+  ]);
+});
+
 test('production client authentication never authorizes the search credential route as a model', async () => {
   const allowedRouteIds: string[][] = [];
   const authenticate = createProductionAuthenticator(
@@ -195,6 +227,7 @@ test('production client authentication never authorizes the search credential ro
         return null;
       },
     } as never,
+    { activeModelIds: async () => [] } as never,
     [route.id, searchCredentialRoute.id]
   );
 
@@ -3139,8 +3172,6 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         id: luna.id,
         apiMode: 'responses',
         upstreamModelId: luna.upstreamModelId,
-        upstreamBaseUrl: luna.upstreamBaseUrl,
-        upstreamApiKey: tenantKey,
         label: luna.label,
         input: luna.input,
         reasoning: true,
@@ -3166,7 +3197,9 @@ test('delivers only the authenticated tenant runtime model routes without exposi
     }
     assert.equal(enabledCalls.get(searchCredentialRoute.id), 5);
     assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 5);
+    assert.equal(keyCalls.includes(luna.id), false);
     assert.equal(keyCalls.includes(internalDeepSeekRoute.id), false);
+    assert.doesNotMatch(JSON.stringify(releasedClientBody.models), /provider-key|provider\.example/u);
     const catalogResponse = await (await fetch(`${baseUrl}/v1/models`, { headers: auth() })).json() as {
       models: Array<{ id: string }>;
     };
