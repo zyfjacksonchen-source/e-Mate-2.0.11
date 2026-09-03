@@ -852,3 +852,126 @@ test(
     }
   }
 );
+
+test(
+  'real PostgreSQL rolls back injected prepare, complete, and finalize transaction failures',
+  { skip: databaseUrl ? false : 'E_MATE_TEST_POSTGRES_URL is not set' },
+  async () => {
+    const suffix = randomUUID();
+    const tenantId = `usage-fault-${suffix}`;
+    const userId = `user-${suffix}`;
+    const taskId = `image-task-${suffix}`;
+    const database = pool();
+    const principal: ModelGatewayPrincipal = { tenantId, userId, modelIds: ['gpt-image-2-pro'] };
+    const invocation: InvocationFact = {
+      tenantId,
+      userId,
+      taskId,
+      traceId: `image-trace-${suffix}`,
+      modelId: 'gpt-image-2-pro',
+      providerId: 'custom-gpt',
+      requestDigest: 'I'.repeat(43),
+      routeFingerprint: 'F'.repeat(43),
+    };
+    const usage: UsageFact = {
+      tenantId,
+      userId,
+      taskId,
+      traceId: invocation.traceId,
+      modelId: invocation.modelId,
+      providerId: invocation.providerId,
+      providerResponseId: `image-response-${suffix}`,
+      inputTokens: 3,
+      outputTokens: 7,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 0,
+    };
+
+    const faultingStore = (needle: RegExp) => new PostgresUsageStore({
+      connect: async () => {
+        const client = await database.connect();
+        let injected = false;
+        return {
+          query: async (...args: Parameters<typeof client.query>) => {
+            const result = await client.query(...args);
+            const statement = typeof args[0] === 'string' ? args[0].replace(/\s+/g, ' ').trim() : '';
+            if (!injected && needle.test(statement)) {
+              injected = true;
+              throw new Error('injected transaction failure');
+            }
+            return result;
+          },
+          release: () => client.release(),
+        };
+      },
+    } as never, limits);
+
+    const state = async () => (await database.query<{
+      tasks: string;
+      attempts: string;
+      invocations: string;
+      prepared: string;
+      completed: string;
+      finalized: string;
+    }>(`
+      SELECT
+        (SELECT count(*) FROM e_mate_model_usage_task WHERE tenant_id = $1 AND task_id = $2)::text AS tasks,
+        (SELECT count(*) FROM e_mate_model_usage_attempt WHERE tenant_id = $1 AND task_id = $2)::text AS attempts,
+        (SELECT count(*) FROM e_mate_model_invocation WHERE tenant_id = $1 AND task_id = $2)::text AS invocations,
+        (SELECT count(*) FROM e_mate_model_invocation WHERE tenant_id = $1 AND task_id = $2 AND status = 'PREPARED')::text AS prepared,
+        (SELECT count(*) FROM e_mate_model_invocation WHERE tenant_id = $1 AND task_id = $2 AND status = 'COMPLETED')::text AS completed,
+        (SELECT count(*) FROM e_mate_model_usage_task WHERE tenant_id = $1 AND task_id = $2 AND status = 'FINALIZED')::text AS finalized
+    `, [tenantId, taskId])).rows[0];
+
+    try {
+      const store = new PostgresUsageStore(database, limits);
+      await store.initialize();
+      await createActiveTestUsers(database, [{ tenantId, userId }]);
+
+      await assert.rejects(
+        faultingStore(/^INSERT INTO e_mate_model_invocation /).prepare(invocation),
+        /injected transaction failure/
+      );
+      assert.deepEqual(await state(), {
+        tasks: '0', attempts: '0', invocations: '0', prepared: '0', completed: '0', finalized: '0',
+      });
+
+      const prepared = await store.prepare(invocation);
+      await assert.rejects(
+        faultingStore(/^UPDATE e_mate_model_invocation SET status = 'COMPLETED'/).complete(prepared.invocationId, usage),
+        /injected transaction failure/
+      );
+      assert.deepEqual(await state(), {
+        tasks: '1', attempts: '0', invocations: '1', prepared: '1', completed: '0', finalized: '0',
+      });
+
+      await new PostgresUsageStore(database, limits).complete(prepared.invocationId, usage);
+      await assert.rejects(
+        faultingStore(/^UPDATE e_mate_model_usage_task SET status = 'FINALIZED'/).finalize(principal, taskId),
+        /injected transaction failure/
+      );
+      assert.deepEqual(await state(), {
+        tasks: '1', attempts: '1', invocations: '1', prepared: '0', completed: '1', finalized: '0',
+      });
+
+      const restarted = new PostgresUsageStore(database, limits);
+      assert.equal((await restarted.prepare(invocation)).status, 'RECORDED');
+      const [first, second] = await Promise.all([
+        restarted.finalize(principal, taskId),
+        restarted.finalize(principal, taskId),
+      ]);
+      assert(first && second);
+      assert.equal(second.usageId, first.usageId);
+      assert.equal(second.inputTokens + second.outputTokens, 10);
+      assert.deepEqual(await state(), {
+        tasks: '1', attempts: '1', invocations: '1', prepared: '0', completed: '1', finalized: '1',
+      });
+    } finally {
+      await database.query('DELETE FROM e_mate_model_usage_task WHERE tenant_id = $1', [tenantId]).catch(() => undefined);
+      await database.query('DELETE FROM e_mate_model_quota_state WHERE tenant_id = $1', [tenantId]).catch(() => undefined);
+      await database.query('DELETE FROM e_mate_tenant_user WHERE tenant_id = $1 AND user_id = $2', [tenantId, userId]).catch(() => undefined);
+      await database.end().catch(() => undefined);
+    }
+  }
+);
