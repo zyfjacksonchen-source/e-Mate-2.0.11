@@ -103,6 +103,22 @@ test('resolved Harness modules use source builds and file URLs for Windows ESM i
   join(root, 'packages', 'storage', 'storage-domain', 'lib', 'index.js'))
 })
 
+test('Computer Use composes one cross-platform Profile row without a candidate plugin layer', () => {
+  const root = new URL('../../dsh-plugin-computer-use/', import.meta.url)
+  const patchSource = readFileSync(new URL('cordis.patch.yml', root), 'utf8')
+  const patch = parseYaml(patchSource)
+  assert.match(patchSource, /process\.platform === 'win32' \? 'hidden' : 'visible'/u)
+  const build = readFileSync(new URL('scripts/build.mjs', root), 'utf8')
+  assert.doesNotMatch(build, /executablePath\?: string|processStartTime\?: string|windowId\?: number/u)
+  const rows = patch.flatMap(entry => entry.insert ?? []).filter(entry => entry.id === 'emate-computer-use')
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].name, '@e-mate/dsh-plugin-computer-use')
+  const source = readFileSync(new URL('src/windows.ts', root), 'utf8')
+  for (const excluded of ['upstream/plugins/computer-user/src/index.js', 'computer_set_mode', 'node:child_process']) {
+    assert.equal(source.includes(excluded), false)
+  }
+})
+
 test('validated identity transitions restore the protected route before reloading one enterprise snapshot', () => {
   const source = readFileSync(new URL('../profile/plugins/emate-shell/src/client/identity.tsx', import.meta.url), 'utf8')
   const login = source.slice(source.indexOf('  const login = async'), source.indexOf('  const issueChallenge'))

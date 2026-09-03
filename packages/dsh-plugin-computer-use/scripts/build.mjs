@@ -20,12 +20,17 @@ for (const name of ['lib', 'assets', 'docs']) {
   await cp(join(upstream, name), join(root, name), { recursive: true })
 }
 if (process.platform === 'darwin') {
-  await rm(join(root, 'native'), { recursive: true, force: true })
-  await cp(join(upstream, 'native'), join(root, 'native'), { recursive: true })
+  await rm(join(root, 'native/macos'), { recursive: true, force: true })
+  await cp(join(upstream, 'native/macos'), join(root, 'native/macos'), { recursive: true })
 }
 await mkdir(join(root, 'scripts'), { recursive: true })
 await cp(join(upstream, 'scripts/build-native.mjs'), join(root, 'scripts/build-native.mjs'))
-await cp(join(upstream, 'LICENSE'), join(root, 'LICENSE'))
+const windowsManifest = JSON.parse(await readFile(join(root, 'native/windows/manifest.json'), 'utf8'))
+const windowsHelper = await readFile(join(root, 'native/windows/dsh-computer-use-helper.ps1'))
+if (windowsManifest.schemaVersion !== 1 || windowsManifest.source?.path !== 'dsh-computer-use-helper.ps1'
+  || windowsManifest.source.sha256 !== createHash('sha256').update(windowsHelper).digest('hex')) {
+  throw new Error('Windows helper integrity manifest mismatch')
+}
 if (process.platform === 'darwin') {
   const helper = join(root, 'native/macos/bin/dsh-computer-use-helper')
   const nativeManifestPath = join(root, 'native/macos/manifest.json')
@@ -149,13 +154,33 @@ For every webpage read or operation, use the CDP browser tools first.
 If a Computer Use Tool fails or its post-action state is not verified, report
 that failure or uncertainty; never claim the requested UI action succeeded.
 
-Use this capability only for a local macOS application UI that has no narrower,`,
+Use this capability only for a local application UI that has no narrower,`,
   'Computer Use Skill selection rule',
 )
 await writeFile(skillPath, skill)
 
+const runtimeSource = join(root, '.runtime-source')
+const runtimeBundle = join(root, '.runtime-bundle')
+try {
+await mkdir(runtimeSource, { recursive: true })
+await writeFile(join(runtimeSource, 'windows.ts'), (await readText(join(root, 'src/windows.ts')))
+  .replace('../../../upstream/plugins/dsh-computer-use/lib/errors.js', '../lib/errors.js'))
+const providerPath = join(root, 'lib/providers/macos.js')
+let provider = await readText(providerPath)
+provider = replaceExactlyOnce(provider, `import { NativeHelperClient } from "./native-helper.js";`, `import { NativeHelperClient } from "./native-helper.js";
+import { WindowsBackend } from "../../.runtime-source/windows.ts";`, 'Windows backend import')
+provider = replaceExactlyOnce(provider, `        if (process.platform !== 'darwin') {
+            throw new ComputerUseError('COMPUTER_UNSUPPORTED_PLATFORM', \`dsh-computer-use 0.1.0 supports macOS only; current platform is ${'${process.platform}'}\`);
+        }`, `        if (process.platform !== 'darwin' && process.platform !== 'win32') {
+            throw new ComputerUseError('COMPUTER_UNSUPPORTED_PLATFORM', \`Computer Use supports darwin and win32; current platform is ${'${process.platform}'}\`);
+        }`, 'provider platform gate')
+provider = replaceExactlyOnce(provider, `        super(ctx, new MacOSBackend(ctx, resolved), resolved);`, `        super(ctx, process.platform === 'darwin' ? new MacOSBackend(ctx, resolved) : new WindowsBackend(ctx, resolved), resolved);`, 'provider platform selection')
+provider = replaceExactlyOnce(provider, `            const backend = new MacOSBackend(ctx, candidate);`, `            const backend = process.platform === 'darwin' ? new MacOSBackend(ctx, candidate) : new WindowsBackend(ctx, candidate);`, 'provider reconfiguration selection')
+await writeFile(providerPath, provider)
+
 const servicePath = join(root, 'lib/service.js')
 let service = await readText(servicePath)
+service = replaceExactlyOnce(service, `            provider: 'macos-ax',`, `            provider: this.backend.name,`, 'platform status provider')
 service = replaceExactlyOnce(
   service,
   `            ...this.healthState,
@@ -171,8 +196,17 @@ service = replaceExactlyOnce(
 )
 await writeFile(servicePath, service)
 
+const backendTypesPath = join(root, 'lib/types/backend.d.ts')
+let backendTypes = await readText(backendTypesPath)
+backendTypes = replaceExactlyOnce(backendTypes, `readonly name: 'macos-ax';`, `readonly name: 'macos-ax' | 'windows-uia';`, 'backend provider type')
+await writeFile(backendTypesPath, backendTypes)
+const publicTypesPath = join(root, 'lib/types/types.d.ts')
+let publicTypes = await readText(publicTypesPath)
+publicTypes = replaceExactlyOnce(publicTypes, `provider: 'macos-ax';`, `provider: 'macos-ax' | 'windows-uia';`, 'public provider type')
+await writeFile(publicTypesPath, publicTypes)
+
 const indexPath = join(root, 'lib/index.js')
-await cp(join(root, 'src/emate-capability.js'), join(root, 'lib/emate-capability.js'))
+await cp(join(root, 'src/emate-capability.ts'), join(root, 'lib/emate-capability.js'))
 let index = await readText(indexPath)
 index = replaceExactlyOnce(
   index,
@@ -206,4 +240,7 @@ let runtime = await readText(join(root, '.runtime-bundle/index.js'))
 runtime = replaceExactlyOnce(runtime, 'new URL("../../native/macos/", import.meta.url)', 'new URL("../native/macos/", import.meta.url)', 'bundled native path')
 runtime = replaceExactlyOnce(runtime, 'new URL("../../scripts/build-native.mjs", import.meta.url)', 'new URL("../scripts/build-native.mjs", import.meta.url)', 'bundled native builder path')
 await writeFile(indexPath, runtime)
-await rm(join(root, '.runtime-bundle'), { recursive: true, force: true })
+} finally {
+  await rm(runtimeBundle, { recursive: true, force: true })
+  await rm(runtimeSource, { recursive: true, force: true })
+}

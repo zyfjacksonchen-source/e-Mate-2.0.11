@@ -8,7 +8,7 @@ import { desktopAutomationBypass, hasExplicitComputerUseRequest } from '../lib/e
 
 const root = new URL('../', import.meta.url)
 
-test('computer-use adapter preserves the immutable universal helper only on macOS', async () => {
+test('computer-use adapter preserves Darwin and adds one pinned Windows backend', async () => {
   const pkg = JSON.parse(await readFile(new URL('package.json', root), 'utf8'))
   const patch = await readFile(new URL('cordis.patch.yml', root), 'utf8')
   const nativeBuilder = await readFile(new URL('scripts/build-native.mjs', root), 'utf8')
@@ -20,7 +20,8 @@ test('computer-use adapter preserves the immutable universal helper only on macO
   assert.equal(pkg.version, '2.0.16')
   assert.equal(pkg.dsh.upstream.commit, '76bfe8607f61945c1cbb84e73976e601100c13a2')
   assert.equal(pkg.eMate.harnessVersion, '0.1.0-rc.7')
-  assert.match(patch, /process\.platform !== 'darwin'/u)
+  assert.match(patch, /\['darwin', 'win32'\]\.includes\(process\.platform\)/u)
+  assert.match(patch, /process\.platform === 'win32' \? 'hidden' : 'visible'/u)
   assert.doesNotMatch(patch, /allowAllApps:\s*true/u)
   if (process.platform === 'darwin') {
     const manifest = JSON.parse(await readFile(new URL('native/macos/manifest.json', root), 'utf8'))
@@ -36,7 +37,9 @@ test('computer-use adapter preserves the immutable universal helper only on macO
   assert.match(adapterBuilder, /nativeManifest\.binary\.sha256/u)
   assert.match(adapterBuilder, /process\.platform === 'darwin'/u)
   assert.match(adapterBuilder, /\['lib', 'assets', 'docs'\]/u)
-  assert.doesNotMatch(adapterBuilder, /process\.platform === 'win32'/u)
+  assert.match(adapterBuilder, /process\.platform !== 'darwin' && process\.platform !== 'win32'/u)
+  assert.doesNotMatch(adapterBuilder, /executablePath\?: string|processStartTime\?: string|windowId\?: number/u)
+  assert.match(adapterBuilder, /finally \{[\s\S]*rm\(runtimeBundle[\s\S]*rm\(runtimeSource/u)
   assert.doesNotMatch(adapterBuilder, /unsupported computer-use build platform/u)
   assert.doesNotMatch(adapterBuilder, /--entitlements|allow-jit|allow-unsigned-executable-memory|disable-library-validation/u)
   assert.match(client, /@e-mate\/dsh-plugin-computer-use/u)
@@ -52,6 +55,7 @@ test('computer-use adapter preserves the immutable universal helper only on macO
   assert.match(bundle, /current user request must explicitly select @电脑操控/u)
   assert.match(bundle, /Use CDP browser tools first for webpage tasks/u)
   assert.match(bundle, /new URL\("\.\.\/native\/macos\/", import\.meta\.url\)/u)
+  assert.match(bundle, /windows-uia/u)
   assert.match(bundle, /new URL\("\.\.\/scripts\/build-native\.mjs", import\.meta\.url\)/u)
   assert.equal((bundle.match(/["']emateCapabilities["']/gu) ?? []).length, 1)
   assert.match(bundle, /installComputerUseCapability\(ctx, this\)/u)

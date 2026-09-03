@@ -25,3 +25,6 @@
 [submodule "upstream/plugins/dsh-im"]
 	path = upstream/plugins/dsh-im
 	url = https://github.com/zyfjacksonchen-source/dsh-im.git
+[submodule "upstream/plugins/computer-user"]
+	path = upstream/plugins/computer-user
+	url = https://github.com/jing-hy/computer-user.git
