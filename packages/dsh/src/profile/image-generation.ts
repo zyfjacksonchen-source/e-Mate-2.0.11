@@ -1491,7 +1491,7 @@ export async function apply(ctx, config = {}) {
               : 'provider-result-uncommitted',
             parentSessionId,
             started?.id,
-            clientRequestId,
+            batchScope?.clientRequestId ?? (started === undefined ? undefined : clientRequestId),
             providerRequestId,
             revision,
           ))
