@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { link, lstat, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, sep } from 'node:path'
+import { setTimeout as wait } from 'node:timers/promises'
 import { zipSync } from 'fflate'
 import { loadTargetLlm, loadTargetStorageDomain, loadTargetTools } from './target-runtime.js'
 
@@ -68,6 +69,13 @@ const MAX_EDIT_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_PACK_IMAGES = 100
 const MAX_PACK_BYTES = 100 * 1024 * 1024
 const IMAGE_TIMEOUT_MS = 610_000
+// Admission retries are deliberately local, fixed, and well inside the owning Tool timeout.
+const IMAGE_ADMISSION_MAX_ATTEMPTS = 3
+const IMAGE_ADMISSION_WAIT_BUDGET_MS = 30_000
+const MAX_ADMISSION_ERROR_BYTES = 16 * 1024
+const MIN_GATEWAY_RETRY_AFTER_MS = 1_000
+const MAX_GATEWAY_RETRY_AFTER_MS = 3_600_000
+const MAX_EDIT_MULTIPART_BYTES = MAX_EDIT_IMAGES * MAX_EDIT_IMAGE_BYTES + MAX_PROMPT_CHARS * 4 + 256 * 1024
 const ATTACHMENT_ID = /^sha256:[0-9a-f]{64}$/u
 const SHA256 = /^[0-9a-f]{64}$/u
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
@@ -197,6 +205,47 @@ async function readBounded(response, maximum, label) {
   return Buffer.concat(chunks.map(chunk => Buffer.from(chunk)), length)
 }
 
+class GatewayAdmissionError extends Error {
+  constructor(code, retryAfterMs, retryable) {
+    super(`e-Mate image request failed with HTTP 429 (${code})`)
+    this.code = code
+    this.retryAfterMs = retryAfterMs
+    this.retryable = retryable
+    this.definitelyNotSubmitted = true
+  }
+}
+
+async function gatewayAdmissionResult(response) {
+  if (response.status !== 429
+    || response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+    return { kind: 'other' }
+  }
+  let value
+  try {
+    value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(
+      await readBounded(response, MAX_ADMISSION_ERROR_BYTES, 'e-Mate image admission'),
+    ))
+  } catch {
+    return { kind: 'malformed' }
+  }
+  if (!exactKeys(value, ['error']) || !isRecord(value.error)
+    || !exactKeys(value.error, ['code', 'message', 'retryAfterMs'])) return { kind: 'malformed' }
+  const { code, message, retryAfterMs } = value.error
+  if (!['TENANT_REQUEST_RATE_LIMITED', 'TENANT_CONCURRENCY_LIMITED', 'USER_TOKEN_LIMIT_REACHED'].includes(code)
+    || typeof message !== 'string' || message.length < 1 || message.length > 256 || /[\u0000-\u001f\u007f]/u.test(message)
+    || !Number.isSafeInteger(retryAfterMs)
+    || retryAfterMs < MIN_GATEWAY_RETRY_AFTER_MS || retryAfterMs > MAX_GATEWAY_RETRY_AFTER_MS
+    || response.headers.get('retry-after') !== String(Math.ceil(retryAfterMs / 1_000))) return { kind: 'malformed' }
+  return {
+    kind: 'admission',
+    error: new GatewayAdmissionError(
+      code,
+      retryAfterMs,
+      code === 'TENANT_REQUEST_RATE_LIMITED' || code === 'TENANT_CONCURRENCY_LIMITED',
+    ),
+  }
+}
+
 async function responseJson(response, maximum, label) {
   if (!response.ok) throw new Error(`${label} failed with HTTP ${response.status}`)
   const mediaType = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase()
@@ -287,7 +336,8 @@ function failureCode(error, submitted, aborted) {
 }
 
 function requestDefinitelyRejected(error) {
-  return /HTTP 413(?:\D|$)/u.test(error instanceof Error ? error.message : String(error))
+  return error?.definitelyNotSubmitted === true
+    || /HTTP 413(?:\D|$)/u.test(error instanceof Error ? error.message : String(error))
 }
 
 function failedReceipt(
@@ -952,17 +1002,15 @@ function createImageClient({ request, root, attachments }) {
   const imageLimit = Math.min(attachments.imageLimits.maxImageBytes, attachments.imageLimits.maxMessageImageBytes)
   const responseLimit = Math.ceil(imageLimit * 4 / 3) + 256 * 1024
 
-  async function execute(task, refs, signal, scope, onSubmit, onProviderResponse) {
+  async function execute(task, refs, signal, scope, onPossiblySubmitted, onProviderResponse) {
     signal.throwIfAborted()
-    const headers = new Headers({ accept: 'application/json', ...scope })
-    let body
-    let path
-    if (refs.length === 0) {
-      path = '/images/generations'
-      headers.set('content-type', 'application/json')
-      body = JSON.stringify({ model: IMAGE_MODEL, prompt: task.prompt })
-    } else {
-      path = '/images/edits'
+    const startedAt = Date.now()
+    const path = refs.length === 0 ? '/images/generations' : '/images/edits'
+    const label = `e-Mate image ${refs.length === 0 ? 'generation' : 'edit'}`
+    const jsonBody = refs.length === 0 ? JSON.stringify({ model: IMAGE_MODEL, prompt: task.prompt }) : undefined
+    let editBody
+    let editContentType
+    if (refs.length > 0) {
       const form = new FormData()
       form.set('model', IMAGE_MODEL)
       form.set('prompt', task.prompt)
@@ -981,13 +1029,46 @@ function createImageClient({ request, root, attachments }) {
         const extension = ref.mediaType === 'image/png' ? 'png' : ref.mediaType === 'image/jpeg' ? 'jpg' : 'webp'
         form.append(field, new Blob([new Uint8Array(stored.data)], { type: ref.mediaType }), `image-${index + 1}.${extension}`)
       }
-      body = form
+      const encoded = new Request('https://localhost/', { method: 'POST', body: form })
+      editContentType = encoded.headers.get('content-type')
+      if (editContentType === null || !/^multipart\/form-data; boundary=[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(editContentType)) {
+        throw new Error('e-Mate image edit multipart encoding is invalid')
+      }
+      editBody = new Uint8Array(await encoded.arrayBuffer())
+      if (editBody.byteLength < 1 || editBody.byteLength > MAX_EDIT_MULTIPART_BYTES) {
+        throw new Error('e-Mate image edit request exceeds the encoded byte boundary')
+      }
     }
-    signal.throwIfAborted()
-    onSubmit()
-    const value = await responseJson(await request(endpoint(root, path), {
-      method: 'POST', headers, body, redirect: 'error', signal,
-    }), responseLimit, `e-Mate image ${refs.length === 0 ? 'generation' : 'edit'}`)
+    const body = () => jsonBody ?? new Uint8Array(editBody)
+    let value
+    for (let attempt = 1; attempt <= IMAGE_ADMISSION_MAX_ATTEMPTS; attempt += 1) {
+      signal.throwIfAborted()
+      const headers = new Headers({ accept: 'application/json', ...scope })
+      headers.set('content-type', jsonBody === undefined ? editContentType : 'application/json')
+      let response
+      try {
+        response = await request(endpoint(root, path), {
+          method: 'POST', headers, body: body(), redirect: 'error', signal,
+        })
+      } catch (error) {
+        onPossiblySubmitted()
+        throw error
+      }
+      const admission = await gatewayAdmissionResult(response)
+      if (admission.kind === 'other') {
+        onPossiblySubmitted()
+        value = await responseJson(response, responseLimit, label)
+        break
+      }
+      if (admission.kind === 'malformed') {
+        onPossiblySubmitted()
+        throw new Error(`${label} failed with HTTP 429`)
+      }
+      const error = admission.error
+      const remaining = IMAGE_ADMISSION_WAIT_BUDGET_MS - (Date.now() - startedAt)
+      if (!error.retryable || attempt === IMAGE_ADMISSION_MAX_ATTEMPTS || error.retryAfterMs > remaining) throw error
+      await wait(error.retryAfterMs, undefined, { signal })
+    }
     if (!exactKeys(value, ['id', 'data', 'usage']) || typeof value.id !== 'string' || !IDENTIFIER.test(value.id)
       || !Array.isArray(value.data) || value.data.length !== 1 || !isRecord(value.usage)) {
       throw new Error('e-Mate image response is invalid')
@@ -1302,7 +1383,7 @@ export async function apply(ctx, config = {}) {
       }
 
       appendImageReceipt(exec.agent, runningReceipt(exec.callId, operation, refs, parentSessionId))
-      let submitted = false
+      let ambiguousDispatch = false
       let started
       let terminalJob
       let clientRequestId
@@ -1318,7 +1399,7 @@ export async function apply(ctx, config = {}) {
             refs,
             signal,
             scope.headers,
-            () => { submitted = true },
+            () => { ambiguousDispatch = true },
             value => { providerRequestId = value },
           )
           let reviewDecision
@@ -1381,7 +1462,7 @@ export async function apply(ctx, config = {}) {
         if (!alreadyRecorded) {
           const aborted = exec.signal.aborted
           const definitelyRejected = providerRequestId === undefined && requestDefinitelyRejected(error)
-          const possiblySubmitted = submitted && !definitelyRejected
+          const possiblySubmitted = ambiguousDispatch && !definitelyRejected
           const cancelled = started?.signal.aborted === true || terminalJob?.status === 'killed' || aborted
           appendImageReceipt(exec.agent, failedReceipt(
             exec.callId,

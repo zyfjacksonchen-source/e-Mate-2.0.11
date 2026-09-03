@@ -1138,8 +1138,13 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const unreviewedBytes = readFileSync(new URL('../../../upstream/deepseek-harness/docs/user/guide/providers-custom-form.zh.png', import.meta.url))
     const requests = []
     const requestScopes = []
+    const requestBodies = []
+    const requestRawBodies = []
+    const requestContentTypes = []
     let remoteCounter = 0
     let nextFailureStatus
+    const queuedGatewayOutcomes = []
+    const sourceReadCounts = new Map()
     let nextCorruptData = false
     let nextPrivateRequestError = false
     let nextNoop = false
@@ -1155,11 +1160,18 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       status,
       headers: { 'content-type': 'application/json' },
     })
+    const admission = (code, retryAfterMs = 1_000, retryAfter = String(Math.ceil(retryAfterMs / 1_000))) => new Response(
+      JSON.stringify({ error: { code, message: 'admission rejected', retryAfterMs } }),
+      { status: 429, headers: { 'content-type': 'application/json', 'retry-after': retryAfter } },
+    )
     const identity = {
       async request(url, init = {}) {
         assert.equal(url.origin, 'https://model.example')
         assert.equal(url.pathname.startsWith('/e-mate/model-api/v1/images/'), true)
         const outgoing = new Request(url, init)
+        requestBodies.push(init.body)
+        requestRawBodies.push(Buffer.from(await outgoing.clone().arrayBuffer()))
+        requestContentTypes.push(outgoing.headers.get('content-type'))
         jobTimeline.push(`provider:${outgoing.headers.get('x-client-request-id')}`)
         requestScopes.push({
           task: outgoing.headers.get('x-e-mate-task-id'),
@@ -1204,6 +1216,11 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         } else {
           throw new Error(`unexpected managed image request ${init.method ?? 'GET'} ${url.pathname}`)
         }
+        if (queuedGatewayOutcomes.length > 0) {
+          const outcome = queuedGatewayOutcomes.shift()
+          if (outcome instanceof Error) throw outcome
+          return outcome
+        }
         if (nextFailureStatus !== undefined) {
           const status = nextFailureStatus
           nextFailureStatus = undefined
@@ -1230,6 +1247,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     const imageAttachments = {
       imageLimits: context.attachments.imageLimits,
       async readImage(ref, signal) {
+        sourceReadCounts.set(ref.attachmentId, (sourceReadCounts.get(ref.attachmentId) ?? 0) + 1)
         if (rejectOutputRead && ref.attachmentId === outputAttachmentId) {
           rejectOutputRead = false
           outputAttachmentId = undefined
@@ -2421,13 +2439,107 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(sessionEvents.at(-1).data.client_request_id, requestScopes.at(-1).client)
     assert.equal('provider_request_id' in sessionEvents.at(-1).data, false)
     const requestsBeforeRateLimit = requests.length
-    nextFailureStatus = 429
-    await assert.rejects(
-      imagegen.execute({ prompt: 'Do not retry a rate limit response.' }, execution()),
-      /receipt status unknown/u,
-    )
-    assert.equal(requests.length, requestsBeforeRateLimit + 1)
-    assert.equal(sessionEvents.at(-1).data.failure_code, 'http-429')
+    const responsesBeforeRateLimit = remoteCounter
+    queuedGatewayOutcomes.push(admission('TENANT_REQUEST_RATE_LIMITED'))
+    const rateRetried = await imagegen.execute({ prompt: 'Retry one typed request admission response.' }, execution())
+    assert.equal(requests.length, requestsBeforeRateLimit + 2)
+    assert.equal(remoteCounter, responsesBeforeRateLimit + 1)
+    assert.deepEqual(requestScopes.slice(-2), [requestScopes.at(-1), requestScopes.at(-1)])
+    assert.deepEqual(requests.slice(-2).map(request => request.body), [
+      { model: 'gpt-image-2-pro', prompt: 'Retry one typed request admission response.' },
+      { model: 'gpt-image-2-pro', prompt: 'Retry one typed request admission response.' },
+    ])
+    assert.equal(rateRetried.receipt.billing_status, 'recorded')
+
+    const requestsBeforeConcurrency = requests.length
+    queuedGatewayOutcomes.push(admission('TENANT_CONCURRENCY_LIMITED'))
+    await imagegen.execute({ prompt: 'Retry one typed concurrency admission response.' }, execution())
+    assert.equal(requests.length, requestsBeforeConcurrency + 2)
+    assert.deepEqual(requestScopes.slice(-2), [requestScopes.at(-1), requestScopes.at(-1)])
+
+    const assertGatewayFailure = async ({ prompt, outcomes, billing = 'unknown', status = billing === 'unknown' ? 'unknown' : 'failed' }) => {
+      const before = requests.length
+      queuedGatewayOutcomes.push(...outcomes)
+      const attempt = execution()
+      await assert.rejects(imagegen.execute({ prompt }, attempt), new RegExp(`receipt status ${status}`, 'u'))
+      assert.equal(requests.length, before + outcomes.length)
+      const receipt = terminalReceipt(agent, attempt.callId)
+      assert.equal(receipt.billing_status, billing)
+      assert.equal(receipt.status, status)
+      return receipt
+    }
+
+    const capped = await assertGatewayFailure({
+      prompt: 'Stop at the fixed typed admission attempt cap.',
+      outcomes: Array.from({ length: 3 }, () => admission('TENANT_REQUEST_RATE_LIMITED')),
+      billing: 'not-submitted',
+    })
+    assert.equal(capped.failure_code, 'http-429')
+    await assertGatewayFailure({
+      prompt: 'Do not wait beyond the total admission deadline.',
+      outcomes: [admission('TENANT_CONCURRENCY_LIMITED', 31_000)],
+      billing: 'not-submitted',
+    })
+
+    const abortWaitController = new AbortController()
+    const beforeAbortWait = requests.length
+    queuedGatewayOutcomes.push(admission('TENANT_REQUEST_RATE_LIMITED', 1_000))
+    const abortWaitExecution = { ...execution(), signal: abortWaitController.signal }
+    const abortWait = imagegen.execute({ prompt: 'Abort during typed admission wait.' }, abortWaitExecution)
+    await waitFor(() => requests.length === beforeAbortWait + 1 ? true : undefined, 'typed admission wait did not begin')
+    abortWaitController.abort(new Error('cancel typed admission wait'))
+    await assert.rejects(abortWait, /receipt status cancelled/u)
+    assert.equal(requests.length, beforeAbortWait + 1)
+    assert.equal(terminalReceipt(agent, abortWaitExecution.callId).billing_status, 'not-submitted')
+
+    const malformedAdmissionCases = [
+      new Response(JSON.stringify({ error: { code: 'TENANT_REQUEST_RATE_LIMITED', message: 'missing header', retryAfterMs: 1_000 } }), { status: 429, headers: { 'content-type': 'application/json' } }),
+      admission('TENANT_REQUEST_RATE_LIMITED', 1_000, 'invalid'),
+      admission('TENANT_REQUEST_RATE_LIMITED', 1_000, '2'),
+      new Response('not json', { status: 429, headers: { 'content-type': 'text/plain', 'retry-after': '1' } }),
+      new Response('{', { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '1' } }),
+      new Response(JSON.stringify({ error: null }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '1' } }),
+      new Response(JSON.stringify({ error: { code: 'TENANT_REQUEST_RATE_LIMITED', message: 'invalid\ncontrol', retryAfterMs: 1_000 } }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '1' } }),
+      new Response(JSON.stringify({ error: { code: 'UNKNOWN_LIMIT', message: 'unknown', retryAfterMs: 1_000 } }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '1' } }),
+    ]
+    for (const [index, outcome] of malformedAdmissionCases.entries()) {
+      await assertGatewayFailure({ prompt: `Do not retry malformed admission ${index}.`, outcomes: [outcome] })
+    }
+    await assertGatewayFailure({
+      prompt: 'Do not retry a user token limit.',
+      outcomes: [admission('USER_TOKEN_LIMIT_REACHED')],
+      billing: 'not-submitted',
+    })
+    for (const [prompt, outcome] of [
+      ['Do not retry conflict.', json({ error: { code: 'INVOCATION_REQUEST_CONFLICT' } }, 409)],
+      ['Do not retry gateway failure.', json({ error: { code: 'MODEL_GATEWAY_UNAVAILABLE' } }, 503)],
+      ['Do not retry upstream rejection.', json({ error: { code: 'UPSTREAM_REJECTED' } }, 502)],
+      ['Do not retry network failure.', new Error('network failed')],
+      ['Do not retry timeout.', Object.assign(new Error('request timed out'), { name: 'TimeoutError' })],
+      ['Do not retry malformed success.', new Response('{', { status: 200, headers: { 'content-type': 'application/json' } })],
+      ['Do not retry non-JSON success.', new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })],
+    ]) await assertGatewayFailure({ prompt, outcomes: [outcome] })
+    await assertGatewayFailure({
+      prompt: 'Preserve unknown after an admission retry reaches a network error.',
+      outcomes: [admission('TENANT_REQUEST_RATE_LIMITED'), new Error('network failed after admission')],
+    })
+
+    const sourceReadsBeforeRetry = sourceReadCounts.get(selected.attachmentId) ?? 0
+    const requestsBeforeEditRetry = requests.length
+    const bodiesBeforeEditRetry = requestBodies.length
+    const rawBodiesBeforeEditRetry = requestRawBodies.length
+    queuedGatewayOutcomes.push(admission('TENANT_CONCURRENCY_LIMITED'))
+    const editRetried = await imagegen.execute({
+      prompt: 'Rebuild the same edit body after typed admission.', image_url: selected.attachmentId,
+    }, execution())
+    assert.equal(editRetried.images.length, 1)
+    assert.equal(requests.length, requestsBeforeEditRetry + 2)
+    assert.deepEqual(requests.slice(-2).map(request => request.body), [requests.at(-1).body, requests.at(-1).body])
+    assert.notStrictEqual(requestBodies[bodiesBeforeEditRetry], requestBodies[bodiesBeforeEditRetry + 1])
+    assert.equal(requestRawBodies[rawBodiesBeforeEditRetry].equals(requestRawBodies[rawBodiesBeforeEditRetry + 1]), true)
+    assert.equal(requestContentTypes.at(-2), requestContentTypes.at(-1))
+    assert.match(requestContentTypes.at(-1), /^multipart\/form-data; boundary=/u)
+    assert.equal(sourceReadCounts.get(selected.attachmentId), sourceReadsBeforeRetry + 1)
 
     const requestsBeforeOversize = requests.length
     nextFailureStatus = 413
