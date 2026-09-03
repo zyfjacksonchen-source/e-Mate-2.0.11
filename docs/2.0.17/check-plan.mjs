@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 
 const here = new URL('.', import.meta.url)
 const [
   baselineText, ordersText, executionText, ownersText, regressionText, adrText,
-  batchSchemaText, batchResultSchemaText, latencyContractText, fileImportHostText,
+  batchSchemaText, batchResultSchemaText, latencyContractText, enterpriseRecoveryText, fileImportHostText,
 ] = await Promise.all([
   readFile(new URL('baseline-lock.json', here), 'utf8'),
   readFile(new URL('work-orders.json', here), 'utf8'),
@@ -16,6 +16,7 @@ const [
   readFile(new URL('contracts/image-batch.schema.json', here), 'utf8'),
   readFile(new URL('contracts/image-batch-result.schema.json', here), 'utf8'),
   readFile(new URL('contracts/single-image-latency.md', here), 'utf8'),
+  readFile(new URL('contracts/enterprise-model-recovery.md', here), 'utf8'),
   readFile(new URL('../../packages/dsh-plugin-file-import/src/index.ts', here), 'utf8'),
 ])
 const baseline = JSON.parse(baselineText)
@@ -42,9 +43,9 @@ assert(!/(?:main|master|latest|HEAD)/.test(JSON.stringify([active, orders.baseli
 
 const tickets = orders.tickets
 const ids = tickets.map(ticket => ticket.id)
-const expectedIds = ['EM217-000', 'EM217-001', 'EM217-002', 'EM217-003', 'EM217-004', 'EM217-101', 'EM217-102', 'EM217-103', 'EM217-104', 'EM217-105', 'EM217-106', 'EM217-107', 'EM217-108', 'EM217-201', 'EM217-202', 'EM217-203', 'EM217-204', 'EM217-205', 'EM217-301', 'EM217-302', 'EM217-303', 'EM217-304', 'EM217-305', 'EM217-306', 'EM217-307', 'EM217-401', 'EM217-402', 'EM217-403', 'EM217-404', 'EM217-405', 'EM217-406', 'EM217-407', 'EM217-408', 'EM217-501', 'EM217-502', 'EM217-503', 'EM217-504', 'EM217-505', 'EM217-506', 'EM217-507']
-assert.equal(tickets.length, 40)
-assert.equal(new Set(ids).size, 40)
+const expectedIds = ['EM217-000', 'EM217-001', 'EM217-002', 'EM217-003', 'EM217-004', 'EM217-101', 'EM217-102', 'EM217-103', 'EM217-104', 'EM217-105', 'EM217-106', 'EM217-107', 'EM217-108', 'EM217-201', 'EM217-202', 'EM217-203', 'EM217-204', 'EM217-205', 'EM217-206', 'EM217-301', 'EM217-302', 'EM217-303', 'EM217-304', 'EM217-305', 'EM217-306', 'EM217-307', 'EM217-401', 'EM217-402', 'EM217-403', 'EM217-404', 'EM217-405', 'EM217-406', 'EM217-407', 'EM217-408', 'EM217-501', 'EM217-502', 'EM217-503', 'EM217-504', 'EM217-505', 'EM217-506', 'EM217-507']
+assert.equal(tickets.length, 41)
+assert.equal(new Set(ids).size, 41)
 assert.deepEqual([...ids].sort(), [...expectedIds].sort())
 const map = new Map(tickets.map(ticket => [ticket.id, ticket]))
 for (const ticket of tickets) {
@@ -272,8 +273,64 @@ for (const required of ['parent userQuestions 不可用时 provider 前拒绝', 
 for (const ticket of tickets) for (const path of ticket.write_set) assert(!path.includes('enterprise/apps/model-gateway/test/**'), ticket.id + ' uses singular gateway test path')
 assert.deepEqual(t('EM217-203').depends_on, ['EM217-201'])
 assert.deepEqual(t('EM217-202').depends_on, ['EM217-201', 'EM217-203'])
-assert(t('EM217-204').depends_on.includes('EM217-202'))
+const observability204 = t('EM217-204')
+assert(observability204.depends_on.includes('EM217-202'))
+assert.deepEqual(observability204.write_set, [
+  'enterprise/apps/model-gateway/src/**',
+  'enterprise/apps/model-gateway/tests/**',
+  'packages/dsh/src/profile/image-generation.ts',
+  'packages/dsh/src/profile/native-image-task-runner.ts',
+  'packages/dsh/src/profile/audit.ts',
+  'packages/dsh/test/e-mate.test.mjs',
+  'packages/dsh/test/native-image-task-runner.test.mjs',
+  'docs/2.0.17/observability/image-batch.md',
+])
+assert(text('EM217-204').includes('parent_projection_append'))
+assert(!text('EM217-204').includes('packages/dsh/src/profile/image-batch.ts'))
+assert(!text('EM217-204').includes('packages/dsh-plugin-tool-search'))
+const projectionVisibleMentions = [...observability204.implementation, ...observability204.acceptance]
+  .filter(statement => statement.includes('projection_visible'))
+assert(projectionVisibleMentions.length > 0)
+assert(projectionVisibleMentions.every(statement => statement.includes('OPEN')),
+  'EM217-204 may mention projection_visible only as explicitly OPEN')
+assert(observability204.acceptance.some(statement => statement.includes('first paint') && statement.includes('OPEN')
+  && statement.includes('EM217-301') && statement.includes('EM217-108')))
 assert(t('EM217-205').depends_on.includes('EM217-204'))
+const recovery206 = t('EM217-206')
+assert.equal(recovery206.owner, 'AUTH')
+assert.deepEqual(recovery206.depends_on, ['EM217-205', 'EM217-406'])
+assert.equal(recovery206.branch, 'feat/2.0.17/em217-206-enterprise-offline-auth')
+assert.equal(recovery206.worktree, '/Users/mac/e-mate/worktrees/em217-206')
+assert.equal(recovery206.evidence.status, 'OPEN')
+assert(recovery206.write_set.includes('enterprise/apps/model-gateway/src/postgres-usage-store.ts'))
+assert(!recovery206.write_set.includes('enterprise/apps/model-gateway/src/tenant-model-route-policy.ts'))
+const em206NewPaths = new Set([
+  'packages/dsh/profile/plugins/emate-shell/tests/enterprise-model-recovery.client.spec.tsx',
+  'docs/2.0.17/contracts/enterprise-model-recovery.md',
+])
+for (const path of recovery206.write_set.filter(path => !em206NewPaths.has(path))) {
+  await assert.doesNotReject(
+    access(new URL(`../../${path}`, here)),
+    'EM217-206 invented a source owner path: ' + path,
+  )
+}
+assert(t('EM217-501').depends_on.includes('EM217-206'))
+for (const required of [
+  'management/control', 'Gateway data-plane', 'provider', 'Postgres', 'warm/cold', 'Renderer health',
+  'Session list/open/history', 'Workspace', 'attachments', 'local Tools', 'expired/revoked',
+  'Gateway-routed OpenAI-compatible', 'model-session credential', 'provider POST=0', 'key A→B',
+  'online/focus', 'credential-generation', '<=30', 'coalesced', 'direct-provider fallback', 'OPEN',
+]) assert(JSON.stringify(recovery206).includes(required), 'EM217-206 missing ' + required)
+for (const required of [
+  'Management/control-plane outage', 'Gateway data-plane outage', 'Provider outage', 'Postgres outage',
+  'exp - 1', 'exp', 'Session revoke or user disable', 'User model-list change',
+  'Route disable/unpublish then re-enable', 'Tenant key A to B rotation',
+  'Delayed refresh/catalog A versus logout/login B', 'Gateway starts while Postgres is down',
+  'no direct-provider fallback', 'ALL EM217-206 EVIDENCE OPEN',
+]) assert(enterpriseRecoveryText.includes(required), 'enterprise recovery contract missing ' + required)
+assert(ownersText.includes('| AUTH |'))
+assert(regressionText.includes('NEW-ENT-RECOVERY-001'))
+assert(text('EM217-501').includes('EM217-206 is in the dependency closure'))
 assert(text('EM217-202').includes('enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts'))
 assert(text('EM217-202').includes('USER_TOKEN_LIMIT') && text('EM217-202').includes('malformed success'))
 const computerUse = text('EM217-408')
@@ -335,4 +392,4 @@ assert(executionText.includes('workdir: desktop; corepack yarn check'))
 for (const command of ['workdir: desktop; corepack yarn check', 'workdir: desktop; corepack yarn dist:mac', 'workdir: desktop; corepack yarn dist:win']) {
   assert(ordersText.includes(command), 'work orders missing Desktop command: ' + command)
 }
-console.log('EM217 plan check passed: 40 tickets, exact pins, single-image latency gate, corrected component commands, acyclic dependencies, WIP <= 6, and gates OPEN.')
+console.log('EM217 plan check passed: 41 tickets, exact pins, enterprise recovery and single-image latency gates, corrected component commands, acyclic dependencies, WIP <= 6, and gates OPEN.')

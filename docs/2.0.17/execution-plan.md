@@ -24,6 +24,14 @@ EM217-307 由 `UI/shared-file-import` 所有，精确依赖 EM217-004 与 EM217-
 
 The current gateway already owns its idempotent journal, admission, and exactly-once usage. EM217-201/203/205 prove those owners and close only demonstrated gaps. EM217-202 allows only typed pre-provider-admission retry or proven receipt reacquisition. Unknown outcomes are never generically replayed. Every gateway request is one image; no `/images/batch` and no `n>1`.
 
+## Enterprise model delivery and recovery
+
+EM217-206 由 AUTH owner 串行接在 EM217-205 与 EM217-406 之后，并在 EM217-501 source gate 前完成；EM217-205 未完成前仅允许本规划与 `contracts/enterprise-model-recovery.md`，不得实施产品或测试。它区分 management/control-plane、Gateway data-plane、provider 与 Postgres outage：warm/cold management outage 不得阻断 Renderer health、Session list/open/history、Workspace、attachments 或 local Tools；身份 UI 将 local availability 与 enterprise authenticated/routable state 分离，expired/revoked cache 不得声明 authenticated 或授权 enterprise call。
+
+实现必须原子关闭 direct-key bypass：runtime catalog 只返回 Gateway-routed OpenAI-compatible metadata 并复用既有短期 model-session credential，`llm-pi-ai` 走既有 Gateway path；Gateway 每请求的 Postgres session/user/route/key 校验仍是最终权威。客户端不再接收、缓存或回退使用 plaintext upstream key；Settings/domain/log/error/audit 不含 access/refresh/model/upstream plaintext，废弃 upstream-key OS refs 由既有 credential owner 清理。仅允许非权威 last-known-good metadata 用于 UX，绝不延长 expiry/revocation。
+
+Reconnect 仅复用 existing online/focus、credential-generation、coalesced refresh 与 <=30 秒 keepalive seam；refresh 有效时无需 app restart/login。Fault acceptance 覆盖 warm/cold blackhole、exp-1/exp、session revoke/user disable/model-list change、route disable/re-enable、key rotation、late A versus logout/login B、OS/Settings/table atomic failure、running Postgres down→up、Gateway startup Postgres-down supervisor truth，以及 bounded/coalesced reconnect。auth/route/Gateway 不 live 时 provider POST=0；provider outage 保持 provider-boundary truth且不新增 retry。Desktop lifecycle、rc.7 Session/Workspace/attachment/Tool/history owner、analytics/admin UI、generic provider retry、package/version/release 均排除；monotonic revision 如确有必要须另行批准 scope。全部 EM217-206 source/fault/reconnect/gateway-startup/installed/production evidence 保持 **OPEN**；rollback 先 fail-closed 禁用 enterprise routing，绝不恢复 direct upstream-key distribution。
+
 ## Computer Use
 
 EM217-408 只复用 pinned jing-hy MIT PowerShell/Win32 primitives，并接到既有 `@e-mate/dsh-plugin-computer-use` / `ctx.computerUse` backend 与单一 Profile row；不得安装或复制其插件层。Darwin 保持 Anionex pin，二者 MIT notice/provenance 均保留。Windows 路径必须校验 app+HWND+PID、UIA state hash、Win32 返回值、key/button cleanup、policy-never/per-turn lease/one-use confirmation、workspace Attachment fence、固定 DSH subprocess bounds/integrity/cleanup 和 post-action observation；secure desktop/UIPI/elevated/locked/RDP 诚实失败。排除候选 registry/settings/client/Skill/global Set/computer_set_mode/raw spawn/arbitrary path/output guard。Windows installed-machine evidence 保持 OPEN。EM217-407/505 依赖 408。
@@ -50,4 +58,4 @@ Git tracks only small sanitized specifications, manifests, and assertions. Video
 
 ## Machine check
 
-Run `node docs/2.0.17/check-plan.mjs`, then `git diff --check`. The canonical 40 work orders and detailed acceptance/rollback data are in `work-orders.json`.
+Run `node docs/2.0.17/check-plan.mjs`, then `git diff --check`. The canonical 41 work orders and detailed acceptance/rollback data are in `work-orders.json`; all EM217-206 evidence remains **OPEN**.

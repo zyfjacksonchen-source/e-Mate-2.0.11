@@ -5,6 +5,7 @@
 | SUP | Governance, integration, gates, version contract, release/rollback decisions | Main agent only; EM217-407 follows EM217-501 |
 | IMG | Single local image_batch and direct single-image latency ownership in @e-mate/dsh | 101 → 102 → 103 → 104 → 105 → 106 → 107 → 108; QA verifies 108 sanitized evidence |
 | GW | Existing gateway journal/admission/usage owners | 201 → 203 → 202 → 204 → 205; proof before gap closure |
+| AUTH | Enterprise Profile identity/model delivery and Gateway live auth recovery | EM217-206 after EM217-205 + EM217-406; before EM217-501; local rc.7 and Desktop owners excluded; all evidence OPEN |
 | UI | Existing Web client services, projections, conversation slots, Gallery, and shared file import | 301 → 302 → 303 → 304 → 305 → 306; 307 follows 004 + 404 and precedes 501 |
 | DESK | Existing Desktop lifecycle and the single Computer Use component | 401 → 402 → 403 → 404 → 405 → 406 → 408 |
 | QA | Assertions and sanitized evidence manifests | 501 → 502 → 503 → GUI gates; no release decisions |
