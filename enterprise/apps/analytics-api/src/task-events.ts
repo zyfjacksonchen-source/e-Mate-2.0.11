@@ -16,6 +16,7 @@ export type TaskEventQuery = {
   to: string;
   timezone?: string;
   userIds?: string[];
+  scenario?: TaskScenario;
 };
 
 export type TaskEventStore = {
@@ -74,6 +75,9 @@ export class PostgresTaskEventStore implements TaskEventStore {
       throw new Error('Invalid task event user filter');
     }
     const filteredUserIds = userIds.map(principalId);
+    if (query.scenario !== undefined && !TASK_SCENARIOS.includes(query.scenario)) {
+      throw new Error('Invalid task event scenario filter');
+    }
     const timezone = query.timezone ?? 'UTC';
     try {
       if (
@@ -96,6 +100,7 @@ export class PostgresTaskEventStore implements TaskEventStore {
            AND received_at >= $2::timestamptz
            AND received_at < $3::timestamptz
            AND (cardinality($4::text[]) = 0 OR user_id = ANY($4::text[]))
+           AND ($6::text IS NULL OR scenario = $6)
       ),
       totals AS (
         SELECT count(*)::text AS received_tasks,
@@ -171,7 +176,7 @@ export class PostgresTaskEventStore implements TaskEventStore {
              ) AS user_event_counts
         FROM totals
     `,
-      [tenantId, from, to, filteredUserIds, timezone]
+      [tenantId, from, to, filteredUserIds, timezone, query.scenario ?? null]
     );
     const row = result.rows[0];
     if (!row) throw new Error('Task event totals were unavailable');

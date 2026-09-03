@@ -55,6 +55,7 @@ test('task summary uses only authoritative task rows and exact decimal strings',
     to: '2026-07-27T00:00:00.000Z',
     timezone: 'Asia/Shanghai',
     userIds: ['user-1', 'user-2'],
+    scenario: 'CONTENT_CREATION',
   });
 
   assert.deepEqual(summary.summary, {
@@ -76,11 +77,21 @@ test('task summary uses only authoritative task rows and exact decimal strings',
   assert.doesNotMatch(statement, /\bLIMIT\b/);
   assert.match(statement, /user_id = ANY\(\$4::text\[\]\)/);
   assert.match(statement, /received_at AT TIME ZONE \$5/);
+  assert.match(statement, /\$6::text IS NULL OR scenario = \$6/);
   assert.deepEqual(parameters, [
     'tenant-1',
     '2026-07-25T00:00:00.000Z',
     '2026-07-27T00:00:00.000Z',
     ['user-1', 'user-2'],
     'Asia/Shanghai',
+    'CONTENT_CREATION',
   ]);
+  await assert.rejects(
+    store.summary(principal, {
+      from: '2026-07-25T00:00:00.000Z',
+      to: '2026-07-27T00:00:00.000Z',
+      scenario: 'UNKNOWN' as 'CONTENT_CREATION',
+    }),
+    /Invalid task event scenario filter/
+  );
 });

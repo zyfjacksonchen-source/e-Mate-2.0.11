@@ -131,6 +131,7 @@ export type TenantUsageEvent =
       traceId: string;
       modelId: string;
       providerId: string;
+      scenario: TaskScenario | null;
       outcome: 'ACCOUNTED' | 'REJECTED' | 'PENDING';
     }
   | {
@@ -142,6 +143,7 @@ export type TenantUsageEvent =
       traceId: string;
       modelId: string;
       providerId: string;
+      scenario: TaskScenario | null;
       inputTokens: string;
       outputTokens: string;
       cacheReadTokens: string;
@@ -695,7 +697,17 @@ export function parseTenantUsageEventPage(value: unknown): TenantUsageEventPage 
   }
   const events = input.events.map((eventValue): TenantUsageEvent => {
     const event = record(eventValue, 'usage event');
-    const commonFields = ['kind', 'eventId', 'occurredAt', 'userId', 'taskId', 'traceId', 'modelId', 'providerId'];
+    const commonFields = [
+      'kind',
+      'eventId',
+      'occurredAt',
+      'userId',
+      'taskId',
+      'traceId',
+      'modelId',
+      'providerId',
+      'scenario',
+    ];
     const kind = event.kind;
     exact(
       event,
@@ -712,6 +724,9 @@ export function parseTenantUsageEventPage(value: unknown): TenantUsageEventPage 
           ],
       'usage event'
     );
+    if (event.scenario !== null && !taskScenarios.has(event.scenario as TaskScenario)) {
+      throw new Error('Invalid usage event scenario');
+    }
     const common = {
       eventId: identifier(event.eventId, 'usage event id'),
       occurredAt: timestamp(event.occurredAt, 'usage event time'),
@@ -720,6 +735,7 @@ export function parseTenantUsageEventPage(value: unknown): TenantUsageEventPage 
       traceId: identifier(event.traceId, 'usage trace id'),
       modelId: identifier(event.modelId, 'usage model id'),
       providerId: identifier(event.providerId, 'usage provider id'),
+      scenario: event.scenario as TaskScenario | null,
     };
     if (Date.parse(common.occurredAt) < Date.parse(from) || Date.parse(common.occurredAt) >= Date.parse(to)) {
       throw new Error('Usage event is outside the requested range');

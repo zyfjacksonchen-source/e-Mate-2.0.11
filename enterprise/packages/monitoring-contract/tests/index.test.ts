@@ -260,6 +260,7 @@ test('usage event pages keep drill-down facts exact and ordered', () => {
         traceId: 'trace-1',
         modelId: 'gpt-5.6-sol',
         providerId: 'openai',
+        scenario: 'CONTENT_CREATION',
         outcome: 'ACCOUNTED',
       },
       {
@@ -271,6 +272,7 @@ test('usage event pages keep drill-down facts exact and ordered', () => {
         traceId: 'trace-1',
         modelId: 'gpt-5.6-sol',
         providerId: 'openai',
+        scenario: null,
         inputTokens: '1',
         outputTokens: '2',
         cacheReadTokens: '3',
@@ -288,6 +290,12 @@ test('usage event pages keep drill-down facts exact and ordered', () => {
       events: [page.events[1], page.events[0]],
     })
   );
+  assert.throws(() =>
+    parseTenantUsageEventPage({
+      ...page,
+      events: [{ ...page.events[0], scenario: 'UNKNOWN' }],
+    })
+  );
 });
 
 test('usage event ordering keeps pagination stable when source ids collide', () => {
@@ -300,6 +308,7 @@ test('usage event ordering keeps pagination stable when source ids collide', () 
     traceId: 'trace-1',
     modelId: 'gpt-5.6-sol',
     providerId: 'openai',
+    scenario: null,
     inputTokens: '1',
     outputTokens: '2',
     cacheReadTokens: '3',
