@@ -1582,6 +1582,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.match(imagegen.description, /native image_batch child may call imagegen exactly once/u)
     assert.match(imagegen.description, /Never pass a provider, model, output path, size, quality, timeout, or concurrency policy/u)
     let batchChildOrdinal = 0
+    let rejectBatchChildModelPolicy = false
     const batchChildren = new Map()
     pluginCtx.sessions = { flush: async () => true }
     pluginCtx.emateModelPolicy = modelPolicy
@@ -1590,6 +1591,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       async start(_provider, request) {
         const child = nativeParent('image-batch-real-child-' + ++batchChildOrdinal)
         batchChildren.set(child.id, child)
+        if (rejectBatchChildModelPolicy) rejectModelPolicyFrom = policyModels.length + 1
         Object.assign(child.session.header, { origin: 'subagent', parentSession: request.parent.id })
         child.session.append('subagent/descriptor', { version: 2, mode: 'one-shot', provider: 'spawn', label: request.label })
         const callId = 'image-batch-real-call-' + batchChildOrdinal
@@ -1602,15 +1604,17 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     }
     const requestsBeforePolicyFailure = requests.length
     const jobsBeforePolicyFailure = jobs.length
-    rejectModelPolicyFrom = policyModels.length + 2
+    rejectBatchChildModelPolicy = true
     const policyFailureParent = nativeParent('image-batch-policy-failure-parent')
     const policyFailure = await imageBatch.execute({ tasks: [
       { prompt: 'real batch pre-job 1' }, { prompt: 'real batch pre-job 2' },
     ], concurrency: 1 }, { agent: policyFailureParent, callId: 'image-batch-policy-failure', signal: new AbortController().signal })
+    rejectBatchChildModelPolicy = false
     rejectModelPolicyFrom = undefined
     assert.equal(policyFailure.status, 'failed')
     assert.equal(requests.length, requestsBeforePolicyFailure)
     assert.equal(jobs.length, jobsBeforePolicyFailure)
+    assert.ok(batchChildren.size >= 1, 'model-policy fixture must create at least one batch child')
     const linkedPolicyFailures = policyFailure.tasks.filter(task => typeof task.child_session_id === 'string')
     const unstartedPolicyFailures = policyFailure.tasks.filter(task => typeof task.child_session_id !== 'string')
     assert.ok(linkedPolicyFailures.length >= 1, 'model-policy failure must retain at least one linked child')
