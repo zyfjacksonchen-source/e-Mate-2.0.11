@@ -90,6 +90,18 @@ test('normalizes trimming, scalar, empty, duplicate, and omitted references', ()
   assert.equal(value.tasks[0].promptSha256, imageBatchPromptSha256('new image'))
 })
 
+test('preserves normalized multibyte prompt and sixteen first-occurrence source IDs', () => {
+  const ids = Array.from({ length: 16 }, (_, index) => 'sha256:' + index.toString(16).padStart(64, '0'))
+  const value = normalizeImageBatchRequest({ tasks: [
+    { prompt: '  精确空白 🌟\n第二行  ', image_url: ids },
+    { prompt: 'new', image_url: [] },
+  ] })
+  assert.equal(value.tasks[0].prompt, '精确空白 🌟\n第二行')
+  assert.deepEqual(value.tasks[0].attachmentIds, ids)
+  assert.equal(value.tasks[0].operation, 'fusion')
+  assert.equal(value.tasks[1].operation, 'generate')
+})
+
 test('copies and freezes every normalized value', () => {
   const ids = [A, B, A]
   const tasks = [{ prompt: ' first ', image_url: ids }, task('second')]

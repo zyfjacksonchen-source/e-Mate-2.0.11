@@ -42,7 +42,7 @@ import {
   createOsCredentialBackend,
   runCommand,
 } from '../profile/plugins/credentials-os.js'
-import { apply as applyImageGeneration } from '../profile/plugins/image-generation.js'
+import { apply as applyImageGeneration, resolveBatchSources } from '../profile/plugins/image-generation.js'
 import {
   apply as applyModelPolicy,
   createQuotaService,
@@ -1098,11 +1098,55 @@ test('image capability stays visible and inert until its managed endpoint is con
   }
 })
 
+test('image batch source preparation uses parent catalog and verifies each CAS ref once in order', async () => {
+  const refs = [1, 2].map(value => ({
+    attachmentId: 'sha256:' + String(value).repeat(64), mediaType: 'image/png', bytes: 8,
+    width: 1, height: 1, name: 'source-' + value + '.png',
+  }))
+  const parent = { id: 'source-parent', session: {
+    header: { id: 'source-parent' }, events: [],
+    deriveMessages: () => [{ source: { kind: 'user' }, content: refs.map(attachment => ({ type: 'image', attachment })) }],
+  } }
+  const reads = []
+  const ctx = { attachments: { readImage: async ref => { reads.push(ref.attachmentId); return { ref: structuredClone(ref), data: new Uint8Array(ref.bytes) } } } }
+  const resolved = await resolveBatchSources(ctx, parent, refs.map(ref => ref.attachmentId), new AbortController().signal)
+  assert.deepEqual(resolved, refs)
+  assert.deepEqual(reads, refs.map(ref => ref.attachmentId))
+  assert(Object.isFrozen(resolved) && resolved.every(Object.isFrozen))
+
+  await assert.rejects(resolveBatchSources(ctx, parent, ['sha256:' + 'f'.repeat(64)], new AbortController().signal), /not a successful current-session image output/)
+  assert.equal(reads.length, 2)
+  await assert.rejects(resolveBatchSources({ attachments: { readImage: async ref => ({ ref: { ...ref, width: 2 }, data: new Uint8Array(ref.bytes) }) } },
+    parent, [refs[0].attachmentId], new AbortController().signal), /no longer matches/)
+  const unsupported = { ...refs[0], mediaType: 'image/gif' }
+  const oversized = { ...refs[0], attachmentId: 'sha256:' + '3'.repeat(64), bytes: 5 * 1024 * 1024 + 1 }
+  for (const source of [unsupported, oversized]) {
+    const sourceParent = { ...parent, session: { ...parent.session,
+      deriveMessages: () => [{ source: { kind: 'user' }, content: [{ type: 'image', attachment: source }] }],
+    } }
+    let read = false
+    await assert.rejects(resolveBatchSources({ attachments: { readImage: async () => { read = true } } },
+      sourceParent, [source.attachmentId], new AbortController().signal), /unsupported or oversized/)
+    assert.equal(read, false)
+  }
+})
+
 test('image generation reuses the Model Gateway with Harness Jobs and attachments', async () => {
   const imageGenerationSource = readFileSync(new URL('../src/profile/image-generation.ts', import.meta.url), 'utf8')
   assert.equal(imageGenerationSource.match(/ctx\.jobs\.start\(/gu)?.length, 1)
   assert.doesNotMatch(imageGenerationSource, /startWhenAvailable|subagents?\.start|ctx\.on\(['"]subagent\//u)
   assert.doesNotMatch(imageGenerationSource, /IMAGE_LEAF_LABEL|childImageRuns|authorizedLeaves/u)
+  assert.doesNotMatch(imageGenerationSource, /export async function reviewImageCandidate/u)
+  const batchReviewSource = imageGenerationSource.slice(
+    imageGenerationSource.indexOf('async function reviewImageCandidate'),
+    imageGenerationSource.indexOf('function validVerification'),
+  )
+  assert.ok(batchReviewSource.indexOf('appendImageReceipt(owner, candidate)') < batchReviewSource.indexOf("requireImageFlush(ctx, owner, 'image batch review candidate')"))
+  assert.ok(batchReviewSource.indexOf("requireImageFlush(ctx, owner, 'image batch review candidate')") < batchReviewSource.indexOf('catch (primary)'))
+  assert.ok(batchReviewSource.indexOf('catch (primary)') < batchReviewSource.indexOf('appendImageReceipt(owner, cancelled)'))
+  assert.ok(batchReviewSource.indexOf('appendImageReceipt(owner, cancelled)') < batchReviewSource.indexOf("requireImageFlush(ctx, owner, 'image batch review candidate cleanup')"))
+  assert.equal(batchReviewSource.split('value.request_id, 3').length - 1, 3)
+  assert.match(batchReviewSource, /combinedReviewPersistence\(primary, cleanup\)/u)
   assert.equal(imageGenerationSource.match(/const IMAGE_MODEL = 'gpt-image-2-pro'/gu)?.length, 1)
   assert.equal(imageGenerationSource.match(/await request\(endpoint\(root, path\)/gu)?.length, 1)
   assert.doesNotMatch(imageGenerationSource, /['"]gpt-image-2['"]/u)

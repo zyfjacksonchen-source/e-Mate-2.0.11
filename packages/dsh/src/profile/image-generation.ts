@@ -11,7 +11,7 @@ import { createNativeImageTaskRuntime } from './native-image-task-runner.ts'
 export const name = 'emate-image-generation'
 export const inject = [
   'tools', 'jobs', 'attachments', 'sandboxPolicy', 'sessionProjections',
-  'sessionProjectionCache', 'sessionPersistence', 'sessions', 'subagents',
+  'sessionProjectionCache', 'sessionPersistence', 'sessions', 'agents', 'subagents',
   'emateIdentity', 'emateModelPolicy', 'emateCapabilities',
 ]
 
@@ -489,9 +489,29 @@ function verifiedReceipt(
   }
 }
 
+async function requireImageFlush(ctx, owner, label) {
+  try {
+    if (await ctx.sessions.flush(owner.session) === true) return
+  } catch (error) {
+    const failure = new Error(label + ' flush failed', { cause: error })
+    ;(failure as Error & { code: string }).code = 'image-review-persistence'
+    throw failure
+  }
+  const failure = new Error(label + ' did not reach durable storage')
+  ;(failure as Error & { code: string }).code = 'image-review-persistence'
+  throw failure
+}
+
+function combinedReviewPersistence(primary, cleanup) {
+  const failure = new AggregateError([primary, cleanup], 'image batch review and cleanup persistence failed', { cause: primary })
+  ;(failure as AggregateError & { code: string }).code = 'image-review-persistence'
+  return failure
+}
+
 async function reviewImageCandidate(
   ctx,
   owner,
+  questionOwner,
   callId,
   task,
   refs,
@@ -500,36 +520,56 @@ async function reviewImageCandidate(
   parentSessionId,
   clientRequestId,
   signal,
+  durableBatchReview = false,
 ) {
-  const candidate = verifiedReceipt(
-    callId, task, refs, value, jobId, parentSessionId, clientRequestId,
-  )
+  const candidate = verifiedReceipt(callId, task, refs, value, jobId, parentSessionId, clientRequestId)
   appendImageReceipt(owner, candidate)
+  if (durableBatchReview) {
+    try {
+      await requireImageFlush(ctx, owner, 'image batch review candidate')
+    } catch (primary) {
+      const cancelled = failedReceipt(
+        callId, imageOperation(refs), refs, 'cancelled', true, 'cancelled', parentSessionId,
+        jobId, clientRequestId, value.request_id, 3,
+      )
+      appendImageReceipt(owner, cancelled)
+      try {
+        await requireImageFlush(ctx, owner, 'image batch review candidate cleanup')
+      } catch (cleanup) {
+        throw combinedReviewPersistence(primary, cleanup)
+      }
+      throw primary
+    }
+  }
   const userQuestions = ctx.get('userQuestions')
-  if (userQuestions === undefined) return undefined
+  if (userQuestions === undefined) {
+    if (!durableBatchReview) return undefined
+    const cancelled = failedReceipt(
+      callId, imageOperation(refs), refs, 'cancelled', true, 'cancelled', parentSessionId,
+      jobId, clientRequestId, value.request_id, 3,
+    )
+    appendImageReceipt(owner, cancelled)
+    await requireImageFlush(ctx, owner, 'image batch unavailable review')
+    throw new Error('image batch parent review route is unavailable')
+  }
   const approve = '确认结果'
   const reject = '拒绝结果'
   const questionId = `image-review-${jobId}`
   const sources = refs.map(imageRef)
   const output = imageRef(value.image)
   const detail = [
-    '修改目标：',
-    task.prompt,
-    '',
-    '图片对照信息：',
+    '修改目标：', task.prompt, '', '图片对照信息：',
     ...sources.map((source, index) => `- 源图 ${index + 1}：${source.name ?? '未命名图片'}（${source.width}×${source.height}）`),
     `- 候选结果：${output.name ?? '改图候选'}（${output.width}×${output.height}）`,
     '- 系统已确认候选文件与源文件不同；修改语义仍需你对照图片确认。',
   ].join('\n')
+  let finalAppended = false
   try {
     const answer = await userQuestions.ask({
-      agent: owner,
+      agent: questionOwner,
       signal,
-      questions: [{
-        id: questionId,
-        header: '改图结果确认',
-        question: '请对照源图确认候选结果是否完整完成修改目标。',
-        detail,
+      questions: [{ id: questionId, header: '改图结果确认',
+        question: '请对照源图确认候选结果是否完整完成修改目标。', detail,
         options: [
           { label: approve, description: '确认候选图已完整满足修改目标。' },
           { label: reject, description: '结果不正确；本次任务失败，可显式重新修改。' },
@@ -538,14 +578,29 @@ async function reviewImageCandidate(
       }],
     })
     const selected = answer?.answers?.find(item => item?.id === questionId)
-    return selected?.custom === undefined
-      && selected?.selected?.length === 1
-      && selected.selected[0] === approve
-      ? 'accepted'
-      : 'rejected'
+    const decision = selected?.custom === undefined && selected?.selected?.length === 1
+      && selected.selected[0] === approve ? 'accepted' : 'rejected'
+    if (!durableBatchReview) return decision
+    const finalReceipt = verifiedReceipt(
+      callId, task, refs, value, jobId, parentSessionId, clientRequestId, decision, 3,
+    )
+    appendImageReceipt(owner, finalReceipt)
+    finalAppended = true
+    await requireImageFlush(ctx, owner, 'image batch final review')
+    return { decision, finalReceipt }
   } catch (error) {
-    if (signal.aborted) throw error
-    return undefined
+    if (finalAppended) throw error
+    if (!durableBatchReview) {
+      if (signal.aborted) throw error
+      return undefined
+    }
+    const cancelled = failedReceipt(
+      callId, imageOperation(refs), refs, 'cancelled', true, 'cancelled', parentSessionId,
+      jobId, clientRequestId, value.request_id, 3,
+    )
+    appendImageReceipt(owner, cancelled)
+    await requireImageFlush(ctx, owner, 'image batch cancelled review')
+    throw error
   }
 }
 
@@ -752,6 +807,25 @@ function successfulSessionImage(agent, attachmentId) {
     .find(candidate => candidate.attachmentId === attachmentId)
   if (image !== undefined) return image
   throw new Error(`image attachment ${attachmentId} is not a successful current-session image output`)
+}
+
+/** Resolve one normalized source list through the parent catalog and Attachment CAS exactly once per ID. */
+export async function resolveBatchSources(ctx, parent, attachmentIds, signal) {
+  const refs = attachmentIds.map(id => successfulSessionImage(parent, id))
+  const resolved = []
+  for (const ref of refs) {
+    signal.throwIfAborted()
+    if (!MEDIA_TYPES.has(ref.mediaType) || ref.bytes > MAX_EDIT_IMAGE_BYTES) {
+      throw new Error('image batch source attachment is unsupported or oversized')
+    }
+    const stored = await ctx.attachments.readImage(ref, signal)
+    if (!sameImageRef(stored.ref, ref) || !(stored.data instanceof Uint8Array)
+      || stored.data.byteLength !== ref.bytes || stored.data.byteLength > MAX_EDIT_IMAGE_BYTES) {
+      throw new Error('image batch source no longer matches its Attachment CAS receipt')
+    }
+    resolved.push(Object.freeze(imageRef(stored.ref)))
+  }
+  return Object.freeze(resolved)
 }
 
 function latestUserMessage(messages) {
@@ -1330,7 +1404,11 @@ export async function apply(ctx, config = {}) {
   ])
   ctx.sessionProjections.register(imageReceiptsProjectionDefinition(z))
   ctx.sessionProjections.register(imageBatchProjectionDefinition(z))
-  const nativeImageTasks = createNativeImageTaskRuntime(ctx)
+  const nativeImageTasks = createNativeImageTaskRuntime(ctx, {
+    sourceReviewAvailable: parent => ctx.get('userQuestions') !== undefined
+      && ctx.agents.get(parent.id) === parent && ctx.agents.roots().includes(parent),
+    resolveSources: (parent, attachmentIds, signal) => resolveBatchSources(ctx, parent, attachmentIds, signal),
+  })
   await hydrateImageReceiptProjections(ctx)
   ctx.on('agent/pre-step', async ({ agent }, next) => {
     const decision = await next()
@@ -1417,11 +1495,15 @@ export async function apply(ctx, config = {}) {
             value => { providerRequestId = value },
           )
           let reviewDecision
+          let finalReceipt
           if (imageResultStatus(refs, value) === 'needs-review') {
             if (started?.id === undefined) throw new Error('image Job identity is unavailable for native review')
-            reviewDecision = await reviewImageCandidate(
-              ctx,
+            let reviewed
+            try {
+              reviewed = await reviewImageCandidate(
+                ctx,
               exec.agent,
+              batchClaim?.sourceTask === true ? batchClaim.reviewOwner : exec.agent,
               exec.callId,
               task,
               refs,
@@ -1430,9 +1512,20 @@ export async function apply(ctx, config = {}) {
               parentSessionId,
               clientRequestId,
               signal,
-            )
+                batchClaim?.sourceTask === true,
+              )
+            } catch (error) {
+              if (error?.code === 'image-review-persistence') batchClaim?.reportReviewFailure(error)
+              throw error
+            }
+            if (isRecord(reviewed)) {
+              reviewDecision = reviewed.decision
+              finalReceipt = reviewed.finalReceipt
+            } else {
+              reviewDecision = reviewed
+            }
           }
-          return { ...value, reviewDecision, status: imageResultStatus(refs, value, reviewDecision) }
+          return { ...value, reviewDecision, finalReceipt, status: imageResultStatus(refs, value, reviewDecision) }
         })
         let image
         try {
@@ -1442,7 +1535,7 @@ export async function apply(ctx, config = {}) {
           throw error
         }
         await ctx.jobs.wait(started.id, IMAGE_TIMEOUT_MS, exec.agent, exec.signal)
-        const receipt = verifiedReceipt(
+        const receipt = image.finalReceipt ?? verifiedReceipt(
           exec.callId,
           task,
           refs,
@@ -1453,7 +1546,7 @@ export async function apply(ctx, config = {}) {
           image.reviewDecision,
           finalReceiptRevision(exec.agent, exec.callId),
         )
-        appendImageReceipt(exec.agent, receipt)
+        if (image.finalReceipt === undefined) appendImageReceipt(exec.agent, receipt)
         if (receipt.status === 'failed') {
           if (receipt.failure_code === 'user-rejected') {
             throw new Error('e-Mate image edit was rejected by the user; use a new explicit retry Tool call')
@@ -1524,7 +1617,7 @@ export async function apply(ctx, config = {}) {
   }
   ctx.tools.register(defineTool({
     name: 'image_batch',
-    description: 'Generate 2 to 8 mutually independent new images as one durable local batch. Each task has one non-empty prompt of at most 20,000 characters and produces exactly one image. Optional concurrency is 1 to 4 and defaults to 3. Use imagegen instead for one image or for any edit/reference task. Do not pass source image IDs until batch editing is enabled.',
+    description: 'Generate or edit 2 to 8 mutually independent images as one durable local batch. Each task has one non-empty prompt of at most 20,000 characters, optional ordered current-session image_url IDs, and produces exactly one image. Omitted or empty image_url means new image; one ID means edit; multiple IDs mean reference fusion. Optional concurrency is 1 to 4 and defaults to 3. Use imagegen instead for exactly one output.',
     parameters: imageBatchParameters(),
     output: imageBatchOutput,
     isConcurrencySafe: () => false,

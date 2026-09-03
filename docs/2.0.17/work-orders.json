@@ -355,7 +355,7 @@
     {
       "id": "EM217-105",
       "wave": "W1 图像运行时",
-      "title": "锁定单图与批图的提示词和参数保真",
+      "title": "启用 source-task 路由并锁定提示词与参数保真",
       "owner": "IMG",
       "depends_on": [
         "EM217-104"
@@ -364,8 +364,13 @@
       "worktree": "/Users/mac/e-mate/worktrees/em217-105",
       "write_set": [
         "packages/dsh/src/profile/image-batch.ts",
+        "packages/dsh/src/profile/native-image-task-runner.ts",
         "packages/dsh/src/profile/image-generation.ts",
-        "packages/dsh/test/**prompt-fidelity*"
+        "packages/dsh/test/**image-batch*",
+        "packages/dsh/test/**prompt-fidelity*",
+        "packages/dsh/test/e-mate.test.mjs",
+        "docs/2.0.17/work-orders.json",
+        "docs/2.0.17/check-plan.mjs"
       ],
       "implementation": [
         "沿用 EM217-002 已接受 pinned-spawn：exact prompt 只在 typed normalized args 中比较，随机 nonce 只在 one-shot descriptor label；prompt 文本不是 gate marker。",
@@ -373,6 +378,7 @@
         "raw 输入仅为 prompt 与可选 scalar/0..16 image_url IDs（允许 []/duplicates）；parent/child 在 digest/comparison 前同样 first-occurrence dedupe，persisted list 保持 ordered unique。固定 model/quality/size 由 provider policy 保持。",
         "EM217-101 至 EM217-104 只启用 normalized image list 为空的 new-image（omitted 与 explicit []）；batch 禁止 implicit history inference。本工单必须先完成 source-task route 才能启用 non-empty image list：parent 通过 shared CAS 校验 normalized ordered Attachment IDs，并可在 native child message 中携带这些 Attachment refs；gate 校验同一 normalized IDs。",
         "imagegen receipt 仍归 child；userQuestions 路由到 parent，child revision 2 必须在提问前 flush，回答后 revision 3 必须 append+flush；live child 在 adjudication 全程占用并发槽。",
+        "candidate revision 2 flush 失败时必须 append 唯一 cancelled revision 3 并尝试 cleanup flush 后再传播 image-review-persistence；双 flush 失败合并报告且绝不提问。所有 provider response 后的 cancelled revision 3 保留 recorded billing、provider_request_id 与 model。",
         "parent userQuestions 不可用时 source task 必须在 provider 前拒绝；不得留下永久 needs-review，禁止 child 改写、module global、remote provider 或模型/质量/尺寸降级。"
       ],
       "acceptance": [

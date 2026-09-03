@@ -39,7 +39,7 @@ interface RuntimeContext {
     getProvider(name: string): { readonly inheritsParentContext: boolean; readonly capabilities?: { readonly toolFilter?: boolean; readonly persona?: boolean } } | undefined
     start(name: string, request: {
       readonly label: string
-      readonly prompt: readonly { readonly type: 'text'; readonly text: string }[]
+      readonly prompt: readonly ({ readonly type: 'text'; readonly text: string } | { readonly type: 'image'; readonly attachment: ImageAttachmentRef })[]
       readonly parent: AgentLike
       readonly signal: AbortSignal
       readonly toolFilter: { readonly allow: readonly string[] }
@@ -54,8 +54,8 @@ interface TerminalReceipt {
   readonly status: 'completed' | 'needs-review' | 'failed' | 'cancelled' | 'unknown'
   readonly billing_status: 'not-submitted' | 'recorded' | 'unknown'
   readonly parent_session_id: string
-  readonly operation: 'generate'
-  readonly sources: readonly []
+  readonly operation: 'generate' | 'edit' | 'fusion'
+  readonly sources: readonly ImageAttachmentRef[]
   readonly job_id?: string
   readonly client_request_id?: string
   readonly output?: ImageAttachmentRef
@@ -90,28 +90,35 @@ function sameImage(left: ImageAttachmentRef, right: ImageAttachmentRef): boolean
   return left.attachmentId === right.attachmentId && left.mediaType === right.mediaType && left.bytes === right.bytes
     && left.width === right.width && left.height === right.height && left.name === right.name
 }
-function receipt(value: unknown, owner: string, eventSeq: number): { receipt: TerminalReceipt; pointer: ImageBatchReceiptPointer } {
+function receipt(value: unknown, owner: string, eventSeq: number, task: NormalizedImageBatchTask,
+  sources: readonly ImageAttachmentRef[]): { receipt: TerminalReceipt; pointer: ImageBatchReceiptPointer } {
   if (!Number.isSafeInteger(eventSeq) || eventSeq < 0) throw new Error('native image receipt event sequence is invalid')
   if (!isRecord(value) || value.schema_version !== 2 || typeof value.call_id !== 'string' || value.call_id.length === 0
     || !Number.isSafeInteger(value.revision) || Number(value.revision) < 1 || Number(value.revision) > 3
     || typeof value.status !== 'string' || !TERMINAL_STATUSES.has(value.status)
     || typeof value.billing_status !== 'string' || !['not-submitted', 'recorded', 'unknown'].includes(value.billing_status)
-    || value.parent_session_id !== owner || value.operation !== 'generate'
-    || !Array.isArray(value.sources) || value.sources.length !== 0 || !Array.isArray(value.content)
+    || value.parent_session_id !== owner || value.operation !== task.operation
+    || !Array.isArray(value.sources) || value.sources.length !== sources.length || !Array.isArray(value.content)
     || value.job_id !== undefined && typeof value.job_id !== 'string'
     || value.client_request_id !== undefined && typeof value.client_request_id !== 'string'
     || value.failure_code !== undefined && typeof value.failure_code !== 'string') throw new Error('native image child receipt is invalid')
+  const receiptSources = value.sources.map(imageRef)
+  if (receiptSources.some((source, index) => !sameImage(source, sources[index]))) {
+    throw new Error('native image child receipt sources are invalid')
+  }
   const output = value.output === undefined ? undefined : imageRef(value.output)
   const block = value.content[0]
-  if (output === undefined ? value.content.length !== 0
-    : value.content.length !== 1 || !isRecord(block) || block.type !== 'image'
-      || !sameImage(imageRef(block.attachment), output)) throw new Error('native image child receipt content is invalid')
-  if (value.status === 'completed' && output === undefined || value.status !== 'completed' && output !== undefined) {
+  const imageBearing = value.status === 'completed' || value.status === 'needs-review'
+  if (imageBearing
+    ? output === undefined || value.content.length !== 1 || !isRecord(block) || block.type !== 'image'
+      || !sameImage(imageRef(block.attachment), output)
+    : value.content.length !== 0) throw new Error('native image child receipt content is invalid')
+  if (task.operation === 'generate' && value.status !== 'completed' && output !== undefined) {
     throw new Error('native image child receipt output status is invalid')
   }
   const parsed: TerminalReceipt = { call_id: value.call_id, revision: Number(value.revision),
     status: value.status as TerminalReceipt['status'], billing_status: value.billing_status as TerminalReceipt['billing_status'],
-    parent_session_id: owner, operation: 'generate', sources: [],
+    parent_session_id: owner, operation: task.operation, sources: receiptSources,
     ...(value.job_id === undefined ? {} : { job_id: nativeId(value.job_id, 'native image Job ID') }),
     ...(value.client_request_id === undefined ? {} : { client_request_id: nativeId(value.client_request_id, 'native image client request ID') }),
     ...(output === undefined ? {} : { output }),
@@ -144,6 +151,8 @@ interface Gate {
   readonly parentCallId: string
   readonly taskId: string
   readonly task: NormalizedImageBatchTask
+  readonly parent: AgentLike
+  readonly sources: readonly ImageAttachmentRef[]
   readonly controller: AbortController
   readonly opened: Promise<string>
   readonly claimed: Promise<string>
@@ -155,10 +164,11 @@ interface Gate {
   isOpen: boolean
   settled: boolean
   run?: SubagentRunLike
+  reviewFailure?: unknown
   timer: ReturnType<typeof setTimeout>
 }
 function createGate(parentSessionId: string, parentCallId: string, taskId: string, task: NormalizedImageBatchTask,
-  parentSignal: AbortSignal, deadlineMs: number): Gate {
+  parent: AgentLike, sources: readonly ImageAttachmentRef[], parentSignal: AbortSignal, deadlineMs: number): Gate {
   const controller = new AbortController()
   let resolveOpen!: (value: string) => void
   let rejectOpen!: (reason: unknown) => void
@@ -168,7 +178,7 @@ function createGate(parentSessionId: string, parentCallId: string, taskId: strin
   void opened.catch(() => undefined)
   const onAbort = () => gate.fail(parentSignal.reason ?? new Error('image batch cancelled'))
   const gate: Gate = {
-    nonce: randomBytes(32).toString('base64url'), parentSessionId, parentCallId, taskId, task, controller, opened, claimed,
+    nonce: randomBytes(32).toString('base64url'), parentSessionId, parentCallId, taskId, task, parent, sources, controller, opened, claimed,
     isOpen: false, settled: false,
     open() { if (!gate.settled) { gate.isOpen = true; gate.settled = true; resolveOpen(gate.taskId) } },
     fail(reason) { controller.abort(reason); if (!gate.settled) { gate.settled = true; rejectOpen(reason) } },
@@ -183,7 +193,11 @@ function createGate(parentSessionId: string, parentCallId: string, taskId: strin
 }
 
 /** Creates effect-owned nonce gates and a bounded native child executor for image_batch. */
-export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: { deadlineMs?: number } = {}) {
+export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: {
+  deadlineMs?: number
+  sourceReviewAvailable?(parent: AgentLike): boolean
+  resolveSources?(parent: AgentLike, attachmentIds: readonly string[], signal: AbortSignal): Promise<readonly ImageAttachmentRef[]>
+} = {}) {
   const deadlineMs = options.deadlineMs ?? 610_000
   const lookup = new Map<string, Gate>()
   const active = new Set<Gate>()
@@ -201,7 +215,7 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: { dea
     await Promise.allSettled([...active].map(cleanup))
   }, 'emate.image-batch: abort active native children')
 
-  async function claim(agent: AgentLike, args: unknown): Promise<{ taskId: string; batchId: string; ordinal: number } | undefined> {
+  async function claim(agent: AgentLike, args: unknown): Promise<{ taskId: string; batchId: string; ordinal: number; reviewOwner: AgentLike; sourceTask: boolean; reportReviewFailure(reason: unknown): void } | undefined> {
     if (agent.session.header.origin !== 'subagent') return undefined
     const value = descriptor(agent)
     if (value === undefined || typeof value.label !== 'string' || !value.label.startsWith(LABEL_PREFIX)) return undefined
@@ -222,7 +236,9 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: { dea
     }
     const taskId = await gate.opened
     gate.controller.signal.throwIfAborted()
-    return { taskId, batchId: imageBatchId(gate.parentSessionId, gate.parentCallId), ordinal: gate.task.ordinal }
+    return { taskId, batchId: imageBatchId(gate.parentSessionId, gate.parentCallId), ordinal: gate.task.ordinal,
+      reviewOwner: gate.parent, sourceTask: gate.task.attachmentIds.length > 0,
+      reportReviewFailure(reason) { gate.reviewFailure = reason; gate.fail(reason) } }
   }
 
   const flush = async (session: SessionLike, label: string) => {
@@ -251,17 +267,29 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: { dea
   async function execute(raw: unknown, exec: ToolExecution) {
     if (disposed) throw new Error('image batch runtime is disposed')
     const request = normalizeImageBatchRequest(raw)
-    if (request.tasks.some(task => task.attachmentIds.length !== 0)) {
-      const failure = new Error('image batch source tasks are unavailable until the native source-review route is enabled') as Error & { code: string }
-      failure.code = 'source-task-unavailable'
-      throw failure
-    }
     const parent = exec.agent
     const session = parent.session
     const sessionId = nativeId(session.header.id, 'image batch parent Session ID')
     if (parent.id !== sessionId) throw new Error('image batch parent Agent does not own its Session')
     const callId = nativeId(exec.callId, 'image batch parent Tool call ID')
     replayGuard(session, sessionId, callId)
+    const preparedSources = new Map<number, readonly ImageAttachmentRef[]>()
+    if (request.tasks.some(task => task.attachmentIds.length > 0)) {
+      if (options.resolveSources === undefined || options.sourceReviewAvailable?.(parent) !== true) {
+        throw new Error('image batch source review route is unavailable')
+      }
+      const uniqueIds = [...new Set(request.tasks.flatMap(task => task.attachmentIds))]
+      const resolved = await options.resolveSources(parent, uniqueIds, exec.signal)
+      if (resolved.length !== uniqueIds.length
+        || resolved.some((ref, index) => ref.attachmentId !== uniqueIds[index])) {
+        throw new Error('image batch source resolution did not preserve normalized attachment order')
+      }
+      const byId = new Map(resolved.map(ref => [ref.attachmentId, Object.freeze({ ...ref })]))
+      for (const task of request.tasks) {
+        if (task.attachmentIds.length === 0) continue
+        preparedSources.set(task.ordinal, Object.freeze(task.attachmentIds.map(id => byId.get(id)!)))
+      }
+    }
     preflight()
     await ctx.emateModelPolicy.assertModel('gpt-image-2-pro')
     exec.signal.throwIfAborted()
@@ -307,18 +335,23 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: { dea
 
     const runTask = async (task: NormalizedImageBatchTask) => {
       if (fatal !== undefined || exec.signal.aborted || disposed) return
-      const gate = createGate(sessionId, callId, imageBatchTaskId(sessionId, callId, task.ordinal), task, exec.signal, deadlineMs)
+      const sources = preparedSources.get(task.ordinal) ?? []
+      const gate = createGate(sessionId, callId, imageBatchTaskId(sessionId, callId, task.ordinal), task, parent, sources, exec.signal, deadlineMs)
       lookup.set(gate.nonce, gate); active.add(gate)
       let proven: ProvenImage | undefined
       let terminalPointer: ImageBatchReceiptPointer | undefined
       let terminalReceipt: TerminalReceipt | undefined
       try {
-        const args = { prompt: task.prompt, image_url: [] as string[] }
-        const prompt = ['Generate exactly one new image for this instruction.',
-          'Call imagegen exactly once with these exact arguments, including the empty image_url array:', JSON.stringify(args),
-          'Make no second Tool call and do not delegate. Do not change these arguments or infer an image. Internal typed gateway admission may retry according to its own policy. Stop after imagegen returns.'].join('\n')
+        const args = { prompt: task.prompt, image_url: [...task.attachmentIds] }
+        const prompt = [task.operation === 'generate'
+          ? 'Generate exactly one new image for this instruction.'
+          : 'Create exactly one edited image from the attached source images in their given order.',
+          'Call imagegen exactly once with these exact arguments:', JSON.stringify(args),
+          'Make no second Tool call and do not delegate. Do not change these arguments or infer another image. Internal typed gateway admission may retry according to its own policy. Stop after imagegen returns.'].join('\n')
+        const content = [{ type: 'text' as const, text: prompt },
+          ...sources.map(source => ({ type: 'image' as const, attachment: source }))]
         const run = await ctx.subagents.start(PROVIDER, { label: LABEL_PREFIX + gate.nonce,
-          prompt: [{ type: 'text', text: prompt }], parent, signal: gate.controller.signal,
+          prompt: content, parent, signal: gate.controller.signal,
           toolFilter: { allow: ['imagegen'] }, persona: PERSONA })
         gate.run = run
         await Promise.race([gate.claimed, run.result.then(() => { throw new Error('native image child made no authorized imagegen call') })])
@@ -330,13 +363,27 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: { dea
           child_session_id: gate.claimedChildId, updated_at: new Date().toISOString() }, 'image batch task link')
         gate.open()
         await run.result
+        if (gate.reviewFailure !== undefined) {
+          const failure = new PersistenceError('image batch child review persistence failed')
+          failFatal(failure)
+          throw failure
+        }
         try { await flush(run.localAgent.session, 'image batch child result') } catch (error) { failFatal(error); throw error }
 
         const events = [...run.localAgent.session.events]
         const calls = events.filter(event => event.type === 'tool/call' && isRecord(event.data) && event.data.name === 'imagegen')
         const terminals = events.filter(event => event.type === 'emate/image-output' && isRecord(event.data)
           && typeof event.data.status === 'string' && TERMINAL_STATUSES.has(event.data.status))
-        const parsed = terminals.map(event => receipt(event.data, gate.claimedChildId!, event.seq))
+        const reviewEvents = terminals.filter(event => isRecord(event.data) && event.data.status === 'needs-review')
+        const finalEvents = terminals.filter(event => isRecord(event.data) && event.data.status !== 'needs-review')
+        const reviews = reviewEvents.map(event => receipt(event.data, gate.claimedChildId!, event.seq, task, sources))
+        const parsed = finalEvents.map(event => receipt(event.data, gate.claimedChildId!, event.seq, task, sources))
+        if (reviewEvents.length > 1 || task.operation === 'generate' && reviewEvents.length !== 0
+          || task.operation !== 'generate' && reviewEvents.length === 0 && parsed[0]?.receipt.status === 'completed'
+          || reviewEvents.length === 1 && (reviews[0].receipt.revision !== 2 || parsed[0]?.receipt.revision !== 3
+            || reviews[0].receipt.call_id !== parsed[0]?.receipt.call_id || reviewEvents[0].seq >= finalEvents[0]?.seq)) {
+          throw new Error('native image child review receipt sequence is invalid')
+        }
         const completed = parsed.find(item => item.receipt.status === 'completed' && item.receipt.output !== undefined && item.receipt.job_id !== undefined)
         if (completed !== undefined) {
           const job = ctx.jobs.get(completed.receipt.job_id!, run.localAgent)
@@ -345,7 +392,7 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: { dea
             images.set(task.ordinal, proven.attachment)
           }
         }
-        if (calls.length !== 1 || terminals.length !== 1 || !isRecord(calls[0].data)
+        if (calls.length !== 1 || finalEvents.length !== 1 || !isRecord(calls[0].data)
           || typeof calls[0].data.callId !== 'string') throw new Error('native image child must contain exactly one imagegen call and terminal receipt')
         terminalReceipt = parsed[0].receipt; terminalPointer = parsed[0].pointer
         const expectedClientRequestId = `image-${gate.taskId.slice('sha256:'.length)}`

@@ -147,7 +147,7 @@ export function imageBatchParameters() {
         properties: {
           prompt: { type: 'string', required: true, description: 'One non-empty image instruction of at most 20,000 characters.' },
           image_url: {
-            description: 'Optional exact sha256 attachment ID or ordered list of at most 16 IDs; EM217-103 accepts only omitted or empty lists.',
+            description: 'Optional exact current-session sha256 attachment ID or ordered list of at most 16 IDs for edit or reference fusion; omitted or empty means a new image.',
             oneOf: [
               { type: 'string' },
               { type: 'array', items: { type: 'string' } },

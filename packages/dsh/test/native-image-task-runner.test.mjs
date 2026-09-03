@@ -10,7 +10,7 @@ function session(id, meta = {}) {
   return { header: { id, ...meta }, events, append(type, data, options) { events.push({ seq: events.length, time: Date.now(), type, data, options }) } }
 }
 
-function harness({ flush = async () => true, mutateRun, outcome = 'completed', callCount = 1, parentSessionId = 'parent', onStart, onDispose, descriptorTransform, claimArgs, deadlineMs = 2_000 } = {}) {
+function harness({ flush = async () => true, mutateRun, outcome = 'completed', callCount = 1, parentSessionId = 'parent', onStart, onDispose, descriptorTransform, claimArgs, deadlineMs = 2_000, sourceRefs, sourceReviewAvailable = sourceRefs !== undefined } = {}) {
   const disposers = []
   const parentSession = session(parentSessionId)
   const parent = { id: parentSessionId, session: parentSession }
@@ -23,6 +23,9 @@ function harness({ flush = async () => true, mutateRun, outcome = 'completed', c
   const starts = []
   const disposedOrder = []
   const aborted = []
+  const childPrompts = []
+  const childSessions = []
+  const sourceResolutions = []
   const returnedStarts = new Set()
   const claimsBeforeReturn = []
   const jobs = new Map()
@@ -37,8 +40,10 @@ function harness({ flush = async () => true, mutateRun, outcome = 'completed', c
         assert.equal(name, 'spawn')
         assert.deepEqual(request.toolFilter, { allow: ['imagegen'] })
         assert(!request.prompt[0].text.includes(request.label.slice('emate-image-batch:'.length)))
+        childPrompts.push(request.prompt)
         const ordinal = ++childOrdinal
         const childSession = session('child-' + ordinal, { origin: 'subagent', parentSession: parentSessionId })
+        childSessions.push(childSession)
         starts.push(ordinal)
         if (onStart !== undefined) onStart({ ordinal, request, childSession })
         request.signal.addEventListener('abort', () => aborted.push(ordinal), { once: true })
@@ -58,6 +63,9 @@ function harness({ flush = async () => true, mutateRun, outcome = 'completed', c
           assert.equal(scope.ordinal, ordinal)
           assert.match(scope.taskId, /^sha256:[0-9a-f]{64}$/)
           const selected = typeof outcome === 'function' ? outcome(ordinal) : outcome
+          const ids = Array.isArray(args.image_url) ? args.image_url : args.image_url === undefined ? [] : [args.image_url]
+          const operation = ids.length === 0 ? 'generate' : ids.length === 1 ? 'edit' : 'fusion'
+          const sources = request.prompt.slice(1).map(block => block.attachment)
           if (selected === 'wait-abort') {
             await new Promise(resolve => request.signal.addEventListener('abort', resolve, { once: true }))
             return { stopReason: 'aborted', output: [] }
@@ -69,8 +77,25 @@ function harness({ flush = async () => true, mutateRun, outcome = 'completed', c
           if (selected === 'no-receipt') return { stopReason: 'completed', output: [] }
           if (selected === 'pre-job-failed') {
             childSession.append('emate/image-output', { schema_version: 2, revision: 2, call_id: callId,
-              operation: 'generate', status: 'failed', billing_status: 'not-submitted', parent_session_id: child.id,
-              client_request_id: 'image-' + scope.taskId.slice('sha256:'.length), sources: [], content: [], failure_code: 'validation-failed', verifier: {}, verification: {} })
+              operation, status: 'failed', billing_status: 'not-submitted', parent_session_id: child.id,
+              client_request_id: 'image-' + scope.taskId.slice('sha256:'.length), sources, content: [], failure_code: 'validation-failed', verifier: {}, verification: {} })
+            return { stopReason: 'error', output: [] }
+          }
+          if (selected === 'review-persistence') {
+            providers += 1
+            const jobId = 'emate-image-' + ordinal
+            jobs.set(jobId, { kind: 'emate-image', ownerSession: child.id, status: 'completed' })
+            const output = image(ordinal)
+            childSession.append('emate/image-output', { schema_version: 2, revision: 2, call_id: callId, operation,
+              status: 'needs-review', billing_status: 'recorded', parent_session_id: child.id, provider_request_id: 'provider-' + ordinal,
+              client_request_id: 'image-' + scope.taskId.slice('sha256:'.length), sources, content: [{ type: 'image', attachment: output }],
+              job_id: jobId, output, verifier: {}, verification: {} })
+            childSession.append('emate/image-output', { schema_version: 2, revision: 3, call_id: callId, operation,
+              status: 'cancelled', billing_status: 'recorded', parent_session_id: child.id, provider_request_id: 'provider-' + ordinal,
+              client_request_id: 'image-' + scope.taskId.slice('sha256:'.length), sources, content: [], job_id: jobId,
+              failure_code: 'cancelled', verifier: {}, verification: {} })
+            const failure = new Error('candidate flush failed')
+            scope.reportReviewFailure(failure)
             return { stopReason: 'error', output: [] }
           }
           providers += 1
@@ -81,14 +106,18 @@ function harness({ flush = async () => true, mutateRun, outcome = 'completed', c
               : selected === 'invalid-bytes' ? { ...image(ordinal), bytes: 0 }
                 : selected === 'invalid-dimension' ? { ...image(ordinal), width: 65_536 }
                   : selected === 'invalid-name' ? { ...image(ordinal), name: 'bad/name.png' } : image(ordinal)
+          if (sources.length > 0) childSession.append('emate/image-output', { schema_version: 2, revision: 2, call_id: callId,
+            operation, status: 'needs-review', billing_status: 'recorded', parent_session_id: child.id,
+            client_request_id: 'image-' + scope.taskId.slice('sha256:'.length), sources,
+            content: [{ type: 'image', attachment: output }], job_id: jobId, output, verifier: {}, verification: {} })
           childSession.append('emate/image-output', { schema_version: 2,
-            revision: selected === 'invalid-revision' ? 4 : 2, call_id: callId,
-            operation: selected === 'invalid-operation' ? 'edit' : 'generate',
-            status: selected === 'bad-status' ? { value: 'completed' } : 'completed',
+            revision: selected === 'invalid-revision' ? 4 : sources.length > 0 ? 3 : 2, call_id: callId,
+            operation: selected === 'invalid-operation' ? (operation === 'generate' ? 'edit' : 'generate') : operation,
+            status: selected === 'bad-status' ? { value: 'completed' } : selected === 'review-rejected' ? 'failed' : 'completed',
             billing_status: 'recorded', parent_session_id: child.id,
-            client_request_id: 'image-' + scope.taskId.slice('sha256:'.length), sources: selected === 'invalid-sources' ? [image(99)] : [],
-            content: [{ type: 'image', attachment: output }], job_id: jobId,
-            output, verifier: {}, verification: {} })
+            client_request_id: 'image-' + scope.taskId.slice('sha256:'.length), sources: selected === 'invalid-sources' ? [image(99)] : sources,
+            content: selected === 'review-rejected' ? [] : [{ type: 'image', attachment: output }], job_id: jobId,
+            output, ...(selected === 'review-rejected' ? { failure_code: 'user-rejected' } : {}), verifier: {}, verification: {} })
           return { stopReason: 'completed', output: [] }
         })()
         const run = { id: child.id, localAgent: child, result,
@@ -98,10 +127,12 @@ function harness({ flush = async () => true, mutateRun, outcome = 'completed', c
       },
     },
   }
-  runtime = createNativeImageTaskRuntime(ctx, { deadlineMs })
+  runtime = createNativeImageTaskRuntime(ctx, { deadlineMs, sourceReviewAvailable: () => sourceReviewAvailable,
+    resolveSources: sourceRefs === undefined ? undefined : async (_parent, ids) => { sourceResolutions.push([...ids]); return ids.map(id => sourceRefs.get(id)) },
+  })
   const claim = runtime.claim
   runtime.claim = (agent, args) => { claimsBeforeReturn.push(!returnedStarts.has(Number(agent.id.slice('child-'.length)))); return claim(agent, args) }
-  return { ctx, runtime, parent, parentSession, stats: () => ({ live, maximum, providers, scopes, starts, disposedOrder, aborted, claimsBeforeReturn }), dispose: async () => Promise.all(disposers.map(fn => fn())) }
+  return { ctx, runtime, parent, parentSession, stats: () => ({ live, maximum, providers, scopes, starts, disposedOrder, aborted, claimsBeforeReturn, childPrompts, childSessions, sourceResolutions }), dispose: async () => Promise.all(disposers.map(fn => fn())) }
 }
 
 for (const count of [2, 4, 5, 8]) test('runs ' + count + ' tasks with the requested worker bound', async () => {
@@ -166,10 +197,92 @@ test('provider remains closed until the parent child link is durable', async () 
   assert.equal(h.stats().providers, 2)
 })
 
-test('source tasks and failed created durability reject before child creation', async () => {
+test('source route preflights normalized IDs and carries exact ordered ContentBlocks', async () => {
+  const first = image(10)
+  const second = image(11)
+  const h = harness({ sourceRefs: new Map([[first.attachmentId, first], [second.attachmentId, second]]) })
+  const result = await h.runtime.execute({ tasks: [
+    { prompt: '  编辑 多字节 🌟  ', image_url: [first.attachmentId, first.attachmentId, second.attachmentId] },
+    { prompt: 'new', image_url: [] },
+  ], concurrency: 1 }, { agent: h.parent, callId: 'source', signal: new AbortController().signal })
+  assert.equal(result.status, 'completed')
+  assert.deepEqual(h.stats().sourceResolutions, [[first.attachmentId, second.attachmentId]])
+  assert.deepEqual(h.stats().childPrompts[0].slice(1), [
+    { type: 'image', attachment: first }, { type: 'image', attachment: second },
+  ])
+  assert.deepEqual(JSON.parse(h.stats().childPrompts[0][0].text.split('\n')[2]), {
+    prompt: '编辑 多字节 🌟', image_url: [first.attachmentId, second.attachmentId],
+  })
+  assert.equal(h.stats().childPrompts[1].length, 1)
+  assert.deepEqual(h.parentSession.events[0].data.tasks.map(task => task.image_url), [
+    [first.attachmentId, second.attachmentId], [],
+  ])
+})
+
+test('claimed source gate rejects reordered IDs and extra fields before provider', async t => {
+  const refs = [image(12), image(13)]
+  for (const [name, claimArgs] of [
+    ['reordered', args => ({ ...args, image_url: [...args.image_url].reverse() })],
+    ['extra', args => ({ ...args, model: 'forbidden' })],
+  ]) await t.test(name, async () => {
+    const h = harness({ sourceRefs: new Map(refs.map(ref => [ref.attachmentId, ref])), claimArgs })
+    const result = await h.runtime.execute({ tasks: [
+      { prompt: 'edit', image_url: refs.map(ref => ref.attachmentId) },
+      { prompt: 'edit again', image_url: refs.map(ref => ref.attachmentId) },
+    ], concurrency: 1 }, { agent: h.parent, callId: 'source-' + name, signal: new AbortController().signal })
+    assert.equal(result.status, 'failed')
+    assert.equal(h.stats().providers, 0)
+    assert.deepEqual(h.stats().sourceResolutions, [refs.map(ref => ref.attachmentId)])
+    assert.equal(result.tasks[0].submission_status, 'not-submitted')
+  })
+})
+
+test('rejected source review keeps revision-two and revision-three output evidence child-owned', async () => {
+  const source = image(15)
+  const h = harness({ sourceRefs: new Map([[source.attachmentId, source]]), outcome: 'review-rejected' })
+  const result = await h.runtime.execute({ tasks: [
+    { prompt: 'edit', image_url: source.attachmentId }, { prompt: 'edit again', image_url: source.attachmentId },
+  ] }, { agent: h.parent, callId: 'source-rejected', signal: new AbortController().signal })
+  assert.equal(result.status, 'failed')
+  assert.equal(result.images.length, 0)
+  for (const child of h.stats().childSessions) {
+    const receipts = child.events.filter(event => event.type === 'emate/image-output').map(event => event.data)
+    assert.deepEqual(receipts.map(receipt => [receipt.revision, receipt.status]), [[2, 'needs-review'], [3, 'failed']])
+    assert(receipts.every(receipt => receipt.output !== undefined))
+  }
+  assert.equal(JSON.stringify(h.parentSession.events).includes('attachmentId'), false)
+})
+
+test('candidate flush failure leaves one recorded cancelled revision three and aborts batch', async () => {
+  const source = image(16)
+  const h = harness({ sourceRefs: new Map([[source.attachmentId, source]]), outcome: 'review-persistence' })
+  await assert.rejects(h.runtime.execute({ tasks: [
+    { prompt: 'edit', image_url: source.attachmentId }, { prompt: 'edit again', image_url: source.attachmentId },
+  ], concurrency: 1 }, { agent: h.parent, callId: 'review-persistence', signal: new AbortController().signal }), /review persistence failed/)
+  assert.equal(h.stats().providers, 1)
+  const receipts = h.stats().childSessions[0].events.filter(event => event.type === 'emate/image-output').map(event => event.data)
+  assert.deepEqual(receipts.map(receipt => [receipt.revision, receipt.status]), [[2, 'needs-review'], [3, 'cancelled']])
+  assert.equal(receipts[1].billing_status, 'recorded')
+  assert.equal(receipts[1].provider_request_id, 'provider-1')
+  assert.equal(receipts.some(receipt => receipt.revision === 4), false)
+})
+
+test('source validation failure before Job remains terminal without review', async () => {
+  const source = image(14)
+  const h = harness({ sourceRefs: new Map([[source.attachmentId, source]]), outcome: 'pre-job-failed' })
+  const result = await h.runtime.execute({ tasks: [
+    { prompt: 'edit', image_url: source.attachmentId }, { prompt: 'edit again', image_url: source.attachmentId },
+  ] }, { agent: h.parent, callId: 'source-pre-job', signal: new AbortController().signal })
+  assert.equal(result.status, 'failed')
+  assert.equal(h.stats().providers, 0)
+  assert(result.failures.every(failure => failure.receipt.status === 'failed' && failure.job_id === undefined))
+  assert(h.stats().childPrompts.every(content => content.length === 2))
+})
+
+test('unavailable source review and failed created durability stop before provider', async () => {
   const source = harness()
   await assert.rejects(source.runtime.execute({ tasks: [{ prompt: 'a', image_url: image(1).attachmentId }, { prompt: 'b' }] },
-    { agent: source.parent, callId: 'source', signal: new AbortController().signal }), /source tasks are unavailable/)
+    { agent: source.parent, callId: 'source-unavailable', signal: new AbortController().signal }), /source review route is unavailable/)
   assert.equal(source.parentSession.events.length, 0)
   assert.equal(source.stats().providers, 0)
 
