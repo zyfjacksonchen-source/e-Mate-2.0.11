@@ -10,7 +10,7 @@
   },
   "baseline_evidence": {
     "source": "supervisor-provided baseline result",
-    "command": "corepack yarn --cwd desktop check",
+    "command": "workdir: desktop; corepack yarn check",
     "passed_files": 45,
     "skipped_files": 1,
     "passed_tests": 404,
@@ -68,8 +68,8 @@
         "electron_shell_generation": "not-required-unless-focused-tests-expose-ownership-defect"
       },
       "verify": [
-        "corepack yarn --cwd desktop workspace @e-mate/desktop vitest run tests/electron-runtime.spec.ts",
-        "MAIN-AGENT-ONLY: corepack yarn --cwd desktop check"
+        "workdir: desktop; corepack yarn workspace @e-mate/desktop vitest run tests/electron-runtime.spec.ts",
+        "MAIN-AGENT-ONLY: workdir: desktop; corepack yarn check"
       ],
       "rollback": "revert the single EM217-402 implementation commit"
     },
@@ -146,9 +146,11 @@
         "desktop/e-mate-desktop/src/pnpm.ts",
         "desktop/patches/dsh-app-boot@0.1.0-rc.7.patch",
         "desktop/package.json",
-        "desktop/yarn.lock"
+        "desktop/yarn.lock",
+        "scripts/harness-provenance.mjs"
       ],
       "target_tests": [
+        "scripts/harness-provenance.test.mjs",
         "desktop/e-mate-desktop/tests/plugin.spec.ts",
         "desktop/e-mate-desktop/tests/shutdown.spec.ts",
         "desktop/e-mate-desktop/tests/profiles.spec.ts",
@@ -158,12 +160,15 @@
         "desktop/e-mate-desktop/tests/package.spec.ts"
       ],
       "changes": [
-        "empty-machine-patch-parser"
+        "empty-machine-patch-parser",
+        "pinned-app-boot-overlay-admission"
       ],
       "verify": [
-        "corepack yarn --cwd desktop workspace @e-mate/desktop vitest run tests/profile.spec.ts tests/package.spec.ts",
-        "MAIN-AGENT-ONLY: corepack yarn --cwd desktop check"
+        "node --test scripts/harness-provenance.test.mjs",
+        "workdir: desktop; corepack yarn workspace @e-mate/desktop vitest run tests/profile.spec.ts tests/package.spec.ts",
+        "MAIN-AGENT-ONLY: workdir: desktop; corepack yarn check"
       ],
+      "fail_closed_reason": "Desktop provenance rejects any patched Harness resolution absent from the sole DESKTOP_OVERLAYS allowlist",
       "rollback": "revert the EM217-404 dependency patch, both resolution bindings, regenerated lockfile entry, and focused assertions together"
     },
     {
@@ -364,14 +369,17 @@
       "target_files": [
         "desktop/patches/dsh-app-boot@0.1.0-rc.7.patch",
         "desktop/package.json",
-        "desktop/yarn.lock"
+        "desktop/yarn.lock",
+        "scripts/harness-provenance.mjs"
       ],
       "target_tests": [
         "desktop/e-mate-desktop/tests/profile.spec.ts",
+        "scripts/harness-provenance.test.mjs",
         "desktop/e-mate-desktop/tests/package.spec.ts"
       ],
-      "semantics": "patch rc.7 dependency parser so null or undefined YAML means an empty patch list while non-array malformed input still fails; bind exact and caret rc.7 descriptors and regenerate the Yarn lock without changing the rc.7 version",
-      "rollback": "remove the dependency patch, both resolution bindings, lockfile patch resolution, and focused assertions as one EM217-404 revert"
+      "semantics": "patch rc.7 dependency parser so null or undefined YAML means an empty patch list while non-array malformed input still fails; bind exact and caret rc.7 descriptors, regenerate the Yarn lock, and admit the exact patch in the sole Desktop overlay allowlist without changing the rc.7 version",
+      "fail_closed_reason": "Desktop provenance rejects any patched Harness resolution absent from the sole DESKTOP_OVERLAYS allowlist",
+      "rollback": "remove the dependency patch, both resolution bindings, lockfile patch resolution, overlay admission, and focused assertions as one EM217-404 revert"
     }
   ],
   "rejected_imports": [
@@ -449,14 +457,18 @@
           "desktop/package.json",
           "desktop/yarn.lock",
           "desktop/e-mate-desktop/tests/profile.spec.ts",
-          "desktop/e-mate-desktop/tests/package.spec.ts"
+          "desktop/e-mate-desktop/tests/package.spec.ts",
+          "scripts/harness-provenance.mjs",
+          "scripts/harness-provenance.test.mjs"
         ],
         "changes": [
           "empty-machine-patch-parser",
+          "pinned-app-boot-overlay-admission",
           "exact-and-caret-rc.7-resolution-bindings",
           "regenerated-desktop-yarn-lock",
           "profile-and-package-assertions"
-        ]
+        ],
+        "fail_closed_reason": "Desktop provenance rejects any patched Harness resolution absent from the sole DESKTOP_OVERLAYS allowlist"
       },
       {
         "id": "EM217-405",
@@ -472,7 +484,10 @@
     "verification": {
       "focused_commands": {
         "EM217-402": "workdir: desktop; corepack yarn workspace @e-mate/desktop vitest run tests/electron-runtime.spec.ts",
-        "EM217-404": "workdir: desktop; corepack yarn workspace @e-mate/desktop vitest run tests/profile.spec.ts tests/package.spec.ts"
+        "EM217-404": [
+          "workdir: root; node --test scripts/harness-provenance.test.mjs",
+          "workdir: desktop; corepack yarn workspace @e-mate/desktop vitest run tests/profile.spec.ts tests/package.spec.ts"
+        ]
       },
       "full_check": "workdir: desktop; corepack yarn check",
       "full_check_runner": "main-agent-only",

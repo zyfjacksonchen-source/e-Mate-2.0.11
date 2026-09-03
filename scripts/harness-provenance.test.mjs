@@ -73,12 +73,19 @@ test('runs manager-free Harness build scripts in order through inherited pnpm an
   }
 })
 
-test('keeps exactly the three overlays still missing from e13', () => {
+test('keeps exactly the four pinned Desktop overlays', () => {
   assert.deepEqual([...DESKTOP_OVERLAYS], [
+    ['@deepseek-ai/dsh-app-boot', 'desktop/patches/dsh-app-boot@0.1.0-rc.7.patch'],
     ['@deepseek-ai/dsh-client-ui-workspace', 'desktop/patches/dsh-client-ui-workspace@0.1.0-rc.7.patch'],
     ['@deepseek-ai/dsh-sandbox-windows-acl', 'desktop/patches/dsh-sandbox-windows-acl@0.1.0-rc.7.patch'],
     ['@deepseek-ai/dsh-tool-fs', 'desktop/.yarn/patches/@deepseek-ai-dsh-tool-fs-npm-0.1.0-rc.7-redundant-escalation.patch'],
   ])
+
+  const appBoot = readFileSync(join(harnessRoot, 'packages/boot/app-boot/src/index.ts'), 'utf8')
+  const appBootPatch = readFileSync(join(root, DESKTOP_OVERLAYS.get('@deepseek-ai/dsh-app-boot')), 'utf8')
+  assert.equal(appBoot.includes('parsed === undefined') || appBoot.includes('parsed === null'), false)
+  assert.ok(appBoot.includes('if (!Array.isArray(parsed))'))
+  assert.ok(appBootPatch.includes('+	if (parsed === void 0 || parsed === null) return [];'))
 
   const workspace = readFileSync(join(harnessRoot, 'packages/client/ui-workspace/src/client/WorkspaceBrowser.tsx'), 'utf8')
   const workspacePatch = readFileSync(join(root, DESKTOP_OVERLAYS.get('@deepseek-ai/dsh-client-ui-workspace')), 'utf8')

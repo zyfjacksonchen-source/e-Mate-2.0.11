@@ -285,6 +285,23 @@ describe('desktop profile composition', () => {
     expect(() => readDesktopShellMode({ path })).toThrow('invalid settings document')
   })
 
+  it('treats empty machine-wide patch documents as no entries and rejects malformed roots', () => {
+    const home = temporaryHome()
+    const path = join(home, 'cordis.patch.yml')
+    const baseline = composeEntries([prepareDesktopProfile(undefined, home, 'win32').patches])
+
+    for (const content of ['', '# no machine-wide patches\n']) {
+      writeFileSync(path, content)
+      const rows = composeEntries([prepareDesktopProfile(undefined, home, 'win32').patches])
+      expect(rows).toEqual(baseline)
+    }
+
+    writeFileSync(path, 'not: a patch list\n')
+    expect(() => prepareDesktopProfile(undefined, home, 'win32')).toThrow(
+      'must be a top-level YAML array of loader patch entries',
+    )
+  })
+
   it('adapts one Windows native picker and desktop pwsh provider without replacing DSH seams', () => {
     const home = temporaryHome()
     writeFileSync(join(home, 'cordis.patch.yml'), [

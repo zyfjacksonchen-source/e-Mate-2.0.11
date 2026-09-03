@@ -487,6 +487,34 @@ describe('published package surface', () => {
     expect(lockfile).not.toContain('dsh-better-sidebar@')
   })
 
+  it('binds empty machine patch handling to the pinned rc.7 app-boot patch', () => {
+    const patchResolution = 'patch:@deepseek-ai/dsh-app-boot@npm%3A0.1.0-rc.7#./patches/dsh-app-boot@0.1.0-rc.7.patch'
+    const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
+    const patch = readFileSync(new URL('patches/dsh-app-boot@0.1.0-rc.7.patch', workspaceRoot), 'utf8')
+
+    expect(workspaceManifest.resolutions).toMatchObject({
+      '@deepseek-ai/dsh-app-boot@npm:0.1.0-rc.7': patchResolution,
+      '@deepseek-ai/dsh-app-boot@npm:^0.1.0-rc.7': patchResolution,
+    })
+    expect(patch).toBe([
+      'diff --git a/lib/index.js b/lib/index.js',
+      'index 8bca7aa8e26ef9c9f1495061d2e91ff89ebf434a..32c9f77f20af88f0606f75afd9fdf88126c91d90 100644',
+      '--- a/lib/index.js',
+      '+++ b/lib/index.js',
+      '@@ -840 +840,2 @@ function parsePatchList(binName, file, content, label) {',
+      '-\tif (!Array.isArray(parsed)) throw new Error(\`${binName}: ${label} ${file} must be a top-level YAML array of loader patch entries\`);',
+      '+\tif (parsed === void 0 || parsed === null) return [];',
+      '+\tif (!Array.isArray(parsed)) throw new Error(\`${binName}: ${label} ${file} must be a top-level YAML array of loader patch entries\`);',
+      '',
+    ].join('\n'))
+    expect(lockfile).toContain(
+      '"@deepseek-ai/dsh-app-boot@patch:@deepseek-ai/dsh-app-boot@npm%3A0.1.0-rc.7#./patches/dsh-app-boot@0.1.0-rc.7.patch::locator=%40e-mate%2Fdesktop-workspace%40workspace%3A.":',
+    )
+    expect(lockfile).toContain(
+      'resolution: "@deepseek-ai/dsh-app-boot@patch:@deepseek-ai/dsh-app-boot@npm%3A0.1.0-rc.7#./patches/dsh-app-boot@0.1.0-rc.7.patch::version=0.1.0-rc.7&hash=d4ccf8&locator=%40e-mate%2Fdesktop-workspace%40workspace%3A."',
+    )
+  })
+
   it('keeps the pinned app-builder patch free of local NSIS changes', () => {
     const patchResolution = 'patch:app-builder-lib@npm%3A26.15.7#./patches/app-builder-lib@26.15.7.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
