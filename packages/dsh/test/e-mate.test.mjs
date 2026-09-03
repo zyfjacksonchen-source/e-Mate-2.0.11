@@ -2235,7 +2235,11 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     for (const call of blockedBatch) {
       await assert.rejects(
         executeNativeImageCall(blockedBatchParent, blockedPosition, call),
-        /parent image batch rejected before provider submission[\s\S]*four sibling native subagent calls[\s\S]*run_in_background: false/u,
+        error => {
+          assert.match(error.message, /parent image batch rejected before provider submission[\s\S]*use image_batch once[\s\S]*never call imagegen directly for two or more independent new images/u)
+          assert.doesNotMatch(error.message, /sibling native subagent calls|run_in_background/u)
+          return true
+        },
       )
     }
     assert.equal(requests.length, requestsBeforeBlockedBatch)
