@@ -219,10 +219,18 @@ for (const required of ['explicit []', 'first-occurrence ordered unique ID list'
   assert(batch103.includes(required), 'EM217-103 missing image_url normalization rule: ' + required)
 }
 const worker104 = text('EM217-104')
-assert(worker104.includes('默认 3、硬上限 4'))
-assert(worker104.includes('不发送也不拥有本地 scheduling hint'))
-assert(worker104.includes('result inspection') && worker104.includes('dispose 完成后 refill'))
+assert.deepEqual(t('EM217-104').write_set, [
+  'packages/dsh/src/profile/native-image-task-runner.ts',
+  'packages/dsh/test/native-image-task-runner.test.mjs',
+  'packages/dsh/test/image-batch-worker-stress.test.mjs',
+])
+for (const required of ['shared native-image-task-runner Promise worker loop', '默认 3、硬上限 4',
+  '140 个 seeded interleavings', 'result inspection', 'run.dispose 完成后', 'runtime 保持不变',
+  '不创建 image-batch-admission.ts', '第二 state owner', 'public registration']) {
+  assert(worker104.includes(required), 'EM217-104 missing shared-worker rule: ' + required)
+}
 assert(!worker104.includes('admission hint 与本地资源共同决定'))
+assert(!t('EM217-104').write_set.some(path => path.includes('image-batch-admission')), 'EM217-104 must not create a second admission owner')
 const receipt106 = text('EM217-106')
 assert(receipt106.includes('receipt 与 child projection 保持完全不变'))
 assert(receipt106.includes('parent task link → existing child projection'))

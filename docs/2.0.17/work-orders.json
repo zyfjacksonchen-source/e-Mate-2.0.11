@@ -326,16 +326,16 @@
       "branch": "feat/2.0.17/em217-104-bounded-worker-refill",
       "worktree": "/Users/mac/e-mate/worktrees/em217-104",
       "write_set": [
-        "packages/dsh/src/profile/image-batch.ts",
-        "packages/dsh/src/profile/image-batch-admission.ts",
-        "packages/dsh/test/**image-batch*"
+        "packages/dsh/src/profile/native-image-task-runner.ts",
+        "packages/dsh/test/native-image-task-runner.test.mjs",
+        "packages/dsh/test/image-batch-worker-stress.test.mjs"
       ],
       "implementation": [
-        "使用极小的本地 live-child worker bound：默认 3、硬上限 4；现有 gateway admission 是最终授权者，但不发送也不拥有本地 scheduling hint。",
-        "5–8 图仅在 child result inspection 完成、child flush 成功、parent terminal/task-state flush 成功且 child dispose 完成后 refill。",
-        "live child（含正在终结但未 dispose）永不超过 bound；结果按 ordinal 排列。",
-        "取消后不启动 queued 项；已提交项按原生 Job 结果记 cancelled/unknown。",
-        "只加固 EM217-103 已激活实现的 live-child concurrency/refill/cancel；不移动 Tool/Session/Job/CAS/Tool Search/audit 所有权，不增加注册点或协议。"
+        "先审计 EM217-103 的 shared native-image-task-runner Promise worker loop；该 owner 已实现默认 3、硬上限 4 的 live-child bound、ordinal admission、quiescent refill 与 signal/effect cancellation，因此 deterministic red test 未证明 shared gap 时 runtime 保持不变。",
+        "使用 deferred/barrier-controlled tests 覆盖 task count 2–8、concurrency 1–4/默认 3 与 140 个 seeded interleavings；live child 包含已 settlement 但尚未 dispose 的 run。",
+        "下一 ordinal 仅在 child result inspection、child flush、parent terminal/task-state flush 与 run.dispose 完成后由同一 Promise worker loop refill；starts 与 result 均按 ordinal，gateway rejection 只是 task result 且成功 sibling 保留。",
+        "signal/HMR/persistence fatal abort active gate、停止 queued child start、等待 run settle/dispose；queued 项只产生 truthful cancelled/not-submitted，linked ambiguity 保留 unknown，不得永久 hang。",
+        "不创建 image-batch-admission.ts、queue、scheduler、gateway hint、dynamic concurrency、第二 state owner 或 public registration；gateway admission 仍是独立最终授权者且不驱动本地 worker bound。"
       ],
       "acceptance": [
         "任一时刻 live children <= configured bound <= 4；无 gateway hint 或动态并发协议。",
@@ -344,6 +344,8 @@
         "public Tool、durable event producer、receipt、CAS、Tool Search aliases 与 audit owner 均保持 EM217-103 形态；无 disconnected state/UI/endpoint。"
       ],
       "tests": [
+        "node --test packages/dsh/test/native-image-task-runner.test.mjs packages/dsh/test/image-batch-worker-stress.test.mjs",
+        "node docs/2.0.17/check-plan.mjs",
         "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
         "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
       ],
