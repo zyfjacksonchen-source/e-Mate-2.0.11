@@ -233,7 +233,8 @@ a {
   min-height: var(--target-desktop);
 }
 
-.filter-bar label {
+.filter-bar label,
+.filter-bar .filter-field {
   min-width: 142px;
   display: grid;
   gap: var(--space-1);
@@ -244,6 +245,10 @@ a {
 
 .filter-bar .user-filter {
   min-width: min(360px, 100%);
+}
+
+.filter-bar .scenario-filter {
+  min-width: 180px;
 }
 
 .filter-bar .arco-select,
@@ -973,6 +978,12 @@ tbody tr:last-child td {
   font-size: var(--text-caption-size);
 }
 
+.validation-buttons {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--space-2);
+}
+
 .loading-state,
 .drawer-loading {
   min-height: 360px;
@@ -1307,6 +1318,7 @@ tbody tr:last-child td {
   }
 
   .filter-bar label,
+  .filter-bar .filter-field,
   .filter-bar .user-filter {
     width: 100%;
   }
@@ -1352,6 +1364,11 @@ tbody tr:last-child td {
   .validation-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .validation-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
 
   .auth-shell {
