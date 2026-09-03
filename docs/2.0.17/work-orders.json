@@ -766,24 +766,25 @@
       "worktree": "/Users/mac/e-mate/worktrees/em217-301",
       "write_set": [
         "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-client.ts",
-        "packages/dsh/profile/plugins/emate-shell/src/client/image-gallery.tsx（仅接入点）",
-        "packages/dsh/profile/plugins/emate-shell/tests/**"
+        "packages/dsh/profile/plugins/emate-shell/tests/image-batch-client.client.spec.tsx",
+        "docs/2.0.17/work-orders.json"
       ],
       "implementation": [
         "通过正常 DSH Web route/RPC/client service/slot 读取 parent batch projection。",
         "按 batch_id/task_id 建索引，保留 ordinal；不扫描 DOM，不读取 Electron/Node 私有 API。",
-        "对状态更新做细粒度订阅，避免每个 receipt 触发整个聊天树重建。"
+        "通过 rc.7 useProjection selector/equality 在 future batch subtree 内复用结构；不创建第二订阅、store 或事件总线。",
+        "本分支仅作为 EM217-302 的 stack prerequisite，不单独集成；EM217-302 必须在真实 batch subtree 中导入并调用 hook，禁止 placeholder render。"
       ],
       "acceptance": [
         "parent turn open 时能拿到 queued/running/terminal。",
-        "相同 ID 更新幂等，乱序事件最终一致。",
-        "renderer 无新增 IPC 插件框架。"
+        "相同 ID 更新幂等，乱序事件最终一致；最后一个 task-state 与 parent terminal 之间的全 task 终态窗口可读。",
+        "renderer 无新增 IPC 插件框架；Gallery 保持不变，生产 consumer 由堆叠的 EM217-302 提供。"
       ],
       "tests": [
-        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "../../../../../upstream/deepseek-harness/node_modules/.bin/vitest run tests/image-batch-client.client.spec.tsx (from packages/dsh/profile/plugins/emate-shell; OPEN until dependencies exist)",
         "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
       ],
-      "rollback": "移除读取层入口；旧 Gallery 保持。",
+      "rollback": "删除 image-batch-client.ts 与其 focused test；旧 Gallery 未修改。",
       "risk": "中"
     },
     {
