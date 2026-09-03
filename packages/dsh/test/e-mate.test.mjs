@@ -1494,7 +1494,13 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       signal: new AbortController().signal,
     })
     const nativeParentScopes = new WeakMap()
-    const nativeParent = (rawId) => {
+    const nativeParent = (rawId, optionalMeta = {}) => {
+      const metaKeys = Object.keys(optionalMeta).sort()
+      assert.deepEqual(metaKeys, optionalMeta.origin === undefined ? [] : ['origin', 'parentSession'])
+      if (optionalMeta.origin !== undefined) {
+        assert.equal(optionalMeta.origin, 'subagent')
+        assert.equal(typeof optionalMeta.parentSession, 'string')
+      }
       const id = SessionId(rawId)
       const scopeFiber = context.plugin(() => {})
       const session = Session.create(id, undefined, {
@@ -1502,6 +1508,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         id,
         createdAt: Date.now(),
         cwd: temporary,
+        ...optionalMeta,
       })
       const parent = {
         id,
@@ -1589,10 +1596,12 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     pluginCtx.subagents = {
       getProvider: () => ({ inheritsParentContext: false, capabilities: { toolFilter: true, persona: true } }),
       async start(_provider, request) {
-        const child = nativeParent('image-batch-real-child-' + ++batchChildOrdinal)
+        const childId = 'image-batch-real-child-' + ++batchChildOrdinal
+        const child = nativeParent(childId, { origin: 'subagent', parentSession: request.parent.id })
         batchChildren.set(child.id, child)
+        assert.equal(child.session.header.origin, 'subagent')
+        assert.equal(child.session.header.parentSession, request.parent.id)
         if (rejectBatchChildModelPolicy) rejectModelPolicyFrom = policyModels.length + 1
-        Object.assign(child.session.header, { origin: 'subagent', parentSession: request.parent.id })
         child.session.append('subagent/descriptor', { version: 2, mode: 'one-shot', provider: 'spawn', label: request.label })
         const callId = 'image-batch-real-call-' + batchChildOrdinal
         const childArgs = { prompt: 'real batch pre-job ' + batchChildOrdinal, image_url: [] }
