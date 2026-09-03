@@ -1611,9 +1611,17 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(policyFailure.status, 'failed')
     assert.equal(requests.length, requestsBeforePolicyFailure)
     assert.equal(jobs.length, jobsBeforePolicyFailure)
-    for (const task of policyFailure.tasks) {
+    const linkedPolicyFailures = policyFailure.tasks.filter(task => typeof task.child_session_id === 'string')
+    const unstartedPolicyFailures = policyFailure.tasks.filter(task => typeof task.child_session_id !== 'string')
+    assert.ok(linkedPolicyFailures.length >= 1, 'model-policy failure must retain at least one linked child')
+    assert.equal(
+      linkedPolicyFailures.length,
+      batchChildren.size,
+      'linked policy-failure tasks must exactly match the fake batch child map',
+    )
+    for (const task of linkedPolicyFailures) {
       const child = batchChildren.get(task.child_session_id)
-      assert.ok(child)
+      assert.ok(child, `missing fake batch child for linked task ${task.task_id}: ${task.child_session_id}`)
       assert.equal(task.receipt.owner_session_id, task.child_session_id)
       assert.equal(task.failure_code, 'validation-failed')
       assert.notEqual(task.failure_code, 'child-contract-failed')
@@ -1623,6 +1631,14 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
       assert.equal('job_id' in receipt, false)
       assert.equal('provider_request_id' in receipt, false)
       assert.equal(task.submission_status, 'not-submitted')
+    }
+    for (const task of unstartedPolicyFailures) {
+      assert.equal('child_session_id' in task, false)
+      assert.equal('job_id' in task, false)
+      assert.equal('receipt' in task, false)
+      assert.equal(task.submission_status, 'not-submitted')
+      assert.ok(['failed', 'cancelled'].includes(task.state), `unstarted task has invalid terminal state: ${task.state}`)
+      assert.equal(task.failure_code, task.state === 'cancelled' ? 'cancelled' : 'not-submitted')
     }
 
     tools.delete('imagegen')
