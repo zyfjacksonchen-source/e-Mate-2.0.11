@@ -1973,6 +1973,100 @@ test('isolates distinct image batch-item task IDs as separate n=1 invocations', 
   );
 });
 
+test('local three-request bound leaves the configured fourth slot without gateway queue metadata', async () => {
+  const admissionLimits = {
+    tenantRequestsPerMinute: 100,
+    tenantBurst: 100,
+    tenantMaxConcurrent: 4,
+    invocationLeaseMs: 180_000,
+  };
+  const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((complete) => { resolve = complete; });
+    return { promise, resolve };
+  };
+  const held = Array.from({ length: 5 }, deferred);
+  const posted = Array.from({ length: 5 }, deferred);
+  const pending: Promise<Response>[] = [];
+
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const send = (taskId: string) => {
+        const request = imageRequest(baseUrl, undefined, {
+          ...responseHeaders(),
+          'x-e-mate-task-id': taskId,
+          'x-e-mate-trace-id': `trace-${taskId}`,
+        });
+        pending.push(request);
+        return request;
+      };
+
+      try {
+        const batch = [1, 2, 3].map((ordinal) => send(`batch-task-${ordinal}`));
+        await Promise.all(posted.slice(0, 3).map(({ promise }) => promise));
+
+        const independent = send('independent-task');
+        await posted[3]!.promise;
+        assert.equal(upstreamRequests.length, 4);
+
+        const limited = await send('overflow-task');
+        assert.equal(limited.status, 429);
+        assert.deepEqual(await limited.json(), {
+          error: {
+            code: 'TENANT_CONCURRENCY_LIMITED',
+            message: 'Too many model requests are already running',
+            retryAfterMs: 180_000,
+          },
+        });
+        assert.equal(limited.headers.get('retry-after'), '180');
+        assert.equal(upstreamRequests.length, 4);
+
+        held[0]!.resolve();
+        assert.equal((await batch[0]).status, 200);
+
+        const next = send('next-distinct-task');
+        await posted[4]!.promise;
+        held[4]!.resolve();
+        assert.equal((await next).status, 200);
+        assert.equal(upstreamRequests.length, 5);
+        assert.equal(new Set(upstreamRequests.map((request) => request.headers.get('idempotency-key'))).size, 5);
+        for (const upstream of upstreamRequests) {
+          assert.deepEqual(await upstream.json(), {
+            model: imageRoute.upstreamModelId,
+            prompt: 'A blue circle on white.',
+            size: '1024x1024',
+            n: 1,
+            response_format: 'b64_json',
+          });
+        }
+
+        held[1]!.resolve();
+        held[2]!.resolve();
+        held[3]!.resolve();
+        const completed = await Promise.all([batch[1]!, batch[2]!, independent]);
+        assert.deepEqual(completed.map(({ status }) => status), [200, 200, 200]);
+      } finally {
+        held.forEach(({ resolve }) => resolve());
+        await Promise.allSettled(pending);
+      }
+    },
+    async (_request, index) => {
+      posted[index - 1]!.resolve();
+      await held[index - 1]!.promise;
+      return Response.json({
+        data: [{ b64_json: 'aGVsbG8=' }],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      });
+    },
+    undefined,
+    undefined,
+    admissionLimits,
+    imageRoute,
+    { isEnabled: async () => true },
+    new InMemoryUsageStore(admissionLimits, () => 1_000)
+  );
+});
+
 test('keeps image and response APIs isolated and rejects extra image controls before upstream', async () => {
   await withGateway(
     async (baseUrl, upstreamRequests) => {
