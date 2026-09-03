@@ -1582,12 +1582,14 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.match(imagegen.description, /native image_batch child may call imagegen exactly once/u)
     assert.match(imagegen.description, /Never pass a provider, model, output path, size, quality, timeout, or concurrency policy/u)
     let batchChildOrdinal = 0
+    const batchChildren = new Map()
     pluginCtx.sessions = { flush: async () => true }
     pluginCtx.emateModelPolicy = modelPolicy
     pluginCtx.subagents = {
       getProvider: () => ({ inheritsParentContext: false, capabilities: { toolFilter: true, persona: true } }),
       async start(_provider, request) {
         const child = nativeParent('image-batch-real-child-' + ++batchChildOrdinal)
+        batchChildren.set(child.id, child)
         Object.assign(child.session.header, { origin: 'subagent', parentSession: request.parent.id })
         child.session.append('subagent/descriptor', { version: 2, mode: 'one-shot', provider: 'spawn', label: request.label })
         const callId = 'image-batch-real-call-' + batchChildOrdinal
@@ -1610,7 +1612,7 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.equal(requests.length, requestsBeforePolicyFailure)
     assert.equal(jobs.length, jobsBeforePolicyFailure)
     for (const task of policyFailure.tasks) {
-      const child = context.agents.get(task.child_session_id)
+      const child = batchChildren.get(task.child_session_id)
       assert.ok(child)
       assert.equal(task.receipt.owner_session_id, task.child_session_id)
       assert.equal(task.failure_code, 'validation-failed')
