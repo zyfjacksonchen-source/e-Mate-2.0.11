@@ -1595,8 +1595,24 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
         Object.assign(child.session.header, { origin: 'subagent', parentSession: request.parent.id })
         child.session.append('subagent/descriptor', { version: 2, mode: 'one-shot', provider: 'spawn', label: request.label })
         const callId = 'image-batch-real-call-' + batchChildOrdinal
-        child.session.append('tool/call', { name: 'imagegen', callId, arguments: '{}' })
-        const result = imagegen.execute({ prompt: 'real batch pre-job ' + batchChildOrdinal, image_url: [] }, {
+        const childArgs = { prompt: 'real batch pre-job ' + batchChildOrdinal, image_url: [] }
+        const childArguments = JSON.stringify(childArgs)
+        const turn = 200 + batchChildOrdinal
+        const step = 1
+        child.session.append('turn/start', { turn })
+        child.session.append('step/start', { turn, step })
+        child.session.append('assistant/message', {
+          turn,
+          step,
+          message: {
+            id: 'image-batch-real-message-' + batchChildOrdinal,
+            role: 'assistant',
+            content: [{ type: 'tool-call', id: callId, name: 'imagegen', arguments: childArguments }],
+            source: { kind: 'model', provider: 'e-mate-enterprise', model: 'gpt-5.6-luna' },
+          },
+        }, { surfaceOp: 'append' })
+        child.session.append('tool/call', { turn, step, name: 'imagegen', callId, arguments: childArguments })
+        const result = imagegen.execute(childArgs, {
           agent: child, callId, signal: request.signal,
         }).then(() => ({ stopReason: 'completed' }), () => ({ stopReason: 'error' }))
         return { id: child.id, localAgent: child, result, async dispose() { await result } }
