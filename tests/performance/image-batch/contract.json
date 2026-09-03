@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "id": "EM217-001-keyless-fixture-v1",
+  "purpose": "Reproduce supported 2.0.16 text-only new-image choreography and presentation boundaries without a provider call.",
+  "provider": {
+    "class": "deterministic-keyless-fixture",
+    "network": "forbidden",
+    "credentials": "none",
+    "response_payload": "metadata-only"
+  },
+  "batches": {
+    "runs_per_task_count": 20,
+    "task_counts": [
+      4,
+      5,
+      8
+    ],
+    "logical_clock": "integer fixture ticks",
+    "executed_input_class": "text-only-new-image"
+  },
+  "executed_request": {
+    "model": "gpt-image-2-pro",
+    "image_url": "omitted-new-image",
+    "aspect_ratio": "unexpressible",
+    "size": "unexpressible",
+    "quality": "provider-default-unexpressible"
+  },
+  "single_image_control": {
+    "task_count": 1,
+    "model": "gpt-image-2-pro",
+    "image_url": "omitted-new-image",
+    "aspect_ratio": "unexpressible",
+    "size": "unexpressible",
+    "quality": "provider-default-unexpressible",
+    "comparison_requires_equal": [
+      "model",
+      "image_url",
+      "aspect_ratio",
+      "size",
+      "quality"
+    ]
+  },
+  "unsupported_current_batch_inputs": [
+    {
+      "id": "reference-edit",
+      "status": "unsupported-in-2.0.16",
+      "current_behavior": "serial-in-parent",
+      "source_evidence": [
+        {
+          "file": "packages/dsh/src/profile/agent-operations.ts",
+          "assertion": "Run multiple edits serially in that Agent"
+        },
+        {
+          "file": "packages/dsh/src/profile/image-generation.ts",
+          "assertion": "imagegen accepts only prompt and optional image_url"
+        }
+      ]
+    },
+    {
+      "id": "reference-fusion",
+      "status": "unsupported-in-2.0.16",
+      "current_behavior": "not-delegated-as-batch",
+      "source_evidence": [
+        {
+          "file": "packages/dsh/src/profile/agent-operations.ts",
+          "assertion": "delegation boundary is two or more mutually independent new images"
+        },
+        {
+          "file": "packages/dsh/src/profile/image-generation.ts",
+          "assertion": "multiple image_url values describe one fusion operation, not a batch"
+        }
+      ]
+    },
+    {
+      "id": "caller-selected-aspect-ratio",
+      "status": "unsupported-in-2.0.16",
+      "current_behavior": "unexpressible",
+      "source_evidence": [
+        {
+          "file": "packages/dsh/src/profile/image-generation.ts",
+          "assertion": "normalizeTask permits only prompt and image_url"
+        }
+      ]
+    },
+    {
+      "id": "caller-selected-size",
+      "status": "unsupported-in-2.0.16",
+      "current_behavior": "unexpressible",
+      "source_evidence": [
+        {
+          "file": "packages/dsh/src/profile/image-generation.ts",
+          "assertion": "normalizeTask permits only prompt and image_url"
+        }
+      ]
+    },
+    {
+      "id": "caller-selected-quality",
+      "status": "unsupported-in-2.0.16",
+      "current_behavior": "unexpressible",
+      "source_evidence": [
+        {
+          "file": "packages/dsh/src/profile/image-generation.ts",
+          "assertion": "normalizeTask permits only prompt and image_url"
+        }
+      ]
+    }
+  ],
+  "timeline_events": [
+    "parent-planning",
+    "child-start",
+    "provider-submit",
+    "provider-finish",
+    "attachment-commit",
+    "projection-paint",
+    "child-return",
+    "turn-close"
+  ],
+  "item_metrics": [
+    "planning_to_start",
+    "provider_latency",
+    "attachment_commit_latency",
+    "projection_paint_latency",
+    "completion_to_turn_close"
+  ],
+  "batch_metrics": [
+    "total_duration",
+    "wave_count"
+  ],
+  "failure_classifications": [
+    "preflight",
+    "pre-submit",
+    "provider-rejected",
+    "provider-outcome-unknown",
+    "attachment-commit",
+    "projection-ui",
+    "cancelled"
+  ],
+  "sanitization": {
+    "forbidden_fields": [
+      "prompt",
+      "prompt_text",
+      "image",
+      "image_bytes",
+      "api_key",
+      "authorization"
+    ],
+    "identifiers": "deterministic fixture ids only"
+  }
+}
