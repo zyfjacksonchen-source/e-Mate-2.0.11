@@ -1,0 +1,1353 @@
+{
+  "schema_version": 1,
+  "baseline": {
+    "release_target": "2.0.17",
+    "lock": "docs/2.0.17/baseline-lock.json",
+    "emate_baseline_sha": "f876f01d8280e4ab20fe83b88c36c7fe7a662135",
+    "harness_commit": "4da69d7c3522ee51de12822c917c503a124f7a7d",
+    "desktop_reference_repository": "anywhere-labs/deepseek-harness-desktop",
+    "desktop_reference_commit": "6074088f5b660206e404b3591fab51fb99c69add",
+    "package_manager": "pnpm@11.7.0"
+  },
+  "operating_model": {
+    "main_agent": "sole supervisor/integrator/releaser",
+    "wip_limit": 6,
+    "one_ticket_one_branch_one_worktree_one_commit_one_pr": true,
+    "subagents_may_not": [
+      "安装依赖",
+      "构建、打包或发布",
+      "修改未分配写集",
+      "创建第二套 Host/Shell/Updater/Profile owner",
+      "通过 renderer 私有 IPC 控制插件/批任务",
+      "在幂等能力完成前增加自动图片重试"
+    ],
+    "merge_policy": "Main agent merges dependency-topologically and serializes overlapping owners/write sets; narrow check failure returns ticket to owner."
+  },
+  "roles": {
+    "SUP": "主代理/集成监督者：唯一可合并、安装依赖、构建、打包、发布的人。",
+    "IMG": "图像运行时代理：imagegen/image_batch、Session/Job 事件与投影。",
+    "GW": "模型网关代理：幂等、限流、重试边界、计量与审计。",
+    "UI": "Web 客户端代理：聊天内实时进度、最终 Gallery、冷启动恢复。",
+    "DESK": "桌面架构代理：只对齐 pinned anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add，不改业务运行时。",
+    "QA": "验证代理：测试代码、基准、Computer Use 用例与证据采集；不发布。",
+    "WINCU": "Native Windows Computer Use contributor inside the existing DESK-owned @e-mate/dsh-plugin-computer-use component."
+  },
+  "tickets": [
+    {
+      "id": "EM217-000",
+      "wave": "W0 基线冻结",
+      "title": "冻结 2.0.17 精确基线与执行清单",
+      "owner": "SUP",
+      "depends_on": [],
+      "branch": "feat/2.0.17/em217-000-baseline-lock",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-000",
+      "write_set": [
+        "docs/2.0.17/baseline-lock.json",
+        "docs/2.0.17/execution-plan.md",
+        "docs/2.0.17/owners.md",
+        "docs/2.0.17/work-orders.json",
+        "docs/2.0.17/check-plan.mjs"
+      ],
+      "implementation": [
+        "记录 e-Mate、Harness、唯一 pinned anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add 与包管理器精确版本。",
+        "建立一工单一分支一 worktree 一提交一 PR；WIP 上限 6。",
+        "建立禁止写集：Harness 子模块、第二套 Shell/Updater/Profile owner、私有渲染器 IPC 插件系统。"
+      ],
+      "acceptance": [
+        "所有后续 PR 能引用同一 baseline-lock.json。",
+        "CI 拒绝浮动版本、未登记写集、跨 owner 写入以及 2.0.17 提前改版本。",
+        "Exactly 38 unique, resolvable and acyclic work orders are machine-checked with WIP <= 6.",
+        "The rejected uploaded Desktop reference is absent from every active provenance field."
+      ],
+      "tests": [
+        "node docs/2.0.17/check-plan.mjs"
+      ],
+      "rollback": "删除本工单新增文档即可；不触碰运行时代码。",
+      "risk": "低"
+    },
+    {
+      "id": "EM217-001",
+      "wave": "W0 基线冻结",
+      "title": "复现生产并发生图并建立可重复基准",
+      "owner": "QA",
+      "depends_on": [
+        "EM217-000"
+      ],
+      "branch": "feat/2.0.17/em217-001-production-benchmark",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-001",
+      "write_set": [
+        "tests/performance/image-batch/**",
+        "docs/2.0.17/evidence-manifests/baseline.json"
+      ],
+      "implementation": [
+        "固定 4 图、5 图、8 图三组任务；每组含纯文本、带参考图、不同宽高比。",
+        "采集 parent planning、child start、provider submit/finish、attachment commit、projection paint、turn close 时间点。",
+        "连续执行至少 20 批形成开发基线；最终发布门禁执行 100 批。",
+        "记录单图对照组，禁止用不同模型、不同质量档或不同参考图做对比。"
+      ],
+      "acceptance": [
+        "可稳定复现“先全部等待、最终一次显示”行为。",
+        "每次运行都有 batch-level 与 item-level 原始证据，不仅有平均值。",
+        "失败可按前置、提交前、结果未知、provider 拒绝、附件落盘、投影/UI 分类。",
+        "Tracked evidence is a small sanitized manifest/assertion only; external immutable artifacts use URI plus SHA-256, with no secrets, prompt text, image bytes, logs, screenshots, videos, or installers committed."
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE PREREQUISITE: corepack pnpm run build:harness",
+        "corepack pnpm run test:fast",
+        "node --test tests/performance/image-batch/baseline.test.mjs"
+      ],
+      "rollback": "仅测试与证据文件；无产品代码回滚。",
+      "risk": "低"
+    },
+    {
+      "id": "EM217-002",
+      "wave": "W0 基线冻结",
+      "title": "批准 Image Batch ADR 与追加式事件协议",
+      "owner": "SUP",
+      "depends_on": [
+        "EM217-001"
+      ],
+      "branch": "feat/2.0.17/em217-002-image-batch-adr",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-002",
+      "write_set": [
+        "docs/2.0.17/adr/ADR-0217-image-batch.md",
+        "docs/2.0.17/contracts/image-batch.schema.json",
+        "docs/2.0.17/contracts/image-batch-result.schema.json"
+      ],
+      "implementation": [
+        "保留 imagegen 为单图原子工具；image_batch 是 @e-mate/dsh 内唯一多图入口并复用 native Subagent/Job/Session/projection/Attachment CAS。",
+        "ADR 固化已接受的 pinned-spawn：effect-scoped gate registry；随机不可猜 nonce 只放 native one-shot subagent descriptor label；deterministic batch/task IDs 只用于 durable join。",
+        "对子任务做 normalized args comparison；gate 在验证前 consume-once。禁止 prompt 文本 marker 权威、module global gate、remote provider。",
+        "通过 native SessionStore durability checkpoint 严格顺序：parent created event → ctx.sessions.flush(parent.session) → parent task-linked snapshot → flush → open/provider submission；任一 flush 返回 false 或 reject 即 fail closed。child terminal/result 先 flush，再写 parent terminal，再 flush，最后 dispose/refill。",
+        "必须使用 spawn/localAgent 和 shared Attachment CAS；new-image batches 是首期完整范围。",
+        "batch edits/fusion 明确阻断，直到存在 durable parent-owned revision-3 review/adjudication route；不得用永久 needs-review 代替。"
+      ],
+      "acceptance": [
+        "ADR/Schema 表达 queued/running/全部终态、顺序、child Session、Job、receipt 引用和时间戳，旧版本可忽略新事件。",
+        "pinned-spawn nonce/gate/normalized-args/consume-once 与每个 durability checkpoint 均有失败测试。",
+        "created/link 未持久化时零 provider submission；child 未 flush 时零 parent terminal。",
+        "无 DOM 扫描、第二存储/调度器/RPC、模型降级、未幂等自动重试或 prompt marker 权威。",
+        "首期只支持 new-image batch；edit/fusion 在 revision-3 durable review/adjudication 前 fail closed。"
+      ],
+      "tests": [
+        "node docs/2.0.17/check-plan.mjs"
+      ],
+      "rollback": "ADR 未批准时不得进入实现；回滚为撤销文档 PR。",
+      "risk": "低"
+    },
+    {
+      "id": "EM217-003",
+      "wave": "W0 基线冻结",
+      "title": "建立 pinned deepseek-harness-desktop 原生架构来源矩阵",
+      "owner": "DESK",
+      "depends_on": [
+        "EM217-000"
+      ],
+      "branch": "feat/2.0.17/em217-003-desktop-delta-matrix",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-003",
+      "write_set": [
+        "docs/2.0.17/dsh-desktop-provenance-matrix.md",
+        "docs/2.0.17/dsh-desktop-backport-plan.json"
+      ],
+      "implementation": [
+        "只审计 pinned anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add 与当前 e-Mate Desktop 的 Thin Host、Web carrier、generation、platform strategy、Profile、desktopPnpm、Cordis 生命周期和插件顺序。",
+        "逐项标记 already-aligned / safe-backport / blocked-by-Harness / out-of-scope。",
+        "safe-backport 记录 pinned 源文件、目标文件、语义差异、验证方法和回滚点。",
+        "Community Fabric Draft 明确 out-of-scope；不得比较、引用或导入任何其他 Desktop 仓库作为活动来源。"
+      ],
+      "acceptance": [
+        "Desktop 工单只追溯到 anywhere-labs/deepseek-harness-desktop@6074088f5b660206e404b3591fab51fb99c69add，或判定无需修改。",
+        "不创建并行框架，不使用任何未准入 Desktop 参考。",
+        "Harness 阻断项转独立 RFC，不混入 2.0.17。"
+      ],
+      "tests": [
+        "corepack yarn --cwd desktop check"
+      ],
+      "rollback": "撤销矩阵与规划文档；不改产品代码。",
+      "risk": "低"
+    },
+    {
+      "id": "EM217-004",
+      "wave": "W0 基线冻结",
+      "title": "冻结全功能非回退验收清单",
+      "owner": "QA",
+      "depends_on": [
+        "EM217-000"
+      ],
+      "branch": "feat/2.0.17/em217-004-regression-inventory",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-004",
+      "write_set": [
+        "docs/2.0.17/regression-inventory.md",
+        "tests/regression/2.0.17/**"
+      ],
+      "implementation": [
+        "从现有测试、菜单、设置、Agent、插件、附件、图片编辑、打包、更新、Session 恢复中生成能力清单。",
+        "每项绑定自动测试或真实 Computer Use 步骤、平台、前置条件、证据文件名。",
+        "将单图生成、单图编辑、旧会话 Gallery、image_pack、needs-review、取消、离线恢复列为强制回归。"
+      ],
+      "acceptance": [
+        "清单覆盖当前 2.0.16 已实现功能；未覆盖项不得宣称不回退。",
+        "每个 P0/P1 能力都有自动或 GUI 证据。"
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE PREREQUISITE: corepack pnpm run build:harness",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs builds): corepack pnpm test"
+      ],
+      "rollback": "仅清单和测试；无运行时代码回滚。",
+      "risk": "低"
+    },
+    {
+      "id": "EM217-101",
+      "wave": "W1 图像运行时",
+      "title": "实现 image_batch 公共工具契约与任务规范化",
+      "owner": "IMG",
+      "depends_on": [
+        "EM217-002"
+      ],
+      "branch": "feat/2.0.17/em217-101-image-batch-contract",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-101",
+      "write_set": [
+        "packages/dsh/src/profile/image-batch.ts",
+        "packages/dsh/src/profile/image-generation.ts（仅共享类型/注册点）",
+        "packages/dsh/src/profile/agent-operations.ts",
+        "packages/dsh/src/profile/audit.ts",
+        "packages/dsh/test/e-mate.test.mjs",
+        "packages/dsh/test/**image-batch*",
+        "packages/dsh-plugin-tool-search/cordis.patch.yml",
+        "packages/dsh-plugin-tool-search/test/tool-search.test.mjs"
+      ],
+      "implementation": [
+        "batch task 输入严格镜像当前 imagegen：必填 prompt，加可选且有序的 image_url Attachment ID 列表；拒绝空任务、重复 ordinal、未知字段和越界并发。",
+        "不得接受或宣称 size/aspect/quality/model 输入；固定 model/quality/size 仍由现有 provider policy 决定。",
+        "仅支持 new-image batch；edit/fusion 在 durable parent-owned revision-3 review/adjudication route 前 fail closed。",
+        "通过现有 agent-operations 注册，通过现有 audit.ts 映射到 canonical image-generation first-party plugin/scenario，并通过现有 Tool Search cordis.patch.yml 使 image_batch 可见/可搜索。不得创建第二 Tool Search、第二 registry，或在中央聊天 UI 硬编码。",
+        "结果只含 batch/task/attachment/receipt 引用，不复制图片字节；单图 imagegen 合同不变。"
+      ],
+      "acceptance": [
+        "2/4/5/8 图仅接受 prompt 与可选有序 image_url Attachment IDs；size/aspect/quality/model 和其他未知字段被拒绝。",
+        "Tool Search 可发现 image_batch，audit 使用同一 canonical image-generation first-party plugin/scenario。",
+        "单图 imagegen 不变；无中央聊天 UI 硬编码、第二 registry、第二 Tool Search 或第二图片存储。",
+        "每个 gateway 调用仍只生成一张图。"
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test",
+        "node --test packages/dsh-plugin-tool-search/test/tool-search.test.mjs"
+      ],
+      "rollback": "移除 image_batch 注册并恢复旧规则；不改变 imagegen 数据。",
+      "risk": "中"
+    },
+    {
+      "id": "EM217-102",
+      "wave": "W1 图像运行时",
+      "title": "实现批次追加式事件、状态机与父 Session 投影",
+      "owner": "IMG",
+      "depends_on": [
+        "EM217-101"
+      ],
+      "branch": "feat/2.0.17/em217-102-batch-events-projection",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-102",
+      "write_set": [
+        "packages/dsh/src/profile/image-batch.ts",
+        "packages/dsh/src/profile/image-batch-events.ts",
+        "packages/dsh/test/**image-batch*"
+      ],
+      "implementation": [
+        "写入 created、task-linked、task-state、terminal 事件；事件带 schema=1。",
+        "投影同时包含 queued/running/terminal，而不是只投影终态。",
+        "状态转移采用白名单；禁止 completed 回退 running、终态重复写和 task 跨 batch。",
+        "父 Session 只保存控制平面与引用，图片事实仍归 child Session。"
+      ],
+      "acceptance": [
+        "事件重放可确定性重建同一 projection。",
+        "随机乱序/重复事件不会产生第二终态或丢失已成功图片。",
+        "投影能在 parent turn 尚未 closed 时读取。",
+        "Implementation remains in the single @e-mate/dsh owner and reuses native Subagent/Jobs/Sessions/projections/Attachment CAS/conversation slots; no second scheduler, store, RPC, or image byte owner.",
+        "Every gateway call requests exactly one image."
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+      ],
+      "rollback": "新事件可被忽略；撤销工具注册即可，不删除已写事件。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-103",
+      "wave": "W1 图像运行时",
+      "title": "接入 pinned DSH 原生 Subagent 与 Job 生命周期",
+      "owner": "IMG",
+      "depends_on": [
+        "EM217-102",
+        "EM217-003"
+      ],
+      "branch": "feat/2.0.17/em217-103-native-subagent-job-adapter",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-103",
+      "write_set": [
+        "packages/dsh/src/profile/image-batch.ts",
+        "packages/dsh/src/profile/native-image-task-runner.ts",
+        "packages/dsh/test/**native-image-task*"
+      ],
+      "implementation": [
+        "使用 pinned rc.7 spawn/localAgent、native Job、child Session 和 shared Attachment CAS；每项一个 one-shot child。",
+        "effect-scoped gate registry 生成随机不可猜 nonce，仅写 descriptor label；deterministic batch/task IDs 仅 durable join。禁止 prompt marker、module global、remote provider。",
+        "gate consume-once 后才做 normalized args comparison；任何 nonce/args/owner 不匹配均拒绝且不可重试复用。",
+        "通过 native SessionStore durability checkpoint 严格执行 parent created flush、task-linked flush 后才 open/provider submission；ctx.sessions.flush(parent.session) false/reject 时 fail closed。child result flush 后才允许 parent terminal flush；随后 dispose 才释放 worker slot。"
+      ],
+      "acceptance": [
+        "Session/Job/task 一一对应，使用 localAgent 与 shared CAS，无 daemon/独立队列/renderer IPC。",
+        "未完成 created/link durability checkpoint 时 upstream submission=0；child 未 flush 时 parent terminal=0。",
+        "gate effect-scoped、nonce one-shot、consume-before-validation；无 module global、prompt marker 或 remote provider。",
+        "取消/失败完整释放 effect、Job、child 和 gate。"
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+      ],
+      "rollback": "删除 adapter 与工具入口；已完成 child receipt 保留，未完成 Job 由原生取消。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-104",
+      "wave": "W1 图像运行时",
+      "title": "实现有界并发、槽位补充与公平取消",
+      "owner": "IMG",
+      "depends_on": [
+        "EM217-103",
+        "EM217-203"
+      ],
+      "branch": "feat/2.0.17/em217-104-bounded-worker-refill",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-104",
+      "write_set": [
+        "packages/dsh/src/profile/image-batch.ts",
+        "packages/dsh/src/profile/image-batch-admission.ts",
+        "packages/dsh/test/**image-batch*"
+      ],
+      "implementation": [
+        "使用极小的本地 live-child worker bound：默认 3、硬上限 4；现有 gateway admission 是最终授权者，但不发送也不拥有本地 scheduling hint。",
+        "5–8 图仅在 child result inspection 完成、child flush 成功、parent terminal/task-state flush 成功且 child dispose 完成后 refill。",
+        "live child（含正在终结但未 dispose）永不超过 bound；结果按 ordinal 排列。",
+        "取消后不启动 queued 项；已提交项按原生 Job 结果记 cancelled/unknown。"
+      ],
+      "acceptance": [
+        "任一时刻 live children <= configured bound <= 4；无 gateway hint 或动态并发协议。",
+        "第 5 项只在前一 child inspect+flush、parent flush、dispose 后补位，无饥饿或重复提交。",
+        "gateway admission 仍可拒绝单项，但不驱动本地 worker 调度；partial 成功项全部保留。"
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+      ],
+      "rollback": "回退到并发 1 的同一 image_batch 实现；不恢复 prompt-only 多子代理路径。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-105",
+      "wave": "W1 图像运行时",
+      "title": "锁定单图与批图的提示词和参数保真",
+      "owner": "IMG",
+      "depends_on": [
+        "EM217-104"
+      ],
+      "branch": "feat/2.0.17/em217-105-prompt-fidelity",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-105",
+      "write_set": [
+        "packages/dsh/src/profile/image-batch.ts",
+        "packages/dsh/src/profile/image-generation.ts",
+        "packages/dsh/test/**prompt-fidelity*"
+      ],
+      "implementation": [
+        "沿用 EM217-002 已接受 pinned-spawn：exact prompt 只在 typed normalized args 中比较，随机 nonce 只在 one-shot descriptor label；prompt 文本不是 gate marker。",
+        "effect-scoped gate consume-once before validation；禁止 module global、remote provider、child 改写、模型/质量/尺寸降级。",
+        "输入仅为 prompt 与可选有序 image_url Attachment IDs；固定 model/quality/size 由 provider policy 保持。",
+        "首期只覆盖 new-image batch；edit/fusion 等待 durable parent-owned revision-3 review/adjudication route。"
+      ],
+      "acceptance": [
+        "父 task 与实际 imagegen normalized args 完全一致；prompt 不作为授权 marker 且日志不记录原文。",
+        "ordered image_url Attachment IDs 一致；不接收 size/aspect/quality/model 字段。",
+        "one-shot gate 不可复用；无 module global 或 remote provider。"
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+      ],
+      "rollback": "恢复旧 child envelope；不影响单图路径。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-106",
+      "wave": "W1 图像运行时",
+      "title": "实现精确 receipt 关联与合法部分终态",
+      "owner": "IMG",
+      "depends_on": [
+        "EM217-102",
+        "EM217-103",
+        "EM217-105"
+      ],
+      "branch": "feat/2.0.17/em217-106-terminal-receipts",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-106",
+      "write_set": [
+        "packages/dsh/src/profile/image-batch.ts",
+        "packages/dsh/src/profile/image-generation.ts（receipt 元数据扩展）",
+        "packages/dsh/test/**receipt*"
+      ],
+      "implementation": [
+        "child emate/image-output receipt 与 child projection 保持完全不变且归 child owner；不得加入 batch_id/task_id/ordinal/child_session_id。",
+        "parent task-linked/task snapshot 事件保存 exact child_session_id、task_id、ordinal；精确 join 为 parent task link → existing child projection。",
+        "禁止描述、label 或时间窗关联；needs-review 仅作受 durable revision-3 adjudication 支持的瞬时状态，首期 new-image batch 不产生永久 needs-review。",
+        "全部 task 合法终态后写唯一 parent terminal；child result 必须先 durability flush。"
+      ],
+      "acceptance": [
+        "测试证明 child receipt schema/metadata 未变且不含 batch/task/ordinal/child_session_id。",
+        "同名、乱序、晚到、重建均按 parent exact link 加载 existing child projection，不串图。",
+        "四成功一失败为 partial 且保留四图；terminal 唯一。"
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+      ],
+      "rollback": "旧 receipt 字段保持可读；新增字段为向后兼容。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-107",
+      "wave": "W1 图像运行时",
+      "title": "实现重启恢复、结果汇总与旧会话只读兼容",
+      "owner": "IMG",
+      "depends_on": [
+        "EM217-104",
+        "EM217-106"
+      ],
+      "branch": "feat/2.0.17/em217-107-recovery-compatibility",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-107",
+      "write_set": [
+        "packages/dsh/src/profile/image-batch.ts",
+        "packages/dsh/src/profile/image-batch-recovery.ts",
+        "packages/dsh/test/**recovery*"
+      ],
+      "implementation": [
+        "工具最终结果由 durable projection 生成，不从内存数组拼接。",
+        "重启后从 parent events、child Session receipts 和 native Jobs 恢复；仅对证明确未提交的 queued task 重新启动。",
+        "provider outcome unknown 不自动重发；等待幂等 receipt reacquire 或标 unknown。",
+        "旧会话继续使用现有 Gallery 只读关联逻辑，新批次不再走 legacy label/time fallback。"
+      ],
+      "acceptance": [
+        "在 queued、running、provider-finished/attachment-before-event 三个切点模拟崩溃后无重复图、无丢图。",
+        "工具结果 images/failures/tasks 与 UI projection 一致。",
+        "Implementation remains in the single @e-mate/dsh owner and reuses native Subagent/Jobs/Sessions/projections/Attachment CAS/conversation slots; no second scheduler, store, RPC, or image byte owner.",
+        "Every gateway call requests exactly one image."
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+      ],
+      "rollback": "撤销恢复入口；事件与附件保留，可由旧客户端忽略。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-201",
+      "wave": "W2 模型网关",
+      "title": "证明并按缺口加固现有网关幂等账本",
+      "owner": "GW",
+      "depends_on": [
+        "EM217-002",
+        "EM217-001"
+      ],
+      "branch": "feat/2.0.17/em217-201-gateway-idempotency",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-201",
+      "write_set": [
+        "enterprise/apps/model-gateway/src/**",
+        "enterprise/apps/model-gateway/tests/**",
+        "docs/2.0.17/contracts/image-idempotency.md"
+      ],
+      "implementation": [
+        "先追踪并测试当前 idempotent journal owner，只关闭已证明缺口。",
+        "以现有 journal facts 证明同 request/body 并发与重启行为；当前无 image receipt，不承诺 same-key receipt reacquire。",
+        "同 key 不同 body 冲突；submitted/unknown 不二次 POST；保持单图请求，不建第二 journal/image store/batch endpoint。"
+      ],
+      "acceptance": [
+        "并发/重启测试证明当前 journal；每项代码变更对应已证明缺口。",
+        "无测试或合同在 image receipt 不存在时宣称 receipt reacquire。",
+        "timeout/restart 最多一次 upstream 单图 submission。"
+      ],
+      "tests": [
+        "corepack pnpm enterprise:check",
+        "corepack pnpm enterprise:test"
+      ],
+      "rollback": "关闭新路由逻辑并回到无自动重试；账本数据可保留到 TTL 到期。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-202",
+      "wave": "W2 模型网关",
+      "title": "证明安全 typed pre-provider 重试或 receipt reacquire",
+      "owner": "GW",
+      "depends_on": [
+        "EM217-201",
+        "EM217-203"
+      ],
+      "branch": "feat/2.0.17/em217-202-safe-retry",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-202",
+      "write_set": [
+        "enterprise/apps/model-gateway/src/**",
+        "enterprise/apps/model-gateway/tests/model-gateway-contract.test.ts",
+        "packages/dsh/src/profile/image-generation.ts",
+        "packages/dsh/test/e-mate.test.mjs"
+      ],
+      "implementation": [
+        "只重试 typed gateway pre-provider tenant rate/concurrency 429，保持同 item ID 与字节等价 body，并限制 attempts 与总 deadline。",
+        "USER_TOKEN_LIMIT、409、任何 5xx、network、timeout、malformed success、submitted/unknown、provider-result replay 一律不重试。",
+        "image-generation client 与 gateway 端到端共享 typed admission result；每次重试都证明前次 provider admission=0。",
+        "每请求一张图；无 /images/batch 或 n>1。"
+      ],
+      "acceptance": [
+        "故障测试证明仅 typed pre-provider tenant rate/concurrency 429 可重试，duplicate provider submission=0。",
+        "同 item ID/body、attempt cap、deadline 端到端强制。",
+        "USER_TOKEN_LIMIT/409/5xx/network/timeout/malformed success/provider-result 永不 replay。"
+      ],
+      "tests": [
+        "corepack pnpm enterprise:check",
+        "corepack pnpm enterprise:test"
+      ],
+      "rollback": "配置重试上限为 0 即可回退；幂等账本保留。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-203",
+      "wave": "W2 模型网关",
+      "title": "证明并按缺口加固现有网关 admission control",
+      "owner": "GW",
+      "depends_on": [
+        "EM217-201"
+      ],
+      "branch": "feat/2.0.17/em217-203-admission-control",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-203",
+      "write_set": [
+        "enterprise/apps/model-gateway/src/**",
+        "enterprise/apps/model-gateway/tests/**"
+      ],
+      "implementation": [
+        "Trace and test the existing provider/account/model admission owner; implement only demonstrated fairness or Retry-After gaps.",
+        "Return typed admission state to local image_batch; do not add a second persistent queue or local admission owner.",
+        "Preserve one image per admitted request and interactive-single-image fairness."
+      ],
+      "acceptance": [
+        "Existing admission and any gap closure have deterministic fairness/limit tests.",
+        "Configured in-flight limits hold without starving interactive single-image requests.",
+        "No second queue, /images/batch endpoint, or multi-image gateway request is introduced."
+      ],
+      "tests": [
+        "corepack pnpm enterprise:check",
+        "corepack pnpm enterprise:test"
+      ],
+      "rollback": "关闭 admission 开关恢复旧转发；不影响请求格式。",
+      "risk": "中"
+    },
+    {
+      "id": "EM217-204",
+      "wave": "W2 模型网关",
+      "title": "补齐图像全链路时延与失败分类遥测",
+      "owner": "GW",
+      "depends_on": [
+        "EM217-202",
+        "EM217-102"
+      ],
+      "branch": "feat/2.0.17/em217-204-image-observability",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-204",
+      "write_set": [
+        "enterprise/apps/model-gateway/src/**",
+        "packages/dsh/src/profile/image-batch.ts（仅 trace 字段消费）",
+        "docs/2.0.17/observability/image-batch.md",
+        "packages/dsh/src/profile/audit.ts",
+        "packages/dsh/test/e-mate.test.mjs",
+        "packages/dsh-plugin-tool-search/cordis.patch.yml",
+        "packages/dsh-plugin-tool-search/test/tool-search.test.mjs"
+      ],
+      "implementation": [
+        "统一 trace_id、batch_id、task_id、client_request_id，不记录 prompt 原文或图片字节。",
+        "记录 admission_wait、provider_submit、provider_latency、attachment_commit、projection_visible。",
+        "failure_code 固定枚举：preflight、rate_limited、provider_rejected、provider_timeout_before_accept、provider_outcome_unknown、attachment_commit、projection、cancelled。",
+        "复用现有 Tool Search 与 audit owner：image_batch 可见/可搜索，并映射到 canonical image-generation first-party plugin/scenario；不建第二 registry/Tool Search，不在中央聊天 UI 硬编码。"
+      ],
+      "acceptance": [
+        "任一失败能从 batch task 追踪到 gateway 请求，且不泄漏敏感内容。",
+        "基准报告可按阶段定位三分钟/八分半的主要等待点。"
+      ],
+      "tests": [
+        "corepack pnpm enterprise:check",
+        "corepack pnpm enterprise:test"
+      ],
+      "rollback": "停用新指标；产品行为不变化。",
+      "risk": "中"
+    },
+    {
+      "id": "EM217-205",
+      "wave": "W2 模型网关",
+      "title": "证明并按缺口加固现有 exactly-once usage 与审计",
+      "owner": "GW",
+      "depends_on": [
+        "EM217-204"
+      ],
+      "branch": "feat/2.0.17/em217-205-usage-exactly-once",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-205",
+      "write_set": [
+        "enterprise/apps/model-gateway/src/**",
+        "enterprise/apps/model-gateway/tests/**"
+      ],
+      "implementation": [
+        "Trace and test current exactly-once usage/accounting before changing it; implement only demonstrated gap closure.",
+        "Bind usage to existing idempotent request facts; receipt reads and duplicate queries do not charge again.",
+        "Batch presentation aggregates task usage and never records a second batch image call; redact prompts and image bytes."
+      ],
+      "acceptance": [
+        "Concurrent duplicate, restart, and receipt reacquire tests prove exactly-once accounting.",
+        "Every code change corresponds to a documented current-owner gap.",
+        "Audit correlation contains IDs/hashes only, never prompt or image bytes."
+      ],
+      "tests": [
+        "corepack pnpm enterprise:check",
+        "corepack pnpm enterprise:test"
+      ],
+      "rollback": "回退聚合显示，不删除原始 usage 事实。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-301",
+      "wave": "W3 Web 客户端",
+      "title": "建立 batch projection 的官方 Web Client 读取层",
+      "owner": "UI",
+      "depends_on": [
+        "EM217-102",
+        "EM217-106"
+      ],
+      "branch": "feat/2.0.17/em217-301-batch-client-projection",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-301",
+      "write_set": [
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-client.ts",
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-gallery.tsx（仅接入点）",
+        "packages/dsh/profile/plugins/emate-shell/tests/**"
+      ],
+      "implementation": [
+        "通过正常 DSH Web route/RPC/client service/slot 读取 parent batch projection。",
+        "按 batch_id/task_id 建索引，保留 ordinal；不扫描 DOM，不读取 Electron/Node 私有 API。",
+        "对状态更新做细粒度订阅，避免每个 receipt 触发整个聊天树重建。"
+      ],
+      "acceptance": [
+        "parent turn open 时能拿到 queued/running/terminal。",
+        "相同 ID 更新幂等，乱序事件最终一致。",
+        "renderer 无新增 IPC 插件框架。"
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+      ],
+      "rollback": "移除读取层入口；旧 Gallery 保持。",
+      "risk": "中"
+    },
+    {
+      "id": "EM217-302",
+      "wave": "W3 Web 客户端",
+      "title": "在开放中的 turn 内逐张呈现批次进度",
+      "owner": "UI",
+      "depends_on": [
+        "EM217-301"
+      ],
+      "branch": "feat/2.0.17/em217-302-live-open-turn-renderer",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-302",
+      "write_set": [
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-progress.tsx",
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-gallery.tsx",
+        "packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx"
+      ],
+      "implementation": [
+        "image_batch 创建后立即显示 N 个固定顺序 skeleton 卡片。",
+        "每个 task receipt 到达后只更新对应卡片；无需等待 owner.turn.status=closed。",
+        "显示 queued/running/needs-review/failed/cancelled/unknown，且成功图可立刻预览。",
+        "保留 legacy 单图 turn-closed 终态规则，不影响 imagegen。"
+      ],
+      "acceptance": [
+        "自动测试明确替换当前“turn 未关闭不渲染批次”的预期。",
+        "第一张图 receipt 到 paint 的本地 p95 ≤ 1 秒。",
+        "关闭 turn 前已完成图片可见且不会在 turn 关闭时闪烁/重复。"
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+      ],
+      "rollback": "回滚组件接入即可；批次仍会完成并保留数据。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-303",
+      "wave": "W3 Web 客户端",
+      "title": "让同一组件原位收敛为唯一最终 Gallery",
+      "owner": "UI",
+      "depends_on": [
+        "EM217-302",
+        "EM217-106"
+      ],
+      "branch": "feat/2.0.17/em217-303-single-final-gallery",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-303",
+      "write_set": [
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-progress.tsx",
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-gallery.tsx",
+        "packages/dsh/profile/plugins/emate-shell/tests/**"
+      ],
+      "implementation": [
+        "batch terminal 后不新增第二个终态节点；同一组件切换到 final Gallery 状态。",
+        "最终排序按 ordinal，包含所有成功/needs-review 图片和结构化失败摘要。",
+        "父 assistant 文本总结可随后出现，但不复制图片卡片。"
+      ],
+      "acceptance": [
+        "每个 batch 在聊天中恰好一个可见图片集合。",
+        "冷启动与实时完成得到同一 DOM/可访问性语义。",
+        "4 成功 1 失败不会把成功图隐藏。"
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+      ],
+      "rollback": "恢复 progress-only 显示；数据不变。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-304",
+      "wave": "W3 Web 客户端",
+      "title": "实现部分失败、取消和显式单项重试 UX",
+      "owner": "UI",
+      "depends_on": [
+        "EM217-303",
+        "EM217-202"
+      ],
+      "branch": "feat/2.0.17/em217-304-partial-failure-ux",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-304",
+      "write_set": [
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-progress.tsx",
+        "packages/dsh/profile/plugins/emate-shell/tests/**"
+      ],
+      "implementation": [
+        "失败卡片显示可理解原因，不用 toast 取代内联状态。",
+        "自动重试只由 gateway 安全策略执行；用户可点击“重新生成此项”创建新的 task/request ID，明确表示新生成。",
+        "整批取消停止 queued 项，保留已完成图。",
+        "unknown 明确告知“结果不确定，未自动重复生成”。"
+      ],
+      "acceptance": [
+        "partial、cancelled、unknown 均有稳定可恢复 UI。",
+        "用户重试不会伪装成原任务继续，也不会覆盖旧成功图。"
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+      ],
+      "rollback": "隐藏新操作按钮；原始结果仍可见。",
+      "risk": "中"
+    },
+    {
+      "id": "EM217-305",
+      "wave": "W3 Web 客户端",
+      "title": "实现刷新/重启恢复与旧会话读取兼容",
+      "owner": "UI",
+      "depends_on": [
+        "EM217-304",
+        "EM217-107"
+      ],
+      "branch": "feat/2.0.17/em217-305-rehydration-legacy-read",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-305",
+      "write_set": [
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-client.ts",
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-gallery.tsx",
+        "packages/dsh/profile/plugins/emate-shell/tests/**"
+      ],
+      "implementation": [
+        "刷新、窗口重开、应用重启后从 durable projection 重建。",
+        "新 schema 按 ID 关联；旧会话保留现有 child label/time fallback，仅作为只读 legacy adapter。",
+        "防止无 receipt 的同名 child 被误纳入 Gallery。"
+      ],
+      "acceptance": [
+        "重启前后图片数量、顺序、状态、失败原因一致。",
+        "旧 2.0.16 会话截图/fixture 不回退。"
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+      ],
+      "rollback": "禁用新 batch adapter；legacy adapter 保留。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-306",
+      "wave": "W3 Web 客户端",
+      "title": "完成批次 UI 性能、可访问性与大图内存治理",
+      "owner": "UI",
+      "depends_on": [
+        "EM217-305"
+      ],
+      "branch": "feat/2.0.17/em217-306-client-a11y-performance",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-306",
+      "write_set": [
+        "packages/dsh/profile/plugins/emate-shell/src/client/**image-batch*",
+        "packages/dsh/profile/plugins/emate-shell/tests/**"
+      ],
+      "implementation": [
+        "使用缩略图/懒加载策略，原图只在预览时解码；释放 object URL/监听器。",
+        "状态变化有 aria-live 但避免每个进度事件重复播报。",
+        "键盘可访问预览、下载、失败详情、重试和取消。"
+      ],
+      "acceptance": [
+        "8 图完成后无持续增长的 object URL、订阅或 event listener。",
+        "长对话滚动与输入不卡顿；批次更新不重渲染无关消息。",
+        "自动 a11y 检查无新增严重问题。"
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
+      ],
+      "rollback": "回滚优化不改变批次数据契约。",
+      "risk": "中"
+    },
+    {
+      "id": "EM217-401",
+      "wave": "W4 桌面原生对齐",
+      "title": "锁定 pinned deepseek-harness-desktop 来源与执行顺序",
+      "owner": "DESK",
+      "depends_on": [
+        "EM217-003"
+      ],
+      "branch": "feat/2.0.17/em217-401-desktop-provenance-plan",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-401",
+      "write_set": [
+        "docs/2.0.17/dsh-desktop-provenance-matrix.md",
+        "docs/2.0.17/dsh-desktop-backport-plan.json"
+      ],
+      "implementation": [
+        "只将 safe-backport 项转成 402–406 的精确写集。",
+        "每个变更保留源 commit、目标语义、冲突说明、验证方法。",
+        "若当前实现已一致，关闭对应工单而非重写。"
+      ],
+      "acceptance": [
+        "402–406 不得出现未在 provenance matrix 中登记的架构改动。",
+        "不存在整仓 blind copy/rebase。"
+      ],
+      "tests": [
+        "node docs/2.0.17/check-plan.mjs",
+        "corepack yarn --cwd desktop check"
+      ],
+      "rollback": "撤销文档；不触碰代码。",
+      "risk": "低"
+    },
+    {
+      "id": "EM217-402",
+      "wave": "W4 桌面原生对齐",
+      "title": "对齐 ElectronShellGeneration 的单代资源所有权",
+      "owner": "DESK",
+      "depends_on": [
+        "EM217-401"
+      ],
+      "branch": "feat/2.0.17/em217-402-shell-generation-parity",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-402",
+      "write_set": [
+        "由 EM217-401 锁定的现有 desktop/e-mate-desktop Shell generation 文件",
+        "对应 Desktop 单元/集成测试"
+      ],
+      "implementation": [
+        "BrowserWindow、Tray、监听器、导航、external links、zoom 均归 generation 所有。",
+        "profile/mode 切换时 release 幂等且 await 完成；不得跨代缓存资源引用。",
+        "仅在 Web surface ready 后创建 tray/提交 last-known-good。"
+      ],
+      "acceptance": [
+        "连续切 profile、重载、关窗、重开 50 次无重复 tray/listener/window。",
+        "旧 generation 的回调不能修改新 generation。"
+      ],
+      "tests": [
+        "corepack yarn --cwd desktop check"
+      ],
+      "rollback": "按 provenance 记录的单提交精确回滚。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-403",
+      "wave": "W4 桌面原生对齐",
+      "title": "对齐 ElectronPlatformStrategy 并收敛平台分支",
+      "owner": "DESK",
+      "depends_on": [
+        "EM217-402"
+      ],
+      "branch": "feat/2.0.17/em217-403-platform-strategy-parity",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-403",
+      "write_set": [
+        "由 EM217-401 锁定的现有 platform strategy 文件",
+        "对应 macOS/Windows 测试"
+      ],
+      "implementation": [
+        "把窗口、菜单、关闭、激活、外链等平台差异集中到既有 Strategy。",
+        "删除散落的重复 platform if/else，但不改业务行为。",
+        "不新增第二套主进程入口或平台抽象。"
+      ],
+      "acceptance": [
+        "macOS/Windows 现有行为清单全部通过。",
+        "平台分支有唯一 owner，代码来源可追溯。"
+      ],
+      "tests": [
+        "corepack yarn --cwd desktop check"
+      ],
+      "rollback": "精确回滚此工单提交。",
+      "risk": "中"
+    },
+    {
+      "id": "EM217-404",
+      "wave": "W4 桌面原生对齐",
+      "title": "审计并对齐 Cordis inject/effect 与插件销毁顺序",
+      "owner": "DESK",
+      "depends_on": [
+        "EM217-403"
+      ],
+      "branch": "feat/2.0.17/em217-404-cordis-lifecycle-audit",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-404",
+      "write_set": [
+        "由 EM217-401 锁定的 Desktop/Profile 插件装配文件",
+        "对应 lifecycle 测试"
+      ],
+      "implementation": [
+        "Desktop-only 插件使用 required inject；跨 DSH 插件使用嵌套 inject。",
+        "所有异步 operation 由 ctx.effect/原生 handle 管理，dispose 时 cancel 并 await。",
+        "官方 base/web 先加载，再 Desktop，再 e-Mate 插件；禁止第二 loader。"
+      ],
+      "acceptance": [
+        "插件启停/切换 50 次无遗留 Job、计时器、socket、监听器。",
+        "缺服务时 fail-closed 并给明确错误，不读取私有 desktopRuntime。"
+      ],
+      "tests": [
+        "corepack yarn --cwd desktop check"
+      ],
+      "rollback": "精确回滚此工单提交。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-405",
+      "wave": "W4 桌面原生对齐",
+      "title": "清除非原生 Renderer bridge 与重复 IPC 所有权",
+      "owner": "DESK",
+      "depends_on": [
+        "EM217-404"
+      ],
+      "branch": "feat/2.0.17/em217-405-renderer-bridge-audit",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-405",
+      "write_set": [
+        "由 EM217-401 锁定的 renderer/preload/web bridge 文件",
+        "对应安全/导航测试"
+      ],
+      "implementation": [
+        "renderer 只通过 loopback Web carrier 和官方 Web Client 能力工作。",
+        "页面不暴露 Electron/Node；删除或封闭仅为插件控制而生的私有 IPC。",
+        "保留确属 Desktop shell 的最小 preload/IPC，并在矩阵中逐项说明。"
+      ],
+      "acceptance": [
+        "Web UI 不依赖 desktopProfiles、desktopPnpm 私有对象或 Node helper。",
+        "CSP、导航、外链、下载和权限回归通过。"
+      ],
+      "tests": [
+        "corepack yarn --cwd desktop check"
+      ],
+      "rollback": "精确回滚此工单提交。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-406",
+      "wave": "W4 桌面原生对齐",
+      "title": "对齐 desktopProfiles/desktopPnpm 服务边界与插件安装路径",
+      "owner": "DESK",
+      "depends_on": [
+        "EM217-405"
+      ],
+      "branch": "feat/2.0.17/em217-406-profile-pnpm-services-parity",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-406",
+      "write_set": [
+        "由 EM217-401 锁定的 desktopProfiles/desktopPnpm 现有服务文件",
+        "对应 profile/package 测试"
+      ],
+      "implementation": [
+        "desktopProfiles.current 为唯一 profile 事实源，不从 argv/settings/URL 猜测。",
+        "插件运行/安装只走 desktopPnpm.run、runPlugin、installPlugin；UI 不直接运行 pnpm。",
+        "保留精确 package pins、native unpack 与现有 unsigned delivery 约束。",
+        "不引入 Community Fabric Draft。"
+      ],
+      "acceptance": [
+        "profile 切换、插件安装/运行/卸载遵循原生生命周期。",
+        "无 raw pnpm 子进程从 renderer 或业务插件发起。"
+      ],
+      "tests": [
+        "corepack yarn --cwd desktop check"
+      ],
+      "rollback": "精确回滚此工单提交。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-407",
+      "wave": "W4 桌面原生对齐",
+      "title": "在全部 Source Gate 后更新 2.0.17 版本与基线合同",
+      "owner": "SUP",
+      "depends_on": [
+        "EM217-501",
+        "EM217-401",
+        "EM217-402",
+        "EM217-403",
+        "EM217-404",
+        "EM217-405",
+        "EM217-406",
+        "EM217-408"
+      ],
+      "branch": "feat/2.0.17/em217-407-version-contract-bump",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-407",
+      "write_set": [
+        "AGENTS.md",
+        "docs/target-contract.md",
+        "desktop/e-mate-desktop/base-contract.json",
+        "受现有发布规则约束的 package/version/lock 元数据"
+      ],
+      "implementation": [
+        "只在所有源码工单 green 后把 current source target 从 2.0.16 改为 2.0.17。",
+        "保持 Harness rc.7 与 pinned commit，除非独立 RFC 已批准并完成全门禁。",
+        "更新变更说明、schema 兼容说明、回滚基线和 provenance。"
+      ],
+      "acceptance": [
+        "版本、合同、锁文件、产物元数据一致。",
+        "没有先改版本再补功能的提交。"
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE PREREQUISITE: corepack pnpm run build:harness",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs builds): corepack pnpm test",
+        "corepack pnpm enterprise:check",
+        "corepack pnpm enterprise:test",
+        "corepack yarn --cwd desktop check"
+      ],
+      "rollback": "单提交精确回滚到 2.0.16 合同；运行时代码不回退。",
+      "risk": "中"
+    },
+    {
+      "id": "EM217-408",
+      "wave": "W4 桌面原生对齐",
+      "title": "native Windows Computer Use plugin integration",
+      "owner": "DESK",
+      "depends_on": [
+        "EM217-406"
+      ],
+      "branch": "feat/2.0.17/em217-408-native-windows-computer-use",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-408",
+      "write_set": [
+        ".gitmodules",
+        "upstream/plugins/computer-user",
+        "packages/dsh-plugin-computer-use/**",
+        "packages/dsh/test/e-mate.test.mjs",
+        "desktop/e-mate-desktop/tests/e-mate-profile-win.spec.ts",
+        "desktop/e-mate-desktop/tests/plugin.spec.ts"
+      ],
+      "implementation": [
+        "只把 https://github.com/jing-hy/computer-user.git@2fbf383b49fe08e466d4d1caba659fb42b61de6b 作为 MIT PowerShell/Win32 primitives 来源；不得安装、复制、注册为第二或替代 DSH plugin。",
+        "仅将审计后的 primitives 接到现有 @e-mate/dsh-plugin-computer-use / ctx.computerUse backend 与单一 Profile row；Darwin 保持 MIT Anionex/dsh-computer-use@76bfe8607f61945c1cbb84e73976e601100c13a2。",
+        "每次 observation/action 精确绑定 app + HWND + owning PID；UI Automation observation/state hash 必须新鲜，target 缺失、变化、复用或 hash stale 均 fail closed。",
+        "检查所有 Win32/PowerShell 返回值；timeout/cancel/error/partial 路径都以 finally 保证释放 key/button。",
+        "沿用 DSH approval policy-never、当前 turn @电脑操控 lease、敏感动作 one-use confirmation；权限不得跨 turn/action。",
+        "截图/附件 artifact 只走 workspace-fenced native Attachment owner；固定 DSH subprocess owner，参数/输出/timeout 有界，支持 cancellation、完整性校验、terminate/reap cleanup。",
+        "动作后必须对同一 app/HWND/PID 重新 observation 才能成功；secure desktop、UIPI、elevated target、locked session、RDP 不可用必须诚实结构化失败。",
+        "明确排除候选 src/index.js Tool registry、config/settings/client、Skill、process-global approval Set、computer_set_mode、raw spawn、arbitrary path/output 和 LLM output-guard monkey patch。"
+      ],
+      "acceptance": [
+        "Win32 仅复用 pinned jing-hy MIT primitives，经现有 component/backend/Profile row 暴露；Darwin 不变，二者 MIT notice、仓库、commit、incorporated-file provenance 完整。",
+        "测试覆盖 app+HWND+PID、UIA state hash/stale rejection、checked return values、post-action observation 和 target change fail-closed。",
+        "故障测试覆盖 key/button cleanup、bounded args/output/timeout、integrity、cancellation、terminate/reap。",
+        "approval 测试证明 policy-never、per-turn lease、one-use sensitive confirmation，无 global approval state。",
+        "Attachment/artifact workspace fence 生效；secure-desktop/UIPI/elevated/locked/RDP 限制诚实失败。",
+        "静态/组合测试证明所有明确排除的候选层均未采用，且不存在第二 registry/settings/client/Skill/Profile row/automation framework。",
+        "本工单当前只产出 source/component proof；Windows installed-machine evidence 保持 OPEN，等待后续用户授权 Windows build 与真实机器测试。"
+      ],
+      "tests": [
+        "node --test packages/dsh-plugin-computer-use/test/contract.test.mjs packages/dsh-plugin-computer-use/test/capability-status.test.mjs",
+        "node --test packages/dsh/test/e-mate.test.mjs",
+        "corepack yarn --cwd desktop check"
+      ],
+      "rollback": "仅移除 Win32 primitive backend 与 pinned provenance gitlink；保留既有 component/backend/Profile row、native DSH owner 和 Darwin Anionex 实现。",
+      "risk": "高",
+      "installed_machine_evidence": {
+        "platform": "win32",
+        "status": "OPEN",
+        "confirmation_required": true,
+        "reason": "等待后续用户授权 Windows build 与真实 installed-machine Computer Use 测试；source/component proof 不可替代。"
+      }
+    },
+    {
+      "id": "EM217-501",
+      "wave": "W4 Source Gate",
+      "title": "补齐单元、契约、状态机与属性测试",
+      "owner": "QA",
+      "depends_on": [
+        "EM217-107",
+        "EM217-205",
+        "EM217-304",
+        "EM217-305",
+        "EM217-306",
+        "EM217-402",
+        "EM217-403",
+        "EM217-404",
+        "EM217-405",
+        "EM217-406",
+        "EM217-408"
+      ],
+      "branch": "feat/2.0.17/em217-501-contract-property-tests",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-501",
+      "write_set": [
+        "packages/dsh/test/**",
+        "packages/dsh/profile/plugins/emate-shell/tests/**",
+        "enterprise/apps/model-gateway/tests/**",
+        "tests/contracts/**"
+      ],
+      "implementation": [
+        "覆盖 2/4/5/8 图、乱序、重复事件、同名 prompt、取消、partial、needs-review、unknown、重启。",
+        "生成随机合法/非法状态序列验证终态唯一、无丢图、无跨批串图。",
+        "保留并更新现有 legacy Gallery 与 uncertain provider failure 测试。",
+        "Run complete source verification for image runtime, UI, gateway, Desktop alignment, and native Windows Computer Use before any version change."
+      ],
+      "acceptance": [
+        "关键 invariant 在 10,000 组随机序列上通过。",
+        "所有原有 imagegen/image edit/image_pack 测试无回退。",
+        "All source/UI/gateway/Desktop/Windows-plugin work is in the dependency closure and complete source checks pass before EM217-407."
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE PREREQUISITE: corepack pnpm run build:harness",
+        "MAIN-AGENT-ONLY SOURCE-GATED (runs builds): corepack pnpm test",
+        "corepack pnpm enterprise:check",
+        "corepack pnpm enterprise:test",
+        "corepack yarn --cwd desktop check"
+      ],
+      "rollback": "仅测试变更；产品提交按首个失败工单回滚。",
+      "risk": "中"
+    },
+    {
+      "id": "EM217-502",
+      "wave": "W5 验收发布",
+      "title": "执行 4/5/8 图并发稳定性与性能压测",
+      "owner": "QA",
+      "depends_on": [
+        "EM217-501",
+        "EM217-204"
+      ],
+      "branch": "feat/2.0.17/em217-502-image-stress-benchmark",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-502",
+      "write_set": [
+        "tests/performance/image-batch/**",
+        "docs/2.0.17/evidence-manifests/performance.json"
+      ],
+      "implementation": [
+        "对固定任务集执行至少 100 批；区分本地测试 provider、staging provider 和真实生产小样本。",
+        "输出 first-visible、all-terminal、per-item success、batch partial、429、unknown、duplicate 指标及置信区间。",
+        "核验 5–8 图槽位补充行为和单图公平性。"
+      ],
+      "acceptance": [
+        "duplicate provider generation = 0。",
+        "首图可见 p50 ≤ 75 秒、p95 ≤ 120 秒；且相对同轮单图对照的额外编排开销 p95 ≤ 10 秒。",
+        "每图合法终态率 ≥ 95%；成功图保留率 = 100%。",
+        "4 图 all-terminal p50 ≤ 150 秒、p95 ≤ 240 秒；5 图 p50 ≤ 210 秒、p95 ≤ 300 秒。",
+        "未达标即阻断发布，不用降低质量/模型掩盖。",
+        "Tracked evidence is a small sanitized manifest/assertion only; external immutable artifacts use URI plus SHA-256, with no secrets, prompt text, image bytes, logs, screenshots, videos, or installers committed."
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE PREREQUISITE: corepack pnpm run build:harness",
+        "corepack pnpm run test:fast",
+        "node --test tests/performance/image-batch/stress.test.mjs"
+      ],
+      "rollback": "性能改动按 ticket 精确回滚；保留证据。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-503",
+      "wave": "W5 验收发布",
+      "title": "完成单图与批图质量非劣性盲测",
+      "owner": "QA",
+      "depends_on": [
+        "EM217-105",
+        "EM217-502"
+      ],
+      "branch": "feat/2.0.17/em217-503-quality-noninferiority",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-503",
+      "write_set": [
+        "tests/quality/image-batch/**",
+        "docs/2.0.17/evidence-manifests/quality.json"
+      ],
+      "implementation": [
+        "使用同模型、同质量、同尺寸、同提示词、同参考图做单图与批图配对。",
+        "至少 50 个 prompt，覆盖人物、文字、产品、场景、风格、参考图编辑。",
+        "双盲随机排序；评分含 prompt adherence、细节、构图、文字、参考图一致性。",
+        "同时验证 canonical provider request hash，先排除参数漂移。"
+      ],
+      "acceptance": [
+        "批图平均质量差不低于 -0.2/5，95% CI 下界不低于 -0.3；或预先批准的等价非劣界。",
+        "任一类别明显退化即阻断，不用主观“看起来差不多”放行。",
+        "Tracked evidence is a small sanitized manifest/assertion only; external immutable artifacts use URI plus SHA-256, with no secrets, prompt text, image bytes, logs, screenshots, videos, or installers committed."
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE PREREQUISITE: corepack pnpm run build:harness",
+        "corepack pnpm run test:fast",
+        "node --test tests/quality/image-batch/noninferiority.test.mjs"
+      ],
+      "rollback": "回滚 prompt/参数变更；不更换低质量模型。",
+      "risk": "高"
+    },
+    {
+      "id": "EM217-504",
+      "wave": "W5 验收发布",
+      "title": "macOS 真实 Computer Use 全功能验证",
+      "owner": "QA",
+      "depends_on": [
+        "EM217-407",
+        "EM217-501"
+      ],
+      "branch": "feat/2.0.17/em217-504-macos-computer-use",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-504",
+      "write_set": [
+        "tests/ui/**",
+        "docs/2.0.17/evidence-manifests/computer-use-macos.json"
+      ],
+      "implementation": [
+        "Current phase permits only a main-agent-authorized non-production app-directory/dev macOS Computer Use candidate; it is not packaged candidate, installed, or release evidence.",
+        "Production packaged/installed execution is HUMAN-CONFIRMATION-GATED and performed only by the main agent；QA 使用真实鼠标、键盘、窗口、菜单、拖放和系统对话框。",
+        "执行单图、编辑、2/4/5/8 图逐张出现、取消、单项重试、partial、刷新、重启、离线、旧会话、下载、预览。",
+        "执行窗口/托盘、profile、插件、设置、附件、终端、更新检查与退出重开回归。",
+        "保存全程录屏、每步骤截图、应用日志、Job/Session 证据和产物 hash。"
+      ],
+      "acceptance": [
+        "第一张完成后立即可见；最终只出现一个 Gallery。",
+        "无 crash、白屏、重复 tray、跨会话串图、丢图或重复 provider submit。",
+        "regression inventory 中 macOS P0/P1 全通过。",
+        "Tracked evidence is a small sanitized manifest/assertion only; external immutable artifacts use URI plus SHA-256, with no secrets, prompt text, image bytes, logs, screenshots, videos, or installers committed."
+      ],
+      "tests": [
+        "MAIN-AGENT-ONLY SOURCE PREREQUISITE: corepack pnpm run build:harness",
+        "corepack pnpm run test:fast",
+        "MAIN-AGENT-ONLY NON-PRODUCTION CURRENT-PHASE: corepack pnpm smoke:app-dir",
+        "HUMAN-CONFIRMATION-GATED PRODUCTION: corepack yarn --cwd desktop dist:mac; installed macOS Computer Use"
+      ],
+      "rollback": "卸载候选并安装已锁定 2.0.16 产物；用户数据不清除。",
+      "risk": "高",
+      "gate": {
+        "confirmation_required": true,
+        "status": "OPEN",
+        "reason": "Production packaging, installed acceptance, rollback, and public activation require explicit human confirmation and main-agent execution.",
+        "scope": "packaged/installed production execution"
+      },
+      "production_requires": [
+        "EM217-502",
+        "EM217-503"
+      ]
+    },
+    {
+      "id": "EM217-505",
+      "wave": "W5 验收发布",
+      "title": "Windows 登录态 Codex Remote 真实 Computer Use 验证",
+      "owner": "QA",
+      "depends_on": [
+        "EM217-504",
+        "EM217-408"
+      ],
+      "branch": "feat/2.0.17/em217-505-windows-computer-use",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-505",
+      "write_set": [
+        "tests/ui/**",
+        "docs/2.0.17/evidence-manifests/computer-use-windows.json"
+      ],
+      "implementation": [
+        "只在已登录的 Codex Remote Windows 桌面执行构建/安装/GUI 验证，不通过 SSH 模拟。",
+        "复用 macOS 核心用例并补充托盘、窗口关闭、路径、权限、下载与更新差异。",
+        "保存录屏、截图、日志、安装/卸载结果和产物 hash。"
+      ],
+      "acceptance": [
+        "Windows P0/P1 全通过；逐张显示与最终聚合行为一致。",
+        "无路径/权限/托盘/窗口生命周期回退。",
+        "Tracked evidence is a small sanitized manifest/assertion only; external immutable artifacts use URI plus SHA-256, with no secrets, prompt text, image bytes, logs, screenshots, videos, or installers committed."
+      ],
+      "tests": [
+        "HUMAN-CONFIRMATION-GATED PRODUCTION: corepack yarn --cwd desktop dist:win on signed-in Codex Remote Windows; installed Windows Computer Use"
+      ],
+      "rollback": "卸载候选并恢复已锁定 2.0.16 Windows 产物。",
+      "risk": "高",
+      "gate": {
+        "confirmation_required": true,
+        "status": "OPEN",
+        "reason": "Production packaging, installed acceptance, rollback, and public activation require explicit human confirmation and main-agent execution."
+      }
+    },
+    {
+      "id": "EM217-506",
+      "wave": "W5 验收发布",
+      "title": "验证更新、精确回滚、数据持久化与跨启动兼容",
+      "owner": "QA",
+      "depends_on": [
+        "EM217-504",
+        "EM217-505"
+      ],
+      "branch": "feat/2.0.17/em217-506-rollback-persistence",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-506",
+      "write_set": [
+        "tests/release/**",
+        "docs/2.0.17/evidence-manifests/rollback.json"
+      ],
+      "implementation": [
+        "验证 2.0.16 → 2.0.17、2.0.17 精确包回滚到 2.0.16、再升级到 2.0.17。",
+        "在 queued/running/partial/completed 四种状态重启并检查 Session、Job、Gallery。",
+        "确认旧客户端忽略新 batch 事件且不破坏既有会话/附件。",
+        "核验 last-known-good、更新失败、断网、磁盘不足、进程被杀场景。"
+      ],
+      "acceptance": [
+        "回滚不删除用户数据；旧版可启动、旧功能可用。",
+        "重新升级后新批次和旧批次均恢复一致。",
+        "任何不可逆迁移为发布阻断项。",
+        "Tracked evidence is a small sanitized manifest/assertion only; external immutable artifacts use URI plus SHA-256, with no secrets, prompt text, image bytes, logs, screenshots, videos, or installers committed."
+      ],
+      "tests": [
+        "HUMAN-CONFIRMATION-GATED: installed update, rollback, persistence, and cross-boot Computer Use"
+      ],
+      "rollback": "使用锁定产物和 hash 执行精确回滚，不做临时热修。",
+      "risk": "高",
+      "gate": {
+        "confirmation_required": true,
+        "status": "OPEN",
+        "reason": "Production packaging, installed acceptance, rollback, and public activation require explicit human confirmation and main-agent execution."
+      }
+    },
+    {
+      "id": "EM217-507",
+      "wave": "W5 验收发布",
+      "title": "完成候选、安装态、公开生产证据与分环发布",
+      "owner": "SUP",
+      "depends_on": [
+        "EM217-506"
+      ],
+      "branch": "feat/2.0.17/em217-507-release-evidence-canary",
+      "worktree": "/Users/mac/e-mate/worktrees/em217-507",
+      "write_set": [
+        "docs/2.0.17/evidence-manifests/release.json",
+        "existing release metadata paths authorized by the main agent"
+      ],
+      "implementation": [
+        "依次完成 source、candidate、installed、public-production 四层证据。",
+        "候选包 hash、安装后文件 hash、运行时报告 SHA/版本必须一致。",
+        "先内部环，再小范围生产环，再全量；每环观察 success、latency、429、unknown、crash。",
+        "硬回滚条件：duplicate > 0；P0 crash/session loss；每图成功率连续低于 93%；5 图 p95 > 360 秒且确认非 provider 全局事故。"
+      ],
+      "acceptance": [
+        "全部门禁通过且无 waiver 才发布 2.0.17。",
+        "公开生产验证使用真实更新路径与真实安装态，不以源码测试代替。",
+        "发布证据可从 commit → build → artifact → install → runtime → telemetry 完整追溯。",
+        "Tracked evidence is a small sanitized manifest/assertion only; external immutable artifacts use URI plus SHA-256, with no secrets, prompt text, image bytes, logs, screenshots, videos, or installers committed."
+      ],
+      "tests": [
+        "HUMAN-CONFIRMATION-GATED: production macOS/Windows dist, immutable upload/read-back, pointer activation, rollback, and public release verification"
+      ],
+      "rollback": "立即把发布指针恢复到锁定 2.0.16 产物；保留 2.0.17 事件与日志用于取证。",
+      "risk": "高",
+      "gate": {
+        "confirmation_required": true,
+        "status": "OPEN",
+        "reason": "Production packaging, installed acceptance, rollback, and public activation require explicit human confirmation and main-agent execution."
+      }
+    }
+  ]
+}
