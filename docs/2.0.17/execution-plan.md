@@ -12,6 +12,10 @@ The main agent is sole integrator, builder, installer, releaser, and rollback ow
 
 EM217-002 固化已接受的 pinned-spawn：effect-scoped consume-once gate、model-hidden descriptor-label nonce、normalized args、spawn/shared CAS。child 只校验 descriptor mode/provider/nonce 与自身 Session parent；parent 在 link/flush/open 前要求 run.localAgent!==undefined 且 exact run.id=run.localAgent.id=claimed child。顺序必须为 parent created（含 effective concurrency）flush → child register/start → parent identity check → exact task link flush → open/provider；child Session flush → inspect one terminal receipt/Job → parent task-state flush → quiescent dispose/refill，任一 flush false/reject 均 fail closed。EM217-101 仅交付由 focused test 直接执行的 internal request normalizer/ID/schema，EM217-102 仅交付由 focused test 直接执行的 internal event reducer/projection；两者都不注册 model-visible Tool、不产生 public event、不修改 agent-operations/Tool Search/audit。EM217-103 是第一次原子公开激活：在 complete pinned-spawn gate、durable producer、可用 new-image execution/result 同时成立后，才在同一 ticket 注册 image_batch 并更新 agent-operations、既有 Tool Search visibility/aliases 和 canonical image-generation audit classification；禁止 disconnected registration、unused UI/state 或 placeholder endpoint。EM217-104 仅在同一 owner 内强化 live-child concurrency/refill/cancel。EM217-105 完整实现 parent CAS 与 exact Attachment refs/IDs gate、child receipt owner 不变、userQuestions 路由 parent、提问前 child revision 2 flush、回答后 revision 3 flush，且 review 全程占槽，之后才启用 source edit/fusion；parent userQuestions 不可用则 provider 前拒绝且不得永久 needs-review。EM217-106 只做 parent exact link → existing child projection，不扩展 child receipt metadata。EM217-107 永不自动恢复/重试 one-shot task：created/unlinked=interrupted/not-submitted，linked/nonterminal=unknown，只有 existing child terminal receipt 可在 provider POST=0 时 reacquire/project/finalize。`image_batch` 仍是 `@e-mate/dsh` 内唯一实现，不建第二 scheduler/store/RPC。
 
+## Single-image latency gate
+
+EM217-108 只在 EM217-107 与 EM217-202 完成后实施，owner 为 IMG、sanitized evidence 由 QA 验证。Pinned rc.7 没有 native image-generation Tool，因此不得宣称 native imagegen parity；固定 comparator 是同一 in-process 25 ms fake provider response 加一次真实 pinned rc.7 `LocalAttachmentStore.saveImage` 的 pinned-owner lower bound，对照 assembled direct `imagegen` Tool/Job/receipt/projection。两臂使用相同 prompt SHA、request body、response bytes，禁止网络、product sleep/flag、next LLM turn 与 provider network variance。Direct one-image 必须 zero subagents/batch events、exactly one Job/POST/CAS save/terminal receipt，ordinary success zero retry/wait。Warm small/max 每 fresh process 20 warmups + 60 ABBA pairs，cold small/max 各 15 fresh-context pairs，0/256 receipt history slope 30 pairs，重复三个 fresh processes，每次 nearest-rank p95/p99 全部通过；阈值、fail-closed sanitized manifest 与独立 macOS dev cached-byte first-visible p95 ≤ 500 ms 由 `contracts/single-image-latency.md` 定义。只有 measured failing stage 可在后续修改 `image-generation.ts`；若已 green，仅交付 test/evidence。全部 performance evidence 当前保持 OPEN，production gates 不变。
+
 ## Shared file import
 
 EM217-307 由 `UI/shared-file-import` 所有，精确依赖 EM217-004 与 EM217-404，并在 EM217-501 前完成。当前 allowlist 中每个普通文件类型都走同一 extension-owned canonical MIME、session Workspace、atomic link/collision/rollback 和严格 RpcResult 路径；不得为 spreadsheet 或任一单独扩展新增 endpoint/protocol。预期校验保持 `bad-request`，意外 Host 异常使用 pinned rc.7 `internal` 固定安全文案；客户端仅呈现 allowlist 内的有界业务校验文案，其余失败均折叠为固定安全中文。Native images 继续使用既有 draft/Attachment CAS。
@@ -26,7 +30,7 @@ EM217-408 只复用 pinned jing-hy MIT PowerShell/Win32 primitives，并接到�
 
 ## Verification and gates
 
-EM217-501 覆盖全部 source、UI、gateway、Desktop alignment 与 Windows plugin；EM217-407 位于完整 source verification 和 Desktop 对齐之后，GUI 再随后执行。环境证据表明：缺少 pinned Harness emitted lib 时 `test:fast` 会在断言前失败；主代理先执行仓库自有 `build:harness` 后，`test:fast` 为 12/12 green。EM217-404 patch/package/lock 与 focused 38 tests 通过后，Desktop full check 对 `Desktop Harness overlay is not admitted: @deepseek-ai/dsh-app-boot@npm:0.1.0-rc.7` 正确 fail closed；唯一 owner `scripts/harness-provenance.mjs` 必须精确准入该 pinned overlay，并先通过 `scripts/harness-provenance.test.mjs` focused test，再运行 Desktop full check。该修复是必要的端到端 provenance owner，不是 bypass；`COREPACK_ENABLE_PROJECT_SPEC=0` 不是 canonical guidance。依赖安装属于精确 Harness worktree的环境准备，不写入产品命令。Source commands 按顺序为：
+EM217-501 覆盖 EM217-108 单图 latency/bypass gate、全部 source、UI、gateway、Desktop alignment 与 Windows plugin；EM217-407 位于完整 source verification 和 Desktop 对齐之后，GUI 再随后执行。环境证据表明：缺少 pinned Harness emitted lib 时 `test:fast` 会在断言前失败；主代理先执行仓库自有 `build:harness` 后，`test:fast` 为 12/12 green。EM217-404 patch/package/lock 与 focused 38 tests 通过后，Desktop full check 对 `Desktop Harness overlay is not admitted: @deepseek-ai/dsh-app-boot@npm:0.1.0-rc.7` 正确 fail closed；唯一 owner `scripts/harness-provenance.mjs` 必须精确准入该 pinned overlay，并先通过 `scripts/harness-provenance.test.mjs` focused test，再运行 Desktop full check。该修复是必要的端到端 provenance owner，不是 bypass；`COREPACK_ENABLE_PROJECT_SPEC=0` 不是 canonical guidance。依赖安装属于精确 Harness worktree的环境准备，不写入产品命令。Source commands 按顺序为：
 
 - `MAIN-AGENT-ONLY SOURCE PREREQUISITE: corepack pnpm run build:harness`
 - `corepack pnpm run test:fast`
@@ -38,7 +42,7 @@ EM217-501 覆盖全部 source、UI、gateway、Desktop alignment 与 Windows plu
 - `node --test scripts/harness-provenance.test.mjs`
 - `workdir: desktop; corepack yarn check`
 
-Ticket-local tests 只写真实路径。当前仅允许主代理授权的非生产 app-directory/dev macOS Computer Use：EM217-504 只依赖 407+501。其 packaged/installed production 另需 502+503 且 **HUMAN-CONFIRMATION-GATED**；Windows installed evidence、生产 dist、rollback、public release 均保持 OPEN。
+Ticket-local tests 只写真实路径。EM217-307 的 TSX check 从 pinned Harness workdir 直接运行已安装的 `node_modules/.bin/vitest`，不得使用会触发 Lefthook 安装的 `pnpm exec`；EM217-408 通过 `node scripts/component-run.mjs check --component @e-mate/dsh-plugin-computer-use` 构建并检查独立 component，不得使用 root `--filter`。当前仅允许主代理授权的非生产 app-directory/dev macOS Computer Use：EM217-504 只依赖 407+501。其 packaged/installed production 另需 502+503 且 **HUMAN-CONFIRMATION-GATED**；Windows installed evidence、生产 dist、rollback、public release 均保持 OPEN。
 
 ## Evidence
 
@@ -46,4 +50,4 @@ Git tracks only small sanitized specifications, manifests, and assertions. Video
 
 ## Machine check
 
-Run `node docs/2.0.17/check-plan.mjs`, then `git diff --check`. The canonical 39 work orders and detailed acceptance/rollback data are in `work-orders.json`.
+Run `node docs/2.0.17/check-plan.mjs`, then `git diff --check`. The canonical 40 work orders and detailed acceptance/rollback data are in `work-orders.json`.
