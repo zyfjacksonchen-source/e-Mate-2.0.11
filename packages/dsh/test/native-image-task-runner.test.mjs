@@ -53,7 +53,9 @@ function harness({ flush = async () => true, mutateRun, outcome = 'completed', c
         const result = (async () => {
           if (callCount === 0) return { stopReason: 'completed', output: [] }
           const scope = await runtime.claim(child, claimArgs === undefined ? args : claimArgs(args, ordinal))
-          scopes.push(scope.taskId)
+          scopes.push(scope)
+          assert.match(scope.batchId, /^sha256:[0-9a-f]{64}$/)
+          assert.equal(scope.ordinal, ordinal)
           assert.match(scope.taskId, /^sha256:[0-9a-f]{64}$/)
           const selected = typeof outcome === 'function' ? outcome(ordinal) : outcome
           if (selected === 'wait-abort') {
@@ -68,7 +70,7 @@ function harness({ flush = async () => true, mutateRun, outcome = 'completed', c
           if (selected === 'pre-job-failed') {
             childSession.append('emate/image-output', { schema_version: 2, revision: 2, call_id: callId,
               operation: 'generate', status: 'failed', billing_status: 'not-submitted', parent_session_id: child.id,
-              sources: [], content: [], failure_code: 'validation-failed', verifier: {}, verification: {} })
+              client_request_id: 'image-' + scope.taskId.slice('sha256:'.length), sources: [], content: [], failure_code: 'validation-failed', verifier: {}, verification: {} })
             return { stopReason: 'error', output: [] }
           }
           providers += 1
@@ -84,7 +86,7 @@ function harness({ flush = async () => true, mutateRun, outcome = 'completed', c
             operation: selected === 'invalid-operation' ? 'edit' : 'generate',
             status: selected === 'bad-status' ? { value: 'completed' } : 'completed',
             billing_status: 'recorded', parent_session_id: child.id,
-            sources: selected === 'invalid-sources' ? [image(99)] : [],
+            client_request_id: 'image-' + scope.taskId.slice('sha256:'.length), sources: selected === 'invalid-sources' ? [image(99)] : [],
             content: [{ type: 'image', attachment: output }], job_id: jobId,
             output, verifier: {}, verification: {} })
           return { stopReason: 'completed', output: [] }
@@ -230,7 +232,9 @@ test('each task receives a distinct deterministic gateway identity', async () =>
   await h.runtime.execute({ tasks: [{ prompt: 'same' }, { prompt: 'same' }, { prompt: 'same' }], concurrency: 3 },
     { agent: h.parent, callId: 'scope', signal: new AbortController().signal })
   assert.equal(h.stats().scopes.length, 3)
-  assert.equal(new Set(h.stats().scopes).size, 3)
+  assert.equal(new Set(h.stats().scopes.map(scope => scope.taskId)).size, 3)
+  assert.equal(new Set(h.stats().scopes.map(scope => scope.batchId)).size, 1)
+  assert.deepEqual(h.stats().scopes.map(scope => scope.ordinal), [1, 2, 3])
 })
 
 test('opened linked crashes and missing receipts become unknown, while pre-open failures remain not-submitted', async t => {

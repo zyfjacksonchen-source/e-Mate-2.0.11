@@ -985,21 +985,25 @@ function detectedImage(data) {
   throw new Error('e-Mate image result is not PNG, JPEG, or WebP')
 }
 
-function requestScope(exec, deterministicTaskId) {
+function requestScope(exec, batchClaim) {
   const sessionId = String(exec.agent?.session?.header?.id ?? exec.agent?.id ?? '')
   const callId = String(exec.callId ?? '')
   if (sessionId.length === 0 || callId.length === 0) throw new Error('image generation requires a stable e-Mate Tool scope')
-  const id = deterministicTaskId === undefined
+  const id = batchClaim === undefined
     ? createHash('sha256').update(sessionId).update('\0').update(callId).digest('hex').slice(0, 32)
-    : deterministicTaskId.slice('sha256:'.length)
+    : batchClaim.taskId.slice('sha256:'.length)
   const clientRequestId = `image-${id}`
   return {
     clientRequestId,
     headers: {
-      'x-e-mate-task-id': deterministicTaskId ?? clientRequestId,
+      'x-e-mate-task-id': batchClaim?.taskId ?? clientRequestId,
       'x-e-mate-trace-id': clientRequestId,
       session_id: clientRequestId,
       'x-client-request-id': clientRequestId,
+      ...(batchClaim === undefined ? {} : {
+        'x-e-mate-batch-id': batchClaim.batchId,
+        'x-e-mate-batch-ordinal': String(batchClaim.ordinal),
+      }),
     },
   }
 }
@@ -1358,6 +1362,7 @@ export async function apply(ctx, config = {}) {
     async execute(args, exec) {
       assertFreshParentCall(exec.agent, exec.callId)
       const batchClaim = await nativeImageTasks.claim(exec.agent, args)
+      const batchScope = batchClaim === undefined ? undefined : requestScope(exec, batchClaim)
       const parentSessionId = sessionIdentity(exec.agent)
       let operation = attemptedImageOperation(args)
       let refs = []
@@ -1384,7 +1389,7 @@ export async function apply(ctx, config = {}) {
           failureCode(error, false, exec.signal.aborted),
           parentSessionId,
           undefined,
-          undefined,
+          batchScope?.clientRequestId,
           undefined,
           2,
         ))
@@ -1395,12 +1400,12 @@ export async function apply(ctx, config = {}) {
       let ambiguousDispatch = false
       let started
       let terminalJob
-      let clientRequestId
+      let clientRequestId = batchScope?.clientRequestId
       let providerRequestId
       try {
         await modelPolicy.assertModel(IMAGE_MODEL)
         exec.signal.throwIfAborted()
-        const scope = requestScope(exec, batchClaim?.taskId)
+        const scope = batchScope ?? requestScope(exec, undefined)
         clientRequestId = scope.clientRequestId
         started = startImageJob(ctx, exec.agent, exec.signal, async (signal) => {
           const value = await client.execute(
@@ -1486,7 +1491,7 @@ export async function apply(ctx, config = {}) {
               : 'provider-result-uncommitted',
             parentSessionId,
             started?.id,
-            started === undefined ? undefined : clientRequestId,
+            clientRequestId,
             providerRequestId,
             revision,
           ))

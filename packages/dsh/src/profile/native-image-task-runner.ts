@@ -57,6 +57,7 @@ interface TerminalReceipt {
   readonly operation: 'generate'
   readonly sources: readonly []
   readonly job_id?: string
+  readonly client_request_id?: string
   readonly output?: ImageAttachmentRef
   readonly failure_code?: string
 }
@@ -98,6 +99,7 @@ function receipt(value: unknown, owner: string, eventSeq: number): { receipt: Te
     || value.parent_session_id !== owner || value.operation !== 'generate'
     || !Array.isArray(value.sources) || value.sources.length !== 0 || !Array.isArray(value.content)
     || value.job_id !== undefined && typeof value.job_id !== 'string'
+    || value.client_request_id !== undefined && typeof value.client_request_id !== 'string'
     || value.failure_code !== undefined && typeof value.failure_code !== 'string') throw new Error('native image child receipt is invalid')
   const output = value.output === undefined ? undefined : imageRef(value.output)
   const block = value.content[0]
@@ -111,6 +113,7 @@ function receipt(value: unknown, owner: string, eventSeq: number): { receipt: Te
     status: value.status as TerminalReceipt['status'], billing_status: value.billing_status as TerminalReceipt['billing_status'],
     parent_session_id: owner, operation: 'generate', sources: [],
     ...(value.job_id === undefined ? {} : { job_id: nativeId(value.job_id, 'native image Job ID') }),
+    ...(value.client_request_id === undefined ? {} : { client_request_id: nativeId(value.client_request_id, 'native image client request ID') }),
     ...(output === undefined ? {} : { output }),
     ...(value.failure_code === undefined ? {} : { failure_code: value.failure_code }) }
   return { receipt: parsed, pointer: { owner_session_id: owner, call_id: parsed.call_id,
@@ -198,7 +201,7 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: { dea
     await Promise.allSettled([...active].map(cleanup))
   }, 'emate.image-batch: abort active native children')
 
-  async function claim(agent: AgentLike, args: unknown): Promise<{ taskId: string } | undefined> {
+  async function claim(agent: AgentLike, args: unknown): Promise<{ taskId: string; batchId: string; ordinal: number } | undefined> {
     if (agent.session.header.origin !== 'subagent') return undefined
     const value = descriptor(agent)
     if (value === undefined || typeof value.label !== 'string' || !value.label.startsWith(LABEL_PREFIX)) return undefined
@@ -219,7 +222,7 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: { dea
     }
     const taskId = await gate.opened
     gate.controller.signal.throwIfAborted()
-    return { taskId }
+    return { taskId, batchId: imageBatchId(gate.parentSessionId, gate.parentCallId), ordinal: gate.task.ordinal }
   }
 
   const flush = async (session: SessionLike, label: string) => {
@@ -345,7 +348,11 @@ export function createNativeImageTaskRuntime(ctx: RuntimeContext, options: { dea
         if (calls.length !== 1 || terminals.length !== 1 || !isRecord(calls[0].data)
           || typeof calls[0].data.callId !== 'string') throw new Error('native image child must contain exactly one imagegen call and terminal receipt')
         terminalReceipt = parsed[0].receipt; terminalPointer = parsed[0].pointer
-        if (terminalReceipt.call_id !== calls[0].data.callId) throw new Error('native image child receipt call correlation is invalid')
+        const expectedClientRequestId = `image-${gate.taskId.slice('sha256:'.length)}`
+        if (terminalReceipt.call_id !== calls[0].data.callId
+          || terminalReceipt.client_request_id !== expectedClientRequestId) {
+          throw new Error('native image child receipt call correlation is invalid')
+        }
         const needsJob = terminalReceipt.billing_status !== 'not-submitted' || terminalReceipt.output !== undefined
         let job: JobLike | undefined
         if (needsJob) {

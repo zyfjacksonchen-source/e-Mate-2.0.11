@@ -10,6 +10,7 @@ import {
   InvocationAdmissionError,
   PostgresUsageStore,
   PostgresTenantModelRoutePolicy,
+  type ModelGatewayOptions,
   type ModelGatewayPrincipal,
   type ModelGatewayRoute,
   type ProviderInvocationReceipt,
@@ -18,6 +19,8 @@ import {
   type UsageStore,
 } from '../src/index.ts';
 import { createProductionAuthenticator } from '../src/production.ts';
+import type { ImageObservation } from '../src/image-observability.ts';
+import { InvocationRequestConflictError } from '../src/server.ts';
 
 const sessionToken = 's'.repeat(64);
 const otherToken = 'o'.repeat(64);
@@ -445,7 +448,8 @@ async function withGateway(
   gatewayLimits = limits,
   gatewayRoute: ModelGatewayRoute = route,
   tenantModelRoutePolicy?: TenantModelRoutePolicy,
-  usageStore: UsageStore = new InMemoryUsageStore(gatewayLimits)
+  usageStore: UsageStore = new InMemoryUsageStore(gatewayLimits),
+  imageObservation?: ModelGatewayOptions['imageObservation']
 ): Promise<void> {
   const upstreamRequests: Request[] = [];
   const consentStore = new InMemoryConsentStore(consentPolicy);
@@ -468,6 +472,7 @@ async function withGateway(
     usagePrivateKey: privateKey,
     reconcileProviderInvocation,
     upstreamTimeoutMs,
+    imageObservation,
     fetchImplementation: async (input, init) => {
       const upstreamRequest = new Request(input, init);
       upstreamRequests.push(upstreamRequest);
@@ -1653,6 +1658,137 @@ test('keeps an interrupted Chat Completions invocation pending without upstream 
     limits,
     chatRoute,
     { isEnabled: async () => true }
+  );
+});
+
+
+
+test('correlates batch image stages and rejects mismatched optional scope before provider submission', async () => {
+  const observations: ImageObservation[] = [];
+  const taskId = 'sha256:' + 'a'.repeat(64);
+  const traceId = 'image-' + 'a'.repeat(64);
+  const batchId = 'sha256:' + 'b'.repeat(64);
+  const headers = {
+    ...responseHeaders(),
+    session_id: traceId,
+    'x-client-request-id': traceId,
+    'x-e-mate-task-id': taskId,
+    'x-e-mate-trace-id': traceId,
+    'x-e-mate-batch-id': batchId,
+    'x-e-mate-batch-ordinal': '2',
+  };
+  await withGateway(
+    async (baseUrl, upstreamRequests) => {
+      const generated = await imageRequest(baseUrl, undefined, headers);
+      assert.equal(generated.status, 200);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(observations.map(({ stage }) => stage), [
+        'admission_decision', 'provider_submit', 'provider_outcome', 'client_response',
+      ]);
+      for (const event of observations) {
+        assert.deepEqual(
+          { trace_id: event.trace_id, client_request_id: event.client_request_id, task_id: event.task_id, batch_id: event.batch_id, ordinal: event.ordinal },
+          { trace_id: traceId, client_request_id: traceId, task_id: taskId, batch_id: batchId, ordinal: 2 }
+        );
+        assert(event.duration_ms >= 0 && event.duration_ms <= 600_000);
+      }
+      const mismatched = await imageRequest(baseUrl, { model: imageRoute.id, prompt: 'must not submit' }, {
+        ...headers, 'x-e-mate-batch-ordinal': '3', 'x-e-mate-trace-id': 'wrong-trace',
+      });
+      assert.equal(mismatched.status, 400);
+      assert.equal(upstreamRequests.length, 1);
+    },
+    () => Response.json({
+      data: [{ b64_json: 'aGVsbG8=' }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    }),
+    undefined, undefined, limits, imageRoute, { isEnabled: async () => true },
+    new InMemoryUsageStore(limits),
+    event => observations.push(event)
+  );
+});
+
+test('observes only executable admission and classifies every provider boundary conservatively', async () => {
+  const runCase = async ({ response, prepare, complete, expected, status }: {
+    response?: () => Response | Promise<Response>;
+    prepare?: UsageStore['prepare'];
+    complete?: UsageStore['complete'];
+    expected: string;
+    status: number;
+  }) => {
+    const observations: ImageObservation[] = [];
+    const store = new InMemoryUsageStore(limits);
+    if (prepare) store.prepare = prepare;
+    if (complete) store.complete = complete;
+    await withGateway(
+      async (baseUrl) => {
+        const result = await imageRequest(baseUrl);
+        assert.equal(result.status, status);
+        await new Promise(resolve => setImmediate(resolve));
+        const admitted = observations.filter(event => event.stage === 'admission_decision' && event.outcome === 'admitted');
+        if (expected === 'preflight' || expected === 'rate_limited') assert.equal(admitted.length, 0);
+        assert.equal(observations.at(-1)?.stage, 'client_response');
+        assert.equal(observations.at(-1)?.failure_code, expected);
+      },
+      response,
+      undefined, undefined, limits, imageRoute, { isEnabled: async () => true }, store,
+      event => observations.push(event)
+    );
+  };
+  await runCase({
+    prepare: async () => { throw new InvocationAdmissionError('TENANT_CONCURRENCY_LIMITED', 1_000); },
+    expected: 'rate_limited', status: 429,
+  });
+  await runCase({
+    prepare: async () => ({ status: 'PENDING', invocationId: 'pending-invocation' }),
+    expected: 'preflight', status: 409,
+  });
+  await runCase({
+    prepare: async () => { throw new InvocationRequestConflictError('conflict'); },
+    expected: 'preflight', status: 409,
+  });
+  await runCase({
+    prepare: async () => ({ status: 'RECORDED', invocationId: 'recorded-invocation' }),
+    expected: 'preflight', status: 503,
+  });
+  await runCase({
+    prepare: async () => { throw new Error('private database detail'); },
+    expected: 'preflight', status: 503,
+  });
+  await runCase({ response: () => new Response('', { status: 400 }), expected: 'provider_rejected', status: 502 });
+  await runCase({ response: () => new Response('', { status: 503 }), expected: 'provider_outcome_unknown', status: 502 });
+  await runCase({ response: () => new Response('not json', { headers: { 'content-type': 'text/plain' } }), expected: 'provider_outcome_unknown', status: 502 });
+  await runCase({ response: async () => { throw new Error('private network detail'); }, expected: 'provider_outcome_unknown', status: 502 });
+  await runCase({
+    response: async () => {
+      const error = new DOMException('private timeout detail', 'TimeoutError') as DOMException & { definitelyNotSubmitted: true };
+      error.definitelyNotSubmitted = true;
+      throw error;
+    },
+    expected: 'provider_timeout_before_accept', status: 504,
+  });
+  await runCase({
+    response: () => Response.json({ data: [{ b64_json: 'aGVsbG8=' }], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }),
+    complete: async () => { throw new Error('private usage journal detail'); },
+    expected: 'provider_outcome_unknown', status: 503,
+  });
+});
+
+test('an observation callback exception cannot change an image success response', async () => {
+  await withGateway(
+    async (baseUrl) => {
+      const response = await imageRequest(baseUrl);
+      assert.equal(response.status, 200);
+      assert.equal(((await response.json()) as { data: unknown[] }).data.length, 1);
+      await new Promise(resolve => setImmediate(resolve));
+    },
+    () => Response.json({
+      data: [{ b64_json: 'aGVsbG8=' }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    }),
+    undefined, undefined, limits, imageRoute, { isEnabled: async () => true },
+    new InMemoryUsageStore(limits),
+    () => { throw new Error('private logger detail'); }
   );
 });
 

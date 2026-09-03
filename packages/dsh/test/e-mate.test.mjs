@@ -49,7 +49,7 @@ import {
   MODEL_POLICY_CHANNEL,
   validateModelPolicy,
 } from '../profile/plugins/model-policy.js'
-import { apply as applyAudit, AUDIT_CHANNEL, createTaskAuditFact, createUsageFact } from '../profile/plugins/audit.js'
+import { apply as applyAudit, AUDIT_CHANNEL, createTaskAuditFact, createUsageFact, imageBatchAuditCorrelation } from '../profile/plugins/audit.js'
 import {
   apply as applyIdentity,
   createEnterpriseIdentityProvider,
@@ -1195,6 +1195,8 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
           trace: outgoing.headers.get('x-e-mate-trace-id'),
           session: outgoing.headers.get('session_id'),
           client: outgoing.headers.get('x-client-request-id'),
+          batch: outgoing.headers.get('x-e-mate-batch-id'),
+          ordinal: outgoing.headers.get('x-e-mate-batch-ordinal'),
         })
         activeSubmissions += 1
         maximumSubmissions = Math.max(maximumSubmissions, activeSubmissions)
@@ -1295,10 +1297,14 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     let preStep
     let modelPolicyGate
     let modelPolicyGateEntered
+    let rejectModelPolicyFrom
     const modelPolicy = { assertModel: async model => {
       policyModels.push(model)
       modelPolicyGateEntered?.()
       await modelPolicyGate
+      if (rejectModelPolicyFrom !== undefined && policyModels.length >= rejectModelPolicyFrom) {
+        throw new Error('simulated image model policy pre-Job failure')
+      }
     } }
     let throwNextImageJobStarter = false
     let imageReviewAsk
@@ -1575,6 +1581,48 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.match(imagegen.description, /use image_batch once and do not call imagegen directly/u)
     assert.match(imagegen.description, /native image_batch child may call imagegen exactly once/u)
     assert.match(imagegen.description, /Never pass a provider, model, output path, size, quality, timeout, or concurrency policy/u)
+    let batchChildOrdinal = 0
+    pluginCtx.sessions = { flush: async () => true }
+    pluginCtx.emateModelPolicy = modelPolicy
+    pluginCtx.subagents = {
+      getProvider: () => ({ inheritsParentContext: false, capabilities: { toolFilter: true, persona: true } }),
+      async start(_provider, request) {
+        const child = nativeParent('image-batch-real-child-' + ++batchChildOrdinal)
+        Object.assign(child.session.header, { origin: 'subagent', parentSession: request.parent.id })
+        child.session.append('subagent/descriptor', { version: 2, mode: 'one-shot', provider: 'spawn', label: request.label })
+        const callId = 'image-batch-real-call-' + batchChildOrdinal
+        child.session.append('tool/call', { name: 'imagegen', callId, arguments: '{}' })
+        const result = imagegen.execute({ prompt: 'real batch pre-job ' + batchChildOrdinal, image_url: [] }, {
+          agent: child, callId, signal: request.signal,
+        }).then(() => ({ stopReason: 'completed' }), () => ({ stopReason: 'error' }))
+        return { id: child.id, localAgent: child, result, async dispose() { await result } }
+      },
+    }
+    const requestsBeforePolicyFailure = requests.length
+    const jobsBeforePolicyFailure = jobs.length
+    rejectModelPolicyFrom = policyModels.length + 2
+    const policyFailureParent = nativeParent('image-batch-policy-failure-parent')
+    const policyFailure = await imageBatch.execute({ tasks: [
+      { prompt: 'real batch pre-job 1' }, { prompt: 'real batch pre-job 2' },
+    ], concurrency: 1 }, { agent: policyFailureParent, callId: 'image-batch-policy-failure', signal: new AbortController().signal })
+    rejectModelPolicyFrom = undefined
+    assert.equal(policyFailure.status, 'failed')
+    assert.equal(requests.length, requestsBeforePolicyFailure)
+    assert.equal(jobs.length, jobsBeforePolicyFailure)
+    for (const task of policyFailure.tasks) {
+      const child = context.agents.get(task.child_session_id)
+      assert.ok(child)
+      assert.equal(task.receipt.owner_session_id, task.child_session_id)
+      assert.equal(task.failure_code, 'validation-failed')
+      assert.notEqual(task.failure_code, 'child-contract-failed')
+      const receipt = terminalReceipt(child, task.receipt.call_id)
+      assert.equal(receipt.billing_status, 'not-submitted')
+      assert.equal(receipt.client_request_id, 'image-' + task.task_id.slice('sha256:'.length))
+      assert.equal('job_id' in receipt, false)
+      assert.equal('provider_request_id' in receipt, false)
+      assert.equal(task.submission_status, 'not-submitted')
+    }
+
     tools.delete('imagegen')
     await assert.rejects(
       imagegen.execute({ prompt: 'must fail before dispatch' }, {
@@ -2187,7 +2235,9 @@ test('image generation reuses the Model Gateway with Harness Jobs and attachment
     assert.deepEqual([...waitedJobs].sort(), jobs.map(job => job.id).sort())
     assert.equal(requests.every(request => !('provider' in request.body) && !('api_key' in request.body)), true)
     const firstScope = `image-${createHash('sha256').update('image-session\0image-call-1').digest('hex').slice(0, 32)}`
-    assert.deepEqual(requestScopes[0], { task: firstScope, trace: firstScope, session: firstScope, client: firstScope })
+    assert.deepEqual(requestScopes[0], {
+      task: firstScope, trace: firstScope, session: firstScope, client: firstScope, batch: null, ordinal: null,
+    })
     assert.equal(new Set(requestScopes.map(scope => scope.task)).size, requestScopes.length)
 
     let nativeBoundaryTurn = 100
@@ -4445,6 +4495,42 @@ test('local weekly quota serializes finite accounts and settles only real termin
   assert.deepEqual(warnings, [
     'e-Mate finite weekly quota permits one in-flight request; one real request may exceed its remaining allowance',
   ])
+})
+
+
+test('audit derives strict attachment and parent append stages without claiming UI visibility', () => {
+  const time = Date.parse('2027-01-02T03:04:05.000Z')
+  const taskId = 'sha256:' + 'a'.repeat(64)
+  const batchId = 'sha256:' + 'b'.repeat(64)
+  const clientRequestId = 'image-' + 'a'.repeat(64)
+  const image = { attachmentId: 'sha256:' + 'c'.repeat(64), mediaType: 'image/png', bytes: 8, width: 1, height: 1 }
+  const attachment = imageBatchAuditCorrelation({ time, type: 'emate/image-output', data: {
+    schema_version: 2, status: 'completed', billing_status: 'recorded', client_request_id: clientRequestId,
+    output: image, content: [{ type: 'image', attachment: { ...image } }],
+  } })
+  assert.deepEqual(attachment, {
+    schema_version: 1, stage: 'attachment_commit', trace_id: clientRequestId,
+    client_request_id: clientRequestId, task_id: taskId, occurred_at: '2027-01-02T03:04:05.000Z',
+  })
+  const parent = imageBatchAuditCorrelation({ time, type: 'emate/image-batch', data: {
+    kind: 'task-state', batch_id: batchId, task: { task_id: taskId, ordinal: 4, state: 'completed' },
+  } })
+  assert.deepEqual(parent, {
+    schema_version: 1, stage: 'parent_projection_append', trace_id: clientRequestId,
+    client_request_id: clientRequestId, task_id: taskId, batch_id: batchId, ordinal: 4,
+    occurred_at: '2027-01-02T03:04:05.000Z',
+  })
+  for (const observation of [attachment, parent]) {
+    const serialized = JSON.stringify(observation)
+    for (const forbidden of ['prompt', 'b64_json', 'nonce', 'secret', '/Users/', 'projection_visible']) {
+      assert.equal(serialized.includes(forbidden), false)
+    }
+  }
+  for (const invalid of [
+    { time, type: 'emate/image-output', data: { schema_version: 2, status: 'failed', billing_status: 'not-submitted', client_request_id: clientRequestId, content: [] } },
+    { time, type: 'emate/image-output', data: { schema_version: 2, status: 'completed', billing_status: 'recorded', client_request_id: clientRequestId, output: image, content: [] } },
+    { time: Number.NaN, type: 'emate/image-output', data: { schema_version: 2, status: 'completed', billing_status: 'recorded', client_request_id: clientRequestId, output: image, content: [{ type: 'image', attachment: image }] } },
+  ]) assert.equal(imageBatchAuditCorrelation(invalid), undefined)
 })
 
 test('audit records only real Harness usage and deduplicates reconnect replay and concurrent flush', async () => {

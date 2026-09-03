@@ -123,6 +123,57 @@ function trustedToolScenario(ctx, exec) {
   }
 }
 
+function exactImageRef(value) {
+  if (!isRecord(value)) return undefined
+  const keys = Object.keys(value).sort().join(',')
+  if (keys !== 'attachmentId,bytes,height,mediaType,width' && keys !== 'attachmentId,bytes,height,mediaType,name,width'
+    || typeof value.attachmentId !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(value.attachmentId)
+    || typeof value.mediaType !== 'string' || !['image/png', 'image/jpeg', 'image/webp'].includes(value.mediaType)
+    || !Number.isSafeInteger(value.bytes) || value.bytes < 1 || value.bytes > 5 * 1024 * 1024
+    || !Number.isSafeInteger(value.width) || value.width < 1 || value.width > 65_535
+    || !Number.isSafeInteger(value.height) || value.height < 1 || value.height > 65_535
+    || value.name !== undefined && (typeof value.name !== 'string' || value.name.length < 1 || value.name.length > 255 || /[\u0000/\\]/u.test(value.name))) return undefined
+  return value
+}
+
+export function imageBatchAuditCorrelation(event) {
+  if (!Number.isSafeInteger(event?.time) || event.time < 0 || !Number.isFinite(new Date(event.time).getTime())) return undefined
+  const occurredAt = new Date(event.time).toISOString()
+  const data = event?.data
+  if (event?.type === 'emate/image-output' && isRecord(data) && data.schema_version === 2
+    && data.status === 'completed' && data.billing_status === 'recorded'
+    && typeof data.client_request_id === 'string' && /^image-[0-9a-f]{64}$/u.test(data.client_request_id)
+    && Array.isArray(data.content) && data.content.length === 1 && isRecord(data.content[0]) && data.content[0].type === 'image') {
+    const output = exactImageRef(data.output)
+    const content = exactImageRef(data.content[0].attachment)
+    if (output === undefined || content === undefined || canonicalJson(output) !== canonicalJson(content)) return undefined
+    return {
+      schema_version: 1,
+      stage: 'attachment_commit',
+      trace_id: data.client_request_id,
+      client_request_id: data.client_request_id,
+      task_id: `sha256:${data.client_request_id.slice('image-'.length)}`,
+      occurred_at: occurredAt,
+    }
+  }
+  const task = data?.task
+  if (event?.type !== 'emate/image-batch' || !isRecord(data) || data.kind !== 'task-state'
+    || typeof data.batch_id !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(data.batch_id)
+    || !isRecord(task) || typeof task.task_id !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(task.task_id)
+    || !Number.isSafeInteger(task.ordinal) || task.ordinal < 1 || task.ordinal > 8) return undefined
+  const clientRequestId = `image-${task.task_id.slice('sha256:'.length)}`
+  return {
+    schema_version: 1,
+    stage: 'parent_projection_append',
+    trace_id: clientRequestId,
+    client_request_id: clientRequestId,
+    task_id: task.task_id,
+    batch_id: data.batch_id,
+    ordinal: task.ordinal,
+    occurred_at: occurredAt,
+  }
+}
+
 function terminalImageReceipt(sessionId, event) {
   return event?.type === 'emate/image-output'
     && isRecord(event.data)
@@ -579,6 +630,12 @@ function createAuditService(
 
   const captureTaskEvent = (sessionId, event, live) => {
     if (!isRecord(event) || !isRecord(event.data)) return
+    const imageCorrelation = live ? imageBatchAuditCorrelation(event) : undefined
+    if (imageCorrelation !== undefined) {
+      queueMicrotask(() => {
+        try { ctx.logger?.info?.(JSON.stringify({ event: 'image_observation', ...imageCorrelation })) } catch { /* Audit logging cannot own Tool success. */ }
+      })
+    }
     const sessionKey = String(sessionId)
     let turn = Number.isSafeInteger(event.data.turn) ? event.data.turn : openTurns.get(sessionKey)
     if (event.type === 'turn/start') {

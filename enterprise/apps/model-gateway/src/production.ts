@@ -804,6 +804,9 @@ export async function startProductionModelGateway(configurationFile: string): Pr
       usagePrivateKey: configuration.usagePrivateKey,
       consentStore: consent.store,
       upstreamTimeoutMs: configuration.upstreamTimeoutMs,
+      imageObservation: (event) => {
+        process.stdout.write(`${JSON.stringify({ event: 'image_observation', ...event })}\n`);
+      },
     });
     server = createServer(
       {
