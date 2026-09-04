@@ -80,6 +80,17 @@ async function insertLegacyUser(
   );
 }
 
+async function allowDefaultModel(tenant: string, user: string): Promise<void> {
+  assert.ok(pool);
+  const updated = await pool.query(
+    `UPDATE e_mate_tenant_user
+        SET allowed_model_ids = ARRAY['gpt-5.6-sol']::text[]
+      WHERE tenant_id = $1 AND user_id = $2`,
+    [tenant, user]
+  );
+  assert.equal(updated.rowCount, 1);
+}
+
 function createStore(): PostgresAuthStore {
   assert.ok(pool);
   return new PostgresAuthStore(pool, {
@@ -162,10 +173,13 @@ before(async () => {
       roles text[] NOT NULL,
       status text NOT NULL,
       token_limit bigint,
+      allowed_model_ids text[] NOT NULL DEFAULT ARRAY[]::text[],
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY (tenant_id, user_id)
     );
+    ALTER TABLE e_mate_tenant_user
+      ADD COLUMN IF NOT EXISTS allowed_model_ids text[] NOT NULL DEFAULT ARRAY[]::text[];
     CREATE TABLE IF NOT EXISTS e_mate_tenant_model_route (
       tenant_id text NOT NULL,
       route_id text NOT NULL,
@@ -405,6 +419,7 @@ integrationTest('concurrent first login upgrades once and subsequent logins use 
   const userLogin = `upgrade-${suffix}@example.test`;
   const password = 'legacy-password';
   await insertLegacyUser(tenant, user, userLogin, password);
+  await allowDefaultModel(tenant, user);
   const input = { tenantId: tenant, clientId: 'e-mate-desktop', user: userLogin, password };
   const concurrent = await Promise.all([auth.authenticatePassword(input), auth.authenticatePassword(input)]);
   assert.equal(
@@ -586,6 +601,7 @@ integrationTest('v0.2.9.2 migration dry-runs, applies atomically, and repeats wi
       [tenant, adminUserId]
     );
     assert.deepEqual(adminEvidence.rows[0]?.source_record_sha256, expectedAdminEvidence);
+    await allowDefaultModel(tenant, adminUserId);
     assert.equal(
       (
         await auth.authenticatePassword({
@@ -713,6 +729,11 @@ integrationTest('Postgres password login and refresh rotation are hash-only, ato
     await store.authenticatePassword({ tenantId, clientId: 'e-mate-desktop', user: login, password: 'wrong' }),
     { ok: false, code: 'INVALID_GRANT' }
   );
+  assert.deepEqual(
+    await store.authenticatePassword({ tenantId, clientId: 'e-mate-desktop', user: login, password }),
+    { ok: false, code: 'POLICY_REQUIRED' }
+  );
+  await allowDefaultModel(tenantId, userId);
   const loginResult = await store.authenticatePassword({
     tenantId,
     clientId: 'e-mate-desktop',
