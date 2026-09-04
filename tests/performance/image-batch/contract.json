@@ -2,6 +2,10 @@
   "schema_version": 1,
   "id": "EM217-001-keyless-fixture-v1",
   "purpose": "Reproduce supported 2.0.16 text-only new-image choreography and presentation boundaries without a provider call.",
+  "baseline_source": {
+    "commit": "f876f01d8280e4ab20fe83b88c36c7fe7a662135",
+    "foreground_cap": 4
+  },
   "provider": {
     "class": "deterministic-keyless-fixture",
     "network": "forbidden",

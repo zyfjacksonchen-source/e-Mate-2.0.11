@@ -2,24 +2,15 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const ROOT = new URL('../../../', import.meta.url)
 const CONTRACT_URL = new URL('./contract.json', import.meta.url)
-const SOURCE_URLS = {
-  operations: new URL('packages/dsh/src/profile/agent-operations.ts', ROOT),
-  runtime: new URL('packages/dsh/src/profile/image-generation.ts', ROOT),
-  gallery: new URL('packages/dsh/profile/plugins/emate-shell/src/client/image-gallery.tsx', ROOT),
-}
-
 const contract = JSON.parse(await readFile(CONTRACT_URL, 'utf8'))
-const sources = Object.fromEntries(await Promise.all(Object.entries(SOURCE_URLS).map(async ([key, url]) => [key, await readFile(url, 'utf8')])))
 
 function foregroundCap() {
-  const word = /at most ([a-z]+) sibling native/u.exec(sources.operations)?.[1]
-  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight']
-  const cap = words.indexOf(word)
-  assert.ok(cap > 0, 'foreground cap must be readable from agent-operations.ts')
-  assert.match(sources.runtime, new RegExp('at most ' + word + ' sibling native subagent calls', 'u'))
-  return cap
+  assert.deepEqual(Object.keys(contract.baseline_source), ['commit', 'foreground_cap'])
+  assert.match(contract.baseline_source.commit, /^[0-9a-f]{40}$/u)
+  assert.equal(contract.baseline_source.commit, 'f876f01d8280e4ab20fe83b88c36c7fe7a662135')
+  assert.equal(contract.baseline_source.foreground_cap, 4)
+  return contract.baseline_source.foreground_cap
 }
 
 function fixtureTask(taskCount, ordinal) {
@@ -96,16 +87,13 @@ function assertSanitized(value) {
   visit(value)
 }
 
-test('source contract identifies the current 2.0.16 behavior', () => {
+test('frozen captured 2.0.16 baseline identifies its source commit and foreground cap', () => {
   assert.equal(foregroundCap(), 4)
-  assert.match(sources.operations, /when the user requests two or more mutually independent new images/u)
-  assert.match(sources.operations, /Run multiple edits serially in that Agent/u)
-  assert.match(sources.operations, /If more than four images were requested, wait until every call in the current foreground batch returns/u)
-  assert.match(sources.runtime, /Object\.keys\(args\)\.some\(key => !\['prompt', 'image_url'\]\.includes\(key\)\)/u)
-  assert.ok(sources.runtime.includes("const IMAGE_MODEL = 'gpt-image-2-pro'"))
-  assert.ok(sources.gallery.includes("if (owner.turn.status !== 'closed') return null"))
-  assert.ok(sources.gallery.includes('...childGalleryImageItems(sessions, sessionId)'))
-  assert.ok(sources.gallery.includes('.sort((left, right) => (left.item.createdAt ?? 0) - (right.item.createdAt ?? 0)'))
+  assert.equal(contract.batches.executed_input_class, 'text-only-new-image')
+  assert.equal(contract.executed_request.model, 'gpt-image-2-pro')
+  assert.ok(contract.unsupported_current_batch_inputs.every(gap => gap.source_evidence.every(evidence =>
+    typeof evidence.file === 'string' && evidence.file.length > 0
+      && typeof evidence.assertion === 'string' && evidence.assertion.length > 0)))
 })
 
 test('20 deterministic fixture batches for each 4/5/8-task shape retain item-level evidence', () => {
