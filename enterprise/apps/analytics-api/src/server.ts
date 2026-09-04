@@ -15,6 +15,7 @@ import {
   parseAdminModelRouteKeyUpdate,
   parseAdminModelRoutePublication,
   parseAdminModelRouteUpdate,
+  parseAdminModelFastModeUpdate,
   parseAdminPasswordReset,
   parseTenantUserCreate,
   parseTenantUserDelete,
@@ -22,6 +23,7 @@ import {
 } from '@e-mate/admin-contract';
 import type { ConsentStore } from '@e-mate/consent-store';
 import { AdminManagementError, type AdminManagementStore } from './admin-management.ts';
+import { ModelFastModeError, type ModelFastModeControl } from './model-fast-mode.ts';
 import { type RuntimeRegistryPrincipal, type RuntimeRegistryStore } from './runtime-registry.ts';
 import type { ObservabilityPolicyMutationResult, ObservabilityPolicyStore } from './observability-policy.ts';
 import type { SessionSummaryStore } from './session-index.ts';
@@ -47,6 +49,7 @@ export type AnalyticsApiOptions = {
   usageAnalytics?: UsageAnalyticsReader;
   taskEvents?: TaskEventStore;
   adminManagement?: AdminManagementStore;
+  modelFastMode?: ModelFastModeControl;
   consentStore?: ConsentStore;
 };
 
@@ -426,6 +429,7 @@ export function createAnalyticsHandler({
   usageAnalytics,
   taskEvents,
   adminManagement,
+  modelFastMode,
   consentStore,
 }: AnalyticsApiOptions): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
   return async (request, response) => {
@@ -651,6 +655,36 @@ export function createAnalyticsHandler({
         } catch (error) {
           if (error instanceof HttpError) throw error;
           throwManagementError(error);
+        }
+      }
+      if (url.pathname === '/v1/admin/model-fast-mode') {
+        rejectQuery(url);
+        if (request.method !== 'GET' && request.method !== 'PUT') {
+          methodNotAllowed(response, 'GET, PUT');
+          return;
+        }
+        const identity = await principal(request, authenticate);
+        requireEnterprisePrincipal(identity);
+        requireRole(identity, managementRoles);
+        if (!modelFastMode) throw new HttpError(503, 'GPT_FAST_MODE_UNAVAILABLE', 'GPT fast mode unavailable');
+        try {
+          const result = request.method === 'GET'
+            ? await modelFastMode.read(identity)
+            : await modelFastMode.update(identity, parseAdminModelFastModeUpdate(await readJson(request)));
+          json(response, 200, result);
+          return;
+        } catch (error) {
+          if (error instanceof HttpError) throw error;
+          if (error instanceof ModelFastModeError && error.code === 'FORBIDDEN') {
+            throw new HttpError(403, 'ACCESS_DENIED', 'Access denied');
+          }
+          if (error instanceof ModelFastModeError && error.code === 'CONFLICT') {
+            throw new HttpError(409, 'GPT_FAST_MODE_CONFLICT', 'GPT fast mode changed; reload and retry');
+          }
+          if (error instanceof Error && error.message.startsWith('Invalid GPT fast mode')) {
+            throw new HttpError(400, 'INVALID_GPT_FAST_MODE', 'Invalid GPT fast mode');
+          }
+          throw new HttpError(503, 'GPT_FAST_MODE_UNAVAILABLE', 'GPT fast mode unavailable');
         }
       }
       if (url.pathname === '/v1/admin/model-routes') {

@@ -8,6 +8,7 @@ import { openPostgresConsentStore } from '@e-mate/consent-store';
 import { openPostgresAdminManagementStore, type AdminModelRouteDefinition } from './admin-management.ts';
 import type { RuntimeRegistryPrincipal } from './runtime-registry.ts';
 import { createAnalyticsServer, type AuthenticateBearer } from './server.ts';
+import { createModelFastModeControl, type ModelFastModeConfiguration } from './model-fast-mode.ts';
 import { openPostgresTaskEventStore } from './task-events.ts';
 import { openPostgresUsageAnalyticsReader } from './usage-analytics.ts';
 import {
@@ -34,6 +35,7 @@ export type AnalyticsProductionConfiguration = {
   consentPolicy: ConsentPolicy;
   modelRouteKeyEncryptionKey?: Buffer;
   sessionAuth?: AccessSessionVerifierOptions;
+  modelFastMode?: ModelFastModeConfiguration;
   authenticate: AuthenticateBearer;
 };
 
@@ -235,6 +237,7 @@ export function parseProductionConfiguration(
       ...(root.redis === undefined ? [] : ['redis']),
       ...(root.modelRouteKeys === undefined ? [] : ['modelRouteKeys']),
       ...(root.sessionAuth === undefined ? [] : ['sessionAuth']),
+      ...(root.modelFastMode === undefined ? [] : ['modelFastMode']),
     ],
     'configuration'
   );
@@ -301,6 +304,19 @@ export function parseProductionConfiguration(
     };
   }
 
+  let modelFastMode: ModelFastModeConfiguration | undefined;
+  if (root.modelFastMode !== undefined) {
+    const value = record(root.modelFastMode, 'GPT fast mode configuration');
+    exact(value, ['tenantId', 'sshHost', 'privateKeyFile', 'knownHostsFile'], 'GPT fast mode configuration');
+    const sshHost = text(value.sshHost, 'GPT fast mode host', 253);
+    if (!/^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(sshHost)) throw new Error('Invalid GPT fast mode host');
+    const privateKeyFile = secretPath(value.privateKeyFile, 'GPT fast mode private key');
+    const knownHostsFile = secretPath(value.knownHostsFile, 'GPT fast mode known hosts');
+    readSecret(privateKeyFile, 'GPT fast mode private key', 16 * 1024);
+    readSecret(knownHostsFile, 'GPT fast mode known hosts', 16 * 1024);
+    modelFastMode = { tenantId: identifier(value.tenantId, 'GPT fast mode tenant'), sshHost, privateKeyFile, knownHostsFile };
+  }
+
   return {
     host: listen.host,
     port: integer(listen.port, 'listen port', 1, 65_535),
@@ -309,6 +325,7 @@ export function parseProductionConfiguration(
     modelRoutes: parseModelRoutes(root.modelRoutes),
     ...(modelRouteKeyEncryptionKey ? { modelRouteKeyEncryptionKey } : {}),
     ...(sessionAuth ? { sessionAuth } : {}),
+    ...(modelFastMode ? { modelFastMode } : {}),
     authenticate: createHashedBearerAuthenticator(principals),
   };
 }
@@ -418,6 +435,7 @@ export async function startProductionAnalyticsApi(configurationFile: string): Pr
       usageAnalytics: usage.reader,
       taskEvents: tasks.store,
       adminManagement: admin.store,
+      ...(configuration.modelFastMode ? { modelFastMode: createModelFastModeControl(configuration.modelFastMode) } : {}),
       consentStore: consent.store,
     });
     server.listen(configuration.port, configuration.host);

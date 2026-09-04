@@ -89,6 +89,40 @@ test('production configuration maps a hashed bearer to fixed identity and denies
   assert.equal(parseProductionConfiguration(withoutRedis, readSecret).port, 4190);
 });
 
+test('GPT fast mode configuration binds one tenant and fixed SSH secret paths', () => {
+  const mode = {
+    tenantId: 'tenant-1',
+    sshHost: 'proxy.internal',
+    privateKeyFile: '/run/secrets/gpt-fast-mode-key',
+    knownHostsFile: '/run/secrets/gpt-fast-mode-hosts',
+  };
+  const readSecret = secretReader(principals());
+  const reader = (path: string) =>
+    path === mode.privateKeyFile || path === mode.knownHostsFile ? Buffer.from('test-key-material') : readSecret(path);
+  const parsed = parseProductionConfiguration({
+    ...configuration(),
+    modelRoutes: [
+      ...(configuration().modelRoutes as unknown[]),
+      { routeId: 'gpt-web-search', label: 'e-Mate 企业搜索', provider: '联网搜索' },
+    ],
+    modelFastMode: mode,
+  }, reader);
+  assert.deepEqual(parsed.modelFastMode, mode);
+  assert.equal(parsed.modelRoutes.at(-1)?.routeId, 'gpt-web-search');
+  for (const patch of [
+    { sshHost: '-oProxyCommand=unsafe' },
+    { sshHost: 'host user' },
+    { privateKeyFile: '/tmp/key' },
+    { tenantId: '' },
+    { extra: true },
+  ]) {
+    assert.throws(
+      () => parseProductionConfiguration({ ...configuration(), modelFastMode: { ...mode, ...patch } }, reader),
+      /Invalid/
+    );
+  }
+});
+
 test('production registers only identity, model-policy management, bounded model probes, and redacted audit surfaces', async () => {
   const source = readFileSync(new URL('../src/production.ts', import.meta.url), 'utf8');
   const serverSource = readFileSync(new URL('../src/server.ts', import.meta.url), 'utf8');
@@ -275,6 +309,10 @@ test('service images prove their runtime closure as the declared unprivileged us
       `RUN bun -e "await import\\('./apps/${application}/dist/${entry}'\\)"`,
       'u'
     ));
+    if (stage === 'analytics') {
+      assert.match(block, /apt-get install -y --no-install-recommends openssh-client/u);
+      assert.match(block, /useradd --uid 10001 --gid 0/u);
+    }
   }
 });
 
