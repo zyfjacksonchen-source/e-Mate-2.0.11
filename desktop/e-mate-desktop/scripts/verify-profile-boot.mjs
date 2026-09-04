@@ -174,21 +174,55 @@ try {
   if (trayItems.some(item => item.label().startsWith('Profile:'))) {
     throw new Error('assembled e-Mate profile unexpectedly exposes a profile selector')
   }
-  const disclosureAgent = ctx.agentLoop.create(
-    SessionId('profile-smoke-tool-disclosure'),
-    { provider: 'mock', model: 'mock' },
-  )
+  const disclosureAgent = (await ctx.agents.create({
+    sessionId: SessionId('profile-smoke-tool-disclosure'),
+    meta: { cwd: home },
+    agentOptions: { provider: 'mock', model: 'mock' },
+    setup: async agentCtx => void await ctx.agentPresets.mount(agentCtx),
+  })).agent
   const initialToolNames = new Set(ctx.tools.schemas(disclosureAgent).map(schema => schema.name))
   if (!initialToolNames.has('tool_search')
     || !initialToolNames.has('imagegen')
     || !initialToolNames.has('image_pack')
+    || !['job_output', 'job_list', 'job_kill'].every(name => initialToolNames.has(name))
     || initialToolNames.has('office_write')) {
     throw new Error('assembled Profile did not apply progressive Tool disclosure')
   }
+
+  const processTool = process.platform === 'win32' ? 'pwsh' : 'bash'
+  const background = await ctx.tools.execute({
+    callId: CallId('profile-smoke-background-job'),
+    name: processTool,
+    arguments: {
+      command: process.platform === 'win32' ? 'Start-Sleep -Seconds 30' : 'sleep 30',
+      description: 'Hold harmless profile smoke process',
+      run_in_background: true,
+    },
+    agent: disclosureAgent,
+    signal: new AbortController().signal,
+  })
+  if (background.isError || background.value.kind !== 'background') {
+    throw new Error(`assembled Profile could not start a native background Job: ${JSON.stringify(background)}`)
+  }
+  const cancelled = await ctx.tools.execute({
+    callId: CallId('profile-smoke-job-kill'),
+    name: 'job_kill',
+    arguments: { job_id: background.value.jobId, reason: 'profile cancellation smoke complete' },
+    agent: disclosureAgent,
+    signal: new AbortController().signal,
+  })
+  if (cancelled.isError || cancelled.value.outcome !== 'cancellation-requested') {
+    throw new Error(`assembled Profile native job_kill did not request cancellation: ${JSON.stringify(cancelled)}`)
+  }
+  const terminalJob = await ctx.jobs.wait(background.value.jobId, 5_000, disclosureAgent)
+  if (terminalJob.status !== 'killed') {
+    throw new Error(`assembled Profile background Job settled as ${terminalJob.status} instead of killed`)
+  }
+
   const disclosure = await ctx.tools.execute({
     callId: CallId('profile-smoke-tool-search'),
     name: 'tool_search',
-    arguments: { query: 'office document write', limit: 1 },
+    arguments: { query: 'office_write', limit: 1 },
     agent: disclosureAgent,
     signal: new AbortController().signal,
   })

@@ -13,6 +13,7 @@
           - get_goal
           - glob
           - grep
+          - job_*
           - image_pack
           - image_batch
           - imagegen
