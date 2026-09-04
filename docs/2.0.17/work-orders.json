@@ -1051,7 +1051,7 @@
         "node --test packages/dsh-plugin-file-import/test/file-import.test.mjs packages/dsh-plugin-file-import/test/client-result.test.mjs packages/dsh-plugin-file-import/test/image-normalization.test.mjs",
         "MAIN-AGENT-ONLY ADAPTER CHECK (requires built pinned Harness workspace): node --test scripts/harness-conversation-adapter.test.mjs",
         "MAIN-AGENT-ONLY COMPONENT CHECK (after corepack pnpm run build:harness): workdir: upstream/deepseek-harness; node_modules/.bin/vitest run --root ../.. --config packages/dsh/profile/plugins/emate-shell/vitest.config.ts packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx",
-        "MAIN-AGENT-ONLY COMPONENT BUILD: corepack pnpm --filter @e-mate/dsh-plugin-file-import build",
+        "MAIN-AGENT-ONLY COMPONENT GATE (component-run builds, then runs package test): node scripts/component-run.mjs check --component @e-mate/dsh-plugin-file-import",
         "MAIN-AGENT-ONLY ASSEMBLED GUI: refresh the existing dsh web URL after rebuilding Web artifacts; exercise picker cancel/retry/session switch/mixed image+ordinary/folder pass-through and verify no raw error text"
       ],
       "rollback": "精确回滚共享 file-import 源码、测试与文档；删除失败导入产生的临时文件，保留已成功提交的 Workspace 文件和 native image Attachment CAS；接受 save 后、Session flush 前失败留下的不可达 CAS 对象。",

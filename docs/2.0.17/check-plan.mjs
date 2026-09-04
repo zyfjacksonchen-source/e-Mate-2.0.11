@@ -92,7 +92,10 @@ assert.deepEqual(fileImport.write_set, [
 assert(t('EM217-501').depends_on.includes('EM217-307'))
 assert(fileImport.tests.includes('MAIN-AGENT-ONLY COMPONENT CHECK (after corepack pnpm run build:harness): workdir: upstream/deepseek-harness; node_modules/.bin/vitest run --root ../.. --config packages/dsh/profile/plugins/emate-shell/vitest.config.ts packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx'))
 assert.equal(fileImportPackage.scripts['test:client'], 'cd ../../upstream/deepseek-harness && node_modules/.bin/vitest run --root ../.. --config packages/dsh/profile/plugins/emate-shell/vitest.config.ts packages/dsh-plugin-file-import/test/client-flow.client.spec.tsx')
-assert.match(fileImportPackage.scripts.check, /(?:^|&&\s*)pnpm test:client(?:\s*&&|$)/u)
+assert.equal(fileImportPackage.scripts['test:source'], 'node --test test/*.test.mjs')
+assert.equal(fileImportPackage.scripts.test, 'pnpm test:source && pnpm test:client')
+assert.equal(fileImportPackage.scripts.check, 'pnpm build && pnpm test')
+assert(fileImport.tests.includes('MAIN-AGENT-ONLY COMPONENT GATE (component-run builds, then runs package test): node scripts/component-run.mjs check --component @e-mate/dsh-plugin-file-import'))
 assert(!text('EM217-307').includes('pnpm exec'), 'EM217-307 must call the already-installed pinned Harness vitest binary directly')
 assert(executionText.includes('The main agent is sole integrator'))
 for (const required of ['internal', 'bad-request', 'ALLOWED_MEDIA_BY_EXTENSION', 'NFC', '零字节', '16 MiB', '32 MiB', 'batch rollback', 'serverResponseSchema', 'invalid_union', 'native image']) {

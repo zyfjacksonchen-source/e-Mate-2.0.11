@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import * as jsxRuntime from 'react/jsx-runtime'
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SlotTestRuntime } from '../../../upstream/deepseek-harness/packages/test-support/client-runtime/src/index.ts'
@@ -18,8 +19,10 @@ const imported = {
 }
 const success = { ok: true, value: { schema_version: 1, files: [imported] } }
 const attachment = { attachmentId: `sha256:${'a'.repeat(64)}`, mediaType: 'image/png', bytes: 4, width: 1, height: 1, name: 'picture.png' }
+const HYDRATED_NOTE = Uint8Array.from([110, 111, 116, 101])
 const staged = { ok: true, value: { schema_version: 1, attachments: [attachment] } }
 const stagedDuplicates = { ok: true, value: { schema_version: 1, attachments: [attachment, attachment] } }
+const EMPTY_DURABLE_IMAGES: readonly any[] = []
 const DEFAULT_IMAGE_LIMITS = { maxImageBytes: 5 * 1024 * 1024, maxImagesPerMessage: 20, maxMessageImageBytes: 100 * 1024 * 1024, maxImagePixels: 40_000_000, mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] }
 function file(name = imported.display_name, type = 'text/plain'): File {
   const value = new File(['note'], name, { type })
@@ -33,16 +36,20 @@ function picker(): HTMLInputElement { return document.querySelector('input[type=
 // React store fixture for the plugin's native InputState face. The actual
 // transformed native facade/store/hub are exercised by the adapter self-check.
 function Composer({
-  sessionId = 'one', draft = '', files = [], images = [], callImport = vi.fn().mockResolvedValue(success),
+  sessionId = 'one', draft = '', files = [], initialImages = EMPTY_DURABLE_IMAGES, images = EMPTY_DURABLE_IMAGES, callImport = vi.fn().mockResolvedValue(success),
   callRpc, createDraftImages = (selected: readonly File[]) => selected.map((value, index) => ({ id: `native-${index}`, file: value })),
   readAttachment = vi.fn(), acceptImages = true, onDurableImages, onHydrate, onRemoveImage, onRelease, onBeginStage, onCancelStage, refuseHydration = false,
   limits = DEFAULT_IMAGE_LIMITS,
 }: {
-  sessionId?: string; draft?: string; files?: readonly FileReference[]; images?: readonly any[]; callImport?: any; callRpc?: any
+  sessionId?: string; draft?: string; files?: readonly FileReference[]; initialImages?: readonly any[]; images?: readonly any[]; callImport?: any; callRpc?: any
   createDraftImages?: any; readAttachment?: any; acceptImages?: boolean; onDurableImages?: any; onHydrate?: any
   onRemoveImage?: any; onRelease?: any; onBeginStage?: any; onCancelStage?: any; refuseHydration?: boolean; limits?: any
 }) {
-  const [input, setInput] = useState({ draft, fileRefs: files, phase: 'plain', imageIds: [] as string[], imageRefs: images as any[], hydratedImageKeys: [] as string[], runtimeOnlyImageIds: [] as string[], imageStagePending: false })
+  const [input, setInput] = useState({ draft, fileRefs: files, phase: 'plain', imageIds: [] as string[], imageRefs: [...initialImages] as any[], hydratedImageKeys: [] as string[], runtimeOnlyImageIds: [] as string[], imageStagePending: false })
+  useEffect(() => {
+    if (images.length === 0) return
+    setInput(current => ({ ...current, imageIds: [], imageRefs: [...images], hydratedImageKeys: [] }))
+  }, [images])
   const actions = useMemo(() => ({
     addFiles(added: readonly FileReference[], text?: string) {
       setInput(current => ({ ...current, draft: text ?? current.draft, fileRefs: [...current.fileRefs, ...added] }))
@@ -342,7 +349,7 @@ describe('file import composer lifecycle', () => {
   it('hydrates a persisted image with a fresh native id through readAttachment', async () => {
     const draft = { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000001', attachment }
     const created = vi.fn((selected: readonly File[]) => [{ id: 'fresh-after-restart', file: selected[0] }])
-    const readAttachment = vi.fn().mockResolvedValue({ ok: true, value: { attachment, data: new TextEncoder().encode('note') } })
+    const readAttachment = vi.fn().mockResolvedValue({ ok: true, value: { attachment, data: HYDRATED_NOTE } })
     render(<Composer draft="正文" files={Array.from({ length: 5 }, (_, index) => ({ ...imported, stored_name: `file-${index}.txt`, relative_path: `.e-mate/imports/file-${index}.txt` }))}
       images={[draft]} createDraftImages={created} readAttachment={readAttachment} />)
     expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(true)
@@ -353,13 +360,31 @@ describe('file import composer lifecycle', () => {
     expect(screen.getAllByRole('button', { name: /移除/u })).toHaveLength(5)
   })
 
+  it('rehydrates an existing shell snapshot after transient navigation remount', async () => {
+    const draft = { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000001', attachment }
+    const firstRead = vi.fn().mockResolvedValue({ ok: false, error: { code: 'internal', message: 'hidden', details: {} } })
+    const first = render(<Composer initialImages={[draft]} readAttachment={firstRead} />)
+    await screen.findByRole('button', { name: '重试恢复 picture.png' })
+    expect(firstRead).toHaveBeenCalledOnce()
+    first.unmount()
+
+    const readAttachment = vi.fn().mockResolvedValue({ ok: true, value: { attachment, data: HYDRATED_NOTE } })
+    const created = vi.fn((selected: readonly File[]) => [{ id: 'remount-fresh-id', file: selected[0] }])
+    const hydrated = vi.fn()
+    render(<Composer initialImages={[draft]} readAttachment={readAttachment} createDraftImages={created} onHydrate={hydrated} />)
+    await waitFor(() => expect(hydrated).toHaveBeenCalledWith(draft.draft_key, 'remount-fresh-id'))
+    expect(readAttachment).toHaveBeenCalledOnce()
+    expect(created).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: '重试恢复 picture.png' })).toBeNull()
+  })
+
   it('hydrates multiple refs once each across StrictMode rerenders', async () => {
     const secondAttachment = { ...attachment, attachmentId: `sha256:${'b'.repeat(64)}`, name: 'second.png' }
     const drafts = [
       { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000001', attachment },
       { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000002', attachment: secondAttachment },
     ]
-    const readAttachment = vi.fn(async (ref: any) => ({ ok: true, value: { attachment: ref, data: new TextEncoder().encode('note') } }))
+    const readAttachment = vi.fn(async (ref: any) => ({ ok: true, value: { attachment: ref, data: HYDRATED_NOTE } }))
     const created = vi.fn((selected: readonly File[]) => [{ id: `native-${selected[0]!.name}`, file: selected[0] }])
     const hydrated = vi.fn()
     const callRpc = vi.fn()
@@ -374,7 +399,7 @@ describe('file import composer lifecycle', () => {
 
   it('retains association refusal for explicit removal and releases its descriptor', async () => {
     const draft = { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000001', attachment }
-    const readAttachment = vi.fn().mockResolvedValue({ ok: true, value: { attachment, data: new TextEncoder().encode('note') } })
+    const readAttachment = vi.fn().mockResolvedValue({ ok: true, value: { attachment, data: HYDRATED_NOTE } })
     const created = vi.fn((selected: readonly File[]) => [{ id: 'refused-id', file: selected[0] }])
     const removed = vi.fn()
     const released = vi.fn()
@@ -408,7 +433,7 @@ describe('file import composer lifecycle', () => {
     const draft = { schema_version: 1, draft_key: '00000000-0000-4000-8000-000000000001', attachment }
     const readAttachment = vi.fn()
       .mockImplementationOnce(() => first instanceof Error ? Promise.reject(first) : Promise.resolve(first))
-      .mockResolvedValueOnce({ ok: true, value: { attachment, data: new TextEncoder().encode('note') } })
+      .mockResolvedValueOnce({ ok: true, value: { attachment, data: HYDRATED_NOTE } })
     const hydrated = vi.fn()
     const removed = vi.fn()
     const created = vi.fn((selected: readonly File[]) => [{ id: 'retry-id', file: selected[0] }])
@@ -445,7 +470,7 @@ describe('file import composer lifecycle', () => {
     const created = vi.fn((selected: readonly File[]) => [{ id: `native-${selected[0]!.name}`, file: selected[0] }])
     render(<Composer images={drafts} readAttachment={readAttachment} createDraftImages={created} onHydrate={hydrated} onRemoveImage={removed} />)
     await waitFor(() => expect(readAttachment).toHaveBeenCalledTimes(2))
-    reads.get(secondAttachment.attachmentId)!({ ok: true, value: { attachment: secondAttachment, data: new TextEncoder().encode('note') } })
+    reads.get(secondAttachment.attachmentId)!({ ok: true, value: { attachment: secondAttachment, data: HYDRATED_NOTE } })
     await waitFor(() => expect(hydrated).toHaveBeenCalledWith(drafts[1]!.draft_key, 'native-second.png'))
     reads.get(attachment.attachmentId)!({ ok: true, value: { attachment, data: Uint8Array.of(1) } })
     await waitFor(() => expect(removed).toHaveBeenCalledWith(drafts[0]!.draft_key))
@@ -476,6 +501,10 @@ describe('file import composer lifecycle', () => {
     const picked = vi.fn()
     try {
       const shell = new SessionInputShell({ actx: {} as never, defaultSink: vi.fn() })
+      const adaptedSnapshot = () => ({
+        ...shell.snapshot, fileRefs: [], imageRefs: [], hydratedImageKeys: [],
+        runtimeOnlyImageIds: shell.snapshot.imageIds, imageStagePending: false,
+      })
       const shellAddImages = vi.spyOn(shell, 'addImages')
       const absentMenu = { getSnapshot: () => null, subscribe: () => () => {} }
       const locale = { revision: 0 }
@@ -493,7 +522,7 @@ describe('file import composer lifecycle', () => {
       } as never)
       // Execute the exact adapted native registration, including its children
       // and inject. SlotTestRuntime uses production SlotRegistry + web-react.
-      const source = adaptHarnessConversationSource(readFileSync('upstream/deepseek-harness/packages/client/ui-conversation/lib/client.js', 'utf8'))
+      const source = adaptHarnessConversationSource(readFileSync(resolve(process.cwd(), 'packages/client/ui-conversation/lib/client.js'), 'utf8'))
       const start = source.indexOf('\t\t\tslots.register({\n\t\t\t\tname: "conversation.composer.bar",')
       const end = source.indexOf('\t\t\tslots.register({\n\t\t\t\tname: "conversation.composer",', start)
       expect(start).toBeGreaterThan(0)
@@ -515,7 +544,7 @@ describe('file import composer lifecycle', () => {
       } as never)
       const nativeTextarea = screen.getByRole('textbox') // Fallback before the product plugin loads.
       expect(screen.queryByRole('button', { name: '添加本地图片或文件' })).toBeNull()
-      live = { ...shell.snapshot, fileRefs: [] }
+      live = adaptedSnapshot()
       await runtime.sessions.setCurrent('one')
       expect(screen.getByRole('textbox')).toBe(nativeTextarea)
       await runtime.sessions.setCurrent('two')
@@ -532,7 +561,7 @@ describe('file import composer lifecycle', () => {
         expect(entries).toHaveLength(2)
         expect(entries[0]!.children).toBeUndefined()
       }
-      live = { ...shell.snapshot, fileRefs: [] }
+      live = adaptedSnapshot()
       await runtime.sessions.setCurrent('one')
       expect(screen.getByRole('textbox')).toBe(textarea)
       expect(screen.getByRole('button', { name: '原生计划' })).toBeTruthy()

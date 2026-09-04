@@ -15,4 +15,4 @@
 - 选择图片即接受本次暂存：RPC 进行中不可从临时行移除，成功关联后由 native image card 负责移除。一个 active AbortController 将 Session 切换/卸载与 native 120 秒本地暂存上限通过 AbortSignal.any 合并传给 RPC；runtime-only stage reservation 与未 hydrate 引用都会阻止 SessionInputShell 提交，且 reservation 永不持久化。
 - 冷恢复通过目标 Session 的 `session.attachment` 读取并复核 CAS 引用与实际字节，再创建全新的 native runtime id。确定损坏/缺失/未授权的引用移除一次；transport、internal、临时读取或 native 创建/关联失败保留引用并显示显式“重试恢复 / 移除”操作，不轮询也不定时重试。
 - 图片遵守 live native policy，并受单图 5 MiB、每条消息 20 图、合计 100 MiB 的硬上限约束。该实现不新增 Store、transport 或 channel。
-- `pnpm check` 在 source-only Node 测试之外执行 `test:client`；该 adapter/client 自检依赖已构建的 pinned rc.7 `ui-conversation/lib/client.js`，不能宣称在没有该构建产物的 clean source worktree 中直接运行。
+- `scripts/component-run.mjs check` 先执行 package `build`，再执行 `test`；`test` 串行运行 `test:source` 与 canonical `test:client`，`check` 只组合 `build + test` 而不重复 client；该 adapter/client 自检依赖已构建的 pinned rc.7 `ui-conversation/lib/client.js`，不能宣称在没有该构建产物的 clean source worktree 中直接运行。
