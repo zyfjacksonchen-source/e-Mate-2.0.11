@@ -942,13 +942,18 @@
       "branch": "feat/2.0.17/em217-306-client-a11y-performance",
       "worktree": "/Users/mac/e-mate/worktrees/em217-306",
       "write_set": [
-        "packages/dsh/profile/plugins/emate-shell/src/client/**image-batch*",
-        "packages/dsh/profile/plugins/emate-shell/tests/**"
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-progress.tsx",
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-batch-progress.module.css",
+        "packages/dsh/profile/plugins/emate-shell/src/client/image-gallery.tsx",
+        "packages/dsh/profile/plugins/emate-shell/tests/image-batch-progress.client.spec.tsx",
+        "packages/dsh/profile/plugins/emate-shell/tests/image-gallery.client.spec.tsx",
+        "docs/2.0.17/work-orders.json"
       ],
       "implementation": [
-        "使用缩略图/懒加载策略，原图只在预览时解码；释放 object URL/监听器。",
-        "状态变化有 aria-live 但避免每个进度事件重复播报。",
-        "键盘可访问预览、下载、失败详情、重试和取消。"
+        "复用 pinned rc.7 MessageImage tile 与 ConversationService resolveImage cache/releaseSessionImages object-URL owner；native MessageImage 当前无 visibility lazy seam，因此不新增第二 cache/IntersectionObserver。",
+        "每批仅一个 counts-based aria-live summary；task revision 不改变计数时复用同一文本节点，卡片不成为 live region。",
+        "复用 native MessageImage preview/lightbox、retry button、可聚焦 failure region 与 composer Stop；下载继续由既有 Gallery/resource owner 执行。",
+        "current logged image_batch 判定只读取 chat.timeline 当前 Turn 索引，禁止扫描长 Session 的全部 Turn/event/DOM。"
       ],
       "acceptance": [
         "8 图完成后无持续增长的 object URL、订阅或 event listener。",
@@ -956,10 +961,10 @@
         "自动 a11y 检查无新增严重问题。"
       ],
       "tests": [
-        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
+        "../../../../../upstream/deepseek-harness/node_modules/.bin/vitest run tests/image-batch-client.client.spec.tsx tests/image-batch-progress.client.spec.tsx tests/image-gallery.client.spec.tsx (from packages/dsh/profile/plugins/emate-shell)",
         "MAIN-AGENT-ONLY SOURCE-GATED (runs build): corepack pnpm --filter @e-mate/dsh test"
       ],
-      "rollback": "回滚优化不改变批次数据契约。",
+      "rollback": "移除 counts live summary、stable image loader 与焦点样式；native resource owner 和批次数据不变。",
       "risk": "中"
     },
     {

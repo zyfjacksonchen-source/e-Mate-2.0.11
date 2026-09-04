@@ -591,11 +591,10 @@ export function schemaAwareChildGalleryImageItems(
 }
 
 function snapshotHasImageBatchCall(snapshot: ConversationSnapshot): boolean {
-  for (const turn of snapshot.turns.values()) {
-    const data = turn.data.get('e-mate-image-calls')
-    if ((data?.batchCalls?.length ?? 0) > 0) return true
-  }
-  return false
+  const current = snapshot.chat.timeline.turnOrder.at(-1)
+  if (current === undefined) return false
+  const data = snapshot.chat.timeline.turns.get(current)?.data.get('e-mate-image-calls')
+  return (data?.batchCalls?.length ?? 0) > 0
 }
 
 const imageLabels = {

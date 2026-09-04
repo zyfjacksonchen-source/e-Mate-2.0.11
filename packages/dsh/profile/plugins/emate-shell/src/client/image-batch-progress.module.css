@@ -76,6 +76,7 @@
   font-size: 12px;
 }
 
+.liveSummary,
 .reason,
 .cancelGuidance,
 .retry p {
@@ -88,6 +89,10 @@
 .reason,
 .retry {
   padding: 0 10px 10px;
+}
+
+.liveSummary {
+  margin-bottom: 4px;
 }
 
 .cancelGuidance {
@@ -131,6 +136,11 @@
   background: color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent);
   color: var(--dsw-alias-label-secondary);
   font-size: 12px;
+}
+
+.failures:focus-visible {
+  outline: 2px solid var(--dsw-alias-label-primary);
+  outline-offset: 2px;
 }
 
 .failures strong {

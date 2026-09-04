@@ -156,7 +156,10 @@ function galleryProps(
   return {
     sessionId,
     useSession: (selector: (value: unknown) => unknown) => selector({
-      chat: { nodes: { values: () => nodes.values() } }, turns: new Map(),
+      chat: {
+        nodes: { values: () => nodes.values() },
+        timeline: { turnOrder: [], turns: new Map() },
+      },
     }),
     useSessions: (selector: (value: unknown) => unknown) => selector({
       byId: { [sessionId]: {} }, subagentsByParent: {},
@@ -594,8 +597,12 @@ describe('completed artifact terminal', () => {
 
     const props = (batchCalls: readonly unknown[]) => galleryProps(parentId, [], {
       useSession: (selector: (value: unknown) => unknown) => selector({
-        chat: { nodes: { values: () => [][Symbol.iterator]() } },
-        turns: new Map([[1, { data: { get: () => ({ batchCalls }) } }]]),
+        chat: {
+          nodes: { values: () => [][Symbol.iterator]() },
+          timeline: {
+            turnOrder: [1], turns: new Map([[1, { data: { get: () => ({ batchCalls }) } }]]),
+          },
+        },
       }),
       useSessions: (selector: (value: unknown) => unknown) => selector(sessions),
       useProjection: projectionHook([]),

@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useRef, useSyncExternalStore } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -13,15 +15,20 @@ import {
 } from '../src/client/image-batch-progress.tsx'
 import { ArtifactTerminal, imageCallsDefinition, selectArtifactTerminal } from '../src/client/image-gallery.tsx'
 
-vi.mock('@deepseek-ai/dsh-client-ui-attachment', () => ({
-  MessageImage: ({ attachment, load, labels }: {
-    attachment: { attachmentId?: string; name?: string }
-    load: (attachment: unknown) => Promise<string>
-    labels: { openNamed: (name: string) => string }
-  }) => <button type="button" aria-label={labels.openNamed(attachment.name ?? 'image')}
-    data-attachment-id={attachment.attachmentId}
-    onClick={() => { void load(attachment) }}>{attachment.name}</button>,
-}))
+vi.mock('@deepseek-ai/dsh-client-ui-attachment', async () => {
+  const { useEffect } = await import('react')
+  return {
+    MessageImage: ({ attachment, load, labels }: {
+      attachment: { attachmentId?: string; name?: string }
+      load: (attachment: unknown) => Promise<string>
+      labels: { openNamed: (name: string) => string }
+    }) => {
+      useEffect(() => { void load(attachment) }, [attachment, load])
+      return <button type="button" aria-label={labels.openNamed(attachment.name ?? 'image')}
+        data-attachment-id={attachment.attachmentId}>{attachment.name}</button>
+    },
+  }
+})
 
 afterEach(cleanup)
 
@@ -219,6 +226,11 @@ describe('live image batch progress', () => {
     expect(projectionSubscriptions).toBe(1)
     expect(screen.getByText('如需取消，请使用输入框旁的“停止生成”按钮。')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /取消/u })).toBeNull()
+    const progress = screen.getByLabelText('图片批次进度')
+    expect(progress.getAttribute('aria-live')).toBeNull()
+    const liveSummary = within(progress).getByText('批次进度，排队 2，生成中 0，待确认 0，完成 0，未完成 0')
+    expect(liveSummary.getAttribute('aria-live')).toBe('polite')
+    expect(liveSummary.getAttribute('aria-atomic')).toBe('true')
     const first = screen.getByRole('article', { name: '第 1 张图片：排队中' })
     const second = screen.getByRole('article', { name: '第 2 张图片：排队中' })
     expect(screen.getAllByRole('listitem')).toHaveLength(2)
@@ -229,9 +241,15 @@ describe('live image batch progress', () => {
     })
     expect(screen.getByRole('article', { name: '第 1 张图片：正在生成' })).toBe(first)
     expect(screen.getByRole('article', { name: '第 2 张图片：排队中' })).toBe(second)
+    expect(liveSummary.textContent).toBe('批次进度，排队 1，生成中 1，待确认 0，完成 0，未完成 0')
+    await act(async () => {
+      store.apply('eMateImageBatches', projection(['running', 'queued'], { revisions: [3, 1] }), 3)
+      await Promise.resolve()
+    })
+    expect(within(progress).getByText(liveSummary.textContent!)).toBe(liveSummary)
 
     const states = ['queued', 'running', 'needs-review', 'completed', 'failed', 'cancelled', 'unknown', 'interrupted']
-    await act(async () => { store.apply('eMateImageBatches', projection(states), 3); await Promise.resolve() })
+    await act(async () => { store.apply('eMateImageBatches', projection(states), 4); await Promise.resolve() })
     expect(screen.getAllByRole('article').map(node => node.getAttribute('data-state'))).toEqual(states)
     view.unmount()
     expect(projectionSubscriptions).toBe(0)
@@ -375,6 +393,9 @@ describe('live image batch progress', () => {
     expect(summary.textContent).not.toMatch(/[\/]|provider|prompt/iu)
     expect(summary.getAttribute('role')).toBeNull()
     expect(summary.getAttribute('aria-live')).toBeNull()
+    expect(summary.getAttribute('tabindex')).toBe('0')
+    summary.focus()
+    expect(document.activeElement).toBe(summary)
     expect(within(screen.getByLabelText('图片批次进度')).queryByRole('status')).toBeNull()
     view.unmount()
   })
@@ -424,6 +445,7 @@ describe('live image batch progress', () => {
     fireEvent.keyDown(button, { key: 'Enter' })
     fireEvent.click(button)
     await waitFor(() => { expect(prepareRetry).toHaveBeenCalledWith(retryTask) })
+    expect(document.activeElement).toBe(button)
     expect(prepareRetry.mock.calls[0]?.[0]).toEqual({ ordinal: 1, prompt: '精确原始提示', imageIds: [] })
     expect(JSON.stringify(prepareRetry.mock.calls[0]?.[0])).not.toMatch(/batch_id|task_id|client_request_id|child_session_id/u)
     expect(screen.getByText('已准备到输入框，请确认内容后发送；发送后系统才会创建新的任务。')).toBeTruthy()
@@ -447,6 +469,47 @@ describe('live image batch progress', () => {
     fireEvent.click(button)
     expect(prepareRetry).not.toHaveBeenCalled()
     view.unmount()
+  })
+
+  it('keeps eight card subscriptions bounded and delegates URL lifecycle to native owners', async () => {
+    const store = new ProjectionValueStore()
+    store.apply('eMateImageBatches', projection(Array(8).fill('completed'), {
+      revisions: Array(8).fill(3), terminal: true,
+    }), 1)
+    const sessions = sessionHarness(projectedSessions(Array(8).fill('completed')))
+    const view = renderProgress(store, sessions)
+    await waitFor(() => { expect(view.loadImage).toHaveBeenCalledTimes(8) })
+    const cards = screen.getAllByRole('article')
+    expect(cards).toHaveLength(8)
+    expect(sessions.subscriptions()).toBe(8)
+    await act(async () => {
+      store.apply('eMateImageBatches', projection(Array(8).fill('completed'), {
+        revisions: [4, 3, 3, 3, 3, 3, 3, 3], terminal: true,
+      }), 2)
+      await Promise.resolve()
+    })
+    expect(screen.getAllByRole('article').every((card, index) => card === cards[index])).toBe(true)
+    expect(view.loadImage).toHaveBeenCalledTimes(8)
+    expect(sessions.subscriptions()).toBe(8)
+    view.unmount()
+    expect(sessions.subscriptions()).toBe(0)
+
+    const batchSource = readFileSync(resolve('src/client/image-batch-progress.tsx'), 'utf8')
+    const messageImage = readFileSync(resolve('../../../../../upstream/deepseek-harness/packages/client/ui-attachment/src/MessageImage.tsx'), 'utf8')
+    const conversation = readFileSync(resolve('../../../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/service.ts'), 'utf8')
+    const batchCss = readFileSync(resolve('src/client/image-batch-progress.module.css'), 'utf8')
+    const gallerySource = readFileSync(resolve('src/client/image-gallery.tsx'), 'utf8')
+    expect(batchSource).toContain('variant="tile"')
+    expect(batchSource).not.toMatch(/createObjectURL|revokeObjectURL|IntersectionObserver|imageUrls/u)
+    expect(messageImage).toContain('onClick={request}')
+    expect(messageImage).toContain('if (live) setSrc(url)')
+    expect(conversation).toContain('private readonly imageUrls = new Map')
+    expect(conversation).toContain('releaseSessionImages(sessionId')
+    expect(conversation).toContain('revokePreview(url)')
+    expect(batchCss).toContain('@media (prefers-reduced-motion: reduce)')
+    expect(batchCss).toContain('.failures:focus-visible')
+    expect(gallerySource).toContain('snapshot.chat.timeline.turnOrder.at(-1)')
+    expect(gallerySource).not.toContain('for (const turn of snapshot')
   })
 
   it('shows needs-review live, then updates the same card for accepted and rejected outcomes', async () => {

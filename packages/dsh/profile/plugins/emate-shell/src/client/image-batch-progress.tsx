@@ -1,4 +1,4 @@
-import { memo, useState } from 'react'
+import { memo, useCallback, useState } from 'react'
 import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 import { MessageImage } from '@deepseek-ai/dsh-client-ui-attachment'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
@@ -57,6 +57,19 @@ const batchStatusLabels = {
   cancelled: '已取消',
 } as const
 
+function batchLiveSummary(tasks: readonly ImageBatchClientTask[]): string {
+  const count = (state: ImageBatchClientTaskState): number => tasks.filter(task => task.state === state).length
+  const failure = tasks.filter(task => ['failed', 'cancelled', 'unknown', 'interrupted'].includes(task.state)).length
+  return [
+    '批次进度',
+    '排队 ' + count('queued'),
+    '生成中 ' + count('running'),
+    '待确认 ' + count('needs-review'),
+    '完成 ' + count('completed'),
+    '未完成 ' + failure,
+  ].join('，')
+}
+
 const imageLabels = {
   image: '图像',
   open: '查看原图',
@@ -106,6 +119,10 @@ const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, retry, prepa
   readonly loadImage: ImageBatchProgressProps['loadImage']
 }) {
   const preview = useSessions(sessions => exactPreview(sessions, task), samePreview)
+  const loadPreview = useCallback(
+    (attachment: ImageAttachmentRef) => loadImage(attachment, preview?.ownerSessionId),
+    [loadImage, preview?.ownerSessionId],
+  )
   const [retryMessage, setRetryMessage] = useState<string>()
   const [preparing, setPreparing] = useState(false)
   const label = '第 ' + task.ordinal + ' 张图片：' + stateLabels[task.state]
@@ -124,7 +141,7 @@ const ImageBatchTaskCard = memo(function ImageBatchTaskCard({ task, retry, prepa
         ? <div className={css.placeholder} aria-hidden="true"><span /></div>
         : <MessageImage
             attachment={preview.attachment}
-            load={attachment => loadImage(attachment, preview.ownerSessionId)}
+            load={loadPreview}
             variant="tile"
             labels={imageLabels}
           />}
@@ -158,7 +175,7 @@ export function ImageBatchProgress({
     call.parentCallId + '\0' + task.ordinal, task,
   ] as const)))
   if (batches.length === 0) return null
-  return <div className={css.root} aria-live="polite" aria-label="图片批次进度">
+  return <div className={css.root} aria-label="图片批次进度">
     {batches.map(batch => {
       const failures = batch.tasks.filter(task => task.terminal && task.state !== 'completed')
       const batchLabel = '图片批次，共 ' + batch.tasks.length + ' 张'
@@ -170,6 +187,9 @@ export function ImageBatchProgress({
         aria-busy={!batch.terminal}
         data-batch-id={batch.batchId}
       >
+        <p className={css.liveSummary} aria-live="polite" aria-atomic="true">
+          {batchLiveSummary(batch.tasks)}
+        </p>
         {!batch.terminal && <p className={css.cancelGuidance}>
           如需取消，请使用输入框旁的“停止生成”按钮。
         </p>}
@@ -186,6 +206,7 @@ export function ImageBatchProgress({
         </div>
         {batch.terminal && failures.length > 0 && <section
           className={css.failures}
+          tabIndex={0}
           aria-label={'批次未完成项目：' + failures.length + ' 项'}
         >
           <strong>未完成 {failures.length} 项</strong>
