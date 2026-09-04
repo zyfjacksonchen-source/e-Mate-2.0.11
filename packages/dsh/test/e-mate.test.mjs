@@ -3742,6 +3742,31 @@ test('enterprise model switch keeps native history and survives a cached-policy 
       Object.keys(value).sort().map(key => [key, value[key]]),
     ))).digest('hex'),
   })
+  const parsePolicyWith213Schema = value => {
+    const keys = [
+      'account_subject', 'allowed_model_ids', 'default_chat_model_id', 'default_chat_reasoning_effort',
+      'expires_at', 'image_fallback_upstream_model_id', 'image_primary_model_id', 'issued_at',
+      'policy_sha256', 'receipt_id', 'revision', 'schema_version',
+    ]
+    assert.deepEqual(Object.keys(value).sort(), keys.sort())
+    assert.equal(value.schema_version, 1)
+    assert.equal(value.image_primary_model_id, 'gpt-image-2-pro')
+    assert.equal(value.image_fallback_upstream_model_id, 'gpt-image-2')
+    const legacyManagedModels = new Set([
+      'gpt-5.6-luna', 'gpt-5.6-sol', 'deepseek', 'doubao-seed-2-0-pro-260215',
+      'gpt-image-2-pro', 'gpt-image-2',
+    ])
+    assert.equal(Array.isArray(value.allowed_model_ids), true)
+    assert.equal(value.allowed_model_ids.length >= 1 && value.allowed_model_ids.length <= legacyManagedModels.size, true)
+    assert.equal(value.allowed_model_ids.every(model => legacyManagedModels.has(model)), true)
+    assert.equal(value.allowed_model_ids.includes(value.default_chat_model_id), true)
+    assert.equal(new Set(value.allowed_model_ids).size, value.allowed_model_ids.length)
+    assert.equal(value.allowed_model_ids.includes('gpt-image-2') && !value.allowed_model_ids.includes('gpt-image-2-pro'), false)
+    assert.equal(value.policy_sha256, storedLegacyPolicy(Object.fromEntries(
+      Object.entries(value).filter(([key]) => key !== 'policy_sha256'),
+    )).policy_sha256)
+    return structuredClone(value)
+  }
   const legacyPolicyRecord = storedLegacyPolicy(legacyPolicy)
   const legacyPolicySha256 = legacyPolicyRecord.policy_sha256
   records.set('active', legacyPolicyRecord)
@@ -3937,16 +3962,13 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     const modelPolicyConfig = { bindingPath: join(paths.profile, 'plugins', 'runtime-binding.json') }
     await applyModelPolicy(modelPolicyContext, modelPolicyConfig)
 
-    const migratedPolicy = records.get('active')
+    const migratedPolicy = parsePolicyWith213Schema(records.get('active'))
     assert.deepEqual(migratedPolicy.allowed_model_ids, [
-      'deepseek', 'doubao-seed-2-0-pro-260215', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-image-2-pro',
+      'deepseek', 'doubao-seed-2-0-pro-260215', 'gpt-5.6-luna',
+      'gpt-5.6-sol', 'gpt-image-2', 'gpt-image-2-pro',
     ])
-    assert.equal('image_fallback_upstream_model_id' in migratedPolicy, false)
-    assert.notEqual(migratedPolicy.policy_sha256, legacyPolicySha256)
-    const { policy_sha256: migratedSha256, ...migratedPolicyValue } = migratedPolicy
-    assert.equal(migratedSha256, validateModelPolicy(
-      migratedPolicyValue, accountSubject, Date.parse(migratedPolicyValue.issued_at),
-    ).policy_sha256)
+    assert.equal(migratedPolicy.image_fallback_upstream_model_id, 'gpt-image-2')
+    assert.equal(migratedPolicy.policy_sha256, legacyPolicySha256)
     assert.throws(
       () => policyStorageSchema.parse({ ...legacyPolicy, policy_sha256: '0'.repeat(64) }),
       /legacy model policy is invalid/,
@@ -3974,7 +3996,18 @@ test('enterprise model switch keeps native history and survives a cached-policy 
     assert.equal(current.ok, true)
     assert.equal(current.value.revision, 7)
     assert.equal('account_subject' in current.value, false)
-    assert.match(records.get('active').policy_sha256, /^[0-9a-f]{64}$/)
+    assert.equal('image_fallback_upstream_model_id' in current.value, false)
+    assert.equal(current.value.allowed_model_ids.includes('gpt-image-2'), false)
+    const refreshedDurablePolicy = parsePolicyWith213Schema(records.get('active'))
+    assert.equal(refreshedDurablePolicy.image_fallback_upstream_model_id, 'gpt-image-2')
+    assert.equal(refreshedDurablePolicy.allowed_model_ids.includes('gpt-image-2'), true)
+    assert.notEqual(refreshedDurablePolicy.policy_sha256, legacyPolicySha256)
+    assert.notEqual(refreshedDurablePolicy.policy_sha256, current.value.policy_sha256)
+    assert.equal(projectionRecords.get('active').policy_sha256, current.value.policy_sha256)
+    assert.equal(Object.values(llmSettings.providers)
+      .flatMap(provider => provider.models.map(model => model.id))
+      .includes('gpt-image-2'), false)
+    assert.match(refreshedDurablePolicy.policy_sha256, /^[0-9a-f]{64}$/)
     assert.equal(projectionRecords.get('active').search_status, 'granted')
     assert.doesNotMatch(JSON.stringify(projectionRecords.get('active')), /redacted-for-test/u)
     assert.equal(credentialValues.has('E_MATE_MODEL_KEY_GPT'), false)

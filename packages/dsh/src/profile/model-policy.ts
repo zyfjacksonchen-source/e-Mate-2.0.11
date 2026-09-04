@@ -372,6 +372,42 @@ export function validateModelPolicy(value, accountSubject, now = Date.now()) {
   }
 }
 
+function encodeDurableModelPolicy(policy) {
+  const { policy_sha256: _currentHash, ...current } = policy
+  const allowedModelIds = [...current.allowed_model_ids]
+  if (allowedModelIds.includes('gpt-image-2-pro')) allowedModelIds.push('gpt-image-2')
+  const durable = {
+    ...current,
+    allowed_model_ids: [...new Set(allowedModelIds)].sort(),
+    image_fallback_upstream_model_id: 'gpt-image-2',
+  }
+  return { ...durable, policy_sha256: sha256(canonicalJson(durable)) }
+}
+
+function decodeDurableModelPolicy(value, accountSubject, now) {
+  if (!isRecord(value) || typeof value.policy_sha256 !== 'string') {
+    throw new Error('e-Mate stored model policy is invalid')
+  }
+  const { policy_sha256: expected, ...stored } = value
+  if (stored.image_fallback_upstream_model_id !== undefined) {
+    if (stored.image_fallback_upstream_model_id !== 'gpt-image-2'
+      || !Array.isArray(stored.allowed_model_ids)
+      || new Set(stored.allowed_model_ids).size !== stored.allowed_model_ids.length
+      || stored.allowed_model_ids.includes('gpt-image-2') && !stored.allowed_model_ids.includes('gpt-image-2-pro')
+      || sha256(canonicalJson(stored)) !== expected) {
+      throw new Error('e-Mate legacy model policy is invalid')
+    }
+    const { image_fallback_upstream_model_id: _fallback, ...current } = stored
+    return validateModelPolicy({
+      ...current,
+      allowed_model_ids: current.allowed_model_ids.filter(model => MANAGED_MODELS.has(model)),
+    }, accountSubject, now)
+  }
+  const policy = validateModelPolicy(stored, accountSubject, now)
+  if (policy.policy_sha256 !== expected) throw new Error('e-Mate stored model policy is invalid')
+  return policy
+}
+
 function policyModelId(model) {
   return model === 'deepseek-v4-flash' ? 'deepseek' : model
 }
@@ -747,9 +783,7 @@ function createService(ctx, table, projectionTable, quota) {
       if (validatedCache?.source === cached
         && validatedCache.subject === subject
         && now < validatedCache.expiresAt) return validatedCache.policy
-      const { policy_sha256: expected, ...raw } = cached
-      const policy = validateModelPolicy(raw, subject, now)
-      if (policy.policy_sha256 !== expected) return undefined
+      const policy = decodeDurableModelPolicy(cached, subject, now)
       validatedCache = { source: cached, subject, expiresAt: Date.parse(policy.expires_at), policy }
       return policy
     } catch {
@@ -802,7 +836,8 @@ function createService(ctx, table, projectionTable, quota) {
         if (runtime.models !== undefined) {
           await projectRuntimeModels(ctx, runtime.models, policy, runtime.searchCredentialGrant, isCurrent)
         }
-        await current(() => table.put('active', policy))
+        const durablePolicy = encodeDurableModelPolicy(policy)
+        await current(() => table.put('active', durablePolicy))
         if (runtime.models !== undefined) {
           const marker = await runtimeProjectionMarker(ctx, policy, runtime.searchCredentialGrant.status)
           await current(() => projectionTable.put(
@@ -811,7 +846,8 @@ function createService(ctx, table, projectionTable, quota) {
           ))
           runtimeReady = true
         }
-        cached = policy
+        cached = durablePolicy
+        validatedCache = { source: durablePolicy, subject: policy.account_subject, expiresAt: Date.parse(policy.expires_at), policy }
         lastRefresh = Date.now()
         return policy
       } catch (error) {
@@ -1014,7 +1050,6 @@ export async function apply(ctx, config = {}) {
     policy_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
   }
   const policyRecord = z.object(policyShape).strict()
-  const migratedLegacyRecords = new WeakSet()
   const legacyPolicyRecord = z.object({
     ...policyShape,
     allowed_model_ids: z.array(z.enum([...MANAGED_MODELS, 'gpt-image-2']))
@@ -1022,18 +1057,12 @@ export async function apply(ctx, config = {}) {
     image_fallback_upstream_model_id: z.literal('gpt-image-2'),
   }).strict().transform(value => {
     const { policy_sha256: expected, ...legacy } = value
-    if (!legacy.allowed_model_ids.includes('gpt-image-2')
-      || new Set(legacy.allowed_model_ids).size !== legacy.allowed_model_ids.length
+    if (new Set(legacy.allowed_model_ids).size !== legacy.allowed_model_ids.length
+      || legacy.allowed_model_ids.includes('gpt-image-2') && !legacy.allowed_model_ids.includes('gpt-image-2-pro')
       || sha256(canonicalJson(legacy)) !== expected) {
       throw new Error('e-Mate legacy model policy is invalid')
     }
-    const { image_fallback_upstream_model_id: _fallback, ...current } = legacy
-    const migrated = validateModelPolicy({
-      ...current,
-      allowed_model_ids: [...new Set(current.allowed_model_ids.filter(model => MANAGED_MODELS.has(model)))],
-    }, current.account_subject, Date.parse(current.issued_at))
-    migratedLegacyRecords.add(migrated)
-    return migrated
+    return value
   })
   const runtimeProjectionRecord = z.object({
     schema_version: z.literal(1),
@@ -1055,8 +1084,13 @@ export async function apply(ctx, config = {}) {
   ctx.effect(() => () => domain.close(), 'emate.modelPolicy: close target storage domain')
   const policyTable = domain.table('active')
   const storedPolicy = policyTable.get('active')
-  if (storedPolicy !== undefined && migratedLegacyRecords.has(storedPolicy)) {
-    await policyTable.put('active', storedPolicy)
+  if (storedPolicy !== undefined) {
+    const policy = decodeDurableModelPolicy(
+      storedPolicy,
+      storedPolicy.account_subject,
+      Date.parse(storedPolicy.issued_at),
+    )
+    await policyTable.put('active', encodeDurableModelPolicy(policy))
   }
   const quotaSnapshot = z.object({
     schema_version: z.literal(1),
