@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { DESKTOP_REFERENCE, HARNESS_COMMIT, createPassManifest, nearestRank, sha256, validateGuiEvidence } from './protocol.mjs'
+import { DESKTOP_REFERENCE, HARNESS_COMMIT, createPassManifest, nearestRank, sha256, validateGuiEvidence, validateManifest } from './protocol.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
 const SHA256 = /^[0-9a-f]{64}$/u
@@ -39,6 +39,9 @@ function gui([measurementsPath, outputPath]) {
 
 function project([sourceRawPath, sourceUri, guiRawPath, guiUri, openPath, outputPath]) {
   if (!outputPath) throw new Error('usage: project-evidence.mjs project SOURCE_RAW SOURCE_URI GUI_RAW GUI_URI OPEN_MANIFEST PASS_OUT')
+  const openManifest = JSON.parse(readFileSync(openPath, 'utf8'))
+  if (openManifest.status !== 'OPEN') throw new Error('OPEN_MANIFEST must be an exact OPEN manifest')
+  validateManifest(openManifest)
   const sourceRaw = readFileSync(sourceRawPath)
   const guiRaw = readFileSync(guiRawPath)
   const aggregate = JSON.parse(sourceRaw.toString('utf8'))

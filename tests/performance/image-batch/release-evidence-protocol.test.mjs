@@ -15,7 +15,7 @@ function provider(layer, provenance, origin, deployment, probe) {
     provenance, measured_at: '2026-09-04T01:00:00.000Z', fixed_set_sha256: digest('fixed-set'),
     runs: [4, 5, 8].map((taskCount, index) => ({ run: index + 1, task_count: taskCount, first_terminal_ms: 10_000, all_terminal_ms: 20_000,
       direct_single_terminal_ms: 5_000, completed_count: taskCount, failed_count: 0, unknown_count: 0,
-      retained_success_count: taskCount, duplicate_provider_generation: 0 })),
+      retained_success_count: taskCount })),
     typed_429_retry_probe: probe,
   }
 }
@@ -85,11 +85,22 @@ test('environment aliasing, fake staging probe, undersized GUI, and leaked field
     value => { value.staging.typed_429_retry_probe.status = 'NOT_RUN'; value.staging.typed_429_retry_probe.retry_after_ms = null; value.staging.typed_429_retry_probe.attempts = 0; value.staging.typed_429_retry_probe.accepted_submissions = 0; value.staging.typed_429_retry_probe.identical_request = false; value.staging.typed_429_retry_probe.pass = false },
     value => { value.macos_gui.batches.length = 99 },
     value => { value.production.runs[0].prompt = 'forbidden' },
+    value => { value.production.runs[0].duplicate_provider_generation = 0 },
+    value => { value.production.runs[0].first_terminal_ms = value.production.runs[0].all_terminal_ms + 1 },
   ]) {
     const value = clone(validStudy()); mutate(value)
     const { raw, descriptor } = encoded(value)
     assert.throws(() => validateRawEvidence(raw, descriptor))
   }
+})
+
+test('duplicate release gate uses observed macOS GUI provider submissions only', () => {
+  const open = JSON.parse(readFileSync(MANIFEST, 'utf8'))
+  const value = validStudy()
+  value.macos_gui.batches[0].provider_submission_counts[0] = 2
+  const { raw, descriptor } = encoded(value)
+  assert.equal(validateRawEvidence(raw, descriptor).claim, CLAIM)
+  assert.throws(() => projectManifest(open, raw, descriptor), /duplicate_provider_generation failed/u)
 })
 
 test('strict immutable URI rejects credentials, query strings, and non-HTTPS storage', () => {

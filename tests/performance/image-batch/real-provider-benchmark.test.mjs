@@ -28,7 +28,41 @@ test('real provider runner covers 4/5/8 with four-way batch concurrency and emit
   assert(maximum <= 4)
   assert.equal(report.typed_429_retry_probe.status, 'NOT_RUN')
   const raw = JSON.stringify(report)
-  assert.doesNotMatch(raw, /private-|secret-session|prompt|b64_json|\/Users\//u)
+  assert.doesNotMatch(raw, /private-|secret-session|prompt|b64_json|duplicate_provider_generation|\/Users\//u)
+})
+
+test('queued mapLimit waves share one monotonic batch start', async () => {
+  let now = 0
+  let id = 0
+  let scheduled = false
+  let waiting = []
+  const fetchImpl = async (_url, init) => {
+    if (!init.headers['x-e-mate-batch-id']) {
+      now += 100
+      return success(++id)
+    }
+    return new Promise(resolve => {
+      waiting.push(() => resolve(success(++id)))
+      if (scheduled) return
+      scheduled = true
+      queueMicrotask(() => {
+        scheduled = false
+        const wave = waiting
+        waiting = []
+        now += 100
+        wave.forEach(complete => complete())
+      })
+    })
+  }
+
+  const report = await runProviderBenchmark(config('production', false), prompts, fetchImpl, () => now)
+  const five = report.runs.find(run => run.task_count === 5)
+  const eight = report.runs.find(run => run.task_count === 8)
+  assert.deepEqual(
+    [five.first_terminal_ms, five.all_terminal_ms, eight.first_terminal_ms, eight.all_terminal_ms],
+    [100, 200, 100, 200],
+  )
+  assert.deepEqual(report.runs.map(run => run.direct_single_terminal_ms), [100, 100, 100])
 })
 
 test('controlled staging requires one typed pre-provider 429 and one successful identical retry', async () => {

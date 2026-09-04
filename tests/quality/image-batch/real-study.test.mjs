@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
@@ -33,7 +33,7 @@ test('precommit balances A/B before collection; blind packet and finalized raw b
       cases: Array.from({ length: 60 }, (_, index) => {
         const category = categories[index % categories.length]
         return { pair_id: `pair-${String(index + 1).padStart(3, '0')}`, category,
-          prompt: `private test prompt ${index + 1}`, references: category === 'reference-edit' ? [reference] : [] }
+          prompt: `private test prompt ${index + 1}`, references: category === 'reference-edit' ? Array(index === categories.indexOf('reference-edit') ? 8 : 1).fill(reference) : [] }
       }),
     }
     const state = prepareStudy(input, '1'.repeat(64), context())
@@ -61,11 +61,27 @@ test('precommit balances A/B before collection; blind packet and finalized raw b
     assert([...seenBatch.values()].every(ordinals => ordinals.length >= 2 && ordinals.length <= 4 && ordinals.every((ordinal, index) => ordinal === index + 1)))
     assert.equal(Object.hasOwn(packet.pairs[0], 'allocation'), false)
     assert.equal(Object.hasOwn(packet.pairs[0], 'condition'), false)
+    for (const [index, value] of packet.pairs.entries()) {
+      const expectedCount = state.cases[index].references.length
+      assert.equal(value.references.length, expectedCount)
+      assert(value.category === 'reference-edit' ? expectedCount >= 1 && expectedCount <= 8 : expectedCount === 0)
+      assert.notStrictEqual(value.requests.single, value.requests.batch)
+      assert.deepEqual(value.requests.single, state.cases[index].request)
+      assert.deepEqual(value.requests.batch, state.cases[index].request)
+      for (const item of value.references) {
+        assert.deepEqual(Object.keys(item).sort(), ['media_type', 'path', 'sha256'])
+        assert.match(item.path, /\/outputs\/reference-\d{4}-\d{2}\.(?:png|jpg|webp)$/u)
+        assert.doesNotMatch(item.path, /(?:single|batch|-[AB]\.)/u)
+        assert.equal(item.path.includes(value.pair_id), false)
+        assert.equal(hash(readFileSync(item.path)), item.sha256)
+      }
+    }
 
     const evaluator = { model: 'automatic-blind-evaluator-v1', implementation_sha256: hash('evaluator implementation'), protocol_sha256: input.evaluator_protocol_commitment_sha256 }
     const scoreSheet = {
       schema_version: 1, evaluator, evaluator_hash: evaluatorHash(evaluator),
       pairs: packet.pairs.map(value => ({ pair_id: value.pair_id,
+        reference_hashes: value.references.map(reference => reference.sha256),
         artifacts: { A: { sha256: value.artifacts.A.sha256 }, B: { sha256: value.artifacts.B.sha256 } },
         scores: { A: dimensions(value.category), B: dimensions(value.category) } })),
     }
@@ -73,7 +89,36 @@ test('precommit balances A/B before collection; blind packet and finalized raw b
     assert.equal(result.analysis.status, 'PASS')
     const descriptor = { uri: `https://evidence.example/immutable/${hash(result.raw)}.json`, sha256: hash(result.raw) }
     assert.equal(validateAndAnalyzeStudy(result.raw, descriptor).status, 'PASS')
-    assert.doesNotMatch(result.raw, /private test prompt|private-session-token-value|\/var\//u)
+    assert.doesNotMatch(result.raw, /private test prompt|private-session-token-value|"path"|iVBORw0KGgo/u)
+    assert.equal(result.raw.includes(temporary), false)
+    const raw = JSON.parse(result.raw)
+    assert.deepEqual(raw.pairs.find(value => value.category !== 'reference-edit').reference_hashes, [])
+    const rawReferenceHashes = raw.pairs.find(value => value.category === 'reference-edit').reference_hashes
+    assert.equal(rawReferenceHashes.length, 8)
+    assert(rawReferenceHashes.every(value => value === hash(png)))
+
+    for (const condition of ['single', 'batch']) {
+      const badRequest = structuredClone(packet); badRequest.pairs[0].requests[condition].canonical_provider_request_hash = hash(`wrong ${condition} request`)
+      assert.throws(() => finalizeStudy(state, precommit, badRequest, [scoreSheet]), new RegExp(`${condition} request differs from precommit`, 'u'))
+    }
+    const badReferenceHash = structuredClone(packet); const referencePair = badReferenceHash.pairs.find(value => value.references.length > 0)
+    referencePair.references[0].sha256 = hash('wrong reference')
+    assert.throws(() => finalizeStudy(state, precommit, badReferenceHash, [scoreSheet]), /reference metadata mismatch/u)
+    const badSeenReference = structuredClone(scoreSheet); badSeenReference.pairs.find(value => value.reference_hashes.length > 0).reference_hashes[0] = hash('not seen')
+    assert.throws(() => finalizeStudy(state, precommit, packet, [badSeenReference]), /reference hash mismatch/u)
+
+    const copiedReference = packet.pairs.find(value => value.references.length > 0).references[0].path
+    writeFileSync(copiedReference, Buffer.concat([png, Buffer.from('tampered')]))
+    assert.throws(() => finalizeStudy(state, precommit, packet, [scoreSheet]), /reference bytes changed/u)
+    writeFileSync(copiedReference, png)
+    rmSync(copiedReference)
+    assert.throws(() => finalizeStudy(state, precommit, packet, [scoreSheet]), /reference 1 is unavailable/u)
+    writeFileSync(copiedReference, png)
+
+    const copiedArtifact = packet.pairs[0].artifacts.A.path
+    writeFileSync(copiedArtifact, Buffer.concat([png, Buffer.from('tampered')]))
+    assert.throws(() => finalizeStudy(state, precommit, packet, [scoreSheet]), /bytes changed/u)
+    writeFileSync(copiedArtifact, png)
 
     const badEvaluator = structuredClone(scoreSheet); badEvaluator.evaluator_hash = hash('unmatched evaluator')
     assert.throws(() => finalizeStudy(state, precommit, packet, [badEvaluator]), /evaluator hash\/protocol mismatch/u)
@@ -82,6 +127,23 @@ test('precommit balances A/B before collection; blind packet and finalized raw b
   } finally {
     rmSync(temporary, { recursive: true, force: true })
   }
+})
+
+test('collection fails closed when a precommitted source reference changes', async () => {
+  const temporary = mkdtempSync(join(tmpdir(), 'emate-em217-503-reference-'))
+  try {
+    const reference = join(temporary, 'source.png'); writeFileSync(reference, png)
+    const input = { schema_version: 1, evaluator_protocol_commitment_sha256: hash('protocol'),
+      cases: Array.from({ length: 60 }, (_, index) => {
+        const category = categories[index % categories.length]
+        return { pair_id: `pair-${index + 1}`, category, prompt: `prompt ${index + 1}`, references: category === 'reference-edit' ? [reference] : [] }
+      }) }
+    const state = prepareStudy(input, '3'.repeat(64), context())
+    writeFileSync(reference, Buffer.concat([png, Buffer.from('changed')]))
+    let calls = 0
+    await assert.rejects(collectStudy(state, hash(JSON.stringify(state) + '\n'), context(), join(temporary, 'output'), async () => { calls += 1 }), /reference bytes changed/u)
+    assert.equal(calls, 0)
+  } finally { rmSync(temporary, { recursive: true, force: true }) }
 })
 
 test('prepare rejects category gaps and reference edits without an actual reference', () => {

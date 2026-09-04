@@ -96,9 +96,9 @@ function scope(seed, batchId, ordinal) {
   }
 }
 
-async function requestImage(config, prompt, requestScope, fetchImpl = fetch) {
+async function requestImage(config, prompt, requestScope, fetchImpl = fetch, now = () => performance.now()) {
   const body = JSON.stringify({ model: MODEL, prompt })
-  const started = performance.now()
+  const started = now()
   let response
   try {
     response = await fetchImpl(new URL(`${config.root.pathname}/images/generations`, config.root.origin), {
@@ -106,11 +106,11 @@ async function requestImage(config, prompt, requestScope, fetchImpl = fetch) {
       headers: { authorization: `Bearer ${config.token}`, accept: 'application/json', 'content-type': 'application/json', ...requestScope.headers },
     })
   } catch (error) {
-    return { status: 'unknown', elapsed: performance.now() - started, body, requestScope,
+    return { status: 'unknown', elapsed: now() - started, body, requestScope,
       error_name: error instanceof Error && /^[A-Za-z][A-Za-z0-9]*$/u.test(error.name) ? error.name : 'UnknownError' }
   }
   const value = await readJson(response)
-  const elapsed = performance.now() - started
+  const elapsed = now() - started
   if (response.status === 429) return { status: 'rate-limited', elapsed, value, response, body, requestScope }
   if (!response.ok) return { status: 'failed', elapsed }
   const image = validImage(value)
@@ -145,7 +145,7 @@ async function mapLimit(values, limit, action) {
   return results
 }
 
-export async function runProviderBenchmark(config, prompts, fetchImpl = fetch) {
+export async function runProviderBenchmark(config, prompts, fetchImpl = fetch, now = () => performance.now()) {
   let offset = 0
   const schedule = Array.from({ length: config.runs }, (_, index) => {
     const taskCount = SIZES[index % SIZES.length]
@@ -156,19 +156,22 @@ export async function runProviderBenchmark(config, prompts, fetchImpl = fetch) {
   const runs = []
   for (const [index, { taskCount, selected }] of schedule.entries()) {
     const batchId = `sha256:${sha256(`${fixedSetSha256}\0${index + 1}`)}`
-    const control = await requestImage(config, selected[0], scope(`${fixedSetSha256}\0direct\0${index + 1}`), fetchImpl)
+    const control = await requestImage(config, selected[0], scope(`${fixedSetSha256}\0direct\0${index + 1}`), fetchImpl, now)
     requireValue(control.status === 'completed', `same-round direct control ${index + 1} did not complete (${control.error_name ?? control.status})`)
-    const results = await mapLimit(selected, 4, (prompt, ordinal) => requestImage(config, prompt, scope(`${fixedSetSha256}\0${index + 1}\0${ordinal + 1}`, batchId, ordinal + 1), fetchImpl))
+    const batchStarted = now()
+    const results = await mapLimit(selected, 4, async (prompt, ordinal) => {
+      const result = await requestImage(config, prompt, scope(`${fixedSetSha256}\0${index + 1}\0${ordinal + 1}`, batchId, ordinal + 1), fetchImpl, now)
+      return { ...result, batchElapsed: now() - batchStarted }
+    })
     requireValue(!results.some(result => result.status === 'rate-limited'), `ordinary ${config.layer} batch ${index + 1} was rate limited`)
     runs.push({
       run: index + 1, task_count: taskCount,
-      first_terminal_ms: Math.min(...results.map(result => result.elapsed)), all_terminal_ms: Math.max(...results.map(result => result.elapsed)),
+      first_terminal_ms: Math.min(...results.map(result => result.batchElapsed)), all_terminal_ms: Math.max(...results.map(result => result.batchElapsed)),
       direct_single_terminal_ms: control.elapsed,
       completed_count: results.filter(result => result.status === 'completed').length,
       failed_count: results.filter(result => result.status === 'failed').length,
       unknown_count: results.filter(result => result.status === 'unknown').length,
       retained_success_count: results.filter(result => result.status === 'completed').length,
-      duplicate_provider_generation: 0,
     })
   }
   const report = {

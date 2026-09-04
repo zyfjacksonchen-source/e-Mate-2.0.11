@@ -67,6 +67,7 @@ function study({ count = 60, singleScore = 4, batchScore = 4 } = {}) {
       return {
         pair_id: 'pair-' + String(pairNumber).padStart(4, '0'),
         category,
+        reference_hashes: category === 'reference-edit' ? [hex('reference-' + pairNumber)] : [],
         requests: { single: { ...request }, batch: { ...request } },
         artifacts: { A: { sha256: hex('artifact-A-' + pairNumber) }, B: { sha256: hex('artifact-B-' + pairNumber) } },
         allocation: { ...allocation, commitment_sha256: hex('allocation-' + pairNumber), assigned_before_scoring: true },
@@ -145,6 +146,9 @@ test('protocol rejects randomization, blinding, operational IDs, and every paire
     [value => { value.pairs[0].allocation.score_derived = true }, false],
     [value => { value.pairs[0].allocation.A = 'single'; value.pairs[0].allocation.B = 'single' }, true],
     [value => { value.pairs[0].provider_id = 'forbidden' }, false],
+    [value => { value.pairs.find(pair => pair.category === 'reference-edit').reference_hashes = [] }, false],
+    [value => { value.pairs.find(pair => pair.category !== 'reference-edit').reference_hashes = [hex('unexpected-reference')] }, false],
+    [value => { value.pairs.find(pair => pair.category === 'reference-edit').reference_hashes[0] = 'bad' }, false],
     [value => { value.pairs[0].task_id = 'forbidden' }, false],
     [value => { value.pairs[0].call_id = 'forbidden' }, false],
     [value => { value.raw_evidence = { uri: defaultUri, sha256: hex('self-hash') } }, false],

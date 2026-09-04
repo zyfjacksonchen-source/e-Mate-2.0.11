@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import {
   ATTACHMENT_LIMITS, CLAIM, COMPARISON_SCENARIOS, DESKTOP_REFERENCE, HARNESS_COMMIT, HISTORY_SCENARIO, NORMALIZED_PROMPT, REQUEST_BODY,
@@ -13,6 +17,7 @@ import { MAX_IMAGE_BYTES, SMALL_PNG, createExactMaxPng } from './fixtures.mjs'
 import { createStreamResponse, runtimeNetworkGuardSmoke, workerSourceSmoke } from './worker.mjs'
 
 const ROOT = new URL('../../../', import.meta.url)
+const PROJECT_EVIDENCE = fileURLToPath(new URL('./project-evidence.mjs', import.meta.url))
 const HASH_A = 'a'.repeat(64)
 const HASH_B = 'b'.repeat(64)
 const HASH_C = 'c'.repeat(64)
@@ -238,6 +243,46 @@ test('OPEN manifest cannot claim source or GUI results', () => {
   const gui = clone(manifest)
   gui.gui_first_visible.status = 'PASS'
   assert.throws(() => validateManifest(gui), /OPEN manifest cannot claim GUI evidence/u)
+})
+
+test('project CLI requires the supplied manifest to be exact OPEN state', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'emate-em217-108-project-'))
+  try {
+    const combined = aggregate()
+    const sourceRaw = JSON.stringify(combined) + '\n'
+    const sourceUri = `https://evidence.example/em217-108/${sha256(sourceRaw)}.json`
+    const gui = guiEvidence()
+    const paths = { source: join(directory, 'source.json'), gui: join(directory, 'gui.json'), open: join(directory, 'open.json') }
+    writeFileSync(paths.source, sourceRaw)
+    writeFileSync(paths.gui, gui.raw)
+    writeFileSync(paths.open, JSON.stringify(openManifest()))
+    const run = output => spawnSync(process.execPath, [PROJECT_EVIDENCE, 'project', paths.source, sourceUri, paths.gui, gui.descriptor.uri, paths.open, output], { encoding: 'utf8' })
+
+    const passPath = join(directory, 'pass.json')
+    const valid = run(passPath)
+    assert.equal(valid.status, 0, valid.stderr)
+    assert.strictEqual(validateManifest(JSON.parse(readFileSync(passPath, 'utf8')), sourceRaw, gui.raw).status, 'PASS')
+
+    rmSync(paths.source)
+    rmSync(paths.gui)
+    const tampered = openManifest()
+    tampered.results = { forged: true }
+    writeFileSync(paths.open, JSON.stringify(tampered))
+    const tamperedPath = join(directory, 'tampered-pass.json')
+    const rejectedTamper = run(tamperedPath)
+    assert.notEqual(rejectedTamper.status, 0)
+    assert.match(rejectedTamper.stderr, /OPEN manifest cannot claim results/u)
+    assert.throws(() => readFileSync(tamperedPath), /ENOENT/u)
+
+    writeFileSync(paths.open, JSON.stringify(createSourcePassManifest(combined, sourceUri, sourceRaw)))
+    const nonOpenPath = join(directory, 'non-open-pass.json')
+    const rejectedNonOpen = run(nonOpenPath)
+    assert.notEqual(rejectedNonOpen.status, 0)
+    assert.match(rejectedNonOpen.stderr, /OPEN_MANIFEST must be an exact OPEN manifest/u)
+    assert.throws(() => readFileSync(nonOpenPath), /ENOENT/u)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })
 
 test('PASS is projected only from exact source and 100-sample macOS dev GUI raw bytes', () => {

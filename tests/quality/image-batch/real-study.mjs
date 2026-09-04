@@ -2,7 +2,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { extname, resolve } from 'node:path'
+import { dirname, extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   DESKTOP_REFERENCE, HARNESS_COMMIT, applicableDimensions, canonicalAllocationBytes, projectManifest,
@@ -50,6 +50,11 @@ function sourceContext(env = process.env, tokenRequired = false) {
     provenance: { emate_commit: commit, harness_commit: HARNESS_COMMIT, desktop_reference: DESKTOP_REFERENCE, version: '2.0.17' },
     environment: { layer: 'production-provider', environment_name_sha256: sha256(environmentName), gateway_origin_sha256: sha256(root.href), deployment_fingerprint_sha256: deployment },
   }
+}
+
+function readBytes(path, label) {
+  requireValue(typeof path === 'string' && path.length > 0, `${label} path is invalid`)
+  try { return readFileSync(path) } catch { fail(`${label} is unavailable`) }
 }
 
 function detect(bytes, label) {
@@ -109,7 +114,7 @@ export function prepareStudy(input, seed, context) {
     requireValue(Array.isArray(value.references) && value.references.length <= 8 && value.references.every(path => typeof path === 'string' && path.length > 0), `case ${value.pair_id} references are invalid`)
     requireValue(value.category === 'reference-edit' ? value.references.length >= 1 : value.references.length === 0, `case ${value.pair_id} reference/category mismatch`)
     const references = value.references.map(path => {
-      const bytes = readFileSync(path); const type = detect(bytes, `case ${value.pair_id} reference`)
+      const bytes = readBytes(path, `case ${value.pair_id} reference`); const type = detect(bytes, `case ${value.pair_id} reference`)
       return { path, media_type: type.mediaType, bytes: bytes.byteLength, sha256: sha256(bytes) }
     })
     return { pair_id: value.pair_id, category: value.category, prompt: value.prompt, references,
@@ -161,7 +166,7 @@ async function generate(context, value, headers, fetchImpl) {
     const form = new FormData(); form.set('model', MODEL); form.set('prompt', value.prompt)
     const field = value.references.length === 1 ? 'image' : 'image[]'
     value.references.forEach((reference, index) => {
-      const bytes = readFileSync(reference.path)
+      const bytes = readBytes(reference.path, `reference for ${value.pair_id}`)
       requireValue(bytes.byteLength === reference.bytes && sha256(bytes) === reference.sha256, `reference bytes changed for ${value.pair_id}`)
       form.append(field, new Blob([bytes], { type: reference.media_type }), `reference-${index + 1}${extname(reference.path) || '.bin'}`)
     })
@@ -181,7 +186,7 @@ async function generate(context, value, headers, fetchImpl) {
   requireValue(typeof encoded === 'string' && /^[A-Za-z0-9+/]+={0,2}$/u.test(encoded), `gateway result is not canonical base64 for ${value.pair_id}`)
   const bytes = Buffer.from(encoded, 'base64')
   requireValue(bytes.toString('base64').replace(/=+$/u, '') === encoded.replace(/=+$/u, ''), `gateway result base64 is invalid for ${value.pair_id}`)
-  return { bytes, ...detect(bytes, `gateway result for ${value.pair_id}`) }
+  return { bytes, ...detect(bytes, `gateway result for ${value.pair_id}`), request: requestHashes(value.prompt, value.references, context.upstreamModel) }
 }
 
 function groups(values) {
@@ -199,8 +204,19 @@ export async function collectStudy(state, precommitSha256, context, outputDirect
   stateShape(state); hash(precommitSha256, 'precommit file hash')
   requireValue(JSON.stringify(state.provenance) === JSON.stringify(context.provenance) && JSON.stringify(state.environment) === JSON.stringify(context.environment) && state.upstream_model === context.upstreamModel, 'collection environment differs from the precommit')
   mkdirSync(outputDirectory, { mode: 0o700 })
+  const controlledCases = state.cases.map((value, caseIndex) => ({
+    ...value,
+    references: value.references.map((reference, referenceIndex) => {
+      const bytes = readBytes(reference.path, `case ${value.pair_id} reference`)
+      const type = detect(bytes, `case ${value.pair_id} reference`)
+      requireValue(type.mediaType === reference.media_type && bytes.byteLength === reference.bytes && sha256(bytes) === reference.sha256, `reference bytes changed for ${value.pair_id}`)
+      const path = resolve(outputDirectory, `reference-${String(caseIndex + 1).padStart(4, '0')}-${String(referenceIndex + 1).padStart(2, '0')}.${type.extension}`)
+      writeFileSync(path, bytes, { flag: 'wx', mode: 0o600 })
+      return { ...reference, path }
+    }),
+  }))
   const artifacts = new Map()
-  for (const [groupIndex, group] of groups(state.cases).entries()) {
+  for (const [groupIndex, group] of groups(controlledCases).entries()) {
     const batchId = `sha256:${sha256(`${precommitSha256}\0batch\0${groupIndex + 1}`)}`
     const batch = () => Promise.all(group.map((value, index) => generate(context, value, scope(`${precommitSha256}\0${value.pair_id}\0batch`, batchId, index + 1), fetchImpl)))
     const single = () => Promise.all(group.map(value => generate(context, value, scope(`${precommitSha256}\0${value.pair_id}\0single`), fetchImpl)))
@@ -216,13 +232,17 @@ export async function collectStudy(state, precommitSha256, context, outputDirect
         writeFileSync(path, result.bytes, { flag: 'wx', mode: 0o600 })
         sides[side] = { path, sha256: sha256(result.bytes) }
       }
-      artifacts.set(value.pair_id, sides)
+      artifacts.set(value.pair_id, {
+        references: value.references.map(reference => ({ path: reference.path, media_type: reference.media_type, sha256: reference.sha256 })),
+        requests: { single: { ...byCondition.single.request }, batch: { ...byCondition.batch.request } },
+        artifacts: sides,
+      })
     }
   }
   return {
     schema_version: 1, ticket: 'EM217-503', evaluator_protocol_commitment_sha256: state.evaluator_protocol_commitment_sha256,
     precommit_sha256: precommitSha256,
-    pairs: state.cases.map(value => ({ pair_id: value.pair_id, category: value.category, prompt: value.prompt, artifacts: artifacts.get(value.pair_id) })),
+    pairs: state.cases.map(value => ({ pair_id: value.pair_id, category: value.category, prompt: value.prompt, ...artifacts.get(value.pair_id) })),
   }
 }
 
@@ -240,12 +260,38 @@ export function finalizeStudy(state, precommitSha256, packet, scoreSheets) {
     && packet.evaluator_protocol_commitment_sha256 === state.evaluator_protocol_commitment_sha256, 'blind packet commitment mismatch')
   requireValue(Array.isArray(packet.pairs) && packet.pairs.length === state.cases.length, 'blind packet pair count mismatch')
   const blindById = new Map(packet.pairs.map(value => [value.pair_id, value]))
-  for (const source of state.cases) {
+  requireValue(blindById.size === packet.pairs.length, 'blind packet pair IDs must be unique')
+  let controlledOutputDirectory
+  for (const [caseIndex, source] of state.cases.entries()) {
     const blind = blindById.get(source.pair_id)
-    exactKeys(blind, ['pair_id', 'category', 'prompt', 'artifacts'], `blind pair ${source.pair_id}`)
+    exactKeys(blind, ['pair_id', 'category', 'prompt', 'references', 'requests', 'artifacts'], `blind pair ${source.pair_id}`)
     requireValue(blind.category === source.category && blind.prompt === source.prompt, `blind pair ${source.pair_id} input mismatch`)
+    requireValue(Array.isArray(blind.references) && blind.references.length === source.references.length, `blind pair ${source.pair_id} reference count mismatch`)
+    requireValue(source.category === 'reference-edit' ? blind.references.length >= 1 && blind.references.length <= 8 : blind.references.length === 0, `blind pair ${source.pair_id} reference/category mismatch`)
     exactKeys(blind.artifacts, ['A', 'B'], `blind pair ${source.pair_id} artifacts`)
-    for (const side of ['A', 'B']) { exactKeys(blind.artifacts[side], ['path', 'sha256'], `blind ${source.pair_id} ${side}`); hash(blind.artifacts[side].sha256, `blind ${source.pair_id} ${side}`) }
+    for (const side of ['A', 'B']) {
+      exactKeys(blind.artifacts[side], ['path', 'sha256'], `blind ${source.pair_id} ${side}`); hash(blind.artifacts[side].sha256, `blind ${source.pair_id} ${side}`)
+      requireValue(typeof blind.artifacts[side].path === 'string' && resolve(blind.artifacts[side].path) === blind.artifacts[side].path, `blind ${source.pair_id} ${side} path is invalid`)
+      const bytes = readBytes(blind.artifacts[side].path, `blind ${source.pair_id} ${side}`)
+      requireValue(sha256(bytes) === blind.artifacts[side].sha256, `blind ${source.pair_id} ${side} bytes changed`)
+      controlledOutputDirectory ??= dirname(blind.artifacts[side].path)
+      requireValue(dirname(blind.artifacts[side].path) === controlledOutputDirectory, `blind ${source.pair_id} artifact directory mismatch`)
+    }
+    for (const [referenceIndex, reference] of blind.references.entries()) {
+      exactKeys(reference, ['path', 'media_type', 'sha256'], `blind ${source.pair_id} reference ${referenceIndex + 1}`)
+      const expected = source.references[referenceIndex]; hash(reference.sha256, `blind ${source.pair_id} reference ${referenceIndex + 1}`)
+      const extension = expected.media_type === 'image/png' ? 'png' : expected.media_type === 'image/jpeg' ? 'jpg' : 'webp'
+      const expectedPath = resolve(controlledOutputDirectory, `reference-${String(caseIndex + 1).padStart(4, '0')}-${String(referenceIndex + 1).padStart(2, '0')}.${extension}`)
+      requireValue(reference.path === expectedPath && reference.media_type === expected.media_type && reference.sha256 === expected.sha256, `blind ${source.pair_id} reference metadata mismatch`)
+      const bytes = readBytes(reference.path, `blind ${source.pair_id} reference ${referenceIndex + 1}`)
+      requireValue(bytes.byteLength === expected.bytes && sha256(bytes) === expected.sha256, `blind ${source.pair_id} reference bytes changed`)
+    }
+    exactKeys(blind.requests, ['single', 'batch'], `blind pair ${source.pair_id} requests`)
+    for (const condition of ['single', 'batch']) {
+      exactKeys(blind.requests[condition], ['model', 'quality', 'size', 'prompt_hash', 'reference_set_hash', 'canonical_provider_request_hash'], `${source.pair_id} ${condition} request`)
+      requireValue(JSON.stringify(blind.requests[condition]) === JSON.stringify(source.request), `${source.pair_id} ${condition} request differs from precommit`)
+    }
+    requireValue(JSON.stringify(blind.requests.single) === JSON.stringify(blind.requests.batch), `${source.pair_id} paired request mismatch`)
   }
   requireValue(Array.isArray(scoreSheets) && scoreSheets.length >= 1 && scoreSheets.length <= 10, '1..10 evaluator score sheets are required')
   const evaluatorHashes = new Set()
@@ -255,9 +301,11 @@ export function finalizeStudy(state, precommitSha256, packet, scoreSheets) {
     requireValue(!evaluatorHashes.has(sheet.evaluator_hash), 'evaluator hashes must be unique'); evaluatorHashes.add(sheet.evaluator_hash)
     requireValue(Array.isArray(sheet.pairs) && sheet.pairs.length === state.cases.length, `score sheet ${sheetIndex + 1} pair count mismatch`)
     const byId = new Map(sheet.pairs.map(value => [value.pair_id, value]))
+    requireValue(byId.size === sheet.pairs.length, `score sheet ${sheetIndex + 1} pair IDs must be unique`)
     for (const source of state.cases) {
       const scored = byId.get(source.pair_id); const blind = blindById.get(source.pair_id)
-      exactKeys(scored, ['pair_id', 'artifacts', 'scores'], `score ${source.pair_id}`)
+      exactKeys(scored, ['pair_id', 'reference_hashes', 'artifacts', 'scores'], `score ${source.pair_id}`)
+      requireValue(JSON.stringify(scored.reference_hashes) === JSON.stringify(blind.references.map(reference => reference.sha256)), `score ${source.pair_id} reference hash mismatch`)
       requireValue(JSON.stringify(scored.artifacts) === JSON.stringify({ A: { sha256: blind.artifacts.A.sha256 }, B: { sha256: blind.artifacts.B.sha256 } }), `score ${source.pair_id} artifact hash mismatch`)
       exactKeys(scored.scores, ['A', 'B'], `score ${source.pair_id} sides`)
       for (const side of ['A', 'B']) {
@@ -271,7 +319,8 @@ export function finalizeStudy(state, precommitSha256, packet, scoreSheets) {
     const blind = blindById.get(source.pair_id)
     return {
       pair_id: source.pair_id, category: source.category,
-      requests: { single: { ...source.request }, batch: { ...source.request } },
+      reference_hashes: blind.references.map(reference => reference.sha256),
+      requests: { single: { ...blind.requests.single }, batch: { ...blind.requests.batch } },
       artifacts: { A: { sha256: blind.artifacts.A.sha256 }, B: { sha256: blind.artifacts.B.sha256 } },
       allocation: { ...source.allocation },
       scores: sheets.flatMap(sheet => ['A', 'B'].map(side => ({ evaluator_hash: sheet.evaluator_hash, side, dimensions: sheet.byId.get(source.pair_id).scores[side] }))),

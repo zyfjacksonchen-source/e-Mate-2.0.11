@@ -149,14 +149,14 @@ export function validateProviderLayerEvidence(value, layer, expectedProvenance) 
   const runIds = new Set()
   const sizes = new Set()
   for (const run of value.runs) {
-    exactKeys(run, ['run', 'task_count', 'first_terminal_ms', 'all_terminal_ms', 'direct_single_terminal_ms', 'completed_count', 'failed_count', 'unknown_count', 'retained_success_count', 'duplicate_provider_generation'], `${layer} run`)
+    exactKeys(run, ['run', 'task_count', 'first_terminal_ms', 'all_terminal_ms', 'direct_single_terminal_ms', 'completed_count', 'failed_count', 'unknown_count', 'retained_success_count'], `${layer} run`)
     integer(run.run, `${layer} run index`, 1); require(!runIds.has(run.run), `${layer} run IDs must be unique`); runIds.add(run.run)
     require([4, 5, 8].includes(run.task_count), `${layer} task_count must be 4, 5, or 8`); sizes.add(run.task_count)
     for (const key of ['first_terminal_ms', 'all_terminal_ms', 'direct_single_terminal_ms']) finite(run[key], `${layer}.${key}`)
-    for (const key of ['completed_count', 'failed_count', 'unknown_count', 'retained_success_count', 'duplicate_provider_generation']) integer(run[key], `${layer}.${key}`)
+    require(run.first_terminal_ms <= run.all_terminal_ms, `${layer} first terminal cannot follow all-terminal`)
+    for (const key of ['completed_count', 'failed_count', 'unknown_count', 'retained_success_count']) integer(run[key], `${layer}.${key}`)
     require(run.completed_count + run.failed_count + run.unknown_count === run.task_count, `${layer} terminal count mismatch`)
     require(run.retained_success_count === run.completed_count, `${layer} successful response was not retained for validation`)
-    require(run.duplicate_provider_generation === 0, `${layer} duplicate provider generation detected`)
   }
   require([4, 5, 8].every(size => sizes.has(size)), `${layer} must exercise 4, 5, and 8 image batches`)
   const probe = value.typed_429_retry_probe

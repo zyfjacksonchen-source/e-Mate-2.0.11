@@ -142,12 +142,15 @@ export function validateAndAnalyzeStudy(raw, descriptor) {
   let batchOnA = 0
 
   for (const pair of record.pairs) {
-    exactKeys(pair, ['pair_id', 'category', 'requests', 'artifacts', 'allocation', 'scores'], 'pair')
+    exactKeys(pair, ['pair_id', 'category', 'reference_hashes', 'requests', 'artifacts', 'allocation', 'scores'], 'pair')
     identifier(pair.pair_id, 'pair ID')
     require(!pairIds.has(pair.pair_id), 'pair IDs must be unique')
     pairIds.add(pair.pair_id)
     require(CATEGORIES.includes(pair.category), 'unknown category')
     categoryCounts[pair.category] += 1
+    require(Array.isArray(pair.reference_hashes) && pair.reference_hashes.length <= 8, 'reference hashes must contain 0..8 entries')
+    require(pair.category === 'reference-edit' ? pair.reference_hashes.length >= 1 : pair.reference_hashes.length === 0, 'reference hash/category mismatch')
+    pair.reference_hashes.forEach(value => hash(value, 'reference hash'))
 
     exactKeys(pair.requests, ['single', 'batch'], 'paired requests')
     for (const side of ['single', 'batch']) {
