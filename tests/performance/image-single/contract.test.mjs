@@ -15,6 +15,7 @@ const ROOT = new URL('../../../', import.meta.url)
 const HASH_A = 'a'.repeat(64)
 const HASH_B = 'b'.repeat(64)
 const HASH_C = 'c'.repeat(64)
+const GIT_COMMIT = 'c'.repeat(40)
 const RESPONSE_SMALL = 'd'.repeat(64)
 const RESPONSE_MAX = 'e'.repeat(64)
 const clone = value => structuredClone(value)
@@ -75,7 +76,7 @@ function worker(repetition = 1) {
   return {
     schema_version: 1, ticket: 'EM217-108', claim: CLAIM, repetition,
     protocol: { fake_delay_ms: 25, repetitions: 3, clock: 'performance.now monotonic', percentile: 'nearest-rank-per-repetition', ordering: 'interleaved-ABBA', filesystem: 'same-worker-temp-volume' },
-    provenance: { emate_commit: HASH_C, harness_commit: HARNESS_COMMIT, module_sha256: {
+    provenance: { emate_commit: GIT_COMMIT, harness_commit: HARNESS_COMMIT, module_sha256: {
       image_generation_source: HASH_A, image_generation_bundle: HASH_B, attachment_store_source: HASH_C,
       attachment_bundle: HASH_A, jobs_bundle: HASH_B, tools_bundle: HASH_C,
     } },
@@ -162,6 +163,15 @@ test('nearest-rank is deterministic at p95 and p99', () => {
   assert.equal(nearestRank([-5, 0, 10], 0.95), 10)
 })
 
+
+test('Git commit provenance accepts exactly 40 lowercase hex characters', () => {
+  const valid = worker()
+  assert.strictEqual(validateWorkerReport(valid), valid)
+  for (const invalid of ['a'.repeat(39), 'a'.repeat(41), 'g'.repeat(40), 'a'.repeat(64)]) {
+    rejectsMutation(value => { value.provenance.emate_commit = invalid }, /lowercase 40-hex Git commit/u)
+  }
+})
+
 test('validates exact protocol, counts, hashes, stages, arithmetic, and three repetitions', () => {
   const report = worker()
   assert.strictEqual(validateWorkerReport(report), report)
@@ -222,6 +232,9 @@ test('SOURCE_PASS manifest is a strict projection of exact validated raw bytes',
   const manifest = createSourcePassManifest(combined, 'https://evidence.example/em217-108/raw.json', raw)
   assert.strictEqual(validateManifest(manifest, raw), manifest)
   assert.throws(() => validateManifest(manifest), /requires the exact raw aggregate bytes/u)
+  const fakeCommit = clone(manifest)
+  fakeCommit.provenance.emate_commit = HASH_C
+  assert.throws(() => validateManifest(fakeCommit, raw), /lowercase 40-hex Git commit/u)
   const wrongHash = clone(manifest)
   wrongHash.external_raw.sha256 = HASH_A
   assert.throws(() => validateManifest(wrongHash, raw), /raw hash mismatch/u)

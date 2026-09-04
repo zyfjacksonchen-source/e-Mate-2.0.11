@@ -76,6 +76,7 @@ function exactKeys(value, keys, label) {
   const expected = [...keys].sort()
   expect(actual.length === expected.length && actual.every((key, index) => key === expected[index]), label + ' fields do not match')
 }
+function gitCommit(value, label) { expect(typeof value === 'string' && /^[0-9a-f]{40}$/u.test(value), label + ' must be a lowercase 40-hex Git commit'); return value }
 function hash(value, label) { expect(typeof value === 'string' && /^[0-9a-f]{64}$/u.test(value), label + ' must be lowercase SHA-256'); return value }
 function sameNumber(actual, expected, label) { expect(Object.is(actual, expected), label + ' arithmetic mismatch') }
 
@@ -235,7 +236,7 @@ export function validateWorkerReport(report) {
   expect(report.protocol.fake_delay_ms === 25 && report.protocol.repetitions === 3, 'worker protocol constants')
   expect(report.protocol.clock === 'performance.now monotonic' && report.protocol.percentile === 'nearest-rank-per-repetition' && report.protocol.ordering === 'interleaved-ABBA' && report.protocol.filesystem === 'same-worker-temp-volume', 'worker protocol labels')
   exactKeys(report.provenance, ['emate_commit', 'harness_commit', 'module_sha256'], 'worker.provenance')
-  hash(report.provenance.emate_commit, 'worker.provenance.emate_commit')
+  gitCommit(report.provenance.emate_commit, 'worker.provenance.emate_commit')
   expect(report.provenance.harness_commit === HARNESS_COMMIT, 'worker Harness commit')
   record(report.provenance.module_sha256, 'worker.provenance.module_sha256')
   expect(Object.keys(report.provenance.module_sha256).length >= 5, 'worker module hash coverage')
@@ -381,6 +382,9 @@ export function validateManifest(manifest, rawAggregate) {
     expect(manifest.provenance === null && manifest.results === null, 'OPEN manifest cannot claim results')
     expect(manifest.external_raw.uri === null && manifest.external_raw.sha256 === null, 'OPEN manifest cannot claim raw evidence')
   } else {
+    record(manifest.provenance, 'manifest.provenance')
+    gitCommit(manifest.provenance.emate_commit, 'manifest.provenance.emate_commit')
+    expect(manifest.provenance.harness_commit === HARNESS_COMMIT, 'manifest Harness commit')
     expect(typeof manifest.external_raw.uri === 'string' && /^(?:https|s3|r2):\/\//u.test(manifest.external_raw.uri), 'manifest external raw URI')
     hash(manifest.external_raw.sha256, 'manifest external raw hash')
     expect(typeof rawAggregate === 'string' || rawAggregate instanceof Uint8Array, 'SOURCE_PASS manifest requires the exact raw aggregate bytes')
