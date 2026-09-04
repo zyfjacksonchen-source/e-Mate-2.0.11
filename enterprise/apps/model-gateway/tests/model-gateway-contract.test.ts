@@ -3082,6 +3082,10 @@ test('delivers only the authenticated tenant runtime model routes without exposi
   const tenantKey = 'tenant-specific-provider-key-123456789';
   const searchKey = 'tenant-specific-search-key-123456789';
   const internalDeepSeekKey = 'internal-deepseek-chat-key-never-leased';
+  const modelSessionToken = `${'a'.repeat(32)}.${'b'.repeat(32)}.${'c'.repeat(64)}`;
+  const clientCredential = 'client-credential-that-must-never-be-reflected';
+  const opaqueSessionToken = 'opaque-session-token-that-is-not-a-jwt-value';
+  const runtimeAuth = (token = modelSessionToken) => ({ authorization: `Bearer ${token}` });
   const internalDeepSeekRoute = {
     ...chatRoute,
     upstreamModelId: 'deepseek-v4-flash',
@@ -3089,24 +3093,33 @@ test('delivers only the authenticated tenant runtime model routes without exposi
   };
   const enabledCalls = new Map<string, number>();
   const keyCalls: string[] = [];
+  let searchGrantStatus: 'granted' | 'denied' | 'unavailable' = 'granted';
   const identity = {
     tenantId: 'tenant-a',
     userId: 'user-a',
     modelIds: [luna.id],
+    sessionId: 'session-a',
   };
   const consentStore = new InMemoryConsentStore(consentPolicy);
   await consentStore.accept(identity, consentInput);
-  const server = createModelGatewayServer({
+  const upstreamRequests: Request[] = [];
+  const options: ModelGatewayOptions = {
     routes: [luna, internalDeepSeekRoute, searchCredentialRoute, imageRoute],
-    authenticate: async (token) => token === sessionToken ? identity : null,
+    publicBaseUrl: 'http://127.0.0.1',
+    authenticate: async (token) => token === modelSessionToken || token === opaqueSessionToken
+      ? identity
+      : token === clientCredential ? { ...identity, sessionId: undefined } : null,
     consentStore,
     tenantModelRoutePolicy: {
       isEnabled: async (_tenantId, routeId) => {
         enabledCalls.set(routeId, (enabledCalls.get(routeId) ?? 0) + 1);
-        return true;
+        return routeId !== searchCredentialRoute.id || searchGrantStatus !== 'denied';
       },
       upstreamApiKey: async (_tenantId, routeId) => {
         keyCalls.push(routeId);
+        if (routeId === searchCredentialRoute.id && searchGrantStatus === 'unavailable') {
+          throw new Error('search key unavailable');
+        }
         return routeId === luna.id
           ? tenantKey
           : routeId === searchCredentialRoute.id ? searchKey : internalDeepSeekKey;
@@ -3115,21 +3128,28 @@ test('delivers only the authenticated tenant runtime model routes without exposi
     usageStore: new InMemoryUsageStore(limits),
     usageKeyId: 'usage-2026',
     usagePrivateKey: privateKey,
-  });
+    fetchImplementation: async (input, init) => {
+      const request = new Request(input, init);
+      upstreamRequests.push(request);
+      return completedSse(10, 5, `legacy-response-${upstreamRequests.length}`);
+    },
+  };
+  const server = createModelGatewayServer(options);
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();
   assert(address && typeof address === 'object');
   const baseUrl = `http://127.0.0.1:${address.port}`;
+  options.publicBaseUrl = baseUrl;
 
   try {
     assert.equal((await fetch(`${baseUrl}/v1/runtime-models`)).status, 401);
-    assert.equal((await fetch(`${baseUrl}/v1/runtime-models?all=true`, { headers: auth() })).status, 400);
+    assert.equal((await fetch(`${baseUrl}/v1/runtime-models?all=true`, { headers: runtimeAuth() })).status, 400);
     for (const query of [
       'client_version=2.0.15&client_version=2.0.16',
       'client_version=2.0.12&extra=true',
     ]) {
-      const invalid = await fetch(`${baseUrl}/v1/runtime-models?${query}`, { headers: auth() });
+      const invalid = await fetch(`${baseUrl}/v1/runtime-models?${query}`, { headers: runtimeAuth() });
       assert.equal(invalid.status, 400);
       assert.deepEqual(await invalid.json(), {
         error: { code: 'INVALID_REQUEST', message: 'Query is not allowed' },
@@ -3146,7 +3166,7 @@ test('delivers only the authenticated tenant runtime model routes without exposi
     ]) {
       const unsupported = await fetch(
         `${baseUrl}/v1/runtime-models?client_version=${encodeURIComponent(clientVersion)}`,
-        { headers: auth() },
+        { headers: runtimeAuth() },
       );
       assert.equal(unsupported.status, 400);
       assert.deepEqual(await unsupported.json(), {
@@ -3156,11 +3176,8 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         },
       });
     }
-    assert.equal((await fetch(`${baseUrl}/v1/runtime-models`, { method: 'POST', headers: auth() })).status, 405);
-    const legacyResponse = await fetch(`${baseUrl}/v1/runtime-models`, { headers: auth() });
-    assert.equal(legacyResponse.status, 200);
-    assert.deepEqual(Object.keys(await legacyResponse.json()).sort(), ['models', 'schemaVersion']);
-    const response = await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.12`, { headers: auth() });
+    assert.equal((await fetch(`${baseUrl}/v1/runtime-models`, { method: 'POST', headers: runtimeAuth() })).status, 405);
+    const response = await fetch(`${baseUrl}/v1/runtime-models?client_version=2.0.17`, { headers: runtimeAuth() });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('cache-control'), 'no-store');
     assert.equal(response.headers.get('access-control-allow-origin'), null);
@@ -3186,20 +3203,109 @@ test('delivers only the authenticated tenant runtime model routes without exposi
         upstreamApiKey: searchKey,
       },
     });
-    for (const clientVersion of ['2.0.13', '2.0.14', '2.0.15', '2.0.16', '2.0.17']) {
-      const currentClientResponse = await fetch(
-        `${baseUrl}/v1/runtime-models?client_version=${clientVersion}`,
-        { headers: auth() },
-      );
-      assert.equal(currentClientResponse.status, 200);
-      assert.deepEqual(await currentClientResponse.json(), releasedClientBody);
-    }
-    assert.equal(enabledCalls.get(searchCredentialRoute.id), 6);
-    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 6);
+    assert.equal(enabledCalls.get(searchCredentialRoute.id), 1);
+    assert.equal(keyCalls.filter((routeId) => routeId === searchCredentialRoute.id).length, 1);
     assert.equal(keyCalls.includes(luna.id), false);
     assert.equal(keyCalls.includes(internalDeepSeekRoute.id), false);
+    assert.equal('upstreamBaseUrl' in releasedClientBody.models[0], false);
+    assert.equal('upstreamApiKey' in releasedClientBody.models[0], false);
     assert.doesNotMatch(JSON.stringify(releasedClientBody.models), /provider-key|provider\.example/u);
-    const catalogResponse = await (await fetch(`${baseUrl}/v1/models`, { headers: auth() })).json() as {
+
+    const legacyCases = [
+      { clientVersion: null, searchStatus: 'granted' as const },
+      { clientVersion: '2.0.12', searchStatus: 'granted' as const },
+      { clientVersion: '2.0.13', searchStatus: 'denied' as const },
+      { clientVersion: '2.0.14', searchStatus: 'unavailable' as const },
+      { clientVersion: '2.0.15', searchStatus: 'granted' as const },
+      { clientVersion: '2.0.16', searchStatus: 'granted' as const },
+    ];
+    let legacyModel: { upstreamBaseUrl: string; upstreamApiKey: string } | undefined;
+    for (const { clientVersion, searchStatus } of legacyCases) {
+      searchGrantStatus = searchStatus;
+      const path = clientVersion === null
+        ? `${baseUrl}/v1/runtime-models`
+        : `${baseUrl}/v1/runtime-models?client_version=${clientVersion}`;
+      const legacyCatalogResponse = await fetch(path, { headers: runtimeAuth() });
+      assert.equal(legacyCatalogResponse.status, 200);
+      assert.equal(legacyCatalogResponse.headers.get('cache-control'), 'no-store');
+      assert.equal(legacyCatalogResponse.headers.get('access-control-allow-origin'), null);
+      const body = await legacyCatalogResponse.json() as {
+        schemaVersion: number;
+        models: Array<Record<string, unknown>>;
+        searchCredentialGrant?: Record<string, unknown>;
+      };
+      const searchGrantExpected = clientVersion !== null && clientVersion !== '2.0.12';
+      assert.deepEqual(
+        Object.keys(body).sort(),
+        searchGrantExpected ? ['models', 'schemaVersion', 'searchCredentialGrant'] : ['models', 'schemaVersion']
+      );
+      assert.equal(body.schemaVersion, 1);
+      assert.equal(body.models.length, 1);
+      const model = body.models[0] as Record<string, unknown>;
+      assert.deepEqual(Object.keys(model).sort(), [
+        'allowInsecureHttpUpstream', 'apiMode', 'contextWindow', 'id', 'input', 'label', 'maxTokens',
+        'reasoning', 'upstreamApiKey', 'upstreamBaseUrl', 'upstreamModelId',
+      ]);
+      assert.equal(model.id, luna.id);
+      assert.equal(model.apiMode, 'responses');
+      assert.equal(model.upstreamModelId, luna.upstreamModelId);
+      assert.equal(model.upstreamBaseUrl, `${baseUrl}/v1`);
+      assert.equal(model.upstreamApiKey, modelSessionToken);
+      assert.equal(model.allowInsecureHttpUpstream, true);
+      assert.equal(model.label, luna.label);
+      assert.deepEqual(model.input, luna.input);
+      assert.equal(model.reasoning, true);
+      assert.equal(model.contextWindow, luna.contextWindow);
+      assert.equal(model.maxTokens, luna.maxTokens);
+      if (searchGrantExpected) {
+        assert.deepEqual(body.searchCredentialGrant, {
+          schemaVersion: 1,
+          status: searchStatus,
+          purpose: 'web-search',
+          provider: 'deepseek-official',
+          credentialRef: 'E_MATE_SEARCH_KEY_DEEPSEEK',
+          ...(searchStatus === 'granted' ? { upstreamApiKey: searchKey } : {}),
+        });
+      }
+      assert.doesNotMatch(JSON.stringify(body.models), /tenant-specific|provider-secret|provider\.example|internal-deepseek/u);
+      legacyModel ??= model as { upstreamBaseUrl: string; upstreamApiKey: string };
+    }
+    for (const [path, token] of [
+      [`${baseUrl}/v1/runtime-models`, clientCredential],
+      [`${baseUrl}/v1/runtime-models?client_version=2.0.16`, opaqueSessionToken],
+    ]) {
+      const denied = await fetch(path, { headers: runtimeAuth(token) });
+      assert.equal(denied.status, 403);
+      assert.doesNotMatch(JSON.stringify(await denied.json()), new RegExp(token, 'u'));
+    }
+
+    assert(legacyModel);
+    const routed = await fetch(`${legacyModel.upstreamBaseUrl}/responses`, {
+      method: 'POST',
+      headers: {
+        ...responseHeaders(),
+        ...runtimeAuth(legacyModel.upstreamApiKey),
+        session_id: 'legacy-session',
+        'x-client-request-id': 'legacy-session',
+        'x-e-mate-task-id': 'legacy-task',
+        'x-e-mate-trace-id': 'legacy-trace',
+      },
+      body: JSON.stringify({
+        model: luna.id,
+        input: [{ role: 'user', content: 'legacy route' }],
+        stream: true,
+        store: false,
+        reasoning: { effort: 'high', summary: 'auto' },
+      }),
+    });
+    assert.equal(routed.status, 200);
+    await routed.text();
+    assert.equal(upstreamRequests.length, 1);
+    assert.equal(upstreamRequests[0]?.url, `${luna.upstreamBaseUrl}/responses`);
+    assert.equal(upstreamRequests[0]?.headers.get('authorization'), `Bearer ${tenantKey}`);
+    assert.equal(keyCalls.filter((routeId) => routeId === luna.id).length, 1);
+
+    const catalogResponse = await (await fetch(`${baseUrl}/v1/models`, { headers: runtimeAuth() })).json() as {
       models: Array<{ id: string }>;
     };
     assert.deepEqual(catalogResponse.models.map(({ id }) => id), [luna.id]);
@@ -3255,7 +3361,7 @@ test('fails closed instead of leasing an internal-proxy chat key to native DeepS
 
   try {
     const response = await fetch(
-      `http://127.0.0.1:${address.port}/v1/runtime-models?client_version=2.0.15`,
+      `http://127.0.0.1:${address.port}/v1/runtime-models?client_version=2.0.17`,
       { headers: auth() },
     );
     assert.equal(response.status, 200);
@@ -3342,7 +3448,7 @@ test('keeps GPT runtime available while managed search is denied or unavailable'
     assert(address && typeof address === 'object');
     try {
       const response = await fetch(
-        `http://127.0.0.1:${address.port}/v1/runtime-models?client_version=2.0.12`,
+        `http://127.0.0.1:${address.port}/v1/runtime-models?client_version=2.0.17`,
         { headers: auth() },
       );
       assert.equal(response.status, 200);

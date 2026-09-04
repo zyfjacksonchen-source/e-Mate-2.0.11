@@ -9,6 +9,7 @@ import { assertWindowsSecretFileAccess, loadProductionConfiguration } from '../s
 function configuration(overrides: Record<string, unknown> = {}) {
   return {
     schemaVersion: 1,
+    publicBaseUrl: 'https://mvdcm.ecoremedia.net/e-mate/model-api',
     listen: {
       host: '127.0.0.1',
       port: 8443,
@@ -72,6 +73,18 @@ test('production configuration requires external absolute secret files and rejec
   const directory = mkdtempSync(join(tmpdir(), 'e-mate-gateway-'));
   const file = join(directory, 'gateway.json');
   try {
+    for (const value of [
+      'http://mvdcm.ecoremedia.net/e-mate/model-api',
+      'https://user@mvdcm.ecoremedia.net/e-mate/model-api',
+      'https://mvdcm.ecoremedia.net/e-mate/model-api?query=1',
+      'https://mvdcm.ecoremedia.net/e-mate/model-api#fragment',
+      'https://mvdcm.ecoremedia.net/e-mate/model-api/v1',
+    ]) {
+      writeFileSync(file, JSON.stringify(configuration({ publicBaseUrl: value })));
+      assert.throws(() => loadProductionConfiguration(file), /Invalid Model Gateway production configuration/);
+    }
+    writeFileSync(file, JSON.stringify(configuration({ publicBaseUrl: 'https://mvdcm.ecoremedia.net/e-mate/model-api/' })));
+    assert.throws(() => loadProductionConfiguration(file), /TLS certificate path must be absolute/);
     writeFileSync(file, JSON.stringify(configuration()));
     assert.throws(() => loadProductionConfiguration(file), /TLS certificate path must be absolute/);
     writeFileSync(
