@@ -57,7 +57,7 @@
       "acceptance": [
         "所有后续 PR 能引用同一 baseline-lock.json。",
         "CI 拒绝浮动版本、未登记写集、跨 owner 写入以及 2.0.17 提前改版本。",
-        "Exactly 41 unique, resolvable and acyclic work orders are machine-checked with WIP <= 6.",
+        "Exactly 42 unique, resolvable and acyclic work orders are machine-checked with WIP <= 6.",
         "The rejected uploaded Desktop reference is absent from every active provenance field."
       ],
       "tests": [
@@ -373,6 +373,7 @@
         "docs/2.0.17/check-plan.mjs"
       ],
       "implementation": [
+        "本工单的确认流程为历史实现，已由 EM217-109 覆盖：新生图、改图与融合零确认，不再调用 userQuestions；历史 revision-2 needs-review/revision-3 reviewed receipts 保持只读兼容，不恢复旧确认链。",
         "沿用 EM217-002 已接受 pinned-spawn：exact prompt 只在 typed normalized args 中比较，随机 nonce 只在 one-shot descriptor label；prompt 文本不是 gate marker。",
         "validation 前 atomic claim 从 nonce lookup 删除；claimed gate 仍在 effect-owned active set 至 settlement/final cleanup。禁止 module global、remote provider、child 改写、模型/质量/尺寸降级。",
         "raw 输入仅为 prompt 与可选 scalar/0..16 image_url IDs（允许 []/duplicates）；parent/child 在 digest/comparison 前同样 first-occurrence dedupe，persisted list 保持 ordered unique。固定 model/quality/size 由 provider policy 保持。",
@@ -382,6 +383,7 @@
         "parent userQuestions 不可用时 source task 必须在 provider 前拒绝；不得留下永久 needs-review，禁止 child 改写、module global、remote provider 或模型/质量/尺寸降级。"
       ],
       "acceptance": [
+        "当前新请求遵循 EM217-109 零确认合同；下列 parent userQuestions/revision-3 adjudication 条款仅记录历史实现，不适用于新请求。",
         "父 task 与实际 imagegen normalized args 完全一致；prompt 不作为授权 marker 且日志不记录原文。",
         "raw []/duplicates 合法且 parent/child normalized ordered first-occurrence unique image_url IDs 一致；operation 由 normalized refs 重算，无 implicit history inference；不接收 size/aspect/quality/model 字段。",
         "one-shot gate 不可复用；无 module global 或 remote provider。",
@@ -522,7 +524,7 @@
       "risk": "高",
       "performance_evidence": {
         "status": "OPEN",
-        "reason": "benchmark infrastructure 已实现但尚未执行 full benchmark；等待 main-agent-authorized built prerequisites、三次 fresh-process measurements 与 external immutable raw artifact URI+SHA-256，当前 source/GUI evidence 均保持 OPEN。"
+        "reason": "主代理已在 source commit 734da986d6bdc5c4dd8452a5ed29c1ce466a4a72 完成三次 fresh-process full benchmark，本地结果为 SOURCE_PASS_PENDING_EXTERNAL_EVIDENCE 且 network_calls=0；本地 raw SHA-256 为 9901da0ad7349a8d69e78ca41e593f62220853dd11c9563cd8f2435cfbf6b826。external immutable raw artifact URI+SHA-256、独立 macOS dev GUI first-visible、installed 与 production evidence 仍保持 OPEN；本地源码测量不替代这些门。"
       }
     },
     {
@@ -793,7 +795,7 @@
       "risk": "高",
       "evidence": {
         "status": "OPEN",
-        "reason": "EM217-205 尚未完成；EM217-206 仅完成规划与合同，未实施、未运行 fault/reconnect/gateway-startup/installed/production evidence。"
+        "reason": "EM217-205/406 已完成 source 集成；EM217-206 source 已于 7cf4a0655cc04629f63f52bbcc90b6c76cba825d 集成。最终 source commit 734da986d6bdc5c4dd8452a5ed29c1ce466a4a72 的 root/Profile/Client/enterprise source checks 退出 0，Model Gateway 108 通过、11 条件 skip。live PostgreSQL、完整 fault/reconnect/gateway-startup、external immutable、GUI、installed 与 production evidence 仍保持 OPEN；已通过的源码检查不替代缺失证据。"
       }
     },
     {

@@ -441,6 +441,21 @@
       "evidenceFile": "packages/dsh/test/identity-lifecycle.test.mjs"
     },
     {
+      "id": "NEW-ENT-RECOVERY-001",
+      "category": "identity-login-agreements-model-policy",
+      "priority": "P0",
+      "release": "2.0.17-new",
+      "platforms": [
+        "all",
+        "server"
+      ],
+      "behavior": "New acceptance: local routes remain usable when enterprise authentication is unavailable; enterprise delivery requires live Gateway authority, rejects expired or revoked state and direct-provider fallback, and reconnects without restart when refresh remains valid.",
+      "preconditions": "EM217-206 source integrated. Source-only support: packages/dsh/profile/plugins/emate-shell/tests/enterprise-model-recovery.client.spec.tsx :: keeps an ordinary local route and shell interactive when enterprise auth is unavailable. This proves local shell availability only; full fault/reconnect/gateway-startup, live PostgreSQL, external immutable, GUI, installed, and production evidence remain OPEN under docs/2.0.17/contracts/enterprise-model-recovery.md.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-NEW-ENT-RECOVERY-001: exercise the authorized warm/cold management outage and reconnect scenarios; verify native local owners remain usable and expired/revoked enterprise state cannot submit; record scenario-specific live Gateway/PostgreSQL evidence and keep unexecuted fault, installed, and production gates OPEN.",
+      "evidenceFile": "EM217-206-enterprise-model-recovery-receipt.json"
+    },
+    {
       "id": "IMG-001",
       "category": "images-single-generation-edit-review-pack-gallery-cancel-unknown",
       "priority": "P0",
@@ -538,6 +553,21 @@
       "evidenceOwner": "automated-test",
       "evidence": "packages/dsh/test/e-mate.test.mjs :: image generation reuses the Model Gateway with Harness Jobs and attachments",
       "evidenceFile": "packages/dsh/test/e-mate.test.mjs"
+    },
+    {
+      "id": "NEW-IMG-LATENCY-001",
+      "category": "images-single-generation-edit-review-pack-gallery-cancel-unknown",
+      "priority": "P0",
+      "release": "2.0.17-new",
+      "platforms": [
+        "all",
+        "macos"
+      ],
+      "behavior": "New acceptance: direct single-image generation bypasses image_batch and stays within the pinned-owner lower-bound p95/p99 relaxations; cached-local-byte macOS dev terminal-projection-to-first-visible handoff is p95 <= 500 ms.",
+      "preconditions": "EM217-107 and EM217-202 source complete. Source-only support: tests/performance/image-single/contract.test.mjs :: validates exact protocol, counts, hashes, stages, arithmetic, and three repetitions. This validates the benchmark protocol only; external immutable and GUI evidence remain OPEN under docs/2.0.17/contracts/single-image-latency.md; macOS dev evidence cannot satisfy installed or production gates.",
+      "evidenceOwner": "main-agent-gui",
+      "evidence": "GUI EM217-GUI-NEW-IMG-LATENCY-001: measure cached-local-byte terminal-projection-to-first-visible image handoff in the authorized macOS app-directory/dev build; require p95 <= 500 ms and exact source provenance plus external raw URI/SHA-256; keep installed and production gates OPEN.",
+      "evidenceFile": "EM217-GUI-NEW-IMG-LATENCY-001-receipt.json"
     },
     {
       "id": "NEW-IMG-BATCH-001",

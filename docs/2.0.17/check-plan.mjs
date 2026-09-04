@@ -49,6 +49,7 @@ const expectedIds = ['EM217-000', 'EM217-001', 'EM217-002', 'EM217-003', 'EM217-
 assert.equal(tickets.length, 42)
 assert.equal(new Set(ids).size, 42)
 assert.deepEqual([...ids].sort(), [...expectedIds].sort())
+assert(!/\b41 (?:unique|work orders)\b/.test(ordersText + executionText), 'work-order prose must match the 42-ticket plan')
 const map = new Map(tickets.map(ticket => [ticket.id, ticket]))
 for (const ticket of tickets) {
   for (const field of ['owner', 'write_set', 'acceptance', 'tests', 'rollback']) {
@@ -249,6 +250,7 @@ assert.deepEqual(t('EM217-106').write_set, [
   'docs/2.0.17/check-plan.mjs',
 ])
 const source105 = text('EM217-105')
+assert(source105.includes('已由 EM217-109 覆盖') && source105.includes('只读兼容'), 'EM217-105 confirmation must stay superseded with historical read-only compatibility')
 for (const required of ['shared CAS', 'Attachment refs', 'normalized IDs', 'userQuestions 路由到 parent', 'revision 2', 'revision 3', 'adjudication 全程占用并发槽', 'provider 前拒绝', '不得留下永久 needs-review', 'cleanup flush', 'image-review-persistence', 'provider_request_id', 'recorded billing']) {
   assert(source105.includes(required), 'EM217-105 missing source route rule: ' + required)
 }
@@ -413,7 +415,7 @@ for (const required of [
   'exp - 1', 'exp', 'Session revoke or user disable', 'User model-list change',
   'Route disable/unpublish then re-enable', 'Tenant key A to B rotation',
   'Delayed refresh/catalog A versus logout/login B', 'Gateway starts while Postgres is down',
-  'no direct-provider fallback', 'ALL EM217-206 EVIDENCE OPEN',
+  'no direct-provider fallback', 'Missing fault, reconnect, live-Postgres, gateway-startup, or installed evidence stays **OPEN**',
 ]) assert(enterpriseRecoveryText.includes(required), 'enterprise recovery contract missing ' + required)
 assert(ownersText.includes('| AUTH |'))
 assert(regressionText.includes('NEW-ENT-RECOVERY-001'))

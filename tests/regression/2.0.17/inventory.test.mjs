@@ -10,6 +10,10 @@ assert.ok(Array.isArray(manifest.rows) && manifest.rows.length > 0)
 
 const ids = manifest.rows.map(row => row.id)
 assert.equal(new Set(ids).size, ids.length, 'inventory IDs must be unique')
+const documentedInventory = await readFile(new URL('docs/2.0.17/regression-inventory.md', repositoryRoot), 'utf8')
+for (const [, id] of documentedInventory.matchAll(/^\| (NEW-[A-Z0-9-]+) \|/gm)) {
+  assert.ok(ids.includes(id), 'documented new acceptance missing from inventory: ' + id)
+}
 const priorities = new Set(['P0', 'P1'])
 const platforms = new Set(['all', 'web', 'macos', 'windows', 'server'])
 const owners = new Set(['automated-test', 'main-agent-gui'])

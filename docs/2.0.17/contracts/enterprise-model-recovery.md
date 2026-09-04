@@ -1,14 +1,14 @@
 # EM217-206 enterprise model delivery and recovery contract
 
-Status: **SOURCE IMPLEMENTATION IN PROGRESS — ALL EM217-206 EVIDENCE OPEN**
+Status: **SOURCE INTEGRATED AND CHECKED — FULL FAULT/LIVE/GUI/INSTALLED/PRODUCTION EVIDENCE OPEN**
 
-EM217-205 and EM217-406 are integrated, so EM217-206 source implementation may proceed in its locked write set. This contract changes no candidate, installed, production, packaging, version, or release gate. Missing fault, reconnect, live-Postgres, gateway-startup, or installed evidence stays **OPEN**.
+EM217-205 and EM217-406 source dependencies are integrated. EM217-206 source was integrated at `7cf4a0655cc04629f63f52bbcc90b6c76cba825d`; root/Profile/Client/enterprise source checks exited 0 at source commit `734da986d6bdc5c4dd8452a5ed29c1ce466a4a72`, with Model Gateway 108 passed and 11 conditionally skipped. These checks prove their named source boundaries only. This contract changes no candidate, installed, production, packaging, version, or release gate. Missing fault, reconnect, live-Postgres, gateway-startup, or installed evidence stays **OPEN**.
 
 ## Ownership and scope
 
 EM217-206 is owned by AUTH and depends on EM217-205 and EM217-406. It hardens only existing Profile identity/model-policy seams and the existing Model Gateway. Pinned DSH rc.7 remains the sole owner of Sessions, Session history/events, Workspace, attachments/CAS, local Tools, settings/storage primitives, and the Agent Loop. Desktop remains the sole lifecycle owner and receives no EM217-206 change.
 
-In scope for later implementation:
+Source implementation scope:
 
 - `packages/dsh/src/profile/identity/enterprise-provider.ts`
 - `packages/dsh/src/profile/identity/index.ts`
@@ -62,7 +62,7 @@ Projection persistence is rollback-safe: after injected failure at any OS creden
 
 ## Acceptance and fault evidence
 
-All evidence below is **OPEN** until the future authorized implementation and focused tests actually run.
+The source checks recorded above do not close the complete acceptance matrix below. Full fault/reconnect/gateway-startup, live PostgreSQL, external immutable, GUI, installed, and production evidence remains **OPEN** until the corresponding authorized scenario-specific evidence is recorded; a source check cannot substitute for an unexecuted scenario.
 
 | Fault | Required result |
 |---|---|
