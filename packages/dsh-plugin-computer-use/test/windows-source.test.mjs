@@ -13,7 +13,7 @@ const frame = { x: 10, y: 20, width: 800, height: 600 }
 const hash = 'a'.repeat(64)
 const options = { screenshot: 'none', maxNodes: 500, maxDepth: 14, maxTextBytes: 64000 }
 const rawObservation = { app: target, stateHash: hash, frontmost: true, window: { id: target.windowId, title: 'Document', frame }, treeText: '[0] Window Document', truncated: false, elements: [{ index: 0, locator: [], role: 'Window', actions: [], enabled: true, focused: true, frame }], permissions: { accessibility: 'granted', screenRecording: 'granted' } }
-const hiddenConfig = { actionTimeoutMs: 15000, maxNodes: 500, maxDepth: 14, maxTextBytes: 64000, interaction: { focusPolicy: 'preserve', keyboardPolicy: 'activate', pointerInputPolicy: 'targeted', cursorVisualization: 'hidden', cursorMotionMs: 0, cursorAutoHideMs: 0 } }
+const hiddenConfig = { actionTimeoutMs: 15000, maxNodes: 500, maxDepth: 14, maxTextBytes: 64000, interaction: { focusPolicy: 'preserve', keyboardPolicy: 'preserve', pointerInputPolicy: 'targeted', cursorVisualization: 'hidden', cursorMotionMs: 0, cursorAutoHideMs: 0 } }
 
 function reader(text, lossy = false) { return { readFrom: () => ({ text, lossy }) } }
 function completedHandle(envelope = { ok: true, value: null }) {
@@ -154,11 +154,21 @@ test('helper and stderr text never reaches caller-visible errors', async () => {
   } finally { await rm(managedRoot, { recursive: true, force: true }) }
 })
 
+test('cancellation during asynchronous preparation is rejected before spawn', async () => {
+  const managedRoot = await fixtureRoot(); const controller = new AbortController(); let spawns = 0
+  const process = completedHandle()
+  const client = new WindowsHelperClient({ subprocess: { spawn() { spawns += 1; return process.handle } } }, 120000, managedRoot, 'win32', {
+    environment: { SystemRoot: 'C:\\Windows' }, validateExecutable: async () => controller.abort(),
+  })
+  try { await assert.rejects(client.invoke({ command: 'health' }, controller.signal), /COMPUTER_CANCELLED/u); assert.equal(spawns, 0) } finally { await rm(managedRoot, { recursive: true, force: true }) }
+})
+
 test('cancellation terminates and reaps the subprocess tree', async () => {
   const managedRoot = await fixtureRoot(); let terminate = 0; let wait = 0
   const handle = { done: new Promise(() => {}), collected: { stdout: reader(''), stderr: reader('') }, terminate: () => { terminate += 1 }, waitForExit: async () => { wait += 1; return true } }
-  const client = new WindowsHelperClient({ subprocess: { spawn() { return handle } } }, 120000, managedRoot, 'win32', { environment: { SystemRoot: 'C:\\Windows' }, validateExecutable: async () => {} }); const controller = new AbortController()
-  try { const pending = client.invoke({ command: 'health' }, controller.signal); setTimeout(() => controller.abort(), 10); await assert.rejects(pending, /COMPUTER_CANCELLED/u); assert.equal(terminate, 1); assert.equal(wait, 1) } finally { await rm(managedRoot, { recursive: true, force: true }) }
+  const controller = new AbortController()
+  const client = new WindowsHelperClient({ subprocess: { spawn() { queueMicrotask(() => controller.abort()); return handle } } }, 120000, managedRoot, 'win32', { environment: { SystemRoot: 'C:\\Windows' }, validateExecutable: async () => {} })
+  try { await assert.rejects(client.invoke({ command: 'health' }, controller.signal), /COMPUTER_CANCELLED/u); assert.equal(terminate, 1); assert.equal(wait, 1) } finally { await rm(managedRoot, { recursive: true, force: true }) }
 })
 
 test('Windows cursor configuration is hidden and visible mode cannot silently no-op', async () => {
@@ -178,6 +188,11 @@ test('composition keeps one owner, bounded health probes, exact cleanup, and no 
   assert.equal(rows.length, 1)
   assert.deepEqual(rows[0].disabled, { __jsExpr: "Array.of('darwin', 'win32').includes(process.platform) === false" })
   assert.deepEqual(rows[0].config.interaction.cursorVisualization, { __jsExpr: "process.platform === 'win32' ? 'hidden' : 'visible'" })
+  assert.equal(rows[0].config.interaction.focusPolicy, 'preserve')
+  assert.equal(rows[0].config.interaction.keyboardPolicy, 'preserve')
+  assert.match(helper, /if\(\$policy -ne 'activate'\)\{throw 'configured activation policy denies fallback while target is not foreground'\}; if\(-not \[EmateWin32\]::SetForegroundWindow/u)
+  assert.match(helper, /elseif\(\$a\.kind -eq 'type-text'\)[\s\S]*?Ensure-Foreground \$hwnd \(\[string\]\$request\.interaction\.keyboardPolicy\)[\s\S]*?foreach\(\$ch[\s\S]*?Send-Checked/u)
+  assert.match(helper, /elseif\(\$a\.kind -eq 'press-key'\)[\s\S]*?Ensure-Foreground \$hwnd \(\[string\]\$request\.interaction\.keyboardPolicy\)[\s\S]*?Send-Checked/u)
   const disabled = platform => Function('process', 'return (' + rows[0].disabled.__jsExpr + ')')({ platform })
   assert.equal(disabled('darwin'), false)
   assert.equal(disabled('win32'), false)

@@ -231,7 +231,8 @@ export function FileImportControl({
     const current = () => owner.current === requestSession && generation.current === requestGeneration
     const hydrated = new Set(input.hydratedImageKeys)
     const pending = input.imageRefs.filter(item => !hydrated.has(item.draft_key) && !transientHydration.current.has(item.draft_key))
-    if (requestSession === undefined || pending.length === 0) return
+    if (requestSession === undefined) return
+    if (pending.length === 0) { setHydrating(false); return }
     let cancelled = false
     let notified = false
     const removedKeys = new Set<string>()

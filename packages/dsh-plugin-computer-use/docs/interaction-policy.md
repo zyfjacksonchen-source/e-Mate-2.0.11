@@ -2,21 +2,21 @@
 
 ## Requirement
 
-DSH Computer Use must let an Agent operate a native macOS application while the user continues working elsewhere. The default pointer path must not move the system cursor, post pointer events to the global HID stream, or activate the target application merely to make a pointer action work. Keyboard input is the one deliberate exception: the Bundle enables `keyboardPolicy: activate` so typing works reliably by bringing the target app to the foreground first, matching Codex Computer Use behavior. Pointer actions may show a separate Agent cursor, but that overlay must never become an input source or a window manager participant.
+DSH Computer Use must let an Agent operate a native application while the user continues working elsewhere. The default pointer path must not move the system cursor, post pointer events to the global HID stream, or activate the target application merely to make a pointer action work. Keyboard input also preserves the user's foreground application: the Bundle enables `keyboardPolicy: preserve` and never activates a background target as fallback. Pointer actions may show a separate Agent cursor, but that overlay must never become an input source or a window manager participant.
 
 The default Bundle configuration is:
 
 ```yaml
 interaction:
   focusPolicy: preserve
-  keyboardPolicy: activate
+  keyboardPolicy: preserve
   pointerInputPolicy: targeted
-  cursorVisualization: visible
+  cursorVisualization: !!js "process.platform === 'win32' ? 'hidden' : 'visible'"
   cursorMotionMs: 180
   cursorAutoHideMs: 0
 ```
 
-`preserve` means pointer actions do not request foreground activation. `keyboardPolicy: activate` (the Bundle default) requests foreground activation before `type-text` keyboard fallback and `press-key`; `keyboardPolicy: preserve` keeps typing routed to the selected pid without activation and is reliable only for applications that accept background keyboard events. `targeted` means mouse, drag, and wheel events may be sent only to the exact observed process and window. `visible` enables the separate Agent cursor, whose motion and auto-hide timing are also host-owned. The model cannot change any interaction policy through Tool arguments.
+`preserve` means pointer and keyboard actions do not request foreground activation. The Bundle default, `keyboardPolicy: preserve`, keeps macOS keyboard fallback routed to the selected pid without activation and is reliable only for applications that accept background keyboard events. Windows permits semantic UI Automation value changes in the background, but its raw keyboard fallback fails closed while the target is not foreground; it never activates as a fallback. `targeted` means mouse, drag, and wheel events may be sent only to the exact observed process and window. `visible` enables the separate Agent cursor, whose motion and auto-hide timing are also host-owned. The model cannot change any interaction policy through Tool arguments.
 
 This is an input-routing property, not a consequence of Accessibility permission alone. Accessibility grants semantic UI access; foreground preservation comes from choosing semantic Accessibility operations first and using process/window-targeted fallback instead of the system cursor.
 
@@ -61,8 +61,9 @@ These fields do not claim that a target application can never change focus as it
 | non-foreground `perform-action` advertised by the element | None | None | Allowed |
 | `AXRaise` | Denied | None | Requires explicit `focusPolicy: activate`, then re-observation/revalidation |
 | `type-text` through selected-text assignment | None | None | Allowed when the focused element accepts it |
-| `type-text` keyboard fallback | None with `keyboardPolicy: preserve`; `activated` with `keyboardPolicy: activate` | Target pid | Allowed; activation makes it reliable |
-| `press-key` | None with `keyboardPolicy: preserve`; `activated` with `keyboardPolicy: activate` | Target pid | Allowed; activation makes it reliable |
+| macOS `type-text` keyboard fallback | None with `keyboardPolicy: preserve`; `activated` with `keyboardPolicy: activate` | Target pid | Allowed when the application accepts background keyboard events |
+| macOS `press-key` | None with `keyboardPolicy: preserve`; `activated` with `keyboardPolicy: activate` | Target pid | Allowed when the application accepts background keyboard events |
+| Windows raw `type-text` or `press-key` fallback | None under the shipped `keyboardPolicy: preserve` | Target HWND | Allowed only when the target is already foreground; otherwise denied before input |
 | coordinate click or element-frame fallback | None | Target pid + window | Allowed when `pointerInputPolicy: targeted` |
 | scroll | None | Target pid + window | Allowed when `pointerInputPolicy: targeted` |
 | drag | None | Target pid + window | Allowed when `pointerInputPolicy: targeted` |
@@ -120,11 +121,12 @@ The release evidence covers both implementation and observed behavior:
 - a native monitor requires the overlay to be the only 28x28 window owned by its process, not become frontmost, and produce no global pointer events from that process pid;
 - the helper must contain `SLEventPostToPid` and `CGEventSetWindowLocation`;
 - a coordinate click without an observed window id resolves the app window under the Quartz screen point and still reports `pointerRouting: target-process`;
-- `keyboardPolicy: activate` makes a background fixture become active and receive the key event, and the fixture transcript records the activation;
+- on macOS, `keyboardPolicy: activate` makes a background fixture become active and receive the key event, and the fixture transcript records the activation;
 - the fixture is started through `open -g` with `--background`, so LaunchServices does not request foreground activation;
 - the fixture records every `applicationDidBecomeActive` callback and the default path must not increase `activationCount`;
 - an independent native monitor samples cursor position and the frontmost pid every millisecond throughout click, scroll, and drag; every sample must remain unchanged;
 - background `AXPress`, Accessibility value/action, selected-text input, and pid-targeted key input change the fixture without activating it;
+- the Windows source contract requires the shipped `keyboardPolicy: preserve` and rejects raw keyboard fallback before `SetForegroundWindow` when the target is in the background;
 - the native fixture inserts a harmless sibling and recreates a uniquely identified checkbox, proving the raw locator becomes stale while `AXIdentifier` resolution still finds exactly one target;
 - target-process click and scroll are each observed exactly once; drag has exactly one down/up gesture; the target remains non-frontmost;
 - `pointerInputPolicy: deny` rejects click fallback, scroll, and drag before any target pointer event is delivered;
@@ -133,6 +135,7 @@ The release evidence covers both implementation and observed behavior:
 ## Known limitations
 
 - Target-process pointer delivery is less universal than semantic Accessibility. Custom canvases, games, hardened input surfaces, or future macOS changes may reject it.
+- Background keyboard delivery is application-dependent on macOS. Windows raw keyboard fallback is unavailable for a background target under the shipped preserve policy and fails closed rather than activating it.
 - The clicked point must fall inside an on-screen window of the selected app; minimized, fully hidden, or windowless targets fail closed.
 - `focusPolicy: activate` and `keyboardPolicy: activate` are intentionally disruptive and exist only as operator-selected compatibility modes.
 - A target application may change its own activation or focus as a side effect of an accepted action; the helper does not claim control over application-internal behavior.

@@ -15,7 +15,8 @@ const bundleRuntime = () => {
   if (result.status !== 0) throw new Error(`runtime bundle failed:\n${result.stdout}${result.stderr}`)
 }
 
-for (const name of ['lib', 'assets', 'docs']) {
+// Keep the e-Mate policy docs and their checked bilingual hashes intact.
+for (const name of ['lib', 'assets']) {
   await rm(join(root, name), { recursive: true, force: true })
   await cp(join(upstream, name), join(root, name), { recursive: true })
 }
