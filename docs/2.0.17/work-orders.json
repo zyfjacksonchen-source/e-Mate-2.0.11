@@ -1038,7 +1038,7 @@
       ],
       "acceptance": [
         "ALLOWED_MEDIA_BY_EXTENSION 当前每个普通类型都经过同一 Host import handler，保存字节相等、MIME canonical、stored name 安全；引用保存在原生草稿附件状态，提交边界仅追加一次相对路径 mention；既有 native PNG/JPEG/GIF/WebP 路径不变。",
-        "2026-09-04 用户追加：附件以可移除缩略卡放在聊天输入框内上方，多文件换行并自然撑高；正文与聊天记录不显示生成的 @ 引用或导入路径。正常文件名中的 @ 保留，移除不删源文件，重启恢复附件，旧草稿迁移不丢内容。主代理连续测试、子代理修复，统一合并后再做真实开发 App 回归，见 ATT-006。",
+        "2026-09-04 用户追加：附件放在聊天输入框内上方，按最新 Codex 参考使用横向紧凑卡、标准文件类型图标、文件名和扩展名副行及右上角移除；多文件换行并自然撑高。附件、正文、工具栏和工作区底栏共用同一外框，光效直接跟随外框；正文、聊天记录及消息导航不显示生成的 @ 引用或导入路径。正常文件名中的 @ 保留，移除不删源文件，重启恢复附件，旧草稿迁移不丢内容。主代理连续测试、子代理修复，统一合并后再做真实开发 App 回归，见 ATT-006。",
         "NFC/分解中文名、空格/@ 碰撞、零字节、精确/超出单文件/数量/总量边界、malformed/noncanonical base64、MIME spoof、未知/可执行扩展、collision suffix、post-link abort/verification cleanup、temporary/target/batch cleanup failure surfacing 与 batch rollback 有真实行为测试。",
         "捕获的 success、bad-request、internal RpcResult 在 pinned rc.7 serverResponseSchema runtime 可用时全部解析，旧 unavailable 失败；客户端 invalid_union/transport/任意 Host 文案只能得到固定安全中文。",
         "picker cancel、Session switch、failure 后重选、mixed image+ordinary 和 folder pass-through 由最窄 client/pure fixture 覆盖；不新增 Store、Router、transport、Host 路径或 spreadsheet-specific endpoint/protocol。"

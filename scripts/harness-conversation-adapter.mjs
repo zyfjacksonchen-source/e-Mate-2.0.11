@@ -1,11 +1,12 @@
-// Product-only additions to the pinned rc.7 ui-conversation owner. Never edit
-// the Harness checkout: both runtime assemblers apply this to their copied lib.
+// Product-only additions to pinned conversation owners. Never edit upstream
+// packages: assemblers apply these transforms to their copied client bundles.
 export const CONVERSATION_ADAPTER_PATH = 'scripts/harness-conversation-adapter.mjs'
 export const CONVERSATION_PACKAGE = '@deepseek-ai/dsh-client-ui-conversation'
+export const NAVIGATION_PACKAGE = '@kelearns/dsh-navigation-bar'
 
-function replaceOnce(source, before, after, owner) {
+function replaceOnce(source, before, after, owner, version = 'rc.7') {
   const count = source.split(before).length - 1
-  if (count !== 1) throw new Error(`Harness conversation adapter ${owner}: expected one rc.7 seam, found ${count}`)
+  if (count !== 1) throw new Error(`Harness conversation adapter ${owner}: expected one ${version} seam, found ${count}`)
   return source.replace(before, after)
 }
 
@@ -32,7 +33,7 @@ function emateDraftFiles(value) {
   })
 }
 
-// Pending steering and the native queue editor share this display/model split.
+// Pending steering, the native queue editor and navigation share this projection.
 function emateImportedText(text) {
   const paths = []
   const clean = text.replace(/(^|\s)@(\.e-mate\/imports\/\S+)/gu, (token, space, path) => {
@@ -43,14 +44,30 @@ function emateImportedText(text) {
   })
   return { text: paths.length ? clean.trimEnd() : text, filePaths: paths }
 }
-function emateFileDisplay(text) {
+function emateFileDisplay(text, source) {
   const value = emateImportedText(text)
-  return [value.text, ...value.filePaths.map(path => path.slice('.e-mate/imports/'.length))].filter(Boolean).join('\n')
+  const names = new Map()
+  if (Array.isArray(source?.mentions)) for (const mention of source.mentions) {
+    if (mention?.source !== 'e-mate/file-import' || typeof mention.ref !== 'string') continue
+    try {
+      const [file] = emateDraftFiles([JSON.parse(mention.ref)])
+      names.set(file.relative_path, file.display_name)
+    } catch { /* Invalid optional labels fall back to the actual stored filename. */ }
+  }
+  return [value.text, ...value.filePaths.map(path => names.get(path) ?? path.slice('.e-mate/imports/'.length))].filter(Boolean).join('\n')
 }
 function emateQueuePreview(row) {
   const text = row.content.map(block => block.type === 'text' ? emateFileDisplay(block.text) : `[${block.type}]`).join(' ').replace(/\s+/gu, ' ').trim()
   const chars = Array.from(text)
   return chars.length > 200 ? chars.slice(0, 200).join('') + '…' : text
+}
+
+/** Desktop's copied navigation 0.2.1 bundle: one projection for AX and hover. */
+export function adaptNavigationSource(source) {
+  source = replaceOnce(source, '      const textOfBlocks = (blocks) => {',
+    `${[emateDraftFiles, emateImportedText, emateFileDisplay].map(fn => fn.toString()).join('\n')}\n      const textOfBlocks = (blocks) => {`, 'navigation/helpers', '0.2.1')
+  return replaceOnce(source, '            const userText = textOfBlocks(data.content)\n',
+    '            const userText = emateFileDisplay(textOfBlocks(data.content), data.source)\n', 'navigation/user-text', '0.2.1')
 }
 
 /** Apply exact compiled seams from packages/client/ui-conversation/src/client. */

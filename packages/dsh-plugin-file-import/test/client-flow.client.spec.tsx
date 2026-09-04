@@ -2,7 +2,7 @@
 import React, { useMemo, useState } from 'react'
 import * as jsxRuntime from 'react/jsx-runtime'
 import { readFileSync } from 'node:fs'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SlotTestRuntime } from '../../../upstream/deepseek-harness/packages/test-support/client-runtime/src/index.ts'
 import { InputBar } from '../../../upstream/deepseek-harness/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx'
@@ -54,13 +54,52 @@ describe('file import composer lifecycle', () => {
     expect(screen.queryByRole('status')).toBeNull()
   })
 
+  it('shows standard file icons and separate extensions with complete names and independent actions', () => {
+    const types = [
+      ['季度经营报告 带空格@最终版本与补充说明.md', 'text/markdown', 'MD', 'FileText'],
+      ['预算.XLSX', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'XLSX', 'FileSpreadsheet'],
+      ['方案.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'PPTX', 'FileChartColumn'],
+      ['数据.json', 'application/json', 'JSON', 'FileJson2'],
+      ['配置.yaml', 'application/yaml', 'YAML', 'FileCode2'],
+      ['归档.zip', 'application/zip', 'ZIP', 'FileArchive'],
+      ['说明.pdf', 'application/pdf', 'PDF', 'FileText'],
+    ] as const
+    const files = types.map(([display_name, media_type, extension], index) => ({
+      ...imported, display_name, media_type, stored_name: `file-${index}.${extension.toLowerCase()}`,
+      relative_path: `.e-mate/imports/file-${index}.${extension.toLowerCase()}`,
+    }))
+    const open = vi.fn()
+    const remove = vi.fn()
+    render(<FileCards files={files} open={open} remove={remove} />)
+
+    for (const [name, , extension, icon] of types) {
+      const card = screen.getByRole('button', { name: `打开 ${name}` })
+      expect(card.getAttribute('title')).toBe(name)
+      expect(within(card).getByText(name).getAttribute('title')).toBe(name)
+      expect(within(card).getByText(extension)).not.toBe(within(card).getByText(name))
+      expect(card.querySelector('svg')?.getAttribute('data-file-icon')).toBe(icon)
+      expect(card.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+    }
+    expect(screen.queryByText('表格')).toBeNull()
+    expect(screen.queryByText('演示')).toBeNull()
+    expect(screen.queryByText('压缩')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: `移除 ${files[0]!.display_name}` }))
+    expect(remove).toHaveBeenCalledWith(files[0]!.relative_path)
+    expect(open).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: `打开 ${files[1]!.display_name}` }))
+    expect(open).toHaveBeenCalledWith(files[1]!.relative_path)
+  })
+
   it('retains a failed import and puts the successful retry inside the composer above plain text', async () => {
     const callImport = vi.fn()
       .mockResolvedValueOnce({ ok: false, error: { code: 'internal', message: '文件暂时无法导入当前工作区。', details: {} } })
       .mockResolvedValueOnce(success)
     render(<Composer draft="请读" callImport={callImport} />)
     fireEvent.change(picker(), { target: { files: [file()] } })
-    await screen.findByText('文件暂时无法导入当前工作区。')
+    const failure = await screen.findByText('文件暂时无法导入当前工作区。')
+    const failedCard = failure.closest('[data-phase="error"]')!
+    expect(within(failedCard as HTMLElement).getByText('TXT')).toBeTruthy()
+    expect(failedCard.querySelector('svg')?.getAttribute('data-file-icon')).toBe('FileText')
     fireEvent.click(screen.getByRole('button', { name: `移除 ${imported.display_name}` }))
     fireEvent.change(picker(), { target: { files: [file()] } })
     await waitFor(() => expect(document.querySelector('[data-emate-resource-path]')).not.toBeNull())

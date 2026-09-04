@@ -168,7 +168,7 @@
       "priority": "P0",
       "release": "2.0.17-new",
       "platforms": ["web", "macos", "windows"],
-      "behavior": "File thumbnails stay inside the native composer, wrap and grow its height; generated @ references and import paths stay out of draft and chat display while exact file submission and real filename @ remain intact.",
+      "behavior": "Compact horizontal file cards use standard type icons, filename and extension labels inside the native composer; attachments, input and workspace footer grow within one continuous frame and edge light. Generated @ references and import paths stay out of draft, chat and message navigation display while exact file submission and real filename @ remain intact.",
       "preconditions": "Native App or Web runtime, persisted legacy draft, PNG and ordinary file fixtures; live send needs a valid model route.",
       "evidenceOwner": "main-agent-gui",
       "evidence": "GUI EM217-GUI-ATT-006: start the integrated runtime; migrate old draft; add enough mixed files to wrap; remove/re-add; restart; verify cards, plain text and native controls; send/reopen and verify one exact reference per file with no generated @ display. Local display fixtures do not prove live send.",

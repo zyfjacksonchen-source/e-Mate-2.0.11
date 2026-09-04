@@ -1,12 +1,13 @@
 import { createElement, useCallback, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
-import { IconPaperclipOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseOutline16, IconPaperclipOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InputTriggerServiceContract, InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import {
-  ALLOWED_MEDIA_BY_EXTENSION, allowedMediaType, CHANNEL, COMPOSER_DROP_TARGET, fileBadge, fileDropRoute,
+  ALLOWED_MEDIA_BY_EXTENSION, allowedMediaType, CHANNEL, COMPOSER_DROP_TARGET, extensionOf, fileDropRoute,
   MAX_FILE_BYTES, MAX_FILES, MAX_TOTAL_BYTES, WORKSPACE_DROP_TARGET,
 } from '../contract.ts'
 import { normalizedImage } from './image.ts'
+import { FileIcon } from './file-icons.tsx'
 import { importedDraft, importedMessage, type FileReference } from './references.ts'
 import { parseImportResult, safeThrownImportMessage } from './result.ts'
 import css from './style.module.css'
@@ -64,6 +65,16 @@ function errorRows(files: readonly File[], message: string): ImportRow[] {
   return files.map(file => ({ id: crypto.randomUUID(), displayName: file.name || '未命名文件', mediaType: file.type, phase: 'error', message }))
 }
 
+function FileCardContent({ name, mediaType }: { name: string; mediaType: string }) {
+  return <>
+    <span className={css.icon}><FileIcon name={name} mediaType={mediaType} /></span>
+    <span className={css.details}>
+      <span className={css.name} title={name}>{name}</span>
+      <span className={css.extension}>{extensionOf(name).toUpperCase() || 'FILE'}</span>
+    </span>
+  </>
+}
+
 export function FileCards({ files, remove, open }: {
   files: readonly FileReference[]
   remove?: (path: string) => void
@@ -72,11 +83,10 @@ export function FileCards({ files, remove, open }: {
   return <>{files.map(file => <div key={file.relative_path} className={css.row} data-emate-resource-path={file.relative_path}>
     <button type="button" className={css.file} disabled={open === undefined} title={file.display_name}
       aria-label={`打开 ${file.display_name}`} onClick={() => { open?.(file.relative_path) }}>
-      <span className={css.badge} aria-hidden="true">{fileBadge(file.display_name, file.media_type)}</span>
-      <span className={css.name}>{file.display_name}</span>
+      <FileCardContent name={file.display_name} mediaType={file.media_type} />
     </button>
     {remove !== undefined && <button type="button" className={css.dismiss} aria-label={`移除 ${file.display_name}`}
-      onClick={() => { remove(file.relative_path) }}>×</button>}
+      onClick={() => { remove(file.relative_path) }}><IconCloseOutline16 size={12} /></button>}
   </div>)}</>
 }
 
@@ -250,13 +260,12 @@ export function FileImportControl({ sessionId, input, inputActions, isLoopback, 
     accessory: input.fileRefs.length + rows.length === 0 ? null : <div className={css.rows} role="status" aria-live="polite" aria-label="附件">
       <FileCards files={input.fileRefs} remove={inputActions.removeFile} />
       {rows.map(row => <div key={row.id} className={css.row} data-phase={row.phase}>
-        <span className={css.badge} aria-hidden="true">{fileBadge(row.displayName, row.mediaType)}</span>
-        <span className={css.name} title={row.displayName}>{row.displayName}</span>
+        <div className={css.file}><FileCardContent name={row.displayName} mediaType={row.mediaType} /></div>
         <span className={css.phase} title={row.message}>{row.phase === 'importing' ? '导入中…' : row.message}</span>
         <button type="button" className={css.dismiss} aria-label={`移除 ${row.displayName}`} onClick={() => {
           dismissed.current.add(row.id)
           setRows(current => current.filter(item => item.id !== row.id))
-        }}>×</button>
+        }}><IconCloseOutline16 size={12} /></button>
       </div>)}
     </div>,
   })

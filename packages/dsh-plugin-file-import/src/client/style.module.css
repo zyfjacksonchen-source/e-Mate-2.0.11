@@ -21,23 +21,25 @@
 .rows {
   display: flex;
   flex-wrap: wrap;
+  min-width: 0;
   gap: 8px;
   padding: 4px 0;
 }
 .row {
   position: relative;
   display: flex;
-  flex: 0 0 80px;
-  width: 80px;
-  height: 80px;
+  flex: 0 1 220px;
+  width: 220px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 52px;
   box-sizing: border-box;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  gap: 4px;
-  padding: 8px 5px 5px;
+  padding: 5px 28px 5px 5px;
   border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-primary);
 }
@@ -45,47 +47,64 @@
   display: flex;
   width: 100%;
   min-width: 0;
-  flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
-  cursor: pointer;
+  text-align: left;
 }
-.file:disabled { cursor: default; }
-.badge {
+button.file:not(:disabled) { cursor: pointer; }
+.file:focus-visible,
+.dismiss:focus-visible {
+  outline: 2px solid var(--dsw-alias-label-primary);
+  outline-offset: 2px;
+}
+.icon {
   display: grid;
-  width: 34px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
   place-items: center;
-  border-radius: 7px;
-  background: color-mix(in srgb, #eb5e1a 12%, var(--dsw-alias-bg-layer-2));
-  color: #eb5e1a;
-  font-size: 10px;
-  font-weight: 700;
+  border-radius: 10px;
+  background: var(--dsw-static-neutral-bluish-950, #171717);
+  color: var(--dsw-static-neutral-bluish-300, #b0b0b0);
+}
+.details {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
 }
 .name,
-.phase {
+.extension {
   max-width: 100%;
   overflow: hidden;
-  font-size: 11px;
-  line-height: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.phase { color: var(--dsw-alias-label-tertiary); font-size: 10px; }
+.name {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 18px;
+}
+.extension { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 16px; }
+.phase {
+  margin: 4px 0 0 50px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
 .row[data-phase='error'] .phase { color: var(--dsw-alias-label-danger, #c13b32); }
-.row[data-phase] .badge { height: 23px; }
 .dismiss {
   position: absolute;
-  top: 3px;
-  right: 3px;
+  top: 2px;
+  right: 2px;
   display: grid;
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   place-items: center;
   padding: 0;
   border: 0;
@@ -93,7 +112,5 @@
   background: var(--dsw-alias-button-contrast-fill);
   color: var(--dsw-alias-label-primary-inverted);
   cursor: pointer;
-  font-size: 15px;
-  line-height: 1;
 }
 .message .rows { justify-content: flex-end; }
