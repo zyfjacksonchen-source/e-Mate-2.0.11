@@ -1,0 +1,380 @@
+diff --git a/backend/internal/handler/dto/settings.go b/backend/internal/handler/dto/settings.go
+index dc34771cad8e28164fcfce0c3eae05d5f1380eab..6f4fc6e5f30836f88a18e9383202eeefa0309fd4 100644
+--- a/backend/internal/handler/dto/settings.go
++++ b/backend/internal/handler/dto/settings.go
+@@ -455,6 +455,7 @@ type OpenAIFastPolicyRule struct {
+ 	ServiceTier          string   `json:"service_tier"`
+ 	Action               string   `json:"action"`
+ 	Scope                string   `json:"scope"`
++	APIKeyIDs            []int64  `json:"api_key_ids,omitempty"`
+ 	UserIDs              []int64  `json:"user_ids,omitempty"`
+ 	ErrorMessage         string   `json:"error_message,omitempty"`
+ 	ModelWhitelist       []string `json:"model_whitelist,omitempty"`
+diff --git a/backend/internal/pkg/ctxkey/ctxkey.go b/backend/internal/pkg/ctxkey/ctxkey.go
+index 2ec3e0fdbeba9c9bb91394ac76ba1d75fe677f33..8a4ad263d76110b620fa8e4e56d61cce421e46a4 100644
+--- a/backend/internal/pkg/ctxkey/ctxkey.go
++++ b/backend/internal/pkg/ctxkey/ctxkey.go
+@@ -57,6 +57,9 @@ const (
+ 	// 供 service 层执行用户级策略，不能使用客户端请求体中的 user 标识替代。
+ 	UserID Key = "ctx_user_id"
+ 
++	// APIKeyID is set only after API key authentication.
++	APIKeyID Key = "ctx_api_key_id"
++
+ 	// IsMaxTokensOneHaikuRequest 标识当前请求是否为 max_tokens=1 + haiku 模型的探测请求
+ 	// 用于 ClaudeCodeOnly 验证绕过（绕过 system prompt 检查，但仍需验证 User-Agent）
+ 	IsMaxTokensOneHaikuRequest Key = "ctx_is_max_tokens_one_haiku"
+diff --git a/backend/internal/server/middleware/api_key_auth.go b/backend/internal/server/middleware/api_key_auth.go
+index a595fbdb3da55b129e1c394787d9ace3cda1f429..1d3bcb267cd3e99e489a0dde5e9c0e4f5f9b6026 100644
+--- a/backend/internal/server/middleware/api_key_auth.go
++++ b/backend/internal/server/middleware/api_key_auth.go
+@@ -164,6 +164,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
+ 			return
+ 		}
+ 		ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
++		ctx = context.WithValue(ctx, ctxkey.APIKeyID, apiKey.ID)
+ 		c.Request = c.Request.WithContext(ctx)
+ 		billingInfoRequest := c.Request.URL.Path == "/v1/sub2api/billing"
+ 		// Async image task polling only reads data that already belongs to the
+diff --git a/backend/internal/server/middleware/openai_fast_policy_forwarding_test.go b/backend/internal/server/middleware/openai_fast_policy_forwarding_test.go
+index 5fea5547a3a7994e246f64eedfb0de9e3df91c6d..0fff18bd58de95b968bd0b6c4f73c9350cff5c14 100644
+--- a/backend/internal/server/middleware/openai_fast_policy_forwarding_test.go
++++ b/backend/internal/server/middleware/openai_fast_policy_forwarding_test.go
+@@ -56,9 +56,8 @@ func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
+ 	cfg.Security.URLAllowlist.Enabled = false
+ 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+ 
+-	settingService := service.NewSettingService(&openAIFastPolicyForwardingSettingRepo{
+-		value: string(settingsJSON),
+-	}, cfg)
++	settingsRepo := &openAIFastPolicyForwardingSettingRepo{value: string(settingsJSON)}
++	settingService := service.NewSettingService(settingsRepo, cfg)
+ 	gatewayService := service.NewOpenAIGatewayService(
+ 		nil, nil, nil, nil, nil, nil, nil, cfg,
+ 		nil, nil, nil, nil, nil, &openAIFastPolicyForwardingHTTPUpstream{client: upstreamServer.Client()},
+@@ -74,8 +73,9 @@ func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
+ 		Hydrated: true,
+ 	}
+ 	apiKeys := map[string]*service.APIKey{
+-		"key-user-42": newOpenAIFastPolicyForwardingAPIKey(1, "key-user-42", 42, groupID, group),
+-		"key-user-43": newOpenAIFastPolicyForwardingAPIKey(2, "key-user-43", 43, groupID, group),
++		"key-same-user": newOpenAIFastPolicyForwardingAPIKey(3, "key-same-user", 42, groupID, group),
++		"key-user-42":   newOpenAIFastPolicyForwardingAPIKey(1, "key-user-42", 42, groupID, group),
++		"key-user-43":   newOpenAIFastPolicyForwardingAPIKey(2, "key-user-43", 43, groupID, group),
+ 	}
+ 	apiKeyService := service.NewAPIKeyService(&openAIFastPolicyForwardingAPIKeyRepo{apiKeys: apiKeys}, nil, nil, nil, nil, nil, cfg)
+ 	account := &service.Account{
+@@ -109,11 +109,15 @@ func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
+ 		c.Status(http.StatusOK)
+ 	})
+ 
+-	send := func(apiKey string) {
++	send := func(apiKey string, bodies ...string) {
++		body := `{"model":"gpt-5","stream":false,"service_tier":"priority","input":"hi"}`
++		if len(bodies) > 0 {
++			body = bodies[0]
++		}
+ 		request := httptest.NewRequest(
+ 			http.MethodPost,
+ 			"/v1/responses",
+-			bytes.NewBufferString(`{"model":"gpt-5","stream":false,"service_tier":"priority","input":"hi"}`),
++			bytes.NewBufferString(body),
+ 		)
+ 		request.Header.Set("Content-Type", "application/json")
+ 		request.Header.Set("x-api-key", apiKey)
+@@ -129,6 +133,25 @@ func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
+ 	otherUserBody := <-upstreamBodies
+ 	require.Equal(t, service.OpenAIFastTierPriority, gjson.GetBytes(allowedUserBody, "service_tier").String())
+ 	require.False(t, gjson.GetBytes(otherUserBody, "service_tier").Exists())
++	// Existing clients omit service_tier; only the managed key gains priority.
++	settings.Rules = append(settings.Rules, service.OpenAIFastPolicyRule{
++		ServiceTier: service.OpenAIFastTierAny, Action: service.OpenAIFastPolicyActionForcePriority,
++		Scope: service.BetaPolicyScopeAll, APIKeyIDs: []int64{1}, ModelWhitelist: []string{"gpt-5"},
++	})
++	settingsJSON, err = json.Marshal(settings)
++	require.NoError(t, err)
++	settingsRepo.value = string(settingsJSON)
++	send("key-user-42", `{"model":"gpt-5","stream":false,"input":"hi"}`)
++	require.Equal(t, "priority", gjson.GetBytes(<-upstreamBodies, "service_tier").String())
++	send("key-same-user", `{"model":"gpt-5","stream":false,"input":"hi"}`)
++	require.False(t, gjson.GetBytes(<-upstreamBodies, "service_tier").Exists())
++	// A persisted off switch wins over a caller-supplied priority on the next request.
++	settings.Rules[len(settings.Rules)-1].Action = service.BetaPolicyActionFilter
++	settingsJSON, err = json.Marshal(settings)
++	require.NoError(t, err)
++	settingsRepo.value = string(settingsJSON)
++	send("key-user-42")
++	require.False(t, gjson.GetBytes(<-upstreamBodies, "service_tier").Exists())
+ }
+ 
+ func newOpenAIFastPolicyForwardingAPIKey(id int64, key string, userID, groupID int64, group *service.Group) *service.APIKey {
+diff --git a/backend/internal/service/openai_fast_policy_test.go b/backend/internal/service/openai_fast_policy_test.go
+index c5144b6a025f1102c3bf20bd7fd791aa3e24cffa..4d5451f657a0c119efb5ef15a60bc1da7fe3a8a9 100644
+--- a/backend/internal/service/openai_fast_policy_test.go
++++ b/backend/internal/service/openai_fast_policy_test.go
+@@ -411,3 +411,72 @@ func TestSetOpenAIFastPolicySettings_Validation(t *testing.T) {
+ 	require.Equal(t, OpenAIFastPolicyActionForcePriority, got.Rules[0].Action)
+ 	require.Equal(t, []int64{42, 43}, got.Rules[0].UserIDs)
+ }
++
++func TestFastPolicyManagedKeyAddsMissingTierAndPreservesOtherTraffic(t *testing.T) {
++	settings := &OpenAIFastPolicySettings{Rules: []OpenAIFastPolicyRule{
++		{ServiceTier: OpenAIFastTierAny, Action: OpenAIFastPolicyActionForcePriority,
++			Scope: BetaPolicyScopeAll, APIKeyIDs: []int64{101},
++			ModelWhitelist: []string{"gpt-5.6-luna", "gpt-5.6-sol"}},
++		{ServiceTier: OpenAIFastTierAny, Action: OpenAIFastPolicyActionForcePriority,
++			Scope: BetaPolicyScopeAll, ModelWhitelist: []string{"gpt-5.6-sol"}},
++	}}
++	svc := newOpenAIGatewayServiceWithSettings(t, settings)
++	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
++	for _, tc := range []struct {
++		key         int64
++		model, want string
++	}{
++		{101, "gpt-5.6-luna", "priority"}, {101, "gpt-5.6-sol", "priority"},
++		{202, "gpt-5.6-sol", ""}, {101, "gpt-image-2-pro", ""}, {101, "deepseek", ""},
++	} {
++		ctx := context.WithValue(context.Background(), ctxkey.APIKeyID, tc.key)
++		body := []byte(`{"model":"` + tc.model + `","input":"OK","stream":true}`)
++		result, err := svc.applyOpenAIFastPolicyToBody(ctx, account, tc.model, body)
++		require.NoError(t, err)
++		require.Equal(t, tc.want, gjson.GetBytes(result, "service_tier").String())
++		frame := []byte(`{"type":"response.create","model":"` + tc.model + `","input":"OK"}`)
++		result, blocked, err := svc.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, tc.model, frame)
++		require.NoError(t, err)
++		require.Nil(t, blocked)
++		require.Equal(t, tc.want, gjson.GetBytes(result, "service_tier").String())
++	}
++	for _, ids := range [][]int64{{0}, {-1}, {101, 101}} {
++		settings.Rules[0].APIKeyIDs = ids
++		require.Error(t, svc.settingService.SetOpenAIFastPolicySettings(context.Background(), settings))
++	}
++}
++
++func TestFastPolicyMixedManagedModels(t *testing.T) {
++	settings := &OpenAIFastPolicySettings{Rules: []OpenAIFastPolicyRule{
++		{ServiceTier: OpenAIFastTierPriority, Action: BetaPolicyActionFilter, Scope: BetaPolicyScopeAll, APIKeyIDs: []int64{101}, ModelWhitelist: []string{"gpt-5.6-sol"}, FallbackAction: BetaPolicyActionPass},
++		{ServiceTier: OpenAIFastTierAny, Action: OpenAIFastPolicyActionForcePriority, Scope: BetaPolicyScopeAll, APIKeyIDs: []int64{101}, ModelWhitelist: []string{"gpt-5.6-luna"}, FallbackAction: BetaPolicyActionPass},
++	}}
++	svc := newOpenAIGatewayServiceWithSettings(t, settings)
++	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
++	for _, key := range []int64{101, 202} {
++		ctx := context.WithValue(context.Background(), ctxkey.APIKeyID, key)
++		for _, model := range []string{"gpt-5.6-luna", "gpt-5.6-sol", "gpt-image-2-pro", "deepseek"} {
++			for _, tier := range []string{"", "priority", "fast", "default"} {
++				request := map[string]string{"model": model}
++				if tier != "" {
++					request["service_tier"] = tier
++				}
++				body, err := json.Marshal(request)
++				require.NoError(t, err)
++				result, err := svc.applyOpenAIFastPolicyToBody(ctx, account, model, body)
++				require.NoError(t, err)
++				want := tier
++				if tier == "fast" {
++					want = "priority"
++				}
++				if key == 101 && model == "gpt-5.6-luna" {
++					want = "priority"
++				}
++				if key == 101 && model == "gpt-5.6-sol" && (tier == "priority" || tier == "fast") {
++					want = ""
++				}
++				require.Equal(t, want, gjson.GetBytes(result, "service_tier").String(), "key=%d model=%s tier=%s", key, model, tier)
++			}
++		}
++	}
++}
+diff --git a/backend/internal/service/openai_gateway_forward.go b/backend/internal/service/openai_gateway_forward.go
+index b3963535b1c035bb21842310a3f7f78a3916fc5b..4caafb7a2f46d71d50d0710f22b3b1c3314bc5a5 100644
+--- a/backend/internal/service/openai_gateway_forward.go
++++ b/backend/internal/service/openai_gateway_forward.go
+@@ -467,8 +467,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
+ 		}
+ 	}
+ 
+-	if rawTier := requestView.ServiceTier; rawTier != "" {
+-		if normTier := normalizedOpenAIServiceTierValue(rawTier); normTier != "" {
++	{
++		rawTier := requestView.ServiceTier
++		if normTier := normalizedOpenAIServiceTierValue(rawTier); normTier != "" || rawTier == "" {
+ 			action, errMsg := s.evaluateOpenAIFastPolicy(ctx, account, upstreamModel, normTier)
+ 			switch action {
+ 			case BetaPolicyActionBlock:
+diff --git a/backend/internal/service/openai_gateway_request_body.go b/backend/internal/service/openai_gateway_request_body.go
+index fdd4019119e0884459a6a4db730a29fe1a900ea7..21f2591b5819e83783ff35748d40b3736270639f 100644
+--- a/backend/internal/service/openai_gateway_request_body.go
++++ b/backend/internal/service/openai_gateway_request_body.go
+@@ -855,7 +855,7 @@ func (e *OpenAIFastBlockedError) Error() string { return e.Message }
+ //   - ServiceTier must be empty (= any), "all", or equal the normalized tier
+ //   - ModelWhitelist narrows the rule to specific models; FallbackAction
+ //     handles the non-matching case (default: pass)
+-//   - User-specific rules take precedence over global rules; each group keeps
++//   - API-key rules take precedence over user rules, then global rules; each group keeps
+ //     the configured first-match order
+ //
+ // 与 Claude BetaPolicy 的差异（保留首条匹配 short-circuit）：
+@@ -871,9 +871,6 @@ func (s *OpenAIGatewayService) evaluateOpenAIFastPolicy(ctx context.Context, acc
+ 		return BetaPolicyActionPass, ""
+ 	}
+ 	tier := strings.ToLower(strings.TrimSpace(serviceTier))
+-	if tier == "" {
+-		return BetaPolicyActionPass, ""
+-	}
+ 	settings := openAIFastPolicySettingsFromContext(ctx)
+ 	if settings == nil {
+ 		fetched, err := s.settingService.GetOpenAIFastPolicySettings(ctx)
+@@ -882,25 +879,40 @@ func (s *OpenAIGatewayService) evaluateOpenAIFastPolicy(ctx context.Context, acc
+ 		}
+ 		settings = fetched
+ 	}
+-	return evaluateOpenAIFastPolicyWithSettings(settings, openAIFastPolicyUserID(ctx), account, model, tier)
++	var apiKeyID int64
++	if ctx != nil {
++		apiKeyID, _ = ctx.Value(ctxkey.APIKeyID).(int64)
++	}
++	return evaluateOpenAIFastPolicyWithSettings(settings, openAIFastPolicyUserID(ctx), apiKeyID, account, model, tier)
+ }
+ 
+ // evaluateOpenAIFastPolicyWithSettings is the pure-function core extracted so
+ // long-lived sessions (e.g. WS) can prefetch settings once and avoid hitting
+ // the settingService on every frame. See WSSession entry and
+ // openAIFastPolicySettingsFromContext for the caching glue.
+-func evaluateOpenAIFastPolicyWithSettings(settings *OpenAIFastPolicySettings, userID int64, account *Account, model, tier string) (action, errMsg string) {
++func evaluateOpenAIFastPolicyWithSettings(settings *OpenAIFastPolicySettings, userID, apiKeyID int64, account *Account, model, tier string) (action, errMsg string) {
+ 	if settings == nil {
+ 		return BetaPolicyActionPass, ""
+ 	}
+ 	isOAuth := account != nil && account.IsOAuth()
+ 	isBedrock := account != nil && account.IsBedrock()
+ 
+-	// 用户专属规则先于全局规则。规则组内仍按配置顺序首条命中，允许
+-	// 管理员为某位用户配置例外，而不被先出现的全局规则覆盖。
+-	for _, userScoped := range []bool{true, false} {
++	// API-key rules are narrower than user rules, which precede global rules.
++	for _, scope := range []int{2, 1, 0} {
+ 		for _, rule := range settings.Rules {
+-			if (len(rule.UserIDs) > 0) != userScoped || !openAIFastPolicyUserMatches(rule.UserIDs, userID) {
++			ruleScope := 0
++			if len(rule.UserIDs) > 0 {
++				ruleScope = 1
++			}
++			if len(rule.APIKeyIDs) > 0 {
++				ruleScope = 2
++			}
++			if ruleScope != scope || !openAIFastPolicyIDMatches(rule.UserIDs, userID) || !openAIFastPolicyIDMatches(rule.APIKeyIDs, apiKeyID) {
++				continue
++			}
++			// Preserve existing global/user behavior: only an authenticated API-key
++			// force rule may add a tier to a request that omitted service_tier.
++			if tier == "" && (rule.Action != OpenAIFastPolicyActionForcePriority || len(rule.APIKeyIDs) == 0) {
+ 				continue
+ 			}
+ 			if !betaPolicyScopeMatches(rule.Scope, isOAuth, isBedrock) {
+@@ -934,7 +946,7 @@ func openAIFastPolicyUserID(ctx context.Context) int64 {
+ 	return userID
+ }
+ 
+-func openAIFastPolicyUserMatches(ruleUserIDs []int64, userID int64) bool {
++func openAIFastPolicyIDMatches(ruleUserIDs []int64, userID int64) bool {
+ 	if len(ruleUserIDs) == 0 {
+ 		return true
+ 	}
+@@ -992,11 +1004,8 @@ func (s *OpenAIGatewayService) applyOpenAIFastPolicyToBody(ctx context.Context,
+ 		return body, nil
+ 	}
+ 	rawTier := gjson.GetBytes(body, "service_tier").String()
+-	if rawTier == "" {
+-		return body, nil
+-	}
+ 	normTier := normalizedOpenAIServiceTierValue(rawTier)
+-	if normTier == "" {
++	if rawTier != "" && normTier == "" {
+ 		return body, nil
+ 	}
+ 	action, errMsg := s.evaluateOpenAIFastPolicy(ctx, account, model, normTier)
+@@ -1103,11 +1112,8 @@ func (s *OpenAIGatewayService) applyOpenAIFastPolicyToWSResponseCreate(
+ 		return frame, nil, nil
+ 	}
+ 	rawTier := gjson.GetBytes(frame, "service_tier").String()
+-	if rawTier == "" {
+-		return frame, nil, nil
+-	}
+ 	normTier := normalizedOpenAIServiceTierValue(rawTier)
+-	if normTier == "" {
++	if rawTier != "" && normTier == "" {
+ 		return frame, nil, nil
+ 	}
+ 	action, errMsg := s.evaluateOpenAIFastPolicy(ctx, account, model, normTier)
+diff --git a/backend/internal/service/setting_features.go b/backend/internal/service/setting_features.go
+index 50a3fbcfd8157c6d529b4f0c352baba39abb1fc3..dca36ad2370ae661aa85339f3e5232e7955c5031 100644
+--- a/backend/internal/service/setting_features.go
++++ b/backend/internal/service/setting_features.go
+@@ -908,15 +908,17 @@ func (s *SettingService) SetOpenAIFastPolicySettings(ctx context.Context, settin
+ 		if !validScopes[rule.Scope] {
+ 			return fmt.Errorf("rule[%d]: invalid scope %q", i, rule.Scope)
+ 		}
+-		seenUserIDs := make(map[int64]struct{}, len(rule.UserIDs))
+-		for j, userID := range rule.UserIDs {
+-			if userID <= 0 {
+-				return fmt.Errorf("rule[%d]: user_ids[%d] must be positive", i, j)
++		for field, ids := range map[string][]int64{"user_ids": rule.UserIDs, "api_key_ids": rule.APIKeyIDs} {
++			seen := make(map[int64]struct{}, len(ids))
++			for j, id := range ids {
++				if id <= 0 {
++					return fmt.Errorf("rule[%d]: %s[%d] must be positive", i, field, j)
++				}
++				if _, exists := seen[id]; exists {
++					return fmt.Errorf("rule[%d]: %s[%d] duplicates id %d", i, field, j, id)
++				}
++				seen[id] = struct{}{}
+ 			}
+-			if _, exists := seenUserIDs[userID]; exists {
+-				return fmt.Errorf("rule[%d]: user_ids[%d] duplicates user_id %d", i, j, userID)
+-			}
+-			seenUserIDs[userID] = struct{}{}
+ 		}
+ 		for j, pattern := range rule.ModelWhitelist {
+ 			trimmed := strings.TrimSpace(pattern)
+diff --git a/backend/internal/service/settings_view.go b/backend/internal/service/settings_view.go
+index 4a6d3906f3b61a0ecf272b73e7e0aea37545f173..e88c77aac45a581e16bec6ec3b73503f3c5f17b6 100644
+--- a/backend/internal/service/settings_view.go
++++ b/backend/internal/service/settings_view.go
+@@ -603,9 +603,10 @@ const (
+ 
+ // OpenAIFastPolicyRule 单条 OpenAI fast/flex 策略规则
+ type OpenAIFastPolicyRule struct {
+-	ServiceTier          string   `json:"service_tier"`                     // "priority" | "flex" | "auto" | "default" | "scale" | "all"
+-	Action               string   `json:"action"`                           // "pass" | "filter" | "block" | "force_priority"
+-	Scope                string   `json:"scope"`                            // "all" | "oauth" | "apikey" | "bedrock"
++	ServiceTier          string   `json:"service_tier"` // "priority" | "flex" | "auto" | "default" | "scale" | "all"
++	Action               string   `json:"action"`       // "pass" | "filter" | "block" | "force_priority"
++	Scope                string   `json:"scope"`        // "all" | "oauth" | "apikey" | "bedrock"
++	APIKeyIDs            []int64  `json:"api_key_ids,omitempty"`
+ 	UserIDs              []int64  `json:"user_ids,omitempty"`               // 空=所有 Sub2API 用户；非空=仅指定 API Key 所属用户
+ 	ErrorMessage         string   `json:"error_message,omitempty"`          // 自定义错误消息 (action=block 时生效)
+ 	ModelWhitelist       []string `json:"model_whitelist,omitempty"`        // 模型匹配模式列表（为空=对所有模型生效）
+diff --git a/frontend/src/api/admin/settings.ts b/frontend/src/api/admin/settings.ts
+index 2fceea7b62729629bb1958ad4dd7475bbaedfc3f..626a0f6eebe8d82d4a22a23f3f51c378764248a3 100644
+--- a/frontend/src/api/admin/settings.ts
++++ b/frontend/src/api/admin/settings.ts
+@@ -1342,6 +1342,7 @@ export interface OpenAIFastPolicyRule {
+   action: "pass" | "filter" | "block" | "force_priority";
+   scope: "all" | "oauth" | "apikey" | "bedrock";
+   user_ids?: number[];
++  api_key_ids?: number[];
+   error_message?: string;
+   model_whitelist?: string[];
+   fallback_action?: "pass" | "filter" | "block" | "force_priority";
+diff --git a/frontend/src/views/admin/SettingsView.vue b/frontend/src/views/admin/SettingsView.vue
+index e3047e684c9b9ab94c7536a3c77dc7716de89c8c..8c22b836a00c21df254eb7fde5776c09dfc27774 100644
+--- a/frontend/src/views/admin/SettingsView.vue
++++ b/frontend/src/views/admin/SettingsView.vue
+@@ -10608,6 +10608,7 @@ async function saveSettings() {
+             .filter((p) => p !== "");
+           const hasWhitelist = whitelist.length > 0;
+           return {
++            api_key_ids: rule.api_key_ids?.length ? [...rule.api_key_ids] : undefined,
+             service_tier: rule.service_tier,
+             action: rule.action,
+             scope: rule.scope,
