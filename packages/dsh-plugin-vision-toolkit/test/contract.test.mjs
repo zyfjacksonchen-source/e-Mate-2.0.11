@@ -253,7 +253,7 @@ test('mixed PNG, PDF and DOCX follows the real native-drop and File Import menti
     { relative_path: '.e-mate/imports/资料.pdf' },
     { relative_path: '.e-mate/imports/文档.docx' },
   ]), '请结合海报阅读 @.e-mate/imports/资料.pdf @.e-mate/imports/文档.docx ')
-  assert.match(client, /if \(images\.length > 0\) dropImages\(images\)[\s\S]*if \(ordinary\.length > 0\) void importFiles\(ordinary\)/u)
+  assert.match(client, /if \(images\.length > 0\) \{\s+const message = await stageImageFiles\(images\)\s+if \(message !== null && current\(\)\) setRows\(currentRows => \[\.\.\.currentRows, \.\.\.errorRows\(images, message\)\]\)\s+\}\s+if \(ordinary\.length > 0\) await importFiles\(ordinary\)/u)
 })
 
 targetTest('Vision ships one signed offline CPython wheel closure for the selected target', async () => {
