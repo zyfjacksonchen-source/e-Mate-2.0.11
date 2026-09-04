@@ -150,3 +150,96 @@ esac
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('SSH control merges reads, caps total processes, and rejects excess writes', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'e-mate-fast-mode-capacity-'));
+  const ssh = join(directory, 'ssh');
+  const startsFile = join(directory, 'starts');
+  const releaseFile = join(directory, 'release');
+  const previous = {
+    path: process.env.PATH,
+    starts: process.env.E_MATE_FAKE_SSH_STARTS,
+    release: process.env.E_MATE_FAKE_SSH_RELEASE,
+  };
+  writeFileSync(ssh, `#!/bin/sh
+set -eu
+cat > /dev/null
+printf '%s\n' "$$" >> "$E_MATE_FAKE_SSH_STARTS"
+while [ ! -f "$E_MATE_FAKE_SSH_RELEASE" ]; do sleep 0.01; done
+printf '%s\n' '{"schemaVersion":1,"revision":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","enabledModelIds":[]}'
+`);
+  chmodSync(ssh, 0o700);
+  process.env.PATH = directory + ':' + (previous.path ?? '');
+  process.env.E_MATE_FAKE_SSH_STARTS = startsFile;
+  process.env.E_MATE_FAKE_SSH_RELEASE = releaseFile;
+  const principal = { tenantId: 'tenant-a', userId: 'admin-1', roles: ['TENANT_ADMIN'] };
+  const update = {
+    schemaVersion: 1 as const, expectedRevision: 'a'.repeat(64),
+    modelIds: ['gpt-5.6-luna' as const], enabled: true,
+  };
+  const control = createModelFastModeControl({
+    tenantId: 'tenant-a', sshHost: 'proxy.example',
+    privateKeyFile: '/run/secrets/fast-key', knownHostsFile: '/run/secrets/fast-hosts',
+  });
+  const server = createAnalyticsServer({ authenticate: async () => principal, modelFastMode: control });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/admin/model-fast-mode`;
+  const pending: Promise<unknown>[] = [];
+  const starts = () => {
+    try {
+      return readFileSync(startsFile, 'utf8').trim().split('\n').filter(Boolean).length;
+    } catch {
+      return 0;
+    }
+  };
+  const waitForStarts = async (expected: number) => {
+    const deadline = Date.now() + 2_000;
+    while (starts() < expected) {
+      if (Date.now() >= deadline) assert.fail('expected ' + expected + ' SSH processes, observed ' + starts());
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  };
+  const restore = (key: string, value: string | undefined) => {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  };
+  try {
+    const firstRead = control.read(principal);
+    const mergedRead = control.read(principal);
+    pending.push(firstRead);
+    assert.equal(mergedRead, firstRead);
+    await waitForStarts(1);
+
+    const admittedWrite = control.update(principal, update);
+    pending.push(admittedWrite);
+    await waitForStarts(2);
+    await assert.rejects(control.update(principal, update),
+      (error) => error instanceof ModelFastModeError && error.code === 'UNAVAILABLE');
+    await assert.rejects(control.read(principal),
+      (error) => error instanceof ModelFastModeError && error.code === 'UNAVAILABLE');
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: { authorization: 'Bearer admin', 'content-type': 'application/json' },
+      body: JSON.stringify(update),
+    });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json() as { error: { code: string } }).error.code, 'GPT_FAST_MODE_UNAVAILABLE');
+    assert.equal(starts(), 2);
+
+    writeFileSync(releaseFile, 'release');
+    assert.deepEqual(await Promise.all([firstRead, mergedRead, admittedWrite]), [
+      { schemaVersion: 1, revision: 'c'.repeat(64), enabledModelIds: [] },
+      { schemaVersion: 1, revision: 'c'.repeat(64), enabledModelIds: [] },
+      { schemaVersion: 1, revision: 'c'.repeat(64), enabledModelIds: [] },
+    ]);
+  } finally {
+    writeFileSync(releaseFile, 'release');
+    await Promise.allSettled(pending);
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    restore('PATH', previous.path);
+    restore('E_MATE_FAKE_SSH_STARTS', previous.starts);
+    restore('E_MATE_FAKE_SSH_RELEASE', previous.release);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
