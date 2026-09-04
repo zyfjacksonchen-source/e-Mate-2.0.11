@@ -1030,6 +1030,7 @@
         "tests/regression/2.0.17/inventory.test.mjs",
         "packages/dsh-plugin-file-import/**",
         "packages/dsh/profile/plugins/emate-shell/tests/composer-205.client.spec.tsx",
+        "desktop/e-mate-desktop/tests/e-mate-profile.spec.ts",
         "scripts/harness-conversation-adapter.mjs",
         "scripts/harness-conversation-adapter.test.mjs"
       ],

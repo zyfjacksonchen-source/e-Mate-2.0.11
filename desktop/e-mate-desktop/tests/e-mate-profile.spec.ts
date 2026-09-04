@@ -15,7 +15,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { composeEntries } from '@deepseek-ai/dsh-app-boot'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { adaptNavigationSource, NAVIGATION_PACKAGE } from '../../../scripts/harness-conversation-adapter.mjs'
+const conversationAdapterUrl = new URL('../../../scripts/harness-conversation-adapter.mjs', import.meta.url).href
+const { adaptNavigationSource, NAVIGATION_PACKAGE } = await import(conversationAdapterUrl) as {
+  adaptNavigationSource(source: string): string
+  NAVIGATION_PACKAGE: string
+}
 import { prepareDesktopProfile } from '../src/profile.ts'
 
 const roots: string[] = []
@@ -42,7 +46,7 @@ describe('e-Mate navigation attachment display', () => {
   it('projects actual buildEntries AX and hover labels without mutating messages or keys', () => {
     const source = adaptNavigationSource(navigation)
     const buildEntries = navigationEntries(source)
-    const files = [file(), file('plain.txt', 'literal@name  file.txt')]
+    const files = [file(), file('plain.txt', 'literal@name  file.txt')] as const
     const nodes = [{
       key: 'user-anchor', kind: 'user',
       data: {
