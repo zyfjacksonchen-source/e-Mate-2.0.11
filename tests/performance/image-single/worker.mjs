@@ -1,0 +1,508 @@
+import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { performance } from 'node:perf_hooks'
+import { setTimeout as delay } from 'node:timers/promises'
+import dns from 'node:dns'
+import http from 'node:http'
+import https from 'node:https'
+import net from 'node:net'
+import tls from 'node:tls'
+import dgram from 'node:dgram'
+import { syncBuiltinESMExports } from 'node:module'
+import {
+  ATTACHMENT_LIMITS, CLAIM, COMPARISON_SCENARIOS, FAKE_DELAY_MS, HARNESS_COMMIT, HISTORY_SCENARIO,
+  MODEL, NORMALIZED_PROMPT, REPETITIONS, REQUEST_BODY, SCHEMA_VERSION, TICKET,
+  comparisonSummary, historySummary, sha256, validateDirectMeasurement, validateLowerMeasurement, validateWorkerReport,
+} from './protocol.mjs'
+import { SMALL_PNG, createExactMaxPng, imageResponseBody } from './fixtures.mjs'
+
+const ROOT = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
+const PATHS = Object.freeze({
+  imageGenerationBundle: join(ROOT, 'packages/dsh/profile/plugins/image-generation.js'),
+  imageGenerationSource: join(ROOT, 'packages/dsh/src/profile/image-generation.ts'),
+  cordis: join(ROOT, 'upstream/deepseek-harness/vendor/cordis/lib/index.js'),
+  agent: join(ROOT, 'upstream/deepseek-harness/packages/core/agent/lib/index.js'),
+  session: join(ROOT, 'upstream/deepseek-harness/packages/core/session/lib/index.js'),
+  projection: join(ROOT, 'upstream/deepseek-harness/packages/session/session-projection/lib/index.js'),
+  jobs: join(ROOT, 'upstream/deepseek-harness/packages/jobs/jobs-local/lib/index.js'),
+  attachment: join(ROOT, 'upstream/deepseek-harness/packages/attachment/attachment-local/lib/index.js'),
+  attachmentStore: join(ROOT, 'upstream/deepseek-harness/packages/attachment/attachment-local/src/store.ts'),
+  tools: join(ROOT, 'upstream/deepseek-harness/packages/core/tools/lib/index.js'),
+  llm: join(ROOT, 'upstream/deepseek-harness/packages/llm/llm/lib/index.js'),
+  storage: join(ROOT, 'upstream/deepseek-harness/packages/storage/storage-domain/lib/index.js'),
+  zod: join(ROOT, 'upstream/deepseek-harness/packages/storage/storage-domain/node_modules/zod/index.js'),
+  baseContract: join(ROOT, 'desktop/e-mate-desktop/base-contract.json'),
+})
+const REQUIRED_BUILT = ['imageGenerationBundle', 'cordis', 'agent', 'session', 'projection', 'jobs', 'attachment', 'tools', 'llm', 'storage', 'zod']
+
+function prerequisiteError() {
+  const missing = REQUIRED_BUILT.map(key => PATHS[key]).filter(path => !existsSync(path))
+  if (missing.length === 0) return undefined
+  return new Error('EM217-108 benchmark prerequisites are absent: ' + missing.map(path => path.slice(ROOT.length + 1)).join(', ')
+    + '. Run only the main-agent-authorized existing Harness/e-Mate build prerequisites; this benchmark never installs or builds them.')
+}
+function fileSha256(path) { return createHash('sha256').update(readFileSync(path)).digest('hex') }
+
+
+let networkCalls = 0
+function installNetworkGuard() {
+  const originals = []
+  const block = (target, key) => {
+    const original = target[key]
+    originals.push(() => { target[key] = original })
+    target[key] = () => { networkCalls += 1; throw new Error('EM217-108 benchmark forbids network access: ' + key) }
+  }
+  for (const [target, keys] of [
+    [net, ['connect', 'createConnection']], [tls, ['connect']], [http, ['request', 'get']], [https, ['request', 'get']],
+    [dns, ['lookup', 'resolve', 'resolve4', 'resolve6']], [dgram, ['createSocket']],
+  ]) for (const key of keys) block(target, key)
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = () => { networkCalls += 1; throw new Error('EM217-108 benchmark forbids fetch') }
+  syncBuiltinESMExports()
+  return () => {
+    for (const restore of originals.reverse()) restore()
+    globalThis.fetch = originalFetch
+    syncBuiltinESMExports()
+  }
+}
+
+let modulesPromise
+async function modules() {
+  modulesPromise ??= Promise.all([
+    import(pathToFileURL(PATHS.cordis)), import(pathToFileURL(PATHS.agent)), import(pathToFileURL(PATHS.session)),
+    import(pathToFileURL(PATHS.projection)), import(pathToFileURL(PATHS.jobs)), import(pathToFileURL(PATHS.attachment)),
+    import(pathToFileURL(PATHS.imageGenerationBundle)),
+  ]).then(([cordis, agent, session, projection, jobs, attachment, imageGeneration]) => ({
+    Context: cordis.Context,
+    AgentRegistry: agent.default,
+    SessionStore: session.default,
+    SessionId: session.SessionId,
+    SessionProjectionRegistry: projection.default,
+    LocalJobRegistry: jobs.default,
+    LocalAttachmentStore: attachment.LocalAttachmentStore,
+    applyImageGeneration: imageGeneration.apply,
+  }))
+  return modulesPromise
+}
+function writeBinding(root, dshHome) {
+  const zod = realpathSync(PATHS.zod)
+  const path = join(root, 'runtime-binding.json')
+  writeFileSync(path, JSON.stringify({
+    schema_version: 1, product: 'e-Mate', version: '2.0.16', dsh_home: dshHome, harness_commit: HARNESS_COMMIT,
+    tools_module: PATHS.tools, tools_module_sha256: fileSha256(PATHS.tools),
+    llm_module: PATHS.llm, llm_module_sha256: fileSha256(PATHS.llm),
+    storage_domain_module: PATHS.storage, storage_domain_module_sha256: fileSha256(PATHS.storage),
+    zod_module: zod, zod_module_sha256: fileSha256(zod),
+  }))
+  return path
+}
+export function createStreamResponse(bytes, marks) {
+  const split = Math.max(1, Math.floor(bytes.byteLength / 2))
+  let offset = 0
+  return new Response(new ReadableStream({
+    pull(controller) {
+      if (offset >= bytes.byteLength) {
+        controller.close()
+        marks.responseComplete = performance.now()
+        return
+      }
+      const end = offset === 0 ? split : bytes.byteLength
+      controller.enqueue(bytes.subarray(offset, end))
+      offset = end
+    },
+  }, { highWaterMark: 0 }), { headers: { 'content-type': 'application/json', 'content-length': String(bytes.byteLength) } })
+}
+function fakeRequest(fixture, active) {
+  return async (url, init = {}) => {
+    active.counts.attempts += 1
+    assert.equal(url.origin, 'https://model.example')
+    assert.equal(url.pathname, '/e-mate/model-api/v1/images/generations')
+    assert.equal(init.method, 'POST')
+    assert.equal(init.redirect, 'error')
+    assert.equal(String(init.body), REQUEST_BODY)
+    assert.equal(init.headers.get('content-type'), 'application/json')
+    assert.equal(init.headers.get('accept'), 'application/json')
+    assert.equal(init.headers.get('x-e-mate-batch-id'), null)
+    assert.equal(init.headers.get('x-e-mate-batch-ordinal'), null)
+    const requestId = init.headers.get('x-client-request-id')
+    active.requestId ??= requestId
+    assert.equal(requestId, active.requestId)
+    assert.match(requestId ?? '', /^image-[0-9a-f]{32}$/u)
+    assert.equal(init.headers.get('x-e-mate-task-id'), requestId)
+    assert.equal(init.headers.get('x-e-mate-trace-id'), requestId)
+    assert.equal(init.headers.get('session_id'), requestId)
+    const bodySha256 = sha256(String(init.body))
+    active.requestBodySha256 ??= bodySha256
+    assert.equal(bodySha256, active.requestBodySha256)
+    if (active.admissionRejectsRemaining > 0) {
+      active.admissionRejectsRemaining -= 1
+      active.admissionRejectedAt = performance.now()
+      return new Response(JSON.stringify({ error: { code: 'TENANT_CONCURRENCY_LIMITED', message: 'admission rejected', retryAfterMs: 1000 } }), {
+        status: 429, headers: { 'content-type': 'application/json', 'retry-after': '1' },
+      })
+    }
+    if (active.admissionRejectedAt !== undefined) active.counts.admission_wait_ms = Math.round(performance.now() - active.admissionRejectedAt)
+    active.counts.provider_posts += 1
+    active.marks.providerSubmit = performance.now()
+    await delay(FAKE_DELAY_MS, undefined, { signal: init.signal })
+    active.marks.providerFinish = performance.now()
+    assert.ok(active.marks.providerFinish - active.marks.providerSubmit >= FAKE_DELAY_MS - 1)
+    return createStreamResponse(fixture.response, active.marks)
+  }
+}
+function emptyActive(admissionRejects = 0) {
+  return {
+    marks: {},
+    counts: { subagent_starts: 0, batch_events: 0, jobs: 0, provider_posts: 0, cas_saves: 0, terminal_receipts: 0, attempts: 0, admission_wait_ms: 0 },
+    requestBodySha256: undefined,
+    savedAttachmentId: undefined,
+    admissionRejectsRemaining: admissionRejects,
+    admissionRejectedAt: undefined,
+    requestId: undefined,
+  }
+}
+function relativeMark(value, start) { return value === undefined ? null : value - start }
+function assembledMeasurement(active, start, end, fixture) {
+  const marks = active.marks
+  return {
+    total_ms: end - start,
+    stages: {
+      provider_submit_ms: relativeMark(marks.providerSubmit, start), provider_finish_ms: relativeMark(marks.providerFinish, start),
+      response_complete_ms: relativeMark(marks.responseComplete, start), cas_begin_ms: relativeMark(marks.casBegin, start),
+      cas_end_ms: relativeMark(marks.casEnd, start), verification_begin_ms: relativeMark(marks.verificationBegin, start),
+      verification_end_ms: relativeMark(marks.verificationEnd, start), job_terminal_ms: relativeMark(marks.jobTerminal, start),
+      receipt_append_begin_ms: relativeMark(marks.receiptAppendBegin, start), projection_handoff_ms: relativeMark(marks.projectionHandoff, start),
+      receipt_append_return_ms: relativeMark(marks.receiptAppendReturn, start), tool_return_ms: relativeMark(marks.toolReturn, start),
+    },
+    counts: active.counts,
+    request_body_sha256: active.requestBodySha256,
+    response_body_sha256: fixture.responseSha256,
+    attachment_sha256: fixture.sha256,
+  }
+}
+function historicalReceipt(sessionId, index, attachment) {
+  return {
+    schema_version: 2, revision: 2, call_id: 'history-' + String(index + 1).padStart(3, '0'), operation: 'generate',
+    status: 'completed', billing_status: 'recorded', parent_session_id: String(sessionId), sources: [],
+    content: [{ type: 'image', attachment }], job_id: 'emate-image-history-' + String(index + 1),
+    provider_request_id: 'history-provider-' + String(index + 1), client_request_id: 'history-client-' + String(index + 1),
+    model: MODEL, output: attachment, verifier: { structural: 'attachment-cas-v1', semantic: 'not-required' },
+    verification: { structural: 'passed', source_output: 'not-applicable', semantic: 'not-applicable' },
+  }
+}
+
+async function createLower(root) {
+  const { Context, LocalAttachmentStore } = await modules()
+  const context = new Context()
+  await context.plugin(LocalAttachmentStore, { dshHome: join(root, 'dsh-home') })
+  assert.equal(JSON.stringify(context.attachments.imageLimits), JSON.stringify(ATTACHMENT_LIMITS))
+  return {
+    async run(fixture) {
+      const marks = {}
+      const counts = { provider_posts: 0, attempts: 0 }
+      const active = { marks, counts, requestBodySha256: undefined }
+      const start = performance.now()
+      const request = fakeRequest(fixture, active)
+      const response = await request(new URL('https://model.example/e-mate/model-api/v1/images/generations'), {
+        method: 'POST', headers: new Headers({
+          accept: 'application/json', 'content-type': 'application/json',
+          'x-client-request-id': 'image-' + sha256('lower-bound').slice(0, 32),
+          'x-e-mate-task-id': 'image-' + sha256('lower-bound').slice(0, 32),
+          'x-e-mate-trace-id': 'image-' + sha256('lower-bound').slice(0, 32),
+          session_id: 'image-' + sha256('lower-bound').slice(0, 32),
+        }),
+        body: REQUEST_BODY, redirect: 'error', signal: new AbortController().signal,
+      })
+      const parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await response.arrayBuffer()))
+      const data = Buffer.from(parsed.data[0].b64_json, 'base64')
+      assert.equal(sha256(data), fixture.sha256)
+      marks.casBegin = performance.now()
+      await context.attachments.saveImage({ data, mediaType: 'image/png', name: 'e-Mate-image.png' })
+      marks.casEnd = performance.now()
+      const end = performance.now()
+      assert.equal(counts.provider_posts, 1)
+      assert.equal(counts.attempts, 1)
+      return validateLowerMeasurement({
+        total_ms: end - start,
+        stages: { provider_submit_ms: marks.providerSubmit - start, provider_finish_ms: marks.providerFinish - start,
+          response_complete_ms: marks.responseComplete - start, cas_begin_ms: marks.casBegin - start, cas_end_ms: marks.casEnd - start },
+        request_body_sha256: active.requestBodySha256, response_body_sha256: fixture.responseSha256, attachment_sha256: fixture.sha256,
+      })
+    },
+    dispose: () => context.fiber.dispose(),
+  }
+}
+
+async function createAssembled(root, fixture, historyCount = 0) {
+  const { Context, AgentRegistry, SessionStore, SessionId, SessionProjectionRegistry, LocalJobRegistry, LocalAttachmentStore, applyImageGeneration } = await modules()
+  mkdirSync(root, { recursive: true })
+  const context = new Context()
+  await context.plugin(AgentRegistry)
+  await context.plugin(SessionStore)
+  await context.plugin(SessionProjectionRegistry)
+  await context.plugin(LocalJobRegistry)
+  await context.plugin(LocalAttachmentStore, { dshHome: join(root, 'dsh-home') })
+  assert.equal(JSON.stringify(context.attachments.imageLimits), JSON.stringify(ATTACHMENT_LIMITS))
+  const tools = new Map()
+  const effectCleanups = []
+  let active = emptyActive()
+  const modelPolicy = { assertModel: async model => { assert.equal(model, MODEL) } }
+  const identity = { request: (url, init) => fakeRequest(fixture, active)(url, init) }
+  const attachments = {
+    imageLimits: context.attachments.imageLimits,
+    async saveImage(input) {
+      active.counts.cas_saves += 1
+      active.marks.casBegin = performance.now()
+      const saved = await context.attachments.saveImage(input)
+      active.marks.casEnd = performance.now()
+      active.savedAttachmentId = saved.attachmentId
+      return saved
+    },
+    async readImage(ref, signal) {
+      if (ref.attachmentId === active.savedAttachmentId) active.marks.verificationBegin = performance.now()
+      const stored = await context.attachments.readImage(ref, signal)
+      if (ref.attachmentId === active.savedAttachmentId) active.marks.verificationEnd = performance.now()
+      return stored
+    },
+  }
+  const jobs = {
+    attachController: name => context.jobs.attachController(name),
+    start(spec) { active.counts.jobs += 1; return context.jobs.start(spec) },
+    startWhenAvailable() { throw new Error('direct imagegen entered the queued Job path') },
+    wait: (id, timeout, owner, signal) => context.jobs.wait(id, timeout, owner, signal),
+    get: (id, owner) => context.jobs.get(id, owner),
+    kill: (id, owner, reason) => context.jobs.kill(id, owner, reason),
+  }
+  const facade = {
+    tools: { register(tool) { tools.set(tool.name, tool); return () => tools.delete(tool.name) }, schemas: () => [...tools.values()] },
+    jobs, attachments, sessionProjections: context.sessionProjections,
+    sessionProjectionCache: { cachedSnapshot: () => undefined, coldSnapshot: async () => { throw new Error('unexpected cold projection read') } },
+    sessionPersistence: { list: async () => [] }, sessions: context.sessions, agents: context.agents,
+    subagents: {
+      getProvider() { active.counts.subagent_starts += 1; return undefined },
+      async start() { active.counts.subagent_starts += 1; throw new Error('direct imagegen started a subagent') },
+    },
+    emateModelPolicy: modelPolicy,
+    sandboxPolicy: { resolve: () => ({ mode: 'read-only', workspaceRoot: root }) }, logger: context.logger,
+    get(name) {
+      if (name === 'emateIdentity') return identity
+      if (name === 'emateModelPolicy') return modelPolicy
+      if (name === 'emateCapabilities') return { register: () => () => {} }
+      return undefined
+    },
+    effect(setup) { const cleanup = setup(); if (typeof cleanup === 'function') effectCleanups.push(cleanup); return cleanup },
+    on() { return () => {} },
+  }
+  await applyImageGeneration(facade, { bindingPath: writeBinding(root, join(root, 'dsh-home')), rootUrl: 'https://model.example/e-mate/model-api/v1' })
+  const imagegen = tools.get('imagegen')
+  assert.ok(imagegen, 'assembled imagegen Tool was not registered')
+  const ownerFiber = context.plugin(() => {})
+  const sessionId = SessionId('image-benchmark-' + createHash('sha256').update(root).digest('hex').slice(0, 24))
+  const session = context.sessions.create(sessionId, { meta: { cwd: root } })
+  const seedAttachment = { attachmentId: 'sha256:' + fixture.sha256, mediaType: 'image/png', bytes: fixture.bytes, width: 1, height: 1, name: 'history.png' }
+  for (let index = 0; index < historyCount; index += 1) session.append('emate/image-output', historicalReceipt(sessionId, index, seedAttachment), { ignorable: true })
+  const nativeAppend = session.append.bind(session)
+  session.append = (type, data, ...options) => {
+    if (type === 'emate/image-batch') active.counts.batch_events += 1
+    const terminalReceipt = type === 'emate/image-output' && data?.status !== 'running'
+    if (terminalReceipt) {
+      active.counts.terminal_receipts += 1
+      active.marks.receiptAppendBegin = performance.now()
+    }
+    const event = nativeAppend(type, data, ...options)
+    if (terminalReceipt) active.marks.receiptAppendReturn = performance.now()
+    return event
+  }
+  context.sessionProjections.onChanged((changed, key) => {
+    if (changed === session && key === 'eMateImageReceipts' && active.marks.receiptAppendBegin !== undefined) active.marks.projectionHandoff = performance.now()
+  })
+  context.jobs.onJobDone((snapshot, owner) => {
+    if (owner?.id === sessionId && snapshot.kind === 'emate-image') active.marks.jobTerminal = performance.now()
+  })
+  const agent = {
+    id: sessionId, ctx: ownerFiber.ctx, session, options: {}, status: 'idle',
+    send() {}, followup() {}, inject() {}, cancel() {},
+    steer: () => ({ outcome: Promise.resolve({ status: 'rejected' }) }),
+    runMaintenance: job => job(new AbortController().signal), whenIdle: () => Promise.resolve(),
+  }
+  context.agents.register(agent)
+  let call = 0
+  return {
+    async run(options = {}) {
+      active = emptyActive(options.admissionRejects ?? 0)
+      const start = performance.now()
+      const result = await imagegen.execute({ prompt: NORMALIZED_PROMPT }, {
+        agent, callId: 'single-image-' + String(++call), signal: new AbortController().signal,
+      })
+      active.marks.toolReturn = performance.now()
+      assert.equal(result.status, 'completed')
+      assert.equal(result.images.length, 1)
+      assert.equal(result.images[0].model, MODEL)
+      assert.equal(result.images[0].image.attachmentId, 'sha256:' + fixture.sha256)
+      const end = performance.now()
+      const measurement = assembledMeasurement(active, start, end, fixture)
+      return options.admissionRejects === undefined ? validateDirectMeasurement(measurement) : measurement
+    },
+    async dispose() {
+      for (const cleanup of effectCleanups.reverse()) await cleanup()
+      await ownerFiber.dispose()
+      await context.fiber.dispose()
+    },
+  }
+}
+
+function firstArm(index) { return index % 4 === 0 || index % 4 === 3 }
+async function runComparison(name, fixture, workerRoot) {
+  const spec = COMPARISON_SCENARIOS[name]
+  const warm = name.startsWith('warm-')
+  let lower
+  let assembled
+  if (warm) {
+    lower = await createLower(join(workerRoot, name, 'lower'))
+    assembled = await createAssembled(join(workerRoot, name, 'assembled'), fixture)
+    for (let index = 0; index < spec.warmups; index += 1) {
+      if (firstArm(index)) { await lower.run(fixture); await assembled.run() } else { await assembled.run(); await lower.run(fixture) }
+    }
+  }
+  const samples = []
+  try {
+    for (let index = 0; index < spec.pairs; index += 1) {
+      const pairRoot = join(workerRoot, name, 'pair-' + String(index + 1))
+      if (!warm) {
+        lower = await createLower(join(pairRoot, 'lower'))
+        assembled = await createAssembled(join(pairRoot, 'assembled'), fixture)
+      }
+      let lowerResult
+      let assembledResult
+      if (firstArm(index)) { lowerResult = await lower.run(fixture); assembledResult = await assembled.run() }
+      else { assembledResult = await assembled.run(); lowerResult = await lower.run(fixture) }
+      samples.push({ index: index + 1, order: firstArm(index) ? 'lower-bound-first' : 'assembled-first', lower_bound: lowerResult, assembled: assembledResult })
+      if (!warm) {
+        await assembled.dispose(); await lower.dispose(); assembled = undefined; lower = undefined
+        rmSync(pairRoot, { recursive: true, force: true })
+      }
+    }
+  } finally {
+    if (assembled !== undefined) await assembled.dispose()
+    if (lower !== undefined) await lower.dispose()
+  }
+  return { kind: 'lower-bound-vs-assembled', warmups: spec.warmups, pairs: spec.pairs, threshold: spec, samples, percentiles: comparisonSummary(samples, spec) }
+}
+async function runHistory(fixture, workerRoot) {
+  const samples = []
+  for (let index = 0; index < HISTORY_SCENARIO.pairs; index += 1) {
+    const pairRoot = join(workerRoot, 'history', 'pair-' + String(index + 1))
+    const empty = await createAssembled(join(pairRoot, 'empty'), fixture, 0)
+    const loaded = await createAssembled(join(pairRoot, 'loaded'), fixture, 256)
+    let emptyResult
+    let loadedResult
+    try {
+      if (firstArm(index)) { emptyResult = await empty.run(); loadedResult = await loaded.run() }
+      else { loadedResult = await loaded.run(); emptyResult = await empty.run() }
+    } finally {
+      await loaded.dispose(); await empty.dispose(); rmSync(pairRoot, { recursive: true, force: true })
+    }
+    samples.push({ index: index + 1, order: firstArm(index) ? 'empty-first' : 'loaded-first', empty: emptyResult, loaded: loadedResult, delta_ms: loadedResult.total_ms - emptyResult.total_ms })
+  }
+  return {
+    kind: 'paired-history-slope', warmups: 0, pairs: 30, receipts: [0, 256], bounds: { p95_ms: 75, p99_ms: 150 },
+    samples, percentiles: historySummary(samples),
+  }
+}
+
+
+async function runAdmissionRetryProbe(fixture, workerRoot) {
+  const assembled = await createAssembled(join(workerRoot, 'admission-retry'), fixture)
+  try {
+    const measurement = await assembled.run({ admissionRejects: 1 })
+    const pass = measurement.counts.attempts === 2 && measurement.counts.provider_posts === 1
+      && measurement.counts.admission_wait_ms >= 999 && measurement.counts.admission_wait_ms <= 5000
+    return { retry_after_ms: 1000, identical_request_scope: true, measurement, pass }
+  } finally {
+    await assembled.dispose()
+  }
+}
+
+
+
+export function runtimeNetworkGuardSmoke() {
+  const before = networkCalls
+  const restore = installNetworkGuard()
+  restore()
+  assert.equal(networkCalls, before)
+  return { status: 'network-guard-smoke-passed' }
+}
+
+export function workerSourceSmoke() {
+  assert.equal(Object.keys(PATHS).length, 14)
+  assert.equal(REQUIRED_BUILT.length, 11)
+  assert.ok(REQUIRED_BUILT.every(key => typeof PATHS[key] === 'string' && PATHS[key].startsWith(ROOT)))
+  assert.equal(typeof prerequisiteError, 'function')
+  assert.equal(typeof fileSha256, 'function')
+  return { status: 'worker-source-smoke-passed' }
+}
+
+async function main() {
+  const restoreNetwork = installNetworkGuard()
+  const missing = prerequisiteError()
+  if (missing !== undefined) throw missing
+  const repetition = Number(process.env.EMATE_BENCHMARK_REPETITION)
+  const emateCommit = process.env.EMATE_BENCHMARK_COMMIT
+  assert.ok(Number.isSafeInteger(repetition) && repetition >= 1 && repetition <= REPETITIONS, 'worker repetition is invalid')
+  assert.match(emateCommit ?? '', /^[0-9a-f]{40}$/u)
+  const base = JSON.parse(readFileSync(PATHS.baseContract, 'utf8'))
+  assert.equal(base.harness_version, '0.1.0-rc.7')
+  assert.equal(base.harness_commit, HARNESS_COMMIT)
+  const fixtures = { small: { data: SMALL_PNG }, max: { data: createExactMaxPng() } }
+  for (const fixture of Object.values(fixtures)) {
+    fixture.sha256 = sha256(fixture.data)
+    fixture.bytes = fixture.data.byteLength
+    fixture.response = imageResponseBody(fixture.data)
+    fixture.responseSha256 = sha256(fixture.response)
+  }
+  const workerRoot = mkdtempSync(join(tmpdir(), 'emate-image-latency-'))
+  try {
+    const scenarios = {}
+    scenarios['warm-small'] = await runComparison('warm-small', fixtures.small, workerRoot)
+    scenarios['warm-max'] = await runComparison('warm-max', fixtures.max, workerRoot)
+    scenarios['cold-small'] = await runComparison('cold-small', fixtures.small, workerRoot)
+    scenarios['cold-max'] = await runComparison('cold-max', fixtures.max, workerRoot)
+    scenarios['history-0-vs-256'] = await runHistory(fixtures.small, workerRoot)
+    const admissionRetryProbe = await runAdmissionRetryProbe(fixtures.small, workerRoot)
+    const report = {
+      schema_version: SCHEMA_VERSION, ticket: TICKET, claim: CLAIM, repetition,
+      protocol: { fake_delay_ms: 25, repetitions: 3, clock: 'performance.now monotonic', percentile: 'nearest-rank-per-repetition', ordering: 'interleaved-ABBA', filesystem: 'same-worker-temp-volume' },
+      provenance: { emate_commit: emateCommit, harness_commit: HARNESS_COMMIT, module_sha256: {
+        image_generation_source: fileSha256(PATHS.imageGenerationSource), image_generation_bundle: fileSha256(PATHS.imageGenerationBundle),
+        attachment_store_source: fileSha256(PATHS.attachmentStore), attachment_bundle: fileSha256(PATHS.attachment),
+        jobs_bundle: fileSha256(PATHS.jobs), tools_bundle: fileSha256(PATHS.tools),
+      } },
+      runtime: { node: process.version, v8: process.versions.v8, platform: process.platform, arch: process.arch },
+      model: MODEL, attachment_limits: ATTACHMENT_LIMITS,
+      fixtures: Object.fromEntries(Object.entries(fixtures).map(([name, fixture]) => [name, {
+        sha256: fixture.sha256, bytes: fixture.bytes, media_type: 'image/png', response_body_sha256: fixture.responseSha256,
+      }])),
+      prompt_sha256: sha256(NORMALIZED_PROMPT), request_body_sha256: sha256(REQUEST_BODY), network_calls: networkCalls, scenarios,
+      admission_retry_probe: admissionRetryProbe,
+      pass: Object.values(scenarios).every(scenario => scenario.percentiles.pass) && admissionRetryProbe.pass,
+    }
+    validateWorkerReport(report)
+    const output = JSON.stringify(report)
+    assert.ok(Buffer.byteLength(output) <= 2 * 1024 * 1024, 'worker JSON exceeds 2 MiB')
+    process.stdout.write(output)
+  } finally {
+    rmSync(workerRoot, { recursive: true, force: true })
+    restoreNetwork()
+  }
+}
+
+if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+  main().catch(error => {
+    process.stderr.write((error instanceof Error ? error.stack : String(error)) + '\n')
+    process.exitCode = 1
+  })
+}

@@ -500,7 +500,7 @@
         "先证明 pinned Harness rc.7 没有 native image-generation Tool；不得宣称 native imagegen parity。比较器固定为 pinned-owner lower bound：同一 in-process 25 ms fake provider response 加一次真实 pinned rc.7 LocalAttachmentStore.saveImage，对照 assembled direct imagegen Tool/Job/receipt/projection。",
         "同一 prompt SHA、exact request body、response bytes、model、limits、Node process 与 filesystem；fake provider 禁止 socket/DNS/TLS/credential/network，delay 仅在测试代码，不得加入 product sleep、benchmark flag 或第二路径。",
         "warm small/max 每个 fresh process 先 20 次 untimed warmup，再做 60 个 interleaved ABBA paired samples；cold small/max 各做 15 个 fresh-Context/Agent/Session/CAS-root pairs；history slope 做 30 个 0-versus-256 receipt pairs；重复 3 个 fresh processes，每次独立 nearest-rank p95/p99 且全部通过。",
-        "分开记录 provider submit/finish、response complete、CAS begin/end、optional post-save verification、Job terminal、terminal receipt append、Tool return、terminal projection handoff、GUI cached-byte load 与 first paint；不混入 next LLM turn 或 provider network variance。",
+        "source benchmark 分开记录 provider submit/finish、response complete、CAS begin/end、optional post-save verification、Job terminal、terminal receipt append、Tool return 与 terminal projection handoff；GUI cached-byte load/first paint 保持 OPEN 给独立 macOS dev acceptance，不混入 next LLM turn 或 provider network variance。",
         "只有 benchmark 证明超界的 stage 才可在后续修改 image-generation.ts；保持 Tool checks、canonical base64、raster validation、CAS fsync/hash/permissions、Job terminal ordering、receipts/projection 与 EM217-202 retry。若已全部 green，后续只交付 test/evidence。"
       ],
       "acceptance": [
@@ -508,10 +508,13 @@
         "按 contracts/single-image-latency.md 的公式逐 repetition 通过：warm small p95 max(75 ms,15%)/p99 max(150 ms,25%)；warm max p95 max(250 ms,15%)/p99 max(500 ms,25%)；cold small p95 max(350 ms,25%)/p99 max(750 ms,50%)；cold max p95 max(750 ms,25%)/p99 max(1500 ms,50%)。",
         "0→256 receipt history slope 不超过 p95 75 ms / p99 150 ms；macOS app-directory/dev cached-local-byte terminal-projection-to-first-visible handoff 单独 p95 ≤ 500 ms，且不作为 packaged/installed/production evidence。",
         "tracked evidence 只含 sanitized provenance/percentiles/counts/hashes 与 external raw artifact URI+SHA-256；不得包含 prompt、image/base64 bytes、logs、secrets、credentials、screenshots、videos 或 installers；任一字段、sample、hash、count、stage 或 threshold 缺失/不匹配即保持 OPEN。",
-        "性能门禁不改变 EM217-202 typed pre-provider retry：429 latency 单独报告且不放宽 success percentile；所有 production、candidate、installed、public gates 保持原状。"
+        "性能门禁不改变 EM217-202 typed pre-provider retry：每个 fresh worker 单独执行一次 typed concurrency-429 probe，证明 Retry-After 1 秒、two byte-identical attempts、exactly one accepted provider submission 与 999–5000 ms admission wait，且不进入/放宽 success percentile；所有 production、candidate、installed、public gates 保持原状。"
       ],
       "tests": [
         "node --test tests/performance/image-single/contract.test.mjs",
+        "node tests/performance/image-single/benchmark.mjs --source-smoke",
+        "MAIN-AGENT-ONLY SOURCE PREREQUISITE: corepack pnpm run build:harness",
+        "MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build",
         "MAIN-AGENT-ONLY PERFORMANCE GATE: node tests/performance/image-single/benchmark.mjs",
         "MAIN-AGENT-ONLY MACOS DEV ACCEPTANCE: cached local bytes from terminal projection to first visible image p95 <= 500 ms"
       ],
@@ -519,7 +522,7 @@
       "risk": "高",
       "performance_evidence": {
         "status": "OPEN",
-        "reason": "等待 EM217-107 与 EM217-202 完成后实现 deterministic benchmark 并采集三次 fresh-process evidence；规划合同不是性能证据。"
+        "reason": "benchmark infrastructure 已实现但尚未执行 full benchmark；等待 main-agent-authorized built prerequisites、三次 fresh-process measurements 与 external immutable raw artifact URI+SHA-256，当前 source/GUI evidence 均保持 OPEN。"
       }
     },
     {

@@ -5,7 +5,7 @@ import { access, readFile } from 'node:fs/promises'
 const here = new URL('.', import.meta.url)
 const [
   baselineText, ordersText, executionText, ownersText, regressionText, adrText,
-  batchSchemaText, batchResultSchemaText, latencyContractText, enterpriseRecoveryText, fileImportHostText,
+  batchSchemaText, batchResultSchemaText, latencyContractText, latencyManifestText, enterpriseRecoveryText, fileImportHostText,
 ] = await Promise.all([
   readFile(new URL('baseline-lock.json', here), 'utf8'),
   readFile(new URL('work-orders.json', here), 'utf8'),
@@ -16,6 +16,7 @@ const [
   readFile(new URL('contracts/image-batch.schema.json', here), 'utf8'),
   readFile(new URL('contracts/image-batch-result.schema.json', here), 'utf8'),
   readFile(new URL('contracts/single-image-latency.md', here), 'utf8'),
+  readFile(new URL('evidence-manifests/single-image-latency.json', here), 'utf8'),
   readFile(new URL('contracts/enterprise-model-recovery.md', here), 'utf8'),
   readFile(new URL('../../packages/dsh-plugin-file-import/src/index.ts', here), 'utf8'),
 ])
@@ -23,6 +24,7 @@ const baseline = JSON.parse(baselineText)
 const orders = JSON.parse(ordersText)
 const batchSchema = JSON.parse(batchSchemaText)
 const batchResultSchema = JSON.parse(batchResultSchemaText)
+const latencyManifest = JSON.parse(latencyManifestText)
 const active = baseline.active
 
 assert.equal(active.emate_baseline_sha, 'f876f01d8280e4ab20fe83b88c36c7fe7a662135')
@@ -294,6 +296,21 @@ assert.deepEqual(latency108.depends_on, ['EM217-107', 'EM217-202'])
 assert.equal(latency108.branch, 'feat/2.0.17/em217-108-single-image-latency')
 assert.equal(latency108.worktree, '/Users/mac/e-mate/worktrees/em217-108')
 assert.equal(latency108.performance_evidence.status, 'OPEN')
+assert.equal(latencyManifest.ticket, 'EM217-108')
+assert.equal(latencyManifest.status, 'OPEN')
+assert.equal(latencyManifest.provenance, null)
+assert.equal(latencyManifest.results, null)
+assert.equal(latencyManifest.external_raw.uri, null)
+assert.equal(latencyManifest.external_raw.sha256, null)
+assert.equal(latencyManifest.gui_first_visible.status, 'OPEN')
+assert.equal(latencyManifest.gui_first_visible.p95_limit_ms, 500)
+for (const path of ['../../tests/performance/image-single/protocol.mjs', '../../tests/performance/image-single/fixtures.mjs', '../../tests/performance/image-single/worker.mjs', '../../tests/performance/image-single/benchmark.mjs', '../../tests/performance/image-single/contract.test.mjs']) await access(new URL(path, here))
+assert(latency108.tests.includes('node --test tests/performance/image-single/contract.test.mjs'))
+assert(latency108.tests.includes('node tests/performance/image-single/benchmark.mjs --source-smoke'))
+assert(latency108.tests.includes('MAIN-AGENT-ONLY SOURCE PREREQUISITE: corepack pnpm run build:harness'))
+assert(latency108.tests.includes('MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build'))
+assert(latency108.tests.includes('MAIN-AGENT-ONLY PERFORMANCE GATE: node tests/performance/image-single/benchmark.mjs'))
+assert(latency108.tests.indexOf('MAIN-AGENT-ONLY SOURCE-GATED: corepack pnpm --filter @e-mate/dsh build') < latency108.tests.indexOf('MAIN-AGENT-ONLY PERFORMANCE GATE: node tests/performance/image-single/benchmark.mjs'))
 assert.deepEqual(latency108.write_set, [
   'docs/2.0.17/contracts/single-image-latency.md',
   'tests/performance/image-single/**',
@@ -308,6 +325,7 @@ for (const required of [
   'Run three fresh processes', 'nearest-rank p95 and p99', 'zero subagents', 'zero `emate/image-batch` events',
   'exactly one native Job', 'zero retry and zero admission wait', 'max(75 ms, 15%)', 'max(1500 ms, 50%)',
   '75 ms p95 and 150 ms p99', 'p95 no greater than 500 ms', 'Only a stage proven by this benchmark',
+  'Each worker emits at most 2 MiB of JSON', 'work/em217-108/image-single/',
 ]) assert(latencyContractText.includes(required), 'single-image latency contract missing ' + required)
 for (const required of ['prompt text, image or base64 bytes', 'product code gains no benchmark mode, delay, or flag']) {
   assert(latencyContractText.includes(required), 'single-image latency contract missing prohibition: ' + required)
