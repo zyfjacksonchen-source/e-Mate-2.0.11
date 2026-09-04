@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
+import type { UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
 import { SlotTestRuntime } from '../../../../../../upstream/deepseek-harness/packages/test-support/client-runtime/lib/index.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseImageOutputReceipt } from '../src/client/image-gallery-contract.ts'
@@ -100,6 +101,13 @@ const limits = {
   mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
 }
 
+function projectionHook(imageBatches: unknown = undefined): UseProjection {
+  return ((key: string, selector?: (value: unknown) => unknown) => {
+    const value = key === 'imageLimits' ? limits : key === 'eMateImageBatches' ? imageBatches : undefined
+    return selector === undefined ? value : selector(value)
+  }) as UseProjection
+}
+
 function terminalProps(
   nodes: readonly unknown[],
   matched = { callIds: ['call-image-1'], paths: [] as string[], childSessionIds: [] as string[] },
@@ -114,7 +122,7 @@ function terminalProps(
     useSession: (selector: (value: unknown) => unknown) => selector({ chat: { nodes: { values: () => nodes.values() } } }),
     useSessions: (selector: (value: unknown) => unknown) => selector({ byId: { 'session-1': { cwd: '/work' } } }),
     useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
-    useProjection: () => limits,
+    useProjection: projectionHook(),
     loadImage: vi.fn(async () => 'blob:image'),
     addImageToDraft: vi.fn(async () => {}),
     draftBytes: () => 0,
@@ -154,7 +162,7 @@ function galleryProps(
       byId: { [sessionId]: {} }, subagentsByParent: {},
     }),
     useInput: (selector: (value: unknown) => unknown) => selector({ imageIds: [], phase: 'plain' }),
-    useProjection: () => limits,
+    useProjection: projectionHook(),
     loadImage: vi.fn(async () => 'blob:image'),
     addImageToDraft: vi.fn(async () => {}),
     draftBytes: () => 0,
@@ -590,7 +598,7 @@ describe('completed artifact terminal', () => {
         turns: new Map([[1, { data: { get: () => ({ batchCalls }) } }]]),
       }),
       useSessions: (selector: (value: unknown) => unknown) => selector(sessions),
-      useProjection: (key: string) => key === 'eMateImageBatches' ? [] : limits,
+      useProjection: projectionHook([]),
     })
     const upgraded = render(<ImageGalleryView {...props([]) as never} />)
     expect(screen.getAllByRole('article')).toHaveLength(3)
