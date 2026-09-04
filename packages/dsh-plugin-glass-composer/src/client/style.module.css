@@ -38,19 +38,11 @@
   opacity: .45;
 }
 
-:global([data-emate-composer-frame-host]:has([data-emate-glass-control][data-emate-glass-palette]:not([data-emate-glass-palette='off'])))::before {
-  content: '';
-  position: absolute;
-  z-index: 2;
-  inset: -2px;
-  padding: 2px;
-  border-radius: inherit;
-  background: conic-gradient(from var(--emate-glass-angle), var(--emate-glass-a), var(--emate-glass-b), var(--emate-glass-c), var(--emate-glass-a));
-  pointer-events: none;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
+:global([data-emate-composer-frame-host]:has([data-emate-glass-control][data-emate-glass-palette]:not([data-emate-glass-palette='off']))) {
+  border-color: transparent;
+  background:
+    linear-gradient(var(--emate-color-surface), var(--emate-color-surface)) padding-box,
+    conic-gradient(from var(--emate-glass-angle), var(--emate-glass-a), var(--emate-glass-b), var(--emate-glass-c), var(--emate-glass-a)) border-box;
   animation: emate-glass-orbit 4s linear infinite;
 }
 
@@ -83,14 +75,16 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :global([data-emate-composer-frame-host]:has([data-emate-glass-control][data-emate-glass-palette]:not([data-emate-glass-palette='off'])))::before {
+  :global([data-emate-composer-frame-host]:has([data-emate-glass-control][data-emate-glass-palette]:not([data-emate-glass-palette='off']))) {
     animation: none;
     --emate-glass-angle: 45deg;
   }
 }
 
 @media (forced-colors: active) {
-  :global([data-emate-composer-frame-host]:has([data-emate-glass-control][data-emate-glass-palette]:not([data-emate-glass-palette='off'])))::before {
-    display: none;
+  :global([data-emate-composer-frame-host]:has([data-emate-glass-control][data-emate-glass-palette]:not([data-emate-glass-palette='off']))) {
+    animation: none;
+    background: Canvas;
+    border-color: CanvasText;
   }
 }
