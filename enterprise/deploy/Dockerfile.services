@@ -13,6 +13,8 @@ RUN pnpm --filter @e-mate/analytics-api build \
  && pnpm --filter @e-mate/auth-gateway build
 
 FROM ${BUN_IMAGE} AS analytics
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-client && rm -rf /var/lib/apt/lists/* \
+ && useradd --uid 10001 --gid 0 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin emate
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build --chown=10001:0 /app/node_modules ./node_modules

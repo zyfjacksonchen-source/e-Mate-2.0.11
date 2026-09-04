@@ -104,6 +104,53 @@ export type AdminModelRouteUpdate = {
   enabled: boolean;
 };
 
+export const GPT_FAST_MODEL_IDS = ['gpt-5.6-luna', 'gpt-5.6-sol'] as const;
+export type GptFastModelId = (typeof GPT_FAST_MODEL_IDS)[number];
+export type AdminModelFastMode = {
+  schemaVersion: 1;
+  revision: string;
+  enabledModelIds: GptFastModelId[];
+};
+export type AdminModelFastModeUpdate = {
+  schemaVersion: 1;
+  expectedRevision: string;
+  modelIds: GptFastModelId[];
+  enabled: boolean;
+};
+
+function fastModelIds(value: unknown): GptFastModelId[] {
+  if (!Array.isArray(value) || value.length > GPT_FAST_MODEL_IDS.length ||
+      new Set(value).size !== value.length ||
+      value.some((id) => !(GPT_FAST_MODEL_IDS as readonly unknown[]).includes(id))) {
+    throw new Error('Invalid GPT fast mode models');
+  }
+  return value as GptFastModelId[];
+}
+
+function fastModeRevision(value: unknown): string {
+  if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) {
+    throw new Error('Invalid GPT fast mode revision');
+  }
+  return value;
+}
+
+export function parseAdminModelFastMode(value: unknown): AdminModelFastMode {
+  const input = record(value, 'GPT fast mode');
+  exact(input, ['schemaVersion', 'revision', 'enabledModelIds'], 'GPT fast mode');
+  if (input.schemaVersion !== 1) throw new Error('Invalid GPT fast mode version');
+  return { schemaVersion: 1, revision: fastModeRevision(input.revision), enabledModelIds: fastModelIds(input.enabledModelIds) };
+}
+
+export function parseAdminModelFastModeUpdate(value: unknown): AdminModelFastModeUpdate {
+  const input = record(value, 'GPT fast mode update');
+  exact(input, ['schemaVersion', 'expectedRevision', 'modelIds', 'enabled'], 'GPT fast mode update');
+  const modelIds = fastModelIds(input.modelIds);
+  if (input.schemaVersion !== 1 || typeof input.enabled !== 'boolean' || !modelIds.length) {
+    throw new Error('Invalid GPT fast mode update');
+  }
+  return { schemaVersion: 1, expectedRevision: fastModeRevision(input.expectedRevision), modelIds, enabled: input.enabled };
+}
+
 export type AdminModelRoutePublication = {
   schemaVersion: 1;
   published: boolean;

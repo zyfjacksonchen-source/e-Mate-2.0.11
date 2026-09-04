@@ -11,6 +11,8 @@ import {
   issueApiKey,
   loginAdmin,
   loadApiKeys,
+  loadModelFastMode,
+  updateModelFastMode,
   loadConsentAcceptances,
   requestAdmin,
   resetTenantUserPassword,
@@ -27,6 +29,22 @@ import {
 import { messagesFor } from '../src/i18n.ts';
 
 const origin = 'https://admin.example.test';
+
+test('fast mode saves one authenticated batch and reads the authoritative revision', async () => {
+  const state = { schemaVersion: 1 as const, revision: 'a'.repeat(64), enabledModelIds: ['gpt-5.6-luna' as const] };
+  const requests: RequestInit[] = [];
+  const options = { origin, fetcher: (async (url, init) => {
+    assert.equal(new URL(String(url), origin).pathname, '/v1/admin/model-fast-mode');
+    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer admin');
+    requests.push(init ?? {});
+    return new Response(JSON.stringify(state), { status: 200 });
+  }) as typeof fetch };
+  assert.deepEqual(await loadModelFastMode('admin', new AbortController().signal, options), state);
+  const update = { schemaVersion: 1 as const, expectedRevision: state.revision, modelIds: ['gpt-5.6-luna' as const], enabled: true };
+  assert.deepEqual(await updateModelFastMode('admin', new AbortController().signal, options, update), state);
+  assert.equal(requests[1]?.method, 'PUT');
+  assert.deepEqual(JSON.parse(String(requests[1]?.body)), update);
+});
 
 test('admin login reuses the e-Mate dark component theme and logo treatment', () => {
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');

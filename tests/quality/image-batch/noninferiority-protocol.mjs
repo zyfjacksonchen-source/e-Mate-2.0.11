@@ -9,6 +9,8 @@ const OVERALL_MEAN_MARGIN = -0.2
 const CI_LOWER_MARGIN = -0.3
 const MAX_RAW_BYTES = 4 * 1024 * 1024
 const MAX_PAIRS = 1000
+export const HARNESS_COMMIT = '4da69d7c3522ee51de12822c917c503a124f7a7d'
+export const DESKTOP_REFERENCE = '6074088f5b660206e404b3591fab51fb99c69add'
 
 function fail(message) { throw new Error(message) }
 function require(condition, message) { if (!condition) fail(message) }
@@ -20,13 +22,14 @@ function exactKeys(value, keys, label) {
 }
 function finite(value, label) { require(Number.isFinite(value), label + ' must be finite') }
 function hash(value, label) { require(typeof value === 'string' && SHA256.test(value), label + ' must be lowercase SHA-256') }
+function commit(value, label) { require(typeof value === 'string' && /^[0-9a-f]{40}$/u.test(value), label + ' must be a lowercase 40-hex commit') }
 function sameArray(value, expected) {
   return Array.isArray(value) && value.length === expected.length && value.every((item, index) => item === expected[index])
 }
 function identifier(value, label) {
   require(typeof value === 'string' && value.length >= 1 && value.length <= 128 && !/[\u0000-\u001f\u007f-\u009f]/u.test(value), label + ' must be a bounded identifier')
 }
-function applicableDimensions(category) {
+export function applicableDimensions(category) {
   return category === 'text' ? [...BASE_DIMENSIONS, 'text']
     : category === 'reference-edit' ? [...BASE_DIMENSIONS, 'reference_consistency']
       : [...BASE_DIMENSIONS]
@@ -39,7 +42,18 @@ function evidenceDescriptor(value, label = 'raw evidence') {
   try { uri = new URL(value.uri) } catch { fail(label + ' URI is invalid') }
   require(uri.protocol === 'https:' && uri.hostname.length > 0 && uri.pathname.length > 1, label + ' requires HTTPS with nonempty host and path')
   require(uri.username === '' && uri.password === '' && uri.search === '' && uri.hash === '', label + ' URI must not contain credentials, query, or fragment')
+  require(uri.pathname.includes(value.sha256), label + ' URI path must contain the exact raw hash')
   return value
+}
+function provenance(value) {
+  exactKeys(value, ['emate_commit', 'harness_commit', 'desktop_reference', 'version'], 'provenance')
+  commit(value.emate_commit, 'e-Mate commit')
+  require(value.harness_commit === HARNESS_COMMIT && value.desktop_reference === DESKTOP_REFERENCE && value.version === '2.0.17', 'release provenance mismatch')
+}
+function environment(value) {
+  exactKeys(value, ['layer', 'environment_name_sha256', 'gateway_origin_sha256', 'deployment_fingerprint_sha256'], 'environment')
+  require(value.layer === 'production-provider', 'quality study requires the production provider environment')
+  for (const key of ['environment_name_sha256', 'gateway_origin_sha256', 'deployment_fingerprint_sha256']) hash(value[key], 'environment ' + key)
 }
 function rawBytes(raw) {
   require(typeof raw === 'string' || raw instanceof Uint8Array, 'raw study must be exact UTF-8 text or bytes')
@@ -94,8 +108,10 @@ export function validateAndAnalyzeStudy(raw, descriptor) {
   let record
   try { record = JSON.parse(exactRaw.text) } catch { fail('raw study must be valid JSON') }
 
-  exactKeys(record, ['schema_version', 'protocol', 'pairs'], 'study')
+  exactKeys(record, ['schema_version', 'provenance', 'environment', 'protocol', 'pairs'], 'study')
   require(record.schema_version === 1, 'unsupported study schema')
+  provenance(record.provenance)
+  environment(record.environment)
   const protocol = record.protocol
   exactKeys(protocol, ['minimum_pairs', 'maximum_pairs', 'minimum_per_category', 'categories', 'dimensions', 'category_dimensions', 'overall_mean_margin', 'ci_lower_margin', 'ci95', 'blinding', 'randomization'], 'protocol')
   require(protocol.minimum_pairs === 50 && protocol.maximum_pairs === MAX_PAIRS, 'pair bounds must be predeclared as 50..1000')
@@ -126,12 +142,15 @@ export function validateAndAnalyzeStudy(raw, descriptor) {
   let batchOnA = 0
 
   for (const pair of record.pairs) {
-    exactKeys(pair, ['pair_id', 'category', 'requests', 'allocation', 'scores'], 'pair')
+    exactKeys(pair, ['pair_id', 'category', 'reference_hashes', 'requests', 'artifacts', 'allocation', 'scores'], 'pair')
     identifier(pair.pair_id, 'pair ID')
     require(!pairIds.has(pair.pair_id), 'pair IDs must be unique')
     pairIds.add(pair.pair_id)
     require(CATEGORIES.includes(pair.category), 'unknown category')
     categoryCounts[pair.category] += 1
+    require(Array.isArray(pair.reference_hashes) && pair.reference_hashes.length <= 8, 'reference hashes must contain 0..8 entries')
+    require(pair.category === 'reference-edit' ? pair.reference_hashes.length >= 1 : pair.reference_hashes.length === 0, 'reference hash/category mismatch')
+    pair.reference_hashes.forEach(value => hash(value, 'reference hash'))
 
     exactKeys(pair.requests, ['single', 'batch'], 'paired requests')
     for (const side of ['single', 'batch']) {
@@ -144,6 +163,12 @@ export function validateAndAnalyzeStudy(raw, descriptor) {
       hash(pair.requests[side].canonical_provider_request_hash, 'canonical provider request hash')
     }
     for (const field of Object.keys(pair.requests.single)) require(pair.requests.single[field] === pair.requests.batch[field], 'paired request mismatch: ' + field)
+
+    exactKeys(pair.artifacts, ['A', 'B'], 'blind artifacts')
+    for (const side of ['A', 'B']) {
+      exactKeys(pair.artifacts[side], ['sha256'], 'blind artifact ' + side)
+      hash(pair.artifacts[side].sha256, 'blind artifact ' + side)
+    }
 
     exactKeys(pair.allocation, ['A', 'B', 'commitment_sha256', 'assigned_before_scoring'], 'allocation')
     require(new Set([pair.allocation.A, pair.allocation.B]).size === 2 && ['single', 'batch'].includes(pair.allocation.A) && ['single', 'batch'].includes(pair.allocation.B), 'allocation must map A/B to opposite conditions')
@@ -206,21 +231,30 @@ export function validateAndAnalyzeStudy(raw, descriptor) {
       scores_complete_and_finite: true,
     },
     raw_evidence: { ...descriptor },
+    provenance: record.provenance,
+    environment: record.environment,
   }
 }
 
-export function validateManifest(manifest) {
-  exactKeys(manifest, ['schema_version', 'ticket', 'claim', 'status', 'raw_evidence', 'result', 'release_gate'], 'manifest')
+export function validateManifest(manifest, raw) {
+  exactKeys(manifest, ['schema_version', 'ticket', 'claim', 'status', 'provenance', 'environment', 'raw_evidence', 'result', 'release_gate'], 'manifest')
   require(manifest.schema_version === 1 && manifest.ticket === 'EM217-503', 'manifest identity mismatch')
   require(manifest.claim === 'quality-noninferiority-blind-paired-study', 'manifest claim mismatch')
   exactKeys(manifest.raw_evidence, ['uri', 'sha256'], 'manifest raw evidence')
   if (manifest.status === 'OPEN') {
-    require(manifest.release_gate === 'OPEN' && manifest.raw_evidence.uri === null && manifest.raw_evidence.sha256 === null && manifest.result === null, 'OPEN manifest must contain only null evidence')
+    require(manifest.release_gate === 'OPEN' && manifest.provenance === null && manifest.environment === null
+      && manifest.raw_evidence.uri === null && manifest.raw_evidence.sha256 === null && manifest.result === null, 'OPEN manifest must contain only null evidence')
     scanSensitive(manifest)
     return manifest
   }
   require(manifest.status === 'PASS' && manifest.release_gate === 'PASS', 'only complete PASS may close the manifest')
   evidenceDescriptor(manifest.raw_evidence, 'manifest raw evidence')
+  require(raw !== undefined, 'PASS manifest requires exact raw evidence bytes')
+  const analysis = validateAndAnalyzeStudy(raw, manifest.raw_evidence)
+  require(analysis.status === 'PASS', 'PASS raw evidence failed its release thresholds')
+  provenance(manifest.provenance); environment(manifest.environment)
+  require(JSON.stringify(manifest.provenance) === JSON.stringify(analysis.provenance), 'manifest provenance does not match raw evidence')
+  require(JSON.stringify(manifest.environment) === JSON.stringify(analysis.environment), 'manifest environment does not match raw evidence')
   const result = manifest.result
   exactKeys(result, ['pair_count', 'overall', 'categories', 'protocol_checks'], 'manifest result')
   require(Number.isInteger(result.pair_count) && result.pair_count >= 50 && result.pair_count <= MAX_PAIRS, 'PASS requires 50..1000 pairs')
@@ -240,6 +274,8 @@ export function validateManifest(manifest) {
   require(categoryN === result.pair_count, 'category counts must sum to pair count')
   exactKeys(result.protocol_checks, ['request_hashes_match', 'randomized_concealed_balanced_order', 'matched_blind_evaluators', 'scores_complete_and_finite'], 'protocol checks')
   require(Object.values(result.protocol_checks).every(value => value === true), 'every protocol check must pass')
+  require(JSON.stringify(result) === JSON.stringify({ pair_count: analysis.pair_count, overall: analysis.overall,
+    categories: analysis.categories, protocol_checks: analysis.protocol_checks }), 'manifest result is not the exact raw projection')
   scanSensitive(manifest)
   return manifest
 }
@@ -253,6 +289,8 @@ export function projectManifest(openManifest, raw, descriptor) {
     ...openManifest,
     status: 'PASS',
     release_gate: 'PASS',
+    provenance: analysis.provenance,
+    environment: analysis.environment,
     raw_evidence: { ...descriptor },
     result: {
       pair_count: analysis.pair_count,
@@ -260,7 +298,7 @@ export function projectManifest(openManifest, raw, descriptor) {
       categories: analysis.categories,
       protocol_checks: analysis.protocol_checks,
     },
-  })
+  }, raw)
 }
 
 export const protocolConstants = Object.freeze({ CATEGORIES, ALL_DIMENSIONS, CI_CRITICAL_VALUE, OVERALL_MEAN_MARGIN, CI_LOWER_MARGIN, MAX_RAW_BYTES, MAX_PAIRS })

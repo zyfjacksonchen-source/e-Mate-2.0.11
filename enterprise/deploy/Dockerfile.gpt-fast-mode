@@ -1,0 +1,5 @@
+FROM weishaw/sub2api@sha256:85d29bfc69fa7a314cd2a35420dbe2faa6251ccbb3c3d1d4c56c732270e87479
+# sub2api must be built from the pinned source plus sub2api-fast-mode.patch,
+# with its rebuilt frontend embedded. The control command checks this label.
+COPY --chown=1000:1000 sub2api /app/sub2api
+LABEL net.ecoremedia.emate.gpt-fast-mode="1"

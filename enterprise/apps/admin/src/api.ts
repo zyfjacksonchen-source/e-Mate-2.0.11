@@ -3,6 +3,9 @@ import {
   parseAdminConsentList,
   parseAdminApiKeyList,
   parseAdminModelRouteList,
+  parseAdminModelFastMode,
+  type AdminModelFastMode,
+  type AdminModelFastModeUpdate,
   type AdminModelRouteKeyUpdate,
   parseTenantUser,
   parseTenantUserList,
@@ -505,6 +508,20 @@ export async function loadModelRoutes(
   options: StatusRequestOptions
 ): Promise<AdminModelRouteList> {
   return parseAdminModelRouteList(await requestAdmin(token, signal, options, '/v1/admin/model-routes'));
+}
+
+export async function loadModelFastMode(
+  token: string, signal: AbortSignal, options: StatusRequestOptions
+): Promise<AdminModelFastMode> {
+  return parseAdminModelFastMode(await requestAdmin(token, signal, options, '/v1/admin/model-fast-mode'));
+}
+
+export async function updateModelFastMode(
+  token: string, signal: AbortSignal, options: StatusRequestOptions, input: AdminModelFastModeUpdate
+): Promise<AdminModelFastMode> {
+  return parseAdminModelFastMode(await requestAdmin(token, signal, options, '/v1/admin/model-fast-mode', {
+    method: 'PUT', body: input,
+  }));
 }
 
 export async function updateModelRoute(

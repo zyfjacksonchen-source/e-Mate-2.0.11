@@ -16,6 +16,8 @@ import {
 import { ChartLine, Plus, Refresh, UserBusiness } from '@icon-park/react';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import type {
+  AdminModelFastMode,
+  GptFastModelId,
   AdminApiKeyMetadata,
   AdminModelRoute,
   AdminUserRole,
@@ -24,6 +26,7 @@ import type {
   AdminConsentQuery,
   TenantUser,
 } from '@e-mate/admin-contract';
+import { GPT_FAST_MODEL_IDS } from '@e-mate/admin-contract';
 import eMateLogo from '../../../../packages/dsh/profile/plugins/emate-shell/assets/emate-logo.png';
 import {
   AdminApiError,
@@ -37,6 +40,7 @@ import {
   loadApiKeys,
   loadConsentAcceptances,
   loadModelRoutes,
+  loadModelFastMode,
   loadTenantUsers,
   loginAdmin,
   publishModelRoute,
@@ -47,6 +51,7 @@ import {
   revokeApiKey,
   testModelConnection,
   updateModelRoute,
+  updateModelFastMode,
   updateModelRouteKey,
   updateTenantUser,
   type QuotaUnit,
@@ -101,6 +106,9 @@ export function App() {
     readAdminModelSession(sessionStorage.getItem(ADMIN_MODEL_SESSION_KEY))
   );
   const [modelTests, setModelTests] = useState<Record<string, ModelTestState>>({});
+  const [fastMode, setFastMode] = useState<AdminModelFastMode | null>(null);
+  const [fastModeError, setFastModeError] = useState<string | null>(null);
+  const [fastModeBusy, setFastModeBusy] = useState(false);
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
   const [loginBusy, setLoginBusy] = useState(false);
@@ -194,6 +202,36 @@ export function App() {
       });
     return () => controller.abort();
   }, [consentQuery, copy.authFailed, reloadKey, requestOptions, token]);
+
+  useEffect(() => {
+    setFastMode(null);
+    setFastModeError(null);
+    if (!token) return;
+    const controller = new AbortController();
+    void loadModelFastMode(token, controller.signal, requestOptions)
+      .then((value) => { if (!controller.signal.aborted) setFastMode(value); })
+      .catch(() => { if (!controller.signal.aborted) setFastModeError(copy.fastModeUnavailable); });
+    return () => controller.abort();
+  }, [token, reloadKey, requestOptions, copy.fastModeUnavailable]);
+
+  const changeFastMode = async (modelIds: GptFastModelId[], enabled: boolean) => {
+    if (!fastMode || fastModeBusy) return;
+    setFastModeBusy(true);
+    setFastModeError(null);
+    try {
+      const value = await updateModelFastMode(token, new AbortController().signal, requestOptions, {
+        schemaVersion: 1, modelIds, enabled, expectedRevision: fastMode.revision,
+      });
+      setFastMode(value);
+    } catch (error) {
+      setFastMode(null);
+      setFastModeError(adminErrorStatus(error) === 409 ? copy.fastModeConflict : copy.fastModeFailed);
+      // A lost response may follow a successful write; read the authoritative state.
+      await loadModelFastMode(token, new AbortController().signal, requestOptions).then(setFastMode).catch(() => {});
+    } finally {
+      setFastModeBusy(false);
+    }
+  };
 
   const submitToken = (event: FormEvent) => {
     event.preventDefault();
@@ -687,6 +725,14 @@ export function App() {
                 </Button>
               </div>
               <Alert type='info' showIcon content={`${copy.modelsCatalogNotice} ${copy.modelTestUsageNotice}`} />
+              <Alert type='info' showIcon content={copy.fastModeNotice} />
+              {fastModeError && <Alert type='warning' showIcon content={fastModeError} />}
+              <div className='record-actions'>
+                <Button disabled={!fastMode || fastModeBusy} loading={fastModeBusy}
+                  onClick={() => void changeFastMode([...GPT_FAST_MODEL_IDS], true)}>{copy.fastModeEnableAll}</Button>
+                <Button disabled={!fastMode || fastModeBusy} loading={fastModeBusy}
+                  onClick={() => void changeFastMode([...GPT_FAST_MODEL_IDS], false)}>{copy.fastModeDisableAll}</Button>
+              </div>
               <div className='record-list'>
                 {facts.routes.filter((route) => route.published).map((route) => {
                   const modelTest = modelTests[route.routeId];
@@ -729,8 +775,19 @@ export function App() {
                       >
                         {copy.updateModelKey}
                       </Button>
+                      {(GPT_FAST_MODEL_IDS as readonly string[]).includes(route.routeId) && <>
+                        <span>{copy.fastMode}</span>
+                        <Switch
+                          aria-label={`${route.label} ${copy.fastMode}`}
+                          checked={fastMode?.enabledModelIds.includes(route.routeId as GptFastModelId) ?? false}
+                          disabled={!fastMode || fastModeBusy}
+                          loading={fastModeBusy}
+                          onChange={(enabled) => void changeFastMode([route.routeId as GptFastModelId], enabled)}
+                        />
+                      </>}
                       <span>{route.enabled ? copy.enabled : copy.disabled}</span>
                       <Switch
+                        aria-label={`${route.label} ${copy.enabled}`}
                         checked={route.enabled}
                         loading={mutating}
                         onChange={(enabled) =>

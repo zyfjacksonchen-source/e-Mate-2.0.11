@@ -1,4 +1,4 @@
-import { cp, mkdir, rm } from 'node:fs/promises'
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -17,3 +17,5 @@ await rm(pdfTarget, { recursive: true, force: true })
 await mkdir(pdfTarget, { recursive: true })
 await cp(join(pdfSource, 'dist', 'pdfparser.js'), join(pdfTarget, 'pdfparser.js'))
 await cp(join(pdfSource, 'license.txt'), join(pdfTarget, 'LICENSE'))
+const pdfLicense = await readFile(join(pdfTarget, 'LICENSE'), 'utf8')
+await writeFile(join(pdfTarget, 'LICENSE'), pdfLicense.replace(/\r\n?/gu, '\n'))

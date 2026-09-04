@@ -18,8 +18,10 @@
   },
   "gui_first_visible": {
     "status": "OPEN",
+    "environment": null,
     "p95_limit_ms": 500,
     "p95_ms": null,
+    "sample_count": null,
     "evidence_uri": null,
     "sha256": null
   }

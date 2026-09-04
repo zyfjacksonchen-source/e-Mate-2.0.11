@@ -1,3 +1,4 @@
 # Match the pinned DeepSeek Harness checkout: byte-level release gates see the
 # same canonical text on every CI runner.
 * text=auto eol=lf
+enterprise/deploy/sub2api-fast-mode.patch -whitespace
