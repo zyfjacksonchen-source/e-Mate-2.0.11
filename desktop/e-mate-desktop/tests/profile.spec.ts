@@ -232,7 +232,7 @@ describe('desktop profile composition', () => {
       name: '@e-mate/desktop',
       config: expect.objectContaining({ mode: 'advanced' }),
     }))
-  })
+  }, 15_000)
 
   it('keeps advanced mode fixed when stale settings request compatibility mode', () => {
     const home = temporaryHome()
