@@ -447,34 +447,183 @@ test('projection isolates batches by recomputed identity and deterministic repla
   rejects(() => projection.apply(projection.init(), { type: 'emate/image-batch', data: unknown }))
 })
 
-test('seeded random disorder, duplicate insertion, and corruption never creates another terminal or loses image evidence', () => {
-  const { sequence, state: terminalState } = completedAndInterruptedEvents()
-  let seed = 0x217102
+test('10,000 seeded legal and illegal state sequences preserve terminal, image, identity, duplicate, and summary invariants', () => {
+  const ITERATIONS = 5_000
+  const EXPECTED_SEQUENCE_COUNT = 10_000
+  const taskCounts = [2, 4, 5, 8]
+  const finalStatuses = ['completed', 'partial', 'cancelled', 'failed']
+  const corruptionsSeen = new Set()
+  const statusesSeen = new Set()
+  const countsSeen = new Set()
+  let seed = 0x217501
+  let sequenceCount = 0
   const random = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 0x100000000)
-  for (let round = 0; round < 100; round += 1) {
-    const shuffled = sequence.map(clone)
-    for (let i = shuffled.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(random() * (i + 1)); [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+
+  const context = (session, call, ordinal) => ({
+    schema_version: 1,
+    event_id: imageBatchEventId(session, call, ordinal),
+    batch_id: imageBatchId(session, call),
+    parent_session_id: session,
+    parent_call_id: call,
+    occurred_at: TIME,
+  })
+  const initialTask = (session, call, ordinal, prompt) => ({
+    task_id: imageBatchTaskId(session, call, ordinal),
+    ordinal,
+    revision: 1,
+    state: 'queued',
+    submission_status: 'not-submitted',
+    prompt_sha256: prompt,
+    image_url: random() < 0.5 ? [] : [`sha256:${ordinal.toString(16).padStart(64, '0')}`],
+  })
+  const event = (session, call, ordinal, kind, task) => ({ ...context(session, call, ordinal), kind, task })
+  const add = (state, sequence, session, data) => {
+    const next = reduceImageBatchEvent(state, data, session)
+    assert.equal(reduceImageBatchEvent(next, clone(data), session), next, 'every exact duplicate must be idempotent')
+    sequence.push(data)
+    return next
+  }
+  const finishTask = (state, sequence, session, call, index, outcome) => {
+    let task = state.tasks[index]
+    const appendTaskEvent = (kind, next) => {
+      state = add(state, sequence, session, event(session, call, state.accepted_events.length + 1, kind, next))
+      task = state.tasks[index]
     }
-    if (shuffled.every((event, index) => event.event_id === sequence[index].event_id)) continue
-    let state
-    assert.throws(() => { for (const event of shuffled) state = append(state, event) }, /invalid image batch event:/u)
+    if (outcome === 'interrupted') {
+      appendTaskEvent('task-state', { ...task, revision: task.revision + 1, state: 'interrupted',
+        failure_code: 'not-submitted', updated_at: TIME })
+      return state
+    }
+    if ((outcome === 'failed' || outcome === 'cancelled') && random() < 0.35) {
+      appendTaskEvent('task-state', { ...task, revision: task.revision + 1, state: outcome,
+        failure_code: outcome === 'failed' ? 'preflight' : 'cancelled', updated_at: TIME })
+      return state
+    }
+    appendTaskEvent('task-linked', { ...task, revision: task.revision + 1,
+      child_session_id: `child-${call}-${task.ordinal}`, updated_at: TIME })
+    if (outcome === 'unknown' && random() < 0.35) {
+      appendTaskEvent('task-state', { ...task, revision: task.revision + 1, state: 'unknown',
+        submission_status: 'unknown', failure_code: 'outcome-unknown', updated_at: TIME })
+      return state
+    }
+    appendTaskEvent('task-state', { ...task, revision: task.revision + 1, state: 'running',
+      submission_status: 'submitted', job_id: `job-${call}-${task.ordinal}`, updated_at: TIME })
+    const receipt = (status, revision = 2, event_seq = state.accepted_events.length + 10) => ({
+      owner_session_id: task.child_session_id,
+      call_id: `imagegen-${call}-${task.ordinal}`,
+      revision,
+      event_seq,
+      status,
+    })
+    if (outcome === 'completed' && random() < 0.25) {
+      appendTaskEvent('task-state', { ...task, revision: task.revision + 1, state: 'needs-review',
+        receipt: receipt('needs-review'), updated_at: TIME })
+      appendTaskEvent('task-state', { ...task, revision: task.revision + 1, state: 'completed',
+        receipt: receipt('completed', 3, task.receipt.event_seq + 1), updated_at: TIME })
+      return state
+    }
+    const stateName = outcome === 'image-failed' ? 'failed' : outcome
+    const result = { ...task, revision: task.revision + 1, state: stateName, updated_at: TIME }
+    if (stateName === 'completed') result.receipt = receipt('completed')
+    else {
+      result.failure_code = stateName === 'unknown' ? 'outcome-unknown' : stateName
+      if (stateName === 'unknown') result.submission_status = 'unknown'
+      if (outcome === 'image-failed') result.receipt = receipt('completed')
+    }
+    appendTaskEvent('task-state', result)
+    return state
   }
-  let state
-  for (const event of sequence) {
-    state = append(state, event)
-    if (random() < 0.8) assert.equal(append(state, clone(event)), state)
+
+  for (let round = 0; round < ITERATIONS; round += 1) {
+    const session = `property-session-${round}`
+    const call = `property-call-${round}`
+    const count = taskCounts[round % taskCounts.length]
+    const expectedStatus = finalStatuses[round % finalStatuses.length]
+    const commonPrompt = (round % 3).toString(16).padStart(64, '0')
+    const tasks = Array.from({ length: count }, (_, index) => initialTask(
+      session, call, index + 1,
+      round % 3 === 0 ? commonPrompt : (round * 8 + index + 1).toString(16).padStart(64, '0'),
+    ))
+    const create = { ...context(session, call, 1), kind: 'created', concurrency: 1 + round % 4, tasks }
+    const sequence = []
+    let state = add(undefined, sequence, session, create)
+    const outcomes = expectedStatus === 'completed'
+      ? Array(count).fill('completed')
+      : expectedStatus === 'partial'
+        ? Array.from({ length: count }, (_, index) => index === 0 ? 'completed' : index === 1 ? 'interrupted'
+          : ['completed', 'failed', 'cancelled', 'unknown', 'image-failed'][Math.floor(random() * 5)])
+        : expectedStatus === 'cancelled'
+          ? Array.from({ length: count }, () => random() < 0.5 ? 'cancelled' : 'interrupted')
+          : Array.from({ length: count }, () => random() < 0.5 ? 'failed' : 'unknown')
+    for (let index = 0; index < count; index += 1) state = finishTask(state, sequence, session, call, index, outcomes[index])
+    const preTerminalState = state
+    const end = { ...context(session, call, state.accepted_events.length + 1), kind: 'terminal', status: expectedStatus, tasks: state.tasks }
+    state = add(state, sequence, session, end)
+    sequenceCount += 1
+
+    const view = imageBatchProjectionDefinition(z, session).view([state])[0]
+    const completedIds = state.tasks.filter(task => task.receipt?.status === 'completed').map(task => task.task_id)
+    assert.equal(state.accepted_events.filter(item => JSON.parse(item.canonical).kind === 'terminal').length, 1)
+    assert.equal(state.status, expectedStatus)
+    assert.equal(view.terminal_event_id, end.event_id)
+    assert.equal(view.tasks.length, count)
+    assert.deepEqual(view.image_evidence.map(item => item.task_id), completedIds, 'no completed image pointer may be lost')
+    assert.deepEqual(view.failures.map(item => item.task_id),
+      state.tasks.filter(task => task.state !== 'completed').map(task => task.task_id),
+      'final summary must include every failed task, including image-bearing failures')
+    rejects(() => reduceImageBatchEvent(state, {
+      ...context(session, call, state.accepted_events.length + 1), kind: 'terminal', status: expectedStatus, tasks: state.tasks,
+    }, session))
+    statusesSeen.add(state.status)
+    countsSeen.add(count)
+
+    const corrupt = clone(end)
+    const requestedCorruption = Math.floor(round / 4) % 8
+    const pointerTask = corrupt.tasks.find(task => task.receipt)
+    const childTask = corrupt.tasks.find(task => task.child_session_id)
+    let corruption = requestedCorruption
+    if ((corruption === 3 || corruption === 4 || corruption === 5) && pointerTask === undefined) corruption = 7
+    if (corruption === 2 && childTask === undefined) corruption = 1
+    let expectedRejection
+    if (corruption === 0) {
+      corrupt.parent_call_id = `foreign-call-${round}`
+      expectedRejection = /cross-batch event injection/u
+    } else if (corruption === 1) {
+      corrupt.tasks[0].task_id = imageBatchTaskId(session, `foreign-call-${round}`, 1)
+      expectedRejection = /task_id does not match its parent and ordinal/u
+    } else if (corruption === 2) {
+      childTask.child_session_id = `foreign-child-${round}`
+      if (childTask.receipt) childTask.receipt.owner_session_id = childTask.child_session_id
+      expectedRejection = /terminal must contain the current complete ordered task snapshots/u
+    } else if (corruption === 3) {
+      pointerTask.receipt.call_id = `foreign-image-call-${round}`
+      expectedRejection = /terminal must contain the current complete ordered task snapshots/u
+    } else if (corruption === 4) {
+      pointerTask.receipt.client_request_id = `foreign-client-${round}`
+      expectedRejection = /object keys do not match the schema/u
+    } else if (corruption === 5) {
+      pointerTask.receipt.revision = pointerTask.receipt.revision === 2 ? 3 : 2
+      expectedRejection = /terminal must contain the current complete ordered task snapshots/u
+    } else if (corruption === 6) {
+      corrupt.occurred_at = '2026-02-30T12:34:56.000Z'
+      expectedRejection = /occurred_at is invalid/u
+    } else {
+      corrupt.batch_id = imageBatchId(session, `foreign-call-${round}`)
+      expectedRejection = /cross-batch event injection/u
+    }
+    const acceptedState = clone(state)
+    const acceptedView = clone(view)
+    assert.throws(() => reduceImageBatchEvent(preTerminalState, corrupt, session), expectedRejection)
+    assert.deepEqual(state, acceptedState, 'a rejected unseen event must not mutate the accepted terminal state')
+    assert.deepEqual(imageBatchProjectionDefinition(z, session).view([state])[0], acceptedView,
+      'a rejected unseen event must not mutate the accepted terminal view')
+    corruptionsSeen.add(corruption)
+    sequenceCount += 1
   }
-  assert.deepEqual(state, terminalState)
-  const view = imageBatchProjectionDefinition(z, SESSION).view([state])[0]
-  assert.equal(view.status, 'partial')
-  assert.equal(view.image_evidence.length, 1)
-  for (let round = 0; round < 50; round += 1) {
-    const corrupt = clone(sequence[Math.floor(random() * sequence.length)])
-    corrupt.event_id = imageBatchEventId(SESSION, CALL, 1 + Math.floor(random() * sequence.length))
-    corrupt.occurred_at = `2026-02-17T12:35:${String(round % 60).padStart(2, '0')}.000Z`
-    rejects(() => append(state, corrupt))
-    assert.equal(state.status, 'partial')
-    assert.equal(imageBatchProjectionDefinition(z).view([state])[0].image_evidence.length, 1)
-  }
+
+  assert.equal(ITERATIONS * 2, EXPECTED_SEQUENCE_COUNT)
+  assert.equal(sequenceCount, EXPECTED_SEQUENCE_COUNT)
+  assert.deepEqual([...countsSeen].sort((a, b) => a - b), taskCounts)
+  assert.deepEqual([...statusesSeen].sort(), [...finalStatuses].sort())
+  assert.deepEqual([...corruptionsSeen].sort((a, b) => a - b), [0, 1, 2, 3, 4, 5, 6, 7])
 })
