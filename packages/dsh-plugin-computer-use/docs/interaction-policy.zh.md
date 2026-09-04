@@ -2,21 +2,21 @@
 
 ## 需求
 
-DSH Computer Use 应让 Agent 操作原生 macOS 应用时，用户仍能在其他应用中继续工作。默认指针路径不能移动系统光标、向全局 HID 事件流投递指针事件，也不能只为完成指针动作就激活目标应用。键盘输入是唯一刻意例外：Bundle 默认启用 `keyboardPolicy: activate`，通过先把目标应用带到前台来让输入可靠工作，这与 Codex Computer Use 的行为一致。指针动作可以显示独立 Agent 光标，但 overlay 绝不能成为输入源或窗口管理器参与者。
+DSH Computer Use 应让 Agent 操作原生应用时，用户仍能在其他应用中继续工作。默认指针路径不能移动系统光标、向全局 HID 事件流投递指针事件，也不能只为完成指针动作就激活目标应用。键盘输入同样保留用户当前前台应用：Bundle 默认启用 `keyboardPolicy: preserve`，且不会把激活后台目标作为 fallback。指针动作可以显示独立 Agent 光标，但 overlay 绝不能成为输入源或窗口管理器参与者。
 
 Bundle 默认配置为：
 
 ```yaml
 interaction:
   focusPolicy: preserve
-  keyboardPolicy: activate
+  keyboardPolicy: preserve
   pointerInputPolicy: targeted
-  cursorVisualization: visible
+  cursorVisualization: !!js "process.platform === 'win32' ? 'hidden' : 'visible'"
   cursorMotionMs: 180
-  cursorAutoHideMs: 1400
+  cursorAutoHideMs: 0
 ```
 
-`preserve` 表示指针动作不请求前台激活。`keyboardPolicy: activate`（Bundle 默认）会在 `type-text` 键盘 fallback 与 `press-key` 前请求前台激活；`keyboardPolicy: preserve` 仍把键盘事件定向投递给选定 pid 而不激活，只有接受后台键盘事件的应用才可靠。`targeted` 表示鼠标、拖拽和滚轮事件只能投递给准确的已观察进程与窗口。`visible` 开启独立 Agent 光标，其移动与自动隐藏时长同样归宿主所有。模型不能通过 Tool 参数修改任何交互策略。
+`preserve` 表示指针与键盘动作都不请求前台激活。Bundle 默认的 `keyboardPolicy: preserve` 会在 macOS 上把键盘 fallback 定向投递给选定 pid 而不激活，只有接受后台键盘事件的应用才可靠。Windows 可在后台执行语义化 UI Automation value 操作，但当目标不在前台时，raw keyboard fallback 会 fail closed，绝不会把激活作为 fallback。`targeted` 表示鼠标、拖拽和滚轮事件只能投递给准确的已观察进程与窗口。`visible` 开启独立 Agent 光标，其移动与自动隐藏时长同样归宿主所有。模型不能通过 Tool 参数修改任何交互策略。
 
 这是一项输入路由属性，并不是只要拿到 Accessibility 权限就自然成立。Accessibility 授予语义化 UI 访问能力；真正避免抢前台的是优先使用语义化 Accessibility 操作，并用进程/窗口定向 fallback 代替系统光标。
 
@@ -61,8 +61,9 @@ resolution?: {
 | 元素声明且不影响前台的 `perform-action` | 不激活 | 无 | 允许 |
 | `AXRaise` | 拒绝 | 无 | 需要显式 `focusPolicy: activate`，随后重新观察/校验 |
 | 通过 selected-text 赋值的 `type-text` | 不激活 | 无 | 当前 focused element 接受时允许 |
-| `type-text` 键盘 fallback | `keyboardPolicy: preserve` 不激活；`keyboardPolicy: activate` 激活 | 目标 pid | 允许；激活后更可靠 |
-| `press-key` | `keyboardPolicy: preserve` 不激活；`keyboardPolicy: activate` 激活 | 目标 pid | 允许；激活后更可靠 |
+| macOS `type-text` 键盘 fallback | `keyboardPolicy: preserve` 不激活；`keyboardPolicy: activate` 激活 | 目标 pid | 目标应用接受后台键盘事件时允许 |
+| macOS `press-key` | `keyboardPolicy: preserve` 不激活；`keyboardPolicy: activate` 激活 | 目标 pid | 目标应用接受后台键盘事件时允许 |
+| Windows raw `type-text` 或 `press-key` fallback | shipped `keyboardPolicy: preserve` 下不激活 | 目标 HWND | 仅当目标已在前台时允许；否则在输入前拒绝 |
 | 坐标点击或元素 frame fallback | 不激活 | 目标 pid + window | `pointerInputPolicy: targeted` 时允许 |
 | 滚动 | 不激活 | 目标 pid + window | `pointerInputPolicy: targeted` 时允许 |
 | 拖拽 | 不激活 | 目标 pid + window | `pointerInputPolicy: targeted` 时允许 |
@@ -120,11 +121,12 @@ Helper 不会先移动系统光标再尝试恢复。那种设计仍会打断用�
 - native monitor 要求 overlay 是该进程拥有的唯一 28x28 窗口、不会成为前台，且该进程 pid 不产生任何全局 pointer event；
 - helper 必须包含 `SLEventPostToPid` 与 `CGEventSetWindowLocation`；
 - 不携带已观察窗口 id 的坐标点击会按 Quartz 屏幕点解析应用窗口，结果仍报告 `pointerRouting: target-process`；
-- `keyboardPolicy: activate` 会让后台 fixture 变为前台并收到按键事件，fixture transcript 记录这次激活；
+- 在 macOS 上，`keyboardPolicy: activate` 会让后台 fixture 变为前台并收到按键事件，fixture transcript 记录这次激活；
 - fixture 通过 `open -g` 与 `--background` 启动，LaunchServices 不会请求前台激活；
 - fixture 记录每次 `applicationDidBecomeActive` 回调，默认路径不得增加 `activationCount`；
 - 独立 native monitor 会在 click、scroll 与 drag 整个动作期间每毫秒采样系统光标和前台 pid，所有采样都必须保持不变；
 - 后台 `AXPress`、Accessibility value/action、selected-text 输入与 pid 定向按键都能修改 fixture 且不激活它；
+- Windows 源码合同要求 shipped `keyboardPolicy: preserve`，目标在后台时会在 `SetForegroundWindow` 前拒绝 raw keyboard fallback；
 - native fixture 会插入无害 sibling 并重建一个带唯一 identifier 的 checkbox，证明原始 locator 已 stale，而 `AXIdentifier` resolution 仍只找到一个目标；
 - 目标进程 click 与 scroll 各只被观察到一次；drag 只产生一组 down/up gesture；目标始终不是前台应用；
 - `pointerInputPolicy: deny` 会在任何目标指针事件发出前拒绝 click fallback、scroll 与 drag；
@@ -133,6 +135,7 @@ Helper 不会先移动系统光标再尝试恢复。那种设计仍会打断用�
 ## 已知限制
 
 - 目标进程指针投递不如语义化 Accessibility 普适。自定义 canvas、游戏、强化输入 surface 或未来 macOS 变化可能拒绝该路由。
+- macOS 后台键盘投递取决于目标应用；在 shipped preserve 策略下，Windows raw keyboard fallback 对后台目标不可用，并会 fail closed 而不是激活目标。
 - 点击点必须落在选定应用的某个屏幕内窗口里；最小化、完全隐藏或无窗口目标会 fail closed。
 - `focusPolicy: activate` 与 `keyboardPolicy: activate` 会有意打断前台工作，只作为操作方显式选择的兼容模式。
 - 目标应用可能因接受动作而自行改变 activation 或 focus；helper 不承诺控制应用内部副作用。

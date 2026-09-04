@@ -13,7 +13,7 @@ const frame = { x: 10, y: 20, width: 800, height: 600 }
 const hash = 'a'.repeat(64)
 const options = { screenshot: 'none', maxNodes: 500, maxDepth: 14, maxTextBytes: 64000 }
 const rawObservation = { app: target, stateHash: hash, frontmost: true, window: { id: target.windowId, title: 'Document', frame }, treeText: '[0] Window Document', truncated: false, elements: [{ index: 0, locator: [], role: 'Window', actions: [], enabled: true, focused: true, frame }], permissions: { accessibility: 'granted', screenRecording: 'granted' } }
-const hiddenConfig = { actionTimeoutMs: 15000, maxNodes: 500, maxDepth: 14, maxTextBytes: 64000, interaction: { focusPolicy: 'preserve', keyboardPolicy: 'activate', pointerInputPolicy: 'targeted', cursorVisualization: 'hidden', cursorMotionMs: 0, cursorAutoHideMs: 0 } }
+const hiddenConfig = { actionTimeoutMs: 15000, maxNodes: 500, maxDepth: 14, maxTextBytes: 64000, interaction: { focusPolicy: 'preserve', keyboardPolicy: 'preserve', pointerInputPolicy: 'targeted', cursorVisualization: 'hidden', cursorMotionMs: 0, cursorAutoHideMs: 0 } }
 
 function reader(text, lossy = false) { return { readFrom: () => ({ text, lossy }) } }
 function completedHandle(envelope = { ok: true, value: null }) {
@@ -178,6 +178,11 @@ test('composition keeps one owner, bounded health probes, exact cleanup, and no 
   assert.equal(rows.length, 1)
   assert.deepEqual(rows[0].disabled, { __jsExpr: "Array.of('darwin', 'win32').includes(process.platform) === false" })
   assert.deepEqual(rows[0].config.interaction.cursorVisualization, { __jsExpr: "process.platform === 'win32' ? 'hidden' : 'visible'" })
+  assert.equal(rows[0].config.interaction.focusPolicy, 'preserve')
+  assert.equal(rows[0].config.interaction.keyboardPolicy, 'preserve')
+  assert.match(helper, /if\(\$policy -ne 'activate'\)\{throw 'configured activation policy denies fallback while target is not foreground'\}; if\(-not \[EmateWin32\]::SetForegroundWindow/u)
+  assert.match(helper, /elseif\(\$a\.kind -eq 'type-text'\)[\s\S]*?Ensure-Foreground \$hwnd \(\[string\]\$request\.interaction\.keyboardPolicy\)[\s\S]*?foreach\(\$ch[\s\S]*?Send-Checked/u)
+  assert.match(helper, /elseif\(\$a\.kind -eq 'press-key'\)[\s\S]*?Ensure-Foreground \$hwnd \(\[string\]\$request\.interaction\.keyboardPolicy\)[\s\S]*?Send-Checked/u)
   const disabled = platform => Function('process', 'return (' + rows[0].disabled.__jsExpr + ')')({ platform })
   assert.equal(disabled('darwin'), false)
   assert.equal(disabled('win32'), false)
